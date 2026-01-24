@@ -4,6 +4,7 @@
 pub mod bench;
 
 use std::path::Path;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::astro_image::AstroImage;
 use crate::math;
@@ -29,6 +30,86 @@ impl SigmaClippedConfig {
     }
 }
 
+/// Statistics for sigma clipping operations.
+#[derive(Debug, Default)]
+struct ClipStats {
+    /// Total number of input values processed.
+    total_values: AtomicU64,
+    /// Total number of values clipped (removed as outliers).
+    clipped_values: AtomicU64,
+    /// Number of pixels where clipping occurred.
+    pixels_with_clipping: AtomicU64,
+    /// Number of pixels where excessive clipping occurred (>50% of values).
+    pixels_excessive_clipping: AtomicU64,
+}
+
+impl ClipStats {
+    fn record(&self, original_len: usize, final_len: usize) {
+        let clipped = original_len - final_len;
+        self.total_values
+            .fetch_add(original_len as u64, Ordering::Relaxed);
+        self.clipped_values
+            .fetch_add(clipped as u64, Ordering::Relaxed);
+        if clipped > 0 {
+            self.pixels_with_clipping.fetch_add(1, Ordering::Relaxed);
+        }
+        if clipped > original_len / 2 {
+            self.pixels_excessive_clipping
+                .fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    fn log_summary(&self, frame_count: usize) {
+        let total = self.total_values.load(Ordering::Relaxed);
+        let clipped = self.clipped_values.load(Ordering::Relaxed);
+        let pixels_clipped = self.pixels_with_clipping.load(Ordering::Relaxed);
+        let excessive = self.pixels_excessive_clipping.load(Ordering::Relaxed);
+
+        if total == 0 {
+            return;
+        }
+
+        let pixel_count = total / frame_count as u64;
+        let clip_percent = 100.0 * clipped as f64 / total as f64;
+        let pixels_clipped_percent = 100.0 * pixels_clipped as f64 / pixel_count as f64;
+        let excessive_percent = 100.0 * excessive as f64 / pixel_count as f64;
+
+        tracing::info!(
+            "Sigma clipping stats: {:.2}% of values clipped ({} of {})",
+            clip_percent,
+            clipped,
+            total
+        );
+        tracing::info!(
+            "  Pixels with any clipping: {:.2}% ({} of {})",
+            pixels_clipped_percent,
+            pixels_clipped,
+            pixel_count
+        );
+
+        if excessive > 0 {
+            tracing::warn!(
+                "  Pixels with excessive clipping (>50%): {:.2}% ({} pixels) - consider adjusting sigma threshold",
+                excessive_percent,
+                excessive
+            );
+        }
+
+        // Warn if overall clipping seems too aggressive or too lenient
+        if clip_percent > 20.0 {
+            tracing::warn!(
+                "High clipping rate ({:.1}%) - sigma threshold may be too aggressive",
+                clip_percent
+            );
+        } else if clip_percent < 0.1 && frame_count > 10 {
+            tracing::debug!(
+                "Very low clipping rate ({:.2}%) - data may be very clean or threshold too lenient",
+                clip_percent
+            );
+        }
+    }
+}
+
 /// Stack images using sigma-clipped mean with bounded memory usage.
 pub fn stack_sigma_clipped_from_paths<P: AsRef<Path>>(
     paths: &[P],
@@ -41,9 +122,16 @@ pub fn stack_sigma_clipped_from_paths<P: AsRef<Path>>(
 
     let cache = ImageCache::from_paths(paths, &config.cache.cache_dir, frame_type);
     let clip = config.clip;
+    let stats = ClipStats::default();
+
     let result = cache.process_chunked(config.cache.chunk_rows, |values: &mut [f32]| {
-        sigma_clipped_mean(values, &clip)
+        let original_len = values.len();
+        let (result, final_len) = sigma_clipped_mean_with_stats(values, &clip);
+        stats.record(original_len, final_len);
+        result
     });
+
+    stats.log_summary(paths.len());
 
     if !config.cache.keep_cache {
         cache.cleanup();
@@ -52,7 +140,7 @@ pub fn stack_sigma_clipped_from_paths<P: AsRef<Path>>(
     result
 }
 
-/// Calculate sigma-clipped mean in-place.
+/// Calculate sigma-clipped mean in-place, returning both the result and final value count.
 ///
 /// Algorithm:
 /// 1. Use median as center (robust to outliers)
@@ -62,11 +150,13 @@ pub fn stack_sigma_clipped_from_paths<P: AsRef<Path>>(
 ///
 /// Note: This function modifies the input slice. The caller provides a mutable
 /// buffer that can be reused across calls (one per thread in parallel processing).
-fn sigma_clipped_mean(values: &mut [f32], config: &SigmaClipConfig) -> f32 {
+///
+/// Returns: (mean, final_count) where final_count is the number of values after clipping.
+fn sigma_clipped_mean_with_stats(values: &mut [f32], config: &SigmaClipConfig) -> (f32, usize) {
     debug_assert!(!values.is_empty());
 
     if values.len() <= 2 {
-        return math::mean_f32(values);
+        return (math::mean_f32(values), values.len());
     }
 
     let mut len = values.len();
@@ -106,12 +196,17 @@ fn sigma_clipped_mean(values: &mut [f32], config: &SigmaClipConfig) -> f32 {
     }
 
     // Return mean of remaining values (lower noise than median for Gaussian data)
-    math::mean_f32(&values[..len])
+    (math::mean_f32(&values[..len]), len)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Calculate sigma-clipped mean in-place (test helper).
+    fn sigma_clipped_mean(values: &mut [f32], config: &SigmaClipConfig) -> f32 {
+        sigma_clipped_mean_with_stats(values, config).0
+    }
 
     #[test]
     fn test_sigma_clipped_mean_removes_outlier() {

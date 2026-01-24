@@ -26,7 +26,7 @@ impl Default for CacheConfig {
         Self {
             chunk_rows: 128,
             cache_dir: std::env::temp_dir().join("lumos_cache"),
-            keep_cache: false,
+            keep_cache: cfg!(debug_assertions) || cfg!(test),
         }
     }
 }
