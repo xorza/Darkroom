@@ -11,9 +11,9 @@ lumos/src/
 ├── astro_image/
 │   ├── mod.rs               # AstroImage struct, calibration, metadata
 │   ├── demosaic/            # Bayer and X-Trans demosaicing
-│   │   ├── bayer/           # SIMD Bayer demosaic
-│   │   └── xtrans/          # SIMD X-Trans demosaic
-│   ├── hot_pixels.rs        # Hot pixel detection and correction
+│   │   ├── bayer/           # SIMD Bayer demosaic (with bench.rs)
+│   │   └── xtrans/          # SIMD X-Trans demosaic (with bench.rs)
+│   ├── hot_pixels.rs        # Hot pixel detection and correction (with bench.rs)
 │   ├── libraw.rs            # LibRaw bindings for raw file loading
 │   └── sensor.rs            # Sensor type detection (Bayer/X-Trans/Mono)
 ├── calibration_masters.rs   # Bias/Dark/Flat master loading
@@ -21,15 +21,22 @@ lumos/src/
 │   ├── mod.rs               # ImageStack API
 │   ├── cache.rs             # Memory/disk caching with mmap
 │   ├── cache_config.rs      # Memory allocation configuration
-│   ├── mean.rs              # Mean stacking
-│   ├── median.rs            # Median stacking (chunked)
-│   ├── sigma_clipped.rs     # Sigma-clipped mean stacking
+│   ├── mean/                # Mean stacking (with bench.rs)
+│   ├── median/              # Median stacking (with bench.rs)
+│   ├── sigma_clipped/       # Sigma-clipped mean stacking (with bench.rs)
 │   └── error.rs             # Error types
 └── star_detection/
     ├── mod.rs               # Main API: find_stars(), Star, StarDetectionConfig
-    ├── background.rs        # Tiled sigma-clipped background estimation
-    ├── detection.rs         # Connected component star detection
-    └── centroid.rs          # Sub-pixel centroid and quality metrics
+    ├── background/          # Tiled sigma-clipped background estimation
+    │   ├── mod.rs           # estimate_background() function
+    │   ├── tests.rs         # Unit tests
+    │   └── bench.rs         # Benchmarks
+    ├── detection/           # Connected component star detection
+    │   ├── mod.rs           # detect_stars(), dilate_mask()
+    │   └── tests.rs         # Unit tests
+    └── centroid/            # Sub-pixel centroid and quality metrics
+        ├── mod.rs           # compute_centroid()
+        └── tests.rs         # Unit tests
 ```
 
 ## Key Modules
@@ -96,7 +103,31 @@ SIMD-optimized demosaicing:
 
 Run full validation:
 ```bash
-cargo test && cargo fmt && cargo check && cargo clippy --all-targets -- -D warnings
+cargo test && cargo fmt && cargo check && cargo clippy --all-targets --features bench -- -D warnings
 ```
 
 Many tests require environment variables pointing to test data (marked as `#[ignore]`).
+
+## Benchmarks
+
+Benchmarks are gated behind the `bench` feature. Run with:
+```bash
+# All benchmarks
+cargo bench --features bench
+
+# Specific benchmark
+cargo bench --features bench --bench background
+cargo bench --features bench --bench demosaic_bayer
+cargo bench --features bench --bench hot_pixels
+cargo bench --features bench --bench stack_mean
+cargo bench --features bench --bench stack_median
+cargo bench --features bench --bench stack_sigma_clipped
+```
+
+Available benchmarks in `benches/`:
+- `background.rs` - Background estimation (synthetic data, various image/tile sizes)
+- `demosaic_bayer.rs` - Bayer demosaic (requires LUMOS_CALIBRATION_DIR)
+- `demosaic_xtrans.rs` - X-Trans demosaic (requires LUMOS_CALIBRATION_DIR)
+- `hot_pixels.rs` - Hot pixel detection
+- `math.rs` - SIMD math operations
+- `stack_*.rs` - Stacking operations

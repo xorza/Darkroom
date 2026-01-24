@@ -28,6 +28,11 @@ mod tests;
 #[cfg(test)]
 mod visual_tests;
 
+#[cfg(feature = "bench")]
+pub mod bench {
+    pub use super::background::bench as background;
+}
+
 pub use background::estimate_background;
 pub use centroid::compute_centroid;
 pub use detection::detect_stars;

@@ -3,6 +3,9 @@
 //! Estimates the sky background using a tiled approach with sigma-clipped
 //! statistics, then bilinearly interpolates to create a smooth background map.
 
+#[cfg(feature = "bench")]
+pub mod bench;
+
 #[cfg(test)]
 mod tests;
 
