@@ -217,9 +217,7 @@ BitPix             // FITS pixel type enum (UInt8, Int16, Int32, Int64, Float32,
 StackingMethod     // Mean | Median | SigmaClippedMean(SigmaClipConfig)
 SigmaClipConfig    // { sigma, max_iterations }
 CacheConfig        // { cache_dir, keep_cache, available_memory, progress } - cache directory, cleanup, memory override, progress callback
-CacheError         // Error type for cache operations (NoPaths, ImageLoad, DimensionMismatch, I/O errors)
-CacheProgress      // { current, total, stage } - progress info for callbacks
-CacheStage         // Loading | Processing
+StackError         // Error type for stacking operations (NoPaths, ImageLoad, DimensionMismatch, cache I/O errors)
 FrameType          // Dark | Flat | Bias | Light
 CalibrationMasters // Container for master dark/flat/bias frames
 ```
@@ -230,7 +228,8 @@ CalibrationMasters // Container for master dark/flat/bias frames
 - `astro_image/rawloader.rs` - RAW loading via rawloader (pure Rust)
 - `astro_image/libraw.rs` - RAW loading via libraw-rs (C library fallback)
 - `stacking/mod.rs` - `StackingMethod`, `FrameType`, `stack_frames()` dispatch
-- `stacking/cache.rs` - `ImageCache` with memory-mapped binary cache and `process_chunked()` for shared chunked processing, `CacheError` for error handling
+- `stacking/error.rs` - `StackError` enum for stacking operation errors
+- `stacking/cache.rs` - `ImageCache` with memory-mapped binary cache and `process_chunked()` for shared chunked processing
 - `stacking/cache_config.rs` - `CacheConfig` struct with progress callbacks and `compute_optimal_chunk_rows()` for adaptive chunk sizing based on available memory and image dimensions (uses sysinfo)
 - `stacking/mean/` - Mean stacking module
   - `mod.rs` - Public API with `stack_mean_from_images()`

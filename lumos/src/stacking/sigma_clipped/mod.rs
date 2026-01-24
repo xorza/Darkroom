@@ -11,7 +11,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::astro_image::AstroImage;
 use crate::math;
-use crate::stacking::cache::{CacheError, ImageCache};
+use crate::stacking::cache::ImageCache;
+use crate::stacking::error::StackError;
 use crate::stacking::{CacheConfig, FrameType, SigmaClipConfig};
 
 /// Configuration for sigma-clipped mean stacking.
@@ -131,7 +132,7 @@ pub fn stack_sigma_clipped_from_paths<P: AsRef<Path>>(
     paths: &[P],
     frame_type: FrameType,
     config: &SigmaClippedConfig,
-) -> Result<AstroImage, CacheError> {
+) -> Result<AstroImage, StackError> {
     let cache = ImageCache::from_paths(paths, &config.cache, frame_type)?;
     let clip = config.clip;
     let stats = ClipStats::default();

@@ -3,12 +3,14 @@
 #[cfg(feature = "bench")]
 pub mod bench;
 
+use std::io;
 use std::path::Path;
 
 use rayon::prelude::*;
 
 use crate::astro_image::ImageDimensions;
 use crate::stacking::FrameType;
+use crate::stacking::error::StackError;
 use crate::{AstroImage, math};
 
 /// Chunk size for parallel accumulation (16KB of f32s for good cache locality).
@@ -18,25 +20,41 @@ const ACCUMULATE_CHUNK_SIZE: usize = 4096;
 ///
 /// Loads images one at a time and accumulates sum, then divides by count.
 /// Uses parallel processing for accumulation.
-pub fn stack_mean_from_paths<P: AsRef<Path>>(paths: &[P], frame_type: FrameType) -> AstroImage {
-    assert!(!paths.is_empty(), "No paths provided for stacking");
+///
+/// # Errors
+///
+/// Returns an error if:
+/// - No paths are provided
+/// - Image loading fails
+/// - Image dimensions don't match
+pub fn stack_mean_from_paths<P: AsRef<Path>>(
+    paths: &[P],
+    frame_type: FrameType,
+) -> Result<AstroImage, StackError> {
+    if paths.is_empty() {
+        return Err(StackError::NoPaths);
+    }
 
     let mut sum: Vec<f32> = Vec::new();
     let mut dimensions: Option<ImageDimensions> = None;
     let mut metadata = None;
 
     for (i, path) in paths.iter().enumerate() {
-        let frame = AstroImage::from_file(path).expect("Failed to load image");
+        let path_ref = path.as_ref();
+        let frame = AstroImage::from_file(path_ref).map_err(|e| StackError::ImageLoad {
+            path: path_ref.to_path_buf(),
+            source: io::Error::other(e.to_string()),
+        })?;
 
         if let Some(dims) = dimensions {
-            assert!(
-                frame.dimensions == dims,
-                "{} frame {} has different dimensions: {:?} vs {:?}",
-                frame_type,
-                i,
-                frame.dimensions,
-                dims
-            );
+            if frame.dimensions != dims {
+                return Err(StackError::DimensionMismatch {
+                    frame_type,
+                    index: i,
+                    expected: dims,
+                    actual: frame.dimensions,
+                });
+            }
             // Accumulate pixel values in parallel chunks using SIMD
             accumulate_parallel(&mut sum, &frame.pixels);
         } else {
@@ -50,11 +68,11 @@ pub fn stack_mean_from_paths<P: AsRef<Path>>(paths: &[P], frame_type: FrameType)
     let inv_count = 1.0 / paths.len() as f32;
     scale_parallel(&mut sum, inv_count);
 
-    AstroImage {
+    Ok(AstroImage {
         metadata: metadata.unwrap(),
         pixels: sum,
         dimensions: dimensions.unwrap(),
-    }
+    })
 }
 
 /// Accumulate src into dst in parallel chunks using SIMD.

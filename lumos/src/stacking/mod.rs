@@ -1,5 +1,6 @@
 mod cache;
 mod cache_config;
+mod error;
 mod mean;
 mod median;
 mod sigma_clipped;
@@ -8,8 +9,8 @@ use std::path::PathBuf;
 
 use strum_macros::Display;
 
-pub use cache::CacheError;
 pub use cache_config::CacheConfig;
+pub use error::StackError;
 pub use median::MedianConfig;
 pub use sigma_clipped::SigmaClippedConfig;
 
@@ -136,13 +137,13 @@ impl ImageStack {
     /// - Image dimensions don't match
     /// - Cache directory creation fails (for disk-backed storage)
     /// - Cache file I/O fails (for disk-backed storage)
-    pub fn process(&self) -> Result<AstroImage, CacheError> {
+    pub fn process(&self) -> Result<AstroImage, StackError> {
         if self.paths.is_empty() {
-            return Err(CacheError::NoPaths);
+            return Err(StackError::NoPaths);
         }
 
         match &self.method {
-            StackingMethod::Mean => Ok(mean::stack_mean_from_paths(&self.paths, self.frame_type)),
+            StackingMethod::Mean => mean::stack_mean_from_paths(&self.paths, self.frame_type),
             StackingMethod::Median(config) => {
                 median::stack_median_from_paths(&self.paths, self.frame_type, config)
             }
