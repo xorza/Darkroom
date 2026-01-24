@@ -135,6 +135,40 @@ fn add_noise(pixels: &mut [f32], sigma: f32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use image::GrayImage;
+
+    /// Save synthetic star field to PNG for visual verification.
+    #[test]
+    fn test_save_synthetic_image() {
+        let config = SyntheticFieldConfig {
+            width: 256,
+            height: 256,
+            background: 0.05,
+            noise_sigma: 0.01,
+        };
+
+        let stars = vec![
+            SyntheticStar::new(64.0, 64.0, 0.9, 3.0),
+            SyntheticStar::new(192.0, 64.0, 0.7, 2.5),
+            SyntheticStar::new(64.0, 192.0, 0.5, 2.0),
+            SyntheticStar::new(192.0, 192.0, 0.8, 4.0),
+            SyntheticStar::new(128.0, 128.0, 0.6, 2.0),
+        ];
+
+        let pixels = generate_star_field(&config, &stars);
+
+        // Convert to u8 grayscale
+        let bytes: Vec<u8> = pixels
+            .iter()
+            .map(|&p| (p.clamp(0.0, 1.0) * 255.0) as u8)
+            .collect();
+
+        let image = GrayImage::from_raw(config.width as u32, config.height as u32, bytes).unwrap();
+
+        let output_path = common::test_utils::test_output_path("synthetic_stars.png");
+        image.save(&output_path).unwrap();
+        println!("Saved synthetic star field to: {:?}", output_path);
+    }
 
     #[test]
     fn test_synthetic_star_fwhm() {
