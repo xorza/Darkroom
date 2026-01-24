@@ -1,5 +1,5 @@
 //! Benchmark module for sigma-clipped mean stacking.
-//! Run with: cargo bench --package lumos --features bench stack_sigma_clipped
+//! Run with: cargo bench -p lumos --features bench --bench stack_sigma_clipped
 
 use std::hint::black_box;
 use std::path::Path;
@@ -21,14 +21,19 @@ fn benchmark_sigma_clipped_mean(c: &mut Criterion) {
     // Test various stack sizes typical for astrophotography
     for size in [20, 50, 100] {
         // Create test data with one outlier
-        let mut values: Vec<f32> = (1..=size).map(|x| 10.0 + (x as f32 * 0.01)).collect();
-        values[0] = 1000.0; // Add outlier
+        let original: Vec<f32> = {
+            let mut v: Vec<f32> = (1..=size).map(|x| 10.0 + (x as f32 * 0.01)).collect();
+            v[0] = 1000.0; // Add outlier
+            v
+        };
 
         group.throughput(Throughput::Elements(size as u64));
 
         group.bench_function(BenchmarkId::new("with_outlier", size), |b| {
+            let mut values = original.clone();
             b.iter(|| {
-                let result = super::sigma_clipped_mean(black_box(&values), black_box(&config));
+                values.copy_from_slice(&original);
+                let result = super::sigma_clipped_mean(black_box(&mut values), black_box(&config));
                 black_box(result)
             })
         });

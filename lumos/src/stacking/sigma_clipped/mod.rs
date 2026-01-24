@@ -11,21 +11,12 @@ use crate::stacking::cache::ImageCache;
 use crate::stacking::{CacheConfig, FrameType, SigmaClipConfig};
 
 /// Configuration for memory-efficient sigma-clipped mean stacking.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct SigmaClippedConfig {
     /// Sigma clipping parameters.
     pub clip: SigmaClipConfig,
     /// Cache configuration.
     pub cache: CacheConfig,
-}
-
-impl Default for SigmaClippedConfig {
-    fn default() -> Self {
-        Self {
-            clip: SigmaClipConfig::default(),
-            cache: CacheConfig::default(),
-        }
-    }
 }
 
 impl SigmaClippedConfig {
@@ -124,9 +115,9 @@ mod tests {
 
     #[test]
     fn test_sigma_clipped_mean_removes_outlier() {
-        let values = vec![1.0, 2.0, 2.0, 2.0, 2.0, 100.0];
+        let mut values = vec![1.0, 2.0, 2.0, 2.0, 2.0, 100.0];
         let config = SigmaClipConfig::new(2.0, 3);
-        let result = sigma_clipped_mean(&values, &config);
+        let result = sigma_clipped_mean(&mut values, &config);
         assert!(
             result < 10.0,
             "Expected outlier to be clipped, got {}",
@@ -139,7 +130,7 @@ mod tests {
         let mut values: Vec<f32> = vec![10.0; 50];
         values.push(1000.0);
         let config = SigmaClipConfig::new(2.0, 3);
-        let result = sigma_clipped_mean(&values, &config);
+        let result = sigma_clipped_mean(&mut values, &config);
         assert!(
             (result - 10.0).abs() < 1.0,
             "Expected ~10.0, got {}",

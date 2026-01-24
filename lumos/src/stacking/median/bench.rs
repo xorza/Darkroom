@@ -1,5 +1,5 @@
 //! Benchmark module for median stacking.
-//! Run with: cargo bench --package lumos --features bench stack_median
+//! Run with: cargo bench -p lumos --features bench --bench stack_median
 
 use std::hint::black_box;
 use std::path::Path;

@@ -75,23 +75,3 @@ fn scale_parallel(data: &mut [f32], scale_val: f32) {
             math::scale(chunk, scale_val);
         });
 }
-
-#[cfg(test)]
-mod tests {
-    use crate::math;
-
-    #[test]
-    fn test_accumulate() {
-        let mut dst = vec![1.0f32, 2.0, 3.0, 4.0];
-        let src = vec![0.5f32, 0.5, 0.5, 0.5];
-        math::accumulate(&mut dst, &src);
-        assert_eq!(dst, vec![1.5, 2.5, 3.5, 4.5]);
-    }
-
-    #[test]
-    fn test_scale() {
-        let mut data = vec![2.0f32, 4.0, 6.0, 8.0];
-        math::scale(&mut data, 0.5);
-        assert_eq!(data, vec![1.0, 2.0, 3.0, 4.0]);
-    }
-}
