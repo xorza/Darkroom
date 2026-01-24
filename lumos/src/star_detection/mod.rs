@@ -23,6 +23,9 @@ mod background;
 mod centroid;
 mod detection;
 
+#[cfg(test)]
+mod tests;
+
 pub use background::{BackgroundMap, estimate_background};
 pub use centroid::compute_centroid;
 pub use detection::{StarCandidate, detect_stars};
@@ -132,63 +135,4 @@ pub fn find_stars(
     stars.sort_by(|a, b| b.flux.partial_cmp(&a.flux).unwrap());
 
     stars
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_star_is_saturated() {
-        let star = Star {
-            x: 10.0,
-            y: 10.0,
-            flux: 100.0,
-            fwhm: 3.0,
-            eccentricity: 0.1,
-            snr: 50.0,
-            peak: 0.96,
-        };
-        assert!(star.is_saturated());
-
-        let star2 = Star { peak: 0.8, ..star };
-        assert!(!star2.is_saturated());
-    }
-
-    #[test]
-    fn test_star_is_usable() {
-        let star = Star {
-            x: 10.0,
-            y: 10.0,
-            flux: 100.0,
-            fwhm: 3.0,
-            eccentricity: 0.2,
-            snr: 50.0,
-            peak: 0.8,
-        };
-        assert!(star.is_usable(10.0, 0.5));
-
-        // Low SNR
-        let low_snr = Star { snr: 5.0, ..star };
-        assert!(!low_snr.is_usable(10.0, 0.5));
-
-        // Too elongated
-        let elongated = Star {
-            eccentricity: 0.7,
-            ..star
-        };
-        assert!(!elongated.is_usable(10.0, 0.5));
-
-        // Saturated
-        let saturated = Star { peak: 0.98, ..star };
-        assert!(!saturated.is_usable(10.0, 0.5));
-    }
-
-    #[test]
-    fn test_default_config() {
-        let config = StarDetectionConfig::default();
-        assert_eq!(config.detection_sigma, 4.0);
-        assert_eq!(config.min_area, 5);
-        assert_eq!(config.background_tile_size, 64);
-    }
 }
