@@ -237,13 +237,13 @@ fn compute_all_channel_stats(
     channel_samples
         .into_iter()
         .map(|mut samples| {
-            let median = median_f32_in_place(&mut samples);
+            let median = crate::math::median_f32_mut(&mut samples);
 
             // Compute absolute deviations in place, reusing the buffer
             for v in samples.iter_mut() {
                 *v = (*v - median).abs();
             }
-            let mad = median_f32_in_place(&mut samples);
+            let mad = crate::math::median_f32_mut(&mut samples);
 
             // Convert MAD to σ equivalent (for normal distribution, σ ≈ 1.4826 * MAD)
             const MAD_TO_SIGMA: f32 = 1.4826;
@@ -262,30 +262,6 @@ fn compute_all_channel_stats(
             }
         })
         .collect()
-}
-
-/// Calculate median in place without allocating a new vector.
-fn median_f32_in_place(values: &mut [f32]) -> f32 {
-    debug_assert!(!values.is_empty());
-
-    let len = values.len();
-    let mid = len / 2;
-
-    if len.is_multiple_of(2) {
-        // For even length, need both middle elements
-        let (_, right_median, _) =
-            values.select_nth_unstable_by(mid, |a, b| a.partial_cmp(b).unwrap());
-        let right = *right_median;
-        // Left median is max of left partition
-        let left = values[..mid]
-            .iter()
-            .copied()
-            .fold(f32::NEG_INFINITY, f32::max);
-        (left + right) / 2.0
-    } else {
-        let (_, median, _) = values.select_nth_unstable_by(mid, |a, b| a.partial_cmp(b).unwrap());
-        *median
-    }
 }
 
 /// Calculate median of 8-connected neighbors for a specific channel.
