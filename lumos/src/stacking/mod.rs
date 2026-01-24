@@ -3,10 +3,33 @@ mod mean;
 mod median;
 mod sigma_clipped;
 
+use std::path::PathBuf;
+
 use strum_macros::Display;
 
 pub use median::MedianStackConfig;
 pub use sigma_clipped::SigmaClippedConfig;
+
+/// Common configuration for cache-based stacking methods (median, sigma-clipped).
+#[derive(Debug, Clone, PartialEq)]
+pub struct CacheConfig {
+    /// Number of rows to process at once (memory vs seeks tradeoff).
+    pub chunk_rows: usize,
+    /// Directory for decoded image cache.
+    pub cache_dir: PathBuf,
+    /// Keep cache after stacking (useful for re-processing).
+    pub keep_cache: bool,
+}
+
+impl Default for CacheConfig {
+    fn default() -> Self {
+        Self {
+            chunk_rows: 128,
+            cache_dir: std::env::temp_dir().join("lumos_cache"),
+            keep_cache: false,
+        }
+    }
+}
 
 #[cfg(feature = "bench")]
 pub mod bench {
@@ -92,8 +115,6 @@ impl SigmaClipConfig {
         }
     }
 }
-
-use std::path::PathBuf;
 
 /// Accumulator for incrementally stacking frames using running mean.
 ///

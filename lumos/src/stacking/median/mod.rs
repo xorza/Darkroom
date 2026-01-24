@@ -3,33 +3,15 @@
 #[cfg(feature = "bench")]
 pub mod bench;
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use crate::astro_image::AstroImage;
 use crate::math;
-use crate::stacking::FrameType;
 use crate::stacking::cache::ImageCache;
+use crate::stacking::{CacheConfig, FrameType};
 
 /// Configuration for memory-efficient median stacking.
-#[derive(Debug, Clone, PartialEq)]
-pub struct MedianStackConfig {
-    /// Number of rows to process at once (memory vs seeks tradeoff).
-    pub chunk_rows: usize,
-    /// Directory for decoded image cache.
-    pub cache_dir: PathBuf,
-    /// Keep cache after stacking (useful for re-processing).
-    pub keep_cache: bool,
-}
-
-impl Default for MedianStackConfig {
-    fn default() -> Self {
-        Self {
-            chunk_rows: 128,
-            cache_dir: std::env::temp_dir().join("lumos_cache"),
-            keep_cache: false,
-        }
-    }
-}
+pub type MedianStackConfig = CacheConfig;
 
 /// Stack images using median with bounded memory usage.
 pub fn stack_median_from_paths<P: AsRef<Path>>(
