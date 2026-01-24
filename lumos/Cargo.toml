@@ -49,3 +49,8 @@ required-features = ["bench"]
 name = "stack_median"
 harness = false
 required-features = ["bench"]
+
+[[bench]]
+name = "stack_sigma_clipped"
+harness = false
+required-features = ["bench"]

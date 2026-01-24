@@ -11,6 +11,7 @@ pub use sigma_clipped::SigmaClippedConfig;
 #[cfg(feature = "bench")]
 pub mod bench {
     pub use super::median::bench as median;
+    pub use super::sigma_clipped::bench as sigma_clipped;
 }
 
 use crate::AstroImage;
