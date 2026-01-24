@@ -204,7 +204,13 @@ impl ImageCache {
 
         // Write first image (or reuse existing cache)
         let first_path = paths[0].as_ref();
-        let first_cache_path = cache_dir.join(cache_filename_for_path(first_path));
+        let first_cache_filename = cache_filename_for_path(first_path);
+        let first_cache_path = cache_dir.join(&first_cache_filename);
+        tracing::debug!(
+            source = %first_path.display(),
+            cache_file = %first_cache_filename,
+            "Mapping source to cache file"
+        );
         if !try_reuse_cache_file(&first_cache_path, dimensions) {
             write_cache_file(&first_cache_path, &first_image)?;
         }
@@ -225,7 +231,13 @@ impl ImageCache {
         // Process remaining images
         for (i, path) in paths.iter().enumerate().skip(1) {
             let path_ref = path.as_ref();
-            let cache_path = cache_dir.join(cache_filename_for_path(path_ref));
+            let cache_filename = cache_filename_for_path(path_ref);
+            let cache_path = cache_dir.join(&cache_filename);
+            tracing::debug!(
+                source = %path_ref.display(),
+                cache_file = %cache_filename,
+                "Mapping source to cache file"
+            );
 
             // Try to reuse existing cache file if dimensions match
             if !try_reuse_cache_file(&cache_path, dimensions) {
