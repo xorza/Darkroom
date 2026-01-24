@@ -13,7 +13,8 @@ use rayon::prelude::*;
 
 /// Apply 3x3 median filter to remove Bayer pattern artifacts.
 ///
-/// Uses parallel processing for large images.
+/// Uses parallel processing for large images. Separates interior pixels
+/// (full 9-element neighborhood) from edge pixels for better performance.
 pub fn median_filter_3x3(pixels: &[f32], width: usize, height: usize) -> Vec<f32> {
     assert_eq!(
         pixels.len(),
@@ -22,42 +23,106 @@ pub fn median_filter_3x3(pixels: &[f32], width: usize, height: usize) -> Vec<f32
     );
 
     if width < 3 || height < 3 {
-        // Image too small for meaningful filtering, return copy
         return pixels.to_vec();
     }
 
     let mut output = vec![0.0f32; width * height];
 
-    // Process rows in parallel for large images
-    const PARALLEL_THRESHOLD: usize = 64;
-    if height >= PARALLEL_THRESHOLD {
-        output
-            .par_chunks_mut(width)
-            .enumerate()
-            .for_each(|(y, row)| {
-                filter_row(pixels, width, height, y, row);
-            });
-    } else {
-        for y in 0..height {
-            let row = &mut output[y * width..(y + 1) * width];
-            filter_row(pixels, width, height, y, row);
-        }
-    }
+    // Process in row chunks to reduce false cache sharing
+    const ROWS_PER_CHUNK: usize = 8;
+
+    output
+        .par_chunks_mut(width * ROWS_PER_CHUNK)
+        .enumerate()
+        .for_each(|(chunk_idx, chunk)| {
+            let y_start = chunk_idx * ROWS_PER_CHUNK;
+            let rows_in_chunk = chunk.len() / width;
+
+            for local_y in 0..rows_in_chunk {
+                let y = y_start + local_y;
+                let row = &mut chunk[local_y * width..(local_y + 1) * width];
+
+                if y == 0 || y == height - 1 {
+                    // Edge row - use generic edge handling
+                    filter_edge_row(pixels, width, height, y, row);
+                } else {
+                    // Interior row - fast path for most pixels
+                    filter_interior_row(pixels, width, y, row);
+                }
+            }
+        });
 
     output
 }
 
-/// Filter a single row.
+/// Filter an interior row (y is not 0 or height-1).
+/// Uses fast path for interior pixels with full 9-element neighborhood.
 #[inline]
-fn filter_row(pixels: &[f32], width: usize, height: usize, y: usize, output_row: &mut [f32]) {
+fn filter_interior_row(pixels: &[f32], width: usize, y: usize, output_row: &mut [f32]) {
+    // Left edge pixel (x=0): 6 neighbors
+    output_row[0] = median_at_left_edge(pixels, width, y);
+
+    // Interior pixels (x=1 to width-2): 9 neighbors each
+    let row_above = &pixels[(y - 1) * width..y * width];
+    let row_curr = &pixels[y * width..(y + 1) * width];
+    let row_below = &pixels[(y + 1) * width..(y + 2) * width];
+
+    for x in 1..width - 1 {
+        output_row[x] = median9_inline(
+            row_above[x - 1],
+            row_above[x],
+            row_above[x + 1],
+            row_curr[x - 1],
+            row_curr[x],
+            row_curr[x + 1],
+            row_below[x - 1],
+            row_below[x],
+            row_below[x + 1],
+        );
+    }
+
+    // Right edge pixel (x=width-1): 6 neighbors
+    output_row[width - 1] = median_at_right_edge(pixels, width, y);
+}
+
+/// Filter an edge row (y=0 or y=height-1).
+#[inline]
+fn filter_edge_row(pixels: &[f32], width: usize, height: usize, y: usize, output_row: &mut [f32]) {
     for (x, out) in output_row.iter_mut().enumerate() {
-        *out = median_at(pixels, width, height, x, y);
+        *out = median_at_edge(pixels, width, height, x, y);
     }
 }
 
-/// Compute median of 3x3 neighborhood at (x, y).
+/// Compute median at left edge (x=0) for interior row.
 #[inline]
-fn median_at(pixels: &[f32], width: usize, height: usize, x: usize, y: usize) -> f32 {
+fn median_at_left_edge(pixels: &[f32], width: usize, y: usize) -> f32 {
+    let mut v = [0.0f32; 6];
+    v[0] = pixels[(y - 1) * width];
+    v[1] = pixels[(y - 1) * width + 1];
+    v[2] = pixels[y * width];
+    v[3] = pixels[y * width + 1];
+    v[4] = pixels[(y + 1) * width];
+    v[5] = pixels[(y + 1) * width + 1];
+    median6(&mut v)
+}
+
+/// Compute median at right edge (x=width-1) for interior row.
+#[inline]
+fn median_at_right_edge(pixels: &[f32], width: usize, y: usize) -> f32 {
+    let x = width - 1;
+    let mut v = [0.0f32; 6];
+    v[0] = pixels[(y - 1) * width + x - 1];
+    v[1] = pixels[(y - 1) * width + x];
+    v[2] = pixels[y * width + x - 1];
+    v[3] = pixels[y * width + x];
+    v[4] = pixels[(y + 1) * width + x - 1];
+    v[5] = pixels[(y + 1) * width + x];
+    median6(&mut v)
+}
+
+/// Compute median for edge/corner pixels with variable neighborhood size.
+#[inline]
+fn median_at_edge(pixels: &[f32], width: usize, height: usize, x: usize, y: usize) -> f32 {
     let mut neighbors = [0.0f32; 9];
     let mut count = 0;
 
@@ -74,8 +139,25 @@ fn median_at(pixels: &[f32], width: usize, height: usize, x: usize, y: usize) ->
         }
     }
 
-    // Fast median for small arrays
     median_of_n(&mut neighbors[..count])
+}
+
+/// Inline median of 9 elements - the hot path for interior pixels.
+#[inline]
+#[allow(clippy::too_many_arguments)]
+fn median9_inline(
+    v0: f32,
+    v1: f32,
+    v2: f32,
+    v3: f32,
+    v4: f32,
+    v5: f32,
+    v6: f32,
+    v7: f32,
+    v8: f32,
+) -> f32 {
+    let mut v = [v0, v1, v2, v3, v4, v5, v6, v7, v8];
+    median9(&mut v)
 }
 
 /// Compute median of a small array (up to 9 elements).
