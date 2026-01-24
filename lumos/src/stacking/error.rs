@@ -10,7 +10,7 @@ use crate::stacking::FrameType;
 
 /// Errors that can occur during stacking operations.
 #[derive(Debug, Error)]
-pub enum StackError {
+pub enum Error {
     #[error("No paths provided for stacking")]
     NoPaths,
 

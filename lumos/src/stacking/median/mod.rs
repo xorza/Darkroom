@@ -11,7 +11,7 @@ use std::path::Path;
 use crate::astro_image::AstroImage;
 use crate::math;
 use crate::stacking::cache::ImageCache;
-use crate::stacking::error::StackError;
+use crate::stacking::error::Error;
 use crate::stacking::{CacheConfig, FrameType};
 
 /// Configuration for median stacking.
@@ -35,7 +35,7 @@ pub fn stack_median_from_paths<P: AsRef<Path>>(
     paths: &[P],
     frame_type: FrameType,
     config: &MedianConfig,
-) -> Result<AstroImage, StackError> {
+) -> Result<AstroImage, Error> {
     let cache = ImageCache::from_paths(paths, config, frame_type)?;
     let result = cache.process_chunked(math::median_f32_mut);
 

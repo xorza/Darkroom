@@ -10,7 +10,7 @@ use std::path::PathBuf;
 use strum_macros::Display;
 
 pub use cache_config::CacheConfig;
-pub use error::StackError;
+pub use error::Error;
 pub use median::MedianConfig;
 pub use sigma_clipped::SigmaClippedConfig;
 
@@ -137,9 +137,9 @@ impl ImageStack {
     /// - Image dimensions don't match
     /// - Cache directory creation fails (for disk-backed storage)
     /// - Cache file I/O fails (for disk-backed storage)
-    pub fn process(&self) -> Result<AstroImage, StackError> {
+    pub fn process(&self) -> Result<AstroImage, Error> {
         if self.paths.is_empty() {
-            return Err(StackError::NoPaths);
+            return Err(Error::NoPaths);
         }
 
         match &self.method {

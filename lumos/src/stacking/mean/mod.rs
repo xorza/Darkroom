@@ -10,7 +10,7 @@ use rayon::prelude::*;
 
 use crate::astro_image::ImageDimensions;
 use crate::stacking::FrameType;
-use crate::stacking::error::StackError;
+use crate::stacking::error::Error;
 use crate::{AstroImage, math};
 
 /// Chunk size for parallel accumulation (16KB of f32s for good cache locality).
@@ -30,9 +30,9 @@ const ACCUMULATE_CHUNK_SIZE: usize = 4096;
 pub fn stack_mean_from_paths<P: AsRef<Path>>(
     paths: &[P],
     frame_type: FrameType,
-) -> Result<AstroImage, StackError> {
+) -> Result<AstroImage, Error> {
     if paths.is_empty() {
-        return Err(StackError::NoPaths);
+        return Err(Error::NoPaths);
     }
 
     let mut sum: Vec<f32> = Vec::new();
@@ -41,14 +41,14 @@ pub fn stack_mean_from_paths<P: AsRef<Path>>(
 
     for (i, path) in paths.iter().enumerate() {
         let path_ref = path.as_ref();
-        let frame = AstroImage::from_file(path_ref).map_err(|e| StackError::ImageLoad {
+        let frame = AstroImage::from_file(path_ref).map_err(|e| Error::ImageLoad {
             path: path_ref.to_path_buf(),
             source: io::Error::other(e.to_string()),
         })?;
 
         if let Some(dims) = dimensions {
             if frame.dimensions != dims {
-                return Err(StackError::DimensionMismatch {
+                return Err(Error::DimensionMismatch {
                     frame_type,
                     index: i,
                     expected: dims,
