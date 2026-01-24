@@ -1,11 +1,12 @@
 use std::fs::File;
 use std::path::Path;
 
+use aligned_vec::AVec;
 use image as image_lib;
 use tiff::decoder::DecodingResult;
 
+use super::ALIGNMENT;
 use super::stride::add_stride_padding;
-use crate::common::AlignedBytes;
 use crate::prelude::*;
 
 pub(crate) fn load_png_jpeg<P: AsRef<Path>>(filename: P) -> Result<Image> {
@@ -51,7 +52,7 @@ pub(crate) fn load_png_jpeg<P: AsRef<Path>>(filename: P) -> Result<Image> {
 
     Ok(Image {
         desc,
-        bytes: AlignedBytes::from_vec(bytes),
+        bytes: AVec::from_slice(ALIGNMENT, &bytes),
     })
 }
 
@@ -116,7 +117,7 @@ pub(crate) fn load_tiff<P: AsRef<Path>>(filename: P) -> Result<Image> {
 
     Ok(Image {
         desc,
-        bytes: AlignedBytes::from_vec(bytes),
+        bytes: AVec::from_slice(ALIGNMENT, &bytes),
     })
 }
 

@@ -71,6 +71,7 @@ lz4_flex = { version = "*", features = ["std"] }
 bitcode = { version = "*", features = ["serde"] }
 rfd = { version = "*" }
 async-trait = { version = "*" }
+aligned-vec = { version = "*" }
 
 
 [profile.bench]

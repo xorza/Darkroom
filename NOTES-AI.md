@@ -114,8 +114,7 @@ GPU/CPU image processing library with automatic backend selection.
 
 **Key modules:**
 
-- `image/mod.rs` - Core `Image` and `ImageDesc` types with file I/O (PNG, JPEG, TIFF)
-- `common/aligned_bytes.rs` - 8-byte aligned byte storage for efficient zero-copy casting to/from f32/f64
+- `image/mod.rs` - Core `Image` and `ImageDesc` types with file I/O (PNG, JPEG, TIFF), uses `aligned_vec::AVec` for 8-byte aligned storage
 - `common/color_format.rs` - `ColorFormat`, `ChannelCount`, `ChannelSize`, `ChannelType` enums
 - `common/error.rs` - Error types (`Error`, `Result`)
 - `common/conversion/` - Color format conversion (scalar and SIMD implementations)
@@ -132,9 +131,8 @@ GPU/CPU image processing library with automatic backend selection.
 **Key types:**
 
 ```rust
-Image              // CPU image with AlignedBytes, desc, file I/O, format conversion
+Image              // CPU image with AVec<u8> (8-byte aligned), desc, file I/O, format conversion
 ImageDesc          // { width: usize, height: usize, stride: usize, color_format }
-AlignedBytes       // 8-byte aligned byte storage (Vec<u64> internally) for zero-copy casting
 ImageBuffer        // Smart buffer with automatic CPU/GPU transfer (AtomicRefCell)
 Storage            // Cpu(Image) | Gpu(GpuImage)
 ColorFormat        // { channel_count, channel_size, channel_type }

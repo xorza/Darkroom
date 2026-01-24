@@ -7,13 +7,18 @@ mod tests;
 
 use std::path::Path;
 
+use aligned_vec::AVec;
+
 /// Supported image file extensions for reading and writing.
 pub const SUPPORTED_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg", "tiff", "tif"];
 
 use crate::common::conversion::convert_image;
-use crate::common::{AlignedBytes, ColorFormat, Error, Result};
+use crate::common::{ColorFormat, Error, Result};
 
 use stride::{add_stride_padding, align_stride, strip_stride_padding};
+
+/// 8-byte alignment for image data to allow zero-copy casting to f32/f64.
+const ALIGNMENT: usize = 8;
 
 #[derive(Clone, Copy, Eq, PartialEq, Debug, Hash)]
 pub struct ImageDesc {
@@ -29,7 +34,7 @@ pub struct ImageDesc {
 #[derive(Clone, Debug)]
 pub struct Image {
     desc: ImageDesc,
-    bytes: AlignedBytes,
+    bytes: AVec<u8>,
 }
 
 impl Image {
@@ -40,23 +45,26 @@ impl Image {
 
     /// Returns the image bytes as a slice.
     pub fn bytes(&self) -> &[u8] {
-        self.bytes.as_slice()
+        &self.bytes
     }
 
     /// Convert to owned bytes (zero-copy due to 8-byte alignment).
     pub fn into_bytes(self) -> Vec<u8> {
-        self.bytes.into_vec()
+        let (ptr, _align, len, capacity) = self.bytes.into_raw_parts();
+        // Safety: AVec guarantees the pointer is valid and properly aligned.
+        unsafe { Vec::from_raw_parts(ptr, len, capacity) }
     }
 
     /// Returns the image bytes as a mutable slice.
     pub fn bytes_mut(&mut self) -> &mut [u8] {
-        self.bytes.as_mut_slice()
+        &mut self.bytes
     }
 
     pub fn new_black(desc: ImageDesc) -> Result<Image> {
         desc.color_format.validate()?;
 
-        let bytes = AlignedBytes::new_zeroed(desc.size_in_bytes());
+        let mut bytes = AVec::with_capacity(ALIGNMENT, desc.size_in_bytes());
+        bytes.resize(desc.size_in_bytes(), 0);
 
         Ok(Image { desc, bytes })
     }
@@ -74,7 +82,7 @@ impl Image {
 
         Ok(Image {
             desc,
-            bytes: AlignedBytes::from_vec(bytes),
+            bytes: AVec::from_slice(ALIGNMENT, &bytes),
         })
     }
 
@@ -163,7 +171,7 @@ impl Image {
                 stride: desc.row_bytes(),
                 color_format: desc.color_format,
             },
-            bytes: AlignedBytes::from_vec(bytes),
+            bytes: AVec::from_slice(ALIGNMENT, &bytes),
         }
     }
 
@@ -190,7 +198,7 @@ impl Image {
                 stride: aligned_stride,
                 color_format: desc.color_format,
             },
-            bytes: AlignedBytes::from_vec(bytes),
+            bytes: AVec::from_slice(ALIGNMENT, &bytes),
         }
     }
 }
