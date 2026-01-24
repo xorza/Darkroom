@@ -25,6 +25,8 @@ mod detection;
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod visual_tests;
 
 pub use background::{BackgroundMap, estimate_background};
 pub use centroid::compute_centroid;
