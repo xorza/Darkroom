@@ -99,6 +99,10 @@ SIMD-optimized demosaicing:
 - **75% memory**: Conservative threshold for system stability
 - **3σ clipping**: Standard for outlier rejection in astronomy
 
+## Constraints
+
+- **Background tile_size**: Must be 16-256, image must be at least tile_size × tile_size
+
 ## Testing
 
 Run full validation:

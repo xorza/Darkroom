@@ -93,8 +93,14 @@ pub fn estimate_background(
     height: usize,
     tile_size: usize,
 ) -> BackgroundMap {
-    assert!(tile_size >= 8, "Tile size must be at least 8");
-    assert!(width > 0 && height > 0, "Image dimensions must be positive");
+    assert!(
+        (16..=256).contains(&tile_size),
+        "Tile size must be between 16 and 256"
+    );
+    assert!(
+        width >= tile_size && height >= tile_size,
+        "Image must be at least tile_size x tile_size"
+    );
 
     let tiles_x = width.div_ceil(tile_size);
     let tiles_y = height.div_ceil(tile_size);
