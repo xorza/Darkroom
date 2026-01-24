@@ -4,22 +4,62 @@
 use std::hint::black_box;
 use std::path::Path;
 
-use criterion::{BenchmarkId, Criterion};
+use criterion::{BenchmarkId, Criterion, Throughput};
 
 use crate::stacking::FrameType;
 use crate::stacking::median::{MedianStackConfig, stack_median_from_paths};
 
 /// Register median stacking benchmarks with Criterion.
 pub fn benchmarks(c: &mut Criterion, calibration_dir: &Path) {
+    // Benchmark the per-pixel median calculation (scalar vs SIMD)
+    benchmark_median_calculation(c);
+
+    // Benchmark full stacking pipeline
+    benchmark_full_stacking(c, calibration_dir);
+}
+
+/// Benchmark the core median calculation comparing scalar vs SIMD.
+fn benchmark_median_calculation(c: &mut Criterion) {
+    let mut group = c.benchmark_group("median_calculation");
+
+    // Test various array sizes typical for astrophotography stacking
+    for size in [5, 8, 10, 15, 16, 20, 30, 50] {
+        // Create test data - reversed sequence is worst case for sorting
+        let values: Vec<f32> = (1..=size).map(|x| x as f32).rev().collect();
+
+        group.throughput(Throughput::Elements(size as u64));
+
+        // Benchmark scalar implementation
+        group.bench_function(BenchmarkId::new("scalar", size), |b| {
+            b.iter(|| {
+                let result = super::scalar::median_f32(black_box(&values));
+                black_box(result)
+            })
+        });
+
+        // Benchmark SIMD implementation (via cpu dispatch)
+        group.bench_function(BenchmarkId::new("simd", size), |b| {
+            b.iter(|| {
+                let result = super::cpu::median_f32(black_box(&values));
+                black_box(result)
+            })
+        });
+    }
+
+    group.finish();
+}
+
+/// Benchmark full median stacking pipeline with real images.
+fn benchmark_full_stacking(c: &mut Criterion, calibration_dir: &Path) {
     let darks_dir = calibration_dir.join("Darks");
     if !darks_dir.exists() {
-        eprintln!("Darks directory not found, skipping median stacking benchmarks");
+        eprintln!("Darks directory not found, skipping full stacking benchmarks");
         return;
     }
 
     let paths = common::file_utils::astro_image_files(&darks_dir);
     if paths.is_empty() {
-        eprintln!("No dark files found, skipping median stacking benchmarks");
+        eprintln!("No dark files found, skipping full stacking benchmarks");
         return;
     }
 
@@ -30,22 +70,16 @@ pub fn benchmarks(c: &mut Criterion, calibration_dir: &Path) {
     let mut group = c.benchmark_group("median_stacking");
     group.sample_size(10);
 
-    // Benchmark with different chunk sizes
-    for chunk_rows in [128] {
-        let config = MedianStackConfig {
-            chunk_rows,
-            cache_dir: std::env::temp_dir().join("lumos_bench_cache"),
-            keep_cache: false,
-        };
+    let config = MedianStackConfig {
+        chunk_rows: 128,
+        cache_dir: std::env::temp_dir().join("lumos_bench_cache"),
+        keep_cache: false,
+    };
 
-        group.bench_function(
-            BenchmarkId::new(
-                "stack_median",
-                format!("{}frames_{}rows", frame_count, chunk_rows),
-            ),
-            |b| b.iter(|| black_box(stack_median_from_paths(&paths, FrameType::Dark, &config))),
-        );
-    }
+    group.bench_function(
+        BenchmarkId::new("stack_median", format!("{}frames", frame_count)),
+        |b| b.iter(|| black_box(stack_median_from_paths(&paths, FrameType::Dark, &config))),
+    );
 
     group.finish();
 }

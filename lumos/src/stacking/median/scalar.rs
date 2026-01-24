@@ -4,7 +4,7 @@ use crate::math;
 
 /// Calculate the median of values using scalar operations.
 #[inline]
-#[cfg_attr(target_arch = "aarch64", allow(dead_code))]
+#[cfg_attr(all(target_arch = "aarch64", not(feature = "bench")), allow(dead_code))]
 pub(super) fn median_f32(values: &[f32]) -> f32 {
     math::median_f32(values)
 }
