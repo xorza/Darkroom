@@ -11,17 +11,17 @@ use super::detection::StarCandidate;
 use super::{Star, StarDetectionConfig};
 
 /// Stamp size for centroid computation (pixels on each side of center).
-const STAMP_RADIUS: usize = 7;
+pub(crate) const STAMP_RADIUS: usize = 7;
 
 /// Maximum iterations for centroid refinement.
-const MAX_ITERATIONS: usize = 10;
+pub(crate) const MAX_ITERATIONS: usize = 10;
 
 /// Convergence threshold in pixels squared.
-const CONVERGENCE_THRESHOLD_SQ: f32 = 0.001 * 0.001;
+pub(crate) const CONVERGENCE_THRESHOLD_SQ: f32 = 0.001 * 0.001;
 
 /// Check if position is within valid bounds for stamp extraction.
 #[inline]
-fn is_valid_stamp_position(cx: f32, cy: f32, width: usize, height: usize) -> bool {
+pub(crate) fn is_valid_stamp_position(cx: f32, cy: f32, width: usize, height: usize) -> bool {
     let icx = cx.round() as isize;
     let icy = cy.round() as isize;
     icx >= STAMP_RADIUS as isize
@@ -85,7 +85,7 @@ pub fn compute_centroid(
 /// Single iteration of centroid refinement.
 ///
 /// Returns (new_x, new_y) or None if position is invalid.
-fn refine_centroid(
+pub(crate) fn refine_centroid(
     pixels: &[f32],
     width: usize,
     height: usize,
@@ -146,15 +146,16 @@ fn refine_centroid(
 }
 
 /// Quality metrics for a star.
-struct StarMetrics {
-    flux: f32,
-    fwhm: f32,
-    eccentricity: f32,
-    snr: f32,
+#[derive(Debug)]
+pub(crate) struct StarMetrics {
+    pub flux: f32,
+    pub fwhm: f32,
+    pub eccentricity: f32,
+    pub snr: f32,
 }
 
 /// Compute quality metrics for a star at the given position.
-fn compute_metrics(
+pub(crate) fn compute_metrics(
     pixels: &[f32],
     width: usize,
     height: usize,
