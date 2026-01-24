@@ -384,12 +384,23 @@ fn normalize_u16_to_f32_parallel(data: &[u16], black: f32, inv_range: f32) -> Ve
 #[inline]
 fn normalize_chunk_simd(input: &[u16], output: &mut [f32], black: f32, inv_range: f32) {
     #[cfg(target_arch = "x86_64")]
-    if is_x86_feature_detected!("sse2") {
-        // SAFETY: We've verified SSE2 is available
-        unsafe {
-            normalize_chunk_sse2(input, output, black, inv_range);
+    {
+        // Prefer SSE4.1 for faster u16->i32 conversion (pmovzxwd)
+        if is_x86_feature_detected!("sse4.1") {
+            // SAFETY: We've verified SSE4.1 is available
+            unsafe {
+                normalize_chunk_sse41(input, output, black, inv_range);
+            }
+        } else if is_x86_feature_detected!("sse2") {
+            // SAFETY: We've verified SSE2 is available
+            unsafe {
+                normalize_chunk_sse2(input, output, black, inv_range);
+            }
+        } else {
+            for (out, &val) in output.iter_mut().zip(input.iter()) {
+                *out = ((val as f32) - black).max(0.0) * inv_range;
+            }
         }
-        return;
     }
 
     #[cfg(target_arch = "aarch64")]
@@ -416,13 +427,13 @@ fn normalize_chunk_scalar(input: &[u16], output: &mut [f32], black: f32, inv_ran
     }
 }
 
-/// SSE2 SIMD normalization for x86_64.
+/// SSE4.1 SIMD normalization for x86_64 (fast path with pmovzxwd).
 #[cfg(target_arch = "x86_64")]
-#[target_feature(enable = "sse2")]
-unsafe fn normalize_chunk_sse2(input: &[u16], output: &mut [f32], black: f32, inv_range: f32) {
+#[target_feature(enable = "sse4.1")]
+unsafe fn normalize_chunk_sse41(input: &[u16], output: &mut [f32], black: f32, inv_range: f32) {
     use std::arch::x86_64::*;
 
-    // SAFETY: All operations in this function require SSE2, which is guaranteed by target_feature
+    // SAFETY: All operations require SSE4.1, guaranteed by target_feature
     unsafe {
         let black_vec = _mm_set1_ps(black);
         let inv_range_vec = _mm_set1_ps(inv_range);
@@ -433,15 +444,52 @@ unsafe fn normalize_chunk_sse2(input: &[u16], output: &mut [f32], black: f32, in
 
         for i in 0..chunks {
             let idx = i * 4;
-            // Load 4 u16 values and convert to f32
-            // SSE2 doesn't have direct u16->f32, so we go through i32
-            let v0 = input[idx] as i32;
-            let v1 = input[idx + 1] as i32;
-            let v2 = input[idx + 2] as i32;
-            let v3 = input[idx + 3] as i32;
+            // Load 4 u16 values (64 bits) and zero-extend to 4 i32 values using SSE4.1
+            let vals_u16 = _mm_loadl_epi64(input.as_ptr().add(idx) as *const __m128i);
+            let vals_i32 = _mm_cvtepu16_epi32(vals_u16);
+            let vals_f32 = _mm_cvtepi32_ps(vals_i32);
 
-            let vals = _mm_set_epi32(v3, v2, v1, v0);
-            let vals_f32 = _mm_cvtepi32_ps(vals);
+            // Subtract black, clamp to 0, multiply by inv_range
+            let subtracted = _mm_sub_ps(vals_f32, black_vec);
+            let clamped = _mm_max_ps(subtracted, zero_vec);
+            let normalized = _mm_mul_ps(clamped, inv_range_vec);
+
+            // Store result
+            _mm_storeu_ps(output.as_mut_ptr().add(idx), normalized);
+        }
+
+        // Handle remainder with scalar
+        let start = chunks * 4;
+        for i in 0..remainder {
+            let idx = start + i;
+            output[idx] = ((input[idx] as f32) - black).max(0.0) * inv_range;
+        }
+    }
+}
+
+/// SSE2 SIMD normalization for x86_64 (fallback without SSE4.1).
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "sse2")]
+unsafe fn normalize_chunk_sse2(input: &[u16], output: &mut [f32], black: f32, inv_range: f32) {
+    use std::arch::x86_64::*;
+
+    // SAFETY: All operations require SSE2, guaranteed by target_feature
+    unsafe {
+        let black_vec = _mm_set1_ps(black);
+        let inv_range_vec = _mm_set1_ps(inv_range);
+        let zero_vec = _mm_setzero_ps();
+
+        let chunks = input.len() / 4;
+        let remainder = input.len() % 4;
+
+        for i in 0..chunks {
+            let idx = i * 4;
+            // Load 4 u16 values (64 bits) and unpack to i32 using SSE2
+            // _mm_loadl_epi64 loads 64 bits into lower half, zeros upper half
+            let vals_u16 = _mm_loadl_epi64(input.as_ptr().add(idx) as *const __m128i);
+            // Unpack low 16-bit integers to 32-bit by interleaving with zeros
+            let vals_i32 = _mm_unpacklo_epi16(vals_u16, _mm_setzero_si128());
+            let vals_f32 = _mm_cvtepi32_ps(vals_i32);
 
             // Subtract black, clamp to 0, multiply by inv_range
             let subtracted = _mm_sub_ps(vals_f32, black_vec);
