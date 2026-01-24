@@ -16,8 +16,19 @@ const STAMP_RADIUS: usize = 7;
 /// Maximum iterations for centroid refinement.
 const MAX_ITERATIONS: usize = 10;
 
-/// Convergence threshold in pixels.
-const CONVERGENCE_THRESHOLD: f32 = 0.001;
+/// Convergence threshold in pixels squared.
+const CONVERGENCE_THRESHOLD_SQ: f32 = 0.001 * 0.001;
+
+/// Check if position is within valid bounds for stamp extraction.
+#[inline]
+fn is_valid_stamp_position(cx: f32, cy: f32, width: usize, height: usize) -> bool {
+    let icx = cx.round() as isize;
+    let icy = cy.round() as isize;
+    icx >= STAMP_RADIUS as isize
+        && icy >= STAMP_RADIUS as isize
+        && icx < (width - STAMP_RADIUS) as isize
+        && icy < (height - STAMP_RADIUS) as isize
+}
 
 /// Compute sub-pixel centroid and quality metrics for a star candidate.
 ///
@@ -45,15 +56,14 @@ pub fn compute_centroid(
 
     // Iterative centroid refinement
     for _ in 0..MAX_ITERATIONS {
-        let (new_cx, new_cy, converged) =
-            refine_centroid(pixels, width, height, background, cx, cy)?;
+        let (new_cx, new_cy) = refine_centroid(pixels, width, height, background, cx, cy)?;
 
         let dx = new_cx - cx;
         let dy = new_cy - cy;
         cx = new_cx;
         cy = new_cy;
 
-        if converged || (dx * dx + dy * dy) < CONVERGENCE_THRESHOLD * CONVERGENCE_THRESHOLD {
+        if dx * dx + dy * dy < CONVERGENCE_THRESHOLD_SQ {
             break;
         }
     }
@@ -74,7 +84,7 @@ pub fn compute_centroid(
 
 /// Single iteration of centroid refinement.
 ///
-/// Returns (new_x, new_y, converged).
+/// Returns (new_x, new_y) or None if position is invalid.
 fn refine_centroid(
     pixels: &[f32],
     width: usize,
@@ -82,21 +92,16 @@ fn refine_centroid(
     background: &BackgroundMap,
     cx: f32,
     cy: f32,
-) -> Option<(f32, f32, bool)> {
-    let icx = cx.round() as isize;
-    let icy = cy.round() as isize;
-
-    // Check bounds
-    if icx < STAMP_RADIUS as isize
-        || icy < STAMP_RADIUS as isize
-        || icx >= (width - STAMP_RADIUS) as isize
-        || icy >= (height - STAMP_RADIUS) as isize
-    {
+) -> Option<(f32, f32)> {
+    if !is_valid_stamp_position(cx, cy, width, height) {
         return None;
     }
 
-    let stamp_size = 2 * STAMP_RADIUS + 1;
+    let icx = cx.round() as isize;
+    let icy = cy.round() as isize;
+
     let sigma = 2.0f32; // Gaussian weight sigma
+    let two_sigma_sq = 2.0 * sigma * sigma;
 
     let mut sum_x = 0.0f32;
     let mut sum_y = 0.0f32;
@@ -115,7 +120,7 @@ fn refine_centroid(
             let fx = x as f32 - cx;
             let fy = y as f32 - cy;
             let dist_sq = fx * fx + fy * fy;
-            let weight = value * (-dist_sq / (2.0 * sigma * sigma)).exp();
+            let weight = value * (-dist_sq / two_sigma_sq).exp();
 
             sum_x += x as f32 * weight;
             sum_y += y as f32 * weight;
@@ -130,11 +135,14 @@ fn refine_centroid(
     let new_cx = sum_x / sum_w;
     let new_cy = sum_y / sum_w;
 
-    // Check if centroid moved outside stamp
-    let moved_far = (new_cx - cx).abs() > stamp_size as f32 / 4.0
-        || (new_cy - cy).abs() > stamp_size as f32 / 4.0;
+    // Reject if centroid moved too far (likely bad detection)
+    let stamp_size = 2 * STAMP_RADIUS + 1;
+    let max_move = stamp_size as f32 / 4.0;
+    if (new_cx - cx).abs() > max_move || (new_cy - cy).abs() > max_move {
+        return None;
+    }
 
-    Some((new_cx, new_cy, !moved_far))
+    Some((new_cx, new_cy))
 }
 
 /// Quality metrics for a star.
@@ -154,17 +162,12 @@ fn compute_metrics(
     cx: f32,
     cy: f32,
 ) -> Option<StarMetrics> {
-    let icx = cx.round() as isize;
-    let icy = cy.round() as isize;
-
-    // Check bounds
-    if icx < STAMP_RADIUS as isize
-        || icy < STAMP_RADIUS as isize
-        || icx >= (width - STAMP_RADIUS) as isize
-        || icy >= (height - STAMP_RADIUS) as isize
-    {
+    if !is_valid_stamp_position(cx, cy, width, height) {
         return None;
     }
+
+    let icx = cx.round() as isize;
+    let icy = cy.round() as isize;
 
     // Collect background-subtracted values and positions
     let mut flux = 0.0f32;

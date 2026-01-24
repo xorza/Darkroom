@@ -85,13 +85,7 @@ pub fn detect_stars(
     let detection_config = DetectionConfig::from(config);
 
     // Create binary mask of above-threshold pixels
-    let mask = create_threshold_mask(
-        pixels,
-        width,
-        height,
-        background,
-        detection_config.sigma_threshold,
-    );
+    let mask = create_threshold_mask(pixels, background, detection_config.sigma_threshold);
 
     // Dilate mask to connect nearby pixels that may be separated due to
     // Bayer pattern artifacts (alternating row sensitivities) or background
@@ -150,25 +144,18 @@ pub fn dilate_mask(mask: &[bool], width: usize, height: usize, radius: usize) ->
 /// Create binary mask of pixels above threshold.
 fn create_threshold_mask(
     pixels: &[f32],
-    width: usize,
-    height: usize,
     background: &BackgroundMap,
     sigma_threshold: f32,
 ) -> Vec<bool> {
-    let mut mask = vec![false; width * height];
-
-    for y in 0..height {
-        for x in 0..width {
-            let idx = y * width + x;
-            let bg = background.background[idx];
-            let noise = background.noise[idx].max(1e-6); // Avoid division by zero
-            let threshold = bg + sigma_threshold * noise;
-
-            mask[idx] = pixels[idx] > threshold;
-        }
-    }
-
-    mask
+    pixels
+        .iter()
+        .zip(background.background.iter())
+        .zip(background.noise.iter())
+        .map(|((&px, &bg), &noise)| {
+            let threshold = bg + sigma_threshold * noise.max(1e-6);
+            px > threshold
+        })
+        .collect()
 }
 
 /// Connected component labeling using union-find.
@@ -185,30 +172,34 @@ fn connected_components(mask: &[bool], width: usize, height: usize) -> (Vec<u32>
                 continue;
             }
 
-            let mut neighbors = Vec::with_capacity(2);
+            // Use fixed-size array instead of Vec to avoid allocation in hot loop
+            let mut neighbors = [0u32; 2];
+            let mut neighbor_count = 0;
 
             // Check left neighbor
             if x > 0 && mask[idx - 1] {
-                neighbors.push(labels[idx - 1]);
+                neighbors[neighbor_count] = labels[idx - 1];
+                neighbor_count += 1;
             }
 
             // Check top neighbor
             if y > 0 && mask[idx - width] {
-                neighbors.push(labels[idx - width]);
+                neighbors[neighbor_count] = labels[idx - width];
+                neighbor_count += 1;
             }
 
-            if neighbors.is_empty() {
+            if neighbor_count == 0 {
                 // New label
                 labels[idx] = next_label;
                 parent.push(next_label); // parent[label-1] = label (self-reference)
                 next_label += 1;
             } else {
                 // Use minimum neighbor label
-                let min_label = *neighbors.iter().min().unwrap();
+                let min_label = neighbors[..neighbor_count].iter().copied().min().unwrap();
                 labels[idx] = min_label;
 
                 // Union all neighbor labels
-                for &label in &neighbors {
+                for &label in &neighbors[..neighbor_count] {
                     union(&mut parent, min_label, label);
                 }
             }
@@ -226,7 +217,7 @@ fn connected_components(mask: &[bool], width: usize, height: usize) -> (Vec<u32>
                 continue;
             }
 
-            let root = find(&parent, labels[idx]);
+            let root = find(&mut parent, labels[idx]);
             if label_map[root as usize] == 0 {
                 num_labels += 1;
                 label_map[root as usize] = num_labels;
@@ -238,12 +229,13 @@ fn connected_components(mask: &[bool], width: usize, height: usize) -> (Vec<u32>
     (labels, num_labels as usize)
 }
 
-/// Find root of a label (with path compression).
-fn find(parent: &[u32], mut label: u32) -> u32 {
-    while parent[(label - 1) as usize] != label {
-        label = parent[(label - 1) as usize];
+/// Find root of a label with path compression.
+fn find(parent: &mut [u32], label: u32) -> u32 {
+    let idx = (label - 1) as usize;
+    if parent[idx] != label {
+        parent[idx] = find(parent, parent[idx]); // Path compression
     }
-    label
+    parent[idx]
 }
 
 /// Union two labels.
