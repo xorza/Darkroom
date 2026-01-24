@@ -64,7 +64,6 @@ struct TileGrid {
     centers_y: Vec<f32>,
     tiles_x: usize,
     tiles_y: usize,
-    tile_size: usize,
 }
 
 impl TileGrid {
@@ -158,7 +157,6 @@ pub fn estimate_background(
             .collect(),
         tiles_x,
         tiles_y,
-        tile_size,
     };
 
     // Allocate output buffers
@@ -287,40 +285,39 @@ fn sigma_clipped_stats(
     TileStats { median, sigma }
 }
 
-/// Interpolate an entire row at once, amortizing tile lookups.
+/// Interpolate an entire row using simple bilinear interpolation between tile centers.
 fn interpolate_row(bg_row: &mut [f32], noise_row: &mut [f32], y: usize, grid: &TileGrid) {
     let fy = y as f32;
     let width = bg_row.len();
 
-    // Find Y tile indices and weight (constant for entire row)
-    let ty_raw = y / grid.tile_size;
-    let ty = ty_raw.min(grid.tiles_y - 1);
-    let center_y = grid.centers_y[ty];
+    for x in 0..width {
+        let fx = x as f32;
 
-    let ty_f = (fy - center_y) / grid.tile_size as f32 + 0.5;
-    let ty0 = if ty_f < 0.5 { ty.saturating_sub(1) } else { ty };
-    let ty1 = (ty0 + 1).min(grid.tiles_y - 1);
+        // Find the four surrounding tile centers for bilinear interpolation
+        // Tile centers are at centers_x[i], centers_y[j]
+        // We need to find which four centers surround this pixel
 
-    let wy = if ty1 != ty0 && grid.tiles_y > 1 {
-        ((fy - grid.centers_y[ty0]) / (grid.centers_y[ty1] - grid.centers_y[ty0])).clamp(0.0, 1.0)
-    } else {
-        0.0
-    };
-
-    let wy_inv = 1.0 - wy;
-
-    // Process row
-    let mut x = 0;
-
-    while x < width {
-        // Find X tile indices
-        let tx_raw = x / grid.tile_size;
-        let tx = tx_raw.min(grid.tiles_x - 1);
-        let center_x = grid.centers_x[tx];
-
-        let tx_f = (x as f32 - center_x) / grid.tile_size as f32 + 0.5;
-        let tx0 = if tx_f < 0.5 { tx.saturating_sub(1) } else { tx };
+        // Find tx0, tx1 such that centers_x[tx0] <= fx < centers_x[tx1]
+        let tx0 = find_lower_tile(fx, &grid.centers_x);
         let tx1 = (tx0 + 1).min(grid.tiles_x - 1);
+
+        let ty0 = find_lower_tile(fy, &grid.centers_y);
+        let ty1 = (ty0 + 1).min(grid.tiles_y - 1);
+
+        // Compute interpolation weights
+        let wx = if tx1 != tx0 {
+            ((fx - grid.centers_x[tx0]) / (grid.centers_x[tx1] - grid.centers_x[tx0]))
+                .clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+
+        let wy = if ty1 != ty0 {
+            ((fy - grid.centers_y[ty0]) / (grid.centers_y[ty1] - grid.centers_y[ty0]))
+                .clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
 
         // Get four corner tiles
         let t00 = grid.get(tx0, ty0);
@@ -328,50 +325,31 @@ fn interpolate_row(bg_row: &mut [f32], noise_row: &mut [f32], y: usize, grid: &T
         let t01 = grid.get(tx0, ty1);
         let t11 = grid.get(tx1, ty1);
 
-        // Precompute Y-interpolated values
-        let bg_y0 = wy_inv * t00.median + wy * t01.median;
-        let bg_y1 = wy_inv * t10.median + wy * t11.median;
-        let noise_y0 = wy_inv * t00.sigma + wy * t01.sigma;
-        let noise_y1 = wy_inv * t10.sigma + wy * t11.sigma;
+        // Bilinear interpolation
+        let wx_inv = 1.0 - wx;
+        let wy_inv = 1.0 - wy;
 
-        // Determine range of X that uses same tile corners
-        let next_tile_boundary = ((tx_raw + 1) * grid.tile_size).min(width);
+        bg_row[x] = wx_inv * wy_inv * t00.median
+            + wx * wy_inv * t10.median
+            + wx_inv * wy * t01.median
+            + wx * wy * t11.median;
 
-        // Check if we need to switch corners mid-tile
-        let switch_x = if tx0 == tx {
-            let switch_threshold = center_x + grid.tile_size as f32 * 0.5;
-            if switch_threshold < next_tile_boundary as f32 {
-                (switch_threshold as usize).max(x + 1)
-            } else {
-                next_tile_boundary
-            }
-        } else {
-            next_tile_boundary
-        };
-
-        let x_end = switch_x.min(width);
-
-        // Compute wx denominator once
-        let wx_denom = if tx1 != tx0 && grid.tiles_x > 1 {
-            grid.centers_x[tx1] - grid.centers_x[tx0]
-        } else {
-            1.0
-        };
-        let center_x0 = grid.centers_x[tx0];
-
-        // Interpolate pixels in this segment
-        for px in x..x_end {
-            let fx = px as f32;
-            let wx = if tx1 != tx0 && grid.tiles_x > 1 {
-                ((fx - center_x0) / wx_denom).clamp(0.0, 1.0)
-            } else {
-                0.0
-            };
-
-            bg_row[px] = (1.0 - wx) * bg_y0 + wx * bg_y1;
-            noise_row[px] = (1.0 - wx) * noise_y0 + wx * noise_y1;
-        }
-
-        x = x_end;
+        noise_row[x] = wx_inv * wy_inv * t00.sigma
+            + wx * wy_inv * t10.sigma
+            + wx_inv * wy * t01.sigma
+            + wx * wy * t11.sigma;
     }
+}
+
+/// Find the tile index whose center is at or before the given position.
+#[inline]
+fn find_lower_tile(pos: f32, centers: &[f32]) -> usize {
+    // Binary search would be overkill for small tile counts
+    // Linear search from the end since we often query sequentially
+    for i in (0..centers.len()).rev() {
+        if centers[i] <= pos {
+            return i;
+        }
+    }
+    0
 }
