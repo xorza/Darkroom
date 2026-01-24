@@ -614,6 +614,96 @@ mod tests {
     }
 
     #[test]
+    fn test_roundtrip_astro_to_image_to_astro_rgb() {
+        let original = AstroImage {
+            metadata: AstroImageMetadata::default(),
+            pixels: vec![
+                1.0, 0.0, 0.0, // red
+                0.0, 1.0, 0.0, // green
+                0.0, 0.0, 1.0, // blue
+                0.5, 0.5, 0.5, // gray
+            ],
+            dimensions: ImageDimensions::new(2, 2, 3),
+        };
+
+        // Convert to Image and back
+        let image: Image = original.clone().into();
+        let restored: AstroImage = image.into();
+
+        // Verify dimensions preserved
+        assert_eq!(restored.dimensions, original.dimensions);
+
+        // Verify pixel values preserved
+        for (a, b) in original.pixels.iter().zip(restored.pixels.iter()) {
+            assert!((a - b).abs() < 1e-6, "Pixel mismatch: {} vs {}", a, b);
+        }
+    }
+
+    #[test]
+    fn test_image_rgba_to_astro_drops_alpha() {
+        // Create RGBA f32 image
+        let desc = ImageDesc::new(2, 1, ColorFormat::RGBA_F32);
+        let pixels: Vec<f32> = vec![
+            1.0, 0.0, 0.0, 0.5, // red with 50% alpha
+            0.0, 1.0, 0.0, 1.0, // green with full alpha
+        ];
+        let bytes: Vec<u8> = bytemuck::cast_slice(&pixels).to_vec();
+        let image = Image::new_with_data(desc, bytes).unwrap();
+
+        // Convert to AstroImage (should drop alpha)
+        let astro: AstroImage = image.into();
+
+        assert_eq!(astro.dimensions.channels, 3);
+        assert_eq!(astro.pixels.len(), 6); // 2 pixels * 3 channels
+
+        // Verify RGB values preserved (alpha dropped)
+        assert!((astro.pixels[0] - 1.0).abs() < 1e-6); // R
+        assert!((astro.pixels[1] - 0.0).abs() < 1e-6); // G
+        assert!((astro.pixels[2] - 0.0).abs() < 1e-6); // B
+        assert!((astro.pixels[3] - 0.0).abs() < 1e-6); // R
+        assert!((astro.pixels[4] - 1.0).abs() < 1e-6); // G
+        assert!((astro.pixels[5] - 0.0).abs() < 1e-6); // B
+    }
+
+    #[test]
+    fn test_image_gray_alpha_to_astro_drops_alpha() {
+        // Create GrayAlpha f32 image
+        let desc = ImageDesc::new(2, 1, ColorFormat::GRAY_ALPHA_F32);
+        let pixels: Vec<f32> = vec![
+            0.5, 0.8, // gray 0.5 with 80% alpha
+            0.9, 1.0, // gray 0.9 with full alpha
+        ];
+        let bytes: Vec<u8> = bytemuck::cast_slice(&pixels).to_vec();
+        let image = Image::new_with_data(desc, bytes).unwrap();
+
+        // Convert to AstroImage (should drop alpha)
+        let astro: AstroImage = image.into();
+
+        assert_eq!(astro.dimensions.channels, 1);
+        assert_eq!(astro.pixels.len(), 2);
+
+        // Verify gray values preserved (alpha dropped)
+        assert!((astro.pixels[0] - 0.5).abs() < 1e-6);
+        assert!((astro.pixels[1] - 0.9).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_astro_to_image_preserves_data() {
+        let pixels = vec![0.1, 0.2, 0.3, 0.4];
+        let astro = AstroImage {
+            metadata: AstroImageMetadata::default(),
+            pixels: pixels.clone(),
+            dimensions: ImageDimensions::new(2, 2, 1),
+        };
+
+        let image: Image = astro.into();
+
+        // Verify the data is preserved (may or may not be zero-copy depending on alignment)
+        let image_floats: &[f32] = bytemuck::cast_slice(image.bytes());
+        assert_eq!(image_floats, &pixels[..]);
+    }
+
+    #[test]
     #[cfg_attr(not(feature = "slow-tests"), ignore)]
     fn test_load_single_raw_from_env() {
         init_tracing();
