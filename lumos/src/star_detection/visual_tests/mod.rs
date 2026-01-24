@@ -1,6 +1,7 @@
 //! Visual tests for star detection - generates debug images for inspection.
 
 mod debug_steps;
+mod subpixel_accuracy;
 mod synthetic;
 
 use crate::AstroImage;
