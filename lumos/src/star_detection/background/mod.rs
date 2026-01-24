@@ -51,15 +51,27 @@ impl BackgroundMap {
 }
 
 /// Tile statistics computed during background estimation.
+#[derive(Clone, Copy)]
 struct TileStats {
-    /// Sigma-clipped median of the tile.
     median: f32,
-    /// Sigma-clipped standard deviation.
     sigma: f32,
-    /// Center X of tile.
-    center_x: f32,
-    /// Center Y of tile.
-    center_y: f32,
+}
+
+/// Tile grid with precomputed centers for interpolation.
+struct TileGrid {
+    stats: Vec<TileStats>,
+    centers_x: Vec<f32>,
+    centers_y: Vec<f32>,
+    tiles_x: usize,
+    tiles_y: usize,
+    tile_size: usize,
+}
+
+impl TileGrid {
+    #[inline]
+    fn get(&self, tx: usize, ty: usize) -> TileStats {
+        self.stats[ty * self.tiles_x + tx]
+    }
 }
 
 /// Estimate background using tiled sigma-clipped statistics.
@@ -84,48 +96,86 @@ pub fn estimate_background(
     assert!(tile_size >= 8, "Tile size must be at least 8");
     assert!(width > 0 && height > 0, "Image dimensions must be positive");
 
-    // Compute number of tiles
     let tiles_x = width.div_ceil(tile_size);
     let tiles_y = height.div_ceil(tile_size);
+    let max_tile_pixels = tile_size * tile_size;
 
-    // Compute statistics for each tile in parallel
-    let tile_stats: Vec<TileStats> = (0..tiles_y)
+    // Compute statistics for each tile in parallel with per-thread scratch buffers
+    let tile_stats: Vec<TileStats> = (0..tiles_y * tiles_x)
         .into_par_iter()
-        .flat_map(|ty| {
-            (0..tiles_x).into_par_iter().map(move |tx| {
+        .map_init(
+            || {
+                (
+                    Vec::with_capacity(max_tile_pixels),
+                    Vec::with_capacity(max_tile_pixels),
+                )
+            },
+            |(values_buf, deviations_buf), idx| {
+                let ty = idx / tiles_x;
+                let tx = idx % tiles_x;
+
                 let x_start = tx * tile_size;
                 let y_start = ty * tile_size;
                 let x_end = (x_start + tile_size).min(width);
                 let y_end = (y_start + tile_size).min(height);
 
-                compute_tile_stats(pixels, width, x_start, y_start, x_end, y_end)
+                compute_tile_stats(
+                    pixels,
+                    width,
+                    x_start,
+                    x_end,
+                    y_start,
+                    y_end,
+                    values_buf,
+                    deviations_buf,
+                )
+            },
+        )
+        .collect();
+
+    // Build tile grid with precomputed centers
+    let grid = TileGrid {
+        stats: tile_stats,
+        centers_x: (0..tiles_x)
+            .map(|tx| {
+                let x_start = tx * tile_size;
+                let x_end = (x_start + tile_size).min(width);
+                (x_start + x_end) as f32 * 0.5
             })
-        })
-        .collect();
+            .collect(),
+        centers_y: (0..tiles_y)
+            .map(|ty| {
+                let y_start = ty * tile_size;
+                let y_end = (y_start + tile_size).min(height);
+                (y_start + y_end) as f32 * 0.5
+            })
+            .collect(),
+        tiles_x,
+        tiles_y,
+        tile_size,
+    };
 
-    // Create grid of tile statistics for interpolation
-    let tile_grid: Vec<Vec<&TileStats>> = (0..tiles_y)
-        .map(|ty| {
-            (0..tiles_x)
-                .map(|tx| &tile_stats[ty * tiles_x + tx])
-                .collect()
-        })
-        .collect();
-
-    // Interpolate to create per-pixel background and noise maps
+    // Allocate output buffers
     let mut background = vec![0.0f32; width * height];
     let mut noise = vec![0.0f32; width * height];
 
-    // Process rows in parallel
+    // Process rows in parallel with chunking to reduce false sharing
+    const ROWS_PER_CHUNK: usize = 8;
     background
-        .par_chunks_mut(width)
-        .zip(noise.par_chunks_mut(width))
+        .par_chunks_mut(width * ROWS_PER_CHUNK)
+        .zip(noise.par_chunks_mut(width * ROWS_PER_CHUNK))
         .enumerate()
-        .for_each(|(y, (bg_row, noise_row))| {
-            for x in 0..width {
-                let (bg, n) = interpolate_at(&tile_grid, x, y, tile_size, tiles_x, tiles_y);
-                bg_row[x] = bg;
-                noise_row[x] = n;
+        .for_each(|(chunk_idx, (bg_chunk, noise_chunk))| {
+            let y_start = chunk_idx * ROWS_PER_CHUNK;
+            let rows_in_chunk = bg_chunk.len() / width;
+
+            for local_y in 0..rows_in_chunk {
+                let y = y_start + local_y;
+                let row_offset = local_y * width;
+                let bg_row = &mut bg_chunk[row_offset..row_offset + width];
+                let noise_row = &mut noise_chunk[row_offset..row_offset + width];
+
+                interpolate_row(bg_row, noise_row, y, &grid);
             }
         });
 
@@ -137,45 +187,41 @@ pub fn estimate_background(
     }
 }
 
-/// Compute sigma-clipped statistics for a single tile.
+/// Compute sigma-clipped statistics for a single tile using provided scratch buffers.
+#[allow(clippy::too_many_arguments)]
 fn compute_tile_stats(
     pixels: &[f32],
     width: usize,
     x_start: usize,
-    y_start: usize,
     x_end: usize,
+    y_start: usize,
     y_end: usize,
+    values: &mut Vec<f32>,
+    deviations: &mut Vec<f32>,
 ) -> TileStats {
-    // Extract tile pixels
-    let mut values: Vec<f32> = Vec::with_capacity((x_end - x_start) * (y_end - y_start));
+    // Clear and fill values buffer
+    values.clear();
     for y in y_start..y_end {
-        for x in x_start..x_end {
-            values.push(pixels[y * width + x]);
-        }
+        let row_start = y * width + x_start;
+        values.extend_from_slice(&pixels[row_start..row_start + (x_end - x_start)]);
     }
 
     // Sigma-clipped statistics (3 iterations, 3-sigma clip)
-    let (median, sigma) = sigma_clipped_stats(&mut values, 3.0, 3);
-
-    // Tile center
-    let center_x = (x_start + x_end) as f32 / 2.0;
-    let center_y = (y_start + y_end) as f32 / 2.0;
-
-    TileStats {
-        median,
-        sigma,
-        center_x,
-        center_y,
-    }
+    sigma_clipped_stats(values, deviations, 3.0, 3)
 }
 
-/// Compute sigma-clipped median and standard deviation.
-///
-/// Uses iterative sigma clipping to reject outliers (e.g., stars) and estimate
-/// the background statistics.
-fn sigma_clipped_stats(values: &mut [f32], kappa: f32, iterations: usize) -> (f32, f32) {
+/// Compute sigma-clipped median and standard deviation using scratch buffers.
+fn sigma_clipped_stats(
+    values: &mut [f32],
+    deviations: &mut Vec<f32>,
+    kappa: f32,
+    iterations: usize,
+) -> TileStats {
     if values.is_empty() {
-        return (0.0, 0.0);
+        return TileStats {
+            median: 0.0,
+            sigma: 0.0,
+        };
     }
 
     let mut len = values.len();
@@ -187,19 +233,20 @@ fn sigma_clipped_stats(values: &mut [f32], kappa: f32, iterations: usize) -> (f3
 
         let active = &mut values[..len];
 
-        // Compute median (this sorts active in place, but preserves values)
+        // Compute median
         let median = crate::math::median_f32_mut(active);
 
-        // Compute MAD using a temporary buffer to avoid destroying original values
-        let mut deviations: Vec<f32> = active.iter().map(|v| (v - median).abs()).collect();
-        let mad = crate::math::median_f32_mut(&mut deviations);
-        let sigma = mad * 1.4826; // MAD to sigma conversion
+        // Compute MAD using deviations buffer
+        deviations.clear();
+        deviations.extend(active.iter().map(|v| (v - median).abs()));
+        let mad = crate::math::median_f32_mut(deviations);
+        let sigma = mad * 1.4826;
 
         if sigma < f32::EPSILON {
-            return (median, 0.0);
+            return TileStats { median, sigma: 0.0 };
         }
 
-        // Clip values outside threshold (keep original values, just compact them)
+        // Clip values outside threshold
         let threshold = kappa * sigma;
         let mut write_idx = 0;
         for i in 0..len {
@@ -210,90 +257,115 @@ fn sigma_clipped_stats(values: &mut [f32], kappa: f32, iterations: usize) -> (f3
         }
 
         if write_idx == len {
-            // No values clipped, converged
             break;
         }
         len = write_idx;
     }
 
-    // Final statistics on clipped data
+    // Final statistics
     let active = &mut values[..len];
     if active.is_empty() {
-        return (0.0, 0.0);
+        return TileStats {
+            median: 0.0,
+            sigma: 0.0,
+        };
     }
 
     let median = crate::math::median_f32_mut(active);
 
-    // Compute standard deviation using MAD (more robust than sample std)
-    let mut deviations: Vec<f32> = active.iter().map(|v| (v - median).abs()).collect();
-    let mad = crate::math::median_f32_mut(&mut deviations);
+    deviations.clear();
+    deviations.extend(active.iter().map(|v| (v - median).abs()));
+    let mad = crate::math::median_f32_mut(deviations);
     let sigma = mad * 1.4826;
 
-    (median, sigma)
+    TileStats { median, sigma }
 }
 
-/// Bilinearly interpolate background/noise at a pixel position.
-fn interpolate_at(
-    tile_grid: &[Vec<&TileStats>],
-    x: usize,
-    y: usize,
-    tile_size: usize,
-    tiles_x: usize,
-    tiles_y: usize,
-) -> (f32, f32) {
-    // Find the four nearest tile centers
-    let fx = x as f32;
+/// Interpolate an entire row at once, amortizing tile lookups.
+fn interpolate_row(bg_row: &mut [f32], noise_row: &mut [f32], y: usize, grid: &TileGrid) {
     let fy = y as f32;
+    let width = bg_row.len();
 
-    // Tile indices (clamped)
-    let tx = ((x / tile_size) as isize).clamp(0, tiles_x as isize - 1) as usize;
-    let ty = ((y / tile_size) as isize).clamp(0, tiles_y as isize - 1) as usize;
+    // Find Y tile indices and weight (constant for entire row)
+    let ty_raw = y / grid.tile_size;
+    let ty = ty_raw.min(grid.tiles_y - 1);
+    let center_y = grid.centers_y[ty];
 
-    // For simplicity, use nearest-neighbor at edges, bilinear in interior
-    let tile = tile_grid[ty][tx];
+    let ty_f = (fy - center_y) / grid.tile_size as f32 + 0.5;
+    let ty0 = if ty_f < 0.5 { ty.saturating_sub(1) } else { ty };
+    let ty1 = (ty0 + 1).min(grid.tiles_y - 1);
 
-    if tiles_x == 1 || tiles_y == 1 {
-        return (tile.median, tile.sigma);
+    let wy = if ty1 != ty0 && grid.tiles_y > 1 {
+        ((fy - grid.centers_y[ty0]) / (grid.centers_y[ty1] - grid.centers_y[ty0])).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+
+    let wy_inv = 1.0 - wy;
+
+    // Process row
+    let mut x = 0;
+
+    while x < width {
+        // Find X tile indices
+        let tx_raw = x / grid.tile_size;
+        let tx = tx_raw.min(grid.tiles_x - 1);
+        let center_x = grid.centers_x[tx];
+
+        let tx_f = (x as f32 - center_x) / grid.tile_size as f32 + 0.5;
+        let tx0 = if tx_f < 0.5 { tx.saturating_sub(1) } else { tx };
+        let tx1 = (tx0 + 1).min(grid.tiles_x - 1);
+
+        // Get four corner tiles
+        let t00 = grid.get(tx0, ty0);
+        let t10 = grid.get(tx1, ty0);
+        let t01 = grid.get(tx0, ty1);
+        let t11 = grid.get(tx1, ty1);
+
+        // Precompute Y-interpolated values
+        let bg_y0 = wy_inv * t00.median + wy * t01.median;
+        let bg_y1 = wy_inv * t10.median + wy * t11.median;
+        let noise_y0 = wy_inv * t00.sigma + wy * t01.sigma;
+        let noise_y1 = wy_inv * t10.sigma + wy * t11.sigma;
+
+        // Determine range of X that uses same tile corners
+        let next_tile_boundary = ((tx_raw + 1) * grid.tile_size).min(width);
+
+        // Check if we need to switch corners mid-tile
+        let switch_x = if tx0 == tx {
+            let switch_threshold = center_x + grid.tile_size as f32 * 0.5;
+            if switch_threshold < next_tile_boundary as f32 {
+                (switch_threshold as usize).max(x + 1)
+            } else {
+                next_tile_boundary
+            }
+        } else {
+            next_tile_boundary
+        };
+
+        let x_end = switch_x.min(width);
+
+        // Compute wx denominator once
+        let wx_denom = if tx1 != tx0 && grid.tiles_x > 1 {
+            grid.centers_x[tx1] - grid.centers_x[tx0]
+        } else {
+            1.0
+        };
+        let center_x0 = grid.centers_x[tx0];
+
+        // Interpolate pixels in this segment
+        for px in x..x_end {
+            let fx = px as f32;
+            let wx = if tx1 != tx0 && grid.tiles_x > 1 {
+                ((fx - center_x0) / wx_denom).clamp(0.0, 1.0)
+            } else {
+                0.0
+            };
+
+            bg_row[px] = (1.0 - wx) * bg_y0 + wx * bg_y1;
+            noise_row[px] = (1.0 - wx) * noise_y0 + wx * noise_y1;
+        }
+
+        x = x_end;
     }
-
-    // Determine interpolation weights based on position relative to tile centers
-    let tx_f = (fx - tile.center_x) / tile_size as f32 + 0.5;
-    let ty_f = (fy - tile.center_y) / tile_size as f32 + 0.5;
-
-    // Clamp to valid range
-    let tx0 = tx.saturating_sub(if tx_f < 0.5 { 1 } else { 0 });
-    let ty0 = ty.saturating_sub(if ty_f < 0.5 { 1 } else { 0 });
-    let tx1 = (tx0 + 1).min(tiles_x - 1);
-    let ty1 = (ty0 + 1).min(tiles_y - 1);
-
-    // Get four corner tiles
-    let t00 = tile_grid[ty0][tx0];
-    let t10 = tile_grid[ty0][tx1];
-    let t01 = tile_grid[ty1][tx0];
-    let t11 = tile_grid[ty1][tx1];
-
-    // Compute interpolation weights
-    let wx = if tx1 != tx0 {
-        ((fx - t00.center_x) / (t10.center_x - t00.center_x)).clamp(0.0, 1.0)
-    } else {
-        0.0
-    };
-    let wy = if ty1 != ty0 {
-        ((fy - t00.center_y) / (t01.center_y - t00.center_y)).clamp(0.0, 1.0)
-    } else {
-        0.0
-    };
-
-    // Bilinear interpolation
-    let bg = (1.0 - wx) * (1.0 - wy) * t00.median
-        + wx * (1.0 - wy) * t10.median
-        + (1.0 - wx) * wy * t01.median
-        + wx * wy * t11.median;
-
-    let noise = (1.0 - wx) * (1.0 - wy) * t00.sigma
-        + wx * (1.0 - wy) * t10.sigma
-        + (1.0 - wx) * wy * t01.sigma
-        + wx * wy * t11.sigma;
-
-    (bg, noise)
 }
