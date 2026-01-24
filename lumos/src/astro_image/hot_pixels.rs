@@ -185,23 +185,13 @@ const MAX_MEDIAN_SAMPLES: usize = 100_000;
 /// For large images, computing exact median is expensive (O(n) but with large constant).
 /// Instead, we sample a subset of pixels and compute median on the sample.
 /// With 100K samples, the median estimate is accurate to within ~0.5% with high probability.
+///
+/// Samples all channels in a single pass for better cache locality.
 fn compute_all_channel_stats(
     pixels: &[f32],
     channels: usize,
     sigma_threshold: f32,
 ) -> Vec<ChannelStats> {
-    (0..channels)
-        .map(|c| compute_channel_stats_sampled(pixels, channels, c, sigma_threshold))
-        .collect()
-}
-
-/// Compute statistics for a single channel using sampled median.
-fn compute_channel_stats_sampled(
-    pixels: &[f32],
-    channels: usize,
-    channel: usize,
-    sigma_threshold: f32,
-) -> ChannelStats {
     let pixel_count = pixels.len() / channels;
 
     // Determine sampling strategy
@@ -219,36 +209,48 @@ fn compute_channel_stats_sampled(
         1
     };
 
-    // Extract samples for this channel into a contiguous buffer
-    let mut samples: Vec<f32> = Vec::with_capacity(sample_count);
+    // Allocate sample buffers for all channels
+    let mut channel_samples: Vec<Vec<f32>> = (0..channels)
+        .map(|_| Vec::with_capacity(sample_count))
+        .collect();
+
+    // Extract samples for all channels in a single pass - contiguous memory access
     for i in 0..sample_count {
-        let pixel_idx = i * stride;
-        samples.push(pixels[pixel_idx * channels + channel]);
+        let base = i * stride * channels;
+        for c in 0..channels {
+            channel_samples[c].push(pixels[base + c]);
+        }
     }
 
-    let median = median_f32_in_place(&mut samples);
+    // Compute stats for each channel
+    channel_samples
+        .into_iter()
+        .map(|mut samples| {
+            let median = median_f32_in_place(&mut samples);
 
-    // Compute absolute deviations in place, reusing the buffer
-    for v in samples.iter_mut() {
-        *v = (*v - median).abs();
-    }
-    let mad = median_f32_in_place(&mut samples);
+            // Compute absolute deviations in place, reusing the buffer
+            for v in samples.iter_mut() {
+                *v = (*v - median).abs();
+            }
+            let mad = median_f32_in_place(&mut samples);
 
-    // Convert MAD to σ equivalent (for normal distribution, σ ≈ 1.4826 * MAD)
-    const MAD_TO_SIGMA: f32 = 1.4826;
-    let computed_sigma = mad * MAD_TO_SIGMA;
+            // Convert MAD to σ equivalent (for normal distribution, σ ≈ 1.4826 * MAD)
+            const MAD_TO_SIGMA: f32 = 1.4826;
+            let computed_sigma = mad * MAD_TO_SIGMA;
 
-    // Apply minimum sigma floor: stacked master darks have compressed noise,
-    // so use at least 1% of median to avoid overly tight thresholds
-    let sigma = computed_sigma.max(median * 0.01);
-    let threshold = median + sigma_threshold * sigma;
+            // Apply minimum sigma floor: stacked master darks have compressed noise,
+            // so use at least 1% of median to avoid overly tight thresholds
+            let sigma = computed_sigma.max(median * 0.01);
+            let threshold = median + sigma_threshold * sigma;
 
-    ChannelStats {
-        median,
-        mad,
-        sigma,
-        threshold,
-    }
+            ChannelStats {
+                median,
+                mad,
+                sigma,
+                threshold,
+            }
+        })
+        .collect()
 }
 
 /// Calculate median in place without allocating a new vector.
@@ -497,20 +499,19 @@ mod tests {
         // Create data with known distribution: values 0..pixel_count
         // True median should be (pixel_count - 1) / 2 = 499999.5
         let pixels: Vec<f32> = (0..pixel_count).map(|i| i as f32).collect();
-        let dark = make_test_image(size, size, 1, pixels.clone());
 
         // Get stats using our sampled approach
-        let stats = super::compute_channel_stats_sampled(&dark.pixels, 1, 0, 5.0);
+        let stats = super::compute_all_channel_stats(&pixels, 1, 5.0);
 
         // Exact median
         let exact_median = (pixel_count - 1) as f32 / 2.0;
 
         // Sampled median should be within 1% of exact
-        let error_pct = (stats.median - exact_median).abs() / exact_median * 100.0;
+        let error_pct = (stats[0].median - exact_median).abs() / exact_median * 100.0;
         assert!(
             error_pct < 1.0,
             "Sampled median {} differs from exact {} by {:.2}%",
-            stats.median,
+            stats[0].median,
             exact_median,
             error_pct
         );
