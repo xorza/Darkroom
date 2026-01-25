@@ -82,14 +82,23 @@ impl BenchmarkResult {
             self.catalog_stars, self.detected_stars
         );
         println!(
-            "  Detection rate: {:.1}%",
-            self.metrics.detection_rate * 100.0
+            "  Completeness: {:.1}% ({} of {} catalog stars detected)",
+            self.metrics.detection_rate * 100.0,
+            self.metrics.true_positives,
+            self.catalog_stars
         );
-        println!("  Precision: {:.1}%", self.metrics.precision * 100.0);
         println!(
             "  Mean centroid error: {:.3} pixels",
             self.metrics.mean_centroid_error
         );
+        // Note: "false positives" include real stars fainter than catalog limit
+        let extra_detections = self.detected_stars.saturating_sub(self.catalog_stars);
+        if extra_detections > 0 {
+            println!(
+                "  Extra detections: {} (likely fainter than catalog mag limit)",
+                extra_detections
+            );
+        }
         println!("  Runtime: {} ms", self.runtime_ms);
     }
 
@@ -941,5 +950,152 @@ mod tests {
         assert!((residuals.mean_dx - 0.1).abs() < 0.01);
         assert!((residuals.mean_dy - 0.2).abs() < 0.01);
         assert!(residuals.rms_total > 0.0);
+    }
+
+    #[test]
+    #[ignore] // Requires network
+    fn debug_bright_star_matching() {
+        crate::testing::init_tracing();
+
+        let benchmark = SurveyBenchmark::new().unwrap();
+        let field = super::super::fields::sparse_field();
+
+        let sdss = field.sdss.as_ref().unwrap();
+        let image_path = benchmark
+            .fetcher
+            .fetch_sdss(sdss.run, sdss.camcol, sdss.field, 'r', sdss.rerun)
+            .unwrap();
+
+        let (image, wcs) = benchmark.load_image_with_wcs(&image_path).unwrap();
+        let width = image.dimensions.width;
+        let height = image.dimensions.height;
+
+        println!("\n=== WCS Info ===");
+        println!(
+            "CRPIX: ({:.1}, {:.1}), CRVAL: ({:.6}, {:.6})",
+            wcs.crpix1, wcs.crpix2, wcs.crval1, wcs.crval2
+        );
+        println!(
+            "CD matrix: [{:.2e}, {:.2e}; {:.2e}, {:.2e}]",
+            wcs.cd1_1, wcs.cd1_2, wcs.cd2_1, wcs.cd2_2
+        );
+        println!("Pixel scale: {:.3} arcsec/pix", wcs.pixel_scale_arcsec());
+
+        let bounds = wcs.image_bounds_sky(width, height);
+        println!(
+            "Image bounds: RA [{:.4}, {:.4}], Dec [{:.4}, {:.4}]",
+            bounds.ra_min, bounds.ra_max, bounds.dec_min, bounds.dec_max
+        );
+
+        let catalog_stars = benchmark
+            .catalog
+            .query_box(field.source, &bounds, field.mag_limit)
+            .unwrap();
+
+        println!("\n=== First few catalog stars (raw) ===");
+        for star in catalog_stars.iter().take(5) {
+            let (px, py) = wcs.sky_to_pixel(star.ra, star.dec);
+            println!(
+                "RA={:.6}, Dec={:.6}, mag={:.1} -> pixel ({:.1}, {:.1})",
+                star.ra, star.dec, star.mag, px, py
+            );
+        }
+
+        let ground_truth_with_mag =
+            catalog_to_ground_truth_with_mag(&catalog_stars, &wcs, width, height, &field);
+
+        let config = StarDetectionConfig {
+            expected_fwhm: field.expected_fwhm_pixels(0.396),
+            ..Default::default()
+        };
+        let result = find_stars(&image.pixels, width, height, &config);
+        let match_radius = config.expected_fwhm * 2.0;
+
+        println!("\n=== Bright Catalog Stars (mag < 18) ===");
+        println!("Match radius: {:.1} pixels", match_radius);
+
+        let bright_stars: Vec<_> = ground_truth_with_mag
+            .iter()
+            .filter(|(_, m)| *m < 18.0)
+            .collect();
+
+        for (gt, mag) in bright_stars.iter().take(10) {
+            // Find nearest detected star
+            let mut nearest_dist = f32::MAX;
+            let mut nearest_det: Option<&Star> = None;
+            for det in &result.stars {
+                let dx = det.x - gt.x;
+                let dy = det.y - gt.y;
+                let dist = (dx * dx + dy * dy).sqrt();
+                if dist < nearest_dist {
+                    nearest_dist = dist;
+                    nearest_det = Some(det);
+                }
+            }
+
+            print!("Catalog: ({:7.1}, {:7.1}) mag={:.1}", gt.x, gt.y, mag);
+
+            if let Some(det) = nearest_det {
+                let matched = nearest_dist < match_radius;
+                println!(
+                    " -> nearest: ({:7.1}, {:7.1}) dist={:5.1}px {}",
+                    det.x,
+                    det.y,
+                    nearest_dist,
+                    if matched { "MATCH" } else { "NO MATCH" }
+                );
+            } else {
+                println!(" -> no detections found");
+            }
+
+            // Check pixel value at catalog position
+            let px = gt.x as usize;
+            let py = gt.y as usize;
+            if px < width && py < height {
+                let idx = py * width + px;
+                println!(
+                    "    Pixel value: {:.1}, saturated flag: {}",
+                    image.pixels[idx], gt.is_saturated
+                );
+            }
+        }
+
+        println!("\nTotal bright stars in catalog: {}", bright_stars.len());
+        println!("Total detections: {}", result.stars.len());
+
+        // Compute systematic offset
+        let mut dx_sum = 0.0f32;
+        let mut dy_sum = 0.0f32;
+        let mut count = 0;
+
+        for (gt, _) in &bright_stars {
+            let mut nearest_dist = f32::MAX;
+            let mut nearest_dx = 0.0f32;
+            let mut nearest_dy = 0.0f32;
+            for det in &result.stars {
+                let dx = det.x - gt.x;
+                let dy = det.y - gt.y;
+                let dist = (dx * dx + dy * dy).sqrt();
+                if dist < nearest_dist {
+                    nearest_dist = dist;
+                    nearest_dx = dx;
+                    nearest_dy = dy;
+                }
+            }
+            if nearest_dist < 100.0 {
+                dx_sum += nearest_dx;
+                dy_sum += nearest_dy;
+                count += 1;
+            }
+        }
+
+        if count > 0 {
+            println!(
+                "\nSystematic offset (mean of {} stars): dX = {:.1}, dY = {:.1}",
+                count,
+                dx_sum / count as f32,
+                dy_sum / count as f32
+            );
+        }
     }
 }

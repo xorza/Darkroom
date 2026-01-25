@@ -11,6 +11,37 @@
 //! - **Pan-STARRS**: All-sky survey with deep imaging and accurate astrometry.
 //! - **Gaia DR3**: ESA mission with the most accurate stellar positions available.
 //!
+//! # Interpreting Results
+//!
+//! ## Key Metrics
+//!
+//! - **Completeness (detection rate)**: Fraction of catalog stars detected.
+//!   Expect 10-50% for magnitude-limited catalogs since many catalog stars
+//!   are fainter than the detector can reliably find.
+//!
+//! - **Centroid accuracy**: RMS error between detected and catalog positions.
+//!   Sub-pixel accuracy (< 0.5 px) indicates correct detection and centroiding.
+//!   This is the primary validation metric.
+//!
+//! - **Astrometric residuals**: Mean and RMS position offsets. Small mean offsets
+//!   (< 0.5 px) indicate correct WCS. Large systematic offsets suggest coordinate
+//!   system issues.
+//!
+//! ## Known Limitations
+//!
+//! - **SDSS catalog coverage**: The SDSS PhotoObj catalog is merged from multiple
+//!   observations. Some catalog objects may not appear in the specific frame being
+//!   tested, causing apparent "missed detections" for bright objects. Faint stars
+//!   near the detection limit typically match well.
+//!
+//! - **Extra detections**: The detector may find more stars than the catalog
+//!   contains. These are usually real stars fainter than the catalog magnitude
+//!   limit, not false positives.
+//!
+//! - **FWHM and flux errors**: Catalog ground truth uses estimated values
+//!   (field typical FWHM, flux from magnitude with assumed zeropoint). High
+//!   errors in these metrics are expected and not indicative of algorithm issues.
+//!
 //! # Usage
 //!
 //! ```rust,ignore
