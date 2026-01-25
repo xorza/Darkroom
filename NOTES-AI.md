@@ -352,8 +352,8 @@ CalibrationMasters // Container for master dark/flat/bias frames
 
 **Key types:**
 ```rust
-Star               // { x, y, flux, fwhm, eccentricity, snr, peak } - detected star with metrics
-StarDetectionConfig // Detection parameters (sigma, area, eccentricity, SNR, FWHM filtering)
+Star               // { x, y, flux, fwhm, eccentricity, snr, peak, sharpness } - detected star with metrics
+StarDetectionConfig // Detection parameters (sigma, area, eccentricity, SNR, FWHM, sharpness filtering)
 StarCandidate      // { centroid_x, centroid_y, area, bbox } - initial detection before refinement
 BackgroundMap      // { background, noise } - per-pixel background and noise estimates
 ```
@@ -361,9 +361,9 @@ BackgroundMap      // { background, noise } - per-pixel background and noise est
 **Algorithm pipeline:**
 1. **Median filter** - 3x3 median removes Bayer pattern artifacts from CFA sensors
 2. **Background estimation** - Tile-based sigma-clipped median with bilinear interpolation
-3. **Star detection** - Threshold (background + k×σ), connected components with union-find (path compression)
-4. **Centroid refinement** - Iterative Gaussian-weighted centroid (~0.05 pixel accuracy)
-5. **Quality filtering** - SNR, eccentricity, saturation, and FWHM outlier rejection
+3. **Star detection** - Threshold (background + k×σ), connected components with union-find (path compression), dilation radius 1 for minimal merging
+4. **Centroid refinement** - Iterative Gaussian-weighted centroid with adaptive stamp radius (~3.5× FWHM), ~0.05 pixel accuracy
+5. **Quality filtering** - SNR, eccentricity, saturation, sharpness (cosmic ray rejection), and FWHM outlier rejection
 6. **Duplicate removal** - Spatial deduplication (8 pixel separation)
 
 **FWHM outlier filtering:**
@@ -380,7 +380,20 @@ BackgroundMap      // { background, noise } - per-pixel background and noise est
 - `max_eccentricity: 0.6` - Maximum allowed elongation
 - `min_snr: 10.0` - Minimum signal-to-noise ratio
 - `max_fwhm_deviation: 3.0` - MAD units for FWHM outlier rejection
+- `max_sharpness: 0.7` - Maximum sharpness (cosmic ray rejection threshold)
+- `expected_fwhm: 4.0` - Expected FWHM for adaptive stamp radius calculation
 - `background_tile_size: 64` - Tile size for background estimation
+
+**Sharpness metric (cosmic ray rejection):**
+- `sharpness = peak_value / core_flux` where core_flux is sum of 3x3 region around peak
+- Cosmic rays: concentrated in single pixel → sharpness ~0.7-1.0
+- Real stars: PSF spreads flux across pixels → sharpness ~0.2-0.5
+- Stars with sharpness > max_sharpness are filtered as likely cosmic rays
+
+**Adaptive centroid window:**
+- Stamp radius computed from expected FWHM: `radius = clamp(ceil(fwhm * 1.75), 4, 15)`
+- Window size adapts to capture ~3.5× FWHM for >99% PSF flux
+- Improves accuracy for varied seeing conditions
 
 **Dependencies:** common, imaginarium, fitsio, rawloader, libraw-rs, anyhow, rayon, strum_macros
 
