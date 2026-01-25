@@ -518,10 +518,10 @@ registration/
 2. [x] 5.2 Log-polar rotation estimation (LogPolarCorrelator, FullPhaseCorrelator)
 3. [x] 5.3 Progressive RANSAC (estimate_progressive with weighted sampling)
 
-### Phase 5: Testing (2-3 days)
-1. [ ] 6.1 Numerical stability tests
+### Phase 5: Testing (2-3 days) - PARTIALLY COMPLETED
+1. [x] 6.1 Numerical stability tests (extreme scales, small coords, near-singular transforms)
 2. [ ] 6.2 Performance regression tests
-3. [ ] 6.3 Integration tests
+3. [x] 6.3 Integration tests (dithered exposures, mosaics, field rotation, atmospheric refraction, centroid noise, partial overlap, plate scales)
 
 ---
 

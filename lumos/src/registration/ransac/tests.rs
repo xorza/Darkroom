@@ -681,3 +681,284 @@ fn test_progressive_ransac_finds_solution_faster() {
     assert!(approx_eq(result.transform.rotation_angle(), angle, 0.05));
     assert!(approx_eq(result.transform.scale_factor(), scale, 0.05));
 }
+
+// ============================================================================
+// Numerical Stability Tests
+// ============================================================================
+
+#[test]
+fn test_ransac_extreme_scale_1e6() {
+    // Test with coordinates scaled by 1e6 (typical for high-res sensors)
+    let ref_points: Vec<(f64, f64)> = (0..20)
+        .map(|i| {
+            let x = (i % 5) as f64 * 1e6;
+            let y = (i / 5) as f64 * 1e6;
+            (x, y)
+        })
+        .collect();
+
+    let known = TransformMatrix::translation(5000.0, -3000.0);
+    let target_points: Vec<(f64, f64)> =
+        ref_points.iter().map(|&(x, y)| known.apply(x, y)).collect();
+
+    let config = RansacConfig {
+        seed: Some(42),
+        inlier_threshold: 100.0, // Scaled threshold
+        ..Default::default()
+    };
+    let estimator = RansacEstimator::new(config);
+    let result = estimator
+        .estimate(&ref_points, &target_points, TransformType::Translation)
+        .unwrap();
+
+    assert_eq!(result.inliers.len(), 20);
+    let (dx, dy) = result.transform.translation_components();
+    assert!(approx_eq(dx, 5000.0, 1.0));
+    assert!(approx_eq(dy, -3000.0, 1.0));
+}
+
+#[test]
+fn test_ransac_small_coordinates() {
+    // Test with small but reasonable coordinates
+    let ref_points: Vec<(f64, f64)> = (0..20)
+        .map(|i| {
+            let x = (i % 5) as f64 * 10.0;
+            let y = (i / 5) as f64 * 10.0;
+            (x, y)
+        })
+        .collect();
+
+    let known = TransformMatrix::translation(0.5, -0.3);
+    let target_points: Vec<(f64, f64)> =
+        ref_points.iter().map(|&(x, y)| known.apply(x, y)).collect();
+
+    let config = RansacConfig {
+        seed: Some(42),
+        inlier_threshold: 0.1,
+        ..Default::default()
+    };
+    let estimator = RansacEstimator::new(config);
+    let result = estimator
+        .estimate(&ref_points, &target_points, TransformType::Translation)
+        .unwrap();
+
+    assert_eq!(result.inliers.len(), 20);
+    let (dx, dy) = result.transform.translation_components();
+    assert!(approx_eq(dx, 0.5, 0.01));
+    assert!(approx_eq(dy, -0.3, 0.01));
+}
+
+#[test]
+fn test_ransac_mixed_scale_coordinates() {
+    // Test with points at very different scales (some near origin, some far)
+    let ref_points = vec![
+        (0.0, 0.0),
+        (1.0, 0.0),
+        (0.0, 1.0),
+        (1000.0, 1000.0),
+        (1001.0, 1000.0),
+        (1000.0, 1001.0),
+        (5000.0, 0.0),
+        (0.0, 5000.0),
+        (2500.0, 2500.0),
+        (100.0, 100.0),
+    ];
+
+    let known = TransformMatrix::translation(10.0, -5.0);
+    let target_points: Vec<(f64, f64)> =
+        ref_points.iter().map(|&(x, y)| known.apply(x, y)).collect();
+
+    let config = RansacConfig {
+        seed: Some(42),
+        inlier_threshold: 0.5,
+        ..Default::default()
+    };
+    let estimator = RansacEstimator::new(config);
+    let result = estimator
+        .estimate(&ref_points, &target_points, TransformType::Translation)
+        .unwrap();
+
+    assert_eq!(result.inliers.len(), 10);
+    let (dx, dy) = result.transform.translation_components();
+    assert!(approx_eq(dx, 10.0, 0.1));
+    assert!(approx_eq(dy, -5.0, 0.1));
+}
+
+#[test]
+fn test_homography_near_affine() {
+    // Homography with very small perspective components (nearly affine)
+    let ref_points = vec![
+        (0.0, 0.0),
+        (100.0, 0.0),
+        (100.0, 100.0),
+        (0.0, 100.0),
+        (50.0, 50.0),
+        (25.0, 75.0),
+        (75.0, 25.0),
+        (33.0, 66.0),
+    ];
+
+    // Homography with tiny perspective components
+    let known = TransformMatrix::homography([1.0, 0.1, 5.0, -0.05, 1.0, 3.0, 1e-8, 1e-8]);
+    let target_points: Vec<(f64, f64)> =
+        ref_points.iter().map(|&(x, y)| known.apply(x, y)).collect();
+
+    let config = RansacConfig {
+        seed: Some(42),
+        inlier_threshold: 0.5,
+        ..Default::default()
+    };
+    let estimator = RansacEstimator::new(config);
+    let result = estimator
+        .estimate(&ref_points, &target_points, TransformType::Homography)
+        .unwrap();
+
+    // Should still find all points as inliers
+    assert!(result.inliers.len() >= 7);
+
+    // Check transform accuracy
+    for i in result.inliers.iter() {
+        let (rx, ry) = ref_points[*i];
+        let (tx, ty) = target_points[*i];
+        let (px, py) = result.transform.apply(rx, ry);
+        let error = ((px - tx).powi(2) + (py - ty).powi(2)).sqrt();
+        assert!(error < 1.0, "High error {} at point {}", error, i);
+    }
+}
+
+#[test]
+fn test_similarity_very_small_rotation() {
+    // Very small rotation angle (< 0.1 degrees)
+    let ref_points: Vec<(f64, f64)> = (0..20)
+        .map(|i| {
+            let x = (i % 5) as f64 * 100.0;
+            let y = (i / 5) as f64 * 100.0;
+            (x, y)
+        })
+        .collect();
+
+    let tiny_angle = 0.001; // ~0.057 degrees
+    let known = TransformMatrix::similarity(5.0, 3.0, tiny_angle, 1.0);
+    let target_points: Vec<(f64, f64)> =
+        ref_points.iter().map(|&(x, y)| known.apply(x, y)).collect();
+
+    let config = RansacConfig {
+        seed: Some(42),
+        inlier_threshold: 0.5,
+        ..Default::default()
+    };
+    let estimator = RansacEstimator::new(config);
+    let result = estimator
+        .estimate(&ref_points, &target_points, TransformType::Similarity)
+        .unwrap();
+
+    assert_eq!(result.inliers.len(), 20);
+    // Rotation angle should be recovered accurately
+    assert!(
+        (result.transform.rotation_angle() - tiny_angle).abs() < 0.0005,
+        "Expected angle ~{}, got {}",
+        tiny_angle,
+        result.transform.rotation_angle()
+    );
+}
+
+#[test]
+fn test_similarity_near_unity_scale() {
+    // Scale very close to 1.0 (typical for dithered exposures)
+    let ref_points: Vec<(f64, f64)> = (0..20)
+        .map(|i| {
+            let x = 100.0 + (i % 5) as f64 * 100.0;
+            let y = 100.0 + (i / 5) as f64 * 100.0;
+            (x, y)
+        })
+        .collect();
+
+    let tiny_scale = 1.0001; // 0.01% scale difference
+    let known = TransformMatrix::similarity(2.0, -1.0, 0.0, tiny_scale);
+    let target_points: Vec<(f64, f64)> =
+        ref_points.iter().map(|&(x, y)| known.apply(x, y)).collect();
+
+    let config = RansacConfig {
+        seed: Some(42),
+        inlier_threshold: 0.5,
+        ..Default::default()
+    };
+    let estimator = RansacEstimator::new(config);
+    let result = estimator
+        .estimate(&ref_points, &target_points, TransformType::Similarity)
+        .unwrap();
+
+    assert_eq!(result.inliers.len(), 20);
+    assert!(
+        (result.transform.scale_factor() - tiny_scale).abs() < 0.0001,
+        "Expected scale ~{}, got {}",
+        tiny_scale,
+        result.transform.scale_factor()
+    );
+}
+
+#[test]
+fn test_affine_with_shear() {
+    // Affine transform with significant shear
+    let ref_points: Vec<(f64, f64)> = (0..20)
+        .map(|i| {
+            let x = (i % 5) as f64 * 50.0;
+            let y = (i / 5) as f64 * 50.0;
+            (x, y)
+        })
+        .collect();
+
+    // Shear: x' = x + 0.3*y, y' = y + 0.1*x
+    let known = TransformMatrix::affine([1.0, 0.3, 10.0, 0.1, 1.0, -5.0]);
+    let target_points: Vec<(f64, f64)> =
+        ref_points.iter().map(|&(x, y)| known.apply(x, y)).collect();
+
+    let config = RansacConfig {
+        seed: Some(42),
+        inlier_threshold: 0.5,
+        ..Default::default()
+    };
+    let estimator = RansacEstimator::new(config);
+    let result = estimator
+        .estimate(&ref_points, &target_points, TransformType::Affine)
+        .unwrap();
+
+    assert_eq!(result.inliers.len(), 20);
+
+    // Check all points transform correctly
+    for i in 0..ref_points.len() {
+        let (rx, ry) = ref_points[i];
+        let (tx, ty) = target_points[i];
+        let (px, py) = result.transform.apply(rx, ry);
+        let error = ((px - tx).powi(2) + (py - ty).powi(2)).sqrt();
+        assert!(error < 0.1, "High error {} at point {}", error, i);
+    }
+}
+
+#[test]
+fn test_normalize_points_extreme_values() {
+    // Test normalization with extreme coordinate values
+    let points = vec![
+        (1e10, 1e10),
+        (1e10 + 1.0, 1e10),
+        (1e10, 1e10 + 1.0),
+        (1e10 + 1.0, 1e10 + 1.0),
+    ];
+
+    let (normalized, transform) = normalize_points(&points);
+
+    // Check centroid is at origin
+    let (cx, cy) = centroid(&normalized);
+    assert!(cx.abs() < 1e-10, "Centroid x not at origin: {}", cx);
+    assert!(cy.abs() < 1e-10, "Centroid y not at origin: {}", cy);
+
+    // Transform should be invertible (denormalization should recover original)
+    let inv = transform.inverse();
+    for (orig, norm) in points.iter().zip(normalized.iter()) {
+        let (rx, ry) = inv.apply(norm.0, norm.1);
+        let dx: f64 = rx - orig.0;
+        let dy: f64 = ry - orig.1;
+        assert!(dx.abs() < 1e-5, "X mismatch: {} vs {}", rx, orig.0);
+        assert!(dy.abs() < 1e-5, "Y mismatch: {} vs {}", ry, orig.1);
+    }
+}

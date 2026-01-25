@@ -792,3 +792,228 @@ fn test_match_brightness_weighted_selection() {
         matches.len()
     );
 }
+
+// ============================================================================
+// Numerical Stability Tests
+// ============================================================================
+
+/// Test triangle formation with very flat triangles
+#[test]
+fn test_triangle_very_flat() {
+    // Nearly collinear points - should reject very flat triangles
+    // Use even smaller offset to ensure rejection
+    let positions = vec![
+        (0.0, 0.0),
+        (100.0, 0.0),
+        (50.0, 1e-10), // Extremely small offset - nearly collinear
+    ];
+
+    let tri = Triangle::from_positions([0, 1, 2], [positions[0], positions[1], positions[2]]);
+
+    // Very flat triangle should be rejected (area too small)
+    assert!(
+        tri.is_none(),
+        "Should reject extremely flat triangle (height ~0)"
+    );
+}
+
+/// Test triangle formation with nearly degenerate points
+#[test]
+fn test_triangle_near_collinear() {
+    // Points that are almost but not quite collinear
+    let positions = vec![
+        (0.0, 0.0),
+        (100.0, 0.0),
+        (50.0, 1.0), // Small but valid offset
+    ];
+
+    let tri = Triangle::from_positions([0, 1, 2], [positions[0], positions[1], positions[2]]);
+
+    // This should form a valid (though thin) triangle
+    assert!(tri.is_some(), "Should accept thin but valid triangle");
+
+    // Check area is computed reasonably
+    let tri = tri.unwrap();
+    // Area should be approximately 50 (base=100, height=1, area=50)
+    let expected_area = 50.0;
+    // Heron's formula: s = (a+b+c)/2, area = sqrt(s*(s-a)*(s-b)*(s-c))
+    let a = tri.sides[0];
+    let b = tri.sides[1];
+    let c = tri.sides[2];
+    let s = (a + b + c) / 2.0;
+    let area = (s * (s - a) * (s - b) * (s - c)).sqrt();
+    assert!(
+        (area - expected_area).abs() < 1.0,
+        "Expected area ~{}, got {}",
+        expected_area,
+        area
+    );
+}
+
+/// Test matching with large coordinate values
+#[test]
+fn test_match_large_coordinates() {
+    // Coordinates typical of high-resolution sensors (4K+)
+    let base_offset = 5000.0;
+    let ref_positions: Vec<(f64, f64)> = (0..25)
+        .map(|i| {
+            let x = base_offset + (i % 5) as f64 * 100.0;
+            let y = base_offset + (i / 5) as f64 * 100.0;
+            (x, y)
+        })
+        .collect();
+
+    // Apply small translation
+    let target_positions: Vec<(f64, f64)> = ref_positions
+        .iter()
+        .map(|(x, y)| (x + 10.0, y - 5.0))
+        .collect();
+
+    let config = TriangleMatchConfig::default();
+    let matches = match_stars_triangles_kdtree(&ref_positions, &target_positions, &config);
+
+    assert!(
+        matches.len() >= 20,
+        "Large coordinate matching found only {} matches",
+        matches.len()
+    );
+
+    // Verify all matches are correct
+    for m in &matches {
+        assert_eq!(
+            m.ref_idx, m.target_idx,
+            "Incorrect match at large coordinates: ref {} != target {}",
+            m.ref_idx, m.target_idx
+        );
+    }
+}
+
+/// Test matching with small but reasonable coordinate values
+#[test]
+fn test_match_small_coordinates() {
+    // Small but non-trivial coordinates (scaled down star field)
+    let ref_positions: Vec<(f64, f64)> = (0..25)
+        .map(|i| {
+            let x = (i % 5) as f64 * 10.0;
+            let y = (i / 5) as f64 * 10.0;
+            (x, y)
+        })
+        .collect();
+
+    // Apply translation
+    let target_positions: Vec<(f64, f64)> = ref_positions
+        .iter()
+        .map(|(x, y)| (x + 1.0, y - 0.5))
+        .collect();
+
+    let config = TriangleMatchConfig::default();
+    let matches = match_stars_triangles_kdtree(&ref_positions, &target_positions, &config);
+
+    assert!(
+        matches.len() >= 15,
+        "Small coordinate matching found only {} matches",
+        matches.len()
+    );
+}
+
+/// Test triangle similarity with very similar but different triangles
+#[test]
+fn test_triangle_similarity_threshold_boundary() {
+    // Create an equilateral triangle: sides all equal, ratios = (1.0, 1.0)
+    let tri1 = Triangle::from_positions([0, 1, 2], [(0.0, 0.0), (10.0, 0.0), (5.0, 8.66)]).unwrap();
+
+    // Create a similar but slightly distorted triangle
+    // Ratios are sides[0]/sides[2] and sides[1]/sides[2]
+    // Distort to change ratios by ~0.05
+    let tri2 = Triangle::from_positions([0, 1, 2], [(0.0, 0.0), (10.0, 0.0), (4.5, 8.0)]).unwrap();
+
+    // Print ratios for debugging
+    let dr0 = (tri1.ratios.0 - tri2.ratios.0).abs();
+    let dr1 = (tri1.ratios.1 - tri2.ratios.1).abs();
+
+    // With large tolerance, these should be similar
+    assert!(
+        tri1.is_similar(&tri2, 0.15),
+        "Triangles should be similar with 15% tolerance (dr0={}, dr1={})",
+        dr0,
+        dr1
+    );
+
+    // With tight tolerance, these should NOT be similar
+    assert!(
+        !tri1.is_similar(&tri2, 0.01),
+        "Distorted triangles should not match 1% tolerance (dr0={}, dr1={})",
+        dr0,
+        dr1
+    );
+}
+
+/// Test matching with extreme scale difference between reference and target
+#[test]
+fn test_match_large_scale_difference() {
+    // Reference stars at normal scale
+    let ref_positions: Vec<(f64, f64)> = (0..20)
+        .map(|i| {
+            let x = (i % 5) as f64 * 50.0;
+            let y = (i / 5) as f64 * 50.0;
+            (x, y)
+        })
+        .collect();
+
+    // Target stars scaled by 2x (large scale difference)
+    let scale = 2.0;
+    let target_positions: Vec<(f64, f64)> = ref_positions
+        .iter()
+        .map(|(x, y)| (x * scale, y * scale))
+        .collect();
+
+    let config = TriangleMatchConfig::default();
+    let matches = match_stars_triangles_kdtree(&ref_positions, &target_positions, &config);
+
+    // Triangle matching is scale-invariant, should still find matches
+    assert!(
+        matches.len() >= 15,
+        "Scale-invariant matching with 2x scale found only {} matches",
+        matches.len()
+    );
+}
+
+/// Test matching with 180 degree rotation
+#[test]
+fn test_match_180_degree_rotation() {
+    let ref_positions: Vec<(f64, f64)> = (0..16)
+        .map(|i| {
+            let x = 100.0 + (i % 4) as f64 * 50.0;
+            let y = 100.0 + (i / 4) as f64 * 50.0;
+            (x, y)
+        })
+        .collect();
+
+    // Center of the pattern
+    let cx = 175.0;
+    let cy = 175.0;
+
+    // 180 degree rotation around center
+    let target_positions: Vec<(f64, f64)> = ref_positions
+        .iter()
+        .map(|(x, y)| {
+            let dx = x - cx;
+            let dy = y - cy;
+            (cx - dx, cy - dy) // 180 degree rotation
+        })
+        .collect();
+
+    let config = TriangleMatchConfig {
+        check_orientation: false, // Must disable for 180 degree rotation
+        ..Default::default()
+    };
+
+    let matches = match_stars_triangles_kdtree(&ref_positions, &target_positions, &config);
+
+    // Should still find matches despite 180 degree rotation
+    assert!(
+        matches.len() >= 10,
+        "180 degree rotation matching found only {} matches",
+        matches.len()
+    );
+}
