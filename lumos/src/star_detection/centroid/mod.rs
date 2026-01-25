@@ -28,7 +28,7 @@ use super::background::BackgroundMap;
 use super::constants::{self, CENTROID_CONVERGENCE_THRESHOLD, MAX_CENTROID_ITERATIONS};
 use super::cosmic_ray::compute_laplacian_snr;
 use super::detection::StarCandidate;
-use super::{Star, StarDetectionConfig};
+use super::{CentroidMethod, Star, StarDetectionConfig};
 
 /// Maximum iterations for centroid refinement.
 pub(crate) const MAX_ITERATIONS: usize = MAX_CENTROID_ITERATIONS;
@@ -69,12 +69,10 @@ pub(crate) fn is_valid_stamp_position(
 ///
 /// # Algorithm
 ///
-/// Uses iterative weighted centroid:
-/// 1. Start with peak pixel as initial guess
-/// 2. Extract stamp centered on current position (size adapts to expected FWHM)
-/// 3. Compute weighted centroid with Gaussian weights
-/// 4. Repeat until convergence (~0.05 pixel accuracy)
-/// 5. Compute quality metrics (FWHM, SNR, eccentricity)
+/// The centroid method is selected via `config.centroid_method`:
+/// - `WeightedMoments`: Iterative weighted centroid (~0.05 pixel accuracy, fast)
+/// - `GaussianFit`: 2D Gaussian fitting (~0.01 pixel accuracy, slower)
+/// - `MoffatFit`: 2D Moffat fitting (~0.01 pixel accuracy, best for atmospheric seeing)
 pub fn compute_centroid(
     pixels: &[f32],
     width: usize,
@@ -90,7 +88,8 @@ pub fn compute_centroid(
     let mut cx = candidate.peak_x as f32;
     let mut cy = candidate.peak_y as f32;
 
-    // Iterative centroid refinement
+    // First pass: always use weighted moments for initial refinement
+    // This gives a good starting point for fitting methods
     for _ in 0..MAX_ITERATIONS {
         let (new_cx, new_cy) =
             refine_centroid(pixels, width, height, background, cx, cy, stamp_radius)?;
@@ -102,6 +101,60 @@ pub fn compute_centroid(
 
         if dx * dx + dy * dy < CONVERGENCE_THRESHOLD_SQ {
             break;
+        }
+    }
+
+    // Get local background for fitting
+    let icx = cx.round() as isize;
+    let icy = cy.round() as isize;
+    let idx = icy as usize * width + icx as usize;
+    let local_bg = background.background[idx];
+    let local_noise = background.noise[idx];
+
+    // Refine with profile fitting if requested
+    match config.centroid_method {
+        CentroidMethod::GaussianFit => {
+            let fit_config = GaussianFitConfig::default();
+            if let Some(result) = fit_gaussian_2d(
+                pixels,
+                width,
+                height,
+                cx,
+                cy,
+                stamp_radius,
+                local_bg,
+                &fit_config,
+            )
+            .filter(|r| r.converged)
+            {
+                cx = result.x;
+                cy = result.y;
+            }
+        }
+        CentroidMethod::MoffatFit { beta } => {
+            let fit_config = MoffatFitConfig {
+                fit_beta: false,
+                fixed_beta: beta,
+                ..MoffatFitConfig::default()
+            };
+            if let Some(result) = fit_moffat_2d(
+                pixels,
+                width,
+                height,
+                cx,
+                cy,
+                stamp_radius,
+                local_bg,
+                &fit_config,
+            )
+            .filter(|r| r.converged)
+            {
+                cx = result.x;
+                cy = result.y;
+            }
+        }
+        CentroidMethod::WeightedMoments => {
+            // Already computed above
         }
     }
 
@@ -119,11 +172,6 @@ pub fn compute_centroid(
     )?;
 
     // Compute L.A.Cosmic Laplacian SNR for cosmic ray detection
-    let icx = cx.round() as isize;
-    let icy = cy.round() as isize;
-    let idx = icy as usize * width + icx as usize;
-    let local_bg = background.background[idx];
-    let local_noise = background.noise[idx];
     let laplacian_snr_value = compute_laplacian_snr(
         pixels,
         width,

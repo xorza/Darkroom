@@ -135,11 +135,19 @@ pub fn dilate_mask(mask: &[bool], width: usize, height: usize, radius: usize) ->
 }
 
 /// Create binary mask of pixels above threshold.
+///
+/// Uses SIMD acceleration on supported platforms for large images.
 pub(crate) fn create_threshold_mask(
     pixels: &[f32],
     background: &BackgroundMap,
     sigma_threshold: f32,
 ) -> Vec<bool> {
+    // Use SIMD for larger images
+    if pixels.len() >= 64 {
+        return simd::create_threshold_mask_simd(pixels, background, sigma_threshold);
+    }
+
+    // Scalar fallback for small images
     pixels
         .iter()
         .zip(background.background.iter())

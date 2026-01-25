@@ -6,6 +6,8 @@
 //!
 //! Reference: van Dokkum 2001, PASP 113, 1420
 
+use super::simd;
+
 /// Compute the Laplacian of an image using a 3x3 kernel.
 ///
 /// Uses the standard discrete Laplacian kernel:
@@ -16,7 +18,19 @@
 /// ```
 ///
 /// Edge pixels are handled by clamping to image bounds.
+/// Uses SIMD acceleration for interior pixels on supported platforms.
 pub fn compute_laplacian(pixels: &[f32], width: usize, height: usize) -> Vec<f32> {
+    // Use SIMD-accelerated version for larger images
+    if width >= 10 && height >= 3 {
+        return simd::compute_laplacian_simd(pixels, width, height);
+    }
+
+    // Scalar fallback for small images
+    compute_laplacian_scalar(pixels, width, height)
+}
+
+/// Scalar implementation of Laplacian computation.
+fn compute_laplacian_scalar(pixels: &[f32], width: usize, height: usize) -> Vec<f32> {
     let mut laplacian = vec![0.0f32; pixels.len()];
 
     for y in 0..height {

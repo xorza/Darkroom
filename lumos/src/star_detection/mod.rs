@@ -66,6 +66,32 @@ pub use centroid::{
     MoffatFitConfig, MoffatFitResult, alpha_beta_to_fwhm, fit_moffat_2d, fwhm_beta_to_alpha,
 };
 
+/// Method for computing sub-pixel centroids.
+///
+/// Different methods offer tradeoffs between accuracy and speed.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub enum CentroidMethod {
+    /// Iterative weighted centroid using Gaussian weights.
+    /// Fast (~0.05 pixel accuracy). This is the default.
+    #[default]
+    WeightedMoments,
+
+    /// 2D Gaussian profile fitting via Levenberg-Marquardt optimization.
+    /// High precision (~0.01 pixel accuracy) but ~8x slower than WeightedMoments.
+    /// Best for well-sampled, symmetric PSFs.
+    GaussianFit,
+
+    /// 2D Moffat profile fitting with configurable beta parameter.
+    /// High precision (~0.01 pixel accuracy), similar speed to GaussianFit.
+    /// Better model for atmospheric seeing (extended wings).
+    /// Beta parameter controls wing slope: 2.5 typical for ground-based, 4.5 for space-based.
+    MoffatFit {
+        /// Power law slope controlling wing falloff. Typical range: 2.0-5.0.
+        /// Lower values = more extended wings.
+        beta: f32,
+    },
+}
+
 /// A detected star with sub-pixel position and quality metrics.
 #[derive(Debug, Clone, Copy)]
 pub struct Star {
@@ -302,6 +328,15 @@ pub struct StarDetectionConfig {
     /// When provided, defective pixels are replaced with local median before detection,
     /// and stars with centroids near defects are flagged.
     pub defect_map: Option<DefectMap>,
+    /// Number of iterative background estimation passes (0 = single pass).
+    /// When > 0, the background is re-estimated after masking detected objects,
+    /// which improves accuracy in crowded fields. SExtractor-style algorithm.
+    /// Typical value: 1-2 for crowded fields, 0 for sparse fields.
+    pub iterative_background_passes: usize,
+    /// Method for computing sub-pixel centroids.
+    /// WeightedMoments (default) is fast (~0.05 pixel accuracy).
+    /// GaussianFit and MoffatFit provide higher precision (~0.01 pixel) but are slower.
+    pub centroid_method: CentroidMethod,
 }
 
 impl Default for StarDetectionConfig {
@@ -328,6 +363,8 @@ impl Default for StarDetectionConfig {
             gain: None,   // Use simplified SNR formula by default
             read_noise: None,
             defect_map: None,
+            iterative_background_passes: 0, // Single pass by default (fastest)
+            centroid_method: CentroidMethod::WeightedMoments,
         }
     }
 }
@@ -423,7 +460,24 @@ pub fn find_stars(
     };
 
     // Step 1: Estimate background
-    let background = estimate_background(&smoothed, width, height, config.background_tile_size);
+    let background = if config.iterative_background_passes > 0 {
+        // Use iterative background estimation for crowded fields
+        let iter_config = IterativeBackgroundConfig {
+            iterations: config.iterative_background_passes,
+            detection_sigma: config.detection_sigma,
+            ..IterativeBackgroundConfig::default()
+        };
+        estimate_background_iterative(
+            &smoothed,
+            width,
+            height,
+            config.background_tile_size,
+            &iter_config,
+        )
+    } else {
+        // Single-pass background estimation (faster)
+        estimate_background(&smoothed, width, height, config.background_tile_size)
+    };
 
     // Collect background statistics
     let bg_min = background

@@ -367,9 +367,10 @@ CalibrationMasters // Container for master dark/flat/bias frames
 **Key types:**
 ```rust
 Star               // { x, y, flux, fwhm, eccentricity, snr, peak, sharpness } - detected star with metrics
-StarDetectionConfig // Detection parameters (sigma, area, eccentricity, SNR, FWHM, sharpness filtering)
+StarDetectionConfig // Detection parameters (sigma, area, eccentricity, SNR, FWHM, sharpness, centroid method)
 StarCandidate      // { centroid_x, centroid_y, area, bbox } - initial detection before refinement
 BackgroundMap      // { background, noise } - per-pixel background and noise estimates
+CentroidMethod     // WeightedMoments | GaussianFit | MoffatFit { beta } - sub-pixel centroid algorithm selection
 ```
 
 **Algorithm pipeline:**
@@ -377,7 +378,7 @@ BackgroundMap      // { background, noise } - per-pixel background and noise est
 2. **Background estimation** - Tile-based sigma-clipped median with tile grid median filter and bilinear interpolation
 3. **Star detection** - Threshold (background + k×σ), connected components with union-find (path compression), dilation radius 1 for minimal merging
 4. **Deblending** - Multi-peak components split into separate candidates using local maxima detection and nearest-peak pixel assignment
-5. **Centroid refinement** - Iterative Gaussian-weighted centroid with adaptive stamp radius (~3.5× FWHM), ~0.05 pixel accuracy
+5. **Centroid refinement** - Configurable method: WeightedMoments (~0.05 pixel), GaussianFit (~0.01 pixel), or MoffatFit (~0.01 pixel, best for atmospheric seeing)
 6. **Quality filtering** - SNR, eccentricity, saturation, sharpness (cosmic ray rejection), and FWHM outlier rejection
 7. **Duplicate removal** - Spatial deduplication (8 pixel separation)
 
@@ -404,6 +405,8 @@ BackgroundMap      // { background, noise } - per-pixel background and noise est
 - `max_sharpness: 0.7` - Maximum sharpness (cosmic ray rejection threshold)
 - `expected_fwhm: 4.0` - Expected FWHM for adaptive stamp radius calculation
 - `background_tile_size: 64` - Tile size for background estimation
+- `iterative_background_passes: 0` - SExtractor-style iterative background (0 = single pass)
+- `centroid_method: WeightedMoments` - Centroid algorithm (WeightedMoments/GaussianFit/MoffatFit)
 
 **Sharpness metric (cosmic ray rejection):**
 - `sharpness = peak_value / core_flux` where core_flux is sum of 3x3 region around peak
@@ -415,6 +418,15 @@ BackgroundMap      // { background, noise } - per-pixel background and noise est
 - Stamp radius computed from expected FWHM: `radius = clamp(ceil(fwhm * 1.75), 4, 15)`
 - Window size adapts to capture ~3.5× FWHM for >99% PSF flux
 - Improves accuracy for varied seeing conditions
+
+**Centroid methods:**
+- `WeightedMoments` (default) - Iterative Gaussian-weighted centroid, ~0.05 pixel accuracy, fast
+- `GaussianFit` - 2D Gaussian Levenberg-Marquardt fitting, ~0.01 pixel accuracy, ~8x slower
+- `MoffatFit { beta }` - 2D Moffat profile fitting with configurable beta (wing slope)
+  - Beta 2.5 typical for ground-based seeing, 4.5 for space-based
+  - Better model for atmospheric PSF with extended wings
+  - Similar accuracy to GaussianFit (~0.01 pixel)
+- All methods use weighted moments first for initial position, then refine with fitting if requested
 
 **Deblending (star pair separation):**
 - Finds local maxima within each connected component
