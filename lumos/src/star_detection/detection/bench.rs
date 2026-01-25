@@ -159,7 +159,12 @@ pub fn benchmarks(c: &mut Criterion) {
     let mut cc_group = c.benchmark_group("connected_components");
     cc_group.sample_size(30);
 
-    for &(width, height, num_stars) in &[(512, 512, 50), (1024, 1024, 200), (2048, 2048, 800)] {
+    for &(width, height, num_stars) in &[
+        (512, 512, 50),
+        (1024, 1024, 200),
+        (2048, 2048, 800),
+        (4096, 4096, 3200),
+    ] {
         let pixels = generate_test_image(width, height, num_stars);
         let background = create_background_map(width, height);
         let mask = create_threshold_mask(&pixels, &background, 3.0);

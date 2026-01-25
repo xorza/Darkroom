@@ -159,7 +159,13 @@ pub(crate) fn create_threshold_mask(
         .collect()
 }
 
-/// Connected component labeling using union-find.
+/// Connected component labeling using union-find with parallel second pass.
+///
+/// Uses a two-pass algorithm:
+/// 1. First pass: Sequential scan assigning provisional labels with union-find
+/// 2. Second pass: Parallel label flattening using precomputed root mapping
+///
+/// For images >1M pixels, the second pass is parallelized using rayon.
 pub(crate) fn connected_components(
     mask: &[bool],
     width: usize,
@@ -170,64 +176,97 @@ pub(crate) fn connected_components(
     let mut next_label = 1u32;
 
     // First pass: assign provisional labels
+    // This must be sequential due to union-find dependencies
     for y in 0..height {
+        let row_start = y * width;
         for x in 0..width {
-            let idx = y * width + x;
+            let idx = row_start + x;
             if !mask[idx] {
                 continue;
             }
 
-            // Use fixed-size array instead of Vec to avoid allocation in hot loop
-            let mut neighbors = [0u32; 2];
-            let mut neighbor_count = 0;
-
-            // Check left neighbor
-            if x > 0 && mask[idx - 1] {
-                neighbors[neighbor_count] = labels[idx - 1];
-                neighbor_count += 1;
-            }
-
-            // Check top neighbor
-            if y > 0 && mask[idx - width] {
-                neighbors[neighbor_count] = labels[idx - width];
-                neighbor_count += 1;
-            }
-
-            if neighbor_count == 0 {
-                // New label
-                labels[idx] = next_label;
-                parent.push(next_label); // parent[label-1] = label (self-reference)
-                next_label += 1;
+            // Check neighbors: left and top only (for forward scan)
+            let left_label = if x > 0 && mask[idx - 1] {
+                labels[idx - 1]
             } else {
-                // Use minimum neighbor label
-                let min_label = neighbors[..neighbor_count].iter().copied().min().unwrap();
-                labels[idx] = min_label;
+                0
+            };
 
-                // Union all neighbor labels
-                for &label in &neighbors[..neighbor_count] {
-                    union(&mut parent, min_label, label);
+            let top_label = if y > 0 && mask[idx - width] {
+                labels[idx - width]
+            } else {
+                0
+            };
+
+            match (left_label, top_label) {
+                (0, 0) => {
+                    // New component
+                    labels[idx] = next_label;
+                    parent.push(next_label);
+                    next_label += 1;
+                }
+                (l, 0) => {
+                    // Only left neighbor
+                    labels[idx] = l;
+                }
+                (0, t) => {
+                    // Only top neighbor
+                    labels[idx] = t;
+                }
+                (l, t) => {
+                    // Both neighbors - use minimum and union
+                    let min_label = l.min(t);
+                    labels[idx] = min_label;
+                    if l != t {
+                        union(&mut parent, l, t);
+                    }
                 }
             }
         }
     }
 
-    // Second pass: flatten labels using path compression
-    let mut label_map = vec![0u32; parent.len() + 1];
+    if parent.is_empty() {
+        return (labels, 0);
+    }
+
+    // Flatten all roots first (sequential, but small - just parent.len() elements)
+    let mut root_to_final = vec![0u32; parent.len() + 1];
     let mut num_labels = 0u32;
+    for label in 1..=parent.len() as u32 {
+        let root = find(&mut parent, label);
+        if root_to_final[root as usize] == 0 {
+            num_labels += 1;
+            root_to_final[root as usize] = num_labels;
+        }
+    }
 
-    for y in 0..height {
-        for x in 0..width {
-            let idx = y * width + x;
-            if labels[idx] == 0 {
-                continue;
+    // Create direct mapping from provisional label to final label
+    let label_map: Vec<u32> = (0..=parent.len() as u32)
+        .map(|label| {
+            if label == 0 {
+                0
+            } else {
+                let root = find(&mut parent, label);
+                root_to_final[root as usize]
             }
+        })
+        .collect();
 
-            let root = find(&mut parent, labels[idx]);
-            if label_map[root as usize] == 0 {
-                num_labels += 1;
-                label_map[root as usize] = num_labels;
+    // Second pass: apply label mapping
+    // Parallelize for large images (>4M pixels, i.e., 2K×2K and larger)
+    let pixel_count = width * height;
+    if pixel_count > 4_000_000 {
+        use rayon::prelude::*;
+        labels.par_iter_mut().for_each(|label| {
+            if *label != 0 {
+                *label = label_map[*label as usize];
             }
-            labels[idx] = label_map[root as usize];
+        });
+    } else {
+        for label in labels.iter_mut() {
+            if *label != 0 {
+                *label = label_map[*label as usize];
+            }
         }
     }
 

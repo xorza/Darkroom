@@ -401,9 +401,11 @@ pub(crate) fn compute_metrics(
     let mut peak_value = 0.0f32;
 
     // For roundness calculation: marginal sums
+    // Use fixed-size arrays to avoid allocation (max stamp_radius is 15, so max size is 31)
     let stamp_size = 2 * stamp_radius + 1;
-    let mut marginal_x = vec![0.0f32; stamp_size];
-    let mut marginal_y = vec![0.0f32; stamp_size];
+    const MAX_STAMP_SIZE: usize = 2 * super::constants::MAX_STAMP_RADIUS + 1; // 31
+    let mut marginal_x = [0.0f32; MAX_STAMP_SIZE];
+    let mut marginal_y = [0.0f32; MAX_STAMP_SIZE];
 
     let stamp_radius_i32 = stamp_radius as i32;
     let outer_ring_threshold = (stamp_radius_i32 - 2) * (stamp_radius_i32 - 2);
@@ -533,8 +535,8 @@ pub(crate) fn compute_metrics(
 
     // Compute roundness metrics (DAOFIND style)
     let (roundness1, roundness2) = compute_roundness(
-        &marginal_x,
-        &marginal_y,
+        &marginal_x[..stamp_size],
+        &marginal_y[..stamp_size],
         stamp_radius,
         pixels,
         width,
