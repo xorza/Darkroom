@@ -124,6 +124,16 @@ pub struct StarDetectionConfig {
     /// (>0.7) because most flux is in a single pixel. Real stars spread flux across
     /// multiple pixels due to PSF, giving sharpness 0.2-0.5. Set to 1.0 to disable.
     pub max_sharpness: f32,
+    /// Minimum separation between peaks for deblending star pairs (in pixels).
+    /// Peaks closer than this are merged. Set to 0 to disable deblending.
+    pub deblend_min_separation: usize,
+    /// Minimum peak prominence for deblending (0.0-1.0).
+    /// Secondary peaks must be at least this fraction of the primary peak to be
+    /// considered for deblending. Prevents noise spikes from causing false splits.
+    pub deblend_min_prominence: f32,
+    /// Minimum separation between stars for duplicate removal (in pixels).
+    /// Stars closer than this are considered duplicates; only brightest is kept.
+    pub duplicate_min_separation: f32,
 }
 
 impl Default for StarDetectionConfig {
@@ -137,15 +147,68 @@ impl Default for StarDetectionConfig {
             min_snr: 10.0,
             background_tile_size: 64,
             max_fwhm_deviation: 3.0,
-            expected_fwhm: 4.0, // Typical value for well-sampled images
-            max_sharpness: 0.7, // Reject cosmic rays (sharpness > 0.7)
+            expected_fwhm: 4.0,
+            max_sharpness: 0.7,
+            deblend_min_separation: 3,
+            deblend_min_prominence: 0.3,
+            duplicate_min_separation: 8.0,
         }
     }
 }
 
+/// Result of star detection with diagnostics.
+#[derive(Debug, Clone)]
+pub struct StarDetectionResult {
+    /// Detected stars sorted by flux (brightest first).
+    pub stars: Vec<Star>,
+    /// Diagnostic information from the detection pipeline.
+    pub diagnostics: StarDetectionDiagnostics,
+}
+
+/// Diagnostic information from star detection.
+///
+/// Contains statistics and counts from each stage of the detection pipeline
+/// for debugging and tuning purposes.
+#[derive(Debug, Clone, Default)]
+pub struct StarDetectionDiagnostics {
+    /// Number of pixels above detection threshold.
+    pub pixels_above_threshold: usize,
+    /// Number of connected components found.
+    pub connected_components: usize,
+    /// Number of candidates after size/edge filtering.
+    pub candidates_after_filtering: usize,
+    /// Number of candidates that were deblended into multiple stars.
+    pub deblended_components: usize,
+    /// Number of stars after centroid computation (before quality filtering).
+    pub stars_after_centroid: usize,
+    /// Number of stars rejected for low SNR.
+    pub rejected_low_snr: usize,
+    /// Number of stars rejected for high eccentricity.
+    pub rejected_high_eccentricity: usize,
+    /// Number of stars rejected as cosmic rays (high sharpness).
+    pub rejected_cosmic_rays: usize,
+    /// Number of stars rejected as saturated.
+    pub rejected_saturated: usize,
+    /// Number of stars rejected for abnormal FWHM.
+    pub rejected_fwhm_outliers: usize,
+    /// Number of duplicate detections removed.
+    pub rejected_duplicates: usize,
+    /// Final number of stars returned.
+    pub final_star_count: usize,
+    /// Median FWHM of detected stars (pixels).
+    pub median_fwhm: f32,
+    /// Median SNR of detected stars.
+    pub median_snr: f32,
+    /// Background level statistics (min, max, mean).
+    pub background_stats: (f32, f32, f32),
+    /// Noise level statistics (min, max, mean).
+    pub noise_stats: (f32, f32, f32),
+}
+
 /// Detect stars in an image.
 ///
-/// Returns a list of detected stars sorted by flux (brightest first).
+/// Returns detected stars sorted by flux (brightest first) along with
+/// diagnostic information from the detection pipeline.
 ///
 /// # Arguments
 /// * `pixels` - Image pixel data (grayscale, normalized 0.0-1.0)
@@ -157,8 +220,10 @@ pub fn find_stars(
     width: usize,
     height: usize,
     config: &StarDetectionConfig,
-) -> Vec<Star> {
+) -> StarDetectionResult {
     assert_eq!(pixels.len(), width * height, "Pixel count mismatch");
+
+    let mut diagnostics = StarDetectionDiagnostics::default();
 
     // Step 0: Apply 3x3 median filter to remove Bayer pattern artifacts
     // This smooths out alternating-row sensitivity differences from CFA sensors
@@ -166,6 +231,23 @@ pub fn find_stars(
 
     // Step 1: Estimate background
     let background = estimate_background(&smoothed, width, height, config.background_tile_size);
+
+    // Collect background statistics
+    let bg_min = background
+        .background
+        .iter()
+        .fold(f32::MAX, |a, &b| a.min(b));
+    let bg_max = background
+        .background
+        .iter()
+        .fold(f32::MIN, |a, &b| a.max(b));
+    let bg_mean = background.background.iter().sum::<f32>() / background.background.len() as f32;
+    diagnostics.background_stats = (bg_min, bg_max, bg_mean);
+
+    let noise_min = background.noise.iter().fold(f32::MAX, |a, &b| a.min(b));
+    let noise_max = background.noise.iter().fold(f32::MIN, |a, &b| a.max(b));
+    let noise_mean = background.noise.iter().sum::<f32>() / background.noise.len() as f32;
+    diagnostics.noise_stats = (noise_min, noise_max, noise_mean);
 
     // Step 2: Detect star candidates
     let candidates = if config.expected_fwhm > 0.0 {
@@ -187,39 +269,65 @@ pub fn find_stars(
         // No matched filter - use standard detection
         detect_stars(&smoothed, width, height, &background, config)
     };
+    diagnostics.candidates_after_filtering = candidates.len();
     tracing::debug!("Detected {} star candidates", candidates.len());
 
-    // Step 4: Compute precise centroids and filter
-    let mut stars: Vec<Star> = candidates
+    // Step 3: Compute precise centroids
+    let stars_after_centroid: Vec<Star> = candidates
         .into_iter()
         .filter_map(|candidate| {
             compute_centroid(pixels, width, height, &background, &candidate, config)
         })
-        .filter(|star| {
-            star.is_usable(
-                config.min_snr,
-                config.max_eccentricity,
-                config.max_sharpness,
-            )
-        })
         .collect();
+    diagnostics.stars_after_centroid = stars_after_centroid.len();
+
+    // Step 4: Apply quality filters and count rejections
+    let mut stars: Vec<Star> = Vec::with_capacity(stars_after_centroid.len());
+    for star in stars_after_centroid {
+        if star.is_saturated() {
+            diagnostics.rejected_saturated += 1;
+        } else if star.snr < config.min_snr {
+            diagnostics.rejected_low_snr += 1;
+        } else if star.eccentricity > config.max_eccentricity {
+            diagnostics.rejected_high_eccentricity += 1;
+        } else if star.is_cosmic_ray(config.max_sharpness) {
+            diagnostics.rejected_cosmic_rays += 1;
+        } else {
+            stars.push(star);
+        }
+    }
 
     // Sort by flux (brightest first)
     stars.sort_by(|a, b| b.flux.partial_cmp(&a.flux).unwrap());
 
     // Filter FWHM outliers - spurious detections often have abnormally large FWHM
     let removed = filter_fwhm_outliers(&mut stars, config.max_fwhm_deviation);
+    diagnostics.rejected_fwhm_outliers = removed;
     if removed > 0 {
         tracing::debug!("Removed {} stars with abnormally large FWHM", removed);
     }
 
     // Remove duplicate detections - keep only the brightest star within min_separation pixels
-    let removed = remove_duplicate_stars(&mut stars, 8.0);
+    let removed = remove_duplicate_stars(&mut stars, config.duplicate_min_separation);
+    diagnostics.rejected_duplicates = removed;
     if removed > 0 {
         tracing::debug!("Removed {} duplicate star detections", removed);
     }
 
-    stars
+    // Compute final statistics
+    diagnostics.final_star_count = stars.len();
+
+    if !stars.is_empty() {
+        let mut fwhms: Vec<f32> = stars.iter().map(|s| s.fwhm).collect();
+        fwhms.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        diagnostics.median_fwhm = fwhms[fwhms.len() / 2];
+
+        let mut snrs: Vec<f32> = stars.iter().map(|s| s.snr).collect();
+        snrs.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        diagnostics.median_snr = snrs[snrs.len() / 2];
+    }
+
+    StarDetectionResult { stars, diagnostics }
 }
 
 /// Remove duplicate star detections that are too close together.

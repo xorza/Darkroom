@@ -106,8 +106,8 @@ fn test_subpixel_shift_detection() {
     // Run star detection on both images
     let detection_config = StarDetectionConfig::default();
 
-    let detected1 = find_stars(&pixels1, config.width, config.height, &detection_config);
-    let detected2 = find_stars(&pixels2, config.width, config.height, &detection_config);
+    let detected1 = find_stars(&pixels1, config.width, config.height, &detection_config).stars;
+    let detected2 = find_stars(&pixels2, config.width, config.height, &detection_config).stars;
 
     println!("\nDetection results:");
     println!("  Image 1: {} stars detected", detected1.len());
@@ -248,7 +248,7 @@ fn test_subpixel_accuracy_sweep() {
     let mut all_passed = true;
 
     let pixels1 = generate_star_field(&config, &base_stars);
-    let detected1 = find_stars(&pixels1, config.width, config.height, &detection_config);
+    let detected1 = find_stars(&pixels1, config.width, config.height, &detection_config).stars;
 
     for (shift_x, shift_y) in test_shifts {
         let shifted_stars: Vec<SyntheticStar> = base_stars
@@ -257,7 +257,7 @@ fn test_subpixel_accuracy_sweep() {
             .collect();
 
         let pixels2 = generate_star_field(&config, &shifted_stars);
-        let detected2 = find_stars(&pixels2, config.width, config.height, &detection_config);
+        let detected2 = find_stars(&pixels2, config.width, config.height, &detection_config).stars;
 
         let pairs = match_stars(&detected1, &detected2, 3.0);
         let (detected_dx, detected_dy) = compute_median_shift(&pairs);

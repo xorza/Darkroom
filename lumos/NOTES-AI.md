@@ -47,7 +47,12 @@ Detects stars in astronomical images with sub-pixel accuracy.
 
 **API:**
 ```rust
-pub fn find_stars(pixels: &[f32], width: usize, height: usize, config: &StarDetectionConfig) -> Vec<Star>;
+pub fn find_stars(pixels: &[f32], width: usize, height: usize, config: &StarDetectionConfig) -> StarDetectionResult;
+
+pub struct StarDetectionResult {
+    pub stars: Vec<Star>,                  // Detected stars sorted by flux
+    pub diagnostics: StarDetectionDiagnostics, // Pipeline statistics
+}
 
 pub struct Star {
     pub x: f32,           // Sub-pixel X position
@@ -57,20 +62,47 @@ pub struct Star {
     pub eccentricity: f32,// 0=circular, 1=elongated
     pub snr: f32,         // Signal-to-noise ratio
     pub peak: f32,        // Peak pixel value
+    pub sharpness: f32,   // peak/core_flux - cosmic rays have high values
+}
+
+pub struct StarDetectionDiagnostics {
+    pub candidates_after_filtering: usize,
+    pub stars_after_centroid: usize,
+    pub rejected_low_snr: usize,
+    pub rejected_high_eccentricity: usize,
+    pub rejected_cosmic_rays: usize,
+    pub rejected_saturated: usize,
+    pub rejected_fwhm_outliers: usize,
+    pub rejected_duplicates: usize,
+    pub final_star_count: usize,
+    pub median_fwhm: f32,
+    pub median_snr: f32,
+    pub background_stats: (f32, f32, f32),  // (min, max, mean)
+    pub noise_stats: (f32, f32, f32),       // (min, max, mean)
 }
 ```
 
 **Algorithm:**
 1. **Preprocessing**: 3x3 median filter to remove Bayer pattern artifacts from CFA sensors
-2. **Background estimation** (`background.rs`): Tiled sigma-clipped median with bilinear interpolation
-3. **Detection** (`detection.rs`): Threshold mask + morphological dilation (radius 2) + connected component labeling (union-find)
-4. **Centroid** (`centroid.rs`): Iterative Gaussian-weighted centroid refinement on original (unfiltered) pixels
-5. **Filtering**: SNR, eccentricity, area constraints + deduplication (8px separation)
+2. **Background estimation** (`background.rs`): Tiled sigma-clipped median with 3x3 tile median filter for robustness to bright stars, then bilinear interpolation
+3. **Detection** (`detection.rs`): Threshold mask + morphological dilation (radius 1) + connected component labeling (union-find) + deblending for star pairs
+4. **Centroid** (`centroid.rs`): Iterative Gaussian-weighted centroid refinement on original (unfiltered) pixels with adaptive stamp radius (~3.5× FWHM)
+5. **Filtering**: SNR, eccentricity, sharpness (cosmic ray rejection), area constraints, FWHM outlier removal (MAD-based), deduplication (configurable separation)
 
 **Key Implementation Details:**
 - **Median filter**: Removes alternating-row sensitivity differences from Bayer CFA patterns that cause horizontal striping in threshold masks
-- **Dilation (radius 2)**: Connects fragmented star regions that may have gaps at faint signal levels
+- **Tile median filter**: 3x3 median on background tiles rejects outliers from bright stars contaminating tiles
+- **Dilation (radius 1)**: Connects fragmented star regions while minimizing merging of close stars
+- **Deblending**: Detects local maxima within connected components to separate star pairs (configurable min_separation and min_prominence)
+- **Adaptive stamp radius**: Centroid window sized at ~3.5× expected FWHM to capture >99% of PSF flux
+- **Sharpness metric**: peak/core_flux ratio distinguishes cosmic rays (>0.7) from real stars (0.2-0.5)
 - **Centroid uses original pixels**: Smoothed data for detection, original for sub-pixel accuracy
+
+**Configurable Parameters (StarDetectionConfig):**
+- `deblend_min_separation`: Minimum separation between peaks for deblending (default: 3 pixels)
+- `deblend_min_prominence`: Minimum peak prominence as fraction of primary (default: 0.3)
+- `duplicate_min_separation`: Minimum separation for duplicate removal (default: 8.0 pixels)
+- `max_sharpness`: Maximum sharpness for cosmic ray rejection (default: 0.7)
 
 ### Hot Pixel Detection (`hot_pixels.rs`)
 

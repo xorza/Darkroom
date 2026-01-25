@@ -6,6 +6,12 @@
 use super::*;
 use crate::star_detection::background::{BackgroundMap, estimate_background};
 
+/// Default deblend config for tests
+const TEST_DEBLEND_CONFIG: DeblendConfig = DeblendConfig {
+    min_separation: 3,
+    min_prominence: 0.3,
+};
+
 fn make_test_image_with_star(
     width: usize,
     height: usize,
@@ -742,7 +748,7 @@ fn test_extract_candidates_empty() {
     let pixels = vec![0.5; 9];
     let labels = vec![0u32; 9];
 
-    let candidates = extract_candidates(&pixels, &labels, 0, 3, 3);
+    let candidates = extract_candidates(&pixels, &labels, 0, 3, 3, &TEST_DEBLEND_CONFIG);
 
     assert!(candidates.is_empty());
 }
@@ -761,7 +767,7 @@ fn test_extract_candidates_single_component() {
         0, 0, 0,
     ];
 
-    let candidates = extract_candidates(&pixels, &labels, 1, 3, 3);
+    let candidates = extract_candidates(&pixels, &labels, 1, 3, 3, &TEST_DEBLEND_CONFIG);
 
     assert_eq!(candidates.len(), 1);
     let c = &candidates[0];
@@ -789,7 +795,7 @@ fn test_extract_candidates_two_components() {
         0, 0, 0, 0, 0,
     ];
 
-    let candidates = extract_candidates(&pixels, &labels, 2, 5, 3);
+    let candidates = extract_candidates(&pixels, &labels, 2, 5, 3, &TEST_DEBLEND_CONFIG);
 
     assert_eq!(candidates.len(), 2);
 
@@ -822,7 +828,7 @@ fn test_extract_candidates_bounding_box() {
     labels[2 * 5 + 1] = 1;
     pixels[2 * 5 + 1] = 0.7;
 
-    let candidates = extract_candidates(&pixels, &labels, 1, 5, 5);
+    let candidates = extract_candidates(&pixels, &labels, 1, 5, 5, &TEST_DEBLEND_CONFIG);
 
     assert_eq!(candidates.len(), 1);
     let c = &candidates[0];
@@ -842,7 +848,7 @@ fn test_extract_candidates_width_height() {
     // 3x2 component covering full image
     let labels = vec![1u32; 6];
 
-    let candidates = extract_candidates(&pixels, &labels, 1, 3, 2);
+    let candidates = extract_candidates(&pixels, &labels, 1, 3, 2, &TEST_DEBLEND_CONFIG);
 
     assert_eq!(candidates.len(), 1);
     let c = &candidates[0];
@@ -864,7 +870,7 @@ fn test_extract_candidates_multiple_peaks_same_value() {
         0, 0, 0,
     ];
 
-    let candidates = extract_candidates(&pixels, &labels, 1, 3, 3);
+    let candidates = extract_candidates(&pixels, &labels, 1, 3, 3, &TEST_DEBLEND_CONFIG);
 
     assert_eq!(candidates.len(), 1);
     let c = &candidates[0];
@@ -888,7 +894,7 @@ fn test_extract_candidates_peak_at_corner() {
         0, 0, 0,
     ];
 
-    let candidates = extract_candidates(&pixels, &labels, 1, 3, 3);
+    let candidates = extract_candidates(&pixels, &labels, 1, 3, 3, &TEST_DEBLEND_CONFIG);
 
     assert_eq!(candidates.len(), 1);
     let c = &candidates[0];
@@ -913,7 +919,7 @@ fn test_extract_candidates_single_pixel_component() {
         0, 0, 0,
     ];
 
-    let candidates = extract_candidates(&pixels, &labels, 1, 3, 3);
+    let candidates = extract_candidates(&pixels, &labels, 1, 3, 3, &TEST_DEBLEND_CONFIG);
 
     assert_eq!(candidates.len(), 1);
     let c = &candidates[0];
@@ -943,7 +949,7 @@ fn test_extract_candidates_diagonal_component() {
         0, 0, 1,
     ];
 
-    let candidates = extract_candidates(&pixels, &labels, 1, 3, 3);
+    let candidates = extract_candidates(&pixels, &labels, 1, 3, 3, &TEST_DEBLEND_CONFIG);
 
     assert_eq!(candidates.len(), 1);
     let c = &candidates[0];
@@ -973,7 +979,7 @@ fn test_extract_candidates_sparse_labels() {
     ];
 
     // num_labels should be 3 to account for label 3
-    let candidates = extract_candidates(&pixels, &labels, 3, 3, 3);
+    let candidates = extract_candidates(&pixels, &labels, 3, 3, 3, &TEST_DEBLEND_CONFIG);
 
     // Only non-empty components are returned (labels 1 and 3)
     assert_eq!(candidates.len(), 2);
@@ -991,7 +997,7 @@ fn test_extract_candidates_full_image_component() {
     let pixels: Vec<f32> = (0..9).map(|i| 0.1 + i as f32 * 0.1).collect();
     let labels = vec![1u32; 9];
 
-    let candidates = extract_candidates(&pixels, &labels, 1, 3, 3);
+    let candidates = extract_candidates(&pixels, &labels, 1, 3, 3, &TEST_DEBLEND_CONFIG);
 
     assert_eq!(candidates.len(), 1);
     let c = &candidates[0];
@@ -1020,7 +1026,7 @@ fn test_extract_candidates_negative_pixel_values() {
         0, 0, 0,
     ];
 
-    let candidates = extract_candidates(&pixels, &labels, 1, 3, 3);
+    let candidates = extract_candidates(&pixels, &labels, 1, 3, 3, &TEST_DEBLEND_CONFIG);
 
     assert_eq!(candidates.len(), 1);
     let c = &candidates[0];
@@ -1042,7 +1048,7 @@ fn test_extract_candidates_many_components() {
         labels[idx] = (i + 1) as u32;
     }
 
-    let candidates = extract_candidates(&pixels, &labels, 10, 10, 10);
+    let candidates = extract_candidates(&pixels, &labels, 10, 10, 10, &TEST_DEBLEND_CONFIG);
 
     assert_eq!(candidates.len(), 10);
     for (i, c) in candidates.iter().enumerate() {
@@ -1064,7 +1070,7 @@ fn test_extract_candidates_non_square_image() {
         0, 1, 1, 1, 0, 2, 0,
     ];
 
-    let candidates = extract_candidates(&pixels, &labels, 2, 7, 2);
+    let candidates = extract_candidates(&pixels, &labels, 2, 7, 2, &TEST_DEBLEND_CONFIG);
 
     assert_eq!(candidates.len(), 2);
 
@@ -1117,7 +1123,7 @@ fn test_connected_components_and_extract_integration() {
     pixels[7 * 10 + 7] = 0.8;
 
     let (labels, num_labels) = connected_components(&mask, 10, 10);
-    let candidates = extract_candidates(&pixels, &labels, num_labels, 10, 10);
+    let candidates = extract_candidates(&pixels, &labels, num_labels, 10, 10, &TEST_DEBLEND_CONFIG);
 
     assert_eq!(num_labels, 2);
     assert_eq!(candidates.len(), 2);
@@ -1217,7 +1223,7 @@ fn test_deblend_star_pair() {
         }
     }
 
-    let candidates = extract_candidates(&pixels, &labels, 1, width, height);
+    let candidates = extract_candidates(&pixels, &labels, 1, width, height, &TEST_DEBLEND_CONFIG);
 
     // Should deblend into 2 candidates
     assert_eq!(
@@ -1291,7 +1297,7 @@ fn test_no_deblend_for_close_peaks() {
         }
     }
 
-    let candidates = extract_candidates(&pixels, &labels, 1, width, height);
+    let candidates = extract_candidates(&pixels, &labels, 1, width, height, &TEST_DEBLEND_CONFIG);
 
     // Should NOT deblend - only one candidate because peaks are too close
     assert_eq!(
@@ -1335,7 +1341,7 @@ fn test_deblend_respects_prominence() {
         }
     }
 
-    let candidates = extract_candidates(&pixels, &labels, 1, width, height);
+    let candidates = extract_candidates(&pixels, &labels, 1, width, height, &TEST_DEBLEND_CONFIG);
 
     // Should NOT deblend - secondary peak is not prominent enough
     assert_eq!(

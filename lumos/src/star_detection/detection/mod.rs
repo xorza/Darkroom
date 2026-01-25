@@ -96,8 +96,10 @@ pub fn detect_stars(
     // Find connected components
     let (labels, num_labels) = connected_components(&mask, width, height);
 
-    // Extract candidate properties
-    let mut candidates = extract_candidates(pixels, &labels, num_labels, width, height);
+    // Extract candidate properties with deblending
+    let deblend_config = DeblendConfig::from(config);
+    let mut candidates =
+        extract_candidates(pixels, &labels, num_labels, width, height, &deblend_config);
 
     // Filter candidates
     candidates.retain(|c| {
@@ -292,8 +294,10 @@ pub fn detect_stars_filtered(
     // Find connected components
     let (labels, num_labels) = connected_components(&mask, width, height);
 
-    // Extract candidate properties using ORIGINAL pixels for peak values
-    let mut candidates = extract_candidates(pixels, &labels, num_labels, width, height);
+    // Extract candidate properties using ORIGINAL pixels for peak values, with deblending
+    let deblend_config = DeblendConfig::from(config);
+    let mut candidates =
+        extract_candidates(pixels, &labels, num_labels, width, height, &deblend_config);
 
     // Filter candidates
     candidates.retain(|c| {
@@ -335,11 +339,32 @@ fn create_threshold_mask_filtered(
         .collect()
 }
 
-/// Minimum separation between peaks for deblending (in pixels).
-const DEBLEND_MIN_SEPARATION: usize = 3;
+/// Configuration for deblending algorithm.
+#[derive(Debug, Clone, Copy)]
+pub struct DeblendConfig {
+    /// Minimum separation between peaks for deblending (in pixels).
+    pub min_separation: usize,
+    /// Minimum peak prominence as fraction of primary peak for deblending.
+    pub min_prominence: f32,
+}
 
-/// Minimum peak prominence as fraction of primary peak for deblending.
-const DEBLEND_MIN_PROMINENCE: f32 = 0.3;
+impl Default for DeblendConfig {
+    fn default() -> Self {
+        Self {
+            min_separation: 3,
+            min_prominence: 0.3,
+        }
+    }
+}
+
+impl From<&StarDetectionConfig> for DeblendConfig {
+    fn from(config: &StarDetectionConfig) -> Self {
+        Self {
+            min_separation: config.deblend_min_separation,
+            min_prominence: config.deblend_min_prominence,
+        }
+    }
+}
 
 /// Extract candidate properties from labeled image with simple deblending.
 ///
@@ -351,6 +376,7 @@ pub(crate) fn extract_candidates(
     num_labels: usize,
     width: usize,
     height: usize,
+    deblend_config: &DeblendConfig,
 ) -> Vec<StarCandidate> {
     if num_labels == 0 {
         return Vec::new();
@@ -395,7 +421,7 @@ pub(crate) fn extract_candidates(
         }
 
         // Find local maxima for deblending
-        let peaks = find_local_maxima(&data, pixels, width);
+        let peaks = find_local_maxima(&data, pixels, width, deblend_config);
 
         if peaks.len() <= 1 {
             // Single peak - create one candidate
@@ -447,6 +473,7 @@ fn find_local_maxima(
     data: &ComponentData,
     pixels: &[f32],
     width: usize,
+    config: &DeblendConfig,
 ) -> Vec<(usize, usize, f32)> {
     let mut peaks: Vec<(usize, usize, f32)> = Vec::new();
 
@@ -457,7 +484,7 @@ fn find_local_maxima(
         .map(|&(_, _, v)| v)
         .fold(f32::MIN, f32::max);
 
-    let min_peak_value = global_max * DEBLEND_MIN_PROMINENCE;
+    let min_peak_value = global_max * config.min_prominence;
 
     // Check each pixel for local maximum
     for &(x, y, value) in &data.pixels {
@@ -494,10 +521,11 @@ fn find_local_maxima(
 
         if is_maximum {
             // Check separation from existing peaks
+            let min_sep = config.min_separation;
             let well_separated = peaks.iter().all(|&(px, py, _)| {
                 let dx = (x as i32 - px as i32).unsigned_abs() as usize;
                 let dy = (y as i32 - py as i32).unsigned_abs() as usize;
-                dx >= DEBLEND_MIN_SEPARATION || dy >= DEBLEND_MIN_SEPARATION
+                dx >= min_sep || dy >= min_sep
             });
 
             if well_separated {
@@ -507,8 +535,7 @@ fn find_local_maxima(
                 for peak in &mut peaks {
                     let dx = (x as i32 - peak.0 as i32).unsigned_abs() as usize;
                     let dy = (y as i32 - peak.1 as i32).unsigned_abs() as usize;
-                    if dx < DEBLEND_MIN_SEPARATION && dy < DEBLEND_MIN_SEPARATION && value > peak.2
-                    {
+                    if dx < min_sep && dy < min_sep && value > peak.2 {
                         *peak = (x, y, value);
                         break;
                     }

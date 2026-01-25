@@ -49,7 +49,8 @@ fn test_visualize_star_detection() {
 
     // Find stars
     let config = StarDetectionConfig::default();
-    let stars = find_stars(&grayscale, width, height, &config);
+    let result = find_stars(&grayscale, width, height, &config);
+    let stars = result.stars;
     println!("Found {} stars", stars.len());
 
     // Check for duplicates (stars within 5 pixels of each other)
@@ -227,7 +228,8 @@ fn test_synthetic_star_detection() {
         ..Default::default()
     };
 
-    let detected_stars = find_stars(&pixels, config.width, config.height, &detection_config);
+    let result = find_stars(&pixels, config.width, config.height, &detection_config);
+    let detected_stars = result.stars;
     println!("\nDetected {} stars", detected_stars.len());
 
     for (i, star) in detected_stars.iter().enumerate() {

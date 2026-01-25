@@ -109,18 +109,21 @@ fn test_find_stars_on_light_frame() {
     // Find stars
     let config = StarDetectionConfig::default();
     let start = std::time::Instant::now();
-    let stars = find_stars(&grayscale, width, height, &config);
-    println!("Found {} stars in {:?}", stars.len(), start.elapsed());
+    let result = find_stars(&grayscale, width, height, &config);
+    println!(
+        "Found {} stars in {:?}",
+        result.stars.len(),
+        start.elapsed()
+    );
 
     // Print statistics
     assert!(
-        !stars.is_empty(),
+        !result.stars.is_empty(),
         "Should find at least some stars in a light frame"
     );
 
-    // Sort by flux (brightest first)
-    let mut stars = stars;
-    stars.sort_by(|a, b| b.flux.partial_cmp(&a.flux).unwrap());
+    // Stars are already sorted by flux (brightest first)
+    let stars = result.stars;
 
     println!("\nTop 10 brightest stars:");
     println!(

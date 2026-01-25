@@ -217,7 +217,8 @@ fn test_debug_star_detection_steps() {
     println!("Saved: {:?}", path);
 
     // Run full detection
-    let stars = find_stars(&grayscale, width, height, &config);
+    let result = find_stars(&grayscale, width, height, &config);
+    let stars = result.stars;
     println!("\nDetected {} stars", stars.len());
 
     // Create result image with detections
@@ -400,7 +401,8 @@ fn test_debug_synthetic_steps() {
     println!("Saved: {:?}", path);
 
     // Run full detection
-    let stars = find_stars(&grayscale, width, height, &detection_config);
+    let detection_result = find_stars(&grayscale, width, height, &detection_config);
+    let stars = detection_result.stars;
     println!(
         "\nDetected {} stars (expected {})",
         stars.len(),
