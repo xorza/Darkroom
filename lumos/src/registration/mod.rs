@@ -59,6 +59,7 @@
 //!
 //! See `IMPLEMENTATION_PLAN.md` for detailed algorithm documentation.
 
+pub mod distortion;
 pub mod interpolation;
 pub mod phase_correlation;
 pub mod pipeline;
@@ -88,6 +89,7 @@ pub mod bench {
 }
 
 // Re-export main types for convenience
+pub use distortion::{DistortionMap, ThinPlateSpline, TpsConfig};
 pub use interpolation::{InterpolationMethod, WarpConfig, warp_image};
 pub use phase_correlation::{PhaseCorrelationConfig, PhaseCorrelator};
 pub use pipeline::{Registrator, quick_register, register_stars, warp_to_reference};

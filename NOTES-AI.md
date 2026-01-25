@@ -466,6 +466,9 @@ RegistrationResult // { transform, matched_stars, residuals, rms_error, quality_
 StarMatch          // { ref_idx, target_idx, votes, confidence }
 RansacConfig       // { max_iterations, inlier_threshold, confidence, use_local_optimization, lo_max_iterations }
 KdTree             // 2D k-d tree for k-nearest neighbor and radius queries
+ThinPlateSpline    // Smooth non-rigid transformation for local distortion correction
+TpsConfig          // { regularization } - TPS fitting configuration
+DistortionMap      // Grid-based distortion visualization with interpolation
 ```
 
 **Algorithm pipeline:**
@@ -506,6 +509,16 @@ KdTree             // 2D k-d tree for k-nearest neighbor and radius queries
   - Platform support: AVX2/SSE2 on x86_64, NEON on aarch64
   - Processes 4 points (AVX2) or 2 points (SSE2/NEON) per iteration
   - Scalar fallback for unsupported platforms and remainder handling
+
+**Thin-Plate Spline distortion modeling (new):**
+- `ThinPlateSpline::fit()` - Fit TPS from control point correspondences
+- `transform()` / `transform_points()` - Apply smooth non-rigid transformation
+- Radial basis function: U(r) = r² log(r)
+- Handles local distortions in wide-field astronomical images
+- Optional regularization for smoother interpolation
+- `DistortionMap::from_tps()` - Visualize distortion as vector field
+- `bending_energy()` - Measure spline smoothness
+- Critical for PixInsight-level accuracy (<0.01 pixel)
 
 **Interpolation methods:**
 - `Nearest` - Fastest, for previews/masks
