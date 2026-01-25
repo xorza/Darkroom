@@ -49,11 +49,6 @@ impl Registrator {
         Self { config }
     }
 
-    /// Create a registrator with default configuration.
-    pub fn with_defaults() -> Self {
-        Self::default()
-    }
-
     /// Register target to reference using pre-detected star positions.
     ///
     /// This is the main entry point when star positions are already known.
@@ -132,7 +127,11 @@ impl Registrator {
         let ransac = RansacEstimator::new(ransac_config);
         let ransac_result = ransac
             .estimate(&ref_matched, &target_matched, self.config.transform_type)
-            .ok_or(RegistrationError::RansacFailed)?;
+            .ok_or(RegistrationError::RansacFailed {
+                reason: crate::registration::types::RansacFailureReason::NoInliersFound,
+                iterations: self.config.ransac_iterations,
+                best_inlier_count: 0,
+            })?;
 
         // Get inlier matches
         let inlier_matches: Vec<_> = ransac_result

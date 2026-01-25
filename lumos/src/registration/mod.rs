@@ -98,8 +98,8 @@ pub use pipeline::{
 
 // Core types needed by users
 pub use types::{
-    RegistrationConfig, RegistrationConfigBuilder, RegistrationError, RegistrationResult,
-    StarMatch, TransformMatrix, TransformType,
+    RansacFailureReason, RegistrationConfig, RegistrationConfigBuilder, RegistrationError,
+    RegistrationResult, StarMatch, TransformMatrix, TransformType,
 };
 
 // Configuration types

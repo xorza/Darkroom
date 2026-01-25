@@ -160,7 +160,33 @@ impl TransformMatrix {
         }
     }
 
-    /// Apply transform to a point, returning (x', y').
+    /// Apply transform to map a point from REFERENCE coordinates to TARGET coordinates.
+    ///
+    /// Given a transform T estimated from `register_stars(ref_stars, target_stars)`:
+    /// - `T.apply(ref_point)` gives the corresponding target point
+    /// - `T.apply_inverse(target_point)` gives the corresponding reference point
+    ///
+    /// # Image Warping
+    ///
+    /// To align a target image to the reference frame (so it overlays correctly
+    /// with the reference), you need to sample the target image at positions
+    /// mapped from reference coordinates. This means using `apply()` to find
+    /// where each reference pixel maps to in the target, then sampling there.
+    ///
+    /// The `warp_image` function handles this automatically.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let result = registrator.register_stars(&ref_stars, &target_stars)?;
+    /// let transform = result.transform;
+    ///
+    /// // Map a reference point to its corresponding target location
+    /// let (target_x, target_y) = transform.apply(ref_x, ref_y);
+    ///
+    /// // Map a target point back to reference coordinates
+    /// let (ref_x, ref_y) = transform.apply_inverse(target_x, target_y);
+    /// ```
     pub fn apply(&self, x: f64, y: f64) -> (f64, f64) {
         let d = &self.data;
         let w = d[6] * x + d[7] * y + d[8];
@@ -175,7 +201,12 @@ impl TransformMatrix {
         self.apply(x, y)
     }
 
-    /// Apply inverse transform to a point.
+    /// Apply inverse transform to map a point from TARGET coordinates to REFERENCE coordinates.
+    ///
+    /// This is the inverse of `apply()`. Given a point in the target image,
+    /// it returns the corresponding point in the reference image.
+    ///
+    /// See [`apply`](Self::apply) for more details on transform direction.
     pub fn apply_inverse(&self, x: f64, y: f64) -> (f64, f64) {
         self.inverse().apply(x, y)
     }
@@ -591,6 +622,30 @@ pub struct StarMatch {
     pub confidence: f64,
 }
 
+/// Reason for RANSAC failure.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RansacFailureReason {
+    /// No inliers found after all iterations.
+    NoInliersFound,
+    /// Point set is degenerate (collinear, coincident, etc.).
+    DegeneratePointSet,
+    /// Matrix computation failed (singular matrix).
+    SingularMatrix,
+    /// Found some inliers but not enough to meet threshold.
+    InsufficientInliers,
+}
+
+impl std::fmt::Display for RansacFailureReason {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            RansacFailureReason::NoInliersFound => write!(f, "no inliers found"),
+            RansacFailureReason::DegeneratePointSet => write!(f, "degenerate point set"),
+            RansacFailureReason::SingularMatrix => write!(f, "singular matrix"),
+            RansacFailureReason::InsufficientInliers => write!(f, "insufficient inliers"),
+        }
+    }
+}
+
 /// Registration error types.
 #[derive(Debug, Clone)]
 pub enum RegistrationError {
@@ -599,7 +654,14 @@ pub enum RegistrationError {
     /// No matching star patterns found.
     NoMatchingPatterns,
     /// RANSAC failed to find valid transformation.
-    RansacFailed,
+    RansacFailed {
+        /// The reason for failure.
+        reason: RansacFailureReason,
+        /// Number of iterations completed.
+        iterations: usize,
+        /// Best inlier count achieved (may be 0).
+        best_inlier_count: usize,
+    },
     /// Registration accuracy too low.
     AccuracyTooLow { rms_error: f64, max_allowed: f64 },
     /// Images have incompatible dimensions.
@@ -621,8 +683,16 @@ impl std::fmt::Display for RegistrationError {
             RegistrationError::NoMatchingPatterns => {
                 write!(f, "No matching star patterns found between images")
             }
-            RegistrationError::RansacFailed => {
-                write!(f, "RANSAC failed to find valid transformation")
+            RegistrationError::RansacFailed {
+                reason,
+                iterations,
+                best_inlier_count,
+            } => {
+                write!(
+                    f,
+                    "RANSAC failed: {} (iterations: {}, best inlier count: {})",
+                    reason, iterations, best_inlier_count
+                )
             }
             RegistrationError::AccuracyTooLow {
                 rms_error,

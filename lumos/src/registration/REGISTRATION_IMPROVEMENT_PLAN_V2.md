@@ -285,80 +285,51 @@ pub fn estimate_with_matches(
 
 ---
 
-## Phase 5: API Refinement (1 day)
+## Phase 5: API Refinement (1 day) ✅ DONE
 
-### 5.1 Simplify Registrator Construction
+### 5.1 Simplify Registrator Construction ✅ DONE
 
 **File:** `pipeline/mod.rs`
 
-**Current:** Three ways to create Registrator:
-- `Registrator::new(config)`
-- `Registrator::with_defaults()`
-- `Registrator::default()`
+**Implementation:**
+- Removed `with_defaults()` method
+- Keep only `new()` and `Default` trait impl
+- No usages of `with_defaults()` existed in the codebase
 
-**Change:** Keep only `new()` and `Default`:
-```rust
-impl Registrator {
-    pub fn new(config: RegistrationConfig) -> Self { ... }
-}
+**Effort:** 30 minutes → Done
 
-impl Default for Registrator {
-    fn default() -> Self {
-        Self::new(RegistrationConfig::default())
-    }
-}
+### 5.2 Improve Error Messages ✅ DONE
 
-// Remove with_defaults()
-```
+**File:** `types/mod.rs`
 
-**Effort:** 1 hour
+**Implementation:**
+- Added `RansacFailureReason` enum with variants:
+  - `NoInliersFound` - no inliers found after all iterations
+  - `DegeneratePointSet` - points are collinear/coincident
+  - `SingularMatrix` - matrix computation failed
+  - `InsufficientInliers` - found some but not enough
+- Updated `RegistrationError::RansacFailed` to include:
+  - `reason: RansacFailureReason`
+  - `iterations: usize`
+  - `best_inlier_count: usize`
+- Implemented `Display` for both types with descriptive messages
+- Exported `RansacFailureReason` from registration module
 
-### 5.2 Improve Error Messages
+**Effort:** 2 hours → Done
 
-**File:** `types/mod.rs:464-492`
+### 5.3 Document Transform Direction ✅ DONE
 
-**Current:** `RegistrationError::RansacFailed` has no details
+**File:** `types/mod.rs`
 
-**Improvement:**
-```rust
-pub enum RegistrationError {
-    RansacFailed {
-        reason: RansacFailureReason,
-        iterations: usize,
-        best_inlier_count: usize,
-    },
-    // ...
-}
+**Implementation:**
+- Added comprehensive documentation to `apply()` method explaining:
+  - Transform maps REFERENCE coordinates to TARGET coordinates
+  - How to use with `register_stars()` results
+  - Image warping guidance
+  - Code example
+- Added documentation to `apply_inverse()` referencing `apply()`
 
-pub enum RansacFailureReason {
-    NoInliersFound,
-    DegeneratePointSet,
-    SingularMatrix,
-    InsufficientInliers { found: usize, required: usize },
-}
-```
-
-**Effort:** 2 hours
-
-### 5.3 Document Transform Direction
-
-**File:** `types/mod.rs:163-170`
-
-**Current:** `apply()` direction is implicit
-
-**Change:** Add clear documentation:
-```rust
-/// Apply transform to map a point from REFERENCE coordinates to TARGET coordinates.
-///
-/// Given a transform T estimated from `register_stars(ref_stars, target_stars)`:
-/// - `T.apply(ref_point)` gives the corresponding target point
-/// - `T.apply_inverse(target_point)` gives the corresponding reference point
-///
-/// For image warping (aligning target to reference frame), use `apply_inverse`.
-pub fn apply(&self, x: f64, y: f64) -> (f64, f64) { ... }
-```
-
-**Effort:** 30 minutes
+**Effort:** 30 minutes → Done
 
 ---
 
