@@ -28,6 +28,8 @@ mod detection;
 mod median_filter;
 
 #[cfg(test)]
+pub mod astrometry_benchmark;
+#[cfg(test)]
 pub mod survey_benchmark;
 #[cfg(test)]
 mod tests;
