@@ -13,6 +13,7 @@ mod tests;
 
 mod simd;
 
+use super::constants;
 use rayon::prelude::*;
 
 /// Background map with per-pixel background and noise estimates.
@@ -325,7 +326,7 @@ pub(crate) fn sigma_clipped_stats(
         deviations.clear();
         deviations.extend(active.iter().map(|v| (v - median).abs()));
         let mad = crate::math::median_f32_mut(deviations);
-        let sigma = mad * 1.4826;
+        let sigma = constants::mad_to_sigma(mad);
 
         if sigma < f32::EPSILON {
             return TileStats { median, sigma: 0.0 };
@@ -361,7 +362,7 @@ pub(crate) fn sigma_clipped_stats(
     deviations.clear();
     deviations.extend(active.iter().map(|v| (v - median).abs()));
     let mad = crate::math::median_f32_mut(deviations);
-    let sigma = mad * 1.4826;
+    let sigma = constants::mad_to_sigma(mad);
 
     TileStats { median, sigma }
 }
@@ -577,27 +578,9 @@ fn create_object_mask(
 
 /// Dilate a binary mask by the given radius.
 #[allow(dead_code)] // Used by create_object_mask
+#[inline]
 fn dilate_mask(mask: &[bool], width: usize, height: usize, radius: usize) -> Vec<bool> {
-    let mut dilated = vec![false; width * height];
-
-    for y in 0..height {
-        for x in 0..width {
-            if mask[y * width + x] {
-                let y_min = y.saturating_sub(radius);
-                let y_max = (y + radius).min(height - 1);
-                let x_min = x.saturating_sub(radius);
-                let x_max = (x + radius).min(width - 1);
-
-                for dy in y_min..=y_max {
-                    for dx in x_min..=x_max {
-                        dilated[dy * width + dx] = true;
-                    }
-                }
-            }
-        }
-    }
-
-    dilated
+    constants::dilate_mask(mask, width, height, radius)
 }
 
 /// Estimate background with masked pixels excluded.

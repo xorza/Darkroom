@@ -25,21 +25,17 @@ pub use moffat_fit::{MoffatFitConfig, MoffatFitResult, fit_moffat_2d};
 pub use moffat_fit::{alpha_beta_to_fwhm, fwhm_beta_to_alpha};
 
 use super::background::BackgroundMap;
+use super::constants::{self, CENTROID_CONVERGENCE_THRESHOLD, MAX_CENTROID_ITERATIONS};
 use super::cosmic_ray::compute_laplacian_snr;
 use super::detection::StarCandidate;
 use super::{Star, StarDetectionConfig};
 
-/// Minimum stamp radius for centroid computation.
-const MIN_STAMP_RADIUS: usize = 4;
-
-/// Maximum stamp radius for centroid computation.
-const MAX_STAMP_RADIUS: usize = 15;
-
 /// Maximum iterations for centroid refinement.
-pub(crate) const MAX_ITERATIONS: usize = 10;
+pub(crate) const MAX_ITERATIONS: usize = MAX_CENTROID_ITERATIONS;
 
 /// Convergence threshold in pixels squared.
-pub(crate) const CONVERGENCE_THRESHOLD_SQ: f32 = 0.001 * 0.001;
+pub(crate) const CONVERGENCE_THRESHOLD_SQ: f32 =
+    CENTROID_CONVERGENCE_THRESHOLD * CENTROID_CONVERGENCE_THRESHOLD;
 
 /// Compute adaptive stamp radius based on expected FWHM.
 ///
@@ -47,10 +43,7 @@ pub(crate) const CONVERGENCE_THRESHOLD_SQ: f32 = 0.001 * 0.001;
 /// while not being so large that it includes too much noise or neighboring stars.
 #[inline]
 pub(crate) fn compute_stamp_radius(expected_fwhm: f32) -> usize {
-    // Use ~3.5× FWHM to capture >99% of Gaussian PSF flux
-    // Clamp to reasonable bounds
-    let radius = (expected_fwhm * 1.75).ceil() as usize;
-    radius.clamp(MIN_STAMP_RADIUS, MAX_STAMP_RADIUS)
+    constants::compute_stamp_radius(expected_fwhm)
 }
 
 /// Check if position is within valid bounds for stamp extraction.
@@ -329,7 +322,7 @@ pub(crate) fn compute_metrics(
     // So sigma^2 = sum(r^2 * I) / sum(I) / 2
     // FWHM = 2.355 * sigma
     let sigma_sq = sum_r2 / flux / 2.0;
-    let fwhm = 2.355 * sigma_sq.sqrt();
+    let fwhm = constants::sigma_to_fwhm(sigma_sq.sqrt());
 
     // Eccentricity from covariance matrix
     // eigenvalues of [[sum_x2, sum_xy], [sum_xy, sum_y2]] / flux

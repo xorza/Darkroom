@@ -177,7 +177,7 @@ fn median_of_n(values: &mut [f32]) -> f32 {
         9 => median9(values),
         _ => {
             // Fallback for 7, 8 (edge cases)
-            values.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
             values[n / 2]
         }
     }

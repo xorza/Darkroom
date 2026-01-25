@@ -21,6 +21,7 @@
 
 mod background;
 mod centroid;
+pub mod constants;
 mod convolution;
 mod cosmic_ray;
 mod deblend;
@@ -492,7 +493,11 @@ pub fn find_stars(
     }
 
     // Sort by flux (brightest first)
-    stars.sort_by(|a, b| b.flux.partial_cmp(&a.flux).unwrap());
+    stars.sort_by(|a, b| {
+        b.flux
+            .partial_cmp(&a.flux)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
 
     // Filter FWHM outliers - spurious detections often have abnormally large FWHM
     let removed = filter_fwhm_outliers(&mut stars, config.max_fwhm_deviation);
@@ -513,11 +518,11 @@ pub fn find_stars(
 
     if !stars.is_empty() {
         let mut fwhms: Vec<f32> = stars.iter().map(|s| s.fwhm).collect();
-        fwhms.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        fwhms.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
         diagnostics.median_fwhm = fwhms[fwhms.len() / 2];
 
         let mut snrs: Vec<f32> = stars.iter().map(|s| s.snr).collect();
-        snrs.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        snrs.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
         diagnostics.median_snr = snrs[snrs.len() / 2];
     }
 
@@ -579,7 +584,7 @@ fn local_median_excluding_defects(
         // All neighbors are defective, use the pixel value itself
         pixels[cy * width + cx]
     } else {
-        values.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
         values[values.len() / 2]
     }
 }
@@ -638,11 +643,11 @@ fn compute_fwhm_median_mad(fwhms: &[f32]) -> (f32, f32) {
     assert!(!fwhms.is_empty(), "Need at least one FWHM value");
 
     let mut sorted: Vec<f32> = fwhms.to_vec();
-    sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
     let median = sorted[sorted.len() / 2];
 
     let mut deviations: Vec<f32> = sorted.iter().map(|&f| (f - median).abs()).collect();
-    deviations.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    deviations.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
     let mad = deviations[deviations.len() / 2];
 
     (median, mad)

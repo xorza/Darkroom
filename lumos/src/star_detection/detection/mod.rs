@@ -6,8 +6,11 @@ mod tests;
 #[cfg(feature = "bench")]
 pub mod bench;
 
+mod simd;
+
 use super::StarDetectionConfig;
 use super::background::BackgroundMap;
+use super::constants;
 use super::deblend::{
     ComponentData, DeblendConfig, MultiThresholdDeblendConfig,
     deblend_component as multi_threshold_deblend, deblend_local_maxima,
@@ -126,28 +129,9 @@ pub fn detect_stars(
 /// Dilate a binary mask by the given radius (morphological dilation).
 ///
 /// This connects nearby pixels that might be separated due to variable threshold.
+#[inline]
 pub fn dilate_mask(mask: &[bool], width: usize, height: usize, radius: usize) -> Vec<bool> {
-    let mut dilated = vec![false; width * height];
-
-    for y in 0..height {
-        for x in 0..width {
-            if mask[y * width + x] {
-                // Set all pixels within radius
-                let y_min = y.saturating_sub(radius);
-                let y_max = (y + radius).min(height - 1);
-                let x_min = x.saturating_sub(radius);
-                let x_max = (x + radius).min(width - 1);
-
-                for dy in y_min..=y_max {
-                    for dx in x_min..=x_max {
-                        dilated[dy * width + dx] = true;
-                    }
-                }
-            }
-        }
-    }
-
-    dilated
+    constants::dilate_mask(mask, width, height, radius)
 }
 
 /// Create binary mask of pixels above threshold.

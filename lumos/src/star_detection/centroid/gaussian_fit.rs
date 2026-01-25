@@ -328,17 +328,18 @@ fn compute_gradient(jacobian: &[[f32; 6]], residuals: &[f32]) -> [f32; 6] {
 
 // Use shared linear solver
 use super::linear_solver::solve_6x6;
+use crate::star_detection::constants;
 
 /// Convert sigma to FWHM.
 #[inline]
 pub fn sigma_to_fwhm(sigma: f32) -> f32 {
-    sigma * 2.0 * (2.0 * (2.0f32).ln()).sqrt() // 2 * sqrt(2 * ln(2)) ≈ 2.355
+    constants::sigma_to_fwhm(sigma)
 }
 
 /// Convert FWHM to sigma.
 #[inline]
 pub fn fwhm_to_sigma(fwhm: f32) -> f32 {
-    fwhm / (2.0 * (2.0 * (2.0f32).ln()).sqrt())
+    constants::fwhm_to_sigma(fwhm)
 }
 
 #[cfg(test)]

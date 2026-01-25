@@ -326,7 +326,7 @@ fn build_deblend_tree(
 fn find_region_peak(region: &[(usize, usize, f32)]) -> (usize, usize, f32) {
     region
         .iter()
-        .max_by(|a, b| a.2.partial_cmp(&b.2).unwrap())
+        .max_by(|a, b| a.2.partial_cmp(&b.2).unwrap_or(std::cmp::Ordering::Equal))
         .map(|&(x, y, v)| (x, y, v))
         .unwrap_or((0, 0, 0.0))
 }
@@ -524,7 +524,7 @@ fn assign_pixels_to_objects(
 fn create_single_object(pixels: &[(usize, usize, f32)]) -> DeblendedObject {
     let (peak_x, peak_y, peak_value) = pixels
         .iter()
-        .max_by(|a, b| a.2.partial_cmp(&b.2).unwrap())
+        .max_by(|a, b| a.2.partial_cmp(&b.2).unwrap_or(std::cmp::Ordering::Equal))
         .map(|&(x, y, v)| (x, y, v))
         .unwrap_or((0, 0, 0.0));
 

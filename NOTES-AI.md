@@ -345,10 +345,24 @@ CalibrationMasters // Container for master dark/flat/bias frames
 - Detects stars in astronomical images and computes sub-pixel accurate centroids
 - Module structure:
   - `mod.rs` - `Star`, `StarDetectionConfig`, `find_stars()` main API
+  - `constants.rs` - Shared astronomical and algorithmic constants (FWHM_TO_SIGMA, MAD_TO_SIGMA, etc.)
   - `background/mod.rs` - `BackgroundMap`, `estimate_background()` using tile-based sigma-clipped median
   - `detection/mod.rs` - `StarCandidate`, `detect_stars()` using thresholding and connected components
   - `centroid/mod.rs` - `compute_centroid()` using iterative weighted centroid algorithm
+  - `convolution/mod.rs` - Gaussian kernel convolution with SIMD acceleration
+  - `deblend/mod.rs` - Multi-threshold deblending for separating blended stars
+  - `cosmic_ray/mod.rs` - Cosmic ray detection using Laplacian edge detection
   - `median_filter/mod.rs` - `median_filter_3x3()` for Bayer pattern artifact removal
+
+**Constants module (`star_detection/constants.rs`):**
+- `FWHM_TO_SIGMA: f32 = 2.354_82` - FWHM to Gaussian σ conversion (2√(2ln2))
+- `MAD_TO_SIGMA: f32 = 1.4826022` - MAD to σ conversion for normal distribution
+- `DEFAULT_SATURATION_THRESHOLD: f32 = 0.95` - Saturation detection threshold
+- `STAMP_RADIUS_FWHM_FACTOR: f32 = 1.75` - Stamp radius as multiple of FWHM
+- `MIN_STAMP_RADIUS: usize = 4` / `MAX_STAMP_RADIUS: usize = 15` - Stamp radius bounds
+- `CENTROID_CONVERGENCE_THRESHOLD: f32 = 0.001` - Centroid iteration convergence
+- `MAX_CENTROID_ITERATIONS: usize = 10` - Maximum centroid refinement iterations
+- Utility functions: `fwhm_to_sigma()`, `sigma_to_fwhm()`, `mad_to_sigma()`, `compute_stamp_radius()`, `dilate_mask()`
 
 **Key types:**
 ```rust

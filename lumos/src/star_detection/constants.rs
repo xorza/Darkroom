@@ -1,0 +1,182 @@
+//! Shared constants for star detection algorithms.
+//!
+//! This module centralizes mathematical and algorithmic constants used across
+//! the star detection pipeline to avoid magic numbers and ensure consistency.
+
+/// FWHM to Gaussian sigma conversion factor.
+///
+/// For a Gaussian distribution, FWHM = 2√(2ln2) × σ ≈ 2.3548 × σ.
+/// This is the exact value: 2 * sqrt(2 * ln(2)).
+pub const FWHM_TO_SIGMA: f32 = 2.354_82;
+
+/// MAD (Median Absolute Deviation) to standard deviation conversion factor.
+///
+/// For a normal distribution, σ ≈ 1.4826 × MAD.
+/// This is the exact value: 1 / Φ⁻¹(3/4) where Φ⁻¹ is the inverse CDF.
+pub const MAD_TO_SIGMA: f32 = 1.4826022;
+
+/// Default saturation threshold as fraction of dynamic range.
+///
+/// Stars with peak values above this threshold (95% of max) are considered
+/// potentially saturated and may be filtered or flagged.
+#[allow(dead_code)]
+pub const DEFAULT_SATURATION_THRESHOLD: f32 = 0.95;
+
+/// Number of rows to process per parallel chunk.
+///
+/// This value is chosen to minimize false sharing between CPU cores while
+/// maintaining good cache utilization. 8 rows × 64 bytes/cache line provides
+/// enough separation for most image widths.
+#[allow(dead_code)]
+pub const ROWS_PER_CHUNK: usize = 8;
+
+/// Stamp radius as a multiple of FWHM.
+///
+/// A stamp radius of 1.75 × FWHM captures approximately 99% of the PSF flux
+/// for a Gaussian profile, providing accurate centroid and flux measurements
+/// while minimizing background contamination.
+pub const STAMP_RADIUS_FWHM_FACTOR: f32 = 1.75;
+
+/// Minimum stamp radius in pixels.
+///
+/// Ensures sufficient pixels for accurate centroid computation even for
+/// very small PSFs or undersampled images.
+pub const MIN_STAMP_RADIUS: usize = 4;
+
+/// Maximum stamp radius in pixels.
+///
+/// Limits computation time and prevents excessive background inclusion
+/// for very large PSFs.
+pub const MAX_STAMP_RADIUS: usize = 15;
+
+/// Default number of sigma-clipping iterations for background estimation.
+#[allow(dead_code)]
+pub const DEFAULT_SIGMA_CLIP_ITERATIONS: usize = 3;
+
+/// Default sigma threshold for sigma-clipping.
+#[allow(dead_code)]
+pub const DEFAULT_SIGMA_CLIP_KAPPA: f32 = 3.0;
+
+/// Centroid convergence threshold in pixels squared.
+///
+/// Iteration stops when the squared distance moved is less than this value.
+pub const CENTROID_CONVERGENCE_THRESHOLD: f32 = 0.001;
+
+/// Maximum centroid iterations before giving up.
+pub const MAX_CENTROID_ITERATIONS: usize = 10;
+
+/// Gaussian weight sigma for centroid refinement.
+///
+/// Controls the weighting function used in iterative centroid computation.
+#[allow(dead_code)]
+pub const CENTROID_WEIGHT_SIGMA: f32 = 2.0;
+
+// Utility functions for conversions
+
+/// Convert FWHM to Gaussian sigma.
+#[inline]
+pub fn fwhm_to_sigma(fwhm: f32) -> f32 {
+    fwhm / FWHM_TO_SIGMA
+}
+
+/// Convert Gaussian sigma to FWHM.
+#[inline]
+pub fn sigma_to_fwhm(sigma: f32) -> f32 {
+    sigma * FWHM_TO_SIGMA
+}
+
+/// Convert MAD to standard deviation (assuming normal distribution).
+#[inline]
+pub fn mad_to_sigma(mad: f32) -> f32 {
+    mad * MAD_TO_SIGMA
+}
+
+/// Compute stamp radius from expected FWHM.
+#[inline]
+pub fn compute_stamp_radius(expected_fwhm: f32) -> usize {
+    let radius = (expected_fwhm * STAMP_RADIUS_FWHM_FACTOR).ceil() as usize;
+    radius.clamp(MIN_STAMP_RADIUS, MAX_STAMP_RADIUS)
+}
+
+/// Dilate a binary mask by the given radius (morphological dilation).
+///
+/// This connects nearby pixels that might be separated due to variable threshold.
+/// Used in star detection to merge fragmented detections and in background
+/// estimation to mask object wings.
+///
+/// # Arguments
+/// * `mask` - Input binary mask
+/// * `width` - Image width
+/// * `height` - Image height
+/// * `radius` - Dilation radius in pixels
+///
+/// # Returns
+/// Dilated mask of the same size
+pub fn dilate_mask(mask: &[bool], width: usize, height: usize, radius: usize) -> Vec<bool> {
+    let mut dilated = vec![false; width * height];
+
+    for y in 0..height {
+        for x in 0..width {
+            if mask[y * width + x] {
+                // Set all pixels within radius
+                let y_min = y.saturating_sub(radius);
+                let y_max = (y + radius).min(height - 1);
+                let x_min = x.saturating_sub(radius);
+                let x_max = (x + radius).min(width - 1);
+
+                for dy in y_min..=y_max {
+                    for dx in x_min..=x_max {
+                        dilated[dy * width + dx] = true;
+                    }
+                }
+            }
+        }
+    }
+
+    dilated
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_fwhm_sigma_conversion_roundtrip() {
+        let fwhm = 4.5;
+        let sigma = fwhm_to_sigma(fwhm);
+        let fwhm_back = sigma_to_fwhm(sigma);
+        assert!((fwhm - fwhm_back).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_fwhm_to_sigma_known_value() {
+        // For FWHM = 2.3548, sigma should be ~1.0
+        let sigma = fwhm_to_sigma(FWHM_TO_SIGMA);
+        assert!((sigma - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_mad_to_sigma_known_value() {
+        // For MAD = 1.0, sigma should be ~1.4826
+        let sigma = mad_to_sigma(1.0);
+        assert!((sigma - MAD_TO_SIGMA).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_compute_stamp_radius_typical_fwhm() {
+        // FWHM = 4.0 -> radius = ceil(4.0 * 1.75) = 7
+        assert_eq!(compute_stamp_radius(4.0), 7);
+    }
+
+    #[test]
+    fn test_compute_stamp_radius_clamped_min() {
+        // Very small FWHM should clamp to minimum
+        assert_eq!(compute_stamp_radius(1.0), MIN_STAMP_RADIUS);
+    }
+
+    #[test]
+    fn test_compute_stamp_radius_clamped_max() {
+        // Very large FWHM should clamp to maximum
+        assert_eq!(compute_stamp_radius(20.0), MAX_STAMP_RADIUS);
+    }
+}

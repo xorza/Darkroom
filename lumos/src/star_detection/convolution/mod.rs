@@ -56,7 +56,7 @@ pub fn gaussian_kernel_1d(sigma: f32) -> Vec<f32> {
 /// FWHM = 2 * sqrt(2 * ln(2)) * sigma ≈ 2.355 * sigma
 #[inline]
 pub fn fwhm_to_sigma(fwhm: f32) -> f32 {
-    fwhm / 2.355
+    super::constants::fwhm_to_sigma(fwhm)
 }
 
 /// Apply separable Gaussian convolution to an image.

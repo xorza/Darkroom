@@ -87,8 +87,9 @@ fn test_fwhm_to_sigma() {
 
 #[test]
 fn test_fwhm_to_sigma_roundtrip() {
+    use crate::star_detection::constants::FWHM_TO_SIGMA;
     let sigma = 3.0;
-    let fwhm = sigma * 2.355;
+    let fwhm = sigma * FWHM_TO_SIGMA;
     let sigma_back = fwhm_to_sigma(fwhm);
     assert!((sigma_back - sigma).abs() < 1e-6);
 }

@@ -10,7 +10,7 @@ pub fn median_of_n(values: &mut [f32]) -> f32 {
     if values.is_empty() {
         return 0.0;
     }
-    values.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
     values[values.len() / 2]
 }
 

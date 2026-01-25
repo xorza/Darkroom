@@ -209,7 +209,7 @@ pub fn deblend_local_maxima(
             // Fallback: use global maximum
             data.pixels
                 .iter()
-                .max_by(|a, b| a.2.partial_cmp(&b.2).unwrap())
+                .max_by(|a, b| a.2.partial_cmp(&b.2).unwrap_or(std::cmp::Ordering::Equal))
                 .map(|&(x, y, v)| (x, y, v))
                 .unwrap_or((data.x_min, data.y_min, 0.0))
         } else {
