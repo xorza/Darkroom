@@ -337,7 +337,7 @@ fn test_lanczos_clamping_prevents_overshoot() {
 
     // Clamped value must be within [0, 1] range
     assert!(
-        val_clamp >= 0.0 && val_clamp <= 1.0,
+        (0.0..=1.0).contains(&val_clamp),
         "Clamped value {} should be in [0, 1]",
         val_clamp
     );
@@ -381,4 +381,206 @@ fn test_lanczos_clamping_preserves_smooth_regions() {
         val_no_clamp,
         val_clamp
     );
+}
+
+// ============================================================================
+// Milestone F: Test Hardening - Interpolation quality tests
+// ============================================================================
+
+/// Test that interpolation preserves gradients accurately
+#[test]
+fn test_interpolation_gradient_preservation() {
+    // Create a linear gradient image
+    let width = 64;
+    let height = 64;
+    let input: Vec<f32> = (0..width * height)
+        .map(|i| (i % width) as f32 / width as f32)
+        .collect();
+
+    let methods = [
+        InterpolationMethod::Bilinear,
+        InterpolationMethod::Bicubic,
+        InterpolationMethod::Lanczos3,
+    ];
+
+    for method in &methods {
+        let config = WarpConfig {
+            method: *method,
+            ..Default::default()
+        };
+
+        // Sample at sub-pixel positions along the gradient
+        let samples: Vec<f32> = (0..10)
+            .map(|i| {
+                let x = 10.0 + i as f32 * 0.5;
+                interpolate_pixel(&input, width, height, x, 32.0, &config)
+            })
+            .collect();
+
+        // Check that samples are monotonically increasing (gradient preserved)
+        for i in 1..samples.len() {
+            assert!(
+                samples[i] >= samples[i - 1] - 0.001,
+                "{:?}: Gradient not preserved at step {}: {} < {}",
+                method,
+                i,
+                samples[i],
+                samples[i - 1]
+            );
+        }
+    }
+}
+
+/// Test interpolation quality by comparing different methods on same input
+#[test]
+fn test_bicubic_vs_lanczos_quality() {
+    // Create image with known analytic function: f(x,y) = sin(x/10) * cos(y/10)
+    let width = 64;
+    let height = 64;
+    let input: Vec<f32> = (0..width * height)
+        .map(|i| {
+            let x = (i % width) as f32;
+            let y = (i / width) as f32;
+            (x / 10.0).sin() * (y / 10.0).cos()
+        })
+        .collect();
+
+    let config_bicubic = WarpConfig {
+        method: InterpolationMethod::Bicubic,
+        ..Default::default()
+    };
+
+    let config_lanczos = WarpConfig {
+        method: InterpolationMethod::Lanczos3,
+        ..Default::default()
+    };
+
+    // Sample at sub-pixel positions and compare to analytic function
+    let mut bicubic_error_sum = 0.0f32;
+    let mut lanczos_error_sum = 0.0f32;
+    let mut count = 0;
+
+    for iy in 5..height - 5 {
+        for ix in 5..width - 5 {
+            let x = ix as f32 + 0.3; // Sub-pixel offset
+            let y = iy as f32 + 0.7;
+
+            let expected = (x / 10.0).sin() * (y / 10.0).cos();
+            let bicubic_val = interpolate_pixel(&input, width, height, x, y, &config_bicubic);
+            let lanczos_val = interpolate_pixel(&input, width, height, x, y, &config_lanczos);
+
+            bicubic_error_sum += (bicubic_val - expected).abs();
+            lanczos_error_sum += (lanczos_val - expected).abs();
+            count += 1;
+        }
+    }
+
+    let bicubic_mae = bicubic_error_sum / count as f32;
+    let lanczos_mae = lanczos_error_sum / count as f32;
+
+    // Both should have low error
+    assert!(bicubic_mae < 0.05, "Bicubic MAE too high: {}", bicubic_mae);
+    assert!(lanczos_mae < 0.05, "Lanczos MAE too high: {}", lanczos_mae);
+
+    println!(
+        "Interpolation MAE comparison: Bicubic={:.6}, Lanczos={:.6}",
+        bicubic_mae, lanczos_mae
+    );
+}
+
+/// Test that bilinear interpolation is exact at pixel centers
+#[test]
+fn test_all_methods_exact_at_pixel_centers() {
+    let width = 16;
+    let height = 16;
+    let input: Vec<f32> = (0..width * height)
+        .map(|i| ((i * 17) % 100) as f32 / 100.0)
+        .collect();
+
+    let methods = [
+        InterpolationMethod::Nearest,
+        InterpolationMethod::Bilinear,
+        InterpolationMethod::Bicubic,
+        InterpolationMethod::Lanczos2,
+        InterpolationMethod::Lanczos3,
+        InterpolationMethod::Lanczos4,
+    ];
+
+    for method in &methods {
+        let config = WarpConfig {
+            method: *method,
+            ..Default::default()
+        };
+
+        // Sample at exact pixel centers
+        for y in 2..height - 2 {
+            for x in 2..width - 2 {
+                let expected = input[y * width + x];
+                let sampled = interpolate_pixel(&input, width, height, x as f32, y as f32, &config);
+
+                // Should be exact (or very close for Lanczos due to kernel shape)
+                let tolerance = if matches!(method, InterpolationMethod::Nearest) {
+                    0.0
+                } else {
+                    0.01
+                };
+
+                assert!(
+                    (sampled - expected).abs() <= tolerance,
+                    "{:?} at ({}, {}): expected {}, got {} (diff {})",
+                    method,
+                    x,
+                    y,
+                    expected,
+                    sampled,
+                    (sampled - expected).abs()
+                );
+            }
+        }
+    }
+}
+
+/// Test interpolation with extreme sub-pixel positions
+#[test]
+fn test_interpolation_extreme_subpixel() {
+    let width = 32;
+    let height = 32;
+    let input: Vec<f32> = (0..width * height)
+        .map(|i| i as f32 / (width * height) as f32)
+        .collect();
+
+    let config = WarpConfig {
+        method: InterpolationMethod::Lanczos3,
+        ..Default::default()
+    };
+
+    // Test positions very close to pixel boundaries
+    let extreme_positions = [
+        (10.0001, 10.0001),
+        (10.9999, 10.9999),
+        (10.5, 10.0001),
+        (10.0001, 10.5),
+    ];
+
+    for &(x, y) in &extreme_positions {
+        let val = interpolate_pixel(&input, width, height, x, y, &config);
+
+        // Should not produce NaN or infinity
+        assert!(
+            val.is_finite(),
+            "Non-finite value at ({}, {}): {}",
+            x,
+            y,
+            val
+        );
+
+        // Should be within reasonable range
+        assert!(
+            (-0.1..=1.1).contains(&val),
+            "Value out of range at ({}, {}): {}",
+            x,
+            y,
+            val
+        );
+    }
 }

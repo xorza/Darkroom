@@ -115,13 +115,12 @@ pub fn warp_row_bilinear_scalar(
     inverse: &TransformMatrix,
     border_value: f32,
 ) {
-    let output_width = output_row.len();
     let y = output_y as f64;
 
-    for x in 0..output_width {
+    for (x, out_pixel) in output_row.iter_mut().enumerate() {
         let (src_x, src_y) = inverse.transform_point(x as f64, y);
 
-        output_row[x] = bilinear_sample(
+        *out_pixel = bilinear_sample(
             input,
             input_width,
             input_height,
@@ -257,17 +256,17 @@ mod tests {
         warp_row_bilinear_simd(&input, width, height, &mut output_row, y, &inverse, -1.0);
 
         // Check that pixels are shifted
-        for x in 10..width - 10 {
+        for (x, &output_val) in output_row.iter().enumerate().skip(10).take(width - 20) {
             // Output at (x, y) should come from input at (x-5, y-3)
             let src_x = x as i32 - 5;
             let src_y = y as i32 - 3;
             if src_x >= 0 && src_y >= 0 {
                 let expected = input[src_y as usize * width + src_x as usize];
                 assert!(
-                    (output_row[x] - expected).abs() < 0.01,
+                    (output_val - expected).abs() < 0.01,
                     "Mismatch at x={}: {} vs {}",
                     x,
-                    output_row[x],
+                    output_val,
                     expected
                 );
             }

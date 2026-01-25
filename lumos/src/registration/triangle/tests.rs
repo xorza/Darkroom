@@ -685,3 +685,163 @@ fn test_kdtree_scales_better_than_brute_force() {
         kdtree_time
     );
 }
+
+// ============================================================================
+// Milestone F: Test Hardening - Additional stress tests
+// ============================================================================
+
+/// Test with very dense star field (500+ stars) - stress test for k-d tree
+#[test]
+fn test_match_very_dense_field_500_stars() {
+    use std::f64::consts::PI;
+
+    // Generate 500 stars in a semi-random grid pattern
+    let mut ref_positions = Vec::with_capacity(500);
+    for i in 0..25 {
+        for j in 0..20 {
+            // Add some deterministic "noise" to positions
+            let noise_x = ((i * 7 + j * 13) as f64 * 0.1).sin() * 3.0;
+            let noise_y = ((i * 11 + j * 17) as f64 * 0.1).cos() * 3.0;
+            let x = i as f64 * 40.0 + noise_x;
+            let y = j as f64 * 50.0 + noise_y;
+            ref_positions.push((x, y));
+        }
+    }
+
+    assert_eq!(ref_positions.len(), 500);
+
+    // Apply a similarity transform (rotation + scale + translation)
+    let angle = PI / 20.0; // 9 degrees
+    let scale = 1.05;
+    let cos_a = angle.cos();
+    let sin_a = angle.sin();
+
+    let target_positions: Vec<(f64, f64)> = ref_positions
+        .iter()
+        .map(|(x, y)| {
+            let nx = scale * (cos_a * x - sin_a * y) + 100.0;
+            let ny = scale * (sin_a * x + cos_a * y) + 50.0;
+            (nx, ny)
+        })
+        .collect();
+
+    let config = TriangleMatchConfig {
+        max_stars: 150, // Use only brightest 150 stars
+        min_votes: 3,
+        ..Default::default()
+    };
+
+    // K-d tree matching should handle this efficiently
+    let matches = match_stars_triangles_kdtree(&ref_positions, &target_positions, &config);
+
+    // Should find a substantial number of matches
+    assert!(
+        matches.len() >= 50,
+        "Dense field (500 stars) matching found only {} matches",
+        matches.len()
+    );
+
+    // Verify match correctness
+    let correct_matches = matches.iter().filter(|m| m.ref_idx == m.target_idx).count();
+    let accuracy = correct_matches as f64 / matches.len() as f64;
+    assert!(
+        accuracy >= 0.9,
+        "Match accuracy too low: {:.1}% ({} correct out of {})",
+        accuracy * 100.0,
+        correct_matches,
+        matches.len()
+    );
+}
+
+/// Test with clustered star distribution (simulating star clusters)
+#[test]
+fn test_match_clustered_stars() {
+    use std::f64::consts::PI;
+
+    // Create 3 clusters of stars
+    let mut ref_positions = Vec::new();
+
+    // Cluster 1: center at (50, 50)
+    for i in 0..10 {
+        let angle = i as f64 * PI / 5.0;
+        let r = 5.0 + (i as f64 * 0.5);
+        ref_positions.push((50.0 + r * angle.cos(), 50.0 + r * angle.sin()));
+    }
+
+    // Cluster 2: center at (200, 50)
+    for i in 0..10 {
+        let angle = i as f64 * PI / 5.0;
+        let r = 5.0 + (i as f64 * 0.5);
+        ref_positions.push((200.0 + r * angle.cos(), 50.0 + r * angle.sin()));
+    }
+
+    // Cluster 3: center at (125, 150)
+    for i in 0..10 {
+        let angle = i as f64 * PI / 5.0;
+        let r = 5.0 + (i as f64 * 0.5);
+        ref_positions.push((125.0 + r * angle.cos(), 150.0 + r * angle.sin()));
+    }
+
+    // Apply translation
+    let target_positions: Vec<(f64, f64)> = ref_positions
+        .iter()
+        .map(|(x, y)| (x + 20.0, y + 15.0))
+        .collect();
+
+    let config = TriangleMatchConfig {
+        min_votes: 2,
+        ..Default::default()
+    };
+
+    let matches = match_stars_triangles_kdtree(&ref_positions, &target_positions, &config);
+
+    // Should match most stars despite clustering
+    assert!(
+        matches.len() >= 20,
+        "Clustered star matching found only {} matches",
+        matches.len()
+    );
+}
+
+/// Test matching with non-uniform brightness distribution (simulating real star fields)
+#[test]
+fn test_match_brightness_weighted_selection() {
+    // This test simulates what happens when max_stars limits star count
+    // Brighter stars (lower indices) should be preferred
+
+    let ref_positions: Vec<(f64, f64)> = (0..50)
+        .map(|i| {
+            let x = (i % 10) as f64 * 30.0;
+            let y = (i / 10) as f64 * 30.0;
+            (x, y)
+        })
+        .collect();
+
+    let target_positions: Vec<(f64, f64)> = ref_positions
+        .iter()
+        .map(|(x, y)| (x + 10.0, y + 5.0))
+        .collect();
+
+    let config = TriangleMatchConfig {
+        max_stars: 20, // Only use "brightest" 20 stars
+        min_votes: 2,
+        ..Default::default()
+    };
+
+    let matches = match_stars_triangles(&ref_positions, &target_positions, &config);
+
+    // All matches should be from the first 20 stars
+    for m in &matches {
+        assert!(
+            m.ref_idx < 20,
+            "Match included star {} which exceeds max_stars limit",
+            m.ref_idx
+        );
+    }
+
+    assert!(
+        matches.len() >= 10,
+        "Brightness-limited matching found only {} matches",
+        matches.len()
+    );
+}
