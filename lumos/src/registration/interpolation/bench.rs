@@ -6,6 +6,10 @@ use std::path::Path;
 
 use criterion::{BenchmarkId, Criterion, Throughput};
 
+use super::simd::{
+    warp_image_bilinear_simd, warp_image_lanczos3_simd, warp_row_bilinear_scalar,
+    warp_row_bilinear_simd, warp_row_lanczos3_scalar, warp_row_lanczos3_simd,
+};
 use super::{InterpolationMethod, WarpConfig, interpolate_pixel, resample_image, warp_image};
 use crate::registration::types::TransformMatrix;
 
@@ -14,6 +18,7 @@ pub fn benchmarks(c: &mut Criterion, _calibration_dir: &Path) {
     benchmark_interpolation_methods(c);
     benchmark_warp_sizes(c);
     benchmark_resample(c);
+    benchmark_simd_vs_scalar(c);
 }
 
 /// Generate a gradient test image.
@@ -94,6 +99,144 @@ fn benchmark_interpolation_methods(c: &mut Criterion) {
             })
         });
     }
+
+    group.finish();
+}
+
+/// Benchmark SIMD vs Scalar implementations for bilinear and Lanczos3.
+fn benchmark_simd_vs_scalar(c: &mut Criterion) {
+    let mut group = c.benchmark_group("simd_vs_scalar");
+
+    let transform = TransformMatrix::similarity(10.0, -5.0, 0.05, 1.02);
+    let inverse = transform.inverse();
+
+    // Test row warping for different sizes
+    for size in [256, 512, 1024] {
+        let image = generate_gradient_image(size, size);
+        let y = size / 2;
+
+        group.throughput(Throughput::Elements(size as u64));
+
+        // Bilinear SIMD vs Scalar
+        group.bench_function(
+            BenchmarkId::new("bilinear_simd_row", format!("{}px", size)),
+            |b| {
+                b.iter(|| {
+                    let mut output = vec![0.0f32; size];
+                    warp_row_bilinear_simd(
+                        black_box(&image),
+                        size,
+                        size,
+                        &mut output,
+                        y,
+                        black_box(&inverse),
+                        0.0,
+                    );
+                    black_box(output)
+                })
+            },
+        );
+
+        group.bench_function(
+            BenchmarkId::new("bilinear_scalar_row", format!("{}px", size)),
+            |b| {
+                b.iter(|| {
+                    let mut output = vec![0.0f32; size];
+                    warp_row_bilinear_scalar(
+                        black_box(&image),
+                        size,
+                        size,
+                        &mut output,
+                        y,
+                        black_box(&inverse),
+                        0.0,
+                    );
+                    black_box(output)
+                })
+            },
+        );
+
+        // Lanczos3 SIMD vs Scalar
+        group.bench_function(
+            BenchmarkId::new("lanczos3_simd_row", format!("{}px", size)),
+            |b| {
+                b.iter(|| {
+                    let mut output = vec![0.0f32; size];
+                    warp_row_lanczos3_simd(
+                        black_box(&image),
+                        size,
+                        size,
+                        &mut output,
+                        y,
+                        black_box(&inverse),
+                        0.0,
+                        true,
+                        false,
+                    );
+                    black_box(output)
+                })
+            },
+        );
+
+        group.bench_function(
+            BenchmarkId::new("lanczos3_scalar_row", format!("{}px", size)),
+            |b| {
+                b.iter(|| {
+                    let mut output = vec![0.0f32; size];
+                    warp_row_lanczos3_scalar(
+                        black_box(&image),
+                        size,
+                        size,
+                        &mut output,
+                        y,
+                        black_box(&inverse),
+                        0.0,
+                        true,
+                        false,
+                    );
+                    black_box(output)
+                })
+            },
+        );
+    }
+
+    // Full image warping comparison (512x512)
+    let size = 512;
+    let image = generate_gradient_image(size, size);
+
+    group.throughput(Throughput::Elements((size * size) as u64));
+
+    group.bench_function("bilinear_simd_image_512", |b| {
+        b.iter(|| {
+            let result = warp_image_bilinear_simd(
+                black_box(&image),
+                size,
+                size,
+                size,
+                size,
+                black_box(&transform),
+                0.0,
+            );
+            black_box(result)
+        })
+    });
+
+    group.bench_function("lanczos3_simd_image_512", |b| {
+        b.iter(|| {
+            let result = warp_image_lanczos3_simd(
+                black_box(&image),
+                size,
+                size,
+                size,
+                size,
+                black_box(&transform),
+                0.0,
+                true,
+                false,
+            );
+            black_box(result)
+        })
+    });
 
     group.finish();
 }
