@@ -501,25 +501,25 @@ fn test_median_at_edge_bottom_row() {
     );
 }
 
-// --- Tests for median9_inline ---
+// --- Tests for simd::median9_scalar ---
 
 #[test]
-fn test_median9_inline() {
-    // Same as median9 but with inline function
-    let result = median9_inline(0.9, 0.1, 0.8, 0.2, 0.7, 0.3, 0.6, 0.4, 0.5);
+fn test_median9_scalar() {
+    // Test the SIMD module's scalar median9 function
+    let result = simd::median9_scalar(0.9, 0.1, 0.8, 0.2, 0.7, 0.3, 0.6, 0.4, 0.5);
     assert!(
         (result - 0.5).abs() < 1e-6,
-        "median9_inline should be 0.5, got {}",
+        "median9_scalar should be 0.5, got {}",
         result
     );
 }
 
 #[test]
-fn test_median9_inline_all_same() {
-    let result = median9_inline(0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5);
+fn test_median9_scalar_all_same() {
+    let result = simd::median9_scalar(0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5);
     assert!(
         (result - 0.5).abs() < 1e-6,
-        "median9_inline all same should be 0.5, got {}",
+        "median9_scalar all same should be 0.5, got {}",
         result
     );
 }

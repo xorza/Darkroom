@@ -345,14 +345,17 @@ CalibrationMasters // Container for master dark/flat/bias frames
 - Detects stars in astronomical images and computes sub-pixel accurate centroids
 - Module structure:
   - `mod.rs` - `Star`, `StarDetectionConfig`, `find_stars()` main API
-  - `constants.rs` - Shared astronomical and algorithmic constants (FWHM_TO_SIGMA, MAD_TO_SIGMA, etc.)
-  - `background/mod.rs` - `BackgroundMap`, `estimate_background()` using tile-based sigma-clipped median
+  - `constants.rs` - Shared astronomical and algorithmic constants (FWHM_TO_SIGMA, MAD_TO_SIGMA, etc.), `dilate_mask()` utility
+  - `background/mod.rs` - `BackgroundMap`, `estimate_background()` using tile-based sigma-clipped median, SIMD accelerated
   - `detection/mod.rs` - `StarCandidate`, `detect_stars()` using thresholding and connected components
+  - `detection/simd/` - SIMD threshold mask creation (AVX2, SSE4.1, NEON)
   - `centroid/mod.rs` - `compute_centroid()` using iterative weighted centroid algorithm
-  - `convolution/mod.rs` - Gaussian kernel convolution with SIMD acceleration
+  - `convolution/mod.rs` - Gaussian kernel convolution with SIMD acceleration (AVX2, SSE4.1, NEON)
   - `deblend/mod.rs` - Multi-threshold deblending for separating blended stars
   - `cosmic_ray/mod.rs` - Cosmic ray detection using Laplacian edge detection
+  - `cosmic_ray/simd/` - SIMD Laplacian computation (AVX2, SSE4.1, NEON) - ~5-6x speedup over scalar
   - `median_filter/mod.rs` - `median_filter_3x3()` for Bayer pattern artifact removal
+  - `median_filter/simd/` - SIMD median filter using 25-comparator sorting network (AVX2, SSE4.1, NEON) - ~2x speedup over scalar
 
 **Constants module (`star_detection/constants.rs`):**
 - `FWHM_TO_SIGMA: f32 = 2.354_82` - FWHM to Gaussian σ conversion (2√(2ln2))

@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::star_detection::background::{BackgroundMap, estimate_background};
+use crate::star_detection::constants::FWHM_TO_SIGMA;
 use crate::star_detection::detection::{StarCandidate, detect_stars};
 
 /// Default stamp radius for tests (matching expected FWHM of ~4 pixels).
@@ -76,7 +77,7 @@ fn test_fwhm_estimation() {
     let width = 128;
     let height = 128;
     let sigma = 3.0f32;
-    let expected_fwhm = 2.355 * sigma;
+    let expected_fwhm = FWHM_TO_SIGMA * sigma;
     let pixels = make_gaussian_star(width, height, 64.0, 64.0, sigma, 0.8);
 
     let bg = estimate_background(&pixels, width, height, 32);
@@ -811,11 +812,11 @@ fn test_snr_decreases_with_higher_noise() {
 
 #[test]
 fn test_fwhm_formula_for_known_gaussian() {
-    // For a Gaussian with known sigma, verify FWHM ≈ 2.355 * sigma
+    // For a Gaussian with known sigma, verify FWHM ≈ FWHM_TO_SIGMA * sigma
     let width = 128;
     let height = 128;
     let sigma = 3.0f32;
-    let expected_fwhm = 2.355 * sigma;
+    let expected_fwhm = FWHM_TO_SIGMA * sigma;
 
     let pixels = make_gaussian_star(width, height, 64.0, 64.0, sigma, 0.8);
     let bg = make_uniform_background(width, height, 0.1, 0.001); // Very low noise

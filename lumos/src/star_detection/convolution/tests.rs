@@ -1,6 +1,7 @@
 //! Tests for Gaussian convolution.
 
 use super::*;
+use crate::star_detection::constants::FWHM_TO_SIGMA;
 
 // ============================================================================
 // Kernel generation tests
@@ -333,7 +334,7 @@ fn test_matched_filter_boosts_snr() {
         *p += ((i * 17) % 100) as f32 * 0.001 - 0.05;
     }
 
-    let fwhm = sigma * 2.355;
+    let fwhm = sigma * FWHM_TO_SIGMA;
     let result = matched_filter(&pixels, width, height, &background, fwhm);
 
     // Peak should be at star location

@@ -2,6 +2,7 @@
 //! Run with: cargo bench -p lumos --features bench --bench star_detection_cosmic_ray
 
 use super::laplacian::compute_laplacian;
+use super::simd::compute_laplacian_simd;
 use super::{LACosmicConfig, detect_cosmic_rays};
 use criterion::{BenchmarkId, Criterion, Throughput};
 use std::hint::black_box;
@@ -79,6 +80,34 @@ pub fn bench_detect_cosmic_rays(data: &BenchData) -> usize {
     result.cosmic_ray_count
 }
 
+/// Scalar full-image Laplacian (for comparison).
+fn compute_laplacian_scalar(pixels: &[f32], width: usize, height: usize) -> Vec<f32> {
+    let mut output = vec![0.0f32; pixels.len()];
+    for y in 0..height {
+        for x in 0..width {
+            let idx = y * width + x;
+            let left = if x > 0 { pixels[idx - 1] } else { pixels[idx] };
+            let right = if x + 1 < width {
+                pixels[idx + 1]
+            } else {
+                pixels[idx]
+            };
+            let above = if y > 0 {
+                pixels[idx - width]
+            } else {
+                pixels[idx]
+            };
+            let below = if y + 1 < height {
+                pixels[idx + width]
+            } else {
+                pixels[idx]
+            };
+            output[idx] = left + right + above + below - 4.0 * pixels[idx];
+        }
+    }
+    output
+}
+
 /// Register cosmic ray detection benchmarks with Criterion.
 pub fn benchmarks(c: &mut Criterion) {
     let mut laplacian_group = c.benchmark_group("cosmic_ray_laplacian");
@@ -95,6 +124,39 @@ pub fn benchmarks(c: &mut Criterion) {
     }
 
     laplacian_group.finish();
+
+    // SIMD vs Scalar comparison
+    let mut simd_group = c.benchmark_group("cosmic_ray_simd_vs_scalar");
+    simd_group.sample_size(30);
+
+    for &(width, height) in &[(512, 512), (1024, 1024), (2048, 2048)] {
+        let data = BenchData::new(width, height, 100, 20);
+        let size_name = format!("{}x{}", width, height);
+
+        simd_group.throughput(Throughput::Elements((width * height) as u64));
+
+        simd_group.bench_function(BenchmarkId::new("scalar", &size_name), |b| {
+            b.iter(|| {
+                black_box(compute_laplacian_scalar(
+                    black_box(&data.pixels),
+                    width,
+                    height,
+                ))
+            })
+        });
+
+        simd_group.bench_function(BenchmarkId::new("simd", &size_name), |b| {
+            b.iter(|| {
+                black_box(compute_laplacian_simd(
+                    black_box(&data.pixels),
+                    width,
+                    height,
+                ))
+            })
+        });
+    }
+
+    simd_group.finish();
 
     let mut detect_group = c.benchmark_group("cosmic_ray_detect");
     detect_group.sample_size(20);

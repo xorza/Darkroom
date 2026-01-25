@@ -1,5 +1,7 @@
 //! Synthetic star field generation for testing star detection algorithms.
 
+use crate::star_detection::constants::FWHM_TO_SIGMA;
+
 /// A synthetic star to be placed in a generated image.
 #[allow(dead_code)]
 #[derive(Debug, Clone, Copy)]
@@ -28,7 +30,7 @@ impl SyntheticStar {
 
     /// Get the FWHM (Full Width at Half Maximum) of this star.
     pub fn fwhm(&self) -> f32 {
-        2.355 * self.sigma
+        FWHM_TO_SIGMA * self.sigma
     }
 }
 
@@ -173,7 +175,7 @@ mod tests {
     #[test]
     fn test_synthetic_star_fwhm() {
         let star = SyntheticStar::new(50.0, 50.0, 0.8, 2.0);
-        let expected_fwhm = 2.355 * 2.0;
+        let expected_fwhm = FWHM_TO_SIGMA * 2.0;
         assert!((star.fwhm() - expected_fwhm).abs() < 0.001);
     }
 

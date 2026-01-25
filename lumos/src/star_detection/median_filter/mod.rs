@@ -6,6 +6,8 @@
 #[cfg(feature = "bench")]
 pub mod bench;
 
+pub mod simd;
+
 #[cfg(test)]
 mod tests;
 
@@ -56,7 +58,7 @@ pub fn median_filter_3x3(pixels: &[f32], width: usize, height: usize) -> Vec<f32
 }
 
 /// Filter an interior row (y is not 0 or height-1).
-/// Uses fast path for interior pixels with full 9-element neighborhood.
+/// Uses SIMD fast path for interior pixels with full 9-element neighborhood.
 #[inline]
 fn filter_interior_row(pixels: &[f32], width: usize, y: usize, output_row: &mut [f32]) {
     // Left edge pixel (x=0): 6 neighbors
@@ -67,19 +69,8 @@ fn filter_interior_row(pixels: &[f32], width: usize, y: usize, output_row: &mut 
     let row_curr = &pixels[y * width..(y + 1) * width];
     let row_below = &pixels[(y + 1) * width..(y + 2) * width];
 
-    for x in 1..width - 1 {
-        output_row[x] = median9_inline(
-            row_above[x - 1],
-            row_above[x],
-            row_above[x + 1],
-            row_curr[x - 1],
-            row_curr[x],
-            row_curr[x + 1],
-            row_below[x - 1],
-            row_below[x],
-            row_below[x + 1],
-        );
-    }
+    // Use SIMD-accelerated row processing
+    simd::median_filter_row_simd(row_above, row_curr, row_below, output_row, width);
 
     // Right edge pixel (x=width-1): 6 neighbors
     output_row[width - 1] = median_at_right_edge(pixels, width, y);
@@ -140,24 +131,6 @@ fn median_at_edge(pixels: &[f32], width: usize, height: usize, x: usize, y: usiz
     }
 
     median_of_n(&mut neighbors[..count])
-}
-
-/// Inline median of 9 elements - the hot path for interior pixels.
-#[inline]
-#[allow(clippy::too_many_arguments)]
-fn median9_inline(
-    v0: f32,
-    v1: f32,
-    v2: f32,
-    v3: f32,
-    v4: f32,
-    v5: f32,
-    v6: f32,
-    v7: f32,
-    v8: f32,
-) -> f32 {
-    let mut v = [v0, v1, v2, v3, v4, v5, v6, v7, v8];
-    median9(&mut v)
 }
 
 /// Compute median of a small array (up to 9 elements).

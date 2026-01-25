@@ -2,6 +2,7 @@
 
 use super::synthetic::{SyntheticFieldConfig, SyntheticStar, generate_star_field};
 use crate::star_detection::background::estimate_background;
+use crate::star_detection::constants::dilate_mask;
 use crate::star_detection::{StarDetectionConfig, find_stars, median_filter_3x3};
 use crate::testing::{calibration_dir, init_tracing};
 use image::{GrayImage, Rgb, RgbImage};
@@ -52,29 +53,7 @@ fn create_threshold_mask(
     mask
 }
 
-/// Dilate mask (same logic as detection.rs).
-fn dilate_mask(mask: &[bool], width: usize, height: usize, radius: usize) -> Vec<bool> {
-    let mut dilated = vec![false; width * height];
-
-    for y in 0..height {
-        for x in 0..width {
-            if mask[y * width + x] {
-                let y_min = y.saturating_sub(radius);
-                let y_max = (y + radius).min(height - 1);
-                let x_min = x.saturating_sub(radius);
-                let x_max = (x + radius).min(width - 1);
-
-                for dy in y_min..=y_max {
-                    for dx in x_min..=x_max {
-                        dilated[dy * width + dx] = true;
-                    }
-                }
-            }
-        }
-    }
-
-    dilated
-}
+// Note: dilate_mask is now imported from crate::star_detection::constants
 
 #[test]
 fn test_debug_star_detection_steps() {
@@ -547,9 +526,10 @@ fn test_noise_analysis() {
             local_diffs.push(diff_v);
         }
     }
+    use crate::star_detection::constants::MAD_TO_SIGMA;
     local_diffs.sort_by(|a, b| a.partial_cmp(b).unwrap());
     let local_mad = local_diffs[local_diffs.len() / 2];
-    let local_sigma = local_mad * 1.4826 / std::f32::consts::SQRT_2; // Divide by sqrt(2) for difference of 2 values
+    let local_sigma = local_mad * MAD_TO_SIGMA / std::f32::consts::SQRT_2; // Divide by sqrt(2) for difference of 2 values
     println!(
         "\nLocal difference-based noise estimate: {:.6}",
         local_sigma
