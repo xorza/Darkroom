@@ -76,6 +76,8 @@ reqwest = { version = "*", features = ["blocking", "json", "form", "query", "mul
 bzip2 = { version = "*" }
 dirs = { version = "*" }
 tempfile = { version = "*" }
+rand_chacha = { version = "*" }
+rustfft ={ version = "*" }
 
 
 [profile.bench]

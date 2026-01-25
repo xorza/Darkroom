@@ -2,6 +2,7 @@ mod astro_image;
 mod calibration_masters;
 mod common;
 pub mod math;
+pub mod registration;
 mod stacking;
 mod star_detection;
 #[cfg(any(test, feature = "bench"))]
@@ -9,6 +10,10 @@ mod testing;
 
 pub use astro_image::{AstroImage, AstroImageMetadata, BitPix, HotPixelMap, ImageDimensions};
 pub use calibration_masters::CalibrationMasters;
+pub use registration::{
+    InterpolationMethod, RegistrationConfig, RegistrationError, RegistrationResult, Registrator,
+    TransformMatrix, TransformType,
+};
 pub use stacking::{FrameType, ImageStack, MedianConfig, SigmaClipConfig, StackingMethod};
 pub use star_detection::{Star, StarDetectionConfig, find_stars};
 

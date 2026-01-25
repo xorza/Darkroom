@@ -23,16 +23,27 @@
 //! # Example
 //!
 //! ```ignore
-//! use lumos::registration::{register_images, RegistrationConfig};
+//! use lumos::registration::{Registrator, RegistrationConfig, TransformType};
 //!
+//! // Prepare star positions (x, y) from both images
+//! let ref_stars = vec![(100.0, 100.0), (200.0, 150.0), /* ... */];
+//! let target_stars = vec![(110.0, 105.0), (210.0, 155.0), /* ... */];
+//!
+//! // Configure registration
 //! let config = RegistrationConfig::builder()
-//!     .with_rotation()
 //!     .with_scale()
 //!     .ransac_threshold(2.0)
 //!     .build();
 //!
-//! let result = register_images(&reference, &target, &config)?;
+//! // Run registration
+//! let registrator = Registrator::new(config);
+//! let result = registrator.register_stars(&ref_stars, &target_stars)?;
+//!
 //! println!("RMS error: {:.3} pixels", result.rms_error);
+//! println!("Matched {} stars", result.num_inliers);
+//!
+//! // Apply transformation to align target image
+//! let aligned = warp_to_reference(&target_image, width, height, &result.transform, InterpolationMethod::Lanczos3);
 //! ```
 //!
 //! # Algorithm Overview
@@ -48,29 +59,25 @@
 //!
 //! See `IMPLEMENTATION_PLAN.md` for detailed algorithm documentation.
 
-// TODO: Implement modules as per IMPLEMENTATION_PLAN.md
-//
-// Phase 1: Core types
-// pub mod types;
-//
-// Phase 2: Triangle matching
-// pub mod star_matching;
-//
-// Phase 3: RANSAC
-// pub mod transform;
-//
-// Phase 4: Phase correlation
-// pub mod phase_correlation;
-//
-// Phase 5: Interpolation
-// pub mod interpolation;
-//
-// Phase 6: Image warping
-// pub mod warp;
-//
-// Phase 7: Quality metrics
-// pub mod quality;
-//
-// Benchmarks (feature-gated)
-// #[cfg(feature = "bench")]
-// pub mod bench;
+pub mod interpolation;
+pub mod phase_correlation;
+pub mod pipeline;
+pub mod quality;
+pub mod ransac;
+pub mod triangle;
+pub mod types;
+
+// Re-export main types for convenience
+pub use interpolation::{InterpolationMethod, WarpConfig, warp_image};
+pub use phase_correlation::{PhaseCorrelationConfig, PhaseCorrelator};
+pub use pipeline::{Registrator, quick_register, register_stars, warp_to_reference};
+pub use quality::{
+    QuadrantConsistency, QualityMetrics, ResidualStats, check_quadrant_consistency,
+    compute_residuals, estimate_overlap,
+};
+pub use ransac::{RansacConfig, RansacEstimator, RansacResult};
+pub use triangle::{Triangle, TriangleMatchConfig, match_stars_triangles};
+pub use types::{
+    RegistrationConfig, RegistrationConfigBuilder, RegistrationError, RegistrationResult,
+    StarMatch, TransformMatrix, TransformType,
+};
