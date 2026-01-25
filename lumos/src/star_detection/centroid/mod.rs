@@ -37,6 +37,21 @@ pub(crate) const MAX_ITERATIONS: usize = MAX_CENTROID_ITERATIONS;
 pub(crate) const CONVERGENCE_THRESHOLD_SQ: f32 =
     CENTROID_CONVERGENCE_THRESHOLD * CENTROID_CONVERGENCE_THRESHOLD;
 
+/// Method for computing local background during centroid refinement.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub enum LocalBackgroundMethod {
+    /// Use the global background map (default, fastest).
+    #[default]
+    GlobalMap,
+    /// Compute local background using an annular region around the star.
+    /// Inner radius is based on stamp_radius, outer radius is 1.5× that.
+    /// More accurate in regions with variable nebulosity.
+    Annulus,
+    /// Use sigma-clipped median of the outer ring of the stamp.
+    /// Good compromise between speed and accuracy.
+    OuterRing,
+}
+
 /// Compute adaptive stamp radius based on expected FWHM.
 ///
 /// The stamp should be large enough to capture most of the PSF flux (~3.5× FWHM)
@@ -61,6 +76,166 @@ pub(crate) fn is_valid_stamp_position(
         && icy >= stamp_radius as isize
         && icx < (width - stamp_radius) as isize
         && icy < (height - stamp_radius) as isize
+}
+
+/// Compute local background and noise using an annular region around the star.
+///
+/// The inner radius excludes the star's flux, and the outer radius samples
+/// the local sky. Uses sigma-clipped median for robustness.
+///
+/// # Arguments
+/// * `pixels` - Image data
+/// * `width` - Image width
+/// * `height` - Image height
+/// * `cx` - Star center x coordinate
+/// * `cy` - Star center y coordinate
+/// * `inner_radius` - Inner radius of annulus (excludes star)
+/// * `outer_radius` - Outer radius of annulus
+///
+/// # Returns
+/// Tuple of (background, noise) or None if not enough valid pixels
+fn compute_annulus_background(
+    pixels: &[f32],
+    width: usize,
+    height: usize,
+    cx: f32,
+    cy: f32,
+    inner_radius: usize,
+    outer_radius: usize,
+) -> Option<(f32, f32)> {
+    let icx = cx.round() as isize;
+    let icy = cy.round() as isize;
+    let inner_r2 = (inner_radius * inner_radius) as f32;
+    let outer_r2 = (outer_radius * outer_radius) as f32;
+
+    let mut values = Vec::with_capacity(4 * outer_radius * outer_radius);
+
+    let outer_r_i32 = outer_radius as i32;
+    for dy in -outer_r_i32..=outer_r_i32 {
+        for dx in -outer_r_i32..=outer_r_i32 {
+            let r2 = (dx * dx + dy * dy) as f32;
+            if r2 < inner_r2 || r2 > outer_r2 {
+                continue;
+            }
+
+            let x = icx + dx as isize;
+            let y = icy + dy as isize;
+
+            if x >= 0 && x < width as isize && y >= 0 && y < height as isize {
+                values.push(pixels[y as usize * width + x as usize]);
+            }
+        }
+    }
+
+    if values.len() < 10 {
+        return None;
+    }
+
+    // Sigma-clipped median (2 iterations, 3-sigma clip)
+    let (median, sigma) = sigma_clipped_median_mad(&mut values, 3.0, 2);
+    Some((median, sigma))
+}
+
+/// Compute local background using the outer ring of a stamp.
+///
+/// Faster than full annulus computation, uses only the outermost pixels.
+fn compute_outer_ring_background(
+    pixels: &[f32],
+    width: usize,
+    height: usize,
+    cx: f32,
+    cy: f32,
+    stamp_radius: usize,
+) -> Option<(f32, f32)> {
+    let icx = cx.round() as isize;
+    let icy = cy.round() as isize;
+
+    let mut values = Vec::with_capacity(8 * stamp_radius);
+
+    let r = stamp_radius as i32;
+    // Collect only the outermost ring
+    for dy in -r..=r {
+        for dx in -r..=r {
+            // Check if on the outer edge
+            if dx.abs() != r && dy.abs() != r {
+                continue;
+            }
+
+            let x = icx + dx as isize;
+            let y = icy + dy as isize;
+
+            if x >= 0 && x < width as isize && y >= 0 && y < height as isize {
+                values.push(pixels[y as usize * width + x as usize]);
+            }
+        }
+    }
+
+    if values.len() < 8 {
+        return None;
+    }
+
+    let (median, sigma) = sigma_clipped_median_mad(&mut values, 3.0, 2);
+    Some((median, sigma))
+}
+
+/// Compute sigma-clipped median and MAD (median absolute deviation).
+fn sigma_clipped_median_mad(values: &mut [f32], kappa: f32, iterations: usize) -> (f32, f32) {
+    if values.is_empty() {
+        return (0.0, 0.0);
+    }
+
+    let mut len = values.len();
+
+    for _ in 0..iterations {
+        if len < 3 {
+            break;
+        }
+
+        let active = &mut values[..len];
+        active.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        let median = active[active.len() / 2];
+
+        // Compute MAD
+        let mut deviations: Vec<f32> = active.iter().map(|v| (v - median).abs()).collect();
+        deviations.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        let mad = deviations[deviations.len() / 2];
+        let sigma = constants::mad_to_sigma(mad);
+
+        if sigma < f32::EPSILON {
+            return (median, 0.0);
+        }
+
+        // Clip values outside threshold
+        let threshold = kappa * sigma;
+        let mut write_idx = 0;
+        for i in 0..len {
+            if (values[i] - median).abs() <= threshold {
+                values[write_idx] = values[i];
+                write_idx += 1;
+            }
+        }
+
+        if write_idx == len {
+            break;
+        }
+        len = write_idx;
+    }
+
+    // Final median and sigma
+    let active = &mut values[..len];
+    if active.is_empty() {
+        return (0.0, 0.0);
+    }
+
+    active.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let median = active[active.len() / 2];
+
+    let mut deviations: Vec<f32> = active.iter().map(|v| (v - median).abs()).collect();
+    deviations.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let mad = deviations[deviations.len() / 2];
+    let sigma = constants::mad_to_sigma(mad);
+
+    (median, sigma)
 }
 
 /// Compute sub-pixel centroid and quality metrics for a star candidate.
@@ -104,12 +279,37 @@ pub fn compute_centroid(
         }
     }
 
-    // Get local background for fitting
-    let icx = cx.round() as isize;
-    let icy = cy.round() as isize;
-    let idx = icy as usize * width + icx as usize;
-    let local_bg = background.background[idx];
-    let local_noise = background.noise[idx];
+    // Compute local background based on configured method
+    let (local_bg, local_noise) = match config.local_background_method {
+        LocalBackgroundMethod::GlobalMap => {
+            let icx = cx.round() as isize;
+            let icy = cy.round() as isize;
+            let idx = icy as usize * width + icx as usize;
+            (background.background[idx], background.noise[idx])
+        }
+        LocalBackgroundMethod::Annulus => {
+            let inner_radius = stamp_radius;
+            let outer_radius = (stamp_radius as f32 * 1.5).ceil() as usize;
+            compute_annulus_background(pixels, width, height, cx, cy, inner_radius, outer_radius)
+                .unwrap_or_else(|| {
+                    // Fall back to global map
+                    let icx = cx.round() as isize;
+                    let icy = cy.round() as isize;
+                    let idx = icy as usize * width + icx as usize;
+                    (background.background[idx], background.noise[idx])
+                })
+        }
+        LocalBackgroundMethod::OuterRing => {
+            compute_outer_ring_background(pixels, width, height, cx, cy, stamp_radius)
+                .unwrap_or_else(|| {
+                    // Fall back to global map
+                    let icx = cx.round() as isize;
+                    let icy = cy.round() as isize;
+                    let idx = icy as usize * width + icx as usize;
+                    (background.background[idx], background.noise[idx])
+                })
+        }
+    };
 
     // Refine with profile fitting if requested
     match config.centroid_method {

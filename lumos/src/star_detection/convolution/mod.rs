@@ -278,3 +278,196 @@ pub fn matched_filter(
     let sigma = fwhm_to_sigma(fwhm);
     gaussian_convolve(&subtracted, width, height, sigma)
 }
+
+/// Apply matched filter with an elliptical Gaussian kernel.
+///
+/// This variant allows for non-circular PSF shapes, useful when stars are
+/// elongated due to tracking errors, field rotation, or optical aberrations.
+///
+/// # Arguments
+/// * `pixels` - Input image data
+/// * `width` - Image width
+/// * `height` - Image height
+/// * `background` - Per-pixel background values
+/// * `fwhm` - Expected FWHM of stars in pixels (major axis)
+/// * `axis_ratio` - Ratio of minor to major axis (0 < ratio <= 1, where 1 = circular)
+/// * `angle` - Position angle of major axis in radians (0 = along x-axis)
+///
+/// # Returns
+/// Convolved, background-subtracted image
+pub fn matched_filter_elliptical(
+    pixels: &[f32],
+    width: usize,
+    height: usize,
+    background: &[f32],
+    fwhm: f32,
+    axis_ratio: f32,
+    angle: f32,
+) -> Vec<f32> {
+    assert_eq!(pixels.len(), width * height);
+    assert_eq!(background.len(), width * height);
+    assert!(
+        axis_ratio > 0.0 && axis_ratio <= 1.0,
+        "Axis ratio must be in (0, 1]"
+    );
+
+    // Subtract background first
+    let subtracted: Vec<f32> = pixels
+        .iter()
+        .zip(background.iter())
+        .map(|(&p, &b)| (p - b).max(0.0))
+        .collect();
+
+    // Convolve with elliptical Gaussian kernel
+    let sigma = fwhm_to_sigma(fwhm);
+    elliptical_gaussian_convolve(&subtracted, width, height, sigma, axis_ratio, angle)
+}
+
+/// Compute 2D elliptical Gaussian kernel.
+///
+/// The kernel is normalized so that it sums to 1.0.
+///
+/// # Arguments
+/// * `sigma` - Standard deviation along the major axis (in pixels)
+/// * `axis_ratio` - Ratio of minor to major axis (0 < ratio <= 1)
+/// * `angle` - Position angle of major axis in radians (0 = along x-axis)
+///
+/// # Returns
+/// Tuple of (kernel values, kernel width, kernel height)
+pub fn elliptical_gaussian_kernel_2d(sigma: f32, axis_ratio: f32, angle: f32) -> (Vec<f32>, usize) {
+    assert!(sigma > 0.0, "Sigma must be positive");
+    assert!(
+        axis_ratio > 0.0 && axis_ratio <= 1.0,
+        "Axis ratio must be in (0, 1]"
+    );
+
+    // Kernel radius based on major axis sigma
+    let radius = (3.0 * sigma).ceil() as usize;
+    let size = 2 * radius + 1;
+
+    // Sigma values for major and minor axes
+    let sigma_major = sigma;
+    let sigma_minor = sigma * axis_ratio;
+
+    // Precompute rotation matrix components
+    let cos_a = angle.cos();
+    let sin_a = angle.sin();
+
+    // Precompute denominators
+    let two_sigma_major_sq = 2.0 * sigma_major * sigma_major;
+    let two_sigma_minor_sq = 2.0 * sigma_minor * sigma_minor;
+
+    let mut kernel = vec![0.0f32; size * size];
+    let mut sum = 0.0f32;
+
+    for ky in 0..size {
+        for kx in 0..size {
+            let x = kx as f32 - radius as f32;
+            let y = ky as f32 - radius as f32;
+
+            // Rotate coordinates to align with ellipse axes
+            let x_rot = x * cos_a + y * sin_a;
+            let y_rot = -x * sin_a + y * cos_a;
+
+            // Compute elliptical Gaussian value
+            let value =
+                (-x_rot * x_rot / two_sigma_major_sq - y_rot * y_rot / two_sigma_minor_sq).exp();
+
+            kernel[ky * size + kx] = value;
+            sum += value;
+        }
+    }
+
+    // Normalize
+    for v in &mut kernel {
+        *v /= sum;
+    }
+
+    (kernel, size)
+}
+
+/// Apply elliptical Gaussian convolution to an image.
+///
+/// Unlike separable convolution for circular Gaussians, elliptical Gaussians
+/// require full 2D convolution which is O(n×k²). This is used when the PSF
+/// is known to be non-circular.
+///
+/// # Arguments
+/// * `pixels` - Input image data
+/// * `width` - Image width
+/// * `height` - Image height
+/// * `sigma` - Gaussian sigma along major axis (use `fwhm_to_sigma` to convert from FWHM)
+/// * `axis_ratio` - Ratio of minor to major axis (0 < ratio <= 1, where 1 = circular)
+/// * `angle` - Position angle of major axis in radians (0 = along x-axis)
+///
+/// # Returns
+/// Convolved image of the same size
+pub fn elliptical_gaussian_convolve(
+    pixels: &[f32],
+    width: usize,
+    height: usize,
+    sigma: f32,
+    axis_ratio: f32,
+    angle: f32,
+) -> Vec<f32> {
+    assert_eq!(pixels.len(), width * height, "Pixel count mismatch");
+
+    // For axis_ratio very close to 1.0, use faster separable convolution
+    if (axis_ratio - 1.0).abs() < 0.01 {
+        return gaussian_convolve(pixels, width, height, sigma);
+    }
+
+    let (kernel, ksize) = elliptical_gaussian_kernel_2d(sigma, axis_ratio, angle);
+    let radius = ksize / 2;
+
+    let mut output = vec![0.0f32; width * height];
+
+    // Process rows in parallel
+    const ROWS_PER_CHUNK: usize = 8;
+    output
+        .par_chunks_mut(width * ROWS_PER_CHUNK)
+        .enumerate()
+        .for_each(|(chunk_idx, out_chunk)| {
+            let y_start = chunk_idx * ROWS_PER_CHUNK;
+            let rows_in_chunk = out_chunk.len() / width;
+
+            for local_y in 0..rows_in_chunk {
+                let y = y_start + local_y;
+                let out_row = &mut out_chunk[local_y * width..(local_y + 1) * width];
+
+                for (x, out_px) in out_row.iter_mut().enumerate() {
+                    let mut sum = 0.0f32;
+
+                    for ky in 0..ksize {
+                        for kx in 0..ksize {
+                            let sx = x as isize + kx as isize - radius as isize;
+                            let sy = y as isize + ky as isize - radius as isize;
+
+                            // Mirror boundary handling
+                            let sx = if sx < 0 {
+                                (-sx) as usize
+                            } else if sx >= width as isize {
+                                (2 * width - 2).saturating_sub(sx as usize)
+                            } else {
+                                sx as usize
+                            };
+
+                            let sy = if sy < 0 {
+                                (-sy) as usize
+                            } else if sy >= height as isize {
+                                (2 * height - 2).saturating_sub(sy as usize)
+                            } else {
+                                sy as usize
+                            };
+
+                            sum += pixels[sy * width + sx] * kernel[ky * ksize + kx];
+                        }
+                    }
+
+                    *out_px = sum;
+                }
+            }
+        });
+
+    output
+}

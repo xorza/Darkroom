@@ -54,11 +54,12 @@ pub use background::{
     IterativeBackgroundConfig, estimate_background, estimate_background_iterative,
 };
 pub use centroid::compute_centroid;
-pub use convolution::matched_filter;
+pub use convolution::{matched_filter, matched_filter_elliptical};
 pub use detection::{detect_stars, detect_stars_filtered};
 pub use median_filter::median_filter_3x3;
 
 // Re-export fitting functions from centroid module
+pub use centroid::LocalBackgroundMethod;
 #[allow(unused_imports)]
 pub use centroid::{GaussianFitConfig, GaussianFitResult, fit_gaussian_2d};
 #[allow(unused_imports)]
@@ -250,6 +251,162 @@ impl DefectMap {
     }
 }
 
+/// Detection threshold and area parameters.
+#[derive(Debug, Clone)]
+pub struct DetectionParams {
+    /// Detection threshold in sigma above background (typically 3.0-5.0).
+    pub detection_sigma: f32,
+    /// Minimum star area in pixels.
+    pub min_area: usize,
+    /// Maximum star area in pixels.
+    pub max_area: usize,
+    /// Edge margin in pixels (stars too close to edge are rejected).
+    pub edge_margin: usize,
+    /// Expected FWHM of stars in pixels for matched filtering.
+    /// Set to 0.0 to disable matched filtering.
+    pub expected_fwhm: f32,
+    /// Axis ratio for elliptical Gaussian matched filter (minor/major axis).
+    /// Value of 1.0 means circular PSF.
+    pub psf_axis_ratio: f32,
+    /// Position angle of PSF major axis in radians.
+    pub psf_angle: f32,
+    /// Tile size for background estimation.
+    pub background_tile_size: usize,
+    /// Number of iterative background estimation passes.
+    pub iterative_background_passes: usize,
+}
+
+impl Default for DetectionParams {
+    fn default() -> Self {
+        Self {
+            detection_sigma: 4.0,
+            min_area: 5,
+            max_area: 500,
+            edge_margin: 10,
+            expected_fwhm: 4.0,
+            psf_axis_ratio: 1.0,
+            psf_angle: 0.0,
+            background_tile_size: 64,
+            iterative_background_passes: 0,
+        }
+    }
+}
+
+/// Quality filter parameters for rejecting spurious detections.
+#[derive(Debug, Clone)]
+pub struct QualityFilters {
+    /// Maximum eccentricity (0-1, higher = more elongated allowed).
+    pub max_eccentricity: f32,
+    /// Minimum SNR for a star to be considered valid.
+    pub min_snr: f32,
+    /// Maximum FWHM deviation from median in MAD units.
+    pub max_fwhm_deviation: f32,
+    /// Maximum sharpness (cosmic ray rejection).
+    pub max_sharpness: f32,
+    /// Maximum roundness for a star to be considered valid.
+    pub max_roundness: f32,
+    /// Minimum separation between stars for duplicate removal.
+    pub duplicate_min_separation: f32,
+}
+
+impl Default for QualityFilters {
+    fn default() -> Self {
+        Self {
+            max_eccentricity: 0.6,
+            min_snr: 10.0,
+            max_fwhm_deviation: 3.0,
+            max_sharpness: 0.7,
+            max_roundness: 1.0,
+            duplicate_min_separation: 8.0,
+        }
+    }
+}
+
+/// Camera-specific parameters for accurate SNR calculation.
+#[derive(Debug, Clone)]
+pub struct CameraParams {
+    /// Whether the image has a Color Filter Array (Bayer/X-Trans pattern).
+    pub is_cfa: bool,
+    /// Camera gain in electrons per ADU (e-/ADU).
+    pub gain: Option<f32>,
+    /// Read noise in electrons (e-).
+    pub read_noise: Option<f32>,
+    /// Optional defect map for masking bad pixels.
+    pub defect_map: Option<DefectMap>,
+}
+
+impl Default for CameraParams {
+    fn default() -> Self {
+        Self {
+            is_cfa: true, // CFA by default for backward compatibility
+            gain: None,
+            read_noise: None,
+            defect_map: None,
+        }
+    }
+}
+
+impl CameraParams {
+    /// Create camera params for a CFA sensor with default settings.
+    pub fn cfa() -> Self {
+        Self {
+            is_cfa: true,
+            ..Default::default()
+        }
+    }
+
+    /// Create camera params for a monochrome sensor.
+    pub fn monochrome() -> Self {
+        Self {
+            is_cfa: false,
+            ..Default::default()
+        }
+    }
+
+    /// Set gain and read noise for accurate SNR calculation.
+    pub fn with_noise_model(mut self, gain: f32, read_noise: f32) -> Self {
+        self.gain = Some(gain);
+        self.read_noise = Some(read_noise);
+        self
+    }
+}
+
+/// Deblending parameters for separating overlapping stars.
+#[derive(Debug, Clone)]
+pub struct DeblendParams {
+    /// Minimum separation between peaks for deblending (in pixels).
+    pub min_separation: usize,
+    /// Minimum peak prominence for deblending (0.0-1.0).
+    pub min_prominence: f32,
+    /// Enable multi-threshold deblending (SExtractor-style).
+    pub multi_threshold: bool,
+    /// Number of deblending sub-thresholds.
+    pub nthresh: usize,
+    /// Minimum contrast for multi-threshold deblending.
+    pub min_contrast: f32,
+}
+
+impl Default for DeblendParams {
+    fn default() -> Self {
+        Self {
+            min_separation: 3,
+            min_prominence: 0.3,
+            multi_threshold: false,
+            nthresh: 32,
+            min_contrast: 0.005,
+        }
+    }
+}
+
+/// Centroiding parameters.
+#[derive(Debug, Clone, Default)]
+pub struct CentroidParams {
+    /// Method for computing sub-pixel centroids.
+    pub method: CentroidMethod,
+    /// Method for computing local background during centroid refinement.
+    pub local_background: LocalBackgroundMethod,
+}
+
 /// Configuration for star detection.
 #[derive(Debug, Clone)]
 pub struct StarDetectionConfig {
@@ -276,6 +433,14 @@ pub struct StarDetectionConfig {
     /// faint stars by boosting SNR. Set to 0.0 to disable matched filtering.
     /// Typical values are 2.0-6.0 pixels depending on seeing and sampling.
     pub expected_fwhm: f32,
+    /// Axis ratio for elliptical Gaussian matched filter (minor/major axis).
+    /// Value of 1.0 means circular PSF (default), smaller values mean more elongated.
+    /// Useful for tracking errors, field rotation, or optical aberrations.
+    /// Must be in range (0, 1].
+    pub psf_axis_ratio: f32,
+    /// Position angle of PSF major axis in radians (0 = along x-axis).
+    /// Only used when psf_axis_ratio < 1.0.
+    pub psf_angle: f32,
     /// Maximum sharpness for a star to be considered valid.
     /// Sharpness = peak_value / flux_in_3x3_core. Cosmic rays have very high sharpness
     /// (>0.7) because most flux is in a single pixel. Real stars spread flux across
@@ -337,6 +502,11 @@ pub struct StarDetectionConfig {
     /// WeightedMoments (default) is fast (~0.05 pixel accuracy).
     /// GaussianFit and MoffatFit provide higher precision (~0.01 pixel) but are slower.
     pub centroid_method: CentroidMethod,
+    /// Method for computing local background during centroid refinement.
+    /// GlobalMap (default) uses the precomputed background map.
+    /// Annulus and OuterRing compute local background around each star,
+    /// which is more accurate in regions with variable nebulosity.
+    pub local_background_method: LocalBackgroundMethod,
 }
 
 impl Default for StarDetectionConfig {
@@ -351,6 +521,8 @@ impl Default for StarDetectionConfig {
             background_tile_size: 64,
             max_fwhm_deviation: 3.0,
             expected_fwhm: 4.0,
+            psf_axis_ratio: 1.0, // Circular PSF by default
+            psf_angle: 0.0,
             max_sharpness: 0.7,
             deblend_min_separation: 3,
             deblend_min_prominence: 0.3,
@@ -365,7 +537,204 @@ impl Default for StarDetectionConfig {
             defect_map: None,
             iterative_background_passes: 0, // Single pass by default (fastest)
             centroid_method: CentroidMethod::WeightedMoments,
+            local_background_method: LocalBackgroundMethod::GlobalMap,
         }
+    }
+}
+
+impl StarDetectionConfig {
+    /// Create a new builder for constructing StarDetectionConfig.
+    pub fn builder() -> StarDetectionConfigBuilder {
+        StarDetectionConfigBuilder::default()
+    }
+
+    /// Create config from sub-struct parameters.
+    pub fn from_params(
+        detection: DetectionParams,
+        quality: QualityFilters,
+        camera: CameraParams,
+        deblend: DeblendParams,
+        centroid: CentroidParams,
+    ) -> Self {
+        Self {
+            detection_sigma: detection.detection_sigma,
+            min_area: detection.min_area,
+            max_area: detection.max_area,
+            edge_margin: detection.edge_margin,
+            expected_fwhm: detection.expected_fwhm,
+            psf_axis_ratio: detection.psf_axis_ratio,
+            psf_angle: detection.psf_angle,
+            background_tile_size: detection.background_tile_size,
+            iterative_background_passes: detection.iterative_background_passes,
+            max_eccentricity: quality.max_eccentricity,
+            min_snr: quality.min_snr,
+            max_fwhm_deviation: quality.max_fwhm_deviation,
+            max_sharpness: quality.max_sharpness,
+            max_roundness: quality.max_roundness,
+            duplicate_min_separation: quality.duplicate_min_separation,
+            is_cfa: camera.is_cfa,
+            gain: camera.gain,
+            read_noise: camera.read_noise,
+            defect_map: camera.defect_map,
+            deblend_min_separation: deblend.min_separation,
+            deblend_min_prominence: deblend.min_prominence,
+            multi_threshold_deblend: deblend.multi_threshold,
+            deblend_nthresh: deblend.nthresh,
+            deblend_min_contrast: deblend.min_contrast,
+            centroid_method: centroid.method,
+            local_background_method: centroid.local_background,
+        }
+    }
+}
+
+/// Builder for StarDetectionConfig with fluent API.
+#[derive(Debug, Clone, Default)]
+pub struct StarDetectionConfigBuilder {
+    detection: DetectionParams,
+    quality: QualityFilters,
+    camera: CameraParams,
+    deblend: DeblendParams,
+    centroid: CentroidParams,
+}
+
+impl StarDetectionConfigBuilder {
+    /// Create a new builder with default parameters.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Configure for wide-field imaging (larger stars, relaxed filtering).
+    pub fn for_wide_field(mut self) -> Self {
+        self.detection.expected_fwhm = 6.0;
+        self.detection.max_area = 1000;
+        self.quality.max_eccentricity = 0.7;
+        self
+    }
+
+    /// Configure for high-resolution imaging (smaller stars, stricter filtering).
+    pub fn for_high_resolution(mut self) -> Self {
+        self.detection.expected_fwhm = 2.5;
+        self.detection.max_area = 200;
+        self.quality.max_eccentricity = 0.5;
+        self.quality.min_snr = 15.0;
+        self
+    }
+
+    /// Configure for crowded fields (aggressive deblending).
+    pub fn for_crowded_field(mut self) -> Self {
+        self.deblend.multi_threshold = true;
+        self.deblend.min_separation = 2;
+        self.detection.iterative_background_passes = 2;
+        self
+    }
+
+    /// Set expected FWHM for matched filtering.
+    pub fn with_fwhm(mut self, fwhm: f32) -> Self {
+        self.detection.expected_fwhm = fwhm;
+        self
+    }
+
+    /// Set detection threshold in sigma.
+    pub fn with_detection_sigma(mut self, sigma: f32) -> Self {
+        self.detection.detection_sigma = sigma;
+        self
+    }
+
+    /// Set minimum SNR threshold.
+    pub fn with_min_snr(mut self, snr: f32) -> Self {
+        self.quality.min_snr = snr;
+        self
+    }
+
+    /// Enable cosmic ray rejection with specified sharpness threshold.
+    pub fn with_cosmic_ray_rejection(mut self, max_sharpness: f32) -> Self {
+        self.quality.max_sharpness = max_sharpness;
+        self
+    }
+
+    /// Configure for monochrome sensor (skip CFA median filter).
+    pub fn for_monochrome(mut self) -> Self {
+        self.camera.is_cfa = false;
+        self
+    }
+
+    /// Configure for CFA sensor (apply CFA median filter).
+    pub fn for_cfa(mut self) -> Self {
+        self.camera.is_cfa = true;
+        self
+    }
+
+    /// Set camera noise model for accurate SNR calculation.
+    pub fn with_noise_model(mut self, gain: f32, read_noise: f32) -> Self {
+        self.camera.gain = Some(gain);
+        self.camera.read_noise = Some(read_noise);
+        self
+    }
+
+    /// Set elliptical PSF parameters.
+    pub fn with_elliptical_psf(mut self, axis_ratio: f32, angle: f32) -> Self {
+        self.detection.psf_axis_ratio = axis_ratio;
+        self.detection.psf_angle = angle;
+        self
+    }
+
+    /// Set centroid method.
+    pub fn with_centroid_method(mut self, method: CentroidMethod) -> Self {
+        self.centroid.method = method;
+        self
+    }
+
+    /// Set local background method for centroiding.
+    pub fn with_local_background(mut self, method: LocalBackgroundMethod) -> Self {
+        self.centroid.local_background = method;
+        self
+    }
+
+    /// Enable multi-threshold deblending.
+    pub fn with_multi_threshold_deblend(mut self, enable: bool) -> Self {
+        self.deblend.multi_threshold = enable;
+        self
+    }
+
+    /// Set detection parameters directly.
+    pub fn detection(mut self, params: DetectionParams) -> Self {
+        self.detection = params;
+        self
+    }
+
+    /// Set quality filter parameters directly.
+    pub fn quality(mut self, params: QualityFilters) -> Self {
+        self.quality = params;
+        self
+    }
+
+    /// Set camera parameters directly.
+    pub fn camera(mut self, params: CameraParams) -> Self {
+        self.camera = params;
+        self
+    }
+
+    /// Set deblending parameters directly.
+    pub fn deblend(mut self, params: DeblendParams) -> Self {
+        self.deblend = params;
+        self
+    }
+
+    /// Set centroid parameters directly.
+    pub fn centroid(mut self, params: CentroidParams) -> Self {
+        self.centroid = params;
+        self
+    }
+
+    /// Build the final StarDetectionConfig.
+    pub fn build(self) -> StarDetectionConfig {
+        StarDetectionConfig::from_params(
+            self.detection,
+            self.quality,
+            self.camera,
+            self.deblend,
+            self.centroid,
+        )
     }
 }
 
@@ -500,17 +869,35 @@ pub fn find_stars(
     let candidates = if config.expected_fwhm > 0.0 {
         // Apply matched filter (Gaussian convolution) for better faint star detection
         // This is the DAOFIND/SExtractor technique
-        tracing::debug!(
-            "Applying matched filter with FWHM={:.1} pixels",
-            config.expected_fwhm
-        );
-        let filtered = matched_filter(
-            &smoothed,
-            width,
-            height,
-            &background.background,
-            config.expected_fwhm,
-        );
+        let filtered = if config.psf_axis_ratio < 0.99 {
+            tracing::debug!(
+                "Applying elliptical matched filter with FWHM={:.1}, axis_ratio={:.2}, angle={:.2}",
+                config.expected_fwhm,
+                config.psf_axis_ratio,
+                config.psf_angle
+            );
+            matched_filter_elliptical(
+                &smoothed,
+                width,
+                height,
+                &background.background,
+                config.expected_fwhm,
+                config.psf_axis_ratio,
+                config.psf_angle,
+            )
+        } else {
+            tracing::debug!(
+                "Applying matched filter with FWHM={:.1} pixels",
+                config.expected_fwhm
+            );
+            matched_filter(
+                &smoothed,
+                width,
+                height,
+                &background.background,
+                config.expected_fwhm,
+            )
+        };
         detect_stars_filtered(&smoothed, &filtered, width, height, &background, config)
     } else {
         // No matched filter - use standard detection

@@ -24,31 +24,31 @@ pub struct BackgroundMap {
     /// Per-pixel noise (sigma) estimates.
     pub noise: Vec<f32>,
     /// Image width.
-    #[allow(dead_code)]
+    #[allow(dead_code)] // Public API for external use
     pub width: usize,
     /// Image height.
-    #[allow(dead_code)]
+    #[allow(dead_code)] // Public API for external use
     pub height: usize,
 }
 
 impl BackgroundMap {
     /// Get background value at a pixel position.
+    #[allow(dead_code)] // Public API for external use
     #[inline]
-    #[allow(dead_code)]
     pub fn get_background(&self, x: usize, y: usize) -> f32 {
         self.background[y * self.width + x]
     }
 
     /// Get noise estimate at a pixel position.
+    #[allow(dead_code)] // Public API for external use
     #[inline]
-    #[allow(dead_code)]
     pub fn get_noise(&self, x: usize, y: usize) -> f32 {
         self.noise[y * self.width + x]
     }
 
     /// Get background-subtracted value at a pixel position.
+    #[allow(dead_code)] // Public API for external use
     #[inline]
-    #[allow(dead_code)]
     pub fn subtract(&self, pixels: &[f32], x: usize, y: usize) -> f32 {
         let idx = y * self.width + x;
         pixels[idx] - self.background[idx]
@@ -422,21 +422,22 @@ fn interpolate_row(bg_row: &mut [f32], noise_row: &mut [f32], y: usize, grid: &T
         let noise_segment = &mut noise_row[x..segment_end];
 
         if tx1 != tx0 {
-            // Interpolation needed
+            // Interpolation needed - use SIMD-accelerated version
             let inv_dx = 1.0 / (grid.centers_x[tx1] - grid.centers_x[tx0]);
             let x_offset = grid.centers_x[tx0];
+            let wx_start = (x as f32 - x_offset) * inv_dx;
+            let wx_step = inv_dx;
 
-            for (j, (bg, noise)) in bg_segment
-                .iter_mut()
-                .zip(noise_segment.iter_mut())
-                .enumerate()
-            {
-                let px = (x + j) as f32;
-                let wx = ((px - x_offset) * inv_dx).clamp(0.0, 1.0);
-                let wx_inv = 1.0 - wx;
-                *bg = wx_inv * left_bg + wx * right_bg;
-                *noise = wx_inv * left_noise + wx * right_noise;
-            }
+            simd::interpolate_segment_simd(
+                bg_segment,
+                noise_segment,
+                left_bg,
+                right_bg,
+                left_noise,
+                right_noise,
+                wx_start,
+                wx_step,
+            );
         } else {
             // Constant fill (single tile column)
             bg_segment.fill(left_bg);
@@ -463,7 +464,6 @@ fn find_lower_tile(pos: f32, centers: &[f32]) -> usize {
 }
 
 /// Configuration for iterative background refinement.
-#[allow(dead_code)] // Public API for external use
 #[derive(Debug, Clone)]
 pub struct IterativeBackgroundConfig {
     /// Detection threshold in sigma above background for masking objects.
@@ -511,7 +511,6 @@ impl Default for IterativeBackgroundConfig {
 /// * `height` - Image height
 /// * `tile_size` - Size of tiles for background estimation
 /// * `config` - Iterative refinement configuration
-#[allow(dead_code)] // Public API for external use
 pub fn estimate_background_iterative(
     pixels: &[f32],
     width: usize,
@@ -548,7 +547,6 @@ pub fn estimate_background_iterative(
 }
 
 /// Create a mask of pixels that are likely objects (above threshold).
-#[allow(dead_code)] // Used by estimate_background_iterative
 fn create_object_mask(
     pixels: &[f32],
     background: &BackgroundMap,
@@ -577,14 +575,12 @@ fn create_object_mask(
 }
 
 /// Dilate a binary mask by the given radius.
-#[allow(dead_code)] // Used by create_object_mask
 #[inline]
 fn dilate_mask(mask: &[bool], width: usize, height: usize, radius: usize) -> Vec<bool> {
     constants::dilate_mask(mask, width, height, radius)
 }
 
 /// Estimate background with masked pixels excluded.
-#[allow(dead_code)] // Used by estimate_background_iterative
 fn estimate_background_masked(
     pixels: &[f32],
     width: usize,
@@ -699,7 +695,6 @@ fn estimate_background_masked(
 
 /// Compute tile statistics with masked pixels excluded.
 #[allow(clippy::too_many_arguments)]
-#[allow(dead_code)] // Used by estimate_background_masked
 fn compute_tile_stats_masked(
     pixels: &[f32],
     mask: &[bool],
