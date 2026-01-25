@@ -14,6 +14,8 @@ mod tests;
 #[cfg(feature = "bench")]
 pub mod bench;
 
+pub mod simd;
+
 use rand::prelude::*;
 use rand_chacha::ChaCha8Rng;
 
@@ -280,28 +282,16 @@ fn random_sample<R: Rng>(rng: &mut R, n: usize, k: usize) -> Vec<usize> {
 }
 
 /// Count inliers and compute score.
+///
+/// Uses SIMD acceleration when available (AVX2/SSE on x86_64, NEON on aarch64).
+#[inline]
 fn count_inliers(
     ref_points: &[(f64, f64)],
     target_points: &[(f64, f64)],
     transform: &TransformMatrix,
     threshold: f64,
 ) -> (Vec<usize>, usize) {
-    let threshold_sq = threshold * threshold;
-    let mut inliers = Vec::new();
-    let mut score = 0;
-
-    for (i, (&(rx, ry), &(tx, ty))) in ref_points.iter().zip(target_points.iter()).enumerate() {
-        let (px, py) = transform.apply(rx, ry);
-        let dist_sq = (px - tx).powi(2) + (py - ty).powi(2);
-
-        if dist_sq < threshold_sq {
-            inliers.push(i);
-            // Use inverse distance as score contribution
-            score += ((threshold_sq - dist_sq) * 1000.0) as usize;
-        }
-    }
-
-    (inliers, score)
+    simd::count_inliers_simd(ref_points, target_points, transform, threshold)
 }
 
 /// Compute adaptive iteration count for early termination.
@@ -757,17 +747,13 @@ pub fn refine_transform(
 }
 
 /// Compute residuals for a transformation.
+///
+/// Uses SIMD acceleration when available (AVX2/SSE on x86_64, NEON on aarch64).
+#[inline]
 pub fn compute_residuals(
     ref_points: &[(f64, f64)],
     target_points: &[(f64, f64)],
     transform: &TransformMatrix,
 ) -> Vec<f64> {
-    ref_points
-        .iter()
-        .zip(target_points.iter())
-        .map(|(&(rx, ry), &(tx, ty))| {
-            let (px, py) = transform.apply(rx, ry);
-            ((px - tx).powi(2) + (py - ty).powi(2)).sqrt()
-        })
-        .collect()
+    simd::compute_residuals_simd(ref_points, target_points, transform)
 }

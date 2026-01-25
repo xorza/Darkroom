@@ -500,6 +500,12 @@ KdTree             // 2D k-d tree for k-nearest neighbor and radius queries
 - Weighted scoring (not just inlier count) for better model selection
 - DLT (Direct Linear Transform) for homography estimation
 - Point normalization for numerical stability
+- **SIMD acceleration** (new):
+  - `count_inliers_simd()` - SIMD-accelerated inlier counting with transform application
+  - `compute_residuals_simd()` - SIMD-accelerated residual computation
+  - Platform support: AVX2/SSE2 on x86_64, NEON on aarch64
+  - Processes 4 points (AVX2) or 2 points (SSE2/NEON) per iteration
+  - Scalar fallback for unsupported platforms and remainder handling
 
 **Interpolation methods:**
 - `Nearest` - Fastest, for previews/masks
