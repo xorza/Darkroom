@@ -12,13 +12,11 @@ pub mod bench;
 
 use std::collections::HashMap;
 
-use crate::registration::constants::{MIN_TRIANGLE_AREA_SQ, MIN_TRIANGLE_SIDE};
+use crate::registration::constants::{
+    DENSE_VOTE_THRESHOLD, MIN_TRIANGLE_AREA_SQ, MIN_TRIANGLE_SIDE,
+};
 use crate::registration::spatial::{KdTree, form_triangles_from_neighbors};
 use crate::registration::types::StarMatch;
-
-/// Threshold for using dense vote matrix (n_ref * n_target < this value).
-/// Dense is faster due to direct indexing, but uses more memory.
-const DENSE_VOTE_THRESHOLD: usize = 250_000; // ~500KB for u16 matrix
 
 /// Vote matrix storage - either dense (Vec) or sparse (HashMap).
 enum VoteMatrix {
@@ -45,8 +43,15 @@ impl VoteMatrix {
     fn increment(&mut self, ref_idx: usize, target_idx: usize) {
         match self {
             VoteMatrix::Dense { votes, n_target } => {
-                votes[ref_idx * *n_target + target_idx] =
-                    votes[ref_idx * *n_target + target_idx].saturating_add(1);
+                let idx = ref_idx * *n_target + target_idx;
+                let new_val = votes[idx].saturating_add(1);
+                debug_assert!(
+                    new_val < u16::MAX,
+                    "Vote overflow: too many matching triangles for star pair ({}, {})",
+                    ref_idx,
+                    target_idx
+                );
+                votes[idx] = new_val;
             }
             VoteMatrix::Sparse(map) => {
                 *map.entry((ref_idx, target_idx)).or_insert(0) += 1;

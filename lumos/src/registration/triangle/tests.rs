@@ -802,7 +802,7 @@ fn test_match_brightness_weighted_selection() {
 fn test_triangle_very_flat() {
     // Nearly collinear points - should reject very flat triangles
     // Use even smaller offset to ensure rejection
-    let positions = vec![
+    let positions: [(f64, f64); 3] = [
         (0.0, 0.0),
         (100.0, 0.0),
         (50.0, 1e-10), // Extremely small offset - nearly collinear
@@ -821,7 +821,7 @@ fn test_triangle_very_flat() {
 #[test]
 fn test_triangle_near_collinear() {
     // Points that are almost but not quite collinear
-    let positions = vec![
+    let positions: [(f64, f64); 3] = [
         (0.0, 0.0),
         (100.0, 0.0),
         (50.0, 1.0), // Small but valid offset

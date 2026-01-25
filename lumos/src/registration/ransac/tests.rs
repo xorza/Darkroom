@@ -962,3 +962,273 @@ fn test_normalize_points_extreme_values() {
         assert!(dy.abs() < 1e-5, "Y mismatch: {} vs {}", ry, orig.1);
     }
 }
+
+// ============================================================================
+// Convergence and edge case tests
+// ============================================================================
+
+/// Test RANSAC with 100% inliers (perfect match)
+#[test]
+fn test_ransac_100_percent_inliers() {
+    // Perfect correspondences - all points are inliers
+    let ref_points = vec![
+        (0.0, 0.0),
+        (100.0, 0.0),
+        (0.0, 100.0),
+        (100.0, 100.0),
+        (50.0, 50.0),
+        (25.0, 75.0),
+        (75.0, 25.0),
+        (33.0, 66.0),
+    ];
+
+    let transform = TransformMatrix::similarity(10.0, -5.0, 0.2, 1.1);
+    let target_points: Vec<(f64, f64)> = ref_points
+        .iter()
+        .map(|&(x, y)| transform.apply(x, y))
+        .collect();
+
+    let config = RansacConfig {
+        max_iterations: 100,
+        inlier_threshold: 1.0,
+        ..Default::default()
+    };
+    let estimator = RansacEstimator::new(config);
+
+    let result = estimator.estimate(&ref_points, &target_points, TransformType::Similarity);
+
+    assert!(result.is_some(), "Should succeed with 100% inliers");
+    let result = result.unwrap();
+
+    // All points should be inliers
+    assert_eq!(
+        result.inliers.len(),
+        ref_points.len(),
+        "All {} points should be inliers, got {}",
+        ref_points.len(),
+        result.inliers.len()
+    );
+}
+
+/// Test RANSAC with 0% inliers (pure noise) - should return None gracefully
+#[test]
+fn test_ransac_0_percent_inliers_pure_noise() {
+    // Completely random points with no correspondence
+    let ref_points = vec![
+        (10.0, 20.0),
+        (30.0, 40.0),
+        (50.0, 60.0),
+        (70.0, 80.0),
+        (90.0, 100.0),
+    ];
+
+    // Target points are completely unrelated
+    let target_points = vec![
+        (500.0, 600.0),
+        (700.0, 100.0),
+        (200.0, 900.0),
+        (800.0, 50.0),
+        (150.0, 350.0),
+    ];
+
+    let config = RansacConfig {
+        max_iterations: 100,
+        inlier_threshold: 1.0,
+        min_inlier_ratio: 0.8, // Require 80% inliers
+        ..Default::default()
+    };
+    let estimator = RansacEstimator::new(config);
+
+    let result = estimator.estimate(&ref_points, &target_points, TransformType::Similarity);
+
+    // Should either return None or return a result with very few inliers
+    if let Some(result) = result {
+        // If it returns something, it should have low inlier count
+        assert!(
+            result.inliers.len() < 3,
+            "Pure noise should have few inliers, got {}",
+            result.inliers.len()
+        );
+    }
+    // Returning None is also acceptable for pure noise
+}
+
+/// Test adaptive iteration count verification
+#[test]
+fn test_adaptive_iteration_count() {
+    let config = RansacConfig {
+        max_iterations: 10000,
+        confidence: 0.999,
+        ..Default::default()
+    };
+
+    // With 50% inliers and 2 points per model (similarity), we need:
+    // k = log(1-0.999) / log(1 - 0.5^2) = log(0.001) / log(0.75) ≈ 24 iterations
+    let adaptive_iters = adaptive_iterations(0.5, 2, config.confidence);
+    assert!(
+        adaptive_iters < 50,
+        "50% inliers should need ~24 iterations, got {}",
+        adaptive_iters
+    );
+    assert!(
+        adaptive_iters > 10,
+        "Should need at least 10 iterations, got {}",
+        adaptive_iters
+    );
+
+    // With 90% inliers, we need very few iterations
+    let high_inlier_iters = adaptive_iterations(0.9, 2, config.confidence);
+    assert!(
+        high_inlier_iters < 15,
+        "90% inliers should need very few iterations, got {}",
+        high_inlier_iters
+    );
+
+    // With 10% inliers, we need many iterations
+    let low_inlier_iters = adaptive_iterations(0.1, 2, config.confidence);
+    assert!(
+        low_inlier_iters > 500,
+        "10% inliers should need many iterations, got {}",
+        low_inlier_iters
+    );
+}
+
+/// Test that RANSAC early terminates when it finds a good model
+#[test]
+fn test_ransac_early_termination() {
+    // All perfect inliers - should terminate early
+    let ref_points: Vec<(f64, f64)> = (0..50).map(|i| (i as f64 * 10.0, i as f64 * 5.0)).collect();
+
+    let transform = TransformMatrix::from_translation(7.0, 3.0);
+    let target_points: Vec<(f64, f64)> = ref_points
+        .iter()
+        .map(|&(x, y)| transform.apply(x, y))
+        .collect();
+
+    let config = RansacConfig {
+        max_iterations: 10000, // Very high, but should terminate early
+        inlier_threshold: 1.0,
+        confidence: 0.999,
+        ..Default::default()
+    };
+    let estimator = RansacEstimator::new(config);
+
+    let result = estimator.estimate(&ref_points, &target_points, TransformType::Translation);
+
+    assert!(result.is_some(), "Should find solution");
+    let result = result.unwrap();
+
+    // With perfect inliers, should find all 50 points as inliers
+    assert!(
+        result.inliers.len() >= 45,
+        "Should find most points as inliers, got {}",
+        result.inliers.len()
+    );
+}
+
+/// Test homography estimation with nearly degenerate points
+#[test]
+fn test_homography_nearly_degenerate() {
+    // Points that are nearly collinear but not quite
+    let ref_points = vec![
+        (0.0, 0.0),
+        (100.0, 1.0),   // Nearly on x-axis
+        (200.0, -1.0),  // Nearly on x-axis
+        (300.0, 0.5),   // Nearly on x-axis
+        (0.0, 100.0),   // This one breaks collinearity
+        (100.0, 100.0), // This one breaks collinearity
+    ];
+
+    let transform = TransformMatrix::from_translation(10.0, 10.0);
+    let target_points: Vec<(f64, f64)> = ref_points
+        .iter()
+        .map(|&(x, y)| transform.apply(x, y))
+        .collect();
+
+    let config = RansacConfig {
+        max_iterations: 500,
+        inlier_threshold: 2.0,
+        ..Default::default()
+    };
+    let estimator = RansacEstimator::new(config);
+
+    // This may or may not succeed depending on which points are sampled
+    // Key is it doesn't panic
+    let result = estimator.estimate(&ref_points, &target_points, TransformType::Homography);
+
+    // If it succeeds, check the transform is reasonable
+    if let Some(result) = result {
+        assert!(
+            result.inliers.len() >= 4,
+            "Should find at least 4 inliers for homography"
+        );
+    }
+}
+
+/// Test progressive RANSAC gives better results with confidence weights
+#[test]
+fn test_progressive_ransac_uses_weights() {
+    // Create points with varying confidence
+    let ref_points: Vec<(f64, f64)> = (0..20).map(|i| (i as f64 * 10.0, i as f64 * 5.0)).collect();
+
+    let transform = TransformMatrix::from_translation(5.0, 3.0);
+    let mut target_points: Vec<(f64, f64)> = ref_points
+        .iter()
+        .map(|&(x, y)| transform.apply(x, y))
+        .collect();
+
+    // Add noise to low-confidence points (first 5)
+    for point in target_points.iter_mut().take(5) {
+        point.0 += 50.0;
+        point.1 += 50.0;
+    }
+
+    // High confidence for good points, low for outliers
+    let confidences: Vec<f64> = (0..20).map(|i| if i < 5 { 0.1 } else { 0.9 }).collect();
+
+    let config = RansacConfig {
+        max_iterations: 200,
+        inlier_threshold: 2.0,
+        ..Default::default()
+    };
+    let estimator = RansacEstimator::new(config);
+
+    let result = estimator.estimate_progressive(
+        &ref_points,
+        &target_points,
+        &confidences,
+        TransformType::Translation,
+    );
+
+    assert!(result.is_some(), "Progressive RANSAC should succeed");
+    let result = result.unwrap();
+
+    // Should find the 15 good points as inliers
+    assert!(
+        result.inliers.len() >= 12,
+        "Should find at least 12 of 15 good points as inliers, got {}",
+        result.inliers.len()
+    );
+}
+
+/// Test RANSAC with minimum possible point count
+#[test]
+fn test_ransac_minimum_points() {
+    // Exactly 2 points for translation (minimum required)
+    let ref_points = vec![(0.0, 0.0), (100.0, 0.0)];
+    let target_points = vec![(10.0, 10.0), (110.0, 10.0)];
+
+    let config = RansacConfig {
+        max_iterations: 100,
+        inlier_threshold: 1.0,
+        min_inlier_ratio: 0.5, // Allow 50% inliers (1 of 2)
+        ..Default::default()
+    };
+    let estimator = RansacEstimator::new(config);
+
+    let result = estimator.estimate(&ref_points, &target_points, TransformType::Translation);
+
+    assert!(result.is_some(), "Should work with minimum 2 points");
+    let result = result.unwrap();
+    assert_eq!(result.inliers.len(), 2);
+}

@@ -24,6 +24,14 @@ pub const MIN_TRIANGLE_SIDE: f64 = 1e-10;
 pub const MIN_TRIANGLE_AREA_SQ: f64 = 1e-6;
 
 // =============================================================================
+// Vote matrix settings
+// =============================================================================
+
+/// Threshold for using dense vote matrix (n_ref * n_target < this value).
+/// Dense is faster due to direct indexing, but uses more memory (~500KB for u16 matrix at threshold).
+pub const DENSE_VOTE_THRESHOLD: usize = 250_000;
+
+// =============================================================================
 // Triangle matching defaults
 // =============================================================================
 

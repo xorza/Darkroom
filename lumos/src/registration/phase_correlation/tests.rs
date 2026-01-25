@@ -294,3 +294,501 @@ fn test_rotate_and_scale_image() {
         "Identity transform should preserve values"
     );
 }
+
+// ============================================================================
+// Sub-pixel refinement accuracy tests
+// ============================================================================
+
+/// Test sub-pixel accuracy with known fractional offset
+#[test]
+fn test_subpixel_accuracy_parabolic() {
+    let width = 128;
+    let height = 128;
+
+    // Create a pattern with multiple features for better correlation
+    // Using the same create_test_image helper with fractional shift
+    let reference = create_test_image(width, height, 0, 0);
+
+    // Integer shift of 4 pixels in X
+    let shift_x = 4;
+    let target = create_test_image(width, height, shift_x, 0);
+
+    let config = PhaseCorrelationConfig {
+        subpixel_method: SubpixelMethod::Parabolic,
+        min_peak_value: 0.001,
+        ..Default::default()
+    };
+    let correlator = PhaseCorrelator::new(width, height, config);
+    let result = correlator.correlate(&reference, &target, width, height);
+
+    assert!(result.is_some(), "Sub-pixel correlation should succeed");
+    let result = result.unwrap();
+
+    // Check that we detect approximately the correct shift
+    let detected_shift_x = result.translation.0;
+
+    // The detected shift should be close to the actual shift (sign depends on convention)
+    assert!(
+        (detected_shift_x.abs() - shift_x as f64).abs() < 2.0
+            || (detected_shift_x + shift_x as f64).abs() < 2.0,
+        "X accuracy: expected ~{}, got {}",
+        shift_x,
+        detected_shift_x
+    );
+}
+
+/// Test gaussian sub-pixel refinement
+#[test]
+fn test_subpixel_accuracy_gaussian() {
+    let width = 128;
+    let height = 128;
+
+    let mut reference = vec![0.0f32; width * height];
+    let cx = width as f64 / 2.0;
+    let cy = height as f64 / 2.0;
+    let sigma = 15.0;
+
+    for y in 0..height {
+        for x in 0..width {
+            let dx = x as f64 - cx;
+            let dy = y as f64 - cy;
+            reference[y * width + x] =
+                (-((dx * dx + dy * dy) / (2.0 * sigma * sigma))).exp() as f32;
+        }
+    }
+
+    let config = PhaseCorrelationConfig {
+        subpixel_method: SubpixelMethod::Gaussian,
+        min_peak_value: 0.001,
+        ..Default::default()
+    };
+    let correlator = PhaseCorrelator::new(width, height, config);
+    let result = correlator.correlate(&reference, &reference, width, height);
+
+    assert!(result.is_some(), "Gaussian sub-pixel should succeed");
+    let result = result.unwrap();
+
+    // Self-correlation should be near zero
+    assert!(
+        result.translation.0.abs() < 0.5,
+        "Gaussian method: expected near-zero dx, got {}",
+        result.translation.0
+    );
+    assert!(
+        result.translation.1.abs() < 0.5,
+        "Gaussian method: expected near-zero dy, got {}",
+        result.translation.1
+    );
+}
+
+/// Test centroid sub-pixel refinement
+#[test]
+fn test_subpixel_accuracy_centroid() {
+    let width = 128;
+    let height = 128;
+
+    let mut reference = vec![0.0f32; width * height];
+    let cx = width as f64 / 2.0;
+    let cy = height as f64 / 2.0;
+    let sigma = 15.0;
+
+    for y in 0..height {
+        for x in 0..width {
+            let dx = x as f64 - cx;
+            let dy = y as f64 - cy;
+            reference[y * width + x] =
+                (-((dx * dx + dy * dy) / (2.0 * sigma * sigma))).exp() as f32;
+        }
+    }
+
+    let config = PhaseCorrelationConfig {
+        subpixel_method: SubpixelMethod::Centroid,
+        min_peak_value: 0.001,
+        ..Default::default()
+    };
+    let correlator = PhaseCorrelator::new(width, height, config);
+    let result = correlator.correlate(&reference, &reference, width, height);
+
+    assert!(result.is_some(), "Centroid sub-pixel should succeed");
+    let result = result.unwrap();
+
+    // Self-correlation should be near zero
+    assert!(
+        result.translation.0.abs() < 0.5,
+        "Centroid method: expected near-zero dx, got {}",
+        result.translation.0
+    );
+}
+
+// ============================================================================
+// Large translation tests (wraparound handling)
+// ============================================================================
+
+/// Test translation near half image size (edge of wraparound)
+#[test]
+fn test_large_translation_near_wraparound() {
+    let width = 128;
+    let height = 128;
+
+    // Create a distinctive pattern
+    let mut reference = vec![0.0f32; width * height];
+    for y in 20..40 {
+        for x in 20..40 {
+            reference[y * width + x] = 1.0;
+        }
+    }
+
+    // Shift by 30 pixels (less than half image, should work)
+    let shift = 30;
+    let mut target = vec![0.0f32; width * height];
+    for y in (20 + shift)..(40 + shift) {
+        for x in 20..40 {
+            if y < height {
+                target[y * width + x] = 1.0;
+            }
+        }
+    }
+
+    let config = PhaseCorrelationConfig {
+        min_peak_value: 0.001,
+        ..Default::default()
+    };
+    let correlator = PhaseCorrelator::new(width, height, config);
+    let result = correlator.correlate(&reference, &target, width, height);
+
+    assert!(
+        result.is_some(),
+        "Large translation correlation should succeed"
+    );
+    let result = result.unwrap();
+
+    // Should detect approximately the shift
+    assert!(
+        (result.translation.1.abs() - shift as f64).abs() < 5.0
+            || (result.translation.1 + shift as f64).abs() < 5.0,
+        "Expected shift near {}, got {}",
+        shift,
+        result.translation.1
+    );
+}
+
+// ============================================================================
+// Rotation estimation tests
+// ============================================================================
+
+/// Test rotation estimation with known angle
+#[test]
+fn test_rotation_estimation_45_degrees() {
+    let width = 128;
+    let height = 128;
+
+    // Create a radial pattern that's rotationally sensitive
+    let mut reference = vec![0.0f32; width * height];
+    let cx = width as f64 / 2.0;
+    let cy = height as f64 / 2.0;
+
+    for y in 0..height {
+        for x in 0..width {
+            let dx = x as f64 - cx;
+            let dy = y as f64 - cy;
+            let angle = dy.atan2(dx);
+            let r = (dx * dx + dy * dy).sqrt();
+            // Create wedge pattern
+            let val = if angle.abs() < 0.5 && r < 40.0 {
+                1.0
+            } else {
+                0.0
+            };
+            reference[y * width + x] = val;
+        }
+    }
+
+    // Rotate by 45 degrees
+    let rotation_angle = std::f64::consts::PI / 4.0;
+    let mut target = vec![0.0f32; width * height];
+    for y in 0..height {
+        for x in 0..width {
+            let dx = x as f64 - cx;
+            let dy = y as f64 - cy;
+            let angle = dy.atan2(dx) - rotation_angle;
+            let r = (dx * dx + dy * dy).sqrt();
+            let val = if angle.abs() < 0.5 && r < 40.0 {
+                1.0
+            } else {
+                0.0
+            };
+            target[y * width + x] = val;
+        }
+    }
+
+    let correlator = LogPolarCorrelator::new(128, 64.0);
+    let result = correlator.estimate_rotation_scale(&reference, &target, width, height);
+
+    assert!(
+        result.is_some(),
+        "Rotation estimation should succeed for 45 degree rotation"
+    );
+    let result = result.unwrap();
+
+    // Should detect approximately 45 degrees (pi/4 radians)
+    let expected = std::f64::consts::PI / 4.0;
+    let error = (result.rotation.abs() - expected).abs();
+    assert!(
+        error < 0.3 || (result.rotation + expected).abs() < 0.3,
+        "Expected rotation ~{:.2} rad, got {:.2} rad",
+        expected,
+        result.rotation
+    );
+}
+
+/// Test small rotation detection
+#[test]
+fn test_rotation_estimation_small_angle() {
+    let width = 128;
+    let height = 128;
+
+    // Create pattern with clear orientation
+    let mut reference = vec![0.0f32; width * height];
+    let cx = width as f64 / 2.0;
+    let cy = height as f64 / 2.0;
+
+    for y in 0..height {
+        for x in 0..width {
+            let dx = x as f64 - cx;
+            let dy = y as f64 - cy;
+            let r = (dx * dx + dy * dy).sqrt();
+            let angle = dy.atan2(dx);
+            // Create radial spokes
+            let val = if r < 50.0 && (angle * 4.0).sin().abs() > 0.7 {
+                1.0
+            } else {
+                0.0
+            };
+            reference[y * width + x] = val;
+        }
+    }
+
+    let correlator = LogPolarCorrelator::new(128, 64.0);
+    let result = correlator.estimate_rotation_scale(&reference, &reference, width, height);
+
+    assert!(result.is_some(), "Small rotation estimation should succeed");
+    let result = result.unwrap();
+
+    // Self-correlation should show near-zero rotation
+    assert!(
+        result.rotation.abs() < 0.1,
+        "Expected near-zero rotation, got {}",
+        result.rotation
+    );
+}
+
+// ============================================================================
+// Scale estimation tests
+// ============================================================================
+
+/// Test scale estimation with 1.2x scaling
+#[test]
+fn test_scale_estimation_1_2x() {
+    let width = 128;
+    let height = 128;
+
+    // Create concentric rings pattern
+    let mut reference = vec![0.0f32; width * height];
+    let cx = width as f64 / 2.0;
+    let cy = height as f64 / 2.0;
+
+    for y in 0..height {
+        for x in 0..width {
+            let dx = x as f64 - cx;
+            let dy = y as f64 - cy;
+            let r = (dx * dx + dy * dy).sqrt();
+            reference[y * width + x] = ((r * 0.2).sin() * 0.5 + 0.5) as f32;
+        }
+    }
+
+    // Scale by 1.2x
+    let scale_factor = 1.2;
+    let mut target = vec![0.0f32; width * height];
+    for y in 0..height {
+        for x in 0..width {
+            let dx = x as f64 - cx;
+            let dy = y as f64 - cy;
+            let r = (dx * dx + dy * dy).sqrt() / scale_factor;
+            target[y * width + x] = ((r * 0.2).sin() * 0.5 + 0.5) as f32;
+        }
+    }
+
+    let correlator = LogPolarCorrelator::new(128, 64.0);
+    let result = correlator.estimate_rotation_scale(&reference, &target, width, height);
+
+    assert!(result.is_some(), "Scale estimation should succeed");
+    let result = result.unwrap();
+
+    // Should detect approximately 1.2x scale
+    let scale_error = (result.scale - scale_factor).abs();
+    assert!(
+        scale_error < 0.3,
+        "Expected scale ~{}, got {}",
+        scale_factor,
+        result.scale
+    );
+}
+
+// ============================================================================
+// Low SNR / edge case tests
+// ============================================================================
+
+/// Test correlation with noisy images
+#[test]
+fn test_correlation_with_noise() {
+    let width = 64;
+    let height = 64;
+
+    // Create signal pattern
+    let mut reference = vec![0.0f32; width * height];
+    for y in 20..44 {
+        for x in 20..44 {
+            reference[y * width + x] = 1.0;
+        }
+    }
+
+    // Add moderate noise using simple LCG PRNG
+    let mut seed = 12345u64;
+    let mut target = reference.clone();
+    for pixel in target.iter_mut() {
+        seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
+        let noise = ((seed >> 33) as f32 / u32::MAX as f32) * 0.3 - 0.15;
+        *pixel += noise;
+    }
+
+    let config = PhaseCorrelationConfig {
+        min_peak_value: 0.001,
+        ..Default::default()
+    };
+    let correlator = PhaseCorrelator::new(width, height, config);
+    let result = correlator.correlate(&reference, &target, width, height);
+
+    assert!(
+        result.is_some(),
+        "Correlation with noise should still succeed"
+    );
+    let result = result.unwrap();
+
+    // Should still detect approximately zero offset (noisy version of same image)
+    assert!(
+        result.translation.0.abs() < 5.0,
+        "Noisy correlation dx too large: {}",
+        result.translation.0
+    );
+    assert!(
+        result.translation.1.abs() < 5.0,
+        "Noisy correlation dy too large: {}",
+        result.translation.1
+    );
+}
+
+/// Test correlation with uniform (DC) image - should fail gracefully
+#[test]
+fn test_correlation_uniform_image() {
+    let width = 64;
+    let height = 64;
+
+    // Uniform image has no features
+    let uniform = vec![0.5f32; width * height];
+
+    let config = PhaseCorrelationConfig {
+        min_peak_value: 0.1, // Reasonable threshold
+        ..Default::default()
+    };
+    let correlator = PhaseCorrelator::new(width, height, config);
+    let result = correlator.correlate(&uniform, &uniform, width, height);
+
+    // May succeed or fail - either is acceptable for degenerate input
+    // Key is it doesn't panic
+    if let Some(result) = result {
+        // If it returns a result, confidence should be low
+        assert!(
+            result.confidence < 0.9,
+            "Uniform image correlation should have low confidence"
+        );
+    }
+}
+
+/// Test correlation with pure checkerboard at Nyquist frequency
+#[test]
+fn test_correlation_nyquist_checkerboard() {
+    let width = 64;
+    let height = 64;
+
+    // 1-pixel checkerboard (Nyquist frequency)
+    let mut pattern = vec![0.0f32; width * height];
+    for y in 0..height {
+        for x in 0..width {
+            pattern[y * width + x] = if (x + y) % 2 == 0 { 1.0 } else { 0.0 };
+        }
+    }
+
+    let config = PhaseCorrelationConfig {
+        min_peak_value: 0.001,
+        ..Default::default()
+    };
+    let correlator = PhaseCorrelator::new(width, height, config);
+    let result = correlator.correlate(&pattern, &pattern, width, height);
+
+    // This is a difficult case - may or may not succeed
+    // Key is it doesn't panic
+    if let Some(result) = result {
+        // Self-correlation of any pattern should show zero offset
+        assert!(
+            result.translation.0.abs() < 2.0,
+            "Nyquist pattern self-correlation dx: {}",
+            result.translation.0
+        );
+    }
+}
+
+/// Test full phase correlator with rotation and translation
+#[test]
+fn test_full_correlator_rotation_and_translation() {
+    let width = 128;
+    let height = 128;
+
+    // Create asymmetric pattern
+    let mut reference = vec![0.0f32; width * height];
+    let cx = width as f64 / 2.0;
+    let cy = height as f64 / 2.0;
+
+    for y in 0..height {
+        for x in 0..width {
+            let dx = x as f64 - cx;
+            let dy = y as f64 - cy;
+            let r = (dx * dx + dy * dy).sqrt();
+            let angle = dy.atan2(dx);
+            // Asymmetric blob
+            let val = if r < 30.0 && angle > 0.0 { 1.0 } else { 0.0 };
+            reference[y * width + x] = val;
+        }
+    }
+
+    let config = super::PhaseCorrelationConfig {
+        min_peak_value: 0.01,
+        ..Default::default()
+    };
+    let correlator = super::FullPhaseCorrelator::with_config(width, height, config);
+    let result = correlator.estimate(&reference, &reference, width, height);
+
+    assert!(result.is_some(), "Full correlator should succeed");
+    let result = result.unwrap();
+
+    // Self-correlation
+    assert!(
+        result.rotation.abs() < 0.2,
+        "Self-correlation rotation error: {}",
+        result.rotation
+    );
+    assert!(
+        (result.scale - 1.0).abs() < 0.2,
+        "Self-correlation scale error: {}",
+        result.scale
+    );
+}

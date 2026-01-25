@@ -846,7 +846,7 @@ fn test_integration_partial_overlap() {
         .filter_map(|&(x, y)| {
             let (nx, ny) = transform.apply(x, y);
             // Simulate frame boundary - only keep stars visible in target frame
-            if nx >= 0.0 && nx <= 2048.0 && ny >= 0.0 && ny <= 2048.0 {
+            if (0.0..=2048.0).contains(&nx) && (0.0..=2048.0).contains(&ny) {
                 Some((nx, ny))
             } else {
                 None
