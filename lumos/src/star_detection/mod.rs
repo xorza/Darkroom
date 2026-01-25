@@ -583,8 +583,8 @@ impl StarDetectionConfig {
             self.background_tile_size
         );
         assert!(
-            self.expected_fwhm > 0.0,
-            "expected_fwhm must be positive, got {}",
+            self.expected_fwhm >= 0.0,
+            "expected_fwhm must be non-negative (0.0 disables matched filter), got {}",
             self.expected_fwhm
         );
         assert!(
