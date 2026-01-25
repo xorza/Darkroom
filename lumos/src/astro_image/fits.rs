@@ -52,6 +52,7 @@ pub fn load_fits(path: &Path) -> Result<AstroImage> {
     );
 
     // Read metadata
+    // FITS files don't indicate CFA status - assume false (processed data)
     let metadata = AstroImageMetadata {
         object: read_key_optional(&hdu, &mut fptr, "OBJECT"),
         instrument: read_key_optional(&hdu, &mut fptr, "INSTRUME"),
@@ -60,6 +61,7 @@ pub fn load_fits(path: &Path) -> Result<AstroImage> {
         exposure_time: read_key_optional(&hdu, &mut fptr, "EXPTIME"),
         bitpix,
         header_dimensions: dimensions.clone(),
+        is_cfa: false,
     };
 
     Ok(AstroImage {

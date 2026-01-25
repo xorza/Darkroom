@@ -138,8 +138,8 @@ pub fn load_raw(path: &Path) -> Result<AstroImage> {
     );
 
     // Process based on sensor type
-    // Returns (pixels, width, height, num_channels) - dimensions may differ for libraw fallback
-    let (pixels, out_width, out_height, num_channels) = match sensor_type {
+    // Returns (pixels, width, height, num_channels, is_cfa) - dimensions may differ for libraw fallback
+    let (pixels, out_width, out_height, num_channels, is_cfa) = match sensor_type {
         SensorType::Monochrome => {
             tracing::info!(
                 "Monochrome sensor detected (filters=0x{:08x}, colors={}), skipping demosaic",
@@ -157,7 +157,7 @@ pub fn load_raw(path: &Path) -> Result<AstroImage> {
                 black,
                 range,
             )?;
-            (pixels, width, height, channels)
+            (pixels, width, height, channels, false)
         }
         SensorType::Bayer(cfa_pattern) => {
             tracing::debug!(
@@ -177,7 +177,7 @@ pub fn load_raw(path: &Path) -> Result<AstroImage> {
                 range,
                 cfa_pattern,
             )?;
-            (pixels, width, height, channels)
+            (pixels, width, height, channels, true)
         }
         SensorType::XTrans => {
             tracing::info!(
@@ -221,14 +221,15 @@ pub fn load_raw(path: &Path) -> Result<AstroImage> {
                 range,
                 xtrans_pattern,
             );
-            (pixels, width, height, channels)
+            (pixels, width, height, channels, true)
         }
         SensorType::Unknown => {
             tracing::info!(
                 "Unknown CFA pattern (filters=0x{:08x}), using libraw demosaic fallback",
                 filters
             );
-            process_unknown_libraw_fallback(inner)?
+            let (pixels, w, h, c) = process_unknown_libraw_fallback(inner)?;
+            (pixels, w, h, c, true) // Assume CFA for unknown patterns
         }
     };
 
@@ -252,6 +253,7 @@ pub fn load_raw(path: &Path) -> Result<AstroImage> {
         exposure_time: None,
         bitpix: BitPix::Int16,
         header_dimensions: vec![out_height, out_width, num_channels],
+        is_cfa,
     };
 
     Ok(AstroImage {

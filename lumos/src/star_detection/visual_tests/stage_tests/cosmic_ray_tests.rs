@@ -51,7 +51,6 @@ fn test_cosmic_ray_rejection() {
 
     // Run detection - disable CFA filter and matched filter for synthetic images
     let detection_config = StarDetectionConfig {
-        is_cfa: false,
         expected_fwhm: 0.0,
         ..Default::default()
     };
@@ -184,7 +183,6 @@ fn test_laplacian_snr_visualization() {
 
     // Run detection - disable CFA filter and matched filter for synthetic images
     let detection_config = StarDetectionConfig {
-        is_cfa: false,
         expected_fwhm: 0.0,
         ..Default::default()
     };

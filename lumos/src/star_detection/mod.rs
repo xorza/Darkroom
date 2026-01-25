@@ -325,10 +325,8 @@ impl Default for QualityFilters {
 }
 
 /// Camera-specific parameters for accurate SNR calculation.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct CameraParams {
-    /// Whether the image has a Color Filter Array (Bayer/X-Trans pattern).
-    pub is_cfa: bool,
     /// Camera gain in electrons per ADU (e-/ADU).
     pub gain: Option<f32>,
     /// Read noise in electrons (e-).
@@ -337,34 +335,7 @@ pub struct CameraParams {
     pub defect_map: Option<DefectMap>,
 }
 
-impl Default for CameraParams {
-    fn default() -> Self {
-        Self {
-            is_cfa: true, // CFA by default for backward compatibility
-            gain: None,
-            read_noise: None,
-            defect_map: None,
-        }
-    }
-}
-
 impl CameraParams {
-    /// Create camera params for a CFA sensor with default settings.
-    pub fn cfa() -> Self {
-        Self {
-            is_cfa: true,
-            ..Default::default()
-        }
-    }
-
-    /// Create camera params for a monochrome sensor.
-    pub fn monochrome() -> Self {
-        Self {
-            is_cfa: false,
-            ..Default::default()
-        }
-    }
-
     /// Set gain and read noise for accurate SNR calculation.
     pub fn with_noise_model(mut self, gain: f32, read_noise: f32) -> Self {
         self.gain = Some(gain);
@@ -477,10 +448,6 @@ pub struct StarDetectionConfig {
     /// at least this fraction of the total flux. Lower values deblend more aggressively.
     /// SExtractor default: 0.005. Set to 1.0 to disable deblending.
     pub deblend_min_contrast: f32,
-    /// Whether the image has a Color Filter Array (Bayer/X-Trans pattern).
-    /// When true, applies a 3x3 median filter to remove CFA artifacts before detection.
-    /// Set to false for monochrome sensors to skip the filter (~6ms faster on 4K images).
-    pub is_cfa: bool,
     /// Camera gain in electrons per ADU (e-/ADU).
     /// Used for accurate SNR calculation using the full CCD noise equation.
     /// When None, uses simplified background-dominated SNR formula.
@@ -533,8 +500,7 @@ impl Default for StarDetectionConfig {
             multi_threshold_deblend: false, // Use simpler local maxima by default
             deblend_nthresh: 32,
             deblend_min_contrast: 0.005,
-            is_cfa: true, // Assume CFA by default for backward compatibility
-            gain: None,   // Use simplified SNR formula by default
+            gain: None, // Use simplified SNR formula by default
             read_noise: None,
             defect_map: None,
             iterative_background_passes: 0, // Single pass by default (fastest)
@@ -665,7 +631,6 @@ impl StarDetectionConfig {
             max_sharpness: quality.max_sharpness,
             max_roundness: quality.max_roundness,
             duplicate_min_separation: quality.duplicate_min_separation,
-            is_cfa: camera.is_cfa,
             gain: camera.gain,
             read_noise: camera.read_noise,
             defect_map: camera.defect_map,
@@ -742,18 +707,6 @@ impl StarDetectionConfigBuilder {
     /// Enable cosmic ray rejection with specified sharpness threshold.
     pub fn with_cosmic_ray_rejection(mut self, max_sharpness: f32) -> Self {
         self.quality.max_sharpness = max_sharpness;
-        self
-    }
-
-    /// Configure for monochrome sensor (skip CFA median filter).
-    pub fn for_monochrome(mut self) -> Self {
-        self.camera.is_cfa = false;
-        self
-    }
-
-    /// Configure for CFA sensor (apply CFA median filter).
-    pub fn for_cfa(mut self) -> Self {
-        self.camera.is_cfa = true;
         self
     }
 
@@ -916,7 +869,7 @@ pub fn find_stars(image: &AstroImage, config: &StarDetectionConfig) -> StarDetec
 
     // Step 0b: Apply 3x3 median filter to remove Bayer pattern artifacts
     // Only applied for CFA sensors; skip for monochrome (~6ms faster on 4K images)
-    let smoothed = if config.is_cfa {
+    let smoothed = if image.metadata.is_cfa {
         median_filter_3x3(&pixels_cleaned, width, height)
     } else {
         pixels_cleaned

@@ -111,6 +111,9 @@ pub struct AstroImageMetadata {
     pub bitpix: BitPix,
     /// Raw FITS header dimensions [height, width] or [channels, height, width]
     pub header_dimensions: Vec<usize>,
+    /// Whether the image has CFA pattern artifacts (from Bayer/X-Trans sensors).
+    /// When true, star detection applies median filtering to reduce pattern noise.
+    pub is_cfa: bool,
 }
 
 /// Represents an astronomical image loaded from a FITS file.

@@ -74,7 +74,6 @@ fn test_pipeline_sparse_field() {
     let field_config = sparse_field_config();
     // Synthetic images: disable CFA filter, disable matched filter for accurate FWHM
     let detection_config = StarDetectionConfig {
-        is_cfa: false,
         expected_fwhm: 0.0, // Disable matched filter to get accurate FWHM measurement
         ..StarDetectionConfig::default()
     };
@@ -100,7 +99,6 @@ fn test_pipeline_dense_field() {
     let field_config = dense_field_config();
     // Synthetic images: disable CFA filter, disable matched filter for accurate FWHM
     let detection_config = StarDetectionConfig {
-        is_cfa: false,
         expected_fwhm: 0.0,
         ..StarDetectionConfig::default()
     };
@@ -140,7 +138,6 @@ fn test_pipeline_moffat_profile() {
     };
     // Synthetic images: disable CFA filter, disable matched filter for accurate FWHM
     let detection_config = StarDetectionConfig {
-        is_cfa: false,
         expected_fwhm: 0.0,
         ..StarDetectionConfig::default()
     };
@@ -183,7 +180,6 @@ fn test_pipeline_fwhm_range() {
     };
     // Synthetic images: disable CFA filter, disable matched filter for accurate FWHM
     let detection_config = StarDetectionConfig {
-        is_cfa: false,
         expected_fwhm: 0.0,
         ..StarDetectionConfig::default()
     };
@@ -228,7 +224,6 @@ fn test_pipeline_dynamic_range() {
     // Synthetic images: disable CFA filter, disable matched filter
     // Lower SNR threshold to catch faint stars
     let detection_config = StarDetectionConfig {
-        is_cfa: false,
         expected_fwhm: 0.0,
         min_snr: 5.0,
         ..StarDetectionConfig::default()
@@ -267,7 +262,6 @@ fn test_pipeline_low_noise() {
     };
     // Synthetic images: disable CFA filter, disable matched filter for accurate FWHM
     let detection_config = StarDetectionConfig {
-        is_cfa: false,
         expected_fwhm: 0.0,
         ..StarDetectionConfig::default()
     };
