@@ -89,10 +89,9 @@ pub fn detect_stars(
     let mask = create_threshold_mask(pixels, background, detection_config.sigma_threshold);
 
     // Dilate mask to connect nearby pixels that may be separated due to
-    // Bayer pattern artifacts (alternating row sensitivities) or background
-    // estimation variance across a single star.
-    // Use radius 2 (5x5 structuring element) to bridge Bayer gaps.
-    let mask = dilate_mask(&mask, width, height, 2);
+    // Bayer pattern artifacts or noise. Use radius 1 (3x3 structuring element)
+    // to minimize merging of close stars while still connecting fragmented detections.
+    let mask = dilate_mask(&mask, width, height, 1);
 
     // Find connected components
     let (labels, num_labels) = connected_components(&mask, width, height);
@@ -285,10 +284,10 @@ pub fn detect_stars_filtered(
     let mask =
         create_threshold_mask_filtered(filtered, background, detection_config.sigma_threshold);
 
-    // Dilate mask - use smaller radius (1) when matched filter is applied
-    // since convolution already "connects" nearby pixels
-    let dilation_radius = if config.expected_fwhm > 0.0 { 1 } else { 2 };
-    let mask = dilate_mask(&mask, width, height, dilation_radius);
+    // Dilate mask with radius 1 to connect fragmented detections while
+    // minimizing merging of close stars. Matched filtering already provides
+    // good connectivity, so minimal dilation is needed.
+    let mask = dilate_mask(&mask, width, height, 1);
 
     // Find connected components
     let (labels, num_labels) = connected_components(&mask, width, height);
