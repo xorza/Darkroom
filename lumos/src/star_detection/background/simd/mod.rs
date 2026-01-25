@@ -9,6 +9,9 @@
 #![allow(dead_code)]
 
 #[cfg(target_arch = "x86_64")]
+use crate::common::cpu_features;
+
+#[cfg(target_arch = "x86_64")]
 pub mod sse;
 
 #[cfg(target_arch = "aarch64")]
@@ -21,10 +24,10 @@ pub mod neon;
 pub fn sum_and_sum_sq_simd(values: &[f32]) -> (f32, f32) {
     #[cfg(target_arch = "x86_64")]
     {
-        if is_x86_feature_detected!("avx2") {
+        if cpu_features::has_avx2() {
             return unsafe { sse::sum_and_sum_sq_avx2(values) };
         }
-        if is_x86_feature_detected!("sse4.1") {
+        if cpu_features::has_sse4_1() {
             return unsafe { sse::sum_and_sum_sq_sse41(values) };
         }
     }
@@ -46,10 +49,10 @@ pub fn sum_and_sum_sq_simd(values: &[f32]) -> (f32, f32) {
 pub fn sum_abs_deviations_simd(values: &[f32], median: f32) -> f32 {
     #[cfg(target_arch = "x86_64")]
     {
-        if is_x86_feature_detected!("avx2") {
+        if cpu_features::has_avx2() {
             return unsafe { sse::sum_abs_deviations_avx2(values, median) };
         }
-        if is_x86_feature_detected!("sse4.1") {
+        if cpu_features::has_sse4_1() {
             return unsafe { sse::sum_abs_deviations_sse41(values, median) };
         }
     }

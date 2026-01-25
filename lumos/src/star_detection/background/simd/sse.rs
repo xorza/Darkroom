@@ -192,11 +192,13 @@ pub unsafe fn sum_abs_deviations_sse41(values: &[f32], median: f32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(target_arch = "x86_64")]
+    use crate::common::cpu_features;
 
     #[test]
     #[cfg(target_arch = "x86_64")]
     fn test_avx2_sum_and_sum_sq() {
-        if !is_x86_feature_detected!("avx2") {
+        if !cpu_features::has_avx2() {
             eprintln!("Skipping AVX2 test");
             return;
         }
@@ -224,7 +226,7 @@ mod tests {
     #[test]
     #[cfg(target_arch = "x86_64")]
     fn test_sse41_sum_and_sum_sq() {
-        if !is_x86_feature_detected!("sse4.1") {
+        if !cpu_features::has_sse4_1() {
             eprintln!("Skipping SSE4.1 test");
             return;
         }
@@ -252,7 +254,7 @@ mod tests {
     #[test]
     #[cfg(target_arch = "x86_64")]
     fn test_avx2_sum_abs_deviations() {
-        if !is_x86_feature_detected!("avx2") {
+        if !cpu_features::has_avx2() {
             eprintln!("Skipping AVX2 test");
             return;
         }

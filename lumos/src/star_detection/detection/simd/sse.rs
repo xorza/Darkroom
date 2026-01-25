@@ -126,6 +126,8 @@ pub unsafe fn create_threshold_mask_sse41(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(target_arch = "x86_64")]
+    use crate::common::cpu_features;
 
     fn create_threshold_mask_scalar(
         pixels: &[f32],
@@ -147,7 +149,7 @@ mod tests {
     #[test]
     #[cfg(target_arch = "x86_64")]
     fn test_avx2_threshold_mask() {
-        if !is_x86_feature_detected!("avx2") {
+        if !cpu_features::has_avx2() {
             eprintln!("Skipping AVX2 test - not available");
             return;
         }
@@ -177,7 +179,7 @@ mod tests {
     #[test]
     #[cfg(target_arch = "x86_64")]
     fn test_sse41_threshold_mask() {
-        if !is_x86_feature_detected!("sse4.1") {
+        if !cpu_features::has_sse4_1() {
             eprintln!("Skipping SSE4.1 test - not available");
             return;
         }
@@ -207,7 +209,7 @@ mod tests {
     #[test]
     #[cfg(target_arch = "x86_64")]
     fn test_avx2_detects_stars_above_threshold() {
-        if !is_x86_feature_detected!("avx2") {
+        if !cpu_features::has_avx2() {
             eprintln!("Skipping AVX2 star detection test - not available");
             return;
         }

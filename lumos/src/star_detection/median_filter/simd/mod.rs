@@ -14,6 +14,9 @@
 //! using SIMD for the min/max operations in the sorting network.
 
 #[cfg(target_arch = "x86_64")]
+use crate::common::cpu_features;
+
+#[cfg(target_arch = "x86_64")]
 pub mod sse;
 
 #[cfg(target_arch = "aarch64")]
@@ -40,13 +43,13 @@ pub fn median_filter_row_simd(
 ) {
     #[cfg(target_arch = "x86_64")]
     {
-        if width >= 12 && is_x86_feature_detected!("avx2") {
+        if width >= 12 && cpu_features::has_avx2() {
             unsafe {
                 sse::median_filter_row_avx2(row_above, row_curr, row_below, output_row, width);
             }
             return;
         }
-        if width >= 8 && is_x86_feature_detected!("sse4.1") {
+        if width >= 8 && cpu_features::has_sse4_1() {
             unsafe {
                 sse::median_filter_row_sse41(row_above, row_curr, row_below, output_row, width);
             }

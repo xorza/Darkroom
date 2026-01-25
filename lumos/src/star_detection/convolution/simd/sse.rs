@@ -162,11 +162,13 @@ fn convolve_pixel_scalar(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(target_arch = "x86_64")]
+    use crate::common::cpu_features;
 
     #[test]
     #[cfg(target_arch = "x86_64")]
     fn test_avx2_matches_scalar() {
-        if !is_x86_feature_detected!("avx2") || !is_x86_feature_detected!("fma") {
+        if !cpu_features::has_avx2_fma() {
             eprintln!("Skipping AVX2 test: CPU does not support AVX2+FMA");
             return;
         }
@@ -200,7 +202,7 @@ mod tests {
     #[test]
     #[cfg(target_arch = "x86_64")]
     fn test_sse41_matches_scalar() {
-        if !is_x86_feature_detected!("sse4.1") {
+        if !cpu_features::has_sse4_1() {
             eprintln!("Skipping SSE4.1 test: CPU does not support SSE4.1");
             return;
         }

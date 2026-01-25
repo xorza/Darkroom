@@ -6,6 +6,9 @@
 //! - Scalar fallback on other platforms
 
 #[cfg(target_arch = "x86_64")]
+use crate::common::cpu_features;
+
+#[cfg(target_arch = "x86_64")]
 pub mod sse;
 
 #[cfg(target_arch = "aarch64")]
@@ -29,7 +32,7 @@ pub fn create_threshold_mask_simd(
 
     #[cfg(target_arch = "x86_64")]
     {
-        if len >= 8 && is_x86_feature_detected!("avx2") {
+        if len >= 8 && cpu_features::has_avx2() {
             unsafe {
                 sse::create_threshold_mask_avx2(
                     pixels,
@@ -41,7 +44,7 @@ pub fn create_threshold_mask_simd(
             }
             return output;
         }
-        if len >= 4 && is_x86_feature_detected!("sse4.1") {
+        if len >= 4 && cpu_features::has_sse4_1() {
             unsafe {
                 sse::create_threshold_mask_sse41(
                     pixels,

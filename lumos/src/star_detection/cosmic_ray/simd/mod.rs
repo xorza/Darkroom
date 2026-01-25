@@ -6,6 +6,9 @@
 //! - Scalar fallback on other platforms
 
 #[cfg(target_arch = "x86_64")]
+use crate::common::cpu_features;
+
+#[cfg(target_arch = "x86_64")]
 pub mod sse;
 
 #[cfg(target_arch = "aarch64")]
@@ -29,13 +32,13 @@ pub mod neon;
 pub fn compute_laplacian_row_simd(pixels: &[f32], width: usize, y: usize, output: &mut [f32]) {
     #[cfg(target_arch = "x86_64")]
     {
-        if width >= 10 && is_x86_feature_detected!("avx2") {
+        if width >= 10 && cpu_features::has_avx2() {
             unsafe {
                 sse::compute_laplacian_row_avx2(pixels, width, y, output);
             }
             return;
         }
-        if width >= 6 && is_x86_feature_detected!("sse4.1") {
+        if width >= 6 && cpu_features::has_sse4_1() {
             unsafe {
                 sse::compute_laplacian_row_sse41(pixels, width, y, output);
             }

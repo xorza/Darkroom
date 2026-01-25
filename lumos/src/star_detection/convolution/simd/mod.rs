@@ -6,6 +6,9 @@
 //! - Scalar fallback on other platforms
 
 #[cfg(target_arch = "x86_64")]
+use crate::common::cpu_features;
+
+#[cfg(target_arch = "x86_64")]
 pub mod sse;
 
 #[cfg(target_arch = "aarch64")]
@@ -18,13 +21,13 @@ pub mod neon;
 pub fn convolve_row_simd(input: &[f32], output: &mut [f32], kernel: &[f32], radius: usize) {
     #[cfg(target_arch = "x86_64")]
     {
-        if is_x86_feature_detected!("avx2") && is_x86_feature_detected!("fma") {
+        if cpu_features::has_avx2_fma() {
             unsafe {
                 sse::convolve_row_avx2(input, output, kernel, radius);
             }
             return;
         }
-        if is_x86_feature_detected!("sse4.1") {
+        if cpu_features::has_sse4_1() {
             unsafe {
                 sse::convolve_row_sse41(input, output, kernel, radius);
             }
@@ -77,7 +80,7 @@ fn convolve_row_scalar(input: &[f32], output: &mut [f32], kernel: &[f32], radius
 pub fn simd_available() -> bool {
     #[cfg(target_arch = "x86_64")]
     {
-        is_x86_feature_detected!("sse4.1")
+        cpu_features::has_sse4_1()
     }
     #[cfg(target_arch = "aarch64")]
     {
@@ -94,10 +97,10 @@ pub fn simd_available() -> bool {
 pub fn simd_implementation_name() -> &'static str {
     #[cfg(target_arch = "x86_64")]
     {
-        if is_x86_feature_detected!("avx2") && is_x86_feature_detected!("fma") {
+        if cpu_features::has_avx2_fma() {
             return "AVX2+FMA";
         }
-        if is_x86_feature_detected!("sse4.1") {
+        if cpu_features::has_sse4_1() {
             return "SSE4.1";
         }
     }

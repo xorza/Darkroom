@@ -259,6 +259,8 @@ unsafe fn median9_sse41(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(target_arch = "x86_64")]
+    use crate::common::cpu_features;
 
     fn median9_reference(values: &mut [f32; 9]) -> f32 {
         values.sort_by(|a, b| a.partial_cmp(b).unwrap());
@@ -268,7 +270,7 @@ mod tests {
     #[test]
     #[cfg(target_arch = "x86_64")]
     fn test_avx2_median9() {
-        if !is_x86_feature_detected!("avx2") {
+        if !cpu_features::has_avx2() {
             eprintln!("Skipping AVX2 test - not available");
             return;
         }
@@ -329,7 +331,7 @@ mod tests {
     #[test]
     #[cfg(target_arch = "x86_64")]
     fn test_sse41_median9() {
-        if !is_x86_feature_detected!("sse4.1") {
+        if !cpu_features::has_sse4_1() {
             eprintln!("Skipping SSE4.1 test - not available");
             return;
         }
@@ -384,7 +386,7 @@ mod tests {
     #[test]
     #[cfg(target_arch = "x86_64")]
     fn test_median_filter_row_avx2() {
-        if !is_x86_feature_detected!("avx2") {
+        if !cpu_features::has_avx2() {
             eprintln!("Skipping AVX2 row test - not available");
             return;
         }
@@ -423,7 +425,7 @@ mod tests {
     #[test]
     #[cfg(target_arch = "x86_64")]
     fn test_median_filter_row_sse41() {
-        if !is_x86_feature_detected!("sse4.1") {
+        if !cpu_features::has_sse4_1() {
             eprintln!("Skipping SSE4.1 row test - not available");
             return;
         }

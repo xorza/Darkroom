@@ -140,6 +140,8 @@ pub unsafe fn compute_laplacian_row_sse41(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(target_arch = "x86_64")]
+    use crate::common::cpu_features;
 
     fn compute_laplacian_scalar(pixels: &[f32], width: usize, height: usize) -> Vec<f32> {
         let mut output = vec![0.0f32; pixels.len()];
@@ -160,7 +162,7 @@ mod tests {
     #[test]
     #[cfg(target_arch = "x86_64")]
     fn test_avx2_laplacian_row() {
-        if !is_x86_feature_detected!("avx2") {
+        if !cpu_features::has_avx2() {
             eprintln!("Skipping AVX2 test - not available");
             return;
         }
@@ -198,7 +200,7 @@ mod tests {
     #[test]
     #[cfg(target_arch = "x86_64")]
     fn test_sse41_laplacian_row() {
-        if !is_x86_feature_detected!("sse4.1") {
+        if !cpu_features::has_sse4_1() {
             eprintln!("Skipping SSE4.1 test - not available");
             return;
         }
@@ -236,7 +238,7 @@ mod tests {
     #[test]
     #[cfg(target_arch = "x86_64")]
     fn test_simd_laplacian_peak_detection() {
-        if !is_x86_feature_detected!("avx2") {
+        if !cpu_features::has_avx2() {
             eprintln!("Skipping peak detection test - AVX2 not available");
             return;
         }
