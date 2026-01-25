@@ -32,6 +32,11 @@ pub struct RansacConfig {
     pub min_inlier_ratio: f64,
     /// Random seed for reproducibility (None for random).
     pub seed: Option<u64>,
+    /// Enable Local Optimization (LO-RANSAC).
+    /// When enabled, promising hypotheses are refined iteratively.
+    pub use_local_optimization: bool,
+    /// Maximum iterations for local optimization step.
+    pub lo_max_iterations: usize,
 }
 
 impl Default for RansacConfig {
@@ -42,6 +47,8 @@ impl Default for RansacConfig {
             confidence: 0.999,
             min_inlier_ratio: 0.5,
             seed: None,
+            use_local_optimization: true,
+            lo_max_iterations: 10,
         }
     }
 }
@@ -123,18 +130,34 @@ impl RansacEstimator {
             };
 
             // Count inliers
-            let (inliers, score) = count_inliers(
+            let (mut inliers, mut score) = count_inliers(
                 ref_points,
                 target_points,
                 &transform,
                 self.config.inlier_threshold,
             );
 
+            let mut current_transform = transform;
+
+            // Local Optimization: if this hypothesis looks promising, refine it
+            if self.config.use_local_optimization && inliers.len() >= min_samples {
+                let (lo_transform, lo_inliers, lo_score) = self.local_optimization(
+                    ref_points,
+                    target_points,
+                    &current_transform,
+                    &inliers,
+                    transform_type,
+                );
+                current_transform = lo_transform;
+                inliers = lo_inliers;
+                score = lo_score;
+            }
+
             // Update best if improved
             if score > best_score {
                 best_score = score;
                 best_inliers = inliers;
-                best_transform = Some(transform);
+                best_transform = Some(current_transform);
 
                 // Adaptive iteration count based on inlier ratio
                 let inlier_ratio = best_inliers.len() as f64 / n as f64;
@@ -148,7 +171,7 @@ impl RansacEstimator {
             }
         }
 
-        // Refine with least squares on inliers
+        // Final refinement with least squares on all inliers
         if let Some(transform) = best_transform
             && best_inliers.len() >= min_samples
         {
@@ -178,6 +201,73 @@ impl RansacEstimator {
         }
 
         None
+    }
+
+    /// Perform local optimization on a promising hypothesis.
+    ///
+    /// This implements the LO-RANSAC algorithm:
+    /// 1. Re-estimate transform using current inliers
+    /// 2. Find new inliers with the refined transform
+    /// 3. Repeat until convergence or max iterations
+    ///
+    /// This typically improves the inlier count by 5-15%.
+    fn local_optimization(
+        &self,
+        ref_points: &[(f64, f64)],
+        target_points: &[(f64, f64)],
+        initial_transform: &TransformMatrix,
+        initial_inliers: &[usize],
+        transform_type: TransformType,
+    ) -> (TransformMatrix, Vec<usize>, usize) {
+        let min_samples = transform_type.min_points();
+        let mut current_transform = initial_transform.clone();
+        let mut current_inliers = initial_inliers.to_vec();
+
+        // Compute initial score
+        let (_, initial_score) = count_inliers(
+            ref_points,
+            target_points,
+            &current_transform,
+            self.config.inlier_threshold,
+        );
+        let mut current_score = initial_score;
+
+        for _ in 0..self.config.lo_max_iterations {
+            if current_inliers.len() < min_samples {
+                break;
+            }
+
+            // Re-estimate transform using all current inliers
+            let inlier_ref: Vec<(f64, f64)> =
+                current_inliers.iter().map(|&i| ref_points[i]).collect();
+            let inlier_target: Vec<(f64, f64)> =
+                current_inliers.iter().map(|&i| target_points[i]).collect();
+
+            let refined = match estimate_transform(&inlier_ref, &inlier_target, transform_type) {
+                Some(t) => t,
+                None => break,
+            };
+
+            // Count inliers with refined transform
+            let (new_inliers, new_score) = count_inliers(
+                ref_points,
+                target_points,
+                &refined,
+                self.config.inlier_threshold,
+            );
+
+            // Check for convergence (no improvement)
+            if new_inliers.len() <= current_inliers.len() && new_score <= current_score {
+                break;
+            }
+
+            // Update if improved
+            current_transform = refined;
+            current_inliers = new_inliers;
+            current_score = new_score;
+        }
+
+        (current_transform, current_inliers, current_score)
     }
 }
 

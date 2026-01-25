@@ -328,3 +328,228 @@ fn test_ransac_homography() {
 
     assert!(result.is_some());
 }
+
+// ============================================================================
+// LO-RANSAC Tests
+// ============================================================================
+
+#[test]
+fn test_lo_ransac_improves_inlier_count() {
+    // Create points with some noise
+    let ref_points: Vec<(f64, f64)> = (0..20)
+        .map(|i| {
+            let x = (i % 5) as f64 * 20.0;
+            let y = (i / 5) as f64 * 20.0;
+            (x, y)
+        })
+        .collect();
+
+    let known = TransformMatrix::similarity(10.0, -5.0, PI / 8.0, 1.1);
+    let mut target_points: Vec<(f64, f64)> =
+        ref_points.iter().map(|&(x, y)| known.apply(x, y)).collect();
+
+    // Add some noise to make it harder
+    target_points[5].0 += 0.5;
+    target_points[10].1 -= 0.3;
+
+    // Test with LO-RANSAC enabled
+    let config_with_lo = RansacConfig {
+        seed: Some(123),
+        use_local_optimization: true,
+        lo_max_iterations: 5,
+        inlier_threshold: 1.0,
+        ..Default::default()
+    };
+    let estimator_with = RansacEstimator::new(config_with_lo);
+    let result_with = estimator_with
+        .estimate(&ref_points, &target_points, TransformType::Similarity)
+        .unwrap();
+
+    // Test with LO-RANSAC disabled
+    let config_without_lo = RansacConfig {
+        seed: Some(123),
+        use_local_optimization: false,
+        inlier_threshold: 1.0,
+        ..Default::default()
+    };
+    let estimator_without = RansacEstimator::new(config_without_lo);
+    let result_without = estimator_without
+        .estimate(&ref_points, &target_points, TransformType::Similarity)
+        .unwrap();
+
+    // LO-RANSAC should find at least as many inliers
+    assert!(
+        result_with.inliers.len() >= result_without.inliers.len(),
+        "LO-RANSAC found {} inliers, standard found {}",
+        result_with.inliers.len(),
+        result_without.inliers.len()
+    );
+}
+
+#[test]
+fn test_lo_ransac_converges() {
+    let ref_points = vec![
+        (0.0, 0.0),
+        (10.0, 0.0),
+        (0.0, 10.0),
+        (10.0, 10.0),
+        (5.0, 5.0),
+        (7.0, 3.0),
+        (3.0, 7.0),
+        (8.0, 8.0),
+    ];
+
+    let known = TransformMatrix::translation(5.0, 3.0);
+    let target_points: Vec<(f64, f64)> =
+        ref_points.iter().map(|&(x, y)| known.apply(x, y)).collect();
+
+    let config = RansacConfig {
+        seed: Some(42),
+        use_local_optimization: true,
+        lo_max_iterations: 10,
+        ..Default::default()
+    };
+    let estimator = RansacEstimator::new(config);
+    let result = estimator
+        .estimate(&ref_points, &target_points, TransformType::Translation)
+        .unwrap();
+
+    // All points should be inliers
+    assert_eq!(result.inliers.len(), 8);
+
+    // Transform should be accurate
+    let (dx, dy) = result.transform.translation_components();
+    assert!(approx_eq(dx, 5.0, 0.1));
+    assert!(approx_eq(dy, 3.0, 0.1));
+}
+
+#[test]
+fn test_ransac_30_percent_outliers() {
+    // 10 inliers, ~4 outliers (30%)
+    let ref_points = vec![
+        (0.0, 0.0),
+        (10.0, 0.0),
+        (20.0, 0.0),
+        (0.0, 10.0),
+        (10.0, 10.0),
+        (20.0, 10.0),
+        (0.0, 20.0),
+        (10.0, 20.0),
+        (20.0, 20.0),
+        (5.0, 5.0),
+        (100.0, 100.0), // outlier
+        (150.0, 50.0),  // outlier
+        (200.0, 200.0), // outlier
+        (250.0, 150.0), // outlier
+    ];
+
+    let known = TransformMatrix::translation(5.0, 3.0);
+    let mut target_points: Vec<(f64, f64)> =
+        ref_points.iter().map(|&(x, y)| known.apply(x, y)).collect();
+
+    // Make outliers actually outliers
+    target_points[10] = (500.0, 500.0);
+    target_points[11] = (600.0, 300.0);
+    target_points[12] = (700.0, 700.0);
+    target_points[13] = (800.0, 400.0);
+
+    let config = RansacConfig {
+        seed: Some(42),
+        inlier_threshold: 1.0,
+        use_local_optimization: true,
+        ..Default::default()
+    };
+    let estimator = RansacEstimator::new(config);
+    let result = estimator
+        .estimate(&ref_points, &target_points, TransformType::Translation)
+        .unwrap();
+
+    // Should find 10 inliers
+    assert_eq!(result.inliers.len(), 10);
+
+    // Outliers should not be in inliers
+    assert!(!result.inliers.contains(&10));
+    assert!(!result.inliers.contains(&11));
+    assert!(!result.inliers.contains(&12));
+    assert!(!result.inliers.contains(&13));
+}
+
+#[test]
+fn test_ransac_numerical_stability_large_coords() {
+    // Points with large coordinates (typical for high-res images)
+    let ref_points: Vec<(f64, f64)> = (0..10)
+        .map(|i| {
+            let x = 2000.0 + (i % 5) as f64 * 100.0;
+            let y = 1500.0 + (i / 5) as f64 * 100.0;
+            (x, y)
+        })
+        .collect();
+
+    let known = TransformMatrix::similarity(50.0, -30.0, PI / 16.0, 1.05);
+    let target_points: Vec<(f64, f64)> =
+        ref_points.iter().map(|&(x, y)| known.apply(x, y)).collect();
+
+    let config = RansacConfig {
+        seed: Some(42),
+        ..Default::default()
+    };
+    let estimator = RansacEstimator::new(config);
+    let result = estimator
+        .estimate(&ref_points, &target_points, TransformType::Similarity)
+        .unwrap();
+
+    // Should find all points as inliers
+    assert_eq!(result.inliers.len(), 10);
+
+    // Check accuracy
+    for i in 0..ref_points.len() {
+        let (rx, ry) = ref_points[i];
+        let (tx, ty) = target_points[i];
+        let (px, py) = result.transform.apply(rx, ry);
+        let error = ((px - tx).powi(2) + (py - ty).powi(2)).sqrt();
+        assert!(
+            error < 0.1,
+            "Large coordinate error: {} at point {}",
+            error,
+            i
+        );
+    }
+}
+
+#[test]
+fn test_ransac_deterministic_with_seed() {
+    let ref_points = vec![
+        (0.0, 0.0),
+        (10.0, 0.0),
+        (0.0, 10.0),
+        (10.0, 10.0),
+        (5.0, 5.0),
+    ];
+    let target_points: Vec<(f64, f64)> =
+        ref_points.iter().map(|(x, y)| (x + 5.0, y + 3.0)).collect();
+
+    let config = RansacConfig {
+        seed: Some(12345),
+        ..Default::default()
+    };
+
+    // Run twice with same seed
+    let estimator1 = RansacEstimator::new(config.clone());
+    let result1 = estimator1
+        .estimate(&ref_points, &target_points, TransformType::Translation)
+        .unwrap();
+
+    let estimator2 = RansacEstimator::new(config);
+    let result2 = estimator2
+        .estimate(&ref_points, &target_points, TransformType::Translation)
+        .unwrap();
+
+    // Should get identical results
+    assert_eq!(result1.inliers, result2.inliers);
+    assert_eq!(result1.iterations, result2.iterations);
+
+    let (dx1, dy1) = result1.transform.translation_components();
+    let (dx2, dy2) = result2.transform.translation_components();
+    assert!(approx_eq(dx1, dx2, EPSILON));
+    assert!(approx_eq(dy1, dy2, EPSILON));
+}

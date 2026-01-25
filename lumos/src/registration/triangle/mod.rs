@@ -12,6 +12,7 @@ pub mod bench;
 
 use std::collections::HashMap;
 
+use crate::registration::spatial::{KdTree, form_triangles_from_neighbors};
 use crate::registration::types::StarMatch;
 
 /// Orientation of a triangle (clockwise or counter-clockwise).
@@ -344,4 +345,151 @@ pub fn matches_to_point_pairs(
     }
 
     (ref_points, target_points)
+}
+
+/// Form triangles using k-d tree for efficient neighbor lookup.
+///
+/// This is much more efficient than `form_triangles` for large star counts,
+/// reducing complexity from O(n³) to approximately O(n * k²) where k is
+/// the number of nearest neighbors considered.
+///
+/// # Arguments
+/// * `positions` - Star positions (x, y)
+/// * `k_neighbors` - Number of nearest neighbors to consider for each star
+///
+/// # Returns
+/// Vector of triangles formed from neighboring stars
+pub fn form_triangles_kdtree(positions: &[(f64, f64)], k_neighbors: usize) -> Vec<Triangle> {
+    let tree = match KdTree::build(positions) {
+        Some(t) => t,
+        None => return Vec::new(),
+    };
+
+    let triangle_indices = form_triangles_from_neighbors(&tree, k_neighbors);
+
+    triangle_indices
+        .into_iter()
+        .filter_map(|[i, j, k]| {
+            Triangle::from_positions([i, j, k], [positions[i], positions[j], positions[k]])
+        })
+        .collect()
+}
+
+/// Match stars using k-d tree optimized triangle formation.
+///
+/// This version uses a k-d tree for efficient triangle formation, making it
+/// suitable for large star counts (>100 stars). For small star counts (<50),
+/// the regular `match_stars_triangles` may be faster due to lower overhead.
+///
+/// # Arguments
+/// * `ref_positions` - Reference image star positions
+/// * `target_positions` - Target image star positions
+/// * `config` - Triangle matching configuration
+///
+/// # Returns
+/// Vector of matched star pairs with confidence scores
+pub fn match_stars_triangles_kdtree(
+    ref_positions: &[(f64, f64)],
+    target_positions: &[(f64, f64)],
+    config: &TriangleMatchConfig,
+) -> Vec<StarMatch> {
+    let n_ref = ref_positions.len().min(config.max_stars);
+    let n_target = target_positions.len().min(config.max_stars);
+
+    if n_ref < 3 || n_target < 3 {
+        return Vec::new();
+    }
+
+    // Limit positions to max_stars
+    let ref_pos: Vec<_> = ref_positions
+        .iter()
+        .take(config.max_stars)
+        .copied()
+        .collect();
+    let target_pos: Vec<_> = target_positions
+        .iter()
+        .take(config.max_stars)
+        .copied()
+        .collect();
+
+    // Use k-d tree for triangle formation
+    // k_neighbors scales with star count but is capped for efficiency
+    let k_neighbors = (n_ref.min(n_target) / 3).clamp(5, 20);
+
+    let ref_triangles = form_triangles_kdtree(&ref_pos, k_neighbors);
+    let target_triangles = form_triangles_kdtree(&target_pos, k_neighbors);
+
+    if ref_triangles.is_empty() || target_triangles.is_empty() {
+        return Vec::new();
+    }
+
+    // Build hash table for reference triangles
+    let hash_table = TriangleHashTable::build(&ref_triangles, config.hash_bins);
+
+    // Vote for star correspondences
+    let mut vote_matrix: HashMap<(usize, usize), usize> = HashMap::new();
+
+    for target_tri in &target_triangles {
+        let candidates = hash_table.find_candidates(target_tri, config.ratio_tolerance);
+
+        for &ref_idx in &candidates {
+            let ref_tri = &ref_triangles[ref_idx];
+
+            // Check similarity
+            if !ref_tri.is_similar(target_tri, config.ratio_tolerance) {
+                continue;
+            }
+
+            // Check orientation if required
+            if config.check_orientation && ref_tri.orientation != target_tri.orientation {
+                continue;
+            }
+
+            // Vote for all three vertex correspondences
+            for i in 0..3 {
+                let ref_star = ref_tri.star_indices[i];
+                let target_star = target_tri.star_indices[i];
+                *vote_matrix.entry((ref_star, target_star)).or_insert(0) += 1;
+            }
+        }
+    }
+
+    // Filter by minimum votes and resolve conflicts
+    let mut matches: Vec<StarMatch> = vote_matrix
+        .into_iter()
+        .filter(|&(_, votes)| votes >= config.min_votes)
+        .map(|((ref_idx, target_idx), votes)| StarMatch {
+            ref_idx,
+            target_idx,
+            votes,
+            confidence: 0.0,
+        })
+        .collect();
+
+    // Sort by votes (descending)
+    matches.sort_by(|a, b| b.votes.cmp(&a.votes));
+
+    // Resolve one-to-many conflicts (greedy approach)
+    let mut used_ref = vec![false; n_ref];
+    let mut used_target = vec![false; n_target];
+    let mut resolved = Vec::new();
+
+    for m in matches {
+        if m.ref_idx < n_ref
+            && m.target_idx < n_target
+            && !used_ref[m.ref_idx]
+            && !used_target[m.target_idx]
+        {
+            used_ref[m.ref_idx] = true;
+            used_target[m.target_idx] = true;
+
+            // Compute confidence based on votes
+            let max_possible_votes = (n_ref.min(n_target) - 2) * (n_ref.min(n_target) - 1) / 2;
+            let confidence = (m.votes as f64 / max_possible_votes.max(1) as f64).min(1.0);
+
+            resolved.push(StarMatch { confidence, ..m });
+        }
+    }
+
+    resolved
 }

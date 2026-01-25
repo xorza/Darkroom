@@ -64,6 +64,7 @@ pub mod phase_correlation;
 pub mod pipeline;
 pub mod quality;
 pub mod ransac;
+pub mod spatial;
 pub mod triangle;
 pub mod types;
 
@@ -95,7 +96,11 @@ pub use quality::{
     compute_residuals, estimate_overlap,
 };
 pub use ransac::{RansacConfig, RansacEstimator, RansacResult};
-pub use triangle::{Triangle, TriangleMatchConfig, match_stars_triangles};
+pub use spatial::KdTree;
+pub use triangle::{
+    Triangle, TriangleMatchConfig, form_triangles_kdtree, match_stars_triangles,
+    match_stars_triangles_kdtree,
+};
 pub use types::{
     RegistrationConfig, RegistrationConfigBuilder, RegistrationError, RegistrationResult,
     StarMatch, TransformMatrix, TransformType,

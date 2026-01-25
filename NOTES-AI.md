@@ -443,6 +443,70 @@ LocalBackgroundMethod // GlobalMap | LocalAnnulus - how to estimate local backgr
 
 **Dependencies:** common, imaginarium, fitsio, rawloader, libraw-rs, anyhow, rayon, strum_macros
 
+**Image registration module (`registration/`):**
+- State-of-the-art image registration for aligning astronomical images
+- Supports translation, euclidean, similarity, affine, and homography transforms
+- Module structure:
+  - `mod.rs` - Public API, re-exports
+  - `types/` - Core types: `TransformMatrix`, `TransformType`, `RegistrationConfig`, `RegistrationResult`, `StarMatch`
+  - `spatial/` - K-d tree for efficient spatial queries (O(n log n) vs O(n³))
+  - `triangle/` - Triangle matching using geometric hashing (scale/rotation invariant)
+  - `ransac/` - RANSAC with LO-RANSAC (Local Optimization) for robust transform estimation
+  - `phase_correlation/` - FFT-based coarse alignment for large offsets
+  - `interpolation/` - Lanczos-3/4, bicubic, bilinear, nearest neighbor interpolation
+  - `pipeline/` - Full registration pipeline with `Registrator` struct
+  - `quality/` - Quality metrics, residual stats, quadrant consistency checking
+
+**Key types:**
+```rust
+TransformMatrix    // 3x3 homogeneous matrix with apply(), inverse(), compose()
+TransformType      // Translation | Euclidean | Similarity | Affine | Homography
+RegistrationConfig // Builder pattern with validation (min_stars, ransac_*, triangle_*, etc.)
+RegistrationResult // { transform, matched_stars, residuals, rms_error, quality_score }
+StarMatch          // { ref_idx, target_idx, votes, confidence }
+RansacConfig       // { max_iterations, inlier_threshold, confidence, use_local_optimization, lo_max_iterations }
+KdTree             // 2D k-d tree for k-nearest neighbor and radius queries
+```
+
+**Algorithm pipeline:**
+1. **Coarse alignment** (optional) - Phase correlation for initial translation estimate
+2. **Triangle matching** - Geometric hashing with side ratios (scale/rotation invariant)
+3. **RANSAC** - Random sampling with LO-RANSAC for robust transform estimation
+4. **Refinement** - Least-squares optimization on all inliers
+5. **Warping** - High-quality Lanczos-3 interpolation
+
+**K-d tree optimization (new):**
+- `KdTree::build()` - Median-split balanced tree construction
+- `k_nearest()` - Efficient k-nearest neighbor query with bounded max-heap
+- `radius_search()` - Find all points within radius
+- `form_triangles_from_neighbors()` - O(n*k²) triangle formation vs O(n³) brute-force
+- `match_stars_triangles_kdtree()` - K-d tree optimized star matching for >100 stars
+
+**LO-RANSAC (new):**
+- Local optimization after finding promising hypothesis
+- Iteratively refines transform on inlier set until convergence
+- Typically improves inlier count by 5-15%
+- Configurable via `use_local_optimization` and `lo_max_iterations`
+
+**Triangle matching details:**
+- Forms triangles from star positions (brute-force or k-d tree based)
+- Computes scale-invariant side ratios (a/c, b/c) as triangle descriptors
+- Geometric hash table for O(1) candidate lookup
+- Voting system accumulates consistent star correspondences
+- Greedy conflict resolution by vote count
+
+**RANSAC details:**
+- Adaptive iteration count based on inlier ratio
+- Weighted scoring (not just inlier count) for better model selection
+- DLT (Direct Linear Transform) for homography estimation
+- Point normalization for numerical stability
+
+**Interpolation methods:**
+- `Nearest` - Fastest, for previews/masks
+- `Bilinear` - Fast, reasonable quality
+- `Bicubic` - Catmull-Rom spline, good quality
+- `Lanczos2/3/4` - Sinc-windowed sinc kernel, highest quality (3 is default)
+
 ## Key Data Structures
 
 ### Graph Elements

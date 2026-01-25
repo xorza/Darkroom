@@ -125,6 +125,8 @@ impl Registrator {
             confidence: self.config.ransac_confidence,
             min_inlier_ratio: 0.3,
             seed: None,
+            use_local_optimization: true,
+            lo_max_iterations: 10,
         };
 
         let ransac = RansacEstimator::new(ransac_config);
