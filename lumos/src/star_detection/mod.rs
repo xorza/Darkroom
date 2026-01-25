@@ -67,6 +67,8 @@ pub use centroid::{
     MoffatFitConfig, MoffatFitResult, alpha_beta_to_fwhm, fit_moffat_2d, fwhm_beta_to_alpha,
 };
 
+use crate::astro_image::AstroImage;
+
 /// Method for computing sub-pixel centroids.
 ///
 /// Different methods offer tradeoffs between accuracy and speed.
@@ -880,23 +882,23 @@ pub struct StarDetectionDiagnostics {
     pub noise_stats: (f32, f32, f32),
 }
 
-/// Detect stars in an image.
+/// Detect stars in an astronomical image.
 ///
 /// Returns detected stars sorted by flux (brightest first) along with
 /// diagnostic information from the detection pipeline.
 ///
+/// For RGB images, only the first channel (red) is used. For grayscale
+/// images, the single channel is used directly.
+///
 /// # Arguments
-/// * `pixels` - Image pixel data (grayscale, normalized 0.0-1.0)
-/// * `width` - Image width
-/// * `height` - Image height
+/// * `image` - Astronomical image (grayscale or RGB, normalized 0.0-1.0)
 /// * `config` - Detection configuration
-pub fn find_stars(
-    pixels: &[f32],
-    width: usize,
-    height: usize,
-    config: &StarDetectionConfig,
-) -> StarDetectionResult {
-    assert_eq!(pixels.len(), width * height, "Pixel count mismatch");
+pub fn find_stars(image: &AstroImage, config: &StarDetectionConfig) -> StarDetectionResult {
+    let grayscale = image.to_grayscale();
+    let width = grayscale.dimensions.width;
+    let height = grayscale.dimensions.height;
+    let pixels = &grayscale.pixels;
+
     config.validate();
 
     let mut diagnostics = StarDetectionDiagnostics::default();

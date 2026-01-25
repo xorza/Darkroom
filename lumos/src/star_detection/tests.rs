@@ -115,14 +115,12 @@ fn test_find_stars_on_light_frame() {
         start.elapsed()
     );
 
-    // Convert to grayscale for star detection
     let (width, height) = (image.dimensions.width, image.dimensions.height);
-    let grayscale = image.to_grayscale().pixels;
 
     // Find stars
     let config = StarDetectionConfig::default();
     let start = std::time::Instant::now();
-    let result = find_stars(&grayscale, width, height, &config);
+    let result = find_stars(&image, &config);
     println!(
         "Found {} stars in {:?}",
         result.stars.len(),

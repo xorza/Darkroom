@@ -286,7 +286,7 @@ impl SurveyBenchmark {
 
         // Step 5: Run star detection
         let start = Instant::now();
-        let result = find_stars(&image.pixels, width, height, config);
+        let result = find_stars(&image, config);
         let runtime_ms = start.elapsed().as_millis() as u64;
 
         tracing::info!("Detected {} stars in {} ms", result.stars.len(), runtime_ms);
@@ -1008,7 +1008,7 @@ mod tests {
             expected_fwhm: field.expected_fwhm_pixels(0.396),
             ..Default::default()
         };
-        let result = find_stars(&image.pixels, width, height, &config);
+        let result = find_stars(&image, &config);
         let match_radius = config.expected_fwhm * 2.0;
 
         println!("\n=== Bright Catalog Stars (mag < 18) ===");

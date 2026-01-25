@@ -2,6 +2,8 @@
 //!
 //! Tests the cosmic ray detection via Laplacian SNR filtering.
 
+use crate::AstroImage;
+use crate::astro_image::{AstroImageMetadata, ImageDimensions};
 use crate::star_detection::visual_tests::generators::{
     StarFieldConfig, add_cosmic_rays, generate_star_field,
 };
@@ -54,7 +56,12 @@ fn test_cosmic_ray_rejection() {
         ..Default::default()
     };
 
-    let result = find_stars(&pixels, width, height, &detection_config);
+    let image = AstroImage {
+        pixels: pixels.clone(),
+        dimensions: ImageDimensions::new(width, height, 1),
+        metadata: AstroImageMetadata::default(),
+    };
+    let result = find_stars(&image, &detection_config);
     let stars = result.stars;
 
     // Create overlay
@@ -182,7 +189,12 @@ fn test_laplacian_snr_visualization() {
         ..Default::default()
     };
 
-    let result = find_stars(&pixels, width, height, &detection_config);
+    let image = AstroImage {
+        pixels: pixels.clone(),
+        dimensions: ImageDimensions::new(width, height, 1),
+        metadata: AstroImageMetadata::default(),
+    };
+    let result = find_stars(&image, &detection_config);
     let stars = result.stars;
 
     println!("\nLaplacian SNR Analysis:");

@@ -12,6 +12,7 @@ mod stage_tests;
 mod pipeline_tests;
 
 use crate::AstroImage;
+use crate::astro_image::{AstroImageMetadata, ImageDimensions};
 use crate::star_detection::{StarDetectionConfig, find_stars};
 use crate::testing::{calibration_dir, init_tracing};
 use image::{GrayImage, Rgb, RgbImage};
@@ -51,12 +52,9 @@ fn test_visualize_star_detection() {
         .fold(f32::NEG_INFINITY, f32::max);
     println!("Pixel range: {:.6} - {:.6}", min_val, max_val);
 
-    // Convert to grayscale for star detection
-    let grayscale = image.to_grayscale().pixels;
-
     // Find stars
     let config = StarDetectionConfig::default();
-    let result = find_stars(&grayscale, width, height, &config);
+    let result = find_stars(&image, &config);
     let stars = result.stars;
     println!("Found {} stars", stars.len());
 
@@ -235,7 +233,12 @@ fn test_synthetic_star_detection() {
         ..Default::default()
     };
 
-    let result = find_stars(&pixels, config.width, config.height, &detection_config);
+    let image = AstroImage {
+        pixels: pixels.clone(),
+        dimensions: ImageDimensions::new(config.width, config.height, 1),
+        metadata: AstroImageMetadata::default(),
+    };
+    let result = find_stars(&image, &detection_config);
     let detected_stars = result.stars;
     println!("\nDetected {} stars", detected_stars.len());
 

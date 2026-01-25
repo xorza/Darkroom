@@ -4,6 +4,8 @@
 
 use super::local_solver::{AstrometryStar, LocalSolver};
 use super::rectangle_cache::{RectangleCache, RectangleInfo};
+use crate::AstroImage;
+use crate::astro_image::{AstroImageMetadata, ImageDimensions};
 use crate::star_detection::visual_tests::generators::GroundTruthStar;
 use crate::star_detection::visual_tests::output::{
     DetectionMetrics, compute_detection_metrics, save_comparison_png, save_grayscale_png,
@@ -196,7 +198,12 @@ impl AstrometryBenchmark {
 
         // Run our detector
         let start = Instant::now();
-        let result = find_stars(&pixels, width, height, config);
+        let image = AstroImage {
+            pixels: pixels.clone(),
+            dimensions: ImageDimensions::new(width, height, 1),
+            metadata: AstroImageMetadata::default(),
+        };
+        let result = find_stars(&image, config);
         let runtime_ms = start.elapsed().as_millis() as u64;
 
         // Compute metrics

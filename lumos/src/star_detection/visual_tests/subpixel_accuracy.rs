@@ -4,9 +4,19 @@
 //! which is critical for image registration and stacking.
 
 use super::synthetic::{SyntheticFieldConfig, SyntheticStar, generate_star_field};
+use crate::AstroImage;
+use crate::astro_image::{AstroImageMetadata, ImageDimensions};
 use crate::star_detection::{Star, StarDetectionConfig, find_stars};
 use image::{Rgb, RgbImage};
 use imageproc::drawing::{draw_cross_mut, draw_hollow_circle_mut};
+
+fn make_grayscale_image(pixels: Vec<f32>, width: usize, height: usize) -> AstroImage {
+    AstroImage {
+        pixels,
+        dimensions: ImageDimensions::new(width, height, 1),
+        metadata: AstroImageMetadata::default(),
+    }
+}
 
 /// Match detected stars between two images based on proximity.
 /// Returns pairs of (star1, star2) that are within `max_distance` pixels.
@@ -106,8 +116,10 @@ fn test_subpixel_shift_detection() {
     // Run star detection on both images
     let detection_config = StarDetectionConfig::default();
 
-    let detected1 = find_stars(&pixels1, config.width, config.height, &detection_config).stars;
-    let detected2 = find_stars(&pixels2, config.width, config.height, &detection_config).stars;
+    let image1 = make_grayscale_image(pixels1.clone(), config.width, config.height);
+    let image2 = make_grayscale_image(pixels2.clone(), config.width, config.height);
+    let detected1 = find_stars(&image1, &detection_config).stars;
+    let detected2 = find_stars(&image2, &detection_config).stars;
 
     println!("\nDetection results:");
     println!("  Image 1: {} stars detected", detected1.len());
@@ -248,7 +260,8 @@ fn test_subpixel_accuracy_sweep() {
     let mut all_passed = true;
 
     let pixels1 = generate_star_field(&config, &base_stars);
-    let detected1 = find_stars(&pixels1, config.width, config.height, &detection_config).stars;
+    let image1 = make_grayscale_image(pixels1, config.width, config.height);
+    let detected1 = find_stars(&image1, &detection_config).stars;
 
     for (shift_x, shift_y) in test_shifts {
         let shifted_stars: Vec<SyntheticStar> = base_stars
@@ -257,7 +270,8 @@ fn test_subpixel_accuracy_sweep() {
             .collect();
 
         let pixels2 = generate_star_field(&config, &shifted_stars);
-        let detected2 = find_stars(&pixels2, config.width, config.height, &detection_config).stars;
+        let image2 = make_grayscale_image(pixels2, config.width, config.height);
+        let detected2 = find_stars(&image2, &detection_config).stars;
 
         let pairs = match_stars(&detected1, &detected2, 3.0);
         let (detected_dx, detected_dy) = compute_median_shift(&pairs);
