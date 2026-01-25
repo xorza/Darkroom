@@ -3,6 +3,30 @@
 //! This module implements geometric hashing based on triangles formed from stars.
 //! Triangles are characterized by their side ratios, which are invariant to
 //! translation, rotation, and scale.
+//!
+//! # Algorithm Overview
+//!
+//! 1. Form triangles from star positions using k-nearest neighbors
+//! 2. Compute scale-invariant descriptors (sorted side ratios)
+//! 3. Hash reference triangles into bins by their ratios
+//! 4. For each target triangle, lookup matching reference triangles
+//! 5. Vote for star correspondences based on shared vertices
+//! 6. Extract high-confidence matches from vote matrix
+//!
+//! # Implementation Variants
+//!
+//! This module contains two implementations:
+//!
+//! - **`match_stars_triangles_kdtree()`** (production): Uses k-d tree for efficient
+//!   neighbor lookup, O(n·k²) complexity where k is neighbors per star.
+//!   **This is the public API and should be used in production.**
+//!
+//! - **`match_stars_triangles()`** (test/bench only): Brute-force O(n³) implementation.
+//!   Kept for benchmark comparisons and algorithm validation. Not exported publicly.
+//!
+//! The brute-force version is marked with `#[cfg_attr]` to allow dead code in
+//! non-test/bench builds. Tests use it to validate algorithm correctness independent
+//! of the k-d tree optimization.
 
 #[cfg(test)]
 mod tests;

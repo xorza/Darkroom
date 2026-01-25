@@ -902,7 +902,12 @@ impl LogPolarCorrelator {
     }
 }
 
-/// Bilinear interpolation for f32 images.
+/// Bilinear interpolation for f32 images (f64 coordinates).
+///
+/// This is a local implementation for phase correlation that uses f64 coordinates
+/// for sub-pixel precision in log-polar transforms. A similar implementation exists
+/// in `interpolation/simd/mod.rs` using f32 coordinates for SIMD warping.
+/// Both are kept separate due to different precision requirements.
 fn bilinear_sample(image: &[f32], width: usize, height: usize, x: f64, y: f64) -> f32 {
     let x0 = x.floor() as isize;
     let y0 = y.floor() as isize;

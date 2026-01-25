@@ -131,7 +131,11 @@ pub fn warp_row_bilinear_scalar(
     }
 }
 
-/// Bilinear sampling at a single point.
+/// Bilinear sampling at a single point (f32 coordinates).
+///
+/// This is the SIMD-compatible implementation using f32 coordinates for fast warping.
+/// A similar implementation exists in `phase_correlation/mod.rs` using f64 coordinates
+/// for higher precision in log-polar transforms.
 #[inline]
 pub fn bilinear_sample(
     input: &[f32],

@@ -27,24 +27,49 @@ pub const MIN_TRIANGLE_AREA_SQ: f64 = 1e-6;
 // Vote matrix settings
 // =============================================================================
 
-/// Threshold for using dense vote matrix (n_ref * n_target < this value).
-/// Dense is faster due to direct indexing, but uses more memory (~500KB for u16 matrix at threshold).
+/// Threshold for switching between dense and sparse vote matrix storage.
+///
+/// When `n_ref * n_target < DENSE_VOTE_THRESHOLD`, use a dense Vec<u16> matrix.
+/// Otherwise, use a sparse HashMap for memory efficiency.
+///
+/// Memory analysis at threshold (250,000 entries):
+/// - Dense: 250,000 * 2 bytes (u16) = 500 KB
+/// - Sparse: Only stores non-zero votes, but each entry costs ~40 bytes
+///   (key: 16 bytes + value: 8 bytes + HashMap overhead)
+///
+/// Dense is faster for small star counts due to direct indexing (O(1) vs hash lookup).
+/// For 500x500 stars (250K entries), dense is still preferred. Beyond that, sparse wins.
 pub const DENSE_VOTE_THRESHOLD: usize = 250_000;
 
 // =============================================================================
 // Triangle matching defaults
 // =============================================================================
 
-/// Default tolerance for side ratio comparison.
+/// Default tolerance for triangle side ratio comparison (1% = 0.01).
+///
+/// Two triangles match if their sorted side ratios differ by less than this tolerance.
+/// Tighter tolerance = fewer false matches but may miss true matches with noise.
+/// Looser tolerance = more matches but higher false positive rate.
 pub const DEFAULT_TRIANGLE_TOLERANCE: f64 = 0.01;
 
-/// Default number of hash table bins per dimension.
+/// Default number of hash table bins per dimension for geometric hashing.
+///
+/// Triangles are binned by their two side ratios into a 2D grid.
+/// 100 bins per dimension = 10,000 total buckets. This balances:
+/// - Too few bins: Many triangles per bucket, slow lookup
+/// - Too many bins: Most buckets empty, wasted memory, boundary effects
 pub const DEFAULT_HASH_BINS: usize = 100;
 
-/// Default minimum votes required to accept a match.
+/// Default minimum votes required to accept a star correspondence.
+///
+/// A vote is cast when triangles from ref/target share a vertex correspondence.
+/// Higher threshold = more confident matches but fewer total matches.
 pub const DEFAULT_MIN_VOTES: usize = 3;
 
-/// Default maximum number of stars to use for matching.
+/// Default maximum number of stars to use for triangle matching.
+///
+/// Limits computational cost: O(n²) for kdtree triangle formation.
+/// Stars should be sorted by brightness; we take the brightest N.
 pub const DEFAULT_MAX_STARS: usize = 50;
 
 // =============================================================================
@@ -65,32 +90,3 @@ pub const DEFAULT_MIN_INLIER_RATIO: f64 = 0.5;
 
 /// Default maximum iterations for local optimization.
 pub const DEFAULT_LO_MAX_ITERATIONS: usize = 10;
-
-// =============================================================================
-// SIMD dispatch thresholds
-// =============================================================================
-
-/// Minimum point count before using AVX2 SIMD.
-pub const SIMD_AVX2_MIN_POINTS: usize = 4;
-
-/// Minimum point count before using SSE SIMD.
-pub const SIMD_SSE_MIN_POINTS: usize = 2;
-
-/// Minimum point count before using NEON SIMD.
-pub const SIMD_NEON_MIN_POINTS: usize = 2;
-
-// =============================================================================
-// Quality thresholds
-// =============================================================================
-
-/// Minimum number of inliers for valid registration.
-pub const MIN_INLIERS_FOR_VALID: usize = 4;
-
-/// Maximum RMS error for valid registration (pixels).
-pub const MAX_RMS_ERROR_FOR_VALID: f64 = 5.0;
-
-/// Minimum inlier ratio for valid registration.
-pub const MIN_INLIER_RATIO_FOR_VALID: f64 = 0.3;
-
-/// Maximum RMS difference between quadrants for consistency.
-pub const MAX_QUADRANT_RMS_DIFFERENCE: f64 = 2.0;

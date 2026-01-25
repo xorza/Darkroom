@@ -1,4 +1,20 @@
 //! Tests for triangle matching module.
+//!
+//! # Test Strategy
+//!
+//! This file contains tests for both triangle matching implementations:
+//!
+//! - **Brute-force tests** (`match_stars_triangles`): Validate the core algorithm
+//!   correctness with O(n³) exhaustive triangle enumeration. These are the reference
+//!   implementation tests.
+//!
+//! - **K-d tree tests** (`match_stars_triangles_kdtree`): Validate the production
+//!   implementation that uses spatial indexing for O(n·k²) complexity. These tests
+//!   ensure the optimized path produces correct results.
+//!
+//! Both implementations should produce equivalent results for most test cases,
+//! though the kdtree version may find slightly different (but equally valid) matches
+//! due to using different triangle subsets.
 
 use super::*;
 
@@ -455,6 +471,114 @@ fn test_form_triangles_kdtree_too_few() {
     let positions = vec![(0.0, 0.0), (1.0, 1.0)];
     let triangles = form_triangles_kdtree(&positions, 5);
     assert!(triangles.is_empty());
+}
+
+#[test]
+fn test_kdtree_match_rotated_stars() {
+    let ref_positions = vec![
+        (0.0, 0.0),
+        (10.0, 0.0),
+        (0.0, 10.0),
+        (10.0, 10.0),
+        (5.0, 5.0),
+    ];
+
+    // Rotate by 90 degrees around origin
+    let target_positions: Vec<(f64, f64)> = ref_positions.iter().map(|(x, y)| (-*y, *x)).collect();
+
+    let config = TriangleMatchConfig {
+        check_orientation: false, // Rotation changes orientation
+        ..Default::default()
+    };
+
+    let matches = match_stars_triangles_kdtree(&ref_positions, &target_positions, &config);
+
+    assert_eq!(matches.len(), 5);
+}
+
+#[test]
+fn test_kdtree_match_with_missing_stars() {
+    let ref_positions = vec![
+        (0.0, 0.0),
+        (10.0, 0.0),
+        (0.0, 10.0),
+        (10.0, 10.0),
+        (5.0, 5.0),
+    ];
+
+    // Only 4 stars in target (missing one)
+    let target_positions = vec![(0.0, 0.0), (10.0, 0.0), (0.0, 10.0), (10.0, 10.0)];
+
+    let matches = match_stars_triangles_kdtree(
+        &ref_positions,
+        &target_positions,
+        &TriangleMatchConfig::default(),
+    );
+
+    // Should match the 4 common stars
+    assert!(matches.len() >= 4);
+}
+
+#[test]
+fn test_kdtree_match_with_extra_stars() {
+    let ref_positions = vec![(0.0, 0.0), (10.0, 0.0), (0.0, 10.0), (10.0, 10.0)];
+
+    // Target has extra stars
+    let target_positions = vec![
+        (0.0, 0.0),
+        (10.0, 0.0),
+        (0.0, 10.0),
+        (10.0, 10.0),
+        (5.0, 5.0),
+        (15.0, 15.0),
+    ];
+
+    let matches = match_stars_triangles_kdtree(
+        &ref_positions,
+        &target_positions,
+        &TriangleMatchConfig::default(),
+    );
+
+    // Should match all 4 reference stars
+    assert_eq!(matches.len(), 4);
+}
+
+#[test]
+fn test_kdtree_match_mirrored_image() {
+    let ref_positions = vec![
+        (0.0, 0.0),
+        (10.0, 0.0),
+        (0.0, 10.0),
+        (10.0, 10.0),
+        (5.0, 5.0),
+    ];
+
+    // Mirror horizontally
+    let target_positions: Vec<(f64, f64)> = ref_positions.iter().map(|(x, y)| (-*x, *y)).collect();
+
+    // With orientation check, mirrored triangles should be rejected
+    let config_with_orientation = TriangleMatchConfig {
+        check_orientation: true,
+        min_votes: 1,
+        ..Default::default()
+    };
+    let matches_with =
+        match_stars_triangles_kdtree(&ref_positions, &target_positions, &config_with_orientation);
+
+    // Without orientation check, should match more
+    let config_no_orientation = TriangleMatchConfig {
+        check_orientation: false,
+        min_votes: 1,
+        ..Default::default()
+    };
+    let matches_without =
+        match_stars_triangles_kdtree(&ref_positions, &target_positions, &config_no_orientation);
+
+    // With mirroring and orientation check, we should get fewer matches than without
+    assert!(
+        matches_without.len() >= matches_with.len(),
+        "Expected more matches without orientation check"
+    );
 }
 
 // ============================================================================

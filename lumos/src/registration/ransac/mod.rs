@@ -497,7 +497,19 @@ impl RansacEstimator {
 
 /// Weighted sampling of k unique indices from a pool.
 ///
-/// Samples indices with probability proportional to their weights.
+/// Samples indices with probability proportional to their weights using
+/// Algorithm A-Res (reservoir sampling with weights).
+///
+/// # Performance Note
+///
+/// This implementation uses a full sort O(n log n) rather than a partial sort
+/// or bounded heap O(n log k). This is acceptable because:
+/// - Pool size is limited by `max_stars_for_matching` (default 200)
+/// - k is typically 2-4 (minimum points for transform estimation)
+/// - The sampling overhead is negligible compared to model fitting
+///
+/// If profiling shows this is a bottleneck, consider using `select_nth_unstable`
+/// for O(n) average case, or a BoundedMaxHeap for O(n log k).
 fn weighted_sample_into<R: Rng>(
     rng: &mut R,
     pool: &[usize],
