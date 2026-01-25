@@ -494,24 +494,24 @@ registration/
 
 ## Implementation Order
 
-### Phase 1: Quick Cleanup (1-2 days)
+### Phase 1: Quick Cleanup (1-2 days) - COMPLETED
 1. [x] 1.1 API visibility
-2. [ ] 1.2 Constants module
-3. [ ] 1.3 Deprecate brute-force
-4. [ ] 1.4 Fix triangle area
-5. [ ] 2.3 Consolidate residuals
+2. [x] 1.2 Constants module
+3. [x] 1.3 Deprecate brute-force (kept for tests, pipeline uses kdtree)
+4. [x] 1.4 Fix triangle area (Heron's formula)
+5. [x] 2.3 Consolidate residuals
 
-### Phase 2: Code Quality (2-3 days)
-1. [ ] 2.1 Extract voting logic
-2. [ ] 2.2 Extract conflict resolution
-3. [ ] 3.1 Pre-allocate RANSAC buffers
-4. [ ] 3.3 Reuse candidate buffer
+### Phase 2: Code Quality (2-3 days) - COMPLETED
+1. [x] 2.1 Extract voting logic (`vote_for_correspondences()`)
+2. [x] 2.2 Extract conflict resolution (`resolve_matches()`)
+3. [x] 3.1 Pre-allocate RANSAC buffers (`random_sample_into()`)
+4. [x] 3.3 Reuse candidate buffer (`find_candidates_into()`)
 
-### Phase 3: Performance (3-5 days)
-1. [ ] 3.2 Dense vote matrix
-2. [ ] 4.1 SIMD affine estimation
-3. [ ] 4.2 SIMD Lanczos kernel
-4. [ ] 4.3 SIMD KdTree distances
+### Phase 3: Performance (3-5 days) - PARTIALLY COMPLETED
+1. [x] 3.2 Dense vote matrix (VoteMatrix enum with sparse/dense)
+2. [~] 4.1 SIMD affine estimation (skipped - compiler auto-vectorizes, small sample sizes)
+3. [~] 4.2 SIMD Lanczos kernel (skipped - sin() doesn't vectorize, small kernels)
+4. [~] 4.3 SIMD KdTree distances (skipped - tree traversal dominates, not distance calc)
 
 ### Phase 4: Algorithms (5-7 days)
 1. [ ] 5.1 Multi-scale registration

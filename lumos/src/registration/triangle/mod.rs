@@ -16,17 +16,78 @@ use crate::registration::constants::{MIN_TRIANGLE_AREA_SQ, MIN_TRIANGLE_SIDE};
 use crate::registration::spatial::{KdTree, form_triangles_from_neighbors};
 use crate::registration::types::StarMatch;
 
+/// Threshold for using dense vote matrix (n_ref * n_target < this value).
+/// Dense is faster due to direct indexing, but uses more memory.
+const DENSE_VOTE_THRESHOLD: usize = 250_000; // ~500KB for u16 matrix
+
+/// Vote matrix storage - either dense (Vec) or sparse (HashMap).
+enum VoteMatrix {
+    /// Dense storage for small star counts: votes[ref_idx * n_target + target_idx]
+    Dense { votes: Vec<u16>, n_target: usize },
+    /// Sparse storage for large star counts
+    Sparse(HashMap<(usize, usize), usize>),
+}
+
+impl VoteMatrix {
+    fn new(n_ref: usize, n_target: usize) -> Self {
+        let size = n_ref * n_target;
+        if size < DENSE_VOTE_THRESHOLD {
+            VoteMatrix::Dense {
+                votes: vec![0u16; size],
+                n_target,
+            }
+        } else {
+            VoteMatrix::Sparse(HashMap::new())
+        }
+    }
+
+    #[inline]
+    fn increment(&mut self, ref_idx: usize, target_idx: usize) {
+        match self {
+            VoteMatrix::Dense { votes, n_target } => {
+                votes[ref_idx * *n_target + target_idx] =
+                    votes[ref_idx * *n_target + target_idx].saturating_add(1);
+            }
+            VoteMatrix::Sparse(map) => {
+                *map.entry((ref_idx, target_idx)).or_insert(0) += 1;
+            }
+        }
+    }
+
+    fn into_hashmap(self) -> HashMap<(usize, usize), usize> {
+        match self {
+            VoteMatrix::Dense { votes, n_target } => {
+                let mut map = HashMap::new();
+                for (idx, &count) in votes.iter().enumerate() {
+                    if count > 0 {
+                        let ref_idx = idx / n_target;
+                        let target_idx = idx % n_target;
+                        map.insert((ref_idx, target_idx), count as usize);
+                    }
+                }
+                map
+            }
+            VoteMatrix::Sparse(map) => map,
+        }
+    }
+}
+
 /// Vote for star correspondences based on matching triangles.
 ///
 /// For each pair of similar triangles, votes for vertex correspondences
 /// based on the sorted side lengths (vertices correspond by position in sorted order).
+///
+/// Uses dense matrix for small star counts (faster due to direct indexing),
+/// sparse HashMap for large counts (memory efficient).
 fn vote_for_correspondences(
     target_triangles: &[Triangle],
     ref_triangles: &[Triangle],
     hash_table: &TriangleHashTable,
     config: &TriangleMatchConfig,
+    n_ref: usize,
+    n_target: usize,
 ) -> HashMap<(usize, usize), usize> {
-    let mut vote_matrix: HashMap<(usize, usize), usize> = HashMap::new();
+    let mut vote_matrix = VoteMatrix::new(n_ref, n_target);
 
     // Pre-allocate candidate buffer to avoid per-triangle allocations
     let mut candidates: Vec<usize> = Vec::new();
@@ -52,12 +113,12 @@ fn vote_for_correspondences(
             for i in 0..3 {
                 let ref_star = ref_tri.star_indices[i];
                 let target_star = target_tri.star_indices[i];
-                *vote_matrix.entry((ref_star, target_star)).or_insert(0) += 1;
+                vote_matrix.increment(ref_star, target_star);
             }
         }
     }
 
-    vote_matrix
+    vote_matrix.into_hashmap()
 }
 
 /// Resolve vote matrix into final star matches using greedy conflict resolution.
@@ -375,8 +436,14 @@ pub(crate) fn match_stars_triangles(
     let hash_table = TriangleHashTable::build(&ref_triangles, config.hash_bins);
 
     // Vote for star correspondences and resolve conflicts
-    let vote_matrix =
-        vote_for_correspondences(&target_triangles, &ref_triangles, &hash_table, config);
+    let vote_matrix = vote_for_correspondences(
+        &target_triangles,
+        &ref_triangles,
+        &hash_table,
+        config,
+        n_ref,
+        n_target,
+    );
     resolve_matches(vote_matrix, n_ref, n_target, config.min_votes)
 }
 
@@ -481,7 +548,13 @@ pub fn match_stars_triangles_kdtree(
     let hash_table = TriangleHashTable::build(&ref_triangles, config.hash_bins);
 
     // Vote for star correspondences and resolve conflicts
-    let vote_matrix =
-        vote_for_correspondences(&target_triangles, &ref_triangles, &hash_table, config);
+    let vote_matrix = vote_for_correspondences(
+        &target_triangles,
+        &ref_triangles,
+        &hash_table,
+        config,
+        n_ref,
+        n_target,
+    );
     resolve_matches(vote_matrix, n_ref, n_target, config.min_votes)
 }
