@@ -110,20 +110,27 @@ impl RansacEstimator {
         let mut best_inliers: Vec<usize> = Vec::new();
         let mut best_score = 0;
 
+        // Pre-allocate buffers to avoid per-iteration allocations
+        let mut sample_indices: Vec<usize> = Vec::with_capacity(min_samples);
+        let mut sample_ref: Vec<(f64, f64)> = Vec::with_capacity(min_samples);
+        let mut sample_target: Vec<(f64, f64)> = Vec::with_capacity(min_samples);
+
         let mut iterations = 0;
         let max_iter = self.config.max_iterations;
 
         while iterations < max_iter {
             iterations += 1;
 
-            // Random sample
-            let sample_indices = random_sample(&mut rng, n, min_samples);
+            // Random sample into pre-allocated buffer
+            random_sample_into(&mut rng, n, min_samples, &mut sample_indices);
 
-            // Extract sample points
-            let sample_ref: Vec<(f64, f64)> =
-                sample_indices.iter().map(|&i| ref_points[i]).collect();
-            let sample_target: Vec<(f64, f64)> =
-                sample_indices.iter().map(|&i| target_points[i]).collect();
+            // Extract sample points (reusing buffers)
+            sample_ref.clear();
+            sample_target.clear();
+            for &i in &sample_indices {
+                sample_ref.push(ref_points[i]);
+                sample_target.push(target_points[i]);
+            }
 
             // Estimate transformation from sample
             let transform = match estimate_transform(&sample_ref, &sample_target, transform_type) {
@@ -273,12 +280,31 @@ impl RansacEstimator {
     }
 }
 
-/// Randomly sample k unique indices from 0..n.
-fn random_sample<R: Rng>(rng: &mut R, n: usize, k: usize) -> Vec<usize> {
-    let mut indices: Vec<usize> = (0..n).collect();
-    indices.shuffle(rng);
-    indices.truncate(k);
-    indices
+/// Randomly sample k unique indices from 0..n into pre-allocated buffer.
+///
+/// The buffer is cleared and filled with k random unique indices.
+fn random_sample_into<R: Rng>(rng: &mut R, n: usize, k: usize, buffer: &mut Vec<usize>) {
+    debug_assert!(k <= n, "Cannot sample {} indices from {}", k, n);
+    buffer.clear();
+
+    // For small k relative to n, use reservoir-like sampling
+    // For k close to n, shuffle would be better but we typically have k << n
+    if k <= n / 2 {
+        // Floyd's algorithm for sampling without replacement
+        for j in (n - k)..n {
+            let t = rng.random_range(0..=j);
+            if buffer.contains(&t) {
+                buffer.push(j);
+            } else {
+                buffer.push(t);
+            }
+        }
+    } else {
+        // Fall back to shuffle for large k
+        buffer.extend(0..n);
+        buffer.shuffle(rng);
+        buffer.truncate(k);
+    }
 }
 
 /// Count inliers and compute score.
@@ -295,7 +321,7 @@ fn count_inliers(
 }
 
 /// Compute adaptive iteration count for early termination.
-pub fn adaptive_iterations(inlier_ratio: f64, sample_size: usize, confidence: f64) -> usize {
+pub(crate) fn adaptive_iterations(inlier_ratio: f64, sample_size: usize, confidence: f64) -> usize {
     if inlier_ratio <= 0.0 || inlier_ratio >= 1.0 {
         return 1;
     }
@@ -318,7 +344,7 @@ pub fn adaptive_iterations(inlier_ratio: f64, sample_size: usize, confidence: f6
 }
 
 /// Estimate transformation from point correspondences.
-pub fn estimate_transform(
+pub(crate) fn estimate_transform(
     ref_points: &[(f64, f64)],
     target_points: &[(f64, f64)],
     transform_type: TransformType,
@@ -366,7 +392,7 @@ fn estimate_euclidean(
 }
 
 /// Estimate similarity transform (translation + rotation + uniform scale).
-pub fn estimate_similarity(
+pub(crate) fn estimate_similarity(
     ref_points: &[(f64, f64)],
     target_points: &[(f64, f64)],
 ) -> Option<TransformMatrix> {
@@ -427,7 +453,7 @@ pub fn estimate_similarity(
 }
 
 /// Estimate affine transform using least squares.
-pub fn estimate_affine(
+pub(crate) fn estimate_affine(
     ref_points: &[(f64, f64)],
     target_points: &[(f64, f64)],
 ) -> Option<TransformMatrix> {
@@ -516,7 +542,7 @@ pub fn estimate_affine(
 }
 
 /// Estimate homography using Direct Linear Transform (DLT).
-pub fn estimate_homography(
+pub(crate) fn estimate_homography(
     ref_points: &[(f64, f64)],
     target_points: &[(f64, f64)],
 ) -> Option<TransformMatrix> {
@@ -585,7 +611,7 @@ pub fn estimate_homography(
 }
 
 /// Normalize points for numerical stability.
-pub fn normalize_points(points: &[(f64, f64)]) -> (Vec<(f64, f64)>, TransformMatrix) {
+pub(crate) fn normalize_points(points: &[(f64, f64)]) -> (Vec<(f64, f64)>, TransformMatrix) {
     if points.is_empty() {
         return (Vec::new(), TransformMatrix::identity());
     }
@@ -722,7 +748,7 @@ fn solve_linear_9x9(a: &[[f64; 9]; 9], b: &[f64; 9]) -> Option<[f64; 9]> {
 }
 
 /// Compute centroid of points.
-pub fn centroid(points: &[(f64, f64)]) -> (f64, f64) {
+pub(crate) fn centroid(points: &[(f64, f64)]) -> (f64, f64) {
     if points.is_empty() {
         return (0.0, 0.0);
     }
@@ -738,7 +764,7 @@ pub fn centroid(points: &[(f64, f64)]) -> (f64, f64) {
 }
 
 /// Refine transformation using all inlier points.
-pub fn refine_transform(
+pub(crate) fn refine_transform(
     ref_points: &[(f64, f64)],
     target_points: &[(f64, f64)],
     transform_type: TransformType,
@@ -750,7 +776,7 @@ pub fn refine_transform(
 ///
 /// Uses SIMD acceleration when available (AVX2/SSE on x86_64, NEON on aarch64).
 #[inline]
-pub fn compute_residuals(
+pub(crate) fn compute_residuals(
     ref_points: &[(f64, f64)],
     target_points: &[(f64, f64)],
     transform: &TransformMatrix,

@@ -59,6 +59,7 @@
 //!
 //! See `IMPLEMENTATION_PLAN.md` for detailed algorithm documentation.
 
+pub mod constants;
 pub mod distortion;
 pub mod interpolation;
 pub mod phase_correlation;
@@ -88,22 +89,27 @@ pub mod bench {
     }
 }
 
-// Re-export main types for convenience
-pub use distortion::{DistortionMap, ThinPlateSpline, TpsConfig};
-pub use interpolation::{InterpolationMethod, WarpConfig, warp_image};
-pub use phase_correlation::{PhaseCorrelationConfig, PhaseCorrelator};
+// Re-export main public API types
+// High-level pipeline API (primary entry point)
 pub use pipeline::{Registrator, quick_register, register_stars, warp_to_reference};
-pub use quality::{
-    QuadrantConsistency, QualityMetrics, ResidualStats, check_quadrant_consistency,
-    compute_residuals, estimate_overlap,
-};
-pub use ransac::{RansacConfig, RansacEstimator, RansacResult};
-pub use spatial::KdTree;
-pub use triangle::{
-    Triangle, TriangleMatchConfig, form_triangles_kdtree, match_stars_triangles,
-    match_stars_triangles_kdtree,
-};
+
+// Core types needed by users
 pub use types::{
     RegistrationConfig, RegistrationConfigBuilder, RegistrationError, RegistrationResult,
     StarMatch, TransformMatrix, TransformType,
 };
+
+// Configuration types
+pub use distortion::{DistortionMap, ThinPlateSpline, TpsConfig};
+pub use interpolation::{InterpolationMethod, WarpConfig, warp_image};
+pub use phase_correlation::{PhaseCorrelationConfig, PhaseCorrelator};
+pub use ransac::{RansacConfig, RansacEstimator, RansacResult};
+
+// Quality assessment
+pub use quality::{
+    QuadrantConsistency, QualityMetrics, ResidualStats, check_quadrant_consistency,
+    estimate_overlap,
+};
+
+// Triangle matching (kdtree version only - brute force is internal)
+pub use triangle::{TriangleMatchConfig, match_stars_triangles_kdtree};

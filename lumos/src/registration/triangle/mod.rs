@@ -12,8 +12,103 @@ pub mod bench;
 
 use std::collections::HashMap;
 
+use crate::registration::constants::{MIN_TRIANGLE_AREA_SQ, MIN_TRIANGLE_SIDE};
 use crate::registration::spatial::{KdTree, form_triangles_from_neighbors};
 use crate::registration::types::StarMatch;
+
+/// Vote for star correspondences based on matching triangles.
+///
+/// For each pair of similar triangles, votes for vertex correspondences
+/// based on the sorted side lengths (vertices correspond by position in sorted order).
+fn vote_for_correspondences(
+    target_triangles: &[Triangle],
+    ref_triangles: &[Triangle],
+    hash_table: &TriangleHashTable,
+    config: &TriangleMatchConfig,
+) -> HashMap<(usize, usize), usize> {
+    let mut vote_matrix: HashMap<(usize, usize), usize> = HashMap::new();
+
+    // Pre-allocate candidate buffer to avoid per-triangle allocations
+    let mut candidates: Vec<usize> = Vec::new();
+
+    for target_tri in target_triangles {
+        hash_table.find_candidates_into(target_tri, config.ratio_tolerance, &mut candidates);
+
+        for &ref_idx in &candidates {
+            let ref_tri = &ref_triangles[ref_idx];
+
+            // Check similarity
+            if !ref_tri.is_similar(target_tri, config.ratio_tolerance) {
+                continue;
+            }
+
+            // Check orientation if required
+            if config.check_orientation && ref_tri.orientation != target_tri.orientation {
+                continue;
+            }
+
+            // Vote for all three vertex correspondences
+            // Since sides are sorted by length, vertices should correspond in order
+            for i in 0..3 {
+                let ref_star = ref_tri.star_indices[i];
+                let target_star = target_tri.star_indices[i];
+                *vote_matrix.entry((ref_star, target_star)).or_insert(0) += 1;
+            }
+        }
+    }
+
+    vote_matrix
+}
+
+/// Resolve vote matrix into final star matches using greedy conflict resolution.
+///
+/// Filters matches by minimum votes, sorts by vote count, and greedily assigns
+/// matches ensuring each reference and target star is used at most once.
+fn resolve_matches(
+    vote_matrix: HashMap<(usize, usize), usize>,
+    n_ref: usize,
+    n_target: usize,
+    min_votes: usize,
+) -> Vec<StarMatch> {
+    // Filter by minimum votes and collect matches
+    let mut matches: Vec<StarMatch> = vote_matrix
+        .into_iter()
+        .filter(|&(_, votes)| votes >= min_votes)
+        .map(|((ref_idx, target_idx), votes)| StarMatch {
+            ref_idx,
+            target_idx,
+            votes,
+            confidence: 0.0, // Will be computed below
+        })
+        .collect();
+
+    // Sort by votes (descending)
+    matches.sort_by(|a, b| b.votes.cmp(&a.votes));
+
+    // Resolve one-to-many conflicts (greedy approach)
+    let mut used_ref = vec![false; n_ref];
+    let mut used_target = vec![false; n_target];
+    let mut resolved = Vec::new();
+
+    for m in matches {
+        if m.ref_idx < n_ref
+            && m.target_idx < n_target
+            && !used_ref[m.ref_idx]
+            && !used_target[m.target_idx]
+        {
+            used_ref[m.ref_idx] = true;
+            used_target[m.target_idx] = true;
+
+            // Compute confidence based on votes
+            let max_possible_votes = (n_ref.min(n_target) - 2) * (n_ref.min(n_target) - 1) / 2;
+            let confidence = (m.votes as f64 / max_possible_votes.max(1) as f64).min(1.0);
+
+            resolved.push(StarMatch { confidence, ..m });
+        }
+    }
+
+    resolved
+}
 
 /// Orientation of a triangle (clockwise or counter-clockwise).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -49,9 +144,8 @@ impl Triangle {
         let d12 = ((x2 - x1).powi(2) + (y2 - y1).powi(2)).sqrt();
         let d20 = ((x0 - x2).powi(2) + (y0 - y2).powi(2)).sqrt();
 
-        // Check for degenerate triangle
-        let min_side = 1e-10;
-        if d01 < min_side || d12 < min_side || d20 < min_side {
+        // Check for degenerate triangle (sides too short)
+        if d01 < MIN_TRIANGLE_SIDE || d12 < MIN_TRIANGLE_SIDE || d20 < MIN_TRIANGLE_SIDE {
             return None;
         }
 
@@ -67,15 +161,18 @@ impl Triangle {
 
         // Compute invariant ratios
         let longest = sides[2];
-        if longest < min_side {
+        if longest < MIN_TRIANGLE_SIDE {
             return None;
         }
 
         let ratios = (sides[0] / longest, sides[1] / longest);
 
-        // Check triangle inequality and area (avoid very flat triangles)
-        if sides[0] + sides[1] <= sides[2] * 1.001 {
-            return None; // Nearly collinear
+        // Check for very flat triangles using Heron's formula for area
+        // area² = s(s-a)(s-b)(s-c) where s = (a+b+c)/2
+        let s = (sides[0] + sides[1] + sides[2]) / 2.0;
+        let area_sq = s * (s - sides[0]) * (s - sides[1]) * (s - sides[2]);
+        if area_sq < MIN_TRIANGLE_AREA_SQ {
+            return None; // Too flat / nearly collinear
         }
 
         // Compute orientation using cross product
@@ -148,12 +245,27 @@ impl TriangleHashTable {
     /// Find candidate triangles that might match the query.
     /// Returns indices into the original triangle array.
     pub fn find_candidates(&self, query: &Triangle, tolerance: f64) -> Vec<usize> {
+        let mut candidates = Vec::new();
+        self.find_candidates_into(query, tolerance, &mut candidates);
+        candidates
+    }
+
+    /// Find candidate triangles into a pre-allocated buffer.
+    ///
+    /// The buffer is cleared before use. This avoids allocations when
+    /// called repeatedly in a loop.
+    pub fn find_candidates_into(
+        &self,
+        query: &Triangle,
+        tolerance: f64,
+        candidates: &mut Vec<usize>,
+    ) {
+        candidates.clear();
+
         let (bx, by) = query.hash_key(self.bins);
 
         // Search in neighboring bins based on tolerance
         let bin_tolerance = ((tolerance * self.bins as f64).ceil() as usize).max(1);
-
-        let mut candidates = Vec::new();
 
         let x_min = bx.saturating_sub(bin_tolerance);
         let x_max = (bx + bin_tolerance + 1).min(self.bins);
@@ -165,8 +277,6 @@ impl TriangleHashTable {
                 candidates.extend_from_slice(&self.table[y * self.bins + x]);
             }
         }
-
-        candidates
     }
 
     /// Get the number of triangles in the table.
@@ -207,8 +317,11 @@ impl Default for TriangleMatchConfig {
     }
 }
 
-/// Form all triangles from a list of star positions.
-pub fn form_triangles(positions: &[(f64, f64)], max_stars: usize) -> Vec<Triangle> {
+/// Form all triangles from a list of star positions (brute-force O(n³)).
+///
+/// For large star counts, prefer `form_triangles_kdtree` which is O(n·k²).
+#[cfg_attr(not(any(test, feature = "bench")), allow(dead_code))]
+pub(crate) fn form_triangles(positions: &[(f64, f64)], max_stars: usize) -> Vec<Triangle> {
     let n = positions.len().min(max_stars);
     if n < 3 {
         return Vec::new();
@@ -231,10 +344,14 @@ pub fn form_triangles(positions: &[(f64, f64)], max_stars: usize) -> Vec<Triangl
     triangles
 }
 
-/// Match stars between reference and target using triangle matching.
+/// Match stars between reference and target using triangle matching (brute-force).
+///
+/// This is the O(n³) brute-force version. For better performance with large star
+/// counts (>50 stars), use `match_stars_triangles_kdtree` instead.
 ///
 /// Returns a list of matched star pairs with confidence scores.
-pub fn match_stars_triangles(
+#[cfg_attr(not(any(test, feature = "bench")), allow(dead_code))]
+pub(crate) fn match_stars_triangles(
     ref_positions: &[(f64, f64)],
     target_positions: &[(f64, f64)],
     config: &TriangleMatchConfig,
@@ -257,79 +374,16 @@ pub fn match_stars_triangles(
     // Build hash table for reference triangles
     let hash_table = TriangleHashTable::build(&ref_triangles, config.hash_bins);
 
-    // Vote for star correspondences
-    let mut vote_matrix: HashMap<(usize, usize), usize> = HashMap::new();
-
-    for target_tri in &target_triangles {
-        let candidates = hash_table.find_candidates(target_tri, config.ratio_tolerance);
-
-        for &ref_idx in &candidates {
-            let ref_tri = &ref_triangles[ref_idx];
-
-            // Check similarity
-            if !ref_tri.is_similar(target_tri, config.ratio_tolerance) {
-                continue;
-            }
-
-            // Check orientation if required
-            if config.check_orientation && ref_tri.orientation != target_tri.orientation {
-                continue;
-            }
-
-            // Vote for all three vertex correspondences
-            // The correspondence depends on which sides match
-            // Since sides are sorted by length, vertices should correspond in order
-            for i in 0..3 {
-                let ref_star = ref_tri.star_indices[i];
-                let target_star = target_tri.star_indices[i];
-                *vote_matrix.entry((ref_star, target_star)).or_insert(0) += 1;
-            }
-        }
-    }
-
-    // Filter by minimum votes and resolve conflicts
-    let mut matches: Vec<StarMatch> = vote_matrix
-        .into_iter()
-        .filter(|&(_, votes)| votes >= config.min_votes)
-        .map(|((ref_idx, target_idx), votes)| StarMatch {
-            ref_idx,
-            target_idx,
-            votes,
-            confidence: 0.0, // Will be computed later
-        })
-        .collect();
-
-    // Sort by votes (descending)
-    matches.sort_by(|a, b| b.votes.cmp(&a.votes));
-
-    // Resolve one-to-many conflicts (greedy approach)
-    let mut used_ref = vec![false; n_ref];
-    let mut used_target = vec![false; n_target];
-    let mut resolved = Vec::new();
-
-    for m in matches {
-        if m.ref_idx < n_ref
-            && m.target_idx < n_target
-            && !used_ref[m.ref_idx]
-            && !used_target[m.target_idx]
-        {
-            used_ref[m.ref_idx] = true;
-            used_target[m.target_idx] = true;
-
-            // Compute confidence based on votes
-            let max_possible_votes = (n_ref.min(n_target) - 2) * (n_ref.min(n_target) - 1) / 2;
-            let confidence = (m.votes as f64 / max_possible_votes.max(1) as f64).min(1.0);
-
-            resolved.push(StarMatch { confidence, ..m });
-        }
-    }
-
-    resolved
+    // Vote for star correspondences and resolve conflicts
+    let vote_matrix =
+        vote_for_correspondences(&target_triangles, &ref_triangles, &hash_table, config);
+    resolve_matches(vote_matrix, n_ref, n_target, config.min_votes)
 }
 
 /// Convert star matches to point pairs for transformation estimation.
 #[allow(clippy::type_complexity)]
-pub fn matches_to_point_pairs(
+#[cfg_attr(not(any(test, feature = "bench")), allow(dead_code))]
+pub(crate) fn matches_to_point_pairs(
     matches: &[StarMatch],
     ref_positions: &[(f64, f64)],
     target_positions: &[(f64, f64)],
@@ -426,70 +480,8 @@ pub fn match_stars_triangles_kdtree(
     // Build hash table for reference triangles
     let hash_table = TriangleHashTable::build(&ref_triangles, config.hash_bins);
 
-    // Vote for star correspondences
-    let mut vote_matrix: HashMap<(usize, usize), usize> = HashMap::new();
-
-    for target_tri in &target_triangles {
-        let candidates = hash_table.find_candidates(target_tri, config.ratio_tolerance);
-
-        for &ref_idx in &candidates {
-            let ref_tri = &ref_triangles[ref_idx];
-
-            // Check similarity
-            if !ref_tri.is_similar(target_tri, config.ratio_tolerance) {
-                continue;
-            }
-
-            // Check orientation if required
-            if config.check_orientation && ref_tri.orientation != target_tri.orientation {
-                continue;
-            }
-
-            // Vote for all three vertex correspondences
-            for i in 0..3 {
-                let ref_star = ref_tri.star_indices[i];
-                let target_star = target_tri.star_indices[i];
-                *vote_matrix.entry((ref_star, target_star)).or_insert(0) += 1;
-            }
-        }
-    }
-
-    // Filter by minimum votes and resolve conflicts
-    let mut matches: Vec<StarMatch> = vote_matrix
-        .into_iter()
-        .filter(|&(_, votes)| votes >= config.min_votes)
-        .map(|((ref_idx, target_idx), votes)| StarMatch {
-            ref_idx,
-            target_idx,
-            votes,
-            confidence: 0.0,
-        })
-        .collect();
-
-    // Sort by votes (descending)
-    matches.sort_by(|a, b| b.votes.cmp(&a.votes));
-
-    // Resolve one-to-many conflicts (greedy approach)
-    let mut used_ref = vec![false; n_ref];
-    let mut used_target = vec![false; n_target];
-    let mut resolved = Vec::new();
-
-    for m in matches {
-        if m.ref_idx < n_ref
-            && m.target_idx < n_target
-            && !used_ref[m.ref_idx]
-            && !used_target[m.target_idx]
-        {
-            used_ref[m.ref_idx] = true;
-            used_target[m.target_idx] = true;
-
-            // Compute confidence based on votes
-            let max_possible_votes = (n_ref.min(n_target) - 2) * (n_ref.min(n_target) - 1) / 2;
-            let confidence = (m.votes as f64 / max_possible_votes.max(1) as f64).min(1.0);
-
-            resolved.push(StarMatch { confidence, ..m });
-        }
-    }
-
-    resolved
+    // Vote for star correspondences and resolve conflicts
+    let vote_matrix =
+        vote_for_correspondences(&target_triangles, &ref_triangles, &hash_table, config);
+    resolve_matches(vote_matrix, n_ref, n_target, config.min_votes)
 }

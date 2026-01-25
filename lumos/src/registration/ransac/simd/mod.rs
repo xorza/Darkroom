@@ -63,7 +63,7 @@ pub fn count_inliers_simd(
 }
 
 /// Scalar implementation of inlier counting.
-pub fn count_inliers_scalar(
+fn count_inliers_scalar(
     ref_points: &[(f64, f64)],
     target_points: &[(f64, f64)],
     transform: &TransformMatrix,
@@ -124,7 +124,7 @@ pub fn compute_residuals_simd(
 }
 
 /// Scalar implementation of residual computation.
-pub fn compute_residuals_scalar(
+fn compute_residuals_scalar(
     ref_points: &[(f64, f64)],
     target_points: &[(f64, f64)],
     transform: &TransformMatrix,

@@ -239,6 +239,8 @@ pub fn estimate_overlap(width: usize, height: usize, transform: &TransformMatrix
 }
 
 /// Compute per-star residuals given transformation.
+///
+/// Uses SIMD acceleration when available via the RANSAC module.
 pub fn compute_residuals(
     ref_points: &[(f64, f64)],
     target_points: &[(f64, f64)],
@@ -250,14 +252,8 @@ pub fn compute_residuals(
         "Point count mismatch"
     );
 
-    ref_points
-        .iter()
-        .zip(target_points.iter())
-        .map(|(&(rx, ry), &(tx, ty))| {
-            let (px, py) = transform.apply(rx, ry);
-            ((px - tx).powi(2) + (py - ty).powi(2)).sqrt()
-        })
-        .collect()
+    // Delegate to SIMD-optimized implementation
+    crate::registration::ransac::compute_residuals(ref_points, target_points, transform)
 }
 
 /// Compute registration statistics for a set of residuals.
