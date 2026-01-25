@@ -327,7 +327,6 @@ impl RansacEstimator {
             .iter()
             .map(|&c| (c + 0.1).powi(2)) // Square to emphasize high-confidence matches
             .collect();
-        let total_weight: f64 = weights.iter().sum();
 
         let mut best_transform: Option<TransformMatrix> = None;
         let mut best_inliers: Vec<usize> = Vec::new();
@@ -341,28 +340,34 @@ impl RansacEstimator {
         let mut iterations = 0;
         let max_iter = self.config.max_iterations;
 
-        // Progressive sampling strategy:
-        // - Early iterations: sample from top confidence matches
-        // - Later iterations: gradually include lower confidence matches
-        // - Final iterations: uniform random sampling
+        // Progressive sampling strategy (3-phase approach):
+        // Phase 1 (0-33%): Sample from top 25% high-confidence matches
+        // Phase 2 (33-66%): Sample from top 50% matches
+        // Phase 3 (66-100%): Uniform random sampling
         while iterations < max_iter {
             iterations += 1;
 
-            // Compute effective pool size based on iteration progress
-            // Start with top 20% of matches, expand to 100% by iteration 50%
-            let progress = iterations as f64 / max_iter as f64;
-            let pool_fraction = (0.2 + 0.8 * (progress * 2.0).min(1.0)).min(1.0);
-            let pool_size = ((n as f64 * pool_fraction) as usize).max(min_samples);
+            // Simple 3-phase pool selection
+            let phase = iterations * 3 / max_iter;
+            let (pool_size, use_weighted) = match phase {
+                0 => ((n / 4).max(min_samples), true), // Top 25%
+                1 => ((n / 2).max(min_samples), true), // Top 50%
+                _ => (n, false),                       // Full pool
+            };
 
             // Sample from the progressive pool
-            if progress < 0.5 {
+            if use_weighted {
                 // Weighted sampling from top matches
+                let pool_weight: f64 = sorted_indices[..pool_size]
+                    .iter()
+                    .map(|&i| weights[i])
+                    .sum();
                 weighted_sample_into(
                     &mut rng,
                     &sorted_indices[..pool_size],
                     &weights,
                     min_samples,
-                    total_weight * pool_fraction,
+                    pool_weight,
                     &mut sample_indices,
                 );
             } else {

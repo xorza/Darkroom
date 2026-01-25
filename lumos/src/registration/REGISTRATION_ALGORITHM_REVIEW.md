@@ -4,12 +4,18 @@ Comprehensive review of the registration module comparing implementation against
 
 ## Executive Summary
 
-The registration module is **production-quality** and follows most best practices for astronomical image registration. The implementation includes LO-RANSAC, geometric hashing with voting, k-d tree optimization, and SIMD acceleration. A few optimization opportunities exist, primarily around:
+The registration module is **production-quality** and follows most best practices for astronomical image registration. The implementation includes LO-RANSAC, geometric hashing with voting, k-d tree optimization, and SIMD acceleration.
 
-1. **MAGSAC scoring** - Modern threshold-free inlier weighting
-2. **Iterative Phase Correlation** - Sub-pixel accuracy improvement  
-3. **Lanczos SIMD** - Full AVX2/NEON acceleration for warping
-4. **Two-step triangle matching** - Faster convergence with rough+fine strategy
+### Implemented Optimizations
+
+- **MSAC-like scoring** ✅ - Already uses truncated quadratic cost: `(threshold² - dist²) * 1000`
+- **Simplified progressive sampling** ✅ - Changed to cleaner 3-phase approach (25%→50%→100% pool)
+
+### Remaining Optimization Opportunities
+
+1. **Iterative Phase Correlation** - Sub-pixel accuracy improvement (0.01-0.05 pixel)
+2. **Lanczos SIMD** - Full AVX2/NEON acceleration for warping (2-3x speedup)
+3. **Two-step triangle matching** - Requires transform-guided refinement (complex)
 
 ---
 
