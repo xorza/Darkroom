@@ -6,10 +6,7 @@ use std::path::Path;
 
 use criterion::{BenchmarkId, Criterion, Throughput};
 
-use super::simd::{
-    warp_image_bilinear_simd, warp_image_lanczos3_simd, warp_row_bilinear_scalar,
-    warp_row_bilinear_simd, warp_row_lanczos3_scalar, warp_row_lanczos3_simd,
-};
+use super::simd::{warp_image_bilinear_simd, warp_row_bilinear_scalar, warp_row_bilinear_simd};
 use super::{InterpolationMethod, WarpConfig, interpolate_pixel, resample_image, warp_image};
 use crate::registration::types::TransformMatrix;
 
@@ -155,49 +152,6 @@ fn benchmark_simd_vs_scalar(c: &mut Criterion) {
                 })
             },
         );
-
-        // Lanczos3 SIMD vs Scalar
-        group.bench_function(
-            BenchmarkId::new("lanczos3_simd_row", format!("{}px", size)),
-            |b| {
-                b.iter(|| {
-                    let mut output = vec![0.0f32; size];
-                    warp_row_lanczos3_simd(
-                        black_box(&image),
-                        size,
-                        size,
-                        &mut output,
-                        y,
-                        black_box(&inverse),
-                        0.0,
-                        true,
-                        false,
-                    );
-                    black_box(output)
-                })
-            },
-        );
-
-        group.bench_function(
-            BenchmarkId::new("lanczos3_scalar_row", format!("{}px", size)),
-            |b| {
-                b.iter(|| {
-                    let mut output = vec![0.0f32; size];
-                    warp_row_lanczos3_scalar(
-                        black_box(&image),
-                        size,
-                        size,
-                        &mut output,
-                        y,
-                        black_box(&inverse),
-                        0.0,
-                        true,
-                        false,
-                    );
-                    black_box(output)
-                })
-            },
-        );
     }
 
     // Full image warping comparison (512x512)
@@ -216,23 +170,6 @@ fn benchmark_simd_vs_scalar(c: &mut Criterion) {
                 size,
                 black_box(&transform),
                 0.0,
-            );
-            black_box(result)
-        })
-    });
-
-    group.bench_function("lanczos3_simd_image_512", |b| {
-        b.iter(|| {
-            let result = warp_image_lanczos3_simd(
-                black_box(&image),
-                size,
-                size,
-                size,
-                size,
-                black_box(&transform),
-                0.0,
-                true,
-                false,
             );
             black_box(result)
         })

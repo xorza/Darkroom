@@ -63,7 +63,28 @@ pub fn count_inliers_simd(
 }
 
 /// Scalar implementation of inlier counting.
+#[cfg(any(feature = "bench", test))]
+pub fn count_inliers_scalar(
+    ref_points: &[(f64, f64)],
+    target_points: &[(f64, f64)],
+    transform: &TransformMatrix,
+    threshold: f64,
+) -> (Vec<usize>, usize) {
+    count_inliers_scalar_impl(ref_points, target_points, transform, threshold)
+}
+
+#[cfg(not(any(feature = "bench", test)))]
 fn count_inliers_scalar(
+    ref_points: &[(f64, f64)],
+    target_points: &[(f64, f64)],
+    transform: &TransformMatrix,
+    threshold: f64,
+) -> (Vec<usize>, usize) {
+    count_inliers_scalar_impl(ref_points, target_points, transform, threshold)
+}
+
+#[inline]
+fn count_inliers_scalar_impl(
     ref_points: &[(f64, f64)],
     target_points: &[(f64, f64)],
     transform: &TransformMatrix,
@@ -87,44 +108,21 @@ fn count_inliers_scalar(
     (inliers, score)
 }
 
-/// Compute residuals using SIMD acceleration.
+/// Compute residuals (Euclidean distance for each point pair after transformation).
 ///
-/// Returns the Euclidean distance for each point pair after transformation.
+/// Note: SIMD acceleration was removed as it provided <5% improvement.
+/// The bottleneck is the sqrt operation which doesn't vectorize well.
 #[inline]
-pub fn compute_residuals_simd(
+pub fn compute_residuals(
     ref_points: &[(f64, f64)],
     target_points: &[(f64, f64)],
     transform: &TransformMatrix,
 ) -> Vec<f64> {
-    let len = ref_points.len();
-
-    if len == 0 {
-        return Vec::new();
-    }
-
-    #[cfg(target_arch = "x86_64")]
-    {
-        if len >= 4 && cpu_features::has_avx2() {
-            return unsafe { sse::compute_residuals_avx2(ref_points, target_points, transform) };
-        }
-        if len >= 2 && cpu_features::has_sse4_1() {
-            return unsafe { sse::compute_residuals_sse2(ref_points, target_points, transform) };
-        }
-    }
-
-    #[cfg(target_arch = "aarch64")]
-    {
-        if len >= 2 {
-            return unsafe { neon::compute_residuals_neon(ref_points, target_points, transform) };
-        }
-    }
-
-    // Scalar fallback
-    compute_residuals_scalar(ref_points, target_points, transform)
+    compute_residuals_scalar_impl(ref_points, target_points, transform)
 }
 
-/// Scalar implementation of residual computation.
-fn compute_residuals_scalar(
+#[inline]
+fn compute_residuals_scalar_impl(
     ref_points: &[(f64, f64)],
     target_points: &[(f64, f64)],
     transform: &TransformMatrix,
@@ -245,78 +243,18 @@ mod tests {
     }
 
     #[test]
-    fn test_compute_residuals_simd_basic() {
+    fn test_compute_residuals_basic() {
         let ref_points = vec![(0.0, 0.0), (10.0, 10.0), (20.0, 20.0), (30.0, 30.0)];
         let target_points = vec![(10.0, 5.0), (20.0, 15.0), (30.0, 25.0), (40.0, 35.0)];
         let transform = create_test_transform();
 
-        let residuals_simd = compute_residuals_simd(&ref_points, &target_points, &transform);
-        let residuals_scalar = compute_residuals_scalar(&ref_points, &target_points, &transform);
+        let residuals = compute_residuals(&ref_points, &target_points, &transform);
 
-        assert_eq!(residuals_simd.len(), residuals_scalar.len());
-        for (i, (s, sc)) in residuals_simd
-            .iter()
-            .zip(residuals_scalar.iter())
-            .enumerate()
-        {
-            assert!(
-                (s - sc).abs() < 1e-10,
-                "Index {}: SIMD {} vs Scalar {}",
-                i,
-                s,
-                sc
-            );
-        }
+        assert_eq!(residuals.len(), ref_points.len());
 
         // All residuals should be 0 (exact match)
-        for r in &residuals_simd {
+        for r in &residuals {
             assert!(*r < 1e-10);
-        }
-    }
-
-    #[test]
-    fn test_compute_residuals_simd_matches_scalar() {
-        let transform = create_similarity_transform();
-
-        for size in [1, 2, 3, 4, 5, 7, 8, 9, 15, 16, 17, 32, 64, 100] {
-            let ref_points: Vec<(f64, f64)> = (0..size)
-                .map(|i| (i as f64 * 7.3, i as f64 * 4.2 + 1.0))
-                .collect();
-
-            let target_points: Vec<(f64, f64)> = ref_points
-                .iter()
-                .enumerate()
-                .map(|(i, &(x, y))| {
-                    let (tx, ty) = transform.apply(x, y);
-                    (tx + (i as f64 * 0.1), ty - (i as f64 * 0.05))
-                })
-                .collect();
-
-            let residuals_simd = compute_residuals_simd(&ref_points, &target_points, &transform);
-            let residuals_scalar =
-                compute_residuals_scalar(&ref_points, &target_points, &transform);
-
-            assert_eq!(
-                residuals_simd.len(),
-                residuals_scalar.len(),
-                "Size {}: length mismatch",
-                size
-            );
-
-            for (i, (s, sc)) in residuals_simd
-                .iter()
-                .zip(residuals_scalar.iter())
-                .enumerate()
-            {
-                assert!(
-                    (s - sc).abs() < 1e-9,
-                    "Size {}, Index {}: SIMD {} vs Scalar {}",
-                    size,
-                    i,
-                    s,
-                    sc
-                );
-            }
         }
     }
 
@@ -355,27 +293,15 @@ mod tests {
             })
             .collect();
 
-        let residuals_simd = compute_residuals_simd(&ref_points, &target_points, &transform);
-        let residuals_scalar = compute_residuals_scalar(&ref_points, &target_points, &transform);
+        let residuals = compute_residuals(&ref_points, &target_points, &transform);
 
-        for (i, (s, sc)) in residuals_simd
-            .iter()
-            .zip(residuals_scalar.iter())
-            .enumerate()
-        {
-            assert!(
-                (s - sc).abs() < 1e-9,
-                "Index {}: SIMD {} vs Scalar {}",
-                i,
-                s,
-                sc
-            );
+        for (i, r) in residuals.iter().enumerate() {
             // Expected residual is sqrt(0.5² + 0.3²) ≈ 0.583
             assert!(
-                (s - 0.583).abs() < 0.01,
+                (r - 0.583).abs() < 0.01,
                 "Index {}: unexpected residual {}",
                 i,
-                s
+                r
             );
         }
     }

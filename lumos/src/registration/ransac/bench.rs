@@ -6,7 +6,7 @@ use std::path::Path;
 
 use criterion::{BenchmarkId, Criterion, Throughput};
 
-use super::simd::{compute_residuals_simd, count_inliers_simd};
+use super::simd::{count_inliers_scalar, count_inliers_simd};
 use super::{RansacConfig, RansacEstimator};
 use crate::registration::types::{TransformMatrix, TransformType};
 
@@ -243,7 +243,20 @@ fn benchmark_simd_vs_scalar(c: &mut Criterion) {
 
         group.throughput(Throughput::Elements(point_count as u64));
 
-        // Count inliers benchmark (SIMD dispatch)
+        // Count inliers - scalar
+        group.bench_function(BenchmarkId::new("count_inliers_scalar", point_count), |b| {
+            b.iter(|| {
+                let result = count_inliers_scalar(
+                    black_box(&ref_points),
+                    black_box(&target_points),
+                    black_box(&transform),
+                    threshold,
+                );
+                black_box(result)
+            })
+        });
+
+        // Count inliers - SIMD dispatch
         group.bench_function(BenchmarkId::new("count_inliers_simd", point_count), |b| {
             b.iter(|| {
                 let result = count_inliers_simd(
@@ -255,21 +268,6 @@ fn benchmark_simd_vs_scalar(c: &mut Criterion) {
                 black_box(result)
             })
         });
-
-        // Compute residuals benchmark (SIMD dispatch)
-        group.bench_function(
-            BenchmarkId::new("compute_residuals_simd", point_count),
-            |b| {
-                b.iter(|| {
-                    let result = compute_residuals_simd(
-                        black_box(&ref_points),
-                        black_box(&target_points),
-                        black_box(&transform),
-                    );
-                    black_box(result)
-                })
-            },
-        );
     }
 
     group.finish();

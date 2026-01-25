@@ -126,97 +126,6 @@ pub unsafe fn count_inliers_neon(
     }
 }
 
-/// Compute residuals using NEON SIMD.
-///
-/// # Safety
-/// - Caller must ensure NEON is available.
-#[cfg(target_arch = "aarch64")]
-#[target_feature(enable = "neon")]
-pub unsafe fn compute_residuals_neon(
-    ref_points: &[(f64, f64)],
-    target_points: &[(f64, f64)],
-    transform: &TransformMatrix,
-) -> Vec<f64> {
-    unsafe {
-        let len = ref_points.len();
-        let mut residuals = vec![0.0f64; len];
-
-        let t = &transform.data;
-
-        let a = vdupq_n_f64(t[0]);
-        let b = vdupq_n_f64(t[1]);
-        let c = vdupq_n_f64(t[2]);
-        let d = vdupq_n_f64(t[3]);
-        let e = vdupq_n_f64(t[4]);
-        let f = vdupq_n_f64(t[5]);
-        let g = vdupq_n_f64(t[6]);
-        let h = vdupq_n_f64(t[7]);
-        let one = vdupq_n_f64(1.0);
-
-        let chunks = len / 2;
-
-        for chunk in 0..chunks {
-            let base = chunk * 2;
-
-            // Load 2 reference points
-            let rx0 = ref_points[base].0;
-            let ry0 = ref_points[base].1;
-            let rx1 = ref_points[base + 1].0;
-            let ry1 = ref_points[base + 1].1;
-
-            let ref_x = vld1q_f64([rx0, rx1].as_ptr());
-            let ref_y = vld1q_f64([ry0, ry1].as_ptr());
-
-            // Load 2 target points
-            let tx0 = target_points[base].0;
-            let ty0 = target_points[base].1;
-            let tx1 = target_points[base + 1].0;
-            let ty1 = target_points[base + 1].1;
-
-            let tar_x = vld1q_f64([tx0, tx1].as_ptr());
-            let tar_y = vld1q_f64([ty0, ty1].as_ptr());
-
-            // Compute transformed coordinates
-            let ax = vmulq_f64(a, ref_x);
-            let by = vmulq_f64(b, ref_y);
-            let num_x = vaddq_f64(vaddq_f64(ax, by), c);
-
-            let dx_coef = vmulq_f64(d, ref_x);
-            let ey = vmulq_f64(e, ref_y);
-            let num_y = vaddq_f64(vaddq_f64(dx_coef, ey), f);
-
-            let gx = vmulq_f64(g, ref_x);
-            let hy = vmulq_f64(h, ref_y);
-            let denom = vaddq_f64(vaddq_f64(gx, hy), one);
-
-            let trans_x = vdivq_f64(num_x, denom);
-            let trans_y = vdivq_f64(num_y, denom);
-
-            // Compute distance
-            let dx = vsubq_f64(trans_x, tar_x);
-            let dy = vsubq_f64(trans_y, tar_y);
-            let dx_sq = vmulq_f64(dx, dx);
-            let dy_sq = vmulq_f64(dy, dy);
-            let dist_sq = vaddq_f64(dx_sq, dy_sq);
-            let dist = vsqrtq_f64(dist_sq);
-
-            // Store results
-            vst1q_f64(residuals.as_mut_ptr().add(base), dist);
-        }
-
-        // Handle remainder
-        let remainder_start = chunks * 2;
-        for i in remainder_start..len {
-            let (rx, ry) = ref_points[i];
-            let (tx, ty) = target_points[i];
-            let (px, py) = transform.apply(rx, ry);
-            residuals[i] = ((px - tx).powi(2) + (py - ty).powi(2)).sqrt();
-        }
-
-        residuals
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -242,21 +151,6 @@ mod tests {
         }
 
         (inliers, score)
-    }
-
-    fn compute_residuals_scalar(
-        ref_points: &[(f64, f64)],
-        target_points: &[(f64, f64)],
-        transform: &TransformMatrix,
-    ) -> Vec<f64> {
-        ref_points
-            .iter()
-            .zip(target_points.iter())
-            .map(|(&(rx, ry), &(tx, ty))| {
-                let (px, py) = transform.apply(rx, ry);
-                ((px - tx).powi(2) + (py - ty).powi(2)).sqrt()
-            })
-            .collect()
     }
 
     #[test]
@@ -286,38 +180,5 @@ mod tests {
 
         assert_eq!(inliers_neon, inliers_scalar, "Inliers mismatch");
         assert_eq!(score_neon, score_scalar, "Score mismatch");
-    }
-
-    #[test]
-    #[cfg(target_arch = "aarch64")]
-    fn test_neon_compute_residuals() {
-        let transform = TransformMatrix::similarity(5.0, 10.0, 0.1, 1.1);
-        let ref_points: Vec<(f64, f64)> =
-            (0..25).map(|i| (i as f64 * 4.0, i as f64 * 2.5)).collect();
-        let target_points: Vec<(f64, f64)> = ref_points
-            .iter()
-            .map(|&(x, y)| {
-                let (tx, ty) = transform.apply(x, y);
-                (tx + 0.3, ty - 0.2)
-            })
-            .collect();
-
-        let residuals_neon =
-            unsafe { compute_residuals_neon(&ref_points, &target_points, &transform) };
-        let residuals_scalar = compute_residuals_scalar(&ref_points, &target_points, &transform);
-
-        for (i, (n, s)) in residuals_neon
-            .iter()
-            .zip(residuals_scalar.iter())
-            .enumerate()
-        {
-            assert!(
-                (n - s).abs() < 1e-10,
-                "Index {}: NEON {} vs Scalar {}",
-                i,
-                n,
-                s
-            );
-        }
     }
 }

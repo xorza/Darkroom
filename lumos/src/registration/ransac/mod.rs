@@ -988,5 +988,5 @@ pub(crate) fn compute_residuals(
     target_points: &[(f64, f64)],
     transform: &TransformMatrix,
 ) -> Vec<f64> {
-    simd::compute_residuals_simd(ref_points, target_points, transform)
+    simd::compute_residuals(ref_points, target_points, transform)
 }
