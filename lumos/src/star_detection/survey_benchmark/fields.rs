@@ -154,12 +154,16 @@ pub fn faint_field() -> TestField {
 /// Open cluster field (M67).
 ///
 /// Well-studied cluster with accurate positions.
+/// Note: M67 itself (RA=132.825) is not well covered by SDSS, so we use
+/// a different field from SDSS run 3836 which has good Gaia coverage.
 pub fn cluster_m67() -> TestField {
+    // The SDSS field 3836/3/89 is actually centered at RA~161.78, Dec~11.4
+    // We use Gaia catalog for this region instead of M67 proper
     TestField {
         name: "m67_cluster",
-        description: "Open cluster M67 - well-studied with precise positions",
-        ra: 132.825, // M67 center
-        dec: 11.8,
+        description: "SDSS field with Gaia catalog - tests cross-survey matching",
+        ra: 161.78, // Actual SDSS field center (not M67)
+        dec: 11.4,
         source: CatalogSource::GaiaDr3,
         sdss: Some(SdssField {
             run: 3836,
@@ -167,7 +171,7 @@ pub fn cluster_m67() -> TestField {
             field: 89,
             rerun: 301,
         }),
-        expected_star_count: 200..500,
+        expected_star_count: 50..200,
         difficulty: Difficulty::Medium,
         mag_limit: 18.0,
         typical_fwhm_arcsec: 1.3,
