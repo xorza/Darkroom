@@ -91,7 +91,10 @@ pub mod bench {
 
 // Re-export main public API types
 // High-level pipeline API (primary entry point)
-pub use pipeline::{Registrator, quick_register, register_stars, warp_to_reference};
+pub use pipeline::{
+    MultiScaleConfig, MultiScaleRegistrator, Registrator, quick_register, register_stars,
+    warp_to_reference,
+};
 
 // Core types needed by users
 pub use types::{
@@ -102,7 +105,10 @@ pub use types::{
 // Configuration types
 pub use distortion::{DistortionMap, ThinPlateSpline, TpsConfig};
 pub use interpolation::{InterpolationMethod, WarpConfig, warp_image};
-pub use phase_correlation::{PhaseCorrelationConfig, PhaseCorrelator};
+pub use phase_correlation::{
+    FullPhaseCorrelator, FullPhaseResult, LogPolarCorrelator, LogPolarResult,
+    PhaseCorrelationConfig, PhaseCorrelator,
+};
 pub use ransac::{RansacConfig, RansacEstimator, RansacResult};
 
 // Quality assessment

@@ -418,3 +418,117 @@ fn test_pipeline_affine_transform() {
         mean_error
     );
 }
+
+#[test]
+fn test_multiscale_registration_basic() {
+    // Create a large star field
+    let ref_stars = generate_star_grid(10, 10, 50.0, (50.0, 50.0));
+    let translation = TransformMatrix::from_translation(25.0, -15.0);
+    let target_stars = transform_stars(&ref_stars, &translation);
+
+    let config = RegistrationConfig::builder()
+        .min_stars(6)
+        .min_matched_stars(4)
+        .max_residual(5.0)
+        .build();
+
+    let multiscale_config = MultiScaleConfig {
+        levels: 2,
+        scale_factor: 2.0,
+        min_dimension: 64,
+        use_phase_correlation: false,
+    };
+
+    let registrator = MultiScaleRegistrator::new(config, multiscale_config);
+    let result = registrator
+        .register_stars(&ref_stars, &target_stars, 1000, 1000)
+        .unwrap();
+
+    let (tx, ty) = result.transform.translation_components();
+    assert!((tx - 25.0).abs() < 2.0, "Expected tx=25, got {}", tx);
+    assert!((ty - (-15.0)).abs() < 2.0, "Expected ty=-15, got {}", ty);
+}
+
+#[test]
+fn test_multiscale_registration_with_rotation() {
+    let ref_stars = generate_star_grid(8, 8, 60.0, (100.0, 100.0));
+
+    // Apply rotation + translation
+    let angle = PI / 20.0; // 9 degrees
+    let transform = TransformMatrix::similarity(30.0, -20.0, angle, 1.0);
+    let target_stars = transform_stars(&ref_stars, &transform);
+
+    let config = RegistrationConfig::builder()
+        .with_scale()
+        .min_stars(6)
+        .min_matched_stars(4)
+        .max_residual(5.0)
+        .build();
+
+    let multiscale_config = MultiScaleConfig {
+        levels: 2,
+        scale_factor: 2.0,
+        min_dimension: 64,
+        use_phase_correlation: false,
+    };
+
+    let registrator = MultiScaleRegistrator::new(config, multiscale_config);
+    let result = registrator
+        .register_stars(&ref_stars, &target_stars, 1000, 1000)
+        .unwrap();
+
+    // Check that the transform is close to the original
+    let est_angle = result.transform.rotation_angle();
+    assert!(
+        (est_angle - angle).abs() < 0.05,
+        "Expected angle={:.3}, got {:.3}",
+        angle,
+        est_angle
+    );
+}
+
+#[test]
+fn test_downsample_image() {
+    // Create a simple 4x4 image
+    let image = vec![
+        1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0,
+    ];
+
+    let downsampled = super::downsample_image(&image, 4, 4, 2, 2);
+
+    // Each 2x2 block should average to its center value
+    assert_eq!(downsampled.len(), 4);
+
+    // Top-left 2x2: (1+2+5+6)/4 = 3.5
+    assert!((downsampled[0] - 3.5).abs() < 0.01);
+    // Top-right 2x2: (3+4+7+8)/4 = 5.5
+    assert!((downsampled[1] - 5.5).abs() < 0.01);
+    // Bottom-left 2x2: (9+10+13+14)/4 = 11.5
+    assert!((downsampled[2] - 11.5).abs() < 0.01);
+    // Bottom-right 2x2: (11+12+15+16)/4 = 13.5
+    assert!((downsampled[3] - 13.5).abs() < 0.01);
+}
+
+#[test]
+fn test_build_pyramid() {
+    let image = vec![0.5f32; 256 * 256];
+    let pyramid = super::build_pyramid(&image, 256, 256, 3, 2.0);
+
+    assert_eq!(pyramid.len(), 3);
+    assert_eq!(pyramid[0].1, 256); // Level 0: full resolution
+    assert_eq!(pyramid[0].2, 256);
+    assert_eq!(pyramid[1].1, 128); // Level 1: half resolution
+    assert_eq!(pyramid[1].2, 128);
+    assert_eq!(pyramid[2].1, 64); // Level 2: quarter resolution
+    assert_eq!(pyramid[2].2, 64);
+}
+
+#[test]
+fn test_scale_transform() {
+    let transform = TransformMatrix::from_translation(10.0, 20.0);
+    let scaled = super::scale_transform(&transform, 2.0);
+
+    let (tx, ty) = scaled.translation_components();
+    assert!((tx - 20.0).abs() < 0.01);
+    assert!((ty - 40.0).abs() < 0.01);
+}

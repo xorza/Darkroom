@@ -485,3 +485,365 @@ pub fn transpose_inplace(data: &mut [Complex<f32>], n: usize) {
         }
     }
 }
+
+/// Result of log-polar phase correlation.
+#[derive(Debug, Clone)]
+pub struct LogPolarResult {
+    /// Estimated rotation angle in radians.
+    pub rotation: f64,
+    /// Estimated scale factor (1.0 = no scaling).
+    pub scale: f64,
+    /// Peak correlation value.
+    pub peak_value: f64,
+    /// Confidence in the estimate.
+    pub confidence: f64,
+}
+
+/// Log-polar phase correlation for rotation and scale estimation.
+///
+/// This technique works by:
+/// 1. Computing the magnitude spectrum of both images (shift-invariant)
+/// 2. Converting magnitude spectra to log-polar coordinates
+/// 3. Using phase correlation to find rotation (angular shift) and scale (radial shift)
+///
+/// The key insight is that in log-polar coordinates:
+/// - Rotation becomes a vertical (angular) translation
+/// - Scale change becomes a horizontal (log-radius) translation
+///
+/// This makes rotation/scale estimation a simple translation problem.
+pub struct LogPolarCorrelator {
+    /// Size of the log-polar image
+    size: usize,
+    /// Logarithmic base for radius mapping
+    log_base: f64,
+    /// Minimum radius (avoids DC component)
+    min_radius: f64,
+    /// Maximum radius
+    max_radius: f64,
+    /// Phase correlator for translation in log-polar space
+    correlator: PhaseCorrelator,
+}
+
+impl LogPolarCorrelator {
+    /// Create a new log-polar correlator.
+    ///
+    /// # Arguments
+    /// * `size` - Size of the log-polar image (typically 256 or 512)
+    /// * `max_radius` - Maximum radius to consider (typically half the image size)
+    pub fn new(size: usize, max_radius: f64) -> Self {
+        let config = PhaseCorrelationConfig {
+            use_windowing: true,
+            subpixel_method: SubpixelMethod::Parabolic,
+            min_peak_value: 0.05,
+        };
+        Self::with_config(size, max_radius, config)
+    }
+
+    /// Create a new log-polar correlator with custom config.
+    pub fn with_config(size: usize, max_radius: f64, config: PhaseCorrelationConfig) -> Self {
+        let min_radius = 4.0; // Avoid DC component artifacts
+        let log_base = (max_radius / min_radius).ln();
+
+        Self {
+            size,
+            log_base,
+            min_radius,
+            max_radius,
+            correlator: PhaseCorrelator::new(size, size, config),
+        }
+    }
+
+    /// Estimate rotation and scale between two images.
+    ///
+    /// # Arguments
+    /// * `reference` - Reference image
+    /// * `target` - Target image
+    /// * `width` - Image width
+    /// * `height` - Image height
+    ///
+    /// # Returns
+    /// Estimated rotation (radians) and scale, or None if estimation failed.
+    pub fn estimate_rotation_scale(
+        &self,
+        reference: &[f32],
+        target: &[f32],
+        width: usize,
+        height: usize,
+    ) -> Option<LogPolarResult> {
+        if reference.len() != width * height || target.len() != width * height {
+            return None;
+        }
+
+        // Step 1: Compute magnitude spectra (shift-invariant)
+        let ref_mag = self.compute_magnitude_spectrum(reference, width, height);
+        let tar_mag = self.compute_magnitude_spectrum(target, width, height);
+
+        // Step 2: Convert to log-polar coordinates
+        let ref_lp = self.to_log_polar(&ref_mag, width.max(height).next_power_of_two());
+        let tar_lp = self.to_log_polar(&tar_mag, width.max(height).next_power_of_two());
+
+        // Step 3: Phase correlate in log-polar space
+        let result = self
+            .correlator
+            .correlate(&ref_lp, &tar_lp, self.size, self.size)?;
+
+        // Convert translation to rotation and scale
+        let (dx, dy) = result.translation;
+
+        // dy corresponds to rotation (angular shift)
+        // dx corresponds to scale (log-radius shift)
+        let rotation = -dy * 2.0 * std::f64::consts::PI / self.size as f64;
+
+        // Scale is exp(dx * log_base / size)
+        let scale = (dx * self.log_base / self.size as f64).exp();
+
+        // Clamp scale to reasonable range
+        let scale = scale.clamp(0.5, 2.0);
+
+        Some(LogPolarResult {
+            rotation,
+            scale,
+            peak_value: result.peak_value,
+            confidence: result.confidence,
+        })
+    }
+
+    /// Compute the magnitude spectrum of an image.
+    fn compute_magnitude_spectrum(&self, image: &[f32], width: usize, height: usize) -> Vec<f32> {
+        let n = width.max(height).next_power_of_two();
+
+        // Pad image to power of 2
+        let mut padded = vec![0.0f32; n * n];
+        let offset_x = (n - width) / 2;
+        let offset_y = (n - height) / 2;
+
+        for y in 0..height {
+            for x in 0..width {
+                padded[(y + offset_y) * n + (x + offset_x)] = image[y * width + x];
+            }
+        }
+
+        // Apply Hann window
+        let window = hann_window(n);
+        for y in 0..n {
+            for x in 0..n {
+                padded[y * n + x] *= window[x] * window[y];
+            }
+        }
+
+        // Compute 2D FFT
+        let mut planner = rustfft::FftPlanner::new();
+        let fft = planner.plan_fft_forward(n);
+
+        let mut data: Vec<Complex<f32>> = padded.iter().map(|&v| Complex::new(v, 0.0)).collect();
+
+        // FFT on rows
+        for row in 0..n {
+            let start = row * n;
+            fft.process(&mut data[start..start + n]);
+        }
+
+        // Transpose
+        transpose_inplace(&mut data, n);
+
+        // FFT on columns
+        for row in 0..n {
+            let start = row * n;
+            fft.process(&mut data[start..start + n]);
+        }
+
+        // Transpose back
+        transpose_inplace(&mut data, n);
+
+        // Compute magnitude and apply log scaling
+        // Also shift zero frequency to center
+        let mut magnitude = vec![0.0f32; n * n];
+        for y in 0..n {
+            for x in 0..n {
+                // FFT shift: swap quadrants
+                let sx = (x + n / 2) % n;
+                let sy = (y + n / 2) % n;
+                let mag = data[y * n + x].norm();
+                // Log scale to compress dynamic range
+                magnitude[sy * n + sx] = (1.0 + mag).ln();
+            }
+        }
+
+        magnitude
+    }
+
+    /// Convert magnitude spectrum to log-polar coordinates.
+    fn to_log_polar(&self, magnitude: &[f32], fft_size: usize) -> Vec<f32> {
+        let mut log_polar = vec![0.0f32; self.size * self.size];
+
+        let cx = fft_size as f64 / 2.0;
+        let cy = fft_size as f64 / 2.0;
+
+        for theta_idx in 0..self.size {
+            // Angle from 0 to 2*PI
+            let theta = theta_idx as f64 * 2.0 * std::f64::consts::PI / self.size as f64;
+            let cos_t = theta.cos();
+            let sin_t = theta.sin();
+
+            for rho_idx in 0..self.size {
+                // Log-spaced radius
+                let t = rho_idx as f64 / self.size as f64;
+                let radius = self.min_radius * (t * self.log_base).exp();
+
+                if radius <= self.max_radius {
+                    // Convert to Cartesian coordinates
+                    let x = cx + radius * cos_t;
+                    let y = cy + radius * sin_t;
+
+                    // Bilinear interpolation
+                    let value = bilinear_sample(magnitude, fft_size, fft_size, x, y);
+                    log_polar[theta_idx * self.size + rho_idx] = value;
+                }
+            }
+        }
+
+        log_polar
+    }
+}
+
+/// Bilinear interpolation for f32 images.
+fn bilinear_sample(image: &[f32], width: usize, height: usize, x: f64, y: f64) -> f32 {
+    let x0 = x.floor() as isize;
+    let y0 = y.floor() as isize;
+    let x1 = x0 + 1;
+    let y1 = y0 + 1;
+
+    let fx = (x - x0 as f64) as f32;
+    let fy = (y - y0 as f64) as f32;
+
+    let get_pixel = |px: isize, py: isize| -> f32 {
+        if px >= 0 && px < width as isize && py >= 0 && py < height as isize {
+            image[py as usize * width + px as usize]
+        } else {
+            0.0
+        }
+    };
+
+    let p00 = get_pixel(x0, y0);
+    let p10 = get_pixel(x1, y0);
+    let p01 = get_pixel(x0, y1);
+    let p11 = get_pixel(x1, y1);
+
+    let top = p00 + fx * (p10 - p00);
+    let bottom = p01 + fx * (p11 - p01);
+
+    top + fy * (bottom - top)
+}
+
+/// Combined rotation, scale, and translation estimator.
+///
+/// Uses log-polar phase correlation for rotation/scale,
+/// then standard phase correlation for translation.
+pub struct FullPhaseCorrelator {
+    log_polar: LogPolarCorrelator,
+    translation: PhaseCorrelator,
+}
+
+/// Result of full phase correlation (rotation + scale + translation).
+#[derive(Debug, Clone)]
+pub struct FullPhaseResult {
+    /// Estimated rotation angle in radians.
+    pub rotation: f64,
+    /// Estimated scale factor.
+    pub scale: f64,
+    /// Estimated translation (dx, dy).
+    pub translation: (f64, f64),
+    /// Overall confidence.
+    pub confidence: f64,
+}
+
+impl FullPhaseCorrelator {
+    /// Create a new full phase correlator.
+    pub fn new(width: usize, height: usize) -> Self {
+        Self::with_config(width, height, PhaseCorrelationConfig::default())
+    }
+
+    /// Create a new full phase correlator with custom config.
+    pub fn with_config(width: usize, height: usize, config: PhaseCorrelationConfig) -> Self {
+        let max_dim = width.max(height);
+        let lp_size = 256.min(max_dim.next_power_of_two());
+
+        // Use lower threshold for log-polar correlation
+        let lp_config = PhaseCorrelationConfig {
+            min_peak_value: config.min_peak_value * 0.5,
+            ..config
+        };
+
+        Self {
+            log_polar: LogPolarCorrelator::with_config(lp_size, max_dim as f64 / 2.0, lp_config),
+            translation: PhaseCorrelator::new(width, height, config),
+        }
+    }
+
+    /// Estimate full transformation (rotation, scale, translation).
+    pub fn estimate(
+        &self,
+        reference: &[f32],
+        target: &[f32],
+        width: usize,
+        height: usize,
+    ) -> Option<FullPhaseResult> {
+        // Step 1: Estimate rotation and scale
+        let rs_result = self
+            .log_polar
+            .estimate_rotation_scale(reference, target, width, height)?;
+
+        // Step 2: De-rotate and de-scale target, then estimate translation
+        let corrected = rotate_and_scale_image(
+            target,
+            width,
+            height,
+            -rs_result.rotation,
+            1.0 / rs_result.scale,
+        );
+
+        let trans_result = self
+            .translation
+            .correlate(reference, &corrected, width, height)?;
+
+        Some(FullPhaseResult {
+            rotation: rs_result.rotation,
+            scale: rs_result.scale,
+            translation: trans_result.translation,
+            confidence: (rs_result.confidence + trans_result.confidence) / 2.0,
+        })
+    }
+}
+
+/// Rotate and scale an image around its center.
+fn rotate_and_scale_image(
+    image: &[f32],
+    width: usize,
+    height: usize,
+    angle: f64,
+    scale: f64,
+) -> Vec<f32> {
+    let mut result = vec![0.0f32; width * height];
+
+    let cx = width as f64 / 2.0;
+    let cy = height as f64 / 2.0;
+
+    let cos_a = angle.cos();
+    let sin_a = angle.sin();
+
+    for y in 0..height {
+        for x in 0..width {
+            // Transform from output to input coordinates
+            let dx = x as f64 - cx;
+            let dy = y as f64 - cy;
+
+            // Rotate and scale (inverse transform)
+            let sx = (dx * cos_a + dy * sin_a) / scale + cx;
+            let sy = (-dx * sin_a + dy * cos_a) / scale + cy;
+
+            result[y * width + x] = bilinear_sample(image, width, height, sx, sy);
+        }
+    }
+
+    result
+}

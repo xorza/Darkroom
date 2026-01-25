@@ -513,10 +513,10 @@ registration/
 3. [~] 4.2 SIMD Lanczos kernel (skipped - sin() doesn't vectorize, small kernels)
 4. [~] 4.3 SIMD KdTree distances (skipped - tree traversal dominates, not distance calc)
 
-### Phase 4: Algorithms (5-7 days)
-1. [ ] 5.1 Multi-scale registration
-2. [ ] 5.2 Log-polar rotation estimation
-3. [ ] 5.3 Progressive RANSAC
+### Phase 4: Algorithms (5-7 days) - COMPLETED
+1. [x] 5.1 Multi-scale registration (MultiScaleRegistrator, pyramid approach)
+2. [x] 5.2 Log-polar rotation estimation (LogPolarCorrelator, FullPhaseCorrelator)
+3. [x] 5.3 Progressive RANSAC (estimate_progressive with weighted sampling)
 
 ### Phase 5: Testing (2-3 days)
 1. [ ] 6.1 Numerical stability tests

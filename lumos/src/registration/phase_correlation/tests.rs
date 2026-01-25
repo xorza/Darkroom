@@ -169,3 +169,128 @@ fn test_confidence_calculation() {
     // Self-correlation should have positive confidence
     assert!(result.confidence >= 0.0);
 }
+
+#[test]
+fn test_log_polar_correlator_creation() {
+    let correlator = LogPolarCorrelator::new(128, 64.0);
+    // Just verify it doesn't panic
+    assert!(correlator.size == 128);
+}
+
+#[test]
+fn test_log_polar_identical_images() {
+    let width = 128;
+    let height = 128;
+
+    // Create a simple test pattern
+    let mut image = vec![0.0f32; width * height];
+    for y in 0..height {
+        for x in 0..width {
+            // Radial pattern that's rotationally interesting
+            let dx = x as f64 - width as f64 / 2.0;
+            let dy = y as f64 - height as f64 / 2.0;
+            let r = (dx * dx + dy * dy).sqrt();
+            image[y * width + x] = (r * 0.1).sin().abs() as f32;
+        }
+    }
+
+    let correlator = LogPolarCorrelator::new(128, 64.0);
+    let result = correlator.estimate_rotation_scale(&image, &image, width, height);
+
+    assert!(result.is_some(), "Log-polar correlation should succeed");
+    let result = result.unwrap();
+
+    // Identical images should have near-zero rotation and scale ~1
+    assert!(
+        result.rotation.abs() < 0.2,
+        "Expected near-zero rotation, got {}",
+        result.rotation
+    );
+    assert!(
+        (result.scale - 1.0).abs() < 0.2,
+        "Expected scale ~1.0, got {}",
+        result.scale
+    );
+}
+
+#[test]
+fn test_full_phase_correlator() {
+    let width = 128;
+    let height = 128;
+
+    // Create a test pattern with multiple gaussian blobs (more suitable for phase correlation)
+    let mut reference = vec![0.0f32; width * height];
+
+    // Add several gaussian blobs at different positions
+    let blobs = [(0.3, 0.3), (0.7, 0.7), (0.3, 0.7), (0.7, 0.3), (0.5, 0.5)];
+    for (bx_frac, by_frac) in blobs {
+        let bx = width as f64 * bx_frac;
+        let by = height as f64 * by_frac;
+        let sigma = 8.0;
+        for y in 0..height {
+            for x in 0..width {
+                let dx = x as f64 - bx;
+                let dy = y as f64 - by;
+                let d2 = dx * dx + dy * dy;
+                reference[y * width + x] += (-d2 / (2.0 * sigma * sigma)).exp() as f32;
+            }
+        }
+    }
+
+    // Use a lower threshold config for testing
+    let config = super::PhaseCorrelationConfig {
+        min_peak_value: 0.01,
+        ..Default::default()
+    };
+    let correlator = super::FullPhaseCorrelator::with_config(width, height, config);
+    let result = correlator.estimate(&reference, &reference, width, height);
+
+    assert!(result.is_some(), "Full phase correlation should succeed");
+    let result = result.unwrap();
+
+    // Identical images should have minimal transformation
+    assert!(result.rotation.abs() < 0.2, "Expected near-zero rotation");
+    assert!((result.scale - 1.0).abs() < 0.2, "Expected scale ~1.0");
+    assert!(result.translation.0.abs() < 2.0, "Expected near-zero dx");
+    assert!(result.translation.1.abs() < 2.0, "Expected near-zero dy");
+}
+
+#[test]
+fn test_bilinear_sample() {
+    let image = vec![0.0, 1.0, 2.0, 3.0];
+
+    // Center of 2x2 image should interpolate all 4 corners
+    let center = super::bilinear_sample(&image, 2, 2, 0.5, 0.5);
+    assert!((center - 1.5).abs() < 0.01, "Expected 1.5, got {}", center);
+
+    // Corner should be exact
+    let corner = super::bilinear_sample(&image, 2, 2, 0.0, 0.0);
+    assert!((corner - 0.0).abs() < 0.01, "Expected 0.0, got {}", corner);
+}
+
+#[test]
+fn test_rotate_and_scale_image() {
+    let width = 64;
+    let height = 64;
+
+    // Create a simple gradient image
+    let mut image = vec![0.0f32; width * height];
+    for y in 0..height {
+        for x in 0..width {
+            image[y * width + x] = x as f32 / width as f32;
+        }
+    }
+
+    // Identity transform should preserve image
+    let identity = super::rotate_and_scale_image(&image, width, height, 0.0, 1.0);
+
+    // Check center pixels (edges may have border effects)
+    let cx = width / 2;
+    let cy = height / 2;
+    let orig = image[cy * width + cx];
+    let transformed = identity[cy * width + cx];
+    assert!(
+        (orig - transformed).abs() < 0.1,
+        "Identity transform should preserve values"
+    );
+}

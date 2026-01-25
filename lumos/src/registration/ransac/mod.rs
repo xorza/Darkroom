@@ -278,6 +278,221 @@ impl RansacEstimator {
 
         (current_transform, current_inliers, current_score)
     }
+
+    /// Estimate transformation using progressive/guided sampling.
+    ///
+    /// This variant uses match confidence scores to guide hypothesis sampling,
+    /// preferentially sampling from high-confidence matches early in the process.
+    /// This typically finds good solutions faster than uniform random sampling.
+    ///
+    /// # Arguments
+    /// * `ref_points` - Reference (source) point positions
+    /// * `target_points` - Target (destination) point positions
+    /// * `confidences` - Confidence scores for each point pair (0.0 - 1.0)
+    /// * `transform_type` - Type of transformation to estimate
+    ///
+    /// # Returns
+    /// Best transformation found, or None if estimation failed.
+    pub fn estimate_progressive(
+        &self,
+        ref_points: &[(f64, f64)],
+        target_points: &[(f64, f64)],
+        confidences: &[f64],
+        transform_type: TransformType,
+    ) -> Option<RansacResult> {
+        let n = ref_points.len();
+        let min_samples = transform_type.min_points();
+
+        if n < min_samples || confidences.len() != n {
+            return None;
+        }
+
+        let mut rng: ChaCha8Rng = match self.config.seed {
+            Some(seed) => ChaCha8Rng::seed_from_u64(seed),
+            None => ChaCha8Rng::from_os_rng(),
+        };
+
+        // Build sorted index by confidence (descending)
+        let mut sorted_indices: Vec<usize> = (0..n).collect();
+        sorted_indices.sort_by(|&a, &b| {
+            confidences[b]
+                .partial_cmp(&confidences[a])
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+
+        // Compute cumulative weights for weighted sampling
+        // Higher confidence = higher probability of being sampled
+        let weights: Vec<f64> = confidences
+            .iter()
+            .map(|&c| (c + 0.1).powi(2)) // Square to emphasize high-confidence matches
+            .collect();
+        let total_weight: f64 = weights.iter().sum();
+
+        let mut best_transform: Option<TransformMatrix> = None;
+        let mut best_inliers: Vec<usize> = Vec::new();
+        let mut best_score = 0;
+
+        // Pre-allocate buffers
+        let mut sample_indices: Vec<usize> = Vec::with_capacity(min_samples);
+        let mut sample_ref: Vec<(f64, f64)> = Vec::with_capacity(min_samples);
+        let mut sample_target: Vec<(f64, f64)> = Vec::with_capacity(min_samples);
+
+        let mut iterations = 0;
+        let max_iter = self.config.max_iterations;
+
+        // Progressive sampling strategy:
+        // - Early iterations: sample from top confidence matches
+        // - Later iterations: gradually include lower confidence matches
+        // - Final iterations: uniform random sampling
+        while iterations < max_iter {
+            iterations += 1;
+
+            // Compute effective pool size based on iteration progress
+            // Start with top 20% of matches, expand to 100% by iteration 50%
+            let progress = iterations as f64 / max_iter as f64;
+            let pool_fraction = (0.2 + 0.8 * (progress * 2.0).min(1.0)).min(1.0);
+            let pool_size = ((n as f64 * pool_fraction) as usize).max(min_samples);
+
+            // Sample from the progressive pool
+            if progress < 0.5 {
+                // Weighted sampling from top matches
+                weighted_sample_into(
+                    &mut rng,
+                    &sorted_indices[..pool_size],
+                    &weights,
+                    min_samples,
+                    total_weight * pool_fraction,
+                    &mut sample_indices,
+                );
+            } else {
+                // Uniform random sampling (fall back to standard RANSAC behavior)
+                random_sample_into(&mut rng, n, min_samples, &mut sample_indices);
+            }
+
+            // Extract sample points
+            sample_ref.clear();
+            sample_target.clear();
+            for &i in &sample_indices {
+                sample_ref.push(ref_points[i]);
+                sample_target.push(target_points[i]);
+            }
+
+            // Estimate transformation from sample
+            let transform = match estimate_transform(&sample_ref, &sample_target, transform_type) {
+                Some(t) => t,
+                None => continue,
+            };
+
+            // Count inliers
+            let (mut inliers, mut score) = count_inliers(
+                ref_points,
+                target_points,
+                &transform,
+                self.config.inlier_threshold,
+            );
+
+            let mut current_transform = transform;
+
+            // Local Optimization
+            if self.config.use_local_optimization && inliers.len() >= min_samples {
+                let (lo_transform, lo_inliers, lo_score) = self.local_optimization(
+                    ref_points,
+                    target_points,
+                    &current_transform,
+                    &inliers,
+                    transform_type,
+                );
+                current_transform = lo_transform;
+                inliers = lo_inliers;
+                score = lo_score;
+            }
+
+            // Update best if improved
+            if score > best_score {
+                best_score = score;
+                best_inliers = inliers;
+                best_transform = Some(current_transform);
+
+                // Adaptive early termination
+                let inlier_ratio = best_inliers.len() as f64 / n as f64;
+                if inlier_ratio >= self.config.min_inlier_ratio {
+                    let adaptive_max =
+                        adaptive_iterations(inlier_ratio, min_samples, self.config.confidence);
+                    if iterations >= adaptive_max {
+                        break;
+                    }
+                }
+            }
+        }
+
+        // Final refinement
+        if let Some(transform) = best_transform
+            && best_inliers.len() >= min_samples
+        {
+            let inlier_ref: Vec<(f64, f64)> = best_inliers.iter().map(|&i| ref_points[i]).collect();
+            let inlier_target: Vec<(f64, f64)> =
+                best_inliers.iter().map(|&i| target_points[i]).collect();
+
+            let refined =
+                refine_transform(&inlier_ref, &inlier_target, transform_type).unwrap_or(transform);
+
+            let (final_inliers, _) = count_inliers(
+                ref_points,
+                target_points,
+                &refined,
+                self.config.inlier_threshold,
+            );
+
+            let inlier_ratio = final_inliers.len() as f64 / n as f64;
+
+            return Some(RansacResult {
+                transform: refined,
+                inliers: final_inliers,
+                iterations,
+                inlier_ratio,
+            });
+        }
+
+        None
+    }
+}
+
+/// Weighted sampling of k unique indices from a pool.
+///
+/// Samples indices with probability proportional to their weights.
+fn weighted_sample_into<R: Rng>(
+    rng: &mut R,
+    pool: &[usize],
+    weights: &[f64],
+    k: usize,
+    _total_weight: f64,
+    buffer: &mut Vec<usize>,
+) {
+    buffer.clear();
+
+    if pool.len() <= k {
+        buffer.extend_from_slice(pool);
+        return;
+    }
+
+    // Use reservoir sampling with weights (Algorithm A-Res)
+    // For each item, compute key = random^(1/weight), keep top k keys
+    let mut items_with_keys: Vec<(usize, f64)> = pool
+        .iter()
+        .map(|&idx| {
+            let w = weights.get(idx).copied().unwrap_or(1.0).max(0.001);
+            let u: f64 = rng.random();
+            let key = u.powf(1.0 / w); // Higher weight = higher expected key
+            (idx, key)
+        })
+        .collect();
+
+    // Partial sort to get top k by key (descending)
+    items_with_keys.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+
+    for (idx, _) in items_with_keys.into_iter().take(k) {
+        buffer.push(idx);
+    }
 }
 
 /// Randomly sample k unique indices from 0..n into pre-allocated buffer.

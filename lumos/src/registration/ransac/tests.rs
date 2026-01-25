@@ -553,3 +553,131 @@ fn test_ransac_deterministic_with_seed() {
     assert!(approx_eq(dx1, dx2, EPSILON));
     assert!(approx_eq(dy1, dy2, EPSILON));
 }
+
+#[test]
+fn test_progressive_ransac_basic() {
+    // Create a simple translation scenario with confidence scores
+    let ref_points: Vec<(f64, f64)> = (0..20)
+        .map(|i| ((i % 5) as f64 * 20.0, (i / 5) as f64 * 20.0))
+        .collect();
+
+    let dx = 15.0;
+    let dy = -8.0;
+    let target_points: Vec<(f64, f64)> = ref_points.iter().map(|(x, y)| (x + dx, y + dy)).collect();
+
+    // High confidence for all matches (perfect data)
+    let confidences: Vec<f64> = vec![0.9; 20];
+
+    let config = RansacConfig {
+        seed: Some(42),
+        ..Default::default()
+    };
+    let estimator = RansacEstimator::new(config);
+
+    let result = estimator
+        .estimate_progressive(
+            &ref_points,
+            &target_points,
+            &confidences,
+            TransformType::Translation,
+        )
+        .unwrap();
+
+    let (est_dx, est_dy) = result.transform.translation_components();
+    assert!(approx_eq(est_dx, dx, 0.1));
+    assert!(approx_eq(est_dy, dy, 0.1));
+    assert_eq!(result.inliers.len(), 20);
+}
+
+#[test]
+fn test_progressive_ransac_with_outliers() {
+    // Create scenario where high-confidence matches are inliers
+    // and low-confidence matches are outliers
+    let mut ref_points: Vec<(f64, f64)> = (0..15)
+        .map(|i| ((i % 5) as f64 * 20.0, (i / 5) as f64 * 20.0))
+        .collect();
+
+    let dx = 10.0;
+    let dy = 5.0;
+    let mut target_points: Vec<(f64, f64)> =
+        ref_points.iter().map(|(x, y)| (x + dx, y + dy)).collect();
+
+    // Add 5 outliers with low confidence
+    for i in 0..5 {
+        ref_points.push((100.0 + i as f64 * 10.0, 100.0));
+        target_points.push((200.0 + i as f64 * 5.0, 50.0)); // Wrong correspondence
+    }
+
+    // High confidence for inliers, low for outliers
+    let mut confidences: Vec<f64> = vec![0.9; 15];
+    confidences.extend(vec![0.1; 5]);
+
+    let config = RansacConfig {
+        seed: Some(123),
+        max_iterations: 500,
+        ..Default::default()
+    };
+    let estimator = RansacEstimator::new(config);
+
+    let result = estimator
+        .estimate_progressive(
+            &ref_points,
+            &target_points,
+            &confidences,
+            TransformType::Translation,
+        )
+        .unwrap();
+
+    let (est_dx, est_dy) = result.transform.translation_components();
+    assert!(approx_eq(est_dx, dx, 0.5));
+    assert!(approx_eq(est_dy, dy, 0.5));
+
+    // Should find mostly inliers (the first 15 points)
+    assert!(result.inliers.len() >= 12);
+}
+
+#[test]
+fn test_progressive_ransac_finds_solution_faster() {
+    // Progressive RANSAC should find a good solution in fewer iterations
+    // when high-confidence matches are correct
+    let ref_points: Vec<(f64, f64)> = (0..50)
+        .map(|i| ((i % 10) as f64 * 10.0, (i / 10) as f64 * 10.0))
+        .collect();
+
+    let angle = PI / 12.0; // 15 degrees
+    let scale = 1.2;
+    let known = TransformMatrix::similarity(5.0, -3.0, angle, scale);
+    let target_points: Vec<(f64, f64)> =
+        ref_points.iter().map(|&(x, y)| known.apply(x, y)).collect();
+
+    // Varying confidence (higher for more central points)
+    let confidences: Vec<f64> = (0..50)
+        .map(|i| {
+            let x = (i % 10) as f64;
+            let y = (i / 10) as f64;
+            let dist = ((x - 4.5).powi(2) + (y - 2.0).powi(2)).sqrt();
+            1.0 / (1.0 + dist * 0.1)
+        })
+        .collect();
+
+    let config = RansacConfig {
+        seed: Some(999),
+        max_iterations: 200,
+        ..Default::default()
+    };
+    let estimator = RansacEstimator::new(config);
+
+    let result = estimator
+        .estimate_progressive(
+            &ref_points,
+            &target_points,
+            &confidences,
+            TransformType::Similarity,
+        )
+        .unwrap();
+
+    // Should find a good solution
+    assert!(result.inlier_ratio > 0.9);
+    assert!(approx_eq(result.transform.rotation_angle(), angle, 0.05));
+    assert!(approx_eq(result.transform.scale_factor(), scale, 0.05));
+}
