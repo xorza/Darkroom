@@ -2,7 +2,7 @@
 //! Run with: cargo bench --package lumos --features bench background
 
 use super::estimate_background;
-use super::simd::{sum_abs_deviations_simd, sum_and_sum_sq_simd};
+use super::simd::{interpolate_segment_simd, sum_abs_deviations_simd, sum_and_sum_sq_simd};
 use criterion::{BenchmarkId, Criterion, Throughput};
 use std::hint::black_box;
 
@@ -123,4 +123,58 @@ pub fn benchmarks(c: &mut Criterion) {
     }
 
     simd_group.finish();
+
+    // Interpolation SIMD vs Scalar comparison
+    let mut interp_group = c.benchmark_group("background_interpolation");
+    interp_group.sample_size(50);
+
+    for size in [64, 256, 1024, 4096] {
+        interp_group.throughput(Throughput::Elements(size as u64));
+
+        let left_bg = 100.0f32;
+        let right_bg = 200.0f32;
+        let left_noise = 5.0f32;
+        let right_noise = 10.0f32;
+        let wx_start = 0.0f32;
+        let wx_step = 1.0 / size as f32;
+
+        // Scalar interpolation
+        interp_group.bench_function(BenchmarkId::new("scalar", size), |b| {
+            let mut bg_out = vec![0.0f32; size];
+            let mut noise_out = vec![0.0f32; size];
+
+            b.iter(|| {
+                let delta_bg = right_bg - left_bg;
+                let delta_noise = right_noise - left_noise;
+                for (i, (bg, noise)) in bg_out.iter_mut().zip(noise_out.iter_mut()).enumerate() {
+                    let wx = (wx_start + i as f32 * wx_step).clamp(0.0, 1.0);
+                    *bg = left_bg + wx * delta_bg;
+                    *noise = left_noise + wx * delta_noise;
+                }
+                black_box(bg_out[size / 2] + noise_out[size / 2])
+            })
+        });
+
+        // SIMD interpolation
+        interp_group.bench_function(BenchmarkId::new("simd", size), |b| {
+            let mut bg_out = vec![0.0f32; size];
+            let mut noise_out = vec![0.0f32; size];
+
+            b.iter(|| {
+                interpolate_segment_simd(
+                    &mut bg_out,
+                    &mut noise_out,
+                    left_bg,
+                    right_bg,
+                    left_noise,
+                    right_noise,
+                    wx_start,
+                    wx_step,
+                );
+                black_box(bg_out[size / 2] + noise_out[size / 2])
+            })
+        });
+    }
+
+    interp_group.finish();
 }
