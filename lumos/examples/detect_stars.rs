@@ -35,10 +35,13 @@ use tracing_subscriber::EnvFilter;
 const MAX_STARS_TO_DRAW: usize = 100;
 
 /// Circle color (RGB, 0.0-1.0).
-const CIRCLE_COLOR: [f32; 3] = [0.0, 1.0, 0.0]; // Green
+const CIRCLE_COLOR: [f32; 3] = [1.0, 0.0, 0.0]; // Red - more visible
 
 /// Circle line thickness in pixels.
 const CIRCLE_THICKNESS: usize = 2;
+
+/// Minimum radius for drawn circles (pixels).
+const MIN_CIRCLE_RADIUS: f32 = 8.0;
 
 fn main() {
     // Initialize tracing for console output
@@ -71,8 +74,14 @@ fn main() {
         "Image loaded"
     );
 
-    // Configure star detection
-    let config = StarDetectionConfig::default();
+    // Configure star detection - filter stars in the bottom portion of the image
+    // (often contains horizon, water reflections, or ground)
+    let config = StarDetectionConfig {
+        edge_margin: 20,       // Larger edge margin
+        min_snr: 15.0,         // Higher SNR threshold
+        max_eccentricity: 0.5, // Stricter roundness
+        ..StarDetectionConfig::default()
+    };
 
     // Run star detection
     tracing::info!("Running star detection...");
@@ -103,8 +112,22 @@ fn main() {
         return;
     }
 
+    // Filter out stars in the bottom third of the image (horizon, water, ground)
+    let height_cutoff = (image.dimensions.height as f32 * 0.7) as f32;
+    let sky_stars: Vec<&Star> = result
+        .stars
+        .iter()
+        .filter(|s| s.y < height_cutoff)
+        .collect();
+
+    tracing::info!(
+        total = result.stars.len(),
+        sky_only = sky_stars.len(),
+        "Filtered stars above horizon"
+    );
+
     // Take the best stars (already sorted by flux, brightest first)
-    let best_stars: Vec<&Star> = result.stars.iter().take(MAX_STARS_TO_DRAW).collect();
+    let best_stars: Vec<&Star> = sky_stars.iter().copied().take(MAX_STARS_TO_DRAW).collect();
     tracing::info!(
         count = best_stars.len(),
         "Drawing circles around best stars"
@@ -131,11 +154,12 @@ fn main() {
     // Draw circles on the image
     let mut output_image = image.clone();
     for star in &best_stars {
+        let radius = (star.fwhm * 2.0).max(MIN_CIRCLE_RADIUS);
         draw_circle(
             &mut output_image,
             star.x,
             star.y,
-            star.fwhm * 2.0, // Radius = 2x FWHM for visibility
+            radius,
             &CIRCLE_COLOR,
             CIRCLE_THICKNESS,
         );
