@@ -321,3 +321,342 @@ Reference: [CNN star detection](https://arxiv.org/html/2404.19108v1)
 ### Centroid Accuracy
 - [Sub-pixel centroid on FPGA](https://link.springer.com/article/10.1007/s11554-014-0408-z) - 1/33 pixel accuracy
 - [Gaussian Analytic Centroiding](https://www.sciencedirect.com/science/article/abs/pii/S0273117715006110)
+
+---
+
+## 10. Code Refactoring & Optimization Plan
+
+This section outlines the comprehensive refactoring plan to reorganize the star detection module
+into a clean, testable, benchmarkable, and highly optimized architecture.
+
+### 10.1 Target Directory Structure
+
+```
+star_detection/
+├── mod.rs                    # Public API, Star struct, configs, find_stars()
+├── notes.md                  # This file
+│
+├── background/               # Background estimation algorithms
+│   ├── mod.rs               # Public interface, BackgroundMap
+│   ├── tile_stats.rs        # Sigma-clipped statistics per tile
+│   ├── interpolation.rs     # Bilinear interpolation
+│   ├── iterative.rs         # Iterative refinement with masking
+│   ├── simd/
+│   │   ├── mod.rs           # SIMD dispatch
+│   │   ├── sse.rs           # SSE/AVX implementation
+│   │   └── neon.rs          # ARM NEON implementation
+│   ├── tests.rs             # Unit tests
+│   └── bench.rs             # Benchmarks
+│
+├── convolution/              # Matched filter / Gaussian convolution
+│   ├── mod.rs               # Public interface
+│   ├── separable.rs         # Separable 2D convolution
+│   ├── simd/
+│   │   ├── mod.rs
+│   │   ├── sse.rs           # SIMD horizontal/vertical passes
+│   │   └── neon.rs
+│   ├── tests.rs
+│   └── bench.rs
+│
+├── detection/                # Thresholding and connected components
+│   ├── mod.rs               # Public interface, detect_stars()
+│   ├── threshold.rs         # Adaptive thresholding
+│   ├── union_find.rs        # Connected component labeling
+│   ├── morphology.rs        # Dilation operations
+│   ├── simd/
+│   │   ├── mod.rs
+│   │   ├── sse.rs           # SIMD threshold comparison
+│   │   └── neon.rs
+│   ├── tests.rs
+│   └── bench.rs
+│
+├── deblend/                  # Star deblending algorithms
+│   ├── mod.rs               # Public interface
+│   ├── local_maxima.rs      # Simple deblending
+│   ├── multi_threshold.rs   # SExtractor-style tree deblending
+│   ├── tests.rs
+│   └── bench.rs
+│
+├── centroid/                 # Centroid computation
+│   ├── mod.rs               # Public interface
+│   ├── weighted.rs          # Iterative weighted centroid
+│   ├── gaussian_fit.rs      # 2D Gaussian L-M fitting
+│   ├── moffat_fit.rs        # 2D Moffat L-M fitting
+│   ├── linear_solver.rs     # 5x5/6x6 Gaussian elimination (shared)
+│   ├── simd/
+│   │   ├── mod.rs
+│   │   ├── sse.rs           # SIMD weighted sums
+│   │   └── neon.rs
+│   ├── tests.rs
+│   └── bench.rs
+│
+├── metrics/                  # Quality metrics computation
+│   ├── mod.rs               # Public interface
+│   ├── sharpness.rs         # Sharpness metric
+│   ├── roundness.rs         # DAOFIND GROUND/SROUND
+│   ├── eccentricity.rs      # Second moments
+│   ├── fwhm.rs              # FWHM estimation
+│   ├── tests.rs
+│   └── bench.rs
+│
+├── cosmic_ray/               # Cosmic ray detection
+│   ├── mod.rs               # Public interface
+│   ├── laplacian.rs         # L.A.Cosmic Laplacian
+│   ├── fine_structure.rs    # Median-based noise
+│   ├── simd/
+│   │   ├── mod.rs
+│   │   ├── sse.rs           # SIMD 3x3 kernels
+│   │   └── neon.rs
+│   ├── tests.rs
+│   └── bench.rs
+│
+├── median_filter/            # Median filtering
+│   ├── mod.rs               # Public interface
+│   ├── scalar.rs            # Scalar implementation
+│   ├── simd/
+│   │   ├── mod.rs
+│   │   ├── sse.rs           # SIMD sorting networks
+│   │   └── neon.rs
+│   ├── tests.rs
+│   └── bench.rs
+│
+└── filtering/                # Post-detection filtering
+    ├── mod.rs               # Public interface
+    ├── duplicates.rs        # Duplicate removal
+    ├── fwhm_outliers.rs     # MAD-based FWHM filtering
+    ├── quality.rs           # Combined quality filtering
+    ├── tests.rs
+    └── bench.rs
+```
+
+### 10.2 Phase 1: Module Reorganization
+
+| Step | Task | Files Affected | Status |
+|------|------|---------------|--------|
+| 1.1 | Create `background/` folder structure | New folder | Pending |
+| 1.2 | Move background code to `background/mod.rs`, `tile_stats.rs`, `interpolation.rs` | background/mod.rs → split | Pending |
+| 1.3 | Move iterative refinement to `background/iterative.rs` | background/mod.rs → split | Pending |
+| 1.4 | Add `background/tests.rs` (move existing tests) | background/tests.rs | Pending |
+| 1.5 | Add `background/bench.rs` | New file | Pending |
+| 1.6 | Create `convolution/` folder structure | New folder | Pending |
+| 1.7 | Move matched_filter to `convolution/mod.rs`, `separable.rs` | convolution.rs → split | Pending |
+| 1.8 | Add `convolution/tests.rs`, `convolution/bench.rs` | New files | Pending |
+| 1.9 | Create `detection/` folder structure | New folder | Pending |
+| 1.10 | Split detection into `threshold.rs`, `union_find.rs`, `morphology.rs` | detection/mod.rs → split | Pending |
+| 1.11 | Add `detection/tests.rs`, `detection/bench.rs` | New files | Pending |
+| 1.12 | Create `deblend/` folder structure | New folder | Pending |
+| 1.13 | Move deblend code to `local_maxima.rs`, `multi_threshold.rs` | deblend.rs → split | Pending |
+| 1.14 | Add `deblend/tests.rs`, `deblend/bench.rs` | New files | Pending |
+| 1.15 | Create `centroid/` folder structure | New folder | Pending |
+| 1.16 | Move centroid, gaussian_fit, moffat_fit into `centroid/` | Multiple files | Pending |
+| 1.17 | Extract shared `linear_solver.rs` | New file | Pending |
+| 1.18 | Add `centroid/tests.rs`, `centroid/bench.rs` | New files | Pending |
+| 1.19 | Create `metrics/` folder structure | New folder | Pending |
+| 1.20 | Split metrics into `sharpness.rs`, `roundness.rs`, `eccentricity.rs`, `fwhm.rs` | centroid.rs → split | Pending |
+| 1.21 | Add `metrics/tests.rs`, `metrics/bench.rs` | New files | Pending |
+| 1.22 | Create `cosmic_ray/` folder structure | New folder | Pending |
+| 1.23 | Split cosmic_ray into `laplacian.rs`, `fine_structure.rs` | cosmic_ray.rs → split | Pending |
+| 1.24 | Add `cosmic_ray/tests.rs`, `cosmic_ray/bench.rs` | New files | Pending |
+| 1.25 | Create `median_filter/` folder structure | New folder | Pending |
+| 1.26 | Move median_filter to `scalar.rs` | median_filter.rs → move | Pending |
+| 1.27 | Add `median_filter/tests.rs`, `median_filter/bench.rs` | New files | Pending |
+| 1.28 | Create `filtering/` folder structure | New folder | Pending |
+| 1.29 | Extract filtering logic from mod.rs | mod.rs → split | Pending |
+| 1.30 | Add `filtering/tests.rs`, `filtering/bench.rs` | New files | Pending |
+
+### 10.3 Phase 2: Add SIMD Implementations
+
+Modules that benefit from SIMD (data-parallel operations on pixel arrays):
+
+| Module | SIMD Opportunity | Expected Speedup | Priority |
+|--------|------------------|------------------|----------|
+| **background** | Tile statistics (sum, sum_sq, count) | 3-4× | High |
+| **convolution** | Separable kernel multiply-add | 4-8× | High |
+| **detection** | Threshold comparison (packed compare) | 2-4× | Medium |
+| **median_filter** | Sorting networks for 3x3 | 2-3× | High |
+| **cosmic_ray** | 3x3 Laplacian convolution | 3-4× | Medium |
+| **centroid** | Weighted sum accumulation | 2-3× | Low |
+| **metrics** | Second moment computation | 2× | Low |
+
+| Step | Task | Status |
+|------|------|--------|
+| 2.1 | Add `background/simd/mod.rs` with runtime dispatch | Pending |
+| 2.2 | Implement `background/simd/sse.rs` (AVX2 tile stats) | Pending |
+| 2.3 | Implement `background/simd/neon.rs` (NEON tile stats) | Pending |
+| 2.4 | Benchmark background SIMD vs scalar | Pending |
+| 2.5 | Add `convolution/simd/mod.rs` with runtime dispatch | Pending |
+| 2.6 | Implement `convolution/simd/sse.rs` (AVX2 separable conv) | Pending |
+| 2.7 | Implement `convolution/simd/neon.rs` (NEON separable conv) | Pending |
+| 2.8 | Benchmark convolution SIMD vs scalar | Pending |
+| 2.9 | Add `median_filter/simd/mod.rs` with runtime dispatch | Pending |
+| 2.10 | Implement `median_filter/simd/sse.rs` (sorting networks) | Pending |
+| 2.11 | Implement `median_filter/simd/neon.rs` | Pending |
+| 2.12 | Benchmark median_filter SIMD vs scalar | Pending |
+| 2.13 | Add `cosmic_ray/simd/mod.rs` with runtime dispatch | Pending |
+| 2.14 | Implement `cosmic_ray/simd/sse.rs` (3x3 Laplacian) | Pending |
+| 2.15 | Implement `cosmic_ray/simd/neon.rs` | Pending |
+| 2.16 | Benchmark cosmic_ray SIMD vs scalar | Pending |
+| 2.17 | Add `detection/simd/mod.rs` (threshold only) | Pending |
+| 2.18 | Implement `detection/simd/sse.rs` (packed compare) | Pending |
+| 2.19 | Implement `detection/simd/neon.rs` | Pending |
+| 2.20 | Benchmark detection SIMD vs scalar | Pending |
+
+### 10.4 Phase 3: Run Benchmarks & Profile
+
+| Step | Task | Status |
+|------|------|--------|
+| 3.1 | Create comprehensive benchmark suite for all modules | Pending |
+| 3.2 | Run benchmarks on x86_64 (Intel/AMD) | Pending |
+| 3.3 | Run benchmarks on aarch64 (Apple Silicon / ARM server) | Pending |
+| 3.4 | Profile with `perf` / Instruments for hotspots | Pending |
+| 3.5 | Generate flamegraphs for full pipeline | Pending |
+| 3.6 | Document baseline performance numbers | Pending |
+
+### 10.5 Phase 4: Optimize - False Cache Sharing
+
+False cache sharing occurs when threads write to different variables that share a cache line (64 bytes).
+
+| Step | Task | Status |
+|------|------|--------|
+| 4.1 | Audit parallel loops for potential false sharing | Pending |
+| 4.2 | Add `#[repr(align(64))]` padding to per-thread accumulators | Pending |
+| 4.3 | Use `crossbeam::utils::CachePadded` for thread-local state | Pending |
+| 4.4 | Ensure tile processing uses separate output buffers | Pending |
+| 4.5 | Benchmark before/after padding changes | Pending |
+| 4.6 | Check `rayon` chunk sizes align with cache lines | Pending |
+
+Specific areas to check:
+- `estimate_background()`: tile_stats parallel computation
+- `matched_filter()`: row-wise convolution with shared output
+- `detect_stars()`: union-find parent array updates
+
+### 10.6 Phase 5: Optimize - Memory Allocations
+
+Reduce allocations in hot paths:
+
+| Step | Task | Status |
+|------|------|--------|
+| 5.1 | Add `#[inline]` to small hot functions | Pending |
+| 5.2 | Use `Vec::with_capacity()` everywhere sizes are known | Pending |
+| 5.3 | Reuse scratch buffers across iterations | Pending |
+| 5.4 | Consider arena allocator for temporary pixel buffers | Pending |
+| 5.5 | Profile with DHAT for allocation hotspots | Pending |
+| 5.6 | Move allocations outside loops where possible | Pending |
+| 5.7 | Use `SmallVec` for small, fixed-size collections | Pending |
+| 5.8 | Avoid `collect()` when iterator can be consumed directly | Pending |
+| 5.9 | Benchmark before/after allocation optimizations | Pending |
+
+Specific areas to check:
+- `sigma_clipped_stats()`: reuses `values` buffer but could avoid clone
+- `compute_centroid()`: allocates stamp buffer per star
+- `deblend_component()`: multiple Vec allocations in tree building
+
+### 10.7 Phase 6: Algorithm-Level Optimizations
+
+| Step | Task | Status |
+|------|------|--------|
+| 6.1 | **Background**: Use integral image for fast tile sums | Pending |
+| 6.2 | **Convolution**: Cache-oblivious tiled convolution | Pending |
+| 6.3 | **Convolution**: Precompute separable kernel weights | Pending |
+| 6.4 | **Detection**: Early exit for empty regions | Pending |
+| 6.5 | **Union-find**: Path compression + union by rank | Pending |
+| 6.6 | **Deblending**: Lazy tree evaluation | Pending |
+| 6.7 | **Centroid**: Incremental update for iterative refinement | Pending |
+| 6.8 | **L-M fitting**: Better initial parameter estimates | Pending |
+| 6.9 | **Median filter**: Huang algorithm for sliding median | Pending |
+| 6.10 | **Metrics**: Fused computation of multiple metrics | Pending |
+
+### 10.8 Phase 7: Final Review & Consolidation
+
+| Step | Task | Status |
+|------|------|--------|
+| 7.1 | Review all algorithms for correctness after refactoring | Pending |
+| 7.2 | Run full test suite, ensure no regressions | Pending |
+| 7.3 | Run full benchmark suite, document improvements | Pending |
+| 7.4 | Identify shared code patterns, extract to common utilities | Pending |
+| 7.5 | Look for code duplication between modules | Pending |
+| 7.6 | Simplify public API if possible | Pending |
+| 7.7 | Add integration tests with real astronomical images | Pending |
+| 7.8 | Document performance characteristics in module docs | Pending |
+| 7.9 | Create performance regression tests | Pending |
+| 7.10 | Final code review for style consistency | Pending |
+
+### 10.9 Shared Code Candidates
+
+Code that appears in multiple places and should be extracted:
+
+| Pattern | Current Locations | Target Location |
+|---------|-------------------|-----------------|
+| 5x5/6x6 Gaussian elimination | gaussian_fit.rs, moffat_fit.rs | centroid/linear_solver.rs |
+| 3x3 kernel convolution | cosmic_ray.rs, median_filter.rs | common/kernel3x3.rs |
+| Sigma-clipped statistics | background/mod.rs | common/statistics.rs |
+| MAD computation | background/mod.rs, filtering | common/statistics.rs |
+| Cache-line padding | Multiple parallel loops | common/cache_aligned.rs |
+| SIMD runtime dispatch | Each simd/mod.rs | common/simd_dispatch.rs |
+
+### 10.10 Benchmark Criteria
+
+Each benchmark should test:
+
+1. **Small images** (256×256): Measure overhead, startup cost
+2. **Medium images** (2048×2048): Typical use case
+3. **Large images** (8192×8192): Memory bandwidth limited
+4. **Many stars** (1000+ detections): Scaling with star count
+5. **Crowded field**: Deblending performance
+6. **Low SNR**: Edge case behavior
+
+Metrics to track:
+- Wall-clock time (median of 10 runs)
+- CPU cycles (via `perf`)
+- Cache misses (L1, L2, L3)
+- Branch mispredictions
+- Memory bandwidth utilization
+- Allocations count and size
+
+### 10.11 Expected Performance Targets
+
+| Module | Current | Target | Improvement |
+|--------|---------|--------|-------------|
+| Background (4K image) | ~50ms | ~15ms | 3× |
+| Convolution (4K image) | ~80ms | ~15ms | 5× |
+| Detection (4K image) | ~30ms | ~20ms | 1.5× |
+| Centroid (1000 stars) | ~20ms | ~10ms | 2× |
+| Median filter (4K) | ~100ms | ~25ms | 4× |
+| Full pipeline (4K) | ~400ms | ~100ms | 4× |
+
+---
+
+## 11. Implementation Order Summary
+
+### Iteration 1: Reorganization (No functional changes)
+1. Create folder structure
+2. Move code to appropriate modules
+3. Update imports and public API
+4. Ensure all tests pass
+
+### Iteration 2: Testing & Benchmarking Infrastructure
+1. Add tests.rs for each module
+2. Add bench.rs for each module
+3. Create baseline benchmarks
+
+### Iteration 3: SIMD Implementation
+1. Add SIMD for highest-impact modules (convolution, background, median)
+2. Benchmark each SIMD implementation
+3. Add SIMD for medium-impact modules
+
+### Iteration 4: Memory & Cache Optimization
+1. Profile for false cache sharing
+2. Add cache-line padding
+3. Reduce allocations
+4. Benchmark improvements
+
+### Iteration 5: Algorithm Optimization
+1. Implement algorithmic improvements
+2. Benchmark each change
+3. Document complexity changes
+
+### Iteration 6: Final Review
+1. Code review and cleanup
+2. Extract shared utilities
+3. Final benchmarks
+4. Documentation update
