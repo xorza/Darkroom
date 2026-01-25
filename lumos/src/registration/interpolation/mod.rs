@@ -18,6 +18,9 @@ use crate::registration::types::TransformMatrix;
 #[cfg(test)]
 mod tests;
 
+#[cfg(feature = "bench")]
+pub mod bench;
+
 /// Interpolation method for image resampling.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum InterpolationMethod {

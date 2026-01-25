@@ -9,6 +9,9 @@
 #[cfg(test)]
 mod tests;
 
+#[cfg(feature = "bench")]
+pub mod bench;
+
 use rustfft::{Fft, FftPlanner, num_complex::Complex};
 use std::sync::Arc;
 

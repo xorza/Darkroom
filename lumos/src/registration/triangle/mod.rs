@@ -7,6 +7,9 @@
 #[cfg(test)]
 mod tests;
 
+#[cfg(feature = "bench")]
+pub mod bench;
+
 use std::collections::HashMap;
 
 use crate::registration::types::StarMatch;

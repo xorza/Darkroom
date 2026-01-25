@@ -67,6 +67,25 @@ pub mod ransac;
 pub mod triangle;
 pub mod types;
 
+#[cfg(feature = "bench")]
+pub mod bench {
+    //! Benchmark module for registration operations.
+
+    use criterion::Criterion;
+    use std::path::Path;
+
+    /// Register all registration benchmarks with Criterion.
+    pub fn benchmarks(c: &mut Criterion, calibration_dir: &Path) {
+        super::types::bench::benchmarks(c, calibration_dir);
+        super::triangle::bench::benchmarks(c, calibration_dir);
+        super::ransac::bench::benchmarks(c, calibration_dir);
+        super::phase_correlation::bench::benchmarks(c, calibration_dir);
+        super::interpolation::bench::benchmarks(c, calibration_dir);
+        super::pipeline::bench::benchmarks(c, calibration_dir);
+        super::quality::bench::benchmarks(c, calibration_dir);
+    }
+}
+
 // Re-export main types for convenience
 pub use interpolation::{InterpolationMethod, WarpConfig, warp_image};
 pub use phase_correlation::{PhaseCorrelationConfig, PhaseCorrelator};

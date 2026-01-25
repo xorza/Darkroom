@@ -111,3 +111,8 @@ required-features = ["bench"]
 name = "star_detection_detection"
 harness = false
 required-features = ["bench"]
+
+[[bench]]
+name = "registration"
+harness = false
+required-features = ["bench"]

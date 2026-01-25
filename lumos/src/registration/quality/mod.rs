@@ -8,6 +8,9 @@ use crate::registration::types::TransformMatrix;
 #[cfg(test)]
 mod tests;
 
+#[cfg(feature = "bench")]
+pub mod bench;
+
 /// Quality assessment result for image registration.
 #[derive(Debug, Clone)]
 pub struct QualityMetrics {

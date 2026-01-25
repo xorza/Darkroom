@@ -11,6 +11,9 @@
 #[cfg(test)]
 mod tests;
 
+#[cfg(feature = "bench")]
+pub mod bench;
+
 use rand::prelude::*;
 use rand_chacha::ChaCha8Rng;
 
