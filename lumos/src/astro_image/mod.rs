@@ -130,6 +130,7 @@ impl AstroImage {
     /// Automatically detects the file type based on extension:
     /// - FITS files: .fit, .fits
     /// - RAW camera files: .raf, .cr2, .cr3, .nef, .arw, .dng
+    /// - Standard image files: .tiff, .tif, .png, .jpg, .jpeg
     ///
     /// # Arguments
     /// * `path` - Path to the image file
@@ -147,6 +148,10 @@ impl AstroImage {
         match ext.as_str() {
             "fit" | "fits" => fits::load_fits(path),
             "raf" | "cr2" | "cr3" | "nef" | "arw" | "dng" => libraw::load_raw(path),
+            "tiff" | "tif" | "png" | "jpg" | "jpeg" => {
+                let image = Image::read_file(path)?;
+                Ok(image.into())
+            }
             _ => anyhow::bail!("Unsupported file extension: {}", ext),
         }
     }

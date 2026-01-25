@@ -13,6 +13,7 @@ use std::time::{Duration, Instant};
 const NOVA_BASE_URL: &str = "https://nova.astrometry.net";
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(120);
 const POLL_INTERVAL: Duration = Duration::from_secs(5);
+const POOL_IDLE_TIMEOUT: Duration = Duration::from_secs(3);
 
 /// A star detected by astrometry.net's source extraction.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -84,6 +85,7 @@ impl NovaClient {
     pub fn new(api_key: String) -> Self {
         let client = Client::builder()
             .timeout(DEFAULT_TIMEOUT)
+            .pool_idle_timeout(POOL_IDLE_TIMEOUT)
             .build()
             .expect("Failed to create HTTP client");
 
@@ -205,11 +207,22 @@ impl NovaClient {
             .client
             .get(&url)
             .send()
-            .context("Failed to get submission status")?;
+            .with_context(|| format!("Failed to send request to {}", url))?;
 
-        let status: SubmissionStatusResponse = response
-            .json()
-            .context("Failed to parse submission status")?;
+        if !response.status().is_success() {
+            bail!(
+                "Failed to get submission status: HTTP {}",
+                response.status()
+            );
+        }
+
+        let text = response
+            .text()
+            .context("Failed to read submission status response body")?;
+        tracing::debug!("Submission status response: {}", text);
+
+        let status: SubmissionStatusResponse = serde_json::from_str(&text)
+            .with_context(|| format!("Failed to parse submission status: {}", text))?;
 
         let jobs: Vec<u64> = status
             .jobs

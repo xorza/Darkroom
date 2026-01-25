@@ -2,6 +2,7 @@
 //!
 //! Orchestrates rectangle generation, astrometry.net solving, and metrics computation.
 
+use super::local_solver::LocalSolver;
 use super::nova_client::{AstrometryStar, NovaClient};
 use super::rectangle_cache::{RectangleCache, RectangleInfo};
 use crate::star_detection::visual_tests::generators::GroundTruthStar;
@@ -205,6 +206,57 @@ impl AstrometryBenchmark {
             // Rate limiting - be nice to the server
             if i + 1 < unsolved.len() {
                 std::thread::sleep(Duration::from_secs(2));
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Solve rectangles using local solve-field command.
+    ///
+    /// This is much faster than the web API and doesn't require an API key.
+    /// Requires astrometry.net to be installed locally with index files.
+    pub fn solve_rectangles_local(&mut self, rectangles: &[RectangleInfo]) -> Result<()> {
+        if !LocalSolver::is_available() {
+            anyhow::bail!("solve-field not found - install astrometry.net package");
+        }
+
+        let solver = LocalSolver::new();
+
+        let unsolved: Vec<_> = rectangles.iter().filter(|r| r.axy_path.is_none()).collect();
+
+        if unsolved.is_empty() {
+            tracing::info!("All {} rectangles already solved", rectangles.len());
+            return Ok(());
+        }
+
+        tracing::info!(
+            "Solving {} unsolved rectangles locally (out of {})",
+            unsolved.len(),
+            rectangles.len()
+        );
+
+        for (i, rect) in unsolved.iter().enumerate() {
+            tracing::info!(
+                "Solving rectangle {}/{}: {} ({}x{})",
+                i + 1,
+                unsolved.len(),
+                rect.id,
+                rect.width,
+                rect.height
+            );
+
+            let image_path = self.cache.rectangle_image_path(rect);
+
+            match solver.solve_and_get_stars(&image_path) {
+                Ok(stars) => {
+                    self.cache.save_axy_result(&rect.id, 0, &stars)?;
+                    tracing::info!("Solved rectangle {}: {} stars", rect.id, stars.len());
+                }
+                Err(e) => {
+                    tracing::error!("Failed to solve rectangle {}: {}", rect.id, e);
+                    // Continue with other rectangles
+                }
             }
         }
 

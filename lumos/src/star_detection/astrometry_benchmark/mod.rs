@@ -56,12 +56,15 @@
 //! without network access.
 
 pub mod benchmark;
+pub mod local_solver;
 pub mod nova_client;
 pub mod rectangle_cache;
 
 // Re-exports
 #[allow(unused_imports)]
 pub use benchmark::{AstrometryBenchmark, AstrometryBenchmarkResult};
+#[allow(unused_imports)]
+pub use local_solver::LocalSolver;
 #[allow(unused_imports)]
 pub use nova_client::{AstrometryStar, NovaClient};
 #[allow(unused_imports)]
@@ -184,6 +187,82 @@ mod tests {
 
         let results = benchmark.run_all(&config);
         AstrometryBenchmark::print_summary(&results);
+    }
+
+    #[test]
+    #[ignore] // Requires LUMOS_CALIBRATION_DIR and local astrometry.net installation
+    fn test_local_astrometry_benchmark() {
+        init_tracing();
+
+        if !local_solver::LocalSolver::is_available() {
+            eprintln!("solve-field not found, skipping test");
+            eprintln!("Install with: yay -S astrometry.net");
+            return;
+        }
+
+        let Some(cal_dir) = calibration_dir() else {
+            eprintln!("LUMOS_CALIBRATION_DIR not set, skipping test");
+            return;
+        };
+
+        let source_image = cal_dir.join("calibrated_light_only_sky.tiff");
+        if !source_image.exists() {
+            eprintln!(
+                "calibrated_light_only_sky.tiff not found in {}, skipping test",
+                cal_dir.display()
+            );
+            return;
+        }
+
+        println!("\n=== Local Astrometry Benchmark ===\n");
+        println!("Source image: {}", source_image.display());
+
+        let mut benchmark = AstrometryBenchmark::new(None).expect("Failed to create benchmark");
+
+        // Generate rectangles
+        let rectangles = benchmark
+            .prepare_rectangles(&source_image, 5)
+            .expect("Failed to generate rectangles");
+
+        println!("Generated {} rectangles", rectangles.len());
+
+        // Solve locally using solve-field
+        benchmark
+            .solve_rectangles_local(&rectangles)
+            .expect("Failed to solve rectangles locally");
+
+        // Run benchmark
+        let config = StarDetectionConfig {
+            expected_fwhm: 4.0,
+            detection_sigma: 3.0,
+            min_snr: 5.0,
+            ..Default::default()
+        };
+
+        let results = benchmark.run_all(&config);
+
+        AstrometryBenchmark::print_summary(&results);
+
+        // Assertions
+        assert!(!results.is_empty(), "Should have benchmark results");
+
+        let avg_detection_rate = results
+            .iter()
+            .map(|r| r.metrics.detection_rate)
+            .sum::<f32>()
+            / results.len() as f32;
+
+        println!(
+            "\nAverage detection rate: {:.1}%",
+            avg_detection_rate * 100.0
+        );
+
+        // We should detect at least 10% of the stars astrometry.net found
+        assert!(
+            avg_detection_rate > 0.10,
+            "Detection rate too low: {:.1}%",
+            avg_detection_rate * 100.0
+        );
     }
 
     #[test]

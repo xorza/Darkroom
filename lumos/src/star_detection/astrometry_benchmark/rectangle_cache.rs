@@ -236,7 +236,7 @@ impl RectangleCache {
                 simple_hash(&format!("{}_{}_{}_{}_{}", source_name, x, y, width, height))
             );
 
-            let image_path = PathBuf::from("rectangles").join(format!("rect_{}.tiff", id));
+            let image_path = PathBuf::from("rectangles").join(format!("rect_{}.fits", id));
 
             let rect = RectangleInfo {
                 id,
@@ -274,19 +274,22 @@ impl RectangleCache {
     fn save_rectangle(&self, source: &crate::AstroImage, rect: &RectangleInfo) -> Result<()> {
         let full_path = self.cache_dir.join(&rect.image_path);
 
+        // Convert to grayscale if needed
+        let grayscale = source.to_grayscale();
+
         // Extract rectangle pixels
-        let src_width = source.dimensions.width;
+        let src_width = grayscale.dimensions.width;
         let mut pixels = Vec::with_capacity(rect.width * rect.height);
 
         for y in rect.y..(rect.y + rect.height) {
             for x in rect.x..(rect.x + rect.width) {
                 let idx = y * src_width + x;
-                pixels.push(source.pixels[idx]);
+                pixels.push(grayscale.pixels[idx]);
             }
         }
 
-        // Save as TIFF
-        save_grayscale_tiff(&pixels, rect.width, rect.height, &full_path)?;
+        // Save as FITS (required for image2xy)
+        save_grayscale_fits(&pixels, rect.width, rect.height, &full_path)?;
 
         tracing::debug!("Saved rectangle to {}", full_path.display());
         Ok(())
@@ -396,25 +399,31 @@ fn simple_hash(s: &str) -> u32 {
     hash
 }
 
-/// Save grayscale image as TIFF.
-fn save_grayscale_tiff(pixels: &[f32], width: usize, height: usize, path: &Path) -> Result<()> {
-    use image::{GrayImage, Luma};
+/// Save grayscale image as FITS (required for image2xy).
+fn save_grayscale_fits(pixels: &[f32], width: usize, height: usize, path: &Path) -> Result<()> {
+    use fitsio::FitsFile;
+    use fitsio::images::{ImageDescription, ImageType};
 
-    // Convert to 16-bit grayscale
-    let mut img = GrayImage::new(width as u32, height as u32);
-
-    for (i, &pixel) in pixels.iter().enumerate() {
-        let x = (i % width) as u32;
-        let y = (i / width) as u32;
-        // Scale 0.0-1.0 to 0-65535, then convert to u8 for GrayImage
-        // Note: For better precision, we could use a 16-bit TIFF, but image crate
-        // GrayImage uses u8. For star detection benchmarks, 8-bit should be sufficient.
-        let value = (pixel.clamp(0.0, 1.0) * 255.0) as u8;
-        img.put_pixel(x, y, Luma([value]));
+    // Remove existing file if present (fitsio won't overwrite)
+    if path.exists() {
+        std::fs::remove_file(path)?;
     }
 
-    img.save(path)
-        .with_context(|| format!("Failed to save TIFF: {}", path.display()))?;
+    let description = ImageDescription {
+        data_type: ImageType::Float,
+        dimensions: &[height, width], // FITS uses [NAXIS2, NAXIS1] = [height, width]
+    };
+
+    let mut fptr = FitsFile::create(path)
+        .with_custom_primary(&description)
+        .open()
+        .with_context(|| format!("Failed to create FITS file: {}", path.display()))?;
+
+    let hdu = fptr.primary_hdu().context("Failed to get primary HDU")?;
+
+    // Write the pixel data
+    hdu.write_image(&mut fptr, pixels)
+        .context("Failed to write FITS image data")?;
 
     Ok(())
 }

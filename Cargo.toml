@@ -75,6 +75,7 @@ aligned-vec = { version = "*" }
 reqwest = { version = "*", features = ["blocking", "json", "form", "query", "multipart"] }
 bzip2 = { version = "*" }
 dirs = { version = "*" }
+tempfile = { version = "*" }
 
 
 [profile.bench]
