@@ -71,13 +71,13 @@ pub fn sparse_field() -> TestField {
     TestField {
         name: "sparse_north",
         description: "Sparse high-galactic-latitude field with well-separated stars",
-        ra: 180.0, // Near NGP
-        dec: 45.0,
+        ra: 177.25, // From SDSS run 2505
+        dec: 0.03,
         source: CatalogSource::Sdss,
         sdss: Some(SdssField {
             run: 2505,
-            camcol: 3,
-            field: 150,
+            camcol: 1,
+            field: 32,
             rerun: 301,
         }),
         expected_star_count: 20..100,

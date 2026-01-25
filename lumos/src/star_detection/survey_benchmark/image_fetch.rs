@@ -1,12 +1,17 @@
 //! FITS image download from astronomical surveys.
 //!
 //! Supports downloading images from SDSS and Pan-STARRS with local caching.
+//!
+//! Set `LUMOS_TEST_CACHE_DIR` environment variable to customize the cache location.
 
 use anyhow::{Context, Result};
 use std::fs::{self, File};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
+
+/// Default timeout for HTTP requests in seconds.
+const DEFAULT_TIMEOUT_SECS: u64 = 120;
 
 /// Image fetcher with local caching.
 #[derive(Debug)]
@@ -16,12 +21,19 @@ pub struct ImageFetcher {
 }
 
 impl ImageFetcher {
-    /// Create a new image fetcher with default cache directory.
+    /// Create a new image fetcher.
+    ///
+    /// Uses `LUMOS_TEST_CACHE_DIR` environment variable if set,
+    /// otherwise falls back to system cache directory.
     pub fn new() -> Result<Self> {
-        let cache_dir = dirs::cache_dir()
-            .unwrap_or_else(|| PathBuf::from(".cache"))
-            .join("lumos")
-            .join("survey_images");
+        let cache_dir = if let Ok(dir) = std::env::var("LUMOS_TEST_CACHE_DIR") {
+            PathBuf::from(dir)
+        } else {
+            dirs::cache_dir()
+                .unwrap_or_else(|| PathBuf::from(".cache"))
+                .join("lumos")
+                .join("survey_images")
+        };
 
         Self::with_cache_dir(cache_dir)
     }
@@ -31,7 +43,8 @@ impl ImageFetcher {
         fs::create_dir_all(&cache_dir).context("Failed to create cache directory")?;
 
         let client = reqwest::blocking::Client::builder()
-            .timeout(Duration::from_secs(300)) // 5 min timeout for large downloads
+            .timeout(Duration::from_secs(DEFAULT_TIMEOUT_SECS))
+            .connect_timeout(Duration::from_secs(30))
             .build()
             .context("Failed to create HTTP client")?;
 
@@ -225,17 +238,24 @@ impl Default for ImageFetcher {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::env;
 
+    /// Get a test fetcher using LUMOS_TEST_CACHE_DIR or default.
     fn test_fetcher() -> ImageFetcher {
-        let cache_dir = env::temp_dir().join("lumos_test_cache");
-        ImageFetcher::with_cache_dir(cache_dir).unwrap()
+        ImageFetcher::new().unwrap()
     }
 
     #[test]
     fn test_cache_dir_creation() {
         let fetcher = test_fetcher();
         assert!(fetcher.cache_dir().exists());
+        println!("Cache dir: {}", fetcher.cache_dir().display());
+    }
+
+    #[test]
+    fn test_cache_lookup() {
+        let fetcher = test_fetcher();
+        // Non-existent file should return None
+        assert!(fetcher.is_cached("nonexistent.fits").is_none());
     }
 
     #[test]
@@ -258,23 +278,14 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Requires network
+    #[ignore] // Requires network - Pan-STARRS can be slow/unreliable
     fn test_fetch_panstarrs() {
         let fetcher = test_fetcher();
 
-        // Fetch a Pan-STARRS cutout
-        // M31 center region
-        let path = fetcher.fetch_panstarrs(10.6847, 41.2687, 5.0, 'r').unwrap();
+        // Fetch a Pan-STARRS cutout - small region to be faster
+        let path = fetcher.fetch_panstarrs(180.0, 45.0, 2.0, 'r').unwrap();
 
         assert!(path.exists());
         println!("Downloaded Pan-STARRS image to: {}", path.display());
-    }
-
-    #[test]
-    fn test_cache_lookup() {
-        let fetcher = test_fetcher();
-
-        // Non-existent file should return None
-        assert!(fetcher.is_cached("nonexistent.fits").is_none());
     }
 }

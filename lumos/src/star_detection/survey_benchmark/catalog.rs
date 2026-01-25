@@ -49,6 +49,7 @@ impl CatalogClient {
     pub fn new() -> Self {
         let client = reqwest::blocking::Client::builder()
             .timeout(Duration::from_secs(60))
+            .connect_timeout(Duration::from_secs(15))
             .build()
             .expect("Failed to create HTTP client");
 
@@ -144,8 +145,15 @@ impl CatalogClient {
         let center_ra = ra;
         let center_dec = dec;
 
-        let stars = data
+        // Extract rows from the first table
+        let rows = data
             .0
+            .into_iter()
+            .next()
+            .map(|table| table.Rows)
+            .unwrap_or_default();
+
+        let stars = rows
             .into_iter()
             .filter_map(|row| {
                 let star_ra = row.ra?;
@@ -297,7 +305,14 @@ fn angular_distance(ra1: f64, dec1: f64, ra2: f64, dec2: f64) -> f64 {
 // Response types for JSON parsing
 
 #[derive(Debug, Deserialize)]
-struct SdssResponse(Vec<SdssRow>);
+struct SdssResponse(Vec<SdssTable>);
+
+#[derive(Debug, Deserialize)]
+#[allow(non_snake_case, dead_code)]
+struct SdssTable {
+    TableName: String,
+    Rows: Vec<SdssRow>,
+}
 
 #[derive(Debug, Deserialize)]
 #[allow(non_snake_case)]

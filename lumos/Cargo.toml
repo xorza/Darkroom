@@ -27,16 +27,16 @@ tracing-subscriber = { workspace = true }
 memmap2 = { workspace = true }
 sysinfo = { workspace = true }
 criterion = { workspace = true, optional = true }
-reqwest = { workspace = true }
-serde = { workspace = true }
-serde_json = { workspace = true }
-bzip2 = { workspace = true }
-dirs = { workspace = true }
 
 [dev-dependencies]
 criterion = { workspace = true }
 image = { workspace = true }
 imageproc = { workspace = true }
+reqwest = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+bzip2 = { workspace = true }
+dirs = { workspace = true }
 
 [[bench]]
 name = "demosaic_bayer"
