@@ -61,6 +61,9 @@ pub struct Star {
     pub snr: f32,
     /// Peak pixel value (for saturation detection).
     pub peak: f32,
+    /// Sharpness metric (peak / flux_in_core). Cosmic rays have high sharpness (>0.8),
+    /// real stars have lower sharpness (typically 0.2-0.6 depending on seeing).
+    pub sharpness: f32,
 }
 
 impl Star {
@@ -72,11 +75,21 @@ impl Star {
         self.peak > 0.95
     }
 
+    /// Check if star is likely a cosmic ray (very sharp, single-pixel spike).
+    ///
+    /// Cosmic rays typically have sharpness > 0.7, while real stars are 0.2-0.5.
+    pub fn is_cosmic_ray(&self, max_sharpness: f32) -> bool {
+        self.sharpness > max_sharpness
+    }
+
     /// Check if star is usable for registration.
     ///
-    /// Filters out saturated, elongated, and low-SNR stars.
-    pub fn is_usable(&self, min_snr: f32, max_eccentricity: f32) -> bool {
-        !self.is_saturated() && self.snr >= min_snr && self.eccentricity <= max_eccentricity
+    /// Filters out saturated, elongated, low-SNR stars, and cosmic rays.
+    pub fn is_usable(&self, min_snr: f32, max_eccentricity: f32, max_sharpness: f32) -> bool {
+        !self.is_saturated()
+            && self.snr >= min_snr
+            && self.eccentricity <= max_eccentricity
+            && !self.is_cosmic_ray(max_sharpness)
     }
 }
 
@@ -106,6 +119,11 @@ pub struct StarDetectionConfig {
     /// faint stars by boosting SNR. Set to 0.0 to disable matched filtering.
     /// Typical values are 2.0-6.0 pixels depending on seeing and sampling.
     pub expected_fwhm: f32,
+    /// Maximum sharpness for a star to be considered valid.
+    /// Sharpness = peak_value / flux_in_3x3_core. Cosmic rays have very high sharpness
+    /// (>0.7) because most flux is in a single pixel. Real stars spread flux across
+    /// multiple pixels due to PSF, giving sharpness 0.2-0.5. Set to 1.0 to disable.
+    pub max_sharpness: f32,
 }
 
 impl Default for StarDetectionConfig {
@@ -120,6 +138,7 @@ impl Default for StarDetectionConfig {
             background_tile_size: 64,
             max_fwhm_deviation: 3.0,
             expected_fwhm: 4.0, // Typical value for well-sampled images
+            max_sharpness: 0.7, // Reject cosmic rays (sharpness > 0.7)
         }
     }
 }
@@ -176,7 +195,13 @@ pub fn find_stars(
         .filter_map(|candidate| {
             compute_centroid(pixels, width, height, &background, &candidate, config)
         })
-        .filter(|star| star.is_usable(config.min_snr, config.max_eccentricity))
+        .filter(|star| {
+            star.is_usable(
+                config.min_snr,
+                config.max_eccentricity,
+                config.max_sharpness,
+            )
+        })
         .collect();
 
     // Sort by flux (brightest first)

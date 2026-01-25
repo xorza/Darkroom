@@ -17,6 +17,7 @@ fn test_star_is_saturated() {
         eccentricity: 0.1,
         snr: 50.0,
         peak: 0.96,
+        sharpness: 0.3,
     };
     assert!(star.is_saturated());
 
@@ -34,23 +35,31 @@ fn test_star_is_usable() {
         eccentricity: 0.2,
         snr: 50.0,
         peak: 0.8,
+        sharpness: 0.3,
     };
-    assert!(star.is_usable(10.0, 0.5));
+    assert!(star.is_usable(10.0, 0.5, 0.7));
 
     // Low SNR
     let low_snr = Star { snr: 5.0, ..star };
-    assert!(!low_snr.is_usable(10.0, 0.5));
+    assert!(!low_snr.is_usable(10.0, 0.5, 0.7));
 
     // Too elongated
     let elongated = Star {
         eccentricity: 0.7,
         ..star
     };
-    assert!(!elongated.is_usable(10.0, 0.5));
+    assert!(!elongated.is_usable(10.0, 0.5, 0.7));
 
     // Saturated
     let saturated = Star { peak: 0.98, ..star };
-    assert!(!saturated.is_usable(10.0, 0.5));
+    assert!(!saturated.is_usable(10.0, 0.5, 0.7));
+
+    // Cosmic ray (too sharp)
+    let cosmic_ray = Star {
+        sharpness: 0.9,
+        ..star
+    };
+    assert!(!cosmic_ray.is_usable(10.0, 0.5, 0.7));
 }
 
 #[test]
@@ -169,6 +178,7 @@ fn make_test_star(fwhm: f32, flux: f32) -> Star {
         eccentricity: 0.1,
         snr: 50.0,
         peak: 0.5,
+        sharpness: 0.3,
     }
 }
 
@@ -434,6 +444,7 @@ fn make_star_at(x: f32, y: f32, flux: f32) -> Star {
         eccentricity: 0.1,
         snr: 50.0,
         peak: 0.5,
+        sharpness: 0.3,
     }
 }
 

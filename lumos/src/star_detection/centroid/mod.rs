@@ -79,6 +79,7 @@ pub fn compute_centroid(
         eccentricity: metrics.eccentricity,
         snr: metrics.snr,
         peak: candidate.peak_value,
+        sharpness: metrics.sharpness,
     })
 }
 
@@ -152,6 +153,7 @@ pub(crate) struct StarMetrics {
     pub fwhm: f32,
     pub eccentricity: f32,
     pub snr: f32,
+    pub sharpness: f32,
 }
 
 /// Compute quality metrics for a star at the given position.
@@ -172,6 +174,7 @@ pub(crate) fn compute_metrics(
 
     // Collect background-subtracted values and positions
     let mut flux = 0.0f32;
+    let mut core_flux = 0.0f32; // Flux in 3x3 core for sharpness calculation
     let mut sum_r2 = 0.0f32;
     let mut sum_x2 = 0.0f32;
     let mut sum_y2 = 0.0f32;
@@ -191,6 +194,11 @@ pub(crate) fn compute_metrics(
 
             flux += value;
             peak_value = peak_value.max(value);
+
+            // Core flux for sharpness (3x3 region around center)
+            if dx.abs() <= 1 && dy.abs() <= 1 {
+                core_flux += value;
+            }
 
             // Weighted second moments for FWHM and eccentricity
             let fx = x as f32 - cx;
@@ -252,10 +260,20 @@ pub(crate) fn compute_metrics(
         flux / f32::EPSILON
     };
 
+    // Sharpness = peak / core_flux
+    // Cosmic rays: most flux in single pixel -> sharpness ~= 1/9 to 1.0
+    // Real stars: flux spread across PSF -> sharpness ~= 0.2-0.5
+    let sharpness = if core_flux > f32::EPSILON {
+        (peak_value / core_flux).clamp(0.0, 1.0)
+    } else {
+        1.0 // No core flux means very sharp (likely artifact)
+    };
+
     Some(StarMetrics {
         flux,
         fwhm,
         eccentricity,
         snr,
+        sharpness,
     })
 }
