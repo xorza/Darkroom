@@ -543,6 +543,97 @@ impl Default for StarDetectionConfig {
 }
 
 impl StarDetectionConfig {
+    /// Validate the configuration and panic if invalid.
+    ///
+    /// This is called automatically by `find_stars()` but can be called
+    /// manually to check configuration before processing.
+    ///
+    /// # Panics
+    /// Panics with a descriptive message if any parameter is out of valid range.
+    pub fn validate(&self) {
+        assert!(
+            self.detection_sigma > 0.0,
+            "detection_sigma must be positive, got {}",
+            self.detection_sigma
+        );
+        assert!(
+            self.min_area >= 1,
+            "min_area must be at least 1, got {}",
+            self.min_area
+        );
+        assert!(
+            self.max_area >= self.min_area,
+            "max_area ({}) must be >= min_area ({})",
+            self.max_area,
+            self.min_area
+        );
+        assert!(
+            (0.0..=1.0).contains(&self.max_eccentricity),
+            "max_eccentricity must be in [0, 1], got {}",
+            self.max_eccentricity
+        );
+        assert!(
+            self.min_snr > 0.0,
+            "min_snr must be positive, got {}",
+            self.min_snr
+        );
+        assert!(
+            (16..=256).contains(&self.background_tile_size),
+            "background_tile_size must be in [16, 256], got {}",
+            self.background_tile_size
+        );
+        assert!(
+            self.expected_fwhm > 0.0,
+            "expected_fwhm must be positive, got {}",
+            self.expected_fwhm
+        );
+        assert!(
+            (0.0..=1.0).contains(&self.psf_axis_ratio),
+            "psf_axis_ratio must be in (0, 1], got {}",
+            self.psf_axis_ratio
+        );
+        assert!(
+            (0.0..=1.0).contains(&self.max_sharpness),
+            "max_sharpness must be in [0, 1], got {}",
+            self.max_sharpness
+        );
+        assert!(
+            (0.0..=1.0).contains(&self.deblend_min_prominence),
+            "deblend_min_prominence must be in [0, 1], got {}",
+            self.deblend_min_prominence
+        );
+        assert!(
+            self.duplicate_min_separation >= 0.0,
+            "duplicate_min_separation must be non-negative, got {}",
+            self.duplicate_min_separation
+        );
+        assert!(
+            (0.0..=1.0).contains(&self.max_roundness),
+            "max_roundness must be in [0, 1], got {}",
+            self.max_roundness
+        );
+        assert!(
+            self.deblend_nthresh >= 2,
+            "deblend_nthresh must be at least 2, got {}",
+            self.deblend_nthresh
+        );
+        assert!(
+            (0.0..=1.0).contains(&self.deblend_min_contrast),
+            "deblend_min_contrast must be in [0, 1], got {}",
+            self.deblend_min_contrast
+        );
+        if let Some(gain) = self.gain {
+            assert!(gain > 0.0, "gain must be positive, got {}", gain);
+        }
+        if let Some(read_noise) = self.read_noise {
+            assert!(
+                read_noise >= 0.0,
+                "read_noise must be non-negative, got {}",
+                read_noise
+            );
+        }
+    }
+
     /// Create a new builder for constructing StarDetectionConfig.
     pub fn builder() -> StarDetectionConfigBuilder {
         StarDetectionConfigBuilder::default()
@@ -806,6 +897,7 @@ pub fn find_stars(
     config: &StarDetectionConfig,
 ) -> StarDetectionResult {
     assert_eq!(pixels.len(), width * height, "Pixel count mismatch");
+    config.validate();
 
     let mut diagnostics = StarDetectionDiagnostics::default();
 

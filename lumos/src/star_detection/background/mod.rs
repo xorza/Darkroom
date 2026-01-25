@@ -293,77 +293,16 @@ fn compute_tile_stats(
     sigma_clipped_stats(values, deviations, 3.0, 3)
 }
 
-/// Compute sigma-clipped median and standard deviation using scratch buffers.
-///
-/// Uses MAD (median absolute deviation) scaled by 1.4826 to estimate sigma.
-/// Values outside `kappa * sigma` from the median are iteratively removed.
+/// Compute sigma-clipped tile statistics using the shared implementation.
+#[inline]
 pub(crate) fn sigma_clipped_stats(
     values: &mut [f32],
     deviations: &mut Vec<f32>,
     kappa: f32,
     iterations: usize,
 ) -> TileStats {
-    if values.is_empty() {
-        return TileStats {
-            median: 0.0,
-            sigma: 0.0,
-        };
-    }
-
-    let mut len = values.len();
-
-    for _ in 0..iterations {
-        if len < 3 {
-            break;
-        }
-
-        let active = &mut values[..len];
-
-        // Compute median
-        let median = crate::math::median_f32_mut(active);
-
-        // Compute MAD using deviations buffer
-        deviations.clear();
-        deviations.extend(active.iter().map(|v| (v - median).abs()));
-        let mad = crate::math::median_f32_mut(deviations);
-        let sigma = constants::mad_to_sigma(mad);
-
-        if sigma < f32::EPSILON {
-            return TileStats { median, sigma: 0.0 };
-        }
-
-        // Clip values outside threshold
-        let threshold = kappa * sigma;
-        let mut write_idx = 0;
-        for i in 0..len {
-            if (values[i] - median).abs() <= threshold {
-                values[write_idx] = values[i];
-                write_idx += 1;
-            }
-        }
-
-        if write_idx == len {
-            break;
-        }
-        len = write_idx;
-    }
-
-    // Final statistics
-    let active = &mut values[..len];
-    if active.is_empty() {
-        return TileStats {
-            median: 0.0,
-            sigma: 0.0,
-        };
-    }
-
-    let median = crate::math::median_f32_mut(active);
-
-    deviations.clear();
-    deviations.extend(active.iter().map(|v| (v - median).abs()));
-    let mad = crate::math::median_f32_mut(deviations);
-    let sigma = constants::mad_to_sigma(mad);
-
+    let (median, sigma) =
+        constants::sigma_clipped_median_mad(values, deviations, kappa, iterations);
     TileStats { median, sigma }
 }
 

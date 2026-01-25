@@ -46,10 +46,7 @@ pub enum LocalBackgroundMethod {
     /// Compute local background using an annular region around the star.
     /// Inner radius is based on stamp_radius, outer radius is 1.5× that.
     /// More accurate in regions with variable nebulosity.
-    Annulus,
-    /// Use sigma-clipped median of the outer ring of the stamp.
-    /// Good compromise between speed and accuracy.
-    OuterRing,
+    LocalAnnulus,
 }
 
 /// Compute adaptive stamp radius based on expected FWHM.
@@ -136,106 +133,11 @@ fn compute_annulus_background(
     Some((median, sigma))
 }
 
-/// Compute local background using the outer ring of a stamp.
-///
-/// Faster than full annulus computation, uses only the outermost pixels.
-fn compute_outer_ring_background(
-    pixels: &[f32],
-    width: usize,
-    height: usize,
-    cx: f32,
-    cy: f32,
-    stamp_radius: usize,
-) -> Option<(f32, f32)> {
-    let icx = cx.round() as isize;
-    let icy = cy.round() as isize;
-
-    let mut values = Vec::with_capacity(8 * stamp_radius);
-
-    let r = stamp_radius as i32;
-    // Collect only the outermost ring
-    for dy in -r..=r {
-        for dx in -r..=r {
-            // Check if on the outer edge
-            if dx.abs() != r && dy.abs() != r {
-                continue;
-            }
-
-            let x = icx + dx as isize;
-            let y = icy + dy as isize;
-
-            if x >= 0 && x < width as isize && y >= 0 && y < height as isize {
-                values.push(pixels[y as usize * width + x as usize]);
-            }
-        }
-    }
-
-    if values.len() < 8 {
-        return None;
-    }
-
-    let (median, sigma) = sigma_clipped_median_mad(&mut values, 3.0, 2);
-    Some((median, sigma))
-}
-
-/// Compute sigma-clipped median and MAD (median absolute deviation).
+/// Compute sigma-clipped median and MAD using the shared implementation.
+#[inline]
 fn sigma_clipped_median_mad(values: &mut [f32], kappa: f32, iterations: usize) -> (f32, f32) {
-    if values.is_empty() {
-        return (0.0, 0.0);
-    }
-
-    let mut len = values.len();
-
-    for _ in 0..iterations {
-        if len < 3 {
-            break;
-        }
-
-        let active = &mut values[..len];
-        active.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-        let median = active[active.len() / 2];
-
-        // Compute MAD
-        let mut deviations: Vec<f32> = active.iter().map(|v| (v - median).abs()).collect();
-        deviations.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-        let mad = deviations[deviations.len() / 2];
-        let sigma = constants::mad_to_sigma(mad);
-
-        if sigma < f32::EPSILON {
-            return (median, 0.0);
-        }
-
-        // Clip values outside threshold
-        let threshold = kappa * sigma;
-        let mut write_idx = 0;
-        for i in 0..len {
-            if (values[i] - median).abs() <= threshold {
-                values[write_idx] = values[i];
-                write_idx += 1;
-            }
-        }
-
-        if write_idx == len {
-            break;
-        }
-        len = write_idx;
-    }
-
-    // Final median and sigma
-    let active = &mut values[..len];
-    if active.is_empty() {
-        return (0.0, 0.0);
-    }
-
-    active.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-    let median = active[active.len() / 2];
-
-    let mut deviations: Vec<f32> = active.iter().map(|v| (v - median).abs()).collect();
-    deviations.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-    let mad = deviations[deviations.len() / 2];
-    let sigma = constants::mad_to_sigma(mad);
-
-    (median, sigma)
+    let mut deviations = Vec::with_capacity(values.len());
+    constants::sigma_clipped_median_mad(values, &mut deviations, kappa, iterations)
 }
 
 /// Compute sub-pixel centroid and quality metrics for a star candidate.
@@ -280,34 +182,18 @@ pub fn compute_centroid(
     }
 
     // Compute local background based on configured method
+    let icx = cx.round() as isize;
+    let icy = cy.round() as isize;
+    let idx = icy as usize * width + icx as usize;
+    let global_fallback = || (background.background[idx], background.noise[idx]);
+
     let (local_bg, local_noise) = match config.local_background_method {
-        LocalBackgroundMethod::GlobalMap => {
-            let icx = cx.round() as isize;
-            let icy = cy.round() as isize;
-            let idx = icy as usize * width + icx as usize;
-            (background.background[idx], background.noise[idx])
-        }
-        LocalBackgroundMethod::Annulus => {
+        LocalBackgroundMethod::GlobalMap => global_fallback(),
+        LocalBackgroundMethod::LocalAnnulus => {
             let inner_radius = stamp_radius;
             let outer_radius = (stamp_radius as f32 * 1.5).ceil() as usize;
             compute_annulus_background(pixels, width, height, cx, cy, inner_radius, outer_radius)
-                .unwrap_or_else(|| {
-                    // Fall back to global map
-                    let icx = cx.round() as isize;
-                    let icy = cy.round() as isize;
-                    let idx = icy as usize * width + icx as usize;
-                    (background.background[idx], background.noise[idx])
-                })
-        }
-        LocalBackgroundMethod::OuterRing => {
-            compute_outer_ring_background(pixels, width, height, cx, cy, stamp_radius)
-                .unwrap_or_else(|| {
-                    // Fall back to global map
-                    let icx = cx.round() as isize;
-                    let icy = cy.round() as isize;
-                    let idx = icy as usize * width + icx as usize;
-                    (background.background[idx], background.noise[idx])
-                })
+                .unwrap_or_else(global_fallback)
         }
     };
 

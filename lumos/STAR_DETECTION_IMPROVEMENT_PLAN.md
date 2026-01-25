@@ -147,17 +147,16 @@ let config = StarDetectionConfig {
 ```
 
 ### 3.3 Local Background Subtraction in Centroid ✅
-**Status:** COMPLETE - Annular and outer-ring methods added
+**Status:** COMPLETE - Simplified to two methods
 
-New `LocalBackgroundMethod` enum:
+`LocalBackgroundMethod` enum (simplified):
 - `GlobalMap` - Use precomputed background map (default, fastest)
-- `Annulus` - Compute from annular region around star
-- `OuterRing` - Use sigma-clipped median of stamp edge
+- `LocalAnnulus` - Compute from annular region around star (more accurate in nebulae)
 
 Config option:
 ```rust
 let config = StarDetectionConfig {
-    local_background_method: LocalBackgroundMethod::Annulus,
+    local_background_method: LocalBackgroundMethod::LocalAnnulus,
     ..Default::default()
 };
 ```
@@ -274,10 +273,23 @@ let config = StarDetectionConfig::builder()
     .with_noise_model(1.5, 3.0) // gain, read_noise
     .with_elliptical_psf(0.8, 0.5)
     .with_centroid_method(CentroidMethod::GaussianFit)
-    .with_local_background(LocalBackgroundMethod::Annulus)
+    .with_local_background(LocalBackgroundMethod::LocalAnnulus)
     .with_multi_threshold_deblend(true)
     .build();
 ```
+
+**Configuration Validation:**
+`StarDetectionConfig::validate()` checks all parameter ranges and is called automatically by `find_stars()`:
+- Sigma thresholds must be positive
+- Area bounds must be valid (min <= max, min >= 1)
+- Fractions (eccentricity, sharpness, prominence) must be in [0, 1]
+- Tile size must be in [16, 256]
+- Gain must be positive if provided
+- Read noise must be non-negative if provided
+
+**Code Consolidation:**
+- `sigma_clipped_median_mad()` function in `constants.rs` is shared between background estimation and centroid modules
+- Eliminates code duplication while maintaining efficient scratch buffer reuse
 
 ---
 

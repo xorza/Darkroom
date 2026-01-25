@@ -136,6 +136,83 @@ pub fn dilate_mask(mask: &[bool], width: usize, height: usize, radius: usize) ->
     dilated
 }
 
+/// Compute sigma-clipped median and MAD-based sigma.
+///
+/// Iteratively rejects outliers beyond `kappa × sigma` from the median.
+/// Uses scratch buffer `deviations` for efficiency when called repeatedly.
+///
+/// # Arguments
+/// * `values` - Mutable slice of values (will be reordered)
+/// * `deviations` - Scratch buffer for deviations (reused between calls)
+/// * `kappa` - Number of sigma for clipping threshold
+/// * `iterations` - Number of clipping iterations
+///
+/// # Returns
+/// Tuple of (median, sigma) after clipping
+pub fn sigma_clipped_median_mad(
+    values: &mut [f32],
+    deviations: &mut Vec<f32>,
+    kappa: f32,
+    iterations: usize,
+) -> (f32, f32) {
+    if values.is_empty() {
+        return (0.0, 0.0);
+    }
+
+    let mut len = values.len();
+
+    for _ in 0..iterations {
+        if len < 3 {
+            break;
+        }
+
+        let active = &mut values[..len];
+
+        // Compute median
+        let median = crate::math::median_f32_mut(active);
+
+        // Compute MAD using deviations buffer
+        deviations.clear();
+        deviations.extend(active.iter().map(|v| (v - median).abs()));
+        let mad = crate::math::median_f32_mut(deviations);
+        let sigma = mad_to_sigma(mad);
+
+        if sigma < f32::EPSILON {
+            return (median, 0.0);
+        }
+
+        // Clip values outside threshold
+        let threshold = kappa * sigma;
+        let mut write_idx = 0;
+        for i in 0..len {
+            if (values[i] - median).abs() <= threshold {
+                values[write_idx] = values[i];
+                write_idx += 1;
+            }
+        }
+
+        if write_idx == len {
+            break;
+        }
+        len = write_idx;
+    }
+
+    // Final statistics
+    let active = &mut values[..len];
+    if active.is_empty() {
+        return (0.0, 0.0);
+    }
+
+    let median = crate::math::median_f32_mut(active);
+
+    deviations.clear();
+    deviations.extend(active.iter().map(|v| (v - median).abs()));
+    let mad = crate::math::median_f32_mut(deviations);
+    let sigma = mad_to_sigma(mad);
+
+    (median, sigma)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

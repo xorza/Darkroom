@@ -365,15 +365,16 @@ CalibrationMasters // Container for master dark/flat/bias frames
 - `MIN_STAMP_RADIUS: usize = 4` / `MAX_STAMP_RADIUS: usize = 15` - Stamp radius bounds
 - `CENTROID_CONVERGENCE_THRESHOLD: f32 = 0.001` - Centroid iteration convergence
 - `MAX_CENTROID_ITERATIONS: usize = 10` - Maximum centroid refinement iterations
-- Utility functions: `fwhm_to_sigma()`, `sigma_to_fwhm()`, `mad_to_sigma()`, `compute_stamp_radius()`, `dilate_mask()`
+- Utility functions: `fwhm_to_sigma()`, `sigma_to_fwhm()`, `mad_to_sigma()`, `compute_stamp_radius()`, `dilate_mask()`, `sigma_clipped_median_mad()`
 
 **Key types:**
 ```rust
 Star               // { x, y, flux, fwhm, eccentricity, snr, peak, sharpness } - detected star with metrics
-StarDetectionConfig // Detection parameters (sigma, area, eccentricity, SNR, FWHM, sharpness, centroid method)
+StarDetectionConfig // Detection parameters with validate() method; uses builder pattern and param sub-structs
 StarCandidate      // { centroid_x, centroid_y, area, bbox } - initial detection before refinement
 BackgroundMap      // { background, noise } - per-pixel background and noise estimates
 CentroidMethod     // WeightedMoments | GaussianFit | MoffatFit { beta } - sub-pixel centroid algorithm selection
+LocalBackgroundMethod // GlobalMap | LocalAnnulus - how to estimate local background during centroid refinement
 ```
 
 **Algorithm pipeline:**
@@ -410,6 +411,7 @@ CentroidMethod     // WeightedMoments | GaussianFit | MoffatFit { beta } - sub-p
 - `background_tile_size: 64` - Tile size for background estimation
 - `iterative_background_passes: 0` - SExtractor-style iterative background (0 = single pass)
 - `centroid_method: WeightedMoments` - Centroid algorithm (WeightedMoments/GaussianFit/MoffatFit)
+- `local_background_method: GlobalMap` - Local background method (GlobalMap/LocalAnnulus)
 
 **Sharpness metric (cosmic ray rejection):**
 - `sharpness = peak_value / core_flux` where core_flux is sum of 3x3 region around peak
