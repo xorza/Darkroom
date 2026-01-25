@@ -3,10 +3,23 @@
 //! Uses the locally installed astrometry.net package's image2xy tool
 //! to extract star positions from images.
 
-use super::nova_client::AstrometryStar;
 use anyhow::{Context, Result, bail};
+use serde::{Deserialize, Serialize};
 use std::path::Path;
 use std::process::Command;
+
+/// A star detected by astrometry.net's source extraction.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AstrometryStar {
+    /// X coordinate in pixels (0-indexed).
+    pub x: f32,
+    /// Y coordinate in pixels (0-indexed).
+    pub y: f32,
+    /// Estimated flux (brightness).
+    pub flux: f32,
+    /// Estimated background at this position.
+    pub background: f32,
+}
 
 /// Local source extractor using astrometry.net's image2xy command.
 #[derive(Debug)]

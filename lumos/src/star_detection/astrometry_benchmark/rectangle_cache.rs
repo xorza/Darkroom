@@ -3,7 +3,7 @@
 //! Manages splitting a source image into random rectangles, caching them,
 //! and storing astrometry.net results.
 
-use super::nova_client::AstrometryStar;
+use super::local_solver::AstrometryStar;
 use anyhow::{Context, Result, bail};
 use rand::rngs::SmallRng;
 use rand::{Rng, SeedableRng};

@@ -166,6 +166,8 @@ pub fn benchmarks(c: &mut Criterion) {
                     black_box(cx),
                     black_box(cy),
                     black_box(stamp_radius),
+                    black_box(None),
+                    black_box(None),
                 ))
             })
         });

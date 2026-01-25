@@ -1,9 +1,8 @@
 //! Benchmark runner for comparing star detection against astrometry.net.
 //!
-//! Orchestrates rectangle generation, astrometry.net solving, and metrics computation.
+//! Orchestrates rectangle generation, local solving, and metrics computation.
 
-use super::local_solver::LocalSolver;
-use super::nova_client::{AstrometryStar, NovaClient};
+use super::local_solver::{AstrometryStar, LocalSolver};
 use super::rectangle_cache::{RectangleCache, RectangleInfo};
 use crate::star_detection::visual_tests::generators::GroundTruthStar;
 use crate::star_detection::visual_tests::output::{
@@ -11,12 +10,9 @@ use crate::star_detection::visual_tests::output::{
     save_metrics,
 };
 use crate::star_detection::{Star, StarDetectionConfig, find_stars};
-use anyhow::{Context, Result};
+use anyhow::Result;
 use std::path::{Path, PathBuf};
-use std::time::{Duration, Instant};
-
-/// Default timeout for astrometry.net solving.
-const DEFAULT_SOLVE_TIMEOUT: Duration = Duration::from_secs(300);
+use std::time::Instant;
 
 /// Default rectangle size range.
 const DEFAULT_MIN_SIZE: (usize, usize) = (512, 512);
@@ -70,45 +66,25 @@ impl AstrometryBenchmarkResult {
 #[derive(Debug)]
 pub struct AstrometryBenchmark {
     cache: RectangleCache,
-    nova_client: Option<NovaClient>,
     output_dir: PathBuf,
 }
 
 impl AstrometryBenchmark {
     /// Create a new benchmark runner.
-    ///
-    /// If `api_key` is provided, can upload images to astrometry.net.
-    /// If `None`, only uses cached results.
-    pub fn new(api_key: Option<String>) -> Result<Self> {
+    pub fn new() -> Result<Self> {
         let cache = RectangleCache::new()?;
-
-        let nova_client = api_key.map(NovaClient::new);
-
         let output_dir = common::test_utils::test_output_path("astrometry_benchmark");
 
-        Ok(Self {
-            cache,
-            nova_client,
-            output_dir,
-        })
+        Ok(Self { cache, output_dir })
     }
 
     /// Create a benchmark runner with custom directories.
-    pub fn with_dirs(
-        cache_dir: PathBuf,
-        output_dir: PathBuf,
-        api_key: Option<String>,
-    ) -> Result<Self> {
+    pub fn with_dirs(cache_dir: PathBuf, output_dir: PathBuf) -> Result<Self> {
         let cache = RectangleCache::with_cache_dir(cache_dir)?;
-        let nova_client = api_key.map(NovaClient::new);
 
         std::fs::create_dir_all(&output_dir)?;
 
-        Ok(Self {
-            cache,
-            nova_client,
-            output_dir,
-        })
+        Ok(Self { cache, output_dir })
     }
 
     /// Get the rectangle cache.
@@ -152,67 +128,7 @@ impl AstrometryBenchmark {
             .generate_rectangles(source_image, num_rectangles, min_size, max_size, seed)
     }
 
-    /// Solve rectangles through astrometry.net.
-    ///
-    /// Only solves rectangles that don't have cached results.
-    /// Requires an API key to have been provided.
-    pub fn solve_rectangles(&mut self, rectangles: &[RectangleInfo]) -> Result<()> {
-        let client = self
-            .nova_client
-            .as_mut()
-            .context("No API key provided - cannot solve through astrometry.net")?;
-
-        let unsolved: Vec<_> = rectangles.iter().filter(|r| r.axy_path.is_none()).collect();
-
-        if unsolved.is_empty() {
-            tracing::info!("All {} rectangles already solved", rectangles.len());
-            return Ok(());
-        }
-
-        tracing::info!(
-            "Solving {} unsolved rectangles (out of {})",
-            unsolved.len(),
-            rectangles.len()
-        );
-
-        for (i, rect) in unsolved.iter().enumerate() {
-            tracing::info!(
-                "Solving rectangle {}/{}: {} ({}x{})",
-                i + 1,
-                unsolved.len(),
-                rect.id,
-                rect.width,
-                rect.height
-            );
-
-            let image_path = self.cache.rectangle_image_path(rect);
-
-            // Upload and wait for solution
-            match client.solve_and_get_stars(&image_path, DEFAULT_SOLVE_TIMEOUT) {
-                Ok(stars) => {
-                    // Get job ID from a re-query (not ideal but works)
-                    // For now, use a placeholder
-                    let job_id = 0u64; // We don't have easy access to this after solve_and_get_stars
-
-                    self.cache.save_axy_result(&rect.id, job_id, &stars)?;
-                    tracing::info!("Solved rectangle {}: {} stars", rect.id, stars.len());
-                }
-                Err(e) => {
-                    tracing::error!("Failed to solve rectangle {}: {}", rect.id, e);
-                    // Continue with other rectangles
-                }
-            }
-
-            // Rate limiting - be nice to the server
-            if i + 1 < unsolved.len() {
-                std::thread::sleep(Duration::from_secs(2));
-            }
-        }
-
-        Ok(())
-    }
-
-    /// Solve rectangles using local solve-field command.
+    /// Solve rectangles using local image2xy command.
     ///
     /// This is much faster than the web API and doesn't require an API key.
     /// Requires astrometry.net to be installed locally with index files.
@@ -450,7 +366,7 @@ mod tests {
         let output_dir = temp_dir.join("output");
         let cache_dir = temp_dir.join("cache");
 
-        let benchmark = AstrometryBenchmark::with_dirs(cache_dir, output_dir, None);
+        let benchmark = AstrometryBenchmark::with_dirs(cache_dir, output_dir);
         assert!(benchmark.is_ok());
 
         // Cleanup
@@ -475,7 +391,7 @@ mod tests {
         let cache_dir = temp_dir.join("cache");
         let output_dir = temp_dir.join("output");
 
-        let mut benchmark = AstrometryBenchmark::with_dirs(cache_dir, output_dir, None).unwrap();
+        let mut benchmark = AstrometryBenchmark::with_dirs(cache_dir, output_dir).unwrap();
 
         let rectangles = benchmark.prepare_rectangles(&source_image, 3).unwrap();
 
@@ -496,17 +412,9 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Requires NOVA_API_KEY and LUMOS_CALIBRATION_DIR
-    fn test_full_benchmark() {
+    #[ignore] // Requires LUMOS_CALIBRATION_DIR and local astrometry.net
+    fn test_full_benchmark_local() {
         crate::testing::init_tracing();
-
-        let api_key = match std::env::var("NOVA_API_KEY") {
-            Ok(key) => key,
-            Err(_) => {
-                eprintln!("NOVA_API_KEY not set, skipping test");
-                return;
-            }
-        };
 
         let Some(cal_dir) = calibration_dir() else {
             eprintln!("LUMOS_CALIBRATION_DIR not set, skipping test");
@@ -519,13 +427,18 @@ mod tests {
             return;
         }
 
-        let mut benchmark = AstrometryBenchmark::new(Some(api_key)).unwrap();
+        if !LocalSolver::is_available() {
+            eprintln!("Local astrometry.net not installed, skipping test");
+            return;
+        }
+
+        let mut benchmark = AstrometryBenchmark::new().unwrap();
 
         // Generate 2 rectangles for testing
         let rectangles = benchmark.prepare_rectangles(&source_image, 2).unwrap();
 
-        // Solve through astrometry.net
-        benchmark.solve_rectangles(&rectangles).unwrap();
+        // Solve using local solver
+        benchmark.solve_rectangles_local(&rectangles).unwrap();
 
         // Run benchmark
         let config = StarDetectionConfig::default();
@@ -546,7 +459,7 @@ mod tests {
     fn test_benchmark_cached() {
         crate::testing::init_tracing();
 
-        let benchmark = match AstrometryBenchmark::new(None) {
+        let benchmark = match AstrometryBenchmark::new() {
             Ok(b) => b,
             Err(e) => {
                 eprintln!("Failed to create benchmark: {}", e);
