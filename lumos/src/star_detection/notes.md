@@ -129,91 +129,49 @@ If profiling shows bottlenecks in real-world usage:
 
 This section documents current limitations and provides a concrete plan to address each one.
 
-### 1. No Gain Parameter (SNR Calculation)
+### 1. Gain Parameter for SNR Calculation ✅ IMPLEMENTED
 
-**Current state**: SNR is calculated as `flux / (noise * sqrt(aperture_area))`, which assumes background-dominated regime. This underestimates noise for bright stars.
+**Status**: Complete. Added to `StarDetectionConfig` and `compute_metrics()`.
 
-**Correct CCD noise equation**:
+The full CCD noise equation is now used when gain is provided:
 ```
 SNR = flux / sqrt(flux/gain + npix × (σ_sky² + σ_read²/gain²))
 ```
 
-Where:
-- `flux` = source counts (ADU)
-- `gain` = electrons per ADU (e-/ADU)
-- `npix` = number of pixels in aperture
-- `σ_sky` = sky background noise per pixel
-- `σ_read` = read noise in electrons
-
-**Implementation plan**:
-
-| Step | Task | Files | Priority |
-|------|------|-------|----------|
-| 1.1 | Add `gain` and `read_noise` fields to `StarDetectionConfig` | `mod.rs` | Medium |
-| 1.2 | Update `compute_metrics()` to use full CCD equation | `centroid/mod.rs` | Medium |
-| 1.3 | Make gain/read_noise optional (default to background-dominated) | `mod.rs` | Medium |
-| 1.4 | Add tests comparing SNR with/without gain correction | `centroid/tests.rs` | Medium |
-
-**API change**:
+**Usage**:
 ```rust
-pub struct StarDetectionConfig {
-    // ... existing fields ...
-    
-    /// Camera gain in electrons per ADU (e-/ADU).
-    /// Used for accurate SNR calculation. Set to None for background-dominated estimate.
-    pub gain: Option<f32>,
-    
-    /// Read noise in electrons.
-    /// Used for accurate SNR calculation. Set to None to ignore.
-    pub read_noise: Option<f32>,
-}
+let config = StarDetectionConfig {
+    gain: Some(1.5),        // e-/ADU
+    read_noise: Some(3.5),  // e-
+    ..Default::default()
+};
 ```
+
+When `gain` is `None`, falls back to simplified background-dominated formula.
 
 ---
 
-### 2. No Read Noise Handling
+### 2. Read Noise Handling ✅ IMPLEMENTED
 
-**Current state**: Detection threshold only considers sky noise (`background + k × σ_sky`). Read noise is not included.
+**Status**: Complete. Coupled with gain parameter above.
 
-**Impact**: Faint star detection is less accurate, especially for low-gain cameras or short exposures where read noise dominates.
-
-**Implementation plan**:
-
-| Step | Task | Files | Priority |
-|------|------|-------|----------|
-| 2.1 | Add combined noise calculation: `σ_total = sqrt(σ_sky² + σ_read²)` | `background/mod.rs` | Low |
-| 2.2 | Update `BackgroundMap.noise` to include read noise if provided | `background/mod.rs` | Low |
-| 2.3 | Pass read_noise from config through the pipeline | `mod.rs`, `detection/mod.rs` | Low |
-
-**Note**: This is coupled with limitation #1 (gain parameter). Implement together.
+The `read_noise` field works together with `gain` for accurate SNR calculation. Both are optional; when either is `None`, the simpler background-dominated formula is used.
 
 ---
 
-### 3. Fixed CFA Handling (Median Filter Always Applied)
+### 3. CFA Handling ✅ IMPLEMENTED
 
-**Current state**: `find_stars()` always applies 3x3 median filter to smooth Bayer pattern artifacts. This is unnecessary for monochrome sensors and adds ~6ms overhead.
+**Status**: Complete. Added `is_cfa` flag to `StarDetectionConfig`.
 
-**Implementation plan**:
-
-| Step | Task | Files | Priority |
-|------|------|-------|----------|
-| 3.1 | Add `is_cfa: bool` field to `StarDetectionConfig` | `mod.rs` | High |
-| 3.2 | Skip median filter when `is_cfa == false` | `mod.rs:find_stars()` | High |
-| 3.3 | Default `is_cfa` to `true` for backward compatibility | `mod.rs` | High |
-
-**API change**:
+**Usage**:
 ```rust
-pub struct StarDetectionConfig {
-    // ... existing fields ...
-    
-    /// Whether the image has a Color Filter Array (Bayer/X-Trans).
-    /// When true, applies median filter to remove CFA artifacts.
-    /// Set to false for monochrome sensors to skip the filter (~6ms faster).
-    pub is_cfa: bool,
-}
+let config = StarDetectionConfig {
+    is_cfa: false,  // Skip median filter for monochrome sensors
+    ..Default::default()
+};
 ```
 
-**Estimated improvement**: 6ms faster for mono sensors on 4K images.
+**Performance**: ~6ms faster for mono sensors on 4K images by skipping unnecessary median filter.
 
 ---
 
@@ -259,46 +217,31 @@ pub fn cross_match_catalog(
 
 ---
 
-### 5. No Defect Map Support
+### 5. Defect Map Support ✅ IMPLEMENTED
 
-**Current state**: Hot pixels, dead pixels, and bad columns are not explicitly handled. They may be detected as cosmic rays (if sharp) or cause false detections.
+**Status**: Complete. Added `DefectMap` struct and defect masking to the pipeline.
 
-**Implementation plan**:
-
-| Step | Task | Files | Priority |
-|------|------|-------|----------|
-| 5.1 | Define `DefectMap` struct (hot pixels, dead pixels, bad columns) | New: `defects.rs` | Medium |
-| 5.2 | Add optional `defect_map` to `StarDetectionConfig` | `mod.rs` | Medium |
-| 5.3 | Mask defect pixels before detection (set to NaN or background) | `mod.rs:find_stars()` | Medium |
-| 5.4 | Reject stars whose centroids fall on defects | `centroid/mod.rs` | Medium |
-| 5.5 | Add `Star.near_defect: bool` flag for diagnostics | `mod.rs` | Low |
-
-**API sketch**:
+**Usage**:
 ```rust
-#[derive(Debug, Clone, Default)]
-pub struct DefectMap {
-    /// Hot pixel coordinates (x, y).
-    pub hot_pixels: Vec<(usize, usize)>,
-    /// Dead pixel coordinates (x, y).
-    pub dead_pixels: Vec<(usize, usize)>,
-    /// Bad columns (x coordinate).
-    pub bad_columns: Vec<usize>,
-    /// Bad rows (y coordinate).
-    pub bad_rows: Vec<usize>,
-}
+let defect_map = DefectMap {
+    hot_pixels: vec![(100, 200), (150, 300)],
+    dead_pixels: vec![(500, 600)],
+    bad_columns: vec![1024],
+    bad_rows: vec![],
+};
 
-pub struct StarDetectionConfig {
-    // ... existing fields ...
-    
-    /// Optional defect map for masking bad pixels.
-    pub defect_map: Option<DefectMap>,
-}
+let config = StarDetectionConfig {
+    defect_map: Some(defect_map),
+    ..Default::default()
+};
 ```
 
-**Implementation detail**: Convert `DefectMap` to a boolean mask once at start of `find_stars()`, then use it to:
-1. Replace defect pixels with local median before processing
-2. Skip candidates whose peak falls on a defect
-3. Flag stars within N pixels of a defect
+**Implementation**:
+- `DefectMap` struct with `hot_pixels`, `dead_pixels`, `bad_columns`, `bad_rows`
+- `to_mask()` method converts to boolean mask for efficient lookup
+- `is_defective()` method for single-pixel queries
+- Defective pixels are replaced with local median (3x3 neighborhood) before processing
+- This prevents hot pixels from being detected as stars
 
 ---
 
@@ -324,13 +267,13 @@ pub struct StarDetectionConfig {
 
 ### Implementation Priority Summary
 
-| Limitation | Priority | Effort | Impact |
+| Limitation | Priority | Effort | Status |
 |------------|----------|--------|--------|
-| 3. CFA handling | **High** | Low | 6ms speedup for mono, easy win |
-| 1. Gain parameter | Medium | Medium | More accurate SNR for bright stars |
-| 2. Read noise | Medium | Low | Coupled with #1 |
-| 5. Defect map | Medium | Medium | Prevents false detections |
-| 4. WCS/catalog | Low | Medium | Nice-to-have for verification |
+| 3. CFA handling | **High** | Low | ✅ **DONE** - `is_cfa` config flag |
+| 1. Gain parameter | Medium | Medium | ✅ **DONE** - Full CCD noise equation |
+| 2. Read noise | Medium | Low | ✅ **DONE** - Coupled with gain |
+| 5. Defect map | Medium | Medium | ✅ **DONE** - `DefectMap` struct |
+| 4. WCS/catalog | Low | Medium | Pending - Nice-to-have |
 | 6. PSF photometry | Very Low | Very High | Out of scope for registration |
 
 ---

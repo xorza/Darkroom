@@ -113,7 +113,17 @@ pub fn compute_centroid(
     }
 
     // Compute quality metrics
-    let metrics = compute_metrics(pixels, width, height, background, cx, cy, stamp_radius)?;
+    let metrics = compute_metrics(
+        pixels,
+        width,
+        height,
+        background,
+        cx,
+        cy,
+        stamp_radius,
+        config.gain,
+        config.read_noise,
+    )?;
 
     // Compute L.A.Cosmic Laplacian SNR for cosmic ray detection
     let icx = cx.round() as isize;
@@ -227,6 +237,13 @@ pub(crate) struct StarMetrics {
 }
 
 /// Compute quality metrics for a star at the given position.
+///
+/// If `gain` and `read_noise` are provided, uses the full CCD noise equation:
+/// `SNR = flux / sqrt(flux/gain + npix × (σ_sky² + σ_read²/gain²))`
+///
+/// Otherwise, uses the simplified background-dominated formula:
+/// `SNR = flux / (σ_sky × sqrt(npix))`
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn compute_metrics(
     pixels: &[f32],
     width: usize,
@@ -235,6 +252,8 @@ pub(crate) fn compute_metrics(
     cx: f32,
     cy: f32,
     stamp_radius: usize,
+    gain: Option<f32>,
+    read_noise: Option<f32>,
 ) -> Option<StarMetrics> {
     if !is_valid_stamp_position(cx, cy, width, height, stamp_radius) {
         return None;
@@ -330,7 +349,7 @@ pub(crate) fn compute_metrics(
         0.0
     };
 
-    // SNR = flux / (noise * sqrt(aperture_area))
+    // Compute SNR using appropriate noise model
     let avg_noise = if noise_count > 0 {
         noise_sum / noise_count as f32
     } else {
@@ -338,10 +357,42 @@ pub(crate) fn compute_metrics(
     };
 
     let aperture_area = (2 * stamp_radius + 1).pow(2) as f32;
-    let snr = if avg_noise > f32::EPSILON {
-        flux / (avg_noise * aperture_area.sqrt())
-    } else {
-        flux / f32::EPSILON
+    let npix = aperture_area;
+
+    let snr = match (gain, read_noise) {
+        // Full CCD noise equation when gain is provided:
+        // SNR = flux / sqrt(flux/gain + npix × (σ_sky² + σ_read²/gain²))
+        // flux is in ADU, σ_sky is in ADU, σ_read is in electrons
+        (Some(g), Some(rn)) if g > f32::EPSILON => {
+            let shot_noise_var = flux / g; // Poisson noise in electrons² converted to ADU²
+            let sky_noise_var = avg_noise * avg_noise; // Background noise variance in ADU²
+            let read_noise_var = (rn * rn) / (g * g); // Read noise in ADU²
+            let total_noise_var = shot_noise_var + npix * (sky_noise_var + read_noise_var);
+            if total_noise_var > f32::EPSILON {
+                flux / total_noise_var.sqrt()
+            } else {
+                flux / f32::EPSILON
+            }
+        }
+        // Partial: gain only (no read noise), useful for shot-noise dominated regime
+        (Some(g), None) if g > f32::EPSILON => {
+            let shot_noise_var = flux / g;
+            let sky_noise_var = avg_noise * avg_noise;
+            let total_noise_var = shot_noise_var + npix * sky_noise_var;
+            if total_noise_var > f32::EPSILON {
+                flux / total_noise_var.sqrt()
+            } else {
+                flux / f32::EPSILON
+            }
+        }
+        // Simplified background-dominated formula (default)
+        _ => {
+            if avg_noise > f32::EPSILON {
+                flux / (avg_noise * npix.sqrt())
+            } else {
+                flux / f32::EPSILON
+            }
+        }
     };
 
     // Sharpness = peak / core_flux
