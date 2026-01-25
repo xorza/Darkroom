@@ -1232,3 +1232,156 @@ fn test_ransac_minimum_points() {
     let result = result.unwrap();
     assert_eq!(result.inliers.len(), 2);
 }
+
+// ============================================================================
+// StarMatch-based estimation tests
+// ============================================================================
+
+#[test]
+fn test_estimate_with_matches_basic() {
+    use crate::registration::types::StarMatch;
+
+    // Create reference and target stars
+    let ref_stars: Vec<(f64, f64)> = vec![
+        (100.0, 100.0),
+        (200.0, 100.0),
+        (100.0, 200.0),
+        (200.0, 200.0),
+        (150.0, 150.0),
+    ];
+
+    // Apply known translation
+    let dx = 50.0;
+    let dy = -30.0;
+    let target_stars: Vec<(f64, f64)> = ref_stars.iter().map(|(x, y)| (x + dx, y + dy)).collect();
+
+    // Create matches with varying confidences
+    let matches: Vec<StarMatch> = (0..ref_stars.len())
+        .map(|i| StarMatch {
+            ref_idx: i,
+            target_idx: i,
+            votes: 10 - i,                      // Higher votes for lower indices
+            confidence: 1.0 - (i as f64 * 0.1), // Higher confidence for lower indices
+        })
+        .collect();
+
+    let config = RansacConfig {
+        seed: Some(42),
+        ..Default::default()
+    };
+
+    let ransac = RansacEstimator::new(config);
+    let result = ransac.estimate_with_matches(
+        &matches,
+        &ref_stars,
+        &target_stars,
+        TransformType::Translation,
+    );
+
+    assert!(result.is_some(), "estimate_with_matches should succeed");
+    let result = result.unwrap();
+
+    // Should find the correct translation
+    let (est_dx, est_dy) = result.transform.translation_components();
+    assert!(
+        (est_dx - dx).abs() < 1.0,
+        "Expected dx={}, got {}",
+        dx,
+        est_dx
+    );
+    assert!(
+        (est_dy - dy).abs() < 1.0,
+        "Expected dy={}, got {}",
+        dy,
+        est_dy
+    );
+}
+
+#[test]
+fn test_estimate_with_matches_empty() {
+    use crate::registration::types::StarMatch;
+
+    let matches: Vec<StarMatch> = vec![];
+    let ref_stars: Vec<(f64, f64)> = vec![];
+    let target_stars: Vec<(f64, f64)> = vec![];
+
+    let ransac = RansacEstimator::new(RansacConfig::default());
+    let result = ransac.estimate_with_matches(
+        &matches,
+        &ref_stars,
+        &target_stars,
+        TransformType::Translation,
+    );
+
+    assert!(result.is_none(), "Empty matches should return None");
+}
+
+#[test]
+fn test_estimate_with_matches_uses_confidence() {
+    use crate::registration::types::StarMatch;
+
+    // Create points where one outlier has low confidence
+    let ref_stars: Vec<(f64, f64)> = vec![
+        (100.0, 100.0),
+        (200.0, 100.0),
+        (100.0, 200.0),
+        (200.0, 200.0),
+        (150.0, 150.0), // This one will be an outlier
+    ];
+
+    let dx = 50.0;
+    let dy = -30.0;
+
+    // Create target stars with one outlier
+    let mut target_stars: Vec<(f64, f64)> =
+        ref_stars.iter().map(|(x, y)| (x + dx, y + dy)).collect();
+    target_stars[4] = (1000.0, 1000.0); // Outlier
+
+    // Create matches - give the outlier very low confidence
+    let matches: Vec<StarMatch> = (0..ref_stars.len())
+        .map(|i| StarMatch {
+            ref_idx: i,
+            target_idx: i,
+            votes: if i == 4 { 1 } else { 10 },
+            confidence: if i == 4 { 0.01 } else { 0.9 }, // Very low confidence for outlier
+        })
+        .collect();
+
+    let config = RansacConfig {
+        seed: Some(42),
+        inlier_threshold: 5.0,
+        ..Default::default()
+    };
+
+    let ransac = RansacEstimator::new(config);
+    let result = ransac.estimate_with_matches(
+        &matches,
+        &ref_stars,
+        &target_stars,
+        TransformType::Translation,
+    );
+
+    assert!(result.is_some());
+    let result = result.unwrap();
+
+    // The outlier should not be in the inliers
+    assert!(
+        !result.inliers.contains(&4),
+        "Outlier (index 4) should not be in inliers"
+    );
+
+    // Should still find the correct translation
+    let (est_dx, est_dy) = result.transform.translation_components();
+    assert!(
+        (est_dx - dx).abs() < 1.0,
+        "Expected dx={}, got {}",
+        dx,
+        est_dx
+    );
+    assert!(
+        (est_dy - dy).abs() < 1.0,
+        "Expected dy={}, got {}",
+        dy,
+        est_dy
+    );
+}

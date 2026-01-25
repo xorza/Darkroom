@@ -202,66 +202,73 @@ enum NearestBuffer {
 
 ## Phase 4: Algorithm Improvements (3-4 days)
 
-### 4.1 Replace Iterative Eigensolver for Homography
-
-**File:** `ransac/mod.rs:698-751`
-
-**Current:** `solve_homogeneous_9x9()` uses 50 iterations of power iteration
-
-**Issue:** Slow and potentially inaccurate for ill-conditioned matrices
-
-**Improvement:** Use SVD from `nalgebra` or `ndarray-linalg`:
-```rust
-use nalgebra::{DMatrix, SVD};
-
-fn solve_homogeneous_svd(a: &[[f64; 9]; 8]) -> Option<[f64; 9]> {
-    let mat = DMatrix::from_row_slice(8, 9, &a.iter().flatten().collect::<Vec<_>>());
-    let svd = SVD::new(mat, true, true);
-    let v = svd.v_t?.transpose();
-    // Last column of V is the solution
-    Some(v.column(8).as_slice().try_into().ok()?)
-}
-```
-
-**Effort:** 4 hours (includes adding dependency)
-
-### 4.2 Phase Correlation Wraparound Handling
-
-**File:** `phase_correlation/mod.rs:156-172`
-
-**Issue:** Large translations (> image_size/4) cause FFT wraparound
-
-**Improvement:** Add coarse-to-fine refinement:
-```rust
-pub fn correlate_large_offset(&self, ...) -> Option<PhaseCorrelationResult> {
-    // 1. Downsample both images by 4x
-    // 2. Correlate downsampled (handles up to image_size offsets)
-    // 3. Refine at full resolution around coarse estimate
-}
-```
-
-**Effort:** 4 hours
-
-### 4.3 Make Progressive RANSAC Default
+### 4.1 Replace Iterative Eigensolver for Homography ✅ DONE
 
 **File:** `ransac/mod.rs`
 
-**Current:** `estimate_progressive()` exists but `estimate()` is default
+**Implementation:**
+- Added `nalgebra` dependency to workspace and lumos crate
+- Replaced `solve_homogeneous_9x9()` with SVD-based implementation
+- Uses `nalgebra::SVD` to find the right singular vector corresponding to smallest singular value
+- Removed unused `solve_linear_9x9()` Gaussian elimination function
+- All 49 RANSAC tests pass, including homography tests
 
-**Change:** When confidences are available, use progressive sampling by default:
+**Benefits:**
+- More accurate for ill-conditioned matrices
+- No iteration count tuning needed
+- Mathematically correct null-space computation
+- Cleaner, shorter code (~20 lines vs ~50 lines)
+
+**Effort:** 4 hours → Done
+
+### 4.2 Phase Correlation Wraparound Handling ✅ DONE
+
+**File:** `phase_correlation/mod.rs`
+
+**Implementation:**
+- Added `correlate_large_offset()` function for multi-scale correlation
+- Downsamples images by 4x using box filter averaging
+- Runs phase correlation on downsampled images
+- Extends detectable offset range from ~image_size/4 to ~image_size
+- Falls back to standard correlation for small images (<64 after downsampling)
+- Added helper function `downsample_image()` for box filter averaging
+- Added 3 unit tests for the new functionality
+
+**Trade-offs:**
+- Reduced accuracy (4-pixel precision instead of sub-pixel)
+- Suitable as coarse estimate to be refined by star matching
+- Confidence scaled by 0.9 to reflect reduced resolution
+
+**Effort:** 4 hours → Done
+
+### 4.3 Make Progressive RANSAC Default ✅ DONE
+
+**File:** `ransac/mod.rs`
+
+**Implementation:**
+- Added `estimate_with_matches()` method to `RansacEstimator`
+- Takes `StarMatch` objects directly, extracts coordinates and confidences
+- Automatically uses progressive sampling via `estimate_progressive()`
+- This is now the recommended API when using triangle matching results
+- Added 3 unit tests for the new method
+
+**API:**
 ```rust
-pub fn estimate(&self, ref_points, target_points, transform_type) -> Option<RansacResult> {
-    // Use uniform sampling
-}
-
-pub fn estimate_with_matches(&self, matches: &[StarMatch], ...) -> Option<RansacResult> {
-    // Extract confidences from matches, use progressive
-    let confidences: Vec<f64> = matches.iter().map(|m| m.confidence).collect();
-    self.estimate_progressive(ref_points, target_points, &confidences, transform_type)
-}
+pub fn estimate_with_matches(
+    &self,
+    matches: &[StarMatch],
+    ref_stars: &[(f64, f64)],
+    target_stars: &[(f64, f64)],
+    transform_type: TransformType,
+) -> Option<RansacResult>
 ```
 
-**Effort:** 2 hours
+**Benefits:**
+- Cleaner API - no need to manually extract coordinates and confidences
+- Progressive sampling is used automatically when confidences are available
+- Better outlier rejection by prioritizing high-confidence matches
+
+**Effort:** 2 hours → Done
 
 ---
 

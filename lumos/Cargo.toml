@@ -30,6 +30,7 @@ criterion = { workspace = true, optional = true }
 rustfft = { workspace = true }
 rand = { workspace = true }
 rand_chacha = { workspace = true }
+nalgebra = { workspace = true }
 
 [dev-dependencies]
 criterion = { workspace = true }

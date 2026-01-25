@@ -466,6 +466,111 @@ impl PhaseCorrelator {
     }
 }
 
+/// Estimate translation for potentially large offsets using multi-scale approach.
+///
+/// Standard phase correlation has limited range due to FFT wraparound (typically
+/// up to image_size/4). This method handles larger offsets by downsampling both
+/// images and running phase correlation at reduced resolution, which extends
+/// the detectable offset range by the downsampling factor.
+///
+/// # Arguments
+/// * `reference` - Reference image
+/// * `target` - Target image
+/// * `width` - Image width
+/// * `height` - Image height
+/// * `config` - Phase correlation configuration
+///
+/// # Returns
+/// Phase correlation result with extended range, or None if estimation failed.
+///
+/// # Note
+/// The accuracy is reduced by the downsampling factor (typically 4 pixels instead
+/// of sub-pixel). For large offsets where standard phase correlation fails, this
+/// provides a coarse estimate that can be refined by other means (e.g., star matching).
+pub fn correlate_large_offset(
+    reference: &[f32],
+    target: &[f32],
+    width: usize,
+    height: usize,
+    config: &PhaseCorrelationConfig,
+) -> Option<PhaseCorrelationResult> {
+    // Downsampling factor - 4x allows detecting offsets up to ~image_size (vs image_size/4)
+    const DOWNSAMPLE_FACTOR: usize = 4;
+
+    // Minimum size for downsampled image to maintain correlation quality
+    const MIN_DOWNSAMPLE_SIZE: usize = 64;
+
+    let ds_width = width / DOWNSAMPLE_FACTOR;
+    let ds_height = height / DOWNSAMPLE_FACTOR;
+
+    // If image is too small for downsampling, use standard correlation
+    if ds_width < MIN_DOWNSAMPLE_SIZE || ds_height < MIN_DOWNSAMPLE_SIZE {
+        let correlator = PhaseCorrelator::new(width, height, config.clone());
+        return correlator.correlate(reference, target, width, height);
+    }
+
+    // Downsample both images using box filter (averaging)
+    let ref_ds = downsample_image(reference, width, height, DOWNSAMPLE_FACTOR);
+    let tar_ds = downsample_image(target, width, height, DOWNSAMPLE_FACTOR);
+
+    // Run phase correlation on downsampled images
+    let correlator = PhaseCorrelator::new(ds_width, ds_height, config.clone());
+    let result = correlator.correlate(&ref_ds, &tar_ds, ds_width, ds_height)?;
+
+    // Scale up the translation to full resolution
+    let dx = result.translation.0 * DOWNSAMPLE_FACTOR as f64;
+    let dy = result.translation.1 * DOWNSAMPLE_FACTOR as f64;
+
+    Some(PhaseCorrelationResult {
+        translation: (dx, dy),
+        peak_value: result.peak_value,
+        // Slightly lower confidence due to reduced resolution
+        confidence: result.confidence * 0.9,
+    })
+}
+
+/// Downsample an image using box filter (averaging).
+fn downsample_image(image: &[f32], width: usize, height: usize, factor: usize) -> Vec<f32> {
+    let new_width = width / factor;
+    let new_height = height / factor;
+    let mut result = vec![0.0f32; new_width * new_height];
+
+    let factor_sq = (factor * factor) as f32;
+
+    for ny in 0..new_height {
+        for nx in 0..new_width {
+            let mut sum = 0.0f32;
+            for dy in 0..factor {
+                for dx in 0..factor {
+                    let x = nx * factor + dx;
+                    let y = ny * factor + dy;
+                    sum += image[y * width + x];
+                }
+            }
+            result[ny * new_width + nx] = sum / factor_sq;
+        }
+    }
+
+    result
+}
+
+/// Shift an image by a fractional offset using bilinear interpolation.
+#[cfg(test)]
+fn shift_image(image: &[f32], width: usize, height: usize, dx: f64, dy: f64) -> Vec<f32> {
+    let mut result = vec![0.0f32; width * height];
+
+    for y in 0..height {
+        for x in 0..width {
+            // Sample from source position (inverse of shift)
+            let sx = x as f64 - dx;
+            let sy = y as f64 - dy;
+            result[y * width + x] = bilinear_sample(image, width, height, sx, sy);
+        }
+    }
+
+    result
+}
+
 /// Compute 1D Hann window.
 pub fn hann_window(size: usize) -> Vec<f32> {
     use std::f32::consts::PI;

@@ -16,10 +16,11 @@ pub mod bench;
 
 pub mod simd;
 
+use nalgebra::{DMatrix, SVD};
 use rand::prelude::*;
 use rand_chacha::ChaCha8Rng;
 
-use crate::registration::types::{TransformMatrix, TransformType};
+use crate::registration::types::{StarMatch, TransformMatrix, TransformType};
 
 /// RANSAC configuration.
 #[derive(Debug, Clone)]
@@ -455,6 +456,43 @@ impl RansacEstimator {
 
         None
     }
+
+    /// Estimate transformation from star matches using progressive sampling.
+    ///
+    /// This is the recommended method when you have `StarMatch` objects from
+    /// triangle matching, as it uses the match confidences to guide RANSAC
+    /// sampling, typically finding good solutions faster.
+    ///
+    /// # Arguments
+    /// * `matches` - Star matches with confidence scores
+    /// * `ref_stars` - Reference star positions (x, y)
+    /// * `target_stars` - Target star positions (x, y)
+    /// * `transform_type` - Type of transformation to estimate
+    ///
+    /// # Returns
+    /// Best transformation found, or None if estimation failed.
+    pub fn estimate_with_matches(
+        &self,
+        matches: &[StarMatch],
+        ref_stars: &[(f64, f64)],
+        target_stars: &[(f64, f64)],
+        transform_type: TransformType,
+    ) -> Option<RansacResult> {
+        if matches.is_empty() {
+            return None;
+        }
+
+        // Extract point pairs and confidences from matches
+        let ref_points: Vec<(f64, f64)> = matches.iter().map(|m| ref_stars[m.ref_idx]).collect();
+
+        let target_points: Vec<(f64, f64)> =
+            matches.iter().map(|m| target_stars[m.target_idx]).collect();
+
+        let confidences: Vec<f64> = matches.iter().map(|m| m.confidence).collect();
+
+        // Use progressive sampling with the confidences
+        self.estimate_progressive(&ref_points, &target_points, &confidences, transform_type)
+    }
 }
 
 /// Weighted sampling of k unique indices from a pool.
@@ -872,94 +910,31 @@ pub(crate) fn normalize_points(points: &[(f64, f64)]) -> (Vec<(f64, f64)>, Trans
     (normalized, t)
 }
 
-/// Solve 9x9 homogeneous system using inverse iteration.
+/// Solve 9x9 homogeneous system using SVD.
+///
+/// Finds the eigenvector corresponding to the smallest singular value of A^T A,
+/// which is the null space of A (or closest to it for overdetermined systems).
 fn solve_homogeneous_9x9(ata: &[[f64; 9]; 9]) -> Option<[f64; 9]> {
-    // Use inverse iteration to find eigenvector of smallest eigenvalue
-    // Start with random vector and iterate
+    // Flatten the 9x9 matrix into a nalgebra DMatrix
+    let data: Vec<f64> = ata.iter().flatten().copied().collect();
+    let matrix = DMatrix::from_row_slice(9, 9, &data);
 
-    let mut v = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0];
-    let epsilon = 1e-10;
+    // Compute SVD with V matrix (we need the right singular vectors)
+    let svd = SVD::new(matrix, false, true);
 
-    // Add small regularization to diagonal for invertibility
-    let mut a_reg = *ata;
-    #[allow(clippy::needless_range_loop)]
-    for i in 0..9 {
-        a_reg[i][i] += epsilon;
+    // Get V^T (right singular vectors as rows)
+    let v_t = svd.v_t?;
+
+    // The last row of V^T (last column of V) corresponds to smallest singular value
+    // This is the solution to the homogeneous system
+    let last_row = v_t.row(8);
+
+    let mut result = [0.0; 9];
+    for (i, &val) in last_row.iter().enumerate() {
+        result[i] = val;
     }
 
-    // Inverse iteration: v = A^-1 * v, then normalize
-    for _ in 0..50 {
-        // Solve A * v_new = v using Gaussian elimination
-        let v_new = solve_linear_9x9(&a_reg, &v)?;
-
-        // Normalize
-        let norm: f64 = v_new.iter().map(|x| x * x).sum::<f64>().sqrt();
-        if norm < 1e-15 {
-            return None;
-        }
-
-        for i in 0..9 {
-            v[i] = v_new[i] / norm;
-        }
-    }
-
-    Some(v)
-}
-
-/// Solve 9x9 linear system using Gaussian elimination with partial pivoting.
-fn solve_linear_9x9(a: &[[f64; 9]; 9], b: &[f64; 9]) -> Option<[f64; 9]> {
-    let mut aug = [[0.0; 10]; 9];
-
-    // Build augmented matrix
-    for i in 0..9 {
-        for j in 0..9 {
-            aug[i][j] = a[i][j];
-        }
-        aug[i][9] = b[i];
-    }
-
-    // Forward elimination with partial pivoting
-    #[allow(clippy::needless_range_loop)]
-    for col in 0..9 {
-        // Find pivot
-        let mut max_row = col;
-        let mut max_val = aug[col][col].abs();
-        for row in (col + 1)..9 {
-            if aug[row][col].abs() > max_val {
-                max_val = aug[row][col].abs();
-                max_row = row;
-            }
-        }
-
-        if max_val < 1e-15 {
-            return None; // Singular matrix
-        }
-
-        // Swap rows
-        if max_row != col {
-            aug.swap(col, max_row);
-        }
-
-        // Eliminate
-        for row in (col + 1)..9 {
-            let factor = aug[row][col] / aug[col][col];
-            for j in col..10 {
-                aug[row][j] -= factor * aug[col][j];
-            }
-        }
-    }
-
-    // Back substitution
-    let mut x = [0.0; 9];
-    for i in (0..9).rev() {
-        x[i] = aug[i][9];
-        for j in (i + 1)..9 {
-            x[i] -= aug[i][j] * x[j];
-        }
-        x[i] /= aug[i][i];
-    }
-
-    Some(x)
+    Some(result)
 }
 
 /// Compute centroid of points.

@@ -77,7 +77,8 @@ bzip2 = { version = "*" }
 dirs = { version = "*" }
 tempfile = { version = "*" }
 rand_chacha = { version = "*" }
-rustfft ={ version = "*" }
+rustfft = { version = "*" }
+nalgebra = { version = "*" }
 
 
 [profile.bench]
