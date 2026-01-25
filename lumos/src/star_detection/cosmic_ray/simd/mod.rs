@@ -249,4 +249,339 @@ mod tests {
             expected
         );
     }
+
+    // ========== Comprehensive SIMD vs Scalar tests ==========
+
+    #[test]
+    fn test_compute_laplacian_simd_small_image() {
+        // Test images smaller than SIMD width threshold
+        for width in 4..16 {
+            for height in 3..8 {
+                let pixels: Vec<f32> = (0..width * height)
+                    .map(|i| (i as f32 * 0.1).sin() + 1.0)
+                    .collect();
+
+                let expected = compute_laplacian_reference(&pixels, width, height);
+                let result = compute_laplacian_simd(&pixels, width, height);
+
+                for y in 0..height {
+                    for x in 0..width {
+                        let idx = y * width + x;
+                        assert!(
+                            (result[idx] - expected[idx]).abs() < 1e-5,
+                            "Small image {}x{} mismatch at ({}, {}): {} vs {}",
+                            width,
+                            height,
+                            x,
+                            y,
+                            result[idx],
+                            expected[idx]
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_compute_laplacian_simd_edge_rows() {
+        let width = 64;
+        let height = 32;
+        let pixels: Vec<f32> = (0..width * height)
+            .map(|i| (i as f32 * 0.05).cos() * 10.0 + 50.0)
+            .collect();
+
+        let expected = compute_laplacian_reference(&pixels, width, height);
+        let result = compute_laplacian_simd(&pixels, width, height);
+
+        // Specifically check edge rows (y=0 and y=height-1)
+        for x in 0..width {
+            // Top row
+            let idx_top = x;
+            assert!(
+                (result[idx_top] - expected[idx_top]).abs() < 1e-4,
+                "Top edge mismatch at x={}: {} vs {}",
+                x,
+                result[idx_top],
+                expected[idx_top]
+            );
+
+            // Bottom row
+            let idx_bottom = (height - 1) * width + x;
+            assert!(
+                (result[idx_bottom] - expected[idx_bottom]).abs() < 1e-4,
+                "Bottom edge mismatch at x={}: {} vs {}",
+                x,
+                result[idx_bottom],
+                expected[idx_bottom]
+            );
+        }
+    }
+
+    #[test]
+    fn test_compute_laplacian_simd_edge_columns() {
+        let width = 64;
+        let height = 32;
+        let pixels: Vec<f32> = (0..width * height)
+            .map(|i| (i as f32 * 0.03).sin() * 20.0 + 100.0)
+            .collect();
+
+        let expected = compute_laplacian_reference(&pixels, width, height);
+        let result = compute_laplacian_simd(&pixels, width, height);
+
+        // Specifically check edge columns (x=0 and x=width-1)
+        for y in 0..height {
+            // Left column
+            let idx_left = y * width;
+            assert!(
+                (result[idx_left] - expected[idx_left]).abs() < 1e-4,
+                "Left edge mismatch at y={}: {} vs {}",
+                y,
+                result[idx_left],
+                expected[idx_left]
+            );
+
+            // Right column
+            let idx_right = y * width + width - 1;
+            assert!(
+                (result[idx_right] - expected[idx_right]).abs() < 1e-4,
+                "Right edge mismatch at y={}: {} vs {}",
+                y,
+                result[idx_right],
+                expected[idx_right]
+            );
+        }
+    }
+
+    #[test]
+    fn test_compute_laplacian_simd_corners() {
+        let width = 64;
+        let height = 32;
+        let pixels: Vec<f32> = (0..width * height).map(|i| (i % 50) as f32 * 0.1).collect();
+
+        let expected = compute_laplacian_reference(&pixels, width, height);
+        let result = compute_laplacian_simd(&pixels, width, height);
+
+        // Check all four corners
+        let corners = [
+            (0, 0),                  // top-left
+            (width - 1, 0),          // top-right
+            (0, height - 1),         // bottom-left
+            (width - 1, height - 1), // bottom-right
+        ];
+
+        for (x, y) in corners {
+            let idx = y * width + x;
+            assert!(
+                (result[idx] - expected[idx]).abs() < 1e-4,
+                "Corner ({}, {}) mismatch: {} vs {}",
+                x,
+                y,
+                result[idx],
+                expected[idx]
+            );
+        }
+    }
+
+    #[test]
+    fn test_compute_laplacian_simd_negative_values() {
+        let width = 48;
+        let height = 24;
+        let pixels: Vec<f32> = (0..width * height)
+            .map(|i| (i as f32 * 0.2).sin() * 50.0) // Mix of positive and negative
+            .collect();
+
+        let expected = compute_laplacian_reference(&pixels, width, height);
+        let result = compute_laplacian_simd(&pixels, width, height);
+
+        for y in 0..height {
+            for x in 0..width {
+                let idx = y * width + x;
+                assert!(
+                    (result[idx] - expected[idx]).abs() < 1e-4,
+                    "Negative values mismatch at ({}, {}): {} vs {}",
+                    x,
+                    y,
+                    result[idx],
+                    expected[idx]
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_compute_laplacian_simd_large_image() {
+        let width = 256;
+        let height = 128;
+        let pixels: Vec<f32> = (0..width * height)
+            .map(|i| ((i * 13) % 256) as f32 * 0.01)
+            .collect();
+
+        let expected = compute_laplacian_reference(&pixels, width, height);
+        let result = compute_laplacian_simd(&pixels, width, height);
+
+        for y in 0..height {
+            for x in 0..width {
+                let idx = y * width + x;
+                assert!(
+                    (result[idx] - expected[idx]).abs() < 1e-4,
+                    "Large image mismatch at ({}, {}): {} vs {}",
+                    x,
+                    y,
+                    result[idx],
+                    expected[idx]
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_compute_laplacian_simd_multiple_peaks() {
+        let width = 64;
+        let height = 32;
+        let mut pixels = vec![0.1f32; width * height];
+
+        // Add multiple sharp peaks
+        let peaks = [(10, 8), (30, 12), (50, 20), (20, 25)];
+        for (px, py) in peaks {
+            pixels[py * width + px] = 1.0;
+        }
+
+        let expected = compute_laplacian_reference(&pixels, width, height);
+        let result = compute_laplacian_simd(&pixels, width, height);
+
+        // Check all pixels match
+        for y in 0..height {
+            for x in 0..width {
+                let idx = y * width + x;
+                assert!(
+                    (result[idx] - expected[idx]).abs() < 1e-5,
+                    "Multiple peaks mismatch at ({}, {}): {} vs {}",
+                    x,
+                    y,
+                    result[idx],
+                    expected[idx]
+                );
+            }
+        }
+
+        // Verify peaks have negative Laplacian
+        for (px, py) in peaks {
+            let idx = py * width + px;
+            assert!(
+                result[idx] < -3.0,
+                "Peak at ({}, {}) should be negative: {}",
+                px,
+                py,
+                result[idx]
+            );
+        }
+    }
+
+    #[test]
+    fn test_compute_laplacian_simd_gradient() {
+        // Test with a linear gradient (should have small Laplacian)
+        let width = 64;
+        let height = 32;
+        let pixels: Vec<f32> = (0..width * height)
+            .map(|i| {
+                let x = i % width;
+                let y = i / width;
+                (x as f32 * 0.1) + (y as f32 * 0.2)
+            })
+            .collect();
+
+        let expected = compute_laplacian_reference(&pixels, width, height);
+        let result = compute_laplacian_simd(&pixels, width, height);
+
+        for y in 0..height {
+            for x in 0..width {
+                let idx = y * width + x;
+                assert!(
+                    (result[idx] - expected[idx]).abs() < 1e-4,
+                    "Gradient mismatch at ({}, {}): {} vs {}",
+                    x,
+                    y,
+                    result[idx],
+                    expected[idx]
+                );
+            }
+        }
+
+        // Interior pixels of linear gradient should have near-zero Laplacian
+        for y in 1..height - 1 {
+            for x in 1..width - 1 {
+                let idx = y * width + x;
+                assert!(
+                    result[idx].abs() < 1e-4,
+                    "Linear gradient interior should be ~0: ({}, {}) = {}",
+                    x,
+                    y,
+                    result[idx]
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_compute_laplacian_row_simd_matches_scalar() {
+        let width = 64;
+        let height = 10;
+        let pixels: Vec<f32> = (0..width * height)
+            .map(|i| (i as f32 * 0.17).sin() * 30.0 + 50.0)
+            .collect();
+
+        // Test each interior row
+        for y in 1..height - 1 {
+            let mut output_simd = vec![0.0f32; pixels.len()];
+            let mut output_scalar = vec![0.0f32; pixels.len()];
+
+            compute_laplacian_row_simd(&pixels, width, y, &mut output_simd);
+            compute_laplacian_row_scalar(&pixels, width, y, &mut output_scalar);
+
+            // Check interior pixels of this row
+            for x in 1..width - 1 {
+                let idx = y * width + x;
+                assert!(
+                    (output_simd[idx] - output_scalar[idx]).abs() < 1e-4,
+                    "Row {} mismatch at x={}: {} vs {}",
+                    y,
+                    x,
+                    output_simd[idx],
+                    output_scalar[idx]
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_compute_laplacian_simd_various_widths() {
+        // Test widths that exercise different SIMD paths
+        let widths = [6, 7, 8, 9, 10, 11, 12, 15, 16, 17, 31, 32, 33, 63, 64, 65];
+        let height = 10;
+
+        for width in widths {
+            let pixels: Vec<f32> = (0..width * height)
+                .map(|i| (i as f32 * 0.13).cos() * 25.0 + 50.0)
+                .collect();
+
+            let expected = compute_laplacian_reference(&pixels, width, height);
+            let result = compute_laplacian_simd(&pixels, width, height);
+
+            for y in 0..height {
+                for x in 0..width {
+                    let idx = y * width + x;
+                    assert!(
+                        (result[idx] - expected[idx]).abs() < 1e-4,
+                        "Width {} mismatch at ({}, {}): {} vs {}",
+                        width,
+                        x,
+                        y,
+                        result[idx],
+                        expected[idx]
+                    );
+                }
+            }
+        }
+    }
 }
