@@ -21,9 +21,10 @@ use rayon::prelude::*;
 use crate::astro_image::{AstroImage, AstroImageMetadata, ImageDimensions};
 use crate::stacking::FrameType;
 use crate::stacking::cache_config::{
-    CacheConfig, CacheStage, MEMORY_PERCENT, compute_optimal_chunk_rows_with_memory,
+    CacheConfig, MEMORY_PERCENT, compute_optimal_chunk_rows_with_memory,
 };
 use crate::stacking::error::Error;
+use crate::stacking::progress::{ProgressCallback, StackingStage, report_progress};
 
 /// Generate a cache filename from the hash of the source path.
 fn cache_filename_for_path(path: &Path) -> String {
@@ -68,6 +69,8 @@ pub struct ImageCache {
     metadata: AstroImageMetadata,
     /// Configuration for cache operations.
     config: CacheConfig,
+    /// Progress callback.
+    progress: ProgressCallback,
 }
 
 impl ImageCache {
@@ -96,13 +99,14 @@ impl ImageCache {
         paths: &[P],
         config: &CacheConfig,
         frame_type: FrameType,
+        progress: ProgressCallback,
     ) -> Result<Self, Error> {
         if paths.is_empty() {
             return Err(Error::NoPaths);
         }
 
         // Report initial progress
-        config.report_progress(0, paths.len(), CacheStage::Loading);
+        report_progress(&progress, 0, paths.len(), StackingStage::Loading);
 
         // Load first image to get dimensions
         let first_path = paths[0].as_ref();
@@ -127,9 +131,16 @@ impl ImageCache {
         );
 
         let storage = if use_in_memory {
-            Self::load_in_memory(paths, config, frame_type, dimensions, first_image)?
+            Self::load_in_memory(paths, &progress, frame_type, dimensions, first_image)?
         } else {
-            Self::load_to_disk(paths, config, frame_type, dimensions, first_image)?
+            Self::load_to_disk(
+                paths,
+                config,
+                &progress,
+                frame_type,
+                dimensions,
+                first_image,
+            )?
         };
 
         Ok(Self {
@@ -137,18 +148,19 @@ impl ImageCache {
             dimensions,
             metadata,
             config: config.clone(),
+            progress,
         })
     }
 
     /// Load all images into memory.
     fn load_in_memory<P: AsRef<Path> + Sync>(
         paths: &[P],
-        config: &CacheConfig,
+        progress: &ProgressCallback,
         frame_type: FrameType,
         dimensions: ImageDimensions,
         first_image: AstroImage,
     ) -> Result<Storage, Error> {
-        config.report_progress(1, paths.len(), CacheStage::Loading);
+        report_progress(progress, 1, paths.len(), StackingStage::Loading);
 
         // Load remaining images in parallel
         let remaining_results: Result<Vec<(usize, AstroImage)>, Error> = paths[1..]
@@ -185,7 +197,7 @@ impl ImageCache {
         images.push(first_image);
         images.extend(remaining.into_iter().map(|(_, img)| img));
 
-        config.report_progress(paths.len(), paths.len(), CacheStage::Loading);
+        report_progress(progress, paths.len(), paths.len(), StackingStage::Loading);
 
         tracing::info!("Loaded {} frames into memory", images.len());
         Ok(Storage::InMemory(images))
@@ -195,6 +207,7 @@ impl ImageCache {
     fn load_to_disk<P: AsRef<Path>>(
         paths: &[P],
         config: &CacheConfig,
+        progress: &ProgressCallback,
         frame_type: FrameType,
         dimensions: ImageDimensions,
         first_image: AstroImage,
@@ -232,7 +245,7 @@ impl ImageCache {
         };
         mmaps.push(mmap);
         cache_paths.push(first_cache_path);
-        config.report_progress(1, paths.len(), CacheStage::Loading);
+        report_progress(progress, 1, paths.len(), StackingStage::Loading);
 
         // Process remaining images
         for (i, path) in paths.iter().enumerate().skip(1) {
@@ -277,7 +290,7 @@ impl ImageCache {
 
             mmaps.push(mmap);
             cache_paths.push(cache_path);
-            config.report_progress(i + 1, paths.len(), CacheStage::Loading);
+            report_progress(progress, i + 1, paths.len(), StackingStage::Loading);
         }
 
         tracing::info!("Cached {} frames to disk at {:?}", mmaps.len(), cache_dir);
@@ -345,8 +358,7 @@ impl ImageCache {
         let mut output_pixels = vec![0.0f32; dims.pixel_count()];
         let num_chunks = height.div_ceil(chunk_rows);
 
-        self.config
-            .report_progress(0, num_chunks, CacheStage::Processing);
+        report_progress(&self.progress, 0, num_chunks, StackingStage::Processing);
 
         for chunk_idx in 0..num_chunks {
             let start_row = chunk_idx * chunk_rows;
@@ -380,8 +392,12 @@ impl ImageCache {
                     }
                 });
 
-            self.config
-                .report_progress(chunk_idx + 1, num_chunks, CacheStage::Processing);
+            report_progress(
+                &self.progress,
+                chunk_idx + 1,
+                num_chunks,
+                StackingStage::Processing,
+            );
         }
 
         AstroImage {
@@ -710,7 +726,12 @@ mod tests {
     fn test_from_paths_empty_returns_no_paths_error() {
         let paths: Vec<PathBuf> = vec![];
         let config = CacheConfig::default();
-        let result = ImageCache::from_paths(&paths, &config, FrameType::Dark);
+        let result = ImageCache::from_paths(
+            &paths,
+            &config,
+            FrameType::Dark,
+            ProgressCallback::default(),
+        );
 
         assert!(result.is_err());
         let err = result.unwrap_err();
@@ -721,7 +742,12 @@ mod tests {
     fn test_from_paths_nonexistent_file_returns_image_load_error() {
         let paths = vec![PathBuf::from("/nonexistent/path/to/image.fits")];
         let config = CacheConfig::default();
-        let result = ImageCache::from_paths(&paths, &config, FrameType::Dark);
+        let result = ImageCache::from_paths(
+            &paths,
+            &config,
+            FrameType::Dark,
+            ProgressCallback::default(),
+        );
 
         assert!(result.is_err());
         let err = result.unwrap_err();

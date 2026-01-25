@@ -3,6 +3,7 @@ mod cache_config;
 mod error;
 mod mean;
 mod median;
+mod progress;
 mod sigma_clipped;
 
 use std::path::PathBuf;
@@ -12,6 +13,7 @@ use strum_macros::Display;
 pub use cache_config::CacheConfig;
 pub use error::Error;
 pub use median::MedianConfig;
+pub use progress::{ProgressCallback, StackingProgress, StackingStage};
 pub use sigma_clipped::SigmaClippedConfig;
 
 #[cfg(feature = "bench")]
@@ -137,7 +139,7 @@ impl ImageStack {
     /// - Image dimensions don't match
     /// - Cache directory creation fails (for disk-backed storage)
     /// - Cache file I/O fails (for disk-backed storage)
-    pub fn process(&self) -> Result<AstroImage, Error> {
+    pub fn process(&self, progress: ProgressCallback) -> Result<AstroImage, Error> {
         if self.paths.is_empty() {
             return Err(Error::NoPaths);
         }
@@ -180,10 +182,15 @@ impl ImageStack {
         match &self.method {
             StackingMethod::Mean => mean::stack_mean_from_paths(&self.paths, self.frame_type),
             StackingMethod::Median(config) => {
-                median::stack_median_from_paths(&self.paths, self.frame_type, config)
+                median::stack_median_from_paths(&self.paths, self.frame_type, config, progress)
             }
             StackingMethod::SigmaClippedMean(config) => {
-                sigma_clipped::stack_sigma_clipped_from_paths(&self.paths, self.frame_type, config)
+                sigma_clipped::stack_sigma_clipped_from_paths(
+                    &self.paths,
+                    self.frame_type,
+                    config,
+                    progress,
+                )
             }
         }
     }
@@ -200,7 +207,7 @@ mod tests {
     #[test]
     fn test_image_stack_empty_paths_returns_no_paths_error() {
         let stack = ImageStack::new(FrameType::Dark, StackingMethod::Mean, Vec::<PathBuf>::new());
-        let result = stack.process();
+        let result = stack.process(ProgressCallback::default());
 
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), Error::NoPaths));
@@ -210,7 +217,7 @@ mod tests {
     fn test_image_stack_mean_nonexistent_file() {
         let paths = vec![PathBuf::from("/nonexistent/stack_image.fits")];
         let stack = ImageStack::new(FrameType::Dark, StackingMethod::Mean, paths);
-        let result = stack.process();
+        let result = stack.process(ProgressCallback::default());
 
         assert!(result.is_err());
         match result.unwrap_err() {
@@ -225,7 +232,7 @@ mod tests {
     fn test_image_stack_median_nonexistent_file() {
         let paths = vec![PathBuf::from("/nonexistent/median_stack.fits")];
         let stack = ImageStack::new(FrameType::Flat, StackingMethod::default(), paths);
-        let result = stack.process();
+        let result = stack.process(ProgressCallback::default());
 
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), Error::ImageLoad { .. }));
@@ -240,7 +247,7 @@ mod tests {
             StackingMethod::SigmaClippedMean(config),
             paths,
         );
-        let result = stack.process();
+        let result = stack.process(ProgressCallback::default());
 
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), Error::ImageLoad { .. }));
@@ -344,7 +351,7 @@ mod tests {
             method
         );
         let stack = ImageStack::new(frame_type, method, paths.clone());
-        let master = stack.process().unwrap();
+        let master = stack.process(ProgressCallback::default()).unwrap();
 
         let first = AstroImage::from_file(&paths[0]).unwrap();
         println!(
@@ -428,7 +435,7 @@ mod tests {
             StackingMethod::Median(config.clone()),
             paths.clone(),
         );
-        let master = stack.process().unwrap();
+        let master = stack.process(ProgressCallback::default()).unwrap();
 
         let first = AstroImage::from_file(&paths[0]).unwrap();
         println!(

@@ -14,7 +14,10 @@ pub use registration::{
     InterpolationMethod, RegistrationConfig, RegistrationError, RegistrationResult, Registrator,
     TransformMatrix, TransformType,
 };
-pub use stacking::{FrameType, ImageStack, MedianConfig, SigmaClipConfig, StackingMethod};
+pub use stacking::{
+    CacheConfig, FrameType, ImageStack, MedianConfig, ProgressCallback, SigmaClipConfig,
+    StackingMethod, StackingProgress, StackingStage,
+};
 pub use star_detection::{Star, StarDetectionConfig, find_stars};
 
 #[cfg(feature = "bench")]

@@ -13,6 +13,7 @@ use crate::astro_image::AstroImage;
 use crate::math;
 use crate::stacking::cache::ImageCache;
 use crate::stacking::error::Error;
+use crate::stacking::progress::ProgressCallback;
 use crate::stacking::{CacheConfig, FrameType, SigmaClipConfig};
 
 /// Configuration for sigma-clipped mean stacking.
@@ -132,8 +133,9 @@ pub fn stack_sigma_clipped_from_paths<P: AsRef<Path> + Sync>(
     paths: &[P],
     frame_type: FrameType,
     config: &SigmaClippedConfig,
+    progress: ProgressCallback,
 ) -> Result<AstroImage, Error> {
-    let cache = ImageCache::from_paths(paths, &config.cache, frame_type)?;
+    let cache = ImageCache::from_paths(paths, &config.cache, frame_type, progress)?;
     let clip = config.clip;
     let stats = ClipStats::default();
 
@@ -235,7 +237,12 @@ mod tests {
     fn test_empty_paths_returns_no_paths_error() {
         let paths: Vec<PathBuf> = vec![];
         let config = SigmaClippedConfig::default();
-        let result = stack_sigma_clipped_from_paths(&paths, FrameType::Light, &config);
+        let result = stack_sigma_clipped_from_paths(
+            &paths,
+            FrameType::Light,
+            &config,
+            ProgressCallback::default(),
+        );
 
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), Error::NoPaths));
@@ -245,7 +252,12 @@ mod tests {
     fn test_nonexistent_file_returns_image_load_error() {
         let paths = vec![PathBuf::from("/nonexistent/sigma_image.fits")];
         let config = SigmaClippedConfig::default();
-        let result = stack_sigma_clipped_from_paths(&paths, FrameType::Light, &config);
+        let result = stack_sigma_clipped_from_paths(
+            &paths,
+            FrameType::Light,
+            &config,
+            ProgressCallback::default(),
+        );
 
         assert!(result.is_err());
         match result.unwrap_err() {

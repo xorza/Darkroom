@@ -7,6 +7,7 @@ use anyhow::Result;
 use rayon::prelude::*;
 
 use crate::astro_image::HotPixelMap;
+use crate::stacking::ProgressCallback;
 use crate::{AstroImage, FrameType, ImageStack, StackingMethod};
 
 /// Default sigma threshold for hot pixel detection.
@@ -185,7 +186,11 @@ impl CalibrationMasters {
     /// ```
     ///
     /// Missing subdirectories are skipped (the corresponding master will be None).
-    pub fn from_directory<P: AsRef<Path>>(dir: P, method: StackingMethod) -> Result<Self> {
+    pub fn from_directory<P: AsRef<Path>>(
+        dir: P,
+        method: StackingMethod,
+        progress: ProgressCallback,
+    ) -> Result<Self> {
         let dir = dir.as_ref();
         assert!(
             dir.exists(),
@@ -196,11 +201,11 @@ impl CalibrationMasters {
 
         // Try to load existing masters first, then create from raw frames if not found
         let master_dark = Self::load_master(dir, FrameType::Dark, &method)
-            .or_else(|| Self::create_master(dir, "Darks", FrameType::Dark, &method));
+            .or_else(|| Self::create_master(dir, "Darks", FrameType::Dark, &method, &progress));
         let master_flat = Self::load_master(dir, FrameType::Flat, &method)
-            .or_else(|| Self::create_master(dir, "Flats", FrameType::Flat, &method));
+            .or_else(|| Self::create_master(dir, "Flats", FrameType::Flat, &method, &progress));
         let master_bias = Self::load_master(dir, FrameType::Bias, &method)
-            .or_else(|| Self::create_master(dir, "Bias", FrameType::Bias, &method));
+            .or_else(|| Self::create_master(dir, "Bias", FrameType::Bias, &method, &progress));
 
         // Generate hot pixel map from master dark
         let hot_pixel_map = master_dark
@@ -264,6 +269,7 @@ impl CalibrationMasters {
         subdir: &str,
         frame_type: FrameType,
         method: &StackingMethod,
+        progress: &ProgressCallback,
     ) -> Option<AstroImage> {
         let dir = base_dir.join(subdir);
         if !dir.exists() {
@@ -276,7 +282,7 @@ impl CalibrationMasters {
         }
 
         let stack = ImageStack::new(frame_type, method.clone(), paths);
-        match stack.process() {
+        match stack.process(progress.clone()) {
             Ok(image) => Some(image),
             Err(e) => {
                 tracing::error!("Failed to stack {:?} frames: {}", frame_type, e);
@@ -305,8 +311,12 @@ mod tests {
             return;
         };
 
-        let masters =
-            CalibrationMasters::from_directory(&cal_dir, StackingMethod::default()).unwrap();
+        let masters = CalibrationMasters::from_directory(
+            &cal_dir,
+            StackingMethod::default(),
+            ProgressCallback::default(),
+        )
+        .unwrap();
 
         // At least one master should be created
         assert!(
