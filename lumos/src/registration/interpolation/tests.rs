@@ -307,3 +307,78 @@ fn test_lanczos2_vs_lanczos3() {
     // Both should give reasonable values (not wildly different)
     assert!((v2 - v3).abs() < 0.5);
 }
+
+#[test]
+fn test_lanczos_clamping_prevents_overshoot() {
+    // Create image with sharp edge (step function)
+    // This is the classic case where Lanczos produces ringing artifacts
+    let mut input = vec![0.0f32; 64];
+    for y in 0..8 {
+        for x in 4..8 {
+            input[y * 8 + x] = 1.0;
+        }
+    }
+
+    let config_no_clamp = WarpConfig {
+        method: InterpolationMethod::Lanczos3,
+        clamp_output: false,
+        ..Default::default()
+    };
+
+    let config_clamp = WarpConfig {
+        method: InterpolationMethod::Lanczos3,
+        clamp_output: true,
+        ..Default::default()
+    };
+
+    // Sample near the sharp edge - Lanczos can overshoot here
+    let val_no_clamp = interpolate_pixel(&input, 8, 8, 3.7, 4.0, &config_no_clamp);
+    let val_clamp = interpolate_pixel(&input, 8, 8, 3.7, 4.0, &config_clamp);
+
+    // Clamped value must be within [0, 1] range
+    assert!(
+        val_clamp >= 0.0 && val_clamp <= 1.0,
+        "Clamped value {} should be in [0, 1]",
+        val_clamp
+    );
+
+    // Without clamping, Lanczos often produces slight overshoot/undershoot near edges
+    // The clamped value should be different if there was overshoot
+    // (Note: they may be equal if no overshoot occurred at this position)
+    println!(
+        "No clamp: {}, Clamp: {} (difference: {})",
+        val_no_clamp,
+        val_clamp,
+        (val_no_clamp - val_clamp).abs()
+    );
+}
+
+#[test]
+fn test_lanczos_clamping_preserves_smooth_regions() {
+    // In smooth regions, clamping should have minimal effect
+    let input: Vec<f32> = (0..64).map(|i| (i as f32) / 64.0).collect();
+
+    let config_no_clamp = WarpConfig {
+        method: InterpolationMethod::Lanczos3,
+        clamp_output: false,
+        ..Default::default()
+    };
+
+    let config_clamp = WarpConfig {
+        method: InterpolationMethod::Lanczos3,
+        clamp_output: true,
+        ..Default::default()
+    };
+
+    // Sample in smooth gradient region
+    let val_no_clamp = interpolate_pixel(&input, 8, 8, 3.5, 4.5, &config_no_clamp);
+    let val_clamp = interpolate_pixel(&input, 8, 8, 3.5, 4.5, &config_clamp);
+
+    // In smooth regions, clamping should have minimal effect
+    assert!(
+        (val_no_clamp - val_clamp).abs() < 0.01,
+        "Clamping changed smooth region: {} vs {}",
+        val_no_clamp,
+        val_clamp
+    );
+}

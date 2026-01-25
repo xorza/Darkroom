@@ -9,6 +9,7 @@
 //!   astronomical images where preserving fine details matters.
 //! - **Bicubic**: Good quality with reasonable performance. Uses cubic polynomials.
 //! - **Bilinear**: Fast but lower quality. Linear interpolation in both dimensions.
+//!   SIMD-accelerated on x86_64 (AVX2/SSE4.1) and aarch64 (NEON).
 //! - **Nearest**: Fastest, no interpolation. For previews or masks.
 
 use std::f32::consts::PI;
@@ -20,6 +21,8 @@ mod tests;
 
 #[cfg(feature = "bench")]
 pub mod bench;
+
+pub mod simd;
 
 /// Interpolation method for image resampling.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -63,6 +66,15 @@ pub struct WarpConfig {
     pub border_value: f32,
     /// Whether to normalize Lanczos kernel weights (recommended)
     pub normalize_kernel: bool,
+    /// Clamp output to the min/max of neighborhood pixels to reduce ringing.
+    ///
+    /// Lanczos interpolation can produce values outside the range of input pixels
+    /// (ringing artifacts) especially near sharp edges. Enabling this option clamps
+    /// the result to [min, max] of the sampled neighborhood, eliminating overshoot
+    /// and undershoot while preserving most of the sharpness benefit.
+    ///
+    /// This option only affects Lanczos interpolation methods.
+    pub clamp_output: bool,
 }
 
 impl Default for WarpConfig {
@@ -71,6 +83,7 @@ impl Default for WarpConfig {
             method: InterpolationMethod::Lanczos3,
             border_value: 0.0,
             normalize_kernel: true,
+            clamp_output: false,
         }
     }
 }
@@ -229,6 +242,7 @@ fn interpolate_lanczos(
     border: f32,
     a: usize,
     normalize: bool,
+    clamp: bool,
 ) -> f32 {
     let x0 = x.floor() as i32;
     let y0 = y.floor() as i32;
@@ -264,8 +278,10 @@ fn interpolate_lanczos(
         }
     }
 
-    // Compute weighted sum
+    // Compute weighted sum, tracking min/max for clamping
     let mut sum = 0.0;
+    let mut min_val = f32::MAX;
+    let mut max_val = f32::MIN;
 
     for (j, &wyj) in wy.iter().enumerate() {
         let py = y0 - a_i32 + 1 + j as i32;
@@ -273,10 +289,19 @@ fn interpolate_lanczos(
             let px = x0 - a_i32 + 1 + i as i32;
             let pixel = sample_pixel(data, width, height, px, py, border);
             sum += pixel * wxi * wyj;
+
+            if clamp {
+                min_val = min_val.min(pixel);
+                max_val = max_val.max(pixel);
+            }
         }
     }
 
-    sum
+    if clamp && min_val <= max_val {
+        sum.clamp(min_val, max_val)
+    } else {
+        sum
+    }
 }
 
 /// Interpolate a single pixel at sub-pixel coordinates.
@@ -307,6 +332,7 @@ pub fn interpolate_pixel(
             config.border_value,
             2,
             config.normalize_kernel,
+            config.clamp_output,
         ),
         InterpolationMethod::Lanczos3 => interpolate_lanczos(
             data,
@@ -317,6 +343,7 @@ pub fn interpolate_pixel(
             config.border_value,
             3,
             config.normalize_kernel,
+            config.clamp_output,
         ),
         InterpolationMethod::Lanczos4 => interpolate_lanczos(
             data,
@@ -327,6 +354,7 @@ pub fn interpolate_pixel(
             config.border_value,
             4,
             config.normalize_kernel,
+            config.clamp_output,
         ),
     }
 }
@@ -335,6 +363,10 @@ pub fn interpolate_pixel(
 ///
 /// Applies the inverse of the given transform to map output coordinates
 /// to input coordinates, then interpolates the input image.
+///
+/// For bilinear interpolation, this function uses SIMD acceleration when available:
+/// - AVX2/SSE4.1 on x86_64
+/// - NEON on aarch64
 ///
 /// # Arguments
 ///
@@ -369,6 +401,25 @@ pub fn warp_image(
     // Compute inverse transform to map output -> input
     let inverse = transform.inverse();
 
+    // Use SIMD-accelerated path for bilinear interpolation
+    if config.method == InterpolationMethod::Bilinear {
+        for y in 0..output_height {
+            let row_start = y * output_width;
+            let row_end = row_start + output_width;
+            simd::warp_row_bilinear_simd(
+                input,
+                input_width,
+                input_height,
+                &mut output[row_start..row_end],
+                y,
+                &inverse,
+                config.border_value,
+            );
+        }
+        return output;
+    }
+
+    // Standard path for other interpolation methods
     for y in 0..output_height {
         for x in 0..output_width {
             // Transform output coordinates to input coordinates
@@ -402,6 +453,7 @@ pub fn resample_image(
         method,
         border_value: 0.0,
         normalize_kernel: true,
+        clamp_output: false,
     };
 
     let scale_x = input_width as f64 / output_width as f64;

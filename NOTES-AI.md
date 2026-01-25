@@ -522,9 +522,23 @@ DistortionMap      // Grid-based distortion visualization with interpolation
 
 **Interpolation methods:**
 - `Nearest` - Fastest, for previews/masks
-- `Bilinear` - Fast, reasonable quality
+- `Bilinear` - Fast, reasonable quality, SIMD-accelerated
 - `Bicubic` - Catmull-Rom spline, good quality
 - `Lanczos2/3/4` - Sinc-windowed sinc kernel, highest quality (3 is default)
+
+**Interpolation SIMD acceleration (new):**
+- `simd::warp_row_bilinear_simd()` - SIMD-accelerated bilinear row warping
+- `simd::warp_image_bilinear_simd()` - Full image warping convenience function
+- Platform support: AVX2 (8 pixels/iter), SSE4.1 (4 pixels/iter), NEON (4 pixels/iter)
+- Pre-computes y-dependent transform terms for efficiency
+- Automatic dispatch to best available SIMD path with scalar fallback
+- Integrated into `warp_image()` for transparent acceleration
+
+**Lanczos clamping (new):**
+- `WarpConfig::clamp_output` - Optional clamping to reduce ringing artifacts
+- Clamps interpolated values to [min, max] of sampled neighborhood pixels
+- Eliminates overshoot/undershoot near sharp edges while preserving sharpness
+- Minimal impact in smooth regions (only activates when overshoot occurs)
 
 ## Key Data Structures
 

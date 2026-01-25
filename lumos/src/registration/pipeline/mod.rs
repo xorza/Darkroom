@@ -273,6 +273,7 @@ pub fn warp_to_reference(
         method,
         border_value: 0.0,
         normalize_kernel: true,
+        clamp_output: false,
     };
 
     warp_image(
