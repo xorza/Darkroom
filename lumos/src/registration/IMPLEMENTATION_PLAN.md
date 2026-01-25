@@ -10,7 +10,7 @@ Siril, DeepSkyStacker) and academic research (Astroalign, phase correlation meth
 - Sub-pixel registration accuracy (< 0.1 pixel RMS)
 - Support for translation, similarity, affine, and projective transformations
 - Robust handling of rotation, scale changes, and field distortions
-- SIMD acceleration for all compute-intensive operations
+- SIMD acceleration for all compute-intensive operations (SSE4.1, AVX2, NEON)
 - GPU-ready architecture for future acceleration
 
 **Algorithm Selection Rationale:**
@@ -24,23 +24,23 @@ Siril, DeepSkyStacker) and academic research (Astroalign, phase correlation meth
 ## Architecture Overview
 
 ```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                         Registration Pipeline                                │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                              │
-│  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐    ┌───────────┐ │
-│  │    Input     │───▶│    Coarse    │───▶│     Fine     │───▶│  Transform │ │
-│  │   Images     │    │  Alignment   │    │  Alignment   │    │   Apply    │ │
-│  └──────────────┘    └──────────────┘    └──────────────┘    └───────────┘ │
-│         │                   │                   │                   │        │
-│         ▼                   ▼                   ▼                   ▼        │
-│  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐    ┌───────────┐ │
-│  │    Star      │    │    Phase     │    │   Triangle   │    │  Lanczos  │ │
-│  │  Detection   │    │ Correlation  │    │  Matching    │    │  Resample │ │
-│  │  (existing)  │    │   (FFT)      │    │  + RANSAC    │    │           │ │
-│  └──────────────┘    └──────────────┘    └──────────────┘    └───────────┘ │
-│                                                                              │
-└─────────────────────────────────────────────────────────────────────────────┘
++-----------------------------------------------------------------------------+
+|                         Registration Pipeline                                |
++-----------------------------------------------------------------------------+
+|                                                                              |
+|  +------------+    +------------+    +------------+    +-----------+        |
+|  |    Input   |--->|   Coarse   |--->|    Fine    |--->| Transform |        |
+|  |   Images   |    | Alignment  |    | Alignment  |    |   Apply   |        |
+|  +------------+    +------------+    +------------+    +-----------+        |
+|         |                |                 |                 |               |
+|         v                v                 v                 v               |
+|  +------------+    +------------+    +------------+    +-----------+        |
+|  |    Star    |    |   Phase    |    |  Triangle  |    |  Lanczos  |        |
+|  | Detection  |    |Correlation |    |  Matching  |    |  Resample |        |
+|  | (existing) |    |   (FFT)    |    |  + RANSAC  |    |           |        |
+|  +------------+    +------------+    +------------+    +-----------+        |
+|                                                                              |
++-----------------------------------------------------------------------------+
 ```
 
 ---
@@ -49,59 +49,70 @@ Siril, DeepSkyStacker) and academic research (Astroalign, phase correlation meth
 
 ```
 lumos/src/registration/
-├── mod.rs                      # Public API and re-exports
-├── IMPLEMENTATION_PLAN.md      # This document
-│
-├── types.rs                    # Core types and enums
-│   ├── Transform               # Transformation enum (Translation, Similarity, Affine, Homography)
-│   ├── TransformMatrix         # 3x3 homogeneous transformation matrix
-│   ├── RegistrationConfig      # Configuration struct
-│   ├── RegistrationResult      # Result with transform, metrics, matched stars
-│   └── MatchedStar             # Star correspondence (ref_idx, target_idx, distance)
-│
-├── star_matching/              # Star pattern matching algorithms
-│   ├── mod.rs
-│   ├── triangle.rs             # Triangle descriptor and matching
-│   ├── geometric_hash.rs       # Geometric hashing for fast lookup
-│   ├── voting.rs               # Voting scheme for candidate matches
-│   └── tests.rs
-│
-├── transform/                  # Transformation estimation
-│   ├── mod.rs
-│   ├── ransac.rs               # RANSAC robust estimation
-│   ├── least_squares.rs        # Weighted least squares refinement
-│   ├── models.rs               # Translation, Similarity, Affine, Homography
-│   └── tests.rs
-│
-├── phase_correlation/          # FFT-based coarse alignment
-│   ├── mod.rs
-│   ├── fft.rs                  # FFT wrapper (using rustfft)
-│   ├── correlation.rs          # Phase correlation implementation
-│   ├── subpixel.rs             # Sub-pixel peak detection
-│   ├── simd/                   # SIMD acceleration
-│   │   ├── mod.rs
-│   │   ├── avx2.rs
-│   │   ├── sse.rs
-│   │   └── neon.rs
-│   └── tests.rs
-│
-├── interpolation/              # Image resampling
-│   ├── mod.rs
-│   ├── lanczos.rs              # Lanczos-3 interpolation
-│   ├── bicubic.rs              # Bicubic interpolation (faster fallback)
-│   ├── bilinear.rs             # Bilinear (fastest, lowest quality)
-│   ├── simd/                   # SIMD acceleration
-│   │   ├── mod.rs
-│   │   ├── avx2.rs
-│   │   ├── sse.rs
-│   │   └── neon.rs
-│   └── tests.rs
-│
-├── warp.rs                     # Image warping with transforms
-│
-├── quality.rs                  # Registration quality metrics
-│
-└── bench.rs                    # Benchmarks (feature-gated)
+|-- mod.rs                      # Public API and re-exports
+|-- IMPLEMENTATION_PLAN.md      # This document
+|
+|-- types/                      # Core types and configuration
+|   |-- mod.rs                  # TransformType, TransformMatrix, Config, Result
+|   |-- tests.rs                # Unit tests for types
+|   +-- bench.rs                # Benchmarks (matrix ops, composition)
+|
+|-- triangle/                   # Triangle matching algorithm
+|   |-- mod.rs                  # Triangle descriptor and hash table
+|   |-- matching.rs             # Star matching via triangle voting
+|   |-- simd/                   # SIMD-accelerated distance calculations
+|   |   |-- mod.rs
+|   |   |-- sse.rs              # SSE4.1 implementation
+|   |   +-- neon.rs             # ARM NEON implementation
+|   |-- tests.rs                # Comprehensive matching tests
+|   +-- bench.rs                # Triangle formation, hash table, matching benchmarks
+|
+|-- ransac/                     # RANSAC transformation estimation
+|   |-- mod.rs                  # RansacEstimator, RansacConfig, RansacResult
+|   |-- estimators.rs           # Transform-specific estimators (translation, affine, etc.)
+|   |-- refinement.rs           # Least-squares refinement
+|   |-- simd/                   # SIMD-accelerated residual calculations
+|   |   |-- mod.rs
+|   |   |-- sse.rs
+|   |   +-- neon.rs
+|   |-- tests.rs                # Outlier rejection, refinement tests
+|   +-- bench.rs                # RANSAC iteration benchmarks
+|
+|-- phase_correlation/          # FFT-based coarse alignment
+|   |-- mod.rs                  # PhaseCorrelator, config, result types
+|   |-- fft_ops.rs              # FFT operations using rustfft
+|   |-- subpixel.rs             # Sub-pixel peak detection methods
+|   |-- simd/                   # SIMD-accelerated complex arithmetic
+|   |   |-- mod.rs
+|   |   |-- sse.rs              # SSE4.1 complex multiply
+|   |   +-- neon.rs             # NEON complex multiply
+|   |-- tests.rs                # Correlation accuracy tests
+|   +-- bench.rs                # FFT, correlation benchmarks by image size
+|
+|-- interpolation/              # Image resampling
+|   |-- mod.rs                  # InterpolationMethod, public API
+|   |-- lanczos.rs              # Lanczos-3/4 kernel and interpolation
+|   |-- bicubic.rs              # Bicubic interpolation
+|   |-- bilinear.rs             # Bilinear interpolation
+|   |-- nearest.rs              # Nearest neighbor
+|   |-- simd/                   # SIMD-accelerated interpolation
+|   |   |-- mod.rs
+|   |   |-- sse.rs              # SSE4.1 row processing
+|   |   +-- neon.rs             # NEON row processing
+|   |-- tests.rs                # Kernel properties, accuracy tests
+|   +-- bench.rs                # Interpolation method comparison benchmarks
+|
+|-- pipeline/                   # Full registration pipeline
+|   |-- mod.rs                  # Registrator, register_images, register_and_warp
+|   |-- builder.rs              # RegistrationConfigBuilder
+|   |-- tests.rs                # End-to-end pipeline tests
+|   +-- bench.rs                # Full pipeline benchmarks
+|
++-- quality/                    # Registration quality metrics
+    |-- mod.rs                  # QualityMetrics, assess_quality
+    |-- validation.rs           # Validation against ground truth
+    |-- tests.rs                # Quality assessment tests
+    +-- bench.rs                # Quality computation benchmarks
 ```
 
 ---
@@ -112,7 +123,7 @@ lumos/src/registration/
 
 ```rust
 /// Supported transformation models with increasing degrees of freedom
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TransformType {
     /// Translation only (2 DOF: dx, dy)
     Translation,
@@ -137,124 +148,112 @@ pub struct TransformMatrix {
 }
 
 impl TransformMatrix {
-    /// Create identity transform
     pub fn identity() -> Self;
-    
-    /// Create translation transform
-    pub fn translation(dx: f64, dy: f64) -> Self;
-    
-    /// Create similarity transform (translation + rotation + scale)
+    pub fn from_translation(dx: f64, dy: f64) -> Self;
+    pub fn from_scale(sx: f64, sy: f64) -> Self;
+    pub fn from_rotation(angle: f64) -> Self;
+    pub fn from_rotation_around(angle: f64, cx: f64, cy: f64) -> Self;
     pub fn similarity(dx: f64, dy: f64, angle: f64, scale: f64) -> Self;
-    
-    /// Create affine transform from 6 parameters
     pub fn affine(params: [f64; 6]) -> Self;
-    
-    /// Create homography from 8 parameters (9th is 1.0)
     pub fn homography(params: [f64; 8]) -> Self;
     
-    /// Apply transform to a point
-    pub fn apply(&self, x: f64, y: f64) -> (f64, f64);
-    
-    /// Apply inverse transform to a point
-    pub fn apply_inverse(&self, x: f64, y: f64) -> (f64, f64);
-    
-    /// Compute matrix inverse
-    pub fn inverse(&self) -> Option<Self>;
-    
-    /// Compose two transforms: self * other
+    pub fn transform_point(&self, x: f64, y: f64) -> (f64, f64);
+    pub fn inverse(&self) -> Self;  // Panics on singular matrix
     pub fn compose(&self, other: &Self) -> Self;
     
-    /// Extract translation components
     pub fn translation_components(&self) -> (f64, f64);
-    
-    /// Extract rotation angle (for similarity/euclidean)
     pub fn rotation_angle(&self) -> f64;
-    
-    /// Extract scale factor (for similarity)
     pub fn scale_factor(&self) -> f64;
+    pub fn is_valid(&self) -> bool;
 }
 ```
 
 ### 1.2 Configuration and Results
 
 ```rust
-/// Registration configuration
 #[derive(Debug, Clone)]
 pub struct RegistrationConfig {
-    /// Maximum transformation type to consider
     pub transform_type: TransformType,
-    
-    /// Use phase correlation for coarse alignment first
     pub use_phase_correlation: bool,
     
-    /// RANSAC parameters
+    // RANSAC parameters
     pub ransac_iterations: usize,      // Default: 1000
-    pub ransac_threshold: f64,         // Inlier threshold in pixels, default: 2.0
-    pub ransac_confidence: f64,        // Target confidence, default: 0.999
+    pub ransac_threshold: f64,         // Default: 2.0 pixels
+    pub ransac_confidence: f64,        // Default: 0.999
     
-    /// Triangle matching parameters
-    pub min_stars_for_matching: usize, // Minimum stars required, default: 10
-    pub max_stars_for_matching: usize, // Limit for performance, default: 200
-    pub triangle_tolerance: f64,       // Side ratio tolerance, default: 0.01
+    // Triangle matching parameters
+    pub min_stars_for_matching: usize, // Default: 10
+    pub max_stars_for_matching: usize, // Default: 200
+    pub triangle_tolerance: f64,       // Default: 0.01
     
-    /// Sub-pixel refinement
-    pub refine_with_centroids: bool,   // Use star centroids for refinement
-    pub max_refinement_iterations: usize,
-    
-    /// Quality thresholds
-    pub min_matched_stars: usize,      // Minimum matches required, default: 6
-    pub max_residual_pixels: f64,      // Maximum acceptable RMS error, default: 1.0
+    // Quality thresholds
+    pub min_matched_stars: usize,      // Default: 6
+    pub max_residual_pixels: f64,      // Default: 1.0
 }
 
-/// Result of registration
 #[derive(Debug, Clone)]
 pub struct RegistrationResult {
-    /// Computed transformation matrix
     pub transform: TransformMatrix,
-    
-    /// Matched star pairs (reference_idx, target_idx)
-    pub matched_stars: Vec<(usize, usize)>,
-    
-    /// Per-match residuals in pixels
+    pub matched_stars: Vec<StarMatch>,
     pub residuals: Vec<f64>,
-    
-    /// RMS registration error in pixels
     pub rms_error: f64,
-    
-    /// Maximum residual error in pixels
     pub max_error: f64,
-    
-    /// Number of RANSAC inliers
     pub num_inliers: usize,
-    
-    /// Registration quality score (0.0 - 1.0)
     pub quality_score: f64,
-    
-    /// Processing time in milliseconds
     pub elapsed_ms: f64,
+}
+
+#[derive(Debug, Clone)]
+pub struct StarMatch {
+    pub ref_idx: usize,
+    pub target_idx: usize,
+    pub ref_pos: (f64, f64),
+    pub target_pos: (f64, f64),
 }
 ```
 
-### Tests for Phase 1
+### types/tests.rs
 
 ```rust
 #[cfg(test)]
 mod tests {
-    // Transform matrix tests
-    #[test] fn test_identity_transform();
-    #[test] fn test_translation_transform();
-    #[test] fn test_rotation_90_degrees();
-    #[test] fn test_scale_transform();
-    #[test] fn test_similarity_composition();
-    #[test] fn test_affine_inverse();
-    #[test] fn test_homography_inverse();
-    #[test] fn test_transform_point_roundtrip();
-    #[test] fn test_compose_translations();
-    #[test] fn test_compose_rotations();
+    // Matrix construction
+    fn test_identity_transform();
+    fn test_translation_transform();
+    fn test_rotation_90_degrees();
+    fn test_rotation_180_degrees();
+    fn test_rotation_angle_extraction();
+    fn test_scale_transform();
+    fn test_scale_factor_extraction();
     
-    // Config validation tests
-    #[test] fn test_config_default_values();
-    #[test] fn test_config_validation();
+    // Matrix operations
+    fn test_transform_point();
+    fn test_transform_point_roundtrip();
+    fn test_inverse_translation();
+    fn test_inverse_rotation();
+    fn test_inverse_affine();
+    fn test_inverse_homography();
+    fn test_compose_translations();
+    fn test_compose_rotations();
+    fn test_compose_mixed();
+    
+    // Validation
+    fn test_is_valid_identity();
+    fn test_is_valid_singular();
+    fn test_config_default_values();
+    fn test_config_builder();
+}
+```
+
+### types/bench.rs
+
+```rust
+#[cfg(feature = "bench")]
+mod bench {
+    fn bench_transform_point(c: &mut Criterion);
+    fn bench_matrix_inverse(c: &mut Criterion);
+    fn bench_matrix_compose(c: &mut Criterion);
+    fn bench_transform_1000_points(c: &mut Criterion);
 }
 ```
 
@@ -266,173 +265,204 @@ mod tests {
 
 The triangle matching algorithm identifies similar star patterns between images:
 
-1. **Triangle Formation**: Select N brightest stars, form all possible triangles
-2. **Triangle Descriptor**: Compute invariant features (side ratios, angles)
+1. **Triangle Formation**: Select N brightest stars, form triangles from all combinations
+2. **Triangle Descriptor**: Compute invariant features (side ratios) independent of scale/rotation
 3. **Hash Table Lookup**: Use geometric hashing for O(1) candidate retrieval
 4. **Voting**: Accumulate votes for consistent star correspondences
 5. **Verification**: Validate top candidates with geometric consistency
 
-### 2.2 Triangle Descriptor
+### 2.2 Implementation
 
 ```rust
-/// Triangle formed from three stars, with invariant descriptors
+/// Triangle formed from three stars with scale-invariant descriptors
 #[derive(Debug, Clone)]
-pub struct Triangle {
-    /// Indices of the three stars (sorted by some criterion)
+pub struct TriangleDescriptor {
     pub star_indices: [usize; 3],
-    
-    /// Side lengths sorted: a <= b <= c
-    pub sides: [f64; 3],
-    
-    /// Invariant ratios: (a/c, b/c) - independent of scale
-    pub ratios: (f64, f64),
-    
-    /// Interior angles in radians
-    pub angles: [f64; 3],
-    
-    /// Orientation (clockwise or counter-clockwise)
-    pub orientation: Orientation,
+    pub sides: [f64; 3],        // Sorted: a <= b <= c
+    pub ratios: (f64, f64),     // (a/c, b/c) - scale invariant
+    pub orientation: bool,       // Clockwise or counter-clockwise
 }
 
-impl Triangle {
-    /// Create triangle from three star positions
-    pub fn from_positions(
-        idx: [usize; 3],
-        positions: [(f64, f64); 3],
-    ) -> Self;
-    
-    /// Check if two triangles are similar within tolerance
-    pub fn is_similar(&self, other: &Triangle, tolerance: f64) -> bool;
-    
-    /// Compute hash key for geometric hashing
+impl TriangleDescriptor {
+    pub fn from_positions(indices: [usize; 3], positions: [(f64, f64); 3]) -> Option<Self>;
+    pub fn is_similar(&self, other: &Self, tolerance: f64) -> bool;
     pub fn hash_key(&self, bins: usize) -> (usize, usize);
 }
 
-/// Geometric hash table for fast triangle lookup
+/// Geometric hash table for O(1) triangle lookup
 pub struct TriangleHashTable {
-    /// Hash table: bins × bins grid of triangle indices
     table: Vec<Vec<usize>>,
     bins: usize,
 }
 
 impl TriangleHashTable {
-    /// Build hash table from triangles
-    pub fn build(triangles: &[Triangle], bins: usize) -> Self;
-    
-    /// Find candidate matches for a query triangle
-    pub fn find_candidates(&self, query: &Triangle) -> Vec<usize>;
+    pub fn build(triangles: &[TriangleDescriptor], bins: usize) -> Self;
+    pub fn find_candidates(&self, query: &TriangleDescriptor, tolerance: f64) -> Vec<usize>;
 }
-```
-
-### 2.3 Star Matching
-
-```rust
-/// Match stars between reference and target images using triangle matching
-pub fn match_stars_triangles(
-    ref_stars: &[Star],
-    target_stars: &[Star],
-    config: &TriangleMatchConfig,
-) -> Vec<StarMatch>;
 
 /// Configuration for triangle matching
 #[derive(Debug, Clone)]
 pub struct TriangleMatchConfig {
-    /// Maximum number of stars to use (brightest N)
     pub max_stars: usize,           // Default: 50
-    
-    /// Tolerance for side ratio comparison
-    pub ratio_tolerance: f64,       // Default: 0.01
-    
-    /// Minimum votes required to consider a match
+    pub ratio_tolerance: f64,       // Default: 0.002
     pub min_votes: usize,           // Default: 3
-    
-    /// Use orientation check (handles mirrored images)
+    pub hash_bins: usize,           // Default: 100
     pub check_orientation: bool,    // Default: true
 }
 
-/// A matched star pair with confidence
-#[derive(Debug, Clone)]
-pub struct StarMatch {
-    pub ref_idx: usize,
-    pub target_idx: usize,
-    pub votes: usize,
-    pub confidence: f64,
+/// Match stars between reference and target using triangle matching
+pub fn match_stars(
+    ref_stars: &[(f64, f64)],
+    target_stars: &[(f64, f64)],
+    config: &TriangleMatchConfig,
+) -> Vec<(usize, usize, usize)>;  // (ref_idx, target_idx, votes)
+```
+
+### 2.3 SIMD Optimizations
+
+```rust
+// triangle/simd/mod.rs
+pub mod simd {
+    /// SIMD-accelerated distance calculations for triangle formation
+    /// Computes distances between all star pairs in parallel
+    
+    #[cfg(target_arch = "x86_64")]
+    pub fn compute_distances_sse(
+        positions: &[(f64, f64)],
+        distances: &mut [f64],
+    );
+    
+    #[cfg(target_arch = "aarch64")]
+    pub fn compute_distances_neon(
+        positions: &[(f64, f64)],
+        distances: &mut [f64],
+    );
+    
+    /// SIMD-accelerated ratio comparison for hash table lookup
+    pub fn compare_ratios_simd(
+        query: (f64, f64),
+        candidates: &[(f64, f64)],
+        tolerance: f64,
+        matches: &mut [bool],
+    );
 }
 ```
 
-### 2.4 Implementation Details
-
-**Triangle Selection Strategy:**
-- Use N brightest stars (default N=50, configurable)
-- Form triangles from all combinations: C(N,3) triangles
-- For N=50: 19,600 triangles per image
-- Filter degenerate triangles (very small area, collinear points)
-
-**Geometric Hashing:**
-- Quantize (a/c, b/c) ratios into bins × bins grid
-- Default: 100 × 100 = 10,000 bins
-- Each bin stores list of triangle indices
-- Query: find all triangles in same bin as query
-
-**Voting Scheme:**
-- For each matching triangle pair, vote for the 3 star correspondences
-- Count votes for each (ref_star, target_star) pair
-- Filter pairs with votes >= min_votes
-- Resolve conflicts (one-to-many mappings) by taking highest vote
-
-### Tests for Phase 2
+### triangle/tests.rs
 
 ```rust
 #[cfg(test)]
 mod tests {
     // Triangle descriptor tests
-    #[test] fn test_triangle_from_positions();
-    #[test] fn test_triangle_ratios_scale_invariant();
-    #[test] fn test_triangle_similarity_check();
-    #[test] fn test_triangle_orientation();
-    #[test] fn test_degenerate_triangle_detection();
+    fn test_triangle_from_positions();
+    fn test_triangle_ratios_scale_invariant();
+    fn test_triangle_ratios_rotation_invariant();
+    fn test_triangle_similarity_check();
+    fn test_triangle_orientation_detection();
+    fn test_degenerate_triangle_detection();
+    fn test_collinear_points_rejected();
+    fn test_very_small_triangle_rejected();
     
     // Hash table tests
-    #[test] fn test_hash_table_build();
-    #[test] fn test_hash_table_lookup_exact();
-    #[test] fn test_hash_table_lookup_similar();
-    #[test] fn test_hash_table_empty();
+    fn test_hash_table_build();
+    fn test_hash_table_lookup_exact();
+    fn test_hash_table_lookup_with_tolerance();
+    fn test_hash_table_empty();
+    fn test_hash_key_distribution();
     
-    // Matching tests
-    #[test] fn test_match_identical_star_lists();
-    #[test] fn test_match_translated_stars();
-    #[test] fn test_match_rotated_stars();
-    #[test] fn test_match_scaled_stars();
-    #[test] fn test_match_with_missing_stars();
-    #[test] fn test_match_with_extra_stars();
-    #[test] fn test_match_subset_detection();
-    #[test] fn test_match_mirrored_image();
+    // Star matching tests
+    fn test_match_identical_star_lists();
+    fn test_match_translated_stars();
+    fn test_match_rotated_stars_45deg();
+    fn test_match_rotated_stars_90deg();
+    fn test_match_rotated_stars_180deg();
+    fn test_match_scaled_stars();
+    fn test_match_similarity_transform();
+    fn test_match_with_missing_stars();
+    fn test_match_with_extra_stars();
+    fn test_match_with_noise();
+    fn test_match_mirrored_image();
     
     // Edge cases
-    #[test] fn test_too_few_stars();
-    #[test] fn test_all_collinear_stars();
-    #[test] fn test_duplicate_positions();
+    fn test_too_few_stars();
+    fn test_all_collinear_stars();
+    fn test_duplicate_positions();
+    fn test_very_close_stars();
+    
+    // SIMD tests
+    fn test_simd_distances_match_scalar();
+    fn test_simd_ratio_compare_match_scalar();
 }
 ```
 
-### Benchmarks for Phase 2
+### triangle/bench.rs
 
 ```rust
 #[cfg(feature = "bench")]
 mod bench {
+    use criterion::{criterion_group, Criterion, BenchmarkId};
+    
     // Triangle formation benchmarks
-    fn bench_triangle_formation_50_stars(c: &mut Criterion);
-    fn bench_triangle_formation_100_stars(c: &mut Criterion);
-    fn bench_triangle_formation_200_stars(c: &mut Criterion);
+    fn bench_triangle_formation(c: &mut Criterion) {
+        let mut group = c.benchmark_group("triangle_formation");
+        for n_stars in [20, 50, 100, 200].iter() {
+            group.bench_with_input(
+                BenchmarkId::new("stars", n_stars),
+                n_stars,
+                |b, &n| { /* ... */ },
+            );
+        }
+        group.finish();
+    }
     
     // Hash table benchmarks
-    fn bench_hash_table_build_1000_triangles(c: &mut Criterion);
+    fn bench_hash_table_build(c: &mut Criterion) {
+        let mut group = c.benchmark_group("hash_table_build");
+        for n_triangles in [1000, 5000, 20000].iter() {
+            group.bench_with_input(
+                BenchmarkId::new("triangles", n_triangles),
+                n_triangles,
+                |b, &n| { /* ... */ },
+            );
+        }
+        group.finish();
+    }
+    
     fn bench_hash_table_lookup(c: &mut Criterion);
     
     // Full matching benchmarks
-    fn bench_match_50_stars_translated(c: &mut Criterion);
-    fn bench_match_100_stars_rotated(c: &mut Criterion);
-    fn bench_match_with_outliers(c: &mut Criterion);
+    fn bench_match_stars(c: &mut Criterion) {
+        let mut group = c.benchmark_group("match_stars");
+        for (n_ref, n_target) in [(50, 50), (100, 100), (200, 200)].iter() {
+            // Translation only
+            group.bench_function(
+                BenchmarkId::new("translated", format!("{}x{}", n_ref, n_target)),
+                |b| { /* ... */ },
+            );
+            // Rotation + scale
+            group.bench_function(
+                BenchmarkId::new("similarity", format!("{}x{}", n_ref, n_target)),
+                |b| { /* ... */ },
+            );
+            // With 20% extra stars (outliers)
+            group.bench_function(
+                BenchmarkId::new("with_outliers", format!("{}x{}", n_ref, n_target)),
+                |b| { /* ... */ },
+            );
+        }
+        group.finish();
+    }
+    
+    // SIMD comparison benchmarks
+    fn bench_simd_vs_scalar_distances(c: &mut Criterion);
+    
+    criterion_group!(benches, 
+        bench_triangle_formation,
+        bench_hash_table_build,
+        bench_hash_table_lookup,
+        bench_match_stars,
+        bench_simd_vs_scalar_distances,
+    );
 }
 ```
 
@@ -442,61 +472,52 @@ mod bench {
 
 ### 3.1 Algorithm Description
 
-RANSAC (Random Sample Consensus) robustly estimates transformations in the presence of outliers:
+RANSAC (Random Sample Consensus) robustly estimates transformations:
 
-1. **Random Sample**: Select minimum points needed for transform (4 for homography)
+1. **Random Sample**: Select minimum points needed for transform
 2. **Model Estimation**: Compute candidate transformation from sample
-3. **Consensus**: Count inliers (points within threshold of model)
-4. **Iteration**: Repeat, keeping best model
-5. **Refinement**: Final least-squares fit on all inliers
+3. **Consensus**: Count inliers within threshold
+4. **Iteration**: Repeat with adaptive termination
+5. **Refinement**: Least-squares fit on all inliers
 
 ### 3.2 Implementation
 
 ```rust
-/// RANSAC estimator for robust transformation fitting
-pub struct RansacEstimator {
-    config: RansacConfig,
-}
-
 #[derive(Debug, Clone)]
 pub struct RansacConfig {
-    /// Maximum iterations
     pub max_iterations: usize,      // Default: 1000
-    
-    /// Inlier distance threshold in pixels
-    pub inlier_threshold: f64,      // Default: 2.0
-    
-    /// Early termination confidence
+    pub inlier_threshold: f64,      // Default: 2.0 pixels
     pub confidence: f64,            // Default: 0.999
-    
-    /// Minimum inlier ratio to accept model
     pub min_inlier_ratio: f64,      // Default: 0.5
-}
-
-impl RansacEstimator {
-    /// Estimate transformation from matched point pairs
-    pub fn estimate(
-        &self,
-        ref_points: &[(f64, f64)],
-        target_points: &[(f64, f64)],
-        transform_type: TransformType,
-    ) -> Option<RansacResult>;
+    pub seed: Option<u64>,          // For reproducibility
 }
 
 #[derive(Debug, Clone)]
 pub struct RansacResult {
-    /// Best transformation found
     pub transform: TransformMatrix,
-    
-    /// Indices of inlier matches
     pub inliers: Vec<usize>,
-    
-    /// Number of iterations performed
+    pub inlier_ratio: f64,
     pub iterations: usize,
 }
 
-/// Minimum samples needed for each transform type
-fn min_samples(transform_type: TransformType) -> usize {
+/// Estimate transformation using RANSAC
+pub fn estimate_transform(
+    ref_points: &[(f64, f64)],
+    target_points: &[(f64, f64)],
+    transform_type: TransformType,
+    config: &RansacConfig,
+) -> Option<RansacResult>;
+
+/// Refine transformation using weighted least squares on inliers
+pub fn refine_transform(
+    ref_points: &[(f64, f64)],
+    target_points: &[(f64, f64)],
+    inliers: &[usize],
+    transform_type: TransformType,
+) -> TransformMatrix;
+
+/// Minimum samples for each transform type
+pub fn min_samples(transform_type: TransformType) -> usize {
     match transform_type {
         TransformType::Translation => 1,
         TransformType::Euclidean => 2,
@@ -507,91 +528,140 @@ fn min_samples(transform_type: TransformType) -> usize {
 }
 ```
 
-### 3.3 Adaptive Iteration Count
+### 3.3 SIMD Optimizations
 
 ```rust
-/// Compute number of iterations needed for given confidence
-fn adaptive_iterations(
-    inlier_ratio: f64,
-    sample_size: usize,
-    confidence: f64,
-) -> usize {
-    // N = log(1 - confidence) / log(1 - w^n)
-    // where w = inlier_ratio, n = sample_size
-    let w_n = inlier_ratio.powi(sample_size as i32);
-    let log_conf = (1.0 - confidence).ln();
-    let log_outlier = (1.0 - w_n).ln();
+// ransac/simd/mod.rs
+pub mod simd {
+    /// SIMD-accelerated residual computation
+    /// Computes distance^2 for all points after transformation
     
-    (log_conf / log_outlier).ceil() as usize
+    #[cfg(target_arch = "x86_64")]
+    pub fn compute_residuals_sse(
+        ref_points: &[(f64, f64)],
+        target_points: &[(f64, f64)],
+        transform: &TransformMatrix,
+        residuals: &mut [f64],
+    );
+    
+    #[cfg(target_arch = "aarch64")]
+    pub fn compute_residuals_neon(
+        ref_points: &[(f64, f64)],
+        target_points: &[(f64, f64)],
+        transform: &TransformMatrix,
+        residuals: &mut [f64],
+    );
+    
+    /// SIMD-accelerated inlier counting
+    pub fn count_inliers_simd(
+        residuals: &[f64],
+        threshold_sq: f64,
+    ) -> usize;
+    
+    /// SIMD-accelerated point centroid calculation
+    pub fn compute_centroid_simd(
+        points: &[(f64, f64)],
+    ) -> (f64, f64);
 }
 ```
 
-### 3.4 Least Squares Refinement
-
-```rust
-/// Refine transformation using weighted least squares on inliers
-pub fn refine_transform(
-    ref_points: &[(f64, f64)],
-    target_points: &[(f64, f64)],
-    inliers: &[usize],
-    transform_type: TransformType,
-) -> TransformMatrix;
-
-/// Solve for affine parameters using SVD
-fn solve_affine_svd(
-    ref_points: &[(f64, f64)],
-    target_points: &[(f64, f64)],
-) -> [f64; 6];
-
-/// Solve for homography using DLT (Direct Linear Transform)
-fn solve_homography_dlt(
-    ref_points: &[(f64, f64)],
-    target_points: &[(f64, f64)],
-) -> [f64; 8];
-```
-
-### Tests for Phase 3
+### ransac/tests.rs
 
 ```rust
 #[cfg(test)]
 mod tests {
-    // RANSAC basic tests
-    #[test] fn test_ransac_perfect_translation();
-    #[test] fn test_ransac_perfect_rotation();
-    #[test] fn test_ransac_perfect_affine();
-    #[test] fn test_ransac_perfect_homography();
+    // Basic estimation tests
+    fn test_ransac_perfect_translation();
+    fn test_ransac_perfect_euclidean();
+    fn test_ransac_perfect_similarity();
+    fn test_ransac_perfect_affine();
+    fn test_ransac_perfect_homography();
     
     // Outlier rejection tests
-    #[test] fn test_ransac_with_10_percent_outliers();
-    #[test] fn test_ransac_with_30_percent_outliers();
-    #[test] fn test_ransac_with_50_percent_outliers();
+    fn test_ransac_10_percent_outliers();
+    fn test_ransac_20_percent_outliers();
+    fn test_ransac_30_percent_outliers();
+    fn test_ransac_50_percent_outliers();
+    fn test_ransac_clustered_outliers();
+    fn test_ransac_systematic_outliers();
     
     // Edge cases
-    #[test] fn test_ransac_insufficient_points();
-    #[test] fn test_ransac_all_outliers();
-    #[test] fn test_ransac_collinear_points();
-    
-    // Least squares tests
-    #[test] fn test_ls_refine_improves_accuracy();
-    #[test] fn test_ls_affine_overdetermined();
-    #[test] fn test_ls_homography_overdetermined();
+    fn test_ransac_insufficient_points();
+    fn test_ransac_all_outliers();
+    fn test_ransac_collinear_points();
+    fn test_ransac_degenerate_config();
     
     // Adaptive iteration tests
-    #[test] fn test_adaptive_iterations_high_inlier_ratio();
-    #[test] fn test_adaptive_iterations_low_inlier_ratio();
-    #[test] fn test_early_termination();
+    fn test_adaptive_iterations_high_inlier_ratio();
+    fn test_adaptive_iterations_low_inlier_ratio();
+    fn test_early_termination();
+    
+    // Refinement tests
+    fn test_refinement_improves_accuracy();
+    fn test_refinement_affine_overdetermined();
+    fn test_refinement_homography_overdetermined();
+    
+    // Reproducibility tests
+    fn test_deterministic_with_seed();
+    
+    // SIMD tests
+    fn test_simd_residuals_match_scalar();
+    fn test_simd_inlier_count_match_scalar();
+    fn test_simd_centroid_match_scalar();
 }
 ```
 
-### Benchmarks for Phase 3
+### ransac/bench.rs
 
 ```rust
 #[cfg(feature = "bench")]
 mod bench {
-    fn bench_ransac_100_points_10pct_outliers(c: &mut Criterion);
-    fn bench_ransac_100_points_30pct_outliers(c: &mut Criterion);
-    fn bench_ransac_affine_vs_homography(c: &mut Criterion);
+    use criterion::{criterion_group, Criterion, BenchmarkId};
+    
+    fn bench_ransac_estimation(c: &mut Criterion) {
+        let mut group = c.benchmark_group("ransac_estimation");
+        
+        // Varying point counts
+        for n_points in [50, 100, 200, 500].iter() {
+            // Different outlier ratios
+            for outlier_pct in [0, 10, 20, 30].iter() {
+                group.bench_function(
+                    BenchmarkId::new(
+                        format!("{}pct_outliers", outlier_pct),
+                        n_points,
+                    ),
+                    |b| { /* ... */ },
+                );
+            }
+        }
+        group.finish();
+    }
+    
+    fn bench_transform_types(c: &mut Criterion) {
+        let mut group = c.benchmark_group("ransac_transform_types");
+        for transform_type in [
+            TransformType::Translation,
+            TransformType::Similarity,
+            TransformType::Affine,
+            TransformType::Homography,
+        ].iter() {
+            group.bench_function(
+                BenchmarkId::new("type", format!("{:?}", transform_type)),
+                |b| { /* ... */ },
+            );
+        }
+        group.finish();
+    }
+    
     fn bench_least_squares_refinement(c: &mut Criterion);
+    fn bench_simd_vs_scalar_residuals(c: &mut Criterion);
+    
+    criterion_group!(benches,
+        bench_ransac_estimation,
+        bench_transform_types,
+        bench_least_squares_refinement,
+        bench_simd_vs_scalar_residuals,
+    );
 }
 ```
 
@@ -603,172 +673,196 @@ mod bench {
 
 Phase correlation uses FFT to find translation between images:
 
-1. **FFT**: Compute 2D FFT of both images
-2. **Cross-Power Spectrum**: Multiply FFT₁ by conjugate of FFT₂, normalize
+1. **FFT**: Compute 2D FFT of both images with Hann windowing
+2. **Cross-Power Spectrum**: Multiply FFT1 by conjugate of FFT2, normalize
 3. **Inverse FFT**: Peak location gives translation offset
-4. **Sub-pixel Refinement**: Parabolic fit around peak for sub-pixel accuracy
+4. **Sub-pixel Refinement**: Parabolic/Gaussian fit for sub-pixel accuracy
 
 ### 4.2 Implementation
 
 ```rust
-/// Phase correlation for coarse translation estimation
-pub struct PhaseCorrelator {
-    /// Cached FFT planner for efficiency
-    planner: Arc<dyn FftPlanner<f32>>,
-    
-    /// Configuration
-    config: PhaseCorrelationConfig,
-}
-
 #[derive(Debug, Clone)]
 pub struct PhaseCorrelationConfig {
-    /// Apply Hann window to reduce edge effects
     pub use_windowing: bool,        // Default: true
-    
-    /// Sub-pixel interpolation method
     pub subpixel_method: SubpixelMethod,
-    
-    /// Minimum correlation peak to accept
-    pub min_peak_value: f32,        // Default: 0.1
+    pub min_peak_value: f64,        // Default: 0.1
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SubpixelMethod {
-    /// No sub-pixel refinement
     None,
-    /// Parabolic fit (fast, ~0.1 pixel accuracy)
-    Parabolic,
-    /// Gaussian fit (slower, ~0.05 pixel accuracy)
-    Gaussian,
-    /// Centroid (robust to noise)
-    Centroid,
-}
-
-impl PhaseCorrelator {
-    /// Estimate translation between two images
-    pub fn correlate(
-        &self,
-        reference: &[f32],
-        target: &[f32],
-        width: usize,
-        height: usize,
-    ) -> PhaseCorrelationResult;
+    Parabolic,   // Fast, ~0.1 pixel accuracy
+    Gaussian,    // Slower, ~0.05 pixel accuracy
+    Centroid,    // Robust to noise
 }
 
 #[derive(Debug, Clone)]
 pub struct PhaseCorrelationResult {
-    /// Estimated translation (dx, dy)
     pub translation: (f64, f64),
-    
-    /// Peak correlation value (0.0 - 1.0)
     pub peak_value: f64,
-    
-    /// Secondary peak ratio (lower = more confident)
-    pub secondary_peak_ratio: f64,
+    pub confidence: f64,
 }
-```
 
-### 4.3 Rotation and Scale via Log-Polar Transform
-
-For handling rotation and scale, use log-polar representation:
-
-```rust
-/// Extended phase correlation with rotation/scale detection
-pub fn correlate_with_rotation_scale(
+/// Estimate translation using phase correlation
+pub fn correlate(
     reference: &[f32],
     target: &[f32],
     width: usize,
     height: usize,
-) -> RotationScaleResult;
+    config: &PhaseCorrelationConfig,
+) -> PhaseCorrelationResult;
 
-#[derive(Debug, Clone)]
-pub struct RotationScaleResult {
-    pub translation: (f64, f64),
-    pub rotation: f64,      // Radians
-    pub scale: f64,         // Scale factor
-    pub confidence: f64,
-}
+/// Apply Hann window to reduce edge artifacts
+pub fn apply_hann_window(image: &mut [f32], width: usize, height: usize);
 
-/// Convert image to log-polar representation
-fn to_log_polar(
-    image: &[f32],
+/// Find peak and refine to sub-pixel
+pub fn find_peak_subpixel(
+    correlation: &[f32],
     width: usize,
     height: usize,
-    angular_bins: usize,
-    radial_bins: usize,
-) -> Vec<f32>;
+    method: SubpixelMethod,
+) -> (f64, f64, f64);
 ```
 
-### 4.4 SIMD Optimization
+### 4.3 SIMD Optimizations
 
 ```rust
-/// SIMD-accelerated complex multiply for cross-power spectrum
+// phase_correlation/simd/mod.rs
 pub mod simd {
-    /// AVX2 complex multiply: (a + bi) * (c - di) = (ac + bd) + (bc - ad)i
+    /// SIMD-accelerated complex multiply-conjugate for cross-power spectrum
+    /// Computes (a + bi) * (c - di) = (ac + bd) + (bc - ad)i
+    
     #[cfg(target_arch = "x86_64")]
-    pub fn complex_multiply_conjugate_avx2(
-        fft1_re: &[f32], fft1_im: &[f32],
-        fft2_re: &[f32], fft2_im: &[f32],
-        out_re: &mut [f32], out_im: &mut [f32],
+    pub fn complex_multiply_conjugate_sse(
+        fft1: &[Complex<f32>],
+        fft2: &[Complex<f32>],
+        output: &mut [Complex<f32>],
     );
     
-    /// NEON implementation for ARM
     #[cfg(target_arch = "aarch64")]
-    pub fn complex_multiply_conjugate_neon(...);
+    pub fn complex_multiply_conjugate_neon(
+        fft1: &[Complex<f32>],
+        fft2: &[Complex<f32>],
+        output: &mut [Complex<f32>],
+    );
     
-    /// SSE4.1 fallback
-    #[cfg(target_arch = "x86_64")]
-    pub fn complex_multiply_conjugate_sse41(...);
+    /// SIMD-accelerated normalization of cross-power spectrum
+    pub fn normalize_spectrum_simd(
+        spectrum: &mut [Complex<f32>],
+    );
+    
+    /// SIMD-accelerated Hann window application
+    pub fn apply_hann_window_simd(
+        image: &mut [f32],
+        width: usize,
+        height: usize,
+    );
+    
+    /// SIMD-accelerated peak search
+    pub fn find_max_simd(
+        data: &[f32],
+    ) -> (usize, f32);
 }
 ```
 
-### Tests for Phase 4
+### phase_correlation/tests.rs
 
 ```rust
 #[cfg(test)]
 mod tests {
     // Basic correlation tests
-    #[test] fn test_correlate_identical_images();
-    #[test] fn test_correlate_translated_1_pixel();
-    #[test] fn test_correlate_translated_10_pixels();
-    #[test] fn test_correlate_translated_subpixel();
-    #[test] fn test_correlate_negative_translation();
+    fn test_correlate_identical_images();
+    fn test_correlate_translated_1_pixel();
+    fn test_correlate_translated_5_pixels();
+    fn test_correlate_translated_10_pixels();
+    fn test_correlate_translated_subpixel();
+    fn test_correlate_negative_translation();
+    fn test_correlate_xy_translation();
     
-    // Sub-pixel accuracy tests
-    #[test] fn test_subpixel_parabolic_accuracy();
-    #[test] fn test_subpixel_gaussian_accuracy();
-    #[test] fn test_subpixel_centroid_accuracy();
+    // Sub-pixel method tests
+    fn test_subpixel_parabolic_accuracy();
+    fn test_subpixel_gaussian_accuracy();
+    fn test_subpixel_centroid_accuracy();
+    fn test_subpixel_methods_comparison();
+    
+    // Windowing tests
+    fn test_hann_window_application();
+    fn test_windowing_reduces_artifacts();
     
     // Robustness tests
-    #[test] fn test_correlate_with_noise();
-    #[test] fn test_correlate_partial_overlap();
-    #[test] fn test_correlate_different_brightness();
+    fn test_correlate_with_noise();
+    fn test_correlate_partial_overlap();
+    fn test_correlate_different_brightness();
+    fn test_correlate_empty_image();
+    fn test_correlate_size_mismatch();
     
-    // Rotation/scale tests
-    #[test] fn test_detect_rotation_45_degrees();
-    #[test] fn test_detect_scale_1_5x();
-    #[test] fn test_detect_rotation_and_scale();
+    // Confidence tests
+    fn test_confidence_high_correlation();
+    fn test_confidence_low_correlation();
+    fn test_confidence_ambiguous_peaks();
     
     // SIMD tests
-    #[test] fn test_simd_matches_scalar();
-    #[test] fn test_simd_complex_multiply();
+    fn test_simd_complex_multiply_matches_scalar();
+    fn test_simd_normalize_matches_scalar();
+    fn test_simd_hann_window_matches_scalar();
+    fn test_simd_find_max_matches_scalar();
 }
 ```
 
-### Benchmarks for Phase 4
+### phase_correlation/bench.rs
 
 ```rust
 #[cfg(feature = "bench")]
 mod bench {
-    fn bench_phase_correlation_512x512(c: &mut Criterion);
-    fn bench_phase_correlation_1024x1024(c: &mut Criterion);
-    fn bench_phase_correlation_2048x2048(c: &mut Criterion);
-    fn bench_phase_correlation_4096x4096(c: &mut Criterion);
+    use criterion::{criterion_group, Criterion, BenchmarkId, Throughput};
     
-    fn bench_log_polar_transform(c: &mut Criterion);
-    fn bench_subpixel_refinement(c: &mut Criterion);
+    fn bench_phase_correlation_by_size(c: &mut Criterion) {
+        let mut group = c.benchmark_group("phase_correlation");
+        
+        for (width, height) in [
+            (256, 256),
+            (512, 512),
+            (1024, 1024),
+            (2048, 2048),
+            (4096, 4096),
+        ].iter() {
+            let pixels = width * height;
+            group.throughput(Throughput::Elements(*pixels as u64));
+            group.bench_with_input(
+                BenchmarkId::new("size", format!("{}x{}", width, height)),
+                &(*width, *height),
+                |b, &(w, h)| { /* ... */ },
+            );
+        }
+        group.finish();
+    }
     
-    fn bench_simd_complex_multiply(c: &mut Criterion);
+    fn bench_fft_operations(c: &mut Criterion) {
+        let mut group = c.benchmark_group("fft_operations");
+        for size in [512, 1024, 2048, 4096].iter() {
+            group.bench_function(
+                BenchmarkId::new("forward_2d", size),
+                |b| { /* ... */ },
+            );
+            group.bench_function(
+                BenchmarkId::new("inverse_2d", size),
+                |b| { /* ... */ },
+            );
+        }
+        group.finish();
+    }
+    
+    fn bench_subpixel_methods(c: &mut Criterion);
+    fn bench_hann_window(c: &mut Criterion);
+    fn bench_simd_vs_scalar_complex_multiply(c: &mut Criterion);
+    
+    criterion_group!(benches,
+        bench_phase_correlation_by_size,
+        bench_fft_operations,
+        bench_subpixel_methods,
+        bench_hann_window,
+        bench_simd_vs_scalar_complex_multiply,
+    );
 }
 ```
 
@@ -776,95 +870,49 @@ mod bench {
 
 ## Phase 5: Image Interpolation
 
-### 5.1 Interpolation Methods
+### 5.1 Implementation
 
 ```rust
-/// Interpolation method for image resampling
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InterpolationMethod {
-    /// Nearest neighbor (fastest, blocky)
     Nearest,
-    /// Bilinear (fast, smooth)
     Bilinear,
-    /// Bicubic (good quality, moderate speed)
     Bicubic,
-    /// Lanczos-3 (best quality, slowest)
-    Lanczos3,
-    /// Lanczos-4 (slightly better than Lanczos-3)
-    Lanczos4,
-}
-```
-
-### 5.2 Lanczos Kernel
-
-```rust
-/// Lanczos interpolation kernel
-pub struct LanczosKernel {
-    /// Kernel size (3 or 4 typically)
-    a: usize,
-    /// Precomputed weights table for sub-pixel offsets
-    weights: Vec<[f32; 8]>,  // For a=3: 6 weights per sample
+    Lanczos2,  // a=2, 4x4 kernel
+    Lanczos3,  // a=3, 6x6 kernel (default, best quality)
 }
 
-impl LanczosKernel {
-    /// Create Lanczos-a kernel
-    pub fn new(a: usize) -> Self;
-    
-    /// Compute kernel weight
-    #[inline]
-    fn lanczos(x: f32, a: f32) -> f32 {
-        if x == 0.0 {
-            1.0
-        } else if x.abs() < a {
-            let pi_x = std::f32::consts::PI * x;
-            let pi_x_a = pi_x / a;
-            (pi_x.sin() / pi_x) * (pi_x_a.sin() / pi_x_a)
-        } else {
-            0.0
-        }
+impl InterpolationMethod {
+    pub fn kernel_radius(&self) -> usize;
+}
+
+/// Interpolate at sub-pixel position
+pub fn interpolate(
+    image: &[f32],
+    width: usize,
+    height: usize,
+    x: f64,
+    y: f64,
+    method: InterpolationMethod,
+) -> f32;
+
+/// Lanczos kernel computation
+pub fn lanczos_kernel(x: f64, a: usize) -> f64 {
+    if x == 0.0 {
+        1.0
+    } else if x.abs() < a as f64 {
+        let pi_x = std::f64::consts::PI * x;
+        let pi_x_a = pi_x / a as f64;
+        (pi_x.sin() / pi_x) * (pi_x_a.sin() / pi_x_a)
+    } else {
+        0.0
     }
-    
-    /// Interpolate at sub-pixel position
-    pub fn interpolate(
-        &self,
-        image: &[f32],
-        width: usize,
-        height: usize,
-        x: f32,
-        y: f32,
-    ) -> f32;
 }
-```
 
-### 5.3 SIMD-Accelerated Interpolation
+/// Bicubic kernel (Catmull-Rom)
+pub fn bicubic_kernel(x: f64) -> f64;
 
-```rust
-pub mod simd {
-    /// Process 8 output pixels in parallel using AVX2
-    #[cfg(target_arch = "x86_64")]
-    pub fn lanczos_row_avx2(
-        src: &[f32],
-        dst: &mut [f32],
-        src_width: usize,
-        x_offsets: &[f32],  // Sub-pixel x positions
-        kernel: &LanczosKernel,
-    );
-    
-    /// Bilinear interpolation for 8 pixels
-    #[cfg(target_arch = "x86_64")]
-    pub fn bilinear_8pixels_avx2(
-        src: &[f32],
-        width: usize,
-        x: &[f32; 8],
-        y: &[f32; 8],
-    ) -> [f32; 8];
-}
-```
-
-### 5.4 Image Warping
-
-```rust
-/// Warp image using transformation matrix
+/// Warp image using transformation
 pub fn warp_image(
     src: &[f32],
     src_width: usize,
@@ -875,68 +923,178 @@ pub fn warp_image(
     method: InterpolationMethod,
 ) -> Vec<f32>;
 
-/// Warp image with parallel processing
-pub fn warp_image_parallel(
+/// Resample image to new dimensions
+pub fn resample(
     src: &[f32],
     src_width: usize,
     src_height: usize,
     dst_width: usize,
     dst_height: usize,
-    transform: &TransformMatrix,
     method: InterpolationMethod,
 ) -> Vec<f32>;
 ```
 
-### Tests for Phase 5
+### 5.2 SIMD Optimizations
+
+```rust
+// interpolation/simd/mod.rs
+pub mod simd {
+    /// SIMD-accelerated Lanczos interpolation for a row of output pixels
+    /// Processes 4/8 output pixels in parallel
+    
+    #[cfg(target_arch = "x86_64")]
+    pub fn interpolate_row_lanczos_sse(
+        src: &[f32],
+        src_width: usize,
+        src_height: usize,
+        dst: &mut [f32],
+        y: usize,
+        x_coords: &[f64],
+        y_coord: f64,
+    );
+    
+    #[cfg(target_arch = "aarch64")]
+    pub fn interpolate_row_lanczos_neon(
+        src: &[f32],
+        src_width: usize,
+        src_height: usize,
+        dst: &mut [f32],
+        y: usize,
+        x_coords: &[f64],
+        y_coord: f64,
+    );
+    
+    /// SIMD-accelerated bilinear interpolation
+    /// Much faster than Lanczos, good for previews
+    pub fn interpolate_bilinear_simd(
+        src: &[f32],
+        src_width: usize,
+        x: &[f32; 8],
+        y: &[f32; 8],
+    ) -> [f32; 8];
+    
+    /// SIMD-accelerated kernel weight computation
+    pub fn compute_lanczos_weights_simd(
+        offsets: &[f64],
+        a: usize,
+        weights: &mut [f64],
+    );
+}
+```
+
+### interpolation/tests.rs
 
 ```rust
 #[cfg(test)]
 mod tests {
-    // Kernel tests
-    #[test] fn test_lanczos_kernel_sum_to_one();
-    #[test] fn test_lanczos_kernel_symmetry();
-    #[test] fn test_lanczos_at_integer_positions();
+    // Kernel property tests
+    fn test_lanczos_kernel_center_is_one();
+    fn test_lanczos_kernel_zeros_at_integers();
+    fn test_lanczos_kernel_symmetry();
+    fn test_lanczos_kernel_outside_window();
+    fn test_lanczos2_vs_lanczos3();
+    fn test_bicubic_kernel_properties();
     
     // Interpolation accuracy tests
-    #[test] fn test_bilinear_gradient();
-    #[test] fn test_bicubic_smooth_curve();
-    #[test] fn test_lanczos_sinc_preservation();
-    #[test] fn test_interpolation_at_integer_is_exact();
+    fn test_nearest_at_pixel_centers();
+    fn test_bilinear_gradient();
+    fn test_bilinear_at_pixel_centers();
+    fn test_bicubic_smooth_curve();
+    fn test_bicubic_preserves_dc();
+    fn test_lanczos_preserves_dc();
+    fn test_lanczos_smooth_gradient();
     
     // Edge handling tests
-    #[test] fn test_interpolation_near_edge();
-    #[test] fn test_interpolation_outside_bounds();
+    fn test_interpolation_near_edge();
+    fn test_interpolation_at_boundary();
+    fn test_border_handling_modes();
     
     // Warp tests
-    #[test] fn test_warp_identity();
-    #[test] fn test_warp_translation();
-    #[test] fn test_warp_rotation_90();
-    #[test] fn test_warp_scale_2x();
-    #[test] fn test_warp_affine();
-    #[test] fn test_warp_homography();
+    fn test_warp_identity();
+    fn test_warp_translation_integer();
+    fn test_warp_translation_subpixel();
+    fn test_warp_rotation_90();
+    fn test_warp_rotation_45();
+    fn test_warp_scale_2x();
+    fn test_warp_scale_half();
+    fn test_warp_affine();
+    fn test_warp_homography();
+    
+    // Resample tests
+    fn test_resample_upscale_2x();
+    fn test_resample_downscale_half();
+    fn test_resample_arbitrary();
     
     // SIMD tests
-    #[test] fn test_simd_bilinear_matches_scalar();
-    #[test] fn test_simd_lanczos_matches_scalar();
+    fn test_simd_lanczos_matches_scalar();
+    fn test_simd_bilinear_matches_scalar();
+    fn test_simd_weights_match_scalar();
 }
 ```
 
-### Benchmarks for Phase 5
+### interpolation/bench.rs
 
 ```rust
 #[cfg(feature = "bench")]
 mod bench {
-    fn bench_bilinear_1024x1024(c: &mut Criterion);
-    fn bench_bicubic_1024x1024(c: &mut Criterion);
-    fn bench_lanczos3_1024x1024(c: &mut Criterion);
-    fn bench_lanczos4_1024x1024(c: &mut Criterion);
+    use criterion::{criterion_group, Criterion, BenchmarkId, Throughput};
     
-    fn bench_warp_translation(c: &mut Criterion);
-    fn bench_warp_rotation(c: &mut Criterion);
-    fn bench_warp_affine(c: &mut Criterion);
-    fn bench_warp_homography(c: &mut Criterion);
+    fn bench_interpolation_methods(c: &mut Criterion) {
+        let mut group = c.benchmark_group("interpolation_methods");
+        
+        let size = 1024;
+        let pixels = size * size;
+        group.throughput(Throughput::Elements(pixels as u64));
+        
+        for method in [
+            InterpolationMethod::Nearest,
+            InterpolationMethod::Bilinear,
+            InterpolationMethod::Bicubic,
+            InterpolationMethod::Lanczos2,
+            InterpolationMethod::Lanczos3,
+        ].iter() {
+            group.bench_function(
+                BenchmarkId::new("method", format!("{:?}", method)),
+                |b| { /* ... */ },
+            );
+        }
+        group.finish();
+    }
     
+    fn bench_warp_by_size(c: &mut Criterion) {
+        let mut group = c.benchmark_group("warp_image");
+        
+        for size in [512, 1024, 2048, 4096].iter() {
+            let pixels = size * size;
+            group.throughput(Throughput::Elements(pixels as u64));
+            
+            group.bench_function(
+                BenchmarkId::new("translation", size),
+                |b| { /* ... */ },
+            );
+            group.bench_function(
+                BenchmarkId::new("rotation", size),
+                |b| { /* ... */ },
+            );
+            group.bench_function(
+                BenchmarkId::new("affine", size),
+                |b| { /* ... */ },
+            );
+        }
+        group.finish();
+    }
+    
+    fn bench_resample(c: &mut Criterion);
     fn bench_simd_vs_scalar(c: &mut Criterion);
+    fn bench_parallel_vs_sequential(c: &mut Criterion);
+    
+    criterion_group!(benches,
+        bench_interpolation_methods,
+        bench_warp_by_size,
+        bench_resample,
+        bench_simd_vs_scalar,
+        bench_parallel_vs_sequential,
+    );
 }
 ```
 
@@ -944,134 +1102,169 @@ mod bench {
 
 ## Phase 6: Full Pipeline Integration
 
-### 6.1 High-Level API
+### 6.1 Implementation
 
 ```rust
-/// Main registration function
-pub fn register_images(
-    reference: &AstroImage,
-    target: &AstroImage,
-    config: &RegistrationConfig,
-) -> Result<RegistrationResult, RegistrationError>;
-
-/// Register and warp target image to match reference
-pub fn register_and_warp(
-    reference: &AstroImage,
-    target: &AstroImage,
-    config: &RegistrationConfig,
-    interpolation: InterpolationMethod,
-) -> Result<(AstroImage, RegistrationResult), RegistrationError>;
-
-/// Register multiple images to a reference
-pub fn register_stack(
-    reference: &AstroImage,
-    targets: &[AstroImage],
-    config: &RegistrationConfig,
-) -> Vec<Result<RegistrationResult, RegistrationError>>;
-```
-
-### 6.2 Builder Pattern
-
-```rust
-pub struct RegistrationConfigBuilder {
+/// High-level registrator with caching and configuration
+pub struct Registrator {
     config: RegistrationConfig,
 }
 
+impl Registrator {
+    pub fn new(config: RegistrationConfig) -> Self;
+    pub fn with_defaults() -> Self;
+    
+    /// Register stars only (no image warping)
+    pub fn register_stars(
+        &self,
+        ref_stars: &[(f64, f64)],
+        target_stars: &[(f64, f64)],
+    ) -> Result<RegistrationResult, RegistrationError>;
+    
+    /// Quick registration using phase correlation only
+    pub fn quick_register(
+        &self,
+        reference: &[f32],
+        target: &[f32],
+        width: usize,
+        height: usize,
+    ) -> Result<RegistrationResult, RegistrationError>;
+    
+    /// Warp target image to match reference
+    pub fn warp_to_reference(
+        &self,
+        target: &[f32],
+        width: usize,
+        height: usize,
+        transform: &TransformMatrix,
+        method: InterpolationMethod,
+    ) -> Vec<f32>;
+}
+
+/// Builder pattern for configuration
+pub struct RegistrationConfigBuilder { /* ... */ }
+
 impl RegistrationConfigBuilder {
     pub fn new() -> Self;
-    
-    // Transform type
-    pub fn translation_only(mut self) -> Self;
-    pub fn with_rotation(mut self) -> Self;
-    pub fn with_scale(mut self) -> Self;
-    pub fn full_affine(mut self) -> Self;
-    pub fn full_homography(mut self) -> Self;
-    
-    // Coarse alignment
-    pub fn use_phase_correlation(mut self, enable: bool) -> Self;
-    
-    // RANSAC parameters
-    pub fn ransac_iterations(mut self, n: usize) -> Self;
-    pub fn ransac_threshold(mut self, pixels: f64) -> Self;
-    
-    // Star matching
-    pub fn max_stars(mut self, n: usize) -> Self;
-    pub fn triangle_tolerance(mut self, tol: f64) -> Self;
-    
-    // Quality
-    pub fn min_matched_stars(mut self, n: usize) -> Self;
-    pub fn max_residual(mut self, pixels: f64) -> Self;
-    
+    pub fn translation_only(self) -> Self;
+    pub fn with_rotation(self) -> Self;
+    pub fn with_scale(self) -> Self;
+    pub fn full_affine(self) -> Self;
+    pub fn full_homography(self) -> Self;
+    pub fn use_phase_correlation(self, enable: bool) -> Self;
+    pub fn ransac_iterations(self, n: usize) -> Self;
+    pub fn ransac_threshold(self, pixels: f64) -> Self;
+    pub fn max_stars(self, n: usize) -> Self;
+    pub fn min_matched_stars(self, n: usize) -> Self;
     pub fn build(self) -> RegistrationConfig;
 }
-```
 
-### 6.3 Error Types
-
-```rust
 #[derive(Debug, thiserror::Error)]
 pub enum RegistrationError {
-    #[error("Insufficient stars detected: found {found}, need {required}")]
+    #[error("Insufficient stars: found {found}, need {required}")]
     InsufficientStars { found: usize, required: usize },
     
-    #[error("No matching star patterns found between images")]
+    #[error("No matching star patterns found")]
     NoMatchingPatterns,
     
     #[error("RANSAC failed to find valid transformation")]
-    RansacFailed,
+    RansacFailed { reason: String },
     
-    #[error("Registration accuracy too low: {rms_error:.3} pixels (max: {max_allowed:.3})")]
+    #[error("Registration accuracy too low: {rms_error:.3} > {max_allowed:.3} pixels")]
     AccuracyTooLow { rms_error: f64, max_allowed: f64 },
     
-    #[error("Images have incompatible dimensions")]
+    #[error("Image dimension mismatch")]
     DimensionMismatch,
-    
-    #[error("Star detection failed: {0}")]
-    StarDetection(String),
 }
 ```
 
-### Tests for Phase 6
+### pipeline/tests.rs
 
 ```rust
 #[cfg(test)]
 mod tests {
-    // End-to-end tests
-    #[test] fn test_register_translated_synthetic();
-    #[test] fn test_register_rotated_synthetic();
-    #[test] fn test_register_scaled_synthetic();
-    #[test] fn test_register_affine_synthetic();
+    // End-to-end registration tests
+    fn test_register_identity();
+    fn test_register_translation_only();
+    fn test_register_small_rotation();
+    fn test_register_large_rotation();
+    fn test_register_similarity();
+    fn test_register_affine();
+    fn test_register_with_outliers();
+    fn test_register_quality_metrics();
     
-    // Real image tests (ignored by default)
-    #[test] #[ignore] fn test_register_real_dslr_images();
-    #[test] #[ignore] fn test_register_telescope_images();
+    // Quick registration tests
+    fn test_quick_register_translation();
+    fn test_quick_register_large_shift();
     
-    // Error handling tests
-    #[test] fn test_error_insufficient_stars();
-    #[test] fn test_error_no_overlap();
-    #[test] fn test_error_dimension_mismatch();
+    // Warp tests
+    fn test_warp_to_reference();
+    fn test_warp_preserves_content();
     
     // Builder tests
-    #[test] fn test_builder_default();
-    #[test] fn test_builder_presets();
+    fn test_builder_default();
+    fn test_builder_presets();
+    fn test_builder_custom_config();
+    
+    // Error handling tests
+    fn test_error_insufficient_stars();
+    fn test_error_no_matching_patterns();
+    fn test_error_ransac_failed();
+    fn test_error_dimension_mismatch();
+    
+    // Integration tests (with star detection)
+    #[ignore]
+    fn test_full_pipeline_synthetic_stars();
+    #[ignore]
+    fn test_full_pipeline_real_image();
 }
 ```
 
-### Benchmarks for Phase 6
+### pipeline/bench.rs
 
 ```rust
 #[cfg(feature = "bench")]
 mod bench {
-    // Full pipeline benchmarks
-    fn bench_register_1024x1024_50_stars(c: &mut Criterion);
-    fn bench_register_2048x2048_100_stars(c: &mut Criterion);
-    fn bench_register_4096x4096_200_stars(c: &mut Criterion);
+    use criterion::{criterion_group, Criterion, BenchmarkId, Throughput};
     
-    // Component breakdown
-    fn bench_pipeline_star_detection(c: &mut Criterion);
-    fn bench_pipeline_triangle_matching(c: &mut Criterion);
-    fn bench_pipeline_ransac(c: &mut Criterion);
-    fn bench_pipeline_warp(c: &mut Criterion);
+    fn bench_full_pipeline(c: &mut Criterion) {
+        let mut group = c.benchmark_group("full_pipeline");
+        
+        for (size, n_stars) in [
+            (1024, 50),
+            (2048, 100),
+            (4096, 200),
+        ].iter() {
+            let pixels = size * size;
+            group.throughput(Throughput::Elements(pixels as u64));
+            
+            group.bench_function(
+                BenchmarkId::new("register", format!("{}x{}_{}stars", size, size, n_stars)),
+                |b| { /* ... */ },
+            );
+        }
+        group.finish();
+    }
+    
+    fn bench_pipeline_stages(c: &mut Criterion) {
+        let mut group = c.benchmark_group("pipeline_stages");
+        
+        // Measure each stage separately
+        group.bench_function("triangle_matching", |b| { /* ... */ });
+        group.bench_function("ransac_estimation", |b| { /* ... */ });
+        group.bench_function("phase_correlation", |b| { /* ... */ });
+        group.bench_function("image_warping", |b| { /* ... */ });
+        
+        group.finish();
+    }
+    
+    fn bench_config_variations(c: &mut Criterion);
+    
+    criterion_group!(benches,
+        bench_full_pipeline,
+        bench_pipeline_stages,
+        bench_config_variations,
+    );
 }
 ```
 
@@ -1079,118 +1272,217 @@ mod bench {
 
 ## Phase 7: Quality Metrics and Validation
 
-### 7.1 Quality Metrics
+### 7.1 Implementation
 
 ```rust
-/// Registration quality assessment
-pub struct RegistrationQuality {
-    /// RMS error of matched star positions after transformation
+#[derive(Debug, Clone)]
+pub struct QualityMetrics {
     pub rms_error: f64,
-    
-    /// Maximum residual error
     pub max_error: f64,
-    
-    /// Percentage of stars successfully matched
-    pub match_ratio: f64,
-    
-    /// RANSAC inlier ratio
+    pub mean_error: f64,
+    pub median_error: f64,
+    pub percentile_95: f64,
     pub inlier_ratio: f64,
-    
-    /// Condition number of transformation matrix (stability indicator)
-    pub condition_number: f64,
-    
-    /// Estimated sub-pixel accuracy
-    pub estimated_accuracy: f64,
+    pub match_ratio: f64,
+    pub is_acceptable: bool,
 }
 
-/// Compute quality metrics for registration result
-pub fn assess_quality(
-    result: &RegistrationResult,
-    ref_stars: &[Star],
-    target_stars: &[Star],
-) -> RegistrationQuality;
+#[derive(Debug, Clone)]
+pub struct ResidualStats {
+    pub mean: f64,
+    pub std_dev: f64,
+    pub min: f64,
+    pub max: f64,
+    pub median: f64,
+}
+
+#[derive(Debug, Clone)]
+pub struct QuadrantConsistency {
+    pub quadrant_rms: [f64; 4],
+    pub max_deviation: f64,
+    pub is_uniform: bool,
+}
+
+/// Compute comprehensive quality metrics
+pub fn compute_quality_metrics(
+    ref_points: &[(f64, f64)],
+    target_points: &[(f64, f64)],
+    transform: &TransformMatrix,
+    inliers: &[usize],
+) -> QualityMetrics;
+
+/// Compute residual statistics
+pub fn compute_residual_stats(residuals: &[f64]) -> ResidualStats;
+
+/// Check consistency across image quadrants
+pub fn check_quadrant_consistency(
+    ref_points: &[(f64, f64)],
+    target_points: &[(f64, f64)],
+    transform: &TransformMatrix,
+    width: usize,
+    height: usize,
+) -> QuadrantConsistency;
+
+/// Estimate overlap between images
+pub fn estimate_overlap(
+    transform: &TransformMatrix,
+    width: usize,
+    height: usize,
+) -> f64;
 ```
 
-### 7.2 Validation Against Known Transformations
+### quality/tests.rs
 
 ```rust
-/// Validate registration against ground truth
-pub fn validate_registration(
-    result: &RegistrationResult,
-    ground_truth: &TransformMatrix,
-) -> ValidationResult;
-
-#[derive(Debug)]
-pub struct ValidationResult {
-    /// Translation error in pixels
-    pub translation_error: f64,
+#[cfg(test)]
+mod tests {
+    // Quality metrics tests
+    fn test_quality_metrics_perfect();
+    fn test_quality_metrics_high_error();
+    fn test_quality_metrics_low_inlier_ratio();
+    fn test_quality_metrics_threshold();
     
-    /// Rotation error in degrees
-    pub rotation_error: f64,
+    // Residual stats tests
+    fn test_residual_stats_basic();
+    fn test_residual_stats_empty();
+    fn test_residual_stats_single();
+    fn test_percentile_computation();
     
-    /// Scale error as ratio (1.0 = perfect)
-    pub scale_error: f64,
+    // Quadrant consistency tests
+    fn test_quadrant_consistency_uniform();
+    fn test_quadrant_consistency_non_uniform();
+    fn test_quadrant_consistency_missing_quadrant();
     
-    /// Overall transformation error (Frobenius norm)
-    pub matrix_error: f64,
+    // Overlap estimation tests
+    fn test_overlap_identity();
+    fn test_overlap_translation();
+    fn test_overlap_large_shift();
+    fn test_overlap_rotation();
 }
 ```
 
-### 7.3 Visual Debugging
+### quality/bench.rs
 
 ```rust
-/// Generate debug visualization
-pub fn visualize_registration(
-    reference: &AstroImage,
-    target: &AstroImage,
-    result: &RegistrationResult,
-    output_path: &Path,
-) -> std::io::Result<()>;
-
-/// Overlay matched stars
-pub fn visualize_matches(
-    image: &AstroImage,
-    ref_stars: &[Star],
-    target_stars: &[Star],
-    matches: &[(usize, usize)],
-    output_path: &Path,
-) -> std::io::Result<()>;
+#[cfg(feature = "bench")]
+mod bench {
+    use criterion::{criterion_group, Criterion, BenchmarkId};
+    
+    fn bench_quality_metrics(c: &mut Criterion) {
+        let mut group = c.benchmark_group("quality_metrics");
+        
+        for n_points in [50, 100, 500, 1000].iter() {
+            group.bench_with_input(
+                BenchmarkId::new("compute_metrics", n_points),
+                n_points,
+                |b, &n| { /* ... */ },
+            );
+        }
+        group.finish();
+    }
+    
+    fn bench_residual_computation(c: &mut Criterion);
+    fn bench_quadrant_consistency(c: &mut Criterion);
+    
+    criterion_group!(benches,
+        bench_quality_metrics,
+        bench_residual_computation,
+        bench_quadrant_consistency,
+    );
+}
 ```
 
 ---
 
-## Implementation Schedule
+## SIMD Implementation Summary
 
-### Week 1-2: Phase 1 + Phase 2
-- Core types and transformation matrices
-- Triangle formation and descriptor computation
-- Geometric hashing and matching
-- Unit tests for all components
+### SSE4.1 (x86_64 baseline)
 
-### Week 3: Phase 3
-- RANSAC implementation
-- Least squares refinement
-- Adaptive iteration count
-- Robustness testing with synthetic outliers
+| Module | Function | Description |
+|--------|----------|-------------|
+| triangle | `compute_distances_sse` | Pairwise distance calculation |
+| triangle | `compare_ratios_sse` | Ratio tolerance checking |
+| ransac | `compute_residuals_sse` | Transform residual calculation |
+| ransac | `count_inliers_sse` | Threshold-based counting |
+| phase_correlation | `complex_multiply_conjugate_sse` | Cross-power spectrum |
+| phase_correlation | `normalize_spectrum_sse` | Magnitude normalization |
+| phase_correlation | `apply_hann_window_sse` | Window function |
+| interpolation | `interpolate_row_lanczos_sse` | Lanczos row processing |
+| interpolation | `interpolate_bilinear_sse` | Fast bilinear |
 
-### Week 4: Phase 4
-- FFT integration (rustfft crate)
-- Phase correlation implementation
-- Sub-pixel peak detection
-- SIMD optimization for complex multiply
+### NEON (ARM64)
 
-### Week 5: Phase 5
-- Lanczos kernel implementation
-- Bilinear/bicubic fallbacks
-- Image warping with transforms
-- SIMD optimization for interpolation
+All above functions have NEON equivalents with `_neon` suffix.
 
-### Week 6: Phase 6 + Phase 7
-- Full pipeline integration
-- Builder pattern API
-- Quality metrics
-- End-to-end testing
-- Performance optimization
+### Runtime Detection
+
+```rust
+// In each simd/mod.rs
+pub fn compute_distances(positions: &[(f64, f64)], distances: &mut [f64]) {
+    #[cfg(target_arch = "x86_64")]
+    {
+        if is_x86_feature_detected!("sse4.1") {
+            return unsafe { sse::compute_distances_sse(positions, distances) };
+        }
+    }
+    #[cfg(target_arch = "aarch64")]
+    {
+        return unsafe { neon::compute_distances_neon(positions, distances) };
+    }
+    // Scalar fallback
+    compute_distances_scalar(positions, distances)
+}
+```
+
+---
+
+## Benchmark Organization
+
+### Benchmark Files Location
+
+```
+lumos/benches/
+|-- registration_triangle.rs      # Triangle matching benchmarks
+|-- registration_ransac.rs        # RANSAC benchmarks
+|-- registration_phase_corr.rs    # Phase correlation benchmarks
+|-- registration_interpolation.rs # Interpolation benchmarks
+|-- registration_pipeline.rs      # Full pipeline benchmarks
++-- registration_quality.rs       # Quality metrics benchmarks
+```
+
+### Cargo.toml Bench Configuration
+
+```toml
+[[bench]]
+name = "registration_triangle"
+harness = false
+required-features = ["bench"]
+
+[[bench]]
+name = "registration_ransac"
+harness = false
+required-features = ["bench"]
+
+[[bench]]
+name = "registration_phase_corr"
+harness = false
+required-features = ["bench"]
+
+[[bench]]
+name = "registration_interpolation"
+harness = false
+required-features = ["bench"]
+
+[[bench]]
+name = "registration_pipeline"
+harness = false
+required-features = ["bench"]
+
+[[bench]]
+name = "registration_quality"
+harness = false
+required-features = ["bench"]
+```
 
 ---
 
@@ -1199,27 +1491,21 @@ pub fn visualize_matches(
 ```toml
 [dependencies]
 # FFT for phase correlation
-rustfft = "6.1"
-
-# Linear algebra for transformation solving
-nalgebra = "0.32"
+rustfft = { workspace = true }
 
 # Parallel processing
-rayon = "1.8"
+rayon = { workspace = true }
 
 # Error handling
-thiserror = "1.0"
+thiserror = { workspace = true }
 
 # Random number generation for RANSAC
-rand = "0.8"
-rand_chacha = "0.3"  # Deterministic RNG for reproducible tests
+rand = { workspace = true }
+rand_chacha = { workspace = true }
 
 [dev-dependencies]
 # Benchmarking
-criterion = "0.5"
-
-# Property-based testing
-proptest = "1.0"
+criterion = { workspace = true }
 ```
 
 ---
@@ -1230,12 +1516,13 @@ proptest = "1.0"
 |--------|--------|--------------|
 | Sub-pixel accuracy | < 0.1 pixel RMS | < 0.05 pixel RMS |
 | Matching success rate | > 95% | > 99% |
-| Processing time (2K×2K) | < 500ms | < 100ms |
-| Processing time (4K×4K) | < 2s | < 500ms |
+| Processing time (2K x 2K) | < 500ms | < 100ms |
+| Processing time (4K x 4K) | < 2s | < 500ms |
 | Outlier tolerance | 30% | 50% |
-| Rotation detection | ±180° | Any angle |
+| Rotation detection | +/-180 deg | Any angle |
 | Scale detection | 0.5x - 2.0x | 0.1x - 10x |
 | Memory usage | < 4x image size | < 2x image size |
+| SIMD speedup | 2-4x | 4-8x |
 
 ---
 
@@ -1244,17 +1531,16 @@ proptest = "1.0"
 ### Academic Papers
 1. Beroiz, M., Cabral, J. B., & Sanchez, B. (2020). Astroalign: A Python module for 
    astronomical image registration. Astronomy and Computing, 32, 100384.
-2. Stetson, P. B. (1987). DAOFIND: Stellar photometry. PASP, 99, 191.
-3. Fischler, M. A., & Bolles, R. C. (1981). Random sample consensus: a paradigm for 
+2. Fischler, M. A., & Bolles, R. C. (1981). Random sample consensus: a paradigm for 
    model fitting. Communications of the ACM, 24(6), 381-395.
+3. Kuglin, C. D., & Hines, D. C. (1975). The phase correlation image alignment method.
+   IEEE Conference on Cybernetics and Society.
 
 ### Software References
-- [Siril Registration Documentation](https://siril.readthedocs.io/en/latest/preprocessing/registration.html)
-- [PixInsight StarAlignment](https://www.pixinsight.com/tutorials/sa-distortion/)
-- [DeepSkyStacker Technical Info](http://deepskystacker.free.fr/english/technical.htm)
-- [Astroalign Python Package](https://astroalign.quatrope.org/)
+- Siril Registration: https://siril.readthedocs.io/en/latest/preprocessing/registration.html
+- PixInsight StarAlignment: https://www.pixinsight.com/tutorials/sa-distortion/
+- Astroalign Python: https://astroalign.quatrope.org/
 
 ### Rust Crates
-- [rustfft](https://crates.io/crates/rustfft) - FFT implementation
-- [nalgebra](https://crates.io/crates/nalgebra) - Linear algebra
-- [image](https://crates.io/crates/image) - Image loading/saving
+- rustfft: https://crates.io/crates/rustfft
+- rayon: https://crates.io/crates/rayon

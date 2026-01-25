@@ -1,0 +1,309 @@
+use super::*;
+
+const EPSILON: f32 = 1e-5;
+
+#[test]
+fn test_lanczos_kernel_center() {
+    // At center, kernel should be 1
+    assert!((lanczos_kernel(0.0, 3.0) - 1.0).abs() < EPSILON);
+}
+
+#[test]
+fn test_lanczos_kernel_zeros() {
+    // At integer positions, sinc is 0 (except at 0)
+    assert!(lanczos_kernel(1.0, 3.0).abs() < EPSILON);
+    assert!(lanczos_kernel(2.0, 3.0).abs() < EPSILON);
+    assert!(lanczos_kernel(-1.0, 3.0).abs() < EPSILON);
+}
+
+#[test]
+fn test_lanczos_kernel_outside() {
+    // Outside window, kernel is 0
+    assert_eq!(lanczos_kernel(3.0, 3.0), 0.0);
+    assert_eq!(lanczos_kernel(4.0, 3.0), 0.0);
+    assert_eq!(lanczos_kernel(-3.0, 3.0), 0.0);
+}
+
+#[test]
+fn test_lanczos_kernel_symmetry() {
+    // Kernel should be symmetric
+    assert!((lanczos_kernel(0.5, 3.0) - lanczos_kernel(-0.5, 3.0)).abs() < EPSILON);
+    assert!((lanczos_kernel(1.5, 3.0) - lanczos_kernel(-1.5, 3.0)).abs() < EPSILON);
+}
+
+#[test]
+fn test_bicubic_kernel_center() {
+    assert!((bicubic_kernel(0.0) - 1.0).abs() < EPSILON);
+}
+
+#[test]
+fn test_bicubic_kernel_edges() {
+    assert!(bicubic_kernel(2.0).abs() < EPSILON);
+    assert!(bicubic_kernel(-2.0).abs() < EPSILON);
+}
+
+#[test]
+fn test_bicubic_kernel_continuity() {
+    // Kernel should be continuous at x=1
+    let left = bicubic_kernel(1.0 - 0.001);
+    let right = bicubic_kernel(1.0 + 0.001);
+    assert!((left - right).abs() < 0.01);
+}
+
+#[test]
+fn test_nearest_interpolation() {
+    let data = vec![0.0, 1.0, 2.0, 3.0];
+    let config = WarpConfig {
+        method: InterpolationMethod::Nearest,
+        ..Default::default()
+    };
+
+    // Center of pixels
+    assert!((interpolate_pixel(&data, 2, 2, 0.4, 0.4, &config) - 0.0).abs() < EPSILON);
+    assert!((interpolate_pixel(&data, 2, 2, 1.4, 0.4, &config) - 1.0).abs() < EPSILON);
+    assert!((interpolate_pixel(&data, 2, 2, 0.4, 1.4, &config) - 2.0).abs() < EPSILON);
+    assert!((interpolate_pixel(&data, 2, 2, 1.4, 1.4, &config) - 3.0).abs() < EPSILON);
+}
+
+#[test]
+fn test_bilinear_center() {
+    let data = vec![0.0, 2.0, 2.0, 4.0];
+    let config = WarpConfig {
+        method: InterpolationMethod::Bilinear,
+        ..Default::default()
+    };
+
+    // At pixel centers
+    assert!((interpolate_pixel(&data, 2, 2, 0.0, 0.0, &config) - 0.0).abs() < EPSILON);
+    assert!((interpolate_pixel(&data, 2, 2, 1.0, 0.0, &config) - 2.0).abs() < EPSILON);
+
+    // Between pixels - should interpolate
+    let center = interpolate_pixel(&data, 2, 2, 0.5, 0.5, &config);
+    assert!((center - 2.0).abs() < EPSILON); // Average of all 4
+}
+
+#[test]
+fn test_bilinear_edge() {
+    let data = vec![1.0, 1.0, 1.0, 1.0];
+    let config = WarpConfig {
+        method: InterpolationMethod::Bilinear,
+        ..Default::default()
+    };
+
+    // Uniform image should give same value everywhere
+    assert!((interpolate_pixel(&data, 2, 2, 0.3, 0.7, &config) - 1.0).abs() < EPSILON);
+}
+
+#[test]
+fn test_bicubic_pixel_centers() {
+    // At pixel centers, bicubic should return exact values
+    let data: Vec<f32> = (0..16).map(|i| i as f32).collect();
+    let config = WarpConfig {
+        method: InterpolationMethod::Bicubic,
+        ..Default::default()
+    };
+
+    assert!((interpolate_pixel(&data, 4, 4, 1.0, 1.0, &config) - 5.0).abs() < 0.01);
+    assert!((interpolate_pixel(&data, 4, 4, 2.0, 2.0, &config) - 10.0).abs() < 0.01);
+}
+
+#[test]
+fn test_lanczos_pixel_centers() {
+    // At pixel centers, Lanczos should return exact values
+    let data: Vec<f32> = (0..64).map(|i| i as f32).collect();
+    let config = WarpConfig {
+        method: InterpolationMethod::Lanczos3,
+        normalize_kernel: true,
+        ..Default::default()
+    };
+
+    assert!((interpolate_pixel(&data, 8, 8, 3.0, 3.0, &config) - 27.0).abs() < 0.1);
+    assert!((interpolate_pixel(&data, 8, 8, 4.0, 4.0, &config) - 36.0).abs() < 0.1);
+}
+
+#[test]
+fn test_border_handling() {
+    let data = vec![1.0; 4];
+    let config = WarpConfig {
+        method: InterpolationMethod::Bilinear,
+        border_value: 0.0,
+        ..Default::default()
+    };
+
+    // Inside - should interpolate to 1.0 since all pixels are 1.0
+    assert!((interpolate_pixel(&data, 2, 2, 0.5, 0.5, &config) - 1.0).abs() < EPSILON);
+
+    // Fully outside - should return border value
+    assert!((interpolate_pixel(&data, 2, 2, -2.0, 0.0, &config) - 0.0).abs() < EPSILON);
+}
+
+#[test]
+fn test_warp_identity() {
+    let input: Vec<f32> = (0..16).map(|i| i as f32).collect();
+    let transform = TransformMatrix::identity();
+    let config = WarpConfig {
+        method: InterpolationMethod::Bilinear,
+        ..Default::default()
+    };
+
+    let output = warp_image(&input, 4, 4, 4, 4, &transform, &config);
+
+    // Identity transform should preserve the image at pixel centers
+    for (i, (&inp, &out)) in input.iter().zip(output.iter()).enumerate() {
+        assert!(
+            (inp - out).abs() < 0.1,
+            "Mismatch at pixel {}: {} vs {}",
+            i,
+            inp,
+            out
+        );
+    }
+}
+
+#[test]
+fn test_warp_translation() {
+    // Create a simple image with a single bright pixel
+    let mut input = vec![0.0f32; 16];
+    input[5] = 1.0; // Position (1, 1)
+
+    // Translate by (1, 1)
+    let transform = TransformMatrix::from_translation(1.0, 1.0);
+    let config = WarpConfig {
+        method: InterpolationMethod::Bilinear,
+        ..Default::default()
+    };
+
+    let output = warp_image(&input, 4, 4, 4, 4, &transform, &config);
+
+    // The bright pixel should move to (2, 2)
+    assert!(output[10] > 0.5, "Expected bright pixel at (2,2)");
+    assert!(output[5] < 0.1, "Expected dark pixel at (1,1)");
+}
+
+#[test]
+fn test_warp_scale() {
+    // Create a 2x2 image
+    let input = vec![1.0, 2.0, 3.0, 4.0];
+
+    // Scale 2x
+    let transform = TransformMatrix::from_scale(2.0, 2.0);
+    let config = WarpConfig {
+        method: InterpolationMethod::Bilinear,
+        ..Default::default()
+    };
+
+    let output = warp_image(&input, 2, 2, 4, 4, &transform, &config);
+
+    assert_eq!(output.len(), 16);
+    // Top-left corner should still be ~1.0
+    assert!((output[0] - 1.0).abs() < 0.1);
+}
+
+#[test]
+fn test_resample_upscale() {
+    let input = vec![1.0, 2.0, 3.0, 4.0];
+    let output = resample_image(&input, 2, 2, 4, 4, InterpolationMethod::Bilinear);
+
+    assert_eq!(output.len(), 16);
+    // Corners should preserve values
+    assert!((output[0] - 1.0).abs() < 0.2);
+}
+
+#[test]
+fn test_resample_downscale() {
+    // Create larger image
+    let input: Vec<f32> = (0..64).map(|i| i as f32).collect();
+    let output = resample_image(&input, 8, 8, 4, 4, InterpolationMethod::Lanczos3);
+
+    assert_eq!(output.len(), 16);
+}
+
+#[test]
+fn test_interpolation_method_radius() {
+    assert_eq!(InterpolationMethod::Nearest.kernel_radius(), 1);
+    assert_eq!(InterpolationMethod::Bilinear.kernel_radius(), 1);
+    assert_eq!(InterpolationMethod::Bicubic.kernel_radius(), 2);
+    assert_eq!(InterpolationMethod::Lanczos2.kernel_radius(), 2);
+    assert_eq!(InterpolationMethod::Lanczos3.kernel_radius(), 3);
+    assert_eq!(InterpolationMethod::Lanczos4.kernel_radius(), 4);
+}
+
+#[test]
+fn test_lanczos_preserves_dc() {
+    // A uniform image should remain uniform after Lanczos interpolation
+    let input = vec![0.5f32; 64];
+    let config = WarpConfig {
+        method: InterpolationMethod::Lanczos3,
+        normalize_kernel: true,
+        ..Default::default()
+    };
+
+    // Sample at various sub-pixel positions
+    let val1 = interpolate_pixel(&input, 8, 8, 3.3, 4.7, &config);
+    let val2 = interpolate_pixel(&input, 8, 8, 2.1, 5.9, &config);
+
+    assert!((val1 - 0.5).abs() < 0.01);
+    assert!((val2 - 0.5).abs() < 0.01);
+}
+
+#[test]
+fn test_warp_rotation() {
+    // Create image with asymmetric pattern
+    let mut input = vec![0.0f32; 64];
+    input[0] = 1.0; // Top-left corner
+
+    // Rotate 90 degrees around center
+    let transform = TransformMatrix::from_rotation_around(std::f64::consts::FRAC_PI_2, 4.0, 4.0);
+    let config = WarpConfig {
+        method: InterpolationMethod::Bilinear,
+        ..Default::default()
+    };
+
+    let output = warp_image(&input, 8, 8, 8, 8, &transform, &config);
+
+    // After 90 degree rotation, top-left should move
+    // The bright pixel should be somewhere else
+    assert!(
+        output[0] < 0.5,
+        "Top-left should not be bright after rotation"
+    );
+}
+
+#[test]
+fn test_bicubic_smooth_gradient() {
+    // Bicubic should smoothly interpolate gradients
+    let input: Vec<f32> = (0..16).map(|i| (i % 4) as f32).collect();
+    let config = WarpConfig {
+        method: InterpolationMethod::Bicubic,
+        ..Default::default()
+    };
+
+    // Sample between pixels
+    let v1 = interpolate_pixel(&input, 4, 4, 0.5, 1.0, &config);
+    let v2 = interpolate_pixel(&input, 4, 4, 1.5, 1.0, &config);
+    let v3 = interpolate_pixel(&input, 4, 4, 2.5, 1.0, &config);
+
+    // Should be monotonically increasing in a gradient
+    assert!(v1 < v2);
+    assert!(v2 < v3);
+}
+
+#[test]
+fn test_lanczos2_vs_lanczos3() {
+    let input: Vec<f32> = (0..64).map(|i| (i as f32).sin()).collect();
+
+    let config2 = WarpConfig {
+        method: InterpolationMethod::Lanczos2,
+        ..Default::default()
+    };
+    let config3 = WarpConfig {
+        method: InterpolationMethod::Lanczos3,
+        ..Default::default()
+    };
+
+    let v2 = interpolate_pixel(&input, 8, 8, 3.5, 4.5, &config2);
+    let v3 = interpolate_pixel(&input, 8, 8, 3.5, 4.5, &config3);
+
+    // Both should give reasonable values (not wildly different)
+    assert!((v2 - v3).abs() < 0.5);
+}
