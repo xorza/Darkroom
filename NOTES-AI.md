@@ -360,11 +360,17 @@ BackgroundMap      // { background, noise } - per-pixel background and noise est
 
 **Algorithm pipeline:**
 1. **Median filter** - 3x3 median removes Bayer pattern artifacts from CFA sensors
-2. **Background estimation** - Tile-based sigma-clipped median with bilinear interpolation
+2. **Background estimation** - Tile-based sigma-clipped median with tile grid median filter and bilinear interpolation
 3. **Star detection** - Threshold (background + k×σ), connected components with union-find (path compression), dilation radius 1 for minimal merging
 4. **Centroid refinement** - Iterative Gaussian-weighted centroid with adaptive stamp radius (~3.5× FWHM), ~0.05 pixel accuracy
 5. **Quality filtering** - SNR, eccentricity, saturation, sharpness (cosmic ray rejection), and FWHM outlier rejection
 6. **Duplicate removal** - Spatial deduplication (8 pixel separation)
+
+**Background estimation details:**
+- Divides image into tiles (default 64×64 pixels)
+- Computes sigma-clipped median and MAD for each tile (3-sigma, 3 iterations)
+- Applies 3×3 median filter to tile grid to reject bright star contamination
+- Bilinearly interpolates between tile centers for smooth per-pixel background
 
 **FWHM outlier filtering:**
 - Uses MAD (median absolute deviation) for robust outlier detection

@@ -71,6 +71,77 @@ impl TileGrid {
     fn get(&self, tx: usize, ty: usize) -> TileStats {
         self.stats[ty * self.tiles_x + tx]
     }
+
+    /// Apply median filter to the tile grid statistics.
+    ///
+    /// This makes the background estimation more robust to bright stars by
+    /// replacing each tile's statistics with the median of its 3x3 neighborhood.
+    fn apply_median_filter(&mut self) {
+        if self.tiles_x < 3 || self.tiles_y < 3 {
+            return; // Not enough tiles for filtering
+        }
+
+        let mut filtered = vec![
+            TileStats {
+                median: 0.0,
+                sigma: 0.0
+            };
+            self.stats.len()
+        ];
+
+        for ty in 0..self.tiles_y {
+            for tx in 0..self.tiles_x {
+                // Gather 3x3 neighborhood values
+                let mut medians = [0.0f32; 9];
+                let mut sigmas = [0.0f32; 9];
+                let mut count = 0;
+
+                for dy in -1i32..=1 {
+                    for dx in -1i32..=1 {
+                        let nx = tx as i32 + dx;
+                        let ny = ty as i32 + dy;
+
+                        if nx >= 0
+                            && nx < self.tiles_x as i32
+                            && ny >= 0
+                            && ny < self.tiles_y as i32
+                        {
+                            let neighbor = self.get(nx as usize, ny as usize);
+                            medians[count] = neighbor.median;
+                            sigmas[count] = neighbor.sigma;
+                            count += 1;
+                        }
+                    }
+                }
+
+                // Compute median of neighborhoods
+                let filtered_median = median_of_slice(&mut medians[..count]);
+                let filtered_sigma = median_of_slice(&mut sigmas[..count]);
+
+                filtered[ty * self.tiles_x + tx] = TileStats {
+                    median: filtered_median,
+                    sigma: filtered_sigma,
+                };
+            }
+        }
+
+        self.stats = filtered;
+    }
+}
+
+/// Compute median of a small slice (up to 9 elements).
+#[inline]
+fn median_of_slice(values: &mut [f32]) -> f32 {
+    if values.is_empty() {
+        return 0.0;
+    }
+    values.sort_unstable_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let mid = values.len() / 2;
+    if values.len() % 2 == 0 {
+        (values[mid - 1] + values[mid]) * 0.5
+    } else {
+        values[mid]
+    }
 }
 
 /// Estimate background using tiled sigma-clipped statistics.
@@ -139,7 +210,7 @@ pub fn estimate_background(
         .collect();
 
     // Build tile grid with precomputed centers
-    let grid = TileGrid {
+    let mut grid = TileGrid {
         stats: tile_stats,
         centers_x: (0..tiles_x)
             .map(|tx| {
@@ -158,6 +229,9 @@ pub fn estimate_background(
         tiles_x,
         tiles_y,
     };
+
+    // Apply median filter to tile grid to reject bright star contamination
+    grid.apply_median_filter();
 
     // Allocate output buffers
     let mut background = vec![0.0f32; width * height];
