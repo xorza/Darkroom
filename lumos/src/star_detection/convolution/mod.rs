@@ -16,6 +16,8 @@ mod simd;
 
 use rayon::prelude::*;
 
+use super::constants::{ROWS_PER_CHUNK, fwhm_to_sigma};
+
 /// Compute 1D Gaussian kernel.
 ///
 /// The kernel is normalized so that it sums to 1.0.
@@ -49,14 +51,6 @@ pub fn gaussian_kernel_1d(sigma: f32) -> Vec<f32> {
     }
 
     kernel
-}
-
-/// Convert FWHM to Gaussian sigma.
-///
-/// FWHM = 2 * sqrt(2 * ln(2)) * sigma ≈ 2.355 * sigma
-#[inline]
-pub fn fwhm_to_sigma(fwhm: f32) -> f32 {
-    super::constants::fwhm_to_sigma(fwhm)
 }
 
 /// Apply separable Gaussian convolution to an image.
@@ -103,11 +97,6 @@ pub fn gaussian_convolve(pixels: &[f32], width: usize, height: usize, sigma: f32
 fn convolve_rows_parallel(input: &[f32], output: &mut [f32], width: usize, kernel: &[f32]) {
     let radius = kernel.len() / 2;
 
-    // Process multiple rows per chunk to reduce false sharing.
-    // 8 rows of f32 = 8 * width * 4 bytes. For width >= 128, each chunk is >= 4KB,
-    // which spans multiple cache lines and gives each thread a distinct memory region.
-    const ROWS_PER_CHUNK: usize = 8;
-
     output
         .par_chunks_mut(width * ROWS_PER_CHUNK)
         .enumerate()
@@ -145,10 +134,6 @@ fn convolve_cols_parallel(
 ) {
     let radius = kernel.len() / 2;
 
-    // Process multiple rows per chunk to reduce false sharing
-    const ROWS_PER_CHUNK: usize = 8;
-
-    // Process rows in parallel, each row convolves all columns vertically
     output
         .par_chunks_mut(width * ROWS_PER_CHUNK)
         .enumerate()
@@ -422,8 +407,6 @@ pub fn elliptical_gaussian_convolve(
 
     let mut output = vec![0.0f32; width * height];
 
-    // Process rows in parallel
-    const ROWS_PER_CHUNK: usize = 8;
     output
         .par_chunks_mut(width * ROWS_PER_CHUNK)
         .enumerate()

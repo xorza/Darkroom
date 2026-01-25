@@ -4,15 +4,7 @@
 //! It captures small-scale structure including cosmic rays, but also real fine features
 //! like stellar cores.
 
-/// Compute median of a small array (in-place partial sort).
-#[inline]
-pub fn median_of_n(values: &mut [f32]) -> f32 {
-    if values.is_empty() {
-        return 0.0;
-    }
-    values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-    values[values.len() / 2]
-}
+use crate::star_detection::median_filter::median_of_n;
 
 /// Compute fine structure image using 3x3 median filter.
 ///
@@ -62,8 +54,9 @@ mod tests {
         let mut values = [1.0, 5.0, 3.0, 2.0, 4.0];
         assert!((median_of_n(&mut values) - 3.0).abs() < 1e-6);
 
+        // For even count, the optimized implementation returns average of middle two
         let mut values2 = [1.0, 2.0, 3.0, 4.0];
-        assert!((median_of_n(&mut values2) - 3.0).abs() < 1e-6);
+        assert!((median_of_n(&mut values2) - 2.5).abs() < 1e-6);
 
         let mut values3 = [42.0];
         assert!((median_of_n(&mut values3) - 42.0).abs() < 1e-6);

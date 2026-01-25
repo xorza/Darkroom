@@ -2,7 +2,8 @@
 //! Run with: cargo bench --package lumos --features bench convolution
 
 use super::simd::convolve_row_simd;
-use super::{fwhm_to_sigma, gaussian_convolve, gaussian_kernel_1d, matched_filter};
+use super::{gaussian_convolve, gaussian_kernel_1d, matched_filter};
+use crate::star_detection::constants::fwhm_to_sigma;
 use criterion::{BenchmarkId, Criterion, Throughput};
 use std::hint::black_box;
 

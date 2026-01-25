@@ -725,7 +725,7 @@ fn test_find_striped_region() {
 
 #[test]
 fn test_dilation_comparison() {
-    use crate::star_detection::detection::dilate_mask;
+    use crate::star_detection::constants::dilate_mask;
     use crate::star_detection::estimate_background;
 
     let cal_dir = match std::env::var("LUMOS_CALIBRATION_DIR") {

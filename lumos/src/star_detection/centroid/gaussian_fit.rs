@@ -328,23 +328,11 @@ fn compute_gradient(jacobian: &[[f32; 6]], residuals: &[f32]) -> [f32; 6] {
 
 // Use shared linear solver
 use super::linear_solver::solve_6x6;
-use crate::star_detection::constants;
-
-/// Convert sigma to FWHM.
-#[inline]
-pub fn sigma_to_fwhm(sigma: f32) -> f32 {
-    constants::sigma_to_fwhm(sigma)
-}
-
-/// Convert FWHM to sigma.
-#[inline]
-pub fn fwhm_to_sigma(fwhm: f32) -> f32 {
-    constants::fwhm_to_sigma(fwhm)
-}
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::star_detection::constants::{fwhm_to_sigma, sigma_to_fwhm};
 
     fn make_gaussian_stamp(
         width: usize,

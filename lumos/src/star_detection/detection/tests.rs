@@ -5,6 +5,7 @@
 
 use super::*;
 use crate::star_detection::background::{BackgroundMap, estimate_background};
+use crate::star_detection::constants::dilate_mask;
 
 /// Default deblend config for tests
 const TEST_DEBLEND_CONFIG: DeblendConfig = DeblendConfig {

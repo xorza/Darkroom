@@ -13,7 +13,7 @@ mod tests;
 
 mod simd;
 
-use super::constants;
+use super::constants::{self, ROWS_PER_CHUNK};
 use rayon::prelude::*;
 
 /// Background map with per-pixel background and noise estimates.
@@ -242,8 +242,6 @@ pub fn estimate_background(
     let mut background = vec![0.0f32; width * height];
     let mut noise = vec![0.0f32; width * height];
 
-    // Process rows in parallel with chunking to reduce false sharing
-    const ROWS_PER_CHUNK: usize = 8;
     background
         .par_chunks_mut(width * ROWS_PER_CHUNK)
         .zip(noise.par_chunks_mut(width * ROWS_PER_CHUNK))
@@ -605,7 +603,6 @@ fn estimate_background_masked(
     let mut background = vec![0.0f32; width * height];
     let mut noise = vec![0.0f32; width * height];
 
-    const ROWS_PER_CHUNK: usize = 8;
     background
         .par_chunks_mut(width * ROWS_PER_CHUNK)
         .zip(noise.par_chunks_mut(width * ROWS_PER_CHUNK))

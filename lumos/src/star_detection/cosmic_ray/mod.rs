@@ -29,8 +29,7 @@ mod tests;
 
 // Re-export public API
 pub use fine_structure::compute_fine_structure;
-#[allow(unused_imports)]
-pub use fine_structure::median_of_n;
+// median_of_n is now in median_filter module
 pub use laplacian::{compute_laplacian, compute_laplacian_snr};
 
 /// Configuration for L.A.Cosmic cosmic ray detection.

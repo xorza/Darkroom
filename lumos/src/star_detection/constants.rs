@@ -15,19 +15,11 @@ pub const FWHM_TO_SIGMA: f32 = 2.354_82;
 /// This is the exact value: 1 / Φ⁻¹(3/4) where Φ⁻¹ is the inverse CDF.
 pub const MAD_TO_SIGMA: f32 = 1.4826022;
 
-/// Default saturation threshold as fraction of dynamic range.
-///
-/// Stars with peak values above this threshold (95% of max) are considered
-/// potentially saturated and may be filtered or flagged.
-#[allow(dead_code)]
-pub const DEFAULT_SATURATION_THRESHOLD: f32 = 0.95;
-
 /// Number of rows to process per parallel chunk.
 ///
 /// This value is chosen to minimize false sharing between CPU cores while
 /// maintaining good cache utilization. 8 rows × 64 bytes/cache line provides
 /// enough separation for most image widths.
-#[allow(dead_code)]
 pub const ROWS_PER_CHUNK: usize = 8;
 
 /// Stamp radius as a multiple of FWHM.
@@ -49,14 +41,6 @@ pub const MIN_STAMP_RADIUS: usize = 4;
 /// for very large PSFs.
 pub const MAX_STAMP_RADIUS: usize = 15;
 
-/// Default number of sigma-clipping iterations for background estimation.
-#[allow(dead_code)]
-pub const DEFAULT_SIGMA_CLIP_ITERATIONS: usize = 3;
-
-/// Default sigma threshold for sigma-clipping.
-#[allow(dead_code)]
-pub const DEFAULT_SIGMA_CLIP_KAPPA: f32 = 3.0;
-
 /// Centroid convergence threshold in pixels squared.
 ///
 /// Iteration stops when the squared distance moved is less than this value.
@@ -64,12 +48,6 @@ pub const CENTROID_CONVERGENCE_THRESHOLD: f32 = 0.001;
 
 /// Maximum centroid iterations before giving up.
 pub const MAX_CENTROID_ITERATIONS: usize = 10;
-
-/// Gaussian weight sigma for centroid refinement.
-///
-/// Controls the weighting function used in iterative centroid computation.
-#[allow(dead_code)]
-pub const CENTROID_WEIGHT_SIGMA: f32 = 2.0;
 
 // Utility functions for conversions
 

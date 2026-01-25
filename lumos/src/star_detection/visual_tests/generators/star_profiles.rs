@@ -6,7 +6,9 @@
 //! - Elliptical Gaussian (tracking errors)
 //! - Saturated stars (flat-topped profiles)
 
-use crate::star_detection::constants::FWHM_TO_SIGMA;
+// Re-export FWHM conversion functions for convenience
+#[allow(unused_imports)]
+pub use crate::star_detection::constants::{fwhm_to_sigma, sigma_to_fwhm};
 
 /// Render a circular Gaussian star profile.
 ///
@@ -246,16 +248,6 @@ pub fn render_cosmic_ray_extended(
     if y < height - 1 {
         pixels[(y + 1) * width + x] += bleed;
     }
-}
-
-/// Convert FWHM to Gaussian sigma.
-pub fn fwhm_to_sigma(fwhm: f32) -> f32 {
-    fwhm / FWHM_TO_SIGMA
-}
-
-/// Convert Gaussian sigma to FWHM.
-pub fn sigma_to_fwhm(sigma: f32) -> f32 {
-    sigma * FWHM_TO_SIGMA
 }
 
 #[cfg(test)]

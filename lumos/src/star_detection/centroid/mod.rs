@@ -18,8 +18,6 @@ pub mod bench;
 
 // Re-export fitting functions and types for convenience
 pub use gaussian_fit::{GaussianFitConfig, GaussianFitResult, fit_gaussian_2d};
-#[allow(unused_imports)]
-pub use gaussian_fit::{fwhm_to_sigma, sigma_to_fwhm};
 pub use moffat_fit::{MoffatFitConfig, MoffatFitResult, fit_moffat_2d};
 #[allow(unused_imports)]
 pub use moffat_fit::{alpha_beta_to_fwhm, fwhm_beta_to_alpha};

@@ -13,6 +13,8 @@ mod tests;
 
 use rayon::prelude::*;
 
+use super::constants::ROWS_PER_CHUNK;
+
 /// Apply 3x3 median filter to remove Bayer pattern artifacts.
 ///
 /// Uses parallel processing for large images. Separates interior pixels
@@ -29,9 +31,6 @@ pub fn median_filter_3x3(pixels: &[f32], width: usize, height: usize) -> Vec<f32
     }
 
     let mut output = vec![0.0f32; width * height];
-
-    // Process in row chunks to reduce false cache sharing
-    const ROWS_PER_CHUNK: usize = 8;
 
     output
         .par_chunks_mut(width * ROWS_PER_CHUNK)
@@ -135,9 +134,10 @@ fn median_at_edge(pixels: &[f32], width: usize, height: usize, x: usize, y: usiz
 
 /// Compute median of a small array (up to 9 elements).
 ///
-/// Uses sorting networks for fixed sizes, falls back to partial sort for edges.
+/// Uses sorting networks for fixed sizes (3-6, 9) for optimal performance,
+/// falls back to partial sort for other sizes (7, 8).
 #[inline]
-fn median_of_n(values: &mut [f32]) -> f32 {
+pub fn median_of_n(values: &mut [f32]) -> f32 {
     let n = values.len();
     match n {
         0 => 0.0,

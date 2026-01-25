@@ -3,7 +3,8 @@
 //! Tests the Gaussian filtering for star enhancement.
 
 use crate::star_detection::background::estimate_background;
-use crate::star_detection::convolution::{fwhm_to_sigma, gaussian_convolve};
+use crate::star_detection::constants::fwhm_to_sigma;
+use crate::star_detection::convolution::gaussian_convolve;
 use crate::star_detection::visual_tests::generators::{StarFieldConfig, generate_star_field};
 use crate::star_detection::visual_tests::output::save_grayscale_png;
 use crate::testing::init_tracing;
