@@ -77,3 +77,28 @@ required-features = ["bench"]
 name = "median_filter"
 harness = false
 required-features = ["bench"]
+
+[[bench]]
+name = "star_detection_centroid"
+harness = false
+required-features = ["bench"]
+
+[[bench]]
+name = "star_detection_convolution"
+harness = false
+required-features = ["bench"]
+
+[[bench]]
+name = "star_detection_cosmic_ray"
+harness = false
+required-features = ["bench"]
+
+[[bench]]
+name = "star_detection_deblend"
+harness = false
+required-features = ["bench"]
+
+[[bench]]
+name = "star_detection_detection"
+harness = false
+required-features = ["bench"]

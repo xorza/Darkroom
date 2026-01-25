@@ -18,6 +18,12 @@
 mod fine_structure;
 mod laplacian;
 
+#[cfg(feature = "bench")]
+pub mod bench;
+
+// SIMD implementations (not yet implemented)
+pub mod simd;
+
 #[cfg(test)]
 mod tests;
 

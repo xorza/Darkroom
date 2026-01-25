@@ -1,7 +1,10 @@
 //! Benchmarks for cosmic ray detection.
+//! Run with: cargo bench -p lumos --features bench --bench star_detection_cosmic_ray
 
 use super::laplacian::compute_laplacian;
 use super::{LACosmicConfig, detect_cosmic_rays};
+use criterion::{BenchmarkId, Criterion, Throughput};
+use std::hint::black_box;
 
 /// Benchmark data for cosmic ray detection.
 pub struct BenchData {
@@ -74,6 +77,53 @@ pub fn bench_detect_cosmic_rays(data: &BenchData) -> usize {
         &config,
     );
     result.cosmic_ray_count
+}
+
+/// Register cosmic ray detection benchmarks with Criterion.
+pub fn benchmarks(c: &mut Criterion) {
+    let mut laplacian_group = c.benchmark_group("cosmic_ray_laplacian");
+    laplacian_group.sample_size(30);
+
+    for &(width, height) in &[(512, 512), (1024, 1024), (2048, 2048)] {
+        let data = BenchData::new(width, height, 100, 20);
+        let size_name = format!("{}x{}", width, height);
+
+        laplacian_group.throughput(Throughput::Elements((width * height) as u64));
+        laplacian_group.bench_function(BenchmarkId::new("compute_laplacian", &size_name), |b| {
+            b.iter(|| black_box(compute_laplacian(black_box(&data.pixels), width, height)))
+        });
+    }
+
+    laplacian_group.finish();
+
+    let mut detect_group = c.benchmark_group("cosmic_ray_detect");
+    detect_group.sample_size(20);
+
+    for &(width, height, num_stars, num_cr) in &[
+        (512, 512, 50, 10),
+        (1024, 1024, 200, 40),
+        (2048, 2048, 800, 100),
+    ] {
+        let data = BenchData::new(width, height, num_stars, num_cr);
+        let config = LACosmicConfig::default();
+        let size_name = format!("{}x{}", width, height);
+
+        detect_group.throughput(Throughput::Elements((width * height) as u64));
+        detect_group.bench_function(BenchmarkId::new("detect_cosmic_rays", &size_name), |b| {
+            b.iter(|| {
+                black_box(detect_cosmic_rays(
+                    black_box(&data.pixels),
+                    width,
+                    height,
+                    black_box(&data.background),
+                    black_box(&data.noise),
+                    black_box(&config),
+                ))
+            })
+        });
+    }
+
+    detect_group.finish();
 }
 
 #[cfg(test)]

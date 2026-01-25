@@ -34,9 +34,12 @@ mod visual_tests;
 
 #[cfg(feature = "bench")]
 pub mod bench {
-    #[allow(unused_imports)]
     pub use super::background::bench as background;
-    #[allow(unused_imports)]
+    pub use super::centroid::bench as centroid;
+    pub use super::convolution::bench as convolution;
+    pub use super::cosmic_ray::bench as cosmic_ray;
+    pub use super::deblend::bench as deblend;
+    pub use super::detection::bench as detection;
     pub use super::median_filter::bench as median_filter;
 }
 

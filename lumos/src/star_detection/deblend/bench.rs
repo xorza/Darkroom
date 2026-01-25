@@ -1,9 +1,12 @@
 //! Benchmarks for deblending algorithms.
+//! Run with: cargo bench -p lumos --features bench --bench star_detection_deblend
 
 use super::DeblendConfig;
 use super::local_maxima::{ComponentData, deblend_local_maxima};
 use super::multi_threshold::{MultiThresholdDeblendConfig, deblend_component};
+use criterion::{BenchmarkId, Criterion, Throughput};
 use std::collections::HashMap;
+use std::hint::black_box;
 
 /// Benchmark data for deblending.
 pub struct BenchData {
@@ -127,6 +130,60 @@ pub fn bench_multi_threshold(data: &BenchData) -> usize {
     }
 
     total_objects
+}
+
+/// Register deblending benchmarks with Criterion.
+pub fn benchmarks(c: &mut Criterion) {
+    let mut local_group = c.benchmark_group("deblend_local_maxima");
+    local_group.sample_size(50);
+
+    for &(num_pairs, separation) in &[(10, 15), (50, 12), (100, 10)] {
+        let data = BenchData::new(512, 512, num_pairs, separation);
+        let config = DeblendConfig::default();
+        let name = format!("{}pairs_sep{}", num_pairs, separation);
+
+        local_group.throughput(Throughput::Elements(num_pairs as u64));
+        local_group.bench_function(BenchmarkId::new("local_maxima", &name), |b| {
+            b.iter(|| {
+                for component in &data.components {
+                    black_box(deblend_local_maxima(
+                        black_box(component),
+                        black_box(&data.image),
+                        data.width,
+                        black_box(&config),
+                    ));
+                }
+            })
+        });
+    }
+
+    local_group.finish();
+
+    let mut mt_group = c.benchmark_group("deblend_multi_threshold");
+    mt_group.sample_size(30);
+
+    for &(num_pairs, separation) in &[(10, 15), (50, 12)] {
+        let data = BenchData::new(512, 512, num_pairs, separation);
+        let config = MultiThresholdDeblendConfig::default();
+        let name = format!("{}pairs_sep{}", num_pairs, separation);
+
+        mt_group.throughput(Throughput::Elements(num_pairs as u64));
+        mt_group.bench_function(BenchmarkId::new("multi_threshold", &name), |b| {
+            b.iter(|| {
+                for pixels in &data.component_pixels {
+                    black_box(deblend_component(
+                        black_box(&data.image),
+                        black_box(pixels),
+                        data.width,
+                        0.01,
+                        black_box(&config),
+                    ));
+                }
+            })
+        });
+    }
+
+    mt_group.finish();
 }
 
 #[cfg(test)]
