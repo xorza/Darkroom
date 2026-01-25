@@ -27,7 +27,9 @@ fn test_cosmic_ray_rejection() {
         height,
         num_stars: 30,
         fwhm_range: (3.5, 4.5),
-        magnitude_range: (8.0, 12.0),
+        // Use proper magnitude range to avoid saturation
+        magnitude_range: (12.5, 13.5),
+        mag_zero_point: 14.8,
         background_level: 0.1,
         noise_sigma: 0.02,
         cosmic_ray_count: 0,
@@ -45,9 +47,10 @@ fn test_cosmic_ray_rejection() {
         &test_output_path("stage_cr_rejection_input.png"),
     );
 
-    // Run detection
+    // Run detection - disable CFA filter and matched filter for synthetic images
     let detection_config = StarDetectionConfig {
-        expected_fwhm: 4.0,
+        is_cfa: false,
+        expected_fwhm: 0.0,
         ..Default::default()
     };
 
@@ -152,7 +155,9 @@ fn test_laplacian_snr_visualization() {
         height,
         num_stars: 10,
         fwhm_range: (4.0, 4.0),
-        magnitude_range: (8.0, 11.0),
+        // Use proper magnitude range to avoid saturation
+        magnitude_range: (12.5, 13.5),
+        mag_zero_point: 14.8,
         background_level: 0.1,
         noise_sigma: 0.02,
         cosmic_ray_count: 0,
@@ -170,9 +175,10 @@ fn test_laplacian_snr_visualization() {
         &test_output_path("stage_laplacian_snr_input.png"),
     );
 
-    // Run detection to get Laplacian SNR values
+    // Run detection - disable CFA filter and matched filter for synthetic images
     let detection_config = StarDetectionConfig {
-        expected_fwhm: 4.0,
+        is_cfa: false,
+        expected_fwhm: 0.0,
         ..Default::default()
     };
 

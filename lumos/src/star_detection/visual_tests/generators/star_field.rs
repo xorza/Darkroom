@@ -118,8 +118,14 @@ impl Default for StarFieldConfig {
             height: 512,
             num_stars: 50,
             fwhm_range: (3.0, 4.0),
-            magnitude_range: (8.0, 14.0),
-            mag_zero_point: 15.0,
+            magnitude_range: (10.0, 14.0),
+            // Zero point chosen so mag 14 gives amplitude ~0.15 above background
+            // and mag 10 gives amplitude ~0.6 (below saturation)
+            // flux = 10^((zero - mag) / 2.5), amplitude = flux / (2π σ²)
+            // For σ=1.5 (FWHM=3.5), 2πσ² ≈ 14
+            // mag 14: amp=0.15 → flux=2.1 → zero = 14 + 2.5*log10(2.1) ≈ 14.8
+            // mag 10: amp=0.15*10^1.6 ≈ 6 → saturates, so use smaller range
+            mag_zero_point: 14.5,
             background_level: 0.1,
             noise_sigma: 0.02,
             crowding: CrowdingType::Uniform,
@@ -429,7 +435,10 @@ pub fn sparse_field_config() -> StarFieldConfig {
         height: 512,
         num_stars: 20,
         fwhm_range: (3.0, 4.0),
-        magnitude_range: (8.0, 12.0),
+        // Magnitude range chosen so brightest star has peak ~0.7-0.8 (no saturation)
+        // and faintest has peak ~0.3, all well above noise floor
+        magnitude_range: (12.5, 13.5),
+        mag_zero_point: 14.8,
         background_level: 0.1,
         noise_sigma: 0.02,
         ..Default::default()
@@ -443,7 +452,9 @@ pub fn dense_field_config() -> StarFieldConfig {
         height: 512,
         num_stars: 200,
         fwhm_range: (3.0, 4.0),
-        magnitude_range: (8.0, 14.0),
+        // Magnitude range chosen to avoid saturation while maintaining dynamic range
+        magnitude_range: (12.0, 14.0),
+        mag_zero_point: 14.8,
         background_level: 0.1,
         noise_sigma: 0.02,
         crowding: CrowdingType::Uniform,
@@ -458,7 +469,9 @@ pub fn crowded_cluster_config() -> StarFieldConfig {
         height: 512,
         num_stars: 500,
         fwhm_range: (3.0, 4.0),
-        magnitude_range: (8.0, 15.0),
+        // Wider magnitude range for crowded cluster (some faint stars expected)
+        magnitude_range: (12.0, 14.5),
+        mag_zero_point: 14.8,
         background_level: 0.1,
         noise_sigma: 0.02,
         crowding: CrowdingType::Clustered,
@@ -473,7 +486,8 @@ pub fn elliptical_stars_config() -> StarFieldConfig {
         height: 512,
         num_stars: 50,
         fwhm_range: (3.0, 4.0),
-        magnitude_range: (8.0, 13.0),
+        magnitude_range: (12.5, 13.5),
+        mag_zero_point: 14.8,
         background_level: 0.1,
         noise_sigma: 0.02,
         elongation: ElongationType::Uniform,
@@ -489,7 +503,9 @@ pub fn faint_stars_config() -> StarFieldConfig {
         height: 512,
         num_stars: 30,
         fwhm_range: (3.0, 4.0),
-        magnitude_range: (12.0, 15.0), // Fainter stars
+        // Faint stars near detection limit
+        magnitude_range: (13.5, 14.5),
+        mag_zero_point: 14.8,
         background_level: 0.15,
         noise_sigma: 0.04, // Higher noise
         ..Default::default()
