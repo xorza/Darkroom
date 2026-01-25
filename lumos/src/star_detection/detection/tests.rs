@@ -10,6 +10,9 @@ use crate::star_detection::background::{BackgroundMap, estimate_background};
 const TEST_DEBLEND_CONFIG: DeblendConfig = DeblendConfig {
     min_separation: 3,
     min_prominence: 0.3,
+    multi_threshold: false,
+    n_thresholds: 32,
+    min_contrast: 0.005,
 };
 
 fn make_test_image_with_star(
@@ -1348,6 +1351,236 @@ fn test_deblend_respects_prominence() {
         candidates.len(),
         1,
         "Non-prominent secondary peak should not cause deblending, got {} candidates",
+        candidates.len()
+    );
+}
+
+// =============================================================================
+// Multi-Threshold Deblending Tests
+// =============================================================================
+
+#[test]
+fn test_multi_threshold_deblend_star_pair() {
+    // Test multi-threshold deblending with two separated stars
+    let width = 30;
+    let height = 15;
+    let mut pixels = vec![0.1f32; width * height];
+
+    // Add first star at (7, 7)
+    for dy in -4i32..=4 {
+        for dx in -4i32..=4 {
+            let x = 7 + dx;
+            let y = 7 + dy;
+            if x >= 0 && x < width as i32 && y >= 0 && y < height as i32 {
+                let dist_sq = (dx * dx + dy * dy) as f32;
+                let value = 0.8 * (-dist_sq / 4.0).exp();
+                pixels[y as usize * width + x as usize] += value;
+            }
+        }
+    }
+
+    // Add second star at (22, 7)
+    for dy in -4i32..=4 {
+        for dx in -4i32..=4 {
+            let x = 22 + dx;
+            let y = 7 + dy;
+            if x >= 0 && x < width as i32 && y >= 0 && y < height as i32 {
+                let dist_sq = (dx * dx + dy * dy) as f32;
+                let value = 0.6 * (-dist_sq / 4.0).exp();
+                pixels[y as usize * width + x as usize] += value;
+            }
+        }
+    }
+
+    // Create a single connected component covering both stars
+    let mut labels = vec![0u32; width * height];
+    for y in 0..height {
+        for x in 0..width {
+            if pixels[y * width + x] > 0.15 {
+                labels[y * width + x] = 1;
+            }
+        }
+    }
+
+    // Use multi-threshold deblending config
+    let mt_config = DeblendConfig {
+        min_separation: 3,
+        min_prominence: 0.3,
+        multi_threshold: true,
+        n_thresholds: 32,
+        min_contrast: 0.005,
+    };
+
+    let candidates = extract_candidates(&pixels, &labels, 1, width, height, &mt_config);
+
+    // Should deblend into 2 candidates
+    assert_eq!(
+        candidates.len(),
+        2,
+        "Multi-threshold deblend should find 2 candidates, got {}",
+        candidates.len()
+    );
+
+    // Sort by peak_x to have consistent ordering
+    let mut sorted: Vec<_> = candidates.iter().collect();
+    sorted.sort_by_key(|c| c.peak_x);
+
+    // Check peak positions
+    assert!(
+        (sorted[0].peak_x as i32 - 7).abs() <= 1,
+        "First peak X should be near 7, got {}",
+        sorted[0].peak_x
+    );
+    assert!(
+        (sorted[1].peak_x as i32 - 22).abs() <= 1,
+        "Second peak X should be near 22, got {}",
+        sorted[1].peak_x
+    );
+}
+
+#[test]
+fn test_multi_threshold_vs_simple_deblend_consistency() {
+    // Both deblending methods should produce similar results for clear star pairs
+    let width = 30;
+    let height = 15;
+    let mut pixels = vec![0.1f32; width * height];
+
+    // Add two well-separated stars
+    for dy in -3i32..=3 {
+        for dx in -3i32..=3 {
+            // Star 1 at (7, 7)
+            let x1 = 7 + dx;
+            let y1 = 7 + dy;
+            if x1 >= 0 && x1 < width as i32 && y1 >= 0 && y1 < height as i32 {
+                let dist_sq = (dx * dx + dy * dy) as f32;
+                pixels[y1 as usize * width + x1 as usize] += 0.8 * (-dist_sq / 3.0).exp();
+            }
+
+            // Star 2 at (22, 7)
+            let x2 = 22 + dx;
+            let y2 = 7 + dy;
+            if x2 >= 0 && x2 < width as i32 && y2 >= 0 && y2 < height as i32 {
+                let dist_sq = (dx * dx + dy * dy) as f32;
+                pixels[y2 as usize * width + x2 as usize] += 0.7 * (-dist_sq / 3.0).exp();
+            }
+        }
+    }
+
+    // Create a single component
+    let mut labels = vec![0u32; width * height];
+    for y in 0..height {
+        for x in 0..width {
+            if pixels[y * width + x] > 0.15 {
+                labels[y * width + x] = 1;
+            }
+        }
+    }
+
+    // Simple deblending
+    let simple_config = DeblendConfig {
+        min_separation: 3,
+        min_prominence: 0.3,
+        multi_threshold: false,
+        n_thresholds: 32,
+        min_contrast: 0.005,
+    };
+    let simple_candidates = extract_candidates(&pixels, &labels, 1, width, height, &simple_config);
+
+    // Multi-threshold deblending
+    let mt_config = DeblendConfig {
+        min_separation: 3,
+        min_prominence: 0.3,
+        multi_threshold: true,
+        n_thresholds: 32,
+        min_contrast: 0.005,
+    };
+    let mt_candidates = extract_candidates(&pixels, &labels, 1, width, height, &mt_config);
+
+    // Both should find 2 stars
+    assert_eq!(
+        simple_candidates.len(),
+        2,
+        "Simple deblend should find 2 stars"
+    );
+    assert_eq!(
+        mt_candidates.len(),
+        2,
+        "Multi-threshold deblend should find 2 stars"
+    );
+
+    // Peak positions should be similar
+    let mut simple_sorted: Vec<_> = simple_candidates.iter().collect();
+    simple_sorted.sort_by_key(|c| c.peak_x);
+
+    let mut mt_sorted: Vec<_> = mt_candidates.iter().collect();
+    mt_sorted.sort_by_key(|c| c.peak_x);
+
+    for i in 0..2 {
+        assert!(
+            (simple_sorted[i].peak_x as i32 - mt_sorted[i].peak_x as i32).abs() <= 2,
+            "Peak {} X positions should be similar",
+            i
+        );
+        assert!(
+            (simple_sorted[i].peak_y as i32 - mt_sorted[i].peak_y as i32).abs() <= 2,
+            "Peak {} Y positions should be similar",
+            i
+        );
+    }
+}
+
+#[test]
+fn test_multi_threshold_deblend_high_contrast_disables() {
+    // Setting min_contrast to 1.0 should disable multi-threshold deblending
+    let width = 30;
+    let height = 15;
+    let mut pixels = vec![0.1f32; width * height];
+
+    // Add two separated stars
+    for dy in -3i32..=3 {
+        for dx in -3i32..=3 {
+            let x1 = 7 + dx;
+            let y1 = 7 + dy;
+            if x1 >= 0 && x1 < width as i32 && y1 >= 0 && y1 < height as i32 {
+                let dist_sq = (dx * dx + dy * dy) as f32;
+                pixels[y1 as usize * width + x1 as usize] += 0.8 * (-dist_sq / 3.0).exp();
+            }
+
+            let x2 = 22 + dx;
+            let y2 = 7 + dy;
+            if x2 >= 0 && x2 < width as i32 && y2 >= 0 && y2 < height as i32 {
+                let dist_sq = (dx * dx + dy * dy) as f32;
+                pixels[y2 as usize * width + x2 as usize] += 0.7 * (-dist_sq / 3.0).exp();
+            }
+        }
+    }
+
+    // Create a single component
+    let mut labels = vec![0u32; width * height];
+    for y in 0..height {
+        for x in 0..width {
+            if pixels[y * width + x] > 0.15 {
+                labels[y * width + x] = 1;
+            }
+        }
+    }
+
+    // Multi-threshold with min_contrast = 1.0 (disabled)
+    let config = DeblendConfig {
+        min_separation: 3,
+        min_prominence: 0.3,
+        multi_threshold: true,
+        n_thresholds: 32,
+        min_contrast: 1.0, // Disabled
+    };
+
+    let candidates = extract_candidates(&pixels, &labels, 1, width, height, &config);
+
+    // Should return single candidate (deblending disabled)
+    assert_eq!(
+        candidates.len(),
+        1,
+        "High min_contrast should disable multi-threshold deblending, got {} candidates",
         candidates.len()
     );
 }

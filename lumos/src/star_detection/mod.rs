@@ -22,8 +22,12 @@
 mod background;
 mod centroid;
 mod convolution;
+mod cosmic_ray;
+mod deblend;
 mod detection;
+mod gaussian_fit;
 mod median_filter;
+mod moffat_fit;
 
 #[cfg(test)]
 mod tests;
@@ -38,11 +42,21 @@ pub mod bench {
     pub use super::median_filter::bench as median_filter;
 }
 
-pub use background::estimate_background;
+// Public API exports - used by external consumers of the library
+#[allow(unused_imports)]
+pub use background::{
+    IterativeBackgroundConfig, estimate_background, estimate_background_iterative,
+};
 pub use centroid::compute_centroid;
 pub use convolution::matched_filter;
 pub use detection::{detect_stars, detect_stars_filtered};
+#[allow(unused_imports)]
+pub use gaussian_fit::{GaussianFitConfig, GaussianFitResult, fit_gaussian_2d};
 pub use median_filter::median_filter_3x3;
+#[allow(unused_imports)]
+pub use moffat_fit::{
+    MoffatFitConfig, MoffatFitResult, alpha_beta_to_fwhm, fit_moffat_2d, fwhm_beta_to_alpha,
+};
 
 /// A detected star with sub-pixel position and quality metrics.
 #[derive(Debug, Clone, Copy)]
@@ -64,6 +78,17 @@ pub struct Star {
     /// Sharpness metric (peak / flux_in_core). Cosmic rays have high sharpness (>0.8),
     /// real stars have lower sharpness (typically 0.2-0.6 depending on seeing).
     pub sharpness: f32,
+    /// Roundness based on marginal Gaussian fits (DAOFIND GROUND).
+    /// (Hx - Hy) / (Hx + Hy) where Hx, Hy are heights of marginal x and y fits.
+    /// Circular sources → 0, x-extended → negative, y-extended → positive.
+    pub roundness1: f32,
+    /// Roundness based on symmetry (DAOFIND SROUND).
+    /// Measures bilateral vs four-fold symmetry. Circular → 0, asymmetric → non-zero.
+    pub roundness2: f32,
+    /// L.A.Cosmic Laplacian SNR metric for cosmic ray detection.
+    /// Cosmic rays have very sharp edges (high Laplacian), stars have smooth edges.
+    /// Values > 50 typically indicate cosmic rays. Based on van Dokkum 2001.
+    pub laplacian_snr: f32,
 }
 
 impl Star {
@@ -82,14 +107,37 @@ impl Star {
         self.sharpness > max_sharpness
     }
 
+    /// Check if star is likely a cosmic ray using L.A.Cosmic Laplacian metric.
+    ///
+    /// Based on van Dokkum 2001: cosmic rays have very sharp edges that produce
+    /// high Laplacian values. Stars, being smoothed by the PSF, have lower values.
+    /// Threshold of ~50 is typical for rejecting cosmic rays.
+    pub fn is_cosmic_ray_laplacian(&self, max_laplacian_snr: f32) -> bool {
+        self.laplacian_snr > max_laplacian_snr
+    }
+
+    /// Check if star passes roundness filters.
+    ///
+    /// Both roundness metrics should be close to zero for circular sources.
+    pub fn is_round(&self, max_roundness: f32) -> bool {
+        self.roundness1.abs() <= max_roundness && self.roundness2.abs() <= max_roundness
+    }
+
     /// Check if star is usable for registration.
     ///
-    /// Filters out saturated, elongated, low-SNR stars, and cosmic rays.
-    pub fn is_usable(&self, min_snr: f32, max_eccentricity: f32, max_sharpness: f32) -> bool {
+    /// Filters out saturated, elongated, low-SNR stars, cosmic rays, and non-round objects.
+    pub fn is_usable(
+        &self,
+        min_snr: f32,
+        max_eccentricity: f32,
+        max_sharpness: f32,
+        max_roundness: f32,
+    ) -> bool {
         !self.is_saturated()
             && self.snr >= min_snr
             && self.eccentricity <= max_eccentricity
             && !self.is_cosmic_ray(max_sharpness)
+            && self.is_round(max_roundness)
     }
 }
 
@@ -134,6 +182,25 @@ pub struct StarDetectionConfig {
     /// Minimum separation between stars for duplicate removal (in pixels).
     /// Stars closer than this are considered duplicates; only brightest is kept.
     pub duplicate_min_separation: f32,
+    /// Maximum roundness for a star to be considered valid.
+    /// Roundness metrics (GROUND and SROUND from DAOFIND) measure asymmetry.
+    /// Circular sources have roundness near 0. Cosmic rays, satellite trails,
+    /// and galaxies have higher absolute roundness. Set to 1.0 to disable.
+    pub max_roundness: f32,
+    /// Enable multi-threshold deblending (SExtractor-style).
+    /// When enabled, uses tree-based deblending with multiple threshold levels
+    /// instead of simple local maxima detection. More accurate for crowded fields
+    /// but slower. Set to true for better crowded field handling.
+    pub multi_threshold_deblend: bool,
+    /// Number of deblending sub-thresholds for multi-threshold deblending.
+    /// Higher values give finer deblending resolution but use more CPU.
+    /// SExtractor default: 32. Typical range: 16-64.
+    pub deblend_nthresh: usize,
+    /// Minimum contrast for multi-threshold deblending (0.0-1.0).
+    /// A branch is considered a separate object only if its flux is
+    /// at least this fraction of the total flux. Lower values deblend more aggressively.
+    /// SExtractor default: 0.005. Set to 1.0 to disable deblending.
+    pub deblend_min_contrast: f32,
 }
 
 impl Default for StarDetectionConfig {
@@ -152,6 +219,10 @@ impl Default for StarDetectionConfig {
             deblend_min_separation: 3,
             deblend_min_prominence: 0.3,
             duplicate_min_separation: 8.0,
+            max_roundness: 1.0, // Disabled by default (accept all roundness values)
+            multi_threshold_deblend: false, // Use simpler local maxima by default
+            deblend_nthresh: 32,
+            deblend_min_contrast: 0.005,
         }
     }
 }
@@ -189,6 +260,8 @@ pub struct StarDetectionDiagnostics {
     pub rejected_cosmic_rays: usize,
     /// Number of stars rejected as saturated.
     pub rejected_saturated: usize,
+    /// Number of stars rejected for non-circular shape (roundness).
+    pub rejected_roundness: usize,
     /// Number of stars rejected for abnormal FWHM.
     pub rejected_fwhm_outliers: usize,
     /// Number of duplicate detections removed.
@@ -292,6 +365,8 @@ pub fn find_stars(
             diagnostics.rejected_high_eccentricity += 1;
         } else if star.is_cosmic_ray(config.max_sharpness) {
             diagnostics.rejected_cosmic_rays += 1;
+        } else if !star.is_round(config.max_roundness) {
+            diagnostics.rejected_roundness += 1;
         } else {
             stars.push(star);
         }

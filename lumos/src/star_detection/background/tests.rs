@@ -303,6 +303,156 @@ fn test_background_on_real_image() {
 }
 
 // =============================================================================
+// Iterative Background Refinement Tests
+// =============================================================================
+
+#[test]
+fn test_iterative_background_uniform() {
+    // Uniform image should produce same result as non-iterative
+    let width = 128;
+    let height = 128;
+    let pixels: Vec<f32> = vec![0.5; width * height];
+
+    let config = IterativeBackgroundConfig::default();
+    let bg = estimate_background_iterative(&pixels, width, height, 32, &config);
+
+    // All background values should be close to 0.5
+    for y in (0..height).step_by(10) {
+        for x in (0..width).step_by(10) {
+            let val = bg.get_background(x, y);
+            assert!(
+                (val - 0.5).abs() < 0.01,
+                "Background at ({}, {}) = {}, expected ~0.5",
+                x,
+                y,
+                val
+            );
+        }
+    }
+}
+
+#[test]
+fn test_iterative_background_with_bright_stars() {
+    // Background with bright stars should be better estimated with iterative refinement
+    let width = 128;
+    let height = 128;
+    let mut pixels: Vec<f32> = vec![0.1; width * height];
+
+    // Add multiple bright Gaussian stars
+    let stars: [(i32, i32); 5] = [(32, 32), (64, 64), (96, 96), (32, 96), (96, 32)];
+    for (sx, sy) in stars {
+        for dy in -5i32..=5 {
+            for dx in -5i32..=5 {
+                let x = sx + dx;
+                let y = sy + dy;
+                if x >= 0 && x < width as i32 && y >= 0 && y < height as i32 {
+                    let dist_sq = (dx * dx + dy * dy) as f32;
+                    let value = 0.8 * (-dist_sq / 4.0).exp();
+                    pixels[y as usize * width + x as usize] += value;
+                }
+            }
+        }
+    }
+
+    // Non-iterative estimate
+    let bg_simple = estimate_background(&pixels, width, height, 32);
+
+    // Iterative estimate (should be better at excluding stars)
+    let config = IterativeBackgroundConfig {
+        detection_sigma: 3.0,
+        iterations: 2,
+        mask_dilation: 5,
+        min_unmasked_fraction: 0.3,
+    };
+    let bg_iterative = estimate_background_iterative(&pixels, width, height, 32, &config);
+
+    // Check background at a point away from stars
+    let test_x = 16;
+    let test_y = 64;
+    let simple_bg = bg_simple.get_background(test_x, test_y);
+    let iter_bg = bg_iterative.get_background(test_x, test_y);
+
+    // Both should be close to 0.1, but iterative should be at least as good
+    assert!(
+        (iter_bg - 0.1).abs() < 0.05,
+        "Iterative background {} should be close to 0.1",
+        iter_bg
+    );
+    assert!(
+        (iter_bg - 0.1).abs() <= (simple_bg - 0.1).abs() + 0.01,
+        "Iterative {} should be at least as good as simple {} at estimating 0.1 background",
+        iter_bg,
+        simple_bg
+    );
+}
+
+#[test]
+fn test_iterative_background_preserves_gradient() {
+    // Background gradient should be preserved with iterative estimation
+    let width = 128;
+    let height = 128;
+    let mut pixels: Vec<f32> = (0..height)
+        .flat_map(|y| (0..width).map(move |x| (x + y) as f32 / 256.0))
+        .collect();
+
+    // Add a bright star
+    for dy in -3i32..=3 {
+        for dx in -3i32..=3 {
+            let x = 64 + dx;
+            let y = 64 + dy;
+            if x >= 0 && x < width as i32 && y >= 0 && y < height as i32 {
+                let dist_sq = (dx * dx + dy * dy) as f32;
+                pixels[y as usize * width + x as usize] += 0.5 * (-dist_sq / 2.0).exp();
+            }
+        }
+    }
+
+    let config = IterativeBackgroundConfig::default();
+    let bg = estimate_background_iterative(&pixels, width, height, 32, &config);
+
+    // Gradient should be preserved
+    let corner_00 = bg.get_background(0, 0);
+    let corner_end = bg.get_background(127, 127);
+    assert!(
+        corner_end > corner_00,
+        "Gradient not preserved: corner_00={}, corner_end={}",
+        corner_00,
+        corner_end
+    );
+}
+
+#[test]
+fn test_iterative_background_config_default() {
+    let config = IterativeBackgroundConfig::default();
+
+    assert!((config.detection_sigma - 3.0).abs() < 1e-6);
+    assert_eq!(config.iterations, 1);
+    assert_eq!(config.mask_dilation, 3);
+    assert!((config.min_unmasked_fraction - 0.3).abs() < 1e-6);
+}
+
+#[test]
+fn test_iterative_background_zero_iterations() {
+    // Zero iterations should be equivalent to non-iterative
+    let width = 64;
+    let height = 64;
+    let pixels: Vec<f32> = vec![0.3; width * height];
+
+    let config = IterativeBackgroundConfig {
+        iterations: 0,
+        ..Default::default()
+    };
+    let bg = estimate_background_iterative(&pixels, width, height, 32, &config);
+
+    let val = bg.get_background(32, 32);
+    assert!(
+        (val - 0.3).abs() < 0.01,
+        "Background {} should be ~0.3",
+        val
+    );
+}
+
+// =============================================================================
 // Sigma-Clipped Statistics Tests
 // =============================================================================
 

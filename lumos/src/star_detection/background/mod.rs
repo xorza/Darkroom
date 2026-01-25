@@ -456,3 +456,295 @@ fn find_lower_tile(pos: f32, centers: &[f32]) -> usize {
     }
     0
 }
+
+/// Configuration for iterative background refinement.
+#[allow(dead_code)] // Public API for external use
+#[derive(Debug, Clone)]
+pub struct IterativeBackgroundConfig {
+    /// Detection threshold in sigma above background for masking objects.
+    /// Higher values = more conservative masking (only mask very bright objects).
+    /// Typical value: 3.0-5.0
+    pub detection_sigma: f32,
+    /// Number of refinement iterations. Usually 1-2 is sufficient.
+    pub iterations: usize,
+    /// Dilation radius for object masks in pixels.
+    /// Expands masked regions to ensure object wings are excluded.
+    /// Typical value: 2-5 pixels.
+    pub mask_dilation: usize,
+    /// Minimum fraction of pixels that must remain unmasked per tile.
+    /// If too many pixels are masked, use original (unrefined) estimate.
+    /// Typical value: 0.3-0.5
+    pub min_unmasked_fraction: f32,
+}
+
+impl Default for IterativeBackgroundConfig {
+    fn default() -> Self {
+        Self {
+            detection_sigma: 3.0,
+            iterations: 1,
+            mask_dilation: 3,
+            min_unmasked_fraction: 0.3,
+        }
+    }
+}
+
+/// Estimate background with iterative refinement.
+///
+/// This implements the SExtractor-style iterative approach:
+/// 1. Estimate initial background
+/// 2. Detect pixels above threshold (potential objects)
+/// 3. Create dilated mask of detected regions
+/// 4. Re-estimate background excluding masked pixels
+/// 5. Repeat for specified iterations
+///
+/// This provides cleaner background maps for crowded fields by excluding
+/// stars and other bright objects from the estimation.
+///
+/// # Arguments
+/// * `pixels` - Grayscale image data
+/// * `width` - Image width
+/// * `height` - Image height
+/// * `tile_size` - Size of tiles for background estimation
+/// * `config` - Iterative refinement configuration
+#[allow(dead_code)] // Public API for external use
+pub fn estimate_background_iterative(
+    pixels: &[f32],
+    width: usize,
+    height: usize,
+    tile_size: usize,
+    config: &IterativeBackgroundConfig,
+) -> BackgroundMap {
+    // Start with initial background estimate
+    let mut background = estimate_background(pixels, width, height, tile_size);
+
+    for _iter in 0..config.iterations {
+        // Create mask of pixels above threshold
+        let mask = create_object_mask(
+            pixels,
+            &background,
+            config.detection_sigma,
+            config.mask_dilation,
+            width,
+            height,
+        );
+
+        // Re-estimate background with masked pixels excluded
+        background = estimate_background_masked(
+            pixels,
+            width,
+            height,
+            tile_size,
+            &mask,
+            config.min_unmasked_fraction,
+        );
+    }
+
+    background
+}
+
+/// Create a mask of pixels that are likely objects (above threshold).
+#[allow(dead_code)] // Used by estimate_background_iterative
+fn create_object_mask(
+    pixels: &[f32],
+    background: &BackgroundMap,
+    detection_sigma: f32,
+    dilation_radius: usize,
+    width: usize,
+    height: usize,
+) -> Vec<bool> {
+    // Initial mask: pixels above threshold
+    let mut mask: Vec<bool> = pixels
+        .iter()
+        .zip(background.background.iter())
+        .zip(background.noise.iter())
+        .map(|((&px, &bg), &noise)| {
+            let threshold = bg + detection_sigma * noise.max(1e-6);
+            px > threshold
+        })
+        .collect();
+
+    // Dilate mask to cover object wings
+    if dilation_radius > 0 {
+        mask = dilate_mask(&mask, width, height, dilation_radius);
+    }
+
+    mask
+}
+
+/// Dilate a binary mask by the given radius.
+#[allow(dead_code)] // Used by create_object_mask
+fn dilate_mask(mask: &[bool], width: usize, height: usize, radius: usize) -> Vec<bool> {
+    let mut dilated = vec![false; width * height];
+
+    for y in 0..height {
+        for x in 0..width {
+            if mask[y * width + x] {
+                let y_min = y.saturating_sub(radius);
+                let y_max = (y + radius).min(height - 1);
+                let x_min = x.saturating_sub(radius);
+                let x_max = (x + radius).min(width - 1);
+
+                for dy in y_min..=y_max {
+                    for dx in x_min..=x_max {
+                        dilated[dy * width + dx] = true;
+                    }
+                }
+            }
+        }
+    }
+
+    dilated
+}
+
+/// Estimate background with masked pixels excluded.
+#[allow(dead_code)] // Used by estimate_background_iterative
+fn estimate_background_masked(
+    pixels: &[f32],
+    width: usize,
+    height: usize,
+    tile_size: usize,
+    mask: &[bool],
+    min_unmasked_fraction: f32,
+) -> BackgroundMap {
+    assert!(
+        (16..=256).contains(&tile_size),
+        "Tile size must be between 16 and 256"
+    );
+    assert!(
+        width >= tile_size && height >= tile_size,
+        "Image must be at least tile_size x tile_size"
+    );
+
+    let tiles_x = width.div_ceil(tile_size);
+    let tiles_y = height.div_ceil(tile_size);
+    let max_tile_pixels = tile_size * tile_size;
+    let min_pixels = (max_tile_pixels as f32 * min_unmasked_fraction) as usize;
+
+    // Compute statistics for each tile with masking
+    let tile_stats: Vec<TileStats> = (0..tiles_y * tiles_x)
+        .into_par_iter()
+        .map_init(
+            || {
+                (
+                    Vec::with_capacity(max_tile_pixels),
+                    Vec::with_capacity(max_tile_pixels),
+                )
+            },
+            |(values_buf, deviations_buf), idx| {
+                let ty = idx / tiles_x;
+                let tx = idx % tiles_x;
+
+                let x_start = tx * tile_size;
+                let y_start = ty * tile_size;
+                let x_end = (x_start + tile_size).min(width);
+                let y_end = (y_start + tile_size).min(height);
+
+                compute_tile_stats_masked(
+                    pixels,
+                    mask,
+                    width,
+                    x_start,
+                    x_end,
+                    y_start,
+                    y_end,
+                    min_pixels,
+                    values_buf,
+                    deviations_buf,
+                )
+            },
+        )
+        .collect();
+
+    // Build tile grid
+    let mut grid = TileGrid {
+        stats: tile_stats,
+        centers_x: (0..tiles_x)
+            .map(|tx| {
+                let x_start = tx * tile_size;
+                let x_end = (x_start + tile_size).min(width);
+                (x_start + x_end) as f32 * 0.5
+            })
+            .collect(),
+        centers_y: (0..tiles_y)
+            .map(|ty| {
+                let y_start = ty * tile_size;
+                let y_end = (y_start + tile_size).min(height);
+                (y_start + y_end) as f32 * 0.5
+            })
+            .collect(),
+        tiles_x,
+        tiles_y,
+    };
+
+    // Apply median filter
+    grid.apply_median_filter();
+
+    // Interpolate
+    let mut background = vec![0.0f32; width * height];
+    let mut noise = vec![0.0f32; width * height];
+
+    const ROWS_PER_CHUNK: usize = 8;
+    background
+        .par_chunks_mut(width * ROWS_PER_CHUNK)
+        .zip(noise.par_chunks_mut(width * ROWS_PER_CHUNK))
+        .enumerate()
+        .for_each(|(chunk_idx, (bg_chunk, noise_chunk))| {
+            let y_start = chunk_idx * ROWS_PER_CHUNK;
+            let rows_in_chunk = bg_chunk.len() / width;
+
+            for local_y in 0..rows_in_chunk {
+                let y = y_start + local_y;
+                let row_offset = local_y * width;
+                let bg_row = &mut bg_chunk[row_offset..row_offset + width];
+                let noise_row = &mut noise_chunk[row_offset..row_offset + width];
+
+                interpolate_row(bg_row, noise_row, y, &grid);
+            }
+        });
+
+    BackgroundMap {
+        background,
+        noise,
+        width,
+        height,
+    }
+}
+
+/// Compute tile statistics with masked pixels excluded.
+#[allow(clippy::too_many_arguments)]
+#[allow(dead_code)] // Used by estimate_background_masked
+fn compute_tile_stats_masked(
+    pixels: &[f32],
+    mask: &[bool],
+    width: usize,
+    x_start: usize,
+    x_end: usize,
+    y_start: usize,
+    y_end: usize,
+    min_pixels: usize,
+    values: &mut Vec<f32>,
+    deviations: &mut Vec<f32>,
+) -> TileStats {
+    // Collect unmasked pixels
+    values.clear();
+    for y in y_start..y_end {
+        let row_start = y * width;
+        for x in x_start..x_end {
+            let idx = row_start + x;
+            if !mask[idx] {
+                values.push(pixels[idx]);
+            }
+        }
+    }
+
+    // If too few unmasked pixels, fall back to all pixels (unmasked)
+    if values.len() < min_pixels {
+        values.clear();
+        for y in y_start..y_end {
+            let row_start = y * width + x_start;
+            values.extend_from_slice(&pixels[row_start..row_start + (x_end - x_start)]);
+        }
+    }
+
+    sigma_clipped_stats(values, deviations, 3.0, 3)
+}

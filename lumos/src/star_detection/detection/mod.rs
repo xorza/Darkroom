@@ -5,6 +5,7 @@ mod tests;
 
 use super::StarDetectionConfig;
 use super::background::BackgroundMap;
+use super::deblend::{MultiThresholdDeblendConfig, deblend_component as multi_threshold_deblend};
 
 /// A candidate star region before centroid refinement.
 #[derive(Debug)]
@@ -346,6 +347,12 @@ pub struct DeblendConfig {
     pub min_separation: usize,
     /// Minimum peak prominence as fraction of primary peak for deblending.
     pub min_prominence: f32,
+    /// Enable multi-threshold deblending (SExtractor-style).
+    pub multi_threshold: bool,
+    /// Number of sub-thresholds for multi-threshold deblending.
+    pub n_thresholds: usize,
+    /// Minimum contrast for multi-threshold deblending.
+    pub min_contrast: f32,
 }
 
 impl Default for DeblendConfig {
@@ -353,6 +360,9 @@ impl Default for DeblendConfig {
         Self {
             min_separation: 3,
             min_prominence: 0.3,
+            multi_threshold: false,
+            n_thresholds: 32,
+            min_contrast: 0.005,
         }
     }
 }
@@ -362,14 +372,18 @@ impl From<&StarDetectionConfig> for DeblendConfig {
         Self {
             min_separation: config.deblend_min_separation,
             min_prominence: config.deblend_min_prominence,
+            multi_threshold: config.multi_threshold_deblend,
+            n_thresholds: config.deblend_nthresh,
+            min_contrast: config.deblend_min_contrast,
         }
     }
 }
 
-/// Extract candidate properties from labeled image with simple deblending.
+/// Extract candidate properties from labeled image with deblending.
 ///
 /// For components with multiple local maxima (star pairs), this function
 /// splits them into separate candidates based on peak positions.
+/// Supports both simple local-maxima deblending and multi-threshold deblending.
 pub(crate) fn extract_candidates(
     pixels: &[f32],
     labels: &[u32],
@@ -420,36 +434,73 @@ pub(crate) fn extract_candidates(
             continue;
         }
 
-        // Find local maxima for deblending
-        let peaks = find_local_maxima(&data, pixels, width, deblend_config);
-
-        if peaks.len() <= 1 {
-            // Single peak - create one candidate
-            let (peak_x, peak_y, peak_value) = if peaks.is_empty() {
-                // Fallback: use global maximum
-                data.pixels
-                    .iter()
-                    .max_by(|a, b| a.2.partial_cmp(&b.2).unwrap())
-                    .map(|&(x, y, v)| (x, y, v))
-                    .unwrap()
-            } else {
-                peaks[0]
+        if deblend_config.multi_threshold {
+            // Use multi-threshold deblending (SExtractor-style)
+            let mt_config = MultiThresholdDeblendConfig {
+                n_thresholds: deblend_config.n_thresholds,
+                min_contrast: deblend_config.min_contrast,
+                min_separation: deblend_config.min_separation,
             };
 
-            candidates.push(StarCandidate {
-                x_min: data.x_min,
-                x_max: data.x_max,
-                y_min: data.y_min,
-                y_max: data.y_max,
-                peak_x,
-                peak_y,
-                peak_value,
-                area: data.pixels.len(),
-            });
+            // Estimate detection threshold from the minimum pixel value in component
+            let detection_threshold = data
+                .pixels
+                .iter()
+                .map(|&(_, _, v)| v)
+                .fold(f32::MAX, f32::min);
+
+            let deblended = multi_threshold_deblend(
+                pixels,
+                &data.pixels,
+                width,
+                detection_threshold,
+                &mt_config,
+            );
+
+            for obj in deblended {
+                candidates.push(StarCandidate {
+                    x_min: obj.bbox.0,
+                    x_max: obj.bbox.1,
+                    y_min: obj.bbox.2,
+                    y_max: obj.bbox.3,
+                    peak_x: obj.peak_x,
+                    peak_y: obj.peak_y,
+                    peak_value: obj.peak_value,
+                    area: obj.pixels.len(),
+                });
+            }
         } else {
-            // Multiple peaks - deblend by assigning pixels to nearest peak
-            let deblended = deblend_component(&data, &peaks);
-            candidates.extend(deblended);
+            // Use simple local-maxima deblending
+            let peaks = find_local_maxima(&data, pixels, width, deblend_config);
+
+            if peaks.len() <= 1 {
+                // Single peak - create one candidate
+                let (peak_x, peak_y, peak_value) = if peaks.is_empty() {
+                    // Fallback: use global maximum
+                    data.pixels
+                        .iter()
+                        .max_by(|a, b| a.2.partial_cmp(&b.2).unwrap())
+                        .map(|&(x, y, v)| (x, y, v))
+                        .unwrap()
+                } else {
+                    peaks[0]
+                };
+
+                candidates.push(StarCandidate {
+                    x_min: data.x_min,
+                    x_max: data.x_max,
+                    y_min: data.y_min,
+                    y_max: data.y_max,
+                    peak_x,
+                    peak_y,
+                    peak_value,
+                    area: data.pixels.len(),
+                });
+            } else {
+                // Multiple peaks - deblend by assigning pixels to nearest peak
+                let deblended = deblend_component(&data, &peaks);
+                candidates.extend(deblended);
+            }
         }
     }
 

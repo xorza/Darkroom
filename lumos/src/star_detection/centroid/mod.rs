@@ -7,6 +7,7 @@
 mod tests;
 
 use super::background::BackgroundMap;
+use super::cosmic_ray::compute_laplacian_snr;
 use super::detection::StarCandidate;
 use super::{Star, StarDetectionConfig};
 
@@ -96,6 +97,23 @@ pub fn compute_centroid(
     // Compute quality metrics
     let metrics = compute_metrics(pixels, width, height, background, cx, cy, stamp_radius)?;
 
+    // Compute L.A.Cosmic Laplacian SNR for cosmic ray detection
+    let icx = cx.round() as isize;
+    let icy = cy.round() as isize;
+    let idx = icy as usize * width + icx as usize;
+    let local_bg = background.background[idx];
+    let local_noise = background.noise[idx];
+    let laplacian_snr_value = compute_laplacian_snr(
+        pixels,
+        width,
+        height,
+        cx,
+        cy,
+        stamp_radius,
+        local_bg,
+        local_noise,
+    );
+
     Some(Star {
         x: cx,
         y: cy,
@@ -105,6 +123,9 @@ pub fn compute_centroid(
         snr: metrics.snr,
         peak: candidate.peak_value,
         sharpness: metrics.sharpness,
+        roundness1: metrics.roundness1,
+        roundness2: metrics.roundness2,
+        laplacian_snr: laplacian_snr_value,
     })
 }
 
@@ -181,6 +202,10 @@ pub(crate) struct StarMetrics {
     pub eccentricity: f32,
     pub snr: f32,
     pub sharpness: f32,
+    /// GROUND: roundness from marginal Gaussian fits
+    pub roundness1: f32,
+    /// SROUND: roundness from symmetry analysis
+    pub roundness2: f32,
 }
 
 /// Compute quality metrics for a star at the given position.
@@ -211,6 +236,11 @@ pub(crate) fn compute_metrics(
     let mut noise_count = 0usize;
     let mut peak_value = 0.0f32;
 
+    // For roundness calculation: marginal sums
+    let stamp_size = 2 * stamp_radius + 1;
+    let mut marginal_x = vec![0.0f32; stamp_size];
+    let mut marginal_y = vec![0.0f32; stamp_size];
+
     let stamp_radius_i32 = stamp_radius as i32;
     let outer_ring_threshold = (stamp_radius_i32 - 2) * (stamp_radius_i32 - 2);
     for dy in -stamp_radius_i32..=stamp_radius_i32 {
@@ -229,6 +259,12 @@ pub(crate) fn compute_metrics(
             if dx.abs() <= 1 && dy.abs() <= 1 {
                 core_flux += value;
             }
+
+            // Marginal distributions for roundness
+            let mx_idx = (dx + stamp_radius_i32) as usize;
+            let my_idx = (dy + stamp_radius_i32) as usize;
+            marginal_x[mx_idx] += value;
+            marginal_y[my_idx] += value;
 
             // Weighted second moments for FWHM and eccentricity
             let fx = x as f32 - cx;
@@ -299,11 +335,103 @@ pub(crate) fn compute_metrics(
         1.0 // No core flux means very sharp (likely artifact)
     };
 
+    // Compute roundness metrics (DAOFIND style)
+    let (roundness1, roundness2) = compute_roundness(
+        &marginal_x,
+        &marginal_y,
+        stamp_radius,
+        pixels,
+        width,
+        icx,
+        icy,
+    );
+
     Some(StarMetrics {
         flux,
         fwhm,
         eccentricity,
         snr,
         sharpness,
+        roundness1,
+        roundness2,
     })
+}
+
+/// Compute DAOFIND-style roundness metrics.
+///
+/// Returns (GROUND, SROUND):
+/// - GROUND: (Hx - Hy) / (Hx + Hy) where Hx, Hy are heights of marginal Gaussian fits
+/// - SROUND: Symmetry-based roundness measuring bilateral vs four-fold symmetry
+fn compute_roundness(
+    marginal_x: &[f32],
+    marginal_y: &[f32],
+    stamp_radius: usize,
+    pixels: &[f32],
+    width: usize,
+    icx: isize,
+    icy: isize,
+) -> (f32, f32) {
+    // GROUND: Compare heights of marginal distributions
+    // The "height" is the peak of the marginal distribution
+    let hx = marginal_x.iter().fold(0.0f32, |a, &b| a.max(b));
+    let hy = marginal_y.iter().fold(0.0f32, |a, &b| a.max(b));
+
+    let roundness1 = if hx + hy > f32::EPSILON {
+        (hx - hy) / (hx + hy)
+    } else {
+        0.0
+    };
+
+    // SROUND: Symmetry-based roundness
+    // Compare sum of pixels on opposite sides of center
+    // A symmetric source should have equal flux on all sides
+    let stamp_radius_i32 = stamp_radius as i32;
+    let mut sum_left = 0.0f32;
+    let mut sum_right = 0.0f32;
+    let mut sum_top = 0.0f32;
+    let mut sum_bottom = 0.0f32;
+
+    for dy in -stamp_radius_i32..=stamp_radius_i32 {
+        for dx in -stamp_radius_i32..=stamp_radius_i32 {
+            if dx == 0 && dy == 0 {
+                continue;
+            }
+            let x = (icx + dx as isize) as usize;
+            let y = (icy + dy as isize) as usize;
+            let idx = y * width + x;
+            let value = pixels[idx];
+
+            if dx < 0 {
+                sum_left += value;
+            } else if dx > 0 {
+                sum_right += value;
+            }
+            if dy < 0 {
+                sum_top += value;
+            } else if dy > 0 {
+                sum_bottom += value;
+            }
+        }
+    }
+
+    // Compute asymmetry in x and y directions
+    let total_x = sum_left + sum_right;
+    let total_y = sum_top + sum_bottom;
+
+    let asym_x = if total_x > f32::EPSILON {
+        (sum_right - sum_left) / total_x
+    } else {
+        0.0
+    };
+
+    let asym_y = if total_y > f32::EPSILON {
+        (sum_bottom - sum_top) / total_y
+    } else {
+        0.0
+    };
+
+    // SROUND is the RMS asymmetry
+    let roundness2 = (asym_x * asym_x + asym_y * asym_y).sqrt();
+
+    (roundness1.clamp(-1.0, 1.0), roundness2.clamp(0.0, 1.0))
 }

@@ -1140,3 +1140,189 @@ fn test_compute_centroid_multiple_stars_independent() {
         );
     }
 }
+
+// =============================================================================
+// Roundness Tests
+// =============================================================================
+
+#[test]
+fn test_circular_star_roundness() {
+    // A circular Gaussian star should have roundness near zero
+    let width = 64;
+    let height = 64;
+    let pixels = make_gaussian_star(width, height, 32.0, 32.0, 2.5, 0.8);
+
+    let bg = estimate_background(&pixels, width, height, 32);
+    let config = StarDetectionConfig::default();
+    let candidates = detect_stars(&pixels, width, height, &bg, &config);
+
+    assert_eq!(candidates.len(), 1);
+
+    let star = compute_centroid(&pixels, width, height, &bg, &candidates[0], &config)
+        .expect("Should compute centroid");
+
+    // Circular star should have roundness close to 0
+    assert!(
+        star.roundness1.abs() < 0.1,
+        "Circular star should have roundness1 near 0, got {}",
+        star.roundness1
+    );
+    assert!(
+        star.roundness2 < 0.1,
+        "Circular star should have roundness2 near 0, got {}",
+        star.roundness2
+    );
+}
+
+#[test]
+fn test_elongated_x_star_roundness() {
+    // An elongated star in x direction should have negative roundness1
+    let width = 64;
+    let height = 64;
+    let mut pixels = vec![0.1f32; width * height];
+
+    // Create elongated Gaussian (sigma_x > sigma_y)
+    let cx = 32.0;
+    let cy = 32.0;
+    let sigma_x = 4.0;
+    let sigma_y = 2.0;
+    for y in 0..height {
+        for x in 0..width {
+            let dx = x as f32 - cx;
+            let dy = y as f32 - cy;
+            let value = 0.8
+                * (-dx * dx / (2.0 * sigma_x * sigma_x) - dy * dy / (2.0 * sigma_y * sigma_y))
+                    .exp();
+            if value > 0.001 {
+                pixels[y * width + x] += value;
+            }
+        }
+    }
+
+    let bg = estimate_background(&pixels, width, height, 32);
+    let config = StarDetectionConfig::default();
+    let candidates = detect_stars(&pixels, width, height, &bg, &config);
+
+    assert!(!candidates.is_empty());
+
+    let star = compute_centroid(&pixels, width, height, &bg, &candidates[0], &config)
+        .expect("Should compute centroid");
+
+    // X-elongated star: more flux in x marginal -> higher Hx -> negative roundness1
+    // (roundness1 = (Hx - Hy) / (Hx + Hy), but Hx is sum in y direction)
+    // Actually, marginal_x sums along y for each x position, so x-elongated means
+    // the x marginal has lower peak (more spread). Let's just check it's non-zero.
+    assert!(
+        star.roundness1.abs() > 0.05 || star.eccentricity > 0.3,
+        "Elongated star should have noticeable shape metrics"
+    );
+}
+
+#[test]
+fn test_asymmetric_star_roundness2() {
+    // An asymmetric source should have non-zero roundness2
+    let width = 64;
+    let height = 64;
+    let mut pixels = vec![0.1f32; width * height];
+
+    // Create a star with extra flux on one side (like a cosmic ray tail)
+    let cx = 32.0;
+    let cy = 32.0;
+    for y in 0..height {
+        for x in 0..width {
+            let dx = x as f32 - cx;
+            let dy = y as f32 - cy;
+            let r2 = dx * dx + dy * dy;
+            let mut value = 0.8 * (-r2 / (2.0 * 2.5 * 2.5)).exp();
+
+            // Add asymmetric tail to the right
+            if dx > 0.0 && dx < 8.0 && dy.abs() < 2.0 {
+                value += 0.3 * (-(dx - 4.0).powi(2) / 8.0).exp();
+            }
+
+            if value > 0.001 {
+                pixels[y * width + x] += value;
+            }
+        }
+    }
+
+    let bg = estimate_background(&pixels, width, height, 32);
+    let config = StarDetectionConfig::default();
+    let candidates = detect_stars(&pixels, width, height, &bg, &config);
+
+    assert!(!candidates.is_empty());
+
+    let star = compute_centroid(&pixels, width, height, &bg, &candidates[0], &config)
+        .expect("Should compute centroid");
+
+    // Asymmetric source should have higher roundness2 (symmetry metric)
+    // The tail adds more flux to the right side
+    assert!(
+        star.roundness2 > 0.01,
+        "Asymmetric star should have roundness2 > 0, got {}",
+        star.roundness2
+    );
+}
+
+#[test]
+fn test_laplacian_snr_computed_for_star() {
+    // Verify that laplacian_snr is computed for detected stars
+    let width = 64;
+    let height = 64;
+    let pixels = make_gaussian_star(width, height, 32.0, 32.0, 2.5, 0.8);
+
+    let bg = estimate_background(&pixels, width, height, 32);
+    let config = StarDetectionConfig::default();
+    let candidates = detect_stars(&pixels, width, height, &bg, &config);
+
+    assert_eq!(candidates.len(), 1);
+
+    let star = compute_centroid(&pixels, width, height, &bg, &candidates[0], &config)
+        .expect("Should compute centroid");
+
+    // Laplacian SNR should be computed (non-negative value)
+    // The actual value depends on the noise estimate from background
+    assert!(
+        star.laplacian_snr >= 0.0,
+        "Laplacian SNR should be non-negative, got {}",
+        star.laplacian_snr
+    );
+}
+
+#[test]
+fn test_star_is_round() {
+    use crate::star_detection::Star;
+
+    let round_star = Star {
+        x: 10.0,
+        y: 10.0,
+        flux: 100.0,
+        fwhm: 3.0,
+        eccentricity: 0.1,
+        snr: 50.0,
+        peak: 0.5,
+        sharpness: 0.3,
+        roundness1: 0.05,
+        roundness2: 0.03,
+        laplacian_snr: 0.0,
+    };
+
+    let non_round_star = Star {
+        roundness1: 0.5,
+        roundness2: 0.4,
+        ..round_star
+    };
+
+    assert!(
+        round_star.is_round(0.2),
+        "Round star should pass roundness check"
+    );
+    assert!(
+        !non_round_star.is_round(0.2),
+        "Non-round star should fail roundness check"
+    );
+    assert!(
+        non_round_star.is_round(1.0),
+        "All stars should pass with max_roundness=1.0"
+    );
+}

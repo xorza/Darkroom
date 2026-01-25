@@ -18,6 +18,9 @@ fn test_star_is_saturated() {
         snr: 50.0,
         peak: 0.96,
         sharpness: 0.3,
+        roundness1: 0.0,
+        roundness2: 0.0,
+        laplacian_snr: 0.0,
     };
     assert!(star.is_saturated());
 
@@ -36,30 +39,40 @@ fn test_star_is_usable() {
         snr: 50.0,
         peak: 0.8,
         sharpness: 0.3,
+        roundness1: 0.0,
+        roundness2: 0.0,
+        laplacian_snr: 0.0,
     };
-    assert!(star.is_usable(10.0, 0.5, 0.7));
+    assert!(star.is_usable(10.0, 0.5, 0.7, 1.0));
 
     // Low SNR
     let low_snr = Star { snr: 5.0, ..star };
-    assert!(!low_snr.is_usable(10.0, 0.5, 0.7));
+    assert!(!low_snr.is_usable(10.0, 0.5, 0.7, 1.0));
 
     // Too elongated
     let elongated = Star {
         eccentricity: 0.7,
         ..star
     };
-    assert!(!elongated.is_usable(10.0, 0.5, 0.7));
+    assert!(!elongated.is_usable(10.0, 0.5, 0.7, 1.0));
 
     // Saturated
     let saturated = Star { peak: 0.98, ..star };
-    assert!(!saturated.is_usable(10.0, 0.5, 0.7));
+    assert!(!saturated.is_usable(10.0, 0.5, 0.7, 1.0));
 
     // Cosmic ray (too sharp)
     let cosmic_ray = Star {
         sharpness: 0.9,
         ..star
     };
-    assert!(!cosmic_ray.is_usable(10.0, 0.5, 0.7));
+    assert!(!cosmic_ray.is_usable(10.0, 0.5, 0.7, 1.0));
+
+    // Non-round (fails roundness check)
+    let non_round = Star {
+        roundness1: 0.5,
+        ..star
+    };
+    assert!(!non_round.is_usable(10.0, 0.5, 0.7, 0.3));
 }
 
 #[test]
@@ -182,6 +195,9 @@ fn make_test_star(fwhm: f32, flux: f32) -> Star {
         snr: 50.0,
         peak: 0.5,
         sharpness: 0.3,
+        roundness1: 0.0,
+        roundness2: 0.0,
+        laplacian_snr: 0.0,
     }
 }
 
@@ -448,6 +464,9 @@ fn make_star_at(x: f32, y: f32, flux: f32) -> Star {
         snr: 50.0,
         peak: 0.5,
         sharpness: 0.3,
+        roundness1: 0.0,
+        roundness2: 0.0,
+        laplacian_snr: 0.0,
     }
 }
 
