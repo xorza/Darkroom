@@ -393,6 +393,10 @@ pub struct TriangleMatchConfig {
     pub hash_bins: usize,
     /// Check orientation (set false to handle mirrored images).
     pub check_orientation: bool,
+    /// Enable two-step matching (rough then fine).
+    /// Phase 1 uses relaxed tolerance (5x ratio_tolerance) for initial matches.
+    /// Phase 2 uses strict tolerance (ratio_tolerance) for refinement.
+    pub two_step_matching: bool,
 }
 
 impl Default for TriangleMatchConfig {
@@ -403,6 +407,7 @@ impl Default for TriangleMatchConfig {
             min_votes: 3,
             hash_bins: 100,
             check_orientation: true,
+            two_step_matching: false, // Disabled by default for backwards compatibility
         }
     }
 }
@@ -473,7 +478,247 @@ pub(crate) fn match_stars_triangles(
         n_ref,
         n_target,
     );
-    resolve_matches(vote_matrix, n_ref, n_target, config.min_votes)
+    let initial_matches = resolve_matches(vote_matrix, n_ref, n_target, config.min_votes);
+
+    // If two-step matching is disabled or not enough matches, return initial matches
+    if !config.two_step_matching || initial_matches.len() < 3 {
+        return initial_matches;
+    }
+
+    // Phase 2: Transform-guided refinement
+    // Use initial matches to estimate a preliminary transform, then re-match with stricter tolerance
+    // Note: for match_stars_triangles we use the full positions since form_triangles limits internally
+    two_step_refine_matches(
+        ref_positions,
+        target_positions,
+        &initial_matches,
+        &ref_triangles,
+        &target_triangles,
+        &hash_table,
+        config,
+    )
+}
+
+/// Refine matches using transform-guided two-step strategy.
+///
+/// Given initial matches, estimates a preliminary transform and uses it to
+/// guide a second matching pass with stricter tolerance.
+fn two_step_refine_matches(
+    ref_positions: &[(f64, f64)],
+    target_positions: &[(f64, f64)],
+    initial_matches: &[StarMatch],
+    ref_triangles: &[Triangle],
+    target_triangles: &[Triangle],
+    hash_table: &TriangleHashTable,
+    config: &TriangleMatchConfig,
+) -> Vec<StarMatch> {
+    // Need at least 3 matches to estimate a transform
+    if initial_matches.len() < 3 {
+        return initial_matches.to_vec();
+    }
+
+    // Estimate preliminary transform from initial matches
+    // Using a simple similarity transform (rotation + scale + translation)
+    let transform = estimate_similarity_transform(ref_positions, target_positions, initial_matches);
+
+    // If transform estimation failed, return initial matches
+    let Some((scale, rotation, tx, ty)) = transform else {
+        return initial_matches.to_vec();
+    };
+
+    // Transform target positions to reference frame
+    let cos_r = rotation.cos();
+    let sin_r = rotation.sin();
+
+    let transformed_target: Vec<(f64, f64)> = target_positions
+        .iter()
+        .map(|&(x, y)| {
+            let x_rot = (x * cos_r - y * sin_r) * scale + tx;
+            let y_rot = (x * sin_r + y * cos_r) * scale + ty;
+            (x_rot, y_rot)
+        })
+        .collect();
+
+    // Re-vote with strict tolerance, using transformed positions for guidance
+    let strict_tolerance = config.ratio_tolerance * 0.5; // Stricter than original
+    let n_ref = ref_positions.len();
+    let n_target = target_positions.len();
+
+    let mut vote_matrix = VoteMatrix::new(n_ref, n_target);
+    let mut candidates: Vec<usize> = Vec::new();
+
+    // Use position proximity to boost votes
+    let position_threshold = compute_position_threshold(ref_positions);
+
+    for target_tri in target_triangles {
+        hash_table.find_candidates_into(target_tri, strict_tolerance, &mut candidates);
+
+        for &ref_idx in &candidates {
+            let ref_tri = &ref_triangles[ref_idx];
+
+            // Check similarity with strict tolerance
+            if !ref_tri.is_similar(target_tri, strict_tolerance) {
+                continue;
+            }
+
+            if config.check_orientation && ref_tri.orientation != target_tri.orientation {
+                continue;
+            }
+
+            // Vote with position-weighted bonus
+            for i in 0..3 {
+                let ref_star = ref_tri.star_indices[i];
+                let target_star = target_tri.star_indices[i];
+
+                // Check if transformed target position is close to reference position
+                if ref_star < ref_positions.len() && target_star < transformed_target.len() {
+                    let (rx, ry) = ref_positions[ref_star];
+                    let (tx, ty) = transformed_target[target_star];
+                    let dist_sq = (rx - tx).powi(2) + (ry - ty).powi(2);
+
+                    // Only vote if positions are reasonably close
+                    if dist_sq < position_threshold * position_threshold {
+                        // Extra vote for position consistency
+                        vote_matrix.increment(ref_star, target_star);
+                        vote_matrix.increment(ref_star, target_star);
+                    } else {
+                        // Single vote for triangle match only
+                        vote_matrix.increment(ref_star, target_star);
+                    }
+                }
+            }
+        }
+    }
+
+    let refined_matches = resolve_matches(
+        vote_matrix.into_hashmap(),
+        n_ref,
+        n_target,
+        config.min_votes,
+    );
+
+    // Return refined matches if they're better, otherwise keep initial
+    if refined_matches.len() >= initial_matches.len() {
+        refined_matches
+    } else {
+        initial_matches.to_vec()
+    }
+}
+
+/// Estimate a similarity transform (rotation + uniform scale + translation) from matches.
+///
+/// Returns (scale, rotation_radians, translate_x, translate_y) or None if estimation fails.
+fn estimate_similarity_transform(
+    ref_positions: &[(f64, f64)],
+    target_positions: &[(f64, f64)],
+    matches: &[StarMatch],
+) -> Option<(f64, f64, f64, f64)> {
+    if matches.len() < 2 {
+        return None;
+    }
+
+    // Collect matched point pairs
+    let pairs: Vec<((f64, f64), (f64, f64))> = matches
+        .iter()
+        .filter_map(|m| {
+            if m.ref_idx < ref_positions.len() && m.target_idx < target_positions.len() {
+                Some((ref_positions[m.ref_idx], target_positions[m.target_idx]))
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    if pairs.len() < 2 {
+        return None;
+    }
+
+    // Compute centroids
+    let n = pairs.len() as f64;
+    let (ref_cx, ref_cy) = pairs.iter().fold((0.0, 0.0), |(sx, sy), ((rx, ry), _)| {
+        (sx + rx / n, sy + ry / n)
+    });
+    let (tar_cx, tar_cy) = pairs.iter().fold((0.0, 0.0), |(sx, sy), (_, (tx, ty))| {
+        (sx + tx / n, sy + ty / n)
+    });
+
+    // Center the points
+    let ref_centered: Vec<(f64, f64)> = pairs
+        .iter()
+        .map(|((rx, ry), _)| (rx - ref_cx, ry - ref_cy))
+        .collect();
+    let tar_centered: Vec<(f64, f64)> = pairs
+        .iter()
+        .map(|(_, (tx, ty))| (tx - tar_cx, ty - tar_cy))
+        .collect();
+
+    // Estimate rotation and scale using least squares
+    // Reference: "Closed-form solution of absolute orientation using unit quaternions" (Horn, 1987)
+    let mut sxx = 0.0;
+    let mut sxy = 0.0;
+    let mut syx = 0.0;
+    let mut syy = 0.0;
+    let mut tar_norm_sq = 0.0;
+
+    for i in 0..pairs.len() {
+        let (rx, ry) = ref_centered[i];
+        let (tx, ty) = tar_centered[i];
+
+        sxx += tx * rx;
+        sxy += tx * ry;
+        syx += ty * rx;
+        syy += ty * ry;
+        tar_norm_sq += tx * tx + ty * ty;
+    }
+
+    if tar_norm_sq < 1e-10 {
+        return None;
+    }
+
+    // Rotation angle
+    let rotation = (syx - sxy).atan2(sxx + syy);
+
+    // Scale
+    let cos_r = rotation.cos();
+    let sin_r = rotation.sin();
+    let scale_num = sxx * cos_r + syy * cos_r + syx * sin_r - sxy * sin_r;
+    let scale = scale_num / tar_norm_sq;
+
+    // Clamp scale to reasonable range
+    if !(0.1..=10.0).contains(&scale) {
+        return None;
+    }
+
+    // Translation
+    let tx = ref_cx - scale * (tar_cx * cos_r - tar_cy * sin_r);
+    let ty = ref_cy - scale * (tar_cx * sin_r + tar_cy * cos_r);
+
+    Some((scale, rotation, tx, ty))
+}
+
+/// Compute a reasonable position threshold based on star field density.
+fn compute_position_threshold(positions: &[(f64, f64)]) -> f64 {
+    if positions.len() < 2 {
+        return 100.0; // Default large threshold
+    }
+
+    // Find average nearest-neighbor distance
+    let mut total_min_dist = 0.0;
+    for (i, &(xi, yi)) in positions.iter().enumerate().take(20) {
+        let mut min_dist_sq = f64::MAX;
+        for (j, &(xj, yj)) in positions.iter().enumerate() {
+            if i != j {
+                let dist_sq = (xi - xj).powi(2) + (yi - yj).powi(2);
+                min_dist_sq = min_dist_sq.min(dist_sq);
+            }
+        }
+        total_min_dist += min_dist_sq.sqrt();
+    }
+
+    let avg_nn_dist = total_min_dist / positions.len().min(20) as f64;
+
+    // Threshold is a multiple of average nearest-neighbor distance
+    (avg_nn_dist * 3.0).max(5.0)
 }
 
 /// Convert star matches to point pairs for transformation estimation.

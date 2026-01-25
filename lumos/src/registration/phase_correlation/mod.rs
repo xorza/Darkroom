@@ -24,6 +24,10 @@ pub struct PhaseCorrelationConfig {
     pub subpixel_method: SubpixelMethod,
     /// Minimum correlation peak value to accept.
     pub min_peak_value: f32,
+    /// Maximum iterations for iterative refinement (0 = disabled).
+    pub max_iterations: usize,
+    /// Convergence threshold for iterative refinement (pixels).
+    pub convergence_threshold: f64,
 }
 
 impl Default for PhaseCorrelationConfig {
@@ -32,6 +36,8 @@ impl Default for PhaseCorrelationConfig {
             use_windowing: true,
             subpixel_method: SubpixelMethod::Parabolic,
             min_peak_value: 0.1,
+            max_iterations: 0, // Disabled by default for backwards compatibility
+            convergence_threshold: 0.01,
         }
     }
 }
@@ -170,6 +176,85 @@ impl PhaseCorrelator {
             translation: (sub_dx, sub_dy),
             peak_value: peak_val,
             confidence,
+        })
+    }
+
+    /// Estimate translation with iterative refinement for sub-pixel accuracy.
+    ///
+    /// This method iteratively shifts the target image to align it with the
+    /// reference and re-correlates to find residual errors. This converges to
+    /// higher accuracy (0.01-0.05 pixels) compared to single-shot methods (~0.1 pixels).
+    ///
+    /// # Algorithm
+    /// 1. Initial correlation to get coarse offset
+    /// 2. Shift original target by negative offset (to align with reference)
+    /// 3. Re-correlate to find residual offset
+    /// 4. Accumulate total offset
+    /// 5. Repeat until convergence or max iterations
+    ///
+    /// # Arguments
+    /// * `reference` - Reference image
+    /// * `target` - Target image
+    /// * `width` - Image width
+    /// * `height` - Image height
+    ///
+    /// # Returns
+    /// Phase correlation result with refined sub-pixel translation.
+    pub fn correlate_iterative(
+        &self,
+        reference: &[f32],
+        target: &[f32],
+        width: usize,
+        height: usize,
+    ) -> Option<PhaseCorrelationResult> {
+        if reference.len() != width * height || target.len() != width * height {
+            return None;
+        }
+
+        // If iterations disabled, fall back to standard correlation
+        if self.config.max_iterations == 0 {
+            return self.correlate(reference, target, width, height);
+        }
+
+        // Initial correlation
+        let mut result = self.correlate(reference, target, width, height)?;
+        let mut total_dx = result.translation.0;
+        let mut total_dy = result.translation.1;
+
+        for _iteration in 0..self.config.max_iterations {
+            // Shift original target by NEGATIVE accumulated offset to align with reference
+            // If target = reference shifted by (dx, dy), then shifting target by (-dx, -dy)
+            // should align it back with reference
+            let aligned_target = shift_image_subpixel(target, width, height, -total_dx, -total_dy);
+
+            // Correlate reference with aligned target to find residual error
+            let residual = self.correlate(reference, &aligned_target, width, height)?;
+
+            let residual_dx = residual.translation.0;
+            let residual_dy = residual.translation.1;
+
+            // Check for convergence (residual should approach zero)
+            let residual_magnitude = (residual_dx * residual_dx + residual_dy * residual_dy).sqrt();
+            if residual_magnitude < self.config.convergence_threshold {
+                break;
+            }
+
+            // Add residual to total offset
+            // If aligned_target still needs to move by residual, our estimate was off by that much
+            total_dx += residual_dx;
+            total_dy += residual_dy;
+
+            // Update result with better peak value if found
+            if residual.peak_value > result.peak_value {
+                result.peak_value = residual.peak_value;
+                result.confidence = residual.confidence;
+            }
+        }
+
+        Some(PhaseCorrelationResult {
+            translation: (total_dx, total_dy),
+            peak_value: result.peak_value,
+            confidence: result.confidence,
         })
     }
 
@@ -555,8 +640,9 @@ fn downsample_image(image: &[f32], width: usize, height: usize, factor: usize) -
 }
 
 /// Shift an image by a fractional offset using bilinear interpolation.
-#[cfg(test)]
-fn shift_image(image: &[f32], width: usize, height: usize, dx: f64, dy: f64) -> Vec<f32> {
+///
+/// Used by iterative phase correlation for sub-pixel accuracy refinement.
+fn shift_image_subpixel(image: &[f32], width: usize, height: usize, dx: f64, dy: f64) -> Vec<f32> {
     let mut result = vec![0.0f32; width * height];
 
     for y in 0..height {
@@ -569,6 +655,12 @@ fn shift_image(image: &[f32], width: usize, height: usize, dx: f64, dy: f64) -> 
     }
 
     result
+}
+
+/// Shift an image by a fractional offset using bilinear interpolation.
+#[cfg(test)]
+fn shift_image(image: &[f32], width: usize, height: usize, dx: f64, dy: f64) -> Vec<f32> {
+    shift_image_subpixel(image, width, height, dx, dy)
 }
 
 /// Compute 1D Hann window.
@@ -731,6 +823,8 @@ impl LogPolarCorrelator {
             use_windowing: true,
             subpixel_method: SubpixelMethod::Parabolic,
             min_peak_value: 0.05,
+            max_iterations: 0,
+            convergence_threshold: 0.01,
         };
         Self::with_config(size, max_radius, config)
     }

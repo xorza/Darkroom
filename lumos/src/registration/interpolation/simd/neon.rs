@@ -173,6 +173,281 @@ fn sample_pixel_scalar(
     }
 }
 
+/// Warp a row using NEON SIMD with Lanczos3 interpolation.
+///
+/// Processes 4 output pixels at a time. NEON acceleration is used for
+/// coordinate transformation and weight accumulation.
+///
+/// # Safety
+/// - Caller must ensure this is running on aarch64 with NEON.
+#[cfg(target_arch = "aarch64")]
+#[allow(clippy::too_many_arguments)]
+pub unsafe fn warp_row_lanczos3_neon(
+    input: &[f32],
+    input_width: usize,
+    input_height: usize,
+    output_row: &mut [f32],
+    output_y: usize,
+    inverse: &TransformMatrix,
+    border_value: f32,
+    normalize: bool,
+    clamp: bool,
+) {
+    use crate::registration::interpolation::lanczos_kernel;
+
+    unsafe {
+        let output_width = output_row.len();
+        let y = output_y as f64;
+
+        // Extract transform coefficients
+        let t = &inverse.data;
+        let ta = t[0] as f32;
+        let tb = t[1] as f32;
+        let tc = t[2] as f32;
+        let td = t[3] as f32;
+        let te = t[4] as f32;
+        let tf = t[5] as f32;
+        let tg = t[6] as f32;
+        let th = t[7] as f32;
+
+        // Pre-compute y-dependent terms
+        let by_c = tb * y as f32 + tc;
+        let ey_f = te * y as f32 + tf;
+        let hy_1 = th * y as f32 + 1.0;
+
+        let a_vec = vdupq_n_f32(ta);
+        let d_vec = vdupq_n_f32(td);
+        let g_vec = vdupq_n_f32(tg);
+        let by_c_vec = vdupq_n_f32(by_c);
+        let ey_f_vec = vdupq_n_f32(ey_f);
+        let hy_1_vec = vdupq_n_f32(hy_1);
+
+        let chunks = output_width / 4;
+
+        for chunk in 0..chunks {
+            let base_x = chunk * 4;
+
+            // Load x coordinates for 4 output pixels
+            let x_coords = vld1q_f32(
+                [
+                    base_x as f32,
+                    (base_x + 1) as f32,
+                    (base_x + 2) as f32,
+                    (base_x + 3) as f32,
+                ]
+                .as_ptr(),
+            );
+
+            // Compute source coordinates for all 4 pixels
+            let ax = vmulq_f32(a_vec, x_coords);
+            let dx = vmulq_f32(d_vec, x_coords);
+            let gx = vmulq_f32(g_vec, x_coords);
+
+            let num_x = vaddq_f32(ax, by_c_vec);
+            let num_y = vaddq_f32(dx, ey_f_vec);
+            let denom = vaddq_f32(gx, hy_1_vec);
+
+            // Division using reciprocal approximation
+            let denom_recip = vrecpeq_f32(denom);
+            let denom_recip = vmulq_f32(vrecpsq_f32(denom, denom_recip), denom_recip);
+            let denom_recip = vmulq_f32(vrecpsq_f32(denom, denom_recip), denom_recip);
+
+            let src_x = vmulq_f32(num_x, denom_recip);
+            let src_y = vmulq_f32(num_y, denom_recip);
+
+            // Extract source coordinates
+            let mut src_x_arr = [0.0f32; 4];
+            let mut src_y_arr = [0.0f32; 4];
+            vst1q_f32(src_x_arr.as_mut_ptr(), src_x);
+            vst1q_f32(src_y_arr.as_mut_ptr(), src_y);
+
+            // Process each of the 4 pixels with Lanczos3
+            let mut results = [0.0f32; 4];
+
+            for p in 0..4 {
+                let sx = src_x_arr[p];
+                let sy = src_y_arr[p];
+
+                let x0 = sx.floor() as i32;
+                let y0 = sy.floor() as i32;
+                let fx = sx - x0 as f32;
+                let fy = sy - y0 as f32;
+
+                // Pre-compute weights (6 values each for Lanczos3)
+                let mut wx = [0.0f32; 6];
+                let mut wy = [0.0f32; 6];
+
+                for i in 0..6 {
+                    wx[i] = lanczos_kernel(fx - (i as i32 - 2) as f32, 3.0);
+                    wy[i] = lanczos_kernel(fy - (i as i32 - 2) as f32, 3.0);
+                }
+
+                // Normalize if requested
+                if normalize {
+                    let wx_sum: f32 = wx.iter().sum();
+                    let wy_sum: f32 = wy.iter().sum();
+                    if wx_sum.abs() > 1e-10 {
+                        for w in wx.iter_mut() {
+                            *w /= wx_sum;
+                        }
+                    }
+                    if wy_sum.abs() > 1e-10 {
+                        for w in wy.iter_mut() {
+                            *w /= wy_sum;
+                        }
+                    }
+                }
+
+                // Compute weighted sum using NEON for 4 pixels at a time
+                let mut sum = vdupq_n_f32(0.0);
+                let mut min_val = f32::MAX;
+                let mut max_val = f32::MIN;
+
+                for j in 0..6 {
+                    let py = y0 - 2 + j as i32;
+                    let wyj = wy[j];
+
+                    // Load 4 pixels at a time, process 6 total (4 + 2)
+                    let mut pixels = [0.0f32; 8];
+                    for i in 0..6 {
+                        let px = x0 - 2 + i as i32;
+                        let pix = sample_pixel_scalar(
+                            input,
+                            input_width,
+                            input_height,
+                            px,
+                            py,
+                            border_value,
+                        );
+                        pixels[i] = pix;
+                        if clamp {
+                            min_val = min_val.min(pix);
+                            max_val = max_val.max(pix);
+                        }
+                    }
+
+                    // Load weights
+                    let mut weights = [0.0f32; 8];
+                    for i in 0..6 {
+                        weights[i] = wx[i] * wyj;
+                    }
+
+                    // First 4 pixels
+                    let pix_vec1 = vld1q_f32(pixels.as_ptr());
+                    let wgt_vec1 = vld1q_f32(weights.as_ptr());
+                    sum = vmlaq_f32(sum, pix_vec1, wgt_vec1);
+
+                    // Last 2 pixels (in a 4-wide vector, padded)
+                    let pix_vec2 = vld1q_f32(pixels.as_ptr().add(4));
+                    let wgt_vec2 = vld1q_f32(weights.as_ptr().add(4));
+                    sum = vmlaq_f32(sum, pix_vec2, wgt_vec2);
+                }
+
+                // Horizontal sum
+                let mut sum_arr = [0.0f32; 4];
+                vst1q_f32(sum_arr.as_mut_ptr(), sum);
+                let mut pixel_sum: f32 = sum_arr.iter().sum();
+
+                // Add remaining 2 elements (they're in the second vector)
+                // Actually we accumulated all 6 across two 4-wide vectors,
+                // but indices 6,7 are zeros so the sum is correct.
+
+                if clamp && min_val <= max_val {
+                    pixel_sum = pixel_sum.clamp(min_val, max_val);
+                }
+
+                results[p] = pixel_sum;
+            }
+
+            // Store 4 results
+            output_row[base_x..(base_x + 4)].copy_from_slice(&results);
+        }
+
+        // Handle remainder with scalar
+        let remainder_start = chunks * 4;
+        for x in remainder_start..output_width {
+            let (src_x, src_y) = inverse.transform_point(x as f64, y);
+            output_row[x] = lanczos3_sample_scalar(
+                input,
+                input_width,
+                input_height,
+                src_x as f32,
+                src_y as f32,
+                border_value,
+                normalize,
+                clamp,
+            );
+        }
+    }
+}
+
+/// Scalar Lanczos3 sampling for remainder pixels.
+#[inline]
+#[allow(clippy::too_many_arguments)]
+fn lanczos3_sample_scalar(
+    input: &[f32],
+    width: usize,
+    height: usize,
+    x: f32,
+    y: f32,
+    border: f32,
+    normalize: bool,
+    clamp: bool,
+) -> f32 {
+    use crate::registration::interpolation::lanczos_kernel;
+
+    let x0 = x.floor() as i32;
+    let y0 = y.floor() as i32;
+    let fx = x - x0 as f32;
+    let fy = y - y0 as f32;
+
+    let mut wx = [0.0f32; 6];
+    let mut wy = [0.0f32; 6];
+
+    for i in 0..6 {
+        wx[i] = lanczos_kernel(fx - (i as i32 - 2) as f32, 3.0);
+        wy[i] = lanczos_kernel(fy - (i as i32 - 2) as f32, 3.0);
+    }
+
+    if normalize {
+        let wx_sum: f32 = wx.iter().sum();
+        let wy_sum: f32 = wy.iter().sum();
+        if wx_sum.abs() > 1e-10 {
+            for w in wx.iter_mut() {
+                *w /= wx_sum;
+            }
+        }
+        if wy_sum.abs() > 1e-10 {
+            for w in wy.iter_mut() {
+                *w /= wy_sum;
+            }
+        }
+    }
+
+    let mut sum = 0.0f32;
+    let mut min_val = f32::MAX;
+    let mut max_val = f32::MIN;
+
+    for j in 0..6 {
+        let py = y0 - 2 + j as i32;
+        for i in 0..6 {
+            let px = x0 - 2 + i as i32;
+            let pixel = sample_pixel_scalar(input, width, height, px, py, border);
+            sum += pixel * wx[i] * wy[j];
+            if clamp {
+                min_val = min_val.min(pixel);
+                max_val = max_val.max(pixel);
+            }
+        }
+    }
+
+    if clamp && min_val <= max_val {
+        sum.clamp(min_val, max_val)
+    } else {
+        sum
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

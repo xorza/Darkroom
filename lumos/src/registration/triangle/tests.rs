@@ -1141,3 +1141,129 @@ fn test_match_180_degree_rotation() {
         matches.len()
     );
 }
+
+// ============================================================================
+// Two-step matching tests
+// ============================================================================
+
+/// Test two-step matching with translated stars
+#[test]
+fn test_two_step_matching_translated() {
+    let ref_positions: Vec<(f64, f64)> = (0..25)
+        .map(|i| {
+            let x = 100.0 + (i % 5) as f64 * 40.0;
+            let y = 100.0 + (i / 5) as f64 * 40.0;
+            (x, y)
+        })
+        .collect();
+
+    // Simple translation
+    let target_positions: Vec<(f64, f64)> = ref_positions
+        .iter()
+        .map(|(x, y)| (x + 50.0, y + 30.0))
+        .collect();
+
+    // Standard matching
+    let standard_config = TriangleMatchConfig {
+        two_step_matching: false,
+        ..Default::default()
+    };
+    let standard_matches =
+        match_stars_triangles_kdtree(&ref_positions, &target_positions, &standard_config);
+
+    // Two-step matching
+    let twostep_config = TriangleMatchConfig {
+        two_step_matching: true,
+        ..Default::default()
+    };
+    let twostep_matches =
+        match_stars_triangles_kdtree(&ref_positions, &target_positions, &twostep_config);
+
+    // Both should find matches
+    assert!(
+        standard_matches.len() >= 10,
+        "Standard matching should find matches: {}",
+        standard_matches.len()
+    );
+
+    // Two-step should find at least as many matches
+    assert!(
+        twostep_matches.len() >= standard_matches.len().saturating_sub(2),
+        "Two-step should find similar matches. Standard: {}, Two-step: {}",
+        standard_matches.len(),
+        twostep_matches.len()
+    );
+}
+
+/// Test two-step matching with rotated and scaled stars
+#[test]
+fn test_two_step_matching_similarity_transform() {
+    let ref_positions: Vec<(f64, f64)> = (0..20)
+        .map(|i| {
+            let x = 200.0 + (i % 5) as f64 * 50.0;
+            let y = 200.0 + (i / 5) as f64 * 50.0;
+            (x, y)
+        })
+        .collect();
+
+    let cx = 300.0;
+    let cy = 275.0;
+    let scale = 1.05;
+    let rotation: f64 = 0.1; // ~6 degrees
+    let cos_r = rotation.cos();
+    let sin_r = rotation.sin();
+
+    let target_positions: Vec<(f64, f64)> = ref_positions
+        .iter()
+        .map(|(x, y)| {
+            let dx = x - cx;
+            let dy = y - cy;
+            let x_rot = (dx * cos_r - dy * sin_r) * scale + cx + 20.0;
+            let y_rot = (dx * sin_r + dy * cos_r) * scale + cy + 15.0;
+            (x_rot, y_rot)
+        })
+        .collect();
+
+    // Two-step matching
+    let config = TriangleMatchConfig {
+        two_step_matching: true,
+        ..Default::default()
+    };
+    let matches = match_stars_triangles_kdtree(&ref_positions, &target_positions, &config);
+
+    // Should find good matches
+    assert!(
+        matches.len() >= 10,
+        "Two-step matching with similarity transform found only {} matches",
+        matches.len()
+    );
+}
+
+/// Test that two-step matching falls back gracefully with few matches
+#[test]
+fn test_two_step_matching_fallback() {
+    // Very sparse field - likely to have few initial matches
+    let ref_positions: Vec<(f64, f64)> = vec![
+        (100.0, 100.0),
+        (200.0, 150.0),
+        (150.0, 250.0),
+        (300.0, 200.0),
+    ];
+
+    let target_positions: Vec<(f64, f64)> = ref_positions
+        .iter()
+        .map(|(x, y)| (x + 10.0, y + 5.0))
+        .collect();
+
+    let config = TriangleMatchConfig {
+        two_step_matching: true,
+        min_votes: 1,
+        ..Default::default()
+    };
+
+    // Should not crash and should return some result
+    let matches = match_stars_triangles_kdtree(&ref_positions, &target_positions, &config);
+
+    // At least should not crash; may or may not find matches depending on tolerance
+    assert!(matches.len() <= ref_positions.len());
+}

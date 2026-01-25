@@ -101,6 +101,7 @@ impl Registrator {
             min_votes: 2,
             hash_bins: 100,
             check_orientation: true,
+            two_step_matching: false, // Standard single-pass matching
         };
 
         let matches = match_stars_triangles_kdtree(&ref_stars, &target_stars, &triangle_config);

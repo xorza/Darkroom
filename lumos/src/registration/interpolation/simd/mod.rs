@@ -4,6 +4,11 @@
 //! - AVX2/SSE4.1 on x86_64
 //! - NEON on aarch64
 //! - Scalar fallback on other platforms
+//!
+//! # Supported Interpolation Methods
+//!
+//! - **Bilinear**: SIMD-accelerated on all platforms (8 pixels/cycle on AVX2)
+//! - **Lanczos3**: SIMD-accelerated on x86_64 (AVX2/SSE) and aarch64 (NEON)
 
 #[cfg(target_arch = "x86_64")]
 use crate::common::cpu_features;
@@ -14,6 +19,7 @@ pub mod sse;
 #[cfg(target_arch = "aarch64")]
 pub mod neon;
 
+use crate::registration::interpolation::lanczos_kernel;
 use crate::registration::types::TransformMatrix;
 
 /// Warp a row of pixels using SIMD-accelerated bilinear interpolation.
@@ -172,6 +178,204 @@ fn sample_pixel(data: &[f32], width: usize, height: usize, x: i32, y: i32, borde
     } else {
         data[y as usize * width + x as usize]
     }
+}
+
+/// Warp a row of pixels using SIMD-accelerated Lanczos3 interpolation.
+///
+/// Lanczos3 uses a 6x6 kernel for high-quality resampling. This implementation
+/// accelerates the weight computation and accumulation using SIMD.
+///
+/// # Arguments
+/// * `input` - Input image data (row-major)
+/// * `input_width` - Width of input image
+/// * `input_height` - Height of input image
+/// * `output_row` - Output buffer for this row
+/// * `output_y` - Y coordinate of this row
+/// * `inverse` - Inverse transform (output -> input)
+/// * `border_value` - Value for out-of-bounds pixels
+/// * `normalize` - Whether to normalize kernel weights
+/// * `clamp` - Whether to clamp output to neighborhood min/max
+#[inline]
+#[allow(clippy::too_many_arguments)]
+pub fn warp_row_lanczos3_simd(
+    input: &[f32],
+    input_width: usize,
+    input_height: usize,
+    output_row: &mut [f32],
+    output_y: usize,
+    inverse: &TransformMatrix,
+    border_value: f32,
+    normalize: bool,
+    clamp: bool,
+) {
+    let output_width = output_row.len();
+
+    #[cfg(target_arch = "x86_64")]
+    {
+        if output_width >= 4 && cpu_features::has_avx2() {
+            unsafe {
+                sse::warp_row_lanczos3_avx2(
+                    input,
+                    input_width,
+                    input_height,
+                    output_row,
+                    output_y,
+                    inverse,
+                    border_value,
+                    normalize,
+                    clamp,
+                );
+            }
+            return;
+        }
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    {
+        if output_width >= 4 {
+            unsafe {
+                neon::warp_row_lanczos3_neon(
+                    input,
+                    input_width,
+                    input_height,
+                    output_row,
+                    output_y,
+                    inverse,
+                    border_value,
+                    normalize,
+                    clamp,
+                );
+            }
+            return;
+        }
+    }
+
+    // Scalar fallback
+    warp_row_lanczos3_scalar(
+        input,
+        input_width,
+        input_height,
+        output_row,
+        output_y,
+        inverse,
+        border_value,
+        normalize,
+        clamp,
+    );
+}
+
+/// Scalar implementation of row warping with Lanczos3 interpolation.
+#[allow(clippy::too_many_arguments)]
+pub fn warp_row_lanczos3_scalar(
+    input: &[f32],
+    input_width: usize,
+    input_height: usize,
+    output_row: &mut [f32],
+    output_y: usize,
+    inverse: &TransformMatrix,
+    border_value: f32,
+    normalize: bool,
+    clamp: bool,
+) {
+    let y = output_y as f64;
+    const A: usize = 3; // Lanczos3 kernel radius
+
+    for (x, out_pixel) in output_row.iter_mut().enumerate() {
+        let (src_x, src_y) = inverse.transform_point(x as f64, y);
+        let sx = src_x as f32;
+        let sy = src_y as f32;
+
+        let x0 = sx.floor() as i32;
+        let y0 = sy.floor() as i32;
+        let fx = sx - x0 as f32;
+        let fy = sy - y0 as f32;
+
+        // Pre-compute x weights (6 values for Lanczos3)
+        let mut wx = [0.0f32; 6];
+        for (i, w) in wx.iter_mut().enumerate() {
+            let dx = fx - (i as i32 - 2) as f32;
+            *w = lanczos_kernel(dx, A as f32);
+        }
+
+        // Pre-compute y weights
+        let mut wy = [0.0f32; 6];
+        for (j, w) in wy.iter_mut().enumerate() {
+            let dy = fy - (j as i32 - 2) as f32;
+            *w = lanczos_kernel(dy, A as f32);
+        }
+
+        // Normalize weights if requested
+        if normalize {
+            let wx_sum: f32 = wx.iter().sum();
+            let wy_sum: f32 = wy.iter().sum();
+            if wx_sum.abs() > 1e-10 {
+                wx.iter_mut().for_each(|w| *w /= wx_sum);
+            }
+            if wy_sum.abs() > 1e-10 {
+                wy.iter_mut().for_each(|w| *w /= wy_sum);
+            }
+        }
+
+        // Compute weighted sum
+        let mut sum = 0.0f32;
+        let mut min_val = f32::MAX;
+        let mut max_val = f32::MIN;
+
+        for (j, &wyj) in wy.iter().enumerate() {
+            let py = y0 - 2 + j as i32;
+            for (i, &wxi) in wx.iter().enumerate() {
+                let px = x0 - 2 + i as i32;
+                let pixel = sample_pixel(input, input_width, input_height, px, py, border_value);
+                sum += pixel * wxi * wyj;
+
+                if clamp {
+                    min_val = min_val.min(pixel);
+                    max_val = max_val.max(pixel);
+                }
+            }
+        }
+
+        *out_pixel = if clamp && min_val <= max_val {
+            sum.clamp(min_val, max_val)
+        } else {
+            sum
+        };
+    }
+}
+
+/// Warp an entire image using SIMD-accelerated Lanczos3 interpolation.
+#[allow(clippy::too_many_arguments)]
+pub fn warp_image_lanczos3_simd(
+    input: &[f32],
+    input_width: usize,
+    input_height: usize,
+    output_width: usize,
+    output_height: usize,
+    transform: &TransformMatrix,
+    border_value: f32,
+    normalize: bool,
+    clamp: bool,
+) -> Vec<f32> {
+    let mut output = vec![border_value; output_width * output_height];
+    let inverse = transform.inverse();
+
+    for y in 0..output_height {
+        let row_start = y * output_width;
+        let row_end = row_start + output_width;
+        warp_row_lanczos3_simd(
+            input,
+            input_width,
+            input_height,
+            &mut output[row_start..row_end],
+            y,
+            &inverse,
+            border_value,
+            normalize,
+            clamp,
+        );
+    }
+
+    output
 }
 
 /// Warp an entire image using SIMD-accelerated bilinear interpolation.
@@ -382,6 +586,185 @@ mod tests {
                     x,
                     output_simd[x],
                     output_scalar[x]
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_warp_row_lanczos3_identity() {
+        let width = 100;
+        let height = 100;
+        let input = create_test_image(width, height);
+        let identity = TransformMatrix::identity();
+
+        let mut output_row = vec![0.0f32; width];
+        let y = 50;
+
+        warp_row_lanczos3_simd(
+            &input,
+            width,
+            height,
+            &mut output_row,
+            y,
+            &identity,
+            0.0,
+            true,
+            false,
+        );
+
+        // With identity transform, output should match input (within Lanczos ringing tolerance)
+        for x in 3..width - 3 {
+            let expected = input[y * width + x];
+            assert!(
+                (output_row[x] - expected).abs() < 0.02,
+                "Mismatch at x={}: {} vs {}",
+                x,
+                output_row[x],
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn test_warp_row_lanczos3_simd_matches_scalar() {
+        let width = 128;
+        let height = 128;
+        let input = create_test_image(width, height);
+
+        // Test with various transforms
+        let transforms = vec![
+            TransformMatrix::identity(),
+            TransformMatrix::translation(2.5, 1.7),
+            TransformMatrix::similarity(3.0, 2.0, 0.1, 1.05),
+        ];
+
+        for transform in transforms {
+            let inverse = transform.inverse();
+
+            for y in [3, 50, height - 4] {
+                for (normalize, clamp) in [(false, false), (true, false), (true, true)] {
+                    let mut output_simd = vec![0.0f32; width];
+                    let mut output_scalar = vec![0.0f32; width];
+
+                    warp_row_lanczos3_simd(
+                        &input,
+                        width,
+                        height,
+                        &mut output_simd,
+                        y,
+                        &inverse,
+                        -1.0,
+                        normalize,
+                        clamp,
+                    );
+
+                    warp_row_lanczos3_scalar(
+                        &input,
+                        width,
+                        height,
+                        &mut output_scalar,
+                        y,
+                        &inverse,
+                        -1.0,
+                        normalize,
+                        clamp,
+                    );
+
+                    for x in 0..width {
+                        assert!(
+                            (output_simd[x] - output_scalar[x]).abs() < 1e-4,
+                            "Row {}, x={}, normalize={}, clamp={}: SIMD {} vs Scalar {}",
+                            y,
+                            x,
+                            normalize,
+                            clamp,
+                            output_simd[x],
+                            output_scalar[x]
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_warp_row_lanczos3_various_sizes() {
+        let height = 64;
+        let input_base = create_test_image(256, height);
+
+        // Test various widths including non-SIMD-aligned sizes
+        for width in [1, 2, 3, 4, 5, 7, 8, 16, 33, 64, 100] {
+            let input: Vec<f32> = input_base.iter().take(width * height).copied().collect();
+            let transform = TransformMatrix::translation(1.5, 0.5);
+            let inverse = transform.inverse();
+
+            let mut output_simd = vec![0.0f32; width];
+            let mut output_scalar = vec![0.0f32; width];
+            let y = height / 2;
+
+            warp_row_lanczos3_simd(
+                &input,
+                width,
+                height,
+                &mut output_simd,
+                y,
+                &inverse,
+                0.0,
+                true,
+                false,
+            );
+            warp_row_lanczos3_scalar(
+                &input,
+                width,
+                height,
+                &mut output_scalar,
+                y,
+                &inverse,
+                0.0,
+                true,
+                false,
+            );
+
+            for x in 0..width {
+                assert!(
+                    (output_simd[x] - output_scalar[x]).abs() < 1e-5,
+                    "Width {}, x={}: SIMD {} vs Scalar {}",
+                    width,
+                    x,
+                    output_simd[x],
+                    output_scalar[x]
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_warp_image_lanczos3_simd() {
+        let width = 64;
+        let height = 64;
+        let input = create_test_image(width, height);
+
+        let transform = TransformMatrix::identity();
+
+        let output = warp_image_lanczos3_simd(
+            &input, width, height, width, height, &transform, 0.0, true, false,
+        );
+
+        assert_eq!(output.len(), width * height);
+
+        // Check interior pixels match input (within Lanczos tolerance)
+        for y in 5..height - 5 {
+            for x in 5..width - 5 {
+                let expected = input[y * width + x];
+                let actual = output[y * width + x];
+                assert!(
+                    (actual - expected).abs() < 0.02,
+                    "({}, {}): {} vs {}",
+                    x,
+                    y,
+                    actual,
+                    expected
                 );
             }
         }
