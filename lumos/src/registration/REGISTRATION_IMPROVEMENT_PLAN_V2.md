@@ -169,34 +169,47 @@ votes[idx] = new_val;
 
 **Effort:** 4 hours → Done
 
-### 3.2 FFT Transpose Optimization
+### 3.2 FFT Transpose Optimization ✅ DONE
 
-**File:** `phase_correlation/mod.rs:225-258`
+**File:** `phase_correlation/mod.rs`
 
-**Current:** 3 full matrix transposes in `fft_2d()`
+**Implementation:**
+- Added cache-oblivious blocked transpose for matrices larger than 64x64
+- Uses recursive subdivision with 32x32 base blocks for cache efficiency
+- `transpose_blocked()` recursively divides matrix into quadrants
+- `swap_blocks()` swaps off-diagonal rectangular regions
+- Simple loop for small matrices (≤64) to avoid overhead
 
-**Options:**
-1. Use cache-oblivious transpose algorithm
-2. Pre-transpose reference image once, reuse
-3. Consider in-place 2D FFT algorithms
+**Technical details:**
+- Block threshold: 64 (below this uses simple nested loops)
+- Base block size: 32x32 for optimal cache utilization
+- Handles non-power-of-2 sizes correctly with size-half logic
 
-**Effort:** 4 hours
+**Expected benefit:** Better cache locality for large FFT operations
 
-### 3.3 K-d Tree Neighbor Collection
+**Effort:** 4 hours → Done
 
-**File:** `spatial/mod.rs:81-115`
+### 3.3 K-d Tree Neighbor Collection ✅ DONE
 
-**Current:** `BoundedMaxHeap` uses `Vec` even for small k
+**File:** `spatial/mod.rs`
 
-**Optimization:** For k <= 32, use fixed-size array:
-```rust
-enum NearestBuffer {
-    Small([Option<(f64, usize)>; 32]),
-    Large(BinaryHeap<...>),
-}
-```
+**Implementation:**
+- `BoundedMaxHeap` is now an enum with two variants:
+  - `Small`: Uses fixed-size array `[(usize, f64); 32]` for k ≤ 32
+  - `Large`: Uses `Vec<(usize, f64)>` for k > 32
+- Avoids heap allocation for the common case of small k values
+- All heap operations (`sift_up_slice`, `sift_down_slice`) unified as static methods
+- Added 7 unit tests covering both variants and boundary cases
 
-**Effort:** 3 hours
+**Technical details:**
+- `SMALL_HEAP_CAPACITY = 32` (stack-allocated threshold)
+- Small variant: 528 bytes on stack (32 × 16 bytes + 2 × usize)
+- Large variant: 32 bytes (Vec metadata)
+- `#[allow(clippy::large_enum_variant)]` since size difference is intentional
+
+**Expected benefit:** Reduced allocation overhead for typical k-nearest queries
+
+**Effort:** 3 hours → Done
 
 ---
 

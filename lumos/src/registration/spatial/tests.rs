@@ -497,3 +497,143 @@ fn test_kdtree_negative_coordinates() {
     let indices: Vec<usize> = neighbors.iter().map(|(i, _)| *i).collect();
     assert!(indices.contains(&0) || indices.contains(&1));
 }
+
+// ============================================================================
+// BoundedMaxHeap optimization tests (small vs large capacity)
+// ============================================================================
+
+/// Test BoundedMaxHeap with small capacity (stack-allocated path)
+#[test]
+fn test_bounded_max_heap_small() {
+    use super::BoundedMaxHeap;
+
+    let mut heap = BoundedMaxHeap::new(5);
+
+    // Verify it uses the Small variant
+    assert!(matches!(heap, BoundedMaxHeap::Small { .. }));
+
+    // Push items
+    heap.push(0, 10.0);
+    heap.push(1, 5.0);
+    heap.push(2, 15.0);
+    heap.push(3, 3.0);
+    heap.push(4, 8.0);
+
+    assert!(heap.is_full());
+    assert!((heap.max_distance() - 15.0).abs() < 1e-10);
+
+    // Push a smaller item - should replace the max
+    heap.push(5, 2.0);
+    assert!((heap.max_distance() - 10.0).abs() < 1e-10);
+
+    // Push a larger item - should be rejected
+    heap.push(6, 20.0);
+    assert!((heap.max_distance() - 10.0).abs() < 1e-10);
+
+    let result = heap.into_vec();
+    assert_eq!(result.len(), 5);
+}
+
+/// Test BoundedMaxHeap with large capacity (heap-allocated path)
+#[test]
+fn test_bounded_max_heap_large() {
+    use super::BoundedMaxHeap;
+    use super::SMALL_HEAP_CAPACITY;
+
+    let capacity = SMALL_HEAP_CAPACITY + 10;
+    let mut heap = BoundedMaxHeap::new(capacity);
+
+    // Verify it uses the Large variant
+    assert!(matches!(heap, BoundedMaxHeap::Large { .. }));
+
+    // Push items
+    for i in 0..capacity {
+        heap.push(i, (capacity - i) as f64);
+    }
+
+    assert!(heap.is_full());
+
+    // Max distance should be the largest value (capacity)
+    assert!((heap.max_distance() - capacity as f64).abs() < 1e-10);
+
+    // Push a smaller item - should replace the max
+    heap.push(100, 0.5);
+    assert!((heap.max_distance() - (capacity - 1) as f64).abs() < 1e-10);
+
+    let result = heap.into_vec();
+    assert_eq!(result.len(), capacity);
+}
+
+/// Test BoundedMaxHeap at the boundary (exactly SMALL_HEAP_CAPACITY)
+#[test]
+fn test_bounded_max_heap_boundary() {
+    use super::BoundedMaxHeap;
+    use super::SMALL_HEAP_CAPACITY;
+
+    // Exactly at the boundary - should use Small variant
+    let heap_at_boundary = BoundedMaxHeap::new(SMALL_HEAP_CAPACITY);
+    assert!(matches!(heap_at_boundary, BoundedMaxHeap::Small { .. }));
+
+    // One above the boundary - should use Large variant
+    let heap_above = BoundedMaxHeap::new(SMALL_HEAP_CAPACITY + 1);
+    assert!(matches!(heap_above, BoundedMaxHeap::Large { .. }));
+}
+
+/// Test k_nearest with small k uses stack allocation
+#[test]
+fn test_kdtree_k_nearest_small_k() {
+    // Generate enough points to query
+    let mut points = Vec::new();
+    for i in 0..100 {
+        points.push((i as f64, (i * i % 50) as f64));
+    }
+
+    let tree = KdTree::build(&points).unwrap();
+
+    // Small k (within SMALL_HEAP_CAPACITY) should work correctly
+    let neighbors = tree.k_nearest((50.0, 25.0), 10);
+    assert_eq!(neighbors.len(), 10);
+
+    // Verify sorted by distance
+    for i in 1..neighbors.len() {
+        assert!(neighbors[i - 1].1 <= neighbors[i].1);
+    }
+}
+
+/// Test k_nearest with large k uses heap allocation
+#[test]
+fn test_kdtree_k_nearest_large_k() {
+    use super::SMALL_HEAP_CAPACITY;
+
+    // Generate enough points
+    let mut points = Vec::new();
+    for i in 0..100 {
+        points.push((i as f64, (i * i % 50) as f64));
+    }
+
+    let tree = KdTree::build(&points).unwrap();
+
+    // Large k (above SMALL_HEAP_CAPACITY) should still work correctly
+    let k = SMALL_HEAP_CAPACITY + 10;
+    let neighbors = tree.k_nearest((50.0, 25.0), k);
+    assert_eq!(neighbors.len(), k);
+
+    // Verify sorted by distance
+    for i in 1..neighbors.len() {
+        assert!(neighbors[i - 1].1 <= neighbors[i].1);
+    }
+}
+
+/// Test BoundedMaxHeap empty state
+#[test]
+fn test_bounded_max_heap_empty() {
+    use super::BoundedMaxHeap;
+
+    let heap_small = BoundedMaxHeap::new(5);
+    assert!(!heap_small.is_full());
+    assert_eq!(heap_small.max_distance(), f64::INFINITY);
+
+    let heap_large = BoundedMaxHeap::new(50);
+    assert!(!heap_large.is_full());
+    assert_eq!(heap_large.max_distance(), f64::INFINITY);
+}

@@ -247,55 +247,116 @@ fn distance_squared(a: (f64, f64), b: (f64, f64)) -> f64 {
     dx * dx + dy * dy
 }
 
+/// Maximum capacity for stack-allocated neighbor collection.
+/// For k <= this value, we avoid heap allocation entirely.
+const SMALL_HEAP_CAPACITY: usize = 32;
+
 /// A bounded max-heap for k-nearest neighbor search.
 ///
 /// Keeps track of the k smallest distances seen so far.
+/// Uses stack allocation for small k (≤32), heap allocation for larger k.
+///
+/// The large size difference between variants is intentional - the Small variant
+/// avoids heap allocation for the common case of k ≤ 32.
 #[derive(Debug)]
-struct BoundedMaxHeap {
-    capacity: usize,
-    items: Vec<(usize, f64)>, // (index, distance_squared)
+#[allow(clippy::large_enum_variant)]
+enum BoundedMaxHeap {
+    /// Stack-allocated variant for small k values
+    Small {
+        capacity: usize,
+        len: usize,
+        items: [(usize, f64); SMALL_HEAP_CAPACITY],
+    },
+    /// Heap-allocated variant for larger k values
+    Large {
+        capacity: usize,
+        items: Vec<(usize, f64)>,
+    },
 }
 
 impl BoundedMaxHeap {
     fn new(capacity: usize) -> Self {
-        Self {
-            capacity,
-            items: Vec::with_capacity(capacity + 1),
+        if capacity <= SMALL_HEAP_CAPACITY {
+            BoundedMaxHeap::Small {
+                capacity,
+                len: 0,
+                items: [(0, 0.0); SMALL_HEAP_CAPACITY],
+            }
+        } else {
+            BoundedMaxHeap::Large {
+                capacity,
+                items: Vec::with_capacity(capacity + 1),
+            }
         }
     }
 
     fn push(&mut self, idx: usize, dist_sq: f64) {
-        if self.items.len() < self.capacity {
-            self.items.push((idx, dist_sq));
-            self.sift_up(self.items.len() - 1);
-        } else if dist_sq < self.items[0].1 {
-            // Replace the maximum (root) with new item
-            self.items[0] = (idx, dist_sq);
-            self.sift_down(0);
+        match self {
+            BoundedMaxHeap::Small {
+                capacity,
+                len,
+                items,
+            } => {
+                if *len < *capacity {
+                    items[*len] = (idx, dist_sq);
+                    *len += 1;
+                    Self::sift_up_slice(&mut items[..*len], *len - 1);
+                } else if dist_sq < items[0].1 {
+                    items[0] = (idx, dist_sq);
+                    Self::sift_down_slice(&mut items[..*len], 0);
+                }
+            }
+            BoundedMaxHeap::Large { capacity, items } => {
+                if items.len() < *capacity {
+                    items.push((idx, dist_sq));
+                    let last_idx = items.len() - 1;
+                    Self::sift_up_slice(items, last_idx);
+                } else if dist_sq < items[0].1 {
+                    items[0] = (idx, dist_sq);
+                    Self::sift_down_slice(items, 0);
+                }
+            }
         }
     }
 
     fn is_full(&self) -> bool {
-        self.items.len() >= self.capacity
+        match self {
+            BoundedMaxHeap::Small { capacity, len, .. } => *len >= *capacity,
+            BoundedMaxHeap::Large { capacity, items } => items.len() >= *capacity,
+        }
     }
 
     fn max_distance(&self) -> f64 {
-        if self.items.is_empty() {
-            f64::INFINITY
-        } else {
-            self.items[0].1
+        match self {
+            BoundedMaxHeap::Small { len, items, .. } => {
+                if *len == 0 {
+                    f64::INFINITY
+                } else {
+                    items[0].1
+                }
+            }
+            BoundedMaxHeap::Large { items, .. } => {
+                if items.is_empty() {
+                    f64::INFINITY
+                } else {
+                    items[0].1
+                }
+            }
         }
     }
 
     fn into_vec(self) -> Vec<(usize, f64)> {
-        self.items
+        match self {
+            BoundedMaxHeap::Small { len, items, .. } => items[..len].to_vec(),
+            BoundedMaxHeap::Large { items, .. } => items,
+        }
     }
 
-    fn sift_up(&mut self, mut idx: usize) {
+    fn sift_up_slice(items: &mut [(usize, f64)], mut idx: usize) {
         while idx > 0 {
             let parent = (idx - 1) / 2;
-            if self.items[idx].1 > self.items[parent].1 {
-                self.items.swap(idx, parent);
+            if items[idx].1 > items[parent].1 {
+                items.swap(idx, parent);
                 idx = parent;
             } else {
                 break;
@@ -303,21 +364,22 @@ impl BoundedMaxHeap {
         }
     }
 
-    fn sift_down(&mut self, mut idx: usize) {
+    fn sift_down_slice(items: &mut [(usize, f64)], mut idx: usize) {
+        let len = items.len();
         loop {
             let left = 2 * idx + 1;
             let right = 2 * idx + 2;
             let mut largest = idx;
 
-            if left < self.items.len() && self.items[left].1 > self.items[largest].1 {
+            if left < len && items[left].1 > items[largest].1 {
                 largest = left;
             }
-            if right < self.items.len() && self.items[right].1 > self.items[largest].1 {
+            if right < len && items[right].1 > items[largest].1 {
                 largest = right;
             }
 
             if largest != idx {
-                self.items.swap(idx, largest);
+                items.swap(idx, largest);
                 idx = largest;
             } else {
                 break;

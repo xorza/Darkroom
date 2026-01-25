@@ -582,11 +582,102 @@ pub fn hann_window(size: usize) -> Vec<f32> {
         .collect()
 }
 
-/// In-place square matrix transpose.
+/// In-place square matrix transpose using cache-oblivious blocking.
+///
+/// For large matrices, uses recursive blocking to improve cache locality.
+/// For small matrices (≤64), uses simple swapping.
 pub fn transpose_inplace(data: &mut [Complex<f32>], n: usize) {
-    for i in 0..n {
-        for j in (i + 1)..n {
-            data.swap(i * n + j, j * n + i);
+    // Threshold below which simple transpose is faster
+    const BLOCK_THRESHOLD: usize = 64;
+
+    if n <= BLOCK_THRESHOLD {
+        // Simple transpose for small matrices
+        for i in 0..n {
+            for j in (i + 1)..n {
+                data.swap(i * n + j, j * n + i);
+            }
+        }
+    } else {
+        // Blocked transpose for better cache locality
+        transpose_blocked(data, n, 0, 0, n);
+    }
+}
+
+/// Blocked transpose with cache-friendly access pattern.
+///
+/// Transposes a square sub-matrix starting at (row_start, col_start) with size `size`.
+fn transpose_blocked(
+    data: &mut [Complex<f32>],
+    stride: usize,
+    row_start: usize,
+    col_start: usize,
+    size: usize,
+) {
+    // Block size chosen to fit in L1 cache (~32KB)
+    // Each Complex<f32> is 8 bytes, so 32 elements × 32 elements = 8KB
+    const BLOCK_SIZE: usize = 32;
+
+    if size <= BLOCK_SIZE {
+        // Base case: transpose this small block directly
+        for i in 0..size {
+            let row = row_start + i;
+            // Only process upper triangle to avoid double-swapping
+            let j_start = if row_start == col_start { i + 1 } else { 0 };
+            for j in j_start..size {
+                let col = col_start + j;
+                if row < col {
+                    let idx1 = row * stride + col;
+                    let idx2 = col * stride + row;
+                    data.swap(idx1, idx2);
+                }
+            }
+        }
+    } else {
+        // Recursive case: divide into quadrants
+        let half = size / 2;
+
+        // Transpose the two diagonal blocks (self-transpose)
+        transpose_blocked(data, stride, row_start, col_start, half);
+        transpose_blocked(
+            data,
+            stride,
+            row_start + half,
+            col_start + half,
+            size - half,
+        );
+
+        // Swap the two off-diagonal blocks with each other
+        swap_blocks(
+            data,
+            stride,
+            row_start,
+            col_start + half,
+            row_start + half,
+            col_start,
+            half,
+            size - half,
+        );
+    }
+}
+
+/// Swap two rectangular blocks at (r1, c1) and (r2, c2).
+/// The blocks are of size (height1, width1) and (width1, height1) respectively.
+#[allow(clippy::too_many_arguments)]
+fn swap_blocks(
+    data: &mut [Complex<f32>],
+    stride: usize,
+    r1: usize,
+    c1: usize,
+    r2: usize,
+    c2: usize,
+    height: usize,
+    width: usize,
+) {
+    for i in 0..height {
+        for j in 0..width {
+            let idx1 = (r1 + i) * stride + (c1 + j);
+            let idx2 = (r2 + j) * stride + (c2 + i);
+            data.swap(idx1, idx2);
         }
     }
 }
