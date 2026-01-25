@@ -3,9 +3,15 @@
 #[cfg(test)]
 mod tests;
 
+#[cfg(feature = "bench")]
+pub mod bench;
+
 use super::StarDetectionConfig;
 use super::background::BackgroundMap;
-use super::deblend::{MultiThresholdDeblendConfig, deblend_component as multi_threshold_deblend};
+use super::deblend::{
+    ComponentData, DeblendConfig, MultiThresholdDeblendConfig,
+    deblend_component as multi_threshold_deblend, deblend_local_maxima,
+};
 
 /// A candidate star region before centroid refinement.
 #[derive(Debug)]
@@ -340,33 +346,6 @@ fn create_threshold_mask_filtered(
         .collect()
 }
 
-/// Configuration for deblending algorithm.
-#[derive(Debug, Clone, Copy)]
-pub struct DeblendConfig {
-    /// Minimum separation between peaks for deblending (in pixels).
-    pub min_separation: usize,
-    /// Minimum peak prominence as fraction of primary peak for deblending.
-    pub min_prominence: f32,
-    /// Enable multi-threshold deblending (SExtractor-style).
-    pub multi_threshold: bool,
-    /// Number of sub-thresholds for multi-threshold deblending.
-    pub n_thresholds: usize,
-    /// Minimum contrast for multi-threshold deblending.
-    pub min_contrast: f32,
-}
-
-impl Default for DeblendConfig {
-    fn default() -> Self {
-        Self {
-            min_separation: 3,
-            min_prominence: 0.3,
-            multi_threshold: false,
-            n_thresholds: 32,
-            min_contrast: 0.005,
-        }
-    }
-}
-
 impl From<&StarDetectionConfig> for DeblendConfig {
     fn from(config: &StarDetectionConfig) -> Self {
         Self {
@@ -470,187 +449,23 @@ pub(crate) fn extract_candidates(
                 });
             }
         } else {
-            // Use simple local-maxima deblending
-            let peaks = find_local_maxima(&data, pixels, width, deblend_config);
+            // Use simple local-maxima deblending from deblend module
+            let deblended = deblend_local_maxima(&data, pixels, width, deblend_config);
 
-            if peaks.len() <= 1 {
-                // Single peak - create one candidate
-                let (peak_x, peak_y, peak_value) = if peaks.is_empty() {
-                    // Fallback: use global maximum
-                    data.pixels
-                        .iter()
-                        .max_by(|a, b| a.2.partial_cmp(&b.2).unwrap())
-                        .map(|&(x, y, v)| (x, y, v))
-                        .unwrap()
-                } else {
-                    peaks[0]
-                };
-
+            for obj in deblended {
                 candidates.push(StarCandidate {
-                    x_min: data.x_min,
-                    x_max: data.x_max,
-                    y_min: data.y_min,
-                    y_max: data.y_max,
-                    peak_x,
-                    peak_y,
-                    peak_value,
-                    area: data.pixels.len(),
+                    x_min: obj.x_min,
+                    x_max: obj.x_max,
+                    y_min: obj.y_min,
+                    y_max: obj.y_max,
+                    peak_x: obj.peak_x,
+                    peak_y: obj.peak_y,
+                    peak_value: obj.peak_value,
+                    area: obj.area,
                 });
-            } else {
-                // Multiple peaks - deblend by assigning pixels to nearest peak
-                let deblended = deblend_component(&data, &peaks);
-                candidates.extend(deblended);
             }
         }
     }
 
     candidates
-}
-
-/// Temporary data for a connected component.
-struct ComponentData {
-    x_min: usize,
-    x_max: usize,
-    y_min: usize,
-    y_max: usize,
-    pixels: Vec<(usize, usize, f32)>, // (x, y, value)
-}
-
-/// Find local maxima within a component for deblending.
-///
-/// A pixel is a local maximum if it's greater than all 8 neighbors.
-/// Only returns peaks that are sufficiently separated and prominent.
-fn find_local_maxima(
-    data: &ComponentData,
-    pixels: &[f32],
-    width: usize,
-    config: &DeblendConfig,
-) -> Vec<(usize, usize, f32)> {
-    let mut peaks: Vec<(usize, usize, f32)> = Vec::new();
-
-    // Find global maximum first
-    let global_max = data
-        .pixels
-        .iter()
-        .map(|&(_, _, v)| v)
-        .fold(f32::MIN, f32::max);
-
-    let min_peak_value = global_max * config.min_prominence;
-
-    // Check each pixel for local maximum
-    for &(x, y, value) in &data.pixels {
-        if value < min_peak_value {
-            continue;
-        }
-
-        // Check if this is a local maximum (greater than all 8 neighbors)
-        let mut is_maximum = true;
-        for dy in -1i32..=1 {
-            for dx in -1i32..=1 {
-                if dx == 0 && dy == 0 {
-                    continue;
-                }
-
-                let nx = x as i32 + dx;
-                let ny = y as i32 + dy;
-
-                if nx >= 0 && ny >= 0 {
-                    let nx = nx as usize;
-                    let ny = ny as usize;
-                    let neighbor_idx = ny * width + nx;
-
-                    if neighbor_idx < pixels.len() && pixels[neighbor_idx] >= value {
-                        is_maximum = false;
-                        break;
-                    }
-                }
-            }
-            if !is_maximum {
-                break;
-            }
-        }
-
-        if is_maximum {
-            // Check separation from existing peaks
-            let min_sep = config.min_separation;
-            let well_separated = peaks.iter().all(|&(px, py, _)| {
-                let dx = (x as i32 - px as i32).unsigned_abs() as usize;
-                let dy = (y as i32 - py as i32).unsigned_abs() as usize;
-                dx >= min_sep || dy >= min_sep
-            });
-
-            if well_separated {
-                peaks.push((x, y, value));
-            } else {
-                // Keep the brighter peak
-                for peak in &mut peaks {
-                    let dx = (x as i32 - peak.0 as i32).unsigned_abs() as usize;
-                    let dy = (y as i32 - peak.1 as i32).unsigned_abs() as usize;
-                    if dx < min_sep && dy < min_sep && value > peak.2 {
-                        *peak = (x, y, value);
-                        break;
-                    }
-                }
-            }
-        }
-    }
-
-    // Sort by brightness (brightest first)
-    peaks.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
-
-    peaks
-}
-
-/// Deblend a component into multiple candidates based on peak positions.
-///
-/// Each pixel is assigned to the nearest peak, creating separate candidates.
-fn deblend_component(data: &ComponentData, peaks: &[(usize, usize, f32)]) -> Vec<StarCandidate> {
-    // Initialize per-peak data
-    let mut peak_data: Vec<(usize, usize, usize, usize, usize)> = peaks
-        .iter()
-        .map(|_| (usize::MAX, 0, usize::MAX, 0, 0)) // (x_min, x_max, y_min, y_max, area)
-        .collect();
-
-    // Assign each pixel to nearest peak
-    for &(x, y, _) in &data.pixels {
-        let mut min_dist_sq = usize::MAX;
-        let mut nearest_peak = 0;
-
-        for (i, &(px, py, _)) in peaks.iter().enumerate() {
-            let dx = (x as i32 - px as i32).unsigned_abs() as usize;
-            let dy = (y as i32 - py as i32).unsigned_abs() as usize;
-            let dist_sq = dx * dx + dy * dy;
-
-            if dist_sq < min_dist_sq {
-                min_dist_sq = dist_sq;
-                nearest_peak = i;
-            }
-        }
-
-        let pd = &mut peak_data[nearest_peak];
-        pd.0 = pd.0.min(x);
-        pd.1 = pd.1.max(x);
-        pd.2 = pd.2.min(y);
-        pd.3 = pd.3.max(y);
-        pd.4 += 1;
-    }
-
-    // Build candidates
-    peaks
-        .iter()
-        .zip(peak_data.iter())
-        .filter(|(_, pd)| pd.4 > 0) // Only include peaks with assigned pixels
-        .map(
-            |(&(peak_x, peak_y, peak_value), &(x_min, x_max, y_min, y_max, area))| StarCandidate {
-                x_min,
-                x_max,
-                y_min,
-                y_max,
-                peak_x,
-                peak_y,
-                peak_value,
-                area,
-            },
-        )
-        .collect()
 }

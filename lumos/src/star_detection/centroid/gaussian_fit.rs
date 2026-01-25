@@ -326,58 +326,8 @@ fn compute_gradient(jacobian: &[[f32; 6]], residuals: &[f32]) -> [f32; 6] {
     gradient
 }
 
-/// Solve 6x6 linear system using Gaussian elimination with partial pivoting.
-#[allow(clippy::needless_range_loop)]
-fn solve_6x6(a: &[[f32; 6]; 6], b: &[f32; 6]) -> Option<[f32; 6]> {
-    // Copy to working arrays
-    let mut matrix = *a;
-    let mut rhs = *b;
-
-    // Forward elimination with partial pivoting
-    for col in 0..6 {
-        // Find pivot
-        let mut max_row = col;
-        let mut max_val = matrix[col][col].abs();
-        for row in (col + 1)..6 {
-            if matrix[row][col].abs() > max_val {
-                max_val = matrix[row][col].abs();
-                max_row = row;
-            }
-        }
-
-        if max_val < 1e-10 {
-            return None; // Singular matrix
-        }
-
-        // Swap rows
-        if max_row != col {
-            matrix.swap(col, max_row);
-            rhs.swap(col, max_row);
-        }
-
-        // Eliminate column
-        for row in (col + 1)..6 {
-            let factor = matrix[row][col] / matrix[col][col];
-            let pivot_row = matrix[col];
-            for (j, m) in matrix[row].iter_mut().enumerate().skip(col) {
-                *m -= factor * pivot_row[j];
-            }
-            rhs[row] -= factor * rhs[col];
-        }
-    }
-
-    // Back substitution
-    let mut x = [0.0f32; 6];
-    for i in (0..6).rev() {
-        let mut sum = rhs[i];
-        for (j, &xj) in x.iter().enumerate().skip(i + 1) {
-            sum -= matrix[i][j] * xj;
-        }
-        x[i] = sum / matrix[i][i];
-    }
-
-    Some(x)
-}
+// Use shared linear solver
+use super::linear_solver::solve_6x6;
 
 /// Convert sigma to FWHM.
 #[inline]

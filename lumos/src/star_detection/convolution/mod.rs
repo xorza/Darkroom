@@ -3,9 +3,16 @@
 //! Implements separable Gaussian convolution which is O(n×k) instead of O(n×k²)
 //! where k is the kernel size. This is the key technique used by DAOFIND and
 //! SExtractor to boost SNR for faint star detection.
+//!
+//! Uses SIMD acceleration when available (AVX2/SSE on x86_64, NEON on aarch64).
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(feature = "bench")]
+pub mod bench;
+
+mod simd;
 
 use rayon::prelude::*;
 
@@ -88,47 +95,47 @@ pub fn gaussian_convolve(pixels: &[f32], width: usize, height: usize, sigma: f32
     output
 }
 
-/// Convolve all rows in parallel.
+/// Convolve all rows in parallel with chunking to reduce false cache sharing.
+///
+/// Instead of giving each thread a single row, we process multiple rows per chunk.
+/// This improves cache locality and reduces potential false sharing when output
+/// rows are close together in memory.
 fn convolve_rows_parallel(input: &[f32], output: &mut [f32], width: usize, kernel: &[f32]) {
     let radius = kernel.len() / 2;
 
+    // Process multiple rows per chunk to reduce false sharing.
+    // 8 rows of f32 = 8 * width * 4 bytes. For width >= 128, each chunk is >= 4KB,
+    // which spans multiple cache lines and gives each thread a distinct memory region.
+    const ROWS_PER_CHUNK: usize = 8;
+
     output
-        .par_chunks_mut(width)
+        .par_chunks_mut(width * ROWS_PER_CHUNK)
         .enumerate()
-        .for_each(|(y, out_row)| {
-            let in_row = &input[y * width..(y + 1) * width];
-            convolve_row(in_row, out_row, kernel, radius);
+        .for_each(|(chunk_idx, out_chunk)| {
+            let y_start = chunk_idx * ROWS_PER_CHUNK;
+            let rows_in_chunk = out_chunk.len() / width;
+
+            for local_y in 0..rows_in_chunk {
+                let y = y_start + local_y;
+                let in_row = &input[y * width..(y + 1) * width];
+                let out_row = &mut out_chunk[local_y * width..(local_y + 1) * width];
+                convolve_row(in_row, out_row, kernel, radius);
+            }
         });
 }
 
 /// Convolve a single row with 1D kernel.
+///
+/// Uses SIMD acceleration when available (AVX2/SSE on x86_64, NEON on aarch64).
 #[inline]
 fn convolve_row(input: &[f32], output: &mut [f32], kernel: &[f32], radius: usize) {
-    let width = input.len();
-
-    for (x, out) in output.iter_mut().enumerate() {
-        let mut sum = 0.0f32;
-
-        for (k, &kval) in kernel.iter().enumerate() {
-            let sx = x as isize + k as isize - radius as isize;
-
-            // Mirror boundary handling
-            let sx = if sx < 0 {
-                (-sx) as usize
-            } else if sx >= width as isize {
-                2 * width - 2 - sx as usize
-            } else {
-                sx as usize
-            };
-
-            sum += input[sx] * kval;
-        }
-
-        *out = sum;
-    }
+    simd::convolve_row_simd(input, output, kernel, radius);
 }
 
-/// Convolve all columns in parallel.
+/// Convolve all columns in parallel with chunking to reduce false cache sharing.
+///
+/// Processes multiple rows per chunk to improve cache locality and reduce
+/// false sharing between threads writing to adjacent output rows.
 fn convolve_cols_parallel(
     input: &[f32],
     output: &mut [f32],
@@ -138,30 +145,41 @@ fn convolve_cols_parallel(
 ) {
     let radius = kernel.len() / 2;
 
+    // Process multiple rows per chunk to reduce false sharing
+    const ROWS_PER_CHUNK: usize = 8;
+
     // Process rows in parallel, each row convolves all columns vertically
     output
-        .par_chunks_mut(width)
+        .par_chunks_mut(width * ROWS_PER_CHUNK)
         .enumerate()
-        .for_each(|(y, out_row)| {
-            for x in 0..width {
-                let mut sum = 0.0f32;
+        .for_each(|(chunk_idx, out_chunk)| {
+            let y_start = chunk_idx * ROWS_PER_CHUNK;
+            let rows_in_chunk = out_chunk.len() / width;
 
-                for (k, &kval) in kernel.iter().enumerate() {
-                    let sy = y as isize + k as isize - radius as isize;
+            for local_y in 0..rows_in_chunk {
+                let y = y_start + local_y;
+                let out_row = &mut out_chunk[local_y * width..(local_y + 1) * width];
 
-                    // Mirror boundary handling
-                    let sy = if sy < 0 {
-                        (-sy) as usize
-                    } else if sy >= height as isize {
-                        2 * height - 2 - sy as usize
-                    } else {
-                        sy as usize
-                    };
+                for x in 0..width {
+                    let mut sum = 0.0f32;
 
-                    sum += input[sy * width + x] * kval;
+                    for (k, &kval) in kernel.iter().enumerate() {
+                        let sy = y as isize + k as isize - radius as isize;
+
+                        // Mirror boundary handling
+                        let sy = if sy < 0 {
+                            (-sy) as usize
+                        } else if sy >= height as isize {
+                            2 * height - 2 - sy as usize
+                        } else {
+                            sy as usize
+                        };
+
+                        sum += input[sy * width + x] * kval;
+                    }
+
+                    out_row[x] = sum;
                 }
-
-                out_row[x] = sum;
             }
         });
 }

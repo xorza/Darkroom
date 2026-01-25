@@ -2,9 +2,27 @@
 //!
 //! Uses iterative weighted centroid algorithm for sub-pixel accurate positioning,
 //! typically achieving ~0.05 pixel accuracy.
+//!
+//! Also provides 2D Gaussian and Moffat profile fitting for higher precision
+//! centroid computation (~0.01 pixel accuracy).
+
+pub mod gaussian_fit;
+pub mod linear_solver;
+pub mod moffat_fit;
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(feature = "bench")]
+pub mod bench;
+
+// Re-export fitting functions and types for convenience
+pub use gaussian_fit::{GaussianFitConfig, GaussianFitResult, fit_gaussian_2d};
+#[allow(unused_imports)]
+pub use gaussian_fit::{fwhm_to_sigma, sigma_to_fwhm};
+pub use moffat_fit::{MoffatFitConfig, MoffatFitResult, fit_moffat_2d};
+#[allow(unused_imports)]
+pub use moffat_fit::{alpha_beta_to_fwhm, fwhm_beta_to_alpha};
 
 use super::background::BackgroundMap;
 use super::cosmic_ray::compute_laplacian_snr;

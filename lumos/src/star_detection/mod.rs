@@ -25,9 +25,7 @@ mod convolution;
 mod cosmic_ray;
 mod deblend;
 mod detection;
-mod gaussian_fit;
 mod median_filter;
-mod moffat_fit;
 
 #[cfg(test)]
 mod tests;
@@ -50,11 +48,13 @@ pub use background::{
 pub use centroid::compute_centroid;
 pub use convolution::matched_filter;
 pub use detection::{detect_stars, detect_stars_filtered};
-#[allow(unused_imports)]
-pub use gaussian_fit::{GaussianFitConfig, GaussianFitResult, fit_gaussian_2d};
 pub use median_filter::median_filter_3x3;
+
+// Re-export fitting functions from centroid module
 #[allow(unused_imports)]
-pub use moffat_fit::{
+pub use centroid::{GaussianFitConfig, GaussianFitResult, fit_gaussian_2d};
+#[allow(unused_imports)]
+pub use centroid::{
     MoffatFitConfig, MoffatFitResult, alpha_beta_to_fwhm, fit_moffat_2d, fwhm_beta_to_alpha,
 };
 

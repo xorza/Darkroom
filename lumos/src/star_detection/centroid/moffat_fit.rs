@@ -13,6 +13,9 @@
 // These are public API functions exported for external use
 #![allow(dead_code)]
 
+// Use shared linear solvers
+use super::linear_solver::{solve_5x5, solve_6x6};
+
 /// Configuration for Moffat profile fitting.
 #[derive(Debug, Clone)]
 pub struct MoffatFitConfig {
@@ -563,100 +566,6 @@ fn compute_gradient_6(jacobian: &[[f32; 6]], residuals: &[f32]) -> [f32; 6] {
         }
     }
     gradient
-}
-
-/// Solve 5x5 linear system using Gaussian elimination.
-#[allow(clippy::needless_range_loop)]
-fn solve_5x5(a: &[[f32; 5]; 5], b: &[f32; 5]) -> Option<[f32; 5]> {
-    let mut matrix = *a;
-    let mut rhs = *b;
-
-    for col in 0..5 {
-        let mut max_row = col;
-        let mut max_val = matrix[col][col].abs();
-        for row in (col + 1)..5 {
-            if matrix[row][col].abs() > max_val {
-                max_val = matrix[row][col].abs();
-                max_row = row;
-            }
-        }
-
-        if max_val < 1e-10 {
-            return None;
-        }
-
-        if max_row != col {
-            matrix.swap(col, max_row);
-            rhs.swap(col, max_row);
-        }
-
-        for row in (col + 1)..5 {
-            let factor = matrix[row][col] / matrix[col][col];
-            let pivot_row = matrix[col];
-            for (j, m) in matrix[row].iter_mut().enumerate().skip(col) {
-                *m -= factor * pivot_row[j];
-            }
-            rhs[row] -= factor * rhs[col];
-        }
-    }
-
-    let mut x = [0.0f32; 5];
-    for i in (0..5).rev() {
-        let mut sum = rhs[i];
-        for (j, &xj) in x.iter().enumerate().skip(i + 1) {
-            sum -= matrix[i][j] * xj;
-        }
-        x[i] = sum / matrix[i][i];
-    }
-
-    Some(x)
-}
-
-/// Solve 6x6 linear system using Gaussian elimination.
-#[allow(clippy::needless_range_loop)]
-fn solve_6x6(a: &[[f32; 6]; 6], b: &[f32; 6]) -> Option<[f32; 6]> {
-    let mut matrix = *a;
-    let mut rhs = *b;
-
-    for col in 0..6 {
-        let mut max_row = col;
-        let mut max_val = matrix[col][col].abs();
-        for row in (col + 1)..6 {
-            if matrix[row][col].abs() > max_val {
-                max_val = matrix[row][col].abs();
-                max_row = row;
-            }
-        }
-
-        if max_val < 1e-10 {
-            return None;
-        }
-
-        if max_row != col {
-            matrix.swap(col, max_row);
-            rhs.swap(col, max_row);
-        }
-
-        for row in (col + 1)..6 {
-            let factor = matrix[row][col] / matrix[col][col];
-            let pivot_row = matrix[col];
-            for (j, m) in matrix[row].iter_mut().enumerate().skip(col) {
-                *m -= factor * pivot_row[j];
-            }
-            rhs[row] -= factor * rhs[col];
-        }
-    }
-
-    let mut x = [0.0f32; 6];
-    for i in (0..6).rev() {
-        let mut sum = rhs[i];
-        for (j, &xj) in x.iter().enumerate().skip(i + 1) {
-            sum -= matrix[i][j] * xj;
-        }
-        x[i] = sum / matrix[i][i];
-    }
-
-    Some(x)
 }
 
 /// Convert Moffat alpha and beta to FWHM.

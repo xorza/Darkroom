@@ -2,12 +2,16 @@
 //!
 //! Estimates the sky background using a tiled approach with sigma-clipped
 //! statistics, then bilinearly interpolates to create a smooth background map.
+//!
+//! Uses SIMD acceleration when available for statistics computation.
 
 #[cfg(feature = "bench")]
 pub mod bench;
 
 #[cfg(test)]
 mod tests;
+
+mod simd;
 
 use rayon::prelude::*;
 
