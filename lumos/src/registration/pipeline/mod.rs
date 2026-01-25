@@ -18,7 +18,7 @@ use crate::registration::{
     interpolation::{InterpolationMethod, WarpConfig, warp_image},
     phase_correlation::{PhaseCorrelationConfig, PhaseCorrelator},
     ransac::{RansacConfig, RansacEstimator},
-    triangle::{TriangleMatchConfig, match_stars_triangles},
+    triangle::{TriangleMatchConfig, match_stars_triangles_kdtree},
     types::{
         RegistrationConfig, RegistrationError, RegistrationResult, TransformMatrix, TransformType,
     },
@@ -108,7 +108,7 @@ impl Registrator {
             check_orientation: true,
         };
 
-        let matches = match_stars_triangles(&ref_stars, &target_stars, &triangle_config);
+        let matches = match_stars_triangles_kdtree(&ref_stars, &target_stars, &triangle_config);
 
         if matches.len() < self.config.min_matched_stars {
             return Err(RegistrationError::NoMatchingPatterns);

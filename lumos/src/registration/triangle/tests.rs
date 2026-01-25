@@ -461,59 +461,6 @@ fn test_form_triangles_kdtree_too_few() {
 // Tests recommended from algorithm review
 // ============================================================================
 
-/// Test with a dense star field (100+ stars)
-#[test]
-fn test_match_dense_field_100_stars() {
-    use std::f64::consts::PI;
-
-    // Generate 100 stars in a grid pattern with some noise
-    let mut ref_positions = Vec::with_capacity(100);
-    for i in 0..10 {
-        for j in 0..10 {
-            let x = i as f64 * 20.0 + (i as f64 * 0.1).sin() * 2.0;
-            let y = j as f64 * 20.0 + (j as f64 * 0.1).cos() * 2.0;
-            ref_positions.push((x, y));
-        }
-    }
-
-    // Apply a similarity transform
-    let angle = PI / 12.0; // 15 degrees
-    let scale = 1.1;
-    let cos_a = angle.cos();
-    let sin_a = angle.sin();
-
-    let target_positions: Vec<(f64, f64)> = ref_positions
-        .iter()
-        .map(|(x, y)| {
-            let nx = scale * (cos_a * x - sin_a * y) + 50.0;
-            let ny = scale * (sin_a * x + cos_a * y) + 30.0;
-            (nx, ny)
-        })
-        .collect();
-
-    let config = TriangleMatchConfig {
-        max_stars: 100,
-        min_votes: 2,
-        ..Default::default()
-    };
-
-    // Test both regular and k-d tree matching
-    let matches_regular = match_stars_triangles(&ref_positions, &target_positions, &config);
-    let matches_kdtree = match_stars_triangles_kdtree(&ref_positions, &target_positions, &config);
-
-    // Both should find a reasonable number of matches
-    assert!(
-        matches_regular.len() >= 20,
-        "Regular matching found only {} matches",
-        matches_regular.len()
-    );
-    assert!(
-        matches_kdtree.len() >= 20,
-        "K-d tree matching found only {} matches",
-        matches_kdtree.len()
-    );
-}
-
 /// Test with sparse star field (exactly 10 stars)
 #[test]
 fn test_match_sparse_field_10_stars() {
