@@ -59,6 +59,7 @@ pub fn load_fits(path: &Path) -> Result<AstroImage> {
         telescope: read_key_optional(&hdu, &mut fptr, "TELESCOP"),
         date_obs: read_key_optional(&hdu, &mut fptr, "DATE-OBS"),
         exposure_time: read_key_optional(&hdu, &mut fptr, "EXPTIME"),
+        iso: None, // FITS typically doesn't store ISO
         bitpix,
         header_dimensions: dimensions.clone(),
         is_cfa: false,

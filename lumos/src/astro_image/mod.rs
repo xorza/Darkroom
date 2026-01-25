@@ -107,6 +107,8 @@ pub struct AstroImageMetadata {
     pub date_obs: Option<String>,
     /// Exposure time in seconds (EXPTIME keyword)
     pub exposure_time: Option<f64>,
+    /// ISO sensitivity (from EXIF or raw metadata)
+    pub iso: Option<u32>,
     /// Pixel data type (BITPIX keyword)
     pub bitpix: BitPix,
     /// Raw FITS header dimensions [height, width] or [channels, height, width]

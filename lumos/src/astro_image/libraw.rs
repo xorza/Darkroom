@@ -233,6 +233,15 @@ pub fn load_raw(path: &Path) -> Result<AstroImage> {
         }
     };
 
+    // Extract additional metadata before dropping guard
+    // SAFETY: inner is valid
+    let iso_speed = unsafe { (*inner).other.iso_speed };
+    let iso = if iso_speed > 0.0 {
+        Some(iso_speed.round() as u32)
+    } else {
+        None
+    };
+
     // Guard can be dropped now - we've extracted all needed data
     drop(guard);
 
@@ -251,6 +260,7 @@ pub fn load_raw(path: &Path) -> Result<AstroImage> {
         telescope: None,
         date_obs: None,
         exposure_time: None,
+        iso,
         bitpix: BitPix::Int16,
         header_dimensions: vec![out_height, out_width, num_channels],
         is_cfa,
