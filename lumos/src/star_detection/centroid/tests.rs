@@ -4,6 +4,9 @@ use super::*;
 use crate::star_detection::background::{BackgroundMap, estimate_background};
 use crate::star_detection::detection::{StarCandidate, detect_stars};
 
+/// Default stamp radius for tests (matching expected FWHM of ~4 pixels).
+const TEST_STAMP_RADIUS: usize = 7;
+
 fn make_gaussian_star(
     width: usize,
     height: usize,
@@ -145,90 +148,158 @@ fn test_snr_positive() {
 #[test]
 fn test_valid_stamp_position_center() {
     // Center of a 64x64 image should be valid
-    assert!(is_valid_stamp_position(32.0, 32.0, 64, 64));
+    assert!(is_valid_stamp_position(
+        32.0,
+        32.0,
+        64,
+        64,
+        TEST_STAMP_RADIUS
+    ));
 }
 
 #[test]
 fn test_valid_stamp_position_minimum_valid() {
-    // Minimum valid position is at STAMP_RADIUS
-    let min_pos = STAMP_RADIUS as f32;
-    assert!(is_valid_stamp_position(min_pos, min_pos, 64, 64));
+    // Minimum valid position is at TEST_STAMP_RADIUS
+    let min_pos = TEST_STAMP_RADIUS as f32;
+    assert!(is_valid_stamp_position(
+        min_pos,
+        min_pos,
+        64,
+        64,
+        TEST_STAMP_RADIUS
+    ));
 }
 
 #[test]
 fn test_valid_stamp_position_maximum_valid() {
-    // Maximum valid position is at width - STAMP_RADIUS - 1
+    // Maximum valid position is at width - TEST_STAMP_RADIUS - 1
     let width = 64usize;
     let height = 64usize;
-    let max_pos_x = (width - STAMP_RADIUS - 1) as f32;
-    let max_pos_y = (height - STAMP_RADIUS - 1) as f32;
-    assert!(is_valid_stamp_position(max_pos_x, max_pos_y, width, height));
+    let max_pos_x = (width - TEST_STAMP_RADIUS - 1) as f32;
+    let max_pos_y = (height - TEST_STAMP_RADIUS - 1) as f32;
+    assert!(is_valid_stamp_position(
+        max_pos_x,
+        max_pos_y,
+        width,
+        height,
+        TEST_STAMP_RADIUS
+    ));
 }
 
 #[test]
 fn test_valid_stamp_position_too_close_to_left_edge() {
     // Position too close to left edge
-    let pos = (STAMP_RADIUS - 1) as f32;
-    assert!(!is_valid_stamp_position(pos, 32.0, 64, 64));
+    let pos = (TEST_STAMP_RADIUS - 1) as f32;
+    assert!(!is_valid_stamp_position(
+        pos,
+        32.0,
+        64,
+        64,
+        TEST_STAMP_RADIUS
+    ));
 }
 
 #[test]
 fn test_valid_stamp_position_too_close_to_top_edge() {
     // Position too close to top edge
-    let pos = (STAMP_RADIUS - 1) as f32;
-    assert!(!is_valid_stamp_position(32.0, pos, 64, 64));
+    let pos = (TEST_STAMP_RADIUS - 1) as f32;
+    assert!(!is_valid_stamp_position(
+        32.0,
+        pos,
+        64,
+        64,
+        TEST_STAMP_RADIUS
+    ));
 }
 
 #[test]
 fn test_valid_stamp_position_too_close_to_right_edge() {
     // Position too close to right edge
     let width = 64usize;
-    let pos = (width - STAMP_RADIUS) as f32;
-    assert!(!is_valid_stamp_position(pos, 32.0, width, 64));
+    let pos = (width - TEST_STAMP_RADIUS) as f32;
+    assert!(!is_valid_stamp_position(
+        pos,
+        32.0,
+        width,
+        64,
+        TEST_STAMP_RADIUS
+    ));
 }
 
 #[test]
 fn test_valid_stamp_position_too_close_to_bottom_edge() {
     // Position too close to bottom edge
     let height = 64usize;
-    let pos = (height - STAMP_RADIUS) as f32;
-    assert!(!is_valid_stamp_position(32.0, pos, 64, height));
+    let pos = (height - TEST_STAMP_RADIUS) as f32;
+    assert!(!is_valid_stamp_position(
+        32.0,
+        pos,
+        64,
+        height,
+        TEST_STAMP_RADIUS
+    ));
 }
 
 #[test]
 fn test_valid_stamp_position_negative_rounds_to_invalid() {
     // Negative position should be invalid
-    assert!(!is_valid_stamp_position(-1.0, 32.0, 64, 64));
-    assert!(!is_valid_stamp_position(32.0, -1.0, 64, 64));
+    assert!(!is_valid_stamp_position(
+        -1.0,
+        32.0,
+        64,
+        64,
+        TEST_STAMP_RADIUS
+    ));
+    assert!(!is_valid_stamp_position(
+        32.0,
+        -1.0,
+        64,
+        64,
+        TEST_STAMP_RADIUS
+    ));
 }
 
 #[test]
 fn test_valid_stamp_position_fractional_rounding() {
     // Test that fractional positions are rounded correctly
-    // 7.4 rounds to 7, which equals STAMP_RADIUS, so it should be valid
-    assert!(is_valid_stamp_position(7.4, 32.0, 64, 64));
-    // 6.4 rounds to 6, which is less than STAMP_RADIUS (7), so invalid
-    assert!(!is_valid_stamp_position(6.4, 32.0, 64, 64));
+    // 7.4 rounds to 7, which equals TEST_STAMP_RADIUS, so it should be valid
+    assert!(is_valid_stamp_position(
+        7.4,
+        32.0,
+        64,
+        64,
+        TEST_STAMP_RADIUS
+    ));
+    // 6.4 rounds to 6, which is less than TEST_STAMP_RADIUS (7), so invalid
+    assert!(!is_valid_stamp_position(
+        6.4,
+        32.0,
+        64,
+        64,
+        TEST_STAMP_RADIUS
+    ));
 }
 
 #[test]
 fn test_valid_stamp_position_small_image() {
     // Image too small to have any valid stamp positions
-    // Minimum valid image size is 2 * STAMP_RADIUS + 1 = 15
-    let min_size = 2 * STAMP_RADIUS + 1;
+    // Minimum valid image size is 2 * TEST_STAMP_RADIUS + 1 = 15
+    let min_size = 2 * TEST_STAMP_RADIUS + 1;
     // Just barely large enough - center should be valid
     assert!(is_valid_stamp_position(
-        STAMP_RADIUS as f32,
-        STAMP_RADIUS as f32,
+        TEST_STAMP_RADIUS as f32,
+        TEST_STAMP_RADIUS as f32,
         min_size,
-        min_size
+        min_size,
+        TEST_STAMP_RADIUS
     ));
     // One pixel smaller - no valid positions
     assert!(!is_valid_stamp_position(
-        STAMP_RADIUS as f32,
-        STAMP_RADIUS as f32,
+        TEST_STAMP_RADIUS as f32,
+        TEST_STAMP_RADIUS as f32,
         min_size - 1,
-        min_size - 1
+        min_size - 1,
+        TEST_STAMP_RADIUS
     ));
 }
 
@@ -259,7 +330,7 @@ fn test_refine_centroid_centered_star() {
     let pixels = make_gaussian_star(width, height, cx, cy, 2.5, 0.8);
     let bg = make_uniform_background(width, height, 0.1, 0.01);
 
-    let result = refine_centroid(&pixels, width, height, &bg, cx, cy);
+    let result = refine_centroid(&pixels, width, height, &bg, cx, cy, TEST_STAMP_RADIUS);
 
     assert!(result.is_some());
     let (new_cx, new_cy) = result.unwrap();
@@ -281,7 +352,15 @@ fn test_refine_centroid_offset_converges() {
     let start_cx = 32.0f32;
     let start_cy = 33.0f32;
 
-    let result = refine_centroid(&pixels, width, height, &bg, start_cx, start_cy);
+    let result = refine_centroid(
+        &pixels,
+        width,
+        height,
+        &bg,
+        start_cx,
+        start_cy,
+        TEST_STAMP_RADIUS,
+    );
 
     assert!(result.is_some());
     let (new_cx, new_cy) = result.unwrap();
@@ -304,7 +383,7 @@ fn test_refine_centroid_invalid_position_returns_none() {
     let bg = make_uniform_background(width, height, 0.1, 0.01);
 
     // Position too close to edge
-    let result = refine_centroid(&pixels, width, height, &bg, 3.0, 32.0);
+    let result = refine_centroid(&pixels, width, height, &bg, 3.0, 32.0, TEST_STAMP_RADIUS);
     assert!(result.is_none());
 }
 
@@ -316,7 +395,7 @@ fn test_refine_centroid_zero_flux_returns_none() {
     let pixels = vec![0.1f32; width * height];
     let bg = make_uniform_background(width, height, 0.1, 0.01);
 
-    let result = refine_centroid(&pixels, width, height, &bg, 32.0, 32.0);
+    let result = refine_centroid(&pixels, width, height, &bg, 32.0, 32.0, TEST_STAMP_RADIUS);
     assert!(result.is_none());
 }
 
@@ -330,7 +409,7 @@ fn test_refine_centroid_rejects_large_movement() {
 
     // Start far from the actual star - the stamp won't contain the star,
     // so there's no signal, which should cause rejection
-    let result = refine_centroid(&pixels, width, height, &bg, 32.0, 32.0);
+    let result = refine_centroid(&pixels, width, height, &bg, 32.0, 32.0, TEST_STAMP_RADIUS);
 
     // With no star in the stamp (star is at 50,50, stamp centered at 32,32 with radius 7),
     // the weighted centroid has zero or near-zero flux
@@ -351,7 +430,7 @@ fn test_refine_centroid_iterative_convergence() {
     let mut cy = 32.0f32;
 
     for iteration in 0..MAX_ITERATIONS {
-        let result = refine_centroid(&pixels, width, height, &bg, cx, cy);
+        let result = refine_centroid(&pixels, width, height, &bg, cx, cy, TEST_STAMP_RADIUS);
         assert!(result.is_some(), "Iteration {} failed", iteration);
 
         let (new_cx, new_cy) = result.unwrap();
@@ -381,7 +460,7 @@ fn test_compute_metrics_valid_star() {
     let pixels = make_gaussian_star(width, height, 32.0, 32.0, 2.5, 0.8);
     let bg = make_uniform_background(width, height, 0.1, 0.01);
 
-    let metrics = compute_metrics(&pixels, width, height, &bg, 32.0, 32.0);
+    let metrics = compute_metrics(&pixels, width, height, &bg, 32.0, 32.0, TEST_STAMP_RADIUS);
 
     assert!(metrics.is_some());
     let m = metrics.unwrap();
@@ -402,7 +481,7 @@ fn test_compute_metrics_invalid_position_returns_none() {
     let bg = make_uniform_background(width, height, 0.1, 0.01);
 
     // Position too close to edge
-    let metrics = compute_metrics(&pixels, width, height, &bg, 3.0, 32.0);
+    let metrics = compute_metrics(&pixels, width, height, &bg, 3.0, 32.0, TEST_STAMP_RADIUS);
     assert!(metrics.is_none());
 }
 
@@ -414,7 +493,7 @@ fn test_compute_metrics_zero_flux_returns_none() {
     let pixels = vec![0.05f32; width * height];
     let bg = make_uniform_background(width, height, 0.1, 0.01);
 
-    let metrics = compute_metrics(&pixels, width, height, &bg, 32.0, 32.0);
+    let metrics = compute_metrics(&pixels, width, height, &bg, 32.0, 32.0, TEST_STAMP_RADIUS);
     assert!(metrics.is_none());
 }
 
@@ -431,8 +510,26 @@ fn test_compute_metrics_fwhm_scales_with_sigma() {
     let pixels_large = make_gaussian_star(width, height, 64.0, 64.0, sigma_large, 0.8);
     let bg = make_uniform_background(width, height, 0.1, 0.01);
 
-    let metrics_small = compute_metrics(&pixels_small, width, height, &bg, 64.0, 64.0).unwrap();
-    let metrics_large = compute_metrics(&pixels_large, width, height, &bg, 64.0, 64.0).unwrap();
+    let metrics_small = compute_metrics(
+        &pixels_small,
+        width,
+        height,
+        &bg,
+        64.0,
+        64.0,
+        TEST_STAMP_RADIUS,
+    )
+    .unwrap();
+    let metrics_large = compute_metrics(
+        &pixels_large,
+        width,
+        height,
+        &bg,
+        64.0,
+        64.0,
+        TEST_STAMP_RADIUS,
+    )
+    .unwrap();
 
     // Larger sigma should result in larger FWHM
     assert!(
@@ -452,8 +549,26 @@ fn test_compute_metrics_snr_scales_with_amplitude() {
     let pixels_bright = make_gaussian_star(width, height, 32.0, 32.0, 2.5, 0.8);
     let bg = make_uniform_background(width, height, 0.1, 0.01);
 
-    let metrics_dim = compute_metrics(&pixels_dim, width, height, &bg, 32.0, 32.0).unwrap();
-    let metrics_bright = compute_metrics(&pixels_bright, width, height, &bg, 32.0, 32.0).unwrap();
+    let metrics_dim = compute_metrics(
+        &pixels_dim,
+        width,
+        height,
+        &bg,
+        32.0,
+        32.0,
+        TEST_STAMP_RADIUS,
+    )
+    .unwrap();
+    let metrics_bright = compute_metrics(
+        &pixels_bright,
+        width,
+        height,
+        &bg,
+        32.0,
+        32.0,
+        TEST_STAMP_RADIUS,
+    )
+    .unwrap();
 
     // Brighter star should have higher SNR
     assert!(
@@ -502,7 +617,8 @@ fn test_elongated_star_high_eccentricity() {
     let pixels = make_elliptical_star(width, height, 32.0, 32.0, 4.0, 1.5, 0.8);
     let bg = make_uniform_background(width, height, 0.1, 0.01);
 
-    let metrics = compute_metrics(&pixels, width, height, &bg, 32.0, 32.0).unwrap();
+    let metrics =
+        compute_metrics(&pixels, width, height, &bg, 32.0, 32.0, TEST_STAMP_RADIUS).unwrap();
 
     // Elongated star should have high eccentricity (> 0.5)
     assert!(
@@ -521,8 +637,18 @@ fn test_circular_vs_elongated_eccentricity() {
     let elongated = make_elliptical_star(width, height, 32.0, 32.0, 4.0, 2.0, 0.8);
     let bg = make_uniform_background(width, height, 0.1, 0.01);
 
-    let metrics_circular = compute_metrics(&circular, width, height, &bg, 32.0, 32.0).unwrap();
-    let metrics_elongated = compute_metrics(&elongated, width, height, &bg, 32.0, 32.0).unwrap();
+    let metrics_circular =
+        compute_metrics(&circular, width, height, &bg, 32.0, 32.0, TEST_STAMP_RADIUS).unwrap();
+    let metrics_elongated = compute_metrics(
+        &elongated,
+        width,
+        height,
+        &bg,
+        32.0,
+        32.0,
+        TEST_STAMP_RADIUS,
+    )
+    .unwrap();
 
     assert!(
         metrics_elongated.eccentricity > metrics_circular.eccentricity,
@@ -554,7 +680,15 @@ fn test_centroid_with_noisy_background() {
 
     let bg = make_uniform_background(width, height, 0.1, 0.05); // Higher noise estimate
 
-    let result = refine_centroid(&pixels, width, height, &bg, true_cx, true_cy);
+    let result = refine_centroid(
+        &pixels,
+        width,
+        height,
+        &bg,
+        true_cx,
+        true_cy,
+        TEST_STAMP_RADIUS,
+    );
     assert!(result.is_some());
 
     let (new_cx, new_cy) = result.unwrap();
@@ -578,8 +712,26 @@ fn test_snr_decreases_with_higher_noise() {
     let bg_low_noise = make_uniform_background(width, height, 0.1, 0.01);
     let bg_high_noise = make_uniform_background(width, height, 0.1, 0.1);
 
-    let metrics_low = compute_metrics(&pixels, width, height, &bg_low_noise, 32.0, 32.0).unwrap();
-    let metrics_high = compute_metrics(&pixels, width, height, &bg_high_noise, 32.0, 32.0).unwrap();
+    let metrics_low = compute_metrics(
+        &pixels,
+        width,
+        height,
+        &bg_low_noise,
+        32.0,
+        32.0,
+        TEST_STAMP_RADIUS,
+    )
+    .unwrap();
+    let metrics_high = compute_metrics(
+        &pixels,
+        width,
+        height,
+        &bg_high_noise,
+        32.0,
+        32.0,
+        TEST_STAMP_RADIUS,
+    )
+    .unwrap();
 
     assert!(
         metrics_low.snr > metrics_high.snr,
@@ -604,7 +756,8 @@ fn test_fwhm_formula_for_known_gaussian() {
     let pixels = make_gaussian_star(width, height, 64.0, 64.0, sigma, 0.8);
     let bg = make_uniform_background(width, height, 0.1, 0.001); // Very low noise
 
-    let metrics = compute_metrics(&pixels, width, height, &bg, 64.0, 64.0).unwrap();
+    let metrics =
+        compute_metrics(&pixels, width, height, &bg, 64.0, 64.0, TEST_STAMP_RADIUS).unwrap();
 
     // Allow 10% error due to discrete sampling and finite aperture
     let error = (metrics.fwhm - expected_fwhm).abs() / expected_fwhm;
@@ -626,8 +779,26 @@ fn test_flux_proportional_to_amplitude() {
     let pixels_amp2 = make_gaussian_star(width, height, 32.0, 32.0, 2.5, 0.8);
     let bg = make_uniform_background(width, height, 0.1, 0.01);
 
-    let metrics1 = compute_metrics(&pixels_amp1, width, height, &bg, 32.0, 32.0).unwrap();
-    let metrics2 = compute_metrics(&pixels_amp2, width, height, &bg, 32.0, 32.0).unwrap();
+    let metrics1 = compute_metrics(
+        &pixels_amp1,
+        width,
+        height,
+        &bg,
+        32.0,
+        32.0,
+        TEST_STAMP_RADIUS,
+    )
+    .unwrap();
+    let metrics2 = compute_metrics(
+        &pixels_amp2,
+        width,
+        height,
+        &bg,
+        32.0,
+        32.0,
+        TEST_STAMP_RADIUS,
+    )
+    .unwrap();
 
     // Flux should scale roughly proportionally with amplitude
     let flux_ratio = metrics2.flux / metrics1.flux;
@@ -658,7 +829,8 @@ fn test_eccentricity_bounds() {
         ("elongated_x", elongated_x),
         ("elongated_y", elongated_y),
     ] {
-        let metrics = compute_metrics(&pixels, width, height, &bg, 32.0, 32.0).unwrap();
+        let metrics =
+            compute_metrics(&pixels, width, height, &bg, 32.0, 32.0, TEST_STAMP_RADIUS).unwrap();
         assert!(
             metrics.eccentricity >= 0.0 && metrics.eccentricity <= 1.0,
             "{} eccentricity {} out of bounds [0,1]",
@@ -678,8 +850,26 @@ fn test_eccentricity_orientation_invariant() {
     let elongated_x = make_elliptical_star(width, height, 32.0, 32.0, 4.0, 2.0, 0.8);
     let elongated_y = make_elliptical_star(width, height, 32.0, 32.0, 2.0, 4.0, 0.8);
 
-    let metrics_x = compute_metrics(&elongated_x, width, height, &bg, 32.0, 32.0).unwrap();
-    let metrics_y = compute_metrics(&elongated_y, width, height, &bg, 32.0, 32.0).unwrap();
+    let metrics_x = compute_metrics(
+        &elongated_x,
+        width,
+        height,
+        &bg,
+        32.0,
+        32.0,
+        TEST_STAMP_RADIUS,
+    )
+    .unwrap();
+    let metrics_y = compute_metrics(
+        &elongated_y,
+        width,
+        height,
+        &bg,
+        32.0,
+        32.0,
+        TEST_STAMP_RADIUS,
+    )
+    .unwrap();
 
     // Should have similar eccentricity (within 20%)
     let diff = (metrics_x.eccentricity - metrics_y.eccentricity).abs();
@@ -706,8 +896,10 @@ fn test_snr_formula_consistency() {
     let bg1 = make_uniform_background(width, height, 0.1, noise1);
     let bg2 = make_uniform_background(width, height, 0.1, noise2);
 
-    let metrics1 = compute_metrics(&pixels, width, height, &bg1, 32.0, 32.0).unwrap();
-    let metrics2 = compute_metrics(&pixels, width, height, &bg2, 32.0, 32.0).unwrap();
+    let metrics1 =
+        compute_metrics(&pixels, width, height, &bg1, 32.0, 32.0, TEST_STAMP_RADIUS).unwrap();
+    let metrics2 =
+        compute_metrics(&pixels, width, height, &bg2, 32.0, 32.0, TEST_STAMP_RADIUS).unwrap();
 
     // SNR should halve when noise doubles (same flux)
     let snr_ratio = metrics1.snr / metrics2.snr;
@@ -740,7 +932,7 @@ fn test_metrics_with_high_background() {
     }
 
     let bg = make_uniform_background(width, height, 0.5, 0.02);
-    let metrics = compute_metrics(&pixels, width, height, &bg, 32.0, 32.0);
+    let metrics = compute_metrics(&pixels, width, height, &bg, 32.0, 32.0, TEST_STAMP_RADIUS);
 
     assert!(
         metrics.is_some(),
@@ -762,8 +954,26 @@ fn test_fwhm_independent_of_amplitude() {
     let pixels_bright = make_gaussian_star(width, height, 32.0, 32.0, sigma, 0.9);
     let bg = make_uniform_background(width, height, 0.1, 0.01);
 
-    let metrics_dim = compute_metrics(&pixels_dim, width, height, &bg, 32.0, 32.0).unwrap();
-    let metrics_bright = compute_metrics(&pixels_bright, width, height, &bg, 32.0, 32.0).unwrap();
+    let metrics_dim = compute_metrics(
+        &pixels_dim,
+        width,
+        height,
+        &bg,
+        32.0,
+        32.0,
+        TEST_STAMP_RADIUS,
+    )
+    .unwrap();
+    let metrics_bright = compute_metrics(
+        &pixels_bright,
+        width,
+        height,
+        &bg,
+        32.0,
+        32.0,
+        TEST_STAMP_RADIUS,
+    )
+    .unwrap();
 
     // FWHM should be within 20% of each other
     let diff = (metrics_dim.fwhm - metrics_bright.fwhm).abs();
@@ -787,15 +997,39 @@ fn test_eccentricity_increases_with_elongation() {
     let ratio_2_1 = make_elliptical_star(width, height, 32.0, 32.0, 4.0, 2.0, 0.8);
     let ratio_3_1 = make_elliptical_star(width, height, 32.0, 32.0, 6.0, 2.0, 0.8);
 
-    let ecc_1 = compute_metrics(&ratio_1_1, width, height, &bg, 32.0, 32.0)
-        .unwrap()
-        .eccentricity;
-    let ecc_2 = compute_metrics(&ratio_2_1, width, height, &bg, 32.0, 32.0)
-        .unwrap()
-        .eccentricity;
-    let ecc_3 = compute_metrics(&ratio_3_1, width, height, &bg, 32.0, 32.0)
-        .unwrap()
-        .eccentricity;
+    let ecc_1 = compute_metrics(
+        &ratio_1_1,
+        width,
+        height,
+        &bg,
+        32.0,
+        32.0,
+        TEST_STAMP_RADIUS,
+    )
+    .unwrap()
+    .eccentricity;
+    let ecc_2 = compute_metrics(
+        &ratio_2_1,
+        width,
+        height,
+        &bg,
+        32.0,
+        32.0,
+        TEST_STAMP_RADIUS,
+    )
+    .unwrap()
+    .eccentricity;
+    let ecc_3 = compute_metrics(
+        &ratio_3_1,
+        width,
+        height,
+        &bg,
+        32.0,
+        32.0,
+        TEST_STAMP_RADIUS,
+    )
+    .unwrap()
+    .eccentricity;
 
     assert!(
         ecc_1 < ecc_2 && ecc_2 < ecc_3,

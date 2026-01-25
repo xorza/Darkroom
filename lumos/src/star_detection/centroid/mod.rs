@@ -10,8 +10,11 @@ use super::background::BackgroundMap;
 use super::detection::StarCandidate;
 use super::{Star, StarDetectionConfig};
 
-/// Stamp size for centroid computation (pixels on each side of center).
-pub(crate) const STAMP_RADIUS: usize = 7;
+/// Minimum stamp radius for centroid computation.
+const MIN_STAMP_RADIUS: usize = 4;
+
+/// Maximum stamp radius for centroid computation.
+const MAX_STAMP_RADIUS: usize = 15;
 
 /// Maximum iterations for centroid refinement.
 pub(crate) const MAX_ITERATIONS: usize = 10;
@@ -19,15 +22,33 @@ pub(crate) const MAX_ITERATIONS: usize = 10;
 /// Convergence threshold in pixels squared.
 pub(crate) const CONVERGENCE_THRESHOLD_SQ: f32 = 0.001 * 0.001;
 
+/// Compute adaptive stamp radius based on expected FWHM.
+///
+/// The stamp should be large enough to capture most of the PSF flux (~3.5× FWHM)
+/// while not being so large that it includes too much noise or neighboring stars.
+#[inline]
+pub(crate) fn compute_stamp_radius(expected_fwhm: f32) -> usize {
+    // Use ~3.5× FWHM to capture >99% of Gaussian PSF flux
+    // Clamp to reasonable bounds
+    let radius = (expected_fwhm * 1.75).ceil() as usize;
+    radius.clamp(MIN_STAMP_RADIUS, MAX_STAMP_RADIUS)
+}
+
 /// Check if position is within valid bounds for stamp extraction.
 #[inline]
-pub(crate) fn is_valid_stamp_position(cx: f32, cy: f32, width: usize, height: usize) -> bool {
+pub(crate) fn is_valid_stamp_position(
+    cx: f32,
+    cy: f32,
+    width: usize,
+    height: usize,
+    stamp_radius: usize,
+) -> bool {
     let icx = cx.round() as isize;
     let icy = cy.round() as isize;
-    icx >= STAMP_RADIUS as isize
-        && icy >= STAMP_RADIUS as isize
-        && icx < (width - STAMP_RADIUS) as isize
-        && icy < (height - STAMP_RADIUS) as isize
+    icx >= stamp_radius as isize
+        && icy >= stamp_radius as isize
+        && icx < (width - stamp_radius) as isize
+        && icy < (height - stamp_radius) as isize
 }
 
 /// Compute sub-pixel centroid and quality metrics for a star candidate.
@@ -38,7 +59,7 @@ pub(crate) fn is_valid_stamp_position(cx: f32, cy: f32, width: usize, height: us
 ///
 /// Uses iterative weighted centroid:
 /// 1. Start with peak pixel as initial guess
-/// 2. Extract stamp centered on current position
+/// 2. Extract stamp centered on current position (size adapts to expected FWHM)
 /// 3. Compute weighted centroid with Gaussian weights
 /// 4. Repeat until convergence (~0.05 pixel accuracy)
 /// 5. Compute quality metrics (FWHM, SNR, eccentricity)
@@ -48,15 +69,19 @@ pub fn compute_centroid(
     height: usize,
     background: &BackgroundMap,
     candidate: &StarCandidate,
-    _config: &StarDetectionConfig,
+    config: &StarDetectionConfig,
 ) -> Option<Star> {
+    // Compute adaptive stamp radius based on expected FWHM
+    let stamp_radius = compute_stamp_radius(config.expected_fwhm);
+
     // Initial position from peak
     let mut cx = candidate.peak_x as f32;
     let mut cy = candidate.peak_y as f32;
 
     // Iterative centroid refinement
     for _ in 0..MAX_ITERATIONS {
-        let (new_cx, new_cy) = refine_centroid(pixels, width, height, background, cx, cy)?;
+        let (new_cx, new_cy) =
+            refine_centroid(pixels, width, height, background, cx, cy, stamp_radius)?;
 
         let dx = new_cx - cx;
         let dy = new_cy - cy;
@@ -69,7 +94,7 @@ pub fn compute_centroid(
     }
 
     // Compute quality metrics
-    let metrics = compute_metrics(pixels, width, height, background, cx, cy)?;
+    let metrics = compute_metrics(pixels, width, height, background, cx, cy, stamp_radius)?;
 
     Some(Star {
         x: cx,
@@ -93,8 +118,9 @@ pub(crate) fn refine_centroid(
     background: &BackgroundMap,
     cx: f32,
     cy: f32,
+    stamp_radius: usize,
 ) -> Option<(f32, f32)> {
-    if !is_valid_stamp_position(cx, cy, width, height) {
+    if !is_valid_stamp_position(cx, cy, width, height, stamp_radius) {
         return None;
     }
 
@@ -108,8 +134,9 @@ pub(crate) fn refine_centroid(
     let mut sum_y = 0.0f32;
     let mut sum_w = 0.0f32;
 
-    for dy in -(STAMP_RADIUS as i32)..=(STAMP_RADIUS as i32) {
-        for dx in -(STAMP_RADIUS as i32)..=(STAMP_RADIUS as i32) {
+    let stamp_radius_i32 = stamp_radius as i32;
+    for dy in -stamp_radius_i32..=stamp_radius_i32 {
+        for dx in -stamp_radius_i32..=stamp_radius_i32 {
             let x = (icx + dx as isize) as usize;
             let y = (icy + dy as isize) as usize;
             let idx = y * width + x;
@@ -137,7 +164,7 @@ pub(crate) fn refine_centroid(
     let new_cy = sum_y / sum_w;
 
     // Reject if centroid moved too far (likely bad detection)
-    let stamp_size = 2 * STAMP_RADIUS + 1;
+    let stamp_size = 2 * stamp_radius + 1;
     let max_move = stamp_size as f32 / 4.0;
     if (new_cx - cx).abs() > max_move || (new_cy - cy).abs() > max_move {
         return None;
@@ -164,8 +191,9 @@ pub(crate) fn compute_metrics(
     background: &BackgroundMap,
     cx: f32,
     cy: f32,
+    stamp_radius: usize,
 ) -> Option<StarMetrics> {
-    if !is_valid_stamp_position(cx, cy, width, height) {
+    if !is_valid_stamp_position(cx, cy, width, height, stamp_radius) {
         return None;
     }
 
@@ -183,8 +211,10 @@ pub(crate) fn compute_metrics(
     let mut noise_count = 0usize;
     let mut peak_value = 0.0f32;
 
-    for dy in -(STAMP_RADIUS as i32)..=(STAMP_RADIUS as i32) {
-        for dx in -(STAMP_RADIUS as i32)..=(STAMP_RADIUS as i32) {
+    let stamp_radius_i32 = stamp_radius as i32;
+    let outer_ring_threshold = (stamp_radius_i32 - 2) * (stamp_radius_i32 - 2);
+    for dy in -stamp_radius_i32..=stamp_radius_i32 {
+        for dx in -stamp_radius_i32..=stamp_radius_i32 {
             let x = (icx + dx as isize) as usize;
             let y = (icy + dy as isize) as usize;
             let idx = y * width + x;
@@ -210,7 +240,7 @@ pub(crate) fn compute_metrics(
 
             // Collect noise from background region (outer ring)
             let r2 = dx * dx + dy * dy;
-            if r2 > (STAMP_RADIUS as i32 - 2) * (STAMP_RADIUS as i32 - 2) {
+            if r2 > outer_ring_threshold {
                 noise_sum += background.noise[idx];
                 noise_count += 1;
             }
@@ -253,7 +283,7 @@ pub(crate) fn compute_metrics(
         background.noise[icy as usize * width + icx as usize]
     };
 
-    let aperture_area = (2 * STAMP_RADIUS + 1).pow(2) as f32;
+    let aperture_area = (2 * stamp_radius + 1).pow(2) as f32;
     let snr = if avg_noise > f32::EPSILON {
         flux / (avg_noise * aperture_area.sqrt())
     } else {
