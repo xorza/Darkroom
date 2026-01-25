@@ -362,9 +362,10 @@ BackgroundMap      // { background, noise } - per-pixel background and noise est
 1. **Median filter** - 3x3 median removes Bayer pattern artifacts from CFA sensors
 2. **Background estimation** - Tile-based sigma-clipped median with tile grid median filter and bilinear interpolation
 3. **Star detection** - Threshold (background + k×σ), connected components with union-find (path compression), dilation radius 1 for minimal merging
-4. **Centroid refinement** - Iterative Gaussian-weighted centroid with adaptive stamp radius (~3.5× FWHM), ~0.05 pixel accuracy
-5. **Quality filtering** - SNR, eccentricity, saturation, sharpness (cosmic ray rejection), and FWHM outlier rejection
-6. **Duplicate removal** - Spatial deduplication (8 pixel separation)
+4. **Deblending** - Multi-peak components split into separate candidates using local maxima detection and nearest-peak pixel assignment
+5. **Centroid refinement** - Iterative Gaussian-weighted centroid with adaptive stamp radius (~3.5× FWHM), ~0.05 pixel accuracy
+6. **Quality filtering** - SNR, eccentricity, saturation, sharpness (cosmic ray rejection), and FWHM outlier rejection
+7. **Duplicate removal** - Spatial deduplication (8 pixel separation)
 
 **Background estimation details:**
 - Divides image into tiles (default 64×64 pixels)
@@ -400,6 +401,14 @@ BackgroundMap      // { background, noise } - per-pixel background and noise est
 - Stamp radius computed from expected FWHM: `radius = clamp(ceil(fwhm * 1.75), 4, 15)`
 - Window size adapts to capture ~3.5× FWHM for >99% PSF flux
 - Improves accuracy for varied seeing conditions
+
+**Deblending (star pair separation):**
+- Finds local maxima within each connected component
+- Peak must be brighter than all 8 neighbors to qualify as local maximum
+- Minimum separation: 3 pixels between peaks (prevents noise from causing splits)
+- Minimum prominence: 30% of global maximum (rejects noise spikes)
+- Pixels assigned to nearest peak using Euclidean distance
+- Each peak becomes a separate `StarCandidate` with its own bounding box and area
 
 **Dependencies:** common, imaginarium, fitsio, rawloader, libraw-rs, anyhow, rayon, strum_macros
 

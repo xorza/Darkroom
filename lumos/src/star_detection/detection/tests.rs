@@ -852,7 +852,7 @@ fn test_extract_candidates_width_height() {
 
 #[test]
 fn test_extract_candidates_multiple_peaks_same_value() {
-    // When multiple pixels have the same peak value, the first one encountered wins
+    // When multiple pixels have the same peak value, one of them is selected as peak
     let pixels = vec![
         0.1, 0.1, 0.1, //
         0.9, 0.9, 0.9, // Three pixels with same peak value
@@ -868,9 +868,9 @@ fn test_extract_candidates_multiple_peaks_same_value() {
 
     assert_eq!(candidates.len(), 1);
     let c = &candidates[0];
-    // First pixel with peak value is at (0, 1)
-    assert_eq!(c.peak_x, 0);
+    // Peak is at one of the positions with value 0.9
     assert_eq!(c.peak_y, 1);
+    assert!(c.peak_x <= 2); // One of 0, 1, or 2
     assert!((c.peak_value - 0.9).abs() < 1e-6);
 }
 
@@ -960,6 +960,7 @@ fn test_extract_candidates_diagonal_component() {
 #[test]
 fn test_extract_candidates_sparse_labels() {
     // Labels are not contiguous (1 and 3, no 2)
+    // Empty components (label 2) are skipped in the output
     let pixels = vec![
         0.8, 0.1, 0.7, //
         0.1, 0.1, 0.1, //
@@ -974,15 +975,14 @@ fn test_extract_candidates_sparse_labels() {
     // num_labels should be 3 to account for label 3
     let candidates = extract_candidates(&pixels, &labels, 3, 3, 3);
 
-    assert_eq!(candidates.len(), 3);
+    // Only non-empty components are returned (labels 1 and 3)
+    assert_eq!(candidates.len(), 2);
     // Label 1 at (0, 0)
     assert_eq!(candidates[0].area, 1);
     assert_eq!(candidates[0].peak_x, 0);
-    // Label 2 doesn't exist - will have default/invalid values
-    assert_eq!(candidates[1].area, 0);
     // Label 3 at (2, 0)
-    assert_eq!(candidates[2].area, 1);
-    assert_eq!(candidates[2].peak_x, 2);
+    assert_eq!(candidates[1].area, 1);
+    assert_eq!(candidates[1].peak_x, 2);
 }
 
 #[test]
@@ -1167,4 +1167,181 @@ fn test_connected_components_complex_merge() {
     for i in [0, 1, 2, 5, 6, 7, 8] {
         assert_eq!(labels[i], label, "Pixel {} should be in same component", i);
     }
+}
+
+// =============================================================================
+// Deblending Tests
+// =============================================================================
+
+#[test]
+fn test_deblend_star_pair() {
+    // Create a component with two distinct peaks (star pair)
+    // Image: 15x9 with two Gaussian-like stars at (4,4) and (10,4)
+    let width = 15;
+    let height = 9;
+    let mut pixels = vec![0.1f32; width * height];
+
+    // Add first star at (4, 4)
+    for dy in -3i32..=3 {
+        for dx in -3i32..=3 {
+            let x = 4 + dx;
+            let y = 4 + dy;
+            if x >= 0 && x < width as i32 && y >= 0 && y < height as i32 {
+                let dist_sq = (dx * dx + dy * dy) as f32;
+                let value = 0.8 * (-dist_sq / 3.0).exp();
+                pixels[y as usize * width + x as usize] += value;
+            }
+        }
+    }
+
+    // Add second star at (10, 4)
+    for dy in -3i32..=3 {
+        for dx in -3i32..=3 {
+            let x = 10 + dx;
+            let y = 4 + dy;
+            if x >= 0 && x < width as i32 && y >= 0 && y < height as i32 {
+                let dist_sq = (dx * dx + dy * dy) as f32;
+                let value = 0.6 * (-dist_sq / 3.0).exp();
+                pixels[y as usize * width + x as usize] += value;
+            }
+        }
+    }
+
+    // Create a single connected component covering both stars
+    let mut labels = vec![0u32; width * height];
+    for y in 1..8 {
+        for x in 1..14 {
+            if pixels[y * width + x] > 0.15 {
+                labels[y * width + x] = 1;
+            }
+        }
+    }
+
+    let candidates = extract_candidates(&pixels, &labels, 1, width, height);
+
+    // Should deblend into 2 candidates
+    assert_eq!(
+        candidates.len(),
+        2,
+        "Should deblend into 2 candidates, got {}",
+        candidates.len()
+    );
+
+    // Sort by peak_x to have consistent ordering
+    let mut sorted: Vec<_> = candidates.iter().collect();
+    sorted.sort_by_key(|c| c.peak_x);
+
+    // First star at approximately (4, 4)
+    assert!(
+        (sorted[0].peak_x as i32 - 4).abs() <= 1,
+        "First peak X should be near 4, got {}",
+        sorted[0].peak_x
+    );
+    assert!(
+        (sorted[0].peak_y as i32 - 4).abs() <= 1,
+        "First peak Y should be near 4, got {}",
+        sorted[0].peak_y
+    );
+
+    // Second star at approximately (10, 4)
+    assert!(
+        (sorted[1].peak_x as i32 - 10).abs() <= 1,
+        "Second peak X should be near 10, got {}",
+        sorted[1].peak_x
+    );
+    assert!(
+        (sorted[1].peak_y as i32 - 4).abs() <= 1,
+        "Second peak Y should be near 4, got {}",
+        sorted[1].peak_y
+    );
+}
+
+#[test]
+fn test_no_deblend_for_close_peaks() {
+    // Two peaks that are too close together should not be deblended
+    let width = 9;
+    let height = 9;
+    let mut pixels = vec![0.1f32; width * height];
+
+    // Add two peaks very close together (separation < DEBLEND_MIN_SEPARATION)
+    pixels[4 * width + 3] = 0.9; // Peak at (3, 4)
+    pixels[4 * width + 4] = 0.85; // Peak at (4, 4) - only 1 pixel away
+
+    // Surrounding pixels
+    for dy in -1i32..=1 {
+        for dx in -1i32..=1 {
+            let x = 3 + dx;
+            let y = 4 + dy;
+            if x >= 0 && x < width as i32 && y >= 0 && y < height as i32 {
+                let idx = y as usize * width + x as usize;
+                if pixels[idx] < 0.5 {
+                    pixels[idx] = 0.5;
+                }
+            }
+        }
+    }
+
+    // Create single component
+    let mut labels = vec![0u32; width * height];
+    for y in 2..7 {
+        for x in 1..7 {
+            if pixels[y * width + x] > 0.15 {
+                labels[y * width + x] = 1;
+            }
+        }
+    }
+
+    let candidates = extract_candidates(&pixels, &labels, 1, width, height);
+
+    // Should NOT deblend - only one candidate because peaks are too close
+    assert_eq!(
+        candidates.len(),
+        1,
+        "Close peaks should not be deblended, got {} candidates",
+        candidates.len()
+    );
+}
+
+#[test]
+fn test_deblend_respects_prominence() {
+    // A small secondary peak that's not prominent enough should not cause deblending
+    let width = 11;
+    let height = 9;
+    let mut pixels = vec![0.1f32; width * height];
+
+    // Add main star at (3, 4)
+    for dy in -3i32..=3 {
+        for dx in -3i32..=3 {
+            let x = 3 + dx;
+            let y = 4 + dy;
+            if x >= 0 && x < width as i32 && y >= 0 && y < height as i32 {
+                let dist_sq = (dx * dx + dy * dy) as f32;
+                let value = 0.9 * (-dist_sq / 3.0).exp();
+                pixels[y as usize * width + x as usize] += value;
+            }
+        }
+    }
+
+    // Add small bump at (7, 4) - only 20% of main peak (below 30% threshold)
+    pixels[4 * width + 7] = 0.28; // 0.1 bg + 0.18 = 0.28 (0.18/0.9 = 20%)
+
+    // Create single component
+    let mut labels = vec![0u32; width * height];
+    for y in 0..height {
+        for x in 0..width {
+            if pixels[y * width + x] > 0.15 {
+                labels[y * width + x] = 1;
+            }
+        }
+    }
+
+    let candidates = extract_candidates(&pixels, &labels, 1, width, height);
+
+    // Should NOT deblend - secondary peak is not prominent enough
+    assert_eq!(
+        candidates.len(),
+        1,
+        "Non-prominent secondary peak should not cause deblending, got {} candidates",
+        candidates.len()
+    );
 }

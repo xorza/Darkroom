@@ -335,7 +335,16 @@ fn create_threshold_mask_filtered(
         .collect()
 }
 
-/// Extract candidate properties from labeled image.
+/// Minimum separation between peaks for deblending (in pixels).
+const DEBLEND_MIN_SEPARATION: usize = 3;
+
+/// Minimum peak prominence as fraction of primary peak for deblending.
+const DEBLEND_MIN_PROMINENCE: f32 = 0.3;
+
+/// Extract candidate properties from labeled image with simple deblending.
+///
+/// For components with multiple local maxima (star pairs), this function
+/// splits them into separate candidates based on peak positions.
 pub(crate) fn extract_candidates(
     pixels: &[f32],
     labels: &[u32],
@@ -347,17 +356,17 @@ pub(crate) fn extract_candidates(
         return Vec::new();
     }
 
-    // Initialize candidate data
-    let mut x_min = vec![usize::MAX; num_labels];
-    let mut x_max = vec![0usize; num_labels];
-    let mut y_min = vec![usize::MAX; num_labels];
-    let mut y_max = vec![0usize; num_labels];
-    let mut peak_x = vec![0usize; num_labels];
-    let mut peak_y = vec![0usize; num_labels];
-    let mut peak_value = vec![f32::MIN; num_labels];
-    let mut area = vec![0usize; num_labels];
+    // Collect component data in first pass
+    let mut component_data: Vec<ComponentData> = (0..num_labels)
+        .map(|_| ComponentData {
+            x_min: usize::MAX,
+            x_max: 0,
+            y_min: usize::MAX,
+            y_max: 0,
+            pixels: Vec::new(),
+        })
+        .collect();
 
-    // Single pass to collect all properties
     for y in 0..height {
         for x in 0..width {
             let idx = y * width + x;
@@ -367,33 +376,203 @@ pub(crate) fn extract_candidates(
             }
 
             let i = (label - 1) as usize;
-            area[i] += 1;
+            let data = &mut component_data[i];
 
-            x_min[i] = x_min[i].min(x);
-            x_max[i] = x_max[i].max(x);
-            y_min[i] = y_min[i].min(y);
-            y_max[i] = y_max[i].max(y);
+            data.x_min = data.x_min.min(x);
+            data.x_max = data.x_max.max(x);
+            data.y_min = data.y_min.min(y);
+            data.y_max = data.y_max.max(y);
+            data.pixels.push((x, y, pixels[idx]));
+        }
+    }
 
-            let value = pixels[idx];
-            if value > peak_value[i] {
-                peak_value[i] = value;
-                peak_x[i] = x;
-                peak_y[i] = y;
+    // Process each component, potentially deblending into multiple candidates
+    let mut candidates = Vec::with_capacity(num_labels);
+
+    for data in component_data {
+        if data.pixels.is_empty() {
+            continue;
+        }
+
+        // Find local maxima for deblending
+        let peaks = find_local_maxima(&data, pixels, width);
+
+        if peaks.len() <= 1 {
+            // Single peak - create one candidate
+            let (peak_x, peak_y, peak_value) = if peaks.is_empty() {
+                // Fallback: use global maximum
+                data.pixels
+                    .iter()
+                    .max_by(|a, b| a.2.partial_cmp(&b.2).unwrap())
+                    .map(|&(x, y, v)| (x, y, v))
+                    .unwrap()
+            } else {
+                peaks[0]
+            };
+
+            candidates.push(StarCandidate {
+                x_min: data.x_min,
+                x_max: data.x_max,
+                y_min: data.y_min,
+                y_max: data.y_max,
+                peak_x,
+                peak_y,
+                peak_value,
+                area: data.pixels.len(),
+            });
+        } else {
+            // Multiple peaks - deblend by assigning pixels to nearest peak
+            let deblended = deblend_component(&data, &peaks);
+            candidates.extend(deblended);
+        }
+    }
+
+    candidates
+}
+
+/// Temporary data for a connected component.
+struct ComponentData {
+    x_min: usize,
+    x_max: usize,
+    y_min: usize,
+    y_max: usize,
+    pixels: Vec<(usize, usize, f32)>, // (x, y, value)
+}
+
+/// Find local maxima within a component for deblending.
+///
+/// A pixel is a local maximum if it's greater than all 8 neighbors.
+/// Only returns peaks that are sufficiently separated and prominent.
+fn find_local_maxima(
+    data: &ComponentData,
+    pixels: &[f32],
+    width: usize,
+) -> Vec<(usize, usize, f32)> {
+    let mut peaks: Vec<(usize, usize, f32)> = Vec::new();
+
+    // Find global maximum first
+    let global_max = data
+        .pixels
+        .iter()
+        .map(|&(_, _, v)| v)
+        .fold(f32::MIN, f32::max);
+
+    let min_peak_value = global_max * DEBLEND_MIN_PROMINENCE;
+
+    // Check each pixel for local maximum
+    for &(x, y, value) in &data.pixels {
+        if value < min_peak_value {
+            continue;
+        }
+
+        // Check if this is a local maximum (greater than all 8 neighbors)
+        let mut is_maximum = true;
+        for dy in -1i32..=1 {
+            for dx in -1i32..=1 {
+                if dx == 0 && dy == 0 {
+                    continue;
+                }
+
+                let nx = x as i32 + dx;
+                let ny = y as i32 + dy;
+
+                if nx >= 0 && ny >= 0 {
+                    let nx = nx as usize;
+                    let ny = ny as usize;
+                    let neighbor_idx = ny * width + nx;
+
+                    if neighbor_idx < pixels.len() && pixels[neighbor_idx] >= value {
+                        is_maximum = false;
+                        break;
+                    }
+                }
+            }
+            if !is_maximum {
+                break;
+            }
+        }
+
+        if is_maximum {
+            // Check separation from existing peaks
+            let well_separated = peaks.iter().all(|&(px, py, _)| {
+                let dx = (x as i32 - px as i32).unsigned_abs() as usize;
+                let dy = (y as i32 - py as i32).unsigned_abs() as usize;
+                dx >= DEBLEND_MIN_SEPARATION || dy >= DEBLEND_MIN_SEPARATION
+            });
+
+            if well_separated {
+                peaks.push((x, y, value));
+            } else {
+                // Keep the brighter peak
+                for peak in &mut peaks {
+                    let dx = (x as i32 - peak.0 as i32).unsigned_abs() as usize;
+                    let dy = (y as i32 - peak.1 as i32).unsigned_abs() as usize;
+                    if dx < DEBLEND_MIN_SEPARATION && dy < DEBLEND_MIN_SEPARATION && value > peak.2
+                    {
+                        *peak = (x, y, value);
+                        break;
+                    }
+                }
             }
         }
     }
 
+    // Sort by brightness (brightest first)
+    peaks.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
+
+    peaks
+}
+
+/// Deblend a component into multiple candidates based on peak positions.
+///
+/// Each pixel is assigned to the nearest peak, creating separate candidates.
+fn deblend_component(data: &ComponentData, peaks: &[(usize, usize, f32)]) -> Vec<StarCandidate> {
+    // Initialize per-peak data
+    let mut peak_data: Vec<(usize, usize, usize, usize, usize)> = peaks
+        .iter()
+        .map(|_| (usize::MAX, 0, usize::MAX, 0, 0)) // (x_min, x_max, y_min, y_max, area)
+        .collect();
+
+    // Assign each pixel to nearest peak
+    for &(x, y, _) in &data.pixels {
+        let mut min_dist_sq = usize::MAX;
+        let mut nearest_peak = 0;
+
+        for (i, &(px, py, _)) in peaks.iter().enumerate() {
+            let dx = (x as i32 - px as i32).unsigned_abs() as usize;
+            let dy = (y as i32 - py as i32).unsigned_abs() as usize;
+            let dist_sq = dx * dx + dy * dy;
+
+            if dist_sq < min_dist_sq {
+                min_dist_sq = dist_sq;
+                nearest_peak = i;
+            }
+        }
+
+        let pd = &mut peak_data[nearest_peak];
+        pd.0 = pd.0.min(x);
+        pd.1 = pd.1.max(x);
+        pd.2 = pd.2.min(y);
+        pd.3 = pd.3.max(y);
+        pd.4 += 1;
+    }
+
     // Build candidates
-    (0..num_labels)
-        .map(|i| StarCandidate {
-            x_min: x_min[i],
-            x_max: x_max[i],
-            y_min: y_min[i],
-            y_max: y_max[i],
-            peak_x: peak_x[i],
-            peak_y: peak_y[i],
-            peak_value: peak_value[i],
-            area: area[i],
-        })
+    peaks
+        .iter()
+        .zip(peak_data.iter())
+        .filter(|(_, pd)| pd.4 > 0) // Only include peaks with assigned pixels
+        .map(
+            |(&(peak_x, peak_y, peak_value), &(x_min, x_max, y_min, y_max, area))| StarCandidate {
+                x_min,
+                x_max,
+                y_min,
+                y_max,
+                peak_x,
+                peak_y,
+                peak_value,
+                area,
+            },
+        )
         .collect()
 }
