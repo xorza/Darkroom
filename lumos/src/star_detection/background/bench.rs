@@ -2,6 +2,7 @@
 //! Run with: cargo bench --package lumos --features bench background
 
 use super::estimate_background;
+use super::simd::{sum_abs_deviations_simd, sum_and_sum_sq_simd};
 use criterion::{BenchmarkId, Criterion, Throughput};
 use std::hint::black_box;
 
@@ -78,4 +79,48 @@ pub fn benchmarks(c: &mut Criterion) {
     }
 
     group.finish();
+
+    // SIMD vs Scalar comparison for sum_and_sum_sq
+    let mut simd_group = c.benchmark_group("background_simd_vs_scalar");
+    simd_group.sample_size(50);
+
+    for size in [1024, 4096, 16384, 65536] {
+        let values: Vec<f32> = (0..size).map(|i| (i % 256) as f32 / 255.0).collect();
+
+        simd_group.throughput(Throughput::Elements(size as u64));
+
+        // Scalar sum_and_sum_sq
+        simd_group.bench_function(BenchmarkId::new("sum_and_sum_sq_scalar", size), |b| {
+            b.iter(|| {
+                let mut sum = 0.0f32;
+                let mut sum_sq = 0.0f32;
+                for &v in black_box(&values) {
+                    sum += v;
+                    sum_sq += v * v;
+                }
+                black_box((sum, sum_sq))
+            })
+        });
+
+        // SIMD sum_and_sum_sq
+        simd_group.bench_function(BenchmarkId::new("sum_and_sum_sq_simd", size), |b| {
+            b.iter(|| black_box(sum_and_sum_sq_simd(black_box(&values))))
+        });
+
+        // Scalar sum_abs_deviations
+        let median = 0.5f32;
+        simd_group.bench_function(BenchmarkId::new("sum_abs_dev_scalar", size), |b| {
+            b.iter(|| {
+                let sum: f32 = black_box(&values).iter().map(|&v| (v - median).abs()).sum();
+                black_box(sum)
+            })
+        });
+
+        // SIMD sum_abs_deviations
+        simd_group.bench_function(BenchmarkId::new("sum_abs_dev_simd", size), |b| {
+            b.iter(|| black_box(sum_abs_deviations_simd(black_box(&values), median)))
+        });
+    }
+
+    simd_group.finish();
 }

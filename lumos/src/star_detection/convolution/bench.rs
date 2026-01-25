@@ -1,6 +1,7 @@
 //! Benchmark module for Gaussian convolution and matched filtering.
 //! Run with: cargo bench --package lumos --features bench convolution
 
+use super::simd::convolve_row_simd;
 use super::{fwhm_to_sigma, gaussian_convolve, gaussian_kernel_1d, matched_filter};
 use criterion::{BenchmarkId, Criterion, Throughput};
 use std::hint::black_box;
@@ -136,4 +137,55 @@ pub fn benchmarks(c: &mut Criterion) {
         })
     });
     util_group.finish();
+
+    // SIMD vs Scalar comparison for row convolution
+    let mut simd_group = c.benchmark_group("convolution_simd_vs_scalar");
+    simd_group.sample_size(50);
+
+    for width in [256, 512, 1024, 2048] {
+        let input: Vec<f32> = (0..width).map(|i| (i % 256) as f32 / 255.0).collect();
+        let kernel = gaussian_kernel_1d(2.0); // typical sigma
+        let radius = kernel.len() / 2;
+
+        simd_group.throughput(Throughput::Elements(width as u64));
+
+        // Scalar row convolution
+        simd_group.bench_function(BenchmarkId::new("convolve_row_scalar", width), |b| {
+            b.iter(|| {
+                let mut output = vec![0.0f32; width];
+                for (x, out) in output.iter_mut().enumerate() {
+                    let mut sum = 0.0f32;
+                    for (k, &kval) in kernel.iter().enumerate() {
+                        let sx = x as isize + k as isize - radius as isize;
+                        let sx = if sx < 0 {
+                            (-sx) as usize
+                        } else if sx >= width as isize {
+                            2 * width - 2 - sx as usize
+                        } else {
+                            sx as usize
+                        };
+                        sum += black_box(&input)[sx] * kval;
+                    }
+                    *out = sum;
+                }
+                black_box(output)
+            })
+        });
+
+        // SIMD row convolution
+        simd_group.bench_function(BenchmarkId::new("convolve_row_simd", width), |b| {
+            b.iter(|| {
+                let mut output = vec![0.0f32; width];
+                convolve_row_simd(
+                    black_box(&input),
+                    black_box(&mut output),
+                    black_box(&kernel),
+                    radius,
+                );
+                black_box(output)
+            })
+        });
+    }
+
+    simd_group.finish();
 }
