@@ -72,6 +72,9 @@ bitcode = { version = "*", features = ["serde"] }
 rfd = { version = "*" }
 async-trait = { version = "*" }
 aligned-vec = { version = "*" }
+reqwest = { version = "*", features = ["blocking", "json", "form", "query"] }
+bzip2 = { version = "*" }
+dirs = { version = "*" }
 
 
 [profile.bench]

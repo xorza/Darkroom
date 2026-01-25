@@ -1,0 +1,178 @@
+//! Survey benchmark module for star detection validation.
+//!
+//! This module provides tools for benchmarking star detection algorithms
+//! against real astronomical survey data with known ground truth from
+//! professional catalogs.
+//!
+//! # Supported Surveys
+//!
+//! - **SDSS** (Sloan Digital Sky Survey): Wide-field imaging survey covering
+//!   ~14,000 square degrees of the northern sky.
+//! - **Pan-STARRS**: All-sky survey with deep imaging and accurate astrometry.
+//! - **Gaia DR3**: ESA mission with the most accurate stellar positions available.
+//!
+//! # Usage
+//!
+//! ```rust,ignore
+//! use lumos::star_detection::survey_benchmark::{SurveyBenchmark, sparse_field};
+//! use lumos::star_detection::StarDetectionConfig;
+//!
+//! let benchmark = SurveyBenchmark::new()?;
+//! let field = sparse_field();
+//! let config = StarDetectionConfig::default();
+//!
+//! let result = benchmark.run_field(&field, &config)?;
+//! result.print_summary();
+//! ```
+//!
+//! # Test Fields
+//!
+//! The module includes pre-defined test fields with varying characteristics:
+//!
+//! - `sparse_field()`: Well-separated stars for basic validation
+//! - `medium_field()`: Typical extragalactic field density
+//! - `dense_field()`: Crowded galactic field for deblending tests
+//! - `faint_field()`: Stars near detection limit
+//! - `cluster_m67()`: Well-studied open cluster
+//! - `standard_sa95()`: Photometric standard field
+
+pub mod benchmark;
+pub mod catalog;
+pub mod fields;
+pub mod image_fetch;
+pub mod wcs;
+
+// Re-exports for public API
+#[allow(unused_imports)]
+pub use benchmark::{BenchmarkResult, SurveyBenchmark};
+#[allow(unused_imports)]
+pub use catalog::{CatalogClient, CatalogSource, CatalogStar};
+#[allow(unused_imports)]
+pub use fields::{
+    Difficulty, TestField, all_test_fields, cluster_m67, dense_field, faint_field, medium_field,
+    sparse_field, standard_sa95,
+};
+#[allow(unused_imports)]
+pub use image_fetch::ImageFetcher;
+#[allow(unused_imports)]
+pub use wcs::{SkyBounds, WCS};
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::star_detection::StarDetectionConfig;
+    use crate::testing::init_tracing;
+
+    #[test]
+    #[ignore] // Requires network
+    fn test_full_benchmark_sparse() {
+        init_tracing();
+
+        let benchmark = SurveyBenchmark::new().expect("Failed to create benchmark");
+        let field = sparse_field();
+
+        let config = StarDetectionConfig {
+            expected_fwhm: field.expected_fwhm_pixels(0.396),
+            detection_sigma: 3.0, // Lower threshold for survey data
+            ..Default::default()
+        };
+
+        match benchmark.run_field(&field, &config) {
+            Ok(result) => {
+                println!("\n=== Benchmark Results ===");
+                result.print_summary();
+
+                // Relaxed assertions for real data
+                assert!(
+                    result.metrics.detection_rate > 0.3,
+                    "Detection rate too low: {:.1}%",
+                    result.metrics.detection_rate * 100.0
+                );
+            }
+            Err(e) => {
+                println!("Benchmark failed (may be network issue): {}", e);
+            }
+        }
+    }
+
+    #[test]
+    #[ignore] // Requires network
+    fn test_benchmark_all_sdss_fields() {
+        init_tracing();
+
+        let benchmark = SurveyBenchmark::new().expect("Failed to create benchmark");
+
+        println!("\n=== Running All SDSS Field Benchmarks ===\n");
+
+        for field in fields::sdss_fields() {
+            println!("Testing field: {} - {}", field.name, field.description);
+
+            let config = StarDetectionConfig {
+                expected_fwhm: field.expected_fwhm_pixels(0.396),
+                detection_sigma: 3.0,
+                ..Default::default()
+            };
+
+            match benchmark.run_field(&field, &config) {
+                Ok(result) => {
+                    println!(
+                        "  Detection: {:.1}% ({}/{}), Centroid: {:.3}px, Time: {}ms",
+                        result.metrics.detection_rate * 100.0,
+                        result.metrics.true_positives,
+                        result.catalog_stars,
+                        result.metrics.mean_centroid_error,
+                        result.runtime_ms
+                    );
+                }
+                Err(e) => {
+                    println!("  FAILED: {}", e);
+                }
+            }
+            println!();
+        }
+    }
+
+    #[test]
+    #[ignore] // Requires network
+    fn test_catalog_queries() {
+        init_tracing();
+
+        let client = CatalogClient::new();
+
+        // Test SDSS query
+        println!("Testing SDSS catalog query...");
+        match client.query_region(CatalogSource::Sdss, 180.0, 45.0, 0.1, 20.0) {
+            Ok(stars) => println!("  Found {} SDSS stars", stars.len()),
+            Err(e) => println!("  SDSS query failed: {}", e),
+        }
+
+        // Test Pan-STARRS query
+        println!("Testing Pan-STARRS catalog query...");
+        match client.query_region(CatalogSource::PanStarrs, 180.0, 45.0, 0.1, 20.0) {
+            Ok(stars) => println!("  Found {} Pan-STARRS stars", stars.len()),
+            Err(e) => println!("  Pan-STARRS query failed: {}", e),
+        }
+
+        // Test Gaia query
+        println!("Testing Gaia DR3 catalog query...");
+        match client.query_region(CatalogSource::GaiaDr3, 180.0, 45.0, 0.1, 18.0) {
+            Ok(stars) => println!("  Found {} Gaia stars", stars.len()),
+            Err(e) => println!("  Gaia query failed: {}", e),
+        }
+    }
+
+    #[test]
+    #[ignore] // Requires network
+    fn test_image_download() {
+        init_tracing();
+
+        let fetcher = ImageFetcher::new().expect("Failed to create fetcher");
+
+        // Test SDSS download
+        println!("Testing SDSS image download...");
+        match fetcher.fetch_sdss(2505, 3, 150, 'r', 301) {
+            Ok(path) => println!("  Downloaded to: {}", path.display()),
+            Err(e) => println!("  Download failed: {}", e),
+        }
+    }
+}

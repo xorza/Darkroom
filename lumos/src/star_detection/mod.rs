@@ -28,6 +28,8 @@ mod detection;
 mod median_filter;
 
 #[cfg(test)]
+pub mod survey_benchmark;
+#[cfg(test)]
 mod tests;
 #[cfg(test)]
 mod visual_tests;
