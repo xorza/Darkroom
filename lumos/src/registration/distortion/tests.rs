@@ -474,3 +474,269 @@ fn test_tps_identity() {
     assert!((tx - 25.0).abs() < 1e-3);
     assert!((ty - 75.0).abs() < 1e-3);
 }
+
+// ============================================================================
+// Additional edge case tests
+// ============================================================================
+
+/// Test TPS with various regularization values
+#[test]
+fn test_tps_regularization_values() {
+    let source = vec![
+        (0.0, 0.0),
+        (100.0, 0.0),
+        (0.0, 100.0),
+        (100.0, 100.0),
+        (50.0, 50.0),
+    ];
+
+    // Noisy target points
+    let target = vec![
+        (3.0, -2.0),
+        (97.0, 4.0),
+        (-1.0, 103.0),
+        (104.0, 98.0),
+        (48.0, 52.0),
+    ];
+
+    // Test with increasing regularization
+    let lambdas = [0.0, 1.0, 10.0, 100.0, 1000.0];
+    let mut prev_energy = f64::MAX;
+
+    for &lambda in &lambdas {
+        let config = TpsConfig {
+            regularization: lambda,
+        };
+        let tps = ThinPlateSpline::fit(&source, &target, config).unwrap();
+        let energy = tps.bending_energy();
+
+        // Higher regularization should result in lower or equal bending energy
+        if lambda > 0.0 {
+            assert!(
+                energy <= prev_energy + 1e-6,
+                "λ={}: energy {} should be <= previous {}",
+                lambda,
+                energy,
+                prev_energy
+            );
+        }
+        prev_energy = energy;
+    }
+}
+
+/// Test TPS with nearly collinear points (ill-conditioned)
+#[test]
+fn test_tps_nearly_collinear() {
+    // Points that are nearly but not exactly collinear
+    let source = vec![
+        (0.0, 0.0),
+        (50.0, 0.1), // Slightly off the line
+        (100.0, 0.0),
+        (0.0, 100.0), // This breaks collinearity
+    ];
+
+    let target: Vec<(f64, f64)> = source.iter().map(|&(x, y)| (x + 5.0, y + 3.0)).collect();
+
+    let result = ThinPlateSpline::fit(&source, &target, TpsConfig::default());
+
+    // Should succeed since points are not exactly collinear
+    assert!(
+        result.is_some(),
+        "TPS should handle nearly collinear points"
+    );
+
+    let tps = result.unwrap();
+
+    // Should still interpolate control points reasonably
+    for (&src, &tgt) in source.iter().zip(target.iter()) {
+        let (tx, ty) = tps.transform(src.0, src.1);
+        assert!(
+            (tx - tgt.0).abs() < 1.0,
+            "Control point x: {} vs {}",
+            tx,
+            tgt.0
+        );
+        assert!(
+            (ty - tgt.1).abs() < 1.0,
+            "Control point y: {} vs {}",
+            ty,
+            tgt.1
+        );
+    }
+}
+
+/// Test TPS with large deformations
+#[test]
+fn test_tps_large_deformation() {
+    let source = vec![
+        (0.0, 0.0),
+        (100.0, 0.0),
+        (0.0, 100.0),
+        (100.0, 100.0),
+        (50.0, 50.0),
+    ];
+
+    // Large deformation - twist the grid
+    let target = vec![
+        (0.0, 0.0),
+        (120.0, 20.0),  // Stretched and sheared
+        (20.0, 120.0),  // Stretched and sheared
+        (100.0, 100.0), // Unchanged
+        (60.0, 40.0),   // Center moved
+    ];
+
+    let tps = ThinPlateSpline::fit(&source, &target, TpsConfig::default()).unwrap();
+
+    // Control points should still be interpolated exactly
+    for (&src, &tgt) in source.iter().zip(target.iter()) {
+        let (tx, ty) = tps.transform(src.0, src.1);
+        assert!(
+            (tx - tgt.0).abs() < 1e-5,
+            "Large deform x: {} vs {}",
+            tx,
+            tgt.0
+        );
+        assert!(
+            (ty - tgt.1).abs() < 1e-5,
+            "Large deform y: {} vs {}",
+            ty,
+            tgt.1
+        );
+    }
+
+    // Bending energy should be significant for large deformation
+    let energy = tps.bending_energy();
+    assert!(
+        energy.abs() > 0.01,
+        "Large deformation should have significant bending energy: {}",
+        energy
+    );
+}
+
+/// Test bending energy calculation
+#[test]
+fn test_tps_bending_energy_properties() {
+    let source = vec![(0.0, 0.0), (100.0, 0.0), (0.0, 100.0), (100.0, 100.0)];
+
+    // Identity: zero bending energy
+    let tps_identity = ThinPlateSpline::fit(&source, &source, TpsConfig::default()).unwrap();
+    let energy_identity = tps_identity.bending_energy();
+    assert!(
+        energy_identity.abs() < 1e-10,
+        "Identity should have zero bending energy: {}",
+        energy_identity
+    );
+
+    // Pure translation: zero bending energy
+    let target_trans: Vec<(f64, f64)> = source.iter().map(|&(x, y)| (x + 50.0, y + 30.0)).collect();
+    let tps_trans = ThinPlateSpline::fit(&source, &target_trans, TpsConfig::default()).unwrap();
+    let energy_trans = tps_trans.bending_energy();
+    assert!(
+        energy_trans.abs() < 1e-6,
+        "Pure translation should have near-zero bending energy: {}",
+        energy_trans
+    );
+
+    // Pure rotation: near-zero bending energy (affine)
+    let angle: f64 = 0.3;
+    let cos_a = angle.cos();
+    let sin_a = angle.sin();
+    let target_rot: Vec<(f64, f64)> = source
+        .iter()
+        .map(|&(x, y)| (x * cos_a - y * sin_a, x * sin_a + y * cos_a))
+        .collect();
+    let tps_rot = ThinPlateSpline::fit(&source, &target_rot, TpsConfig::default()).unwrap();
+    let energy_rot = tps_rot.bending_energy();
+    assert!(
+        energy_rot.abs() < 1e-5,
+        "Pure rotation should have near-zero bending energy: {}",
+        energy_rot
+    );
+}
+
+/// Test TPS with clustered control points
+#[test]
+fn test_tps_clustered_points() {
+    // Two clusters of points far apart
+    let source = vec![
+        // Cluster 1 at (0,0)
+        (0.0, 0.0),
+        (10.0, 0.0),
+        (0.0, 10.0),
+        (10.0, 10.0),
+        // Cluster 2 at (1000,1000)
+        (1000.0, 1000.0),
+        (1010.0, 1000.0),
+        (1000.0, 1010.0),
+        (1010.0, 1010.0),
+    ];
+
+    let target: Vec<(f64, f64)> = source.iter().map(|&(x, y)| (x + 5.0, y + 3.0)).collect();
+
+    let tps = ThinPlateSpline::fit(&source, &target, TpsConfig::default()).unwrap();
+
+    // Should interpolate both clusters correctly
+    for (&src, &tgt) in source.iter().zip(target.iter()) {
+        let (tx, ty) = tps.transform(src.0, src.1);
+        assert!(
+            (tx - tgt.0).abs() < 1e-4,
+            "Clustered x: {} vs {}",
+            tx,
+            tgt.0
+        );
+        assert!(
+            (ty - tgt.1).abs() < 1e-4,
+            "Clustered y: {} vs {}",
+            ty,
+            tgt.1
+        );
+    }
+
+    // Test interpolation between clusters
+    let (tx, ty) = tps.transform(500.0, 500.0);
+    // Should be approximately (505, 503) for pure translation
+    assert!(
+        (tx - 505.0).abs() < 10.0,
+        "Between clusters x: {} expected ~505",
+        tx
+    );
+    assert!(
+        (ty - 503.0).abs() < 10.0,
+        "Between clusters y: {} expected ~503",
+        ty
+    );
+}
+
+/// Test distortion map with non-uniform distortion
+#[test]
+fn test_distortion_map_non_uniform() {
+    // Create a grid with position-dependent distortion
+    let mut source = Vec::new();
+    let mut target = Vec::new();
+
+    for y in (0..=200).step_by(50) {
+        for x in (0..=200).step_by(50) {
+            let sx = x as f64;
+            let sy = y as f64;
+            source.push((sx, sy));
+            // Distortion increases with x
+            let dx = sx * 0.05;
+            let dy = sy * 0.02;
+            target.push((sx + dx, sy + dy));
+        }
+    }
+
+    let tps = ThinPlateSpline::fit(&source, &target, TpsConfig::default()).unwrap();
+    let map = DistortionMap::from_tps(&tps, 200, 200, 25.0);
+
+    // Left side should have smaller distortion than right side
+    let (dx_left, _) = map.interpolate(25.0, 100.0);
+    let (dx_right, _) = map.interpolate(175.0, 100.0);
+
+    assert!(
+        dx_right > dx_left,
+        "Right side distortion {} should be larger than left {}",
+        dx_right,
+        dx_left
+    );
+}

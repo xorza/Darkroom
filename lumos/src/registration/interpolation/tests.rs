@@ -2,6 +2,150 @@ use super::*;
 
 const EPSILON: f32 = 1e-5;
 
+// ============================================================================
+// Lanczos LUT Accuracy Tests
+// ============================================================================
+
+#[test]
+fn test_lanczos_lut_vs_direct_computation() {
+    // Compare LUT results with direct computation across the entire kernel support
+    for a in [2, 3, 4] {
+        let a_f32 = a as f32;
+        let lut = super::get_lanczos_lut(a);
+
+        // Test many positions including edge cases
+        let test_positions: Vec<f32> = (0..=1000)
+            .map(|i| (i as f32 / 1000.0) * a_f32)
+            .chain([-0.5, -1.0, -1.5, -2.0, -2.5, -3.0, -3.5, -4.0].into_iter())
+            .collect();
+
+        for x in test_positions {
+            if x.abs() > a_f32 {
+                continue;
+            }
+
+            let direct = super::lanczos_kernel_direct(x, a_f32);
+            let lut_val = lut.lookup(x);
+
+            // LUT with linear interpolation should be very accurate
+            let diff = (direct - lut_val).abs();
+            assert!(
+                diff < 0.001,
+                "LUT mismatch at x={}, a={}: direct={}, lut={}, diff={}",
+                x,
+                a,
+                direct,
+                lut_val,
+                diff
+            );
+        }
+    }
+}
+
+#[test]
+fn test_lanczos_lut_symmetry() {
+    // Verify the LUT preserves kernel symmetry
+    for a in [2, 3, 4] {
+        let lut = super::get_lanczos_lut(a);
+
+        for i in 1..100 {
+            let x = i as f32 / 50.0;
+            let pos = lut.lookup(x);
+            let neg = lut.lookup(-x);
+
+            assert!(
+                (pos - neg).abs() < 1e-6,
+                "Symmetry broken at x={}, a={}: +x={}, -x={}",
+                x,
+                a,
+                pos,
+                neg
+            );
+        }
+    }
+}
+
+#[test]
+fn test_lanczos_lut_special_values() {
+    for a in [2, 3, 4] {
+        let lut = super::get_lanczos_lut(a);
+        let a_f32 = a as f32;
+
+        // At x=0, kernel should be 1
+        assert!(
+            (lut.lookup(0.0) - 1.0).abs() < 0.001,
+            "LUT(0) should be 1.0 for a={}, got {}",
+            a,
+            lut.lookup(0.0)
+        );
+
+        // At integer positions (except 0), kernel should be ~0
+        for i in 1..a {
+            let val = lut.lookup(i as f32);
+            assert!(
+                val.abs() < 0.001,
+                "LUT({}) should be ~0 for a={}, got {}",
+                i,
+                a,
+                val
+            );
+        }
+
+        // At boundary, kernel should be 0
+        assert!(
+            lut.lookup(a_f32).abs() < 1e-6,
+            "LUT(a) should be 0 for a={}, got {}",
+            a,
+            lut.lookup(a_f32)
+        );
+
+        // Outside boundary, kernel should be 0
+        assert_eq!(
+            lut.lookup(a_f32 + 0.1),
+            0.0,
+            "LUT beyond boundary should be 0"
+        );
+    }
+}
+
+#[test]
+fn test_lanczos_kernel_uses_lut() {
+    // Verify that lanczos_kernel uses LUT for standard parameters
+    // and produces identical results
+    for a in [2.0f32, 3.0, 4.0] {
+        for i in 0..100 {
+            let x = (i as f32 - 50.0) / 20.0;
+            let kernel_val = lanczos_kernel(x, a);
+            let direct_val = super::lanczos_kernel_direct(x, a);
+
+            // Should be very close (LUT with interpolation)
+            let diff = (kernel_val - direct_val).abs();
+            assert!(
+                diff < 0.001,
+                "Kernel mismatch at x={}, a={}: kernel={}, direct={}, diff={}",
+                x,
+                a,
+                kernel_val,
+                direct_val,
+                diff
+            );
+        }
+    }
+}
+
+#[test]
+fn test_lanczos_kernel_fallback_for_nonstandard_a() {
+    // For non-standard values of 'a', should fall back to direct computation
+    let a = 2.5f32; // Not 2, 3, or 4
+    let x = 0.5;
+
+    let kernel_val = lanczos_kernel(x, a);
+    let direct_val = super::lanczos_kernel_direct(x, a);
+
+    // Should be exactly equal (using direct computation)
+    assert_eq!(kernel_val, direct_val);
+}
+
 #[test]
 fn test_lanczos_kernel_center() {
     // At center, kernel should be 1

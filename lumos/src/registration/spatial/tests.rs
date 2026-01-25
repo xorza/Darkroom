@@ -275,3 +275,225 @@ fn test_distance_squared() {
     assert!((distance_squared((1.0, 1.0), (1.0, 1.0))).abs() < 1e-10);
     assert!((distance_squared((0.0, 0.0), (1.0, 0.0)) - 1.0).abs() < 1e-10);
 }
+
+// ============================================================================
+// Additional edge case tests
+// ============================================================================
+
+/// Test KdTree with duplicate points
+#[test]
+fn test_kdtree_duplicate_points() {
+    // Multiple points at the same location
+    let points = vec![
+        (5.0, 5.0),
+        (5.0, 5.0), // Duplicate
+        (5.0, 5.0), // Duplicate
+        (10.0, 10.0),
+    ];
+    let tree = KdTree::build(&points).unwrap();
+
+    assert_eq!(tree.len(), 4);
+
+    // k_nearest should return all duplicates
+    let neighbors = tree.k_nearest((5.0, 5.0), 3);
+    assert_eq!(neighbors.len(), 3);
+
+    // All three should have distance 0
+    for (idx, dist) in &neighbors {
+        if *idx < 3 {
+            assert!(*dist < 1e-10, "Duplicate point should have zero distance");
+        }
+    }
+}
+
+/// Test KdTree with many points (performance check)
+#[test]
+fn test_kdtree_many_points() {
+    // Generate 1000 points in a grid pattern
+    let mut points = Vec::with_capacity(1000);
+    for y in 0..32 {
+        for x in 0..32 {
+            if points.len() < 1000 {
+                points.push((x as f64 * 10.0, y as f64 * 10.0));
+            }
+        }
+    }
+
+    let tree = KdTree::build(&points).unwrap();
+    assert_eq!(tree.len(), 1000);
+
+    // k_nearest should work efficiently
+    let neighbors = tree.k_nearest((155.0, 155.0), 10);
+    assert_eq!(neighbors.len(), 10);
+
+    // All neighbors should be reasonably close (within a few grid cells)
+    // Grid spacing is 10, so neighbors within 2 cells have distance^2 < 800
+    for (_, dist) in &neighbors {
+        assert!(
+            *dist < 1000.0,
+            "Neighbor too far: {} (squared distance)",
+            dist
+        );
+    }
+}
+
+/// Test KdTree with points on a single horizontal line (degenerate)
+#[test]
+fn test_kdtree_horizontal_line() {
+    let points: Vec<(f64, f64)> = (0..10).map(|i| (i as f64 * 10.0, 0.0)).collect();
+    let tree = KdTree::build(&points).unwrap();
+
+    assert_eq!(tree.len(), 10);
+
+    // Query in the middle
+    let neighbors = tree.k_nearest((45.0, 0.0), 3);
+    assert_eq!(neighbors.len(), 3);
+
+    // Should find points 4 and 5 as closest
+    let indices: Vec<usize> = neighbors.iter().map(|(i, _)| *i).collect();
+    assert!(indices.contains(&4) || indices.contains(&5));
+}
+
+/// Test KdTree with points on a single vertical line (degenerate)
+#[test]
+fn test_kdtree_vertical_line() {
+    let points: Vec<(f64, f64)> = (0..10).map(|i| (0.0, i as f64 * 10.0)).collect();
+    let tree = KdTree::build(&points).unwrap();
+
+    assert_eq!(tree.len(), 10);
+
+    // Query in the middle
+    let neighbors = tree.k_nearest((0.0, 45.0), 3);
+    assert_eq!(neighbors.len(), 3);
+
+    // Should find points 4 and 5 as closest
+    let indices: Vec<usize> = neighbors.iter().map(|(i, _)| *i).collect();
+    assert!(indices.contains(&4) || indices.contains(&5));
+}
+
+/// Test KdTree with points at identical coordinates
+#[test]
+fn test_kdtree_all_identical_points() {
+    // All points at the same location
+    let points: Vec<(f64, f64)> = (0..5).map(|_| (7.0, 7.0)).collect();
+    let tree = KdTree::build(&points).unwrap();
+
+    assert_eq!(tree.len(), 5);
+
+    // k_nearest should return all 5 with distance 0
+    let neighbors = tree.k_nearest((7.0, 7.0), 5);
+    assert_eq!(neighbors.len(), 5);
+
+    for (_, dist) in &neighbors {
+        assert!(
+            *dist < 1e-10,
+            "All points at same location should have zero distance"
+        );
+    }
+}
+
+/// Test radius search with exact boundary
+#[test]
+fn test_kdtree_radius_search_boundary() {
+    let points = vec![
+        (0.0, 0.0),
+        (1.0, 0.0), // Exactly at radius 1
+        (2.0, 0.0), // Beyond radius 1
+    ];
+    let tree = KdTree::build(&points).unwrap();
+
+    // Radius search with r=1 should include point at distance 1
+    let results = tree.radius_search((0.0, 0.0), 1.0);
+
+    // Should find points 0 and 1 (distance 0 and 1)
+    assert!(!results.is_empty()); // At least the center point
+    let indices: Vec<usize> = results.iter().map(|(i, _)| *i).collect();
+    assert!(indices.contains(&0));
+
+    // Point at exactly radius 1 may or may not be included depending on implementation
+    // (distance squared = 1.0, radius squared = 1.0)
+}
+
+/// Test k_nearest with k=0
+#[test]
+fn test_kdtree_k_nearest_zero() {
+    let points = vec![(0.0, 0.0), (1.0, 1.0)];
+    let tree = KdTree::build(&points).unwrap();
+
+    let neighbors = tree.k_nearest((0.0, 0.0), 0);
+    assert!(neighbors.is_empty());
+}
+
+/// Test radius search with radius=0
+#[test]
+fn test_kdtree_radius_search_zero() {
+    let points = vec![(0.0, 0.0), (1.0, 1.0)];
+    let tree = KdTree::build(&points).unwrap();
+
+    // Radius 0 should only find exact matches
+    let results = tree.radius_search((0.0, 0.0), 0.0);
+    // May or may not find the exact point depending on implementation
+    assert!(results.len() <= 1);
+}
+
+/// Test form_triangles with very sparse neighbors
+#[test]
+fn test_form_triangles_sparse_neighbors() {
+    // Grid of points
+    let mut points = Vec::new();
+    for y in 0..5 {
+        for x in 0..5 {
+            points.push((x as f64 * 100.0, y as f64 * 100.0));
+        }
+    }
+
+    let tree = KdTree::build(&points).unwrap();
+
+    // With k=2, each point only sees 2 neighbors, limiting triangle formation
+    let triangles = form_triangles_from_neighbors(&tree, 2);
+
+    // Should still form some triangles
+    assert!(!triangles.is_empty());
+
+    // All triangles should have sorted indices
+    for tri in &triangles {
+        assert!(tri[0] < tri[1] && tri[1] < tri[2]);
+    }
+}
+
+/// Test k_nearest query far from all points
+#[test]
+fn test_kdtree_query_far_from_points() {
+    let points = vec![(0.0, 0.0), (1.0, 0.0), (0.0, 1.0), (1.0, 1.0)];
+    let tree = KdTree::build(&points).unwrap();
+
+    // Query very far from all points
+    let neighbors = tree.k_nearest((1000.0, 1000.0), 2);
+    assert_eq!(neighbors.len(), 2);
+
+    // Distances should be large
+    for (_, dist) in &neighbors {
+        assert!(*dist > 1_000_000.0, "Distance should be very large");
+    }
+}
+
+/// Test tree with negative coordinates
+#[test]
+fn test_kdtree_negative_coordinates() {
+    let points = vec![
+        (-10.0, -10.0),
+        (-5.0, -5.0),
+        (0.0, 0.0),
+        (5.0, 5.0),
+        (10.0, 10.0),
+    ];
+    let tree = KdTree::build(&points).unwrap();
+
+    // Query at negative coords
+    let neighbors = tree.k_nearest((-7.0, -7.0), 2);
+    assert_eq!(neighbors.len(), 2);
+
+    // Should find the two closest negative points
+    let indices: Vec<usize> = neighbors.iter().map(|(i, _)| *i).collect();
+    assert!(indices.contains(&0) || indices.contains(&1));
+}

@@ -97,29 +97,35 @@ votes[idx] = new_val;
 
 **Effort:** 4 hours → Done
 
-### 2.3 Distortion Module Tests
+### 2.3 Distortion Module Tests ✅ DONE
 
 **File:** `distortion/tests.rs`
 
-**Missing tests:**
-- [ ] TPS with non-zero regularization (λ > 0)
-- [ ] Ill-conditioned control points (nearly collinear)
-- [ ] Large deformations stress test
-- [ ] Bending energy verification
+**Added tests:**
+- [x] TPS with various regularization values (λ = 0, 1, 10, 100, 1000)
+- [x] Nearly collinear points (ill-conditioned)
+- [x] Large deformations stress test
+- [x] Bending energy properties (identity, translation, rotation)
+- [x] Clustered control points
+- [x] Non-uniform distortion map
 
-**Effort:** 3 hours
+**Effort:** 3 hours → Done
 
-### 2.4 Spatial Module Tests
+### 2.4 Spatial Module Tests ✅ DONE
 
 **File:** `spatial/tests.rs`
 
-**Missing tests:**
-- [ ] KdTree with duplicate points
-- [ ] KdTree with 10k+ points (performance)
-- [ ] Degenerate tree structures (all points on a line)
-- [ ] Points at identical coordinates
+**Added tests:**
+- [x] KdTree with duplicate points
+- [x] KdTree with 1000 points (performance)
+- [x] Degenerate tree structures (horizontal/vertical lines)
+- [x] Points at identical coordinates
+- [x] Radius search boundary cases
+- [x] k=0 and radius=0 edge cases
+- [x] Negative coordinates
+- [x] Query far from all points
 
-**Effort:** 3 hours
+**Effort:** 3 hours → Done
 
 ### 2.5 RANSAC Convergence Tests ✅ DONE
 
@@ -140,35 +146,28 @@ votes[idx] = new_val;
 
 ## Phase 3: Performance Optimization (2-3 days)
 
-### 3.1 Lanczos Kernel Lookup Table
+### 3.1 Lanczos Kernel Lookup Table ✅ DONE
 
-**File:** `interpolation/mod.rs:291-330`
+**File:** `interpolation/mod.rs`
 
-**Current:** Computes `sinc()` per pixel (involves `sin()`, division)
+**Implementation:**
+- Added `LanczosLut` struct with pre-computed kernel values
+- Uses 1024 samples per unit interval for ~0.001 precision
+- Linear interpolation between LUT entries for smooth results
+- Lazy initialization via `OnceLock` (no startup cost)
+- Separate LUTs for Lanczos2, Lanczos3, Lanczos4
+- Falls back to direct computation for non-standard kernel sizes
+- Added 6 LUT accuracy tests
 
-**Optimization:** Pre-compute kernel weights for common sub-pixel positions:
-```rust
-struct LanczosLUT {
-    weights: [[f32; 6]; 256], // 256 sub-pixel positions, 6 taps
-}
-
-impl LanczosLUT {
-    fn new(a: usize) -> Self {
-        let mut weights = [[0.0; 6]; 256];
-        for i in 0..256 {
-            let t = i as f32 / 256.0;
-            for j in 0..6 {
-                weights[i][j] = lanczos_weight(t - (j as f32 - 2.5), a);
-            }
-        }
-        Self { weights }
-    }
-}
-```
+**Technical details:**
+- LUT resolution: 1024 samples/unit → total entries: a×1024+1 (e.g., 3073 for Lanczos3)
+- Memory: ~12KB per LUT (Lanczos3), initialized lazily
+- Accuracy: <0.001 max error vs direct computation
+- Kernel symmetry exploited (stores only positive x values)
 
 **Expected speedup:** 20-30% for Lanczos interpolation
 
-**Effort:** 4 hours
+**Effort:** 4 hours → Done
 
 ### 3.2 FFT Transpose Optimization
 

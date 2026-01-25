@@ -13,6 +13,7 @@
 //! - **Nearest**: Fastest, no interpolation. For previews or masks.
 
 use std::f32::consts::PI;
+use std::sync::OnceLock;
 
 use crate::registration::types::TransformMatrix;
 
@@ -88,7 +89,7 @@ impl Default for WarpConfig {
     }
 }
 
-/// Lanczos kernel value.
+/// Lanczos kernel value (direct computation).
 ///
 /// The Lanczos kernel is a sinc function windowed by another sinc:
 /// L(x) = sinc(x) * sinc(x/a) for |x| < a
@@ -96,7 +97,7 @@ impl Default for WarpConfig {
 ///
 /// where sinc(x) = sin(pi*x) / (pi*x) for x != 0, and sinc(0) = 1
 #[inline]
-pub(crate) fn lanczos_kernel(x: f32, a: f32) -> f32 {
+fn lanczos_kernel_direct(x: f32, a: f32) -> f32 {
     if x.abs() < 1e-6 {
         return 1.0;
     }
@@ -108,6 +109,101 @@ pub(crate) fn lanczos_kernel(x: f32, a: f32) -> f32 {
     let pi_x_a = pi_x / a;
 
     (pi_x.sin() / pi_x) * (pi_x_a.sin() / pi_x_a)
+}
+
+// ============================================================================
+// Lanczos Kernel Lookup Table (LUT) for Performance Optimization
+// ============================================================================
+
+/// Number of sub-pixel samples per unit interval in the LUT.
+/// Higher values = more precision, more memory.
+/// 1024 gives ~0.001 precision which is far beyond typical image precision.
+const LANCZOS_LUT_RESOLUTION: usize = 1024;
+
+/// Pre-computed Lanczos kernel lookup table.
+///
+/// The LUT covers the range [0, a] with LANCZOS_LUT_RESOLUTION samples per unit.
+/// Total entries = a * LANCZOS_LUT_RESOLUTION + 1 (for endpoint).
+///
+/// Since the kernel is symmetric, we only store positive values and use abs(x).
+#[derive(Debug)]
+struct LanczosLut {
+    /// Pre-computed kernel values for x in [0, a]
+    values: Vec<f32>,
+    /// Kernel parameter (2, 3, or 4)
+    a: usize,
+}
+
+impl LanczosLut {
+    /// Create a new LUT for the given kernel parameter.
+    fn new(a: usize) -> Self {
+        let num_entries = a * LANCZOS_LUT_RESOLUTION + 1;
+        let mut values = Vec::with_capacity(num_entries);
+
+        let a_f32 = a as f32;
+        for i in 0..num_entries {
+            let x = i as f32 / LANCZOS_LUT_RESOLUTION as f32;
+            values.push(lanczos_kernel_direct(x, a_f32));
+        }
+
+        Self { values, a }
+    }
+
+    /// Look up the kernel value for a given x using linear interpolation.
+    #[inline]
+    fn lookup(&self, x: f32) -> f32 {
+        let abs_x = x.abs();
+        let a_f32 = self.a as f32;
+
+        // Fast path: outside kernel support
+        if abs_x >= a_f32 {
+            return 0.0;
+        }
+
+        // Convert to LUT index (floating point for interpolation)
+        let idx_f = abs_x * LANCZOS_LUT_RESOLUTION as f32;
+        let idx0 = idx_f as usize;
+
+        // Linear interpolation between adjacent LUT entries
+        let idx1 = (idx0 + 1).min(self.values.len() - 1);
+        let frac = idx_f - idx0 as f32;
+
+        // Safety: idx0 and idx1 are bounded by construction
+        let v0 = self.values[idx0];
+        let v1 = self.values[idx1];
+
+        v0 + frac * (v1 - v0)
+    }
+}
+
+// Global LUT instances (lazily initialized)
+static LANCZOS2_LUT: OnceLock<LanczosLut> = OnceLock::new();
+static LANCZOS3_LUT: OnceLock<LanczosLut> = OnceLock::new();
+static LANCZOS4_LUT: OnceLock<LanczosLut> = OnceLock::new();
+
+/// Get the LUT for a given kernel parameter.
+#[inline]
+fn get_lanczos_lut(a: usize) -> &'static LanczosLut {
+    match a {
+        2 => LANCZOS2_LUT.get_or_init(|| LanczosLut::new(2)),
+        3 => LANCZOS3_LUT.get_or_init(|| LanczosLut::new(3)),
+        4 => LANCZOS4_LUT.get_or_init(|| LanczosLut::new(4)),
+        _ => panic!("Unsupported Lanczos parameter: {}", a),
+    }
+}
+
+/// Lanczos kernel value using lookup table.
+///
+/// Uses pre-computed LUT with linear interpolation for fast evaluation.
+/// Falls back to direct computation for unsupported kernel sizes.
+#[inline]
+pub(crate) fn lanczos_kernel(x: f32, a: f32) -> f32 {
+    let a_usize = a as usize;
+    if (2..=4).contains(&a_usize) && (a - a_usize as f32).abs() < 1e-6 {
+        get_lanczos_lut(a_usize).lookup(x)
+    } else {
+        lanczos_kernel_direct(x, a)
+    }
 }
 
 /// Bicubic kernel value (Catmull-Rom spline).
