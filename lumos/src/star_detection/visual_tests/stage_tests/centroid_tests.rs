@@ -1,0 +1,280 @@
+//! Centroid computation stage tests.
+//!
+//! Tests sub-pixel centroid accuracy on synthetic stars.
+
+use crate::star_detection::StarDetectionConfig;
+use crate::star_detection::background::estimate_background;
+use crate::star_detection::centroid::compute_centroid;
+use crate::star_detection::detection::StarCandidate;
+use crate::star_detection::visual_tests::generators::{fwhm_to_sigma, render_gaussian_star};
+use crate::star_detection::visual_tests::output::save_grayscale_png;
+use crate::testing::init_tracing;
+use common::test_utils::test_output_path;
+use image::{Rgb, RgbImage};
+use imageproc::drawing::{draw_cross_mut, draw_hollow_circle_mut};
+
+/// Default tile size for background estimation
+const TILE_SIZE: usize = 64;
+
+/// Test centroid accuracy on precisely placed stars.
+#[test]
+#[cfg_attr(not(feature = "slow-tests"), ignore)]
+fn test_centroid_accuracy() {
+    init_tracing();
+
+    let width = 256;
+    let height = 256;
+    let fwhm = 4.0;
+    let sigma = fwhm_to_sigma(fwhm);
+
+    // Create stars at known sub-pixel positions
+    let test_positions = vec![
+        (50.0, 50.0),     // Integer position
+        (100.3, 50.2),    // Sub-pixel X
+        (50.7, 100.8),    // Sub-pixel Y
+        (150.5, 150.5),   // Half-pixel both
+        (100.25, 100.75), // Quarter-pixel
+    ];
+
+    // Create image with uniform background
+    let mut pixels = vec![0.1f32; width * height];
+
+    // Add stars at test positions
+    for &(x, y) in &test_positions {
+        let amplitude = 0.8 / (2.0 * std::f32::consts::PI * sigma * sigma);
+        render_gaussian_star(&mut pixels, width, x, y, sigma, amplitude);
+    }
+
+    // Add small amount of noise
+    let mut rng = 42u64;
+    for p in &mut pixels {
+        rng = rng.wrapping_mul(6364136223846793005).wrapping_add(1);
+        let u1 = ((rng >> 33) as f32 / (1u64 << 31) as f32).max(1e-10);
+        rng = rng.wrapping_mul(6364136223846793005).wrapping_add(1);
+        let u2 = (rng >> 33) as f32 / (1u64 << 31) as f32;
+        let z = (-2.0 * u1.ln()).sqrt() * (2.0 * std::f32::consts::PI * u2).cos();
+        *p += z * 0.01;
+        *p = p.clamp(0.0, 1.0);
+    }
+
+    // Save input
+    save_grayscale_png(
+        &pixels,
+        width,
+        height,
+        &test_output_path("stage_centroid_accuracy_input.png"),
+    );
+
+    // Estimate background
+    let background = estimate_background(&pixels, width, height, TILE_SIZE);
+
+    // Test centroid computation for each star
+    let mut errors = Vec::new();
+    let config = StarDetectionConfig {
+        expected_fwhm: fwhm,
+        ..Default::default()
+    };
+
+    for &(true_x, true_y) in &test_positions {
+        // Create a fake candidate at the known position
+        let peak_x = true_x.round() as usize;
+        let peak_y = true_y.round() as usize;
+
+        let candidate = StarCandidate {
+            x_min: peak_x.saturating_sub(5),
+            x_max: (peak_x + 5).min(width - 1),
+            y_min: peak_y.saturating_sub(5),
+            y_max: (peak_y + 5).min(height - 1),
+            peak_x,
+            peak_y,
+            peak_value: pixels[peak_y * width + peak_x],
+            area: 50,
+        };
+
+        let result = compute_centroid(&pixels, width, height, &background, &candidate, &config);
+
+        if let Some(star) = result {
+            let error = ((star.x - true_x).powi(2) + (star.y - true_y).powi(2)).sqrt();
+            errors.push(error);
+
+            println!(
+                "True: ({:.2}, {:.2}) -> Detected: ({:.3}, {:.3}), error: {:.4}px",
+                true_x, true_y, star.x, star.y, error
+            );
+        } else {
+            println!(
+                "Failed to compute centroid at ({:.2}, {:.2})",
+                true_x, true_y
+            );
+        }
+    }
+
+    // Create overlay showing true vs detected positions
+    let mut img = RgbImage::from_fn(width as u32, height as u32, |x, y| {
+        let idx = y as usize * width + x as usize;
+        let v = (pixels[idx].clamp(0.0, 1.0) * 255.0) as u8;
+        Rgb([v, v, v])
+    });
+
+    let blue = Rgb([80u8, 80, 255]);
+    let green = Rgb([0u8, 255, 0]);
+
+    for &(true_x, true_y) in &test_positions {
+        // True position in blue
+        draw_hollow_circle_mut(
+            &mut img,
+            (true_x.round() as i32, true_y.round() as i32),
+            8,
+            blue,
+        );
+
+        // Detected position
+        let peak_x = true_x.round() as usize;
+        let peak_y = true_y.round() as usize;
+
+        let candidate = StarCandidate {
+            x_min: peak_x.saturating_sub(5),
+            x_max: (peak_x + 5).min(width - 1),
+            y_min: peak_y.saturating_sub(5),
+            y_max: (peak_y + 5).min(height - 1),
+            peak_x,
+            peak_y,
+            peak_value: pixels[peak_y * width + peak_x],
+            area: 50,
+        };
+
+        let result = compute_centroid(&pixels, width, height, &background, &candidate, &config);
+
+        if let Some(star) = result {
+            draw_cross_mut(
+                &mut img,
+                green,
+                star.x.round() as i32,
+                star.y.round() as i32,
+            );
+        }
+    }
+
+    img.save(test_output_path("stage_centroid_accuracy_overlay.png"))
+        .unwrap();
+
+    // Calculate statistics
+    if !errors.is_empty() {
+        let mean_error: f32 = errors.iter().sum::<f32>() / errors.len() as f32;
+        let max_error = errors.iter().cloned().fold(0.0f32, f32::max);
+
+        println!("\nCentroid accuracy:");
+        println!("  Mean error: {:.4} pixels", mean_error);
+        println!("  Max error: {:.4} pixels", max_error);
+
+        // Sub-pixel accuracy should be < 0.3 pixels
+        assert!(
+            mean_error < 0.3,
+            "Mean centroid error {:.4} should be < 0.3 pixels",
+            mean_error
+        );
+    }
+}
+
+/// Test centroid on stars with different SNR.
+#[test]
+#[cfg_attr(not(feature = "slow-tests"), ignore)]
+fn test_centroid_snr() {
+    init_tracing();
+
+    let width = 512;
+    let height = 128;
+    let fwhm = 4.0;
+    let sigma = fwhm_to_sigma(fwhm);
+
+    // Create stars with different brightness
+    let brightnesses = [0.9, 0.5, 0.3, 0.15, 0.08];
+    let mut pixels = vec![0.1f32; width * height];
+
+    let y = 64.37; // Same sub-pixel Y for all
+    let mut true_positions = Vec::new();
+
+    for (i, &brightness) in brightnesses.iter().enumerate() {
+        let x = 50.0 + i as f32 * 100.0 + 0.42; // Sub-pixel X
+        true_positions.push((x, y, brightness));
+
+        let amplitude = brightness / (2.0 * std::f32::consts::PI * sigma * sigma);
+        render_gaussian_star(&mut pixels, width, x, y, sigma, amplitude);
+    }
+
+    // Add noise
+    let noise_sigma = 0.02;
+    let mut rng = 42u64;
+    for p in &mut pixels {
+        rng = rng.wrapping_mul(6364136223846793005).wrapping_add(1);
+        let u1 = ((rng >> 33) as f32 / (1u64 << 31) as f32).max(1e-10);
+        rng = rng.wrapping_mul(6364136223846793005).wrapping_add(1);
+        let u2 = (rng >> 33) as f32 / (1u64 << 31) as f32;
+        let z = (-2.0 * u1.ln()).sqrt() * (2.0 * std::f32::consts::PI * u2).cos();
+        *p += z * noise_sigma;
+        *p = p.clamp(0.0, 1.0);
+    }
+
+    save_grayscale_png(
+        &pixels,
+        width,
+        height,
+        &test_output_path("stage_centroid_snr_input.png"),
+    );
+
+    // Estimate background
+    let background = estimate_background(&pixels, width, height, TILE_SIZE);
+
+    // Create overlay
+    let mut img = RgbImage::from_fn(width as u32, height as u32, |x, y| {
+        let idx = y as usize * width + x as usize;
+        let v = (pixels[idx].clamp(0.0, 1.0) * 255.0) as u8;
+        Rgb([v, v, v])
+    });
+
+    let blue = Rgb([80u8, 80, 255]);
+    let green = Rgb([0u8, 255, 0]);
+
+    let config = StarDetectionConfig {
+        expected_fwhm: fwhm,
+        ..Default::default()
+    };
+
+    println!("\nCentroid accuracy vs SNR:");
+    println!("  Noise sigma: {}", noise_sigma);
+
+    for (true_x, true_y, brightness) in &true_positions {
+        let peak_x = true_x.round() as usize;
+        let peak_y = true_y.round() as usize;
+
+        draw_hollow_circle_mut(&mut img, (*true_x as i32, *true_y as i32), 6, blue);
+
+        let candidate = StarCandidate {
+            x_min: peak_x.saturating_sub(5),
+            x_max: (peak_x + 5).min(width - 1),
+            y_min: peak_y.saturating_sub(5),
+            y_max: (peak_y + 5).min(height - 1),
+            peak_x,
+            peak_y,
+            peak_value: pixels[peak_y * width + peak_x],
+            area: 50,
+        };
+
+        let result = compute_centroid(&pixels, width, height, &background, &candidate, &config);
+
+        if let Some(star) = result {
+            let error = ((star.x - true_x).powi(2) + (star.y - true_y).powi(2)).sqrt();
+            draw_cross_mut(&mut img, green, star.x as i32, star.y as i32);
+
+            println!(
+                "  Brightness={:.2}: SNR={:.1}, error={:.4}px",
+                brightness, star.snr, error
+            );
+        } else {
+            println!("  Brightness={:.2}: Failed to compute centroid", brightness);
+        }
+    }
+
+    img.save(test_output_path("stage_centroid_snr_overlay.png"))
+        .unwrap();
+}

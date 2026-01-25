@@ -1,8 +1,15 @@
 //! Visual tests for star detection - generates debug images for inspection.
 
 mod debug_steps;
+pub mod generators;
+pub mod output;
 mod subpixel_accuracy;
 mod synthetic;
+
+// Algorithm stage tests
+mod stage_tests;
+// Pipeline tests
+mod pipeline_tests;
 
 use crate::AstroImage;
 use crate::star_detection::{StarDetectionConfig, find_stars};
