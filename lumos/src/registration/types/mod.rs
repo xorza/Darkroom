@@ -68,6 +68,48 @@ impl Default for TransformMatrix {
     }
 }
 
+impl std::fmt::Display for TransformMatrix {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let (tx, ty) = self.translation_components();
+        let rotation_deg = self.rotation_angle().to_degrees();
+        let scale = self.scale_factor();
+
+        match self.transform_type {
+            TransformType::Translation => {
+                write!(f, "Translation(dx={:.2}, dy={:.2})", tx, ty)
+            }
+            TransformType::Euclidean => {
+                write!(
+                    f,
+                    "Euclidean(dx={:.2}, dy={:.2}, rot={:.3}°)",
+                    tx, ty, rotation_deg
+                )
+            }
+            TransformType::Similarity => {
+                write!(
+                    f,
+                    "Similarity(dx={:.2}, dy={:.2}, rot={:.3}°, scale={:.4})",
+                    tx, ty, rotation_deg, scale
+                )
+            }
+            TransformType::Affine => {
+                write!(
+                    f,
+                    "Affine(dx={:.2}, dy={:.2}, rot={:.3}°, scale={:.4})",
+                    tx, ty, rotation_deg, scale
+                )
+            }
+            TransformType::Homography => {
+                write!(
+                    f,
+                    "Homography(dx={:.2}, dy={:.2}, rot={:.3}°, scale={:.4})",
+                    tx, ty, rotation_deg, scale
+                )
+            }
+        }
+    }
+}
+
 impl TransformMatrix {
     /// Create identity transform.
     pub fn identity() -> Self {

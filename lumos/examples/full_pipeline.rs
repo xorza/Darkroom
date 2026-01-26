@@ -455,6 +455,8 @@ fn register_all_lights(
                     "Registration successful"
                 );
 
+                tracing::info!("Transform: {}", result.transform);
+
                 // Warp the image to align with reference
                 let warped =
                     warp_image_to_reference(&target_image, width, height, &result.transform);
