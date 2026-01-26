@@ -18,3 +18,4 @@ AI coding rules for Rust projects:
 - Read `NOTES-AI.md` for summarized knowledge about the project.
 - When running benchmarks, use `cargo bench -p <crate> --features bench --bench <name>` to compile only the needed
   crate and enable the bench feature (e.g., `cargo bench -p lumos --features bench --bench math`).
+- Use nightly -Z unstable-options --report-time for measuring test execution time when asked
