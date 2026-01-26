@@ -90,25 +90,37 @@ lto = true
 strip = "symbols"
 
 # Optimize heavy dependencies even in dev/test builds
-# This dramatically speeds up GPU initialization (15s -> <1s)
 [profile.dev.package.wgpu]
 opt-level = 3
 [profile.dev.package.wgpu-core]
 opt-level = 3
 [profile.dev.package.wgpu-hal]
 opt-level = 3
+[profile.dev.package.wgpu-types]
+opt-level = 3
 [profile.dev.package.naga]
 opt-level = 3
-[profile.dev.package.metal]
+[profile.dev.package.gpu-alloc]
 opt-level = 3
-
-[profile.test.package.wgpu]
+[profile.dev.package.gpu-descriptor]
 opt-level = 3
-[profile.test.package.wgpu-core]
+[profile.dev.package.image]
 opt-level = 3
-[profile.test.package.wgpu-hal]
+[profile.dev.package.tiff]
 opt-level = 3
-[profile.test.package.naga]
+[profile.dev.package.spirv]
 opt-level = 3
-[profile.test.package.metal]
+[profile.dev.package.ash]
+opt-level = 3
+[profile.dev.package.png]
+opt-level = 3
+[profile.dev.package.zune-jpeg]
+opt-level = 3
+[profile.dev.package.ravif]
+opt-level = 3
+[profile.dev.package.rav1e]
+opt-level = 3
+[profile.dev.package.nalgebra]
+opt-level = 3
+[profile.dev.package.rustfft]
 opt-level = 3
