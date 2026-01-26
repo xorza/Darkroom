@@ -5,8 +5,8 @@
 
 **/target/
 /patch.diff
-style.toml
-config.toml
-log/
-.claude/settings.local.json
-vision_output.tiff
+/style.toml
+/config.toml
+/log/
+/.claude/settings.local.json
+/vision_output.tiff
