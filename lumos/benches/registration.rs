@@ -1,7 +1,5 @@
 //! Benchmark for registration operations.
 
-use std::path::PathBuf;
-
 use criterion::{Criterion, criterion_group, criterion_main};
 
 fn benchmarks(c: &mut Criterion) {
