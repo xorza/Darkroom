@@ -30,8 +30,8 @@ slow-timeout = { period = "30s", terminate-after = 2 }
 # GPU tests need single-threaded execution to share GPU context
 [[profile.default.overrides]]
 filter = "package(imaginarium) & test(/gpu/)"
-test-threads = 1
+threads-required = 1
 
 [[profile.ci.overrides]]
 filter = "package(imaginarium) & test(/gpu/)"
-test-threads = 1
+threads-required = 1
