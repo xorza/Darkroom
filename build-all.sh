@@ -5,7 +5,8 @@ set -eu
 # - Linux x86_64 gnu
 # - Linux aarch64 gnu (ARMv8)
 # - Windows x86_64 (MinGW)
-# - macOS aarch64 (Apple Silicon)
+#
+# Note: macOS targets require osxcross toolchain and are not included by default
 #
 # Usage:
 #   ./build-all.sh       - Build for all targets
@@ -15,7 +16,6 @@ TARGETS="
 x86_64-unknown-linux-gnu
 x86_64-pc-windows-gnu
 aarch64-unknown-linux-gnu
-aarch64-apple-darwin
 "
 
 # Handle -i flag to install targets
