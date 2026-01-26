@@ -3,6 +3,8 @@ name = "imaginarium"
 version.workspace = true
 edition.workspace = true
 
+[features]
+bench = ["dep:criterion"]
 
 [dependencies]
 common.workspace = true
@@ -24,6 +26,11 @@ pollster.workspace = true
 atomic_refcell.workspace = true
 tokio.workspace = true
 aligned-vec.workspace = true
+criterion = { workspace = true, optional = true }
 
 [dev-dependencies]
-criterion.workspace = true
+
+[[bench]]
+name = "conversion"
+harness = false
+required-features = ["bench"]

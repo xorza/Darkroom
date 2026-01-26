@@ -11,3 +11,8 @@ mod processing_context;
 pub mod prelude;
 
 pub use prelude::*;
+
+#[cfg(feature = "bench")]
+pub mod bench {
+    pub use crate::common::conversion::bench as conversion;
+}

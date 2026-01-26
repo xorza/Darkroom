@@ -4,6 +4,9 @@ mod conversion_simd;
 #[cfg(test)]
 mod tests;
 
+#[cfg(feature = "bench")]
+pub mod bench;
+
 pub(crate) use conversion_scalar::ChannelConvert;
 
 use crate::common::error::Result;
