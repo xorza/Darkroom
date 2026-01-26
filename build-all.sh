@@ -4,10 +4,10 @@ set -eu
 # Build targets:
 # - Linux x86_64 gnu (native)
 # - Windows x86_64 (MinGW) - requires: pacman -S mingw-w64-gcc
+# - Linux aarch64 gnu (ARMv8) - requires: pacman -S aarch64-linux-gnu-gcc
 #
-# Cross-compilation targets (require additional toolchains, not enabled by default):
-# - aarch64-unknown-linux-gnu - requires: aarch64-linux-gnu-gcc
-# - aarch64-apple-darwin - requires: osxcross
+# Cross-compilation targets not included:
+# - aarch64-apple-darwin - requires osxcross
 #
 # Usage:
 #   ./build-all.sh       - Build for all targets
@@ -16,6 +16,7 @@ set -eu
 TARGETS="
 x86_64-unknown-linux-gnu
 x86_64-pc-windows-gnu
+aarch64-unknown-linux-gnu
 "
 
 # Handle -i flag to install targets
