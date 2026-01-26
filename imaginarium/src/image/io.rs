@@ -4,7 +4,6 @@ use std::path::Path;
 use image as image_lib;
 use tiff::decoder::DecodingResult;
 
-use super::stride::add_stride_padding;
 use super::vec_to_avec;
 use crate::prelude::*;
 
@@ -40,14 +39,8 @@ pub(crate) fn load_png_jpeg<P: AsRef<Path>>(filename: P) -> Result<Image> {
     };
 
     let color_format = ColorFormat::from((channel_count, channel_size, channel_type));
-    let desc = ImageDesc::new(img.width() as usize, img.height() as usize, color_format);
-    let bytes = add_stride_padding(
-        vec_to_avec(img.into_bytes()),
-        desc.width,
-        desc.height,
-        desc.stride,
-        color_format.byte_count(),
-    );
+    let desc = ImageDesc::new_packed(img.width() as usize, img.height() as usize, color_format);
+    let bytes = vec_to_avec(img.into_bytes());
 
     Ok(Image { desc, bytes })
 }
@@ -102,14 +95,8 @@ pub(crate) fn load_tiff<P: AsRef<Path>>(filename: P) -> Result<Image> {
 
     let channel_size = ChannelSize::from_bit_count(channel_bits)?;
     let color_format = ColorFormat::from((channel_count, channel_size, channel_type));
-    let desc = ImageDesc::new(w as usize, h as usize, color_format);
-    let bytes = add_stride_padding(
-        vec_to_avec(bytes),
-        desc.width,
-        desc.height,
-        desc.stride,
-        color_format.byte_count(),
-    );
+    let desc = ImageDesc::new_packed(w as usize, h as usize, color_format);
+    let bytes = vec_to_avec(bytes);
 
     Ok(Image { desc, bytes })
 }

@@ -226,10 +226,22 @@ fn vec_to_avec(bytes: Vec<u8>) -> AVec<u8> {
 }
 
 impl ImageDesc {
+    /// Create a new ImageDesc with aligned stride (4-byte aligned).
     pub fn new(width: usize, height: usize, color_format: ColorFormat) -> Self {
-        let stride = align_stride(
-            width * color_format.channel_count as usize * color_format.channel_size as usize,
-        );
+        let row_bytes = width * color_format.byte_count() as usize;
+        let stride = align_stride(row_bytes);
+
+        Self {
+            width,
+            height,
+            stride,
+            color_format,
+        }
+    }
+
+    /// Create a new ImageDesc with packed stride (no padding).
+    pub fn new_packed(width: usize, height: usize, color_format: ColorFormat) -> Self {
+        let stride = width * color_format.byte_count() as usize;
 
         Self {
             width,

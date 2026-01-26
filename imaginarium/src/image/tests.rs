@@ -69,8 +69,11 @@ fn save_and_reload_png() {
         .unwrap();
 
     let reloaded = Image::read_file(test_output_path("save_reload.png")).unwrap();
-    assert_eq!(original.desc(), reloaded.desc());
-    assert_eq!(original.bytes(), reloaded.bytes());
+    assert_eq!(original.desc().width, reloaded.desc().width);
+    assert_eq!(original.desc().height, reloaded.desc().height);
+    assert_eq!(original.desc().color_format, reloaded.desc().color_format);
+    // Compare packed bytes (ignore stride padding differences)
+    assert_eq!(original.clone().packed().bytes(), reloaded.bytes());
 }
 
 #[test]
