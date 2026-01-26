@@ -17,8 +17,8 @@ use crate::common::{ColorFormat, Error, Result};
 
 use stride::{add_stride_padding, align_stride, strip_stride_padding};
 
-/// 8-byte alignment for image data to allow zero-copy casting to f32/f64.
-const ALIGNMENT: usize = 8;
+/// 16-byte alignment for image data to enable SIMD operations and zero-copy casting to f32/f64.
+const ALIGNMENT: usize = 16;
 
 #[derive(Clone, Copy, Eq, PartialEq, Debug, Hash)]
 pub struct ImageDesc {
@@ -28,9 +28,9 @@ pub struct ImageDesc {
     pub color_format: ColorFormat,
 }
 
-/// An image with pixel data stored in 8-byte aligned memory.
+/// An image with pixel data stored in 16-byte aligned memory.
 ///
-/// The 8-byte alignment allows zero-copy casting to/from `Vec<f32>` or `Vec<f64>`.
+/// The 16-byte alignment enables SIMD operations and allows zero-copy casting to/from `Vec<f32>` or `Vec<f64>`.
 #[derive(Clone, Debug)]
 pub struct Image {
     desc: ImageDesc,

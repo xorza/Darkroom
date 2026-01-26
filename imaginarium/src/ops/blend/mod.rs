@@ -15,12 +15,12 @@ use crate::processing_context::{ImageBuffer, ProcessingContext};
 pub use pipeline::GpuBlendPipeline;
 
 const SUPPORTED_CPU_FORMATS: &[ColorFormat] = &[
-    ColorFormat::GRAY_U8,
-    ColorFormat::GRAY_U16,
-    ColorFormat::GRAY_F32,
-    ColorFormat::GRAY_ALPHA_U8,
-    ColorFormat::GRAY_ALPHA_U16,
-    ColorFormat::GRAY_ALPHA_F32,
+    ColorFormat::L_U8,
+    ColorFormat::L_U16,
+    ColorFormat::L_F32,
+    ColorFormat::LA_U8,
+    ColorFormat::LA_U16,
+    ColorFormat::LA_F32,
     ColorFormat::RGB_U8,
     ColorFormat::RGB_U16,
     ColorFormat::RGB_F32,
@@ -30,16 +30,16 @@ const SUPPORTED_CPU_FORMATS: &[ColorFormat] = &[
 ];
 
 const SUPPORTED_GPU_FORMATS: &[ColorFormat] = &[
-    ColorFormat::GRAY_U8,
-    ColorFormat::GRAY_ALPHA_U8,
+    ColorFormat::L_U8,
+    ColorFormat::LA_U8,
     ColorFormat::RGB_U8,
     ColorFormat::RGBA_U8,
-    ColorFormat::GRAY_U16,
-    ColorFormat::GRAY_ALPHA_U16,
+    ColorFormat::L_U16,
+    ColorFormat::LA_U16,
     ColorFormat::RGB_U16,
     ColorFormat::RGBA_U16,
-    ColorFormat::GRAY_F32,
-    ColorFormat::GRAY_ALPHA_F32,
+    ColorFormat::L_F32,
+    ColorFormat::LA_F32,
     ColorFormat::RGB_F32,
     ColorFormat::RGBA_F32,
 ];
@@ -114,7 +114,7 @@ impl Blend {
     }
 
     /// Applies blending of two images using GPU.
-    /// Supports U8 and F32 formats for GRAY, GRAY_ALPHA, RGB, and RGBA.
+    /// Supports U8 and F32 formats for L, LA, RGB, and RGBA.
     ///
     /// # Arguments
     /// * `ctx` - The GPU context

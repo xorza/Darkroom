@@ -131,12 +131,12 @@ GPU/CPU image processing library with automatic backend selection.
 **Key types:**
 
 ```rust
-Image              // CPU image with AVec<u8> (8-byte aligned), desc, file I/O, format conversion
+Image              // CPU image with AVec<u8> (16-byte aligned), desc, file I/O, format conversion
 ImageDesc          // { width: usize, height: usize, stride: usize, color_format }
 ImageBuffer        // Smart buffer with automatic CPU/GPU transfer (AtomicRefCell)
 Storage            // Cpu(Image) | Gpu(GpuImage)
 ColorFormat        // { channel_count, channel_size, channel_type }
-ChannelCount       // Gray | GrayAlpha | Rgb | Rgba
+ChannelCount       // L | LA | Rgb | Rgba
 ChannelSize        // _8bit | _16bit | _32bit
 ChannelType        // UInt | Float
 Gpu                // wgpu device/queue wrapper
@@ -156,7 +156,7 @@ FilterMode         // Nearest | Linear
 ```
 
 **Color formats (12 supported):**
-- Gray/GrayAlpha/RGB/RGBA × U8/U16/F32
+- L/LA/RGB/RGBA × U8/U16/F32
 - Constants: `ColorFormat::RGBA_U8`, `ColorFormat::RGB_F32`, etc.
 - `ALL_FORMATS` and `ALPHA_FORMATS` arrays
 
@@ -255,7 +255,7 @@ CalibrationMasters // Container for master dark/flat/bias frames
 
 **Conversions:**
 - `From<AstroImage> for imaginarium::Image` - extracts the inner image (trivial since AstroImage wraps Image)
-- `From<imaginarium::Image> for AstroImage` - wraps Image with default metadata (requires GRAY_F32 or RGB_F32)
+- `From<imaginarium::Image> for AstroImage` - wraps Image with default metadata (requires L_F32 or RGB_F32)
 
 **Calibration:**
 - `AstroImage::calibrate(master_dark, master_flat)` - applies dark subtraction and flat field correction

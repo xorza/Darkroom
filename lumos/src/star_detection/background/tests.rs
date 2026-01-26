@@ -666,7 +666,7 @@ fn test_background_regression() {
     let imag_image = imaginarium::Image::read_file(&image_path)
         .expect("Failed to load image")
         .packed();
-    let astro_image: crate::AstroImage = imag_image.convert(ColorFormat::GRAY_F32).unwrap().into();
+    let astro_image: crate::AstroImage = imag_image.convert(ColorFormat::L_F32).unwrap().into();
 
     let width = astro_image.width();
     let height = astro_image.height();

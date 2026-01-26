@@ -10,7 +10,7 @@ fn main() {
     print_image_info("Input", &input);
 
     // Convert to grayscale (averages RGB channels)
-    let gray = input.clone().convert(ColorFormat::GRAY_U8).unwrap();
+    let gray = input.clone().convert(ColorFormat::L_U8).unwrap();
     save_image(&gray, "gray_u8.png");
 
     // Convert to 16-bit (bit replication for full range)

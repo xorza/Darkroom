@@ -8,12 +8,12 @@ use strum_macros::EnumIter;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, EnumIter)]
 pub enum ConversionFormat {
-    GrayU8,
-    GrayU16,
-    GrayF32,
-    GrayAlphaU8,
-    GrayAlphaU16,
-    GrayAlphaF32,
+    LU8,
+    LU16,
+    LF32,
+    LaU8,
+    LaU16,
+    LaF32,
     RgbU8,
     RgbU16,
     RgbF32,
@@ -25,12 +25,12 @@ pub enum ConversionFormat {
 impl ConversionFormat {
     pub fn to_color_format(self) -> ColorFormat {
         match self {
-            ConversionFormat::GrayU8 => ColorFormat::GRAY_U8,
-            ConversionFormat::GrayU16 => ColorFormat::GRAY_U16,
-            ConversionFormat::GrayF32 => ColorFormat::GRAY_F32,
-            ConversionFormat::GrayAlphaU8 => ColorFormat::GRAY_ALPHA_U8,
-            ConversionFormat::GrayAlphaU16 => ColorFormat::GRAY_ALPHA_U16,
-            ConversionFormat::GrayAlphaF32 => ColorFormat::GRAY_ALPHA_F32,
+            ConversionFormat::LU8 => ColorFormat::L_U8,
+            ConversionFormat::LU16 => ColorFormat::L_U16,
+            ConversionFormat::LF32 => ColorFormat::L_F32,
+            ConversionFormat::LaU8 => ColorFormat::LA_U8,
+            ConversionFormat::LaU16 => ColorFormat::LA_U16,
+            ConversionFormat::LaF32 => ColorFormat::LA_F32,
             ConversionFormat::RgbU8 => ColorFormat::RGB_U8,
             ConversionFormat::RgbU16 => ColorFormat::RGB_U16,
             ConversionFormat::RgbF32 => ColorFormat::RGB_F32,

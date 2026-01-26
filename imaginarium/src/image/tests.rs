@@ -93,7 +93,7 @@ fn save_and_reload_tiff() {
 
 #[test]
 fn save_tiff_with_misaligned_bytes_returns_error() {
-    let desc = ImageDesc::new(1, 1, ColorFormat::GRAY_U16);
+    let desc = ImageDesc::new(1, 1, ColorFormat::L_U16);
     // 3 bytes doesn't match expected size for GRAY_U16 (stride * height)
     let result = Image::new_with_data(desc, vec![0u8; 3]);
     assert!(result.is_err());
@@ -114,7 +114,7 @@ fn new_empty_creates_zeroed_image() {
 
 #[test]
 fn new_with_data_preserves_bytes() {
-    let desc = ImageDesc::new(2, 2, ColorFormat::GRAY_U8);
+    let desc = ImageDesc::new(2, 2, ColorFormat::L_U8);
     let data = vec![1, 2, 0, 0, 3, 4, 0, 0]; // 2x2 with 4-byte stride
     let img = Image::new_with_data(desc, data.clone()).unwrap();
 
@@ -149,7 +149,7 @@ fn valid_f32_format_succeeds() {
 #[test]
 fn image_desc_stride_alignment() {
     // Stride should be 4-byte aligned
-    let desc = ImageDesc::new(1, 1, ColorFormat::GRAY_U8);
+    let desc = ImageDesc::new(1, 1, ColorFormat::L_U8);
     assert_eq!(desc.stride % 4, 0);
 
     let desc = ImageDesc::new(3, 1, ColorFormat::RGB_U8);
@@ -176,7 +176,7 @@ fn bytes_per_pixel_calculation() {
     let img = Image::new_black(desc).unwrap();
     assert_eq!(img.bytes_per_pixel(), 6);
 
-    let desc = ImageDesc::new(1, 1, ColorFormat::GRAY_F32);
+    let desc = ImageDesc::new(1, 1, ColorFormat::L_F32);
     let img = Image::new_black(desc).unwrap();
     assert_eq!(img.bytes_per_pixel(), 4);
 }
@@ -228,12 +228,12 @@ fn convert_rgb_u8_to_rgb_u16() {
 
 #[test]
 fn convert_gray_u8_to_gray_u16() {
-    let desc = ImageDesc::new(1, 1, ColorFormat::GRAY_U8);
+    let desc = ImageDesc::new(1, 1, ColorFormat::L_U8);
     // stride is 4 bytes (1 byte data + 3 padding for 4-byte alignment)
     let src = Image::new_with_data(desc, vec![200, 0, 0, 0]).unwrap();
-    let result = src.convert(ColorFormat::GRAY_U16).unwrap();
+    let result = src.convert(ColorFormat::L_U16).unwrap();
 
-    assert_eq!(result.desc().color_format, ColorFormat::GRAY_U16);
+    assert_eq!(result.desc().color_format, ColorFormat::L_U16);
     let expected_val: u16 = 200u8.convert();
     let mut expected_bytes: Vec<u8> = bytemuck::cast_slice(&[expected_val]).to_vec();
     expected_bytes.extend_from_slice(&[0, 0]); // padding
@@ -242,7 +242,7 @@ fn convert_gray_u8_to_gray_u16() {
 
 #[test]
 fn convert_channel_count_gray_to_rgb() {
-    let desc = ImageDesc::new(1, 1, ColorFormat::GRAY_U8);
+    let desc = ImageDesc::new(1, 1, ColorFormat::L_U8);
     let src = Image::new_with_data(desc, vec![128, 0, 0, 0]).unwrap();
     let result = src.convert(ColorFormat::RGB_U8).unwrap();
 
@@ -259,9 +259,9 @@ fn convert_channel_count_rgb_to_gray() {
     // R=100, G=150, B=200
     // Luminance (Rec.709) = 0.2126*100 + 0.7152*150 + 0.0722*200 = 142.98
     let src = Image::new_with_data(desc, vec![100, 150, 200, 0]).unwrap();
-    let result = src.convert(ColorFormat::GRAY_U8).unwrap();
+    let result = src.convert(ColorFormat::L_U8).unwrap();
 
-    assert_eq!(result.desc().color_format, ColorFormat::GRAY_U8);
+    assert_eq!(result.desc().color_format, ColorFormat::L_U8);
     // Should be luminance-weighted grayscale
     assert_eq!(result.bytes()[0], 142);
 }
@@ -293,9 +293,9 @@ fn convert_rgb_to_rgba_adds_max_alpha() {
 
 #[test]
 fn convert_to_float_normalizes() {
-    let desc = ImageDesc::new(1, 1, ColorFormat::GRAY_U8);
+    let desc = ImageDesc::new(1, 1, ColorFormat::L_U8);
     let src = Image::new_with_data(desc, vec![255, 0, 0, 0]).unwrap();
-    let result = src.convert(ColorFormat::GRAY_F32).unwrap();
+    let result = src.convert(ColorFormat::L_F32).unwrap();
 
     let float_val: f32 = bytemuck::cast_slice(&result.bytes()[..4])[0];
     assert!(
@@ -307,11 +307,11 @@ fn convert_to_float_normalizes() {
 
 #[test]
 fn convert_from_float_denormalizes() {
-    let desc = ImageDesc::new(1, 1, ColorFormat::GRAY_F32);
+    let desc = ImageDesc::new(1, 1, ColorFormat::L_F32);
     let float_bytes: [u8; 4] = 1.0f32.to_ne_bytes();
     let data = float_bytes.to_vec();
     let src = Image::new_with_data(desc, data).unwrap();
-    let result = src.convert(ColorFormat::GRAY_U8).unwrap();
+    let result = src.convert(ColorFormat::L_U8).unwrap();
 
     assert_eq!(result.bytes()[0], 255);
 }
@@ -326,11 +326,8 @@ fn convert_and_save_various_formats() {
 
     // Test various format conversions
     let conversions = [
-        (ColorFormat::GRAY_U8, test_output_path("conv-gray-u8.tiff")),
-        (
-            ColorFormat::GRAY_U16,
-            test_output_path("conv-gray-u16.tiff"),
-        ),
+        (ColorFormat::L_U8, test_output_path("conv-gray-u8.tiff")),
+        (ColorFormat::L_U16, test_output_path("conv-gray-u16.tiff")),
         (ColorFormat::RGB_U8, test_output_path("conv-rgb-u8.tiff")),
         (ColorFormat::RGB_U16, test_output_path("conv-rgb-u16.tiff")),
         (
@@ -341,10 +338,7 @@ fn convert_and_save_various_formats() {
             ColorFormat::RGBA_F32,
             test_output_path("conv-rgba-f32.tiff"),
         ),
-        (
-            ColorFormat::GRAY_ALPHA_U8,
-            test_output_path("conv-ga-u8.tiff"),
-        ),
+        (ColorFormat::LA_U8, test_output_path("conv-ga-u8.tiff")),
     ];
 
     for (format, path) in conversions {

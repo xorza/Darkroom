@@ -3,7 +3,7 @@
 // This module will contain SIMD implementations for common conversion paths.
 // Currently a placeholder - SIMD implementations can be added here for:
 // - RGBA_U8 <-> RGB_U8
-// - RGBA_U8 <-> GRAY_U8
+// - RGBA_U8 <-> L_U8
 // - RGBA_F32 <-> RGB_F32
 // - etc.
 //

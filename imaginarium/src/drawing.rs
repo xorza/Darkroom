@@ -1,14 +1,14 @@
 //! Drawing primitives for images.
 //!
 //! Provides functions to draw shapes like circles, crosses, lines, and dots on images.
-//! Works with f32 images (GRAY_F32 or RGB_F32).
+//! Works with f32 images (L_F32 or RGB_F32).
 
 use crate::{Color, Image};
 
 /// Draw a hollow circle on an image.
 ///
 /// # Arguments
-/// * `image` - The image to draw on (must be GRAY_F32 or RGB_F32)
+/// * `image` - The image to draw on (must be L_F32 or RGB_F32)
 /// * `cx` - Center x coordinate
 /// * `cy` - Center y coordinate
 /// * `radius` - Circle radius in pixels
@@ -52,7 +52,7 @@ pub fn draw_circle(image: &mut Image, cx: f32, cy: f32, radius: f32, color: Colo
 /// Draw a filled circle (dot) on an image.
 ///
 /// # Arguments
-/// * `image` - The image to draw on (must be GRAY_F32 or RGB_F32)
+/// * `image` - The image to draw on (must be L_F32 or RGB_F32)
 /// * `cx` - Center x coordinate
 /// * `cy` - Center y coordinate
 /// * `radius` - Circle radius in pixels
@@ -91,7 +91,7 @@ pub fn draw_dot(image: &mut Image, cx: f32, cy: f32, radius: f32, color: Color) 
 /// Draw a cross marker on an image.
 ///
 /// # Arguments
-/// * `image` - The image to draw on (must be GRAY_F32 or RGB_F32)
+/// * `image` - The image to draw on (must be L_F32 or RGB_F32)
 /// * `cx` - Center x coordinate
 /// * `cy` - Center y coordinate
 /// * `arm_length` - Length of each arm from center
@@ -130,7 +130,7 @@ pub fn draw_cross(
 /// Draw a line on an image using Bresenham-style algorithm with thickness.
 ///
 /// # Arguments
-/// * `image` - The image to draw on (must be GRAY_F32 or RGB_F32)
+/// * `image` - The image to draw on (must be L_F32 or RGB_F32)
 /// * `x1`, `y1` - Start point
 /// * `x2`, `y2` - End point
 /// * `color` - Color (for grayscale images, uses luminance)
@@ -209,7 +209,7 @@ pub fn draw_line(
 /// Draw a rectangle outline on an image.
 ///
 /// # Arguments
-/// * `image` - The image to draw on (must be GRAY_F32 or RGB_F32)
+/// * `image` - The image to draw on (must be L_F32 or RGB_F32)
 /// * `x` - Left x coordinate
 /// * `y` - Top y coordinate
 /// * `w` - Width
@@ -250,7 +250,7 @@ mod tests {
 
     fn create_test_image(width: usize, height: usize, channels: usize) -> Image {
         let format = if channels == 1 {
-            ColorFormat::GRAY_F32
+            ColorFormat::L_F32
         } else {
             ColorFormat::RGB_F32
         };

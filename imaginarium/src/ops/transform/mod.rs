@@ -12,16 +12,16 @@ use crate::ops::{Backend, select_backend};
 use crate::processing_context::{ImageBuffer, ProcessingContext};
 
 const SUPPORTED_GPU_FORMATS: &[ColorFormat] = &[
-    ColorFormat::GRAY_U8,
-    ColorFormat::GRAY_ALPHA_U8,
+    ColorFormat::L_U8,
+    ColorFormat::LA_U8,
     ColorFormat::RGB_U8,
     ColorFormat::RGBA_U8,
-    ColorFormat::GRAY_U16,
-    ColorFormat::GRAY_ALPHA_U16,
+    ColorFormat::L_U16,
+    ColorFormat::LA_U16,
     ColorFormat::RGB_U16,
     ColorFormat::RGBA_U16,
-    ColorFormat::GRAY_F32,
-    ColorFormat::GRAY_ALPHA_F32,
+    ColorFormat::L_F32,
+    ColorFormat::LA_F32,
     ColorFormat::RGB_F32,
     ColorFormat::RGBA_F32,
 ];

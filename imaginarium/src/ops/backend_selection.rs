@@ -38,7 +38,7 @@ pub fn select_backend<'a>(
 ) -> Result<Backend> {
     let buffers: Vec<&ImageBuffer> = buffers.into_iter().collect();
 
-    assert!(!buffers.is_empty(), "buffers must not be empty");
+    debug_assert!(!buffers.is_empty(), "buffers must not be empty");
 
     let format = buffers[0].desc().color_format;
 
@@ -63,7 +63,7 @@ pub fn select_backend<'a>(
 
     let any_on_gpu = buffers.iter().any(|b| b.is_gpu());
     if any_on_gpu {
-        assert!(ctx.has_gpu(), "data is on GPU but context has no GPU");
+        debug_assert!(ctx.has_gpu(), "data is on GPU but context has no GPU");
     }
 
     if any_on_gpu && gpu_supported {

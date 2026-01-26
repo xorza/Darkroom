@@ -11,18 +11,10 @@ pub(crate) fn load_png_jpeg<P: AsRef<Path>>(filename: P) -> Result<Image> {
     let img = image_lib::open(filename)?;
 
     let (channel_count, channel_size, channel_type) = match img.color() {
-        image_lib::ColorType::L8 => (ChannelCount::Gray, ChannelSize::_8bit, ChannelType::UInt),
-        image_lib::ColorType::L16 => (ChannelCount::Gray, ChannelSize::_16bit, ChannelType::UInt),
-        image_lib::ColorType::La8 => (
-            ChannelCount::GrayAlpha,
-            ChannelSize::_8bit,
-            ChannelType::UInt,
-        ),
-        image_lib::ColorType::La16 => (
-            ChannelCount::GrayAlpha,
-            ChannelSize::_16bit,
-            ChannelType::UInt,
-        ),
+        image_lib::ColorType::L8 => (ChannelCount::L, ChannelSize::_8bit, ChannelType::UInt),
+        image_lib::ColorType::L16 => (ChannelCount::L, ChannelSize::_16bit, ChannelType::UInt),
+        image_lib::ColorType::La8 => (ChannelCount::LA, ChannelSize::_8bit, ChannelType::UInt),
+        image_lib::ColorType::La16 => (ChannelCount::LA, ChannelSize::_16bit, ChannelType::UInt),
         image_lib::ColorType::Rgb8 => (ChannelCount::Rgb, ChannelSize::_8bit, ChannelType::UInt),
         image_lib::ColorType::Rgb16 => (ChannelCount::Rgb, ChannelSize::_16bit, ChannelType::UInt),
         image_lib::ColorType::Rgba8 => (ChannelCount::Rgba, ChannelSize::_8bit, ChannelType::UInt),
@@ -51,8 +43,8 @@ pub(crate) fn load_tiff<P: AsRef<Path>>(filename: P) -> Result<Image> {
     let mut decoder = tiff::decoder::Decoder::new(File::open(filename)?)?.with_limits(limits);
 
     let (channel_bits, channel_count) = match decoder.colortype()? {
-        tiff::ColorType::Gray(b) => (b, ChannelCount::Gray),
-        tiff::ColorType::GrayA(b) => (b, ChannelCount::GrayAlpha),
+        tiff::ColorType::Gray(b) => (b, ChannelCount::L),
+        tiff::ColorType::GrayA(b) => (b, ChannelCount::LA),
         tiff::ColorType::RGB(b) => (b, ChannelCount::Rgb),
         tiff::ColorType::RGBA(b) => (b, ChannelCount::Rgba),
         _ => {
@@ -102,7 +94,7 @@ pub(crate) fn load_tiff<P: AsRef<Path>>(filename: P) -> Result<Image> {
 }
 
 pub(crate) fn save_jpg<P: AsRef<Path>>(image: &Image, filename: P) -> Result<()> {
-    assert!(
+    debug_assert!(
         image.desc().is_packed(),
         "Image must be packed before saving"
     );
@@ -116,7 +108,7 @@ pub(crate) fn save_jpg<P: AsRef<Path>>(image: &Image, filename: P) -> Result<()>
 
     let color_format = match image.desc.color_format.channel_size {
         ChannelSize::_8bit => match image.desc.color_format.channel_count {
-            ChannelCount::Gray => image_lib::ColorType::L8,
+            ChannelCount::L => image_lib::ColorType::L8,
             ChannelCount::Rgb => image_lib::ColorType::Rgb8,
 
             _ => {
@@ -148,7 +140,7 @@ pub(crate) fn save_jpg<P: AsRef<Path>>(image: &Image, filename: P) -> Result<()>
 }
 
 pub(crate) fn save_png<P: AsRef<Path>>(image: &Image, filename: P) -> Result<()> {
-    assert!(
+    debug_assert!(
         image.desc().is_packed(),
         "Image must be packed before saving"
     );
@@ -162,14 +154,14 @@ pub(crate) fn save_png<P: AsRef<Path>>(image: &Image, filename: P) -> Result<()>
 
     let color_format = match image.desc.color_format.channel_size {
         ChannelSize::_8bit => match image.desc.color_format.channel_count {
-            ChannelCount::Gray => image_lib::ColorType::L8,
-            ChannelCount::GrayAlpha => image_lib::ColorType::La8,
+            ChannelCount::L => image_lib::ColorType::L8,
+            ChannelCount::LA => image_lib::ColorType::La8,
             ChannelCount::Rgb => image_lib::ColorType::Rgb8,
             ChannelCount::Rgba => image_lib::ColorType::Rgba8,
         },
         ChannelSize::_16bit => match image.desc.color_format.channel_count {
-            ChannelCount::Gray => image_lib::ColorType::L16,
-            ChannelCount::GrayAlpha => image_lib::ColorType::La16,
+            ChannelCount::L => image_lib::ColorType::L16,
+            ChannelCount::LA => image_lib::ColorType::La16,
             ChannelCount::Rgb => image_lib::ColorType::Rgb16,
             ChannelCount::Rgba => image_lib::ColorType::Rgba16,
         },

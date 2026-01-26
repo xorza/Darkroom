@@ -144,16 +144,16 @@ macro_rules! dispatch_tiff {
 
 pub(crate) fn save_tiff<P: AsRef<Path>>(image: &Image, filename: P) -> Result<()> {
     dispatch_tiff!(image, filename, {
-        // Gray
-        (Gray, _8bit, UInt) => Gray8U,
-        (Gray, _16bit, UInt) => Gray16U,
-        (Gray, _32bit, UInt) => Gray32U,
-        (Gray, _32bit, Float) => Gray32F,
-        // GrayAlpha
-        (GrayAlpha, _8bit, UInt) => GrayAlpha8U,
-        (GrayAlpha, _16bit, UInt) => GrayAlpha16U,
-        (GrayAlpha, _32bit, UInt) => GrayAlpha32U,
-        (GrayAlpha, _32bit, Float) => GrayAlpha32F,
+        // L (grayscale)
+        (L, _8bit, UInt) => Gray8U,
+        (L, _16bit, UInt) => Gray16U,
+        (L, _32bit, UInt) => Gray32U,
+        (L, _32bit, Float) => Gray32F,
+        // LA (grayscale + alpha)
+        (LA, _8bit, UInt) => GrayAlpha8U,
+        (LA, _16bit, UInt) => GrayAlpha16U,
+        (LA, _32bit, UInt) => GrayAlpha32U,
+        (LA, _32bit, Float) => GrayAlpha32F,
         // RGB
         (Rgb, _8bit, UInt) => RGB8U,
         (Rgb, _16bit, UInt) => RGB16U,
@@ -175,7 +175,7 @@ where
     CT::Inner: Pod,
     [CT::Inner]: TiffValue,
 {
-    assert!(
+    debug_assert!(
         image.desc().is_packed(),
         "Image must be packed before saving"
     );

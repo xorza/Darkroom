@@ -27,12 +27,12 @@ pub(super) fn apply(params: &ContrastBrightness, input: &Image, output: &mut Ima
     if is_x86_feature_detected!("sse4.1") {
         match (channel_size, channel_type, channel_count) {
             // u8 formats
-            (ChannelSize::_8bit, ChannelType::UInt, ChannelCount::Gray) => {
+            (ChannelSize::_8bit, ChannelType::UInt, ChannelCount::L) => {
                 // SAFETY: SSE4.1 support verified above
                 unsafe { apply_u8_gray_sse41(input, output, *params) };
                 return;
             }
-            (ChannelSize::_8bit, ChannelType::UInt, ChannelCount::GrayAlpha) => {
+            (ChannelSize::_8bit, ChannelType::UInt, ChannelCount::LA) => {
                 // SAFETY: SSE4.1 support verified above
                 unsafe { apply_u8_gray_alpha_sse41(input, output, *params) };
                 return;
@@ -48,12 +48,12 @@ pub(super) fn apply(params: &ContrastBrightness, input: &Image, output: &mut Ima
                 return;
             }
             // f32 formats
-            (ChannelSize::_32bit, ChannelType::Float, ChannelCount::Gray) => {
+            (ChannelSize::_32bit, ChannelType::Float, ChannelCount::L) => {
                 // SAFETY: SSE4.1 support verified above
                 unsafe { apply_f32_gray_sse41(input, output, *params) };
                 return;
             }
-            (ChannelSize::_32bit, ChannelType::Float, ChannelCount::GrayAlpha) => {
+            (ChannelSize::_32bit, ChannelType::Float, ChannelCount::LA) => {
                 // SAFETY: SSE4.1 support verified above
                 unsafe { apply_f32_gray_alpha_sse41(input, output, *params) };
                 return;
@@ -77,12 +77,12 @@ pub(super) fn apply(params: &ContrastBrightness, input: &Image, output: &mut Ima
     {
         match (channel_size, channel_type, channel_count) {
             // u8 formats
-            (ChannelSize::_8bit, ChannelType::UInt, ChannelCount::Gray) => {
+            (ChannelSize::_8bit, ChannelType::UInt, ChannelCount::L) => {
                 // SAFETY: NEON is always available on aarch64
                 unsafe { apply_u8_gray_neon(input, output, *params) };
                 return;
             }
-            (ChannelSize::_8bit, ChannelType::UInt, ChannelCount::GrayAlpha) => {
+            (ChannelSize::_8bit, ChannelType::UInt, ChannelCount::LA) => {
                 // SAFETY: NEON is always available on aarch64
                 unsafe { apply_u8_gray_alpha_neon(input, output, *params) };
                 return;
@@ -98,12 +98,12 @@ pub(super) fn apply(params: &ContrastBrightness, input: &Image, output: &mut Ima
                 return;
             }
             // f32 formats
-            (ChannelSize::_32bit, ChannelType::Float, ChannelCount::Gray) => {
+            (ChannelSize::_32bit, ChannelType::Float, ChannelCount::L) => {
                 // SAFETY: NEON is always available on aarch64
                 unsafe { apply_f32_gray_neon(input, output, *params) };
                 return;
             }
-            (ChannelSize::_32bit, ChannelType::Float, ChannelCount::GrayAlpha) => {
+            (ChannelSize::_32bit, ChannelType::Float, ChannelCount::LA) => {
                 // SAFETY: NEON is always available on aarch64
                 unsafe { apply_f32_gray_alpha_neon(input, output, *params) };
                 return;

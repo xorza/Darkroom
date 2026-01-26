@@ -7,16 +7,16 @@ use crate::common::error::{Error, Result};
 use crate::gpu::{Gpu, GpuImage};
 
 // Format type constants matching shader
-const FORMAT_GRAY_U8: u32 = 0;
-const FORMAT_GRAY_ALPHA_U8: u32 = 1;
+const FORMAT_L_U8: u32 = 0;
+const FORMAT_LA_U8: u32 = 1;
 const FORMAT_RGB_U8: u32 = 2;
 const FORMAT_RGBA_U8: u32 = 3;
-const FORMAT_GRAY_F32: u32 = 4;
-const FORMAT_GRAY_ALPHA_F32: u32 = 5;
+const FORMAT_L_F32: u32 = 4;
+const FORMAT_LA_F32: u32 = 5;
 const FORMAT_RGB_F32: u32 = 6;
 const FORMAT_RGBA_F32: u32 = 7;
-const FORMAT_GRAY_U16: u32 = 8;
-const FORMAT_GRAY_ALPHA_U16: u32 = 9;
+const FORMAT_L_U16: u32 = 8;
+const FORMAT_LA_U16: u32 = 9;
 const FORMAT_RGB_U16: u32 = 10;
 const FORMAT_RGBA_U16: u32 = 11;
 
@@ -26,22 +26,16 @@ fn get_format_type(format: ColorFormat) -> Result<u32> {
         format.channel_size,
         format.channel_type,
     ) {
-        (ChannelCount::Gray, ChannelSize::_8bit, ChannelType::UInt) => Ok(FORMAT_GRAY_U8),
-        (ChannelCount::GrayAlpha, ChannelSize::_8bit, ChannelType::UInt) => {
-            Ok(FORMAT_GRAY_ALPHA_U8)
-        }
+        (ChannelCount::L, ChannelSize::_8bit, ChannelType::UInt) => Ok(FORMAT_L_U8),
+        (ChannelCount::LA, ChannelSize::_8bit, ChannelType::UInt) => Ok(FORMAT_LA_U8),
         (ChannelCount::Rgb, ChannelSize::_8bit, ChannelType::UInt) => Ok(FORMAT_RGB_U8),
         (ChannelCount::Rgba, ChannelSize::_8bit, ChannelType::UInt) => Ok(FORMAT_RGBA_U8),
-        (ChannelCount::Gray, ChannelSize::_32bit, ChannelType::Float) => Ok(FORMAT_GRAY_F32),
-        (ChannelCount::GrayAlpha, ChannelSize::_32bit, ChannelType::Float) => {
-            Ok(FORMAT_GRAY_ALPHA_F32)
-        }
+        (ChannelCount::L, ChannelSize::_32bit, ChannelType::Float) => Ok(FORMAT_L_F32),
+        (ChannelCount::LA, ChannelSize::_32bit, ChannelType::Float) => Ok(FORMAT_LA_F32),
         (ChannelCount::Rgb, ChannelSize::_32bit, ChannelType::Float) => Ok(FORMAT_RGB_F32),
         (ChannelCount::Rgba, ChannelSize::_32bit, ChannelType::Float) => Ok(FORMAT_RGBA_F32),
-        (ChannelCount::Gray, ChannelSize::_16bit, ChannelType::UInt) => Ok(FORMAT_GRAY_U16),
-        (ChannelCount::GrayAlpha, ChannelSize::_16bit, ChannelType::UInt) => {
-            Ok(FORMAT_GRAY_ALPHA_U16)
-        }
+        (ChannelCount::L, ChannelSize::_16bit, ChannelType::UInt) => Ok(FORMAT_L_U16),
+        (ChannelCount::LA, ChannelSize::_16bit, ChannelType::UInt) => Ok(FORMAT_LA_U16),
         (ChannelCount::Rgb, ChannelSize::_16bit, ChannelType::UInt) => Ok(FORMAT_RGB_U16),
         (ChannelCount::Rgba, ChannelSize::_16bit, ChannelType::UInt) => Ok(FORMAT_RGBA_U16),
         _ => Err(Error::UnsupportedFormat(format!(
@@ -132,12 +126,12 @@ pub(super) fn apply(
 
         // Calculate work items based on format
         let work_items = match format_type {
-            FORMAT_GRAY_U8 => {
+            FORMAT_L_U8 => {
                 // Each thread processes 4 pixels (one u32)
                 let quads_per_row = width.div_ceil(4);
                 quads_per_row * height
             }
-            FORMAT_GRAY_ALPHA_U8 | FORMAT_GRAY_U16 => {
+            FORMAT_LA_U8 | FORMAT_L_U16 => {
                 // Each thread processes 2 pixels (one u32)
                 let pairs_per_row = width.div_ceil(2);
                 pairs_per_row * height
@@ -306,7 +300,7 @@ mod tests {
 
         let pipeline = GpuContrastBrightnessPipeline::new(&ctx).unwrap();
 
-        let input_cpu = create_test_image(ColorFormat::GRAY_U8, 8, 8, 0);
+        let input_cpu = create_test_image(ColorFormat::L_U8, 8, 8, 0);
         let input = GpuImage::from_image(&ctx, &input_cpu);
         let mut output = GpuImage::new_empty(&ctx, *input.desc());
 
@@ -429,7 +423,7 @@ mod tests {
 
         let pipeline = GpuContrastBrightnessPipeline::new(&ctx).unwrap();
 
-        let input_cpu = create_test_image_f32(ColorFormat::GRAY_F32, 8, 8, 0.5);
+        let input_cpu = create_test_image_f32(ColorFormat::L_F32, 8, 8, 0.5);
         let input = GpuImage::from_image(&ctx, &input_cpu);
         let mut output = GpuImage::new_empty(&ctx, *input.desc());
 
@@ -476,22 +470,22 @@ mod tests {
         let pipeline = GpuContrastBrightnessPipeline::new(&ctx).unwrap();
 
         let u8_formats = [
-            ColorFormat::GRAY_U8,
-            ColorFormat::GRAY_ALPHA_U8,
+            ColorFormat::L_U8,
+            ColorFormat::LA_U8,
             ColorFormat::RGB_U8,
             ColorFormat::RGBA_U8,
         ];
 
         let u16_formats = [
-            ColorFormat::GRAY_U16,
-            ColorFormat::GRAY_ALPHA_U16,
+            ColorFormat::L_U16,
+            ColorFormat::LA_U16,
             ColorFormat::RGB_U16,
             ColorFormat::RGBA_U16,
         ];
 
         let f32_formats = [
-            ColorFormat::GRAY_F32,
-            ColorFormat::GRAY_ALPHA_F32,
+            ColorFormat::L_F32,
+            ColorFormat::LA_F32,
             ColorFormat::RGB_F32,
             ColorFormat::RGBA_F32,
         ];
@@ -568,7 +562,7 @@ mod tests {
 
         let pipeline = GpuContrastBrightnessPipeline::new(&ctx).unwrap();
 
-        let desc = ImageDesc::new(4, 4, ColorFormat::GRAY_ALPHA_U8);
+        let desc = ImageDesc::new(4, 4, ColorFormat::LA_U8);
         let mut input_data = vec![0u8; desc.stride * desc.height];
         // Set specific alpha values
         for y in 0..4usize {

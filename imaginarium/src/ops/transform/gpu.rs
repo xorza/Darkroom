@@ -7,16 +7,16 @@ use crate::gpu::GpuImage;
 use crate::prelude::*;
 
 // Format types matching shader constants
-const FORMAT_GRAY_U8: u32 = 0;
-const FORMAT_GRAY_ALPHA_U8: u32 = 1;
+const FORMAT_L_U8: u32 = 0;
+const FORMAT_LA_U8: u32 = 1;
 const FORMAT_RGB_U8: u32 = 2;
 const FORMAT_RGBA_U8: u32 = 3;
-const FORMAT_GRAY_F32: u32 = 4;
-const FORMAT_GRAY_ALPHA_F32: u32 = 5;
+const FORMAT_L_F32: u32 = 4;
+const FORMAT_LA_F32: u32 = 5;
 const FORMAT_RGB_F32: u32 = 6;
 const FORMAT_RGBA_F32: u32 = 7;
-const FORMAT_GRAY_U16: u32 = 8;
-const FORMAT_GRAY_ALPHA_U16: u32 = 9;
+const FORMAT_L_U16: u32 = 8;
+const FORMAT_LA_U16: u32 = 9;
 const FORMAT_RGB_U16: u32 = 10;
 const FORMAT_RGBA_U16: u32 = 11;
 
@@ -48,16 +48,16 @@ fn get_format_type(format: ColorFormat) -> u32 {
         format.channel_size,
         format.channel_type,
     ) {
-        (ChannelCount::Gray, ChannelSize::_8bit, ChannelType::UInt) => FORMAT_GRAY_U8,
-        (ChannelCount::GrayAlpha, ChannelSize::_8bit, ChannelType::UInt) => FORMAT_GRAY_ALPHA_U8,
+        (ChannelCount::L, ChannelSize::_8bit, ChannelType::UInt) => FORMAT_L_U8,
+        (ChannelCount::LA, ChannelSize::_8bit, ChannelType::UInt) => FORMAT_LA_U8,
         (ChannelCount::Rgb, ChannelSize::_8bit, ChannelType::UInt) => FORMAT_RGB_U8,
         (ChannelCount::Rgba, ChannelSize::_8bit, ChannelType::UInt) => FORMAT_RGBA_U8,
-        (ChannelCount::Gray, ChannelSize::_32bit, ChannelType::Float) => FORMAT_GRAY_F32,
-        (ChannelCount::GrayAlpha, ChannelSize::_32bit, ChannelType::Float) => FORMAT_GRAY_ALPHA_F32,
+        (ChannelCount::L, ChannelSize::_32bit, ChannelType::Float) => FORMAT_L_F32,
+        (ChannelCount::LA, ChannelSize::_32bit, ChannelType::Float) => FORMAT_LA_F32,
         (ChannelCount::Rgb, ChannelSize::_32bit, ChannelType::Float) => FORMAT_RGB_F32,
         (ChannelCount::Rgba, ChannelSize::_32bit, ChannelType::Float) => FORMAT_RGBA_F32,
-        (ChannelCount::Gray, ChannelSize::_16bit, ChannelType::UInt) => FORMAT_GRAY_U16,
-        (ChannelCount::GrayAlpha, ChannelSize::_16bit, ChannelType::UInt) => FORMAT_GRAY_ALPHA_U16,
+        (ChannelCount::L, ChannelSize::_16bit, ChannelType::UInt) => FORMAT_L_U16,
+        (ChannelCount::LA, ChannelSize::_16bit, ChannelType::UInt) => FORMAT_LA_U16,
         (ChannelCount::Rgb, ChannelSize::_16bit, ChannelType::UInt) => FORMAT_RGB_U16,
         (ChannelCount::Rgba, ChannelSize::_16bit, ChannelType::UInt) => FORMAT_RGBA_U16,
         _ => panic!("Unsupported format for Transform: {}", format),
@@ -91,12 +91,7 @@ pub(super) fn apply(
     // we need to clear the output buffer first to avoid garbage data
     let needs_clear = matches!(
         format_type,
-        FORMAT_GRAY_U8
-            | FORMAT_GRAY_ALPHA_U8
-            | FORMAT_RGB_U8
-            | FORMAT_GRAY_U16
-            | FORMAT_GRAY_ALPHA_U16
-            | FORMAT_RGB_U16
+        FORMAT_L_U8 | FORMAT_LA_U8 | FORMAT_RGB_U8 | FORMAT_L_U16 | FORMAT_LA_U16 | FORMAT_RGB_U16
     );
 
     if needs_clear {
@@ -507,16 +502,16 @@ mod tests {
         let lena_rgba = load_lena_rgba_u8_895x551();
 
         let formats = [
-            ColorFormat::GRAY_U8,
-            ColorFormat::GRAY_ALPHA_U8,
+            ColorFormat::L_U8,
+            ColorFormat::LA_U8,
             ColorFormat::RGB_U8,
             ColorFormat::RGBA_U8,
-            ColorFormat::GRAY_U16,
-            ColorFormat::GRAY_ALPHA_U16,
+            ColorFormat::L_U16,
+            ColorFormat::LA_U16,
             ColorFormat::RGB_U16,
             ColorFormat::RGBA_U16,
-            ColorFormat::GRAY_F32,
-            ColorFormat::GRAY_ALPHA_F32,
+            ColorFormat::L_F32,
+            ColorFormat::LA_F32,
             ColorFormat::RGB_F32,
             ColorFormat::RGBA_F32,
         ];
@@ -557,7 +552,7 @@ mod tests {
         let pipeline = GpuTransformPipeline::new(&ctx).unwrap();
 
         let lena_rgba = load_lena_rgba_u8_895x551();
-        let lena_gray = lena_rgba.convert(ColorFormat::GRAY_U8).unwrap();
+        let lena_gray = lena_rgba.convert(ColorFormat::L_U8).unwrap();
 
         let input = GpuImage::from_image(&ctx, &lena_gray);
         let mut output = GpuImage::new_empty(&ctx, *lena_gray.desc());
@@ -580,7 +575,7 @@ mod tests {
         let pipeline = GpuTransformPipeline::new(&ctx).unwrap();
 
         let lena_rgba = load_lena_rgba_u8_895x551();
-        let lena_gray_alpha = lena_rgba.convert(ColorFormat::GRAY_ALPHA_U8).unwrap();
+        let lena_gray_alpha = lena_rgba.convert(ColorFormat::LA_U8).unwrap();
 
         let input = GpuImage::from_image(&ctx, &lena_gray_alpha);
         let mut output = GpuImage::new_empty(&ctx, *lena_gray_alpha.desc());
@@ -603,7 +598,7 @@ mod tests {
         let pipeline = GpuTransformPipeline::new(&ctx).unwrap();
 
         let lena_rgba = load_lena_rgba_u8_895x551();
-        let lena_gray_f32 = lena_rgba.convert(ColorFormat::GRAY_F32).unwrap();
+        let lena_gray_f32 = lena_rgba.convert(ColorFormat::L_F32).unwrap();
 
         let input = GpuImage::from_image(&ctx, &lena_gray_f32);
         let mut output = GpuImage::new_empty(&ctx, *lena_gray_f32.desc());
@@ -637,7 +632,7 @@ mod tests {
         let pipeline = GpuTransformPipeline::new(&ctx).unwrap();
 
         let lena_rgba = load_lena_rgba_u8_895x551();
-        let lena_gray_alpha_f32 = lena_rgba.convert(ColorFormat::GRAY_ALPHA_F32).unwrap();
+        let lena_gray_alpha_f32 = lena_rgba.convert(ColorFormat::LA_F32).unwrap();
 
         let input = GpuImage::from_image(&ctx, &lena_gray_alpha_f32);
         let mut output = GpuImage::new_empty(&ctx, *lena_gray_alpha_f32.desc());
@@ -671,7 +666,7 @@ mod tests {
         let pipeline = GpuTransformPipeline::new(&ctx).unwrap();
 
         let lena_rgba = load_lena_rgba_u8_895x551();
-        let lena_gray = lena_rgba.convert(ColorFormat::GRAY_U8).unwrap();
+        let lena_gray = lena_rgba.convert(ColorFormat::L_U8).unwrap();
 
         let width = lena_gray.desc().width;
         let height = lena_gray.desc().height;

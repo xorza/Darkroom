@@ -162,11 +162,11 @@ impl AstroImage {
     /// Create a new AstroImage from an ImageDesc and pixel data.
     ///
     /// # Panics
-    /// Panics if format is not GRAY_F32 or RGB_F32, or if pixel count doesn't match dimensions.
+    /// Panics if format is not L_F32 or RGB_F32, or if pixel count doesn't match dimensions.
     pub fn new(desc: ImageDesc, pixels: Vec<f32>) -> Self {
         assert!(
-            desc.color_format == ColorFormat::GRAY_F32 || desc.color_format == ColorFormat::RGB_F32,
-            "Only GRAY_F32 or RGB_F32 formats supported, got {:?}",
+            desc.color_format == ColorFormat::L_F32 || desc.color_format == ColorFormat::RGB_F32,
+            "Only L_F32 or RGB_F32 formats supported, got {:?}",
             desc.color_format
         );
         assert_eq!(
@@ -199,7 +199,7 @@ impl AstroImage {
             "Only 1 or 3 channels supported"
         );
         let color_format = if channels == 1 {
-            ColorFormat::GRAY_F32
+            ColorFormat::L_F32
         } else {
             ColorFormat::RGB_F32
         };
@@ -326,7 +326,7 @@ impl AstroImage {
             metadata: self.metadata,
             image: self
                 .image
-                .convert(ColorFormat::GRAY_F32)
+                .convert(ColorFormat::L_F32)
                 .expect("Failed to convert to grayscale"),
         }
     }
@@ -363,7 +363,7 @@ impl From<Image> for AstroImage {
 
         // Determine target format: Gray or RGB, always f32
         let target_format = match desc.color_format.channel_count {
-            ChannelCount::Gray | ChannelCount::GrayAlpha => ColorFormat::GRAY_F32,
+            ChannelCount::L | ChannelCount::LA => ColorFormat::L_F32,
             ChannelCount::Rgb | ChannelCount::Rgba => ColorFormat::RGB_F32,
         };
 
@@ -375,9 +375,9 @@ impl From<Image> for AstroImage {
 
         // Validate that the resulting image has the expected format
         debug_assert!(
-            image.desc().color_format == ColorFormat::GRAY_F32
+            image.desc().color_format == ColorFormat::L_F32
                 || image.desc().color_format == ColorFormat::RGB_F32,
-            "Image must be GRAY_F32 or RGB_F32 after conversion"
+            "Image must be L_F32 or RGB_F32 after conversion"
         );
 
         AstroImage {
@@ -411,7 +411,7 @@ mod tests {
 
         assert_eq!(desc.width, 3);
         assert_eq!(desc.height, 2);
-        assert_eq!(desc.color_format, ColorFormat::GRAY_F32);
+        assert_eq!(desc.color_format, ColorFormat::L_F32);
 
         // Verify pixel data
         let pixels: &[f32] = bytemuck::cast_slice(image.bytes());
@@ -467,7 +467,7 @@ mod tests {
         let desc = image.desc();
         assert_eq!(desc.width, 100);
         assert_eq!(desc.height, 100);
-        assert_eq!(desc.color_format, ColorFormat::GRAY_F32);
+        assert_eq!(desc.color_format, ColorFormat::L_F32);
     }
 
     #[test]
@@ -497,7 +497,7 @@ mod tests {
     #[test]
     fn test_from_image_no_stride_padding() {
         // Create an Image with potential stride padding
-        let desc = ImageDesc::new(3, 2, ColorFormat::GRAY_F32);
+        let desc = ImageDesc::new(3, 2, ColorFormat::L_F32);
         let pixels: Vec<f32> = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
         let bytes: Vec<u8> = bytemuck::cast_slice(&pixels).to_vec();
         let image = Image::new_with_data(desc, bytes).unwrap();
@@ -693,8 +693,8 @@ mod tests {
 
     #[test]
     fn test_image_gray_alpha_to_astro_drops_alpha() {
-        // Create GrayAlpha f32 image
-        let desc = ImageDesc::new(2, 1, ColorFormat::GRAY_ALPHA_F32);
+        // Create LA f32 image
+        let desc = ImageDesc::new(2, 1, ColorFormat::LA_F32);
         let pixels: Vec<f32> = vec![
             0.5, 0.8, // gray 0.5 with 80% alpha
             0.9, 1.0, // gray 0.9 with full alpha
