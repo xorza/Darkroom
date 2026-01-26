@@ -15,7 +15,13 @@
 use std::f32::consts::PI;
 use std::sync::OnceLock;
 
+use rayon::prelude::*;
+
 use crate::registration::types::TransformMatrix;
+
+/// Number of rows to process per parallel chunk.
+/// Balances parallelism overhead vs cache locality.
+const ROWS_PER_CHUNK: usize = 32;
 
 #[cfg(test)]
 mod tests;
@@ -460,7 +466,8 @@ pub fn interpolate_pixel(
 /// Applies the inverse of the given transform to map output coordinates
 /// to input coordinates, then interpolates the input image.
 ///
-/// For bilinear interpolation, this function uses SIMD acceleration when available:
+/// This function is parallelized using rayon, processing rows in chunks.
+/// For bilinear interpolation, it also uses SIMD acceleration when available:
 /// - AVX2/SSE4.1 on x86_64
 /// - NEON on aarch64
 ///
@@ -497,41 +504,59 @@ pub fn warp_image(
     // Compute inverse transform to map output -> input
     let inverse = transform.inverse();
 
-    // Use SIMD-accelerated path for bilinear interpolation
+    // Use SIMD-accelerated path for bilinear interpolation (parallel by row chunks)
     if config.method == InterpolationMethod::Bilinear {
-        for y in 0..output_height {
-            let row_start = y * output_width;
-            let row_end = row_start + output_width;
-            simd::warp_row_bilinear_simd(
-                input,
-                input_width,
-                input_height,
-                &mut output[row_start..row_end],
-                y,
-                &inverse,
-                config.border_value,
-            );
-        }
+        output
+            .par_chunks_mut(output_width * ROWS_PER_CHUNK)
+            .enumerate()
+            .for_each(|(chunk_idx, chunk)| {
+                let start_y = chunk_idx * ROWS_PER_CHUNK;
+                let num_rows = chunk.len() / output_width;
+
+                for row_in_chunk in 0..num_rows {
+                    let y = start_y + row_in_chunk;
+                    let row_start = row_in_chunk * output_width;
+                    let row_end = row_start + output_width;
+                    simd::warp_row_bilinear_simd(
+                        input,
+                        input_width,
+                        input_height,
+                        &mut chunk[row_start..row_end],
+                        y,
+                        &inverse,
+                        config.border_value,
+                    );
+                }
+            });
         return output;
     }
 
-    // Standard path for other interpolation methods
-    for y in 0..output_height {
-        for x in 0..output_width {
-            // Transform output coordinates to input coordinates
-            let (src_x, src_y) = inverse.transform_point(x as f64, y as f64);
+    // Parallel path for other interpolation methods (Lanczos, Bicubic, etc.)
+    output
+        .par_chunks_mut(output_width * ROWS_PER_CHUNK)
+        .enumerate()
+        .for_each(|(chunk_idx, chunk)| {
+            let start_y = chunk_idx * ROWS_PER_CHUNK;
+            let num_rows = chunk.len() / output_width;
 
-            // Interpolate input at source coordinates
-            output[y * output_width + x] = interpolate_pixel(
-                input,
-                input_width,
-                input_height,
-                src_x as f32,
-                src_y as f32,
-                config,
-            );
-        }
-    }
+            for row_in_chunk in 0..num_rows {
+                let y = start_y + row_in_chunk;
+                for x in 0..output_width {
+                    // Transform output coordinates to input coordinates
+                    let (src_x, src_y) = inverse.transform_point(x as f64, y as f64);
+
+                    // Interpolate input at source coordinates
+                    chunk[row_in_chunk * output_width + x] = interpolate_pixel(
+                        input,
+                        input_width,
+                        input_height,
+                        src_x as f32,
+                        src_y as f32,
+                        config,
+                    );
+                }
+            }
+        });
 
     output
 }
