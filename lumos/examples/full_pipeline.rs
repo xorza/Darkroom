@@ -4,6 +4,7 @@
 //! 1. Create master calibration frames (darks, flats, biases) from raw frames
 //! 2. Calibrate light frames using the master frames
 //! 3. Detect stars in calibrated images
+//! 4. Register (align) all lights to a reference frame
 //!
 //! # Directory Structure
 //!
@@ -32,6 +33,10 @@
 //!     light1_calibrated.tiff
 //!     light2_calibrated.tiff
 //!     ...
+//!   registered_lights/
+//!     light1_registered.tiff (reference frame, copied as-is)
+//!     light2_registered.tiff
+//!     ...
 //!   stars_detected.tiff
 //! ```
 //!
@@ -48,8 +53,9 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use lumos::{
-    AstroImage, CalibrationMasters, MedianConfig, ProgressCallback, StackingMethod,
-    StackingProgress, StackingStage, Star, StarDetectionConfig, find_stars,
+    AstroImage, CalibrationMasters, InterpolationMethod, MedianConfig, ProgressCallback,
+    RegistrationConfig, Registrator, StackingMethod, StackingProgress, StackingStage, Star,
+    StarDetectionConfig, find_stars,
 };
 use tracing_subscriber::EnvFilter;
 
@@ -64,6 +70,9 @@ const CIRCLE_THICKNESS: usize = 2;
 
 /// Minimum radius for drawn circles (pixels).
 const MIN_CIRCLE_RADIUS: f32 = 8.0;
+
+/// Maximum stars to use for registration.
+const MAX_STARS_FOR_REGISTRATION: usize = 200;
 
 fn main() {
     init_tracing();
@@ -81,9 +90,11 @@ fn main() {
     let output_base = PathBuf::from("test_output");
     let masters_dir = output_base.join("calibration_masters");
     let calibrated_dir = output_base.join("calibrated_lights");
+    let registered_dir = output_base.join("registered_lights");
 
     fs::create_dir_all(&masters_dir).expect("Failed to create masters directory");
     fs::create_dir_all(&calibrated_dir).expect("Failed to create calibrated directory");
+    fs::create_dir_all(&registered_dir).expect("Failed to create registered directory");
 
     // =========================================================================
     // STEP 1: Create calibration master frames
@@ -101,20 +112,30 @@ fn main() {
     println!("STEP 2: Calibrating light frames");
     println!("{}\n", "=".repeat(60));
 
-    let calibrated_paths = calibrate_light_frames(&calibration_dir, &calibrated_dir, &masters);
+    let calibrated_images = calibrate_light_frames(&calibration_dir, &calibrated_dir, &masters);
 
     // =========================================================================
-    // STEP 3: Detect stars in calibrated images
+    // STEP 3: Detect stars in all calibrated images
     // =========================================================================
     println!("\n{}", "=".repeat(60));
-    println!("STEP 3: Detecting stars");
+    println!("STEP 3: Detecting stars in all calibrated images");
     println!("{}\n", "=".repeat(60));
 
-    if let Some(first_calibrated) = calibrated_paths.first() {
-        detect_stars_in_image(first_calibrated, &output_base);
-    } else {
-        tracing::warn!("No calibrated images to run star detection on");
-    }
+    let stars_per_image = detect_stars_in_all_images(&calibrated_images);
+
+    // =========================================================================
+    // STEP 4: Register all lights to reference frame
+    // =========================================================================
+    println!("\n{}", "=".repeat(60));
+    println!("STEP 4: Registering all lights to reference frame");
+    println!("{}\n", "=".repeat(60));
+
+    register_all_lights(
+        &calibrated_images,
+        &stars_per_image,
+        &registered_dir,
+        &output_base,
+    );
 
     // =========================================================================
     // Summary
@@ -193,12 +214,19 @@ fn create_calibration_masters(calibration_dir: &Path, output_dir: &Path) -> Cali
     masters
 }
 
+/// Calibrated image with its filename.
+#[derive(Debug)]
+struct CalibratedImage {
+    image: AstroImage,
+    filename: String,
+}
+
 /// Step 2: Calibrate light frames using master calibration frames.
 fn calibrate_light_frames(
     calibration_dir: &Path,
     output_dir: &Path,
     masters: &CalibrationMasters,
-) -> Vec<PathBuf> {
+) -> Vec<CalibratedImage> {
     let lights_dir = calibration_dir.join("Lights");
 
     if !lights_dir.exists() {
@@ -216,10 +244,10 @@ fn calibrate_light_frames(
     tracing::info!(count = light_paths.len(), "Found light frames to calibrate");
 
     let start = Instant::now();
-    let mut calibrated_paths = Vec::new();
+    let mut calibrated_images = Vec::new();
 
     for path in &light_paths {
-        let filename = path.file_stem().unwrap().to_string_lossy();
+        let filename = path.file_stem().unwrap().to_string_lossy().to_string();
         tracing::info!(file = %filename, "Calibrating");
 
         // Load the light frame
@@ -236,92 +264,244 @@ fn calibrate_light_frames(
 
         // Save calibrated frame
         let output_path = output_dir.join(format!("{}_calibrated.tiff", filename));
-        let img: imaginarium::Image = light.into();
+        let img: imaginarium::Image = light.clone().into();
         if let Err(e) = img.save_file(&output_path) {
             tracing::error!(file = %filename, error = %e, "Failed to save");
             continue;
         }
 
         tracing::debug!(file = %filename, "Saved");
-        calibrated_paths.push(output_path);
+        calibrated_images.push(CalibratedImage {
+            image: light,
+            filename,
+        });
     }
 
     let elapsed = start.elapsed();
     tracing::info!(
-        successful = calibrated_paths.len(),
-        failed = light_paths.len() - calibrated_paths.len(),
+        successful = calibrated_images.len(),
+        failed = light_paths.len() - calibrated_images.len(),
         elapsed_secs = format!("{:.2}", elapsed.as_secs_f32()),
         "Step 2 complete: Light frames calibrated"
     );
 
-    calibrated_paths
+    calibrated_images
 }
 
-/// Step 3: Detect stars in a calibrated image.
-fn detect_stars_in_image(image_path: &Path, output_dir: &Path) {
-    tracing::info!(path = %image_path.display(), "Loading image for star detection");
+/// Step 3: Detect stars in all calibrated images.
+fn detect_stars_in_all_images(calibrated_images: &[CalibratedImage]) -> Vec<Vec<Star>> {
+    let start = Instant::now();
 
-    // Load the image
-    let image = match AstroImage::from_file(image_path) {
-        Ok(img) => img,
-        Err(e) => {
-            tracing::error!(error = %e, "Failed to load image");
-            return;
-        }
-    };
-
-    tracing::info!(
-        width = image.dimensions.width,
-        height = image.dimensions.height,
-        channels = image.dimensions.channels,
-        "Image loaded"
-    );
-
-    // Configure star detection
     let config = StarDetectionConfig {
         edge_margin: 20,
-        min_snr: 15.0,
-        max_eccentricity: 0.5,
+        min_snr: 10.0,
+        max_eccentricity: 0.6,
         ..StarDetectionConfig::default()
     };
 
-    // Run star detection
-    let start = Instant::now();
-    let result = find_stars(&image, &config);
-    let elapsed = start.elapsed();
+    let mut all_stars = Vec::with_capacity(calibrated_images.len());
 
+    for calibrated in calibrated_images {
+        let result = find_stars(&calibrated.image, &config);
+
+        tracing::info!(
+            file = %calibrated.filename,
+            stars = result.stars.len(),
+            median_fwhm = format!("{:.2}", result.diagnostics.median_fwhm),
+            median_snr = format!("{:.1}", result.diagnostics.median_snr),
+            "Stars detected"
+        );
+
+        all_stars.push(result.stars);
+    }
+
+    let elapsed = start.elapsed();
+    let total_stars: usize = all_stars.iter().map(|s| s.len()).sum();
     tracing::info!(
-        stars_detected = result.stars.len(),
-        elapsed_ms = elapsed.as_millis(),
-        median_fwhm = format!("{:.2}", result.diagnostics.median_fwhm),
-        median_snr = format!("{:.1}", result.diagnostics.median_snr),
-        "Star detection complete"
+        images = calibrated_images.len(),
+        total_stars,
+        elapsed_secs = format!("{:.2}", elapsed.as_secs_f32()),
+        "Step 3 complete: Stars detected in all images"
     );
 
-    if result.stars.is_empty() {
-        tracing::warn!("No stars detected!");
+    all_stars
+}
+
+/// Step 4: Register all lights to a reference frame.
+fn register_all_lights(
+    calibrated_images: &[CalibratedImage],
+    stars_per_image: &[Vec<Star>],
+    output_dir: &Path,
+    output_base: &Path,
+) {
+    if calibrated_images.is_empty() {
+        tracing::warn!("No calibrated images to register");
         return;
     }
 
-    // Filter out stars in the bottom portion of the image (horizon, ground)
-    let height_cutoff = image.dimensions.height as f32 * 0.7;
-    let sky_stars: Vec<&Star> = result
-        .stars
-        .iter()
-        .filter(|s| s.y < height_cutoff)
-        .collect();
+    let start = Instant::now();
+
+    // Use the first image as the reference
+    let ref_image = &calibrated_images[0];
+    let ref_stars = &stars_per_image[0];
 
     tracing::info!(
-        total = result.stars.len(),
-        sky_only = sky_stars.len(),
-        "Filtered stars above horizon"
+        reference = %ref_image.filename,
+        ref_stars = ref_stars.len(),
+        "Using first image as reference"
     );
 
-    // Take the best stars (sorted by flux, brightest first)
+    // Convert reference stars to (x, y) tuples, sorted by flux (brightest first)
+    let mut ref_star_positions: Vec<(f64, f64)> =
+        ref_stars.iter().map(|s| (s.x as f64, s.y as f64)).collect();
+    // Stars are already sorted by flux from find_stars, take the brightest
+    ref_star_positions.truncate(MAX_STARS_FOR_REGISTRATION);
+
+    // Configure registration
+    let reg_config = RegistrationConfig::builder()
+        .with_scale()
+        .ransac_iterations(1000)
+        .ransac_threshold(2.0)
+        .max_stars(MAX_STARS_FOR_REGISTRATION)
+        .min_matched_stars(6)
+        .max_residual(3.0)
+        .build();
+
+    let registrator = Registrator::new(reg_config);
+
+    let width = ref_image.image.dimensions.width;
+    let height = ref_image.image.dimensions.height;
+
+    let mut successful_registrations = 0;
+    let mut failed_registrations = 0;
+
+    for (i, (calibrated, stars)) in calibrated_images
+        .iter()
+        .zip(stars_per_image.iter())
+        .enumerate()
+    {
+        let output_path = output_dir.join(format!("{}_registered.tiff", calibrated.filename));
+
+        if i == 0 {
+            // Reference frame - just copy it
+            let img: imaginarium::Image = calibrated.image.clone().into();
+            img.save_file(&output_path)
+                .expect("Failed to save reference frame");
+            tracing::info!(file = %calibrated.filename, "Reference frame saved (no transformation needed)");
+            successful_registrations += 1;
+            continue;
+        }
+
+        // Convert target stars to (x, y) tuples
+        let mut target_star_positions: Vec<(f64, f64)> =
+            stars.iter().map(|s| (s.x as f64, s.y as f64)).collect();
+        target_star_positions.truncate(MAX_STARS_FOR_REGISTRATION);
+
+        // Register target to reference
+        match registrator.register_stars(&ref_star_positions, &target_star_positions) {
+            Ok(result) => {
+                tracing::info!(
+                    file = %calibrated.filename,
+                    matched_stars = result.num_inliers,
+                    rms_error = format!("{:.3}", result.rms_error),
+                    elapsed_ms = format!("{:.1}", result.elapsed_ms),
+                    "Registration successful"
+                );
+
+                // Warp the image to align with reference
+                let warped =
+                    warp_image_to_reference(&calibrated.image, width, height, &result.transform);
+
+                // Save registered image
+                let img: imaginarium::Image = warped.into();
+                img.save_file(&output_path)
+                    .expect("Failed to save registered frame");
+
+                successful_registrations += 1;
+            }
+            Err(e) => {
+                tracing::error!(
+                    file = %calibrated.filename,
+                    error = %e,
+                    "Registration failed"
+                );
+                failed_registrations += 1;
+            }
+        }
+    }
+
+    let elapsed = start.elapsed();
+    tracing::info!(
+        successful = successful_registrations,
+        failed = failed_registrations,
+        elapsed_secs = format!("{:.2}", elapsed.as_secs_f32()),
+        "Step 4 complete: All lights registered"
+    );
+
+    // Save visualization of stars detected in reference frame
+    if !ref_stars.is_empty() {
+        save_star_visualization(ref_image, ref_stars, output_base);
+    }
+}
+
+/// Warp an image to align with the reference frame.
+fn warp_image_to_reference(
+    image: &AstroImage,
+    width: usize,
+    height: usize,
+    transform: &lumos::TransformMatrix,
+) -> AstroImage {
+    let channels = image.dimensions.channels;
+
+    // Warp each channel separately
+    let mut warped_pixels = Vec::with_capacity(image.pixels.len());
+
+    for c in 0..channels {
+        // Extract channel
+        let channel: Vec<f32> = image
+            .pixels
+            .iter()
+            .skip(c)
+            .step_by(channels)
+            .copied()
+            .collect();
+
+        // Warp channel
+        let warped_channel = lumos::registration::warp_to_reference(
+            &channel,
+            width,
+            height,
+            transform,
+            InterpolationMethod::Lanczos3,
+        );
+
+        // Interleave back
+        if c == 0 {
+            warped_pixels.resize(image.pixels.len(), 0.0);
+        }
+        for (i, &val) in warped_channel.iter().enumerate() {
+            warped_pixels[i * channels + c] = val;
+        }
+    }
+
+    AstroImage {
+        pixels: warped_pixels,
+        dimensions: image.dimensions,
+        metadata: image.metadata.clone(),
+    }
+}
+
+/// Save a visualization of detected stars on the reference image.
+fn save_star_visualization(ref_image: &CalibratedImage, stars: &[Star], output_dir: &Path) {
+    // Filter out stars in the bottom portion of the image (horizon, ground)
+    let height_cutoff = ref_image.image.dimensions.height as f32 * 0.7;
+    let sky_stars: Vec<&Star> = stars.iter().filter(|s| s.y < height_cutoff).collect();
+
+    // Take the best stars
     let best_stars: Vec<&Star> = sky_stars.iter().copied().take(MAX_STARS_TO_DRAW).collect();
 
     // Print info about the brightest stars
-    println!("\nTop 10 brightest stars:");
+    println!("\nTop 10 brightest stars in reference frame:");
     println!(
         "{:>4}  {:>8}  {:>8}  {:>8}  {:>6}  {:>6}",
         "Rank", "X", "Y", "Flux", "FWHM", "SNR"
@@ -339,7 +519,7 @@ fn detect_stars_in_image(image_path: &Path, output_dir: &Path) {
     }
 
     // Draw circles on the image
-    let mut output_image = image.clone();
+    let mut output_image = ref_image.image.clone();
     for star in &best_stars {
         let radius = (star.fwhm * 2.0).max(MIN_CIRCLE_RADIUS);
         draw_circle(
@@ -361,7 +541,7 @@ fn detect_stars_in_image(image_path: &Path, output_dir: &Path) {
     tracing::info!(
         path = %output_path.display(),
         stars_marked = best_stars.len(),
-        "Step 3 complete: Stars detected and marked"
+        "Star visualization saved"
     );
 }
 

@@ -441,6 +441,9 @@ LocalBackgroundMethod // GlobalMap | LocalAnnulus - how to estimate local backgr
 - Pixels assigned to nearest peak using Euclidean distance
 - Each peak becomes a separate `StarCandidate` with its own bounding box and area
 
+**Examples:**
+- `full_pipeline.rs` - Complete calibration workflow: master frame creation, light calibration, star detection, and registration (alignment) of all lights to a reference frame
+
 **Dependencies:** common, imaginarium, fitsio, rawloader, libraw-rs, anyhow, rayon, strum_macros
 
 **Image registration module (`registration/`):**
