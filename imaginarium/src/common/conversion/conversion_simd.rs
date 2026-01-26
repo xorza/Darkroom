@@ -1,77 +1,793 @@
 // SIMD-optimized image conversion implementations
 //
-// This module will contain SIMD implementations for common conversion paths.
-// Currently a placeholder - SIMD implementations can be added here for:
+// This module contains SIMD implementations for common conversion paths:
 // - RGBA_U8 <-> RGB_U8
-// - RGBA_U8 <-> L_U8
-// - RGBA_F32 <-> RGB_F32
-// - etc.
-//
-// The mod.rs will dispatch to these when available.
+// - RGB_U8/RGBA_U8 -> L_U8 (luminance)
+// - More to be added...
 
+use rayon::prelude::*;
+
+use crate::common::color_format::ColorFormat;
 use crate::common::error::Result;
 use crate::image::Image;
 
 /// Check if SIMD conversion is available for the given format pair.
 /// Returns true if a SIMD-optimized path exists.
-#[allow(unused_variables)]
 pub(crate) fn has_simd_path(from: &Image, to: &Image) -> bool {
-    // TODO: Add checks for supported SIMD conversion paths
-    // Example:
-    // #[cfg(target_arch = "aarch64")]
-    // if from.desc.color_format == ColorFormat::RGBA_U8
-    //     && to.desc.color_format == ColorFormat::RGB_U8 {
-    //     return true;
-    // }
+    let from_fmt = from.desc().color_format;
+    let to_fmt = to.desc().color_format;
+
+    #[cfg(target_arch = "x86_64")]
+    if is_x86_feature_detected!("ssse3") {
+        match (from_fmt, to_fmt) {
+            (ColorFormat::RGBA_U8, ColorFormat::RGB_U8) => return true,
+            (ColorFormat::RGB_U8, ColorFormat::RGBA_U8) => return true,
+            (ColorFormat::RGBA_U8, ColorFormat::L_U8) => return true,
+            (ColorFormat::RGB_U8, ColorFormat::L_U8) => return true,
+            _ => {}
+        }
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    match (from_fmt, to_fmt) {
+        (ColorFormat::RGBA_U8, ColorFormat::RGB_U8) => return true,
+        (ColorFormat::RGB_U8, ColorFormat::RGBA_U8) => return true,
+        (ColorFormat::RGBA_U8, ColorFormat::L_U8) => return true,
+        (ColorFormat::RGB_U8, ColorFormat::L_U8) => return true,
+        _ => {}
+    }
+
     false
 }
 
 /// Attempt SIMD conversion. Returns Ok(true) if conversion was performed,
 /// Ok(false) if no SIMD path available, or Err on failure.
-#[allow(unused_variables)]
 pub(crate) fn try_convert_simd(from: &Image, to: &mut Image) -> Result<bool> {
-    // TODO: Implement SIMD conversion paths
-    // Example structure:
-    //
-    // #[cfg(target_arch = "aarch64")]
-    // {
-    //     let from_fmt = from.desc.color_format;
-    //     let to_fmt = to.desc.color_format;
-    //
-    //     match (from_fmt, to_fmt) {
-    //         (ColorFormat::RGBA_U8, ColorFormat::RGB_U8) => {
-    //             unsafe { convert_rgba_u8_to_rgb_u8_neon(from, to) };
-    //             return Ok(true);
-    //         }
-    //         _ => {}
-    //     }
-    // }
-    //
-    // #[cfg(target_arch = "x86_64")]
-    // if is_x86_feature_detected!("sse4.1") {
-    //     // SSE4.1 implementations
-    // }
+    let from_fmt = from.desc().color_format;
+    let to_fmt = to.desc().color_format;
+
+    #[cfg(target_arch = "x86_64")]
+    if is_x86_feature_detected!("ssse3") {
+        match (from_fmt, to_fmt) {
+            (ColorFormat::RGBA_U8, ColorFormat::RGB_U8) => {
+                convert_rgba_u8_to_rgb_u8(from, to);
+                return Ok(true);
+            }
+            (ColorFormat::RGB_U8, ColorFormat::RGBA_U8) => {
+                convert_rgb_u8_to_rgba_u8(from, to);
+                return Ok(true);
+            }
+            (ColorFormat::RGBA_U8, ColorFormat::L_U8) => {
+                convert_rgba_u8_to_l_u8(from, to);
+                return Ok(true);
+            }
+            (ColorFormat::RGB_U8, ColorFormat::L_U8) => {
+                convert_rgb_u8_to_l_u8(from, to);
+                return Ok(true);
+            }
+            _ => {}
+        }
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    match (from_fmt, to_fmt) {
+        (ColorFormat::RGBA_U8, ColorFormat::RGB_U8) => {
+            convert_rgba_u8_to_rgb_u8(from, to);
+            return Ok(true);
+        }
+        (ColorFormat::RGB_U8, ColorFormat::RGBA_U8) => {
+            convert_rgb_u8_to_rgba_u8(from, to);
+            return Ok(true);
+        }
+        (ColorFormat::RGBA_U8, ColorFormat::L_U8) => {
+            convert_rgba_u8_to_l_u8(from, to);
+            return Ok(true);
+        }
+        (ColorFormat::RGB_U8, ColorFormat::L_U8) => {
+            convert_rgb_u8_to_l_u8(from, to);
+            return Ok(true);
+        }
+        _ => {}
+    }
 
     Ok(false)
+}
+
+// =============================================================================
+// RGBA_U8 -> RGB_U8 conversion
+// =============================================================================
+
+fn convert_rgba_u8_to_rgb_u8(from: &Image, to: &mut Image) {
+    debug_assert_eq!(from.desc().color_format, ColorFormat::RGBA_U8);
+    debug_assert_eq!(to.desc().color_format, ColorFormat::RGB_U8);
+    debug_assert_eq!(from.desc().width, to.desc().width);
+    debug_assert_eq!(from.desc().height, to.desc().height);
+
+    let width = from.desc().width;
+    let from_stride = from.desc().stride;
+    let to_stride = to.desc().stride;
+
+    let from_bytes = from.bytes();
+    let to_bytes = to.bytes_mut();
+
+    to_bytes
+        .par_chunks_mut(to_stride)
+        .enumerate()
+        .for_each(|(y, to_row)| {
+            let from_row = &from_bytes[y * from_stride..];
+
+            #[cfg(target_arch = "x86_64")]
+            // SAFETY: We've verified SSSE3 is available in try_convert_simd
+            unsafe {
+                convert_rgba_to_rgb_row_ssse3(from_row, to_row, width);
+            }
+
+            #[cfg(target_arch = "aarch64")]
+            // SAFETY: NEON is always available on aarch64
+            unsafe {
+                convert_rgba_to_rgb_row_neon(from_row, to_row, width);
+            }
+        });
+}
+
+// =============================================================================
+// RGB_U8 -> RGBA_U8 conversion
+// =============================================================================
+
+fn convert_rgb_u8_to_rgba_u8(from: &Image, to: &mut Image) {
+    debug_assert_eq!(from.desc().color_format, ColorFormat::RGB_U8);
+    debug_assert_eq!(to.desc().color_format, ColorFormat::RGBA_U8);
+    debug_assert_eq!(from.desc().width, to.desc().width);
+    debug_assert_eq!(from.desc().height, to.desc().height);
+
+    let width = from.desc().width;
+    let from_stride = from.desc().stride;
+    let to_stride = to.desc().stride;
+
+    let from_bytes = from.bytes();
+    let to_bytes = to.bytes_mut();
+
+    to_bytes
+        .par_chunks_mut(to_stride)
+        .enumerate()
+        .for_each(|(y, to_row)| {
+            let from_row = &from_bytes[y * from_stride..];
+
+            #[cfg(target_arch = "x86_64")]
+            // SAFETY: We've verified SSSE3 is available in try_convert_simd
+            unsafe {
+                convert_rgb_to_rgba_row_ssse3(from_row, to_row, width);
+            }
+
+            #[cfg(target_arch = "aarch64")]
+            // SAFETY: NEON is always available on aarch64
+            unsafe {
+                convert_rgb_to_rgba_row_neon(from_row, to_row, width);
+            }
+        });
+}
+
+// =============================================================================
+// SSE/SSSE3 implementations (x86_64)
+// =============================================================================
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "ssse3")]
+unsafe fn convert_rgba_to_rgb_row_ssse3(src: &[u8], dst: &mut [u8], width: usize) {
+    use std::arch::x86_64::*;
+
+    let src_ptr = src.as_ptr();
+    let dst_ptr = dst.as_mut_ptr();
+
+    // Process 16 pixels at a time (64 bytes in, 48 bytes out)
+    let simd_width = width / 16;
+    let remainder = width % 16;
+
+    // Shuffle mask to extract RGB from RGBA (4 pixels -> 12 bytes)
+    // Input:  R0 G0 B0 A0 R1 G1 B1 A1 R2 G2 B2 A2 R3 G3 B3 A3 (16 bytes = 4 pixels)
+    // Output: R0 G0 B0 R1 G1 B1 R2 G2 B2 R3 G3 B3 xx xx xx xx (12 bytes valid)
+    let shuffle = _mm_setr_epi8(0, 1, 2, 4, 5, 6, 8, 9, 10, 12, 13, 14, -1, -1, -1, -1);
+
+    for i in 0..simd_width {
+        let src_offset = i * 64;
+        let dst_offset = i * 48;
+
+        unsafe {
+            // Load 64 bytes (16 RGBA pixels)
+            let rgba0 = _mm_loadu_si128(src_ptr.add(src_offset) as *const __m128i);
+            let rgba1 = _mm_loadu_si128(src_ptr.add(src_offset + 16) as *const __m128i);
+            let rgba2 = _mm_loadu_si128(src_ptr.add(src_offset + 32) as *const __m128i);
+            let rgba3 = _mm_loadu_si128(src_ptr.add(src_offset + 48) as *const __m128i);
+
+            // Shuffle each to get RGB (12 bytes valid per register)
+            let rgb0 = _mm_shuffle_epi8(rgba0, shuffle);
+            let rgb1 = _mm_shuffle_epi8(rgba1, shuffle);
+            let rgb2 = _mm_shuffle_epi8(rgba2, shuffle);
+            let rgb3 = _mm_shuffle_epi8(rgba3, shuffle);
+
+            // Pack 4x12 bytes = 48 bytes into 3x16 byte stores
+            // out0: rgb0[0..12] + rgb1[0..4]
+            let out0 = _mm_or_si128(rgb0, _mm_slli_si128(rgb1, 12));
+
+            // out1: rgb1[4..12] + rgb2[0..8]
+            let out1 = _mm_or_si128(_mm_srli_si128(rgb1, 4), _mm_slli_si128(rgb2, 8));
+
+            // out2: rgb2[8..12] + rgb3[0..12]
+            let out2 = _mm_or_si128(_mm_srli_si128(rgb2, 8), _mm_slli_si128(rgb3, 4));
+
+            // Store 48 bytes
+            _mm_storeu_si128(dst_ptr.add(dst_offset) as *mut __m128i, out0);
+            _mm_storeu_si128(dst_ptr.add(dst_offset + 16) as *mut __m128i, out1);
+            _mm_storeu_si128(dst_ptr.add(dst_offset + 32) as *mut __m128i, out2);
+        }
+    }
+
+    // Handle remainder pixels (scalar)
+    let src_remainder = &src[simd_width * 64..];
+    let dst_remainder = &mut dst[simd_width * 48..];
+    for i in 0..remainder {
+        dst_remainder[i * 3] = src_remainder[i * 4];
+        dst_remainder[i * 3 + 1] = src_remainder[i * 4 + 1];
+        dst_remainder[i * 3 + 2] = src_remainder[i * 4 + 2];
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "ssse3")]
+unsafe fn convert_rgb_to_rgba_row_ssse3(src: &[u8], dst: &mut [u8], width: usize) {
+    use std::arch::x86_64::*;
+
+    let src_ptr = src.as_ptr();
+    let dst_ptr = dst.as_mut_ptr();
+
+    // Process 16 pixels at a time (48 bytes in, 64 bytes out)
+    let simd_width = width / 16;
+    let remainder = width % 16;
+
+    unsafe {
+        // Alpha mask (0xFF in alpha positions)
+        let alpha_mask = _mm_setr_epi8(0, 0, 0, -1, 0, 0, 0, -1, 0, 0, 0, -1, 0, 0, 0, -1);
+        // Shuffle: RGB -> RGBA (insert space for alpha)
+        let shuf = _mm_setr_epi8(0, 1, 2, -1, 3, 4, 5, -1, 6, 7, 8, -1, 9, 10, 11, -1);
+
+        for i in 0..simd_width {
+            let src_offset = i * 48;
+            let dst_offset = i * 64;
+
+            // Load 48 bytes (3 registers, we use all bytes)
+            let in0 = _mm_loadu_si128(src_ptr.add(src_offset) as *const __m128i);
+            let in1 = _mm_loadu_si128(src_ptr.add(src_offset + 16) as *const __m128i);
+            let in2 = _mm_loadu_si128(src_ptr.add(src_offset + 32) as *const __m128i);
+
+            // First 4 pixels (bytes 0-11 of in0)
+            let rgba0 = _mm_or_si128(_mm_shuffle_epi8(in0, shuf), alpha_mask);
+
+            // Second 4 pixels (bytes 12-15 of in0 + bytes 0-7 of in1)
+            let combined1 = _mm_or_si128(_mm_srli_si128(in0, 12), _mm_slli_si128(in1, 4));
+            let rgba1 = _mm_or_si128(_mm_shuffle_epi8(combined1, shuf), alpha_mask);
+
+            // Third 4 pixels (bytes 8-15 of in1 + bytes 0-3 of in2)
+            let combined2 = _mm_or_si128(_mm_srli_si128(in1, 8), _mm_slli_si128(in2, 8));
+            let rgba2 = _mm_or_si128(_mm_shuffle_epi8(combined2, shuf), alpha_mask);
+
+            // Fourth 4 pixels (bytes 4-15 of in2)
+            let combined3 = _mm_srli_si128(in2, 4);
+            let rgba3 = _mm_or_si128(_mm_shuffle_epi8(combined3, shuf), alpha_mask);
+
+            // Store 64 bytes
+            _mm_storeu_si128(dst_ptr.add(dst_offset) as *mut __m128i, rgba0);
+            _mm_storeu_si128(dst_ptr.add(dst_offset + 16) as *mut __m128i, rgba1);
+            _mm_storeu_si128(dst_ptr.add(dst_offset + 32) as *mut __m128i, rgba2);
+            _mm_storeu_si128(dst_ptr.add(dst_offset + 48) as *mut __m128i, rgba3);
+        }
+    }
+
+    // Handle remainder pixels (scalar)
+    let src_remainder = &src[simd_width * 48..];
+    let dst_remainder = &mut dst[simd_width * 64..];
+    for i in 0..remainder {
+        dst_remainder[i * 4] = src_remainder[i * 3];
+        dst_remainder[i * 4 + 1] = src_remainder[i * 3 + 1];
+        dst_remainder[i * 4 + 2] = src_remainder[i * 3 + 2];
+        dst_remainder[i * 4 + 3] = 255;
+    }
+}
+
+// =============================================================================
+// RGBA_U8 -> L_U8 luminance conversion
+// =============================================================================
+
+// Rec. 709 luminance weights scaled to fixed-point (shift by 16)
+// R: 0.2126 * 65536 = 13933
+// G: 0.7152 * 65536 = 46871
+// B: 0.0722 * 65536 = 4732
+const LUMA_R: u32 = 13933;
+const LUMA_G: u32 = 46871;
+const LUMA_B: u32 = 4732;
+
+fn convert_rgba_u8_to_l_u8(from: &Image, to: &mut Image) {
+    debug_assert_eq!(from.desc().color_format, ColorFormat::RGBA_U8);
+    debug_assert_eq!(to.desc().color_format, ColorFormat::L_U8);
+    debug_assert_eq!(from.desc().width, to.desc().width);
+    debug_assert_eq!(from.desc().height, to.desc().height);
+
+    let width = from.desc().width;
+    let from_stride = from.desc().stride;
+    let to_stride = to.desc().stride;
+
+    let from_bytes = from.bytes();
+    let to_bytes = to.bytes_mut();
+
+    to_bytes
+        .par_chunks_mut(to_stride)
+        .enumerate()
+        .for_each(|(y, to_row)| {
+            let from_row = &from_bytes[y * from_stride..];
+
+            #[cfg(target_arch = "x86_64")]
+            // SAFETY: We've verified SSSE3 is available in try_convert_simd
+            unsafe {
+                convert_rgba_to_l_row_ssse3(from_row, to_row, width);
+            }
+
+            #[cfg(target_arch = "aarch64")]
+            // SAFETY: NEON is always available on aarch64
+            unsafe {
+                convert_rgba_to_l_row_neon(from_row, to_row, width);
+            }
+        });
+}
+
+fn convert_rgb_u8_to_l_u8(from: &Image, to: &mut Image) {
+    debug_assert_eq!(from.desc().color_format, ColorFormat::RGB_U8);
+    debug_assert_eq!(to.desc().color_format, ColorFormat::L_U8);
+    debug_assert_eq!(from.desc().width, to.desc().width);
+    debug_assert_eq!(from.desc().height, to.desc().height);
+
+    let width = from.desc().width;
+    let from_stride = from.desc().stride;
+    let to_stride = to.desc().stride;
+
+    let from_bytes = from.bytes();
+    let to_bytes = to.bytes_mut();
+
+    to_bytes
+        .par_chunks_mut(to_stride)
+        .enumerate()
+        .for_each(|(y, to_row)| {
+            let from_row = &from_bytes[y * from_stride..];
+
+            #[cfg(target_arch = "x86_64")]
+            // SAFETY: We've verified SSSE3 is available in try_convert_simd
+            unsafe {
+                convert_rgb_to_l_row_ssse3(from_row, to_row, width);
+            }
+
+            #[cfg(target_arch = "aarch64")]
+            // SAFETY: NEON is always available on aarch64
+            unsafe {
+                convert_rgb_to_l_row_neon(from_row, to_row, width);
+            }
+        });
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "ssse3")]
+unsafe fn convert_rgba_to_l_row_ssse3(src: &[u8], dst: &mut [u8], width: usize) {
+    use std::arch::x86_64::*;
+
+    let src_ptr = src.as_ptr();
+    let dst_ptr = dst.as_mut_ptr();
+
+    // Process 8 pixels at a time (32 bytes in, 8 bytes out)
+    let simd_width = width / 8;
+    let remainder = width % 8;
+
+    // Luminance weights for _mm_maddubs_epi16:
+    // We need pairs of (R_weight, G_weight) and (B_weight, 0) for each pixel
+    // Using approximation: R=54, G=183, B=19 (sum=256, allows shift by 8)
+    // More accurate: R=54, G=183, B=18 for better rounding
+
+    for i in 0..simd_width {
+        let src_offset = i * 32;
+        let dst_offset = i * 8;
+
+        unsafe {
+            // Load 8 RGBA pixels (32 bytes)
+            let rgba0 = _mm_loadu_si128(src_ptr.add(src_offset) as *const __m128i);
+            let rgba1 = _mm_loadu_si128(src_ptr.add(src_offset + 16) as *const __m128i);
+
+            // Extract R, G, B channels using shuffle
+            // From RGBA RGBA RGBA RGBA -> RRRR GGGG BBBB ----
+            let shuf_r = _mm_setr_epi8(0, 4, 8, 12, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1);
+            let shuf_g = _mm_setr_epi8(1, 5, 9, 13, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1);
+            let shuf_b =
+                _mm_setr_epi8(2, 6, 10, 14, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1);
+
+            let r0 = _mm_shuffle_epi8(rgba0, shuf_r);
+            let g0 = _mm_shuffle_epi8(rgba0, shuf_g);
+            let b0 = _mm_shuffle_epi8(rgba0, shuf_b);
+
+            let r1 = _mm_shuffle_epi8(rgba1, shuf_r);
+            let g1 = _mm_shuffle_epi8(rgba1, shuf_g);
+            let b1 = _mm_shuffle_epi8(rgba1, shuf_b);
+
+            // Combine: r0[0-3] r1[0-3] in low 8 bytes
+            let r = _mm_or_si128(r0, _mm_slli_si128(r1, 4));
+            let g = _mm_or_si128(g0, _mm_slli_si128(g1, 4));
+            let b = _mm_or_si128(b0, _mm_slli_si128(b1, 4));
+
+            // Compute luminance using 16-bit intermediate
+            // L = (R * 54 + G * 183 + B * 19) >> 8
+            let zero = _mm_setzero_si128();
+
+            // Unpack to 16-bit
+            let r16 = _mm_unpacklo_epi8(r, zero);
+            let g16 = _mm_unpacklo_epi8(g, zero);
+            let b16 = _mm_unpacklo_epi8(b, zero);
+
+            // Multiply and accumulate
+            let r_w = _mm_set1_epi16(54);
+            let g_w = _mm_set1_epi16(183);
+            let b_w = _mm_set1_epi16(19);
+
+            let sum = _mm_add_epi16(
+                _mm_add_epi16(_mm_mullo_epi16(r16, r_w), _mm_mullo_epi16(g16, g_w)),
+                _mm_mullo_epi16(b16, b_w),
+            );
+
+            // Shift right by 8 and pack to 8-bit
+            let lum16 = _mm_srli_epi16(sum, 8);
+            let lum8 = _mm_packus_epi16(lum16, zero);
+
+            // Store 8 bytes
+            _mm_storel_epi64(dst_ptr.add(dst_offset) as *mut __m128i, lum8);
+        }
+    }
+
+    // Handle remainder pixels (scalar)
+    let src_remainder = &src[simd_width * 32..];
+    let dst_remainder = &mut dst[simd_width * 8..];
+    for i in 0..remainder {
+        let r = src_remainder[i * 4] as u32;
+        let g = src_remainder[i * 4 + 1] as u32;
+        let b = src_remainder[i * 4 + 2] as u32;
+        dst_remainder[i] = ((r * LUMA_R + g * LUMA_G + b * LUMA_B) >> 16) as u8;
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "ssse3")]
+unsafe fn convert_rgb_to_l_row_ssse3(src: &[u8], dst: &mut [u8], width: usize) {
+    use std::arch::x86_64::*;
+
+    let src_ptr = src.as_ptr();
+    let dst_ptr = dst.as_mut_ptr();
+
+    // Process 16 pixels at a time (48 bytes in, 16 bytes out)
+    let simd_width = width / 16;
+    let remainder = width % 16;
+
+    for i in 0..simd_width {
+        let src_offset = i * 48;
+        let dst_offset = i * 16;
+
+        unsafe {
+            // Load 48 bytes (16 RGB pixels)
+            let in0 = _mm_loadu_si128(src_ptr.add(src_offset) as *const __m128i);
+            let in1 = _mm_loadu_si128(src_ptr.add(src_offset + 16) as *const __m128i);
+            let in2 = _mm_loadu_si128(src_ptr.add(src_offset + 32) as *const __m128i);
+
+            // Extract R, G, B for first 8 pixels
+            // RGB RGB RGB RGB RGB R | GB RGB RGB RGB RGB RG | B RGB RGB RGB RGB RGB
+            let shuf_r0 = _mm_setr_epi8(0, 3, 6, 9, 12, 15, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1);
+            let shuf_g0 =
+                _mm_setr_epi8(1, 4, 7, 10, 13, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1);
+            let shuf_b0 =
+                _mm_setr_epi8(2, 5, 8, 11, 14, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1);
+
+            // First 5-6 pixels from in0
+            let r0_part = _mm_shuffle_epi8(in0, shuf_r0); // R0 R1 R2 R3 R4 R5 ...
+            let g0_part = _mm_shuffle_epi8(in0, shuf_g0); // G0 G1 G2 G3 G4 ...
+            let b0_part = _mm_shuffle_epi8(in0, shuf_b0); // B0 B1 B2 B3 B4 ...
+
+            // Get remaining from in1 for first 8 pixels
+            let shuf_r1 =
+                _mm_setr_epi8(2, 5, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1);
+            let shuf_g1 =
+                _mm_setr_epi8(0, 3, 6, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1);
+            let shuf_b1 =
+                _mm_setr_epi8(1, 4, 7, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1);
+
+            let r1_part = _mm_shuffle_epi8(in1, shuf_r1);
+            let g1_part = _mm_shuffle_epi8(in1, shuf_g1);
+            let b1_part = _mm_shuffle_epi8(in1, shuf_b1);
+
+            // Combine first 8 pixels
+            let r_lo = _mm_or_si128(r0_part, _mm_slli_si128(r1_part, 6));
+            let g_lo = _mm_or_si128(g0_part, _mm_slli_si128(g1_part, 5));
+            let b_lo = _mm_or_si128(b0_part, _mm_slli_si128(b1_part, 5));
+
+            // Second 8 pixels (from in1 and in2)
+            let shuf_r2 = _mm_setr_epi8(
+                8, 11, 14, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+            );
+            let shuf_g2 = _mm_setr_epi8(
+                9, 12, 15, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+            );
+            let shuf_b2 = _mm_setr_epi8(
+                10, 13, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+            );
+
+            let r2_part = _mm_shuffle_epi8(in1, shuf_r2);
+            let g2_part = _mm_shuffle_epi8(in1, shuf_g2);
+            let b2_part = _mm_shuffle_epi8(in1, shuf_b2);
+
+            let shuf_r3 =
+                _mm_setr_epi8(1, 4, 7, 10, 13, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1);
+            let shuf_g3 =
+                _mm_setr_epi8(2, 5, 8, 11, 14, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1);
+            let shuf_b3 = _mm_setr_epi8(0, 3, 6, 9, 12, 15, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1);
+
+            let r3_part = _mm_shuffle_epi8(in2, shuf_r3);
+            let g3_part = _mm_shuffle_epi8(in2, shuf_g3);
+            let b3_part = _mm_shuffle_epi8(in2, shuf_b3);
+
+            let r_hi = _mm_or_si128(r2_part, _mm_slli_si128(r3_part, 3));
+            let g_hi = _mm_or_si128(g2_part, _mm_slli_si128(g3_part, 3));
+            let b_hi = _mm_or_si128(b2_part, _mm_slli_si128(b3_part, 2));
+
+            // Compute luminance for both halves
+            let zero = _mm_setzero_si128();
+            let r_w = _mm_set1_epi16(54);
+            let g_w = _mm_set1_epi16(183);
+            let b_w = _mm_set1_epi16(19);
+
+            // First 8 pixels
+            let r16_lo = _mm_unpacklo_epi8(r_lo, zero);
+            let g16_lo = _mm_unpacklo_epi8(g_lo, zero);
+            let b16_lo = _mm_unpacklo_epi8(b_lo, zero);
+
+            let sum_lo = _mm_add_epi16(
+                _mm_add_epi16(_mm_mullo_epi16(r16_lo, r_w), _mm_mullo_epi16(g16_lo, g_w)),
+                _mm_mullo_epi16(b16_lo, b_w),
+            );
+            let lum16_lo = _mm_srli_epi16(sum_lo, 8);
+
+            // Second 8 pixels
+            let r16_hi = _mm_unpacklo_epi8(r_hi, zero);
+            let g16_hi = _mm_unpacklo_epi8(g_hi, zero);
+            let b16_hi = _mm_unpacklo_epi8(b_hi, zero);
+
+            let sum_hi = _mm_add_epi16(
+                _mm_add_epi16(_mm_mullo_epi16(r16_hi, r_w), _mm_mullo_epi16(g16_hi, g_w)),
+                _mm_mullo_epi16(b16_hi, b_w),
+            );
+            let lum16_hi = _mm_srli_epi16(sum_hi, 8);
+
+            // Pack both to 8-bit and store
+            let lum8 = _mm_packus_epi16(lum16_lo, lum16_hi);
+            _mm_storeu_si128(dst_ptr.add(dst_offset) as *mut __m128i, lum8);
+        }
+    }
+
+    // Handle remainder pixels (scalar)
+    let src_remainder = &src[simd_width * 48..];
+    let dst_remainder = &mut dst[simd_width * 16..];
+    for i in 0..remainder {
+        let r = src_remainder[i * 3] as u32;
+        let g = src_remainder[i * 3 + 1] as u32;
+        let b = src_remainder[i * 3 + 2] as u32;
+        dst_remainder[i] = ((r * LUMA_R + g * LUMA_G + b * LUMA_B) >> 16) as u8;
+    }
+}
+
+#[cfg(target_arch = "aarch64")]
+unsafe fn convert_rgba_to_l_row_neon(src: &[u8], dst: &mut [u8], width: usize) {
+    use std::arch::aarch64::*;
+
+    let src_ptr = src.as_ptr();
+    let dst_ptr = dst.as_mut_ptr();
+
+    // Process 16 pixels at a time
+    let simd_width = width / 16;
+    let remainder = width % 16;
+
+    unsafe {
+        // Luminance weights (scaled to sum to 256 for shift by 8)
+        let r_w = vdupq_n_u16(54);
+        let g_w = vdupq_n_u16(183);
+        let b_w = vdupq_n_u16(19);
+
+        for i in 0..simd_width {
+            let src_offset = i * 64;
+            let dst_offset = i * 16;
+
+            // Load 16 RGBA pixels deinterleaved
+            let rgba = vld4q_u8(src_ptr.add(src_offset));
+            let r = rgba.0;
+            let g = rgba.1;
+            let b = rgba.2;
+
+            // Split into low and high halves, widen to 16-bit
+            let r_lo = vmovl_u8(vget_low_u8(r));
+            let r_hi = vmovl_u8(vget_high_u8(r));
+            let g_lo = vmovl_u8(vget_low_u8(g));
+            let g_hi = vmovl_u8(vget_high_u8(g));
+            let b_lo = vmovl_u8(vget_low_u8(b));
+            let b_hi = vmovl_u8(vget_high_u8(b));
+
+            // Compute luminance: (R*54 + G*183 + B*19) >> 8
+            let sum_lo = vaddq_u16(
+                vaddq_u16(vmulq_u16(r_lo, r_w), vmulq_u16(g_lo, g_w)),
+                vmulq_u16(b_lo, b_w),
+            );
+            let sum_hi = vaddq_u16(
+                vaddq_u16(vmulq_u16(r_hi, r_w), vmulq_u16(g_hi, g_w)),
+                vmulq_u16(b_hi, b_w),
+            );
+
+            // Shift right by 8 and narrow to 8-bit
+            let lum_lo = vshrn_n_u16(sum_lo, 8);
+            let lum_hi = vshrn_n_u16(sum_hi, 8);
+            let lum = vcombine_u8(lum_lo, lum_hi);
+
+            // Store 16 bytes
+            vst1q_u8(dst_ptr.add(dst_offset), lum);
+        }
+    }
+
+    // Handle remainder pixels (scalar)
+    let src_remainder = &src[simd_width * 64..];
+    let dst_remainder = &mut dst[simd_width * 16..];
+    for i in 0..remainder {
+        let r = src_remainder[i * 4] as u32;
+        let g = src_remainder[i * 4 + 1] as u32;
+        let b = src_remainder[i * 4 + 2] as u32;
+        dst_remainder[i] = ((r * LUMA_R + g * LUMA_G + b * LUMA_B) >> 16) as u8;
+    }
+}
+
+#[cfg(target_arch = "aarch64")]
+unsafe fn convert_rgb_to_l_row_neon(src: &[u8], dst: &mut [u8], width: usize) {
+    use std::arch::aarch64::*;
+
+    let src_ptr = src.as_ptr();
+    let dst_ptr = dst.as_mut_ptr();
+
+    // Process 16 pixels at a time
+    let simd_width = width / 16;
+    let remainder = width % 16;
+
+    unsafe {
+        // Luminance weights (scaled to sum to 256 for shift by 8)
+        let r_w = vdupq_n_u16(54);
+        let g_w = vdupq_n_u16(183);
+        let b_w = vdupq_n_u16(19);
+
+        for i in 0..simd_width {
+            let src_offset = i * 48;
+            let dst_offset = i * 16;
+
+            // Load 16 RGB pixels deinterleaved
+            let rgb = vld3q_u8(src_ptr.add(src_offset));
+            let r = rgb.0;
+            let g = rgb.1;
+            let b = rgb.2;
+
+            // Split into low and high halves, widen to 16-bit
+            let r_lo = vmovl_u8(vget_low_u8(r));
+            let r_hi = vmovl_u8(vget_high_u8(r));
+            let g_lo = vmovl_u8(vget_low_u8(g));
+            let g_hi = vmovl_u8(vget_high_u8(g));
+            let b_lo = vmovl_u8(vget_low_u8(b));
+            let b_hi = vmovl_u8(vget_high_u8(b));
+
+            // Compute luminance: (R*54 + G*183 + B*19) >> 8
+            let sum_lo = vaddq_u16(
+                vaddq_u16(vmulq_u16(r_lo, r_w), vmulq_u16(g_lo, g_w)),
+                vmulq_u16(b_lo, b_w),
+            );
+            let sum_hi = vaddq_u16(
+                vaddq_u16(vmulq_u16(r_hi, r_w), vmulq_u16(g_hi, g_w)),
+                vmulq_u16(b_hi, b_w),
+            );
+
+            // Shift right by 8 and narrow to 8-bit
+            let lum_lo = vshrn_n_u16(sum_lo, 8);
+            let lum_hi = vshrn_n_u16(sum_hi, 8);
+            let lum = vcombine_u8(lum_lo, lum_hi);
+
+            // Store 16 bytes
+            vst1q_u8(dst_ptr.add(dst_offset), lum);
+        }
+    }
+
+    // Handle remainder pixels (scalar)
+    let src_remainder = &src[simd_width * 48..];
+    let dst_remainder = &mut dst[simd_width * 16..];
+    for i in 0..remainder {
+        let r = src_remainder[i * 3] as u32;
+        let g = src_remainder[i * 3 + 1] as u32;
+        let b = src_remainder[i * 3 + 2] as u32;
+        dst_remainder[i] = ((r * LUMA_R + g * LUMA_G + b * LUMA_B) >> 16) as u8;
+    }
 }
 
 // =============================================================================
 // NEON implementations (aarch64)
 // =============================================================================
 
-// #[cfg(target_arch = "aarch64")]
-// unsafe fn convert_rgba_u8_to_rgb_u8_neon(from: &Image, to: &mut Image) {
-//     use std::arch::aarch64::*;
-//     // Implementation here
-// }
+#[cfg(target_arch = "aarch64")]
+unsafe fn convert_rgba_to_rgb_row_neon(src: &[u8], dst: &mut [u8], width: usize) {
+    use std::arch::aarch64::*;
 
-// =============================================================================
-// SSE4.1 implementations (x86_64)
-// =============================================================================
+    let src_ptr = src.as_ptr();
+    let dst_ptr = dst.as_mut_ptr();
 
-// #[cfg(target_arch = "x86_64")]
-// #[target_feature(enable = "sse4.1")]
-// unsafe fn convert_rgba_u8_to_rgb_u8_sse41(from: &Image, to: &mut Image) {
-//     use std::arch::x86_64::*;
-//     // Implementation here
-// }
+    // Process 16 pixels at a time using vld4/vst3
+    let simd_width = width / 16;
+    let remainder = width % 16;
+
+    for i in 0..simd_width {
+        let src_offset = i * 64;
+        let dst_offset = i * 48;
+
+        unsafe {
+            // Load 16 RGBA pixels (64 bytes) deinterleaved into R, G, B, A planes
+            let rgba = vld4q_u8(src_ptr.add(src_offset));
+
+            // Store only R, G, B (48 bytes) interleaved
+            let rgb = uint8x16x3_t(rgba.0, rgba.1, rgba.2);
+            vst3q_u8(dst_ptr.add(dst_offset), rgb);
+        }
+    }
+
+    // Handle remainder pixels (scalar)
+    let src_remainder = &src[simd_width * 64..];
+    let dst_remainder = &mut dst[simd_width * 48..];
+    for i in 0..remainder {
+        dst_remainder[i * 3] = src_remainder[i * 4];
+        dst_remainder[i * 3 + 1] = src_remainder[i * 4 + 1];
+        dst_remainder[i * 3 + 2] = src_remainder[i * 4 + 2];
+    }
+}
+
+#[cfg(target_arch = "aarch64")]
+unsafe fn convert_rgb_to_rgba_row_neon(src: &[u8], dst: &mut [u8], width: usize) {
+    use std::arch::aarch64::*;
+
+    let src_ptr = src.as_ptr();
+    let dst_ptr = dst.as_mut_ptr();
+
+    // Process 16 pixels at a time using vld3/vst4
+    let simd_width = width / 16;
+    let remainder = width % 16;
+
+    unsafe {
+        // Alpha channel (all 255)
+        let alpha = vdupq_n_u8(255);
+
+        for i in 0..simd_width {
+            let src_offset = i * 48;
+            let dst_offset = i * 64;
+
+            // Load 16 RGB pixels (48 bytes) deinterleaved into R, G, B planes
+            let rgb = vld3q_u8(src_ptr.add(src_offset));
+
+            // Store R, G, B, A (64 bytes) interleaved
+            let rgba = uint8x16x4_t(rgb.0, rgb.1, rgb.2, alpha);
+            vst4q_u8(dst_ptr.add(dst_offset), rgba);
+        }
+    }
+
+    // Handle remainder pixels (scalar)
+    let src_remainder = &src[simd_width * 48..];
+    let dst_remainder = &mut dst[simd_width * 64..];
+    for i in 0..remainder {
+        dst_remainder[i * 4] = src_remainder[i * 3];
+        dst_remainder[i * 4 + 1] = src_remainder[i * 3 + 1];
+        dst_remainder[i * 4 + 2] = src_remainder[i * 3 + 2];
+        dst_remainder[i * 4 + 3] = 255;
+    }
+}
