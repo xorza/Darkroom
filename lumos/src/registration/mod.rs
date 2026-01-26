@@ -75,17 +75,16 @@ pub mod bench {
     //! Benchmark module for registration operations.
 
     use criterion::Criterion;
-    use std::path::Path;
 
     /// Register all registration benchmarks with Criterion.
-    pub fn benchmarks(c: &mut Criterion, calibration_dir: &Path) {
-        super::types::bench::benchmarks(c, calibration_dir);
-        super::triangle::bench::benchmarks(c, calibration_dir);
-        super::ransac::bench::benchmarks(c, calibration_dir);
-        super::phase_correlation::bench::benchmarks(c, calibration_dir);
-        super::interpolation::bench::benchmarks(c, calibration_dir);
-        super::pipeline::bench::benchmarks(c, calibration_dir);
-        super::quality::bench::benchmarks(c, calibration_dir);
+    pub fn benchmarks(c: &mut Criterion) {
+        super::types::bench::benchmarks(c);
+        super::triangle::bench::benchmarks(c);
+        super::ransac::bench::benchmarks(c);
+        super::phase_correlation::bench::benchmarks(c);
+        super::interpolation::bench::benchmarks(c);
+        super::pipeline::bench::benchmarks(c);
+        super::quality::bench::benchmarks(c);
     }
 }
 

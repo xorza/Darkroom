@@ -2,12 +2,11 @@
 //! Run with: cargo bench -p lumos --features bench --bench math
 
 use std::hint::black_box;
-use std::path::Path;
 
 use criterion::{BenchmarkId, Criterion, Throughput};
 
 /// Register math benchmarks with Criterion.
-pub fn benchmarks(c: &mut Criterion, _calibration_dir: &Path) {
+pub fn benchmarks(c: &mut Criterion) {
     benchmark_sum_f32(c);
     benchmark_sum_squared_diff(c);
     benchmark_accumulate(c);

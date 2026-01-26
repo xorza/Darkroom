@@ -2,12 +2,11 @@
 //! Run with: cargo bench -p lumos --features bench --bench stack_median
 
 use std::hint::black_box;
-use std::path::Path;
 
 use criterion::{BenchmarkId, Criterion, Throughput};
 
 /// Register median stacking benchmarks with Criterion.
-pub fn benchmarks(c: &mut Criterion, _calibration_dir: &Path) {
+pub fn benchmarks(c: &mut Criterion) {
     benchmark_median_calculation(c);
 }
 

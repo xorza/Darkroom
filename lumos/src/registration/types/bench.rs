@@ -2,14 +2,13 @@
 //! Run with: cargo bench -p lumos --features bench --bench registration_types
 
 use std::hint::black_box;
-use std::path::Path;
 
 use criterion::{BenchmarkId, Criterion, Throughput};
 
 use super::TransformMatrix;
 
 /// Register types benchmarks with Criterion.
-pub fn benchmarks(c: &mut Criterion, _calibration_dir: &Path) {
+pub fn benchmarks(c: &mut Criterion) {
     benchmark_transform_point(c);
     benchmark_matrix_inverse(c);
     benchmark_matrix_compose(c);

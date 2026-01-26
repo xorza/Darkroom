@@ -2,7 +2,6 @@
 //! Run with: cargo bench -p lumos --features bench --bench registration_ransac
 
 use std::hint::black_box;
-use std::path::Path;
 
 use criterion::{BenchmarkId, Criterion, Throughput};
 
@@ -11,7 +10,7 @@ use super::{RansacConfig, RansacEstimator};
 use crate::registration::types::{TransformMatrix, TransformType};
 
 /// Register RANSAC benchmarks with Criterion.
-pub fn benchmarks(c: &mut Criterion, _calibration_dir: &Path) {
+pub fn benchmarks(c: &mut Criterion) {
     benchmark_ransac_estimation(c);
     benchmark_transform_types(c);
     benchmark_outlier_ratios(c);
