@@ -118,6 +118,9 @@ GPU/CPU image processing library with automatic backend selection.
 - `common/color_format.rs` - `ColorFormat`, `ChannelCount`, `ChannelSize`, `ChannelType` enums
 - `common/error.rs` - Error types (`Error`, `Result`)
 - `common/conversion/` - Color format conversion (scalar and SIMD implementations)
+  - SIMD optimizations: SSE2/SSSE3/AVX2 (x86_64), NEON (aarch64)
+  - Optimized paths: RGBA↔RGB (SSSE3/AVX2), RGB↔L (SSE2/AVX2), LA↔RGBA (SSSE3/AVX2), U8↔U16 (SSE2/AVX2), U16↔F32 (SSE2/AVX2)
+  - simd_tests.rs: Comprehensive correctness tests for all SIMD paths (edge cases, boundary values, round-trips)
 - `gpu/mod.rs` - `Gpu` context wrapping wgpu device/queue
 - `gpu/gpu_image.rs` - `GpuImage` for GPU-resident image data
 - `processing_context/mod.rs` - `ProcessingContext` managing GPU resources and pipelines

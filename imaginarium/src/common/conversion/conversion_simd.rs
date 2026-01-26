@@ -2459,13 +2459,22 @@ unsafe fn convert_la_to_rgba_row_avx2(src: &[u8], dst: &mut [u8], width: usize) 
             // Load 32 bytes (16 LA pixels)
             let la = _mm256_loadu_si256(src_ptr.add(src_offset) as *const __m256i);
 
-            // Expand to RGBA using shuffle
+            // Expand to RGBA using shuffle (within each 128-bit lane)
+            // rgba_lo lane0 = pixels 0-3, rgba_lo lane1 = pixels 8-11
+            // rgba_hi lane0 = pixels 4-7, rgba_hi lane1 = pixels 12-15
             let rgba_lo = _mm256_shuffle_epi8(la, shuf_lo);
             let rgba_hi = _mm256_shuffle_epi8(la, shuf_hi);
 
+            // We need to fix the lane order:
+            // Want: pixels 0-3, 4-7 (first 32 bytes), pixels 8-11, 12-15 (next 32 bytes)
+            // Have: rgba_lo = [0-3, 8-11], rgba_hi = [4-7, 12-15]
+            // Use vperm2i128 to combine the right lanes
+            let out0 = _mm256_permute2x128_si256(rgba_lo, rgba_hi, 0x20); // lo[0], hi[0] = pixels 0-3, 4-7
+            let out1 = _mm256_permute2x128_si256(rgba_lo, rgba_hi, 0x31); // lo[1], hi[1] = pixels 8-11, 12-15
+
             // Store 64 bytes (16 RGBA pixels)
-            _mm256_storeu_si256(dst_ptr.add(dst_offset) as *mut __m256i, rgba_lo);
-            _mm256_storeu_si256(dst_ptr.add(dst_offset + 32) as *mut __m256i, rgba_hi);
+            _mm256_storeu_si256(dst_ptr.add(dst_offset) as *mut __m256i, out0);
+            _mm256_storeu_si256(dst_ptr.add(dst_offset + 32) as *mut __m256i, out1);
         }
     }
 
