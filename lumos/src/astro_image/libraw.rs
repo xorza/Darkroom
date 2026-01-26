@@ -201,11 +201,14 @@ pub fn load_raw(path: &Path) -> Result<AstroImage> {
             // SAFETY: inner is valid and xtrans is populated for X-Trans sensors
             let xtrans_raw = unsafe { (*inner).idata.xtrans };
 
-            // Convert libraw's i8 pattern to u8
+            // Convert libraw's pattern to u8 (type varies by platform)
             let mut xtrans_pattern = [[0u8; 6]; 6];
             for (i, row) in xtrans_raw.iter().enumerate() {
                 for (j, &val) in row.iter().enumerate() {
-                    xtrans_pattern[i][j] = val as u8;
+                    #[allow(clippy::unnecessary_cast)]
+                    {
+                        xtrans_pattern[i][j] = val as u8;
+                    }
                 }
             }
 
