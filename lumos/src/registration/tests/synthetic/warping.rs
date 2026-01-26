@@ -8,6 +8,7 @@
 //! - All InterpolationMethod variants (Nearest, Bilinear, Bicubic, Lanczos2/3/4)
 
 use crate::registration::interpolation::{InterpolationMethod, WarpConfig, warp_image};
+use crate::registration::pipeline::warp_to_reference;
 use crate::registration::types::{TransformMatrix, TransformType};
 use crate::testing::synthetic::{self, StarFieldConfig};
 
@@ -525,16 +526,13 @@ fn test_warp_with_detected_transform() {
         .register_stars(&ref_stars, &target_stars)
         .expect("Registration should succeed");
 
-    // Use detected transform (inverse) to warp target back to reference frame
-    let inverse_detected = result.transform.inverse();
-    let aligned = warp_image(
+    // Use warp_to_reference to align target back to reference frame
+    let aligned = warp_to_reference(
         &target_pixels,
         width,
         height,
-        width,
-        height,
-        &inverse_detected,
-        &warp_config,
+        &result.transform,
+        InterpolationMethod::Lanczos3,
     );
 
     // Compare aligned image to reference
