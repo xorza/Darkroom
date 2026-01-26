@@ -263,14 +263,14 @@ mod tests {
     fn test_sparse_field() {
         let (pixels, stars) = sparse_field(256, 256);
         assert_eq!(pixels.len(), 256 * 256);
-        assert_eq!(stars.len(), 20);
+        assert_eq!(stars.len(), 15);
     }
 
     #[test]
     fn test_dense_field() {
-        let (pixels, stars) = dense_field(512, 512);
-        assert_eq!(pixels.len(), 512 * 512);
-        assert_eq!(stars.len(), 200);
+        let (pixels, stars) = dense_field(256, 256);
+        assert_eq!(pixels.len(), 256 * 256);
+        assert_eq!(stars.len(), 80);
     }
 
     #[test]

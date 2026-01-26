@@ -74,26 +74,27 @@ fn test_subpixel_shift_detection() {
     let shift_y = 0.23;
 
     let config = SyntheticFieldConfig {
-        width: 512,
-        height: 512,
+        width: 256,
+        height: 256,
         background: 0.1,
         noise_sigma: 0.015,
     };
 
     // Create stars at various positions with different brightnesses
+    // Scaled for 256x256 image with margin for edge detection
     let base_stars = vec![
-        SyntheticStar::new(80.0, 80.0, 0.9, 3.0),
-        SyntheticStar::new(200.0, 80.0, 0.8, 2.8),
-        SyntheticStar::new(350.0, 100.0, 0.7, 3.2),
-        SyntheticStar::new(450.0, 150.0, 0.75, 2.5),
-        SyntheticStar::new(100.0, 200.0, 0.65, 2.6),
-        SyntheticStar::new(256.0, 256.0, 0.85, 3.0),
-        SyntheticStar::new(400.0, 280.0, 0.6, 2.4),
-        SyntheticStar::new(80.0, 350.0, 0.7, 2.8),
-        SyntheticStar::new(200.0, 400.0, 0.55, 2.2),
-        SyntheticStar::new(350.0, 380.0, 0.8, 3.1),
-        SyntheticStar::new(450.0, 420.0, 0.72, 2.7),
-        SyntheticStar::new(150.0, 450.0, 0.68, 2.9),
+        SyntheticStar::new(40.0, 40.0, 0.9, 3.0),
+        SyntheticStar::new(100.0, 40.0, 0.8, 2.8),
+        SyntheticStar::new(170.0, 50.0, 0.7, 3.2),
+        SyntheticStar::new(220.0, 75.0, 0.75, 2.5),
+        SyntheticStar::new(50.0, 100.0, 0.65, 2.6),
+        SyntheticStar::new(128.0, 128.0, 0.85, 3.0),
+        SyntheticStar::new(200.0, 140.0, 0.6, 2.4),
+        SyntheticStar::new(40.0, 175.0, 0.7, 2.8),
+        SyntheticStar::new(100.0, 200.0, 0.55, 2.2),
+        SyntheticStar::new(175.0, 190.0, 0.8, 3.1),
+        SyntheticStar::new(220.0, 210.0, 0.72, 2.7),
+        SyntheticStar::new(75.0, 220.0, 0.68, 2.9),
     ];
 
     // Create shifted stars

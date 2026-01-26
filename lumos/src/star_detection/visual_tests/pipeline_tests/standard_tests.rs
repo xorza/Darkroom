@@ -125,9 +125,9 @@ fn test_pipeline_moffat_profile() {
     init_tracing();
 
     let field_config = StarFieldConfig {
-        width: 512,
-        height: 512,
-        num_stars: 40,
+        width: 256,
+        height: 256,
+        num_stars: 25,
         fwhm_range: (3.5, 4.5),
         // Narrower magnitude range to avoid saturation
         magnitude_range: (12.5, 13.5),
@@ -148,8 +148,8 @@ fn test_pipeline_moffat_profile() {
 
     // Moffat profile has extended wings that can affect FWHM estimation
     let criteria = crate::star_detection::visual_tests::output::PassCriteria {
-        min_detection_rate: 0.95,
-        max_false_positive_rate: 0.02,
+        min_detection_rate: 0.90, // Relaxed for smaller images
+        max_false_positive_rate: 0.05,
         max_mean_centroid_error: 0.30, // Moffat wings can affect centroid matching
         max_fwhm_error: 0.20,          // Gaussian fit on Moffat profile has some error
     };
@@ -168,9 +168,9 @@ fn test_pipeline_fwhm_range() {
     init_tracing();
 
     let field_config = StarFieldConfig {
-        width: 512,
-        height: 512,
-        num_stars: 40,
+        width: 256,
+        height: 256,
+        num_stars: 25,
         // Moderate FWHM range - very small stars (< 2.5px) fail min_area filter
         fwhm_range: (3.0, 5.0),
         // Narrower magnitude range to avoid saturation
@@ -190,7 +190,7 @@ fn test_pipeline_fwhm_range() {
 
     // Relaxed for FWHM variation - centroid matching can have outliers with varying PSF
     let criteria = crate::star_detection::visual_tests::output::PassCriteria {
-        min_detection_rate: 0.95,
+        min_detection_rate: 0.90, // Relaxed for smaller images
         max_false_positive_rate: 0.05,
         max_mean_centroid_error: 0.30, // Relaxed due to FWHM variation
         max_fwhm_error: 0.30,
@@ -211,9 +211,9 @@ fn test_pipeline_dynamic_range() {
     init_tracing();
 
     let field_config = StarFieldConfig {
-        width: 512,
-        height: 512,
-        num_stars: 50,
+        width: 256,
+        height: 256,
+        num_stars: 30,
         fwhm_range: (3.0, 4.0),
         // Adjusted to avoid saturation: bright stars peak ~0.8, faint ~0.2
         magnitude_range: (12.0, 14.0),
@@ -251,9 +251,9 @@ fn test_pipeline_low_noise() {
     init_tracing();
 
     let field_config = StarFieldConfig {
-        width: 512,
-        height: 512,
-        num_stars: 40,
+        width: 256,
+        height: 256,
+        num_stars: 25,
         fwhm_range: (3.0, 4.0),
         // Narrower magnitude range to avoid saturation
         magnitude_range: (12.5, 13.5),

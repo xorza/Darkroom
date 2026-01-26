@@ -173,7 +173,7 @@ fn test_centroid_accuracy() {
 fn test_centroid_snr() {
     init_tracing();
 
-    let width = 512;
+    let width = 256;
     let height = 128;
     let fwhm = 4.0;
     let sigma = fwhm_to_sigma(fwhm);

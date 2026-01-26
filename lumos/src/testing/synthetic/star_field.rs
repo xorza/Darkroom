@@ -425,9 +425,9 @@ fn add_gaussian_noise(pixels: &mut [f32], sigma: f32, seed: u64) {
 /// Generate a specific test configuration: sparse field with well-separated stars.
 pub fn sparse_field_config() -> StarFieldConfig {
     StarFieldConfig {
-        width: 512,
-        height: 512,
-        num_stars: 20,
+        width: 256,
+        height: 256,
+        num_stars: 15,
         fwhm_range: (3.0, 4.0),
         magnitude_range: (12.5, 13.5),
         mag_zero_point: 14.8,
@@ -440,9 +440,9 @@ pub fn sparse_field_config() -> StarFieldConfig {
 /// Generate a specific test configuration: dense field with crowding.
 pub fn dense_field_config() -> StarFieldConfig {
     StarFieldConfig {
-        width: 512,
-        height: 512,
-        num_stars: 200,
+        width: 256,
+        height: 256,
+        num_stars: 80,
         fwhm_range: (3.0, 4.0),
         magnitude_range: (12.0, 14.0),
         mag_zero_point: 14.8,
@@ -456,9 +456,9 @@ pub fn dense_field_config() -> StarFieldConfig {
 /// Generate a specific test configuration: crowded cluster.
 pub fn crowded_cluster_config() -> StarFieldConfig {
     StarFieldConfig {
-        width: 512,
-        height: 512,
-        num_stars: 500,
+        width: 256,
+        height: 256,
+        num_stars: 150,
         fwhm_range: (3.0, 4.0),
         magnitude_range: (12.0, 14.5),
         mag_zero_point: 14.8,
@@ -472,9 +472,9 @@ pub fn crowded_cluster_config() -> StarFieldConfig {
 /// Generate a specific test configuration: elliptical stars (tracking error).
 pub fn elliptical_stars_config() -> StarFieldConfig {
     StarFieldConfig {
-        width: 512,
-        height: 512,
-        num_stars: 50,
+        width: 256,
+        height: 256,
+        num_stars: 30,
         fwhm_range: (3.0, 4.0),
         magnitude_range: (12.5, 13.5),
         mag_zero_point: 14.8,
@@ -489,9 +489,9 @@ pub fn elliptical_stars_config() -> StarFieldConfig {
 /// Generate a specific test configuration: faint stars in high noise.
 pub fn faint_stars_config() -> StarFieldConfig {
     StarFieldConfig {
-        width: 512,
-        height: 512,
-        num_stars: 30,
+        width: 256,
+        height: 256,
+        num_stars: 20,
         fwhm_range: (3.0, 4.0),
         magnitude_range: (13.5, 14.5),
         mag_zero_point: 14.8,

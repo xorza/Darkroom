@@ -20,8 +20,8 @@ const TILE_SIZE: usize = 64;
 fn test_background_uniform() {
     init_tracing();
 
-    let width = 512;
-    let height = 512;
+    let width = 256;
+    let height = 256;
     let bg_level = 0.15;
 
     // Create uniform background with some stars
@@ -88,8 +88,8 @@ fn test_background_uniform() {
 fn test_background_gradient() {
     init_tracing();
 
-    let width = 512;
-    let height = 512;
+    let width = 256;
+    let height = 256;
 
     // Create gradient background
     let mut pixels = vec![0.0f32; width * height];
@@ -165,8 +165,8 @@ fn test_background_gradient() {
 fn test_background_vignette() {
     init_tracing();
 
-    let width = 512;
-    let height = 512;
+    let width = 256;
+    let height = 256;
 
     // Create vignette background
     let mut pixels = vec![0.0f32; width * height];
@@ -240,8 +240,8 @@ fn test_background_vignette() {
 fn test_background_nebula() {
     init_tracing();
 
-    let width = 512;
-    let height = 512;
+    let width = 256;
+    let height = 256;
 
     // Create nebula background
     let mut pixels = vec![0.0f32; width * height];

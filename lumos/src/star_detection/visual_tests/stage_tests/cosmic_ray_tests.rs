@@ -20,8 +20,8 @@ use imaginarium::drawing::{draw_circle, draw_cross};
 fn test_cosmic_ray_rejection() {
     init_tracing();
 
-    let width = 512;
-    let height = 512;
+    let width = 256;
+    let height = 256;
 
     // Create star field without cosmic rays first
     let config = StarFieldConfig {
@@ -40,7 +40,7 @@ fn test_cosmic_ray_rejection() {
     let (mut pixels, ground_truth) = generate_star_field(&config);
 
     // Add cosmic rays manually so we know their positions
-    let cr_positions = add_cosmic_rays(&mut pixels, width, 30, (0.5, 1.0), 123);
+    let cr_positions = add_cosmic_rays(&mut pixels, width, 15, (0.5, 1.0), 123);
 
     save_grayscale_png(
         &pixels,

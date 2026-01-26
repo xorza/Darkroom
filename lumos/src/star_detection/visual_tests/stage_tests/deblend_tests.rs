@@ -115,7 +115,7 @@ fn test_deblend_star_pair() {
 fn test_deblend_chain() {
     init_tracing();
 
-    let width = 512;
+    let width = 256;
     let height = 128;
     let fwhm = 4.0;
     let sigma = fwhm_to_sigma(fwhm);

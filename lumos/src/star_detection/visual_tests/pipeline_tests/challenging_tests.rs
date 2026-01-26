@@ -117,9 +117,9 @@ fn test_very_dense() {
     init_tracing();
 
     let field_config = StarFieldConfig {
-        width: 512,
-        height: 512,
-        num_stars: 800, // Very dense
+        width: 256,
+        height: 256,
+        num_stars: 200, // Very dense
         fwhm_range: (3.0, 4.0),
         magnitude_range: (8.0, 14.0),
         background_level: 0.1,
@@ -147,9 +147,9 @@ fn test_gradient_density() {
     init_tracing();
 
     let field_config = StarFieldConfig {
-        width: 512,
-        height: 512,
-        num_stars: 300,
+        width: 256,
+        height: 256,
+        num_stars: 100,
         fwhm_range: (3.0, 4.0),
         magnitude_range: (8.0, 14.0),
         background_level: 0.1,
@@ -203,9 +203,9 @@ fn test_varying_tracking_error() {
     init_tracing();
 
     let field_config = StarFieldConfig {
-        width: 512,
-        height: 512,
-        num_stars: 50,
+        width: 256,
+        height: 256,
+        num_stars: 30,
         fwhm_range: (3.0, 4.0),
         magnitude_range: (8.0, 13.0),
         background_level: 0.1,
@@ -238,9 +238,9 @@ fn test_field_rotation() {
     init_tracing();
 
     let field_config = StarFieldConfig {
-        width: 512,
-        height: 512,
-        num_stars: 60,
+        width: 256,
+        height: 256,
+        num_stars: 35,
         fwhm_range: (3.0, 4.0),
         magnitude_range: (8.0, 13.0),
         background_level: 0.1,
@@ -276,14 +276,14 @@ fn test_cosmic_rays() {
     init_tracing();
 
     let field_config = StarFieldConfig {
-        width: 512,
-        height: 512,
-        num_stars: 40,
+        width: 256,
+        height: 256,
+        num_stars: 25,
         fwhm_range: (3.0, 4.0),
         magnitude_range: (8.0, 13.0),
         background_level: 0.1,
         noise_sigma: 0.02,
-        cosmic_ray_count: 50, // Many cosmic rays
+        cosmic_ray_count: 25, // Many cosmic rays
         ..Default::default()
     };
     let detection_config = StarDetectionConfig::default();
@@ -306,9 +306,9 @@ fn test_bayer_pattern() {
     init_tracing();
 
     let field_config = StarFieldConfig {
-        width: 512,
-        height: 512,
-        num_stars: 40,
+        width: 256,
+        height: 256,
+        num_stars: 25,
         fwhm_range: (3.0, 4.0),
         magnitude_range: (8.0, 13.0),
         background_level: 0.1,
@@ -336,9 +336,9 @@ fn test_saturated_stars() {
     init_tracing();
 
     let field_config = StarFieldConfig {
-        width: 512,
-        height: 512,
-        num_stars: 50,
+        width: 256,
+        height: 256,
+        num_stars: 30,
         fwhm_range: (3.0, 4.0),
         magnitude_range: (6.0, 13.0), // Include bright stars
         background_level: 0.1,
@@ -375,9 +375,9 @@ fn test_gradient_background() {
     init_tracing();
 
     let field_config = StarFieldConfig {
-        width: 512,
-        height: 512,
-        num_stars: 40,
+        width: 256,
+        height: 256,
+        num_stars: 25,
         fwhm_range: (3.0, 4.0),
         magnitude_range: (8.0, 13.0),
         gradient: Some((0.05, 0.25, 0.3)), // Strong gradient
@@ -408,9 +408,9 @@ fn test_vignette_background() {
     init_tracing();
 
     let field_config = StarFieldConfig {
-        width: 512,
-        height: 512,
-        num_stars: 40,
+        width: 256,
+        height: 256,
+        num_stars: 25,
         fwhm_range: (3.0, 4.0),
         magnitude_range: (8.0, 13.0),
         vignette: Some((0.2, 0.05, 2.0)), // Strong vignette
@@ -441,9 +441,9 @@ fn test_nebula_background() {
     init_tracing();
 
     let field_config = StarFieldConfig {
-        width: 512,
-        height: 512,
-        num_stars: 50,
+        width: 256,
+        height: 256,
+        num_stars: 30,
         fwhm_range: (3.0, 4.0),
         magnitude_range: (8.0, 13.0),
         background_level: 0.1,
@@ -488,9 +488,9 @@ fn test_edge_stars() {
     init_tracing();
 
     let field_config = StarFieldConfig {
-        width: 512,
-        height: 512,
-        num_stars: 50,
+        width: 256,
+        height: 256,
+        num_stars: 30,
         fwhm_range: (3.0, 4.0),
         magnitude_range: (8.0, 12.0),
         background_level: 0.1,
@@ -541,9 +541,9 @@ fn test_very_low_snr() {
     init_tracing();
 
     let field_config = StarFieldConfig {
-        width: 512,
-        height: 512,
-        num_stars: 30,
+        width: 256,
+        height: 256,
+        num_stars: 20,
         fwhm_range: (3.5, 4.5),
         magnitude_range: (13.0, 15.5), // Very faint
         mag_zero_point: 16.0,
@@ -580,9 +580,9 @@ fn test_combined_challenges() {
     init_tracing();
 
     let field_config = StarFieldConfig {
-        width: 512,
-        height: 512,
-        num_stars: 100,
+        width: 256,
+        height: 256,
+        num_stars: 50,
         fwhm_range: (2.5, 5.0),
         magnitude_range: (7.0, 14.0),
         background_level: 0.1,

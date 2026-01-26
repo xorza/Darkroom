@@ -28,8 +28,8 @@ fn normalize_for_display(pixels: &[f32]) -> Vec<f32> {
 fn test_gaussian_filter_sparse() {
     init_tracing();
 
-    let width = 512;
-    let height = 512;
+    let width = 256;
+    let height = 256;
     let fwhm = 3.5;
 
     // Create sparse star field
@@ -120,8 +120,8 @@ fn test_gaussian_filter_sparse() {
 fn test_gaussian_filter_fwhm_range() {
     init_tracing();
 
-    let width = 512;
-    let height = 512;
+    let width = 256;
+    let height = 256;
 
     // Create stars with varying FWHM
     let config = StarFieldConfig {
@@ -182,8 +182,8 @@ fn test_gaussian_filter_fwhm_range() {
 fn test_gaussian_filter_noise() {
     init_tracing();
 
-    let width = 512;
-    let height = 512;
+    let width = 256;
+    let height = 256;
     let fwhm = 3.5;
 
     // Create star field with high noise

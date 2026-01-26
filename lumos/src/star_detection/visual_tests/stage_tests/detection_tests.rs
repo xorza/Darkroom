@@ -122,8 +122,8 @@ fn test_detection_sparse() {
 fn test_detection_thresholds() {
     init_tracing();
 
-    let width = 512;
-    let height = 512;
+    let width = 256;
+    let height = 256;
 
     // Create field with mix of bright and faint stars
     let config = StarFieldConfig {
@@ -210,8 +210,8 @@ fn test_detection_thresholds() {
 fn test_detection_area_filter() {
     init_tracing();
 
-    let width = 512;
-    let height = 512;
+    let width = 256;
+    let height = 256;
 
     // Create field with varying star sizes
     let config = StarFieldConfig {
