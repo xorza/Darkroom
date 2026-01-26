@@ -543,6 +543,13 @@ DistortionMap      // Grid-based distortion visualization with interpolation
 - Pre-computes y-dependent transform terms for efficiency
 - Automatic dispatch to best available SIMD path with scalar fallback
 
+**Warping API:**
+- `warp_to_reference(target_image, width, height, transform, method)` - Aligns target image to reference frame
+  - Takes transform from `register_stars()` (maps reference→target)
+  - Internally inverts before passing to `warp_image()` for correct sampling direction
+  - Returns image in reference coordinates, ready for stacking/blending
+- `warp_image(input, ..., transform, config)` - Low-level warping, expects input→output transform
+
 **Lanczos clamping (new):**
 - `WarpConfig::clamp_output` - Optional clamping to reduce ringing artifacts
 - Clamps interpolated values to [min, max] of sampled neighborhood pixels

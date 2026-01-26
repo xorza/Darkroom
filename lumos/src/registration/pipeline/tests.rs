@@ -127,15 +127,24 @@ fn test_registrator_config() {
 
 #[test]
 fn test_warp_to_reference() {
-    // Create a simple test image
+    // Create a simple test image with a bright pixel offset from center
     let width = 64;
     let height = 64;
-    let mut image = vec![0.0f32; width * height];
-    image[32 * width + 32] = 1.0; // Bright pixel at center
+    let mut target_image = vec![0.0f32; width * height];
 
+    // Place bright pixel at (37, 35) in target image
+    let target_x = 37;
+    let target_y = 35;
+    target_image[target_y * width + target_x] = 1.0;
+
+    // Transform maps reference -> target: ref(32,32) -> target(37,35)
+    // So translation is (5, 3)
     let transform = TransformMatrix::from_translation(5.0, 3.0);
+
+    // warp_to_reference should align target to reference frame
+    // The pixel at target(37,35) should appear at reference(32,32) after warping
     let warped = warp_to_reference(
-        &image,
+        &target_image,
         width,
         height,
         &transform,
@@ -143,8 +152,184 @@ fn test_warp_to_reference() {
     );
 
     assert_eq!(warped.len(), width * height);
-    // The bright pixel should have moved
-    assert!(warped[32 * width + 32] < 0.5);
+
+    // The bright pixel should now be at reference position (32, 32)
+    let ref_x = 32;
+    let ref_y = 32;
+    assert!(
+        warped[ref_y * width + ref_x] > 0.5,
+        "Expected bright pixel at reference position ({}, {}), got {}",
+        ref_x,
+        ref_y,
+        warped[ref_y * width + ref_x]
+    );
+
+    // Original target position should now be dark (or near-dark due to interpolation)
+    assert!(
+        warped[target_y * width + target_x] < 0.5,
+        "Expected dark at original target position ({}, {}), got {}",
+        target_x,
+        target_y,
+        warped[target_y * width + target_x]
+    );
+}
+
+/// Test that warp_to_reference correctly aligns a warped image back to reference
+#[test]
+fn test_warp_to_reference_roundtrip() {
+    let width = 128;
+    let height = 128;
+
+    // Create reference image with a few bright spots
+    let mut ref_image = vec![0.0f32; width * height];
+    let ref_points = [(40, 40), (80, 40), (60, 80), (40, 80), (80, 80)];
+    for &(x, y) in &ref_points {
+        ref_image[y * width + x] = 1.0;
+    }
+
+    // Define transform: reference -> target
+    let transform = TransformMatrix::similarity(10.0, -5.0, 0.1, 1.02);
+
+    // Create target image by warping reference with the transform
+    // (simulates what the camera would see if shifted/rotated)
+    let target_image = crate::registration::interpolation::warp_image(
+        &ref_image,
+        width,
+        height,
+        width,
+        height,
+        &transform,
+        &crate::registration::interpolation::WarpConfig {
+            method: InterpolationMethod::Lanczos3,
+            border_value: 0.0,
+            normalize_kernel: true,
+            clamp_output: false,
+        },
+    );
+
+    // Now use warp_to_reference to align target back to reference frame
+    let aligned = warp_to_reference(
+        &target_image,
+        width,
+        height,
+        &transform,
+        InterpolationMethod::Lanczos3,
+    );
+
+    // Compare aligned image to reference (excluding borders affected by warping)
+    let margin = 20;
+    let mut max_diff = 0.0f32;
+    let mut sum_sq_diff = 0.0f32;
+    let mut count = 0;
+
+    for y in margin..height - margin {
+        for x in margin..width - margin {
+            let ref_val = ref_image[y * width + x];
+            let aligned_val = aligned[y * width + x];
+            let diff = (ref_val - aligned_val).abs();
+            max_diff = max_diff.max(diff);
+            sum_sq_diff += diff * diff;
+            count += 1;
+        }
+    }
+
+    let rmse = (sum_sq_diff / count as f32).sqrt();
+
+    // After roundtrip, images should be very similar
+    // Some error is expected due to double interpolation (forward + inverse warp)
+    assert!(
+        rmse < 0.15,
+        "Roundtrip RMSE too high: {} (expected < 0.15)",
+        rmse
+    );
+    assert!(
+        max_diff < 0.5,
+        "Roundtrip max diff too high: {} (expected < 0.5)",
+        max_diff
+    );
+}
+
+/// End-to-end test: detect transform from stars, warp image, verify alignment
+#[test]
+fn test_warp_to_reference_end_to_end() {
+    let width = 256;
+    let height = 256;
+
+    // Generate reference star positions
+    let ref_stars = generate_star_grid(6, 6, 35.0, (30.0, 30.0));
+
+    // Create reference image with Gaussian stars
+    let ref_image = generate_synthetic_star_image(width, height, &ref_stars, 1.0, 4.0);
+
+    // Apply known transform to star positions
+    let known_transform = TransformMatrix::similarity(12.0, -8.0, 0.05, 1.01);
+    let target_stars = transform_stars(&ref_stars, &known_transform);
+
+    // Create target image with transformed star positions
+    let target_image = generate_synthetic_star_image(width, height, &target_stars, 1.0, 4.0);
+
+    // Register: find transform from reference stars to target stars
+    let result = register_stars(&ref_stars, &target_stars, TransformType::Similarity)
+        .expect("Registration should succeed");
+
+    // Warp target image to align with reference
+    let aligned = warp_to_reference(
+        &target_image,
+        width,
+        height,
+        &result.transform,
+        InterpolationMethod::Lanczos3,
+    );
+
+    // Compute alignment quality metrics in central region
+    let margin = 30;
+    let mut ref_sum = 0.0f32;
+    let mut aligned_sum = 0.0f32;
+    let mut product_sum = 0.0f32;
+    let mut ref_sq_sum = 0.0f32;
+    let mut aligned_sq_sum = 0.0f32;
+    let mut diff_sum = 0.0f32;
+    let mut count = 0;
+
+    for y in margin..height - margin {
+        for x in margin..width - margin {
+            let r = ref_image[y * width + x];
+            let a = aligned[y * width + x];
+
+            ref_sum += r;
+            aligned_sum += a;
+            product_sum += r * a;
+            ref_sq_sum += r * r;
+            aligned_sq_sum += a * a;
+            diff_sum += (r - a).abs();
+            count += 1;
+        }
+    }
+
+    let n = count as f32;
+    let ref_mean = ref_sum / n;
+    let aligned_mean = aligned_sum / n;
+
+    // Normalized Cross-Correlation
+    let numerator = product_sum - n * ref_mean * aligned_mean;
+    let denom_ref = (ref_sq_sum - n * ref_mean * ref_mean).sqrt();
+    let denom_aligned = (aligned_sq_sum - n * aligned_mean * aligned_mean).sqrt();
+    let ncc = numerator / (denom_ref * denom_aligned + 1e-10);
+
+    // Mean Absolute Error
+    let mae = diff_sum / n;
+
+    // NCC > 0.9 indicates good alignment; wrong direction would give NCC << 0.5
+    assert!(
+        ncc > 0.90,
+        "End-to-end alignment NCC too low: {} (expected > 0.90)",
+        ncc
+    );
+    assert!(
+        mae < 0.1,
+        "End-to-end alignment MAE too high: {} (expected < 0.1)",
+        mae
+    );
 }
 
 #[test]

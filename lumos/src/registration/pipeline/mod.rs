@@ -256,7 +256,7 @@ pub fn register_stars(
 /// * `target_image` - Target image pixel data
 /// * `width` - Image width
 /// * `height` - Image height
-/// * `transform` - Transformation from reference to target coordinates
+/// * `transform` - Transformation from reference to target coordinates (as returned by `register_stars`)
 /// * `method` - Interpolation method
 ///
 /// # Returns
@@ -276,13 +276,20 @@ pub fn warp_to_reference(
         clamp_output: false,
     };
 
+    // The transform maps reference→target coordinates.
+    // warp_image expects input→output transform (target→reference here),
+    // then inverts it internally to get output→input for sampling.
+    // So we pass the inverse (target→reference), which gets inverted back
+    // to reference→target, giving us the correct sampling direction.
+    let inverse = transform.inverse();
+
     warp_image(
         target_image,
         width,
         height,
         width,
         height,
-        transform,
+        &inverse,
         &config,
     )
 }
