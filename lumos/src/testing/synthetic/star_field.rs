@@ -114,9 +114,9 @@ pub struct StarFieldConfig {
 impl Default for StarFieldConfig {
     fn default() -> Self {
         Self {
-            width: 512,
-            height: 512,
-            num_stars: 50,
+            width: 256,
+            height: 256,
+            num_stars: 30,
             fwhm_range: (3.0, 4.0),
             magnitude_range: (10.0, 14.0),
             mag_zero_point: 14.5,

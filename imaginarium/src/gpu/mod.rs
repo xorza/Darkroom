@@ -84,10 +84,8 @@ impl Gpu {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serial_test::serial;
 
     #[test]
-    #[serial]
     fn test_gpu_context_creation() {
         let result = Gpu::new();
         if let Err(e) = &result {

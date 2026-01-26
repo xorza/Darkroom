@@ -185,11 +185,9 @@ pub(super) fn apply(
 mod tests {
     use super::*;
     use crate::common::test_utils::{load_lena_rgba_u8_61x38, load_lena_rgba_u8_895x551, test_gpu};
-    use serial_test::serial;
     use std::f32::consts::PI;
 
     #[test]
-    #[serial]
     fn test_identity_transform() {
         let Some(ctx) = test_gpu() else {
             return;
@@ -214,7 +212,6 @@ mod tests {
     }
 
     #[test]
-    #[serial]
     fn test_scale_transform() {
         let Some(ctx) = test_gpu() else {
             return;
@@ -243,7 +240,6 @@ mod tests {
     }
 
     #[test]
-    #[serial]
     fn test_rotation_transform() {
         let Some(ctx) = test_gpu() else {
             return;
@@ -269,7 +265,6 @@ mod tests {
     }
 
     #[test]
-    #[serial]
     fn test_filter_modes() {
         let Some(ctx) = test_gpu() else {
             return;
@@ -312,7 +307,6 @@ mod tests {
     }
 
     #[test]
-    #[serial]
     fn test_transform_rgb_u8() {
         let Some(ctx) = test_gpu() else {
             return;
@@ -338,7 +332,6 @@ mod tests {
     }
 
     #[test]
-    #[serial]
     fn test_transform_rgb_u8_rotation() {
         let Some(ctx) = test_gpu() else {
             return;
@@ -371,7 +364,6 @@ mod tests {
     }
 
     #[test]
-    #[serial]
     fn test_transform_rgba_f32() {
         let Some(ctx) = test_gpu() else {
             return;
@@ -409,7 +401,6 @@ mod tests {
     }
 
     #[test]
-    #[serial]
     fn test_transform_rgba_f32_rotation() {
         let Some(ctx) = test_gpu() else {
             return;
@@ -440,7 +431,6 @@ mod tests {
     }
 
     #[test]
-    #[serial]
     fn test_transform_rgb_f32() {
         let Some(ctx) = test_gpu() else {
             return;
@@ -477,7 +467,6 @@ mod tests {
     }
 
     #[test]
-    #[serial]
     fn test_transform_rgb_f32_rotation() {
         let Some(ctx) = test_gpu() else {
             return;
@@ -508,7 +497,6 @@ mod tests {
     }
 
     #[test]
-    #[serial]
     fn test_transform_all_formats_scale() {
         let Some(ctx) = test_gpu() else {
             return;
@@ -561,7 +549,6 @@ mod tests {
     }
 
     #[test]
-    #[serial]
     fn test_transform_gray_u8_identity() {
         let Some(ctx) = test_gpu() else {
             return;
@@ -585,7 +572,6 @@ mod tests {
     }
 
     #[test]
-    #[serial]
     fn test_transform_gray_alpha_u8_identity() {
         let Some(ctx) = test_gpu() else {
             return;
@@ -609,7 +595,6 @@ mod tests {
     }
 
     #[test]
-    #[serial]
     fn test_transform_gray_f32_identity() {
         let Some(ctx) = test_gpu() else {
             return;
@@ -644,7 +629,6 @@ mod tests {
     }
 
     #[test]
-    #[serial]
     fn test_transform_gray_alpha_f32_identity() {
         let Some(ctx) = test_gpu() else {
             return;
@@ -679,7 +663,6 @@ mod tests {
     }
 
     #[test]
-    #[serial]
     fn test_transform_gray_u8_rotation() {
         let Some(ctx) = test_gpu() else {
             return;

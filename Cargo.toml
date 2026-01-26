@@ -78,7 +78,6 @@ tempfile = { version = "*" }
 rand_chacha = { version = "*" }
 rustfft = { version = "*" }
 nalgebra = { version = "*" }
-serial_test = { version = "*" }
 
 
 [profile.bench]
