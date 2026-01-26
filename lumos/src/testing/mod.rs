@@ -2,6 +2,8 @@
 
 #![allow(dead_code)]
 
+pub mod synthetic;
+
 use std::path::PathBuf;
 
 use crate::AstroImage;

@@ -7,7 +7,7 @@ AI coding rules for Rust projects:
 - Always add `#[derive(Debug)]` to Rust structs.
 - If Rust code was changed, run in following order:
     1. `cargo test && cargo fmt && cargo check && cargo clippy --all-targets -- -D warnings`
-       before confirming output.
+       before confirming output. Skip doc-tests.
 - Add asserts for function input arguments and outputs where applicable, so logic errors crash instead of being
   swallowed. Do not use asserts for user input and possible network failures.
 - Check online documentation for best practices and patterns.

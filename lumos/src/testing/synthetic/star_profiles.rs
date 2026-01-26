@@ -6,9 +6,18 @@
 //! - Elliptical Gaussian (tracking errors)
 //! - Saturated stars (flat-topped profiles)
 
-// Re-export FWHM conversion functions for convenience
-#[allow(unused_imports)]
-pub use crate::star_detection::constants::{fwhm_to_sigma, sigma_to_fwhm};
+/// Convert FWHM to Gaussian sigma.
+/// FWHM = 2 * sqrt(2 * ln(2)) * sigma ≈ 2.355 * sigma
+#[inline]
+pub fn fwhm_to_sigma(fwhm: f32) -> f32 {
+    fwhm / 2.354_82
+}
+
+/// Convert Gaussian sigma to FWHM.
+#[inline]
+pub fn sigma_to_fwhm(sigma: f32) -> f32 {
+    sigma * 2.354_82
+}
 
 /// Render a circular Gaussian star profile.
 ///
@@ -318,5 +327,13 @@ mod tests {
             (recovered_fwhm - fwhm).abs() < 0.001,
             "FWHM conversion should be reversible"
         );
+    }
+
+    #[test]
+    fn test_fwhm_sigma_conversion() {
+        let fwhm = 4.0;
+        let sigma = fwhm_to_sigma(fwhm);
+        let recovered = sigma_to_fwhm(sigma);
+        assert!((recovered - fwhm).abs() < 0.001);
     }
 }

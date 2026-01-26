@@ -1,0 +1,248 @@
+//! Transform utilities for synthetic star fields.
+//!
+//! Provides functions to apply geometric transforms (translation, rotation, scale)
+//! to star positions for testing registration algorithms.
+
+/// Generate random star positions within a bounded area.
+///
+/// Uses a deterministic LCG random number generator for reproducibility.
+///
+/// # Arguments
+/// * `num_stars` - Number of star positions to generate
+/// * `width` - Image width in pixels
+/// * `height` - Image height in pixels
+/// * `seed` - Random seed for reproducibility
+/// * `margin` - Margin from edges (default 50.0 if not specified)
+///
+/// # Returns
+/// Vector of (x, y) coordinates
+pub fn generate_random_positions(
+    num_stars: usize,
+    width: f64,
+    height: f64,
+    seed: u64,
+) -> Vec<(f64, f64)> {
+    generate_random_positions_with_margin(num_stars, width, height, seed, 50.0)
+}
+
+/// Generate random star positions with custom margin.
+pub fn generate_random_positions_with_margin(
+    num_stars: usize,
+    width: f64,
+    height: f64,
+    seed: u64,
+    margin: f64,
+) -> Vec<(f64, f64)> {
+    // Simple LCG random number generator for reproducibility
+    let mut state = seed;
+    let mut next_random = || {
+        state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+        (state >> 33) as f64 / (1u64 << 31) as f64
+    };
+
+    let mut stars = Vec::with_capacity(num_stars);
+
+    for _ in 0..num_stars {
+        let x = margin + next_random() * (width - 2.0 * margin);
+        let y = margin + next_random() * (height - 2.0 * margin);
+        stars.push((x, y));
+    }
+
+    stars
+}
+
+/// Apply a translation transform to a star field.
+///
+/// # Arguments
+/// * `stars` - Input star positions as (x, y) tuples
+/// * `dx` - Translation in X direction (pixels)
+/// * `dy` - Translation in Y direction (pixels)
+///
+/// # Returns
+/// Translated star positions
+pub fn translate_stars(stars: &[(f64, f64)], dx: f64, dy: f64) -> Vec<(f64, f64)> {
+    stars.iter().map(|(x, y)| (x + dx, y + dy)).collect()
+}
+
+/// Apply a similarity transform (translation + rotation + scale) to a star field.
+///
+/// The transform is applied around a center point:
+/// 1. Translate star to origin (relative to center)
+/// 2. Apply rotation and scale
+/// 3. Translate back to center
+/// 4. Apply translation offset
+///
+/// # Arguments
+/// * `stars` - Input star positions as (x, y) tuples
+/// * `dx` - Translation in X direction (pixels)
+/// * `dy` - Translation in Y direction (pixels)
+/// * `angle_rad` - Rotation angle in radians
+/// * `scale` - Scale factor (1.0 = no change)
+/// * `center_x` - X coordinate of rotation center
+/// * `center_y` - Y coordinate of rotation center
+///
+/// # Returns
+/// Transformed star positions
+pub fn transform_stars(
+    stars: &[(f64, f64)],
+    dx: f64,
+    dy: f64,
+    angle_rad: f64,
+    scale: f64,
+    center_x: f64,
+    center_y: f64,
+) -> Vec<(f64, f64)> {
+    let cos_a = angle_rad.cos() * scale;
+    let sin_a = angle_rad.sin() * scale;
+
+    stars
+        .iter()
+        .map(|(x, y)| {
+            // Translate to origin, rotate+scale, translate back, then apply offset
+            let rx = x - center_x;
+            let ry = y - center_y;
+            let new_x = cos_a * rx - sin_a * ry + center_x + dx;
+            let new_y = sin_a * rx + cos_a * ry + center_y + dy;
+            (new_x, new_y)
+        })
+        .collect()
+}
+
+/// Apply rotation only (no translation or scale) around a center point.
+///
+/// # Arguments
+/// * `stars` - Input star positions
+/// * `angle_rad` - Rotation angle in radians
+/// * `center_x` - X coordinate of rotation center
+/// * `center_y` - Y coordinate of rotation center
+pub fn rotate_stars(
+    stars: &[(f64, f64)],
+    angle_rad: f64,
+    center_x: f64,
+    center_y: f64,
+) -> Vec<(f64, f64)> {
+    transform_stars(stars, 0.0, 0.0, angle_rad, 1.0, center_x, center_y)
+}
+
+/// Apply scale only (no translation or rotation) around a center point.
+///
+/// # Arguments
+/// * `stars` - Input star positions
+/// * `scale` - Scale factor
+/// * `center_x` - X coordinate of scale center
+/// * `center_y` - Y coordinate of scale center
+pub fn scale_stars(
+    stars: &[(f64, f64)],
+    scale: f64,
+    center_x: f64,
+    center_y: f64,
+) -> Vec<(f64, f64)> {
+    transform_stars(stars, 0.0, 0.0, 0.0, scale, center_x, center_y)
+}
+
+/// Add positional noise to star coordinates.
+///
+/// Uses deterministic LCG for reproducibility.
+///
+/// # Arguments
+/// * `stars` - Input star positions
+/// * `noise_amplitude` - Maximum noise in each direction (pixels)
+/// * `seed` - Random seed
+pub fn add_position_noise(
+    stars: &[(f64, f64)],
+    noise_amplitude: f64,
+    seed: u64,
+) -> Vec<(f64, f64)> {
+    let mut state = seed;
+    let mut next_random = || {
+        state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+        ((state >> 33) as f64 / (1u64 << 31) as f64) * 2.0 - 1.0 // -1 to 1
+    };
+
+    stars
+        .iter()
+        .map(|(x, y)| {
+            let noise_x = next_random() * noise_amplitude;
+            let noise_y = next_random() * noise_amplitude;
+            (x + noise_x, y + noise_y)
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_generate_random_positions() {
+        let stars = generate_random_positions(100, 1000.0, 1000.0, 12345);
+        assert_eq!(stars.len(), 100);
+
+        // Check all stars are within bounds (with margin)
+        for (x, y) in &stars {
+            assert!(*x >= 50.0 && *x <= 950.0);
+            assert!(*y >= 50.0 && *y <= 950.0);
+        }
+
+        // Check reproducibility
+        let stars2 = generate_random_positions(100, 1000.0, 1000.0, 12345);
+        assert_eq!(stars, stars2);
+    }
+
+    #[test]
+    fn test_translate_stars() {
+        let stars = vec![(100.0, 200.0), (300.0, 400.0)];
+        let translated = translate_stars(&stars, 10.0, -20.0);
+
+        assert_eq!(translated[0], (110.0, 180.0));
+        assert_eq!(translated[1], (310.0, 380.0));
+    }
+
+    #[test]
+    fn test_transform_stars_identity() {
+        let stars = vec![(100.0, 200.0), (300.0, 400.0)];
+        let transformed = transform_stars(&stars, 0.0, 0.0, 0.0, 1.0, 500.0, 500.0);
+
+        // Identity transform should preserve positions
+        assert!((transformed[0].0 - 100.0).abs() < 1e-10);
+        assert!((transformed[0].1 - 200.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_rotate_stars_90_degrees() {
+        let stars = vec![(600.0, 500.0)]; // 100 pixels right of center
+        let rotated = rotate_stars(&stars, std::f64::consts::FRAC_PI_2, 500.0, 500.0);
+
+        // 90 degree rotation should move point to 100 pixels above center
+        assert!((rotated[0].0 - 500.0).abs() < 1e-10);
+        assert!((rotated[0].1 - 600.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_scale_stars() {
+        let stars = vec![(600.0, 500.0)]; // 100 pixels right of center
+        let scaled = scale_stars(&stars, 2.0, 500.0, 500.0);
+
+        // 2x scale should move point to 200 pixels right of center
+        assert!((scaled[0].0 - 700.0).abs() < 1e-10);
+        assert!((scaled[0].1 - 500.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_add_position_noise() {
+        let stars = vec![(500.0, 500.0); 100];
+        let noisy = add_position_noise(&stars, 1.0, 12345);
+
+        // Check that noise was added
+        let mut has_different = false;
+        for (orig, noisy) in stars.iter().zip(noisy.iter()) {
+            if (orig.0 - noisy.0).abs() > 1e-10 || (orig.1 - noisy.1).abs() > 1e-10 {
+                has_different = true;
+            }
+            // Noise should be within amplitude
+            assert!((orig.0 - noisy.0).abs() <= 1.0);
+            assert!((orig.1 - noisy.1).abs() <= 1.0);
+        }
+        assert!(has_different);
+    }
+}

@@ -1,64 +1,12 @@
 //! Tests for registration using synthetic star fields.
 
 use crate::registration::{RegistrationConfig, Registrator};
-
-/// Generate a synthetic star field with random positions.
-/// Returns a list of (x, y) coordinates.
-fn generate_star_field(num_stars: usize, width: f64, height: f64, seed: u64) -> Vec<(f64, f64)> {
-    // Simple LCG random number generator for reproducibility
-    let mut state = seed;
-    let mut next_random = || {
-        state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
-        (state >> 33) as f64 / (1u64 << 31) as f64
-    };
-
-    let margin = 50.0;
-    let mut stars = Vec::with_capacity(num_stars);
-
-    for _ in 0..num_stars {
-        let x = margin + next_random() * (width - 2.0 * margin);
-        let y = margin + next_random() * (height - 2.0 * margin);
-        stars.push((x, y));
-    }
-
-    stars
-}
-
-/// Apply a translation transform to a star field.
-fn translate_stars(stars: &[(f64, f64)], dx: f64, dy: f64) -> Vec<(f64, f64)> {
-    stars.iter().map(|(x, y)| (x + dx, y + dy)).collect()
-}
-
-/// Apply a similarity transform (translation + rotation + scale) to a star field.
-fn transform_stars(
-    stars: &[(f64, f64)],
-    dx: f64,
-    dy: f64,
-    angle_rad: f64,
-    scale: f64,
-    center_x: f64,
-    center_y: f64,
-) -> Vec<(f64, f64)> {
-    let cos_a = angle_rad.cos() * scale;
-    let sin_a = angle_rad.sin() * scale;
-
-    stars
-        .iter()
-        .map(|(x, y)| {
-            // Translate to origin, rotate+scale, translate back, then apply offset
-            let rx = x - center_x;
-            let ry = y - center_y;
-            let new_x = cos_a * rx - sin_a * ry + center_x + dx;
-            let new_y = sin_a * rx + cos_a * ry + center_y + dy;
-            (new_x, new_y)
-        })
-        .collect()
-}
+use crate::testing::synthetic::{generate_random_positions, transform_stars, translate_stars};
 
 #[test]
 fn test_registration_translation_only() {
     // Generate reference star field
-    let ref_stars = generate_star_field(50, 1000.0, 1000.0, 12345);
+    let ref_stars = generate_random_positions(50, 1000.0, 1000.0, 12345);
 
     // Apply known translation
     let dx = 25.5;
@@ -118,7 +66,7 @@ fn test_registration_translation_only() {
 #[test]
 fn test_registration_similarity_transform() {
     // Generate reference star field
-    let ref_stars = generate_star_field(80, 2000.0, 2000.0, 54321);
+    let ref_stars = generate_random_positions(80, 2000.0, 2000.0, 54321);
 
     // Apply known similarity transform (translation + rotation + scale)
     let dx = 30.0;
@@ -194,7 +142,7 @@ fn test_registration_similarity_transform() {
 #[test]
 fn test_registration_with_noise() {
     // Generate reference star field
-    let ref_stars = generate_star_field(100, 1500.0, 1500.0, 99999);
+    let ref_stars = generate_random_positions(100, 1500.0, 1500.0, 99999);
 
     // Apply translation with some noise in star positions
     let dx = 50.0;
@@ -261,7 +209,7 @@ fn test_registration_with_noise() {
 #[test]
 fn test_registration_large_translation() {
     // Generate reference star field
-    let ref_stars = generate_star_field(60, 2000.0, 2000.0, 77777);
+    let ref_stars = generate_random_positions(60, 2000.0, 2000.0, 77777);
 
     // Apply large translation (simulating significant pointing offset)
     let dx = 200.0;
@@ -300,7 +248,7 @@ fn test_registration_large_translation() {
 
 #[test]
 fn test_registration_transform_display() {
-    let ref_stars = generate_star_field(50, 1000.0, 1000.0, 12345);
+    let ref_stars = generate_random_positions(50, 1000.0, 1000.0, 12345);
     let target_stars = translate_stars(&ref_stars, 10.0, -5.0);
 
     let config = RegistrationConfig::builder()

@@ -1,13 +1,9 @@
 //! Synthetic data generators for visual tests.
+//!
+//! This module re-exports from [`crate::testing::synthetic`] for backwards compatibility.
+//! New code should use `crate::testing::synthetic` directly.
 
 #![allow(dead_code)]
 
-pub mod artifacts;
-pub mod backgrounds;
-pub mod star_field;
-pub mod star_profiles;
-
-pub use artifacts::*;
-pub use backgrounds::*;
-pub use star_field::*;
-pub use star_profiles::*;
+// Re-export everything from the centralized synthetic module
+pub use crate::testing::synthetic::*;
