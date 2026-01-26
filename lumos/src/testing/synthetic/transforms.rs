@@ -169,6 +169,127 @@ pub fn add_position_noise(
         .collect()
 }
 
+/// Remove random stars from a list (simulate missed detections).
+///
+/// # Arguments
+/// * `stars` - Input star positions
+/// * `fraction` - Fraction of stars to remove (0.0 to 1.0)
+/// * `seed` - Random seed for reproducibility
+///
+/// # Returns
+/// Filtered star list with approximately (1 - fraction) of original stars
+pub fn remove_random_stars(stars: &[(f64, f64)], fraction: f64, seed: u64) -> Vec<(f64, f64)> {
+    assert!(
+        (0.0..=1.0).contains(&fraction),
+        "fraction must be between 0.0 and 1.0"
+    );
+
+    let mut state = seed;
+    let mut next_random = || {
+        state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+        (state >> 33) as f64 / (1u64 << 31) as f64
+    };
+
+    stars
+        .iter()
+        .filter(|_| next_random() >= fraction)
+        .copied()
+        .collect()
+}
+
+/// Add random spurious stars (simulate false detections like hot pixels, cosmic rays).
+///
+/// # Arguments
+/// * `stars` - Input star positions
+/// * `count` - Number of spurious stars to add
+/// * `width` - Image width for bounds
+/// * `height` - Image height for bounds
+/// * `seed` - Random seed for reproducibility
+///
+/// # Returns
+/// Star list with additional spurious positions appended
+pub fn add_spurious_stars(
+    stars: &[(f64, f64)],
+    count: usize,
+    width: f64,
+    height: f64,
+    seed: u64,
+) -> Vec<(f64, f64)> {
+    let margin = 10.0;
+    let mut result = stars.to_vec();
+
+    let mut state = seed;
+    let mut next_random = || {
+        state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+        (state >> 33) as f64 / (1u64 << 31) as f64
+    };
+
+    for _ in 0..count {
+        let x = margin + next_random() * (width - 2.0 * margin);
+        let y = margin + next_random() * (height - 2.0 * margin);
+        result.push((x, y));
+    }
+
+    result
+}
+
+/// Filter stars to a bounding box (simulate partial overlap).
+///
+/// # Arguments
+/// * `stars` - Input star positions
+/// * `min_x` - Minimum X coordinate
+/// * `max_x` - Maximum X coordinate
+/// * `min_y` - Minimum Y coordinate
+/// * `max_y` - Maximum Y coordinate
+///
+/// # Returns
+/// Stars within the specified bounds
+pub fn filter_to_bounds(
+    stars: &[(f64, f64)],
+    min_x: f64,
+    max_x: f64,
+    min_y: f64,
+    max_y: f64,
+) -> Vec<(f64, f64)> {
+    stars
+        .iter()
+        .filter(|(x, y)| *x >= min_x && *x <= max_x && *y >= min_y && *y <= max_y)
+        .copied()
+        .collect()
+}
+
+/// Simulate partial overlap by shifting stars and keeping only those in bounds.
+///
+/// This simulates what happens when two images have partial overlap:
+/// stars at edges are not visible in both images.
+///
+/// # Arguments
+/// * `stars` - Input star positions
+/// * `dx` - Translation in X
+/// * `dy` - Translation in Y
+/// * `width` - Image width
+/// * `height` - Image height
+/// * `margin` - Edge margin for valid positions
+///
+/// # Returns
+/// Translated stars that remain within bounds
+pub fn translate_with_overlap(
+    stars: &[(f64, f64)],
+    dx: f64,
+    dy: f64,
+    width: f64,
+    height: f64,
+    margin: f64,
+) -> Vec<(f64, f64)> {
+    stars
+        .iter()
+        .map(|(x, y)| (x + dx, y + dy))
+        .filter(|(x, y)| {
+            *x >= margin && *x <= width - margin && *y >= margin && *y <= height - margin
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -53,7 +53,10 @@ pub use star_field::{
     sparse_field_config,
 };
 pub use star_profiles::{fwhm_to_sigma, render_gaussian_star};
-pub use transforms::{generate_random_positions, transform_stars, translate_stars};
+pub use transforms::{
+    add_position_noise, add_spurious_stars, filter_to_bounds, generate_random_positions,
+    remove_random_stars, transform_stars, translate_stars, translate_with_overlap,
+};
 
 // ============================================================================
 // Convenient preset functions

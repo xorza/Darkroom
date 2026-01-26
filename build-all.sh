@@ -34,10 +34,10 @@ for t in $TARGETS; do
   cargo clippy --target "$t" --all-targets -- -D warnings
 done
 
-echo "==> Building release for all targets"
+echo "==> Building for all targets"
 for t in $TARGETS; do
-  echo "==> cargo build --release --target $t"
-  cargo build --release --target "$t"
+  echo "==> cargo build --target $t"
+  cargo build --target "$t"
 done
 
 echo "==> Done."
