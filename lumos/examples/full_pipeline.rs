@@ -459,6 +459,11 @@ fn register_all_lights(
                 let warped =
                     warp_image_to_reference(&target_image, width, height, &result.transform);
 
+                tracing::info!(
+                    file = %filename,
+                    "Warped image saved"
+                );
+
                 // Save registered image
                 let img: imaginarium::Image = warped.into();
                 img.save_file(&output_path)
