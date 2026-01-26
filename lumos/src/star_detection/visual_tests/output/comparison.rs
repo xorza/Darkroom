@@ -4,7 +4,7 @@
 
 use super::image_writer::gray_to_rgb_image_stretched;
 use crate::star_detection::Star;
-use crate::star_detection::visual_tests::generators::GroundTruthStar;
+use crate::testing::synthetic::GroundTruthStar;
 use imaginarium::drawing::{draw_circle, draw_cross, draw_line};
 use imaginarium::{Color, Image};
 

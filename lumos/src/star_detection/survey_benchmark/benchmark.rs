@@ -7,12 +7,12 @@ use super::fields::TestField;
 use super::image_fetch::ImageFetcher;
 use super::wcs::WCS;
 use crate::astro_image::AstroImage;
-use crate::star_detection::visual_tests::generators::GroundTruthStar;
 use crate::star_detection::visual_tests::output::{
     DetectionMetrics, compute_detection_metrics, save_comparison_png, save_grayscale_png,
     save_metrics,
 };
 use crate::star_detection::{Star, StarDetectionConfig, find_stars};
+use crate::testing::synthetic::GroundTruthStar;
 use anyhow::{Context, Result};
 use std::io::Write;
 use std::path::{Path, PathBuf};

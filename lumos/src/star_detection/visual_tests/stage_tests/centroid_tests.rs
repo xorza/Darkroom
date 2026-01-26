@@ -6,11 +6,11 @@ use crate::star_detection::StarDetectionConfig;
 use crate::star_detection::background::estimate_background;
 use crate::star_detection::centroid::compute_centroid;
 use crate::star_detection::detection::StarCandidate;
-use crate::star_detection::visual_tests::generators::{fwhm_to_sigma, render_gaussian_star};
 use crate::star_detection::visual_tests::output::{
     gray_to_rgb_image_stretched, save_grayscale_png, save_image_png,
 };
 use crate::testing::init_tracing;
+use crate::testing::synthetic::{fwhm_to_sigma, render_gaussian_star};
 use common::test_utils::test_output_path;
 use imaginarium::Color;
 use imaginarium::drawing::{draw_circle, draw_cross};

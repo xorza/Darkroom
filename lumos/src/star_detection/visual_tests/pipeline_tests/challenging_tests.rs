@@ -2,16 +2,16 @@
 
 use crate::AstroImage;
 
-use crate::star_detection::visual_tests::generators::{
-    CrowdingType, ElongationType, NebulaConfig, StarFieldConfig, crowded_cluster_config,
-    elliptical_stars_config, faint_stars_config, generate_star_field,
-};
 use crate::star_detection::visual_tests::output::{
     PassCriteria, check_pass, compute_detection_metrics, crowded_criteria, faint_star_criteria,
     save_comparison_png, save_grayscale_png, save_metrics,
 };
 use crate::star_detection::{StarDetectionConfig, find_stars};
 use crate::testing::init_tracing;
+use crate::testing::synthetic::{
+    CrowdingType, ElongationType, NebulaConfig, StarFieldConfig, crowded_cluster_config,
+    elliptical_stars_config, faint_stars_config, generate_star_field,
+};
 use common::test_utils::test_output_path;
 
 /// Run full pipeline and evaluate metrics for challenging cases.

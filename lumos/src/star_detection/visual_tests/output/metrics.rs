@@ -2,7 +2,7 @@
 
 use super::comparison::{MatchResult, match_stars};
 use crate::star_detection::Star;
-use crate::star_detection::visual_tests::generators::GroundTruthStar;
+use crate::testing::synthetic::GroundTruthStar;
 use std::fmt;
 use std::fs::File;
 use std::io::Write;

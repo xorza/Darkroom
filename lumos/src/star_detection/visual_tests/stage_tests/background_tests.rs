@@ -3,12 +3,12 @@
 //! Tests the background estimation with various synthetic backgrounds.
 
 use crate::star_detection::background::estimate_background;
-use crate::star_detection::visual_tests::generators::{
+use crate::star_detection::visual_tests::output::save_grayscale_png;
+use crate::testing::init_tracing;
+use crate::testing::synthetic::{
     NebulaConfig, StarFieldConfig, add_gradient_background, add_nebula_background,
     add_uniform_background, add_vignette_background, generate_star_field,
 };
-use crate::star_detection::visual_tests::output::save_grayscale_png;
-use crate::testing::init_tracing;
 use common::test_utils::test_output_path;
 
 /// Default tile size for background estimation

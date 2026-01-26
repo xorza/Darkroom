@@ -1,7 +1,7 @@
 //! Visual tests for star detection - generates debug images for inspection.
 
 mod debug_steps;
-pub mod generators;
+
 pub mod output;
 mod subpixel_accuracy;
 mod synthetic;

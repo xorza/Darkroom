@@ -5,13 +5,11 @@
 use crate::star_detection::StarDetectionConfig;
 use crate::star_detection::background::estimate_background;
 use crate::star_detection::detection::detect_stars;
-use crate::star_detection::visual_tests::generators::{
-    StarFieldConfig, generate_star_field, sparse_field_config,
-};
 use crate::star_detection::visual_tests::output::{
     gray_to_rgb_image_stretched, save_grayscale_png, save_image_png,
 };
 use crate::testing::init_tracing;
+use crate::testing::synthetic::{StarFieldConfig, generate_star_field, sparse_field_config};
 use common::test_utils::test_output_path;
 use imaginarium::Color;
 use imaginarium::drawing::{draw_circle, draw_cross};

@@ -6,12 +6,12 @@ use super::local_solver::{AstrometryStar, LocalSolver};
 use super::rectangle_cache::{RectangleCache, RectangleInfo};
 use crate::AstroImage;
 
-use crate::star_detection::visual_tests::generators::GroundTruthStar;
 use crate::star_detection::visual_tests::output::{
     DetectionMetrics, compute_detection_metrics, save_comparison_png, save_grayscale_png,
     save_metrics,
 };
 use crate::star_detection::{Star, StarDetectionConfig, find_stars};
+use crate::testing::synthetic::GroundTruthStar;
 use anyhow::Result;
 use std::path::{Path, PathBuf};
 use std::time::Instant;

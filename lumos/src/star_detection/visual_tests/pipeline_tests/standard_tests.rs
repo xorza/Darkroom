@@ -2,15 +2,15 @@
 
 use crate::AstroImage;
 
-use crate::star_detection::visual_tests::generators::{
-    StarFieldConfig, dense_field_config, generate_star_field, sparse_field_config,
-};
 use crate::star_detection::visual_tests::output::{
     DetectionMetrics, check_pass, compute_detection_metrics, save_comparison_png,
     save_grayscale_png, save_metrics, standard_criteria,
 };
 use crate::star_detection::{StarDetectionConfig, find_stars};
 use crate::testing::init_tracing;
+use crate::testing::synthetic::{
+    StarFieldConfig, dense_field_config, generate_star_field, sparse_field_config,
+};
 use common::test_utils::test_output_path;
 
 /// Run full pipeline and evaluate metrics.

@@ -169,7 +169,7 @@ pub fn save_comparison_png(
     pixels: &[f32],
     width: usize,
     height: usize,
-    ground_truth: &[crate::star_detection::visual_tests::generators::GroundTruthStar],
+    ground_truth: &[crate::testing::synthetic::GroundTruthStar],
     detected: &[crate::star_detection::Star],
     match_radius: f32,
     path: &Path,

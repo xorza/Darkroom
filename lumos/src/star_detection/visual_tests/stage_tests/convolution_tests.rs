@@ -5,9 +5,9 @@
 use crate::star_detection::background::estimate_background;
 use crate::star_detection::constants::fwhm_to_sigma;
 use crate::star_detection::convolution::gaussian_convolve;
-use crate::star_detection::visual_tests::generators::{StarFieldConfig, generate_star_field};
 use crate::star_detection::visual_tests::output::save_grayscale_png;
 use crate::testing::init_tracing;
+use crate::testing::synthetic::{StarFieldConfig, generate_star_field};
 use common::test_utils::test_output_path;
 
 /// Default tile size for background estimation

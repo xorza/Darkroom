@@ -4,14 +4,12 @@
 
 use crate::AstroImage;
 
-use crate::star_detection::visual_tests::generators::{
-    StarFieldConfig, add_cosmic_rays, generate_star_field,
-};
 use crate::star_detection::visual_tests::output::{
     gray_to_rgb_image_stretched, save_grayscale_png, save_image_png,
 };
 use crate::star_detection::{StarDetectionConfig, find_stars};
 use crate::testing::init_tracing;
+use crate::testing::synthetic::{StarFieldConfig, add_cosmic_rays, generate_star_field};
 use common::test_utils::test_output_path;
 use imaginarium::Color;
 use imaginarium::drawing::{draw_circle, draw_cross};
