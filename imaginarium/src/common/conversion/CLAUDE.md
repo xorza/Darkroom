@@ -1,1 +1,8 @@
-Refere to bench-analysis.md, update data when running benchmarks, put benchmark output to bench-results.txt. When optimizing run only needed banches, store status in bench-analysis.md for where simds are good and where not needed.
+Refer to bench-analysis.md for SIMD optimization status and benchmark data.
+
+When running benchmarks:
+- Save raw output to bench-results.txt
+- Update bench-analysis.md with analyzed results
+- Run only the specific benchmarks needed for the current optimization
+
+The bench-analysis.md documents which conversions benefit from SIMD and which are memory-bound (no SIMD benefit).

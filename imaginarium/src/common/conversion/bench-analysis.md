@@ -88,6 +88,56 @@ RGB→L achieves 1.16 Gelem/s because output is 1/3 or 1/4 the input size, reduc
 Fixed-point for U8: R=54, G=183, B=19 (sum=256, shift by 8)
 Floating-point for F32: R=0.2126, G=0.7152, B=0.0722
 
+## Removed SIMD Paths (Memory-Bound)
+
+The following SIMD implementations were **intentionally removed** because benchmarks showed
+they provide no meaningful speedup (<1.03x) over scalar code with Rayon parallelization.
+These conversions are **memory-bound**, not compute-bound.
+
+### Removed Conversions
+
+| Conversion | SIMD Speedup | Reason |
+|------------|--------------|--------|
+| RGBA_F32 ↔ RGB_F32 | 1.00x | Memory-bound, 4 bytes/channel |
+| L_F32 ↔ RGBA_F32 | 1.01x | Memory-bound, F32 expansion |
+| L_F32 ↔ RGB_F32 | 1.01x | Memory-bound, F32 expansion |
+| RGBA_F32 → L_F32 | 1.01x | Memory-bound, F32 luminance |
+| RGB_F32 → L_F32 | 1.02x | Memory-bound, F32 luminance |
+| RGBA_U16 ↔ F32 | 1.00-1.01x | Memory-bound, large data types |
+| RGB_U16 ↔ F32 | 1.00-1.01x | Memory-bound, large data types |
+| U8 → F32 | 1.01-1.02x | Memory-bound (output 4x input size) |
+
+### Why These Are Memory-Bound
+
+F32 data is 4 bytes per channel vs 1 byte for U8. For a 4096×4096 image:
+- RGBA_F32: 256MB of data (vs 64MB for RGBA_U8)
+- Memory bandwidth saturates before SIMD benefits materialize
+
+SIMD helps when the bottleneck is computation (e.g., luminance weights for U8).
+When the bottleneck is memory bandwidth, SIMD just moves data faster within the CPU
+while waiting for memory.
+
+### Kept SIMD Paths (Compute-Bound)
+
+| Conversion | SIMD Speedup | Why Kept |
+|------------|--------------|----------|
+| RGBA_U8 ↔ RGB_U8 | 1.07-1.12x | Byte shuffling benefits from SIMD |
+| RGB/RGBA_U8 → L_U8 | 1.65-1.90x | Weighted sum is compute-heavy |
+| L_U8 → RGBA_U8 | 2.10x | Broadcast + interleave |
+| LA_U8 ↔ RGBA_U8 | 1.11-1.30x | Channel expansion/reduction |
+| U8 ↔ U16 | 1.02-1.03x | Kept for API consistency |
+| L_U16 ↔ F32 | 1.06-1.14x | Single channel = less memory pressure |
+| F32 → U8 | 1.02-1.03x | Kept for API consistency |
+
+### Do Not Re-Implement
+
+These paths were removed after careful benchmarking. The scalar fallback with Rayon
+parallelization is equally fast for these memory-bound operations. Re-implementing
+SIMD for these paths would add code complexity without performance benefit.
+
+If future hardware significantly improves memory bandwidth relative to compute,
+these paths could be reconsidered.
+
 ## Recommendations
 
 ### Keep Images in U8/U16

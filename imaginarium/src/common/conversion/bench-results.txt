@@ -1,576 +1,627 @@
     Finished `bench` profile [optimized + debuginfo] target(s) in 0.15s
      Running benches/conversion.rs (target/release/deps/conversion-627a3775996b26d8)
-Gnuplot not found, using plotters backend
-Benchmarking conversion_channels/rgba_u8_to_rgb_u8/256x256
-Benchmarking conversion_channels/rgba_u8_to_rgb_u8/256x256: Warming up for 3.0000 s
-Benchmarking conversion_channels/rgba_u8_to_rgb_u8/256x256: Collecting 100 samples in estimated 5.1081 s (76k iterations)
-Benchmarking conversion_channels/rgba_u8_to_rgb_u8/256x256: Analyzing
-conversion_channels/rgba_u8_to_rgb_u8/256x256
-                        time:   [67.781 µs 68.053 µs 68.372 µs]
-                        thrpt:  [958.52 Melem/s 963.02 Melem/s 966.89 Melem/s]
+Benchmarking la_rgba/la_to_rgba_scalar/4k
+Benchmarking la_rgba/la_to_rgba_scalar/4k: Warming up for 3.0000 s
+Benchmarking la_rgba/la_to_rgba_scalar/4k: Collecting 100 samples in estimated 5.6264 s (400 iterations)
+Benchmarking la_rgba/la_to_rgba_scalar/4k: Analyzing
+la_rgba/la_to_rgba_scalar/4k
+                        time:   [14.010 ms 14.044 ms 14.078 ms]
+                        thrpt:  [1.1917 Gelem/s 1.1946 Gelem/s 1.1975 Gelem/s]
                  change:
-                        time:   [+0.6019% +1.4985% +2.2956%] (p = 0.00 < 0.05)
-                        thrpt:  [−2.2441% −1.4764% −0.5983%]
+                        time:   [+0.8667% +1.1640% +1.4915%] (p = 0.00 < 0.05)
+                        thrpt:  [−1.4695% −1.1506% −0.8592%]
                         Change within noise threshold.
-Found 10 outliers among 100 measurements (10.00%)
-  1 (1.00%) low mild
-  2 (2.00%) high mild
-  7 (7.00%) high severe
-Benchmarking conversion_channels/rgba_u8_to_rgb_u8/1024x1024
-Benchmarking conversion_channels/rgba_u8_to_rgb_u8/1024x1024: Warming up for 3.0000 s
-Benchmarking conversion_channels/rgba_u8_to_rgb_u8/1024x1024: Collecting 100 samples in estimated 5.8252 s (10k iterations)
-Benchmarking conversion_channels/rgba_u8_to_rgb_u8/1024x1024: Analyzing
-conversion_channels/rgba_u8_to_rgb_u8/1024x1024
-                        time:   [572.18 µs 576.05 µs 581.44 µs]
-                        thrpt:  [1.8034 Gelem/s 1.8203 Gelem/s 1.8326 Gelem/s]
+Benchmarking la_rgba/la_to_rgba_simd/4k
+Benchmarking la_rgba/la_to_rgba_simd/4k: Warming up for 3.0000 s
+Benchmarking la_rgba/la_to_rgba_simd/4k: Collecting 100 samples in estimated 5.1016 s (400 iterations)
+Benchmarking la_rgba/la_to_rgba_simd/4k: Analyzing
+la_rgba/la_to_rgba_simd/4k
+                        time:   [12.674 ms 12.702 ms 12.731 ms]
+                        thrpt:  [1.3179 Gelem/s 1.3208 Gelem/s 1.3238 Gelem/s]
                  change:
-                        time:   [−0.8968% −0.1433% +0.6709%] (p = 0.74 > 0.05)
-                        thrpt:  [−0.6664% +0.1435% +0.9049%]
-                        No change in performance detected.
-Found 25 outliers among 100 measurements (25.00%)
-  7 (7.00%) low severe
+                        time:   [+0.0810% +0.3877% +0.7026%] (p = 0.02 < 0.05)
+                        thrpt:  [−0.6977% −0.3862% −0.0809%]
+                        Change within noise threshold.
+Benchmarking la_rgba/rgba_to_la_scalar/4k
+Benchmarking la_rgba/rgba_to_la_scalar/4k: Warming up for 3.0000 s
+Benchmarking la_rgba/rgba_to_la_scalar/4k: Collecting 100 samples in estimated 5.4042 s (500 iterations)
+Benchmarking la_rgba/rgba_to_la_scalar/4k: Analyzing
+la_rgba/rgba_to_la_scalar/4k
+                        time:   [10.788 ms 10.808 ms 10.827 ms]
+                        thrpt:  [1.5496 Gelem/s 1.5524 Gelem/s 1.5552 Gelem/s]
+                 change:
+                        time:   [+0.5238% +0.8024% +1.0893%] (p = 0.00 < 0.05)
+                        thrpt:  [−1.0775% −0.7960% −0.5211%]
+                        Change within noise threshold.
+Found 6 outliers among 100 measurements (6.00%)
   3 (3.00%) low mild
-  1 (1.00%) high mild
-  14 (14.00%) high severe
-Benchmarking conversion_channels/rgba_u8_to_rgb_u8/4096x4096
-Benchmarking conversion_channels/rgba_u8_to_rgb_u8/4096x4096: Warming up for 3.0000 s
-Benchmarking conversion_channels/rgba_u8_to_rgb_u8/4096x4096: Collecting 100 samples in estimated 6.6513 s (300 iterations)
-Benchmarking conversion_channels/rgba_u8_to_rgb_u8/4096x4096: Analyzing
-conversion_channels/rgba_u8_to_rgb_u8/4096x4096
-                        time:   [22.132 ms 22.169 ms 22.207 ms]
-                        thrpt:  [755.49 Melem/s 756.78 Melem/s 758.06 Melem/s]
+  3 (3.00%) high mild
+Benchmarking la_rgba/rgba_to_la_simd/4k
+Benchmarking la_rgba/rgba_to_la_simd/4k: Warming up for 3.0000 s
+Benchmarking la_rgba/rgba_to_la_simd/4k: Collecting 100 samples in estimated 5.0047 s (600 iterations)
+Benchmarking la_rgba/rgba_to_la_simd/4k: Analyzing
+la_rgba/rgba_to_la_simd/4k
+                        time:   [8.3196 ms 8.3397 ms 8.3601 ms]
+                        thrpt:  [2.0068 Gelem/s 2.0117 Gelem/s 2.0166 Gelem/s]
                  change:
-                        time:   [+0.7856% +1.0372% +1.2999%] (p = 0.00 < 0.05)
-                        thrpt:  [−1.2833% −1.0266% −0.7794%]
-                        Change within noise threshold.
-Found 2 outliers among 100 measurements (2.00%)
-  2 (2.00%) high mild
-Benchmarking conversion_channels/rgb_u8_to_rgba_u8/256x256
-Benchmarking conversion_channels/rgb_u8_to_rgba_u8/256x256: Warming up for 3.0000 s
-Benchmarking conversion_channels/rgb_u8_to_rgba_u8/256x256: Collecting 100 samples in estimated 5.1837 s (86k iterations)
-Benchmarking conversion_channels/rgb_u8_to_rgba_u8/256x256: Analyzing
-conversion_channels/rgb_u8_to_rgba_u8/256x256
-                        time:   [59.984 µs 60.646 µs 61.372 µs]
-                        thrpt:  [1.0679 Gelem/s 1.0806 Gelem/s 1.0926 Gelem/s]
+                        time:   [−0.0574% +0.2592% +0.5905%] (p = 0.12 > 0.05)
+                        thrpt:  [−0.5870% −0.2586% +0.0574%]
+                        No change in performance detected.
+
+Benchmarking u16_f32/rgba_u16_to_f32_scalar/4k
+Benchmarking u16_f32/rgba_u16_to_f32_scalar/4k: Warming up for 3.0000 s
+Benchmarking u16_f32/rgba_u16_to_f32_scalar/4k: Collecting 100 samples in estimated 9.7837 s (200 iterations)
+Benchmarking u16_f32/rgba_u16_to_f32_scalar/4k: Analyzing
+u16_f32/rgba_u16_to_f32_scalar/4k
+                        time:   [48.720 ms 48.773 ms 48.827 ms]
+                        thrpt:  [343.60 Melem/s 343.99 Melem/s 344.36 Melem/s]
                  change:
-                        time:   [−0.2820% +1.3060% +3.0102%] (p = 0.12 > 0.05)
-                        thrpt:  [−2.9223% −1.2892% +0.2828%]
+                        time:   [−0.1402% +0.0100% +0.1571%] (p = 0.90 > 0.05)
+                        thrpt:  [−0.1569% −0.0100% +0.1404%]
                         No change in performance detected.
 Found 1 outliers among 100 measurements (1.00%)
   1 (1.00%) high mild
-Benchmarking conversion_channels/rgb_u8_to_rgba_u8/1024x1024
-Benchmarking conversion_channels/rgb_u8_to_rgba_u8/1024x1024: Warming up for 3.0000 s
-Benchmarking conversion_channels/rgb_u8_to_rgba_u8/1024x1024: Collecting 100 samples in estimated 5.7520 s (10k iterations)
-Benchmarking conversion_channels/rgb_u8_to_rgba_u8/1024x1024: Analyzing
-conversion_channels/rgb_u8_to_rgba_u8/1024x1024
-                        time:   [565.11 µs 567.78 µs 571.13 µs]
-                        thrpt:  [1.8360 Gelem/s 1.8468 Gelem/s 1.8555 Gelem/s]
+Benchmarking u16_f32/rgba_u16_to_f32_simd/4k
+Benchmarking u16_f32/rgba_u16_to_f32_simd/4k: Warming up for 3.0000 s
+Benchmarking u16_f32/rgba_u16_to_f32_simd/4k: Collecting 100 samples in estimated 9.7082 s (200 iterations)
+Benchmarking u16_f32/rgba_u16_to_f32_simd/4k: Analyzing
+u16_f32/rgba_u16_to_f32_simd/4k
+                        time:   [48.438 ms 48.488 ms 48.539 ms]
+                        thrpt:  [345.64 Melem/s 346.01 Melem/s 346.37 Melem/s]
                  change:
-                        time:   [−2.8860% −1.8522% −0.7989%] (p = 0.00 < 0.05)
-                        thrpt:  [+0.8053% +1.8872% +2.9718%]
-                        Change within noise threshold.
-Found 12 outliers among 100 measurements (12.00%)
-  3 (3.00%) high mild
-  9 (9.00%) high severe
-Benchmarking conversion_channels/rgb_u8_to_rgba_u8/4096x4096
-Benchmarking conversion_channels/rgb_u8_to_rgba_u8/4096x4096: Warming up for 3.0000 s
-Benchmarking conversion_channels/rgb_u8_to_rgba_u8/4096x4096: Collecting 100 samples in estimated 6.3796 s (300 iterations)
-Benchmarking conversion_channels/rgb_u8_to_rgba_u8/4096x4096: Analyzing
-conversion_channels/rgb_u8_to_rgba_u8/4096x4096
-                        time:   [21.217 ms 21.256 ms 21.296 ms]
-                        thrpt:  [787.80 Melem/s 789.30 Melem/s 790.74 Melem/s]
-                 change:
-                        time:   [−0.1298% +0.1173% +0.3746%] (p = 0.37 > 0.05)
-                        thrpt:  [−0.3732% −0.1172% +0.1300%]
+                        time:   [−0.1303% +0.0107% +0.1589%] (p = 0.89 > 0.05)
+                        thrpt:  [−0.1587% −0.0107% +0.1305%]
                         No change in performance detected.
-Found 6 outliers among 100 measurements (6.00%)
-  2 (2.00%) low mild
-  3 (3.00%) high mild
+Found 1 outliers among 100 measurements (1.00%)
+  1 (1.00%) high mild
+Benchmarking u16_f32/rgba_f32_to_u16_scalar/4k
+Benchmarking u16_f32/rgba_f32_to_u16_scalar/4k: Warming up for 3.0000 s
+Benchmarking u16_f32/rgba_f32_to_u16_scalar/4k: Collecting 100 samples in estimated 6.2490 s (200 iterations)
+Benchmarking u16_f32/rgba_f32_to_u16_scalar/4k: Analyzing
+u16_f32/rgba_f32_to_u16_scalar/4k
+                        time:   [31.136 ms 31.177 ms 31.219 ms]
+                        thrpt:  [537.40 Melem/s 538.12 Melem/s 538.84 Melem/s]
+                 change:
+                        time:   [−0.3535% −0.1464% +0.0638%] (p = 0.17 > 0.05)
+                        thrpt:  [−0.0638% +0.1467% +0.3548%]
+                        No change in performance detected.
+Benchmarking u16_f32/rgba_f32_to_u16_simd/4k
+Benchmarking u16_f32/rgba_f32_to_u16_simd/4k: Warming up for 3.0000 s
+Benchmarking u16_f32/rgba_f32_to_u16_simd/4k: Collecting 100 samples in estimated 6.2022 s (200 iterations)
+Benchmarking u16_f32/rgba_f32_to_u16_simd/4k: Analyzing
+u16_f32/rgba_f32_to_u16_simd/4k
+                        time:   [30.969 ms 31.017 ms 31.065 ms]
+                        thrpt:  [540.06 Melem/s 540.91 Melem/s 541.74 Melem/s]
+                 change:
+                        time:   [−0.2665% −0.0630% +0.1510%] (p = 0.55 > 0.05)
+                        thrpt:  [−0.1508% +0.0630% +0.2672%]
+                        No change in performance detected.
+Benchmarking u16_f32/rgb_u16_to_f32_scalar/4k
+Benchmarking u16_f32/rgb_u16_to_f32_scalar/4k: Warming up for 3.0000 s
+Benchmarking u16_f32/rgb_u16_to_f32_scalar/4k: Collecting 100 samples in estimated 7.2248 s (200 iterations)
+Benchmarking u16_f32/rgb_u16_to_f32_scalar/4k: Analyzing
+u16_f32/rgb_u16_to_f32_scalar/4k
+                        time:   [36.057 ms 36.100 ms 36.145 ms]
+                        thrpt:  [464.16 Melem/s 464.74 Melem/s 465.30 Melem/s]
+                 change:
+                        time:   [−0.3942% −0.2011% −0.0184%] (p = 0.04 < 0.05)
+                        thrpt:  [+0.0184% +0.2015% +0.3958%]
+                        Change within noise threshold.
+Found 1 outliers among 100 measurements (1.00%)
+  1 (1.00%) high mild
+Benchmarking u16_f32/rgb_u16_to_f32_simd/4k
+Benchmarking u16_f32/rgb_u16_to_f32_simd/4k: Warming up for 3.0000 s
+Benchmarking u16_f32/rgb_u16_to_f32_simd/4k: Collecting 100 samples in estimated 7.1755 s (200 iterations)
+Benchmarking u16_f32/rgb_u16_to_f32_simd/4k: Analyzing
+u16_f32/rgb_u16_to_f32_simd/4k
+                        time:   [35.905 ms 35.954 ms 36.005 ms]
+                        thrpt:  [465.97 Melem/s 466.63 Melem/s 467.26 Melem/s]
+                 change:
+                        time:   [−0.2930% −0.0947% +0.1013%] (p = 0.34 > 0.05)
+                        thrpt:  [−0.1012% +0.0947% +0.2938%]
+                        No change in performance detected.
+Found 2 outliers among 100 measurements (2.00%)
+  1 (1.00%) high mild
   1 (1.00%) high severe
-Benchmarking conversion_channels/rgba_f32_to_rgb_f32/256x256
-Benchmarking conversion_channels/rgba_f32_to_rgb_f32/256x256: Warming up for 3.0000 s
-Benchmarking conversion_channels/rgba_f32_to_rgb_f32/256x256: Collecting 100 samples in estimated 5.1704 s (45k iterations)
-Benchmarking conversion_channels/rgba_f32_to_rgb_f32/256x256: Analyzing
-conversion_channels/rgba_f32_to_rgb_f32/256x256
-                        time:   [113.33 µs 113.49 µs 113.67 µs]
-                        thrpt:  [576.56 Melem/s 577.48 Melem/s 578.27 Melem/s]
+Benchmarking u16_f32/rgb_f32_to_u16_scalar/4k
+Benchmarking u16_f32/rgb_f32_to_u16_scalar/4k: Warming up for 3.0000 s
+Benchmarking u16_f32/rgb_f32_to_u16_scalar/4k: Collecting 100 samples in estimated 7.1547 s (300 iterations)
+Benchmarking u16_f32/rgb_f32_to_u16_scalar/4k: Analyzing
+u16_f32/rgb_f32_to_u16_scalar/4k
+                        time:   [23.825 ms 23.859 ms 23.895 ms]
+                        thrpt:  [702.13 Melem/s 703.17 Melem/s 704.19 Melem/s]
                  change:
-                        time:   [−1.2791% −0.6966% −0.1903%] (p = 0.01 < 0.05)
-                        thrpt:  [+0.1907% +0.7015% +1.2957%]
+                        time:   [+0.0831% +0.2793% +0.4888%] (p = 0.01 < 0.05)
+                        thrpt:  [−0.4865% −0.2785% −0.0830%]
+                        Change within noise threshold.
+Found 1 outliers among 100 measurements (1.00%)
+  1 (1.00%) high mild
+Benchmarking u16_f32/rgb_f32_to_u16_simd/4k
+Benchmarking u16_f32/rgb_f32_to_u16_simd/4k: Warming up for 3.0000 s
+Benchmarking u16_f32/rgb_f32_to_u16_simd/4k: Collecting 100 samples in estimated 7.0630 s (300 iterations)
+Benchmarking u16_f32/rgb_f32_to_u16_simd/4k: Analyzing
+u16_f32/rgb_f32_to_u16_simd/4k
+                        time:   [23.497 ms 23.534 ms 23.572 ms]
+                        thrpt:  [711.75 Melem/s 712.88 Melem/s 714.00 Melem/s]
+                 change:
+                        time:   [+0.0228% +0.2409% +0.4636%] (p = 0.04 < 0.05)
+                        thrpt:  [−0.4615% −0.2403% −0.0228%]
+                        Change within noise threshold.
+Found 1 outliers among 100 measurements (1.00%)
+  1 (1.00%) high mild
+Benchmarking u16_f32/l_u16_to_f32_scalar/4k
+Benchmarking u16_f32/l_u16_to_f32_scalar/4k: Warming up for 3.0000 s
+Benchmarking u16_f32/l_u16_to_f32_scalar/4k: Collecting 100 samples in estimated 5.4081 s (400 iterations)
+Benchmarking u16_f32/l_u16_to_f32_scalar/4k: Analyzing
+u16_f32/l_u16_to_f32_scalar/4k
+                        time:   [13.463 ms 13.498 ms 13.533 ms]
+                        thrpt:  [1.2398 Gelem/s 1.2430 Gelem/s 1.2461 Gelem/s]
+                 change:
+                        time:   [−0.3919% −0.0288% +0.3459%] (p = 0.88 > 0.05)
+                        thrpt:  [−0.3447% +0.0288% +0.3934%]
+                        No change in performance detected.
+Found 1 outliers among 100 measurements (1.00%)
+  1 (1.00%) high mild
+Benchmarking u16_f32/l_u16_to_f32_simd/4k
+Benchmarking u16_f32/l_u16_to_f32_simd/4k: Warming up for 3.0000 s
+Benchmarking u16_f32/l_u16_to_f32_simd/4k: Collecting 100 samples in estimated 5.1241 s (400 iterations)
+Benchmarking u16_f32/l_u16_to_f32_simd/4k: Analyzing
+u16_f32/l_u16_to_f32_simd/4k
+                        time:   [12.748 ms 12.782 ms 12.816 ms]
+                        thrpt:  [1.3091 Gelem/s 1.3126 Gelem/s 1.3161 Gelem/s]
+                 change:
+                        time:   [+0.3274% +0.6484% +0.9669%] (p = 0.00 < 0.05)
+                        thrpt:  [−0.9577% −0.6443% −0.3263%]
+                        Change within noise threshold.
+Found 1 outliers among 100 measurements (1.00%)
+  1 (1.00%) high mild
+Benchmarking u16_f32/l_f32_to_u16_scalar/4k
+Benchmarking u16_f32/l_f32_to_u16_scalar/4k: Warming up for 3.0000 s
+Benchmarking u16_f32/l_f32_to_u16_scalar/4k: Collecting 100 samples in estimated 5.7183 s (600 iterations)
+Benchmarking u16_f32/l_f32_to_u16_scalar/4k: Analyzing
+u16_f32/l_f32_to_u16_scalar/4k
+                        time:   [9.4962 ms 9.5155 ms 9.5352 ms]
+                        thrpt:  [1.7595 Gelem/s 1.7631 Gelem/s 1.7667 Gelem/s]
+                 change:
+                        time:   [+0.0095% +0.2897% +0.5659%] (p = 0.05 < 0.05)
+                        thrpt:  [−0.5627% −0.2888% −0.0095%]
+                        Change within noise threshold.
+Found 1 outliers among 100 measurements (1.00%)
+  1 (1.00%) high mild
+Benchmarking u16_f32/l_f32_to_u16_simd/4k
+Benchmarking u16_f32/l_f32_to_u16_simd/4k: Warming up for 3.0000 s
+Benchmarking u16_f32/l_f32_to_u16_simd/4k: Collecting 100 samples in estimated 5.0092 s (600 iterations)
+Benchmarking u16_f32/l_f32_to_u16_simd/4k: Analyzing
+u16_f32/l_f32_to_u16_simd/4k
+                        time:   [8.2968 ms 8.3152 ms 8.3337 ms]
+                        thrpt:  [2.0132 Gelem/s 2.0177 Gelem/s 2.0221 Gelem/s]
+                 change:
+                        time:   [−0.4345% −0.1402% +0.1604%] (p = 0.34 > 0.05)
+                        thrpt:  [−0.1601% +0.1404% +0.4364%]
+                        No change in performance detected.
+Found 2 outliers among 100 measurements (2.00%)
+  2 (2.00%) high mild
+
+Benchmarking luminance/rgba_u8_to_l_scalar/4k
+Benchmarking luminance/rgba_u8_to_l_scalar/4k: Warming up for 3.0000 s
+Benchmarking luminance/rgba_u8_to_l_scalar/4k: Collecting 100 samples in estimated 5.6178 s (800 iterations)
+Benchmarking luminance/rgba_u8_to_l_scalar/4k: Analyzing
+luminance/rgba_u8_to_l_scalar/4k
+                        time:   [7.0192 ms 7.0330 ms 7.0481 ms]
+                        thrpt:  [2.3804 Gelem/s 2.3855 Gelem/s 2.3902 Gelem/s]
+                 change:
+                        time:   [+0.7688% +1.0026% +1.2308%] (p = 0.00 < 0.05)
+                        thrpt:  [−1.2159% −0.9926% −0.7629%]
+                        Change within noise threshold.
+Found 4 outliers among 100 measurements (4.00%)
+  2 (2.00%) high mild
+  2 (2.00%) high severe
+Benchmarking luminance/rgba_u8_to_l_simd/4k
+Benchmarking luminance/rgba_u8_to_l_simd/4k: Warming up for 3.0000 s
+Benchmarking luminance/rgba_u8_to_l_simd/4k: Collecting 100 samples in estimated 5.1224 s (1200 iterations)
+Benchmarking luminance/rgba_u8_to_l_simd/4k: Analyzing
+luminance/rgba_u8_to_l_simd/4k
+                        time:   [4.2558 ms 4.2612 ms 4.2664 ms]
+                        thrpt:  [3.9324 Gelem/s 3.9372 Gelem/s 3.9422 Gelem/s]
+                 change:
+                        time:   [−0.9631% −0.7769% −0.5819%] (p = 0.00 < 0.05)
+                        thrpt:  [+0.5853% +0.7830% +0.9725%]
+                        Change within noise threshold.
+Found 3 outliers among 100 measurements (3.00%)
+  3 (3.00%) low mild
+Benchmarking luminance/rgb_u8_to_l_scalar/4k
+Benchmarking luminance/rgb_u8_to_l_scalar/4k: Warming up for 3.0000 s
+Benchmarking luminance/rgb_u8_to_l_scalar/4k: Collecting 100 samples in estimated 5.6237 s (800 iterations)
+Benchmarking luminance/rgb_u8_to_l_scalar/4k: Analyzing
+luminance/rgb_u8_to_l_scalar/4k
+                        time:   [7.0214 ms 7.0431 ms 7.0666 ms]
+                        thrpt:  [2.3742 Gelem/s 2.3821 Gelem/s 2.3894 Gelem/s]
+                 change:
+                        time:   [+0.8626% +1.2070% +1.5898%] (p = 0.00 < 0.05)
+                        thrpt:  [−1.5649% −1.1926% −0.8552%]
                         Change within noise threshold.
 Found 5 outliers among 100 measurements (5.00%)
-  3 (3.00%) high mild
-  2 (2.00%) high severe
-Benchmarking conversion_channels/rgba_f32_to_rgb_f32/1024x1024
-Benchmarking conversion_channels/rgba_f32_to_rgb_f32/1024x1024: Warming up for 3.0000 s
-Benchmarking conversion_channels/rgba_f32_to_rgb_f32/1024x1024: Collecting 100 samples in estimated 5.0503 s (1800 iterations)
-Benchmarking conversion_channels/rgba_f32_to_rgb_f32/1024x1024: Analyzing
-conversion_channels/rgba_f32_to_rgb_f32/1024x1024
-                        time:   [2.7916 ms 2.8186 ms 2.8444 ms]
-                        thrpt:  [368.64 Melem/s 372.02 Melem/s 375.62 Melem/s]
-                 change:
-                        time:   [−1.9547% −0.7040% +0.5931%] (p = 0.27 > 0.05)
-                        thrpt:  [−0.5896% +0.7090% +1.9937%]
-                        No change in performance detected.
-Found 5 outliers among 100 measurements (5.00%)
-  5 (5.00%) low mild
-Benchmarking conversion_channels/rgba_f32_to_rgb_f32/4096x4096
-Benchmarking conversion_channels/rgba_f32_to_rgb_f32/4096x4096: Warming up for 3.0000 s
-
-Warning: Unable to complete 100 samples in 5.0s. You may wish to increase target time to 11.7s, or reduce sample count to 40.
-Benchmarking conversion_channels/rgba_f32_to_rgb_f32/4096x4096: Collecting 100 samples in estimated 11.697 s (100 iterations)
-Benchmarking conversion_channels/rgba_f32_to_rgb_f32/4096x4096: Analyzing
-conversion_channels/rgba_f32_to_rgb_f32/4096x4096
-                        time:   [110.23 ms 110.54 ms 110.84 ms]
-                        thrpt:  [151.37 Melem/s 151.78 Melem/s 152.20 Melem/s]
-                 change:
-                        time:   [+33.746% +34.156% +34.601%] (p = 0.00 < 0.05)
-                        thrpt:  [−25.706% −25.460% −25.231%]
-                        Performance has regressed.
-Benchmarking conversion_channels/rgb_f32_to_rgba_f32/256x256
-Benchmarking conversion_channels/rgb_f32_to_rgba_f32/256x256: Warming up for 3.0000 s
-Benchmarking conversion_channels/rgb_f32_to_rgba_f32/256x256: Collecting 100 samples in estimated 5.0804 s (45k iterations)
-Benchmarking conversion_channels/rgb_f32_to_rgba_f32/256x256: Analyzing
-conversion_channels/rgb_f32_to_rgba_f32/256x256
-                        time:   [111.25 µs 111.48 µs 111.76 µs]
-                        thrpt:  [586.40 Melem/s 587.89 Melem/s 589.09 Melem/s]
-                 change:
-                        time:   [−10.680% −10.060% −9.4751%] (p = 0.00 < 0.05)
-                        thrpt:  [+10.467% +11.185% +11.957%]
-                        Performance has improved.
-Found 10 outliers among 100 measurements (10.00%)
-  3 (3.00%) low mild
-  4 (4.00%) high mild
-  3 (3.00%) high severe
-Benchmarking conversion_channels/rgb_f32_to_rgba_f32/1024x1024
-Benchmarking conversion_channels/rgb_f32_to_rgba_f32/1024x1024: Warming up for 3.0000 s
-Benchmarking conversion_channels/rgb_f32_to_rgba_f32/1024x1024: Collecting 100 samples in estimated 5.1613 s (1300 iterations)
-Benchmarking conversion_channels/rgb_f32_to_rgba_f32/1024x1024: Analyzing
-conversion_channels/rgb_f32_to_rgba_f32/1024x1024
-                        time:   [3.9957 ms 4.0147 ms 4.0328 ms]
-                        thrpt:  [260.02 Melem/s 261.18 Melem/s 262.43 Melem/s]
-                 change:
-                        time:   [+11.853% +12.836% +13.822%] (p = 0.00 < 0.05)
-                        thrpt:  [−12.144% −11.376% −10.597%]
-                        Performance has regressed.
-Found 13 outliers among 100 measurements (13.00%)
-  3 (3.00%) low severe
-  4 (4.00%) low mild
-  6 (6.00%) high mild
-Benchmarking conversion_channels/rgb_f32_to_rgba_f32/4096x4096
-Benchmarking conversion_channels/rgb_f32_to_rgba_f32/4096x4096: Warming up for 3.0000 s
-
-Warning: Unable to complete 100 samples in 5.0s. You may wish to increase target time to 8.2s, or reduce sample count to 60.
-Benchmarking conversion_channels/rgb_f32_to_rgba_f32/4096x4096: Collecting 100 samples in estimated 8.2481 s (100 iterations)
-Benchmarking conversion_channels/rgb_f32_to_rgba_f32/4096x4096: Analyzing
-conversion_channels/rgb_f32_to_rgba_f32/4096x4096
-                        time:   [79.673 ms 79.827 ms 79.999 ms]
-                        thrpt:  [209.72 Melem/s 210.17 Melem/s 210.58 Melem/s]
-                 change:
-                        time:   [−4.8262% −4.2695% −3.7826%] (p = 0.00 < 0.05)
-                        thrpt:  [+3.9314% +4.4600% +5.0709%]
-                        Performance has improved.
-Found 9 outliers among 100 measurements (9.00%)
   2 (2.00%) high mild
-  7 (7.00%) high severe
-
-Benchmarking conversion_bit_depth/rgba_u8_to_rgba_f32/256x256
-Benchmarking conversion_bit_depth/rgba_u8_to_rgba_f32/256x256: Warming up for 3.0000 s
-Benchmarking conversion_bit_depth/rgba_u8_to_rgba_f32/256x256: Collecting 100 samples in estimated 5.3750 s (56k iterations)
-Benchmarking conversion_bit_depth/rgba_u8_to_rgba_f32/256x256: Analyzing
-conversion_bit_depth/rgba_u8_to_rgba_f32/256x256
-                        time:   [97.581 µs 98.033 µs 98.674 µs]
-                        thrpt:  [664.16 Melem/s 668.51 Melem/s 671.61 Melem/s]
+  3 (3.00%) high severe
+Benchmarking luminance/rgb_u8_to_l_simd/4k
+Benchmarking luminance/rgb_u8_to_l_simd/4k: Warming up for 3.0000 s
+Benchmarking luminance/rgb_u8_to_l_simd/4k: Collecting 100 samples in estimated 5.1845 s (1400 iterations)
+Benchmarking luminance/rgb_u8_to_l_simd/4k: Analyzing
+luminance/rgb_u8_to_l_simd/4k
+                        time:   [3.6906 ms 3.6965 ms 3.7021 ms]
+                        thrpt:  [4.5318 Gelem/s 4.5387 Gelem/s 4.5459 Gelem/s]
                  change:
-                        time:   [−0.0524% +0.6552% +1.4067%] (p = 0.07 > 0.05)
-                        thrpt:  [−1.3872% −0.6509% +0.0525%]
-                        No change in performance detected.
-Found 10 outliers among 100 measurements (10.00%)
+                        time:   [−0.7737% −0.5784% −0.3835%] (p = 0.00 < 0.05)
+                        thrpt:  [+0.3850% +0.5818% +0.7797%]
+                        Change within noise threshold.
+Found 5 outliers among 100 measurements (5.00%)
   1 (1.00%) low severe
   4 (4.00%) low mild
-  3 (3.00%) high mild
-  2 (2.00%) high severe
-Benchmarking conversion_bit_depth/rgba_u8_to_rgba_f32/1024x1024
-Benchmarking conversion_bit_depth/rgba_u8_to_rgba_f32/1024x1024: Warming up for 3.0000 s
-Benchmarking conversion_bit_depth/rgba_u8_to_rgba_f32/1024x1024: Collecting 100 samples in estimated 5.1834 s (2300 iterations)
-Benchmarking conversion_bit_depth/rgba_u8_to_rgba_f32/1024x1024: Analyzing
-conversion_bit_depth/rgba_u8_to_rgba_f32/1024x1024
-                        time:   [2.2521 ms 2.2795 ms 2.3055 ms]
-                        thrpt:  [454.82 Melem/s 460.00 Melem/s 465.60 Melem/s]
+Benchmarking luminance/l_u8_to_rgba_scalar/4k
+Benchmarking luminance/l_u8_to_rgba_scalar/4k: Warming up for 3.0000 s
+Benchmarking luminance/l_u8_to_rgba_scalar/4k: Collecting 100 samples in estimated 5.5688 s (400 iterations)
+Benchmarking luminance/l_u8_to_rgba_scalar/4k: Analyzing
+luminance/l_u8_to_rgba_scalar/4k
+                        time:   [13.801 ms 13.844 ms 13.888 ms]
+                        thrpt:  [1.2080 Gelem/s 1.2119 Gelem/s 1.2156 Gelem/s]
                  change:
-                        time:   [+1.1061% +2.9154% +4.7663%] (p = 0.00 < 0.05)
-                        thrpt:  [−4.5495% −2.8328% −1.0940%]
-                        Performance has regressed.
-Found 2 outliers among 100 measurements (2.00%)
-  2 (2.00%) low mild
-Benchmarking conversion_bit_depth/rgba_u8_to_rgba_f32/4096x4096
-Benchmarking conversion_bit_depth/rgba_u8_to_rgba_f32/4096x4096: Warming up for 3.0000 s
-
-Warning: Unable to complete 100 samples in 5.0s. You may wish to increase target time to 5.8s, or reduce sample count to 80.
-Benchmarking conversion_bit_depth/rgba_u8_to_rgba_f32/4096x4096: Collecting 100 samples in estimated 5.7541 s (100 iterations)
-Benchmarking conversion_bit_depth/rgba_u8_to_rgba_f32/4096x4096: Analyzing
-conversion_bit_depth/rgba_u8_to_rgba_f32/4096x4096
-                        time:   [57.328 ms 57.434 ms 57.550 ms]
-                        thrpt:  [291.53 Melem/s 292.11 Melem/s 292.65 Melem/s]
+                        time:   [−0.3213% +0.1134% +0.5323%] (p = 0.62 > 0.05)
+                        thrpt:  [−0.5295% −0.1133% +0.3223%]
+                        No change in performance detected.
+Found 4 outliers among 100 measurements (4.00%)
+  4 (4.00%) high mild
+Benchmarking luminance/l_u8_to_rgba_simd/4k
+Benchmarking luminance/l_u8_to_rgba_simd/4k: Warming up for 3.0000 s
+Benchmarking luminance/l_u8_to_rgba_simd/4k: Collecting 100 samples in estimated 5.2912 s (800 iterations)
+Benchmarking luminance/l_u8_to_rgba_simd/4k: Analyzing
+luminance/l_u8_to_rgba_simd/4k
+                        time:   [6.5692 ms 6.5824 ms 6.5991 ms]
+                        thrpt:  [2.5423 Gelem/s 2.5488 Gelem/s 2.5539 Gelem/s]
                  change:
-                        time:   [−9.9056% −8.4868% −7.0890%] (p = 0.00 < 0.05)
-                        thrpt:  [+7.6299% +9.2738% +10.995%]
-                        Performance has improved.
-Found 2 outliers among 100 measurements (2.00%)
-  1 (1.00%) high mild
-  1 (1.00%) high severe
-Benchmarking conversion_bit_depth/rgba_f32_to_rgba_u8/256x256
-Benchmarking conversion_bit_depth/rgba_f32_to_rgba_u8/256x256: Warming up for 3.0000 s
-Benchmarking conversion_bit_depth/rgba_f32_to_rgba_u8/256x256: Collecting 100 samples in estimated 5.4200 s (45k iterations)
-Benchmarking conversion_bit_depth/rgba_f32_to_rgba_u8/256x256: Analyzing
-conversion_bit_depth/rgba_f32_to_rgba_u8/256x256
-                        time:   [119.08 µs 119.29 µs 119.53 µs]
-                        thrpt:  [548.27 Melem/s 549.37 Melem/s 550.35 Melem/s]
+                        time:   [+0.3342% +0.5277% +0.7881%] (p = 0.00 < 0.05)
+                        thrpt:  [−0.7820% −0.5249% −0.3331%]
+                        Change within noise threshold.
+Found 9 outliers among 100 measurements (9.00%)
+  5 (5.00%) high mild
+  4 (4.00%) high severe
+Benchmarking luminance/rgba_f32_to_l_scalar/4k
+Benchmarking luminance/rgba_f32_to_l_scalar/4k: Warming up for 3.0000 s
+Benchmarking luminance/rgba_f32_to_l_scalar/4k: Collecting 100 samples in estimated 6.0829 s (300 iterations)
+Benchmarking luminance/rgba_f32_to_l_scalar/4k: Analyzing
+luminance/rgba_f32_to_l_scalar/4k
+                        time:   [20.241 ms 20.267 ms 20.293 ms]
+                        thrpt:  [826.76 Melem/s 827.81 Melem/s 828.88 Melem/s]
                  change:
-                        time:   [−0.5132% −0.0363% +0.5074%] (p = 0.90 > 0.05)
-                        thrpt:  [−0.5049% +0.0363% +0.5158%]
+                        time:   [−0.1520% +0.0576% +0.2687%] (p = 0.58 > 0.05)
+                        thrpt:  [−0.2680% −0.0576% +0.1522%]
+                        No change in performance detected.
+Benchmarking luminance/rgba_f32_to_l_simd/4k
+Benchmarking luminance/rgba_f32_to_l_simd/4k: Warming up for 3.0000 s
+Benchmarking luminance/rgba_f32_to_l_simd/4k: Collecting 100 samples in estimated 6.0335 s (300 iterations)
+Benchmarking luminance/rgba_f32_to_l_simd/4k: Analyzing
+luminance/rgba_f32_to_l_simd/4k
+                        time:   [20.045 ms 20.078 ms 20.113 ms]
+                        thrpt:  [834.15 Melem/s 835.60 Melem/s 836.97 Melem/s]
+                 change:
+                        time:   [−0.3054% −0.0874% +0.1451%] (p = 0.45 > 0.05)
+                        thrpt:  [−0.1449% +0.0874% +0.3063%]
                         No change in performance detected.
 Found 10 outliers among 100 measurements (10.00%)
-  1 (1.00%) low mild
-  4 (4.00%) high mild
-  5 (5.00%) high severe
-Benchmarking conversion_bit_depth/rgba_f32_to_rgba_u8/1024x1024
-Benchmarking conversion_bit_depth/rgba_f32_to_rgba_u8/1024x1024: Warming up for 3.0000 s
-Benchmarking conversion_bit_depth/rgba_f32_to_rgba_u8/1024x1024: Collecting 100 samples in estimated 5.0598 s (1000 iterations)
-Benchmarking conversion_bit_depth/rgba_f32_to_rgba_u8/1024x1024: Analyzing
-conversion_bit_depth/rgba_f32_to_rgba_u8/1024x1024
-                        time:   [5.0494 ms 5.0561 ms 5.0627 ms]
-                        thrpt:  [207.12 Melem/s 207.39 Melem/s 207.66 Melem/s]
+  9 (9.00%) high mild
+  1 (1.00%) high severe
+Benchmarking luminance/rgb_f32_to_l_scalar/4k
+Benchmarking luminance/rgb_f32_to_l_scalar/4k: Warming up for 3.0000 s
+Benchmarking luminance/rgb_f32_to_l_scalar/4k: Collecting 100 samples in estimated 5.5031 s (300 iterations)
+Benchmarking luminance/rgb_f32_to_l_scalar/4k: Analyzing
+luminance/rgb_f32_to_l_scalar/4k
+                        time:   [18.334 ms 18.367 ms 18.402 ms]
+                        thrpt:  [911.72 Melem/s 913.42 Melem/s 915.11 Melem/s]
                  change:
-                        time:   [−0.2891% −0.1042% +0.0917%] (p = 0.29 > 0.05)
-                        thrpt:  [−0.0917% +0.1043% +0.2900%]
+                        time:   [−0.0527% +0.2048% +0.4606%] (p = 0.11 > 0.05)
+                        thrpt:  [−0.4585% −0.2044% +0.0527%]
+                        No change in performance detected.
+Benchmarking luminance/rgb_f32_to_l_simd/4k
+Benchmarking luminance/rgb_f32_to_l_simd/4k: Warming up for 3.0000 s
+Benchmarking luminance/rgb_f32_to_l_simd/4k: Collecting 100 samples in estimated 5.4378 s (300 iterations)
+Benchmarking luminance/rgb_f32_to_l_simd/4k: Analyzing
+luminance/rgb_f32_to_l_simd/4k
+                        time:   [18.038 ms 18.072 ms 18.106 ms]
+                        thrpt:  [926.59 Melem/s 928.38 Melem/s 930.11 Melem/s]
+                 change:
+                        time:   [−0.3722% −0.1236% +0.1450%] (p = 0.35 > 0.05)
+                        thrpt:  [−0.1448% +0.1238% +0.3736%]
                         No change in performance detected.
 Found 1 outliers among 100 measurements (1.00%)
-  1 (1.00%) low mild
-Benchmarking conversion_bit_depth/rgba_f32_to_rgba_u8/4096x4096
-Benchmarking conversion_bit_depth/rgba_f32_to_rgba_u8/4096x4096: Warming up for 3.0000 s
-
-Warning: Unable to complete 100 samples in 5.0s. You may wish to increase target time to 5.9s, or reduce sample count to 80.
-Benchmarking conversion_bit_depth/rgba_f32_to_rgba_u8/4096x4096: Collecting 100 samples in estimated 5.9320 s (100 iterations)
-Benchmarking conversion_bit_depth/rgba_f32_to_rgba_u8/4096x4096: Analyzing
-conversion_bit_depth/rgba_f32_to_rgba_u8/4096x4096
-                        time:   [59.169 ms 59.267 ms 59.376 ms]
-                        thrpt:  [282.56 Melem/s 283.08 Melem/s 283.55 Melem/s]
+  1 (1.00%) high mild
+Benchmarking luminance/l_f32_to_rgba_scalar/4k
+Benchmarking luminance/l_f32_to_rgba_scalar/4k: Warming up for 3.0000 s
+Benchmarking luminance/l_f32_to_rgba_scalar/4k: Collecting 100 samples in estimated 9.2644 s (200 iterations)
+Benchmarking luminance/l_f32_to_rgba_scalar/4k: Analyzing
+luminance/l_f32_to_rgba_scalar/4k
+                        time:   [46.318 ms 46.412 ms 46.507 ms]
+                        thrpt:  [360.74 Melem/s 361.48 Melem/s 362.22 Melem/s]
                  change:
-                        time:   [−24.927% −23.139% −21.493%] (p = 0.00 < 0.05)
-                        thrpt:  [+27.377% +30.106% +33.203%]
-                        Performance has improved.
+                        time:   [+0.1665% +0.4313% +0.6728%] (p = 0.00 < 0.05)
+                        thrpt:  [−0.6683% −0.4295% −0.1662%]
+                        Change within noise threshold.
+Found 1 outliers among 100 measurements (1.00%)
+  1 (1.00%) high mild
+Benchmarking luminance/l_f32_to_rgba_simd/4k
+Benchmarking luminance/l_f32_to_rgba_simd/4k: Warming up for 3.0000 s
+Benchmarking luminance/l_f32_to_rgba_simd/4k: Collecting 100 samples in estimated 9.2401 s (200 iterations)
+Benchmarking luminance/l_f32_to_rgba_simd/4k: Analyzing
+luminance/l_f32_to_rgba_simd/4k
+                        time:   [46.090 ms 46.162 ms 46.237 ms]
+                        thrpt:  [362.86 Melem/s 363.44 Melem/s 364.01 Melem/s]
+Found 1 outliers among 100 measurements (1.00%)
+  1 (1.00%) high mild
+
+Benchmarking channels/rgba_u8_to_rgb_scalar/4k
+Benchmarking channels/rgba_u8_to_rgb_scalar/4k: Warming up for 3.0000 s
+Benchmarking channels/rgba_u8_to_rgb_scalar/4k: Collecting 100 samples in estimated 5.8354 s (500 iterations)
+Benchmarking channels/rgba_u8_to_rgb_scalar/4k: Analyzing
+channels/rgba_u8_to_rgb_scalar/4k
+                        time:   [11.603 ms 11.630 ms 11.657 ms]
+                        thrpt:  [1.4392 Gelem/s 1.4426 Gelem/s 1.4460 Gelem/s]
+Benchmarking channels/rgba_u8_to_rgb_simd/4k
+Benchmarking channels/rgba_u8_to_rgb_simd/4k: Warming up for 3.0000 s
+Benchmarking channels/rgba_u8_to_rgb_simd/4k: Collecting 100 samples in estimated 5.2126 s (500 iterations)
+Benchmarking channels/rgba_u8_to_rgb_simd/4k: Analyzing
+channels/rgba_u8_to_rgb_simd/4k
+                        time:   [10.410 ms 10.429 ms 10.449 ms]
+                        thrpt:  [1.6056 Gelem/s 1.6086 Gelem/s 1.6116 Gelem/s]
+Found 3 outliers among 100 measurements (3.00%)
+  1 (1.00%) low mild
+  2 (2.00%) high mild
+Benchmarking channels/rgb_u8_to_rgba_scalar/4k
+Benchmarking channels/rgb_u8_to_rgba_scalar/4k: Warming up for 3.0000 s
+Benchmarking channels/rgb_u8_to_rgba_scalar/4k: Collecting 100 samples in estimated 5.4346 s (400 iterations)
+Benchmarking channels/rgb_u8_to_rgba_scalar/4k: Analyzing
+channels/rgb_u8_to_rgba_scalar/4k
+                        time:   [13.540 ms 13.568 ms 13.598 ms]
+                        thrpt:  [1.2338 Gelem/s 1.2365 Gelem/s 1.2391 Gelem/s]
+Found 3 outliers among 100 measurements (3.00%)
+  3 (3.00%) high mild
+Benchmarking channels/rgb_u8_to_rgba_simd/4k
+Benchmarking channels/rgb_u8_to_rgba_simd/4k: Warming up for 3.0000 s
+Benchmarking channels/rgb_u8_to_rgba_simd/4k: Collecting 100 samples in estimated 5.0728 s (400 iterations)
+Benchmarking channels/rgb_u8_to_rgba_simd/4k: Analyzing
+channels/rgb_u8_to_rgba_simd/4k
+                        time:   [12.608 ms 12.635 ms 12.662 ms]
+                        thrpt:  [1.3250 Gelem/s 1.3278 Gelem/s 1.3307 Gelem/s]
+Benchmarking channels/rgba_f32_to_rgb_scalar/4k
+Benchmarking channels/rgba_f32_to_rgb_scalar/4k: Warming up for 3.0000 s
+Benchmarking channels/rgba_f32_to_rgb_scalar/4k: Collecting 100 samples in estimated 8.4196 s (200 iterations)
+Benchmarking channels/rgba_f32_to_rgb_scalar/4k: Analyzing
+channels/rgba_f32_to_rgb_scalar/4k
+                        time:   [41.995 ms 42.061 ms 42.131 ms]
+                        thrpt:  [398.22 Melem/s 398.88 Melem/s 399.50 Melem/s]
+Found 1 outliers among 100 measurements (1.00%)
+  1 (1.00%) high mild
+Benchmarking channels/rgba_f32_to_rgb_simd/4k
+Benchmarking channels/rgba_f32_to_rgb_simd/4k: Warming up for 3.0000 s
+Benchmarking channels/rgba_f32_to_rgb_simd/4k: Collecting 100 samples in estimated 8.3886 s (200 iterations)
+Benchmarking channels/rgba_f32_to_rgb_simd/4k: Analyzing
+channels/rgba_f32_to_rgb_simd/4k
+                        time:   [41.925 ms 41.985 ms 42.047 ms]
+                        thrpt:  [399.01 Melem/s 399.60 Melem/s 400.17 Melem/s]
+Found 4 outliers among 100 measurements (4.00%)
+  4 (4.00%) high mild
+Benchmarking channels/rgb_f32_to_rgba_scalar/4k
+Benchmarking channels/rgb_f32_to_rgba_scalar/4k: Warming up for 3.0000 s
+
+Warning: Unable to complete 100 samples in 5.0s. You may wish to increase target time to 5.1s, or reduce sample count to 90.
+Benchmarking channels/rgb_f32_to_rgba_scalar/4k: Collecting 100 samples in estimated 5.0828 s (100 iterations)
+Benchmarking channels/rgb_f32_to_rgba_scalar/4k: Analyzing
+channels/rgb_f32_to_rgba_scalar/4k
+                        time:   [50.773 ms 50.860 ms 50.952 ms]
+                        thrpt:  [329.27 Melem/s 329.87 Melem/s 330.44 Melem/s]
+Found 2 outliers among 100 measurements (2.00%)
+  2 (2.00%) high mild
+Benchmarking channels/rgb_f32_to_rgba_simd/4k
+Benchmarking channels/rgb_f32_to_rgba_simd/4k: Warming up for 3.0000 s
+
+Warning: Unable to complete 100 samples in 5.0s. You may wish to increase target time to 5.1s, or reduce sample count to 90.
+Benchmarking channels/rgb_f32_to_rgba_simd/4k: Collecting 100 samples in estimated 5.0892 s (100 iterations)
+Benchmarking channels/rgb_f32_to_rgba_simd/4k: Analyzing
+channels/rgb_f32_to_rgba_simd/4k
+                        time:   [50.716 ms 50.812 ms 50.914 ms]
+                        thrpt:  [329.52 Melem/s 330.18 Melem/s 330.80 Melem/s]
+Found 2 outliers among 100 measurements (2.00%)
+  2 (2.00%) high mild
+
+Benchmarking bit_depth/rgba_u8_to_f32_scalar/4k
+Benchmarking bit_depth/rgba_u8_to_f32_scalar/4k: Warming up for 3.0000 s
+Benchmarking bit_depth/rgba_u8_to_f32_scalar/4k: Collecting 100 samples in estimated 9.2562 s (200 iterations)
+Benchmarking bit_depth/rgba_u8_to_f32_scalar/4k: Analyzing
+bit_depth/rgba_u8_to_f32_scalar/4k
+                        time:   [46.229 ms 46.315 ms 46.403 ms]
+                        thrpt:  [361.55 Melem/s 362.24 Melem/s 362.91 Melem/s]
+Found 1 outliers among 100 measurements (1.00%)
+  1 (1.00%) high mild
+Benchmarking bit_depth/rgba_u8_to_f32_simd/4k
+Benchmarking bit_depth/rgba_u8_to_f32_simd/4k: Warming up for 3.0000 s
+Benchmarking bit_depth/rgba_u8_to_f32_simd/4k: Collecting 100 samples in estimated 9.1401 s (200 iterations)
+Benchmarking bit_depth/rgba_u8_to_f32_simd/4k: Analyzing
+bit_depth/rgba_u8_to_f32_simd/4k
+                        time:   [45.580 ms 45.656 ms 45.740 ms]
+                        thrpt:  [366.80 Melem/s 367.47 Melem/s 368.09 Melem/s]
 Found 3 outliers among 100 measurements (3.00%)
   2 (2.00%) high mild
   1 (1.00%) high severe
-Benchmarking conversion_bit_depth/rgb_u8_to_rgb_f32/256x256
-Benchmarking conversion_bit_depth/rgb_u8_to_rgb_f32/256x256: Warming up for 3.0000 s
-Benchmarking conversion_bit_depth/rgb_u8_to_rgb_f32/256x256: Collecting 100 samples in estimated 5.0246 s (61k iterations)
-Benchmarking conversion_bit_depth/rgb_u8_to_rgb_f32/256x256: Analyzing
-conversion_bit_depth/rgb_u8_to_rgb_f32/256x256
-                        time:   [82.570 µs 82.844 µs 83.189 µs]
-                        thrpt:  [787.80 Melem/s 791.08 Melem/s 793.70 Melem/s]
-                 change:
-                        time:   [−0.1286% +0.3557% +0.9679%] (p = 0.25 > 0.05)
-                        thrpt:  [−0.9586% −0.3544% +0.1288%]
-                        No change in performance detected.
-Found 7 outliers among 100 measurements (7.00%)
-  2 (2.00%) high mild
-  5 (5.00%) high severe
-Benchmarking conversion_bit_depth/rgb_u8_to_rgb_f32/1024x1024
-Benchmarking conversion_bit_depth/rgb_u8_to_rgb_f32/1024x1024: Warming up for 3.0000 s
-Benchmarking conversion_bit_depth/rgb_u8_to_rgb_f32/1024x1024: Collecting 100 samples in estimated 9.9202 s (10k iterations)
-Benchmarking conversion_bit_depth/rgb_u8_to_rgb_f32/1024x1024: Analyzing
-conversion_bit_depth/rgb_u8_to_rgb_f32/1024x1024
-                        time:   [972.76 µs 979.23 µs 987.41 µs]
-                        thrpt:  [1.0619 Gelem/s 1.0708 Gelem/s 1.0779 Gelem/s]
-                 change:
-                        time:   [−1.5520% −0.4396% +0.6864%] (p = 0.46 > 0.05)
-                        thrpt:  [−0.6817% +0.4416% +1.5765%]
-                        No change in performance detected.
-Found 16 outliers among 100 measurements (16.00%)
-  1 (1.00%) low mild
-  5 (5.00%) high mild
-  10 (10.00%) high severe
-Benchmarking conversion_bit_depth/rgb_u8_to_rgb_f32/4096x4096
-Benchmarking conversion_bit_depth/rgb_u8_to_rgb_f32/4096x4096: Warming up for 3.0000 s
-Benchmarking conversion_bit_depth/rgb_u8_to_rgb_f32/4096x4096: Collecting 100 samples in estimated 8.4200 s (200 iterations)
-Benchmarking conversion_bit_depth/rgb_u8_to_rgb_f32/4096x4096: Analyzing
-conversion_bit_depth/rgb_u8_to_rgb_f32/4096x4096
-                        time:   [42.013 ms 42.091 ms 42.176 ms]
-                        thrpt:  [397.79 Melem/s 398.59 Melem/s 399.33 Melem/s]
-                 change:
-                        time:   [−1.1853% −0.9153% −0.6488%] (p = 0.00 < 0.05)
-                        thrpt:  [+0.6531% +0.9237% +1.1995%]
-                        Change within noise threshold.
+Benchmarking bit_depth/rgba_f32_to_u8_scalar/4k
+Benchmarking bit_depth/rgba_f32_to_u8_scalar/4k: Warming up for 3.0000 s
+Benchmarking bit_depth/rgba_f32_to_u8_scalar/4k: Collecting 100 samples in estimated 6.1391 s (300 iterations)
+Benchmarking bit_depth/rgba_f32_to_u8_scalar/4k: Analyzing
+bit_depth/rgba_f32_to_u8_scalar/4k
+                        time:   [20.435 ms 20.461 ms 20.487 ms]
+                        thrpt:  [818.92 Melem/s 819.97 Melem/s 820.99 Melem/s]
+Benchmarking bit_depth/rgba_f32_to_u8_simd/4k
+Benchmarking bit_depth/rgba_f32_to_u8_simd/4k: Warming up for 3.0000 s
+Benchmarking bit_depth/rgba_f32_to_u8_simd/4k: Collecting 100 samples in estimated 6.0360 s (300 iterations)
+Benchmarking bit_depth/rgba_f32_to_u8_simd/4k: Analyzing
+bit_depth/rgba_f32_to_u8_simd/4k
+                        time:   [20.083 ms 20.120 ms 20.159 ms]
+                        thrpt:  [832.26 Melem/s 833.87 Melem/s 835.40 Melem/s]
 Found 5 outliers among 100 measurements (5.00%)
-  2 (2.00%) high mild
-  3 (3.00%) high severe
-Benchmarking conversion_bit_depth/rgb_f32_to_rgb_u8/256x256
-Benchmarking conversion_bit_depth/rgb_f32_to_rgb_u8/256x256: Warming up for 3.0000 s
-Benchmarking conversion_bit_depth/rgb_f32_to_rgb_u8/256x256: Collecting 100 samples in estimated 5.1551 s (50k iterations)
-Benchmarking conversion_bit_depth/rgb_f32_to_rgb_u8/256x256: Analyzing
-conversion_bit_depth/rgb_f32_to_rgb_u8/256x256
-                        time:   [102.06 µs 102.35 µs 102.72 µs]
-                        thrpt:  [638.01 Melem/s 640.31 Melem/s 642.16 Melem/s]
-                 change:
-                        time:   [−0.7803% +0.0924% +0.8988%] (p = 0.85 > 0.05)
-                        thrpt:  [−0.8908% −0.0923% +0.7865%]
-                        No change in performance detected.
-Found 9 outliers among 100 measurements (9.00%)
-  2 (2.00%) low mild
-  5 (5.00%) high mild
+  4 (4.00%) high mild
+  1 (1.00%) high severe
+Benchmarking bit_depth/rgb_u8_to_f32_scalar/4k
+Benchmarking bit_depth/rgb_u8_to_f32_scalar/4k: Warming up for 3.0000 s
+Benchmarking bit_depth/rgb_u8_to_f32_scalar/4k: Collecting 100 samples in estimated 6.9872 s (200 iterations)
+Benchmarking bit_depth/rgb_u8_to_f32_scalar/4k: Analyzing
+bit_depth/rgb_u8_to_f32_scalar/4k
+                        time:   [34.856 ms 34.932 ms 35.008 ms]
+                        thrpt:  [479.23 Melem/s 480.28 Melem/s 481.33 Melem/s]
+Benchmarking bit_depth/rgb_u8_to_f32_simd/4k
+Benchmarking bit_depth/rgb_u8_to_f32_simd/4k: Warming up for 3.0000 s
+Benchmarking bit_depth/rgb_u8_to_f32_simd/4k: Collecting 100 samples in estimated 6.8662 s (200 iterations)
+Benchmarking bit_depth/rgb_u8_to_f32_simd/4k: Analyzing
+bit_depth/rgb_u8_to_f32_simd/4k
+                        time:   [34.337 ms 34.401 ms 34.471 ms]
+                        thrpt:  [486.71 Melem/s 487.69 Melem/s 488.60 Melem/s]
+Found 5 outliers among 100 measurements (5.00%)
+  3 (3.00%) high mild
   2 (2.00%) high severe
-Benchmarking conversion_bit_depth/rgb_f32_to_rgb_u8/1024x1024
-Benchmarking conversion_bit_depth/rgb_f32_to_rgb_u8/1024x1024: Warming up for 3.0000 s
-
-Warning: Unable to complete 100 samples in 5.0s. You may wish to increase target time to 8.2s, enable flat sampling, or reduce sample count to 50.
-Benchmarking conversion_bit_depth/rgb_f32_to_rgb_u8/1024x1024: Collecting 100 samples in estimated 8.2198 s (5050 iterations)
-Benchmarking conversion_bit_depth/rgb_f32_to_rgb_u8/1024x1024: Analyzing
-conversion_bit_depth/rgb_f32_to_rgb_u8/1024x1024
-                        time:   [1.6208 ms 1.6413 ms 1.6615 ms]
-                        thrpt:  [631.12 Melem/s 638.87 Melem/s 646.96 Melem/s]
-                 change:
-                        time:   [−5.1205% −3.5059% −1.8666%] (p = 0.00 < 0.05)
-                        thrpt:  [+1.9021% +3.6333% +5.3968%]
-                        Performance has improved.
+Benchmarking bit_depth/rgb_f32_to_u8_scalar/4k
+Benchmarking bit_depth/rgb_f32_to_u8_scalar/4k: Warming up for 3.0000 s
+Benchmarking bit_depth/rgb_f32_to_u8_scalar/4k: Collecting 100 samples in estimated 6.3532 s (400 iterations)
+Benchmarking bit_depth/rgb_f32_to_u8_scalar/4k: Analyzing
+bit_depth/rgb_f32_to_u8_scalar/4k
+                        time:   [15.755 ms 15.785 ms 15.815 ms]
+                        thrpt:  [1.0608 Gelem/s 1.0629 Gelem/s 1.0649 Gelem/s]
 Found 1 outliers among 100 measurements (1.00%)
   1 (1.00%) high mild
-Benchmarking conversion_bit_depth/rgb_f32_to_rgb_u8/4096x4096
-Benchmarking conversion_bit_depth/rgb_f32_to_rgb_u8/4096x4096: Warming up for 3.0000 s
-Benchmarking conversion_bit_depth/rgb_f32_to_rgb_u8/4096x4096: Collecting 100 samples in estimated 8.7572 s (200 iterations)
-Benchmarking conversion_bit_depth/rgb_f32_to_rgb_u8/4096x4096: Analyzing
-conversion_bit_depth/rgb_f32_to_rgb_u8/4096x4096
-                        time:   [43.722 ms 43.778 ms 43.836 ms]
-                        thrpt:  [382.72 Melem/s 383.24 Melem/s 383.73 Melem/s]
-                 change:
-                        time:   [−9.7104% −7.3618% −5.1397%] (p = 0.00 < 0.05)
-                        thrpt:  [+5.4182% +7.9468% +10.755%]
-                        Performance has improved.
-Found 1 outliers among 100 measurements (1.00%)
-  1 (1.00%) high severe
-Benchmarking conversion_bit_depth/rgba_u8_to_rgba_u16/256x256
-Benchmarking conversion_bit_depth/rgba_u8_to_rgba_u16/256x256: Warming up for 3.0000 s
-Benchmarking conversion_bit_depth/rgba_u8_to_rgba_u16/256x256: Collecting 100 samples in estimated 5.0972 s (61k iterations)
-Benchmarking conversion_bit_depth/rgba_u8_to_rgba_u16/256x256: Analyzing
-conversion_bit_depth/rgba_u8_to_rgba_u16/256x256
-                        time:   [84.020 µs 84.131 µs 84.245 µs]
-                        thrpt:  [777.92 Melem/s 778.98 Melem/s 780.01 Melem/s]
-                 change:
-                        time:   [−0.0483% +0.2915% +0.6658%] (p = 0.11 > 0.05)
-                        thrpt:  [−0.6614% −0.2906% +0.0483%]
-                        No change in performance detected.
-Found 6 outliers among 100 measurements (6.00%)
-  5 (5.00%) high mild
-  1 (1.00%) high severe
-Benchmarking conversion_bit_depth/rgba_u8_to_rgba_u16/1024x1024
-Benchmarking conversion_bit_depth/rgba_u8_to_rgba_u16/1024x1024: Warming up for 3.0000 s
-Benchmarking conversion_bit_depth/rgba_u8_to_rgba_u16/1024x1024: Collecting 100 samples in estimated 8.5366 s (10k iterations)
-Benchmarking conversion_bit_depth/rgba_u8_to_rgba_u16/1024x1024: Analyzing
-conversion_bit_depth/rgba_u8_to_rgba_u16/1024x1024
-                        time:   [835.36 µs 839.08 µs 843.84 µs]
-                        thrpt:  [1.2426 Gelem/s 1.2497 Gelem/s 1.2552 Gelem/s]
-                 change:
-                        time:   [−1.7087% −1.0528% −0.3509%] (p = 0.00 < 0.05)
-                        thrpt:  [+0.3522% +1.0640% +1.7384%]
-                        Change within noise threshold.
-Found 16 outliers among 100 measurements (16.00%)
-  1 (1.00%) low mild
-  4 (4.00%) high mild
-  11 (11.00%) high severe
-Benchmarking conversion_bit_depth/rgba_u8_to_rgba_u16/4096x4096
-Benchmarking conversion_bit_depth/rgba_u8_to_rgba_u16/4096x4096: Warming up for 3.0000 s
-Benchmarking conversion_bit_depth/rgba_u8_to_rgba_u16/4096x4096: Collecting 100 samples in estimated 7.1893 s (200 iterations)
-Benchmarking conversion_bit_depth/rgba_u8_to_rgba_u16/4096x4096: Analyzing
-conversion_bit_depth/rgba_u8_to_rgba_u16/4096x4096
-                        time:   [35.928 ms 35.984 ms 36.043 ms]
-                        thrpt:  [465.47 Melem/s 466.24 Melem/s 466.97 Melem/s]
+Benchmarking bit_depth/rgb_f32_to_u8_simd/4k
+Benchmarking bit_depth/rgb_f32_to_u8_simd/4k: Warming up for 3.0000 s
+Benchmarking bit_depth/rgb_f32_to_u8_simd/4k: Collecting 100 samples in estimated 6.1594 s (400 iterations)
+Benchmarking bit_depth/rgb_f32_to_u8_simd/4k: Analyzing
+bit_depth/rgb_f32_to_u8_simd/4k
+                        time:   [15.332 ms 15.365 ms 15.399 ms]
+                        thrpt:  [1.0895 Gelem/s 1.0919 Gelem/s 1.0942 Gelem/s]
 Found 2 outliers among 100 measurements (2.00%)
   2 (2.00%) high mild
-Benchmarking conversion_bit_depth/rgba_u16_to_rgba_u8/256x256
-Benchmarking conversion_bit_depth/rgba_u16_to_rgba_u8/256x256: Warming up for 3.0000 s
-Benchmarking conversion_bit_depth/rgba_u16_to_rgba_u8/256x256: Collecting 100 samples in estimated 5.4049 s (61k iterations)
-Benchmarking conversion_bit_depth/rgba_u16_to_rgba_u8/256x256: Analyzing
-conversion_bit_depth/rgba_u16_to_rgba_u8/256x256
-                        time:   [89.055 µs 89.327 µs 89.684 µs]
-                        thrpt:  [730.74 Melem/s 733.67 Melem/s 735.91 Melem/s]
-Found 7 outliers among 100 measurements (7.00%)
-  2 (2.00%) high mild
-  5 (5.00%) high severe
-Benchmarking conversion_bit_depth/rgba_u16_to_rgba_u8/1024x1024
-Benchmarking conversion_bit_depth/rgba_u16_to_rgba_u8/1024x1024: Warming up for 3.0000 s
-
-Warning: Unable to complete 100 samples in 5.0s. You may wish to increase target time to 5.1s, enable flat sampling, or reduce sample count to 60.
-Benchmarking conversion_bit_depth/rgba_u16_to_rgba_u8/1024x1024: Collecting 100 samples in estimated 5.1469 s (5050 iterations)
-Benchmarking conversion_bit_depth/rgba_u16_to_rgba_u8/1024x1024: Analyzing
-conversion_bit_depth/rgba_u16_to_rgba_u8/1024x1024
-                        time:   [1.0107 ms 1.0156 ms 1.0228 ms]
-                        thrpt:  [1.0252 Gelem/s 1.0325 Gelem/s 1.0374 Gelem/s]
-Found 9 outliers among 100 measurements (9.00%)
-  1 (1.00%) low mild
-  1 (1.00%) high mild
-  7 (7.00%) high severe
-Benchmarking conversion_bit_depth/rgba_u16_to_rgba_u8/4096x4096
-Benchmarking conversion_bit_depth/rgba_u16_to_rgba_u8/4096x4096: Warming up for 3.0000 s
-Benchmarking conversion_bit_depth/rgba_u16_to_rgba_u8/4096x4096: Collecting 100 samples in estimated 7.2252 s (200 iterations)
-Benchmarking conversion_bit_depth/rgba_u16_to_rgba_u8/4096x4096: Analyzing
-conversion_bit_depth/rgba_u16_to_rgba_u8/4096x4096
-                        time:   [36.049 ms 36.096 ms 36.148 ms]
-                        thrpt:  [464.12 Melem/s 464.79 Melem/s 465.41 Melem/s]
-Found 5 outliers among 100 measurements (5.00%)
-  4 (4.00%) high mild
-  1 (1.00%) high severe
-
-Benchmarking conversion_luminance/rgba_u8_to_l_u8/256x256
-Benchmarking conversion_luminance/rgba_u8_to_l_u8/256x256: Warming up for 3.0000 s
-Benchmarking conversion_luminance/rgba_u8_to_l_u8/256x256: Collecting 100 samples in estimated 5.0249 s (96k iterations)
-Benchmarking conversion_luminance/rgba_u8_to_l_u8/256x256: Analyzing
-conversion_luminance/rgba_u8_to_l_u8/256x256
-                        time:   [51.790 µs 52.141 µs 52.549 µs]
-                        thrpt:  [1.2471 Gelem/s 1.2569 Gelem/s 1.2654 Gelem/s]
-Found 13 outliers among 100 measurements (13.00%)
-  8 (8.00%) high mild
-  5 (5.00%) high severe
-Benchmarking conversion_luminance/rgba_u8_to_l_u8/1024x1024
-Benchmarking conversion_luminance/rgba_u8_to_l_u8/1024x1024: Warming up for 3.0000 s
-Benchmarking conversion_luminance/rgba_u8_to_l_u8/1024x1024: Collecting 100 samples in estimated 5.5807 s (10k iterations)
-Benchmarking conversion_luminance/rgba_u8_to_l_u8/1024x1024: Analyzing
-conversion_luminance/rgba_u8_to_l_u8/1024x1024
-                        time:   [550.06 µs 552.46 µs 555.98 µs]
-                        thrpt:  [1.8860 Gelem/s 1.8980 Gelem/s 1.9063 Gelem/s]
-Found 19 outliers among 100 measurements (19.00%)
-  2 (2.00%) high mild
-  17 (17.00%) high severe
-Benchmarking conversion_luminance/rgba_u8_to_l_u8/4096x4096
-Benchmarking conversion_luminance/rgba_u8_to_l_u8/4096x4096: Warming up for 3.0000 s
-Benchmarking conversion_luminance/rgba_u8_to_l_u8/4096x4096: Collecting 100 samples in estimated 5.3190 s (300 iterations)
-Benchmarking conversion_luminance/rgba_u8_to_l_u8/4096x4096: Analyzing
-conversion_luminance/rgba_u8_to_l_u8/4096x4096
-                        time:   [17.673 ms 17.713 ms 17.757 ms]
-                        thrpt:  [944.83 Melem/s 947.15 Melem/s 949.31 Melem/s]
-Found 4 outliers among 100 measurements (4.00%)
-  4 (4.00%) high mild
-Benchmarking conversion_luminance/l_u8_to_rgba_u8/256x256
-Benchmarking conversion_luminance/l_u8_to_rgba_u8/256x256: Warming up for 3.0000 s
-Benchmarking conversion_luminance/l_u8_to_rgba_u8/256x256: Collecting 100 samples in estimated 5.0154 s (111k iterations)
-Benchmarking conversion_luminance/l_u8_to_rgba_u8/256x256: Analyzing
-conversion_luminance/l_u8_to_rgba_u8/256x256
-                        time:   [45.230 µs 45.480 µs 45.825 µs]
-                        thrpt:  [1.4301 Gelem/s 1.4410 Gelem/s 1.4490 Gelem/s]
-Found 6 outliers among 100 measurements (6.00%)
-  1 (1.00%) high mild
-  5 (5.00%) high severe
-Benchmarking conversion_luminance/l_u8_to_rgba_u8/1024x1024
-Benchmarking conversion_luminance/l_u8_to_rgba_u8/1024x1024: Warming up for 3.0000 s
-Benchmarking conversion_luminance/l_u8_to_rgba_u8/1024x1024: Collecting 100 samples in estimated 7.4037 s (15k iterations)
-Benchmarking conversion_luminance/l_u8_to_rgba_u8/1024x1024: Analyzing
-conversion_luminance/l_u8_to_rgba_u8/1024x1024
-                        time:   [487.26 µs 488.62 µs 490.05 µs]
-                        thrpt:  [2.1398 Gelem/s 2.1460 Gelem/s 2.1520 Gelem/s]
-Found 14 outliers among 100 measurements (14.00%)
-  10 (10.00%) high mild
-  4 (4.00%) high severe
-Benchmarking conversion_luminance/l_u8_to_rgba_u8/4096x4096
-Benchmarking conversion_luminance/l_u8_to_rgba_u8/4096x4096: Warming up for 3.0000 s
-Benchmarking conversion_luminance/l_u8_to_rgba_u8/4096x4096: Collecting 100 samples in estimated 5.0291 s (300 iterations)
-Benchmarking conversion_luminance/l_u8_to_rgba_u8/4096x4096: Analyzing
-conversion_luminance/l_u8_to_rgba_u8/4096x4096
-                        time:   [16.693 ms 16.732 ms 16.775 ms]
-                        thrpt:  [1.0001 Gelem/s 1.0027 Gelem/s 1.0050 Gelem/s]
+Benchmarking bit_depth/rgba_u8_to_u16_scalar/4k
+Benchmarking bit_depth/rgba_u8_to_u16_scalar/4k: Warming up for 3.0000 s
+Benchmarking bit_depth/rgba_u8_to_u16_scalar/4k: Collecting 100 samples in estimated 7.3951 s (300 iterations)
+Benchmarking bit_depth/rgba_u8_to_u16_scalar/4k: Analyzing
+bit_depth/rgba_u8_to_u16_scalar/4k
+                        time:   [24.635 ms 24.675 ms 24.717 ms]
+                        thrpt:  [678.78 Melem/s 679.93 Melem/s 681.04 Melem/s]
 Found 3 outliers among 100 measurements (3.00%)
-  2 (2.00%) high mild
-  1 (1.00%) high severe
-Benchmarking conversion_luminance/rgb_u8_to_l_u8/256x256
-Benchmarking conversion_luminance/rgb_u8_to_l_u8/256x256: Warming up for 3.0000 s
-Benchmarking conversion_luminance/rgb_u8_to_l_u8/256x256: Collecting 100 samples in estimated 5.1023 s (106k iterations)
-Benchmarking conversion_luminance/rgb_u8_to_l_u8/256x256: Analyzing
-conversion_luminance/rgb_u8_to_l_u8/256x256
-                        time:   [48.175 µs 48.416 µs 48.712 µs]
-                        thrpt:  [1.3454 Gelem/s 1.3536 Gelem/s 1.3604 Gelem/s]
-Found 14 outliers among 100 measurements (14.00%)
-  2 (2.00%) high mild
-  12 (12.00%) high severe
-Benchmarking conversion_luminance/rgb_u8_to_l_u8/1024x1024
-Benchmarking conversion_luminance/rgb_u8_to_l_u8/1024x1024: Warming up for 3.0000 s
-Benchmarking conversion_luminance/rgb_u8_to_l_u8/1024x1024: Collecting 100 samples in estimated 5.3770 s (10k iterations)
-Benchmarking conversion_luminance/rgb_u8_to_l_u8/1024x1024: Analyzing
-conversion_luminance/rgb_u8_to_l_u8/1024x1024
-                        time:   [528.17 µs 530.71 µs 534.32 µs]
-                        thrpt:  [1.9625 Gelem/s 1.9758 Gelem/s 1.9853 Gelem/s]
-Found 7 outliers among 100 measurements (7.00%)
-  1 (1.00%) high mild
-  6 (6.00%) high severe
-Benchmarking conversion_luminance/rgb_u8_to_l_u8/4096x4096
-Benchmarking conversion_luminance/rgb_u8_to_l_u8/4096x4096: Warming up for 3.0000 s
-Benchmarking conversion_luminance/rgb_u8_to_l_u8/4096x4096: Collecting 100 samples in estimated 5.7921 s (400 iterations)
-Benchmarking conversion_luminance/rgb_u8_to_l_u8/4096x4096: Analyzing
-conversion_luminance/rgb_u8_to_l_u8/4096x4096
-                        time:   [14.413 ms 14.436 ms 14.460 ms]
-                        thrpt:  [1.1602 Gelem/s 1.1622 Gelem/s 1.1640 Gelem/s]
-Found 13 outliers among 100 measurements (13.00%)
-  1 (1.00%) low severe
-  1 (1.00%) low mild
-  8 (8.00%) high mild
-  3 (3.00%) high severe
-Benchmarking conversion_luminance/rgba_f32_to_l_f32/256x256
-Benchmarking conversion_luminance/rgba_f32_to_l_f32/256x256: Warming up for 3.0000 s
-Benchmarking conversion_luminance/rgba_f32_to_l_f32/256x256: Collecting 100 samples in estimated 5.1203 s (50k iterations)
-Benchmarking conversion_luminance/rgba_f32_to_l_f32/256x256: Analyzing
-conversion_luminance/rgba_f32_to_l_f32/256x256
-                        time:   [101.29 µs 101.54 µs 101.82 µs]
-                        thrpt:  [643.67 Melem/s 645.41 Melem/s 646.98 Melem/s]
-Found 13 outliers among 100 measurements (13.00%)
-  1 (1.00%) low severe
-  8 (8.00%) high mild
-  4 (4.00%) high severe
-Benchmarking conversion_luminance/rgba_f32_to_l_f32/1024x1024
-Benchmarking conversion_luminance/rgba_f32_to_l_f32/1024x1024: Warming up for 3.0000 s
-Benchmarking conversion_luminance/rgba_f32_to_l_f32/1024x1024: Collecting 100 samples in estimated 5.2206 s (1100 iterations)
-Benchmarking conversion_luminance/rgba_f32_to_l_f32/1024x1024: Analyzing
-conversion_luminance/rgba_f32_to_l_f32/1024x1024
-                        time:   [4.7289 ms 4.7407 ms 4.7520 ms]
-                        thrpt:  [220.66 Melem/s 221.18 Melem/s 221.74 Melem/s]
-Found 1 outliers among 100 measurements (1.00%)
-  1 (1.00%) low mild
-Benchmarking conversion_luminance/rgba_f32_to_l_f32/4096x4096
-Benchmarking conversion_luminance/rgba_f32_to_l_f32/4096x4096: Warming up for 3.0000 s
-
-Warning: Unable to complete 100 samples in 5.0s. You may wish to increase target time to 5.9s, or reduce sample count to 80.
-Benchmarking conversion_luminance/rgba_f32_to_l_f32/4096x4096: Collecting 100 samples in estimated 5.8842 s (100 iterations)
-Benchmarking conversion_luminance/rgba_f32_to_l_f32/4096x4096: Analyzing
-conversion_luminance/rgba_f32_to_l_f32/4096x4096
-                        time:   [59.222 ms 60.005 ms 61.019 ms]
-                        thrpt:  [274.95 Melem/s 279.59 Melem/s 283.29 Melem/s]
-Found 7 outliers among 100 measurements (7.00%)
   3 (3.00%) high mild
-  4 (4.00%) high severe
-Benchmarking conversion_luminance/l_f32_to_rgba_f32/256x256
-Benchmarking conversion_luminance/l_f32_to_rgba_f32/256x256: Warming up for 3.0000 s
-Benchmarking conversion_luminance/l_f32_to_rgba_f32/256x256: Collecting 100 samples in estimated 5.4224 s (61k iterations)
-Benchmarking conversion_luminance/l_f32_to_rgba_f32/256x256: Analyzing
-conversion_luminance/l_f32_to_rgba_f32/256x256
-                        time:   [89.244 µs 89.587 µs 90.020 µs]
-                        thrpt:  [728.02 Melem/s 731.53 Melem/s 734.34 Melem/s]
+Benchmarking bit_depth/rgba_u8_to_u16_simd/4k
+Benchmarking bit_depth/rgba_u8_to_u16_simd/4k: Warming up for 3.0000 s
+Benchmarking bit_depth/rgba_u8_to_u16_simd/4k: Collecting 100 samples in estimated 7.2164 s (300 iterations)
+Benchmarking bit_depth/rgba_u8_to_u16_simd/4k: Analyzing
+bit_depth/rgba_u8_to_u16_simd/4k
+                        time:   [24.048 ms 24.090 ms 24.134 ms]
+                        thrpt:  [695.17 Melem/s 696.45 Melem/s 697.65 Melem/s]
 Found 4 outliers among 100 measurements (4.00%)
+  3 (3.00%) high mild
+  1 (1.00%) high severe
+Benchmarking bit_depth/rgba_u16_to_u8_scalar/4k
+Benchmarking bit_depth/rgba_u16_to_u8_scalar/4k: Warming up for 3.0000 s
+Benchmarking bit_depth/rgba_u16_to_u8_scalar/4k: Collecting 100 samples in estimated 6.5726 s (400 iterations)
+Benchmarking bit_depth/rgba_u16_to_u8_scalar/4k: Analyzing
+bit_depth/rgba_u16_to_u8_scalar/4k
+                        time:   [16.416 ms 16.446 ms 16.477 ms]
+                        thrpt:  [1.0182 Gelem/s 1.0201 Gelem/s 1.0220 Gelem/s]
+Found 2 outliers among 100 measurements (2.00%)
   2 (2.00%) high mild
-  2 (2.00%) high severe
-Benchmarking conversion_luminance/l_f32_to_rgba_f32/1024x1024
-Benchmarking conversion_luminance/l_f32_to_rgba_f32/1024x1024: Warming up for 3.0000 s
-Benchmarking conversion_luminance/l_f32_to_rgba_f32/1024x1024: Collecting 100 samples in estimated 5.0060 s (2400 iterations)
-Benchmarking conversion_luminance/l_f32_to_rgba_f32/1024x1024: Analyzing
-conversion_luminance/l_f32_to_rgba_f32/1024x1024
-                        time:   [2.0477 ms 2.0778 ms 2.1082 ms]
-                        thrpt:  [497.38 Melem/s 504.66 Melem/s 512.07 Melem/s]
-Benchmarking conversion_luminance/l_f32_to_rgba_f32/4096x4096
-Benchmarking conversion_luminance/l_f32_to_rgba_f32/4096x4096: Warming up for 3.0000 s
-
-Warning: Unable to complete 100 samples in 5.0s. You may wish to increase target time to 5.8s, or reduce sample count to 80.
-Benchmarking conversion_luminance/l_f32_to_rgba_f32/4096x4096: Collecting 100 samples in estimated 5.7558 s (100 iterations)
-Benchmarking conversion_luminance/l_f32_to_rgba_f32/4096x4096: Analyzing
-conversion_luminance/l_f32_to_rgba_f32/4096x4096
-                        time:   [57.378 ms 57.485 ms 57.602 ms]
-                        thrpt:  [291.26 Melem/s 291.85 Melem/s 292.40 Melem/s]
+Benchmarking bit_depth/rgba_u16_to_u8_simd/4k
+Benchmarking bit_depth/rgba_u16_to_u8_simd/4k: Warming up for 3.0000 s
+Benchmarking bit_depth/rgba_u16_to_u8_simd/4k: Collecting 100 samples in estimated 6.4080 s (400 iterations)
+Benchmarking bit_depth/rgba_u16_to_u8_simd/4k: Analyzing
+bit_depth/rgba_u16_to_u8_simd/4k
+                        time:   [16.004 ms 16.034 ms 16.065 ms]
+                        thrpt:  [1.0443 Gelem/s 1.0464 Gelem/s 1.0483 Gelem/s]
 Found 4 outliers among 100 measurements (4.00%)
-  2 (2.00%) high mild
-  2 (2.00%) high severe
+  1 (1.00%) high mild
+  3 (3.00%) high severe
 
+================================================================================
+BENCHMARK ANALYSIS - 4K (4096x4096) Images on x86_64
+================================================================================
+Date: 2026-01-26
+
+## Summary Table (SIMD vs Scalar Speedup)
+
+| Conversion               | Scalar (ms) | SIMD (ms) | Speedup | SIMD Thrpt   | Notes              |
+|--------------------------|-------------|-----------|---------|--------------|---------------------|
+| **LA ↔ RGBA (U8)**       |             |           |         |              |                     |
+| LA → RGBA                | 14.04       | 12.70     | 1.11x   | 1.32 Gelem/s | Memory bound        |
+| RGBA → LA                | 10.81       | 8.34      | 1.30x   | 2.01 Gelem/s | +luminance compute  |
+|                          |             |           |         |              |                     |
+| **U16 ↔ F32**            |             |           |         |              |                     |
+| RGBA U16 → F32           | 48.77       | 48.49     | 1.01x   | 346 Melem/s  | Memory bound        |
+| RGBA F32 → U16           | 31.18       | 31.02     | 1.01x   | 541 Melem/s  | Memory bound        |
+| RGB U16 → F32            | 36.10       | 35.95     | 1.00x   | 467 Melem/s  | Memory bound        |
+| RGB F32 → U16            | 23.86       | 23.53     | 1.01x   | 713 Melem/s  | Memory bound        |
+| L U16 → F32              | 13.50       | 12.78     | 1.06x   | 1.31 Gelem/s |                     |
+| L F32 → U16              | 9.52        | 8.32      | 1.14x   | 2.02 Gelem/s |                     |
+|                          |             |           |         |              |                     |
+| **Luminance (U8)**       |             |           |         |              |                     |
+| RGBA → L                 | 7.03        | 4.26      | 1.65x   | 3.94 Gelem/s | **Best speedup**    |
+| RGB → L                  | 7.04        | 3.70      | 1.90x   | 4.54 Gelem/s | **Best speedup**    |
+| L → RGBA                 | 13.84       | 6.58      | 2.10x   | 2.55 Gelem/s | **Best speedup**    |
+|                          |             |           |         |              |                     |
+| **Luminance (F32)**      |             |           |         |              |                     |
+| RGBA F32 → L             | 20.27       | 20.08     | 1.01x   | 836 Melem/s  | Memory bound        |
+| RGB F32 → L              | 18.37       | 18.07     | 1.02x   | 928 Melem/s  | Memory bound        |
+| L F32 → RGBA             | 46.41       | 46.16     | 1.01x   | 363 Melem/s  | Memory bound        |
+|                          |             |           |         |              |                     |
+| **Channel Conv (U8)**    |             |           |         |              |                     |
+| RGBA → RGB               | 11.63       | 10.43     | 1.12x   | 1.61 Gelem/s |                     |
+| RGB → RGBA               | 13.57       | 12.64     | 1.07x   | 1.33 Gelem/s |                     |
+|                          |             |           |         |              |                     |
+| **Channel Conv (F32)**   |             |           |         |              |                     |
+| RGBA F32 → RGB           | 42.06       | 41.99     | 1.00x   | 400 Melem/s  | Memory bound        |
+| RGB F32 → RGBA           | 50.86       | 50.81     | 1.00x   | 330 Melem/s  | Memory bound        |
+|                          |             |           |         |              |                     |
+| **Bit Depth (U8↔F32)**   |             |           |         |              |                     |
+| RGBA U8 → F32            | 46.32       | 45.66     | 1.01x   | 367 Melem/s  | Memory bound        |
+| RGBA F32 → U8            | 20.46       | 20.12     | 1.02x   | 834 Melem/s  |                     |
+| RGB U8 → F32             | 34.93       | 34.40     | 1.02x   | 488 Melem/s  |                     |
+| RGB F32 → U8             | 15.79       | 15.37     | 1.03x   | 1.09 Gelem/s |                     |
+|                          |             |           |         |              |                     |
+| **Bit Depth (U8↔U16)**   |             |           |         |              |                     |
+| RGBA U8 → U16            | 24.68       | 24.09     | 1.02x   | 696 Melem/s  |                     |
+| RGBA U16 → U8            | 16.45       | 16.03     | 1.03x   | 1.05 Gelem/s |                     |
+
+## Key Observations
+
+### High-Value SIMD Paths (>1.5x speedup)
+1. **L_U8 → RGBA_U8**: 2.10x - SIMD shuffle expansion very effective
+2. **RGB_U8 → L_U8**: 1.90x - SIMD luminance with efficient deinterleave
+3. **RGBA_U8 → L_U8**: 1.65x - SIMD luminance calculation benefits
+
+### Memory-Bound Conversions (~1.0x speedup)
+Most F32 conversions are memory-bound due to 4x larger data size:
+- RGBA_F32 ↔ RGB_F32: No speedup (scalar already saturates memory bandwidth)
+- U16 ↔ F32: Minimal speedup (large data movement)
+- L_F32 → RGBA_F32: No speedup
+
+### Moderate SIMD Benefit (1.1-1.3x)
+- Channel conversions (U8): 1.07-1.12x
+- LA ↔ RGBA: 1.11-1.30x
+- L_F32 ↔ U16: 1.06-1.14x
+
+## Recommendations for Future Optimization
+
+### Priority 1: High Impact
+1. **L_U8 → RGB_U8**: Currently falls back to scalar, should have ~2x speedup potential
+2. **L_U16 → RGB/RGBA_U16**: Missing SIMD paths
+
+### Priority 2: Low Impact (Memory Bound)
+- F32 channel conversions - unlikely to benefit from more SIMD work
+- Large format conversions involving F32
+
+### Hardware Notes
+- Platform: x86_64 with AVX2
+- 4K image = 16.7 Mpixels
+- Memory bandwidth is the primary bottleneck for F32 formats
+- SIMD shines when:
+  - Data fits in cache (smaller images)
+  - Reduction operations (luminance)
+  - Format expansion/compression (L→RGBA, RGBA→L)
