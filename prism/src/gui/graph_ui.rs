@@ -5,7 +5,6 @@ use egui::{
     vec2,
 };
 use scenarium::data::StaticValue;
-use tokio::net::unix::ReuniteError;
 
 use crate::app_data::AppData;
 use crate::common::frame::Frame;

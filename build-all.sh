@@ -2,26 +2,36 @@
 set -eu
 
 # Build targets:
-# - Linux x86_64 musl
-# - Linux aarch64 musl (ARMv8)
+# - Linux x86_64 gnu
+# - Linux aarch64 gnu (ARMv8)
+# - Windows x86_64 (MinGW)
 # - macOS aarch64 (Apple Silicon)
 #
-# Notes:
-# - rustup targets must be installed beforehand:
-#   rustup target add x86_64-unknown-linux-musl aarch64-unknown-linux-musl aarch64-apple-darwin
-# - Cross-compiling musl targets may require a linker/toolchain (or using zig).
+# Usage:
+#   ./build-all.sh       - Build for all targets
+#   ./build-all.sh -i    - Install all rustup targets first, then build
 
 TARGETS="
 x86_64-unknown-linux-gnu
-x86_64-unknown-linux-musl
 x86_64-pc-windows-gnu
 aarch64-unknown-linux-gnu
-aarch64-unknown-linux-musl
 aarch64-apple-darwin
 "
 
-echo "==> Running clippy (host target)"
-cargo clippy --all-targets -- -D warnings
+# Handle -i flag to install targets
+if [ "${1:-}" = "-i" ]; then
+  echo "==> Installing rustup targets"
+  for t in $TARGETS; do
+    echo "==> rustup target add $t"
+    rustup target add "$t"
+  done
+fi
+
+echo "==> Running clippy for all targets"
+for t in $TARGETS; do
+  echo "==> cargo clippy --target $t"
+  cargo clippy --target "$t" --all-targets -- -D warnings
+done
 
 echo "==> Building release for all targets"
 for t in $TARGETS; do
