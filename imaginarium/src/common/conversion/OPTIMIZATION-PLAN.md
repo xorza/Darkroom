@@ -94,24 +94,28 @@ fn convert_tiled(from: &Image, to: &mut Image, tile_size: usize) {
 
 ---
 
-## Phase 8: Missing Format Paths
+## Phase 8: Missing Format Paths ✅ COMPLETED
 
-### High Priority
+### Benchmark Results (Scalar vs SIMD, 4096×4096)
 
-| From | To | Current | Priority |
-|------|-----|---------|----------|
-| RGB_U8 | RGB_F32 | Scalar | Add SIMD |
-| RGB_F32 | RGB_U8 | Scalar | Add SIMD |
-| LA_U8 | RGBA_U8 | Scalar | Add SIMD |
-| RGBA_U8 | LA_U8 | Scalar | Add SIMD |
+| Conversion | Scalar | SIMD | Speedup |
+|------------|--------|------|---------|
+| LA_U8 → RGBA_U8 | 1.19 Gelem/s | 1.31 Gelem/s | **+10%** |
+| RGBA_U8 → LA_U8 | 1.54 Gelem/s | 1.99 Gelem/s | **+29%** |
+| RGBA_U16 → RGBA_F32 | 342 Melem/s | 346 Melem/s | +1% |
+| RGBA_F32 → RGBA_U16 | 536 Melem/s | 540 Melem/s | +1% |
+| RGB_U16 → RGB_F32 | 453 Melem/s | 457 Melem/s | +1% |
+| RGB_F32 → RGB_U16 | 703 Melem/s | 711 Melem/s | +1% |
+| L_U16 → L_F32 | 1.24 Gelem/s | 1.31 Gelem/s | **+6%** |
 
-### Medium Priority
+**Notes**:
+- LA↔RGBA conversions show good SIMD gains (10-29%)
+- U16↔F32 conversions are memory-bandwidth bound (large data: 8 bytes/pixel for U16, 16 bytes/pixel for F32)
+- Luminance U16↔F32 shows better gains due to smaller data size (2→4 bytes/pixel)
 
-| From | To | Notes |
-|------|-----|-------|
-| RGB_U16 | RGB_F32 | HDR workflow |
-| RGBA_U16 | RGBA_F32 | HDR workflow |
-| L_U16 | L_F32 | HDR grayscale |
+**Implementation**: Runtime CPU feature detection with multi-tier fallback:
+- x86_64: AVX2 → SSSE3/SSE2 → scalar
+- aarch64: NEON → scalar
 
 ---
 

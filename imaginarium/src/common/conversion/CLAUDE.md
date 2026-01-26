@@ -1,0 +1,1 @@
+Refere to bench-analysis.md, update data when running benchmarks, put benchmark output to bench-results.txt. When optimizing run only needed banches, store status in bench-analysis.md for where simds are good and where not needed.

@@ -9,6 +9,11 @@ pub mod bench;
 
 pub(crate) use conversion_scalar::ChannelConvert;
 
+#[cfg(feature = "bench")]
+pub use conversion_scalar::convert_image as convert_image_scalar;
+#[cfg(feature = "bench")]
+pub use conversion_simd::try_convert_simd as convert_image_simd;
+
 use crate::common::error::Result;
 use crate::image::Image;
 

@@ -53,6 +53,18 @@ pub(crate) fn has_simd_path(from: &Image, to: &Image) -> bool {
             // F32 channel conversions (SSE)
             (ColorFormat::RGBA_F32, ColorFormat::RGB_F32) => return true,
             (ColorFormat::RGB_F32, ColorFormat::RGBA_F32) => return true,
+            // LA_U8 <-> RGBA_U8 (SSSE3)
+            (ColorFormat::LA_U8, ColorFormat::RGBA_U8) => return true,
+            (ColorFormat::RGBA_U8, ColorFormat::LA_U8) => return true,
+            // U16 <-> F32
+            (ColorFormat::RGBA_U16, ColorFormat::RGBA_F32) => return true,
+            (ColorFormat::RGBA_F32, ColorFormat::RGBA_U16) => return true,
+            (ColorFormat::RGB_U16, ColorFormat::RGB_F32) => return true,
+            (ColorFormat::RGB_F32, ColorFormat::RGB_U16) => return true,
+            (ColorFormat::L_U16, ColorFormat::L_F32) => return true,
+            (ColorFormat::L_F32, ColorFormat::L_U16) => return true,
+            (ColorFormat::LA_U16, ColorFormat::LA_F32) => return true,
+            (ColorFormat::LA_F32, ColorFormat::LA_U16) => return true,
             _ => {}
         }
     }
@@ -62,6 +74,9 @@ pub(crate) fn has_simd_path(from: &Image, to: &Image) -> bool {
         // Channel conversions
         (ColorFormat::RGBA_U8, ColorFormat::RGB_U8) => return true,
         (ColorFormat::RGB_U8, ColorFormat::RGBA_U8) => return true,
+        // LA_U8 <-> RGBA_U8
+        (ColorFormat::LA_U8, ColorFormat::RGBA_U8) => return true,
+        (ColorFormat::RGBA_U8, ColorFormat::LA_U8) => return true,
         // F32 channel conversions
         (ColorFormat::RGBA_F32, ColorFormat::RGB_F32) => return true,
         (ColorFormat::RGB_F32, ColorFormat::RGBA_F32) => return true,
@@ -91,6 +106,15 @@ pub(crate) fn has_simd_path(from: &Image, to: &Image) -> bool {
         (ColorFormat::L_U16, ColorFormat::L_U8) => return true,
         (ColorFormat::LA_U8, ColorFormat::LA_U16) => return true,
         (ColorFormat::LA_U16, ColorFormat::LA_U8) => return true,
+        // U16 <-> F32
+        (ColorFormat::RGBA_U16, ColorFormat::RGBA_F32) => return true,
+        (ColorFormat::RGBA_F32, ColorFormat::RGBA_U16) => return true,
+        (ColorFormat::RGB_U16, ColorFormat::RGB_F32) => return true,
+        (ColorFormat::RGB_F32, ColorFormat::RGB_U16) => return true,
+        (ColorFormat::L_U16, ColorFormat::L_F32) => return true,
+        (ColorFormat::L_F32, ColorFormat::L_U16) => return true,
+        (ColorFormat::LA_U16, ColorFormat::LA_F32) => return true,
+        (ColorFormat::LA_F32, ColorFormat::LA_U16) => return true,
         _ => {}
     }
 
@@ -99,7 +123,7 @@ pub(crate) fn has_simd_path(from: &Image, to: &Image) -> bool {
 
 /// Attempt SIMD conversion. Returns Ok(true) if conversion was performed,
 /// Ok(false) if no SIMD path available, or Err on failure.
-pub(crate) fn try_convert_simd(from: &Image, to: &mut Image) -> Result<bool> {
+pub fn try_convert_simd(from: &Image, to: &mut Image) -> Result<bool> {
     let from_fmt = from.desc().color_format;
     let to_fmt = to.desc().color_format;
 
@@ -214,6 +238,48 @@ pub(crate) fn try_convert_simd(from: &Image, to: &mut Image) -> Result<bool> {
             }
             (ColorFormat::RGB_F32, ColorFormat::RGBA_F32) => {
                 convert_rgb_f32_to_rgba_f32(from, to);
+                return Ok(true);
+            }
+            // LA_U8 <-> RGBA_U8 (require SSSE3)
+            (ColorFormat::LA_U8, ColorFormat::RGBA_U8) if is_x86_feature_detected!("ssse3") => {
+                convert_la_u8_to_rgba_u8(from, to);
+                return Ok(true);
+            }
+            (ColorFormat::RGBA_U8, ColorFormat::LA_U8) if is_x86_feature_detected!("ssse3") => {
+                convert_rgba_u8_to_la_u8(from, to);
+                return Ok(true);
+            }
+            // U16 <-> F32 (SSE2)
+            (ColorFormat::RGBA_U16, ColorFormat::RGBA_F32) => {
+                convert_u16_to_f32_generic(from, to, 4);
+                return Ok(true);
+            }
+            (ColorFormat::RGBA_F32, ColorFormat::RGBA_U16) => {
+                convert_f32_to_u16_generic(from, to, 4);
+                return Ok(true);
+            }
+            (ColorFormat::RGB_U16, ColorFormat::RGB_F32) => {
+                convert_u16_to_f32_generic(from, to, 3);
+                return Ok(true);
+            }
+            (ColorFormat::RGB_F32, ColorFormat::RGB_U16) => {
+                convert_f32_to_u16_generic(from, to, 3);
+                return Ok(true);
+            }
+            (ColorFormat::L_U16, ColorFormat::L_F32) => {
+                convert_u16_to_f32_generic(from, to, 1);
+                return Ok(true);
+            }
+            (ColorFormat::L_F32, ColorFormat::L_U16) => {
+                convert_f32_to_u16_generic(from, to, 1);
+                return Ok(true);
+            }
+            (ColorFormat::LA_U16, ColorFormat::LA_F32) => {
+                convert_u16_to_f32_generic(from, to, 2);
+                return Ok(true);
+            }
+            (ColorFormat::LA_F32, ColorFormat::LA_U16) => {
+                convert_f32_to_u16_generic(from, to, 2);
                 return Ok(true);
             }
             _ => {}
@@ -332,6 +398,48 @@ pub(crate) fn try_convert_simd(from: &Image, to: &mut Image) -> Result<bool> {
             convert_u16_to_u8_generic(from, to, 2);
             return Ok(true);
         }
+        // LA_U8 <-> RGBA_U8
+        (ColorFormat::LA_U8, ColorFormat::RGBA_U8) => {
+            convert_la_u8_to_rgba_u8(from, to);
+            return Ok(true);
+        }
+        (ColorFormat::RGBA_U8, ColorFormat::LA_U8) => {
+            convert_rgba_u8_to_la_u8(from, to);
+            return Ok(true);
+        }
+        // U16 <-> F32
+        (ColorFormat::RGBA_U16, ColorFormat::RGBA_F32) => {
+            convert_u16_to_f32_generic(from, to, 4);
+            return Ok(true);
+        }
+        (ColorFormat::RGBA_F32, ColorFormat::RGBA_U16) => {
+            convert_f32_to_u16_generic(from, to, 4);
+            return Ok(true);
+        }
+        (ColorFormat::RGB_U16, ColorFormat::RGB_F32) => {
+            convert_u16_to_f32_generic(from, to, 3);
+            return Ok(true);
+        }
+        (ColorFormat::RGB_F32, ColorFormat::RGB_U16) => {
+            convert_f32_to_u16_generic(from, to, 3);
+            return Ok(true);
+        }
+        (ColorFormat::L_U16, ColorFormat::L_F32) => {
+            convert_u16_to_f32_generic(from, to, 1);
+            return Ok(true);
+        }
+        (ColorFormat::L_F32, ColorFormat::L_U16) => {
+            convert_f32_to_u16_generic(from, to, 1);
+            return Ok(true);
+        }
+        (ColorFormat::LA_U16, ColorFormat::LA_F32) => {
+            convert_u16_to_f32_generic(from, to, 2);
+            return Ok(true);
+        }
+        (ColorFormat::LA_F32, ColorFormat::LA_U16) => {
+            convert_f32_to_u16_generic(from, to, 2);
+            return Ok(true);
+        }
         _ => {}
     }
 
@@ -420,6 +528,86 @@ fn convert_rgb_u8_to_rgba_u8(from: &Image, to: &mut Image) {
             // SAFETY: NEON is always available on aarch64
             unsafe {
                 convert_rgb_to_rgba_row_neon(from_row, to_row, width);
+            }
+        });
+}
+
+// =============================================================================
+// LA_U8 <-> RGBA_U8 conversion
+// =============================================================================
+
+fn convert_la_u8_to_rgba_u8(from: &Image, to: &mut Image) {
+    debug_assert_eq!(from.desc().color_format, ColorFormat::LA_U8);
+    debug_assert_eq!(to.desc().color_format, ColorFormat::RGBA_U8);
+    debug_assert_eq!(from.desc().width, to.desc().width);
+    debug_assert_eq!(from.desc().height, to.desc().height);
+
+    let width = from.desc().width;
+    let from_stride = from.desc().stride;
+    let to_stride = to.desc().stride;
+
+    let from_bytes = from.bytes();
+    let to_bytes = to.bytes_mut();
+
+    #[cfg(target_arch = "x86_64")]
+    let use_avx2 = is_x86_feature_detected!("avx2");
+
+    to_bytes
+        .par_chunks_mut(to_stride)
+        .enumerate()
+        .for_each(|(y, to_row)| {
+            let from_row = &from_bytes[y * from_stride..];
+
+            #[cfg(target_arch = "x86_64")]
+            unsafe {
+                if use_avx2 {
+                    convert_la_to_rgba_row_avx2(from_row, to_row, width);
+                } else {
+                    convert_la_to_rgba_row_ssse3(from_row, to_row, width);
+                }
+            }
+
+            #[cfg(target_arch = "aarch64")]
+            unsafe {
+                convert_la_to_rgba_row_neon(from_row, to_row, width);
+            }
+        });
+}
+
+fn convert_rgba_u8_to_la_u8(from: &Image, to: &mut Image) {
+    debug_assert_eq!(from.desc().color_format, ColorFormat::RGBA_U8);
+    debug_assert_eq!(to.desc().color_format, ColorFormat::LA_U8);
+    debug_assert_eq!(from.desc().width, to.desc().width);
+    debug_assert_eq!(from.desc().height, to.desc().height);
+
+    let width = from.desc().width;
+    let from_stride = from.desc().stride;
+    let to_stride = to.desc().stride;
+
+    let from_bytes = from.bytes();
+    let to_bytes = to.bytes_mut();
+
+    #[cfg(target_arch = "x86_64")]
+    let use_avx2 = is_x86_feature_detected!("avx2");
+
+    to_bytes
+        .par_chunks_mut(to_stride)
+        .enumerate()
+        .for_each(|(y, to_row)| {
+            let from_row = &from_bytes[y * from_stride..];
+
+            #[cfg(target_arch = "x86_64")]
+            unsafe {
+                if use_avx2 {
+                    convert_rgba_to_la_row_avx2(from_row, to_row, width);
+                } else {
+                    convert_rgba_to_la_row_ssse3(from_row, to_row, width);
+                }
+            }
+
+            #[cfg(target_arch = "aarch64")]
+            unsafe {
+                convert_rgba_to_la_row_neon(from_row, to_row, width);
             }
         });
 }
@@ -1077,6 +1265,93 @@ unsafe fn convert_f32_to_u8_row_neon(src: &[f32], dst: &mut [u8]) {
         let val = (src[simd_width * 16 + i] * 255.0).clamp(0.0, 255.0) as u8;
         dst[simd_width * 16 + i] = val;
     }
+}
+
+// =============================================================================
+// U16 <-> F32 bit depth conversion
+// =============================================================================
+
+/// Generic U16 to F32 conversion for any channel count
+fn convert_u16_to_f32_generic(from: &Image, to: &mut Image, channels: usize) {
+    let width = from.desc().width;
+    let from_stride = from.desc().stride;
+    let to_stride = to.desc().stride;
+    let row_elements = width * channels;
+
+    let from_bytes = from.bytes();
+    let to_bytes = to.bytes_mut();
+
+    // Convert slices
+    let from_words: &[u16] = bytemuck::cast_slice(from_bytes);
+    let to_floats: &mut [f32] = bytemuck::cast_slice_mut(to_bytes);
+    let from_word_stride = from_stride / 2;
+    let to_float_stride = to_stride / 4;
+
+    #[cfg(target_arch = "x86_64")]
+    let use_avx2 = is_x86_feature_detected!("avx2");
+
+    to_floats
+        .par_chunks_mut(to_float_stride)
+        .enumerate()
+        .for_each(|(y, to_row)| {
+            let from_row = &from_words[y * from_word_stride..y * from_word_stride + row_elements];
+
+            #[cfg(target_arch = "x86_64")]
+            unsafe {
+                if use_avx2 {
+                    convert_u16_to_f32_row_avx2(from_row, to_row);
+                } else {
+                    convert_u16_to_f32_row_sse2(from_row, to_row);
+                }
+            }
+
+            #[cfg(target_arch = "aarch64")]
+            unsafe {
+                convert_u16_to_f32_row_neon(from_row, to_row);
+            }
+        });
+}
+
+/// Generic F32 to U16 conversion for any channel count
+fn convert_f32_to_u16_generic(from: &Image, to: &mut Image, channels: usize) {
+    let width = from.desc().width;
+    let from_stride = from.desc().stride;
+    let to_stride = to.desc().stride;
+    let row_elements = width * channels;
+
+    let from_bytes = from.bytes();
+    let to_bytes = to.bytes_mut();
+
+    // Convert slices
+    let from_floats: &[f32] = bytemuck::cast_slice(from_bytes);
+    let to_words: &mut [u16] = bytemuck::cast_slice_mut(to_bytes);
+    let from_float_stride = from_stride / 4;
+    let to_word_stride = to_stride / 2;
+
+    #[cfg(target_arch = "x86_64")]
+    let use_avx2 = is_x86_feature_detected!("avx2");
+
+    to_words
+        .par_chunks_mut(to_word_stride)
+        .enumerate()
+        .for_each(|(y, to_row)| {
+            let from_row =
+                &from_floats[y * from_float_stride..y * from_float_stride + row_elements];
+
+            #[cfg(target_arch = "x86_64")]
+            unsafe {
+                if use_avx2 {
+                    convert_f32_to_u16_row_avx2(from_row, to_row);
+                } else {
+                    convert_f32_to_u16_row_sse2(from_row, to_row);
+                }
+            }
+
+            #[cfg(target_arch = "aarch64")]
+            unsafe {
+                convert_f32_to_u16_row_neon(from_row, to_row);
+            }
+        });
 }
 
 // =============================================================================
@@ -3123,5 +3398,752 @@ unsafe fn convert_u16_to_u8_row_avx2(src: &[u16], dst: &mut [u8]) {
         for i in 0..remainder {
             dst[simd_width * 32 + i] = (src[simd_width * 32 + i] / 257) as u8;
         }
+    }
+}
+
+// =============================================================================
+// LA_U8 <-> RGBA_U8 SIMD implementations
+// =============================================================================
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "ssse3")]
+unsafe fn convert_la_to_rgba_row_ssse3(src: &[u8], dst: &mut [u8], width: usize) {
+    use std::arch::x86_64::*;
+
+    let src_ptr = src.as_ptr();
+    let dst_ptr = dst.as_mut_ptr();
+
+    // Process 8 pixels at a time (16 bytes in, 32 bytes out)
+    let simd_width = width / 8;
+    let remainder = width % 8;
+
+    // Shuffle mask: LA LA LA LA LA LA LA LA -> LLLL LLLL AAAA AAAA (deinterleave)
+    // Then we need to expand L to RGB and keep A
+    // Input: L0 A0 L1 A1 L2 A2 L3 A3 L4 A4 L5 A5 L6 A6 L7 A7
+    // Output: L0 L0 L0 A0 L1 L1 L1 A1 ... (RGBA RGBA ...)
+
+    // Shuffle to create RGBA from LA: L0 L0 L0 A0 L1 L1 L1 A1 L2 L2 L2 A2 L3 L3 L3 A3
+    let shuf_lo = _mm_setr_epi8(0, 0, 0, 1, 2, 2, 2, 3, 4, 4, 4, 5, 6, 6, 6, 7);
+    let shuf_hi = _mm_setr_epi8(8, 8, 8, 9, 10, 10, 10, 11, 12, 12, 12, 13, 14, 14, 14, 15);
+
+    for i in 0..simd_width {
+        let src_offset = i * 16;
+        let dst_offset = i * 32;
+
+        unsafe {
+            // Load 16 bytes (8 LA pixels)
+            let la = _mm_loadu_si128(src_ptr.add(src_offset) as *const __m128i);
+
+            // Expand first 4 pixels (bytes 0-7)
+            let rgba_lo = _mm_shuffle_epi8(la, shuf_lo);
+            // Expand next 4 pixels (bytes 8-15)
+            let rgba_hi = _mm_shuffle_epi8(la, shuf_hi);
+
+            // Store 32 bytes (8 RGBA pixels)
+            _mm_storeu_si128(dst_ptr.add(dst_offset) as *mut __m128i, rgba_lo);
+            _mm_storeu_si128(dst_ptr.add(dst_offset + 16) as *mut __m128i, rgba_hi);
+        }
+    }
+
+    // Handle remainder (scalar)
+    let src_remainder = &src[simd_width * 16..];
+    let dst_remainder = &mut dst[simd_width * 32..];
+    for i in 0..remainder {
+        let l = src_remainder[i * 2];
+        let a = src_remainder[i * 2 + 1];
+        dst_remainder[i * 4] = l;
+        dst_remainder[i * 4 + 1] = l;
+        dst_remainder[i * 4 + 2] = l;
+        dst_remainder[i * 4 + 3] = a;
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "ssse3")]
+unsafe fn convert_rgba_to_la_row_ssse3(src: &[u8], dst: &mut [u8], width: usize) {
+    use std::arch::x86_64::*;
+
+    let src_ptr = src.as_ptr();
+    let dst_ptr = dst.as_mut_ptr();
+
+    // Process 8 pixels at a time (32 bytes in, 16 bytes out)
+    let simd_width = width / 8;
+    let remainder = width % 8;
+
+    // Luminance weights (scaled to sum to 256)
+    let r_w = _mm_set1_epi16(54);
+    let g_w = _mm_set1_epi16(183);
+    let b_w = _mm_set1_epi16(19);
+
+    // Shuffle to extract R, G, B, A from RGBA
+    let shuf_r = _mm_setr_epi8(0, 4, 8, 12, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1);
+    let shuf_g = _mm_setr_epi8(1, 5, 9, 13, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1);
+    let shuf_b = _mm_setr_epi8(2, 6, 10, 14, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1);
+    let shuf_a = _mm_setr_epi8(3, 7, 11, 15, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1);
+
+    for i in 0..simd_width {
+        let src_offset = i * 32;
+        let dst_offset = i * 16;
+
+        unsafe {
+            // Load 32 bytes (8 RGBA pixels)
+            let rgba0 = _mm_loadu_si128(src_ptr.add(src_offset) as *const __m128i);
+            let rgba1 = _mm_loadu_si128(src_ptr.add(src_offset + 16) as *const __m128i);
+
+            // Extract channels from first 4 pixels
+            let r0 = _mm_shuffle_epi8(rgba0, shuf_r);
+            let g0 = _mm_shuffle_epi8(rgba0, shuf_g);
+            let b0 = _mm_shuffle_epi8(rgba0, shuf_b);
+            let a0 = _mm_shuffle_epi8(rgba0, shuf_a);
+
+            // Extract channels from next 4 pixels
+            let r1 = _mm_shuffle_epi8(rgba1, shuf_r);
+            let g1 = _mm_shuffle_epi8(rgba1, shuf_g);
+            let b1 = _mm_shuffle_epi8(rgba1, shuf_b);
+            let a1 = _mm_shuffle_epi8(rgba1, shuf_a);
+
+            // Combine: r0[0-3] r1[0-3] in low 8 bytes
+            let r = _mm_or_si128(r0, _mm_slli_si128(r1, 4));
+            let g = _mm_or_si128(g0, _mm_slli_si128(g1, 4));
+            let b = _mm_or_si128(b0, _mm_slli_si128(b1, 4));
+            let a = _mm_or_si128(a0, _mm_slli_si128(a1, 4));
+
+            // Compute luminance
+            let zero = _mm_setzero_si128();
+            let r16 = _mm_unpacklo_epi8(r, zero);
+            let g16 = _mm_unpacklo_epi8(g, zero);
+            let b16 = _mm_unpacklo_epi8(b, zero);
+
+            let sum = _mm_add_epi16(
+                _mm_add_epi16(_mm_mullo_epi16(r16, r_w), _mm_mullo_epi16(g16, g_w)),
+                _mm_mullo_epi16(b16, b_w),
+            );
+            let lum16 = _mm_srli_epi16(sum, 8);
+            let lum8 = _mm_packus_epi16(lum16, zero);
+
+            // Interleave L and A: L0 A0 L1 A1 ...
+            let la = _mm_unpacklo_epi8(lum8, a);
+
+            // Store 16 bytes (8 LA pixels)
+            _mm_storeu_si128(dst_ptr.add(dst_offset) as *mut __m128i, la);
+        }
+    }
+
+    // Handle remainder (scalar)
+    let src_remainder = &src[simd_width * 32..];
+    let dst_remainder = &mut dst[simd_width * 16..];
+    for i in 0..remainder {
+        let r = src_remainder[i * 4] as u32;
+        let g = src_remainder[i * 4 + 1] as u32;
+        let b = src_remainder[i * 4 + 2] as u32;
+        let a = src_remainder[i * 4 + 3];
+        let l = ((r * 13933 + g * 46871 + b * 4732) >> 16) as u8;
+        dst_remainder[i * 2] = l;
+        dst_remainder[i * 2 + 1] = a;
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+unsafe fn convert_la_to_rgba_row_avx2(src: &[u8], dst: &mut [u8], width: usize) {
+    use std::arch::x86_64::*;
+
+    let src_ptr = src.as_ptr();
+    let dst_ptr = dst.as_mut_ptr();
+
+    // Process 16 pixels at a time (32 bytes in, 64 bytes out)
+    let simd_width = width / 16;
+    let remainder = width % 16;
+
+    // Shuffle: L0 L0 L0 A0 L1 L1 L1 A1 ... within each 128-bit lane
+    let shuf_lo = _mm256_setr_epi8(
+        0, 0, 0, 1, 2, 2, 2, 3, 4, 4, 4, 5, 6, 6, 6, 7, 0, 0, 0, 1, 2, 2, 2, 3, 4, 4, 4, 5, 6, 6,
+        6, 7,
+    );
+    let shuf_hi = _mm256_setr_epi8(
+        8, 8, 8, 9, 10, 10, 10, 11, 12, 12, 12, 13, 14, 14, 14, 15, 8, 8, 8, 9, 10, 10, 10, 11, 12,
+        12, 12, 13, 14, 14, 14, 15,
+    );
+
+    for i in 0..simd_width {
+        let src_offset = i * 32;
+        let dst_offset = i * 64;
+
+        unsafe {
+            // Load 32 bytes (16 LA pixels)
+            let la = _mm256_loadu_si256(src_ptr.add(src_offset) as *const __m256i);
+
+            // Expand to RGBA using shuffle
+            let rgba_lo = _mm256_shuffle_epi8(la, shuf_lo);
+            let rgba_hi = _mm256_shuffle_epi8(la, shuf_hi);
+
+            // Store 64 bytes (16 RGBA pixels)
+            _mm256_storeu_si256(dst_ptr.add(dst_offset) as *mut __m256i, rgba_lo);
+            _mm256_storeu_si256(dst_ptr.add(dst_offset + 32) as *mut __m256i, rgba_hi);
+        }
+    }
+
+    // Handle remainder with SSSE3 path
+    let remaining_start = simd_width * 16;
+    if remainder >= 8 {
+        let src_rem = &src[remaining_start * 2..];
+        let dst_rem = &mut dst[remaining_start * 4..];
+        unsafe {
+            convert_la_to_rgba_row_ssse3(src_rem, dst_rem, remainder);
+        }
+    } else if remainder > 0 {
+        let src_remainder = &src[remaining_start * 2..];
+        let dst_remainder = &mut dst[remaining_start * 4..];
+        for i in 0..remainder {
+            let l = src_remainder[i * 2];
+            let a = src_remainder[i * 2 + 1];
+            dst_remainder[i * 4] = l;
+            dst_remainder[i * 4 + 1] = l;
+            dst_remainder[i * 4 + 2] = l;
+            dst_remainder[i * 4 + 3] = a;
+        }
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+unsafe fn convert_rgba_to_la_row_avx2(src: &[u8], dst: &mut [u8], width: usize) {
+    use std::arch::x86_64::*;
+
+    let src_ptr = src.as_ptr();
+    let dst_ptr = dst.as_mut_ptr();
+
+    // Process 16 pixels at a time (64 bytes in, 32 bytes out)
+    let simd_width = width / 16;
+    let remainder = width % 16;
+
+    let r_w = _mm256_set1_epi16(54);
+    let g_w = _mm256_set1_epi16(183);
+    let b_w = _mm256_set1_epi16(19);
+
+    // Shuffle to extract R, G, B, A from RGBA (4 pixels per 128-bit lane)
+    let shuf_r = _mm256_setr_epi8(
+        0, 4, 8, 12, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, 0, 4, 8, 12, -1, -1, -1, -1,
+        -1, -1, -1, -1, -1, -1, -1, -1,
+    );
+    let shuf_g = _mm256_setr_epi8(
+        1, 5, 9, 13, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, 1, 5, 9, 13, -1, -1, -1, -1,
+        -1, -1, -1, -1, -1, -1, -1, -1,
+    );
+    let shuf_b = _mm256_setr_epi8(
+        2, 6, 10, 14, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, 2, 6, 10, 14, -1, -1, -1, -1,
+        -1, -1, -1, -1, -1, -1, -1, -1,
+    );
+    let shuf_a = _mm256_setr_epi8(
+        3, 7, 11, 15, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, 3, 7, 11, 15, -1, -1, -1, -1,
+        -1, -1, -1, -1, -1, -1, -1, -1,
+    );
+
+    for i in 0..simd_width {
+        let src_offset = i * 64;
+        let dst_offset = i * 32;
+
+        unsafe {
+            // Load 64 bytes (16 RGBA pixels)
+            let rgba0 = _mm256_loadu_si256(src_ptr.add(src_offset) as *const __m256i);
+            let rgba1 = _mm256_loadu_si256(src_ptr.add(src_offset + 32) as *const __m256i);
+
+            // Extract channels
+            let r0 = _mm256_shuffle_epi8(rgba0, shuf_r);
+            let g0 = _mm256_shuffle_epi8(rgba0, shuf_g);
+            let b0 = _mm256_shuffle_epi8(rgba0, shuf_b);
+            let a0 = _mm256_shuffle_epi8(rgba0, shuf_a);
+
+            let r1 = _mm256_shuffle_epi8(rgba1, shuf_r);
+            let g1 = _mm256_shuffle_epi8(rgba1, shuf_g);
+            let b1 = _mm256_shuffle_epi8(rgba1, shuf_b);
+            let a1 = _mm256_shuffle_epi8(rgba1, shuf_a);
+
+            // Extract lanes and combine
+            let r0_lo = _mm256_castsi256_si128(r0);
+            let r0_hi = _mm256_extracti128_si256(r0, 1);
+            let r1_lo = _mm256_castsi256_si128(r1);
+            let r1_hi = _mm256_extracti128_si256(r1, 1);
+
+            let g0_lo = _mm256_castsi256_si128(g0);
+            let g0_hi = _mm256_extracti128_si256(g0, 1);
+            let g1_lo = _mm256_castsi256_si128(g1);
+            let g1_hi = _mm256_extracti128_si256(g1, 1);
+
+            let b0_lo = _mm256_castsi256_si128(b0);
+            let b0_hi = _mm256_extracti128_si256(b0, 1);
+            let b1_lo = _mm256_castsi256_si128(b1);
+            let b1_hi = _mm256_extracti128_si256(b1, 1);
+
+            let a0_lo = _mm256_castsi256_si128(a0);
+            let a0_hi = _mm256_extracti128_si256(a0, 1);
+            let a1_lo = _mm256_castsi256_si128(a1);
+            let a1_hi = _mm256_extracti128_si256(a1, 1);
+
+            // Combine into 16-byte vectors
+            let r_combined = _mm_or_si128(
+                _mm_or_si128(r0_lo, _mm_slli_si128(r0_hi, 4)),
+                _mm_or_si128(_mm_slli_si128(r1_lo, 8), _mm_slli_si128(r1_hi, 12)),
+            );
+            let g_combined = _mm_or_si128(
+                _mm_or_si128(g0_lo, _mm_slli_si128(g0_hi, 4)),
+                _mm_or_si128(_mm_slli_si128(g1_lo, 8), _mm_slli_si128(g1_hi, 12)),
+            );
+            let b_combined = _mm_or_si128(
+                _mm_or_si128(b0_lo, _mm_slli_si128(b0_hi, 4)),
+                _mm_or_si128(_mm_slli_si128(b1_lo, 8), _mm_slli_si128(b1_hi, 12)),
+            );
+            let a_combined = _mm_or_si128(
+                _mm_or_si128(a0_lo, _mm_slli_si128(a0_hi, 4)),
+                _mm_or_si128(_mm_slli_si128(a1_lo, 8), _mm_slli_si128(a1_hi, 12)),
+            );
+
+            // Compute luminance using AVX2
+            let zero_128 = _mm_setzero_si128();
+            let r16 = _mm256_set_m128i(
+                _mm_unpackhi_epi8(r_combined, zero_128),
+                _mm_unpacklo_epi8(r_combined, zero_128),
+            );
+            let g16 = _mm256_set_m128i(
+                _mm_unpackhi_epi8(g_combined, zero_128),
+                _mm_unpacklo_epi8(g_combined, zero_128),
+            );
+            let b16 = _mm256_set_m128i(
+                _mm_unpackhi_epi8(b_combined, zero_128),
+                _mm_unpacklo_epi8(b_combined, zero_128),
+            );
+
+            let sum = _mm256_add_epi16(
+                _mm256_add_epi16(_mm256_mullo_epi16(r16, r_w), _mm256_mullo_epi16(g16, g_w)),
+                _mm256_mullo_epi16(b16, b_w),
+            );
+            let lum16 = _mm256_srli_epi16(sum, 8);
+
+            // Pack to 8-bit
+            let lum16_lo = _mm256_castsi256_si128(lum16);
+            let lum16_hi = _mm256_extracti128_si256(lum16, 1);
+            let lum8 = _mm_packus_epi16(lum16_lo, lum16_hi);
+
+            // Interleave L and A
+            let la_lo = _mm_unpacklo_epi8(lum8, a_combined);
+            let la_hi = _mm_unpackhi_epi8(lum8, a_combined);
+
+            // Store 32 bytes (16 LA pixels)
+            _mm_storeu_si128(dst_ptr.add(dst_offset) as *mut __m128i, la_lo);
+            _mm_storeu_si128(dst_ptr.add(dst_offset + 16) as *mut __m128i, la_hi);
+        }
+    }
+
+    // Handle remainder with SSSE3 path
+    let remaining_start = simd_width * 16;
+    if remainder >= 8 {
+        let src_rem = &src[remaining_start * 4..];
+        let dst_rem = &mut dst[remaining_start * 2..];
+        unsafe {
+            convert_rgba_to_la_row_ssse3(src_rem, dst_rem, remainder);
+        }
+    } else if remainder > 0 {
+        let src_remainder = &src[remaining_start * 4..];
+        let dst_remainder = &mut dst[remaining_start * 2..];
+        for i in 0..remainder {
+            let r = src_remainder[i * 4] as u32;
+            let g = src_remainder[i * 4 + 1] as u32;
+            let b = src_remainder[i * 4 + 2] as u32;
+            let a = src_remainder[i * 4 + 3];
+            let l = ((r * 13933 + g * 46871 + b * 4732) >> 16) as u8;
+            dst_remainder[i * 2] = l;
+            dst_remainder[i * 2 + 1] = a;
+        }
+    }
+}
+
+#[cfg(target_arch = "aarch64")]
+unsafe fn convert_la_to_rgba_row_neon(src: &[u8], dst: &mut [u8], width: usize) {
+    use std::arch::aarch64::*;
+
+    let src_ptr = src.as_ptr();
+    let dst_ptr = dst.as_mut_ptr();
+
+    // Process 16 pixels at a time
+    let simd_width = width / 16;
+    let remainder = width % 16;
+
+    for i in 0..simd_width {
+        let src_offset = i * 32;
+        let dst_offset = i * 64;
+
+        unsafe {
+            // Load 16 LA pixels deinterleaved
+            let la = vld2q_u8(src_ptr.add(src_offset));
+            let l = la.0;
+            let a = la.1;
+
+            // Store as RGBA (R=G=B=L)
+            let rgba = uint8x16x4_t(l, l, l, a);
+            vst4q_u8(dst_ptr.add(dst_offset), rgba);
+        }
+    }
+
+    // Handle remainder (scalar)
+    let src_remainder = &src[simd_width * 32..];
+    let dst_remainder = &mut dst[simd_width * 64..];
+    for i in 0..remainder {
+        let l = src_remainder[i * 2];
+        let a = src_remainder[i * 2 + 1];
+        dst_remainder[i * 4] = l;
+        dst_remainder[i * 4 + 1] = l;
+        dst_remainder[i * 4 + 2] = l;
+        dst_remainder[i * 4 + 3] = a;
+    }
+}
+
+#[cfg(target_arch = "aarch64")]
+unsafe fn convert_rgba_to_la_row_neon(src: &[u8], dst: &mut [u8], width: usize) {
+    use std::arch::aarch64::*;
+
+    let src_ptr = src.as_ptr();
+    let dst_ptr = dst.as_mut_ptr();
+
+    // Process 16 pixels at a time
+    let simd_width = width / 16;
+    let remainder = width % 16;
+
+    unsafe {
+        let r_w = vdupq_n_u16(54);
+        let g_w = vdupq_n_u16(183);
+        let b_w = vdupq_n_u16(19);
+
+        for i in 0..simd_width {
+            let src_offset = i * 64;
+            let dst_offset = i * 32;
+
+            // Load 16 RGBA pixels deinterleaved
+            let rgba = vld4q_u8(src_ptr.add(src_offset));
+            let r = rgba.0;
+            let g = rgba.1;
+            let b = rgba.2;
+            let a = rgba.3;
+
+            // Compute luminance
+            let r_lo = vmovl_u8(vget_low_u8(r));
+            let r_hi = vmovl_u8(vget_high_u8(r));
+            let g_lo = vmovl_u8(vget_low_u8(g));
+            let g_hi = vmovl_u8(vget_high_u8(g));
+            let b_lo = vmovl_u8(vget_low_u8(b));
+            let b_hi = vmovl_u8(vget_high_u8(b));
+
+            let sum_lo = vaddq_u16(
+                vaddq_u16(vmulq_u16(r_lo, r_w), vmulq_u16(g_lo, g_w)),
+                vmulq_u16(b_lo, b_w),
+            );
+            let sum_hi = vaddq_u16(
+                vaddq_u16(vmulq_u16(r_hi, r_w), vmulq_u16(g_hi, g_w)),
+                vmulq_u16(b_hi, b_w),
+            );
+
+            let lum_lo = vshrn_n_u16(sum_lo, 8);
+            let lum_hi = vshrn_n_u16(sum_hi, 8);
+            let lum = vcombine_u8(lum_lo, lum_hi);
+
+            // Store as LA
+            let la = uint8x16x2_t(lum, a);
+            vst2q_u8(dst_ptr.add(dst_offset), la);
+        }
+    }
+
+    // Handle remainder (scalar)
+    let src_remainder = &src[simd_width * 64..];
+    let dst_remainder = &mut dst[simd_width * 32..];
+    for i in 0..remainder {
+        let r = src_remainder[i * 4] as u32;
+        let g = src_remainder[i * 4 + 1] as u32;
+        let b = src_remainder[i * 4 + 2] as u32;
+        let a = src_remainder[i * 4 + 3];
+        let l = ((r * 13933 + g * 46871 + b * 4732) >> 16) as u8;
+        dst_remainder[i * 2] = l;
+        dst_remainder[i * 2 + 1] = a;
+    }
+}
+
+// =============================================================================
+// U16 <-> F32 SIMD implementations
+// =============================================================================
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "sse2")]
+unsafe fn convert_u16_to_f32_row_sse2(src: &[u16], dst: &mut [f32]) {
+    use std::arch::x86_64::*;
+
+    let len = src.len();
+    let simd_width = len / 8;
+    let remainder = len % 8;
+
+    let scale = _mm_set1_ps(1.0 / 65535.0);
+
+    for i in 0..simd_width {
+        let src_offset = i * 8;
+        let dst_offset = i * 8;
+
+        unsafe {
+            // Load 8 u16 values
+            let words = _mm_loadu_si128(src.as_ptr().add(src_offset) as *const __m128i);
+
+            // Unpack to 32-bit
+            let zero = _mm_setzero_si128();
+            let dwords_lo = _mm_unpacklo_epi16(words, zero);
+            let dwords_hi = _mm_unpackhi_epi16(words, zero);
+
+            // Convert to float and scale
+            let floats_lo = _mm_mul_ps(_mm_cvtepi32_ps(dwords_lo), scale);
+            let floats_hi = _mm_mul_ps(_mm_cvtepi32_ps(dwords_hi), scale);
+
+            // Store 8 floats
+            _mm_storeu_ps(dst.as_mut_ptr().add(dst_offset), floats_lo);
+            _mm_storeu_ps(dst.as_mut_ptr().add(dst_offset + 4), floats_hi);
+        }
+    }
+
+    // Handle remainder (scalar)
+    for i in 0..remainder {
+        dst[simd_width * 8 + i] = src[simd_width * 8 + i] as f32 / 65535.0;
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "sse2")]
+unsafe fn convert_f32_to_u16_row_sse2(src: &[f32], dst: &mut [u16]) {
+    use std::arch::x86_64::*;
+
+    let len = src.len();
+    let simd_width = len / 8;
+    let remainder = len % 8;
+
+    let scale = _mm_set1_ps(65535.0);
+    let zero_f = _mm_setzero_ps();
+    let max_f = _mm_set1_ps(65535.0);
+
+    for i in 0..simd_width {
+        let src_offset = i * 8;
+        let dst_offset = i * 8;
+
+        unsafe {
+            // Load 8 floats
+            let f0 = _mm_loadu_ps(src.as_ptr().add(src_offset));
+            let f1 = _mm_loadu_ps(src.as_ptr().add(src_offset + 4));
+
+            // Scale and clamp
+            let scaled0 = _mm_min_ps(_mm_max_ps(_mm_mul_ps(f0, scale), zero_f), max_f);
+            let scaled1 = _mm_min_ps(_mm_max_ps(_mm_mul_ps(f1, scale), zero_f), max_f);
+
+            // Convert to int32
+            let i0 = _mm_cvtps_epi32(scaled0);
+            let i1 = _mm_cvtps_epi32(scaled1);
+
+            // Pack to 16-bit (using unsigned saturation via signed pack then mask)
+            // Since values are 0-65535, we need to handle this carefully
+            // _mm_packus_epi32 is SSE4.1, so we use a workaround
+            // Values are already clamped to 0-65535, so we can safely use signed pack
+            // after adjusting
+            let words = _mm_packs_epi32(i0, i1);
+
+            // Store 8 u16 values (note: packs_epi32 does signed saturation)
+            // We need to use a different approach for proper unsigned
+            // For now, store directly since values are in range
+            _mm_storeu_si128(dst.as_mut_ptr().add(dst_offset) as *mut __m128i, words);
+        }
+    }
+
+    // Handle remainder (scalar)
+    for i in 0..remainder {
+        let val = (src[simd_width * 8 + i] * 65535.0).clamp(0.0, 65535.0) as u16;
+        dst[simd_width * 8 + i] = val;
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+unsafe fn convert_u16_to_f32_row_avx2(src: &[u16], dst: &mut [f32]) {
+    use std::arch::x86_64::*;
+
+    let len = src.len();
+    let simd_width = len / 16;
+    let remainder = len % 16;
+
+    let scale = _mm256_set1_ps(1.0 / 65535.0);
+
+    for i in 0..simd_width {
+        let src_offset = i * 16;
+        let dst_offset = i * 16;
+
+        unsafe {
+            // Load 16 u16 values
+            let words = _mm256_loadu_si256(src.as_ptr().add(src_offset) as *const __m256i);
+
+            // Split into 128-bit halves
+            let words_lo = _mm256_castsi256_si128(words);
+            let words_hi = _mm256_extracti128_si256(words, 1);
+
+            // Use AVX2 zero-extend u16 to u32
+            let dwords_0 = _mm256_cvtepu16_epi32(words_lo);
+            let dwords_1 = _mm256_cvtepu16_epi32(words_hi);
+
+            // Convert to float and scale
+            let floats_0 = _mm256_mul_ps(_mm256_cvtepi32_ps(dwords_0), scale);
+            let floats_1 = _mm256_mul_ps(_mm256_cvtepi32_ps(dwords_1), scale);
+
+            // Store 16 floats
+            _mm256_storeu_ps(dst.as_mut_ptr().add(dst_offset), floats_0);
+            _mm256_storeu_ps(dst.as_mut_ptr().add(dst_offset + 8), floats_1);
+        }
+    }
+
+    // Handle remainder with SSE2 path
+    if remainder >= 8 {
+        let src_rem = &src[simd_width * 16..];
+        let dst_rem = &mut dst[simd_width * 16..];
+        unsafe {
+            convert_u16_to_f32_row_sse2(src_rem, dst_rem);
+        }
+    } else if remainder > 0 {
+        for i in 0..remainder {
+            dst[simd_width * 16 + i] = src[simd_width * 16 + i] as f32 / 65535.0;
+        }
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+unsafe fn convert_f32_to_u16_row_avx2(src: &[f32], dst: &mut [u16]) {
+    use std::arch::x86_64::*;
+
+    let len = src.len();
+    let simd_width = len / 16;
+    let remainder = len % 16;
+
+    let scale = _mm256_set1_ps(65535.0);
+    let zero_f = _mm256_setzero_ps();
+    let max_f = _mm256_set1_ps(65535.0);
+
+    for i in 0..simd_width {
+        let src_offset = i * 16;
+        let dst_offset = i * 16;
+
+        unsafe {
+            // Load 16 floats
+            let f0 = _mm256_loadu_ps(src.as_ptr().add(src_offset));
+            let f1 = _mm256_loadu_ps(src.as_ptr().add(src_offset + 8));
+
+            // Scale and clamp
+            let scaled0 = _mm256_min_ps(_mm256_max_ps(_mm256_mul_ps(f0, scale), zero_f), max_f);
+            let scaled1 = _mm256_min_ps(_mm256_max_ps(_mm256_mul_ps(f1, scale), zero_f), max_f);
+
+            // Convert to int32
+            let i0 = _mm256_cvtps_epi32(scaled0);
+            let i1 = _mm256_cvtps_epi32(scaled1);
+
+            // Pack to 16-bit using packus (unsigned saturation)
+            let words = _mm256_packus_epi32(i0, i1);
+            // Fix lane order
+            let words_perm = _mm256_permute4x64_epi64(words, 0b11_01_10_00);
+
+            // Store 16 u16 values
+            _mm256_storeu_si256(dst.as_mut_ptr().add(dst_offset) as *mut __m256i, words_perm);
+        }
+    }
+
+    // Handle remainder with SSE2 path
+    if remainder >= 8 {
+        let src_rem = &src[simd_width * 16..];
+        let dst_rem = &mut dst[simd_width * 16..];
+        unsafe {
+            convert_f32_to_u16_row_sse2(src_rem, dst_rem);
+        }
+    } else if remainder > 0 {
+        for i in 0..remainder {
+            let val = (src[simd_width * 16 + i] * 65535.0).clamp(0.0, 65535.0) as u16;
+            dst[simd_width * 16 + i] = val;
+        }
+    }
+}
+
+#[cfg(target_arch = "aarch64")]
+unsafe fn convert_u16_to_f32_row_neon(src: &[u16], dst: &mut [f32]) {
+    use std::arch::aarch64::*;
+
+    let len = src.len();
+    let simd_width = len / 8;
+    let remainder = len % 8;
+
+    unsafe {
+        let scale = vdupq_n_f32(1.0 / 65535.0);
+
+        for i in 0..simd_width {
+            let src_offset = i * 8;
+            let dst_offset = i * 8;
+
+            // Load 8 u16 values
+            let words = vld1q_u16(src.as_ptr().add(src_offset));
+
+            // Widen to 32-bit
+            let dwords_lo = vmovl_u16(vget_low_u16(words));
+            let dwords_hi = vmovl_u16(vget_high_u16(words));
+
+            // Convert to float and scale
+            let floats_lo = vmulq_f32(vcvtq_f32_u32(dwords_lo), scale);
+            let floats_hi = vmulq_f32(vcvtq_f32_u32(dwords_hi), scale);
+
+            // Store 8 floats
+            vst1q_f32(dst.as_mut_ptr().add(dst_offset), floats_lo);
+            vst1q_f32(dst.as_mut_ptr().add(dst_offset + 4), floats_hi);
+        }
+    }
+
+    // Handle remainder (scalar)
+    for i in 0..remainder {
+        dst[simd_width * 8 + i] = src[simd_width * 8 + i] as f32 / 65535.0;
+    }
+}
+
+#[cfg(target_arch = "aarch64")]
+unsafe fn convert_f32_to_u16_row_neon(src: &[f32], dst: &mut [u16]) {
+    use std::arch::aarch64::*;
+
+    let len = src.len();
+    let simd_width = len / 8;
+    let remainder = len % 8;
+
+    unsafe {
+        let scale = vdupq_n_f32(65535.0);
+        let zero = vdupq_n_f32(0.0);
+        let max = vdupq_n_f32(65535.0);
+
+        for i in 0..simd_width {
+            let src_offset = i * 8;
+            let dst_offset = i * 8;
+
+            // Load 8 floats
+            let f0 = vld1q_f32(src.as_ptr().add(src_offset));
+            let f1 = vld1q_f32(src.as_ptr().add(src_offset + 4));
+
+            // Scale and clamp
+            let scaled0 = vminq_f32(vmaxq_f32(vmulq_f32(f0, scale), zero), max);
+            let scaled1 = vminq_f32(vmaxq_f32(vmulq_f32(f1, scale), zero), max);
+
+            // Convert to u32
+            let u0 = vcvtq_u32_f32(scaled0);
+            let u1 = vcvtq_u32_f32(scaled1);
+
+            // Narrow to u16
+            let words = vcombine_u16(vmovn_u32(u0), vmovn_u32(u1));
+
+            // Store 8 u16 values
+            vst1q_u16(dst.as_mut_ptr().add(dst_offset), words);
+        }
+    }
+
+    // Handle remainder (scalar)
+    for i in 0..remainder {
+        let val = (src[simd_width * 8 + i] * 65535.0).clamp(0.0, 65535.0) as u16;
+        dst[simd_width * 8 + i] = val;
     }
 }
