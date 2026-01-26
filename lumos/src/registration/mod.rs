@@ -70,6 +70,9 @@ pub mod spatial;
 pub mod triangle;
 pub mod types;
 
+#[cfg(test)]
+mod tests;
+
 #[cfg(feature = "bench")]
 pub mod bench {
     //! Benchmark module for registration operations.
