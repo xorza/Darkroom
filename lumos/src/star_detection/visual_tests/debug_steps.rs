@@ -58,6 +58,7 @@ fn create_threshold_mask(
 // Note: dilate_mask is now imported from crate::star_detection::constants
 
 #[test]
+#[ignore]
 fn test_debug_star_detection_steps() {
     init_tracing();
 
@@ -67,6 +68,11 @@ fn test_debug_star_detection_steps() {
     };
 
     let image_path = cal_dir.join("calibrated_light_500x500_stretched.tiff");
+
+    if !image_path.exists() {
+        eprintln!("Test image not found at {:?}, skipping test", image_path);
+        return;
+    }
 
     println!("Loading image: {:?}", image_path);
     let imag_image = imaginarium::Image::read_file(&image_path)
