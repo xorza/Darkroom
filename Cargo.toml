@@ -61,7 +61,6 @@ criterion = { version = "*" }
 memmap2 = { version = "*" }
 tiff = { version = "*" }
 image = { version = "*" }
-imageproc = { version = "*" }
 paste = { version = "*" }
 atomic_refcell = { version = "*" }
 arc-swap = { version = "*" }

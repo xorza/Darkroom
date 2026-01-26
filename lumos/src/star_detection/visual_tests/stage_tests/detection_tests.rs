@@ -8,11 +8,13 @@ use crate::star_detection::detection::detect_stars;
 use crate::star_detection::visual_tests::generators::{
     StarFieldConfig, generate_star_field, sparse_field_config,
 };
-use crate::star_detection::visual_tests::output::save_grayscale_png;
+use crate::star_detection::visual_tests::output::{
+    gray_to_rgb_image_stretched, save_grayscale_png, save_image_png,
+};
 use crate::testing::init_tracing;
 use common::test_utils::test_output_path;
-use image::{Rgb, RgbImage};
-use imageproc::drawing::{draw_cross_mut, draw_hollow_circle_mut};
+use imaginarium::Color;
+use imaginarium::drawing::{draw_circle, draw_cross};
 
 /// Default tile size for background estimation
 const TILE_SIZE: usize = 64;
@@ -24,30 +26,19 @@ fn create_detection_overlay(
     height: usize,
     candidates: &[(usize, usize)],
     ground_truth: &[(f32, f32)],
-) -> RgbImage {
-    // Normalize pixels for display
-    let min_val = pixels.iter().cloned().fold(f32::INFINITY, f32::min);
-    let max_val = pixels.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
-    let range = (max_val - min_val).max(1e-10);
-
-    let mut img = RgbImage::from_fn(width as u32, height as u32, |x, y| {
-        let idx = y as usize * width + x as usize;
-        let v = ((pixels[idx] - min_val) / range * 255.0) as u8;
-        Rgb([v, v, v])
-    });
+) -> imaginarium::Image {
+    let mut img = gray_to_rgb_image_stretched(pixels, width, height);
 
     // Draw ground truth in blue
-    let blue = Rgb([80u8, 80, 255]);
+    let blue = Color::rgb(0.3, 0.3, 1.0);
     for (x, y) in ground_truth {
-        let cx = x.round() as i32;
-        let cy = y.round() as i32;
-        draw_hollow_circle_mut(&mut img, (cx, cy), 8, blue);
+        draw_circle(&mut img, *x, *y, 8.0, blue, 1.0);
     }
 
     // Draw candidates in green
-    let green = Rgb([0u8, 255, 0]);
+    let green = Color::GREEN;
     for &(x, y) in candidates {
-        draw_cross_mut(&mut img, green, x as i32, y as i32);
+        draw_cross(&mut img, x as f32, y as f32, 3.0, green, 1.0);
     }
 
     img
@@ -97,9 +88,7 @@ fn test_detection_sparse() {
         &candidate_positions,
         &truth_positions,
     );
-    overlay
-        .save(test_output_path("stage_det_sparse_overlay.png"))
-        .unwrap();
+    save_image_png(overlay, &test_output_path("stage_det_sparse_overlay.png"));
 
     // Calculate detection rate
     let match_radius = 5.0;
@@ -177,12 +166,10 @@ fn test_detection_thresholds() {
             &candidate_positions,
             &truth_positions,
         );
-        overlay
-            .save(test_output_path(&format!(
-                "stage_det_thresholds_sigma_{:.0}.png",
-                sigma
-            )))
-            .unwrap();
+        save_image_png(
+            overlay,
+            &test_output_path(&format!("stage_det_thresholds_sigma_{:.0}.png", sigma)),
+        );
 
         // Count matches
         let match_radius = 5.0;
@@ -271,12 +258,10 @@ fn test_detection_area_filter() {
             &candidate_positions,
             &truth_positions,
         );
-        overlay
-            .save(test_output_path(&format!(
-                "stage_det_area_filter_{}.png",
-                label
-            )))
-            .unwrap();
+        save_image_png(
+            overlay,
+            &test_output_path(&format!("stage_det_area_filter_{}.png", label)),
+        );
 
         // Count matches and false positives
         let match_radius = 5.0;

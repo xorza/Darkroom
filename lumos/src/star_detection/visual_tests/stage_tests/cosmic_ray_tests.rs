@@ -7,12 +7,14 @@ use crate::AstroImage;
 use crate::star_detection::visual_tests::generators::{
     StarFieldConfig, add_cosmic_rays, generate_star_field,
 };
-use crate::star_detection::visual_tests::output::save_grayscale_png;
+use crate::star_detection::visual_tests::output::{
+    gray_to_rgb_image_stretched, save_grayscale_png, save_image_png,
+};
 use crate::star_detection::{StarDetectionConfig, find_stars};
 use crate::testing::init_tracing;
 use common::test_utils::test_output_path;
-use image::{Rgb, RgbImage};
-use imageproc::drawing::{draw_cross_mut, draw_hollow_circle_mut};
+use imaginarium::Color;
+use imaginarium::drawing::{draw_circle, draw_cross};
 
 /// Test cosmic ray rejection on star field.
 #[test]
@@ -60,32 +62,27 @@ fn test_cosmic_ray_rejection() {
     let stars = result.stars;
 
     // Create overlay
-    let mut img = RgbImage::from_fn(width as u32, height as u32, |x, y| {
-        let idx = y as usize * width + x as usize;
-        let v = (pixels[idx].clamp(0.0, 1.0) * 255.0) as u8;
-        Rgb([v, v, v])
-    });
+    let mut img = gray_to_rgb_image_stretched(&pixels, width, height);
 
     // Draw cosmic ray positions in red
-    let red = Rgb([255u8, 50, 50]);
+    let red = Color::rgb(1.0, 0.2, 0.2);
     for (x, y) in &cr_positions {
-        draw_cross_mut(&mut img, red, *x as i32, *y as i32);
+        draw_cross(&mut img, *x as f32, *y as f32, 3.0, red, 1.0);
     }
 
     // Draw true star positions in blue
-    let blue = Rgb([80u8, 80, 255]);
+    let blue = Color::rgb(0.3, 0.3, 1.0);
     for star in &ground_truth {
-        draw_hollow_circle_mut(&mut img, (star.x as i32, star.y as i32), 8, blue);
+        draw_circle(&mut img, star.x, star.y, 8.0, blue, 1.0);
     }
 
     // Draw detected stars in green
-    let green = Rgb([0u8, 255, 0]);
+    let green = Color::GREEN;
     for star in &stars {
-        draw_hollow_circle_mut(&mut img, (star.x as i32, star.y as i32), 5, green);
+        draw_circle(&mut img, star.x, star.y, 5.0, green, 1.0);
     }
 
-    img.save(test_output_path("stage_cr_rejection_overlay.png"))
-        .unwrap();
+    save_image_png(img, &test_output_path("stage_cr_rejection_overlay.png"));
 
     // Count how many cosmic rays were falsely detected as stars
     let mut cr_false_positives = 0;
@@ -205,33 +202,28 @@ fn test_laplacian_snr_visualization() {
     }
 
     // Create composite visualization
-    let mut img = RgbImage::from_fn(width as u32, height as u32, |x, y| {
-        let idx = y as usize * width + x as usize;
-        let v = (pixels[idx].clamp(0.0, 1.0) * 255.0) as u8;
-        Rgb([v, v, v])
-    });
+    let mut img = gray_to_rgb_image_stretched(&pixels, width, height);
 
     // Mark CR positions
-    let red = Rgb([255u8, 100, 100]);
+    let red = Color::rgb(1.0, 0.4, 0.4);
     for (x, y) in &cr_positions {
-        draw_cross_mut(&mut img, red, *x as i32, *y as i32);
+        draw_cross(&mut img, *x as f32, *y as f32, 3.0, red, 1.0);
     }
 
     // Mark detected stars colored by Laplacian SNR
     for star in &stars {
         // High Laplacian SNR = likely cosmic ray (red), low = likely star (green)
         let color = if star.laplacian_snr > 5.0 {
-            Rgb([255u8, 0, 0]) // High Lap_SNR: likely CR
+            Color::RED // High Lap_SNR: likely CR
         } else if star.laplacian_snr > 2.0 {
-            Rgb([255u8, 255, 0]) // Medium: uncertain
+            Color::YELLOW // Medium: uncertain
         } else {
-            Rgb([0u8, 255, 0]) // Low: likely real star
+            Color::GREEN // Low: likely real star
         };
-        draw_hollow_circle_mut(&mut img, (star.x as i32, star.y as i32), 6, color);
+        draw_circle(&mut img, star.x, star.y, 6.0, color, 1.0);
     }
 
-    img.save(test_output_path("stage_laplacian_snr_overlay.png"))
-        .unwrap();
+    save_image_png(img, &test_output_path("stage_laplacian_snr_overlay.png"));
 
     println!("\nColor legend:");
     println!("  Green circles: Low Laplacian SNR (likely real star)");

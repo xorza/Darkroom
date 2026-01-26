@@ -1,7 +1,45 @@
 //! Image writing utilities for visual tests.
 
 use image::{GrayImage, Rgb, RgbImage};
+use imaginarium::{ColorFormat, Image, ImageDesc};
 use std::path::Path;
+
+/// Convert f32 grayscale pixels to imaginarium RGB_F32 image (for drawing).
+pub fn gray_to_rgb_image(pixels: &[f32], width: usize, height: usize) -> Image {
+    let desc = ImageDesc::new_packed(width, height, ColorFormat::RGB_F32);
+    let rgb_pixels: Vec<f32> = pixels.iter().flat_map(|&v| [v, v, v]).collect();
+    Image::new_with_data(desc, bytemuck::cast_slice(&rgb_pixels).to_vec()).unwrap()
+}
+
+/// Convert f32 grayscale pixels to imaginarium RGB_F32 image with auto-stretching.
+pub fn gray_to_rgb_image_stretched(pixels: &[f32], width: usize, height: usize) -> Image {
+    let min = pixels.iter().cloned().fold(f32::INFINITY, f32::min);
+    let max = pixels.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+    let range = (max - min).max(1e-10);
+
+    let desc = ImageDesc::new_packed(width, height, ColorFormat::RGB_F32);
+    let rgb_pixels: Vec<f32> = pixels
+        .iter()
+        .flat_map(|&p| {
+            let v = (p - min) / range;
+            [v, v, v]
+        })
+        .collect();
+    Image::new_with_data(desc, bytemuck::cast_slice(&rgb_pixels).to_vec()).unwrap()
+}
+
+/// Save imaginarium Image to PNG file.
+/// Converts to RGB_U8 if needed since PNG doesn't support float formats.
+pub fn save_image_png(image: Image, path: &Path) {
+    let image_u8 = if image.desc().color_format.channel_type == imaginarium::ChannelType::Float {
+        image.convert(ColorFormat::RGB_U8).unwrap()
+    } else {
+        image
+    };
+    image_u8
+        .save_file(path)
+        .expect("Failed to save image as PNG");
+}
 
 /// Convert f32 pixels to grayscale image (clamped to 0-1).
 pub fn to_gray_image(pixels: &[f32], width: usize, height: usize) -> GrayImage {
@@ -144,7 +182,7 @@ pub fn save_comparison_png(
         detected,
         match_radius,
     );
-    image.save(path).expect("Failed to save comparison PNG");
+    save_image_png(image, path);
 }
 
 /// Save mask to PNG file.

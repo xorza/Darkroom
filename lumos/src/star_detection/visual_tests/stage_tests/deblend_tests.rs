@@ -6,11 +6,13 @@ use crate::star_detection::StarDetectionConfig;
 use crate::star_detection::background::estimate_background;
 use crate::star_detection::detection::detect_stars;
 use crate::star_detection::visual_tests::generators::{fwhm_to_sigma, render_gaussian_star};
-use crate::star_detection::visual_tests::output::save_grayscale_png;
+use crate::star_detection::visual_tests::output::{
+    gray_to_rgb_image_stretched, save_grayscale_png, save_image_png,
+};
 use crate::testing::init_tracing;
 use common::test_utils::test_output_path;
-use image::{Rgb, RgbImage};
-use imageproc::drawing::{draw_cross_mut, draw_hollow_circle_mut};
+use imaginarium::Color;
+use imaginarium::drawing::{draw_circle, draw_cross};
 
 /// Default tile size for background estimation
 const TILE_SIZE: usize = 64;
@@ -71,25 +73,20 @@ fn test_deblend_star_pair() {
     let candidates = detect_stars(&pixels, width, height, &background, &config);
 
     // Create overlay
-    let mut img = RgbImage::from_fn(width as u32, height as u32, |x, y| {
-        let idx = y as usize * width + x as usize;
-        let v = (pixels[idx].clamp(0.0, 1.0) * 255.0) as u8;
-        Rgb([v, v, v])
-    });
+    let mut img = gray_to_rgb_image_stretched(&pixels, width, height);
 
     // Draw true positions in blue
-    let blue = Rgb([80u8, 80, 255]);
-    draw_hollow_circle_mut(&mut img, (star1_x as i32, star_y as i32), 6, blue);
-    draw_hollow_circle_mut(&mut img, (star2_x as i32, star_y as i32), 6, blue);
+    let blue = Color::rgb(0.3, 0.3, 1.0);
+    draw_circle(&mut img, star1_x, star_y, 6.0, blue, 1.0);
+    draw_circle(&mut img, star2_x, star_y, 6.0, blue, 1.0);
 
     // Draw detected candidates in green
-    let green = Rgb([0u8, 255, 0]);
+    let green = Color::GREEN;
     for c in &candidates {
-        draw_cross_mut(&mut img, green, c.peak_x as i32, c.peak_y as i32);
+        draw_cross(&mut img, c.peak_x as f32, c.peak_y as f32, 3.0, green, 1.0);
     }
 
-    img.save(test_output_path("stage_deblend_pair_overlay.png"))
-        .unwrap();
+    save_image_png(img, &test_output_path("stage_deblend_pair_overlay.png"));
 
     println!(
         "Star pair separation: {:.1}px ({:.1} FWHM)",
@@ -168,26 +165,21 @@ fn test_deblend_chain() {
     let candidates = detect_stars(&pixels, width, height, &background, &config);
 
     // Create overlay
-    let mut img = RgbImage::from_fn(width as u32, height as u32, |x, y| {
-        let idx = y as usize * width + x as usize;
-        let v = (pixels[idx].clamp(0.0, 1.0) * 255.0) as u8;
-        Rgb([v, v, v])
-    });
+    let mut img = gray_to_rgb_image_stretched(&pixels, width, height);
 
     // Draw true positions in blue
-    let blue = Rgb([80u8, 80, 255]);
+    let blue = Color::rgb(0.3, 0.3, 1.0);
     for (x, y) in &true_positions {
-        draw_hollow_circle_mut(&mut img, (*x as i32, *y as i32), 6, blue);
+        draw_circle(&mut img, *x, *y, 6.0, blue, 1.0);
     }
 
     // Draw detected candidates in green
-    let green = Rgb([0u8, 255, 0]);
+    let green = Color::GREEN;
     for c in &candidates {
-        draw_cross_mut(&mut img, green, c.peak_x as i32, c.peak_y as i32);
+        draw_cross(&mut img, c.peak_x as f32, c.peak_y as f32, 3.0, green, 1.0);
     }
 
-    img.save(test_output_path("stage_deblend_chain_overlay.png"))
-        .unwrap();
+    save_image_png(img, &test_output_path("stage_deblend_chain_overlay.png"));
 
     println!(
         "Chain of {} stars, separation: {:.1}px ({:.1} FWHM)",
@@ -267,25 +259,20 @@ fn test_deblend_unequal_pair() {
     let candidates = detect_stars(&pixels, width, height, &background, &config);
 
     // Create overlay
-    let mut img = RgbImage::from_fn(width as u32, height as u32, |x, y| {
-        let idx = y as usize * width + x as usize;
-        let v = (pixels[idx].clamp(0.0, 1.0) * 255.0) as u8;
-        Rgb([v, v, v])
-    });
+    let mut img = gray_to_rgb_image_stretched(&pixels, width, height);
 
     // Draw true positions in blue
-    let blue = Rgb([80u8, 80, 255]);
-    draw_hollow_circle_mut(&mut img, (star1_x as i32, star_y as i32), 8, blue); // Bigger for bright
-    draw_hollow_circle_mut(&mut img, (star2_x as i32, star_y as i32), 5, blue); // Smaller for faint
+    let blue = Color::rgb(0.3, 0.3, 1.0);
+    draw_circle(&mut img, star1_x, star_y, 8.0, blue, 1.0); // Bigger for bright
+    draw_circle(&mut img, star2_x, star_y, 5.0, blue, 1.0); // Smaller for faint
 
     // Draw detected candidates in green
-    let green = Rgb([0u8, 255, 0]);
+    let green = Color::GREEN;
     for c in &candidates {
-        draw_cross_mut(&mut img, green, c.peak_x as i32, c.peak_y as i32);
+        draw_cross(&mut img, c.peak_x as f32, c.peak_y as f32, 3.0, green, 1.0);
     }
 
-    img.save(test_output_path("stage_deblend_unequal_overlay.png"))
-        .unwrap();
+    save_image_png(img, &test_output_path("stage_deblend_unequal_overlay.png"));
 
     println!(
         "Unequal pair: bright + faint (4:1 ratio), separation: {:.1}px",

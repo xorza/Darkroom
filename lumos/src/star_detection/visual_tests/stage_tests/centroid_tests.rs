@@ -7,11 +7,13 @@ use crate::star_detection::background::estimate_background;
 use crate::star_detection::centroid::compute_centroid;
 use crate::star_detection::detection::StarCandidate;
 use crate::star_detection::visual_tests::generators::{fwhm_to_sigma, render_gaussian_star};
-use crate::star_detection::visual_tests::output::save_grayscale_png;
+use crate::star_detection::visual_tests::output::{
+    gray_to_rgb_image_stretched, save_grayscale_png, save_image_png,
+};
 use crate::testing::init_tracing;
 use common::test_utils::test_output_path;
-use image::{Rgb, RgbImage};
-use imageproc::drawing::{draw_cross_mut, draw_hollow_circle_mut};
+use imaginarium::Color;
+use imaginarium::drawing::{draw_circle, draw_cross};
 
 /// Default tile size for background estimation
 const TILE_SIZE: usize = 64;
@@ -110,23 +112,14 @@ fn test_centroid_accuracy() {
     }
 
     // Create overlay showing true vs detected positions
-    let mut img = RgbImage::from_fn(width as u32, height as u32, |x, y| {
-        let idx = y as usize * width + x as usize;
-        let v = (pixels[idx].clamp(0.0, 1.0) * 255.0) as u8;
-        Rgb([v, v, v])
-    });
+    let mut img = gray_to_rgb_image_stretched(&pixels, width, height);
 
-    let blue = Rgb([80u8, 80, 255]);
-    let green = Rgb([0u8, 255, 0]);
+    let blue = Color::rgb(0.3, 0.3, 1.0);
+    let green = Color::GREEN;
 
     for &(true_x, true_y) in &test_positions {
         // True position in blue
-        draw_hollow_circle_mut(
-            &mut img,
-            (true_x.round() as i32, true_y.round() as i32),
-            8,
-            blue,
-        );
+        draw_circle(&mut img, true_x, true_y, 8.0, blue, 1.0);
 
         // Detected position
         let peak_x = true_x.round() as usize;
@@ -146,17 +139,14 @@ fn test_centroid_accuracy() {
         let result = compute_centroid(&pixels, width, height, &background, &candidate, &config);
 
         if let Some(star) = result {
-            draw_cross_mut(
-                &mut img,
-                green,
-                star.x.round() as i32,
-                star.y.round() as i32,
-            );
+            draw_cross(&mut img, star.x, star.y, 3.0, green, 1.0);
         }
     }
 
-    img.save(test_output_path("stage_centroid_accuracy_overlay.png"))
-        .unwrap();
+    save_image_png(
+        img,
+        &test_output_path("stage_centroid_accuracy_overlay.png"),
+    );
 
     // Calculate statistics
     if !errors.is_empty() {
@@ -227,14 +217,10 @@ fn test_centroid_snr() {
     let background = estimate_background(&pixels, width, height, TILE_SIZE);
 
     // Create overlay
-    let mut img = RgbImage::from_fn(width as u32, height as u32, |x, y| {
-        let idx = y as usize * width + x as usize;
-        let v = (pixels[idx].clamp(0.0, 1.0) * 255.0) as u8;
-        Rgb([v, v, v])
-    });
+    let mut img = gray_to_rgb_image_stretched(&pixels, width, height);
 
-    let blue = Rgb([80u8, 80, 255]);
-    let green = Rgb([0u8, 255, 0]);
+    let blue = Color::rgb(0.3, 0.3, 1.0);
+    let green = Color::GREEN;
 
     let config = StarDetectionConfig {
         expected_fwhm: fwhm,
@@ -248,7 +234,7 @@ fn test_centroid_snr() {
         let peak_x = true_x.round() as usize;
         let peak_y = true_y.round() as usize;
 
-        draw_hollow_circle_mut(&mut img, (*true_x as i32, *true_y as i32), 6, blue);
+        draw_circle(&mut img, *true_x, *true_y, 6.0, blue, 1.0);
 
         let candidate = StarCandidate {
             x_min: peak_x.saturating_sub(5),
@@ -265,7 +251,7 @@ fn test_centroid_snr() {
 
         if let Some(star) = result {
             let error = ((star.x - true_x).powi(2) + (star.y - true_y).powi(2)).sqrt();
-            draw_cross_mut(&mut img, green, star.x as i32, star.y as i32);
+            draw_cross(&mut img, star.x, star.y, 3.0, green, 1.0);
 
             println!(
                 "  Brightness={:.2}: SNR={:.1}, error={:.4}px",
@@ -276,6 +262,5 @@ fn test_centroid_snr() {
         }
     }
 
-    img.save(test_output_path("stage_centroid_snr_overlay.png"))
-        .unwrap();
+    save_image_png(img, &test_output_path("stage_centroid_snr_overlay.png"));
 }

@@ -2,24 +2,24 @@
 //!
 //! Creates annotated images showing ground truth vs detected stars.
 
-use super::image_writer::gray_to_rgb_stretched;
+use super::image_writer::gray_to_rgb_image_stretched;
 use crate::star_detection::Star;
 use crate::star_detection::visual_tests::generators::GroundTruthStar;
-use image::{Rgb, RgbImage};
-use imageproc::drawing::{draw_cross_mut, draw_hollow_circle_mut};
+use imaginarium::drawing::{draw_circle, draw_cross, draw_line};
+use imaginarium::{Color, Image};
 
 /// Colors for comparison images.
 pub mod colors {
-    use image::Rgb;
+    use imaginarium::Color;
 
-    pub const BLUE: Rgb<u8> = Rgb([50, 100, 255]); // Ground truth
-    pub const GREEN: Rgb<u8> = Rgb([0, 255, 0]); // Correctly detected
-    pub const RED: Rgb<u8> = Rgb([255, 50, 50]); // Missed (false negative)
-    pub const YELLOW: Rgb<u8> = Rgb([255, 255, 0]); // False positive
-    pub const CYAN: Rgb<u8> = Rgb([0, 255, 255]); // Detected centroid
-    pub const MAGENTA: Rgb<u8> = Rgb([255, 0, 255]); // True centroid
-    pub const WHITE: Rgb<u8> = Rgb([255, 255, 255]);
-    pub const ORANGE: Rgb<u8> = Rgb([255, 165, 0]); // Saturated
+    pub const BLUE: Color = Color::rgb(0.2, 0.4, 1.0); // Ground truth
+    pub const GREEN: Color = Color::rgb(0.0, 1.0, 0.0); // Correctly detected
+    pub const RED: Color = Color::rgb(1.0, 0.2, 0.2); // Missed (false negative)
+    pub const YELLOW: Color = Color::rgb(1.0, 1.0, 0.0); // False positive
+    pub const CYAN: Color = Color::rgb(0.0, 1.0, 1.0); // Detected centroid
+    pub const MAGENTA: Color = Color::rgb(1.0, 0.0, 1.0); // True centroid
+    pub const WHITE: Color = Color::rgb(1.0, 1.0, 1.0);
+    pub const ORANGE: Color = Color::rgb(1.0, 0.65, 0.0); // Saturated
 }
 
 /// Create a comparison image showing ground truth and detected stars.
@@ -45,17 +45,17 @@ pub fn create_comparison_image(
     ground_truth: &[GroundTruthStar],
     detected: &[Star],
     match_radius: f32,
-) -> RgbImage {
-    let mut image = gray_to_rgb_stretched(pixels, width, height);
+) -> Image {
+    let mut image = gray_to_rgb_image_stretched(pixels, width, height);
 
     // Match detected stars to ground truth
     let matches = match_stars(ground_truth, detected, match_radius);
 
     // Draw ground truth stars
     for (i, truth) in ground_truth.iter().enumerate() {
-        let cx = truth.x.round() as i32;
-        let cy = truth.y.round() as i32;
-        let radius = (truth.fwhm * 1.5).max(5.0) as i32;
+        let cx = truth.x;
+        let cy = truth.y;
+        let radius = (truth.fwhm * 1.5).max(5.0);
 
         // Color depends on whether it was detected
         let color = if matches.matched_truth.contains(&i) {
@@ -64,27 +64,27 @@ pub fn create_comparison_image(
             colors::RED // Missed
         };
 
-        draw_hollow_circle_mut(&mut image, (cx, cy), radius, color);
+        draw_circle(&mut image, cx, cy, radius, color, 1.0);
 
         // Draw true centroid position
         if !matches.matched_truth.contains(&i) {
-            draw_cross_mut(&mut image, colors::MAGENTA, cx, cy);
+            draw_cross(&mut image, cx, cy, 3.0, colors::MAGENTA, 1.0);
         }
     }
 
     // Draw detected stars
     for (i, det) in detected.iter().enumerate() {
-        let cx = det.x.round() as i32;
-        let cy = det.y.round() as i32;
+        let cx = det.x;
+        let cy = det.y;
 
         if matches.matched_detected.contains(&i) {
             // True positive - draw centroid cross
-            draw_cross_mut(&mut image, colors::CYAN, cx, cy);
+            draw_cross(&mut image, cx, cy, 3.0, colors::CYAN, 1.0);
         } else {
             // False positive - draw yellow circle
-            let radius = (det.fwhm * 0.7).max(4.0) as i32;
-            draw_hollow_circle_mut(&mut image, (cx, cy), radius, colors::YELLOW);
-            draw_cross_mut(&mut image, colors::YELLOW, cx, cy);
+            let radius = (det.fwhm * 0.7).max(4.0);
+            draw_circle(&mut image, cx, cy, radius, colors::YELLOW, 1.0);
+            draw_cross(&mut image, cx, cy, 3.0, colors::YELLOW, 1.0);
         }
     }
 
@@ -97,13 +97,13 @@ pub fn create_ground_truth_image(
     width: usize,
     height: usize,
     ground_truth: &[GroundTruthStar],
-) -> RgbImage {
-    let mut image = gray_to_rgb_stretched(pixels, width, height);
+) -> Image {
+    let mut image = gray_to_rgb_image_stretched(pixels, width, height);
 
     for truth in ground_truth {
-        let cx = truth.x.round() as i32;
-        let cy = truth.y.round() as i32;
-        let radius = (truth.fwhm * 1.5).max(5.0) as i32;
+        let cx = truth.x;
+        let cy = truth.y;
+        let radius = (truth.fwhm * 1.5).max(5.0);
 
         let color = if truth.is_saturated {
             colors::ORANGE
@@ -111,8 +111,8 @@ pub fn create_ground_truth_image(
             colors::BLUE
         };
 
-        draw_hollow_circle_mut(&mut image, (cx, cy), radius, color);
-        draw_cross_mut(&mut image, color, cx, cy);
+        draw_circle(&mut image, cx, cy, radius, color, 1.0);
+        draw_cross(&mut image, cx, cy, 3.0, color, 1.0);
     }
 
     image
@@ -124,16 +124,16 @@ pub fn create_detection_image(
     width: usize,
     height: usize,
     detected: &[Star],
-) -> RgbImage {
-    let mut image = gray_to_rgb_stretched(pixels, width, height);
+) -> Image {
+    let mut image = gray_to_rgb_image_stretched(pixels, width, height);
 
     for det in detected {
-        let cx = det.x.round() as i32;
-        let cy = det.y.round() as i32;
-        let radius = (det.fwhm * 0.7).max(4.0) as i32;
+        let cx = det.x;
+        let cy = det.y;
+        let radius = (det.fwhm * 0.7).max(4.0);
 
-        draw_hollow_circle_mut(&mut image, (cx, cy), radius, colors::GREEN);
-        draw_cross_mut(&mut image, colors::GREEN, cx, cy);
+        draw_circle(&mut image, cx, cy, radius, colors::GREEN, 1.0);
+        draw_cross(&mut image, cx, cy, 3.0, colors::GREEN, 1.0);
     }
 
     image
@@ -198,69 +198,25 @@ pub fn match_stars(
 }
 
 /// Draw centroid refinement path on an image.
-pub fn draw_centroid_path(image: &mut RgbImage, positions: &[(f32, f32)], color: Rgb<u8>) {
+pub fn draw_centroid_path(image: &mut Image, positions: &[(f32, f32)], color: Color) {
     for window in positions.windows(2) {
         let (x1, y1) = window[0];
         let (x2, y2) = window[1];
 
         // Draw line between consecutive positions
-        draw_line(image, x1, y1, x2, y2, color);
+        draw_line(image, x1, y1, x2, y2, color, 1.0);
     }
 
     // Mark each position with a small dot
     for (i, &(x, y)) in positions.iter().enumerate() {
         let intensity = (i as f32 / positions.len() as f32) * 0.5 + 0.5;
-        let scaled_color = Rgb([
-            (color.0[0] as f32 * intensity) as u8,
-            (color.0[1] as f32 * intensity) as u8,
-            (color.0[2] as f32 * intensity) as u8,
-        ]);
+        let scaled_color = Color::rgb(
+            color.r * intensity,
+            color.g * intensity,
+            color.b * intensity,
+        );
 
-        let px = x.round() as i32;
-        let py = y.round() as i32;
-        if px >= 0 && px < image.width() as i32 && py >= 0 && py < image.height() as i32 {
-            image.put_pixel(px as u32, py as u32, scaled_color);
-        }
-    }
-}
-
-/// Draw a line using Bresenham's algorithm.
-fn draw_line(image: &mut RgbImage, x1: f32, y1: f32, x2: f32, y2: f32, color: Rgb<u8>) {
-    let x1 = x1.round() as i32;
-    let y1 = y1.round() as i32;
-    let x2 = x2.round() as i32;
-    let y2 = y2.round() as i32;
-
-    let dx = (x2 - x1).abs();
-    let dy = -(y2 - y1).abs();
-    let sx = if x1 < x2 { 1 } else { -1 };
-    let sy = if y1 < y2 { 1 } else { -1 };
-    let mut err = dx + dy;
-
-    let mut x = x1;
-    let mut y = y1;
-
-    let w = image.width() as i32;
-    let h = image.height() as i32;
-
-    loop {
-        if x >= 0 && x < w && y >= 0 && y < h {
-            image.put_pixel(x as u32, y as u32, color);
-        }
-
-        if x == x2 && y == y2 {
-            break;
-        }
-
-        let e2 = 2 * err;
-        if e2 >= dy {
-            err += dy;
-            x += sx;
-        }
-        if e2 <= dx {
-            err += dx;
-            y += sy;
-        }
+        imaginarium::drawing::draw_dot(image, x, y, 1.0, scaled_color);
     }
 }
 

@@ -6,9 +6,10 @@
 use super::synthetic::{SyntheticFieldConfig, SyntheticStar, generate_star_field};
 use crate::AstroImage;
 
+use super::output::save_image_png;
 use crate::star_detection::{Star, StarDetectionConfig, find_stars};
-use image::{Rgb, RgbImage};
-use imageproc::drawing::{draw_cross_mut, draw_hollow_circle_mut};
+use imaginarium::Color;
+use imaginarium::drawing::{draw_circle, draw_cross};
 
 fn make_grayscale_image(pixels: Vec<f32>, width: usize, height: usize) -> AstroImage {
     AstroImage::from_pixels(width, height, 1, pixels)
@@ -310,63 +311,80 @@ fn save_subpixel_visualization(
     detected_dx: f32,
     detected_dy: f32,
 ) {
-    // Create side-by-side comparison image
+    // Create side-by-side comparison using imaginarium
     let combined_width = width * 2 + 20; // 20px gap
-    let mut output = RgbImage::new(combined_width as u32, height as u32);
+
+    // Create combined image
+    let desc = imaginarium::ImageDesc::new_packed(
+        combined_width,
+        height,
+        imaginarium::ColorFormat::RGB_F32,
+    );
+    let mut output = imaginarium::Image::new_black(desc).unwrap();
+    let pixels_out: &mut [f32] = bytemuck::cast_slice_mut(output.bytes_mut());
 
     // Fill gap with dark gray
     for y in 0..height {
         for x in width..(width + 20) {
-            output.put_pixel(x as u32, y as u32, Rgb([40, 40, 40]));
+            let idx = (y * combined_width + x) * 3;
+            pixels_out[idx] = 0.15;
+            pixels_out[idx + 1] = 0.15;
+            pixels_out[idx + 2] = 0.15;
         }
     }
 
     // Copy image 1 to left side
     for y in 0..height {
         for x in 0..width {
-            let v = (pixels1[y * width + x].clamp(0.0, 1.0) * 255.0) as u8;
-            output.put_pixel(x as u32, y as u32, Rgb([v, v, v]));
+            let v = pixels1[y * width + x].clamp(0.0, 1.0);
+            let idx = (y * combined_width + x) * 3;
+            pixels_out[idx] = v;
+            pixels_out[idx + 1] = v;
+            pixels_out[idx + 2] = v;
         }
     }
 
     // Copy image 2 to right side
     for y in 0..height {
         for x in 0..width {
-            let v = (pixels2[y * width + x].clamp(0.0, 1.0) * 255.0) as u8;
-            output.put_pixel((x + width + 20) as u32, y as u32, Rgb([v, v, v]));
+            let v = pixels2[y * width + x].clamp(0.0, 1.0);
+            let idx = (y * combined_width + (x + width + 20)) * 3;
+            pixels_out[idx] = v;
+            pixels_out[idx + 1] = v;
+            pixels_out[idx + 2] = v;
         }
     }
 
     // Draw detected stars
-    let green = Rgb([0u8, 255, 0]);
-    let cyan = Rgb([0u8, 255, 255]);
+    let green = Color::GREEN;
+    let cyan = Color::CYAN;
+    let yellow = Color::YELLOW;
 
     for star in detected1 {
-        let cx = star.x.round() as i32;
-        let cy = star.y.round() as i32;
-        draw_cross_mut(&mut output, green, cx, cy);
+        let cx = star.x;
+        let cy = star.y;
+        draw_cross(&mut output, cx, cy, 3.0, green, 1.0);
     }
 
     for star in detected2 {
-        let cx = star.x.round() as i32 + width as i32 + 20;
-        let cy = star.y.round() as i32;
-        draw_cross_mut(&mut output, green, cx, cy);
+        let cx = star.x + width as f32 + 20.0;
+        let cy = star.y;
+        draw_cross(&mut output, cx, cy, 3.0, green, 1.0);
     }
 
-    // Draw lines connecting matched pairs (scaled for visibility)
-    let yellow = Rgb([255u8, 255, 0]);
+    // Draw circles around matched pairs
     for (s1, s2) in pairs {
-        let cx1 = s1.x.round() as i32;
-        let cy1 = s1.y.round() as i32;
-        draw_hollow_circle_mut(&mut output, (cx1, cy1), 8, cyan);
+        let cx1 = s1.x;
+        let cy1 = s1.y;
+        draw_circle(&mut output, cx1, cy1, 8.0, cyan, 1.0);
 
-        let cx2 = s2.x.round() as i32 + width as i32 + 20;
-        let cy2 = s2.y.round() as i32;
-        draw_hollow_circle_mut(&mut output, (cx2, cy2), 8, yellow);
+        let cx2 = s2.x + width as f32 + 20.0;
+        let cy2 = s2.y;
+        draw_circle(&mut output, cx2, cy2, 8.0, yellow, 1.0);
     }
 
     let output_path = common::test_utils::test_output_path("subpixel_shift_test.png");
-    output.save(&output_path).unwrap();
+    save_image_png(output, &output_path);
     println!("\nSaved visualization to: {:?}", output_path);
     println!("  Left: Image 1 (reference)");
     println!(

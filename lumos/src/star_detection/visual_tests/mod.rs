@@ -15,8 +15,10 @@ use crate::AstroImage;
 
 use crate::star_detection::{StarDetectionConfig, find_stars};
 use crate::testing::{calibration_dir, init_tracing};
-use image::{GrayImage, Rgb, RgbImage};
-use imageproc::drawing::{draw_cross_mut, draw_hollow_circle_mut};
+use image::GrayImage;
+use imaginarium::Color;
+use imaginarium::drawing::{draw_circle, draw_cross};
+use output::{gray_to_rgb_image_stretched, save_image_png};
 use synthetic::{SyntheticFieldConfig, SyntheticStar, generate_star_field};
 
 #[test]
@@ -96,16 +98,8 @@ fn test_visualize_star_detection() {
     }
     println!("Normalized pixel range: {:.6} - {:.6}", 0.0, 1.0);
 
-    // Convert AstroImage to imaginarium::Image, then to RGB_U8
-    let imag_image: imaginarium::Image = display_image.into();
-    let imag_image = imag_image
-        .convert(imaginarium::ColorFormat::RGB_U8)
-        .expect("Failed to convert to RGB_U8");
-
-    // Convert to image crate's RgbImage for imageproc drawing
-    let mut rgb_image: RgbImage =
-        RgbImage::from_raw(width as u32, height as u32, imag_image.bytes().to_vec())
-            .expect("Failed to create RgbImage");
+    // Convert to RGB for drawing
+    let mut rgb_image = gray_to_rgb_image_stretched(display_image.pixels(), width, height);
 
     // Draw only top N best stars (by SNR)
     let max_stars = 200;
@@ -128,23 +122,23 @@ fn test_visualize_star_detection() {
     }
 
     // Green color for markers
-    let color = Rgb([0u8, 255, 0]);
+    let color = Color::GREEN;
 
     for star in &top_stars {
-        let radius = (star.fwhm * 1.5).max(8.0) as i32;
-        let cx = star.x.round() as i32;
-        let cy = star.y.round() as i32;
+        let radius = (star.fwhm * 1.5).max(8.0);
+        let cx = star.x;
+        let cy = star.y;
 
         // Draw circle around star
-        draw_hollow_circle_mut(&mut rgb_image, (cx, cy), radius, color);
+        draw_circle(&mut rgb_image, cx, cy, radius, color, 1.0);
 
         // Draw cross at centroid
-        draw_cross_mut(&mut rgb_image, color, cx, cy);
+        draw_cross(&mut rgb_image, cx, cy, 3.0, color, 1.0);
     }
 
     // Save as PNG
     let output_path = common::test_utils::test_output_path("star_detection_visual.png");
-    rgb_image.save(&output_path).expect("Failed to save image");
+    save_image_png(rgb_image, &output_path);
 
     println!("Saved visualization to: {:?}", output_path);
     println!("\nStar detection summary:");
@@ -251,33 +245,29 @@ fn test_synthetic_star_detection() {
     }
 
     // Create output image with detections marked
-    let mut output_image = RgbImage::from_fn(config.width as u32, config.height as u32, |x, y| {
-        let idx = y as usize * config.width + x as usize;
-        let v = (pixels[idx].clamp(0.0, 1.0) * 255.0) as u8;
-        Rgb([v, v, v])
-    });
+    let mut output_image = gray_to_rgb_image_stretched(&pixels, config.width, config.height);
 
     // Draw true star positions in blue
-    let blue = Rgb([0u8, 100, 255]);
+    let blue = Color::rgb(0.0, 0.4, 1.0);
     for star in &true_stars {
-        let cx = star.x.round() as i32;
-        let cy = star.y.round() as i32;
-        let radius = (star.fwhm() * 1.5) as i32;
-        draw_hollow_circle_mut(&mut output_image, (cx, cy), radius, blue);
+        let cx = star.x;
+        let cy = star.y;
+        let radius = star.fwhm() * 1.5;
+        draw_circle(&mut output_image, cx, cy, radius, blue, 1.0);
     }
 
     // Draw detected stars in green
-    let green = Rgb([0u8, 255, 0]);
+    let green = Color::GREEN;
     for star in &detected_stars {
-        let cx = star.x.round() as i32;
-        let cy = star.y.round() as i32;
-        draw_cross_mut(&mut output_image, green, cx, cy);
-        let radius = (star.fwhm * 0.5).max(3.0) as i32;
-        draw_hollow_circle_mut(&mut output_image, (cx, cy), radius, green);
+        let cx = star.x;
+        let cy = star.y;
+        draw_cross(&mut output_image, cx, cy, 3.0, green, 1.0);
+        let radius = (star.fwhm * 0.5).max(3.0);
+        draw_circle(&mut output_image, cx, cy, radius, green, 1.0);
     }
 
     let output_path = common::test_utils::test_output_path("synthetic_detection.png");
-    output_image.save(&output_path).unwrap();
+    save_image_png(output_image, &output_path);
     println!("\nSaved detection result to: {:?}", output_path);
     println!("  Blue circles = true star positions");
     println!("  Green crosses/circles = detected stars");

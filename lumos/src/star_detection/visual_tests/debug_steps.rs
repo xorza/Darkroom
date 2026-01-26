@@ -1,5 +1,6 @@
 //! Debug test that outputs intermediate steps of star detection.
 
+use super::output::{gray_to_rgb_image_stretched, save_image_png};
 use super::synthetic::{SyntheticFieldConfig, SyntheticStar, generate_star_field};
 use crate::AstroImage;
 
@@ -7,9 +8,9 @@ use crate::star_detection::background::estimate_background;
 use crate::star_detection::constants::dilate_mask;
 use crate::star_detection::{StarDetectionConfig, find_stars, median_filter_3x3};
 use crate::testing::{calibration_dir, init_tracing};
-use image::{GrayImage, Rgb, RgbImage};
-use imageproc::drawing::{draw_cross_mut, draw_hollow_circle_mut};
-use imaginarium::ColorFormat;
+use image::GrayImage;
+use imaginarium::drawing::{draw_circle, draw_cross};
+use imaginarium::{Color, ColorFormat};
 
 /// Convert f32 pixels to grayscale image (auto-stretched to full range).
 fn to_gray_stretched(pixels: &[f32], width: usize, height: usize) -> GrayImage {
@@ -55,8 +56,6 @@ fn create_threshold_mask(
     mask
 }
 
-// Note: dilate_mask is now imported from crate::star_detection::constants
-
 #[test]
 #[ignore]
 fn test_debug_star_detection_steps() {
@@ -86,10 +85,8 @@ fn test_debug_star_detection_steps() {
 
     println!("Image size: {}x{}, channels: {}", width, height, channels);
 
-    // Convert to grayscale
     let grayscale: Vec<f32> = astro_image.pixels().to_vec();
 
-    // Print pixel statistics
     let min_val = grayscale.iter().cloned().fold(f32::INFINITY, f32::min);
     let max_val = grayscale.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
     let mean_val: f32 = grayscale.iter().sum::<f32>() / grayscale.len() as f32;
@@ -98,23 +95,19 @@ fn test_debug_star_detection_steps() {
         min_val, max_val, mean_val
     );
 
-    // Save input image (stretched) - shows Bayer pattern artifacts
     let input_img = to_gray_stretched(&grayscale, width, height);
     let path = common::test_utils::test_output_path("debug_01_input_raw.png");
     input_img.save(&path).unwrap();
     println!("Saved: {:?}", path);
 
-    // Apply 3x3 median filter to remove Bayer pattern
     let smoothed = median_filter_3x3(&grayscale, width, height);
     println!("Applied 3x3 median filter to remove Bayer artifacts");
 
-    // Save smoothed image (stretched)
     let smoothed_img = to_gray_stretched(&smoothed, width, height);
     let path = common::test_utils::test_output_path("debug_02_smoothed.png");
     smoothed_img.save(&path).unwrap();
     println!("Saved: {:?}", path);
 
-    // Use default config now that median filter removes Bayer artifacts
     let config = StarDetectionConfig::default();
     let background = estimate_background(&smoothed, width, height, config.background_tile_size);
 
@@ -145,19 +138,16 @@ fn test_debug_star_detection_steps() {
             .fold(f32::NEG_INFINITY, f32::max)
     );
 
-    // Save background map
     let bg_img = to_gray_stretched(&background.background, width, height);
     let path = common::test_utils::test_output_path("debug_03_background.png");
     bg_img.save(&path).unwrap();
     println!("Saved: {:?}", path);
 
-    // Save noise map
     let noise_img = to_gray_stretched(&background.noise, width, height);
     let path = common::test_utils::test_output_path("debug_04_noise.png");
     noise_img.save(&path).unwrap();
     println!("Saved: {:?}", path);
 
-    // Save background-subtracted image (using smoothed data)
     let subtracted: Vec<f32> = smoothed
         .iter()
         .zip(background.background.iter())
@@ -168,7 +158,6 @@ fn test_debug_star_detection_steps() {
     sub_img.save(&path).unwrap();
     println!("Saved: {:?}", path);
 
-    // Create and save threshold mask (using smoothed data)
     let mask = create_threshold_mask(
         &smoothed,
         width,
@@ -189,7 +178,6 @@ fn test_debug_star_detection_steps() {
     mask_img.save(&path).unwrap();
     println!("Saved: {:?}", path);
 
-    // Dilate and save
     let dilated = dilate_mask(&mask, width, height, 2);
     let dilated_count = dilated.iter().filter(|&&b| b).count();
     println!(
@@ -203,31 +191,25 @@ fn test_debug_star_detection_steps() {
     dilated_img.save(&path).unwrap();
     println!("Saved: {:?}", path);
 
-    // Run full detection
     let image = AstroImage::from_pixels(width, height, 1, grayscale.clone());
     let result = find_stars(&image, &config);
     let stars = result.stars;
     println!("\nDetected {} stars", stars.len());
 
-    // Create result image with detections
-    let mut result = RgbImage::from_fn(width as u32, height as u32, |x, y| {
-        let v = input_img.get_pixel(x, y).0[0];
-        Rgb([v, v, v])
-    });
+    let mut result_img = gray_to_rgb_image_stretched(&grayscale, width, height);
 
-    let green = Rgb([0u8, 255, 0]);
-    let yellow = Rgb([255u8, 255, 0]);
+    let green = Color::GREEN;
+    let yellow = Color::YELLOW;
 
     for (i, star) in stars.iter().take(50).enumerate() {
-        let cx = star.x.round() as i32;
-        let cy = star.y.round() as i32;
-        let radius = (star.fwhm * 0.7).max(5.0) as i32;
+        let cx = star.x;
+        let cy = star.y;
+        let radius = (star.fwhm * 0.7).max(5.0);
 
-        // Use yellow for top 10, green for rest
         let color = if i < 10 { yellow } else { green };
 
-        draw_hollow_circle_mut(&mut result, (cx, cy), radius, color);
-        draw_cross_mut(&mut result, color, cx, cy);
+        draw_circle(&mut result_img, cx, cy, radius, color, 1.0);
+        draw_cross(&mut result_img, cx, cy, 3.0, color, 1.0);
 
         if i < 10 {
             println!(
@@ -243,7 +225,7 @@ fn test_debug_star_detection_steps() {
     }
 
     let path = common::test_utils::test_output_path("debug_08_detections.png");
-    result.save(&path).unwrap();
+    save_image_png(result_img, &path);
     println!("Saved: {:?}", path);
 
     println!("\nAll debug images saved to test_output/");
@@ -253,7 +235,6 @@ fn test_debug_star_detection_steps() {
 fn test_debug_synthetic_steps() {
     init_tracing();
 
-    // Generate synthetic star field
     let config = SyntheticFieldConfig {
         width: 256,
         height: 256,
@@ -279,7 +260,6 @@ fn test_debug_synthetic_steps() {
     let width = config.width;
     let height = config.height;
 
-    // Print pixel statistics
     let min_val = grayscale.iter().cloned().fold(f32::INFINITY, f32::min);
     let max_val = grayscale.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
     let mean_val: f32 = grayscale.iter().sum::<f32>() / grayscale.len() as f32;
@@ -288,13 +268,11 @@ fn test_debug_synthetic_steps() {
         min_val, max_val, mean_val
     );
 
-    // Save input image (stretched)
     let input_img = to_gray_stretched(&grayscale, width, height);
     let path = common::test_utils::test_output_path("synth_debug_01_input.png");
     input_img.save(&path).unwrap();
     println!("Saved: {:?}", path);
 
-    // Estimate background
     let detection_config = StarDetectionConfig::default();
     let background = estimate_background(
         &grayscale,
@@ -330,19 +308,16 @@ fn test_debug_synthetic_steps() {
             .fold(f32::NEG_INFINITY, f32::max)
     );
 
-    // Save background map
     let bg_img = to_gray_stretched(&background.background, width, height);
     let path = common::test_utils::test_output_path("synth_debug_02_background.png");
     bg_img.save(&path).unwrap();
     println!("Saved: {:?}", path);
 
-    // Save noise map
     let noise_img = to_gray_stretched(&background.noise, width, height);
     let path = common::test_utils::test_output_path("synth_debug_03_noise.png");
     noise_img.save(&path).unwrap();
     println!("Saved: {:?}", path);
 
-    // Save background-subtracted image
     let subtracted: Vec<f32> = grayscale
         .iter()
         .zip(background.background.iter())
@@ -353,7 +328,6 @@ fn test_debug_synthetic_steps() {
     sub_img.save(&path).unwrap();
     println!("Saved: {:?}", path);
 
-    // Create and save threshold mask
     let mask = create_threshold_mask(
         &grayscale,
         width,
@@ -374,7 +348,6 @@ fn test_debug_synthetic_steps() {
     mask_img.save(&path).unwrap();
     println!("Saved: {:?}", path);
 
-    // Dilate and save
     let dilated = dilate_mask(&mask, width, height, 2);
     let dilated_count = dilated.iter().filter(|&&b| b).count();
     println!(
@@ -388,7 +361,6 @@ fn test_debug_synthetic_steps() {
     dilated_img.save(&path).unwrap();
     println!("Saved: {:?}", path);
 
-    // Run full detection
     let image = AstroImage::from_pixels(width, height, 1, grayscale.clone());
     let detection_result = find_stars(&image, &detection_config);
     let stars = detection_result.stars;
@@ -398,30 +370,24 @@ fn test_debug_synthetic_steps() {
         true_stars.len()
     );
 
-    // Create result image with detections
-    let mut result = RgbImage::from_fn(width as u32, height as u32, |x, y| {
-        let v = input_img.get_pixel(x, y).0[0];
-        Rgb([v, v, v])
-    });
+    let mut result_img = gray_to_rgb_image_stretched(&grayscale, width, height);
 
-    // Draw true positions in blue
-    let blue = Rgb([0u8, 100, 255]);
+    let blue = Color::rgb(0.0, 0.4, 1.0);
     for star in &true_stars {
-        let cx = star.x.round() as i32;
-        let cy = star.y.round() as i32;
-        let radius = (star.fwhm() * 1.2) as i32;
-        draw_hollow_circle_mut(&mut result, (cx, cy), radius, blue);
+        let cx = star.x;
+        let cy = star.y;
+        let radius = star.fwhm() * 1.2;
+        draw_circle(&mut result_img, cx, cy, radius, blue, 1.0);
     }
 
-    // Draw detected stars in green
-    let green = Rgb([0u8, 255, 0]);
+    let green = Color::GREEN;
     for (i, star) in stars.iter().enumerate() {
-        let cx = star.x.round() as i32;
-        let cy = star.y.round() as i32;
-        let radius = (star.fwhm * 0.5).max(3.0) as i32;
+        let cx = star.x;
+        let cy = star.y;
+        let radius = (star.fwhm * 0.5).max(3.0);
 
-        draw_hollow_circle_mut(&mut result, (cx, cy), radius, green);
-        draw_cross_mut(&mut result, green, cx, cy);
+        draw_circle(&mut result_img, cx, cy, radius, green, 1.0);
+        draw_cross(&mut result_img, cx, cy, 3.0, green, 1.0);
 
         println!(
             "  Detected {}: pos=({:.1}, {:.1}) fwhm={:.1} snr={:.1} flux={:.2}",
@@ -435,7 +401,7 @@ fn test_debug_synthetic_steps() {
     }
 
     let path = common::test_utils::test_output_path("synth_debug_07_detections.png");
-    result.save(&path).unwrap();
+    save_image_png(result_img, &path);
     println!("Saved: {:?}", path);
     println!("  Blue circles = true star positions");
     println!("  Green crosses/circles = detected stars");
@@ -467,15 +433,12 @@ fn test_noise_analysis() {
     let width = astro_image.width();
     let height = astro_image.height();
 
-    // Convert to grayscale
     let grayscale = astro_image.to_grayscale().pixels().to_vec();
 
-    // Print pixel value histogram
     let min_val = grayscale.iter().cloned().fold(f32::INFINITY, f32::min);
     let max_val = grayscale.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
     println!("Pixel range: {:.6} to {:.6}", min_val, max_val);
 
-    // Compute histogram
     let nbins = 100;
     let mut hist = vec![0usize; nbins];
     for &v in &grayscale {
@@ -484,12 +447,10 @@ fn test_noise_analysis() {
         hist[bin] += 1;
     }
 
-    // Find peak (mode)
     let peak_bin = hist.iter().enumerate().max_by_key(|(_, c)| *c).unwrap().0;
     let peak_val = min_val + (peak_bin as f32 + 0.5) * (max_val - min_val) / nbins as f32;
     println!("Histogram peak at bin {}: value ~{:.6}", peak_bin, peak_val);
 
-    // Estimate background with different tile sizes
     for tile_size in [32, 64, 128] {
         let bg = estimate_background(&grayscale, width, height, tile_size);
 
@@ -505,7 +466,6 @@ fn test_noise_analysis() {
             noise_mean, noise_min, noise_max
         );
 
-        // Count pixels above threshold for different sigma values
         for sigma in [3.0, 4.0, 5.0, 8.0, 10.0] {
             let count = grayscale
                 .iter()
@@ -522,14 +482,11 @@ fn test_noise_analysis() {
         }
     }
 
-    // Also try computing noise differently - using local pixel differences
-    // This is more robust to gradients
     let mut local_diffs: Vec<f32> = Vec::new();
     for y in 1..height - 1 {
         for x in 1..width - 1 {
             let idx = y * width + x;
             let c = grayscale[idx];
-            // Horizontal and vertical neighbors
             let diff_h = (grayscale[idx + 1] - c).abs();
             let diff_v = (grayscale[idx + width] - c).abs();
             local_diffs.push(diff_h);
@@ -539,7 +496,7 @@ fn test_noise_analysis() {
     use crate::star_detection::constants::MAD_TO_SIGMA;
     local_diffs.sort_by(|a, b| a.partial_cmp(b).unwrap());
     let local_mad = local_diffs[local_diffs.len() / 2];
-    let local_sigma = local_mad * MAD_TO_SIGMA / std::f32::consts::SQRT_2; // Divide by sqrt(2) for difference of 2 values
+    let local_sigma = local_mad * MAD_TO_SIGMA / std::f32::consts::SQRT_2;
     println!(
         "\nLocal difference-based noise estimate: {:.6}",
         local_sigma
@@ -570,10 +527,8 @@ fn test_threshold_detail() {
     let width = astro_image.width();
     let height = astro_image.height();
 
-    // Convert to grayscale
     let grayscale = astro_image.to_grayscale().pixels().to_vec();
 
-    // Look at a small 20x20 region in detail
     let region_x = 100;
     let region_y = 100;
     let region_size = 20;
@@ -591,7 +546,6 @@ fn test_threshold_detail() {
         println!("y={:3}: {}", y, row);
     }
 
-    // Compute background
     let bg = estimate_background(&grayscale, width, height, 64);
 
     println!("\nBackground values in same region:");
@@ -614,7 +568,6 @@ fn test_threshold_detail() {
         println!("y={:3}: {}", y, row);
     }
 
-    // Show threshold (background + 8*noise)
     println!("\nThreshold (bg + 8*noise) in same region:");
     for y in region_y..region_y + region_size {
         let mut row = String::new();
@@ -625,7 +578,6 @@ fn test_threshold_detail() {
         println!("y={:3}: {}", y, row);
     }
 
-    // Show which pixels pass threshold
     println!("\nPixels above threshold (1=above, 0=below):");
     for y in region_y..region_y + region_size {
         let mut row = String::new();
@@ -662,13 +614,10 @@ fn test_find_striped_region() {
     let width = astro_image.width();
     let height = astro_image.height();
 
-    // Convert to grayscale
     let grayscale = astro_image.to_grayscale().pixels().to_vec();
 
     let bg = estimate_background(&grayscale, width, height, 64);
 
-    // Find a region with many threshold-passing pixels
-    // Scan for a 30x30 region with >10 pixels above 8-sigma
     let region_size = 30;
     let mut best_region = (0, 0, 0);
 
@@ -685,7 +634,6 @@ fn test_find_striped_region() {
                 }
             }
             if count > best_region.2 && count < 200 {
-                // Some pixels but not too many (avoid stars)
                 best_region = (start_x, start_y, count);
             }
         }
@@ -697,7 +645,6 @@ fn test_find_striped_region() {
         region_x, region_y, count
     );
 
-    // Print the mask pattern for this region
     println!("\nPixels above threshold (8 sigma):");
     for y in region_y..region_y + region_size {
         let mut row = String::new();
@@ -709,7 +656,6 @@ fn test_find_striped_region() {
         println!("y={:3}: {}", y, row);
     }
 
-    // Print raw pixel values for a smaller region to see the pattern
     println!("\nRaw pixel values (multiplied by 1000 for readability) in 10x10 sub-region:");
     for y in region_y..region_y + 10 {
         let mut row = String::new();
@@ -746,15 +692,12 @@ fn test_dilation_comparison() {
     let width = astro_image.width();
     let height = astro_image.height();
 
-    // Convert to grayscale
     let grayscale = astro_image.to_grayscale().pixels().to_vec();
 
-    // Apply median filter
     let smoothed = median_filter_3x3(&grayscale, width, height);
 
     let bg = estimate_background(&smoothed, width, height, 64);
 
-    // Create threshold mask
     let mask: Vec<bool> = smoothed
         .iter()
         .zip(bg.background.iter())
@@ -765,21 +708,17 @@ fn test_dilation_comparison() {
     let mask_count = mask.iter().filter(|&&b| b).count();
     println!("Threshold mask: {} pixels", mask_count);
 
-    // Count connected components WITHOUT dilation
     let (_labels_no_dil, num_no_dil) = connected_components(&mask, width, height);
     println!("Without dilation: {} connected components", num_no_dil);
 
-    // Count connected components WITH dilation (radius 1)
     let dilated_1 = dilate_mask(&mask, width, height, 1);
     let (_labels_dil_1, num_dil_1) = connected_components(&dilated_1, width, height);
     println!("With dilation radius=1: {} connected components", num_dil_1);
 
-    // Count connected components WITH dilation (radius 2)
     let dilated_2 = dilate_mask(&mask, width, height, 2);
     let (_labels_dil_2, num_dil_2) = connected_components(&dilated_2, width, height);
     println!("With dilation radius=2: {} connected components", num_dil_2);
 
-    // Save both masks for visual comparison
     let no_dil_img = mask_to_gray(&mask, width, height);
     let path = common::test_utils::test_output_path("compare_no_dilation.png");
     no_dil_img.save(&path).unwrap();
