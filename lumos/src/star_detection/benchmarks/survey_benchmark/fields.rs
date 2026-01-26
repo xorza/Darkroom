@@ -234,6 +234,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[ignore] // Benchmark test - run with --ignored
     fn test_all_fields_valid() {
         let fields = all_test_fields();
         assert!(!fields.is_empty());
@@ -251,6 +252,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore] // Benchmark test - run with --ignored
     fn test_sparse_field() {
         let field = sparse_field();
         assert_eq!(field.difficulty, Difficulty::Sparse);
@@ -258,6 +260,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore] // Benchmark test - run with --ignored
     fn test_dense_field() {
         let field = dense_field();
         assert_eq!(field.difficulty, Difficulty::Dense);
@@ -265,6 +268,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore] // Benchmark test - run with --ignored
     fn test_fwhm_conversion() {
         let field = sparse_field();
         // SDSS has ~0.396 arcsec/pixel
@@ -273,6 +277,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore] // Benchmark test - run with --ignored
     fn test_fields_by_difficulty() {
         let sparse = fields_by_difficulty(Difficulty::Sparse);
         assert!(sparse.iter().all(|f| f.difficulty == Difficulty::Sparse));

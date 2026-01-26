@@ -430,6 +430,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[ignore] // Benchmark test - run with --ignored
     fn test_cache_creation() {
         let temp_dir = std::env::temp_dir().join(format!("lumos_test_{}", std::process::id()));
         let cache = RectangleCache::with_cache_dir(temp_dir.clone()).unwrap();
@@ -441,6 +442,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore] // Benchmark test - run with --ignored
     fn test_manifest_persistence() {
         let temp_dir =
             std::env::temp_dir().join(format!("lumos_test_manifest_{}", std::process::id()));

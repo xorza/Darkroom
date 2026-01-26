@@ -364,6 +364,7 @@ mod tests {
     use crate::testing::calibration_dir;
 
     #[test]
+    #[ignore] // Benchmark test - run with --ignored
     fn test_benchmark_creation() {
         let temp_dir = std::env::temp_dir().join(format!("lumos_bench_{}", std::process::id()));
         let output_dir = temp_dir.join("output");

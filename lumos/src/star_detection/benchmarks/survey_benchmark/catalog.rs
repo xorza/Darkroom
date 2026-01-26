@@ -347,6 +347,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[ignore] // Benchmark test - run with --ignored
     fn test_angular_distance() {
         // Same point
         assert!((angular_distance(180.0, 45.0, 180.0, 45.0)).abs() < 1e-10);

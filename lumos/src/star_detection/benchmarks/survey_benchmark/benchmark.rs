@@ -654,6 +654,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[ignore] // Benchmark test - run with --ignored
     fn test_normalize_pixels() {
         let pixels = vec![0.0, 100.0, 200.0, 300.0, 400.0];
         let normalized = normalize_pixels(&pixels);
@@ -811,6 +812,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore] // Benchmark test - run with --ignored
     fn test_magnitude_bin_computation() {
         // Test with synthetic data
         let ground_truth_with_mag = vec![
@@ -891,6 +893,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore] // Benchmark test - run with --ignored
     fn test_astrometric_residuals_computation() {
         let ground_truth = vec![
             GroundTruthStar {

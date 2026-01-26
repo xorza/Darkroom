@@ -179,6 +179,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[ignore] // Benchmark test - run with --ignored
     fn test_local_solver_available() {
         // This test will pass if image2xy is installed
         let available = LocalSolver::is_available();

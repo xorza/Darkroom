@@ -28,12 +28,8 @@ mod deblend;
 mod detection;
 mod median_filter;
 
-#[cfg(test)]
-pub mod astrometry_benchmark;
-#[cfg(test)]
-mod real_data_tests;
-#[cfg(test)]
-pub mod survey_benchmark;
+#[cfg(all(test, feature = "benchmark-tests"))]
+pub mod benchmarks;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]

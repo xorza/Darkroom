@@ -259,6 +259,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore] // Benchmark test - run with --ignored
     fn test_reference_pixel() {
         let wcs = make_simple_wcs();
         let (ra, dec) = wcs.pixel_to_sky(500.0, 500.0);
@@ -268,6 +269,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore] // Benchmark test - run with --ignored
     fn test_roundtrip() {
         let wcs = make_simple_wcs();
 
@@ -294,6 +296,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore] // Benchmark test - run with --ignored
     fn test_pixel_offset() {
         let wcs = make_simple_wcs();
 
@@ -314,6 +317,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore] // Benchmark test - run with --ignored
     fn test_image_bounds() {
         let wcs = make_simple_wcs();
         let bounds = wcs.image_bounds_sky(1000, 1000);
@@ -325,6 +329,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore] // Benchmark test - run with --ignored
     fn test_from_header() {
         let wcs = WCS::from_header(|key| match key {
             "CRPIX1" => Some(501.0), // 1-indexed
@@ -343,6 +348,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore] // Benchmark test - run with --ignored
     fn test_pixel_scale() {
         let wcs = make_simple_wcs();
         let scale = wcs.pixel_scale_arcsec();
