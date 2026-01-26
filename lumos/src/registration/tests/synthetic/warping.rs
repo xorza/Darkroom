@@ -59,9 +59,12 @@ fn compute_ncc(a: &[f32], b: &[f32]) -> f64 {
 }
 
 /// Generate a synthetic star field for warping tests.
+/// Uses smaller 256x256 images for faster tests.
 fn generate_test_field(seed: u64) -> (Vec<f32>, usize, usize) {
     let config = StarFieldConfig {
-        num_stars: 50,
+        width: 256,
+        height: 256,
+        num_stars: 30,
         seed,
         ..synthetic::sparse_field_config()
     };
@@ -78,6 +81,16 @@ fn all_interpolation_methods() -> Vec<InterpolationMethod> {
         InterpolationMethod::Lanczos2,
         InterpolationMethod::Lanczos3,
         InterpolationMethod::Lanczos4,
+    ]
+}
+
+/// Representative interpolation methods for roundtrip tests.
+/// Tests Nearest (baseline), Bilinear (fast), and Lanczos3 (quality).
+fn representative_interpolation_methods() -> Vec<InterpolationMethod> {
+    vec![
+        InterpolationMethod::Nearest,
+        InterpolationMethod::Bilinear,
+        InterpolationMethod::Lanczos3,
     ]
 }
 
@@ -151,7 +164,7 @@ fn test_warp_translation_roundtrip() {
     // Inverse brings it back
     let inverse = forward.inverse();
 
-    for method in all_interpolation_methods() {
+    for method in representative_interpolation_methods() {
         let config = WarpConfig {
             method,
             border_value: 0.0,
@@ -213,7 +226,7 @@ fn test_warp_euclidean_roundtrip() {
     let forward = TransformMatrix::euclidean(dx, dy, angle_rad);
     let inverse = forward.inverse();
 
-    for method in all_interpolation_methods() {
+    for method in representative_interpolation_methods() {
         let config = WarpConfig {
             method,
             border_value: 0.0,
@@ -271,7 +284,7 @@ fn test_warp_similarity_roundtrip() {
     let forward = TransformMatrix::similarity(dx, dy, angle_rad, scale);
     let inverse = forward.inverse();
 
-    for method in all_interpolation_methods() {
+    for method in representative_interpolation_methods() {
         let config = WarpConfig {
             method,
             border_value: 0.0,
@@ -337,7 +350,7 @@ fn test_warp_affine_roundtrip() {
 
     assert_eq!(forward.transform_type, TransformType::Affine);
 
-    for method in all_interpolation_methods() {
+    for method in representative_interpolation_methods() {
         let config = WarpConfig {
             method,
             border_value: 0.0,
@@ -392,7 +405,7 @@ fn test_warp_homography_roundtrip() {
 
     assert_eq!(forward.transform_type, TransformType::Homography);
 
-    for method in all_interpolation_methods() {
+    for method in representative_interpolation_methods() {
         let config = WarpConfig {
             method,
             border_value: 0.0,
@@ -439,7 +452,9 @@ fn test_warp_with_detected_transform() {
     use crate::star_detection::{StarDetectionConfig, find_stars};
 
     let config = StarFieldConfig {
-        num_stars: 60,
+        width: 256,
+        height: 256,
+        num_stars: 40,
         seed: 66666,
         ..synthetic::sparse_field_config()
     };

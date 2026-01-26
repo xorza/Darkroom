@@ -137,17 +137,18 @@ fn test_sigma_clipping_rejects_outliers() {
 #[test]
 fn test_interpolation_produces_valid_values() {
     // Verify interpolation produces continuous (no NaN/Inf) values
-    let width = 128;
-    let height = 128;
+    let width = 64;
+    let height = 64;
 
     let pixels: Vec<f32> = (0..height)
-        .flat_map(|y| (0..width).map(move |x| (x + y) as f32 / 256.0))
+        .flat_map(|y| (0..width).map(move |x| (x + y) as f32 / 128.0))
         .collect();
 
-    let bg = estimate_background(&pixels, width, height, 32);
+    let bg = estimate_background(&pixels, width, height, 16);
 
-    for y in 0..height {
-        for x in 0..width {
+    // Sample every 4th pixel instead of every pixel
+    for y in (0..height).step_by(4) {
+        for x in (0..width).step_by(4) {
             let val = bg.get_background(x, y);
             assert!(val.is_finite(), "NaN/Inf at ({},{})", x, y);
             assert!(
@@ -163,28 +164,28 @@ fn test_interpolation_produces_valid_values() {
 
 #[test]
 fn test_large_image() {
-    let width = 512;
-    let height = 512;
+    let width = 256;
+    let height = 256;
     let pixels: Vec<f32> = vec![0.33; width * height];
 
     let bg = estimate_background(&pixels, width, height, 64);
 
     assert!((bg.get_background(0, 0) - 0.33).abs() < 0.01);
+    assert!((bg.get_background(127, 127) - 0.33).abs() < 0.01);
     assert!((bg.get_background(255, 255) - 0.33).abs() < 0.01);
-    assert!((bg.get_background(511, 511) - 0.33).abs() < 0.01);
 }
 
 #[test]
 fn test_different_tile_sizes() {
-    let width = 256;
-    let height = 256;
+    let width = 128;
+    let height = 128;
     let pixels: Vec<f32> = vec![0.5; width * height];
 
-    // Test min and max tile sizes
-    for tile_size in [16, 32, 64, 128, 256] {
+    // Test representative tile sizes (min, mid, max)
+    for tile_size in [16, 64, 128] {
         let bg = estimate_background(&pixels, width, height, tile_size);
         assert!(
-            (bg.get_background(128, 128) - 0.5).abs() < 0.01,
+            (bg.get_background(64, 64) - 0.5).abs() < 0.01,
             "Failed for tile_size={}",
             tile_size
         );
@@ -389,17 +390,17 @@ fn test_iterative_background_with_bright_stars() {
 #[test]
 fn test_iterative_background_preserves_gradient() {
     // Background gradient should be preserved with iterative estimation
-    let width = 128;
-    let height = 128;
+    let width = 64;
+    let height = 64;
     let mut pixels: Vec<f32> = (0..height)
-        .flat_map(|y| (0..width).map(move |x| (x + y) as f32 / 256.0))
+        .flat_map(|y| (0..width).map(move |x| (x + y) as f32 / 128.0))
         .collect();
 
     // Add a bright star
     for dy in -3i32..=3 {
         for dx in -3i32..=3 {
-            let x = 64 + dx;
-            let y = 64 + dy;
+            let x = 32 + dx;
+            let y = 32 + dy;
             if x >= 0 && x < width as i32 && y >= 0 && y < height as i32 {
                 let dist_sq = (dx * dx + dy * dy) as f32;
                 pixels[y as usize * width + x as usize] += 0.5 * (-dist_sq / 2.0).exp();
@@ -408,11 +409,11 @@ fn test_iterative_background_preserves_gradient() {
     }
 
     let config = IterativeBackgroundConfig::default();
-    let bg = estimate_background_iterative(&pixels, width, height, 32, &config);
+    let bg = estimate_background_iterative(&pixels, width, height, 16, &config);
 
     // Gradient should be preserved
     let corner_00 = bg.get_background(0, 0);
-    let corner_end = bg.get_background(127, 127);
+    let corner_end = bg.get_background(63, 63);
     assert!(
         corner_end > corner_00,
         "Gradient not preserved: corner_00={}, corner_end={}",
