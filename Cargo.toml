@@ -88,3 +88,27 @@ split-debuginfo = "unpacked"
 [profile.release]
 lto = true
 strip = "symbols"
+
+# Optimize heavy dependencies even in dev/test builds
+# This dramatically speeds up GPU initialization (15s -> <1s)
+[profile.dev.package.wgpu]
+opt-level = 3
+[profile.dev.package.wgpu-core]
+opt-level = 3
+[profile.dev.package.wgpu-hal]
+opt-level = 3
+[profile.dev.package.naga]
+opt-level = 3
+[profile.dev.package.metal]
+opt-level = 3
+
+[profile.test.package.wgpu]
+opt-level = 3
+[profile.test.package.wgpu-core]
+opt-level = 3
+[profile.test.package.wgpu-hal]
+opt-level = 3
+[profile.test.package.naga]
+opt-level = 3
+[profile.test.package.metal]
+opt-level = 3
