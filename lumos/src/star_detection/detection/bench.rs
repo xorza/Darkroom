@@ -1,7 +1,6 @@
 //! Benchmark module for star detection algorithms.
 //! Run with: cargo bench --package lumos --features bench detection
 
-use super::simd::create_threshold_mask_simd;
 use super::{
     connected_components, create_threshold_mask, detect_stars, detect_stars_filtered, dilate_mask,
     extract_candidates,
@@ -87,42 +86,6 @@ pub fn benchmarks(c: &mut Criterion) {
     }
 
     mask_group.finish();
-
-    // SIMD vs Scalar comparison for threshold mask
-    let mut simd_group = c.benchmark_group("threshold_mask_simd_vs_scalar");
-    simd_group.sample_size(30);
-
-    for &(width, height) in &[(512, 512), (1024, 1024), (2048, 2048)] {
-        let pixels = generate_test_image(width, height, 100);
-        let background = create_background_map(width, height);
-        let size_name = format!("{}x{}", width, height);
-
-        simd_group.throughput(Throughput::Elements((width * height) as u64));
-
-        // Scalar implementation
-        simd_group.bench_function(BenchmarkId::new("scalar", &size_name), |b| {
-            b.iter(|| {
-                black_box(create_threshold_mask(
-                    black_box(&pixels),
-                    black_box(&background),
-                    black_box(3.0),
-                ))
-            })
-        });
-
-        // SIMD implementation
-        simd_group.bench_function(BenchmarkId::new("simd", &size_name), |b| {
-            b.iter(|| {
-                black_box(create_threshold_mask_simd(
-                    black_box(&pixels),
-                    black_box(&background),
-                    black_box(3.0),
-                ))
-            })
-        });
-    }
-
-    simd_group.finish();
 
     // Dilation benchmarks
     let mut dilate_group = c.benchmark_group("dilate_mask");
