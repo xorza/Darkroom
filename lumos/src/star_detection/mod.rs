@@ -29,7 +29,7 @@ mod detection;
 mod median_filter;
 
 #[cfg(all(test, feature = "benchmark-tests"))]
-pub mod benchmarks;
+pub mod real_data_tests;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
