@@ -18,14 +18,14 @@ status-level = "pass"
 final-status-level = "fail"
 
 # Slow test threshold (warn after this duration)
-slow-timeout = { period = "60s", terminate-after = 2 }
+slow-timeout = { period = "30s", terminate-after = 2 }
 
 [profile.ci]
 # CI profile with more conservative settings
 test-threads = 4
 retries = 1
 fail-fast = false
-slow-timeout = { period = "120s", terminate-after = 2 }
+slow-timeout = { period = "30s", terminate-after = 2 }
 
 # GPU tests need single-threaded execution to share GPU context
 [[profile.default.overrides]]
