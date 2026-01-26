@@ -6,6 +6,8 @@
 
 use crate::AstroImage;
 
+use crate::registration::interpolation::{InterpolationMethod, WarpConfig, warp_image};
+use crate::registration::types::TransformMatrix;
 use crate::registration::{RegistrationConfig, Registrator};
 use crate::star_detection::{StarDetectionConfig, find_stars};
 use crate::testing::synthetic::{self, StarFieldConfig};
@@ -25,10 +27,17 @@ fn create_astro_image(pixels: Vec<f32>, width: usize, height: usize) -> AstroIma
     AstroImage::from_pixels(width, height, 1, pixels)
 }
 
-/// Apply a similarity transform to an image by resampling.
-/// This creates a new image where each pixel is sampled from the source
-/// at the inverse-transformed position.
-#[allow(clippy::too_many_arguments)]
+/// Default warp config for tests - bilinear for speed.
+fn warp_config() -> WarpConfig {
+    WarpConfig {
+        method: InterpolationMethod::Bilinear,
+        border_value: 0.0,
+        normalize_kernel: true,
+        clamp_output: false,
+    }
+}
+
+/// Apply a similarity transform to an image.
 fn transform_image(
     src_pixels: &[f32],
     width: usize,
@@ -37,76 +46,30 @@ fn transform_image(
     dy: f64,
     angle_rad: f64,
     scale: f64,
-    center_x: f64,
-    center_y: f64,
 ) -> Vec<f32> {
-    let mut dst_pixels = vec![0.0f32; width * height];
-
-    // For each destination pixel, find the source pixel
-    for dst_y in 0..height {
-        for dst_x in 0..width {
-            // Inverse transform: map destination back to source
-            // Forward: x' = cos*rx - sin*ry + cx + dx, where rx = x - cx
-            // Inverse: need to solve for (x, y) given (x', y')
-            let x_prime = dst_x as f64;
-            let y_prime = dst_y as f64;
-
-            // Remove translation
-            let tx = x_prime - center_x - dx;
-            let ty = y_prime - center_y - dy;
-
-            // Inverse rotation and scale
-            let inv_scale = 1.0 / scale;
-            let inv_cos = angle_rad.cos() * inv_scale;
-            let inv_sin = angle_rad.sin() * inv_scale;
-
-            let src_x = inv_cos * tx + inv_sin * ty + center_x;
-            let src_y = -inv_sin * tx + inv_cos * ty + center_y;
-
-            // Bilinear interpolation
-            if src_x >= 0.0
-                && src_x < (width - 1) as f64
-                && src_y >= 0.0
-                && src_y < (height - 1) as f64
-            {
-                let x0 = src_x.floor() as usize;
-                let y0 = src_y.floor() as usize;
-                let x1 = x0 + 1;
-                let y1 = y0 + 1;
-
-                let fx = src_x - x0 as f64;
-                let fy = src_y - y0 as f64;
-
-                let p00 = src_pixels[y0 * width + x0] as f64;
-                let p10 = src_pixels[y0 * width + x1] as f64;
-                let p01 = src_pixels[y1 * width + x0] as f64;
-                let p11 = src_pixels[y1 * width + x1] as f64;
-
-                let value = p00 * (1.0 - fx) * (1.0 - fy)
-                    + p10 * fx * (1.0 - fy)
-                    + p01 * (1.0 - fx) * fy
-                    + p11 * fx * fy;
-
-                dst_pixels[dst_y * width + dst_x] = value as f32;
-            }
-        }
-    }
-
-    dst_pixels
+    let transform = TransformMatrix::similarity(dx, dy, angle_rad, scale);
+    warp_image(
+        src_pixels,
+        width,
+        height,
+        width,
+        height,
+        &transform,
+        &warp_config(),
+    )
 }
 
 /// Apply a translation to an image.
 fn translate_image(src_pixels: &[f32], width: usize, height: usize, dx: f64, dy: f64) -> Vec<f32> {
-    transform_image(
+    let transform = TransformMatrix::translation(dx, dy);
+    warp_image(
         src_pixels,
         width,
         height,
-        dx,
-        dy,
-        0.0,
-        1.0,
-        width as f64 / 2.0,
-        height as f64 / 2.0,
+        width,
+        height,
+        &transform,
+        &warp_config(),
     )
 }
 
@@ -218,20 +181,8 @@ fn test_image_registration_rotation() {
     let dy = -3.0;
     let angle_deg: f64 = 1.0;
     let angle_rad = angle_deg.to_radians();
-    let center_x = width as f64 / 2.0;
-    let center_y = height as f64 / 2.0;
 
-    let target_pixels = transform_image(
-        &ref_pixels,
-        width,
-        height,
-        dx,
-        dy,
-        angle_rad,
-        1.0,
-        center_x,
-        center_y,
-    );
+    let target_pixels = transform_image(&ref_pixels, width, height, dx, dy, angle_rad, 1.0);
 
     let ref_image = create_astro_image(ref_pixels, width, height);
     let target_image = create_astro_image(target_pixels, width, height);
@@ -300,20 +251,8 @@ fn test_image_registration_similarity() {
     let angle_deg: f64 = 0.8;
     let angle_rad = angle_deg.to_radians();
     let scale = 1.005;
-    let center_x = width as f64 / 2.0;
-    let center_y = height as f64 / 2.0;
 
-    let target_pixels = transform_image(
-        &ref_pixels,
-        width,
-        height,
-        dx,
-        dy,
-        angle_rad,
-        scale,
-        center_x,
-        center_y,
-    );
+    let target_pixels = transform_image(&ref_pixels, width, height, dx, dy, angle_rad, scale);
 
     let ref_image = create_astro_image(ref_pixels, width, height);
     let target_image = create_astro_image(target_pixels, width, height);
@@ -465,20 +404,8 @@ fn test_image_registration_dense_field() {
     let dx = 10.0;
     let dy = 8.0;
     let angle_rad = 0.5_f64.to_radians();
-    let center_x = width as f64 / 2.0;
-    let center_y = height as f64 / 2.0;
 
-    let target_pixels = transform_image(
-        &ref_pixels,
-        width,
-        height,
-        dx,
-        dy,
-        angle_rad,
-        1.0,
-        center_x,
-        center_y,
-    );
+    let target_pixels = transform_image(&ref_pixels, width, height, dx, dy, angle_rad, 1.0);
 
     let ref_image = create_astro_image(ref_pixels, width, height);
     let target_image = create_astro_image(target_pixels, width, height);
