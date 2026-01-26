@@ -1,21 +1,18 @@
 AI coding rules for Rust projects:
 
-- Avoid using Option<> and Result<> for cases that should not fail.
-- For required values, use `.unwrap()`. For non-obvious cases add `.expect("...")` with clear, specific message.
+- Avoid `Option<>` and `Result<>` for cases that cannot fail.
+- For required values, use `.unwrap()`. For non-obvious cases, add `.expect("...")` with a clear, specific message.
 - Prefer crashing on logic errors rather than silently swallowing them.
-- Use Result<> only for expected/legitimate failures (e.g., network, I/O, external services, user input).
+- Use `Result<>` only for expected failures (e.g., network, I/O, external services, user input).
 - Always add `#[derive(Debug)]` to Rust structs.
-- If Rust code was changed, run in following order:
-    1. `cargo nextest && cargo fmt && cargo check && cargo clippy --all-targets -- -D warnings`
-       before confirming output. Skip doc-tests.
-- Add asserts for function input arguments and outputs where applicable, so logic errors crash instead of being
-  swallowed. Do not use asserts for user input and possible network failures.
+- After changing Rust code, run in this order before confirming output:
+    1. `cargo nextest run && cargo fmt && cargo check && cargo clippy --all-targets -- -D warnings`
+    2. Skip doc-tests.
+- Add asserts for function inputs and outputs where applicable so logic errors crash instead of being swallowed. Do not use asserts for user input or network failures.
 - Check online documentation for best practices and patterns.
-- Update README.md with any changes to the project.
-- `NOTES-AI.md` is AI-generated and contains implementation details, project structure, and functionality notes. Avoid
-  editing `README.md` unless asked; instead, update `NOTES-AI.md` and keep it current for fast AI access. Do not store
-  changes there, only current state of the project.
-- Read `NOTES-AI.md` for summarized knowledge about the project.
-- When running benchmarks, use `cargo bench -p <crate> --features bench --bench <name>` to compile only the needed
-  crate and enable the bench feature (e.g., `cargo bench -p lumos --features bench --bench math`).
-- Use nextest for running tests, also use it for measuring test execution time when asked
+- Update README.md with any project changes.
+- `NOTES-AI.md` is AI-generated and contains implementation details, project structure, and functionality notes. Avoid editing `README.md` unless asked; instead, update `NOTES-AI.md` and keep it current. Store only current state, not change history.
+- Read `NOTES-AI.md` for summarized project knowledge.
+- When running benchmarks, use `cargo bench -p <crate> --features bench --bench <name>` to compile only the needed crate and enable the bench feature (e.g., `cargo bench -p lumos --features bench --bench math`).
+- Use nextest for running tests and for measuring test execution time when asked.
+- For iterative changes and benchmarks, add readme files to corresponding folders explaining which optimizations were implemented and which were removed. When running benchmarks, always output results to a txt file in the bench directory and maintain a bench-analysis.md file with interpretations. Update it when re-running benchmarks.

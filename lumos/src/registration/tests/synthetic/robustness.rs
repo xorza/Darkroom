@@ -7,7 +7,7 @@
 //! - Minimum star counts
 //! - Combined disturbances (stress tests)
 
-use crate::registration::{RegistrationConfig, Registrator};
+use crate::registration::{RegistrationConfig, Registrator, TransformType};
 use crate::testing::synthetic::{
     add_position_noise, add_spurious_stars, generate_random_positions, remove_random_stars,
     transform_stars, translate_stars, translate_with_overlap,
@@ -744,5 +744,514 @@ fn test_stress_dense_field_large_transform() {
         result.num_inliers >= 100,
         "Expected many inliers in dense field, got {}",
         result.num_inliers
+    );
+}
+
+// ============================================================================
+// Large Rotation Tests
+// ============================================================================
+
+#[test]
+fn test_large_rotation_45_degrees() {
+    // 45 degree rotation - tests trig at non-trivial angles
+    let ref_stars = generate_random_positions(100, 2000.0, 2000.0, 10001);
+
+    let angle_deg: f64 = 45.0;
+    let angle_rad = angle_deg.to_radians();
+    let dx = 20.0;
+    let dy = -15.0;
+    let center_x = 1000.0;
+    let center_y = 1000.0;
+
+    let target_stars = transform_stars(&ref_stars, dx, dy, angle_rad, 1.0, center_x, center_y);
+
+    let config = RegistrationConfig::builder()
+        .with_rotation()
+        .min_stars(6)
+        .min_matched_stars(4)
+        .max_residual(3.0)
+        .build();
+
+    let registrator = Registrator::new(config);
+    let result = registrator
+        .register_stars(&ref_stars, &target_stars)
+        .expect("Registration should succeed with 45° rotation");
+
+    let recovered_angle = result.transform.rotation_angle();
+    let rotation_error_deg = (recovered_angle - angle_rad).abs().to_degrees();
+
+    assert!(
+        rotation_error_deg < 0.1,
+        "45° rotation error too large: expected {}°, got {}°, error {}°",
+        angle_deg,
+        recovered_angle.to_degrees(),
+        rotation_error_deg
+    );
+
+    // Validate transform accuracy
+    let mut max_error = 0.0f64;
+    for (ref_star, target_star) in ref_stars.iter().zip(target_stars.iter()) {
+        let (tx, ty) = result.transform.apply(ref_star.0, ref_star.1);
+        let error = ((tx - target_star.0).powi(2) + (ty - target_star.1).powi(2)).sqrt();
+        max_error = max_error.max(error);
+    }
+
+    assert!(
+        max_error < 1.0,
+        "Max transformation error with 45° rotation: {} pixels",
+        max_error
+    );
+}
+
+#[test]
+fn test_large_rotation_90_degrees() {
+    // 90 degree rotation - edge case for atan2
+    let ref_stars = generate_random_positions(100, 2000.0, 2000.0, 10002);
+
+    let angle_deg: f64 = 90.0;
+    let angle_rad = angle_deg.to_radians();
+    let dx = 10.0;
+    let dy = 10.0;
+    let center_x = 1000.0;
+    let center_y = 1000.0;
+
+    let target_stars = transform_stars(&ref_stars, dx, dy, angle_rad, 1.0, center_x, center_y);
+
+    let config = RegistrationConfig::builder()
+        .with_rotation()
+        .min_stars(6)
+        .min_matched_stars(4)
+        .max_residual(3.0)
+        .build();
+
+    let registrator = Registrator::new(config);
+    let result = registrator
+        .register_stars(&ref_stars, &target_stars)
+        .expect("Registration should succeed with 90° rotation");
+
+    let recovered_angle = result.transform.rotation_angle();
+    let rotation_error_deg = (recovered_angle - angle_rad).abs().to_degrees();
+
+    assert!(
+        rotation_error_deg < 0.1,
+        "90° rotation error too large: expected {}°, got {}°, error {}°",
+        angle_deg,
+        recovered_angle.to_degrees(),
+        rotation_error_deg
+    );
+
+    let mut max_error = 0.0f64;
+    for (ref_star, target_star) in ref_stars.iter().zip(target_stars.iter()) {
+        let (tx, ty) = result.transform.apply(ref_star.0, ref_star.1);
+        let error = ((tx - target_star.0).powi(2) + (ty - target_star.1).powi(2)).sqrt();
+        max_error = max_error.max(error);
+    }
+
+    assert!(
+        max_error < 1.0,
+        "Max transformation error with 90° rotation: {} pixels",
+        max_error
+    );
+}
+
+#[test]
+fn test_large_rotation_negative_45_degrees() {
+    // Negative rotation to test both directions
+    let ref_stars = generate_random_positions(100, 2000.0, 2000.0, 10003);
+
+    let angle_deg: f64 = -45.0;
+    let angle_rad = angle_deg.to_radians();
+    let center_x = 1000.0;
+    let center_y = 1000.0;
+
+    let target_stars = transform_stars(&ref_stars, 0.0, 0.0, angle_rad, 1.0, center_x, center_y);
+
+    let config = RegistrationConfig::builder()
+        .with_rotation()
+        .min_stars(6)
+        .min_matched_stars(4)
+        .max_residual(3.0)
+        .build();
+
+    let registrator = Registrator::new(config);
+    let result = registrator
+        .register_stars(&ref_stars, &target_stars)
+        .expect("Registration should succeed with -45° rotation");
+
+    let recovered_angle = result.transform.rotation_angle();
+    let rotation_error_deg = (recovered_angle - angle_rad).abs().to_degrees();
+
+    assert!(
+        rotation_error_deg < 0.1,
+        "-45° rotation error too large: expected {}°, got {}°, error {}°",
+        angle_deg,
+        recovered_angle.to_degrees(),
+        rotation_error_deg
+    );
+}
+
+// ============================================================================
+// Extreme Scale Tests
+// ============================================================================
+
+#[test]
+fn test_extreme_scale_2x() {
+    // 2x scale factor (zoom in)
+    let ref_stars = generate_random_positions(100, 2000.0, 2000.0, 20001);
+
+    let scale = 2.0;
+    let center_x = 1000.0;
+    let center_y = 1000.0;
+
+    let target_stars = transform_stars(&ref_stars, 0.0, 0.0, 0.0, scale, center_x, center_y);
+
+    let config = RegistrationConfig::builder()
+        .with_scale()
+        .min_stars(6)
+        .min_matched_stars(4)
+        .max_residual(5.0) // Allow more residual for large scale
+        .build();
+
+    let registrator = Registrator::new(config);
+    let result = registrator
+        .register_stars(&ref_stars, &target_stars)
+        .expect("Registration should succeed with 2x scale");
+
+    let recovered_scale = result.transform.scale_factor();
+    let scale_error = (recovered_scale - scale).abs();
+
+    assert!(
+        scale_error < 0.01,
+        "2x scale error too large: expected {}, got {}, error {}",
+        scale,
+        recovered_scale,
+        scale_error
+    );
+
+    // Validate transform accuracy
+    let mut max_error = 0.0f64;
+    for (ref_star, target_star) in ref_stars.iter().zip(target_stars.iter()) {
+        let (tx, ty) = result.transform.apply(ref_star.0, ref_star.1);
+        let error = ((tx - target_star.0).powi(2) + (ty - target_star.1).powi(2)).sqrt();
+        max_error = max_error.max(error);
+    }
+
+    assert!(
+        max_error < 2.0,
+        "Max transformation error with 2x scale: {} pixels",
+        max_error
+    );
+}
+
+#[test]
+fn test_extreme_scale_half() {
+    // 0.5x scale factor (zoom out)
+    let ref_stars = generate_random_positions(100, 2000.0, 2000.0, 20002);
+
+    let scale = 0.5;
+    let center_x = 1000.0;
+    let center_y = 1000.0;
+
+    let target_stars = transform_stars(&ref_stars, 0.0, 0.0, 0.0, scale, center_x, center_y);
+
+    let config = RegistrationConfig::builder()
+        .with_scale()
+        .min_stars(6)
+        .min_matched_stars(4)
+        .max_residual(5.0)
+        .build();
+
+    let registrator = Registrator::new(config);
+    let result = registrator
+        .register_stars(&ref_stars, &target_stars)
+        .expect("Registration should succeed with 0.5x scale");
+
+    let recovered_scale = result.transform.scale_factor();
+    let scale_error = (recovered_scale - scale).abs();
+
+    assert!(
+        scale_error < 0.01,
+        "0.5x scale error too large: expected {}, got {}, error {}",
+        scale,
+        recovered_scale,
+        scale_error
+    );
+
+    let mut max_error = 0.0f64;
+    for (ref_star, target_star) in ref_stars.iter().zip(target_stars.iter()) {
+        let (tx, ty) = result.transform.apply(ref_star.0, ref_star.1);
+        let error = ((tx - target_star.0).powi(2) + (ty - target_star.1).powi(2)).sqrt();
+        max_error = max_error.max(error);
+    }
+
+    assert!(
+        max_error < 2.0,
+        "Max transformation error with 0.5x scale: {} pixels",
+        max_error
+    );
+}
+
+#[test]
+fn test_extreme_scale_with_rotation() {
+    // Combined extreme scale (1.5x) with rotation (30°)
+    let ref_stars = generate_random_positions(100, 2000.0, 2000.0, 20003);
+
+    let scale = 1.5;
+    let angle_deg: f64 = 30.0;
+    let angle_rad = angle_deg.to_radians();
+    let dx = 50.0;
+    let dy = -30.0;
+    let center_x = 1000.0;
+    let center_y = 1000.0;
+
+    let target_stars = transform_stars(&ref_stars, dx, dy, angle_rad, scale, center_x, center_y);
+
+    let config = RegistrationConfig::builder()
+        .with_scale()
+        .min_stars(6)
+        .min_matched_stars(4)
+        .max_residual(5.0)
+        .build();
+
+    let registrator = Registrator::new(config);
+    let result = registrator
+        .register_stars(&ref_stars, &target_stars)
+        .expect("Registration should succeed with 1.5x scale + 30° rotation");
+
+    let recovered_scale = result.transform.scale_factor();
+    let scale_error = (recovered_scale - scale).abs();
+
+    assert!(
+        scale_error < 0.01,
+        "Combined scale error: expected {}, got {}",
+        scale,
+        recovered_scale
+    );
+
+    let recovered_angle = result.transform.rotation_angle();
+    let rotation_error_deg = (recovered_angle - angle_rad).abs().to_degrees();
+
+    assert!(
+        rotation_error_deg < 0.1,
+        "Combined rotation error: expected {}°, got {}°",
+        angle_deg,
+        recovered_angle.to_degrees()
+    );
+}
+
+// ============================================================================
+// Affine Robustness Tests
+// ============================================================================
+
+/// Apply an affine transform to star positions.
+fn apply_affine(stars: &[(f64, f64)], params: [f64; 6]) -> Vec<(f64, f64)> {
+    let [a, b, tx, c, d, ty] = params;
+    stars
+        .iter()
+        .map(|(x, y)| (a * x + b * y + tx, c * x + d * y + ty))
+        .collect()
+}
+
+#[test]
+fn test_affine_with_outliers() {
+    // Affine transform with differential scale + shear, plus 15% spurious stars
+    let ref_stars = generate_random_positions(100, 2000.0, 2000.0, 30001);
+
+    let scale_x = 1.01;
+    let scale_y = 0.99;
+    let shear = 0.005;
+    let dx = 40.0;
+    let dy = -25.0;
+
+    let affine_params = [scale_x, shear, dx, 0.0, scale_y, dy];
+    let target_stars = apply_affine(&ref_stars, affine_params);
+
+    // Add 15% spurious stars
+    let target_with_spurious = add_spurious_stars(&target_stars, 15, 2000.0, 2000.0, 30002);
+
+    let config = RegistrationConfig::builder()
+        .full_affine()
+        .min_stars(6)
+        .min_matched_stars(4)
+        .max_residual(5.0)
+        .build();
+
+    let registrator = Registrator::new(config);
+    let result = registrator
+        .register_stars(&ref_stars, &target_with_spurious)
+        .expect("Affine registration should succeed with 15% spurious stars");
+
+    assert_eq!(result.transform.transform_type, TransformType::Affine);
+
+    // Validate transform accuracy on original (non-spurious) stars
+    let mut max_error = 0.0f64;
+    for (ref_star, target_star) in ref_stars.iter().zip(target_stars.iter()) {
+        let (tx, ty) = result.transform.apply(ref_star.0, ref_star.1);
+        let error = ((tx - target_star.0).powi(2) + (ty - target_star.1).powi(2)).sqrt();
+        max_error = max_error.max(error);
+    }
+
+    assert!(
+        max_error < 2.0,
+        "Max affine transformation error with outliers: {} pixels",
+        max_error
+    );
+}
+
+#[test]
+fn test_affine_with_noise_and_missing() {
+    // Affine with noise + 10% missing stars
+    let ref_stars = generate_random_positions(100, 2000.0, 2000.0, 30003);
+
+    let scale_x = 1.005;
+    let scale_y = 0.995;
+    let shear = 0.003;
+    let dx = 30.0;
+    let dy = 20.0;
+
+    let affine_params = [scale_x, shear, dx, 0.0, scale_y, dy];
+    let target_stars = apply_affine(&ref_stars, affine_params);
+
+    // Add noise
+    let target_noisy = add_position_noise(&target_stars, 0.4, 30004);
+    // Remove 10%
+    let target_modified = remove_random_stars(&target_noisy, 0.1, 30005);
+
+    let config = RegistrationConfig::builder()
+        .full_affine()
+        .min_stars(6)
+        .min_matched_stars(4)
+        .max_residual(5.0)
+        .build();
+
+    let registrator = Registrator::new(config);
+    let result = registrator
+        .register_stars(&ref_stars, &target_modified)
+        .expect("Affine registration should succeed with noise and missing stars");
+
+    assert_eq!(result.transform.transform_type, TransformType::Affine);
+    assert!(
+        result.rms_error < 3.0,
+        "Affine RMS error with noise: {}",
+        result.rms_error
+    );
+}
+
+// ============================================================================
+// Homography Robustness Tests
+// ============================================================================
+
+/// Apply a homography to star positions.
+fn apply_homography(stars: &[(f64, f64)], params: [f64; 8]) -> Vec<(f64, f64)> {
+    stars
+        .iter()
+        .map(|(x, y)| {
+            let w = params[6] * x + params[7] * y + 1.0;
+            let x_prime = (params[0] * x + params[1] * y + params[2]) / w;
+            let y_prime = (params[3] * x + params[4] * y + params[5]) / w;
+            (x_prime, y_prime)
+        })
+        .collect()
+}
+
+#[test]
+fn test_homography_with_outliers() {
+    // Homography with perspective + 10% spurious stars
+    let ref_stars = generate_random_positions(120, 2000.0, 2000.0, 40001);
+
+    let angle_rad = 0.3_f64.to_radians();
+    let cos_a = angle_rad.cos();
+    let sin_a = angle_rad.sin();
+    let dx = 30.0;
+    let dy = -20.0;
+    let h6 = 0.00002;
+    let h7 = 0.00001;
+
+    let homography_params = [cos_a, -sin_a, dx, sin_a, cos_a, dy, h6, h7];
+    let target_stars = apply_homography(&ref_stars, homography_params);
+
+    // Add 10% spurious
+    let target_with_spurious = add_spurious_stars(&target_stars, 12, 2000.0, 2000.0, 40002);
+
+    let config = RegistrationConfig::builder()
+        .full_homography()
+        .min_stars(8)
+        .min_matched_stars(6)
+        .max_residual(5.0)
+        .build();
+
+    let registrator = Registrator::new(config);
+    let result = registrator
+        .register_stars(&ref_stars, &target_with_spurious)
+        .expect("Homography registration should succeed with outliers");
+
+    assert_eq!(result.transform.transform_type, TransformType::Homography);
+
+    // Validate transform accuracy
+    let mut max_error = 0.0f64;
+    for (ref_star, target_star) in ref_stars.iter().zip(target_stars.iter()) {
+        let (tx, ty) = result.transform.apply(ref_star.0, ref_star.1);
+        let error = ((tx - target_star.0).powi(2) + (ty - target_star.1).powi(2)).sqrt();
+        max_error = max_error.max(error);
+    }
+
+    assert!(
+        max_error < 3.0,
+        "Max homography transformation error with outliers: {} pixels",
+        max_error
+    );
+}
+
+#[test]
+fn test_homography_with_noise_and_partial_overlap() {
+    // Homography with noise + 70% overlap
+    let ref_stars = generate_random_positions(150, 2000.0, 2000.0, 40003);
+
+    let dx = 600.0; // 30% shift = 70% overlap
+    let h6 = 0.000015;
+    let h7 = 0.000008;
+
+    let homography_params = [1.0, 0.0, dx, 0.0, 1.0, 0.0, h6, h7];
+    let target_stars = apply_homography(&ref_stars, homography_params);
+
+    // Filter to overlap region
+    let target_in_bounds: Vec<(f64, f64)> = target_stars
+        .iter()
+        .filter(|(x, y)| *x >= 50.0 && *x <= 1950.0 && *y >= 50.0 && *y <= 1950.0)
+        .copied()
+        .collect();
+
+    // Add noise
+    let target_noisy = add_position_noise(&target_in_bounds, 0.3, 40004);
+
+    // Filter reference to overlapping region
+    let ref_in_overlap: Vec<(f64, f64)> = ref_stars
+        .iter()
+        .filter(|(x, y)| {
+            let w = h6 * x + h7 * y + 1.0;
+            let new_x = (x + dx) / w;
+            let new_y = *y / w;
+            (50.0..=1950.0).contains(&new_x) && (50.0..=1950.0).contains(&new_y)
+        })
+        .copied()
+        .collect();
+
+    let config = RegistrationConfig::builder()
+        .full_homography()
+        .min_stars(8)
+        .min_matched_stars(6)
+        .max_residual(5.0)
+        .build();
+
+    let registrator = Registrator::new(config);
+    let result = registrator
+        .register_stars(&ref_in_overlap, &target_noisy)
+        .expect("Homography should succeed with noise and partial overlap");
+
+    assert_eq!(result.transform.transform_type, TransformType::Homography);
+    assert!(
+        result.rms_error < 3.0,
+        "Homography RMS error with noise and overlap: {}",
+        result.rms_error
     );
 }
