@@ -1,6 +1,6 @@
-// Color formats
+// Color formats and types
 pub use crate::common::{
-    ALL_FORMATS, ALPHA_FORMATS, ChannelCount, ChannelSize, ChannelType, ColorFormat,
+    ALL_FORMATS, ALPHA_FORMATS, ChannelCount, ChannelSize, ChannelType, Color, ColorFormat,
 };
 
 // Error handling

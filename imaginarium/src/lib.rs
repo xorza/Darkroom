@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 
 mod common;
+pub mod drawing;
 mod gpu;
 mod image;
 mod ops;
