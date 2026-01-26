@@ -13,11 +13,11 @@
 //! cargo test -p lumos star_detection::tests
 //!
 //! # Run real-data tests (requires LUMOS_CALIBRATION_DIR)
-//! cargo test -p lumos --features benchmark-tests star_detection::tests::real_data -- --ignored
+//! cargo test -p lumos --features real-data star_detection::tests::real_data -- --ignored
 //! ```
 
 pub mod common;
-#[cfg(feature = "benchmark-tests")]
+#[cfg(feature = "real-data")]
 pub mod real_data;
 pub mod synthetic;
 mod unit_tests;

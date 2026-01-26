@@ -7,7 +7,7 @@ description = ""
 [features]
 slow-tests = []
 bench = ["dep:criterion"]
-benchmark-tests = []
+real-data = []
 
 [dependencies]
 common = { workspace = true }
