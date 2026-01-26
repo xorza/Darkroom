@@ -2,12 +2,11 @@
 //!
 //! This module provides runtime dispatch to the best available SIMD implementation:
 //! - AVX2/SSE4.1 on x86_64
-//! - NEON on aarch64
-//! - Scalar fallback on other platforms
+//! - Scalar fallback on aarch64 (NEON removed - benchmarks showed scalar is faster)
 //!
 //! # Supported Interpolation Methods
 //!
-//! - **Bilinear**: SIMD-accelerated on all platforms (8 pixels/cycle on AVX2)
+//! - **Bilinear**: SIMD-accelerated on x86_64 (8 pixels/cycle on AVX2)
 //! - **Lanczos3**: Scalar only (SIMD provides <5% improvement due to memory-bound LUT lookups)
 
 #[cfg(target_arch = "x86_64")]
@@ -16,18 +15,12 @@ use crate::common::cpu_features;
 #[cfg(target_arch = "x86_64")]
 pub mod sse;
 
-#[cfg(target_arch = "aarch64")]
-pub mod neon;
-
 use crate::registration::interpolation::lanczos_kernel;
 use crate::registration::types::TransformMatrix;
 
 /// Warp a row of pixels using SIMD-accelerated bilinear interpolation.
 ///
-/// This processes multiple output pixels in parallel by:
-/// 1. Computing source coordinates for multiple pixels at once
-/// 2. Gathering pixel values using SIMD
-/// 3. Computing bilinear weights and interpolating in parallel
+/// Uses AVX2/SSE4.1 on x86_64, scalar on other platforms.
 ///
 /// # Arguments
 /// * `input` - Input image data (row-major)
@@ -47,10 +40,9 @@ pub fn warp_row_bilinear_simd(
     inverse: &TransformMatrix,
     border_value: f32,
 ) {
-    let output_width = output_row.len();
-
     #[cfg(target_arch = "x86_64")]
     {
+        let output_width = output_row.len();
         if output_width >= 8 && cpu_features::has_avx2() {
             unsafe {
                 sse::warp_row_bilinear_avx2(
@@ -81,25 +73,7 @@ pub fn warp_row_bilinear_simd(
         }
     }
 
-    #[cfg(target_arch = "aarch64")]
-    {
-        if output_width >= 4 {
-            unsafe {
-                neon::warp_row_bilinear_neon(
-                    input,
-                    input_width,
-                    input_height,
-                    output_row,
-                    output_y,
-                    inverse,
-                    border_value,
-                );
-            }
-            return;
-        }
-    }
-
-    // Scalar fallback
+    // Scalar fallback (also used on aarch64 - NEON was slower due to gather overhead)
     warp_row_bilinear_scalar(
         input,
         input_width,
