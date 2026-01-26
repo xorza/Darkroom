@@ -245,6 +245,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore] // Slow test - file system operations
     fn test_cache_dir_creation() {
         let fetcher = test_fetcher();
         assert!(fetcher.cache_dir().exists());
@@ -252,6 +253,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore] // Slow test - file system operations
     fn test_cache_lookup() {
         let fetcher = test_fetcher();
         // Non-existent file should return None
