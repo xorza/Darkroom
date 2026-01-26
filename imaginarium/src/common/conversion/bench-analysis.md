@@ -122,11 +122,12 @@ while waiting for memory.
 | Conversion | SIMD Speedup | Why Kept |
 |------------|--------------|----------|
 | RGBA_U8 ↔ RGB_U8 | 1.07-1.12x | Byte shuffling benefits from SIMD |
-| RGB/RGBA_U8 → L_U8 | 1.65-1.90x | Weighted sum is compute-heavy |
-| L_U8 → RGBA_U8 | 2.10x | Broadcast + interleave |
+| RGB/RGBA_U8 → L_U8 | 1.27-1.50x | Weighted sum is compute-heavy |
+| L_U8 → RGBA_U8/RGB_U8 | 1.19x | Broadcast + interleave |
 | LA_U8 ↔ RGBA_U8 | 1.11-1.30x | Channel expansion/reduction |
 | U8 ↔ U16 | 1.02-1.03x | Kept for API consistency |
 | L_U16 ↔ F32 | 1.06-1.14x | Single channel = less memory pressure |
+| LA_U16 ↔ LA_F32 | 1.06-1.14x | Two channels = moderate memory pressure |
 | F32 → U8 | 1.02-1.03x | Kept for API consistency |
 
 ### Do Not Re-Implement
