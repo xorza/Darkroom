@@ -2,7 +2,7 @@
 
 use crate::AstroImage;
 
-use crate::star_detection::visual_tests::output::{
+use crate::star_detection::tests::common::output::{
     PassCriteria, check_pass, compute_detection_metrics, crowded_criteria, faint_star_criteria,
     save_comparison_png, save_grayscale_png, save_metrics,
 };

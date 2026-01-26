@@ -3,7 +3,7 @@
 //! Tests the background estimation with various synthetic backgrounds.
 
 use crate::star_detection::background::estimate_background;
-use crate::star_detection::visual_tests::output::save_grayscale_png;
+use crate::star_detection::tests::common::output::save_grayscale_png;
 use crate::testing::init_tracing;
 use crate::testing::synthetic::{
     NebulaConfig, StarFieldConfig, add_gradient_background, add_nebula_background,

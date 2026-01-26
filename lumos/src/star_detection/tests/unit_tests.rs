@@ -1,6 +1,6 @@
-//! Tests for star detection.
+//! Unit tests for star detection.
 
-use super::{
+use crate::star_detection::{
     Star, StarDetectionConfig, compute_fwhm_median_mad, filter_fwhm_outliers,
     remove_duplicate_stars,
 };

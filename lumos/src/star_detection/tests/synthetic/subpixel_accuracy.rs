@@ -3,10 +3,10 @@
 //! Tests the algorithm's ability to detect sub-pixel shifts between images,
 //! which is critical for image registration and stacking.
 
-use super::synthetic::{SyntheticFieldConfig, SyntheticStar, generate_star_field};
+use super::{SyntheticFieldConfig, SyntheticStar, generate_star_field};
 use crate::AstroImage;
 
-use super::output::save_image_png;
+use crate::star_detection::tests::common::save_image_png;
 use crate::star_detection::{Star, StarDetectionConfig, find_stars};
 use imaginarium::Color;
 use imaginarium::drawing::{draw_circle, draw_cross};

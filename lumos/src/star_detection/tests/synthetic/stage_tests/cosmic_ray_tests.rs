@@ -4,7 +4,7 @@
 
 use crate::AstroImage;
 
-use crate::star_detection::visual_tests::output::{
+use crate::star_detection::tests::common::output::{
     gray_to_rgb_image_stretched, save_grayscale_png, save_image_png,
 };
 use crate::star_detection::{StarDetectionConfig, find_stars};

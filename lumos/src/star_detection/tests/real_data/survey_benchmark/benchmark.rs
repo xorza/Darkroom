@@ -7,7 +7,7 @@ use super::fields::TestField;
 use super::image_fetch::ImageFetcher;
 use super::wcs::WCS;
 use crate::astro_image::AstroImage;
-use crate::star_detection::visual_tests::output::{
+use crate::star_detection::tests::common::output::{
     DetectionMetrics, compute_detection_metrics, save_comparison_png, save_grayscale_png,
     save_metrics,
 };

@@ -28,12 +28,8 @@ mod deblend;
 mod detection;
 mod median_filter;
 
-#[cfg(all(test, feature = "benchmark-tests"))]
-pub mod real_data_tests;
 #[cfg(test)]
-mod tests;
-#[cfg(test)]
-mod visual_tests;
+pub mod tests;
 
 #[cfg(feature = "bench")]
 pub mod bench {

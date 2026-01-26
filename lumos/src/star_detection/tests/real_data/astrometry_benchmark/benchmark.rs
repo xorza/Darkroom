@@ -6,7 +6,7 @@ use super::local_solver::{AstrometryStar, LocalSolver};
 use super::rectangle_cache::{RectangleCache, RectangleInfo};
 use crate::AstroImage;
 
-use crate::star_detection::visual_tests::output::{
+use crate::star_detection::tests::common::output::{
     DetectionMetrics, compute_detection_metrics, save_comparison_png, save_grayscale_png,
     save_metrics,
 };

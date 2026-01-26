@@ -1,8 +1,8 @@
 //! Debug test that outputs intermediate steps of star detection.
 
-use super::output::{gray_to_rgb_image_stretched, save_image_png};
-use super::synthetic::{SyntheticFieldConfig, SyntheticStar, generate_star_field};
+use super::{SyntheticFieldConfig, SyntheticStar, generate_star_field};
 use crate::AstroImage;
+use crate::star_detection::tests::common::{gray_to_rgb_image_stretched, save_image_png};
 
 use crate::star_detection::background::estimate_background;
 use crate::star_detection::constants::dilate_mask;

@@ -6,7 +6,7 @@ use crate::star_detection::StarDetectionConfig;
 use crate::star_detection::background::estimate_background;
 use crate::star_detection::centroid::compute_centroid;
 use crate::star_detection::detection::StarCandidate;
-use crate::star_detection::visual_tests::output::{
+use crate::star_detection::tests::common::output::{
     gray_to_rgb_image_stretched, save_grayscale_png, save_image_png,
 };
 use crate::testing::init_tracing;
