@@ -1,159 +1,210 @@
 # Imaginarium Conversion Optimization Plan
 
-## Status: ✅ COMPLETE
+## Current Status
 
-All 5 phases have been implemented with SIMD optimizations:
+### Completed SIMD Optimizations
 
-| Phase | Conversion | Status | Measured Speedup |
-|-------|-----------|--------|------------------|
-| 1 | RGBA↔RGB U8 | ✅ Complete | 1.5-3.2x |
-| 2 | Luminance U8 | ✅ Complete | 1.6-3.1x |
-| 3 | U8↔F32 | ✅ Complete | 1.35-1.6x |
-| 4 | U8↔U16 | ✅ Complete | 1.35-1.8x |
-| 5 | F32 channels | ✅ Complete | 1.1-1.4x |
+| Conversion | Technique | Speedup |
+|------------|-----------|---------|
+| RGBA↔RGB U8 | SSSE3 PSHUFB shuffle | 1.5-3.2x |
+| Luminance U8 | PMADDUBSW Rec.709 | 1.6-3.1x |
+| U8↔F32 | SSE2 unpack + convert | 1.35-1.6x |
+| U8↔U16 | Bit replication | 1.35-1.8x |
+| F32 channels | Rayon parallel | 1.1-1.4x |
+| F32 Luminance | SSE shuffle + FMA | 1.1-1.25x |
+| L_F32↔RGBA_F32 | SSE broadcast | 1.1-1.2x |
 
----
+### Current Throughput (4096×4096)
 
-## Quick Benchmark Commands
-
-Run only specific benchmarks to save time (full suite takes ~5+ minutes):
-
-```bash
-# Quick single conversion test (~5s)
-cargo bench -p imaginarium --features bench --bench conversion -- "rgba_u8_to_rgb_u8/4096"
-
-# Test specific phase
-cargo bench -p imaginarium --features bench --bench conversion -- "rgba_u8_to_rgb\|rgb_u8_to_rgba"  # Phase 1
-cargo bench -p imaginarium --features bench --bench conversion -- "to_l_u8\|l_u8_to"              # Phase 2
-cargo bench -p imaginarium --features bench --bench conversion -- "u8.*f32\|f32.*u8"              # Phase 3
-cargo bench -p imaginarium --features bench --bench conversion -- "u8.*u16\|u16.*u8"              # Phase 4
-cargo bench -p imaginarium --features bench --bench conversion -- "f32.*rgb.*f32"                 # Phase 5
-
-# By image size (4096 is most representative for SIMD gains)
-cargo bench -p imaginarium --features bench --bench conversion -- "4096x4096"
-
-# By category
-cargo bench -p imaginarium --features bench --bench conversion -- "conversion_channels"
-cargo bench -p imaginarium --features bench --bench conversion -- "conversion_bit_depth"
-cargo bench -p imaginarium --features bench --bench conversion -- "conversion_luminance"
-
-# Quick iteration with fewer samples (~20% faster)
-cargo bench -p imaginarium --features bench --bench conversion -- "TARGET" -- --sample-size 50
-
-# Compare against baseline
-cargo bench -p imaginarium --features bench --bench conversion -- "TARGET" -- --save-baseline before
-# ... make changes ...
-cargo bench -p imaginarium --features bench --bench conversion -- "TARGET" -- --baseline before
-```
+| Conversion | Throughput | Bottleneck |
+|------------|------------|------------|
+| RGB→L U8 | 1.16 Gelem/s | Compute |
+| L→RGBA U8 | 1.00 Gelem/s | Memory |
+| RGBA→RGB U8 | 757 Melem/s | Memory |
+| U8→U16 | 466 Melem/s | Memory |
+| U8→F32 | 292 Melem/s | Memory |
+| F32→RGB F32 | 210 Melem/s | Memory |
 
 ---
 
-## Current Performance (4096×4096 = 16.7M pixels)
+## Phase 6: AVX2 Upgrade (High Impact)
 
-| Conversion | Time | Throughput | Notes |
-|------------|------|------------|-------|
-| **U8 Channel (SIMD)** |
-| RGBA→RGB U8 | 22.2ms | 756 Melem/s | SSSE3 shuffle |
-| RGB→RGBA U8 | 21.3ms | 789 Melem/s | SSSE3 shuffle |
-| **U8 Luminance (SIMD)** |
-| RGBA→L U8 | 17.7ms | 947 Melem/s | PMADDUBSW |
-| RGB→L U8 | 14.4ms | 1.16 Gelem/s | PMADDUBSW |
-| L→RGBA U8 | 16.7ms | 1.00 Gelem/s | Broadcast |
-| **Bit Depth (SIMD)** |
-| RGBA U8→F32 | 57.4ms | 292 Melem/s | Unpack+convert |
-| RGBA F32→U8 | 59.3ms | 283 Melem/s | Convert+pack |
-| RGBA U8→U16 | 36.0ms | 466 Melem/s | (val<<8)\|val |
-| RGBA U16→U8 | 36.1ms | 465 Melem/s | val>>8 |
-| **F32 Channel (Rayon)** |
-| RGBA→RGB F32 | 79.9ms | 210 Melem/s | Scalar+parallel |
-| RGB→RGBA F32 | 78.5ms | 214 Melem/s | Scalar+parallel |
+**Goal**: 2x throughput on modern CPUs (89%+ support per Steam survey)
 
----
+**Conversions to upgrade**:
+1. RGBA↔RGB U8 - 256-bit shuffle with `_mm256_shuffle_epi8`
+2. Luminance U8 - 256-bit `_mm256_maddubs_epi16`
+3. U8↔F32 - 256-bit unpack/convert
 
-## Future Optimization Ideas
-
-### High Priority (Good ROI)
-
-1. **AVX2/AVX-512 paths** for x86_64 CPUs with wider SIMD
-   - 256-bit AVX2: ~2x throughput over SSE
-   - 512-bit AVX-512: ~4x throughput over SSE
-   - Auto-detect with `is_x86_feature_detected!("avx2")`
-
-2. **F32 Luminance SIMD** (currently scalar)
-   - `RGBA_F32→L_F32`: 280 Melem/s → potential 500+ Melem/s
-   - Use `_mm_dp_ps` (SSE4.1) or FMA for dot product
-
-3. **L→RGBA F32 expansion** (currently scalar)
-   - `L_F32→RGBA_F32`: 291 Melem/s → potential 500+ Melem/s
-   - Simple broadcast operation
-
-### Medium Priority
-
-4. **RGB U8↔F32 SIMD paths** (currently only RGBA)
-   - Would need 3-byte stride handling
-   - Complex but doable with shuffle masks
-
-5. **Tile-based processing** for cache optimization
-   - Process 64×64 or 128×128 tiles
-   - Better L2/L3 cache utilization on large images
-
-6. **Buffer reuse API**
-   - Avoid `Image::new_black()` allocation on each conversion
-   - Add `convert_into(src, dst)` that reuses existing buffer
-
-### Lower Priority
-
-7. **LA (Luminance+Alpha) format support**
-   - `RGBA→LA`, `LA→RGBA` conversions
-   - Useful for grayscale with transparency
-
-8. **In-place conversions** where possible
-   - `RGBA_U8→RGB_U8` could work in-place (shrinking)
-   - Reduces memory allocations
-
----
-
-## Implementation Notes
-
-### Architecture Detection
-
+**Implementation**:
 ```rust
 #[cfg(target_arch = "x86_64")]
 if is_x86_feature_detected!("avx2") {
     // Use AVX2 path
 } else if is_x86_feature_detected!("ssse3") {
-    // Use SSSE3 path (current)
-} else {
-    // Fall back to scalar
+    // Fall back to SSSE3
 }
-
-#[cfg(target_arch = "aarch64")]
-// NEON is always available on aarch64
 ```
 
-### Key SIMD Techniques Used
+**Expected improvement**: ~2x for cache-friendly sizes
 
-| Technique | Intrinsic | Use Case |
-|-----------|-----------|----------|
-| Byte shuffle | `_mm_shuffle_epi8` | RGBA↔RGB reorder |
-| Weighted sum | `_mm_maddubs_epi16` | Luminance calculation |
-| Zero-extend | `_mm_unpacklo_epi8` | U8→U16, U8→U32 |
-| Float convert | `_mm_cvtepi32_ps` | U32→F32 |
-| Pack saturate | `_mm_packus_epi16` | U16→U8 |
+**References**:
+- [Simd Library](https://github.com/ermig1979/Simd) - C++ SIMD image processing
+- [fast_image_resize](https://github.com/Cykooz/fast_image_resize) - Rust SIMD resizing
 
-### Memory Bandwidth Limits
+---
 
-At 4096×4096, operations are often memory-bound:
-- DDR4-3200: ~25 GB/s theoretical, ~15-20 GB/s practical
-- Current throughput: 5-10 GB/s effective (read+write)
-- SIMD helps by reducing instruction count, not memory speed
+## Phase 7: Cache-Optimized Tiling (Medium Impact)
+
+**Problem**: 4096×4096 images (67MB+) exceed L3 cache, causing memory bandwidth bottleneck.
+
+**Solution**: Process in tiles that fit in L2 cache (256KB-1MB per core).
+
+**Tile size calculation**:
+- L2 cache: ~256KB per core
+- RGBA_U8 tile: sqrt(256KB/4) ≈ 256×256 pixels
+- Process tiles in Z-order (Morton curve) for better spatial locality
+
+**Implementation approach**:
+```rust
+fn convert_tiled(from: &Image, to: &mut Image, tile_size: usize) {
+    // Divide image into tiles
+    // Process each tile with SIMD
+    // Use rayon to parallelize across tiles
+}
+```
+
+**Expected improvement**: 10-30% for large images
+
+**References**:
+- [Texture Tiling and Swizzling](https://fgiesen.wordpress.com/2011/01/17/texture-tiling-and-swizzling/)
+- [Cache Tiling for Image Processing](https://www.researchgate.net/publication/225270282)
+
+---
+
+## Phase 8: Missing Format Paths
+
+### High Priority
+
+| From | To | Current | Priority |
+|------|-----|---------|----------|
+| RGB_U8 | RGB_F32 | Scalar | Add SIMD |
+| RGB_F32 | RGB_U8 | Scalar | Add SIMD |
+| LA_U8 | RGBA_U8 | Scalar | Add SIMD |
+| RGBA_U8 | LA_U8 | Scalar | Add SIMD |
+
+### Medium Priority
+
+| From | To | Notes |
+|------|-----|-------|
+| RGB_U16 | RGB_F32 | HDR workflow |
+| RGBA_U16 | RGBA_F32 | HDR workflow |
+| L_U16 | L_F32 | HDR grayscale |
+
+---
+
+## Phase 9: API Improvements
+
+### Buffer Reuse
+
+Current issue: `Image::new_black()` allocates on every conversion.
+
+```rust
+// Current (allocates)
+let converted = image.convert(ColorFormat::RGB_U8)?;
+
+// Proposed (reuses buffer)
+image.convert_into(&mut output_buffer, ColorFormat::RGB_U8)?;
+```
+
+### In-Place Conversions
+
+For shrinking conversions (RGBA→RGB, RGBA→L):
+```rust
+// Could reuse input buffer when output is smaller
+image.convert_in_place(ColorFormat::RGB_U8)?;
+```
+
+---
+
+## Test Coverage Gaps
+
+### Missing SIMD Correctness Tests
+
+The current tests only verify scalar conversions. Need to add:
+
+1. **Round-trip tests for all SIMD paths**:
+   - RGBA_U8 → RGB_U8 → RGBA_U8
+   - U8 → F32 → U8 (boundary values)
+   - U8 → U16 → U8
+
+2. **Edge case tests**:
+   - Width not divisible by SIMD width (16 for SSE, 32 for AVX2)
+   - Single-row images
+   - Very small images (< SIMD width)
+
+3. **Value correctness tests**:
+   - Luminance weights (compare to known correct values)
+   - F32 clamping (values > 1.0, < 0.0)
+   - U16 scaling (0xFF → 0xFFFF, not 0xFF00)
+
+### Suggested Test File
+
+Create `imaginarium/src/common/conversion/simd_tests.rs`:
+
+```rust
+#[test]
+fn test_rgba_to_rgb_u8_simd_correctness() {
+    // Test various widths including non-SIMD-aligned
+    for width in [1, 15, 16, 17, 31, 32, 33, 100, 256] {
+        let src = create_test_rgba(width, 1);
+        let dst = src.convert(ColorFormat::RGB_U8).unwrap();
+        // Verify each pixel
+    }
+}
+
+#[test]
+fn test_luminance_weights() {
+    // White pixel should give L=255
+    // Pure red should give L ≈ 54 (0.2126 * 255)
+    // Pure green should give L ≈ 183 (0.7152 * 255)
+    // Pure blue should give L ≈ 18 (0.0722 * 255)
+}
+
+#[test]
+fn test_u8_to_u16_boundary_values() {
+    // 0 → 0
+    // 255 → 65535 (not 65280)
+}
+```
+
+---
+
+## Benchmark Commands
+
+```bash
+# Quick single conversion
+cargo bench -p imaginarium --features bench --bench conversion -- "rgba_u8_to_rgb_u8/4096"
+
+# By category
+cargo bench -p imaginarium --features bench --bench conversion -- "conversion_channels"
+cargo bench -p imaginarium --features bench --bench conversion -- "conversion_luminance"
+cargo bench -p imaginarium --features bench --bench conversion -- "conversion_bit_depth"
+
+# Large images only (memory-bound)
+cargo bench -p imaginarium --features bench --bench conversion -- "4096x4096"
+
+# Compare before/after
+cargo bench ... -- --save-baseline before
+# make changes
+cargo bench ... -- --baseline before
+```
 
 ---
 
 ## Files
 
 - `src/common/conversion/conversion_simd.rs` - SIMD implementations
-- `src/common/conversion/conversion.rs` - Scalar fallbacks
+- `src/common/conversion/conversion.rs` - Scalar fallbacks  
 - `benches/conversion.rs` - Criterion benchmarks
-- `bench-analysis.md` - Detailed analysis
-- `bench-results.txt` - Raw benchmark output
+- `bench-analysis.md` - Performance analysis
