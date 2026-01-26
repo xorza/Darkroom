@@ -21,6 +21,7 @@ pub fn benchmarks(c: &mut Criterion, _calibration_dir: &Path) {
 }
 
 /// Generate matched point pairs for testing.
+#[allow(clippy::type_complexity)]
 fn generate_point_pairs(
     count: usize,
     transform: &TransformMatrix,

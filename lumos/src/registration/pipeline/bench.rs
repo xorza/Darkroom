@@ -69,8 +69,8 @@ fn benchmark_full_pipeline(c: &mut Criterion) {
     let ref_stars = generate_star_grid(10, 10, 100.0, (200.0, 200.0));
     let mut target_stars = transform_stars(&ref_stars, &transform);
     // Add 20% outliers
-    for i in 0..20 {
-        target_stars[i] = (500.0 + i as f64 * 20.0, 500.0 - i as f64 * 10.0);
+    for (i, star) in target_stars.iter_mut().enumerate().take(20) {
+        *star = (500.0 + i as f64 * 20.0, 500.0 - i as f64 * 10.0);
     }
 
     group.bench_function("with_20%_outliers", |b| {

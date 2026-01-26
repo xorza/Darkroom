@@ -34,6 +34,7 @@ fn generate_gaussian_stamp(
 }
 
 /// Generate a synthetic Moffat star stamp for benchmarking.
+#[allow(clippy::too_many_arguments)]
 fn generate_moffat_stamp(
     width: usize,
     height: usize,

@@ -723,7 +723,7 @@ fn compute_position_threshold(positions: &[(f64, f64)]) -> f64 {
 
 /// Convert star matches to point pairs for transformation estimation.
 #[allow(clippy::type_complexity)]
-#[cfg_attr(not(any(test, feature = "bench")), allow(dead_code))]
+#[allow(dead_code)]
 pub(crate) fn matches_to_point_pairs(
     matches: &[StarMatch],
     ref_positions: &[(f64, f64)],

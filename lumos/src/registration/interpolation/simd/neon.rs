@@ -50,8 +50,6 @@ pub unsafe fn warp_row_bilinear_neon(
         let ey_f_vec = vdupq_n_f32(ey_f);
         let hy_1_vec = vdupq_n_f32(hy_1);
 
-        let one = vdupq_n_f32(1.0);
-
         let chunks = output_width / 4;
 
         for chunk in 0..chunks {

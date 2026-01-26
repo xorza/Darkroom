@@ -70,9 +70,13 @@ pub unsafe fn median_filter_row_neon(
 }
 
 /// Vectorized median of 9 elements using NEON.
+///
+/// Uses a 25-comparator sorting network optimized for finding the median.
+/// After the network, v4 contains the median of each SIMD lane.
 #[cfg(target_arch = "aarch64")]
 #[target_feature(enable = "neon")]
 #[inline]
+#[allow(clippy::too_many_arguments)]
 unsafe fn median9_neon(
     mut v0: float32x4_t,
     mut v1: float32x4_t,
@@ -85,6 +89,7 @@ unsafe fn median9_neon(
     mut v8: float32x4_t,
 ) -> float32x4_t {
     // Sorting network using min/max
+    // The final assignments to v0-v3, v5-v8 are unused because we only need v4 (median)
     macro_rules! swap {
         ($a:ident, $b:ident) => {
             let t = $a;
@@ -119,6 +124,9 @@ unsafe fn median9_neon(
     swap!(v2, v4);
     swap!(v2, v3);
     swap!(v4, v5);
+
+    // Suppress unused assignment warnings - only v4 (median) is needed
+    let _ = (v0, v1, v2, v3, v5, v6, v7, v8);
 
     v4
 }

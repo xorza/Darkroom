@@ -103,11 +103,13 @@ pub fn simd_implementation_name() -> &'static str {
         if cpu_features::has_sse4_1() {
             return "SSE4.1";
         }
+        return "Scalar";
     }
     #[cfg(target_arch = "aarch64")]
     {
         return "NEON";
     }
+    #[allow(unreachable_code)]
     "Scalar"
 }
 

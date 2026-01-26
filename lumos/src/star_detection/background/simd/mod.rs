@@ -361,6 +361,7 @@ unsafe fn interpolate_segment_sse(
 }
 
 #[cfg(target_arch = "aarch64")]
+#[allow(clippy::too_many_arguments)]
 unsafe fn interpolate_segment_neon(
     bg_out: &mut [f32],
     noise_out: &mut [f32],
@@ -377,40 +378,42 @@ unsafe fn interpolate_segment_neon(
     let delta_bg = right_bg - left_bg;
     let delta_noise = right_noise - left_noise;
 
-    let left_bg_v = vdupq_n_f32(left_bg);
-    let delta_bg_v = vdupq_n_f32(delta_bg);
-    let left_noise_v = vdupq_n_f32(left_noise);
-    let delta_noise_v = vdupq_n_f32(delta_noise);
-    let wx_step_4 = vdupq_n_f32(wx_step * 4.0);
-    let zero = vdupq_n_f32(0.0);
-    let one = vdupq_n_f32(1.0);
+    unsafe {
+        let left_bg_v = vdupq_n_f32(left_bg);
+        let delta_bg_v = vdupq_n_f32(delta_bg);
+        let left_noise_v = vdupq_n_f32(left_noise);
+        let delta_noise_v = vdupq_n_f32(delta_noise);
+        let wx_step_4 = vdupq_n_f32(wx_step * 4.0);
+        let zero = vdupq_n_f32(0.0);
+        let one = vdupq_n_f32(1.0);
 
-    // Initial weights: [wx_start, wx_start+step, wx_start+2*step, wx_start+3*step]
-    let initial_offsets: [f32; 4] = [0.0, wx_step, 2.0 * wx_step, 3.0 * wx_step];
-    let mut wx_v = vaddq_f32(vdupq_n_f32(wx_start), vld1q_f32(initial_offsets.as_ptr()));
+        // Initial weights: [wx_start, wx_start+step, wx_start+2*step, wx_start+3*step]
+        let initial_offsets: [f32; 4] = [0.0, wx_step, 2.0 * wx_step, 3.0 * wx_step];
+        let mut wx_v = vaddq_f32(vdupq_n_f32(wx_start), vld1q_f32(initial_offsets.as_ptr()));
 
-    let mut i = 0;
-    while i + 4 <= len {
-        // Clamp weights to [0, 1]
-        let wx_clamped = vminq_f32(vmaxq_f32(wx_v, zero), one);
+        let mut i = 0;
+        while i + 4 <= len {
+            // Clamp weights to [0, 1]
+            let wx_clamped = vminq_f32(vmaxq_f32(wx_v, zero), one);
 
-        // bg = left_bg + wx * delta_bg (FMA)
-        let bg_v = vfmaq_f32(left_bg_v, wx_clamped, delta_bg_v);
-        let noise_v = vfmaq_f32(left_noise_v, wx_clamped, delta_noise_v);
+            // bg = left_bg + wx * delta_bg (FMA)
+            let bg_v = vfmaq_f32(left_bg_v, wx_clamped, delta_bg_v);
+            let noise_v = vfmaq_f32(left_noise_v, wx_clamped, delta_noise_v);
 
-        vst1q_f32(bg_out.as_mut_ptr().add(i), bg_v);
-        vst1q_f32(noise_out.as_mut_ptr().add(i), noise_v);
+            vst1q_f32(bg_out.as_mut_ptr().add(i), bg_v);
+            vst1q_f32(noise_out.as_mut_ptr().add(i), noise_v);
 
-        wx_v = vaddq_f32(wx_v, wx_step_4);
-        i += 4;
-    }
+            wx_v = vaddq_f32(wx_v, wx_step_4);
+            i += 4;
+        }
 
-    // Handle remainder scalar
-    while i < len {
-        let wx = (wx_start + i as f32 * wx_step).clamp(0.0, 1.0);
-        bg_out[i] = left_bg + wx * delta_bg;
-        noise_out[i] = left_noise + wx * delta_noise;
-        i += 1;
+        // Handle remainder scalar
+        while i < len {
+            let wx = (wx_start + i as f32 * wx_step).clamp(0.0, 1.0);
+            bg_out[i] = left_bg + wx * delta_bg;
+            noise_out[i] = left_noise + wx * delta_noise;
+            i += 1;
+        }
     }
 }
 

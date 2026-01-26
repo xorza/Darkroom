@@ -20,30 +20,32 @@ pub unsafe fn convolve_row_neon(input: &[f32], output: &mut [f32], kernel: &[f32
     let safe_end = width.saturating_sub(radius + 4);
 
     // Handle left edge with scalar
-    for x in 0..safe_start.min(width) {
-        output[x] = convolve_pixel_scalar(input, kernel, radius, x, width);
+    for (x, out) in output.iter_mut().enumerate().take(safe_start.min(width)) {
+        *out = convolve_pixel_scalar(input, kernel, radius, x, width);
     }
 
     // SIMD middle section
     if safe_start < safe_end {
         let mut x = safe_start;
-        while x + 4 <= safe_end + radius {
-            let mut sum = vdupq_n_f32(0.0);
+        unsafe {
+            while x + 4 <= safe_end + radius {
+                let mut sum = vdupq_n_f32(0.0);
 
-            for (k, &kval) in kernel.iter().enumerate() {
-                let kv = vdupq_n_f32(kval);
-                let sx = x + k - radius;
+                for (k, &kval) in kernel.iter().enumerate() {
+                    let kv = vdupq_n_f32(kval);
+                    let sx = x + k - radius;
 
-                // Load 4 input values
-                let vals = vld1q_f32(input.as_ptr().add(sx));
+                    // Load 4 input values
+                    let vals = vld1q_f32(input.as_ptr().add(sx));
 
-                // Multiply-accumulate (FMA)
-                sum = vfmaq_f32(sum, vals, kv);
+                    // Multiply-accumulate (FMA)
+                    sum = vfmaq_f32(sum, vals, kv);
+                }
+
+                // Store 4 output values
+                vst1q_f32(output.as_mut_ptr().add(x), sum);
+                x += 4;
             }
-
-            // Store 4 output values
-            vst1q_f32(output.as_mut_ptr().add(x), sum);
-            x += 4;
         }
 
         // Handle remaining pixels before right edge with scalar
@@ -54,8 +56,13 @@ pub unsafe fn convolve_row_neon(input: &[f32], output: &mut [f32], kernel: &[f32
     }
 
     // Handle right edge with scalar (mirroring)
-    for x in width.saturating_sub(radius)..width {
-        output[x] = convolve_pixel_scalar(input, kernel, radius, x, width);
+    for (x, out) in output
+        .iter_mut()
+        .enumerate()
+        .take(width)
+        .skip(width.saturating_sub(radius))
+    {
+        *out = convolve_pixel_scalar(input, kernel, radius, x, width);
     }
 }
 
@@ -106,8 +113,8 @@ mod tests {
             convolve_row_neon(&input, &mut output_neon, &kernel, radius);
         }
 
-        for x in 0..256 {
-            output_scalar[x] = convolve_pixel_scalar(&input, &kernel, radius, x, 256);
+        for (x, out) in output_scalar.iter_mut().enumerate() {
+            *out = convolve_pixel_scalar(&input, &kernel, radius, x, 256);
         }
 
         for i in 0..256 {
