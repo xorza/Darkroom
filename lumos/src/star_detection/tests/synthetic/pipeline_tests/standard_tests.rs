@@ -3,8 +3,8 @@
 use crate::AstroImage;
 
 use crate::star_detection::tests::common::output::{
-    DetectionMetrics, check_pass, compute_detection_metrics, save_comparison_png,
-    save_grayscale_png, save_metrics, standard_criteria,
+    DetectionMetrics, check_pass, compute_detection_metrics, save_comparison, save_grayscale,
+    save_metrics, standard_criteria,
 };
 use crate::star_detection::{StarDetectionConfig, find_stars};
 use crate::testing::init_tracing;
@@ -22,7 +22,7 @@ fn run_pipeline_test(
     let (pixels, ground_truth) = generate_star_field(field_config);
 
     // Save input
-    save_grayscale_png(
+    save_grayscale(
         &pixels,
         field_config.width,
         field_config.height,
@@ -39,7 +39,7 @@ fn run_pipeline_test(
     let metrics = compute_detection_metrics(&ground_truth, &stars, match_radius);
 
     // Save comparison image
-    save_comparison_png(
+    save_comparison(
         &pixels,
         field_config.width,
         field_config.height,

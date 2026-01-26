@@ -6,7 +6,7 @@
 use super::{SyntheticFieldConfig, SyntheticStar, generate_star_field};
 use crate::AstroImage;
 
-use crate::star_detection::tests::common::save_image_png;
+use crate::star_detection::tests::common::save_image;
 use crate::star_detection::{Star, StarDetectionConfig, find_stars};
 use imaginarium::Color;
 use imaginarium::drawing::{draw_circle, draw_cross};
@@ -386,7 +386,7 @@ fn save_subpixel_visualization(
 
     let output_path =
         common::test_utils::test_output_path("synthetic_starfield/subpixel_shift_test.png");
-    save_image_png(output, &output_path);
+    save_image(output, &output_path);
     println!("\nSaved visualization to: {:?}", output_path);
     println!("  Left: Image 1 (reference)");
     println!(

@@ -2,7 +2,7 @@
 
 use super::{SyntheticFieldConfig, SyntheticStar, generate_star_field};
 use crate::AstroImage;
-use crate::star_detection::tests::common::{gray_to_rgb_image_stretched, save_image_png};
+use crate::star_detection::tests::common::{gray_to_rgb_image_stretched, save_image};
 
 use crate::star_detection::background::estimate_background;
 use crate::star_detection::constants::dilate_mask;
@@ -232,7 +232,7 @@ fn test_debug_synthetic_steps() {
 
     let path =
         common::test_utils::test_output_path("synthetic_starfield/synth_debug_07_detections.png");
-    save_image_png(result_img, &path);
+    save_image(result_img, &path);
     println!("Saved: {:?}", path);
     println!("  Blue circles = true star positions");
     println!("  Green crosses/circles = detected stars");

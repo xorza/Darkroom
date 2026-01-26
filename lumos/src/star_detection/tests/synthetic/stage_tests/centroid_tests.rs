@@ -7,7 +7,7 @@ use crate::star_detection::background::estimate_background;
 use crate::star_detection::centroid::compute_centroid;
 use crate::star_detection::detection::StarCandidate;
 use crate::star_detection::tests::common::output::{
-    gray_to_rgb_image_stretched, save_grayscale_png, save_image_png,
+    gray_to_rgb_image_stretched, save_grayscale, save_image,
 };
 use crate::testing::init_tracing;
 use crate::testing::synthetic::{fwhm_to_sigma, render_gaussian_star};
@@ -60,7 +60,7 @@ fn test_centroid_accuracy() {
     }
 
     // Save input
-    save_grayscale_png(
+    save_grayscale(
         &pixels,
         width,
         height,
@@ -143,7 +143,7 @@ fn test_centroid_accuracy() {
         }
     }
 
-    save_image_png(
+    save_image(
         img,
         &test_output_path("synthetic_starfield/stage_centroid_accuracy_overlay.png"),
     );
@@ -206,7 +206,7 @@ fn test_centroid_snr() {
         *p = p.clamp(0.0, 1.0);
     }
 
-    save_grayscale_png(
+    save_grayscale(
         &pixels,
         width,
         height,
@@ -262,7 +262,7 @@ fn test_centroid_snr() {
         }
     }
 
-    save_image_png(
+    save_image(
         img,
         &test_output_path("synthetic_starfield/stage_centroid_snr_overlay.png"),
     );

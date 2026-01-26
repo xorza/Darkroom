@@ -6,7 +6,7 @@ use crate::star_detection::StarDetectionConfig;
 use crate::star_detection::background::estimate_background;
 use crate::star_detection::detection::detect_stars;
 use crate::star_detection::tests::common::output::{
-    gray_to_rgb_image_stretched, save_grayscale_png, save_image_png,
+    gray_to_rgb_image_stretched, save_grayscale, save_image,
 };
 use crate::testing::init_tracing;
 use crate::testing::synthetic::{fwhm_to_sigma, render_gaussian_star};
@@ -53,7 +53,7 @@ fn test_deblend_star_pair() {
         *p = p.clamp(0.0, 1.0);
     }
 
-    save_grayscale_png(
+    save_grayscale(
         &pixels,
         width,
         height,
@@ -86,7 +86,7 @@ fn test_deblend_star_pair() {
         draw_cross(&mut img, c.peak_x as f32, c.peak_y as f32, 3.0, green, 1.0);
     }
 
-    save_image_png(
+    save_image(
         img,
         &test_output_path("synthetic_starfield/stage_deblend_pair_overlay.png"),
     );
@@ -148,7 +148,7 @@ fn test_deblend_chain() {
         *p = p.clamp(0.0, 1.0);
     }
 
-    save_grayscale_png(
+    save_grayscale(
         &pixels,
         width,
         height,
@@ -182,7 +182,7 @@ fn test_deblend_chain() {
         draw_cross(&mut img, c.peak_x as f32, c.peak_y as f32, 3.0, green, 1.0);
     }
 
-    save_image_png(
+    save_image(
         img,
         &test_output_path("synthetic_starfield/stage_deblend_chain_overlay.png"),
     );
@@ -244,7 +244,7 @@ fn test_deblend_unequal_pair() {
         *p = p.clamp(0.0, 1.0);
     }
 
-    save_grayscale_png(
+    save_grayscale(
         &pixels,
         width,
         height,
@@ -278,7 +278,7 @@ fn test_deblend_unequal_pair() {
         draw_cross(&mut img, c.peak_x as f32, c.peak_y as f32, 3.0, green, 1.0);
     }
 
-    save_image_png(
+    save_image(
         img,
         &test_output_path("synthetic_starfield/stage_deblend_unequal_overlay.png"),
     );

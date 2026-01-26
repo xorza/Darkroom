@@ -4,6 +4,14 @@ use image::{GrayImage, Rgb, RgbImage};
 use imaginarium::{ColorFormat, Image, ImageDesc};
 use std::path::Path;
 
+use super::TEST_OUTPUT_IMAGE_EXT;
+
+/// Build an output path with the configured test image extension.
+/// Takes a base path and replaces or adds the extension from `TEST_OUTPUT_IMAGE_EXT`.
+pub fn output_path(base: &Path) -> std::path::PathBuf {
+    base.with_extension(TEST_OUTPUT_IMAGE_EXT)
+}
+
 /// Convert f32 grayscale pixels to imaginarium RGB_F32 image (for drawing).
 pub fn gray_to_rgb_image(pixels: &[f32], width: usize, height: usize) -> Image {
     let desc = ImageDesc::new_packed(width, height, ColorFormat::RGB_F32);
@@ -28,17 +36,21 @@ pub fn gray_to_rgb_image_stretched(pixels: &[f32], width: usize, height: usize) 
     Image::new_with_data(desc, bytemuck::cast_slice(&rgb_pixels).to_vec()).unwrap()
 }
 
-/// Save imaginarium Image to PNG file.
-/// Converts to RGB_U8 if needed since PNG doesn't support float formats.
-pub fn save_image_png(image: Image, path: &Path) {
+/// Save imaginarium Image to file using the configured test output format.
+/// Converts to RGB_U8 if needed since some formats don't support float data.
+pub fn save_image(image: Image, path: &Path) {
+    let out = output_path(path);
     let image_u8 = if image.desc().color_format.channel_type == imaginarium::ChannelType::Float {
         image.convert(ColorFormat::RGB_U8).unwrap()
     } else {
         image
     };
-    image_u8
-        .save_file(path)
-        .expect("Failed to save image as PNG");
+    image_u8.save_file(&out).expect("Failed to save image");
+}
+
+/// Deprecated: use `save_image` instead.
+pub fn save_image_png(image: Image, path: &Path) {
+    save_image(image, path);
 }
 
 /// Convert f32 pixels to grayscale image (clamped to 0-1).
@@ -146,26 +158,44 @@ pub fn gray_to_rgb_stretched(pixels: &[f32], width: usize, height: usize) -> Rgb
     RgbImage::from_raw(width as u32, height as u32, data).unwrap()
 }
 
-/// Save grayscale image to PNG file.
-pub fn save_grayscale_png(pixels: &[f32], width: usize, height: usize, path: &Path) {
+/// Save grayscale image to file using the configured test output format.
+pub fn save_grayscale(pixels: &[f32], width: usize, height: usize, path: &Path) {
+    let out = output_path(path);
     let img = to_gray_image(pixels, width, height);
-    img.save(path).expect("Failed to save grayscale PNG");
+    img.save(&out).expect("Failed to save grayscale image");
 }
 
-/// Save grayscale image with auto-stretch to PNG file.
-pub fn save_grayscale_stretched_png(pixels: &[f32], width: usize, height: usize, path: &Path) {
+/// Deprecated: use `save_grayscale` instead.
+pub fn save_grayscale_png(pixels: &[f32], width: usize, height: usize, path: &Path) {
+    save_grayscale(pixels, width, height, path);
+}
+
+/// Save grayscale image with auto-stretch to file using the configured test output format.
+pub fn save_grayscale_stretched(pixels: &[f32], width: usize, height: usize, path: &Path) {
+    let out = output_path(path);
     let img = to_gray_stretched(pixels, width, height);
-    img.save(path)
-        .expect("Failed to save stretched grayscale PNG");
+    img.save(&out)
+        .expect("Failed to save stretched grayscale image");
 }
 
-/// Save RGB image to PNG file.
+/// Deprecated: use `save_grayscale_stretched` instead.
+pub fn save_grayscale_stretched_png(pixels: &[f32], width: usize, height: usize, path: &Path) {
+    save_grayscale_stretched(pixels, width, height, path);
+}
+
+/// Save RGB image to file using the configured test output format.
+pub fn save_rgb(image: &RgbImage, path: &Path) {
+    let out = output_path(path);
+    image.save(&out).expect("Failed to save RGB image");
+}
+
+/// Deprecated: use `save_rgb` instead.
 pub fn save_rgb_png(image: &RgbImage, path: &Path) {
-    image.save(path).expect("Failed to save RGB PNG");
+    save_rgb(image, path);
 }
 
 /// Save comparison image showing ground truth vs detected stars.
-pub fn save_comparison_png(
+pub fn save_comparison(
     pixels: &[f32],
     width: usize,
     height: usize,
@@ -182,13 +212,40 @@ pub fn save_comparison_png(
         detected,
         match_radius,
     );
-    save_image_png(image, path);
+    save_image(image, path);
 }
 
-/// Save mask to PNG file.
-pub fn save_mask_png(mask: &[bool], width: usize, height: usize, path: &Path) {
+/// Deprecated: use `save_comparison` instead.
+pub fn save_comparison_png(
+    pixels: &[f32],
+    width: usize,
+    height: usize,
+    ground_truth: &[crate::testing::synthetic::GroundTruthStar],
+    detected: &[crate::star_detection::Star],
+    match_radius: f32,
+    path: &Path,
+) {
+    save_comparison(
+        pixels,
+        width,
+        height,
+        ground_truth,
+        detected,
+        match_radius,
+        path,
+    );
+}
+
+/// Save mask to file using the configured test output format.
+pub fn save_mask(mask: &[bool], width: usize, height: usize, path: &Path) {
+    let out = output_path(path);
     let img = mask_to_gray(mask, width, height);
-    img.save(path).expect("Failed to save mask PNG");
+    img.save(&out).expect("Failed to save mask image");
+}
+
+/// Deprecated: use `save_mask` instead.
+pub fn save_mask_png(mask: &[bool], width: usize, height: usize, path: &Path) {
+    save_mask(mask, width, height, path);
 }
 
 /// Create a side-by-side comparison image.

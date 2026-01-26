@@ -8,8 +8,7 @@ use super::image_fetch::ImageFetcher;
 use super::wcs::WCS;
 use crate::astro_image::AstroImage;
 use crate::star_detection::tests::common::output::{
-    DetectionMetrics, compute_detection_metrics, save_comparison_png, save_grayscale_png,
-    save_metrics,
+    DetectionMetrics, compute_detection_metrics, save_comparison, save_grayscale, save_metrics,
 };
 use crate::star_detection::{Star, StarDetectionConfig, find_stars};
 use crate::testing::synthetic::GroundTruthStar;
@@ -377,7 +376,7 @@ impl SurveyBenchmark {
         let pixels_normalized = normalize_pixels(image.pixels());
 
         // Save input image
-        save_grayscale_png(
+        save_grayscale(
             &pixels_normalized,
             width,
             height,
@@ -386,7 +385,7 @@ impl SurveyBenchmark {
 
         // Save comparison image (use 2*FWHM as match radius)
         let match_radius = 8.0; // Typical 2*FWHM for survey images
-        save_comparison_png(
+        save_comparison(
             &pixels_normalized,
             width,
             height,

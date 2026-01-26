@@ -3,7 +3,7 @@
 //! Tests the background estimation with various synthetic backgrounds.
 
 use crate::star_detection::background::estimate_background;
-use crate::star_detection::tests::common::output::save_grayscale_png;
+use crate::star_detection::tests::common::output::save_grayscale;
 use crate::testing::init_tracing;
 use crate::testing::synthetic::{
     NebulaConfig, StarFieldConfig, add_gradient_background, add_nebula_background,
@@ -39,7 +39,7 @@ fn test_background_uniform() {
     let background = estimate_background(&pixels, width, height, TILE_SIZE);
 
     // Save input image
-    save_grayscale_png(
+    save_grayscale(
         &pixels,
         width,
         height,
@@ -48,7 +48,7 @@ fn test_background_uniform() {
 
     // Save background map
     let bg_pixels = background.background.clone();
-    save_grayscale_png(
+    save_grayscale(
         &bg_pixels,
         width,
         height,
@@ -61,7 +61,7 @@ fn test_background_uniform() {
         .zip(background.background.iter())
         .map(|(&p, &bg)| (p - bg).max(0.0))
         .collect();
-    save_grayscale_png(
+    save_grayscale(
         &subtracted,
         width,
         height,
@@ -115,7 +115,7 @@ fn test_background_gradient() {
     let background = estimate_background(&pixels, width, height, TILE_SIZE);
 
     // Save images
-    save_grayscale_png(
+    save_grayscale(
         &pixels,
         width,
         height,
@@ -123,7 +123,7 @@ fn test_background_gradient() {
     );
 
     let bg_pixels = background.background.clone();
-    save_grayscale_png(
+    save_grayscale(
         &bg_pixels,
         width,
         height,
@@ -135,7 +135,7 @@ fn test_background_gradient() {
         .zip(background.background.iter())
         .map(|(&p, &bg)| (p - bg).max(0.0))
         .collect();
-    save_grayscale_png(
+    save_grayscale(
         &subtracted,
         width,
         height,
@@ -191,7 +191,7 @@ fn test_background_vignette() {
     let background = estimate_background(&pixels, width, height, TILE_SIZE);
 
     // Save images
-    save_grayscale_png(
+    save_grayscale(
         &pixels,
         width,
         height,
@@ -199,7 +199,7 @@ fn test_background_vignette() {
     );
 
     let bg_pixels = background.background.clone();
-    save_grayscale_png(
+    save_grayscale(
         &bg_pixels,
         width,
         height,
@@ -211,7 +211,7 @@ fn test_background_vignette() {
         .zip(background.background.iter())
         .map(|(&p, &bg)| (p - bg).max(0.0))
         .collect();
-    save_grayscale_png(
+    save_grayscale(
         &subtracted,
         width,
         height,
@@ -280,7 +280,7 @@ fn test_background_nebula() {
     let background = estimate_background(&pixels, width, height, TILE_SIZE);
 
     // Save images
-    save_grayscale_png(
+    save_grayscale(
         &pixels,
         width,
         height,
@@ -288,7 +288,7 @@ fn test_background_nebula() {
     );
 
     let bg_pixels = background.background.clone();
-    save_grayscale_png(
+    save_grayscale(
         &bg_pixels,
         width,
         height,
@@ -300,7 +300,7 @@ fn test_background_nebula() {
         .zip(background.background.iter())
         .map(|(&p, &bg)| (p - bg).max(0.0))
         .collect();
-    save_grayscale_png(
+    save_grayscale(
         &subtracted,
         width,
         height,

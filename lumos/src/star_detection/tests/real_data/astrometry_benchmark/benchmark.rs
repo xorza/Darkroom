@@ -7,8 +7,7 @@ use super::rectangle_cache::{RectangleCache, RectangleInfo};
 use crate::AstroImage;
 
 use crate::star_detection::tests::common::output::{
-    DetectionMetrics, compute_detection_metrics, save_comparison_png, save_grayscale_png,
-    save_metrics,
+    DetectionMetrics, compute_detection_metrics, save_comparison, save_grayscale, save_metrics,
 };
 use crate::star_detection::{Star, StarDetectionConfig, find_stars};
 use crate::testing::synthetic::GroundTruthStar;
@@ -321,11 +320,11 @@ impl AstrometryBenchmark {
         std::fs::create_dir_all(&rect_dir)?;
 
         // Save input image
-        save_grayscale_png(pixels, width, height, &rect_dir.join("input.png"));
+        save_grayscale(pixels, width, height, &rect_dir.join("input.png"));
 
         // Save comparison image
         let match_radius = 8.0;
-        save_comparison_png(
+        save_comparison(
             pixels,
             width,
             height,

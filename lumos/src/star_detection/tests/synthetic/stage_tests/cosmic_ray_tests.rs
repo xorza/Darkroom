@@ -5,7 +5,7 @@
 use crate::AstroImage;
 
 use crate::star_detection::tests::common::output::{
-    gray_to_rgb_image_stretched, save_grayscale_png, save_image_png,
+    gray_to_rgb_image_stretched, save_grayscale, save_image,
 };
 use crate::star_detection::{StarDetectionConfig, find_stars};
 use crate::testing::init_tracing;
@@ -42,7 +42,7 @@ fn test_cosmic_ray_rejection() {
     // Add cosmic rays manually so we know their positions
     let cr_positions = add_cosmic_rays(&mut pixels, width, 15, (0.5, 1.0), 123);
 
-    save_grayscale_png(
+    save_grayscale(
         &pixels,
         width,
         height,
@@ -80,7 +80,7 @@ fn test_cosmic_ray_rejection() {
         draw_circle(&mut img, star.x, star.y, 5.0, green, 1.0);
     }
 
-    save_image_png(
+    save_image(
         img,
         &test_output_path("synthetic_starfield/stage_cr_rejection_overlay.png"),
     );
@@ -168,7 +168,7 @@ fn test_laplacian_snr_visualization() {
     // Add cosmic rays
     let cr_positions = add_cosmic_rays(&mut pixels, width, 10, (0.6, 0.9), 456);
 
-    save_grayscale_png(
+    save_grayscale(
         &pixels,
         width,
         height,
@@ -224,7 +224,7 @@ fn test_laplacian_snr_visualization() {
         draw_circle(&mut img, star.x, star.y, 6.0, color, 1.0);
     }
 
-    save_image_png(
+    save_image(
         img,
         &test_output_path("synthetic_starfield/stage_laplacian_snr_overlay.png"),
     );

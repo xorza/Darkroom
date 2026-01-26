@@ -5,7 +5,7 @@
 use crate::star_detection::background::estimate_background;
 use crate::star_detection::constants::fwhm_to_sigma;
 use crate::star_detection::convolution::gaussian_convolve;
-use crate::star_detection::tests::common::output::save_grayscale_png;
+use crate::star_detection::tests::common::output::save_grayscale;
 use crate::testing::init_tracing;
 use crate::testing::synthetic::{StarFieldConfig, generate_star_field};
 use common::test_utils::test_output_path;
@@ -46,7 +46,7 @@ fn test_gaussian_filter_sparse() {
     let (pixels, ground_truth) = generate_star_field(&config);
 
     // Save input
-    save_grayscale_png(
+    save_grayscale(
         &pixels,
         width,
         height,
@@ -62,7 +62,7 @@ fn test_gaussian_filter_sparse() {
         .map(|(&p, &bg)| (p - bg).max(0.0))
         .collect();
 
-    save_grayscale_png(
+    save_grayscale(
         &bg_subtracted,
         width,
         height,
@@ -76,7 +76,7 @@ fn test_gaussian_filter_sparse() {
     // Normalize for display
     let filtered_display = normalize_for_display(&filtered);
 
-    save_grayscale_png(
+    save_grayscale(
         &filtered_display,
         width,
         height,
@@ -137,7 +137,7 @@ fn test_gaussian_filter_fwhm_range() {
     let (pixels, ground_truth) = generate_star_field(&config);
 
     // Save input
-    save_grayscale_png(
+    save_grayscale(
         &pixels,
         width,
         height,
@@ -159,7 +159,7 @@ fn test_gaussian_filter_fwhm_range() {
         let filtered = gaussian_convolve(&bg_subtracted, width, height, sigma);
         let filtered_display = normalize_for_display(&filtered);
 
-        save_grayscale_png(
+        save_grayscale(
             &filtered_display,
             width,
             height,
@@ -200,7 +200,7 @@ fn test_gaussian_filter_noise() {
     let (pixels, ground_truth) = generate_star_field(&config);
 
     // Save input
-    save_grayscale_png(
+    save_grayscale(
         &pixels,
         width,
         height,
@@ -216,7 +216,7 @@ fn test_gaussian_filter_noise() {
         .map(|(&p, &bg)| (p - bg).max(0.0))
         .collect();
 
-    save_grayscale_png(
+    save_grayscale(
         &bg_subtracted,
         width,
         height,
@@ -228,7 +228,7 @@ fn test_gaussian_filter_noise() {
     let filtered = gaussian_convolve(&bg_subtracted, width, height, sigma);
     let filtered_display = normalize_for_display(&filtered);
 
-    save_grayscale_png(
+    save_grayscale(
         &filtered_display,
         width,
         height,

@@ -6,7 +6,7 @@ use crate::star_detection::StarDetectionConfig;
 use crate::star_detection::background::estimate_background;
 use crate::star_detection::detection::detect_stars;
 use crate::star_detection::tests::common::output::{
-    gray_to_rgb_image_stretched, save_grayscale_png, save_image_png,
+    gray_to_rgb_image_stretched, save_grayscale, save_image,
 };
 use crate::testing::init_tracing;
 use crate::testing::synthetic::{StarFieldConfig, generate_star_field, sparse_field_config};
@@ -52,7 +52,7 @@ fn test_detection_sparse() {
     let (pixels, ground_truth) = generate_star_field(&config);
 
     // Save input
-    save_grayscale_png(
+    save_grayscale(
         &pixels,
         config.width,
         config.height,
@@ -86,7 +86,7 @@ fn test_detection_sparse() {
         &candidate_positions,
         &truth_positions,
     );
-    save_image_png(
+    save_image(
         overlay,
         &test_output_path("synthetic_starfield/stage_det_sparse_overlay.png"),
     );
@@ -139,7 +139,7 @@ fn test_detection_thresholds() {
     let (pixels, ground_truth) = generate_star_field(&config);
 
     // Save input
-    save_grayscale_png(
+    save_grayscale(
         &pixels,
         width,
         height,
@@ -167,7 +167,7 @@ fn test_detection_thresholds() {
             &candidate_positions,
             &truth_positions,
         );
-        save_image_png(
+        save_image(
             overlay,
             &test_output_path(&format!(
                 "synthetic_starfield/stage_det_thresholds_sigma_{:.0}.png",
@@ -229,7 +229,7 @@ fn test_detection_area_filter() {
     let (pixels, ground_truth) = generate_star_field(&config);
 
     // Save input
-    save_grayscale_png(
+    save_grayscale(
         &pixels,
         width,
         height,
@@ -262,7 +262,7 @@ fn test_detection_area_filter() {
             &candidate_positions,
             &truth_positions,
         );
-        save_image_png(
+        save_image(
             overlay,
             &test_output_path(&format!(
                 "synthetic_starfield/stage_det_area_filter_{}.png",

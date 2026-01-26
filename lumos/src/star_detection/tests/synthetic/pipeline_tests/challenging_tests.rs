@@ -4,7 +4,7 @@ use crate::AstroImage;
 
 use crate::star_detection::tests::common::output::{
     PassCriteria, check_pass, compute_detection_metrics, crowded_criteria, faint_star_criteria,
-    save_comparison_png, save_grayscale_png, save_metrics,
+    save_comparison, save_grayscale, save_metrics,
 };
 use crate::star_detection::{StarDetectionConfig, find_stars};
 use crate::testing::init_tracing;
@@ -24,7 +24,7 @@ fn run_challenging_test(
     let (pixels, ground_truth) = generate_star_field(field_config);
 
     // Save input
-    save_grayscale_png(
+    save_grayscale(
         &pixels,
         field_config.width,
         field_config.height,
@@ -44,7 +44,7 @@ fn run_challenging_test(
     let metrics = compute_detection_metrics(&ground_truth, &stars, match_radius);
 
     // Save comparison image
-    save_comparison_png(
+    save_comparison(
         &pixels,
         field_config.width,
         field_config.height,
