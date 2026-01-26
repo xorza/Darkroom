@@ -147,14 +147,28 @@ fn main() {
     println!("Total time: {:.2}s", total_elapsed.as_secs_f32());
 }
 
-/// Step 1: Create calibration master frames from raw calibration frames.
+/// Step 1: Load or create calibration master frames.
 fn create_calibration_masters(calibration_dir: &Path, output_dir: &Path) -> CalibrationMasters {
     let start = Instant::now();
 
     let config = MedianConfig::default();
     let method = StackingMethod::Median(config);
-    let progress = create_progress_callback();
 
+    // First, try to load existing masters from the output directory
+    if let Ok(masters) = CalibrationMasters::load_from_directory(output_dir, method.clone())
+        && (masters.master_dark.is_some()
+            || masters.master_flat.is_some()
+            || masters.master_bias.is_some())
+    {
+        tracing::info!(
+            "Loaded existing calibration masters from {}",
+            output_dir.display()
+        );
+        return masters;
+    }
+
+    // No existing masters found, create from raw frames
+    let progress = create_progress_callback();
     tracing::info!("Creating calibration masters from raw frames...");
 
     let masters = CalibrationMasters::from_directory(calibration_dir, method, progress)
