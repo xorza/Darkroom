@@ -209,8 +209,10 @@ impl GpuImage {
 mod tests {
     use super::*;
     use crate::common::test_utils::{load_lena_rgba_u8_61x38, test_gpu};
+    use serial_test::serial;
 
     #[test]
+    #[serial]
     fn test_to_image() {
         let Some(ctx) = test_gpu() else {
             return;
@@ -226,6 +228,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[serial]
     async fn test_to_image_async() {
         let Some(ctx) = test_gpu() else {
             return;

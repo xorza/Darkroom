@@ -161,8 +161,10 @@ mod tests {
     use super::*;
     use crate::common::test_utils::{create_test_image, create_test_image_f32, test_gpu};
     use crate::image::{Image, ImageDesc};
+    use serial_test::serial;
 
     #[test]
+    #[serial]
     fn test_gpu_contrast_brightness_no_change() {
         let Some(ctx) = test_gpu() else {
             return;
@@ -201,6 +203,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_gpu_contrast_brightness_increase() {
         let Some(ctx) = test_gpu() else {
             return;
@@ -231,6 +234,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_gpu_contrast_brightness_alpha_preserved() {
         let Some(ctx) = test_gpu() else {
             return;
@@ -279,6 +283,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_gpu_contrast_brightness_pipeline_reuse() {
         let Some(ctx) = test_gpu() else {
             return;
@@ -299,6 +304,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_gpu_contrast_brightness_gray_u8() {
         let Some(ctx) = test_gpu() else {
             return;
@@ -337,6 +343,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_gpu_contrast_brightness_rgb_u8() {
         let Some(ctx) = test_gpu() else {
             return;
@@ -375,6 +382,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_gpu_contrast_brightness_rgba_f32() {
         let Some(ctx) = test_gpu() else {
             return;
@@ -422,6 +430,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_gpu_contrast_brightness_gray_f32() {
         let Some(ctx) = test_gpu() else {
             return;
@@ -468,6 +477,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_gpu_contrast_brightness_all_formats() {
         let Some(ctx) = test_gpu() else {
             return;
@@ -561,6 +571,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_gpu_contrast_brightness_gray_alpha_u8_alpha_preserved() {
         let Some(ctx) = test_gpu() else {
             return;
@@ -607,6 +618,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_gpu_contrast_brightness_rgba_f32_alpha_preserved() {
         let Some(ctx) = test_gpu() else {
             return;

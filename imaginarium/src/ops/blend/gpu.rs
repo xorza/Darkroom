@@ -180,8 +180,10 @@ mod tests {
     use super::*;
     use crate::common::test_utils::{create_test_image, create_test_image_f32, test_gpu};
     use crate::image::{Image, ImageDesc};
+    use serial_test::serial;
 
     #[test]
+    #[serial]
     fn test_gpu_blend_normal_alpha_zero() {
         let Some(ctx) = test_gpu() else {
             return;
@@ -223,6 +225,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_gpu_blend_normal_alpha_one() {
         let Some(ctx) = test_gpu() else {
             return;
@@ -264,6 +267,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_gpu_blend_multiply() {
         let Some(ctx) = test_gpu() else {
             return;
@@ -315,6 +319,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_gpu_blend_all_modes() {
         let Some(ctx) = test_gpu() else {
             return;
@@ -355,6 +360,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_gpu_blend_pipeline_reuse() {
         let Some(ctx) = test_gpu() else {
             return;
@@ -378,6 +384,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_gpu_blend_gray_u8() {
         let Some(ctx) = test_gpu() else {
             return;
@@ -419,6 +426,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_gpu_blend_rgb_u8() {
         let Some(ctx) = test_gpu() else {
             return;
@@ -460,6 +468,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_gpu_blend_rgba_f32() {
         let Some(ctx) = test_gpu() else {
             return;
@@ -510,6 +519,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_gpu_blend_rgb_f32() {
         let Some(ctx) = test_gpu() else {
             return;
@@ -536,6 +546,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_gpu_blend_gray_f32() {
         let Some(ctx) = test_gpu() else {
             return;
@@ -586,6 +597,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_gpu_blend_all_formats() {
         let Some(ctx) = test_gpu() else {
             return;
