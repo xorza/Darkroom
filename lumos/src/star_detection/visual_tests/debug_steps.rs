@@ -204,7 +204,7 @@ fn test_debug_star_detection_steps() {
     println!("Saved: {:?}", path);
 
     // Run full detection
-    let image = AstroImage::new(width, height, 1, grayscale.clone());
+    let image = AstroImage::from_pixels(width, height, 1, grayscale.clone());
     let result = find_stars(&image, &config);
     let stars = result.stars;
     println!("\nDetected {} stars", stars.len());
@@ -389,7 +389,7 @@ fn test_debug_synthetic_steps() {
     println!("Saved: {:?}", path);
 
     // Run full detection
-    let image = AstroImage::new(width, height, 1, grayscale.clone());
+    let image = AstroImage::from_pixels(width, height, 1, grayscale.clone());
     let detection_result = find_stars(&image, &detection_config);
     let stars = detection_result.stars;
     println!(

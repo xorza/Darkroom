@@ -233,7 +233,7 @@ fn test_synthetic_star_detection() {
         ..Default::default()
     };
 
-    let image = AstroImage::new(config.width, config.height, 1, pixels.clone());
+    let image = AstroImage::from_pixels(config.width, config.height, 1, pixels.clone());
     let result = find_stars(&image, &detection_config);
     let detected_stars = result.stars;
     println!("\nDetected {} stars", detected_stars.len());

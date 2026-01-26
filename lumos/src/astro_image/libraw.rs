@@ -266,7 +266,7 @@ pub fn load_raw(path: &Path) -> Result<AstroImage> {
         is_cfa,
     };
 
-    let mut astro = AstroImage::new(
+    let mut astro = AstroImage::from_pixels(
         dimensions.width,
         dimensions.height,
         dimensions.channels,

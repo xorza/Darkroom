@@ -11,7 +11,7 @@ use image::{Rgb, RgbImage};
 use imageproc::drawing::{draw_cross_mut, draw_hollow_circle_mut};
 
 fn make_grayscale_image(pixels: Vec<f32>, width: usize, height: usize) -> AstroImage {
-    AstroImage::new(width, height, 1, pixels)
+    AstroImage::from_pixels(width, height, 1, pixels)
 }
 
 /// Match detected stars between two images based on proximity.

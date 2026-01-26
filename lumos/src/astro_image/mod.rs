@@ -7,7 +7,7 @@ mod sensor;
 pub use hot_pixels::HotPixelMap;
 
 use anyhow::Result;
-use imaginarium::{ChannelCount, ChannelSize, ChannelType, ColorFormat, Image, ImageDesc};
+use imaginarium::{ChannelCount, ColorFormat, Image, ImageDesc};
 use std::path::Path;
 
 /// FITS BITPIX values representing pixel data types.
@@ -159,29 +159,24 @@ impl AstroImage {
         }
     }
 
-    /// Create a new AstroImage from dimensions and pixel data.
-    pub fn new(width: usize, height: usize, channels: usize, pixels: Vec<f32>) -> Self {
+    /// Create a new AstroImage from an ImageDesc and pixel data.
+    ///
+    /// # Panics
+    /// Panics if format is not GRAY_F32 or RGB_F32, or if pixel count doesn't match dimensions.
+    pub fn new(desc: ImageDesc, pixels: Vec<f32>) -> Self {
         assert!(
-            channels == 1 || channels == 3,
-            "Only 1 or 3 channels supported"
+            desc.color_format == ColorFormat::GRAY_F32 || desc.color_format == ColorFormat::RGB_F32,
+            "Only GRAY_F32 or RGB_F32 formats supported, got {:?}",
+            desc.color_format
         );
         assert_eq!(
             pixels.len(),
-            width * height * channels,
-            "Pixel count mismatch"
+            desc.pixel_count(),
+            "Pixel count mismatch: expected {}, got {}",
+            desc.pixel_count(),
+            pixels.len()
         );
 
-        let channel_count = if channels == 1 {
-            ChannelCount::Gray
-        } else {
-            ChannelCount::Rgb
-        };
-        let color_format = ColorFormat {
-            channel_count,
-            channel_size: ChannelSize::_32bit,
-            channel_type: ChannelType::Float,
-        };
-        let desc = ImageDesc::new(width, height, color_format);
         let bytes: Vec<u8> = bytemuck::try_cast_vec(pixels)
             .unwrap_or_else(|(_, pixels)| bytemuck::cast_slice(&pixels).to_vec());
         let image = Image::new_with_data(desc, bytes).expect("Failed to create Image");
@@ -190,6 +185,26 @@ impl AstroImage {
             metadata: AstroImageMetadata::default(),
             image,
         }
+    }
+
+    /// Create a new AstroImage from width, height, channels, and pixel data.
+    ///
+    /// Convenience constructor that builds the ImageDesc internally.
+    ///
+    /// # Panics
+    /// Panics if channels is not 1 or 3, or if pixel count doesn't match dimensions.
+    pub fn from_pixels(width: usize, height: usize, channels: usize, pixels: Vec<f32>) -> Self {
+        assert!(
+            channels == 1 || channels == 3,
+            "Only 1 or 3 channels supported"
+        );
+        let color_format = if channels == 1 {
+            ColorFormat::GRAY_F32
+        } else {
+            ColorFormat::RGB_F32
+        };
+        let desc = ImageDesc::new(width, height, color_format);
+        Self::new(desc, pixels)
     }
 
     /// Get image width.
@@ -288,7 +303,7 @@ impl AstroImage {
 
     /// Get the total number of pixel values (width * height * channels).
     pub fn pixel_count(&self) -> usize {
-        self.width() * self.height() * self.channels()
+        self.image.desc().pixel_count()
     }
 
     /// Calculate the mean pixel value across all pixels using parallel processing.
@@ -300,54 +315,19 @@ impl AstroImage {
 
     /// Convert to grayscale using luminance weights.
     ///
-    /// If already grayscale, returns a clone.
+    /// Consumes self. If already grayscale, returns self unchanged.
     /// For RGB images, uses Rec. 709 luminance weights: 0.2126*R + 0.7152*G + 0.0722*B
-    pub fn to_grayscale(&self) -> Self {
-        use rayon::prelude::*;
-
+    pub fn to_grayscale(self) -> Self {
         if self.is_grayscale() {
-            return self.clone();
+            return self;
         }
 
-        assert!(
-            self.is_rgb(),
-            "to_grayscale only supports grayscale (1) or RGB (3) channel images"
-        );
-
-        // Rec. 709 luminance weights
-        const R_WEIGHT: f32 = 0.2126;
-        const G_WEIGHT: f32 = 0.7152;
-        const B_WEIGHT: f32 = 0.0722;
-
-        let pixel_count = self.width() * self.height();
-        let mut gray_pixels = vec![0.0f32; pixel_count];
-        let src_pixels = self.pixels();
-
-        // Process in parallel chunks to maintain cache locality
-        const CHUNK_SIZE: usize = 4096;
-
-        gray_pixels
-            .par_chunks_mut(CHUNK_SIZE)
-            .enumerate()
-            .for_each(|(chunk_idx, chunk)| {
-                let base_idx = chunk_idx * CHUNK_SIZE;
-                for (i, gray) in chunk.iter_mut().enumerate() {
-                    let src_idx = (base_idx + i) * 3;
-                    let r = src_pixels[src_idx];
-                    let g = src_pixels[src_idx + 1];
-                    let b = src_pixels[src_idx + 2];
-                    *gray = R_WEIGHT * r + G_WEIGHT * g + B_WEIGHT * b;
-                }
-            });
-
         AstroImage {
-            metadata: self.metadata.clone(),
-            image: {
-                let desc = ImageDesc::new(self.width(), self.height(), ColorFormat::GRAY_F32);
-                let bytes: Vec<u8> = bytemuck::try_cast_vec(gray_pixels)
-                    .unwrap_or_else(|(_, pixels)| bytemuck::cast_slice(&pixels).to_vec());
-                Image::new_with_data(desc, bytes).expect("Failed to create grayscale Image")
-            },
+            metadata: self.metadata,
+            image: self
+                .image
+                .convert(ColorFormat::GRAY_F32)
+                .expect("Failed to convert to grayscale"),
         }
     }
 
@@ -387,10 +367,18 @@ impl From<Image> for AstroImage {
             ChannelCount::Rgb | ChannelCount::Rgba => ColorFormat::RGB_F32,
         };
 
+        // convert() returns the same image without cloning if format already matches
         let image = image
             .convert(target_format)
             .expect("Failed to convert image to f32")
             .packed();
+
+        // Validate that the resulting image has the expected format
+        debug_assert!(
+            image.desc().color_format == ColorFormat::GRAY_F32
+                || image.desc().color_format == ColorFormat::RGB_F32,
+            "Image must be GRAY_F32 or RGB_F32 after conversion"
+        );
 
         AstroImage {
             metadata: AstroImageMetadata::default(),
@@ -416,16 +404,14 @@ mod tests {
 
     #[test]
     fn test_convert_to_imaginarium_image_grayscale() {
-        let astro = AstroImage::new(3, 2, 1, vec![0.0, 0.25, 0.5, 0.75, 1.0, 0.5]);
+        let astro = AstroImage::from_pixels(3, 2, 1, vec![0.0, 0.25, 0.5, 0.75, 1.0, 0.5]);
 
         let image: Image = astro.into();
         let desc = image.desc();
 
         assert_eq!(desc.width, 3);
         assert_eq!(desc.height, 2);
-        assert_eq!(desc.color_format.channel_count, ChannelCount::Gray);
-        assert_eq!(desc.color_format.channel_size, ChannelSize::_32bit);
-        assert_eq!(desc.color_format.channel_type, ChannelType::Float);
+        assert_eq!(desc.color_format, ColorFormat::GRAY_F32);
 
         // Verify pixel data
         let pixels: &[f32] = bytemuck::cast_slice(image.bytes());
@@ -437,7 +423,7 @@ mod tests {
 
     #[test]
     fn test_convert_to_imaginarium_image_rgb() {
-        let astro = AstroImage::new(
+        let astro = AstroImage::from_pixels(
             2,
             2,
             3,
@@ -454,9 +440,7 @@ mod tests {
 
         assert_eq!(desc.width, 2);
         assert_eq!(desc.height, 2);
-        assert_eq!(desc.color_format.channel_count, ChannelCount::Rgb);
-        assert_eq!(desc.color_format.channel_size, ChannelSize::_32bit);
-        assert_eq!(desc.color_format.channel_type, ChannelType::Float);
+        assert_eq!(desc.color_format, ColorFormat::RGB_F32);
 
         // Verify pixel data
         let pixels: &[f32] = bytemuck::cast_slice(image.bytes());
@@ -536,7 +520,7 @@ mod tests {
 
     #[test]
     fn test_mean() {
-        let image = AstroImage::new(2, 2, 1, vec![1.0, 2.0, 3.0, 4.0]);
+        let image = AstroImage::from_pixels(2, 2, 1, vec![1.0, 2.0, 3.0, 4.0]);
         assert!((image.mean() - 2.5).abs() < f32::EPSILON);
     }
 
@@ -544,8 +528,8 @@ mod tests {
     fn test_calibrate_bias_subtraction() {
         use crate::{CalibrationMasters, StackingMethod};
 
-        let mut light = AstroImage::new(2, 2, 1, vec![100.0, 200.0, 150.0, 250.0]);
-        let bias = AstroImage::new(2, 2, 1, vec![5.0, 5.0, 5.0, 5.0]);
+        let mut light = AstroImage::from_pixels(2, 2, 1, vec![100.0, 200.0, 150.0, 250.0]);
+        let bias = AstroImage::from_pixels(2, 2, 1, vec![5.0, 5.0, 5.0, 5.0]);
 
         let masters = CalibrationMasters {
             master_dark: None,
@@ -564,8 +548,8 @@ mod tests {
     fn test_calibrate_dark_subtraction() {
         use crate::{CalibrationMasters, StackingMethod};
 
-        let mut light = AstroImage::new(2, 2, 1, vec![100.0, 200.0, 150.0, 250.0]);
-        let dark = AstroImage::new(2, 2, 1, vec![10.0, 20.0, 15.0, 25.0]);
+        let mut light = AstroImage::from_pixels(2, 2, 1, vec![100.0, 200.0, 150.0, 250.0]);
+        let dark = AstroImage::from_pixels(2, 2, 1, vec![10.0, 20.0, 15.0, 25.0]);
 
         let masters = CalibrationMasters {
             master_dark: Some(dark),
@@ -584,9 +568,9 @@ mod tests {
     fn test_calibrate_flat_correction() {
         use crate::{CalibrationMasters, StackingMethod};
 
-        let mut light = AstroImage::new(2, 2, 1, vec![100.0, 200.0, 150.0, 250.0]);
+        let mut light = AstroImage::from_pixels(2, 2, 1, vec![100.0, 200.0, 150.0, 250.0]);
         // Flat with mean = 1.0, so normalized flat equals the flat itself
-        let flat = AstroImage::new(2, 2, 1, vec![0.8, 1.0, 1.2, 1.0]);
+        let flat = AstroImage::from_pixels(2, 2, 1, vec![0.8, 1.0, 1.2, 1.0]);
 
         let masters = CalibrationMasters {
             master_dark: None,
@@ -610,10 +594,10 @@ mod tests {
     fn test_calibrate_full() {
         use crate::{CalibrationMasters, StackingMethod};
 
-        let mut light = AstroImage::new(2, 2, 1, vec![115.0, 225.0, 170.0, 280.0]);
-        let bias = AstroImage::new(2, 2, 1, vec![5.0, 5.0, 5.0, 5.0]);
-        let dark = AstroImage::new(2, 2, 1, vec![10.0, 20.0, 15.0, 25.0]);
-        let flat = AstroImage::new(2, 2, 1, vec![0.8, 1.0, 1.2, 1.0]);
+        let mut light = AstroImage::from_pixels(2, 2, 1, vec![115.0, 225.0, 170.0, 280.0]);
+        let bias = AstroImage::from_pixels(2, 2, 1, vec![5.0, 5.0, 5.0, 5.0]);
+        let dark = AstroImage::from_pixels(2, 2, 1, vec![10.0, 20.0, 15.0, 25.0]);
+        let flat = AstroImage::from_pixels(2, 2, 1, vec![0.8, 1.0, 1.2, 1.0]);
 
         let masters = CalibrationMasters {
             master_dark: Some(dark),
@@ -636,7 +620,7 @@ mod tests {
 
     #[test]
     fn test_roundtrip_astro_to_image_to_astro() {
-        let original = AstroImage::new(3, 2, 1, vec![0.1, 0.2, 0.3, 0.4, 0.5, 0.6]);
+        let original = AstroImage::from_pixels(3, 2, 1, vec![0.1, 0.2, 0.3, 0.4, 0.5, 0.6]);
 
         // Convert to Image and back
         let image: Image = original.clone().into();
@@ -656,7 +640,7 @@ mod tests {
 
     #[test]
     fn test_roundtrip_astro_to_image_to_astro_rgb() {
-        let original = AstroImage::new(
+        let original = AstroImage::from_pixels(
             2,
             2,
             3,
@@ -732,7 +716,7 @@ mod tests {
     #[test]
     fn test_astro_to_image_preserves_data() {
         let pixels = vec![0.1, 0.2, 0.3, 0.4];
-        let astro = AstroImage::new(2, 2, 1, pixels.clone());
+        let astro = AstroImage::from_pixels(2, 2, 1, pixels.clone());
 
         let image: Image = astro.into();
 
@@ -891,7 +875,7 @@ mod tests {
         // Pixel (1,0): R=40, G=50, B=60
         // Pixel (0,1): R=70, G=80, B=90
         // Pixel (1,1): R=100, G=110, B=120
-        let image = AstroImage::new(
+        let image = AstroImage::from_pixels(
             2,
             2,
             3,
@@ -921,7 +905,7 @@ mod tests {
         use crate::{CalibrationMasters, StackingMethod};
 
         // Create 2x2 RGB light frame
-        let mut light = AstroImage::new(
+        let mut light = AstroImage::from_pixels(
             2,
             2,
             3,
@@ -934,7 +918,7 @@ mod tests {
         );
 
         // Create RGB bias frame (5.0 for all channels)
-        let bias = AstroImage::new(2, 2, 3, vec![5.0; 12]);
+        let bias = AstroImage::from_pixels(2, 2, 3, vec![5.0; 12]);
 
         let masters = CalibrationMasters {
             master_dark: None,
@@ -959,10 +943,10 @@ mod tests {
         use crate::{CalibrationMasters, StackingMethod};
 
         // RGB light frame
-        let mut light = AstroImage::new(2, 2, 3, vec![100.0; 12]); // 2x2x3
+        let mut light = AstroImage::from_pixels(2, 2, 3, vec![100.0; 12]); // 2x2x3
 
         // Grayscale bias frame (channel mismatch!)
-        let bias = AstroImage::new(2, 2, 1, vec![5.0; 4]); // 2x2x1
+        let bias = AstroImage::from_pixels(2, 2, 1, vec![5.0; 4]); // 2x2x1
 
         let masters = CalibrationMasters {
             master_dark: None,
@@ -982,10 +966,10 @@ mod tests {
         use crate::{CalibrationMasters, StackingMethod};
 
         // Grayscale light frame
-        let mut light = AstroImage::new(2, 2, 1, vec![100.0; 4]); // 2x2x1
+        let mut light = AstroImage::from_pixels(2, 2, 1, vec![100.0; 4]); // 2x2x1
 
         // RGB dark frame (channel mismatch!)
-        let dark = AstroImage::new(2, 2, 3, vec![10.0; 12]); // 2x2x3
+        let dark = AstroImage::from_pixels(2, 2, 3, vec![10.0; 12]); // 2x2x3
 
         let masters = CalibrationMasters {
             master_dark: Some(dark),

@@ -243,6 +243,11 @@ impl ImageDesc {
         self.height * self.stride
     }
 
+    /// Returns the total number of pixel values (width * height * channels).
+    pub fn pixel_count(&self) -> usize {
+        self.width * self.height * self.color_format.channel_count as usize
+    }
+
     /// Returns the number of bytes per row without padding.
     pub fn row_bytes(&self) -> usize {
         self.width * self.color_format.byte_count() as usize

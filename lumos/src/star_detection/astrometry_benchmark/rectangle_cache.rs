@@ -275,7 +275,7 @@ impl RectangleCache {
         let full_path = self.cache_dir.join(&rect.image_path);
 
         // Convert to grayscale if needed
-        let grayscale = source.to_grayscale();
+        let grayscale = source.clone().to_grayscale();
 
         // Extract rectangle pixels
         let src_width = grayscale.width();

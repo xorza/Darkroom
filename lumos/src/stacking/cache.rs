@@ -400,7 +400,8 @@ impl ImageCache {
             );
         }
 
-        let mut result = AstroImage::new(dims.width, dims.height, dims.channels, output_pixels);
+        let mut result =
+            AstroImage::from_pixels(dims.width, dims.height, dims.channels, output_pixels);
         result.metadata = self.metadata.clone();
         result
     }
@@ -647,7 +648,7 @@ mod tests {
             channels: 3,
         };
         let pixels: Vec<f32> = (0..36).map(|i| i as f32).collect();
-        let image = AstroImage::new(dims.width, dims.height, dims.channels, pixels.clone());
+        let image = AstroImage::from_pixels(dims.width, dims.height, dims.channels, pixels.clone());
 
         let cache_path = temp_dir.join("test_frame.bin");
         write_cache_file(&cache_path, &image).unwrap();
@@ -683,7 +684,7 @@ mod tests {
             channels: 3,
         };
         let pixels: Vec<f32> = (0..36).map(|i| i as f32).collect();
-        let image = AstroImage::new(dims.width, dims.height, dims.channels, pixels);
+        let image = AstroImage::from_pixels(dims.width, dims.height, dims.channels, pixels);
 
         let cache_path = temp_dir.join("chunk_frame.bin");
         write_cache_file(&cache_path, &image).unwrap();
@@ -760,7 +761,7 @@ mod tests {
             channels: 3,
         };
         let pixels: Vec<f32> = (0..36).map(|i| i as f32).collect();
-        let image = AstroImage::new(dims.width, dims.height, dims.channels, pixels);
+        let image = AstroImage::from_pixels(dims.width, dims.height, dims.channels, pixels);
 
         let cache_path = temp_dir.join("reuse_frame.bin");
         write_cache_file(&cache_path, &image).unwrap();
@@ -825,7 +826,7 @@ mod tests {
             channels: 1,
         };
         let pixels: Vec<f32> = vec![1.0, 2.0, 3.0, 4.0];
-        let image = AstroImage::new(dims.width, dims.height, dims.channels, pixels.clone());
+        let image = AstroImage::from_pixels(dims.width, dims.height, dims.channels, pixels.clone());
 
         let cache_path = temp_dir.join("valid_write.bin");
         let result = write_cache_file(&cache_path, &image);

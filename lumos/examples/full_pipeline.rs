@@ -539,7 +539,7 @@ fn warp_image_to_reference(
     }
 
     let dims = image.dimensions();
-    let mut result = AstroImage::new(dims.width, dims.height, dims.channels, warped_pixels);
+    let mut result = AstroImage::from_pixels(dims.width, dims.height, dims.channels, warped_pixels);
     result.metadata = image.metadata.clone();
     result
 }

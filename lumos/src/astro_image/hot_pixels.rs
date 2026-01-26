@@ -371,7 +371,7 @@ mod tests {
         channels: usize,
         pixels: Vec<f32>,
     ) -> AstroImage {
-        AstroImage::new(width, height, channels, pixels)
+        AstroImage::from_pixels(width, height, channels, pixels)
     }
 
     #[test]

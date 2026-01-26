@@ -69,7 +69,7 @@ pub fn stack_mean_from_paths<P: AsRef<Path>>(
     scale_parallel(&mut sum, inv_count);
 
     let dims = dimensions.unwrap();
-    let mut result = AstroImage::new(dims.width, dims.height, dims.channels, sum);
+    let mut result = AstroImage::from_pixels(dims.width, dims.height, dims.channels, sum);
     result.metadata = metadata.unwrap();
     Ok(result)
 }

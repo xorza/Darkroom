@@ -55,7 +55,7 @@ fn test_cosmic_ray_rejection() {
         ..Default::default()
     };
 
-    let image = AstroImage::new(width, height, 1, pixels.clone());
+    let image = AstroImage::from_pixels(width, height, 1, pixels.clone());
     let result = find_stars(&image, &detection_config);
     let stars = result.stars;
 
@@ -183,7 +183,7 @@ fn test_laplacian_snr_visualization() {
         ..Default::default()
     };
 
-    let image = AstroImage::new(width, height, 1, pixels.clone());
+    let image = AstroImage::from_pixels(width, height, 1, pixels.clone());
     let result = find_stars(&image, &detection_config);
     let stars = result.stars;
 

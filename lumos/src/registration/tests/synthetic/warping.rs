@@ -480,8 +480,8 @@ fn test_warp_with_detected_transform() {
         ..Default::default()
     };
 
-    let ref_image = AstroImage::new(width, height, 1, ref_pixels.clone());
-    let target_image = AstroImage::new(width, height, 1, target_pixels.clone());
+    let ref_image = AstroImage::from_pixels(width, height, 1, ref_pixels.clone());
+    let target_image = AstroImage::from_pixels(width, height, 1, target_pixels.clone());
 
     let ref_result = find_stars(&ref_image, &det_config);
     let target_result = find_stars(&target_image, &det_config);

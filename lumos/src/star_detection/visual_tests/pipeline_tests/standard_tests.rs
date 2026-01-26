@@ -30,7 +30,7 @@ fn run_pipeline_test(
     );
 
     // Run detection
-    let image = AstroImage::new(field_config.width, field_config.height, 1, pixels.clone());
+    let image = AstroImage::from_pixels(field_config.width, field_config.height, 1, pixels.clone());
     let result = find_stars(&image, detection_config);
     let stars = result.stars;
 

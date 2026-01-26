@@ -22,7 +22,7 @@ fn detection_config() -> StarDetectionConfig {
 
 /// Create an AstroImage from pixel data.
 fn create_astro_image(pixels: Vec<f32>, width: usize, height: usize) -> AstroImage {
-    AstroImage::new(width, height, 1, pixels)
+    AstroImage::from_pixels(width, height, 1, pixels)
 }
 
 /// Apply a similarity transform to an image by resampling.
