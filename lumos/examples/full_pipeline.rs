@@ -87,7 +87,10 @@ fn main() {
     tracing::info!(path = %calibration_dir.display(), "Calibration directory");
 
     // Set up output directories
-    let output_base = PathBuf::from("test_output");
+    let output_base = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .join("test_output");
     let masters_dir = output_base.join("calibration_masters");
     let calibrated_dir = output_base.join("calibrated_lights");
     let registered_dir = output_base.join("registered_lights");
