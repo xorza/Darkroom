@@ -5,7 +5,7 @@
 //! correctly recovers the applied transformation.
 
 use crate::AstroImage;
-use crate::astro_image::{AstroImageMetadata, ImageDimensions};
+
 use crate::registration::{RegistrationConfig, Registrator};
 use crate::star_detection::{StarDetectionConfig, find_stars};
 use crate::testing::synthetic::{self, StarFieldConfig};
@@ -22,11 +22,7 @@ fn detection_config() -> StarDetectionConfig {
 
 /// Create an AstroImage from pixel data.
 fn create_astro_image(pixels: Vec<f32>, width: usize, height: usize) -> AstroImage {
-    AstroImage {
-        pixels,
-        dimensions: ImageDimensions::new(width, height, 1),
-        metadata: AstroImageMetadata::default(),
-    }
+    AstroImage::new(width, height, 1, pixels)
 }
 
 /// Apply a similarity transform to an image by resampling.

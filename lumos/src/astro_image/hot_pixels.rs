@@ -59,17 +59,17 @@ impl HotPixelMap {
     pub fn from_master_dark(master_dark: &AstroImage, sigma_threshold: f32) -> Self {
         assert!(sigma_threshold > 0.0, "Sigma threshold must be positive");
 
-        let pixels = &master_dark.pixels;
-        let channels = master_dark.dimensions.channels;
-        let pixel_count = master_dark.dimensions.width * master_dark.dimensions.height;
+        let pixels = master_dark.pixels();
+        let channels = master_dark.channels();
+        let pixel_count = master_dark.width() * master_dark.height();
 
         // Compute per-channel thresholds in a single pass
         let channel_stats = compute_all_channel_stats(pixels, channels, sigma_threshold);
 
         tracing::debug!(
             "Hot pixel detection per-channel stats ({}x{}x{}):",
-            master_dark.dimensions.width,
-            master_dark.dimensions.height,
+            master_dark.width(),
+            master_dark.height(),
             channels
         );
         for (c, stats) in channel_stats.iter().enumerate() {
@@ -117,7 +117,7 @@ impl HotPixelMap {
 
         Self {
             mask,
-            dimensions: master_dark.dimensions,
+            dimensions: master_dark.dimensions(),
             count: pixel_hot_count,
         }
     }
@@ -152,9 +152,9 @@ impl HotPixelMap {
     /// Panics if image dimensions don't match hot pixel map dimensions.
     pub fn correct(&self, image: &mut AstroImage) {
         assert!(
-            image.dimensions == self.dimensions,
+            image.dimensions() == self.dimensions,
             "Image dimensions {:?} don't match hot pixel map {:?}",
-            image.dimensions,
+            image.dimensions(),
             self.dimensions
         );
 
@@ -163,9 +163,9 @@ impl HotPixelMap {
             return;
         }
 
-        let width = image.dimensions.width;
-        let height = image.dimensions.height;
-        let channels = image.dimensions.channels;
+        let width = image.width();
+        let height = image.height();
+        let channels = image.channels();
         let row_stride = width * channels;
 
         // Pre-compute all corrections in parallel chunks for cache locality
@@ -196,8 +196,9 @@ impl HotPixelMap {
             .collect();
 
         // Apply corrections
+        let pixels = image.pixels_mut();
         for (idx, value) in corrections {
-            image.pixels[idx] = value;
+            pixels[idx] = value;
         }
     }
 }
@@ -290,9 +291,10 @@ fn compute_all_channel_stats(
 
 /// Calculate median of 8-connected neighbors for a specific channel.
 fn median_of_neighbors(image: &AstroImage, x: usize, y: usize, channel: usize) -> f32 {
-    let width = image.dimensions.width;
-    let height = image.dimensions.height;
-    let channels = image.dimensions.channels;
+    let width = image.width();
+    let height = image.height();
+    let channels = image.channels();
+    let pixels = image.pixels();
 
     let mut neighbors = Vec::with_capacity(8);
 
@@ -314,14 +316,14 @@ fn median_of_neighbors(image: &AstroImage, x: usize, y: usize, channel: usize) -
 
         if nx >= 0 && nx < width as i32 && ny >= 0 && ny < height as i32 {
             let idx = (ny as usize * width + nx as usize) * channels + channel;
-            neighbors.push(image.pixels[idx]);
+            neighbors.push(pixels[idx]);
         }
     }
 
     if neighbors.is_empty() {
         // Edge case: isolated pixel with no neighbors (shouldn't happen in practice)
         let idx = (y * width + x) * channels + channel;
-        return image.pixels[idx];
+        return pixels[idx];
     }
 
     crate::math::median_f32_mut(&mut neighbors)
@@ -362,7 +364,6 @@ pub mod bench {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::astro_image::AstroImageMetadata;
 
     fn make_test_image(
         width: usize,
@@ -370,11 +371,7 @@ mod tests {
         channels: usize,
         pixels: Vec<f32>,
     ) -> AstroImage {
-        AstroImage {
-            metadata: AstroImageMetadata::default(),
-            pixels,
-            dimensions: ImageDimensions::new(width, height, channels),
-        }
+        AstroImage::new(width, height, channels, pixels)
     }
 
     #[test]
@@ -423,7 +420,7 @@ mod tests {
         // Create hot pixel map manually (center pixel is hot)
         let hot_map = HotPixelMap {
             mask: vec![false, false, false, false, true, false, false, false, false],
-            dimensions: image.dimensions,
+            dimensions: image.dimensions(),
             count: 1,
         };
 
@@ -431,7 +428,7 @@ mod tests {
 
         // Center should be replaced with median of 8 neighbors
         // Neighbors: 10, 20, 30, 40, 50, 60, 70, 80 -> median = 45
-        let center = image.pixels[4];
+        let center = image.pixels()[4];
         assert!(
             (center - 45.0).abs() < f32::EPSILON,
             "Expected 45.0, got {}",
@@ -439,8 +436,8 @@ mod tests {
         );
 
         // Other pixels should be unchanged
-        assert_eq!(image.pixels[0], 10.0);
-        assert_eq!(image.pixels[8], 80.0);
+        assert_eq!(image.pixels()[0], 10.0);
+        assert_eq!(image.pixels()[8], 80.0);
     }
 
     #[test]
@@ -454,14 +451,14 @@ mod tests {
 
         let hot_map = HotPixelMap {
             mask: vec![true, false, false, false, false, false, false, false, false],
-            dimensions: image.dimensions,
+            dimensions: image.dimensions(),
             count: 1,
         };
 
         hot_map.correct(&mut image);
 
         // Corner has only 3 neighbors: 20, 40, 50 -> median = 40
-        let corner = image.pixels[0];
+        let corner = image.pixels()[0];
         assert!(
             (corner - 40.0).abs() < f32::EPSILON,
             "Expected 40.0, got {}",
@@ -471,14 +468,14 @@ mod tests {
 
     #[test]
     fn test_hot_pixel_percentage() {
-        let pixels = vec![10.0; 100];
-        let mut dark = make_test_image(10, 10, 1, pixels);
+        let mut pixels = vec![10.0; 100];
         // Make 5 pixels hot
-        dark.pixels[0] = 10000.0;
-        dark.pixels[25] = 10000.0;
-        dark.pixels[50] = 10000.0;
-        dark.pixels[75] = 10000.0;
-        dark.pixels[99] = 10000.0;
+        pixels[0] = 10000.0;
+        pixels[25] = 10000.0;
+        pixels[50] = 10000.0;
+        pixels[75] = 10000.0;
+        pixels[99] = 10000.0;
+        let dark = make_test_image(10, 10, 1, pixels);
 
         let hot_map = HotPixelMap::from_master_dark(&dark, 5.0);
 

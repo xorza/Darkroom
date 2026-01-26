@@ -5,17 +5,13 @@
 
 use super::synthetic::{SyntheticFieldConfig, SyntheticStar, generate_star_field};
 use crate::AstroImage;
-use crate::astro_image::{AstroImageMetadata, ImageDimensions};
+
 use crate::star_detection::{Star, StarDetectionConfig, find_stars};
 use image::{Rgb, RgbImage};
 use imageproc::drawing::{draw_cross_mut, draw_hollow_circle_mut};
 
 fn make_grayscale_image(pixels: Vec<f32>, width: usize, height: usize) -> AstroImage {
-    AstroImage {
-        pixels,
-        dimensions: ImageDimensions::new(width, height, 1),
-        metadata: AstroImageMetadata::default(),
-    }
+    AstroImage::new(width, height, 1, pixels)
 }
 
 /// Match detected stars between two images based on proximity.

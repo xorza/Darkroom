@@ -110,12 +110,12 @@ fn test_find_stars_on_light_frame() {
     let image = AstroImage::from_file(first_file).expect("Failed to load image");
     println!(
         "Loaded {}x{} image in {:?}",
-        image.dimensions.width,
-        image.dimensions.height,
+        image.width(),
+        image.height(),
         start.elapsed()
     );
 
-    let (width, height) = (image.dimensions.width, image.dimensions.height);
+    let (width, height) = (image.width(), image.height());
 
     // Find stars
     let config = StarDetectionConfig::default();

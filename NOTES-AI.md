@@ -210,9 +210,12 @@ Astrophotography image processing library for loading, calibrating, and stacking
 **Key types:**
 
 ```rust
-AstroImage         // Astronomical image with metadata and f32 pixels
+AstroImage         // Astronomical image wrapper around imaginarium::Image with metadata
+                   // Struct: { metadata: AstroImageMetadata, image: imaginarium::Image }
+                   // Accessors: width(), height(), channels(), dimensions(), pixels(), pixels_mut()
+                   // Constructor: AstroImage::new(width, height, channels, pixels: Vec<f32>)
 AstroImageMetadata // FITS metadata (object, instrument, exposure, bitpix, etc.)
-ImageDimensions    // { width: usize, height: usize, channels: usize }
+ImageDimensions    // { width: usize, height: usize, channels: usize } - helper struct for dimensions
 BitPix             // FITS pixel type enum (UInt8, Int16, Int32, Int64, Float32, Float64)
 StackingMethod     // Mean | Median | SigmaClippedMean(SigmaClipConfig)
 SigmaClipConfig    // { sigma, max_iterations }
@@ -251,8 +254,8 @@ CalibrationMasters // Container for master dark/flat/bias frames
 - `math.rs` - SIMD math: `sum_f32()`, `mean_f32()`, `sum_squared_diff()`
 
 **Conversions:**
-- `From<AstroImage> for imaginarium::Image` - converts f32 pixels to Image
-- `From<imaginarium::Image> for AstroImage` - converts to GRAY_F32 or RGB_F32, removes stride padding
+- `From<AstroImage> for imaginarium::Image` - extracts the inner image (trivial since AstroImage wraps Image)
+- `From<imaginarium::Image> for AstroImage` - wraps Image with default metadata (requires GRAY_F32 or RGB_F32)
 
 **Calibration:**
 - `AstroImage::calibrate(master_dark, master_flat)` - applies dark subtraction and flat field correction

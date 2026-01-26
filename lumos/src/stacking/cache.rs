@@ -114,7 +114,7 @@ impl ImageCache {
             path: first_path.to_path_buf(),
             source: io::Error::other(e.to_string()),
         })?;
-        let dimensions = first_image.dimensions;
+        let dimensions = first_image.dimensions();
         let metadata = first_image.metadata.clone();
 
         // Check available memory (from config or system)
@@ -174,12 +174,12 @@ impl ImageCache {
                     source: io::Error::other(e.to_string()),
                 })?;
 
-                if image.dimensions != dimensions {
+                if image.dimensions() != dimensions {
                     return Err(Error::DimensionMismatch {
                         frame_type,
                         index: actual_index,
                         expected: dimensions,
-                        actual: image.dimensions,
+                        actual: image.dimensions(),
                     });
                 }
 
@@ -265,12 +265,12 @@ impl ImageCache {
                     source: io::Error::other(e.to_string()),
                 })?;
 
-                if image.dimensions != dimensions {
+                if image.dimensions() != dimensions {
                     return Err(Error::DimensionMismatch {
                         frame_type,
                         index: i,
                         expected: dimensions,
-                        actual: image.dimensions,
+                        actual: image.dimensions(),
                     });
                 }
 
@@ -400,11 +400,9 @@ impl ImageCache {
             );
         }
 
-        AstroImage {
-            metadata: self.metadata.clone(),
-            pixels: output_pixels,
-            dimensions: dims,
-        }
+        let mut result = AstroImage::new(dims.width, dims.height, dims.channels, output_pixels);
+        result.metadata = self.metadata.clone();
+        result
     }
 
     /// Read a horizontal chunk (rows start_row..end_row) from a frame.
@@ -416,7 +414,7 @@ impl ImageCache {
         let end_pixel = end_row * row_size;
 
         match &self.storage {
-            Storage::InMemory(images) => &images[frame_idx].pixels[start_pixel..end_pixel],
+            Storage::InMemory(images) => &images[frame_idx].pixels()[start_pixel..end_pixel],
             Storage::DiskBacked { mmaps, .. } => {
                 let mmap = &mmaps[frame_idx];
                 let start_offset = size_of::<CacheHeader>() + start_pixel * 4;
@@ -473,9 +471,9 @@ fn write_cache_file(path: &Path, image: &AstroImage) -> Result<(), Error> {
     let mut writer = BufWriter::new(file);
 
     let header = CacheHeader {
-        width: image.dimensions.width as u32,
-        height: image.dimensions.height as u32,
-        channels: image.dimensions.channels as u32,
+        width: image.width() as u32,
+        height: image.height() as u32,
+        channels: image.channels() as u32,
     };
     writer
         .write_all(bytemuck::bytes_of(&header))
@@ -484,7 +482,7 @@ fn write_cache_file(path: &Path, image: &AstroImage) -> Result<(), Error> {
             source: e,
         })?;
 
-    let bytes: &[u8] = bytemuck::cast_slice(&image.pixels);
+    let bytes: &[u8] = bytemuck::cast_slice(image.pixels());
     writer.write_all(bytes).map_err(|e| Error::WriteCacheFile {
         path: path.to_path_buf(),
         source: e,
@@ -649,11 +647,7 @@ mod tests {
             channels: 3,
         };
         let pixels: Vec<f32> = (0..36).map(|i| i as f32).collect();
-        let image = AstroImage {
-            metadata: AstroImageMetadata::default(),
-            pixels: pixels.clone(),
-            dimensions: dims,
-        };
+        let image = AstroImage::new(dims.width, dims.height, dims.channels, pixels.clone());
 
         let cache_path = temp_dir.join("test_frame.bin");
         write_cache_file(&cache_path, &image).unwrap();
@@ -689,11 +683,7 @@ mod tests {
             channels: 3,
         };
         let pixels: Vec<f32> = (0..36).map(|i| i as f32).collect();
-        let image = AstroImage {
-            metadata: AstroImageMetadata::default(),
-            pixels,
-            dimensions: dims,
-        };
+        let image = AstroImage::new(dims.width, dims.height, dims.channels, pixels);
 
         let cache_path = temp_dir.join("chunk_frame.bin");
         write_cache_file(&cache_path, &image).unwrap();
@@ -770,11 +760,7 @@ mod tests {
             channels: 3,
         };
         let pixels: Vec<f32> = (0..36).map(|i| i as f32).collect();
-        let image = AstroImage {
-            metadata: AstroImageMetadata::default(),
-            pixels,
-            dimensions: dims,
-        };
+        let image = AstroImage::new(dims.width, dims.height, dims.channels, pixels);
 
         let cache_path = temp_dir.join("reuse_frame.bin");
         write_cache_file(&cache_path, &image).unwrap();
@@ -839,11 +825,7 @@ mod tests {
             channels: 1,
         };
         let pixels: Vec<f32> = vec![1.0, 2.0, 3.0, 4.0];
-        let image = AstroImage {
-            metadata: AstroImageMetadata::default(),
-            pixels: pixels.clone(),
-            dimensions: dims,
-        };
+        let image = AstroImage::new(dims.width, dims.height, dims.channels, pixels.clone());
 
         let cache_path = temp_dir.join("valid_write.bin");
         let result = write_cache_file(&cache_path, &image);

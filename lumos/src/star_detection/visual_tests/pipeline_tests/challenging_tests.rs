@@ -1,7 +1,7 @@
 //! Challenging case tests - tests star detection under difficult conditions.
 
 use crate::AstroImage;
-use crate::astro_image::{AstroImageMetadata, ImageDimensions};
+
 use crate::star_detection::visual_tests::generators::{
     CrowdingType, ElongationType, NebulaConfig, StarFieldConfig, crowded_cluster_config,
     elliptical_stars_config, faint_stars_config, generate_star_field,
@@ -32,11 +32,7 @@ fn run_challenging_test(
     );
 
     // Run detection
-    let image = AstroImage {
-        pixels: pixels.clone(),
-        dimensions: ImageDimensions::new(field_config.width, field_config.height, 1),
-        metadata: AstroImageMetadata::default(),
-    };
+    let image = AstroImage::new(field_config.width, field_config.height, 1, pixels.clone());
     let result = find_stars(&image, detection_config);
     let stars = result.stars;
 

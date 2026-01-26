@@ -266,11 +266,14 @@ pub fn load_raw(path: &Path) -> Result<AstroImage> {
         is_cfa,
     };
 
-    Ok(AstroImage {
-        metadata,
+    let mut astro = AstroImage::new(
+        dimensions.width,
+        dimensions.height,
+        dimensions.channels,
         pixels,
-        dimensions,
-    })
+    );
+    astro.metadata = metadata;
+    Ok(astro)
 }
 
 /// Process monochrome sensor data (no demosaicing needed).
@@ -745,15 +748,15 @@ mod tests {
         let image = result.unwrap();
 
         // Validate dimensions
-        assert!(image.dimensions.width > 0);
-        assert!(image.dimensions.height > 0);
-        assert_eq!(image.dimensions.channels, 3); // RGB output
+        assert!(image.dimensions().width > 0);
+        assert!(image.dimensions().height > 0);
+        assert_eq!(image.dimensions().channels, 3); // RGB output
 
         // Validate pixel count
-        assert_eq!(image.pixels.len(), image.dimensions.pixel_count());
+        assert_eq!(image.pixels().len(), image.dimensions().pixel_count());
 
         // Validate pixel values are normalized
-        for &pixel in &image.pixels {
+        for &pixel in image.pixels() {
             assert!(pixel >= 0.0, "Pixel value {} is negative", pixel);
             // Values can exceed 1.0 slightly due to demosaic interpolation
             assert!(pixel <= 2.0, "Pixel value {} is too large", pixel);
@@ -777,11 +780,17 @@ mod tests {
 
         // Header dimensions should match actual dimensions
         assert_eq!(image.metadata.header_dimensions.len(), 3);
-        assert_eq!(image.metadata.header_dimensions[0], image.dimensions.height);
-        assert_eq!(image.metadata.header_dimensions[1], image.dimensions.width);
+        assert_eq!(
+            image.metadata.header_dimensions[0],
+            image.dimensions().height
+        );
+        assert_eq!(
+            image.metadata.header_dimensions[1],
+            image.dimensions().width
+        );
         assert_eq!(
             image.metadata.header_dimensions[2],
-            image.dimensions.channels
+            image.dimensions().channels
         );
     }
 

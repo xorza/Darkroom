@@ -1,7 +1,7 @@
 //! Standard pipeline tests - tests full star detection on typical scenarios.
 
 use crate::AstroImage;
-use crate::astro_image::{AstroImageMetadata, ImageDimensions};
+
 use crate::star_detection::visual_tests::generators::{
     StarFieldConfig, dense_field_config, generate_star_field, sparse_field_config,
 };
@@ -30,11 +30,7 @@ fn run_pipeline_test(
     );
 
     // Run detection
-    let image = AstroImage {
-        pixels: pixels.clone(),
-        dimensions: ImageDimensions::new(field_config.width, field_config.height, 1),
-        metadata: AstroImageMetadata::default(),
-    };
+    let image = AstroImage::new(field_config.width, field_config.height, 1, pixels.clone());
     let result = find_stars(&image, detection_config);
     let stars = result.stars;
 

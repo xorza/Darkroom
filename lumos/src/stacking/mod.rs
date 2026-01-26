@@ -357,13 +357,13 @@ mod tests {
         println!(
             "Master {}: {}x{}x{}",
             subdir.to_lowercase(),
-            master.dimensions.width,
-            master.dimensions.height,
-            master.dimensions.channels
+            master.width(),
+            master.height(),
+            master.channels()
         );
 
-        assert_eq!(master.dimensions, first.dimensions);
-        assert!(!master.pixels.is_empty());
+        assert_eq!(master.dimensions(), first.dimensions());
+        assert!(!master.pixels().is_empty());
 
         let img: imaginarium::Image = master.into();
         img.save_file(common::test_utils::test_output_path(output_name))
@@ -440,11 +440,13 @@ mod tests {
         let first = AstroImage::from_file(&paths[0]).unwrap();
         println!(
             "Master dark: {}x{}x{}",
-            master.dimensions.width, master.dimensions.height, master.dimensions.channels
+            master.width(),
+            master.height(),
+            master.channels()
         );
 
-        assert_eq!(master.dimensions, first.dimensions);
-        assert!(!master.pixels.is_empty());
+        assert_eq!(master.dimensions(), first.dimensions());
+        assert!(!master.pixels().is_empty());
 
         // Verify cache files were created (disk-backed mode)
         assert!(

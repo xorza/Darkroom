@@ -33,31 +33,35 @@ fn test_load_xtrans_raf_file() {
     let image = AstroImage::from_file(&file_path).expect("Failed to load X-Trans RAF file");
 
     // Validate basic dimensions are non-zero
-    assert!(image.dimensions.width > 0, "Image width must be non-zero");
-    assert!(image.dimensions.height > 0, "Image height must be non-zero");
+    assert!(image.dimensions().width > 0, "Image width must be non-zero");
     assert!(
-        image.dimensions.channels > 0,
+        image.dimensions().height > 0,
+        "Image height must be non-zero"
+    );
+    assert!(
+        image.dimensions().channels > 0,
         "Image channels must be non-zero"
     );
 
     // X-Trans demosaic should produce RGB output (3 channels)
     assert_eq!(
-        image.dimensions.channels, 3,
+        image.dimensions().channels,
+        3,
         "X-Trans demosaic should produce RGB image with 3 channels"
     );
 
     // Validate pixel data exists and matches dimensions
-    let expected_pixel_count = image.dimensions.pixel_count();
+    let expected_pixel_count = image.dimensions().pixel_count();
     assert_eq!(
-        image.pixels.len(),
+        image.pixels().len(),
         expected_pixel_count,
         "Pixel data length {} doesn't match expected {}",
-        image.pixels.len(),
+        image.pixels().len(),
         expected_pixel_count
     );
 
     // Validate pixels are in normalized range [0.0, 1.0]
-    for (i, &pixel) in image.pixels.iter().enumerate() {
+    for (i, &pixel) in image.pixels().iter().enumerate() {
         assert!(
             (0.0..=1.0).contains(&pixel),
             "Pixel {} out of range: {} (expected 0.0-1.0)",
@@ -78,9 +82,9 @@ fn test_load_xtrans_raf_file() {
 
     tracing::info!(
         "Successfully loaded X-Trans image: {}x{} ({} channels, {} pixels)",
-        image.dimensions.width,
-        image.dimensions.height,
-        image.dimensions.channels,
+        image.dimensions().width,
+        image.dimensions().height,
+        image.dimensions().channels,
         expected_pixel_count
     );
 }
@@ -103,28 +107,28 @@ fn test_xtrans_image_dimensions_reasonable() {
     // X-H2: 8256x6192 (40MP)
     // Allow reasonable range for various X-Trans cameras
     assert!(
-        image.dimensions.width >= 1000,
+        image.dimensions().width >= 1000,
         "Image width {} seems too small for X-Trans sensor",
-        image.dimensions.width
+        image.dimensions().width
     );
     assert!(
-        image.dimensions.width <= 10000,
+        image.dimensions().width <= 10000,
         "Image width {} seems too large for X-Trans sensor",
-        image.dimensions.width
+        image.dimensions().width
     );
     assert!(
-        image.dimensions.height >= 1000,
+        image.dimensions().height >= 1000,
         "Image height {} seems too small for X-Trans sensor",
-        image.dimensions.height
+        image.dimensions().height
     );
     assert!(
-        image.dimensions.height <= 8000,
+        image.dimensions().height <= 8000,
         "Image height {} seems too large for X-Trans sensor",
-        image.dimensions.height
+        image.dimensions().height
     );
 
     // Validate aspect ratio is reasonable (typical camera aspect ratios: 3:2, 4:3, 16:9)
-    let aspect_ratio = image.dimensions.width as f64 / image.dimensions.height as f64;
+    let aspect_ratio = image.dimensions().width as f64 / image.dimensions().height as f64;
     assert!(
         (1.0..=2.0).contains(&aspect_ratio),
         "Aspect ratio {} seems unreasonable (expected 1.0-2.0 for landscape)",
@@ -133,8 +137,8 @@ fn test_xtrans_image_dimensions_reasonable() {
 
     tracing::info!(
         "X-Trans image dimensions: {}x{}, aspect ratio: {:.2}",
-        image.dimensions.width,
-        image.dimensions.height,
+        image.dimensions().width,
+        image.dimensions().height,
         aspect_ratio
     );
 }
@@ -152,13 +156,13 @@ fn test_xtrans_pixel_statistics() {
     let image = AstroImage::from_file(&file_path).expect("Failed to load X-Trans RAF file");
 
     // Calculate basic statistics per channel
-    let width = image.dimensions.width;
-    let height = image.dimensions.height;
-    let channels = image.dimensions.channels;
+    let width = image.dimensions().width;
+    let height = image.dimensions().height;
+    let channels = image.dimensions().channels;
 
     for ch in 0..channels {
         let channel_pixels: Vec<f32> = (0..width * height)
-            .map(|i| image.pixels[i * channels + ch])
+            .map(|i| image.pixels()[i * channels + ch])
             .collect();
 
         let sum: f64 = channel_pixels.iter().map(|&p| p as f64).sum();
@@ -217,9 +221,9 @@ fn test_xtrans_no_checkerboard_artifacts() {
 
     let image = AstroImage::from_file(&file_path).expect("Failed to load X-Trans RAF file");
 
-    let width = image.dimensions.width;
-    let height = image.dimensions.height;
-    let channels = image.dimensions.channels;
+    let width = image.dimensions().width;
+    let height = image.dimensions().height;
+    let channels = image.dimensions().channels;
 
     // Check for checkerboard patterns by comparing adjacent pixel differences
     // A bad demosaic might produce alternating patterns
@@ -236,7 +240,7 @@ fn test_xtrans_no_checkerboard_artifacts() {
             for x in start_x..(start_x + sample_size - 1) {
                 let idx1 = (y * width + x) * channels + ch;
                 let idx2 = (y * width + x + 1) * channels + ch;
-                horizontal_diffs.push((image.pixels[idx1] - image.pixels[idx2]).abs());
+                horizontal_diffs.push((image.pixels()[idx1] - image.pixels()[idx2]).abs());
             }
         }
 
@@ -244,7 +248,7 @@ fn test_xtrans_no_checkerboard_artifacts() {
             for x in start_x..(start_x + sample_size) {
                 let idx1 = (y * width + x) * channels + ch;
                 let idx2 = ((y + 1) * width + x) * channels + ch;
-                vertical_diffs.push((image.pixels[idx1] - image.pixels[idx2]).abs());
+                vertical_diffs.push((image.pixels()[idx1] - image.pixels()[idx2]).abs());
             }
         }
 
@@ -298,9 +302,9 @@ fn test_xtrans_color_balance() {
 
     let image = AstroImage::from_file(&file_path).expect("Failed to load X-Trans RAF file");
 
-    let width = image.dimensions.width;
-    let height = image.dimensions.height;
-    let channels = image.dimensions.channels;
+    let width = image.dimensions().width;
+    let height = image.dimensions().height;
+    let channels = image.dimensions().channels;
 
     assert_eq!(channels, 3, "Expected 3 channels for RGB image");
 
@@ -312,7 +316,7 @@ fn test_xtrans_color_balance() {
         for x in 0..width {
             let base_idx = (y * width + x) * channels;
             for (ch, mean) in channel_means.iter_mut().enumerate() {
-                *mean += image.pixels[base_idx + ch] as f64;
+                *mean += image.pixels()[base_idx + ch] as f64;
             }
         }
     }
@@ -385,12 +389,12 @@ fn test_xtrans_conversion_to_imaginarium_image() {
     // Validate conversion preserved dimensions
     assert_eq!(
         image.desc().width,
-        astro_image.dimensions.width,
+        astro_image.dimensions().width,
         "Width mismatch after conversion"
     );
     assert_eq!(
         image.desc().height,
-        astro_image.dimensions.height,
+        astro_image.dimensions().height,
         "Height mismatch after conversion"
     );
 
@@ -402,8 +406,8 @@ fn test_xtrans_conversion_to_imaginarium_image() {
     );
 
     // Validate data size matches
-    let expected_bytes = astro_image.dimensions.width
-        * astro_image.dimensions.height
+    let expected_bytes = astro_image.dimensions().width
+        * astro_image.dimensions().height
         * 3
         * std::mem::size_of::<f32>();
     assert_eq!(

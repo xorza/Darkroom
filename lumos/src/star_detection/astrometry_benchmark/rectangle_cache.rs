@@ -190,8 +190,8 @@ impl RectangleCache {
         let image =
             crate::AstroImage::from_file(source_image).context("Failed to load source image")?;
 
-        let img_width = image.dimensions.width;
-        let img_height = image.dimensions.height;
+        let img_width = image.width();
+        let img_height = image.height();
 
         tracing::info!("Source image size: {}x{}", img_width, img_height);
 
@@ -278,13 +278,14 @@ impl RectangleCache {
         let grayscale = source.to_grayscale();
 
         // Extract rectangle pixels
-        let src_width = grayscale.dimensions.width;
+        let src_width = grayscale.width();
+        let src_pixels = grayscale.pixels();
         let mut pixels = Vec::with_capacity(rect.width * rect.height);
 
         for y in rect.y..(rect.y + rect.height) {
             for x in rect.x..(rect.x + rect.width) {
                 let idx = y * src_width + x;
-                pixels.push(grayscale.pixels[idx]);
+                pixels.push(src_pixels[idx]);
             }
         }
 
@@ -363,11 +364,7 @@ impl RectangleCache {
         let image = crate::AstroImage::from_file(&path)
             .with_context(|| format!("Failed to load rectangle image: {}", path.display()))?;
 
-        Ok((
-            image.pixels,
-            image.dimensions.width,
-            image.dimensions.height,
-        ))
+        Ok((image.pixels().to_vec(), image.width(), image.height()))
     }
 
     /// Clear all cached data.

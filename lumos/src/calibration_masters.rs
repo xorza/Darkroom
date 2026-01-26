@@ -49,19 +49,20 @@ impl CalibrationMasters {
         // Subtract master bias (removes readout noise)
         if let Some(ref bias) = self.master_bias {
             assert!(
-                bias.dimensions == image.dimensions,
+                bias.dimensions() == image.dimensions(),
                 "Bias frame dimensions {:?} don't match light frame {:?}",
-                bias.dimensions,
-                image.dimensions
+                bias.dimensions(),
+                image.dimensions()
             );
+            let bias_pixels = bias.pixels();
             image
-                .pixels
+                .pixels_mut()
                 .par_chunks_mut(CHUNK_SIZE)
                 .enumerate()
-                .for_each(|(chunk_idx, chunk)| {
+                .for_each(|(chunk_idx, chunk): (usize, &mut [f32])| {
                     let start = chunk_idx * CHUNK_SIZE;
                     for (i, p) in chunk.iter_mut().enumerate() {
-                        *p -= bias.pixels[start + i];
+                        *p -= bias_pixels[start + i];
                     }
                 });
         }
@@ -69,19 +70,20 @@ impl CalibrationMasters {
         // Subtract master dark (removes thermal noise)
         if let Some(ref dark) = self.master_dark {
             assert!(
-                dark.dimensions == image.dimensions,
+                dark.dimensions() == image.dimensions(),
                 "Dark frame dimensions {:?} don't match light frame {:?}",
-                dark.dimensions,
-                image.dimensions
+                dark.dimensions(),
+                image.dimensions()
             );
+            let dark_pixels = dark.pixels();
             image
-                .pixels
+                .pixels_mut()
                 .par_chunks_mut(CHUNK_SIZE)
                 .enumerate()
-                .for_each(|(chunk_idx, chunk)| {
+                .for_each(|(chunk_idx, chunk): (usize, &mut [f32])| {
                     let start = chunk_idx * CHUNK_SIZE;
                     for (i, p) in chunk.iter_mut().enumerate() {
-                        *p -= dark.pixels[start + i];
+                        *p -= dark_pixels[start + i];
                     }
                 });
         }
@@ -89,10 +91,10 @@ impl CalibrationMasters {
         // Divide by normalized master flat (corrects vignetting)
         if let Some(ref flat) = self.master_flat {
             assert!(
-                flat.dimensions == image.dimensions,
+                flat.dimensions() == image.dimensions(),
                 "Flat frame dimensions {:?} don't match light frame {:?}",
-                flat.dimensions,
-                image.dimensions
+                flat.dimensions(),
+                image.dimensions()
             );
             let flat_mean = flat.mean();
             assert!(
@@ -100,15 +102,16 @@ impl CalibrationMasters {
                 "Flat frame mean is zero or negative"
             );
             let inv_flat_mean = 1.0 / flat_mean;
+            let flat_pixels = flat.pixels();
 
             image
-                .pixels
+                .pixels_mut()
                 .par_chunks_mut(CHUNK_SIZE)
                 .enumerate()
-                .for_each(|(chunk_idx, chunk)| {
+                .for_each(|(chunk_idx, chunk): (usize, &mut [f32])| {
                     let start = chunk_idx * CHUNK_SIZE;
                     for (i, p) in chunk.iter_mut().enumerate() {
-                        let normalized_flat = flat.pixels[start + i] * inv_flat_mean;
+                        let normalized_flat = flat_pixels[start + i] * inv_flat_mean;
                         if normalized_flat > f32::EPSILON {
                             *p /= normalized_flat;
                         }
@@ -119,10 +122,10 @@ impl CalibrationMasters {
         // Correct hot pixels (replace with median of neighbors)
         if let Some(ref hot_pixel_map) = self.hot_pixel_map {
             assert!(
-                hot_pixel_map.dimensions == image.dimensions,
+                hot_pixel_map.dimensions == image.dimensions(),
                 "Hot pixel map dimensions {:?} don't match light frame {:?}",
                 hot_pixel_map.dimensions,
-                image.dimensions
+                image.dimensions()
             );
             hot_pixel_map.correct(image);
         }
@@ -389,30 +392,36 @@ mod tests {
         if let Some(ref dark) = masters.master_dark {
             println!(
                 "Master dark: {}x{}x{}",
-                dark.dimensions.width, dark.dimensions.height, dark.dimensions.channels
+                dark.width(),
+                dark.height(),
+                dark.channels()
             );
-            assert!(dark.dimensions.width > 0);
-            assert!(dark.dimensions.height > 0);
+            assert!(dark.width() > 0);
+            assert!(dark.height() > 0);
         }
 
         // Verify dimensions if flat exists
         if let Some(ref flat) = masters.master_flat {
             println!(
                 "Master flat: {}x{}x{}",
-                flat.dimensions.width, flat.dimensions.height, flat.dimensions.channels
+                flat.width(),
+                flat.height(),
+                flat.channels()
             );
-            assert!(flat.dimensions.width > 0);
-            assert!(flat.dimensions.height > 0);
+            assert!(flat.width() > 0);
+            assert!(flat.height() > 0);
         }
 
         // Verify dimensions if bias exists
         if let Some(ref bias) = masters.master_bias {
             println!(
                 "Master flat: {}x{}x{}",
-                bias.dimensions.width, bias.dimensions.height, bias.dimensions.channels
+                bias.width(),
+                bias.height(),
+                bias.channels()
             );
-            assert!(bias.dimensions.width > 0);
-            assert!(bias.dimensions.height > 0);
+            assert!(bias.width() > 0);
+            assert!(bias.height() > 0);
         }
     }
 }

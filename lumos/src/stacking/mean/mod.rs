@@ -47,19 +47,19 @@ pub fn stack_mean_from_paths<P: AsRef<Path>>(
         })?;
 
         if let Some(dims) = dimensions {
-            if frame.dimensions != dims {
+            if frame.dimensions() != dims {
                 return Err(Error::DimensionMismatch {
                     frame_type,
                     index: i,
                     expected: dims,
-                    actual: frame.dimensions,
+                    actual: frame.dimensions(),
                 });
             }
             // Accumulate pixel values in parallel chunks using SIMD
-            accumulate_parallel(&mut sum, &frame.pixels);
+            accumulate_parallel(&mut sum, frame.pixels());
         } else {
-            dimensions = Some(frame.dimensions);
-            sum = frame.pixels.clone();
+            dimensions = Some(frame.dimensions());
+            sum = frame.pixels().to_vec();
             metadata = Some(frame.metadata.clone());
         }
     }
@@ -68,11 +68,10 @@ pub fn stack_mean_from_paths<P: AsRef<Path>>(
     let inv_count = 1.0 / paths.len() as f32;
     scale_parallel(&mut sum, inv_count);
 
-    Ok(AstroImage {
-        metadata: metadata.unwrap(),
-        pixels: sum,
-        dimensions: dimensions.unwrap(),
-    })
+    let dims = dimensions.unwrap();
+    let mut result = AstroImage::new(dims.width, dims.height, dims.channels, sum);
+    result.metadata = metadata.unwrap();
+    Ok(result)
 }
 
 /// Accumulate src into dst in parallel chunks using SIMD.

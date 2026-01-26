@@ -236,9 +236,9 @@ fn test_background_on_real_image() {
         .packed();
     let astro_image: crate::AstroImage = imag_image.convert(ColorFormat::GRAY_F32).unwrap().into();
 
-    let width = astro_image.dimensions.width;
-    let height = astro_image.dimensions.height;
-    let pixels = &astro_image.pixels;
+    let width = astro_image.width();
+    let height = astro_image.height();
+    let pixels = astro_image.pixels();
 
     println!("Loaded image: {}x{}", width, height);
 
@@ -757,9 +757,9 @@ fn test_background_regression() {
         .packed();
     let astro_image: crate::AstroImage = imag_image.convert(ColorFormat::GRAY_F32).unwrap().into();
 
-    let width = astro_image.dimensions.width;
-    let height = astro_image.dimensions.height;
-    let pixels = &astro_image.pixels;
+    let width = astro_image.width();
+    let height = astro_image.height();
+    let pixels = astro_image.pixels();
 
     // Estimate background
     let bg = estimate_background(pixels, width, height, 64);

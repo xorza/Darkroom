@@ -12,7 +12,7 @@ mod stage_tests;
 mod pipeline_tests;
 
 use crate::AstroImage;
-use crate::astro_image::{AstroImageMetadata, ImageDimensions};
+
 use crate::star_detection::{StarDetectionConfig, find_stars};
 use crate::testing::{calibration_dir, init_tracing};
 use image::{GrayImage, Rgb, RgbImage};
@@ -39,14 +39,14 @@ fn test_visualize_star_detection() {
     let imag_image =
         imaginarium::Image::read_file(&calibrated_light).expect("Failed to load image");
     let image: AstroImage = imag_image.into();
-    let (width, height) = (image.dimensions.width, image.dimensions.height);
+    let (width, height) = (image.width(), image.height());
     println!("Image size: {}x{}", width, height);
-    println!("Channels: {}", image.dimensions.channels);
+    println!("Channels: {}", image.channels());
 
     // Print pixel value statistics
-    let min_val = image.pixels.iter().cloned().fold(f32::INFINITY, f32::min);
+    let min_val = image.pixels().iter().cloned().fold(f32::INFINITY, f32::min);
     let max_val = image
-        .pixels
+        .pixels()
         .iter()
         .cloned()
         .fold(f32::NEG_INFINITY, f32::max);
@@ -81,17 +81,17 @@ fn test_visualize_star_detection() {
     // Normalize image to 0-1 range for proper display (auto-stretch)
     let mut display_image = image.clone();
     let min_val = display_image
-        .pixels
+        .pixels()
         .iter()
         .cloned()
         .fold(f32::INFINITY, f32::min);
     let max_val = display_image
-        .pixels
+        .pixels()
         .iter()
         .cloned()
         .fold(f32::NEG_INFINITY, f32::max);
     let range = (max_val - min_val).max(1e-6);
-    for p in &mut display_image.pixels {
+    for p in display_image.pixels_mut() {
         *p = (*p - min_val) / range;
     }
     println!("Normalized pixel range: {:.6} - {:.6}", 0.0, 1.0);
@@ -233,11 +233,7 @@ fn test_synthetic_star_detection() {
         ..Default::default()
     };
 
-    let image = AstroImage {
-        pixels: pixels.clone(),
-        dimensions: ImageDimensions::new(config.width, config.height, 1),
-        metadata: AstroImageMetadata::default(),
-    };
+    let image = AstroImage::new(config.width, config.height, 1, pixels.clone());
     let result = find_stars(&image, &detection_config);
     let detected_stars = result.stars;
     println!("\nDetected {} stars", detected_stars.len());

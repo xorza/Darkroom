@@ -434,7 +434,7 @@ fn test_warp_homography_roundtrip() {
 #[test]
 fn test_warp_with_detected_transform() {
     use crate::AstroImage;
-    use crate::astro_image::{AstroImageMetadata, ImageDimensions};
+
     use crate::registration::{RegistrationConfig, Registrator};
     use crate::star_detection::{StarDetectionConfig, find_stars};
 
@@ -480,16 +480,8 @@ fn test_warp_with_detected_transform() {
         ..Default::default()
     };
 
-    let ref_image = AstroImage {
-        pixels: ref_pixels.clone(),
-        dimensions: ImageDimensions::new(width, height, 1),
-        metadata: AstroImageMetadata::default(),
-    };
-    let target_image = AstroImage {
-        pixels: target_pixels.clone(),
-        dimensions: ImageDimensions::new(width, height, 1),
-        metadata: AstroImageMetadata::default(),
-    };
+    let ref_image = AstroImage::new(width, height, 1, ref_pixels.clone());
+    let target_image = AstroImage::new(width, height, 1, target_pixels.clone());
 
     let ref_result = find_stars(&ref_image, &det_config);
     let target_result = find_stars(&target_image, &det_config);

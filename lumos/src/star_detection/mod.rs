@@ -848,9 +848,9 @@ pub struct StarDetectionDiagnostics {
 /// * `config` - Detection configuration
 pub fn find_stars(image: &AstroImage, config: &StarDetectionConfig) -> StarDetectionResult {
     let grayscale = image.to_grayscale();
-    let width = grayscale.dimensions.width;
-    let height = grayscale.dimensions.height;
-    let pixels = &grayscale.pixels;
+    let width = grayscale.width();
+    let height = grayscale.height();
+    let pixels = grayscale.pixels();
 
     config.validate();
 

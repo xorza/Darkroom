@@ -260,8 +260,8 @@ impl SurveyBenchmark {
         // Step 2: Load image and extract WCS
         let (image, wcs) = self.load_image_with_wcs(&image_path)?;
 
-        let width = image.dimensions.width;
-        let height = image.dimensions.height;
+        let width = image.width();
+        let height = image.height();
 
         // Step 3: Query catalog for the image region
         let bounds = wcs.image_bounds_sky(width, height);
@@ -370,11 +370,11 @@ impl SurveyBenchmark {
         let field_dir = self.output_dir.join(field.name);
         std::fs::create_dir_all(&field_dir)?;
 
-        let width = image.dimensions.width;
-        let height = image.dimensions.height;
+        let width = image.width();
+        let height = image.height();
 
         // Normalize image to 0-1 range for display
-        let pixels_normalized = normalize_pixels(&image.pixels);
+        let pixels_normalized = normalize_pixels(image.pixels());
 
         // Save input image
         save_grayscale_png(
@@ -967,8 +967,8 @@ mod tests {
             .unwrap();
 
         let (image, wcs) = benchmark.load_image_with_wcs(&image_path).unwrap();
-        let width = image.dimensions.width;
-        let height = image.dimensions.height;
+        let width = image.width();
+        let height = image.height();
 
         println!("\n=== WCS Info ===");
         println!(
@@ -1055,7 +1055,8 @@ mod tests {
                 let idx = py * width + px;
                 println!(
                     "    Pixel value: {:.1}, saturated flag: {}",
-                    image.pixels[idx], gt.is_saturated
+                    image.pixels()[idx],
+                    gt.is_saturated
                 );
             }
         }

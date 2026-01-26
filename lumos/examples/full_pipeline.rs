@@ -179,8 +179,8 @@ fn create_calibration_masters(calibration_dir: &Path, output_dir: &Path) -> Cali
     // Report what was created
     if let Some(ref dark) = masters.master_dark {
         tracing::info!(
-            width = dark.dimensions.width,
-            height = dark.dimensions.height,
+            width = dark.dimensions().width,
+            height = dark.dimensions().height,
             "Master dark created"
         );
     } else {
@@ -189,8 +189,8 @@ fn create_calibration_masters(calibration_dir: &Path, output_dir: &Path) -> Cali
 
     if let Some(ref flat) = masters.master_flat {
         tracing::info!(
-            width = flat.dimensions.width,
-            height = flat.dimensions.height,
+            width = flat.dimensions().width,
+            height = flat.dimensions().height,
             "Master flat created"
         );
     } else {
@@ -199,8 +199,8 @@ fn create_calibration_masters(calibration_dir: &Path, output_dir: &Path) -> Cali
 
     if let Some(ref bias) = masters.master_bias {
         tracing::info!(
-            width = bias.dimensions.width,
-            height = bias.dimensions.height,
+            width = bias.dimensions().width,
+            height = bias.dimensions().height,
             "Master bias created"
         );
     } else {
@@ -384,8 +384,8 @@ fn register_all_lights(
 
     // Load reference image to get dimensions
     let ref_image = AstroImage::from_file(ref_path).expect("Failed to load reference image");
-    let width = ref_image.dimensions.width;
-    let height = ref_image.dimensions.height;
+    let width = ref_image.dimensions().width;
+    let height = ref_image.dimensions().height;
 
     // Convert reference stars to (x, y) tuples, sorted by flux (brightest first)
     let mut ref_star_positions: Vec<(f64, f64)> =
@@ -505,15 +505,15 @@ fn warp_image_to_reference(
     height: usize,
     transform: &lumos::TransformMatrix,
 ) -> AstroImage {
-    let channels = image.dimensions.channels;
+    let channels = image.channels();
 
     // Warp each channel separately
-    let mut warped_pixels = Vec::with_capacity(image.pixels.len());
+    let mut warped_pixels = Vec::with_capacity(image.pixels().len());
 
     for c in 0..channels {
         // Extract channel
         let channel: Vec<f32> = image
-            .pixels
+            .pixels()
             .iter()
             .skip(c)
             .step_by(channels)
@@ -531,24 +531,23 @@ fn warp_image_to_reference(
 
         // Interleave back
         if c == 0 {
-            warped_pixels.resize(image.pixels.len(), 0.0);
+            warped_pixels.resize(image.pixels().len(), 0.0);
         }
         for (i, &val) in warped_channel.iter().enumerate() {
             warped_pixels[i * channels + c] = val;
         }
     }
 
-    AstroImage {
-        pixels: warped_pixels,
-        dimensions: image.dimensions,
-        metadata: image.metadata.clone(),
-    }
+    let dims = image.dimensions();
+    let mut result = AstroImage::new(dims.width, dims.height, dims.channels, warped_pixels);
+    result.metadata = image.metadata.clone();
+    result
 }
 
 /// Save a visualization of detected stars on the reference image.
 fn save_star_visualization(ref_image: &AstroImage, stars: &[Star], output_dir: &Path) {
     // Filter out stars in the bottom portion of the image (horizon, ground)
-    let height_cutoff = ref_image.dimensions.height as f32 * 0.7;
+    let height_cutoff = ref_image.dimensions().height as f32 * 0.7;
     let sky_stars: Vec<&Star> = stars.iter().filter(|s| s.y < height_cutoff).collect();
 
     // Take the best stars
@@ -608,9 +607,9 @@ fn draw_circle(
     color: &[f32; 3],
     thickness: usize,
 ) {
-    let width = image.dimensions.width;
-    let height = image.dimensions.height;
-    let channels = image.dimensions.channels;
+    let width = image.width();
+    let height = image.height();
+    let channels = image.channels();
 
     let min_radius = (radius - thickness as f32 / 2.0).max(1.0);
     let max_radius = radius + thickness as f32 / 2.0;
@@ -623,6 +622,7 @@ fn draw_circle(
     let y_min = ((cy - max_radius).floor() as i32).max(0) as usize;
     let y_max = ((cy + max_radius).ceil() as i32).min(height as i32 - 1) as usize;
 
+    let pixels = image.pixels_mut();
     for y in y_min..=y_max {
         for x in x_min..=x_max {
             let dx = x as f32 - cx;
@@ -632,11 +632,11 @@ fn draw_circle(
             if dist_sq >= min_r_sq && dist_sq <= max_r_sq {
                 let idx = (y * width + x) * channels;
                 if channels == 1 {
-                    image.pixels[idx] = 0.299 * color[0] + 0.587 * color[1] + 0.114 * color[2];
+                    pixels[idx] = 0.299 * color[0] + 0.587 * color[1] + 0.114 * color[2];
                 } else {
-                    image.pixels[idx] = color[0];
-                    image.pixels[idx + 1] = color[1];
-                    image.pixels[idx + 2] = color[2];
+                    pixels[idx] = color[0];
+                    pixels[idx + 1] = color[1];
+                    pixels[idx + 2] = color[2];
                 }
             }
         }

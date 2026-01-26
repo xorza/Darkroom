@@ -2,7 +2,7 @@
 
 use super::synthetic::{SyntheticFieldConfig, SyntheticStar, generate_star_field};
 use crate::AstroImage;
-use crate::astro_image::{AstroImageMetadata, ImageDimensions};
+
 use crate::star_detection::background::estimate_background;
 use crate::star_detection::constants::dilate_mask;
 use crate::star_detection::{StarDetectionConfig, find_stars, median_filter_3x3};
@@ -80,14 +80,14 @@ fn test_debug_star_detection_steps() {
         .packed();
     let astro_image: crate::AstroImage = imag_image.convert(ColorFormat::GRAY_F32).unwrap().into();
 
-    let width = astro_image.dimensions.width;
-    let height = astro_image.dimensions.height;
-    let channels = astro_image.dimensions.channels;
+    let width = astro_image.width();
+    let height = astro_image.height();
+    let channels = astro_image.channels();
 
     println!("Image size: {}x{}, channels: {}", width, height, channels);
 
     // Convert to grayscale
-    let grayscale: Vec<f32> = astro_image.pixels;
+    let grayscale: Vec<f32> = astro_image.pixels().to_vec();
 
     // Print pixel statistics
     let min_val = grayscale.iter().cloned().fold(f32::INFINITY, f32::min);
@@ -204,11 +204,7 @@ fn test_debug_star_detection_steps() {
     println!("Saved: {:?}", path);
 
     // Run full detection
-    let image = AstroImage {
-        pixels: grayscale.clone(),
-        dimensions: ImageDimensions::new(width, height, 1),
-        metadata: AstroImageMetadata::default(),
-    };
+    let image = AstroImage::new(width, height, 1, grayscale.clone());
     let result = find_stars(&image, &config);
     let stars = result.stars;
     println!("\nDetected {} stars", stars.len());
@@ -393,11 +389,7 @@ fn test_debug_synthetic_steps() {
     println!("Saved: {:?}", path);
 
     // Run full detection
-    let image = AstroImage {
-        pixels: grayscale.clone(),
-        dimensions: ImageDimensions::new(width, height, 1),
-        metadata: AstroImageMetadata::default(),
-    };
+    let image = AstroImage::new(width, height, 1, grayscale.clone());
     let detection_result = find_stars(&image, &detection_config);
     let stars = detection_result.stars;
     println!(
@@ -472,11 +464,11 @@ fn test_noise_analysis() {
     let imag_image = imaginarium::Image::read_file(&cropped_path).expect("Failed to load image");
     let astro_image: crate::AstroImage = imag_image.into();
 
-    let width = astro_image.dimensions.width;
-    let height = astro_image.dimensions.height;
+    let width = astro_image.width();
+    let height = astro_image.height();
 
     // Convert to grayscale
-    let grayscale = astro_image.to_grayscale().pixels;
+    let grayscale = astro_image.to_grayscale().pixels().to_vec();
 
     // Print pixel value histogram
     let min_val = grayscale.iter().cloned().fold(f32::INFINITY, f32::min);
@@ -575,11 +567,11 @@ fn test_threshold_detail() {
     let imag_image = imaginarium::Image::read_file(&cropped_path).expect("Failed to load image");
     let astro_image: crate::AstroImage = imag_image.into();
 
-    let width = astro_image.dimensions.width;
-    let height = astro_image.dimensions.height;
+    let width = astro_image.width();
+    let height = astro_image.height();
 
     // Convert to grayscale
-    let grayscale = astro_image.to_grayscale().pixels;
+    let grayscale = astro_image.to_grayscale().pixels().to_vec();
 
     // Look at a small 20x20 region in detail
     let region_x = 100;
@@ -667,11 +659,11 @@ fn test_find_striped_region() {
     let imag_image = imaginarium::Image::read_file(&cropped_path).expect("Failed to load image");
     let astro_image: crate::AstroImage = imag_image.into();
 
-    let width = astro_image.dimensions.width;
-    let height = astro_image.dimensions.height;
+    let width = astro_image.width();
+    let height = astro_image.height();
 
     // Convert to grayscale
-    let grayscale = astro_image.to_grayscale().pixels;
+    let grayscale = astro_image.to_grayscale().pixels().to_vec();
 
     let bg = estimate_background(&grayscale, width, height, 64);
 
@@ -751,11 +743,11 @@ fn test_dilation_comparison() {
     let imag_image = imaginarium::Image::read_file(&cropped_path).expect("Failed to load image");
     let astro_image: crate::AstroImage = imag_image.into();
 
-    let width = astro_image.dimensions.width;
-    let height = astro_image.dimensions.height;
+    let width = astro_image.width();
+    let height = astro_image.height();
 
     // Convert to grayscale
-    let grayscale = astro_image.to_grayscale().pixels;
+    let grayscale = astro_image.to_grayscale().pixels().to_vec();
 
     // Apply median filter
     let smoothed = median_filter_3x3(&grayscale, width, height);
