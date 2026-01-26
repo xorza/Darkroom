@@ -355,6 +355,9 @@ fn convert_rgba_u8_to_rgb_u8(from: &Image, to: &mut Image) {
     let from_bytes = from.bytes();
     let to_bytes = to.bytes_mut();
 
+    #[cfg(target_arch = "x86_64")]
+    let use_avx2 = is_x86_feature_detected!("avx2");
+
     to_bytes
         .par_chunks_mut(to_stride)
         .enumerate()
@@ -362,9 +365,12 @@ fn convert_rgba_u8_to_rgb_u8(from: &Image, to: &mut Image) {
             let from_row = &from_bytes[y * from_stride..];
 
             #[cfg(target_arch = "x86_64")]
-            // SAFETY: We've verified SSSE3 is available in try_convert_simd
             unsafe {
-                convert_rgba_to_rgb_row_ssse3(from_row, to_row, width);
+                if use_avx2 {
+                    convert_rgba_to_rgb_row_avx2(from_row, to_row, width);
+                } else {
+                    convert_rgba_to_rgb_row_ssse3(from_row, to_row, width);
+                }
             }
 
             #[cfg(target_arch = "aarch64")]
@@ -392,6 +398,9 @@ fn convert_rgb_u8_to_rgba_u8(from: &Image, to: &mut Image) {
     let from_bytes = from.bytes();
     let to_bytes = to.bytes_mut();
 
+    #[cfg(target_arch = "x86_64")]
+    let use_avx2 = is_x86_feature_detected!("avx2");
+
     to_bytes
         .par_chunks_mut(to_stride)
         .enumerate()
@@ -399,9 +408,12 @@ fn convert_rgb_u8_to_rgba_u8(from: &Image, to: &mut Image) {
             let from_row = &from_bytes[y * from_stride..];
 
             #[cfg(target_arch = "x86_64")]
-            // SAFETY: We've verified SSSE3 is available in try_convert_simd
             unsafe {
-                convert_rgb_to_rgba_row_ssse3(from_row, to_row, width);
+                if use_avx2 {
+                    convert_rgb_to_rgba_row_avx2(from_row, to_row, width);
+                } else {
+                    convert_rgb_to_rgba_row_ssse3(from_row, to_row, width);
+                }
             }
 
             #[cfg(target_arch = "aarch64")]
@@ -789,6 +801,9 @@ fn convert_u8_to_f32_generic(from: &Image, to: &mut Image, channels: usize) {
     let to_floats: &mut [f32] = bytemuck::cast_slice_mut(to_bytes);
     let to_float_stride = to_stride / 4;
 
+    #[cfg(target_arch = "x86_64")]
+    let use_avx2 = is_x86_feature_detected!("avx2");
+
     to_floats
         .par_chunks_mut(to_float_stride)
         .enumerate()
@@ -796,9 +811,12 @@ fn convert_u8_to_f32_generic(from: &Image, to: &mut Image, channels: usize) {
             let from_row = &from_bytes[y * from_stride..y * from_stride + row_bytes];
 
             #[cfg(target_arch = "x86_64")]
-            // SAFETY: We've verified SSE2 is available in try_convert_simd
             unsafe {
-                convert_u8_to_f32_row_sse2(from_row, to_row);
+                if use_avx2 {
+                    convert_u8_to_f32_row_avx2(from_row, to_row);
+                } else {
+                    convert_u8_to_f32_row_sse2(from_row, to_row);
+                }
             }
 
             #[cfg(target_arch = "aarch64")]
@@ -823,6 +841,9 @@ fn convert_f32_to_u8_generic(from: &Image, to: &mut Image, channels: usize) {
     let from_floats: &[f32] = bytemuck::cast_slice(from_bytes);
     let from_float_stride = from_stride / 4;
 
+    #[cfg(target_arch = "x86_64")]
+    let use_avx2 = is_x86_feature_detected!("avx2");
+
     to_bytes
         .par_chunks_mut(to_stride)
         .enumerate()
@@ -831,9 +852,12 @@ fn convert_f32_to_u8_generic(from: &Image, to: &mut Image, channels: usize) {
                 &from_floats[y * from_float_stride..y * from_float_stride + row_elements];
 
             #[cfg(target_arch = "x86_64")]
-            // SAFETY: We've verified SSE2 is available in try_convert_simd
             unsafe {
-                convert_f32_to_u8_row_sse2(from_row, to_row);
+                if use_avx2 {
+                    convert_f32_to_u8_row_avx2(from_row, to_row);
+                } else {
+                    convert_f32_to_u8_row_sse2(from_row, to_row);
+                }
             }
 
             #[cfg(target_arch = "aarch64")]
@@ -1074,6 +1098,9 @@ fn convert_u8_to_u16_generic(from: &Image, to: &mut Image, channels: usize) {
     let to_words: &mut [u16] = bytemuck::cast_slice_mut(to_bytes);
     let to_word_stride = to_stride / 2;
 
+    #[cfg(target_arch = "x86_64")]
+    let use_avx2 = is_x86_feature_detected!("avx2");
+
     to_words
         .par_chunks_mut(to_word_stride)
         .enumerate()
@@ -1081,9 +1108,12 @@ fn convert_u8_to_u16_generic(from: &Image, to: &mut Image, channels: usize) {
             let from_row = &from_bytes[y * from_stride..y * from_stride + row_bytes];
 
             #[cfg(target_arch = "x86_64")]
-            // SAFETY: We've verified SSE2 is available in try_convert_simd
             unsafe {
-                convert_u8_to_u16_row_sse2(from_row, to_row);
+                if use_avx2 {
+                    convert_u8_to_u16_row_avx2(from_row, to_row);
+                } else {
+                    convert_u8_to_u16_row_sse2(from_row, to_row);
+                }
             }
 
             #[cfg(target_arch = "aarch64")]
@@ -1109,6 +1139,9 @@ fn convert_u16_to_u8_generic(from: &Image, to: &mut Image, channels: usize) {
     let from_words: &[u16] = bytemuck::cast_slice(from_bytes);
     let from_word_stride = from_stride / 2;
 
+    #[cfg(target_arch = "x86_64")]
+    let use_avx2 = is_x86_feature_detected!("avx2");
+
     to_bytes
         .par_chunks_mut(to_stride)
         .enumerate()
@@ -1116,9 +1149,12 @@ fn convert_u16_to_u8_generic(from: &Image, to: &mut Image, channels: usize) {
             let from_row = &from_words[y * from_word_stride..y * from_word_stride + row_elements];
 
             #[cfg(target_arch = "x86_64")]
-            // SAFETY: We've verified SSE2 is available in try_convert_simd
             unsafe {
-                convert_u16_to_u8_row_sse2(from_row, to_row);
+                if use_avx2 {
+                    convert_u16_to_u8_row_avx2(from_row, to_row);
+                } else {
+                    convert_u16_to_u8_row_sse2(from_row, to_row);
+                }
             }
 
             #[cfg(target_arch = "aarch64")]
@@ -1305,6 +1341,9 @@ fn convert_rgba_u8_to_l_u8(from: &Image, to: &mut Image) {
     let from_bytes = from.bytes();
     let to_bytes = to.bytes_mut();
 
+    #[cfg(target_arch = "x86_64")]
+    let use_avx2 = is_x86_feature_detected!("avx2");
+
     to_bytes
         .par_chunks_mut(to_stride)
         .enumerate()
@@ -1312,9 +1351,12 @@ fn convert_rgba_u8_to_l_u8(from: &Image, to: &mut Image) {
             let from_row = &from_bytes[y * from_stride..];
 
             #[cfg(target_arch = "x86_64")]
-            // SAFETY: We've verified SSSE3 is available in try_convert_simd
             unsafe {
-                convert_rgba_to_l_row_ssse3(from_row, to_row, width);
+                if use_avx2 {
+                    convert_rgba_to_l_row_avx2(from_row, to_row, width);
+                } else {
+                    convert_rgba_to_l_row_ssse3(from_row, to_row, width);
+                }
             }
 
             #[cfg(target_arch = "aarch64")]
@@ -1338,6 +1380,9 @@ fn convert_rgb_u8_to_l_u8(from: &Image, to: &mut Image) {
     let from_bytes = from.bytes();
     let to_bytes = to.bytes_mut();
 
+    #[cfg(target_arch = "x86_64")]
+    let use_avx2 = is_x86_feature_detected!("avx2");
+
     to_bytes
         .par_chunks_mut(to_stride)
         .enumerate()
@@ -1345,9 +1390,12 @@ fn convert_rgb_u8_to_l_u8(from: &Image, to: &mut Image) {
             let from_row = &from_bytes[y * from_stride..];
 
             #[cfg(target_arch = "x86_64")]
-            // SAFETY: We've verified SSSE3 is available in try_convert_simd
             unsafe {
-                convert_rgb_to_l_row_ssse3(from_row, to_row, width);
+                if use_avx2 {
+                    convert_rgb_to_l_row_avx2(from_row, to_row, width);
+                } else {
+                    convert_rgb_to_l_row_ssse3(from_row, to_row, width);
+                }
             }
 
             #[cfg(target_arch = "aarch64")]
@@ -2310,5 +2358,770 @@ unsafe fn convert_rgb_to_rgba_row_neon(src: &[u8], dst: &mut [u8], width: usize)
         dst_remainder[i * 4 + 1] = src_remainder[i * 3 + 1];
         dst_remainder[i * 4 + 2] = src_remainder[i * 3 + 2];
         dst_remainder[i * 4 + 3] = 255;
+    }
+}
+
+// =============================================================================
+// AVX2 implementations (x86_64)
+// =============================================================================
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+unsafe fn convert_rgba_to_rgb_row_avx2(src: &[u8], dst: &mut [u8], width: usize) {
+    use std::arch::x86_64::*;
+
+    let src_ptr = src.as_ptr();
+    let dst_ptr = dst.as_mut_ptr();
+
+    // Process 32 pixels at a time (128 bytes in, 96 bytes out)
+    let simd_width = width / 32;
+    let remainder = width % 32;
+
+    // Shuffle mask to extract RGB from RGBA (4 pixels -> 12 bytes)
+    // Same pattern as SSE but in 128-bit lanes
+    let shuffle = _mm256_setr_epi8(
+        0, 1, 2, 4, 5, 6, 8, 9, 10, 12, 13, 14, -1, -1, -1, -1, // low lane
+        0, 1, 2, 4, 5, 6, 8, 9, 10, 12, 13, 14, -1, -1, -1, -1, // high lane
+    );
+
+    for i in 0..simd_width {
+        let src_offset = i * 128;
+        let dst_offset = i * 96;
+
+        unsafe {
+            // Load 128 bytes (32 RGBA pixels) in 4 x 32-byte chunks
+            let rgba0 = _mm256_loadu_si256(src_ptr.add(src_offset) as *const __m256i);
+            let rgba1 = _mm256_loadu_si256(src_ptr.add(src_offset + 32) as *const __m256i);
+            let rgba2 = _mm256_loadu_si256(src_ptr.add(src_offset + 64) as *const __m256i);
+            let rgba3 = _mm256_loadu_si256(src_ptr.add(src_offset + 96) as *const __m256i);
+
+            // Shuffle each to get RGB (12 bytes valid per 16-byte lane)
+            // Each 256-bit register processes 8 pixels (2 lanes of 4)
+            let rgb0 = _mm256_shuffle_epi8(rgba0, shuffle);
+            let rgb1 = _mm256_shuffle_epi8(rgba1, shuffle);
+            let rgb2 = _mm256_shuffle_epi8(rgba2, shuffle);
+            let rgb3 = _mm256_shuffle_epi8(rgba3, shuffle);
+
+            // Extract 128-bit lanes and pack them
+            // rgb0: [lane0: 12 valid bytes][lane1: 12 valid bytes]
+            let rgb0_lo = _mm256_castsi256_si128(rgb0);
+            let rgb0_hi = _mm256_extracti128_si256(rgb0, 1);
+            let rgb1_lo = _mm256_castsi256_si128(rgb1);
+            let rgb1_hi = _mm256_extracti128_si256(rgb1, 1);
+            let rgb2_lo = _mm256_castsi256_si128(rgb2);
+            let rgb2_hi = _mm256_extracti128_si256(rgb2, 1);
+            let rgb3_lo = _mm256_castsi256_si128(rgb3);
+            let rgb3_hi = _mm256_extracti128_si256(rgb3, 1);
+
+            // Pack 8x12 bytes = 96 bytes into 6x16 byte stores
+            // out0: rgb0_lo[0..12] + rgb0_hi[0..4]
+            let out0 = _mm_or_si128(rgb0_lo, _mm_slli_si128(rgb0_hi, 12));
+
+            // out1: rgb0_hi[4..12] + rgb1_lo[0..8]
+            let out1 = _mm_or_si128(_mm_srli_si128(rgb0_hi, 4), _mm_slli_si128(rgb1_lo, 8));
+
+            // out2: rgb1_lo[8..12] + rgb1_hi[0..12]
+            let out2 = _mm_or_si128(_mm_srli_si128(rgb1_lo, 8), _mm_slli_si128(rgb1_hi, 4));
+
+            // out3: rgb2_lo[0..12] + rgb2_hi[0..4]
+            let out3 = _mm_or_si128(rgb2_lo, _mm_slli_si128(rgb2_hi, 12));
+
+            // out4: rgb2_hi[4..12] + rgb3_lo[0..8]
+            let out4 = _mm_or_si128(_mm_srli_si128(rgb2_hi, 4), _mm_slli_si128(rgb3_lo, 8));
+
+            // out5: rgb3_lo[8..12] + rgb3_hi[0..12]
+            let out5 = _mm_or_si128(_mm_srli_si128(rgb3_lo, 8), _mm_slli_si128(rgb3_hi, 4));
+
+            // Store 96 bytes
+            _mm_storeu_si128(dst_ptr.add(dst_offset) as *mut __m128i, out0);
+            _mm_storeu_si128(dst_ptr.add(dst_offset + 16) as *mut __m128i, out1);
+            _mm_storeu_si128(dst_ptr.add(dst_offset + 32) as *mut __m128i, out2);
+            _mm_storeu_si128(dst_ptr.add(dst_offset + 48) as *mut __m128i, out3);
+            _mm_storeu_si128(dst_ptr.add(dst_offset + 64) as *mut __m128i, out4);
+            _mm_storeu_si128(dst_ptr.add(dst_offset + 80) as *mut __m128i, out5);
+        }
+    }
+
+    // Handle remainder with SSSE3 path (16 pixels at a time)
+    let remaining_start = simd_width * 32;
+    if remainder >= 16 {
+        let src_rem = &src[remaining_start * 4..];
+        let dst_rem = &mut dst[remaining_start * 3..];
+        unsafe {
+            convert_rgba_to_rgb_row_ssse3(src_rem, dst_rem, remainder);
+        }
+    } else if remainder > 0 {
+        // Scalar remainder
+        let src_remainder = &src[remaining_start * 4..];
+        let dst_remainder = &mut dst[remaining_start * 3..];
+        for i in 0..remainder {
+            dst_remainder[i * 3] = src_remainder[i * 4];
+            dst_remainder[i * 3 + 1] = src_remainder[i * 4 + 1];
+            dst_remainder[i * 3 + 2] = src_remainder[i * 4 + 2];
+        }
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+unsafe fn convert_rgb_to_rgba_row_avx2(src: &[u8], dst: &mut [u8], width: usize) {
+    use std::arch::x86_64::*;
+
+    let src_ptr = src.as_ptr();
+    let dst_ptr = dst.as_mut_ptr();
+
+    // Process 32 pixels at a time (96 bytes in, 128 bytes out)
+    let simd_width = width / 32;
+    let remainder = width % 32;
+
+    unsafe {
+        // Alpha mask (0xFF in alpha positions)
+        let alpha_mask = _mm256_setr_epi8(
+            0, 0, 0, -1, 0, 0, 0, -1, 0, 0, 0, -1, 0, 0, 0, -1, // low lane
+            0, 0, 0, -1, 0, 0, 0, -1, 0, 0, 0, -1, 0, 0, 0, -1, // high lane
+        );
+        // Shuffle: RGB -> RGBA (insert space for alpha)
+        let shuf = _mm256_setr_epi8(
+            0, 1, 2, -1, 3, 4, 5, -1, 6, 7, 8, -1, 9, 10, 11, -1, // low lane
+            0, 1, 2, -1, 3, 4, 5, -1, 6, 7, 8, -1, 9, 10, 11, -1, // high lane
+        );
+
+        for i in 0..simd_width {
+            let src_offset = i * 96;
+            let dst_offset = i * 128;
+
+            // Load 96 bytes (6 x 16-byte loads)
+            let in0 = _mm_loadu_si128(src_ptr.add(src_offset) as *const __m128i);
+            let in1 = _mm_loadu_si128(src_ptr.add(src_offset + 16) as *const __m128i);
+            let in2 = _mm_loadu_si128(src_ptr.add(src_offset + 32) as *const __m128i);
+            let in3 = _mm_loadu_si128(src_ptr.add(src_offset + 48) as *const __m128i);
+            let in4 = _mm_loadu_si128(src_ptr.add(src_offset + 64) as *const __m128i);
+            let in5 = _mm_loadu_si128(src_ptr.add(src_offset + 80) as *const __m128i);
+
+            // Reorganize 96 bytes into 8 groups of 12 bytes each
+            // Group 0: in0[0..12]
+            // Group 1: in0[12..16] + in1[0..8]
+            // Group 2: in1[8..16] + in2[0..4]
+            // Group 3: in2[4..16]
+            // Group 4: in3[0..12]
+            // Group 5: in3[12..16] + in4[0..8]
+            // Group 6: in4[8..16] + in5[0..4]
+            // Group 7: in5[4..16]
+
+            // First 4 groups -> first 2 __m256i outputs
+            let grp0 = in0; // bytes 0-11 valid
+            let grp1 = _mm_or_si128(_mm_srli_si128(in0, 12), _mm_slli_si128(in1, 4));
+            let grp2 = _mm_or_si128(_mm_srli_si128(in1, 8), _mm_slli_si128(in2, 8));
+            let grp3 = _mm_srli_si128(in2, 4);
+
+            // Second 4 groups -> second 2 __m256i outputs
+            let grp4 = in3;
+            let grp5 = _mm_or_si128(_mm_srli_si128(in3, 12), _mm_slli_si128(in4, 4));
+            let grp6 = _mm_or_si128(_mm_srli_si128(in4, 8), _mm_slli_si128(in5, 8));
+            let grp7 = _mm_srli_si128(in5, 4);
+
+            // Combine into 256-bit registers and shuffle
+            let combined0 = _mm256_set_m128i(grp1, grp0);
+            let combined1 = _mm256_set_m128i(grp3, grp2);
+            let combined2 = _mm256_set_m128i(grp5, grp4);
+            let combined3 = _mm256_set_m128i(grp7, grp6);
+
+            let rgba0 = _mm256_or_si256(_mm256_shuffle_epi8(combined0, shuf), alpha_mask);
+            let rgba1 = _mm256_or_si256(_mm256_shuffle_epi8(combined1, shuf), alpha_mask);
+            let rgba2 = _mm256_or_si256(_mm256_shuffle_epi8(combined2, shuf), alpha_mask);
+            let rgba3 = _mm256_or_si256(_mm256_shuffle_epi8(combined3, shuf), alpha_mask);
+
+            // Store 128 bytes
+            _mm256_storeu_si256(dst_ptr.add(dst_offset) as *mut __m256i, rgba0);
+            _mm256_storeu_si256(dst_ptr.add(dst_offset + 32) as *mut __m256i, rgba1);
+            _mm256_storeu_si256(dst_ptr.add(dst_offset + 64) as *mut __m256i, rgba2);
+            _mm256_storeu_si256(dst_ptr.add(dst_offset + 96) as *mut __m256i, rgba3);
+        }
+    }
+
+    // Handle remainder with SSSE3 path
+    let remaining_start = simd_width * 32;
+    if remainder >= 16 {
+        let src_rem = &src[remaining_start * 3..];
+        let dst_rem = &mut dst[remaining_start * 4..];
+        unsafe {
+            convert_rgb_to_rgba_row_ssse3(src_rem, dst_rem, remainder);
+        }
+    } else if remainder > 0 {
+        // Scalar remainder
+        let src_remainder = &src[remaining_start * 3..];
+        let dst_remainder = &mut dst[remaining_start * 4..];
+        for i in 0..remainder {
+            dst_remainder[i * 4] = src_remainder[i * 3];
+            dst_remainder[i * 4 + 1] = src_remainder[i * 3 + 1];
+            dst_remainder[i * 4 + 2] = src_remainder[i * 3 + 2];
+            dst_remainder[i * 4 + 3] = 255;
+        }
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+unsafe fn convert_rgba_to_l_row_avx2(src: &[u8], dst: &mut [u8], width: usize) {
+    use std::arch::x86_64::*;
+
+    let src_ptr = src.as_ptr();
+    let dst_ptr = dst.as_mut_ptr();
+
+    // Process 16 pixels at a time (64 bytes in, 16 bytes out)
+    let simd_width = width / 16;
+    let remainder = width % 16;
+
+    unsafe {
+        // Luminance weights
+        let r_w = _mm256_set1_epi16(54);
+        let g_w = _mm256_set1_epi16(183);
+        let b_w = _mm256_set1_epi16(19);
+
+        // Shuffle masks to extract R, G, B from RGBA (8 pixels per 128-bit lane)
+        let shuf_r = _mm256_setr_epi8(
+            0, 4, 8, 12, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, 0, 4, 8, 12, -1, -1, -1,
+            -1, -1, -1, -1, -1, -1, -1, -1, -1,
+        );
+        let shuf_g = _mm256_setr_epi8(
+            1, 5, 9, 13, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, 1, 5, 9, 13, -1, -1, -1,
+            -1, -1, -1, -1, -1, -1, -1, -1, -1,
+        );
+        let shuf_b = _mm256_setr_epi8(
+            2, 6, 10, 14, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, 2, 6, 10, 14, -1, -1, -1,
+            -1, -1, -1, -1, -1, -1, -1, -1, -1,
+        );
+
+        for i in 0..simd_width {
+            let src_offset = i * 64;
+            let dst_offset = i * 16;
+
+            // Load 16 RGBA pixels (64 bytes)
+            let rgba0 = _mm256_loadu_si256(src_ptr.add(src_offset) as *const __m256i);
+            let rgba1 = _mm256_loadu_si256(src_ptr.add(src_offset + 32) as *const __m256i);
+
+            // Extract R, G, B channels
+            let r0 = _mm256_shuffle_epi8(rgba0, shuf_r);
+            let g0 = _mm256_shuffle_epi8(rgba0, shuf_g);
+            let b0 = _mm256_shuffle_epi8(rgba0, shuf_b);
+
+            let r1 = _mm256_shuffle_epi8(rgba1, shuf_r);
+            let g1 = _mm256_shuffle_epi8(rgba1, shuf_g);
+            let b1 = _mm256_shuffle_epi8(rgba1, shuf_b);
+
+            // Extract and combine the 4-byte results from each lane
+            // rgba0 low lane -> bytes 0-3, rgba0 high lane -> bytes 4-7
+            // rgba1 low lane -> bytes 8-11, rgba1 high lane -> bytes 12-15
+            let r0_lo = _mm256_castsi256_si128(r0);
+            let r0_hi = _mm256_extracti128_si256(r0, 1);
+            let r1_lo = _mm256_castsi256_si128(r1);
+            let r1_hi = _mm256_extracti128_si256(r1, 1);
+
+            let g0_lo = _mm256_castsi256_si128(g0);
+            let g0_hi = _mm256_extracti128_si256(g0, 1);
+            let g1_lo = _mm256_castsi256_si128(g1);
+            let g1_hi = _mm256_extracti128_si256(g1, 1);
+
+            let b0_lo = _mm256_castsi256_si128(b0);
+            let b0_hi = _mm256_extracti128_si256(b0, 1);
+            let b1_lo = _mm256_castsi256_si128(b1);
+            let b1_hi = _mm256_extracti128_si256(b1, 1);
+
+            // Combine into single 128-bit registers (16 bytes each)
+            let r_combined = _mm_or_si128(
+                _mm_or_si128(r0_lo, _mm_slli_si128(r0_hi, 4)),
+                _mm_or_si128(_mm_slli_si128(r1_lo, 8), _mm_slli_si128(r1_hi, 12)),
+            );
+            let g_combined = _mm_or_si128(
+                _mm_or_si128(g0_lo, _mm_slli_si128(g0_hi, 4)),
+                _mm_or_si128(_mm_slli_si128(g1_lo, 8), _mm_slli_si128(g1_hi, 12)),
+            );
+            let b_combined = _mm_or_si128(
+                _mm_or_si128(b0_lo, _mm_slli_si128(b0_hi, 4)),
+                _mm_or_si128(_mm_slli_si128(b1_lo, 8), _mm_slli_si128(b1_hi, 12)),
+            );
+
+            // Widen to 256-bit for 16-bit math
+            let zero_128 = _mm_setzero_si128();
+            let r16 = _mm256_set_m128i(
+                _mm_unpackhi_epi8(r_combined, zero_128),
+                _mm_unpacklo_epi8(r_combined, zero_128),
+            );
+            let g16 = _mm256_set_m128i(
+                _mm_unpackhi_epi8(g_combined, zero_128),
+                _mm_unpacklo_epi8(g_combined, zero_128),
+            );
+            let b16 = _mm256_set_m128i(
+                _mm_unpackhi_epi8(b_combined, zero_128),
+                _mm_unpacklo_epi8(b_combined, zero_128),
+            );
+
+            // Compute luminance: (R*54 + G*183 + B*19) >> 8
+            let sum = _mm256_add_epi16(
+                _mm256_add_epi16(_mm256_mullo_epi16(r16, r_w), _mm256_mullo_epi16(g16, g_w)),
+                _mm256_mullo_epi16(b16, b_w),
+            );
+            let lum16 = _mm256_srli_epi16(sum, 8);
+
+            // Pack to 8-bit
+            let lum16_lo = _mm256_castsi256_si128(lum16);
+            let lum16_hi = _mm256_extracti128_si256(lum16, 1);
+            let lum8 = _mm_packus_epi16(lum16_lo, lum16_hi);
+
+            // Store 16 bytes
+            _mm_storeu_si128(dst_ptr.add(dst_offset) as *mut __m128i, lum8);
+        }
+    }
+
+    // Handle remainder pixels (scalar)
+    let src_remainder = &src[simd_width * 64..];
+    let dst_remainder = &mut dst[simd_width * 16..];
+    for i in 0..remainder {
+        let r = src_remainder[i * 4] as u32;
+        let g = src_remainder[i * 4 + 1] as u32;
+        let b = src_remainder[i * 4 + 2] as u32;
+        dst_remainder[i] = ((r * LUMA_R + g * LUMA_G + b * LUMA_B) >> 16) as u8;
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+unsafe fn convert_rgb_to_l_row_avx2(src: &[u8], dst: &mut [u8], width: usize) {
+    use std::arch::x86_64::*;
+
+    let src_ptr = src.as_ptr();
+    let dst_ptr = dst.as_mut_ptr();
+
+    // Process 32 pixels at a time (96 bytes in, 32 bytes out)
+    let simd_width = width / 32;
+    let remainder = width % 32;
+
+    unsafe {
+        let r_w = _mm256_set1_epi16(54);
+        let g_w = _mm256_set1_epi16(183);
+        let b_w = _mm256_set1_epi16(19);
+
+        for i in 0..simd_width {
+            let src_offset = i * 96;
+            let dst_offset = i * 32;
+
+            // Load 96 bytes (32 RGB pixels)
+            let in0 = _mm256_loadu_si256(src_ptr.add(src_offset) as *const __m256i);
+            let in1 = _mm256_loadu_si256(src_ptr.add(src_offset + 32) as *const __m256i);
+            let in2 = _mm256_loadu_si256(src_ptr.add(src_offset + 64) as *const __m256i);
+
+            // For RGB data, we need to deinterleave. Since AVX2 doesn't have
+            // direct deinterleave, we'll process in a different way:
+            // Use the SSSE3 approach but doubled
+
+            // Process first 16 pixels using 128-bit operations
+            let in0_lo = _mm256_castsi256_si128(in0);
+            let in0_hi = _mm256_extracti128_si256(in0, 1);
+            let in1_lo = _mm256_castsi256_si128(in1);
+
+            // Bytes 0-47 contain first 16 RGB pixels
+            // Use same shuffle logic as SSSE3 version
+            let shuf_r0 = _mm_setr_epi8(0, 3, 6, 9, 12, 15, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1);
+            let shuf_g0 =
+                _mm_setr_epi8(1, 4, 7, 10, 13, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1);
+            let shuf_b0 =
+                _mm_setr_epi8(2, 5, 8, 11, 14, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1);
+
+            let shuf_r1 =
+                _mm_setr_epi8(2, 5, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1);
+            let shuf_g1 =
+                _mm_setr_epi8(0, 3, 6, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1);
+            let shuf_b1 =
+                _mm_setr_epi8(1, 4, 7, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1);
+
+            let shuf_r2 = _mm_setr_epi8(
+                8, 11, 14, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+            );
+            let shuf_g2 = _mm_setr_epi8(
+                9, 12, 15, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+            );
+            let shuf_b2 = _mm_setr_epi8(
+                10, 13, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+            );
+
+            let shuf_r3 =
+                _mm_setr_epi8(1, 4, 7, 10, 13, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1);
+            let shuf_g3 =
+                _mm_setr_epi8(2, 5, 8, 11, 14, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1);
+            let shuf_b3 = _mm_setr_epi8(0, 3, 6, 9, 12, 15, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1);
+
+            // First 16 pixels
+            let r0_part = _mm_shuffle_epi8(in0_lo, shuf_r0);
+            let g0_part = _mm_shuffle_epi8(in0_lo, shuf_g0);
+            let b0_part = _mm_shuffle_epi8(in0_lo, shuf_b0);
+
+            let r1_part = _mm_shuffle_epi8(in0_hi, shuf_r1);
+            let g1_part = _mm_shuffle_epi8(in0_hi, shuf_g1);
+            let b1_part = _mm_shuffle_epi8(in0_hi, shuf_b1);
+
+            let r_lo = _mm_or_si128(r0_part, _mm_slli_si128(r1_part, 6));
+            let g_lo = _mm_or_si128(g0_part, _mm_slli_si128(g1_part, 5));
+            let b_lo = _mm_or_si128(b0_part, _mm_slli_si128(b1_part, 5));
+
+            let r2_part = _mm_shuffle_epi8(in0_hi, shuf_r2);
+            let g2_part = _mm_shuffle_epi8(in0_hi, shuf_g2);
+            let b2_part = _mm_shuffle_epi8(in0_hi, shuf_b2);
+
+            let r3_part = _mm_shuffle_epi8(in1_lo, shuf_r3);
+            let g3_part = _mm_shuffle_epi8(in1_lo, shuf_g3);
+            let b3_part = _mm_shuffle_epi8(in1_lo, shuf_b3);
+
+            let r_hi_1 = _mm_or_si128(r2_part, _mm_slli_si128(r3_part, 3));
+            let g_hi_1 = _mm_or_si128(g2_part, _mm_slli_si128(g3_part, 3));
+            let b_hi_1 = _mm_or_si128(b2_part, _mm_slli_si128(b3_part, 2));
+
+            // Second 16 pixels (bytes 48-95)
+            let in1_hi = _mm256_extracti128_si256(in1, 1);
+            let in2_lo = _mm256_castsi256_si128(in2);
+            let in2_hi = _mm256_extracti128_si256(in2, 1);
+
+            let r4_part = _mm_shuffle_epi8(in1_hi, shuf_r0);
+            let g4_part = _mm_shuffle_epi8(in1_hi, shuf_g0);
+            let b4_part = _mm_shuffle_epi8(in1_hi, shuf_b0);
+
+            let r5_part = _mm_shuffle_epi8(in2_lo, shuf_r1);
+            let g5_part = _mm_shuffle_epi8(in2_lo, shuf_g1);
+            let b5_part = _mm_shuffle_epi8(in2_lo, shuf_b1);
+
+            let r_lo_2 = _mm_or_si128(r4_part, _mm_slli_si128(r5_part, 6));
+            let g_lo_2 = _mm_or_si128(g4_part, _mm_slli_si128(g5_part, 5));
+            let b_lo_2 = _mm_or_si128(b4_part, _mm_slli_si128(b5_part, 5));
+
+            let r6_part = _mm_shuffle_epi8(in2_lo, shuf_r2);
+            let g6_part = _mm_shuffle_epi8(in2_lo, shuf_g2);
+            let b6_part = _mm_shuffle_epi8(in2_lo, shuf_b2);
+
+            let r7_part = _mm_shuffle_epi8(in2_hi, shuf_r3);
+            let g7_part = _mm_shuffle_epi8(in2_hi, shuf_g3);
+            let b7_part = _mm_shuffle_epi8(in2_hi, shuf_b3);
+
+            let r_hi_2 = _mm_or_si128(r6_part, _mm_slli_si128(r7_part, 3));
+            let g_hi_2 = _mm_or_si128(g6_part, _mm_slli_si128(g7_part, 3));
+            let b_hi_2 = _mm_or_si128(b6_part, _mm_slli_si128(b7_part, 2));
+
+            // Now compute luminance for all 32 pixels using AVX2
+            let zero_128 = _mm_setzero_si128();
+
+            // First 16 pixels
+            let r16_0 = _mm256_set_m128i(
+                _mm_unpacklo_epi8(r_hi_1, zero_128),
+                _mm_unpacklo_epi8(r_lo, zero_128),
+            );
+            let g16_0 = _mm256_set_m128i(
+                _mm_unpacklo_epi8(g_hi_1, zero_128),
+                _mm_unpacklo_epi8(g_lo, zero_128),
+            );
+            let b16_0 = _mm256_set_m128i(
+                _mm_unpacklo_epi8(b_hi_1, zero_128),
+                _mm_unpacklo_epi8(b_lo, zero_128),
+            );
+
+            let sum0 = _mm256_add_epi16(
+                _mm256_add_epi16(
+                    _mm256_mullo_epi16(r16_0, r_w),
+                    _mm256_mullo_epi16(g16_0, g_w),
+                ),
+                _mm256_mullo_epi16(b16_0, b_w),
+            );
+            let lum16_0 = _mm256_srli_epi16(sum0, 8);
+
+            // Second 16 pixels
+            let r16_1 = _mm256_set_m128i(
+                _mm_unpacklo_epi8(r_hi_2, zero_128),
+                _mm_unpacklo_epi8(r_lo_2, zero_128),
+            );
+            let g16_1 = _mm256_set_m128i(
+                _mm_unpacklo_epi8(g_hi_2, zero_128),
+                _mm_unpacklo_epi8(g_lo_2, zero_128),
+            );
+            let b16_1 = _mm256_set_m128i(
+                _mm_unpacklo_epi8(b_hi_2, zero_128),
+                _mm_unpacklo_epi8(b_lo_2, zero_128),
+            );
+
+            let sum1 = _mm256_add_epi16(
+                _mm256_add_epi16(
+                    _mm256_mullo_epi16(r16_1, r_w),
+                    _mm256_mullo_epi16(g16_1, g_w),
+                ),
+                _mm256_mullo_epi16(b16_1, b_w),
+            );
+            let lum16_1 = _mm256_srli_epi16(sum1, 8);
+
+            // Pack to 8-bit
+            let lum16_0_lo = _mm256_castsi256_si128(lum16_0);
+            let lum16_0_hi = _mm256_extracti128_si256(lum16_0, 1);
+            let lum8_0 = _mm_packus_epi16(lum16_0_lo, lum16_0_hi);
+
+            let lum16_1_lo = _mm256_castsi256_si128(lum16_1);
+            let lum16_1_hi = _mm256_extracti128_si256(lum16_1, 1);
+            let lum8_1 = _mm_packus_epi16(lum16_1_lo, lum16_1_hi);
+
+            // Store 32 bytes
+            _mm_storeu_si128(dst_ptr.add(dst_offset) as *mut __m128i, lum8_0);
+            _mm_storeu_si128(dst_ptr.add(dst_offset + 16) as *mut __m128i, lum8_1);
+        }
+    }
+
+    // Handle remainder with SSSE3 path
+    let remaining_start = simd_width * 32;
+    if remainder >= 16 {
+        let src_rem = &src[remaining_start * 3..];
+        let dst_rem = &mut dst[remaining_start..];
+        unsafe {
+            convert_rgb_to_l_row_ssse3(src_rem, dst_rem, remainder);
+        }
+    } else if remainder > 0 {
+        // Scalar remainder
+        let src_remainder = &src[remaining_start * 3..];
+        let dst_remainder = &mut dst[remaining_start..];
+        for i in 0..remainder {
+            let r = src_remainder[i * 3] as u32;
+            let g = src_remainder[i * 3 + 1] as u32;
+            let b = src_remainder[i * 3 + 2] as u32;
+            dst_remainder[i] = ((r * LUMA_R + g * LUMA_G + b * LUMA_B) >> 16) as u8;
+        }
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+unsafe fn convert_u8_to_f32_row_avx2(src: &[u8], dst: &mut [f32]) {
+    use std::arch::x86_64::*;
+
+    let len = src.len();
+    let simd_width = len / 32;
+    let remainder = len % 32;
+
+    let scale = _mm256_set1_ps(1.0 / 255.0);
+
+    for i in 0..simd_width {
+        let src_offset = i * 32;
+        let dst_offset = i * 32;
+
+        unsafe {
+            // Load 32 bytes
+            let bytes = _mm256_loadu_si256(src.as_ptr().add(src_offset) as *const __m256i);
+
+            // Split into 128-bit halves
+            let bytes_lo = _mm256_castsi256_si128(bytes);
+            let bytes_hi = _mm256_extracti128_si256(bytes, 1);
+
+            // Process low 16 bytes
+            let zero = _mm_setzero_si128();
+            let words_lo_0 = _mm_unpacklo_epi8(bytes_lo, zero);
+            let words_lo_1 = _mm_unpackhi_epi8(bytes_lo, zero);
+
+            let dwords_0 = _mm256_cvtepu16_epi32(words_lo_0);
+            let dwords_1 = _mm256_cvtepu16_epi32(words_lo_1);
+
+            let floats_0 = _mm256_mul_ps(_mm256_cvtepi32_ps(dwords_0), scale);
+            let floats_1 = _mm256_mul_ps(_mm256_cvtepi32_ps(dwords_1), scale);
+
+            // Process high 16 bytes
+            let words_hi_0 = _mm_unpacklo_epi8(bytes_hi, zero);
+            let words_hi_1 = _mm_unpackhi_epi8(bytes_hi, zero);
+
+            let dwords_2 = _mm256_cvtepu16_epi32(words_hi_0);
+            let dwords_3 = _mm256_cvtepu16_epi32(words_hi_1);
+
+            let floats_2 = _mm256_mul_ps(_mm256_cvtepi32_ps(dwords_2), scale);
+            let floats_3 = _mm256_mul_ps(_mm256_cvtepi32_ps(dwords_3), scale);
+
+            // Store 32 floats (128 bytes)
+            _mm256_storeu_ps(dst.as_mut_ptr().add(dst_offset), floats_0);
+            _mm256_storeu_ps(dst.as_mut_ptr().add(dst_offset + 8), floats_1);
+            _mm256_storeu_ps(dst.as_mut_ptr().add(dst_offset + 16), floats_2);
+            _mm256_storeu_ps(dst.as_mut_ptr().add(dst_offset + 24), floats_3);
+        }
+    }
+
+    // Handle remainder with SSE2 path
+    if remainder >= 16 {
+        let src_rem = &src[simd_width * 32..];
+        let dst_rem = &mut dst[simd_width * 32..];
+        unsafe {
+            convert_u8_to_f32_row_sse2(src_rem, dst_rem);
+        }
+    } else if remainder > 0 {
+        // Scalar remainder
+        for i in 0..remainder {
+            dst[simd_width * 32 + i] = src[simd_width * 32 + i] as f32 / 255.0;
+        }
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+unsafe fn convert_f32_to_u8_row_avx2(src: &[f32], dst: &mut [u8]) {
+    use std::arch::x86_64::*;
+
+    let len = src.len();
+    let simd_width = len / 32;
+    let remainder = len % 32;
+
+    let scale = _mm256_set1_ps(255.0);
+    let zero_f = _mm256_setzero_ps();
+    let max_f = _mm256_set1_ps(255.0);
+
+    for i in 0..simd_width {
+        let src_offset = i * 32;
+        let dst_offset = i * 32;
+
+        unsafe {
+            // Load 32 floats (128 bytes)
+            let f0 = _mm256_loadu_ps(src.as_ptr().add(src_offset));
+            let f1 = _mm256_loadu_ps(src.as_ptr().add(src_offset + 8));
+            let f2 = _mm256_loadu_ps(src.as_ptr().add(src_offset + 16));
+            let f3 = _mm256_loadu_ps(src.as_ptr().add(src_offset + 24));
+
+            // Scale and clamp
+            let scaled0 = _mm256_min_ps(_mm256_max_ps(_mm256_mul_ps(f0, scale), zero_f), max_f);
+            let scaled1 = _mm256_min_ps(_mm256_max_ps(_mm256_mul_ps(f1, scale), zero_f), max_f);
+            let scaled2 = _mm256_min_ps(_mm256_max_ps(_mm256_mul_ps(f2, scale), zero_f), max_f);
+            let scaled3 = _mm256_min_ps(_mm256_max_ps(_mm256_mul_ps(f3, scale), zero_f), max_f);
+
+            // Convert to int32
+            let i0 = _mm256_cvtps_epi32(scaled0);
+            let i1 = _mm256_cvtps_epi32(scaled1);
+            let i2 = _mm256_cvtps_epi32(scaled2);
+            let i3 = _mm256_cvtps_epi32(scaled3);
+
+            // Pack to 16-bit (need to handle AVX2 lane crossing)
+            // _mm256_packs_epi32 packs within lanes, so we need to permute after
+            let words_0 = _mm256_packs_epi32(i0, i1); // [i0_lo|i1_lo][i0_hi|i1_hi]
+            let words_1 = _mm256_packs_epi32(i2, i3);
+
+            // Permute to get correct order
+            let words_0_perm = _mm256_permute4x64_epi64(words_0, 0b11_01_10_00);
+            let words_1_perm = _mm256_permute4x64_epi64(words_1, 0b11_01_10_00);
+
+            // Pack to 8-bit
+            let bytes = _mm256_packus_epi16(words_0_perm, words_1_perm);
+            let bytes_perm = _mm256_permute4x64_epi64(bytes, 0b11_01_10_00);
+
+            // Store 32 bytes
+            _mm256_storeu_si256(dst.as_mut_ptr().add(dst_offset) as *mut __m256i, bytes_perm);
+        }
+    }
+
+    // Handle remainder with SSE2 path
+    if remainder >= 16 {
+        let src_rem = &src[simd_width * 32..];
+        let dst_rem = &mut dst[simd_width * 32..];
+        unsafe {
+            convert_f32_to_u8_row_sse2(src_rem, dst_rem);
+        }
+    } else if remainder > 0 {
+        // Scalar remainder
+        for i in 0..remainder {
+            let val = (src[simd_width * 32 + i] * 255.0).clamp(0.0, 255.0) as u8;
+            dst[simd_width * 32 + i] = val;
+        }
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+unsafe fn convert_u8_to_u16_row_avx2(src: &[u8], dst: &mut [u16]) {
+    use std::arch::x86_64::*;
+
+    let len = src.len();
+    let simd_width = len / 32;
+    let remainder = len % 32;
+
+    for i in 0..simd_width {
+        let src_offset = i * 32;
+        let dst_offset = i * 32;
+
+        unsafe {
+            // Load 32 bytes
+            let bytes = _mm256_loadu_si256(src.as_ptr().add(src_offset) as *const __m256i);
+
+            // Split and widen to 16-bit
+            let bytes_lo = _mm256_castsi256_si128(bytes);
+            let bytes_hi = _mm256_extracti128_si256(bytes, 1);
+
+            // Use AVX2 zero-extend
+            let words_lo = _mm256_cvtepu8_epi16(bytes_lo); // 16 u16 values
+            let words_hi = _mm256_cvtepu8_epi16(bytes_hi); // 16 u16 values
+
+            // Multiply by 257: val * 257 = (val << 8) | val
+            let scaled_lo = _mm256_or_si256(words_lo, _mm256_slli_epi16(words_lo, 8));
+            let scaled_hi = _mm256_or_si256(words_hi, _mm256_slli_epi16(words_hi, 8));
+
+            // Store 32 u16 values (64 bytes)
+            _mm256_storeu_si256(dst.as_mut_ptr().add(dst_offset) as *mut __m256i, scaled_lo);
+            _mm256_storeu_si256(
+                dst.as_mut_ptr().add(dst_offset + 16) as *mut __m256i,
+                scaled_hi,
+            );
+        }
+    }
+
+    // Handle remainder with SSE2 path
+    if remainder >= 16 {
+        let src_rem = &src[simd_width * 32..];
+        let dst_rem = &mut dst[simd_width * 32..];
+        unsafe {
+            convert_u8_to_u16_row_sse2(src_rem, dst_rem);
+        }
+    } else if remainder > 0 {
+        // Scalar remainder
+        for i in 0..remainder {
+            dst[simd_width * 32 + i] = (src[simd_width * 32 + i] as u16) * 257;
+        }
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+unsafe fn convert_u16_to_u8_row_avx2(src: &[u16], dst: &mut [u8]) {
+    use std::arch::x86_64::*;
+
+    let len = src.len();
+    let simd_width = len / 32;
+    let remainder = len % 32;
+
+    for i in 0..simd_width {
+        let src_offset = i * 32;
+        let dst_offset = i * 32;
+
+        unsafe {
+            // Load 32 u16 values (64 bytes)
+            let words_lo = _mm256_loadu_si256(src.as_ptr().add(src_offset) as *const __m256i);
+            let words_hi = _mm256_loadu_si256(src.as_ptr().add(src_offset + 16) as *const __m256i);
+
+            // Divide by 257: shift right by 8 (take high byte)
+            let shifted_lo = _mm256_srli_epi16(words_lo, 8);
+            let shifted_hi = _mm256_srli_epi16(words_hi, 8);
+
+            // Pack to 8-bit (handles lane crossing)
+            let bytes = _mm256_packus_epi16(shifted_lo, shifted_hi);
+            // Permute to fix lane order
+            let bytes_perm = _mm256_permute4x64_epi64(bytes, 0b11_01_10_00);
+
+            // Store 32 bytes
+            _mm256_storeu_si256(dst.as_mut_ptr().add(dst_offset) as *mut __m256i, bytes_perm);
+        }
+    }
+
+    // Handle remainder with SSE2 path
+    if remainder >= 16 {
+        let src_rem = &src[simd_width * 32..];
+        let dst_rem = &mut dst[simd_width * 32..];
+        unsafe {
+            convert_u16_to_u8_row_sse2(src_rem, dst_rem);
+        }
+    } else if remainder > 0 {
+        // Scalar remainder
+        for i in 0..remainder {
+            dst[simd_width * 32 + i] = (src[simd_width * 32 + i] / 257) as u8;
+        }
     }
 }

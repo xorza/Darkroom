@@ -6,10 +6,10 @@
 
 | Conversion | Technique | Speedup |
 |------------|-----------|---------|
-| RGBA↔RGB U8 | SSSE3 PSHUFB shuffle | 1.5-3.2x |
-| Luminance U8 | PMADDUBSW Rec.709 | 1.6-3.1x |
-| U8↔F32 | SSE2 unpack + convert | 1.35-1.6x |
-| U8↔U16 | Bit replication | 1.35-1.8x |
+| RGBA↔RGB U8 | AVX2 256-bit shuffle | 1.5-3.2x |
+| Luminance U8 | AVX2 256-bit multiply | **+23-26%** over SSSE3 |
+| U8↔F32 | AVX2 256-bit unpack + convert | 1.35-1.6x |
+| U8↔U16 | AVX2 256-bit | **+3.5-3.9%** over SSE2 |
 | F32 channels | Rayon parallel | 1.1-1.4x |
 | F32 Luminance | SSE shuffle + FMA | 1.1-1.25x |
 | L_F32↔RGBA_F32 | SSE broadcast | 1.1-1.2x |
@@ -18,39 +18,51 @@
 
 | Conversion | Throughput | Bottleneck |
 |------------|------------|------------|
-| RGB→L U8 | 1.16 Gelem/s | Compute |
-| L→RGBA U8 | 1.00 Gelem/s | Memory |
-| RGBA→RGB U8 | 757 Melem/s | Memory |
-| U8→U16 | 466 Melem/s | Memory |
-| U8→F32 | 292 Melem/s | Memory |
-| F32→RGB F32 | 210 Melem/s | Memory |
+| RGB→L U8 | **1.47 Gelem/s** | Compute |
+| RGBA→L U8 | **1.17 Gelem/s** | Compute |
+| L→RGBA U8 | 990 Melem/s | Memory |
+| RGBA→RGB U8 | 800 Melem/s | Memory |
+| U8→U16 | **496 Melem/s** | Memory |
+| U8→F32 | 304 Melem/s | Memory |
+| F32→RGB F32 | 214 Melem/s | Memory |
 
 ---
 
-## Phase 6: AVX2 Upgrade (High Impact)
+## Phase 6: AVX2 Upgrade ✅ COMPLETED
 
 **Goal**: 2x throughput on modern CPUs (89%+ support per Steam survey)
 
-**Conversions to upgrade**:
-1. RGBA↔RGB U8 - 256-bit shuffle with `_mm256_shuffle_epi8`
-2. Luminance U8 - 256-bit `_mm256_maddubs_epi16`
-3. U8↔F32 - 256-bit unpack/convert
+**Conversions upgraded**:
+1. ✅ RGBA↔RGB U8 - 256-bit shuffle with `_mm256_shuffle_epi8`
+2. ✅ Luminance U8 - 256-bit multiply (RGBA→L: +23%, RGB→L: +26%)
+3. ✅ U8↔F32 - 256-bit unpack/convert (+2.3%)
+4. ✅ U8↔U16 - 256-bit (+3.5-3.9%)
 
-**Implementation**:
+**Implementation**: Runtime detection with fallback to SSSE3/SSE2:
 ```rust
 #[cfg(target_arch = "x86_64")]
-if is_x86_feature_detected!("avx2") {
-    // Use AVX2 path
-} else if is_x86_feature_detected!("ssse3") {
-    // Fall back to SSSE3
+let use_avx2 = is_x86_feature_detected!("avx2");
+// ... in parallel loop:
+if use_avx2 {
+    convert_*_row_avx2(from_row, to_row, width);
+} else {
+    convert_*_row_ssse3(from_row, to_row, width);
 }
 ```
 
-**Expected improvement**: ~2x for cache-friendly sizes
+**Actual improvements** (4096×4096):
+| Conversion | Improvement |
+|------------|-------------|
+| RGBA→L U8 | **+23.3%** |
+| RGB→L U8 | **+26.1%** |
+| U8→U16 | **+3.6%** |
+| U16→U8 | **+3.5%** |
+| U8→F32 | **+2.3%** |
+| RGBA→RGB U8 | +6% (first run) |
+| RGB→RGBA U8 | +2.5% |
 
-**References**:
-- [Simd Library](https://github.com/ermig1979/Simd) - C++ SIMD image processing
-- [fast_image_resize](https://github.com/Cykooz/fast_image_resize) - Rust SIMD resizing
+Note: Memory-bound conversions (channel shuffles, F32) show smaller gains as expected.
+Compute-bound luminance conversions benefit most from wider SIMD.
 
 ---
 
