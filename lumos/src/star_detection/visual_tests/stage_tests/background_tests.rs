@@ -43,7 +43,7 @@ fn test_background_uniform() {
         &pixels,
         width,
         height,
-        &test_output_path("stage_bg_uniform_input.png"),
+        &test_output_path("synthetic_starfield/stage_bg_uniform_input.png"),
     );
 
     // Save background map
@@ -52,7 +52,7 @@ fn test_background_uniform() {
         &bg_pixels,
         width,
         height,
-        &test_output_path("stage_bg_uniform_background.png"),
+        &test_output_path("synthetic_starfield/stage_bg_uniform_background.png"),
     );
 
     // Save background-subtracted image
@@ -65,7 +65,7 @@ fn test_background_uniform() {
         &subtracted,
         width,
         height,
-        &test_output_path("stage_bg_uniform_subtracted.png"),
+        &test_output_path("synthetic_starfield/stage_bg_uniform_subtracted.png"),
     );
 
     // Verify background level is approximately correct
@@ -119,7 +119,7 @@ fn test_background_gradient() {
         &pixels,
         width,
         height,
-        &test_output_path("stage_bg_gradient_input.png"),
+        &test_output_path("synthetic_starfield/stage_bg_gradient_input.png"),
     );
 
     let bg_pixels = background.background.clone();
@@ -127,7 +127,7 @@ fn test_background_gradient() {
         &bg_pixels,
         width,
         height,
-        &test_output_path("stage_bg_gradient_background.png"),
+        &test_output_path("synthetic_starfield/stage_bg_gradient_background.png"),
     );
 
     let subtracted: Vec<f32> = pixels
@@ -139,7 +139,7 @@ fn test_background_gradient() {
         &subtracted,
         width,
         height,
-        &test_output_path("stage_bg_gradient_subtracted.png"),
+        &test_output_path("synthetic_starfield/stage_bg_gradient_subtracted.png"),
     );
 
     // Verify gradient is captured
@@ -195,7 +195,7 @@ fn test_background_vignette() {
         &pixels,
         width,
         height,
-        &test_output_path("stage_bg_vignette_input.png"),
+        &test_output_path("synthetic_starfield/stage_bg_vignette_input.png"),
     );
 
     let bg_pixels = background.background.clone();
@@ -203,7 +203,7 @@ fn test_background_vignette() {
         &bg_pixels,
         width,
         height,
-        &test_output_path("stage_bg_vignette_background.png"),
+        &test_output_path("synthetic_starfield/stage_bg_vignette_background.png"),
     );
 
     let subtracted: Vec<f32> = pixels
@@ -215,7 +215,7 @@ fn test_background_vignette() {
         &subtracted,
         width,
         height,
-        &test_output_path("stage_bg_vignette_subtracted.png"),
+        &test_output_path("synthetic_starfield/stage_bg_vignette_subtracted.png"),
     );
 
     // Verify center is brighter than corners
@@ -284,7 +284,7 @@ fn test_background_nebula() {
         &pixels,
         width,
         height,
-        &test_output_path("stage_bg_nebula_input.png"),
+        &test_output_path("synthetic_starfield/stage_bg_nebula_input.png"),
     );
 
     let bg_pixels = background.background.clone();
@@ -292,7 +292,7 @@ fn test_background_nebula() {
         &bg_pixels,
         width,
         height,
-        &test_output_path("stage_bg_nebula_background.png"),
+        &test_output_path("synthetic_starfield/stage_bg_nebula_background.png"),
     );
 
     let subtracted: Vec<f32> = pixels
@@ -304,7 +304,7 @@ fn test_background_nebula() {
         &subtracted,
         width,
         height,
-        &test_output_path("stage_bg_nebula_subtracted.png"),
+        &test_output_path("synthetic_starfield/stage_bg_nebula_subtracted.png"),
     );
 
     println!("Visual inspection required for nebula test");

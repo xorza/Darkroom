@@ -26,7 +26,7 @@ fn run_pipeline_test(
         &pixels,
         field_config.width,
         field_config.height,
-        &test_output_path(&format!("pipeline_{}_input.png", name)),
+        &test_output_path(&format!("synthetic_starfield/pipeline_{}_input.png", name)),
     );
 
     // Run detection
@@ -46,13 +46,19 @@ fn run_pipeline_test(
         &ground_truth,
         &stars,
         match_radius,
-        &test_output_path(&format!("pipeline_{}_comparison.png", name)),
+        &test_output_path(&format!(
+            "synthetic_starfield/pipeline_{}_comparison.png",
+            name
+        )),
     );
 
     // Save metrics
     save_metrics(
         &metrics,
-        &test_output_path(&format!("pipeline_{}_metrics.txt", name)),
+        &test_output_path(&format!(
+            "synthetic_starfield/pipeline_{}_metrics.txt",
+            name
+        )),
     );
 
     println!("\n{} results:", name);

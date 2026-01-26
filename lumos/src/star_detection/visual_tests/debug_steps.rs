@@ -269,7 +269,7 @@ fn test_debug_synthetic_steps() {
     );
 
     let input_img = to_gray_stretched(&grayscale, width, height);
-    let path = common::test_utils::test_output_path("synth_debug_01_input.png");
+    let path = common::test_utils::test_output_path("synthetic_starfield/synth_debug_01_input.png");
     input_img.save(&path).unwrap();
     println!("Saved: {:?}", path);
 
@@ -309,12 +309,13 @@ fn test_debug_synthetic_steps() {
     );
 
     let bg_img = to_gray_stretched(&background.background, width, height);
-    let path = common::test_utils::test_output_path("synth_debug_02_background.png");
+    let path =
+        common::test_utils::test_output_path("synthetic_starfield/synth_debug_02_background.png");
     bg_img.save(&path).unwrap();
     println!("Saved: {:?}", path);
 
     let noise_img = to_gray_stretched(&background.noise, width, height);
-    let path = common::test_utils::test_output_path("synth_debug_03_noise.png");
+    let path = common::test_utils::test_output_path("synthetic_starfield/synth_debug_03_noise.png");
     noise_img.save(&path).unwrap();
     println!("Saved: {:?}", path);
 
@@ -324,7 +325,8 @@ fn test_debug_synthetic_steps() {
         .map(|(&p, &b)| p - b)
         .collect();
     let sub_img = to_gray_stretched(&subtracted, width, height);
-    let path = common::test_utils::test_output_path("synth_debug_04_subtracted.png");
+    let path =
+        common::test_utils::test_output_path("synthetic_starfield/synth_debug_04_subtracted.png");
     sub_img.save(&path).unwrap();
     println!("Saved: {:?}", path);
 
@@ -344,7 +346,9 @@ fn test_debug_synthetic_steps() {
     );
 
     let mask_img = mask_to_gray(&mask, width, height);
-    let path = common::test_utils::test_output_path("synth_debug_05_threshold_mask.png");
+    let path = common::test_utils::test_output_path(
+        "synthetic_starfield/synth_debug_05_threshold_mask.png",
+    );
     mask_img.save(&path).unwrap();
     println!("Saved: {:?}", path);
 
@@ -357,7 +361,8 @@ fn test_debug_synthetic_steps() {
     );
 
     let dilated_img = mask_to_gray(&dilated, width, height);
-    let path = common::test_utils::test_output_path("synth_debug_06_dilated_mask.png");
+    let path =
+        common::test_utils::test_output_path("synthetic_starfield/synth_debug_06_dilated_mask.png");
     dilated_img.save(&path).unwrap();
     println!("Saved: {:?}", path);
 
@@ -400,7 +405,8 @@ fn test_debug_synthetic_steps() {
         );
     }
 
-    let path = common::test_utils::test_output_path("synth_debug_07_detections.png");
+    let path =
+        common::test_utils::test_output_path("synthetic_starfield/synth_debug_07_detections.png");
     save_image_png(result_img, &path);
     println!("Saved: {:?}", path);
     println!("  Blue circles = true star positions");

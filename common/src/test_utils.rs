@@ -18,7 +18,12 @@ pub fn ensure_test_output_dir() {
 }
 
 /// Returns the path to a test output file.
+/// Supports subdirectories - they will be created if needed.
 pub fn test_output_path(name: &str) -> PathBuf {
     ensure_test_output_dir();
-    workspace_root().join("test_output").join(name)
+    let path = workspace_root().join("test_output").join(name);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).expect("Failed to create test output subdirectory");
+    }
+    path
 }

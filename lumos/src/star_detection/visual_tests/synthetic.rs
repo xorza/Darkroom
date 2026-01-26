@@ -167,7 +167,8 @@ mod tests {
 
         let image = GrayImage::from_raw(config.width as u32, config.height as u32, bytes).unwrap();
 
-        let output_path = common::test_utils::test_output_path("synthetic_stars.png");
+        let output_path =
+            common::test_utils::test_output_path("synthetic_starfield/synthetic_stars.png");
         image.save(&output_path).unwrap();
         println!("Saved synthetic star field to: {:?}", output_path);
     }

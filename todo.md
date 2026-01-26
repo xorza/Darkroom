@@ -2,5 +2,3 @@
 - make imaginarium image align to 16 bytes
 - use debug_assert in performance critical sections
 - rename Gray and GrayAlpha to L and LA
-- remove imageproc
-- update all tests to use imaginarium drawing

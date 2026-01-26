@@ -57,7 +57,7 @@ fn test_deblend_star_pair() {
         &pixels,
         width,
         height,
-        &test_output_path("stage_deblend_pair_input.png"),
+        &test_output_path("synthetic_starfield/stage_deblend_pair_input.png"),
     );
 
     // Estimate background
@@ -86,7 +86,10 @@ fn test_deblend_star_pair() {
         draw_cross(&mut img, c.peak_x as f32, c.peak_y as f32, 3.0, green, 1.0);
     }
 
-    save_image_png(img, &test_output_path("stage_deblend_pair_overlay.png"));
+    save_image_png(
+        img,
+        &test_output_path("synthetic_starfield/stage_deblend_pair_overlay.png"),
+    );
 
     println!(
         "Star pair separation: {:.1}px ({:.1} FWHM)",
@@ -149,7 +152,7 @@ fn test_deblend_chain() {
         &pixels,
         width,
         height,
-        &test_output_path("stage_deblend_chain_input.png"),
+        &test_output_path("synthetic_starfield/stage_deblend_chain_input.png"),
     );
 
     // Estimate background
@@ -179,7 +182,10 @@ fn test_deblend_chain() {
         draw_cross(&mut img, c.peak_x as f32, c.peak_y as f32, 3.0, green, 1.0);
     }
 
-    save_image_png(img, &test_output_path("stage_deblend_chain_overlay.png"));
+    save_image_png(
+        img,
+        &test_output_path("synthetic_starfield/stage_deblend_chain_overlay.png"),
+    );
 
     println!(
         "Chain of {} stars, separation: {:.1}px ({:.1} FWHM)",
@@ -242,7 +248,7 @@ fn test_deblend_unequal_pair() {
         &pixels,
         width,
         height,
-        &test_output_path("stage_deblend_unequal_input.png"),
+        &test_output_path("synthetic_starfield/stage_deblend_unequal_input.png"),
     );
 
     // Estimate background
@@ -272,7 +278,10 @@ fn test_deblend_unequal_pair() {
         draw_cross(&mut img, c.peak_x as f32, c.peak_y as f32, 3.0, green, 1.0);
     }
 
-    save_image_png(img, &test_output_path("stage_deblend_unequal_overlay.png"));
+    save_image_png(
+        img,
+        &test_output_path("synthetic_starfield/stage_deblend_unequal_overlay.png"),
+    );
 
     println!(
         "Unequal pair: bright + faint (4:1 ratio), separation: {:.1}px",

@@ -50,7 +50,7 @@ fn test_gaussian_filter_sparse() {
         &pixels,
         width,
         height,
-        &test_output_path("stage_conv_sparse_input.png"),
+        &test_output_path("synthetic_starfield/stage_conv_sparse_input.png"),
     );
 
     // Estimate and subtract background
@@ -66,7 +66,7 @@ fn test_gaussian_filter_sparse() {
         &bg_subtracted,
         width,
         height,
-        &test_output_path("stage_conv_sparse_bg_subtracted.png"),
+        &test_output_path("synthetic_starfield/stage_conv_sparse_bg_subtracted.png"),
     );
 
     // Apply Gaussian filter (matched filter for star detection)
@@ -80,7 +80,7 @@ fn test_gaussian_filter_sparse() {
         &filtered_display,
         width,
         height,
-        &test_output_path("stage_conv_sparse_filtered.png"),
+        &test_output_path("synthetic_starfield/stage_conv_sparse_filtered.png"),
     );
 
     // Verify stars are enhanced
@@ -141,7 +141,7 @@ fn test_gaussian_filter_fwhm_range() {
         &pixels,
         width,
         height,
-        &test_output_path("stage_conv_fwhm_range_input.png"),
+        &test_output_path("synthetic_starfield/stage_conv_fwhm_range_input.png"),
     );
 
     // Background subtraction
@@ -164,7 +164,7 @@ fn test_gaussian_filter_fwhm_range() {
             width,
             height,
             &test_output_path(&format!(
-                "stage_conv_fwhm_range_filtered_{:.1}.png",
+                "synthetic_starfield/stage_conv_fwhm_range_filtered_{:.1}.png",
                 target_fwhm
             )),
         );
@@ -204,7 +204,7 @@ fn test_gaussian_filter_noise() {
         &pixels,
         width,
         height,
-        &test_output_path("stage_conv_noise_input.png"),
+        &test_output_path("synthetic_starfield/stage_conv_noise_input.png"),
     );
 
     // Background subtraction
@@ -220,7 +220,7 @@ fn test_gaussian_filter_noise() {
         &bg_subtracted,
         width,
         height,
-        &test_output_path("stage_conv_noise_bg_subtracted.png"),
+        &test_output_path("synthetic_starfield/stage_conv_noise_bg_subtracted.png"),
     );
 
     // Apply Gaussian filter
@@ -232,7 +232,7 @@ fn test_gaussian_filter_noise() {
         &filtered_display,
         width,
         height,
-        &test_output_path("stage_conv_noise_filtered.png"),
+        &test_output_path("synthetic_starfield/stage_conv_noise_filtered.png"),
     );
 
     // Check star detectability even with noise

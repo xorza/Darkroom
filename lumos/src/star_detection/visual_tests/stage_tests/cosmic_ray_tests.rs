@@ -48,7 +48,7 @@ fn test_cosmic_ray_rejection() {
         &pixels,
         width,
         height,
-        &test_output_path("stage_cr_rejection_input.png"),
+        &test_output_path("synthetic_starfield/stage_cr_rejection_input.png"),
     );
 
     // Run detection - disable CFA filter and matched filter for synthetic images
@@ -82,7 +82,10 @@ fn test_cosmic_ray_rejection() {
         draw_circle(&mut img, star.x, star.y, 5.0, green, 1.0);
     }
 
-    save_image_png(img, &test_output_path("stage_cr_rejection_overlay.png"));
+    save_image_png(
+        img,
+        &test_output_path("synthetic_starfield/stage_cr_rejection_overlay.png"),
+    );
 
     // Count how many cosmic rays were falsely detected as stars
     let mut cr_false_positives = 0;
@@ -171,7 +174,7 @@ fn test_laplacian_snr_visualization() {
         &pixels,
         width,
         height,
-        &test_output_path("stage_laplacian_snr_input.png"),
+        &test_output_path("synthetic_starfield/stage_laplacian_snr_input.png"),
     );
 
     // Run detection - disable CFA filter and matched filter for synthetic images
@@ -223,7 +226,10 @@ fn test_laplacian_snr_visualization() {
         draw_circle(&mut img, star.x, star.y, 6.0, color, 1.0);
     }
 
-    save_image_png(img, &test_output_path("stage_laplacian_snr_overlay.png"));
+    save_image_png(
+        img,
+        &test_output_path("synthetic_starfield/stage_laplacian_snr_overlay.png"),
+    );
 
     println!("\nColor legend:");
     println!("  Green circles: Low Laplacian SNR (likely real star)");

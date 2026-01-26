@@ -64,7 +64,7 @@ fn test_centroid_accuracy() {
         &pixels,
         width,
         height,
-        &test_output_path("stage_centroid_accuracy_input.png"),
+        &test_output_path("synthetic_starfield/stage_centroid_accuracy_input.png"),
     );
 
     // Estimate background
@@ -145,7 +145,7 @@ fn test_centroid_accuracy() {
 
     save_image_png(
         img,
-        &test_output_path("stage_centroid_accuracy_overlay.png"),
+        &test_output_path("synthetic_starfield/stage_centroid_accuracy_overlay.png"),
     );
 
     // Calculate statistics
@@ -210,7 +210,7 @@ fn test_centroid_snr() {
         &pixels,
         width,
         height,
-        &test_output_path("stage_centroid_snr_input.png"),
+        &test_output_path("synthetic_starfield/stage_centroid_snr_input.png"),
     );
 
     // Estimate background
@@ -262,5 +262,8 @@ fn test_centroid_snr() {
         }
     }
 
-    save_image_png(img, &test_output_path("stage_centroid_snr_overlay.png"));
+    save_image_png(
+        img,
+        &test_output_path("synthetic_starfield/stage_centroid_snr_overlay.png"),
+    );
 }

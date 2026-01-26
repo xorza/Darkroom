@@ -214,7 +214,8 @@ fn test_synthetic_star_detection() {
 
     // Save the input image
     let input_image = to_gray_image(&pixels, config.width, config.height);
-    let input_path = common::test_utils::test_output_path("synthetic_input.png");
+    let input_path =
+        common::test_utils::test_output_path("synthetic_starfield/synthetic_input.png");
     input_image.save(&input_path).unwrap();
     println!("\nSaved input image to: {:?}", input_path);
 
@@ -266,7 +267,8 @@ fn test_synthetic_star_detection() {
         draw_circle(&mut output_image, cx, cy, radius, green, 1.0);
     }
 
-    let output_path = common::test_utils::test_output_path("synthetic_detection.png");
+    let output_path =
+        common::test_utils::test_output_path("synthetic_starfield/synthetic_detection.png");
     save_image_png(output_image, &output_path);
     println!("\nSaved detection result to: {:?}", output_path);
     println!("  Blue circles = true star positions");

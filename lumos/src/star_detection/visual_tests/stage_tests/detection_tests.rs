@@ -58,7 +58,7 @@ fn test_detection_sparse() {
         &pixels,
         config.width,
         config.height,
-        &test_output_path("stage_det_sparse_input.png"),
+        &test_output_path("synthetic_starfield/stage_det_sparse_input.png"),
     );
 
     // Estimate background
@@ -88,7 +88,10 @@ fn test_detection_sparse() {
         &candidate_positions,
         &truth_positions,
     );
-    save_image_png(overlay, &test_output_path("stage_det_sparse_overlay.png"));
+    save_image_png(
+        overlay,
+        &test_output_path("synthetic_starfield/stage_det_sparse_overlay.png"),
+    );
 
     // Calculate detection rate
     let match_radius = 5.0;
@@ -142,7 +145,7 @@ fn test_detection_thresholds() {
         &pixels,
         width,
         height,
-        &test_output_path("stage_det_thresholds_input.png"),
+        &test_output_path("synthetic_starfield/stage_det_thresholds_input.png"),
     );
 
     // Estimate background
@@ -168,7 +171,10 @@ fn test_detection_thresholds() {
         );
         save_image_png(
             overlay,
-            &test_output_path(&format!("stage_det_thresholds_sigma_{:.0}.png", sigma)),
+            &test_output_path(&format!(
+                "synthetic_starfield/stage_det_thresholds_sigma_{:.0}.png",
+                sigma
+            )),
         );
 
         // Count matches
@@ -229,7 +235,7 @@ fn test_detection_area_filter() {
         &pixels,
         width,
         height,
-        &test_output_path("stage_det_area_filter_input.png"),
+        &test_output_path("synthetic_starfield/stage_det_area_filter_input.png"),
     );
 
     // Estimate background
@@ -260,7 +266,10 @@ fn test_detection_area_filter() {
         );
         save_image_png(
             overlay,
-            &test_output_path(&format!("stage_det_area_filter_{}.png", label)),
+            &test_output_path(&format!(
+                "synthetic_starfield/stage_det_area_filter_{}.png",
+                label
+            )),
         );
 
         // Count matches and false positives

@@ -383,7 +383,8 @@ fn save_subpixel_visualization(
         draw_circle(&mut output, cx2, cy2, 8.0, yellow, 1.0);
     }
 
-    let output_path = common::test_utils::test_output_path("subpixel_shift_test.png");
+    let output_path =
+        common::test_utils::test_output_path("synthetic_starfield/subpixel_shift_test.png");
     save_image_png(output, &output_path);
     println!("\nSaved visualization to: {:?}", output_path);
     println!("  Left: Image 1 (reference)");

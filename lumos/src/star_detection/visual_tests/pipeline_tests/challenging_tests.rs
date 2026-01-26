@@ -28,7 +28,10 @@ fn run_challenging_test(
         &pixels,
         field_config.width,
         field_config.height,
-        &test_output_path(&format!("challenging_{}_input.png", name)),
+        &test_output_path(&format!(
+            "synthetic_starfield/challenging_{}_input.png",
+            name
+        )),
     );
 
     // Run detection
@@ -48,13 +51,19 @@ fn run_challenging_test(
         &ground_truth,
         &stars,
         match_radius,
-        &test_output_path(&format!("challenging_{}_comparison.png", name)),
+        &test_output_path(&format!(
+            "synthetic_starfield/challenging_{}_comparison.png",
+            name
+        )),
     );
 
     // Save metrics
     save_metrics(
         &metrics,
-        &test_output_path(&format!("challenging_{}_metrics.txt", name)),
+        &test_output_path(&format!(
+            "synthetic_starfield/challenging_{}_metrics.txt",
+            name
+        )),
     );
 
     println!("\n{} results:", name);
