@@ -6,7 +6,7 @@ pub mod registration;
 mod stacking;
 mod star_detection;
 #[cfg(any(test, feature = "bench"))]
-mod testing;
+pub mod testing;
 
 pub use astro_image::{AstroImage, AstroImageMetadata, BitPix, HotPixelMap, ImageDimensions};
 pub use calibration_masters::CalibrationMasters;

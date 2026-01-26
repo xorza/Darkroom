@@ -6,7 +6,7 @@ AI coding rules for Rust projects:
 - Use Result<> only for expected/legitimate failures (e.g., network, I/O, external services, user input).
 - Always add `#[derive(Debug)]` to Rust structs.
 - If Rust code was changed, run in following order:
-    1. `cargo test && cargo fmt && cargo check && cargo clippy --all-targets -- -D warnings`
+    1. `cargo nextest && cargo fmt && cargo check && cargo clippy --all-targets -- -D warnings`
        before confirming output. Skip doc-tests.
 - Add asserts for function input arguments and outputs where applicable, so logic errors crash instead of being
   swallowed. Do not use asserts for user input and possible network failures.
@@ -18,4 +18,4 @@ AI coding rules for Rust projects:
 - Read `NOTES-AI.md` for summarized knowledge about the project.
 - When running benchmarks, use `cargo bench -p <crate> --features bench --bench <name>` to compile only the needed
   crate and enable the bench feature (e.g., `cargo bench -p lumos --features bench --bench math`).
-- Use nightly -Z unstable-options --report-time for measuring test execution time when asked
+- Use nextest for running tests, also use it for measuring test execution time when asked

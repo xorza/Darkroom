@@ -1,11 +1,9 @@
 //! Tests for star detection.
 
 use super::{
-    Star, StarDetectionConfig, compute_fwhm_median_mad, filter_fwhm_outliers, find_stars,
+    Star, StarDetectionConfig, compute_fwhm_median_mad, filter_fwhm_outliers,
     remove_duplicate_stars,
 };
-use crate::AstroImage;
-use crate::testing::{calibration_dir, init_tracing};
 
 #[test]
 fn test_star_is_saturated() {
@@ -81,102 +79,6 @@ fn test_default_config() {
     assert_eq!(config.detection_sigma, 4.0);
     assert_eq!(config.min_area, 5);
     assert_eq!(config.background_tile_size, 64);
-}
-
-#[test]
-#[cfg_attr(not(feature = "slow-tests"), ignore)]
-fn test_find_stars_on_light_frame() {
-    init_tracing();
-
-    let Some(cal_dir) = calibration_dir() else {
-        eprintln!("LUMOS_CALIBRATION_DIR not set, skipping test");
-        return;
-    };
-
-    let lights_dir = cal_dir.join("Lights");
-    if !lights_dir.exists() {
-        eprintln!("Lights directory not found, skipping test");
-        return;
-    }
-
-    let files = common::file_utils::astro_image_files(&lights_dir);
-    let Some(first_file) = files.first() else {
-        eprintln!("No image files in Lights, skipping test");
-        return;
-    };
-
-    println!("Loading light frame: {:?}", first_file);
-    let start = std::time::Instant::now();
-    let image = AstroImage::from_file(first_file).expect("Failed to load image");
-    println!(
-        "Loaded {}x{} image in {:?}",
-        image.width(),
-        image.height(),
-        start.elapsed()
-    );
-
-    let (width, height) = (image.width(), image.height());
-
-    // Find stars
-    let config = StarDetectionConfig::default();
-    let start = std::time::Instant::now();
-    let result = find_stars(&image, &config);
-    println!(
-        "Found {} stars in {:?}",
-        result.stars.len(),
-        start.elapsed()
-    );
-
-    // Print statistics
-    assert!(
-        !result.stars.is_empty(),
-        "Should find at least some stars in a light frame"
-    );
-
-    // Stars are already sorted by flux (brightest first)
-    let stars = result.stars;
-
-    println!("\nTop 10 brightest stars:");
-    println!(
-        "{:>8} {:>8} {:>10} {:>8} {:>8} {:>8}",
-        "X", "Y", "Flux", "FWHM", "SNR", "Ecc"
-    );
-    for star in stars.iter().take(10) {
-        println!(
-            "{:>8.2} {:>8.2} {:>10.1} {:>8.2} {:>8.1} {:>8.3}",
-            star.x, star.y, star.flux, star.fwhm, star.snr, star.eccentricity
-        );
-    }
-
-    // Basic sanity checks
-    for star in &stars {
-        assert!(
-            star.x >= 0.0 && star.x < width as f32,
-            "Star X out of bounds"
-        );
-        assert!(
-            star.y >= 0.0 && star.y < height as f32,
-            "Star Y out of bounds"
-        );
-        assert!(star.flux > 0.0, "Star flux should be positive");
-        assert!(star.fwhm > 0.0, "Star FWHM should be positive");
-        assert!(star.snr > 0.0, "Star SNR should be positive");
-        assert!(
-            star.eccentricity >= 0.0 && star.eccentricity <= 1.0,
-            "Eccentricity should be in [0, 1]"
-        );
-    }
-
-    // Statistics
-    let avg_fwhm: f32 = stars.iter().map(|s| s.fwhm).sum::<f32>() / stars.len() as f32;
-    let avg_snr: f32 = stars.iter().map(|s| s.snr).sum::<f32>() / stars.len() as f32;
-    let avg_ecc: f32 = stars.iter().map(|s| s.eccentricity).sum::<f32>() / stars.len() as f32;
-
-    println!("\nStatistics:");
-    println!("  Average FWHM: {:.2} pixels", avg_fwhm);
-    println!("  Average SNR: {:.1}", avg_snr);
-    println!("  Average eccentricity: {:.3}", avg_ecc);
-    println!("  Total stars: {}", stars.len());
 }
 
 // =============================================================================

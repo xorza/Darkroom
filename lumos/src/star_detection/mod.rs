@@ -31,6 +31,8 @@ mod median_filter;
 #[cfg(test)]
 pub mod astrometry_benchmark;
 #[cfg(test)]
+mod real_data_tests;
+#[cfg(test)]
 pub mod survey_benchmark;
 #[cfg(test)]
 mod tests;
