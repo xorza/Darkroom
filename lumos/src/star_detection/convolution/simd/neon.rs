@@ -25,8 +25,8 @@ pub unsafe fn convolve_row_neon(input: &[f32], output: &mut [f32], kernel: &[f32
     }
 
     // SIMD middle section
+    let mut x = safe_start;
     if safe_start < safe_end {
-        let mut x = safe_start;
         unsafe {
             while x + 4 <= safe_end + radius {
                 let mut sum = vdupq_n_f32(0.0);
@@ -47,12 +47,12 @@ pub unsafe fn convolve_row_neon(input: &[f32], output: &mut [f32], kernel: &[f32
                 x += 4;
             }
         }
+    }
 
-        // Handle remaining pixels before right edge with scalar
-        while x < width.saturating_sub(radius) {
-            output[x] = convolve_pixel_scalar(input, kernel, radius, x, width);
-            x += 1;
-        }
+    // Handle remaining middle pixels with scalar (including when SIMD section was skipped)
+    while x < width.saturating_sub(radius) {
+        output[x] = convolve_pixel_scalar(input, kernel, radius, x, width);
+        x += 1;
     }
 
     // Handle right edge with scalar (mirroring)
