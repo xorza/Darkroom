@@ -19,7 +19,7 @@ const TILE_SIZE: usize = 64;
 
 /// Test deblending on a pair of overlapping stars.
 #[test]
-#[cfg_attr(not(feature = "slow-tests"), ignore)]
+
 fn test_deblend_star_pair() {
     init_tracing();
 
@@ -111,7 +111,7 @@ fn test_deblend_star_pair() {
 
 /// Test deblending on a chain of touching stars.
 #[test]
-#[cfg_attr(not(feature = "slow-tests"), ignore)]
+
 fn test_deblend_chain() {
     init_tracing();
 
@@ -207,7 +207,7 @@ fn test_deblend_chain() {
 
 /// Test deblending on unequal brightness pair.
 #[test]
-#[cfg_attr(not(feature = "slow-tests"), ignore)]
+
 fn test_deblend_unequal_pair() {
     init_tracing();
 

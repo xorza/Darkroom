@@ -16,7 +16,7 @@ use imaginarium::drawing::{draw_circle, draw_cross};
 
 /// Test cosmic ray rejection on star field.
 #[test]
-#[cfg_attr(not(feature = "slow-tests"), ignore)]
+
 fn test_cosmic_ray_rejection() {
     init_tracing();
 
@@ -142,7 +142,7 @@ fn test_cosmic_ray_rejection() {
 
 /// Test Laplacian SNR visualization.
 #[test]
-#[cfg_attr(not(feature = "slow-tests"), ignore)]
+
 fn test_laplacian_snr_visualization() {
     init_tracing();
 

@@ -69,7 +69,7 @@ fn run_pipeline_test(
 
 /// Test: Sparse field with well-separated stars.
 #[test]
-#[cfg_attr(not(feature = "slow-tests"), ignore)]
+
 fn test_pipeline_sparse_field() {
     init_tracing();
 
@@ -94,7 +94,7 @@ fn test_pipeline_sparse_field() {
 
 /// Test: Dense field with many stars.
 #[test]
-#[cfg_attr(not(feature = "slow-tests"), ignore)]
+
 fn test_pipeline_dense_field() {
     init_tracing();
 
@@ -120,7 +120,7 @@ fn test_pipeline_dense_field() {
 
 /// Test: Moffat profile stars (more realistic PSF).
 #[test]
-#[cfg_attr(not(feature = "slow-tests"), ignore)]
+
 fn test_pipeline_moffat_profile() {
     init_tracing();
 
@@ -163,7 +163,7 @@ fn test_pipeline_moffat_profile() {
 
 /// Test: Wide FWHM range (3-5 pixels).
 #[test]
-#[cfg_attr(not(feature = "slow-tests"), ignore)]
+
 fn test_pipeline_fwhm_range() {
     init_tracing();
 
@@ -206,7 +206,7 @@ fn test_pipeline_fwhm_range() {
 
 /// Test: Wide dynamic range (bright to faint stars).
 #[test]
-#[cfg_attr(not(feature = "slow-tests"), ignore)]
+
 fn test_pipeline_dynamic_range() {
     init_tracing();
 
@@ -246,7 +246,7 @@ fn test_pipeline_dynamic_range() {
 
 /// Test: Low noise (ideal conditions).
 #[test]
-#[cfg_attr(not(feature = "slow-tests"), ignore)]
+
 fn test_pipeline_low_noise() {
     init_tracing();
 

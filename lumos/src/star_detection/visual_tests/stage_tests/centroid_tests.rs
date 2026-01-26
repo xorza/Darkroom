@@ -20,7 +20,7 @@ const TILE_SIZE: usize = 64;
 
 /// Test centroid accuracy on precisely placed stars.
 #[test]
-#[cfg_attr(not(feature = "slow-tests"), ignore)]
+
 fn test_centroid_accuracy() {
     init_tracing();
 
@@ -169,7 +169,7 @@ fn test_centroid_accuracy() {
 
 /// Test centroid on stars with different SNR.
 #[test]
-#[cfg_attr(not(feature = "slow-tests"), ignore)]
+
 fn test_centroid_snr() {
     init_tracing();
 

@@ -44,7 +44,7 @@ fn create_detection_overlay(
 
 /// Test detection on sparse star field.
 #[test]
-#[cfg_attr(not(feature = "slow-tests"), ignore)]
+
 fn test_detection_sparse() {
     init_tracing();
 
@@ -118,7 +118,7 @@ fn test_detection_sparse() {
 
 /// Test detection with different sigma thresholds.
 #[test]
-#[cfg_attr(not(feature = "slow-tests"), ignore)]
+
 fn test_detection_thresholds() {
     init_tracing();
 
@@ -206,7 +206,7 @@ fn test_detection_thresholds() {
 
 /// Test detection area filtering.
 #[test]
-#[cfg_attr(not(feature = "slow-tests"), ignore)]
+
 fn test_detection_area_filter() {
     init_tracing();
 

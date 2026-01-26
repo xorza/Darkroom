@@ -24,7 +24,7 @@ fn normalize_for_display(pixels: &[f32]) -> Vec<f32> {
 
 /// Test Gaussian filter response on sparse star field.
 #[test]
-#[cfg_attr(not(feature = "slow-tests"), ignore)]
+
 fn test_gaussian_filter_sparse() {
     init_tracing();
 
@@ -116,7 +116,7 @@ fn test_gaussian_filter_sparse() {
 
 /// Test Gaussian filter with different FWHM values.
 #[test]
-#[cfg_attr(not(feature = "slow-tests"), ignore)]
+
 fn test_gaussian_filter_fwhm_range() {
     init_tracing();
 
@@ -178,7 +178,7 @@ fn test_gaussian_filter_fwhm_range() {
 
 /// Test Gaussian filter noise rejection.
 #[test]
-#[cfg_attr(not(feature = "slow-tests"), ignore)]
+
 fn test_gaussian_filter_noise() {
     init_tracing();
 

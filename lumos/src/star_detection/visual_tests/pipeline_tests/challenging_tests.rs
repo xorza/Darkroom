@@ -90,7 +90,7 @@ fn run_challenging_test(
 
 /// Test: Crowded cluster with overlapping stars.
 #[test]
-#[cfg_attr(not(feature = "slow-tests"), ignore)]
+
 fn test_crowded_cluster() {
     init_tracing();
 
@@ -112,7 +112,7 @@ fn test_crowded_cluster() {
 
 /// Test: Very dense uniform distribution.
 #[test]
-#[cfg_attr(not(feature = "slow-tests"), ignore)]
+
 fn test_very_dense() {
     init_tracing();
 
@@ -142,7 +142,7 @@ fn test_very_dense() {
 
 /// Test: Gradient density field.
 #[test]
-#[cfg_attr(not(feature = "slow-tests"), ignore)]
+
 fn test_gradient_density() {
     init_tracing();
 
@@ -173,7 +173,7 @@ fn test_gradient_density() {
 
 /// Test: Uniform tracking error (all stars elongated same direction).
 #[test]
-#[cfg_attr(not(feature = "slow-tests"), ignore)]
+
 fn test_uniform_tracking_error() {
     init_tracing();
 
@@ -198,7 +198,7 @@ fn test_uniform_tracking_error() {
 
 /// Test: Varying tracking error (random elongation).
 #[test]
-#[cfg_attr(not(feature = "slow-tests"), ignore)]
+
 fn test_varying_tracking_error() {
     init_tracing();
 
@@ -233,7 +233,7 @@ fn test_varying_tracking_error() {
 
 /// Test: Field rotation effect.
 #[test]
-#[cfg_attr(not(feature = "slow-tests"), ignore)]
+
 fn test_field_rotation() {
     init_tracing();
 
@@ -271,7 +271,7 @@ fn test_field_rotation() {
 
 /// Test: Cosmic ray contamination.
 #[test]
-#[cfg_attr(not(feature = "slow-tests"), ignore)]
+
 fn test_cosmic_rays() {
     init_tracing();
 
@@ -301,7 +301,7 @@ fn test_cosmic_rays() {
 
 /// Test: Bayer pattern artifacts (uncalibrated CFA).
 #[test]
-#[cfg_attr(not(feature = "slow-tests"), ignore)]
+
 fn test_bayer_pattern() {
     init_tracing();
 
@@ -331,7 +331,7 @@ fn test_bayer_pattern() {
 
 /// Test: Saturated stars.
 #[test]
-#[cfg_attr(not(feature = "slow-tests"), ignore)]
+
 fn test_saturated_stars() {
     init_tracing();
 
@@ -370,7 +370,7 @@ fn test_saturated_stars() {
 
 /// Test: Gradient background.
 #[test]
-#[cfg_attr(not(feature = "slow-tests"), ignore)]
+
 fn test_gradient_background() {
     init_tracing();
 
@@ -403,7 +403,7 @@ fn test_gradient_background() {
 
 /// Test: Vignette background.
 #[test]
-#[cfg_attr(not(feature = "slow-tests"), ignore)]
+
 fn test_vignette_background() {
     init_tracing();
 
@@ -436,7 +436,7 @@ fn test_vignette_background() {
 
 /// Test: Nebula background.
 #[test]
-#[cfg_attr(not(feature = "slow-tests"), ignore)]
+
 fn test_nebula_background() {
     init_tracing();
 
@@ -483,7 +483,7 @@ fn test_nebula_background() {
 
 /// Test: Stars near image edges.
 #[test]
-#[cfg_attr(not(feature = "slow-tests"), ignore)]
+
 fn test_edge_stars() {
     init_tracing();
 
@@ -513,7 +513,7 @@ fn test_edge_stars() {
 
 /// Test: Faint stars in high noise.
 #[test]
-#[cfg_attr(not(feature = "slow-tests"), ignore)]
+
 fn test_faint_in_noise() {
     init_tracing();
 
@@ -536,7 +536,7 @@ fn test_faint_in_noise() {
 
 /// Test: Very low SNR conditions.
 #[test]
-#[cfg_attr(not(feature = "slow-tests"), ignore)]
+
 fn test_very_low_snr() {
     init_tracing();
 
@@ -575,7 +575,7 @@ fn test_very_low_snr() {
 
 /// Test: Mixed challenging conditions.
 #[test]
-#[cfg_attr(not(feature = "slow-tests"), ignore)]
+
 fn test_combined_challenges() {
     init_tracing();
 

@@ -16,7 +16,7 @@ const TILE_SIZE: usize = 64;
 
 /// Test background estimation on uniform background.
 #[test]
-#[cfg_attr(not(feature = "slow-tests"), ignore)]
+
 fn test_background_uniform() {
     init_tracing();
 
@@ -84,7 +84,7 @@ fn test_background_uniform() {
 
 /// Test background estimation on gradient background.
 #[test]
-#[cfg_attr(not(feature = "slow-tests"), ignore)]
+
 fn test_background_gradient() {
     init_tracing();
 
@@ -161,7 +161,7 @@ fn test_background_gradient() {
 
 /// Test background estimation on vignette pattern.
 #[test]
-#[cfg_attr(not(feature = "slow-tests"), ignore)]
+
 fn test_background_vignette() {
     init_tracing();
 
@@ -236,7 +236,7 @@ fn test_background_vignette() {
 
 /// Test background estimation with nebula structure.
 #[test]
-#[cfg_attr(not(feature = "slow-tests"), ignore)]
+
 fn test_background_nebula() {
     init_tracing();
 
