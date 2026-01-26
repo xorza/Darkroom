@@ -1,4 +1,6 @@
-in Astroimage use imaginarium::image instead of pixels and simensions
-load imaginarium image without stride padding from files
-add paiting tools to imaginarium for circles, crosses and dots
-save all synthetic images into separate directory test_output/synthetic_starfield
+- in Astroimage use imaginarium::image instead of pixels and simensions
+- load imaginarium image without stride padding from files
+- add paiting tools to imaginarium for circles, crosses and dots
+- save all synthetic images into separate directory test_output/synthetic_starfield
+- make imaginarium image align to 16 bytes
+- use debug_assert in performance critical sections
