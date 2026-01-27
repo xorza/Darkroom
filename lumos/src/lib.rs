@@ -151,6 +151,7 @@ pub use registration::{
     register_stars,
     warp_image,
     warp_to_reference,
+    warp_to_reference_image,
 };
 
 // ============================================================================

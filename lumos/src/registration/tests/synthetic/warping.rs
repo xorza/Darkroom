@@ -623,6 +623,132 @@ fn test_interpolation_quality_ordering() {
 }
 
 // ============================================================================
+// Multi-channel image warping tests
+// ============================================================================
+
+#[test]
+fn test_warp_to_reference_image_grayscale() {
+    use crate::AstroImage;
+    use crate::registration::pipeline::warp_to_reference_image;
+
+    let (ref_pixels, width, height) = generate_test_field(88888);
+    let ref_image = AstroImage::from_pixels(width, height, 1, ref_pixels.clone());
+
+    // Apply a translation
+    let transform = TransformMatrix::translation(5.0, -3.0);
+
+    // Warp using both the raw function and the image wrapper
+    let warped_raw = warp_to_reference(
+        &ref_pixels,
+        width,
+        height,
+        &transform,
+        InterpolationMethod::Lanczos3,
+    );
+    let warped_image =
+        warp_to_reference_image(&ref_image, &transform, InterpolationMethod::Lanczos3);
+
+    // Results should be identical
+    assert_eq!(warped_image.width(), width);
+    assert_eq!(warped_image.height(), height);
+    assert_eq!(warped_image.channels(), 1);
+    assert_eq!(warped_image.pixels().len(), warped_raw.len());
+
+    for (a, b) in warped_raw.iter().zip(warped_image.pixels().iter()) {
+        assert!((a - b).abs() < 1e-6, "Pixel mismatch: {} vs {}", a, b);
+    }
+}
+
+#[test]
+fn test_warp_to_reference_image_rgb() {
+    use crate::AstroImage;
+    use crate::registration::pipeline::warp_to_reference_image;
+
+    let (gray_pixels, width, height) = generate_test_field(99999);
+
+    // Create RGB image by duplicating grayscale to all channels with slight offsets
+    let mut rgb_pixels = Vec::with_capacity(width * height * 3);
+    for (i, &val) in gray_pixels.iter().enumerate() {
+        let y = i / width;
+        let x = i % width;
+        // Slightly different values per channel to verify independent processing
+        rgb_pixels.push(val); // R
+        rgb_pixels.push((val + 0.1).min(1.0)); // G
+        rgb_pixels.push(if (x + y) % 2 == 0 { val } else { val * 0.8 }); // B
+    }
+
+    let rgb_image = AstroImage::from_pixels(width, height, 3, rgb_pixels);
+
+    // Apply a transform
+    let transform = TransformMatrix::euclidean(3.0, -2.0, 1.0_f64.to_radians());
+
+    // Warp the RGB image
+    let warped = warp_to_reference_image(&rgb_image, &transform, InterpolationMethod::Lanczos3);
+
+    // Verify dimensions preserved
+    assert_eq!(warped.width(), width);
+    assert_eq!(warped.height(), height);
+    assert_eq!(warped.channels(), 3);
+    assert_eq!(warped.pixels().len(), width * height * 3);
+
+    // Manually warp each channel and compare
+    for c in 0..3 {
+        let channel: Vec<f32> = rgb_image
+            .pixels()
+            .iter()
+            .skip(c)
+            .step_by(3)
+            .copied()
+            .collect();
+        let expected = warp_to_reference(
+            &channel,
+            width,
+            height,
+            &transform,
+            InterpolationMethod::Lanczos3,
+        );
+
+        // Extract warped channel
+        let warped_channel: Vec<f32> = warped.pixels().iter().skip(c).step_by(3).copied().collect();
+
+        assert_eq!(warped_channel.len(), expected.len());
+        for (a, b) in expected.iter().zip(warped_channel.iter()) {
+            assert!(
+                (a - b).abs() < 1e-6,
+                "Channel {} pixel mismatch: {} vs {}",
+                c,
+                a,
+                b
+            );
+        }
+    }
+}
+
+#[test]
+fn test_warp_to_reference_image_preserves_metadata() {
+    use crate::AstroImage;
+    use crate::astro_image::AstroImageMetadata;
+    use crate::registration::pipeline::warp_to_reference_image;
+
+    let (pixels, width, height) = generate_test_field(11111);
+    let mut image = AstroImage::from_pixels(width, height, 1, pixels);
+
+    // Set some metadata
+    image.metadata = AstroImageMetadata {
+        object: Some("M42".to_string()),
+        exposure_time: Some(120.0),
+        ..Default::default()
+    };
+
+    let transform = TransformMatrix::translation(5.0, 5.0);
+    let warped = warp_to_reference_image(&image, &transform, InterpolationMethod::Bilinear);
+
+    // Verify metadata is preserved
+    assert_eq!(warped.metadata.object, Some("M42".to_string()));
+    assert_eq!(warped.metadata.exposure_time, Some(120.0));
+}
+
+// ============================================================================
 // Helper functions
 // ============================================================================
 
