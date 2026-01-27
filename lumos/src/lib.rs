@@ -152,9 +152,17 @@ pub use stacking::{
     ImageStack,
     MAX_GPU_FRAMES,
     MedianConfig,
+    // Multi-session stacking
+    MultiSessionStack,
+    MultiSessionSummary,
     ObjectPosition,
     // Progress reporting
     ProgressCallback,
+    Session,
+    SessionConfig,
+    SessionId,
+    SessionQuality,
+    SessionSummary,
     SigmaClipConfig,
     SigmaClippedConfig,
     StackingMethod,

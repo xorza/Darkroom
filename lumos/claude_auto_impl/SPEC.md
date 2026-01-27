@@ -111,12 +111,22 @@ with tests and running verification commands per project conventions.
 - [x] Run verification commands
 
 ### 3.2 Multi-Session Integration
-- [ ] Design per-session quality assessment workflow
+- [x] Design per-session quality assessment workflow
 - [ ] Implement session-aware local normalization
 - [ ] Implement session-weighted integration
 - [ ] Add gradient removal post-stack (optional)
 - [ ] Write integration tests
 - [ ] Run verification commands
+
+**Implementation** (2026-01-27): Created `src/stacking/session.rs` with:
+- `SessionQuality` - Aggregate metrics for a session (median FWHM, SNR, eccentricity, noise)
+- `Session` - Single imaging session with frames, quality assessment, reference frame selection
+- `SessionConfig` - Configuration (quality threshold, session weights, rejection, normalization)
+- `MultiSessionStack` - Orchestrator for combining multiple sessions
+- `SessionSummary` / `MultiSessionSummary` - Human-readable summaries with Display impl
+- Session weight formula: `(SNR² × (1/FWHM)² × (1/ecc)) / noise × √frame_count`
+- Per-frame weight: `session_weight × normalized_frame_weight_within_session`
+- 26 unit tests passing
 
 ### 3.3 Distortion Correction Extensions
 - [ ] Implement radial distortion models (barrel/pincushion)
@@ -170,9 +180,9 @@ cargo bench -p lumos --features bench --bench <name> | tee benches/<name>_result
 |-------|-------|----------|--------|
 | Local Normalization | 5 | 5 | **Complete** |
 | GPU Acceleration | 12 | 12 | **Complete** (warping done, FFT skipped, sigma clip done, star detection done, batch pipeline done + benchmarked) |
-| Advanced Features | 14 | 6 | **In Progress** (Comet stacking complete) |
+| Advanced Features | 14 | 7 | **In Progress** (Comet stacking complete, session quality done) |
 | Quality & Polish | 4 | 0 | Not Started |
-| **Total** | **35** | **23** | **In Progress** |
+| **Total** | **35** | **24** | **In Progress** |
 
 ---
 

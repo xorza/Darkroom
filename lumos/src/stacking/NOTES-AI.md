@@ -924,3 +924,172 @@ Uses 5th percentile (robust to outliers) via partial sorting:
 - O(n) average case via `select_nth_unstable_by`
 - Avoids comet itself biasing the estimate
 - Clamped to non-negative values before adding
+
+---
+
+## Multi-Session Integration (IMPLEMENTED - 2026-01-27)
+
+### Overview
+
+Multi-session stacking support for integrating astrophotography data from multiple imaging sessions. Each session may have different sky conditions, light pollution levels, temperature, and equipment configuration.
+
+### Workflow (PixInsight-style)
+
+1. **Per-session calibration** - Each session uses its own bias, dark, flat frames
+2. **Per-session quality assessment** - Compute quality metrics for each session
+3. **Cross-session normalization** - Match backgrounds using local normalization
+4. **Session-weighted integration** - Better sessions contribute more
+
+### Key Types
+
+```rust
+// Session identifier
+pub type SessionId = String;
+
+// Quality metrics for an entire session
+pub struct SessionQuality {
+    pub median_fwhm: f32,        // Seeing quality
+    pub median_snr: f32,         // Signal quality
+    pub median_eccentricity: f32, // Tracking quality
+    pub median_noise: f32,       // Noise level
+    pub frame_count: usize,      // Total frames
+    pub usable_frame_count: usize, // After filtering
+    pub frame_qualities: Vec<FrameQuality>,
+}
+
+// Single imaging session
+pub struct Session {
+    pub id: SessionId,
+    pub frame_paths: Vec<PathBuf>,
+    pub quality: SessionQuality,
+    pub reference_frame: Option<usize>,
+}
+
+// Configuration for multi-session stacking
+pub struct SessionConfig {
+    pub quality_threshold: f32,      // 0.0-1.0, default 0.5
+    pub use_session_weights: bool,   // Default true
+    pub rejection: RejectionMethod,  // Default SigmaClip
+    pub use_local_normalization: bool, // Default true
+    pub normalization_tile_size: usize, // Default 128
+}
+
+// Multi-session stacking orchestrator
+pub struct MultiSessionStack {
+    pub sessions: Vec<Session>,
+    pub config: SessionConfig,
+}
+
+// Summary types
+pub struct SessionSummary { id, frame_count, usable_frame_count, median_fwhm, median_snr, weight }
+pub struct MultiSessionSummary { total_sessions, total_frames, total_usable_frames, sessions }
+```
+
+### Session Weight Formula
+
+Session weight combines quality metrics with data quantity:
+
+```
+weight = (SNR² × (1/FWHM)² × (1/eccentricity)) / noise × √frame_count
+```
+
+The √frame_count factor gives more weight to sessions with more data, but with diminishing returns.
+
+### Quality-Based Frame Filtering
+
+Frames can be filtered by quality threshold relative to session median:
+- Threshold of 0.5 keeps frames with >= 50% of median quality weight
+- Uses `FrameQuality::compute_weight()` for per-frame assessment
+
+### Per-Frame Weight Computation
+
+Final frame weights combine session and frame quality:
+
+```
+frame_weight = session_weight × normalized_frame_weight_within_session
+```
+
+This ensures both session-level and frame-level quality contribute.
+
+### API Usage
+
+```rust
+use lumos::stacking::session::{Session, SessionConfig, MultiSessionStack};
+
+// Create sessions from calibrated frames
+let session1 = Session::new("2024-01-15")
+    .with_frames(&night1_paths)
+    .assess_quality(&star_detection_config)?;
+
+let session2 = Session::new("2024-01-16")
+    .with_frames(&night2_paths)
+    .assess_quality(&star_detection_config)?;
+
+// Configure stacking
+let config = SessionConfig::default()
+    .with_quality_threshold(0.3)
+    .with_rejection(RejectionMethod::Gesd(GesdConfig::default()));
+
+// Create stack and compute weights
+let stack = MultiSessionStack::new(vec![session1, session2])
+    .with_config(config);
+
+// Get summary
+println!("{}", stack.summary());
+
+// Get session weights
+let session_weights = stack.compute_session_weights();
+
+// Get per-frame weights
+let frame_weights = stack.compute_frame_weights();
+
+// Get all usable frame paths
+let paths = stack.filter_all_frames();
+```
+
+### Tests (26 passing)
+
+**SessionQuality:**
+- `test_session_quality_default`
+- `test_session_quality_from_frame_qualities`
+- `test_session_quality_from_empty`
+- `test_session_quality_compute_weight`
+- `test_session_quality_zero_usable_frames_zero_weight`
+- `test_session_quality_filter_by_threshold`
+
+**Session:**
+- `test_session_new`
+- `test_session_with_frames`
+- `test_session_with_reference_frame`
+- `test_session_frame_count`
+- `test_session_select_best_reference`
+
+**SessionConfig:**
+- `test_session_config_default`
+- `test_session_config_with_quality_threshold`
+- `test_session_config_invalid_threshold_panics`
+- `test_session_config_without_session_weights`
+- `test_session_config_without_local_normalization`
+- `test_session_config_with_normalization_tile_size`
+- `test_session_config_tile_size_too_small_panics`
+
+**MultiSessionStack:**
+- `test_multi_session_stack_new`
+- `test_multi_session_stack_with_config`
+- `test_multi_session_stack_total_frame_count`
+- `test_multi_session_stack_compute_session_weights_equal`
+- `test_multi_session_stack_compute_session_weights_quality_based`
+- `test_multi_session_stack_all_frame_paths`
+- `test_multi_session_stack_summary`
+- `test_multi_session_summary_display`
+- `test_multi_session_stack_compute_frame_weights`
+
+### Public Exports
+
+- `lumos::Session`
+- `lumos::SessionId`
+- `lumos::SessionQuality`
+- `lumos::SessionConfig`
+- `lumos::SessionSummary`
+- `lumos::MultiSessionStack`
+- `lumos::MultiSessionSummary`

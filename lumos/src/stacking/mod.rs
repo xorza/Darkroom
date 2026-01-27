@@ -9,6 +9,7 @@ mod mean;
 mod median;
 mod progress;
 pub mod rejection;
+pub mod session;
 mod sigma_clipped;
 mod weighted;
 
@@ -47,6 +48,12 @@ pub use comet::{
     CometStackConfig, CometStackResult, CompositeMethod, ObjectPosition,
     apply_comet_offset_to_transform, composite_stacks, compute_comet_offset,
     create_comet_stack_result, interpolate_position,
+};
+// Re-export session types for public API
+#[allow(unused_imports)]
+pub use session::{
+    MultiSessionStack, MultiSessionSummary, Session, SessionConfig, SessionId, SessionQuality,
+    SessionSummary,
 };
 
 #[cfg(feature = "bench")]
