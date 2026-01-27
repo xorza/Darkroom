@@ -18,3 +18,4 @@ AI coding rules for Rust projects:
 - Use nextest for running tests and for measuring test execution time when asked.
 - For iterative changes and benchmarks, add readme files to corresponding folders explaining which optimizations were implemented and which were removed. When running benchmarks, always output results to a txt file in the bench directory and maintain a bench-analysis.md file with interpretations. Update it when re-running benchmarks.
 - Remove deprecated and unused code. Make sure public api is properly exposed and consistent.
+- Check test run time make sure tests taking reasonable amount of time. If tests run too long, research and improve.
