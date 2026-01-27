@@ -48,11 +48,6 @@ pub fn save_image(image: Image, path: &Path) {
     image_u8.save_file(&out).expect("Failed to save image");
 }
 
-/// Deprecated: use `save_image` instead.
-pub fn save_image_png(image: Image, path: &Path) {
-    save_image(image, path);
-}
-
 /// Convert f32 pixels to grayscale image (clamped to 0-1).
 pub fn to_gray_image(pixels: &[f32], width: usize, height: usize) -> GrayImage {
     let bytes: Vec<u8> = pixels
@@ -165,11 +160,6 @@ pub fn save_grayscale(pixels: &[f32], width: usize, height: usize, path: &Path) 
     img.save(&out).expect("Failed to save grayscale image");
 }
 
-/// Deprecated: use `save_grayscale` instead.
-pub fn save_grayscale_png(pixels: &[f32], width: usize, height: usize, path: &Path) {
-    save_grayscale(pixels, width, height, path);
-}
-
 /// Save grayscale image with auto-stretch to file using the configured test output format.
 pub fn save_grayscale_stretched(pixels: &[f32], width: usize, height: usize, path: &Path) {
     let out = output_path(path);
@@ -178,20 +168,10 @@ pub fn save_grayscale_stretched(pixels: &[f32], width: usize, height: usize, pat
         .expect("Failed to save stretched grayscale image");
 }
 
-/// Deprecated: use `save_grayscale_stretched` instead.
-pub fn save_grayscale_stretched_png(pixels: &[f32], width: usize, height: usize, path: &Path) {
-    save_grayscale_stretched(pixels, width, height, path);
-}
-
 /// Save RGB image to file using the configured test output format.
 pub fn save_rgb(image: &RgbImage, path: &Path) {
     let out = output_path(path);
     image.save(&out).expect("Failed to save RGB image");
-}
-
-/// Deprecated: use `save_rgb` instead.
-pub fn save_rgb_png(image: &RgbImage, path: &Path) {
-    save_rgb(image, path);
 }
 
 /// Save comparison image showing ground truth vs detected stars.
@@ -215,37 +195,11 @@ pub fn save_comparison(
     save_image(image, path);
 }
 
-/// Deprecated: use `save_comparison` instead.
-pub fn save_comparison_png(
-    pixels: &[f32],
-    width: usize,
-    height: usize,
-    ground_truth: &[crate::testing::synthetic::GroundTruthStar],
-    detected: &[crate::star_detection::Star],
-    match_radius: f32,
-    path: &Path,
-) {
-    save_comparison(
-        pixels,
-        width,
-        height,
-        ground_truth,
-        detected,
-        match_radius,
-        path,
-    );
-}
-
 /// Save mask to file using the configured test output format.
 pub fn save_mask(mask: &[bool], width: usize, height: usize, path: &Path) {
     let out = output_path(path);
     let img = mask_to_gray(mask, width, height);
     img.save(&out).expect("Failed to save mask image");
-}
-
-/// Deprecated: use `save_mask` instead.
-pub fn save_mask_png(mask: &[bool], width: usize, height: usize, path: &Path) {
-    save_mask(mask, width, height, path);
 }
 
 /// Create a side-by-side comparison image.

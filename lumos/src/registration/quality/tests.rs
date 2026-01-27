@@ -203,7 +203,7 @@ fn test_estimate_overlap_negative_coords() {
 fn test_estimate_overlap_rotation() {
     // Small rotation around center - corners stay in bounds
     let angle = 0.1; // ~6 degrees
-    let transform = TransformMatrix::from_rotation_around(angle, 50.0, 50.0);
+    let transform = TransformMatrix::rotation_around(50.0, 50.0, angle);
     let overlap = estimate_overlap(100, 100, &transform);
 
     // Small rotation should have high overlap (corners stay mostly in bounds)
@@ -215,7 +215,7 @@ fn test_estimate_overlap_rotation() {
 
     // 90 degree rotation around center - all corners still inside
     let angle_90 = std::f64::consts::PI / 2.0;
-    let transform_90 = TransformMatrix::from_rotation_around(angle_90, 50.0, 50.0);
+    let transform_90 = TransformMatrix::rotation_around(50.0, 50.0, angle_90);
     let overlap_90 = estimate_overlap(100, 100, &transform_90);
     assert!(
         overlap_90 > 0.9,

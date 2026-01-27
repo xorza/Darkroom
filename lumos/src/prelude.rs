@@ -16,13 +16,14 @@ pub use crate::CalibrationMasters;
 
 // Star detection - main API
 pub use crate::{
-    Star, StarDetectionConfig, StarDetectionConfigBuilder, StarDetectionResult, find_stars,
+    Star, StarDetectionConfig, StarDetectionConfigBuilder, StarDetectionDiagnostics,
+    StarDetectionResult, find_stars,
 };
 
 // Registration - main API
 pub use crate::{
     InterpolationMethod, RegistrationConfig, RegistrationError, RegistrationResult, Registrator,
-    TransformMatrix, TransformType,
+    TransformMatrix, TransformType, WarpConfig,
 };
 
 // Stacking - main API

@@ -169,7 +169,7 @@ impl TransformMatrix {
     }
 
     /// Create uniform scale transform.
-    pub fn from_scale(sx: f64, sy: f64) -> Self {
+    pub fn scale(sx: f64, sy: f64) -> Self {
         Self {
             data: [sx, 0.0, 0.0, 0.0, sy, 0.0, 0.0, 0.0, 1.0],
             transform_type: TransformType::Affine,
@@ -177,7 +177,10 @@ impl TransformMatrix {
     }
 
     /// Create rotation transform around a specified center point.
-    pub fn from_rotation_around(angle: f64, cx: f64, cy: f64) -> Self {
+    ///
+    /// Parameters follow the pattern (center_x, center_y, angle) for consistency
+    /// with other constructors that use (position, rotation) ordering.
+    pub fn rotation_around(cx: f64, cy: f64, angle: f64) -> Self {
         let cos_a = angle.cos();
         let sin_a = angle.sin();
         // T(-cx,-cy) * R(angle) * T(cx,cy)
@@ -190,7 +193,7 @@ impl TransformMatrix {
     }
 
     /// Create transform from raw 3x3 matrix data.
-    pub fn from_matrix(data: [f64; 9], transform_type: TransformType) -> Self {
+    pub fn matrix(data: [f64; 9], transform_type: TransformType) -> Self {
         Self {
             data,
             transform_type,

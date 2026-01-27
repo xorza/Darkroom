@@ -330,7 +330,7 @@ fn test_warp_scale() {
     let input = vec![1.0, 2.0, 3.0, 4.0];
 
     // Scale 2x
-    let transform = TransformMatrix::from_scale(2.0, 2.0);
+    let transform = TransformMatrix::scale(2.0, 2.0);
     let config = WarpConfig {
         method: InterpolationMethod::Bilinear,
         ..Default::default()
@@ -378,7 +378,7 @@ fn test_warp_rotation() {
     input[0] = 1.0; // Top-left corner
 
     // Rotate 90 degrees around center
-    let transform = TransformMatrix::from_rotation_around(std::f64::consts::FRAC_PI_2, 4.0, 4.0);
+    let transform = TransformMatrix::rotation_around(4.0, 4.0, std::f64::consts::FRAC_PI_2);
     let config = WarpConfig {
         method: InterpolationMethod::Bilinear,
         ..Default::default()

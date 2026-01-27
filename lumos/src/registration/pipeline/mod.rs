@@ -643,7 +643,7 @@ fn scale_transform(transform: &TransformMatrix, scale: f64) -> TransformMatrix {
     let mut data = transform.data;
     data[2] *= scale; // tx
     data[5] *= scale; // ty
-    TransformMatrix::from_matrix(data, transform.transform_type)
+    TransformMatrix::matrix(data, transform.transform_type)
 }
 
 /// Build an image pyramid by successive downsampling.

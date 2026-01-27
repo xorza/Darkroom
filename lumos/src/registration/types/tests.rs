@@ -157,7 +157,7 @@ fn test_is_valid() {
     assert!(valid.is_valid());
 
     // Degenerate matrix (zero scale)
-    let degenerate = TransformMatrix::from_matrix(
+    let degenerate = TransformMatrix::matrix(
         [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0],
         TransformType::Affine,
     );

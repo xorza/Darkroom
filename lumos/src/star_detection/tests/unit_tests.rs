@@ -27,7 +27,7 @@ fn test_star_is_saturated() {
 }
 
 #[test]
-fn test_star_is_usable() {
+fn test_star_passes_quality_filters() {
     let star = Star {
         x: 10.0,
         y: 10.0,
@@ -41,36 +41,36 @@ fn test_star_is_usable() {
         roundness2: 0.0,
         laplacian_snr: 0.0,
     };
-    assert!(star.is_usable(10.0, 0.5, 0.7, 1.0));
+    assert!(star.passes_quality_filters(10.0, 0.5, 0.7, 1.0));
 
     // Low SNR
     let low_snr = Star { snr: 5.0, ..star };
-    assert!(!low_snr.is_usable(10.0, 0.5, 0.7, 1.0));
+    assert!(!low_snr.passes_quality_filters(10.0, 0.5, 0.7, 1.0));
 
     // Too elongated
     let elongated = Star {
         eccentricity: 0.7,
         ..star
     };
-    assert!(!elongated.is_usable(10.0, 0.5, 0.7, 1.0));
+    assert!(!elongated.passes_quality_filters(10.0, 0.5, 0.7, 1.0));
 
     // Saturated
     let saturated = Star { peak: 0.98, ..star };
-    assert!(!saturated.is_usable(10.0, 0.5, 0.7, 1.0));
+    assert!(!saturated.passes_quality_filters(10.0, 0.5, 0.7, 1.0));
 
     // Cosmic ray (too sharp)
     let cosmic_ray = Star {
         sharpness: 0.9,
         ..star
     };
-    assert!(!cosmic_ray.is_usable(10.0, 0.5, 0.7, 1.0));
+    assert!(!cosmic_ray.passes_quality_filters(10.0, 0.5, 0.7, 1.0));
 
     // Non-round (fails roundness check)
     let non_round = Star {
         roundness1: 0.5,
         ..star
     };
-    assert!(!non_round.is_usable(10.0, 0.5, 0.7, 0.3));
+    assert!(!non_round.passes_quality_filters(10.0, 0.5, 0.7, 0.3));
 }
 
 #[test]

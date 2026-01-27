@@ -361,7 +361,7 @@ fn test_registration_result_quality() {
 fn test_registration_large_rotation() {
     let ref_stars = generate_star_grid(5, 5, 100.0, (250.0, 250.0));
     // 30 degree rotation around image center
-    let rotation = TransformMatrix::from_rotation_around(PI / 6.0, 300.0, 300.0);
+    let rotation = TransformMatrix::rotation_around(300.0, 300.0, PI / 6.0);
     let target_stars = transform_stars(&ref_stars, &rotation);
 
     let result = register_stars(&ref_stars, &target_stars, TransformType::Euclidean).unwrap();

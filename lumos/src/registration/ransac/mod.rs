@@ -855,7 +855,7 @@ pub(crate) fn estimate_homography(
     let h = solve_homogeneous_9x9(&ata)?;
 
     // Denormalize: H = T_target^-1 * H_norm * T_ref
-    let h_norm = TransformMatrix::from_matrix(h, TransformType::Homography);
+    let h_norm = TransformMatrix::matrix(h, TransformType::Homography);
     let tar_t_inv = tar_t.inverse(); // Normalization transforms are always invertible
 
     let h_denorm = tar_t_inv.compose(&h_norm).compose(&ref_t);
@@ -871,7 +871,7 @@ pub(crate) fn estimate_homography(
         *d /= scale;
     }
 
-    let result = TransformMatrix::from_matrix(data, TransformType::Homography);
+    let result = TransformMatrix::matrix(data, TransformType::Homography);
 
     if result.is_valid() {
         Some(result)
@@ -909,7 +909,7 @@ pub(crate) fn normalize_points(points: &[(f64, f64)]) -> (Vec<(f64, f64)>, Trans
         .collect();
 
     // Transformation matrix: translate then scale
-    let t = TransformMatrix::from_matrix(
+    let t = TransformMatrix::matrix(
         [
             scale,
             0.0,

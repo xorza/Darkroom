@@ -156,10 +156,11 @@ impl Star {
         self.roundness1.abs() <= max_roundness && self.roundness2.abs() <= max_roundness
     }
 
-    /// Check if star is usable for registration.
+    /// Check if star passes quality filters for registration.
     ///
     /// Filters out saturated, elongated, low-SNR stars, cosmic rays, and non-round objects.
-    pub fn is_usable(
+    /// Unlike simple `is_*` predicates, this method combines multiple quality criteria.
+    pub fn passes_quality_filters(
         &self,
         min_snr: f32,
         max_eccentricity: f32,

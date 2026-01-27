@@ -173,7 +173,7 @@ fn benchmark_overlap_estimation(c: &mut Criterion) {
         ),
         (
             "rotation",
-            TransformMatrix::from_rotation_around(0.1, 500.0, 500.0),
+            TransformMatrix::rotation_around(500.0, 500.0, 0.1),
         ),
         (
             "similarity",
