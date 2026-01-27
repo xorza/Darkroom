@@ -3,9 +3,6 @@
 //! This module implements weighted mean integration where each frame
 //! contributes to the final stack proportionally to its quality.
 
-#[cfg(feature = "bench")]
-pub mod bench;
-
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 
