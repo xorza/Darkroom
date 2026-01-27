@@ -124,7 +124,7 @@ Existing: `examples/full_pipeline.rs` (calibration + registration + stacking)
 
 ### Example 7: Plate Solving (`examples/plate_solve.rs`)
 
-- [ ] Create example showing astrometry workflow:
+- [x] Create example showing astrometry workflow:
   - Load image and detect stars
   - Configure `PlateSolver` with approximate coordinates and scale
   - Solve to get WCS
