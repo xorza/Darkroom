@@ -38,13 +38,14 @@ with tests and running verification commands per project conventions.
 
 > **Rule**: Each GPU implementation must show measurable improvement or be documented as not beneficial
 
-### 2.1 GPU FFT for Phase Correlation
-- [ ] Research wgpu FFT implementations or libraries (rustfft alternatives)
-- [ ] Document findings in `src/gpu/NOTES-AI.md`
-- [ ] Implement GPU FFT wrapper if viable library exists
-- [ ] Integrate with phase correlation registration
-- [ ] Benchmark against CPU rustfft implementation
-- [ ] If <10% improvement: document and remove, mark "[SKIPPED]"
+### 2.1 GPU FFT for Phase Correlation [SKIPPED - No viable library]
+- [x] Research wgpu FFT implementations or libraries (rustfft alternatives)
+- [x] Document findings in `src/registration/gpu/NOTES-AI.md`
+- [SKIPPED] Implement GPU FFT wrapper if viable library exists
+- [SKIPPED] Integrate with phase correlation registration
+- [SKIPPED] Benchmark against CPU rustfft implementation
+
+**Research Conclusion**: No viable wgpu FFT library exists (Jan 2026). gpu-fft is pre-release (0.0.2), vkfft-rs has safety concerns and requires vulkano instead of wgpu. RustFFT is highly optimized (beats FFTW) and sufficient for astrophotography sizes. Re-evaluate in 6-12 months.
 
 ### 2.2 GPU Sigma Clipping
 - [ ] Research parallel reduction strategies for sigma clipping
@@ -136,10 +137,10 @@ cargo bench -p lumos --features bench --bench <name> | tee benches/<name>_result
 | Phase | Tasks | Complete | Status |
 |-------|-------|----------|--------|
 | Local Normalization | 5 | 5 | **Complete** |
-| GPU Acceleration | 12 | 0 | Partial (warping done) |
+| GPU Acceleration | 12 | 2 | Partial (warping done, FFT skipped) |
 | Advanced Features | 14 | 0 | Not Started |
 | Quality & Polish | 4 | 0 | Not Started |
-| **Total** | **35** | **5** | **In Progress** |
+| **Total** | **35** | **7** | **In Progress** |
 
 ---
 
