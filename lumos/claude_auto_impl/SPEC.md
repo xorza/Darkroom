@@ -156,11 +156,22 @@ with tests and running verification commands per project conventions.
 - 35 unit tests passing
 
 ### 3.3 Distortion Correction Extensions
-- [ ] Implement radial distortion models (barrel/pincushion)
+- [x] Implement radial distortion models (barrel/pincushion)
 - [ ] Implement tangential distortion correction
 - [ ] Add field curvature correction
 - [ ] Write unit tests for each model
 - [ ] Run verification commands
+
+**Implementation** (2026-01-27): Created `src/registration/distortion/radial.rs` with:
+- `RadialDistortionConfig` - Configuration (k1, k2, k3 coefficients, optical center)
+- `RadialDistortion` - Brown-Conrady model implementation
+  - `distort()` / `undistort()` - Forward and inverse transformations
+  - `estimate()` - Least-squares coefficient estimation from matched points
+  - `rms_error()` - Residual error computation
+  - Newton-Raphson iteration for accurate undistortion
+- Barrel (k1 > 0) and pincushion (k1 < 0) distortion support
+- Up to 3 radial coefficients (r², r⁴, r⁶ terms)
+- 20 unit tests passing
 
 ### 3.4 Astrometric Solution
 - [ ] Research Gaia/UCAC4 catalog formats and access
@@ -207,9 +218,9 @@ cargo bench -p lumos --features bench --bench <name> | tee benches/<name>_result
 |-------|-------|----------|--------|
 | Local Normalization | 5 | 5 | **Complete** |
 | GPU Acceleration | 12 | 12 | **Complete** (warping done, FFT skipped, sigma clip done, star detection done, batch pipeline done + benchmarked) |
-| Advanced Features | 14 | 10 | **In Progress** (Comet stacking complete, session quality done, session-aware normalization done, session-weighted integration done, gradient removal done) |
+| Advanced Features | 14 | 11 | **In Progress** (Comet stacking complete, session quality done, session-aware normalization done, session-weighted integration done, gradient removal done, radial distortion done) |
 | Quality & Polish | 4 | 0 | Not Started |
-| **Total** | **35** | **27** | **In Progress** |
+| **Total** | **35** | **28** | **In Progress** |
 
 ---
 

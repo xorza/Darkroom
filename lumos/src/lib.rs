@@ -102,6 +102,8 @@ pub use registration::{
     QuadrantConsistency,
     // Quality assessment
     QualityMetrics,
+    RadialDistortion,
+    RadialDistortionConfig,
     // RANSAC
     RansacConfig,
     RansacEstimator,

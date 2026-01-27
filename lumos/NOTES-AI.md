@@ -106,16 +106,31 @@ LocalBackgroundMethod // GlobalMap | LocalAnnulus
 ### Registration Key Types
 
 ```rust
-TransformMatrix    // 3x3 homogeneous matrix with apply(), inverse(), compose()
-TransformType      // Translation | Euclidean | Similarity | Affine | Homography
-RegistrationConfig // Builder pattern with validation
-RegistrationResult // { transform, matched_stars, residuals, rms_error, quality_score }
-StarMatch          // { ref_idx, target_idx, votes, confidence }
-KdTree             // 2D k-d tree for k-NN and radius queries
-ThinPlateSpline    // Smooth non-rigid transformation
-DistortionMap      // Grid-based distortion visualization
-GpuWarper          // GPU-accelerated image warping context
+TransformMatrix         // 3x3 homogeneous matrix with apply(), inverse(), compose()
+TransformType           // Translation | Euclidean | Similarity | Affine | Homography
+RegistrationConfig      // Builder pattern with validation
+RegistrationResult      // { transform, matched_stars, residuals, rms_error, quality_score }
+StarMatch               // { ref_idx, target_idx, votes, confidence }
+KdTree                  // 2D k-d tree for k-NN and radius queries
+ThinPlateSpline         // Smooth non-rigid transformation
+DistortionMap           // Grid-based distortion visualization
+RadialDistortion        // Brown-Conrady barrel/pincushion correction
+RadialDistortionConfig  // { k1, k2, k3, center }
+GpuWarper               // GPU-accelerated image warping context
 ```
+
+### Distortion Correction
+
+Two approaches for lens distortion:
+
+1. **RadialDistortion** (parametric): Brown-Conrady model `r' = r(1 + k₁r² + k₂r⁴ + k₃r⁶)`
+   - `distort()` / `undistort()` - Forward/inverse transform
+   - `estimate()` - Estimate coefficients from matched points
+   - Barrel (k1>0), pincushion (k1<0) support
+
+2. **ThinPlateSpline** (non-parametric): For complex non-radial distortion
+   - Fitted from star correspondences
+   - Smooth interpolation minimizing bending energy
 
 ### Registration Pipeline
 

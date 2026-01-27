@@ -1,20 +1,60 @@
-//! Distortion modeling for local field corrections.
+//! Distortion modeling for optical corrections.
 //!
-//! This module provides thin-plate spline (TPS) interpolation for modeling
-//! local distortions in wide-field astronomical images. TPS is superior to
-//! global polynomial models because it can handle non-uniform distortion
-//! patterns common in optical systems.
+//! This module provides both parametric radial distortion models and non-parametric
+//! thin-plate spline (TPS) interpolation for correcting optical distortions in
+//! astronomical images.
 //!
-//! # Thin-Plate Splines
+//! # Distortion Types
 //!
-//! TPS provides a smooth interpolation that minimizes the "bending energy"
-//! of a thin metal plate. The interpolation function has the form:
+//! ## Radial Distortion (Parametric)
 //!
+//! The Brown-Conrady model handles barrel and pincushion distortion:
+//!
+//! ```text
+//! r' = r(1 + k₁r² + k₂r⁴ + k₃r⁶)
+//! ```
+//!
+//! - **Barrel distortion** (k₁ > 0): Edges bow outward, common in wide-angle lenses
+//! - **Pincushion distortion** (k₁ < 0): Edges bow inward, common in telephoto lenses
+//!
+//! Use `RadialDistortion` when:
+//! - Lens distortion coefficients are known (from calibration)
+//! - The distortion pattern is radially symmetric around the optical center
+//! - You need fast forward/inverse transformations
+//!
+//! ## Thin-Plate Spline (Non-Parametric)
+//!
+//! TPS provides smooth interpolation that minimizes "bending energy":
+//!
+//! ```text
 //! f(x,y) = a₀ + a₁x + a₂y + Σᵢ wᵢ U(||(x,y) - (xᵢ,yᵢ)||)
+//! ```
 //!
 //! where U(r) = r² log(r) is the TPS radial basis function.
 //!
-//! # Usage
+//! Use `ThinPlateSpline` when:
+//! - Distortion pattern is non-radial or non-uniform
+//! - You have matched star pairs but no calibration data
+//! - Complex field distortions from multiple optical elements
+//!
+//! # Usage Examples
+//!
+//! ## Radial Distortion
+//!
+//! ```ignore
+//! use lumos::registration::distortion::{RadialDistortion, RadialDistortionConfig};
+//!
+//! // Create model with known coefficients
+//! let model = RadialDistortion::barrel(0.0001, (512.0, 384.0));
+//!
+//! // Correct a point (remove distortion)
+//! let (x_u, y_u) = model.undistort(x_distorted, y_distorted);
+//!
+//! // Or estimate coefficients from star matches
+//! let model = RadialDistortion::estimate(&undistorted, &distorted, None, 1)?;
+//! ```
+//!
+//! ## Thin-Plate Spline
 //!
 //! ```ignore
 //! use lumos::registration::distortion::{ThinPlateSpline, TpsConfig};
@@ -30,8 +70,12 @@
 //! let (tx, ty) = tps.transform(150.0, 125.0);
 //! ```
 
+mod radial;
+
 #[cfg(test)]
 mod tests;
+
+pub use radial::{RadialDistortion, RadialDistortionConfig};
 
 /// Configuration for thin-plate spline fitting.
 #[derive(Debug, Clone)]

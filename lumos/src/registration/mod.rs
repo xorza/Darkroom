@@ -109,7 +109,9 @@ pub use types::{
 pub use gpu::GpuWarper;
 
 // Configuration types
-pub use distortion::{DistortionMap, ThinPlateSpline, TpsConfig};
+pub use distortion::{
+    DistortionMap, RadialDistortion, RadialDistortionConfig, ThinPlateSpline, TpsConfig,
+};
 pub use interpolation::{InterpolationMethod, WarpConfig, warp_image};
 pub use phase_correlation::{
     FullPhaseCorrelator, FullPhaseResult, LogPolarCorrelator, LogPolarResult,
