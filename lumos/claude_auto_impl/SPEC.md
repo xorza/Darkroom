@@ -200,11 +200,55 @@ with tests and running verification commands per project conventions.
 - 20 unit tests passing
 
 ### 3.4 Astrometric Solution
-- [ ] Research Gaia/UCAC4 catalog formats and access
-- [ ] Implement catalog star matching algorithm
-- [ ] Compute plate solution (WCS coordinates)
-- [ ] Write integration tests
-- [ ] Run verification commands
+- [x] Research Gaia/UCAC4 catalog formats and access
+- [x] Implement catalog star matching algorithm
+- [x] Compute plate solution (WCS coordinates)
+- [x] Write integration tests
+- [x] Run verification commands
+
+**Research Summary** (2026-01-27): Documented in `src/registration/astrometry/NOTES-AI.md`:
+- **Gaia DR3**: Primary catalog via VizieR/TAP APIs, 1.8B+ sources, sub-mas accuracy
+- **UCAC4**: Offline alternative, 113M sources, 900 binary zone files
+- **Plate solving**: Quad geometric hashing (Astrometry.net/ASTAP approach)
+- **WCS format**: CRPIX, CRVAL, CD matrix, optional SIP distortion
+- **Integration**: Reuse existing KdTree, RANSAC, TransformMatrix
+
+**Implementation** (2026-01-27): Created `src/registration/astrometry/` module with:
+- `wcs.rs`: WCS (World Coordinate System) implementation
+  - `Wcs` - Astrometric solution with CRPIX, CRVAL, CD matrix
+  - `WcsBuilder` - Fluent builder for WCS construction
+  - `PixelSkyMatch` - Type alias for pixel<->sky coordinate pairs
+  - Gnomonic (tangent plane) projection for pixel<->sky transforms
+  - `from_scale_rotation()` - Convenience constructor
+  - Field of view, rotation, mirroring computations
+  - RMS residual calculation for solution quality
+- `catalog.rs`: Star catalog access
+  - `CatalogStar` - Star entry with RA, Dec, magnitude, optional ID
+  - `CatalogSource` - Enum for catalog sources (GaiaVizier, Preloaded)
+  - `CatalogError` - Error type for catalog operations
+  - VizieR cone search API integration via ureq HTTP client
+  - VOTable XML parsing for Gaia DR3 response format
+  - `angular_separation()` - Vincenty formula for accurate sky distances
+- `quad_hash.rs`: Quad-based geometric hashing
+  - `QuadHash` - 4-star pattern with scale/rotation-invariant hash code
+  - `QuadHasher` - Builder for quad formation and matching
+  - Uses existing `KdTree` for nearest neighbor queries
+  - Hash code: normalized positions of C,D stars in A-B coordinate system
+  - Linear quad matching (production would use 4D k-d tree)
+  - Vote-based star correspondence from quad matches
+- `solver.rs`: Plate solver
+  - `PlateSolver` - Main solver interface
+  - `PlateSolverConfig` - Configuration (catalog, tolerances, limits)
+  - `PlateSolution` - Result with WCS, matches, RMS error
+  - `SolveError` - Comprehensive error enum
+  - Uses RANSAC for robust transformation estimation
+  - Converts between pixel and sky coordinates via gnomonic projection
+- `tests.rs`: Integration tests
+  - WCS roundtrip tests at various positions
+  - Quad hash consistency and transform invariance tests
+  - Catalog filtering tests
+  - Solver error handling tests
+- 45 unit tests + 9 integration tests passing
 
 ---
 

@@ -59,6 +59,7 @@
 //!
 //! See `IMPLEMENTATION_PLAN.md` for detailed algorithm documentation.
 
+pub(crate) mod astrometry;
 pub(crate) mod constants;
 pub(crate) mod distortion;
 pub(crate) mod gpu;
@@ -128,3 +129,9 @@ pub use quality::{
 
 // Triangle matching
 pub use triangle::{TriangleMatchConfig, match_triangles};
+
+// Astrometry (plate solving)
+pub use astrometry::{
+    CatalogError, CatalogSource, CatalogStar, PixelSkyMatch, PlateSolution, PlateSolver,
+    PlateSolverConfig, QuadHash, QuadHasher, SolveError, Wcs, WcsBuilder,
+};

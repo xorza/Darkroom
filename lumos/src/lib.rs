@@ -84,6 +84,10 @@ pub use star_detection::{
 // ============================================================================
 
 pub use registration::{
+    // Astrometry (plate solving)
+    CatalogError,
+    CatalogSource,
+    CatalogStar,
     // Distortion correction
     DistortionMap,
     FieldCurvature,
@@ -101,6 +105,12 @@ pub use registration::{
     PhaseCorrelationConfig,
     // Phase correlation
     PhaseCorrelator,
+    PixelSkyMatch,
+    PlateSolution,
+    PlateSolver,
+    PlateSolverConfig,
+    QuadHash,
+    QuadHasher,
     QuadrantConsistency,
     // Quality assessment
     QualityMetrics,
@@ -119,6 +129,7 @@ pub use registration::{
     // High-level API
     Registrator,
     ResidualStats,
+    SolveError,
     StarMatch,
     TangentialDistortion,
     TangentialDistortionConfig,
@@ -129,6 +140,8 @@ pub use registration::{
     // Triangle matching
     TriangleMatchConfig,
     WarpConfig,
+    Wcs,
+    WcsBuilder,
     check_quadrant_consistency,
     estimate_overlap,
     match_triangles,
