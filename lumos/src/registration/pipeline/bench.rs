@@ -146,7 +146,7 @@ fn benchmark_config_variations(c: &mut Criterion) {
         group.bench_function(BenchmarkId::new("ransac_iters", iterations), |b| {
             b.iter(|| {
                 let result =
-                    registrator.register_stars(black_box(&ref_stars), black_box(&target_stars));
+                    registrator.register_positions(black_box(&ref_stars), black_box(&target_stars));
                 black_box(result)
             })
         });

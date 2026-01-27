@@ -38,7 +38,7 @@ fn test_outlier_rejection_spurious_stars() {
 
     let registrator = Registrator::new(config);
     let result = registrator
-        .register_stars(&ref_stars, &target_with_spurious)
+        .register_positions(&ref_stars, &target_with_spurious)
         .expect("Registration should succeed despite spurious stars");
 
     let (recovered_dx, recovered_dy) = result.transform.translation_components();
@@ -83,7 +83,7 @@ fn test_outlier_rejection_missing_stars() {
 
     let registrator = Registrator::new(config);
     let result = registrator
-        .register_stars(&ref_stars, &target_with_missing)
+        .register_positions(&ref_stars, &target_with_missing)
         .expect("Registration should succeed despite missing stars");
 
     let (recovered_dx, recovered_dy) = result.transform.translation_components();
@@ -124,7 +124,7 @@ fn test_outlier_rejection_combined() {
 
     let registrator = Registrator::new(config);
     let result = registrator
-        .register_stars(&ref_stars, &target_modified)
+        .register_positions(&ref_stars, &target_modified)
         .expect("Registration should succeed despite combined outliers");
 
     let (recovered_dx, recovered_dy) = result.transform.translation_components();
@@ -165,7 +165,7 @@ fn test_outlier_rejection_20_percent_spurious() {
 
     let registrator = Registrator::new(config);
     let result = registrator
-        .register_stars(&ref_stars, &target_with_spurious)
+        .register_positions(&ref_stars, &target_with_spurious)
         .expect("Registration should succeed with 20% spurious stars");
 
     // Verify by applying transform
@@ -220,7 +220,7 @@ fn test_partial_overlap_75_percent() {
 
     let registrator = Registrator::new(config);
     let result = registrator
-        .register_stars(&ref_in_overlap, &target_stars)
+        .register_positions(&ref_in_overlap, &target_stars)
         .expect("Registration should succeed with 75% overlap");
 
     let (recovered_dx, recovered_dy) = result.transform.translation_components();
@@ -272,7 +272,7 @@ fn test_partial_overlap_50_percent() {
 
     let registrator = Registrator::new(config);
     let result = registrator
-        .register_stars(&ref_in_overlap, &target_stars)
+        .register_positions(&ref_in_overlap, &target_stars)
         .expect("Registration should succeed with 50% overlap");
 
     let (recovered_dx, recovered_dy) = result.transform.translation_components();
@@ -318,7 +318,7 @@ fn test_partial_overlap_diagonal() {
 
     let registrator = Registrator::new(config);
     let result = registrator
-        .register_stars(&ref_in_overlap, &target_stars)
+        .register_positions(&ref_in_overlap, &target_stars)
         .expect("Registration should succeed with diagonal overlap");
 
     let (recovered_dx, recovered_dy) = result.transform.translation_components();
@@ -359,7 +359,7 @@ fn test_subpixel_translation_quarter_pixel() {
 
     let registrator = Registrator::new(config);
     let result = registrator
-        .register_stars(&ref_stars, &target_stars)
+        .register_positions(&ref_stars, &target_stars)
         .expect("Registration should succeed");
 
     let (recovered_dx, recovered_dy) = result.transform.translation_components();
@@ -398,7 +398,7 @@ fn test_subpixel_translation_half_pixel() {
 
     let registrator = Registrator::new(config);
     let result = registrator
-        .register_stars(&ref_stars, &target_stars)
+        .register_positions(&ref_stars, &target_stars)
         .expect("Registration should succeed");
 
     let (recovered_dx, recovered_dy) = result.transform.translation_components();
@@ -435,7 +435,7 @@ fn test_subpixel_rotation() {
 
     let registrator = Registrator::new(config);
     let result = registrator
-        .register_stars(&ref_stars, &target_stars)
+        .register_positions(&ref_stars, &target_stars)
         .expect("Registration should succeed");
 
     let recovered_angle = result.transform.rotation_angle();
@@ -468,7 +468,7 @@ fn test_subpixel_scale() {
 
     let registrator = Registrator::new(config);
     let result = registrator
-        .register_stars(&ref_stars, &target_stars)
+        .register_positions(&ref_stars, &target_stars)
         .expect("Registration should succeed");
 
     let recovered_scale = result.transform.scale_factor();
@@ -507,7 +507,7 @@ fn test_minimum_stars_translation() {
 
     let registrator = Registrator::new(config);
     let result = registrator
-        .register_stars(&ref_stars, &target_stars)
+        .register_positions(&ref_stars, &target_stars)
         .expect("Registration should succeed with 6 stars");
 
     let (recovered_dx, recovered_dy) = result.transform.translation_components();
@@ -547,7 +547,7 @@ fn test_minimum_stars_similarity() {
 
     let registrator = Registrator::new(config);
     let result = registrator
-        .register_stars(&ref_stars, &target_stars)
+        .register_positions(&ref_stars, &target_stars)
         .expect("Registration should succeed with 8 stars");
 
     // Verify transform accuracy
@@ -578,7 +578,7 @@ fn test_insufficient_stars_fails() {
         .build();
 
     let registrator = Registrator::new(config);
-    let result = registrator.register_stars(&ref_stars, &target_stars);
+    let result = registrator.register_positions(&ref_stars, &target_stars);
 
     assert!(
         result.is_err(),
@@ -616,7 +616,7 @@ fn test_stress_transform_noise_outliers() {
 
     let registrator = Registrator::new(config);
     let result = registrator
-        .register_stars(&ref_stars, &target_modified)
+        .register_positions(&ref_stars, &target_modified)
         .expect("Registration should succeed under stress conditions");
 
     // Verify rotation
@@ -693,7 +693,7 @@ fn test_stress_partial_overlap_with_noise() {
 
     let registrator = Registrator::new(config);
     let result = registrator
-        .register_stars(&ref_in_overlap, &target_noisy)
+        .register_positions(&ref_in_overlap, &target_noisy)
         .expect("Registration should succeed with partial overlap and noise");
 
     let recovered_angle = result.transform.rotation_angle();
@@ -726,7 +726,7 @@ fn test_stress_dense_field_large_transform() {
 
     let registrator = Registrator::new(config);
     let result = registrator
-        .register_stars(&ref_stars, &target_stars)
+        .register_positions(&ref_stars, &target_stars)
         .expect("Registration should succeed with dense field");
 
     let recovered_scale = result.transform.scale_factor();
@@ -774,7 +774,7 @@ fn test_large_rotation_45_degrees() {
 
     let registrator = Registrator::new(config);
     let result = registrator
-        .register_stars(&ref_stars, &target_stars)
+        .register_positions(&ref_stars, &target_stars)
         .expect("Registration should succeed with 45° rotation");
 
     let recovered_angle = result.transform.rotation_angle();
@@ -826,7 +826,7 @@ fn test_large_rotation_90_degrees() {
 
     let registrator = Registrator::new(config);
     let result = registrator
-        .register_stars(&ref_stars, &target_stars)
+        .register_positions(&ref_stars, &target_stars)
         .expect("Registration should succeed with 90° rotation");
 
     let recovered_angle = result.transform.rotation_angle();
@@ -875,7 +875,7 @@ fn test_large_rotation_negative_45_degrees() {
 
     let registrator = Registrator::new(config);
     let result = registrator
-        .register_stars(&ref_stars, &target_stars)
+        .register_positions(&ref_stars, &target_stars)
         .expect("Registration should succeed with -45° rotation");
 
     let recovered_angle = result.transform.rotation_angle();
@@ -914,7 +914,7 @@ fn test_extreme_scale_2x() {
 
     let registrator = Registrator::new(config);
     let result = registrator
-        .register_stars(&ref_stars, &target_stars)
+        .register_positions(&ref_stars, &target_stars)
         .expect("Registration should succeed with 2x scale");
 
     let recovered_scale = result.transform.scale_factor();
@@ -963,7 +963,7 @@ fn test_extreme_scale_half() {
 
     let registrator = Registrator::new(config);
     let result = registrator
-        .register_stars(&ref_stars, &target_stars)
+        .register_positions(&ref_stars, &target_stars)
         .expect("Registration should succeed with 0.5x scale");
 
     let recovered_scale = result.transform.scale_factor();
@@ -1015,7 +1015,7 @@ fn test_extreme_scale_with_rotation() {
 
     let registrator = Registrator::new(config);
     let result = registrator
-        .register_stars(&ref_stars, &target_stars)
+        .register_positions(&ref_stars, &target_stars)
         .expect("Registration should succeed with 1.5x scale + 30° rotation");
 
     let recovered_scale = result.transform.scale_factor();
@@ -1078,7 +1078,7 @@ fn test_affine_with_outliers() {
 
     let registrator = Registrator::new(config);
     let result = registrator
-        .register_stars(&ref_stars, &target_with_spurious)
+        .register_positions(&ref_stars, &target_with_spurious)
         .expect("Affine registration should succeed with 15% spurious stars");
 
     assert_eq!(result.transform.transform_type, TransformType::Affine);
@@ -1126,7 +1126,7 @@ fn test_affine_with_noise_and_missing() {
 
     let registrator = Registrator::new(config);
     let result = registrator
-        .register_stars(&ref_stars, &target_modified)
+        .register_positions(&ref_stars, &target_modified)
         .expect("Affine registration should succeed with noise and missing stars");
 
     assert_eq!(result.transform.transform_type, TransformType::Affine);
@@ -1182,7 +1182,7 @@ fn test_homography_with_outliers() {
 
     let registrator = Registrator::new(config);
     let result = registrator
-        .register_stars(&ref_stars, &target_with_spurious)
+        .register_positions(&ref_stars, &target_with_spurious)
         .expect("Homography registration should succeed with outliers");
 
     assert_eq!(result.transform.transform_type, TransformType::Homography);
@@ -1245,7 +1245,7 @@ fn test_homography_with_noise_and_partial_overlap() {
 
     let registrator = Registrator::new(config);
     let result = registrator
-        .register_stars(&ref_in_overlap, &target_noisy)
+        .register_positions(&ref_in_overlap, &target_noisy)
         .expect("Homography should succeed with noise and partial overlap");
 
     assert_eq!(result.transform.transform_type, TransformType::Homography);

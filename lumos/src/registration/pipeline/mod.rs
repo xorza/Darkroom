@@ -23,6 +23,7 @@ use crate::registration::{
         RegistrationConfig, RegistrationError, RegistrationResult, TransformMatrix, TransformType,
     },
 };
+use crate::star_detection::Star;
 
 #[cfg(test)]
 mod tests;
@@ -49,50 +50,96 @@ impl Registrator {
         Self { config }
     }
 
-    /// Register target to reference using pre-detected star positions.
+    /// Register target to reference using pre-detected stars.
     ///
-    /// This is the main entry point when star positions are already known.
+    /// This is the main entry point when stars have been detected.
+    /// Stars should be sorted by brightness (flux) in descending order.
     ///
     /// # Arguments
     ///
-    /// * `ref_stars` - Star positions (x, y) in the reference image
-    /// * `target_stars` - Star positions (x, y) in the target image
+    /// * `ref_stars` - Detected stars in the reference image (sorted by flux, brightest first)
+    /// * `target_stars` - Detected stars in the target image (sorted by flux, brightest first)
     ///
     /// # Returns
     ///
     /// Registration result containing the transformation and quality metrics.
     pub fn register_stars(
         &self,
-        ref_stars: &[(f64, f64)],
-        target_stars: &[(f64, f64)],
+        ref_stars: &[Star],
+        target_stars: &[Star],
+    ) -> Result<RegistrationResult, RegistrationError> {
+        // Convert to (x, y) tuples and delegate to position-based method
+        let ref_positions: Vec<(f64, f64)> =
+            ref_stars.iter().map(|s| (s.x as f64, s.y as f64)).collect();
+        let target_positions: Vec<(f64, f64)> = target_stars
+            .iter()
+            .map(|s| (s.x as f64, s.y as f64))
+            .collect();
+
+        self.register_positions(&ref_positions, &target_positions)
+    }
+
+    /// Register target to reference using star positions as (x, y) tuples.
+    ///
+    /// This is useful when you have pre-extracted positions or for testing.
+    /// Positions should be sorted by brightness (brightest first) for best results.
+    ///
+    /// # Arguments
+    ///
+    /// * `ref_positions` - Star positions (x, y) in the reference image
+    /// * `target_positions` - Star positions (x, y) in the target image
+    ///
+    /// # Returns
+    ///
+    /// Registration result containing the transformation and quality metrics.
+    pub fn register_positions(
+        &self,
+        ref_positions: &[(f64, f64)],
+        target_positions: &[(f64, f64)],
     ) -> Result<RegistrationResult, RegistrationError> {
         let start = Instant::now();
 
         // Validate input
-        if ref_stars.len() < self.config.min_stars_for_matching {
+        if ref_positions.len() < self.config.min_stars_for_matching {
             return Err(RegistrationError::InsufficientStars {
-                found: ref_stars.len(),
+                found: ref_positions.len(),
                 required: self.config.min_stars_for_matching,
             });
         }
-        if target_stars.len() < self.config.min_stars_for_matching {
+        if target_positions.len() < self.config.min_stars_for_matching {
             return Err(RegistrationError::InsufficientStars {
-                found: target_stars.len(),
+                found: target_positions.len(),
                 required: self.config.min_stars_for_matching,
             });
         }
 
-        // Limit stars to brightest N (assuming input is sorted by brightness)
-        let ref_stars: Vec<_> = ref_stars
-            .iter()
-            .take(self.config.max_stars_for_matching)
-            .copied()
-            .collect();
-        let target_stars: Vec<_> = target_stars
-            .iter()
-            .take(self.config.max_stars_for_matching)
-            .copied()
-            .collect();
+        // Select stars for matching - either spatially distributed or just brightest N
+        let ref_stars = if self.config.use_spatial_distribution {
+            select_spatially_distributed(
+                ref_positions,
+                self.config.max_stars_for_matching,
+                self.config.spatial_grid_size,
+            )
+        } else {
+            ref_positions
+                .iter()
+                .take(self.config.max_stars_for_matching)
+                .copied()
+                .collect()
+        };
+        let target_stars = if self.config.use_spatial_distribution {
+            select_spatially_distributed(
+                target_positions,
+                self.config.max_stars_for_matching,
+                self.config.spatial_grid_size,
+            )
+        } else {
+            target_positions
+                .iter()
+                .take(self.config.max_stars_for_matching)
+                .copied()
+                .collect()
+        };
 
         // Step 1: Triangle matching to find star correspondences
         let triangle_config = TriangleMatchConfig {
@@ -210,7 +257,7 @@ impl Registrator {
         };
 
         // Now do star-based registration
-        let mut result = self.register_stars(ref_stars, &adjusted_target_stars)?;
+        let mut result = self.register_positions(ref_stars, &adjusted_target_stars)?;
 
         // If we used phase correlation, compose the transforms
         if let Some(pr) = phase_result {
@@ -229,7 +276,10 @@ impl Registrator {
     }
 }
 
-/// Convenience function to register two star lists.
+/// Convenience function to register two star position lists.
+///
+/// This is a shorthand for creating a Registrator with default settings.
+/// For more control, use `Registrator::new()` with a custom config.
 pub fn register_stars(
     ref_stars: &[(f64, f64)],
     target_stars: &[(f64, f64)],
@@ -246,7 +296,7 @@ pub fn register_stars(
         ..config
     };
 
-    Registrator::new(config).register_stars(ref_stars, target_stars)
+    Registrator::new(config).register_positions(ref_stars, target_stars)
 }
 
 /// Warp target image to align with reference.
@@ -308,7 +358,7 @@ pub fn quick_register(
         .min_matched_stars(4)
         .build();
 
-    let result = Registrator::new(config).register_stars(ref_stars, target_stars)?;
+    let result = Registrator::new(config).register_positions(ref_stars, target_stars)?;
     Ok(result.transform)
 }
 
@@ -393,7 +443,8 @@ impl MultiScaleRegistrator {
 
         if num_levels == 1 {
             // Single level - just do normal registration
-            return Registrator::new(self.config.clone()).register_stars(ref_stars, target_stars);
+            return Registrator::new(self.config.clone())
+                .register_positions(ref_stars, target_stars);
         }
 
         // Start from coarsest level and work down
@@ -434,7 +485,7 @@ impl MultiScaleRegistrator {
             };
 
             let registrator = Registrator::new(level_config);
-            match registrator.register_stars(&scaled_ref, &adjusted_target) {
+            match registrator.register_positions(&scaled_ref, &adjusted_target) {
                 Ok(result) => {
                     // Scale the transform back to full resolution
                     let level_transform = scale_transform(&result.transform, scale);
@@ -559,7 +610,7 @@ impl MultiScaleRegistrator {
             };
 
             let registrator = Registrator::new(level_config);
-            if let Ok(result) = registrator.register_stars(&scaled_ref, &adjusted_target) {
+            if let Ok(result) = registrator.register_positions(&scaled_ref, &adjusted_target) {
                 let level_transform = scale_transform(&result.transform, scale);
                 current_transform = level_transform.compose(&current_transform);
             }
@@ -575,7 +626,7 @@ impl MultiScaleRegistrator {
             .collect();
 
         let registrator = Registrator::new(self.config.clone());
-        let mut result = registrator.register_stars(ref_stars, &adjusted_target)?;
+        let mut result = registrator.register_positions(ref_stars, &adjusted_target)?;
 
         // Compose final transform
         result.transform = result.transform.compose(&current_transform);
@@ -678,4 +729,80 @@ fn downsample_image(
     }
 
     result
+}
+
+/// Select stars with good spatial distribution across the image.
+///
+/// Instead of just taking the brightest N stars (which may cluster in one region),
+/// this function divides the image into a grid and selects the brightest stars
+/// from each cell in round-robin fashion, ensuring coverage across the entire field.
+///
+/// # Arguments
+///
+/// * `stars` - Star positions (x, y), assumed sorted by brightness (brightest first)
+/// * `max_stars` - Maximum number of stars to select
+/// * `grid_size` - Number of grid cells in each dimension (grid_size × grid_size)
+///
+/// # Returns
+///
+/// Selected star positions with good spatial coverage.
+fn select_spatially_distributed(
+    stars: &[(f64, f64)],
+    max_stars: usize,
+    grid_size: usize,
+) -> Vec<(f64, f64)> {
+    if stars.is_empty() || max_stars == 0 {
+        return Vec::new();
+    }
+
+    // Find bounding box of all stars
+    let (min_x, max_x, min_y, max_y) = stars.iter().fold(
+        (f64::MAX, f64::MIN, f64::MAX, f64::MIN),
+        |(min_x, max_x, min_y, max_y), &(x, y)| {
+            (min_x.min(x), max_x.max(x), min_y.min(y), max_y.max(y))
+        },
+    );
+
+    // Add small margin to avoid edge issues
+    let margin = 1.0;
+    let width = (max_x - min_x + 2.0 * margin).max(1.0);
+    let height = (max_y - min_y + 2.0 * margin).max(1.0);
+    let origin_x = min_x - margin;
+    let origin_y = min_y - margin;
+
+    let cell_width = width / grid_size as f64;
+    let cell_height = height / grid_size as f64;
+
+    // Group stars by grid cell
+    let num_cells = grid_size * grid_size;
+    let mut cells: Vec<Vec<(f64, f64)>> = vec![Vec::new(); num_cells];
+
+    for &(x, y) in stars {
+        let cx = ((x - origin_x) / cell_width) as usize;
+        let cy = ((y - origin_y) / cell_height) as usize;
+        let cx = cx.min(grid_size - 1);
+        let cy = cy.min(grid_size - 1);
+        cells[cy * grid_size + cx].push((x, y));
+    }
+
+    // Round-robin selection: take one star from each non-empty cell in turn
+    // Stars in each cell are already in brightness order (from input sorting)
+    let mut selected = Vec::with_capacity(max_stars);
+    let mut round = 0;
+
+    while selected.len() < max_stars {
+        let mut added_any = false;
+        for cell in &cells {
+            if round < cell.len() && selected.len() < max_stars {
+                selected.push(cell[round]);
+                added_any = true;
+            }
+        }
+        if !added_any {
+            break; // No more stars available
+        }
+        round += 1;
+    }
+
+    selected
 }

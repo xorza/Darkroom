@@ -393,6 +393,17 @@ pub struct RegistrationConfig {
     pub min_matched_stars: usize,
     /// Maximum acceptable RMS error in pixels.
     pub max_residual_pixels: f64,
+
+    /// Use spatial distribution when selecting stars for matching.
+    /// When enabled, stars are selected from a grid across the image to ensure
+    /// coverage of all regions, rather than just taking the brightest N stars
+    /// which may cluster in one area. This improves registration accuracy for
+    /// images with lens distortion.
+    pub use_spatial_distribution: bool,
+
+    /// Grid size for spatial distribution (NxN cells).
+    /// Only used when `use_spatial_distribution` is true.
+    pub spatial_grid_size: usize,
 }
 
 impl Default for RegistrationConfig {
@@ -410,6 +421,8 @@ impl Default for RegistrationConfig {
             max_refinement_iterations: 10,
             min_matched_stars: 6,
             max_residual_pixels: 1.0,
+            use_spatial_distribution: true,
+            spatial_grid_size: 8,
         }
     }
 }
@@ -453,6 +466,10 @@ impl RegistrationConfig {
         assert!(
             self.max_residual_pixels > 0.0,
             "max_residual must be positive"
+        );
+        assert!(
+            self.spatial_grid_size >= 2,
+            "spatial_grid_size must be at least 2"
         );
     }
 }
@@ -558,6 +575,21 @@ impl RegistrationConfigBuilder {
     /// Enable/disable centroid refinement.
     pub fn refine_with_centroids(mut self, enable: bool) -> Self {
         self.config.refine_with_centroids = enable;
+        self
+    }
+
+    /// Enable/disable spatial distribution for star selection.
+    /// When enabled, stars are selected from a grid across the image to ensure
+    /// coverage of all regions. This is enabled by default.
+    pub fn use_spatial_distribution(mut self, enable: bool) -> Self {
+        self.config.use_spatial_distribution = enable;
+        self
+    }
+
+    /// Set the grid size for spatial distribution (NxN cells).
+    /// Default is 8 (64 cells). Only used when spatial distribution is enabled.
+    pub fn spatial_grid_size(mut self, size: usize) -> Self {
+        self.config.spatial_grid_size = size;
         self
     }
 

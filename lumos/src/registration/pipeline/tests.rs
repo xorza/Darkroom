@@ -1173,7 +1173,7 @@ fn test_integration_minimum_stars() {
 
     let registrator = Registrator::new(config);
     let result = registrator
-        .register_stars(&ref_positions, &target_positions)
+        .register_positions(&ref_positions, &target_positions)
         .expect("Minimum stars registration should succeed");
 
     let (est_dx, est_dy) = result.transform.translation_components();

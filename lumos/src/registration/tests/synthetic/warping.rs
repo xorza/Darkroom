@@ -523,7 +523,7 @@ fn test_warp_with_detected_transform() {
 
     let registrator = Registrator::new(reg_config);
     let result = registrator
-        .register_stars(&ref_stars, &target_stars)
+        .register_positions(&ref_stars, &target_stars)
         .expect("Registration should succeed");
 
     // Use warp_to_reference to align target back to reference frame

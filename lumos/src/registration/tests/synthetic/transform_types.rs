@@ -33,7 +33,7 @@ fn test_registration_translation_only() {
 
     let registrator = Registrator::new(config);
     let result = registrator
-        .register_stars(&ref_stars, &target_stars)
+        .register_positions(&ref_stars, &target_stars)
         .expect("Registration should succeed");
 
     // Extract recovered translation
@@ -99,7 +99,7 @@ fn test_registration_similarity_transform() {
 
     let registrator = Registrator::new(config);
     let result = registrator
-        .register_stars(&ref_stars, &target_stars)
+        .register_positions(&ref_stars, &target_stars)
         .expect("Registration should succeed");
 
     // Validate by applying the recovered transform to reference stars
@@ -183,7 +183,7 @@ fn test_registration_with_noise() {
 
     let registrator = Registrator::new(config);
     let result = registrator
-        .register_stars(&ref_stars, &target_stars)
+        .register_positions(&ref_stars, &target_stars)
         .expect("Registration should succeed");
 
     // Extract recovered translation
@@ -236,7 +236,7 @@ fn test_registration_large_translation() {
 
     let registrator = Registrator::new(config);
     let result = registrator
-        .register_stars(&ref_stars, &target_stars)
+        .register_positions(&ref_stars, &target_stars)
         .expect("Registration should succeed");
 
     let (recovered_dx, recovered_dy) = result.transform.translation_components();
@@ -269,7 +269,7 @@ fn test_registration_transform_display() {
 
     let registrator = Registrator::new(config);
     let result = registrator
-        .register_stars(&ref_stars, &target_stars)
+        .register_positions(&ref_stars, &target_stars)
         .expect("Registration should succeed");
 
     // Test that Display works
@@ -313,7 +313,7 @@ fn test_registration_euclidean_rotation_only() {
 
     let registrator = Registrator::new(config);
     let result = registrator
-        .register_stars(&ref_stars, &target_stars)
+        .register_positions(&ref_stars, &target_stars)
         .expect("Registration should succeed");
 
     assert_eq!(result.transform.transform_type, TransformType::Euclidean);
@@ -366,7 +366,7 @@ fn test_registration_euclidean_translation_and_rotation() {
 
     let registrator = Registrator::new(config);
     let result = registrator
-        .register_stars(&ref_stars, &target_stars)
+        .register_positions(&ref_stars, &target_stars)
         .expect("Registration should succeed");
 
     assert_eq!(result.transform.transform_type, TransformType::Euclidean);
@@ -434,7 +434,7 @@ fn test_registration_affine_differential_scale() {
 
     let registrator = Registrator::new(config);
     let result = registrator
-        .register_stars(&ref_stars, &target_stars)
+        .register_positions(&ref_stars, &target_stars)
         .expect("Registration should succeed");
 
     assert_eq!(result.transform.transform_type, TransformType::Affine);
@@ -483,7 +483,7 @@ fn test_registration_affine_with_shear() {
 
     let registrator = Registrator::new(config);
     let result = registrator
-        .register_stars(&ref_stars, &target_stars)
+        .register_positions(&ref_stars, &target_stars)
         .expect("Registration should succeed");
 
     assert_eq!(result.transform.transform_type, TransformType::Affine);
@@ -537,7 +537,7 @@ fn test_registration_affine_rotation_and_differential_scale() {
 
     let registrator = Registrator::new(config);
     let result = registrator
-        .register_stars(&ref_stars, &target_stars)
+        .register_positions(&ref_stars, &target_stars)
         .expect("Registration should succeed");
 
     assert_eq!(result.transform.transform_type, TransformType::Affine);
@@ -606,7 +606,7 @@ fn test_registration_homography_mild_perspective() {
 
     let registrator = Registrator::new(config);
     let result = registrator
-        .register_stars(&ref_stars, &target_stars)
+        .register_positions(&ref_stars, &target_stars)
         .expect("Registration should succeed");
 
     assert_eq!(result.transform.transform_type, TransformType::Homography);
@@ -657,7 +657,7 @@ fn test_registration_homography_with_rotation() {
 
     let registrator = Registrator::new(config);
     let result = registrator
-        .register_stars(&ref_stars, &target_stars)
+        .register_positions(&ref_stars, &target_stars)
         .expect("Registration should succeed");
 
     assert_eq!(result.transform.transform_type, TransformType::Homography);
@@ -724,7 +724,7 @@ fn test_similarity_recovers_from_euclidean_data() {
 
     let registrator = Registrator::new(config);
     let result = registrator
-        .register_stars(&ref_stars, &target_stars)
+        .register_positions(&ref_stars, &target_stars)
         .expect("Registration should succeed");
 
     // Scale should be recovered as ~1.0
@@ -769,7 +769,7 @@ fn test_affine_recovers_from_similarity_data() {
 
     let registrator = Registrator::new(config);
     let result = registrator
-        .register_stars(&ref_stars, &target_stars)
+        .register_positions(&ref_stars, &target_stars)
         .expect("Registration should succeed");
 
     // Validate by applying transform

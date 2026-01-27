@@ -62,61 +62,6 @@ use tracing_subscriber::EnvFilter;
 /// Maximum stars to use for registration.
 const MAX_STARS_FOR_REGISTRATION: usize = 500;
 
-/// Select stars with good spatial distribution across the image.
-///
-/// Instead of just taking the brightest N stars (which may cluster in one region),
-/// this function divides the image into a grid and selects the brightest stars
-/// from each cell, ensuring coverage across the entire field.
-fn select_spatially_distributed_stars(
-    stars: &[Star],
-    width: usize,
-    height: usize,
-    max_stars: usize,
-) -> Vec<(f64, f64)> {
-    // Use a grid of cells (e.g., 8x8 = 64 cells)
-    let grid_size = 8usize;
-    let cell_width = width as f64 / grid_size as f64;
-    let cell_height = height as f64 / grid_size as f64;
-
-    // Group stars by grid cell
-    let mut cells: Vec<Vec<&Star>> = vec![Vec::new(); grid_size * grid_size];
-    for star in stars {
-        let cx = ((star.x as f64 / cell_width) as usize).min(grid_size - 1);
-        let cy = ((star.y as f64 / cell_height) as usize).min(grid_size - 1);
-        cells[cy * grid_size + cx].push(star);
-    }
-
-    // Sort each cell by flux (brightest first) - stars should already be sorted
-    // but cells may have mixed them
-    for cell in &mut cells {
-        cell.sort_by(|a, b| {
-            b.flux
-                .partial_cmp(&a.flux)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
-    }
-
-    // Round-robin selection: take one star from each non-empty cell in turn
-    let mut selected = Vec::with_capacity(max_stars);
-    let mut round = 0;
-    while selected.len() < max_stars {
-        let mut added_any = false;
-        for cell in &cells {
-            if round < cell.len() && selected.len() < max_stars {
-                let star = cell[round];
-                selected.push((star.x as f64, star.y as f64));
-                added_any = true;
-            }
-        }
-        if !added_any {
-            break; // No more stars available
-        }
-        round += 1;
-    }
-
-    selected
-}
-
 fn main() {
     init_tracing();
 
@@ -288,9 +233,9 @@ fn calibrate_light_frames(
                     .filter_map(|e| e.ok())
                     .map(|e| e.path())
                     .filter(|p| {
-                        p.extension().map_or(false, |ext| ext == "tiff")
+                        p.extension().is_some_and(|ext| ext == "tiff")
                             && p.file_name()
-                                .map_or(false, |n| n.to_string_lossy().contains("_calibrated"))
+                                .is_some_and(|n| n.to_string_lossy().contains("_calibrated"))
                     })
                     .collect()
             })
@@ -449,17 +394,7 @@ fn register_all_lights(
     let width = ref_image.dimensions().width;
     let height = ref_image.dimensions().height;
 
-    // Select spatially distributed stars for registration
-    // Instead of just brightest N (which may cluster), ensure coverage across image
-    let ref_star_positions =
-        select_spatially_distributed_stars(ref_stars, width, height, MAX_STARS_FOR_REGISTRATION);
-    tracing::info!(
-        "Selected {} spatially distributed reference stars",
-        ref_star_positions.len()
-    );
-
     // Configure registration for high accuracy
-    // Use affine transform to handle lens distortion (shear/skew)
     let reg_config = RegistrationConfig::builder()
         .full_homography() // Affine can model distortions that similarity cannot
         .ransac_iterations(5000) // More iterations for better model
@@ -508,12 +443,8 @@ fn register_all_lights(
             }
         };
 
-        // Select spatially distributed target stars
-        let target_star_positions =
-            select_spatially_distributed_stars(stars, width, height, MAX_STARS_FOR_REGISTRATION);
-
         // Register target to reference
-        match registrator.register_stars(&ref_star_positions, &target_star_positions) {
+        match registrator.register_stars(ref_stars, stars) {
             Ok(result) => {
                 tracing::info!(
                     file = %filename,

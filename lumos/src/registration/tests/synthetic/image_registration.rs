@@ -133,7 +133,7 @@ fn test_image_registration_translation() {
 
     let registrator = Registrator::new(reg_config);
     let result = registrator
-        .register_stars(&ref_stars, &target_stars)
+        .register_positions(&ref_stars, &target_stars)
         .expect("Registration should succeed");
 
     // Verify the recovered translation
@@ -211,7 +211,7 @@ fn test_image_registration_rotation() {
 
     let registrator = Registrator::new(reg_config);
     let result = registrator
-        .register_stars(&ref_stars, &target_stars)
+        .register_positions(&ref_stars, &target_stars)
         .expect("Registration should succeed");
 
     // Verify rotation recovery
@@ -281,7 +281,7 @@ fn test_image_registration_similarity() {
 
     let registrator = Registrator::new(reg_config);
     let result = registrator
-        .register_stars(&ref_stars, &target_stars)
+        .register_positions(&ref_stars, &target_stars)
         .expect("Registration should succeed");
 
     // Verify scale and rotation recovery
@@ -365,7 +365,7 @@ fn test_image_registration_with_noise() {
 
     let registrator = Registrator::new(reg_config);
     let result = registrator
-        .register_stars(&ref_stars, &target_stars)
+        .register_positions(&ref_stars, &target_stars)
         .expect("Registration should succeed");
 
     let (recovered_dx, recovered_dy) = result.transform.translation_components();
@@ -440,7 +440,7 @@ fn test_image_registration_dense_field() {
 
     let registrator = Registrator::new(reg_config);
     let result = registrator
-        .register_stars(&ref_stars, &target_stars)
+        .register_positions(&ref_stars, &target_stars)
         .expect("Registration should succeed");
 
     // Should have many matched stars in a dense field
@@ -503,7 +503,7 @@ fn test_image_registration_large_image() {
 
     let registrator = Registrator::new(reg_config);
     let result = registrator
-        .register_stars(&ref_stars, &target_stars)
+        .register_positions(&ref_stars, &target_stars)
         .expect("Registration should succeed");
 
     let (recovered_dx, recovered_dy) = result.transform.translation_components();
