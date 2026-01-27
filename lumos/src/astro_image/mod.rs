@@ -248,16 +248,49 @@ impl AstroImage {
     }
 
     /// Get pixel value at (x, y) for single-channel images.
-    /// Panics if coordinates are out of bounds.
-    pub fn get_pixel_gray(&self, x: usize, y: usize) -> f32 {
+    ///
+    /// This is a clearer name than `get_pixel_gray` for single-channel access.
+    ///
+    /// # Panics
+    /// Panics (in debug builds) if coordinates are out of bounds or if the image
+    /// has multiple channels.
+    pub fn get_pixel(&self, x: usize, y: usize) -> f32 {
         debug_assert!(x < self.width(), "x coordinate out of bounds");
         debug_assert!(y < self.height(), "y coordinate out of bounds");
         debug_assert!(
             self.is_grayscale(),
-            "Use get_pixel_rgb for multi-channel images"
+            "Use get_pixel_rgb or get_pixel_channel for multi-channel images"
         );
 
         self.pixels()[y * self.width() + x]
+    }
+
+    /// Get pixel value at (x, y) for single-channel images.
+    ///
+    /// # Deprecated
+    /// Use [`get_pixel`](Self::get_pixel) instead for clearer naming.
+    ///
+    /// # Panics
+    /// Panics (in debug builds) if coordinates are out of bounds or if the image
+    /// has multiple channels.
+    #[deprecated(since = "0.2.0", note = "Use `get_pixel` instead")]
+    pub fn get_pixel_gray(&self, x: usize, y: usize) -> f32 {
+        self.get_pixel(x, y)
+    }
+
+    /// Get pixel value at (x, y) for a specific channel.
+    ///
+    /// Works for both single-channel and multi-channel images.
+    ///
+    /// # Panics
+    /// Panics (in debug builds) if coordinates or channel index are out of bounds.
+    pub fn get_pixel_channel(&self, x: usize, y: usize, channel: usize) -> f32 {
+        debug_assert!(x < self.width(), "x coordinate out of bounds");
+        debug_assert!(y < self.height(), "y coordinate out of bounds");
+        debug_assert!(channel < self.channels(), "channel index out of bounds");
+
+        let idx = (y * self.width() + x) * self.channels() + channel;
+        self.pixels()[idx]
     }
 
     /// Get pixel values at (x, y) for multi-channel images.
@@ -513,7 +546,7 @@ mod tests {
         assert_eq!(image.pixels().len(), image.pixel_count());
 
         // Test pixel access
-        let pixel = image.get_pixel_gray(5, 20);
+        let pixel = image.get_pixel(5, 20);
         assert_eq!(pixel, 152.0);
     }
 
@@ -1055,5 +1088,71 @@ mod tests {
 
         // This should panic due to dimension mismatch (channels differ)
         masters.calibrate(&mut light);
+    }
+
+    #[test]
+    fn test_get_pixel() {
+        let image = AstroImage::from_pixels(3, 2, 1, vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
+
+        assert_eq!(image.get_pixel(0, 0), 1.0);
+        assert_eq!(image.get_pixel(1, 0), 2.0);
+        assert_eq!(image.get_pixel(2, 0), 3.0);
+        assert_eq!(image.get_pixel(0, 1), 4.0);
+        assert_eq!(image.get_pixel(1, 1), 5.0);
+        assert_eq!(image.get_pixel(2, 1), 6.0);
+    }
+
+    #[test]
+    fn test_get_pixel_channel_grayscale() {
+        let image = AstroImage::from_pixels(2, 2, 1, vec![1.0, 2.0, 3.0, 4.0]);
+
+        assert_eq!(image.get_pixel_channel(0, 0, 0), 1.0);
+        assert_eq!(image.get_pixel_channel(1, 0, 0), 2.0);
+        assert_eq!(image.get_pixel_channel(0, 1, 0), 3.0);
+        assert_eq!(image.get_pixel_channel(1, 1, 0), 4.0);
+    }
+
+    #[test]
+    fn test_get_pixel_channel_rgb() {
+        let image = AstroImage::from_pixels(
+            2,
+            2,
+            3,
+            vec![
+                1.0, 2.0, 3.0, // (0,0): R=1, G=2, B=3
+                4.0, 5.0, 6.0, // (1,0): R=4, G=5, B=6
+                7.0, 8.0, 9.0, // (0,1): R=7, G=8, B=9
+                10.0, 11.0, 12.0, // (1,1): R=10, G=11, B=12
+            ],
+        );
+
+        // Test pixel (0,0)
+        assert_eq!(image.get_pixel_channel(0, 0, 0), 1.0); // R
+        assert_eq!(image.get_pixel_channel(0, 0, 1), 2.0); // G
+        assert_eq!(image.get_pixel_channel(0, 0, 2), 3.0); // B
+
+        // Test pixel (1,0)
+        assert_eq!(image.get_pixel_channel(1, 0, 0), 4.0); // R
+        assert_eq!(image.get_pixel_channel(1, 0, 1), 5.0); // G
+        assert_eq!(image.get_pixel_channel(1, 0, 2), 6.0); // B
+
+        // Test pixel (0,1)
+        assert_eq!(image.get_pixel_channel(0, 1, 0), 7.0); // R
+        assert_eq!(image.get_pixel_channel(0, 1, 1), 8.0); // G
+        assert_eq!(image.get_pixel_channel(0, 1, 2), 9.0); // B
+
+        // Test pixel (1,1)
+        assert_eq!(image.get_pixel_channel(1, 1, 0), 10.0); // R
+        assert_eq!(image.get_pixel_channel(1, 1, 1), 11.0); // G
+        assert_eq!(image.get_pixel_channel(1, 1, 2), 12.0); // B
+    }
+
+    #[test]
+    #[allow(deprecated)]
+    fn test_get_pixel_gray_deprecated() {
+        // Ensure the deprecated function still works
+        let image = AstroImage::from_pixels(2, 2, 1, vec![1.0, 2.0, 3.0, 4.0]);
+        assert_eq!(image.get_pixel_gray(0, 0), 1.0);
+        assert_eq!(image.get_pixel_gray(1, 1), 4.0);
     }
 }
