@@ -1,8 +1,8 @@
 //! Distortion modeling for optical corrections.
 //!
-//! This module provides parametric distortion models (radial and tangential) and
-//! non-parametric thin-plate spline (TPS) interpolation for correcting optical
-//! distortions in astronomical images.
+//! This module provides parametric distortion models (radial, tangential, and field
+//! curvature) and non-parametric thin-plate spline (TPS) interpolation for correcting
+//! optical distortions in astronomical images.
 //!
 //! # Distortion Types
 //!
@@ -40,6 +40,23 @@
 //! - Distortion pattern is asymmetric
 //! - Often combined with radial distortion for complete lens modeling
 //!
+//! ## Field Curvature (Parametric)
+//!
+//! Field curvature (Petzval curvature) occurs when the focal plane is curved rather
+//! than flat. The model corrects for the radial scaling effect:
+//!
+//! ```text
+//! r' = r × (1 + c₁r² + c₂r⁴)
+//! ```
+//!
+//! - **c₁ > 0**: Outward curvature (magnification increases with radius)
+//! - **c₁ < 0**: Inward curvature (magnification decreases with radius)
+//!
+//! Use `FieldCurvature` when:
+//! - Stars appear defocused at field edges but sharp at center (or vice versa)
+//! - Using fast optical systems with uncorrected Petzval sum
+//! - Combined with radial distortion for complete optical modeling
+//!
 //! ## Thin-Plate Spline (Non-Parametric)
 //!
 //! TPS provides smooth interpolation that minimizes "bending energy":
@@ -72,6 +89,21 @@
 //! let model = RadialDistortion::estimate(&undistorted, &distorted, None, 1)?;
 //! ```
 //!
+//! ## Field Curvature
+//!
+//! ```ignore
+//! use lumos::registration::distortion::{FieldCurvature, FieldCurvatureConfig};
+//!
+//! // Create model with known curvature coefficient
+//! let model = FieldCurvature::new(FieldCurvatureConfig::simple(0.00001, (512.0, 384.0)));
+//!
+//! // Correct field curvature (curved -> flat)
+//! let (x_flat, y_flat) = model.correct(x_curved, y_curved);
+//!
+//! // Or estimate from star matches
+//! let model = FieldCurvature::estimate(&ideal, &curved, None, 1)?;
+//! ```
+//!
 //! ## Thin-Plate Spline
 //!
 //! ```ignore
@@ -88,12 +120,14 @@
 //! let (tx, ty) = tps.transform(150.0, 125.0);
 //! ```
 
+mod field_curvature;
 mod radial;
 mod tangential;
 
 #[cfg(test)]
 mod tests;
 
+pub use field_curvature::{FieldCurvature, FieldCurvatureConfig};
 pub use radial::{RadialDistortion, RadialDistortionConfig};
 pub use tangential::{TangentialDistortion, TangentialDistortionConfig};
 

@@ -86,6 +86,8 @@ pub use star_detection::{
 pub use registration::{
     // Distortion correction
     DistortionMap,
+    FieldCurvature,
+    FieldCurvatureConfig,
     FullPhaseCorrelator,
     FullPhaseResult,
     // GPU warping

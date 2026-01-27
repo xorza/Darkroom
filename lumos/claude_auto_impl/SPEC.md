@@ -158,9 +158,23 @@ with tests and running verification commands per project conventions.
 ### 3.3 Distortion Correction Extensions
 - [x] Implement radial distortion models (barrel/pincushion)
 - [x] Implement tangential distortion correction
-- [ ] Add field curvature correction
-- [ ] Write unit tests for each model
-- [ ] Run verification commands
+- [x] Add field curvature correction
+- [x] Write unit tests for each model
+- [x] Run verification commands
+
+**Field Curvature Implementation** (2026-01-27): Created `src/registration/distortion/field_curvature.rs` with:
+- `FieldCurvatureConfig` - Configuration (c1, c2 coefficients, optical center)
+- `FieldCurvature` - Petzval field curvature model implementation
+  - `apply()` / `correct()` - Forward and inverse transformations
+  - `estimate()` - Least-squares coefficient estimation from matched points
+  - `rms_error()` - Residual error computation
+  - `sag_at()` - Defocus distance calculation at any position
+  - `from_petzval_radius()` - Create config from physical Petzval radius
+  - Newton-Raphson iteration for accurate correction
+- Model: r' = r × (1 + c₁r² + c₂r⁴) for radial scaling effect
+- c₁ > 0: outward curvature (magnification increases with radius)
+- c₁ < 0: inward curvature (magnification decreases with radius)
+- 24 unit tests passing
 
 **Tangential Distortion Implementation** (2026-01-27): Created `src/registration/distortion/tangential.rs` with:
 - `TangentialDistortionConfig` - Configuration (p1, p2 coefficients, optical center)
@@ -230,9 +244,9 @@ cargo bench -p lumos --features bench --bench <name> | tee benches/<name>_result
 |-------|-------|----------|--------|
 | Local Normalization | 5 | 5 | **Complete** |
 | GPU Acceleration | 12 | 12 | **Complete** (warping done, FFT skipped, sigma clip done, star detection done, batch pipeline done + benchmarked) |
-| Advanced Features | 14 | 12 | **In Progress** (Comet stacking complete, session quality done, session-aware normalization done, session-weighted integration done, gradient removal done, radial distortion done, tangential distortion done) |
+| Advanced Features | 14 | 14 | **Complete** (Comet stacking complete, session quality done, session-aware normalization done, session-weighted integration done, gradient removal done, radial distortion done, tangential distortion done, field curvature done) |
 | Quality & Polish | 4 | 0 | Not Started |
-| **Total** | **35** | **29** | **In Progress** |
+| **Total** | **35** | **31** | **In Progress** |
 
 ---
 
