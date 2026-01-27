@@ -21,9 +21,13 @@ pub use stacking::{
 pub use star_detection::{Star, StarDetectionConfig, find_stars};
 
 #[cfg(feature = "bench")]
+mod bench_impl;
+
+#[cfg(feature = "bench")]
 pub mod bench {
     pub use crate::astro_image::demosaic::bench as demosaic;
     pub use crate::astro_image::hot_pixels::bench as hot_pixels;
+    pub use crate::bench_impl::pipeline;
     pub use crate::stacking::bench::{mean, median, sigma_clipped};
     pub use crate::star_detection::bench::{
         background, centroid, convolution, cosmic_ray, deblend, detection, median_filter,

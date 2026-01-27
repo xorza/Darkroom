@@ -117,3 +117,8 @@ required-features = ["bench"]
 name = "registration"
 harness = false
 required-features = ["bench"]
+
+[[bench]]
+name = "full_pipeline"
+harness = false
+required-features = ["bench"]
