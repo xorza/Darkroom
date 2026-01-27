@@ -4,12 +4,21 @@
 //! Uses a hybrid approach: GPU for threshold mask creation, CPU for connected
 //! component labeling (optimal for sparse astronomical images).
 
+// This module provides an optional GPU-accelerated path for star detection.
+// Some items are only used by public API and tests, not internal code.
+#![allow(dead_code)]
+
 use bytemuck::{Pod, Zeroable};
 use imaginarium::ProcessingContext;
 use wgpu::util::DeviceExt;
 
 use super::pipeline::{GpuDilateMaskPipeline, GpuThresholdMaskPipeline};
+use crate::star_detection::StarDetectionConfig;
 use crate::star_detection::background::BackgroundMap;
+use crate::star_detection::deblend::DeblendConfig;
+use crate::star_detection::detection::{
+    DetectionConfig, StarCandidate, connected_components, extract_candidates,
+};
 
 /// Maximum dilation radius supported by the GPU shader.
 pub const MAX_DILATION_RADIUS: u32 = 8;
@@ -369,6 +378,100 @@ fn unpack_mask(packed: &[u32], width: usize, height: usize) -> Vec<bool> {
     result
 }
 
+/// Detect star candidates using GPU-accelerated threshold detection.
+///
+/// Uses a hybrid approach:
+/// 1. GPU: Threshold mask creation and dilation
+/// 2. CPU: Connected component labeling (optimal for sparse astronomical images)
+///
+/// This function returns the same results as `detect_stars()` but uses the GPU
+/// for the threshold mask creation phase, which is the main per-pixel operation.
+///
+/// # Arguments
+/// * `pixels` - Image pixel data
+/// * `width` - Image width
+/// * `height` - Image height
+/// * `background` - Background map from `estimate_background`
+/// * `config` - Star detection configuration
+///
+/// # Returns
+/// Vector of star candidates for further processing (centroiding, etc.)
+///
+/// # Panics
+/// Panics if no GPU is available.
+pub fn detect_stars_gpu(
+    pixels: &[f32],
+    width: usize,
+    height: usize,
+    background: &BackgroundMap,
+    config: &StarDetectionConfig,
+) -> Vec<StarCandidate> {
+    let mut detector = GpuThresholdDetector::new();
+    detect_stars_gpu_with_detector(&mut detector, pixels, width, height, background, config)
+}
+
+/// Detect star candidates using GPU with a reusable detector.
+///
+/// Same as `detect_stars_gpu` but allows reusing the GPU context across
+/// multiple detections for better performance.
+///
+/// # Arguments
+/// * `detector` - Reusable GPU threshold detector
+/// * `pixels` - Image pixel data
+/// * `width` - Image width
+/// * `height` - Image height
+/// * `background` - Background map from `estimate_background`
+/// * `config` - Star detection configuration
+///
+/// # Returns
+/// Vector of star candidates for further processing.
+pub fn detect_stars_gpu_with_detector(
+    detector: &mut GpuThresholdDetector,
+    pixels: &[f32],
+    width: usize,
+    height: usize,
+    background: &BackgroundMap,
+    config: &StarDetectionConfig,
+) -> Vec<StarCandidate> {
+    assert!(
+        detector.gpu_available(),
+        "GPU not available for star detection"
+    );
+
+    let detection_config = DetectionConfig::from(config);
+
+    // Create GPU threshold config from star detection config
+    let gpu_config = GpuThresholdConfig::new(
+        detection_config.sigma_threshold,
+        1, // Dilation radius 1 (3x3) - same as CPU version
+    );
+
+    // Create threshold mask on GPU (already includes dilation)
+    let mask = detector.create_mask(pixels, background, &gpu_config);
+
+    // Connected component labeling on CPU (optimal for sparse images)
+    let (labels, num_labels) = connected_components(&mask, width, height);
+
+    // Extract candidate properties with deblending
+    let deblend_config = DeblendConfig::from(config);
+    let mut candidates =
+        extract_candidates(pixels, &labels, num_labels, width, height, &deblend_config);
+
+    // Apply size and edge filters
+    candidates.retain(|c| {
+        // Size filter
+        c.area >= detection_config.min_area
+            && c.area <= detection_config.max_area
+            // Edge filter
+            && c.x_min >= detection_config.edge_margin
+            && c.y_min >= detection_config.edge_margin
+            && c.x_max < width - detection_config.edge_margin
+            && c.y_max < height - detection_config.edge_margin
+    });
+
+    candidates
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -582,5 +685,253 @@ mod tests {
         assert!(mask[100 * width + 100], "Center pixel should be true");
         assert!(mask[99 * width + 100], "Dilated pixel should be true");
         assert!(mask[101 * width + 100], "Dilated pixel should be true");
+    }
+
+    #[test]
+    fn test_detect_stars_gpu_single_star() {
+        if !test_gpu_available() {
+            eprintln!("Skipping GPU test: no GPU available");
+            return;
+        }
+
+        let width = 64;
+        let height = 64;
+
+        // Create a single bright star at (32, 32)
+        let mut pixels = vec![0.1f32; width * height];
+        // Create a small star-like profile (3x3 bright region)
+        for dy in -1i32..=1 {
+            for dx in -1i32..=1 {
+                let x = (32 + dx) as usize;
+                let y = (32 + dy) as usize;
+                let dist = ((dx * dx + dy * dy) as f32).sqrt();
+                let value = 0.5 - 0.1 * dist; // Brighter center
+                pixels[y * width + x] = value;
+            }
+        }
+
+        let background = BackgroundMap {
+            background: vec![0.1f32; width * height],
+            noise: vec![0.01f32; width * height],
+            width,
+            height,
+        };
+
+        let config = StarDetectionConfig {
+            detection_sigma: 3.0,
+            min_area: 3,
+            max_area: 50,
+            edge_margin: 5,
+            ..Default::default()
+        };
+
+        let candidates = detect_stars_gpu(&pixels, width, height, &background, &config);
+
+        // Should detect exactly one candidate
+        assert_eq!(
+            candidates.len(),
+            1,
+            "Expected 1 candidate, got {}",
+            candidates.len()
+        );
+
+        let star = &candidates[0];
+        // Peak should be near (32, 32)
+        assert!(
+            (star.peak_x as i32 - 32).abs() <= 1,
+            "Peak X ({}) not near 32",
+            star.peak_x
+        );
+        assert!(
+            (star.peak_y as i32 - 32).abs() <= 1,
+            "Peak Y ({}) not near 32",
+            star.peak_y
+        );
+    }
+
+    #[test]
+    fn test_detect_stars_gpu_multiple_stars() {
+        if !test_gpu_available() {
+            eprintln!("Skipping GPU test: no GPU available");
+            return;
+        }
+
+        let width = 128;
+        let height = 128;
+
+        // Create multiple stars at different positions
+        let mut pixels = vec![0.1f32; width * height];
+
+        let star_positions: [(usize, usize); 3] = [(30, 30), (80, 40), (60, 90)];
+
+        for &(cx, cy) in &star_positions {
+            for dy in -1i32..=1 {
+                for dx in -1i32..=1 {
+                    let x = (cx as i32 + dx) as usize;
+                    let y = (cy as i32 + dy) as usize;
+                    pixels[y * width + x] = 0.4;
+                }
+            }
+        }
+
+        let background = BackgroundMap {
+            background: vec![0.1f32; width * height],
+            noise: vec![0.02f32; width * height],
+            width,
+            height,
+        };
+
+        let config = StarDetectionConfig {
+            detection_sigma: 3.0,
+            min_area: 3,
+            max_area: 50,
+            edge_margin: 5,
+            ..Default::default()
+        };
+
+        let candidates = detect_stars_gpu(&pixels, width, height, &background, &config);
+
+        // Should detect three separate candidates
+        assert_eq!(
+            candidates.len(),
+            3,
+            "Expected 3 candidates, got {}",
+            candidates.len()
+        );
+    }
+
+    #[test]
+    fn test_detect_stars_gpu_no_stars() {
+        if !test_gpu_available() {
+            eprintln!("Skipping GPU test: no GPU available");
+            return;
+        }
+
+        let width = 64;
+        let height = 64;
+
+        // All pixels at background level
+        let pixels = vec![0.1f32; width * height];
+
+        let background = BackgroundMap {
+            background: vec![0.1f32; width * height],
+            noise: vec![0.01f32; width * height],
+            width,
+            height,
+        };
+
+        let config = StarDetectionConfig {
+            detection_sigma: 4.0,
+            min_area: 3,
+            max_area: 50,
+            edge_margin: 5,
+            ..Default::default()
+        };
+
+        let candidates = detect_stars_gpu(&pixels, width, height, &background, &config);
+
+        // Should detect no candidates
+        assert!(
+            candidates.is_empty(),
+            "Expected 0 candidates, got {}",
+            candidates.len()
+        );
+    }
+
+    #[test]
+    fn test_detect_stars_gpu_reusable_detector() {
+        if !test_gpu_available() {
+            eprintln!("Skipping GPU test: no GPU available");
+            return;
+        }
+
+        let mut detector = GpuThresholdDetector::new();
+
+        let width = 32;
+        let height = 32;
+
+        // Create a single bright pixel
+        let mut pixels = vec![0.1f32; width * height];
+        pixels[16 * width + 16] = 0.5;
+
+        let background = BackgroundMap {
+            background: vec![0.1f32; width * height],
+            noise: vec![0.01f32; width * height],
+            width,
+            height,
+        };
+
+        let config = StarDetectionConfig {
+            detection_sigma: 3.0,
+            min_area: 1,
+            max_area: 50,
+            edge_margin: 5,
+            ..Default::default()
+        };
+
+        // Run detection multiple times with the same detector
+        for _ in 0..3 {
+            let candidates = detect_stars_gpu_with_detector(
+                &mut detector,
+                &pixels,
+                width,
+                height,
+                &background,
+                &config,
+            );
+
+            assert_eq!(
+                candidates.len(),
+                1,
+                "Expected 1 candidate, got {}",
+                candidates.len()
+            );
+        }
+    }
+
+    #[test]
+    fn test_detect_stars_gpu_edge_rejection() {
+        if !test_gpu_available() {
+            eprintln!("Skipping GPU test: no GPU available");
+            return;
+        }
+
+        let width = 64;
+        let height = 64;
+
+        // Create stars near edges and in center
+        let mut pixels = vec![0.1f32; width * height];
+
+        // Star too close to edge (should be rejected)
+        pixels[5 * width + 5] = 0.5;
+        // Star in valid region (should be kept)
+        pixels[32 * width + 32] = 0.5;
+        // Another star too close to edge (should be rejected)
+        pixels[58 * width + 58] = 0.5;
+
+        let background = BackgroundMap {
+            background: vec![0.1f32; width * height],
+            noise: vec![0.01f32; width * height],
+            width,
+            height,
+        };
+
+        let config = StarDetectionConfig {
+            detection_sigma: 3.0,
+            min_area: 1,
+            max_area: 50,
+            edge_margin: 10, // Large edge margin to reject edge stars
+            ..Default::default()
+        };
+
+        let candidates = detect_stars_gpu(&pixels, width, height, &background, &config);
+
+        // Only the center star should be detected
+        assert_eq!(
+            candidates.len(),
+            1,
+            "Expected 1 candidate (edge rejection), got {}",
+            candidates.len()
+        );
     }
 }

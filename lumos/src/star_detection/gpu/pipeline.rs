@@ -1,5 +1,8 @@
 //! GPU pipelines for star detection threshold operations.
 
+// These pipelines are used by threshold.rs for GPU star detection.
+#![allow(dead_code)]
+
 use imaginarium::{Gpu, GpuPipeline};
 
 /// GPU pipeline for threshold mask creation.

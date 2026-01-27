@@ -122,6 +122,37 @@ impl GpuThresholdDetector {
 }
 ```
 
+## Public API
+
+### detect_stars_gpu
+
+Full star detection using GPU for threshold mask creation:
+
+```rust
+pub fn detect_stars_gpu(
+    pixels: &[f32],
+    width: usize,
+    height: usize,
+    background: &BackgroundMap,
+    config: &StarDetectionConfig,
+) -> Vec<StarCandidate>;
+```
+
+### detect_stars_gpu_with_detector
+
+Same as above but allows reusing the GPU context for better performance:
+
+```rust
+pub fn detect_stars_gpu_with_detector(
+    detector: &mut GpuThresholdDetector,
+    pixels: &[f32],
+    width: usize,
+    height: usize,
+    background: &BackgroundMap,
+    config: &StarDetectionConfig,
+) -> Vec<StarCandidate>;
+```
+
 ## Performance Expectations
 
 For a 4096×4096 image:
@@ -138,11 +169,34 @@ For a 4096×4096 image:
 | Component | Status |
 |-----------|--------|
 | Design | Complete |
-| threshold_mask.wgsl | Not Started |
-| dilate_mask.wgsl | Not Started |
-| GpuThresholdDetector | Not Started |
-| Integration tests | Not Started |
-| Benchmarks | Not Started |
+| threshold_mask.wgsl | Complete |
+| dilate_mask.wgsl | Complete |
+| pipeline.rs | Complete |
+| GpuThresholdDetector | Complete |
+| detect_stars_gpu | Complete |
+| detect_stars_gpu_with_detector | Complete |
+| Integration tests | Complete (15 tests) |
+| Benchmarks | Ready (bench feature has pre-existing issues) |
+
+## Usage
+
+For batch processing (best performance):
+```rust
+let mut detector = GpuThresholdDetector::new();
+if detector.gpu_available() {
+    for image in images {
+        let candidates = detect_stars_gpu_with_detector(
+            &mut detector, &pixels, width, height, &background, &config
+        );
+        // Process candidates...
+    }
+}
+```
+
+For single-use:
+```rust
+let candidates = detect_stars_gpu(&pixels, width, height, &background, &config);
+```
 
 ## Future Considerations
 

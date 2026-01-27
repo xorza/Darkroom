@@ -8,6 +8,7 @@ use super::{
 use crate::star_detection::StarDetectionConfig;
 use crate::star_detection::background::BackgroundMap;
 use crate::star_detection::deblend::DeblendConfig;
+use crate::star_detection::gpu::{GpuThresholdDetector, detect_stars_gpu_with_detector};
 use criterion::{BenchmarkId, Criterion, Throughput};
 use std::hint::black_box;
 
@@ -268,4 +269,106 @@ pub fn benchmarks(c: &mut Criterion) {
     }
 
     filtered_group.finish();
+
+    // GPU vs CPU threshold mask benchmarks
+    gpu_threshold_benchmarks(c);
+
+    // GPU vs CPU full detection benchmarks
+    gpu_detect_stars_benchmarks(c);
+}
+
+/// GPU threshold mask benchmarks.
+fn gpu_threshold_benchmarks(c: &mut Criterion) {
+    let mut detector = GpuThresholdDetector::new();
+    if !detector.gpu_available() {
+        eprintln!("Skipping GPU threshold benchmarks: no GPU available");
+        return;
+    }
+
+    let mut group = c.benchmark_group("gpu_threshold_mask");
+    group.sample_size(30);
+
+    for &(width, height) in &[(512, 512), (1024, 1024), (2048, 2048), (4096, 4096)] {
+        let pixels = generate_test_image(width, height, 100);
+        let background = create_background_map(width, height);
+        let size_name = format!("{}x{}", width, height);
+        let config = crate::star_detection::gpu::GpuThresholdConfig::new(3.0, 1);
+
+        group.throughput(Throughput::Elements((width * height) as u64));
+
+        // CPU version (dispatch to SIMD)
+        group.bench_function(BenchmarkId::new("cpu", &size_name), |b| {
+            b.iter(|| {
+                let mask = create_threshold_mask(
+                    black_box(&pixels),
+                    black_box(&background),
+                    black_box(3.0),
+                );
+                black_box(dilate_mask(&mask, width, height, 1))
+            })
+        });
+
+        // GPU version
+        group.bench_function(BenchmarkId::new("gpu", &size_name), |b| {
+            b.iter(|| {
+                black_box(detector.create_mask(
+                    black_box(&pixels),
+                    black_box(&background),
+                    black_box(&config),
+                ))
+            })
+        });
+    }
+
+    group.finish();
+}
+
+/// GPU vs CPU full detection benchmarks.
+fn gpu_detect_stars_benchmarks(c: &mut Criterion) {
+    let mut detector = GpuThresholdDetector::new();
+    if !detector.gpu_available() {
+        eprintln!("Skipping GPU detect_stars benchmarks: no GPU available");
+        return;
+    }
+
+    let mut group = c.benchmark_group("gpu_detect_stars");
+    group.sample_size(20);
+
+    for &(width, height, num_stars) in &[(512, 512, 50), (1024, 1024, 200), (2048, 2048, 800)] {
+        let pixels = generate_test_image(width, height, num_stars);
+        let background = create_background_map(width, height);
+        let config = StarDetectionConfig::default();
+        let size_name = format!("{}x{}_{}stars", width, height, num_stars);
+
+        group.throughput(Throughput::Elements((width * height) as u64));
+
+        // CPU version
+        group.bench_function(BenchmarkId::new("cpu", &size_name), |b| {
+            b.iter(|| {
+                black_box(detect_stars(
+                    black_box(&pixels),
+                    black_box(width),
+                    black_box(height),
+                    black_box(&background),
+                    black_box(&config),
+                ))
+            })
+        });
+
+        // GPU version
+        group.bench_function(BenchmarkId::new("gpu", &size_name), |b| {
+            b.iter(|| {
+                black_box(detect_stars_gpu_with_detector(
+                    black_box(&mut detector),
+                    black_box(&pixels),
+                    black_box(width),
+                    black_box(height),
+                    black_box(&background),
+                    black_box(&config),
+                ))
+            })
+        });
+    }
+
+    group.finish();
 }
