@@ -12,6 +12,7 @@ AI coding rules for Rust projects:
 - Check online documentation for best practices and patterns.
 - `NOTES-AI.md` files are AI-generated and contain implementation details, structure, and functionality notes. They can be placed in any directory where context is needed (root, crates, modules, etc.). Avoid editing root `README.md` unless asked; instead, update the relevant `NOTES-AI.md` and keep it current. Store only current state, not change history.
 - Read `NOTES-AI.md` files for summarized project knowledge. Check for them in the current working directory and relevant subdirectories.
+- When a `NOTES-AI.md` file becomes too large (>300 lines or covers multiple distinct modules), split it into smaller files in corresponding subdirectories. Keep the parent file as a brief overview with references to child files.
 - Add `README.md` files to any folder that benefits from human-readable documentation (e.g., crates, examples, benchmarks, complex modules).
 - When running benchmarks, use `cargo bench -p <crate> --features bench --bench <name>` to compile only the needed crate and enable the bench feature (e.g., `cargo bench -p lumos --features bench --bench math`).
 - Use nextest for running tests and for measuring test execution time when asked.
