@@ -107,8 +107,8 @@ with tests and running verification commands per project conventions.
 - [x] Design API for comet position input (t1, t2 positions)
 - [x] Implement frame-specific offset based on timestamp interpolation
 - [x] Implement composite output (stars from one stack, comet from other)
-- [ ] Write integration tests with synthetic comet data
-- [ ] Run verification commands
+- [x] Write integration tests with synthetic comet data
+- [x] Run verification commands
 
 ### 3.2 Multi-Session Integration
 - [ ] Design per-session quality assessment workflow
@@ -170,9 +170,9 @@ cargo bench -p lumos --features bench --bench <name> | tee benches/<name>_result
 |-------|-------|----------|--------|
 | Local Normalization | 5 | 5 | **Complete** |
 | GPU Acceleration | 12 | 12 | **Complete** (warping done, FFT skipped, sigma clip done, star detection done, batch pipeline done + benchmarked) |
-| Advanced Features | 14 | 0 | Not Started |
+| Advanced Features | 14 | 6 | **In Progress** (Comet stacking complete) |
 | Quality & Polish | 4 | 0 | Not Started |
-| **Total** | **35** | **17** | **In Progress** |
+| **Total** | **35** | **23** | **In Progress** |
 
 ---
 

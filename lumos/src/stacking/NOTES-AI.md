@@ -816,7 +816,7 @@ composite_stacks(&star_stack, &comet_stack, CompositeMethod) -> Option<Vec<f32>>
 create_comet_stack_result(star_stack, comet_stack, width, height, &config) -> CometStackResult
 ```
 
-**Tests (39 passing):**
+**Tests (49 passing):**
 - ObjectPosition: creation, from_coords
 - CometStackConfig: new, builder pattern, velocity, displacement, same timestamp panics
 - Interpolation: at start/end/middle, extrapolation before/after, same timestamp panics
@@ -828,7 +828,19 @@ create_comet_stack_result(star_stack, comet_stack, width, height, &config) -> Co
   separate_returns_none, different_sizes_panics, empty_stacks
 - Create result: lighten, separate, wrong_star_size, wrong_comet_size
 - Background estimation: percentile, empty, single_value
-- Integration: realistic_scenario
+- Unit integration: realistic_scenario
+
+**Integration Tests (10 tests):**
+- `test_integration_comet_motion_interpolation` - verify position interpolation across multiple frames
+- `test_integration_comet_aligned_transform_sequence` - verify comet centering at each frame
+- `test_integration_synthetic_comet_stacking_mean` - full stacking workflow with synthetic data
+- `test_integration_composite_preserves_both` - verify composite preserves stars and comet
+- `test_integration_velocity_computation` - test velocity calculation for various motion patterns
+- `test_integration_displacement_computation` - test displacement calculation (3-4-5, 5-12-13 triangles)
+- `test_integration_result_struct_completeness` - verify all result fields are populated
+- `test_integration_transform_with_rotation` - comet transform with rotated star transform
+- `test_integration_multiple_composite_methods` - test all composite methods work correctly
+- `test_integration_config_with_rejection_method` - verify rejection method configuration
 
 **Exports:**
 - `lumos::ObjectPosition`
@@ -840,9 +852,6 @@ create_comet_stack_result(star_stack, comet_stack, width, height, &config) -> Co
 - `lumos::composite_stacks`
 - `lumos::create_comet_stack_result`
 - `lumos::apply_comet_offset_to_transform`
-
-**Next Steps:**
-- Write integration tests with synthetic comet data (task 5)
 
 ### Frame-Specific Offset Implementation (COMPLETE - 2026-01-27)
 

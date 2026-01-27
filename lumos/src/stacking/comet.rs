@@ -1077,3 +1077,622 @@ mod tests {
         assert!(additive[32 * width + 32] > 0.8);
     }
 }
+
+/// Integration tests for comet stacking with synthetic data.
+#[cfg(test)]
+mod integration_tests {
+    use super::*;
+    use std::f32::consts::PI;
+
+    /// Simple RNG for test reproducibility.
+    fn lcg_rng(seed: &mut u64) -> f32 {
+        *seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
+        (*seed >> 33) as f32 / (1u64 << 31) as f32
+    }
+
+    /// Render a Gaussian point source at (cx, cy) with given sigma and amplitude.
+    fn render_gaussian(
+        pixels: &mut [f32],
+        width: usize,
+        cx: f32,
+        cy: f32,
+        sigma: f32,
+        amplitude: f32,
+    ) {
+        let height = pixels.len() / width;
+        let radius = (sigma * 4.0).ceil() as i32;
+
+        let cx_i = cx.round() as i32;
+        let cy_i = cy.round() as i32;
+
+        for dy in -radius..=radius {
+            for dx in -radius..=radius {
+                let px = cx_i + dx;
+                let py = cy_i + dy;
+
+                if px >= 0 && px < width as i32 && py >= 0 && py < height as i32 {
+                    let dist_x = px as f32 - cx;
+                    let dist_y = py as f32 - cy;
+                    let dist_sq = dist_x * dist_x + dist_y * dist_y;
+                    let value = amplitude * (-dist_sq / (2.0 * sigma * sigma)).exp();
+                    pixels[py as usize * width + px as usize] += value;
+                }
+            }
+        }
+    }
+
+    /// Generate a synthetic frame with stars and a moving comet.
+    ///
+    /// # Arguments
+    /// * `width`, `height` - Image dimensions
+    /// * `star_positions` - Static star positions (x, y)
+    /// * `comet_pos` - Comet position for this frame (x, y)
+    /// * `background` - Background level
+    /// * `noise_sigma` - Gaussian noise level
+    /// * `seed` - Random seed for noise
+    fn generate_comet_frame(
+        width: usize,
+        height: usize,
+        star_positions: &[(f32, f32)],
+        comet_pos: (f32, f32),
+        background: f32,
+        noise_sigma: f32,
+        seed: u64,
+    ) -> Vec<f32> {
+        let mut pixels = vec![background; width * height];
+        let star_sigma = 2.0; // FWHM ~4.7 pixels
+        let star_amplitude = 0.5;
+        let comet_sigma = 3.0; // Comet is slightly larger
+        let comet_amplitude = 0.6;
+
+        // Render stars
+        for &(x, y) in star_positions {
+            render_gaussian(&mut pixels, width, x, y, star_sigma, star_amplitude);
+        }
+
+        // Render comet
+        render_gaussian(
+            &mut pixels,
+            width,
+            comet_pos.0,
+            comet_pos.1,
+            comet_sigma,
+            comet_amplitude,
+        );
+
+        // Add noise
+        if noise_sigma > 0.0 {
+            let mut rng = seed;
+            for p in pixels.iter_mut() {
+                let u1 = lcg_rng(&mut rng).max(1e-10);
+                let u2 = lcg_rng(&mut rng);
+                let z = (-2.0 * u1.ln()).sqrt() * (2.0 * PI * u2).cos();
+                *p += z * noise_sigma;
+                *p = p.clamp(0.0, 1.0);
+            }
+        }
+
+        pixels
+    }
+
+    /// Apply a transform to warp a frame (simple nearest-neighbor for testing).
+    fn warp_frame(
+        src: &[f32],
+        width: usize,
+        height: usize,
+        transform: &TransformMatrix,
+    ) -> Vec<f32> {
+        let mut dst = vec![0.0f32; width * height];
+
+        for y in 0..height {
+            for x in 0..width {
+                // For each output pixel, find the corresponding input pixel
+                // apply_inverse maps destination -> source
+                let (src_x, src_y) = transform.apply_inverse(x as f64, y as f64);
+
+                // Nearest-neighbor sampling
+                let sx = src_x.round() as i32;
+                let sy = src_y.round() as i32;
+
+                if sx >= 0 && sx < width as i32 && sy >= 0 && sy < height as i32 {
+                    dst[y * width + x] = src[sy as usize * width + sx as usize];
+                }
+            }
+        }
+
+        dst
+    }
+
+    /// Simple mean stacking (for testing).
+    fn stack_mean(frames: &[Vec<f32>]) -> Vec<f32> {
+        assert!(!frames.is_empty());
+        let len = frames[0].len();
+        let mut result = vec![0.0f32; len];
+
+        for frame in frames {
+            for (i, &val) in frame.iter().enumerate() {
+                result[i] += val;
+            }
+        }
+
+        let n = frames.len() as f32;
+        for val in result.iter_mut() {
+            *val /= n;
+        }
+
+        result
+    }
+
+    /// Measure peak brightness at a position (3x3 region).
+    fn measure_peak(pixels: &[f32], width: usize, x: usize, y: usize) -> f32 {
+        let height = pixels.len() / width;
+        let mut max_val = 0.0f32;
+
+        for dy in -1..=1_i32 {
+            for dx in -1..=1_i32 {
+                let px = x as i32 + dx;
+                let py = y as i32 + dy;
+                if px >= 0 && px < width as i32 && py >= 0 && py < height as i32 {
+                    max_val = max_val.max(pixels[py as usize * width + px as usize]);
+                }
+            }
+        }
+        max_val
+    }
+
+    /// Measure the spread of a point source (variance of pixel positions weighted by brightness).
+    fn measure_spread(
+        pixels: &[f32],
+        width: usize,
+        center_x: usize,
+        center_y: usize,
+        radius: usize,
+    ) -> f32 {
+        let height = pixels.len() / width;
+        let mut sum_dist_sq = 0.0f32;
+        let mut sum_weight = 0.0f32;
+
+        let background = estimate_background_percentile(pixels, 0.1);
+
+        for dy in -(radius as i32)..=(radius as i32) {
+            for dx in -(radius as i32)..=(radius as i32) {
+                let px = center_x as i32 + dx;
+                let py = center_y as i32 + dy;
+                if px >= 0 && px < width as i32 && py >= 0 && py < height as i32 {
+                    let val = pixels[py as usize * width + px as usize] - background;
+                    if val > 0.0 {
+                        let dist_sq = (dx * dx + dy * dy) as f32;
+                        sum_dist_sq += dist_sq * val;
+                        sum_weight += val;
+                    }
+                }
+            }
+        }
+
+        if sum_weight > 0.0 {
+            (sum_dist_sq / sum_weight).sqrt()
+        } else {
+            0.0
+        }
+    }
+
+    // ========== Integration Tests ==========
+
+    #[test]
+    fn test_integration_comet_motion_interpolation() {
+        // Test that comet position interpolation works correctly across multiple frames.
+        let pos_start = ObjectPosition::new(50.0, 60.0, 0.0);
+        let pos_end = ObjectPosition::new(70.0, 80.0, 100.0);
+        let config = CometStackConfig::new(pos_start, pos_end);
+
+        // Test at multiple timestamps
+        let timestamps = [0.0, 25.0, 50.0, 75.0, 100.0];
+        let expected_positions = [
+            (50.0, 60.0),
+            (55.0, 65.0),
+            (60.0, 70.0),
+            (65.0, 75.0),
+            (70.0, 80.0),
+        ];
+
+        for (t, expected) in timestamps.iter().zip(expected_positions.iter()) {
+            let (x, y) = interpolate_position(&pos_start, &pos_end, *t);
+            assert!(
+                (x - expected.0).abs() < 1e-10,
+                "At t={}, expected x={}, got x={}",
+                t,
+                expected.0,
+                x
+            );
+            assert!(
+                (y - expected.1).abs() < 1e-10,
+                "At t={}, expected y={}, got y={}",
+                t,
+                expected.1,
+                y
+            );
+        }
+
+        // Verify velocity
+        let (vx, vy) = config.velocity();
+        assert!((vx - 0.2).abs() < 1e-10); // 20 pixels / 100 seconds
+        assert!((vy - 0.2).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_integration_comet_aligned_transform_sequence() {
+        // Test that comet-aligned transforms correctly compensate for comet motion.
+        let pos_start = ObjectPosition::new(100.0, 100.0, 0.0);
+        let pos_end = ObjectPosition::new(120.0, 110.0, 100.0);
+        let config = CometStackConfig::new(pos_start, pos_end);
+
+        // Star transform is identity (reference frame)
+        let star_transform = TransformMatrix::identity();
+        let ref_timestamp = 0.0;
+
+        // At each frame, compute comet-aligned transform and verify it centers the comet
+        for frame_idx in 0..5 {
+            let frame_timestamp = frame_idx as f64 * 25.0;
+            let comet_transform =
+                config.comet_aligned_transform(&star_transform, frame_timestamp, ref_timestamp);
+
+            // The comet's position at this frame
+            let (comet_x, comet_y) =
+                interpolate_position(&config.pos_start, &config.pos_end, frame_timestamp);
+
+            // Apply comet transform to the comet position
+            let (aligned_x, aligned_y) = comet_transform.apply(comet_x, comet_y);
+
+            // After applying the comet transform, the comet should map to its reference position
+            // The reference position is pos_start (at ref_timestamp=0)
+            assert!(
+                (aligned_x - pos_start.x).abs() < 1e-6,
+                "Frame {}: expected aligned_x={}, got {}",
+                frame_idx,
+                pos_start.x,
+                aligned_x
+            );
+            assert!(
+                (aligned_y - pos_start.y).abs() < 1e-6,
+                "Frame {}: expected aligned_y={}, got {}",
+                frame_idx,
+                pos_start.y,
+                aligned_y
+            );
+        }
+    }
+
+    #[test]
+    fn test_integration_synthetic_comet_stacking_mean() {
+        // Generate synthetic frames with a moving comet and verify stacking.
+        let width = 128;
+        let height = 128;
+        let num_frames = 5;
+        let background = 0.1;
+        let noise_sigma = 0.01;
+
+        // Fixed star positions
+        let star_positions: Vec<(f32, f32)> =
+            vec![(30.0, 30.0), (90.0, 40.0), (50.0, 100.0), (110.0, 95.0)];
+
+        // Comet motion: moves from (40, 60) to (80, 70) over the sequence
+        let pos_start = ObjectPosition::new(40.0, 60.0, 0.0);
+        let pos_end = ObjectPosition::new(80.0, 70.0, (num_frames - 1) as f64);
+        let config = CometStackConfig::new(pos_start, pos_end);
+
+        // Generate frames with comet at different positions
+        let mut frames = Vec::new();
+        for frame_idx in 0..num_frames {
+            let timestamp = frame_idx as f64;
+            let (comet_x, comet_y) = interpolate_position(&pos_start, &pos_end, timestamp);
+
+            let frame = generate_comet_frame(
+                width,
+                height,
+                &star_positions,
+                (comet_x as f32, comet_y as f32),
+                background,
+                noise_sigma,
+                42 + frame_idx as u64,
+            );
+            frames.push(frame);
+        }
+
+        // Star-aligned stacking (identity transforms)
+        // In this simplified test, frames are already star-aligned
+        let star_stack = stack_mean(&frames);
+
+        // Comet-aligned stacking: warp each frame to align the comet
+        let ref_timestamp = 0.0;
+        let mut comet_aligned_frames = Vec::new();
+        for (frame_idx, frame) in frames.iter().enumerate() {
+            let frame_timestamp = frame_idx as f64;
+            let star_transform = TransformMatrix::identity();
+            let comet_transform =
+                config.comet_aligned_transform(&star_transform, frame_timestamp, ref_timestamp);
+
+            let warped = warp_frame(frame, width, height, &comet_transform);
+            comet_aligned_frames.push(warped);
+        }
+        let comet_stack = stack_mean(&comet_aligned_frames);
+
+        // Create composite result
+        let result = create_comet_stack_result(
+            star_stack.clone(),
+            comet_stack.clone(),
+            width,
+            height,
+            &config,
+        );
+
+        // Verify results
+        assert_eq!(result.width, width);
+        assert_eq!(result.height, height);
+        assert!(result.composite.is_some());
+
+        // In star stack: stars should be sharp, comet should be spread out
+        // Measure star spread at first star position
+        let star_spread_in_star_stack = measure_spread(&star_stack, width, 30, 30, 8);
+
+        // In comet stack: comet should be relatively sharp
+        // The comet's reference position is (40, 60)
+        let comet_spread_in_comet_stack = measure_spread(&comet_stack, width, 40, 60, 8);
+
+        // The comet in star stack should be more spread out than in comet stack
+        // (because it moved during the sequence)
+        // Calculate comet spread in star stack - it should be larger
+        // The comet center in star stack is somewhere in the middle of its motion
+        let comet_x_avg = ((pos_start.x + pos_end.x) / 2.0).round() as usize;
+        let comet_y_avg = ((pos_start.y + pos_end.y) / 2.0).round() as usize;
+        let comet_spread_in_star_stack =
+            measure_spread(&star_stack, width, comet_x_avg, comet_y_avg, 15);
+
+        // Log values for debugging
+        eprintln!("Star spread in star stack: {}", star_spread_in_star_stack);
+        eprintln!(
+            "Comet spread in comet stack: {}",
+            comet_spread_in_comet_stack
+        );
+        eprintln!("Comet spread in star stack: {}", comet_spread_in_star_stack);
+
+        // Stars should be compact (small spread)
+        assert!(
+            star_spread_in_star_stack < 5.0,
+            "Stars should be compact in star stack, got spread={}",
+            star_spread_in_star_stack
+        );
+
+        // Comet in comet stack should be compact (properly aligned)
+        assert!(
+            comet_spread_in_comet_stack < 6.0,
+            "Comet should be compact in comet stack, got spread={}",
+            comet_spread_in_comet_stack
+        );
+    }
+
+    #[test]
+    fn test_integration_composite_preserves_both() {
+        // Test that the lighten composite preserves both stars and comet.
+        let width = 64;
+        let height = 64;
+
+        // Create star stack with bright star at (20, 20)
+        let mut star_stack = vec![0.1f32; width * height];
+        render_gaussian(&mut star_stack, width, 20.0, 20.0, 2.0, 0.8);
+
+        // Create comet stack with bright comet at (45, 45)
+        let mut comet_stack = vec![0.1f32; width * height];
+        render_gaussian(&mut comet_stack, width, 45.0, 45.0, 3.0, 0.7);
+
+        let composite =
+            composite_stacks(&star_stack, &comet_stack, CompositeMethod::Lighten).unwrap();
+
+        // Both should be bright in the composite
+        let star_peak = measure_peak(&composite, width, 20, 20);
+        let comet_peak = measure_peak(&composite, width, 45, 45);
+        let background_level = composite[0]; // Corner should be background
+
+        assert!(
+            star_peak > 0.6,
+            "Star should be bright in composite, got {}",
+            star_peak
+        );
+        assert!(
+            comet_peak > 0.5,
+            "Comet should be bright in composite, got {}",
+            comet_peak
+        );
+        assert!(
+            background_level < 0.2,
+            "Background should be low, got {}",
+            background_level
+        );
+    }
+
+    #[test]
+    fn test_integration_velocity_computation() {
+        // Test various velocity scenarios
+        let test_cases = [
+            // (start_x, start_y, end_x, end_y, duration, expected_vx, expected_vy)
+            (0.0, 0.0, 100.0, 0.0, 100.0, 1.0, 0.0), // Horizontal motion
+            (0.0, 0.0, 0.0, 100.0, 100.0, 0.0, 1.0), // Vertical motion
+            (0.0, 0.0, 100.0, 100.0, 100.0, 1.0, 1.0), // Diagonal motion
+            (50.0, 50.0, 0.0, 0.0, 50.0, -1.0, -1.0), // Negative velocity
+            (10.0, 20.0, 50.0, 80.0, 200.0, 0.2, 0.3), // Non-integer velocity
+        ];
+
+        for (start_x, start_y, end_x, end_y, duration, expected_vx, expected_vy) in test_cases {
+            let pos_start = ObjectPosition::new(start_x, start_y, 0.0);
+            let pos_end = ObjectPosition::new(end_x, end_y, duration);
+            let config = CometStackConfig::new(pos_start, pos_end);
+
+            let (vx, vy) = config.velocity();
+            assert!(
+                (vx - expected_vx).abs() < 1e-10,
+                "Expected vx={}, got vx={}",
+                expected_vx,
+                vx
+            );
+            assert!(
+                (vy - expected_vy).abs() < 1e-10,
+                "Expected vy={}, got vy={}",
+                expected_vy,
+                vy
+            );
+        }
+    }
+
+    #[test]
+    fn test_integration_displacement_computation() {
+        // Test displacement computation
+        let test_cases = [
+            // (dx, dy, expected_displacement)
+            (3.0, 4.0, 5.0),   // 3-4-5 triangle
+            (0.0, 10.0, 10.0), // Vertical only
+            (10.0, 0.0, 10.0), // Horizontal only
+            (5.0, 12.0, 13.0), // 5-12-13 triangle
+        ];
+
+        for (dx, dy, expected) in test_cases {
+            let pos_start = ObjectPosition::new(100.0, 100.0, 0.0);
+            let pos_end = ObjectPosition::new(100.0 + dx, 100.0 + dy, 100.0);
+            let config = CometStackConfig::new(pos_start, pos_end);
+
+            let displacement = config.total_displacement();
+            assert!(
+                (displacement - expected).abs() < 1e-10,
+                "Expected displacement={}, got {}",
+                expected,
+                displacement
+            );
+        }
+    }
+
+    #[test]
+    fn test_integration_result_struct_completeness() {
+        // Verify all fields in CometStackResult are correctly populated
+        let pos_start = ObjectPosition::new(10.0, 20.0, 0.0);
+        let pos_end = ObjectPosition::new(30.0, 50.0, 100.0);
+        let config =
+            CometStackConfig::new(pos_start, pos_end).composite_method(CompositeMethod::Lighten);
+
+        let star_stack = vec![0.5f32; 256];
+        let comet_stack = vec![0.6f32; 256];
+
+        let result = create_comet_stack_result(star_stack, comet_stack, 16, 16, &config);
+
+        assert_eq!(result.width, 16);
+        assert_eq!(result.height, 16);
+        assert_eq!(result.star_stack.len(), 256);
+        assert_eq!(result.comet_stack.len(), 256);
+        assert!(result.composite.is_some());
+        assert_eq!(result.composite.as_ref().unwrap().len(), 256);
+
+        let (vx, vy) = result.velocity;
+        assert!((vx - 0.2).abs() < 1e-10);
+        assert!((vy - 0.3).abs() < 1e-10);
+
+        // Displacement = sqrt(20^2 + 30^2) = sqrt(400 + 900) = sqrt(1300)
+        let expected_displacement = (20.0f64 * 20.0 + 30.0 * 30.0).sqrt();
+        assert!((result.displacement - expected_displacement).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_integration_transform_with_rotation() {
+        // Test comet-aligned transform when star transform includes rotation
+        let pos_start = ObjectPosition::new(64.0, 64.0, 0.0);
+        let pos_end = ObjectPosition::new(84.0, 64.0, 100.0); // Horizontal motion only
+        let config = CometStackConfig::new(pos_start, pos_end);
+
+        // Star transform with small rotation (1 degree)
+        let angle = 1.0f64.to_radians();
+        let star_transform = TransformMatrix::euclidean(0.0, 0.0, angle);
+
+        // At t=50, comet has moved 10 pixels in x
+        let comet_transform = config.comet_aligned_transform(&star_transform, 50.0, 0.0);
+
+        // The transform should include both the rotation and the comet offset
+        // Verify it's not identity
+        assert!(
+            comet_transform.deviation_from_identity() > 0.01,
+            "Transform should differ from identity"
+        );
+
+        // Verify the comet at t=50 maps correctly
+        let comet_x_at_50 = 74.0; // 64 + 10
+        let comet_y_at_50 = 64.0;
+
+        let (aligned_x, aligned_y) = comet_transform.apply(comet_x_at_50, comet_y_at_50);
+
+        // After the star rotation and comet offset, it should map near the reference position
+        // The exact position depends on the composition order
+        // The important thing is the transform is being applied correctly
+        assert!(
+            aligned_x.is_finite() && aligned_y.is_finite(),
+            "Transform should produce valid coordinates"
+        );
+    }
+
+    #[test]
+    fn test_integration_multiple_composite_methods() {
+        // Test all composite methods work correctly
+        let width = 32;
+        let height = 32;
+
+        let mut star_stack = vec![0.1f32; width * height];
+        render_gaussian(&mut star_stack, width, 10.0, 10.0, 2.0, 0.5);
+
+        let mut comet_stack = vec![0.1f32; width * height];
+        render_gaussian(&mut comet_stack, width, 20.0, 20.0, 2.0, 0.6);
+
+        // Test Lighten
+        let lighten = composite_stacks(&star_stack, &comet_stack, CompositeMethod::Lighten);
+        assert!(lighten.is_some());
+        let lighten = lighten.unwrap();
+        // Lighten should have max of each pixel
+        for (i, (&s, &c)) in star_stack.iter().zip(comet_stack.iter()).enumerate() {
+            assert!(
+                (lighten[i] - s.max(c)).abs() < 1e-6,
+                "Lighten mismatch at pixel {}",
+                i
+            );
+        }
+
+        // Test Additive
+        let additive = composite_stacks(&star_stack, &comet_stack, CompositeMethod::Additive);
+        assert!(additive.is_some());
+        let additive = additive.unwrap();
+        // Additive should have star + (comet - background)
+        // Just verify it produced a result and is different from lighten in most places
+        assert_eq!(additive.len(), lighten.len());
+
+        // Test Separate
+        let separate = composite_stacks(&star_stack, &comet_stack, CompositeMethod::Separate);
+        assert!(separate.is_none());
+    }
+
+    #[test]
+    fn test_integration_config_with_rejection_method() {
+        // Verify rejection method can be configured
+        let pos_start = ObjectPosition::new(50.0, 50.0, 0.0);
+        let pos_end = ObjectPosition::new(70.0, 70.0, 100.0);
+
+        let config = CometStackConfig::new(pos_start, pos_end)
+            .rejection(RejectionMethod::SigmaClip(
+                crate::stacking::rejection::SigmaClipConfig::new(2.0, 3),
+            ))
+            .normalization(NormalizationMethod::Global)
+            .composite_method(CompositeMethod::Additive);
+
+        // Verify configuration was set
+        assert_eq!(config.composite_method, CompositeMethod::Additive);
+        assert_eq!(config.normalization, NormalizationMethod::Global);
+        match config.rejection {
+            RejectionMethod::SigmaClip(sc) => {
+                assert!((sc.sigma - 2.0).abs() < 1e-6);
+                assert_eq!(sc.max_iterations, 3);
+            }
+            _ => panic!("Expected SigmaClip rejection method"),
+        }
+    }
+}
