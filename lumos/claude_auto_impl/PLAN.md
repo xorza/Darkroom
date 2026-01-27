@@ -46,7 +46,7 @@ Many functions take `(pixels: &[f32], width: usize, height: usize)` instead of `
 
 ## Phase 5: Update exports
 
-- [ ] Update `src/prelude.rs` to export all new wrapper functions and builders
+- [x] Update `src/prelude.rs` to export all new wrapper functions and builders
 - [ ] Ensure all public API is documented with examples
 
 ## Phase 6: Examples

@@ -20,10 +20,21 @@ pub use crate::{
     StarDetectionResult, find_stars,
 };
 
+// Star detection - background estimation
+pub use crate::{
+    BackgroundMap, IterativeBackgroundConfig, estimate_background, estimate_background_image,
+    estimate_background_iterative, estimate_background_iterative_image,
+};
+
 // Registration - main API
 pub use crate::{
-    InterpolationMethod, RegistrationConfig, RegistrationError, RegistrationResult, Registrator,
-    TransformMatrix, TransformType, WarpConfig,
+    InterpolationMethod, RegistrationConfig, RegistrationConfigBuilder, RegistrationError,
+    RegistrationResult, Registrator, TransformMatrix, TransformType, WarpConfig,
+};
+
+// Registration - convenience functions
+pub use crate::{
+    quick_register, register_star_positions, warp_to_reference, warp_to_reference_image,
 };
 
 // Stacking - main API
@@ -33,7 +44,15 @@ pub use crate::{
 };
 
 // Live stacking
-pub use crate::{LiveFrameQuality, LiveStackAccumulator, LiveStackConfig, LiveStackMode};
+pub use crate::{
+    LiveFrameQuality, LiveStackAccumulator, LiveStackConfig, LiveStackConfigBuilder,
+    LiveStackError, LiveStackMode,
+};
 
 // Multi-session stacking
 pub use crate::{MultiSessionStack, Session, SessionConfig};
+
+// Gradient removal
+pub use crate::{
+    GradientRemovalConfig, GradientRemovalError, remove_gradient, remove_gradient_image,
+};
