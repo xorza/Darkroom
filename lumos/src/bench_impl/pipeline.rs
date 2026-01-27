@@ -368,6 +368,7 @@ fn warp_sequential_cpu(
 }
 
 /// Warp using parallel CPU processing (SIMD + rayon).
+/// Processes each channel in parallel using warp_to_reference.
 fn warp_parallel_cpu(
     image: &AstroImage,
     width: usize,
@@ -376,14 +377,31 @@ fn warp_parallel_cpu(
     transform: &TransformMatrix,
     method: InterpolationMethod,
 ) -> AstroImage {
-    let warped_pixels = crate::registration::warp_multichannel_parallel(
-        image.pixels(),
-        width,
-        height,
-        channels,
-        transform,
-        method,
-    );
+    use crate::registration::warp_to_reference;
+    use rayon::prelude::*;
+
+    // Extract and warp each channel in parallel
+    let warped_channels: Vec<Vec<f32>> = (0..channels)
+        .into_par_iter()
+        .map(|c| {
+            let channel: Vec<f32> = image
+                .pixels()
+                .iter()
+                .skip(c)
+                .step_by(channels)
+                .copied()
+                .collect();
+            warp_to_reference(&channel, width, height, transform, method)
+        })
+        .collect();
+
+    // Interleave channels back together
+    let mut warped_pixels = vec![0.0f32; width * height * channels];
+    for (c, channel_data) in warped_channels.iter().enumerate() {
+        for (i, &val) in channel_data.iter().enumerate() {
+            warped_pixels[i * channels + c] = val;
+        }
+    }
 
     AstroImage::from_pixels(width, height, channels, warped_pixels)
 }
@@ -397,20 +415,35 @@ fn warp_gpu(
     channels: usize,
     transform: &TransformMatrix,
 ) -> AstroImage {
+    use crate::registration::warp_to_reference;
+
     let warped_pixels = if channels == 3 {
         gpu_warper.warp_rgb(image.pixels(), width, height, transform)
     } else if channels == 1 {
         gpu_warper.warp_channel(image.pixels(), width, height, transform)
     } else {
-        // Fallback for other channel counts
-        crate::registration::warp_multichannel_parallel(
-            image.pixels(),
-            width,
-            height,
-            channels,
-            transform,
-            InterpolationMethod::Bilinear,
-        )
+        // Fallback for other channel counts: warp each channel separately
+        let mut result = vec![0.0f32; width * height * channels];
+        for c in 0..channels {
+            let channel: Vec<f32> = image
+                .pixels()
+                .iter()
+                .skip(c)
+                .step_by(channels)
+                .copied()
+                .collect();
+            let warped_channel = warp_to_reference(
+                &channel,
+                width,
+                height,
+                transform,
+                InterpolationMethod::Bilinear,
+            );
+            for (i, &val) in warped_channel.iter().enumerate() {
+                result[i * channels + c] = val;
+            }
+        }
+        result
     };
 
     AstroImage::from_pixels(width, height, channels, warped_pixels)

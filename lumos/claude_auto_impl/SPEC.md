@@ -82,7 +82,7 @@ with tests and running verification commands per project conventions.
 ### 2.4 Batch Processing Pipeline
 - [x] Implement overlapped compute/transfer for frame processing
 - [x] Add async GPU operations with proper synchronization
-- [ ] Benchmark end-to-end pipeline throughput
+- [x] Benchmark end-to-end pipeline throughput
 
 **Implementation**: Created `src/stacking/gpu/batch_pipeline.rs` with:
 - `BatchPipeline` and `BatchPipelineConfig` types for multi-batch GPU stacking
@@ -91,6 +91,12 @@ with tests and running verification commands per project conventions.
 - Callback-based async readback using `map_async` with `AtomicBool` completion flags
 - `PendingReadback` type for tracking in-flight buffer mapping operations
 - 18 unit tests passing (13 original + 5 async tests)
+
+**Benchmark Results** (2026-01-27):
+- GPU sigma clipping: 5-18% faster than CPU for large stacks (>50 frames)
+- Batch pipeline: Maintains ~240-280 Melem/s throughput for 1024x1024-2048x2048 images
+- Async vs sync: No significant difference for in-memory data (async benefits I/O overlap)
+- See `benches/stacking/bench-analysis.md` for detailed analysis
 
 ---
 
@@ -163,10 +169,10 @@ cargo bench -p lumos --features bench --bench <name> | tee benches/<name>_result
 | Phase | Tasks | Complete | Status |
 |-------|-------|----------|--------|
 | Local Normalization | 5 | 5 | **Complete** |
-| GPU Acceleration | 12 | 11 | Partial (warping done, FFT skipped, sigma clip done, star detection done, batch pipeline async done) |
+| GPU Acceleration | 12 | 12 | **Complete** (warping done, FFT skipped, sigma clip done, star detection done, batch pipeline done + benchmarked) |
 | Advanced Features | 14 | 0 | Not Started |
 | Quality & Polish | 4 | 0 | Not Started |
-| **Total** | **35** | **15** | **In Progress** |
+| **Total** | **35** | **17** | **In Progress** |
 
 ---
 
