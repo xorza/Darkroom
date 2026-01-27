@@ -157,3 +157,269 @@ This works well for single-session data with minimal gradients but fails for:
 - Multi-session data with different sky conditions
 - Frames with varying light pollution gradients
 - Mosaics with different overlap regions
+
+---
+
+## GPU Sigma Clipping Design (January 2026)
+
+### Overview
+
+GPU-accelerated sigma clipping for image stacking. Each GPU thread handles one pixel position across all N frames in the stack, computing statistics and performing iterative outlier rejection.
+
+### Design Decisions
+
+1. **Mean-based clipping** (not median): Computing exact median on GPU requires sorting each N-element stack, which is expensive. Mean-based clipping is:
+   - Easily parallelizable via reduction
+   - Works well with iterative clipping (outliers removed progressively)
+   - Final result is mean anyway (lower noise than median for Gaussian data)
+
+2. **Single-pass statistics**: Compute mean and variance in one pass using Welford's online algorithm to avoid numerical precision issues.
+
+3. **Workgroup per tile**: Each workgroup processes a tile of pixels (e.g., 16×16 = 256 threads). Each thread computes statistics for one pixel stack.
+
+4. **Frame data layout**: Frames stored sequentially in a single buffer. For N frames of WxH pixels:
+   - `frame_data[frame_idx * W * H + y * W + x]` accesses pixel (x,y) of frame `frame_idx`
+   - This layout enables coalesced reads when threads in a workgroup access adjacent pixels
+
+### Data Structures
+
+```rust
+/// GPU sigma clipping configuration
+#[derive(Debug, Clone, Copy)]
+pub struct GpuSigmaClipConfig {
+    pub sigma: f32,           // Clipping threshold (default: 2.5)
+    pub max_iterations: u32,  // Max clipping iterations (default: 3)
+}
+
+/// Params buffer for the shader
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Pod, Zeroable)]
+struct GpuSigmaClipParams {
+    width: u32,
+    height: u32,
+    frame_count: u32,
+    sigma: f32,
+    max_iterations: u32,
+    _padding: [u32; 3],  // Align to 16 bytes
+}
+```
+
+### WGSL Shader Design
+
+**Bindings:**
+```wgsl
+struct Params {
+    width: u32,
+    height: u32,
+    frame_count: u32,
+    sigma: f32,
+    max_iterations: u32,
+    _padding: vec3<u32>,
+}
+
+@group(0) @binding(0) var<uniform> params: Params;
+@group(0) @binding(1) var<storage, read> frames: array<f32>;  // All frames concatenated
+@group(0) @binding(2) var<storage, read_write> output: array<f32>;  // Result image
+```
+
+**Algorithm:**
+```wgsl
+@compute @workgroup_size(16, 16, 1)
+fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
+    let x = global_id.x;
+    let y = global_id.y;
+
+    if (x >= params.width || y >= params.height) {
+        return;
+    }
+
+    let pixel_idx = y * params.width + x;
+    let pixels_per_frame = params.width * params.height;
+
+    // Load all values for this pixel into local array
+    // Note: Max ~128 frames due to register pressure
+    var values: array<f32, 128>;
+    var valid: array<bool, 128>;
+    var count = params.frame_count;
+
+    for (var i = 0u; i < params.frame_count; i++) {
+        values[i] = frames[i * pixels_per_frame + pixel_idx];
+        valid[i] = true;
+    }
+
+    // Iterative sigma clipping
+    for (var iter = 0u; iter < params.max_iterations; iter++) {
+        if (count <= 2u) {
+            break;
+        }
+
+        // Compute mean using only valid values
+        var sum = 0.0;
+        var n = 0u;
+        for (var i = 0u; i < params.frame_count; i++) {
+            if (valid[i]) {
+                sum += values[i];
+                n++;
+            }
+        }
+        let mean = sum / f32(n);
+
+        // Compute variance
+        var sum_sq = 0.0;
+        for (var i = 0u; i < params.frame_count; i++) {
+            if (valid[i]) {
+                let diff = values[i] - mean;
+                sum_sq += diff * diff;
+            }
+        }
+        let variance = sum_sq / f32(n);
+        let std_dev = sqrt(variance);
+
+        if (std_dev < 1e-10) {
+            break;  // All values identical
+        }
+
+        // Mark outliers as invalid
+        let threshold = params.sigma * std_dev;
+        var clipped = 0u;
+        for (var i = 0u; i < params.frame_count; i++) {
+            if (valid[i] && abs(values[i] - mean) > threshold) {
+                valid[i] = false;
+                clipped++;
+            }
+        }
+
+        if (clipped == 0u) {
+            break;  // Converged
+        }
+        count -= clipped;
+    }
+
+    // Compute final mean of remaining values
+    var final_sum = 0.0;
+    var final_n = 0u;
+    for (var i = 0u; i < params.frame_count; i++) {
+        if (valid[i]) {
+            final_sum += values[i];
+            final_n++;
+        }
+    }
+
+    output[pixel_idx] = final_sum / f32(max(final_n, 1u));
+}
+```
+
+### Memory Layout
+
+**Frame Buffer:**
+- Size: `N × W × H × 4` bytes (N frames, W×H pixels, f32)
+- Layout: Frame-major (all pixels of frame 0, then frame 1, etc.)
+- Access pattern: Each thread reads N values at stride `W×H`
+
+**Output Buffer:**
+- Size: `W × H × 4` bytes
+- Layout: Row-major
+- Access pattern: Each thread writes one value
+
+### Workgroup Sizing
+
+- **Workgroup size**: 16×16 = 256 threads (good occupancy on most GPUs)
+- **Dispatch**: `ceil(W/16) × ceil(H/16)` workgroups
+- **Register pressure**: ~128 frames max due to local array size
+
+### Performance Considerations
+
+1. **Memory bandwidth**: Main bottleneck. Each pixel reads N×4 bytes from global memory.
+   - For 24MP image with 50 frames: 24M × 50 × 4 = 4.8 GB reads
+   - Typical GPU memory bandwidth: 400-900 GB/s
+   - Expected: ~5-15ms for reads alone
+
+2. **Compute**: Lightweight compared to memory
+   - Per-pixel: O(N × iterations) operations
+   - GPU can hide latency with many threads
+
+3. **Transfer overhead**: Critical for CPU→GPU path
+   - 4.8 GB over PCIe 3.0 x16 (~12 GB/s): ~400ms
+   - GPU must provide >>10× speedup to overcome transfer
+   - Best when data already on GPU (e.g., after GPU warping)
+
+### API Design
+
+```rust
+/// GPU-accelerated sigma clipping stacker
+pub struct GpuSigmaClipper {
+    ctx: ProcessingContext,
+    pipeline: GpuSigmaClipPipeline,
+}
+
+impl GpuSigmaClipper {
+    pub fn new() -> Self;
+
+    /// Stack frames using GPU sigma clipping.
+    /// Frames must all have same dimensions.
+    pub fn stack(
+        &mut self,
+        frames: &[&[f32]],  // Slice of frame data
+        width: usize,
+        height: usize,
+        config: &GpuSigmaClipConfig,
+    ) -> Vec<f32>;
+
+    /// Stack frames already on GPU (from GpuImage).
+    /// More efficient when data is already on GPU.
+    pub fn stack_gpu(
+        &mut self,
+        frames: &[&GpuImage],
+        config: &GpuSigmaClipConfig,
+    ) -> GpuImage;
+}
+```
+
+### Integration with Existing Code
+
+**Automatic backend selection:**
+```rust
+pub fn stack_sigma_clipped_from_paths<P: AsRef<Path> + Sync>(
+    paths: &[P],
+    frame_type: FrameType,
+    config: &SigmaClippedConfig,
+    progress: ProgressCallback,
+) -> Result<AstroImage, Error> {
+    // Use GPU if:
+    // 1. GPU is available
+    // 2. Frame count >= threshold (e.g., 30)
+    // 3. Image size >= threshold (e.g., 4K)
+    if config.use_gpu && should_use_gpu(paths.len(), expected_size) {
+        return stack_sigma_clipped_gpu(paths, frame_type, config, progress);
+    }
+
+    // Fall back to CPU implementation
+    let cache = ImageCache::from_paths(paths, &config.cache, frame_type, progress)?;
+    // ... existing CPU code ...
+}
+```
+
+### Fallback Strategy
+
+1. **Small stacks (<20 frames)**: CPU always faster (GPU transfer overhead)
+2. **Small images (<1K×1K)**: CPU likely faster
+3. **No GPU available**: Automatic CPU fallback
+4. **GPU out of memory**: Fall back to CPU with warning
+
+### Testing Strategy
+
+1. **Correctness**: Compare GPU results to CPU reference within tolerance (±1e-4)
+2. **Edge cases**:
+   - Single frame (no clipping needed)
+   - Two frames (minimal clipping possible)
+   - All identical values (std_dev = 0)
+   - All outliers except one
+3. **Performance**: Benchmark vs CPU at various frame counts and image sizes
+
+### Files to Implement
+
+- `src/stacking/gpu/mod.rs` - Module definition, backend selection
+- `src/stacking/gpu/sigma_clip.rs` - GpuSigmaClipper implementation
+- `src/stacking/gpu/sigma_clip.wgsl` - WGSL compute shader
+- `src/stacking/gpu/pipeline.rs` - Pipeline setup and caching
+- `src/stacking/gpu/NOTES-AI.md` - Implementation notes (this design)

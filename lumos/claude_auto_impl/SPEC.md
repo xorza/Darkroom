@@ -49,7 +49,7 @@ with tests and running verification commands per project conventions.
 
 ### 2.2 GPU Sigma Clipping
 - [x] Research parallel reduction strategies for sigma clipping
-- [ ] Design GPU kernel for per-pixel stack statistics
+- [x] Design GPU kernel for per-pixel stack statistics
 - [ ] Implement GPU sigma clipping in wgpu compute shader
 - [ ] Write integration tests
 - [ ] Benchmark against CPU implementation
