@@ -69,6 +69,143 @@ impl Default for LiveStackConfig {
     }
 }
 
+impl LiveStackConfig {
+    /// Create a new builder for LiveStackConfig.
+    ///
+    /// # Example
+    /// ```rust,ignore
+    /// use lumos::stacking::{LiveStackConfig, LiveStackConfigBuilder};
+    ///
+    /// let config = LiveStackConfig::builder()
+    ///     .weighted_mean()
+    ///     .normalize(true)
+    ///     .track_variance(false)
+    ///     .build();
+    /// ```
+    pub fn builder() -> LiveStackConfigBuilder {
+        LiveStackConfigBuilder::new()
+    }
+}
+
+/// Builder for `LiveStackConfig`.
+///
+/// Provides a fluent interface for constructing live stack configurations.
+///
+/// # Example
+/// ```rust,ignore
+/// use lumos::stacking::LiveStackConfig;
+///
+/// // Simple running mean
+/// let config = LiveStackConfig::builder()
+///     .running_mean()
+///     .build();
+///
+/// // Weighted mean with normalization
+/// let config = LiveStackConfig::builder()
+///     .weighted_mean()
+///     .normalize(true)
+///     .build();
+///
+/// // Rolling sigma clip for satellite rejection
+/// let config = LiveStackConfig::builder()
+///     .rolling_sigma_clip(20, 2.5)
+///     .track_variance(true)
+///     .build();
+/// ```
+#[derive(Debug, Clone)]
+pub struct LiveStackConfigBuilder {
+    mode: LiveStackMode,
+    normalize: bool,
+    preview_channel: Option<usize>,
+    track_variance: bool,
+}
+
+impl Default for LiveStackConfigBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl LiveStackConfigBuilder {
+    /// Create a new builder with default values.
+    pub fn new() -> Self {
+        Self {
+            mode: LiveStackMode::RunningMean,
+            normalize: true,
+            preview_channel: None,
+            track_variance: true,
+        }
+    }
+
+    /// Set the stacking mode to running mean.
+    ///
+    /// Running mean uses O(pixels) memory and provides no outlier rejection.
+    /// Best for quick previews and memory-constrained situations.
+    pub fn running_mean(mut self) -> Self {
+        self.mode = LiveStackMode::RunningMean;
+        self
+    }
+
+    /// Set the stacking mode to weighted mean.
+    ///
+    /// Weighted mean uses O(pixels) memory and weights frames by quality.
+    /// Best for real-time sessions where frame quality varies.
+    pub fn weighted_mean(mut self) -> Self {
+        self.mode = LiveStackMode::WeightedMean;
+        self
+    }
+
+    /// Set the stacking mode to rolling sigma clip.
+    ///
+    /// Rolling sigma clip keeps the last N frames for sigma-clipped averaging,
+    /// using O(N × pixels) memory. Best for satellite/airplane rejection.
+    ///
+    /// # Arguments
+    /// * `window_size` - Number of recent frames to keep (typical: 10-30, minimum: 3)
+    /// * `sigma` - Sigma threshold for clipping (typical: 2.0-3.0)
+    pub fn rolling_sigma_clip(mut self, window_size: usize, sigma: f32) -> Self {
+        self.mode = LiveStackMode::RollingSigmaClip { window_size, sigma };
+        self
+    }
+
+    /// Set whether to normalize incoming frames.
+    ///
+    /// When enabled (default: true), incoming frames are normalized to match
+    /// the first frame's statistics (median and MAD).
+    pub fn normalize(mut self, normalize: bool) -> Self {
+        self.normalize = normalize;
+        self
+    }
+
+    /// Set whether to track per-pixel variance.
+    ///
+    /// When enabled (default: true), variance is tracked for quality estimation.
+    /// This adds slight memory overhead but provides useful statistics.
+    pub fn track_variance(mut self, track_variance: bool) -> Self {
+        self.track_variance = track_variance;
+        self
+    }
+
+    /// Set the target channel for preview auto-stretch.
+    ///
+    /// When set, auto-stretch uses only this channel's histogram.
+    /// When None (default), all channels are considered.
+    pub fn preview_channel(mut self, channel: Option<usize>) -> Self {
+        self.preview_channel = channel;
+        self
+    }
+
+    /// Build the configuration.
+    pub fn build(self) -> LiveStackConfig {
+        LiveStackConfig {
+            mode: self.mode,
+            normalize: self.normalize,
+            preview_channel: self.preview_channel,
+            track_variance: self.track_variance,
+        }
+    }
+}
+
 /// Live stacking mode determining memory usage and capabilities.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum LiveStackMode {
@@ -1057,5 +1194,87 @@ mod tests {
         assert_eq!(stack.height, 80);
         assert_eq!(stack.channels, 3);
         assert!(stack.is_empty());
+    }
+
+    #[test]
+    fn test_builder_running_mean() {
+        let config = LiveStackConfig::builder().running_mean().build();
+
+        assert_eq!(config.mode, LiveStackMode::RunningMean);
+        assert!(config.normalize); // default true
+        assert!(config.track_variance); // default true
+    }
+
+    #[test]
+    fn test_builder_weighted_mean() {
+        let config = LiveStackConfig::builder()
+            .weighted_mean()
+            .normalize(false)
+            .build();
+
+        assert_eq!(config.mode, LiveStackMode::WeightedMean);
+        assert!(!config.normalize);
+    }
+
+    #[test]
+    fn test_builder_rolling_sigma_clip() {
+        let config = LiveStackConfig::builder()
+            .rolling_sigma_clip(20, 2.5)
+            .track_variance(false)
+            .build();
+
+        assert_eq!(
+            config.mode,
+            LiveStackMode::RollingSigmaClip {
+                window_size: 20,
+                sigma: 2.5
+            }
+        );
+        assert!(!config.track_variance);
+    }
+
+    #[test]
+    fn test_builder_all_options() {
+        let config = LiveStackConfig::builder()
+            .weighted_mean()
+            .normalize(false)
+            .track_variance(true)
+            .preview_channel(Some(1))
+            .build();
+
+        assert_eq!(config.mode, LiveStackMode::WeightedMean);
+        assert!(!config.normalize);
+        assert!(config.track_variance);
+        assert_eq!(config.preview_channel, Some(1));
+    }
+
+    #[test]
+    fn test_builder_default() {
+        let config = LiveStackConfig::builder().build();
+        let default_config = LiveStackConfig::default();
+
+        assert_eq!(config.mode, default_config.mode);
+        assert_eq!(config.normalize, default_config.normalize);
+        assert_eq!(config.track_variance, default_config.track_variance);
+        assert_eq!(config.preview_channel, default_config.preview_channel);
+    }
+
+    #[test]
+    fn test_builder_with_accumulator() {
+        // Verify builder works end-to-end with accumulator
+        let config = LiveStackConfig::builder()
+            .weighted_mean()
+            .normalize(false)
+            .build();
+
+        let mut stack = LiveStackAccumulator::new(10, 10, 1, config).unwrap();
+
+        let frame = create_test_frame(10, 10, 1, 1.0);
+        stack
+            .add_frame(&frame, LiveFrameQuality::unknown())
+            .unwrap();
+
+        let result = stack.preview().unwrap();
+        assert!((result.pixels()[0] - 1.0).abs() < 0.001);
     }
 }

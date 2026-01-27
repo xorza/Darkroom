@@ -185,6 +185,7 @@ pub use stacking::{
     LiveQualityStream,
     LiveStackAccumulator,
     LiveStackConfig,
+    LiveStackConfigBuilder,
     LiveStackError,
     LiveStackMode,
     LiveStackResult,

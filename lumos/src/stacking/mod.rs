@@ -68,8 +68,8 @@ pub use gradient_removal::{
 // Re-export live stacking types for public API
 #[allow(unused_imports)]
 pub use live::{
-    LiveFrameQuality, LiveQualityStream, LiveStackAccumulator, LiveStackConfig, LiveStackError,
-    LiveStackMode, LiveStackResult, LiveStackStats,
+    LiveFrameQuality, LiveQualityStream, LiveStackAccumulator, LiveStackConfig,
+    LiveStackConfigBuilder, LiveStackError, LiveStackMode, LiveStackResult, LiveStackStats,
 };
 
 #[cfg(feature = "bench")]
