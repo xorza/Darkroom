@@ -61,7 +61,7 @@ Existing: `examples/full_pipeline.rs` (calibration + registration + stacking)
 
 ### Example 1: Star Detection (`examples/star_detection.rs`)
 
-- [ ] Create example showing star detection workflow:
+- [x] Create example showing star detection workflow:
   - Load image with `AstroImage::from_file()`
   - Detect stars with default config: `find_stars(&image, &StarDetectionConfig::default())`
   - Detect with custom config using builder: `StarDetectionConfig::builder().for_wide_field().with_min_snr(15.0).build()`
