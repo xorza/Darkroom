@@ -273,8 +273,8 @@ pub(crate) struct DetectionParams {
     pub psf_angle: f32,
     /// Tile size for background estimation.
     pub background_tile_size: usize,
-    /// Number of iterative background estimation passes.
-    pub iterative_background_passes: usize,
+    /// Number of background estimation passes (0 = single pass, >0 = iterative).
+    pub background_passes: usize,
 }
 
 impl Default for DetectionParams {
@@ -288,7 +288,7 @@ impl Default for DetectionParams {
             psf_axis_ratio: 1.0,
             psf_angle: 0.0,
             background_tile_size: 64,
-            iterative_background_passes: 0,
+            background_passes: 0,
         }
     }
 }
@@ -452,11 +452,11 @@ pub struct StarDetectionConfig {
     /// When provided, defective pixels are replaced with local median before detection,
     /// and stars with centroids near defects are flagged.
     pub defect_map: Option<DefectMap>,
-    /// Number of iterative background estimation passes (0 = single pass).
+    /// Number of background estimation passes (0 = single pass).
     /// When > 0, the background is re-estimated after masking detected objects,
     /// which improves accuracy in crowded fields. SExtractor-style algorithm.
     /// Typical value: 1-2 for crowded fields, 0 for sparse fields.
-    pub iterative_background_passes: usize,
+    pub background_passes: usize,
     /// Method for computing sub-pixel centroids.
     /// WeightedMoments (default) is fast (~0.05 pixel accuracy).
     /// GaussianFit and MoffatFit provide higher precision (~0.01 pixel) but are slower.
@@ -493,7 +493,7 @@ impl Default for StarDetectionConfig {
             gain: None, // Use simplified SNR formula by default
             read_noise: None,
             defect_map: None,
-            iterative_background_passes: 0, // Single pass by default (fastest)
+            background_passes: 0, // Single pass by default (fastest)
             centroid_method: CentroidMethod::WeightedMoments,
             local_background_method: LocalBackgroundMethod::GlobalMap,
         }
@@ -614,7 +614,7 @@ impl StarDetectionConfig {
             psf_axis_ratio: detection.psf_axis_ratio,
             psf_angle: detection.psf_angle,
             background_tile_size: detection.background_tile_size,
-            iterative_background_passes: detection.iterative_background_passes,
+            background_passes: detection.background_passes,
             max_eccentricity: quality.max_eccentricity,
             min_snr: quality.min_snr,
             max_fwhm_deviation: quality.max_fwhm_deviation,
@@ -672,7 +672,7 @@ impl StarDetectionConfigBuilder {
     pub fn for_crowded_field(mut self) -> Self {
         self.deblend.multi_threshold = true;
         self.deblend.min_separation = 2;
-        self.detection.iterative_background_passes = 2;
+        self.detection.background_passes = 2;
         self
     }
 
@@ -836,10 +836,10 @@ pub fn find_stars(image: &AstroImage, config: &StarDetectionConfig) -> StarDetec
     };
 
     // Step 1: Estimate background
-    let background = if config.iterative_background_passes > 0 {
+    let background = if config.background_passes > 0 {
         // Use iterative background estimation for crowded fields
         let iter_config = IterativeBackgroundConfig {
-            iterations: config.iterative_background_passes,
+            iterations: config.background_passes,
             detection_sigma: config.detection_sigma,
             ..IterativeBackgroundConfig::default()
         };
