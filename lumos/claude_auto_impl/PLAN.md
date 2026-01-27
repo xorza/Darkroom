@@ -80,7 +80,7 @@ Existing: `examples/full_pipeline.rs` (calibration + registration + stacking)
 
 ### Example 3: Live Stacking (`examples/live_stacking.rs`)
 
-- [ ] Create example showing real-time EAA workflow:
+- [x] Create example showing real-time EAA workflow:
   - Create accumulator with `LiveStackAccumulator::from_reference()` (requires Phase 1)
   - Configure with `LiveStackConfig::builder()` (requires Phase 3)
   - Simulate incoming frames in a loop
