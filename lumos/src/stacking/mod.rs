@@ -36,7 +36,10 @@ pub use weighted::{FrameQuality, RejectionMethod, WeightedConfig};
 pub use local_normalization::{LocalNormalizationConfig, NormalizationMethod};
 // Re-export GPU types for public API
 #[allow(unused_imports)]
-pub use gpu::{GpuSigmaClipConfig, GpuSigmaClipPipeline, GpuSigmaClipper, MAX_GPU_FRAMES};
+pub use gpu::{
+    BatchPipeline, BatchPipelineConfig, GpuSigmaClipConfig, GpuSigmaClipPipeline, GpuSigmaClipper,
+    MAX_GPU_FRAMES,
+};
 
 #[cfg(feature = "bench")]
 pub mod bench {

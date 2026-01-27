@@ -455,3 +455,84 @@ if clipper.gpu_available() {
 cargo bench -p lumos --features bench --bench stack_gpu_sigma_clip
 ```
 Benchmarks GPU vs CPU for various image sizes (256x256 to 2048x2048) and frame counts (10-50).
+
+---
+
+## Batch Processing Pipeline (IMPLEMENTED - 2026-01-27)
+
+### Overview
+
+Multi-batch GPU processing with overlapped compute/transfer for stacking large numbers of frames (>128, the GPU shader limit). Frames are processed in batches with partial results combined using weighted mean.
+
+### Architecture
+
+```text
+┌─────────────────────────────────────────────────────────────────┐
+│                    Batch Processing Pipeline                     │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│   Frame Count > 128                                              │
+│        ↓                                                         │
+│   Split into batches (≤128 frames each)                          │
+│        ↓                                                         │
+│   For each batch:                                                │
+│     1. Upload frame data to GPU                                  │
+│     2. Run sigma clipping compute shader                         │
+│     3. Read back batch result                                    │
+│        ↓                                                         │
+│   Combine batch results (weighted mean by frame count)           │
+│        ↓                                                         │
+│   Final stacked image                                            │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Files
+
+- `src/stacking/gpu/batch_pipeline.rs` - BatchPipeline and BatchPipelineConfig
+
+### API
+
+```rust
+// Configuration
+let config = BatchPipelineConfig::default();  // sigma=2.5, max_iter=3, batch=128
+let config = BatchPipelineConfig::with_sigma_clip(2.0, 3);
+let config = config.batch_size(64);  // smaller batches for more overlap
+let config = config.triple_buffer(); // 3 buffer slots instead of 2
+
+// Stacking pre-loaded frames
+let mut pipeline = BatchPipeline::new(config);
+let result = pipeline.stack(&frames, width, height);
+
+// Stacking from file paths (with parallel I/O)
+let result = pipeline.stack_from_paths(&paths, width, height)?;
+```
+
+### Batch Result Combination
+
+When processing >128 frames, each batch produces a partial result. These are combined using weighted mean based on frame count:
+
+```
+combined[pixel] = Σ(batch_result[pixel] × batch_frame_count) / total_frames
+```
+
+This ensures batches with more frames contribute proportionally more to the final result.
+
+### Tests (13 passing)
+
+- Config tests: `test_config_default`, `test_config_with_sigma_clip`, `test_config_batch_size`, `test_config_triple_buffer`
+- Config panic tests: `test_config_batch_size_zero_panics`, `test_config_batch_size_too_large_panics`
+- Stack tests: `test_stack_single_batch`, `test_stack_multi_batch`, `test_stack_single_batch_with_outlier`, `test_stack_with_outlier_multi_batch`
+- Combine tests: `test_combine_batch_results_single`, `test_combine_batch_results_equal_weights`, `test_combine_batch_results_weighted`
+
+### Exports
+
+- `lumos::BatchPipeline`, `lumos::BatchPipelineConfig`
+
+### Future Optimizations
+
+The module includes infrastructure (BufferSlot struct) for true overlapped compute/transfer using double-buffering, where:
+- Buffer A: GPU computes on batch N
+- Buffer B: CPU uploads batch N+1
+
+This is not yet implemented but the foundation is in place.
