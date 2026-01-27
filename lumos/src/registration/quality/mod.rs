@@ -190,6 +190,18 @@ fn validate_registration(
 /// # Returns
 ///
 /// Estimated fraction of reference image that overlaps with target (0.0 - 1.0).
+///
+/// # Example
+/// ```rust,ignore
+/// use lumos::registration::{Registrator, RegistrationConfig, estimate_overlap};
+///
+/// let config = RegistrationConfig::default();
+/// let registrator = Registrator::new(config);
+/// let result = registrator.register_stars(&ref_stars, &target_stars)?;
+///
+/// let overlap = estimate_overlap(width, height, &result.transform);
+/// println!("Image overlap: {:.1}%", overlap * 100.0);
+/// ```
 pub fn estimate_overlap(width: usize, height: usize, transform: &TransformMatrix) -> f64 {
     // Sample corners and compute bounding box of transformed reference in target space
     let corners = [
@@ -321,7 +333,32 @@ fn percentile(sorted: &[f64], p: f64) -> f64 {
 
 /// Check if registration is consistent across image quadrants.
 ///
-/// This helps detect cases where registration is only correct in part of the image.
+/// This helps detect cases where registration is only correct in part of the image
+/// (e.g., due to field distortion or incorrect transformation model).
+///
+/// # Arguments
+///
+/// * `ref_points` - Reference star positions
+/// * `target_points` - Target star positions (matched pairs)
+/// * `transform` - Estimated transformation
+/// * `width` - Image width
+/// * `height` - Image height
+///
+/// # Example
+/// ```rust,ignore
+/// use lumos::registration::{Registrator, check_quadrant_consistency};
+///
+/// let result = registrator.register_stars(&ref_stars, &target_stars)?;
+///
+/// let consistency = check_quadrant_consistency(
+///     &ref_points, &target_points, &result.transform, width, height
+/// );
+///
+/// if !consistency.is_consistent {
+///     println!("Warning: Registration inconsistent across quadrants");
+///     println!("Max RMS difference: {:.2} pixels", consistency.max_difference);
+/// }
+/// ```
 pub fn check_quadrant_consistency(
     ref_points: &[(f64, f64)],
     target_points: &[(f64, f64)],

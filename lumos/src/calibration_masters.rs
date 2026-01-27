@@ -152,6 +152,18 @@ impl CalibrationMasters {
     /// Automatically generates hot pixel map from master dark if available.
     ///
     /// This is the preferred method. [`load_from_directory`](Self::load_from_directory) is deprecated.
+    ///
+    /// # Example
+    /// ```rust,ignore
+    /// use lumos::{CalibrationMasters, StackingMethod};
+    ///
+    /// // Load pre-created master frames
+    /// let masters = CalibrationMasters::load("./calibration", StackingMethod::Median)?;
+    ///
+    /// // Apply calibration to a light frame
+    /// let mut light = AstroImage::from_file("light_001.fits")?;
+    /// masters.calibrate(&mut light);
+    /// ```
     pub fn load<P: AsRef<Path>>(dir: P, method: StackingMethod) -> Result<Self> {
         Self::load_impl(dir, method)
     }
@@ -207,6 +219,28 @@ impl CalibrationMasters {
     /// Missing subdirectories are skipped (the corresponding master will be None).
     ///
     /// This is the preferred method. [`from_directory`](Self::from_directory) is deprecated.
+    ///
+    /// # Example
+    /// ```rust,ignore
+    /// use lumos::{CalibrationMasters, StackingMethod, stacking::ProgressCallback};
+    ///
+    /// // Create masters from raw calibration frames
+    /// let masters = CalibrationMasters::create(
+    ///     "./calibration",
+    ///     StackingMethod::SigmaClippedMean(Default::default()),
+    ///     ProgressCallback::default(),
+    /// )?;
+    ///
+    /// // Save for future use
+    /// masters.save_to_directory("./calibration")?;
+    ///
+    /// // Apply to light frames
+    /// for path in light_frame_paths {
+    ///     let mut light = AstroImage::from_file(&path)?;
+    ///     masters.calibrate(&mut light);
+    ///     // ... process calibrated frame ...
+    /// }
+    /// ```
     pub fn create<P: AsRef<Path>>(
         dir: P,
         method: StackingMethod,

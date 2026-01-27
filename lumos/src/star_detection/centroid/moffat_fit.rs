@@ -76,6 +76,10 @@ pub struct MoffatFitResult {
 
 /// Fit a 2D Moffat profile to a star stamp.
 ///
+/// Uses Levenberg-Marquardt optimization to fit a Moffat profile,
+/// which models stellar PSFs better than Gaussian for atmospheric seeing.
+/// Achieves ~0.01 pixel centroid accuracy.
+///
 /// # Arguments
 /// * `pixels` - Image pixel data
 /// * `width` - Image width
@@ -88,6 +92,35 @@ pub struct MoffatFitResult {
 ///
 /// # Returns
 /// `Some(MoffatFitResult)` if fit succeeds, `None` if fitting fails.
+///
+/// # Example
+/// ```rust,ignore
+/// use lumos::star_detection::centroid::{fit_moffat_2d, MoffatFitConfig};
+///
+/// // Extract a stamp around the star (21x21 pixels centered on star)
+/// let width = 21;
+/// let height = 21;
+/// let pixels: Vec<f32> = /* star stamp data */;
+///
+/// // Initial centroid estimate from weighted moments
+/// let cx = 10.5;
+/// let cy = 10.3;
+/// let background = 100.0;
+/// let stamp_radius = 8;
+///
+/// // Use fixed beta for faster, more stable fitting
+/// let config = MoffatFitConfig {
+///     fit_beta: false,
+///     fixed_beta: 2.5, // typical atmospheric seeing
+///     ..MoffatFitConfig::default()
+/// };
+///
+/// if let Some(result) = fit_moffat_2d(&pixels, width, height, cx, cy, stamp_radius, background, &config) {
+///     println!("Sub-pixel position: ({:.3}, {:.3})", result.x, result.y);
+///     println!("FWHM: {:.2} pixels", result.fwhm);
+///     println!("Converged: {}", result.converged);
+/// }
+/// ```
 #[allow(clippy::too_many_arguments)]
 pub fn fit_moffat_2d(
     pixels: &[f32],

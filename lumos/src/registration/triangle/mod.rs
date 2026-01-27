@@ -778,6 +778,29 @@ pub fn form_triangles_kdtree(positions: &[(f64, f64)], k_neighbors: usize) -> Ve
 ///
 /// # Returns
 /// Vector of matched star pairs with confidence scores
+///
+/// # Example
+/// ```rust,ignore
+/// use lumos::registration::{TriangleMatchConfig, match_triangles};
+///
+/// // Star positions from both images (sorted by brightness)
+/// let ref_positions = vec![
+///     (100.0, 200.0), (300.0, 150.0), (250.0, 400.0),
+///     (500.0, 300.0), (150.0, 350.0), (450.0, 100.0),
+/// ];
+/// let target_positions = vec![
+///     (102.0, 198.0), (302.0, 148.0), (252.0, 398.0),
+///     (502.0, 298.0), (152.0, 348.0), (452.0, 98.0),
+/// ];
+///
+/// let config = TriangleMatchConfig::default();
+/// let matches = match_triangles(&ref_positions, &target_positions, &config);
+///
+/// for m in &matches {
+///     println!("Ref star {} matches target star {} (votes: {})",
+///         m.ref_idx, m.target_idx, m.votes);
+/// }
+/// ```
 pub fn match_triangles(
     ref_positions: &[(f64, f64)],
     target_positions: &[(f64, f64)],

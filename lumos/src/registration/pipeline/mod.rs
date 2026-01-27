@@ -286,6 +286,24 @@ impl Registrator {
 /// * `ref_positions` - Reference star positions (x, y)
 /// * `target_positions` - Target star positions (x, y)
 /// * `transform_type` - Type of geometric transformation to estimate
+///
+/// # Example
+/// ```rust,ignore
+/// use lumos::{register_star_positions, TransformType};
+///
+/// let ref_positions = vec![
+///     (100.0, 200.0), (300.0, 150.0), (250.0, 400.0),
+///     (500.0, 300.0), (150.0, 350.0), (450.0, 100.0),
+/// ];
+/// let target_positions = vec![
+///     (110.0, 205.0), (310.0, 155.0), (260.0, 405.0),
+///     (510.0, 305.0), (160.0, 355.0), (460.0, 105.0),
+/// ];
+///
+/// let result = register_star_positions(&ref_positions, &target_positions, TransformType::Affine)?;
+/// println!("RMS error: {:.3} pixels", result.rms_error);
+/// println!("Matched {} stars", result.num_inliers);
+/// ```
 pub fn register_star_positions(
     ref_positions: &[(f64, f64)],
     target_positions: &[(f64, f64)],
@@ -439,6 +457,21 @@ pub fn warp_to_reference_image(
 /// # Returns
 ///
 /// The transformation matrix that maps reference to target coordinates.
+///
+/// # Example
+/// ```rust,ignore
+/// use lumos::{quick_register, warp_to_reference, InterpolationMethod};
+///
+/// // Star positions detected from both images
+/// let ref_positions = vec![(100.0, 200.0), (300.0, 150.0), /* ... */];
+/// let target_positions = vec![(102.0, 198.0), (302.0, 148.0), /* ... */];
+///
+/// // Get the transformation matrix
+/// let transform = quick_register(&ref_positions, &target_positions)?;
+///
+/// // Warp target image to align with reference
+/// let aligned = warp_to_reference(&target_pixels, width, height, &transform, InterpolationMethod::Lanczos3);
+/// ```
 pub fn quick_register(
     ref_stars: &[(f64, f64)],
     target_stars: &[(f64, f64)],
