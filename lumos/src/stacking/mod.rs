@@ -1,5 +1,6 @@
 mod cache;
 mod cache_config;
+mod drizzle;
 mod error;
 mod mean;
 mod median;
@@ -13,6 +14,9 @@ use std::path::PathBuf;
 use strum_macros::Display;
 
 pub use cache_config::CacheConfig;
+// Re-export drizzle types for public API
+#[allow(unused_imports)]
+pub use drizzle::{DrizzleAccumulator, DrizzleConfig, DrizzleKernel, DrizzleResult, drizzle_stack};
 pub use error::Error;
 pub use median::MedianConfig;
 pub use progress::{ProgressCallback, StackingProgress, StackingStage};
