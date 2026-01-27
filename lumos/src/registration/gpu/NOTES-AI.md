@@ -144,10 +144,164 @@ Current implementation in `src/registration/phase_correlation/mod.rs`:
 ### Research Complete
 - [x] GPU FFT options evaluated - NOT VIABLE currently
 
+### Research Complete
+- [x] GPU sigma clipping - parallel reduction strategies researched
+
 ### Not Started
-- [ ] GPU sigma clipping (parallel reduction)
+- [ ] GPU sigma clipping implementation
 - [ ] GPU star detection (threshold + connected components)
 - [ ] Batch processing pipeline (overlapped compute/transfer)
+
+---
+
+## GPU Sigma Clipping Research (January 2026)
+
+### Problem Analysis
+
+**Current CPU Implementation** (`src/stacking/sigma_clipped/mod.rs`):
+- Per-pixel stack of N frames (typically 15-100 frames)
+- Iterative algorithm: compute median/mean + std_dev, clip outliers, repeat
+- Default: 3 iterations with sigma=2.5
+- Uses SIMD-accelerated math (`math::median_f32_mut`, `math::sum_squared_diff`)
+
+**GPU Challenge**: Unlike simple reductions (sum, min, max), sigma clipping requires:
+1. Computing statistics (mean/median, std_dev) for each pixel stack
+2. Filtering based on those statistics
+3. Iterating until convergence (typically 2-3 iterations)
+
+### Parallel Reduction Strategies
+
+#### 1. NVIDIA Mark Harris Optimizations (Classic Reference)
+
+From [NVIDIA's Optimizing Parallel Reduction](https://developer.download.nvidia.com/assets/cuda/files/reduction.pdf):
+
+| Optimization | Speedup | Description |
+|--------------|---------|-------------|
+| Interleaved → Sequential addressing | 2× | Avoids shared memory bank conflicts |
+| First add during global load | 2× | Halves number of blocks needed |
+| Unroll last warp | 2× | Removes synchronization overhead |
+| Complete unrolling | 1.4× | Eliminates loop overhead |
+| Multiple elements per thread | 1.4× | Better instruction-level parallelism |
+| **Total** | **30×** | Cumulative improvement |
+
+**Key Insights**:
+- Sequential addressing (contiguous memory) is faster than interleaved
+- Workgroup shared memory enables fast intra-workgroup reductions
+- Warp-level operations (shuffle instructions) bypass shared memory for last 32 elements
+- GPU bandwidth: can achieve 62-73 GB/s for reductions on 32M elements
+
+#### 2. wgpu/WebGPU Considerations
+
+**Workgroup Shared Memory in WGSL**:
+```wgsl
+var<workgroup> shared_data: array<f32, 256>;
+
+@compute @workgroup_size(256, 1, 1)
+fn main(@builtin(local_invocation_index) local_idx: u32) {
+    // Load to shared memory
+    shared_data[local_idx] = input[global_idx];
+    workgroupBarrier();
+
+    // Parallel reduction tree
+    for (var stride = 128u; stride > 0u; stride >>= 1u) {
+        if (local_idx < stride) {
+            shared_data[local_idx] += shared_data[local_idx + stride];
+        }
+        workgroupBarrier();
+    }
+    // Result in shared_data[0]
+}
+```
+
+**Limitations**:
+- WebGPU only supports barriers within a workgroup (max 256 threads)
+- Multi-block reductions require multiple kernel dispatches
+- No subgroup/warp-level operations in standard WebGPU (extension exists but not universal)
+
+#### 3. Sigma Clipping Specific Algorithm
+
+**Proposed GPU Design**:
+
+**Pass 1: Compute Statistics (per pixel stack)**
+- Each thread handles one pixel position across all N frames
+- Compute median (requires sorting) OR mean (simple reduction)
+- Compute sum of squared differences for std_dev
+
+**Pass 2: Mark Outliers**
+- Simple threshold comparison: `abs(value - center) > sigma * stddev`
+- Store mask or compact valid values
+
+**Pass 3: Recompute Mean**
+- Mean of non-rejected values only
+
+**Iteration**: Repeat passes 1-3 for `max_iterations` times (typically 3)
+
+#### 4. Per-Pixel Stack vs Per-Image Processing
+
+**Current CPU approach** (per-pixel column-wise):
+- Load all frames, process each pixel position's stack independently
+- Frame count N typically 15-100
+- Pixel count M typically 4-24 million
+
+**GPU-friendly approach** (per-pixel parallel):
+- Each workgroup handles a tile of pixels (e.g., 16×16 = 256 positions)
+- Each thread computes statistics for one pixel stack
+- Requires frame data to be accessible efficiently (texture cache or buffer)
+
+**Memory Layout Challenge**:
+- CPU uses row-major images, processes column-wise through stack
+- GPU prefers coalesced memory access (adjacent threads read adjacent memory)
+- May need transposed data layout or texture sampling
+
+### GPU Median Computation
+
+Computing exact median on GPU is challenging:
+- Requires sorting each stack (N elements per pixel)
+- Sorting networks work well for small N (<32)
+- For larger N, use approximate methods:
+  - Histogram-based median (discretize values, find bin)
+  - Partial sorting (quickselect-style)
+  - Use mean instead (less robust but much faster)
+
+**Recommendation**: Use mean for GPU sigma clipping, as it:
+- Is easily computable via parallel reduction
+- Works well with iterative clipping (outliers removed progressively)
+- Is what the final result uses anyway (mean of remaining values)
+
+### Performance Expectations
+
+**When GPU might help**:
+- Large images (24+ megapixels) × many frames (50+)
+- Data already on GPU (e.g., after GPU warping)
+- Batch processing multiple stacks
+
+**When CPU is likely better**:
+- Small stacks (<20 frames): overhead dominates
+- Data needs CPU→GPU transfer: ~10GB/s typical PCIe bandwidth
+- Random access patterns (connected components, etc.)
+
+**GPU Transfer Overhead Example**:
+- 24MP × 50 frames × 4 bytes = 4.8 GB
+- PCIe 3.0 x16: ~12 GB/s → 400ms transfer time
+- CPU sigma clipping: likely <1s for this data
+- GPU must provide significant speedup to overcome transfer
+
+### Recommended Implementation Approach
+
+1. **Implement GPU statistics kernel first** (mean + variance per pixel)
+2. **Use mean-based clipping** (not median) for GPU path
+3. **Keep data on GPU** if already there from warping
+4. **Benchmark against CPU** with realistic datasets
+5. **Fall back to CPU** for small stacks or when transfer-bound
+
+### References
+
+- [NVIDIA Parallel Reduction PDF](https://developer.download.nvidia.com/assets/cuda/files/reduction.pdf)
+- [7 Step Optimization of Parallel Reduction](https://medium.com/@rimikadhara/7-step-optimization-of-parallel-reduction-with-cuda-33a3b2feafd8)
+- [WebGPU Compute Shader Basics](https://webgpufundamentals.org/webgpu/lessons/webgpu-compute-shaders.html)
+- [MSDGPU - GPU Mean and StdDev Library](https://github.com/KAdamek/GPU_mean_and_stdev)
+- [Astropy Sigma Clipping](https://docs.astropy.org/en/stable/api/astropy.stats.sigma_clip.html)
+- [Siril Stacking Documentation](https://siril.readthedocs.io/en/latest/preprocessing/stacking.html)
 
 ---
 

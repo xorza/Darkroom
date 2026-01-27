@@ -48,7 +48,7 @@ with tests and running verification commands per project conventions.
 **Research Conclusion**: No viable wgpu FFT library exists (Jan 2026). gpu-fft is pre-release (0.0.2), vkfft-rs has safety concerns and requires vulkano instead of wgpu. RustFFT is highly optimized (beats FFTW) and sufficient for astrophotography sizes. Re-evaluate in 6-12 months.
 
 ### 2.2 GPU Sigma Clipping
-- [ ] Research parallel reduction strategies for sigma clipping
+- [x] Research parallel reduction strategies for sigma clipping
 - [ ] Design GPU kernel for per-pixel stack statistics
 - [ ] Implement GPU sigma clipping in wgpu compute shader
 - [ ] Write integration tests
