@@ -279,11 +279,18 @@ with tests and running verification commands per project conventions.
 - O(N×pixels) memory for RollingSigmaClip mode with rolling window
 - 14 unit tests passing
 
-### 4.2 Code Quality
-- [ ] Review and update all NOTES-AI.md files
-- [ ] Ensure public API is consistent and well-documented
-- [ ] Remove any deprecated or unused code
-- [ ] Final clippy and fmt pass
+### 4.2 Code Quality [COMPLETE]
+- [x] Review and update all NOTES-AI.md files
+- [x] Ensure public API is consistent and well-documented
+- [x] Remove any deprecated or unused code
+- [x] Final clippy and fmt pass
+
+**Implementation** (2026-01-27):
+- Updated root NOTES-AI.md with new module listings (live, comet, session, gradient_removal)
+- Updated registration/gpu/NOTES-AI.md with GPU roadmap completion status
+- Added new types to prelude: LiveFrameQuality, LiveStackAccumulator, LiveStackConfig, LiveStackMode, Session, SessionConfig, MultiSessionStack
+- All 1389 tests pass
+- Clippy clean with -D warnings
 
 ---
 
@@ -308,8 +315,8 @@ cargo bench -p lumos --features bench --bench <name> | tee benches/<name>_result
 | Local Normalization | 5 | 5 | **Complete** |
 | GPU Acceleration | 12 | 12 | **Complete** (warping done, FFT skipped, sigma clip done, star detection done, batch pipeline done + benchmarked) |
 | Advanced Features | 14 | 14 | **Complete** (Comet stacking complete, session quality done, session-aware normalization done, session-weighted integration done, gradient removal done, radial distortion done, tangential distortion done, field curvature done) |
-| Quality & Polish | 8 | 4 | **In Progress** (real-time preview done) |
-| **Total** | **39** | **35** | **In Progress** |
+| Quality & Polish | 8 | 8 | **Complete** (real-time preview done, code quality done) |
+| **Total** | **39** | **39** | **COMPLETE** |
 
 ---
 

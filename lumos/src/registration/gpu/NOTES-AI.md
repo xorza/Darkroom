@@ -140,17 +140,16 @@ Current implementation in `src/registration/phase_correlation/mod.rs`:
 
 ### Implemented
 - [x] GPU image warping (imaginarium/wgpu)
+- [x] GPU sigma clipping (see `stacking/gpu/NOTES-AI.md`)
+- [x] GPU star detection threshold mask (see `star_detection/gpu/NOTES-AI.md`)
+- [x] Batch processing pipeline with async readback (see `stacking/gpu/NOTES-AI.md`)
 
 ### Research Complete
 - [x] GPU FFT options evaluated - NOT VIABLE currently
-
-### Research Complete
 - [x] GPU sigma clipping - parallel reduction strategies researched
 
-### Not Started
-- [ ] GPU sigma clipping implementation
-- [ ] GPU star detection (threshold + connected components)
-- [ ] Batch processing pipeline (overlapped compute/transfer)
+### Skipped
+- GPU FFT for phase correlation - no viable wgpu library exists
 
 ---
 

@@ -1,5 +1,7 @@
 # lumos - Implementation Notes (AI)
 
+> **Last Updated**: 2026-01-27
+
 Astrophotography image processing library for loading, calibrating, and stacking astronomical images.
 
 ## Key Modules
@@ -7,11 +9,11 @@ Astrophotography image processing library for loading, calibrating, and stacking
 | Module | Description |
 |--------|-------------|
 | `astro_image/mod.rs` | `AstroImage` for loading FITS and RAW camera files |
-| `stacking/mod.rs` | Image stacking algorithms (mean, median, sigma-clipped mean) |
+| `stacking/mod.rs` | Image stacking algorithms (see `stacking/NOTES-AI.md`) |
 | `calibration_masters.rs` | Master dark/flat/bias frame management |
 | `math.rs` | SIMD-accelerated math utilities (ARM NEON, x86 SSE4) |
 | `star_detection/` | Star detection and centroid computation |
-| `registration/` | Image registration and alignment |
+| `registration/` | Image registration, alignment, and astrometry |
 
 ## Key Types
 
@@ -30,15 +32,21 @@ CalibrationMasters // Container for master dark/flat/bias frames
 
 ## Stacking Module Structure
 
+See `stacking/NOTES-AI.md` for detailed documentation.
+
 | Module | Description |
 |--------|-------------|
-| `stacking/mod.rs` | `StackingMethod`, `FrameType`, `stack_frames()` dispatch |
-| `stacking/error.rs` | `StackError` enum |
-| `stacking/cache.rs` | `ImageCache` with memory-mapped binary cache |
-| `stacking/cache_config.rs` | `CacheConfig` with adaptive chunk sizing |
+| `stacking/mod.rs` | `StackingMethod`, `FrameType`, `ImageStack` dispatch |
 | `stacking/mean/` | Mean stacking (SIMD: NEON/SSE/scalar) |
 | `stacking/median/` | Median stacking via mmap (SIMD sorting networks) |
 | `stacking/sigma_clipped/` | Sigma-clipped mean via mmap |
+| `stacking/weighted/` | Weighted mean with quality-based frame weights |
+| `stacking/local_normalization.rs` | Tile-based local normalization (PixInsight-style) |
+| `stacking/live.rs` | Live/real-time stacking with incremental updates |
+| `stacking/comet.rs` | Comet/asteroid dual-stack stacking |
+| `stacking/session.rs` | Multi-session integration with weighted stacking |
+| `stacking/gradient_removal.rs` | Post-stack gradient removal (polynomial/RBF) |
+| `stacking/gpu/` | GPU-accelerated sigma clipping and batch pipeline |
 
 ## Demosaic Module (astro_image/demosaic/)
 
@@ -102,6 +110,8 @@ LocalBackgroundMethod // GlobalMap | LocalAnnulus
 | `pipeline/` | Full registration pipeline with `Registrator` |
 | `quality/` | Quality metrics and quadrant consistency |
 | `gpu/` | GPU-accelerated warping via imaginarium |
+| `distortion/` | Radial, tangential, field curvature correction |
+| `astrometry/` | Plate solving (WCS coordinates from star patterns) |
 
 ### Registration Key Types
 
@@ -115,22 +125,43 @@ KdTree                  // 2D k-d tree for k-NN and radius queries
 ThinPlateSpline         // Smooth non-rigid transformation
 DistortionMap           // Grid-based distortion visualization
 RadialDistortion        // Brown-Conrady barrel/pincushion correction
-RadialDistortionConfig  // { k1, k2, k3, center }
+TangentialDistortion    // Brown-Conrady tangential (decentering) correction
+FieldCurvature          // Petzval field curvature correction
 GpuWarper               // GPU-accelerated image warping context
+Wcs                     // World Coordinate System (plate solution)
+PlateSolver             // Astrometric plate solving via quad hashing
+CatalogStar             // Star from Gaia/UCAC4 catalog
 ```
 
 ### Distortion Correction
 
-Two approaches for lens distortion:
+See `registration/distortion/NOTES-AI.md` for detailed documentation.
 
 1. **RadialDistortion** (parametric): Brown-Conrady model `r' = r(1 + k₁r² + k₂r⁴ + k₃r⁶)`
    - `distort()` / `undistort()` - Forward/inverse transform
    - `estimate()` - Estimate coefficients from matched points
    - Barrel (k1>0), pincushion (k1<0) support
 
-2. **ThinPlateSpline** (non-parametric): For complex non-radial distortion
+2. **TangentialDistortion**: Brown-Conrady tangential model
+   - Corrects decentering distortion from misaligned lens elements
+   - p1/p2 coefficients, OpenCV-compatible
+
+3. **FieldCurvature**: Petzval field curvature correction
+   - Corrects radial magnification variation from curved focal plane
+   - c1/c2 coefficients for even-order polynomial model
+
+4. **ThinPlateSpline** (non-parametric): For complex non-radial distortion
    - Fitted from star correspondences
    - Smooth interpolation minimizing bending energy
+
+### Astrometry (Plate Solving)
+
+See `registration/astrometry/NOTES-AI.md` for detailed documentation.
+
+- **Wcs**: World Coordinate System - gnomonic projection pixel↔sky transforms
+- **PlateSolver**: Quad-based geometric hashing for star pattern matching
+- **CatalogSource**: Gaia DR3 via VizieR or preloaded star lists
+- Uses RANSAC for robust transformation estimation
 
 ### Registration Pipeline
 

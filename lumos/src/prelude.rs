@@ -31,3 +31,9 @@ pub use crate::{
     CacheConfig, FrameType, ImageStack, MedianConfig, ProgressCallback, SigmaClipConfig,
     SigmaClippedConfig, StackingMethod, StackingProgress, StackingStage,
 };
+
+// Live stacking
+pub use crate::{LiveFrameQuality, LiveStackAccumulator, LiveStackConfig, LiveStackMode};
+
+// Multi-session stacking
+pub use crate::{MultiSessionStack, Session, SessionConfig};
