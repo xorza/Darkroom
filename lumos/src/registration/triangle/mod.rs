@@ -17,7 +17,7 @@
 //!
 //! This module contains two implementations:
 //!
-//! - **`match_stars_triangles_kdtree()`** (production): Uses k-d tree for efficient
+//! - **`match_triangles()`** (production): Uses k-d tree for efficient
 //!   neighbor lookup, O(n·k²) complexity where k is neighbors per star.
 //!   **This is the public API and should be used in production.**
 //!
@@ -202,14 +202,14 @@ fn resolve_matches(
 
 /// Orientation of a triangle (clockwise or counter-clockwise).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Orientation {
+pub(crate) enum Orientation {
     Clockwise,
     CounterClockwise,
 }
 
 /// A triangle formed from three stars.
 #[derive(Debug, Clone)]
-pub struct Triangle {
+pub(crate) struct Triangle {
     /// Indices of the three stars in the original list.
     pub star_indices: [usize; 3],
     /// Side lengths sorted: sides[0] <= sides[1] <= sides[2].
@@ -305,7 +305,7 @@ impl Triangle {
 
 /// Hash table for fast triangle lookup using geometric hashing.
 #[derive(Debug)]
-pub struct TriangleHashTable {
+pub(crate) struct TriangleHashTable {
     /// 2D grid of bins, each containing triangle indices.
     table: Vec<Vec<usize>>,
     /// Number of bins per dimension.
@@ -438,7 +438,7 @@ pub(crate) fn form_triangles(positions: &[(f64, f64)], max_stars: usize) -> Vec<
 /// Match stars between reference and target using triangle matching (brute-force).
 ///
 /// This is the O(n³) brute-force version. For better performance with large star
-/// counts (>50 stars), use `match_stars_triangles_kdtree` instead.
+/// counts (>50 stars), use `match_triangles` instead.
 ///
 /// Returns a list of matched star pairs with confidence scores.
 #[cfg_attr(not(any(test, feature = "bench")), allow(dead_code))]
@@ -766,11 +766,10 @@ pub fn form_triangles_kdtree(positions: &[(f64, f64)], k_neighbors: usize) -> Ve
         .collect()
 }
 
-/// Match stars using k-d tree optimized triangle formation.
+/// Match stars between reference and target images using triangle pattern matching.
 ///
-/// This version uses a k-d tree for efficient triangle formation, making it
-/// suitable for large star counts (>100 stars). For small star counts (<50),
-/// the regular `match_stars_triangles` may be faster due to lower overhead.
+/// Uses a k-d tree for efficient triangle formation, making it suitable for
+/// large star counts (>100 stars).
 ///
 /// # Arguments
 /// * `ref_positions` - Reference image star positions
@@ -779,7 +778,7 @@ pub fn form_triangles_kdtree(positions: &[(f64, f64)], k_neighbors: usize) -> Ve
 ///
 /// # Returns
 /// Vector of matched star pairs with confidence scores
-pub fn match_stars_triangles_kdtree(
+pub fn match_triangles(
     ref_positions: &[(f64, f64)],
     target_positions: &[(f64, f64)],
     config: &TriangleMatchConfig,

@@ -165,11 +165,11 @@ fn benchmark_overlap_estimation(c: &mut Criterion) {
         ("identity", TransformMatrix::identity()),
         (
             "translation_small",
-            TransformMatrix::from_translation(50.0, 30.0),
+            TransformMatrix::translation(50.0, 30.0),
         ),
         (
             "translation_large",
-            TransformMatrix::from_translation(500.0, 300.0),
+            TransformMatrix::translation(500.0, 300.0),
         ),
         (
             "rotation",

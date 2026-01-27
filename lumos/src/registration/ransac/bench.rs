@@ -102,7 +102,7 @@ fn benchmark_transform_types(c: &mut Criterion) {
     let transforms = [
         (
             TransformType::Translation,
-            TransformMatrix::from_translation(50.0, -30.0),
+            TransformMatrix::translation(50.0, -30.0),
         ),
         (
             TransformType::Euclidean,

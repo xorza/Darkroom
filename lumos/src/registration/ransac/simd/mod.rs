@@ -23,7 +23,7 @@ use crate::registration::types::TransformMatrix;
 ///
 /// This function dispatches to the best available SIMD implementation at runtime.
 #[inline]
-pub fn count_inliers_simd(
+pub(crate) fn count_inliers_simd(
     ref_points: &[(f64, f64)],
     target_points: &[(f64, f64)],
     transform: &TransformMatrix,
@@ -64,7 +64,7 @@ pub fn count_inliers_simd(
 
 /// Scalar implementation of inlier counting.
 #[cfg(any(feature = "bench", test))]
-pub fn count_inliers_scalar(
+pub(crate) fn count_inliers_scalar(
     ref_points: &[(f64, f64)],
     target_points: &[(f64, f64)],
     transform: &TransformMatrix,

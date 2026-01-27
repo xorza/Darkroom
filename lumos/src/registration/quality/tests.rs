@@ -40,7 +40,7 @@ fn test_estimate_overlap_identity() {
 
 #[test]
 fn test_estimate_overlap_translation() {
-    let transform = TransformMatrix::from_translation(50.0, 0.0);
+    let transform = TransformMatrix::translation(50.0, 0.0);
     let overlap = estimate_overlap(100, 100, &transform);
     // 50% horizontal shift -> ~50% overlap
     assert!((overlap - 0.5).abs() < 0.1);
@@ -48,7 +48,7 @@ fn test_estimate_overlap_translation() {
 
 #[test]
 fn test_estimate_overlap_no_overlap() {
-    let transform = TransformMatrix::from_translation(200.0, 0.0);
+    let transform = TransformMatrix::translation(200.0, 0.0);
     let overlap = estimate_overlap(100, 100, &transform);
     assert!(overlap < 0.01);
 }
@@ -149,7 +149,7 @@ fn test_quadrant_consistency_truly_inconsistent() {
         }
     }
 
-    let transform = TransformMatrix::from_translation(5.0, 5.0);
+    let transform = TransformMatrix::translation(5.0, 5.0);
     let consistency = check_quadrant_consistency(&ref_points, &target_points, &transform, 100, 100);
 
     // BR quadrant (index 3) should have much higher error
@@ -164,7 +164,7 @@ fn test_quadrant_consistency_truly_inconsistent() {
 #[test]
 fn test_estimate_overlap_complete_disjoint() {
     // Large translation way beyond image boundaries
-    let transform = TransformMatrix::from_translation(1000.0, 1000.0);
+    let transform = TransformMatrix::translation(1000.0, 1000.0);
     let overlap = estimate_overlap(100, 100, &transform);
     assert!(
         overlap < 0.01,
@@ -188,7 +188,7 @@ fn test_estimate_overlap_perfect() {
 /// Test overlap with negative coordinate shift
 #[test]
 fn test_estimate_overlap_negative_coords() {
-    let transform = TransformMatrix::from_translation(-30.0, -30.0);
+    let transform = TransformMatrix::translation(-30.0, -30.0);
     let overlap = estimate_overlap(100, 100, &transform);
     // 70% overlap in each dimension -> ~49% overlap area
     assert!(

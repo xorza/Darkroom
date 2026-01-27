@@ -39,7 +39,7 @@ fn test_registration_identity() {
 #[test]
 fn test_registration_translation() {
     let ref_stars = generate_star_grid(5, 5, 100.0, (100.0, 100.0));
-    let translation = TransformMatrix::from_translation(50.0, -30.0);
+    let translation = TransformMatrix::translation(50.0, -30.0);
     let target_stars = transform_stars(&ref_stars, &translation);
 
     let result = register_stars(&ref_stars, &target_stars, TransformType::Translation).unwrap();
@@ -84,7 +84,7 @@ fn test_registration_similarity() {
 #[test]
 fn test_registration_with_outliers() {
     let ref_stars = generate_star_grid(6, 6, 80.0, (100.0, 100.0));
-    let translation = TransformMatrix::from_translation(25.0, 40.0);
+    let translation = TransformMatrix::translation(25.0, 40.0);
     let mut target_stars = transform_stars(&ref_stars, &translation);
 
     // Add outliers (wrong matches)
@@ -139,7 +139,7 @@ fn test_warp_to_reference() {
 
     // Transform maps reference -> target: ref(32,32) -> target(37,35)
     // So translation is (5, 3)
-    let transform = TransformMatrix::from_translation(5.0, 3.0);
+    let transform = TransformMatrix::translation(5.0, 3.0);
 
     // warp_to_reference should align target to reference frame
     // The pixel at target(37,35) should appear at reference(32,32) after warping
@@ -335,7 +335,7 @@ fn test_warp_to_reference_end_to_end() {
 #[test]
 fn test_quick_register() {
     let ref_stars = generate_star_grid(4, 4, 150.0, (100.0, 100.0));
-    let translation = TransformMatrix::from_translation(10.0, -15.0);
+    let translation = TransformMatrix::translation(10.0, -15.0);
     let target_stars = transform_stars(&ref_stars, &translation);
 
     let transform = quick_register(&ref_stars, &target_stars).unwrap();
@@ -484,7 +484,7 @@ fn test_pipeline_ground_truth_synthetic() {
 fn test_pipeline_partial_overlap() {
     // Stars with large translation (50% overlap)
     let ref_stars = generate_star_grid(6, 6, 50.0, (50.0, 50.0));
-    let large_translation = TransformMatrix::from_translation(150.0, 0.0);
+    let large_translation = TransformMatrix::translation(150.0, 0.0);
     let target_stars = transform_stars(&ref_stars, &large_translation);
 
     let result = register_stars(&ref_stars, &target_stars, TransformType::Translation).unwrap();
@@ -608,7 +608,7 @@ fn test_pipeline_affine_transform() {
 fn test_multiscale_registration_basic() {
     // Create a large star field
     let ref_stars = generate_star_grid(10, 10, 50.0, (50.0, 50.0));
-    let translation = TransformMatrix::from_translation(25.0, -15.0);
+    let translation = TransformMatrix::translation(25.0, -15.0);
     let target_stars = transform_stars(&ref_stars, &translation);
 
     let config = RegistrationConfig::builder()
@@ -710,7 +710,7 @@ fn test_build_pyramid() {
 
 #[test]
 fn test_scale_transform() {
-    let transform = TransformMatrix::from_translation(10.0, 20.0);
+    let transform = TransformMatrix::translation(10.0, 20.0);
     let scaled = super::scale_transform(&transform, 2.0);
 
     let (tx, ty) = scaled.translation_components();
@@ -792,7 +792,7 @@ fn test_integration_dithered_exposures() {
     let dither_offsets = [(10.0, 15.0), (-20.0, 5.0), (8.0, -12.0), (-5.0, 25.0)];
 
     for (dx, dy) in dither_offsets {
-        let transform = TransformMatrix::from_translation(dx, dy);
+        let transform = TransformMatrix::translation(dx, dy);
         let target_positions: Vec<(f64, f64)> = ref_positions
             .iter()
             .map(|&(x, y)| transform.apply(x, y))
@@ -1023,7 +1023,7 @@ fn test_integration_partial_overlap() {
     let ref_positions: Vec<(f64, f64)> = ref_stars.iter().map(|&(x, y, _)| (x, y)).collect();
 
     // Large translation causing ~50% overlap
-    let transform = TransformMatrix::from_translation(1000.0, 500.0);
+    let transform = TransformMatrix::translation(1000.0, 500.0);
 
     // Target stars are transformed, but filter out those that would be outside frame
     let target_positions: Vec<(f64, f64)> = ref_positions
@@ -1160,7 +1160,7 @@ fn test_integration_minimum_stars() {
         (150.0, 150.0),
     ];
 
-    let transform = TransformMatrix::from_translation(10.0, 5.0);
+    let transform = TransformMatrix::translation(10.0, 5.0);
     let target_positions: Vec<(f64, f64)> = ref_positions
         .iter()
         .map(|&(x, y)| transform.apply(x, y))

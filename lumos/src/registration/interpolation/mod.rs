@@ -543,7 +543,7 @@ pub fn warp_image(
                 let y = start_y + row_in_chunk;
                 for x in 0..output_width {
                     // Transform output coordinates to input coordinates
-                    let (src_x, src_y) = inverse.transform_point(x as f64, y as f64);
+                    let (src_x, src_y) = inverse.apply(x as f64, y as f64);
 
                     // Interpolate input at source coordinates
                     chunk[row_in_chunk * output_width + x] = interpolate_pixel(

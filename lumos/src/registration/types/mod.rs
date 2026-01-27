@@ -168,11 +168,6 @@ impl TransformMatrix {
         }
     }
 
-    /// Create translation transform (alias for `translation`).
-    pub fn from_translation(dx: f64, dy: f64) -> Self {
-        Self::translation(dx, dy)
-    }
-
     /// Create uniform scale transform.
     pub fn from_scale(sx: f64, sy: f64) -> Self {
         Self {
@@ -235,12 +230,6 @@ impl TransformMatrix {
         let x_prime = (d[0] * x + d[1] * y + d[2]) / w;
         let y_prime = (d[3] * x + d[4] * y + d[5]) / w;
         (x_prime, y_prime)
-    }
-
-    /// Alias for `apply` - transform a point.
-    #[inline]
-    pub fn transform_point(&self, x: f64, y: f64) -> (f64, f64) {
-        self.apply(x, y)
     }
 
     /// Apply inverse transform to map a point from TARGET coordinates to REFERENCE coordinates.

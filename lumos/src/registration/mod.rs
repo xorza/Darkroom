@@ -105,10 +105,8 @@ pub use types::{
     RegistrationResult, StarMatch, TransformMatrix, TransformType,
 };
 
-// GPU-accelerated warping and parallel channel processing
-pub use gpu::{
-    GpuWarper, warp_multichannel_parallel, warp_rgb_to_reference_gpu, warp_to_reference_gpu,
-};
+// GPU-accelerated warping
+pub use gpu::GpuWarper;
 
 // Configuration types
 pub use distortion::{DistortionMap, ThinPlateSpline, TpsConfig};
@@ -125,5 +123,5 @@ pub use quality::{
     estimate_overlap,
 };
 
-// Triangle matching (kdtree version only - brute force is internal)
-pub use triangle::{TriangleMatchConfig, match_stars_triangles_kdtree};
+// Triangle matching
+pub use triangle::{TriangleMatchConfig, match_triangles};

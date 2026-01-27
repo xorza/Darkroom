@@ -80,7 +80,7 @@ fn test_transform_inverse() {
 }
 
 #[test]
-fn test_transform_point_roundtrip() {
+fn test_apply_roundtrip() {
     let transforms = vec![
         TransformMatrix::translation(5.0, -3.0),
         TransformMatrix::euclidean(2.0, 3.0, 0.7),

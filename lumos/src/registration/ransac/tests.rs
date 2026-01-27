@@ -1085,7 +1085,7 @@ fn test_ransac_early_termination() {
     // All perfect inliers - should terminate early
     let ref_points: Vec<(f64, f64)> = (0..50).map(|i| (i as f64 * 10.0, i as f64 * 5.0)).collect();
 
-    let transform = TransformMatrix::from_translation(7.0, 3.0);
+    let transform = TransformMatrix::translation(7.0, 3.0);
     let target_points: Vec<(f64, f64)> = ref_points
         .iter()
         .map(|&(x, y)| transform.apply(x, y))
@@ -1125,7 +1125,7 @@ fn test_homography_nearly_degenerate() {
         (100.0, 100.0), // This one breaks collinearity
     ];
 
-    let transform = TransformMatrix::from_translation(10.0, 10.0);
+    let transform = TransformMatrix::translation(10.0, 10.0);
     let target_points: Vec<(f64, f64)> = ref_points
         .iter()
         .map(|&(x, y)| transform.apply(x, y))
@@ -1157,7 +1157,7 @@ fn test_progressive_ransac_uses_weights() {
     // Create points with varying confidence
     let ref_points: Vec<(f64, f64)> = (0..20).map(|i| (i as f64 * 10.0, i as f64 * 5.0)).collect();
 
-    let transform = TransformMatrix::from_translation(5.0, 3.0);
+    let transform = TransformMatrix::translation(5.0, 3.0);
     let mut target_points: Vec<(f64, f64)> = ref_points
         .iter()
         .map(|&(x, y)| transform.apply(x, y))

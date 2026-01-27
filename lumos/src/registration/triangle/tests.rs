@@ -8,7 +8,7 @@
 //!   correctness with O(n³) exhaustive triangle enumeration. These are the reference
 //!   implementation tests.
 //!
-//! - **K-d tree tests** (`match_stars_triangles_kdtree`): Validate the production
+//! - **K-d tree tests** (`match_triangles`): Validate the production
 //!   implementation that uses spatial indexing for O(n·k²) complexity. These tests
 //!   ensure the optimized path produces correct results.
 //!
@@ -371,8 +371,7 @@ fn test_kdtree_match_identical_star_lists() {
         (5.0, 5.0),
     ];
 
-    let matches =
-        match_stars_triangles_kdtree(&positions, &positions, &TriangleMatchConfig::default());
+    let matches = match_triangles(&positions, &positions, &TriangleMatchConfig::default());
 
     // Should match all stars
     assert_eq!(matches.len(), 5);
@@ -399,7 +398,7 @@ fn test_kdtree_match_translated_stars() {
         .map(|(x, y)| (x + 100.0, y + 50.0))
         .collect();
 
-    let matches = match_stars_triangles_kdtree(
+    let matches = match_triangles(
         &ref_positions,
         &target_positions,
         &TriangleMatchConfig::default(),
@@ -427,7 +426,7 @@ fn test_kdtree_match_scaled_stars() {
         .map(|(x, y)| (x * 2.0, y * 2.0))
         .collect();
 
-    let matches = match_stars_triangles_kdtree(
+    let matches = match_triangles(
         &ref_positions,
         &target_positions,
         &TriangleMatchConfig::default(),
@@ -491,7 +490,7 @@ fn test_kdtree_match_rotated_stars() {
         ..Default::default()
     };
 
-    let matches = match_stars_triangles_kdtree(&ref_positions, &target_positions, &config);
+    let matches = match_triangles(&ref_positions, &target_positions, &config);
 
     assert_eq!(matches.len(), 5);
 }
@@ -509,7 +508,7 @@ fn test_kdtree_match_with_missing_stars() {
     // Only 4 stars in target (missing one)
     let target_positions = vec![(0.0, 0.0), (10.0, 0.0), (0.0, 10.0), (10.0, 10.0)];
 
-    let matches = match_stars_triangles_kdtree(
+    let matches = match_triangles(
         &ref_positions,
         &target_positions,
         &TriangleMatchConfig::default(),
@@ -533,7 +532,7 @@ fn test_kdtree_match_with_extra_stars() {
         (15.0, 15.0),
     ];
 
-    let matches = match_stars_triangles_kdtree(
+    let matches = match_triangles(
         &ref_positions,
         &target_positions,
         &TriangleMatchConfig::default(),
@@ -562,8 +561,7 @@ fn test_kdtree_match_mirrored_image() {
         min_votes: 1,
         ..Default::default()
     };
-    let matches_with =
-        match_stars_triangles_kdtree(&ref_positions, &target_positions, &config_with_orientation);
+    let matches_with = match_triangles(&ref_positions, &target_positions, &config_with_orientation);
 
     // Without orientation check, should match more
     let config_no_orientation = TriangleMatchConfig {
@@ -572,7 +570,7 @@ fn test_kdtree_match_mirrored_image() {
         ..Default::default()
     };
     let matches_without =
-        match_stars_triangles_kdtree(&ref_positions, &target_positions, &config_no_orientation);
+        match_triangles(&ref_positions, &target_positions, &config_no_orientation);
 
     // With mirroring and orientation check, we should get fewer matches than without
     assert!(
@@ -803,7 +801,7 @@ fn test_match_very_dense_field_500_stars() {
     };
 
     // K-d tree matching should handle this efficiently
-    let matches = match_stars_triangles_kdtree(&ref_positions, &target_positions, &config);
+    let matches = match_triangles(&ref_positions, &target_positions, &config);
 
     // Should find a substantial number of matches
     assert!(
@@ -864,7 +862,7 @@ fn test_match_clustered_stars() {
         ..Default::default()
     };
 
-    let matches = match_stars_triangles_kdtree(&ref_positions, &target_positions, &config);
+    let matches = match_triangles(&ref_positions, &target_positions, &config);
 
     // Should match most stars despite clustering
     assert!(
@@ -994,7 +992,7 @@ fn test_match_large_coordinates() {
         .collect();
 
     let config = TriangleMatchConfig::default();
-    let matches = match_stars_triangles_kdtree(&ref_positions, &target_positions, &config);
+    let matches = match_triangles(&ref_positions, &target_positions, &config);
 
     assert!(
         matches.len() >= 20,
@@ -1031,7 +1029,7 @@ fn test_match_small_coordinates() {
         .collect();
 
     let config = TriangleMatchConfig::default();
-    let matches = match_stars_triangles_kdtree(&ref_positions, &target_positions, &config);
+    let matches = match_triangles(&ref_positions, &target_positions, &config);
 
     assert!(
         matches.len() >= 15,
@@ -1092,7 +1090,7 @@ fn test_match_large_scale_difference() {
         .collect();
 
     let config = TriangleMatchConfig::default();
-    let matches = match_stars_triangles_kdtree(&ref_positions, &target_positions, &config);
+    let matches = match_triangles(&ref_positions, &target_positions, &config);
 
     // Triangle matching is scale-invariant, should still find matches
     assert!(
@@ -1132,7 +1130,7 @@ fn test_match_180_degree_rotation() {
         ..Default::default()
     };
 
-    let matches = match_stars_triangles_kdtree(&ref_positions, &target_positions, &config);
+    let matches = match_triangles(&ref_positions, &target_positions, &config);
 
     // Should still find matches despite 180 degree rotation
     assert!(
@@ -1168,16 +1166,14 @@ fn test_two_step_matching_translated() {
         two_step_matching: false,
         ..Default::default()
     };
-    let standard_matches =
-        match_stars_triangles_kdtree(&ref_positions, &target_positions, &standard_config);
+    let standard_matches = match_triangles(&ref_positions, &target_positions, &standard_config);
 
     // Two-step matching
     let twostep_config = TriangleMatchConfig {
         two_step_matching: true,
         ..Default::default()
     };
-    let twostep_matches =
-        match_stars_triangles_kdtree(&ref_positions, &target_positions, &twostep_config);
+    let twostep_matches = match_triangles(&ref_positions, &target_positions, &twostep_config);
 
     // Both should find matches
     assert!(
@@ -1229,7 +1225,7 @@ fn test_two_step_matching_similarity_transform() {
         two_step_matching: true,
         ..Default::default()
     };
-    let matches = match_stars_triangles_kdtree(&ref_positions, &target_positions, &config);
+    let matches = match_triangles(&ref_positions, &target_positions, &config);
 
     // Should find good matches
     assert!(
@@ -1262,7 +1258,7 @@ fn test_two_step_matching_fallback() {
     };
 
     // Should not crash and should return some result
-    let matches = match_stars_triangles_kdtree(&ref_positions, &target_positions, &config);
+    let matches = match_triangles(&ref_positions, &target_positions, &config);
 
     // At least should not crash; may or may not find matches depending on tolerance
     assert!(matches.len() <= ref_positions.len());

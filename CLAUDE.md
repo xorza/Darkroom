@@ -17,3 +17,4 @@ AI coding rules for Rust projects:
 - When running benchmarks, use `cargo bench -p <crate> --features bench --bench <name>` to compile only the needed crate and enable the bench feature (e.g., `cargo bench -p lumos --features bench --bench math`).
 - Use nextest for running tests and for measuring test execution time when asked.
 - For iterative changes and benchmarks, add readme files to corresponding folders explaining which optimizations were implemented and which were removed. When running benchmarks, always output results to a txt file in the bench directory and maintain a bench-analysis.md file with interpretations. Update it when re-running benchmarks.
+- Remove deprecated and unused code. Make sure public api is properly exposed and consistent.

@@ -125,14 +125,11 @@ pub use registration::{
     WarpConfig,
     check_quadrant_consistency,
     estimate_overlap,
-    match_stars_triangles_kdtree,
+    match_triangles,
     quick_register,
     register_stars,
     warp_image,
-    warp_multichannel_parallel,
-    warp_rgb_to_reference_gpu,
     warp_to_reference,
-    warp_to_reference_gpu,
 };
 
 // ============================================================================

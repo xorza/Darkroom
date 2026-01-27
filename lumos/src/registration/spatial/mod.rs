@@ -13,7 +13,7 @@ mod tests;
 /// - We need k-nearest-neighbor queries for triangle formation
 /// - The tree is built once and queried many times
 #[derive(Debug)]
-pub struct KdTree {
+pub(crate) struct KdTree {
     nodes: Vec<KdNode>,
     points: Vec<(f64, f64)>,
 }
@@ -403,7 +403,7 @@ impl BoundedMaxHeap {
 ///
 /// # Returns
 /// Vector of triangle vertex indices [i, j, k] where i < j < k
-pub fn form_triangles_from_neighbors(tree: &KdTree, k: usize) -> Vec<[usize; 3]> {
+pub(crate) fn form_triangles_from_neighbors(tree: &KdTree, k: usize) -> Vec<[usize; 3]> {
     use std::collections::HashSet;
 
     let n = tree.len();

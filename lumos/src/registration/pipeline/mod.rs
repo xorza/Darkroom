@@ -18,7 +18,7 @@ use crate::registration::{
     interpolation::{InterpolationMethod, WarpConfig, warp_image},
     phase_correlation::{PhaseCorrelationConfig, PhaseCorrelator},
     ransac::{RansacConfig, RansacEstimator},
-    triangle::{TriangleMatchConfig, match_stars_triangles_kdtree},
+    triangle::{TriangleMatchConfig, match_triangles},
     types::{
         RegistrationConfig, RegistrationError, RegistrationResult, TransformMatrix, TransformType,
     },
@@ -151,7 +151,7 @@ impl Registrator {
             two_step_matching: false, // Standard single-pass matching
         };
 
-        let matches = match_stars_triangles_kdtree(&ref_stars, &target_stars, &triangle_config);
+        let matches = match_triangles(&ref_stars, &target_stars, &triangle_config);
 
         if matches.len() < self.config.min_matched_stars {
             return Err(RegistrationError::NoMatchingPatterns);
@@ -262,7 +262,7 @@ impl Registrator {
         // If we used phase correlation, compose the transforms
         if let Some(pr) = phase_result {
             let (dx, dy) = pr.translation;
-            let phase_transform = TransformMatrix::from_translation(dx, dy);
+            let phase_transform = TransformMatrix::translation(dx, dy);
             result.transform = result.transform.compose(&phase_transform);
         }
 
@@ -577,7 +577,7 @@ impl MultiScaleRegistrator {
                 {
                     let (dx, dy) = pr.translation;
                     // Scale translation to full resolution
-                    let phase_transform = TransformMatrix::from_translation(dx * scale, dy * scale);
+                    let phase_transform = TransformMatrix::translation(dx * scale, dy * scale);
                     current_transform = phase_transform.compose(&current_transform);
                 }
             }

@@ -576,7 +576,7 @@ fn shift_image(image: &[f32], width: usize, height: usize, dx: f64, dy: f64) -> 
 }
 
 /// Compute 1D Hann window.
-pub fn hann_window(size: usize) -> Vec<f32> {
+pub(crate) fn hann_window(size: usize) -> Vec<f32> {
     use std::f32::consts::PI;
     (0..size)
         .map(|i| {
@@ -590,7 +590,7 @@ pub fn hann_window(size: usize) -> Vec<f32> {
 ///
 /// For large matrices, uses recursive blocking to improve cache locality.
 /// For small matrices (≤64), uses simple swapping.
-pub fn transpose_inplace(data: &mut [Complex<f32>], n: usize) {
+pub(crate) fn transpose_inplace(data: &mut [Complex<f32>], n: usize) {
     // Threshold below which simple transpose is faster
     const BLOCK_THRESHOLD: usize = 64;
 

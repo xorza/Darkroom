@@ -9,18 +9,18 @@ use super::TransformMatrix;
 
 /// Register types benchmarks with Criterion.
 pub fn benchmarks(c: &mut Criterion) {
-    benchmark_transform_point(c);
+    benchmark_apply(c);
     benchmark_matrix_inverse(c);
     benchmark_matrix_compose(c);
     benchmark_transform_batch(c);
 }
 
 /// Benchmark transforming a single point with different transform types.
-fn benchmark_transform_point(c: &mut Criterion) {
-    let mut group = c.benchmark_group("transform_point");
+fn benchmark_apply(c: &mut Criterion) {
+    let mut group = c.benchmark_group("apply");
 
     let transforms = [
-        ("translation", TransformMatrix::from_translation(10.0, 20.0)),
+        ("translation", TransformMatrix::translation(10.0, 20.0)),
         ("euclidean", TransformMatrix::euclidean(10.0, 20.0, 0.1)),
         (
             "similarity",
@@ -39,7 +39,7 @@ fn benchmark_transform_point(c: &mut Criterion) {
     for (name, transform) in &transforms {
         group.bench_function(BenchmarkId::new("single", *name), |b| {
             b.iter(|| {
-                let result = transform.transform_point(black_box(100.0), black_box(200.0));
+                let result = transform.apply(black_box(100.0), black_box(200.0));
                 black_box(result)
             })
         });
@@ -53,7 +53,7 @@ fn benchmark_matrix_inverse(c: &mut Criterion) {
     let mut group = c.benchmark_group("matrix_inverse");
 
     let transforms = [
-        ("translation", TransformMatrix::from_translation(10.0, 20.0)),
+        ("translation", TransformMatrix::translation(10.0, 20.0)),
         ("euclidean", TransformMatrix::euclidean(10.0, 20.0, 0.1)),
         (
             "similarity",
@@ -85,7 +85,7 @@ fn benchmark_matrix_inverse(c: &mut Criterion) {
 fn benchmark_matrix_compose(c: &mut Criterion) {
     let mut group = c.benchmark_group("matrix_compose");
 
-    let t1 = TransformMatrix::from_translation(10.0, 20.0);
+    let t1 = TransformMatrix::translation(10.0, 20.0);
     let t2 = TransformMatrix::euclidean(5.0, -5.0, 0.05);
     let t3 = TransformMatrix::similarity(0.0, 0.0, 0.1, 1.02);
 
@@ -125,7 +125,7 @@ fn benchmark_transform_batch(c: &mut Criterion) {
             b.iter(|| {
                 let results: Vec<_> = black_box(&points)
                     .iter()
-                    .map(|&(x, y)| transform.transform_point(x, y))
+                    .map(|&(x, y)| transform.apply(x, y))
                     .collect();
                 black_box(results)
             })

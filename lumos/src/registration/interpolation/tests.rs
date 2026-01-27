@@ -311,7 +311,7 @@ fn test_warp_translation() {
     input[5] = 1.0; // Position (1, 1)
 
     // Translate by (1, 1)
-    let transform = TransformMatrix::from_translation(1.0, 1.0);
+    let transform = TransformMatrix::translation(1.0, 1.0);
     let config = WarpConfig {
         method: InterpolationMethod::Bilinear,
         ..Default::default()

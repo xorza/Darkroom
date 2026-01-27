@@ -96,7 +96,7 @@ fn benchmark_config_variations(c: &mut Criterion) {
         (
             "translation",
             TransformType::Translation,
-            TransformMatrix::from_translation(50.0, -30.0),
+            TransformMatrix::translation(50.0, -30.0),
         ),
         (
             "euclidean",

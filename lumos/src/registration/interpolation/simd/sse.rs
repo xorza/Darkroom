@@ -146,7 +146,7 @@ pub unsafe fn warp_row_bilinear_avx2(
         // Handle remainder with scalar
         let remainder_start = chunks * 8;
         for x in remainder_start..output_width {
-            let (src_x, src_y) = inverse.transform_point(x as f64, y);
+            let (src_x, src_y) = inverse.apply(x as f64, y);
             output_row[x] = super::bilinear_sample(
                 input,
                 input_width,
@@ -281,7 +281,7 @@ pub unsafe fn warp_row_bilinear_sse(
         // Handle remainder with scalar
         let remainder_start = chunks * 4;
         for x in remainder_start..output_width {
-            let (src_x, src_y) = inverse.transform_point(x as f64, y);
+            let (src_x, src_y) = inverse.apply(x as f64, y);
             output_row[x] = super::bilinear_sample(
                 input,
                 input_width,

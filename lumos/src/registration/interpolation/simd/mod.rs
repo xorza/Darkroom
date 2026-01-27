@@ -32,7 +32,7 @@ use crate::registration::types::TransformMatrix;
 /// * `inverse` - Inverse transform (output -> input)
 /// * `border_value` - Value for out-of-bounds pixels
 #[inline]
-pub fn warp_row_bilinear_simd(
+pub(crate) fn warp_row_bilinear_simd(
     input: &[f32],
     input_width: usize,
     input_height: usize,
@@ -87,7 +87,7 @@ pub fn warp_row_bilinear_simd(
 }
 
 /// Scalar implementation of row warping with bilinear interpolation.
-pub fn warp_row_bilinear_scalar(
+pub(crate) fn warp_row_bilinear_scalar(
     input: &[f32],
     input_width: usize,
     input_height: usize,
@@ -99,7 +99,7 @@ pub fn warp_row_bilinear_scalar(
     let y = output_y as f64;
 
     for (x, out_pixel) in output_row.iter_mut().enumerate() {
-        let (src_x, src_y) = inverse.transform_point(x as f64, y);
+        let (src_x, src_y) = inverse.apply(x as f64, y);
 
         *out_pixel = bilinear_sample(
             input,
@@ -118,7 +118,7 @@ pub fn warp_row_bilinear_scalar(
 /// A similar implementation exists in `phase_correlation/mod.rs` using f64 coordinates
 /// for higher precision in log-polar transforms.
 #[inline]
-pub fn bilinear_sample(
+pub(crate) fn bilinear_sample(
     input: &[f32],
     width: usize,
     height: usize,
@@ -218,7 +218,7 @@ pub fn warp_row_lanczos3_scalar(
     const A: usize = 3; // Lanczos3 kernel radius
 
     for (x, out_pixel) in output_row.iter_mut().enumerate() {
-        let (src_x, src_y) = inverse.transform_point(x as f64, y);
+        let (src_x, src_y) = inverse.apply(x as f64, y);
         let sx = src_x as f32;
         let sy = src_y as f32;
 

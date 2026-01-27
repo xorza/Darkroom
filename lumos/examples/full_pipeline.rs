@@ -528,15 +528,45 @@ fn warp_image_to_reference(
         height, img_height
     );
 
-    // Use parallel CPU warping with Lanczos3 for high quality
-    let warped_pixels = lumos::warp_multichannel_parallel(
-        image.pixels(),
-        width,
-        height,
-        channels,
-        transform,
-        InterpolationMethod::Lanczos3,
-    );
+    // Warp each channel separately using warp_to_reference
+    let pixels = image.pixels();
+    let warped_pixels = if channels == 1 {
+        lumos::warp_to_reference(
+            pixels,
+            width,
+            height,
+            transform,
+            InterpolationMethod::Lanczos3,
+        )
+    } else {
+        // Extract channels, warp each, and interleave back
+        use rayon::prelude::*;
+
+        let channel_data: Vec<Vec<f32>> = (0..channels)
+            .map(|c| pixels.iter().skip(c).step_by(channels).copied().collect())
+            .collect();
+
+        let warped_channels: Vec<Vec<f32>> = channel_data
+            .par_iter()
+            .map(|channel| {
+                lumos::warp_to_reference(
+                    channel,
+                    width,
+                    height,
+                    transform,
+                    InterpolationMethod::Lanczos3,
+                )
+            })
+            .collect();
+
+        let mut result = vec![0.0f32; pixels.len()];
+        for c in 0..channels {
+            for (i, &val) in warped_channels[c].iter().enumerate() {
+                result[i * channels + c] = val;
+            }
+        }
+        result
+    };
 
     let dims = image.dimensions();
     let mut result = AstroImage::from_pixels(dims.width, dims.height, dims.channels, warped_pixels);
