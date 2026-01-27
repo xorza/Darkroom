@@ -149,11 +149,14 @@ pub use registration::{
     match_triangles,
     quick_register,
     quick_register_stars,
-    register_stars,
+    register_star_positions,
     warp_image,
     warp_to_reference,
     warp_to_reference_image,
 };
+// Re-export deprecated alias for backwards compatibility
+#[allow(deprecated)]
+pub use registration::register_stars;
 
 // ============================================================================
 // Stacking

@@ -5,7 +5,7 @@ use std::hint::black_box;
 
 use criterion::{BenchmarkId, Criterion, Throughput};
 
-use super::{Registrator, register_stars, warp_to_reference};
+use super::{Registrator, register_star_positions, warp_to_reference};
 use crate::registration::interpolation::InterpolationMethod;
 use crate::registration::types::{RegistrationConfig, TransformMatrix, TransformType};
 
@@ -54,7 +54,7 @@ fn benchmark_full_pipeline(c: &mut Criterion) {
 
         group.bench_function(BenchmarkId::new("similarity", star_count), |b| {
             b.iter(|| {
-                let result = register_stars(
+                let result = register_star_positions(
                     black_box(&ref_stars),
                     black_box(&target_stars),
                     TransformType::Similarity,
@@ -74,7 +74,7 @@ fn benchmark_full_pipeline(c: &mut Criterion) {
 
     group.bench_function("with_20%_outliers", |b| {
         b.iter(|| {
-            let result = register_stars(
+            let result = register_star_positions(
                 black_box(&ref_stars),
                 black_box(&target_stars),
                 TransformType::Similarity,
@@ -120,7 +120,7 @@ fn benchmark_config_variations(c: &mut Criterion) {
 
         group.bench_function(*name, |b| {
             b.iter(|| {
-                let result = register_stars(
+                let result = register_star_positions(
                     black_box(&ref_stars),
                     black_box(&target_stars),
                     *transform_type,

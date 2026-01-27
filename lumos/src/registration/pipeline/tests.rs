@@ -27,7 +27,8 @@ fn test_registration_identity() {
     let ref_stars = generate_star_grid(5, 5, 100.0, (100.0, 100.0));
     let target_stars = ref_stars.clone();
 
-    let result = register_stars(&ref_stars, &target_stars, TransformType::Translation).unwrap();
+    let result =
+        register_star_positions(&ref_stars, &target_stars, TransformType::Translation).unwrap();
 
     // Should find near-identity transform
     let (tx, ty) = result.transform.translation_components();
@@ -42,7 +43,8 @@ fn test_registration_translation() {
     let translation = TransformMatrix::translation(50.0, -30.0);
     let target_stars = transform_stars(&ref_stars, &translation);
 
-    let result = register_stars(&ref_stars, &target_stars, TransformType::Translation).unwrap();
+    let result =
+        register_star_positions(&ref_stars, &target_stars, TransformType::Translation).unwrap();
 
     let (tx, ty) = result.transform.translation_components();
     assert!((tx - 50.0).abs() < 1.0, "Expected tx=50, got {}", tx);
@@ -55,7 +57,8 @@ fn test_registration_rotation() {
     let rotation = TransformMatrix::euclidean(10.0, -5.0, 0.1); // ~5.7 degrees
     let target_stars = transform_stars(&ref_stars, &rotation);
 
-    let result = register_stars(&ref_stars, &target_stars, TransformType::Euclidean).unwrap();
+    let result =
+        register_star_positions(&ref_stars, &target_stars, TransformType::Euclidean).unwrap();
 
     let angle = result.transform.rotation_angle();
     assert!(
@@ -71,7 +74,8 @@ fn test_registration_similarity() {
     let similarity = TransformMatrix::similarity(20.0, 15.0, 0.05, 1.02);
     let target_stars = transform_stars(&ref_stars, &similarity);
 
-    let result = register_stars(&ref_stars, &target_stars, TransformType::Similarity).unwrap();
+    let result =
+        register_star_positions(&ref_stars, &target_stars, TransformType::Similarity).unwrap();
 
     let scale = result.transform.scale_factor();
     assert!(
@@ -92,7 +96,8 @@ fn test_registration_with_outliers() {
     target_stars[5] = (50.0, 800.0);
     target_stars[10] = (900.0, 100.0);
 
-    let result = register_stars(&ref_stars, &target_stars, TransformType::Translation).unwrap();
+    let result =
+        register_star_positions(&ref_stars, &target_stars, TransformType::Translation).unwrap();
 
     let (tx, ty) = result.transform.translation_components();
     // RANSAC should still find correct translation despite outliers
@@ -105,7 +110,7 @@ fn test_registration_insufficient_stars() {
     let ref_stars = vec![(100.0, 100.0), (200.0, 200.0)];
     let target_stars = ref_stars.clone();
 
-    let result = register_stars(&ref_stars, &target_stars, TransformType::Translation);
+    let result = register_star_positions(&ref_stars, &target_stars, TransformType::Translation);
     assert!(matches!(
         result,
         Err(RegistrationError::InsufficientStars { .. })
@@ -269,7 +274,7 @@ fn test_warp_to_reference_end_to_end() {
     let target_image = generate_synthetic_star_image(width, height, &target_stars, 1.0, 4.0);
 
     // Register: find transform from reference stars to target stars
-    let result = register_stars(&ref_stars, &target_stars, TransformType::Similarity)
+    let result = register_star_positions(&ref_stars, &target_stars, TransformType::Similarity)
         .expect("Registration should succeed");
 
     // Warp target image to align with reference
@@ -350,7 +355,8 @@ fn test_registration_result_quality() {
     let ref_stars = generate_star_grid(6, 6, 100.0, (50.0, 50.0));
     let target_stars = ref_stars.clone();
 
-    let result = register_stars(&ref_stars, &target_stars, TransformType::Translation).unwrap();
+    let result =
+        register_star_positions(&ref_stars, &target_stars, TransformType::Translation).unwrap();
 
     // Perfect match should have very low error and high quality
     assert!(result.rms_error < 0.1);
@@ -364,7 +370,8 @@ fn test_registration_large_rotation() {
     let rotation = TransformMatrix::rotation_around(300.0, 300.0, PI / 6.0);
     let target_stars = transform_stars(&ref_stars, &rotation);
 
-    let result = register_stars(&ref_stars, &target_stars, TransformType::Euclidean).unwrap();
+    let result =
+        register_star_positions(&ref_stars, &target_stars, TransformType::Euclidean).unwrap();
 
     let angle = result.transform.rotation_angle();
     assert!(
@@ -429,7 +436,8 @@ fn test_pipeline_ground_truth_synthetic() {
     let target_image = generate_synthetic_star_image(width, height, &target_stars, 1.0, 4.0);
 
     // Register using star positions (simulating star detection)
-    let result = register_stars(&ref_stars, &target_stars, TransformType::Similarity).unwrap();
+    let result =
+        register_star_positions(&ref_stars, &target_stars, TransformType::Similarity).unwrap();
 
     // Verify transform accuracy
     let estimated_scale = result.transform.scale_factor();
@@ -487,7 +495,8 @@ fn test_pipeline_partial_overlap() {
     let large_translation = TransformMatrix::translation(150.0, 0.0);
     let target_stars = transform_stars(&ref_stars, &large_translation);
 
-    let result = register_stars(&ref_stars, &target_stars, TransformType::Translation).unwrap();
+    let result =
+        register_star_positions(&ref_stars, &target_stars, TransformType::Translation).unwrap();
 
     let (tx, ty) = result.transform.translation_components();
     assert!(
@@ -521,7 +530,8 @@ fn test_pipeline_with_position_noise() {
         star.1 += noise_y;
     }
 
-    let result = register_stars(&ref_stars, &target_stars, TransformType::Similarity).unwrap();
+    let result =
+        register_star_positions(&ref_stars, &target_stars, TransformType::Similarity).unwrap();
 
     // Should still recover transform parameters approximately
     let estimated_scale = result.transform.scale_factor();
@@ -551,7 +561,8 @@ fn test_pipeline_consistency() {
     let mut angles = Vec::new();
 
     for _ in 0..5 {
-        let result = register_stars(&ref_stars, &target_stars, TransformType::Similarity).unwrap();
+        let result =
+            register_star_positions(&ref_stars, &target_stars, TransformType::Similarity).unwrap();
         scales.push(result.transform.scale_factor());
         angles.push(result.transform.rotation_angle());
     }
@@ -586,7 +597,7 @@ fn test_pipeline_affine_transform() {
     let affine = TransformMatrix::affine([1.02, 0.03, 15.0, -0.02, 0.98, 10.0]);
     let target_stars = transform_stars(&ref_stars, &affine);
 
-    let result = register_stars(&ref_stars, &target_stars, TransformType::Affine).unwrap();
+    let result = register_star_positions(&ref_stars, &target_stars, TransformType::Affine).unwrap();
 
     // Verify by transforming reference points and checking error
     let mut total_error = 0.0;
@@ -798,7 +809,7 @@ fn test_integration_dithered_exposures() {
             .map(|&(x, y)| transform.apply(x, y))
             .collect();
 
-        let result = register_stars(
+        let result = register_star_positions(
             &ref_positions,
             &target_positions,
             TransformType::Translation,
@@ -853,8 +864,9 @@ fn test_integration_mosaic_panels() {
             .map(|&(x, y)| transform.apply(x, y))
             .collect();
 
-        let result = register_stars(&ref_positions, &target_positions, TransformType::Euclidean)
-            .expect("Mosaic registration should succeed");
+        let result =
+            register_star_positions(&ref_positions, &target_positions, TransformType::Euclidean)
+                .expect("Mosaic registration should succeed");
 
         let (est_dx, est_dy) = result.transform.translation_components();
         let est_angle = result.transform.rotation_angle();
@@ -909,8 +921,9 @@ fn test_integration_field_rotation() {
             })
             .collect();
 
-        let result = register_stars(&ref_positions, &target_positions, TransformType::Euclidean)
-            .expect("Field rotation registration should succeed");
+        let result =
+            register_star_positions(&ref_positions, &target_positions, TransformType::Euclidean)
+                .expect("Field rotation registration should succeed");
 
         let est_angle = result.transform.rotation_angle();
         assert!(
@@ -945,7 +958,7 @@ fn test_integration_atmospheric_refraction() {
         })
         .collect();
 
-    let result = register_stars(&ref_positions, &target_positions, TransformType::Affine)
+    let result = register_star_positions(&ref_positions, &target_positions, TransformType::Affine)
         .expect("Refraction registration should succeed");
 
     // Check that we can model the transformation
@@ -986,8 +999,9 @@ fn test_integration_with_centroid_noise() {
     let target_noisy = add_centroid_noise(&target_stars, 0.3, 44444);
     let target_positions: Vec<(f64, f64)> = target_noisy.iter().map(|&(x, y, _)| (x, y)).collect();
 
-    let result = register_stars(&ref_positions, &target_positions, TransformType::Similarity)
-        .expect("Noisy registration should succeed");
+    let result =
+        register_star_positions(&ref_positions, &target_positions, TransformType::Similarity)
+            .expect("Noisy registration should succeed");
 
     // With noise, we expect slightly higher error but still reasonable
     let (est_dx, est_dy) = result.transform.translation_components();
@@ -1046,7 +1060,7 @@ fn test_integration_partial_overlap() {
     );
 
     // This is harder because target has fewer stars
-    let result = register_stars(
+    let result = register_star_positions(
         &ref_positions,
         &target_positions,
         TransformType::Translation,
@@ -1098,8 +1112,9 @@ fn test_integration_different_plate_scales() {
             })
             .collect();
 
-        let result = register_stars(&ref_positions, &target_positions, TransformType::Similarity)
-            .expect("Scale registration should succeed");
+        let result =
+            register_star_positions(&ref_positions, &target_positions, TransformType::Similarity)
+                .expect("Scale registration should succeed");
 
         let est_scale = result.transform.scale_factor();
         assert!(
@@ -1125,8 +1140,9 @@ fn test_integration_quality_metrics() {
         .map(|&(x, y)| transform.apply(x, y))
         .collect();
 
-    let result = register_stars(&ref_positions, &target_positions, TransformType::Similarity)
-        .expect("Quality metrics test should succeed");
+    let result =
+        register_star_positions(&ref_positions, &target_positions, TransformType::Similarity)
+            .expect("Quality metrics test should succeed");
 
     // Check quality metrics
     let inlier_ratio = result.num_inliers as f64 / result.matched_stars.len() as f64;

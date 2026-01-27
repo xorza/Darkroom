@@ -132,7 +132,7 @@ let target_positions: Vec<(f64, f64)> = target_stars
     .collect();
 
 // Find transformation
-let result = registrator.register_stars(&ref_positions, &target_positions)?;
+let result = registrator.register_star_positions(&ref_positions, &target_positions)?;
 
 println!("Matched {} stars, RMS error: {:.3} pixels", 
     result.num_inliers, result.rms_error);
@@ -199,7 +199,7 @@ For images with optical distortion (especially at field edges):
 use lumos::registration::distortion::{ThinPlateSpline, TpsConfig};
 
 // First, get matched star pairs from registration
-let result = registrator.register_stars(&ref_positions, &target_positions)?;
+let result = registrator.register_star_positions(&ref_positions, &target_positions)?;
 
 // Extract inlier pairs
 let (ref_inliers, target_inliers): (Vec<_>, Vec<_>) = result
@@ -250,7 +250,7 @@ registration/
 ### Data Flow
 
 ```
-register_stars(ref_stars, target_stars)
+register_star_positions(ref_stars, target_stars)
     │
     ├─► Validate inputs (min star count, etc.)
     │

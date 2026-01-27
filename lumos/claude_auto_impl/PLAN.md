@@ -40,8 +40,8 @@ Many functions take `(pixels: &[f32], width: usize, height: usize)` instead of `
 
 ## Phase 4: Naming consistency
 
-- [ ] Rename `register_stars` free function to `register_star_positions` (avoids confusion with `Registrator::register_stars` method)
-- [ ] Keep old name as deprecated alias
+- [x] Rename `register_stars` free function to `register_star_positions` (avoids confusion with `Registrator::register_stars` method)
+- [x] Keep old name as deprecated alias
 - [ ] Rename `IterativeBackgroundConfig.iterative_background_passes` field to just `passes` (redundant prefix)
 
 ## Phase 5: Update exports
