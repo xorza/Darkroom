@@ -140,8 +140,13 @@ pub use stacking::{
     // Configuration
     CacheConfig,
     FrameType,
+    // GPU stacking
+    GpuSigmaClipConfig,
+    GpuSigmaClipPipeline,
+    GpuSigmaClipper,
     // Main API
     ImageStack,
+    MAX_GPU_FRAMES,
     MedianConfig,
     // Progress reporting
     ProgressCallback,
@@ -176,7 +181,7 @@ pub mod bench {
     pub use crate::math::bench as math;
 
     // Stacking benchmarks
-    pub use crate::stacking::bench::{mean, median, sigma_clipped};
+    pub use crate::stacking::bench::{gpu, mean, median, sigma_clipped};
 
     // Star detection benchmarks
     pub use crate::star_detection::bench::{

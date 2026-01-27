@@ -32,6 +32,7 @@ rustfft = { workspace = true }
 rand = { workspace = true }
 rand_chacha = { workspace = true }
 nalgebra = { workspace = true }
+wgpu = { workspace = true }
 
 [dev-dependencies]
 criterion = { workspace = true }
@@ -140,6 +141,12 @@ required-features = ["bench"]
 [[bench]]
 name = "stack_sigma_clipped"
 path = "benches/stacking/sigma_clipped.rs"
+harness = false
+required-features = ["bench"]
+
+[[bench]]
+name = "stack_gpu_sigma_clip"
+path = "benches/stacking/gpu_sigma_clip.rs"
 harness = false
 required-features = ["bench"]
 

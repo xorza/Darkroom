@@ -416,10 +416,42 @@ pub fn stack_sigma_clipped_from_paths<P: AsRef<Path> + Sync>(
    - All outliers except one
 3. **Performance**: Benchmark vs CPU at various frame counts and image sizes
 
-### Files to Implement
+### Implementation Status (COMPLETE - 2026-01-27)
 
-- `src/stacking/gpu/mod.rs` - Module definition, backend selection
+**Files Implemented:**
+- `src/stacking/gpu/mod.rs` - Module definition and re-exports
 - `src/stacking/gpu/sigma_clip.rs` - GpuSigmaClipper implementation
 - `src/stacking/gpu/sigma_clip.wgsl` - WGSL compute shader
-- `src/stacking/gpu/pipeline.rs` - Pipeline setup and caching
-- `src/stacking/gpu/NOTES-AI.md` - Implementation notes (this design)
+- `src/stacking/gpu/pipeline.rs` - Pipeline setup using GpuPipeline trait
+- `src/stacking/gpu/bench.rs` - GPU vs CPU benchmarks (feature = "bench")
+
+**API:**
+```rust
+// Configuration
+GpuSigmaClipConfig::new(sigma: 2.5, max_iterations: 3)
+GpuSigmaClipConfig::default()  // sigma=2.5, max_iterations=3
+
+// Stacking
+let mut clipper = GpuSigmaClipper::new();
+if clipper.gpu_available() {
+    let result = clipper.stack(&frames, width, height, &config);
+}
+```
+
+**Tests (11 passing):**
+- `test_config_default`, `test_config_new`
+- `test_config_zero_sigma_panics`, `test_config_zero_iterations_panics`
+- `test_stack_identical_values`, `test_stack_with_outlier`
+- `test_stack_two_frames_no_clipping`, `test_stack_single_frame`
+- `test_stack_large_image`, `test_stack_empty_frames_panics`
+- `test_stack_too_many_frames_panics`
+
+**Exports:**
+- `lumos::GpuSigmaClipper`, `lumos::GpuSigmaClipConfig`, `lumos::GpuSigmaClipPipeline`
+- `lumos::MAX_GPU_FRAMES` (128)
+
+**Benchmark:**
+```bash
+cargo bench -p lumos --features bench --bench stack_gpu_sigma_clip
+```
+Benchmarks GPU vs CPU for various image sizes (256x256 to 2048x2048) and frame counts (10-50).

@@ -2,6 +2,7 @@ mod cache;
 mod cache_config;
 mod drizzle;
 mod error;
+pub mod gpu;
 mod local_normalization;
 mod mean;
 mod median;
@@ -33,9 +34,13 @@ pub use weighted::{FrameQuality, RejectionMethod, WeightedConfig};
 // Re-export normalization types for public API
 #[allow(unused_imports)]
 pub use local_normalization::{LocalNormalizationConfig, NormalizationMethod};
+// Re-export GPU types for public API
+#[allow(unused_imports)]
+pub use gpu::{GpuSigmaClipConfig, GpuSigmaClipPipeline, GpuSigmaClipper, MAX_GPU_FRAMES};
 
 #[cfg(feature = "bench")]
 pub mod bench {
+    pub use super::gpu::bench as gpu;
     pub use super::mean::bench as mean;
     pub use super::median::bench as median;
     pub use super::sigma_clipped::bench as sigma_clipped;
