@@ -45,7 +45,7 @@ DrizzleKernel      // Square | Point | Gaussian | Lanczos
 
 ---
 
-## Local Normalization (PLANNED)
+## Local Normalization (API DESIGNED, IMPLEMENTATION IN PROGRESS)
 
 ### Research Summary
 
@@ -89,28 +89,36 @@ Local Normalization corrects illumination differences across frames by matching 
 - Bilinear interpolation between tile centers
 - Can reuse SIMD interpolation from `background/simd/`
 
-**API Design**:
+**API Design** (Implemented in `local_normalization.rs`):
 ```rust
 /// Normalization method for aligning frame statistics before stacking.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub enum NormalizationMethod {
-    /// No normalization.
     None,
-    /// Global normalization - match overall median and scale.
+    #[default]
     Global,
-    /// Local normalization - tile-based matching.
     Local(LocalNormalizationConfig),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct LocalNormalizationConfig {
-    /// Tile size in pixels (default: 128)
-    pub tile_size: usize,
-    /// Sigma for clipping outliers in tiles (default: 3.0)
-    pub clip_sigma: f32,
-    /// Number of clipping iterations (default: 3)
-    pub clip_iterations: usize,
+    pub tile_size: usize,        // Default: 128, Range: 64-256
+    pub clip_sigma: f32,         // Default: 3.0
+    pub clip_iterations: usize,  // Default: 3
 }
+
+impl LocalNormalizationConfig {
+    pub fn new(tile_size: usize) -> Self;           // Custom tile size
+    pub fn with_clipping(self, sigma, iters) -> Self; // Custom clipping
+    pub fn fine() -> Self;    // 64px tiles for steep gradients
+    pub fn coarse() -> Self;  // 256px tiles for stability
+}
+
+/// Per-tile statistics from a frame
+pub struct TileNormalizationStats { medians, scales, tiles_x, tiles_y, ... }
+
+/// Correction map for applying normalization
+pub struct LocalNormalizationMap { offsets, scales, centers_x, centers_y, ... }
 ```
 
 ### Implementation Plan

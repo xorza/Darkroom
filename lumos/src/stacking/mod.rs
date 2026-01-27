@@ -2,6 +2,7 @@ mod cache;
 mod cache_config;
 mod drizzle;
 mod error;
+mod local_normalization;
 mod mean;
 mod median;
 mod progress;
@@ -29,6 +30,9 @@ pub use sigma_clipped::SigmaClippedConfig;
 // Re-export weighted types for public API
 #[allow(unused_imports)]
 pub use weighted::{FrameQuality, RejectionMethod, WeightedConfig};
+// Re-export normalization types for public API
+#[allow(unused_imports)]
+pub use local_normalization::{LocalNormalizationConfig, NormalizationMethod};
 
 #[cfg(feature = "bench")]
 pub mod bench {
