@@ -103,7 +103,7 @@ Existing: `examples/full_pipeline.rs` (calibration + registration + stacking)
 
 ### Example 5: Gradient Removal (`examples/gradient_removal.rs`)
 
-- [ ] Create example showing light pollution correction:
+- [x] Create example showing light pollution correction:
   - Load stacked image with gradient
   - Remove with defaults: `remove_gradient_image(&image, &GradientRemovalConfig::default())` (requires Phase 1)
   - Show polynomial model: `GradientModel::Polynomial(2)`
