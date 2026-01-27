@@ -63,7 +63,7 @@ pub use session::{
 #[allow(unused_imports)]
 pub use gradient_removal::{
     CorrectionMethod, GradientModel, GradientRemovalConfig, GradientRemovalError,
-    GradientRemovalResult, remove_gradient, remove_gradient_simple,
+    GradientRemovalResult, remove_gradient, remove_gradient_image, remove_gradient_simple,
 };
 // Re-export live stacking types for public API
 #[allow(unused_imports)]

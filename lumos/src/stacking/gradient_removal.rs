@@ -38,6 +38,7 @@
 //! let corrected = remove_gradient(&image_pixels, width, height, &config)?;
 //! ```
 
+use crate::AstroImage;
 use rayon::prelude::*;
 
 /// Configuration for gradient removal.
@@ -252,6 +253,64 @@ pub fn remove_gradient_simple(
     config: &GradientRemovalConfig,
 ) -> Result<Vec<f32>, GradientRemovalError> {
     remove_gradient(pixels, width, height, config).map(|r| r.corrected)
+}
+
+/// Remove gradient from an AstroImage.
+///
+/// This is a convenience wrapper around [`remove_gradient`] that takes an
+/// `AstroImage` instead of raw pixel data. For RGB images, gradient removal
+/// is applied to each channel independently.
+///
+/// # Arguments
+/// * `image` - Astronomical image (grayscale or RGB)
+/// * `config` - Gradient removal configuration
+///
+/// # Returns
+/// A new `AstroImage` with the gradient removed.
+///
+/// # Errors
+/// Returns error if gradient fitting fails (insufficient samples, singular matrix).
+///
+/// # Example
+/// ```rust,ignore
+/// use lumos::{AstroImage, remove_gradient_image, GradientRemovalConfig};
+///
+/// let image = AstroImage::from_file("stacked.fits")?;
+/// let config = GradientRemovalConfig::polynomial(2);
+/// let corrected = remove_gradient_image(&image, &config)?;
+/// ```
+pub fn remove_gradient_image(
+    image: &AstroImage,
+    config: &GradientRemovalConfig,
+) -> Result<AstroImage, GradientRemovalError> {
+    let width = image.width();
+    let height = image.height();
+    let channels = image.channels();
+
+    if channels == 1 {
+        // Grayscale: apply directly
+        let corrected = remove_gradient_simple(image.pixels(), width, height, config)?;
+        Ok(AstroImage::from_pixels(width, height, channels, corrected))
+    } else {
+        // RGB: process each channel independently
+        let pixels = image.pixels();
+        let channel_size = width * height;
+        let mut corrected = vec![0.0f32; channel_size * channels];
+
+        for c in 0..channels {
+            let channel_data: Vec<f32> = (0..channel_size)
+                .map(|i| pixels[i * channels + c])
+                .collect();
+
+            let channel_corrected = remove_gradient_simple(&channel_data, width, height, config)?;
+
+            for (i, &val) in channel_corrected.iter().enumerate() {
+                corrected[i * channels + c] = val;
+            }
+        }
+
+        Ok(AstroImage::from_pixels(width, height, channels, corrected))
+    }
 }
 
 /// Generate background samples, avoiding bright regions.

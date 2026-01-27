@@ -14,7 +14,7 @@ Many functions take `(pixels: &[f32], width: usize, height: usize)` instead of `
 
 ### Stacking Module
 
-- [ ] Add `remove_gradient_image(image: &AstroImage, config: &GradientRemovalConfig) -> Result<AstroImage, GradientRemovalError>` in `src/stacking/gradient_removal.rs`
+- [x] Add `remove_gradient_image(image: &AstroImage, config: &GradientRemovalConfig) -> Result<AstroImage, GradientRemovalError>` in `src/stacking/gradient_removal.rs`
 - [ ] Add `LiveStackAccumulator::from_reference(reference: &AstroImage, config: LiveStackConfig) -> Result<Self, LiveStackError>` in `src/stacking/live.rs`
 - [ ] Export both in `src/stacking/mod.rs` and `src/lib.rs`
 
@@ -133,6 +133,8 @@ Existing: `examples/full_pipeline.rs` (calibration + registration + stacking)
   - Print solution quality (RMS, rotation, scale)
 
 ## Verification
+
+Run each example and verify it works as intended.
 
 After each task run:
 ```

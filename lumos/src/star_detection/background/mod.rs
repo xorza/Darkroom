@@ -14,6 +14,7 @@ mod tests;
 mod simd;
 
 use super::constants::{self, ROWS_PER_CHUNK};
+use crate::AstroImage;
 use rayon::prelude::*;
 
 /// Background map with per-pixel background and noise estimates.
@@ -661,4 +662,65 @@ fn compute_tile_stats_masked(
     }
 
     sigma_clipped_stats(values, deviations, 3.0, 3)
+}
+
+/// Estimate background from an AstroImage using tiled sigma-clipped statistics.
+///
+/// This is a convenience wrapper around [`estimate_background`] that takes an
+/// `AstroImage` instead of raw pixel data. For RGB images, only the first
+/// channel (red) is used.
+///
+/// # Arguments
+/// * `image` - Astronomical image (grayscale or RGB)
+/// * `tile_size` - Size of tiles for background estimation (typically 32-128)
+///
+/// # Example
+/// ```rust,ignore
+/// use lumos::{AstroImage, estimate_background_image};
+///
+/// let image = AstroImage::from_file("light.fits")?;
+/// let background = estimate_background_image(&image, 64);
+/// ```
+pub fn estimate_background_image(image: &AstroImage, tile_size: usize) -> BackgroundMap {
+    let grayscale = image.clone().to_grayscale();
+    estimate_background(
+        grayscale.pixels(),
+        grayscale.width(),
+        grayscale.height(),
+        tile_size,
+    )
+}
+
+/// Estimate background from an AstroImage with iterative refinement.
+///
+/// This is a convenience wrapper around [`estimate_background_iterative`] that
+/// takes an `AstroImage` instead of raw pixel data. For RGB images, only the
+/// first channel (red) is used.
+///
+/// # Arguments
+/// * `image` - Astronomical image (grayscale or RGB)
+/// * `tile_size` - Size of tiles for background estimation (typically 32-128)
+/// * `config` - Iterative refinement configuration
+///
+/// # Example
+/// ```rust,ignore
+/// use lumos::{AstroImage, estimate_background_iterative_image, IterativeBackgroundConfig};
+///
+/// let image = AstroImage::from_file("crowded_field.fits")?;
+/// let config = IterativeBackgroundConfig::default();
+/// let background = estimate_background_iterative_image(&image, 64, &config);
+/// ```
+pub fn estimate_background_iterative_image(
+    image: &AstroImage,
+    tile_size: usize,
+    config: &IterativeBackgroundConfig,
+) -> BackgroundMap {
+    let grayscale = image.clone().to_grayscale();
+    estimate_background_iterative(
+        grayscale.pixels(),
+        grayscale.width(),
+        grayscale.height(),
+        tile_size,
+        config,
+    )
 }

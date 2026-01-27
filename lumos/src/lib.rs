@@ -72,7 +72,9 @@ pub use star_detection::{
     StarDetectionResult,
     alpha_beta_to_fwhm,
     estimate_background,
+    estimate_background_image,
     estimate_background_iterative,
+    estimate_background_iterative_image,
     find_stars,
     fit_gaussian_2d,
     fit_moffat_2d,
@@ -209,6 +211,7 @@ pub use stacking::{
     create_comet_stack_result,
     interpolate_position,
     remove_gradient,
+    remove_gradient_image,
     remove_gradient_simple,
 };
 
