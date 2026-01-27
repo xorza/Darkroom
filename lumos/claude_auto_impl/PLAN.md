@@ -26,7 +26,7 @@ Many functions take `(pixels: &[f32], width: usize, height: usize)` instead of `
 
 ## Phase 2: Add AstroImage convenience methods
 
-- [ ] Add `AstroImage::save(&self, path: impl AsRef<Path>) -> Result<(), Error>` method that handles conversion to imaginarium::Image internally
+- [x] Add `AstroImage::save(&self, path: impl AsRef<Path>) -> Result<(), Error>` method that handles conversion to imaginarium::Image internally
 - [ ] Add `AstroImage::get_pixel(&self, x: usize, y: usize) -> f32` for single-channel images (clearer than `get_pixel_gray`)
 - [ ] Add `AstroImage::get_pixel_channel(&self, x: usize, y: usize, channel: usize) -> f32` for any channel access
 - [ ] Deprecate `get_pixel_gray` with message pointing to `get_pixel`

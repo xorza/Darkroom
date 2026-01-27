@@ -331,6 +331,29 @@ impl AstroImage {
         }
     }
 
+    /// Save the image to a file.
+    ///
+    /// Automatically detects the file format based on extension:
+    /// - PNG: .png
+    /// - JPEG: .jpg, .jpeg
+    /// - TIFF: .tif, .tiff
+    ///
+    /// # Arguments
+    /// * `path` - Path to save the image to
+    ///
+    /// # Returns
+    /// * `Result<()>` - Ok on success, or an error
+    ///
+    /// # Example
+    /// ```ignore
+    /// let image = AstroImage::from_file("input.fits")?;
+    /// image.save("output.tiff")?;
+    /// ```
+    pub fn save<P: AsRef<Path>>(&self, path: P) -> Result<()> {
+        self.image.save_file(path)?;
+        Ok(())
+    }
+
     /// Load all astronomical images from a directory.
     ///
     /// Loads all supported image files (RAW and FITS) from the directory
@@ -522,6 +545,57 @@ mod tests {
     fn test_mean() {
         let image = AstroImage::from_pixels(2, 2, 1, vec![1.0, 2.0, 3.0, 4.0]);
         assert!((image.mean() - 2.5).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_save_grayscale_tiff() {
+        let image = AstroImage::from_pixels(2, 2, 1, vec![0.1, 0.2, 0.3, 0.4]);
+        let output_path = test_output_path("astro_save_gray.tiff");
+
+        image.save(&output_path).unwrap();
+
+        assert!(output_path.exists());
+
+        // Verify we can load it back
+        let loaded = AstroImage::from_file(&output_path).unwrap();
+        assert_eq!(loaded.width(), 2);
+        assert_eq!(loaded.height(), 2);
+        assert_eq!(loaded.channels(), 1);
+    }
+
+    #[test]
+    fn test_save_rgb_tiff() {
+        let image = AstroImage::from_pixels(
+            2,
+            2,
+            3,
+            vec![
+                1.0, 0.0, 0.0, // red
+                0.0, 1.0, 0.0, // green
+                0.0, 0.0, 1.0, // blue
+                1.0, 1.0, 1.0, // white
+            ],
+        );
+        let output_path = test_output_path("astro_save_rgb.tiff");
+
+        image.save(&output_path).unwrap();
+
+        assert!(output_path.exists());
+
+        // Verify we can load it back
+        let loaded = AstroImage::from_file(&output_path).unwrap();
+        assert_eq!(loaded.width(), 2);
+        assert_eq!(loaded.height(), 2);
+        assert_eq!(loaded.channels(), 3);
+    }
+
+    #[test]
+    fn test_save_invalid_extension() {
+        let image = AstroImage::from_pixels(2, 2, 1, vec![0.1, 0.2, 0.3, 0.4]);
+        let output_path = test_output_path("astro_save_invalid.xyz");
+
+        let result = image.save(&output_path);
+        assert!(result.is_err());
     }
 
     #[test]
