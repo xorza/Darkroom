@@ -560,39 +560,3 @@ pub fn warp_image(
 
     output
 }
-
-/// Resample an image to a new size using the specified interpolation.
-pub fn resample_image(
-    input: &[f32],
-    input_width: usize,
-    input_height: usize,
-    output_width: usize,
-    output_height: usize,
-    method: InterpolationMethod,
-) -> Vec<f32> {
-    let config = WarpConfig {
-        method,
-        border_value: 0.0,
-        normalize_kernel: true,
-        clamp_output: false,
-    };
-
-    let scale_x = input_width as f64 / output_width as f64;
-    let scale_y = input_height as f64 / output_height as f64;
-
-    // Create scaling transform (output to input)
-    let transform = TransformMatrix::from_scale(1.0 / scale_x, 1.0 / scale_y);
-
-    // We need the inverse since warp_image expects input->output transform
-    let inverse_transform = transform.inverse();
-
-    warp_image(
-        input,
-        input_width,
-        input_height,
-        output_width,
-        output_height,
-        &inverse_transform,
-        &config,
-    )
-}

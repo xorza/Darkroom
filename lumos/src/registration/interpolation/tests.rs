@@ -344,25 +344,6 @@ fn test_warp_scale() {
 }
 
 #[test]
-fn test_resample_upscale() {
-    let input = vec![1.0, 2.0, 3.0, 4.0];
-    let output = resample_image(&input, 2, 2, 4, 4, InterpolationMethod::Bilinear);
-
-    assert_eq!(output.len(), 16);
-    // Corners should preserve values
-    assert!((output[0] - 1.0).abs() < 0.2);
-}
-
-#[test]
-fn test_resample_downscale() {
-    // Create larger image
-    let input: Vec<f32> = (0..64).map(|i| i as f32).collect();
-    let output = resample_image(&input, 8, 8, 4, 4, InterpolationMethod::Lanczos3);
-
-    assert_eq!(output.len(), 16);
-}
-
-#[test]
 fn test_interpolation_method_radius() {
     assert_eq!(InterpolationMethod::Nearest.kernel_radius(), 1);
     assert_eq!(InterpolationMethod::Bilinear.kernel_radius(), 1);

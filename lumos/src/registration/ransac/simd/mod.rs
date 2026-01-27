@@ -108,35 +108,6 @@ fn count_inliers_scalar_impl(
     (inliers, score)
 }
 
-/// Compute residuals (Euclidean distance for each point pair after transformation).
-///
-/// Note: SIMD acceleration was removed as it provided <5% improvement.
-/// The bottleneck is the sqrt operation which doesn't vectorize well.
-#[inline]
-pub fn compute_residuals(
-    ref_points: &[(f64, f64)],
-    target_points: &[(f64, f64)],
-    transform: &TransformMatrix,
-) -> Vec<f64> {
-    compute_residuals_scalar_impl(ref_points, target_points, transform)
-}
-
-#[inline]
-fn compute_residuals_scalar_impl(
-    ref_points: &[(f64, f64)],
-    target_points: &[(f64, f64)],
-    transform: &TransformMatrix,
-) -> Vec<f64> {
-    ref_points
-        .iter()
-        .zip(target_points.iter())
-        .map(|(&(rx, ry), &(tx, ty))| {
-            let (px, py) = transform.apply(rx, ry);
-            ((px - tx).powi(2) + (py - ty).powi(2)).sqrt()
-        })
-        .collect()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -243,22 +214,6 @@ mod tests {
     }
 
     #[test]
-    fn test_compute_residuals_basic() {
-        let ref_points = vec![(0.0, 0.0), (10.0, 10.0), (20.0, 20.0), (30.0, 30.0)];
-        let target_points = vec![(10.0, 5.0), (20.0, 15.0), (30.0, 25.0), (40.0, 35.0)];
-        let transform = create_test_transform();
-
-        let residuals = compute_residuals(&ref_points, &target_points, &transform);
-
-        assert_eq!(residuals.len(), ref_points.len());
-
-        // All residuals should be 0 (exact match)
-        for r in &residuals {
-            assert!(*r < 1e-10);
-        }
-    }
-
-    #[test]
     fn test_count_inliers_simd_score_calculation() {
         // Test that score is computed correctly
         let ref_points = vec![(0.0, 0.0), (10.0, 0.0)];
@@ -275,34 +230,5 @@ mod tests {
         assert_eq!(score, score_scalar);
         // Score should be 2 * threshold² * 1000 = 2 * 4 * 1000 = 8000
         assert_eq!(score, 8000);
-    }
-
-    #[test]
-    fn test_affine_transform_residuals() {
-        // Test with affine transform
-        let transform = TransformMatrix::affine([1.1, 0.1, 5.0, -0.1, 0.9, 10.0]);
-
-        let ref_points: Vec<(f64, f64)> =
-            (0..20).map(|i| (i as f64 * 5.0, i as f64 * 3.0)).collect();
-
-        let target_points: Vec<(f64, f64)> = ref_points
-            .iter()
-            .map(|&(x, y)| {
-                let (tx, ty) = transform.apply(x, y);
-                (tx + 0.5, ty - 0.3) // Small offset
-            })
-            .collect();
-
-        let residuals = compute_residuals(&ref_points, &target_points, &transform);
-
-        for (i, r) in residuals.iter().enumerate() {
-            // Expected residual is sqrt(0.5² + 0.3²) ≈ 0.583
-            assert!(
-                (r - 0.583).abs() < 0.01,
-                "Index {}: unexpected residual {}",
-                i,
-                r
-            );
-        }
     }
 }

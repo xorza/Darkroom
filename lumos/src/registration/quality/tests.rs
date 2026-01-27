@@ -54,20 +54,6 @@ fn test_estimate_overlap_no_overlap() {
 }
 
 #[test]
-fn test_compute_residuals() {
-    let ref_points = vec![(0.0, 0.0), (10.0, 0.0), (0.0, 10.0)];
-    let target_points = vec![(5.0, 0.0), (15.0, 0.0), (5.0, 10.0)];
-    let transform = TransformMatrix::from_translation(5.0, 0.0);
-
-    let residuals = compute_residuals(&ref_points, &target_points, &transform);
-
-    assert_eq!(residuals.len(), 3);
-    for r in &residuals {
-        assert!(*r < 0.01, "Expected near-zero residual, got {}", r);
-    }
-}
-
-#[test]
 fn test_residual_stats() {
     let residuals = vec![1.0, 2.0, 3.0, 4.0, 5.0];
     let stats = ResidualStats::compute(&residuals);
@@ -287,21 +273,6 @@ fn test_residual_stats_identical_values() {
         "Std dev of identical values should be 0"
     );
     assert!((stats.percentile_90 - 3.0).abs() < 0.01);
-}
-
-/// Test compute_residuals with large transformation
-#[test]
-fn test_compute_residuals_large_transform() {
-    let ref_points = vec![(0.0, 0.0), (100.0, 0.0), (0.0, 100.0)];
-    let target_points = vec![(50.0, 50.0), (150.0, 50.0), (50.0, 150.0)];
-    let transform = TransformMatrix::from_translation(50.0, 50.0);
-
-    let residuals = compute_residuals(&ref_points, &target_points, &transform);
-
-    assert_eq!(residuals.len(), 3);
-    for r in &residuals {
-        assert!(*r < 0.01, "Expected near-zero residual, got {}", r);
-    }
 }
 
 /// Test quality metrics with very high inlier count

@@ -316,38 +316,6 @@ pub fn warp_image_lanczos3(
     output
 }
 
-/// Warp an entire image using SIMD-accelerated bilinear interpolation.
-///
-/// This is a convenience function that processes all rows.
-pub fn warp_image_bilinear_simd(
-    input: &[f32],
-    input_width: usize,
-    input_height: usize,
-    output_width: usize,
-    output_height: usize,
-    transform: &TransformMatrix,
-    border_value: f32,
-) -> Vec<f32> {
-    let mut output = vec![border_value; output_width * output_height];
-    let inverse = transform.inverse();
-
-    for y in 0..output_height {
-        let row_start = y * output_width;
-        let row_end = row_start + output_width;
-        warp_row_bilinear_simd(
-            input,
-            input_width,
-            input_height,
-            &mut output[row_start..row_end],
-            y,
-            &inverse,
-            border_value,
-        );
-    }
-
-    output
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -463,36 +431,6 @@ mod tests {
                         output_scalar[x]
                     );
                 }
-            }
-        }
-    }
-
-    #[test]
-    fn test_warp_image_bilinear_simd() {
-        let width = 64;
-        let height = 64;
-        let input = create_test_image(width, height);
-
-        let transform = TransformMatrix::translation(1.0, 1.0);
-
-        let output =
-            warp_image_bilinear_simd(&input, width, height, width, height, &transform, 0.0);
-
-        assert_eq!(output.len(), width * height);
-
-        // Check a few interior pixels
-        for y in 5..height - 5 {
-            for x in 5..width - 5 {
-                let expected = input[(y - 1) * width + (x - 1)];
-                let actual = output[y * width + x];
-                assert!(
-                    (actual - expected).abs() < 0.01,
-                    "({}, {}): {} vs {}",
-                    x,
-                    y,
-                    actual,
-                    expected
-                );
             }
         }
     }

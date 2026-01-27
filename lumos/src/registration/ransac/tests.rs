@@ -231,20 +231,6 @@ fn test_adaptive_iterations() {
 }
 
 #[test]
-fn test_compute_residuals() {
-    let ref_points = vec![(0.0, 0.0), (10.0, 0.0), (0.0, 10.0)];
-    let target_points = vec![(5.0, 0.0), (15.0, 0.0), (5.0, 10.0)];
-
-    let transform = TransformMatrix::translation(5.0, 0.0);
-    let residuals = compute_residuals(&ref_points, &target_points, &transform);
-
-    assert_eq!(residuals.len(), 3);
-    for r in &residuals {
-        assert!(approx_eq(*r, 0.0, EPSILON));
-    }
-}
-
-#[test]
 fn test_centroid() {
     let points = vec![(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)];
     let (cx, cy) = centroid(&points);

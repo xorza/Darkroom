@@ -978,15 +978,3 @@ pub(crate) fn refine_transform(
 ) -> Option<TransformMatrix> {
     estimate_transform(ref_points, target_points, transform_type)
 }
-
-/// Compute residuals for a transformation.
-///
-/// Uses SIMD acceleration when available (AVX2/SSE on x86_64, NEON on aarch64).
-#[inline]
-pub(crate) fn compute_residuals(
-    ref_points: &[(f64, f64)],
-    target_points: &[(f64, f64)],
-    transform: &TransformMatrix,
-) -> Vec<f64> {
-    simd::compute_residuals(ref_points, target_points, transform)
-}

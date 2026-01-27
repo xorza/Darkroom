@@ -27,4 +27,3 @@ pub fn create_threshold_mask_slice(
         mask.push(px > threshold);
     }
 }
-
