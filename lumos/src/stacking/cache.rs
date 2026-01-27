@@ -406,6 +406,88 @@ impl ImageCache {
         result
     }
 
+    /// Process images in horizontal chunks with per-frame weights.
+    ///
+    /// Similar to `process_chunked`, but the combine function also receives weights.
+    /// Used for weighted mean stacking with optional rejection.
+    pub fn process_chunked_weighted<F>(&self, weights: &[f32], combine: F) -> AstroImage
+    where
+        F: Fn(&mut [f32], &[f32]) -> f32 + Sync,
+    {
+        let dims = self.dimensions;
+        let frame_count = self.frame_count();
+        let width = dims.width;
+        let height = dims.height;
+        let channels = dims.channels;
+        let available_memory = self.config.get_available_memory();
+
+        assert_eq!(
+            weights.len(),
+            frame_count,
+            "Weight count must match frame count"
+        );
+
+        let chunk_rows = match &self.storage {
+            Storage::InMemory(_) => height,
+            Storage::DiskBacked { .. } => compute_optimal_chunk_rows_with_memory(
+                width,
+                channels,
+                frame_count,
+                available_memory,
+            ),
+        };
+
+        let mut output_pixels = vec![0.0f32; dims.pixel_count()];
+        let num_chunks = height.div_ceil(chunk_rows);
+
+        report_progress(&self.progress, 0, num_chunks, StackingStage::Processing);
+
+        for chunk_idx in 0..num_chunks {
+            let start_row = chunk_idx * chunk_rows;
+            let end_row = (start_row + chunk_rows).min(height);
+            let rows_in_chunk = end_row - start_row;
+            let pixels_in_chunk = rows_in_chunk * width * channels;
+
+            let chunks: Vec<&[f32]> = (0..frame_count)
+                .map(|frame_idx| self.read_chunk(frame_idx, start_row, end_row))
+                .collect();
+
+            let output_slice =
+                &mut output_pixels[start_row * width * channels..][..pixels_in_chunk];
+
+            output_slice
+                .par_chunks_mut(width * channels)
+                .enumerate()
+                .for_each(|(row_in_chunk, row_output)| {
+                    let mut values = vec![0.0f32; frame_count];
+                    let mut local_weights = weights.to_vec();
+                    let row_offset = row_in_chunk * width * channels;
+
+                    for (pixel_in_row, out) in row_output.iter_mut().enumerate() {
+                        let pixel_idx = row_offset + pixel_in_row;
+                        for (frame_idx, chunk) in chunks.iter().enumerate() {
+                            values[frame_idx] = chunk[pixel_idx];
+                        }
+                        // Reset weights for each pixel (rejection may modify values array)
+                        local_weights.copy_from_slice(weights);
+                        *out = combine(&mut values, &local_weights);
+                    }
+                });
+
+            report_progress(
+                &self.progress,
+                chunk_idx + 1,
+                num_chunks,
+                StackingStage::Processing,
+            );
+        }
+
+        let mut result =
+            AstroImage::from_pixels(dims.width, dims.height, dims.channels, output_pixels);
+        result.metadata = self.metadata.clone();
+        result
+    }
+
     /// Read a horizontal chunk (rows start_row..end_row) from a frame.
     fn read_chunk(&self, frame_idx: usize, start_row: usize, end_row: usize) -> &[f32] {
         let width = self.dimensions.width;

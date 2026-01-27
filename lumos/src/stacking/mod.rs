@@ -4,7 +4,9 @@ mod error;
 mod mean;
 mod median;
 mod progress;
+pub mod rejection;
 mod sigma_clipped;
+mod weighted;
 
 use std::path::PathBuf;
 
@@ -14,7 +16,15 @@ pub use cache_config::CacheConfig;
 pub use error::Error;
 pub use median::MedianConfig;
 pub use progress::{ProgressCallback, StackingProgress, StackingStage};
+// Re-export rejection types for public API
+#[allow(unused_imports)]
+pub use rejection::{
+    GesdConfig, LinearFitClipConfig, PercentileClipConfig, RejectionResult, WinsorizedClipConfig,
+};
 pub use sigma_clipped::SigmaClippedConfig;
+// Re-export weighted types for public API
+#[allow(unused_imports)]
+pub use weighted::{FrameQuality, RejectionMethod, WeightedConfig};
 
 #[cfg(feature = "bench")]
 pub mod bench {
@@ -50,6 +60,9 @@ pub enum StackingMethod {
     /// Average after excluding pixels beyond N sigma from the mean.
     /// Uses memory-mapped chunked processing for efficiency.
     SigmaClippedMean(SigmaClippedConfig),
+    /// Weighted mean with optional rejection.
+    /// Supports quality-based frame weighting and multiple rejection methods.
+    WeightedMean(WeightedConfig),
 }
 
 impl Default for StackingMethod {
@@ -65,6 +78,17 @@ impl std::fmt::Display for StackingMethod {
             StackingMethod::Median(_) => write!(f, "median"),
             StackingMethod::SigmaClippedMean(config) => {
                 write!(f, "sigma{:.1}", config.clip.sigma)
+            }
+            StackingMethod::WeightedMean(config) => {
+                let rejection_name = match &config.rejection {
+                    RejectionMethod::None => "none",
+                    RejectionMethod::SigmaClip(_) => "sigma",
+                    RejectionMethod::WinsorizedSigmaClip(_) => "winsorized",
+                    RejectionMethod::LinearFitClip(_) => "linearfit",
+                    RejectionMethod::PercentileClip(_) => "percentile",
+                    RejectionMethod::Gesd(_) => "gesd",
+                };
+                write!(f, "weighted-{}", rejection_name)
             }
         }
     }
@@ -177,6 +201,19 @@ impl ImageStack {
                     "Starting stacking"
                 );
             }
+            StackingMethod::WeightedMean(config) => {
+                tracing::info!(
+                    frame_type = %self.frame_type,
+                    method = "WeightedMean",
+                    frame_count = self.paths.len(),
+                    rejection = %self.method,
+                    has_weights = !config.weights.is_empty(),
+                    cache_dir = %config.cache.cache_dir.display(),
+                    keep_cache = config.cache.keep_cache,
+                    available_memory = ?config.cache.available_memory,
+                    "Starting stacking"
+                );
+            }
         }
 
         match &self.method {
@@ -191,6 +228,9 @@ impl ImageStack {
                     config,
                     progress,
                 )
+            }
+            StackingMethod::WeightedMean(config) => {
+                weighted::stack_weighted_from_paths(&self.paths, self.frame_type, config, progress)
             }
         }
     }

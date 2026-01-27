@@ -14,10 +14,10 @@ This document outlines a comprehensive plan for implementing state-of-the-art as
 |-------|--------|------------|
 | Phase 1: Core Foundation | **COMPLETE** | 100% |
 | Phase 2: Sub-Pixel Registration | **COMPLETE** | 100% |
-| Phase 3: Advanced Stacking | **PARTIAL** | 60% |
+| Phase 3: Advanced Stacking | **MOSTLY COMPLETE** | 90% |
 | Phase 4: Super-Resolution (Drizzle) | **NOT STARTED** | 0% |
 | Phase 5: GPU Acceleration | **PARTIAL** | 30% |
-| Phase 6: Polish & Advanced Features | **PARTIAL** | 20% |
+| Phase 6: Polish & Advanced Features | **PARTIAL** | 25% |
 
 ---
 
@@ -177,9 +177,9 @@ Implemented with sigma-clipped mean and outlier rejection.
 
 ---
 
-### 2.5 Stacking Module [PARTIAL]
+### 2.5 Stacking Module [MOSTLY COMPLETE]
 
-**Status**: Core functionality complete, advanced rejection methods pending
+**Status**: Core functionality complete, all major rejection methods implemented
 
 #### 2.5.1 Normalization Methods [PARTIAL]
 
@@ -190,23 +190,23 @@ Implemented with sigma-clipped mean and outlier rejection.
 - [ ] Local normalization (PixInsight-style tile-based)
 - [ ] Per-session normalization for multi-night data
 
-#### 2.5.2 Pixel Rejection Algorithms [PARTIAL]
+#### 2.5.2 Pixel Rejection Algorithms [COMPLETE]
 
 | Method | Status | Notes |
 |--------|--------|-------|
 | Sigma Clipping | Implemented | Iterative with statistics tracking |
-| Winsorized Sigma Clipping | **NOT IMPLEMENTED** | Replace outliers with boundary values |
-| Linear Fit Clipping | **NOT IMPLEMENTED** | Best for sky gradients |
-| Percentile Clipping | **NOT IMPLEMENTED** | Good for small stacks |
-| GESD (Generalized ESD) | **NOT IMPLEMENTED** | Best for large datasets (>50 frames) |
+| Winsorized Sigma Clipping | **Implemented** | Replace outliers with boundary values |
+| Linear Fit Clipping | **Implemented** | Best for sky gradients |
+| Percentile Clipping | **Implemented** | Good for small stacks |
+| GESD (Generalized ESD) | **Implemented** | Best for large datasets (>50 frames) |
 
-#### 2.5.3 Integration Methods [PARTIAL]
+#### 2.5.3 Integration Methods [COMPLETE]
 
 | Method | Status |
 |--------|--------|
 | Mean | Implemented (SIMD-accelerated) |
 | Median | Implemented (disk-based chunked processing) |
-| Weighted Mean | **NOT IMPLEMENTED** |
+| Weighted Mean | **Implemented** (quality-based frame weighting) |
 
 #### 2.5.4 Drizzle Integration (Super-Resolution) [NOT IMPLEMENTED]
 
@@ -252,15 +252,17 @@ Implemented with sigma-clipped mean and outlier rejection.
 
 ## 3. Advanced Features
 
-### 3.1 Automatic Quality Weighting [NOT IMPLEMENTED]
+### 3.1 Automatic Quality Weighting [COMPLETE]
 
-**Status**: Not yet implemented
+**Status**: Implemented
 
-**To Implement (SubframeSelector-style)**:
-- [ ] Per-frame quality metrics (FWHM, eccentricity, SNR, star count)
-- [ ] Quality scoring function: `weight = (SNR^a × (1/FWHM)^b × (1/eccentricity)^c) / noise`
-- [ ] Integration with weighted mean stacking
-- [ ] Frame rejection based on quality threshold
+**Implemented (SubframeSelector-style)**:
+- [x] Per-frame quality metrics (FWHM, eccentricity, SNR, star count)
+- [x] Quality scoring function: `weight = (SNR^a × (1/FWHM)^b × (1/eccentricity)^c) / noise`
+- [x] Integration with weighted mean stacking
+- [x] `FrameQuality::from_detection_result()` for automatic metrics extraction
+- [x] Configurable exponents for weight calculation
+- [ ] Frame rejection based on quality threshold (manual for now)
 
 ### 3.2 Comet/Asteroid Stacking Mode [NOT IMPLEMENTED]
 
@@ -313,16 +315,16 @@ Implemented with sigma-clipped mean and outlier rejection.
 - [x] Lanczos interpolation
 - [x] Affine/homography transformations
 
-### Phase 3: Advanced Stacking [PARTIAL - 60%]
+### Phase 3: Advanced Stacking [MOSTLY COMPLETE - 90%]
 - [x] Sigma clipping (basic)
-- [ ] Winsorized sigma clipping
-- [ ] Linear fit clipping
-- [ ] Percentile clipping
-- [ ] Generalized ESD
-- [ ] Weighted integration
+- [x] Winsorized sigma clipping
+- [x] Linear fit clipping
+- [x] Percentile clipping
+- [x] Generalized ESD
+- [x] Weighted integration
 - [ ] Local normalization
 - [x] Quality metrics computation
-- [ ] Automatic frame weighting
+- [x] Automatic frame weighting
 
 ### Phase 4: Super-Resolution [NOT STARTED]
 - [ ] Drizzle integration
@@ -349,20 +351,26 @@ Implemented with sigma-clipped mean and outlier rejection.
 
 ## 5. Suggested Improvements Based on Best Practices
 
-### 5.1 High Priority Additions
+### 5.1 High Priority Additions [COMPLETE]
 
-#### 5.1.1 Weighted Mean Integration
-Modern best practice from PixInsight and Siril. Should weight frames by:
-- SNR (signal-to-noise ratio)
-- FWHM (seeing quality)
-- Eccentricity (tracking quality)
-- Background noise level
+#### 5.1.1 Weighted Mean Integration [COMPLETE]
+Modern best practice from PixInsight and Siril. Weights frames by:
+- SNR (signal-to-noise ratio) ✓
+- FWHM (seeing quality) ✓
+- Eccentricity (tracking quality) ✓
+- Background noise level ✓
 
-#### 5.1.2 Linear Fit Clipping
+**Implementation**: `FrameQuality` struct with `from_detection_result()` and `compute_weight()` methods.
+
+#### 5.1.2 Linear Fit Clipping [COMPLETE]
 From Siril documentation: "Fits the best straight line of the pixel stack and rejects outliers. This algorithm performs very well with large stacks and images containing sky gradients with differing spatial distributions."
 
-#### 5.1.3 GESD Rejection
+**Implementation**: `linear_fit_clipped_mean()` in `rejection.rs`
+
+#### 5.1.3 GESD Rejection [COMPLETE]
 From Siril: "Generalized Extreme Studentized Deviate Test shows excellent performances with large datasets of more than 50 images."
+
+**Implementation**: `gesd_mean()` in `rejection.rs` with configurable alpha and max_outliers
 
 ### 5.2 Medium Priority Additions
 
@@ -542,24 +550,24 @@ pub enum DrizzleKernel {
 
 ## 10. Recommended Next Steps
 
-### Immediate (High Impact)
-1. **Implement Weighted Mean Integration** - Essential for quality-based stacking
-2. **Add Linear Fit Clipping** - Handles gradients better than sigma clipping
-3. **Implement GESD Rejection** - Best for large stacks (>50 frames)
+### Immediate (High Impact) [COMPLETE]
+~~1. **Implement Weighted Mean Integration** - Essential for quality-based stacking~~
+~~2. **Add Linear Fit Clipping** - Handles gradients better than sigma clipping~~
+~~3. **Implement GESD Rejection** - Best for large stacks (>50 frames)~~
 
 ### Short Term
-4. **Drizzle Implementation** - Super-resolution capability
-5. **GPU FFT** - Major performance improvement for phase correlation
-6. **Local Normalization** - Required for multi-session data
+1. **Drizzle Implementation** - Super-resolution capability
+2. **GPU FFT** - Major performance improvement for phase correlation
+3. **Local Normalization** - Required for multi-session data
 
 ### Medium Term
-7. **Comet/Asteroid Mode** - Dual-stack approach
-8. **Astrometric Solution** - Gaia catalog matching
-9. **Full GPU Pipeline** - End-to-end acceleration
+4. **Comet/Asteroid Mode** - Dual-stack approach
+5. **Astrometric Solution** - Gaia catalog matching
+6. **Full GPU Pipeline** - End-to-end acceleration
 
 ### Long Term
-10. **Deep Learning Integration** - Self-supervised denoising
-11. **Real-time Preview** - Live stacking capability
+7. **Deep Learning Integration** - Self-supervised denoising
+8. **Real-time Preview** - Live stacking capability
 
 ---
 
