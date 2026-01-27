@@ -59,20 +59,63 @@ use lumos::{
 };
 use tracing_subscriber::EnvFilter;
 
-/// Maximum number of stars to draw circles around.
-const MAX_STARS_TO_DRAW: usize = 100;
-
-/// Circle color (RGB, 0.0-1.0).
-const CIRCLE_COLOR: [f32; 3] = [1.0, 0.0, 0.0]; // Red
-
-/// Circle line thickness in pixels.
-const CIRCLE_THICKNESS: usize = 2;
-
-/// Minimum radius for drawn circles (pixels).
-const MIN_CIRCLE_RADIUS: f32 = 8.0;
-
 /// Maximum stars to use for registration.
-const MAX_STARS_FOR_REGISTRATION: usize = 200;
+const MAX_STARS_FOR_REGISTRATION: usize = 500;
+
+/// Select stars with good spatial distribution across the image.
+///
+/// Instead of just taking the brightest N stars (which may cluster in one region),
+/// this function divides the image into a grid and selects the brightest stars
+/// from each cell, ensuring coverage across the entire field.
+fn select_spatially_distributed_stars(
+    stars: &[Star],
+    width: usize,
+    height: usize,
+    max_stars: usize,
+) -> Vec<(f64, f64)> {
+    // Use a grid of cells (e.g., 8x8 = 64 cells)
+    let grid_size = 8usize;
+    let cell_width = width as f64 / grid_size as f64;
+    let cell_height = height as f64 / grid_size as f64;
+
+    // Group stars by grid cell
+    let mut cells: Vec<Vec<&Star>> = vec![Vec::new(); grid_size * grid_size];
+    for star in stars {
+        let cx = ((star.x as f64 / cell_width) as usize).min(grid_size - 1);
+        let cy = ((star.y as f64 / cell_height) as usize).min(grid_size - 1);
+        cells[cy * grid_size + cx].push(star);
+    }
+
+    // Sort each cell by flux (brightest first) - stars should already be sorted
+    // but cells may have mixed them
+    for cell in &mut cells {
+        cell.sort_by(|a, b| {
+            b.flux
+                .partial_cmp(&a.flux)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+    }
+
+    // Round-robin selection: take one star from each non-empty cell in turn
+    let mut selected = Vec::with_capacity(max_stars);
+    let mut round = 0;
+    while selected.len() < max_stars {
+        let mut added_any = false;
+        for cell in &cells {
+            if round < cell.len() && selected.len() < max_stars {
+                let star = cell[round];
+                selected.push((star.x as f64, star.y as f64));
+                added_any = true;
+            }
+        }
+        if !added_any {
+            break; // No more stars available
+        }
+        round += 1;
+    }
+
+    selected
+}
 
 fn main() {
     init_tracing();
@@ -133,12 +176,7 @@ fn main() {
     println!("STEP 4: Registering all lights to reference frame");
     println!("{}\n", "=".repeat(60));
 
-    register_all_lights(
-        &calibrated_paths,
-        &stars_per_image,
-        &registered_dir,
-        &output_base,
-    );
+    register_all_lights(&calibrated_paths, &stars_per_image, &registered_dir);
 
     // =========================================================================
     // Summary
@@ -242,6 +280,28 @@ fn calibrate_light_frames(
 
     if !lights_dir.exists() {
         tracing::warn!("Lights directory does not exist: {}", lights_dir.display());
+        // Check if we already have calibrated lights from a previous run
+        let existing_calibrated: Vec<PathBuf> = std::fs::read_dir(output_dir)
+            .ok()
+            .map(|entries| {
+                entries
+                    .filter_map(|e| e.ok())
+                    .map(|e| e.path())
+                    .filter(|p| {
+                        p.extension().map_or(false, |ext| ext == "tiff")
+                            && p.file_name()
+                                .map_or(false, |n| n.to_string_lossy().contains("_calibrated"))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        if !existing_calibrated.is_empty() {
+            tracing::info!(
+                "Found {} existing calibrated lights in output directory",
+                existing_calibrated.len()
+            );
+            return existing_calibrated;
+        }
         return Vec::new();
     }
 
@@ -365,7 +425,6 @@ fn register_all_lights(
     calibrated_paths: &[PathBuf],
     stars_per_image: &[Vec<Star>],
     output_dir: &Path,
-    output_base: &Path,
 ) {
     if calibrated_paths.is_empty() {
         tracing::warn!("No calibrated images to register");
@@ -390,20 +449,27 @@ fn register_all_lights(
     let width = ref_image.dimensions().width;
     let height = ref_image.dimensions().height;
 
-    // Convert reference stars to (x, y) tuples, sorted by flux (brightest first)
-    let mut ref_star_positions: Vec<(f64, f64)> =
-        ref_stars.iter().map(|s| (s.x as f64, s.y as f64)).collect();
-    // Stars are already sorted by flux from find_stars, take the brightest
-    ref_star_positions.truncate(MAX_STARS_FOR_REGISTRATION);
+    // Select spatially distributed stars for registration
+    // Instead of just brightest N (which may cluster), ensure coverage across image
+    let ref_star_positions =
+        select_spatially_distributed_stars(ref_stars, width, height, MAX_STARS_FOR_REGISTRATION);
+    tracing::info!(
+        "Selected {} spatially distributed reference stars",
+        ref_star_positions.len()
+    );
 
-    // Configure registration
+    // Configure registration for high accuracy
+    // Use affine transform to handle lens distortion (shear/skew)
     let reg_config = RegistrationConfig::builder()
-        .with_scale()
-        .ransac_iterations(1000)
-        .ransac_threshold(2.0)
+        .full_homography() // Affine can model distortions that similarity cannot
+        .ransac_iterations(5000) // More iterations for better model
+        .ransac_threshold(1.0) // Tighter threshold = stricter inlier selection
+        .ransac_confidence(0.9999) // Higher confidence
         .max_stars(MAX_STARS_FOR_REGISTRATION)
-        .min_matched_stars(6)
-        .max_residual(3.0)
+        .min_matched_stars(20) // Require more matched stars
+        .max_residual(1.0) // Stricter residual limit
+        .triangle_tolerance(0.005) // Tighter triangle matching
+        .refine_with_centroids(true) // Enable centroid refinement
         .build();
 
     let registrator = Registrator::new(reg_config);
@@ -423,11 +489,11 @@ fn register_all_lights(
         ));
 
         if i == 0 {
-            // Reference frame - just copy it
+            // Reference frame - just copy as-is
             let img: imaginarium::Image = ref_image.clone().into();
             img.save_file(&output_path)
                 .expect("Failed to save reference frame");
-            tracing::info!(file = %filename, "Reference frame saved (no transformation needed)");
+            tracing::info!(file = %filename, "Reference frame saved");
             successful_registrations += 1;
             continue;
         }
@@ -442,10 +508,9 @@ fn register_all_lights(
             }
         };
 
-        // Convert target stars to (x, y) tuples
-        let mut target_star_positions: Vec<(f64, f64)> =
-            stars.iter().map(|s| (s.x as f64, s.y as f64)).collect();
-        target_star_positions.truncate(MAX_STARS_FOR_REGISTRATION);
+        // Select spatially distributed target stars
+        let target_star_positions =
+            select_spatially_distributed_stars(stars, width, height, MAX_STARS_FOR_REGISTRATION);
 
         // Register target to reference
         match registrator.register_stars(&ref_star_positions, &target_star_positions) {
@@ -463,11 +528,6 @@ fn register_all_lights(
                 // Warp the image to align with reference
                 let warped =
                     warp_image_to_reference(&target_image, width, height, &result.transform);
-
-                tracing::info!(
-                    file = %filename,
-                    "Warped image saved"
-                );
 
                 // Save registered image
                 let img: imaginarium::Image = warped.into();
@@ -494,11 +554,6 @@ fn register_all_lights(
         elapsed_secs = format!("{:.2}", elapsed.as_secs_f32()),
         "Step 4 complete: All lights registered"
     );
-
-    // Save visualization of stars detected in reference frame
-    if !ref_stars.is_empty() {
-        save_star_visualization(&ref_image, ref_stars, output_base);
-    }
 }
 
 /// Warp an image to align with the reference frame.
@@ -509,6 +564,20 @@ fn warp_image_to_reference(
     transform: &lumos::TransformMatrix,
 ) -> AstroImage {
     let channels = image.channels();
+    let img_width = image.width();
+    let img_height = image.height();
+
+    // Verify dimensions match
+    assert_eq!(
+        width, img_width,
+        "Width mismatch: param {} vs image {}",
+        width, img_width
+    );
+    assert_eq!(
+        height, img_height,
+        "Height mismatch: param {} vs image {}",
+        height, img_height
+    );
 
     // Warp each channel separately
     let mut warped_pixels = Vec::with_capacity(image.pixels().len());
@@ -545,105 +614,6 @@ fn warp_image_to_reference(
     let mut result = AstroImage::from_pixels(dims.width, dims.height, dims.channels, warped_pixels);
     result.metadata = image.metadata.clone();
     result
-}
-
-/// Save a visualization of detected stars on the reference image.
-fn save_star_visualization(ref_image: &AstroImage, stars: &[Star], output_dir: &Path) {
-    // Filter out stars in the bottom portion of the image (horizon, ground)
-    let height_cutoff = ref_image.dimensions().height as f32 * 0.7;
-    let sky_stars: Vec<&Star> = stars.iter().filter(|s| s.y < height_cutoff).collect();
-
-    // Take the best stars
-    let best_stars: Vec<&Star> = sky_stars.iter().copied().take(MAX_STARS_TO_DRAW).collect();
-
-    // Print info about the brightest stars
-    println!("\nTop 10 brightest stars in reference frame:");
-    println!(
-        "{:>4}  {:>8}  {:>8}  {:>8}  {:>6}  {:>6}",
-        "Rank", "X", "Y", "Flux", "FWHM", "SNR"
-    );
-    for (i, star) in best_stars.iter().take(10).enumerate() {
-        println!(
-            "{:>4}  {:>8.2}  {:>8.2}  {:>8.1}  {:>6.2}  {:>6.1}",
-            i + 1,
-            star.x,
-            star.y,
-            star.flux,
-            star.fwhm,
-            star.snr
-        );
-    }
-
-    // Draw circles on the image
-    let mut output_image = ref_image.clone();
-    for star in &best_stars {
-        let radius = (star.fwhm * 2.0).max(MIN_CIRCLE_RADIUS);
-        draw_circle(
-            &mut output_image,
-            star.x,
-            star.y,
-            radius,
-            &CIRCLE_COLOR,
-            CIRCLE_THICKNESS,
-        );
-    }
-
-    // Save output image
-    let output_path = output_dir.join("stars_detected.tiff");
-    let img: imaginarium::Image = output_image.into();
-    img.save_file(&output_path)
-        .expect("Failed to save output image");
-
-    tracing::info!(
-        path = %output_path.display(),
-        stars_marked = best_stars.len(),
-        "Star visualization saved"
-    );
-}
-
-/// Draw a circle on an AstroImage at the given center with the given radius.
-fn draw_circle(
-    image: &mut AstroImage,
-    cx: f32,
-    cy: f32,
-    radius: f32,
-    color: &[f32; 3],
-    thickness: usize,
-) {
-    let width = image.width();
-    let height = image.height();
-    let channels = image.channels();
-
-    let min_radius = (radius - thickness as f32 / 2.0).max(1.0);
-    let max_radius = radius + thickness as f32 / 2.0;
-    let min_r_sq = min_radius * min_radius;
-    let max_r_sq = max_radius * max_radius;
-
-    // Bounding box for the circle
-    let x_min = ((cx - max_radius).floor() as i32).max(0) as usize;
-    let x_max = ((cx + max_radius).ceil() as i32).min(width as i32 - 1) as usize;
-    let y_min = ((cy - max_radius).floor() as i32).max(0) as usize;
-    let y_max = ((cy + max_radius).ceil() as i32).min(height as i32 - 1) as usize;
-
-    let pixels = image.pixels_mut();
-    for y in y_min..=y_max {
-        for x in x_min..=x_max {
-            let dx = x as f32 - cx;
-            let dy = y as f32 - cy;
-            let dist_sq = dx * dx + dy * dy;
-
-            if dist_sq >= min_r_sq && dist_sq <= max_r_sq {
-                let idx = (y * width + x) * channels;
-                if channels == 1 {
-                    pixels[idx] = 0.299 * color[0] + 0.587 * color[1] + 0.114 * color[2];
-                } else {
-                    pixels[idx] = color[0];
-                    pixels[idx + 1] = color[1];
-                    pixels[idx + 2] = color[2];
-                }
-            }
-        }
-    }
 }
 
 /// Create a progress callback that logs to console.
