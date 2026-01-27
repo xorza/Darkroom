@@ -172,6 +172,8 @@ pub use stacking::{
     // Correction method for gradient removal
     CorrectionMethod,
     FrameType,
+    // Multi-session stacking
+    GlobalReferenceInfo,
     // GPU stacking
     GpuSigmaClipConfig,
     GpuSigmaClipPipeline,
@@ -195,7 +197,6 @@ pub use stacking::{
     LiveStackStats,
     MAX_GPU_FRAMES,
     MedianConfig,
-    // Multi-session stacking
     MultiSessionStack,
     MultiSessionSummary,
     ObjectPosition,
@@ -204,8 +205,10 @@ pub use stacking::{
     Session,
     SessionConfig,
     SessionId,
+    SessionNormalization,
     SessionQuality,
     SessionSummary,
+    SessionWeightedStackResult,
     SigmaClipConfig,
     SigmaClippedConfig,
     StackingMethod,

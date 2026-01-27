@@ -91,7 +91,7 @@ Existing: `examples/full_pipeline.rs` (calibration + registration + stacking)
 
 ### Example 4: Multi-Session Stacking (`examples/multi_session.rs`)
 
-- [ ] Create example showing combining data from multiple nights:
+- [x] Create example showing combining data from multiple nights:
   - Create `Session` objects with frame paths
   - Assess quality with `session.assess_quality()`
   - Create `MultiSessionStack` with sessions
