@@ -70,13 +70,13 @@ Existing: `examples/full_pipeline.rs` (calibration + registration + stacking)
 
 ### Example 2: Quick Alignment (`examples/quick_align.rs`)
 
-- [ ] Create example showing simple 2-image alignment:
+- [x] Create example showing simple 2-image alignment:
   - Load reference and target images
   - Detect stars in both
-  - Align with `quick_register()` (requires Phase 1 completion)
-  - Warp target to reference with `warp_to_reference()`
-  - Save result with `image.save()` (requires Phase 2 completion)
-  - Should be under 30 lines of main logic
+  - Align with `quick_register_stars()`
+  - Warp target to reference with `warp_to_reference_image()`
+  - Save result with `image.save()`
+  - Under 30 lines of main logic
 
 ### Example 3: Live Stacking (`examples/live_stacking.rs`)
 
