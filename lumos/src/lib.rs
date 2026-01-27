@@ -148,6 +148,7 @@ pub use registration::{
     estimate_overlap,
     match_triangles,
     quick_register,
+    quick_register_stars,
     register_stars,
     warp_image,
     warp_to_reference,

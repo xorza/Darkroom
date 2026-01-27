@@ -21,8 +21,8 @@ Many functions take `(pixels: &[f32], width: usize, height: usize)` instead of `
 ### Registration Module
 
 - [x] Verify `warp_to_reference` handles multi-channel AstroImage correctly, fix if needed
-- [ ] Add `quick_register(ref_stars: &[Star], target_stars: &[Star]) -> Result<RegistrationResult, RegistrationError>` convenience function with sensible defaults (affine, standard RANSAC)
-- [ ] Export in `src/registration/mod.rs` and `src/lib.rs`
+- [x] Add `quick_register(ref_stars: &[Star], target_stars: &[Star]) -> Result<RegistrationResult, RegistrationError>` convenience function with sensible defaults (affine, standard RANSAC)
+- [x] Export in `src/registration/mod.rs` and `src/lib.rs`
 
 ## Phase 2: Add AstroImage convenience methods
 

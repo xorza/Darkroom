@@ -400,9 +400,20 @@ pub fn warp_to_reference_image(
     }
 }
 
-/// Quick registration using default settings.
+/// Quick registration using default settings with position tuples.
 ///
 /// Suitable for well-aligned images with good star coverage.
+/// Returns only the transformation matrix. For full registration result
+/// with quality metrics, use `quick_register_stars`.
+///
+/// # Arguments
+///
+/// * `ref_stars` - Reference star positions (x, y)
+/// * `target_stars` - Target star positions (x, y)
+///
+/// # Returns
+///
+/// The transformation matrix that maps reference to target coordinates.
 pub fn quick_register(
     ref_stars: &[(f64, f64)],
     target_stars: &[(f64, f64)],
@@ -416,6 +427,54 @@ pub fn quick_register(
 
     let result = Registrator::new(config).register_positions(ref_stars, target_stars)?;
     Ok(result.transform)
+}
+
+/// Quick registration using detected stars with sensible defaults.
+///
+/// Convenience function for common registration scenarios. Uses:
+/// - Affine transformation (6 DOF: translation, rotation, scale, shear)
+/// - Standard RANSAC with 1000 iterations
+/// - 2-pixel inlier threshold
+/// - Up to 100 stars for matching
+///
+/// For more control over registration parameters, use `Registrator::new()` with
+/// a custom `RegistrationConfig`.
+///
+/// # Arguments
+///
+/// * `ref_stars` - Detected stars in the reference image (sorted by flux, brightest first)
+/// * `target_stars` - Detected stars in the target image (sorted by flux, brightest first)
+///
+/// # Returns
+///
+/// Full registration result including transformation, inlier matches, and quality metrics.
+///
+/// # Example
+///
+/// ```ignore
+/// use lumos::{find_stars, quick_register_stars, StarDetectionConfig};
+///
+/// let ref_stars = find_stars(&ref_image, &StarDetectionConfig::default())?;
+/// let target_stars = find_stars(&target_image, &StarDetectionConfig::default())?;
+///
+/// let result = quick_register_stars(&ref_stars.stars, &target_stars.stars)?;
+/// println!("RMS error: {:.3} pixels", result.rms_error);
+/// println!("Matched {} stars", result.num_inliers);
+/// ```
+pub fn quick_register_stars(
+    ref_stars: &[Star],
+    target_stars: &[Star],
+) -> Result<RegistrationResult, RegistrationError> {
+    let config = RegistrationConfig::builder()
+        .full_affine() // 6 DOF for handling rotation, scale, and shear
+        .ransac_iterations(1000)
+        .ransac_threshold(2.0)
+        .max_stars(100)
+        .min_matched_stars(4)
+        .max_residual(5.0)
+        .build();
+
+    Registrator::new(config).register_stars(ref_stars, target_stars)
 }
 
 /// Multi-scale registration configuration.
