@@ -8,11 +8,6 @@
 RESULTS_DIR="benches/results"
 
 # --- Helper Functions ---
-function get_all_benches() {
-    cargo bench --bench '*' --no-run --message-format=json --features="bench" |
-    jq -r 'select(.profile.test == true) | .target.name'
-}
-
 function run_bench() {
     local bench_name=$1
     echo "Running bench: $bench_name"
@@ -23,12 +18,6 @@ function run_bench() {
 }
 
 # --- Main Logic ---
-# Check if jq is installed
-if ! command -v jq &> /dev/null; then
-    echo "jq is not installed. Please install it to run this script."
-    exit 1
-fi
-
 # If arguments are provided, run those specific benches
 if [ "$#" -gt 0 ]; then
     for bench in "$@"; do
@@ -37,9 +26,18 @@ if [ "$#" -gt 0 ]; then
 else
     # If no arguments are provided, run all benches
     echo "No specific benchmarks provided. Running all..."
-    all_benches=$(get_all_benches)
-    for bench in $all_benches;
- do
+
+    # Check for jq only when it's needed
+    if ! command -v jq &> /dev/null; then
+        echo "jq is not installed. Please install it to list and run all benchmarks."
+        exit 1
+    fi
+
+    all_benches=(
+        $(cargo bench --bench '*' --no-run --message-format=json --features="bench" |
+        jq -r 'select(.profile.test == true) | .target.name')
+    )
+    for bench in "${all_benches[@]}"; do
         run_bench "$bench"
     done
 fi

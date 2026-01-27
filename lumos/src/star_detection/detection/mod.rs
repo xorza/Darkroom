@@ -6,6 +6,9 @@ mod tests;
 #[cfg(feature = "bench")]
 pub mod bench;
 
+pub mod scalar;
+pub mod simd;
+
 use super::StarDetectionConfig;
 use super::background::BackgroundMap;
 use super::constants::dilate_mask;
@@ -13,6 +16,7 @@ use super::deblend::{
     ComponentData, DeblendConfig, MultiThresholdDeblendConfig,
     deblend_component as multi_threshold_deblend, deblend_local_maxima,
 };
+use crate::common::cpu_features;
 
 /// A candidate star region before centroid refinement.
 #[derive(Debug)]
@@ -124,21 +128,18 @@ pub fn detect_stars(
     candidates
 }
 
-/// Create binary mask of pixels above threshold.
-pub(crate) fn create_threshold_mask(
+/// Create binary mask of pixels above threshold, with SIMD dispatch.
+pub fn create_threshold_mask(
     pixels: &[f32],
     background: &BackgroundMap,
     sigma_threshold: f32,
 ) -> Vec<bool> {
-    pixels
-        .iter()
-        .zip(background.background.iter())
-        .zip(background.noise.iter())
-        .map(|((&px, &bg), &noise)| {
-            let threshold = bg + sigma_threshold * noise.max(1e-6);
-            px > threshold
-        })
-        .collect()
+    if cfg!(target_arch = "x86_64") && cpu_features::has_sse4_1() {
+        // SAFETY: We've checked that SSE4.1 is available.
+        unsafe { simd::sse::create_threshold_mask_sse(pixels, background, sigma_threshold) }
+    } else {
+        scalar::create_threshold_mask(pixels, background, sigma_threshold)
+    }
 }
 
 /// Connected component labeling using union-find with parallel second pass.

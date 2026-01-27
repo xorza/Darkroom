@@ -19,13 +19,13 @@
 //!
 //! 5. **Quality metrics**: Compute FWHM, SNR, and eccentricity for each star.
 
-mod background;
+pub mod background;
 mod centroid;
 pub mod constants;
 mod convolution;
 mod cosmic_ray;
 mod deblend;
-mod detection;
+pub mod detection;
 mod median_filter;
 
 #[cfg(test)]

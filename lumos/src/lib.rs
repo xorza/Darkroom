@@ -4,7 +4,7 @@ mod common;
 pub mod math;
 pub mod registration;
 mod stacking;
-mod star_detection;
+pub mod star_detection;
 #[cfg(any(test, feature = "bench"))]
 pub mod testing;
 

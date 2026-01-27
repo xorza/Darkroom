@@ -17,7 +17,7 @@ use super::constants::{self, ROWS_PER_CHUNK};
 use rayon::prelude::*;
 
 /// Background map with per-pixel background and noise estimates.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct BackgroundMap {
     /// Per-pixel background values.
     pub background: Vec<f32>,
