@@ -43,82 +43,122 @@ bzip2 = { workspace = true }
 dirs = { workspace = true }
 tempfile = { workspace = true }
 
-[[bench]]
-name = "demosaic_bayer"
-harness = false
-required-features = ["bench"]
+# =============================================================================
+# Star Detection Benchmarks
+# =============================================================================
 
 [[bench]]
-name = "demosaic_xtrans"
-harness = false
-required-features = ["bench"]
-
-[[bench]]
-name = "hot_pixels"
-harness = false
-required-features = ["bench"]
-
-[[bench]]
-name = "stack_mean"
-harness = false
-required-features = ["bench"]
-
-[[bench]]
-name = "stack_median"
-harness = false
-required-features = ["bench"]
-
-[[bench]]
-name = "stack_sigma_clipped"
-harness = false
-required-features = ["bench"]
-
-[[bench]]
-name = "math"
+name = "star_detection_convolution"
+path = "benches/star_detection/convolution.rs"
 harness = false
 required-features = ["bench"]
 
 [[bench]]
 name = "star_detection_background"
+path = "benches/star_detection/background.rs"
 harness = false
 required-features = ["bench"]
 
 [[bench]]
-name = "median_filter"
-harness = false
-required-features = ["bench"]
-
-[[bench]]
-name = "star_detection_centroid"
-harness = false
-required-features = ["bench"]
-
-[[bench]]
-name = "star_detection_convolution"
-harness = false
-required-features = ["bench"]
-
-[[bench]]
-name = "star_detection_cosmic_ray"
+name = "star_detection_threshold"
+path = "benches/star_detection/threshold.rs"
 harness = false
 required-features = ["bench"]
 
 [[bench]]
 name = "star_detection_deblend"
+path = "benches/star_detection/deblend.rs"
 harness = false
 required-features = ["bench"]
 
 [[bench]]
-name = "star_detection_detection"
+name = "star_detection_centroid"
+path = "benches/star_detection/centroid.rs"
 harness = false
 required-features = ["bench"]
+
+[[bench]]
+name = "star_detection_cosmic_ray"
+path = "benches/star_detection/cosmic_ray.rs"
+harness = false
+required-features = ["bench"]
+
+# =============================================================================
+# Image Processing Benchmarks
+# =============================================================================
+
+[[bench]]
+name = "demosaic_bayer"
+path = "benches/image_processing/demosaic_bayer.rs"
+harness = false
+required-features = ["bench"]
+
+[[bench]]
+name = "demosaic_xtrans"
+path = "benches/image_processing/demosaic_xtrans.rs"
+harness = false
+required-features = ["bench"]
+
+[[bench]]
+name = "hot_pixels"
+path = "benches/image_processing/hot_pixels.rs"
+harness = false
+required-features = ["bench"]
+
+[[bench]]
+name = "median_filter"
+path = "benches/image_processing/median_filter.rs"
+harness = false
+required-features = ["bench"]
+
+# =============================================================================
+# Registration Benchmarks
+# =============================================================================
 
 [[bench]]
 name = "registration"
+path = "benches/registration/pipeline.rs"
+harness = false
+required-features = ["bench"]
+
+# =============================================================================
+# Stacking Benchmarks
+# =============================================================================
+
+[[bench]]
+name = "stack_mean"
+path = "benches/stacking/mean.rs"
 harness = false
 required-features = ["bench"]
 
 [[bench]]
+name = "stack_median"
+path = "benches/stacking/median.rs"
+harness = false
+required-features = ["bench"]
+
+[[bench]]
+name = "stack_sigma_clipped"
+path = "benches/stacking/sigma_clipped.rs"
+harness = false
+required-features = ["bench"]
+
+# =============================================================================
+# Math Benchmarks
+# =============================================================================
+
+[[bench]]
+name = "math"
+path = "benches/math/operations.rs"
+harness = false
+required-features = ["bench"]
+
+# =============================================================================
+# Full Pipeline Benchmarks
+# =============================================================================
+
+[[bench]]
 name = "full_pipeline"
+path = "benches/pipeline/full_pipeline.rs"
 harness = false
 required-features = ["bench"]
