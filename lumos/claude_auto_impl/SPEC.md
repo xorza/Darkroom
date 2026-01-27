@@ -113,7 +113,7 @@ with tests and running verification commands per project conventions.
 ### 3.2 Multi-Session Integration
 - [x] Design per-session quality assessment workflow
 - [x] Implement session-aware local normalization
-- [ ] Implement session-weighted integration
+- [x] Implement session-weighted integration
 - [ ] Add gradient removal post-stack (optional)
 - [ ] Write integration tests
 - [ ] Run verification commands
@@ -126,7 +126,10 @@ with tests and running verification commands per project conventions.
 - `SessionSummary` / `MultiSessionSummary` - Human-readable summaries with Display impl
 - Session weight formula: `(SNR² × (1/FWHM)² × (1/ecc)) / noise × √frame_count`
 - Per-frame weight: `session_weight × normalized_frame_weight_within_session`
-- 26 unit tests passing
+- `SessionWeightedStackResult` - Result type with stacked image and metadata
+- `stack_session_weighted()` - Main integration function with optional local normalization
+- Multi-channel support: normalizes each channel independently for RGB images
+- 45 unit tests passing (26 original + 14 normalization + 5 integration)
 
 ### 3.3 Distortion Correction Extensions
 - [ ] Implement radial distortion models (barrel/pincushion)
@@ -180,9 +183,9 @@ cargo bench -p lumos --features bench --bench <name> | tee benches/<name>_result
 |-------|-------|----------|--------|
 | Local Normalization | 5 | 5 | **Complete** |
 | GPU Acceleration | 12 | 12 | **Complete** (warping done, FFT skipped, sigma clip done, star detection done, batch pipeline done + benchmarked) |
-| Advanced Features | 14 | 8 | **In Progress** (Comet stacking complete, session quality done, session-aware normalization done) |
+| Advanced Features | 14 | 9 | **In Progress** (Comet stacking complete, session quality done, session-aware normalization done, session-weighted integration done) |
 | Quality & Polish | 4 | 0 | Not Started |
-| **Total** | **35** | **25** | **In Progress** |
+| **Total** | **35** | **26** | **In Progress** |
 
 ---
 

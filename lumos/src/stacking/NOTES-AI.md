@@ -1180,7 +1180,7 @@ for path in stack.all_frame_paths() {
 }
 ```
 
-### Tests (40 tests total: 26 previous + 14 new)
+### Tests (45 tests total: 26 previous + 14 normalization + 5 integration)
 
 **SessionNormalization:**
 - `test_session_normalization_new`
@@ -1200,3 +1200,79 @@ for path in stack.all_frame_paths() {
 - `test_multi_session_stack_create_normalizer_from_pixels`
 - `test_multi_session_stack_normalizer_with_custom_tile_size`
 - `test_session_normalization_cross_session`
+
+**SessionWeightedStackResult:**
+- `test_session_weighted_stack_result_display`
+- `test_session_weighted_stack_result_into_image`
+- `test_session_weighted_stack_result_session_contributions`
+- `test_stack_session_weighted_no_frames_error`
+- `test_stack_session_weighted_empty_session_error`
+
+---
+
+## Session-Weighted Integration (IMPLEMENTED - 2026-01-27)
+
+### Overview
+
+Session-weighted integration combines frames from multiple sessions using quality-based weighting. It supports optional local normalization to match backgrounds across sessions before integration.
+
+### Key Types
+
+```rust
+/// Result of session-weighted integration
+pub struct SessionWeightedStackResult {
+    pub image: AstroImage,           // Stacked image
+    pub session_count: usize,        // Number of sessions
+    pub total_frames: usize,         // Total frames stacked
+    pub session_weights: Vec<f32>,   // Normalized session weights
+    pub frame_weights: Vec<f32>,     // Per-frame weights used
+    pub reference_info: Option<GlobalReferenceInfo>,
+    pub used_normalization: bool,    // Whether local norm was applied
+}
+```
+
+### API
+
+```rust
+use lumos::stacking::session::{MultiSessionStack, SessionConfig};
+
+// Create multi-session stack
+let stack = MultiSessionStack::new(vec![session1, session2])
+    .with_config(SessionConfig::default());
+
+// Perform session-weighted integration
+let result = stack.stack_session_weighted()?;
+
+// Access results
+println!("{}", result);  // Display summary
+let image = result.into_image();  // Get stacked image
+
+// Get per-session contributions
+let contributions = result.session_contributions(&stack);
+```
+
+### Integration Process
+
+1. **Collect all frames**: Gather paths from all sessions
+2. **Compute weights**: Per-frame weights = session_weight × frame_weight_within_session
+3. **Optional normalization**: If enabled, normalize each frame to match global reference
+4. **Weighted mean**: Stack normalized frames using weighted mean
+
+### Normalization Workflow
+
+When `use_local_normalization` is enabled:
+1. Select global reference frame (best frame from best session)
+2. Create `SessionNormalization` from reference
+3. Load each frame, normalize it to match reference
+4. Stack normalized frames with weights
+
+### Multi-Channel Support
+
+For RGB/color images, normalization is applied per-channel:
+- Extract each channel from the image
+- Normalize each channel independently
+- Reconstruct the normalized image
+
+### Exports
+
+- `lumos::SessionWeightedStackResult`

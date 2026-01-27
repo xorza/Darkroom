@@ -869,6 +869,264 @@ impl MultiSessionStack {
             path,
         })
     }
+
+    /// Perform session-weighted integration.
+    ///
+    /// Stacks all frames from all sessions using session-weighted integration:
+    /// 1. Optionally normalizes each frame to match the global reference
+    /// 2. Computes per-frame weights combining session and frame quality
+    /// 3. Uses weighted mean stacking with the configured rejection method
+    ///
+    /// # Returns
+    /// * `Ok(SessionWeightedStackResult)` - Stacked image with metadata
+    /// * `Err` - If no frames, image loading fails, or dimensions mismatch
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use lumos::stacking::session::{MultiSessionStack, SessionConfig};
+    ///
+    /// let stack = MultiSessionStack::new(vec![session1, session2])
+    ///     .with_config(SessionConfig::default());
+    ///
+    /// let result = stack.stack_session_weighted()?;
+    /// println!("Stacked {} frames from {} sessions", result.total_frames, result.session_count);
+    /// ```
+    pub fn stack_session_weighted(&self) -> anyhow::Result<SessionWeightedStackResult> {
+        use super::weighted::{WeightedConfig, stack_weighted_from_paths};
+        use super::{FrameType, ProgressCallback};
+
+        // Get all frame paths
+        let all_paths = self.all_frame_paths();
+        if all_paths.is_empty() {
+            anyhow::bail!("No frames to stack");
+        }
+
+        // Compute per-frame weights
+        let frame_weights = self.compute_frame_weights();
+        if frame_weights.len() != all_paths.len() {
+            anyhow::bail!(
+                "Weight count ({}) doesn't match frame count ({})",
+                frame_weights.len(),
+                all_paths.len()
+            );
+        }
+
+        // Get session weights for reporting
+        let session_weights = self.compute_session_weights();
+
+        // Load and normalize frames if local normalization is enabled
+        let stacked_image = if self.config.use_local_normalization {
+            self.stack_with_normalization(&all_paths, &frame_weights)?
+        } else {
+            // Stack directly without normalization
+            let config = WeightedConfig::with_weights(frame_weights.clone())
+                .with_rejection(self.config.rejection.clone());
+
+            stack_weighted_from_paths(
+                &all_paths,
+                FrameType::Light,
+                &config,
+                ProgressCallback::default(),
+            )?
+        };
+
+        Ok(SessionWeightedStackResult {
+            image: stacked_image,
+            session_count: self.sessions.len(),
+            total_frames: all_paths.len(),
+            session_weights,
+            frame_weights,
+            reference_info: self.global_reference_info(),
+            used_normalization: self.config.use_local_normalization,
+        })
+    }
+
+    /// Stack frames with local normalization applied.
+    ///
+    /// This loads each frame, normalizes it to match the global reference,
+    /// then performs weighted mean stacking on the normalized data.
+    fn stack_with_normalization(
+        &self,
+        paths: &[PathBuf],
+        weights: &[f32],
+    ) -> anyhow::Result<AstroImage> {
+        use rayon::prelude::*;
+
+        if paths.is_empty() {
+            anyhow::bail!("No frames to stack");
+        }
+
+        // Create session normalizer from the best reference frame
+        let normalizer = self.create_session_normalizer()?;
+        let (width, height) = normalizer.dimensions();
+
+        // Load the first frame to get channel count
+        let first_image = AstroImage::from_file(&paths[0])?;
+        let channels = first_image.channels();
+
+        // Verify dimensions match
+        if first_image.width() != width || first_image.height() != height {
+            anyhow::bail!(
+                "First frame dimensions ({}, {}) don't match reference ({}, {})",
+                first_image.width(),
+                first_image.height(),
+                width,
+                height
+            );
+        }
+
+        // Load and normalize all frames in parallel
+        let normalized_frames: Vec<Vec<f32>> = paths
+            .par_iter()
+            .map(|path| {
+                let image = AstroImage::from_file(path).expect("Failed to load image");
+
+                // For multi-channel images, normalize each channel separately
+                let all_pixels = image.pixels();
+
+                if channels == 1 {
+                    // Single channel - normalize directly
+                    normalizer.normalize_frame(all_pixels)
+                } else {
+                    // Multi-channel - normalize each channel
+                    let mut normalized = vec![0.0f32; all_pixels.len()];
+
+                    for c in 0..channels {
+                        // Extract channel
+                        let channel_pixels: Vec<f32> = all_pixels
+                            .iter()
+                            .skip(c)
+                            .step_by(channels)
+                            .copied()
+                            .collect();
+
+                        // Normalize channel
+                        let normalized_channel = normalizer.normalize_frame(&channel_pixels);
+
+                        // Write back interleaved
+                        for (i, &val) in normalized_channel.iter().enumerate() {
+                            normalized[i * channels + c] = val;
+                        }
+                    }
+
+                    normalized
+                }
+            })
+            .collect();
+
+        // Perform weighted mean stacking on normalized frames
+        let pixel_count = width * height * channels;
+        let mut result_pixels = vec![0.0f32; pixel_count];
+
+        // For each pixel position, compute weighted mean
+        for i in 0..pixel_count {
+            let mut weighted_sum = 0.0f32;
+            let mut weight_sum = 0.0f32;
+
+            for (frame_idx, frame) in normalized_frames.iter().enumerate() {
+                let weight = weights[frame_idx];
+                weighted_sum += frame[i] * weight;
+                weight_sum += weight;
+            }
+
+            result_pixels[i] = if weight_sum > f32::EPSILON {
+                weighted_sum / weight_sum
+            } else {
+                // Fallback to simple mean
+                normalized_frames.iter().map(|f| f[i]).sum::<f32>() / normalized_frames.len() as f32
+            };
+        }
+
+        Ok(AstroImage::from_pixels(
+            width,
+            height,
+            channels,
+            result_pixels,
+        ))
+    }
+}
+
+/// Result of session-weighted integration.
+#[derive(Debug)]
+pub struct SessionWeightedStackResult {
+    /// The stacked image.
+    pub image: AstroImage,
+    /// Number of sessions that contributed to the stack.
+    pub session_count: usize,
+    /// Total number of frames stacked.
+    pub total_frames: usize,
+    /// Normalized session weights used.
+    pub session_weights: Vec<f32>,
+    /// Per-frame weights used (already normalized).
+    pub frame_weights: Vec<f32>,
+    /// Information about the reference frame used for normalization.
+    pub reference_info: Option<GlobalReferenceInfo>,
+    /// Whether local normalization was applied.
+    pub used_normalization: bool,
+}
+
+impl SessionWeightedStackResult {
+    /// Get the stacked image.
+    pub fn image(&self) -> &AstroImage {
+        &self.image
+    }
+
+    /// Consume the result and return just the image.
+    pub fn into_image(self) -> AstroImage {
+        self.image
+    }
+
+    /// Get the total weight contribution from each session.
+    ///
+    /// Returns a vector of (session_index, total_weight) pairs.
+    pub fn session_contributions(&self, stack: &MultiSessionStack) -> Vec<(usize, f32)> {
+        let mut contributions = Vec::new();
+        let mut frame_idx = 0;
+
+        for (session_idx, session) in stack.sessions.iter().enumerate() {
+            let frame_count = session.frame_count();
+            let session_total: f32 = self.frame_weights[frame_idx..frame_idx + frame_count]
+                .iter()
+                .sum();
+            contributions.push((session_idx, session_total));
+            frame_idx += frame_count;
+        }
+
+        contributions
+    }
+}
+
+impl std::fmt::Display for SessionWeightedStackResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "Session-Weighted Stack Result")?;
+        writeln!(f, "==============================")?;
+        writeln!(
+            f,
+            "Image: {}x{} ({} channels)",
+            self.image.width(),
+            self.image.height(),
+            self.image.channels()
+        )?;
+        writeln!(
+            f,
+            "Sessions: {}, Total frames: {}",
+            self.session_count, self.total_frames
+        )?;
+        writeln!(
+            f,
+            "Used normalization: {}",
+            if self.used_normalization { "yes" } else { "no" }
+        )?;
+        if let Some(ref info) = self.reference_info {
+            writeln!(
+                f,
+                "Reference: session '{}', frame {}",
+                info.session_id, info.frame_idx
+            )?;
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -1721,5 +1979,120 @@ mod tests {
             "Session 2 average should be ~100, got {}",
             avg2
         );
+    }
+
+    // ========== SessionWeightedStackResult Tests ==========
+
+    #[test]
+    fn test_session_weighted_stack_result_display() {
+        use crate::AstroImage;
+
+        let image = AstroImage::from_pixels(10, 10, 1, vec![0.5f32; 100]);
+        let result = SessionWeightedStackResult {
+            image,
+            session_count: 2,
+            total_frames: 10,
+            session_weights: vec![0.6, 0.4],
+            frame_weights: vec![0.1; 10],
+            reference_info: Some(GlobalReferenceInfo {
+                session_idx: 0,
+                frame_idx: 2,
+                session_id: "night1".into(),
+                path: PathBuf::from("/ref.fits"),
+            }),
+            used_normalization: true,
+        };
+
+        let display = format!("{}", result);
+        assert!(display.contains("Session-Weighted Stack Result"));
+        assert!(display.contains("Sessions: 2"));
+        assert!(display.contains("Total frames: 10"));
+        assert!(display.contains("Used normalization: yes"));
+        assert!(display.contains("night1"));
+    }
+
+    #[test]
+    fn test_session_weighted_stack_result_into_image() {
+        use crate::AstroImage;
+
+        let image = AstroImage::from_pixels(10, 10, 1, vec![0.5f32; 100]);
+        let result = SessionWeightedStackResult {
+            image,
+            session_count: 1,
+            total_frames: 5,
+            session_weights: vec![1.0],
+            frame_weights: vec![0.2; 5],
+            reference_info: None,
+            used_normalization: false,
+        };
+
+        let img = result.into_image();
+        assert_eq!(img.width(), 10);
+        assert_eq!(img.height(), 10);
+    }
+
+    #[test]
+    fn test_session_weighted_stack_result_session_contributions() {
+        use crate::AstroImage;
+
+        let image = AstroImage::from_pixels(10, 10, 1, vec![0.5f32; 100]);
+
+        // Create matching sessions
+        let sessions = vec![
+            Session {
+                id: "s1".into(),
+                frame_paths: vec![PathBuf::from("/a.fits"), PathBuf::from("/b.fits")],
+                quality: SessionQuality::default(),
+                reference_frame: None,
+            },
+            Session {
+                id: "s2".into(),
+                frame_paths: vec![
+                    PathBuf::from("/c.fits"),
+                    PathBuf::from("/d.fits"),
+                    PathBuf::from("/e.fits"),
+                ],
+                quality: SessionQuality::default(),
+                reference_frame: None,
+            },
+        ];
+        let stack = MultiSessionStack::new(sessions);
+
+        // Frame weights: session 1 has weight 0.1+0.1=0.2, session 2 has 0.2+0.2+0.2=0.6
+        let result = SessionWeightedStackResult {
+            image,
+            session_count: 2,
+            total_frames: 5,
+            session_weights: vec![0.25, 0.75],
+            frame_weights: vec![0.1, 0.1, 0.2, 0.2, 0.2],
+            reference_info: None,
+            used_normalization: false,
+        };
+
+        let contributions = result.session_contributions(&stack);
+        assert_eq!(contributions.len(), 2);
+        assert_eq!(contributions[0].0, 0); // Session 0
+        assert!((contributions[0].1 - 0.2).abs() < f32::EPSILON); // 0.1 + 0.1
+        assert_eq!(contributions[1].0, 1); // Session 1
+        assert!((contributions[1].1 - 0.6).abs() < f32::EPSILON); // 0.2 + 0.2 + 0.2
+    }
+
+    #[test]
+    fn test_stack_session_weighted_no_frames_error() {
+        let stack = MultiSessionStack::new(vec![]);
+        let result = stack.stack_session_weighted();
+
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("No frames to stack"));
+    }
+
+    #[test]
+    fn test_stack_session_weighted_empty_session_error() {
+        let sessions = vec![Session::new("empty")]; // No frames
+        let stack = MultiSessionStack::new(sessions);
+        let result = stack.stack_session_weighted();
+
+        assert!(result.is_err());
     }
 }

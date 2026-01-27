@@ -55,7 +55,7 @@ pub use comet::{
 #[allow(unused_imports)]
 pub use session::{
     GlobalReferenceInfo, MultiSessionStack, MultiSessionSummary, Session, SessionConfig, SessionId,
-    SessionNormalization, SessionQuality, SessionSummary,
+    SessionNormalization, SessionQuality, SessionSummary, SessionWeightedStackResult,
 };
 
 #[cfg(feature = "bench")]
