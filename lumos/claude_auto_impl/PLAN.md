@@ -113,7 +113,7 @@ Existing: `examples/full_pipeline.rs` (calibration + registration + stacking)
 
 ### Example 6: Comet Stacking (`examples/comet_stacking.rs`)
 
-- [ ] Create example showing moving object tracking:
+- [x] Create example showing moving object tracking:
   - Define comet positions at start/end with `ObjectPosition::new()`
   - Configure with `CometStackConfig::new(start, end)`
   - Load frames with timestamps
