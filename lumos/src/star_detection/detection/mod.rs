@@ -16,6 +16,7 @@ use super::deblend::{
     ComponentData, DeblendConfig, MultiThresholdDeblendConfig,
     deblend_component as multi_threshold_deblend, deblend_local_maxima,
 };
+#[cfg(target_arch = "x86_64")]
 use crate::common::cpu_features;
 
 /// A candidate star region before centroid refinement.
@@ -129,17 +130,28 @@ pub fn detect_stars(
 }
 
 /// Create binary mask of pixels above threshold, with SIMD dispatch.
+#[cfg(target_arch = "x86_64")]
 pub fn create_threshold_mask(
     pixels: &[f32],
     background: &BackgroundMap,
     sigma_threshold: f32,
 ) -> Vec<bool> {
-    if cfg!(target_arch = "x86_64") && cpu_features::has_sse4_1() {
+    if cpu_features::has_sse4_1() {
         // SAFETY: We've checked that SSE4.1 is available.
         unsafe { simd::sse::create_threshold_mask_sse(pixels, background, sigma_threshold) }
     } else {
         scalar::create_threshold_mask(pixels, background, sigma_threshold)
     }
+}
+
+/// Create binary mask of pixels above threshold (scalar fallback for non-x86_64).
+#[cfg(not(target_arch = "x86_64"))]
+pub fn create_threshold_mask(
+    pixels: &[f32],
+    background: &BackgroundMap,
+    sigma_threshold: f32,
+) -> Vec<bool> {
+    scalar::create_threshold_mask(pixels, background, sigma_threshold)
 }
 
 /// Connected component labeling using union-find with parallel second pass.
