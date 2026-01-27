@@ -143,11 +143,18 @@ pub use stacking::{
     CometStackConfig,
     CometStackResult,
     CompositeMethod,
+    // Correction method for gradient removal
+    CorrectionMethod,
     FrameType,
     // GPU stacking
     GpuSigmaClipConfig,
     GpuSigmaClipPipeline,
     GpuSigmaClipper,
+    // Gradient removal
+    GradientModel,
+    GradientRemovalConfig,
+    GradientRemovalError,
+    GradientRemovalResult,
     // Main API
     ImageStack,
     MAX_GPU_FRAMES,
@@ -173,6 +180,8 @@ pub use stacking::{
     compute_comet_offset,
     create_comet_stack_result,
     interpolate_position,
+    remove_gradient,
+    remove_gradient_simple,
 };
 
 // ============================================================================

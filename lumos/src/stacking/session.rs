@@ -1095,6 +1095,77 @@ impl SessionWeightedStackResult {
 
         contributions
     }
+
+    /// Remove gradient from the stacked image.
+    ///
+    /// This is a post-stack processing step that removes sky gradients caused by
+    /// light pollution, moon glow, or twilight. The gradient is estimated from
+    /// background samples and either subtracted (additive gradients) or divided
+    /// (multiplicative effects like vignetting).
+    ///
+    /// For multi-channel images, gradient removal is applied to each channel
+    /// independently.
+    ///
+    /// # Arguments
+    /// * `config` - Gradient removal configuration
+    ///
+    /// # Returns
+    /// * `Ok(())` - Gradient successfully removed (image modified in-place)
+    /// * `Err` - If gradient removal fails (e.g., insufficient samples)
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use lumos::stacking::session::{MultiSessionStack, SessionConfig};
+    /// use lumos::stacking::gradient_removal::GradientRemovalConfig;
+    ///
+    /// let stack = MultiSessionStack::new(vec![session1, session2])
+    ///     .with_config(SessionConfig::default());
+    ///
+    /// let mut result = stack.stack_session_weighted()?;
+    ///
+    /// // Remove linear gradient (degree 1)
+    /// let config = GradientRemovalConfig::polynomial(1);
+    /// result.remove_gradient(&config)?;
+    /// ```
+    pub fn remove_gradient(
+        &mut self,
+        config: &super::gradient_removal::GradientRemovalConfig,
+    ) -> Result<(), super::gradient_removal::GradientRemovalError> {
+        let width = self.image.width();
+        let height = self.image.height();
+        let channels = self.image.channels();
+        let pixels = self.image.pixels_mut();
+
+        if channels == 1 {
+            // Single channel - process directly
+            let corrected =
+                super::gradient_removal::remove_gradient_simple(pixels, width, height, config)?;
+            pixels.copy_from_slice(&corrected);
+        } else {
+            // Multi-channel - process each channel independently
+            for c in 0..channels {
+                // Extract channel
+                let channel_pixels: Vec<f32> =
+                    pixels.iter().skip(c).step_by(channels).copied().collect();
+
+                // Remove gradient from channel
+                let corrected = super::gradient_removal::remove_gradient_simple(
+                    &channel_pixels,
+                    width,
+                    height,
+                    config,
+                )?;
+
+                // Write back interleaved
+                for (i, &val) in corrected.iter().enumerate() {
+                    pixels[i * channels + c] = val;
+                }
+            }
+        }
+
+        Ok(())
+    }
 }
 
 impl std::fmt::Display for SessionWeightedStackResult {

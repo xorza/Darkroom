@@ -1276,3 +1276,137 @@ For RGB/color images, normalization is applied per-channel:
 ### Exports
 
 - `lumos::SessionWeightedStackResult`
+
+---
+
+## Gradient Removal (IMPLEMENTED - 2026-01-27)
+
+### Overview
+
+Post-stack gradient removal for removing sky gradients caused by light pollution, moon glow, twilight, or vignetting. Uses automatic sample placement to avoid stars and bright objects, then fits a gradient model to the background samples.
+
+### Research Sources
+
+- [Siril Background Extraction](https://siril.readthedocs.io/en/latest/processing/background.html)
+- [Siril Gradient Tutorial](https://siril.org/tutorials/gradient/)
+- [PixInsight Multiscale Gradient Correction](https://pixinsight.com/tutorials/multiscale-gradient-correction/)
+- [GraXpert Tool](https://remoteastrophotography.com/2023/02/using-graxpert-for-gradient-removal)
+
+### Key Types
+
+```rust
+// Configuration
+pub struct GradientRemovalConfig {
+    pub model: GradientModel,           // Polynomial or RBF
+    pub correction: CorrectionMethod,   // Subtract or Divide
+    pub samples_per_line: usize,        // Sample density (default: 16)
+    pub brightness_tolerance: f32,      // Threshold for sample rejection (default: 1.0)
+    pub min_samples: usize,             // Minimum samples required (default: 16)
+}
+
+// Gradient models
+pub enum GradientModel {
+    Polynomial(u8),  // Degree 1-4 (1=linear, 2=quadratic)
+    Rbf(f32),        // Thin-plate spline with smoothing 0.0-1.0
+}
+
+// Correction methods
+pub enum CorrectionMethod {
+    Subtract,  // For additive gradients (light pollution)
+    Divide,    // For multiplicative effects (vignetting)
+}
+
+// Result
+pub struct GradientRemovalResult {
+    pub corrected: Vec<f32>,           // Corrected image
+    pub gradient: Vec<f32>,            // Extracted gradient model
+    pub sample_count: usize,           // Samples used for fitting
+    pub sample_positions: Vec<(usize, usize)>,
+    pub sample_values: Vec<f32>,
+}
+```
+
+### Algorithm
+
+**1. Sample Placement:**
+- Generate grid of sample positions based on `samples_per_line`
+- Compute image statistics (median, MAD-based sigma)
+- For each sample position:
+  - Compute local median in 5×5 box
+  - Reject if local_median > global_median + tolerance × sigma
+  - This avoids placing samples on stars or bright nebulae
+
+**2. Polynomial Fitting (degrees 1-4):**
+- Degree 1: `f(x,y) = a₀ + a₁x + a₂y` (3 terms)
+- Degree 2: `f(x,y) = a₀ + a₁x + a₂y + a₃x² + a₄xy + a₅y²` (6 terms)
+- Degree 3: 10 terms, Degree 4: 15 terms
+- Uses least-squares fitting with normal equations
+- Coordinates normalized to [-1, 1] for numerical stability
+
+**3. RBF Fitting (thin-plate spline):**
+- Solves system: `[K + λI, P; P^T, 0] [w; a] = [v; 0]`
+- K[i,j] = r² log(r) (TPS kernel)
+- P matrix for affine component
+- Smoothing parameter controls regularization
+
+**4. Correction:**
+- **Subtract**: `corrected = pixel - (gradient - median(gradient))`
+  - Preserves overall brightness level
+- **Divide**: `corrected = pixel / (gradient / mean(gradient))`
+  - Normalizes multiplicative effects
+
+### API Usage
+
+```rust
+use lumos::stacking::gradient_removal::{GradientRemovalConfig, remove_gradient};
+
+// Polynomial gradient removal (linear)
+let config = GradientRemovalConfig::polynomial(1);
+let result = remove_gradient(&pixels, width, height, &config)?;
+
+// Quadratic gradient removal
+let config = GradientRemovalConfig::polynomial(2);
+let result = remove_gradient(&pixels, width, height, &config)?;
+
+// RBF gradient removal for complex gradients
+let config = GradientRemovalConfig::rbf(0.5)
+    .with_samples_per_line(24)
+    .with_correction(CorrectionMethod::Divide);
+let result = remove_gradient(&pixels, width, height, &config)?;
+
+// Simple version (returns only corrected pixels)
+let corrected = remove_gradient_simple(&pixels, width, height, &config)?;
+
+// Post-stack removal via SessionWeightedStackResult
+let mut result = stack.stack_session_weighted()?;
+result.remove_gradient(&GradientRemovalConfig::polynomial(2))?;
+```
+
+### When to Use Each Method
+
+| Method | Best For | Notes |
+|--------|----------|-------|
+| Polynomial(1) | Simple linear gradients | Fast, minimal risk of overcorrection |
+| Polynomial(2) | Parabolic gradients | Good default for most cases |
+| Polynomial(3-4) | Complex gradients | Risk of overcorrection |
+| RBF | Non-uniform gradients | Best for rotating gradients across session |
+| Subtract | Light pollution, moon glow | Additive effects |
+| Divide | Vignetting | Multiplicative effects |
+
+### Tests (35 passing)
+
+- Configuration tests: defaults, polynomial/RBF creation, builder methods
+- Validation tests: panics for invalid parameters
+- Helper function tests: polynomial terms, statistics, median, TPS kernel
+- Integration tests: uniform image, linear gradient, quadratic gradient, RBF, divide correction
+- Error handling: insufficient samples
+
+### Public Exports
+
+- `lumos::GradientRemovalConfig`
+- `lumos::GradientModel`
+- `lumos::CorrectionMethod`
+- `lumos::GradientRemovalResult`
+- `lumos::GradientRemovalError`
+- `lumos::remove_gradient`
+- `lumos::remove_gradient_simple`

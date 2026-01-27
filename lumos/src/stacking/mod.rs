@@ -4,6 +4,7 @@ pub mod comet;
 mod drizzle;
 mod error;
 pub mod gpu;
+mod gradient_removal;
 mod local_normalization;
 mod mean;
 mod median;
@@ -56,6 +57,12 @@ pub use comet::{
 pub use session::{
     GlobalReferenceInfo, MultiSessionStack, MultiSessionSummary, Session, SessionConfig, SessionId,
     SessionNormalization, SessionQuality, SessionSummary, SessionWeightedStackResult,
+};
+// Re-export gradient removal types for public API
+#[allow(unused_imports)]
+pub use gradient_removal::{
+    CorrectionMethod, GradientModel, GradientRemovalConfig, GradientRemovalError,
+    GradientRemovalResult, remove_gradient, remove_gradient_simple,
 };
 
 #[cfg(feature = "bench")]

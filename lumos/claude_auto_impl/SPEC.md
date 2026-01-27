@@ -114,7 +114,7 @@ with tests and running verification commands per project conventions.
 - [x] Design per-session quality assessment workflow
 - [x] Implement session-aware local normalization
 - [x] Implement session-weighted integration
-- [ ] Add gradient removal post-stack (optional)
+- [x] Add gradient removal post-stack (optional)
 - [ ] Write integration tests
 - [ ] Run verification commands
 
@@ -130,6 +130,19 @@ with tests and running verification commands per project conventions.
 - `stack_session_weighted()` - Main integration function with optional local normalization
 - Multi-channel support: normalizes each channel independently for RGB images
 - 45 unit tests passing (26 original + 14 normalization + 5 integration)
+
+**Gradient Removal** (2026-01-27): Created `src/stacking/gradient_removal.rs` with:
+- `GradientRemovalConfig` - Configuration for gradient removal (model, correction, samples)
+- `GradientModel::Polynomial(degree)` - Polynomial surface fitting (degrees 1-4)
+- `GradientModel::Rbf(smoothing)` - Thin-plate spline interpolation for complex gradients
+- `CorrectionMethod::Subtract` - For additive gradients (light pollution, moon glow)
+- `CorrectionMethod::Divide` - For multiplicative effects (vignetting)
+- `remove_gradient()` - Full result with gradient model and sample info
+- `remove_gradient_simple()` - Returns only corrected pixels
+- `SessionWeightedStackResult::remove_gradient()` - Convenience method for post-stack gradient removal
+- Automatic sample placement avoiding bright objects (stars, nebulae)
+- Multi-channel support: processes each channel independently
+- 35 unit tests passing
 
 ### 3.3 Distortion Correction Extensions
 - [ ] Implement radial distortion models (barrel/pincushion)
@@ -183,9 +196,9 @@ cargo bench -p lumos --features bench --bench <name> | tee benches/<name>_result
 |-------|-------|----------|--------|
 | Local Normalization | 5 | 5 | **Complete** |
 | GPU Acceleration | 12 | 12 | **Complete** (warping done, FFT skipped, sigma clip done, star detection done, batch pipeline done + benchmarked) |
-| Advanced Features | 14 | 9 | **In Progress** (Comet stacking complete, session quality done, session-aware normalization done, session-weighted integration done) |
+| Advanced Features | 14 | 10 | **In Progress** (Comet stacking complete, session quality done, session-aware normalization done, session-weighted integration done, gradient removal done) |
 | Quality & Polish | 4 | 0 | Not Started |
-| **Total** | **35** | **26** | **In Progress** |
+| **Total** | **35** | **27** | **In Progress** |
 
 ---
 
