@@ -1,0 +1,68 @@
+    Finished `bench` profile [optimized + debuginfo] target(s) in 0.21s
+     Running benches/full_pipeline.rs (target/release/deps/full_pipeline-0dd534a8a5025826)
+Loading 10 images from $HOME/projects/Siril_Tutorial/calibrated_lights
+Loaded 10 calibrated lights for benchmarking
+Benchmarking pipeline_star_detection/single_image/6032
+Benchmarking pipeline_star_detection/single_image/6032: Warming up for 3.0000 s
+
+Warning: Unable to complete 10 samples in 5.0s. You may wish to increase target time to 6.3s.
+Benchmarking pipeline_star_detection/single_image/6032: Collecting 10 samples in estimated 6.3410 s (10 iterations)
+Benchmarking pipeline_star_detection/single_image/6032: Analyzing
+pipeline_star_detection/single_image/6032
+                        time:   [627.41 ms 629.66 ms 631.68 ms]
+                        change: [−6.0066% −5.4174% −4.8256%] (p = 0.00 < 0.05)
+                        Performance has improved.
+Found 1 outliers among 10 measurements (10.00%)
+  1 (10.00%) low mild
+Benchmarking pipeline_star_detection/all_images/10
+Benchmarking pipeline_star_detection/all_images/10: Warming up for 3.0000 s
+
+Warning: Unable to complete 10 samples in 5.0s. You may wish to increase target time to 63.0s.
+Benchmarking pipeline_star_detection/all_images/10: Collecting 10 samples in estimated 63.039 s (10 iterations)
+Benchmarking pipeline_star_detection/all_images/10: Analyzing
+pipeline_star_detection/all_images/10
+                        time:   [6.2654 s 6.2724 s 6.2797 s]
+                        change: [−5.3934% −5.0110% −4.6115%] (p = 0.00 < 0.05)
+                        Performance has improved.
+
+Benchmarking pipeline_registration/single_pair
+Benchmarking pipeline_registration/single_pair: Warming up for 3.0000 s
+Benchmarking pipeline_registration/single_pair: Collecting 10 samples in estimated 6.0615 s (20 iterations)
+Benchmarking pipeline_registration/single_pair: Analyzing
+pipeline_registration/single_pair
+                        time:   [315.45 ms 328.72 ms 342.09 ms]
+                        change: [−20.187% −16.777% −13.004%] (p = 0.00 < 0.05)
+                        Performance has improved.
+Benchmarking pipeline_registration/all_to_reference/9
+Benchmarking pipeline_registration/all_to_reference/9: Warming up for 3.0000 s
+
+Warning: Unable to complete 10 samples in 5.0s. You may wish to increase target time to 27.5s.
+Benchmarking pipeline_registration/all_to_reference/9: Collecting 10 samples in estimated 27.475 s (10 iterations)
+Benchmarking pipeline_registration/all_to_reference/9: Analyzing
+pipeline_registration/all_to_reference/9
+                        time:   [2.7200 s 2.7712 s 2.8192 s]
+                        change: [−20.394% −18.807% −17.165%] (p = 0.00 < 0.05)
+                        Performance has improved.
+
+Benchmarking pipeline_stacking/mean_accumulate/10
+Benchmarking pipeline_stacking/mean_accumulate/10: Warming up for 3.0000 s
+
+Warning: Unable to complete 10 samples in 5.0s. You may wish to increase target time to 8.0s.
+Benchmarking pipeline_stacking/mean_accumulate/10: Collecting 10 samples in estimated 7.9973 s (10 iterations)
+Benchmarking pipeline_stacking/mean_accumulate/10: Analyzing
+pipeline_stacking/mean_accumulate/10
+                        time:   [800.93 ms 801.61 ms 802.44 ms]
+                        change: [−0.7983% −0.5806% −0.3946%] (p = 0.00 < 0.05)
+                        Change within noise threshold.
+Found 1 outliers among 10 measurements (10.00%)
+  1 (10.00%) high mild
+
+Benchmarking pipeline_full/detect_register_stack/10
+Benchmarking pipeline_full/detect_register_stack/10: Warming up for 3.0000 s
+
+Warning: Unable to complete 10 samples in 5.0s. You may wish to increase target time to 139.1s.
+Benchmarking pipeline_full/detect_register_stack/10: Collecting 10 samples in estimated 139.13 s (10 iterations)
+Benchmarking pipeline_full/detect_register_stack/10: Analyzing
+pipeline_full/detect_register_stack/10
+                        time:   [13.606 s 13.715 s 13.832 s]
+

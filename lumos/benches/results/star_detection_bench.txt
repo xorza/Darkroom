@@ -1,0 +1,1022 @@
+    Finished `bench` profile [optimized + debuginfo] target(s) in 0.23s
+     Running benches/star_detection_background.rs (target/release/deps/star_detection_background-189ffa1940b8cf51)
+Benchmarking background_estimation/512x512/tile_32
+Benchmarking background_estimation/512x512/tile_32: Warming up for 3.0000 s
+Benchmarking background_estimation/512x512/tile_32: Collecting 20 samples in estimated 5.0319 s (8400 iterations)
+Benchmarking background_estimation/512x512/tile_32: Analyzing
+background_estimation/512x512/tile_32
+                        time:   [598.20 µs 658.74 µs 747.50 µs]
+                        thrpt:  [350.69 Melem/s 397.95 Melem/s 438.22 Melem/s]
+                 change:
+                        time:   [+5.5254% +10.121% +17.420%] (p = 0.00 < 0.05)
+                        thrpt:  [−14.836% −9.1907% −5.2361%]
+                        Performance has regressed.
+Found 2 outliers among 20 measurements (10.00%)
+  2 (10.00%) high severe
+Benchmarking background_estimation/512x512/tile_64
+Benchmarking background_estimation/512x512/tile_64: Warming up for 3.0000 s
+Benchmarking background_estimation/512x512/tile_64: Collecting 20 samples in estimated 5.0760 s (7770 iterations)
+Benchmarking background_estimation/512x512/tile_64: Analyzing
+background_estimation/512x512/tile_64
+                        time:   [634.80 µs 678.87 µs 777.11 µs]
+                        thrpt:  [337.33 Melem/s 386.15 Melem/s 412.95 Melem/s]
+                 change:
+                        time:   [+6.7669% +13.915% +26.564%] (p = 0.01 < 0.05)
+                        thrpt:  [−20.988% −12.215% −6.3380%]
+                        Performance has regressed.
+Found 3 outliers among 20 measurements (15.00%)
+  1 (5.00%) high mild
+  2 (10.00%) high severe
+Benchmarking background_estimation/512x512/tile_128
+Benchmarking background_estimation/512x512/tile_128: Warming up for 3.0000 s
+Benchmarking background_estimation/512x512/tile_128: Collecting 20 samples in estimated 5.0718 s (5460 iterations)
+Benchmarking background_estimation/512x512/tile_128: Analyzing
+background_estimation/512x512/tile_128
+                        time:   [915.44 µs 957.58 µs 1.0679 ms]
+                        thrpt:  [245.47 Melem/s 273.76 Melem/s 286.36 Melem/s]
+                 change:
+                        time:   [+35.958% +46.898% +67.637%] (p = 0.00 < 0.05)
+                        thrpt:  [−40.347% −31.925% −26.448%]
+                        Performance has regressed.
+Found 2 outliers among 20 measurements (10.00%)
+  1 (5.00%) high mild
+  1 (5.00%) high severe
+Benchmarking background_estimation/2048x2048/tile_32
+Benchmarking background_estimation/2048x2048/tile_32: Warming up for 3.0000 s
+Benchmarking background_estimation/2048x2048/tile_32: Collecting 20 samples in estimated 9.4863 s (420 iterations)
+Benchmarking background_estimation/2048x2048/tile_32: Analyzing
+background_estimation/2048x2048/tile_32
+                        time:   [21.690 ms 22.643 ms 24.260 ms]
+                        thrpt:  [172.89 Melem/s 185.24 Melem/s 193.37 Melem/s]
+                 change:
+                        time:   [−0.5923% +2.3089% +6.1445%] (p = 0.22 > 0.05)
+                        thrpt:  [−5.7888% −2.2568% +0.5959%]
+                        No change in performance detected.
+Found 3 outliers among 20 measurements (15.00%)
+  1 (5.00%) low mild
+  1 (5.00%) high mild
+  1 (5.00%) high severe
+Benchmarking background_estimation/2048x2048/tile_64
+Benchmarking background_estimation/2048x2048/tile_64: Warming up for 3.0000 s
+Benchmarking background_estimation/2048x2048/tile_64: Collecting 20 samples in estimated 9.0520 s (420 iterations)
+Benchmarking background_estimation/2048x2048/tile_64: Analyzing
+background_estimation/2048x2048/tile_64
+                        time:   [21.215 ms 21.789 ms 22.939 ms]
+                        thrpt:  [182.85 Melem/s 192.50 Melem/s 197.70 Melem/s]
+                 change:
+                        time:   [+1.4563% +6.2239% +13.589%] (p = 0.04 < 0.05)
+                        thrpt:  [−11.963% −5.8592% −1.4354%]
+                        Performance has regressed.
+Found 2 outliers among 20 measurements (10.00%)
+  1 (5.00%) high mild
+  1 (5.00%) high severe
+Benchmarking background_estimation/2048x2048/tile_128
+Benchmarking background_estimation/2048x2048/tile_128: Warming up for 3.0000 s
+Benchmarking background_estimation/2048x2048/tile_128: Collecting 20 samples in estimated 9.3666 s (420 iterations)
+Benchmarking background_estimation/2048x2048/tile_128: Analyzing
+background_estimation/2048x2048/tile_128
+                        time:   [21.295 ms 22.106 ms 23.547 ms]
+                        thrpt:  [178.13 Melem/s 189.74 Melem/s 196.96 Melem/s]
+                 change:
+                        time:   [−3.5094% −0.1588% +4.2787%] (p = 0.95 > 0.05)
+                        thrpt:  [−4.1032% +0.1590% +3.6370%]
+                        No change in performance detected.
+Found 1 outliers among 20 measurements (5.00%)
+  1 (5.00%) high severe
+Benchmarking background_estimation/4096x4096/tile_32
+Benchmarking background_estimation/4096x4096/tile_32: Warming up for 3.0000 s
+Benchmarking background_estimation/4096x4096/tile_32: Collecting 20 samples in estimated 5.2034 s (80 iterations)
+Benchmarking background_estimation/4096x4096/tile_32: Analyzing
+background_estimation/4096x4096/tile_32
+                        time:   [64.682 ms 66.565 ms 68.993 ms]
+                        thrpt:  [243.17 Melem/s 252.04 Melem/s 259.38 Melem/s]
+                 change:
+                        time:   [+5.7094% +8.9650% +12.906%] (p = 0.00 < 0.05)
+                        thrpt:  [−11.431% −8.2274% −5.4010%]
+                        Performance has regressed.
+Found 3 outliers among 20 measurements (15.00%)
+  1 (5.00%) high mild
+  2 (10.00%) high severe
+Benchmarking background_estimation/4096x4096/tile_64
+Benchmarking background_estimation/4096x4096/tile_64: Warming up for 3.0000 s
+Benchmarking background_estimation/4096x4096/tile_64: Collecting 20 samples in estimated 5.3675 s (80 iterations)
+Benchmarking background_estimation/4096x4096/tile_64: Analyzing
+background_estimation/4096x4096/tile_64
+                        time:   [66.917 ms 69.130 ms 72.090 ms]
+                        thrpt:  [232.73 Melem/s 242.69 Melem/s 250.72 Melem/s]
+                 change:
+                        time:   [+6.2957% +10.124% +14.634%] (p = 0.00 < 0.05)
+                        thrpt:  [−12.766% −9.1930% −5.9228%]
+                        Performance has regressed.
+Found 2 outliers among 20 measurements (10.00%)
+  2 (10.00%) high severe
+Benchmarking background_estimation/4096x4096/tile_128
+Benchmarking background_estimation/4096x4096/tile_128: Warming up for 3.0000 s
+Benchmarking background_estimation/4096x4096/tile_128: Collecting 20 samples in estimated 5.5530 s (80 iterations)
+Benchmarking background_estimation/4096x4096/tile_128: Analyzing
+background_estimation/4096x4096/tile_128
+                        time:   [68.477 ms 70.353 ms 73.229 ms]
+                        thrpt:  [229.11 Melem/s 238.47 Melem/s 245.01 Melem/s]
+                 change:
+                        time:   [+4.0006% +7.0448% +11.798%] (p = 0.00 < 0.05)
+                        thrpt:  [−10.553% −6.5812% −3.8467%]
+                        Performance has regressed.
+Found 2 outliers among 20 measurements (10.00%)
+  1 (5.00%) high mild
+  1 (5.00%) high severe
+
+Benchmarking background_simd_vs_scalar/sum_and_sum_sq_scalar/1024
+Benchmarking background_simd_vs_scalar/sum_and_sum_sq_scalar/1024: Warming up for 3.0000 s
+Benchmarking background_simd_vs_scalar/sum_and_sum_sq_scalar/1024: Collecting 50 samples in estimated 5.0004 s (7.7M iterations)
+.00%) low severe
+  10 (20.00%) high severe
+Benchmarking background_simd_vs_scalar/sum_and_sum_sq_scalar/4096
+Benchmarking background_simd_vs_scalar/sum_and_sum_sq_scalar/4096: Warming up for 3.0000 s
+Benchmarking background_simd_vs_scalar/sum_and_sum_sq_scalar/4096: Collecting 50 samples in estimated 5.0009 s (1.5M iterations)
+Benchmarking background_simd_vs_scalar/sum_and_sum_sq_scalar/4096: Analyzing
+background_simd_vs_scalar/sum_and_sum_sq_scalar/4096
+                        time:   [3.4470 µs 3.4706 µs 3.4884 µs]
+                        thrpt:  [1.1742 Gelem/s 1.1802 Gelem/s 1.1883 Gelem/s]
+Benchmarking background_simd_vs_scalar/sum_and_sum_sq_simd/4096
+Benchmarking background_simd_vs_scalar/sum_and_sum_sq_simd/4096: Warming up for 3.0000 s
+Benchmarking background_simd_vs_scalar/sum_and_sum_sq_simd/4096: Collecting 50 samples in estimated 5.0005 s (12M iterations)
+Benchmarking background_simd_vs_scalar/sum_and_sum_sq_simd/4096: Analyzing
+background_simd_vs_scalar/sum_and_sum_sq_simd/4096
+                        time:   [426.05 ns 427.73 ns 429.07 ns]
+                        thrpt:  [9.5462 Gelem/s 9.5762 Gelem/s 9.6138 Gelem/s]
+Found 3 outliers among 50 measurements (6.00%)
+  1 (2.00%) low severe
+  1 (2.00%) low mild
+  1 (2.00%) high mild
+Benchmarking background_simd_vs_scalar/sum_abs_dev_scalar/4096
+Benchmarking background_simd_vs_scalar/sum_abs_dev_scalar/4096: Warming up for 3.0000 s
+Benchmarking background_simd_vs_scalar/sum_abs_dev_scalar/4096: Collecting 50 samples in estimated 5.0038 s (1.4M iterations)
+Benchmarking background_simd_vs_scalar/sum_abs_dev_scalar/4096: Analyzing
+background_simd_vs_scalar/sum_abs_dev_scalar/4096
+                        time:   [3.4935 µs 3.5108 µs 3.5270 µs]
+                        thrpt:  [1.1613 Gelem/s 1.1667 Gelem/s 1.1725 Gelem/s]
+Benchmarking background_simd_vs_scalar/sum_abs_dev_simd/4096
+Benchmarking background_simd_vs_scalar/sum_abs_dev_simd/4096: Warming up for 3.0000 s
+Benchmarking background_simd_vs_scalar/sum_abs_dev_simd/4096: Collecting 50 samples in estimated 5.0005 s (11M iterations)
+Benchmarking background_simd_vs_scalar/sum_abs_dev_simd/4096: Analyzing
+background_simd_vs_scalar/sum_abs_dev_simd/4096
+                        time:   [426.22 ns 429.98 ns 433.16 ns]
+                        thrpt:  [9.4562 Gelem/s 9.5260 Gelem/s 9.6100 Gelem/s]
+Found 7 outliers among 50 measurements (14.00%)
+  3 (6.00%) low severe
+  2 (4.00%) low mild
+  2 (4.00%) high mild
+Benchmarking background_simd_vs_scalar/sum_and_sum_sq_scalar/16384
+Benchmarking background_simd_vs_scalar/sum_and_sum_sq_scalar/16384: Warming up for 3.0000 s
+Benchmarking background_simd_vs_scalar/sum_and_sum_sq_scalar/16384: Collecting 50 samples in estimated 5.0225 s (268k iterations)
+Benchmarking background_simd_vs_scalar/sum_and_sum_sq_scalar/16384: Analyzing
+background_simd_vs_scalar/sum_and_sum_sq_scalar/16384
+                        time:   [18.572 µs 18.812 µs 19.032 µs]
+                        thrpt:  [860.86 Melem/s 870.94 Melem/s 882.20 Melem/s]
+Found 5 outliers among 50 measurements (10.00%)
+  2 (4.00%) low severe
+  1 (2.00%) low mild
+  1 (2.00%) high mild
+  1 (2.00%) high severe
+Benchmarking background_simd_vs_scalar/sum_and_sum_sq_simd/16384
+Benchmarking background_simd_vs_scalar/sum_and_sum_sq_simd/16384: Warming up for 3.0000 s
+Benchmarking background_simd_vs_scalar/sum_and_sum_sq_simd/16384: Collecting 50 samples in estimated 5.0015 s (2.0M iterations)
+Benchmarking background_simd_vs_scalar/sum_and_sum_sq_simd/16384: Analyzing
+background_simd_vs_scalar/sum_and_sum_sq_simd/16384
+                        time:   [2.6550 µs 2.7020 µs 2.7514 µs]
+                        thrpt:  [5.9549 Gelem/s 6.0636 Gelem/s 6.1711 Gelem/s]
+Found 8 outliers among 50 measurements (16.00%)
+  5 (10.00%) low mild
+  1 (2.00%) high mild
+  2 (4.00%) high severe
+Benchmarking background_simd_vs_scalar/sum_abs_dev_scalar/16384
+Benchmarking background_simd_vs_scalar/sum_abs_dev_scalar/16384: Warming up for 3.0000 s
+Benchmarking background_simd_vs_scalar/sum_abs_dev_scalar/16384: Collecting 50 samples in estimated 5.0117 s (279k iterations)
+Benchmarking background_simd_vs_scalar/sum_abs_dev_scalar/16384: Analyzing
+background_simd_vs_scalar/sum_abs_dev_scalar/16384
+                        time:   [18.730 µs 18.965 µs 19.201 µs]
+                        thrpt:  [853.27 Melem/s 863.92 Melem/s 874.76 Melem/s]
+Found 9 outliers among 50 measurements (18.00%)
+  5 (10.00%) low mild
+  1 (2.00%) high mild
+  3 (6.00%) high severe
+Benchmarking background_simd_vs_scalar/sum_abs_dev_simd/16384
+Benchmarking background_simd_vs_scalar/sum_abs_dev_simd/16384: Warming up for 3.0000 s
+Benchmarking background_simd_vs_scalar/sum_abs_dev_simd/16384: Collecting 50 samples in estimated 5.0024 s (1.9M iterations)
+Benchmarking background_simd_vs_scalar/sum_abs_dev_simd/16384: Analyzing
+background_simd_vs_scalar/sum_abs_dev_simd/16384
+                        time:   [2.7001 µs 2.7648 µs 2.8249 µs]
+                        thrpt:  [5.7999 Gelem/s 5.9259 Gelem/s 6.0679 Gelem/s]
+Found 10 outliers among 50 measurements (20.00%)
+  6 (12.00%) low mild
+  2 (4.00%) high mild
+  2 (4.00%) high severe
+Benchmarking background_simd_vs_scalar/sum_and_sum_sq_scalar/65536
+Benchmarking background_simd_vs_scalar/sum_and_sum_sq_scalar/65536: Warming up for 3.0000 s
+Benchmarking background_simd_vs_scalar/sum_and_sum_sq_scalar/65536: Collecting 50 samples in estimated 5.0540 s (117k iterations)
+Benchmarking background_simd_vs_scalar/sum_and_sum_sq_scalar/65536: Analyzing
+background_simd_vs_scalar/sum_and_sum_sq_scalar/65536
+                        time:   [42.194 µs 42.243 µs 42.279 µs]
+                        thrpt:  [1.5501 Gelem/s 1.5514 Gelem/s 1.5532 Gelem/s]
+Found 8 outliers among 50 measurements (16.00%)
+  2 (4.00%) low severe
+  2 (4.00%) low mild
+  4 (8.00%) high mild
+Benchmarking background_simd_vs_scalar/sum_and_sum_sq_simd/65536
+Benchmarking background_simd_vs_scalar/sum_and_sum_sq_simd/65536: Warming up for 3.0000 s
+Benchmarking background_simd_vs_scalar/sum_and_sum_sq_simd/65536: Collecting 50 samples in estimated 5.0047 s (951k iterations)
+Benchmarking background_simd_vs_scalar/sum_and_sum_sq_simd/65536: Analyzing
+background_simd_vs_scalar/sum_and_sum_sq_simd/65536
+                        time:   [5.3575 µs 5.3974 µs 5.4279 µs]
+                        thrpt:  [12.074 Gelem/s 12.142 Gelem/s 12.233 Gelem/s]
+Benchmarking background_simd_vs_scalar/sum_abs_dev_scalar/65536
+Benchmarking background_simd_vs_scalar/sum_abs_dev_scalar/65536: Warming up for 3.0000 s
+Benchmarking background_simd_vs_scalar/sum_abs_dev_scalar/65536: Collecting 50 samples in estimated 5.0361 s (119k iterations)
+Benchmarking background_simd_vs_scalar/sum_abs_dev_scalar/65536: Analyzing
+background_simd_vs_scalar/sum_abs_dev_scalar/65536
+                        time:   [42.369 µs 43.026 µs 43.906 µs]
+                        thrpt:  [1.4926 Gelem/s 1.5232 Gelem/s 1.5468 Gelem/s]
+Found 3 outliers among 50 measurements (6.00%)
+  3 (6.00%) high severe
+Benchmarking background_simd_vs_scalar/sum_abs_dev_simd/65536
+Benchmarking background_simd_vs_scalar/sum_abs_dev_simd/65536: Warming up for 3.0000 s
+Benchmarking background_simd_vs_scalar/sum_abs_dev_simd/65536: Collecting 50 samples in estimated 5.0065 s (923k iterations)
+Benchmarking background_simd_vs_scalar/sum_abs_dev_simd/65536: Analyzing
+background_simd_vs_scalar/sum_abs_dev_simd/65536
+                        time:   [5.4614 µs 5.5195 µs 5.6004 µs]
+                        thrpt:  [11.702 Gelem/s 11.873 Gelem/s 12.000 Gelem/s]
+Found 5 outliers among 50 measurements (10.00%)
+  2 (4.00%) high mild
+  3 (6.00%) high severe
+
+Benchmarking background_interpolation/scalar/64
+Benchmarking background_interpolation/scalar/64: Warming up for 3.0000 s
+Benchmarking background_interpolation/scalar/64: Collecting 50 samples in estimated 5.0000 s (111M iterations)
+Benchmarking background_interpolation/scalar/64: Analyzing
+background_interpolation/scalar/64
+                        time:   [43.610 ns 43.639 ns 43.668 ns]
+                        thrpt:  [1.4656 Gelem/s 1.4666 Gelem/s 1.4676 Gelem/s]
+Found 2 outliers among 50 measurements (4.00%)
+  1 (2.00%) low severe
+  1 (2.00%) low mild
+Benchmarking background_interpolation/simd/64
+Benchmarking background_interpolation/simd/64: Warming up for 3.0000 s
+Benchmarking background_interpolation/simd/64: Collecting 50 samples in estimated 5.0000 s (509M iterations)
+Benchmarking background_interpolation/simd/64: Analyzing
+background_interpolation/simd/64
+                        time:   [9.4385 ns 9.4471 ns 9.4548 ns]
+                        thrpt:  [6.7690 Gelem/s 6.7746 Gelem/s 6.7808 Gelem/s]
+Found 3 outliers among 50 measurements (6.00%)
+  2 (4.00%) low severe
+  1 (2.00%) high severe
+Benchmarking background_interpolation/scalar/256
+Benchmarking background_interpolation/scalar/256: Warming up for 3.0000 s
+Benchmarking background_interpolation/scalar/256: Collecting 50 samples in estimated 5.0001 s (30M iterations)
+Benchmarking background_interpolation/scalar/256: Analyzing
+background_interpolation/scalar/256
+                        time:   [166.24 ns 168.37 ns 171.73 ns]
+                        thrpt:  [1.4907 Gelem/s 1.5204 Gelem/s 1.5399 Gelem/s]
+Found 5 outliers among 50 measurements (10.00%)
+  5 (10.00%) high severe
+Benchmarking background_interpolation/simd/256
+Benchmarking background_interpolation/simd/256: Warming up for 3.0000 s
+Benchmarking background_interpolation/simd/256: Collecting 50 samples in estimated 5.0000 s (183M iterations)
+Benchmarking background_interpolation/simd/256: Analyzing
+background_interpolation/simd/256
+                        time:   [26.910 ns 26.977 ns 27.085 ns]
+                        thrpt:  [9.4516 Gelem/s 9.4894 Gelem/s 9.5130 Gelem/s]
+Found 11 outliers among 50 measurements (22.00%)
+  1 (2.00%) low mild
+  1 (2.00%) high mild
+  9 (18.00%) high severe
+Benchmarking background_interpolation/scalar/1024
+Benchmarking background_interpolation/scalar/1024: Warming up for 3.0000 s
+Benchmarking background_interpolation/scalar/1024: Collecting 50 samples in estimated 5.0008 s (7.5M iterations)
+Benchmarking background_interpolation/scalar/1024: Analyzing
+background_interpolation/scalar/1024
+                        time:   [641.07 ns 641.48 ns 641.93 ns]
+                        thrpt:  [1.5952 Gelem/s 1.5963 Gelem/s 1.5973 Gelem/s]
+Found 4 outliers among 50 measurements (8.00%)
+  4 (8.00%) high mild
+Benchmarking background_interpolation/simd/1024
+Benchmarking background_interpolation/simd/1024: Warming up for 3.0000 s
+Benchmarking background_interpolation/simd/1024: Collecting 50 samples in estimated 5.0000 s (48M iterations)
+Benchmarking background_interpolation/simd/1024: Analyzing
+background_interpolation/simd/1024
+                        time:   [100.33 ns 100.35 ns 100.39 ns]
+                        thrpt:  [10.201 Gelem/s 10.204 Gelem/s 10.207 Gelem/s]
+Found 4 outliers among 50 measurements (8.00%)
+  3 (6.00%) high mild
+  1 (2.00%) high severe
+Benchmarking background_interpolation/scalar/4096
+Benchmarking background_interpolation/scalar/4096: Warming up for 3.0000 s
+Benchmarking background_interpolation/scalar/4096: Collecting 50 samples in estimated 5.0027 s (1.9M iterations)
+Benchmarking background_interpolation/scalar/4096: Analyzing
+background_interpolation/scalar/4096
+                        time:   [2.5473 µs 2.5497 µs 2.5538 µs]
+                        thrpt:  [1.6039 Gelem/s 1.6064 Gelem/s 1.6080 Gelem/s]
+Found 1 outliers among 50 measurements (2.00%)
+  1 (2.00%) high mild
+Benchmarking background_interpolation/simd/4096
+Benchmarking background_interpolation/simd/4096: Warming up for 3.0000 s
+Benchmarking background_interpolation/simd/4096: Collecting 50 samples in estimated 5.0004 s (12M iterations)
+Benchmarking background_interpolation/simd/4096: Analyzing
+background_interpolation/simd/4096
+                        time:   [397.76 ns 397.87 ns 397.98 ns]
+                        thrpt:  [10.292 Gelem/s 10.295 Gelem/s 10.298 Gelem/s]
+Found 2 outliers among 50 measurements (4.00%)
+  1 (2.00%) high mild
+  1 (2.00%) high severe
+
+     Running benches/star_detection_centroid.rs (target/release/deps/star_detection_centroid-6388231faeed0191)
+Benchmarking centroid/refine_centroid_21x21
+Benchmarking centroid/refine_centroid_21x21: Warming up for 3.0000 s
+Benchmarking centroid/refine_centroid_21x21: Collecting 50 samples in estimated 5.0002 s (3.9M iterations)
+Benchmarking centroid/refine_centroid_21x21: Analyzing
+centroid/refine_centroid_21x21
+                        time:   [1.2277 µs 1.2283 µs 1.2289 µs]
+                        change: [+0.3183% +0.5023% +0.6557%] (p = 0.00 < 0.05)
+                        Change within noise threshold.
+Found 7 outliers among 50 measurements (14.00%)
+  2 (4.00%) low mild
+  2 (4.00%) high mild
+  3 (6.00%) high severe
+Benchmarking centroid/compute_metrics_21x21
+Benchmarking centroid/compute_metrics_21x21: Warming up for 3.0000 s
+Benchmarking centroid/compute_metrics_21x21: Collecting 50 samples in estimated 5.0010 s (4.3M iterations)
+Benchmarking centroid/compute_metrics_21x21: Analyzing
+centroid/compute_metrics_21x21
+                        time:   [1.1591 µs 1.1604 µs 1.1620 µs]
+                        change: [−3.0530% −2.8744% −2.6902%] (p = 0.00 < 0.05)
+                        Performance has improved.
+Found 1 outliers among 50 measurements (2.00%)
+  1 (2.00%) high mild
+Benchmarking centroid/compute_centroid_batch/10
+Benchmarking centroid/compute_centroid_batch/10: Warming up for 3.0000 s
+Benchmarking centroid/compute_centroid_batch/10: Collecting 50 samples in estimated 5.1239 s (52k iterations)
+Benchmarking centroid/compute_centroid_batch/10: Analyzing
+centroid/compute_centroid_batch/10
+                        time:   [99.799 µs 99.881 µs 99.951 µs]
+                        thrpt:  [100.05 Kelem/s 100.12 Kelem/s 100.20 Kelem/s]
+                 change:
+                        time:   [−12.229% −6.1366% −0.6886%] (p = 0.05 < 0.05)
+                        thrpt:  [+0.6934% +6.5378% +13.933%]
+                        Change within noise threshold.
+Found 1 outliers among 50 measurements (2.00%)
+  1 (2.00%) high severe
+Benchmarking centroid/compute_centroid_batch/100
+Benchmarking centroid/compute_centroid_batch/100: Warming up for 3.0000 s
+Benchmarking centroid/compute_centroid_batch/100: Collecting 50 samples in estimated 5.6958 s (5100 iterations)
+Benchmarking centroid/compute_centroid_batch/100: Analyzing
+centroid/compute_centroid_batch/100
+                        time:   [1.1225 ms 1.1232 ms 1.1241 ms]
+                        thrpt:  [88.963 Kelem/s 89.030 Kelem/s 89.090 Kelem/s]
+                 change:
+                        time:   [−0.2658% +4.5309% +7.7679%] (p = 0.02 < 0.05)
+                        thrpt:  [−7.2080% −4.3345% +0.2665%]
+                        Change within noise threshold.
+Found 4 outliers among 50 measurements (8.00%)
+  1 (2.00%) high mild
+  3 (6.00%) high severe
+Benchmarking centroid/compute_centroid_batch/500
+Benchmarking centroid/compute_centroid_batch/500: Warming up for 3.0000 s
+
+Warning: Unable to complete 50 samples in 5.0s. You may wish to increase target time to 8.6s, enable flat sampling, or reduce sample count to 20.
+Benchmarking centroid/compute_centroid_batch/500: Collecting 50 samples in estimated 8.5885 s (1275 iterations)
+Benchmarking centroid/compute_centroid_batch/500: Analyzing
+centroid/compute_centroid_batch/500
+                        time:   [6.2896 ms 6.5462 ms 6.8519 ms]
+                        thrpt:  [72.972 Kelem/s 76.380 Kelem/s 79.497 Kelem/s]
+                 change:
+                        time:   [+8.2996% +14.161% +19.285%] (p = 0.00 < 0.05)
+                        thrpt:  [−16.167% −12.404% −7.6636%]
+                        Performance has regressed.
+Found 5 outliers among 50 measurements (10.00%)
+  2 (4.00%) low severe
+  1 (2.00%) high mild
+  2 (4.00%) high severe
+
+Benchmarking gaussian_fit/fit_gaussian_2d/15
+Benchmarking gaussian_fit/fit_gaussian_2d/15: Warming up for 3.0000 s
+Benchmarking gaussian_fit/fit_gaussian_2d/15: Collecting 50 samples in estimated 5.0005 s (428k iterations)
+Benchmarking gaussian_fit/fit_gaussian_2d/15: Analyzing
+gaussian_fit/fit_gaussian_2d/15
+                        time:   [11.586 µs 12.143 µs 13.165 µs]
+                        change: [−7.4158% −1.9646% +3.5509%] (p = 0.56 > 0.05)
+                        No change in performance detected.
+Found 4 outliers among 50 measurements (8.00%)
+  1 (2.00%) high mild
+  3 (6.00%) high severe
+Benchmarking gaussian_fit/fit_gaussian_2d/21
+Benchmarking gaussian_fit/fit_gaussian_2d/21: Warming up for 3.0000 s
+Benchmarking gaussian_fit/fit_gaussian_2d/21: Collecting 50 samples in estimated 5.0559 s (50k iterations)
+Benchmarking gaussian_fit/fit_gaussian_2d/21: Analyzing
+gaussian_fit/fit_gaussian_2d/21
+                        time:   [101.23 µs 106.11 µs 113.53 µs]
+                        change: [−6.7369% −1.1204% +4.3017%] (p = 0.72 > 0.05)
+                        No change in performance detected.
+Found 6 outliers among 50 measurements (12.00%)
+  1 (2.00%) high mild
+  5 (10.00%) high severe
+Benchmarking gaussian_fit/fit_gaussian_2d/31
+Benchmarking gaussian_fit/fit_gaussian_2d/31: Warming up for 3.0000 s
+Benchmarking gaussian_fit/fit_gaussian_2d/31: Collecting 50 samples in estimated 5.1302 s (20k iterations)
+Benchmarking gaussian_fit/fit_gaussian_2d/31: Analyzing
+gaussian_fit/fit_gaussian_2d/31
+                        time:   [250.56 µs 263.78 µs 290.38 µs]
+                        change: [−4.5198% +0.9261% +7.1268%] (p = 0.79 > 0.05)
+                        No change in performance detected.
+Found 6 outliers among 50 measurements (12.00%)
+  3 (6.00%) high mild
+  3 (6.00%) high severe
+
+Benchmarking moffat_fit/fit_moffat_2d_fixed_beta/15
+Benchmarking moffat_fit/fit_moffat_2d_fixed_beta/15: Warming up for 3.0000 s
+Benchmarking moffat_fit/fit_moffat_2d_fixed_beta/15: Collecting 50 samples in estimated 5.0069 s (245k iterations)
+Benchmarking moffat_fit/fit_moffat_2d_fixed_beta/15: Analyzing
+moffat_fit/fit_moffat_2d_fixed_beta/15
+                        time:   [20.296 µs 21.170 µs 22.559 µs]
+                        change: [−8.5859% −1.9350% +4.3907%] (p = 0.60 > 0.05)
+                        No change in performance detected.
+Found 3 outliers among 50 measurements (6.00%)
+  1 (2.00%) low mild
+  2 (4.00%) high severe
+Benchmarking moffat_fit/fit_moffat_2d_var_beta/15
+Benchmarking moffat_fit/fit_moffat_2d_var_beta/15: Warming up for 3.0000 s
+Benchmarking moffat_fit/fit_moffat_2d_var_beta/15: Collecting 50 samples in estimated 5.0410 s (54k iterations)
+Benchmarking moffat_fit/fit_moffat_2d_var_beta/15: Analyzing
+moffat_fit/fit_moffat_2d_var_beta/15
+                        time:   [93.569 µs 98.558 µs 105.59 µs]
+                        change: [−4.0632% +1.0267% +5.7738%] (p = 0.72 > 0.05)
+                        No change in performance detected.
+Found 7 outliers among 50 measurements (14.00%)
+  3 (6.00%) high mild
+  4 (8.00%) high severe
+Benchmarking moffat_fit/fit_moffat_2d_fixed_beta/21
+Benchmarking moffat_fit/fit_moffat_2d_fixed_beta/21: Warming up for 3.0000 s
+Benchmarking moffat_fit/fit_moffat_2d_fixed_beta/21: Collecting 50 samples in estimated 5.0042 s (128k iterations)
+Benchmarking moffat_fit/fit_moffat_2d_fixed_beta/21: Analyzing
+moffat_fit/fit_moffat_2d_fixed_beta/21
+                        time:   [39.184 µs 40.385 µs 42.197 µs]
+                        change: [−10.127% −3.3886% +3.6694%] (p = 0.38 > 0.05)
+                        No change in performance detected.
+Found 6 outliers among 50 measurements (12.00%)
+  1 (2.00%) high mild
+  5 (10.00%) high severe
+Benchmarking moffat_fit/fit_moffat_2d_var_beta/21
+Benchmarking moffat_fit/fit_moffat_2d_var_beta/21: Warming up for 3.0000 s
+Benchmarking moffat_fit/fit_moffat_2d_var_beta/21: Collecting 50 samples in estimated 5.0023 s (79k iterations)
+Benchmarking moffat_fit/fit_moffat_2d_var_beta/21: Analyzing
+moffat_fit/fit_moffat_2d_var_beta/21
+                        time:   [63.168 µs 65.202 µs 68.568 µs]
+Found 6 outliers among 50 measurements (12.00%)
+  2 (4.00%) high mild
+  4 (8.00%) high severe
+Benchmarking moffat_fit/fit_moffat_2d_fixed_beta/31
+Benchmarking moffat_fit/fit_moffat_2d_fixed_beta/31: Warming up for 3.0000 s
+Benchmarking moffat_fit/fit_moffat_2d_fixed_beta/31: Collecting 50 samples in estimated 5.0648 s (52k iterations)
+Benchmarking moffat_fit/fit_moffat_2d_fixed_beta/31: Analyzing
+moffat_fit/fit_moffat_2d_fixed_beta/31
+                        time:   [97.736 µs 102.03 µs 108.33 µs]
+Found 2 outliers among 50 measurements (4.00%)
+  2 (4.00%) high severe
+Benchmarking moffat_fit/fit_moffat_2d_var_beta/31
+Benchmarking moffat_fit/fit_moffat_2d_var_beta/31: Warming up for 3.0000 s
+Benchmarking moffat_fit/fit_moffat_2d_var_beta/31: Collecting 50 samples in estimated 5.0390 s (17k iterations)
+Benchmarking moffat_fit/fit_moffat_2d_var_beta/31: Analyzing
+moffat_fit/fit_moffat_2d_var_beta/31
+                        time:   [302.86 µs 314.40 µs 333.54 µs]
+Found 4 outliers among 50 measurements (8.00%)
+  4 (8.00%) high severe
+
+Benchmarking centroid_utils/compute_stamp_radius
+Benchmarking centroid_utils/compute_stamp_radius: Warming up for 3.0000 s
+Benchmarking centroid_utils/compute_stamp_radius: Collecting 100 samples in estimated 5.0000 s (230M iterations)
+Benchmarking centroid_utils/compute_stamp_radius: Analyzing
+centroid_utils/compute_stamp_radius
+                        time:   [21.993 ns 22.010 ns 22.024 ns]
+
+     Running benches/star_detection_convolution.rs (target/release/deps/star_detection_convolution-bffd57f058be2cba)
+Benchmarking gaussian_kernel/gaussian_kernel_1d/1
+Benchmarking gaussian_kernel/gaussian_kernel_1d/1: Warming up for 3.0000 s
+Benchmarking gaussian_kernel/gaussian_kernel_1d/1: Collecting 100 samples in estimated 5.0000 s (106M iterations)
+Benchmarking gaussian_kernel/gaussian_kernel_1d/1: Analyzing
+gaussian_kernel/gaussian_kernel_1d/1
+                        time:   [43.954 ns 45.193 ns 46.901 ns]
+Found 5 outliers among 100 measurements (5.00%)
+  5 (5.00%) high severe
+Benchmarking gaussian_kernel/gaussian_kernel_1d/2
+Benchmarking gaussian_kernel/gaussian_kernel_1d/2: Warming up for 3.0000 s
+Benchmarking gaussian_kernel/gaussian_kernel_1d/2: Collecting 100 samples in estimated 5.0002 s (84M iterations)
+Benchmarking gaussian_kernel/gaussian_kernel_1d/2: Analyzing
+gaussian_kernel/gaussian_kernel_1d/2
+                        time:   [59.801 ns 62.304 ns 65.571 ns]
+Found 14 outliers among 100 measurements (14.00%)
+  1 (1.00%) low severe
+  3 (3.00%) low mild
+  1 (1.00%) high mild
+  9 (9.00%) high severe
+Benchmarking gaussian_kernel/gaussian_kernel_1d/3
+Benchmarking gaussian_kernel/gaussian_kernel_1d/3: Warming up for 3.0000 s
+Benchmarking gaussian_kernel/gaussian_kernel_1d/3: Collecting 100 samples in estimated 5.0002 s (59M iterations)
+Benchmarking gaussian_kernel/gaussian_kernel_1d/3: Analyzing
+gaussian_kernel/gaussian_kernel_1d/3
+                        time:   [86.877 ns 88.878 ns 91.598 ns]
+Found 6 outliers among 100 measurements (6.00%)
+  1 (1.00%) high mild
+  5 (5.00%) high severe
+Benchmarking gaussian_kernel/gaussian_kernel_1d/4
+Benchmarking gaussian_kernel/gaussian_kernel_1d/4: Warming up for 3.0000 s
+Benchmarking gaussian_kernel/gaussian_kernel_1d/4: Collecting 100 samples in estimated 5.0002 s (49M iterations)
+Benchmarking gaussian_kernel/gaussian_kernel_1d/4: Analyzing
+gaussian_kernel/gaussian_kernel_1d/4
+                        time:   [102.71 ns 106.65 ns 111.65 ns]
+Found 11 outliers among 100 measurements (11.00%)
+  1 (1.00%) low severe
+  2 (2.00%) low mild
+  3 (3.00%) high mild
+  5 (5.00%) high severe
+Benchmarking gaussian_kernel/gaussian_kernel_1d/5
+Benchmarking gaussian_kernel/gaussian_kernel_1d/5: Warming up for 3.0000 s
+Benchmarking gaussian_kernel/gaussian_kernel_1d/5: Collecting 100 samples in estimated 5.0006 s (41M iterations)
+Benchmarking gaussian_kernel/gaussian_kernel_1d/5: Analyzing
+gaussian_kernel/gaussian_kernel_1d/5
+                        time:   [121.82 ns 125.31 ns 130.01 ns]
+Found 6 outliers among 100 measurements (6.00%)
+  1 (1.00%) low mild
+  5 (5.00%) high severe
+
+Benchmarking gaussian_convolve/256x256/sigma_1
+Benchmarking gaussian_convolve/256x256/sigma_1: Warming up for 3.0000 s
+Benchmarking gaussian_convolve/256x256/sigma_1: Collecting 20 samples in estimated 5.0113 s (31k iterations)
+Benchmarking gaussian_convolve/256x256/sigma_1: Analyzing
+gaussian_convolve/256x256/sigma_1
+                        time:   [159.65 µs 160.02 µs 160.32 µs]
+                        thrpt:  [408.77 Melem/s 409.54 Melem/s 410.49 Melem/s]
+Found 4 outliers among 20 measurements (20.00%)
+  1 (5.00%) low mild
+  1 (5.00%) high mild
+  2 (10.00%) high severe
+Benchmarking gaussian_convolve/256x256/sigma_2
+Benchmarking gaussian_convolve/256x256/sigma_2: Warming up for 3.0000 s
+Benchmarking gaussian_convolve/256x256/sigma_2: Collecting 20 samples in estimated 5.0159 s (19k iterations)
+Benchmarking gaussian_convolve/256x256/sigma_2: Analyzing
+gaussian_convolve/256x256/sigma_2
+                        time:   [242.33 µs 243.00 µs 243.90 µs]
+                        thrpt:  [268.70 Melem/s 269.69 Melem/s 270.44 Melem/s]
+Found 2 outliers among 20 measurements (10.00%)
+  2 (10.00%) high severe
+Benchmarking gaussian_convolve/256x256/sigma_3
+Benchmarking gaussian_convolve/256x256/sigma_3: Warming up for 3.0000 s
+Benchmarking gaussian_convolve/256x256/sigma_3: Collecting 20 samples in estimated 5.0633 s (13k iterations)
+Benchmarking gaussian_convolve/256x256/sigma_3: Analyzing
+gaussian_convolve/256x256/sigma_3
+                        time:   [327.10 µs 328.41 µs 329.69 µs]
+                        thrpt:  [198.78 Melem/s 199.55 Melem/s 200.35 Melem/s]
+Found 1 outliers among 20 measurements (5.00%)
+  1 (5.00%) high mild
+Benchmarking gaussian_convolve/512x512/sigma_1
+Benchmarking gaussian_convolve/512x512/sigma_1: Warming up for 3.0000 s
+Benchmarking gaussian_convolve/512x512/sigma_1: Collecting 20 samples in estimated 5.0118 s (11k iterations)
+Benchmarking gaussian_convolve/512x512/sigma_1: Analyzing
+gaussian_convolve/512x512/sigma_1
+                        time:   [463.41 µs 502.70 µs 584.71 µs]
+                        thrpt:  [448.33 Melem/s 521.48 Melem/s 565.69 Melem/s]
+Found 1 outliers among 20 measurements (5.00%)
+  1 (5.00%) high severe
+Benchmarking gaussian_convolve/512x512/sigma_2
+Benchmarking gaussian_convolve/512x512/sigma_2: Warming up for 3.0000 s
+Benchmarking gaussian_convolve/512x512/sigma_2: Collecting 20 samples in estimated 5.0512 s (6720 iterations)
+Benchmarking gaussian_convolve/512x512/sigma_2: Analyzing
+gaussian_convolve/512x512/sigma_2
+                        time:   [741.19 µs 816.40 µs 966.69 µs]
+                        thrpt:  [271.18 Melem/s 321.10 Melem/s 353.68 Melem/s]
+Found 4 outliers among 20 measurements (20.00%)
+  1 (5.00%) low mild
+  2 (10.00%) high mild
+  1 (5.00%) high severe
+Benchmarking gaussian_convolve/512x512/sigma_3
+Benchmarking gaussian_convolve/512x512/sigma_3: Warming up for 3.0000 s
+Benchmarking gaussian_convolve/512x512/sigma_3: Collecting 20 samples in estimated 5.0130 s (4620 iterations)
+Benchmarking gaussian_convolve/512x512/sigma_3: Analyzing
+gaussian_convolve/512x512/sigma_3
+                        time:   [1.0688 ms 1.1669 ms 1.3738 ms]
+                        thrpt:  [190.82 Melem/s 224.66 Melem/s 245.28 Melem/s]
+Found 1 outliers among 20 measurements (5.00%)
+  1 (5.00%) high severe
+Benchmarking gaussian_convolve/1024x1024/sigma_1
+Benchmarking gaussian_convolve/1024x1024/sigma_1: Warming up for 3.0000 s
+Benchmarking gaussian_convolve/1024x1024/sigma_1: Collecting 20 samples in estimated 5.9393 s (1050 iterations)
+Benchmarking gaussian_convolve/1024x1024/sigma_1: Analyzing
+gaussian_convolve/1024x1024/sigma_1
+                        time:   [5.5754 ms 5.8391 ms 6.3239 ms]
+                        thrpt:  [165.81 Melem/s 179.58 Melem/s 188.07 Melem/s]
+Found 1 outliers among 20 measurements (5.00%)
+  1 (5.00%) high severe
+Benchmarking gaussian_convolve/1024x1024/sigma_2
+Benchmarking gaussian_convolve/1024x1024/sigma_2: Warming up for 3.0000 s
+Benchmarking gaussian_convolve/1024x1024/sigma_2: Collecting 20 samples in estimated 5.7694 s (840 iterations)
+Benchmarking gaussian_convolve/1024x1024/sigma_2: Analyzing
+gaussian_convolve/1024x1024/sigma_2
+                        time:   [6.6148 ms 6.7006 ms 6.8212 ms]
+                        thrpt:  [153.72 Melem/s 156.49 Melem/s 158.52 Melem/s]
+Benchmarking gaussian_convolve/1024x1024/sigma_3
+Benchmarking gaussian_convolve/1024x1024/sigma_3: Warming up for 3.0000 s
+Benchmarking gaussian_convolve/1024x1024/sigma_3: Collecting 20 samples in estimated 6.5456 s (840 iterations)
+Benchmarking gaussian_convolve/1024x1024/sigma_3: Analyzing
+gaussian_convolve/1024x1024/sigma_3
+                        time:   [7.6251 ms 8.2711 ms 9.4016 ms]
+                        thrpt:  [111.53 Melem/s 126.78 Melem/s 137.52 Melem/s]
+Found 2 outliers among 20 measurements (10.00%)
+  1 (5.00%) high mild
+  1 (5.00%) high severe
+Benchmarking gaussian_convolve/2048x2048/sigma_1
+Benchmarking gaussian_convolve/2048x2048/sigma_1: Warming up for 3.0000 s
+Benchmarking gaussian_convolve/2048x2048/sigma_1: Collecting 20 samples in estimated 5.9518 s (420 iterations)
+Benchmarking gaussian_convolve/2048x2048/sigma_1: Analyzing
+gaussian_convolve/2048x2048/sigma_1
+                        time:   [14.186 ms 15.054 ms 16.378 ms]
+                        thrpt:  [256.10 Melem/s 278.62 Melem/s 295.67 Melem/s]
+Found 3 outliers among 20 measurements (15.00%)
+  1 (5.00%) high mild
+  2 (10.00%) high severe
+Benchmarking gaussian_convolve/2048x2048/sigma_2
+Benchmarking gaussian_convolve/2048x2048/sigma_2: Warming up for 3.0000 s
+Benchmarking gaussian_convolve/2048x2048/sigma_2: Collecting 20 samples in estimated 8.5645 s (420 iterations)
+Benchmarking gaussian_convolve/2048x2048/sigma_2: Analyzing
+gaussian_convolve/2048x2048/sigma_2
+                        time:   [20.494 ms 21.243 ms 22.811 ms]
+                        thrpt:  [183.87 Melem/s 197.45 Melem/s 204.66 Melem/s]
+Found 6 outliers among 20 measurements (30.00%)
+  1 (5.00%) low severe
+  2 (10.00%) low mild
+  1 (5.00%) high mild
+  2 (10.00%) high severe
+Benchmarking gaussian_convolve/2048x2048/sigma_3
+Benchmarking gaussian_convolve/2048x2048/sigma_3: Warming up for 3.0000 s
+
+Warning: Unable to complete 20 samples in 5.0s. You may wish to increase target time to 5.8s, enable flat sampling, or reduce sample count to 10.
+Benchmarking gaussian_convolve/2048x2048/sigma_3: Collecting 20 samples in estimated 5.8359 s (210 iterations)
+Benchmarking gaussian_convolve/2048x2048/sigma_3: Analyzing
+gaussian_convolve/2048x2048/sigma_3
+                        time:   [24.283 ms 24.479 ms 24.716 ms]
+                        thrpt:  [169.70 Melem/s 171.34 Melem/s 172.73 Melem/s]
+
+Benchmarking matched_filter/512x512/fwhm_3
+Benchmarking matched_filter/512x512/fwhm_3: Warming up for 3.0000 s
+Benchmarking matched_filter/512x512/fwhm_3: Collecting 20 samples in estimated 5.0559 s (6510 iterations)
+Benchmarking matched_filter/512x512/fwhm_3: Analyzing
+matched_filter/512x512/fwhm_3
+                        time:   [936.85 µs 958.31 µs 977.39 µs]
+                        thrpt:  [268.21 Melem/s 273.55 Melem/s 279.81 Melem/s]
+Found 1 outliers among 20 measurements (5.00%)
+  1 (5.00%) high mild
+Benchmarking matched_filter/512x512/fwhm_4
+Benchmarking matched_filter/512x512/fwhm_4: Warming up for 3.0000 s
+Benchmarking matched_filter/512x512/fwhm_4: Collecting 20 samples in estimated 5.1192 s (3780 iterations)
+Benchmarking matched_filter/512x512/fwhm_4: Analyzing
+matched_filter/512x512/fwhm_4
+                        time:   [1.2727 ms 1.2984 ms 1.3373 ms]
+                        thrpt:  [196.03 Melem/s 201.90 Melem/s 205.97 Melem/s]
+Found 1 outliers among 20 measurements (5.00%)
+  1 (5.00%) high mild
+Benchmarking matched_filter/512x512/fwhm_5
+Benchmarking matched_filter/512x512/fwhm_5: Warming up for 3.0000 s
+Benchmarking matched_filter/512x512/fwhm_5: Collecting 20 samples in estimated 5.0365 s (3150 iterations)
+Benchmarking matched_filter/512x512/fwhm_5: Analyzing
+matched_filter/512x512/fwhm_5
+                        time:   [1.4038 ms 1.4413 ms 1.4714 ms]
+                        thrpt:  [178.16 Melem/s 181.87 Melem/s 186.74 Melem/s]
+Found 4 outliers among 20 measurements (20.00%)
+  1 (5.00%) low mild
+  1 (5.00%) high mild
+  2 (10.00%) high severe
+Benchmarking matched_filter/1024x1024/fwhm_3
+Benchmarking matched_filter/1024x1024/fwhm_3: Warming up for 3.0000 s
+Benchmarking matched_filter/1024x1024/fwhm_3: Collecting 20 samples in estimated 5.7857 s (1260 iterations)
+Benchmarking matched_filter/1024x1024/fwhm_3: Analyzing
+matched_filter/1024x1024/fwhm_3
+                        time:   [4.0479 ms 4.1080 ms 4.1927 ms]
+                        thrpt:  [250.10 Melem/s 255.25 Melem/s 259.04 Melem/s]
+Found 3 outliers among 20 measurements (15.00%)
+  3 (15.00%) high severe
+Benchmarking matched_filter/1024x1024/fwhm_4
+Benchmarking matched_filter/1024x1024/fwhm_4: Warming up for 3.0000 s
+Benchmarking matched_filter/1024x1024/fwhm_4: Collecting 20 samples in estimated 5.1318 s (840 iterations)
+Benchmarking matched_filter/1024x1024/fwhm_4: Analyzing
+matched_filter/1024x1024/fwhm_4
+                        time:   [6.0369 ms 6.1319 ms 6.2501 ms]
+                        thrpt:  [167.77 Melem/s 171.00 Melem/s 173.69 Melem/s]
+Benchmarking matched_filter/1024x1024/fwhm_5
+Benchmarking matched_filter/1024x1024/fwhm_5: Warming up for 3.0000 s
+Benchmarking matched_filter/1024x1024/fwhm_5: Collecting 20 samples in estimated 6.3005 s (840 iterations)
+Benchmarking matched_filter/1024x1024/fwhm_5: Analyzing
+matched_filter/1024x1024/fwhm_5
+                        time:   [7.1078 ms 7.2513 ms 7.3930 ms]
+                        thrpt:  [141.83 Melem/s 144.61 Melem/s 147.52 Melem/s]
+Found 2 outliers among 20 measurements (10.00%)
+  1 (5.00%) low mild
+  1 (5.00%) high mild
+Benchmarking matched_filter/2048x2048/fwhm_3
+Benchmarking matched_filter/2048x2048/fwhm_3: Warming up for 3.0000 s
+
+Warning: Unable to complete 20 samples in 5.0s. You may wish to increase target time to 5.7s, enable flat sampling, or reduce sample count to 10.
+Benchmarking matched_filter/2048x2048/fwhm_3: Collecting 20 samples in estimated 5.7329 s (210 iterations)
+Benchmarking matched_filter/2048x2048/fwhm_3: Analyzing
+matched_filter/2048x2048/fwhm_3
+                        time:   [21.106 ms 21.952 ms 23.589 ms]
+                        thrpt:  [177.81 Melem/s 191.07 Melem/s 198.72 Melem/s]
+Benchmarking matched_filter/2048x2048/fwhm_4
+Benchmarking matched_filter/2048x2048/fwhm_4: Warming up for 3.0000 s
+
+Warning: Unable to complete 20 samples in 5.0s. You may wish to increase target time to 5.2s, enable flat sampling, or reduce sample count to 10.
+Benchmarking matched_filter/2048x2048/fwhm_4: Collecting 20 samples in estimated 5.1703 s (210 iterations)
+Benchmarking matched_filter/2048x2048/fwhm_4: Analyzing
+matched_filter/2048x2048/fwhm_4
+                        time:   [24.433 ms 24.569 ms 24.754 ms]
+                        thrpt:  [169.44 Melem/s 170.72 Melem/s 171.67 Melem/s]
+Benchmarking matched_filter/2048x2048/fwhm_5
+Benchmarking matched_filter/2048x2048/fwhm_5: Warming up for 3.0000 s
+
+Warning: Unable to complete 20 samples in 5.0s. You may wish to increase target time to 5.4s, enable flat sampling, or reduce sample count to 10.
+Benchmarking matched_filter/2048x2048/fwhm_5: Collecting 20 samples in estimated 5.3588 s (210 iterations)
+Benchmarking matched_filter/2048x2048/fwhm_5: Analyzing
+matched_filter/2048x2048/fwhm_5
+                        time:   [25.691 ms 26.083 ms 26.838 ms]
+                        thrpt:  [156.28 Melem/s 160.81 Melem/s 163.26 Melem/s]
+Found 4 outliers among 20 measurements (20.00%)
+  4 (20.00%) high severe
+
+Benchmarking convolution_utils/fwhm_to_sigma
+Benchmarking convolution_utils/fwhm_to_sigma: Warming up for 3.0000 s
+Benchmarking convolution_utils/fwhm_to_sigma: Collecting 100 samples in estimated 5.0000 s (715M iterations)
+Benchmarking convolution_utils/fwhm_to_sigma: Analyzing
+convolution_utils/fwhm_to_sigma
+                        time:   [6.4788 ns 6.4874 ns 6.4952 ns]
+
+Benchmarking convolution_simd_vs_scalar/convolve_row_scalar/256
+Benchmarking convolution_simd_vs_scalar/convolve_row_scalar/256: Warming up for 3.0000 s
+Benchmarking convolution_simd_vs_scalar/convolve_row_scalar/256: Collecting 50 samples in estimated 5.0037 s (1.4M iterations)
+Benchmarking convolution_simd_vs_scalar/convolve_row_scalar/256: Analyzing
+convolution_simd_vs_scalar/convolve_row_scalar/256
+                        time:   [3.4149 µs 3.4181 µs 3.4221 µs]
+                        thrpt:  [74.807 Melem/s 74.895 Melem/s 74.965 Melem/s]
+Found 1 outliers among 50 measurements (2.00%)
+  1 (2.00%) high mild
+Benchmarking convolution_simd_vs_scalar/convolve_row_simd/256
+Benchmarking convolution_simd_vs_scalar/convolve_row_simd/256: Warming up for 3.0000 s
+Benchmarking convolution_simd_vs_scalar/convolve_row_simd/256: Collecting 50 samples in estimated 5.0003 s (18M iterations)
+Benchmarking convolution_simd_vs_scalar/convolve_row_simd/256: Analyzing
+convolution_simd_vs_scalar/convolve_row_simd/256
+                        time:   [263.52 ns 263.92 ns 264.34 ns]
+                        thrpt:  [968.46 Melem/s 969.99 Melem/s 971.47 Melem/s]
+Benchmarking convolution_simd_vs_scalar/convolve_row_scalar/512
+Benchmarking convolution_simd_vs_scalar/convolve_row_scalar/512: Warming up for 3.0000 s
+Benchmarking convolution_simd_vs_scalar/convolve_row_scalar/512: Collecting 50 samples in estimated 5.0032 s (708k iterations)
+Benchmarking convolution_simd_vs_scalar/convolve_row_scalar/512: Analyzing
+convolution_simd_vs_scalar/convolve_row_scalar/512
+                        time:   [6.5154 µs 6.5223 µs 6.5316 µs]
+                        thrpt:  [78.388 Melem/s 78.500 Melem/s 78.583 Melem/s]
+Found 3 outliers among 50 measurements (6.00%)
+  3 (6.00%) high mild
+Benchmarking convolution_simd_vs_scalar/convolve_row_simd/512
+Benchmarking convolution_simd_vs_scalar/convolve_row_simd/512: Warming up for 3.0000 s
+Benchmarking convolution_simd_vs_scalar/convolve_row_simd/512: Collecting 50 samples in estimated 5.0002 s (13M iterations)
+Benchmarking convolution_simd_vs_scalar/convolve_row_simd/512: Analyzing
+convolution_simd_vs_scalar/convolve_row_simd/512
+                        time:   [388.36 ns 389.05 ns 389.71 ns]
+                        thrpt:  [1.3138 Gelem/s 1.3160 Gelem/s 1.3184 Gelem/s]
+Found 2 outliers among 50 measurements (4.00%)
+  1 (2.00%) high mild
+  1 (2.00%) high severe
+Benchmarking convolution_simd_vs_scalar/convolve_row_scalar/1024
+Benchmarking convolution_simd_vs_scalar/convolve_row_scalar/1024: Warming up for 3.0000 s
+Benchmarking convolution_simd_vs_scalar/convolve_row_scalar/1024: Collecting 50 samples in estimated 5.0134 s (389k iterations)
+Benchmarking convolution_simd_vs_scalar/convolve_row_scalar/1024: Analyzing
+convolution_simd_vs_scalar/convolve_row_scalar/1024
+                        time:   [12.805 µs 12.814 µs 12.826 µs]
+                        thrpt:  [79.836 Melem/s 79.911 Melem/s 79.969 Melem/s]
+Found 4 outliers among 50 measurements (8.00%)
+  4 (8.00%) high mild
+Benchmarking convolution_simd_vs_scalar/convolve_row_simd/1024
+Benchmarking convolution_simd_vs_scalar/convolve_row_simd/1024: Warming up for 3.0000 s
+Benchmarking convolution_simd_vs_scalar/convolve_row_simd/1024: Collecting 50 samples in estimated 5.0008 s (7.9M iterations)
+Benchmarking convolution_simd_vs_scalar/convolve_row_simd/1024: Analyzing
+convolution_simd_vs_scalar/convolve_row_simd/1024
+                        time:   [629.80 ns 630.74 ns 631.75 ns]
+                        thrpt:  [1.6209 Gelem/s 1.6235 Gelem/s 1.6259 Gelem/s]
+Found 3 outliers among 50 measurements (6.00%)
+  1 (2.00%) high mild
+  2 (4.00%) high severe
+Benchmarking convolution_simd_vs_scalar/convolve_row_scalar/2048
+Benchmarking convolution_simd_vs_scalar/convolve_row_scalar/2048: Warming up for 3.0000 s
+Benchmarking convolution_simd_vs_scalar/convolve_row_scalar/2048: Collecting 50 samples in estimated 5.0301 s (201k iterations)
+Benchmarking convolution_simd_vs_scalar/convolve_row_scalar/2048: Analyzing
+convolution_simd_vs_scalar/convolve_row_scalar/2048
+                        time:   [24.944 µs 24.954 µs 24.966 µs]
+                        thrpt:  [82.032 Melem/s 82.070 Melem/s 82.103 Melem/s]
+Found 5 outliers among 50 measurements (10.00%)
+  3 (6.00%) high mild
+  2 (4.00%) high severe
+Benchmarking convolution_simd_vs_scalar/convolve_row_simd/2048
+Benchmarking convolution_simd_vs_scalar/convolve_row_simd/2048: Warming up for 3.0000 s
+Benchmarking convolution_simd_vs_scalar/convolve_row_simd/2048: Collecting 50 samples in estimated 5.0015 s (2.8M iterations)
+Benchmarking convolution_simd_vs_scalar/convolve_row_simd/2048: Analyzing
+convolution_simd_vs_scalar/convolve_row_simd/2048
+                        time:   [1.7702 µs 1.7709 µs 1.7717 µs]
+                        thrpt:  [1.1560 Gelem/s 1.1564 Gelem/s 1.1569 Gelem/s]
+Found 8 outliers among 50 measurements (16.00%)
+  2 (4.00%) low mild
+  2 (4.00%) high mild
+  4 (8.00%) high severe
+
+     Running benches/star_detection_cosmic_ray.rs (target/release/deps/star_detection_cosmic_ray-cd3221feaeb758a6)
+Benchmarking cosmic_ray_laplacian/compute_laplacian/512x512
+Benchmarking cosmic_ray_laplacian/compute_laplacian/512x512: Warming up for 3.0000 s
+Benchmarking cosmic_ray_laplacian/compute_laplacian/512x512: Collecting 30 samples in estimated 5.0210 s (78k iterations)
+Benchmarking cosmic_ray_laplacian/compute_laplacian/512x512: Analyzing
+cosmic_ray_laplacian/compute_laplacian/512x512
+                        time:   [64.502 µs 64.533 µs 64.562 µs]
+                        thrpt:  [4.0604 Gelem/s 4.0622 Gelem/s 4.0641 Gelem/s]
+                 change:
+                        time:   [+0.1445% +0.7241% +1.3216%] (p = 0.02 < 0.05)
+                        thrpt:  [−1.3043% −0.7189% −0.1443%]
+                        Change within noise threshold.
+Found 9 outliers among 30 measurements (30.00%)
+  5 (16.67%) low severe
+  2 (6.67%) high mild
+  2 (6.67%) high severe
+Benchmarking cosmic_ray_laplacian/compute_laplacian/1024x1024
+Benchmarking cosmic_ray_laplacian/compute_laplacian/1024x1024: Warming up for 3.0000 s
+Benchmarking cosmic_ray_laplacian/compute_laplacian/1024x1024: Collecting 30 samples in estimated 5.0497 s (17k iterations)
+Benchmarking cosmic_ray_laplacian/compute_laplacian/1024x1024: Analyzing
+cosmic_ray_laplacian/compute_laplacian/1024x1024
+                        time:   [302.06 µs 304.29 µs 306.75 µs]
+                        thrpt:  [3.4183 Gelem/s 3.4459 Gelem/s 3.4714 Gelem/s]
+                 change:
+                        time:   [−0.9764% −0.3789% +0.2223%] (p = 0.25 > 0.05)
+                        thrpt:  [−0.2218% +0.3803% +0.9860%]
+                        No change in performance detected.
+Found 5 outliers among 30 measurements (16.67%)
+  2 (6.67%) low mild
+  2 (6.67%) high mild
+  1 (3.33%) high severe
+Benchmarking cosmic_ray_laplacian/compute_laplacian/2048x2048
+Benchmarking cosmic_ray_laplacian/compute_laplacian/2048x2048: Warming up for 3.0000 s
+Benchmarking cosmic_ray_laplacian/compute_laplacian/2048x2048: Collecting 30 samples in estimated 5.2913 s (2790 iterations)
+Benchmarking cosmic_ray_laplacian/compute_laplacian/2048x2048: Analyzing
+cosmic_ray_laplacian/compute_laplacian/2048x2048
+                        time:   [1.8986 ms 1.9055 ms 1.9122 ms]
+                        thrpt:  [2.1934 Gelem/s 2.2011 Gelem/s 2.2092 Gelem/s]
+                 change:
+                        time:   [−0.0131% +1.4604% +3.4066%] (p = 0.10 > 0.05)
+                        thrpt:  [−3.2944% −1.4394% +0.0131%]
+                        No change in performance detected.
+Found 5 outliers among 30 measurements (16.67%)
+  2 (6.67%) high mild
+  3 (10.00%) high severe
+
+Benchmarking cosmic_ray_simd_vs_scalar/scalar/512x512
+Benchmarking cosmic_ray_simd_vs_scalar/scalar/512x512: Warming up for 3.0000 s
+Benchmarking cosmic_ray_simd_vs_scalar/scalar/512x512: Collecting 30 samples in estimated 5.1359 s (13k iterations)
+Benchmarking cosmic_ray_simd_vs_scalar/scalar/512x512: Analyzing
+cosmic_ray_simd_vs_scalar/scalar/512x512
+                        time:   [405.66 µs 405.86 µs 406.13 µs]
+                        thrpt:  [645.47 Melem/s 645.89 Melem/s 646.22 Melem/s]
+                 change:
+                        time:   [−34.565% −27.819% −20.876%] (p = 0.00 < 0.05)
+                        thrpt:  [+26.384% +38.540% +52.823%]
+                        Performance has improved.
+Found 5 outliers among 30 measurements (16.67%)
+  1 (3.33%) high mild
+  4 (13.33%) high severe
+Benchmarking cosmic_ray_simd_vs_scalar/simd/512x512
+Benchmarking cosmic_ray_simd_vs_scalar/simd/512x512: Warming up for 3.0000 s
+Benchmarking cosmic_ray_simd_vs_scalar/simd/512x512: Collecting 30 samples in estimated 5.0194 s (92k iterations)
+Benchmarking cosmic_ray_simd_vs_scalar/simd/512x512: Analyzing
+cosmic_ray_simd_vs_scalar/simd/512x512
+                        time:   [55.992 µs 56.026 µs 56.061 µs]
+                        thrpt:  [4.6761 Gelem/s 4.6790 Gelem/s 4.6818 Gelem/s]
+                 change:
+                        time:   [−0.9796% −0.2971% +0.3877%] (p = 0.41 > 0.05)
+                        thrpt:  [−0.3862% +0.2980% +0.9893%]
+                        No change in performance detected.
+Found 5 outliers among 30 measurements (16.67%)
+  4 (13.33%) low severe
+  1 (3.33%) high severe
+Benchmarking cosmic_ray_simd_vs_scalar/scalar/1024x1024
+Benchmarking cosmic_ray_simd_vs_scalar/scalar/1024x1024: Warming up for 3.0000 s
+Benchmarking cosmic_ray_simd_vs_scalar/scalar/1024x1024: Collecting 30 samples in estimated 5.4261 s (3255 iterations)
+Benchmarking cosmic_ray_simd_vs_scalar/scalar/1024x1024: Analyzing
+cosmic_ray_simd_vs_scalar/scalar/1024x1024
+                        time:   [1.6050 ms 1.6057 ms 1.6065 ms]
+                        thrpt:  [652.69 Melem/s 653.02 Melem/s 653.32 Melem/s]
+                 change:
+                        time:   [−61.972% −61.278% −60.631%] (p = 0.00 < 0.05)
+                        thrpt:  [+154.01% +158.25% +162.96%]
+                        Performance has improved.
+Found 6 outliers among 30 measurements (20.00%)
+  1 (3.33%) high mild
+  5 (16.67%) high severe
+Benchmarking cosmic_ray_simd_vs_scalar/simd/1024x1024
+Benchmarking cosmic_ray_simd_vs_scalar/simd/1024x1024: Warming up for 3.0000 s
+Benchmarking cosmic_ray_simd_vs_scalar/simd/1024x1024: Collecting 30 samples in estimated 5.0123 s (17k iterations)
+Benchmarking cosmic_ray_simd_vs_scalar/simd/1024x1024: Analyzing
+cosmic_ray_simd_vs_scalar/simd/1024x1024
+                        time:   [297.30 µs 297.48 µs 297.68 µs]
+                        thrpt:  [3.5225 Gelem/s 3.5249 Gelem/s 3.5269 Gelem/s]
+                 change:
+                        time:   [−38.544% −37.909% −37.159%] (p = 0.00 < 0.05)
+                        thrpt:  [+59.133% +61.053% +62.717%]
+                        Performance has improved.
+Found 5 outliers among 30 measurements (16.67%)
+  2 (6.67%) low severe
+  1 (3.33%) low mild
+  1 (3.33%) high mild
+  1 (3.33%) high severe
+Benchmarking cosmic_ray_simd_vs_scalar/scalar/2048x2048
+Benchmarking cosmic_ray_simd_vs_scalar/scalar/2048x2048: Warming up for 3.0000 s
+Benchmarking cosmic_ray_simd_vs_scalar/scalar/2048x2048: Collecting 30 samples in estimated 6.6227 s (930 iterations)
+Benchmarking cosmic_ray_simd_vs_scalar/scalar/2048x2048: Analyzing
+cosmic_ray_simd_vs_scalar/scalar/2048x2048
+                        time:   [7.0659 ms 7.0685 ms 7.0722 ms]
+                        thrpt:  [593.07 Melem/s 593.38 Melem/s 593.60 Melem/s]
+                 change:
+                        time:   [−58.864% −58.111% −57.321%] (p = 0.00 < 0.05)
+                        thrpt:  [+134.31% +138.73% +143.10%]
+                        Performance has improved.
+Found 6 outliers among 30 measurements (20.00%)
+  1 (3.33%) high mild
+  5 (16.67%) high severe
+Benchmarking cosmic_ray_simd_vs_scalar/simd/2048x2048
+Benchmarking cosmic_ray_simd_vs_scalar/simd/2048x2048: Warming up for 3.0000 s
+Benchmarking cosmic_ray_simd_vs_scalar/simd/2048x2048: Collecting 30 samples in estimated 5.4533 s (2325 iterations)
+Benchmarking cosmic_ray_simd_vs_scalar/simd/2048x2048: Analyzing
+cosmic_ray_simd_vs_scalar/simd/2048x2048
+                        time:   [2.3393 ms 2.3404 ms 2.3417 ms]
+                        thrpt:  [1.7911 Gelem/s 1.7921 Gelem/s 1.7930 Gelem/s]
+                 change:
+                        time:   [−27.695% −27.215% −26.617%] (p = 0.00 < 0.05)
+                        thrpt:  [+36.271% +37.391% +38.303%]
+                        Performance has improved.
+Found 4 outliers among 30 measurements (13.33%)
+  1 (3.33%) high mild
+  3 (10.00%) high severe
+
+Benchmarking cosmic_ray_detect/detect_cosmic_rays/512x512
+Benchmarking cosmic_ray_detect/detect_cosmic_rays/512x512: Warming up for 3.0000 s
+Benchmarking cosmic_ray_detect/detect_cosmic_rays/512x512: Collecting 20 samples in estimated 5.6054 s (1680 iterations)
+Benchmarking cosmic_ray_detect/detect_cosmic_rays/512x512: Analyzing
+cosmic_ray_detect/detect_cosmic_rays/512x512
+                        time:   [3.3331 ms 3.3396 ms 3.3454 ms]
+                        thrpt:  [78.360 Melem/s 78.496 Melem/s 78.648 Melem/s]
+                 change:
+                        time:   [−59.400% −59.073% −58.671%] (p = 0.00 < 0.05)
+                        thrpt:  [+141.96% +144.34% +146.31%]
+                        Performance has improved.
+Found 2 outliers among 20 measurements (10.00%)
+  1 (5.00%) high mild
+  1 (5.00%) high severe
+Benchmarking cosmic_ray_detect/detect_cosmic_rays/1024x1024
+Benchmarking cosmic_ray_detect/detect_cosmic_rays/1024x1024: Warming up for 3.0000 s
+Benchmarking cosmic_ray_detect/detect_cosmic_rays/1024x1024: Collecting 20 samples in estimated 5.9076 s (420 iterations)
+Benchmarking cosmic_ray_detect/detect_cosmic_rays/1024x1024: Analyzing
+cosmic_ray_detect/detect_cosmic_rays/1024x1024
+                        time:   [14.014 ms 14.072 ms 14.141 ms]
+                        thrpt:  [74.150 Melem/s 74.516 Melem/s 74.825 Melem/s]
+                 change:
+                        time:   [−58.779% −58.458% −58.127%] (p = 0.00 < 0.05)
+                        thrpt:  [+138.82% +140.72% +142.59%]
+                        Performance has improved.
+Found 3 outliers among 20 measurements (15.00%)
+  2 (10.00%) high mild
+  1 (5.00%) high severe
+Benchmarking cosmic_ray_detect/detect_cosmic_rays/2048x2048
+Benchmarking cosmic_ray_detect/detect_cosmic_rays/2048x2048: Warming up for 3.0000 s
+Benchmarking cosmic_ray_detect/detect_cosmic_rays/2048x2048: Collecting 20 samples in estimated 5.1287 s (80 iterations)
+Benchmarking cosmic_ray_detect/detect_cosmic_rays/2048x2048: Analyzing
+cosmic_ray_detect/detect_cosmic_rays/2048x2048
+                        time:   [63.611 ms 63.756 ms 63.927 ms]
+                        thrpt:  [65.611 Melem/s 65.787 Melem/s 65.937 Melem/s]
+Found 3 outliers among 20 measurements (15.00%)
+  2 (10.00%) high mild
+  1 (5.00%) high severe
+
+     Running benches/star_detection_deblend.rs (target/release/deps/star_detection_deblend-a126fb3c835db5e2)
+Benchmarking deblend_local_maxima/local_maxima/10pairs_sep15
+Benchmarking deblend_local_maxima/local_maxima/10pairs_sep15: Warming up for 3.0000 s
+Benchmarking deblend_local_maxima/local_maxima/10pairs_sep15: Collecting 50 samples in estimated 5.0042 s (214k iterations)
+Benchmarking deblend_local_maxima/local_maxima/10pairs_sep15: Analyzing
+deblend_local_maxima/local_maxima/10pairs_sep15
+                        time:   [23.344 µs 23.355 µs 23.366 µs]
+                        thrpt:  [427.97 Kelem/s 428.18 Kelem/s 428.38 Kelem/s]
+                 change:
+                        time:   [−49.947% −48.792% −47.566%] (p = 0.00 < 0.05)
+                        thrpt:  [+90.715% +95.282% +99.790%]
+                        Performance has improved.
+Found 9 outliers among 50 measurements (18.00%)
+  2 (4.00%) high mild
+  7 (14.00%) high severe
+Benchmarking deblend_local_maxima/local_maxima/50pairs_sep12
+Benchmarking deblend_local_maxima/local_maxima/50pairs_sep12: Warming up for 3.0000 s
+Benchmarking deblend_local_maxima/local_maxima/50pairs_sep12: Collecting 50 samples in estimated 5.0397 s (41k iterations)
