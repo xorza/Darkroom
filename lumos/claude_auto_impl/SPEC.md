@@ -254,11 +254,30 @@ with tests and running verification commands per project conventions.
 
 ## Phase 4: Quality & Polish [PARTIAL]
 
-### 4.1 Real-time Preview
-- [ ] Design live stacking API (incremental updates)
-- [ ] Implement streaming accumulator for real-time display
-- [ ] Add quality metrics streaming
-- [ ] Write integration tests
+### 4.1 Real-time Preview [COMPLETE]
+- [x] Design live stacking API (incremental updates)
+- [x] Implement streaming accumulator for real-time display
+- [x] Add quality metrics streaming
+- [x] Write integration tests
+
+**Implementation** (2026-01-27): Created `src/stacking/live.rs` with:
+- `LiveStackConfig` - Configuration (mode, normalize, preview_channel, track_variance)
+- `LiveStackMode` - RunningMean, WeightedMean, RollingSigmaClip{window_size, sigma}
+- `LiveFrameQuality` - Per-frame metrics (SNR, FWHM, eccentricity, noise, star_count)
+- `LiveStackStats` - Accumulated stats (frame_count, total_weight, mean_*, snr_improvement)
+- `LiveStackAccumulator` - Main accumulator with:
+  - `new()` - Create with width, height, channels, config
+  - `add_frame()` - Add frame with quality metrics, returns updated stats
+  - `preview()` - Get current stack as AstroImage (O(pixels) for mean modes)
+  - `finalize()` - Consume accumulator and return final result
+  - `reset()` - Reset to initial state
+- `LiveStackResult` - Final result with image and stats
+- `LiveQualityStream` - Streaming quality metrics for real-time UI
+  - `update()` - Update with new frame quality and stack stats
+  - `snr_trend()` - Returns positive (improving) or negative (degrading) trend
+- O(1) memory overhead for RunningMean/WeightedMean modes
+- O(N×pixels) memory for RollingSigmaClip mode with rolling window
+- 14 unit tests passing
 
 ### 4.2 Code Quality
 - [ ] Review and update all NOTES-AI.md files
@@ -289,8 +308,8 @@ cargo bench -p lumos --features bench --bench <name> | tee benches/<name>_result
 | Local Normalization | 5 | 5 | **Complete** |
 | GPU Acceleration | 12 | 12 | **Complete** (warping done, FFT skipped, sigma clip done, star detection done, batch pipeline done + benchmarked) |
 | Advanced Features | 14 | 14 | **Complete** (Comet stacking complete, session quality done, session-aware normalization done, session-weighted integration done, gradient removal done, radial distortion done, tangential distortion done, field curvature done) |
-| Quality & Polish | 4 | 0 | Not Started |
-| **Total** | **35** | **31** | **In Progress** |
+| Quality & Polish | 8 | 4 | **In Progress** (real-time preview done) |
+| **Total** | **39** | **35** | **In Progress** |
 
 ---
 

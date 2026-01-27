@@ -176,6 +176,15 @@ pub use stacking::{
     GradientRemovalResult,
     // Main API
     ImageStack,
+    // Live stacking
+    LiveFrameQuality,
+    LiveQualityStream,
+    LiveStackAccumulator,
+    LiveStackConfig,
+    LiveStackError,
+    LiveStackMode,
+    LiveStackResult,
+    LiveStackStats,
     MAX_GPU_FRAMES,
     MedianConfig,
     // Multi-session stacking

@@ -19,6 +19,11 @@ Image stacking algorithms for astrophotography, including mean, median, sigma-cl
 | `rejection.rs` | Pixel rejection algorithms |
 | `drizzle.rs` | Drizzle super-resolution stacking |
 | `local_normalization.rs` | Local normalization (tile-based, PixInsight-style) |
+| `live.rs` | Live/real-time stacking with incremental updates |
+| `comet.rs` | Comet/asteroid dual-stack stacking |
+| `session.rs` | Multi-session integration with weighted stacking |
+| `gradient_removal.rs` | Post-stack gradient removal (polynomial/RBF) |
+| `gpu/` | GPU-accelerated sigma clipping and batch processing |
 
 ## Key Types
 
@@ -1421,3 +1426,160 @@ result.remove_gradient(&GradientRemovalConfig::polynomial(2))?;
 - `lumos::GradientRemovalError`
 - `lumos::remove_gradient`
 - `lumos::remove_gradient_simple`
+
+---
+
+## Live Stacking (IMPLEMENTED - 2026-01-27)
+
+### Overview
+
+Real-time/live stacking for astrophotography sessions. Provides incremental frame accumulation with immediate preview capability and streaming quality metrics for UI display.
+
+### Key Features
+
+- **O(1) memory overhead** for RunningMean/WeightedMean modes
+- **Rolling sigma clipping** for outlier rejection during live sessions
+- **Quality-based weighting** for variable sky conditions
+- **Streaming quality metrics** for real-time UI graphs
+
+### Key Types
+
+```rust
+// Configuration
+pub struct LiveStackConfig {
+    pub mode: LiveStackMode,        // RunningMean | WeightedMean | RollingSigmaClip
+    pub normalize: bool,            // Match incoming frames to reference
+    pub preview_channel: Option<usize>,
+    pub track_variance: bool,       // Enable variance tracking
+}
+
+// Stacking modes
+pub enum LiveStackMode {
+    RunningMean,                    // O(pixels) memory, fast preview
+    WeightedMean,                   // O(pixels), quality-weighted
+    RollingSigmaClip {              // O(N×pixels), outlier rejection
+        window_size: usize,         // Rolling window (typical: 10-30)
+        sigma: f32,                 // Clipping threshold (typical: 1.5-3.0)
+    },
+}
+
+// Per-frame quality metrics
+pub struct LiveFrameQuality {
+    pub snr: f32,                   // Signal-to-noise ratio
+    pub fwhm: f32,                  // Full width at half maximum
+    pub eccentricity: f32,          // Star roundness (1.0 = perfect)
+    pub noise: f32,                 // Background noise level
+    pub star_count: usize,          // Detected stars
+}
+
+// Accumulated statistics
+pub struct LiveStackStats {
+    pub frame_count: usize,
+    pub total_weight: f64,
+    pub mean_snr: f32,
+    pub mean_fwhm: f32,
+    pub mean_eccentricity: f32,
+    pub snr_improvement: f32,       // Effective √N
+    pub mean_variance: Option<f32>,
+}
+
+// Main accumulator
+pub struct LiveStackAccumulator {
+    // Methods:
+    fn new(width, height, channels, config) -> Result<Self, LiveStackError>
+    fn add_frame(&mut self, frame: &AstroImage, quality: LiveFrameQuality) -> Result<&LiveStackStats, LiveStackError>
+    fn preview(&self) -> Result<AstroImage, LiveStackError>
+    fn finalize(self) -> Result<LiveStackResult, LiveStackError>
+    fn reset(&mut self)
+    fn stats(&self) -> &LiveStackStats
+    fn frame_count(&self) -> usize
+    fn is_empty(&self) -> bool
+}
+
+// Final result
+pub struct LiveStackResult {
+    pub image: AstroImage,
+    pub stats: LiveStackStats,
+}
+
+// Streaming quality for UI
+pub struct LiveQualityStream {
+    pub snr_history: Vec<f32>,
+    pub fwhm_history: Vec<f32>,
+    pub eccentricity_history: Vec<f32>,
+    pub estimated_final_snr: f32,
+    fn new(max_history: usize) -> Self
+    fn update(&mut self, quality: &LiveFrameQuality, stats: &LiveStackStats)
+    fn snr_trend(&self) -> f32      // Positive = improving
+}
+```
+
+### Weight Computation
+
+Frame weight formula: `(SNR × (1/FWHM)² × (1/ecc)) / noise`
+
+- Higher SNR → higher weight
+- Lower FWHM (better seeing) → higher weight
+- Lower eccentricity (rounder stars) → higher weight
+- Lower noise → higher weight
+
+### SNR Improvement Tracking
+
+- RunningMean: `snr_improvement = √N` (equal weights)
+- Weighted modes: `snr_improvement = √(effective_N)` where effective_N accounts for weight distribution
+
+### Usage Example
+
+```rust
+use lumos::stacking::live::{LiveStackConfig, LiveStackAccumulator, LiveStackMode};
+
+let config = LiveStackConfig {
+    mode: LiveStackMode::WeightedMean,
+    normalize: true,
+    ..Default::default()
+};
+
+let mut stack = LiveStackAccumulator::new(1024, 1024, 1, config)?;
+
+// As frames arrive during imaging session
+for (frame, quality) in incoming_frames {
+    let stats = stack.add_frame(&frame, quality)?;
+
+    // Update real-time display
+    display_preview(stack.preview()?);
+    show_stats(stats);
+}
+
+let result = stack.finalize()?;
+save_image(&result.image);
+```
+
+### Performance Characteristics
+
+| Mode | Memory | add_frame() | preview() |
+|------|--------|-------------|-----------|
+| RunningMean | O(W×H) | O(W×H) | O(W×H) |
+| WeightedMean | O(W×H) | O(W×H) | O(W×H) |
+| RollingSigmaClip | O(N×W×H) | O(W×H) | O(N×W×H) |
+
+Where N = window_size for RollingSigmaClip.
+
+### Tests (14 tests)
+
+- Basic operations: running_mean_basic, weighted_mean, finalize
+- Edge cases: empty_stack, dimension_mismatch, invalid_config
+- Sigma clipping: rolling_sigma_clip (outlier rejection)
+- Quality: quality_weight_computation, quality_stream
+- Multi-channel: rgb_stacking
+- State management: reset, stats_tracking
+
+### Public Exports
+
+- `lumos::LiveStackConfig`
+- `lumos::LiveStackMode`
+- `lumos::LiveFrameQuality`
+- `lumos::LiveStackStats`
+- `lumos::LiveStackError`
+- `lumos::LiveStackAccumulator`
+- `lumos::LiveStackResult`
+- `lumos::LiveQualityStream`

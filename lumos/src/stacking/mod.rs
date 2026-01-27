@@ -5,6 +5,7 @@ mod drizzle;
 mod error;
 pub mod gpu;
 mod gradient_removal;
+pub mod live;
 mod local_normalization;
 mod mean;
 mod median;
@@ -63,6 +64,12 @@ pub use session::{
 pub use gradient_removal::{
     CorrectionMethod, GradientModel, GradientRemovalConfig, GradientRemovalError,
     GradientRemovalResult, remove_gradient, remove_gradient_simple,
+};
+// Re-export live stacking types for public API
+#[allow(unused_imports)]
+pub use live::{
+    LiveFrameQuality, LiveQualityStream, LiveStackAccumulator, LiveStackConfig, LiveStackError,
+    LiveStackMode, LiveStackResult, LiveStackStats,
 };
 
 #[cfg(feature = "bench")]
