@@ -1,42 +1,47 @@
 #!/bin/bash
 
-OUTPUT_FILE="benchmark_results.txt"
+# A script to run benches and save their output to the results directory.
+# This is useful for comparing the performance of different implementations.
+# The script should be run from the root of the lumos crate.
 
-BENCHES=(
-    "demosaic_bayer"
-    "demosaic_xtrans"
-    "hot_pixels"
-    "math"
-    "median_filter"
-    "registration"
-    "stack_mean"
-    "stack_median"
-    "stack_sigma_clipped"
-    "star_detection_background"
-    "star_detection_centroid"
-    "star_detection_convolution"
-    "star_detection_cosmic_ray"
-    "star_detection_deblend"
-    "star_detection_detection"
-)
+# --- Configuration ---
+RESULTS_DIR="benches/results"
 
-# Compile all benchmarks first
-echo "Compiling all benchmarks..."
-for bench in "${BENCHES[@]}"; do
-    echo "  Compiling $bench..."
-    cargo bench -p lumos --features bench --bench "$bench" --no-run
-done
+# --- Helper Functions ---
+function get_all_benches() {
+    cargo bench --bench '*' --no-run --message-format=json --features="bench" |
+    jq -r 'select(.profile.test == true) | .target.name'
+}
 
-# Clear/create output file
-> "$OUTPUT_FILE"
+function run_bench() {
+    local bench_name=$1
+    echo "Running bench: $bench_name"
+    # Ensure the results directory exists
+    mkdir -p "$RESULTS_DIR"
+    # Run the benchmark and save the output
+    cargo bench --bench "$bench_name" --features="bench" -- --save-baseline "$bench_name" > "$RESULTS_DIR/$bench_name.txt"
+}
 
-# Run all benchmarks
-echo "Running benchmarks..."
-for bench in "${BENCHES[@]}"; do
-    echo "  Running $bench..."
-    echo "=== $bench ===" >> "$OUTPUT_FILE"
-    cargo bench -p lumos --features bench --bench "$bench" 2>&1 >> "$OUTPUT_FILE"
-    echo "" >> "$OUTPUT_FILE"
-done
+# --- Main Logic ---
+# Check if jq is installed
+if ! command -v jq &> /dev/null; then
+    echo "jq is not installed. Please install it to run this script."
+    exit 1
+fi
 
-echo "Done! Results saved to $OUTPUT_FILE"
+# If arguments are provided, run those specific benches
+if [ "$#" -gt 0 ]; then
+    for bench in "$@"; do
+        run_bench "$bench"
+    done
+else
+    # If no arguments are provided, run all benches
+    echo "No specific benchmarks provided. Running all..."
+    all_benches=$(get_all_benches)
+    for bench in $all_benches;
+ do
+        run_bench "$bench"
+    done
+fi
+
+echo "Benchmarking complete."
