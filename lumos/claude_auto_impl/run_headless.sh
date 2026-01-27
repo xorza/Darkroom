@@ -129,7 +129,7 @@ for ((i=1; i<=MAX_ITERATIONS; i++)); do
     next=$(grep -m1 "^\s*- \[ \]" "$SPEC_FILE" | sed 's/.*\[ \] //' || echo "none")
     echo -e "Progress: ${CYAN}$done/$total${NC} | Next: ${CYAN}$next${NC}"
 
-    # Run Claude Code in headless mode with streaming output
+    # Run Claude Code in headless mode with streaming JSON parsed to human-readable output
     ALL_DONE_FLAG="/tmp/claude_all_done_$$"
     rm -f "$ALL_DONE_FLAG"
 
@@ -139,22 +139,70 @@ for ((i=1; i<=MAX_ITERATIONS; i++)); do
         --print \
         --verbose \
         --output-format stream-json \
-        "$CLAUDE_PROMPT" 2>&1 | while IFS= read -r line; do
-            echo "$line" >> "$SESSION_LOG"
-            # Extract and display text content from JSON
-            if echo "$line" | grep -q '"type":"assistant"'; then
-                text=$(echo "$line" | sed -n 's/.*"content":\[{"type":"text","text":"\([^"]*\)".*/\1/p' | head -1)
-                if [[ -n "$text" ]]; then
-                    echo -e "${CYAN}[Claude]${NC} $text"
-                fi
-            elif echo "$line" | grep -q '"type":"result"'; then
-                echo -e "${GREEN}[Result]${NC} Task iteration complete"
-            fi
-            # Check for completion signal in output
-            if echo "$line" | grep -q '\[\[ALL DONE\]\]'; then
-                touch "$ALL_DONE_FLAG"
-            fi
-        done
+        "$CLAUDE_PROMPT" 2>&1 | python3 -u -c "
+import sys, json
+
+for line in sys.stdin:
+    line = line.strip()
+    if not line:
+        continue
+    try:
+        data = json.loads(line)
+        msg_type = data.get('type', '')
+
+        if msg_type == 'assistant':
+            content = data.get('message', {}).get('content', [])
+            for item in content:
+                if item.get('type') == 'text':
+                    text = item.get('text', '')
+                    if text:
+                        print(text, flush=True)
+                elif item.get('type') == 'tool_use':
+                    tool = item.get('name', 'unknown')
+                    inp = item.get('input', {})
+                    if tool in ('Bash', 'mcp__acp__Bash'):
+                        cmd = inp.get('command', '')[:100]
+                        print(f'[Tool: {tool}] {cmd}', flush=True)
+                    elif tool in ('Read', 'mcp__acp__Read'):
+                        print(f'[Tool: {tool}] {inp.get(\"file_path\", \"\")}', flush=True)
+                    elif tool in ('Edit', 'mcp__acp__Edit'):
+                        print(f'[Tool: {tool}] {inp.get(\"file_path\", \"\")}', flush=True)
+                    elif tool in ('Write', 'mcp__acp__Write'):
+                        print(f'[Tool: {tool}] {inp.get(\"file_path\", \"\")}', flush=True)
+                    elif tool == 'Grep':
+                        print(f'[Tool: {tool}] {inp.get(\"pattern\", \"\")}', flush=True)
+                    elif tool == 'Glob':
+                        print(f'[Tool: {tool}] {inp.get(\"pattern\", \"\")}', flush=True)
+                    else:
+                        print(f'[Tool: {tool}]', flush=True)
+        elif msg_type == 'user':
+            content = data.get('message', {}).get('content', [])
+            for item in content:
+                if item.get('type') == 'tool_result':
+                    print('[Tool Result]', flush=True)
+        elif msg_type == 'result':
+            print('[Session Complete]', flush=True)
+        elif msg_type == 'system':
+            subtype = data.get('subtype', '')
+            if subtype == 'init':
+                print(f'[Init] Session: {data.get(\"session_id\", \"\")} CWD: {data.get(\"cwd\", \"\")}', flush=True)
+            else:
+                print(f'[System] {subtype}', flush=True)
+
+        # Check for ALL DONE
+        if '[[ALL DONE]]' in line:
+            print('__ALL_DONE_SIGNAL__', flush=True)
+    except json.JSONDecodeError:
+        # Not JSON, print as-is
+        print(line, flush=True)
+    except Exception as e:
+        pass
+" | while IFS= read -r line; do
+        echo "$line" | tee -a "$SESSION_LOG"
+        if [[ "$line" == "__ALL_DONE_SIGNAL__" ]]; then
+            touch "$ALL_DONE_FLAG"
+        fi
+    done
 
     result=$?
     set -e
