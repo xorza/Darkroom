@@ -10,3 +10,4 @@
 /log/
 /.claude/settings.local.json
 /vision_output.tiff
+lumos/claude_auto_impl/logs/
