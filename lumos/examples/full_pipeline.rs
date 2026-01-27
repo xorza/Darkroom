@@ -152,7 +152,7 @@ fn create_calibration_masters(calibration_dir: &Path, output_dir: &Path) -> Cali
     let method = StackingMethod::Median(config);
 
     // First, try to load existing masters from the output directory
-    if let Ok(masters) = CalibrationMasters::load_from_directory(output_dir, method.clone())
+    if let Ok(masters) = CalibrationMasters::load(output_dir, method.clone())
         && (masters.master_dark.is_some()
             || masters.master_flat.is_some()
             || masters.master_bias.is_some())

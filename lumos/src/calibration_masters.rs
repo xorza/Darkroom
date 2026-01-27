@@ -150,7 +150,23 @@ impl CalibrationMasters {
     /// Looks for files named master_dark_<method>.tiff, master_flat_<method>.tiff, etc.
     /// Returns None for any masters that don't exist.
     /// Automatically generates hot pixel map from master dark if available.
+    ///
+    /// This is the preferred method. [`load_from_directory`](Self::load_from_directory) is deprecated.
+    pub fn load<P: AsRef<Path>>(dir: P, method: StackingMethod) -> Result<Self> {
+        Self::load_impl(dir, method)
+    }
+
+    /// Load existing master frames from a directory.
+    ///
+    /// Looks for files named master_dark_<method>.tiff, master_flat_<method>.tiff, etc.
+    /// Returns None for any masters that don't exist.
+    /// Automatically generates hot pixel map from master dark if available.
+    #[deprecated(since = "0.1.0", note = "Use `load` instead")]
     pub fn load_from_directory<P: AsRef<Path>>(dir: P, method: StackingMethod) -> Result<Self> {
+        Self::load_impl(dir, method)
+    }
+
+    fn load_impl<P: AsRef<Path>>(dir: P, method: StackingMethod) -> Result<Self> {
         let dir = dir.as_ref();
 
         let master_dark = Self::load_master(dir, FrameType::Dark, &method);
@@ -352,9 +368,7 @@ mod tests {
         }
 
         // Test loading saved masters
-        let loaded =
-            CalibrationMasters::load_from_directory(&output_dir, StackingMethod::default())
-                .unwrap();
+        let loaded = CalibrationMasters::load(&output_dir, StackingMethod::default()).unwrap();
         assert_eq!(masters.master_dark.is_some(), loaded.master_dark.is_some());
         assert_eq!(masters.master_flat.is_some(), loaded.master_flat.is_some());
         assert_eq!(masters.master_bias.is_some(), loaded.master_bias.is_some());
@@ -370,7 +384,7 @@ mod tests {
         };
 
         let method = StackingMethod::default();
-        let masters = CalibrationMasters::load_from_directory(&masters_dir, method).unwrap();
+        let masters = CalibrationMasters::load(&masters_dir, method).unwrap();
 
         // Print what was found
         println!(

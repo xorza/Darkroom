@@ -34,7 +34,7 @@ Many functions take `(pixels: &[f32], width: usize, height: usize)` instead of `
 ## Phase 3: Constructor pattern consistency
 
 - [x] Add `LiveStackConfig::builder() -> LiveStackConfigBuilder` with methods: `running_mean()`, `weighted_mean()`, `rolling_sigma_clip(window, sigma)`, `normalize(bool)`, `track_variance(bool)`, `build()`
-- [ ] Add `CalibrationMasters::load()` as clearer alias for `load_from_directory()`
+- [x] Add `CalibrationMasters::load()` as clearer alias for `load_from_directory()`
 - [ ] Add `CalibrationMasters::create()` as clearer alias for `from_directory()`
 - [ ] Deprecate old `load_from_directory` and `from_directory` names
 

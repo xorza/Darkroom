@@ -927,9 +927,7 @@ mod tests {
         };
 
         let start = std::time::Instant::now();
-        let masters =
-            CalibrationMasters::load_from_directory(&masters_dir, StackingMethod::default())
-                .unwrap();
+        let masters = CalibrationMasters::load(&masters_dir, StackingMethod::default()).unwrap();
         println!("  Load masters: {:?}", start.elapsed());
 
         println!(
