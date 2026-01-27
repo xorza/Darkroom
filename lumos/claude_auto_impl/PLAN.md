@@ -8,15 +8,15 @@ Many functions take `(pixels: &[f32], width: usize, height: usize)` instead of `
 
 ### Star Detection Module
 
-- [ ] Add `estimate_background_image(image: &AstroImage, tile_size: usize) -> BackgroundMap` wrapper in `src/star_detection/background.rs`
-- [ ] Add `estimate_background_iterative_image(image: &AstroImage, tile_size: usize, config: &IterativeBackgroundConfig) -> BackgroundMap` wrapper
-- [ ] Export both in `src/star_detection/mod.rs` and `src/lib.rs`
+- [x] Add `estimate_background_image(image: &AstroImage, tile_size: usize) -> BackgroundMap` wrapper in `src/star_detection/background.rs`
+- [x] Add `estimate_background_iterative_image(image: &AstroImage, tile_size: usize, config: &IterativeBackgroundConfig) -> BackgroundMap` wrapper
+- [x] Export both in `src/star_detection/mod.rs` and `src/lib.rs`
 
 ### Stacking Module
 
 - [x] Add `remove_gradient_image(image: &AstroImage, config: &GradientRemovalConfig) -> Result<AstroImage, GradientRemovalError>` in `src/stacking/gradient_removal.rs`
-- [ ] Add `LiveStackAccumulator::from_reference(reference: &AstroImage, config: LiveStackConfig) -> Result<Self, LiveStackError>` in `src/stacking/live.rs`
-- [ ] Export both in `src/stacking/mod.rs` and `src/lib.rs`
+- [x] Add `LiveStackAccumulator::from_reference(reference: &AstroImage, config: LiveStackConfig) -> Result<Self, LiveStackError>` in `src/stacking/live.rs`
+- [x] Export both in `src/stacking/mod.rs` and `src/lib.rs`
 
 ### Registration Module
 

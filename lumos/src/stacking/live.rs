@@ -341,6 +341,36 @@ struct NormalizationStats {
 }
 
 impl LiveStackAccumulator {
+    /// Create a live stack accumulator from a reference image.
+    ///
+    /// This is a convenience wrapper that extracts dimensions from the reference image.
+    /// The reference image itself is not added to the stack - call `add_frame()` separately
+    /// if you want to include it.
+    ///
+    /// # Arguments
+    /// * `reference` - Reference image to derive dimensions from
+    /// * `config` - Stacking configuration
+    ///
+    /// # Example
+    /// ```rust,ignore
+    /// use lumos::{AstroImage, LiveStackAccumulator, LiveStackConfig};
+    ///
+    /// let reference = AstroImage::from_file("first_frame.fits")?;
+    /// let config = LiveStackConfig::default();
+    /// let mut stack = LiveStackAccumulator::from_reference(&reference, config)?;
+    /// ```
+    pub fn from_reference(
+        reference: &AstroImage,
+        config: LiveStackConfig,
+    ) -> Result<Self, LiveStackError> {
+        Self::new(
+            reference.width(),
+            reference.height(),
+            reference.channels(),
+            config,
+        )
+    }
+
     /// Create a new live stack accumulator.
     ///
     /// # Arguments
@@ -1013,5 +1043,19 @@ mod tests {
         let result = stack.preview().unwrap();
         assert_eq!(result.dimensions().channels, 3);
         assert!((result.pixels()[0] - 0.5).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_from_reference() {
+        let reference = create_test_frame(100, 80, 3, 0.5);
+        let config = LiveStackConfig::default();
+
+        let stack = LiveStackAccumulator::from_reference(&reference, config).unwrap();
+
+        // Verify dimensions match reference
+        assert_eq!(stack.width, 100);
+        assert_eq!(stack.height, 80);
+        assert_eq!(stack.channels, 3);
+        assert!(stack.is_empty());
     }
 }
