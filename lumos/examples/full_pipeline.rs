@@ -5,6 +5,7 @@
 //! 2. Calibrate light frames using the master frames
 //! 3. Detect stars in calibrated images
 //! 4. Register (align) all lights to a reference frame
+//! 5. Stack aligned lights into final image
 //!
 //! # Directory Structure
 //!
@@ -37,7 +38,7 @@
 //!     light1_registered.tiff (reference frame, copied as-is)
 //!     light2_registered.tiff
 //!     ...
-//!   stars_detected.tiff
+//!   stacked_result.tiff
 //! ```
 //!
 //! # Usage
@@ -53,9 +54,9 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use lumos::{
-    AstroImage, CalibrationMasters, InterpolationMethod, MedianConfig, ProgressCallback,
-    RegistrationConfig, Registrator, StackingMethod, StackingProgress, StackingStage, Star,
-    StarDetectionConfig, find_stars,
+    AstroImage, CalibrationMasters, FrameType, ImageStack, InterpolationMethod, MedianConfig,
+    ProgressCallback, RegistrationConfig, Registrator, SigmaClippedConfig, StackingMethod,
+    StackingProgress, StackingStage, Star, StarDetectionConfig, find_stars,
 };
 use tracing_subscriber::EnvFilter;
 
@@ -121,7 +122,17 @@ fn main() {
     println!("STEP 4: Registering all lights to reference frame");
     println!("{}\n", "=".repeat(60));
 
-    register_all_lights(&calibrated_paths, &stars_per_image, &registered_dir);
+    let registered_paths =
+        register_all_lights(&calibrated_paths, &stars_per_image, &registered_dir);
+
+    // =========================================================================
+    // STEP 5: Stack aligned lights into final image
+    // =========================================================================
+    println!("\n{}", "=".repeat(60));
+    println!("STEP 5: Stacking aligned lights into final image");
+    println!("{}\n", "=".repeat(60));
+
+    stack_registered_lights(&registered_paths, &output_base);
 
     // =========================================================================
     // Summary
@@ -366,14 +377,15 @@ fn detect_stars_in_all_images(calibrated_paths: &[PathBuf]) -> Vec<Vec<Star>> {
 }
 
 /// Step 4: Register all lights to a reference frame.
+/// Returns paths to successfully registered images.
 fn register_all_lights(
     calibrated_paths: &[PathBuf],
     stars_per_image: &[Vec<Star>],
     output_dir: &Path,
-) {
+) -> Vec<PathBuf> {
     if calibrated_paths.is_empty() {
         tracing::warn!("No calibrated images to register");
-        return;
+        return Vec::new();
     }
 
     let start = Instant::now();
@@ -409,7 +421,7 @@ fn register_all_lights(
 
     let registrator = Registrator::new(reg_config);
 
-    let mut successful_registrations = 0;
+    let mut registered_paths = Vec::new();
     let mut failed_registrations = 0;
 
     for (i, (path, stars)) in calibrated_paths
@@ -429,7 +441,7 @@ fn register_all_lights(
             img.save_file(&output_path)
                 .expect("Failed to save reference frame");
             tracing::info!(file = %filename, "Reference frame saved");
-            successful_registrations += 1;
+            registered_paths.push(output_path);
             continue;
         }
 
@@ -465,7 +477,7 @@ fn register_all_lights(
                 img.save_file(&output_path)
                     .expect("Failed to save registered frame");
 
-                successful_registrations += 1;
+                registered_paths.push(output_path);
             }
             Err(e) => {
                 tracing::error!(
@@ -480,11 +492,13 @@ fn register_all_lights(
 
     let elapsed = start.elapsed();
     tracing::info!(
-        successful = successful_registrations,
+        successful = registered_paths.len(),
         failed = failed_registrations,
         elapsed_secs = format!("{:.2}", elapsed.as_secs_f32()),
         "Step 4 complete: All lights registered"
     );
+
+    registered_paths
 }
 
 /// Warp an image to align with the reference frame.
@@ -545,6 +559,58 @@ fn warp_image_to_reference(
     let mut result = AstroImage::from_pixels(dims.width, dims.height, dims.channels, warped_pixels);
     result.metadata = image.metadata.clone();
     result
+}
+
+/// Step 5: Stack all registered lights into a final image.
+fn stack_registered_lights(registered_paths: &[PathBuf], output_dir: &Path) {
+    if registered_paths.is_empty() {
+        tracing::warn!("No registered images to stack");
+        return;
+    }
+
+    if registered_paths.len() < 2 {
+        tracing::warn!(
+            "Need at least 2 images to stack, only have {}",
+            registered_paths.len()
+        );
+        return;
+    }
+
+    let start = Instant::now();
+
+    // Use sigma-clipped mean for best outlier rejection (cosmic rays, satellites, etc.)
+    let stacking_config = SigmaClippedConfig::default();
+    let method = StackingMethod::SigmaClippedMean(stacking_config);
+
+    tracing::info!(
+        image_count = registered_paths.len(),
+        method = %method,
+        "Starting final stack"
+    );
+
+    let stack = ImageStack::new(FrameType::Light, method, registered_paths.to_vec());
+    let progress = create_progress_callback();
+
+    match stack.process(progress) {
+        Ok(stacked) => {
+            let output_path = output_dir.join("stacked_result.tiff");
+
+            // Save the stacked result
+            let img: imaginarium::Image = stacked.into();
+            img.save_file(&output_path)
+                .expect("Failed to save stacked result");
+
+            let elapsed = start.elapsed();
+            tracing::info!(
+                output = %output_path.display(),
+                elapsed_secs = format!("{:.2}", elapsed.as_secs_f32()),
+                "Step 5 complete: Final stack saved"
+            );
+        }
+        Err(e) => {
+            tracing::error!(error = %e, "Stacking failed");
+        }
+    }
 }
 
 /// Create a progress callback that logs to console.

@@ -16,7 +16,7 @@ pub use registration::{
 };
 pub use stacking::{
     CacheConfig, FrameType, ImageStack, MedianConfig, ProgressCallback, SigmaClipConfig,
-    StackingMethod, StackingProgress, StackingStage,
+    SigmaClippedConfig, StackingMethod, StackingProgress, StackingStage,
 };
 pub use star_detection::{Star, StarDetectionConfig, find_stars};
 
