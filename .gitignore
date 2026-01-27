@@ -1,13 +1,14 @@
 **/.DS_Store
 **/.idea/
+**/target/
+**/._.DS_Store
+
+/.claude/settings.local.json
 
 /test_output/
+/lumos/claude_auto_impl/logs/
+/log/
 
-**/target/
 /patch.diff
 /style.toml
 /config.toml
-/log/
-/.claude/settings.local.json
-/vision_output.tiff
-lumos/claude_auto_impl/logs/
