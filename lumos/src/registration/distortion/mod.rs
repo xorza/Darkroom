@@ -1,8 +1,8 @@
 //! Distortion modeling for optical corrections.
 //!
-//! This module provides both parametric radial distortion models and non-parametric
-//! thin-plate spline (TPS) interpolation for correcting optical distortions in
-//! astronomical images.
+//! This module provides parametric distortion models (radial and tangential) and
+//! non-parametric thin-plate spline (TPS) interpolation for correcting optical
+//! distortions in astronomical images.
 //!
 //! # Distortion Types
 //!
@@ -21,6 +21,24 @@
 //! - Lens distortion coefficients are known (from calibration)
 //! - The distortion pattern is radially symmetric around the optical center
 //! - You need fast forward/inverse transformations
+//!
+//! ## Tangential Distortion (Parametric)
+//!
+//! Tangential (decentering) distortion occurs when the lens is not perfectly aligned
+//! with the image sensor. The Brown-Conrady model:
+//!
+//! ```text
+//! x' = x + [2p₁xy + p₂(r² + 2x²)]
+//! y' = y + [p₁(r² + 2y²) + 2p₂xy]
+//! ```
+//!
+//! - **p₁**: Vertical decentering - causes y-dependent shift in x
+//! - **p₂**: Horizontal decentering - causes x-dependent shift in y
+//!
+//! Use `TangentialDistortion` when:
+//! - Lens-sensor alignment is imperfect
+//! - Distortion pattern is asymmetric
+//! - Often combined with radial distortion for complete lens modeling
 //!
 //! ## Thin-Plate Spline (Non-Parametric)
 //!
@@ -71,11 +89,13 @@
 //! ```
 
 mod radial;
+mod tangential;
 
 #[cfg(test)]
 mod tests;
 
 pub use radial::{RadialDistortion, RadialDistortionConfig};
+pub use tangential::{TangentialDistortion, TangentialDistortionConfig};
 
 /// Configuration for thin-plate spline fitting.
 #[derive(Debug, Clone)]

@@ -157,10 +157,22 @@ with tests and running verification commands per project conventions.
 
 ### 3.3 Distortion Correction Extensions
 - [x] Implement radial distortion models (barrel/pincushion)
-- [ ] Implement tangential distortion correction
+- [x] Implement tangential distortion correction
 - [ ] Add field curvature correction
 - [ ] Write unit tests for each model
 - [ ] Run verification commands
+
+**Tangential Distortion Implementation** (2026-01-27): Created `src/registration/distortion/tangential.rs` with:
+- `TangentialDistortionConfig` - Configuration (p1, p2 coefficients, optical center)
+- `TangentialDistortion` - Brown-Conrady tangential model implementation
+  - `distort()` / `undistort()` - Forward and inverse transformations
+  - `estimate()` - Least-squares coefficient estimation from matched points
+  - `rms_error()` - Residual error computation
+  - Newton-Raphson iteration for accurate undistortion
+- p1 coefficient affects vertical decentering (y-dependent x shift)
+- p2 coefficient affects horizontal decentering (x-dependent y shift)
+- Compatible with OpenCV camera calibration conventions
+- 20 unit tests passing
 
 **Implementation** (2026-01-27): Created `src/registration/distortion/radial.rs` with:
 - `RadialDistortionConfig` - Configuration (k1, k2, k3 coefficients, optical center)
@@ -218,9 +230,9 @@ cargo bench -p lumos --features bench --bench <name> | tee benches/<name>_result
 |-------|-------|----------|--------|
 | Local Normalization | 5 | 5 | **Complete** |
 | GPU Acceleration | 12 | 12 | **Complete** (warping done, FFT skipped, sigma clip done, star detection done, batch pipeline done + benchmarked) |
-| Advanced Features | 14 | 11 | **In Progress** (Comet stacking complete, session quality done, session-aware normalization done, session-weighted integration done, gradient removal done, radial distortion done) |
+| Advanced Features | 14 | 12 | **In Progress** (Comet stacking complete, session quality done, session-aware normalization done, session-weighted integration done, gradient removal done, radial distortion done, tangential distortion done) |
 | Quality & Polish | 4 | 0 | Not Started |
-| **Total** | **35** | **28** | **In Progress** |
+| **Total** | **35** | **29** | **In Progress** |
 
 ---
 

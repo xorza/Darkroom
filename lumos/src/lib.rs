@@ -118,6 +118,8 @@ pub use registration::{
     Registrator,
     ResidualStats,
     StarMatch,
+    TangentialDistortion,
+    TangentialDistortionConfig,
     ThinPlateSpline,
     TpsConfig,
     TransformMatrix,
