@@ -173,6 +173,7 @@ impl KdTree {
     ///
     /// # Returns
     /// Vector of (index, distance_squared) pairs for all points within radius
+    #[cfg(test)]
     pub fn radius_search(&self, query: (f64, f64), radius: f64) -> Vec<(usize, f64)> {
         if self.nodes.is_empty() {
             return Vec::new();
@@ -186,6 +187,7 @@ impl KdTree {
     }
 
     /// Recursive radius search.
+    #[cfg(test)]
     fn radius_search_recursive(
         &self,
         node_idx: usize,
@@ -229,6 +231,7 @@ impl KdTree {
     }
 
     /// Check if the tree is empty.
+    #[allow(dead_code)]
     pub fn is_empty(&self) -> bool {
         self.points.is_empty()
     }

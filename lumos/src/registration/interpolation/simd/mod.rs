@@ -15,6 +15,7 @@ use crate::common::cpu_features;
 #[cfg(target_arch = "x86_64")]
 pub mod sse;
 
+#[cfg(test)]
 use crate::registration::interpolation::lanczos_kernel;
 use crate::registration::types::TransformMatrix;
 
@@ -172,6 +173,7 @@ fn sample_pixel(data: &[f32], width: usize, height: usize, x: i32, y: i32, borde
 /// * `border_value` - Value for out-of-bounds pixels
 /// * `normalize` - Whether to normalize kernel weights
 /// * `clamp` - Whether to clamp output to neighborhood min/max
+#[cfg(test)]
 #[inline]
 #[allow(clippy::too_many_arguments)]
 pub fn warp_row_lanczos3(
@@ -199,6 +201,7 @@ pub fn warp_row_lanczos3(
 }
 
 /// Scalar implementation of row warping with Lanczos3 interpolation.
+#[cfg(test)]
 #[allow(clippy::too_many_arguments)]
 pub fn warp_row_lanczos3_scalar(
     input: &[f32],
@@ -278,6 +281,7 @@ pub fn warp_row_lanczos3_scalar(
 }
 
 /// Warp an entire image using Lanczos3 interpolation.
+#[cfg(test)]
 #[allow(clippy::too_many_arguments)]
 pub fn warp_image_lanczos3(
     input: &[f32],

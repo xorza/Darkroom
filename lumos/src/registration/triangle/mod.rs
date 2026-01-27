@@ -213,6 +213,7 @@ pub struct Triangle {
     /// Indices of the three stars in the original list.
     pub star_indices: [usize; 3],
     /// Side lengths sorted: sides[0] <= sides[1] <= sides[2].
+    #[allow(dead_code)]
     pub sides: [f64; 3],
     /// Invariant ratios: (sides[0]/sides[2], sides[1]/sides[2]).
     pub ratios: (f64, f64),
@@ -300,14 +301,6 @@ impl Triangle {
         let bin_y = ((self.ratios.1 * bins as f64) as usize).min(bins - 1);
         (bin_x, bin_y)
     }
-
-    /// Get the vertex opposite to the shortest side.
-    pub fn vertex_opposite_shortest(&self) -> usize {
-        // Shortest side is sides[0], which is opposite to some vertex
-        // We need to track this during construction
-        // For now, return the first index
-        self.star_indices[0]
-    }
 }
 
 /// Hash table for fast triangle lookup using geometric hashing.
@@ -334,6 +327,7 @@ impl TriangleHashTable {
 
     /// Find candidate triangles that might match the query.
     /// Returns indices into the original triangle array.
+    #[cfg(any(test, feature = "bench"))]
     pub fn find_candidates(&self, query: &Triangle, tolerance: f64) -> Vec<usize> {
         let mut candidates = Vec::new();
         self.find_candidates_into(query, tolerance, &mut candidates);
@@ -370,11 +364,13 @@ impl TriangleHashTable {
     }
 
     /// Get the number of triangles in the table.
+    #[cfg(test)]
     pub fn len(&self) -> usize {
         self.table.iter().map(|v| v.len()).sum()
     }
 
     /// Check if the table is empty.
+    #[cfg(test)]
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
