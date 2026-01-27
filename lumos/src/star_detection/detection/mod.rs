@@ -387,6 +387,7 @@ pub(crate) fn extract_candidates(
     if num_labels == 0 {
         return Vec::new();
     }
+    use rayon::prelude::*;
 
     // Collect component data in first pass
     let mut component_data: Vec<ComponentData> = (0..num_labels)
@@ -418,67 +419,67 @@ pub(crate) fn extract_candidates(
         }
     }
 
-    // Process each component, potentially deblending into multiple candidates
-    let mut candidates = Vec::with_capacity(num_labels);
+    // Process each component in parallel, deblending into multiple candidates
+    let candidates: Vec<StarCandidate> = component_data
+        .into_par_iter()
+        .filter(|data| !data.pixels.is_empty())
+        .flat_map(|data| {
+            if deblend_config.multi_threshold {
+                // Use multi-threshold deblending (SExtractor-style)
+                let mt_config = MultiThresholdDeblendConfig {
+                    n_thresholds: deblend_config.n_thresholds,
+                    min_contrast: deblend_config.min_contrast,
+                    min_separation: deblend_config.min_separation,
+                };
 
-    for data in component_data {
-        if data.pixels.is_empty() {
-            continue;
-        }
+                // Estimate detection threshold from the minimum pixel value in component
+                let detection_threshold = data
+                    .pixels
+                    .iter()
+                    .map(|&(_, _, v)| v)
+                    .fold(f32::MAX, f32::min);
 
-        if deblend_config.multi_threshold {
-            // Use multi-threshold deblending (SExtractor-style)
-            let mt_config = MultiThresholdDeblendConfig {
-                n_thresholds: deblend_config.n_thresholds,
-                min_contrast: deblend_config.min_contrast,
-                min_separation: deblend_config.min_separation,
-            };
+                let deblended = multi_threshold_deblend(
+                    pixels,
+                    &data.pixels,
+                    width,
+                    detection_threshold,
+                    &mt_config,
+                );
 
-            // Estimate detection threshold from the minimum pixel value in component
-            let detection_threshold = data
-                .pixels
-                .iter()
-                .map(|&(_, _, v)| v)
-                .fold(f32::MAX, f32::min);
+                deblended
+                    .into_iter()
+                    .map(|obj| StarCandidate {
+                        x_min: obj.bbox.0,
+                        x_max: obj.bbox.1,
+                        y_min: obj.bbox.2,
+                        y_max: obj.bbox.3,
+                        peak_x: obj.peak_x,
+                        peak_y: obj.peak_y,
+                        peak_value: obj.peak_value,
+                        area: obj.pixels.len(),
+                    })
+                    .collect::<Vec<_>>()
+            } else {
+                // Use simple local-maxima deblending from deblend module
+                let deblended = deblend_local_maxima(&data, pixels, width, deblend_config);
 
-            let deblended = multi_threshold_deblend(
-                pixels,
-                &data.pixels,
-                width,
-                detection_threshold,
-                &mt_config,
-            );
-
-            for obj in deblended {
-                candidates.push(StarCandidate {
-                    x_min: obj.bbox.0,
-                    x_max: obj.bbox.1,
-                    y_min: obj.bbox.2,
-                    y_max: obj.bbox.3,
-                    peak_x: obj.peak_x,
-                    peak_y: obj.peak_y,
-                    peak_value: obj.peak_value,
-                    area: obj.pixels.len(),
-                });
+                deblended
+                    .into_iter()
+                    .map(|obj| StarCandidate {
+                        x_min: obj.x_min,
+                        x_max: obj.x_max,
+                        y_min: obj.y_min,
+                        y_max: obj.y_max,
+                        peak_x: obj.peak_x,
+                        peak_y: obj.peak_y,
+                        peak_value: obj.peak_value,
+                        area: obj.area,
+                    })
+                    .collect::<Vec<_>>()
             }
-        } else {
-            // Use simple local-maxima deblending from deblend module
-            let deblended = deblend_local_maxima(&data, pixels, width, deblend_config);
-
-            for obj in deblended {
-                candidates.push(StarCandidate {
-                    x_min: obj.x_min,
-                    x_max: obj.x_max,
-                    y_min: obj.y_min,
-                    y_max: obj.y_max,
-                    peak_x: obj.peak_x,
-                    peak_y: obj.peak_y,
-                    peak_value: obj.peak_value,
-                    area: obj.area,
-                });
-            }
-        }
-    }
+        })
+        .collect();
 
     candidates
 }

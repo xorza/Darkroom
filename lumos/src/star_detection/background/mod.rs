@@ -86,16 +86,12 @@ impl TileGrid {
             return; // Not enough tiles for filtering
         }
 
-        let mut filtered = vec![
-            TileStats {
-                median: 0.0,
-                sigma: 0.0
-            };
-            self.stats.len()
-        ];
+        let filtered_stats: Vec<TileStats> = (0..self.tiles_y * self.tiles_x)
+            .into_par_iter()
+            .map(|idx| {
+                let ty = idx / self.tiles_x;
+                let tx = idx % self.tiles_x;
 
-        for ty in 0..self.tiles_y {
-            for tx in 0..self.tiles_x {
                 // Gather 3x3 neighborhood values
                 let mut medians = [0.0f32; 9];
                 let mut sigmas = [0.0f32; 9];
@@ -123,14 +119,14 @@ impl TileGrid {
                 let filtered_median = median_of_slice(&mut medians[..count]);
                 let filtered_sigma = median_of_slice(&mut sigmas[..count]);
 
-                filtered[ty * self.tiles_x + tx] = TileStats {
+                TileStats {
                     median: filtered_median,
                     sigma: filtered_sigma,
-                };
-            }
-        }
+                }
+            })
+            .collect();
 
-        self.stats = filtered;
+        self.stats = filtered_stats;
     }
 }
 
