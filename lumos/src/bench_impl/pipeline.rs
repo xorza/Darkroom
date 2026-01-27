@@ -108,6 +108,7 @@ fn try_load_from_dir(dir: &PathBuf) -> Option<Vec<AstroImage>> {
 /// Benchmark star detection on all images.
 fn benchmark_star_detection(c: &mut Criterion, images: &[AstroImage]) {
     let mut group = c.benchmark_group("pipeline_star_detection");
+    group.sample_size(10); // Reduce sample size for expensive operations
 
     let config = StarDetectionConfig {
         edge_margin: 20,
@@ -141,6 +142,7 @@ fn benchmark_star_detection(c: &mut Criterion, images: &[AstroImage]) {
 /// Benchmark registration between images.
 fn benchmark_registration(c: &mut Criterion, images: &[AstroImage]) {
     let mut group = c.benchmark_group("pipeline_registration");
+    group.sample_size(10); // Reduce sample size for expensive operations
 
     let detection_config = StarDetectionConfig {
         edge_margin: 20,
@@ -202,6 +204,7 @@ fn benchmark_registration(c: &mut Criterion, images: &[AstroImage]) {
 /// Benchmark image stacking.
 fn benchmark_stacking(c: &mut Criterion, images: &[AstroImage]) {
     let mut group = c.benchmark_group("pipeline_stacking");
+    group.sample_size(10); // Reduce sample size for expensive operations
 
     // For stacking benchmark, we need paths. Since we're benchmarking in-memory,
     // we'll use mean stacking which works directly with loaded images.
