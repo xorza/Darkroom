@@ -18,7 +18,7 @@ with tests and running verification commands per project conventions.
 
 ---
 
-## Phase 1: Local Normalization [IN PROGRESS]
+## Phase 1: Local Normalization [COMPLETE]
 
 ### 1.1 Research & Design
 - [x] Research PixInsight-style local normalization algorithms
@@ -26,11 +26,11 @@ with tests and running verification commands per project conventions.
 - [x] Design API that fits existing `NormalizationMethod` enum
 
 ### 1.2 Implementation
-- [ ] Implement tile-based local statistics computation (128x128 tiles)
-- [ ] Implement smooth interpolation between tile statistics
-- [ ] Add `LocalNormalization` variant to `NormalizationMethod`
-- [ ] Write unit tests for local normalization
-- [ ] Run verification commands
+- [x] Implement tile-based local statistics computation (128x128 tiles)
+- [x] Implement smooth interpolation between tile statistics
+- [x] Add `LocalNormalization` variant to `NormalizationMethod`
+- [x] Write unit tests for local normalization
+- [x] Run verification commands
 
 ---
 
@@ -135,11 +135,11 @@ cargo bench -p lumos --features bench --bench <name> | tee benches/<name>_result
 
 | Phase | Tasks | Complete | Status |
 |-------|-------|----------|--------|
-| Local Normalization | 5 | 0 | Not Started |
+| Local Normalization | 5 | 5 | **Complete** |
 | GPU Acceleration | 12 | 0 | Partial (warping done) |
 | Advanced Features | 14 | 0 | Not Started |
 | Quality & Polish | 4 | 0 | Not Started |
-| **Total** | **35** | **0** | **In Progress** |
+| **Total** | **35** | **5** | **In Progress** |
 
 ---
 

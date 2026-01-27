@@ -15,9 +15,10 @@ Image stacking algorithms for astrophotography, including mean, median, sigma-cl
 | `mean/` | Mean stacking (SIMD: NEON/SSE/scalar) |
 | `median/` | Median stacking via mmap (SIMD sorting networks) |
 | `sigma_clipped/` | Sigma-clipped mean via mmap |
-| `weighted.rs` | Weighted mean with quality-based frame weights |
+| `weighted/` | Weighted mean with quality-based frame weights |
 | `rejection.rs` | Pixel rejection algorithms |
 | `drizzle.rs` | Drizzle super-resolution stacking |
+| `local_normalization.rs` | Local normalization (tile-based, PixInsight-style) |
 
 ## Key Types
 
@@ -31,6 +32,10 @@ FrameQuality       // { snr, fwhm, eccentricity, noise, star_count }
 RejectionMethod    // None | SigmaClip | WinsorizedSigmaClip | LinearFitClip | PercentileClip | Gesd
 DrizzleConfig      // { scale, pixfrac, kernel, min_coverage, fill_value }
 DrizzleKernel      // Square | Point | Gaussian | Lanczos
+NormalizationMethod // None | Global | Local(LocalNormalizationConfig)
+LocalNormalizationConfig // { tile_size, clip_sigma, clip_iterations }
+TileNormalizationStats   // Per-tile median and scale statistics
+LocalNormalizationMap    // Correction map for applying normalization
 ```
 
 ## Rejection Methods
@@ -45,7 +50,7 @@ DrizzleKernel      // Square | Point | Gaussian | Lanczos
 
 ---
 
-## Local Normalization (API DESIGNED, IMPLEMENTATION IN PROGRESS)
+## Local Normalization (IMPLEMENTED)
 
 ### Research Summary
 
@@ -63,85 +68,81 @@ Local Normalization corrects illumination differences across frames by matching 
 
 **Key benefit**: Dramatically improves pixel rejection in final integration by ensuring all subframes have matched, flat backgrounds.
 
-### PixInsight-Style Algorithm
+### Implementation Details
 
-1. **Tile Division**: Divide image into tiles (typical: 128×128 to 256×256 pixels)
-2. **Per-Tile Statistics**: Compute median and scale (MAD or std) for each tile
-3. **Reference Frame**: Select or designate a reference frame
-4. **Compute Correction Factors**:
-   - For each tile: `offset = ref_median - target_median`
-   - For each tile: `scale = ref_scale / target_scale`
-5. **Smooth Interpolation**: Bilinearly interpolate between tile centers
-6. **Apply Correction**: `pixel_corrected = (pixel - target_median) * scale + ref_median`
+**Module**: `local_normalization.rs`
 
-### Design Decisions
+**Algorithm Steps**:
+1. **Tile Division**: Divide image into tiles (default: 128×128, configurable 64-256)
+2. **Per-Tile Statistics**: Compute sigma-clipped median and MAD for each tile (reuses `sigma_clipped_median_mad()` from `star_detection/constants`)
+3. **Compute Correction Factors**:
+   - `offset = ref_median` (per tile)
+   - `scale = ref_scale / target_scale` (clamped to avoid division by near-zero)
+   - `target_median` stored for the correction formula
+4. **Smooth Interpolation**: Bilinear interpolation between tile centers (segment-based for efficiency)
+5. **Apply Correction**: `pixel_corrected = (pixel - target_median) * scale + ref_median`
 
-**Tile Size**:
-- Default: 128×128 (matches existing background estimation)
-- Configurable: 64-256 recommended range
-- Smaller tiles = better gradient handling, but may introduce noise
-
-**Statistics Method**:
-- Use sigma-clipped median and MAD (robust to stars)
-- Can reuse `sigma_clipped_stats()` from `background/mod.rs`
-
-**Interpolation**:
-- Bilinear interpolation between tile centers
-- Can reuse SIMD interpolation from `background/simd/`
-
-**API Design** (Implemented in `local_normalization.rs`):
+**Key Types**:
 ```rust
-/// Normalization method for aligning frame statistics before stacking.
-#[derive(Debug, Clone, PartialEq, Default)]
+// Normalization method enum
 pub enum NormalizationMethod {
-    None,
-    #[default]
-    Global,
-    Local(LocalNormalizationConfig),
+    None,              // No normalization
+    Global,            // Match overall median and scale (default)
+    Local(LocalNormalizationConfig), // Tile-based matching
 }
 
-#[derive(Debug, Clone, PartialEq)]
+// Configuration
 pub struct LocalNormalizationConfig {
     pub tile_size: usize,        // Default: 128, Range: 64-256
     pub clip_sigma: f32,         // Default: 3.0
     pub clip_iterations: usize,  // Default: 3
 }
 
-impl LocalNormalizationConfig {
-    pub fn new(tile_size: usize) -> Self;           // Custom tile size
-    pub fn with_clipping(self, sigma, iters) -> Self; // Custom clipping
-    pub fn fine() -> Self;    // 64px tiles for steep gradients
-    pub fn coarse() -> Self;  // 256px tiles for stability
+// Presets
+LocalNormalizationConfig::fine()   // 64px tiles - steep gradients
+LocalNormalizationConfig::coarse() // 256px tiles - stability
+
+// Per-tile statistics
+pub struct TileNormalizationStats {
+    medians: Vec<f32>,
+    scales: Vec<f32>,
+    tiles_x, tiles_y, tile_size, width, height
 }
 
-/// Per-tile statistics from a frame
-pub struct TileNormalizationStats { medians, scales, tiles_x, tiles_y, ... }
-
-/// Correction map for applying normalization
-pub struct LocalNormalizationMap { offsets, scales, centers_x, centers_y, ... }
+// Correction map
+pub struct LocalNormalizationMap {
+    offsets, scales, target_medians: Vec<f32>,
+    centers_x, centers_y: Vec<f32>,
+    tiles_x, tiles_y, width, height
+}
 ```
 
-### Implementation Plan
+**Convenience Functions**:
+```rust
+// Compute normalization map from reference and target
+compute_normalization_map(reference, target, width, height, config) -> LocalNormalizationMap
 
-1. Add `LocalNormalizationConfig` struct
-2. Add `NormalizationMethod` enum with `None`, `Global`, `Local` variants
-3. Create `local_normalization.rs` module:
-   - `LocalNormalizationMap` struct (per-tile offset and scale)
-   - `compute_local_normalization()` - compute tile statistics
-   - `apply_local_normalization()` - apply with bilinear interpolation
-4. Integrate with `WeightedConfig` to normalize before rejection
-5. Unit tests with synthetic gradient data
+// Apply normalization in one step
+normalize_frame(reference, target, width, height, config) -> Vec<f32>
 
-### Key Insight: Reuse Background Estimation
+// Apply to image in-place
+map.apply(&mut pixels)
 
-The existing `star_detection/background/mod.rs` has:
-- Tile-based sigma-clipped statistics (`TileStats`, `compute_tile_stats()`)
-- Bilinear interpolation between tiles (`interpolate_row()`)
-- SIMD-accelerated interpolation (`simd::interpolate_segment_simd()`)
+// Apply returning new image
+map.apply_to_new(&pixels) -> Vec<f32>
+```
 
-Local normalization can share this infrastructure, computing:
-- `TileStats { median, sigma }` - already exists
-- `NormalizationTile { offset, scale }` - new, derived from reference vs target
+**Performance**:
+- Parallel tile statistics computation via rayon
+- Row-based parallel processing for apply
+- Segment-based interpolation (amortizes tile lookups)
+
+**Test Coverage** (25 tests):
+- Config validation and presets
+- Uniform/gradient image statistics
+- Offset and gradient correction
+- Single tile and non-multiple-of-tile-size images
+- In-place vs new apply consistency
 
 ---
 
