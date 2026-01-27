@@ -18,10 +18,10 @@ with tests and running verification commands per project conventions.
 
 ---
 
-## Phase 1: Local Normalization [NOT STARTED]
+## Phase 1: Local Normalization [IN PROGRESS]
 
 ### 1.1 Research & Design
-- [ ] Research PixInsight-style local normalization algorithms
+- [x] Research PixInsight-style local normalization algorithms
 - [ ] Document approach in `src/stacking/NOTES-AI.md`
 - [ ] Design API that fits existing `NormalizationMethod` enum
 
