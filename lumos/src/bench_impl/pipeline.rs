@@ -56,10 +56,10 @@ fn load_calibrated_lights() -> Option<Vec<AstroImage>> {
     // Try LUMOS_CALIBRATION_DIR/calibrated_lights first
     if let Some(cal_dir) = calibration_dir() {
         let calibrated_dir = cal_dir.join("calibrated_lights");
-        if calibrated_dir.exists() {
-            if let Some(images) = try_load_from_dir(&calibrated_dir) {
-                return Some(images);
-            }
+        if calibrated_dir.exists()
+            && let Some(images) = try_load_from_dir(&calibrated_dir)
+        {
+            return Some(images);
         }
     }
 
@@ -70,10 +70,10 @@ fn load_calibrated_lights() -> Option<Vec<AstroImage>> {
         .join("test_output")
         .join("calibrated_lights");
 
-    if test_output.exists() {
-        if let Some(images) = try_load_from_dir(&test_output) {
-            return Some(images);
-        }
+    if test_output.exists()
+        && let Some(images) = try_load_from_dir(&test_output)
+    {
+        return Some(images);
     }
 
     eprintln!(
@@ -82,7 +82,7 @@ fn load_calibrated_lights() -> Option<Vec<AstroImage>> {
     None
 }
 
-fn try_load_from_dir(dir: &PathBuf) -> Option<Vec<AstroImage>> {
+fn try_load_from_dir(dir: &std::path::Path) -> Option<Vec<AstroImage>> {
     let extensions = [
         "raf", "cr2", "cr3", "nef", "arw", "dng", "fit", "fits", "tiff", "tif",
     ];

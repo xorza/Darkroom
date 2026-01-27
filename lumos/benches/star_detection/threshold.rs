@@ -1,6 +1,5 @@
 use criterion::{Bencher, Criterion, criterion_group, criterion_main};
-use lumos::star_detection::background::BackgroundMap;
-use lumos::star_detection::detection::{create_threshold_mask, scalar};
+use lumos::bench::{BackgroundMap, create_threshold_mask, detection_scalar as scalar};
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 

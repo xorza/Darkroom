@@ -59,17 +59,17 @@
 //!
 //! See `IMPLEMENTATION_PLAN.md` for detailed algorithm documentation.
 
-pub mod constants;
-pub mod distortion;
-pub mod gpu;
-pub mod interpolation;
-pub mod phase_correlation;
-pub mod pipeline;
-pub mod quality;
-pub mod ransac;
-pub mod spatial;
-pub mod triangle;
-pub mod types;
+pub(crate) mod constants;
+pub(crate) mod distortion;
+pub(crate) mod gpu;
+pub(crate) mod interpolation;
+pub(crate) mod phase_correlation;
+pub(crate) mod pipeline;
+pub(crate) mod quality;
+pub(crate) mod ransac;
+pub(crate) mod spatial;
+pub(crate) mod triangle;
+pub(crate) mod types;
 
 #[cfg(test)]
 mod tests;

@@ -3,7 +3,7 @@
 use criterion::{Criterion, criterion_group, criterion_main};
 
 fn benchmarks(c: &mut Criterion) {
-    lumos::math::bench::benchmarks(c);
+    lumos::bench::math::benchmarks(c);
 }
 
 criterion_group!(benches, benchmarks);

@@ -529,7 +529,7 @@ fn warp_image_to_reference(
     );
 
     // Use parallel CPU warping with Lanczos3 for high quality
-    let warped_pixels = lumos::registration::warp_multichannel_parallel(
+    let warped_pixels = lumos::warp_multichannel_parallel(
         image.pixels(),
         width,
         height,

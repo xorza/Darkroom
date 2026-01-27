@@ -19,13 +19,13 @@
 //!
 //! 5. **Quality metrics**: Compute FWHM, SNR, and eccentricity for each star.
 
-pub mod background;
+pub(crate) mod background;
 mod centroid;
-pub mod constants;
+pub(crate) mod constants;
 mod convolution;
 mod cosmic_ray;
 mod deblend;
-pub mod detection;
+pub(crate) mod detection;
 mod median_filter;
 
 #[cfg(test)]
@@ -42,24 +42,26 @@ pub mod bench {
     pub use super::median_filter::bench as median_filter;
 }
 
-// Public API exports - used by external consumers of the library
-#[allow(unused_imports)]
-pub use background::{
-    IterativeBackgroundConfig, estimate_background, estimate_background_iterative,
-};
-pub use centroid::compute_centroid;
-pub use convolution::{matched_filter, matched_filter_elliptical};
-pub use detection::{detect_stars, detect_stars_filtered};
-pub use median_filter::median_filter_3x3;
-
-// Re-export fitting functions from centroid module
+// Public API exports - main entry points for external consumers
 pub use centroid::LocalBackgroundMethod;
-#[allow(unused_imports)]
+
+// Internal re-exports for advanced users (may change in future versions)
+// Background estimation (used by calibration and advanced pipelines)
+pub use background::{
+    BackgroundMap, IterativeBackgroundConfig, estimate_background, estimate_background_iterative,
+};
+
+// Profile fitting (for custom centroiding pipelines)
 pub use centroid::{GaussianFitConfig, GaussianFitResult, fit_gaussian_2d};
-#[allow(unused_imports)]
 pub use centroid::{
     MoffatFitConfig, MoffatFitResult, alpha_beta_to_fwhm, fit_moffat_2d, fwhm_beta_to_alpha,
 };
+
+// Low-level detection (for custom pipelines)
+pub(crate) use centroid::compute_centroid;
+pub(crate) use convolution::{matched_filter, matched_filter_elliptical};
+pub(crate) use detection::{detect_stars, detect_stars_filtered};
+pub(crate) use median_filter::median_filter_3x3;
 
 use crate::astro_image::AstroImage;
 
@@ -249,7 +251,7 @@ impl DefectMap {
 
 /// Detection threshold and area parameters.
 #[derive(Debug, Clone)]
-pub struct DetectionParams {
+pub(crate) struct DetectionParams {
     /// Detection threshold in sigma above background (typically 3.0-5.0).
     pub detection_sigma: f32,
     /// Minimum star area in pixels.
@@ -290,7 +292,7 @@ impl Default for DetectionParams {
 
 /// Quality filter parameters for rejecting spurious detections.
 #[derive(Debug, Clone)]
-pub struct QualityFilters {
+pub(crate) struct QualityFilters {
     /// Maximum eccentricity (0-1, higher = more elongated allowed).
     pub max_eccentricity: f32,
     /// Minimum SNR for a star to be considered valid.
@@ -320,7 +322,7 @@ impl Default for QualityFilters {
 
 /// Camera-specific parameters for accurate SNR calculation.
 #[derive(Debug, Clone, Default)]
-pub struct CameraParams {
+pub(crate) struct CameraParams {
     /// Camera gain in electrons per ADU (e-/ADU).
     pub gain: Option<f32>,
     /// Read noise in electrons (e-).
@@ -329,18 +331,9 @@ pub struct CameraParams {
     pub defect_map: Option<DefectMap>,
 }
 
-impl CameraParams {
-    /// Set gain and read noise for accurate SNR calculation.
-    pub fn with_noise_model(mut self, gain: f32, read_noise: f32) -> Self {
-        self.gain = Some(gain);
-        self.read_noise = Some(read_noise);
-        self
-    }
-}
-
 /// Deblending parameters for separating overlapping stars.
 #[derive(Debug, Clone)]
-pub struct DeblendParams {
+pub(crate) struct DeblendParams {
     /// Minimum separation between peaks for deblending (in pixels).
     pub min_separation: usize,
     /// Minimum peak prominence for deblending (0.0-1.0).
@@ -367,7 +360,7 @@ impl Default for DeblendParams {
 
 /// Centroiding parameters.
 #[derive(Debug, Clone, Default)]
-pub struct CentroidParams {
+pub(crate) struct CentroidParams {
     /// Method for computing sub-pixel centroids.
     pub method: CentroidMethod,
     /// Method for computing local background during centroid refinement.
@@ -602,7 +595,7 @@ impl StarDetectionConfig {
     }
 
     /// Create config from sub-struct parameters.
-    pub fn from_params(
+    pub(crate) fn from_params(
         detection: DetectionParams,
         quality: QualityFilters,
         camera: CameraParams,
@@ -733,36 +726,6 @@ impl StarDetectionConfigBuilder {
     /// Enable multi-threshold deblending.
     pub fn with_multi_threshold_deblend(mut self, enable: bool) -> Self {
         self.deblend.multi_threshold = enable;
-        self
-    }
-
-    /// Set detection parameters directly.
-    pub fn detection(mut self, params: DetectionParams) -> Self {
-        self.detection = params;
-        self
-    }
-
-    /// Set quality filter parameters directly.
-    pub fn quality(mut self, params: QualityFilters) -> Self {
-        self.quality = params;
-        self
-    }
-
-    /// Set camera parameters directly.
-    pub fn camera(mut self, params: CameraParams) -> Self {
-        self.camera = params;
-        self
-    }
-
-    /// Set deblending parameters directly.
-    pub fn deblend(mut self, params: DeblendParams) -> Self {
-        self.deblend = params;
-        self
-    }
-
-    /// Set centroid parameters directly.
-    pub fn centroid(mut self, params: CentroidParams) -> Self {
-        self.centroid = params;
         self
     }
 
