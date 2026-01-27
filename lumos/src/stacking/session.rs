@@ -37,6 +37,9 @@
 use std::path::{Path, PathBuf};
 
 use super::RejectionMethod;
+use super::local_normalization::{
+    LocalNormalizationConfig, LocalNormalizationMap, TileNormalizationStats,
+};
 use super::weighted::FrameQuality;
 use crate::AstroImage;
 use crate::star_detection::{StarDetectionConfig, StarDetectionResult, find_stars};
@@ -566,6 +569,308 @@ impl std::fmt::Display for MultiSessionSummary {
     }
 }
 
+// ============================================================================
+// Session-Aware Local Normalization
+// ============================================================================
+
+/// Session-aware local normalization for multi-session stacking.
+///
+/// Holds the reference frame statistics and can normalize frames from any session
+/// to match the reference. The reference is typically selected from the best
+/// quality session.
+///
+/// # Example
+///
+/// ```ignore
+/// use lumos::stacking::session::{MultiSessionStack, SessionNormalization};
+///
+/// let stack = MultiSessionStack::new(sessions);
+///
+/// // Create normalizer from best session's reference frame
+/// let normalizer = stack.create_session_normalizer(&reference_pixels, width, height)?;
+///
+/// // Normalize a frame from any session
+/// let normalized = normalizer.normalize_frame(&frame_pixels);
+/// ```
+#[derive(Debug, Clone)]
+pub struct SessionNormalization {
+    /// Tile statistics from the reference frame.
+    reference_stats: TileNormalizationStats,
+    /// Local normalization configuration.
+    config: LocalNormalizationConfig,
+}
+
+impl SessionNormalization {
+    /// Create a new session normalizer from a reference frame.
+    ///
+    /// The reference frame should be from the best quality session (typically
+    /// the frame with the best FWHM/SNR combination).
+    ///
+    /// # Arguments
+    /// * `reference_pixels` - Pixel data from the reference frame
+    /// * `width` - Image width
+    /// * `height` - Image height
+    /// * `config` - Local normalization configuration
+    ///
+    /// # Panics
+    ///
+    /// Panics if the image is smaller than the configured tile size.
+    pub fn new(
+        reference_pixels: &[f32],
+        width: usize,
+        height: usize,
+        config: LocalNormalizationConfig,
+    ) -> Self {
+        let reference_stats =
+            TileNormalizationStats::compute(reference_pixels, width, height, &config);
+
+        Self {
+            reference_stats,
+            config,
+        }
+    }
+
+    /// Create from pre-computed reference statistics.
+    ///
+    /// Use this when you want to reuse previously computed statistics.
+    pub fn from_stats(
+        reference_stats: TileNormalizationStats,
+        config: LocalNormalizationConfig,
+    ) -> Self {
+        Self {
+            reference_stats,
+            config,
+        }
+    }
+
+    /// Get the reference tile statistics.
+    pub fn reference_stats(&self) -> &TileNormalizationStats {
+        &self.reference_stats
+    }
+
+    /// Get the normalization configuration.
+    pub fn config(&self) -> &LocalNormalizationConfig {
+        &self.config
+    }
+
+    /// Get image dimensions.
+    pub fn dimensions(&self) -> (usize, usize) {
+        (self.reference_stats.width, self.reference_stats.height)
+    }
+
+    /// Compute a normalization map for a target frame.
+    ///
+    /// The map can be applied to the frame to normalize it to match the reference.
+    ///
+    /// # Arguments
+    /// * `target_pixels` - Pixel data from the frame to normalize
+    ///
+    /// # Panics
+    ///
+    /// Panics if the target frame dimensions don't match the reference.
+    pub fn compute_map(&self, target_pixels: &[f32]) -> LocalNormalizationMap {
+        let target_stats = TileNormalizationStats::compute(
+            target_pixels,
+            self.reference_stats.width,
+            self.reference_stats.height,
+            &self.config,
+        );
+        LocalNormalizationMap::compute(&self.reference_stats, &target_stats)
+    }
+
+    /// Normalize a frame to match the reference.
+    ///
+    /// This is a convenience method that computes the normalization map and applies it.
+    ///
+    /// # Arguments
+    /// * `target_pixels` - Pixel data from the frame to normalize
+    ///
+    /// # Returns
+    /// Normalized pixel data.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the target frame dimensions don't match the reference.
+    pub fn normalize_frame(&self, target_pixels: &[f32]) -> Vec<f32> {
+        let map = self.compute_map(target_pixels);
+        map.apply_to_new(target_pixels)
+    }
+
+    /// Normalize a frame in-place.
+    ///
+    /// # Arguments
+    /// * `target_pixels` - Pixel data to normalize (modified in-place)
+    ///
+    /// # Panics
+    ///
+    /// Panics if the target frame dimensions don't match the reference.
+    pub fn normalize_frame_in_place(&self, target_pixels: &mut [f32]) {
+        let map = self.compute_map(target_pixels);
+        map.apply(target_pixels);
+    }
+}
+
+impl MultiSessionStack {
+    /// Select the best session for providing the reference frame.
+    ///
+    /// Returns the index of the session with the highest quality weight.
+    /// This session's best frame should be used as the global reference for
+    /// cross-session normalization.
+    pub fn select_best_session(&self) -> Option<usize> {
+        if self.sessions.is_empty() {
+            return None;
+        }
+
+        self.sessions
+            .iter()
+            .enumerate()
+            .max_by(|(_, a), (_, b)| {
+                a.quality
+                    .compute_weight()
+                    .partial_cmp(&b.quality.compute_weight())
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .map(|(i, _)| i)
+    }
+
+    /// Select the global reference frame for normalization.
+    ///
+    /// Returns (session_index, frame_index) of the best frame in the best session.
+    /// This frame should be loaded and used to create a `SessionNormalization`.
+    ///
+    /// # Returns
+    /// * `Some((session_idx, frame_idx))` - Indices of the best frame
+    /// * `None` - If no sessions or no frames with quality data
+    pub fn select_global_reference(&self) -> Option<(usize, usize)> {
+        let best_session_idx = self.select_best_session()?;
+        let session = &self.sessions[best_session_idx];
+
+        // Find best frame in best session
+        if session.quality.frame_qualities.is_empty() {
+            // No quality data, use first frame
+            if session.frame_paths.is_empty() {
+                return None;
+            }
+            return Some((best_session_idx, 0));
+        }
+
+        let best_frame_idx = session
+            .quality
+            .frame_qualities
+            .iter()
+            .enumerate()
+            .max_by(|(_, a), (_, b)| {
+                a.compute_weight()
+                    .partial_cmp(&b.compute_weight())
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .map(|(i, _)| i)?;
+
+        Some((best_session_idx, best_frame_idx))
+    }
+
+    /// Get the path to the global reference frame.
+    ///
+    /// # Returns
+    /// * `Some(path)` - Path to the best frame for normalization reference
+    /// * `None` - If no suitable reference frame found
+    pub fn global_reference_path(&self) -> Option<&Path> {
+        let (session_idx, frame_idx) = self.select_global_reference()?;
+        self.sessions
+            .get(session_idx)?
+            .frame_paths
+            .get(frame_idx)
+            .map(|p| p.as_path())
+    }
+
+    /// Create a session normalizer from the automatically selected reference frame.
+    ///
+    /// Loads the best frame from the best session and creates a `SessionNormalization`
+    /// that can be used to normalize all other frames.
+    ///
+    /// # Returns
+    /// * `Ok(SessionNormalization)` - Normalizer ready to use
+    /// * `Err` - If no suitable reference frame or image loading fails
+    pub fn create_session_normalizer(&self) -> anyhow::Result<SessionNormalization> {
+        let reference_path = self
+            .global_reference_path()
+            .ok_or_else(|| anyhow::anyhow!("No suitable reference frame found"))?;
+
+        let reference_image = AstroImage::from_file(reference_path)?;
+        let (width, height) = (reference_image.width(), reference_image.height());
+        let channels = reference_image.channels();
+
+        // Extract the first channel (luminance or red for color images)
+        // Pixel data is stored interleaved: [R0, G0, B0, R1, G1, B1, ...]
+        let all_pixels = reference_image.pixels();
+        let reference_pixels: Vec<f32> = if channels == 1 {
+            all_pixels.to_vec()
+        } else {
+            all_pixels.iter().step_by(channels).copied().collect()
+        };
+
+        let config = LocalNormalizationConfig::new(self.config.normalization_tile_size);
+
+        Ok(SessionNormalization::new(
+            &reference_pixels,
+            width,
+            height,
+            config,
+        ))
+    }
+
+    /// Create a session normalizer from a specific reference frame.
+    ///
+    /// Use this when you want to manually specify the reference frame rather than
+    /// using automatic selection.
+    ///
+    /// # Arguments
+    /// * `reference_pixels` - Pixel data from the reference frame
+    /// * `width` - Image width
+    /// * `height` - Image height
+    pub fn create_session_normalizer_from_pixels(
+        &self,
+        reference_pixels: &[f32],
+        width: usize,
+        height: usize,
+    ) -> SessionNormalization {
+        let config = LocalNormalizationConfig::new(self.config.normalization_tile_size);
+        SessionNormalization::new(reference_pixels, width, height, config)
+    }
+}
+
+/// Reference frame information for session normalization.
+#[derive(Debug, Clone)]
+pub struct GlobalReferenceInfo {
+    /// Session index containing the reference frame.
+    pub session_idx: usize,
+    /// Frame index within the session.
+    pub frame_idx: usize,
+    /// Session identifier.
+    pub session_id: SessionId,
+    /// Path to the reference frame.
+    pub path: PathBuf,
+}
+
+impl MultiSessionStack {
+    /// Get detailed information about the global reference frame.
+    ///
+    /// Returns information about which frame was selected as the global reference
+    /// for normalization, useful for logging and debugging.
+    pub fn global_reference_info(&self) -> Option<GlobalReferenceInfo> {
+        let (session_idx, frame_idx) = self.select_global_reference()?;
+        let session = &self.sessions[session_idx];
+        let path = session.frame_paths.get(frame_idx)?.clone();
+
+        Some(GlobalReferenceInfo {
+            session_idx,
+            frame_idx,
+            session_id: session.id.clone(),
+            path,
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1036,5 +1341,385 @@ mod tests {
 
         // All weights should be positive
         assert!(weights.iter().all(|&w| w > 0.0));
+    }
+
+    // ========== SessionNormalization Tests ==========
+
+    /// Create a uniform test image.
+    fn create_uniform_image(width: usize, height: usize, value: f32) -> Vec<f32> {
+        vec![value; width * height]
+    }
+
+    /// Create a test image with a horizontal gradient.
+    fn create_gradient_image(width: usize, height: usize, left: f32, right: f32) -> Vec<f32> {
+        let mut pixels = vec![0.0; width * height];
+        for y in 0..height {
+            for x in 0..width {
+                let t = x as f32 / (width - 1).max(1) as f32;
+                pixels[y * width + x] = left + t * (right - left);
+            }
+        }
+        pixels
+    }
+
+    #[test]
+    fn test_session_normalization_new() {
+        let width = 256;
+        let height = 256;
+        let reference = create_uniform_image(width, height, 100.0);
+        let config = LocalNormalizationConfig::new(64);
+
+        let normalizer = SessionNormalization::new(&reference, width, height, config);
+
+        assert_eq!(normalizer.dimensions(), (width, height));
+        assert_eq!(normalizer.config().tile_size, 64);
+    }
+
+    #[test]
+    fn test_session_normalization_from_stats() {
+        let width = 256;
+        let height = 256;
+        let reference = create_uniform_image(width, height, 100.0);
+        let config = LocalNormalizationConfig::new(64);
+
+        let stats = TileNormalizationStats::compute(&reference, width, height, &config);
+        let normalizer = SessionNormalization::from_stats(stats.clone(), config.clone());
+
+        assert_eq!(normalizer.dimensions(), (width, height));
+        assert_eq!(normalizer.reference_stats().tiles_x, stats.tiles_x);
+    }
+
+    #[test]
+    fn test_session_normalization_normalize_frame() {
+        let width = 256;
+        let height = 128;
+        let reference = create_uniform_image(width, height, 100.0);
+        let target = create_uniform_image(width, height, 50.0); // 50 units darker
+        let config = LocalNormalizationConfig::new(64);
+
+        let normalizer = SessionNormalization::new(&reference, width, height, config);
+        let normalized = normalizer.normalize_frame(&target);
+
+        // Normalized values should be close to reference
+        let avg: f32 = normalized.iter().sum::<f32>() / normalized.len() as f32;
+        assert!(
+            (avg - 100.0).abs() < 1.0,
+            "Normalized average should be ~100, got {}",
+            avg
+        );
+    }
+
+    #[test]
+    fn test_session_normalization_normalize_frame_in_place() {
+        let width = 256;
+        let height = 128;
+        let reference = create_uniform_image(width, height, 100.0);
+        let mut target = create_uniform_image(width, height, 80.0);
+        let config = LocalNormalizationConfig::new(64);
+
+        let normalizer = SessionNormalization::new(&reference, width, height, config);
+
+        // Compare in-place with new version
+        let normalized_new = normalizer.normalize_frame(&target);
+        normalizer.normalize_frame_in_place(&mut target);
+
+        for (a, b) in target.iter().zip(normalized_new.iter()) {
+            assert!(
+                (a - b).abs() < 1e-6,
+                "In-place and new should give same result"
+            );
+        }
+    }
+
+    #[test]
+    fn test_session_normalization_gradient_correction() {
+        let width = 256;
+        let height = 128;
+        let reference = create_uniform_image(width, height, 100.0);
+        let target = create_gradient_image(width, height, 80.0, 120.0); // Gradient
+        let config = LocalNormalizationConfig::new(64);
+
+        let normalizer = SessionNormalization::new(&reference, width, height, config);
+        let normalized = normalizer.normalize_frame(&target);
+
+        // The gradient should be significantly reduced
+        // Compute variance before and after
+        let target_variance = compute_variance(&target);
+        let normalized_variance = compute_variance(&normalized);
+
+        assert!(
+            normalized_variance < target_variance,
+            "Normalized variance ({}) should be less than target variance ({})",
+            normalized_variance,
+            target_variance
+        );
+    }
+
+    fn compute_variance(pixels: &[f32]) -> f32 {
+        let n = pixels.len() as f32;
+        let mean = pixels.iter().sum::<f32>() / n;
+        pixels.iter().map(|&x| (x - mean).powi(2)).sum::<f32>() / n
+    }
+
+    #[test]
+    fn test_session_normalization_compute_map() {
+        let width = 128;
+        let height = 128;
+        let reference = create_uniform_image(width, height, 100.0);
+        let target = create_uniform_image(width, height, 50.0);
+        let config = LocalNormalizationConfig::new(64);
+
+        let normalizer = SessionNormalization::new(&reference, width, height, config);
+        let map = normalizer.compute_map(&target);
+
+        // Apply map should give same result as normalize_frame
+        let normalized_direct = normalizer.normalize_frame(&target);
+        let normalized_map = map.apply_to_new(&target);
+
+        for (a, b) in normalized_direct.iter().zip(normalized_map.iter()) {
+            assert!(
+                (a - b).abs() < 1e-6,
+                "Direct and map-based normalization should match"
+            );
+        }
+    }
+
+    // ========== MultiSessionStack Reference Selection Tests ==========
+
+    #[test]
+    fn test_multi_session_stack_select_best_session() {
+        let frame_qualities1 = vec![FrameQuality {
+            snr: 100.0,
+            fwhm: 2.0,
+            eccentricity: 0.1,
+            noise: 0.01,
+            star_count: 100,
+        }];
+
+        let frame_qualities2 = vec![FrameQuality {
+            snr: 50.0,
+            fwhm: 3.0,
+            eccentricity: 0.2,
+            noise: 0.02,
+            star_count: 50,
+        }];
+
+        let sessions = vec![
+            Session {
+                id: "good".into(),
+                frame_paths: vec![PathBuf::from("/a.fits")],
+                quality: SessionQuality::from_frame_qualities(&frame_qualities1),
+                reference_frame: None,
+            },
+            Session {
+                id: "worse".into(),
+                frame_paths: vec![PathBuf::from("/b.fits")],
+                quality: SessionQuality::from_frame_qualities(&frame_qualities2),
+                reference_frame: None,
+            },
+        ];
+
+        let stack = MultiSessionStack::new(sessions);
+        let best_idx = stack.select_best_session();
+
+        assert_eq!(best_idx, Some(0)); // First session is better
+    }
+
+    #[test]
+    fn test_multi_session_stack_select_best_session_empty() {
+        let stack = MultiSessionStack::new(vec![]);
+        assert_eq!(stack.select_best_session(), None);
+    }
+
+    #[test]
+    fn test_multi_session_stack_select_global_reference() {
+        let frame_qualities = vec![
+            FrameQuality {
+                snr: 50.0,
+                fwhm: 3.0,
+                eccentricity: 0.2,
+                noise: 0.02,
+                star_count: 50,
+            },
+            FrameQuality {
+                snr: 100.0,
+                fwhm: 2.0,
+                eccentricity: 0.1,
+                noise: 0.01,
+                star_count: 100,
+            },
+        ];
+
+        let sessions = vec![Session {
+            id: "test".into(),
+            frame_paths: vec![PathBuf::from("/a.fits"), PathBuf::from("/b.fits")],
+            quality: SessionQuality::from_frame_qualities(&frame_qualities),
+            reference_frame: None,
+        }];
+
+        let stack = MultiSessionStack::new(sessions);
+        let (session_idx, frame_idx) = stack.select_global_reference().unwrap();
+
+        assert_eq!(session_idx, 0);
+        assert_eq!(frame_idx, 1); // Second frame has better quality
+    }
+
+    #[test]
+    fn test_multi_session_stack_select_global_reference_no_quality() {
+        let sessions = vec![Session {
+            id: "test".into(),
+            frame_paths: vec![PathBuf::from("/a.fits"), PathBuf::from("/b.fits")],
+            quality: SessionQuality::default(), // No frame qualities
+            reference_frame: None,
+        }];
+
+        let stack = MultiSessionStack::new(sessions);
+        let (session_idx, frame_idx) = stack.select_global_reference().unwrap();
+
+        // Falls back to first frame
+        assert_eq!(session_idx, 0);
+        assert_eq!(frame_idx, 0);
+    }
+
+    #[test]
+    fn test_multi_session_stack_global_reference_path() {
+        let frame_qualities = vec![FrameQuality {
+            snr: 100.0,
+            fwhm: 2.0,
+            eccentricity: 0.1,
+            noise: 0.01,
+            star_count: 100,
+        }];
+
+        let sessions = vec![Session {
+            id: "test".into(),
+            frame_paths: vec![PathBuf::from("/best_frame.fits")],
+            quality: SessionQuality::from_frame_qualities(&frame_qualities),
+            reference_frame: None,
+        }];
+
+        let stack = MultiSessionStack::new(sessions);
+        let path = stack.global_reference_path().unwrap();
+
+        assert_eq!(path, Path::new("/best_frame.fits"));
+    }
+
+    #[test]
+    fn test_multi_session_stack_global_reference_info() {
+        let frame_qualities = vec![
+            FrameQuality {
+                snr: 50.0,
+                fwhm: 3.0,
+                eccentricity: 0.2,
+                noise: 0.02,
+                star_count: 50,
+            },
+            FrameQuality {
+                snr: 100.0,
+                fwhm: 2.0,
+                eccentricity: 0.1,
+                noise: 0.01,
+                star_count: 100,
+            },
+        ];
+
+        let sessions = vec![Session {
+            id: "night1".into(),
+            frame_paths: vec![PathBuf::from("/a.fits"), PathBuf::from("/b.fits")],
+            quality: SessionQuality::from_frame_qualities(&frame_qualities),
+            reference_frame: None,
+        }];
+
+        let stack = MultiSessionStack::new(sessions);
+        let info = stack.global_reference_info().unwrap();
+
+        assert_eq!(info.session_idx, 0);
+        assert_eq!(info.frame_idx, 1); // Best frame
+        assert_eq!(info.session_id, "night1");
+        assert_eq!(info.path, PathBuf::from("/b.fits"));
+    }
+
+    #[test]
+    fn test_multi_session_stack_create_normalizer_from_pixels() {
+        let frame_qualities = vec![FrameQuality {
+            snr: 100.0,
+            fwhm: 2.0,
+            eccentricity: 0.1,
+            noise: 0.01,
+            star_count: 100,
+        }];
+
+        let sessions = vec![Session {
+            id: "test".into(),
+            frame_paths: vec![PathBuf::from("/a.fits")],
+            quality: SessionQuality::from_frame_qualities(&frame_qualities),
+            reference_frame: None,
+        }];
+
+        let stack = MultiSessionStack::new(sessions);
+
+        let width = 256;
+        let height = 256;
+        let reference_pixels = create_uniform_image(width, height, 100.0);
+
+        let normalizer =
+            stack.create_session_normalizer_from_pixels(&reference_pixels, width, height);
+
+        assert_eq!(normalizer.dimensions(), (width, height));
+        assert_eq!(normalizer.config().tile_size, 128); // Default from SessionConfig
+    }
+
+    #[test]
+    fn test_multi_session_stack_normalizer_with_custom_tile_size() {
+        let sessions = vec![Session::new("test")];
+
+        let config = SessionConfig::default().with_normalization_tile_size(64);
+        let stack = MultiSessionStack::new(sessions).with_config(config);
+
+        let width = 256;
+        let height = 256;
+        let reference_pixels = create_uniform_image(width, height, 100.0);
+
+        let normalizer =
+            stack.create_session_normalizer_from_pixels(&reference_pixels, width, height);
+
+        assert_eq!(normalizer.config().tile_size, 64);
+    }
+
+    #[test]
+    fn test_session_normalization_cross_session() {
+        // Simulate normalizing frames from two different sessions to a common reference
+        let width = 256;
+        let height = 128;
+        let config = LocalNormalizationConfig::new(64);
+
+        // Reference frame from "good" session
+        let reference = create_uniform_image(width, height, 100.0);
+
+        // Frame from session 1: uniform but darker
+        let session1_frame = create_uniform_image(width, height, 70.0);
+
+        // Frame from session 2: gradient (different light pollution)
+        let session2_frame = create_gradient_image(width, height, 80.0, 120.0);
+
+        let normalizer = SessionNormalization::new(&reference, width, height, config);
+
+        let normalized1 = normalizer.normalize_frame(&session1_frame);
+        let normalized2 = normalizer.normalize_frame(&session2_frame);
+
+        // Both should be close to reference level
+        let avg1: f32 = normalized1.iter().sum::<f32>() / normalized1.len() as f32;
+        let avg2: f32 = normalized2.iter().sum::<f32>() / normalized2.len() as f32;
+
+        assert!(
+            (avg1 - 100.0).abs() < 1.0,
+            "Session 1 average should be ~100, got {}",
+            avg1
+        );
+        assert!(
+            (avg2 - 100.0).abs() < 2.0,
+            "Session 2 average should be ~100, got {}",
+            avg2
+        );
     }
 }

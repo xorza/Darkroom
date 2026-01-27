@@ -35,7 +35,9 @@ pub use sigma_clipped::SigmaClippedConfig;
 pub use weighted::{FrameQuality, RejectionMethod, WeightedConfig};
 // Re-export normalization types for public API
 #[allow(unused_imports)]
-pub use local_normalization::{LocalNormalizationConfig, NormalizationMethod};
+pub use local_normalization::{
+    LocalNormalizationConfig, LocalNormalizationMap, NormalizationMethod, TileNormalizationStats,
+};
 // Re-export GPU types for public API
 #[allow(unused_imports)]
 pub use gpu::{
@@ -52,8 +54,8 @@ pub use comet::{
 // Re-export session types for public API
 #[allow(unused_imports)]
 pub use session::{
-    MultiSessionStack, MultiSessionSummary, Session, SessionConfig, SessionId, SessionQuality,
-    SessionSummary,
+    GlobalReferenceInfo, MultiSessionStack, MultiSessionSummary, Session, SessionConfig, SessionId,
+    SessionNormalization, SessionQuality, SessionSummary,
 };
 
 #[cfg(feature = "bench")]

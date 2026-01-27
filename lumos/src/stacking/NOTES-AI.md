@@ -1091,5 +1091,112 @@ let paths = stack.filter_all_frames();
 - `lumos::SessionQuality`
 - `lumos::SessionConfig`
 - `lumos::SessionSummary`
+- `lumos::SessionNormalization`
+- `lumos::GlobalReferenceInfo`
 - `lumos::MultiSessionStack`
 - `lumos::MultiSessionSummary`
+
+---
+
+## Session-Aware Local Normalization (IMPLEMENTED - 2026-01-27)
+
+### Overview
+
+Session-aware local normalization enables cross-session frame matching by:
+1. Selecting a global reference frame from the best quality session
+2. Applying local normalization to all frames (from any session) to match the reference
+3. Handling gradient and illumination differences between sessions
+
+### Key Types
+
+```rust
+/// Holds reference frame statistics and can normalize frames to match
+pub struct SessionNormalization {
+    reference_stats: TileNormalizationStats,
+    config: LocalNormalizationConfig,
+}
+
+/// Information about the selected global reference frame
+pub struct GlobalReferenceInfo {
+    pub session_idx: usize,
+    pub frame_idx: usize,
+    pub session_id: SessionId,
+    pub path: PathBuf,
+}
+```
+
+### API
+
+```rust
+// Automatic reference selection
+let (session_idx, frame_idx) = stack.select_global_reference()?;
+let reference_path = stack.global_reference_path()?;
+let reference_info = stack.global_reference_info()?;
+
+// Create normalizer from auto-selected reference (loads frame from disk)
+let normalizer = stack.create_session_normalizer()?;
+
+// Create normalizer from manually provided pixels
+let normalizer = stack.create_session_normalizer_from_pixels(&pixels, width, height);
+
+// Normalize frames
+let normalized = normalizer.normalize_frame(&frame_pixels);
+normalizer.normalize_frame_in_place(&mut frame_pixels);
+
+// Get normalization map for manual application
+let map = normalizer.compute_map(&frame_pixels);
+map.apply(&mut other_frame);
+```
+
+### Reference Selection Algorithm
+
+1. **Best session**: Session with highest quality weight (SNR²/FWHM²/ecc × √frame_count)
+2. **Best frame within session**: Frame with highest individual quality weight
+3. **Fallback**: First frame of first session if no quality data available
+
+### Workflow Example
+
+```rust
+use lumos::stacking::session::{MultiSessionStack, SessionNormalization};
+
+// Create multi-session stack
+let stack = MultiSessionStack::new(vec![session1, session2])
+    .with_config(SessionConfig::default().with_normalization_tile_size(64));
+
+// Get reference info (for logging)
+if let Some(info) = stack.global_reference_info() {
+    println!("Using reference from {} (frame {})", info.session_id, info.frame_idx);
+}
+
+// Create normalizer from best frame
+let normalizer = stack.create_session_normalizer()?;
+
+// Normalize all frames to common reference
+for path in stack.all_frame_paths() {
+    let image = AstroImage::from_file(&path)?;
+    let pixels = extract_luminance(&image);
+    let normalized = normalizer.normalize_frame(&pixels);
+    // Use normalized pixels for stacking...
+}
+```
+
+### Tests (40 tests total: 26 previous + 14 new)
+
+**SessionNormalization:**
+- `test_session_normalization_new`
+- `test_session_normalization_from_stats`
+- `test_session_normalization_normalize_frame`
+- `test_session_normalization_normalize_frame_in_place`
+- `test_session_normalization_gradient_correction`
+- `test_session_normalization_compute_map`
+
+**MultiSessionStack Reference Selection:**
+- `test_multi_session_stack_select_best_session`
+- `test_multi_session_stack_select_best_session_empty`
+- `test_multi_session_stack_select_global_reference`
+- `test_multi_session_stack_select_global_reference_no_quality`
+- `test_multi_session_stack_global_reference_path`
+- `test_multi_session_stack_global_reference_info`
+- `test_multi_session_stack_create_normalizer_from_pixels`
+- `test_multi_session_stack_normalizer_with_custom_tile_size`
+- `test_session_normalization_cross_session`

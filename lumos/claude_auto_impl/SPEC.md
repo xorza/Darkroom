@@ -112,7 +112,7 @@ with tests and running verification commands per project conventions.
 
 ### 3.2 Multi-Session Integration
 - [x] Design per-session quality assessment workflow
-- [ ] Implement session-aware local normalization
+- [x] Implement session-aware local normalization
 - [ ] Implement session-weighted integration
 - [ ] Add gradient removal post-stack (optional)
 - [ ] Write integration tests
@@ -180,9 +180,9 @@ cargo bench -p lumos --features bench --bench <name> | tee benches/<name>_result
 |-------|-------|----------|--------|
 | Local Normalization | 5 | 5 | **Complete** |
 | GPU Acceleration | 12 | 12 | **Complete** (warping done, FFT skipped, sigma clip done, star detection done, batch pipeline done + benchmarked) |
-| Advanced Features | 14 | 7 | **In Progress** (Comet stacking complete, session quality done) |
+| Advanced Features | 14 | 8 | **In Progress** (Comet stacking complete, session quality done, session-aware normalization done) |
 | Quality & Polish | 4 | 0 | Not Started |
-| **Total** | **35** | **24** | **In Progress** |
+| **Total** | **35** | **25** | **In Progress** |
 
 ---
 
