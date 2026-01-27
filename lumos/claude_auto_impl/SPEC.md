@@ -81,14 +81,16 @@ with tests and running verification commands per project conventions.
 
 ### 2.4 Batch Processing Pipeline
 - [x] Implement overlapped compute/transfer for frame processing
-- [ ] Add async GPU operations with proper synchronization
+- [x] Add async GPU operations with proper synchronization
 - [ ] Benchmark end-to-end pipeline throughput
 
 **Implementation**: Created `src/stacking/gpu/batch_pipeline.rs` with:
 - `BatchPipeline` and `BatchPipelineConfig` types for multi-batch GPU stacking
 - Handles >128 frames by processing in batches with weighted mean combination
-- Infrastructure for true overlapped compute/transfer (BufferSlot) ready for future optimization
-- 13 unit tests passing
+- True overlapped compute/transfer with double-buffering via `stack_async()`
+- Callback-based async readback using `map_async` with `AtomicBool` completion flags
+- `PendingReadback` type for tracking in-flight buffer mapping operations
+- 18 unit tests passing (13 original + 5 async tests)
 
 ---
 
@@ -161,7 +163,7 @@ cargo bench -p lumos --features bench --bench <name> | tee benches/<name>_result
 | Phase | Tasks | Complete | Status |
 |-------|-------|----------|--------|
 | Local Normalization | 5 | 5 | **Complete** |
-| GPU Acceleration | 12 | 10 | Partial (warping done, FFT skipped, sigma clip done, star detection done, batch pipeline done) |
+| GPU Acceleration | 12 | 11 | Partial (warping done, FFT skipped, sigma clip done, star detection done, batch pipeline async done) |
 | Advanced Features | 14 | 0 | Not Started |
 | Quality & Polish | 4 | 0 | Not Started |
 | **Total** | **35** | **15** | **In Progress** |

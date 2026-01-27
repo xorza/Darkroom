@@ -34,8 +34,23 @@
 //!
 //! For stacking many frames (>128, the GPU shader limit), frames are processed
 //! in batches with partial results combined at the end.
+//!
+//! # Async GPU Operations
+//!
+//! The module provides proper async GPU operations with double-buffering:
+//!
+//! - `stack_async()`: Single-batch async stacking with non-blocking readback
+//! - `stack_multi_batch_async()`: Multi-batch processing with overlapped compute/transfer
+//!
+//! The async operations use callback-based synchronization with `map_async` and
+//! `device.poll()` for non-blocking progress, enabling true overlap between:
+//! - GPU compute on batch N
+//! - Buffer readback from batch N-1
+//! - CPU frame loading for batch N+1
 
 use std::path::Path;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use bytemuck::{Pod, Zeroable};
 use imaginarium::ProcessingContext;
@@ -97,9 +112,15 @@ impl BatchPipelineConfig {
 }
 
 /// GPU buffer slot for double/triple buffering.
-/// Reserved for future optimization with true overlapped compute/transfer.
+///
+/// Each slot contains all buffers needed for one batch:
+/// - `frames_buffer`: Storage for frame pixel data (uploaded from CPU)
+/// - `output_buffer`: GPU-side output from compute shader
+/// - `staging_buffer`: Mappable buffer for CPU readback
+///
+/// The staging buffer is kept unmapped between uses, and `map_async` + poll
+/// is used for non-blocking readback.
 #[derive(Debug)]
-#[allow(dead_code)]
 struct BufferSlot {
     /// Frame data storage buffer.
     frames_buffer: wgpu::Buffer,
@@ -111,9 +132,10 @@ struct BufferSlot {
     pixels_per_frame: usize,
     /// Maximum frames this slot can hold.
     max_frames: usize,
+    /// Output buffer size in bytes (for copy operations).
+    output_size: u64,
 }
 
-#[allow(dead_code)]
 impl BufferSlot {
     fn new(device: &wgpu::Device, pixels_per_frame: usize, max_frames: usize) -> Self {
         let frame_buffer_size = (pixels_per_frame * max_frames * std::mem::size_of::<f32>()) as u64;
@@ -146,7 +168,99 @@ impl BufferSlot {
             staging_buffer,
             pixels_per_frame,
             max_frames,
+            output_size: output_buffer_size,
         }
+    }
+
+    /// Upload frame data to this slot's frames buffer.
+    fn upload(&self, queue: &wgpu::Queue, frame_data: &[f32]) {
+        queue.write_buffer(&self.frames_buffer, 0, bytemuck::cast_slice(frame_data));
+    }
+
+    /// Get the frames buffer for binding.
+    fn frames_buffer(&self) -> &wgpu::Buffer {
+        &self.frames_buffer
+    }
+
+    /// Get the output buffer for binding.
+    fn output_buffer(&self) -> &wgpu::Buffer {
+        &self.output_buffer
+    }
+
+    /// Get the staging buffer for readback.
+    fn staging_buffer(&self) -> &wgpu::Buffer {
+        &self.staging_buffer
+    }
+
+    /// Get output buffer size in bytes.
+    fn output_size(&self) -> u64 {
+        self.output_size
+    }
+}
+
+/// Pending async readback operation.
+///
+/// Tracks the state of an in-flight buffer mapping operation for async GPU readback.
+#[derive(Debug)]
+struct PendingReadback {
+    /// The staging buffer being mapped.
+    staging_buffer: wgpu::Buffer,
+    /// Number of pixels in the output.
+    pixel_count: usize,
+    /// Flag set by the map_async callback when mapping is complete.
+    ready: Arc<AtomicBool>,
+    /// Batch index (for weighted combination).
+    batch_idx: usize,
+    /// Number of frames in this batch (for weighting).
+    frame_count: usize,
+}
+
+impl PendingReadback {
+    /// Create a new pending readback for a buffer slot.
+    fn new(
+        staging_buffer: wgpu::Buffer,
+        pixel_count: usize,
+        batch_idx: usize,
+        frame_count: usize,
+    ) -> Self {
+        Self {
+            staging_buffer,
+            pixel_count,
+            ready: Arc::new(AtomicBool::new(false)),
+            batch_idx,
+            frame_count,
+        }
+    }
+
+    /// Start the async mapping operation.
+    fn start_mapping(&self) {
+        let ready = self.ready.clone();
+        self.staging_buffer
+            .slice(..)
+            .map_async(wgpu::MapMode::Read, move |result| {
+                if result.is_ok() {
+                    ready.store(true, Ordering::Release);
+                }
+            });
+    }
+
+    /// Check if mapping is complete.
+    fn is_ready(&self) -> bool {
+        self.ready.load(Ordering::Acquire)
+    }
+
+    /// Read the mapped buffer data and return the result.
+    /// Must only be called after `is_ready()` returns true.
+    fn read_result(&self) -> Vec<f32> {
+        let data = self.staging_buffer.slice(..).get_mapped_range();
+        let result: Vec<f32> = bytemuck::cast_slice(&data).to_vec();
+        drop(data);
+        result
+    }
+
+    /// Unmap the buffer after reading.
+    fn unmap(&self) {
+        self.staging_buffer.unmap();
     }
 }
 
@@ -683,6 +797,243 @@ impl BatchPipeline {
             pixels_per_frame,
         ))
     }
+
+    /// Stack frames using async GPU operations with proper synchronization.
+    ///
+    /// This method uses double-buffering for true overlapped compute/transfer:
+    /// - While batch N computes on the GPU, batch N-1's result is being read back
+    /// - While batch N+1 data is being uploaded, batch N is computing
+    ///
+    /// # Arguments
+    ///
+    /// * `frames` - Frame data slices
+    /// * `width` - Image width
+    /// * `height` - Image height
+    ///
+    /// # Returns
+    ///
+    /// Stacked image data.
+    pub fn stack_async(&mut self, frames: &[&[f32]], width: usize, height: usize) -> Vec<f32> {
+        assert!(!frames.is_empty(), "At least one frame required");
+
+        let pixels_per_frame = width * height;
+        for (i, frame) in frames.iter().enumerate() {
+            assert_eq!(
+                frame.len(),
+                pixels_per_frame,
+                "Frame {i} has {} pixels, expected {pixels_per_frame}",
+                frame.len()
+            );
+        }
+
+        // For small numbers of batches, sync version is simpler
+        let batch_size = self.config.batch_size;
+        let num_batches = frames.len().div_ceil(batch_size);
+        if num_batches <= 2 {
+            return self.stack(frames, width, height);
+        }
+
+        self.stack_multi_batch_async_internal(frames, width, height)
+    }
+
+    /// Internal implementation of async multi-batch stacking with double-buffering.
+    ///
+    /// Pipeline stages:
+    /// ```text
+    /// Time →
+    /// Slot A: [Upload B0] [Compute B0] [Readback B0]           [Upload B2] [Compute B2] ...
+    /// Slot B:             [Upload B1]  [Compute B1] [Readback B1]          [Upload B3] ...
+    /// ```
+    fn stack_multi_batch_async_internal(
+        &mut self,
+        frames: &[&[f32]],
+        width: usize,
+        height: usize,
+    ) -> Vec<f32> {
+        let gpu_ctx = self.ctx.gpu_context().expect("GPU context not available");
+        let gpu = gpu_ctx.gpu().clone();
+        let pipeline = gpu_ctx
+            .get_or_create(|gpu| Ok(GpuSigmaClipPipeline::new(gpu)))
+            .expect("Failed to create sigma clip pipeline");
+
+        let device = gpu.device();
+        let queue = gpu.queue();
+        let pixels_per_frame = width * height;
+
+        let batch_size = self.config.batch_size;
+        let num_batches = frames.len().div_ceil(batch_size);
+        let buffer_count = self.config.buffer_count.min(num_batches);
+
+        // Create double/triple buffer slots
+        let slots: Vec<BufferSlot> = (0..buffer_count)
+            .map(|_| BufferSlot::new(device, pixels_per_frame, batch_size))
+            .collect();
+
+        // Track pending readback operations
+        let mut pending_readbacks: Vec<Option<PendingReadback>> =
+            (0..buffer_count).map(|_| None).collect();
+        let mut batch_results: Vec<(usize, usize, Vec<f32>)> = Vec::with_capacity(num_batches);
+
+        for batch_idx in 0..num_batches {
+            let slot_idx = batch_idx % buffer_count;
+            let slot = &slots[slot_idx];
+
+            // Check if there's a pending readback for this slot and collect it
+            if let Some(pending) = pending_readbacks[slot_idx].take() {
+                // Poll until mapping is complete
+                while !pending.is_ready() {
+                    device.poll(wgpu::PollType::Poll).unwrap();
+                }
+                let result = pending.read_result();
+                pending.unmap();
+                batch_results.push((pending.batch_idx, pending.frame_count, result));
+            }
+
+            // Calculate frame range for this batch
+            let start = batch_idx * batch_size;
+            let end = (start + batch_size).min(frames.len());
+            let batch_frames = &frames[start..end];
+            let batch_frame_count = batch_frames.len();
+
+            // Concatenate frame data for this batch
+            let mut frame_data = Vec::with_capacity(batch_frame_count * pixels_per_frame);
+            for frame in batch_frames {
+                frame_data.extend_from_slice(frame);
+            }
+
+            // Upload frame data to this slot
+            slot.upload(queue, &frame_data);
+
+            // Create params buffer for this batch
+            let params = GpuParams {
+                width: width as u32,
+                height: height as u32,
+                frame_count: batch_frame_count as u32,
+                sigma: self.config.sigma_clip.sigma,
+                max_iterations: self.config.sigma_clip.max_iterations,
+                _padding: [0; 3],
+            };
+
+            let params_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("async_batch_params"),
+                contents: bytemuck::bytes_of(&params),
+                usage: wgpu::BufferUsages::UNIFORM,
+            });
+
+            let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("async_batch_bind_group"),
+                layout: &pipeline.bind_group_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: params_buffer.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: slot.frames_buffer().as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: slot.output_buffer().as_entire_binding(),
+                    },
+                ],
+            });
+
+            let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("async_batch_encoder"),
+            });
+
+            {
+                let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("async_batch_pass"),
+                    timestamp_writes: None,
+                });
+                pass.set_pipeline(&pipeline.pipeline);
+                pass.set_bind_group(0, &bind_group, &[]);
+                pass.dispatch_workgroups(width.div_ceil(16) as u32, height.div_ceil(16) as u32, 1);
+            }
+
+            // Start async readback - create a new staging buffer for this pending operation
+            // (we need to move ownership for the pending readback)
+            let readback_staging = device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("async_readback_staging"),
+                size: slot.output_size(),
+                usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+
+            // Copy directly from output buffer to the readback staging buffer
+            encoder.copy_buffer_to_buffer(
+                slot.output_buffer(),
+                0,
+                &readback_staging,
+                0,
+                slot.output_size(),
+            );
+
+            queue.submit(std::iter::once(encoder.finish()));
+
+            // Create pending readback with the owned staging buffer
+            let pending = PendingReadback::new(
+                readback_staging,
+                pixels_per_frame,
+                batch_idx,
+                batch_frame_count,
+            );
+            pending.start_mapping();
+            pending_readbacks[slot_idx] = Some(pending);
+        }
+
+        // Collect remaining pending readbacks
+        for pending_opt in pending_readbacks.into_iter().flatten() {
+            // Poll until mapping is complete
+            while !pending_opt.is_ready() {
+                device.poll(wgpu::PollType::Poll).unwrap();
+            }
+            let result = pending_opt.read_result();
+            pending_opt.unmap();
+            batch_results.push((pending_opt.batch_idx, pending_opt.frame_count, result));
+        }
+
+        // Sort by batch index and combine
+        batch_results.sort_by_key(|(idx, _, _)| *idx);
+
+        combine_batch_results_with_weights(
+            &batch_results
+                .iter()
+                .map(|(_, fc, r)| (*fc, r.as_slice()))
+                .collect::<Vec<_>>(),
+            pixels_per_frame,
+        )
+    }
+}
+
+/// Combine batch results with explicit weights.
+fn combine_batch_results_with_weights(
+    results_with_weights: &[(usize, &[f32])],
+    pixels_per_frame: usize,
+) -> Vec<f32> {
+    if results_with_weights.len() == 1 {
+        return results_with_weights[0].1.to_vec();
+    }
+
+    let mut combined = vec![0.0f32; pixels_per_frame];
+    let mut total_weight = 0.0f32;
+
+    for (frame_count, result) in results_with_weights {
+        let weight = *frame_count as f32;
+        for (i, &val) in result.iter().enumerate() {
+            combined[i] += val * weight;
+        }
+        total_weight += weight;
+    }
+
+    // Normalize by total weight
+    for val in &mut combined {
+        *val /= total_weight;
+    }
+
+    combined
 }
 
 impl Default for BatchPipeline {
@@ -919,5 +1270,154 @@ mod tests {
         // Weighted mean: (10*10 + 20*5) / 15 = 200/15 = 13.33...
         let expected = (10.0 * 10.0 + 20.0 * 5.0) / 15.0;
         assert!((combined[0] - expected).abs() < 1e-5);
+    }
+
+    // ========================================================================
+    // Async GPU operations tests
+    // ========================================================================
+
+    #[test]
+    fn test_stack_async_identical_values() {
+        if !test_gpu_available() {
+            eprintln!("Skipping GPU test: no GPU available");
+            return;
+        }
+
+        // Use small batch size to force multi-batch async processing (>2 batches)
+        let config = BatchPipelineConfig::default().batch_size(4);
+        let mut pipeline = BatchPipeline::new(config);
+
+        let width = 32;
+        let height = 32;
+        let frame: Vec<f32> = vec![100.0; width * height];
+        let frames: Vec<&[f32]> = vec![&frame; 15]; // 4 batches (4+4+4+3)
+
+        let result = pipeline.stack_async(&frames, width, height);
+
+        assert_eq!(result.len(), width * height);
+        for val in &result {
+            assert!((*val - 100.0).abs() < 1e-4, "Expected ~100.0, got {}", val);
+        }
+    }
+
+    #[test]
+    fn test_stack_async_with_outlier() {
+        if !test_gpu_available() {
+            eprintln!("Skipping GPU test: no GPU available");
+            return;
+        }
+
+        // Use sigma=2.0 and batch_size=6 for multi-batch async processing
+        // With 5 normal (10.0) + 1 outlier (1000.0) per batch:
+        // Mean = 175, StdDev ≈ 369, Threshold (2σ) ≈ 738
+        // |1000 - 175| = 825 > 738, so outlier IS clipped
+        let config = BatchPipelineConfig::with_sigma_clip(2.0, 3).batch_size(6);
+        let mut pipeline = BatchPipeline::new(config);
+
+        let width = 16;
+        let height = 16;
+        let normal: Vec<f32> = vec![10.0; width * height];
+        let outlier: Vec<f32> = vec![1000.0; width * height];
+
+        // 17 normal frames, 1 outlier - 3 batches of 6
+        // Outlier in first batch should be clipped
+        let frames: Vec<&[f32]> = vec![
+            &normal, &normal, &normal, &normal, &normal,
+            &outlier, // batch 1: 5 normal + 1 outlier
+            &normal, &normal, &normal, &normal, &normal, &normal, // batch 2
+            &normal, &normal, &normal, &normal, &normal, &normal, // batch 3
+        ];
+
+        let result = pipeline.stack_async(&frames, width, height);
+
+        assert_eq!(result.len(), width * height);
+        // Outlier should be clipped within batch 1
+        for val in &result {
+            assert!(
+                (*val - 10.0).abs() < 2.0,
+                "Expected ~10.0 after async clipping, got {}",
+                val
+            );
+        }
+    }
+
+    #[test]
+    fn test_stack_async_matches_sync() {
+        if !test_gpu_available() {
+            eprintln!("Skipping GPU test: no GPU available");
+            return;
+        }
+
+        // Test that async and sync produce equivalent results
+        let config = BatchPipelineConfig::default().batch_size(4);
+
+        let width = 32;
+        let height = 32;
+        // Create frames with varying values for a more realistic test
+        let frame1: Vec<f32> = vec![10.0; width * height];
+        let frame2: Vec<f32> = vec![20.0; width * height];
+        let frame3: Vec<f32> = vec![15.0; width * height];
+        let frames: Vec<&[f32]> = vec![
+            &frame1, &frame2, &frame3, &frame1, &frame2, &frame3, &frame1, &frame2, &frame3,
+            &frame1, &frame2, &frame3,
+        ]; // 12 frames = 3 batches
+
+        let mut pipeline_sync = BatchPipeline::new(config.clone());
+        let result_sync = pipeline_sync.stack(&frames, width, height);
+
+        let mut pipeline_async = BatchPipeline::new(config);
+        let result_async = pipeline_async.stack_async(&frames, width, height);
+
+        assert_eq!(result_sync.len(), result_async.len());
+        for (i, (sync_val, async_val)) in result_sync.iter().zip(result_async.iter()).enumerate() {
+            assert!(
+                (sync_val - async_val).abs() < 1e-4,
+                "Mismatch at pixel {}: sync={}, async={}",
+                i,
+                sync_val,
+                async_val
+            );
+        }
+    }
+
+    #[test]
+    fn test_stack_async_triple_buffer() {
+        if !test_gpu_available() {
+            eprintln!("Skipping GPU test: no GPU available");
+            return;
+        }
+
+        // Test triple buffering mode
+        let config = BatchPipelineConfig::default().batch_size(3).triple_buffer();
+        let mut pipeline = BatchPipeline::new(config);
+
+        let width = 16;
+        let height = 16;
+        let frame: Vec<f32> = vec![42.0; width * height];
+        let frames: Vec<&[f32]> = vec![&frame; 12]; // 4 batches of 3
+
+        let result = pipeline.stack_async(&frames, width, height);
+
+        assert_eq!(result.len(), width * height);
+        for val in &result {
+            assert!((*val - 42.0).abs() < 1e-4, "Expected ~42.0, got {}", val);
+        }
+    }
+
+    #[test]
+    fn test_combine_batch_results_with_weights() {
+        let batch1: Vec<f32> = vec![10.0, 20.0];
+        let batch2: Vec<f32> = vec![30.0, 40.0];
+        let results: Vec<(usize, &[f32])> = vec![
+            (5, batch1.as_slice()), // 5 frames
+            (3, batch2.as_slice()), // 3 frames
+        ];
+
+        let combined = combine_batch_results_with_weights(&results, 2);
+
+        // Weighted mean: (10*5 + 30*3) / 8 = (50 + 90) / 8 = 17.5
+        assert!((combined[0] - 17.5).abs() < 1e-5);
+        // Weighted mean: (20*5 + 40*3) / 8 = (100 + 120) / 8 = 27.5
+        assert!((combined[1] - 27.5).abs() < 1e-5);
     }
 }

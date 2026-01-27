@@ -518,21 +518,77 @@ combined[pixel] = Σ(batch_result[pixel] × batch_frame_count) / total_frames
 
 This ensures batches with more frames contribute proportionally more to the final result.
 
-### Tests (13 passing)
+### Tests (18 passing)
 
 - Config tests: `test_config_default`, `test_config_with_sigma_clip`, `test_config_batch_size`, `test_config_triple_buffer`
 - Config panic tests: `test_config_batch_size_zero_panics`, `test_config_batch_size_too_large_panics`
 - Stack tests: `test_stack_single_batch`, `test_stack_multi_batch`, `test_stack_single_batch_with_outlier`, `test_stack_with_outlier_multi_batch`
 - Combine tests: `test_combine_batch_results_single`, `test_combine_batch_results_equal_weights`, `test_combine_batch_results_weighted`
+- Async tests: `test_stack_async_identical_values`, `test_stack_async_with_outlier`, `test_stack_async_matches_sync`, `test_stack_async_triple_buffer`, `test_combine_batch_results_with_weights`
 
 ### Exports
 
 - `lumos::BatchPipeline`, `lumos::BatchPipelineConfig`
 
-### Future Optimizations
+---
 
-The module includes infrastructure (BufferSlot struct) for true overlapped compute/transfer using double-buffering, where:
-- Buffer A: GPU computes on batch N
-- Buffer B: CPU uploads batch N+1
+## Async GPU Operations (IMPLEMENTED - 2026-01-27)
 
-This is not yet implemented but the foundation is in place.
+### Overview
+
+True overlapped compute/transfer operations using double-buffering with proper GPU synchronization. The `stack_async()` method provides efficient multi-batch processing where:
+- GPU computes on batch N while batch N-1's result is being read back
+- Different buffer slots are used to avoid resource conflicts
+
+### Architecture
+
+```text
+Timeline for Double-Buffering:
+
+Time →
+Slot A: [Upload B0] [Compute B0] [Readback B0]           [Upload B2] [Compute B2] ...
+Slot B:             [Upload B1]  [Compute B1] [Readback B1]          [Upload B3] ...
+```
+
+### Key Types
+
+```rust
+/// Pending async readback operation
+struct PendingReadback {
+    staging_buffer: wgpu::Buffer,  // Owned buffer for async mapping
+    pixel_count: usize,
+    ready: Arc<AtomicBool>,        // Completion flag set by callback
+    batch_idx: usize,
+    frame_count: usize,
+}
+```
+
+### Synchronization Mechanism
+
+1. **Callback-based completion**: `map_async` callback sets `AtomicBool` when mapping completes
+2. **Non-blocking poll**: `device.poll(PollType::Poll)` checks progress without blocking
+3. **Ordered collection**: Results sorted by batch index before weighted combination
+
+### API
+
+```rust
+let mut pipeline = BatchPipeline::new(config);
+
+// Async stacking with overlapped compute/transfer
+let result = pipeline.stack_async(&frames, width, height);
+
+// For small batch counts (≤2), falls back to sync version
+// For larger batch counts, uses true double-buffering
+```
+
+### Performance Characteristics
+
+- **Best for**: Large frame counts (>2× batch_size) with expensive compute
+- **Overlap benefit**: Readback of batch N-1 overlaps with compute of batch N
+- **Memory tradeoff**: Each pending readback needs its own staging buffer
+
+### Implementation Notes
+
+- Each pending readback owns its staging buffer (moved ownership for callback safety)
+- `AtomicBool` with `Acquire/Release` ordering for cross-thread synchronization
+- Fallback to sync version for small batch counts (overlap overhead not worth it)
