@@ -9,6 +9,7 @@
 //!
 //! ```rust,ignore
 //! use lumos::stacking::comet::{CometStackConfig, ObjectPosition, CompositeMethod};
+//! use lumos::registration::TransformMatrix;
 //!
 //! // User marks comet position at start and end of sequence
 //! let pos_start = ObjectPosition::new(512.5, 384.2, 0.0);  // First frame
@@ -17,9 +18,13 @@
 //! let config = CometStackConfig::new(pos_start, pos_end)
 //!     .composite_method(CompositeMethod::Lighten);
 //!
-//! let result = stack_comet(&paths, &config)?;
+//! // Compute comet-aligned transform from star-aligned transform
+//! let star_transform: TransformMatrix = /* from registration */;
+//! let frame_timestamp = 1800.0; // 30 minutes into sequence
+//! let comet_transform = config.comet_aligned_transform(&star_transform, frame_timestamp, 0.0);
 //! ```
 
+use crate::registration::TransformMatrix;
 use crate::stacking::local_normalization::NormalizationMethod;
 use crate::stacking::weighted::RejectionMethod;
 
@@ -160,6 +165,44 @@ impl CometStackConfig {
         let dy = self.pos_end.y - self.pos_start.y;
         (dx * dx + dy * dy).sqrt()
     }
+
+    /// Compute a comet-aligned transform from a star-aligned transform.
+    ///
+    /// This applies the frame-specific comet offset to the given star-aligned
+    /// transform, producing a transform that aligns the comet instead of the stars.
+    ///
+    /// # Arguments
+    /// * `star_transform` - Transform computed from star registration
+    /// * `frame_timestamp` - Timestamp of this frame
+    /// * `ref_timestamp` - Timestamp of the reference frame
+    ///
+    /// # Returns
+    /// A new transform that aligns the comet to its position in the reference frame.
+    ///
+    /// # How It Works
+    ///
+    /// The comet moves across frames. To align ON the comet:
+    /// 1. Apply the star transform to align stars (this misaligns the comet)
+    /// 2. Apply an additional translation to shift the comet back to its reference position
+    ///
+    /// The comet offset is computed as: `offset = -velocity × (frame_time - ref_time)`
+    ///
+    /// The composition is: `offset_transform ∘ star_transform` which means
+    /// star_transform is applied first, then the offset.
+    pub fn comet_aligned_transform(
+        &self,
+        star_transform: &TransformMatrix,
+        frame_timestamp: f64,
+        ref_timestamp: f64,
+    ) -> TransformMatrix {
+        let (dx, dy) = compute_comet_offset(self, frame_timestamp, ref_timestamp);
+        let offset_transform = TransformMatrix::translation(dx, dy);
+
+        // offset_transform.compose(star_transform) means:
+        // Apply star_transform first, then offset_transform
+        // (compose applies `other` first, then `self`)
+        offset_transform.compose(star_transform)
+    }
 }
 
 /// Result of comet stacking operation.
@@ -256,6 +299,54 @@ pub fn compute_comet_offset(
     // The comet has moved by (vx*dt, vy*dt) relative to the reference frame.
     // To align ON the comet, we need to shift back by this amount.
     (-vx * dt, -vy * dt)
+}
+
+/// Apply comet offset to a star-aligned transform.
+///
+/// This is a convenience function that applies the frame-specific comet offset
+/// to a star-aligned transform, producing a transform that aligns the comet
+/// instead of the stars.
+///
+/// # Arguments
+/// * `star_transform` - Transform computed from star registration
+/// * `config` - Comet stacking configuration (defines object velocity)
+/// * `frame_timestamp` - Timestamp of this frame
+/// * `ref_timestamp` - Timestamp of the reference frame
+///
+/// # Returns
+/// A new transform that aligns the comet to its position in the reference frame.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use lumos::stacking::comet::{apply_comet_offset_to_transform, CometStackConfig, ObjectPosition};
+/// use lumos::registration::TransformMatrix;
+///
+/// // Define comet motion
+/// let config = CometStackConfig::new(
+///     ObjectPosition::new(100.0, 200.0, 0.0),    // First frame
+///     ObjectPosition::new(150.0, 210.0, 3600.0), // After 1 hour
+/// );
+///
+/// // For each frame, modify its transform
+/// for (frame_idx, star_transform) in star_transforms.iter().enumerate() {
+///     let frame_time = frame_timestamps[frame_idx];
+///     let comet_transform = apply_comet_offset_to_transform(
+///         star_transform,
+///         &config,
+///         frame_time,
+///         frame_timestamps[0], // reference is first frame
+///     );
+///     // Use comet_transform for warping this frame in the comet-aligned stack
+/// }
+/// ```
+pub fn apply_comet_offset_to_transform(
+    star_transform: &TransformMatrix,
+    config: &CometStackConfig,
+    frame_timestamp: f64,
+    ref_timestamp: f64,
+) -> TransformMatrix {
+    config.comet_aligned_transform(star_transform, frame_timestamp, ref_timestamp)
 }
 
 #[cfg(test)]
@@ -459,5 +550,122 @@ mod tests {
 
         assert_eq!(result.channels(), 1);
         assert_eq!(result.pixel_count(), 100);
+    }
+
+    // ========== Comet-Aligned Transform Tests ==========
+
+    #[test]
+    fn test_comet_aligned_transform_at_reference() {
+        let pos_start = ObjectPosition::new(100.0, 200.0, 0.0);
+        let pos_end = ObjectPosition::new(110.0, 220.0, 100.0);
+        let config = CometStackConfig::new(pos_start, pos_end);
+
+        // Identity star transform
+        let star_transform = TransformMatrix::identity();
+
+        // At reference timestamp, comet offset should be zero
+        let comet_transform = config.comet_aligned_transform(&star_transform, 0.0, 0.0);
+
+        // Result should be identity (no offset needed)
+        let (tx, ty) = comet_transform.translation_components();
+        assert!((tx - 0.0).abs() < 1e-10);
+        assert!((ty - 0.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_comet_aligned_transform_after_time() {
+        let pos_start = ObjectPosition::new(100.0, 200.0, 0.0);
+        let pos_end = ObjectPosition::new(110.0, 220.0, 100.0); // 0.1 px/s in x, 0.2 px/s in y
+        let config = CometStackConfig::new(pos_start, pos_end);
+
+        // Identity star transform
+        let star_transform = TransformMatrix::identity();
+
+        // After 50 seconds, comet moved 5 pixels in x, 10 pixels in y
+        // To align ON comet, we need offset (-5, -10)
+        let comet_transform = config.comet_aligned_transform(&star_transform, 50.0, 0.0);
+
+        let (tx, ty) = comet_transform.translation_components();
+        assert!((tx - (-5.0)).abs() < 1e-10);
+        assert!((ty - (-10.0)).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_comet_aligned_transform_with_translation() {
+        let pos_start = ObjectPosition::new(100.0, 200.0, 0.0);
+        let pos_end = ObjectPosition::new(110.0, 220.0, 100.0);
+        let config = CometStackConfig::new(pos_start, pos_end);
+
+        // Star transform with existing translation
+        let star_transform = TransformMatrix::translation(10.0, 20.0);
+
+        // After 50 seconds, comet offset is (-5, -10)
+        // Combined with star translation (10, 20), result should be (5, 10)
+        let comet_transform = config.comet_aligned_transform(&star_transform, 50.0, 0.0);
+
+        let (tx, ty) = comet_transform.translation_components();
+        assert!((tx - 5.0).abs() < 1e-10);
+        assert!((ty - 10.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_comet_aligned_transform_with_rotation() {
+        let pos_start = ObjectPosition::new(0.0, 0.0, 0.0);
+        let pos_end = ObjectPosition::new(100.0, 0.0, 100.0); // 1 px/s in x only
+        let config = CometStackConfig::new(pos_start, pos_end);
+
+        // Star transform with 90 degree rotation
+        let angle = std::f64::consts::FRAC_PI_2;
+        let star_transform = TransformMatrix::euclidean(0.0, 0.0, angle);
+
+        // After 50 seconds, comet offset is (-50, 0)
+        // But the compose operation applies star_transform first, then offset
+        // So the offset is NOT rotated by the star transform
+        let comet_transform = config.comet_aligned_transform(&star_transform, 50.0, 0.0);
+
+        // Apply both transforms to origin to verify
+        let (x, y) = comet_transform.apply(0.0, 0.0);
+        // Star transform: (0,0) -> (0,0) (rotation around origin)
+        // Then offset: (0,0) + (-50,0) = (-50,0)
+        assert!((x - (-50.0)).abs() < 1e-10);
+        assert!((y - 0.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_apply_comet_offset_to_transform() {
+        let pos_start = ObjectPosition::new(100.0, 200.0, 0.0);
+        let pos_end = ObjectPosition::new(110.0, 220.0, 100.0);
+        let config = CometStackConfig::new(pos_start, pos_end);
+
+        let star_transform = TransformMatrix::identity();
+
+        // Test that the standalone function gives same result as method
+        let via_method = config.comet_aligned_transform(&star_transform, 50.0, 0.0);
+        let via_function = apply_comet_offset_to_transform(&star_transform, &config, 50.0, 0.0);
+
+        let (tx1, ty1) = via_method.translation_components();
+        let (tx2, ty2) = via_function.translation_components();
+
+        assert!((tx1 - tx2).abs() < 1e-10);
+        assert!((ty1 - ty2).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_comet_aligned_transform_point_mapping() {
+        let pos_start = ObjectPosition::new(100.0, 100.0, 0.0);
+        let pos_end = ObjectPosition::new(200.0, 150.0, 100.0);
+        let config = CometStackConfig::new(pos_start, pos_end);
+
+        let star_transform = TransformMatrix::translation(5.0, 10.0);
+
+        // Frame at t=50: comet has moved (50, 25) pixels from start
+        // Comet offset: (-50, -25)
+        // Combined: (5, 10) + (-50, -25) = (-45, -15)
+        let comet_transform = config.comet_aligned_transform(&star_transform, 50.0, 0.0);
+
+        // A point at (0, 0) should map to (-45, -15)
+        let (x, y) = comet_transform.apply(0.0, 0.0);
+        assert!((x - (-45.0)).abs() < 1e-10);
+        assert!((y - (-15.0)).abs() < 1e-10);
     }
 }

@@ -44,8 +44,8 @@ pub use gpu::{
 // Re-export comet stacking types for public API
 #[allow(unused_imports)]
 pub use comet::{
-    CometStackConfig, CometStackResult, CompositeMethod, ObjectPosition, compute_comet_offset,
-    interpolate_position,
+    CometStackConfig, CometStackResult, CompositeMethod, ObjectPosition,
+    apply_comet_offset_to_transform, compute_comet_offset, interpolate_position,
 };
 
 #[cfg(feature = "bench")]

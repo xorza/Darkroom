@@ -827,6 +827,38 @@ compute_comet_offset(&config, frame_timestamp, ref_timestamp) -> (dx, dy)
 - `lumos::compute_comet_offset`
 
 **Next Steps:**
-- Implement frame-specific offset in registration (task 3)
 - Implement composite output generation (task 4)
 - Write integration tests with synthetic comet data (task 5)
+
+### Frame-Specific Offset Implementation (COMPLETE - 2026-01-27)
+
+**New Functions:**
+```rust
+// CometStackConfig method - compute comet-aligned transform
+config.comet_aligned_transform(&star_transform, frame_timestamp, ref_timestamp) -> TransformMatrix
+
+// Standalone convenience function
+apply_comet_offset_to_transform(&star_transform, &config, frame_timestamp, ref_timestamp) -> TransformMatrix
+```
+
+**Transform Composition Logic:**
+The comet-aligned transform is computed as: `offset_transform ∘ star_transform`
+
+This means:
+1. First apply star_transform (aligns stars)
+2. Then apply offset_transform (shifts to align comet)
+
+The offset is: `(-vx × dt, -vy × dt)` where:
+- `vx, vy` = comet velocity (pixels per time unit)
+- `dt` = `frame_timestamp - ref_timestamp`
+
+**Test Coverage (6 new tests):**
+- `test_comet_aligned_transform_at_reference` - zero offset at reference time
+- `test_comet_aligned_transform_after_time` - correct offset after elapsed time
+- `test_comet_aligned_transform_with_translation` - combines with existing translation
+- `test_comet_aligned_transform_with_rotation` - composes correctly with rotation
+- `test_apply_comet_offset_to_transform` - standalone function matches method
+- `test_comet_aligned_transform_point_mapping` - end-to-end point transformation
+
+**Public Exports:**
+- `lumos::apply_comet_offset_to_transform`

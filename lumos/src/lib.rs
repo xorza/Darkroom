@@ -160,6 +160,7 @@ pub use stacking::{
     StackingMethod,
     StackingProgress,
     StackingStage,
+    apply_comet_offset_to_transform,
     compute_comet_offset,
     interpolate_position,
 };

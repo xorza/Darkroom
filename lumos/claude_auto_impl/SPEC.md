@@ -105,7 +105,7 @@ with tests and running verification commands per project conventions.
 ### 3.1 Comet/Asteroid Stacking Mode
 - [x] Research dual-stack approach algorithms
 - [x] Design API for comet position input (t1, t2 positions)
-- [ ] Implement frame-specific offset based on timestamp interpolation
+- [x] Implement frame-specific offset based on timestamp interpolation
 - [ ] Implement composite output (stars from one stack, comet from other)
 - [ ] Write integration tests with synthetic comet data
 - [ ] Run verification commands
