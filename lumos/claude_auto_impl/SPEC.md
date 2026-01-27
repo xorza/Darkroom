@@ -22,7 +22,7 @@ with tests and running verification commands per project conventions.
 
 ### 1.1 Research & Design
 - [x] Research PixInsight-style local normalization algorithms
-- [ ] Document approach in `src/stacking/NOTES-AI.md`
+- [x] Document approach in `src/stacking/NOTES-AI.md`
 - [ ] Design API that fits existing `NormalizationMethod` enum
 
 ### 1.2 Implementation
