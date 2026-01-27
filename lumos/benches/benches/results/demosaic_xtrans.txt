@@ -1,0 +1,7 @@
+xtrans_demosaic/bilinear/scalar
+                        time:   [349.39 ms 349.73 ms 350.09 ms]
+xtrans_demosaic/bilinear/simd
+                        time:   [178.24 ms 178.38 ms 178.54 ms]
+Found 1 outliers among 20 measurements (5.00%)
+  1 (5.00%) high mild
+

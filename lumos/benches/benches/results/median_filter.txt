@@ -1,0 +1,67 @@
+median_filter_3x3/size/512x512
+                        time:   [73.174 µs 73.489 µs 73.885 µs]
+                        thrpt:  [3.5480 Gelem/s 3.5671 Gelem/s 3.5825 Gelem/s]
+Found 9 outliers among 100 measurements (9.00%)
+  1 (1.00%) low mild
+  5 (5.00%) high mild
+  3 (3.00%) high severe
+median_filter_3x3/size/1024x1024
+                        time:   [197.64 µs 198.66 µs 199.89 µs]
+                        thrpt:  [5.2457 Gelem/s 5.2782 Gelem/s 5.3055 Gelem/s]
+Found 11 outliers among 100 measurements (11.00%)
+  3 (3.00%) high mild
+  8 (8.00%) high severe
+median_filter_3x3/size/4096x4096
+                        time:   [18.706 ms 18.911 ms 19.120 ms]
+                        thrpt:  [877.45 Melem/s 887.17 Melem/s 896.90 Melem/s]
+Found 2 outliers among 100 measurements (2.00%)
+  2 (2.00%) high mild
+
+median_filter_row/scalar/256
+                        time:   [248.58 ns 248.77 ns 248.98 ns]
+                        thrpt:  [1.0282 Gelem/s 1.0291 Gelem/s 1.0299 Gelem/s]
+Found 7 outliers among 100 measurements (7.00%)
+  6 (6.00%) high mild
+  1 (1.00%) high severe
+median_filter_row/simd/256
+                        time:   [141.63 ns 141.75 ns 141.89 ns]
+                        thrpt:  [1.8042 Gelem/s 1.8060 Gelem/s 1.8076 Gelem/s]
+Found 7 outliers among 100 measurements (7.00%)
+  7 (7.00%) high mild
+median_filter_row/scalar/512
+                        time:   [494.87 ns 495.28 ns 495.75 ns]
+                        thrpt:  [1.0328 Gelem/s 1.0338 Gelem/s 1.0346 Gelem/s]
+Found 13 outliers among 100 measurements (13.00%)
+  10 (10.00%) high mild
+  3 (3.00%) high severe
+median_filter_row/simd/512
+                        time:   [263.42 ns 263.62 ns 263.86 ns]
+                        thrpt:  [1.9404 Gelem/s 1.9422 Gelem/s 1.9437 Gelem/s]
+Found 12 outliers among 100 measurements (12.00%)
+  7 (7.00%) high mild
+  5 (5.00%) high severe
+median_filter_row/scalar/1024
+                        time:   [991.17 ns 992.41 ns 994.01 ns]
+                        thrpt:  [1.0302 Gelem/s 1.0318 Gelem/s 1.0331 Gelem/s]
+Found 11 outliers among 100 measurements (11.00%)
+  9 (9.00%) high mild
+  2 (2.00%) high severe
+median_filter_row/simd/1024
+                        time:   [516.33 ns 516.67 ns 517.07 ns]
+                        thrpt:  [1.9804 Gelem/s 1.9819 Gelem/s 1.9832 Gelem/s]
+Found 15 outliers among 100 measurements (15.00%)
+  12 (12.00%) high mild
+  3 (3.00%) high severe
+median_filter_row/scalar/2048
+                        time:   [1.9678 µs 1.9710 µs 1.9747 µs]
+                        thrpt:  [1.0371 Gelem/s 1.0391 Gelem/s 1.0407 Gelem/s]
+Found 9 outliers among 100 measurements (9.00%)
+  6 (6.00%) high mild
+  3 (3.00%) high severe
+median_filter_row/simd/2048
+                        time:   [1.0033 µs 1.0039 µs 1.0046 µs]
+                        thrpt:  [2.0386 Gelem/s 2.0400 Gelem/s 2.0412 Gelem/s]
+Found 6 outliers among 100 measurements (6.00%)
+  1 (1.00%) high mild
+  5 (5.00%) high severe
+

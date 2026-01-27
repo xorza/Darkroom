@@ -1,0 +1,192 @@
+gaussian_kernel/gaussian_kernel_1d/1
+                        time:   [42.491 ns 42.529 ns 42.573 ns]
+                        change: [−0.1959% −0.0822% +0.0153%] (p = 0.14 > 0.05)
+                        No change in performance detected.
+Found 6 outliers among 100 measurements (6.00%)
+  3 (3.00%) high mild
+  3 (3.00%) high severe
+gaussian_kernel/gaussian_kernel_1d/2
+                        time:   [57.932 ns 57.971 ns 58.017 ns]
+                        change: [−0.1402% −0.0585% +0.0256%] (p = 0.17 > 0.05)
+                        No change in performance detected.
+Found 9 outliers among 100 measurements (9.00%)
+  2 (2.00%) high mild
+  7 (7.00%) high severe
+gaussian_kernel/gaussian_kernel_1d/3
+                        time:   [83.819 ns 83.896 ns 83.971 ns]
+                        change: [−0.5748% −0.4315% −0.2882%] (p = 0.00 < 0.05)
+                        Change within noise threshold.
+Found 3 outliers among 100 measurements (3.00%)
+  3 (3.00%) high mild
+gaussian_kernel/gaussian_kernel_1d/4
+                        time:   [98.243 ns 98.302 ns 98.358 ns]
+Found 4 outliers among 100 measurements (4.00%)
+  3 (3.00%) high mild
+  1 (1.00%) high severe
+gaussian_kernel/gaussian_kernel_1d/5
+                        time:   [117.75 ns 117.93 ns 118.11 ns]
+Found 12 outliers among 100 measurements (12.00%)
+  1 (1.00%) low mild
+  10 (10.00%) high mild
+  1 (1.00%) high severe
+
+gaussian_convolve/256x256/sigma_1
+                        time:   [127.58 µs 130.38 µs 133.52 µs]
+                        thrpt:  [490.82 Melem/s 502.67 Melem/s 513.67 Melem/s]
+Found 3 outliers among 20 measurements (15.00%)
+  3 (15.00%) high severe
+gaussian_convolve/256x256/sigma_2
+                        time:   [211.94 µs 215.20 µs 219.28 µs]
+                        thrpt:  [298.88 Melem/s 304.54 Melem/s 309.22 Melem/s]
+Found 4 outliers among 20 measurements (20.00%)
+  4 (20.00%) high severe
+gaussian_convolve/256x256/sigma_3
+                        time:   [292.00 µs 296.27 µs 302.06 µs]
+                        thrpt:  [216.97 Melem/s 221.20 Melem/s 224.44 Melem/s]
+Found 4 outliers among 20 measurements (20.00%)
+  1 (5.00%) high mild
+  3 (15.00%) high severe
+gaussian_convolve/512x512/sigma_1
+                        time:   [452.09 µs 455.92 µs 460.38 µs]
+                        thrpt:  [569.41 Melem/s 574.98 Melem/s 579.85 Melem/s]
+Found 1 outliers among 20 measurements (5.00%)
+  1 (5.00%) high severe
+gaussian_convolve/512x512/sigma_2
+                        time:   [786.03 µs 790.97 µs 797.86 µs]
+                        thrpt:  [328.56 Melem/s 331.42 Melem/s 333.50 Melem/s]
+Found 3 outliers among 20 measurements (15.00%)
+  1 (5.00%) low mild
+  2 (10.00%) high severe
+gaussian_convolve/512x512/sigma_3
+                        time:   [1.1213 ms 1.1286 ms 1.1387 ms]
+                        thrpt:  [230.20 Melem/s 232.27 Melem/s 233.79 Melem/s]
+Found 4 outliers among 20 measurements (20.00%)
+  1 (5.00%) low mild
+  1 (5.00%) high mild
+  2 (10.00%) high severe
+gaussian_convolve/1024x1024/sigma_1
+                        time:   [5.7652 ms 5.8473 ms 5.9416 ms]
+                        thrpt:  [176.48 Melem/s 179.33 Melem/s 181.88 Melem/s]
+Found 1 outliers among 20 measurements (5.00%)
+  1 (5.00%) high mild
+gaussian_convolve/1024x1024/sigma_2
+                        time:   [7.0009 ms 7.0485 ms 7.1099 ms]
+                        thrpt:  [147.48 Melem/s 148.77 Melem/s 149.78 Melem/s]
+Found 3 outliers among 20 measurements (15.00%)
+  1 (5.00%) high mild
+  2 (10.00%) high severe
+gaussian_convolve/1024x1024/sigma_3
+                        time:   [8.2710 ms 8.3279 ms 8.3817 ms]
+                        thrpt:  [125.10 Melem/s 125.91 Melem/s 126.78 Melem/s]
+gaussian_convolve/2048x2048/sigma_1
+                        time:   [15.204 ms 15.358 ms 15.484 ms]
+                        thrpt:  [270.89 Melem/s 273.11 Melem/s 275.87 Melem/s]
+Found 1 outliers among 20 measurements (5.00%)
+  1 (5.00%) high severe
+gaussian_convolve/2048x2048/sigma_2
+                        time:   [20.359 ms 20.536 ms 20.715 ms]
+                        thrpt:  [202.47 Melem/s 204.24 Melem/s 206.01 Melem/s]
+Found 1 outliers among 20 measurements (5.00%)
+  1 (5.00%) low mild
+gaussian_convolve/2048x2048/sigma_3
+                        time:   [25.045 ms 25.315 ms 25.582 ms]
+                        thrpt:  [163.96 Melem/s 165.68 Melem/s 167.47 Melem/s]
+Found 1 outliers among 20 measurements (5.00%)
+  1 (5.00%) low mild
+
+matched_filter/512x512/fwhm_3
+                        time:   [625.94 µs 630.98 µs 636.19 µs]
+                        thrpt:  [412.06 Melem/s 415.45 Melem/s 418.80 Melem/s]
+Found 2 outliers among 20 measurements (10.00%)
+  1 (5.00%) high mild
+  1 (5.00%) high severe
+matched_filter/512x512/fwhm_4
+                        time:   [848.79 µs 857.00 µs 867.91 µs]
+                        thrpt:  [302.04 Melem/s 305.89 Melem/s 308.84 Melem/s]
+Found 4 outliers among 20 measurements (20.00%)
+  2 (10.00%) high mild
+  2 (10.00%) high severe
+matched_filter/512x512/fwhm_5
+                        time:   [952.09 µs 959.06 µs 967.08 µs]
+                        thrpt:  [271.07 Melem/s 273.34 Melem/s 275.34 Melem/s]
+Found 3 outliers among 20 measurements (15.00%)
+  2 (10.00%) high mild
+  1 (5.00%) high severe
+matched_filter/1024x1024/fwhm_3
+                        time:   [2.8217 ms 2.8360 ms 2.8570 ms]
+                        thrpt:  [367.02 Melem/s 369.73 Melem/s 371.61 Melem/s]
+Found 3 outliers among 20 measurements (15.00%)
+  1 (5.00%) high mild
+  2 (10.00%) high severe
+matched_filter/1024x1024/fwhm_4
+                        time:   [3.8185 ms 3.8376 ms 3.8545 ms]
+                        thrpt:  [272.04 Melem/s 273.24 Melem/s 274.61 Melem/s]
+Found 1 outliers among 20 measurements (5.00%)
+  1 (5.00%) high severe
+matched_filter/1024x1024/fwhm_5
+                        time:   [4.1551 ms 4.1910 ms 4.2290 ms]
+                        thrpt:  [247.95 Melem/s 250.20 Melem/s 252.36 Melem/s]
+Found 2 outliers among 20 measurements (10.00%)
+  1 (5.00%) high mild
+  1 (5.00%) high severe
+matched_filter/2048x2048/fwhm_3
+                        time:   [21.531 ms 21.697 ms 21.867 ms]
+                        thrpt:  [191.81 Melem/s 193.31 Melem/s 194.80 Melem/s]
+Found 2 outliers among 20 measurements (10.00%)
+  1 (5.00%) low severe
+  1 (5.00%) low mild
+matched_filter/2048x2048/fwhm_4
+                        time:   [25.027 ms 25.152 ms 25.311 ms]
+                        thrpt:  [165.71 Melem/s 166.76 Melem/s 167.59 Melem/s]
+matched_filter/2048x2048/fwhm_5
+                        time:   [25.775 ms 25.984 ms 26.209 ms]
+                        thrpt:  [160.03 Melem/s 161.42 Melem/s 162.72 Melem/s]
+
+convolution_utils/fwhm_to_sigma
+                        time:   [6.2129 ns 6.2188 ns 6.2250 ns]
+Found 5 outliers among 100 measurements (5.00%)
+  4 (4.00%) high mild
+  1 (1.00%) high severe
+
+convolution_simd_vs_scalar/convolve_row_scalar/256
+                        time:   [3.1404 µs 3.1447 µs 3.1502 µs]
+                        thrpt:  [81.263 Melem/s 81.407 Melem/s 81.519 Melem/s]
+Found 2 outliers among 50 measurements (4.00%)
+  2 (4.00%) high mild
+convolution_simd_vs_scalar/convolve_row_simd/256
+                        time:   [250.06 ns 250.66 ns 251.27 ns]
+                        thrpt:  [1.0188 Gelem/s 1.0213 Gelem/s 1.0238 Gelem/s]
+convolution_simd_vs_scalar/convolve_row_scalar/512
+                        time:   [6.2905 µs 6.2965 µs 6.3041 µs]
+                        thrpt:  [81.217 Melem/s 81.315 Melem/s 81.392 Melem/s]
+Found 5 outliers among 50 measurements (10.00%)
+  5 (10.00%) high severe
+convolution_simd_vs_scalar/convolve_row_simd/512
+                        time:   [398.55 ns 398.99 ns 399.51 ns]
+                        thrpt:  [1.2816 Gelem/s 1.2832 Gelem/s 1.2847 Gelem/s]
+Found 1 outliers among 50 measurements (2.00%)
+  1 (2.00%) high severe
+convolution_simd_vs_scalar/convolve_row_scalar/1024
+                        time:   [12.256 µs 12.268 µs 12.285 µs]
+                        thrpt:  [83.351 Melem/s 83.469 Melem/s 83.551 Melem/s]
+Found 4 outliers among 50 measurements (8.00%)
+  1 (2.00%) high mild
+  3 (6.00%) high severe
+convolution_simd_vs_scalar/convolve_row_simd/1024
+                        time:   [623.79 ns 624.38 ns 625.01 ns]
+                        thrpt:  [1.6384 Gelem/s 1.6400 Gelem/s 1.6416 Gelem/s]
+Found 1 outliers among 50 measurements (2.00%)
+  1 (2.00%) high mild
+convolution_simd_vs_scalar/convolve_row_scalar/2048
+                        time:   [24.351 µs 24.368 µs 24.396 µs]
+                        thrpt:  [83.950 Melem/s 84.046 Melem/s 84.105 Melem/s]
+Found 5 outliers among 50 measurements (10.00%)
+  1 (2.00%) high mild
+  4 (8.00%) high severe
+convolution_simd_vs_scalar/convolve_row_simd/2048
+                        time:   [1.1521 µs 1.1528 µs 1.1534 µs]
+                        thrpt:  [1.7756 Gelem/s 1.7766 Gelem/s 1.7776 Gelem/s]
+Found 2 outliers among 50 measurements (4.00%)
+  1 (2.00%) high mild
+  1 (2.00%) high severe
+

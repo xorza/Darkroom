@@ -1,0 +1,26 @@
+deblend_local_maxima/local_maxima/10pairs_sep15
+                        time:   [23.329 µs 23.349 µs 23.373 µs]
+                        thrpt:  [427.85 Kelem/s 428.29 Kelem/s 428.65 Kelem/s]
+Found 5 outliers among 50 measurements (10.00%)
+  1 (2.00%) high mild
+  4 (8.00%) high severe
+deblend_local_maxima/local_maxima/50pairs_sep12
+                        time:   [126.87 µs 127.06 µs 127.26 µs]
+                        thrpt:  [392.90 Kelem/s 393.50 Kelem/s 394.09 Kelem/s]
+deblend_local_maxima/local_maxima/100pairs_sep10
+                        time:   [305.92 µs 306.13 µs 306.37 µs]
+                        thrpt:  [326.41 Kelem/s 326.66 Kelem/s 326.88 Kelem/s]
+Found 6 outliers among 50 measurements (12.00%)
+  3 (6.00%) high mild
+  3 (6.00%) high severe
+
+deblend_multi_threshold/multi_threshold/10pairs_sep15
+                        time:   [22.478 ms 22.491 ms 22.506 ms]
+                        thrpt:  [444.33  elem/s 444.63  elem/s 444.88  elem/s]
+Found 2 outliers among 30 measurements (6.67%)
+  1 (3.33%) high mild
+  1 (3.33%) high severe
+deblend_multi_threshold/multi_threshold/50pairs_sep12
+                        time:   [99.955 ms 100.02 ms 100.08 ms]
+                        thrpt:  [499.59  elem/s 499.91  elem/s 500.22  elem/s]
+

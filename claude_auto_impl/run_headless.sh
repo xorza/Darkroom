@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # =============================================================================
-# Claude Code FULLY AUTONOMOUS Runner - Lumos Project (Headless Mode)
+# Claude Code FULLY AUTONOMOUS Runner
 # =============================================================================
 # WARNING: This runs WITHOUT any confirmation prompts!
 # Only use in isolated environments (containers, VMs, sandboxes)
@@ -51,7 +51,7 @@ echo ""
 echo "This will run Claude Code with --dangerouslySkipPermissions"
 echo "All file operations will be executed without confirmation."
 echo ""
-echo -e "Project: ${CYAN}lumos${NC}"
+echo -e "Project: ${CYAN}Scenarium${NC}"
 echo -e "Root:    ${CYAN}$PROJECT_ROOT${NC}"
 echo ""
 
@@ -63,7 +63,7 @@ if [[ "$SKIP_CONFIRM" != "true" ]]; then
     fi
 fi
 
-CLAUDE_PROMPT="You are implementing the lumos astrophotography stacking library autonomously.
+CLAUDE_PROMPT="You are implementing the project autonomously.
 
 ## READ FIRST:
 1. \`$SPEC_FILE\` - find next \`[ ]\` task
@@ -84,19 +84,19 @@ CLAUDE_PROMPT="You are implementing the lumos astrophotography stacking library 
 
 4. **VERIFY**: Run:
    \`\`\`
-   cargo nextest run -p lumos && cargo fmt && cargo check && cargo clippy --all-targets -- -D warnings
+   cargo nextest run -p <project> && cargo fmt && cargo check && cargo clippy --all-targets -- -D warnings
    \`\`\`
    Must pass before proceeding.
 
 5. **BENCHMARK** (optimizations only):
    \`\`\`
-   cargo bench -p lumos --features bench --bench <name> | tee benches/<name>_results.txt
+   cargo bench -p <project> --features bench --bench <name> | tee benches/<name>_results.txt
    \`\`\`
    If <10% improvement: document, remove code, mark \"[SKIPPED]\"
 
 6. **UPDATE**: Mark \`[x]\` in SPEC.md. Update NOTES-AI.md.
 
-7. **COMMIT**: \`git commit -m \"lumos: <description>\"\`
+7. **COMMIT**: \`git commit -m \"<description>\"\`
 
 RULES:
 - ONE task per response
