@@ -1,0 +1,132 @@
+    Finished `bench` profile [optimized + debuginfo] target(s) in 0.17s
+     Running benches/full_pipeline.rs (target/release/deps/full_pipeline-0dd534a8a5025826)
+Loading 10 images from $HOME/projects/Siril_Tutorial/calibrated_lights
+Loaded 10 calibrated lights for benchmarking
+Benchmarking star_detection/single_image/6032
+Benchmarking star_detection/single_image/6032: Warming up for 3.0000 s
+
+Warning: Unable to complete 10 samples in 5.0s. You may wish to increase target time to 6.2s.
+Benchmarking star_detection/single_image/6032: Collecting 10 samples in estimated 6.2042 s (10 iterations)
+Benchmarking star_detection/single_image/6032: Analyzing
+star_detection/single_image/6032
+                        time:   [611.61 ms 614.52 ms 617.54 ms]
+Benchmarking star_detection/all_images/10
+Benchmarking star_detection/all_images/10: Warming up for 3.0000 s
+
+Warning: Unable to complete 10 samples in 5.0s. You may wish to increase target time to 61.4s.
+Benchmarking star_detection/all_images/10: Collecting 10 samples in estimated 61.359 s (10 iterations)
+Benchmarking star_detection/all_images/10: Analyzing
+star_detection/all_images/10
+                        time:   [6.1365 s 6.1431 s 6.1495 s]
+
+Benchmarking registration/single_pair
+Benchmarking registration/single_pair: Warming up for 3.0000 s
+Benchmarking registration/single_pair: Collecting 10 samples in estimated 6.5753 s (20 iterations)
+Benchmarking registration/single_pair: Analyzing
+registration/single_pair
+                        time:   [318.94 ms 330.19 ms 339.81 ms]
+Found 2 outliers among 10 measurements (20.00%)
+  2 (20.00%) low mild
+Benchmarking registration/all_to_reference/9
+Benchmarking registration/all_to_reference/9: Warming up for 3.0000 s
+
+Warning: Unable to complete 10 samples in 5.0s. You may wish to increase target time to 28.3s.
+Benchmarking registration/all_to_reference/9: Collecting 10 samples in estimated 28.325 s (10 iterations)
+Benchmarking registration/all_to_reference/9: Analyzing
+registration/all_to_reference/9
+                        time:   [2.8259 s 2.8590 s 2.8903 s]
+
+Benchmarking warping/cpu_sequential_bilinear
+Benchmarking warping/cpu_sequential_bilinear: Warming up for 3.0000 s
+Benchmarking warping/cpu_sequential_bilinear: Collecting 10 samples in estimated 5.5835 s (20 iterations)
+Benchmarking warping/cpu_sequential_bilinear: Analyzing
+warping/cpu_sequential_bilinear
+                        time:   [278.02 ms 278.95 ms 280.02 ms]
+                        change: [+0.3258% +0.7217% +1.1231%] (p = 0.00 < 0.05)
+                        Change within noise threshold.
+Found 1 outliers among 10 measurements (10.00%)
+  1 (10.00%) high mild
+Benchmarking warping/cpu_parallel_bilinear
+Benchmarking warping/cpu_parallel_bilinear: Warming up for 3.0000 s
+Benchmarking warping/cpu_parallel_bilinear: Collecting 10 samples in estimated 5.5446 s (20 iterations)
+Benchmarking warping/cpu_parallel_bilinear: Analyzing
+warping/cpu_parallel_bilinear
+                        time:   [276.92 ms 277.51 ms 278.38 ms]
+                        change: [+0.1293% +0.4408% +0.8162%] (p = 0.02 < 0.05)
+                        Change within noise threshold.
+Found 1 outliers among 10 measurements (10.00%)
+  1 (10.00%) high severe
+Benchmarking warping/cpu_parallel_lanczos3
+Benchmarking warping/cpu_parallel_lanczos3: Warming up for 3.0000 s
+
+Warning: Unable to complete 10 samples in 5.0s. You may wish to increase target time to 14.3s.
+Benchmarking warping/cpu_parallel_lanczos3: Collecting 10 samples in estimated 14.336 s (10 iterations)
+Benchmarking warping/cpu_parallel_lanczos3: Analyzing
+warping/cpu_parallel_lanczos3
+                        time:   [1.4374 s 1.4395 s 1.4416 s]
+                        change: [+0.1016% +0.2553% +0.4144%] (p = 0.01 < 0.05)
+                        Change within noise threshold.
+Benchmarking warping/gpu_bilinear
+Benchmarking warping/gpu_bilinear: Warming up for 3.0000 s
+Benchmarking warping/gpu_bilinear: Collecting 10 samples in estimated 7.4283 s (20 iterations)
+Benchmarking warping/gpu_bilinear: Analyzing
+warping/gpu_bilinear    time:   [367.58 ms 369.20 ms 371.36 ms]
+                        change: [−8.0167% −7.5019% −6.8881%] (p = 0.00 < 0.05)
+                        Performance has improved.
+Found 3 outliers among 10 measurements (30.00%)
+  2 (20.00%) low mild
+  1 (10.00%) high severe
+Benchmarking warping/cpu_parallel_batch/5
+Benchmarking warping/cpu_parallel_batch/5: Warming up for 3.0000 s
+
+Warning: Unable to complete 10 samples in 5.0s. You may wish to increase target time to 13.9s.
+Benchmarking warping/cpu_parallel_batch/5: Collecting 10 samples in estimated 13.852 s (10 iterations)
+Benchmarking warping/cpu_parallel_batch/5: Analyzing
+warping/cpu_parallel_batch/5
+                        time:   [1.3800 s 1.3822 s 1.3841 s]
+                        change: [+0.0319% +0.2160% +0.4101%] (p = 0.06 > 0.05)
+                        No change in performance detected.
+Benchmarking warping/gpu_batch/5
+Benchmarking warping/gpu_batch/5: Warming up for 3.0000 s
+
+Warning: Unable to complete 10 samples in 5.0s. You may wish to increase target time to 19.9s.
+Benchmarking warping/gpu_batch/5: Collecting 10 samples in estimated 19.901 s (10 iterations)
+Benchmarking warping/gpu_batch/5: Analyzing
+warping/gpu_batch/5     time:   [1.9721 s 1.9775 s 1.9829 s]
+                        change: [+4.4187% +4.8155% +5.2257%] (p = 0.00 < 0.05)
+                        Performance has regressed.
+
+Benchmarking stacking/mean_accumulate/10
+Benchmarking stacking/mean_accumulate/10: Warming up for 3.0000 s
+
+Warning: Unable to complete 10 samples in 5.0s. You may wish to increase target time to 8.1s.
+Benchmarking stacking/mean_accumulate/10: Collecting 10 samples in estimated 8.0819 s (10 iterations)
+Benchmarking stacking/mean_accumulate/10: Analyzing
+stacking/mean_accumulate/10
+                        time:   [805.49 ms 806.67 ms 808.17 ms]
+Found 1 outliers among 10 measurements (10.00%)
+  1 (10.00%) high severe
+
+Benchmarking full_pipeline/cpu_warp/10
+Benchmarking full_pipeline/cpu_warp/10: Warming up for 3.0000 s
+
+Warning: Unable to complete 10 samples in 5.0s. You may wish to increase target time to 124.1s.
+Benchmarking full_pipeline/cpu_warp/10: Collecting 10 samples in estimated 124.06 s (10 iterations)
+Benchmarking full_pipeline/cpu_warp/10: Analyzing
+full_pipeline/cpu_warp/10
+                        time:   [12.357 s 12.417 s 12.481 s]
+                        change: [−1.1006% −0.3728% +0.3577%] (p = 0.35 > 0.05)
+                        No change in performance detected.
+Benchmarking full_pipeline/gpu_warp/10
+Benchmarking full_pipeline/gpu_warp/10: Warming up for 3.0000 s
+
+Warning: Unable to complete 10 samples in 5.0s. You may wish to increase target time to 134.0s.
+Benchmarking full_pipeline/gpu_warp/10: Collecting 10 samples in estimated 134.03 s (10 iterations)
+Benchmarking full_pipeline/gpu_warp/10: Analyzing
+full_pipeline/gpu_warp/10
+                        time:   [13.390 s 13.424 s 13.467 s]
+                        change: [+0.0839% +0.4375% +0.7998%] (p = 0.04 < 0.05)
+                        Change within noise threshold.
+Found 1 outliers among 10 measurements (10.00%)
+  1 (10.00%) high severe
+

@@ -1,0 +1,18 @@
+error: no bench target named `pipeline` in `lumos` package
+help: available bench targets:
+    demosaic_bayer
+    demosaic_xtrans
+    full_pipeline
+    hot_pixels
+    math
+    median_filter
+    registration
+    stack_mean
+    stack_median
+    stack_sigma_clipped
+    star_detection_background
+    star_detection_centroid
+    star_detection_convolution
+    star_detection_cosmic_ray
+    star_detection_deblend
+    star_detection_detection

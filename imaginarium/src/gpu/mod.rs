@@ -28,9 +28,19 @@ impl Gpu {
         }))
         .map_err(|e| Error::Gpu(format!("failed to find suitable GPU adapter: {}", e)))?;
 
-        let (device, queue) =
-            pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default()))
-                .map_err(|e| Error::Gpu(format!("failed to create device: {}", e)))?;
+        // Request higher limits for large image processing (astrophotography images can be 24+ megapixels)
+        // Support up to 1GB buffers
+        let limits = wgpu::Limits {
+            max_buffer_size: 1024 * 1024 * 1024,
+            max_storage_buffer_binding_size: 1024 * 1024 * 1024,
+            ..Default::default()
+        };
+
+        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+            required_limits: limits,
+            ..Default::default()
+        }))
+        .map_err(|e| Error::Gpu(format!("failed to create device: {}", e)))?;
 
         Ok(Self {
             device: Arc::new(device),

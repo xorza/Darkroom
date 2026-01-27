@@ -97,9 +97,10 @@ LocalBackgroundMethod // GlobalMap | LocalAnnulus
 | `triangle/` | Triangle matching with geometric hashing |
 | `ransac/` | RANSAC with LO-RANSAC (SIMD accelerated) |
 | `phase_correlation/` | FFT-based coarse alignment |
-| `interpolation/` | Lanczos-3/4, bicubic, bilinear, nearest |
+| `interpolation/` | Lanczos-3/4, bicubic, bilinear, nearest (SIMD) |
 | `pipeline/` | Full registration pipeline with `Registrator` |
 | `quality/` | Quality metrics and quadrant consistency |
+| `gpu/` | GPU-accelerated warping via imaginarium |
 
 ### Registration Key Types
 
@@ -112,15 +113,34 @@ StarMatch          // { ref_idx, target_idx, votes, confidence }
 KdTree             // 2D k-d tree for k-NN and radius queries
 ThinPlateSpline    // Smooth non-rigid transformation
 DistortionMap      // Grid-based distortion visualization
+GpuWarper          // GPU-accelerated image warping context
 ```
 
 ### Registration Pipeline
 
 1. Coarse alignment (optional) - Phase correlation for initial translation
 2. Triangle matching - Geometric hashing (scale/rotation invariant)
-3. RANSAC - LO-RANSAC for robust transform estimation
+3. RANSAC - LO-RANSAC for robust transform estimation with early termination
 4. Refinement - Least-squares on all inliers
-5. Warping - High-quality Lanczos-3 interpolation
+5. Warping - Parallel channel processing (CPU) or GPU-accelerated
+
+### GPU Warping
+
+```rust
+// Single-use convenience functions
+warp_to_reference_gpu(image, w, h, transform) -> Vec<f32>
+warp_rgb_to_reference_gpu(image, w, h, transform) -> Vec<f32>
+
+// Reusable context for multiple warps
+let mut warper = GpuWarper::new();
+warper.warp_channel(image, w, h, transform)
+warper.warp_rgb(image, w, h, transform)
+
+// Parallel CPU warping for multi-channel images
+warp_multichannel_parallel(image, w, h, channels, transform, method) -> Vec<f32>
+```
+
+**Performance Note:** CPU parallel warping is ~32% faster than GPU for 24+ megapixel images due to memory transfer overhead. Use CPU bilinear for speed, Lanczos3 for quality. GPU warping is available but recommended only when keeping data on GPU across multiple operations.
 
 ## SIMD Math Utilities (math.rs)
 

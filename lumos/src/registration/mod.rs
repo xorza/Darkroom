@@ -61,6 +61,7 @@
 
 pub mod constants;
 pub mod distortion;
+pub mod gpu;
 pub mod interpolation;
 pub mod phase_correlation;
 pub mod pipeline;
@@ -102,6 +103,11 @@ pub use pipeline::{
 pub use types::{
     RansacFailureReason, RegistrationConfig, RegistrationConfigBuilder, RegistrationError,
     RegistrationResult, StarMatch, TransformMatrix, TransformType,
+};
+
+// GPU-accelerated warping and parallel channel processing
+pub use gpu::{
+    GpuWarper, warp_multichannel_parallel, warp_rgb_to_reference_gpu, warp_to_reference_gpu,
 };
 
 // Configuration types

@@ -468,7 +468,8 @@ fn register_all_lights(
 
                 tracing::info!("Transform: {}", result.transform);
 
-                // Warp the image to align with reference
+                // Warp the image to align with reference using parallel CPU
+                // (faster than GPU for large images due to upload/download overhead)
                 let warped =
                     warp_image_to_reference(&target_image, width, height, &result.transform);
 
@@ -502,6 +503,9 @@ fn register_all_lights(
 }
 
 /// Warp an image to align with the reference frame.
+///
+/// Uses parallel CPU warping with SIMD acceleration and Lanczos3 interpolation.
+/// Benchmarks show this is faster than GPU for large images due to upload/download overhead.
 fn warp_image_to_reference(
     image: &AstroImage,
     width: usize,
@@ -524,36 +528,15 @@ fn warp_image_to_reference(
         height, img_height
     );
 
-    // Warp each channel separately
-    let mut warped_pixels = Vec::with_capacity(image.pixels().len());
-
-    for c in 0..channels {
-        // Extract channel
-        let channel: Vec<f32> = image
-            .pixels()
-            .iter()
-            .skip(c)
-            .step_by(channels)
-            .copied()
-            .collect();
-
-        // Warp channel
-        let warped_channel = lumos::registration::warp_to_reference(
-            &channel,
-            width,
-            height,
-            transform,
-            InterpolationMethod::Lanczos3,
-        );
-
-        // Interleave back
-        if c == 0 {
-            warped_pixels.resize(image.pixels().len(), 0.0);
-        }
-        for (i, &val) in warped_channel.iter().enumerate() {
-            warped_pixels[i * channels + c] = val;
-        }
-    }
+    // Use parallel CPU warping with Lanczos3 for high quality
+    let warped_pixels = lumos::registration::warp_multichannel_parallel(
+        image.pixels(),
+        width,
+        height,
+        channels,
+        transform,
+        InterpolationMethod::Lanczos3,
+    );
 
     let dims = image.dimensions();
     let mut result = AstroImage::from_pixels(dims.width, dims.height, dims.channels, warped_pixels);

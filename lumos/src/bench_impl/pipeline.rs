@@ -4,6 +4,13 @@
 //! runs star detection, registration, and final light stacking without saving intermediates.
 //!
 //! Run with: cargo bench -p lumos --features bench --bench full_pipeline
+//!
+//! Individual stages can be run with:
+//!   cargo bench -p lumos --features bench --bench full_pipeline -- star_detection
+//!   cargo bench -p lumos --features bench --bench full_pipeline -- registration
+//!   cargo bench -p lumos --features bench --bench full_pipeline -- warping
+//!   cargo bench -p lumos --features bench --bench full_pipeline -- stacking
+//!   cargo bench -p lumos --features bench --bench full_pipeline -- full
 
 use std::hint::black_box;
 use std::path::PathBuf;
@@ -12,9 +19,8 @@ use criterion::{BenchmarkId, Criterion};
 
 use crate::AstroImage;
 use crate::registration::{
-    InterpolationMethod, RegistrationConfig, Registrator, warp_to_reference,
+    GpuWarper, InterpolationMethod, RegistrationConfig, Registrator, TransformMatrix,
 };
-
 use crate::star_detection::{Star, StarDetectionConfig, find_stars};
 use crate::testing::calibration_dir;
 
@@ -40,15 +46,12 @@ pub fn benchmarks(c: &mut Criterion) {
 
     benchmark_star_detection(c, &images);
     benchmark_registration(c, &images);
+    benchmark_warping(c, &images);
     benchmark_stacking(c, &images);
     benchmark_full_pipeline(c, &images);
 }
 
 /// Load calibrated light frames.
-///
-/// Looks for calibrated lights in the following locations (in order):
-/// 1. LUMOS_CALIBRATION_DIR/calibrated_lights
-/// 2. test_output/calibrated_lights (relative to lumos crate)
 fn load_calibrated_lights() -> Option<Vec<AstroImage>> {
     // Try LUMOS_CALIBRATION_DIR/calibrated_lights first
     if let Some(cal_dir) = calibration_dir() {
@@ -80,7 +83,6 @@ fn load_calibrated_lights() -> Option<Vec<AstroImage>> {
 }
 
 fn try_load_from_dir(dir: &PathBuf) -> Option<Vec<AstroImage>> {
-    // Include TIFF files in addition to RAW/FITS since calibrated outputs are often TIFF
     let extensions = [
         "raf", "cr2", "cr3", "nef", "arw", "dng", "fit", "fits", "tiff", "tif",
     ];
@@ -105,10 +107,13 @@ fn try_load_from_dir(dir: &PathBuf) -> Option<Vec<AstroImage>> {
     Some(images)
 }
 
-/// Benchmark star detection on all images.
+// =============================================================================
+// Star Detection Benchmarks
+// =============================================================================
+
 fn benchmark_star_detection(c: &mut Criterion, images: &[AstroImage]) {
-    let mut group = c.benchmark_group("pipeline_star_detection");
-    group.sample_size(10); // Reduce sample size for expensive operations
+    let mut group = c.benchmark_group("star_detection");
+    group.sample_size(10);
 
     let config = StarDetectionConfig {
         edge_margin: 20,
@@ -117,7 +122,6 @@ fn benchmark_star_detection(c: &mut Criterion, images: &[AstroImage]) {
         ..StarDetectionConfig::default()
     };
 
-    // Benchmark detection on first image
     group.bench_function(BenchmarkId::new("single_image", images[0].width()), |b| {
         b.iter(|| {
             let result = find_stars(black_box(&images[0]), black_box(&config));
@@ -125,7 +129,6 @@ fn benchmark_star_detection(c: &mut Criterion, images: &[AstroImage]) {
         })
     });
 
-    // Benchmark detection on all images
     group.bench_function(BenchmarkId::new("all_images", images.len()), |b| {
         b.iter(|| {
             let stars: Vec<Vec<Star>> = images
@@ -139,10 +142,13 @@ fn benchmark_star_detection(c: &mut Criterion, images: &[AstroImage]) {
     group.finish();
 }
 
-/// Benchmark registration between images.
+// =============================================================================
+// Registration Benchmarks
+// =============================================================================
+
 fn benchmark_registration(c: &mut Criterion, images: &[AstroImage]) {
-    let mut group = c.benchmark_group("pipeline_registration");
-    group.sample_size(10); // Reduce sample size for expensive operations
+    let mut group = c.benchmark_group("registration");
+    group.sample_size(10);
 
     let detection_config = StarDetectionConfig {
         edge_margin: 20,
@@ -171,7 +177,6 @@ fn benchmark_registration(c: &mut Criterion, images: &[AstroImage]) {
 
     let registrator = Registrator::new(reg_config);
 
-    // Benchmark single registration (image 1 to image 0)
     if stars.len() >= 2 {
         group.bench_function("single_pair", |b| {
             b.iter(|| {
@@ -181,7 +186,6 @@ fn benchmark_registration(c: &mut Criterion, images: &[AstroImage]) {
         });
     }
 
-    // Benchmark all registrations (all images to reference)
     group.bench_function(
         BenchmarkId::new("all_to_reference", images.len() - 1),
         |b| {
@@ -201,17 +205,225 @@ fn benchmark_registration(c: &mut Criterion, images: &[AstroImage]) {
     group.finish();
 }
 
-/// Benchmark image stacking.
+// =============================================================================
+// Warping Benchmarks - CPU vs GPU comparison
+// =============================================================================
+
+fn benchmark_warping(c: &mut Criterion, images: &[AstroImage]) {
+    let mut group = c.benchmark_group("warping");
+    group.sample_size(10);
+
+    let width = images[0].width();
+    let height = images[0].height();
+    let channels = images[0].channels();
+
+    // Create a representative transform (small rotation + translation)
+    let transform = TransformMatrix::similarity(10.5, -5.3, 0.01, 1.001);
+
+    // -------------------------------------------------------------------------
+    // CPU Sequential (baseline)
+    // -------------------------------------------------------------------------
+    group.bench_function("cpu_sequential_bilinear", |b| {
+        b.iter(|| {
+            let warped = warp_sequential_cpu(
+                black_box(&images[0]),
+                width,
+                height,
+                channels,
+                black_box(&transform),
+                InterpolationMethod::Bilinear,
+            );
+            black_box(warped)
+        })
+    });
+
+    // -------------------------------------------------------------------------
+    // CPU Parallel (SIMD + rayon)
+    // -------------------------------------------------------------------------
+    group.bench_function("cpu_parallel_bilinear", |b| {
+        b.iter(|| {
+            let warped = warp_parallel_cpu(
+                black_box(&images[0]),
+                width,
+                height,
+                channels,
+                black_box(&transform),
+                InterpolationMethod::Bilinear,
+            );
+            black_box(warped)
+        })
+    });
+
+    group.bench_function("cpu_parallel_lanczos3", |b| {
+        b.iter(|| {
+            let warped = warp_parallel_cpu(
+                black_box(&images[0]),
+                width,
+                height,
+                channels,
+                black_box(&transform),
+                InterpolationMethod::Lanczos3,
+            );
+            black_box(warped)
+        })
+    });
+
+    // -------------------------------------------------------------------------
+    // GPU Warping
+    // -------------------------------------------------------------------------
+    let mut gpu_warper = GpuWarper::new();
+
+    group.bench_function("gpu_bilinear", |b| {
+        b.iter(|| {
+            let warped = warp_gpu(
+                black_box(&mut gpu_warper),
+                black_box(&images[0]),
+                width,
+                height,
+                channels,
+                black_box(&transform),
+            );
+            black_box(warped)
+        })
+    });
+
+    // -------------------------------------------------------------------------
+    // Batch warping comparison (multiple images)
+    // -------------------------------------------------------------------------
+    if images.len() >= 5 {
+        let batch_size = 5;
+
+        group.bench_function(BenchmarkId::new("cpu_parallel_batch", batch_size), |b| {
+            b.iter(|| {
+                let warped: Vec<_> = images[..batch_size]
+                    .iter()
+                    .map(|img| {
+                        warp_parallel_cpu(
+                            black_box(img),
+                            width,
+                            height,
+                            channels,
+                            black_box(&transform),
+                            InterpolationMethod::Bilinear,
+                        )
+                    })
+                    .collect();
+                black_box(warped)
+            })
+        });
+
+        group.bench_function(BenchmarkId::new("gpu_batch", batch_size), |b| {
+            b.iter(|| {
+                let warped: Vec<_> = images[..batch_size]
+                    .iter()
+                    .map(|img| {
+                        warp_gpu(
+                            black_box(&mut gpu_warper),
+                            black_box(img),
+                            width,
+                            height,
+                            channels,
+                            black_box(&transform),
+                        )
+                    })
+                    .collect();
+                black_box(warped)
+            })
+        });
+    }
+
+    group.finish();
+}
+
+/// Warp using sequential CPU processing (baseline).
+fn warp_sequential_cpu(
+    image: &AstroImage,
+    width: usize,
+    height: usize,
+    channels: usize,
+    transform: &TransformMatrix,
+    method: InterpolationMethod,
+) -> AstroImage {
+    use crate::registration::warp_to_reference;
+
+    let mut warped_pixels = vec![0.0f32; width * height * channels];
+
+    for c in 0..channels {
+        let channel: Vec<f32> = image
+            .pixels()
+            .iter()
+            .skip(c)
+            .step_by(channels)
+            .copied()
+            .collect();
+
+        let warped_channel = warp_to_reference(&channel, width, height, transform, method);
+
+        for (i, &val) in warped_channel.iter().enumerate() {
+            warped_pixels[i * channels + c] = val;
+        }
+    }
+
+    AstroImage::from_pixels(width, height, channels, warped_pixels)
+}
+
+/// Warp using parallel CPU processing (SIMD + rayon).
+fn warp_parallel_cpu(
+    image: &AstroImage,
+    width: usize,
+    height: usize,
+    channels: usize,
+    transform: &TransformMatrix,
+    method: InterpolationMethod,
+) -> AstroImage {
+    let warped_pixels = crate::registration::warp_multichannel_parallel(
+        image.pixels(),
+        width,
+        height,
+        channels,
+        transform,
+        method,
+    );
+
+    AstroImage::from_pixels(width, height, channels, warped_pixels)
+}
+
+/// Warp using GPU compute shaders.
+fn warp_gpu(
+    gpu_warper: &mut GpuWarper,
+    image: &AstroImage,
+    width: usize,
+    height: usize,
+    channels: usize,
+    transform: &TransformMatrix,
+) -> AstroImage {
+    let warped_pixels = if channels == 3 {
+        gpu_warper.warp_rgb(image.pixels(), width, height, transform)
+    } else if channels == 1 {
+        gpu_warper.warp_channel(image.pixels(), width, height, transform)
+    } else {
+        // Fallback for other channel counts
+        crate::registration::warp_multichannel_parallel(
+            image.pixels(),
+            width,
+            height,
+            channels,
+            transform,
+            InterpolationMethod::Bilinear,
+        )
+    };
+
+    AstroImage::from_pixels(width, height, channels, warped_pixels)
+}
+
+// =============================================================================
+// Stacking Benchmarks
+// =============================================================================
+
 fn benchmark_stacking(c: &mut Criterion, images: &[AstroImage]) {
-    let mut group = c.benchmark_group("pipeline_stacking");
-    group.sample_size(10); // Reduce sample size for expensive operations
+    let mut group = c.benchmark_group("stacking");
+    group.sample_size(10);
 
-    // For stacking benchmark, we need paths. Since we're benchmarking in-memory,
-    // we'll use mean stacking which works directly with loaded images.
-    // Note: The actual ImageStack API uses paths, so we benchmark mean stacking
-    // on pre-loaded data to avoid I/O in the benchmark loop.
-
-    // Benchmark mean stacking simulation (averaging pixel arrays)
     let width = images[0].width();
     let height = images[0].height();
     let channels = images[0].channels();
@@ -219,7 +431,6 @@ fn benchmark_stacking(c: &mut Criterion, images: &[AstroImage]) {
 
     group.bench_function(BenchmarkId::new("mean_accumulate", images.len()), |b| {
         b.iter(|| {
-            // Simulate mean stacking: accumulate all pixels
             let mut sum = vec![0.0f64; pixel_count];
             for img in images.iter() {
                 for (i, &p) in img.pixels().iter().enumerate() {
@@ -235,10 +446,13 @@ fn benchmark_stacking(c: &mut Criterion, images: &[AstroImage]) {
     group.finish();
 }
 
-/// Benchmark the full pipeline: star detection + registration + warping + stacking.
+// =============================================================================
+// Full Pipeline Benchmarks - CPU vs GPU comparison
+// =============================================================================
+
 fn benchmark_full_pipeline(c: &mut Criterion, images: &[AstroImage]) {
-    let mut group = c.benchmark_group("pipeline_full");
-    group.sample_size(10); // Reduce sample size for expensive benchmark
+    let mut group = c.benchmark_group("full_pipeline");
+    group.sample_size(10);
 
     let detection_config = StarDetectionConfig {
         edge_margin: 20,
@@ -259,87 +473,128 @@ fn benchmark_full_pipeline(c: &mut Criterion, images: &[AstroImage]) {
         .refine_with_centroids(true)
         .build();
 
-    group.bench_function(
-        BenchmarkId::new("detect_register_stack", images.len()),
-        |b| {
-            b.iter(|| {
-                // Step 1: Detect stars in all images
-                let stars: Vec<Vec<Star>> = images
-                    .iter()
-                    .map(|img| find_stars(img, &detection_config).stars)
-                    .collect();
+    // -------------------------------------------------------------------------
+    // Full pipeline with CPU warping
+    // -------------------------------------------------------------------------
+    group.bench_function(BenchmarkId::new("cpu_warp", images.len()), |b| {
+        b.iter(|| {
+            run_full_pipeline_cpu(
+                black_box(images),
+                black_box(&detection_config),
+                black_box(&reg_config),
+            )
+        })
+    });
 
-                // Step 2: Register all images to reference (first image)
-                let registrator = Registrator::new(reg_config.clone());
-                let ref_stars = &stars[0];
-                let width = images[0].width();
-                let height = images[0].height();
-                let channels = images[0].channels();
+    // -------------------------------------------------------------------------
+    // Full pipeline with GPU warping
+    // -------------------------------------------------------------------------
+    let mut gpu_warper = GpuWarper::new();
 
-                let mut aligned_images: Vec<AstroImage> = Vec::with_capacity(images.len());
-                aligned_images.push(images[0].clone()); // Reference frame
-
-                for (img, target_stars) in images.iter().zip(stars.iter()).skip(1) {
-                    if let Ok(result) = registrator.register_stars(ref_stars, target_stars) {
-                        // Warp image to align with reference
-                        let warped = warp_image(img, width, height, channels, &result.transform);
-                        aligned_images.push(warped);
-                    }
-                }
-
-                // Step 3: Stack aligned images (simple mean)
-                let pixel_count = width * height * channels;
-                let mut sum = vec![0.0f64; pixel_count];
-                for img in aligned_images.iter() {
-                    for (i, &p) in img.pixels().iter().enumerate() {
-                        sum[i] += p as f64;
-                    }
-                }
-                let count = aligned_images.len() as f64;
-                let stacked: Vec<f32> = sum.iter().map(|s| (*s / count) as f32).collect();
-
-                black_box(AstroImage::from_pixels(width, height, channels, stacked))
-            })
-        },
-    );
+    group.bench_function(BenchmarkId::new("gpu_warp", images.len()), |b| {
+        b.iter(|| {
+            run_full_pipeline_gpu(
+                black_box(images),
+                black_box(&detection_config),
+                black_box(&reg_config),
+                black_box(&mut gpu_warper),
+            )
+        })
+    });
 
     group.finish();
 }
 
-/// Warp an image to align with the reference frame.
-fn warp_image(
-    image: &AstroImage,
-    width: usize,
-    height: usize,
-    channels: usize,
-    transform: &crate::TransformMatrix,
+/// Run full pipeline with CPU warping.
+fn run_full_pipeline_cpu(
+    images: &[AstroImage],
+    detection_config: &StarDetectionConfig,
+    reg_config: &RegistrationConfig,
 ) -> AstroImage {
-    let mut warped_pixels = vec![0.0f32; width * height * channels];
+    // Step 1: Detect stars
+    let stars: Vec<Vec<Star>> = images
+        .iter()
+        .map(|img| find_stars(img, detection_config).stars)
+        .collect();
 
-    for c in 0..channels {
-        // Extract channel
-        let channel: Vec<f32> = image
-            .pixels()
-            .iter()
-            .skip(c)
-            .step_by(channels)
-            .copied()
-            .collect();
+    // Step 2: Register and warp
+    let registrator = Registrator::new(reg_config.clone());
+    let ref_stars = &stars[0];
+    let width = images[0].width();
+    let height = images[0].height();
+    let channels = images[0].channels();
 
-        // Warp channel
-        let warped_channel = warp_to_reference(
-            &channel,
-            width,
-            height,
-            transform,
-            InterpolationMethod::Bilinear, // Use bilinear for speed in benchmarks
-        );
+    let mut aligned_images: Vec<AstroImage> = Vec::with_capacity(images.len());
+    aligned_images.push(images[0].clone());
 
-        // Interleave back
-        for (i, &val) in warped_channel.iter().enumerate() {
-            warped_pixels[i * channels + c] = val;
+    for (img, target_stars) in images.iter().zip(stars.iter()).skip(1) {
+        if let Ok(result) = registrator.register_stars(ref_stars, target_stars) {
+            let warped = warp_parallel_cpu(
+                img,
+                width,
+                height,
+                channels,
+                &result.transform,
+                InterpolationMethod::Bilinear,
+            );
+            aligned_images.push(warped);
         }
     }
 
-    AstroImage::from_pixels(width, height, channels, warped_pixels)
+    // Step 3: Stack
+    let pixel_count = width * height * channels;
+    let mut sum = vec![0.0f64; pixel_count];
+    for img in aligned_images.iter() {
+        for (i, &p) in img.pixels().iter().enumerate() {
+            sum[i] += p as f64;
+        }
+    }
+    let count = aligned_images.len() as f64;
+    let stacked: Vec<f32> = sum.iter().map(|s| (*s / count) as f32).collect();
+
+    AstroImage::from_pixels(width, height, channels, stacked)
+}
+
+/// Run full pipeline with GPU warping.
+fn run_full_pipeline_gpu(
+    images: &[AstroImage],
+    detection_config: &StarDetectionConfig,
+    reg_config: &RegistrationConfig,
+    gpu_warper: &mut GpuWarper,
+) -> AstroImage {
+    // Step 1: Detect stars
+    let stars: Vec<Vec<Star>> = images
+        .iter()
+        .map(|img| find_stars(img, detection_config).stars)
+        .collect();
+
+    // Step 2: Register and warp (GPU)
+    let registrator = Registrator::new(reg_config.clone());
+    let ref_stars = &stars[0];
+    let width = images[0].width();
+    let height = images[0].height();
+    let channels = images[0].channels();
+
+    let mut aligned_images: Vec<AstroImage> = Vec::with_capacity(images.len());
+    aligned_images.push(images[0].clone());
+
+    for (img, target_stars) in images.iter().zip(stars.iter()).skip(1) {
+        if let Ok(result) = registrator.register_stars(ref_stars, target_stars) {
+            let warped = warp_gpu(gpu_warper, img, width, height, channels, &result.transform);
+            aligned_images.push(warped);
+        }
+    }
+
+    // Step 3: Stack
+    let pixel_count = width * height * channels;
+    let mut sum = vec![0.0f64; pixel_count];
+    for img in aligned_images.iter() {
+        for (i, &p) in img.pixels().iter().enumerate() {
+            sum[i] += p as f64;
+        }
+    }
+    let count = aligned_images.len() as f64;
+    let stacked: Vec<f32> = sum.iter().map(|s| (*s / count) as f32).collect();
+
+    AstroImage::from_pixels(width, height, channels, stacked)
 }
