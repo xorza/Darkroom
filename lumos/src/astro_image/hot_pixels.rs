@@ -342,9 +342,8 @@ pub mod bench {
 
     /// Register hot pixel detection benchmarks with Criterion.
     pub fn benchmarks(c: &mut Criterion, masters_dir: &Path) {
-        let masters =
-            CalibrationMasters::load_from_directory(masters_dir, StackingMethod::default())
-                .expect("Failed to load calibration masters");
+        let masters = CalibrationMasters::load(masters_dir, StackingMethod::default())
+            .expect("Failed to load calibration masters");
 
         let master_dark = masters
             .master_dark

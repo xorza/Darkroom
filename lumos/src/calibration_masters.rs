@@ -205,7 +205,44 @@ impl CalibrationMasters {
     /// ```
     ///
     /// Missing subdirectories are skipped (the corresponding master will be None).
+    ///
+    /// This is the preferred method. [`from_directory`](Self::from_directory) is deprecated.
+    pub fn create<P: AsRef<Path>>(
+        dir: P,
+        method: StackingMethod,
+        progress: ProgressCallback,
+    ) -> Result<Self> {
+        Self::create_impl(dir, method, progress)
+    }
+
+    /// Create calibration masters from a directory containing Darks, Flats, and Bias subdirectories.
+    ///
+    /// First tries to load existing master files from the directory. If not found,
+    /// creates new masters by stacking raw frames from subdirectories.
+    /// Automatically generates hot pixel map from master dark if available.
+    ///
+    /// Expected directory structure:
+    /// ```text
+    /// calibration_dir/
+    ///   Darks/
+    ///     dark1.raf, dark2.raf, ...
+    ///   Flats/
+    ///     flat1.raf, flat2.raf, ...
+    ///   Bias/
+    ///     bias1.raf, bias2.raf, ...
+    /// ```
+    ///
+    /// Missing subdirectories are skipped (the corresponding master will be None).
+    #[deprecated(since = "0.1.0", note = "Use `create` instead")]
     pub fn from_directory<P: AsRef<Path>>(
+        dir: P,
+        method: StackingMethod,
+        progress: ProgressCallback,
+    ) -> Result<Self> {
+        Self::create_impl(dir, method, progress)
+    }
+
+    fn create_impl<P: AsRef<Path>>(
         dir: P,
         method: StackingMethod,
         progress: ProgressCallback,
@@ -330,7 +367,7 @@ mod tests {
             return;
         };
 
-        let masters = CalibrationMasters::from_directory(
+        let masters = CalibrationMasters::create(
             &cal_dir,
             StackingMethod::default(),
             ProgressCallback::default(),

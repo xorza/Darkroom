@@ -168,7 +168,7 @@ fn create_calibration_masters(calibration_dir: &Path, output_dir: &Path) -> Cali
     let progress = create_progress_callback();
     tracing::info!("Creating calibration masters from raw frames...");
 
-    let masters = CalibrationMasters::from_directory(calibration_dir, method, progress)
+    let masters = CalibrationMasters::create(calibration_dir, method, progress)
         .expect("Failed to create calibration masters");
 
     let elapsed = start.elapsed();
