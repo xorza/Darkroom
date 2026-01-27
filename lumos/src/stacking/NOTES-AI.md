@@ -592,3 +592,175 @@ let result = pipeline.stack_async(&frames, width, height);
 - Each pending readback owns its staging buffer (moved ownership for callback safety)
 - `AtomicBool` with `Acquire/Release` ordering for cross-thread synchronization
 - Fallback to sync version for small batch counts (overlap overhead not worth it)
+
+---
+
+## Comet/Asteroid Stacking Research (2026-01-27)
+
+### Problem Statement
+
+Comets and asteroids move relative to stars during an imaging session. When stacking:
+- **Aligning on stars**: Comet/asteroid becomes blurred or trails
+- **Aligning on comet**: Stars become trailed
+
+The goal is to produce a composite image with both sharp stars AND a sharp comet/asteroid.
+
+### Dual-Stack Approach (Industry Standard)
+
+**Sources:**
+- [Siril Comet Tutorial](https://siril.org/tutorials/comet/)
+- [DeepSkyStacker Comet Stacking](http://deepskystacker.free.fr/english/technical.htm)
+- [PixInsight CometAlignment](https://pixinsight.com/forum/index.php?threads/pcl-comet-alignment-module.3838/)
+- [DeepSkyWorkflows Complete Comet Guide](https://deepskyworkflows.com/how-do-i-stack-comets-in-pixinsight/)
+
+**Workflow:**
+
+1. **Create Star-Aligned Stack**
+   - Register frames using standard star matching (triangle matching, RANSAC)
+   - Stack using sigma clipping or kappa-sigma clipping
+   - Result: Sharp stars, moving object appears as trail/blur
+
+2. **Create Comet-Aligned Stack**
+   - User provides comet position in first frame (x₁, y₁) and last frame (x₂, y₂)
+   - Calculate velocity vector from timestamps: `v = (x₂-x₁, y₂-y₁) / (t₂-t₁)`
+   - For each intermediate frame, interpolate position: `pos(t) = (x₁, y₁) + v × (t - t₁)`
+   - Register each frame with additional translation to center comet
+   - Stack using sigma clipping (rejects star trails as outliers)
+   - Result: Sharp comet, stars appear as trails
+
+3. **Composite Final Image**
+   - Combine using lighten blending: `max(star_stack, comet_stack)` per pixel
+   - Or additive: `star_stack + comet_stack` (requires removing background from comet stack)
+   - Or layer masking: Use comet region from comet stack, stars from star stack
+
+### Position Interpolation Algorithm
+
+**Linear interpolation** (most common, works for short sessions):
+```
+t_normalized = (frame_timestamp - t_first) / (t_last - t_first)
+x_comet = x_first + t_normalized * (x_last - x_first)
+y_comet = y_first + t_normalized * (y_last - y_first)
+```
+
+**Timestamp handling:**
+- Primary: `DATE-OBS` FITS keyword (observation start time)
+- Fallback: `FileLastModificationDate = DATE-OBS + Exposure` (for RAW files)
+- Units: Usually hours or fractional days (MJD)
+
+**PSF-based refinement** (PixInsight 2.0+):
+- Calculate nucleus position using optimal PSF fitting
+- Allows non-linear paths (for curved comet trajectories)
+- More accurate than manual marking
+
+### Transform Computation
+
+For comet-aligned registration:
+```
+transform_comet = transform_stars ∘ Translation(-dx_comet, -dy_comet)
+```
+
+Where:
+- `transform_stars` = standard star-based registration transform
+- `dx_comet, dy_comet` = comet position offset from frame center
+
+### Pixel Rejection for Trail Removal
+
+**Kappa-sigma clipping** effectively removes star trails from comet stack:
+- Star trails appear as bright outliers at each pixel
+- With >10 frames, trails don't overlap enough to survive rejection
+- Lower kappa values (2.0-2.5) remove more trail pixels
+
+**Winsorized sigma clipping** can help preserve comet detail while removing trails.
+
+### Composite Methods
+
+1. **Lighten blend** (simplest):
+   ```
+   output[pixel] = max(star_stack[pixel], comet_stack[pixel])
+   ```
+   Works when backgrounds are dark and matched.
+
+2. **Additive blend with background subtraction**:
+   ```
+   comet_starless = comet_stack - background(comet_stack)
+   output = star_stack + comet_starless
+   ```
+   Better preserves faint structures.
+
+3. **Layer masking**:
+   - Create mask around comet region (manual or auto-detected)
+   - Blend: `output = star_stack * (1-mask) + comet_stack * mask`
+   - Most control but requires mask generation.
+
+### Proposed API Design
+
+```rust
+/// Comet/asteroid position at a specific timestamp
+#[derive(Debug, Clone, Copy)]
+pub struct ObjectPosition {
+    pub x: f64,
+    pub y: f64,
+    pub timestamp: f64,  // MJD or seconds since epoch
+}
+
+/// Configuration for comet stacking
+#[derive(Debug, Clone)]
+pub struct CometStackConfig {
+    /// Position at start of sequence
+    pub pos_start: ObjectPosition,
+    /// Position at end of sequence
+    pub pos_end: ObjectPosition,
+    /// Rejection method for star trail removal
+    pub rejection: RejectionMethod,
+    /// Normalization method
+    pub normalization: NormalizationMethod,
+    /// How to combine star and comet stacks
+    pub composite_method: CompositeMethod,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum CompositeMethod {
+    /// Max of each pixel (lighten blend)
+    Lighten,
+    /// Additive with automatic background subtraction
+    Additive,
+    /// Return both stacks separately for manual compositing
+    Separate,
+}
+
+/// Result of comet stacking
+#[derive(Debug)]
+pub struct CometStackResult {
+    /// Star-aligned stack (sharp stars, blurred comet)
+    pub star_stack: Vec<f32>,
+    /// Comet-aligned stack (sharp comet, star trails rejected)
+    pub comet_stack: Vec<f32>,
+    /// Composite image (if not Separate)
+    pub composite: Option<Vec<f32>>,
+    /// Computed comet velocity (pixels/hour)
+    pub velocity: (f64, f64),
+}
+
+// Main function
+pub fn stack_comet<P: AsRef<Path>>(
+    paths: &[P],
+    config: &CometStackConfig,
+) -> Result<CometStackResult, Error>;
+
+// Interpolate position for a given timestamp
+pub fn interpolate_position(
+    pos_start: &ObjectPosition,
+    pos_end: &ObjectPosition,
+    timestamp: f64,
+) -> (f64, f64);
+```
+
+### Implementation Steps
+
+1. **Research** ✓ - Completed 2026-01-27
+2. **API Design** - Define types and function signatures
+3. **Position interpolation** - Linear interpolation from timestamps
+4. **Comet-aligned registration** - Modify transforms with comet offset
+5. **Dual stacking** - Run star-aligned and comet-aligned stacks
+6. **Composite generation** - Implement blend modes
+7. **Testing** - Synthetic moving object tests
