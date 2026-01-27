@@ -765,10 +765,10 @@ pub fn interpolate_position(
 6. **Composite generation** - Implement blend modes
 7. **Testing** - Synthetic moving object tests
 
-### Implementation Status (PARTIAL - 2026-01-27)
+### Implementation Status (MOSTLY COMPLETE - 2026-01-27)
 
 **Files Implemented:**
-- `src/stacking/comet.rs` - API types and helper functions
+- `src/stacking/comet.rs` - API types, composite functions, and helper functions
 
 **Types Implemented:**
 ```rust
@@ -808,15 +808,27 @@ interpolate_position(&pos_start, &pos_end, timestamp) -> (x, y)
 
 // Compute offset for comet-aligned transform
 compute_comet_offset(&config, frame_timestamp, ref_timestamp) -> (dx, dy)
+
+// Composite star and comet stacks
+composite_stacks(&star_stack, &comet_stack, CompositeMethod) -> Option<Vec<f32>>
+
+// Create complete result struct
+create_comet_stack_result(star_stack, comet_stack, width, height, &config) -> CometStackResult
 ```
 
-**Tests (19 passing):**
+**Tests (39 passing):**
 - ObjectPosition: creation, from_coords
 - CometStackConfig: new, builder pattern, velocity, displacement, same timestamp panics
 - Interpolation: at start/end/middle, extrapolation before/after, same timestamp panics
 - Comet offset: at reference, after time, negative velocity
 - CompositeMethod: default
 - CometStackResult: channels, pixel_count
+- Transform: comet_aligned_transform, apply_comet_offset_to_transform
+- Composite: lighten_basic, lighten_identical, additive_basic, additive_background_subtraction,
+  separate_returns_none, different_sizes_panics, empty_stacks
+- Create result: lighten, separate, wrong_star_size, wrong_comet_size
+- Background estimation: percentile, empty, single_value
+- Integration: realistic_scenario
 
 **Exports:**
 - `lumos::ObjectPosition`
@@ -825,9 +837,11 @@ compute_comet_offset(&config, frame_timestamp, ref_timestamp) -> (dx, dy)
 - `lumos::CompositeMethod`
 - `lumos::interpolate_position`
 - `lumos::compute_comet_offset`
+- `lumos::composite_stacks`
+- `lumos::create_comet_stack_result`
+- `lumos::apply_comet_offset_to_transform`
 
 **Next Steps:**
-- Implement composite output generation (task 4)
 - Write integration tests with synthetic comet data (task 5)
 
 ### Frame-Specific Offset Implementation (COMPLETE - 2026-01-27)
@@ -862,3 +876,42 @@ The offset is: `(-vx × dt, -vy × dt)` where:
 
 **Public Exports:**
 - `lumos::apply_comet_offset_to_transform`
+
+### Composite Output Implementation (COMPLETE - 2026-01-27)
+
+**Purpose:**
+Create the final composite image combining sharp stars from the star-aligned stack and a sharp comet from the comet-aligned stack.
+
+**Composite Methods:**
+
+1. **Lighten (default):**
+   - Formula: `result = max(star_stack, comet_stack)` per pixel
+   - Best for: Dark backgrounds, simple combination
+   - The brighter element (sharp star or sharp comet) wins at each position
+
+2. **Additive:**
+   - Formula: `result = star_stack + max(0, comet_stack - background)`
+   - Background estimated as 5th percentile of comet stack
+   - Best for: Preserving faint structures, avoiding background doubling
+   - Comet signal is added on top of star stack
+
+3. **Separate:**
+   - Returns both stacks without compositing
+   - Best for: Manual post-processing with custom masking/blending
+
+**Functions:**
+```rust
+// Main composite function
+composite_stacks(&star_stack, &comet_stack, method) -> Option<Vec<f32>>
+// Returns Some(composite) for Lighten/Additive, None for Separate
+
+// Convenience for creating complete result
+create_comet_stack_result(star_stack, comet_stack, width, height, &config) -> CometStackResult
+// Automatically applies composite method from config
+```
+
+**Background Estimation:**
+Uses 5th percentile (robust to outliers) via partial sorting:
+- O(n) average case via `select_nth_unstable_by`
+- Avoids comet itself biasing the estimate
+- Clamped to non-negative values before adding

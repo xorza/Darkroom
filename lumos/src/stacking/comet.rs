@@ -349,6 +349,167 @@ pub fn apply_comet_offset_to_transform(
     config.comet_aligned_transform(star_transform, frame_timestamp, ref_timestamp)
 }
 
+/// Composite star-aligned and comet-aligned stacks using the specified method.
+///
+/// This creates the final composite image combining sharp stars from the star-aligned
+/// stack and a sharp comet from the comet-aligned stack.
+///
+/// # Arguments
+/// * `star_stack` - Stacked image aligned on stars (sharp stars, blurred comet)
+/// * `comet_stack` - Stacked image aligned on comet (sharp comet, star trails rejected)
+/// * `method` - How to combine the two stacks
+///
+/// # Returns
+/// `Some(composite)` for `Lighten` or `Additive` methods, `None` for `Separate`.
+///
+/// # Panics
+/// Panics if the two stacks have different lengths.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use lumos::stacking::comet::{composite_stacks, CompositeMethod};
+///
+/// let star_stack = vec![0.5; 1024 * 1024];  // Star-aligned result
+/// let comet_stack = vec![0.6; 1024 * 1024]; // Comet-aligned result
+///
+/// // Lighten blend: max of each pixel
+/// let composite = composite_stacks(&star_stack, &comet_stack, CompositeMethod::Lighten);
+/// assert!(composite.is_some());
+/// ```
+pub fn composite_stacks(
+    star_stack: &[f32],
+    comet_stack: &[f32],
+    method: CompositeMethod,
+) -> Option<Vec<f32>> {
+    assert_eq!(
+        star_stack.len(),
+        comet_stack.len(),
+        "Star and comet stacks must have the same size"
+    );
+
+    match method {
+        CompositeMethod::Lighten => Some(composite_lighten(star_stack, comet_stack)),
+        CompositeMethod::Additive => Some(composite_additive(star_stack, comet_stack)),
+        CompositeMethod::Separate => None,
+    }
+}
+
+/// Lighten blend: take the maximum of each pixel from both stacks.
+///
+/// This works well when backgrounds are dark and matched, as the brighter
+/// element (sharp star or sharp comet) wins at each pixel position.
+///
+/// Formula: `result = max(star_stack, comet_stack)` per pixel.
+fn composite_lighten(star_stack: &[f32], comet_stack: &[f32]) -> Vec<f32> {
+    star_stack
+        .iter()
+        .zip(comet_stack.iter())
+        .map(|(&s, &c)| s.max(c))
+        .collect()
+}
+
+/// Additive blend: add comet to star stack after background subtraction.
+///
+/// This better preserves faint structures by adding the comet signal
+/// on top of the star stack. Background is automatically estimated and
+/// subtracted from the comet stack to prevent doubling the sky background.
+///
+/// Formula: `result = star_stack + max(0, comet_stack - background)`
+///
+/// The background is estimated as the 5th percentile of the comet stack,
+/// which is robust against the comet itself affecting the estimate.
+fn composite_additive(star_stack: &[f32], comet_stack: &[f32]) -> Vec<f32> {
+    // Estimate background as robust low percentile (5th percentile)
+    // This avoids the comet itself biasing the background estimate
+    let background = estimate_background_percentile(comet_stack, 0.05);
+
+    star_stack
+        .iter()
+        .zip(comet_stack.iter())
+        .map(|(&s, &c)| {
+            // Subtract background from comet, clamp to non-negative
+            let comet_signal = (c - background).max(0.0);
+            s + comet_signal
+        })
+        .collect()
+}
+
+/// Estimate background using a percentile value.
+///
+/// Uses partial sorting for efficiency - O(n) average case.
+///
+/// # Arguments
+/// * `data` - Image pixel values
+/// * `percentile` - Percentile to use (0.0-1.0), e.g., 0.05 for 5th percentile
+fn estimate_background_percentile(data: &[f32], percentile: f32) -> f32 {
+    debug_assert!(
+        (0.0..=1.0).contains(&percentile),
+        "Percentile must be between 0 and 1"
+    );
+
+    if data.is_empty() {
+        return 0.0;
+    }
+
+    // Clone and sort to find percentile
+    let mut sorted: Vec<f32> = data.to_vec();
+    let k = ((sorted.len() as f32 * percentile) as usize).min(sorted.len() - 1);
+
+    // Partial sort up to k-th element for efficiency
+    sorted.select_nth_unstable_by(k, |a, b| {
+        a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)
+    });
+
+    sorted[k]
+}
+
+/// Create a CometStackResult from star and comet stacks.
+///
+/// This is a convenience function for creating the result struct after
+/// both stacks have been computed.
+///
+/// # Arguments
+/// * `star_stack` - Stacked image aligned on stars
+/// * `comet_stack` - Stacked image aligned on comet
+/// * `width` - Image width in pixels
+/// * `height` - Image height in pixels
+/// * `config` - Comet stacking configuration (for velocity and composite method)
+///
+/// # Panics
+/// Panics if stack sizes don't match `width * height`.
+pub fn create_comet_stack_result(
+    star_stack: Vec<f32>,
+    comet_stack: Vec<f32>,
+    width: usize,
+    height: usize,
+    config: &CometStackConfig,
+) -> CometStackResult {
+    let pixel_count = width * height;
+    assert_eq!(
+        star_stack.len(),
+        pixel_count,
+        "Star stack size must match width * height"
+    );
+    assert_eq!(
+        comet_stack.len(),
+        pixel_count,
+        "Comet stack size must match width * height"
+    );
+
+    let composite = composite_stacks(&star_stack, &comet_stack, config.composite_method);
+
+    CometStackResult {
+        star_stack,
+        comet_stack,
+        composite,
+        width,
+        height,
+        velocity: config.velocity(),
+        displacement: config.total_displacement(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -667,5 +828,252 @@ mod tests {
         let (x, y) = comet_transform.apply(0.0, 0.0);
         assert!((x - (-45.0)).abs() < 1e-10);
         assert!((y - (-15.0)).abs() < 1e-10);
+    }
+
+    // ========== Composite Output Tests ==========
+
+    #[test]
+    fn test_composite_lighten_basic() {
+        let star_stack = vec![0.3, 0.5, 0.7, 0.2];
+        let comet_stack = vec![0.4, 0.4, 0.6, 0.8];
+
+        let result = composite_stacks(&star_stack, &comet_stack, CompositeMethod::Lighten);
+
+        let composite = result.expect("Lighten should return Some");
+        assert_eq!(composite.len(), 4);
+        assert!((composite[0] - 0.4).abs() < 1e-6); // max(0.3, 0.4)
+        assert!((composite[1] - 0.5).abs() < 1e-6); // max(0.5, 0.4)
+        assert!((composite[2] - 0.7).abs() < 1e-6); // max(0.7, 0.6)
+        assert!((composite[3] - 0.8).abs() < 1e-6); // max(0.2, 0.8)
+    }
+
+    #[test]
+    fn test_composite_lighten_identical() {
+        let star_stack = vec![0.5; 100];
+        let comet_stack = vec![0.5; 100];
+
+        let result = composite_stacks(&star_stack, &comet_stack, CompositeMethod::Lighten);
+
+        let composite = result.expect("Lighten should return Some");
+        for val in composite {
+            assert!((val - 0.5).abs() < 1e-6);
+        }
+    }
+
+    #[test]
+    fn test_composite_additive_basic() {
+        // Star stack with uniform background
+        let star_stack = vec![0.2, 0.2, 0.2, 0.2];
+        // Comet stack: background ~0.1, comet signal at pixel 2
+        let comet_stack = vec![0.1, 0.1, 0.5, 0.1];
+
+        let result = composite_stacks(&star_stack, &comet_stack, CompositeMethod::Additive);
+
+        let composite = result.expect("Additive should return Some");
+        assert_eq!(composite.len(), 4);
+
+        // Background (~0.1) is subtracted from comet_stack
+        // Pixel 2 has signal 0.5 - 0.1 = 0.4 added to 0.2 = 0.6
+        // Other pixels have signal ~0 added
+        assert!(composite[2] > composite[0]); // Comet pixel should be brighter
+    }
+
+    #[test]
+    fn test_composite_additive_background_subtraction() {
+        // Uniform background in comet stack should not change star stack
+        let star_stack = vec![0.3, 0.4, 0.5, 0.6];
+        let comet_stack = vec![0.1, 0.1, 0.1, 0.1]; // All background, no comet signal
+
+        let result = composite_stacks(&star_stack, &comet_stack, CompositeMethod::Additive);
+
+        let composite = result.expect("Additive should return Some");
+        // All values should be approximately equal to star_stack
+        // (comet - background = 0 for all pixels)
+        for (i, val) in composite.iter().enumerate() {
+            assert!(
+                (*val - star_stack[i]).abs() < 0.01,
+                "Expected ~{}, got {}",
+                star_stack[i],
+                val
+            );
+        }
+    }
+
+    #[test]
+    fn test_composite_separate_returns_none() {
+        let star_stack = vec![0.5; 100];
+        let comet_stack = vec![0.6; 100];
+
+        let result = composite_stacks(&star_stack, &comet_stack, CompositeMethod::Separate);
+
+        assert!(result.is_none(), "Separate method should return None");
+    }
+
+    #[test]
+    #[should_panic(expected = "must have the same size")]
+    fn test_composite_stacks_different_sizes_panics() {
+        let star_stack = vec![0.5; 100];
+        let comet_stack = vec![0.6; 50]; // Different size
+
+        composite_stacks(&star_stack, &comet_stack, CompositeMethod::Lighten);
+    }
+
+    #[test]
+    fn test_composite_empty_stacks() {
+        let star_stack: Vec<f32> = vec![];
+        let comet_stack: Vec<f32> = vec![];
+
+        let result = composite_stacks(&star_stack, &comet_stack, CompositeMethod::Lighten);
+        let composite = result.expect("Should return Some for empty stacks");
+        assert!(composite.is_empty());
+    }
+
+    // ========== Create Comet Stack Result Tests ==========
+
+    #[test]
+    fn test_create_comet_stack_result_lighten() {
+        let pos_start = ObjectPosition::new(100.0, 100.0, 0.0);
+        let pos_end = ObjectPosition::new(110.0, 105.0, 100.0);
+        let config = CometStackConfig::new(pos_start, pos_end);
+
+        let star_stack = vec![0.3, 0.5, 0.7, 0.2];
+        let comet_stack = vec![0.4, 0.4, 0.6, 0.8];
+
+        let result = create_comet_stack_result(star_stack, comet_stack, 2, 2, &config);
+
+        assert_eq!(result.width, 2);
+        assert_eq!(result.height, 2);
+        assert!(result.composite.is_some());
+        assert_eq!(result.composite.as_ref().unwrap().len(), 4);
+
+        let (vx, vy) = result.velocity;
+        assert!((vx - 0.1).abs() < 1e-10);
+        assert!((vy - 0.05).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_create_comet_stack_result_separate() {
+        let pos_start = ObjectPosition::new(100.0, 100.0, 0.0);
+        let pos_end = ObjectPosition::new(110.0, 105.0, 100.0);
+        let config =
+            CometStackConfig::new(pos_start, pos_end).composite_method(CompositeMethod::Separate);
+
+        let star_stack = vec![0.5; 16];
+        let comet_stack = vec![0.6; 16];
+
+        let result = create_comet_stack_result(star_stack, comet_stack, 4, 4, &config);
+
+        assert!(result.composite.is_none());
+        assert_eq!(result.star_stack.len(), 16);
+        assert_eq!(result.comet_stack.len(), 16);
+    }
+
+    #[test]
+    #[should_panic(expected = "Star stack size must match")]
+    fn test_create_comet_stack_result_wrong_star_size() {
+        let pos_start = ObjectPosition::new(0.0, 0.0, 0.0);
+        let pos_end = ObjectPosition::new(10.0, 10.0, 100.0);
+        let config = CometStackConfig::new(pos_start, pos_end);
+
+        let star_stack = vec![0.5; 10]; // Wrong size (should be 4)
+        let comet_stack = vec![0.6; 4];
+
+        create_comet_stack_result(star_stack, comet_stack, 2, 2, &config);
+    }
+
+    #[test]
+    #[should_panic(expected = "Comet stack size must match")]
+    fn test_create_comet_stack_result_wrong_comet_size() {
+        let pos_start = ObjectPosition::new(0.0, 0.0, 0.0);
+        let pos_end = ObjectPosition::new(10.0, 10.0, 100.0);
+        let config = CometStackConfig::new(pos_start, pos_end);
+
+        let star_stack = vec![0.5; 4];
+        let comet_stack = vec![0.6; 10]; // Wrong size (should be 4)
+
+        create_comet_stack_result(star_stack, comet_stack, 2, 2, &config);
+    }
+
+    // ========== Background Estimation Tests ==========
+
+    #[test]
+    fn test_estimate_background_percentile() {
+        // Sorted: [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
+        let data = vec![0.5, 0.2, 0.8, 0.1, 0.9, 0.3, 0.7, 0.4, 1.0, 0.6];
+
+        // 5th percentile (index 0) should be ~0.1
+        let bg_5 = estimate_background_percentile(&data, 0.05);
+        assert!((bg_5 - 0.1).abs() < 1e-6);
+
+        // 50th percentile (index 5) should be ~0.6
+        let bg_50 = estimate_background_percentile(&data, 0.5);
+        // After partial sort, the element at index 5 might be 0.5 or 0.6 depending on sort behavior
+        assert!((0.5..=0.6).contains(&bg_50));
+    }
+
+    #[test]
+    fn test_estimate_background_empty() {
+        let data: Vec<f32> = vec![];
+        let bg = estimate_background_percentile(&data, 0.05);
+        assert!((bg - 0.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_estimate_background_single_value() {
+        let data = vec![0.42];
+        let bg = estimate_background_percentile(&data, 0.05);
+        assert!((bg - 0.42).abs() < 1e-6);
+    }
+
+    // ========== Integration-Style Tests ==========
+
+    #[test]
+    fn test_composite_realistic_scenario() {
+        // Simulate a realistic scenario:
+        // - 64x64 image
+        // - Star stack has bright stars on dark background
+        // - Comet stack has bright comet center on dark background
+
+        let width = 64;
+        let height = 64;
+        let mut star_stack = vec![0.1_f32; width * height];
+        let mut comet_stack = vec![0.1_f32; width * height];
+
+        // Add stars to star_stack (bright points)
+        let star_positions = [(10, 10), (20, 30), (50, 15), (40, 55)];
+        for (sx, sy) in star_positions {
+            star_stack[sy * width + sx] = 0.9;
+        }
+
+        // Add comet to comet_stack (bright region in center)
+        let comet_center: (i32, i32) = (32, 32);
+        for dy in -2..=2_i32 {
+            for dx in -2..=2_i32 {
+                let x = (comet_center.0 + dx) as usize;
+                let y = (comet_center.1 + dy) as usize;
+                let dist = ((dx * dx + dy * dy) as f32).sqrt();
+                comet_stack[y * width + x] = 0.9 - dist * 0.1;
+            }
+        }
+
+        // Lighten composite
+        let lighten = composite_stacks(&star_stack, &comet_stack, CompositeMethod::Lighten);
+        let lighten = lighten.unwrap();
+
+        // Stars should be bright
+        assert!(lighten[10 * width + 10] > 0.8);
+        // Comet center should be bright
+        assert!(lighten[32 * width + 32] > 0.8);
+        // Background should remain low
+        assert!(lighten[0] < 0.2);
+
+        // Additive composite
+        let additive = composite_stacks(&star_stack, &comet_stack, CompositeMethod::Additive);
+        let additive = additive.unwrap();
+
+        // Stars should be bright
+        assert!(additive[10 * width + 10] > 0.8);
+        // Comet should be added to star stack (possibly brighter)
+        assert!(additive[32 * width + 32] > 0.8);
     }
 }

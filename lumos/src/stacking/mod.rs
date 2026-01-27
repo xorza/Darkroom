@@ -45,7 +45,8 @@ pub use gpu::{
 #[allow(unused_imports)]
 pub use comet::{
     CometStackConfig, CometStackResult, CompositeMethod, ObjectPosition,
-    apply_comet_offset_to_transform, compute_comet_offset, interpolate_position,
+    apply_comet_offset_to_transform, composite_stacks, compute_comet_offset,
+    create_comet_stack_result, interpolate_position,
 };
 
 #[cfg(feature = "bench")]

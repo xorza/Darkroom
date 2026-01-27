@@ -106,7 +106,7 @@ with tests and running verification commands per project conventions.
 - [x] Research dual-stack approach algorithms
 - [x] Design API for comet position input (t1, t2 positions)
 - [x] Implement frame-specific offset based on timestamp interpolation
-- [ ] Implement composite output (stars from one stack, comet from other)
+- [x] Implement composite output (stars from one stack, comet from other)
 - [ ] Write integration tests with synthetic comet data
 - [ ] Run verification commands
 
