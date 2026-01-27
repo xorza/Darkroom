@@ -13,13 +13,13 @@
 
 | File | Description |
 |------|-------------|
-| `SPEC.md` | Task checklist derived from PLAN.md |
+| `PLAN.md` | Task checklist |
 | `run_headless.sh` | Fully autonomous runner (no prompts) |
 | `logs/` | Session logs and progress tracking |
 
 ## How It Works
 
-1. Claude reads `SPEC.md` to find the next unchecked `[ ]` task
+1. Claude reads `PLAN.md` to find the next unchecked `[ ]` task
 2. Reads `CLAUDE.md` for coding rules and `PLAN.md` for algorithm details
 3. Implements one task at a time
 4. Runs verification: `cargo nextest run && cargo fmt && cargo check && cargo clippy`
@@ -27,7 +27,7 @@
 6. Marks task complete `[x]` and commits
 7. Loops until all tasks done
 
-Edit `SPEC.md` to:
+Edit `PLAN.md` to:
 - Add new tasks
 - Reorder priorities
 - Mark tasks as `[SKIPPED]` to bypass

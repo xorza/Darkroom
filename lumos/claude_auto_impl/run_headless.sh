@@ -12,7 +12,6 @@ set -euo pipefail
 # Configuration
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
-SPEC_FILE="$SCRIPT_DIR/SPEC.md"
 PLAN_FILE="$PROJECT_ROOT/PLAN.md"
 LOG_DIR="$SCRIPT_DIR/logs"
 SESSION_LOG="$LOG_DIR/headless_$(date +%Y%m%d_%H%M%S).log"
@@ -66,14 +65,13 @@ fi
 CLAUDE_PROMPT="You are implementing the project autonomously.
 
 ## READ FIRST:
-1. \`$SPEC_FILE\` - find next \`[ ]\` task
+1. \`$PLAN_FILE\` - find next \`[ ]\` task
 2. \`$PROJECT_ROOT/CLAUDE.md\` - coding rules (MUST follow)
-3. \`$PLAN_FILE\` - algorithm details
-4. Relevant \`NOTES-AI.md\` files
+3. Relevant \`NOTES-AI.md\` files
 
 ## WORKFLOW:
 
-1. **FIND TASK**: Read SPEC.md, find next \`[ ]\`. If all tasks are marked \`[x]\`, output exactly \`[[ALL DONE]]\` and stop.
+1. **FIND TASK**: Read PLAN.md, find next \`[ ]\`. If all tasks are marked \`[x]\`, output exactly \`[[ALL DONE]]\` and stop.
 
 2. **RESEARCH** (if needed): Web search, document in NOTES-AI.md.
 
@@ -94,7 +92,7 @@ CLAUDE_PROMPT="You are implementing the project autonomously.
    \`\`\`
    If <10% improvement: document, remove code, mark \"[SKIPPED]\"
 
-6. **UPDATE**: Mark \`[x]\` in SPEC.md. Update NOTES-AI.md.
+6. **UPDATE**: Mark \`[x]\` in PLAN.md. Update NOTES-AI.md.
 
 7. **COMMIT**: \`git commit -m \"<description>\"\`
 
@@ -118,15 +116,15 @@ for ((i=1; i<=MAX_ITERATIONS; i++)); do
     echo -e "${BLUE}[Iteration $i/$MAX_ITERATIONS]${NC} $(date '+%H:%M:%S')"
 
     # Check completion
-    if ! grep -qE "^\s*- \[ \]" "$SPEC_FILE" 2>/dev/null; then
+    if ! grep -qE "^\s*- \[ \]" "$PLAN_FILE" 2>/dev/null; then
         echo -e "${GREEN}All tasks complete!${NC}"
         break
     fi
 
     # Show progress
-    total=$(grep -cE "^\s*- \[.\]" "$SPEC_FILE" 2>/dev/null || echo 0)
-    done=$(grep -cE "^\s*- \[x\]" "$SPEC_FILE" 2>/dev/null || echo 0)
-    next=$(grep -m1 "^\s*- \[ \]" "$SPEC_FILE" | sed 's/.*\[ \] //' || echo "none")
+    total=$(grep -cE "^\s*- \[.\]" "$PLAN_FILE" 2>/dev/null || echo 0)
+    done=$(grep -cE "^\s*- \[x\]" "$PLAN_FILE" 2>/dev/null || echo 0)
+    next=$(grep -m1 "^\s*- \[ \]" "$PLAN_FILE" | sed 's/.*\[ \] //' || echo "none")
     echo -e "Progress: ${CYAN}$done/$total${NC} | Next: ${CYAN}$next${NC}"
 
     # Run Claude Code in headless mode with streaming JSON parsed to human-readable output
