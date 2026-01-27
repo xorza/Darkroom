@@ -1,169 +1,152 @@
-# Project Implementation Specification
+# Lumos Astrophotography Stacking - Implementation Specification
 
-> **Status**: 🚧 In Progress  
-> **Last Updated**: <!-- AUTO-UPDATED -->  
-> **Progress**: 0 / 45 tasks complete
+> **Status**: In Progress  
+> **Last Updated**: 2026-01-27  
+> **Reference**: See `../PLAN.md` for detailed algorithm descriptions
 
 ---
 
 ## Overview
 
-<!-- EDIT THIS SECTION: Describe your project -->
+This specification defines remaining implementation tasks for the lumos astrophotography
+stacking library. Claude Code will work through each task sequentially, implementing
+with tests and running verification commands per project conventions.
 
-This document defines the complete implementation plan. Claude Code will work through
-each task sequentially, researching best practices, implementing with tests, and
-optimizing with benchmarks.
-
-**Project Name**: <!-- YOUR PROJECT NAME -->  
-**Description**: <!-- WHAT DOES IT DO -->  
-**Target Language**: Rust <!-- or your language -->
+**Crate**: `lumos`  
+**Language**: Rust  
+**Verification**: `cargo nextest run && cargo fmt && cargo check && cargo clippy --all-targets -- -D warnings`
 
 ---
 
-## Phase 1: Research & Design
+## Phase 1: Local Normalization [NOT STARTED]
 
-### 1.1 Research Best Practices
-- [ ] Research current best practices for this domain online
-- [ ] Document findings in `docs/RESEARCH.md`
-- [ ] Identify common pitfalls to avoid
-- [ ] List recommended libraries and their versions
+### 1.1 Research & Design
+- [ ] Research PixInsight-style local normalization algorithms
+- [ ] Document approach in `src/stacking/NOTES-AI.md`
+- [ ] Design API that fits existing `NormalizationMethod` enum
 
-### 1.2 API Design
-- [ ] Design public API surface (types, traits, functions)
-- [ ] Document API in `docs/API_DESIGN.md`
-- [ ] Ensure API follows language idioms and conventions
-- [ ] Review API for breaking change potential
-- [ ] Verify no deprecated patterns are used
-
-### 1.3 Project Structure
-- [ ] Set up project structure with proper module organization
-- [ ] Create README.md in root with project overview
-- [ ] Set up CI configuration (if applicable)
-- [ ] Configure linting and formatting tools
+### 1.2 Implementation
+- [ ] Implement tile-based local statistics computation (128x128 tiles)
+- [ ] Implement smooth interpolation between tile statistics
+- [ ] Add `LocalNormalization` variant to `NormalizationMethod`
+- [ ] Write unit tests for local normalization
+- [ ] Run verification commands
 
 ---
 
-## Phase 2: Core Implementation (Scalar/Baseline)
+## Phase 2: GPU Acceleration [PARTIAL - 30%]
 
-### 2.1 Core Types
-- [ ] Implement core data types in `src/scalar/types.rs`
-- [ ] Write unit tests for all types
-- [ ] Document public types with examples
-- [ ] Update `src/scalar/README.md` with implementation notes
+> **Rule**: Each GPU implementation must show measurable improvement or be documented as not beneficial
 
-### 2.2 Core Algorithms
-- [ ] Implement baseline algorithms in `src/scalar/algorithms.rs`
-- [ ] Write comprehensive unit tests
-- [ ] Add documentation with complexity analysis
-- [ ] Create baseline benchmark in `benches/baseline.rs`
-- [ ] Run baseline benchmark and record results
+### 2.1 GPU FFT for Phase Correlation
+- [ ] Research wgpu FFT implementations or libraries (rustfft alternatives)
+- [ ] Document findings in `src/gpu/NOTES-AI.md`
+- [ ] Implement GPU FFT wrapper if viable library exists
+- [ ] Integrate with phase correlation registration
+- [ ] Benchmark against CPU rustfft implementation
+- [ ] If <10% improvement: document and remove, mark "[SKIPPED]"
 
-### 2.3 Public API Implementation
-- [ ] Implement public API facade in `src/lib.rs`
-- [ ] Ensure API matches design document
+### 2.2 GPU Sigma Clipping
+- [ ] Research parallel reduction strategies for sigma clipping
+- [ ] Design GPU kernel for per-pixel stack statistics
+- [ ] Implement GPU sigma clipping in wgpu compute shader
 - [ ] Write integration tests
-- [ ] Add usage examples in documentation
+- [ ] Benchmark against CPU implementation
+- [ ] If <10% improvement: document and remove, mark "[SKIPPED]"
+
+### 2.3 GPU Star Detection
+- [ ] Design GPU kernel for threshold detection
+- [ ] Implement parallel connected component labeling (or alternative)
+- [ ] Benchmark against SIMD CPU implementation
+- [ ] If <10% improvement: document and remove, mark "[SKIPPED]"
+
+### 2.4 Batch Processing Pipeline
+- [ ] Implement overlapped compute/transfer for frame processing
+- [ ] Add async GPU operations with proper synchronization
+- [ ] Benchmark end-to-end pipeline throughput
 
 ---
 
-## Phase 3: SIMD Optimizations
+## Phase 3: Advanced Features [NOT STARTED]
 
-> **Rule**: Each optimization must show >5% improvement or be removed
+### 3.1 Comet/Asteroid Stacking Mode
+- [ ] Research dual-stack approach algorithms
+- [ ] Design API for comet position input (t1, t2 positions)
+- [ ] Implement frame-specific offset based on timestamp interpolation
+- [ ] Implement composite output (stars from one stack, comet from other)
+- [ ] Write integration tests with synthetic comet data
+- [ ] Run verification commands
 
-### 3.1 SIMD Setup
-- [ ] Research current SIMD best practices for target platform
-- [ ] Set up SIMD feature flags and conditional compilation
-- [ ] Document SIMD strategy in `src/simd/README.md`
+### 3.2 Multi-Session Integration
+- [ ] Design per-session quality assessment workflow
+- [ ] Implement session-aware local normalization
+- [ ] Implement session-weighted integration
+- [ ] Add gradient removal post-stack (optional)
+- [ ] Write integration tests
+- [ ] Run verification commands
 
-### 3.2 SIMD Implementations
-- [ ] Implement SIMD version of algorithm 1 in `src/simd/`
-- [ ] Create benchmark `benches/simd_algo1.rs`
-- [ ] Run benchmark, compare to baseline
-- [ ] Document results (keep if >5% gain, remove if not)
+### 3.3 Distortion Correction Extensions
+- [ ] Implement radial distortion models (barrel/pincushion)
+- [ ] Implement tangential distortion correction
+- [ ] Add field curvature correction
+- [ ] Write unit tests for each model
+- [ ] Run verification commands
 
-- [ ] Implement SIMD version of algorithm 2 in `src/simd/`
-- [ ] Create benchmark `benches/simd_algo2.rs`
-- [ ] Run benchmark, compare to baseline
-- [ ] Document results (keep if >5% gain, remove if not)
-
-### 3.3 SIMD Integration
-- [ ] Integrate beneficial SIMD optimizations into main API
-- [ ] Add runtime detection for SIMD support
-- [ ] Update tests for SIMD paths
-- [ ] Update `src/simd/README.md` with final optimization summary
-
----
-
-## Phase 4: GPU Optimizations
-
-> **Rule**: Each optimization must show >5% improvement or be removed
-
-### 4.1 GPU Setup
-- [ ] Research current GPU compute best practices (CUDA/OpenCL/wgpu/etc.)
-- [ ] Set up GPU feature flags and dependencies
-- [ ] Document GPU strategy in `src/gpu/README.md`
-
-### 4.2 GPU Implementations
-- [ ] Implement GPU version of algorithm 1 in `src/gpu/`
-- [ ] Create benchmark `benches/gpu_algo1.rs`
-- [ ] Run benchmark, compare to baseline and SIMD
-- [ ] Document results (keep if >5% gain, remove if not)
-
-- [ ] Implement GPU version of algorithm 2 in `src/gpu/`
-- [ ] Create benchmark `benches/gpu_algo2.rs`
-- [ ] Run benchmark, compare to baseline and SIMD
-- [ ] Document results (keep if >5% gain, remove if not)
-
-### 4.3 GPU Integration
-- [ ] Integrate beneficial GPU optimizations into main API
-- [ ] Add runtime detection for GPU availability
-- [ ] Handle GPU fallback to SIMD/scalar gracefully
-- [ ] Update `src/gpu/README.md` with final optimization summary
+### 3.4 Astrometric Solution
+- [ ] Research Gaia/UCAC4 catalog formats and access
+- [ ] Implement catalog star matching algorithm
+- [ ] Compute plate solution (WCS coordinates)
+- [ ] Write integration tests
+- [ ] Run verification commands
 
 ---
 
-## Phase 5: Quality Assurance
+## Phase 4: Quality & Polish [PARTIAL]
 
-### 5.1 Test Coverage
-- [ ] Review test coverage, add missing tests
-- [ ] Add edge case tests
-- [ ] Add property-based tests (if applicable)
-- [ ] Ensure all public API has tests
+### 4.1 Real-time Preview
+- [ ] Design live stacking API (incremental updates)
+- [ ] Implement streaming accumulator for real-time display
+- [ ] Add quality metrics streaming
+- [ ] Write integration tests
 
-### 5.2 Documentation
-- [ ] Review and update all README.md files
-- [ ] Ensure all public items are documented
-- [ ] Add examples to documentation
-- [ ] Create CHANGELOG.md
-
-### 5.3 Final Validation
-- [ ] Run full benchmark suite
-- [ ] Create benchmark comparison table in root README.md
-- [ ] Verify no deprecated APIs are used
-- [ ] Final code review pass for quality
+### 4.2 Code Quality
+- [ ] Review and update all NOTES-AI.md files
+- [ ] Ensure public API is consistent and well-documented
+- [ ] Remove any deprecated or unused code
+- [ ] Final clippy and fmt pass
 
 ---
 
-## Optimization Results Tracking
+## Verification Commands
 
-<!-- This section is auto-updated during implementation -->
+After EACH task completion, run:
+```bash
+cargo nextest run -p lumos && cargo fmt && cargo check && cargo clippy --all-targets -- -D warnings
+```
 
-| Optimization | vs Baseline | vs Previous | Status | Notes |
-|-------------|-------------|-------------|--------|-------|
-| Scalar (baseline) | - | - | ✅ Implemented | Baseline reference |
-| SIMD Algo 1 | TBD | TBD | ⏳ Pending | |
-| SIMD Algo 2 | TBD | TBD | ⏳ Pending | |
-| GPU Algo 1 | TBD | TBD | ⏳ Pending | |
-| GPU Algo 2 | TBD | TBD | ⏳ Pending | |
+For benchmarks:
+```bash
+cargo bench -p lumos --features bench --bench <name> | tee benches/<name>_results.txt
+```
 
-**Legend**: ✅ Kept | ❌ Removed (no benefit) | ⏳ Pending | 🚫 Skipped (not applicable)
+---
+
+## Progress Tracking
+
+| Phase | Tasks | Complete | Status |
+|-------|-------|----------|--------|
+| Local Normalization | 5 | 0 | Not Started |
+| GPU Acceleration | 12 | 0 | Partial (warping done) |
+| Advanced Features | 14 | 0 | Not Started |
+| Quality & Polish | 4 | 0 | Not Started |
+| **Total** | **35** | **0** | **In Progress** |
 
 ---
 
 ## Notes
 
-- All benchmarks use criterion.rs (or equivalent)
-- Minimum 100 iterations per benchmark
-- Results recorded on: <!-- MACHINE SPECS -->
-- Remove optimizations showing <5% improvement
-- Document ALL findings, including negative results
+- All implementations must follow `CLAUDE.md` coding rules
+- Use `.unwrap()` for infallible operations, `.expect()` with message for non-obvious cases
+- Add `#[derive(Debug)]` to all structs
+- Update relevant `NOTES-AI.md` after completing each section
+- Benchmark results go to `benches/` with analysis in `bench-analysis.md`

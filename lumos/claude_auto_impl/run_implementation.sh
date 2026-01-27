@@ -1,37 +1,41 @@
 #!/bin/bash
 
 # =============================================================================
-# Claude Code Autonomous Implementation Runner
+# Claude Code Autonomous Implementation Runner - Lumos Project
 # =============================================================================
-# This script runs Claude Code in a loop until all tasks in SPEC.md are complete.
-# It handles logging, progress tracking, and graceful interruption.
+# Runs Claude Code in a loop until all tasks in SPEC.md are complete.
+# Adapted for lumos astrophotography stacking project.
 # =============================================================================
 
 set -euo pipefail
 
 # Configuration
-SPEC_FILE="SPEC.md"
-PROGRESS_LOG="logs/progress.log"
-SESSION_LOG="logs/session_$(date +%Y%m%d_%H%M%S).log"
-MAX_ITERATIONS=500
-ITERATION_DELAY=3
-MAX_CONSECUTIVE_FAILURES=5
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+SPEC_FILE="$SCRIPT_DIR/SPEC.md"
+PLAN_FILE="$PROJECT_ROOT/PLAN.md"
+LOG_DIR="$SCRIPT_DIR/logs"
+PROGRESS_LOG="$LOG_DIR/progress.log"
+SESSION_LOG="$LOG_DIR/session_$(date +%Y%m%d_%H%M%S).log"
+MAX_ITERATIONS=200
+ITERATION_DELAY=5
+MAX_CONSECUTIVE_FAILURES=3
 
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
-NC='\033[0m' # No Color
+CYAN='\033[0;36m'
+NC='\033[0m'
 
-# Create necessary directories
-mkdir -p logs
-mkdir -p src/{scalar,simd,gpu}
-mkdir -p benches
-mkdir -p tests
+# Create log directory
+mkdir -p "$LOG_DIR"
 
 # Initialize progress log
 echo "=== Implementation Started: $(date) ===" >> "$PROGRESS_LOG"
+echo "Project: lumos" >> "$PROGRESS_LOG"
+echo "Working directory: $PROJECT_ROOT" >> "$PROGRESS_LOG"
 
 # Trap for graceful shutdown
 cleanup() {
@@ -44,7 +48,6 @@ trap cleanup SIGINT SIGTERM
 # Function to check if all tasks are complete
 check_completion() {
     if [[ -f "$SPEC_FILE" ]]; then
-        # Check if there are any unchecked boxes
         if grep -q "\[ \]" "$SPEC_FILE"; then
             return 1  # Not complete
         else
@@ -54,133 +57,145 @@ check_completion() {
     return 1
 }
 
-# Function to count progress
+# Function to count and show progress
 show_progress() {
     if [[ -f "$SPEC_FILE" ]]; then
-        local total=$(grep -c "\[.\]" "$SPEC_FILE" 2>/dev/null || echo "0")
-        local done=$(grep -c "\[x\]" "$SPEC_FILE" 2>/dev/null || echo "0")
-        echo -e "${BLUE}Progress: ${done}/${total} tasks complete${NC}"
+        local total=$(grep -cE "^\s*- \[.\]" "$SPEC_FILE" 2>/dev/null || echo "0")
+        local done=$(grep -cE "^\s*- \[x\]" "$SPEC_FILE" 2>/dev/null || echo "0")
+        local skipped=$(grep -c "\[SKIPPED\]" "$SPEC_FILE" 2>/dev/null || echo "0")
+        echo -e "${CYAN}Progress: ${done}/${total} tasks complete (${skipped} skipped)${NC}"
+    fi
+}
+
+# Function to get next task
+get_next_task() {
+    if [[ -f "$SPEC_FILE" ]]; then
+        grep -m1 "^\s*- \[ \]" "$SPEC_FILE" | sed 's/.*\[ \] //' || echo "No tasks found"
     fi
 }
 
 # Main prompt for Claude Code
-CLAUDE_PROMPT='You are implementing a project according to SPEC.md. Follow these rules strictly:
+CLAUDE_PROMPT="You are implementing the lumos astrophotography stacking library.
 
-## WORKFLOW FOR EACH ITERATION:
+## CRITICAL: Read These Files First
+1. Read \`$SPEC_FILE\` to find the next unchecked task \`[ ]\`
+2. Read \`$PROJECT_ROOT/CLAUDE.md\` for coding rules
+3. Read \`$PLAN_FILE\` for algorithm details and context
+4. Read relevant \`NOTES-AI.md\` files in the module you're working on
 
-1. **READ STATE FIRST**
-   - Read SPEC.md to find the next unchecked task `[ ]`
-   - Read relevant README.md files to understand current state
-   - If all tasks show `[x]`, respond with exactly: "ALL_TASKS_COMPLETE"
+## WORKFLOW FOR EACH TASK:
 
-2. **RESEARCH PHASE** (for new components)
-   - Use web search to research current best practices
-   - Check for latest API conventions and patterns
-   - Verify no deprecated APIs will be used
-   - Document findings in relevant README.md
+1. **FIND NEXT TASK**
+   - Read SPEC.md, find the next \`[ ]\` task
+   - If all tasks show \`[x]\`, respond with exactly: \"ALL_TASKS_COMPLETE\"
 
-3. **IMPLEMENTATION PHASE**
-   - Implement ONE task at a time
-   - Follow the public API design principles from SPEC.md
+2. **RESEARCH** (if needed)
+   - Use web search for best practices
+   - Check online documentation
+   - Document findings in relevant NOTES-AI.md
+
+3. **IMPLEMENT**
+   - ONE task at a time only
+   - Follow CLAUDE.md coding rules strictly:
+     * Use \`.unwrap()\` for infallible operations
+     * Use \`.expect(\"message\")\` for non-obvious cases
+     * Add \`#[derive(Debug)]\` to structs
+     * Prefer crashing on logic errors
    - Write clean, documented code
-   - Ensure no deprecated APIs are used
 
-4. **TESTING PHASE**
-   - Write unit tests BEFORE marking task complete
-   - Run tests to verify they pass
-   - Aim for high coverage of the new code
+4. **TEST & VERIFY**
+   - Write unit tests
+   - Run: \`cargo nextest run -p lumos && cargo fmt && cargo check && cargo clippy --all-targets -- -D warnings\`
+   - Tests MUST pass before marking complete
 
-5. **OPTIMIZATION TASKS** (scalar/simd/gpu)
-   - Implement optimization in isolation
-   - Create dedicated benchmark in benches/
-   - Run benchmark and record results
-   - Compare against baseline
-   - If optimization shows <5% improvement or regression:
-     * Document findings in README.md
-     * Remove the optimization code
-     * Mark task as complete with note "[SKIPPED - no benefit]"
-   - If optimization is beneficial:
-     * Keep the code
-     * Document speedup in README.md
+5. **BENCHMARK** (for optimization tasks only)
+   - Create benchmark in \`benches/\`
+   - Run: \`cargo bench -p lumos --features bench --bench <name>\`
+   - Save results to \`benches/<name>_results.txt\`
+   - If improvement < threshold: document why, remove code, mark \"[SKIPPED]\"
 
 6. **UPDATE STATUS**
-   - Mark completed task with `[x]` in SPEC.md
-   - Update README.md in relevant folder with:
-     * What was implemented
-     * Optimizations used (or why skipped)
-     * Benchmark results
-     * Any important notes
+   - Mark completed task with \`[x]\` in SPEC.md
+   - Update relevant NOTES-AI.md with what was implemented
+   - Update bench-analysis.md if benchmarks were run
 
-7. **COMMIT PROGRESS**
-   - Git commit after each completed task
-   - Use descriptive commit message
+7. **GIT COMMIT**
+   - Commit changes with descriptive message
+   - Format: \"lumos: <brief description of what was done>\"
 
-## CRITICAL RULES:
-- ONE task per iteration only
-- ALWAYS run tests before marking complete
-- ALWAYS run benchmarks for optimization tasks
-- NEVER use deprecated APIs (research first if unsure)
-- REMOVE optimizations that do not provide measurable benefit
-- Keep all README.md files updated with current status
+## RULES:
+- ONE task per iteration
+- ALWAYS run verification commands before marking complete
+- ALWAYS benchmark optimization tasks
+- Remove optimizations that don't meet threshold
+- Keep NOTES-AI.md files updated
+- Follow CLAUDE.md rules exactly
 
-Begin by reading SPEC.md and implementing the next incomplete task.'
+Begin now. Read SPEC.md and implement the next incomplete task."
 
-# Initialize git if needed
-if [[ ! -d ".git" ]]; then
-    echo -e "${BLUE}Initializing git repository...${NC}"
-    git init
-    echo "logs/" >> .gitignore
-    git add .gitignore
-    git commit -m "Initial commit: project setup"
-fi
+# Change to project root
+cd "$PROJECT_ROOT"
 
-echo -e "${GREEN}Starting autonomous implementation...${NC}"
-echo -e "${YELLOW}Press Ctrl+C to gracefully stop${NC}\n"
+echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo -e "${GREEN}  Lumos Autonomous Implementation Runner${NC}"
+echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo ""
+echo -e "Project root: ${CYAN}$PROJECT_ROOT${NC}"
+echo -e "Spec file:    ${CYAN}$SPEC_FILE${NC}"
+echo -e "Log file:     ${CYAN}$SESSION_LOG${NC}"
+echo ""
+echo -e "${YELLOW}Press Ctrl+C to gracefully stop${NC}"
+echo ""
+
+show_progress
+echo -e "Next task: ${CYAN}$(get_next_task)${NC}"
+echo ""
 
 iteration=0
 consecutive_failures=0
 
 while [[ $iteration -lt $MAX_ITERATIONS ]]; do
     ((iteration++))
-    
+
     echo -e "\n${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${BLUE}Iteration $iteration / $MAX_ITERATIONS - $(date)${NC}"
+    echo -e "${BLUE}Iteration $iteration / $MAX_ITERATIONS - $(date '+%H:%M:%S')${NC}"
     echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    
+
     show_progress
-    
+    echo -e "Next: ${CYAN}$(get_next_task)${NC}"
+
     # Check if already complete
     if check_completion; then
-        echo -e "\n${GREEN}✓ All tasks complete!${NC}"
+        echo -e "\n${GREEN}All tasks complete!${NC}"
         echo "=== All Tasks Complete: $(date) ===" >> "$PROGRESS_LOG"
         break
     fi
-    
+
     # Run Claude Code
     echo -e "\n${YELLOW}Running Claude Code...${NC}\n"
-    
-    # Capture output and check for completion signal
+
     set +e
     output=$(claude --print "$CLAUDE_PROMPT" 2>&1 | tee -a "$SESSION_LOG")
     exit_code=$?
     set -e
-    
+
     # Log iteration
     echo "--- Iteration $iteration: $(date) ---" >> "$PROGRESS_LOG"
-    
-    # Check for completion signal in output
+    echo "Task: $(get_next_task)" >> "$PROGRESS_LOG"
+
+    # Check for completion signal
     if echo "$output" | grep -q "ALL_TASKS_COMPLETE"; then
-        echo -e "\n${GREEN}✓ Claude signaled all tasks complete!${NC}"
+        echo -e "\n${GREEN}Claude signaled all tasks complete!${NC}"
         echo "=== All Tasks Complete (signaled): $(date) ===" >> "$PROGRESS_LOG"
         break
     fi
-    
+
     # Check for failures
     if [[ $exit_code -ne 0 ]]; then
         ((consecutive_failures++))
         echo -e "${RED}Iteration failed (${consecutive_failures}/${MAX_CONSECUTIVE_FAILURES})${NC}"
-        echo "FAILED: Iteration $iteration" >> "$PROGRESS_LOG"
-        
+        echo "FAILED: Iteration $iteration (exit code $exit_code)" >> "$PROGRESS_LOG"
+
         if [[ $consecutive_failures -ge $MAX_CONSECUTIVE_FAILURES ]]; then
             echo -e "${RED}Too many consecutive failures. Stopping.${NC}"
             echo "=== Stopped due to failures: $(date) ===" >> "$PROGRESS_LOG"
@@ -190,8 +205,7 @@ while [[ $iteration -lt $MAX_ITERATIONS ]]; do
         consecutive_failures=0
         echo "SUCCESS: Iteration $iteration" >> "$PROGRESS_LOG"
     fi
-    
-    # Brief delay between iterations
+
     sleep $ITERATION_DELAY
 done
 
@@ -200,5 +214,6 @@ if [[ $iteration -ge $MAX_ITERATIONS ]]; then
     echo "=== Max iterations reached: $(date) ===" >> "$PROGRESS_LOG"
 fi
 
-echo -e "\n${GREEN}Session complete. Check logs/ for details.${NC}"
+echo -e "\n${GREEN}Session complete.${NC}"
+echo -e "Log saved to: ${CYAN}$SESSION_LOG${NC}"
 show_progress
