@@ -1047,7 +1047,7 @@ let frame_weights = stack.compute_frame_weights();
 let paths = stack.filter_all_frames();
 ```
 
-### Tests (26 passing)
+### Tests (54 unit tests + 9 integration tests)
 
 **SessionQuality:**
 - `test_session_quality_default`
@@ -1083,6 +1083,17 @@ let paths = stack.filter_all_frames();
 - `test_multi_session_stack_summary`
 - `test_multi_session_summary_display`
 - `test_multi_session_stack_compute_frame_weights`
+
+**Integration Tests (9 tests):**
+- `test_integration_multi_session_stacking_synthetic_data` - Full end-to-end stacking with temp files
+- `test_integration_session_normalization_corrects_gradient` - Gradient correction via normalization
+- `test_integration_gradient_removal_on_stacked_result` - Post-stack gradient removal with polynomial fitting
+- `test_integration_cross_session_normalization` - Cross-session frame matching
+- `test_integration_global_reference_selection` - Best frame selection from multiple sessions
+- `test_integration_summary_display_format` - Summary formatting verification
+- `test_integration_quality_based_frame_filtering` - Quality-based frame rejection
+- `test_integration_session_weighted_stack_result_display` - Result display formatting
+- `test_integration_frame_weights_sum_to_one` - Weight normalization validation
 
 ### Public Exports
 

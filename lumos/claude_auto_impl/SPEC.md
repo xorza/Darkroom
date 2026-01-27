@@ -115,8 +115,8 @@ with tests and running verification commands per project conventions.
 - [x] Implement session-aware local normalization
 - [x] Implement session-weighted integration
 - [x] Add gradient removal post-stack (optional)
-- [ ] Write integration tests
-- [ ] Run verification commands
+- [x] Write integration tests
+- [x] Run verification commands
 
 **Implementation** (2026-01-27): Created `src/stacking/session.rs` with:
 - `SessionQuality` - Aggregate metrics for a session (median FWHM, SNR, eccentricity, noise)
@@ -129,7 +129,18 @@ with tests and running verification commands per project conventions.
 - `SessionWeightedStackResult` - Result type with stacked image and metadata
 - `stack_session_weighted()` - Main integration function with optional local normalization
 - Multi-channel support: normalizes each channel independently for RGB images
-- 45 unit tests passing (26 original + 14 normalization + 5 integration)
+- 54 unit tests + 9 integration tests passing
+
+**Integration Tests** (2026-01-27): Added `session::integration_tests` module with:
+- `test_integration_multi_session_stacking_synthetic_data` - Full end-to-end with temp files
+- `test_integration_session_normalization_corrects_gradient` - Gradient correction via normalization
+- `test_integration_gradient_removal_on_stacked_result` - Post-stack gradient removal
+- `test_integration_cross_session_normalization` - Cross-session frame matching
+- `test_integration_global_reference_selection` - Best frame selection from multiple sessions
+- `test_integration_summary_display_format` - Summary formatting
+- `test_integration_quality_based_frame_filtering` - Quality-based frame rejection
+- `test_integration_session_weighted_stack_result_display` - Result display
+- `test_integration_frame_weights_sum_to_one` - Weight normalization
 
 **Gradient Removal** (2026-01-27): Created `src/stacking/gradient_removal.rs` with:
 - `GradientRemovalConfig` - Configuration for gradient removal (model, correction, samples)

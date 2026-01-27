@@ -2167,3 +2167,823 @@ mod tests {
         assert!(result.is_err());
     }
 }
+
+/// Integration tests for multi-session stacking with synthetic data.
+#[cfg(test)]
+mod integration_tests {
+    use super::*;
+    use crate::AstroImage;
+    use tempfile::TempDir;
+
+    // ============================================================================
+    // Test Helpers
+    // ============================================================================
+
+    /// Create a uniform test image.
+    fn create_uniform_image(width: usize, height: usize, value: f32) -> Vec<f32> {
+        vec![value; width * height]
+    }
+
+    /// Create a test image with a horizontal gradient.
+    fn create_gradient_image(width: usize, height: usize, left: f32, right: f32) -> Vec<f32> {
+        let mut pixels = vec![0.0; width * height];
+        for y in 0..height {
+            for x in 0..width {
+                let t = x as f32 / (width - 1).max(1) as f32;
+                pixels[y * width + x] = left + t * (right - left);
+            }
+        }
+        pixels
+    }
+
+    /// Render a Gaussian star at the given position.
+    fn render_gaussian(
+        pixels: &mut [f32],
+        width: usize,
+        cx: f32,
+        cy: f32,
+        sigma: f32,
+        amplitude: f32,
+    ) {
+        let height = pixels.len() / width;
+        let radius = (sigma * 4.0).ceil() as i32;
+
+        for dy in -radius..=radius {
+            for dx in -radius..=radius {
+                let x = (cx as i32 + dx) as usize;
+                let y = (cy as i32 + dy) as usize;
+                if x < width && y < height {
+                    let dist_sq = (dx as f32).powi(2) + (dy as f32).powi(2);
+                    let gauss = amplitude * (-dist_sq / (2.0 * sigma * sigma)).exp();
+                    pixels[y * width + x] += gauss;
+                }
+            }
+        }
+    }
+
+    /// Create an AstroImage with random-ish synthetic star field.
+    fn create_synthetic_frame(
+        width: usize,
+        height: usize,
+        background: f32,
+        noise: f32,
+        star_positions: &[(f32, f32)],
+        star_brightness: f32,
+    ) -> AstroImage {
+        let mut pixels = vec![background; width * height];
+
+        // Add some pseudo-random noise based on position
+        for y in 0..height {
+            for x in 0..width {
+                let idx = y * width + x;
+                // Simple deterministic "noise" based on position
+                let noise_val = ((x * 7 + y * 13) % 100) as f32 / 100.0 - 0.5;
+                pixels[idx] += noise * noise_val;
+            }
+        }
+
+        // Render stars
+        for &(cx, cy) in star_positions {
+            render_gaussian(&mut pixels, width, cx, cy, 2.5, star_brightness);
+        }
+
+        // Clamp to positive values
+        for p in &mut pixels {
+            *p = p.max(0.0);
+        }
+
+        AstroImage::from_pixels(width, height, 1, pixels)
+    }
+
+    /// Save an AstroImage to a temporary TIFF file (as 32-bit float).
+    fn save_test_image(image: &AstroImage, dir: &TempDir, name: &str) -> PathBuf {
+        let path = dir.path().join(name);
+        // Save as L_F32 TIFF - this preserves the float values
+        image
+            .image
+            .clone()
+            .save_file(&path)
+            .expect("Failed to save test image");
+        path
+    }
+
+    /// Compute variance of a pixel array.
+    fn compute_variance(pixels: &[f32]) -> f32 {
+        let n = pixels.len() as f32;
+        let mean = pixels.iter().sum::<f32>() / n;
+        pixels.iter().map(|&x| (x - mean).powi(2)).sum::<f32>() / n
+    }
+
+    // ============================================================================
+    // Integration Tests
+    // ============================================================================
+
+    #[test]
+    fn test_integration_multi_session_stacking_synthetic_data() {
+        // Create temporary directory for test images
+        let temp_dir = TempDir::new().expect("Failed to create temp dir");
+
+        let width = 64;
+        let height = 64;
+        let star_positions = vec![(20.0, 20.0), (40.0, 30.0), (15.0, 45.0), (50.0, 50.0)];
+
+        // Session 1: Good seeing (low FWHM), high SNR
+        // Background level: 100, stars brighter
+        let session1_frames: Vec<PathBuf> = (0..3)
+            .map(|i| {
+                let frame =
+                    create_synthetic_frame(width, height, 100.0, 5.0, &star_positions, 500.0);
+                save_test_image(&frame, &temp_dir, &format!("session1_frame{}.tiff", i))
+            })
+            .collect();
+
+        // Session 2: Poorer conditions (different background)
+        // Background level: 120 (more light pollution), slightly dimmer stars
+        let session2_frames: Vec<PathBuf> = (0..2)
+            .map(|i| {
+                let frame =
+                    create_synthetic_frame(width, height, 120.0, 8.0, &star_positions, 400.0);
+                save_test_image(&frame, &temp_dir, &format!("session2_frame{}.tiff", i))
+            })
+            .collect();
+
+        // Create sessions with manually set quality metrics
+        // (In real usage, assess_quality would compute these from star detection)
+        let quality1 = SessionQuality {
+            median_fwhm: 2.5,
+            median_snr: 100.0,
+            median_eccentricity: 0.1,
+            median_noise: 5.0,
+            frame_count: 3,
+            usable_frame_count: 3,
+            frame_qualities: vec![
+                FrameQuality {
+                    fwhm: 2.4,
+                    snr: 95.0,
+                    eccentricity: 0.1,
+                    noise: 5.0,
+                    star_count: 4,
+                },
+                FrameQuality {
+                    fwhm: 2.5,
+                    snr: 100.0,
+                    eccentricity: 0.1,
+                    noise: 5.0,
+                    star_count: 4,
+                },
+                FrameQuality {
+                    fwhm: 2.6,
+                    snr: 105.0,
+                    eccentricity: 0.1,
+                    noise: 5.0,
+                    star_count: 4,
+                },
+            ],
+        };
+
+        let quality2 = SessionQuality {
+            median_fwhm: 3.2,
+            median_snr: 70.0,
+            median_eccentricity: 0.15,
+            median_noise: 8.0,
+            frame_count: 2,
+            usable_frame_count: 2,
+            frame_qualities: vec![
+                FrameQuality {
+                    fwhm: 3.0,
+                    snr: 65.0,
+                    eccentricity: 0.15,
+                    noise: 8.0,
+                    star_count: 4,
+                },
+                FrameQuality {
+                    fwhm: 3.4,
+                    snr: 75.0,
+                    eccentricity: 0.15,
+                    noise: 8.0,
+                    star_count: 4,
+                },
+            ],
+        };
+
+        let session1 = Session {
+            id: "night1".into(),
+            frame_paths: session1_frames,
+            quality: quality1,
+            reference_frame: Some(1),
+        };
+
+        let session2 = Session {
+            id: "night2".into(),
+            frame_paths: session2_frames,
+            quality: quality2,
+            reference_frame: Some(0),
+        };
+
+        // Configure stacking (disable local normalization since frames have same dimensions)
+        let config = SessionConfig::default()
+            .with_quality_threshold(0.3)
+            .without_local_normalization(); // Disable to simplify test
+
+        let stack = MultiSessionStack::new(vec![session1, session2]).with_config(config);
+
+        // Verify session weights
+        let session_weights = stack.compute_session_weights();
+        assert_eq!(session_weights.len(), 2);
+        // Session 1 should have higher weight (better quality)
+        assert!(
+            session_weights[0] > session_weights[1],
+            "Session 1 (better quality) should have higher weight: {} vs {}",
+            session_weights[0],
+            session_weights[1]
+        );
+
+        // Verify frame weights
+        let frame_weights = stack.compute_frame_weights();
+        assert_eq!(frame_weights.len(), 5); // 3 + 2 frames
+        let weight_sum: f32 = frame_weights.iter().sum();
+        assert!(
+            (weight_sum - 1.0).abs() < 1e-5,
+            "Frame weights should sum to 1.0, got {}",
+            weight_sum
+        );
+
+        // Perform stacking
+        let result = stack
+            .stack_session_weighted()
+            .expect("Stacking should succeed");
+
+        // Verify result
+        assert_eq!(result.session_count, 2);
+        assert_eq!(result.total_frames, 5);
+        assert!(!result.used_normalization); // We disabled it
+        assert_eq!(result.image.width(), width);
+        assert_eq!(result.image.height(), height);
+
+        // Verify the stacked image has reasonable values
+        let stacked_pixels = result.image.pixels();
+        let min_val = stacked_pixels.iter().cloned().fold(f32::INFINITY, f32::min);
+        let max_val = stacked_pixels
+            .iter()
+            .cloned()
+            .fold(f32::NEG_INFINITY, f32::max);
+        let mean_val: f32 = stacked_pixels.iter().sum::<f32>() / stacked_pixels.len() as f32;
+
+        // Background should be weighted average (~100*0.6 + 120*0.4 = 108)
+        // But weights are frame-based, so it depends on frame count too
+        assert!(
+            mean_val > 90.0 && mean_val < 130.0,
+            "Mean background should be reasonable: {}",
+            mean_val
+        );
+        assert!(
+            max_val > mean_val + 100.0,
+            "Max (star peak) should be significantly above mean: max={}, mean={}",
+            max_val,
+            mean_val
+        );
+        assert!(
+            min_val >= 0.0,
+            "Min value should be non-negative: {}",
+            min_val
+        );
+
+        // Clean up happens automatically via TempDir Drop
+    }
+
+    #[test]
+    fn test_integration_session_normalization_corrects_gradient() {
+        let width = 128;
+        let height = 128;
+
+        // Reference frame: uniform background at 100
+        let reference_pixels = create_uniform_image(width, height, 100.0);
+
+        // Target frame: has a gradient (simulating light pollution gradient)
+        let target_pixels = create_gradient_image(width, height, 80.0, 120.0);
+
+        // Before normalization: target has high variance (gradient)
+        let target_variance_before = compute_variance(&target_pixels);
+
+        // Create normalizer and normalize
+        let config = LocalNormalizationConfig::new(64); // Minimum tile size is 64
+        let normalizer = SessionNormalization::new(&reference_pixels, width, height, config);
+        let normalized = normalizer.normalize_frame(&target_pixels);
+
+        // After normalization: variance should be much lower (gradient removed)
+        let target_variance_after = compute_variance(&normalized);
+
+        assert!(
+            target_variance_after < target_variance_before * 0.1,
+            "Normalization should reduce variance by >90%: before={}, after={}",
+            target_variance_before,
+            target_variance_after
+        );
+
+        // Normalized mean should be close to reference
+        let normalized_mean: f32 = normalized.iter().sum::<f32>() / normalized.len() as f32;
+        assert!(
+            (normalized_mean - 100.0).abs() < 2.0,
+            "Normalized mean should be ~100: {}",
+            normalized_mean
+        );
+    }
+
+    #[test]
+    fn test_integration_gradient_removal_on_stacked_result() {
+        // Create a stacked result with a gradient
+        let width = 128;
+        let height = 128;
+
+        // Create image with linear gradient (simulating residual light pollution)
+        // Use a stronger gradient for clearer effect
+        let mut pixels = vec![0.0f32; width * height];
+        for y in 0..height {
+            for x in 0..width {
+                let gradient = 100.0 + (x as f32) * 1.0 + (y as f32) * 0.8;
+                pixels[y * width + x] = gradient;
+            }
+        }
+
+        // Add some smaller stars that won't dominate the sample rejection
+        render_gaussian(&mut pixels, width, 30.0, 30.0, 2.0, 50.0);
+        render_gaussian(&mut pixels, width, 90.0, 80.0, 2.0, 40.0);
+
+        let variance_before = compute_variance(&pixels);
+
+        let image = AstroImage::from_pixels(width, height, 1, pixels);
+
+        let mut result = SessionWeightedStackResult {
+            image,
+            session_count: 1,
+            total_frames: 5,
+            session_weights: vec![1.0],
+            frame_weights: vec![0.2; 5],
+            reference_info: None,
+            used_normalization: false,
+        };
+
+        // Apply gradient removal with denser sampling
+        let config = super::super::gradient_removal::GradientRemovalConfig::polynomial(1)
+            .with_samples_per_line(16)
+            .with_min_samples(16)
+            .with_brightness_tolerance(5.0); // More tolerant of stars
+
+        result
+            .remove_gradient(&config)
+            .expect("Gradient removal should succeed");
+
+        // After gradient removal, variance should be much lower
+        let variance_after = compute_variance(result.image.pixels());
+
+        // The linear polynomial should remove most of the linear gradient
+        // Stars will add some residual variance, so we expect ~90% reduction
+        assert!(
+            variance_after < variance_before * 0.2,
+            "Gradient removal should reduce variance significantly: before={}, after={}",
+            variance_before,
+            variance_after
+        );
+    }
+
+    #[test]
+    fn test_integration_cross_session_normalization() {
+        // Simulate normalizing frames from two different sessions
+        let width = 128;
+        let height = 128;
+
+        // Reference from "good" session: uniform, bright
+        let reference = create_uniform_image(width, height, 100.0);
+
+        // Frame from session 1: uniform but darker (different sky)
+        let session1_frame = create_uniform_image(width, height, 70.0);
+
+        // Frame from session 2: has gradient (different light pollution direction)
+        let session2_frame = create_gradient_image(width, height, 85.0, 115.0);
+
+        let config = LocalNormalizationConfig::new(64);
+        let normalizer = SessionNormalization::new(&reference, width, height, config);
+
+        let normalized1 = normalizer.normalize_frame(&session1_frame);
+        let normalized2 = normalizer.normalize_frame(&session2_frame);
+
+        // Both should be close to reference level (100)
+        let avg1: f32 = normalized1.iter().sum::<f32>() / normalized1.len() as f32;
+        let avg2: f32 = normalized2.iter().sum::<f32>() / normalized2.len() as f32;
+
+        assert!(
+            (avg1 - 100.0).abs() < 2.0,
+            "Session 1 average should be ~100, got {}",
+            avg1
+        );
+        assert!(
+            (avg2 - 100.0).abs() < 2.0,
+            "Session 2 average should be ~100, got {}",
+            avg2
+        );
+
+        // Session 2 should have reduced variance after normalization
+        let session2_variance_before = compute_variance(&session2_frame);
+        let session2_variance_after = compute_variance(&normalized2);
+
+        assert!(
+            session2_variance_after < session2_variance_before * 0.5,
+            "Session 2 gradient should be reduced: before={}, after={}",
+            session2_variance_before,
+            session2_variance_after
+        );
+    }
+
+    #[test]
+    fn test_integration_global_reference_selection() {
+        // Create sessions with different quality levels
+        let quality_good = SessionQuality {
+            median_fwhm: 2.0,
+            median_snr: 150.0,
+            median_eccentricity: 0.08,
+            median_noise: 3.0,
+            frame_count: 5,
+            usable_frame_count: 5,
+            frame_qualities: vec![
+                FrameQuality {
+                    fwhm: 2.2,
+                    snr: 140.0,
+                    eccentricity: 0.12,
+                    noise: 3.5,
+                    star_count: 50,
+                },
+                FrameQuality {
+                    fwhm: 1.8,
+                    snr: 180.0,
+                    eccentricity: 0.06,
+                    noise: 2.2,
+                    star_count: 60,
+                }, // Best frame: lowest FWHM, highest SNR, lowest ecc, lowest noise
+                FrameQuality {
+                    fwhm: 2.2,
+                    snr: 150.0,
+                    eccentricity: 0.09,
+                    noise: 3.2,
+                    star_count: 48,
+                },
+                FrameQuality {
+                    fwhm: 2.1,
+                    snr: 145.0,
+                    eccentricity: 0.08,
+                    noise: 3.1,
+                    star_count: 52,
+                },
+                FrameQuality {
+                    fwhm: 2.3,
+                    snr: 155.0,
+                    eccentricity: 0.10,
+                    noise: 3.0,
+                    star_count: 50,
+                },
+            ],
+        };
+
+        let quality_poor = SessionQuality {
+            median_fwhm: 4.0,
+            median_snr: 50.0,
+            median_eccentricity: 0.25,
+            median_noise: 10.0,
+            frame_count: 3,
+            usable_frame_count: 3,
+            frame_qualities: vec![
+                FrameQuality {
+                    fwhm: 3.8,
+                    snr: 45.0,
+                    eccentricity: 0.25,
+                    noise: 10.0,
+                    star_count: 20,
+                },
+                FrameQuality {
+                    fwhm: 4.0,
+                    snr: 55.0,
+                    eccentricity: 0.24,
+                    noise: 9.5,
+                    star_count: 22,
+                },
+                FrameQuality {
+                    fwhm: 4.2,
+                    snr: 50.0,
+                    eccentricity: 0.26,
+                    noise: 10.5,
+                    star_count: 18,
+                },
+            ],
+        };
+
+        let sessions = vec![
+            Session {
+                id: "poor_night".into(),
+                frame_paths: vec![
+                    PathBuf::from("/poor_a.fits"),
+                    PathBuf::from("/poor_b.fits"),
+                    PathBuf::from("/poor_c.fits"),
+                ],
+                quality: quality_poor,
+                reference_frame: None,
+            },
+            Session {
+                id: "good_night".into(),
+                frame_paths: vec![
+                    PathBuf::from("/good_a.fits"),
+                    PathBuf::from("/good_b.fits"),
+                    PathBuf::from("/good_c.fits"),
+                    PathBuf::from("/good_d.fits"),
+                    PathBuf::from("/good_e.fits"),
+                ],
+                quality: quality_good,
+                reference_frame: None,
+            },
+        ];
+
+        let stack = MultiSessionStack::new(sessions);
+
+        // Should select the good session
+        let best_session = stack.select_best_session();
+        assert_eq!(best_session, Some(1), "Should select the good session");
+
+        // Should select the best frame within the good session
+        let (session_idx, frame_idx) = stack.select_global_reference().unwrap();
+        assert_eq!(session_idx, 1, "Reference should be from good session");
+        assert_eq!(
+            frame_idx, 1,
+            "Should select frame 1 (best quality in good session)"
+        );
+
+        // Verify reference info
+        let info = stack.global_reference_info().unwrap();
+        assert_eq!(info.session_id, "good_night");
+        assert_eq!(info.frame_idx, 1);
+        assert_eq!(info.path, PathBuf::from("/good_b.fits"));
+    }
+
+    #[test]
+    fn test_integration_summary_display_format() {
+        // Create sessions and verify summary display
+        let quality = SessionQuality {
+            median_fwhm: 2.5,
+            median_snr: 100.0,
+            median_eccentricity: 0.12,
+            median_noise: 5.0,
+            frame_count: 10,
+            usable_frame_count: 8,
+            frame_qualities: vec![],
+        };
+
+        let sessions = vec![
+            Session {
+                id: "2024-01-15".into(),
+                frame_paths: (0..10)
+                    .map(|i| PathBuf::from(format!("/n1/{}.fits", i)))
+                    .collect(),
+                quality: quality.clone(),
+                reference_frame: None,
+            },
+            Session {
+                id: "2024-01-16".into(),
+                frame_paths: (0..5)
+                    .map(|i| PathBuf::from(format!("/n2/{}.fits", i)))
+                    .collect(),
+                quality: SessionQuality {
+                    frame_count: 5,
+                    usable_frame_count: 5,
+                    ..quality
+                },
+                reference_frame: None,
+            },
+        ];
+
+        let stack = MultiSessionStack::new(sessions);
+        let summary = stack.summary();
+
+        // Test summary values
+        assert_eq!(summary.total_sessions, 2);
+        assert_eq!(summary.total_frames, 15);
+
+        // Test Display implementation
+        let display = format!("{}", summary);
+        assert!(
+            display.contains("Multi-Session Stack Summary"),
+            "Display should contain header"
+        );
+        assert!(
+            display.contains("2024-01-15"),
+            "Display should show session 1 ID"
+        );
+        assert!(
+            display.contains("2024-01-16"),
+            "Display should show session 2 ID"
+        );
+        assert!(
+            display.contains("2 sessions"),
+            "Display should show session count"
+        );
+    }
+
+    #[test]
+    fn test_integration_quality_based_frame_filtering() {
+        // Create a session with varied quality frames
+        let frame_qualities = vec![
+            // Excellent frame
+            FrameQuality {
+                fwhm: 2.0,
+                snr: 200.0,
+                eccentricity: 0.05,
+                noise: 2.0,
+                star_count: 100,
+            },
+            // Good frame
+            FrameQuality {
+                fwhm: 2.5,
+                snr: 150.0,
+                eccentricity: 0.08,
+                noise: 3.0,
+                star_count: 90,
+            },
+            // Average frame
+            FrameQuality {
+                fwhm: 3.0,
+                snr: 100.0,
+                eccentricity: 0.12,
+                noise: 5.0,
+                star_count: 70,
+            },
+            // Poor frame
+            FrameQuality {
+                fwhm: 5.0,
+                snr: 30.0,
+                eccentricity: 0.30,
+                noise: 15.0,
+                star_count: 20,
+            },
+            // Very poor frame
+            FrameQuality {
+                fwhm: 7.0,
+                snr: 15.0,
+                eccentricity: 0.50,
+                noise: 25.0,
+                star_count: 5,
+            },
+        ];
+
+        let mut quality = SessionQuality::from_frame_qualities(&frame_qualities);
+        assert_eq!(quality.usable_frame_count, 5);
+
+        // Filter with 50% threshold (should remove worst frames)
+        let passing = quality.filter_by_threshold(0.5);
+
+        // Best 3 should pass (threshold relative to median weight)
+        assert!(
+            passing.len() >= 2 && passing.len() <= 4,
+            "Should filter out worst frames"
+        );
+        assert!(
+            quality.usable_frame_count < 5,
+            "Some frames should be rejected"
+        );
+
+        // Frame 0 (excellent) should always pass
+        assert!(passing.contains(&0), "Excellent frame should pass");
+
+        // Frame 4 (very poor) should typically be rejected
+        assert!(!passing.contains(&4), "Very poor frame should be rejected");
+    }
+
+    #[test]
+    fn test_integration_session_weighted_stack_result_display() {
+        let image = AstroImage::from_pixels(100, 100, 1, vec![0.5f32; 10000]);
+
+        let result = SessionWeightedStackResult {
+            image,
+            session_count: 3,
+            total_frames: 25,
+            session_weights: vec![0.5, 0.3, 0.2],
+            frame_weights: vec![0.04; 25],
+            reference_info: Some(GlobalReferenceInfo {
+                session_idx: 0,
+                frame_idx: 5,
+                session_id: "best_night".into(),
+                path: PathBuf::from("/data/best_frame.fits"),
+            }),
+            used_normalization: true,
+        };
+
+        let display = format!("{}", result);
+
+        assert!(display.contains("Session-Weighted Stack Result"));
+        assert!(display.contains("100x100"));
+        assert!(display.contains("Sessions: 3"));
+        assert!(display.contains("Total frames: 25"));
+        assert!(display.contains("Used normalization: yes"));
+        assert!(display.contains("best_night"));
+        assert!(display.contains("frame 5"));
+    }
+
+    #[test]
+    fn test_integration_frame_weights_sum_to_one() {
+        // Create multiple sessions with varied frame counts and quality
+        let sessions = vec![
+            Session {
+                id: "s1".into(),
+                frame_paths: vec![
+                    PathBuf::from("/a.fits"),
+                    PathBuf::from("/b.fits"),
+                    PathBuf::from("/c.fits"),
+                ],
+                quality: SessionQuality {
+                    median_fwhm: 2.5,
+                    median_snr: 100.0,
+                    median_eccentricity: 0.1,
+                    median_noise: 5.0,
+                    frame_count: 3,
+                    usable_frame_count: 3,
+                    frame_qualities: vec![
+                        FrameQuality {
+                            fwhm: 2.4,
+                            snr: 95.0,
+                            eccentricity: 0.1,
+                            noise: 5.0,
+                            star_count: 50,
+                        },
+                        FrameQuality {
+                            fwhm: 2.5,
+                            snr: 100.0,
+                            eccentricity: 0.1,
+                            noise: 5.0,
+                            star_count: 55,
+                        },
+                        FrameQuality {
+                            fwhm: 2.6,
+                            snr: 105.0,
+                            eccentricity: 0.1,
+                            noise: 5.0,
+                            star_count: 52,
+                        },
+                    ],
+                },
+                reference_frame: None,
+            },
+            Session {
+                id: "s2".into(),
+                frame_paths: vec![PathBuf::from("/d.fits"), PathBuf::from("/e.fits")],
+                quality: SessionQuality {
+                    median_fwhm: 3.0,
+                    median_snr: 80.0,
+                    median_eccentricity: 0.15,
+                    median_noise: 7.0,
+                    frame_count: 2,
+                    usable_frame_count: 2,
+                    frame_qualities: vec![
+                        FrameQuality {
+                            fwhm: 2.9,
+                            snr: 78.0,
+                            eccentricity: 0.15,
+                            noise: 7.0,
+                            star_count: 40,
+                        },
+                        FrameQuality {
+                            fwhm: 3.1,
+                            snr: 82.0,
+                            eccentricity: 0.15,
+                            noise: 7.0,
+                            star_count: 42,
+                        },
+                    ],
+                },
+                reference_frame: None,
+            },
+        ];
+
+        let stack = MultiSessionStack::new(sessions);
+
+        // With session weights enabled
+        let frame_weights = stack.compute_frame_weights();
+        let sum: f32 = frame_weights.iter().sum();
+        assert!(
+            (sum - 1.0).abs() < 1e-5,
+            "Frame weights should sum to 1.0, got {}",
+            sum
+        );
+        assert_eq!(frame_weights.len(), 5);
+        assert!(
+            frame_weights.iter().all(|&w| w > 0.0),
+            "All weights should be positive"
+        );
+
+        // With session weights disabled
+        let stack_equal = stack.config.clone();
+        let stack_equal = MultiSessionStack::new(stack.sessions.clone())
+            .with_config(stack_equal.without_session_weights());
+        let frame_weights_equal = stack_equal.compute_frame_weights();
+        let sum_equal: f32 = frame_weights_equal.iter().sum();
+        assert!(
+            (sum_equal - 1.0).abs() < 1e-5,
+            "Frame weights (equal sessions) should sum to 1.0, got {}",
+            sum_equal
+        );
+    }
+}
