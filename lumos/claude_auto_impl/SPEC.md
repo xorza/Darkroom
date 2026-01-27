@@ -62,10 +62,20 @@ with tests and running verification commands per project conventions.
 - Benchmark available via `cargo bench -p lumos --features bench --bench stack_gpu_sigma_clip`
 
 ### 2.3 GPU Star Detection
-- [ ] Design GPU kernel for threshold detection
+- [x] Design GPU kernel for threshold detection
 - [ ] Implement parallel connected component labeling (or alternative)
 - [ ] Benchmark against SIMD CPU implementation
 - [ ] If <10% improvement: document and remove, mark "[SKIPPED]"
+
+**Design**: Created hybrid GPU/CPU approach in `src/star_detection/gpu/`:
+- `threshold_mask.wgsl`: GPU kernel for threshold mask creation (atomic bitmask)
+- `dilate_mask.wgsl`: GPU kernel for mask dilation with shared memory tiling
+- `pipeline.rs`: wgpu pipeline setup for both kernels
+- `threshold.rs`: Rust API (`GpuThresholdDetector`, `GpuThresholdConfig`)
+- `NOTES-AI.md`: Design rationale and architecture documentation
+- 9 unit tests passing
+
+CCL remains on CPU (union-find) - optimal for sparse astronomical images (<5% foreground).
 
 ### 2.4 Batch Processing Pipeline
 - [ ] Implement overlapped compute/transfer for frame processing
@@ -143,10 +153,10 @@ cargo bench -p lumos --features bench --bench <name> | tee benches/<name>_result
 | Phase | Tasks | Complete | Status |
 |-------|-------|----------|--------|
 | Local Normalization | 5 | 5 | **Complete** |
-| GPU Acceleration | 12 | 5 | Partial (warping done, FFT skipped, sigma clip done) |
+| GPU Acceleration | 12 | 6 | Partial (warping done, FFT skipped, sigma clip done, star detection threshold designed) |
 | Advanced Features | 14 | 0 | Not Started |
 | Quality & Polish | 4 | 0 | Not Started |
-| **Total** | **35** | **10** | **In Progress** |
+| **Total** | **35** | **11** | **In Progress** |
 
 ---
 

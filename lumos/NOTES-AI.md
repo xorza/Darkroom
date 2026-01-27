@@ -66,6 +66,7 @@ CFA Patterns: RGGB, BGGR, GRBG, GBRG
 | `deblend/` | Multi-threshold star deblending |
 | `cosmic_ray/` | Laplacian-based cosmic ray detection |
 | `median_filter/` | 3x3 median filter for Bayer artifacts |
+| `gpu/` | GPU-accelerated threshold mask creation (see `gpu/NOTES-AI.md`) |
 
 ### Star Detection Key Types
 

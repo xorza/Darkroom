@@ -26,6 +26,7 @@ mod convolution;
 mod cosmic_ray;
 mod deblend;
 pub(crate) mod detection;
+pub mod gpu;
 mod median_filter;
 
 #[cfg(test)]
