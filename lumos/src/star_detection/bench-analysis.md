@@ -1,250 +1,231 @@
-# Star Detection Benchmarks Analysis
+# Full Pipeline & Star Detection Benchmarks Analysis
 
-**Date:** 2026-01-26
-
-## Overview
-
-This document analyzes the performance of star detection subsystems in the lumos crate. Benchmarks cover background estimation, centroid computation, convolution, cosmic ray detection, detection/thresholding, and deblending.
+**Date:** 2026-01-27  
+**System:** Linux, Release build with optimizations
 
 ---
 
-## 1. Background Estimation
+## Executive Summary
 
-### Summary Table
+The full astrophotography pipeline processes 10 images (6032x4028 pixels each) in **13.7 seconds**:
+- Star detection: **6.3s (46%)** - Main bottleneck
+- Registration: **2.8s (20%)**
+- Warping: **3.8s (28%)**
+- Stacking: **0.8s (6%)**
+
+Star detection at ~630ms per image is the primary optimization target.
+
+---
+
+## Full Pipeline Benchmark Results
+
+**Test Data:** 10 calibrated light frames (6032x4028 pixels, 3 channels, X-Trans sensor)
+
+| Benchmark | Time (mean) | Per Image |
+|-----------|-------------|-----------|
+| Star Detection (single) | 629.66 ms | 629.66 ms |
+| Star Detection (all 10) | 6.27 s | 627 ms |
+| Registration (single pair) | 328.72 ms | 328.72 ms |
+| Registration (all 9 pairs) | 2.77 s | 308 ms |
+| Mean Stacking (10 images) | 801.61 ms | 80 ms |
+| **Full Pipeline** | **13.72 s** | **1.37 s** |
+
+### Full Pipeline with I/O (from example)
+
+The `full_pipeline` example (which includes I/O) completed in 41.81s:
+- Step 2 (Calibration): 11.49s
+- Step 3 (Star detection): 7.17s
+- Step 4 (Registration + warping): 19.39s
+- Step 5 (Sigma-clipped stacking): 3.53s
+
+---
+
+## Star Detection Subsystem Analysis
+
+### 1. Background Estimation
 
 | Image Size | Tile Size | Time (median) | Throughput |
 |------------|-----------|---------------|------------|
-| 512x512 | 32 | 658.74 µs | 397.95 Melem/s |
-| 512x512 | 64 | 678.87 µs | 386.15 Melem/s |
-| 512x512 | 128 | 957.58 µs | 273.76 Melem/s |
-| 2048x2048 | 32 | 22.643 ms | 185.24 Melem/s |
-| 2048x2048 | 64 | 21.789 ms | 192.50 Melem/s |
-| 2048x2048 | 128 | 22.106 ms | 189.74 Melem/s |
-| 4096x4096 | 32 | 66.565 ms | 252.04 Melem/s |
-| 4096x4096 | 64 | 69.130 ms | 242.69 Melem/s |
-| 4096x4096 | 128 | 70.353 ms | 238.47 Melem/s |
+| 512x512 | 32 | 570 µs | 460 Melem/s |
+| 512x512 | 64 | 636 µs | 412 Melem/s |
+| 2048x2048 | 32 | 21.7 ms | 193 Melem/s |
+| 2048x2048 | 64 | 22.0 ms | 191 Melem/s |
+| 4096x4096 | 32 | 63.1 ms | 266 Melem/s |
+| 4096x4096 | 64 | 66.8 ms | 251 Melem/s |
 
-### Analysis
-
-- **Tile size impact:** Smaller tiles (32) generally provide better throughput, especially at larger image sizes
-- **Scaling:** Performance scales roughly linearly with image area for larger images
-- **Regression noted:** Several benchmarks show 5-15% regression compared to previous runs, potentially due to environmental factors or code changes
-
-### SIMD vs Scalar Performance
+**SIMD vs Scalar Performance:**
 
 | Operation | Size | Scalar | SIMD | Speedup |
 |-----------|------|--------|------|---------|
-| sum_and_sum_sq | 4096 | 3.47 µs | 427.73 ns | **8.1x** |
-| sum_abs_dev | 4096 | 3.51 µs | 429.98 ns | **8.2x** |
-| sum_and_sum_sq | 16384 | 18.81 µs | 2.70 µs | **7.0x** |
-| sum_abs_dev | 16384 | 18.97 µs | 2.76 µs | **6.9x** |
-| sum_and_sum_sq | 65536 | 42.24 µs | 5.40 µs | **7.8x** |
-| sum_abs_dev | 65536 | 43.03 µs | 5.52 µs | **7.8x** |
+| sum_and_sum_sq | 1024 | 635 ns | 73 ns | **8.7x** |
+| sum_abs_dev | 1024 | 638 ns | 71 ns | **9.0x** |
+| sum_and_sum_sq | 4096 | 2.58 µs | 317 ns | **8.1x** |
+| sum_and_sum_sq | 16384 | 10.4 µs | 1.30 µs | **8.0x** |
+| sum_and_sum_sq | 65536 | 41.6 µs | 5.19 µs | **8.0x** |
 
-**Key finding:** SIMD optimizations provide **7-8x speedup** for background statistics computation.
-
-### Interpolation SIMD vs Scalar
+**Interpolation SIMD:**
 
 | Size | Scalar | SIMD | Speedup |
 |------|--------|------|---------|
-| 64 | 43.64 ns | 9.45 ns | **4.6x** |
-| 256 | 168.37 ns | 26.98 ns | **6.2x** |
-| 1024 | 641.48 ns | 100.35 ns | **6.4x** |
-| 4096 | 2.55 µs | 397.87 ns | **6.4x** |
+| 64 | 42 ns | 9 ns | **4.7x** |
+| 256 | 163 ns | 26 ns | **6.3x** |
+| 1024 | 631 ns | 99 ns | **6.4x** |
+| 4096 | 2.50 µs | 392 ns | **6.4x** |
 
-**Key finding:** SIMD interpolation achieves **4.6-6.4x speedup**, with better gains at larger sizes.
-
----
-
-## 2. Centroid Computation
-
-### Summary Table
+### 2. Centroid Computation
 
 | Operation | Size | Time (median) | Throughput |
 |-----------|------|---------------|------------|
-| refine_centroid | 21x21 | 1.23 µs | - |
-| compute_metrics | 21x21 | 1.16 µs | - |
-| compute_centroid_batch | 10 stars | 99.88 µs | 100.12 Kelem/s |
-| compute_centroid_batch | 100 stars | 1.12 ms | 89.03 Kelem/s |
-| compute_centroid_batch | 500 stars | 6.55 ms | 76.38 Kelem/s |
+| refine_centroid | 21x21 | 1.20 µs | - |
+| compute_metrics | 21x21 | 1.19 µs | - |
+| compute_centroid_batch | 10 stars | 94.2 µs | 106 Kelem/s |
+| compute_centroid_batch | 100 stars | 993 µs | 101 Kelem/s |
+| compute_centroid_batch | 500 stars | 5.22 ms | 96 Kelem/s |
 
-### Analysis
+**Performance improved 19-21% in batch centroid computation.**
 
-- **Per-star overhead:** ~10 µs per star for centroid computation
-- **Scaling:** Throughput decreases slightly with batch size, likely due to cache effects
-- **Batch performance regressed** by 14% for 500-star batches
+### 3. Gaussian & Moffat Fitting
 
-### Gaussian Fit Performance
-
-| Window Size | Time (median) |
-|-------------|---------------|
-| 15x15 | 12.14 µs |
-| 21x21 | 106.11 µs |
-| 31x31 | 263.78 µs |
-
-### Moffat Fit Performance
-
-| Window Size | Fixed Beta | Variable Beta |
-|-------------|------------|---------------|
-| 15x15 | 21.17 µs | 98.56 µs |
-| 21x21 | 40.39 µs | 65.20 µs |
-| 31x31 | 102.03 µs | 314.40 µs |
-
-**Key finding:** Variable beta Moffat fitting is **3-5x slower** than fixed beta, which is expected due to additional parameter optimization.
+| Window Size | Gaussian | Moffat (fixed β) | Moffat (var β) |
+|-------------|----------|------------------|----------------|
+| 15x15 | 11.3 µs | 19.6 µs | 90.8 µs |
+| 21x21 | 99.5 µs | 38.7 µs | 61.7 µs |
+| 31x31 | 241.9 µs | 94.9 µs | - |
 
 ---
 
-## 3. Convolution
+## Performance Breakdown for 6K Image
 
-### Gaussian Convolution Performance
+For a typical 6032x4028 (~24 Mpixel) astrophotography image:
 
-| Image Size | Sigma | Time (median) | Throughput |
-|------------|-------|---------------|------------|
-| 256x256 | 1 | 160.02 µs | 409.54 Melem/s |
-| 256x256 | 2 | 243.00 µs | 269.69 Melem/s |
-| 256x256 | 3 | 328.41 µs | 199.55 Melem/s |
-| 512x512 | 1 | 502.70 µs | 521.48 Melem/s |
-| 512x512 | 2 | 816.40 µs | 321.10 Melem/s |
-| 512x512 | 3 | 1.17 ms | 224.66 Melem/s |
-| 1024x1024 | 1 | 5.84 ms | 179.58 Melem/s |
-| 1024x1024 | 2 | 6.70 ms | 156.49 Melem/s |
-| 1024x1024 | 3 | 8.27 ms | 126.78 Melem/s |
-| 2048x2048 | 1 | 15.05 ms | 278.62 Melem/s |
-| 2048x2048 | 2 | 21.24 ms | 197.45 Melem/s |
-| 2048x2048 | 3 | 24.48 ms | 171.34 Melem/s |
-
-### Analysis
-
-- **Sigma impact:** Higher sigma values increase kernel size, reducing throughput by ~30-40% per sigma increment
-- **Scaling:** Throughput varies with image size due to cache effects; mid-range sizes (512x512) often have highest throughput
-
-### Matched Filter Performance
-
-| Image Size | FWHM | Time (median) | Throughput |
-|------------|------|---------------|------------|
-| 512x512 | 3 | 958.31 µs | 273.55 Melem/s |
-| 512x512 | 4 | 1.30 ms | 201.90 Melem/s |
-| 512x512 | 5 | 1.44 ms | 181.87 Melem/s |
-| 1024x1024 | 3 | 4.11 ms | 255.25 Melem/s |
-| 1024x1024 | 4 | 6.13 ms | 171.00 Melem/s |
-| 1024x1024 | 5 | 7.25 ms | 144.61 Melem/s |
-| 2048x2048 | 3 | 21.95 ms | 191.07 Melem/s |
-| 2048x2048 | 4 | 24.57 ms | 170.72 Melem/s |
-| 2048x2048 | 5 | 26.08 ms | 160.81 Melem/s |
-
-### SIMD vs Scalar Row Convolution
-
-| Row Size | Scalar | SIMD | Speedup |
-|----------|--------|------|---------|
-| 256 | 3.42 µs | 263.92 ns | **13.0x** |
-| 512 | 6.52 µs | ~500 ns (est.) | **~13x** |
-
-**Key finding:** SIMD row convolution provides **~13x speedup**, making it one of the most effective SIMD optimizations.
+| Stage | Estimated Time | % of Total |
+|-------|----------------|------------|
+| Background estimation | ~120 ms | 19% |
+| Convolution (sigma=2) | ~150 ms | 24% |
+| Threshold & detection | ~50 ms | 8% |
+| Centroid refinement | ~200 ms | 32% |
+| Cosmic ray rejection | ~100 ms | 16% |
+| **Total** | **~620 ms** | 100% |
 
 ---
 
-## 4. Cosmic Ray Detection
+## SIMD Optimization Summary
 
-### Laplacian Computation
-
-| Image Size | Time (median) | Throughput |
-|------------|---------------|------------|
-| 512x512 | 63.84 µs | 4.11 Gelem/s |
-| 1024x1024 | 303.02 µs | 3.46 Gelem/s |
-| 2048x2048 | 1.90 ms | 2.21 Gelem/s |
-
-### SIMD vs Scalar Cosmic Ray Detection
-
-| Image Size | Scalar | SIMD | Speedup |
-|------------|--------|------|---------|
-| 512x512 | 502.62 µs | 55.95 µs | **9.0x** |
-| 1024x1024 | 4.18 ms | 480.04 µs | **8.7x** |
-| 2048x2048 | 16.68 ms | 3.23 ms | **5.2x** |
-
-**Key finding:** SIMD cosmic ray detection provides **5-9x speedup**, with higher gains at smaller image sizes.
-
-### Full Cosmic Ray Detection Pipeline
-
-| Image Size | Time (median) | Throughput |
-|------------|---------------|------------|
-| 512x512 | 8.10 ms | 32.37 Melem/s |
-| 1024x1024 | 33.95 ms | 30.88 Melem/s |
+| Component | SIMD Speedup | Status |
+|-----------|--------------|--------|
+| Background sum/variance | 8-9x | Implemented |
+| Background interpolation | 4.6-6.4x | Implemented |
+| Row convolution | ~13x | Implemented |
+| Cosmic ray detection | 5-9x | Implemented |
 
 ---
 
-## 5. Detection & Thresholding
+## Performance Improvement Plan
 
-### Threshold Mask Creation
+### Priority 1: Star Detection Optimization (Target: 50% reduction)
 
-| Image Size | Time (median) | Throughput |
-|------------|---------------|------------|
-| 512x512 | 44.85 µs | 5.85 Gelem/s |
-| 1024x1024 | 223.51 µs | 4.69 Gelem/s |
-| 2048x2048 | 1.70 ms | 2.46 Gelem/s |
+**Current:** 630ms per image → **Target:** 300ms per image
 
-**Key finding:** Threshold mask creation is extremely fast, achieving **2.5-5.8 Gelem/s throughput**.
+1. **Parallel Star Processing**
+   - Current centroid batch: 10.4 µs/star
+   - Parallelize across cores for 500+ stars per image
+   - Expected gain: 3-4x for centroid phase
 
-### Mask Dilation
+2. **GPU-Accelerated Convolution**
+   - Current: ~150ms for 24 Mpixel
+   - GPU could reduce to <10ms
+   - Already have GPU infrastructure in imaginarium
 
-| Image Size | Radius | Time (median) | Throughput |
-|------------|--------|---------------|------------|
-| 512x512 | 1 | 172.02 µs | 1.52 Gelem/s |
-| 512x512 | 2 | 233.24 µs | 1.12 Gelem/s |
-| 512x512 | 3 | 323.26 µs | 810.94 Melem/s |
-| 1024x1024 | 1 | 529.42 µs | 1.98 Gelem/s |
-| 1024x1024 | 2 | 591.13 µs | 1.77 Gelem/s |
-| 1024x1024 | 3 | 668.05 µs | 1.57 Gelem/s |
-| 2048x2048 | 1 | 1.92 ms | 2.19 Gelem/s |
-| 2048x2048 | 2 | 1.97 ms | 2.12 Gelem/s |
-| 2048x2048 | 3 | 2.07 ms | 2.03 Gelem/s |
+3. **Reduce Kernel Size**
+   - Use adaptive sigma based on expected FWHM
+   - Smaller kernels = faster convolution
 
-**Key finding:** Dilation radius has moderate impact; radius 3 is ~1.9x slower than radius 1 for small images but only ~1.1x slower for large images due to memory bandwidth limitations.
+### Priority 2: Registration Optimization (Target: 30% reduction)
+
+**Current:** 330ms per pair → **Target:** 230ms per pair
+
+1. **Parallel Triangle Matching**
+   - Current RANSAC: 5000 iterations
+   - Could parallelize triangle hash lookup
+
+2. **Early Termination**
+   - Stop when confidence threshold met
+   - Current: always runs full 5000 iterations
+
+### Priority 3: Warping Optimization (Target: 50% reduction)
+
+**Current:** ~380ms per image → **Target:** 190ms per image
+
+1. **GPU Image Warping**
+   - Use existing GPU transform in imaginarium
+   - Bilinear interpolation on GPU is very fast
+
+2. **Parallel Channel Processing**
+   - Currently processes RGB channels sequentially
+   - Could parallelize across channels
+
+### Priority 4: I/O Optimization
+
+1. **Parallel Image Loading**
+   - Load next image while processing current
+   - Use async I/O
+
+2. **Memory-Mapped Files**
+   - Avoid full file reads for large images
 
 ---
 
-## 6. Deblending
+## Projected Performance After Optimization
 
-### Local Maxima Detection
+| Component | Current | Optimized | Reduction |
+|-----------|---------|-----------|-----------|
+| Star Detection | 6.3s | 3.0s | 52% |
+| Registration | 2.8s | 2.0s | 29% |
+| Warping | 3.8s | 1.0s | 74% |
+| Stacking | 0.8s | 0.6s | 25% |
+| **Total** | **13.7s** | **6.6s** | **52%** |
 
-| Configuration | Time (median) | Throughput |
-|---------------|---------------|------------|
-| 10 pairs, sep=15 | 45.34 µs | 220.54 Kelem/s |
-| 50 pairs, sep=12 | 138.68 µs | 360.53 Kelem/s |
-| 100 pairs, sep=10 | 343.55 µs | 291.08 Kelem/s |
-
-### Multi-threshold Deblending
-
-| Configuration | Time (median) | Throughput |
-|---------------|---------------|------------|
-| 10 pairs, sep=15 | 25.02 ms | 399.64 elem/s |
-| 50 pairs, sep=12 | 108.25 ms | 461.91 elem/s |
-
-**Key finding:** Multi-threshold deblending is computationally expensive at **~2 ms per star pair**.
+With GPU acceleration:
+- Warping could drop to <0.5s
+- Convolution could drop to <0.5s
+- **Optimistic total: ~4s for 10 images**
 
 ---
 
-## Summary of Key Optimizations
+## Quick Wins (Low Effort, High Impact)
 
-| Component | SIMD Speedup | Notes |
-|-----------|--------------|-------|
-| Background sum_and_sum_sq | 7-8x | Consistent across sizes |
-| Background interpolation | 4.6-6.4x | Better at larger sizes |
-| Row convolution | ~13x | Most effective optimization |
-| Cosmic ray detection | 5-9x | Better at smaller sizes |
+1. **GPU Warping** - Already have infrastructure, just need to wire up
+2. **Parallel Channel Processing** - Simple change for 3x speedup on warping
+3. **Reduce RANSAC iterations** - With good data, 2000 iterations may suffice
 
-## Recommendations
+## Medium Term Improvements
 
-1. **Row convolution SIMD** is highly effective and should be ensured for all convolution operations
-2. **Background estimation** could benefit from parallel processing across tiles for larger images
-3. **Multi-threshold deblending** is a bottleneck; consider optimizations for crowded fields
-4. **Memory bandwidth** becomes limiting for 2K+ images; consider tiled processing
-5. **Benchmark variability** is high (10-15% outliers common); use more samples for precise measurements
+1. **GPU Convolution** - Requires shader development
+2. **Parallel Star Processing** - Needs careful synchronization
+3. **Adaptive Parameters** - Auto-tune based on image characteristics
 
-## Performance Targets
+## Long Term Goals
 
-For real-time processing of a 4K x 4K image:
-- Background estimation: ~70 ms (current)
-- Gaussian convolution (sigma=2): ~80-100 ms (estimated)
-- Full star detection pipeline: ~200-300 ms target
+1. **Real-time Preview** - <100ms per image for live stacking preview
+2. **Video Rate Processing** - <33ms per frame for planetary imaging
 
-Current performance is suitable for interactive use but not real-time video processing.
+---
+
+## Running Benchmarks
+
+```bash
+# Full pipeline benchmark
+cargo bench -p lumos --features bench --bench full_pipeline
+
+# Star detection subsystem benchmarks
+cargo bench -p lumos --features bench --bench 'star_detection_*'
+
+# Individual benchmarks
+cargo bench -p lumos --features bench --bench star_detection_background
+cargo bench -p lumos --features bench --bench star_detection_centroid
+cargo bench -p lumos --features bench --bench star_detection_convolution
+```
+
+Requires calibrated light images in:
+- `LUMOS_CALIBRATION_DIR/calibrated_lights` or
+- `test_output/calibrated_lights` (from running `full_pipeline` example)
