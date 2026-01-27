@@ -19,15 +19,64 @@ PROMPT="Implement the next uncompleted task from $PLAN_FILE.
 
 One task per run. Output \`[[ALL DONE]]\` when no tasks remain."
 
-while true; do
-    claude --dangerously-skip-permissions --print "$PROMPT" 2>&1 | tee /tmp/claude_output_$$
+OUTPUT_FILE="/tmp/claude_output_$$"
 
-    if grep -q '\[\[ALL DONE\]\]' /tmp/claude_output_$$; then
-        rm -f /tmp/claude_output_$$
-        echo "Done!"
+# Create the Python parser script
+PARSER=$(cat << 'PYEOF'
+import sys, json, os
+
+output_file = os.environ.get("OUTPUT_FILE", "/tmp/claude_output")
+
+for line in sys.stdin:
+    line = line.strip()
+    if not line:
+        continue
+
+    with open(output_file, "a") as f:
+        f.write(line + "\n")
+
+    try:
+        data = json.loads(line)
+        msg_type = data.get("type")
+
+        if msg_type == "assistant":
+            for item in data.get("message", {}).get("content", []):
+                if item.get("type") == "text":
+                    print(item.get("text", ""), flush=True)
+                elif item.get("type") == "tool_use":
+                    name = item.get("name", "?")
+                    inp = item.get("input", {})
+                    if "Bash" in name:
+                        cmd = inp.get("command", "")[:80]
+                        print(f"[{name}] {cmd}", flush=True)
+                    elif "Read" in name or "Edit" in name or "Write" in name:
+                        fpath = inp.get("file_path", "")
+                        print(f"[{name}] {fpath}", flush=True)
+                    else:
+                        print(f"[{name}]", flush=True)
+        elif msg_type == "result":
+            print("\n--- Turn complete ---\n", flush=True)
+
+    except json.JSONDecodeError:
+        print(line, flush=True)
+    except Exception:
+        pass
+PYEOF
+)
+
+while true; do
+    rm -f "$OUTPUT_FILE"
+
+    # Stream JSON and parse with Python for real-time output
+    OUTPUT_FILE="$OUTPUT_FILE" claude --dangerously-skip-permissions --print --output-format stream-json --verbose "$PROMPT" 2>&1 | \
+    python3 -u -c "$PARSER"
+
+    if grep -q '\[\[ALL DONE\]\]' "$OUTPUT_FILE" 2>/dev/null; then
+        rm -f "$OUTPUT_FILE"
+        echo "All tasks complete!"
         break
     fi
 
-    rm -f /tmp/claude_output_$$
+    rm -f "$OUTPUT_FILE"
     sleep 2
 done
