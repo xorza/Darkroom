@@ -5,15 +5,14 @@ use std::hint::black_box;
 
 use criterion::{BenchmarkId, Criterion, Throughput};
 
-use super::simd::{warp_image_bilinear_simd, warp_row_bilinear_scalar, warp_row_bilinear_simd};
-use super::{InterpolationMethod, WarpConfig, interpolate_pixel, resample_image, warp_image};
+use super::simd::{warp_row_bilinear_scalar, warp_row_bilinear_simd};
+use super::{InterpolationMethod, WarpConfig, interpolate_pixel, warp_image};
 use crate::registration::types::TransformMatrix;
 
 /// Register interpolation benchmarks with Criterion.
 pub fn benchmarks(c: &mut Criterion) {
     benchmark_interpolation_methods(c);
     benchmark_warp_sizes(c);
-    benchmark_resample(c);
     benchmark_simd_vs_scalar(c);
 }
 
@@ -153,27 +152,6 @@ fn benchmark_simd_vs_scalar(c: &mut Criterion) {
         );
     }
 
-    // Full image warping comparison (512x512)
-    let size = 512;
-    let image = generate_gradient_image(size, size);
-
-    group.throughput(Throughput::Elements((size * size) as u64));
-
-    group.bench_function("bilinear_simd_image_512", |b| {
-        b.iter(|| {
-            let result = warp_image_bilinear_simd(
-                black_box(&image),
-                size,
-                size,
-                size,
-                size,
-                black_box(&transform),
-                0.0,
-            );
-            black_box(result)
-        })
-    });
-
     group.finish();
 }
 
@@ -236,76 +214,6 @@ fn benchmark_warp_sizes(c: &mut Criterion) {
             },
         );
     }
-
-    group.finish();
-}
-
-/// Benchmark image resampling (up/downscale).
-fn benchmark_resample(c: &mut Criterion) {
-    let mut group = c.benchmark_group("resample");
-
-    let src_size = 512;
-    let image = generate_gradient_image(src_size, src_size);
-
-    // Upscale 2x
-    group.throughput(Throughput::Elements((1024 * 1024) as u64));
-    group.bench_function("upscale_2x_bilinear", |b| {
-        b.iter(|| {
-            let result = resample_image(
-                black_box(&image),
-                src_size,
-                src_size,
-                1024,
-                1024,
-                InterpolationMethod::Bilinear,
-            );
-            black_box(result)
-        })
-    });
-
-    group.bench_function("upscale_2x_lanczos3", |b| {
-        b.iter(|| {
-            let result = resample_image(
-                black_box(&image),
-                src_size,
-                src_size,
-                1024,
-                1024,
-                InterpolationMethod::Lanczos3,
-            );
-            black_box(result)
-        })
-    });
-
-    // Downscale 2x
-    group.throughput(Throughput::Elements((256 * 256) as u64));
-    group.bench_function("downscale_2x_bilinear", |b| {
-        b.iter(|| {
-            let result = resample_image(
-                black_box(&image),
-                src_size,
-                src_size,
-                256,
-                256,
-                InterpolationMethod::Bilinear,
-            );
-            black_box(result)
-        })
-    });
-
-    group.bench_function("downscale_2x_lanczos3", |b| {
-        b.iter(|| {
-            let result = resample_image(
-                black_box(&image),
-                src_size,
-                src_size,
-                256,
-                256,
-                InterpolationMethod::Lanczos3,
-            );
-            black_box(result)
-        })
-    });
 
     group.finish();
 }

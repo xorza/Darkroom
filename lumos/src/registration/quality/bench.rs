@@ -5,40 +5,15 @@ use std::hint::black_box;
 
 use criterion::{BenchmarkId, Criterion, Throughput};
 
-use super::{
-    QualityMetrics, ResidualStats, check_quadrant_consistency, compute_residuals, estimate_overlap,
-};
+use super::{QualityMetrics, ResidualStats, check_quadrant_consistency, estimate_overlap};
 use crate::registration::types::TransformMatrix;
 
 /// Register quality metrics benchmarks with Criterion.
 pub fn benchmarks(c: &mut Criterion) {
     benchmark_quality_metrics(c);
-    benchmark_residual_computation(c);
     benchmark_residual_stats(c);
     benchmark_quadrant_consistency(c);
     benchmark_overlap_estimation(c);
-}
-
-/// Generate matched point pairs for testing.
-#[allow(clippy::type_complexity)]
-fn generate_point_pairs(
-    count: usize,
-    transform: &TransformMatrix,
-) -> (Vec<(f64, f64)>, Vec<(f64, f64)>) {
-    let ref_points: Vec<(f64, f64)> = (0..count)
-        .map(|i| {
-            let x = 100.0 + (i % 20) as f64 * 50.0;
-            let y = 100.0 + (i / 20) as f64 * 50.0;
-            (x, y)
-        })
-        .collect();
-
-    let target_points: Vec<(f64, f64)> = ref_points
-        .iter()
-        .map(|&(x, y)| transform.apply(x, y))
-        .collect();
-
-    (ref_points, target_points)
 }
 
 /// Benchmark quality metrics computation.
@@ -62,32 +37,6 @@ fn benchmark_quality_metrics(c: &mut Criterion) {
                     black_box(0.95),                // overlap_fraction
                 );
                 black_box(metrics)
-            })
-        });
-    }
-
-    group.finish();
-}
-
-/// Benchmark residual computation.
-fn benchmark_residual_computation(c: &mut Criterion) {
-    let mut group = c.benchmark_group("residual_computation");
-
-    let transform = TransformMatrix::similarity(50.0, -30.0, 0.05, 1.01);
-
-    for point_count in [20, 50, 100, 200] {
-        let (ref_points, target_points) = generate_point_pairs(point_count, &transform);
-
-        group.throughput(Throughput::Elements(point_count as u64));
-
-        group.bench_function(BenchmarkId::new("compute", point_count), |b| {
-            b.iter(|| {
-                let residuals = compute_residuals(
-                    black_box(&ref_points),
-                    black_box(&target_points),
-                    black_box(&transform),
-                );
-                black_box(residuals)
             })
         });
     }
