@@ -1,5 +1,6 @@
 mod cache;
 mod cache_config;
+pub mod comet;
 mod drizzle;
 mod error;
 pub mod gpu;
@@ -39,6 +40,12 @@ pub use local_normalization::{LocalNormalizationConfig, NormalizationMethod};
 pub use gpu::{
     BatchPipeline, BatchPipelineConfig, GpuSigmaClipConfig, GpuSigmaClipPipeline, GpuSigmaClipper,
     MAX_GPU_FRAMES,
+};
+// Re-export comet stacking types for public API
+#[allow(unused_imports)]
+pub use comet::{
+    CometStackConfig, CometStackResult, CompositeMethod, ObjectPosition, compute_comet_offset,
+    interpolate_position,
 };
 
 #[cfg(feature = "bench")]

@@ -139,6 +139,10 @@ pub use registration::{
 pub use stacking::{
     // Configuration
     CacheConfig,
+    // Comet/asteroid stacking
+    CometStackConfig,
+    CometStackResult,
+    CompositeMethod,
     FrameType,
     // GPU stacking
     GpuSigmaClipConfig,
@@ -148,6 +152,7 @@ pub use stacking::{
     ImageStack,
     MAX_GPU_FRAMES,
     MedianConfig,
+    ObjectPosition,
     // Progress reporting
     ProgressCallback,
     SigmaClipConfig,
@@ -155,6 +160,8 @@ pub use stacking::{
     StackingMethod,
     StackingProgress,
     StackingStage,
+    compute_comet_offset,
+    interpolate_position,
 };
 
 // ============================================================================

@@ -758,9 +758,75 @@ pub fn interpolate_position(
 ### Implementation Steps
 
 1. **Research** ✓ - Completed 2026-01-27
-2. **API Design** - Define types and function signatures
+2. **API Design** ✓ - Completed 2026-01-27 (see `comet.rs`)
 3. **Position interpolation** - Linear interpolation from timestamps
 4. **Comet-aligned registration** - Modify transforms with comet offset
 5. **Dual stacking** - Run star-aligned and comet-aligned stacks
 6. **Composite generation** - Implement blend modes
 7. **Testing** - Synthetic moving object tests
+
+### Implementation Status (PARTIAL - 2026-01-27)
+
+**Files Implemented:**
+- `src/stacking/comet.rs` - API types and helper functions
+
+**Types Implemented:**
+```rust
+// Object position at a timestamp
+ObjectPosition { x: f64, y: f64, timestamp: f64 }
+ObjectPosition::new(x, y, timestamp)
+ObjectPosition::from_coords(x: u32, y: u32, timestamp)
+
+// Composite methods
+CompositeMethod::Lighten      // max(star, comet) - default
+CompositeMethod::Additive     // star + (comet - bg)
+CompositeMethod::Separate     // return both stacks
+
+// Configuration (builder pattern)
+CometStackConfig::new(pos_start, pos_end)
+    .rejection(RejectionMethod::SigmaClip(...))
+    .normalization(NormalizationMethod::Global)
+    .composite_method(CompositeMethod::Lighten)
+
+// Helper methods
+config.velocity() -> (vx, vy)      // pixels per time unit
+config.total_displacement() -> f64 // total motion in pixels
+
+// Result type
+CometStackResult {
+    star_stack: Vec<f32>,    // sharp stars
+    comet_stack: Vec<f32>,   // sharp comet
+    composite: Option<Vec<f32>>,
+    width, height, velocity, displacement
+}
+```
+
+**Helper Functions:**
+```rust
+// Linear interpolation of position
+interpolate_position(&pos_start, &pos_end, timestamp) -> (x, y)
+
+// Compute offset for comet-aligned transform
+compute_comet_offset(&config, frame_timestamp, ref_timestamp) -> (dx, dy)
+```
+
+**Tests (19 passing):**
+- ObjectPosition: creation, from_coords
+- CometStackConfig: new, builder pattern, velocity, displacement, same timestamp panics
+- Interpolation: at start/end/middle, extrapolation before/after, same timestamp panics
+- Comet offset: at reference, after time, negative velocity
+- CompositeMethod: default
+- CometStackResult: channels, pixel_count
+
+**Exports:**
+- `lumos::ObjectPosition`
+- `lumos::CometStackConfig`
+- `lumos::CometStackResult`
+- `lumos::CompositeMethod`
+- `lumos::interpolate_position`
+- `lumos::compute_comet_offset`
+
+**Next Steps:**
+- Implement frame-specific offset in registration (task 3)
+- Implement composite output generation (task 4)
+- Write integration tests with synthetic comet data (task 5)
