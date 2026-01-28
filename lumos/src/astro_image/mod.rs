@@ -220,6 +220,52 @@ impl AstroImage {
         }
     }
 
+    /// Create an AstroImage from planar channel data.
+    ///
+    /// Each channel is provided as a separate Vec<f32> in the order [R, G, B] for RGB
+    /// or a single channel for grayscale.
+    ///
+    /// # Panics
+    /// Panics if channel count doesn't match dimensions or pixel counts are wrong.
+    pub fn from_planar_channels(dimensions: ImageDimensions, channels: Vec<Vec<f32>>) -> Self {
+        let expected_pixels_per_channel = dimensions.width * dimensions.height;
+
+        assert_eq!(
+            channels.len(),
+            dimensions.channels,
+            "Channel count mismatch: expected {}, got {}",
+            dimensions.channels,
+            channels.len()
+        );
+
+        for (i, channel) in channels.iter().enumerate() {
+            assert_eq!(
+                channel.len(),
+                expected_pixels_per_channel,
+                "Channel {} pixel count mismatch: expected {}, got {}",
+                i,
+                expected_pixels_per_channel,
+                channel.len()
+            );
+        }
+
+        let pixel_data = if dimensions.is_grayscale() {
+            PixelData::L(channels.into_iter().next().unwrap())
+        } else {
+            let mut iter = channels.into_iter();
+            let r = iter.next().unwrap();
+            let g = iter.next().unwrap();
+            let b = iter.next().unwrap();
+            PixelData::Rgb([r, g, b])
+        };
+
+        AstroImage {
+            metadata: AstroImageMetadata::default(),
+            dimensions,
+            pixels: pixel_data,
+        }
+    }
+
     /// Get image width.
     pub fn width(&self) -> usize {
         self.dimensions.width
