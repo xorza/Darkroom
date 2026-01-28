@@ -89,22 +89,16 @@ impl HotPixelMap {
         // The mask is per-value (not per-pixel), so we check each channel value
         const BOOL_CHUNK_SIZE: usize = 16384;
         let mut mask = vec![false; pixels.len()];
-        let _count: usize = mask
-            .par_chunks_mut(BOOL_CHUNK_SIZE)
+        mask.par_chunks_mut(BOOL_CHUNK_SIZE)
             .enumerate()
-            .map(|(chunk_idx, chunk)| {
+            .for_each(|(chunk_idx, chunk)| {
                 let start = chunk_idx * BOOL_CHUNK_SIZE;
-                let mut local_count = 0usize;
                 for (i, val) in chunk.iter_mut().enumerate() {
                     let idx = start + i;
                     let channel = idx % channels;
-                    let is_hot = pixels[idx] > thresholds[channel];
-                    *val = is_hot;
-                    local_count += is_hot as usize;
+                    *val = pixels[idx] > thresholds[channel];
                 }
-                local_count
-            })
-            .sum();
+            });
 
         // For reporting, count unique pixels (not channel values)
         let pixel_hot_count = (0..pixel_count)
