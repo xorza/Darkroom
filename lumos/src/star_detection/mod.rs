@@ -25,6 +25,7 @@ pub(crate) mod constants;
 mod convolution;
 mod cosmic_ray;
 mod deblend;
+mod defect_map;
 pub(crate) mod detection;
 pub mod gpu;
 mod median_filter;
@@ -177,94 +178,8 @@ impl Star {
     }
 }
 
-/// Map of known sensor defects (hot pixels, dead pixels, bad columns).
-///
-/// Used to mask out defective pixels before star detection to prevent
-/// false detections and improve centroid accuracy.
-///
-/// The boolean mask is pre-computed at construction time for efficient lookup.
-#[derive(Debug, Clone)]
-pub struct DefectMap {
-    width: usize,
-    height: usize,
-    /// Pre-computed boolean mask where `true` means the pixel is defective.
-    mask: Vec<bool>,
-}
-
-impl DefectMap {
-    /// Create a defect map from lists of defective pixels, columns, and rows.
-    pub fn new(
-        width: usize,
-        height: usize,
-        hot_pixels: &[(usize, usize)],
-        dead_pixels: &[(usize, usize)],
-        bad_columns: &[usize],
-        bad_rows: &[usize],
-    ) -> Self {
-        let mut mask = vec![false; width * height];
-
-        for &(x, y) in hot_pixels {
-            if x < width && y < height {
-                mask[y * width + x] = true;
-            }
-        }
-
-        for &(x, y) in dead_pixels {
-            if x < width && y < height {
-                mask[y * width + x] = true;
-            }
-        }
-
-        for &col in bad_columns {
-            if col < width {
-                for y in 0..height {
-                    mask[y * width + col] = true;
-                }
-            }
-        }
-
-        for &row in bad_rows {
-            if row < height {
-                for x in 0..width {
-                    mask[row * width + x] = true;
-                }
-            }
-        }
-
-        Self {
-            width,
-            height,
-            mask,
-        }
-    }
-
-    /// Check if a pixel is marked as defective.
-    #[inline]
-    pub fn is_defective(&self, x: usize, y: usize) -> bool {
-        if x < self.width && y < self.height {
-            self.mask[y * self.width + x]
-        } else {
-            false
-        }
-    }
-
-    /// Check if the defect map has no defective pixels.
-    pub fn is_empty(&self) -> bool {
-        !self.mask.contains(&true)
-    }
-
-    /// Get the pre-computed boolean mask.
-    /// Returns a slice where `true` means the pixel is defective.
-    #[inline]
-    pub fn mask(&self) -> &[bool] {
-        &self.mask
-    }
-
-    /// Get dimensions of the defect map.
-    pub fn dimensions(&self) -> (usize, usize) {
-        (self.width, self.height)
-    }
-}
+pub use defect_map::DefectMap;
+use defect_map::apply_defect_mask;
 
 /// Detection threshold and area parameters.
 #[derive(Debug, Clone)]
@@ -1184,65 +1099,6 @@ fn find_stars(image: &AstroImage, config: &StarDetectionConfig) -> StarDetection
     }
 
     StarDetectionResult { stars, diagnostics }
-}
-
-/// Apply defect mask by replacing defective pixels with local median (in place).
-///
-/// This prevents hot pixels and other defects from being detected as stars
-/// or affecting centroid computation.
-fn apply_defect_mask(pixels: &mut [f32], width: usize, height: usize, defect_map: &DefectMap) {
-    let mask = defect_map.mask();
-
-    // Collect defective pixel positions and their replacements first,
-    // then apply (can't modify while reading neighbors)
-    let mut replacements = Vec::new();
-    for y in 0..height {
-        for x in 0..width {
-            let idx = y * width + x;
-            if mask[idx] {
-                let value = local_median_excluding_defects(pixels, width, height, x, y, mask);
-                replacements.push((idx, value));
-            }
-        }
-    }
-
-    for (idx, value) in replacements {
-        pixels[idx] = value;
-    }
-}
-
-/// Compute local median of 3x3 neighborhood, excluding defective pixels.
-fn local_median_excluding_defects(
-    pixels: &[f32],
-    width: usize,
-    height: usize,
-    cx: usize,
-    cy: usize,
-    defect_mask: &[bool],
-) -> f32 {
-    let mut values = Vec::with_capacity(9);
-
-    for dy in -1i32..=1 {
-        for dx in -1i32..=1 {
-            let nx = cx as i32 + dx;
-            let ny = cy as i32 + dy;
-
-            if nx >= 0 && nx < width as i32 && ny >= 0 && ny < height as i32 {
-                let nidx = ny as usize * width + nx as usize;
-                if !defect_mask[nidx] {
-                    values.push(pixels[nidx]);
-                }
-            }
-        }
-    }
-
-    if values.is_empty() {
-        // All neighbors are defective, use the pixel value itself
-        pixels[cy * width + cx]
-    } else {
-        values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-        values[values.len() / 2]
-    }
 }
 
 /// Remove duplicate star detections that are too close together.
