@@ -481,6 +481,41 @@ mod tests {
     }
 
     #[test]
+    fn test_hot_pixel_correction_rgb() {
+        // 3x3 RGB image with hot pixels in different channels
+        // Pixel layout (interleaved RGB input):
+        // (0,0) (1,0) (2,0)
+        // (0,1) (1,1) (2,1)
+        // (0,2) (1,2) (2,2)
+        let pixels = vec![
+            10.0, 10.0, 10.0, // (0,0)
+            10.0, 10.0, 10.0, // (1,0)
+            10.0, 10.0, 10.0, // (2,0)
+            10.0, 10.0, 10.0, // (0,1)
+            1000.0, 10.0, 1000.0, // (1,1) - R and B channels hot
+            10.0, 10.0, 10.0, // (2,1)
+            10.0, 10.0, 10.0, // (0,2)
+            10.0, 10.0, 10.0, // (1,2)
+            10.0, 10.0, 10.0, // (2,2)
+        ];
+        let mut image = make_test_image(3, 3, 3, pixels);
+
+        // Center pixel (1,1) = index 4 is hot in R and B channels
+        let hot_map = HotPixelMap {
+            mask: HotPixelMask::Rgb([vec![4], vec![], vec![4]]),
+            dimensions: image.dimensions(),
+            count: 1,
+        };
+
+        hot_map.correct(&mut image);
+
+        // R and B channels at center should be corrected to median of neighbors (10.0)
+        assert_eq!(image.channel(0)[4], 10.0); // R corrected
+        assert_eq!(image.channel(1)[4], 10.0); // G unchanged
+        assert_eq!(image.channel(2)[4], 10.0); // B corrected
+    }
+
+    #[test]
     fn test_hot_pixel_percentage() {
         let mut pixels = vec![10.0; 100];
         // Make 5 pixels hot
