@@ -936,6 +936,8 @@ pub struct StarDetectionDiagnostics {
 /// * `image` - Astronomical image (grayscale or RGB, normalized 0.0-1.0)
 /// * `config` - Detection configuration
 fn find_stars(image: &AstroImage, config: &StarDetectionConfig) -> StarDetectionResult {
+    let _tracy = tracy_client::span!("find_stars");
+
     config.validate();
 
     let width = image.width();
@@ -947,6 +949,8 @@ fn find_stars(image: &AstroImage, config: &StarDetectionConfig) -> StarDetection
 
     // Step 0a: Apply defect mask if provided
     if config.defect_map.as_ref().is_some_and(|m| !m.is_empty()) {
+        let _tracy = tracy_client::span!("apply_defect_mask");
+
         apply_defect_mask(
             &pixels,
             width,
@@ -960,119 +964,145 @@ fn find_stars(image: &AstroImage, config: &StarDetectionConfig) -> StarDetection
     // Step 0b: Apply 3x3 median filter to remove Bayer pattern artifacts
     // Only applied for CFA sensors; skip for monochrome (~6ms faster on 4K images)
     if image.metadata.is_cfa {
+        let _tracy = tracy_client::span!("median_filter_3x3");
+
         median_filter_3x3(&pixels, width, height, &mut output);
         std::mem::swap(&mut pixels, &mut output);
     }
 
     // Step 1: Estimate background
-    let background = if config.background_passes > 0 {
-        // Use iterative background estimation for crowded fields
-        let iter_config = IterativeBackgroundConfig {
-            iterations: config.background_passes,
-            detection_sigma: config.detection_sigma,
-            ..IterativeBackgroundConfig::default()
-        };
-        estimate_background_iterative(
-            &pixels,
-            width,
-            height,
-            config.background_tile_size,
-            &iter_config,
-        )
-    } else {
-        // Single-pass background estimation (faster)
-        estimate_background(&pixels, width, height, config.background_tile_size)
-    };
+    let background = {
+        let _tracy = tracy_client::span!("estimate_background");
 
-    // Collect background statistics
-    let bg_min = background
-        .background
-        .iter()
-        .fold(f32::MAX, |a, &b| a.min(b));
-    let bg_max = background
-        .background
-        .iter()
-        .fold(f32::MIN, |a, &b| a.max(b));
-    let bg_mean = background.background.iter().sum::<f32>() / background.background.len() as f32;
-    diagnostics.background_stats = (bg_min, bg_max, bg_mean);
-
-    let noise_min = background.noise.iter().fold(f32::MAX, |a, &b| a.min(b));
-    let noise_max = background.noise.iter().fold(f32::MIN, |a, &b| a.max(b));
-    let noise_mean = background.noise.iter().sum::<f32>() / background.noise.len() as f32;
-    diagnostics.noise_stats = (noise_min, noise_max, noise_mean);
-
-    // Step 2: Detect star candidates
-    let candidates = if config.expected_fwhm > f32::EPSILON {
-        // Apply matched filter (Gaussian convolution) for better faint star detection
-        // This is the DAOFIND/SExtractor technique
-        let filtered = if config.psf_axis_ratio < 0.99 {
-            tracing::debug!(
-                "Applying elliptical matched filter with FWHM={:.1}, axis_ratio={:.2}, angle={:.2}",
-                config.expected_fwhm,
-                config.psf_axis_ratio,
-                config.psf_angle
-            );
-            matched_filter_elliptical(
+        if config.background_passes > 0 {
+            // Use iterative background estimation for crowded fields
+            let iter_config = IterativeBackgroundConfig {
+                iterations: config.background_passes,
+                detection_sigma: config.detection_sigma,
+                ..IterativeBackgroundConfig::default()
+            };
+            estimate_background_iterative(
                 &pixels,
                 width,
                 height,
-                &background.background,
-                config.expected_fwhm,
-                config.psf_axis_ratio,
-                config.psf_angle,
+                config.background_tile_size,
+                &iter_config,
             )
         } else {
-            tracing::debug!(
-                "Applying matched filter with FWHM={:.1} pixels",
-                config.expected_fwhm
-            );
-            matched_filter(
-                &pixels,
-                width,
-                height,
-                &background.background,
-                config.expected_fwhm,
-            )
-        };
-        detect_stars_filtered(&pixels, &filtered, width, height, &background, config)
-    } else {
-        // No matched filter - use standard detection
-        detect_stars(&pixels, width, height, &background, config)
+            // Single-pass background estimation (faster)
+            estimate_background(&pixels, width, height, config.background_tile_size)
+        }
+    };
+    {
+        let _tracy = tracy_client::span!("background_statistics");
+        // Collect background statistics
+        let bg_min = background
+            .background
+            .iter()
+            .fold(f32::MAX, |a, &b| a.min(b));
+        let bg_max = background
+            .background
+            .iter()
+            .fold(f32::MIN, |a, &b| a.max(b));
+        let bg_mean =
+            background.background.iter().sum::<f32>() / background.background.len() as f32;
+        diagnostics.background_stats = (bg_min, bg_max, bg_mean);
+
+        let noise_min = background.noise.iter().fold(f32::MAX, |a, &b| a.min(b));
+        let noise_max = background.noise.iter().fold(f32::MIN, |a, &b| a.max(b));
+        let noise_mean = background.noise.iter().sum::<f32>() / background.noise.len() as f32;
+        diagnostics.noise_stats = (noise_min, noise_max, noise_mean);
+    }
+
+    // Step 2: Detect star candidates
+    let candidates = {
+        let _tracy = tracy_client::span!("detect_candidates");
+
+        if config.expected_fwhm > f32::EPSILON {
+            // Apply matched filter (Gaussian convolution) for better faint star detection
+            // This is the DAOFIND/SExtractor technique
+            let filtered = if config.psf_axis_ratio < 0.99 {
+                let _tracy = tracy_client::span!("matched_filter_elliptical");
+
+                tracing::debug!(
+                    "Applying elliptical matched filter with FWHM={:.1}, axis_ratio={:.2}, angle={:.2}",
+                    config.expected_fwhm,
+                    config.psf_axis_ratio,
+                    config.psf_angle
+                );
+                matched_filter_elliptical(
+                    &pixels,
+                    width,
+                    height,
+                    &background.background,
+                    config.expected_fwhm,
+                    config.psf_axis_ratio,
+                    config.psf_angle,
+                )
+            } else {
+                let _tracy = tracy_client::span!("matched_filter");
+
+                tracing::debug!(
+                    "Applying matched filter with FWHM={:.1} pixels",
+                    config.expected_fwhm
+                );
+                matched_filter(
+                    &pixels,
+                    width,
+                    height,
+                    &background.background,
+                    config.expected_fwhm,
+                )
+            };
+            detect_stars_filtered(&pixels, &filtered, width, height, &background, config)
+        } else {
+            // No matched filter - use standard detection
+            detect_stars(&pixels, width, height, &background, config)
+        }
     };
     diagnostics.candidates_after_filtering = candidates.len();
     tracing::debug!("Detected {} star candidates", candidates.len());
 
     // Step 3: Compute precise centroids
-    let stars_after_centroid: Vec<Star> = candidates
-        .into_iter()
-        .filter_map(|candidate| {
-            compute_centroid(&pixels, width, height, &background, &candidate, config)
-        })
-        .collect();
+    let stars_after_centroid: Vec<Star> = {
+        let _tracy = tracy_client::span!("compute_centroids");
+
+        candidates
+            .into_iter()
+            .filter_map(|candidate| {
+                compute_centroid(&pixels, width, height, &background, &candidate, config)
+            })
+            .collect()
+    };
     diagnostics.stars_after_centroid = stars_after_centroid.len();
 
     // Step 4: Apply quality filters and count rejections
-    let mut stars = stars_after_centroid;
-    stars.retain(|star| {
-        if star.is_saturated() {
-            diagnostics.rejected_saturated += 1;
-            false
-        } else if star.snr < config.min_snr {
-            diagnostics.rejected_low_snr += 1;
-            false
-        } else if star.eccentricity > config.max_eccentricity {
-            diagnostics.rejected_high_eccentricity += 1;
-            false
-        } else if star.is_cosmic_ray(config.max_sharpness) {
-            diagnostics.rejected_cosmic_rays += 1;
-            false
-        } else if !star.is_round(config.max_roundness) {
-            diagnostics.rejected_roundness += 1;
-            false
-        } else {
-            true
-        }
-    });
+    let mut stars = {
+        let _tracy = tracy_client::span!("quality_filters");
+
+        let mut stars = stars_after_centroid;
+        stars.retain(|star| {
+            if star.is_saturated() {
+                diagnostics.rejected_saturated += 1;
+                false
+            } else if star.snr < config.min_snr {
+                diagnostics.rejected_low_snr += 1;
+                false
+            } else if star.eccentricity > config.max_eccentricity {
+                diagnostics.rejected_high_eccentricity += 1;
+                false
+            } else if star.is_cosmic_ray(config.max_sharpness) {
+                diagnostics.rejected_cosmic_rays += 1;
+                false
+            } else if !star.is_round(config.max_roundness) {
+                diagnostics.rejected_roundness += 1;
+                false
+            } else {
+                true
+            }
+        });
+        stars
+    };
 
     // Sort by flux (brightest first)
     stars.sort_by(|a, b| {

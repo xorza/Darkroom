@@ -79,6 +79,7 @@ rand_chacha = { version = "*" }
 rustfft = { version = "*" }
 nalgebra = { version = "*" }
 ureq = { version = "*" }
+tracy-client = { version = "*", default-features = false }
 
 
 [profile.bench]
