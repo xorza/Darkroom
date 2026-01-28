@@ -101,21 +101,15 @@ pub(crate) fn apply_defect_mask(
 ) {
     let mask = defect_map.mask();
 
-    // Collect defective pixel positions and their replacements first,
-    // then apply (can't modify while reading neighbors)
-    let mut replacements = Vec::new();
+    // Safe to apply immediately: we only read from non-defective neighbors
+    // and only write to defective pixels, so there's no read-write conflict
     for y in 0..height {
         for x in 0..width {
             let idx = y * width + x;
             if mask[idx] {
-                let value = local_median_excluding_defects(pixels, width, height, x, y, mask);
-                replacements.push((idx, value));
+                pixels[idx] = local_median_excluding_defects(pixels, width, height, x, y, mask);
             }
         }
-    }
-
-    for (idx, value) in replacements {
-        pixels[idx] = value;
     }
 }
 
