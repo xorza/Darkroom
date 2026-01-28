@@ -2,10 +2,17 @@
 
 use super::*;
 
+/// Helper to call median_filter_3x3 with automatic output allocation
+fn filter(pixels: &[f32], width: usize, height: usize) -> Vec<f32> {
+    let mut output = vec![0.0f32; pixels.len()];
+    median_filter_3x3(pixels, width, height, &mut output);
+    output
+}
+
 #[test]
 fn test_uniform_image() {
     let pixels = vec![0.5f32; 100 * 100];
-    let result = median_filter_3x3(&pixels, 100, 100);
+    let result = filter(&pixels, 100, 100);
 
     for (i, &val) in result.iter().enumerate() {
         assert!(
@@ -23,7 +30,7 @@ fn test_single_hot_pixel() {
     let mut pixels = vec![0.1f32; 25];
     pixels[12] = 1.0; // Center pixel
 
-    let result = median_filter_3x3(&pixels, 5, 5);
+    let result = filter(&pixels, 5, 5);
 
     // Hot pixel should be replaced with median of neighbors (0.1)
     assert!(
@@ -42,7 +49,7 @@ fn test_preserves_edges() {
         .flat_map(|y| (0..width).map(move |x| (x + y) as f32 / 20.0))
         .collect();
 
-    let result = median_filter_3x3(&pixels, width, height);
+    let result = filter(&pixels, width, height);
 
     // Check that general gradient direction is preserved
     assert!(result[0] < result[99], "Gradient should be preserved");
@@ -51,7 +58,7 @@ fn test_preserves_edges() {
 #[test]
 fn test_small_image_2x2() {
     let pixels = vec![0.1, 0.2, 0.3, 0.4];
-    let result = median_filter_3x3(&pixels, 2, 2);
+    let result = filter(&pixels, 2, 2);
 
     // Image too small, should return copy
     assert_eq!(result.len(), 4);
@@ -60,7 +67,7 @@ fn test_small_image_2x2() {
 #[test]
 fn test_small_image_1x1() {
     let pixels = vec![0.5];
-    let result = median_filter_3x3(&pixels, 1, 1);
+    let result = filter(&pixels, 1, 1);
 
     assert_eq!(result.len(), 1);
     assert!((result[0] - 0.5).abs() < 1e-6);
@@ -76,7 +83,7 @@ fn test_3x3_image() {
         0.7, 0.8, 0.9,
     ];
 
-    let result = median_filter_3x3(&pixels, 3, 3);
+    let result = filter(&pixels, 3, 3);
 
     // Center pixel has full 9-element neighborhood
     // Median of [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9] = 0.5
@@ -98,7 +105,7 @@ fn test_corner_pixels() {
         1.3, 1.4, 1.5, 1.6,
     ];
 
-    let result = median_filter_3x3(&pixels, 4, 4);
+    let result = filter(&pixels, 4, 4);
 
     // Top-left corner has 4 neighbors: [0.1, 0.2, 0.5, 0.6]
     // Median of 4 = average of middle two = (0.2 + 0.5) / 2 = 0.35
@@ -120,7 +127,7 @@ fn test_edge_pixels() {
         1.3, 1.4, 1.5, 1.6,
     ];
 
-    let result = median_filter_3x3(&pixels, 4, 4);
+    let result = filter(&pixels, 4, 4);
 
     // Top edge (1,0) has 6 neighbors: [0.1, 0.2, 0.3, 0.5, 0.6, 0.7]
     // Sorted: [0.1, 0.2, 0.3, 0.5, 0.6, 0.7]
@@ -142,7 +149,7 @@ fn test_salt_and_pepper_noise() {
     pixels[67] = 0.0; // pepper
     pixels[89] = 1.0; // salt
 
-    let result = median_filter_3x3(&pixels, 10, 10);
+    let result = filter(&pixels, 10, 10);
 
     // All noisy pixels should be close to 0.5 after filtering
     assert!(
@@ -172,7 +179,7 @@ fn test_large_image_parallel() {
         .map(|i| (i % 256) as f32 / 255.0)
         .collect();
 
-    let result = median_filter_3x3(&pixels, width, height);
+    let result = filter(&pixels, width, height);
 
     assert_eq!(result.len(), width * height);
 
@@ -246,7 +253,7 @@ fn test_non_square_image() {
     let height = 10;
     let pixels = vec![0.5f32; width * height];
 
-    let result = median_filter_3x3(&pixels, width, height);
+    let result = filter(&pixels, width, height);
 
     assert_eq!(result.len(), width * height);
 }
@@ -255,7 +262,7 @@ fn test_non_square_image() {
 #[should_panic(expected = "Pixel count must match")]
 fn test_wrong_pixel_count() {
     let pixels = vec![0.5f32; 100];
-    median_filter_3x3(&pixels, 20, 10); // Expects 200 pixels
+    filter(&pixels, 20, 10); // Expects 200 pixels
 }
 
 #[test]
@@ -270,7 +277,7 @@ fn test_bayer_pattern_removal() {
         })
         .collect();
 
-    let result = median_filter_3x3(&pixels, width, height);
+    let result = filter(&pixels, width, height);
 
     // After filtering, the pattern should be smoothed
     // Interior pixels should be close to 0.5
@@ -614,7 +621,7 @@ fn test_4x4_all_corners_and_edges() {
         13.0, 14.0, 15.0, 16.0,
     ];
 
-    let result = median_filter_3x3(&pixels, 4, 4);
+    let result = filter(&pixels, 4, 4);
 
     // All 16 pixels should be computed
     assert_eq!(result.len(), 16);
@@ -638,7 +645,7 @@ fn test_wide_image() {
     let height = 4;
     let pixels = vec![0.5f32; width * height];
 
-    let result = median_filter_3x3(&pixels, width, height);
+    let result = filter(&pixels, width, height);
 
     assert_eq!(result.len(), width * height);
     for &val in &result {
@@ -653,7 +660,7 @@ fn test_tall_image() {
     let height = 100;
     let pixels = vec![0.5f32; width * height];
 
-    let result = median_filter_3x3(&pixels, width, height);
+    let result = filter(&pixels, width, height);
 
     assert_eq!(result.len(), width * height);
     for &val in &result {
@@ -722,7 +729,7 @@ fn test_chunk_boundary() {
         let width = 10;
         let pixels = vec![0.5f32; width * height];
 
-        let result = median_filter_3x3(&pixels, width, height);
+        let result = filter(&pixels, width, height);
 
         assert_eq!(result.len(), width * height);
         for (i, &val) in result.iter().enumerate() {

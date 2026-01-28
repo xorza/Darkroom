@@ -19,7 +19,7 @@ use super::constants::ROWS_PER_CHUNK;
 ///
 /// Uses parallel processing for large images. Separates interior pixels
 /// (full 9-element neighborhood) from edge pixels for better performance.
-pub fn median_filter_3x3(pixels: &[f32], width: usize, height: usize) -> Vec<f32> {
+pub fn median_filter_3x3(pixels: &[f32], width: usize, height: usize, output: &mut [f32]) {
     assert_eq!(
         pixels.len(),
         width * height,
@@ -27,10 +27,9 @@ pub fn median_filter_3x3(pixels: &[f32], width: usize, height: usize) -> Vec<f32
     );
 
     if width < 3 || height < 3 {
-        return pixels.to_vec();
+        output.copy_from_slice(pixels);
+        return;
     }
-
-    let mut output = vec![0.0f32; width * height];
 
     output
         .par_chunks_mut(width * ROWS_PER_CHUNK)
@@ -52,8 +51,6 @@ pub fn median_filter_3x3(pixels: &[f32], width: usize, height: usize) -> Vec<f32
                 }
             }
         });
-
-    output
 }
 
 /// Filter an interior row (y is not 0 or height-1).

@@ -1001,32 +1001,33 @@ pub struct StarDetectionDiagnostics {
 /// * `image` - Astronomical image (grayscale or RGB, normalized 0.0-1.0)
 /// * `config` - Detection configuration
 fn find_stars(image: &AstroImage, config: &StarDetectionConfig) -> StarDetectionResult {
-    let grayscale = image.clone().into_grayscale();
-    let width = grayscale.width();
-    let height = grayscale.height();
-    let pixels = grayscale.channel(0);
-
     config.validate();
+
+    let width = image.width();
+    let height = image.height();
+    let mut pixels = image.to_grayscale_pixels();
 
     let mut diagnostics = StarDetectionDiagnostics::default();
 
     // Step 0a: Apply defect mask if provided
-    let pixels_cleaned = if let Some(ref defect_map) = config.defect_map {
-        if !defect_map.is_empty() {
-            apply_defect_mask(pixels, width, height, defect_map)
-        } else {
-            pixels.to_vec()
-        }
-    } else {
-        pixels.to_vec()
-    };
+    if config.defect_map.as_ref().is_some_and(|m| !m.is_empty()) {
+        apply_defect_mask(
+            &mut pixels,
+            width,
+            height,
+            config.defect_map.as_ref().unwrap(),
+        );
+    }
 
     // Step 0b: Apply 3x3 median filter to remove Bayer pattern artifacts
     // Only applied for CFA sensors; skip for monochrome (~6ms faster on 4K images)
     let smoothed = if image.metadata.is_cfa {
-        median_filter_3x3(&pixels_cleaned, width, height)
+        let input = pixels;
+        let mut output = vec![0.0f32; input.len()];
+        median_filter_3x3(&input, width, height, &mut output);
+        output
     } else {
-        pixels_cleaned
+        pixels
     };
 
     // Step 1: Estimate background
@@ -1111,7 +1112,7 @@ fn find_stars(image: &AstroImage, config: &StarDetectionConfig) -> StarDetection
     let stars_after_centroid: Vec<Star> = candidates
         .into_iter()
         .filter_map(|candidate| {
-            compute_centroid(pixels, width, height, &background, &candidate, config)
+            compute_centroid(&smoothed, width, height, &background, &candidate, config)
         })
         .collect();
     diagnostics.stars_after_centroid = stars_after_centroid.len();
@@ -1171,30 +1172,29 @@ fn find_stars(image: &AstroImage, config: &StarDetectionConfig) -> StarDetection
     StarDetectionResult { stars, diagnostics }
 }
 
-/// Apply defect mask by replacing defective pixels with local median.
+/// Apply defect mask by replacing defective pixels with local median (in place).
 ///
 /// This prevents hot pixels and other defects from being detected as stars
 /// or affecting centroid computation.
-fn apply_defect_mask(
-    pixels: &[f32],
-    width: usize,
-    height: usize,
-    defect_map: &DefectMap,
-) -> Vec<f32> {
-    let mut result = pixels.to_vec();
+fn apply_defect_mask(pixels: &mut [f32], width: usize, height: usize, defect_map: &DefectMap) {
     let mask = defect_map.to_mask(width, height);
 
+    // Collect defective pixel positions and their replacements first,
+    // then apply (can't modify while reading neighbors)
+    let mut replacements = Vec::new();
     for y in 0..height {
         for x in 0..width {
             let idx = y * width + x;
             if mask[idx] {
-                // Replace with local median of non-defective neighbors
-                result[idx] = local_median_excluding_defects(pixels, width, height, x, y, &mask);
+                let value = local_median_excluding_defects(pixels, width, height, x, y, &mask);
+                replacements.push((idx, value));
             }
         }
     }
 
-    result
+    for (idx, value) in replacements {
+        pixels[idx] = value;
+    }
 }
 
 /// Compute local median of 3x3 neighborhood, excluding defective pixels.

@@ -18,12 +18,13 @@ pub fn bench_median_filter(c: &mut Criterion) {
             .collect();
 
         group.throughput(Throughput::Elements((width * height) as u64));
+        let mut output = vec![0.0f32; width * height];
         group.bench_with_input(
             BenchmarkId::new("size", format!("{}x{}", width, height)),
             &pixels,
             |b, pixels| {
                 b.iter(|| {
-                    black_box(median_filter_3x3(black_box(pixels), width, height));
+                    median_filter_3x3(black_box(pixels), width, height, black_box(&mut output));
                 });
             },
         );
