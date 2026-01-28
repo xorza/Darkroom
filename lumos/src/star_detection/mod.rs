@@ -918,10 +918,6 @@ pub struct StarDetectionDiagnostics {
     pub median_fwhm: f32,
     /// Median SNR of detected stars.
     pub median_snr: f32,
-    /// Background level statistics (min, max, mean).
-    pub background_stats: (f32, f32, f32),
-    /// Noise level statistics (min, max, mean).
-    pub noise_stats: (f32, f32, f32),
 }
 
 /// Detect stars in an astronomical image.
@@ -993,26 +989,6 @@ fn find_stars(image: &AstroImage, config: &StarDetectionConfig) -> StarDetection
             estimate_background(&pixels, width, height, config.background_tile_size)
         }
     };
-    {
-        let _tracy = tracy_client::span!("background_statistics");
-        // Collect background statistics
-        let bg_min = background
-            .background
-            .iter()
-            .fold(f32::MAX, |a, &b| a.min(b));
-        let bg_max = background
-            .background
-            .iter()
-            .fold(f32::MIN, |a, &b| a.max(b));
-        let bg_mean =
-            background.background.iter().sum::<f32>() / background.background.len() as f32;
-        diagnostics.background_stats = (bg_min, bg_max, bg_mean);
-
-        let noise_min = background.noise.iter().fold(f32::MAX, |a, &b| a.min(b));
-        let noise_max = background.noise.iter().fold(f32::MIN, |a, &b| a.max(b));
-        let noise_mean = background.noise.iter().sum::<f32>() / background.noise.len() as f32;
-        diagnostics.noise_stats = (noise_min, noise_max, noise_mean);
-    }
 
     // Step 2: Detect star candidates
     let candidates = {
@@ -1129,13 +1105,12 @@ fn find_stars(image: &AstroImage, config: &StarDetectionConfig) -> StarDetection
     diagnostics.final_star_count = stars.len();
 
     if !stars.is_empty() {
-        let mut fwhms: Vec<f32> = stars.iter().map(|s| s.fwhm).collect();
-        fwhms.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-        diagnostics.median_fwhm = fwhms[fwhms.len() / 2];
+        let mut buf: Vec<f32> = stars.iter().map(|s| s.fwhm).collect();
+        diagnostics.median_fwhm = crate::math::median_f32_mut(&mut buf);
 
-        let mut snrs: Vec<f32> = stars.iter().map(|s| s.snr).collect();
-        snrs.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-        diagnostics.median_snr = snrs[snrs.len() / 2];
+        buf.clear();
+        buf.extend(stars.iter().map(|s| s.snr));
+        diagnostics.median_snr = crate::math::median_f32_mut(&mut buf);
     }
 
     StarDetectionResult { stars, diagnostics }

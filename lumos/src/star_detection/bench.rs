@@ -56,7 +56,7 @@ fn generate_synthetic_image(width: usize, height: usize, num_stars: usize) -> As
 /// Register full pipeline benchmarks with Criterion.
 pub fn benchmarks(c: &mut Criterion) {
     let mut group = c.benchmark_group("find_stars_full_pipeline");
-    group.sample_size(200);
+    group.sample_size(10);
 
     // Test various image sizes and star densities
     for &(width, height, num_stars) in &[
