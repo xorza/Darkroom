@@ -70,6 +70,7 @@ pub use star_detection::{
     StarDetectionConfigBuilder,
     StarDetectionDiagnostics,
     StarDetectionResult,
+    StarDetector,
     alpha_beta_to_fwhm,
     estimate_background,
     estimate_background_image,

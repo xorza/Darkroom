@@ -694,6 +694,18 @@ impl StarDetectionConfigBuilder {
         self
     }
 
+    /// Set edge margin in pixels.
+    pub fn with_edge_margin(mut self, margin: usize) -> Self {
+        self.detection.edge_margin = margin;
+        self
+    }
+
+    /// Set maximum eccentricity for star acceptance.
+    pub fn with_max_eccentricity(mut self, eccentricity: f32) -> Self {
+        self.quality.max_eccentricity = eccentricity;
+        self
+    }
+
     /// Enable cosmic ray rejection with specified sharpness threshold.
     pub fn with_cosmic_ray_rejection(mut self, max_sharpness: f32) -> Self {
         self.quality.max_sharpness = max_sharpness;
@@ -741,6 +753,188 @@ impl StarDetectionConfigBuilder {
             self.deblend,
             self.centroid,
         )
+    }
+}
+
+/// Star detector with builder pattern for convenient star detection.
+///
+/// Wraps [`StarDetectionConfig`] and provides methods for detecting stars
+/// in single images or batches.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use lumos::{StarDetector, AstroImage};
+///
+/// // Simple usage with defaults
+/// let detector = StarDetector::new();
+/// let result = detector.detect(&image);
+///
+/// // With custom configuration
+/// let detector = StarDetector::new()
+///     .with_fwhm(4.0)
+///     .with_min_snr(15.0)
+///     .with_edge_margin(20)
+///     .build();
+/// let result = detector.detect(&image);
+///
+/// // Batch detection (parallel)
+/// let results = detector.detect_all(&images);
+/// ```
+#[derive(Debug, Clone)]
+pub struct StarDetector {
+    config: StarDetectionConfig,
+}
+
+impl Default for StarDetector {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl StarDetector {
+    /// Create a new star detector with default configuration.
+    pub fn new() -> Self {
+        Self {
+            config: StarDetectionConfig::default(),
+        }
+    }
+
+    /// Create a star detector from an existing configuration.
+    pub fn from_config(config: StarDetectionConfig) -> Self {
+        Self { config }
+    }
+
+    /// Configure for wide-field imaging (larger stars, relaxed filtering).
+    #[must_use]
+    pub fn for_wide_field(mut self) -> Self {
+        let builder = StarDetectionConfigBuilder::default().for_wide_field();
+        self.config = builder.build();
+        self
+    }
+
+    /// Configure for high-resolution imaging (smaller stars, stricter filtering).
+    #[must_use]
+    pub fn for_high_resolution(mut self) -> Self {
+        let builder = StarDetectionConfigBuilder::default().for_high_resolution();
+        self.config = builder.build();
+        self
+    }
+
+    /// Configure for crowded fields (aggressive deblending).
+    #[must_use]
+    pub fn for_crowded_field(mut self) -> Self {
+        let builder = StarDetectionConfigBuilder::default().for_crowded_field();
+        self.config = builder.build();
+        self
+    }
+
+    /// Set expected FWHM for matched filtering.
+    #[must_use]
+    pub fn with_fwhm(mut self, fwhm: f32) -> Self {
+        self.config.expected_fwhm = fwhm;
+        self
+    }
+
+    /// Set detection threshold in sigma.
+    #[must_use]
+    pub fn with_detection_sigma(mut self, sigma: f32) -> Self {
+        self.config.detection_sigma = sigma;
+        self
+    }
+
+    /// Set minimum SNR threshold.
+    #[must_use]
+    pub fn with_min_snr(mut self, snr: f32) -> Self {
+        self.config.min_snr = snr;
+        self
+    }
+
+    /// Set edge margin in pixels.
+    #[must_use]
+    pub fn with_edge_margin(mut self, margin: usize) -> Self {
+        self.config.edge_margin = margin;
+        self
+    }
+
+    /// Set maximum eccentricity for star acceptance.
+    #[must_use]
+    pub fn with_max_eccentricity(mut self, eccentricity: f32) -> Self {
+        self.config.max_eccentricity = eccentricity;
+        self
+    }
+
+    /// Enable cosmic ray rejection with specified sharpness threshold.
+    #[must_use]
+    pub fn with_cosmic_ray_rejection(mut self, max_sharpness: f32) -> Self {
+        self.config.max_sharpness = max_sharpness;
+        self
+    }
+
+    /// Set camera noise model for accurate SNR calculation.
+    #[must_use]
+    pub fn with_noise_model(mut self, gain: f32, read_noise: f32) -> Self {
+        self.config.gain = Some(gain);
+        self.config.read_noise = Some(read_noise);
+        self
+    }
+
+    /// Set elliptical PSF parameters.
+    #[must_use]
+    pub fn with_elliptical_psf(mut self, axis_ratio: f32, angle: f32) -> Self {
+        self.config.psf_axis_ratio = axis_ratio;
+        self.config.psf_angle = angle;
+        self
+    }
+
+    /// Set centroid method.
+    #[must_use]
+    pub fn with_centroid_method(mut self, method: CentroidMethod) -> Self {
+        self.config.centroid_method = method;
+        self
+    }
+
+    /// Set local background method for centroiding.
+    #[must_use]
+    pub fn with_local_background(mut self, method: LocalBackgroundMethod) -> Self {
+        self.config.local_background_method = method;
+        self
+    }
+
+    /// Enable multi-threshold deblending.
+    #[must_use]
+    pub fn with_multi_threshold_deblend(mut self, enable: bool) -> Self {
+        self.config.multi_threshold_deblend = enable;
+        self
+    }
+
+    /// Finalize configuration (optional, detector is usable without calling this).
+    #[must_use]
+    pub fn build(self) -> Self {
+        self.config.validate();
+        self
+    }
+
+    /// Get reference to the underlying configuration.
+    pub fn config(&self) -> &StarDetectionConfig {
+        &self.config
+    }
+
+    /// Detect stars in a single image.
+    pub fn detect(&self, image: &AstroImage) -> StarDetectionResult {
+        find_stars(image, &self.config)
+    }
+
+    /// Detect stars in multiple images in parallel.
+    ///
+    /// Returns results in the same order as the input images.
+    pub fn detect_all(&self, images: &[AstroImage]) -> Vec<StarDetectionResult> {
+        use rayon::prelude::*;
+
+        images
+            .par_iter()
+            .map(|image| find_stars(image, &self.config))
+            .collect()
     }
 }
 
