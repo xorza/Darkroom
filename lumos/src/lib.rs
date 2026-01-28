@@ -152,7 +152,6 @@ pub use registration::{
     quick_register_stars,
     register_star_positions,
     warp_image,
-    warp_to_reference,
     warp_to_reference_image,
 };
 

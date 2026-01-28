@@ -142,12 +142,11 @@ println!("Matched {} stars, RMS error: {:.3} pixels",
 
 ```rust
 // Warp target image to align with reference
-let aligned = warp_to_reference(
+let aligned = warp_to_reference_image(
     &target_image,
-    width, height,
     &result.transform,
     InterpolationMethod::Lanczos3,  // High-quality interpolation
-)?;
+);
 ```
 
 #### 5. Stack Aligned Images

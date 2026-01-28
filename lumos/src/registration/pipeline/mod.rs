@@ -323,20 +323,10 @@ pub fn register_star_positions(
     Registrator::new(config).register_positions(ref_positions, target_positions)
 }
 
-/// Warp target image to align with reference.
+/// Warp target image to align with reference (raw pixel data, single channel).
 ///
-/// # Arguments
-///
-/// * `target_image` - Target image pixel data
-/// * `width` - Image width
-/// * `height` - Image height
-/// * `transform` - Transformation from reference to target coordinates (as returned by `register_stars`)
-/// * `method` - Interpolation method
-///
-/// # Returns
-///
-/// Warped image aligned to reference frame.
-pub fn warp_to_reference(
+/// Internal helper used by [`warp_to_reference_image`].
+fn warp_to_reference(
     target_image: &[f32],
     width: usize,
     height: usize,
@@ -441,7 +431,7 @@ pub fn warp_to_reference_image(
 ///
 /// # Example
 /// ```rust,ignore
-/// use lumos::{quick_register, warp_to_reference, InterpolationMethod};
+/// use lumos::{quick_register, warp_to_reference_image, InterpolationMethod, AstroImage};
 ///
 /// // Star positions detected from both images
 /// let ref_positions = vec![(100.0, 200.0), (300.0, 150.0), /* ... */];
@@ -451,7 +441,7 @@ pub fn warp_to_reference_image(
 /// let transform = quick_register(&ref_positions, &target_positions)?;
 ///
 /// // Warp target image to align with reference
-/// let aligned = warp_to_reference(&target_pixels, width, height, &transform, InterpolationMethod::Lanczos3);
+/// let aligned = warp_to_reference_image(&target_image, &transform, InterpolationMethod::Lanczos3);
 /// ```
 pub fn quick_register(
     ref_stars: &[(f64, f64)],

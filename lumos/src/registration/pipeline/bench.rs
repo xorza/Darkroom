@@ -5,7 +5,8 @@ use std::hint::black_box;
 
 use criterion::{BenchmarkId, Criterion, Throughput};
 
-use super::{Registrator, register_star_positions, warp_to_reference};
+use super::{Registrator, register_star_positions, warp_to_reference_image};
+use crate::AstroImage;
 use crate::registration::interpolation::InterpolationMethod;
 use crate::registration::types::{RegistrationConfig, TransformMatrix, TransformType};
 
@@ -155,7 +156,7 @@ fn benchmark_config_variations(c: &mut Criterion) {
     group.finish();
 }
 
-/// Benchmark warp_to_reference with different image sizes.
+/// Benchmark warp_to_reference_image with different image sizes.
 fn benchmark_warp_to_reference(c: &mut Criterion) {
     let mut group = c.benchmark_group("warp_to_reference");
 
@@ -163,13 +164,14 @@ fn benchmark_warp_to_reference(c: &mut Criterion) {
 
     for size in [256, 512, 1024] {
         // Generate a test image
-        let image: Vec<f32> = (0..size * size)
+        let pixels: Vec<f32> = (0..size * size)
             .map(|i| {
                 let x = (i % size) as f32 / size as f32;
                 let y = (i / size) as f32 / size as f32;
                 (x * y).sin()
             })
             .collect();
+        let image = AstroImage::from_pixels(size, size, 1, pixels);
 
         group.throughput(Throughput::Elements((size * size) as u64));
 
@@ -177,10 +179,8 @@ fn benchmark_warp_to_reference(c: &mut Criterion) {
             BenchmarkId::new("bilinear", format!("{}x{}", size, size)),
             |b| {
                 b.iter(|| {
-                    let result = warp_to_reference(
+                    let result = warp_to_reference_image(
                         black_box(&image),
-                        size,
-                        size,
                         black_box(&transform),
                         InterpolationMethod::Bilinear,
                     );
@@ -193,10 +193,8 @@ fn benchmark_warp_to_reference(c: &mut Criterion) {
             BenchmarkId::new("lanczos3", format!("{}x{}", size, size)),
             |b| {
                 b.iter(|| {
-                    let result = warp_to_reference(
+                    let result = warp_to_reference_image(
                         black_box(&image),
-                        size,
-                        size,
                         black_box(&transform),
                         InterpolationMethod::Lanczos3,
                     );

@@ -400,10 +400,8 @@ fn register_all_lights(
         "Using first image as reference"
     );
 
-    // Load reference image to get dimensions
+    // Load reference image
     let ref_image = AstroImage::from_file(ref_path).expect("Failed to load reference image");
-    let width = ref_image.dimensions().width;
-    let height = ref_image.dimensions().height;
 
     // Configure registration for high accuracy
     let reg_config = RegistrationConfig::builder()
@@ -469,8 +467,7 @@ fn register_all_lights(
 
                 // Warp the image to align with reference using parallel CPU
                 // (faster than GPU for large images due to upload/download overhead)
-                let warped =
-                    warp_image_to_reference(&target_image, width, height, &result.transform);
+                let warped = warp_image_to_reference(&target_image, &result.transform);
 
                 // Save registered image
                 let img: imaginarium::Image = warped.into();
@@ -505,72 +502,8 @@ fn register_all_lights(
 ///
 /// Uses parallel CPU warping with SIMD acceleration and Lanczos3 interpolation.
 /// Benchmarks show this is faster than GPU for large images due to upload/download overhead.
-fn warp_image_to_reference(
-    image: &AstroImage,
-    width: usize,
-    height: usize,
-    transform: &lumos::TransformMatrix,
-) -> AstroImage {
-    let channels = image.channels();
-    let img_width = image.width();
-    let img_height = image.height();
-
-    // Verify dimensions match
-    assert_eq!(
-        width, img_width,
-        "Width mismatch: param {} vs image {}",
-        width, img_width
-    );
-    assert_eq!(
-        height, img_height,
-        "Height mismatch: param {} vs image {}",
-        height, img_height
-    );
-
-    // Warp each channel separately using warp_to_reference
-    let pixels = image.pixels();
-    let warped_pixels = if channels == 1 {
-        lumos::warp_to_reference(
-            pixels,
-            width,
-            height,
-            transform,
-            InterpolationMethod::Lanczos3,
-        )
-    } else {
-        // Extract channels, warp each, and interleave back
-        use rayon::prelude::*;
-
-        let channel_data: Vec<Vec<f32>> = (0..channels)
-            .map(|c| pixels.iter().skip(c).step_by(channels).copied().collect())
-            .collect();
-
-        let warped_channels: Vec<Vec<f32>> = channel_data
-            .par_iter()
-            .map(|channel| {
-                lumos::warp_to_reference(
-                    channel,
-                    width,
-                    height,
-                    transform,
-                    InterpolationMethod::Lanczos3,
-                )
-            })
-            .collect();
-
-        let mut result = vec![0.0f32; pixels.len()];
-        for c in 0..channels {
-            for (i, &val) in warped_channels[c].iter().enumerate() {
-                result[i * channels + c] = val;
-            }
-        }
-        result
-    };
-
-    let dims = image.dimensions();
-    let mut result = AstroImage::from_pixels(dims.width, dims.height, dims.channels, warped_pixels);
-    result.metadata = image.metadata.clone();
-    result
+fn warp_image_to_reference(image: &AstroImage, transform: &lumos::TransformMatrix) -> AstroImage {
+    lumos::warp_to_reference_image(image, transform, InterpolationMethod::Lanczos3)
 }
 
 /// Step 5: Stack all registered lights into a final image.

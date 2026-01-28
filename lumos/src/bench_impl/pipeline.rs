@@ -221,15 +221,12 @@ fn benchmark_warping(c: &mut Criterion, images: &[AstroImage]) {
     let transform = TransformMatrix::similarity(10.5, -5.3, 0.01, 1.001);
 
     // -------------------------------------------------------------------------
-    // CPU Sequential (baseline)
+    // CPU Warping
     // -------------------------------------------------------------------------
-    group.bench_function("cpu_sequential_bilinear", |b| {
+    group.bench_function("cpu_bilinear", |b| {
         b.iter(|| {
-            let warped = warp_sequential_cpu(
+            let warped = warp_cpu(
                 black_box(&images[0]),
-                width,
-                height,
-                channels,
                 black_box(&transform),
                 InterpolationMethod::Bilinear,
             );
@@ -237,30 +234,10 @@ fn benchmark_warping(c: &mut Criterion, images: &[AstroImage]) {
         })
     });
 
-    // -------------------------------------------------------------------------
-    // CPU Parallel (SIMD + rayon)
-    // -------------------------------------------------------------------------
-    group.bench_function("cpu_parallel_bilinear", |b| {
+    group.bench_function("cpu_lanczos3", |b| {
         b.iter(|| {
-            let warped = warp_parallel_cpu(
+            let warped = warp_cpu(
                 black_box(&images[0]),
-                width,
-                height,
-                channels,
-                black_box(&transform),
-                InterpolationMethod::Bilinear,
-            );
-            black_box(warped)
-        })
-    });
-
-    group.bench_function("cpu_parallel_lanczos3", |b| {
-        b.iter(|| {
-            let warped = warp_parallel_cpu(
-                black_box(&images[0]),
-                width,
-                height,
-                channels,
                 black_box(&transform),
                 InterpolationMethod::Lanczos3,
             );
@@ -293,16 +270,13 @@ fn benchmark_warping(c: &mut Criterion, images: &[AstroImage]) {
     if images.len() >= 5 {
         let batch_size = 5;
 
-        group.bench_function(BenchmarkId::new("cpu_parallel_batch", batch_size), |b| {
+        group.bench_function(BenchmarkId::new("cpu_batch", batch_size), |b| {
             b.iter(|| {
                 let warped: Vec<_> = images[..batch_size]
                     .iter()
                     .map(|img| {
-                        warp_parallel_cpu(
+                        warp_cpu(
                             black_box(img),
-                            width,
-                            height,
-                            channels,
                             black_box(&transform),
                             InterpolationMethod::Bilinear,
                         )
@@ -335,75 +309,15 @@ fn benchmark_warping(c: &mut Criterion, images: &[AstroImage]) {
     group.finish();
 }
 
-/// Warp using sequential CPU processing (baseline).
-fn warp_sequential_cpu(
+/// Warp using CPU (parallel internally via warp_to_reference_image).
+fn warp_cpu(
     image: &AstroImage,
-    width: usize,
-    height: usize,
-    channels: usize,
     transform: &TransformMatrix,
     method: InterpolationMethod,
 ) -> AstroImage {
-    use crate::registration::warp_to_reference;
+    use crate::registration::warp_to_reference_image;
 
-    let mut warped_pixels = vec![0.0f32; width * height * channels];
-
-    for c in 0..channels {
-        let channel: Vec<f32> = image
-            .pixels()
-            .iter()
-            .skip(c)
-            .step_by(channels)
-            .copied()
-            .collect();
-
-        let warped_channel = warp_to_reference(&channel, width, height, transform, method);
-
-        for (i, &val) in warped_channel.iter().enumerate() {
-            warped_pixels[i * channels + c] = val;
-        }
-    }
-
-    AstroImage::from_pixels(width, height, channels, warped_pixels)
-}
-
-/// Warp using parallel CPU processing (SIMD + rayon).
-/// Processes each channel in parallel using warp_to_reference.
-fn warp_parallel_cpu(
-    image: &AstroImage,
-    width: usize,
-    height: usize,
-    channels: usize,
-    transform: &TransformMatrix,
-    method: InterpolationMethod,
-) -> AstroImage {
-    use crate::registration::warp_to_reference;
-    use rayon::prelude::*;
-
-    // Extract and warp each channel in parallel
-    let warped_channels: Vec<Vec<f32>> = (0..channels)
-        .into_par_iter()
-        .map(|c| {
-            let channel: Vec<f32> = image
-                .pixels()
-                .iter()
-                .skip(c)
-                .step_by(channels)
-                .copied()
-                .collect();
-            warp_to_reference(&channel, width, height, transform, method)
-        })
-        .collect();
-
-    // Interleave channels back together
-    let mut warped_pixels = vec![0.0f32; width * height * channels];
-    for (c, channel_data) in warped_channels.iter().enumerate() {
-        for (i, &val) in channel_data.iter().enumerate() {
-            warped_pixels[i * channels + c] = val;
-        }
-    }
-
-    AstroImage::from_pixels(width, height, channels, warped_pixels)
+    warp_to_reference_image(image, transform, method)
 }
 
 /// Warp using GPU compute shaders.
@@ -415,35 +329,16 @@ fn warp_gpu(
     channels: usize,
     transform: &TransformMatrix,
 ) -> AstroImage {
-    use crate::registration::warp_to_reference;
+    use crate::registration::warp_to_reference_image;
 
     let warped_pixels = if channels == 3 {
         gpu_warper.warp_rgb(image.pixels(), width, height, transform)
     } else if channels == 1 {
         gpu_warper.warp_channel(image.pixels(), width, height, transform)
     } else {
-        // Fallback for other channel counts: warp each channel separately
-        let mut result = vec![0.0f32; width * height * channels];
-        for c in 0..channels {
-            let channel: Vec<f32> = image
-                .pixels()
-                .iter()
-                .skip(c)
-                .step_by(channels)
-                .copied()
-                .collect();
-            let warped_channel = warp_to_reference(
-                &channel,
-                width,
-                height,
-                transform,
-                InterpolationMethod::Bilinear,
-            );
-            for (i, &val) in warped_channel.iter().enumerate() {
-                result[i * channels + c] = val;
-            }
-        }
-        result
+        // Fallback for other channel counts: use CPU warping
+        let warped = warp_to_reference_image(image, transform, InterpolationMethod::Bilinear);
+        return warped;
     };
 
     AstroImage::from_pixels(width, height, channels, warped_pixels)
@@ -562,14 +457,7 @@ fn run_full_pipeline_cpu(
 
     for (img, target_stars) in images.iter().zip(stars.iter()).skip(1) {
         if let Ok(result) = registrator.register_stars(ref_stars, target_stars) {
-            let warped = warp_parallel_cpu(
-                img,
-                width,
-                height,
-                channels,
-                &result.transform,
-                InterpolationMethod::Bilinear,
-            );
+            let warped = warp_cpu(img, &result.transform, InterpolationMethod::Bilinear);
             aligned_images.push(warped);
         }
     }

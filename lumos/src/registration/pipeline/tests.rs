@@ -1,4 +1,5 @@
 use super::*;
+use crate::AstroImage;
 use std::f64::consts::PI;
 
 fn generate_star_grid(
@@ -131,65 +132,61 @@ fn test_registrator_config() {
 }
 
 #[test]
-fn test_warp_to_reference() {
+fn test_warp_to_reference_image() {
     // Create a simple test image with a bright pixel offset from center
     let width = 64;
     let height = 64;
-    let mut target_image = vec![0.0f32; width * height];
+    let mut target_pixels = vec![0.0f32; width * height];
 
     // Place bright pixel at (37, 35) in target image
     let target_x = 37;
     let target_y = 35;
-    target_image[target_y * width + target_x] = 1.0;
+    target_pixels[target_y * width + target_x] = 1.0;
+
+    let target_image = AstroImage::from_pixels(width, height, 1, target_pixels);
 
     // Transform maps reference -> target: ref(32,32) -> target(37,35)
     // So translation is (5, 3)
     let transform = TransformMatrix::translation(5.0, 3.0);
 
-    // warp_to_reference should align target to reference frame
+    // warp_to_reference_image should align target to reference frame
     // The pixel at target(37,35) should appear at reference(32,32) after warping
-    let warped = warp_to_reference(
-        &target_image,
-        width,
-        height,
-        &transform,
-        InterpolationMethod::Bilinear,
-    );
+    let warped = warp_to_reference_image(&target_image, &transform, InterpolationMethod::Bilinear);
 
-    assert_eq!(warped.len(), width * height);
+    assert_eq!(warped.pixels().len(), width * height);
 
     // The bright pixel should now be at reference position (32, 32)
     let ref_x = 32;
     let ref_y = 32;
     assert!(
-        warped[ref_y * width + ref_x] > 0.5,
+        warped.pixels()[ref_y * width + ref_x] > 0.5,
         "Expected bright pixel at reference position ({}, {}), got {}",
         ref_x,
         ref_y,
-        warped[ref_y * width + ref_x]
+        warped.pixels()[ref_y * width + ref_x]
     );
 
     // Original target position should now be dark (or near-dark due to interpolation)
     assert!(
-        warped[target_y * width + target_x] < 0.5,
+        warped.pixels()[target_y * width + target_x] < 0.5,
         "Expected dark at original target position ({}, {}), got {}",
         target_x,
         target_y,
-        warped[target_y * width + target_x]
+        warped.pixels()[target_y * width + target_x]
     );
 }
 
-/// Test that warp_to_reference correctly aligns a warped image back to reference
+/// Test that warp_to_reference_image correctly aligns a warped image back to reference
 #[test]
-fn test_warp_to_reference_roundtrip() {
+fn test_warp_to_reference_image_roundtrip() {
     let width = 128;
     let height = 128;
 
     // Create reference image with a few bright spots
-    let mut ref_image = vec![0.0f32; width * height];
+    let mut ref_pixels = vec![0.0f32; width * height];
     let ref_points = [(40, 40), (80, 40), (60, 80), (40, 80), (80, 80)];
     for &(x, y) in &ref_points {
-        ref_image[y * width + x] = 1.0;
+        ref_pixels[y * width + x] = 1.0;
     }
 
     // Define transform: reference -> target
@@ -197,8 +194,8 @@ fn test_warp_to_reference_roundtrip() {
 
     // Create target image by warping reference with the transform
     // (simulates what the camera would see if shifted/rotated)
-    let target_image = crate::registration::interpolation::warp_image(
-        &ref_image,
+    let target_pixels = crate::registration::interpolation::warp_image(
+        &ref_pixels,
         width,
         height,
         width,
@@ -212,14 +209,10 @@ fn test_warp_to_reference_roundtrip() {
         },
     );
 
-    // Now use warp_to_reference to align target back to reference frame
-    let aligned = warp_to_reference(
-        &target_image,
-        width,
-        height,
-        &transform,
-        InterpolationMethod::Lanczos3,
-    );
+    let target_image = AstroImage::from_pixels(width, height, 1, target_pixels);
+
+    // Now use warp_to_reference_image to align target back to reference frame
+    let aligned = warp_to_reference_image(&target_image, &transform, InterpolationMethod::Lanczos3);
 
     // Compare aligned image to reference (excluding borders affected by warping)
     let margin = 20;
@@ -229,8 +222,8 @@ fn test_warp_to_reference_roundtrip() {
 
     for y in margin..height - margin {
         for x in margin..width - margin {
-            let ref_val = ref_image[y * width + x];
-            let aligned_val = aligned[y * width + x];
+            let ref_val = ref_pixels[y * width + x];
+            let aligned_val = aligned.pixels()[y * width + x];
             let diff = (ref_val - aligned_val).abs();
             max_diff = max_diff.max(diff);
             sum_sq_diff += diff * diff;
@@ -256,7 +249,7 @@ fn test_warp_to_reference_roundtrip() {
 
 /// End-to-end test: detect transform from stars, warp image, verify alignment
 #[test]
-fn test_warp_to_reference_end_to_end() {
+fn test_warp_to_reference_image_end_to_end() {
     let width = 256;
     let height = 256;
 
@@ -264,24 +257,23 @@ fn test_warp_to_reference_end_to_end() {
     let ref_stars = generate_star_grid(6, 6, 35.0, (30.0, 30.0));
 
     // Create reference image with Gaussian stars
-    let ref_image = generate_synthetic_star_image(width, height, &ref_stars, 1.0, 4.0);
+    let ref_pixels = generate_synthetic_star_image(width, height, &ref_stars, 1.0, 4.0);
 
     // Apply known transform to star positions
     let known_transform = TransformMatrix::similarity(12.0, -8.0, 0.05, 1.01);
     let target_stars = transform_stars(&ref_stars, &known_transform);
 
     // Create target image with transformed star positions
-    let target_image = generate_synthetic_star_image(width, height, &target_stars, 1.0, 4.0);
+    let target_pixels = generate_synthetic_star_image(width, height, &target_stars, 1.0, 4.0);
+    let target_image = AstroImage::from_pixels(width, height, 1, target_pixels);
 
     // Register: find transform from reference stars to target stars
     let result = register_star_positions(&ref_stars, &target_stars, TransformType::Similarity)
         .expect("Registration should succeed");
 
     // Warp target image to align with reference
-    let aligned = warp_to_reference(
+    let aligned = warp_to_reference_image(
         &target_image,
-        width,
-        height,
         &result.transform,
         InterpolationMethod::Lanczos3,
     );
@@ -298,8 +290,8 @@ fn test_warp_to_reference_end_to_end() {
 
     for y in margin..height - margin {
         for x in margin..width - margin {
-            let r = ref_image[y * width + x];
-            let a = aligned[y * width + x];
+            let r = ref_pixels[y * width + x];
+            let a = aligned.pixels()[y * width + x];
 
             ref_sum += r;
             aligned_sum += a;
@@ -456,10 +448,9 @@ fn test_pipeline_ground_truth_synthetic() {
     );
 
     // Warp target to reference and verify alignment
-    let warped = warp_to_reference(
-        &target_image,
-        width,
-        height,
+    let target_astro = AstroImage::from_pixels(width, height, 1, target_image);
+    let warped = warp_to_reference_image(
+        &target_astro,
         &result.transform,
         InterpolationMethod::Lanczos3,
     );
@@ -471,7 +462,7 @@ fn test_pipeline_ground_truth_synthetic() {
     for y in 20..height - 20 {
         for x in 20..width - 20 {
             let ref_val = ref_image[y * width + x];
-            let warped_val = warped[y * width + x];
+            let warped_val = warped.pixels()[y * width + x];
 
             // Only compare significant pixels
             if ref_val > 0.1 {

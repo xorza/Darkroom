@@ -43,7 +43,7 @@
 //! println!("Matched {} stars", result.num_inliers);
 //!
 //! // Apply transformation to align target image
-//! let aligned = warp_to_reference(&target_image, width, height, &result.transform, InterpolationMethod::Lanczos3);
+//! let aligned = warp_to_reference_image(&target_image, &result.transform, InterpolationMethod::Lanczos3);
 //! ```
 //!
 //! # Algorithm Overview
@@ -97,7 +97,7 @@ pub mod bench {
 // High-level pipeline API (primary entry point)
 pub use pipeline::{
     MultiScaleConfig, MultiScaleRegistrator, Registrator, quick_register, quick_register_stars,
-    register_star_positions, warp_to_reference, warp_to_reference_image,
+    register_star_positions, warp_to_reference_image,
 };
 
 // Core types needed by users
