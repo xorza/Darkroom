@@ -616,12 +616,8 @@ impl From<AstroImage> for Image {
             PixelData::L(data) => (ColorFormat::L_F32, data),
             PixelData::Rgb([r, g, b]) => {
                 let pixel_count = width * height;
-                let mut interleaved = Vec::with_capacity(pixel_count * 3);
-                for i in 0..pixel_count {
-                    interleaved.push(r[i]);
-                    interleaved.push(g[i]);
-                    interleaved.push(b[i]);
-                }
+                let mut interleaved = vec![0.0f32; pixel_count * 3];
+                interleave_rgb(&r, &g, &b, &mut interleaved);
                 (ColorFormat::RGB_F32, interleaved)
             }
         };
