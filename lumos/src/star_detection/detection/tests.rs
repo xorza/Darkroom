@@ -652,6 +652,217 @@ fn test_create_threshold_mask_high_noise_region() {
 }
 
 // =============================================================================
+// SIMD vs Scalar Consistency Tests
+// =============================================================================
+
+/// Helper to create threshold mask using scalar implementation
+fn create_threshold_mask_scalar(
+    pixels: &[f32],
+    background: &BackgroundMap,
+    sigma: f32,
+) -> Vec<bool> {
+    let mut mask = Vec::with_capacity(pixels.len());
+    scalar::create_threshold_mask(pixels, background, sigma, &mut mask);
+    mask
+}
+
+/// Helper to create filtered threshold mask using scalar implementation
+fn create_threshold_mask_filtered_scalar(
+    filtered: &[f32],
+    background: &BackgroundMap,
+    sigma: f32,
+) -> Vec<bool> {
+    let mut mask = Vec::with_capacity(filtered.len());
+    scalar::create_threshold_mask_filtered(filtered, background, sigma, &mut mask);
+    mask
+}
+
+/// Helper to create filtered threshold mask for tests (uses dispatch)
+fn create_threshold_mask_filtered_test(
+    filtered: &[f32],
+    background: &BackgroundMap,
+    sigma: f32,
+) -> Vec<bool> {
+    let mut mask = Vec::with_capacity(filtered.len());
+    create_threshold_mask_filtered(filtered, background, sigma, &mut mask);
+    mask
+}
+
+#[test]
+fn test_simd_vs_scalar_consistency_small() {
+    // Small input that fits in one SIMD vector
+    let pixels = vec![0.5, 1.5, 2.0, 0.8];
+    let background = BackgroundMap {
+        background: vec![1.0, 1.0, 1.0, 1.0],
+        noise: vec![0.1, 0.1, 0.1, 0.1],
+        width: 2,
+        height: 2,
+    };
+
+    let dispatch_mask = create_threshold_mask_test(&pixels, &background, 3.0);
+    let scalar_mask = create_threshold_mask_scalar(&pixels, &background, 3.0);
+
+    assert_eq!(
+        dispatch_mask, scalar_mask,
+        "SIMD and scalar should match for small input"
+    );
+}
+
+#[test]
+fn test_simd_vs_scalar_consistency_unaligned() {
+    // Input sizes that don't align with SIMD width (4) or unroll factor (16)
+    for size in [1, 2, 3, 5, 7, 13, 15, 17, 19, 31, 33] {
+        let pixels: Vec<f32> = (0..size).map(|i| (i as f32) * 0.1).collect();
+        let background = BackgroundMap {
+            background: vec![0.5; size],
+            noise: vec![0.1; size],
+            width: size,
+            height: 1,
+        };
+
+        let dispatch_mask = create_threshold_mask_test(&pixels, &background, 3.0);
+        let scalar_mask = create_threshold_mask_scalar(&pixels, &background, 3.0);
+
+        assert_eq!(
+            dispatch_mask, scalar_mask,
+            "SIMD and scalar should match for size {}",
+            size
+        );
+    }
+}
+
+#[test]
+fn test_simd_vs_scalar_consistency_large() {
+    // Large input that exercises unrolled loop
+    let size = 1024;
+    let mut pixels = vec![0.0f32; size];
+    let mut bg = vec![1.0f32; size];
+    let mut noise = vec![0.1f32; size];
+
+    // Create varied data
+    for i in 0..size {
+        pixels[i] = ((i * 17) % 100) as f32 / 50.0; // 0.0 to 2.0
+        bg[i] = 1.0 + ((i * 7) % 10) as f32 / 100.0; // 1.0 to 1.1
+        noise[i] = 0.05 + ((i * 3) % 10) as f32 / 100.0; // 0.05 to 0.15
+    }
+
+    let background = BackgroundMap {
+        background: bg,
+        noise,
+        width: size,
+        height: 1,
+    };
+
+    let dispatch_mask = create_threshold_mask_test(&pixels, &background, 3.0);
+    let scalar_mask = create_threshold_mask_scalar(&pixels, &background, 3.0);
+
+    assert_eq!(
+        dispatch_mask, scalar_mask,
+        "SIMD and scalar should match for large input"
+    );
+}
+
+#[test]
+fn test_simd_vs_scalar_consistency_filtered() {
+    // Test filtered variant consistency
+    let size = 100;
+    let filtered: Vec<f32> = (0..size).map(|i| (i as f32) * 0.05).collect();
+    let background = BackgroundMap {
+        background: vec![0.0; size], // Not used for filtered
+        noise: vec![0.1; size],
+        width: size,
+        height: 1,
+    };
+
+    let dispatch_mask = create_threshold_mask_filtered_test(&filtered, &background, 3.0);
+    let scalar_mask = create_threshold_mask_filtered_scalar(&filtered, &background, 3.0);
+
+    assert_eq!(
+        dispatch_mask, scalar_mask,
+        "Filtered: SIMD and scalar should match"
+    );
+}
+
+#[test]
+fn test_simd_remainder_handling() {
+    // Test that remainder handling works correctly for all possible remainder sizes
+    for remainder in 0..16 {
+        let size = 64 + remainder; // 64 is cleanly divisible by 16
+        let pixels: Vec<f32> = (0..size)
+            .map(|i| if i % 2 == 0 { 2.0 } else { 0.5 })
+            .collect();
+        let background = BackgroundMap {
+            background: vec![1.0; size],
+            noise: vec![0.1; size],
+            width: size,
+            height: 1,
+        };
+
+        let dispatch_mask = create_threshold_mask_test(&pixels, &background, 3.0);
+        let scalar_mask = create_threshold_mask_scalar(&pixels, &background, 3.0);
+
+        assert_eq!(
+            dispatch_mask, scalar_mask,
+            "Remainder {} should be handled correctly",
+            remainder
+        );
+
+        // Verify correctness: even indices should be true (2.0 > 1.3), odd should be false (0.5 < 1.3)
+        for (i, &val) in dispatch_mask.iter().enumerate() {
+            let expected = i % 2 == 0;
+            assert_eq!(val, expected, "Index {} should be {}", i, expected);
+        }
+    }
+}
+
+#[test]
+fn test_filtered_threshold_mask_basic() {
+    // filtered image is already background-subtracted, so threshold = sigma * noise
+    let filtered = vec![0.2, 0.4, 0.6, 0.8];
+    let background = BackgroundMap {
+        background: vec![0.0; 4], // Not used
+        noise: vec![0.1, 0.1, 0.1, 0.1],
+        width: 2,
+        height: 2,
+    };
+
+    // threshold = 3.0 * 0.1 = 0.3
+    // 0.2 <= 0.3 -> false
+    // 0.4 > 0.3 -> true
+    // 0.6 > 0.3 -> true
+    // 0.8 > 0.3 -> true
+    let mask = create_threshold_mask_filtered_test(&filtered, &background, 3.0);
+
+    assert!(!mask[0]);
+    assert!(mask[1]);
+    assert!(mask[2]);
+    assert!(mask[3]);
+}
+
+#[test]
+fn test_filtered_threshold_mask_variable_noise() {
+    let filtered = vec![0.5, 0.5, 0.5, 0.5];
+    let background = BackgroundMap {
+        background: vec![0.0; 4],
+        noise: vec![0.1, 0.2, 0.3, 0.05],
+        width: 2,
+        height: 2,
+    };
+
+    // thresholds: 0.3, 0.6, 0.9, 0.15
+    // 0.5 > 0.3 -> true
+    // 0.5 <= 0.6 -> false
+    // 0.5 <= 0.9 -> false
+    // 0.5 > 0.15 -> true
+    let mask = create_threshold_mask_filtered_test(&filtered, &background, 3.0);
+
+    assert!(mask[0]);
+    assert!(!mask[1]);
+    assert!(!mask[2]);
+    assert!(mask[3]);
+}
+
+// =============================================================================
 // Additional Dilate Mask Tests
 // =============================================================================
 
