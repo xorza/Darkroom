@@ -99,7 +99,13 @@ pub fn detect_stars(
     let detection_config = DetectionConfig::from(config);
 
     // Create binary mask of above-threshold pixels
-    let mut mask = create_threshold_mask(pixels, background, detection_config.sigma_threshold);
+    let mut mask = Vec::with_capacity(pixels.len());
+    create_threshold_mask(
+        pixels,
+        background,
+        detection_config.sigma_threshold,
+        &mut mask,
+    );
 
     // Dilate mask to connect nearby pixels that may be separated due to
     // Bayer pattern artifacts or noise. Use radius 1 (3x3 structuring element)
@@ -137,12 +143,15 @@ pub fn create_threshold_mask(
     pixels: &[f32],
     background: &BackgroundMap,
     sigma_threshold: f32,
-) -> Vec<bool> {
+    mask: &mut Vec<bool>,
+) {
     if cpu_features::has_sse4_1() {
         // SAFETY: We've checked that SSE4.1 is available.
-        unsafe { simd::sse::create_threshold_mask_sse(pixels, background, sigma_threshold) }
+        unsafe {
+            simd::sse::create_threshold_mask_sse(pixels, background, sigma_threshold, mask);
+        }
     } else {
-        scalar::create_threshold_mask(pixels, background, sigma_threshold)
+        scalar::create_threshold_mask(pixels, background, sigma_threshold, mask);
     }
 }
 
@@ -152,8 +161,9 @@ pub fn create_threshold_mask(
     pixels: &[f32],
     background: &BackgroundMap,
     sigma_threshold: f32,
-) -> Vec<bool> {
-    scalar::create_threshold_mask(pixels, background, sigma_threshold)
+    mask: &mut Vec<bool>,
+) {
+    scalar::create_threshold_mask(pixels, background, sigma_threshold, mask)
 }
 
 /// Connected component labeling using union-find with parallel second pass.
@@ -318,8 +328,13 @@ pub fn detect_stars_filtered(
 
     // Create binary mask from the filtered image
     // The threshold is based on noise in the filtered image
-    let mut mask =
-        create_threshold_mask_filtered(filtered, background, detection_config.sigma_threshold);
+    let mut mask = Vec::with_capacity(filtered.len());
+    create_threshold_mask_filtered(
+        filtered,
+        background,
+        detection_config.sigma_threshold,
+        &mut mask,
+    );
 
     // Dilate mask with radius 1 to connect fragmented detections while
     // minimizing merging of close stars. Matched filtering already provides
@@ -351,29 +366,42 @@ pub fn detect_stars_filtered(
     candidates
 }
 
-/// Create binary mask from a filtered (convolved) image.
+/// Create binary mask from a filtered (convolved) image, with SIMD dispatch.
 ///
 /// For matched-filtered images, the noise is reduced by a factor related to
 /// the kernel size. We use a simpler threshold based on the filtered values
 /// being positive and above a noise-scaled threshold.
-fn create_threshold_mask_filtered(
+#[cfg(target_arch = "x86_64")]
+pub fn create_threshold_mask_filtered(
     filtered: &[f32],
     background: &BackgroundMap,
     sigma_threshold: f32,
-) -> Vec<bool> {
-    // For a matched filter with Gaussian kernel of width σ_k, the noise
-    // in the convolved image is reduced by approximately 1/sqrt(2πσ_k²)
-    // We use the background noise estimate scaled appropriately.
-    filtered
-        .iter()
-        .zip(background.noise.iter())
-        .map(|(&px, &noise)| {
-            // The filtered image is already background-subtracted
-            // Threshold is sigma_threshold times the (reduced) noise
-            let threshold = sigma_threshold * noise.max(1e-6);
-            px > threshold
-        })
-        .collect()
+    mask: &mut Vec<bool>,
+) {
+    if cpu_features::has_sse4_1() {
+        // SAFETY: We've checked that SSE4.1 is available.
+        unsafe {
+            simd::sse::create_threshold_mask_filtered_sse(
+                filtered,
+                background,
+                sigma_threshold,
+                mask,
+            );
+        }
+    } else {
+        scalar::create_threshold_mask_filtered(filtered, background, sigma_threshold, mask);
+    }
+}
+
+/// Create binary mask from a filtered (convolved) image (scalar fallback for non-x86_64).
+#[cfg(not(target_arch = "x86_64"))]
+pub fn create_threshold_mask_filtered(
+    filtered: &[f32],
+    background: &BackgroundMap,
+    sigma_threshold: f32,
+    mask: &mut Vec<bool>,
+) {
+    scalar::create_threshold_mask_filtered(filtered, background, sigma_threshold, mask);
 }
 
 impl From<&StarDetectionConfig> for DeblendConfig {

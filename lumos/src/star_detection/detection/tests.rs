@@ -483,6 +483,13 @@ fn test_dilate_mask_merges_nearby_pixels() {
 // Create Threshold Mask Tests
 // =============================================================================
 
+/// Helper to create threshold mask for tests
+fn create_threshold_mask_test(pixels: &[f32], background: &BackgroundMap, sigma: f32) -> Vec<bool> {
+    let mut mask = Vec::with_capacity(pixels.len());
+    create_threshold_mask(pixels, background, sigma, &mut mask);
+    mask
+}
+
 #[test]
 fn test_create_threshold_mask_all_below() {
     let pixels = vec![0.5, 0.5, 0.5, 0.5];
@@ -492,8 +499,7 @@ fn test_create_threshold_mask_all_below() {
         width: 2,
         height: 2,
     };
-
-    let mask = create_threshold_mask(&pixels, &background, 3.0);
+    let mask = create_threshold_mask_test(&pixels, &background, 3.0);
 
     assert!(mask.iter().all(|&x| !x));
 }
@@ -510,7 +516,7 @@ fn test_create_threshold_mask_all_above() {
 
     // threshold = 1.0 + 3.0 * 0.1 = 1.3
     // pixels at 2.0 > 1.3, so all true
-    let mask = create_threshold_mask(&pixels, &background, 3.0);
+    let mask = create_threshold_mask_test(&pixels, &background, 3.0);
 
     assert!(mask.iter().all(|&x| x));
 }
@@ -530,7 +536,7 @@ fn test_create_threshold_mask_mixed() {
     // pixel 1: 2.0 > 1.3 -> true
     // pixel 2: 0.5 <= 1.3 -> false
     // pixel 3: 1.5 > 1.3 -> true
-    let mask = create_threshold_mask(&pixels, &background, 3.0);
+    let mask = create_threshold_mask_test(&pixels, &background, 3.0);
 
     assert!(!mask[0]);
     assert!(mask[1]);
@@ -553,7 +559,7 @@ fn test_create_threshold_mask_variable_background() {
     // pixel 1: 1.5 <= 1.5 -> false (not strictly greater)
     // pixel 2: 1.5 <= 1.7 -> false
     // pixel 3: 1.5 > 1.1 -> true
-    let mask = create_threshold_mask(&pixels, &background, 3.0);
+    let mask = create_threshold_mask_test(&pixels, &background, 3.0);
 
     assert!(mask[0]);
     assert!(!mask[1]);
@@ -574,7 +580,7 @@ fn test_create_threshold_mask_zero_noise_uses_epsilon() {
     // With noise.max(1e-6), threshold ≈ 1.0 + 3.0 * 1e-6 ≈ 1.000003
     // pixel 0: 1.1 > 1.000003 -> true
     // pixel 1: 0.9 <= 1.000003 -> false
-    let mask = create_threshold_mask(&pixels, &background, 3.0);
+    let mask = create_threshold_mask_test(&pixels, &background, 3.0);
 
     assert!(mask[0]);
     assert!(!mask[1]);
@@ -594,7 +600,7 @@ fn test_create_threshold_mask_exact_threshold_is_false() {
     // threshold = 1.0 + 3.0 * 0.1 = 1.3
     // pixel 0: 1.3 is NOT > 1.3 -> false
     // pixel 1: 1.30001 > 1.3 -> true
-    let mask = create_threshold_mask(&pixels, &background, 3.0);
+    let mask = create_threshold_mask_test(&pixels, &background, 3.0);
 
     assert!(!mask[0], "Exact threshold value should be false");
     assert!(mask[1], "Just above threshold should be true");
@@ -611,15 +617,15 @@ fn test_create_threshold_mask_different_sigma_values() {
     };
 
     // sigma=3: threshold=1.3, 1.5 > 1.3 -> all true
-    let mask_sigma3 = create_threshold_mask(&pixels, &background, 3.0);
+    let mask_sigma3 = create_threshold_mask_test(&pixels, &background, 3.0);
     assert!(mask_sigma3.iter().all(|&x| x));
 
     // sigma=5: threshold=1.5, 1.5 is NOT > 1.5 -> all false
-    let mask_sigma5 = create_threshold_mask(&pixels, &background, 5.0);
+    let mask_sigma5 = create_threshold_mask_test(&pixels, &background, 5.0);
     assert!(mask_sigma5.iter().all(|&x| !x));
 
     // sigma=4: threshold=1.4, 1.5 > 1.4 -> all true
-    let mask_sigma4 = create_threshold_mask(&pixels, &background, 4.0);
+    let mask_sigma4 = create_threshold_mask_test(&pixels, &background, 4.0);
     assert!(mask_sigma4.iter().all(|&x| x));
 }
 
@@ -636,7 +642,7 @@ fn test_create_threshold_mask_high_noise_region() {
 
     // pixel 0: threshold = 1.0 + 3.0*0.1 = 1.3, 2.0 > 1.3 -> true
     // pixel 1: threshold = 1.0 + 3.0*0.5 = 2.5, 2.0 NOT > 2.5 -> false
-    let mask = create_threshold_mask(&pixels, &background, 3.0);
+    let mask = create_threshold_mask_test(&pixels, &background, 3.0);
 
     assert!(mask[0]);
     assert!(

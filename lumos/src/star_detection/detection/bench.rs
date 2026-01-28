@@ -1,9 +1,11 @@
 //! Benchmark module for star detection algorithms.
 //! Run with: cargo bench --package lumos --features bench detection
 
+#[cfg(target_arch = "x86_64")]
+use super::simd;
 use super::{
-    connected_components, create_threshold_mask, detect_stars, detect_stars_filtered,
-    extract_candidates,
+    connected_components, create_threshold_mask, create_threshold_mask_filtered, detect_stars,
+    detect_stars_filtered, extract_candidates, scalar,
 };
 use crate::star_detection::StarDetectionConfig;
 use crate::star_detection::background::BackgroundMap;
@@ -63,8 +65,18 @@ fn create_background_map(width: usize, height: usize) -> BackgroundMap {
     }
 }
 
+/// Helper to create threshold mask for benchmarks.
+fn make_threshold_mask(pixels: &[f32], background: &BackgroundMap, sigma: f32) -> Vec<bool> {
+    let mut mask = Vec::with_capacity(pixels.len());
+    create_threshold_mask(pixels, background, sigma, &mut mask);
+    mask
+}
+
 /// Register detection benchmarks with Criterion.
 pub fn benchmarks(c: &mut Criterion) {
+    // Scalar vs SIMD threshold mask benchmarks
+    scalar_vs_simd_threshold_benchmarks(c);
+
     // Threshold mask creation benchmarks
     let mut mask_group = c.benchmark_group("threshold_mask");
     mask_group.sample_size(30);
@@ -78,11 +90,14 @@ pub fn benchmarks(c: &mut Criterion) {
 
         mask_group.bench_function(BenchmarkId::new("create_threshold_mask", &size_name), |b| {
             b.iter(|| {
-                black_box(create_threshold_mask(
+                let mut mask = Vec::with_capacity(pixels.len());
+                create_threshold_mask(
                     black_box(&pixels),
                     black_box(&background),
                     black_box(3.0),
-                ))
+                    &mut mask,
+                );
+                black_box(mask)
             })
         });
     }
@@ -96,7 +111,7 @@ pub fn benchmarks(c: &mut Criterion) {
     for &(width, height) in &[(512, 512), (1024, 1024), (2048, 2048)] {
         let pixels = generate_test_image(width, height, 100);
         let background = create_background_map(width, height);
-        let mask = create_threshold_mask(&pixels, &background, 3.0);
+        let mask = make_threshold_mask(&pixels, &background, 3.0);
         let size_name = format!("{}x{}", width, height);
 
         dilate_group.throughput(Throughput::Elements((width * height) as u64));
@@ -134,7 +149,7 @@ pub fn benchmarks(c: &mut Criterion) {
     ] {
         let pixels = generate_test_image(width, height, num_stars);
         let background = create_background_map(width, height);
-        let mut mask = create_threshold_mask(&pixels, &background, 3.0);
+        let mut mask = make_threshold_mask(&pixels, &background, 3.0);
         let mut dilated = vec![false; mask.len()];
         dilate_mask(&mask, width, height, 1, &mut dilated);
         std::mem::swap(&mut mask, &mut dilated);
@@ -162,7 +177,7 @@ pub fn benchmarks(c: &mut Criterion) {
     for &(width, height, num_stars) in &[(512, 512, 50), (1024, 1024, 200)] {
         let pixels = generate_test_image(width, height, num_stars);
         let background = create_background_map(width, height);
-        let mut mask = create_threshold_mask(&pixels, &background, 3.0);
+        let mut mask = make_threshold_mask(&pixels, &background, 3.0);
         let mut dilated = vec![false; mask.len()];
         dilate_mask(&mask, width, height, 1, &mut dilated);
         std::mem::swap(&mut mask, &mut dilated);
@@ -307,10 +322,12 @@ fn gpu_threshold_benchmarks(c: &mut Criterion) {
         let mut dilated = vec![false; width * height];
         group.bench_function(BenchmarkId::new("cpu", &size_name), |b| {
             b.iter(|| {
-                let mask = create_threshold_mask(
+                let mut mask = Vec::with_capacity(pixels.len());
+                create_threshold_mask(
                     black_box(&pixels),
                     black_box(&background),
                     black_box(3.0),
+                    &mut mask,
                 );
                 dilate_mask(&mask, width, height, 1, black_box(&mut dilated))
             })
@@ -379,4 +396,138 @@ fn gpu_detect_stars_benchmarks(c: &mut Criterion) {
     }
 
     group.finish();
+}
+
+/// Scalar vs SIMD threshold mask benchmarks.
+#[cfg(target_arch = "x86_64")]
+fn scalar_vs_simd_threshold_benchmarks(c: &mut Criterion) {
+    use crate::common::cpu_features;
+
+    if !cpu_features::has_sse4_1() {
+        eprintln!("Skipping scalar vs SIMD benchmarks: SSE4.1 not available");
+        return;
+    }
+
+    let mut group = c.benchmark_group("scalar_vs_simd_threshold");
+    group.sample_size(50);
+
+    for &(width, height) in &[(512, 512), (1024, 1024), (2048, 2048), (4096, 4096)] {
+        let pixels = generate_test_image(width, height, 100);
+        let background = create_background_map(width, height);
+        let size_name = format!("{}x{}", width, height);
+
+        group.throughput(Throughput::Elements((width * height) as u64));
+
+        // Scalar version - standard threshold mask
+        group.bench_function(BenchmarkId::new("scalar", &size_name), |b| {
+            b.iter(|| {
+                let mut mask = Vec::with_capacity(pixels.len());
+                scalar::create_threshold_mask(
+                    black_box(&pixels),
+                    black_box(&background),
+                    black_box(3.0),
+                    &mut mask,
+                );
+                black_box(mask)
+            })
+        });
+
+        // SIMD version - standard threshold mask
+        group.bench_function(BenchmarkId::new("simd_sse", &size_name), |b| {
+            b.iter(|| {
+                let mut mask = Vec::with_capacity(pixels.len());
+                // SAFETY: We've checked that SSE4.1 is available above.
+                unsafe {
+                    simd::sse::create_threshold_mask_sse(
+                        black_box(&pixels),
+                        black_box(&background),
+                        black_box(3.0),
+                        &mut mask,
+                    );
+                }
+                black_box(mask)
+            })
+        });
+
+        // Dispatch version (auto-selects SIMD when available)
+        group.bench_function(BenchmarkId::new("dispatch", &size_name), |b| {
+            b.iter(|| {
+                let mut mask = Vec::with_capacity(pixels.len());
+                create_threshold_mask(
+                    black_box(&pixels),
+                    black_box(&background),
+                    black_box(3.0),
+                    &mut mask,
+                );
+                black_box(mask)
+            })
+        });
+    }
+
+    group.finish();
+
+    // Filtered threshold mask benchmarks
+    let mut filtered_group = c.benchmark_group("scalar_vs_simd_threshold_filtered");
+    filtered_group.sample_size(50);
+
+    for &(width, height) in &[(512, 512), (1024, 1024), (2048, 2048), (4096, 4096)] {
+        let filtered = generate_test_image(width, height, 100);
+        let background = create_background_map(width, height);
+        let size_name = format!("{}x{}", width, height);
+
+        filtered_group.throughput(Throughput::Elements((width * height) as u64));
+
+        // Scalar version - filtered threshold mask
+        filtered_group.bench_function(BenchmarkId::new("scalar", &size_name), |b| {
+            b.iter(|| {
+                let mut mask = Vec::with_capacity(filtered.len());
+                scalar::create_threshold_mask_filtered(
+                    black_box(&filtered),
+                    black_box(&background),
+                    black_box(3.0),
+                    &mut mask,
+                );
+                black_box(mask)
+            })
+        });
+
+        // SIMD version - filtered threshold mask
+        filtered_group.bench_function(BenchmarkId::new("simd_sse", &size_name), |b| {
+            b.iter(|| {
+                let mut mask = Vec::with_capacity(filtered.len());
+                // SAFETY: We've checked that SSE4.1 is available above.
+                unsafe {
+                    simd::sse::create_threshold_mask_filtered_sse(
+                        black_box(&filtered),
+                        black_box(&background),
+                        black_box(3.0),
+                        &mut mask,
+                    );
+                }
+                black_box(mask)
+            })
+        });
+
+        // Dispatch version (auto-selects SIMD when available)
+        filtered_group.bench_function(BenchmarkId::new("dispatch", &size_name), |b| {
+            b.iter(|| {
+                let mut mask = Vec::with_capacity(filtered.len());
+                create_threshold_mask_filtered(
+                    black_box(&filtered),
+                    black_box(&background),
+                    black_box(3.0),
+                    &mut mask,
+                );
+                black_box(mask)
+            })
+        });
+    }
+
+    filtered_group.finish();
+}
+
+/// Scalar vs SIMD threshold mask benchmarks (non-x86_64 stub).
+#[cfg(not(target_arch = "x86_64"))]
+fn scalar_vs_simd_threshold_benchmarks(_c: &mut Criterion) {
+    eprintln!("Skipping scalar vs SIMD benchmarks: not on x86_64");
 }

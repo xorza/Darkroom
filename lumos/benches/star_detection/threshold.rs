@@ -32,7 +32,11 @@ fn bench_create_threshold_mask(c: &mut Criterion) {
     group.bench_function("dispatch", |b: &mut Bencher| {
         b.iter_batched(
             setup,
-            |(pixels, bg)| create_threshold_mask(&pixels, &bg, sigma_threshold),
+            |(pixels, bg)| {
+                let mut mask = Vec::with_capacity(pixels.len());
+                create_threshold_mask(&pixels, &bg, sigma_threshold, &mut mask);
+                mask
+            },
             criterion::BatchSize::LargeInput,
         )
     });
@@ -40,7 +44,11 @@ fn bench_create_threshold_mask(c: &mut Criterion) {
     group.bench_function("scalar", |b: &mut Bencher| {
         b.iter_batched(
             setup,
-            |(pixels, bg)| scalar::create_threshold_mask(&pixels, &bg, sigma_threshold),
+            |(pixels, bg)| {
+                let mut mask = Vec::with_capacity(pixels.len());
+                scalar::create_threshold_mask(&pixels, &bg, sigma_threshold, &mut mask);
+                mask
+            },
             criterion::BatchSize::LargeInput,
         )
     });
