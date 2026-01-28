@@ -492,25 +492,6 @@ impl AstroImage {
         self.dimensions.pixel_count()
     }
 
-    /// Get pixel data as interleaved Vec<f32> (RGBRGBRGB... format).
-    ///
-    /// For grayscale images, returns a clone of the single channel.
-    /// For RGB images, converts from planar to interleaved format.
-    ///
-    /// Note: This allocates a new Vec. Prefer using `channel()` for per-channel
-    /// operations when possible.
-    pub fn to_interleaved_pixels(&self) -> Vec<f32> {
-        match &self.pixels {
-            PixelData::L(data) => data.clone(),
-            PixelData::Rgb([r, g, b]) => {
-                let pixel_count = self.width() * self.height();
-                let mut interleaved = vec![0.0f32; pixel_count * 3];
-                interleave_rgb(r, g, b, &mut interleaved);
-                interleaved
-            }
-        }
-    }
-
     /// Calculate the mean pixel value across all channels using parallel processing.
     pub fn mean(&self) -> f32 {
         match &self.pixels {
@@ -604,6 +585,22 @@ impl AstroImage {
     /// For RGB images, converts from planar to interleaved format.
     pub fn into_image(self) -> Image {
         self.into()
+    }
+
+    /// Consume self and return pixel data as interleaved Vec<f32> (RGBRGBRGB... format).
+    ///
+    /// For grayscale images, returns the single channel directly (no copy).
+    /// For RGB images, converts from planar to interleaved format.
+    pub fn into_interleaved_pixels(self) -> Vec<f32> {
+        let pixel_count = self.dimensions.width * self.dimensions.height;
+        match self.pixels {
+            PixelData::L(data) => data,
+            PixelData::Rgb([r, g, b]) => {
+                let mut interleaved = vec![0.0f32; pixel_count * 3];
+                interleave_rgb(&r, &g, &b, &mut interleaved);
+                interleaved
+            }
+        }
     }
 }
 
@@ -1464,22 +1461,22 @@ mod tests {
     }
 
     #[test]
-    fn test_to_interleaved_pixels_grayscale() {
+    fn test_into_interleaved_pixels_grayscale() {
         let image =
             AstroImage::from_pixels(ImageDimensions::new(2, 2, 1), vec![1.0, 2.0, 3.0, 4.0]);
 
-        let interleaved = image.to_interleaved_pixels();
+        let interleaved = image.into_interleaved_pixels();
         assert_eq!(interleaved, vec![1.0, 2.0, 3.0, 4.0]);
     }
 
     #[test]
-    fn test_to_interleaved_pixels_rgb() {
+    fn test_into_interleaved_pixels_rgb() {
         let image = AstroImage::from_planar_channels(
             ImageDimensions::new(2, 1, 3),
             vec![vec![1.0, 4.0], vec![2.0, 5.0], vec![3.0, 6.0]],
         );
 
-        let interleaved = image.to_interleaved_pixels();
+        let interleaved = image.into_interleaved_pixels();
         assert_eq!(interleaved, vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
     }
 

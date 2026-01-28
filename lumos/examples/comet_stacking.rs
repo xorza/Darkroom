@@ -270,7 +270,7 @@ fn main() {
 fn stack_mean(frames: &[AstroImage]) -> Vec<f32> {
     assert!(!frames.is_empty(), "Need at least one frame to stack");
 
-    let pixels = frames[0].to_interleaved_pixels();
+    let pixels = frames[0].clone().into_interleaved_pixels();
     let pixel_count = pixels.len();
     let mut sum = vec![0.0f64; pixel_count];
 
@@ -279,7 +279,7 @@ fn stack_mean(frames: &[AstroImage]) -> Vec<f32> {
     }
 
     for frame in &frames[1..] {
-        for (i, &val) in frame.to_interleaved_pixels().iter().enumerate() {
+        for (i, &val) in frame.clone().into_interleaved_pixels().iter().enumerate() {
             sum[i] += f64::from(val);
         }
     }

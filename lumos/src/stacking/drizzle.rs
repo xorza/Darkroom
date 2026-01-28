@@ -181,7 +181,7 @@ impl DrizzleAccumulator {
     ///
     /// The transform maps input pixel coordinates to reference (output) coordinates.
     /// It should include any registration alignment computed from star matching.
-    pub fn add_image(&mut self, image: &AstroImage, transform: &TransformMatrix, weight: f32) {
+    pub fn add_image(&mut self, image: AstroImage, transform: &TransformMatrix, weight: f32) {
         let input_width = image.width();
         let input_height = image.height();
         let input_channels = image.channels();
@@ -196,7 +196,7 @@ impl DrizzleAccumulator {
         let pixfrac = self.config.pixfrac;
         let drop_size = pixfrac / scale; // Drop size in output pixels
 
-        let pixels = image.to_interleaved_pixels();
+        let pixels = image.into_interleaved_pixels();
 
         match self.config.kernel {
             DrizzleKernel::Square => {
@@ -717,7 +717,7 @@ pub fn drizzle_stack<P: AsRef<Path> + Sync>(
 
     // Add first image
     let first_weight = weights.map_or(1.0, |w| w[0]);
-    accumulator.add_image(&first_image, &transforms[0], first_weight);
+    accumulator.add_image(first_image, &transforms[0], first_weight);
     report_progress(&progress, 1, paths.len(), StackingStage::Processing);
 
     // Process remaining images
@@ -742,7 +742,7 @@ pub fn drizzle_stack<P: AsRef<Path> + Sync>(
         }
 
         let weight = weights.map_or(1.0, |w| w[i]);
-        accumulator.add_image(&image, &transforms[i], weight);
+        accumulator.add_image(image, &transforms[i], weight);
         report_progress(&progress, i + 1, paths.len(), StackingStage::Processing);
     }
 
@@ -862,7 +862,7 @@ mod tests {
         let mut acc = DrizzleAccumulator::new(100, 100, 1, config);
 
         let identity = TransformMatrix::identity();
-        acc.add_image(&image, &identity, 1.0);
+        acc.add_image(image, &identity, 1.0);
 
         let result = acc.finalize();
 
@@ -890,7 +890,7 @@ mod tests {
         let mut acc = DrizzleAccumulator::new(10, 10, 1, config);
 
         let identity = TransformMatrix::identity();
-        acc.add_image(&image, &identity, 1.0);
+        acc.add_image(image, &identity, 1.0);
 
         let result = acc.finalize();
         assert_eq!(result.image.width(), 20);
@@ -931,7 +931,7 @@ mod tests {
         let mut acc = DrizzleAccumulator::new(50, 50, 3, config);
 
         let identity = TransformMatrix::identity();
-        acc.add_image(&image, &identity, 1.0);
+        acc.add_image(image, &identity, 1.0);
 
         let result = acc.finalize();
 
@@ -952,7 +952,7 @@ mod tests {
 
         // Add with small translation
         let transform = TransformMatrix::translation(0.5, 0.5);
-        acc.add_image(&image, &transform, 1.0);
+        acc.add_image(image, &transform, 1.0);
 
         let result = acc.finalize();
 

@@ -27,7 +27,7 @@
 //! // Add frames as they arrive
 //! for frame in incoming_frames {
 //!     let quality = compute_frame_quality(&frame);
-//!     stack.add_frame(&frame, quality)?;
+//!     stack.add_frame(frame, quality)?;
 //!
 //!     // Show preview to user
 //!     let preview = stack.preview();
@@ -576,7 +576,7 @@ impl LiveStackAccumulator {
     /// Updated statistics after adding the frame
     pub fn add_frame(
         &mut self,
-        frame: &AstroImage,
+        frame: AstroImage,
         quality: LiveFrameQuality,
     ) -> Result<&LiveStackStats, LiveStackError> {
         // Check dimensions
@@ -597,7 +597,7 @@ impl LiveStackAccumulator {
         };
 
         // Get pixels, optionally normalized
-        let pixels = frame.to_interleaved_pixels();
+        let pixels = frame.into_interleaved_pixels();
         let pixels_to_use: Vec<f32> = if self.config.normalize {
             // Compute or use reference stats
             if self.reference_stats.is_none() {
@@ -924,10 +924,10 @@ mod tests {
         let frame2 = create_test_frame(10, 10, 1, 3.0);
 
         stack
-            .add_frame(&frame1, LiveFrameQuality::unknown())
+            .add_frame(frame1, LiveFrameQuality::unknown())
             .unwrap();
         stack
-            .add_frame(&frame2, LiveFrameQuality::unknown())
+            .add_frame(frame2, LiveFrameQuality::unknown())
             .unwrap();
 
         // Mean should be 2.0
@@ -965,8 +965,8 @@ mod tests {
             star_count: 50,
         };
 
-        stack.add_frame(&frame1, q1).unwrap();
-        stack.add_frame(&frame2, q2).unwrap();
+        stack.add_frame(frame1, q1).unwrap();
+        stack.add_frame(frame2, q2).unwrap();
 
         // Weighted mean should be closer to 1.0 (higher weight)
         let result = stack.preview().unwrap();
@@ -985,9 +985,9 @@ mod tests {
         let frame2 = create_test_frame(20, 20, 1, 2.0);
 
         stack
-            .add_frame(&frame1, LiveFrameQuality::unknown())
+            .add_frame(frame1, LiveFrameQuality::unknown())
             .unwrap();
-        let result = stack.add_frame(&frame2, LiveFrameQuality::unknown());
+        let result = stack.add_frame(frame2, LiveFrameQuality::unknown());
 
         assert!(matches!(
             result,
@@ -1010,9 +1010,7 @@ mod tests {
         let mut stack = LiveStackAccumulator::new(10, 10, 1, config).unwrap();
 
         let frame = create_test_frame(10, 10, 1, 1.0);
-        stack
-            .add_frame(&frame, LiveFrameQuality::unknown())
-            .unwrap();
+        stack.add_frame(frame, LiveFrameQuality::unknown()).unwrap();
 
         assert_eq!(stack.frame_count(), 1);
 
@@ -1029,9 +1027,7 @@ mod tests {
 
         for i in 0..10 {
             let frame = create_test_frame(10, 10, 1, i as f32);
-            stack
-                .add_frame(&frame, LiveFrameQuality::unknown())
-                .unwrap();
+            stack.add_frame(frame, LiveFrameQuality::unknown()).unwrap();
         }
 
         let stats = stack.stats();
@@ -1055,16 +1051,14 @@ mod tests {
         // Add 4 normal frames with value 1.0
         for _ in 0..4 {
             let frame = create_test_frame(10, 10, 1, 1.0);
-            stack
-                .add_frame(&frame, LiveFrameQuality::unknown())
-                .unwrap();
+            stack.add_frame(frame, LiveFrameQuality::unknown()).unwrap();
         }
 
         // Add 1 extreme outlier frame with value 500.0
         // (Needs to be far enough that even with initial high std, it gets clipped)
         let outlier = create_test_frame(10, 10, 1, 500.0);
         stack
-            .add_frame(&outlier, LiveFrameQuality::unknown())
+            .add_frame(outlier, LiveFrameQuality::unknown())
             .unwrap();
 
         // Result should be close to 1.0 (outlier rejected after iterative clipping)
@@ -1111,9 +1105,7 @@ mod tests {
         let mut stack = LiveStackAccumulator::new(10, 10, 1, config).unwrap();
 
         let frame = create_test_frame(10, 10, 1, 42.0);
-        stack
-            .add_frame(&frame, LiveFrameQuality::unknown())
-            .unwrap();
+        stack.add_frame(frame, LiveFrameQuality::unknown()).unwrap();
 
         let result = stack.finalize().unwrap();
         assert_eq!(result.stats.frame_count, 1);
@@ -1169,12 +1161,13 @@ mod tests {
 
         let mut stack = LiveStackAccumulator::new(10, 10, 3, config).unwrap();
 
-        let frame = create_test_frame(10, 10, 3, 0.5);
+        let frame1 = create_test_frame(10, 10, 3, 0.5);
+        let frame2 = create_test_frame(10, 10, 3, 0.5);
         stack
-            .add_frame(&frame, LiveFrameQuality::unknown())
+            .add_frame(frame1, LiveFrameQuality::unknown())
             .unwrap();
         stack
-            .add_frame(&frame, LiveFrameQuality::unknown())
+            .add_frame(frame2, LiveFrameQuality::unknown())
             .unwrap();
 
         let result = stack.preview().unwrap();
@@ -1270,9 +1263,7 @@ mod tests {
         let mut stack = LiveStackAccumulator::new(10, 10, 1, config).unwrap();
 
         let frame = create_test_frame(10, 10, 1, 1.0);
-        stack
-            .add_frame(&frame, LiveFrameQuality::unknown())
-            .unwrap();
+        stack.add_frame(frame, LiveFrameQuality::unknown()).unwrap();
 
         let result = stack.preview().unwrap();
         assert!((result.channel(0)[0] - 1.0).abs() < 0.001);

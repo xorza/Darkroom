@@ -2385,7 +2385,7 @@ mod integration_tests {
         assert_eq!(result.image.height(), height);
 
         // Verify the stacked image has reasonable values
-        let stacked_pixels = result.image.to_interleaved_pixels();
+        let stacked_pixels = result.image.clone().into_interleaved_pixels();
         let min_val = stacked_pixels.iter().cloned().fold(f32::INFINITY, f32::min);
         let max_val = stacked_pixels
             .iter()
@@ -2498,7 +2498,7 @@ mod integration_tests {
             .expect("Gradient removal should succeed");
 
         // After gradient removal, variance should be much lower
-        let variance_after = compute_variance(&result.image.to_interleaved_pixels());
+        let variance_after = compute_variance(&result.image.clone().into_interleaved_pixels());
 
         // The linear polynomial should remove most of the linear gradient
         // Stars will add some residual variance, so we expect ~90% reduction

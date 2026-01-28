@@ -83,7 +83,7 @@ fn main() {
 
         // Add frame to stack
         let stats = stack
-            .add_frame(&frame, quality)
+            .add_frame(frame, quality)
             .expect("Failed to add frame");
 
         // Display progress
