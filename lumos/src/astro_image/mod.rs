@@ -380,7 +380,7 @@ impl AstroImage {
     /// Panics (in debug builds) if coordinates are out of bounds or if the image
     /// has multiple channels.
     /// todo return correct luma for rgb
-    pub fn get_pixel(&self, x: usize, y: usize) -> f32 {
+    pub fn get_pixel_gray(&self, x: usize, y: usize) -> f32 {
         debug_assert!(x < self.width(), "x coordinate out of bounds");
         debug_assert!(y < self.height(), "y coordinate out of bounds");
         debug_assert!(
@@ -389,19 +389,6 @@ impl AstroImage {
         );
 
         self.channel(0)[y * self.width() + x]
-    }
-
-    /// Get pixel value at (x, y) for single-channel images.
-    ///
-    /// # Deprecated
-    /// Use [`get_pixel`](Self::get_pixel) instead for clearer naming.
-    ///
-    /// # Panics
-    /// Panics (in debug builds) if coordinates are out of bounds or if the image
-    /// has multiple channels.
-    #[deprecated(since = "0.2.0", note = "Use `get_pixel` instead")]
-    pub fn get_pixel_gray(&self, x: usize, y: usize) -> f32 {
-        self.get_pixel(x, y)
     }
 
     /// Get pixel value at (x, y) for a specific channel.
@@ -743,7 +730,7 @@ mod tests {
         assert_eq!(image.pixels().len(), image.pixel_count());
 
         // Test pixel access
-        let pixel = image.get_pixel(5, 20);
+        let pixel = image.get_pixel_gray(5, 20);
         assert_eq!(pixel, 152.0);
     }
 
@@ -1304,12 +1291,12 @@ mod tests {
             vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
         );
 
-        assert_eq!(image.get_pixel(0, 0), 1.0);
-        assert_eq!(image.get_pixel(1, 0), 2.0);
-        assert_eq!(image.get_pixel(2, 0), 3.0);
-        assert_eq!(image.get_pixel(0, 1), 4.0);
-        assert_eq!(image.get_pixel(1, 1), 5.0);
-        assert_eq!(image.get_pixel(2, 1), 6.0);
+        assert_eq!(image.get_pixel_gray(0, 0), 1.0);
+        assert_eq!(image.get_pixel_gray(1, 0), 2.0);
+        assert_eq!(image.get_pixel_gray(2, 0), 3.0);
+        assert_eq!(image.get_pixel_gray(0, 1), 4.0);
+        assert_eq!(image.get_pixel_gray(1, 1), 5.0);
+        assert_eq!(image.get_pixel_gray(2, 1), 6.0);
     }
 
     #[test]
