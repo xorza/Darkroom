@@ -181,58 +181,41 @@ impl Star {
 ///
 /// Used to mask out defective pixels before star detection to prevent
 /// false detections and improve centroid accuracy.
-#[derive(Debug, Clone, Default)]
+///
+/// The boolean mask is pre-computed at construction time for efficient lookup.
+#[derive(Debug, Clone)]
 pub struct DefectMap {
-    /// Hot pixel coordinates (x, y). These are pixels with abnormally high dark current.
-    pub hot_pixels: Vec<(usize, usize)>,
-    /// Dead pixel coordinates (x, y). These are pixels that don't respond to light.
-    pub dead_pixels: Vec<(usize, usize)>,
-    /// Bad column x-coordinates. Entire columns that are defective.
-    pub bad_columns: Vec<usize>,
-    /// Bad row y-coordinates. Entire rows that are defective.
-    pub bad_rows: Vec<usize>,
+    width: usize,
+    height: usize,
+    /// Pre-computed boolean mask where `true` means the pixel is defective.
+    mask: Vec<bool>,
 }
 
 impl DefectMap {
-    /// Create an empty defect map.
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Check if a pixel is marked as defective.
-    pub fn is_defective(&self, x: usize, y: usize) -> bool {
-        self.hot_pixels.contains(&(x, y))
-            || self.dead_pixels.contains(&(x, y))
-            || self.bad_columns.contains(&x)
-            || self.bad_rows.contains(&y)
-    }
-
-    /// Check if the defect map is empty.
-    pub fn is_empty(&self) -> bool {
-        self.hot_pixels.is_empty()
-            && self.dead_pixels.is_empty()
-            && self.bad_columns.is_empty()
-            && self.bad_rows.is_empty()
-    }
-
-    /// Create a boolean mask from the defect map.
-    /// Returns a vector where `true` means the pixel is defective.
-    pub fn to_mask(&self, width: usize, height: usize) -> Vec<bool> {
+    /// Create a defect map from lists of defective pixels, columns, and rows.
+    pub fn new(
+        width: usize,
+        height: usize,
+        hot_pixels: &[(usize, usize)],
+        dead_pixels: &[(usize, usize)],
+        bad_columns: &[usize],
+        bad_rows: &[usize],
+    ) -> Self {
         let mut mask = vec![false; width * height];
 
-        for &(x, y) in &self.hot_pixels {
+        for &(x, y) in hot_pixels {
             if x < width && y < height {
                 mask[y * width + x] = true;
             }
         }
 
-        for &(x, y) in &self.dead_pixels {
+        for &(x, y) in dead_pixels {
             if x < width && y < height {
                 mask[y * width + x] = true;
             }
         }
 
-        for &col in &self.bad_columns {
+        for &col in bad_columns {
             if col < width {
                 for y in 0..height {
                     mask[y * width + col] = true;
@@ -240,7 +223,7 @@ impl DefectMap {
             }
         }
 
-        for &row in &self.bad_rows {
+        for &row in bad_rows {
             if row < height {
                 for x in 0..width {
                     mask[row * width + x] = true;
@@ -248,7 +231,38 @@ impl DefectMap {
             }
         }
 
-        mask
+        Self {
+            width,
+            height,
+            mask,
+        }
+    }
+
+    /// Check if a pixel is marked as defective.
+    #[inline]
+    pub fn is_defective(&self, x: usize, y: usize) -> bool {
+        if x < self.width && y < self.height {
+            self.mask[y * self.width + x]
+        } else {
+            false
+        }
+    }
+
+    /// Check if the defect map has no defective pixels.
+    pub fn is_empty(&self) -> bool {
+        !self.mask.contains(&true)
+    }
+
+    /// Get the pre-computed boolean mask.
+    /// Returns a slice where `true` means the pixel is defective.
+    #[inline]
+    pub fn mask(&self) -> &[bool] {
+        &self.mask
+    }
+
+    /// Get dimensions of the defect map.
+    pub fn dimensions(&self) -> (usize, usize) {
+        (self.width, self.height)
     }
 }
 
@@ -1177,7 +1191,7 @@ fn find_stars(image: &AstroImage, config: &StarDetectionConfig) -> StarDetection
 /// This prevents hot pixels and other defects from being detected as stars
 /// or affecting centroid computation.
 fn apply_defect_mask(pixels: &mut [f32], width: usize, height: usize, defect_map: &DefectMap) {
-    let mask = defect_map.to_mask(width, height);
+    let mask = defect_map.mask();
 
     // Collect defective pixel positions and their replacements first,
     // then apply (can't modify while reading neighbors)
@@ -1186,7 +1200,7 @@ fn apply_defect_mask(pixels: &mut [f32], width: usize, height: usize, defect_map
         for x in 0..width {
             let idx = y * width + x;
             if mask[idx] {
-                let value = local_median_excluding_defects(pixels, width, height, x, y, &mask);
+                let value = local_median_excluding_defects(pixels, width, height, x, y, mask);
                 replacements.push((idx, value));
             }
         }
