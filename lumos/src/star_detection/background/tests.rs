@@ -670,10 +670,10 @@ fn test_background_regression() {
 
     let width = astro_image.width();
     let height = astro_image.height();
-    let pixels = astro_image.pixels();
+    let pixels = astro_image.channel(0);
 
     // Estimate background
-    let bg = estimate_background(&pixels, width, height, 64);
+    let bg = estimate_background(pixels, width, height, 64);
 
     // Load reference images
     let ref_bg_path = test_resources.join("background_map.tiff");

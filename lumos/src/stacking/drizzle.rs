@@ -196,7 +196,7 @@ impl DrizzleAccumulator {
         let pixfrac = self.config.pixfrac;
         let drop_size = pixfrac / scale; // Drop size in output pixels
 
-        let pixels = image.pixels();
+        let pixels = image.to_interleaved_pixels();
 
         match self.config.kernel {
             DrizzleKernel::Square => {
@@ -871,7 +871,7 @@ mod tests {
         assert_eq!(result.image.height(), 200);
 
         // Average value should be preserved (approximately)
-        let pixels = result.image.pixels();
+        let pixels = result.image.channel(0);
         let avg: f32 = pixels.iter().sum::<f32>() / pixels.len() as f32;
         // With pixfrac=0.8 and scale=2, not all pixels get full coverage
         // but well-covered pixels should have ~0.5 value

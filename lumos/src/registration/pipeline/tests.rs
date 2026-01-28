@@ -154,26 +154,26 @@ fn test_warp_to_reference_image() {
     // The pixel at target(37,35) should appear at reference(32,32) after warping
     let warped = warp_to_reference_image(&target_image, &transform, InterpolationMethod::Bilinear);
 
-    assert_eq!(warped.pixels().len(), width * height);
+    assert_eq!(warped.channel(0).len(), width * height);
 
     // The bright pixel should now be at reference position (32, 32)
     let ref_x = 32;
     let ref_y = 32;
     assert!(
-        warped.pixels()[ref_y * width + ref_x] > 0.5,
+        warped.channel(0)[ref_y * width + ref_x] > 0.5,
         "Expected bright pixel at reference position ({}, {}), got {}",
         ref_x,
         ref_y,
-        warped.pixels()[ref_y * width + ref_x]
+        warped.channel(0)[ref_y * width + ref_x]
     );
 
     // Original target position should now be dark (or near-dark due to interpolation)
     assert!(
-        warped.pixels()[target_y * width + target_x] < 0.5,
+        warped.channel(0)[target_y * width + target_x] < 0.5,
         "Expected dark at original target position ({}, {}), got {}",
         target_x,
         target_y,
-        warped.pixels()[target_y * width + target_x]
+        warped.channel(0)[target_y * width + target_x]
     );
 }
 
@@ -222,10 +222,11 @@ fn test_warp_to_reference_image_roundtrip() {
     let mut sum_sq_diff = 0.0f32;
     let mut count = 0;
 
+    let aligned_channel = aligned.channel(0);
     for y in margin..height - margin {
         for x in margin..width - margin {
             let ref_val = ref_pixels[y * width + x];
-            let aligned_val = aligned.pixels()[y * width + x];
+            let aligned_val = aligned_channel[y * width + x];
             let diff = (ref_val - aligned_val).abs();
             max_diff = max_diff.max(diff);
             sum_sq_diff += diff * diff;
@@ -291,10 +292,11 @@ fn test_warp_to_reference_image_end_to_end() {
     let mut diff_sum = 0.0f32;
     let mut count = 0;
 
+    let aligned_channel = aligned.channel(0);
     for y in margin..height - margin {
         for x in margin..width - margin {
             let r = ref_pixels[y * width + x];
-            let a = aligned.pixels()[y * width + x];
+            let a = aligned_channel[y * width + x];
 
             ref_sum += r;
             aligned_sum += a;
@@ -463,10 +465,11 @@ fn test_pipeline_ground_truth_synthetic() {
     let mut error_sum = 0.0f32;
     let mut pixel_count = 0;
 
+    let warped_channel = warped.channel(0);
     for y in 20..height - 20 {
         for x in 20..width - 20 {
             let ref_val = ref_image[y * width + x];
-            let warped_val = warped.pixels()[y * width + x];
+            let warped_val = warped_channel[y * width + x];
 
             // Only compare significant pixels
             if ref_val > 0.1 {

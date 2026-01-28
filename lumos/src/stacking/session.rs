@@ -798,16 +798,9 @@ impl MultiSessionStack {
 
         let reference_image = AstroImage::from_file(reference_path)?;
         let (width, height) = (reference_image.width(), reference_image.height());
-        let channels = reference_image.channels();
 
-        // Extract the first channel (luminance or red for color images)
-        // Pixel data is stored interleaved: [R0, G0, B0, R1, G1, B1, ...]
-        let all_pixels = reference_image.pixels();
-        let reference_pixels: Vec<f32> = if channels == 1 {
-            all_pixels.to_vec()
-        } else {
-            all_pixels.iter().step_by(channels).copied().collect()
-        };
+        // Extract the first channel (luminance for grayscale, red for RGB)
+        let reference_pixels = reference_image.channel(0).to_vec();
 
         let config = LocalNormalizationConfig::new(self.config.normalization_tile_size);
 
@@ -2392,7 +2385,7 @@ mod integration_tests {
         assert_eq!(result.image.height(), height);
 
         // Verify the stacked image has reasonable values
-        let stacked_pixels = result.image.pixels();
+        let stacked_pixels = result.image.to_interleaved_pixels();
         let min_val = stacked_pixels.iter().cloned().fold(f32::INFINITY, f32::min);
         let max_val = stacked_pixels
             .iter()
@@ -2505,7 +2498,7 @@ mod integration_tests {
             .expect("Gradient removal should succeed");
 
         // After gradient removal, variance should be much lower
-        let variance_after = compute_variance(&result.image.pixels());
+        let variance_after = compute_variance(&result.image.to_interleaved_pixels());
 
         // The linear polynomial should remove most of the linear gradient
         // Stars will add some residual variance, so we expect ~90% reduction

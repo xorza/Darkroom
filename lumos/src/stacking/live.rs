@@ -597,7 +597,7 @@ impl LiveStackAccumulator {
         };
 
         // Get pixels, optionally normalized
-        let pixels = frame.pixels();
+        let pixels = frame.to_interleaved_pixels();
         let pixels_to_use: Vec<f32> = if self.config.normalize {
             // Compute or use reference stats
             if self.reference_stats.is_none() {
@@ -932,7 +932,7 @@ mod tests {
 
         // Mean should be 2.0
         let result = stack.preview().unwrap();
-        assert!((result.pixels()[0] - 2.0).abs() < 0.001);
+        assert!((result.channel(0)[0] - 2.0).abs() < 0.001);
     }
 
     #[test]
@@ -971,7 +971,7 @@ mod tests {
         // Weighted mean should be closer to 1.0 (higher weight)
         let result = stack.preview().unwrap();
         assert!(
-            result.pixels()[0] < 3.0,
+            result.channel(0)[0] < 3.0,
             "Weighted mean should favor frame 1"
         );
     }
@@ -1070,9 +1070,9 @@ mod tests {
         // Result should be close to 1.0 (outlier rejected after iterative clipping)
         let result = stack.preview().unwrap();
         assert!(
-            result.pixels()[0] < 10.0,
+            result.channel(0)[0] < 10.0,
             "Sigma clipping should reject outlier, got {}",
-            result.pixels()[0]
+            result.channel(0)[0]
         );
     }
 
@@ -1117,7 +1117,7 @@ mod tests {
 
         let result = stack.finalize().unwrap();
         assert_eq!(result.stats.frame_count, 1);
-        assert!((result.image.pixels()[0] - 42.0).abs() < 0.001);
+        assert!((result.image.channel(0)[0] - 42.0).abs() < 0.001);
     }
 
     #[test]
@@ -1179,7 +1179,7 @@ mod tests {
 
         let result = stack.preview().unwrap();
         assert_eq!(result.dimensions().channels, 3);
-        assert!((result.pixels()[0] - 0.5).abs() < 0.001);
+        assert!((result.channel(0)[0] - 0.5).abs() < 0.001);
     }
 
     #[test]
@@ -1275,6 +1275,6 @@ mod tests {
             .unwrap();
 
         let result = stack.preview().unwrap();
-        assert!((result.pixels()[0] - 1.0).abs() < 0.001);
+        assert!((result.channel(0)[0] - 1.0).abs() < 0.001);
     }
 }

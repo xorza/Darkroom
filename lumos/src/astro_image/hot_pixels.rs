@@ -59,12 +59,11 @@ impl HotPixelMap {
     pub fn from_master_dark(master_dark: &AstroImage, sigma_threshold: f32) -> Self {
         assert!(sigma_threshold > 0.0, "Sigma threshold must be positive");
 
-        let pixels = master_dark.pixels();
         let channels = master_dark.channels();
         let pixel_count = master_dark.width() * master_dark.height();
 
-        // Compute per-channel thresholds in a single pass
-        let channel_stats = compute_all_channel_stats(&pixels, channels, sigma_threshold);
+        // Compute per-channel thresholds
+        let channel_stats = compute_all_channel_stats(master_dark, sigma_threshold);
 
         tracing::debug!(
             "Hot pixel detection per-channel stats ({}x{}x{}):",
@@ -85,12 +84,13 @@ impl HotPixelMap {
 
         let thresholds: Vec<f32> = channel_stats.iter().map(|s| s.threshold).collect();
 
-        // Detect hot pixels - a pixel is hot if ANY channel exceeds its threshold
-        // The mask is per-value (not per-pixel), so we check each channel value
-        let mut mask = vec![false; pixels.len()];
+        // Detect hot pixels - stored in interleaved order for mask compatibility
+        // A pixel value is hot if it exceeds the threshold for its channel
+        let mut mask = vec![false; pixel_count * channels];
         crate::common::parallel_chunked(&mut mask, |idx| {
             let channel = idx % channels;
-            pixels[idx] > thresholds[channel]
+            let pixel_idx = idx / channels;
+            master_dark.channel(channel)[pixel_idx] > thresholds[channel]
         });
 
         // For reporting, count unique pixels (not channel values)
@@ -210,14 +210,9 @@ const MAX_MEDIAN_SAMPLES: usize = 100_000;
 /// For large images, computing exact median is expensive (O(n) but with large constant).
 /// Instead, we sample a subset of pixels and compute median on the sample.
 /// With 100K samples, the median estimate is accurate to within ~0.5% with high probability.
-///
-/// Samples all channels in a single pass for better cache locality.
-fn compute_all_channel_stats(
-    pixels: &[f32],
-    channels: usize,
-    sigma_threshold: f32,
-) -> Vec<ChannelStats> {
-    let pixel_count = pixels.len() / channels;
+fn compute_all_channel_stats(image: &AstroImage, sigma_threshold: f32) -> Vec<ChannelStats> {
+    let channels = image.channels();
+    let pixel_count = image.width() * image.height();
 
     // Determine sampling strategy
     let use_sampling = pixel_count > MAX_MEDIAN_SAMPLES * 2;
@@ -234,23 +229,16 @@ fn compute_all_channel_stats(
         1
     };
 
-    // Allocate sample buffers for all channels
-    let mut channel_samples: Vec<Vec<f32>> = (0..channels)
-        .map(|_| Vec::with_capacity(sample_count))
-        .collect();
+    // Compute stats for each channel - planar data allows direct access
+    (0..channels)
+        .map(|c| {
+            let channel_data = image.channel(c);
 
-    // Extract samples for all channels in a single pass - contiguous memory access
-    for i in 0..sample_count {
-        let base = i * stride * channels;
-        for c in 0..channels {
-            channel_samples[c].push(pixels[base + c]);
-        }
-    }
+            // Sample the channel data
+            let mut samples: Vec<f32> = (0..sample_count)
+                .map(|i| channel_data[i * stride])
+                .collect();
 
-    // Compute stats for each channel
-    channel_samples
-        .into_iter()
-        .map(|mut samples| {
             let median = crate::math::median_f32_mut(&mut samples);
 
             // Compute absolute deviations in place, reusing the buffer
@@ -282,8 +270,7 @@ fn compute_all_channel_stats(
 fn median_of_neighbors(image: &AstroImage, x: usize, y: usize, channel: usize) -> f32 {
     let width = image.width();
     let height = image.height();
-    let channels = image.channels();
-    let pixels = image.pixels();
+    let channel_data = image.channel(channel);
 
     let mut neighbors = Vec::with_capacity(8);
 
@@ -304,15 +291,15 @@ fn median_of_neighbors(image: &AstroImage, x: usize, y: usize, channel: usize) -
         let ny = y as i32 + dy;
 
         if nx >= 0 && nx < width as i32 && ny >= 0 && ny < height as i32 {
-            let idx = (ny as usize * width + nx as usize) * channels + channel;
-            neighbors.push(pixels[idx]);
+            let idx = ny as usize * width + nx as usize;
+            neighbors.push(channel_data[idx]);
         }
     }
 
     if neighbors.is_empty() {
         // Edge case: isolated pixel with no neighbors (shouldn't happen in practice)
-        let idx = (y * width + x) * channels + channel;
-        return pixels[idx];
+        let idx = y * width + x;
+        return channel_data[idx];
     }
 
     crate::math::median_f32_mut(&mut neighbors)
@@ -416,7 +403,7 @@ mod tests {
 
         // Center should be replaced with median of 8 neighbors
         // Neighbors: 10, 20, 30, 40, 50, 60, 70, 80 -> median = 45
-        let center = image.pixels()[4];
+        let center = image.channel(0)[4];
         assert!(
             (center - 45.0).abs() < f32::EPSILON,
             "Expected 45.0, got {}",
@@ -424,8 +411,8 @@ mod tests {
         );
 
         // Other pixels should be unchanged
-        assert_eq!(image.pixels()[0], 10.0);
-        assert_eq!(image.pixels()[8], 80.0);
+        assert_eq!(image.channel(0)[0], 10.0);
+        assert_eq!(image.channel(0)[8], 80.0);
     }
 
     #[test]
@@ -446,7 +433,7 @@ mod tests {
         hot_map.correct(&mut image);
 
         // Corner has only 3 neighbors: 20, 40, 50 -> median = 40
-        let corner = image.pixels()[0];
+        let corner = image.channel(0)[0];
         assert!(
             (corner - 40.0).abs() < f32::EPSILON,
             "Expected 40.0, got {}",
@@ -496,9 +483,10 @@ mod tests {
         // Create data with known distribution: values 0..pixel_count
         // True median should be (pixel_count - 1) / 2 = 499999.5
         let pixels: Vec<f32> = (0..pixel_count).map(|i| i as f32).collect();
+        let image = make_test_image(size, size, 1, pixels);
 
         // Get stats using our sampled approach
-        let stats = super::compute_all_channel_stats(&pixels, 1, 5.0);
+        let stats = super::compute_all_channel_stats(&image, 5.0);
 
         // Exact median
         let exact_median = (pixel_count - 1) as f32 / 2.0;

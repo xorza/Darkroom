@@ -167,8 +167,8 @@ fn print_config(config: &GradientRemovalConfig) {
 }
 
 fn print_correction_stats(original: &AstroImage, corrected: &AstroImage) {
-    let orig_stats = compute_stats(&original.pixels());
-    let corr_stats = compute_stats(&corrected.pixels());
+    let orig_stats = compute_stats(original.channel(0));
+    let corr_stats = compute_stats(corrected.channel(0));
 
     println!(
         "  Original: mean={:.4}, std={:.4}",

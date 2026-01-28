@@ -544,7 +544,7 @@ fn test_warp_with_detected_transform() {
     // Compare aligned image to reference
     let margin = 40;
     let (central_ref, central_aligned) =
-        extract_central_region(&ref_pixels, &aligned.pixels(), width, height, margin);
+        extract_central_region(&ref_pixels, aligned.channel(0), width, height, margin);
 
     let psnr = compute_psnr(&central_ref, &central_aligned, 1.0);
     let ncc = compute_ncc(&central_ref, &central_aligned);
@@ -648,7 +648,6 @@ fn test_warp_to_reference_image_grayscale() {
     assert_eq!(warped_image.width(), width);
     assert_eq!(warped_image.height(), height);
     assert_eq!(warped_image.channels(), 1);
-    assert_eq!(warped_image.pixels().len(), width * height);
 }
 
 #[test]
@@ -678,11 +677,9 @@ fn test_warp_to_reference_image_rgb() {
     assert_eq!(warped.width(), width);
     assert_eq!(warped.height(), height);
     assert_eq!(warped.channels(), 3);
-    assert_eq!(warped.pixels().len(), width * height * 3);
-
     // Verify each channel was warped (non-zero values should exist)
     for c in 0..3 {
-        let warped_channel: Vec<f32> = warped.pixels().iter().skip(c).step_by(3).copied().collect();
+        let warped_channel = warped.channel(c);
         let non_zero_count = warped_channel.iter().filter(|&&v| v > 0.0).count();
         assert!(
             non_zero_count > 0,

@@ -751,14 +751,13 @@ mod tests {
         assert!(image.dimensions().height > 0);
         assert_eq!(image.dimensions().channels, 3); // RGB output
 
-        // Validate pixel count
-        assert_eq!(image.pixels().len(), image.dimensions().pixel_count());
-
-        // Validate pixel values are normalized
-        for pixel in image.pixels() {
-            assert!(pixel >= 0.0, "Pixel value {} is negative", pixel);
-            // Values can exceed 1.0 slightly due to demosaic interpolation
-            assert!(pixel <= 2.0, "Pixel value {} is too large", pixel);
+        // Validate pixel values are normalized (check all channels)
+        for c in 0..3 {
+            for &pixel in image.channel(c) {
+                assert!(pixel >= 0.0, "Pixel value {} is negative", pixel);
+                // Values can exceed 1.0 slightly due to demosaic interpolation
+                assert!(pixel <= 2.0, "Pixel value {} is too large", pixel);
+            }
         }
 
         // Check mean is reasonable (not all zeros or all ones)

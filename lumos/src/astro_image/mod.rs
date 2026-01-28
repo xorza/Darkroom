@@ -332,31 +332,7 @@ impl AstroImage {
         }
     }
 
-    /// Get all pixel data in interleaved format (RGBRGBRGB... or just L for grayscale).
-    ///
-    /// For grayscale images, returns a reference to the pixel data.
-    /// For RGB images, converts from planar to interleaved format (allocates).
-    ///
-    /// Note: For RGB images, this allocates a new Vec. If you need per-channel
-    /// access, use [`channel()`](Self::channel) instead for better performance.
-    /// // todo remove on rename
-    pub fn pixels(&self) -> Vec<f32> {
-        match &self.pixels {
-            PixelData::L(data) => data.clone(),
-            PixelData::Rgb([r, g, b]) => {
-                let pixel_count = self.dimensions.width * self.dimensions.height;
-                let mut interleaved = Vec::with_capacity(pixel_count * 3);
-                for i in 0..pixel_count {
-                    interleaved.push(r[i]);
-                    interleaved.push(g[i]);
-                    interleaved.push(b[i]);
-                }
-                interleaved
-            }
-        }
-    }
-
-    /// Apply a function to each channel's data in parallel, with corresponding source channel.
+    /// Apply a function to each channel's data, with corresponding source channel.
     ///
     /// Useful for operations like calibration where you need to combine two images.
     /// The function receives `(channel_index, &mut [f32], &[f32])` for each channel.
@@ -458,6 +434,29 @@ impl AstroImage {
         self.dimensions.pixel_count()
     }
 
+    /// Get pixel data as interleaved Vec<f32> (RGBRGBRGB... format).
+    ///
+    /// For grayscale images, returns a clone of the single channel.
+    /// For RGB images, converts from planar to interleaved format.
+    ///
+    /// Note: This allocates a new Vec. Prefer using `channel()` for per-channel
+    /// operations when possible.
+    pub fn to_interleaved_pixels(&self) -> Vec<f32> {
+        match &self.pixels {
+            PixelData::L(data) => data.clone(),
+            PixelData::Rgb([r, g, b]) => {
+                let pixel_count = self.width() * self.height();
+                let mut interleaved = Vec::with_capacity(pixel_count * 3);
+                for i in 0..pixel_count {
+                    interleaved.push(r[i]);
+                    interleaved.push(g[i]);
+                    interleaved.push(b[i]);
+                }
+                interleaved
+            }
+        }
+    }
+
     /// Calculate the mean pixel value across all channels using parallel processing.
     pub fn mean(&self) -> f32 {
         match &self.pixels {
@@ -545,6 +544,14 @@ impl AstroImage {
             .par_iter()
             .map(|path| Self::from_file(path).expect("Failed to load image"))
             .collect()
+    }
+
+    /// Convert to imaginarium::Image, consuming self.
+    ///
+    /// For grayscale images, this reuses the pixel buffer directly.
+    /// For RGB images, converts from planar to interleaved format.
+    pub fn into_image(self) -> Image {
+        self.into()
     }
 }
 
@@ -726,9 +733,6 @@ mod tests {
         assert_eq!(image.metadata.bitpix, BitPix::Int32);
         assert_eq!(image.metadata.header_dimensions, vec![100, 100]);
 
-        // Verify no stride padding (pixels.len() == width * height * channels)
-        assert_eq!(image.pixels().len(), image.pixel_count());
-
         // Test pixel access
         let pixel = image.get_pixel_gray(5, 20);
         assert_eq!(pixel, 152.0);
@@ -750,12 +754,8 @@ mod tests {
         assert_eq!(astro.height(), 2);
         assert_eq!(astro.channels(), 1);
 
-        // Verify no stride padding (pixels.len() == width * height * channels)
-        assert_eq!(astro.pixels().len(), astro.pixel_count());
-        assert_eq!(astro.pixels().len(), 6);
-
         // Verify pixel values
-        assert_eq!(astro.pixels(), &pixels[..]);
+        assert_eq!(astro.channel(0), &pixels[..]);
     }
 
     #[test]
@@ -836,7 +836,7 @@ mod tests {
 
         masters.calibrate(&mut light);
 
-        assert_eq!(light.pixels(), &[95.0, 195.0, 145.0, 245.0]);
+        assert_eq!(light.channel(0), &[95.0, 195.0, 145.0, 245.0]);
     }
 
     #[test]
@@ -860,7 +860,7 @@ mod tests {
 
         masters.calibrate(&mut light);
 
-        assert_eq!(light.pixels(), &[90.0, 180.0, 135.0, 225.0]);
+        assert_eq!(light.channel(0), &[90.0, 180.0, 135.0, 225.0]);
     }
 
     #[test]
@@ -886,10 +886,10 @@ mod tests {
 
         // Each pixel divided by (flat_pixel / flat_mean)
         // flat_mean = 1.0, so: 100/0.8=125, 200/1.0=200, 150/1.2=125, 250/1.0=250
-        assert!((light.pixels()[0] - 125.0).abs() < 0.01);
-        assert!((light.pixels()[1] - 200.0).abs() < 0.01);
-        assert!((light.pixels()[2] - 125.0).abs() < 0.01);
-        assert!((light.pixels()[3] - 250.0).abs() < 0.01);
+        assert!((light.channel(0)[0] - 125.0).abs() < 0.01);
+        assert!((light.channel(0)[1] - 200.0).abs() < 0.01);
+        assert!((light.channel(0)[2] - 125.0).abs() < 0.01);
+        assert!((light.channel(0)[3] - 250.0).abs() < 0.01);
     }
 
     #[test]
@@ -918,10 +918,10 @@ mod tests {
         // After bias: [110, 220, 165, 275]
         // After dark: [100, 200, 150, 250]
         // After flat (mean=1.0): [125, 200, 125, 250]
-        assert!((light.pixels()[0] - 125.0).abs() < 0.01);
-        assert!((light.pixels()[1] - 200.0).abs() < 0.01);
-        assert!((light.pixels()[2] - 125.0).abs() < 0.01);
-        assert!((light.pixels()[3] - 250.0).abs() < 0.01);
+        assert!((light.channel(0)[0] - 125.0).abs() < 0.01);
+        assert!((light.channel(0)[1] - 200.0).abs() < 0.01);
+        assert!((light.channel(0)[2] - 125.0).abs() < 0.01);
+        assert!((light.channel(0)[3] - 250.0).abs() < 0.01);
     }
 
     #[test]
@@ -938,11 +938,8 @@ mod tests {
         // Verify dimensions preserved
         assert_eq!(restored.dimensions(), original.dimensions());
 
-        // Verify no stride padding
-        assert_eq!(restored.pixels().len(), restored.pixel_count());
-
         // Verify pixel values preserved
-        for (a, b) in original.pixels().iter().zip(restored.pixels().iter()) {
+        for (a, b) in original.channel(0).iter().zip(restored.channel(0).iter()) {
             assert!((a - b).abs() < 1e-6, "Pixel mismatch: {} vs {}", a, b);
         }
     }
@@ -966,9 +963,11 @@ mod tests {
         // Verify dimensions preserved
         assert_eq!(restored.dimensions(), original.dimensions());
 
-        // Verify pixel values preserved
-        for (a, b) in original.pixels().iter().zip(restored.pixels().iter()) {
-            assert!((a - b).abs() < 1e-6, "Pixel mismatch: {} vs {}", a, b);
+        // Verify pixel values preserved for each channel
+        for c in 0..original.channels() {
+            for (a, b) in original.channel(c).iter().zip(restored.channel(c).iter()) {
+                assert!((a - b).abs() < 1e-6, "Pixel mismatch: {} vs {}", a, b);
+            }
         }
     }
 
@@ -987,15 +986,16 @@ mod tests {
         let astro: AstroImage = image.into();
 
         assert_eq!(astro.channels(), 3);
-        assert_eq!(astro.pixels().len(), 6); // 2 pixels * 3 channels
 
         // Verify RGB values preserved (alpha dropped)
-        assert!((astro.pixels()[0] - 1.0).abs() < 1e-6); // R
-        assert!((astro.pixels()[1] - 0.0).abs() < 1e-6); // G
-        assert!((astro.pixels()[2] - 0.0).abs() < 1e-6); // B
-        assert!((astro.pixels()[3] - 0.0).abs() < 1e-6); // R
-        assert!((astro.pixels()[4] - 1.0).abs() < 1e-6); // G
-        assert!((astro.pixels()[5] - 0.0).abs() < 1e-6); // B
+        // Pixel 0: R=1.0, G=0.0, B=0.0
+        // Pixel 1: R=0.0, G=1.0, B=0.0
+        assert!((astro.channel(0)[0] - 1.0).abs() < 1e-6); // R pixel 0
+        assert!((astro.channel(1)[0] - 0.0).abs() < 1e-6); // G pixel 0
+        assert!((astro.channel(2)[0] - 0.0).abs() < 1e-6); // B pixel 0
+        assert!((astro.channel(0)[1] - 0.0).abs() < 1e-6); // R pixel 1
+        assert!((astro.channel(1)[1] - 1.0).abs() < 1e-6); // G pixel 1
+        assert!((astro.channel(2)[1] - 0.0).abs() < 1e-6); // B pixel 1
     }
 
     #[test]
@@ -1013,11 +1013,10 @@ mod tests {
         let astro: AstroImage = image.into();
 
         assert_eq!(astro.channels(), 1);
-        assert_eq!(astro.pixels().len(), 2);
 
         // Verify gray values preserved (alpha dropped)
-        assert!((astro.pixels()[0] - 0.5).abs() < 1e-6);
-        assert!((astro.pixels()[1] - 0.9).abs() < 1e-6);
+        assert!((astro.channel(0)[0] - 0.5).abs() < 1e-6);
+        assert!((astro.channel(0)[1] - 0.9).abs() < 1e-6);
     }
 
     #[test]
@@ -1232,10 +1231,10 @@ mod tests {
         masters.calibrate(&mut light);
 
         // Each channel should have 5.0 subtracted
-        assert_eq!(light.pixels()[0], 95.0); // R of (0,0)
-        assert_eq!(light.pixels()[1], 95.0); // G of (0,0)
-        assert_eq!(light.pixels()[2], 95.0); // B of (0,0)
-        assert_eq!(light.pixels()[3], 195.0); // R of (1,0)
+        assert_eq!(light.channel(0)[0], 95.0); // R of (0,0)
+        assert_eq!(light.channel(1)[0], 95.0); // G of (0,0)
+        assert_eq!(light.channel(2)[0], 95.0); // B of (0,0)
+        assert_eq!(light.channel(0)[1], 195.0); // R of (1,0)
     }
 
     #[test]

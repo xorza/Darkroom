@@ -56,10 +56,10 @@ pub fn stack_mean_from_paths<P: AsRef<Path>>(
                 });
             }
             // Accumulate pixel values in parallel chunks using SIMD
-            accumulate_parallel(&mut sum, &frame.pixels());
+            accumulate_parallel(&mut sum, &frame.to_interleaved_pixels());
         } else {
             dimensions = Some(frame.dimensions());
-            sum = frame.pixels();
+            sum = frame.to_interleaved_pixels();
             metadata = Some(frame.metadata.clone());
         }
     }
