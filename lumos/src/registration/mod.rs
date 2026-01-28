@@ -97,7 +97,7 @@ pub mod bench {
 // High-level pipeline API (primary entry point)
 pub use pipeline::{
     MultiScaleConfig, MultiScaleRegistrator, Registrator, quick_register, quick_register_stars,
-    register_star_positions, warp_to_reference_image,
+    warp_to_reference_image,
 };
 
 // Core types needed by users

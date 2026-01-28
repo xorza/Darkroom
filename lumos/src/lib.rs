@@ -150,7 +150,6 @@ pub use registration::{
     match_triangles,
     quick_register,
     quick_register_stars,
-    register_star_positions,
     warp_image,
     warp_to_reference_image,
 };

@@ -5,9 +5,25 @@ use std::hint::black_box;
 
 use criterion::{BenchmarkId, Criterion, Throughput};
 
-use super::{Registrator, register_star_positions, warp_to_reference_image};
+use super::{Registrator, warp_to_reference_image};
 use crate::registration::interpolation::InterpolationMethod;
 use crate::registration::types::{RegistrationConfig, TransformMatrix, TransformType};
+
+/// Benchmark helper: register star positions with specified transform type
+fn register_star_positions(
+    ref_positions: &[(f64, f64)],
+    target_positions: &[(f64, f64)],
+    transform_type: TransformType,
+) -> Result<super::RegistrationResult, super::RegistrationError> {
+    let config = RegistrationConfig {
+        transform_type,
+        min_stars_for_matching: 6,
+        min_matched_stars: 4,
+        max_residual_pixels: 2.0,
+        ..Default::default()
+    };
+    Registrator::new(config).register_positions(ref_positions, target_positions)
+}
 use crate::{AstroImage, ImageDimensions};
 
 /// Register pipeline benchmarks with Criterion.

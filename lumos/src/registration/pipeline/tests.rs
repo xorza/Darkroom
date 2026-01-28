@@ -1,6 +1,23 @@
 use super::*;
 use crate::AstroImage;
+use crate::registration::types::TransformType;
 use std::f64::consts::PI;
+
+/// Test helper: register star positions with specified transform type
+fn register_star_positions(
+    ref_positions: &[(f64, f64)],
+    target_positions: &[(f64, f64)],
+    transform_type: TransformType,
+) -> Result<RegistrationResult, RegistrationError> {
+    let config = RegistrationConfig {
+        transform_type,
+        min_stars_for_matching: 6,
+        min_matched_stars: 4,
+        max_residual_pixels: 2.0,
+        ..Default::default()
+    };
+    Registrator::new(config).register_positions(ref_positions, target_positions)
+}
 
 fn generate_star_grid(
     rows: usize,
