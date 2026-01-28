@@ -541,6 +541,25 @@ impl AstroImage {
         }
     }
 
+    /// Compute grayscale luminance values without cloning or consuming self.
+    ///
+    /// For grayscale images, returns a clone of the pixel data.
+    /// For RGB images, computes luminance using Rec. 709 weights: 0.2126*R + 0.7152*G + 0.0722*B
+    ///
+    /// Use this when you only need read-only access to grayscale data without
+    /// modifying or taking ownership of the original image.
+    pub fn to_grayscale_pixels(&self) -> Vec<f32> {
+        match &self.pixels {
+            PixelData::L(data) => data.clone(),
+            PixelData::Rgb([r, g, b]) => {
+                let pixel_count = self.dimensions.width * self.dimensions.height;
+                let mut gray = vec![0.0f32; pixel_count];
+                rgb_to_luminance(r, g, b, &mut gray);
+                gray
+            }
+        }
+    }
+
     /// Convert to grayscale using luminance weights.
     ///
     /// Consumes self. If already grayscale, returns self unchanged.
