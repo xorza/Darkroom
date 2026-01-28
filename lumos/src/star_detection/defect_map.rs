@@ -1,17 +1,20 @@
 //! Defect map for masking known sensor defects during star detection.
 
+use rayon::prelude::*;
+use std::collections::HashSet;
+
 /// Map of known sensor defects (hot pixels, dead pixels, bad columns).
 ///
 /// Used to mask out defective pixels before star detection to prevent
 /// false detections and improve centroid accuracy.
 ///
-/// The boolean mask is pre-computed at construction time for efficient lookup.
+/// Stores defective pixel indices for memory efficiency with sparse defect maps.
 #[derive(Debug, Clone)]
 pub struct DefectMap {
     width: usize,
     height: usize,
-    /// Pre-computed boolean mask where `true` means the pixel is defective.
-    mask: Vec<bool>,
+    /// Sorted list of defective pixel indices (y * width + x).
+    defective_indices: Vec<usize>,
 }
 
 impl DefectMap {
@@ -24,24 +27,24 @@ impl DefectMap {
         bad_columns: &[usize],
         bad_rows: &[usize],
     ) -> Self {
-        let mut mask = vec![false; width * height];
+        let mut indices_set = HashSet::new();
 
         for &(x, y) in hot_pixels {
             if x < width && y < height {
-                mask[y * width + x] = true;
+                indices_set.insert(y * width + x);
             }
         }
 
         for &(x, y) in dead_pixels {
             if x < width && y < height {
-                mask[y * width + x] = true;
+                indices_set.insert(y * width + x);
             }
         }
 
         for &col in bad_columns {
             if col < width {
                 for y in 0..height {
-                    mask[y * width + col] = true;
+                    indices_set.insert(y * width + col);
                 }
             }
         }
@@ -49,15 +52,18 @@ impl DefectMap {
         for &row in bad_rows {
             if row < height {
                 for x in 0..width {
-                    mask[row * width + x] = true;
+                    indices_set.insert(row * width + x);
                 }
             }
         }
 
+        let mut defective_indices: Vec<usize> = indices_set.into_iter().collect();
+        defective_indices.sort_unstable();
+
         Self {
             width,
             height,
-            mask,
+            defective_indices,
         }
     }
 
@@ -65,22 +71,28 @@ impl DefectMap {
     #[inline]
     pub fn is_defective(&self, x: usize, y: usize) -> bool {
         if x < self.width && y < self.height {
-            self.mask[y * self.width + x]
+            let idx = y * self.width + x;
+            self.defective_indices.binary_search(&idx).is_ok()
         } else {
             false
         }
     }
 
-    /// Check if the defect map has no defective pixels.
-    pub fn is_empty(&self) -> bool {
-        !self.mask.contains(&true)
+    /// Check if a pixel index is marked as defective.
+    #[inline]
+    pub fn is_defective_idx(&self, idx: usize) -> bool {
+        self.defective_indices.binary_search(&idx).is_ok()
     }
 
-    /// Get the pre-computed boolean mask.
-    /// Returns a slice where `true` means the pixel is defective.
+    /// Check if the defect map has no defective pixels.
+    pub fn is_empty(&self) -> bool {
+        self.defective_indices.is_empty()
+    }
+
+    /// Get the list of defective pixel indices.
     #[inline]
-    pub fn mask(&self) -> &[bool] {
-        &self.mask
+    pub fn defective_indices(&self) -> &[usize] {
+        &self.defective_indices
     }
 
     /// Get dimensions of the defect map.
@@ -102,19 +114,28 @@ pub(crate) fn apply_defect_mask(
     output: &mut [f32],
 ) {
     assert_eq!(input.len(), output.len());
-    let mask = defect_map.mask();
 
     // Copy input to output first
     output.copy_from_slice(input);
 
-    // Replace defective pixels with local median of non-defective neighbors
-    for y in 0..height {
-        for x in 0..width {
-            let idx = y * width + x;
-            if mask[idx] {
-                output[idx] = local_median_excluding_defects(input, width, height, x, y, mask);
-            }
-        }
+    let defective_indices = defect_map.defective_indices();
+    if defective_indices.is_empty() {
+        return;
+    }
+
+    // Compute replacement values in parallel and apply them
+    let replacements: Vec<(usize, f32)> = defective_indices
+        .par_iter()
+        .map(|&idx| {
+            let x = idx % width;
+            let y = idx / width;
+            let value = local_median_excluding_defects(input, width, height, x, y, defect_map);
+            (idx, value)
+        })
+        .collect();
+
+    for (idx, value) in replacements {
+        output[idx] = value;
     }
 }
 
@@ -125,7 +146,7 @@ fn local_median_excluding_defects(
     height: usize,
     cx: usize,
     cy: usize,
-    defect_mask: &[bool],
+    defect_map: &DefectMap,
 ) -> f32 {
     let mut values = [0.0f32; 9];
     let mut count = 0;
@@ -137,7 +158,7 @@ fn local_median_excluding_defects(
 
             if nx >= 0 && nx < width as i32 && ny >= 0 && ny < height as i32 {
                 let nidx = ny as usize * width + nx as usize;
-                if !defect_mask[nidx] {
+                if !defect_map.is_defective_idx(nidx) {
                     values[count] = pixels[nidx];
                     count += 1;
                 }
@@ -266,14 +287,25 @@ mod tests {
     }
 
     #[test]
-    fn test_defect_map_mask_access() {
+    fn test_defect_map_indices_access() {
+        let hot_pixels = vec![(1, 2), (3, 0)];
+        let map = DefectMap::new(5, 5, &hot_pixels, &[], &[], &[]);
+
+        let indices = map.defective_indices();
+        assert_eq!(indices.len(), 2);
+        // Indices should be sorted
+        assert_eq!(indices[0], 3); // (3,0) = 0*5+3 = 3
+        assert_eq!(indices[1], 11); // (1,2) = 2*5+1 = 11
+    }
+
+    #[test]
+    fn test_defect_map_is_defective_idx() {
         let hot_pixels = vec![(1, 2)];
         let map = DefectMap::new(5, 5, &hot_pixels, &[], &[], &[]);
 
-        let mask = map.mask();
-        assert_eq!(mask.len(), 25);
-        assert!(mask[2 * 5 + 1]); // y=2, x=1
-        assert!(!mask[0]);
+        assert!(map.is_defective_idx(11)); // (1,2) = 2*5+1 = 11
+        assert!(!map.is_defective_idx(0));
+        assert!(!map.is_defective_idx(10));
     }
 
     // =============================================================================
