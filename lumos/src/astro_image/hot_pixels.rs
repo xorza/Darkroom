@@ -183,35 +183,24 @@ impl HotPixelMap {
 
         let width = image.width();
 
-        // Helper to correct a single channel
-        let correct_channel = |replacements: &mut Vec<(usize, f32)>,
-                               mask: &[bool],
-                               c: usize,
-                               img: &mut AstroImage| {
-            replacements.clear();
-            replacements.extend(mask.iter().enumerate().filter(|&(_, &is_hot)| is_hot).map(
-                |(pixel_idx, _)| {
-                    let x = pixel_idx % width;
-                    let y = pixel_idx / width;
-                    (pixel_idx, median_of_neighbors(img, x, y, c))
-                },
-            ));
-
-            let channel_data = img.channel_mut(c);
-            for &(pixel_idx, value) in replacements.iter() {
-                channel_data[pixel_idx] = value;
+        // Helper to correct a single channel - compute median and apply immediately.
+        // Safe because hot pixels are sparse and won't be neighbors of each other.
+        let correct_channel = |mask: &[bool], c: usize, img: &mut AstroImage| {
+            for (pixel_idx, _) in mask.iter().enumerate().filter(|&(_, &is_hot)| is_hot) {
+                let x = pixel_idx % width;
+                let y = pixel_idx / width;
+                let replacement = median_of_neighbors(img, x, y, c);
+                img.channel_mut(c)[pixel_idx] = replacement;
             }
         };
 
-        let mut replacements: Vec<(usize, f32)> = Vec::new();
-
         match &self.mask {
             HotPixelMask::L(mask) => {
-                correct_channel(&mut replacements, mask, 0, image);
+                correct_channel(mask, 0, image);
             }
             HotPixelMask::Rgb(masks) => {
                 for (c, mask) in masks.iter().enumerate() {
-                    correct_channel(&mut replacements, mask, c, image);
+                    correct_channel(mask, c, image);
                 }
             }
         }
