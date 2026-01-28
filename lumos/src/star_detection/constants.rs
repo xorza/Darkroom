@@ -87,11 +87,10 @@ pub fn compute_stamp_radius(expected_fwhm: f32) -> usize {
 /// * `width` - Image width
 /// * `height` - Image height
 /// * `radius` - Dilation radius in pixels
-///
-/// # Returns
-/// Dilated mask of the same size
-pub fn dilate_mask(mask: &[bool], width: usize, height: usize, radius: usize) -> Vec<bool> {
-    let mut dilated = vec![false; width * height];
+/// * `output` - Output buffer for dilated mask (will be cleared and filled)
+pub fn dilate_mask(mask: &[bool], width: usize, height: usize, radius: usize, output: &mut [bool]) {
+    assert_eq!(mask.len(), output.len());
+    output.fill(false);
 
     for y in 0..height {
         for x in 0..width {
@@ -104,14 +103,12 @@ pub fn dilate_mask(mask: &[bool], width: usize, height: usize, radius: usize) ->
 
                 for dy in y_min..=y_max {
                     for dx in x_min..=x_max {
-                        dilated[dy * width + dx] = true;
+                        output[dy * width + dx] = true;
                     }
                 }
             }
         }
     }
-
-    dilated
 }
 
 /// Compute sigma-clipped median and MAD-based sigma.

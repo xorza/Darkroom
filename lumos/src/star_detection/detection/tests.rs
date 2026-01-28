@@ -7,6 +7,13 @@ use super::*;
 use crate::star_detection::background::{BackgroundMap, estimate_background};
 use crate::star_detection::constants::dilate_mask;
 
+/// Helper to dilate a mask (allocates output)
+fn dilate_mask_test(mask: &[bool], width: usize, height: usize, radius: usize) -> Vec<bool> {
+    let mut output = vec![false; mask.len()];
+    dilate_mask(mask, width, height, radius, &mut output);
+    output
+}
+
 /// Default deblend config for tests
 const TEST_DEBLEND_CONFIG: DeblendConfig = DeblendConfig {
     min_separation: 3,
@@ -361,7 +368,7 @@ fn test_connected_components_labels_are_sequential() {
 #[test]
 fn test_dilate_mask_empty() {
     let mask = vec![false; 9];
-    let dilated = dilate_mask(&mask, 3, 3, 1);
+    let dilated = dilate_mask_test(&mask, 3, 3, 1);
     assert!(dilated.iter().all(|&x| !x));
 }
 
@@ -371,7 +378,7 @@ fn test_dilate_mask_single_pixel_radius_0() {
     let mut mask = vec![false; 9];
     mask[4] = true; // center
 
-    let dilated = dilate_mask(&mask, 3, 3, 0);
+    let dilated = dilate_mask_test(&mask, 3, 3, 0);
 
     assert_eq!(dilated.iter().filter(|&&x| x).count(), 1);
     assert!(dilated[4]);
@@ -383,7 +390,7 @@ fn test_dilate_mask_single_pixel_radius_1() {
     let mut mask = vec![false; 25]; // 5x5
     mask[2 * 5 + 2] = true; // center at (2, 2)
 
-    let dilated = dilate_mask(&mask, 5, 5, 1);
+    let dilated = dilate_mask_test(&mask, 5, 5, 1);
 
     // Should dilate to 3x3 square centered at (2,2)
     for y in 1..=3 {
@@ -404,7 +411,7 @@ fn test_dilate_mask_single_pixel_radius_2() {
     let mut mask = vec![false; 49];
     mask[3 * 7 + 3] = true; // center at (3, 3)
 
-    let dilated = dilate_mask(&mask, 7, 7, 2);
+    let dilated = dilate_mask_test(&mask, 7, 7, 2);
 
     // Should dilate to 5x5 square centered at (3,3)
     let mut count = 0;
@@ -423,7 +430,7 @@ fn test_dilate_mask_corner_pixel() {
     let mut mask = vec![false; 16];
     mask[0] = true;
 
-    let dilated = dilate_mask(&mask, 4, 4, 1);
+    let dilated = dilate_mask_test(&mask, 4, 4, 1);
 
     // Only 2x2 corner should be dilated
     assert!(dilated[0 * 4 + 0]);
@@ -441,7 +448,7 @@ fn test_dilate_mask_edge_pixel() {
     let mut mask = vec![false; 25];
     mask[2 * 5 + 0] = true;
 
-    let dilated = dilate_mask(&mask, 5, 5, 1);
+    let dilated = dilate_mask_test(&mask, 5, 5, 1);
 
     // Should expand but clip at left edge
     assert!(dilated[1 * 5 + 0]);
@@ -460,7 +467,7 @@ fn test_dilate_mask_merges_nearby_pixels() {
     mask[0] = true;
     mask[3] = true;
 
-    let dilated = dilate_mask(&mask, 7, 1, 2);
+    let dilated = dilate_mask_test(&mask, 7, 1, 2);
 
     // Both should expand and merge
     // Pixel 0 expands to 0,1,2
@@ -648,7 +655,7 @@ fn test_dilate_mask_large_radius() {
     let mut mask = vec![false; 121];
     mask[5 * 11 + 5] = true; // center
 
-    let dilated = dilate_mask(&mask, 11, 11, 5);
+    let dilated = dilate_mask_test(&mask, 11, 11, 5);
 
     // Should create 11x11 square (capped at image bounds)
     assert!(dilated.iter().all(|&x| x), "All pixels should be dilated");
@@ -660,7 +667,7 @@ fn test_dilate_mask_radius_larger_than_image() {
     let mut mask = vec![false; 9];
     mask[4] = true; // center of 3x3
 
-    let dilated = dilate_mask(&mask, 3, 3, 100);
+    let dilated = dilate_mask_test(&mask, 3, 3, 100);
 
     // Should fill entire image
     assert!(dilated.iter().all(|&x| x));
@@ -675,7 +682,7 @@ fn test_dilate_mask_all_corners() {
     mask[4 * 5 + 0] = true; // bottom-left
     mask[4 * 5 + 4] = true; // bottom-right
 
-    let dilated = dilate_mask(&mask, 5, 5, 1);
+    let dilated = dilate_mask_test(&mask, 5, 5, 1);
 
     // Check corner expansions
     // Top-left expands to (0,0), (0,1), (1,0), (1,1)
@@ -696,7 +703,7 @@ fn test_dilate_mask_full_coverage_radius_2() {
     mask[0] = true;
     mask[4] = true;
 
-    let dilated = dilate_mask(&mask, 9, 1, 2);
+    let dilated = dilate_mask_test(&mask, 9, 1, 2);
 
     // Pixel 0 expands to 0,1,2
     // Pixel 4 expands to 2,3,4,5,6
@@ -714,7 +721,7 @@ fn test_dilate_mask_non_square_image() {
     let mut mask = vec![false; 21];
     mask[1 * 7 + 3] = true;
 
-    let dilated = dilate_mask(&mask, 7, 3, 1);
+    let dilated = dilate_mask_test(&mask, 7, 3, 1);
 
     // Should create 3x3 square centered at (3, 1)
     for y in 0..3 {
@@ -735,7 +742,7 @@ fn test_dilate_mask_preserves_original_pixels() {
     mask[12] = true; // center
     mask[24] = true;
 
-    let dilated = dilate_mask(&mask, 5, 5, 1);
+    let dilated = dilate_mask_test(&mask, 5, 5, 1);
 
     // All original pixels must be present
     assert!(dilated[0]);

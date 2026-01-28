@@ -2,11 +2,12 @@
 //! Run with: cargo bench --package lumos --features bench detection
 
 use super::{
-    connected_components, create_threshold_mask, detect_stars, detect_stars_filtered, dilate_mask,
+    connected_components, create_threshold_mask, detect_stars, detect_stars_filtered,
     extract_candidates,
 };
 use crate::star_detection::StarDetectionConfig;
 use crate::star_detection::background::BackgroundMap;
+use crate::star_detection::constants::dilate_mask;
 use crate::star_detection::deblend::DeblendConfig;
 use crate::star_detection::gpu::{GpuThresholdDetector, detect_stars_gpu_with_detector};
 use criterion::{BenchmarkId, Criterion, Throughput};
@@ -101,16 +102,18 @@ pub fn benchmarks(c: &mut Criterion) {
         dilate_group.throughput(Throughput::Elements((width * height) as u64));
 
         for radius in [1, 2, 3] {
+            let mut output = vec![false; mask.len()];
             dilate_group.bench_function(
                 BenchmarkId::new(&size_name, format!("radius_{}", radius)),
                 |b| {
                     b.iter(|| {
-                        black_box(dilate_mask(
+                        dilate_mask(
                             black_box(&mask),
                             black_box(width),
                             black_box(height),
                             black_box(radius),
-                        ))
+                            black_box(&mut output),
+                        )
                     })
                 },
             );
@@ -131,8 +134,10 @@ pub fn benchmarks(c: &mut Criterion) {
     ] {
         let pixels = generate_test_image(width, height, num_stars);
         let background = create_background_map(width, height);
-        let mask = create_threshold_mask(&pixels, &background, 3.0);
-        let mask = dilate_mask(&mask, width, height, 1);
+        let mut mask = create_threshold_mask(&pixels, &background, 3.0);
+        let mut dilated = vec![false; mask.len()];
+        dilate_mask(&mask, width, height, 1, &mut dilated);
+        std::mem::swap(&mut mask, &mut dilated);
         let size_name = format!("{}x{}_{}stars", width, height, num_stars);
 
         cc_group.throughput(Throughput::Elements((width * height) as u64));
@@ -157,8 +162,10 @@ pub fn benchmarks(c: &mut Criterion) {
     for &(width, height, num_stars) in &[(512, 512, 50), (1024, 1024, 200)] {
         let pixels = generate_test_image(width, height, num_stars);
         let background = create_background_map(width, height);
-        let mask = create_threshold_mask(&pixels, &background, 3.0);
-        let mask = dilate_mask(&mask, width, height, 1);
+        let mut mask = create_threshold_mask(&pixels, &background, 3.0);
+        let mut dilated = vec![false; mask.len()];
+        dilate_mask(&mask, width, height, 1, &mut dilated);
+        std::mem::swap(&mut mask, &mut dilated);
         let (labels, num_labels) = connected_components(&mask, width, height);
         let size_name = format!("{}x{}_{}stars", width, height, num_stars);
 
@@ -297,6 +304,7 @@ fn gpu_threshold_benchmarks(c: &mut Criterion) {
         group.throughput(Throughput::Elements((width * height) as u64));
 
         // CPU version (dispatch to SIMD)
+        let mut dilated = vec![false; width * height];
         group.bench_function(BenchmarkId::new("cpu", &size_name), |b| {
             b.iter(|| {
                 let mask = create_threshold_mask(
@@ -304,7 +312,7 @@ fn gpu_threshold_benchmarks(c: &mut Criterion) {
                     black_box(&background),
                     black_box(3.0),
                 );
-                black_box(dilate_mask(&mask, width, height, 1))
+                dilate_mask(&mask, width, height, 1, black_box(&mut dilated))
             })
         });
 

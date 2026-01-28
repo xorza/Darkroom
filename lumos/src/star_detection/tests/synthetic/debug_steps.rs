@@ -177,7 +177,8 @@ fn test_debug_synthetic_steps() {
     mask_img.save(&path).unwrap();
     println!("Saved: {:?}", path);
 
-    let dilated = dilate_mask(&mask, width, height, 2);
+    let mut dilated = vec![false; mask.len()];
+    dilate_mask(&mask, width, height, 2, &mut dilated);
     let dilated_count = dilated.iter().filter(|&&b| b).count();
     println!(
         "Dilated mask: {} pixels ({:.2}%)",

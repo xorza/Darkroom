@@ -99,12 +99,14 @@ pub fn detect_stars(
     let detection_config = DetectionConfig::from(config);
 
     // Create binary mask of above-threshold pixels
-    let mask = create_threshold_mask(pixels, background, detection_config.sigma_threshold);
+    let mut mask = create_threshold_mask(pixels, background, detection_config.sigma_threshold);
 
     // Dilate mask to connect nearby pixels that may be separated due to
     // Bayer pattern artifacts or noise. Use radius 1 (3x3 structuring element)
     // to minimize merging of close stars while still connecting fragmented detections.
-    let mask = dilate_mask(&mask, width, height, 1);
+    let mut dilated = vec![false; mask.len()];
+    dilate_mask(&mask, width, height, 1, &mut dilated);
+    std::mem::swap(&mut mask, &mut dilated);
 
     // Find connected components
     let (labels, num_labels) = connected_components(&mask, width, height);
@@ -316,13 +318,15 @@ pub fn detect_stars_filtered(
 
     // Create binary mask from the filtered image
     // The threshold is based on noise in the filtered image
-    let mask =
+    let mut mask =
         create_threshold_mask_filtered(filtered, background, detection_config.sigma_threshold);
 
     // Dilate mask with radius 1 to connect fragmented detections while
     // minimizing merging of close stars. Matched filtering already provides
     // good connectivity, so minimal dilation is needed.
-    let mask = dilate_mask(&mask, width, height, 1);
+    let mut dilated = vec![false; mask.len()];
+    dilate_mask(&mask, width, height, 1, &mut dilated);
+    std::mem::swap(&mut mask, &mut dilated);
 
     // Find connected components
     let (labels, num_labels) = connected_components(&mask, width, height);

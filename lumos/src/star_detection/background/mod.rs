@@ -455,15 +455,22 @@ pub fn estimate_background_iterative(
     // Start with initial background estimate
     let mut background = estimate_background(pixels, width, height, tile_size);
 
+    // Pre-allocate mask buffers for reuse across iterations
+    let num_pixels = pixels.len();
+    let mut mask = vec![false; num_pixels];
+    let mut scratch = vec![false; num_pixels];
+
     for _iter in 0..config.iterations {
         // Create mask of pixels above threshold
-        let mask = create_object_mask(
+        create_object_mask(
             pixels,
             &background,
             config.detection_sigma,
             config.mask_dilation,
             width,
             height,
+            &mut mask,
+            &mut scratch,
         );
 
         // Re-estimate background with masked pixels excluded
@@ -481,6 +488,9 @@ pub fn estimate_background_iterative(
 }
 
 /// Create a mask of pixels that are likely objects (above threshold).
+///
+/// `output` is used as the mask buffer. `scratch` is used for dilation if needed.
+#[allow(clippy::too_many_arguments)]
 fn create_object_mask(
     pixels: &[f32],
     background: &BackgroundMap,
@@ -488,30 +498,25 @@ fn create_object_mask(
     dilation_radius: usize,
     width: usize,
     height: usize,
-) -> Vec<bool> {
+    output: &mut [bool],
+    scratch: &mut [bool],
+) {
     // Initial mask: pixels above threshold
-    let mut mask: Vec<bool> = pixels
+    for (i, ((&px, &bg), &noise)) in pixels
         .iter()
         .zip(background.background.iter())
         .zip(background.noise.iter())
-        .map(|((&px, &bg), &noise)| {
-            let threshold = bg + detection_sigma * noise.max(1e-6);
-            px > threshold
-        })
-        .collect();
+        .enumerate()
+    {
+        let threshold = bg + detection_sigma * noise.max(1e-6);
+        output[i] = px > threshold;
+    }
 
     // Dilate mask to cover object wings
     if dilation_radius > 0 {
-        mask = dilate_mask(&mask, width, height, dilation_radius);
+        constants::dilate_mask(output, width, height, dilation_radius, scratch);
+        output.copy_from_slice(scratch);
     }
-
-    mask
-}
-
-/// Dilate a binary mask by the given radius.
-#[inline]
-fn dilate_mask(mask: &[bool], width: usize, height: usize, radius: usize) -> Vec<bool> {
-    constants::dilate_mask(mask, width, height, radius)
 }
 
 /// Estimate background with masked pixels excluded.
