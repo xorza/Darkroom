@@ -1,6 +1,5 @@
 //! Defect map for masking known sensor defects during star detection.
 
-use rayon::prelude::*;
 use std::collections::HashSet;
 
 /// Map of known sensor defects (hot pixels, dead pixels, bad columns).
@@ -67,23 +66,6 @@ impl DefectMap {
         }
     }
 
-    /// Check if a pixel is marked as defective.
-    #[inline]
-    pub fn is_defective(&self, x: usize, y: usize) -> bool {
-        if x < self.width && y < self.height {
-            let idx = y * self.width + x;
-            self.defective_indices.binary_search(&idx).is_ok()
-        } else {
-            false
-        }
-    }
-
-    /// Check if a pixel index is marked as defective.
-    #[inline]
-    pub fn is_defective_idx(&self, idx: usize) -> bool {
-        self.defective_indices.binary_search(&idx).is_ok()
-    }
-
     /// Check if the defect map has no defective pixels.
     pub fn is_empty(&self) -> bool {
         self.defective_indices.is_empty()
@@ -123,19 +105,11 @@ pub(crate) fn apply_defect_mask(
         return;
     }
 
-    // Compute replacement values in parallel and apply them
-    let replacements: Vec<(usize, f32)> = defective_indices
-        .par_iter()
-        .map(|&idx| {
-            let x = idx % width;
-            let y = idx / width;
-            let value = local_median_excluding_defects(input, width, height, x, y, defect_map);
-            (idx, value)
-        })
-        .collect();
-
-    for (idx, value) in replacements {
-        output[idx] = value;
+    // Replace defective pixels with local median
+    for &idx in defective_indices {
+        let x = idx % width;
+        let y = idx / width;
+        output[idx] = local_median_excluding_defects(input, width, height, x, y, defective_indices);
     }
 }
 
@@ -146,7 +120,7 @@ fn local_median_excluding_defects(
     height: usize,
     cx: usize,
     cy: usize,
-    defect_map: &DefectMap,
+    defective_indices: &[usize],
 ) -> f32 {
     let mut values = [0.0f32; 9];
     let mut count = 0;
@@ -158,7 +132,7 @@ fn local_median_excluding_defects(
 
             if nx >= 0 && nx < width as i32 && ny >= 0 && ny < height as i32 {
                 let nidx = ny as usize * width + nx as usize;
-                if !defect_map.is_defective_idx(nidx) {
+                if defective_indices.binary_search(&nidx).is_err() {
                     values[count] = pixels[nidx];
                     count += 1;
                 }
@@ -180,6 +154,17 @@ fn local_median_excluding_defects(
 mod tests {
     use super::*;
 
+    // Test helper: check if (x, y) is defective
+    fn is_defective(map: &DefectMap, x: usize, y: usize) -> bool {
+        let (width, height) = map.dimensions();
+        if x < width && y < height {
+            let idx = y * width + x;
+            map.defective_indices().binary_search(&idx).is_ok()
+        } else {
+            false
+        }
+    }
+
     // =============================================================================
     // DefectMap Construction Tests
     // =============================================================================
@@ -197,10 +182,10 @@ mod tests {
         let map = DefectMap::new(10, 10, &hot_pixels, &[], &[], &[]);
 
         assert!(!map.is_empty());
-        assert!(map.is_defective(2, 3));
-        assert!(map.is_defective(5, 5));
-        assert!(!map.is_defective(0, 0));
-        assert!(!map.is_defective(2, 2));
+        assert!(is_defective(&map, 2, 3));
+        assert!(is_defective(&map, 5, 5));
+        assert!(!is_defective(&map, 0, 0));
+        assert!(!is_defective(&map, 2, 2));
     }
 
     #[test]
@@ -208,9 +193,9 @@ mod tests {
         let dead_pixels = vec![(1, 1), (8, 8)];
         let map = DefectMap::new(10, 10, &[], &dead_pixels, &[], &[]);
 
-        assert!(map.is_defective(1, 1));
-        assert!(map.is_defective(8, 8));
-        assert!(!map.is_defective(0, 0));
+        assert!(is_defective(&map, 1, 1));
+        assert!(is_defective(&map, 8, 8));
+        assert!(!is_defective(&map, 0, 0));
     }
 
     #[test]
@@ -221,14 +206,14 @@ mod tests {
         // Entire column 3 should be defective
         for y in 0..10 {
             assert!(
-                map.is_defective(3, y),
+                is_defective(&map, 3, y),
                 "Column 3, row {} should be defective",
                 y
             );
         }
         // Other columns should not be defective
-        assert!(!map.is_defective(2, 5));
-        assert!(!map.is_defective(4, 5));
+        assert!(!is_defective(&map, 2, 5));
+        assert!(!is_defective(&map, 4, 5));
     }
 
     #[test]
@@ -239,14 +224,14 @@ mod tests {
         // Entire row 7 should be defective
         for x in 0..10 {
             assert!(
-                map.is_defective(x, 7),
+                is_defective(&map, x, 7),
                 "Row 7, col {} should be defective",
                 x
             );
         }
         // Other rows should not be defective
-        assert!(!map.is_defective(5, 6));
-        assert!(!map.is_defective(5, 8));
+        assert!(!is_defective(&map, 5, 6));
+        assert!(!is_defective(&map, 5, 8));
     }
 
     #[test]
@@ -257,14 +242,14 @@ mod tests {
         let bad_rows = vec![2];
         let map = DefectMap::new(10, 10, &hot_pixels, &dead_pixels, &bad_columns, &bad_rows);
 
-        assert!(map.is_defective(0, 0)); // Hot pixel
-        assert!(map.is_defective(9, 9)); // Dead pixel
-        assert!(map.is_defective(5, 0)); // Bad column
-        assert!(map.is_defective(5, 9)); // Bad column
-        assert!(map.is_defective(0, 2)); // Bad row
-        assert!(map.is_defective(9, 2)); // Bad row
-        assert!(map.is_defective(5, 2)); // Intersection of bad column and row
-        assert!(!map.is_defective(1, 1)); // Normal pixel
+        assert!(is_defective(&map, 0, 0)); // Hot pixel
+        assert!(is_defective(&map, 9, 9)); // Dead pixel
+        assert!(is_defective(&map, 5, 0)); // Bad column
+        assert!(is_defective(&map, 5, 9)); // Bad column
+        assert!(is_defective(&map, 0, 2)); // Bad row
+        assert!(is_defective(&map, 9, 2)); // Bad row
+        assert!(is_defective(&map, 5, 2)); // Intersection of bad column and row
+        assert!(!is_defective(&map, 1, 1)); // Normal pixel
     }
 
     #[test]
@@ -272,8 +257,8 @@ mod tests {
         let hot_pixels = vec![(100, 100), (5, 5)]; // First is out of bounds
         let map = DefectMap::new(10, 10, &hot_pixels, &[], &[], &[]);
 
-        assert!(map.is_defective(5, 5));
-        assert!(!map.is_defective(9, 9)); // No crash, just not defective
+        assert!(is_defective(&map, 5, 5));
+        assert!(!is_defective(&map, 9, 9)); // No crash, just not defective
     }
 
     #[test]
@@ -281,9 +266,9 @@ mod tests {
         let map = DefectMap::new(10, 10, &[], &[], &[], &[]);
 
         // Out of bounds queries should return false, not panic
-        assert!(!map.is_defective(10, 5));
-        assert!(!map.is_defective(5, 10));
-        assert!(!map.is_defective(100, 100));
+        assert!(!is_defective(&map, 10, 5));
+        assert!(!is_defective(&map, 5, 10));
+        assert!(!is_defective(&map, 100, 100));
     }
 
     #[test]
@@ -296,16 +281,6 @@ mod tests {
         // Indices should be sorted
         assert_eq!(indices[0], 3); // (3,0) = 0*5+3 = 3
         assert_eq!(indices[1], 11); // (1,2) = 2*5+1 = 11
-    }
-
-    #[test]
-    fn test_defect_map_is_defective_idx() {
-        let hot_pixels = vec![(1, 2)];
-        let map = DefectMap::new(5, 5, &hot_pixels, &[], &[], &[]);
-
-        assert!(map.is_defective_idx(11)); // (1,2) = 2*5+1 = 11
-        assert!(!map.is_defective_idx(0));
-        assert!(!map.is_defective_idx(10));
     }
 
     // =============================================================================
