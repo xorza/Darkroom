@@ -35,6 +35,15 @@ fn cache_filename_for_path(path: &Path) -> String {
     format!("{:016x}.bin", hash)
 }
 
+/// Cached frame data for disk-backed storage.
+#[derive(Debug)]
+struct CachedFrame {
+    /// Memory-mapped channel data, one per channel.
+    mmaps: Vec<Mmap>,
+    /// Paths to channel cache files, one per channel.
+    paths: Vec<PathBuf>,
+}
+
 /// Storage mode for image data.
 #[derive(Debug)]
 enum Storage {
@@ -43,10 +52,7 @@ enum Storage {
     /// Images stored on disk with memory-mapped access.
     /// Each frame has one file per channel for efficient planar access.
     DiskBacked {
-        /// mmaps[frame_idx][channel_idx] - memory-mapped channel data
-        mmaps: Vec<Vec<Mmap>>,
-        /// cache_paths[frame_idx][channel_idx] - paths to channel cache files
-        cache_paths: Vec<Vec<PathBuf>>,
+        frames: Vec<CachedFrame>,
         cache_dir: PathBuf,
     },
 }
@@ -212,8 +218,7 @@ impl ImageCache {
         })?;
 
         let channels = dimensions.channels;
-        let mut all_mmaps: Vec<Vec<Mmap>> = Vec::with_capacity(paths.len());
-        let mut all_cache_paths: Vec<Vec<PathBuf>> = Vec::with_capacity(paths.len());
+        let mut cached_frames: Vec<CachedFrame> = Vec::with_capacity(paths.len());
 
         // Write first image (or reuse existing cache)
         let first_path = paths[0].as_ref();
@@ -224,10 +229,9 @@ impl ImageCache {
             "Mapping source to cache files"
         );
 
-        let (frame_mmaps, frame_paths) =
+        let cached_frame =
             cache_image_channels(cache_dir, &base_filename, &first_image, dimensions)?;
-        all_mmaps.push(frame_mmaps);
-        all_cache_paths.push(frame_paths);
+        cached_frames.push(cached_frame);
         report_progress(progress, 1, paths.len(), StackingStage::Loading);
 
         // Process remaining images
@@ -265,8 +269,10 @@ impl ImageCache {
                     frame_mmaps.push(mmap);
                     frame_paths.push(channel_path);
                 }
-                all_mmaps.push(frame_mmaps);
-                all_cache_paths.push(frame_paths);
+                cached_frames.push(CachedFrame {
+                    mmaps: frame_mmaps,
+                    paths: frame_paths,
+                });
             } else {
                 // Load and cache the image
                 let image = AstroImage::from_file(path_ref).map_err(|e| Error::ImageLoad {
@@ -283,10 +289,9 @@ impl ImageCache {
                     });
                 }
 
-                let (frame_mmaps, frame_paths) =
+                let cached_frame =
                     cache_image_channels(cache_dir, &base_filename, &image, dimensions)?;
-                all_mmaps.push(frame_mmaps);
-                all_cache_paths.push(frame_paths);
+                cached_frames.push(cached_frame);
             }
 
             report_progress(progress, i + 1, paths.len(), StackingStage::Loading);
@@ -294,14 +299,13 @@ impl ImageCache {
 
         tracing::info!(
             "Cached {} frames ({} channels each) to disk at {:?}",
-            all_mmaps.len(),
+            cached_frames.len(),
             channels,
             cache_dir
         );
 
         Ok(Storage::DiskBacked {
-            mmaps: all_mmaps,
-            cache_paths: all_cache_paths,
+            frames: cached_frames,
             cache_dir: cache_dir.to_path_buf(),
         })
     }
@@ -310,20 +314,15 @@ impl ImageCache {
     pub fn frame_count(&self) -> usize {
         match &self.storage {
             Storage::InMemory(images) => images.len(),
-            Storage::DiskBacked { mmaps, .. } => mmaps.len(),
+            Storage::DiskBacked { frames, .. } => frames.len(),
         }
     }
 
     /// Remove all cache files (only applies to disk-backed storage).
     pub fn cleanup(&self) {
-        if let Storage::DiskBacked {
-            cache_paths,
-            cache_dir,
-            ..
-        } = &self.storage
-        {
-            for frame_paths in cache_paths {
-                for path in frame_paths {
+        if let Storage::DiskBacked { frames, cache_dir } = &self.storage {
+            for frame in frames {
+                for path in &frame.paths {
                     let _ = std::fs::remove_file(path);
                 }
             }
@@ -374,7 +373,7 @@ impl ImageCache {
         report_progress(&self.progress, 0, total_work, StackingStage::Processing);
 
         // Process each channel independently
-        for channel in 0..channels {
+        for (channel, output_channel) in output_channels.iter_mut().enumerate() {
             for chunk_idx in 0..num_chunks {
                 let start_row = chunk_idx * chunk_rows;
                 let end_row = (start_row + chunk_rows).min(height);
@@ -388,8 +387,7 @@ impl ImageCache {
                     })
                     .collect();
 
-                let output_slice =
-                    &mut output_channels[channel][start_row * width..][..pixels_in_chunk];
+                let output_slice = &mut output_channel[start_row * width..][..pixels_in_chunk];
 
                 output_slice.par_chunks_mut(width).enumerate().for_each(
                     |(row_in_chunk, row_output)| {
@@ -467,7 +465,7 @@ impl ImageCache {
         report_progress(&self.progress, 0, total_work, StackingStage::Processing);
 
         // Process each channel independently
-        for channel in 0..channels {
+        for (channel, output_channel) in output_channels.iter_mut().enumerate() {
             for chunk_idx in 0..num_chunks {
                 let start_row = chunk_idx * chunk_rows;
                 let end_row = (start_row + chunk_rows).min(height);
@@ -480,8 +478,7 @@ impl ImageCache {
                     })
                     .collect();
 
-                let output_slice =
-                    &mut output_channels[channel][start_row * width..][..pixels_in_chunk];
+                let output_slice = &mut output_channel[start_row * width..][..pixels_in_chunk];
 
                 output_slice.par_chunks_mut(width).enumerate().for_each(
                     |(row_in_chunk, row_output)| {
@@ -533,8 +530,8 @@ impl ImageCache {
                 let channel_data = images[frame_idx].channel(channel);
                 &channel_data[start_pixel..end_pixel]
             }
-            Storage::DiskBacked { mmaps, .. } => {
-                let mmap = &mmaps[frame_idx][channel];
+            Storage::DiskBacked { frames, .. } => {
+                let mmap = &frames[frame_idx].mmaps[channel];
                 let start_offset = start_pixel * size_of::<f32>();
                 let end_offset = end_pixel * size_of::<f32>();
                 let bytes = &mmap[start_offset..end_offset];
@@ -596,16 +593,16 @@ fn write_channel_cache_file(path: &Path, channel_data: &[f32]) -> Result<(), Err
     Ok(())
 }
 
-/// Cache all channels of an image to separate files and return mmaps.
+/// Cache all channels of an image to separate files and return a CachedFrame.
 fn cache_image_channels(
     cache_dir: &Path,
     base_filename: &str,
     image: &AstroImage,
     dimensions: ImageDimensions,
-) -> Result<(Vec<Mmap>, Vec<PathBuf>), Error> {
+) -> Result<CachedFrame, Error> {
     let channels = dimensions.channels;
-    let mut frame_mmaps = Vec::with_capacity(channels);
-    let mut frame_paths = Vec::with_capacity(channels);
+    let mut mmaps = Vec::with_capacity(channels);
+    let mut paths = Vec::with_capacity(channels);
 
     for c in 0..channels {
         let channel_filename = channel_cache_filename(base_filename, c);
@@ -628,11 +625,11 @@ fn cache_image_channels(
             })?
         };
 
-        frame_mmaps.push(mmap);
-        frame_paths.push(channel_path);
+        mmaps.push(mmap);
+        paths.push(channel_path);
     }
 
-    Ok((frame_mmaps, frame_paths))
+    Ok(CachedFrame { mmaps, paths })
 }
 
 #[cfg(test)]
@@ -787,15 +784,14 @@ mod tests {
         let image = AstroImage::from_pixels(dims, pixels);
 
         let base_filename = "test_frame.bin";
-        let (mmaps, paths) = cache_image_channels(&temp_dir, base_filename, &image, dims).unwrap();
+        let cached_frame = cache_image_channels(&temp_dir, base_filename, &image, dims).unwrap();
 
         // Should create 3 channel files
-        assert_eq!(mmaps.len(), 3);
-        assert_eq!(paths.len(), 3);
+        assert_eq!(cached_frame.mmaps.len(), 3);
+        assert_eq!(cached_frame.paths.len(), 3);
 
         // Verify each channel file contains the correct data
-        for c in 0..3 {
-            let mmap = &mmaps[c];
+        for (c, mmap) in cached_frame.mmaps.iter().enumerate() {
             let read_channel: &[f32] = bytemuck::cast_slice(&mmap[..]);
             let expected_channel = image.channel(c);
 
@@ -806,7 +802,7 @@ mod tests {
         }
 
         // Cleanup
-        for path in paths {
+        for path in cached_frame.paths {
             let _ = std::fs::remove_file(path);
         }
         let _ = std::fs::remove_dir(&temp_dir);
@@ -831,7 +827,7 @@ mod tests {
 
         // Read row 1 (pixels 4-7)
         let width = 4;
-        let start_offset = 1 * width * size_of::<f32>();
+        let start_offset = width * size_of::<f32>();
         let end_offset = 2 * width * size_of::<f32>();
 
         let bytes = &mmap[start_offset..end_offset];
