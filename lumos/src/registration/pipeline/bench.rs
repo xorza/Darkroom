@@ -6,9 +6,9 @@ use std::hint::black_box;
 use criterion::{BenchmarkId, Criterion, Throughput};
 
 use super::{Registrator, register_star_positions, warp_to_reference_image};
-use crate::AstroImage;
 use crate::registration::interpolation::InterpolationMethod;
 use crate::registration::types::{RegistrationConfig, TransformMatrix, TransformType};
+use crate::{AstroImage, ImageDimensions};
 
 /// Register pipeline benchmarks with Criterion.
 pub fn benchmarks(c: &mut Criterion) {

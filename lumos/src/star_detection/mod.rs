@@ -1046,22 +1046,27 @@ fn find_stars(image: &AstroImage, config: &StarDetectionConfig) -> StarDetection
     diagnostics.stars_after_centroid = stars_after_centroid.len();
 
     // Step 4: Apply quality filters and count rejections
-    let mut stars: Vec<Star> = Vec::with_capacity(stars_after_centroid.len());
-    for star in stars_after_centroid {
+    let mut stars = stars_after_centroid;
+    stars.retain(|star| {
         if star.is_saturated() {
             diagnostics.rejected_saturated += 1;
+            false
         } else if star.snr < config.min_snr {
             diagnostics.rejected_low_snr += 1;
+            false
         } else if star.eccentricity > config.max_eccentricity {
             diagnostics.rejected_high_eccentricity += 1;
+            false
         } else if star.is_cosmic_ray(config.max_sharpness) {
             diagnostics.rejected_cosmic_rays += 1;
+            false
         } else if !star.is_round(config.max_roundness) {
             diagnostics.rejected_roundness += 1;
+            false
         } else {
-            stars.push(star);
+            true
         }
-    }
+    });
 
     // Sort by flux (brightest first)
     stars.sort_by(|a, b| {

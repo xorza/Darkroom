@@ -17,12 +17,12 @@ use std::path::PathBuf;
 
 use criterion::{BenchmarkId, Criterion};
 
-use crate::AstroImage;
 use crate::registration::{
     GpuWarper, InterpolationMethod, RegistrationConfig, Registrator, TransformMatrix,
 };
 use crate::star_detection::{Star, StarDetectionConfig, StarDetector};
 use crate::testing::calibration_dir;
+use crate::{AstroImage, ImageDimensions};
 
 /// Maximum stars to use for registration.
 const MAX_STARS_FOR_REGISTRATION: usize = 500;
@@ -332,9 +332,10 @@ fn warp_gpu(
     use crate::registration::warp_to_reference_image;
 
     let warped_pixels = if channels == 3 {
-        gpu_warper.warp_rgb(image.pixels(), width, height, transform)
+        let interleaved = image.clone().into_interleaved_pixels();
+        gpu_warper.warp_rgb(&interleaved, width, height, transform)
     } else if channels == 1 {
-        gpu_warper.warp_channel(image.pixels(), width, height, transform)
+        gpu_warper.warp_channel(image.channel(0), width, height, transform)
     } else {
         // Fallback for other channel counts: use CPU warping
         let warped = warp_to_reference_image(image, transform, InterpolationMethod::Bilinear);
@@ -361,8 +362,12 @@ fn benchmark_stacking(c: &mut Criterion, images: &[AstroImage]) {
         b.iter(|| {
             let mut sum = vec![0.0f64; pixel_count];
             for img in images.iter() {
-                for (i, &p) in img.pixels().iter().enumerate() {
-                    sum[i] += p as f64;
+                let mut idx = 0;
+                for c in 0..channels {
+                    for &p in img.channel(c) {
+                        sum[idx] += p as f64;
+                        idx += 1;
+                    }
                 }
             }
             let count = images.len() as f64;
@@ -466,8 +471,12 @@ fn run_full_pipeline_cpu(
     let pixel_count = width * height * channels;
     let mut sum = vec![0.0f64; pixel_count];
     for img in aligned_images.iter() {
-        for (i, &p) in img.pixels().iter().enumerate() {
-            sum[i] += p as f64;
+        let mut idx = 0;
+        for c in 0..channels {
+            for &p in img.channel(c) {
+                sum[idx] += p as f64;
+                idx += 1;
+            }
         }
     }
     let count = aligned_images.len() as f64;
@@ -510,8 +519,12 @@ fn run_full_pipeline_gpu(
     let pixel_count = width * height * channels;
     let mut sum = vec![0.0f64; pixel_count];
     for img in aligned_images.iter() {
-        for (i, &p) in img.pixels().iter().enumerate() {
-            sum[i] += p as f64;
+        let mut idx = 0;
+        for c in 0..channels {
+            for &p in img.channel(c) {
+                sum[idx] += p as f64;
+                idx += 1;
+            }
         }
     }
     let count = aligned_images.len() as f64;
