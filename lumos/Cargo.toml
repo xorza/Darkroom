@@ -84,6 +84,12 @@ path = "benches/star_detection/cosmic_ray.rs"
 harness = false
 required-features = ["bench"]
 
+[[bench]]
+name = "star_detection_full_pipeline"
+path = "benches/star_detection/full_pipeline.rs"
+harness = false
+required-features = ["bench"]
+
 # =============================================================================
 # Image Processing Benchmarks
 # =============================================================================

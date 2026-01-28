@@ -34,8 +34,12 @@ mod median_filter;
 pub mod tests;
 
 #[cfg(feature = "bench")]
-pub mod bench {
+pub mod bench;
+
+#[cfg(feature = "bench")]
+pub mod benches {
     pub use super::background::bench as background;
+    pub use super::bench as full_pipeline;
     pub use super::centroid::bench as centroid;
     pub use super::convolution::bench as convolution;
     pub use super::cosmic_ray::bench as cosmic_ray;

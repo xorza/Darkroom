@@ -247,8 +247,9 @@ pub mod bench {
     pub use crate::stacking::bench::{gpu, mean, median, sigma_clipped};
 
     // Star detection benchmarks
-    pub use crate::star_detection::bench::{
-        background, centroid, convolution, cosmic_ray, deblend, detection, median_filter,
+    pub use crate::star_detection::benches::{
+        background, centroid, convolution, cosmic_ray, deblend, detection, full_pipeline,
+        median_filter,
     };
 
     // Testing utilities for benchmarks
