@@ -639,136 +639,41 @@ mod tests {
     // ========== Storage Type Selection Tests ==========
 
     #[test]
-    fn test_in_memory_when_images_fit() {
-        // 10 images of 1000x1000x3 = 10 * 3M pixels * 4 bytes = 120MB
-        // With 1GB available and 75% usable = 750MB
-        // 120MB < 750MB, so should use in-memory
-        let pixel_count = 1000 * 1000 * 3;
+    fn test_fits_in_memory() {
+        // Test basic fit: 10 images of 1000x1000x3 = 120MB, 1GB available (750MB usable)
+        assert!(ImageCache::fits_in_memory(
+            1000 * 1000 * 3,
+            10,
+            1024 * 1024 * 1024
+        ));
+
+        // Test doesn't fit: 100 images of 6000x4000x3 = 28.8GB, 16GB available (12GB usable)
+        assert!(!ImageCache::fits_in_memory(
+            6000 * 4000 * 3,
+            100,
+            16 * 1024 * 1024 * 1024
+        ));
+
+        // Test boundary: exactly at 75% threshold
+        let pixel_count = 1000 * 1000;
         let frame_count = 10;
-        let available = 1024 * 1024 * 1024u64; // 1GB
-
+        let bytes_needed = (pixel_count * frame_count * 4) as u64;
+        let available_at_boundary = (bytes_needed * 100).div_ceil(75);
         assert!(ImageCache::fits_in_memory(
             pixel_count,
             frame_count,
-            available
+            available_at_boundary
         ));
-    }
-
-    #[test]
-    fn test_disk_backed_when_images_exceed_memory() {
-        // 100 images of 6000x4000x3 = 100 * 72M pixels * 4 bytes = 28.8GB
-        // With 16GB available and 75% usable = 12GB
-        // 28.8GB > 12GB, so should use disk
-        let pixel_count = 6000 * 4000 * 3;
-        let frame_count = 100;
-        let available = 16 * 1024 * 1024 * 1024u64; // 16GB
-
         assert!(!ImageCache::fits_in_memory(
             pixel_count,
             frame_count,
-            available
-        ));
-    }
-
-    #[test]
-    fn test_in_memory_at_boundary() {
-        // Set up exactly at 75% boundary
-        // pixel_count * frame_count * 4 = available * 0.75
-        let pixel_count = 1000 * 1000; // 1M pixels
-        let frame_count = 10;
-        let bytes_needed = (pixel_count * frame_count * 4) as u64; // 40MB
-        // usable = available * 75/100 = bytes_needed
-        // We need: bytes_needed <= available * 75 / 100
-        // Rearranging: available >= bytes_needed * 100 / 75
-        // Integer division truncates, so we need to ensure usable >= bytes_needed
-        // available * 75 / 100 >= bytes_needed
-        // To get exactly at boundary with integer math, find smallest available where usable == bytes_needed
-        let available = (bytes_needed * 100).div_ceil(75); // Round up to ensure usable >= bytes_needed
-
-        // At exact boundary, should fit
-        assert!(ImageCache::fits_in_memory(
-            pixel_count,
-            frame_count,
-            available
+            available_at_boundary - 2
         ));
 
-        // With less usable memory, should not fit
-        // Reduce available so usable < bytes_needed
-        let reduced_available = (bytes_needed * 100) / 75 - 1;
-        assert!(!ImageCache::fits_in_memory(
-            pixel_count,
-            frame_count,
-            reduced_available
-        ));
-    }
-
-    #[test]
-    fn test_in_memory_small_stack() {
-        // Small stack: 5 images of 2000x1500x3 = 5 * 9M pixels * 4 = 180MB
-        // With 512MB available (75% = 384MB), should fit
-        let pixel_count = 2000 * 1500 * 3;
-        let frame_count = 5;
-        let available = 512 * 1024 * 1024u64;
-
-        assert!(ImageCache::fits_in_memory(
-            pixel_count,
-            frame_count,
-            available
-        ));
-    }
-
-    #[test]
-    fn test_disk_backed_low_memory() {
-        // Same small stack but only 128MB available (75% = 96MB)
-        // 180MB > 96MB, should use disk
-        let pixel_count = 2000 * 1500 * 3;
-        let frame_count = 5;
-        let available = 128 * 1024 * 1024u64;
-
-        assert!(!ImageCache::fits_in_memory(
-            pixel_count,
-            frame_count,
-            available
-        ));
-    }
-
-    #[test]
-    fn test_in_memory_single_frame() {
-        // Single frame should almost always fit
-        let pixel_count = 8000 * 6000 * 3; // 144M pixels * 4 = 576MB
-        let frame_count = 1;
-        let available = 1024 * 1024 * 1024u64; // 1GB (75% = 768MB)
-
-        assert!(ImageCache::fits_in_memory(
-            pixel_count,
-            frame_count,
-            available
-        ));
-    }
-
-    #[test]
-    fn test_storage_decision_grayscale_vs_rgb() {
-        // Grayscale: 6000x4000x1 * 20 frames = 480M pixels * 4 = 1.92GB
-        // RGB: 6000x4000x3 * 20 frames = 1.44B pixels * 4 = 5.76GB
-        // With 4GB available (75% = 3GB):
-        // - Grayscale should fit
-        // - RGB should not fit
-        let available = 4 * 1024 * 1024 * 1024u64;
-        let frame_count = 20;
-
-        let grayscale_pixels = 6000 * 4000; // 1 channel
-        let rgb_pixels = 6000 * 4000 * 3;
-
-        assert!(ImageCache::fits_in_memory(
-            grayscale_pixels,
-            frame_count,
-            available
-        ));
-        assert!(!ImageCache::fits_in_memory(
-            rgb_pixels,
-            frame_count,
-            available
-        ));
+        // Test grayscale vs RGB with same memory
+        let available = 4 * 1024 * 1024 * 1024u64; // 4GB (3GB usable)
+        assert!(ImageCache::fits_in_memory(6000 * 4000, 20, available)); // Grayscale: 1.92GB
+        assert!(!ImageCache::fits_in_memory(6000 * 4000 * 3, 20, available)); // RGB: 5.76GB
     }
 
     // ========== Cache File Tests ==========
@@ -779,7 +684,6 @@ mod tests {
         std::fs::create_dir_all(&temp_dir).unwrap();
 
         let dims = ImageDimensions::new(4, 3, 3);
-        // Interleaved RGB pixels
         let pixels: Vec<f32> = (0..36).map(|i| i as f32).collect();
         let image = AstroImage::from_pixels(dims, pixels);
 
@@ -794,11 +698,7 @@ mod tests {
         for (c, mmap) in cached_frame.mmaps.iter().enumerate() {
             let read_channel: &[f32] = bytemuck::cast_slice(&mmap[..]);
             let expected_channel = image.channel(c);
-
-            assert_eq!(read_channel.len(), expected_channel.len());
-            for (a, b) in read_channel.iter().zip(expected_channel.iter()) {
-                assert!((a - b).abs() < f32::EPSILON);
-            }
+            assert_eq!(read_channel, expected_channel);
         }
 
         // Cleanup
@@ -809,82 +709,8 @@ mod tests {
     }
 
     #[test]
-    fn test_read_channel_chunk() {
-        let temp_dir = std::env::temp_dir().join("lumos_channel_chunk_test");
-        std::fs::create_dir_all(&temp_dir).unwrap();
-
-        let dims = ImageDimensions::new(4, 3, 1);
-        // Grayscale: 12 pixels
-        let pixels: Vec<f32> = (0..12).map(|i| i as f32).collect();
-        let image = AstroImage::from_pixels(dims, pixels);
-
-        // Write channel 0 to cache
-        let channel_path = temp_dir.join("chunk_c0.bin");
-        write_channel_cache_file(&channel_path, image.channel(0)).unwrap();
-
-        let file = File::open(&channel_path).unwrap();
-        let mmap = unsafe { Mmap::map(&file).unwrap() };
-
-        // Read row 1 (pixels 4-7)
-        let width = 4;
-        let start_offset = width * size_of::<f32>();
-        let end_offset = 2 * width * size_of::<f32>();
-
-        let bytes = &mmap[start_offset..end_offset];
-        let chunk: &[f32] = bytemuck::cast_slice(bytes);
-
-        let expected: Vec<f32> = (4..8).map(|i| i as f32).collect();
-        assert_eq!(chunk.len(), expected.len());
-        for (a, b) in chunk.iter().zip(expected.iter()) {
-            assert!((a - b).abs() < f32::EPSILON);
-        }
-
-        std::fs::remove_file(&channel_path).unwrap();
-        let _ = std::fs::remove_dir(&temp_dir);
-    }
-
-    // ========== Error Path Tests ==========
-
-    #[test]
-    fn test_from_paths_empty_returns_no_paths_error() {
-        let paths: Vec<PathBuf> = vec![];
-        let config = CacheConfig::default();
-        let result = ImageCache::from_paths(
-            &paths,
-            &config,
-            FrameType::Dark,
-            ProgressCallback::default(),
-        );
-
-        assert!(result.is_err());
-        let err = result.unwrap_err();
-        assert!(matches!(err, Error::NoPaths));
-    }
-
-    #[test]
-    fn test_from_paths_nonexistent_file_returns_image_load_error() {
-        let paths = vec![PathBuf::from("/nonexistent/path/to/image.fits")];
-        let config = CacheConfig::default();
-        let result = ImageCache::from_paths(
-            &paths,
-            &config,
-            FrameType::Dark,
-            ProgressCallback::default(),
-        );
-
-        assert!(result.is_err());
-        let err = result.unwrap_err();
-        match err {
-            Error::ImageLoad { path, .. } => {
-                assert!(path.to_string_lossy().contains("nonexistent"));
-            }
-            _ => panic!("Expected ImageLoad error, got {:?}", err),
-        }
-    }
-
-    #[test]
-    fn test_channel_cache_reuse_with_matching_dimensions() {
-        let temp_dir = std::env::temp_dir().join("lumos_channel_reuse_test");
+    fn test_try_reuse_channel_cache_file() {
+        let temp_dir = std::env::temp_dir().join("lumos_reuse_test");
         std::fs::create_dir_all(&temp_dir).unwrap();
 
         let dims = ImageDimensions::new(4, 3, 1);
@@ -894,62 +720,29 @@ mod tests {
         let cache_path = temp_dir.join("reuse_c0.bin");
         write_channel_cache_file(&cache_path, image.channel(0)).unwrap();
 
-        // File should be reusable with same dimensions
+        // Matching dimensions: reusable
         assert!(try_reuse_channel_cache_file(&cache_path, dims));
 
-        // File should not be reusable with different dimensions (different pixel count)
-        let different_dims = ImageDimensions::new(8, 3, 1);
-        assert!(!try_reuse_channel_cache_file(&cache_path, different_dims));
+        // Different dimensions: not reusable
+        assert!(!try_reuse_channel_cache_file(
+            &cache_path,
+            ImageDimensions::new(8, 3, 1)
+        ));
 
-        std::fs::remove_file(&cache_path).unwrap();
-        let _ = std::fs::remove_dir(&temp_dir);
-    }
-
-    #[test]
-    fn test_channel_cache_reuse_nonexistent_file() {
-        let dims = ImageDimensions::new(4, 3, 1);
-        // Nonexistent file should not be reusable
+        // Nonexistent file: not reusable
         assert!(!try_reuse_channel_cache_file(
             Path::new("/nonexistent/file.bin"),
             dims
         ));
-    }
 
-    #[test]
-    fn test_channel_cache_reuse_wrong_size_file() {
-        let temp_dir = std::env::temp_dir().join("lumos_channel_wrong_size_test");
-        std::fs::create_dir_all(&temp_dir).unwrap();
+        // Wrong size file: not reusable
+        let wrong_size_path = temp_dir.join("wrong_size.bin");
+        std::fs::write(&wrong_size_path, b"too short").unwrap();
+        assert!(!try_reuse_channel_cache_file(&wrong_size_path, dims));
 
-        let cache_path = temp_dir.join("wrong_size.bin");
-        // Write a file with wrong size
-        std::fs::write(&cache_path, b"too short").unwrap();
-
-        let dims = ImageDimensions::new(4, 3, 1);
-        assert!(!try_reuse_channel_cache_file(&cache_path, dims));
-
-        std::fs::remove_file(&cache_path).unwrap();
-        let _ = std::fs::remove_dir(&temp_dir);
-    }
-
-    #[test]
-    fn test_write_channel_cache_file_creates_valid_file() {
-        let temp_dir = std::env::temp_dir().join("lumos_channel_write_test");
-        std::fs::create_dir_all(&temp_dir).unwrap();
-
-        let dims = ImageDimensions::new(2, 2, 1);
-        let pixels: Vec<f32> = vec![1.0, 2.0, 3.0, 4.0];
-        let image = AstroImage::from_pixels(dims, pixels);
-
-        let cache_path = temp_dir.join("valid_write_c0.bin");
-        let result = write_channel_cache_file(&cache_path, image.channel(0));
-        assert!(result.is_ok());
-
-        // Verify file exists and has correct size (raw f32 data, no header)
-        let metadata = std::fs::metadata(&cache_path).unwrap();
-        let expected_size = 4 * size_of::<f32>();
-        assert_eq!(metadata.len(), expected_size as u64);
-
-        std::fs::remove_file(&cache_path).unwrap();
+        // Cleanup
+        let _ = std::fs::remove_file(&cache_path);
+        let _ = std::fs::remove_file(&wrong_size_path);
         let _ = std::fs::remove_dir(&temp_dir);
     }
 
@@ -958,5 +751,214 @@ mod tests {
         assert_eq!(channel_cache_filename("abc123.bin", 0), "abc123_c0.bin");
         assert_eq!(channel_cache_filename("abc123.bin", 1), "abc123_c1.bin");
         assert_eq!(channel_cache_filename("abc123.bin", 2), "abc123_c2.bin");
+    }
+
+    // ========== Error Path Tests ==========
+
+    #[test]
+    fn test_from_paths_errors() {
+        let config = CacheConfig::default();
+
+        // Empty paths
+        let result = ImageCache::from_paths(
+            &Vec::<PathBuf>::new(),
+            &config,
+            FrameType::Dark,
+            ProgressCallback::default(),
+        );
+        assert!(matches!(result.unwrap_err(), Error::NoPaths));
+
+        // Nonexistent file
+        let result = ImageCache::from_paths(
+            &[PathBuf::from("/nonexistent/path/image.fits")],
+            &config,
+            FrameType::Dark,
+            ProgressCallback::default(),
+        );
+        assert!(matches!(result.unwrap_err(), Error::ImageLoad { .. }));
+    }
+
+    // ========== Processing Tests ==========
+
+    #[test]
+    fn test_process_chunked_median() {
+        // Create in-memory cache with 3 grayscale frames
+        let dims = ImageDimensions::new(4, 4, 1);
+        let images = vec![
+            AstroImage::from_pixels(dims, vec![1.0; 16]),
+            AstroImage::from_pixels(dims, vec![3.0; 16]),
+            AstroImage::from_pixels(dims, vec![2.0; 16]),
+        ];
+
+        let cache = ImageCache {
+            storage: Storage::InMemory(images),
+            dimensions: dims,
+            metadata: AstroImageMetadata::default(),
+            config: CacheConfig::default(),
+            progress: ProgressCallback::default(),
+        };
+
+        // Median of [1, 3, 2] = 2
+        let result = cache.process_chunked(|values| {
+            values.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            values[values.len() / 2]
+        });
+
+        assert_eq!(result.width(), 4);
+        assert_eq!(result.height(), 4);
+        assert_eq!(result.channels(), 1);
+        for &pixel in result.channel(0) {
+            assert!((pixel - 2.0).abs() < f32::EPSILON);
+        }
+    }
+
+    #[test]
+    fn test_process_chunked_rgb() {
+        // Create in-memory cache with 2 RGB frames
+        let dims = ImageDimensions::new(2, 2, 3);
+        // Frame 1: R=1, G=2, B=3 for all pixels
+        let pixels1: Vec<f32> = (0..4).flat_map(|_| vec![1.0, 2.0, 3.0]).collect();
+        // Frame 2: R=5, G=6, B=7 for all pixels
+        let pixels2: Vec<f32> = (0..4).flat_map(|_| vec![5.0, 6.0, 7.0]).collect();
+
+        let images = vec![
+            AstroImage::from_pixels(dims, pixels1),
+            AstroImage::from_pixels(dims, pixels2),
+        ];
+
+        let cache = ImageCache {
+            storage: Storage::InMemory(images),
+            dimensions: dims,
+            metadata: AstroImageMetadata::default(),
+            config: CacheConfig::default(),
+            progress: ProgressCallback::default(),
+        };
+
+        // Mean: R=(1+5)/2=3, G=(2+6)/2=4, B=(3+7)/2=5
+        let result =
+            cache.process_chunked(|values| values.iter().sum::<f32>() / values.len() as f32);
+
+        assert_eq!(result.channels(), 3);
+        for &pixel in result.channel(0) {
+            assert!((pixel - 3.0).abs() < f32::EPSILON, "R channel");
+        }
+        for &pixel in result.channel(1) {
+            assert!((pixel - 4.0).abs() < f32::EPSILON, "G channel");
+        }
+        for &pixel in result.channel(2) {
+            assert!((pixel - 5.0).abs() < f32::EPSILON, "B channel");
+        }
+    }
+
+    #[test]
+    fn test_process_chunked_weighted() {
+        let dims = ImageDimensions::new(2, 2, 1);
+        let images = vec![
+            AstroImage::from_pixels(dims, vec![10.0; 4]),
+            AstroImage::from_pixels(dims, vec![20.0; 4]),
+        ];
+
+        let cache = ImageCache {
+            storage: Storage::InMemory(images),
+            dimensions: dims,
+            metadata: AstroImageMetadata::default(),
+            config: CacheConfig::default(),
+            progress: ProgressCallback::default(),
+        };
+
+        // Weighted mean with weights [1, 3]: (10*1 + 20*3) / (1+3) = 70/4 = 17.5
+        let weights = vec![1.0, 3.0];
+        let result = cache.process_chunked_weighted(&weights, |values, w| {
+            let sum: f32 = values.iter().zip(w.iter()).map(|(v, wt)| v * wt).sum();
+            let weight_sum: f32 = w.iter().sum();
+            sum / weight_sum
+        });
+
+        for &pixel in result.channel(0) {
+            assert!((pixel - 17.5).abs() < f32::EPSILON);
+        }
+    }
+
+    #[test]
+    fn test_frame_count() {
+        let dims = ImageDimensions::new(2, 2, 1);
+        let images = vec![
+            AstroImage::from_pixels(dims, vec![1.0; 4]),
+            AstroImage::from_pixels(dims, vec![2.0; 4]),
+            AstroImage::from_pixels(dims, vec![3.0; 4]),
+        ];
+
+        let cache = ImageCache {
+            storage: Storage::InMemory(images),
+            dimensions: dims,
+            metadata: AstroImageMetadata::default(),
+            config: CacheConfig::default(),
+            progress: ProgressCallback::default(),
+        };
+
+        assert_eq!(cache.frame_count(), 3);
+    }
+
+    #[test]
+    fn test_cleanup_removes_files() {
+        let temp_dir = std::env::temp_dir().join("lumos_cleanup_test");
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        // Create fake cache files (3 channels for RGB)
+        let paths = vec![
+            temp_dir.join("frame0_c0.bin"),
+            temp_dir.join("frame0_c1.bin"),
+            temp_dir.join("frame0_c2.bin"),
+        ];
+        for path in &paths {
+            std::fs::write(path, b"test data").unwrap();
+            assert!(path.exists());
+        }
+
+        let cache = ImageCache {
+            storage: Storage::DiskBacked {
+                frames: vec![CachedFrame {
+                    mmaps: vec![], // Empty mmaps for test
+                    paths: paths.clone(),
+                }],
+                cache_dir: temp_dir.clone(),
+            },
+            dimensions: ImageDimensions::new(2, 2, 3),
+            metadata: AstroImageMetadata::default(),
+            config: CacheConfig::default(),
+            progress: ProgressCallback::default(),
+        };
+
+        cache.cleanup();
+
+        // Files should be removed
+        for path in &paths {
+            assert!(!path.exists(), "File should be deleted: {:?}", path);
+        }
+    }
+
+    #[test]
+    fn test_read_channel_chunk_in_memory() {
+        let dims = ImageDimensions::new(4, 3, 1);
+        // Pixels 0-11 in row-major order
+        let pixels: Vec<f32> = (0..12).map(|i| i as f32).collect();
+        let images = vec![AstroImage::from_pixels(dims, pixels)];
+
+        let cache = ImageCache {
+            storage: Storage::InMemory(images),
+            dimensions: dims,
+            metadata: AstroImageMetadata::default(),
+            config: CacheConfig::default(),
+            progress: ProgressCallback::default(),
+        };
+
+        // Read row 1 (pixels 4-7)
+        let chunk = cache.read_channel_chunk(0, 0, 1, 2);
+        let expected: Vec<f32> = (4..8).map(|i| i as f32).collect();
+        assert_eq!(chunk, &expected[..]);
+
+        // Read all rows
+        let all = cache.read_channel_chunk(0, 0, 0, 3);
+        assert_eq!(all.len(), 12);
     }
 }
