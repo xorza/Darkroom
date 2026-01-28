@@ -474,13 +474,14 @@ pub fn estimate_background_iterative(
         );
 
         // Re-estimate background with masked pixels excluded
-        background = estimate_background_masked(
+        estimate_background_masked(
             pixels,
             width,
             height,
             tile_size,
             &mask,
             config.min_unmasked_fraction,
+            &mut background,
         );
     }
 
@@ -527,7 +528,8 @@ fn estimate_background_masked(
     tile_size: usize,
     mask: &[bool],
     min_unmasked_fraction: f32,
-) -> BackgroundMap {
+    output: &mut BackgroundMap,
+) {
     assert!(
         (16..=256).contains(&tile_size),
         "Tile size must be between 16 and 256"
@@ -601,13 +603,16 @@ fn estimate_background_masked(
     // Apply median filter
     grid.apply_median_filter();
 
-    // Interpolate
-    let mut background = vec![0.0f32; width * height];
-    let mut noise = vec![0.0f32; width * height];
+    // Interpolate into output
+    output.width = width;
+    output.height = height;
+    output.background.resize(width * height, 0.0);
+    output.noise.resize(width * height, 0.0);
 
-    background
+    output
+        .background
         .par_chunks_mut(width * ROWS_PER_CHUNK)
-        .zip(noise.par_chunks_mut(width * ROWS_PER_CHUNK))
+        .zip(output.noise.par_chunks_mut(width * ROWS_PER_CHUNK))
         .enumerate()
         .for_each(|(chunk_idx, (bg_chunk, noise_chunk))| {
             let y_start = chunk_idx * ROWS_PER_CHUNK;
@@ -622,13 +627,6 @@ fn estimate_background_masked(
                 interpolate_row(bg_row, noise_row, y, &grid);
             }
         });
-
-    BackgroundMap {
-        background,
-        noise,
-        width,
-        height,
-    }
 }
 
 /// Compute tile statistics with masked pixels excluded.

@@ -1150,10 +1150,10 @@ fn remove_duplicate_stars(stars: &mut Vec<Star>, min_separation: f32) -> usize {
 /// Compute median and MAD (median absolute deviation) for FWHM filtering.
 ///
 /// Returns (median, mad) computed from the given FWHM values.
-fn compute_fwhm_median_mad(fwhms: &[f32]) -> (f32, f32) {
+fn compute_fwhm_median_mad(fwhms: Vec<f32>) -> (f32, f32) {
     assert!(!fwhms.is_empty(), "Need at least one FWHM value");
 
-    let mut sorted: Vec<f32> = fwhms.to_vec();
+    let mut sorted: Vec<f32> = fwhms;
     sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
     let median = sorted[sorted.len() / 2];
 
@@ -1179,7 +1179,7 @@ fn filter_fwhm_outliers(stars: &mut Vec<Star>, max_deviation: f32) -> usize {
     // Use top half for robust median/MAD estimate
     let reference_count = (stars.len() / 2).max(5).min(stars.len());
     let fwhms: Vec<f32> = stars.iter().take(reference_count).map(|s| s.fwhm).collect();
-    let (median_fwhm, mad) = compute_fwhm_median_mad(&fwhms);
+    let (median_fwhm, mad) = compute_fwhm_median_mad(fwhms);
 
     // Use at least 10% of median as minimum MAD
     let effective_mad = mad.max(median_fwhm * 0.1);

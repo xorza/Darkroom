@@ -104,7 +104,7 @@ fn make_test_star(fwhm: f32, flux: f32) -> Star {
 #[test]
 fn test_compute_fwhm_median_mad_single_value() {
     let fwhms = vec![3.0];
-    let (median, mad) = compute_fwhm_median_mad(&fwhms);
+    let (median, mad) = compute_fwhm_median_mad(fwhms);
 
     assert!((median - 3.0).abs() < 1e-6);
     assert!((mad - 0.0).abs() < 1e-6);
@@ -115,7 +115,7 @@ fn test_compute_fwhm_median_mad_odd_count() {
     // [2.0, 3.0, 4.0] -> median = 3.0
     // deviations: [1.0, 0.0, 1.0] -> sorted: [0.0, 1.0, 1.0] -> MAD = 1.0
     let fwhms = vec![2.0, 4.0, 3.0];
-    let (median, mad) = compute_fwhm_median_mad(&fwhms);
+    let (median, mad) = compute_fwhm_median_mad(fwhms);
 
     assert!((median - 3.0).abs() < 1e-6);
     assert!((mad - 1.0).abs() < 1e-6);
@@ -126,7 +126,7 @@ fn test_compute_fwhm_median_mad_even_count() {
     // [2.0, 3.0, 4.0, 5.0] -> median = fwhms[2] = 4.0 (integer division)
     // deviations from 4.0: [2.0, 1.0, 0.0, 1.0] -> sorted: [0.0, 1.0, 1.0, 2.0] -> MAD = 1.0
     let fwhms = vec![2.0, 3.0, 5.0, 4.0];
-    let (median, mad) = compute_fwhm_median_mad(&fwhms);
+    let (median, mad) = compute_fwhm_median_mad(fwhms);
 
     assert!((median - 4.0).abs() < 1e-6);
     assert!((mad - 1.0).abs() < 1e-6);
@@ -136,7 +136,7 @@ fn test_compute_fwhm_median_mad_even_count() {
 fn test_compute_fwhm_median_mad_uniform_values() {
     // All same values -> MAD = 0
     let fwhms = vec![3.5, 3.5, 3.5, 3.5, 3.5];
-    let (median, mad) = compute_fwhm_median_mad(&fwhms);
+    let (median, mad) = compute_fwhm_median_mad(fwhms);
 
     assert!((median - 3.5).abs() < 1e-6);
     assert!((mad - 0.0).abs() < 1e-6);
@@ -147,7 +147,7 @@ fn test_compute_fwhm_median_mad_with_outlier() {
     // [3.0, 3.1, 3.2, 3.0, 10.0] -> sorted: [3.0, 3.0, 3.1, 3.2, 10.0] -> median = 3.1
     // deviations: [0.1, 0.1, 0.0, 0.1, 6.9] -> sorted: [0.0, 0.1, 0.1, 0.1, 6.9] -> MAD = 0.1
     let fwhms = vec![3.0, 3.1, 3.2, 3.0, 10.0];
-    let (median, mad) = compute_fwhm_median_mad(&fwhms);
+    let (median, mad) = compute_fwhm_median_mad(fwhms);
 
     assert!((median - 3.1).abs() < 1e-6);
     assert!((mad - 0.1).abs() < 1e-6);
@@ -158,7 +158,7 @@ fn test_compute_fwhm_median_mad_large_spread() {
     // [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0] -> median = 4.0
     // deviations: [3.0, 2.0, 1.0, 0.0, 1.0, 2.0, 3.0] -> sorted: [0,1,1,2,2,3,3] -> MAD = 2.0
     let fwhms = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0];
-    let (median, mad) = compute_fwhm_median_mad(&fwhms);
+    let (median, mad) = compute_fwhm_median_mad(fwhms);
 
     assert!((median - 4.0).abs() < 1e-6);
     assert!((mad - 2.0).abs() < 1e-6);
