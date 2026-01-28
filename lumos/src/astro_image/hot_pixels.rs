@@ -87,18 +87,11 @@ impl HotPixelMap {
 
         // Detect hot pixels - a pixel is hot if ANY channel exceeds its threshold
         // The mask is per-value (not per-pixel), so we check each channel value
-        const BOOL_CHUNK_SIZE: usize = 16384;
         let mut mask = vec![false; pixels.len()];
-        mask.par_chunks_mut(BOOL_CHUNK_SIZE)
-            .enumerate()
-            .for_each(|(chunk_idx, chunk)| {
-                let start = chunk_idx * BOOL_CHUNK_SIZE;
-                for (i, val) in chunk.iter_mut().enumerate() {
-                    let idx = start + i;
-                    let channel = idx % channels;
-                    *val = pixels[idx] > thresholds[channel];
-                }
-            });
+        crate::common::parallel_chunked(&mut mask, |idx| {
+            let channel = idx % channels;
+            pixels[idx] > thresholds[channel]
+        });
 
         // For reporting, count unique pixels (not channel values)
         let pixel_hot_count = (0..pixel_count)

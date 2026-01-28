@@ -5,7 +5,7 @@ use std::path::Path;
 use std::slice;
 use std::time::Instant;
 
-use crate::common::parallel_map_f32;
+use crate::common::parallel_chunked;
 
 use super::demosaic::xtrans::process_xtrans;
 use super::demosaic::{BayerImage, CfaPattern, demosaic_bilinear};
@@ -303,7 +303,8 @@ fn process_monochrome(
 
     // Extract the active area and normalize using parallel map
     let output_size = width * height;
-    let mono_pixels = parallel_map_f32(output_size, |i| {
+    let mut mono_pixels = vec![0.0f32; output_size];
+    parallel_chunked(&mut mono_pixels, |i| {
         let y = i / width;
         let x = i % width;
         let src_y = top_margin + y;

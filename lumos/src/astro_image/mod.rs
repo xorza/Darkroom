@@ -57,7 +57,6 @@ impl BitPix {
 
 /// Image dimensions: width, height, and number of channels.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-#[repr(C)]
 pub struct ImageDimensions {
     /// Image width in pixels
     pub width: usize,
@@ -353,27 +352,6 @@ impl AstroImage {
                     interleaved.push(b[i]);
                 }
                 interleaved
-            }
-        }
-    }
-
-    /// Apply a function to each channel's data in parallel.
-    ///
-    /// This is the preferred way to modify pixel data for both grayscale and RGB images.
-    /// The function receives `(channel_index, &mut [f32])` for each channel.
-    ///
-    /// For grayscale images, the function is called once with channel 0.
-    /// For RGB images, the function is called for channels 0, 1, 2 (R, G, B).
-    pub fn for_each_channel_mut<F>(&mut self, f: F)
-    where
-        F: Fn(usize, &mut [f32]) + Sync + Send,
-    {
-        match &mut self.pixels {
-            PixelData::L(data) => f(0, data),
-            PixelData::Rgb(channels) => {
-                for (i, channel) in channels.iter_mut().enumerate() {
-                    f(i, channel);
-                }
             }
         }
     }

@@ -5,4 +5,4 @@ pub mod cpu_features;
 
 mod parallel;
 
-pub use parallel::parallel_map_f32;
+pub use parallel::parallel_chunked;

@@ -933,6 +933,12 @@ mod tests {
             assert!(path.exists());
         }
 
+        // Use keep_cache: false to actually test cleanup
+        let config = CacheConfig {
+            keep_cache: false,
+            ..Default::default()
+        };
+
         let cache = ImageCache {
             storage: Storage::DiskBacked {
                 frames: vec![cached_frame],
@@ -940,11 +946,12 @@ mod tests {
             },
             dimensions: dims,
             metadata: AstroImageMetadata::default(),
-            config: CacheConfig::default(),
+            config,
             progress: ProgressCallback::default(),
         };
 
-        cache.cleanup();
+        // Drop the cache - should trigger cleanup via Drop
+        drop(cache);
 
         // Files should be removed
         for path in &paths {
