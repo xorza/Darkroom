@@ -132,12 +132,12 @@ impl CalibrationMasters {
     }
 
     /// Generate the filename for a master frame.
-    pub fn master_filename(frame_type: FrameType, method: &StackingMethod) -> String {
+    fn master_filename(frame_type: FrameType, method: &StackingMethod) -> String {
         format!("master_{}_{}.tiff", frame_type, method)
     }
 
     /// Generate the full path for a master frame in a directory.
-    pub fn master_path<P: AsRef<Path>>(
+    fn master_path<P: AsRef<Path>>(
         dir: P,
         frame_type: FrameType,
         method: &StackingMethod,
@@ -165,20 +165,6 @@ impl CalibrationMasters {
     /// masters.calibrate(&mut light);
     /// ```
     pub fn load<P: AsRef<Path>>(dir: P, method: StackingMethod) -> Result<Self> {
-        Self::load_impl(dir, method)
-    }
-
-    /// Load existing master frames from a directory.
-    ///
-    /// Looks for files named master_dark_<method>.tiff, master_flat_<method>.tiff, etc.
-    /// Returns None for any masters that don't exist.
-    /// Automatically generates hot pixel map from master dark if available.
-    #[deprecated(since = "0.1.0", note = "Use `load` instead")]
-    pub fn load_from_directory<P: AsRef<Path>>(dir: P, method: StackingMethod) -> Result<Self> {
-        Self::load_impl(dir, method)
-    }
-
-    fn load_impl<P: AsRef<Path>>(dir: P, method: StackingMethod) -> Result<Self> {
         let dir = dir.as_ref();
 
         let master_dark = Self::load_master(dir, FrameType::Dark, &method);
@@ -242,41 +228,6 @@ impl CalibrationMasters {
     /// }
     /// ```
     pub fn create<P: AsRef<Path>>(
-        dir: P,
-        method: StackingMethod,
-        progress: ProgressCallback,
-    ) -> Result<Self> {
-        Self::create_impl(dir, method, progress)
-    }
-
-    /// Create calibration masters from a directory containing Darks, Flats, and Bias subdirectories.
-    ///
-    /// First tries to load existing master files from the directory. If not found,
-    /// creates new masters by stacking raw frames from subdirectories.
-    /// Automatically generates hot pixel map from master dark if available.
-    ///
-    /// Expected directory structure:
-    /// ```text
-    /// calibration_dir/
-    ///   Darks/
-    ///     dark1.raf, dark2.raf, ...
-    ///   Flats/
-    ///     flat1.raf, flat2.raf, ...
-    ///   Bias/
-    ///     bias1.raf, bias2.raf, ...
-    /// ```
-    ///
-    /// Missing subdirectories are skipped (the corresponding master will be None).
-    #[deprecated(since = "0.1.0", note = "Use `create` instead")]
-    pub fn from_directory<P: AsRef<Path>>(
-        dir: P,
-        method: StackingMethod,
-        progress: ProgressCallback,
-    ) -> Result<Self> {
-        Self::create_impl(dir, method, progress)
-    }
-
-    fn create_impl<P: AsRef<Path>>(
         dir: P,
         method: StackingMethod,
         progress: ProgressCallback,
