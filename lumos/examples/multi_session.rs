@@ -27,7 +27,7 @@ use std::collections::HashMap;
 use std::env;
 use std::path::{Path, PathBuf};
 
-use lumos::{MultiSessionStack, Session, SessionConfig, StarDetectionConfig};
+use lumos::{MultiSessionStack, Session, SessionConfig, StarDetector};
 
 fn main() {
     let args: Vec<String> = env::args().skip(1).collect();
@@ -50,7 +50,7 @@ fn main() {
     println!("Found {} session(s)", session_groups.len());
 
     // Create sessions with quality assessment
-    let detection_config = StarDetectionConfig::default();
+    let detector = StarDetector::new();
     let mut sessions = Vec::new();
 
     for (idx, (session_id, paths)) in session_groups.iter().enumerate() {
@@ -64,7 +64,7 @@ fn main() {
         // Create session and assess quality
         let session = Session::new(session_id.clone())
             .with_frames(paths)
-            .assess_quality(&detection_config)
+            .assess_quality(&detector)
             .expect("Failed to assess session quality");
 
         // Print session quality metrics

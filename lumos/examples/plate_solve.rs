@@ -22,9 +22,7 @@
 use std::env;
 use std::path::Path;
 
-use lumos::{
-    AstroImage, CatalogSource, PlateSolver, PlateSolverConfig, StarDetectionConfig, Wcs, find_stars,
-};
+use lumos::{AstroImage, CatalogSource, PlateSolver, PlateSolverConfig, StarDetector, Wcs};
 
 fn main() {
     // Parse command line arguments
@@ -73,11 +71,11 @@ fn main() {
 
     // Detect stars
     println!("\n--- Star Detection ---");
-    let star_config = StarDetectionConfig::builder()
+    let detector = StarDetector::new()
         .for_wide_field()
         .with_min_snr(10.0)
         .build();
-    let detection_result = find_stars(&image, &star_config);
+    let detection_result = detector.detect(&image);
     println!("Stars detected: {}", detection_result.stars.len());
 
     if detection_result.stars.len() < 10 {

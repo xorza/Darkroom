@@ -10,6 +10,7 @@
 use crate::registration::interpolation::{InterpolationMethod, WarpConfig, warp_image};
 use crate::registration::pipeline::warp_to_reference;
 use crate::registration::types::{TransformMatrix, TransformType};
+use crate::star_detection::StarDetector;
 use crate::testing::synthetic::{self, StarFieldConfig};
 
 /// Compute mean squared error between two images.
@@ -450,7 +451,7 @@ fn test_warp_with_detected_transform() {
     use crate::AstroImage;
 
     use crate::registration::{RegistrationConfig, Registrator};
-    use crate::star_detection::{StarDetectionConfig, find_stars};
+    use crate::star_detection::StarDetectionConfig;
 
     let config = StarFieldConfig {
         width: 256,
@@ -489,18 +490,18 @@ fn test_warp_with_detected_transform() {
     );
 
     // Detect stars in both images
-    let det_config = StarDetectionConfig {
+    let det = StarDetector::from_config(StarDetectionConfig {
         expected_fwhm: 0.0,
         detection_sigma: 3.0,
         min_snr: 5.0,
         ..Default::default()
-    };
+    });
 
     let ref_image = AstroImage::from_pixels(width, height, 1, ref_pixels.clone());
     let target_image = AstroImage::from_pixels(width, height, 1, target_pixels.clone());
 
-    let ref_result = find_stars(&ref_image, &det_config);
-    let target_result = find_stars(&target_image, &det_config);
+    let ref_result = det.detect(&ref_image);
+    let target_result = det.detect(&target_image);
 
     let ref_stars: Vec<(f64, f64)> = ref_result
         .stars

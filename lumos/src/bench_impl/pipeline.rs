@@ -21,7 +21,7 @@ use crate::AstroImage;
 use crate::registration::{
     GpuWarper, InterpolationMethod, RegistrationConfig, Registrator, TransformMatrix,
 };
-use crate::star_detection::{Star, StarDetectionConfig, find_stars};
+use crate::star_detection::{Star, StarDetectionConfig, StarDetector};
 use crate::testing::calibration_dir;
 
 /// Maximum stars to use for registration.
@@ -115,16 +115,16 @@ fn benchmark_star_detection(c: &mut Criterion, images: &[AstroImage]) {
     let mut group = c.benchmark_group("star_detection");
     group.sample_size(10);
 
-    let config = StarDetectionConfig {
+    let detector = StarDetector::from_config(StarDetectionConfig {
         edge_margin: 20,
         min_snr: 10.0,
         max_eccentricity: 0.6,
         ..StarDetectionConfig::default()
-    };
+    });
 
     group.bench_function(BenchmarkId::new("single_image", images[0].width()), |b| {
         b.iter(|| {
-            let result = find_stars(black_box(&images[0]), black_box(&config));
+            let result = detector.detect(black_box(&images[0]));
             black_box(result)
         })
     });
@@ -133,7 +133,7 @@ fn benchmark_star_detection(c: &mut Criterion, images: &[AstroImage]) {
         b.iter(|| {
             let stars: Vec<Vec<Star>> = images
                 .iter()
-                .map(|img| find_stars(black_box(img), black_box(&config)).stars)
+                .map(|img| detector.detect(black_box(img)).stars)
                 .collect();
             black_box(stars)
         })
@@ -150,17 +150,17 @@ fn benchmark_registration(c: &mut Criterion, images: &[AstroImage]) {
     let mut group = c.benchmark_group("registration");
     group.sample_size(10);
 
-    let detection_config = StarDetectionConfig {
+    let detector = StarDetector::from_config(StarDetectionConfig {
         edge_margin: 20,
         min_snr: 10.0,
         max_eccentricity: 0.6,
         ..StarDetectionConfig::default()
-    };
+    });
 
     // Pre-detect stars for registration benchmarks
     let stars: Vec<Vec<Star>> = images
         .iter()
-        .map(|img| find_stars(img, &detection_config).stars)
+        .map(|img| detector.detect(img).stars)
         .collect();
 
     let reg_config = RegistrationConfig::builder()
@@ -487,12 +487,12 @@ fn benchmark_full_pipeline(c: &mut Criterion, images: &[AstroImage]) {
     let mut group = c.benchmark_group("full_pipeline");
     group.sample_size(10);
 
-    let detection_config = StarDetectionConfig {
+    let detector = StarDetector::from_config(StarDetectionConfig {
         edge_margin: 20,
         min_snr: 10.0,
         max_eccentricity: 0.6,
         ..StarDetectionConfig::default()
-    };
+    });
 
     let reg_config = RegistrationConfig::builder()
         .full_homography()
@@ -513,7 +513,7 @@ fn benchmark_full_pipeline(c: &mut Criterion, images: &[AstroImage]) {
         b.iter(|| {
             run_full_pipeline_cpu(
                 black_box(images),
-                black_box(&detection_config),
+                black_box(&detector),
                 black_box(&reg_config),
             )
         })
@@ -528,7 +528,7 @@ fn benchmark_full_pipeline(c: &mut Criterion, images: &[AstroImage]) {
         b.iter(|| {
             run_full_pipeline_gpu(
                 black_box(images),
-                black_box(&detection_config),
+                black_box(&detector),
                 black_box(&reg_config),
                 black_box(&mut gpu_warper),
             )
@@ -541,13 +541,13 @@ fn benchmark_full_pipeline(c: &mut Criterion, images: &[AstroImage]) {
 /// Run full pipeline with CPU warping.
 fn run_full_pipeline_cpu(
     images: &[AstroImage],
-    detection_config: &StarDetectionConfig,
+    detector: &StarDetector,
     reg_config: &RegistrationConfig,
 ) -> AstroImage {
     // Step 1: Detect stars
     let stars: Vec<Vec<Star>> = images
         .iter()
-        .map(|img| find_stars(img, detection_config).stars)
+        .map(|img| detector.detect(img).stars)
         .collect();
 
     // Step 2: Register and warp
@@ -591,14 +591,14 @@ fn run_full_pipeline_cpu(
 /// Run full pipeline with GPU warping.
 fn run_full_pipeline_gpu(
     images: &[AstroImage],
-    detection_config: &StarDetectionConfig,
+    detector: &StarDetector,
     reg_config: &RegistrationConfig,
     gpu_warper: &mut GpuWarper,
 ) -> AstroImage {
     // Step 1: Detect stars
     let stars: Vec<Vec<Star>> = images
         .iter()
-        .map(|img| find_stars(img, detection_config).stars)
+        .map(|img| detector.detect(img).stars)
         .collect();
 
     // Step 2: Register and warp (GPU)

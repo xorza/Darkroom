@@ -20,10 +20,7 @@
 use std::env;
 use std::path::Path;
 
-use lumos::{
-    AstroImage, LiveFrameQuality, LiveStackAccumulator, LiveStackConfig, StarDetectionConfig,
-    find_stars,
-};
+use lumos::{AstroImage, LiveFrameQuality, LiveStackAccumulator, LiveStackConfig, StarDetector};
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -60,8 +57,8 @@ fn main() {
     let mut stack =
         LiveStackAccumulator::from_reference(&reference, config).expect("Failed to create stack");
 
-    // Star detection config for quality assessment
-    let detection_config = StarDetectionConfig::default();
+    // Star detector for quality assessment
+    let detector = StarDetector::new();
 
     // Process frames in real-time
     println!("Processing frames...");
@@ -82,7 +79,7 @@ fn main() {
         };
 
         // Compute frame quality from star detection
-        let quality = compute_frame_quality(&frame, &detection_config);
+        let quality = compute_frame_quality(&frame, &detector);
 
         // Add frame to stack
         let stats = stack
@@ -131,8 +128,8 @@ fn main() {
 }
 
 /// Compute frame quality metrics from star detection.
-fn compute_frame_quality(frame: &AstroImage, config: &StarDetectionConfig) -> LiveFrameQuality {
-    let result = find_stars(frame, config);
+fn compute_frame_quality(frame: &AstroImage, detector: &StarDetector) -> LiveFrameQuality {
+    let result = detector.detect(frame);
 
     if result.stars.is_empty() {
         return LiveFrameQuality::unknown();
@@ -144,7 +141,7 @@ fn compute_frame_quality(frame: &AstroImage, config: &StarDetectionConfig) -> Li
 
     // Compute median eccentricity
     let mut eccs: Vec<f32> = result.stars.iter().map(|s| s.eccentricity).collect();
-    eccs.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    eccs.sort_by(|a: &f32, b: &f32| a.partial_cmp(b).unwrap());
     let median_ecc = eccs[eccs.len() / 2];
 
     // Estimate noise from background stats

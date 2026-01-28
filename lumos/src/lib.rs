@@ -76,7 +76,7 @@ pub use star_detection::{
     estimate_background_image,
     estimate_background_iterative,
     estimate_background_iterative_image,
-    find_stars,
+
     fit_gaussian_2d,
     fit_moffat_2d,
     fwhm_beta_to_alpha,
@@ -155,9 +155,6 @@ pub use registration::{
     warp_to_reference,
     warp_to_reference_image,
 };
-// Re-export deprecated alias for backwards compatibility
-#[allow(deprecated)]
-pub use registration::register_stars;
 
 // ============================================================================
 // Stacking

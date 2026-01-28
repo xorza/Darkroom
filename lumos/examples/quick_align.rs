@@ -17,8 +17,7 @@ use std::env;
 use std::path::Path;
 
 use lumos::{
-    AstroImage, InterpolationMethod, StarDetectionConfig, find_stars, quick_register_stars,
-    warp_to_reference_image,
+    AstroImage, InterpolationMethod, StarDetector, quick_register_stars, warp_to_reference_image,
 };
 
 fn main() {
@@ -59,12 +58,12 @@ fn main() {
 
     // Detect stars
     println!("\nDetecting stars...");
-    let config = StarDetectionConfig::default();
+    let detector = StarDetector::new();
 
-    let ref_result = find_stars(&ref_image, &config);
+    let ref_result = detector.detect(&ref_image);
     println!("  Reference: {} stars detected", ref_result.stars.len());
 
-    let target_result = find_stars(&target_image, &config);
+    let target_result = detector.detect(&target_image);
     println!("  Target: {} stars detected", target_result.stars.len());
 
     // Align target to reference

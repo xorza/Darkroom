@@ -24,8 +24,8 @@ use std::path::Path;
 
 use lumos::{
     AstroImage, CometStackConfig, CompositeMethod, InterpolationMethod, ObjectPosition,
-    StarDetectionConfig, TransformMatrix, apply_comet_offset_to_transform, composite_stacks,
-    create_comet_stack_result, find_stars, quick_register_stars, warp_to_reference_image,
+    StarDetector, TransformMatrix, apply_comet_offset_to_transform, composite_stacks,
+    create_comet_stack_result, quick_register_stars, warp_to_reference_image,
 };
 
 fn main() {
@@ -91,12 +91,12 @@ fn main() {
         })
         .collect();
 
-    // Star detection config
-    let detection_config = StarDetectionConfig::default();
+    // Star detector
+    let detector = StarDetector::new();
 
     // Detect stars in reference
     println!("\nDetecting stars in reference...");
-    let ref_result = find_stars(&reference, &detection_config);
+    let ref_result = detector.detect(&reference);
     println!("  Found {} stars", ref_result.stars.len());
 
     // Process frames: register, warp, and collect for stacking
@@ -121,7 +121,7 @@ fn main() {
         };
 
         // Register frame to reference
-        let frame_result = find_stars(&frame, &detection_config);
+        let frame_result = detector.detect(&frame);
         let transform = if i == 0 {
             // Reference frame uses identity transform
             TransformMatrix::identity()

@@ -17,7 +17,7 @@ pub use crate::CalibrationMasters;
 // Star detection - main API
 pub use crate::{
     Star, StarDetectionConfig, StarDetectionConfigBuilder, StarDetectionDiagnostics,
-    StarDetectionResult, find_stars,
+    StarDetectionResult,
 };
 
 // Star detection - background estimation

@@ -42,7 +42,7 @@ use super::local_normalization::{
 };
 use super::weighted::FrameQuality;
 use crate::AstroImage;
-use crate::star_detection::{StarDetectionConfig, StarDetectionResult, find_stars};
+use crate::star_detection::{StarDetectionResult, StarDetector};
 
 /// Unique identifier for a session.
 pub type SessionId = String;
@@ -209,12 +209,12 @@ impl Session {
     /// This is computationally expensive but only needs to be done once per session.
     ///
     /// # Arguments
-    /// * `config` - Star detection configuration
+    /// * `detector` - Star detector for finding stars
     ///
     /// # Returns
     /// * `Ok(Self)` - Session with quality metrics populated
     /// * `Err` - If frame loading or star detection fails
-    pub fn assess_quality(mut self, config: &StarDetectionConfig) -> anyhow::Result<Self> {
+    pub fn assess_quality(mut self, detector: &StarDetector) -> anyhow::Result<Self> {
         if self.frame_paths.is_empty() {
             return Ok(self);
         }
@@ -223,7 +223,7 @@ impl Session {
 
         for path in &self.frame_paths {
             let image = AstroImage::from_file(path)?;
-            let result = find_stars(&image, config);
+            let result = detector.detect(&image);
             let quality = FrameQuality::from_detection_result(&result);
             frame_qualities.push(quality);
         }

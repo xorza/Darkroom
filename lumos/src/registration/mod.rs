@@ -99,9 +99,6 @@ pub use pipeline::{
     MultiScaleConfig, MultiScaleRegistrator, Registrator, quick_register, quick_register_stars,
     register_star_positions, warp_to_reference, warp_to_reference_image,
 };
-// Re-export deprecated alias for backwards compatibility
-#[allow(deprecated)]
-pub use pipeline::register_stars;
 
 // Core types needed by users
 pub use types::{

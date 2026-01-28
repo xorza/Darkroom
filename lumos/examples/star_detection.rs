@@ -14,7 +14,7 @@
 use std::env;
 use std::path::Path;
 
-use lumos::{AstroImage, StarDetectionConfig, find_stars};
+use lumos::{AstroImage, StarDetector};
 
 fn main() {
     // Get image path from command line
@@ -39,41 +39,41 @@ fn main() {
 
     // === Detection with default configuration ===
     println!("\n--- Detection with default config ---");
-    let default_config = StarDetectionConfig::default();
-    let result = find_stars(&image, &default_config);
+    let detector = StarDetector::new();
+    let result = detector.detect(&image);
 
     println!("Stars detected: {}", result.stars.len());
     print_diagnostics(&result.diagnostics);
 
     // === Detection with wide-field preset ===
     println!("\n--- Detection with wide-field preset ---");
-    let wide_field_config = StarDetectionConfig::builder()
+    let detector = StarDetector::new()
         .for_wide_field()
         .with_min_snr(15.0)
         .build();
-    let result = find_stars(&image, &wide_field_config);
+    let result = detector.detect(&image);
 
     println!("Stars detected: {}", result.stars.len());
     print_diagnostics(&result.diagnostics);
 
     // === Detection with high-resolution preset ===
     println!("\n--- Detection with high-resolution preset ---");
-    let high_res_config = StarDetectionConfig::builder()
+    let detector = StarDetector::new()
         .for_high_resolution()
         .with_cosmic_ray_rejection(0.7)
         .build();
-    let result = find_stars(&image, &high_res_config);
+    let result = detector.detect(&image);
 
     println!("Stars detected: {}", result.stars.len());
     print_diagnostics(&result.diagnostics);
 
     // === Detection with crowded field preset ===
     println!("\n--- Detection with crowded field preset ---");
-    let crowded_config = StarDetectionConfig::builder()
+    let detector = StarDetector::new()
         .for_crowded_field()
         .with_min_snr(8.0)
         .build();
-    let result = find_stars(&image, &crowded_config);
+    let result = detector.detect(&image);
 
     println!("Stars detected: {}", result.stars.len());
     print_diagnostics(&result.diagnostics);

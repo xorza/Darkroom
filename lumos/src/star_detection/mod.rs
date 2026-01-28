@@ -1000,7 +1000,7 @@ pub struct StarDetectionDiagnostics {
 /// # Arguments
 /// * `image` - Astronomical image (grayscale or RGB, normalized 0.0-1.0)
 /// * `config` - Detection configuration
-pub fn find_stars(image: &AstroImage, config: &StarDetectionConfig) -> StarDetectionResult {
+fn find_stars(image: &AstroImage, config: &StarDetectionConfig) -> StarDetectionResult {
     let grayscale = image.clone().to_grayscale();
     let width = grayscale.width();
     let height = grayscale.height();

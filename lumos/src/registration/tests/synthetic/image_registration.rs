@@ -9,17 +9,17 @@ use crate::AstroImage;
 use crate::registration::interpolation::{InterpolationMethod, WarpConfig, warp_image};
 use crate::registration::types::TransformMatrix;
 use crate::registration::{RegistrationConfig, Registrator};
-use crate::star_detection::{StarDetectionConfig, find_stars};
+use crate::star_detection::{StarDetectionConfig, StarDetector};
 use crate::testing::synthetic::{self, StarFieldConfig};
 
-/// Default star detection config for synthetic images.
-fn detection_config() -> StarDetectionConfig {
-    StarDetectionConfig {
+/// Default star detector for synthetic images.
+fn detector() -> StarDetector {
+    StarDetector::from_config(StarDetectionConfig {
         expected_fwhm: 0.0, // Disable matched filter for synthetic images
         detection_sigma: 3.0,
         min_snr: 5.0,
         ..Default::default()
-    }
+    })
 }
 
 /// Create an AstroImage from pixel data.
@@ -96,9 +96,9 @@ fn test_image_registration_translation() {
     let target_image = create_astro_image(target_pixels, width, height);
 
     // Detect stars in both images
-    let det_config = detection_config();
-    let ref_result = find_stars(&ref_image, &det_config);
-    let target_result = find_stars(&target_image, &det_config);
+    let det = detector();
+    let ref_result = det.detect(&ref_image);
+    let target_result = det.detect(&target_image);
 
     assert!(
         ref_result.stars.len() >= 20,
@@ -187,9 +187,9 @@ fn test_image_registration_rotation() {
     let ref_image = create_astro_image(ref_pixels, width, height);
     let target_image = create_astro_image(target_pixels, width, height);
 
-    let det_config = detection_config();
-    let ref_result = find_stars(&ref_image, &det_config);
-    let target_result = find_stars(&target_image, &det_config);
+    let det = detector();
+    let ref_result = det.detect(&ref_image);
+    let target_result = det.detect(&target_image);
 
     let ref_stars: Vec<(f64, f64)> = ref_result
         .stars
@@ -257,9 +257,9 @@ fn test_image_registration_similarity() {
     let ref_image = create_astro_image(ref_pixels, width, height);
     let target_image = create_astro_image(target_pixels, width, height);
 
-    let det_config = detection_config();
-    let ref_result = find_stars(&ref_image, &det_config);
-    let target_result = find_stars(&target_image, &det_config);
+    let det = detector();
+    let ref_result = det.detect(&ref_image);
+    let target_result = det.detect(&target_image);
 
     let ref_stars: Vec<(f64, f64)> = ref_result
         .stars
@@ -335,15 +335,15 @@ fn test_image_registration_with_noise() {
     let ref_image = create_astro_image(ref_pixels, width, height);
     let target_image = create_astro_image(target_pixels, width, height);
 
-    let det_config = StarDetectionConfig {
+    let det = StarDetector::from_config(StarDetectionConfig {
         expected_fwhm: 0.0,
         detection_sigma: 4.0, // Higher threshold for noisy image
         min_snr: 8.0,
         ..Default::default()
-    };
+    });
 
-    let ref_result = find_stars(&ref_image, &det_config);
-    let target_result = find_stars(&target_image, &det_config);
+    let ref_result = det.detect(&ref_image);
+    let target_result = det.detect(&target_image);
 
     let ref_stars: Vec<(f64, f64)> = ref_result
         .stars
@@ -410,9 +410,9 @@ fn test_image_registration_dense_field() {
     let ref_image = create_astro_image(ref_pixels, width, height);
     let target_image = create_astro_image(target_pixels, width, height);
 
-    let det_config = detection_config();
-    let ref_result = find_stars(&ref_image, &det_config);
-    let target_result = find_stars(&target_image, &det_config);
+    let det = detector();
+    let ref_result = det.detect(&ref_image);
+    let target_result = det.detect(&target_image);
 
     assert!(
         ref_result.stars.len() >= 50,
@@ -479,9 +479,9 @@ fn test_image_registration_large_image() {
     let ref_image = create_astro_image(ref_pixels, width, height);
     let target_image = create_astro_image(target_pixels, width, height);
 
-    let det_config = detection_config();
-    let ref_result = find_stars(&ref_image, &det_config);
-    let target_result = find_stars(&target_image, &det_config);
+    let det = detector();
+    let ref_result = det.detect(&ref_image);
+    let target_result = det.detect(&target_image);
 
     let ref_stars: Vec<(f64, f64)> = ref_result
         .stars

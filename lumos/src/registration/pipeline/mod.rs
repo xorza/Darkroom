@@ -323,25 +323,6 @@ pub fn register_star_positions(
     Registrator::new(config).register_positions(ref_positions, target_positions)
 }
 
-/// Convenience function to register two star position lists.
-///
-/// # Deprecated
-///
-/// Use [`register_star_positions`] instead. This function is deprecated to avoid
-/// confusion with [`Registrator::register_stars`], which takes `&[Star]` instead of
-/// position tuples.
-#[deprecated(
-    since = "0.1.0",
-    note = "renamed to `register_star_positions` to avoid confusion with `Registrator::register_stars`"
-)]
-pub fn register_stars(
-    ref_stars: &[(f64, f64)],
-    target_stars: &[(f64, f64)],
-    transform_type: TransformType,
-) -> Result<RegistrationResult, RegistrationError> {
-    register_star_positions(ref_stars, target_stars, transform_type)
-}
-
 /// Warp target image to align with reference.
 ///
 /// # Arguments
