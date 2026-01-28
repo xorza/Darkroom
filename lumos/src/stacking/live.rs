@@ -241,9 +241,6 @@ pub struct LiveFrameQuality {
     /// Star eccentricity (1.0 = round, higher = elongated/trailing)
     pub eccentricity: f32,
 
-    /// Background noise level
-    pub noise: f32,
-
     /// Number of detected stars
     pub star_count: usize,
 }
@@ -254,15 +251,14 @@ impl LiveFrameQuality {
     /// Higher SNR, lower FWHM, and rounder stars result in higher weight.
     /// Formula: (SNR × (1/FWHM)² × (1/eccentricity)) / noise
     pub fn compute_weight(&self) -> f32 {
-        if self.fwhm <= 0.0 || self.eccentricity <= 0.0 || self.noise <= 0.0 {
+        if self.fwhm <= 0.0 || self.eccentricity <= 0.0 {
             return 1.0; // Default weight if metrics are invalid
         }
 
         let fwhm_factor = 1.0 / (self.fwhm * self.fwhm);
         let ecc_factor = 1.0 / self.eccentricity;
-        let noise_factor = 1.0 / self.noise;
 
-        (self.snr * fwhm_factor * ecc_factor * noise_factor).max(0.001)
+        (self.snr * fwhm_factor * ecc_factor).max(0.001)
     }
 
     /// Create quality metrics indicating an unknown/default quality.
@@ -271,7 +267,6 @@ impl LiveFrameQuality {
             snr: 1.0,
             fwhm: 2.0,
             eccentricity: 1.0,
-            noise: 0.01,
             star_count: 0,
         }
     }
@@ -951,7 +946,6 @@ mod tests {
             snr: 20.0,
             fwhm: 2.0,
             eccentricity: 1.0,
-            noise: 0.01,
             star_count: 100,
         };
 
@@ -961,7 +955,6 @@ mod tests {
             snr: 5.0,
             fwhm: 4.0,
             eccentricity: 2.0,
-            noise: 0.02,
             star_count: 50,
         };
 
@@ -1077,7 +1070,6 @@ mod tests {
             snr: 50.0,
             fwhm: 2.0,
             eccentricity: 1.0,
-            noise: 0.01,
             star_count: 200,
         };
 
@@ -1086,7 +1078,6 @@ mod tests {
             snr: 10.0,
             fwhm: 5.0,
             eccentricity: 2.0,
-            noise: 0.05,
             star_count: 50,
         };
 
@@ -1120,7 +1111,6 @@ mod tests {
             snr: 20.0,
             fwhm: 2.5,
             eccentricity: 1.1,
-            noise: 0.01,
             star_count: 100,
         };
 

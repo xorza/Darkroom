@@ -103,14 +103,6 @@ fn main() {
 fn print_diagnostics(diag: &lumos::StarDetectionDiagnostics) {
     println!("  Median FWHM: {:.2} px", diag.median_fwhm);
     println!("  Median SNR: {:.1}", diag.median_snr);
-    println!(
-        "  Background: min={:.4}, max={:.4}, mean={:.4}",
-        diag.background_stats.0, diag.background_stats.1, diag.background_stats.2
-    );
-    println!(
-        "  Noise: min={:.6}, max={:.6}, mean={:.6}",
-        diag.noise_stats.0, diag.noise_stats.1, diag.noise_stats.2
-    );
     println!("  Pipeline:");
     println!(
         "    Pixels above threshold: {}",

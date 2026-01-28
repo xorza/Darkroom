@@ -144,14 +144,10 @@ fn compute_frame_quality(frame: &AstroImage, detector: &StarDetector) -> LiveFra
     eccs.sort_by(|a: &f32, b: &f32| a.partial_cmp(b).unwrap());
     let median_ecc = eccs[eccs.len() / 2];
 
-    // Estimate noise from background stats
-    let noise = result.diagnostics.noise_stats.2; // mean noise
-
     LiveFrameQuality {
         snr,
         fwhm,
         eccentricity: median_ecc,
-        noise,
         star_count: result.stars.len(),
     }
 }
