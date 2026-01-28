@@ -394,15 +394,47 @@ impl AstroImage {
     ///
     /// Useful for operations like calibration where you need to combine two images.
     /// The function receives `(channel_index, &mut [f32], &[f32])` for each channel.
+    /// For RGB images, all three channels are processed in parallel.
     pub fn apply_from_channel<F>(&mut self, source: &AstroImage, f: F)
     where
         F: Fn(usize, &mut [f32], &[f32]) + Sync + Send,
     {
+        use rayon::prelude::*;
+
         assert_eq!(self.channels(), source.channels(), "Channel count mismatch");
-        for c in 0..self.channels() {
-            let src = source.channel(c);
-            let dst = self.channel_mut(c);
-            f(c, dst, src);
+
+        match (&mut self.pixels, &source.pixels) {
+            (PixelData::L(dst), PixelData::L(src)) => f(0, dst, src),
+            (PixelData::Rgb(dst_channels), PixelData::Rgb(src_channels)) => {
+                dst_channels
+                    .par_iter_mut()
+                    .zip(src_channels.par_iter())
+                    .enumerate()
+                    .for_each(|(c, (dst, src))| {
+                        f(c, dst, src);
+                    });
+            }
+            _ => unreachable!("Channel count mismatch checked above"),
+        }
+    }
+
+    /// Apply a function to each channel's data in parallel.
+    ///
+    /// The function receives `(channel_index, &mut [f32])` for each channel.
+    /// For RGB images, all three channels are processed in parallel.
+    pub fn apply_per_channel_mut<F>(&mut self, f: F)
+    where
+        F: Fn(usize, &mut [f32]) + Sync + Send,
+    {
+        use rayon::prelude::*;
+
+        match &mut self.pixels {
+            PixelData::L(data) => f(0, data),
+            PixelData::Rgb(channels) => {
+                channels.par_iter_mut().enumerate().for_each(|(c, data)| {
+                    f(c, data);
+                });
+            }
         }
     }
 

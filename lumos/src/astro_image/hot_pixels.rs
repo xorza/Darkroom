@@ -185,10 +185,19 @@ impl HotPixelMap {
             })
             .collect();
 
-        // Apply corrections using channel-based access
+        // Group corrections by channel for parallel application
+        let channels = image.channels();
+        let mut corrections_by_channel: Vec<Vec<(usize, f32)>> = vec![Vec::new(); channels];
         for (channel, pixel_idx, value) in corrections {
-            image.channel_mut(channel)[pixel_idx] = value;
+            corrections_by_channel[channel].push((pixel_idx, value));
         }
+
+        // Apply corrections - process channels in parallel
+        image.apply_per_channel_mut(|c, channel_data| {
+            for &(pixel_idx, value) in &corrections_by_channel[c] {
+                channel_data[pixel_idx] = value;
+            }
+        });
     }
 }
 
