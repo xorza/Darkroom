@@ -142,7 +142,7 @@ impl Image {
             return Ok(self);
         }
 
-        let desc = ImageDesc::new(self.desc.width, self.desc.height, color_format);
+        let desc = ImageDesc::new_with_stride(self.desc.width, self.desc.height, color_format);
 
         let mut result = Image::new_black(desc)?;
 
@@ -227,7 +227,7 @@ fn vec_to_avec(bytes: Vec<u8>) -> AVec<u8> {
 
 impl ImageDesc {
     /// Create a new ImageDesc with aligned stride (4-byte aligned).
-    pub fn new(width: usize, height: usize, color_format: ColorFormat) -> Self {
+    pub fn new_with_stride(width: usize, height: usize, color_format: ColorFormat) -> Self {
         let row_bytes = width * color_format.byte_count() as usize;
         let stride = align_stride(row_bytes);
 

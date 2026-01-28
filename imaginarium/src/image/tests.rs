@@ -93,7 +93,7 @@ fn save_and_reload_tiff() {
 
 #[test]
 fn save_tiff_with_misaligned_bytes_returns_error() {
-    let desc = ImageDesc::new(1, 1, ColorFormat::L_U16);
+    let desc = ImageDesc::new_with_stride(1, 1, ColorFormat::L_U16);
     // 3 bytes doesn't match expected size for GRAY_U16 (stride * height)
     let result = Image::new_with_data(desc, vec![0u8; 3]);
     assert!(result.is_err());
@@ -105,7 +105,7 @@ fn save_tiff_with_misaligned_bytes_returns_error() {
 
 #[test]
 fn new_empty_creates_zeroed_image() {
-    let desc = ImageDesc::new(10, 10, ColorFormat::RGBA_U8);
+    let desc = ImageDesc::new_with_stride(10, 10, ColorFormat::RGBA_U8);
     let img = Image::new_black(desc).unwrap();
 
     assert!(img.bytes().iter().all(|&b| b == 0));
@@ -114,7 +114,7 @@ fn new_empty_creates_zeroed_image() {
 
 #[test]
 fn new_with_data_preserves_bytes() {
-    let desc = ImageDesc::new(2, 2, ColorFormat::L_U8);
+    let desc = ImageDesc::new_with_stride(2, 2, ColorFormat::L_U8);
     let data = vec![1, 2, 0, 0, 3, 4, 0, 0]; // 2x2 with 4-byte stride
     let img = Image::new_with_data(desc, data.clone()).unwrap();
 
@@ -129,7 +129,7 @@ fn invalid_float_format_returns_error() {
         channel_size: ChannelSize::_8bit,
         channel_type: ChannelType::Float,
     };
-    let desc = ImageDesc::new(1, 1, format);
+    let desc = ImageDesc::new_with_stride(1, 1, format);
     let result = Image::new_black(desc);
 
     assert!(matches!(result, Err(Error::InvalidColorFormat(_))));
@@ -137,7 +137,7 @@ fn invalid_float_format_returns_error() {
 
 #[test]
 fn valid_f32_format_succeeds() {
-    let desc = ImageDesc::new(1, 1, ColorFormat::RGBA_F32);
+    let desc = ImageDesc::new_with_stride(1, 1, ColorFormat::RGBA_F32);
     let result = Image::new_black(desc);
     assert!(result.is_ok());
 }
@@ -149,34 +149,34 @@ fn valid_f32_format_succeeds() {
 #[test]
 fn image_desc_stride_alignment() {
     // Stride should be 4-byte aligned
-    let desc = ImageDesc::new(1, 1, ColorFormat::L_U8);
+    let desc = ImageDesc::new_with_stride(1, 1, ColorFormat::L_U8);
     assert_eq!(desc.stride % 4, 0);
 
-    let desc = ImageDesc::new(3, 1, ColorFormat::RGB_U8);
+    let desc = ImageDesc::new_with_stride(3, 1, ColorFormat::RGB_U8);
     assert_eq!(desc.stride % 4, 0);
     assert!(desc.stride >= 9); // 3 pixels * 3 bytes
 
-    let desc = ImageDesc::new(5, 1, ColorFormat::RGBA_U16);
+    let desc = ImageDesc::new_with_stride(5, 1, ColorFormat::RGBA_U16);
     assert_eq!(desc.stride % 4, 0);
 }
 
 #[test]
 fn image_desc_size_calculation() {
-    let desc = ImageDesc::new(100, 50, ColorFormat::RGBA_U8);
+    let desc = ImageDesc::new_with_stride(100, 50, ColorFormat::RGBA_U8);
     assert_eq!(desc.size_in_bytes(), desc.stride * desc.height);
 }
 
 #[test]
 fn bytes_per_pixel_calculation() {
-    let desc = ImageDesc::new(1, 1, ColorFormat::RGBA_U8);
+    let desc = ImageDesc::new_with_stride(1, 1, ColorFormat::RGBA_U8);
     let img = Image::new_black(desc).unwrap();
     assert_eq!(img.bytes_per_pixel(), 4);
 
-    let desc = ImageDesc::new(1, 1, ColorFormat::RGB_U16);
+    let desc = ImageDesc::new_with_stride(1, 1, ColorFormat::RGB_U16);
     let img = Image::new_black(desc).unwrap();
     assert_eq!(img.bytes_per_pixel(), 6);
 
-    let desc = ImageDesc::new(1, 1, ColorFormat::L_F32);
+    let desc = ImageDesc::new_with_stride(1, 1, ColorFormat::L_F32);
     let img = Image::new_black(desc).unwrap();
     assert_eq!(img.bytes_per_pixel(), 4);
 }
@@ -187,7 +187,7 @@ fn bytes_per_pixel_calculation() {
 
 #[test]
 fn convert_same_format_returns_same_image() {
-    let desc = ImageDesc::new(2, 2, ColorFormat::RGBA_U8);
+    let desc = ImageDesc::new_with_stride(2, 2, ColorFormat::RGBA_U8);
     let data = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
     let img = Image::new_with_data(desc, data.clone()).unwrap();
 
@@ -197,7 +197,7 @@ fn convert_same_format_returns_same_image() {
 
 #[test]
 fn convert_rgba_u8_to_rgba_u16() {
-    let desc = ImageDesc::new(1, 1, ColorFormat::RGBA_U8);
+    let desc = ImageDesc::new_with_stride(1, 1, ColorFormat::RGBA_U8);
     let src = Image::new_with_data(desc, vec![0, 128, 255, 64]).unwrap();
     let result = src.convert(ColorFormat::RGBA_U16).unwrap();
 
@@ -214,7 +214,7 @@ fn convert_rgba_u8_to_rgba_u16() {
 
 #[test]
 fn convert_rgb_u8_to_rgb_u16() {
-    let desc = ImageDesc::new(1, 1, ColorFormat::RGB_U8);
+    let desc = ImageDesc::new_with_stride(1, 1, ColorFormat::RGB_U8);
     // stride is 4 bytes (3 bytes data + 1 padding for 4-byte alignment)
     let src = Image::new_with_data(desc, vec![0, 128, 255, 0]).unwrap();
     let result = src.convert(ColorFormat::RGB_U16).unwrap();
@@ -228,7 +228,7 @@ fn convert_rgb_u8_to_rgb_u16() {
 
 #[test]
 fn convert_gray_u8_to_gray_u16() {
-    let desc = ImageDesc::new(1, 1, ColorFormat::L_U8);
+    let desc = ImageDesc::new_with_stride(1, 1, ColorFormat::L_U8);
     // stride is 4 bytes (1 byte data + 3 padding for 4-byte alignment)
     let src = Image::new_with_data(desc, vec![200, 0, 0, 0]).unwrap();
     let result = src.convert(ColorFormat::L_U16).unwrap();
@@ -242,7 +242,7 @@ fn convert_gray_u8_to_gray_u16() {
 
 #[test]
 fn convert_channel_count_gray_to_rgb() {
-    let desc = ImageDesc::new(1, 1, ColorFormat::L_U8);
+    let desc = ImageDesc::new_with_stride(1, 1, ColorFormat::L_U8);
     let src = Image::new_with_data(desc, vec![128, 0, 0, 0]).unwrap();
     let result = src.convert(ColorFormat::RGB_U8).unwrap();
 
@@ -255,7 +255,7 @@ fn convert_channel_count_gray_to_rgb() {
 
 #[test]
 fn convert_channel_count_rgb_to_gray() {
-    let desc = ImageDesc::new(1, 1, ColorFormat::RGB_U8);
+    let desc = ImageDesc::new_with_stride(1, 1, ColorFormat::RGB_U8);
     // R=100, G=150, B=200
     // Luminance (Rec.709) = 0.2126*100 + 0.7152*150 + 0.0722*200 = 142.98
     let src = Image::new_with_data(desc, vec![100, 150, 200, 0]).unwrap();
@@ -268,7 +268,7 @@ fn convert_channel_count_rgb_to_gray() {
 
 #[test]
 fn convert_rgba_to_rgb_drops_alpha() {
-    let desc = ImageDesc::new(1, 1, ColorFormat::RGBA_U8);
+    let desc = ImageDesc::new_with_stride(1, 1, ColorFormat::RGBA_U8);
     let src = Image::new_with_data(desc, vec![100, 150, 200, 255]).unwrap();
     let result = src.convert(ColorFormat::RGB_U8).unwrap();
 
@@ -280,7 +280,7 @@ fn convert_rgba_to_rgb_drops_alpha() {
 
 #[test]
 fn convert_rgb_to_rgba_adds_max_alpha() {
-    let desc = ImageDesc::new(1, 1, ColorFormat::RGB_U8);
+    let desc = ImageDesc::new_with_stride(1, 1, ColorFormat::RGB_U8);
     let src = Image::new_with_data(desc, vec![100, 150, 200, 0]).unwrap();
     let result = src.convert(ColorFormat::RGBA_U8).unwrap();
 
@@ -293,7 +293,7 @@ fn convert_rgb_to_rgba_adds_max_alpha() {
 
 #[test]
 fn convert_to_float_normalizes() {
-    let desc = ImageDesc::new(1, 1, ColorFormat::L_U8);
+    let desc = ImageDesc::new_with_stride(1, 1, ColorFormat::L_U8);
     let src = Image::new_with_data(desc, vec![255, 0, 0, 0]).unwrap();
     let result = src.convert(ColorFormat::L_F32).unwrap();
 
@@ -307,7 +307,7 @@ fn convert_to_float_normalizes() {
 
 #[test]
 fn convert_from_float_denormalizes() {
-    let desc = ImageDesc::new(1, 1, ColorFormat::L_F32);
+    let desc = ImageDesc::new_with_stride(1, 1, ColorFormat::L_F32);
     let float_bytes: [u8; 4] = 1.0f32.to_ne_bytes();
     let data = float_bytes.to_vec();
     let src = Image::new_with_data(desc, data).unwrap();
@@ -372,21 +372,21 @@ fn double_conversion_preserves_dimensions() {
 
 #[test]
 fn single_pixel_image() {
-    let desc = ImageDesc::new(1, 1, ColorFormat::RGBA_U8);
+    let desc = ImageDesc::new_with_stride(1, 1, ColorFormat::RGBA_U8);
     let img = Image::new_black(desc).unwrap();
     assert!(img.desc().stride >= 4);
 }
 
 #[test]
 fn large_image_dimensions() {
-    let desc = ImageDesc::new(4096, 4096, ColorFormat::RGBA_U8);
+    let desc = ImageDesc::new_with_stride(4096, 4096, ColorFormat::RGBA_U8);
     // Just verify it calculates correctly without overflow
     assert_eq!(desc.size_in_bytes(), desc.stride * 4096);
 }
 
 #[test]
 fn clone_image() {
-    let desc = ImageDesc::new(2, 2, ColorFormat::RGBA_U8);
+    let desc = ImageDesc::new_with_stride(2, 2, ColorFormat::RGBA_U8);
     let data = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
     let img = Image::new_with_data(desc, data.clone()).unwrap();
     let cloned = img.clone();
@@ -401,7 +401,7 @@ fn clone_image() {
 
 #[test]
 fn image_bytes_are_8_byte_aligned() {
-    let desc = ImageDesc::new(100, 100, ColorFormat::RGBA_U8);
+    let desc = ImageDesc::new_with_stride(100, 100, ColorFormat::RGBA_U8);
     let img = Image::new_black(desc).unwrap();
     let ptr = img.bytes().as_ptr() as usize;
     assert_eq!(ptr % 8, 0, "Image bytes should be 8-byte aligned");
@@ -409,7 +409,7 @@ fn image_bytes_are_8_byte_aligned() {
 
 #[test]
 fn into_bytes_is_zero_copy() {
-    let desc = ImageDesc::new(100, 100, ColorFormat::RGBA_U8);
+    let desc = ImageDesc::new_with_stride(100, 100, ColorFormat::RGBA_U8);
     let img = Image::new_black(desc).unwrap();
     let original_ptr = img.bytes().as_ptr();
     let vec = img.into_bytes();
@@ -429,7 +429,7 @@ fn new_with_data_from_aligned_vec_preserves_pointer() {
     let vec = unsafe { Vec::from_raw_parts(ptr, len, capacity) };
 
     // Now create Image from the aligned Vec
-    let desc = ImageDesc::new(2, 2, ColorFormat::RGBA_U8);
+    let desc = ImageDesc::new_with_stride(2, 2, ColorFormat::RGBA_U8);
     let img = Image::new_with_data(desc, vec).unwrap();
 
     // Should preserve the pointer since it was already 8-byte aligned
@@ -442,7 +442,7 @@ fn new_with_data_from_aligned_vec_preserves_pointer() {
 
 #[test]
 fn cast_to_f32_slice_works() {
-    let desc = ImageDesc::new(1, 1, ColorFormat::RGBA_F32);
+    let desc = ImageDesc::new_with_stride(1, 1, ColorFormat::RGBA_F32);
     let mut img = Image::new_black(desc).unwrap();
 
     // Write f32 values via bytemuck

@@ -72,7 +72,7 @@ pub fn test_processing_context() -> ProcessingContext {
 pub fn create_test_image(format: ColorFormat, width: usize, height: usize, seed: usize) -> Image {
     use crate::image::ImageDesc;
 
-    let desc = ImageDesc::new(width, height, format);
+    let desc = ImageDesc::new_with_stride(width, height, format);
     let mut img = Image::new_black(desc).unwrap();
 
     match (format.channel_size, format.channel_type) {
@@ -128,7 +128,7 @@ pub fn create_test_image_f32(
 ) -> Image {
     use crate::image::ImageDesc;
 
-    let desc = ImageDesc::new(width, height, format);
+    let desc = ImageDesc::new_with_stride(width, height, format);
     let mut img = Image::new_black(desc).unwrap();
     let bytes = img.bytes_mut();
     for chunk in bytes.chunks_exact_mut(4) {

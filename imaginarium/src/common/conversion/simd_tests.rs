@@ -9,7 +9,7 @@ use crate::image::{Image, ImageDesc};
 
 /// Helper to create a test image with specific pixel pattern
 fn create_test_image(width: usize, height: usize, format: ColorFormat) -> Image {
-    let desc = ImageDesc::new(width, height, format);
+    let desc = ImageDesc::new_with_stride(width, height, format);
     let mut img = Image::new_black(desc).unwrap();
     let bpp = format.byte_count() as usize;
     let stride = img.desc().stride;
@@ -31,7 +31,7 @@ fn create_test_image(width: usize, height: usize, format: ColorFormat) -> Image 
 
 /// Helper to create a test image with f32 values
 fn create_test_image_f32(width: usize, height: usize, format: ColorFormat) -> Image {
-    let desc = ImageDesc::new(width, height, format);
+    let desc = ImageDesc::new_with_stride(width, height, format);
     let mut img = Image::new_black(desc).unwrap();
     let channels = format.channel_count as usize;
     let float_stride = img.desc().stride / 4;
@@ -55,7 +55,7 @@ fn create_test_image_f32(width: usize, height: usize, format: ColorFormat) -> Im
 
 /// Helper to create a test image with u16 values
 fn create_test_image_u16(width: usize, height: usize, format: ColorFormat) -> Image {
-    let desc = ImageDesc::new(width, height, format);
+    let desc = ImageDesc::new_with_stride(width, height, format);
     let mut img = Image::new_black(desc).unwrap();
     let channels = format.channel_count as usize;
     let word_stride = img.desc().stride / 2;
@@ -213,7 +213,7 @@ fn test_luminance_weights_correctness() {
     // For U8: R=54, G=183, B=19 (sum=256, shift by 8)
 
     // Create single pixel images with primary colors
-    let desc = ImageDesc::new(1, 1, ColorFormat::RGBA_U8);
+    let desc = ImageDesc::new_with_stride(1, 1, ColorFormat::RGBA_U8);
 
     // Pure white should give L=255
     let mut white = Image::new_black(desc).unwrap();
@@ -350,7 +350,7 @@ fn test_rgb_to_l_u8_various_widths() {
 #[test]
 fn test_la_to_rgba_u8_various_widths() {
     for &width in &TEST_WIDTHS {
-        let desc = ImageDesc::new(width, 2, ColorFormat::LA_U8);
+        let desc = ImageDesc::new_with_stride(width, 2, ColorFormat::LA_U8);
         let mut src = Image::new_black(desc).unwrap();
 
         // Fill with test pattern: L=pixel_idx, A=(pixel_idx+1)
@@ -454,7 +454,7 @@ fn test_rgba_to_la_u8_various_widths() {
 #[test]
 fn test_u8_to_u16_boundary_values() {
     // Test that 0 -> 0 and 255 -> 65535 (not 65280)
-    let desc = ImageDesc::new(3, 1, ColorFormat::RGBA_U8);
+    let desc = ImageDesc::new_with_stride(3, 1, ColorFormat::RGBA_U8);
     let mut src = Image::new_black(desc).unwrap();
 
     // Pixel 0: all zeros
@@ -495,7 +495,7 @@ fn test_u8_to_u16_boundary_values() {
 
 #[test]
 fn test_u16_to_u8_boundary_values() {
-    let desc = ImageDesc::new(3, 1, ColorFormat::RGBA_U16);
+    let desc = ImageDesc::new_with_stride(3, 1, ColorFormat::RGBA_U16);
     let mut src = Image::new_black(desc).unwrap();
     let words: &mut [u16] = bytemuck::cast_slice_mut(src.bytes_mut());
 
@@ -566,7 +566,7 @@ fn test_u8_u16_round_trip() {
 #[test]
 fn test_f32_to_u8_clamping() {
     // Test that values outside 0.0-1.0 are clamped
-    let desc = ImageDesc::new(4, 1, ColorFormat::RGBA_F32);
+    let desc = ImageDesc::new_with_stride(4, 1, ColorFormat::RGBA_F32);
     let mut src = Image::new_black(desc).unwrap();
     let floats: &mut [f32] = bytemuck::cast_slice_mut(src.bytes_mut());
 
@@ -748,7 +748,7 @@ fn test_single_row_conversions() {
 
 #[test]
 fn test_single_pixel_conversions() {
-    let desc = ImageDesc::new(1, 1, ColorFormat::RGBA_U8);
+    let desc = ImageDesc::new_with_stride(1, 1, ColorFormat::RGBA_U8);
     let mut src = Image::new_black(desc).unwrap();
     src.bytes_mut()[0..4].copy_from_slice(&[100, 150, 200, 255]);
 

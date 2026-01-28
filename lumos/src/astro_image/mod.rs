@@ -619,7 +619,7 @@ impl From<AstroImage> for Image {
             }
         };
 
-        let desc = ImageDesc::new(width, height, color_format);
+        let desc = ImageDesc::new_with_stride(width, height, color_format);
         let bytes: Vec<u8> = bytemuck::cast_slice(&interleaved).to_vec();
         Image::new_with_data(desc, bytes).expect("Failed to create Image")
     }
@@ -627,6 +627,8 @@ impl From<AstroImage> for Image {
 
 impl From<Image> for AstroImage {
     fn from(image: Image) -> Self {
+        use rayon::prelude::*;
+
         let desc = image.desc();
 
         // Determine target format: Gray or RGB, always f32
@@ -638,37 +640,72 @@ impl From<Image> for AstroImage {
         // convert() returns the same image without cloning if format already matches
         let image = image
             .convert(target_format)
-            .expect("Failed to convert image to f32")
-            .packed();
+            .expect("Failed to convert image to f32");
 
         let desc = image.desc();
         let width = desc.width;
         let height = desc.height;
-        let pixels: &[f32] = bytemuck::cast_slice(image.bytes());
+        let stride_f32 = desc.stride / std::mem::size_of::<f32>();
+        let bytes = image.bytes();
 
-        // Convert interleaved to planar
-        let (dimensions, pixel_data) = if desc.color_format == ColorFormat::L_F32 {
-            (
-                ImageDimensions::new(width, height, 1),
-                PixelData::L(pixels.to_vec()),
-            )
+        let pixel_data = if desc.color_format == ColorFormat::L_F32 {
+            let pixel_count = width * height;
+            let mut data = vec![0.0f32; pixel_count];
+
+            if desc.is_packed() {
+                // Fast path: no stride padding, direct copy
+                let pixels: &[f32] = bytemuck::cast_slice(bytes);
+                data.copy_from_slice(pixels);
+            } else {
+                // Handle stride: copy row by row in parallel
+                let row_bytes = width * std::mem::size_of::<f32>();
+                data.par_chunks_mut(width).enumerate().for_each(|(y, row)| {
+                    let src_offset = y * desc.stride;
+                    let src_row: &[f32] =
+                        bytemuck::cast_slice(&bytes[src_offset..src_offset + row_bytes]);
+                    row.copy_from_slice(src_row);
+                });
+            }
+            PixelData::L(data)
         } else {
             let pixel_count = width * height;
-            let mut r = Vec::with_capacity(pixel_count);
-            let mut g = Vec::with_capacity(pixel_count);
-            let mut b = Vec::with_capacity(pixel_count);
+            let mut r = vec![0.0f32; pixel_count];
+            let mut g = vec![0.0f32; pixel_count];
+            let mut b = vec![0.0f32; pixel_count];
 
-            for chunk in pixels.chunks_exact(3) {
-                r.push(chunk[0]);
-                g.push(chunk[1]);
-                b.push(chunk[2]);
+            if desc.is_packed() {
+                // Fast path: use parallel deinterleave
+                let pixels: &[f32] = bytemuck::cast_slice(bytes);
+                deinterleave_rgb(pixels, &mut r, &mut g, &mut b);
+            } else {
+                // Handle stride: process row by row in parallel
+                let pixels: &[f32] = bytemuck::cast_slice(bytes);
+                r.par_chunks_mut(width)
+                    .zip(g.par_chunks_mut(width))
+                    .zip(b.par_chunks_mut(width))
+                    .enumerate()
+                    .for_each(|(y, ((r_row, g_row), b_row))| {
+                        let row_start = y * stride_f32;
+                        for x in 0..width {
+                            let src_idx = row_start + x * 3;
+                            r_row[x] = pixels[src_idx];
+                            g_row[x] = pixels[src_idx + 1];
+                            b_row[x] = pixels[src_idx + 2];
+                        }
+                    });
             }
-
-            (
-                ImageDimensions::new(width, height, 3),
-                PixelData::Rgb([r, g, b]),
-            )
+            PixelData::Rgb([r, g, b])
         };
+
+        let dimensions = ImageDimensions::new(
+            width,
+            height,
+            if matches!(pixel_data, PixelData::L(_)) {
+                1
+            } else {
+                3
+            },
+        );
 
         AstroImage {
             metadata: AstroImageMetadata::default(),
@@ -786,7 +823,7 @@ mod tests {
     #[test]
     fn test_from_image_no_stride_padding() {
         // Create an Image with potential stride padding
-        let desc = ImageDesc::new(3, 2, ColorFormat::L_F32);
+        let desc = ImageDesc::new_with_stride(3, 2, ColorFormat::L_F32);
         let pixels: Vec<f32> = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
         let bytes: Vec<u8> = bytemuck::cast_slice(&pixels).to_vec();
         let image = Image::new_with_data(desc, bytes).unwrap();
@@ -1015,7 +1052,7 @@ mod tests {
     #[test]
     fn test_image_rgba_to_astro_drops_alpha() {
         // Create RGBA f32 image
-        let desc = ImageDesc::new(2, 1, ColorFormat::RGBA_F32);
+        let desc = ImageDesc::new_with_stride(2, 1, ColorFormat::RGBA_F32);
         let pixels: Vec<f32> = vec![
             1.0, 0.0, 0.0, 0.5, // red with 50% alpha
             0.0, 1.0, 0.0, 1.0, // green with full alpha
@@ -1042,7 +1079,7 @@ mod tests {
     #[test]
     fn test_image_gray_alpha_to_astro_drops_alpha() {
         // Create LA f32 image
-        let desc = ImageDesc::new(2, 1, ColorFormat::LA_F32);
+        let desc = ImageDesc::new_with_stride(2, 1, ColorFormat::LA_F32);
         let pixels: Vec<f32> = vec![
             0.5, 0.8, // gray 0.5 with 80% alpha
             0.9, 1.0, // gray 0.9 with full alpha

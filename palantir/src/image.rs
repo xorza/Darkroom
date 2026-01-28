@@ -89,7 +89,7 @@ impl CustomValue for Image {
 
         let vision_ctx = ctx_manager.get::<VisionCtx>(&VISION_CTX_TYPE);
 
-        let preview_desc = ImageDesc::new(new_width, new_height, desc.color_format);
+        let preview_desc = ImageDesc::new_with_stride(new_width, new_height, desc.color_format);
 
         let mut scaled_buffer = ImageBuffer::new_empty(preview_desc);
 

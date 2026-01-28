@@ -232,7 +232,7 @@ mod tests {
 
         let pipeline = GpuContrastBrightnessPipeline::new(&ctx).unwrap();
 
-        let desc = ImageDesc::new(4, 4, ColorFormat::RGBA_U8);
+        let desc = ImageDesc::new_with_stride(4, 4, ColorFormat::RGBA_U8);
         let mut input_data = vec![0u8; desc.stride * desc.height];
         // Set specific alpha values
         for y in 0..4usize {
@@ -562,7 +562,7 @@ mod tests {
 
         let pipeline = GpuContrastBrightnessPipeline::new(&ctx).unwrap();
 
-        let desc = ImageDesc::new(4, 4, ColorFormat::LA_U8);
+        let desc = ImageDesc::new_with_stride(4, 4, ColorFormat::LA_U8);
         let mut input_data = vec![0u8; desc.stride * desc.height];
         // Set specific alpha values
         for y in 0..4usize {
@@ -608,7 +608,7 @@ mod tests {
 
         let pipeline = GpuContrastBrightnessPipeline::new(&ctx).unwrap();
 
-        let desc = ImageDesc::new(4, 4, ColorFormat::RGBA_F32);
+        let desc = ImageDesc::new_with_stride(4, 4, ColorFormat::RGBA_F32);
         let mut input_data = vec![0u8; desc.stride * desc.height];
         // Set specific alpha values
         for y in 0..4usize {

@@ -220,7 +220,7 @@ mod tests {
         // Create larger output for 2x scale
         let output_format =
             ColorFormat::from((ChannelCount::Rgba, ChannelSize::_8bit, ChannelType::UInt));
-        let output_desc = ImageDesc::new(122, 76, output_format);
+        let output_desc = ImageDesc::new_with_stride(122, 76, output_format);
         let mut output = GpuImage::new_empty(&ctx, output_desc);
 
         let transform = Transform::new().scale(Vec2::new(2.0, 2.0));
@@ -273,7 +273,7 @@ mod tests {
         // Scale up with nearest neighbor
         let output_format =
             ColorFormat::from((ChannelCount::Rgba, ChannelSize::_8bit, ChannelType::UInt));
-        let output_desc = ImageDesc::new(122, 76, output_format);
+        let output_desc = ImageDesc::new_with_stride(122, 76, output_format);
 
         let mut output_nearest = GpuImage::new_empty(&ctx, output_desc);
         let transform_nearest = Transform::new()
@@ -522,7 +522,7 @@ mod tests {
             let height = input_cpu.desc().height;
 
             // Create output with same dimensions
-            let output_desc = ImageDesc::new(width / 2, height / 2, format);
+            let output_desc = ImageDesc::new_with_stride(width / 2, height / 2, format);
 
             let input = GpuImage::from_image(&ctx, &input_cpu);
             let mut output = GpuImage::new_empty(&ctx, output_desc);
