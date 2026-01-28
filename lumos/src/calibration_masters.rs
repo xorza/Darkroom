@@ -338,7 +338,7 @@ mod tests {
     use super::*;
 
     #[test]
-    #[cfg_attr(not(feature = "slow-tests"), ignore)]
+    #[cfg_attr(not(feature = "real-data"), ignore)]
     fn test_calibration_masters_from_env() {
         use crate::testing::calibration_dir;
 
@@ -391,7 +391,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg_attr(not(feature = "slow-tests"), ignore)]
+    #[cfg_attr(not(feature = "real-data"), ignore)]
     fn test_load_masters_from_calibration_masters_subdir() {
         use crate::testing::calibration_masters_dir;
 

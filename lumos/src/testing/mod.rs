@@ -2,6 +2,7 @@
 
 #![allow(dead_code)]
 
+pub mod real_data;
 pub mod synthetic;
 
 use std::path::PathBuf;

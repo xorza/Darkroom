@@ -5,7 +5,6 @@ edition.workspace = true
 description = ""
 
 [features]
-slow-tests = []
 bench = ["dep:criterion"]
 real-data = []
 

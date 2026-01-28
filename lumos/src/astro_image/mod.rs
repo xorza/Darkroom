@@ -1157,7 +1157,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg_attr(not(feature = "slow-tests"), ignore)]
+    #[cfg_attr(not(feature = "real-data"), ignore)]
     fn test_load_single_raw_from_env() {
         init_tracing();
 
@@ -1205,7 +1205,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg_attr(not(feature = "slow-tests"), ignore)]
+    #[cfg_attr(not(feature = "real-data"), ignore)]
     fn test_calibrate_light_from_env() {
         use crate::testing::{calibration_dir, calibration_masters_dir, init_tracing};
         use crate::{CalibrationMasters, StackingMethod};

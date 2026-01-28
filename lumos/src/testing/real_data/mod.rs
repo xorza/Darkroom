@@ -8,7 +8,7 @@
 //! # Running real-data tests
 //!
 //! ```bash
-//! cargo test -p lumos --features benchmark-tests real_data -- --ignored
+//! cargo test -p lumos --features real-data testing::real_data -- --ignored
 //! ```
 //!
 //! # Environment variables
@@ -22,6 +22,9 @@
 //!
 //! - `LUMOS_TEST_CACHE_DIR` - Optional cache directory for test artifacts
 
+#[cfg(feature = "real-data")]
 pub mod astrometry_benchmark;
+#[cfg(feature = "real-data")]
 mod calibration_tests;
+#[cfg(feature = "real-data")]
 pub mod survey_benchmark;

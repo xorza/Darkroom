@@ -26,7 +26,7 @@ use crate::testing::{calibration_dir, calibration_image_paths, init_tracing};
 #[test]
 #[ignore] // Requires LUMOS_CALIBRATION_DIR
 fn test_find_stars_on_light_frame() {
-    use crate::star_detection::{StarDetectionConfig, find_stars};
+    use crate::star_detection::{StarDetectionConfig, StarDetector};
 
     init_tracing();
 
@@ -61,7 +61,8 @@ fn test_find_stars_on_light_frame() {
 
     let config = StarDetectionConfig::default();
     let start = std::time::Instant::now();
-    let result = find_stars(&image, &config);
+    let detector = StarDetector::from_config(config);
+    let result = detector.detect(&image);
     println!(
         "Found {} stars in {:?}",
         result.stars.len(),
@@ -146,7 +147,7 @@ fn test_background_on_real_image() {
 
     let width = astro_image.width();
     let height = astro_image.height();
-    let pixels = astro_image.pixels();
+    let pixels = astro_image.channel(0);
 
     println!("Loaded image: {}x{}", width, height);
 
@@ -173,7 +174,7 @@ fn test_background_on_real_image() {
     let subtracted: Vec<f32> = pixels
         .iter()
         .zip(bg.background.iter())
-        .map(|(p, b)| (p - b + 0.5).clamp(0.0, 1.0))
+        .map(|(&p, &b)| (p - b + 0.5).clamp(0.0, 1.0))
         .collect();
     let sub_img = to_gray_image(&subtracted, width, height);
     let path = common::test_utils::test_output_path("real_data/background_subtracted.png");
@@ -250,7 +251,7 @@ mod stacking_tests {
         );
 
         assert_eq!(master.dimensions(), first.dimensions());
-        assert!(!master.pixels().is_empty());
+        assert!(!master.channel(0).is_empty());
 
         let img: imaginarium::Image = master.into();
         img.save_file(common::test_utils::test_output_path(&format!(
@@ -372,17 +373,22 @@ mod xtrans_tests {
         assert!(image.dimensions().height > 0);
         assert_eq!(image.dimensions().channels, 3);
 
-        let expected_pixel_count = image.dimensions().pixel_count();
-        assert_eq!(image.pixels().len(), expected_pixel_count);
+        let pixel_count_per_channel = image.width() * image.height();
+        for c in 0..image.channels() {
+            assert_eq!(image.channel(c).len(), pixel_count_per_channel);
+        }
 
-        for (i, &pixel) in image.pixels().iter().enumerate() {
-            assert!(
-                (0.0..=1.0).contains(&pixel),
-                "Pixel {} out of range: {}",
-                i,
-                pixel
-            );
-            assert!(!pixel.is_nan(), "Pixel {} is NaN", i);
+        for c in 0..image.channels() {
+            for (i, &pixel) in image.channel(c).iter().enumerate() {
+                assert!(
+                    (0.0..=1.0).contains(&pixel),
+                    "Channel {} pixel {} out of range: {}",
+                    c,
+                    i,
+                    pixel
+                );
+                assert!(!pixel.is_nan(), "Channel {} pixel {} is NaN", c, i);
+            }
         }
 
         tracing::info!(
@@ -404,14 +410,10 @@ mod xtrans_tests {
 
         let image = AstroImage::from_file(&file_path).expect("Failed to load X-Trans RAF file");
 
-        let width = image.dimensions().width;
-        let height = image.dimensions().height;
         let channels = image.dimensions().channels;
 
         for ch in 0..channels {
-            let channel_pixels: Vec<f32> = (0..width * height)
-                .map(|i| image.pixels()[i * channels + ch])
-                .collect();
+            let channel_pixels = image.channel(ch);
 
             let sum: f64 = channel_pixels.iter().map(|&p| p as f64).sum();
             let mean = sum / channel_pixels.len() as f64;

@@ -732,7 +732,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg_attr(not(feature = "slow-tests"), ignore)]
+    #[cfg_attr(not(feature = "real-data"), ignore)]
     fn test_load_raw_valid_file() {
         let Some(path) = first_raw_file() else {
             eprintln!("No RAW file found for testing, skipping");
@@ -767,7 +767,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg_attr(not(feature = "slow-tests"), ignore)]
+    #[cfg_attr(not(feature = "real-data"), ignore)]
     fn test_load_raw_dimensions_match() {
         let Some(path) = first_raw_file() else {
             eprintln!("No RAW file found for testing, skipping");

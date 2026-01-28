@@ -10,7 +10,7 @@ use crate::astro_image::AstroImage;
 use crate::star_detection::tests::common::output::{
     DetectionMetrics, compute_detection_metrics, save_comparison, save_grayscale, save_metrics,
 };
-use crate::star_detection::{Star, StarDetectionConfig, find_stars};
+use crate::star_detection::{Star, StarDetectionConfig, StarDetector};
 use crate::testing::synthetic::GroundTruthStar;
 use anyhow::{Context, Result};
 use std::io::Write;
@@ -285,7 +285,8 @@ impl SurveyBenchmark {
 
         // Step 5: Run star detection
         let start = Instant::now();
-        let result = find_stars(&image, config);
+        let detector = StarDetector::from_config(config.clone());
+        let result = detector.detect(&image);
         let runtime_ms = start.elapsed().as_millis() as u64;
 
         tracing::info!("Detected {} stars in {} ms", result.stars.len(), runtime_ms);
@@ -373,7 +374,7 @@ impl SurveyBenchmark {
         let height = image.height();
 
         // Normalize image to 0-1 range for display
-        let pixels_normalized = normalize_pixels(image.pixels());
+        let pixels_normalized = normalize_pixels(image.channel(0));
 
         // Save input image
         save_grayscale(
@@ -1010,7 +1011,8 @@ mod tests {
             expected_fwhm: field.expected_fwhm_pixels(0.396),
             ..Default::default()
         };
-        let result = find_stars(&image, &config);
+        let detector = StarDetector::from_config(config.clone());
+        let result = detector.detect(&image);
         let match_radius = config.expected_fwhm * 2.0;
 
         println!("\n=== Bright Catalog Stars (mag < 18) ===");
@@ -1057,7 +1059,7 @@ mod tests {
                 let idx = py * width + px;
                 println!(
                     "    Pixel value: {:.1}, saturated flag: {}",
-                    image.pixels()[idx],
+                    image.channel(0)[idx],
                     gt.is_saturated
                 );
             }

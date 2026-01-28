@@ -275,11 +275,11 @@ impl RectangleCache {
         let full_path = self.cache_dir.join(&rect.image_path);
 
         // Convert to grayscale if needed
-        let grayscale = source.clone().to_grayscale();
+        let grayscale = source.clone().into_grayscale();
 
         // Extract rectangle pixels
         let src_width = grayscale.width();
-        let src_pixels = grayscale.pixels();
+        let src_pixels = grayscale.channel(0);
         let mut pixels = Vec::with_capacity(rect.width * rect.height);
 
         for y in rect.y..(rect.y + rect.height) {
@@ -364,7 +364,7 @@ impl RectangleCache {
         let image = crate::AstroImage::from_file(&path)
             .with_context(|| format!("Failed to load rectangle image: {}", path.display()))?;
 
-        Ok((image.pixels().to_vec(), image.width(), image.height()))
+        Ok((image.channel(0).to_vec(), image.width(), image.height()))
     }
 
     /// Clear all cached data.
