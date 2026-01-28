@@ -245,7 +245,7 @@ impl Registrator {
         let phase_config = PhaseCorrelationConfig::default();
         let correlator = PhaseCorrelator::new(width, height, phase_config);
 
-        let phase_result = correlator.correlate(ref_image, target_image, width, height);
+        let phase_result = correlator.correlate(ref_image, target_image);
 
         // Apply coarse translation to target stars if phase correlation succeeded
         let adjusted_target_stars: Vec<_> = if let Some(ref pr) = phase_result {
@@ -662,9 +662,7 @@ impl MultiScaleRegistrator {
                 let phase_config = PhaseCorrelationConfig::default();
                 let correlator = PhaseCorrelator::new(*level_width, *level_height, phase_config);
 
-                if let Some(pr) =
-                    correlator.correlate(level_ref, level_target, *level_width, *level_height)
-                {
+                if let Some(pr) = correlator.correlate(level_ref, level_target) {
                     let (dx, dy) = pr.translation;
                     // Scale translation to full resolution
                     let phase_transform = TransformMatrix::translation(dx * scale, dy * scale);

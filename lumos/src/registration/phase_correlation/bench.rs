@@ -51,12 +51,8 @@ fn benchmark_phase_correlation_sizes(c: &mut Criterion) {
             BenchmarkId::new("correlate", format!("{}x{}", size, size)),
             |b| {
                 b.iter(|| {
-                    let result = correlator.correlate(
-                        black_box(&ref_image),
-                        black_box(&target_image),
-                        size,
-                        size,
-                    );
+                    let result =
+                        correlator.correlate(black_box(&ref_image), black_box(&target_image));
                     black_box(result)
                 })
             },
@@ -91,12 +87,7 @@ fn benchmark_subpixel_methods(c: &mut Criterion) {
 
         group.bench_function(name, |b| {
             b.iter(|| {
-                let result = correlator.correlate(
-                    black_box(&ref_image),
-                    black_box(&target_image),
-                    size,
-                    size,
-                );
+                let result = correlator.correlate(black_box(&ref_image), black_box(&target_image));
                 black_box(result)
             })
         });
@@ -128,12 +119,8 @@ fn benchmark_iterative_correlation(c: &mut Criterion) {
 
     group.bench_function("single_shot", |b| {
         b.iter(|| {
-            let result = correlator_single.correlate(
-                black_box(&ref_image),
-                black_box(&target_image),
-                size,
-                size,
-            );
+            let result =
+                correlator_single.correlate(black_box(&ref_image), black_box(&target_image));
             black_box(result)
         })
     });
@@ -149,12 +136,8 @@ fn benchmark_iterative_correlation(c: &mut Criterion) {
 
     group.bench_function("iterative_3", |b| {
         b.iter(|| {
-            let result = correlator_iter3.correlate_iterative(
-                black_box(&ref_image),
-                black_box(&target_image),
-                size,
-                size,
-            );
+            let result = correlator_iter3
+                .correlate_iterative(black_box(&ref_image), black_box(&target_image));
             black_box(result)
         })
     });
@@ -170,12 +153,8 @@ fn benchmark_iterative_correlation(c: &mut Criterion) {
 
     group.bench_function("iterative_5", |b| {
         b.iter(|| {
-            let result = correlator_iter5.correlate_iterative(
-                black_box(&ref_image),
-                black_box(&target_image),
-                size,
-                size,
-            );
+            let result = correlator_iter5
+                .correlate_iterative(black_box(&ref_image), black_box(&target_image));
             black_box(result)
         })
     });
@@ -280,12 +259,7 @@ fn benchmark_windowing(c: &mut Criterion) {
 
         group.bench_function(name, |b| {
             b.iter(|| {
-                let result = correlator.correlate(
-                    black_box(&ref_image),
-                    black_box(&target_image),
-                    size,
-                    size,
-                );
+                let result = correlator.correlate(black_box(&ref_image), black_box(&target_image));
                 black_box(result)
             })
         });

@@ -70,6 +70,10 @@ pub struct PhaseCorrelationResult {
 /// Phase correlator for translation estimation.
 pub struct PhaseCorrelator {
     config: PhaseCorrelationConfig,
+    /// Image width
+    width: usize,
+    /// Image height
+    height: usize,
     /// FFT size (must be power of 2 for efficiency)
     fft_size: usize,
     /// Cached forward FFT
@@ -100,6 +104,8 @@ impl PhaseCorrelator {
 
         Self {
             config,
+            width,
+            height,
             fft_size,
             forward_fft,
             inverse_fft,
@@ -110,20 +116,15 @@ impl PhaseCorrelator {
     /// Estimate translation between two images.
     ///
     /// Returns (dx, dy) where target = reference shifted by (dx, dy).
-    pub fn correlate(
-        &self,
-        reference: &[f32],
-        target: &[f32],
-        width: usize,
-        height: usize,
-    ) -> Option<PhaseCorrelationResult> {
-        if reference.len() != width * height || target.len() != width * height {
+    pub fn correlate(&self, reference: &[f32], target: &[f32]) -> Option<PhaseCorrelationResult> {
+        let expected_len = self.width * self.height;
+        if reference.len() != expected_len || target.len() != expected_len {
             return None;
         }
 
         // Pad and window the images
-        let ref_padded = self.prepare_image(reference, width, height);
-        let tar_padded = self.prepare_image(target, width, height);
+        let ref_padded = self.prepare_image(reference);
+        let tar_padded = self.prepare_image(target);
 
         // Compute 2D FFT of both images
         let ref_fft = self.fft_2d(&ref_padded);
@@ -195,8 +196,6 @@ impl PhaseCorrelator {
     /// # Arguments
     /// * `reference` - Reference image
     /// * `target` - Target image
-    /// * `width` - Image width
-    /// * `height` - Image height
     ///
     /// # Returns
     /// Phase correlation result with refined sub-pixel translation.
@@ -204,20 +203,19 @@ impl PhaseCorrelator {
         &self,
         reference: &[f32],
         target: &[f32],
-        width: usize,
-        height: usize,
     ) -> Option<PhaseCorrelationResult> {
-        if reference.len() != width * height || target.len() != width * height {
+        let expected_len = self.width * self.height;
+        if reference.len() != expected_len || target.len() != expected_len {
             return None;
         }
 
         // If iterations disabled, fall back to standard correlation
         if self.config.max_iterations == 0 {
-            return self.correlate(reference, target, width, height);
+            return self.correlate(reference, target);
         }
 
         // Initial correlation
-        let mut result = self.correlate(reference, target, width, height)?;
+        let mut result = self.correlate(reference, target)?;
         let mut total_dx = result.translation.0;
         let mut total_dy = result.translation.1;
 
@@ -225,10 +223,11 @@ impl PhaseCorrelator {
             // Shift original target by NEGATIVE accumulated offset to align with reference
             // If target = reference shifted by (dx, dy), then shifting target by (-dx, -dy)
             // should align it back with reference
-            let aligned_target = shift_image_subpixel(target, width, height, -total_dx, -total_dy);
+            let aligned_target =
+                shift_image_subpixel(target, self.width, self.height, -total_dx, -total_dy);
 
             // Correlate reference with aligned target to find residual error
-            let residual = self.correlate(reference, &aligned_target, width, height)?;
+            let residual = self.correlate(reference, &aligned_target)?;
 
             let residual_dx = residual.translation.0;
             let residual_dy = residual.translation.1;
@@ -259,17 +258,17 @@ impl PhaseCorrelator {
     }
 
     /// Prepare image: pad to FFT size and apply window.
-    fn prepare_image(&self, image: &[f32], width: usize, height: usize) -> Vec<f32> {
+    fn prepare_image(&self, image: &[f32]) -> Vec<f32> {
         let n = self.fft_size;
         let mut padded = vec![0.0f32; n * n];
 
         // Copy with centering and windowing
-        let offset_x = (n - width) / 2;
-        let offset_y = (n - height) / 2;
+        let offset_x = (n - self.width) / 2;
+        let offset_y = (n - self.height) / 2;
 
-        for y in 0..height {
-            for x in 0..width {
-                let src_idx = y * width + x;
+        for y in 0..self.height {
+            for x in 0..self.width {
+                let src_idx = y * self.width + x;
                 let dst_idx = (y + offset_y) * n + (x + offset_x);
 
                 // Apply separable window
@@ -785,9 +784,7 @@ impl LogPolarCorrelator {
         let tar_lp = self.to_log_polar(&tar_mag, width.max(height).next_power_of_two());
 
         // Step 3: Phase correlate in log-polar space
-        let result = self
-            .correlator
-            .correlate(&ref_lp, &tar_lp, self.size, self.size)?;
+        let result = self.correlator.correlate(&ref_lp, &tar_lp)?;
 
         // Convert translation to rotation and scale
         let (dx, dy) = result.translation;
@@ -988,13 +985,10 @@ impl FullPhaseCorrelator {
     }
 
     /// Estimate full transformation (rotation, scale, translation).
-    pub fn estimate(
-        &self,
-        reference: &[f32],
-        target: &[f32],
-        width: usize,
-        height: usize,
-    ) -> Option<FullPhaseResult> {
+    pub fn estimate(&self, reference: &[f32], target: &[f32]) -> Option<FullPhaseResult> {
+        let width = self.translation.width;
+        let height = self.translation.height;
+
         // Step 1: Estimate rotation and scale
         let rs_result = self
             .log_polar
@@ -1009,9 +1003,7 @@ impl FullPhaseCorrelator {
             1.0 / rs_result.scale,
         );
 
-        let trans_result = self
-            .translation
-            .correlate(reference, &corrected, width, height)?;
+        let trans_result = self.translation.correlate(reference, &corrected)?;
 
         Some(FullPhaseResult {
             rotation: rs_result.rotation,

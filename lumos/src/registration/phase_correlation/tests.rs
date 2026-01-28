@@ -35,7 +35,7 @@ fn test_correlate_identical_images() {
     let reference = create_test_image(width, height, 0, 0);
 
     let correlator = PhaseCorrelator::new(width, height, test_config());
-    let result = correlator.correlate(&reference, &reference, width, height);
+    let result = correlator.correlate(&reference, &reference);
 
     assert!(
         result.is_some(),
@@ -64,7 +64,7 @@ fn test_correlate_translated_5_pixels() {
     let target = create_test_image(width, height, 5, 0);
 
     let correlator = PhaseCorrelator::new(width, height, test_config());
-    let result = correlator.correlate(&reference, &target, width, height);
+    let result = correlator.correlate(&reference, &target);
 
     assert!(result.is_some(), "Correlation should succeed");
     let result = result.unwrap();
@@ -85,7 +85,7 @@ fn test_correlate_translated_xy() {
     let target = create_test_image(width, height, 3, -7);
 
     let correlator = PhaseCorrelator::new(width, height, test_config());
-    let result = correlator.correlate(&reference, &target, width, height);
+    let result = correlator.correlate(&reference, &target);
 
     assert!(result.is_some(), "Correlation should succeed");
     // Just verify we get some result - exact values depend on implementation details
@@ -120,7 +120,7 @@ fn test_subpixel_methods() {
             ..Default::default()
         };
         let correlator = PhaseCorrelator::new(width, height, config);
-        let result = correlator.correlate(&reference, &reference, width, height);
+        let result = correlator.correlate(&reference, &reference);
 
         assert!(result.is_some(), "Method {:?} failed", method);
     }
@@ -141,7 +141,7 @@ fn test_transpose_inplace() {
 #[test]
 fn test_correlate_empty_image() {
     let correlator = PhaseCorrelator::new(64, 64, PhaseCorrelationConfig::default());
-    let result = correlator.correlate(&[], &[], 0, 0);
+    let result = correlator.correlate(&[], &[]);
     assert!(result.is_none());
 }
 
@@ -150,7 +150,7 @@ fn test_correlate_size_mismatch() {
     let correlator = PhaseCorrelator::new(64, 64, PhaseCorrelationConfig::default());
     let small = vec![0.0f32; 32 * 32];
     let large = vec![0.0f32; 64 * 64];
-    let result = correlator.correlate(&small, &large, 64, 64);
+    let result = correlator.correlate(&small, &large);
     assert!(result.is_none());
 }
 
@@ -161,7 +161,7 @@ fn test_confidence_calculation() {
     let reference = create_test_image(width, height, 0, 0);
 
     let correlator = PhaseCorrelator::new(width, height, test_config());
-    let result = correlator.correlate(&reference, &reference, width, height);
+    let result = correlator.correlate(&reference, &reference);
 
     assert!(result.is_some(), "Correlation should succeed");
     let result = result.unwrap();
@@ -243,7 +243,7 @@ fn test_full_phase_correlator() {
         ..Default::default()
     };
     let correlator = super::FullPhaseCorrelator::with_config(width, height, config);
-    let result = correlator.estimate(&reference, &reference, width, height);
+    let result = correlator.estimate(&reference, &reference);
 
     assert!(result.is_some(), "Full phase correlation should succeed");
     let result = result.unwrap();
@@ -319,7 +319,7 @@ fn test_subpixel_accuracy_parabolic() {
         ..Default::default()
     };
     let correlator = PhaseCorrelator::new(width, height, config);
-    let result = correlator.correlate(&reference, &target, width, height);
+    let result = correlator.correlate(&reference, &target);
 
     assert!(result.is_some(), "Sub-pixel correlation should succeed");
     let result = result.unwrap();
@@ -363,7 +363,7 @@ fn test_subpixel_accuracy_gaussian() {
         ..Default::default()
     };
     let correlator = PhaseCorrelator::new(width, height, config);
-    let result = correlator.correlate(&reference, &reference, width, height);
+    let result = correlator.correlate(&reference, &reference);
 
     assert!(result.is_some(), "Gaussian sub-pixel should succeed");
     let result = result.unwrap();
@@ -407,7 +407,7 @@ fn test_subpixel_accuracy_centroid() {
         ..Default::default()
     };
     let correlator = PhaseCorrelator::new(width, height, config);
-    let result = correlator.correlate(&reference, &reference, width, height);
+    let result = correlator.correlate(&reference, &reference);
 
     assert!(result.is_some(), "Centroid sub-pixel should succeed");
     let result = result.unwrap();
@@ -454,7 +454,7 @@ fn test_large_translation_near_wraparound() {
         ..Default::default()
     };
     let correlator = PhaseCorrelator::new(width, height, config);
-    let result = correlator.correlate(&reference, &target, width, height);
+    let result = correlator.correlate(&reference, &target);
 
     assert!(
         result.is_some(),
@@ -666,7 +666,7 @@ fn test_correlation_with_noise() {
         ..Default::default()
     };
     let correlator = PhaseCorrelator::new(width, height, config);
-    let result = correlator.correlate(&reference, &target, width, height);
+    let result = correlator.correlate(&reference, &target);
 
     assert!(
         result.is_some(),
@@ -701,7 +701,7 @@ fn test_correlation_uniform_image() {
         ..Default::default()
     };
     let correlator = PhaseCorrelator::new(width, height, config);
-    let result = correlator.correlate(&uniform, &uniform, width, height);
+    let result = correlator.correlate(&uniform, &uniform);
 
     // May succeed or fail - either is acceptable for degenerate input
     // Key is it doesn't panic
@@ -733,7 +733,7 @@ fn test_correlation_nyquist_checkerboard() {
         ..Default::default()
     };
     let correlator = PhaseCorrelator::new(width, height, config);
-    let result = correlator.correlate(&pattern, &pattern, width, height);
+    let result = correlator.correlate(&pattern, &pattern);
 
     // This is a difficult case - may or may not succeed
     // Key is it doesn't panic
@@ -775,7 +775,7 @@ fn test_full_correlator_rotation_and_translation() {
         ..Default::default()
     };
     let correlator = super::FullPhaseCorrelator::with_config(width, height, config);
-    let result = correlator.estimate(&reference, &reference, width, height);
+    let result = correlator.estimate(&reference, &reference);
 
     assert!(result.is_some(), "Full correlator should succeed");
     let result = result.unwrap();
@@ -877,7 +877,7 @@ fn test_iterative_correlation_subpixel() {
     };
     let standard_correlator = PhaseCorrelator::new(width, height, standard_config);
     let standard_result = standard_correlator
-        .correlate(&reference, &target, width, height)
+        .correlate(&reference, &target)
         .expect("Standard correlation should succeed");
 
     // Iterative correlation
@@ -890,7 +890,7 @@ fn test_iterative_correlation_subpixel() {
     };
     let iterative_correlator = PhaseCorrelator::new(width, height, iterative_config);
     let iterative_result = iterative_correlator
-        .correlate_iterative(&reference, &target, width, height)
+        .correlate_iterative(&reference, &target)
         .expect("Iterative correlation should succeed");
 
     // Both methods should produce a result
@@ -937,7 +937,7 @@ fn test_iterative_correlation_self() {
     let correlator = PhaseCorrelator::new(width, height, config);
 
     let result = correlator
-        .correlate_iterative(&reference, &reference, width, height)
+        .correlate_iterative(&reference, &reference)
         .expect("Self-correlation should succeed");
 
     // Self-correlation should give near-zero translation
@@ -974,8 +974,8 @@ fn test_iterative_disabled_fallback() {
     };
     let correlator = PhaseCorrelator::new(width, height, config);
 
-    let standard = correlator.correlate(&reference, &reference, width, height);
-    let iterative = correlator.correlate_iterative(&reference, &reference, width, height);
+    let standard = correlator.correlate(&reference, &reference);
+    let iterative = correlator.correlate_iterative(&reference, &reference);
 
     assert!(standard.is_some());
     assert!(iterative.is_some());
