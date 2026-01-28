@@ -44,6 +44,8 @@ pub mod bench {
     pub use super::median_filter::bench as median_filter;
 }
 
+use core::f32;
+
 // Public API exports - main entry points for external consumers
 pub use centroid::LocalBackgroundMethod;
 
@@ -996,7 +998,7 @@ fn find_stars(image: &AstroImage, config: &StarDetectionConfig) -> StarDetection
     diagnostics.noise_stats = (noise_min, noise_max, noise_mean);
 
     // Step 2: Detect star candidates
-    let candidates = if config.expected_fwhm > 0.0 {
+    let candidates = if config.expected_fwhm > f32::EPSILON {
         // Apply matched filter (Gaussian convolution) for better faint star detection
         // This is the DAOFIND/SExtractor technique
         let filtered = if config.psf_axis_ratio < 0.99 {

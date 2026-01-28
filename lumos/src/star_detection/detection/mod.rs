@@ -407,13 +407,15 @@ pub(crate) fn extract_candidates(
     use rayon::prelude::*;
 
     // Collect component data in first pass
+    // Pre-allocate with estimated ~50 pixels per component to reduce reallocations
+    let estimated_pixels_per_component = 50;
     let mut component_data: Vec<ComponentData> = (0..num_labels)
         .map(|_| ComponentData {
             x_min: usize::MAX,
             x_max: 0,
             y_min: usize::MAX,
             y_max: 0,
-            pixels: Vec::new(),
+            pixels: Vec::with_capacity(estimated_pixels_per_component),
         })
         .collect();
 
