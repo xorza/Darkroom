@@ -65,8 +65,7 @@ pub fn load_fits(path: &Path) -> Result<AstroImage> {
         is_cfa: false,
     };
 
-    let mut astro =
-        AstroImage::from_pixels(img_dims.width, img_dims.height, img_dims.channels, pixels);
+    let mut astro = AstroImage::from_pixels(img_dims, pixels);
     astro.metadata = metadata;
     Ok(astro)
 }

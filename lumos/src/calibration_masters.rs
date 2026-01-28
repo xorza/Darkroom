@@ -43,7 +43,7 @@ impl CalibrationMasters {
     /// # Panics
     /// Panics if the provided master frames have different dimensions than the image.
     pub fn calibrate(&self, image: &mut AstroImage) {
-        // Chunk size to avoid false cache sharing (16KB of f32s)
+        // Chunk size for parallel processing (16KB of f32s to avoid false sharing)
         const CHUNK_SIZE: usize = 4096;
 
         // Subtract master bias (removes readout noise)
@@ -54,17 +54,15 @@ impl CalibrationMasters {
                 bias.dimensions(),
                 image.dimensions()
             );
-            let bias_pixels = bias.pixels();
-            image
-                .pixels_mut()
-                .par_chunks_mut(CHUNK_SIZE)
-                .enumerate()
-                .for_each(|(chunk_idx, chunk): (usize, &mut [f32])| {
-                    let start = chunk_idx * CHUNK_SIZE;
-                    for (i, p) in chunk.iter_mut().enumerate() {
-                        *p -= bias_pixels[start + i];
-                    }
-                });
+            image.apply_from_channel(bias, |_c, dst, src| {
+                dst.par_chunks_mut(CHUNK_SIZE)
+                    .zip(src.par_chunks(CHUNK_SIZE))
+                    .for_each(|(d_chunk, s_chunk)| {
+                        for (d, s) in d_chunk.iter_mut().zip(s_chunk.iter()) {
+                            *d -= s;
+                        }
+                    });
+            });
         }
 
         // Subtract master dark (removes thermal noise)
@@ -75,17 +73,15 @@ impl CalibrationMasters {
                 dark.dimensions(),
                 image.dimensions()
             );
-            let dark_pixels = dark.pixels();
-            image
-                .pixels_mut()
-                .par_chunks_mut(CHUNK_SIZE)
-                .enumerate()
-                .for_each(|(chunk_idx, chunk): (usize, &mut [f32])| {
-                    let start = chunk_idx * CHUNK_SIZE;
-                    for (i, p) in chunk.iter_mut().enumerate() {
-                        *p -= dark_pixels[start + i];
-                    }
-                });
+            image.apply_from_channel(dark, |_c, dst, src| {
+                dst.par_chunks_mut(CHUNK_SIZE)
+                    .zip(src.par_chunks(CHUNK_SIZE))
+                    .for_each(|(d_chunk, s_chunk)| {
+                        for (d, s) in d_chunk.iter_mut().zip(s_chunk.iter()) {
+                            *d -= s;
+                        }
+                    });
+            });
         }
 
         // Divide by normalized master flat (corrects vignetting)
@@ -102,21 +98,19 @@ impl CalibrationMasters {
                 "Flat frame mean is zero or negative"
             );
             let inv_flat_mean = 1.0 / flat_mean;
-            let flat_pixels = flat.pixels();
 
-            image
-                .pixels_mut()
-                .par_chunks_mut(CHUNK_SIZE)
-                .enumerate()
-                .for_each(|(chunk_idx, chunk): (usize, &mut [f32])| {
-                    let start = chunk_idx * CHUNK_SIZE;
-                    for (i, p) in chunk.iter_mut().enumerate() {
-                        let normalized_flat = flat_pixels[start + i] * inv_flat_mean;
-                        if normalized_flat > f32::EPSILON {
-                            *p /= normalized_flat;
+            image.apply_from_channel(flat, |_c, dst, src| {
+                dst.par_chunks_mut(CHUNK_SIZE)
+                    .zip(src.par_chunks(CHUNK_SIZE))
+                    .for_each(|(d_chunk, s_chunk)| {
+                        for (d, s) in d_chunk.iter_mut().zip(s_chunk.iter()) {
+                            let normalized_flat = s * inv_flat_mean;
+                            if normalized_flat > f32::EPSILON {
+                                *d /= normalized_flat;
+                            }
                         }
-                    }
-                });
+                    });
+            });
         }
 
         // Correct hot pixels (replace with median of neighbors)

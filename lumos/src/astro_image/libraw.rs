@@ -269,12 +269,7 @@ pub fn load_raw(path: &Path) -> Result<AstroImage> {
         is_cfa,
     };
 
-    let mut astro = AstroImage::from_pixels(
-        dimensions.width,
-        dimensions.height,
-        dimensions.channels,
-        pixels,
-    );
+    let mut astro = AstroImage::from_pixels(dimensions, pixels);
     astro.metadata = metadata;
     Ok(astro)
 }
@@ -759,7 +754,7 @@ mod tests {
         assert_eq!(image.pixels().len(), image.dimensions().pixel_count());
 
         // Validate pixel values are normalized
-        for &pixel in image.pixels() {
+        for pixel in image.pixels() {
             assert!(pixel >= 0.0, "Pixel value {} is negative", pixel);
             // Values can exceed 1.0 slightly due to demosaic interpolation
             assert!(pixel <= 2.0, "Pixel value {} is too large", pixel);

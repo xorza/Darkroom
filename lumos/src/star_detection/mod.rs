@@ -1004,7 +1004,7 @@ fn find_stars(image: &AstroImage, config: &StarDetectionConfig) -> StarDetection
     let grayscale = image.clone().to_grayscale();
     let width = grayscale.width();
     let height = grayscale.height();
-    let pixels = grayscale.pixels();
+    let pixels = grayscale.channel(0);
 
     config.validate();
 

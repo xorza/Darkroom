@@ -38,7 +38,7 @@
 //! let corrected = remove_gradient(&image_pixels, width, height, &config)?;
 //! ```
 
-use crate::AstroImage;
+use crate::{AstroImage, ImageDimensions};
 use rayon::prelude::*;
 
 /// Configuration for gradient removal.
@@ -287,30 +287,24 @@ pub fn remove_gradient_image(
     let height = image.height();
     let channels = image.channels();
 
-    if channels == 1 {
-        // Grayscale: apply directly
-        let corrected = remove_gradient_simple(image.pixels(), width, height, config)?;
-        Ok(AstroImage::from_pixels(width, height, channels, corrected))
-    } else {
-        // RGB: process each channel independently
-        let pixels = image.pixels();
-        let channel_size = width * height;
-        let mut corrected = vec![0.0f32; channel_size * channels];
+    // Process each channel independently using planar access
+    let channel_size = width * height;
+    let mut corrected = vec![0.0f32; channel_size * channels];
 
-        for c in 0..channels {
-            let channel_data: Vec<f32> = (0..channel_size)
-                .map(|i| pixels[i * channels + c])
-                .collect();
+    for c in 0..channels {
+        let channel_data = image.channel(c);
+        let channel_corrected = remove_gradient_simple(channel_data, width, height, config)?;
 
-            let channel_corrected = remove_gradient_simple(&channel_data, width, height, config)?;
-
-            for (i, &val) in channel_corrected.iter().enumerate() {
-                corrected[i * channels + c] = val;
-            }
+        // Interleave back into output
+        for (i, &val) in channel_corrected.iter().enumerate() {
+            corrected[i * channels + c] = val;
         }
-
-        Ok(AstroImage::from_pixels(width, height, channels, corrected))
     }
+
+    Ok(AstroImage::from_pixels(
+        ImageDimensions::new(width, height, channels),
+        corrected,
+    ))
 }
 
 /// Generate background samples, avoiding bright regions.

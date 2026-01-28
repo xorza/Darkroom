@@ -4,7 +4,7 @@
 //! run star detection on both images, and verify that registration
 //! correctly recovers the applied transformation.
 
-use crate::AstroImage;
+use crate::{AstroImage, ImageDimensions};
 
 use crate::registration::interpolation::{InterpolationMethod, WarpConfig, warp_image};
 use crate::registration::types::TransformMatrix;
@@ -24,7 +24,7 @@ fn detector() -> StarDetector {
 
 /// Create an AstroImage from pixel data.
 fn create_astro_image(pixels: Vec<f32>, width: usize, height: usize) -> AstroImage {
-    AstroImage::from_pixels(width, height, 1, pixels)
+    AstroImage::from_pixels(ImageDimensions::new(width, height, 1), pixels)
 }
 
 /// Default warp config for tests - bilinear for speed.

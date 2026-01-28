@@ -143,7 +143,8 @@ fn test_warp_to_reference_image() {
     let target_y = 35;
     target_pixels[target_y * width + target_x] = 1.0;
 
-    let target_image = AstroImage::from_pixels(width, height, 1, target_pixels);
+    let target_image =
+        AstroImage::from_pixels(ImageDimensions::new(width, height, 1), target_pixels);
 
     // Transform maps reference -> target: ref(32,32) -> target(37,35)
     // So translation is (5, 3)
@@ -209,7 +210,8 @@ fn test_warp_to_reference_image_roundtrip() {
         },
     );
 
-    let target_image = AstroImage::from_pixels(width, height, 1, target_pixels);
+    let target_image =
+        AstroImage::from_pixels(ImageDimensions::new(width, height, 1), target_pixels);
 
     // Now use warp_to_reference_image to align target back to reference frame
     let aligned = warp_to_reference_image(&target_image, &transform, InterpolationMethod::Lanczos3);
@@ -265,7 +267,8 @@ fn test_warp_to_reference_image_end_to_end() {
 
     // Create target image with transformed star positions
     let target_pixels = generate_synthetic_star_image(width, height, &target_stars, 1.0, 4.0);
-    let target_image = AstroImage::from_pixels(width, height, 1, target_pixels);
+    let target_image =
+        AstroImage::from_pixels(ImageDimensions::new(width, height, 1), target_pixels);
 
     // Register: find transform from reference stars to target stars
     let result = register_star_positions(&ref_stars, &target_stars, TransformType::Similarity)
@@ -448,7 +451,8 @@ fn test_pipeline_ground_truth_synthetic() {
     );
 
     // Warp target to reference and verify alignment
-    let target_astro = AstroImage::from_pixels(width, height, 1, target_image);
+    let target_astro =
+        AstroImage::from_pixels(ImageDimensions::new(width, height, 1), target_image);
     let warped = warp_to_reference_image(
         &target_astro,
         &result.transform,

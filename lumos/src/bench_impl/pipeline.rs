@@ -341,7 +341,7 @@ fn warp_gpu(
         return warped;
     };
 
-    AstroImage::from_pixels(width, height, channels, warped_pixels)
+    AstroImage::from_pixels(ImageDimensions::new(width, height, channels), warped_pixels)
 }
 
 // =============================================================================
@@ -473,7 +473,7 @@ fn run_full_pipeline_cpu(
     let count = aligned_images.len() as f64;
     let stacked: Vec<f32> = sum.iter().map(|s| (*s / count) as f32).collect();
 
-    AstroImage::from_pixels(width, height, channels, stacked)
+    AstroImage::from_pixels(ImageDimensions::new(width, height, channels), stacked)
 }
 
 /// Run full pipeline with GPU warping.
@@ -517,5 +517,5 @@ fn run_full_pipeline_gpu(
     let count = aligned_images.len() as f64;
     let stacked: Vec<f32> = sum.iter().map(|s| (*s / count) as f32).collect();
 
-    AstroImage::from_pixels(width, height, channels, stacked)
+    AstroImage::from_pixels(ImageDimensions::new(width, height, channels), stacked)
 }

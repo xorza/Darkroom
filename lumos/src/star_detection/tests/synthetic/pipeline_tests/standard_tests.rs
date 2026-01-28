@@ -1,6 +1,6 @@
 //! Standard pipeline tests - tests full star detection on typical scenarios.
 
-use crate::AstroImage;
+use crate::{AstroImage, ImageDimensions};
 
 use crate::star_detection::tests::common::output::{
     DetectionMetrics, check_pass, compute_detection_metrics, save_comparison, save_grayscale,
@@ -30,7 +30,10 @@ fn run_pipeline_test(
     );
 
     // Run detection
-    let image = AstroImage::from_pixels(field_config.width, field_config.height, 1, pixels.clone());
+    let image = AstroImage::from_pixels(
+        ImageDimensions::new(field_config.width, field_config.height, 1),
+        pixels.clone(),
+    );
     let result = find_stars(&image, detection_config);
     let stars = result.stars;
 

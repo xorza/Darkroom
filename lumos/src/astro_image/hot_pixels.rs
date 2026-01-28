@@ -64,7 +64,7 @@ impl HotPixelMap {
         let pixel_count = master_dark.width() * master_dark.height();
 
         // Compute per-channel thresholds in a single pass
-        let channel_stats = compute_all_channel_stats(pixels, channels, sigma_threshold);
+        let channel_stats = compute_all_channel_stats(&pixels, channels, sigma_threshold);
 
         tracing::debug!(
             "Hot pixel detection per-channel stats ({}x{}x{}):",
@@ -160,14 +160,14 @@ impl HotPixelMap {
         let width = image.width();
         let height = image.height();
         let channels = image.channels();
-        let row_stride = width * channels;
 
         // Pre-compute all corrections in parallel chunks for cache locality
         // Processing consecutive rows together keeps neighbor data in cache
         // Hot pixels are sparse (~0.01-0.1%), so total corrections are small
         const ROW_CHUNK_SIZE: usize = 64;
 
-        let corrections: Vec<(usize, f32)> = (0..height.div_ceil(ROW_CHUNK_SIZE))
+        // Corrections stored as (channel, pixel_index_in_channel, value)
+        let corrections: Vec<(usize, usize, f32)> = (0..height.div_ceil(ROW_CHUNK_SIZE))
             .into_par_iter()
             .flat_map(|chunk_idx| {
                 let start_y = chunk_idx * ROW_CHUNK_SIZE;
@@ -177,10 +177,13 @@ impl HotPixelMap {
                 for y in start_y..end_y {
                     for x in 0..width {
                         for c in 0..channels {
-                            let idx = y * row_stride + x * channels + c;
-                            if self.is_hot(idx) {
+                            // Index in the interleaved mask
+                            let mask_idx = (y * width + x) * channels + c;
+                            if self.is_hot(mask_idx) {
                                 let replacement = median_of_neighbors(image, x, y, c);
-                                chunk_corrections.push((idx, replacement));
+                                // Store channel and pixel index within that channel
+                                let pixel_idx = y * width + x;
+                                chunk_corrections.push((c, pixel_idx, replacement));
                             }
                         }
                     }
@@ -189,10 +192,9 @@ impl HotPixelMap {
             })
             .collect();
 
-        // Apply corrections
-        let pixels = image.pixels_mut();
-        for (idx, value) in corrections {
-            pixels[idx] = value;
+        // Apply corrections using channel-based access
+        for (channel, pixel_idx, value) in corrections {
+            image.channel_mut(channel)[pixel_idx] = value;
         }
     }
 }
@@ -364,7 +366,7 @@ mod tests {
         channels: usize,
         pixels: Vec<f32>,
     ) -> AstroImage {
-        AstroImage::from_pixels(width, height, channels, pixels)
+        AstroImage::from_pixels(ImageDimensions::new(width, height, channels), pixels)
     }
 
     #[test]

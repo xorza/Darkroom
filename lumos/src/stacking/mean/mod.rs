@@ -56,10 +56,10 @@ pub fn stack_mean_from_paths<P: AsRef<Path>>(
                 });
             }
             // Accumulate pixel values in parallel chunks using SIMD
-            accumulate_parallel(&mut sum, frame.pixels());
+            accumulate_parallel(&mut sum, &frame.pixels());
         } else {
             dimensions = Some(frame.dimensions());
-            sum = frame.pixels().to_vec();
+            sum = frame.pixels();
             metadata = Some(frame.metadata.clone());
         }
     }
@@ -69,7 +69,10 @@ pub fn stack_mean_from_paths<P: AsRef<Path>>(
     scale_parallel(&mut sum, inv_count);
 
     let dims = dimensions.unwrap();
-    let mut result = AstroImage::from_pixels(dims.width, dims.height, dims.channels, sum);
+    let mut result = AstroImage::from_pixels(
+        ImageDimensions::new(dims.width, dims.height, dims.channels),
+        sum,
+    );
     result.metadata = metadata.unwrap();
     Ok(result)
 }

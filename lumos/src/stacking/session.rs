@@ -41,8 +41,8 @@ use super::local_normalization::{
     LocalNormalizationConfig, LocalNormalizationMap, TileNormalizationStats,
 };
 use super::weighted::FrameQuality;
-use crate::AstroImage;
 use crate::star_detection::{StarDetectionResult, StarDetector};
+use crate::{AstroImage, ImageDimensions};
 
 /// Unique identifier for a session.
 pub type SessionId = String;
@@ -983,26 +983,17 @@ impl MultiSessionStack {
                 let image = AstroImage::from_file(path).expect("Failed to load image");
 
                 // For multi-channel images, normalize each channel separately
-                let all_pixels = image.pixels();
-
                 if channels == 1 {
                     // Single channel - normalize directly
-                    normalizer.normalize_frame(all_pixels)
+                    normalizer.normalize_frame(image.channel(0))
                 } else {
-                    // Multi-channel - normalize each channel
-                    let mut normalized = vec![0.0f32; all_pixels.len()];
+                    // Multi-channel - normalize each channel using planar access
+                    let pixel_count = image.width() * image.height();
+                    let mut normalized = vec![0.0f32; pixel_count * channels];
 
                     for c in 0..channels {
-                        // Extract channel
-                        let channel_pixels: Vec<f32> = all_pixels
-                            .iter()
-                            .skip(c)
-                            .step_by(channels)
-                            .copied()
-                            .collect();
-
-                        // Normalize channel
-                        let normalized_channel = normalizer.normalize_frame(&channel_pixels);
+                        // Normalize channel directly from planar storage
+                        let normalized_channel = normalizer.normalize_frame(image.channel(c));
 
                         // Write back interleaved
                         for (i, &val) in normalized_channel.iter().enumerate() {
@@ -1039,9 +1030,7 @@ impl MultiSessionStack {
         }
 
         Ok(AstroImage::from_pixels(
-            width,
-            height,
-            channels,
+            ImageDimensions::new(width, height, channels),
             result_pixels,
         ))
     }
@@ -1135,33 +1124,17 @@ impl SessionWeightedStackResult {
         let width = self.image.width();
         let height = self.image.height();
         let channels = self.image.channels();
-        let pixels = self.image.pixels_mut();
 
-        if channels == 1 {
-            // Single channel - process directly
-            let corrected =
-                super::gradient_removal::remove_gradient_simple(pixels, width, height, config)?;
-            pixels.copy_from_slice(&corrected);
-        } else {
-            // Multi-channel - process each channel independently
-            for c in 0..channels {
-                // Extract channel
-                let channel_pixels: Vec<f32> =
-                    pixels.iter().skip(c).step_by(channels).copied().collect();
-
-                // Remove gradient from channel
-                let corrected = super::gradient_removal::remove_gradient_simple(
-                    &channel_pixels,
-                    width,
-                    height,
-                    config,
-                )?;
-
-                // Write back interleaved
-                for (i, &val) in corrected.iter().enumerate() {
-                    pixels[i * channels + c] = val;
-                }
-            }
+        // Process each channel using planar access
+        for c in 0..channels {
+            let channel_pixels = self.image.channel(c);
+            let corrected = super::gradient_removal::remove_gradient_simple(
+                channel_pixels,
+                width,
+                height,
+                config,
+            )?;
+            self.image.channel_mut(c).copy_from_slice(&corrected);
         }
 
         Ok(())
@@ -2058,7 +2031,7 @@ mod tests {
     fn test_session_weighted_stack_result_display() {
         use crate::AstroImage;
 
-        let image = AstroImage::from_pixels(10, 10, 1, vec![0.5f32; 100]);
+        let image = AstroImage::from_pixels(ImageDimensions::new(10, 10, 1), vec![0.5f32; 100]);
         let result = SessionWeightedStackResult {
             image,
             session_count: 2,
@@ -2086,7 +2059,7 @@ mod tests {
     fn test_session_weighted_stack_result_into_image() {
         use crate::AstroImage;
 
-        let image = AstroImage::from_pixels(10, 10, 1, vec![0.5f32; 100]);
+        let image = AstroImage::from_pixels(ImageDimensions::new(10, 10, 1), vec![0.5f32; 100]);
         let result = SessionWeightedStackResult {
             image,
             session_count: 1,
@@ -2106,7 +2079,7 @@ mod tests {
     fn test_session_weighted_stack_result_session_contributions() {
         use crate::AstroImage;
 
-        let image = AstroImage::from_pixels(10, 10, 1, vec![0.5f32; 100]);
+        let image = AstroImage::from_pixels(ImageDimensions::new(10, 10, 1), vec![0.5f32; 100]);
 
         // Create matching sessions
         let sessions = vec![
@@ -2173,6 +2146,7 @@ mod tests {
 mod integration_tests {
     use super::*;
     use crate::AstroImage;
+    use imaginarium::Image;
     use tempfile::TempDir;
 
     // ============================================================================
@@ -2252,18 +2226,15 @@ mod integration_tests {
             *p = p.max(0.0);
         }
 
-        AstroImage::from_pixels(width, height, 1, pixels)
+        AstroImage::from_pixels(ImageDimensions::new(width, height, 1), pixels)
     }
 
     /// Save an AstroImage to a temporary TIFF file (as 32-bit float).
     fn save_test_image(image: &AstroImage, dir: &TempDir, name: &str) -> PathBuf {
         let path = dir.path().join(name);
         // Save as L_F32 TIFF - this preserves the float values
-        image
-            .image
-            .clone()
-            .save_file(&path)
-            .expect("Failed to save test image");
+        let img: Image = image.clone().into();
+        img.save_file(&path).expect("Failed to save test image");
         path
     }
 
@@ -2511,7 +2482,7 @@ mod integration_tests {
 
         let variance_before = compute_variance(&pixels);
 
-        let image = AstroImage::from_pixels(width, height, 1, pixels);
+        let image = AstroImage::from_pixels(ImageDimensions::new(width, height, 1), pixels);
 
         let mut result = SessionWeightedStackResult {
             image,
@@ -2534,7 +2505,7 @@ mod integration_tests {
             .expect("Gradient removal should succeed");
 
         // After gradient removal, variance should be much lower
-        let variance_after = compute_variance(result.image.pixels());
+        let variance_after = compute_variance(&result.image.pixels());
 
         // The linear polynomial should remove most of the linear gradient
         // Stars will add some residual variance, so we expect ~90% reduction
@@ -2855,7 +2826,7 @@ mod integration_tests {
 
     #[test]
     fn test_integration_session_weighted_stack_result_display() {
-        let image = AstroImage::from_pixels(100, 100, 1, vec![0.5f32; 10000]);
+        let image = AstroImage::from_pixels(ImageDimensions::new(100, 100, 1), vec![0.5f32; 10000]);
 
         let result = SessionWeightedStackResult {
             image,

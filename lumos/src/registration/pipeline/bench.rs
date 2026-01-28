@@ -171,7 +171,7 @@ fn benchmark_warp_to_reference(c: &mut Criterion) {
                 (x * y).sin()
             })
             .collect();
-        let image = AstroImage::from_pixels(size, size, 1, pixels);
+        let image = AstroImage::from_pixels(ImageDimensions::new(size, size, 1), pixels);
 
         group.throughput(Throughput::Elements((size * size) as u64));
 

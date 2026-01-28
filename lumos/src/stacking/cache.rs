@@ -35,6 +35,7 @@ fn cache_filename_for_path(path: &Path) -> String {
 }
 
 /// Header for cached image files.
+/// todo remove this use ImageDimensions
 #[derive(Debug, Clone, Copy)]
 #[repr(C)]
 struct CacheHeader {
@@ -49,8 +50,9 @@ unsafe impl bytemuck::Zeroable for CacheHeader {}
 /// Storage mode for image data.
 #[derive(Debug)]
 enum Storage {
-    /// All images fit in memory - no disk I/O needed.
-    InMemory(Vec<AstroImage>),
+    /// All images fit in memory - stored as interleaved pixel data for efficient row-chunk access.
+    /// todo revert back to astroimage
+    InMemory(Vec<Vec<f32>>),
     /// Images stored on disk with memory-mapped access.
     DiskBacked {
         mmaps: Vec<Mmap>,
@@ -192,15 +194,15 @@ impl ImageCache {
         // Sort by index to maintain order
         remaining.sort_by_key(|(i, _)| *i);
 
-        // Build final vector
-        let mut images = Vec::with_capacity(paths.len());
-        images.push(first_image);
-        images.extend(remaining.into_iter().map(|(_, img)| img));
+        // Build final vector - convert to interleaved pixel data for efficient row-chunk access
+        let mut pixel_data = Vec::with_capacity(paths.len());
+        pixel_data.push(first_image.pixels());
+        pixel_data.extend(remaining.into_iter().map(|(_, img)| img.pixels()));
 
         report_progress(progress, paths.len(), paths.len(), StackingStage::Loading);
 
-        tracing::info!("Loaded {} frames into memory", images.len());
-        Ok(Storage::InMemory(images))
+        tracing::info!("Loaded {} frames into memory", pixel_data.len());
+        Ok(Storage::InMemory(pixel_data))
     }
 
     /// Load images to disk cache with memory-mapped access.
@@ -305,7 +307,7 @@ impl ImageCache {
     /// Get number of cached frames.
     pub fn frame_count(&self) -> usize {
         match &self.storage {
-            Storage::InMemory(images) => images.len(),
+            Storage::InMemory(pixel_data) => pixel_data.len(),
             Storage::DiskBacked { mmaps, .. } => mmaps.len(),
         }
     }
@@ -400,8 +402,10 @@ impl ImageCache {
             );
         }
 
-        let mut result =
-            AstroImage::from_pixels(dims.width, dims.height, dims.channels, output_pixels);
+        let mut result = AstroImage::from_pixels(
+            ImageDimensions::new(dims.width, dims.height, dims.channels),
+            output_pixels,
+        );
         result.metadata = self.metadata.clone();
         result
     }
@@ -482,8 +486,10 @@ impl ImageCache {
             );
         }
 
-        let mut result =
-            AstroImage::from_pixels(dims.width, dims.height, dims.channels, output_pixels);
+        let mut result = AstroImage::from_pixels(
+            ImageDimensions::new(dims.width, dims.height, dims.channels),
+            output_pixels,
+        );
         result.metadata = self.metadata.clone();
         result
     }
@@ -497,7 +503,7 @@ impl ImageCache {
         let end_pixel = end_row * row_size;
 
         match &self.storage {
-            Storage::InMemory(images) => &images[frame_idx].pixels()[start_pixel..end_pixel],
+            Storage::InMemory(pixel_data) => &pixel_data[frame_idx][start_pixel..end_pixel],
             Storage::DiskBacked { mmaps, .. } => {
                 let mmap = &mmaps[frame_idx];
                 let start_offset = size_of::<CacheHeader>() + start_pixel * 4;
@@ -565,11 +571,25 @@ fn write_cache_file(path: &Path, image: &AstroImage) -> Result<(), Error> {
             source: e,
         })?;
 
-    let bytes: &[u8] = bytemuck::cast_slice(image.pixels());
-    writer.write_all(bytes).map_err(|e| Error::WriteCacheFile {
-        path: path.to_path_buf(),
-        source: e,
-    })?;
+    // Write pixel data in interleaved format (required for row-based memory-mapped access)
+    // For grayscale, write channel directly. For RGB, must interleave.
+    let channels = image.channels();
+    if channels == 1 {
+        let bytes: &[u8] = bytemuck::cast_slice(image.channel(0));
+        writer.write_all(bytes).map_err(|e| Error::WriteCacheFile {
+            path: path.to_path_buf(),
+            source: e,
+        })?;
+    } else {
+        // RGB: write interleaved (allocates once)
+        // todo write each channel separately
+        let pixels = image.pixels();
+        let bytes: &[u8] = bytemuck::cast_slice(&pixels);
+        writer.write_all(bytes).map_err(|e| Error::WriteCacheFile {
+            path: path.to_path_buf(),
+            source: e,
+        })?;
+    }
     writer.flush().map_err(|e| Error::WriteCacheFile {
         path: path.to_path_buf(),
         source: e,
@@ -730,7 +750,10 @@ mod tests {
             channels: 3,
         };
         let pixels: Vec<f32> = (0..36).map(|i| i as f32).collect();
-        let image = AstroImage::from_pixels(dims.width, dims.height, dims.channels, pixels.clone());
+        let image = AstroImage::from_pixels(
+            ImageDimensions::new(dims.width, dims.height, dims.channels),
+            pixels.clone(),
+        );
 
         let cache_path = temp_dir.join("test_frame.bin");
         write_cache_file(&cache_path, &image).unwrap();
@@ -766,7 +789,10 @@ mod tests {
             channels: 3,
         };
         let pixels: Vec<f32> = (0..36).map(|i| i as f32).collect();
-        let image = AstroImage::from_pixels(dims.width, dims.height, dims.channels, pixels);
+        let image = AstroImage::from_pixels(
+            ImageDimensions::new(dims.width, dims.height, dims.channels),
+            pixels,
+        );
 
         let cache_path = temp_dir.join("chunk_frame.bin");
         write_cache_file(&cache_path, &image).unwrap();
@@ -843,7 +869,10 @@ mod tests {
             channels: 3,
         };
         let pixels: Vec<f32> = (0..36).map(|i| i as f32).collect();
-        let image = AstroImage::from_pixels(dims.width, dims.height, dims.channels, pixels);
+        let image = AstroImage::from_pixels(
+            ImageDimensions::new(dims.width, dims.height, dims.channels),
+            pixels,
+        );
 
         let cache_path = temp_dir.join("reuse_frame.bin");
         write_cache_file(&cache_path, &image).unwrap();
@@ -908,7 +937,10 @@ mod tests {
             channels: 1,
         };
         let pixels: Vec<f32> = vec![1.0, 2.0, 3.0, 4.0];
-        let image = AstroImage::from_pixels(dims.width, dims.height, dims.channels, pixels.clone());
+        let image = AstroImage::from_pixels(
+            ImageDimensions::new(dims.width, dims.height, dims.channels),
+            pixels.clone(),
+        );
 
         let cache_path = temp_dir.join("valid_write.bin");
         let result = write_cache_file(&cache_path, &image);

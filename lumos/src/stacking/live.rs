@@ -38,6 +38,7 @@
 //! let result = stack.finalize();
 //! ```
 
+use crate::ImageDimensions;
 use crate::astro_image::AstroImage;
 use std::fmt;
 
@@ -597,15 +598,13 @@ impl LiveStackAccumulator {
 
         // Get pixels, optionally normalized
         let pixels = frame.pixels();
-        let normalized_pixels: Vec<f32>;
-        let pixels_to_use = if self.config.normalize {
+        let pixels_to_use: Vec<f32> = if self.config.normalize {
             // Compute or use reference stats
             if self.reference_stats.is_none() {
-                self.reference_stats = Some(Self::compute_stats(pixels));
+                self.reference_stats = Some(Self::compute_stats(&pixels));
             }
 
-            normalized_pixels = self.normalize_frame(pixels);
-            &normalized_pixels
+            self.normalize_frame(&pixels)
         } else {
             pixels
         };
@@ -614,7 +613,7 @@ impl LiveStackAccumulator {
         match &mut self.rolling_buffer {
             Some(buffer) => {
                 // Rolling sigma clip mode - add to ring buffer
-                buffer.add_frame(pixels_to_use, weight);
+                buffer.add_frame(&pixels_to_use, weight);
             }
             None => {
                 // Running mean or weighted mean mode
@@ -650,9 +649,7 @@ impl LiveStackAccumulator {
 
         let pixels = self.compute_result_pixels();
         Ok(AstroImage::from_pixels(
-            self.width,
-            self.height,
-            self.channels,
+            ImageDimensions::new(self.width, self.height, self.channels),
             pixels,
         ))
     }
@@ -666,7 +663,10 @@ impl LiveStackAccumulator {
         }
 
         let pixels = self.compute_result_pixels();
-        let image = AstroImage::from_pixels(self.width, self.height, self.channels, pixels);
+        let image = AstroImage::from_pixels(
+            ImageDimensions::new(self.width, self.height, self.channels),
+            pixels,
+        );
 
         Ok(LiveStackResult {
             image,
@@ -906,7 +906,7 @@ mod tests {
 
     fn create_test_frame(width: usize, height: usize, channels: usize, value: f32) -> AstroImage {
         let pixels = vec![value; width * height * channels];
-        AstroImage::from_pixels(width, height, channels, pixels)
+        AstroImage::from_pixels(ImageDimensions::new(width, height, channels), pixels)
     }
 
     #[test]

@@ -26,6 +26,7 @@
 
 use std::path::Path;
 
+use crate::ImageDimensions;
 use crate::astro_image::AstroImage;
 use crate::registration::types::TransformMatrix;
 use crate::stacking::error::Error;
@@ -200,7 +201,7 @@ impl DrizzleAccumulator {
         match self.config.kernel {
             DrizzleKernel::Square => {
                 self.add_image_square(
-                    pixels,
+                    &pixels,
                     transform,
                     weight,
                     input_width,
@@ -210,11 +211,11 @@ impl DrizzleAccumulator {
                 );
             }
             DrizzleKernel::Point => {
-                self.add_image_point(pixels, transform, weight, input_width, input_height, scale);
+                self.add_image_point(&pixels, transform, weight, input_width, input_height, scale);
             }
             DrizzleKernel::Gaussian => {
                 self.add_image_gaussian(
-                    pixels,
+                    &pixels,
                     transform,
                     weight,
                     input_width,
@@ -225,7 +226,7 @@ impl DrizzleAccumulator {
             }
             DrizzleKernel::Lanczos => {
                 self.add_image_lanczos(
-                    pixels,
+                    &pixels,
                     transform,
                     weight,
                     input_width,
@@ -567,7 +568,10 @@ impl DrizzleAccumulator {
             }
         }
 
-        let image = AstroImage::from_pixels(self.width, self.height, self.channels, output_data);
+        let image = AstroImage::from_pixels(
+            ImageDimensions::new(self.width, self.height, self.channels),
+            output_data,
+        );
 
         DrizzleResult { image, coverage }
     }
@@ -851,7 +855,8 @@ mod tests {
     #[test]
     fn test_drizzle_single_image() {
         // Create a simple test image
-        let image = AstroImage::from_pixels(100, 100, 1, vec![0.5; 100 * 100]);
+        let image =
+            AstroImage::from_pixels(ImageDimensions::new(100, 100, 1), vec![0.5; 100 * 100]);
 
         let config = DrizzleConfig::x2();
         let mut acc = DrizzleAccumulator::new(100, 100, 1, config);
@@ -879,7 +884,7 @@ mod tests {
 
     #[test]
     fn test_drizzle_point_kernel() {
-        let image = AstroImage::from_pixels(10, 10, 1, vec![1.0; 10 * 10]);
+        let image = AstroImage::from_pixels(ImageDimensions::new(10, 10, 1), vec![1.0; 10 * 10]);
 
         let config = DrizzleConfig::x2().with_kernel(DrizzleKernel::Point);
         let mut acc = DrizzleAccumulator::new(10, 10, 1, config);
@@ -920,7 +925,7 @@ mod tests {
                 pixels[idx + 2] = 0.7; // B
             }
         }
-        let image = AstroImage::from_pixels(50, 50, 3, pixels);
+        let image = AstroImage::from_pixels(ImageDimensions::new(50, 50, 3), pixels);
 
         let config = DrizzleConfig::x2();
         let mut acc = DrizzleAccumulator::new(50, 50, 3, config);
@@ -940,7 +945,7 @@ mod tests {
         // Create test image with known pattern
         let mut pixels = vec![0.0f32; 20 * 20];
         pixels[10 * 20 + 10] = 1.0; // Single bright pixel at center
-        let image = AstroImage::from_pixels(20, 20, 1, pixels);
+        let image = AstroImage::from_pixels(ImageDimensions::new(20, 20, 1), pixels);
 
         let config = DrizzleConfig::x2();
         let mut acc = DrizzleAccumulator::new(20, 20, 1, config);

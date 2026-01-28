@@ -14,6 +14,7 @@
 
 use std::time::Instant;
 
+use crate::ImageDimensions;
 use crate::registration::{
     interpolation::{InterpolationMethod, WarpConfig, warp_image},
     phase_correlation::{PhaseCorrelationConfig, PhaseCorrelator},
@@ -382,36 +383,30 @@ pub fn warp_to_reference_image(
     let width = target.width();
     let height = target.height();
     let channels = target.channels();
-    let pixels = target.pixels();
 
-    if channels == 1 {
-        // Single channel: direct warping
-        let warped = warp_to_reference(pixels, width, height, transform, method);
-        let mut result = crate::AstroImage::from_pixels(width, height, 1, warped);
-        result.metadata = target.metadata.clone();
-        result
-    } else {
-        // Multi-channel: extract, warp each channel in parallel, interleave
-        let warped_channels: Vec<Vec<f32>> = (0..channels)
-            .into_par_iter()
-            .map(|c| {
-                let channel: Vec<f32> = pixels.iter().skip(c).step_by(channels).copied().collect();
-                warp_to_reference(&channel, width, height, transform, method)
-            })
-            .collect();
+    // Warp each channel in parallel using planar access
+    let warped_channels: Vec<Vec<f32>> = (0..channels)
+        .into_par_iter()
+        .map(|c| {
+            let channel = target.channel(c);
+            warp_to_reference(channel, width, height, transform, method)
+        })
+        .collect();
 
-        // Interleave channels back together
-        let mut warped_pixels = vec![0.0f32; width * height * channels];
-        for (c, channel_data) in warped_channels.iter().enumerate() {
-            for (i, &val) in channel_data.iter().enumerate() {
-                warped_pixels[i * channels + c] = val;
-            }
+    // Interleave channels back together for AstroImage constructor
+    let mut warped_pixels = vec![0.0f32; width * height * channels];
+    for (c, channel_data) in warped_channels.iter().enumerate() {
+        for (i, &val) in channel_data.iter().enumerate() {
+            warped_pixels[i * channels + c] = val;
         }
-
-        let mut result = crate::AstroImage::from_pixels(width, height, channels, warped_pixels);
-        result.metadata = target.metadata.clone();
-        result
     }
+
+    let mut result = crate::AstroImage::from_pixels(
+        ImageDimensions::new(width, height, channels),
+        warped_pixels,
+    );
+    result.metadata = target.metadata.clone();
+    result
 }
 
 /// Quick registration using default settings with position tuples.

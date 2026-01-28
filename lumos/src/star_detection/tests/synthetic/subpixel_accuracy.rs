@@ -4,7 +4,7 @@
 //! which is critical for image registration and stacking.
 
 use super::{SyntheticFieldConfig, SyntheticStar, generate_star_field};
-use crate::AstroImage;
+use crate::{AstroImage, ImageDimensions};
 
 use crate::star_detection::tests::common::save_image;
 use crate::star_detection::{Star, StarDetectionConfig, find_stars};
@@ -12,7 +12,7 @@ use imaginarium::Color;
 use imaginarium::drawing::{draw_circle, draw_cross};
 
 fn make_grayscale_image(pixels: Vec<f32>, width: usize, height: usize) -> AstroImage {
-    AstroImage::from_pixels(width, height, 1, pixels)
+    AstroImage::from_pixels(ImageDimensions::new(width, height, 1), pixels)
 }
 
 /// Match detected stars between two images based on proximity.

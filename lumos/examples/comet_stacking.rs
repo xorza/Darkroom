@@ -23,9 +23,9 @@ use std::env;
 use std::path::Path;
 
 use lumos::{
-    AstroImage, CometStackConfig, CompositeMethod, InterpolationMethod, ObjectPosition,
-    StarDetector, TransformMatrix, apply_comet_offset_to_transform, composite_stacks,
-    create_comet_stack_result, quick_register_stars, warp_to_reference_image,
+    AstroImage, CometStackConfig, CompositeMethod, ImageDimensions, InterpolationMethod,
+    ObjectPosition, StarDetector, TransformMatrix, apply_comet_offset_to_transform,
+    composite_stacks, create_comet_stack_result, quick_register_stars, warp_to_reference_image,
 };
 
 fn main() {
@@ -200,8 +200,14 @@ fn main() {
     println!("Displacement: {:.2} px", result.displacement);
 
     // Save results
-    let star_image = AstroImage::from_pixels(width, height, 1, result.star_stack.clone());
-    let comet_image = AstroImage::from_pixels(width, height, 1, result.comet_stack.clone());
+    let star_image = AstroImage::from_pixels(
+        ImageDimensions::new(width, height, 1),
+        result.star_stack.clone(),
+    );
+    let comet_image = AstroImage::from_pixels(
+        ImageDimensions::new(width, height, 1),
+        result.comet_stack.clone(),
+    );
 
     let star_path = Path::new("comet_star_aligned.tiff");
     let comet_path = Path::new("comet_comet_aligned.tiff");
@@ -213,7 +219,10 @@ fn main() {
 
     // Save composite if available
     if let Some(composite_pixels) = &result.composite {
-        let composite_image = AstroImage::from_pixels(width, height, 1, composite_pixels.clone());
+        let composite_image = AstroImage::from_pixels(
+            ImageDimensions::new(width, height, 1),
+            composite_pixels.clone(),
+        );
         let composite_path = Path::new("comet_composite.tiff");
         println!("Saving composite to: {}", composite_path.display());
         composite_image
@@ -233,7 +242,8 @@ fn main() {
         &result.comet_stack,
         CompositeMethod::Additive,
     ) {
-        let additive_image = AstroImage::from_pixels(width, height, 1, additive);
+        let additive_image =
+            AstroImage::from_pixels(ImageDimensions::new(width, height, 1), additive);
         let additive_path = Path::new("comet_additive.tiff");
         println!(
             "Additive: star + (comet - bg) - saved to: {}",
@@ -260,10 +270,15 @@ fn main() {
 fn stack_mean(frames: &[AstroImage]) -> Vec<f32> {
     assert!(!frames.is_empty(), "Need at least one frame to stack");
 
-    let pixel_count = frames[0].pixels().len();
+    let pixels = frames[0].pixels();
+    let pixel_count = pixels.len();
     let mut sum = vec![0.0f64; pixel_count];
 
-    for frame in frames {
+    for (i, &val) in pixels.iter().enumerate() {
+        sum[i] += f64::from(val);
+    }
+
+    for frame in &frames[1..] {
         for (i, &val) in frame.pixels().iter().enumerate() {
             sum[i] += f64::from(val);
         }

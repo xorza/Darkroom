@@ -1,8 +1,8 @@
 //! Debug test that outputs intermediate steps of star detection.
 
 use super::{SyntheticFieldConfig, SyntheticStar, generate_star_field};
-use crate::AstroImage;
 use crate::star_detection::tests::common::{gray_to_rgb_image_stretched, save_image};
+use crate::{AstroImage, ImageDimensions};
 
 use crate::star_detection::background::estimate_background;
 use crate::star_detection::constants::dilate_mask;
@@ -191,7 +191,7 @@ fn test_debug_synthetic_steps() {
     dilated_img.save(&path).unwrap();
     println!("Saved: {:?}", path);
 
-    let image = AstroImage::from_pixels(width, height, 1, grayscale.clone());
+    let image = AstroImage::from_pixels(ImageDimensions::new(width, height, 1), grayscale.clone());
     let detection_result = find_stars(&image, &detection_config);
     let stars = detection_result.stars;
     println!(

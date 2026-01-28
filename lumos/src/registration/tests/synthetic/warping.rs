@@ -7,12 +7,12 @@
 //! - All TransformType variants (Translation, Euclidean, Similarity, Affine, Homography)
 //! - All InterpolationMethod variants (Nearest, Bilinear, Bicubic, Lanczos2/3/4)
 
-use crate::AstroImage;
 use crate::registration::interpolation::{InterpolationMethod, WarpConfig, warp_image};
 use crate::registration::pipeline::warp_to_reference_image;
 use crate::registration::types::{TransformMatrix, TransformType};
 use crate::star_detection::StarDetector;
 use crate::testing::synthetic::{self, StarFieldConfig};
+use crate::{AstroImage, ImageDimensions};
 
 /// Compute mean squared error between two images.
 fn compute_mse(a: &[f32], b: &[f32]) -> f64 {
@@ -498,8 +498,12 @@ fn test_warp_with_detected_transform() {
         ..Default::default()
     });
 
-    let ref_image = AstroImage::from_pixels(width, height, 1, ref_pixels.clone());
-    let target_image = AstroImage::from_pixels(width, height, 1, target_pixels.clone());
+    let ref_image =
+        AstroImage::from_pixels(ImageDimensions::new(width, height, 1), ref_pixels.clone());
+    let target_image = AstroImage::from_pixels(
+        ImageDimensions::new(width, height, 1),
+        target_pixels.clone(),
+    );
 
     let ref_result = det.detect(&ref_image);
     let target_result = det.detect(&target_image);
@@ -529,7 +533,8 @@ fn test_warp_with_detected_transform() {
         .expect("Registration should succeed");
 
     // Use warp_to_reference_image to align target back to reference frame
-    let target_astro = AstroImage::from_pixels(width, height, 1, target_pixels);
+    let target_astro =
+        AstroImage::from_pixels(ImageDimensions::new(width, height, 1), target_pixels);
     let aligned = warp_to_reference_image(
         &target_astro,
         &result.transform,
@@ -539,7 +544,7 @@ fn test_warp_with_detected_transform() {
     // Compare aligned image to reference
     let margin = 40;
     let (central_ref, central_aligned) =
-        extract_central_region(&ref_pixels, aligned.pixels(), width, height, margin);
+        extract_central_region(&ref_pixels, &aligned.pixels(), width, height, margin);
 
     let psnr = compute_psnr(&central_ref, &central_aligned, 1.0);
     let ncc = compute_ncc(&central_ref, &central_aligned);
@@ -630,7 +635,7 @@ fn test_interpolation_quality_ordering() {
 #[test]
 fn test_warp_to_reference_image_grayscale() {
     let (ref_pixels, width, height) = generate_test_field(88888);
-    let ref_image = AstroImage::from_pixels(width, height, 1, ref_pixels);
+    let ref_image = AstroImage::from_pixels(ImageDimensions::new(width, height, 1), ref_pixels);
 
     // Apply a translation
     let transform = TransformMatrix::translation(5.0, -3.0);
@@ -661,7 +666,7 @@ fn test_warp_to_reference_image_rgb() {
         rgb_pixels.push(if (x + y) % 2 == 0 { val } else { val * 0.8 }); // B
     }
 
-    let rgb_image = AstroImage::from_pixels(width, height, 3, rgb_pixels);
+    let rgb_image = AstroImage::from_pixels(ImageDimensions::new(width, height, 3), rgb_pixels);
 
     // Apply a transform
     let transform = TransformMatrix::euclidean(3.0, -2.0, 1.0_f64.to_radians());
@@ -692,7 +697,7 @@ fn test_warp_to_reference_image_preserves_metadata() {
     use crate::astro_image::AstroImageMetadata;
 
     let (pixels, width, height) = generate_test_field(11111);
-    let mut image = AstroImage::from_pixels(width, height, 1, pixels);
+    let mut image = AstroImage::from_pixels(ImageDimensions::new(width, height, 1), pixels);
 
     // Set some metadata
     image.metadata = AstroImageMetadata {
