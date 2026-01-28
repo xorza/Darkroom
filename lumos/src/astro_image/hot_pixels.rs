@@ -100,9 +100,21 @@ impl HotPixelMap {
         let collect_hot_indices = |c: usize| -> Vec<usize> {
             let channel_data = master_dark.channel(c);
             let threshold = thresholds[c];
-            (0..pixel_count)
-                .into_par_iter()
-                .filter(|&idx| channel_data[idx] > threshold)
+
+            // Process in chunks for better cache locality and reduced task overhead
+            const CHUNK_SIZE: usize = 64 * 1024;
+            channel_data
+                .par_chunks(CHUNK_SIZE)
+                .enumerate()
+                .flat_map(|(chunk_idx, chunk)| {
+                    let base_idx = chunk_idx * CHUNK_SIZE;
+                    chunk
+                        .iter()
+                        .enumerate()
+                        .filter(|&(_, &val)| val > threshold)
+                        .map(|(i, _)| base_idx + i)
+                        .collect::<Vec<_>>()
+                })
                 .collect()
         };
 
@@ -112,9 +124,10 @@ impl HotPixelMap {
             let count = indices.len();
             (HotPixelMask::L(indices), count)
         } else {
-            let r = collect_hot_indices(0);
-            let g = collect_hot_indices(1);
-            let b = collect_hot_indices(2);
+            let (r, (g, b)) = rayon::join(
+                || collect_hot_indices(0),
+                || rayon::join(|| collect_hot_indices(1), || collect_hot_indices(2)),
+            );
 
             // Count unique hot pixel positions using a temporary boolean mask
             // (more efficient than sorting and deduping for sparse data)
@@ -176,13 +189,7 @@ impl HotPixelMap {
         let height = image.height();
 
         // Helper to correct a single channel.
-        let correct_channel = |hot_indices: &[usize], c: usize, img: &mut AstroImage| {
-            if hot_indices.is_empty() {
-                return;
-            }
-
-            // Compute and apply replacements
-            let channel_data = img.channel_mut(c);
+        let correct_channel = |hot_indices: &[usize], channel_data: &mut [f32]| {
             for &pixel_idx in hot_indices {
                 let x = pixel_idx % width;
                 let y = pixel_idx / width;
@@ -193,12 +200,13 @@ impl HotPixelMap {
 
         match &self.mask {
             HotPixelMask::L(indices) => {
-                correct_channel(indices, 0, image);
+                correct_channel(indices, image.channel_mut(0));
             }
             HotPixelMask::Rgb(channel_indices) => {
-                for (c, indices) in channel_indices.iter().enumerate() {
-                    correct_channel(indices, c, image);
-                }
+                // Process channels in parallel using apply_per_channel_mut
+                image.apply_per_channel_mut(|c, channel_data| {
+                    correct_channel(&channel_indices[c], channel_data);
+                });
             }
         }
     }
@@ -286,7 +294,8 @@ fn median_of_neighbors_raw(
     x: usize,
     y: usize,
 ) -> f32 {
-    let mut neighbors = Vec::with_capacity(8);
+    let mut neighbors: [f32; 8] = [0.0; 8];
+    let mut count = 0;
 
     // Offsets for 8-connected neighbors
     let offsets: [(i32, i32); 8] = [
@@ -306,17 +315,18 @@ fn median_of_neighbors_raw(
 
         if nx >= 0 && nx < width as i32 && ny >= 0 && ny < height as i32 {
             let idx = ny as usize * width + nx as usize;
-            neighbors.push(channel_data[idx]);
+            neighbors[count] = channel_data[idx];
+            count += 1;
         }
     }
 
-    if neighbors.is_empty() {
+    if count == 0 {
         // Edge case: isolated pixel with no neighbors (shouldn't happen in practice)
         let idx = y * width + x;
         return channel_data[idx];
     }
 
-    crate::math::median_f32_mut(&mut neighbors)
+    crate::math::median_f32_mut(&mut neighbors[..count])
 }
 
 #[cfg(feature = "bench")]
