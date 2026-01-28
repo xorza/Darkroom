@@ -465,9 +465,12 @@ fn register_all_lights(
 
                 tracing::info!("Transform: {}", result.transform);
 
-                // Warp the image to align with reference using parallel CPU
-                // (faster than GPU for large images due to upload/download overhead)
-                let warped = warp_image_to_reference(&target_image, &result.transform);
+                // Warp the image to align with reference
+                let warped = lumos::warp_to_reference_image(
+                    &target_image,
+                    &result.transform,
+                    InterpolationMethod::Lanczos3,
+                );
 
                 // Save registered image
                 let img: imaginarium::Image = warped.into();
@@ -496,14 +499,6 @@ fn register_all_lights(
     );
 
     registered_paths
-}
-
-/// Warp an image to align with the reference frame.
-///
-/// Uses parallel CPU warping with SIMD acceleration and Lanczos3 interpolation.
-/// Benchmarks show this is faster than GPU for large images due to upload/download overhead.
-fn warp_image_to_reference(image: &AstroImage, transform: &lumos::TransformMatrix) -> AstroImage {
-    lumos::warp_to_reference_image(image, transform, InterpolationMethod::Lanczos3)
 }
 
 /// Step 5: Stack all registered lights into a final image.
