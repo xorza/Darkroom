@@ -31,14 +31,23 @@ use rayon::prelude::*;
 
 use super::{AstroImage, ImageDimensions};
 
+/// Per-channel hot pixel mask data.
+#[derive(Debug, Clone)]
+pub enum HotPixelMask {
+    /// Grayscale image (1 channel)
+    L(Vec<bool>),
+    /// RGB image (3 channels)
+    Rgb([Vec<bool>; 3]),
+}
+
 /// A mask of hot (defective) pixels detected from a master dark frame.
 #[derive(Debug, Clone)]
 pub struct HotPixelMap {
-    /// Boolean mask where true = hot pixel
-    mask: Vec<bool>,
+    /// Per-channel boolean masks where true = hot pixel
+    mask: HotPixelMask,
     /// Image dimensions
     pub dimensions: ImageDimensions,
-    /// Number of hot pixels detected
+    /// Number of unique hot pixel positions (a pixel counts once even if multiple channels are hot)
     pub count: usize,
 }
 
@@ -84,23 +93,33 @@ impl HotPixelMap {
 
         let thresholds: Vec<f32> = channel_stats.iter().map(|s| s.threshold).collect();
 
-        // Detect hot pixels - stored in interleaved order for mask compatibility
-        // A pixel value is hot if it exceeds the threshold for its channel
-        let mut mask = vec![false; pixel_count * channels];
-        crate::common::parallel_chunked(&mut mask, |idx| {
-            let channel = idx % channels;
-            let pixel_idx = idx / channels;
-            master_dark.channel(channel)[pixel_idx] > thresholds[channel]
-        });
+        // Helper to create a mask for a single channel
+        let make_channel_mask = |c: usize| {
+            let channel_data = master_dark.channel(c);
+            let threshold = thresholds[c];
+            let mut mask = vec![false; pixel_count];
+            crate::common::parallel_chunked(&mut mask, |idx| channel_data[idx] > threshold);
+            mask
+        };
 
-        // For reporting, count unique pixels (not channel values)
-        let pixel_hot_count = (0..pixel_count)
-            .into_par_iter()
-            .filter(|&p| {
-                let base = p * channels;
-                (0..channels).any(|c| mask[base + c])
-            })
-            .count();
+        // Detect hot pixels per channel - stored in planar format matching AstroImage
+        let (mask, pixel_hot_count) = if channels == 1 {
+            let m = make_channel_mask(0);
+            let count = m.iter().filter(|&&v| v).count();
+            (HotPixelMask::L(m), count)
+        } else {
+            let r = make_channel_mask(0);
+            let g = make_channel_mask(1);
+            let b = make_channel_mask(2);
+
+            // Count unique hot pixel positions (a pixel counts once even if multiple channels are hot)
+            let count = (0..pixel_count)
+                .into_par_iter()
+                .filter(|&p| r[p] || g[p] || b[p])
+                .count();
+
+            (HotPixelMask::Rgb([r, g, b]), count)
+        };
 
         Self {
             mask,
@@ -109,17 +128,29 @@ impl HotPixelMap {
         }
     }
 
-    /// Check if a pixel at the given index is hot.
+    /// Get the mask for a specific channel.
     #[inline]
-    pub fn is_hot(&self, index: usize) -> bool {
-        self.mask[index]
+    fn channel_mask(&self, channel: usize) -> &[bool] {
+        match &self.mask {
+            HotPixelMask::L(m) => {
+                debug_assert!(channel == 0);
+                m
+            }
+            HotPixelMask::Rgb(channels) => &channels[channel],
+        }
+    }
+
+    /// Check if a pixel at (x, y) in a specific channel is hot.
+    #[inline]
+    pub fn is_hot(&self, channel: usize, pixel_idx: usize) -> bool {
+        self.channel_mask(channel)[pixel_idx]
     }
 
     /// Check if a pixel at (x, y, channel) is hot.
     #[inline]
     pub fn is_hot_at(&self, x: usize, y: usize, channel: usize) -> bool {
-        let idx = (y * self.dimensions.width + x) * self.dimensions.channels + channel;
-        self.mask[idx]
+        let idx = y * self.dimensions.width + x;
+        self.channel_mask(channel)[idx]
     }
 
     /// Get the percentage of hot pixels (as percentage of total pixels, not channel values).
@@ -151,53 +182,39 @@ impl HotPixelMap {
         }
 
         let width = image.width();
-        let height = image.height();
-        let channels = image.channels();
 
-        // Pre-compute all corrections in parallel chunks for cache locality
-        // Processing consecutive rows together keeps neighbor data in cache
-        // Hot pixels are sparse (~0.01-0.1%), so total corrections are small
-        const ROW_CHUNK_SIZE: usize = 64;
+        // Helper to correct a single channel
+        let correct_channel = |replacements: &mut Vec<(usize, f32)>,
+                               mask: &[bool],
+                               c: usize,
+                               img: &mut AstroImage| {
+            replacements.clear();
+            replacements.extend(mask.iter().enumerate().filter(|&(_, &is_hot)| is_hot).map(
+                |(pixel_idx, _)| {
+                    let x = pixel_idx % width;
+                    let y = pixel_idx / width;
+                    (pixel_idx, median_of_neighbors(img, x, y, c))
+                },
+            ));
 
-        // Corrections stored as (channel, pixel_index_in_channel, value)
-        let corrections: Vec<(usize, usize, f32)> = (0..height.div_ceil(ROW_CHUNK_SIZE))
-            .into_par_iter()
-            .flat_map(|chunk_idx| {
-                let start_y = chunk_idx * ROW_CHUNK_SIZE;
-                let end_y = (start_y + ROW_CHUNK_SIZE).min(height);
-
-                let mut chunk_corrections = Vec::new();
-                for y in start_y..end_y {
-                    for x in 0..width {
-                        for c in 0..channels {
-                            // Index in the interleaved mask
-                            let mask_idx = (y * width + x) * channels + c;
-                            if self.is_hot(mask_idx) {
-                                let replacement = median_of_neighbors(image, x, y, c);
-                                // Store channel and pixel index within that channel
-                                let pixel_idx = y * width + x;
-                                chunk_corrections.push((c, pixel_idx, replacement));
-                            }
-                        }
-                    }
-                }
-                chunk_corrections
-            })
-            .collect();
-
-        // Group corrections by channel for parallel application
-        let channels = image.channels();
-        let mut corrections_by_channel: Vec<Vec<(usize, f32)>> = vec![Vec::new(); channels];
-        for (channel, pixel_idx, value) in corrections {
-            corrections_by_channel[channel].push((pixel_idx, value));
-        }
-
-        // Apply corrections - process channels in parallel
-        image.apply_per_channel_mut(|c, channel_data| {
-            for &(pixel_idx, value) in &corrections_by_channel[c] {
+            let channel_data = img.channel_mut(c);
+            for &(pixel_idx, value) in replacements.iter() {
                 channel_data[pixel_idx] = value;
             }
-        });
+        };
+
+        let mut replacements: Vec<(usize, f32)> = Vec::new();
+
+        match &self.mask {
+            HotPixelMask::L(mask) => {
+                correct_channel(&mut replacements, mask, 0, image);
+            }
+            HotPixelMask::Rgb(masks) => {
+                for (c, mask) in masks.iter().enumerate() {
+                    correct_channel(&mut replacements, mask, c, image);
+                }
+            }
+        }
     }
 }
 
@@ -403,7 +420,9 @@ mod tests {
 
         // Create hot pixel map manually (center pixel is hot)
         let hot_map = HotPixelMap {
-            mask: vec![false, false, false, false, true, false, false, false, false],
+            mask: HotPixelMask::L(vec![
+                false, false, false, false, true, false, false, false, false,
+            ]),
             dimensions: image.dimensions(),
             count: 1,
         };
@@ -434,7 +453,9 @@ mod tests {
         let mut image = make_test_image(3, 3, 1, pixels);
 
         let hot_map = HotPixelMap {
-            mask: vec![true, false, false, false, false, false, false, false, false],
+            mask: HotPixelMask::L(vec![
+                true, false, false, false, false, false, false, false, false,
+            ]),
             dimensions: image.dimensions(),
             count: 1,
         };
@@ -474,7 +495,7 @@ mod tests {
         let mut image = make_test_image(3, 3, 1, image_pixels);
 
         let hot_map = HotPixelMap {
-            mask: vec![false; 4],
+            mask: HotPixelMask::L(vec![false; 4]),
             dimensions: ImageDimensions::new(2, 2, 1),
             count: 0,
         };
@@ -534,9 +555,9 @@ mod tests {
         // Should detect all 10 hot pixels
         assert_eq!(hot_map.count, 10);
 
-        // Verify specific hot pixels are detected
+        // Verify specific hot pixels are detected (channel 0 for grayscale)
         for &idx in &hot_indices {
-            assert!(hot_map.is_hot(idx), "Hot pixel at {} not detected", idx);
+            assert!(hot_map.is_hot(0, idx), "Hot pixel at {} not detected", idx);
         }
     }
 }
