@@ -87,8 +87,10 @@ strip = "none"
 split-debuginfo = "unpacked"
 
 [profile.release]
-lto = true
-strip = "symbols"
+debug = true
+strip = "none"
+split-debuginfo = "unpacked"
+
 
 # Optimize heavy dependencies even in dev/test builds
 [profile.dev.package.wgpu]

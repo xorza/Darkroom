@@ -4,7 +4,6 @@
 
 use criterion::{BenchmarkId, Criterion, Throughput};
 use std::hint::black_box;
-use std::path::Path;
 
 use crate::AstroImage;
 use crate::astro_image::ImageDimensions;
@@ -54,21 +53,10 @@ fn generate_synthetic_image(width: usize, height: usize, num_stars: usize) -> As
     AstroImage::from_pixels(ImageDimensions::new(width, height, 1), pixels)
 }
 
-/// Save synthetic image for visual inspection.
-fn save_synthetic_image(image: &AstroImage, name: &str) {
-    let output_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("benches/star_detection/images");
-    std::fs::create_dir_all(&output_dir).ok();
-
-    let path = output_dir.join(format!("{}.tiff", name));
-    if let Err(e) = image.save(&path) {
-        eprintln!("Failed to save synthetic image {}: {}", path.display(), e);
-    }
-}
-
 /// Register full pipeline benchmarks with Criterion.
 pub fn benchmarks(c: &mut Criterion) {
     let mut group = c.benchmark_group("find_stars_full_pipeline");
-    group.sample_size(20);
+    group.sample_size(200);
 
     // Test various image sizes and star densities
     for &(width, height, num_stars) in &[
@@ -80,9 +68,6 @@ pub fn benchmarks(c: &mut Criterion) {
         let image = generate_synthetic_image(width, height, num_stars);
 
         let size_name = format!("{}x{}_{}stars", width, height, num_stars);
-
-        // Save synthetic image for visual inspection
-        save_synthetic_image(&image, &size_name);
 
         group.throughput(Throughput::Elements((width * height) as u64));
 
