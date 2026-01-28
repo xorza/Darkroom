@@ -288,6 +288,10 @@ impl ImageCache {
 
     /// Remove all cache files (only applies to disk-backed storage).
     pub fn cleanup(&self) {
+        if self.config.keep_cache {
+            return;
+        }
+
         if let Storage::DiskBacked { frames, cache_dir } = &self.storage {
             for frame in frames {
                 for channel in &frame.channels {
@@ -311,7 +315,22 @@ impl ImageCache {
     where
         F: Fn(&mut [f32]) -> f32 + Sync,
     {
-        self.process_impl(None, |values, _weights| combine(values))
+        self.process_chunks_internal(|output_slice, chunks, frame_count, width| {
+            output_slice.par_chunks_mut(width).enumerate().for_each(
+                |(row_in_chunk, row_output)| {
+                    let mut values = vec![0.0f32; frame_count];
+                    let row_offset = row_in_chunk * width;
+
+                    for (pixel_in_row, out) in row_output.iter_mut().enumerate() {
+                        let pixel_idx = row_offset + pixel_in_row;
+                        for (frame_idx, chunk) in chunks.iter().enumerate() {
+                            values[frame_idx] = chunk[pixel_idx];
+                        }
+                        *out = combine(&mut values);
+                    }
+                },
+            );
+        })
     }
 
     /// Process images in horizontal chunks with per-frame weights.
@@ -323,13 +342,38 @@ impl ImageCache {
     where
         F: Fn(&mut [f32], &[f32]) -> f32 + Sync,
     {
-        self.process_impl(Some(weights), combine)
+        let frame_count = self.frame_count();
+        assert_eq!(
+            weights.len(),
+            frame_count,
+            "Weight count must match frame count"
+        );
+
+        self.process_chunks_internal(|output_slice, chunks, frame_count, width| {
+            output_slice.par_chunks_mut(width).enumerate().for_each(
+                |(row_in_chunk, row_output)| {
+                    let mut values = vec![0.0f32; frame_count];
+                    let mut local_weights = weights.to_vec();
+                    let row_offset = row_in_chunk * width;
+
+                    for (pixel_in_row, out) in row_output.iter_mut().enumerate() {
+                        let pixel_idx = row_offset + pixel_in_row;
+                        for (frame_idx, chunk) in chunks.iter().enumerate() {
+                            values[frame_idx] = chunk[pixel_idx];
+                        }
+                        // Reset weights for each pixel (rejection may modify them)
+                        local_weights.copy_from_slice(weights);
+                        *out = combine(&mut values, &local_weights);
+                    }
+                },
+            );
+        })
     }
 
-    /// Internal processing implementation shared by chunked and weighted variants.
-    fn process_impl<F>(&self, weights: Option<&[f32]>, combine: F) -> AstroImage
+    /// Internal chunk processing - handles chunking logic, calls processor for each chunk.
+    fn process_chunks_internal<F>(&self, mut process_chunk: F) -> AstroImage
     where
-        F: Fn(&mut [f32], &[f32]) -> f32 + Sync,
+        F: FnMut(&mut [f32], &[&[f32]], usize, usize),
     {
         let dims = self.dimensions;
         let frame_count = self.frame_count();
@@ -338,10 +382,6 @@ impl ImageCache {
         let channels = dims.channels;
         let pixels_per_channel = width * height;
         let available_memory = self.config.get_available_memory();
-
-        if let Some(w) = weights {
-            assert_eq!(w.len(), frame_count, "Weight count must match frame count");
-        }
 
         // For in-memory, process entire channel; for disk, use adaptive chunking
         let chunk_rows = match &self.storage {
@@ -361,10 +401,6 @@ impl ImageCache {
 
         let num_chunks = height.div_ceil(chunk_rows);
         let total_work = num_chunks * channels;
-
-        // Default weights (all 1.0) for non-weighted case
-        let default_weights: Vec<f32> = vec![1.0; frame_count];
-        let weights_slice = weights.unwrap_or(&default_weights);
 
         // Reusable buffer for frame chunk references (avoids allocation per chunk)
         let mut chunks: Vec<&[f32]> = Vec::with_capacity(frame_count);
@@ -387,25 +423,7 @@ impl ImageCache {
 
                 let output_slice = &mut output_channel[start_row * width..][..pixels_in_chunk];
 
-                output_slice.par_chunks_mut(width).enumerate().for_each(
-                    |(row_in_chunk, row_output)| {
-                        // One buffer per thread, reused for all pixels in row
-                        let mut values = vec![0.0f32; frame_count];
-                        let mut local_weights = weights_slice.to_vec();
-                        let row_offset = row_in_chunk * width;
-
-                        for (pixel_in_row, out) in row_output.iter_mut().enumerate() {
-                            let pixel_idx = row_offset + pixel_in_row;
-                            // Gather values from all frames
-                            for (frame_idx, chunk) in chunks.iter().enumerate() {
-                                values[frame_idx] = chunk[pixel_idx];
-                            }
-                            // Reset weights for each pixel (rejection may modify them)
-                            local_weights.copy_from_slice(weights_slice);
-                            *out = combine(&mut values, &local_weights);
-                        }
-                    },
-                );
+                process_chunk(output_slice, &chunks, frame_count, width);
 
                 report_progress(
                     &self.progress,
@@ -447,6 +465,12 @@ impl ImageCache {
                 bytemuck::cast_slice(bytes)
             }
         }
+    }
+}
+
+impl Drop for ImageCache {
+    fn drop(&mut self) {
+        self.cleanup();
     }
 }
 

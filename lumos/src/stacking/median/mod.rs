@@ -41,10 +41,6 @@ pub fn stack_median_from_paths<P: AsRef<Path> + Sync>(
     let cache = ImageCache::from_paths(paths, config, frame_type, progress)?;
     let result = cache.process_chunked(math::median_f32_mut);
 
-    if !config.keep_cache {
-        cache.cleanup();
-    }
-
     Ok(result)
 }
 
