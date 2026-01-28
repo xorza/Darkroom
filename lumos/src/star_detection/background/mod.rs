@@ -682,7 +682,7 @@ fn compute_tile_stats_masked(
 /// let background = estimate_background_image(&image, 64);
 /// ```
 pub fn estimate_background_image(image: &AstroImage, tile_size: usize) -> BackgroundMap {
-    let grayscale = image.clone().to_grayscale();
+    let grayscale = image.clone().into_grayscale();
     estimate_background(
         grayscale.channel(0),
         grayscale.width(),
@@ -715,7 +715,7 @@ pub fn estimate_background_iterative_image(
     tile_size: usize,
     config: &IterativeBackgroundConfig,
 ) -> BackgroundMap {
-    let grayscale = image.clone().to_grayscale();
+    let grayscale = image.clone().into_grayscale();
     estimate_background_iterative(
         grayscale.channel(0),
         grayscale.width(),

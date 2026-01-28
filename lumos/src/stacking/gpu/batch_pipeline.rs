@@ -619,7 +619,7 @@ impl BatchPipeline {
                         path: path.as_ref().to_path_buf(),
                         source: std::io::Error::other(e.to_string()),
                     })?
-                    .to_grayscale();
+                    .into_grayscale();
                 Ok(image.into_interleaved_pixels())
             })
             .collect();
@@ -681,7 +681,7 @@ impl BatchPipeline {
                     .map(|path| {
                         AstroImage::from_file(path)
                             .expect("Failed to load image")
-                            .to_grayscale()
+                            .into_grayscale()
                             .into_interleaved_pixels()
                     })
                     .collect()
@@ -702,7 +702,7 @@ impl BatchPipeline {
                     .map(|path| {
                         AstroImage::from_file(path)
                             .expect("Failed to load image")
-                            .to_grayscale()
+                            .into_grayscale()
                             .into_interleaved_pixels()
                     })
                     .collect();

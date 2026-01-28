@@ -545,7 +545,7 @@ impl AstroImage {
     ///
     /// Consumes self. If already grayscale, returns self unchanged.
     /// For RGB images, uses Rec. 709 luminance weights: 0.2126*R + 0.7152*G + 0.0722*B
-    pub fn to_grayscale(self) -> Self {
+    pub fn into_grayscale(self) -> Self {
         if self.is_grayscale() {
             return self;
         }
@@ -633,6 +633,14 @@ impl AstroImage {
                 interleaved
             }
         }
+    }
+
+    /// Consume self and return the underlying planar pixel data.
+    ///
+    /// This is useful when you need to take ownership of the pixel data
+    /// without any conversion.
+    pub fn into_pixels(self) -> PixelData {
+        self.pixels
     }
 }
 
@@ -1442,7 +1450,7 @@ mod tests {
             ],
         );
 
-        let gray = rgb.to_grayscale();
+        let gray = rgb.into_grayscale();
 
         assert!(gray.is_grayscale());
         assert_eq!(gray.channels(), 1);
@@ -1453,7 +1461,7 @@ mod tests {
     #[test]
     fn test_to_grayscale_already_gray() {
         let gray = AstroImage::from_pixels(ImageDimensions::new(2, 2, 1), vec![1.0, 2.0, 3.0, 4.0]);
-        let result = gray.to_grayscale();
+        let result = gray.into_grayscale();
 
         assert!(result.is_grayscale());
         assert_eq!(result.channel(0), &[1.0, 2.0, 3.0, 4.0]);
