@@ -935,29 +935,28 @@ fn find_stars(image: &AstroImage, config: &StarDetectionConfig) -> StarDetection
     let width = image.width();
     let height = image.height();
     let mut pixels = image.to_grayscale_pixels();
+    let mut output = vec![0.0f32; pixels.len()];
 
     let mut diagnostics = StarDetectionDiagnostics::default();
 
     // Step 0a: Apply defect mask if provided
     if config.defect_map.as_ref().is_some_and(|m| !m.is_empty()) {
         apply_defect_mask(
-            &mut pixels,
+            &pixels,
             width,
             height,
             config.defect_map.as_ref().unwrap(),
+            &mut output,
         );
+        std::mem::swap(&mut pixels, &mut output);
     }
 
     // Step 0b: Apply 3x3 median filter to remove Bayer pattern artifacts
     // Only applied for CFA sensors; skip for monochrome (~6ms faster on 4K images)
-    let smoothed = if image.metadata.is_cfa {
-        let input = pixels;
-        let mut output = vec![0.0f32; input.len()];
-        median_filter_3x3(&input, width, height, &mut output);
-        output
-    } else {
-        pixels
-    };
+    if image.metadata.is_cfa {
+        median_filter_3x3(&pixels, width, height, &mut output);
+        std::mem::swap(&mut pixels, &mut output);
+    }
 
     // Step 1: Estimate background
     let background = if config.background_passes > 0 {
@@ -968,7 +967,7 @@ fn find_stars(image: &AstroImage, config: &StarDetectionConfig) -> StarDetection
             ..IterativeBackgroundConfig::default()
         };
         estimate_background_iterative(
-            &smoothed,
+            &pixels,
             width,
             height,
             config.background_tile_size,
@@ -976,7 +975,7 @@ fn find_stars(image: &AstroImage, config: &StarDetectionConfig) -> StarDetection
         )
     } else {
         // Single-pass background estimation (faster)
-        estimate_background(&smoothed, width, height, config.background_tile_size)
+        estimate_background(&pixels, width, height, config.background_tile_size)
     };
 
     // Collect background statistics
@@ -1008,7 +1007,7 @@ fn find_stars(image: &AstroImage, config: &StarDetectionConfig) -> StarDetection
                 config.psf_angle
             );
             matched_filter_elliptical(
-                &smoothed,
+                &pixels,
                 width,
                 height,
                 &background.background,
@@ -1022,17 +1021,17 @@ fn find_stars(image: &AstroImage, config: &StarDetectionConfig) -> StarDetection
                 config.expected_fwhm
             );
             matched_filter(
-                &smoothed,
+                &pixels,
                 width,
                 height,
                 &background.background,
                 config.expected_fwhm,
             )
         };
-        detect_stars_filtered(&smoothed, &filtered, width, height, &background, config)
+        detect_stars_filtered(&pixels, &filtered, width, height, &background, config)
     } else {
         // No matched filter - use standard detection
-        detect_stars(&smoothed, width, height, &background, config)
+        detect_stars(&pixels, width, height, &background, config)
     };
     diagnostics.candidates_after_filtering = candidates.len();
     tracing::debug!("Detected {} star candidates", candidates.len());
@@ -1041,7 +1040,7 @@ fn find_stars(image: &AstroImage, config: &StarDetectionConfig) -> StarDetection
     let stars_after_centroid: Vec<Star> = candidates
         .into_iter()
         .filter_map(|candidate| {
-            compute_centroid(&smoothed, width, height, &background, &candidate, config)
+            compute_centroid(&pixels, width, height, &background, &candidate, config)
         })
         .collect();
     diagnostics.stars_after_centroid = stars_after_centroid.len();
