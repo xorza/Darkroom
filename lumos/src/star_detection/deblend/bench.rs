@@ -4,22 +4,21 @@
 use super::DeblendConfig;
 use super::local_maxima::{ComponentData, Pixel, deblend_local_maxima};
 use super::multi_threshold::{MultiThresholdDeblendConfig, deblend_component};
+use crate::common::Buffer2;
 use criterion::{BenchmarkId, Criterion, Throughput};
 use std::collections::HashMap;
 use std::hint::black_box;
 
 /// Benchmark data for deblending.
 pub struct BenchData {
-    pub image: Vec<f32>,
+    pub image: Buffer2<f32>,
     pub components: Vec<ComponentData>,
-    pub width: usize,
-    pub height: usize,
 }
 
 impl BenchData {
     /// Create benchmark data with synthetic blended star pairs.
     pub fn new(width: usize, height: usize, num_pairs: usize, separation: usize) -> Self {
-        let mut image = vec![0.0f32; width * height];
+        let mut image_data = vec![0.0f32; width * height];
         let mut components = Vec::with_capacity(num_pairs);
 
         let sigma = 2.5f32;
@@ -52,11 +51,11 @@ impl BenchData {
                         let r2 = (dx * dx + dy * dy) as f32;
                         let value = amplitude1 * (-r2 / (2.0 * sigma * sigma)).exp();
                         if value > 0.001 {
-                            image[y * width + x] += value;
+                            image_data[y * width + x] += value;
                             pair_pixels.push(Pixel {
                                 x,
                                 y,
-                                value: image[y * width + x],
+                                value: image_data[y * width + x],
                             });
                         }
                     }
@@ -72,11 +71,11 @@ impl BenchData {
                         let r2 = (dx * dx + dy * dy) as f32;
                         let value = amplitude2 * (-r2 / (2.0 * sigma * sigma)).exp();
                         if value > 0.001 {
-                            image[y * width + x] += value;
+                            image_data[y * width + x] += value;
                             pair_pixels.push(Pixel {
                                 x,
                                 y,
-                                value: image[y * width + x],
+                                value: image_data[y * width + x],
                             });
                         }
                     }
@@ -105,10 +104,8 @@ impl BenchData {
         }
 
         Self {
-            image,
+            image: Buffer2::new(width, height, image_data),
             components,
-            width,
-            height,
         }
     }
 }
@@ -119,7 +116,7 @@ pub fn bench_local_maxima(data: &BenchData) -> usize {
     let mut total_objects = 0;
 
     for component in &data.components {
-        let result = deblend_local_maxima(component, &data.image, data.width, &config);
+        let result = deblend_local_maxima(component, &data.image, &config);
         total_objects += result.len();
     }
 
@@ -132,7 +129,7 @@ pub fn bench_multi_threshold(data: &BenchData) -> usize {
     let mut total_objects = 0;
 
     for component in &data.components {
-        let result = deblend_component(&data.image, &component.pixels, data.width, 0.01, &config);
+        let result = deblend_component(&component.pixels, data.image.width(), 0.01, &config);
         total_objects += result.len();
     }
 
@@ -156,7 +153,6 @@ pub fn benchmarks(c: &mut Criterion) {
                     black_box(deblend_local_maxima(
                         black_box(component),
                         black_box(&data.image),
-                        data.width,
                         black_box(&config),
                     ));
                 }
@@ -179,9 +175,8 @@ pub fn benchmarks(c: &mut Criterion) {
             b.iter(|| {
                 for component in &data.components {
                     black_box(deblend_component(
-                        black_box(&data.image),
                         black_box(&component.pixels),
-                        data.width,
+                        data.image.width(),
                         0.01,
                         black_box(&config),
                     ));

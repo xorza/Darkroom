@@ -7,24 +7,26 @@ use criterion::{BenchmarkId, Criterion, Throughput, criterion_group};
 
 use super::median_filter_3x3;
 use super::simd::{median_filter_row_scalar, median_filter_row_simd};
+use crate::common::Buffer2;
 
 #[allow(dead_code)]
 pub fn bench_median_filter(c: &mut Criterion) {
     let mut group = c.benchmark_group("median_filter_3x3");
 
     for (width, height) in [(512, 512), (1024, 1024), (4096, 4096)] {
-        let pixels: Vec<f32> = (0..width * height)
+        let pixels_data: Vec<f32> = (0..width * height)
             .map(|i| (i % 256) as f32 / 255.0)
             .collect();
+        let pixels = Buffer2::new(width, height, pixels_data);
 
         group.throughput(Throughput::Elements((width * height) as u64));
-        let mut output = vec![0.0f32; width * height];
+        let mut output = Buffer2::new_filled(width, height, 0.0f32);
         group.bench_with_input(
             BenchmarkId::new("size", format!("{}x{}", width, height)),
             &pixels,
             |b, pixels| {
                 b.iter(|| {
-                    median_filter_3x3(black_box(pixels), width, height, black_box(&mut output));
+                    median_filter_3x3(black_box(pixels), black_box(&mut output));
                 });
             },
         );

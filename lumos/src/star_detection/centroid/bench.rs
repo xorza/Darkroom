@@ -4,6 +4,7 @@
 use super::gaussian_fit::{GaussianFitConfig, fit_gaussian_2d};
 use super::moffat_fit::{MoffatFitConfig, fit_moffat_2d};
 use super::{compute_centroid, compute_metrics, compute_stamp_radius, refine_centroid};
+use crate::common::Buffer2;
 use crate::star_detection::StarDetectionConfig;
 use crate::star_detection::background::BackgroundMap;
 use crate::star_detection::detection::StarCandidate;
@@ -19,7 +20,7 @@ fn generate_gaussian_stamp(
     amplitude: f32,
     sigma: f32,
     background: f32,
-) -> Vec<f32> {
+) -> Buffer2<f32> {
     let mut pixels = vec![background; width * height];
     for y in 0..height {
         for x in 0..width {
@@ -30,7 +31,7 @@ fn generate_gaussian_stamp(
             pixels[y * width + x] += value;
         }
     }
-    pixels
+    Buffer2::new(width, height, pixels)
 }
 
 /// Generate a synthetic Moffat star stamp for benchmarking.
@@ -44,7 +45,7 @@ fn generate_moffat_stamp(
     alpha: f32,
     beta: f32,
     background: f32,
-) -> Vec<f32> {
+) -> Buffer2<f32> {
     let mut pixels = vec![background; width * height];
     for y in 0..height {
         for x in 0..width {
@@ -55,7 +56,7 @@ fn generate_moffat_stamp(
             pixels[y * width + x] += value;
         }
     }
-    pixels
+    Buffer2::new(width, height, pixels)
 }
 
 /// Generate a field of synthetic stars for benchmarking centroid computation.
@@ -63,7 +64,7 @@ fn generate_star_field(
     width: usize,
     height: usize,
     num_stars: usize,
-) -> (Vec<f32>, Vec<(f32, f32)>) {
+) -> (Buffer2<f32>, Vec<(f32, f32)>) {
     let background = 0.1f32;
     let noise = 0.01f32;
     let mut pixels = vec![background; width * height];
@@ -103,17 +104,14 @@ fn generate_star_field(
         star_positions.push((cx, cy));
     }
 
-    (pixels, star_positions)
+    (Buffer2::new(width, height, pixels), star_positions)
 }
 
 /// Create a simple background map for benchmarking.
 fn create_background_map(width: usize, height: usize) -> BackgroundMap {
-    let size = width * height;
     BackgroundMap {
-        background: vec![0.1f32; size],
-        noise: vec![0.01f32; size],
-        width,
-        height,
+        background: Buffer2::new_filled(width, height, 0.1f32),
+        noise: Buffer2::new_filled(width, height, 0.01f32),
     }
 }
 
@@ -135,7 +133,7 @@ pub fn benchmarks(c: &mut Criterion) {
         group.bench_function("refine_centroid_21x21", |b| {
             b.iter(|| {
                 black_box(refine_centroid(
-                    black_box(&pixels),
+                    black_box(pixels.as_ref()),
                     black_box(width),
                     black_box(height),
                     black_box(&background),
@@ -160,7 +158,7 @@ pub fn benchmarks(c: &mut Criterion) {
         group.bench_function("compute_metrics_21x21", |b| {
             b.iter(|| {
                 black_box(compute_metrics(
-                    black_box(&pixels),
+                    black_box(pixels.as_ref()),
                     black_box(width),
                     black_box(height),
                     black_box(&background),
@@ -206,8 +204,6 @@ pub fn benchmarks(c: &mut Criterion) {
                 for candidate in &candidates {
                     black_box(compute_centroid(
                         black_box(&pixels),
-                        black_box(512),
-                        black_box(512),
                         black_box(&background),
                         black_box(candidate),
                         black_box(&config),
@@ -235,8 +231,6 @@ pub fn benchmarks(c: &mut Criterion) {
             b.iter(|| {
                 black_box(fit_gaussian_2d(
                     black_box(&pixels),
-                    black_box(width),
-                    black_box(height),
                     black_box((stamp_size / 2) as f32),
                     black_box((stamp_size / 2) as f32),
                     black_box(stamp_size / 2 - 2),
@@ -254,11 +248,9 @@ pub fn benchmarks(c: &mut Criterion) {
     moffat_group.sample_size(50);
 
     for stamp_size in [15, 21, 31] {
-        let width = stamp_size;
-        let height = stamp_size;
         let cx = (stamp_size / 2) as f32 + 0.3;
         let cy = (stamp_size / 2) as f32 + 0.7;
-        let pixels = generate_moffat_stamp(width, height, cx, cy, 1.0, 2.5, 2.5, 0.1);
+        let pixels = generate_moffat_stamp(stamp_size, stamp_size, cx, cy, 1.0, 2.5, 2.5, 0.1);
 
         // Fixed beta (faster)
         let config_fixed = MoffatFitConfig {
@@ -273,8 +265,6 @@ pub fn benchmarks(c: &mut Criterion) {
                 b.iter(|| {
                     black_box(fit_moffat_2d(
                         black_box(&pixels),
-                        black_box(width),
-                        black_box(height),
                         black_box((stamp_size / 2) as f32),
                         black_box((stamp_size / 2) as f32),
                         black_box(stamp_size / 2 - 2),
@@ -298,8 +288,6 @@ pub fn benchmarks(c: &mut Criterion) {
                 b.iter(|| {
                     black_box(fit_moffat_2d(
                         black_box(&pixels),
-                        black_box(width),
-                        black_box(height),
                         black_box((stamp_size / 2) as f32),
                         black_box((stamp_size / 2) as f32),
                         black_box(stamp_size / 2 - 2),

@@ -7,6 +7,7 @@ use criterion::{BenchmarkId, Criterion, Throughput};
 
 use super::simd::{warp_row_bilinear_scalar, warp_row_bilinear_simd};
 use super::{InterpolationMethod, WarpConfig, interpolate_pixel, warp_image};
+use crate::common::Buffer2;
 use crate::registration::types::TransformMatrix;
 
 /// Register interpolation benchmarks with Criterion.
@@ -17,14 +18,14 @@ pub fn benchmarks(c: &mut Criterion) {
 }
 
 /// Generate a gradient test image.
-fn generate_gradient_image(width: usize, height: usize) -> Vec<f32> {
+fn generate_gradient_image(width: usize, height: usize) -> Buffer2<f32> {
     let mut image = vec![0.0f32; width * height];
     for y in 0..height {
         for x in 0..width {
             image[y * width + x] = (x as f32 + y as f32) / (width + height) as f32;
         }
     }
-    image
+    Buffer2::new(width, height, image)
 }
 
 /// Benchmark different interpolation methods.
@@ -54,8 +55,6 @@ fn benchmark_interpolation_methods(c: &mut Criterion) {
             b.iter(|| {
                 let result = interpolate_pixel(
                     black_box(&image),
-                    size,
-                    size,
                     black_box(256.3),
                     black_box(128.7),
                     black_box(&config),
@@ -86,9 +85,7 @@ fn benchmark_interpolation_methods(c: &mut Criterion) {
             b.iter(|| {
                 let results: Vec<f32> = samples
                     .iter()
-                    .map(|&(x, y)| {
-                        interpolate_pixel(black_box(&image), size, size, x, y, black_box(&config))
-                    })
+                    .map(|&(x, y)| interpolate_pixel(black_box(&image), x, y, black_box(&config)))
                     .collect();
                 black_box(results)
             })
@@ -180,8 +177,6 @@ fn benchmark_warp_sizes(c: &mut Criterion) {
                         black_box(&image),
                         size,
                         size,
-                        size,
-                        size,
                         black_box(&transform),
                         black_box(&bilinear_config),
                     );
@@ -202,8 +197,6 @@ fn benchmark_warp_sizes(c: &mut Criterion) {
                 b.iter(|| {
                     let result = warp_image(
                         black_box(&image),
-                        size,
-                        size,
                         size,
                         size,
                         black_box(&transform),

@@ -14,7 +14,7 @@ use criterion::{BenchmarkId, Criterion, Throughput};
 use std::hint::black_box;
 
 /// Generate a synthetic star field image for benchmarking.
-fn generate_test_image(width: usize, height: usize, num_stars: usize) -> Vec<f32> {
+fn generate_test_image(width: usize, height: usize, num_stars: usize) -> Buffer2<f32> {
     let background = 0.1f32;
     let mut pixels = vec![background; width * height];
 
@@ -49,7 +49,7 @@ fn generate_test_image(width: usize, height: usize, num_stars: usize) -> Vec<f32
         }
     }
 
-    pixels
+    Buffer2::new(width, height, pixels)
 }
 
 /// Create a background map for benchmarking.
@@ -75,12 +75,11 @@ pub fn benchmarks(c: &mut Criterion) {
     mask_group.sample_size(10);
     mask_group.throughput(Throughput::Elements((WIDTH * HEIGHT) as u64));
 
-    let pixels_buf = Buffer2::new(WIDTH, HEIGHT, pixels.clone());
     let mut mask = Buffer2::new_filled(WIDTH, HEIGHT, false);
     mask_group.bench_function(BenchmarkId::new("create_threshold_mask", &size_name), |b| {
         b.iter(|| {
             create_threshold_mask(
-                black_box(&pixels_buf),
+                black_box(&pixels),
                 black_box(&background),
                 black_box(3.0),
                 black_box(&mut mask),
@@ -96,7 +95,7 @@ pub fn benchmarks(c: &mut Criterion) {
     dilate_group.throughput(Throughput::Elements((WIDTH * HEIGHT) as u64));
 
     let mut mask = Buffer2::new_filled(WIDTH, HEIGHT, false);
-    create_threshold_mask(&pixels_buf, &background, 3.0, &mut mask);
+    create_threshold_mask(&pixels, &background, 3.0, &mut mask);
     let mut output = Buffer2::new_filled(WIDTH, HEIGHT, false);
     dilate_group.bench_function(BenchmarkId::new(&size_name, "radius_1"), |b| {
         b.iter(|| dilate_mask(black_box(&mask), black_box(1), black_box(&mut output)))
@@ -110,7 +109,7 @@ pub fn benchmarks(c: &mut Criterion) {
     cc_group.throughput(Throughput::Elements((WIDTH * HEIGHT) as u64));
 
     let mut dilated_mask = Buffer2::new_filled(WIDTH, HEIGHT, false);
-    create_threshold_mask(&pixels_buf, &background, 3.0, &mut dilated_mask);
+    create_threshold_mask(&pixels, &background, 3.0, &mut dilated_mask);
     let mut dilated = Buffer2::new_filled(WIDTH, HEIGHT, false);
     dilate_mask(&dilated_mask, 1, &mut dilated);
     std::mem::swap(&mut dilated_mask, &mut dilated);
@@ -125,7 +124,7 @@ pub fn benchmarks(c: &mut Criterion) {
     let mut extract_group = c.benchmark_group("extract_candidates");
     extract_group.sample_size(10);
 
-    let (labels, num_labels) = connected_components(dilated_mask.pixels(), WIDTH, HEIGHT);
+    let (labels, num_labels) = connected_components(&dilated_mask);
 
     let deblend_config = DeblendConfig {
         min_separation: 3,
@@ -143,8 +142,6 @@ pub fn benchmarks(c: &mut Criterion) {
                     black_box(&pixels),
                     black_box(&labels),
                     black_box(num_labels),
-                    black_box(WIDTH),
-                    black_box(HEIGHT),
                     black_box(&deblend_config),
                     black_box(500),
                 ))
@@ -168,8 +165,6 @@ pub fn benchmarks(c: &mut Criterion) {
                     black_box(&pixels),
                     black_box(&labels),
                     black_box(num_labels),
-                    black_box(WIDTH),
-                    black_box(HEIGHT),
                     black_box(&mt_deblend_config),
                     black_box(500),
                 ))
@@ -190,8 +185,6 @@ pub fn benchmarks(c: &mut Criterion) {
         b.iter(|| {
             black_box(detect_stars(
                 black_box(&pixels),
-                black_box(WIDTH),
-                black_box(HEIGHT),
                 black_box(&background),
                 black_box(&config),
             ))
@@ -212,8 +205,6 @@ pub fn benchmarks(c: &mut Criterion) {
             black_box(detect_stars_filtered(
                 black_box(&pixels),
                 black_box(&filtered),
-                black_box(WIDTH),
-                black_box(HEIGHT),
                 black_box(&background),
                 black_box(&config),
             ))
