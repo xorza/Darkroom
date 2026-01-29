@@ -1809,3 +1809,129 @@ fn test_multi_threshold_deblend_high_contrast_disables() {
         candidates.len()
     );
 }
+
+// =============================================================================
+// Timing Tests (run with `cargo test --release -- --nocapture timing`)
+// =============================================================================
+
+/// Generate a synthetic star field image for timing tests.
+fn generate_timing_test_image(width: usize, height: usize, num_stars: usize) -> Vec<f32> {
+    let background = 0.1f32;
+    let mut pixels = vec![background; width * height];
+
+    // Add deterministic noise
+    for (i, p) in pixels.iter_mut().enumerate() {
+        let hash = ((i as u32).wrapping_mul(2654435761)) as f32 / u32::MAX as f32;
+        *p += (hash - 0.5) * 0.02;
+    }
+
+    // Add synthetic stars at deterministic positions
+    for star_idx in 0..num_stars {
+        let hash1 = ((star_idx as u32).wrapping_mul(2654435761)) as usize;
+        let hash2 = ((star_idx as u32).wrapping_mul(1597334677)) as usize;
+        let hash3 = ((star_idx as u32).wrapping_mul(805306457)) as usize;
+        let hash4 = ((star_idx as u32).wrapping_mul(402653189)) as usize;
+
+        let cx = 15 + (hash1 % (width - 30));
+        let cy = 15 + (hash2 % (height - 30));
+        let brightness = 0.5 + (hash3 % 500) as f32 / 1000.0;
+        let sigma = 1.5 + (hash4 % 100) as f32 / 100.0;
+
+        for dy in -8i32..=8 {
+            for dx in -8i32..=8 {
+                let x = (cx as i32 + dx) as usize;
+                let y = (cy as i32 + dy) as usize;
+                if x < width && y < height {
+                    let r2 = (dx * dx + dy * dy) as f32;
+                    let value = brightness * (-r2 / (2.0 * sigma * sigma)).exp();
+                    pixels[y * width + x] += value;
+                }
+            }
+        }
+    }
+
+    pixels
+}
+
+/// Create a background map for timing tests.
+fn create_timing_background_map(width: usize, height: usize) -> BackgroundMap {
+    let size = width * height;
+    BackgroundMap {
+        background: vec![0.1f32; size],
+        noise: vec![0.01f32; size],
+        width,
+        height,
+    }
+}
+
+#[test]
+fn timing_detect_stars_filtered_1k() {
+    if common::is_debug() {
+        println!("Debug mode enabled");
+    } else {
+        println!("Release mode enabled");
+    }
+
+    const WIDTH: usize = 1024;
+    const HEIGHT: usize = 1024;
+    const NUM_STARS: usize = 100;
+    const ITERATIONS: usize = 5;
+
+    let pixels = generate_timing_test_image(WIDTH, HEIGHT, NUM_STARS);
+    let filtered = generate_timing_test_image(WIDTH, HEIGHT, NUM_STARS);
+    let background = create_timing_background_map(WIDTH, HEIGHT);
+    let config = StarDetectionConfig::default();
+
+    // Warmup
+    let _ = detect_stars_filtered(&pixels, &filtered, WIDTH, HEIGHT, &background, &config);
+
+    let start = std::time::Instant::now();
+    for _ in 0..ITERATIONS {
+        let _ = detect_stars_filtered(&pixels, &filtered, WIDTH, HEIGHT, &background, &config);
+    }
+    let elapsed = start.elapsed();
+
+    println!(
+        "\n[TIMING] detect_stars_filtered 1K ({}x{}, {} stars): {:?} per iter ({} iters)\n",
+        WIDTH,
+        HEIGHT,
+        NUM_STARS,
+        elapsed / ITERATIONS as u32,
+        ITERATIONS
+    );
+}
+
+#[test]
+fn timing_detect_stars_filtered_6k() {
+    const WIDTH: usize = 6144;
+    const HEIGHT: usize = 6144;
+    const NUM_STARS: usize = 3000;
+    const ITERATIONS: usize = 3;
+
+    if common::is_debug() {
+        println!("Debug mode enabled");
+    }
+
+    let pixels = generate_timing_test_image(WIDTH, HEIGHT, NUM_STARS);
+    let filtered = generate_timing_test_image(WIDTH, HEIGHT, NUM_STARS);
+    let background = create_timing_background_map(WIDTH, HEIGHT);
+    let config = StarDetectionConfig::default();
+
+    // Warmup
+    let _ = detect_stars_filtered(&pixels, &filtered, WIDTH, HEIGHT, &background, &config);
+
+    let start = std::time::Instant::now();
+    for _ in 0..ITERATIONS {
+        let _ = detect_stars_filtered(&pixels, &filtered, WIDTH, HEIGHT, &background, &config);
+    }
+    let elapsed = start.elapsed();
+
+    println!(
+        "\n[TIMING] detect_stars_filtered 6K ({}x{}, {} stars): {:?} per iter ({} iters)\n",
+        WIDTH,
+        HEIGHT,
+        NUM_STARS,
+        elapsed / ITERATIONS as u32,
+        ITERATIONS
+    );
+}
