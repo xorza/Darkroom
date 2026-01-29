@@ -11,6 +11,17 @@ use std::time::{Duration, Instant};
 
 pub use bench_macros::quick_bench;
 
+// ANSI color codes
+mod colors {
+    pub const RESET: &str = "\x1b[0m";
+    pub const BOLD: &str = "\x1b[1m";
+    pub const CYAN: &str = "\x1b[36m";
+    pub const YELLOW: &str = "\x1b[33m";
+    pub const GREEN: &str = "\x1b[32m";
+    pub const RED: &str = "\x1b[31m";
+    pub const DIM: &str = "\x1b[2m";
+}
+
 /// A simple bencher for measuring execution time in tests.
 #[derive(Debug)]
 pub struct Bencher {
@@ -34,9 +45,10 @@ pub struct BenchResult {
 
 impl std::fmt::Display for BenchResult {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use colors::*;
         write!(
             f,
-            "[BENCH] {}: {:?} (min: {:?}, max: {:?}, median: {:?}, {} iters)",
+            "{CYAN}{BOLD}[BENCH]{RESET} {BOLD}{}{RESET}:\n{YELLOW}{:?}{RESET} {DIM}(min: {:?}, max: {:?}, median: {:?}, {} iters){RESET}",
             self.name, self.mean, self.min, self.max, self.median, self.iterations
         )
     }
@@ -91,7 +103,12 @@ impl Bencher {
         F: FnMut() -> R,
     {
         #[cfg(debug_assertions)]
-        println!("\n⚠️  DEBUG MODE - benchmarks should be run with --release\n");
+        println!(
+            "\n{}{}⚠️ WARNING:{} DEBUG MODE - benchmarks should be run with --release\n",
+            colors::YELLOW,
+            colors::BOLD,
+            colors::RESET
+        );
 
         // Warmup
         for _ in 0..self.warmup_iterations {
@@ -143,16 +160,23 @@ impl Bencher {
                     let diff = result.mean.as_secs_f64() - prev_mean.as_secs_f64();
                     let pct = (diff / prev_mean.as_secs_f64()) * 100.0;
                     let sign = if diff >= 0.0 { "+" } else { "" };
-                    let indicator = if pct < -5.0 {
-                        "faster"
+                    let (indicator, color) = if pct < -5.0 {
+                        ("faster", colors::GREEN)
                     } else if pct > 5.0 {
-                        "SLOWER"
+                        ("SLOWER", colors::RED)
                     } else {
-                        "same"
+                        ("same", colors::DIM)
                     };
                     println!(
-                        "  vs previous: {prev_mean:?} -> {:?} ({sign}{:.1}%) {indicator}\n",
-                        result.mean, pct
+                        "  {}vs previous:{} {:?} -> {:?} ({sign}{:.1}%) {}{}{}\n",
+                        colors::DIM,
+                        colors::RESET,
+                        prev_mean,
+                        result.mean,
+                        pct,
+                        color,
+                        indicator,
+                        colors::RESET
                     );
                 }
 
