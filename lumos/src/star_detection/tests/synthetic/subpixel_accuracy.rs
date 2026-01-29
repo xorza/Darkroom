@@ -11,10 +11,6 @@ use crate::star_detection::{Star, StarDetectionConfig, find_stars};
 use imaginarium::Color;
 use imaginarium::drawing::{draw_circle, draw_cross};
 
-fn make_grayscale_image(pixels: Vec<f32>, width: usize, height: usize) -> AstroImage {
-    AstroImage::from_pixels(ImageDimensions::new(width, height, 1), pixels)
-}
-
 /// Match detected stars between two images based on proximity.
 /// Returns pairs of (star1, star2) that are within `max_distance` pixels.
 fn match_stars(stars1: &[Star], stars2: &[Star], max_distance: f32) -> Vec<(Star, Star)> {
@@ -114,8 +110,14 @@ fn test_subpixel_shift_detection() {
     // Run star detection on both images
     let detection_config = StarDetectionConfig::default();
 
-    let image1 = make_grayscale_image(pixels1.clone(), config.width, config.height);
-    let image2 = make_grayscale_image(pixels2.clone(), config.width, config.height);
+    let image1 = AstroImage::from_pixels(
+        ImageDimensions::new(config.width, config.height, 1),
+        pixels1.clone(),
+    );
+    let image2 = AstroImage::from_pixels(
+        ImageDimensions::new(config.width, config.height, 1),
+        pixels2.clone(),
+    );
     let detected1 = find_stars(&image1, &detection_config).stars;
     let detected2 = find_stars(&image2, &detection_config).stars;
 
@@ -258,7 +260,10 @@ fn test_subpixel_accuracy_sweep() {
     let mut all_passed = true;
 
     let pixels1 = generate_star_field(&config, &base_stars);
-    let image1 = make_grayscale_image(pixels1, config.width, config.height);
+    let image1 = AstroImage::from_pixels(
+        ImageDimensions::new(config.width, config.height, 1),
+        pixels1,
+    );
     let detected1 = find_stars(&image1, &detection_config).stars;
 
     for (shift_x, shift_y) in test_shifts {
@@ -268,7 +273,10 @@ fn test_subpixel_accuracy_sweep() {
             .collect();
 
         let pixels2 = generate_star_field(&config, &shifted_stars);
-        let image2 = make_grayscale_image(pixels2, config.width, config.height);
+        let image2 = AstroImage::from_pixels(
+            ImageDimensions::new(config.width, config.height, 1),
+            pixels2,
+        );
         let detected2 = find_stars(&image2, &detection_config).stars;
 
         let pairs = match_stars(&detected1, &detected2, 3.0);

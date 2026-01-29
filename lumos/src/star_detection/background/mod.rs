@@ -5,7 +5,7 @@
 //!
 //! Uses SIMD acceleration when available for statistics computation.
 
-#[cfg(feature = "bench")]
+#[cfg(test)]
 pub mod bench;
 
 #[cfg(test)]

@@ -1869,78 +1869,14 @@ fn test_multi_threshold_deblend_high_contrast_disables() {
 
 mod quick_benches {
     use super::*;
+    use crate::testing::synthetic::stamps;
     use ::bench::quick_bench;
-
-    /// Generate a raw test image with background + stars (for pixels parameter)
-    fn generate_timing_test_image(width: usize, height: usize, num_stars: usize) -> Buffer2<f32> {
-        let background = 0.1f32;
-        let mut pixels = vec![background; width * height];
-
-        // Add slight noise
-        for (i, p) in pixels.iter_mut().enumerate() {
-            let hash = ((i as u32).wrapping_mul(2654435761)) as f32 / u32::MAX as f32;
-            *p += (hash - 0.5) * 0.02;
-        }
-
-        add_stars_to_image(&mut pixels, width, height, num_stars);
-        Buffer2::new(width, height, pixels)
-    }
-
-    /// Generate a filtered test image (background-subtracted, stars only)
-    /// This simulates the output of matched filtering where background is near zero
-    fn generate_timing_filtered_image(
-        width: usize,
-        height: usize,
-        num_stars: usize,
-    ) -> Buffer2<f32> {
-        let noise_level = 0.01f32;
-        let mut pixels = vec![0.0f32; width * height];
-
-        // Add noise around zero (simulating background-subtracted filtered image)
-        for (i, p) in pixels.iter_mut().enumerate() {
-            let hash = ((i as u32).wrapping_mul(2654435761)) as f32 / u32::MAX as f32;
-            *p = (hash - 0.5) * noise_level * 2.0; // Small noise around zero
-        }
-
-        add_stars_to_image(&mut pixels, width, height, num_stars);
-        Buffer2::new(width, height, pixels)
-    }
-
-    fn add_stars_to_image(pixels: &mut [f32], width: usize, height: usize, num_stars: usize) {
-        for star_idx in 0..num_stars {
-            let hash1 = ((star_idx as u32).wrapping_mul(2654435761)) as usize;
-            let hash2 = ((star_idx as u32).wrapping_mul(1597334677)) as usize;
-            let hash3 = ((star_idx as u32).wrapping_mul(805306457)) as usize;
-            let hash4 = ((star_idx as u32).wrapping_mul(402653189)) as usize;
-
-            let cx = 15 + (hash1 % (width - 30));
-            let cy = 15 + (hash2 % (height - 30));
-            let brightness = 0.5 + (hash3 % 500) as f32 / 1000.0;
-            let sigma = 1.5 + (hash4 % 100) as f32 / 100.0;
-
-            for dy in -8i32..=8 {
-                for dx in -8i32..=8 {
-                    let x = (cx as i32 + dx) as usize;
-                    let y = (cy as i32 + dy) as usize;
-                    if x < width && y < height {
-                        let r2 = (dx * dx + dy * dy) as f32;
-                        let value = brightness * (-r2 / (2.0 * sigma * sigma)).exp();
-                        pixels[y * width + x] += value;
-                    }
-                }
-            }
-        }
-    }
-
-    fn create_timing_background_map(width: usize, height: usize) -> BackgroundMap {
-        background_map::uniform(width, height, 0.1, 0.01)
-    }
 
     #[quick_bench(warmup_iters = 2, iters = 5)]
     fn bench_detect_stars_filtered_1k(b: ::bench::Bencher) {
-        let pixels = generate_timing_test_image(1024, 1024, 100);
-        let filtered = generate_timing_filtered_image(1024, 1024, 100);
-        let background = create_timing_background_map(1024, 1024);
+        let pixels = stamps::benchmark_star_field(1024, 1024, 100, 0.1, 0.01, 12345);
+        let filtered = stamps::benchmark_star_field(1024, 1024, 100, 0.0, 0.01, 12345);
+        let background = background_map::uniform(1024, 1024, 0.1, 0.01);
         let config = StarDetectionConfig::default();
 
         b.bench(|| detect_stars_filtered(&pixels, &filtered, &background, &config));
@@ -1948,9 +1884,9 @@ mod quick_benches {
 
     #[quick_bench(warmup_iters = 1, iters = 3)]
     fn bench_detect_stars_filtered_6k(b: ::bench::Bencher) {
-        let pixels = generate_timing_test_image(6144, 6144, 3000);
-        let filtered = generate_timing_filtered_image(6144, 6144, 3000);
-        let background = create_timing_background_map(6144, 6144);
+        let pixels = stamps::benchmark_star_field(6144, 6144, 3000, 0.1, 0.01, 12345);
+        let filtered = stamps::benchmark_star_field(6144, 6144, 3000, 0.0, 0.01, 12345);
+        let background = background_map::uniform(6144, 6144, 0.1, 0.01);
         let config = StarDetectionConfig::default();
 
         b.bench(|| detect_stars_filtered(&pixels, &filtered, &background, &config));

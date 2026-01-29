@@ -6,6 +6,7 @@ use std::hint::black_box;
 use criterion::{BenchmarkId, Criterion, Throughput};
 
 use super::{PhaseCorrelationConfig, PhaseCorrelator, SubpixelMethod};
+use crate::testing::synthetic::stamps;
 
 /// Register phase correlation benchmarks with Criterion.
 pub fn benchmarks(c: &mut Criterion) {
@@ -15,23 +16,6 @@ pub fn benchmarks(c: &mut Criterion) {
     benchmark_iterative_correlation(c);
 }
 
-/// Generate a test image with a Gaussian spot.
-fn generate_test_image(width: usize, height: usize, spot_x: f32, spot_y: f32) -> Vec<f32> {
-    let mut image = vec![0.0f32; width * height];
-    let sigma = 10.0f32;
-
-    for y in 0..height {
-        for x in 0..width {
-            let dx = x as f32 - spot_x;
-            let dy = y as f32 - spot_y;
-            let value = (-((dx * dx + dy * dy) / (2.0 * sigma * sigma))).exp();
-            image[y * width + x] = value;
-        }
-    }
-
-    image
-}
-
 /// Benchmark phase correlation with different image sizes.
 fn benchmark_phase_correlation_sizes(c: &mut Criterion) {
     let mut group = c.benchmark_group("phase_correlation_sizes");
@@ -39,9 +23,15 @@ fn benchmark_phase_correlation_sizes(c: &mut Criterion) {
     let config = PhaseCorrelationConfig::default();
 
     for size in [128, 256, 512, 1024] {
-        let ref_image = generate_test_image(size, size, size as f32 / 2.0, size as f32 / 2.0);
-        let target_image =
-            generate_test_image(size, size, size as f32 / 2.0 + 5.0, size as f32 / 2.0 + 3.0);
+        let ref_image =
+            stamps::gaussian_spot(size, size, size as f32 / 2.0, size as f32 / 2.0, 10.0);
+        let target_image = stamps::gaussian_spot(
+            size,
+            size,
+            size as f32 / 2.0 + 5.0,
+            size as f32 / 2.0 + 3.0,
+            10.0,
+        );
 
         let correlator = PhaseCorrelator::new(size, size, config.clone());
 
@@ -51,8 +41,10 @@ fn benchmark_phase_correlation_sizes(c: &mut Criterion) {
             BenchmarkId::new("correlate", format!("{}x{}", size, size)),
             |b| {
                 b.iter(|| {
-                    let result =
-                        correlator.correlate(black_box(&ref_image), black_box(&target_image));
+                    let result = correlator.correlate(
+                        black_box(ref_image.pixels()),
+                        black_box(target_image.pixels()),
+                    );
                     black_box(result)
                 })
             },
@@ -67,9 +59,14 @@ fn benchmark_subpixel_methods(c: &mut Criterion) {
     let mut group = c.benchmark_group("phase_correlation_subpixel");
 
     let size = 256;
-    let ref_image = generate_test_image(size, size, size as f32 / 2.0, size as f32 / 2.0);
-    let target_image =
-        generate_test_image(size, size, size as f32 / 2.0 + 5.3, size as f32 / 2.0 + 2.7);
+    let ref_image = stamps::gaussian_spot(size, size, size as f32 / 2.0, size as f32 / 2.0, 10.0);
+    let target_image = stamps::gaussian_spot(
+        size,
+        size,
+        size as f32 / 2.0 + 5.3,
+        size as f32 / 2.0 + 2.7,
+        10.0,
+    );
 
     let methods = [
         ("none", SubpixelMethod::None),
@@ -87,7 +84,10 @@ fn benchmark_subpixel_methods(c: &mut Criterion) {
 
         group.bench_function(name, |b| {
             b.iter(|| {
-                let result = correlator.correlate(black_box(&ref_image), black_box(&target_image));
+                let result = correlator.correlate(
+                    black_box(ref_image.pixels()),
+                    black_box(target_image.pixels()),
+                );
                 black_box(result)
             })
         });
@@ -102,12 +102,19 @@ fn benchmark_iterative_correlation(c: &mut Criterion) {
 
     // Create smooth multi-feature test image
     let size = 256;
-    let ref_image = generate_multi_feature_image(size, size);
+    let spots = [
+        (size as f32 * 0.25, size as f32 * 0.25),
+        (size as f32 * 0.75, size as f32 * 0.25),
+        (size as f32 * 0.5, size as f32 * 0.5),
+        (size as f32 * 0.25, size as f32 * 0.75),
+        (size as f32 * 0.75, size as f32 * 0.75),
+    ];
+    let ref_image = stamps::multi_gaussian_spots(size, size, &spots, 15.0);
 
     // Sub-pixel shift
     let shift_x = 5.37f32;
     let shift_y = 3.21f32;
-    let target_image = generate_shifted_image(&ref_image, size, size, shift_x, shift_y);
+    let target_image = generate_shifted_image(ref_image.pixels(), size, size, shift_x, shift_y);
 
     // Standard single-shot correlation
     let config_single = PhaseCorrelationConfig {
@@ -119,8 +126,8 @@ fn benchmark_iterative_correlation(c: &mut Criterion) {
 
     group.bench_function("single_shot", |b| {
         b.iter(|| {
-            let result =
-                correlator_single.correlate(black_box(&ref_image), black_box(&target_image));
+            let result = correlator_single
+                .correlate(black_box(ref_image.pixels()), black_box(&target_image));
             black_box(result)
         })
     });
@@ -137,7 +144,7 @@ fn benchmark_iterative_correlation(c: &mut Criterion) {
     group.bench_function("iterative_3", |b| {
         b.iter(|| {
             let result = correlator_iter3
-                .correlate_iterative(black_box(&ref_image), black_box(&target_image));
+                .correlate_iterative(black_box(ref_image.pixels()), black_box(&target_image));
             black_box(result)
         })
     });
@@ -154,41 +161,12 @@ fn benchmark_iterative_correlation(c: &mut Criterion) {
     group.bench_function("iterative_5", |b| {
         b.iter(|| {
             let result = correlator_iter5
-                .correlate_iterative(black_box(&ref_image), black_box(&target_image));
+                .correlate_iterative(black_box(ref_image.pixels()), black_box(&target_image));
             black_box(result)
         })
     });
 
     group.finish();
-}
-
-/// Generate a multi-feature image with multiple Gaussian spots (for iterative correlation testing).
-fn generate_multi_feature_image(width: usize, height: usize) -> Vec<f32> {
-    let mut image = vec![0.0f32; width * height];
-    let sigma = 15.0f32;
-
-    // Add multiple Gaussian spots
-    let spots = [
-        (width as f32 * 0.25, height as f32 * 0.25),
-        (width as f32 * 0.75, height as f32 * 0.25),
-        (width as f32 * 0.5, height as f32 * 0.5),
-        (width as f32 * 0.25, height as f32 * 0.75),
-        (width as f32 * 0.75, height as f32 * 0.75),
-    ];
-
-    for y in 0..height {
-        for x in 0..width {
-            let mut value = 0.0f32;
-            for &(cx, cy) in &spots {
-                let dx = x as f32 - cx;
-                let dy = y as f32 - cy;
-                value += (-((dx * dx + dy * dy) / (2.0 * sigma * sigma))).exp();
-            }
-            image[y * width + x] = value;
-        }
-    }
-
-    image
 }
 
 /// Generate a shifted version of an image using bilinear interpolation.
@@ -236,12 +214,13 @@ fn benchmark_windowing(c: &mut Criterion) {
     let mut group = c.benchmark_group("phase_correlation_windowing");
 
     let size = 512;
-    let ref_image = generate_test_image(size, size, size as f32 / 2.0, size as f32 / 2.0);
-    let target_image = generate_test_image(
+    let ref_image = stamps::gaussian_spot(size, size, size as f32 / 2.0, size as f32 / 2.0, 10.0);
+    let target_image = stamps::gaussian_spot(
         size,
         size,
         size as f32 / 2.0 + 10.0,
         size as f32 / 2.0 - 5.0,
+        10.0,
     );
 
     for use_windowing in [false, true] {
@@ -259,7 +238,10 @@ fn benchmark_windowing(c: &mut Criterion) {
 
         group.bench_function(name, |b| {
             b.iter(|| {
-                let result = correlator.correlate(black_box(&ref_image), black_box(&target_image));
+                let result = correlator.correlate(
+                    black_box(ref_image.pixels()),
+                    black_box(target_image.pixels()),
+                );
                 black_box(result)
             })
         });

@@ -41,6 +41,7 @@ use super::local_normalization::{
     LocalNormalizationConfig, LocalNormalizationMap, TileNormalizationStats,
 };
 use super::weighted::FrameQuality;
+use crate::common::Buffer2;
 use crate::star_detection::{StarDetectionResult, StarDetector};
 use crate::{AstroImage, ImageDimensions};
 
@@ -607,22 +608,14 @@ impl SessionNormalization {
     /// the frame with the best FWHM/SNR combination).
     ///
     /// # Arguments
-    /// * `reference_pixels` - Pixel data from the reference frame
-    /// * `width` - Image width
-    /// * `height` - Image height
+    /// * `reference_pixels` - Pixel buffer from the reference frame
     /// * `config` - Local normalization configuration
     ///
     /// # Panics
     ///
     /// Panics if the image is smaller than the configured tile size.
-    pub fn new(
-        reference_pixels: &[f32],
-        width: usize,
-        height: usize,
-        config: LocalNormalizationConfig,
-    ) -> Self {
-        let reference_stats =
-            TileNormalizationStats::compute(reference_pixels, width, height, &config);
+    pub fn new(reference_pixels: &Buffer2<f32>, config: LocalNormalizationConfig) -> Self {
+        let reference_stats = TileNormalizationStats::compute(reference_pixels, &config);
 
         Self {
             reference_stats,
@@ -663,18 +656,13 @@ impl SessionNormalization {
     /// The map can be applied to the frame to normalize it to match the reference.
     ///
     /// # Arguments
-    /// * `target_pixels` - Pixel data from the frame to normalize
+    /// * `target_pixels` - Pixel buffer from the frame to normalize
     ///
     /// # Panics
     ///
     /// Panics if the target frame dimensions don't match the reference.
-    pub fn compute_map(&self, target_pixels: &[f32]) -> LocalNormalizationMap {
-        let target_stats = TileNormalizationStats::compute(
-            target_pixels,
-            self.reference_stats.width,
-            self.reference_stats.height,
-            &self.config,
-        );
+    pub fn compute_map(&self, target_pixels: &Buffer2<f32>) -> LocalNormalizationMap {
+        let target_stats = TileNormalizationStats::compute(target_pixels, &self.config);
         LocalNormalizationMap::compute(&self.reference_stats, &target_stats)
     }
 
@@ -683,15 +671,15 @@ impl SessionNormalization {
     /// This is a convenience method that computes the normalization map and applies it.
     ///
     /// # Arguments
-    /// * `target_pixels` - Pixel data from the frame to normalize
+    /// * `target_pixels` - Pixel buffer from the frame to normalize
     ///
     /// # Returns
-    /// Normalized pixel data.
+    /// Normalized pixel buffer.
     ///
     /// # Panics
     ///
     /// Panics if the target frame dimensions don't match the reference.
-    pub fn normalize_frame(&self, target_pixels: &[f32]) -> Vec<f32> {
+    pub fn normalize_frame(&self, target_pixels: &Buffer2<f32>) -> Buffer2<f32> {
         let map = self.compute_map(target_pixels);
         map.apply_to_new(target_pixels)
     }
@@ -699,12 +687,12 @@ impl SessionNormalization {
     /// Normalize a frame in-place.
     ///
     /// # Arguments
-    /// * `target_pixels` - Pixel data to normalize (modified in-place)
+    /// * `target_pixels` - Pixel buffer to normalize (modified in-place)
     ///
     /// # Panics
     ///
     /// Panics if the target frame dimensions don't match the reference.
-    pub fn normalize_frame_in_place(&self, target_pixels: &mut [f32]) {
+    pub fn normalize_frame_in_place(&self, target_pixels: &mut Buffer2<f32>) {
         let map = self.compute_map(target_pixels);
         map.apply(target_pixels);
     }
@@ -797,19 +785,15 @@ impl MultiSessionStack {
             .ok_or_else(|| anyhow::anyhow!("No suitable reference frame found"))?;
 
         let reference_image = AstroImage::from_file(reference_path)?;
-        let (width, height) = (reference_image.width(), reference_image.height());
+        let width = reference_image.width();
+        let height = reference_image.height();
 
         // Extract the first channel (luminance for grayscale, red for RGB)
-        let reference_pixels = reference_image.channel(0).to_vec();
+        let reference_pixels = Buffer2::new(width, height, reference_image.channel(0).to_vec());
 
         let config = LocalNormalizationConfig::new(self.config.normalization_tile_size);
 
-        Ok(SessionNormalization::new(
-            &reference_pixels,
-            width,
-            height,
-            config,
-        ))
+        Ok(SessionNormalization::new(&reference_pixels, config))
     }
 
     /// Create a session normalizer from a specific reference frame.
@@ -823,12 +807,10 @@ impl MultiSessionStack {
     /// * `height` - Image height
     pub fn create_session_normalizer_from_pixels(
         &self,
-        reference_pixels: &[f32],
-        width: usize,
-        height: usize,
+        reference_pixels: &Buffer2<f32>,
     ) -> SessionNormalization {
         let config = LocalNormalizationConfig::new(self.config.normalization_tile_size);
-        SessionNormalization::new(reference_pixels, width, height, config)
+        SessionNormalization::new(reference_pixels, config)
     }
 }
 
@@ -974,19 +956,23 @@ impl MultiSessionStack {
             .par_iter()
             .map(|path| {
                 let image = AstroImage::from_file(path).expect("Failed to load image");
+                let w = image.width();
+                let h = image.height();
 
                 // For multi-channel images, normalize each channel separately
                 if channels == 1 {
                     // Single channel - normalize directly
-                    normalizer.normalize_frame(image.channel(0))
+                    let channel_buf = Buffer2::new(w, h, image.channel(0).to_vec());
+                    normalizer.normalize_frame(&channel_buf).to_vec()
                 } else {
                     // Multi-channel - normalize each channel using planar access
-                    let pixel_count = image.width() * image.height();
+                    let pixel_count = w * h;
                     let mut normalized = vec![0.0f32; pixel_count * channels];
 
                     for c in 0..channels {
                         // Normalize channel directly from planar storage
-                        let normalized_channel = normalizer.normalize_frame(image.channel(c));
+                        let channel_buf = Buffer2::new(w, h, image.channel(c).to_vec());
+                        let normalized_channel = normalizer.normalize_frame(&channel_buf);
 
                         // Write back interleaved
                         for (i, &val) in normalized_channel.iter().enumerate() {
@@ -1643,40 +1629,34 @@ mod tests {
 
     #[test]
     fn test_session_normalization_new() {
-        let width = 256;
-        let height = 256;
-        let reference = patterns::uniform(width, height, 100.0);
+        let reference = patterns::uniform(256, 256, 100.0);
         let config = LocalNormalizationConfig::new(64);
 
-        let normalizer = SessionNormalization::new(&reference, width, height, config);
+        let normalizer = SessionNormalization::new(&reference, config);
 
-        assert_eq!(normalizer.dimensions(), (width, height));
+        assert_eq!(normalizer.dimensions(), (256, 256));
         assert_eq!(normalizer.config().tile_size, 64);
     }
 
     #[test]
     fn test_session_normalization_from_stats() {
-        let width = 256;
-        let height = 256;
-        let reference = patterns::uniform(width, height, 100.0);
+        let reference = patterns::uniform(256, 256, 100.0);
         let config = LocalNormalizationConfig::new(64);
 
-        let stats = TileNormalizationStats::compute(&reference, width, height, &config);
+        let stats = TileNormalizationStats::compute(&reference, &config);
         let normalizer = SessionNormalization::from_stats(stats.clone(), config.clone());
 
-        assert_eq!(normalizer.dimensions(), (width, height));
+        assert_eq!(normalizer.dimensions(), (256, 256));
         assert_eq!(normalizer.reference_stats().tiles_x, stats.tiles_x);
     }
 
     #[test]
     fn test_session_normalization_normalize_frame() {
-        let width = 256;
-        let height = 128;
-        let reference = patterns::uniform(width, height, 100.0);
-        let target = patterns::uniform(width, height, 50.0); // 50 units darker
+        let reference = patterns::uniform(256, 128, 100.0);
+        let target = patterns::uniform(256, 128, 50.0); // 50 units darker
         let config = LocalNormalizationConfig::new(64);
 
-        let normalizer = SessionNormalization::new(&reference, width, height, config);
+        let normalizer = SessionNormalization::new(&reference, config);
         let normalized = normalizer.normalize_frame(&target);
 
         // Normalized values should be close to reference
@@ -1690,13 +1670,11 @@ mod tests {
 
     #[test]
     fn test_session_normalization_normalize_frame_in_place() {
-        let width = 256;
-        let height = 128;
-        let reference = patterns::uniform(width, height, 100.0);
-        let mut target = patterns::uniform(width, height, 80.0);
+        let reference = patterns::uniform(256, 128, 100.0);
+        let mut target = patterns::uniform(256, 128, 80.0);
         let config = LocalNormalizationConfig::new(64);
 
-        let normalizer = SessionNormalization::new(&reference, width, height, config);
+        let normalizer = SessionNormalization::new(&reference, config);
 
         // Compare in-place with new version
         let normalized_new = normalizer.normalize_frame(&target);
@@ -1712,13 +1690,11 @@ mod tests {
 
     #[test]
     fn test_session_normalization_gradient_correction() {
-        let width = 256;
-        let height = 128;
-        let reference = patterns::uniform(width, height, 100.0);
-        let target = patterns::horizontal_gradient(width, height, 80.0, 120.0); // Gradient
+        let reference = patterns::uniform(256, 128, 100.0);
+        let target = patterns::horizontal_gradient(256, 128, 80.0, 120.0); // Gradient
         let config = LocalNormalizationConfig::new(64);
 
-        let normalizer = SessionNormalization::new(&reference, width, height, config);
+        let normalizer = SessionNormalization::new(&reference, config);
         let normalized = normalizer.normalize_frame(&target);
 
         // The gradient should be significantly reduced
@@ -1742,13 +1718,11 @@ mod tests {
 
     #[test]
     fn test_session_normalization_compute_map() {
-        let width = 128;
-        let height = 128;
-        let reference = patterns::uniform(width, height, 100.0);
-        let target = patterns::uniform(width, height, 50.0);
+        let reference = patterns::uniform(128, 128, 100.0);
+        let target = patterns::uniform(128, 128, 50.0);
         let config = LocalNormalizationConfig::new(64);
 
-        let normalizer = SessionNormalization::new(&reference, width, height, config);
+        let normalizer = SessionNormalization::new(&reference, config);
         let map = normalizer.compute_map(&target);
 
         // Apply map should give same result as normalize_frame
@@ -1937,14 +1911,11 @@ mod tests {
 
         let stack = MultiSessionStack::new(sessions);
 
-        let width = 256;
-        let height = 256;
-        let reference_pixels = patterns::uniform(width, height, 100.0);
+        let reference_pixels = patterns::uniform(256, 256, 100.0);
 
-        let normalizer =
-            stack.create_session_normalizer_from_pixels(&reference_pixels, width, height);
+        let normalizer = stack.create_session_normalizer_from_pixels(&reference_pixels);
 
-        assert_eq!(normalizer.dimensions(), (width, height));
+        assert_eq!(normalizer.dimensions(), (256, 256));
         assert_eq!(normalizer.config().tile_size, 128); // Default from SessionConfig
     }
 
@@ -1955,12 +1926,9 @@ mod tests {
         let config = SessionConfig::default().with_normalization_tile_size(64);
         let stack = MultiSessionStack::new(sessions).with_config(config);
 
-        let width = 256;
-        let height = 256;
-        let reference_pixels = patterns::uniform(width, height, 100.0);
+        let reference_pixels = patterns::uniform(256, 256, 100.0);
 
-        let normalizer =
-            stack.create_session_normalizer_from_pixels(&reference_pixels, width, height);
+        let normalizer = stack.create_session_normalizer_from_pixels(&reference_pixels);
 
         assert_eq!(normalizer.config().tile_size, 64);
     }
@@ -1968,20 +1936,18 @@ mod tests {
     #[test]
     fn test_session_normalization_cross_session() {
         // Simulate normalizing frames from two different sessions to a common reference
-        let width = 256;
-        let height = 128;
         let config = LocalNormalizationConfig::new(64);
 
         // Reference frame from "good" session
-        let reference = patterns::uniform(width, height, 100.0);
+        let reference = patterns::uniform(256, 128, 100.0);
 
         // Frame from session 1: uniform but darker
-        let session1_frame = patterns::uniform(width, height, 70.0);
+        let session1_frame = patterns::uniform(256, 128, 70.0);
 
         // Frame from session 2: gradient (different light pollution)
-        let session2_frame = patterns::horizontal_gradient(width, height, 80.0, 120.0);
+        let session2_frame = patterns::horizontal_gradient(256, 128, 80.0, 120.0);
 
-        let normalizer = SessionNormalization::new(&reference, width, height, config);
+        let normalizer = SessionNormalization::new(&reference, config);
 
         let normalized1 = normalizer.normalize_frame(&session1_frame);
         let normalized2 = normalizer.normalize_frame(&session2_frame);
@@ -2399,7 +2365,7 @@ mod integration_tests {
 
         // Create normalizer and normalize
         let config = LocalNormalizationConfig::new(64); // Minimum tile size is 64
-        let normalizer = SessionNormalization::new(&reference_pixels, width, height, config);
+        let normalizer = SessionNormalization::new(&reference_pixels, config);
         let normalized = normalizer.normalize_frame(&target_pixels);
 
         // After normalization: variance should be much lower (gradient removed)
@@ -2481,20 +2447,18 @@ mod integration_tests {
     #[test]
     fn test_integration_cross_session_normalization() {
         // Simulate normalizing frames from two different sessions
-        let width = 128;
-        let height = 128;
 
         // Reference from "good" session: uniform, bright
-        let reference = patterns::uniform(width, height, 100.0);
+        let reference = patterns::uniform(128, 128, 100.0);
 
         // Frame from session 1: uniform but darker (different sky)
-        let session1_frame = patterns::uniform(width, height, 70.0);
+        let session1_frame = patterns::uniform(128, 128, 70.0);
 
         // Frame from session 2: has gradient (different light pollution direction)
-        let session2_frame = patterns::horizontal_gradient(width, height, 85.0, 115.0);
+        let session2_frame = patterns::horizontal_gradient(128, 128, 85.0, 115.0);
 
         let config = LocalNormalizationConfig::new(64);
-        let normalizer = SessionNormalization::new(&reference, width, height, config);
+        let normalizer = SessionNormalization::new(&reference, config);
 
         let normalized1 = normalizer.normalize_frame(&session1_frame);
         let normalized2 = normalizer.normalize_frame(&session2_frame);

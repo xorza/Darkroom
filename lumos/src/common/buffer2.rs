@@ -75,6 +75,14 @@ impl<T> Buffer2<T> {
     }
 
     #[inline]
+    pub fn to_vec(&self) -> Vec<T>
+    where
+        T: Clone,
+    {
+        self.pixels.clone()
+    }
+
+    #[inline]
     pub fn iter(&self) -> slice::Iter<'_, T> {
         self.pixels.iter()
     }

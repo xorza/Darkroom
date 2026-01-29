@@ -23,11 +23,6 @@ fn detector() -> StarDetector {
     })
 }
 
-/// Create an AstroImage from pixel data.
-fn create_astro_image(pixels: Vec<f32>, width: usize, height: usize) -> AstroImage {
-    AstroImage::from_pixels(ImageDimensions::new(width, height, 1), pixels)
-}
-
 /// Default warp config for tests - bilinear for speed.
 fn warp_config() -> WarpConfig {
     WarpConfig {
@@ -80,8 +75,9 @@ fn test_image_registration_translation() {
     let target_pixels = translate_image(&ref_pixels_vec, width, height, dx, dy);
 
     // Create AstroImages
-    let ref_image = create_astro_image(ref_pixels_vec, width, height);
-    let target_image = create_astro_image(target_pixels, width, height);
+    let ref_image = AstroImage::from_pixels(ImageDimensions::new(width, height, 1), ref_pixels_vec);
+    let target_image =
+        AstroImage::from_pixels(ImageDimensions::new(width, height, 1), target_pixels);
 
     // Detect stars in both images
     let det = detector();
@@ -173,8 +169,9 @@ fn test_image_registration_rotation() {
 
     let target_pixels = transform_image(&ref_pixels_vec, width, height, dx, dy, angle_rad, 1.0);
 
-    let ref_image = create_astro_image(ref_pixels_vec, width, height);
-    let target_image = create_astro_image(target_pixels, width, height);
+    let ref_image = AstroImage::from_pixels(ImageDimensions::new(width, height, 1), ref_pixels_vec);
+    let target_image =
+        AstroImage::from_pixels(ImageDimensions::new(width, height, 1), target_pixels);
 
     let det = detector();
     let ref_result = det.detect(&ref_image);
@@ -244,8 +241,9 @@ fn test_image_registration_similarity() {
 
     let target_pixels = transform_image(&ref_pixels_vec, width, height, dx, dy, angle_rad, scale);
 
-    let ref_image = create_astro_image(ref_pixels_vec, width, height);
-    let target_image = create_astro_image(target_pixels, width, height);
+    let ref_image = AstroImage::from_pixels(ImageDimensions::new(width, height, 1), ref_pixels_vec);
+    let target_image =
+        AstroImage::from_pixels(ImageDimensions::new(width, height, 1), target_pixels);
 
     let det = detector();
     let ref_result = det.detect(&ref_image);
@@ -323,8 +321,9 @@ fn test_image_registration_with_noise() {
     let dy = -15.0;
     let target_pixels = translate_image(&ref_pixels_vec, width, height, dx, dy);
 
-    let ref_image = create_astro_image(ref_pixels_vec, width, height);
-    let target_image = create_astro_image(target_pixels, width, height);
+    let ref_image = AstroImage::from_pixels(ImageDimensions::new(width, height, 1), ref_pixels_vec);
+    let target_image =
+        AstroImage::from_pixels(ImageDimensions::new(width, height, 1), target_pixels);
 
     let det = StarDetector::from_config(StarDetectionConfig {
         expected_fwhm: 0.0,
@@ -399,8 +398,9 @@ fn test_image_registration_dense_field() {
 
     let target_pixels = transform_image(&ref_pixels_vec, width, height, dx, dy, angle_rad, 1.0);
 
-    let ref_image = create_astro_image(ref_pixels_vec, width, height);
-    let target_image = create_astro_image(target_pixels, width, height);
+    let ref_image = AstroImage::from_pixels(ImageDimensions::new(width, height, 1), ref_pixels_vec);
+    let target_image =
+        AstroImage::from_pixels(ImageDimensions::new(width, height, 1), target_pixels);
 
     let det = detector();
     let ref_result = det.detect(&ref_image);
@@ -469,8 +469,9 @@ fn test_image_registration_large_image() {
     let dy = -35.0;
     let target_pixels = translate_image(&ref_pixels_vec, width, height, dx, dy);
 
-    let ref_image = create_astro_image(ref_pixels_vec, width, height);
-    let target_image = create_astro_image(target_pixels, width, height);
+    let ref_image = AstroImage::from_pixels(ImageDimensions::new(width, height, 1), ref_pixels_vec);
+    let target_image =
+        AstroImage::from_pixels(ImageDimensions::new(width, height, 1), target_pixels);
 
     let det = detector();
     let ref_result = det.detect(&ref_image);

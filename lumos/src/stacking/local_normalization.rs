@@ -18,6 +18,7 @@
 
 use rayon::prelude::*;
 
+use crate::common::Buffer2;
 use crate::star_detection::constants::sigma_clipped_median_mad;
 
 /// Number of rows to process per parallel chunk for interpolation.
@@ -176,31 +177,19 @@ impl TileNormalizationStats {
     /// computation to get accurate background estimates.
     ///
     /// # Arguments
-    /// * `pixels` - Grayscale image data (row-major, f32)
-    /// * `width` - Image width in pixels
-    /// * `height` - Image height in pixels
+    /// * `pixels` - Grayscale image buffer
     /// * `config` - Local normalization configuration
     ///
     /// # Panics
     ///
     /// Panics if the image is smaller than the tile size.
-    pub fn compute(
-        pixels: &[f32],
-        width: usize,
-        height: usize,
-        config: &LocalNormalizationConfig,
-    ) -> Self {
+    pub fn compute(pixels: &Buffer2<f32>, config: &LocalNormalizationConfig) -> Self {
+        let width = pixels.width();
+        let height = pixels.height();
         let tile_size = config.tile_size;
         assert!(
             width >= tile_size && height >= tile_size,
             "Image ({width}x{height}) must be at least tile_size ({tile_size}x{tile_size})"
-        );
-        assert_eq!(
-            pixels.len(),
-            width * height,
-            "Pixel buffer size mismatch: expected {}, got {}",
-            width * height,
-            pixels.len()
         );
 
         let tiles_x = width.div_ceil(tile_size);
@@ -377,14 +366,21 @@ impl LocalNormalizationMap {
     ///
     /// # Panics
     ///
-    /// Panics if the pixel buffer size doesn't match the map dimensions.
-    pub fn apply(&self, pixels: &mut [f32]) {
+    /// Panics if the pixel buffer dimensions don't match the map dimensions.
+    pub fn apply(&self, pixels: &mut Buffer2<f32>) {
         assert_eq!(
-            pixels.len(),
-            self.width * self.height,
-            "Pixel buffer size mismatch: expected {}, got {}",
-            self.width * self.height,
-            pixels.len()
+            pixels.width(),
+            self.width,
+            "Width mismatch: expected {}, got {}",
+            self.width,
+            pixels.width()
+        );
+        assert_eq!(
+            pixels.height(),
+            self.height,
+            "Height mismatch: expected {}, got {}",
+            self.height,
+            pixels.height()
         );
 
         let width = self.width;
@@ -492,8 +488,8 @@ impl LocalNormalizationMap {
     /// Apply local normalization, returning a new normalized image.
     ///
     /// This is a convenience method that clones the input and applies normalization.
-    pub fn apply_to_new(&self, pixels: &[f32]) -> Vec<f32> {
-        let mut result = pixels.to_vec();
+    pub fn apply_to_new(&self, pixels: &Buffer2<f32>) -> Buffer2<f32> {
+        let mut result = pixels.clone();
         self.apply(&mut result);
         result
     }
@@ -570,56 +566,48 @@ fn apply_segment_interpolated(
 /// and `LocalNormalizationMap::compute`.
 ///
 /// # Arguments
-/// * `reference_pixels` - Reference frame pixel data
-/// * `target_pixels` - Target frame pixel data (to be normalized)
-/// * `width` - Image width
-/// * `height` - Image height
+/// * `reference_pixels` - Reference frame pixel buffer
+/// * `target_pixels` - Target frame pixel buffer (to be normalized)
 /// * `config` - Local normalization configuration
 ///
 /// # Returns
 /// A `LocalNormalizationMap` that can be applied to normalize the target frame.
 #[allow(dead_code)] // Public API - integration with stacking pipeline pending
 pub fn compute_normalization_map(
-    reference_pixels: &[f32],
-    target_pixels: &[f32],
-    width: usize,
-    height: usize,
+    reference_pixels: &Buffer2<f32>,
+    target_pixels: &Buffer2<f32>,
     config: &LocalNormalizationConfig,
 ) -> LocalNormalizationMap {
-    let ref_stats = TileNormalizationStats::compute(reference_pixels, width, height, config);
-    let target_stats = TileNormalizationStats::compute(target_pixels, width, height, config);
+    let ref_stats = TileNormalizationStats::compute(reference_pixels, config);
+    let target_stats = TileNormalizationStats::compute(target_pixels, config);
     LocalNormalizationMap::compute(&ref_stats, &target_stats)
 }
 
-/// Apply local normalization to a frame, returning the normalized result.
-///
-/// This is a convenience function that computes the normalization map and applies it.
-///
-/// # Arguments
-/// * `reference_pixels` - Reference frame pixel data
-/// * `target_pixels` - Target frame pixel data (to be normalized)
-/// * `width` - Image width
-/// * `height` - Image height
-/// * `config` - Local normalization configuration
-///
-/// # Returns
-/// Normalized version of the target frame.
 #[allow(dead_code)] // Public API - integration with stacking pipeline pending
-pub fn normalize_frame(
-    reference_pixels: &[f32],
-    target_pixels: &[f32],
-    width: usize,
-    height: usize,
-    config: &LocalNormalizationConfig,
-) -> Vec<f32> {
-    let map = compute_normalization_map(reference_pixels, target_pixels, width, height, config);
-    map.apply_to_new(target_pixels)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::testing::synthetic::patterns;
+
+    /// Apply local normalization to a frame, returning the normalized result.
+    ///
+    /// This is a convenience function that computes the normalization map and applies it.
+    ///
+    /// # Arguments
+    /// * `reference_pixels` - Reference frame pixel buffer
+    /// * `target_pixels` - Target frame pixel buffer (to be normalized)
+    /// * `config` - Local normalization configuration
+    ///
+    /// # Returns
+    /// Normalized version of the target frame.
+    pub fn normalize_frame(
+        reference_pixels: &Buffer2<f32>,
+        target_pixels: &Buffer2<f32>,
+        config: &LocalNormalizationConfig,
+    ) -> Buffer2<f32> {
+        let map = compute_normalization_map(reference_pixels, target_pixels, config);
+        map.apply_to_new(target_pixels)
+    }
 
     // ========== Config Tests ==========
 
@@ -707,12 +695,10 @@ mod tests {
 
     #[test]
     fn test_tile_stats_uniform_image() {
-        let width = 256;
-        let height = 256;
-        let pixels = patterns::uniform(width, height, 100.0);
+        let pixels = patterns::uniform(256, 256, 100.0);
         let config = LocalNormalizationConfig::new(64);
 
-        let stats = TileNormalizationStats::compute(&pixels, width, height, &config);
+        let stats = TileNormalizationStats::compute(&pixels, &config);
 
         // 256 / 64 = 4 tiles in each direction
         assert_eq!(stats.tiles_x, 4);
@@ -735,12 +721,10 @@ mod tests {
 
     #[test]
     fn test_tile_stats_horizontal_gradient() {
-        let width = 256;
-        let height = 128;
-        let pixels = patterns::horizontal_gradient(width, height, 50.0, 150.0);
+        let pixels = patterns::horizontal_gradient(256, 128, 50.0, 150.0);
         let config = LocalNormalizationConfig::new(64);
 
-        let stats = TileNormalizationStats::compute(&pixels, width, height, &config);
+        let stats = TileNormalizationStats::compute(&pixels, &config);
 
         // 256 / 64 = 4 tiles in X, 128 / 64 = 2 tiles in Y
         assert_eq!(stats.tiles_x, 4);
@@ -762,12 +746,10 @@ mod tests {
 
     #[test]
     fn test_tile_stats_vertical_gradient() {
-        let width = 128;
-        let height = 256;
-        let pixels = patterns::vertical_gradient(width, height, 0.0, 200.0);
+        let pixels = patterns::vertical_gradient(128, 256, 0.0, 200.0);
         let config = LocalNormalizationConfig::new(64);
 
-        let stats = TileNormalizationStats::compute(&pixels, width, height, &config);
+        let stats = TileNormalizationStats::compute(&pixels, &config);
 
         // 128 / 64 = 2 tiles in X, 256 / 64 = 4 tiles in Y
         assert_eq!(stats.tiles_x, 2);
@@ -789,13 +771,11 @@ mod tests {
 
     #[test]
     fn test_normalization_map_identical_frames() {
-        let width = 256;
-        let height = 256;
-        let pixels = patterns::uniform(width, height, 100.0);
+        let pixels = patterns::uniform(256, 256, 100.0);
         let config = LocalNormalizationConfig::new(64);
 
-        let ref_stats = TileNormalizationStats::compute(&pixels, width, height, &config);
-        let target_stats = TileNormalizationStats::compute(&pixels, width, height, &config);
+        let ref_stats = TileNormalizationStats::compute(&pixels, &config);
+        let target_stats = TileNormalizationStats::compute(&pixels, &config);
         let map = LocalNormalizationMap::compute(&ref_stats, &target_stats);
 
         // For identical frames, scales should be 1.0 (or near 1.0)
@@ -812,14 +792,12 @@ mod tests {
 
     #[test]
     fn test_normalization_map_offset_correction() {
-        let width = 256;
-        let height = 128;
-        let reference = patterns::uniform(width, height, 100.0);
-        let target = patterns::uniform(width, height, 80.0); // 20 units darker
+        let reference = patterns::uniform(256, 128, 100.0);
+        let target = patterns::uniform(256, 128, 80.0); // 20 units darker
         let config = LocalNormalizationConfig::new(64);
 
-        let ref_stats = TileNormalizationStats::compute(&reference, width, height, &config);
-        let target_stats = TileNormalizationStats::compute(&target, width, height, &config);
+        let ref_stats = TileNormalizationStats::compute(&reference, &config);
+        let target_stats = TileNormalizationStats::compute(&target, &config);
         let map = LocalNormalizationMap::compute(&ref_stats, &target_stats);
 
         // Apply normalization - should bring target up to reference level
@@ -836,14 +814,12 @@ mod tests {
 
     #[test]
     fn test_normalization_map_gradient_correction() {
-        let width = 256;
-        let height = 128;
-        let reference = patterns::uniform(width, height, 100.0);
-        let target = patterns::horizontal_gradient(width, height, 80.0, 120.0); // Gradient
+        let reference = patterns::uniform(256, 128, 100.0);
+        let target = patterns::horizontal_gradient(256, 128, 80.0, 120.0); // Gradient
         let config = LocalNormalizationConfig::new(64);
 
-        let ref_stats = TileNormalizationStats::compute(&reference, width, height, &config);
-        let target_stats = TileNormalizationStats::compute(&target, width, height, &config);
+        let ref_stats = TileNormalizationStats::compute(&reference, &config);
+        let target_stats = TileNormalizationStats::compute(&target, &config);
         let map = LocalNormalizationMap::compute(&ref_stats, &target_stats);
 
         // Apply normalization
@@ -872,13 +848,11 @@ mod tests {
 
     #[test]
     fn test_apply_in_place() {
-        let width = 256;
-        let height = 128;
-        let reference = patterns::uniform(width, height, 100.0);
-        let target = patterns::uniform(width, height, 50.0);
+        let reference = patterns::uniform(256, 128, 100.0);
+        let target = patterns::uniform(256, 128, 50.0);
         let config = LocalNormalizationConfig::new(64);
 
-        let map = compute_normalization_map(&reference, &target, width, height, &config);
+        let map = compute_normalization_map(&reference, &target, &config);
 
         let mut target_mut = target.clone();
         map.apply(&mut target_mut);
@@ -896,13 +870,11 @@ mod tests {
 
     #[test]
     fn test_normalize_frame_convenience() {
-        let width = 256;
-        let height = 128;
-        let reference = patterns::uniform(width, height, 100.0);
-        let target = patterns::uniform(width, height, 75.0);
+        let reference = patterns::uniform(256, 128, 100.0);
+        let target = patterns::uniform(256, 128, 75.0);
         let config = LocalNormalizationConfig::new(64);
 
-        let normalized = normalize_frame(&reference, &target, width, height, &config);
+        let normalized = normalize_frame(&reference, &target, &config);
 
         let avg: f32 = normalized.iter().sum::<f32>() / normalized.len() as f32;
         assert!(
@@ -916,17 +888,15 @@ mod tests {
 
     #[test]
     fn test_single_tile_image() {
-        let width = 64;
-        let height = 64;
-        let reference = patterns::uniform(width, height, 100.0);
-        let target = patterns::uniform(width, height, 50.0);
+        let reference = patterns::uniform(64, 64, 100.0);
+        let target = patterns::uniform(64, 64, 50.0);
         let config = LocalNormalizationConfig::new(64);
 
-        let stats = TileNormalizationStats::compute(&reference, width, height, &config);
+        let stats = TileNormalizationStats::compute(&reference, &config);
         assert_eq!(stats.tiles_x, 1);
         assert_eq!(stats.tiles_y, 1);
 
-        let normalized = normalize_frame(&reference, &target, width, height, &config);
+        let normalized = normalize_frame(&reference, &target, &config);
         let avg: f32 = normalized.iter().sum::<f32>() / normalized.len() as f32;
         assert!(
             (avg - 100.0).abs() < 1.0,
@@ -937,17 +907,17 @@ mod tests {
     #[test]
     fn test_non_multiple_tile_size() {
         // Image dimensions not evenly divisible by tile size
-        let width = 300; // 300 / 64 = 4 full tiles + 44 partial
-        let height = 150; // 150 / 64 = 2 full tiles + 22 partial
-        let reference = patterns::uniform(width, height, 100.0);
-        let target = patterns::uniform(width, height, 80.0);
+        // 300 / 64 = 4 full tiles + 44 partial
+        // 150 / 64 = 2 full tiles + 22 partial
+        let reference = patterns::uniform(300, 150, 100.0);
+        let target = patterns::uniform(300, 150, 80.0);
         let config = LocalNormalizationConfig::new(64);
 
-        let stats = TileNormalizationStats::compute(&reference, width, height, &config);
+        let stats = TileNormalizationStats::compute(&reference, &config);
         assert_eq!(stats.tiles_x, 5); // ceil(300/64) = 5
         assert_eq!(stats.tiles_y, 3); // ceil(150/64) = 3
 
-        let normalized = normalize_frame(&reference, &target, width, height, &config);
+        let normalized = normalize_frame(&reference, &target, &config);
         let avg: f32 = normalized.iter().sum::<f32>() / normalized.len() as f32;
         assert!(
             (avg - 100.0).abs() < 1.0,
@@ -958,12 +928,10 @@ mod tests {
     #[test]
     #[should_panic(expected = "must be at least tile_size")]
     fn test_image_too_small_for_tile_size() {
-        let width = 32;
-        let height = 32;
-        let pixels = patterns::uniform(width, height, 100.0);
+        let pixels = patterns::uniform(32, 32, 100.0);
         let config = LocalNormalizationConfig::new(64);
 
-        TileNormalizationStats::compute(&pixels, width, height, &config);
+        TileNormalizationStats::compute(&pixels, &config);
     }
 
     // ========== Helper Function Tests ==========

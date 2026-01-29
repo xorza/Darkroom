@@ -319,31 +319,31 @@ pub fn warp_image_lanczos3(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn create_test_image(width: usize, height: usize) -> Vec<f32> {
-        // Create gradient image
-        (0..height)
-            .flat_map(|y| {
-                (0..width).map(move |x| (x as f32 + y as f32 * 0.5) / (width + height) as f32)
-            })
-            .collect()
-    }
+    use crate::testing::synthetic::patterns;
 
     #[test]
     fn test_warp_row_bilinear_identity() {
         let width = 100;
         let height = 100;
-        let input = create_test_image(width, height);
+        let input = patterns::diagonal_gradient(width, height);
         let identity = TransformMatrix::identity();
 
         let mut output_row = vec![0.0f32; width];
         let y = 50;
 
-        warp_row_bilinear_simd(&input, width, height, &mut output_row, y, &identity, 0.0);
+        warp_row_bilinear_simd(
+            input.pixels(),
+            width,
+            height,
+            &mut output_row,
+            y,
+            &identity,
+            0.0,
+        );
 
         // With identity transform, output should match input
         for x in 1..width - 1 {
-            let expected = input[y * width + x];
+            let expected = input[(x, y)];
             assert!(
                 (output_row[x] - expected).abs() < 0.01,
                 "Mismatch at x={}: {} vs {}",
@@ -358,7 +358,7 @@ mod tests {
     fn test_warp_row_bilinear_translation() {
         let width = 100;
         let height = 100;
-        let input = create_test_image(width, height);
+        let input = patterns::diagonal_gradient(width, height);
 
         // Translate by (5, 3)
         let transform = TransformMatrix::translation(5.0, 3.0);
@@ -367,7 +367,15 @@ mod tests {
         let mut output_row = vec![0.0f32; width];
         let y = 50;
 
-        warp_row_bilinear_simd(&input, width, height, &mut output_row, y, &inverse, -1.0);
+        warp_row_bilinear_simd(
+            input.pixels(),
+            width,
+            height,
+            &mut output_row,
+            y,
+            &inverse,
+            -1.0,
+        );
 
         // Check that pixels are shifted
         for (x, &output_val) in output_row.iter().enumerate().skip(10).take(width - 20) {
@@ -375,7 +383,7 @@ mod tests {
             let src_x = x as i32 - 5;
             let src_y = y as i32 - 3;
             if src_x >= 0 && src_y >= 0 {
-                let expected = input[src_y as usize * width + src_x as usize];
+                let expected = input[(src_x as usize, src_y as usize)];
                 assert!(
                     (output_val - expected).abs() < 0.01,
                     "Mismatch at x={}: {} vs {}",
@@ -391,7 +399,7 @@ mod tests {
     fn test_warp_row_simd_matches_scalar() {
         let width = 128;
         let height = 128;
-        let input = create_test_image(width, height);
+        let input = patterns::diagonal_gradient(width, height);
 
         // Test with various transforms
         let transforms = vec![
@@ -407,10 +415,18 @@ mod tests {
                 let mut output_simd = vec![0.0f32; width];
                 let mut output_scalar = vec![0.0f32; width];
 
-                warp_row_bilinear_simd(&input, width, height, &mut output_simd, y, &inverse, -1.0);
+                warp_row_bilinear_simd(
+                    input.pixels(),
+                    width,
+                    height,
+                    &mut output_simd,
+                    y,
+                    &inverse,
+                    -1.0,
+                );
 
                 warp_row_bilinear_scalar(
-                    &input,
+                    input.pixels(),
                     width,
                     height,
                     &mut output_scalar,
@@ -438,13 +454,18 @@ mod tests {
     #[test]
     fn test_warp_row_various_sizes() {
         let height = 64;
-        let input_base = create_test_image(256, height);
+        let input_base = patterns::diagonal_gradient(256, height);
 
         // Test various widths including non-SIMD-aligned sizes
         for width in [
             1, 2, 3, 4, 5, 7, 8, 9, 15, 16, 17, 31, 32, 33, 63, 64, 100, 128,
         ] {
-            let input: Vec<f32> = input_base.iter().take(width * height).copied().collect();
+            let input: Vec<f32> = input_base
+                .pixels()
+                .iter()
+                .take(width * height)
+                .copied()
+                .collect();
             let identity = TransformMatrix::identity();
 
             let mut output_simd = vec![0.0f32; width];
@@ -471,14 +492,14 @@ mod tests {
     fn test_warp_row_lanczos3_identity() {
         let width = 100;
         let height = 100;
-        let input = create_test_image(width, height);
+        let input = patterns::diagonal_gradient(width, height);
         let identity = TransformMatrix::identity();
 
         let mut output_row = vec![0.0f32; width];
         let y = 50;
 
         warp_row_lanczos3(
-            &input,
+            input.pixels(),
             width,
             height,
             &mut output_row,
@@ -491,7 +512,7 @@ mod tests {
 
         // With identity transform, output should match input (within Lanczos ringing tolerance)
         for x in 3..width - 3 {
-            let expected = input[y * width + x];
+            let expected = input[(x, y)];
             assert!(
                 (output_row[x] - expected).abs() < 0.02,
                 "Mismatch at x={}: {} vs {}",
@@ -505,11 +526,16 @@ mod tests {
     #[test]
     fn test_warp_row_lanczos3_various_sizes() {
         let height = 64;
-        let input_base = create_test_image(256, height);
+        let input_base = patterns::diagonal_gradient(256, height);
 
         // Test various widths
         for width in [1, 2, 3, 4, 5, 7, 8, 16, 33, 64, 100] {
-            let input: Vec<f32> = input_base.iter().take(width * height).copied().collect();
+            let input: Vec<f32> = input_base
+                .pixels()
+                .iter()
+                .take(width * height)
+                .copied()
+                .collect();
             let transform = TransformMatrix::translation(1.5, 0.5);
             let inverse = transform.inverse();
 
@@ -550,12 +576,20 @@ mod tests {
     fn test_warp_image_lanczos3() {
         let width = 64;
         let height = 64;
-        let input = create_test_image(width, height);
+        let input = patterns::diagonal_gradient(width, height);
 
         let transform = TransformMatrix::identity();
 
         let output = warp_image_lanczos3(
-            &input, width, height, width, height, &transform, 0.0, true, false,
+            input.pixels(),
+            width,
+            height,
+            width,
+            height,
+            &transform,
+            0.0,
+            true,
+            false,
         );
 
         assert_eq!(output.len(), width * height);
@@ -563,7 +597,7 @@ mod tests {
         // Check interior pixels match input (within Lanczos tolerance)
         for y in 5..height - 5 {
             for x in 5..width - 5 {
-                let expected = input[y * width + x];
+                let expected = input[(x, y)];
                 let actual = output[y * width + x];
                 assert!(
                     (actual - expected).abs() < 0.02,

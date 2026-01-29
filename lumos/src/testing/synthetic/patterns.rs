@@ -43,6 +43,19 @@ pub fn vertical_gradient(width: usize, height: usize, top: f32, bottom: f32) -> 
     Buffer2::new(width, height, pixels)
 }
 
+/// Create a diagonal gradient for interpolation testing.
+///
+/// Formula: `(x + y * 0.5) / (width + height)`
+/// This creates a gradient that varies in both X and Y directions,
+/// making it useful for testing interpolation accuracy.
+pub fn diagonal_gradient(width: usize, height: usize) -> Buffer2<f32> {
+    let scale = (width + height) as f32;
+    let pixels: Vec<f32> = (0..height)
+        .flat_map(|y| (0..width).map(move |x| (x as f32 + y as f32 * 0.5) / scale))
+        .collect();
+    Buffer2::new(width, height, pixels)
+}
+
 /// Create a radial gradient from center to edges.
 pub fn radial_gradient(width: usize, height: usize, center: f32, edge: f32) -> Buffer2<f32> {
     let mut pixels = vec![0.0f32; width * height];

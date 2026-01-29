@@ -316,14 +316,7 @@ mod tests {
     use super::*;
     #[cfg(target_arch = "x86_64")]
     use crate::common::cpu_features;
-
-    fn create_test_image(width: usize, height: usize) -> Vec<f32> {
-        (0..height)
-            .flat_map(|y| {
-                (0..width).map(move |x| (x as f32 + y as f32 * 0.5) / (width + height) as f32)
-            })
-            .collect()
-    }
+    use crate::testing::synthetic::patterns;
 
     #[test]
     #[cfg(target_arch = "x86_64")]
@@ -335,7 +328,7 @@ mod tests {
 
         let width = 128;
         let height = 64;
-        let input = create_test_image(width, height);
+        let input = patterns::diagonal_gradient(width, height);
         let transform = TransformMatrix::translation(2.5, 1.5);
         let inverse = transform.inverse();
 
@@ -344,11 +337,19 @@ mod tests {
         let y = 30;
 
         unsafe {
-            warp_row_bilinear_avx2(&input, width, height, &mut output_avx2, y, &inverse, -1.0);
+            warp_row_bilinear_avx2(
+                input.pixels(),
+                width,
+                height,
+                &mut output_avx2,
+                y,
+                &inverse,
+                -1.0,
+            );
         }
 
         super::super::warp_row_bilinear_scalar(
-            &input,
+            input.pixels(),
             width,
             height,
             &mut output_scalar,
@@ -378,7 +379,7 @@ mod tests {
 
         let width = 64;
         let height = 64;
-        let input = create_test_image(width, height);
+        let input = patterns::diagonal_gradient(width, height);
         let transform = TransformMatrix::similarity(1.0, 2.0, 0.05, 1.02);
         let inverse = transform.inverse();
 
@@ -387,11 +388,19 @@ mod tests {
         let y = 25;
 
         unsafe {
-            warp_row_bilinear_sse(&input, width, height, &mut output_sse, y, &inverse, 0.0);
+            warp_row_bilinear_sse(
+                input.pixels(),
+                width,
+                height,
+                &mut output_sse,
+                y,
+                &inverse,
+                0.0,
+            );
         }
 
         super::super::warp_row_bilinear_scalar(
-            &input,
+            input.pixels(),
             width,
             height,
             &mut output_scalar,

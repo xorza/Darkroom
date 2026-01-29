@@ -484,17 +484,11 @@ pub fn detect_stars_gpu_with_detector(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testing::synthetic::background_map;
 
     fn test_gpu_available() -> bool {
         let detector = GpuThresholdDetector::new();
         detector.gpu_available()
-    }
-
-    fn make_background(width: usize, height: usize, bg_val: f32, noise_val: f32) -> BackgroundMap {
-        BackgroundMap {
-            background: Buffer2::new_filled(width, height, bg_val),
-            noise: Buffer2::new_filled(width, height, noise_val),
-        }
     }
 
     #[test]
@@ -567,7 +561,7 @@ mod tests {
         let mut pixels = vec![0.1f32; width * height];
         pixels[3 * width + 3] = 0.2; // Bright pixel
 
-        let background = make_background(width, height, 0.1, 0.01);
+        let background = background_map::uniform(width, height, 0.1, 0.01);
 
         let mask = detector.create_mask(&pixels, &background, &config);
 
@@ -607,7 +601,7 @@ mod tests {
         let mut pixels = vec![0.1f32; width * height];
         pixels[4 * width + 4] = 0.2;
 
-        let background = make_background(width, height, 0.1, 0.01);
+        let background = background_map::uniform(width, height, 0.1, 0.01);
 
         let mask = detector.create_mask(&pixels, &background, &config);
 
@@ -643,7 +637,7 @@ mod tests {
 
         // All pixels at background level
         let pixels = vec![0.1f32; width * height];
-        let background = make_background(width, height, 0.1, 0.01);
+        let background = background_map::uniform(width, height, 0.1, 0.01);
 
         let mask = detector.create_mask(&pixels, &background, &config);
 
@@ -670,7 +664,7 @@ mod tests {
         pixels[200 * width + 200] = 0.5;
         pixels[300 * width + 300] = 0.5;
 
-        let background = make_background(width, height, 0.1, 0.02);
+        let background = background_map::uniform(width, height, 0.1, 0.02);
 
         let mask = detector.create_mask(&pixels, &background, &config);
 
@@ -706,7 +700,7 @@ mod tests {
             }
         }
 
-        let background = make_background(width, height, 0.1, 0.01);
+        let background = background_map::uniform(width, height, 0.1, 0.01);
 
         let config = StarDetectionConfig {
             detection_sigma: 3.0,
@@ -765,7 +759,7 @@ mod tests {
             }
         }
 
-        let background = make_background(width, height, 0.1, 0.02);
+        let background = background_map::uniform(width, height, 0.1, 0.02);
 
         let config = StarDetectionConfig {
             detection_sigma: 3.0,
@@ -799,7 +793,7 @@ mod tests {
         // All pixels at background level
         let pixels = vec![0.1f32; width * height];
 
-        let background = make_background(width, height, 0.1, 0.01);
+        let background = background_map::uniform(width, height, 0.1, 0.01);
 
         let config = StarDetectionConfig {
             detection_sigma: 4.0,
@@ -835,7 +829,7 @@ mod tests {
         let mut pixels = vec![0.1f32; width * height];
         pixels[16 * width + 16] = 0.5;
 
-        let background = make_background(width, height, 0.1, 0.01);
+        let background = background_map::uniform(width, height, 0.1, 0.01);
 
         let config = StarDetectionConfig {
             detection_sigma: 3.0,
@@ -885,7 +879,7 @@ mod tests {
         // Another star too close to edge (should be rejected)
         pixels[58 * width + 58] = 0.5;
 
-        let background = make_background(width, height, 0.1, 0.01);
+        let background = background_map::uniform(width, height, 0.1, 0.01);
 
         let config = StarDetectionConfig {
             detection_sigma: 3.0,

@@ -12,7 +12,7 @@ use crate::registration::interpolation::{InterpolationMethod, WarpConfig, warp_i
 use crate::registration::pipeline::warp_to_reference_image;
 use crate::registration::types::{TransformMatrix, TransformType};
 use crate::star_detection::StarDetector;
-use crate::testing::synthetic::{self, StarFieldConfig};
+use crate::testing::synthetic::{self, StarFieldConfig, stamps};
 use crate::{AstroImage, ImageDimensions};
 
 /// Compute mean squared error between two images.
@@ -62,20 +62,6 @@ fn compute_ncc(a: &[f32], b: &[f32]) -> f64 {
     cov / (var_a.sqrt() * var_b.sqrt())
 }
 
-/// Generate a synthetic star field for warping tests.
-/// Uses smaller 256x256 images for faster tests.
-fn generate_test_field(seed: u64) -> (Vec<f32>, usize, usize) {
-    let config = StarFieldConfig {
-        width: 256,
-        height: 256,
-        num_stars: 30,
-        seed,
-        ..synthetic::sparse_field_config()
-    };
-    let (pixels, _) = synthetic::generate_star_field(&config);
-    (pixels.into_vec(), config.width, config.height)
-}
-
 /// All interpolation methods to test.
 fn all_interpolation_methods() -> Vec<InterpolationMethod> {
     vec![
@@ -101,8 +87,9 @@ fn representative_interpolation_methods() -> Vec<InterpolationMethod> {
 /// Test that warping with identity transform preserves the image.
 #[test]
 fn test_warp_identity_all_methods() {
-    let (ref_pixels, width, height) = generate_test_field(12345);
-    let ref_buf = Buffer2::new(width, height, ref_pixels.clone());
+    let (ref_buf, _) = stamps::star_field(256, 256, 30, 2.5, 0.05, 12345);
+    let width = ref_buf.width();
+    let height = ref_buf.height();
 
     let identity = TransformMatrix::identity();
 
@@ -116,8 +103,8 @@ fn test_warp_identity_all_methods() {
 
         let warped = warp_image(&ref_buf, width, height, &identity, &config);
 
-        let psnr = compute_psnr(&ref_pixels, &warped, 1.0);
-        let ncc = compute_ncc(&ref_pixels, &warped);
+        let psnr = compute_psnr(ref_buf.pixels(), &warped, 1.0);
+        let ncc = compute_ncc(ref_buf.pixels(), &warped);
 
         // Identity transform should produce nearly identical output
         // (Nearest should be exact, others very close)
@@ -151,8 +138,9 @@ fn test_warp_identity_all_methods() {
 
 #[test]
 fn test_warp_translation_roundtrip() {
-    let (ref_pixels, width, height) = generate_test_field(11111);
-    let ref_buf = Buffer2::new(width, height, ref_pixels.clone());
+    let (ref_buf, _) = stamps::star_field(256, 256, 30, 2.5, 0.05, 11111);
+    let width = ref_buf.width();
+    let height = ref_buf.height();
 
     let dx = 10.5;
     let dy = -7.3;
@@ -178,7 +166,7 @@ fn test_warp_translation_roundtrip() {
         // Compare central region (avoid border artifacts)
         let margin = 20;
         let (central_ref, central_restored) =
-            extract_central_region(&ref_pixels, &restored, width, height, margin);
+            extract_central_region(ref_buf.pixels(), &restored, width, height, margin);
 
         let psnr = compute_psnr(&central_ref, &central_restored, 1.0);
         let ncc = compute_ncc(&central_ref, &central_restored);
@@ -216,8 +204,9 @@ fn test_warp_translation_roundtrip() {
 
 #[test]
 fn test_warp_euclidean_roundtrip() {
-    let (ref_pixels, width, height) = generate_test_field(22222);
-    let ref_buf = Buffer2::new(width, height, ref_pixels.clone());
+    let (ref_buf, _) = stamps::star_field(256, 256, 30, 2.5, 0.05, 22222);
+    let width = ref_buf.width();
+    let height = ref_buf.height();
 
     let dx = 5.0;
     let dy = -3.0;
@@ -240,7 +229,7 @@ fn test_warp_euclidean_roundtrip() {
 
         let margin = 30;
         let (central_ref, central_restored) =
-            extract_central_region(&ref_pixels, &restored, width, height, margin);
+            extract_central_region(ref_buf.pixels(), &restored, width, height, margin);
 
         let psnr = compute_psnr(&central_ref, &central_restored, 1.0);
         let ncc = compute_ncc(&central_ref, &central_restored);
@@ -275,8 +264,9 @@ fn test_warp_euclidean_roundtrip() {
 
 #[test]
 fn test_warp_similarity_roundtrip() {
-    let (ref_pixels, width, height) = generate_test_field(33333);
-    let ref_buf = Buffer2::new(width, height, ref_pixels.clone());
+    let (ref_buf, _) = stamps::star_field(256, 256, 30, 2.5, 0.05, 33333);
+    let width = ref_buf.width();
+    let height = ref_buf.height();
 
     let dx = 8.0;
     let dy = -5.0;
@@ -300,7 +290,7 @@ fn test_warp_similarity_roundtrip() {
 
         let margin = 40;
         let (central_ref, central_restored) =
-            extract_central_region(&ref_pixels, &restored, width, height, margin);
+            extract_central_region(ref_buf.pixels(), &restored, width, height, margin);
 
         let psnr = compute_psnr(&central_ref, &central_restored, 1.0);
         let ncc = compute_ncc(&central_ref, &central_restored);
@@ -328,8 +318,9 @@ fn test_warp_similarity_roundtrip() {
 
 #[test]
 fn test_warp_affine_roundtrip() {
-    let (ref_pixels, width, height) = generate_test_field(44444);
-    let ref_buf = Buffer2::new(width, height, ref_pixels.clone());
+    let (ref_buf, _) = stamps::star_field(256, 256, 30, 2.5, 0.05, 44444);
+    let width = ref_buf.width();
+    let height = ref_buf.height();
 
     // Affine with slight differential scaling
     let scale_x = 1.01;
@@ -368,7 +359,7 @@ fn test_warp_affine_roundtrip() {
 
         let margin = 40;
         let (central_ref, central_restored) =
-            extract_central_region(&ref_pixels, &restored, width, height, margin);
+            extract_central_region(ref_buf.pixels(), &restored, width, height, margin);
 
         let psnr = compute_psnr(&central_ref, &central_restored, 1.0);
         let ncc = compute_ncc(&central_ref, &central_restored);
@@ -396,8 +387,9 @@ fn test_warp_affine_roundtrip() {
 
 #[test]
 fn test_warp_homography_roundtrip() {
-    let (ref_pixels, width, height) = generate_test_field(55555);
-    let ref_buf = Buffer2::new(width, height, ref_pixels.clone());
+    let (ref_buf, _) = stamps::star_field(256, 256, 30, 2.5, 0.05, 55555);
+    let width = ref_buf.width();
+    let height = ref_buf.height();
 
     // Mild perspective distortion
     let dx = 5.0;
@@ -425,7 +417,7 @@ fn test_warp_homography_roundtrip() {
 
         let margin = 50;
         let (central_ref, central_restored) =
-            extract_central_region(&ref_pixels, &restored, width, height, margin);
+            extract_central_region(ref_buf.pixels(), &restored, width, height, margin);
 
         let psnr = compute_psnr(&central_ref, &central_restored, 1.0);
         let ncc = compute_ncc(&central_ref, &central_restored);
@@ -469,7 +461,6 @@ fn test_warp_with_detected_transform() {
     let height = config.height;
 
     let (ref_pixels, _) = synthetic::generate_star_field(&config);
-    let ref_pixels_vec = ref_pixels.into_vec();
 
     // Apply a known transform
     let dx = 12.0;
@@ -485,8 +476,7 @@ fn test_warp_with_detected_transform() {
         normalize_kernel: true,
         clamp_output: false,
     };
-    let ref_buf = Buffer2::new(width, height, ref_pixels_vec.clone());
-    let target_pixels = warp_image(&ref_buf, width, height, &true_transform, &warp_config);
+    let target_pixels = warp_image(&ref_pixels, width, height, &true_transform, &warp_config);
 
     // Detect stars in both images
     let det = StarDetector::from_config(StarDetectionConfig {
@@ -496,13 +486,11 @@ fn test_warp_with_detected_transform() {
         ..Default::default()
     });
 
-    let ref_image = AstroImage::from_pixels(
-        ImageDimensions::new(width, height, 1),
-        ref_pixels_vec.clone(),
-    );
+    let ref_image =
+        AstroImage::from_pixels(ImageDimensions::new(width, height, 1), ref_pixels.to_vec());
     let target_image = AstroImage::from_pixels(
         ImageDimensions::new(width, height, 1),
-        target_pixels.pixels().to_vec(),
+        target_pixels.to_vec(),
     );
 
     let ref_result = det.detect(&ref_image);
@@ -545,8 +533,13 @@ fn test_warp_with_detected_transform() {
 
     // Compare aligned image to reference
     let margin = 40;
-    let (central_ref, central_aligned) =
-        extract_central_region(&ref_pixels_vec, aligned.channel(0), width, height, margin);
+    let (central_ref, central_aligned) = extract_central_region(
+        ref_pixels.pixels(),
+        aligned.channel(0),
+        width,
+        height,
+        margin,
+    );
 
     let psnr = compute_psnr(&central_ref, &central_aligned, 1.0);
     let ncc = compute_ncc(&central_ref, &central_aligned);
@@ -561,8 +554,9 @@ fn test_warp_with_detected_transform() {
 
 #[test]
 fn test_interpolation_quality_ordering() {
-    let (ref_pixels, width, height) = generate_test_field(77777);
-    let ref_buf = Buffer2::new(width, height, ref_pixels.clone());
+    let (ref_buf, _) = stamps::star_field(256, 256, 30, 2.5, 0.05, 77777);
+    let width = ref_buf.width();
+    let height = ref_buf.height();
 
     // Apply a transform that requires interpolation
     let forward = TransformMatrix::similarity(3.7, -2.3, 1.0_f64.to_radians(), 1.01);
@@ -584,7 +578,7 @@ fn test_interpolation_quality_ordering() {
 
         let margin = 50;
         let (central_ref, central_restored) =
-            extract_central_region(&ref_pixels, &restored, width, height, margin);
+            extract_central_region(ref_buf.pixels(), &restored, width, height, margin);
 
         let psnr = compute_psnr(&central_ref, &central_restored, 1.0);
         results.push((method, psnr));
@@ -638,8 +632,11 @@ fn test_interpolation_quality_ordering() {
 
 #[test]
 fn test_warp_to_reference_image_grayscale() {
-    let (ref_pixels, width, height) = generate_test_field(88888);
-    let ref_image = AstroImage::from_pixels(ImageDimensions::new(width, height, 1), ref_pixels);
+    let (ref_buf, _) = stamps::star_field(256, 256, 30, 2.5, 0.05, 88888);
+    let width = ref_buf.width();
+    let height = ref_buf.height();
+    let ref_image =
+        AstroImage::from_pixels(ImageDimensions::new(width, height, 1), ref_buf.into_vec());
 
     // Apply a translation
     let transform = TransformMatrix::translation(5.0, -3.0);
@@ -656,17 +653,20 @@ fn test_warp_to_reference_image_grayscale() {
 
 #[test]
 fn test_warp_to_reference_image_rgb() {
-    let (gray_pixels, width, height) = generate_test_field(99999);
+    let (gray_buf, _) = stamps::star_field(256, 256, 30, 2.5, 0.05, 99999);
+    let width = gray_buf.width();
+    let height = gray_buf.height();
 
     // Create RGB image by duplicating grayscale to all channels with slight offsets
     let mut rgb_pixels = Vec::with_capacity(width * height * 3);
-    for (i, &val) in gray_pixels.iter().enumerate() {
-        let y = i / width;
-        let x = i % width;
-        // Slightly different values per channel to verify independent processing
-        rgb_pixels.push(val); // R
-        rgb_pixels.push((val + 0.1).min(1.0)); // G
-        rgb_pixels.push(if (x + y) % 2 == 0 { val } else { val * 0.8 }); // B
+    for y in 0..height {
+        for x in 0..width {
+            let val = gray_buf[(x, y)];
+            // Slightly different values per channel to verify independent processing
+            rgb_pixels.push(val); // R
+            rgb_pixels.push((val + 0.1).min(1.0)); // G
+            rgb_pixels.push(if (x + y) % 2 == 0 { val } else { val * 0.8 }); // B
+        }
     }
 
     let rgb_image = AstroImage::from_pixels(ImageDimensions::new(width, height, 3), rgb_pixels);
@@ -697,8 +697,11 @@ fn test_warp_to_reference_image_rgb() {
 fn test_warp_to_reference_image_preserves_metadata() {
     use crate::astro_image::AstroImageMetadata;
 
-    let (pixels, width, height) = generate_test_field(11111);
-    let mut image = AstroImage::from_pixels(ImageDimensions::new(width, height, 1), pixels);
+    let (pixels, _) = stamps::star_field(256, 256, 30, 2.5, 0.05, 11111);
+    let width = pixels.width();
+    let height = pixels.height();
+    let mut image =
+        AstroImage::from_pixels(ImageDimensions::new(width, height, 1), pixels.into_vec());
 
     // Set some metadata
     image.metadata = AstroImageMetadata {
