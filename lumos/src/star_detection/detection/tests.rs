@@ -1864,10 +1864,10 @@ fn create_timing_background_map(width: usize, height: usize) -> BackgroundMap {
     }
 }
 
-use bench::quick_bench;
+use ::bench::quick_bench;
 
-#[quick_bench(iterations = 5)]
-fn bench_detect_stars_filtered_1k(b: bench::Bencher) {
+#[quick_bench(warmup_iters = 2, iters = 5, ignore = false)]
+fn bench_detect_stars_filtered_1k(b: ::bench::Bencher) {
     const WIDTH: usize = 1024;
     const HEIGHT: usize = 1024;
     const NUM_STARS: usize = 100;
@@ -1880,8 +1880,8 @@ fn bench_detect_stars_filtered_1k(b: bench::Bencher) {
     b.bench(|| detect_stars_filtered(&pixels, &filtered, WIDTH, HEIGHT, &background, &config));
 }
 
-#[quick_bench(iterations = 3)]
-fn bench_detect_stars_filtered_6k(b: bench::Bencher) {
+#[quick_bench(warmup_iters = 1, iters = 3)]
+fn bench_detect_stars_filtered_6k(b: ::bench::Bencher) {
     const WIDTH: usize = 6144;
     const HEIGHT: usize = 6144;
     const NUM_STARS: usize = 3000;
