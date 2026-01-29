@@ -155,8 +155,22 @@ pub fn create_threshold_mask(
     }
 }
 
-/// Create binary mask of pixels above threshold (scalar fallback for non-x86_64).
-#[cfg(not(target_arch = "x86_64"))]
+/// Create binary mask of pixels above threshold, with NEON dispatch (aarch64).
+#[cfg(target_arch = "aarch64")]
+pub fn create_threshold_mask(
+    pixels: &[f32],
+    background: &BackgroundMap,
+    sigma_threshold: f32,
+    mask: &mut [bool],
+) {
+    // SAFETY: NEON is always available on aarch64.
+    unsafe {
+        simd::neon::create_threshold_mask_neon(pixels, background, sigma_threshold, mask);
+    }
+}
+
+/// Create binary mask of pixels above threshold (scalar fallback for other architectures).
+#[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
 pub fn create_threshold_mask(
     pixels: &[f32],
     background: &BackgroundMap,
@@ -394,8 +408,27 @@ pub fn create_threshold_mask_filtered(
     }
 }
 
-/// Create binary mask from a filtered (convolved) image (scalar fallback for non-x86_64).
-#[cfg(not(target_arch = "x86_64"))]
+/// Create binary mask from a filtered (convolved) image, with NEON dispatch (aarch64).
+#[cfg(target_arch = "aarch64")]
+pub fn create_threshold_mask_filtered(
+    filtered: &[f32],
+    background: &BackgroundMap,
+    sigma_threshold: f32,
+    mask: &mut [bool],
+) {
+    // SAFETY: NEON is always available on aarch64.
+    unsafe {
+        simd::neon::create_threshold_mask_filtered_neon(
+            filtered,
+            background,
+            sigma_threshold,
+            mask,
+        );
+    }
+}
+
+/// Create binary mask from a filtered (convolved) image (scalar fallback for other architectures).
+#[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
 pub fn create_threshold_mask_filtered(
     filtered: &[f32],
     background: &BackgroundMap,

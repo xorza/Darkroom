@@ -2,6 +2,7 @@
 use crate::star_detection::background::BackgroundMap;
 
 /// Scalar implementation for threshold mask, writing to an existing mask slice.
+#[allow(dead_code)] // Used in tests and as fallback for non-SIMD architectures
 pub fn create_threshold_mask(
     pixels: &[f32],
     background: &BackgroundMap,
@@ -16,6 +17,7 @@ pub fn create_threshold_mask(
 }
 
 /// Scalar implementation for filtered images, writing to an existing mask slice.
+#[allow(dead_code)] // Used in tests and as fallback for non-SIMD architectures
 pub fn create_threshold_mask_filtered(
     filtered: &[f32],
     background: &BackgroundMap,
