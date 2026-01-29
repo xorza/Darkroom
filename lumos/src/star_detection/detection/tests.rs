@@ -1810,7 +1810,6 @@ fn test_multi_threshold_deblend_high_contrast_disables() {
     );
 }
 
-#[cfg(feature = "bench")]
 mod quick_benches {
     use super::*;
     use ::bench::quick_bench;
