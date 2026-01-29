@@ -1,9 +1,10 @@
 //! Benchmark module for background estimation.
 //! Run with: cargo bench --package lumos --features bench background
 
-use super::estimate_background;
-use super::simd::{interpolate_segment_simd, sum_abs_deviations_simd, sum_and_sum_sq_simd};
-use criterion::{BenchmarkId, Criterion, Throughput};
+use bench::quick_bench;
+
+use crate::{IterativeBackgroundConfig, estimate_background_iterative};
+
 use std::hint::black_box;
 
 /// Generate a synthetic star field image for benchmarking using deterministic patterns.
@@ -48,133 +49,21 @@ fn generate_test_image(width: usize, height: usize) -> Vec<f32> {
     pixels
 }
 
-/// Register background estimation benchmarks with Criterion.
-pub fn benchmarks(c: &mut Criterion) {
-    let mut group = c.benchmark_group("background_estimation");
-    group.sample_size(20);
+#[quick_bench(warmup_iters = 2, iters = 5)]
+fn estimate_background_iterative_6k(b: ::bench::Bencher) {
+    let width = 6144;
+    let height = 6144;
 
-    // Test different image sizes
-    for &(width, height) in &[(512, 512), (2048, 2048), (4096, 4096)] {
-        let pixels = generate_test_image(width, height);
-        let size_name = format!("{}x{}", width, height);
+    let pixels = generate_test_image(width, height);
+    let iter_config = IterativeBackgroundConfig::default();
 
-        group.throughput(Throughput::Elements((width * height) as u64));
-
-        // Test different tile sizes
-        for &tile_size in &[32, 64, 128] {
-            group.bench_function(
-                BenchmarkId::new(&size_name, format!("tile_{}", tile_size)),
-                |b| {
-                    b.iter(|| {
-                        black_box(estimate_background(
-                            black_box(&pixels),
-                            black_box(width),
-                            black_box(height),
-                            black_box(tile_size),
-                        ))
-                    })
-                },
-            );
-        }
-    }
-
-    group.finish();
-
-    // SIMD vs Scalar comparison for sum_and_sum_sq
-    let mut simd_group = c.benchmark_group("background_simd_vs_scalar");
-    simd_group.sample_size(50);
-
-    for size in [1024, 4096, 16384, 65536] {
-        let values: Vec<f32> = (0..size).map(|i| (i % 256) as f32 / 255.0).collect();
-
-        simd_group.throughput(Throughput::Elements(size as u64));
-
-        // Scalar sum_and_sum_sq
-        simd_group.bench_function(BenchmarkId::new("sum_and_sum_sq_scalar", size), |b| {
-            b.iter(|| {
-                let mut sum = 0.0f32;
-                let mut sum_sq = 0.0f32;
-                for &v in black_box(&values) {
-                    sum += v;
-                    sum_sq += v * v;
-                }
-                black_box((sum, sum_sq))
-            })
-        });
-
-        // SIMD sum_and_sum_sq
-        simd_group.bench_function(BenchmarkId::new("sum_and_sum_sq_simd", size), |b| {
-            b.iter(|| black_box(sum_and_sum_sq_simd(black_box(&values))))
-        });
-
-        // Scalar sum_abs_deviations
-        let median = 0.5f32;
-        simd_group.bench_function(BenchmarkId::new("sum_abs_dev_scalar", size), |b| {
-            b.iter(|| {
-                let sum: f32 = black_box(&values).iter().map(|&v| (v - median).abs()).sum();
-                black_box(sum)
-            })
-        });
-
-        // SIMD sum_abs_deviations
-        simd_group.bench_function(BenchmarkId::new("sum_abs_dev_simd", size), |b| {
-            b.iter(|| black_box(sum_abs_deviations_simd(black_box(&values), median)))
-        });
-    }
-
-    simd_group.finish();
-
-    // Interpolation SIMD vs Scalar comparison
-    let mut interp_group = c.benchmark_group("background_interpolation");
-    interp_group.sample_size(50);
-
-    for size in [64, 256, 1024, 4096] {
-        interp_group.throughput(Throughput::Elements(size as u64));
-
-        let left_bg = 100.0f32;
-        let right_bg = 200.0f32;
-        let left_noise = 5.0f32;
-        let right_noise = 10.0f32;
-        let wx_start = 0.0f32;
-        let wx_step = 1.0 / size as f32;
-
-        // Scalar interpolation
-        interp_group.bench_function(BenchmarkId::new("scalar", size), |b| {
-            let mut bg_out = vec![0.0f32; size];
-            let mut noise_out = vec![0.0f32; size];
-
-            b.iter(|| {
-                let delta_bg = right_bg - left_bg;
-                let delta_noise = right_noise - left_noise;
-                for (i, (bg, noise)) in bg_out.iter_mut().zip(noise_out.iter_mut()).enumerate() {
-                    let wx = (wx_start + i as f32 * wx_step).clamp(0.0, 1.0);
-                    *bg = left_bg + wx * delta_bg;
-                    *noise = left_noise + wx * delta_noise;
-                }
-                black_box(bg_out[size / 2] + noise_out[size / 2])
-            })
-        });
-
-        // SIMD interpolation
-        interp_group.bench_function(BenchmarkId::new("simd", size), |b| {
-            let mut bg_out = vec![0.0f32; size];
-            let mut noise_out = vec![0.0f32; size];
-
-            b.iter(|| {
-                interpolate_segment_simd(
-                    &mut bg_out,
-                    &mut noise_out,
-                    left_bg,
-                    right_bg,
-                    left_noise,
-                    right_noise,
-                    wx_start,
-                    wx_step,
-                );
-                black_box(bg_out[size / 2] + noise_out[size / 2])
-            })
-        });
-    }
-
-    interp_group.finish();
+    b.bench(|| {
+        black_box(estimate_background_iterative(
+            &pixels,
+            width,
+            height,
+            64,
+            &iter_config,
+        ))
+    });
 }
