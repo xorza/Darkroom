@@ -782,7 +782,6 @@ mod tests {
 
     #[test]
     fn test_empty_component() {
-        let pixels = vec![0.0f32; 100];
         let component: Vec<Pixel> = Vec::new();
         let config = MultiThresholdDeblendConfig::default();
 

@@ -51,7 +51,7 @@ fn test_local_vs_multi_threshold_single_star() {
 
     // Multi-threshold deblending
     let mt_config = MultiThresholdDeblendConfig::default();
-    let mt_result = deblend_component(&pixels, &star, width, 0.01, &mt_config);
+    let mt_result = deblend_component(&star, width, 0.01, &mt_config);
 
     assert_eq!(local_result.len(), 1);
     assert_eq!(mt_result.len(), 1);
@@ -116,7 +116,7 @@ fn test_local_vs_multi_threshold_two_stars() {
         min_contrast: 0.005,
         min_separation: 3,
     };
-    let mt_result = deblend_component(&image, &component_pixels, width, 0.01, &mt_config);
+    let mt_result = deblend_component(&component_pixels, width, 0.01, &mt_config);
 
     assert_eq!(local_result.len(), 2, "Local maxima should find 2 stars");
     assert_eq!(mt_result.len(), 2, "Multi-threshold should find 2 stars");
