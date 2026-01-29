@@ -32,11 +32,17 @@
 //! - [`backgrounds`] - Background generators (uniform, gradient, vignette, nebula)
 //! - [`artifacts`] - Artifact generators (cosmic rays, hot pixels, bad columns)
 //! - [`transforms`] - Star position transforms for registration testing
+//! - [`patterns`] - Simple test patterns (gradients, checkerboard, noise)
+//! - [`stamps`] - Small star stamps for centroid/profile fitting tests
+//! - [`background_map`] - BackgroundMap generation for detection tests
 
 #![allow(dead_code)]
 
 pub mod artifacts;
+pub mod background_map;
 pub mod backgrounds;
+pub mod patterns;
+pub mod stamps;
 pub mod star_field;
 pub mod star_profiles;
 pub mod transforms;

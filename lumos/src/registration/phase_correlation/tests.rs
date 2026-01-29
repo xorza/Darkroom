@@ -1,25 +1,7 @@
 //! Tests for phase correlation module.
 
 use super::*;
-
-fn create_test_image(width: usize, height: usize, offset_x: isize, offset_y: isize) -> Vec<f32> {
-    let mut image = vec![0.0f32; width * height];
-
-    // Create a high-contrast pattern with clear edges that's easy to correlate
-    for y in 0..height {
-        for x in 0..width {
-            let xx = (x as isize - offset_x).rem_euclid(width as isize) as usize;
-            let yy = (y as isize - offset_y).rem_euclid(height as isize) as usize;
-
-            // High-contrast checkerboard pattern
-            let checker = ((xx / 8) + (yy / 8)) % 2;
-            let val = if checker == 0 { 0.0 } else { 1.0 };
-            image[y * width + x] = val;
-        }
-    }
-
-    image
-}
+use crate::testing::synthetic::patterns;
 
 fn test_config() -> PhaseCorrelationConfig {
     PhaseCorrelationConfig {
@@ -32,7 +14,7 @@ fn test_config() -> PhaseCorrelationConfig {
 fn test_correlate_identical_images() {
     let width = 64;
     let height = 64;
-    let reference = create_test_image(width, height, 0, 0);
+    let reference = patterns::checkerboard_offset(width, height, 8, 0.0, 1.0, 0, 0);
 
     let correlator = PhaseCorrelator::new(width, height, test_config());
     let result = correlator.correlate(&reference, &reference);
@@ -60,8 +42,8 @@ fn test_correlate_identical_images() {
 fn test_correlate_translated_5_pixels() {
     let width = 64;
     let height = 64;
-    let reference = create_test_image(width, height, 0, 0);
-    let target = create_test_image(width, height, 5, 0);
+    let reference = patterns::checkerboard_offset(width, height, 8, 0.0, 1.0, 0, 0);
+    let target = patterns::checkerboard_offset(width, height, 8, 0.0, 1.0, 5, 0);
 
     let correlator = PhaseCorrelator::new(width, height, test_config());
     let result = correlator.correlate(&reference, &target);
@@ -81,8 +63,8 @@ fn test_correlate_translated_5_pixels() {
 fn test_correlate_translated_xy() {
     let width = 64;
     let height = 64;
-    let reference = create_test_image(width, height, 0, 0);
-    let target = create_test_image(width, height, 3, -7);
+    let reference = patterns::checkerboard_offset(width, height, 8, 0.0, 1.0, 0, 0);
+    let target = patterns::checkerboard_offset(width, height, 8, 0.0, 1.0, 3, -7);
 
     let correlator = PhaseCorrelator::new(width, height, test_config());
     let result = correlator.correlate(&reference, &target);
@@ -106,7 +88,7 @@ fn test_hann_window() {
 fn test_subpixel_methods() {
     let width = 64;
     let height = 64;
-    let reference = create_test_image(width, height, 0, 0);
+    let reference = patterns::checkerboard_offset(width, height, 8, 0.0, 1.0, 0, 0);
 
     for method in [
         SubpixelMethod::None,
@@ -158,7 +140,7 @@ fn test_correlate_size_mismatch() {
 fn test_confidence_calculation() {
     let width = 64;
     let height = 64;
-    let reference = create_test_image(width, height, 0, 0);
+    let reference = patterns::checkerboard_offset(width, height, 8, 0.0, 1.0, 0, 0);
 
     let correlator = PhaseCorrelator::new(width, height, test_config());
     let result = correlator.correlate(&reference, &reference);
@@ -306,12 +288,11 @@ fn test_subpixel_accuracy_parabolic() {
     let height = 128;
 
     // Create a pattern with multiple features for better correlation
-    // Using the same create_test_image helper with fractional shift
-    let reference = create_test_image(width, height, 0, 0);
+    let reference = patterns::checkerboard_offset(width, height, 8, 0.0, 1.0, 0, 0);
 
     // Integer shift of 4 pixels in X
     let shift_x = 4;
-    let target = create_test_image(width, height, shift_x, 0);
+    let target = patterns::checkerboard_offset(width, height, 8, 0.0, 1.0, shift_x, 0);
 
     let config = PhaseCorrelationConfig {
         subpixel_method: SubpixelMethod::Parabolic,

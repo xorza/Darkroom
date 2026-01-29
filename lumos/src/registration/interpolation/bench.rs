@@ -7,8 +7,8 @@ use criterion::{BenchmarkId, Criterion, Throughput};
 
 use super::simd::{warp_row_bilinear_scalar, warp_row_bilinear_simd};
 use super::{InterpolationMethod, WarpConfig, interpolate_pixel, warp_image};
-use crate::common::Buffer2;
 use crate::registration::types::TransformMatrix;
+use crate::testing::synthetic::patterns;
 
 /// Register interpolation benchmarks with Criterion.
 pub fn benchmarks(c: &mut Criterion) {
@@ -17,23 +17,12 @@ pub fn benchmarks(c: &mut Criterion) {
     benchmark_simd_vs_scalar(c);
 }
 
-/// Generate a gradient test image.
-fn generate_gradient_image(width: usize, height: usize) -> Buffer2<f32> {
-    let mut image = vec![0.0f32; width * height];
-    for y in 0..height {
-        for x in 0..width {
-            image[y * width + x] = (x as f32 + y as f32) / (width + height) as f32;
-        }
-    }
-    Buffer2::new(width, height, image)
-}
-
 /// Benchmark different interpolation methods.
 fn benchmark_interpolation_methods(c: &mut Criterion) {
     let mut group = c.benchmark_group("interpolation_methods");
 
     let size = 512;
-    let image = generate_gradient_image(size, size);
+    let image = patterns::radial_gradient(size, size, 0.0, 1.0);
 
     let methods = [
         ("nearest", InterpolationMethod::Nearest),
@@ -104,7 +93,7 @@ fn benchmark_simd_vs_scalar(c: &mut Criterion) {
 
     // Test row warping for different sizes
     for size in [256, 512, 1024] {
-        let image = generate_gradient_image(size, size);
+        let image = patterns::radial_gradient(size, size, 0.0, 1.0);
         let y = size / 2;
 
         group.throughput(Throughput::Elements(size as u64));
@@ -159,7 +148,7 @@ fn benchmark_warp_sizes(c: &mut Criterion) {
     let transform = TransformMatrix::similarity(10.0, -5.0, 0.05, 1.02);
 
     for size in [128, 256, 512, 1024] {
-        let image = generate_gradient_image(size, size);
+        let image = patterns::radial_gradient(size, size, 0.0, 1.0);
 
         // Test with bilinear (fast)
         let bilinear_config = WarpConfig {

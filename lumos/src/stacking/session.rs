@@ -1169,6 +1169,7 @@ impl std::fmt::Display for SessionWeightedStackResult {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testing::synthetic::patterns;
 
     // ========== SessionQuality Tests ==========
 
@@ -1640,28 +1641,11 @@ mod tests {
 
     // ========== SessionNormalization Tests ==========
 
-    /// Create a uniform test image.
-    fn create_uniform_image(width: usize, height: usize, value: f32) -> Vec<f32> {
-        vec![value; width * height]
-    }
-
-    /// Create a test image with a horizontal gradient.
-    fn create_gradient_image(width: usize, height: usize, left: f32, right: f32) -> Vec<f32> {
-        let mut pixels = vec![0.0; width * height];
-        for y in 0..height {
-            for x in 0..width {
-                let t = x as f32 / (width - 1).max(1) as f32;
-                pixels[y * width + x] = left + t * (right - left);
-            }
-        }
-        pixels
-    }
-
     #[test]
     fn test_session_normalization_new() {
         let width = 256;
         let height = 256;
-        let reference = create_uniform_image(width, height, 100.0);
+        let reference = patterns::uniform(width, height, 100.0);
         let config = LocalNormalizationConfig::new(64);
 
         let normalizer = SessionNormalization::new(&reference, width, height, config);
@@ -1674,7 +1658,7 @@ mod tests {
     fn test_session_normalization_from_stats() {
         let width = 256;
         let height = 256;
-        let reference = create_uniform_image(width, height, 100.0);
+        let reference = patterns::uniform(width, height, 100.0);
         let config = LocalNormalizationConfig::new(64);
 
         let stats = TileNormalizationStats::compute(&reference, width, height, &config);
@@ -1688,8 +1672,8 @@ mod tests {
     fn test_session_normalization_normalize_frame() {
         let width = 256;
         let height = 128;
-        let reference = create_uniform_image(width, height, 100.0);
-        let target = create_uniform_image(width, height, 50.0); // 50 units darker
+        let reference = patterns::uniform(width, height, 100.0);
+        let target = patterns::uniform(width, height, 50.0); // 50 units darker
         let config = LocalNormalizationConfig::new(64);
 
         let normalizer = SessionNormalization::new(&reference, width, height, config);
@@ -1708,8 +1692,8 @@ mod tests {
     fn test_session_normalization_normalize_frame_in_place() {
         let width = 256;
         let height = 128;
-        let reference = create_uniform_image(width, height, 100.0);
-        let mut target = create_uniform_image(width, height, 80.0);
+        let reference = patterns::uniform(width, height, 100.0);
+        let mut target = patterns::uniform(width, height, 80.0);
         let config = LocalNormalizationConfig::new(64);
 
         let normalizer = SessionNormalization::new(&reference, width, height, config);
@@ -1730,8 +1714,8 @@ mod tests {
     fn test_session_normalization_gradient_correction() {
         let width = 256;
         let height = 128;
-        let reference = create_uniform_image(width, height, 100.0);
-        let target = create_gradient_image(width, height, 80.0, 120.0); // Gradient
+        let reference = patterns::uniform(width, height, 100.0);
+        let target = patterns::horizontal_gradient(width, height, 80.0, 120.0); // Gradient
         let config = LocalNormalizationConfig::new(64);
 
         let normalizer = SessionNormalization::new(&reference, width, height, config);
@@ -1760,8 +1744,8 @@ mod tests {
     fn test_session_normalization_compute_map() {
         let width = 128;
         let height = 128;
-        let reference = create_uniform_image(width, height, 100.0);
-        let target = create_uniform_image(width, height, 50.0);
+        let reference = patterns::uniform(width, height, 100.0);
+        let target = patterns::uniform(width, height, 50.0);
         let config = LocalNormalizationConfig::new(64);
 
         let normalizer = SessionNormalization::new(&reference, width, height, config);
@@ -1955,7 +1939,7 @@ mod tests {
 
         let width = 256;
         let height = 256;
-        let reference_pixels = create_uniform_image(width, height, 100.0);
+        let reference_pixels = patterns::uniform(width, height, 100.0);
 
         let normalizer =
             stack.create_session_normalizer_from_pixels(&reference_pixels, width, height);
@@ -1973,7 +1957,7 @@ mod tests {
 
         let width = 256;
         let height = 256;
-        let reference_pixels = create_uniform_image(width, height, 100.0);
+        let reference_pixels = patterns::uniform(width, height, 100.0);
 
         let normalizer =
             stack.create_session_normalizer_from_pixels(&reference_pixels, width, height);
@@ -1989,13 +1973,13 @@ mod tests {
         let config = LocalNormalizationConfig::new(64);
 
         // Reference frame from "good" session
-        let reference = create_uniform_image(width, height, 100.0);
+        let reference = patterns::uniform(width, height, 100.0);
 
         // Frame from session 1: uniform but darker
-        let session1_frame = create_uniform_image(width, height, 70.0);
+        let session1_frame = patterns::uniform(width, height, 70.0);
 
         // Frame from session 2: gradient (different light pollution)
-        let session2_frame = create_gradient_image(width, height, 80.0, 120.0);
+        let session2_frame = patterns::horizontal_gradient(width, height, 80.0, 120.0);
 
         let normalizer = SessionNormalization::new(&reference, width, height, config);
 
@@ -2139,29 +2123,13 @@ mod tests {
 mod integration_tests {
     use super::*;
     use crate::AstroImage;
+    use crate::testing::synthetic::patterns;
     use imaginarium::Image;
     use tempfile::TempDir;
 
     // ============================================================================
     // Test Helpers
     // ============================================================================
-
-    /// Create a uniform test image.
-    fn create_uniform_image(width: usize, height: usize, value: f32) -> Vec<f32> {
-        vec![value; width * height]
-    }
-
-    /// Create a test image with a horizontal gradient.
-    fn create_gradient_image(width: usize, height: usize, left: f32, right: f32) -> Vec<f32> {
-        let mut pixels = vec![0.0; width * height];
-        for y in 0..height {
-            for x in 0..width {
-                let t = x as f32 / (width - 1).max(1) as f32;
-                pixels[y * width + x] = left + t * (right - left);
-            }
-        }
-        pixels
-    }
 
     /// Render a Gaussian star at the given position.
     fn render_gaussian(
@@ -2421,10 +2389,10 @@ mod integration_tests {
         let height = 128;
 
         // Reference frame: uniform background at 100
-        let reference_pixels = create_uniform_image(width, height, 100.0);
+        let reference_pixels = patterns::uniform(width, height, 100.0);
 
         // Target frame: has a gradient (simulating light pollution gradient)
-        let target_pixels = create_gradient_image(width, height, 80.0, 120.0);
+        let target_pixels = patterns::horizontal_gradient(width, height, 80.0, 120.0);
 
         // Before normalization: target has high variance (gradient)
         let target_variance_before = compute_variance(&target_pixels);
@@ -2517,13 +2485,13 @@ mod integration_tests {
         let height = 128;
 
         // Reference from "good" session: uniform, bright
-        let reference = create_uniform_image(width, height, 100.0);
+        let reference = patterns::uniform(width, height, 100.0);
 
         // Frame from session 1: uniform but darker (different sky)
-        let session1_frame = create_uniform_image(width, height, 70.0);
+        let session1_frame = patterns::uniform(width, height, 70.0);
 
         // Frame from session 2: has gradient (different light pollution direction)
-        let session2_frame = create_gradient_image(width, height, 85.0, 115.0);
+        let session2_frame = patterns::horizontal_gradient(width, height, 85.0, 115.0);
 
         let config = LocalNormalizationConfig::new(64);
         let normalizer = SessionNormalization::new(&reference, width, height, config);

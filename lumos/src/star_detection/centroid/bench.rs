@@ -4,116 +4,11 @@
 use super::gaussian_fit::{GaussianFitConfig, fit_gaussian_2d};
 use super::moffat_fit::{MoffatFitConfig, fit_moffat_2d};
 use super::{compute_centroid, compute_metrics, compute_stamp_radius, refine_centroid};
-use crate::common::Buffer2;
 use crate::star_detection::StarDetectionConfig;
-use crate::star_detection::background::BackgroundMap;
 use crate::star_detection::detection::StarCandidate;
+use crate::testing::synthetic::{background_map, stamps};
 use criterion::{BenchmarkId, Criterion, Throughput};
 use std::hint::black_box;
-
-/// Generate a synthetic Gaussian star stamp for benchmarking.
-fn generate_gaussian_stamp(
-    width: usize,
-    height: usize,
-    cx: f32,
-    cy: f32,
-    amplitude: f32,
-    sigma: f32,
-    background: f32,
-) -> Buffer2<f32> {
-    let mut pixels = vec![background; width * height];
-    for y in 0..height {
-        for x in 0..width {
-            let dx = x as f32 - cx;
-            let dy = y as f32 - cy;
-            let r2 = dx * dx + dy * dy;
-            let value = amplitude * (-r2 / (2.0 * sigma * sigma)).exp();
-            pixels[y * width + x] += value;
-        }
-    }
-    Buffer2::new(width, height, pixels)
-}
-
-/// Generate a synthetic Moffat star stamp for benchmarking.
-#[allow(clippy::too_many_arguments)]
-fn generate_moffat_stamp(
-    width: usize,
-    height: usize,
-    cx: f32,
-    cy: f32,
-    amplitude: f32,
-    alpha: f32,
-    beta: f32,
-    background: f32,
-) -> Buffer2<f32> {
-    let mut pixels = vec![background; width * height];
-    for y in 0..height {
-        for x in 0..width {
-            let dx = x as f32 - cx;
-            let dy = y as f32 - cy;
-            let r2 = dx * dx + dy * dy;
-            let value = amplitude * (1.0 + r2 / (alpha * alpha)).powf(-beta);
-            pixels[y * width + x] += value;
-        }
-    }
-    Buffer2::new(width, height, pixels)
-}
-
-/// Generate a field of synthetic stars for benchmarking centroid computation.
-fn generate_star_field(
-    width: usize,
-    height: usize,
-    num_stars: usize,
-) -> (Buffer2<f32>, Vec<(f32, f32)>) {
-    let background = 0.1f32;
-    let noise = 0.01f32;
-    let mut pixels = vec![background; width * height];
-
-    // Add deterministic noise
-    for (i, p) in pixels.iter_mut().enumerate() {
-        let hash = ((i as u32).wrapping_mul(2654435761)) as f32 / u32::MAX as f32;
-        *p += (hash - 0.5) * noise;
-    }
-
-    // Generate star positions deterministically
-    let mut star_positions = Vec::with_capacity(num_stars);
-    for star_idx in 0..num_stars {
-        let hash1 = ((star_idx as u32).wrapping_mul(2654435761)) as usize;
-        let hash2 = ((star_idx as u32).wrapping_mul(1597334677)) as usize;
-        let hash3 = ((star_idx as u32).wrapping_mul(805306457)) as usize;
-
-        let cx = 20.0 + (hash1 % (width - 40)) as f32 + 0.3; // Sub-pixel offset
-        let cy = 20.0 + (hash2 % (height - 40)) as f32 + 0.7; // Sub-pixel offset
-        let brightness = 0.5 + (hash3 % 500) as f32 / 1000.0;
-        let sigma = 2.0;
-
-        // Add Gaussian star
-        for dy in -10i32..=10 {
-            for dx in -10i32..=10 {
-                let x = (cx as i32 + dx) as usize;
-                let y = (cy as i32 + dy) as usize;
-                if x < width && y < height {
-                    let fx = x as f32 - cx;
-                    let fy = y as f32 - cy;
-                    let r2 = fx * fx + fy * fy;
-                    let value = brightness * (-r2 / (2.0 * sigma * sigma)).exp();
-                    pixels[y * width + x] += value;
-                }
-            }
-        }
-        star_positions.push((cx, cy));
-    }
-
-    (Buffer2::new(width, height, pixels), star_positions)
-}
-
-/// Create a simple background map for benchmarking.
-fn create_background_map(width: usize, height: usize) -> BackgroundMap {
-    BackgroundMap {
-        background: Buffer2::new_filled(width, height, 0.1f32),
-        noise: Buffer2::new_filled(width, height, 0.01f32),
-    }
-}
 
 /// Register centroid computation benchmarks with Criterion.
 pub fn benchmarks(c: &mut Criterion) {
@@ -126,8 +21,8 @@ pub fn benchmarks(c: &mut Criterion) {
         let height = 21;
         let cx = 10.3;
         let cy = 10.7;
-        let pixels = generate_gaussian_stamp(width, height, cx, cy, 1.0, 2.0, 0.1);
-        let background = create_background_map(width, height);
+        let pixels = stamps::gaussian(width, height, cx, cy, 2.0, 1.0, 0.1);
+        let background = background_map::uniform(width, height, 0.1, 0.01);
         let stamp_radius = 8;
 
         group.bench_function("refine_centroid_21x21", |b| {
@@ -151,8 +46,8 @@ pub fn benchmarks(c: &mut Criterion) {
         let height = 21;
         let cx = 10.3;
         let cy = 10.7;
-        let pixels = generate_gaussian_stamp(width, height, cx, cy, 1.0, 2.0, 0.1);
-        let background = create_background_map(width, height);
+        let pixels = stamps::gaussian(width, height, cx, cy, 2.0, 1.0, 0.1);
+        let background = background_map::uniform(width, height, 0.1, 0.01);
         let stamp_radius = 8;
 
         group.bench_function("compute_metrics_21x21", |b| {
@@ -174,8 +69,8 @@ pub fn benchmarks(c: &mut Criterion) {
 
     // Benchmark full compute_centroid with varying star counts
     for num_stars in [10, 100, 500] {
-        let (pixels, star_positions) = generate_star_field(512, 512, num_stars);
-        let background = create_background_map(512, 512);
+        let (pixels, star_positions) = stamps::star_field(512, 512, num_stars, 2.0, 0.1, 42);
+        let background = background_map::uniform(512, 512, 0.1, 0.01);
         let config = StarDetectionConfig::default();
 
         // Create star candidates from positions
@@ -220,11 +115,9 @@ pub fn benchmarks(c: &mut Criterion) {
     gaussian_group.sample_size(50);
 
     for stamp_size in [15, 21, 31] {
-        let width = stamp_size;
-        let height = stamp_size;
         let cx = (stamp_size / 2) as f32 + 0.3;
         let cy = (stamp_size / 2) as f32 + 0.7;
-        let pixels = generate_gaussian_stamp(width, height, cx, cy, 1.0, 2.5, 0.1);
+        let pixels = stamps::gaussian(stamp_size, stamp_size, cx, cy, 2.5, 1.0, 0.1);
         let config = GaussianFitConfig::default();
 
         gaussian_group.bench_function(BenchmarkId::new("fit_gaussian_2d", stamp_size), |b| {
@@ -250,7 +143,7 @@ pub fn benchmarks(c: &mut Criterion) {
     for stamp_size in [15, 21, 31] {
         let cx = (stamp_size / 2) as f32 + 0.3;
         let cy = (stamp_size / 2) as f32 + 0.7;
-        let pixels = generate_moffat_stamp(stamp_size, stamp_size, cx, cy, 1.0, 2.5, 2.5, 0.1);
+        let pixels = stamps::moffat(stamp_size, stamp_size, cx, cy, 2.5, 2.5, 1.0, 0.1);
 
         // Fixed beta (faster)
         let config_fixed = MoffatFitConfig {

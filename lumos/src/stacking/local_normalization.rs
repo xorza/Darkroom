@@ -619,6 +619,7 @@ pub fn normalize_frame(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testing::synthetic::patterns;
 
     // ========== Config Tests ==========
 
@@ -704,41 +705,11 @@ mod tests {
 
     // ========== Tile Statistics Tests ==========
 
-    /// Create a uniform image for testing.
-    fn create_uniform_image(width: usize, height: usize, value: f32) -> Vec<f32> {
-        vec![value; width * height]
-    }
-
-    /// Create an image with a linear horizontal gradient.
-    fn create_horizontal_gradient(width: usize, height: usize, left: f32, right: f32) -> Vec<f32> {
-        let mut pixels = vec![0.0; width * height];
-        for y in 0..height {
-            for x in 0..width {
-                let t = x as f32 / (width - 1) as f32;
-                pixels[y * width + x] = left + t * (right - left);
-            }
-        }
-        pixels
-    }
-
-    /// Create an image with a linear vertical gradient.
-    fn create_vertical_gradient(width: usize, height: usize, top: f32, bottom: f32) -> Vec<f32> {
-        let mut pixels = vec![0.0; width * height];
-        for y in 0..height {
-            let t = y as f32 / (height - 1) as f32;
-            let value = top + t * (bottom - top);
-            for x in 0..width {
-                pixels[y * width + x] = value;
-            }
-        }
-        pixels
-    }
-
     #[test]
     fn test_tile_stats_uniform_image() {
         let width = 256;
         let height = 256;
-        let pixels = create_uniform_image(width, height, 100.0);
+        let pixels = patterns::uniform(width, height, 100.0);
         let config = LocalNormalizationConfig::new(64);
 
         let stats = TileNormalizationStats::compute(&pixels, width, height, &config);
@@ -766,7 +737,7 @@ mod tests {
     fn test_tile_stats_horizontal_gradient() {
         let width = 256;
         let height = 128;
-        let pixels = create_horizontal_gradient(width, height, 50.0, 150.0);
+        let pixels = patterns::horizontal_gradient(width, height, 50.0, 150.0);
         let config = LocalNormalizationConfig::new(64);
 
         let stats = TileNormalizationStats::compute(&pixels, width, height, &config);
@@ -793,7 +764,7 @@ mod tests {
     fn test_tile_stats_vertical_gradient() {
         let width = 128;
         let height = 256;
-        let pixels = create_vertical_gradient(width, height, 0.0, 200.0);
+        let pixels = patterns::vertical_gradient(width, height, 0.0, 200.0);
         let config = LocalNormalizationConfig::new(64);
 
         let stats = TileNormalizationStats::compute(&pixels, width, height, &config);
@@ -820,7 +791,7 @@ mod tests {
     fn test_normalization_map_identical_frames() {
         let width = 256;
         let height = 256;
-        let pixels = create_uniform_image(width, height, 100.0);
+        let pixels = patterns::uniform(width, height, 100.0);
         let config = LocalNormalizationConfig::new(64);
 
         let ref_stats = TileNormalizationStats::compute(&pixels, width, height, &config);
@@ -843,8 +814,8 @@ mod tests {
     fn test_normalization_map_offset_correction() {
         let width = 256;
         let height = 128;
-        let reference = create_uniform_image(width, height, 100.0);
-        let target = create_uniform_image(width, height, 80.0); // 20 units darker
+        let reference = patterns::uniform(width, height, 100.0);
+        let target = patterns::uniform(width, height, 80.0); // 20 units darker
         let config = LocalNormalizationConfig::new(64);
 
         let ref_stats = TileNormalizationStats::compute(&reference, width, height, &config);
@@ -867,8 +838,8 @@ mod tests {
     fn test_normalization_map_gradient_correction() {
         let width = 256;
         let height = 128;
-        let reference = create_uniform_image(width, height, 100.0);
-        let target = create_horizontal_gradient(width, height, 80.0, 120.0); // Gradient
+        let reference = patterns::uniform(width, height, 100.0);
+        let target = patterns::horizontal_gradient(width, height, 80.0, 120.0); // Gradient
         let config = LocalNormalizationConfig::new(64);
 
         let ref_stats = TileNormalizationStats::compute(&reference, width, height, &config);
@@ -903,8 +874,8 @@ mod tests {
     fn test_apply_in_place() {
         let width = 256;
         let height = 128;
-        let reference = create_uniform_image(width, height, 100.0);
-        let target = create_uniform_image(width, height, 50.0);
+        let reference = patterns::uniform(width, height, 100.0);
+        let target = patterns::uniform(width, height, 50.0);
         let config = LocalNormalizationConfig::new(64);
 
         let map = compute_normalization_map(&reference, &target, width, height, &config);
@@ -927,8 +898,8 @@ mod tests {
     fn test_normalize_frame_convenience() {
         let width = 256;
         let height = 128;
-        let reference = create_uniform_image(width, height, 100.0);
-        let target = create_uniform_image(width, height, 75.0);
+        let reference = patterns::uniform(width, height, 100.0);
+        let target = patterns::uniform(width, height, 75.0);
         let config = LocalNormalizationConfig::new(64);
 
         let normalized = normalize_frame(&reference, &target, width, height, &config);
@@ -947,8 +918,8 @@ mod tests {
     fn test_single_tile_image() {
         let width = 64;
         let height = 64;
-        let reference = create_uniform_image(width, height, 100.0);
-        let target = create_uniform_image(width, height, 50.0);
+        let reference = patterns::uniform(width, height, 100.0);
+        let target = patterns::uniform(width, height, 50.0);
         let config = LocalNormalizationConfig::new(64);
 
         let stats = TileNormalizationStats::compute(&reference, width, height, &config);
@@ -968,8 +939,8 @@ mod tests {
         // Image dimensions not evenly divisible by tile size
         let width = 300; // 300 / 64 = 4 full tiles + 44 partial
         let height = 150; // 150 / 64 = 2 full tiles + 22 partial
-        let reference = create_uniform_image(width, height, 100.0);
-        let target = create_uniform_image(width, height, 80.0);
+        let reference = patterns::uniform(width, height, 100.0);
+        let target = patterns::uniform(width, height, 80.0);
         let config = LocalNormalizationConfig::new(64);
 
         let stats = TileNormalizationStats::compute(&reference, width, height, &config);
@@ -989,7 +960,7 @@ mod tests {
     fn test_image_too_small_for_tile_size() {
         let width = 32;
         let height = 32;
-        let pixels = create_uniform_image(width, height, 100.0);
+        let pixels = patterns::uniform(width, height, 100.0);
         let config = LocalNormalizationConfig::new(64);
 
         TileNormalizationStats::compute(&pixels, width, height, &config);

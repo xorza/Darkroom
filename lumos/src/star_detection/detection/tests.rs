@@ -7,20 +7,13 @@ use super::*;
 use crate::common::Buffer2;
 use crate::star_detection::background::{BackgroundMap, estimate_background};
 use crate::star_detection::constants::dilate_mask;
+use crate::testing::synthetic::background_map;
 
-/// Helper to construct BackgroundMap from slices
+/// Helper to construct BackgroundMap from slices (for tests with specific per-pixel values)
 fn make_bg(background: Vec<f32>, noise: Vec<f32>, width: usize, height: usize) -> BackgroundMap {
     BackgroundMap {
         background: Buffer2::new(width, height, background),
         noise: Buffer2::new(width, height, noise),
-    }
-}
-
-/// Helper to construct BackgroundMap with uniform values
-fn make_bg_uniform(width: usize, height: usize, bg_val: f32, noise_val: f32) -> BackgroundMap {
-    BackgroundMap {
-        background: Buffer2::new_filled(width, height, bg_val),
-        noise: Buffer2::new_filled(width, height, noise_val),
     }
 }
 
@@ -539,7 +532,7 @@ fn create_threshold_mask_test(
 #[test]
 fn test_create_threshold_mask_all_below() {
     let pixels = Buffer2::new(2, 2, vec![0.5, 0.5, 0.5, 0.5]);
-    let background = make_bg_uniform(2, 2, 1.0, 0.1);
+    let background = background_map::uniform(2, 2, 1.0, 0.1);
     let mask = create_threshold_mask_test(&pixels, &background, 3.0);
 
     assert!(mask.iter().all(|&x| !x));
@@ -548,7 +541,7 @@ fn test_create_threshold_mask_all_below() {
 #[test]
 fn test_create_threshold_mask_all_above() {
     let pixels = Buffer2::new(2, 2, vec![2.0, 2.0, 2.0, 2.0]);
-    let background = make_bg_uniform(2, 2, 1.0, 0.1);
+    let background = background_map::uniform(2, 2, 1.0, 0.1);
 
     // threshold = 1.0 + 3.0 * 0.1 = 1.3
     // pixels at 2.0 > 1.3, so all true
@@ -560,7 +553,7 @@ fn test_create_threshold_mask_all_above() {
 #[test]
 fn test_create_threshold_mask_mixed() {
     let pixels = Buffer2::new(2, 2, vec![1.0, 2.0, 0.5, 1.5]);
-    let background = make_bg_uniform(2, 2, 1.0, 0.1);
+    let background = background_map::uniform(2, 2, 1.0, 0.1);
 
     // threshold = 1.0 + 3.0 * 0.1 = 1.3
     // pixel 0: 1.0 <= 1.3 -> false
@@ -625,7 +618,7 @@ fn test_create_threshold_mask_exact_threshold_is_false() {
 #[test]
 fn test_create_threshold_mask_different_sigma_values() {
     let pixels = Buffer2::new(2, 2, vec![1.5, 1.5, 1.5, 1.5]);
-    let background = make_bg_uniform(2, 2, 1.0, 0.1);
+    let background = background_map::uniform(2, 2, 1.0, 0.1);
 
     // sigma=3: threshold=1.3, 1.5 > 1.3 -> all true
     let mask_sigma3 = create_threshold_mask_test(&pixels, &background, 3.0);
@@ -698,7 +691,7 @@ fn create_threshold_mask_filtered_test(
 fn test_simd_vs_scalar_consistency_small() {
     // Small input that fits in one SIMD vector
     let pixels = Buffer2::new(2, 2, vec![0.5, 1.5, 2.0, 0.8]);
-    let background = make_bg_uniform(2, 2, 1.0, 0.1);
+    let background = background_map::uniform(2, 2, 1.0, 0.1);
 
     let dispatch_mask = create_threshold_mask_test(&pixels, &background, 3.0);
     let scalar_mask = create_threshold_mask_scalar(&pixels, &background, 3.0);
@@ -715,7 +708,7 @@ fn test_simd_vs_scalar_consistency_unaligned() {
     for size in [1, 2, 3, 5, 7, 13, 15, 17, 19, 31, 33] {
         let pixels: Buffer2<f32> =
             Buffer2::new(size, 1, (0..size).map(|i| (i as f32) * 0.1).collect());
-        let background = make_bg_uniform(size, 1, 0.5, 0.1);
+        let background = background_map::uniform(size, 1, 0.5, 0.1);
 
         let dispatch_mask = create_threshold_mask_test(&pixels, &background, 3.0);
         let scalar_mask = create_threshold_mask_scalar(&pixels, &background, 3.0);
@@ -760,7 +753,7 @@ fn test_simd_vs_scalar_consistency_filtered() {
     // Test filtered variant consistency
     let size = 100;
     let filtered = Buffer2::new(size, 1, (0..size).map(|i| (i as f32) * 0.05).collect());
-    let background = make_bg_uniform(size, 1, 0.0, 0.1); // background not used for filtered
+    let background = background_map::uniform(size, 1, 0.0, 0.1); // background not used for filtered
 
     let dispatch_mask = create_threshold_mask_filtered_test(&filtered, &background, 3.0);
     let scalar_mask = create_threshold_mask_filtered_scalar(&filtered, &background, 3.0);
@@ -783,7 +776,7 @@ fn test_simd_remainder_handling() {
                 .map(|i| if i % 2 == 0 { 2.0 } else { 0.5 })
                 .collect(),
         );
-        let background = make_bg_uniform(size, 1, 1.0, 0.1);
+        let background = background_map::uniform(size, 1, 1.0, 0.1);
 
         let dispatch_mask = create_threshold_mask_test(&pixels, &background, 3.0);
         let scalar_mask = create_threshold_mask_scalar(&pixels, &background, 3.0);
@@ -806,7 +799,7 @@ fn test_simd_remainder_handling() {
 fn test_filtered_threshold_mask_basic() {
     // filtered image is already background-subtracted, so threshold = sigma * noise
     let filtered = Buffer2::new(2, 2, vec![0.2, 0.4, 0.6, 0.8]);
-    let background = make_bg_uniform(2, 2, 0.0, 0.1); // Not used
+    let background = background_map::uniform(2, 2, 0.0, 0.1); // Not used
 
     // threshold = 3.0 * 0.1 = 0.3
     // 0.2 <= 0.3 -> false
@@ -1940,7 +1933,7 @@ mod quick_benches {
     }
 
     fn create_timing_background_map(width: usize, height: usize) -> BackgroundMap {
-        make_bg_uniform(width, height, 0.1, 0.01)
+        background_map::uniform(width, height, 0.1, 0.01)
     }
 
     #[quick_bench(warmup_iters = 2, iters = 5)]
