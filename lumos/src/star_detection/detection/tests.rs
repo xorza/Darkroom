@@ -485,7 +485,7 @@ fn test_dilate_mask_merges_nearby_pixels() {
 
 /// Helper to create threshold mask for tests
 fn create_threshold_mask_test(pixels: &[f32], background: &BackgroundMap, sigma: f32) -> Vec<bool> {
-    let mut mask = Vec::with_capacity(pixels.len());
+    let mut mask = vec![false; pixels.len()];
     create_threshold_mask(pixels, background, sigma, &mut mask);
     mask
 }
@@ -661,7 +661,7 @@ fn create_threshold_mask_scalar(
     background: &BackgroundMap,
     sigma: f32,
 ) -> Vec<bool> {
-    let mut mask = Vec::with_capacity(pixels.len());
+    let mut mask = vec![false; pixels.len()];
     scalar::create_threshold_mask(pixels, background, sigma, &mut mask);
     mask
 }
@@ -672,7 +672,7 @@ fn create_threshold_mask_filtered_scalar(
     background: &BackgroundMap,
     sigma: f32,
 ) -> Vec<bool> {
-    let mut mask = Vec::with_capacity(filtered.len());
+    let mut mask = vec![false; filtered.len()];
     scalar::create_threshold_mask_filtered(filtered, background, sigma, &mut mask);
     mask
 }
@@ -683,7 +683,7 @@ fn create_threshold_mask_filtered_test(
     background: &BackgroundMap,
     sigma: f32,
 ) -> Vec<bool> {
-    let mut mask = Vec::with_capacity(filtered.len());
+    let mut mask = vec![false; filtered.len()];
     create_threshold_mask_filtered(filtered, background, sigma, &mut mask);
     mask
 }
