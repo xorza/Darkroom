@@ -16,13 +16,11 @@ pub unsafe fn create_threshold_mask_sse(
     pixels: &[f32],
     background: &BackgroundMap,
     sigma_threshold: f32,
-    mask: &mut Vec<bool>,
+    mask: &mut [bool],
 ) {
     let len = pixels.len();
+    debug_assert_eq!(len, mask.len());
 
-    // Pre-size the vector to avoid bounds checking and reallocation
-    mask.clear();
-    mask.resize(len, false);
     let mask_ptr = mask.as_mut_ptr();
 
     let sigma_vec = _mm_set1_ps(sigma_threshold);
@@ -129,13 +127,11 @@ pub unsafe fn create_threshold_mask_filtered_sse(
     filtered: &[f32],
     background: &BackgroundMap,
     sigma_threshold: f32,
-    mask: &mut Vec<bool>,
+    mask: &mut [bool],
 ) {
     let len = filtered.len();
+    debug_assert_eq!(len, mask.len());
 
-    // Pre-size the vector to avoid bounds checking and reallocation
-    mask.clear();
-    mask.resize(len, false);
     let mask_ptr = mask.as_mut_ptr();
 
     let sigma_vec = _mm_set1_ps(sigma_threshold);

@@ -737,10 +737,7 @@ impl StarDetector {
 
     /// Create a star detector from an existing configuration.
     pub fn from_config(config: StarDetectionConfig) -> Self {
-        Self {
-            config,
-            ..Default::default()
-        }
+        Self { config }
     }
 
     /// Configure for wide-field imaging (larger stars, relaxed filtering).
@@ -1022,10 +1019,10 @@ fn find_stars(image: &AstroImage, config: &StarDetectionConfig) -> StarDetection
                     config.expected_fwhm,
                 )
             };
-            detect_stars_filtered(&pixels, &filtered, width, height, &background, &config)
+            detect_stars_filtered(&pixels, &filtered, width, height, &background, config)
         } else {
             // No matched filter - use standard detection
-            detect_stars(&pixels, width, height, &background, &config)
+            detect_stars(&pixels, width, height, &background, config)
         }
     };
     diagnostics.candidates_after_filtering = candidates.len();
@@ -1036,7 +1033,7 @@ fn find_stars(image: &AstroImage, config: &StarDetectionConfig) -> StarDetection
         candidates
             .into_iter()
             .filter_map(|candidate| {
-                compute_centroid(&pixels, width, height, &background, &candidate, &config)
+                compute_centroid(&pixels, width, height, &background, &candidate, config)
             })
             .collect()
     };

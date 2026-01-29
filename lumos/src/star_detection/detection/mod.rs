@@ -99,7 +99,7 @@ pub fn detect_stars(
     let detection_config = DetectionConfig::from(config);
 
     // Create binary mask of above-threshold pixels
-    let mut mask = Vec::with_capacity(pixels.len());
+    let mut mask = vec![false; pixels.len()];
     create_threshold_mask(
         pixels,
         background,
@@ -143,7 +143,7 @@ pub fn create_threshold_mask(
     pixels: &[f32],
     background: &BackgroundMap,
     sigma_threshold: f32,
-    mask: &mut Vec<bool>,
+    mask: &mut [bool],
 ) {
     if cpu_features::has_sse4_1() {
         // SAFETY: We've checked that SSE4.1 is available.
@@ -161,7 +161,7 @@ pub fn create_threshold_mask(
     pixels: &[f32],
     background: &BackgroundMap,
     sigma_threshold: f32,
-    mask: &mut Vec<bool>,
+    mask: &mut [bool],
 ) {
     scalar::create_threshold_mask(pixels, background, sigma_threshold, mask)
 }
@@ -328,7 +328,7 @@ pub fn detect_stars_filtered(
 
     // Create binary mask from the filtered image
     // The threshold is based on noise in the filtered image
-    let mut mask = Vec::with_capacity(filtered.len());
+    let mut mask = vec![false; filtered.len()];
     create_threshold_mask_filtered(
         filtered,
         background,
@@ -342,6 +342,7 @@ pub fn detect_stars_filtered(
     let mut dilated = vec![false; mask.len()];
     dilate_mask(&mask, width, height, 1, &mut dilated);
     std::mem::swap(&mut mask, &mut dilated);
+    drop(dilated);
 
     // Find connected components
     let (labels, num_labels) = connected_components(&mask, width, height);
@@ -376,7 +377,7 @@ pub fn create_threshold_mask_filtered(
     filtered: &[f32],
     background: &BackgroundMap,
     sigma_threshold: f32,
-    mask: &mut Vec<bool>,
+    mask: &mut [bool],
 ) {
     if cpu_features::has_sse4_1() {
         // SAFETY: We've checked that SSE4.1 is available.
@@ -399,7 +400,7 @@ pub fn create_threshold_mask_filtered(
     filtered: &[f32],
     background: &BackgroundMap,
     sigma_threshold: f32,
-    mask: &mut Vec<bool>,
+    mask: &mut [bool],
 ) {
     scalar::create_threshold_mask_filtered(filtered, background, sigma_threshold, mask);
 }
