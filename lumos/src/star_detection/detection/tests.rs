@@ -1870,7 +1870,7 @@ mod quick_benches {
         b.bench(|| detect_stars_filtered(&pixels, &filtered, 1024, 1024, &background, &config));
     }
 
-    #[quick_bench(warmup_iters = 1, iters = 3)]
+    #[quick_bench(warmup_iters = 0, iters = 1)]
     fn bench_detect_stars_filtered_6k(b: ::bench::Bencher) {
         let pixels = generate_timing_test_image(6144, 6144, 3000);
         let filtered = generate_timing_test_image(6144, 6144, 3000);
