@@ -13,7 +13,7 @@ use super::StarDetectionConfig;
 use super::background::BackgroundMap;
 use super::constants::dilate_mask;
 use super::deblend::{
-    ComponentData, DeblendConfig, MultiThresholdDeblendConfig,
+    ComponentData, DeblendConfig, MultiThresholdDeblendConfig, Pixel,
     deblend_component as multi_threshold_deblend, deblend_local_maxima,
 };
 #[cfg(target_arch = "x86_64")]
@@ -486,6 +486,8 @@ pub(crate) fn extract_candidates(
     use rayon::prelude::*;
 
     // Collect component data in single pass
+    // Stop collecting pixels for components that exceed max_area to avoid
+    // allocating millions of pixels for pathologically large components
     let mut component_data: Vec<ComponentData> = Vec::with_capacity(num_labels);
     component_data.resize_with(num_labels, || ComponentData {
         x_min: usize::MAX,
@@ -499,14 +501,22 @@ pub(crate) fn extract_candidates(
         if label == 0 {
             continue;
         }
+        let data = &mut component_data[(label - 1) as usize];
+        // Skip pixel collection for oversized components (already exceeded max_area)
+        if data.pixels.len() > max_area {
+            continue;
+        }
         let x = idx % width;
         let y = idx / width;
-        let data = &mut component_data[(label - 1) as usize];
         data.x_min = data.x_min.min(x);
         data.x_max = data.x_max.max(x);
         data.y_min = data.y_min.min(y);
         data.y_max = data.y_max.max(y);
-        data.pixels.push((x, y, pixels[idx]));
+        data.pixels.push(Pixel {
+            x,
+            y,
+            value: pixels[idx],
+        });
     }
 
     // Process each component in parallel, deblending into multiple candidates
@@ -525,15 +535,16 @@ pub(crate) fn extract_candidates(
                 };
 
                 // Estimate detection threshold from the minimum pixel value in component
-                let detection_threshold = data
-                    .pixels
-                    .iter()
-                    .map(|&(_, _, v)| v)
-                    .fold(f32::MAX, f32::min);
+                let detection_threshold =
+                    data.pixels.iter().map(|p| p.value).fold(f32::MAX, f32::min);
+
+                // Convert to tuple format for multi_threshold_deblend
+                let pixels_tuples: Vec<(usize, usize, f32)> =
+                    data.pixels.iter().map(|p| (p.x, p.y, p.value)).collect();
 
                 let deblended = multi_threshold_deblend(
                     pixels,
-                    &data.pixels,
+                    &pixels_tuples,
                     width,
                     detection_threshold,
                     &mt_config,

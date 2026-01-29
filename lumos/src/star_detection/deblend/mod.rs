@@ -20,7 +20,7 @@ pub mod bench;
 mod tests;
 
 // Re-export main types and functions
-pub use local_maxima::{ComponentData, deblend_local_maxima};
+pub use local_maxima::{ComponentData, Pixel, deblend_local_maxima};
 #[allow(unused_imports)]
 pub use local_maxima::{DeblendedCandidate, deblend_by_nearest_peak, find_local_maxima};
 #[allow(unused_imports)]

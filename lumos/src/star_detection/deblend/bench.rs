@@ -2,7 +2,7 @@
 //! Run with: cargo bench -p lumos --features bench --bench star_detection_deblend
 
 use super::DeblendConfig;
-use super::local_maxima::{ComponentData, deblend_local_maxima};
+use super::local_maxima::{ComponentData, Pixel, deblend_local_maxima};
 use super::multi_threshold::{MultiThresholdDeblendConfig, deblend_component};
 use criterion::{BenchmarkId, Criterion, Throughput};
 use std::collections::HashMap;
@@ -12,6 +12,7 @@ use std::hint::black_box;
 pub struct BenchData {
     pub image: Vec<f32>,
     pub components: Vec<ComponentData>,
+    /// Tuple format for multi_threshold compatibility
     pub component_pixels: Vec<Vec<(usize, usize, f32)>>,
     pub width: usize,
     pub height: usize,
@@ -84,12 +85,17 @@ impl BenchData {
             }
             let unique_pixels: Vec<_> = seen.into_iter().map(|((x, y), v)| (x, y, v)).collect();
 
+            let pixels_structs: Vec<Pixel> = unique_pixels
+                .iter()
+                .map(|&(x, y, value)| Pixel { x, y, value })
+                .collect();
+
             let data = ComponentData {
                 x_min: unique_pixels.iter().map(|p| p.0).min().unwrap_or(0),
                 x_max: unique_pixels.iter().map(|p| p.0).max().unwrap_or(0),
                 y_min: unique_pixels.iter().map(|p| p.1).min().unwrap_or(0),
                 y_max: unique_pixels.iter().map(|p| p.1).max().unwrap_or(0),
-                pixels: unique_pixels.clone(),
+                pixels: pixels_structs,
             };
 
             components.push(data);
