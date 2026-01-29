@@ -11,8 +11,6 @@ use std::time::{Duration, Instant};
 
 pub use bench_macros::quick_bench;
 
-mod examples;
-
 /// A simple bencher for measuring execution time in tests.
 #[derive(Debug)]
 pub struct Bencher {
