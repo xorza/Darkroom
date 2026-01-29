@@ -716,7 +716,7 @@ impl StarDetectionConfigBuilder {
 /// // Batch detection (parallel)
 /// let results = detector.detect_all(&images);
 /// ```
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct StarDetector {
     config: StarDetectionConfig,
 }
@@ -732,12 +732,16 @@ impl StarDetector {
     pub fn new() -> Self {
         Self {
             config: StarDetectionConfig::default(),
+            bump: bumpalo::Bump::new(),
         }
     }
 
     /// Create a star detector from an existing configuration.
     pub fn from_config(config: StarDetectionConfig) -> Self {
-        Self { config }
+        Self {
+            config,
+            ..Default::default()
+        }
     }
 
     /// Configure for wide-field imaging (larger stars, relaxed filtering).
@@ -865,10 +869,11 @@ impl StarDetector {
     /// Returns results in the same order as the input images.
     pub fn detect_all(&self, images: &[AstroImage]) -> Vec<StarDetectionResult> {
         use rayon::prelude::*;
+        let config = self.config.clone();
 
         images
             .par_iter()
-            .map(|image| find_stars(image, &self.config))
+            .map(|image| find_stars(image, &config))
             .collect()
     }
 }
@@ -932,8 +937,6 @@ pub struct StarDetectionDiagnostics {
 /// * `image` - Astronomical image (grayscale or RGB, normalized 0.0-1.0)
 /// * `config` - Detection configuration
 fn find_stars(image: &AstroImage, config: &StarDetectionConfig) -> StarDetectionResult {
-    let _tracy = tracy_client::span!("find_stars");
-
     config.validate();
 
     let width = image.width();
@@ -945,8 +948,6 @@ fn find_stars(image: &AstroImage, config: &StarDetectionConfig) -> StarDetection
 
     // Step 0a: Apply defect mask if provided
     if config.defect_map.as_ref().is_some_and(|m| !m.is_empty()) {
-        let _tracy = tracy_client::span!("apply_defect_mask");
-
         apply_defect_mask(
             &pixels,
             width,
@@ -960,16 +961,14 @@ fn find_stars(image: &AstroImage, config: &StarDetectionConfig) -> StarDetection
     // Step 0b: Apply 3x3 median filter to remove Bayer pattern artifacts
     // Only applied for CFA sensors; skip for monochrome (~6ms faster on 4K images)
     if image.metadata.is_cfa {
-        let _tracy = tracy_client::span!("median_filter_3x3");
-
         median_filter_3x3(&pixels, width, height, &mut output);
         std::mem::swap(&mut pixels, &mut output);
     }
 
+    drop(output);
+
     // Step 1: Estimate background
     let background = {
-        let _tracy = tracy_client::span!("estimate_background");
-
         if config.background_passes > 0 {
             // Use iterative background estimation for crowded fields
             let iter_config = IterativeBackgroundConfig {
@@ -992,14 +991,10 @@ fn find_stars(image: &AstroImage, config: &StarDetectionConfig) -> StarDetection
 
     // Step 2: Detect star candidates
     let candidates = {
-        let _tracy = tracy_client::span!("detect_candidates");
-
         if config.expected_fwhm > f32::EPSILON {
             // Apply matched filter (Gaussian convolution) for better faint star detection
             // This is the DAOFIND/SExtractor technique
             let filtered = if config.psf_axis_ratio < 0.99 {
-                let _tracy = tracy_client::span!("matched_filter_elliptical");
-
                 tracing::debug!(
                     "Applying elliptical matched filter with FWHM={:.1}, axis_ratio={:.2}, angle={:.2}",
                     config.expected_fwhm,
@@ -1016,8 +1011,6 @@ fn find_stars(image: &AstroImage, config: &StarDetectionConfig) -> StarDetection
                     config.psf_angle,
                 )
             } else {
-                let _tracy = tracy_client::span!("matched_filter");
-
                 tracing::debug!(
                     "Applying matched filter with FWHM={:.1} pixels",
                     config.expected_fwhm
@@ -1030,10 +1023,10 @@ fn find_stars(image: &AstroImage, config: &StarDetectionConfig) -> StarDetection
                     config.expected_fwhm,
                 )
             };
-            detect_stars_filtered(&pixels, &filtered, width, height, &background, config)
+            detect_stars_filtered(&pixels, &filtered, width, height, &background, &config)
         } else {
             // No matched filter - use standard detection
-            detect_stars(&pixels, width, height, &background, config)
+            detect_stars(&pixels, width, height, &background, &config)
         }
     };
     diagnostics.candidates_after_filtering = candidates.len();
@@ -1041,12 +1034,10 @@ fn find_stars(image: &AstroImage, config: &StarDetectionConfig) -> StarDetection
 
     // Step 3: Compute precise centroids
     let stars_after_centroid: Vec<Star> = {
-        let _tracy = tracy_client::span!("compute_centroids");
-
         candidates
             .into_iter()
             .filter_map(|candidate| {
-                compute_centroid(&pixels, width, height, &background, &candidate, config)
+                compute_centroid(&pixels, width, height, &background, &candidate, &config)
             })
             .collect()
     };
@@ -1054,8 +1045,6 @@ fn find_stars(image: &AstroImage, config: &StarDetectionConfig) -> StarDetection
 
     // Step 4: Apply quality filters and count rejections
     let mut stars = {
-        let _tracy = tracy_client::span!("quality_filters");
-
         let mut stars = stars_after_centroid;
         stars.retain(|star| {
             if star.is_saturated() {

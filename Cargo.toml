@@ -79,13 +79,12 @@ rand_chacha = { version = "*" }
 rustfft = { version = "*" }
 nalgebra = { version = "*" }
 ureq = { version = "*" }
-tracy-client = { version = "*", default-features = false }
 
 
 [profile.bench]
 debug = true
 strip = "none"
-split-debuginfo = "unpacked"
+split-debuginfo = "off"
 
 [profile.release]
 debug = true

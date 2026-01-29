@@ -7,7 +7,6 @@ description = ""
 [features]
 bench = ["dep:criterion"]
 real-data = []
-tracy = ["tracy-client/enable"]
 
 [dependencies]
 common = { workspace = true }
@@ -34,7 +33,7 @@ rand_chacha = { workspace = true }
 nalgebra = { workspace = true }
 wgpu = { workspace = true }
 ureq = { workspace = true }
-tracy-client = { workspace = true }
+bumpalo = { workspace = true }
 
 [dev-dependencies]
 criterion = { workspace = true }
