@@ -17,3 +17,4 @@
 /flamegraph.svg
 /trace.tracy
 /profile.json.gz
+/profile.json
