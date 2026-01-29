@@ -454,14 +454,20 @@ pub fn detect_stars_gpu_with_detector(
 
     // Extract candidate properties with deblending
     let deblend_config = DeblendConfig::from(config);
-    let mut candidates =
-        extract_candidates(pixels, &labels, num_labels, width, height, &deblend_config);
+    let mut candidates = extract_candidates(
+        pixels,
+        &labels,
+        num_labels,
+        width,
+        height,
+        &deblend_config,
+        detection_config.max_area,
+    );
 
     // Apply size and edge filters
     candidates.retain(|c| {
         // Size filter
         c.area >= detection_config.min_area
-            && c.area <= detection_config.max_area
             // Edge filter
             && c.x_min >= detection_config.edge_margin
             && c.y_min >= detection_config.edge_margin

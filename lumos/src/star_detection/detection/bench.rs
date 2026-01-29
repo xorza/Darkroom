@@ -166,6 +166,7 @@ pub fn benchmarks(c: &mut Criterion) {
                     black_box(WIDTH),
                     black_box(HEIGHT),
                     black_box(&deblend_config),
+                    black_box(500),
                 ))
             })
         },
@@ -190,6 +191,7 @@ pub fn benchmarks(c: &mut Criterion) {
                     black_box(WIDTH),
                     black_box(HEIGHT),
                     black_box(&mt_deblend_config),
+                    black_box(500),
                 ))
             })
         },

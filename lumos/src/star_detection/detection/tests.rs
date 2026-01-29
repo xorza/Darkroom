@@ -23,6 +23,9 @@ const TEST_DEBLEND_CONFIG: DeblendConfig = DeblendConfig {
     min_contrast: 0.005,
 };
 
+/// Default max_area for tests (large enough to not filter anything in small test images)
+const TEST_MAX_AREA: usize = 10000;
+
 fn make_test_image_with_star(
     width: usize,
     height: usize,
@@ -976,7 +979,15 @@ fn test_extract_candidates_empty() {
     let pixels = vec![0.5; 9];
     let labels = vec![0u32; 9];
 
-    let candidates = extract_candidates(&pixels, &labels, 0, 3, 3, &TEST_DEBLEND_CONFIG);
+    let candidates = extract_candidates(
+        &pixels,
+        &labels,
+        0,
+        3,
+        3,
+        &TEST_DEBLEND_CONFIG,
+        TEST_MAX_AREA,
+    );
 
     assert!(candidates.is_empty());
 }
@@ -995,7 +1006,15 @@ fn test_extract_candidates_single_component() {
         0, 0, 0,
     ];
 
-    let candidates = extract_candidates(&pixels, &labels, 1, 3, 3, &TEST_DEBLEND_CONFIG);
+    let candidates = extract_candidates(
+        &pixels,
+        &labels,
+        1,
+        3,
+        3,
+        &TEST_DEBLEND_CONFIG,
+        TEST_MAX_AREA,
+    );
 
     assert_eq!(candidates.len(), 1);
     let c = &candidates[0];
@@ -1023,7 +1042,15 @@ fn test_extract_candidates_two_components() {
         0, 0, 0, 0, 0,
     ];
 
-    let candidates = extract_candidates(&pixels, &labels, 2, 5, 3, &TEST_DEBLEND_CONFIG);
+    let candidates = extract_candidates(
+        &pixels,
+        &labels,
+        2,
+        5,
+        3,
+        &TEST_DEBLEND_CONFIG,
+        TEST_MAX_AREA,
+    );
 
     assert_eq!(candidates.len(), 2);
 
@@ -1056,7 +1083,15 @@ fn test_extract_candidates_bounding_box() {
     labels[2 * 5 + 1] = 1;
     pixels[2 * 5 + 1] = 0.7;
 
-    let candidates = extract_candidates(&pixels, &labels, 1, 5, 5, &TEST_DEBLEND_CONFIG);
+    let candidates = extract_candidates(
+        &pixels,
+        &labels,
+        1,
+        5,
+        5,
+        &TEST_DEBLEND_CONFIG,
+        TEST_MAX_AREA,
+    );
 
     assert_eq!(candidates.len(), 1);
     let c = &candidates[0];
@@ -1076,12 +1111,45 @@ fn test_extract_candidates_width_height() {
     // 3x2 component covering full image
     let labels = vec![1u32; 6];
 
-    let candidates = extract_candidates(&pixels, &labels, 1, 3, 2, &TEST_DEBLEND_CONFIG);
+    let candidates = extract_candidates(
+        &pixels,
+        &labels,
+        1,
+        3,
+        2,
+        &TEST_DEBLEND_CONFIG,
+        TEST_MAX_AREA,
+    );
 
     assert_eq!(candidates.len(), 1);
     let c = &candidates[0];
     assert_eq!(c.width(), 3);
     assert_eq!(c.height(), 2);
+}
+
+#[test]
+fn test_extract_candidates_max_area_filter() {
+    // Test that components exceeding max_area are skipped early
+    let pixels = vec![0.5; 100]; // 10x10 image
+    let mut labels = vec![0u32; 100];
+
+    // Create a component with 50 pixels (labels 1)
+    for label in labels.iter_mut().take(50) {
+        *label = 1;
+    }
+    // Create a small component with 5 pixels (labels 2)
+    for label in labels.iter_mut().take(55).skip(50) {
+        *label = 2;
+    }
+
+    // With max_area=10, the large component should be skipped
+    let candidates = extract_candidates(&pixels, &labels, 2, 10, 10, &TEST_DEBLEND_CONFIG, 10);
+    assert_eq!(candidates.len(), 1, "Only small component should be found");
+    assert_eq!(candidates[0].area, 5);
+
+    // With max_area=100, both should be found
+    let candidates = extract_candidates(&pixels, &labels, 2, 10, 10, &TEST_DEBLEND_CONFIG, 100);
+    assert_eq!(candidates.len(), 2, "Both components should be found");
 }
 
 #[test]
@@ -1098,7 +1166,15 @@ fn test_extract_candidates_multiple_peaks_same_value() {
         0, 0, 0,
     ];
 
-    let candidates = extract_candidates(&pixels, &labels, 1, 3, 3, &TEST_DEBLEND_CONFIG);
+    let candidates = extract_candidates(
+        &pixels,
+        &labels,
+        1,
+        3,
+        3,
+        &TEST_DEBLEND_CONFIG,
+        TEST_MAX_AREA,
+    );
 
     assert_eq!(candidates.len(), 1);
     let c = &candidates[0];
@@ -1122,7 +1198,15 @@ fn test_extract_candidates_peak_at_corner() {
         0, 0, 0,
     ];
 
-    let candidates = extract_candidates(&pixels, &labels, 1, 3, 3, &TEST_DEBLEND_CONFIG);
+    let candidates = extract_candidates(
+        &pixels,
+        &labels,
+        1,
+        3,
+        3,
+        &TEST_DEBLEND_CONFIG,
+        TEST_MAX_AREA,
+    );
 
     assert_eq!(candidates.len(), 1);
     let c = &candidates[0];
@@ -1147,7 +1231,15 @@ fn test_extract_candidates_single_pixel_component() {
         0, 0, 0,
     ];
 
-    let candidates = extract_candidates(&pixels, &labels, 1, 3, 3, &TEST_DEBLEND_CONFIG);
+    let candidates = extract_candidates(
+        &pixels,
+        &labels,
+        1,
+        3,
+        3,
+        &TEST_DEBLEND_CONFIG,
+        TEST_MAX_AREA,
+    );
 
     assert_eq!(candidates.len(), 1);
     let c = &candidates[0];
@@ -1177,7 +1269,15 @@ fn test_extract_candidates_diagonal_component() {
         0, 0, 1,
     ];
 
-    let candidates = extract_candidates(&pixels, &labels, 1, 3, 3, &TEST_DEBLEND_CONFIG);
+    let candidates = extract_candidates(
+        &pixels,
+        &labels,
+        1,
+        3,
+        3,
+        &TEST_DEBLEND_CONFIG,
+        TEST_MAX_AREA,
+    );
 
     assert_eq!(candidates.len(), 1);
     let c = &candidates[0];
@@ -1207,7 +1307,15 @@ fn test_extract_candidates_sparse_labels() {
     ];
 
     // num_labels should be 3 to account for label 3
-    let candidates = extract_candidates(&pixels, &labels, 3, 3, 3, &TEST_DEBLEND_CONFIG);
+    let candidates = extract_candidates(
+        &pixels,
+        &labels,
+        3,
+        3,
+        3,
+        &TEST_DEBLEND_CONFIG,
+        TEST_MAX_AREA,
+    );
 
     // Only non-empty components are returned (labels 1 and 3)
     assert_eq!(candidates.len(), 2);
@@ -1225,7 +1333,15 @@ fn test_extract_candidates_full_image_component() {
     let pixels: Vec<f32> = (0..9).map(|i| 0.1 + i as f32 * 0.1).collect();
     let labels = vec![1u32; 9];
 
-    let candidates = extract_candidates(&pixels, &labels, 1, 3, 3, &TEST_DEBLEND_CONFIG);
+    let candidates = extract_candidates(
+        &pixels,
+        &labels,
+        1,
+        3,
+        3,
+        &TEST_DEBLEND_CONFIG,
+        TEST_MAX_AREA,
+    );
 
     assert_eq!(candidates.len(), 1);
     let c = &candidates[0];
@@ -1254,7 +1370,15 @@ fn test_extract_candidates_negative_pixel_values() {
         0, 0, 0,
     ];
 
-    let candidates = extract_candidates(&pixels, &labels, 1, 3, 3, &TEST_DEBLEND_CONFIG);
+    let candidates = extract_candidates(
+        &pixels,
+        &labels,
+        1,
+        3,
+        3,
+        &TEST_DEBLEND_CONFIG,
+        TEST_MAX_AREA,
+    );
 
     assert_eq!(candidates.len(), 1);
     let c = &candidates[0];
@@ -1276,7 +1400,15 @@ fn test_extract_candidates_many_components() {
         labels[idx] = (i + 1) as u32;
     }
 
-    let candidates = extract_candidates(&pixels, &labels, 10, 10, 10, &TEST_DEBLEND_CONFIG);
+    let candidates = extract_candidates(
+        &pixels,
+        &labels,
+        10,
+        10,
+        10,
+        &TEST_DEBLEND_CONFIG,
+        TEST_MAX_AREA,
+    );
 
     assert_eq!(candidates.len(), 10);
     for (i, c) in candidates.iter().enumerate() {
@@ -1298,7 +1430,15 @@ fn test_extract_candidates_non_square_image() {
         0, 1, 1, 1, 0, 2, 0,
     ];
 
-    let candidates = extract_candidates(&pixels, &labels, 2, 7, 2, &TEST_DEBLEND_CONFIG);
+    let candidates = extract_candidates(
+        &pixels,
+        &labels,
+        2,
+        7,
+        2,
+        &TEST_DEBLEND_CONFIG,
+        TEST_MAX_AREA,
+    );
 
     assert_eq!(candidates.len(), 2);
 
@@ -1351,7 +1491,15 @@ fn test_connected_components_and_extract_integration() {
     pixels[7 * 10 + 7] = 0.8;
 
     let (labels, num_labels) = connected_components(&mask, 10, 10);
-    let candidates = extract_candidates(&pixels, &labels, num_labels, 10, 10, &TEST_DEBLEND_CONFIG);
+    let candidates = extract_candidates(
+        &pixels,
+        &labels,
+        num_labels,
+        10,
+        10,
+        &TEST_DEBLEND_CONFIG,
+        TEST_MAX_AREA,
+    );
 
     assert_eq!(num_labels, 2);
     assert_eq!(candidates.len(), 2);
@@ -1451,7 +1599,15 @@ fn test_deblend_star_pair() {
         }
     }
 
-    let candidates = extract_candidates(&pixels, &labels, 1, width, height, &TEST_DEBLEND_CONFIG);
+    let candidates = extract_candidates(
+        &pixels,
+        &labels,
+        1,
+        width,
+        height,
+        &TEST_DEBLEND_CONFIG,
+        TEST_MAX_AREA,
+    );
 
     // Should deblend into 2 candidates
     assert_eq!(
@@ -1525,7 +1681,15 @@ fn test_no_deblend_for_close_peaks() {
         }
     }
 
-    let candidates = extract_candidates(&pixels, &labels, 1, width, height, &TEST_DEBLEND_CONFIG);
+    let candidates = extract_candidates(
+        &pixels,
+        &labels,
+        1,
+        width,
+        height,
+        &TEST_DEBLEND_CONFIG,
+        TEST_MAX_AREA,
+    );
 
     // Should NOT deblend - only one candidate because peaks are too close
     assert_eq!(
@@ -1569,7 +1733,15 @@ fn test_deblend_respects_prominence() {
         }
     }
 
-    let candidates = extract_candidates(&pixels, &labels, 1, width, height, &TEST_DEBLEND_CONFIG);
+    let candidates = extract_candidates(
+        &pixels,
+        &labels,
+        1,
+        width,
+        height,
+        &TEST_DEBLEND_CONFIG,
+        TEST_MAX_AREA,
+    );
 
     // Should NOT deblend - secondary peak is not prominent enough
     assert_eq!(
@@ -1636,7 +1808,15 @@ fn test_multi_threshold_deblend_star_pair() {
         min_contrast: 0.005,
     };
 
-    let candidates = extract_candidates(&pixels, &labels, 1, width, height, &mt_config);
+    let candidates = extract_candidates(
+        &pixels,
+        &labels,
+        1,
+        width,
+        height,
+        &mt_config,
+        TEST_MAX_AREA,
+    );
 
     // Should deblend into 2 candidates
     assert_eq!(
@@ -1709,7 +1889,15 @@ fn test_multi_threshold_vs_simple_deblend_consistency() {
         n_thresholds: 32,
         min_contrast: 0.005,
     };
-    let simple_candidates = extract_candidates(&pixels, &labels, 1, width, height, &simple_config);
+    let simple_candidates = extract_candidates(
+        &pixels,
+        &labels,
+        1,
+        width,
+        height,
+        &simple_config,
+        TEST_MAX_AREA,
+    );
 
     // Multi-threshold deblending
     let mt_config = DeblendConfig {
@@ -1719,7 +1907,15 @@ fn test_multi_threshold_vs_simple_deblend_consistency() {
         n_thresholds: 32,
         min_contrast: 0.005,
     };
-    let mt_candidates = extract_candidates(&pixels, &labels, 1, width, height, &mt_config);
+    let mt_candidates = extract_candidates(
+        &pixels,
+        &labels,
+        1,
+        width,
+        height,
+        &mt_config,
+        TEST_MAX_AREA,
+    );
 
     // Both should find 2 stars
     assert_eq!(
@@ -1799,7 +1995,7 @@ fn test_multi_threshold_deblend_high_contrast_disables() {
         min_contrast: 1.0, // Disabled
     };
 
-    let candidates = extract_candidates(&pixels, &labels, 1, width, height, &config);
+    let candidates = extract_candidates(&pixels, &labels, 1, width, height, &config, TEST_MAX_AREA);
 
     // Should return single candidate (deblending disabled)
     assert_eq!(
@@ -1814,15 +2010,38 @@ mod quick_benches {
     use super::*;
     use ::bench::quick_bench;
 
+    /// Generate a raw test image with background + stars (for pixels parameter)
     fn generate_timing_test_image(width: usize, height: usize, num_stars: usize) -> Vec<f32> {
         let background = 0.1f32;
         let mut pixels = vec![background; width * height];
 
+        // Add slight noise
         for (i, p) in pixels.iter_mut().enumerate() {
             let hash = ((i as u32).wrapping_mul(2654435761)) as f32 / u32::MAX as f32;
             *p += (hash - 0.5) * 0.02;
         }
 
+        add_stars_to_image(&mut pixels, width, height, num_stars);
+        pixels
+    }
+
+    /// Generate a filtered test image (background-subtracted, stars only)
+    /// This simulates the output of matched filtering where background is near zero
+    fn generate_timing_filtered_image(width: usize, height: usize, num_stars: usize) -> Vec<f32> {
+        let noise_level = 0.01f32;
+        let mut pixels = vec![0.0f32; width * height];
+
+        // Add noise around zero (simulating background-subtracted filtered image)
+        for (i, p) in pixels.iter_mut().enumerate() {
+            let hash = ((i as u32).wrapping_mul(2654435761)) as f32 / u32::MAX as f32;
+            *p = (hash - 0.5) * noise_level * 2.0; // Small noise around zero
+        }
+
+        add_stars_to_image(&mut pixels, width, height, num_stars);
+        pixels
+    }
+
+    fn add_stars_to_image(pixels: &mut [f32], width: usize, height: usize, num_stars: usize) {
         for star_idx in 0..num_stars {
             let hash1 = ((star_idx as u32).wrapping_mul(2654435761)) as usize;
             let hash2 = ((star_idx as u32).wrapping_mul(1597334677)) as usize;
@@ -1846,8 +2065,6 @@ mod quick_benches {
                 }
             }
         }
-
-        pixels
     }
 
     fn create_timing_background_map(width: usize, height: usize) -> BackgroundMap {
@@ -1863,17 +2080,17 @@ mod quick_benches {
     #[quick_bench(warmup_iters = 2, iters = 5, ignore = false)]
     fn bench_detect_stars_filtered_1k(b: ::bench::Bencher) {
         let pixels = generate_timing_test_image(1024, 1024, 100);
-        let filtered = generate_timing_test_image(1024, 1024, 100);
+        let filtered = generate_timing_filtered_image(1024, 1024, 100);
         let background = create_timing_background_map(1024, 1024);
         let config = StarDetectionConfig::default();
 
         b.bench(|| detect_stars_filtered(&pixels, &filtered, 1024, 1024, &background, &config));
     }
 
-    #[quick_bench(warmup_iters = 0, iters = 1)]
+    #[quick_bench(warmup_iters = 0, iters = 1, ignore = false)]
     fn bench_detect_stars_filtered_6k(b: ::bench::Bencher) {
         let pixels = generate_timing_test_image(6144, 6144, 3000);
-        let filtered = generate_timing_test_image(6144, 6144, 3000);
+        let filtered = generate_timing_filtered_image(6144, 6144, 3000);
         let background = create_timing_background_map(6144, 6144);
         let config = StarDetectionConfig::default();
 

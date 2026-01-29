@@ -119,14 +119,20 @@ pub fn detect_stars(
 
     // Extract candidate properties with deblending
     let deblend_config = DeblendConfig::from(config);
-    let mut candidates =
-        extract_candidates(pixels, &labels, num_labels, width, height, &deblend_config);
+    let mut candidates = extract_candidates(
+        pixels,
+        &labels,
+        num_labels,
+        width,
+        height,
+        &deblend_config,
+        detection_config.max_area,
+    );
 
     // Filter candidates
     candidates.retain(|c| {
         // Size filter
         c.area >= detection_config.min_area
-            && c.area <= detection_config.max_area
             // Edge filter
             && c.x_min >= detection_config.edge_margin
             && c.y_min >= detection_config.edge_margin
@@ -363,14 +369,20 @@ pub fn detect_stars_filtered(
 
     // Extract candidate properties using ORIGINAL pixels for peak values, with deblending
     let deblend_config = DeblendConfig::from(config);
-    let mut candidates =
-        extract_candidates(pixels, &labels, num_labels, width, height, &deblend_config);
+    let mut candidates = extract_candidates(
+        pixels,
+        &labels,
+        num_labels,
+        width,
+        height,
+        &deblend_config,
+        detection_config.max_area,
+    );
 
     // Filter candidates
     candidates.retain(|c| {
         // Size filter
         c.area >= detection_config.min_area
-            && c.area <= detection_config.max_area
             // Edge filter
             && c.x_min >= detection_config.edge_margin
             && c.y_min >= detection_config.edge_margin
@@ -455,6 +467,10 @@ impl From<&StarDetectionConfig> for DeblendConfig {
 /// For components with multiple local maxima (star pairs), this function
 /// splits them into separate candidates based on peak positions.
 /// Supports both simple local-maxima deblending and multi-threshold deblending.
+///
+/// Components larger than `max_area` are skipped early to avoid expensive
+/// processing of pathologically large regions (e.g., when the entire image
+/// is erroneously detected as one component due to bad thresholding).
 pub(crate) fn extract_candidates(
     pixels: &[f32],
     labels: &[u32],
@@ -462,6 +478,7 @@ pub(crate) fn extract_candidates(
     width: usize,
     _height: usize,
     deblend_config: &DeblendConfig,
+    max_area: usize,
 ) -> Vec<StarCandidate> {
     if num_labels == 0 {
         return Vec::new();
@@ -493,9 +510,11 @@ pub(crate) fn extract_candidates(
     }
 
     // Process each component in parallel, deblending into multiple candidates
+    // Skip components that are too large - they can't be stars and would be
+    // expensive to process (e.g., deblending a million-pixel component)
     let candidates: Vec<StarCandidate> = component_data
         .into_par_iter()
-        .filter(|data| !data.pixels.is_empty())
+        .filter(|data| !data.pixels.is_empty() && data.pixels.len() <= max_area)
         .flat_map(|data| {
             if deblend_config.multi_threshold {
                 // Use multi-threshold deblending (SExtractor-style)
