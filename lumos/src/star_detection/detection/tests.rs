@@ -2077,7 +2077,7 @@ mod quick_benches {
         }
     }
 
-    #[quick_bench(warmup_iters = 2, iters = 5, ignore = false)]
+    #[quick_bench(warmup_iters = 2, iters = 5)]
     fn bench_detect_stars_filtered_1k(b: ::bench::Bencher) {
         let pixels = generate_timing_test_image(1024, 1024, 100);
         let filtered = generate_timing_filtered_image(1024, 1024, 100);
@@ -2087,7 +2087,7 @@ mod quick_benches {
         b.bench(|| detect_stars_filtered(&pixels, &filtered, 1024, 1024, &background, &config));
     }
 
-    #[quick_bench(warmup_iters = 1, iters = 3, ignore = false)]
+    #[quick_bench(warmup_iters = 1, iters = 3)]
     fn bench_detect_stars_filtered_6k(b: ::bench::Bencher) {
         let pixels = generate_timing_test_image(6144, 6144, 3000);
         let filtered = generate_timing_filtered_image(6144, 6144, 3000);
