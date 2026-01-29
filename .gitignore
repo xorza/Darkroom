@@ -12,7 +12,8 @@
 /patch.diff
 /style.toml
 /config.toml
-perf.data
-perf.data.old
-flamegraph.svg
-trace.tracy
+/perf.data
+/perf.data.old
+/flamegraph.svg
+/trace.tracy
+/profile.json.gz

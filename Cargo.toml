@@ -90,7 +90,7 @@ split-debuginfo = "unpacked"
 [profile.release]
 debug = true
 strip = "none"
-split-debuginfo = "unpacked"
+split-debuginfo = "off"
 
 
 # Optimize heavy dependencies even in dev/test builds
