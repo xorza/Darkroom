@@ -7,6 +7,7 @@
 //! - All TransformType variants (Translation, Euclidean, Similarity, Affine, Homography)
 //! - All InterpolationMethod variants (Nearest, Bilinear, Bicubic, Lanczos2/3/4)
 
+use crate::common::Buffer2;
 use crate::registration::interpolation::{InterpolationMethod, WarpConfig, warp_image};
 use crate::registration::pipeline::warp_to_reference_image;
 use crate::registration::types::{TransformMatrix, TransformType};
@@ -72,7 +73,7 @@ fn generate_test_field(seed: u64) -> (Vec<f32>, usize, usize) {
         ..synthetic::sparse_field_config()
     };
     let (pixels, _) = synthetic::generate_star_field(&config);
-    (pixels, config.width, config.height)
+    (pixels.into_vec(), config.width, config.height)
 }
 
 /// All interpolation methods to test.
@@ -101,6 +102,7 @@ fn representative_interpolation_methods() -> Vec<InterpolationMethod> {
 #[test]
 fn test_warp_identity_all_methods() {
     let (ref_pixels, width, height) = generate_test_field(12345);
+    let ref_buf = Buffer2::new(width, height, ref_pixels.clone());
 
     let identity = TransformMatrix::identity();
 
@@ -112,15 +114,7 @@ fn test_warp_identity_all_methods() {
             clamp_output: false,
         };
 
-        let warped = warp_image(
-            &ref_pixels,
-            width,
-            height,
-            width,
-            height,
-            &identity,
-            &config,
-        );
+        let warped = warp_image(&ref_buf, width, height, &identity, &config);
 
         let psnr = compute_psnr(&ref_pixels, &warped, 1.0);
         let ncc = compute_ncc(&ref_pixels, &warped);
@@ -158,6 +152,7 @@ fn test_warp_identity_all_methods() {
 #[test]
 fn test_warp_translation_roundtrip() {
     let (ref_pixels, width, height) = generate_test_field(11111);
+    let ref_buf = Buffer2::new(width, height, ref_pixels.clone());
 
     let dx = 10.5;
     let dy = -7.3;
@@ -176,8 +171,9 @@ fn test_warp_translation_roundtrip() {
         };
 
         // Warp forward, then inverse
-        let warped = warp_image(&ref_pixels, width, height, width, height, &forward, &config);
-        let restored = warp_image(&warped, width, height, width, height, &inverse, &config);
+        let warped = warp_image(&ref_buf, width, height, &forward, &config);
+        let warped_buf = Buffer2::new(width, height, warped.into_vec());
+        let restored = warp_image(&warped_buf, width, height, &inverse, &config);
 
         // Compare central region (avoid border artifacts)
         let margin = 20;
@@ -221,6 +217,7 @@ fn test_warp_translation_roundtrip() {
 #[test]
 fn test_warp_euclidean_roundtrip() {
     let (ref_pixels, width, height) = generate_test_field(22222);
+    let ref_buf = Buffer2::new(width, height, ref_pixels.clone());
 
     let dx = 5.0;
     let dy = -3.0;
@@ -237,8 +234,9 @@ fn test_warp_euclidean_roundtrip() {
             clamp_output: false,
         };
 
-        let warped = warp_image(&ref_pixels, width, height, width, height, &forward, &config);
-        let restored = warp_image(&warped, width, height, width, height, &inverse, &config);
+        let warped = warp_image(&ref_buf, width, height, &forward, &config);
+        let warped_buf = Buffer2::new(width, height, warped.into_vec());
+        let restored = warp_image(&warped_buf, width, height, &inverse, &config);
 
         let margin = 30;
         let (central_ref, central_restored) =
@@ -278,6 +276,7 @@ fn test_warp_euclidean_roundtrip() {
 #[test]
 fn test_warp_similarity_roundtrip() {
     let (ref_pixels, width, height) = generate_test_field(33333);
+    let ref_buf = Buffer2::new(width, height, ref_pixels.clone());
 
     let dx = 8.0;
     let dy = -5.0;
@@ -295,8 +294,9 @@ fn test_warp_similarity_roundtrip() {
             clamp_output: false,
         };
 
-        let warped = warp_image(&ref_pixels, width, height, width, height, &forward, &config);
-        let restored = warp_image(&warped, width, height, width, height, &inverse, &config);
+        let warped = warp_image(&ref_buf, width, height, &forward, &config);
+        let warped_buf = Buffer2::new(width, height, warped.into_vec());
+        let restored = warp_image(&warped_buf, width, height, &inverse, &config);
 
         let margin = 40;
         let (central_ref, central_restored) =
@@ -329,6 +329,7 @@ fn test_warp_similarity_roundtrip() {
 #[test]
 fn test_warp_affine_roundtrip() {
     let (ref_pixels, width, height) = generate_test_field(44444);
+    let ref_buf = Buffer2::new(width, height, ref_pixels.clone());
 
     // Affine with slight differential scaling
     let scale_x = 1.01;
@@ -361,8 +362,9 @@ fn test_warp_affine_roundtrip() {
             clamp_output: false,
         };
 
-        let warped = warp_image(&ref_pixels, width, height, width, height, &forward, &config);
-        let restored = warp_image(&warped, width, height, width, height, &inverse, &config);
+        let warped = warp_image(&ref_buf, width, height, &forward, &config);
+        let warped_buf = Buffer2::new(width, height, warped.into_vec());
+        let restored = warp_image(&warped_buf, width, height, &inverse, &config);
 
         let margin = 40;
         let (central_ref, central_restored) =
@@ -395,6 +397,7 @@ fn test_warp_affine_roundtrip() {
 #[test]
 fn test_warp_homography_roundtrip() {
     let (ref_pixels, width, height) = generate_test_field(55555);
+    let ref_buf = Buffer2::new(width, height, ref_pixels.clone());
 
     // Mild perspective distortion
     let dx = 5.0;
@@ -416,8 +419,9 @@ fn test_warp_homography_roundtrip() {
             clamp_output: false,
         };
 
-        let warped = warp_image(&ref_pixels, width, height, width, height, &forward, &config);
-        let restored = warp_image(&warped, width, height, width, height, &inverse, &config);
+        let warped = warp_image(&ref_buf, width, height, &forward, &config);
+        let warped_buf = Buffer2::new(width, height, warped.into_vec());
+        let restored = warp_image(&warped_buf, width, height, &inverse, &config);
 
         let margin = 50;
         let (central_ref, central_restored) =
@@ -465,6 +469,7 @@ fn test_warp_with_detected_transform() {
     let height = config.height;
 
     let (ref_pixels, _) = synthetic::generate_star_field(&config);
+    let ref_pixels_vec = ref_pixels.into_vec();
 
     // Apply a known transform
     let dx = 12.0;
@@ -480,15 +485,8 @@ fn test_warp_with_detected_transform() {
         normalize_kernel: true,
         clamp_output: false,
     };
-    let target_pixels = warp_image(
-        &ref_pixels,
-        width,
-        height,
-        width,
-        height,
-        &true_transform,
-        &warp_config,
-    );
+    let ref_buf = Buffer2::new(width, height, ref_pixels_vec.clone());
+    let target_pixels = warp_image(&ref_buf, width, height, &true_transform, &warp_config);
 
     // Detect stars in both images
     let det = StarDetector::from_config(StarDetectionConfig {
@@ -498,11 +496,13 @@ fn test_warp_with_detected_transform() {
         ..Default::default()
     });
 
-    let ref_image =
-        AstroImage::from_pixels(ImageDimensions::new(width, height, 1), ref_pixels.clone());
+    let ref_image = AstroImage::from_pixels(
+        ImageDimensions::new(width, height, 1),
+        ref_pixels_vec.clone(),
+    );
     let target_image = AstroImage::from_pixels(
         ImageDimensions::new(width, height, 1),
-        target_pixels.clone(),
+        target_pixels.pixels().to_vec(),
     );
 
     let ref_result = det.detect(&ref_image);
@@ -533,8 +533,10 @@ fn test_warp_with_detected_transform() {
         .expect("Registration should succeed");
 
     // Use warp_to_reference_image to align target back to reference frame
-    let target_astro =
-        AstroImage::from_pixels(ImageDimensions::new(width, height, 1), target_pixels);
+    let target_astro = AstroImage::from_pixels(
+        ImageDimensions::new(width, height, 1),
+        target_pixels.into_vec(),
+    );
     let aligned = warp_to_reference_image(
         &target_astro,
         &result.transform,
@@ -544,7 +546,7 @@ fn test_warp_with_detected_transform() {
     // Compare aligned image to reference
     let margin = 40;
     let (central_ref, central_aligned) =
-        extract_central_region(&ref_pixels, aligned.channel(0), width, height, margin);
+        extract_central_region(&ref_pixels_vec, aligned.channel(0), width, height, margin);
 
     let psnr = compute_psnr(&central_ref, &central_aligned, 1.0);
     let ncc = compute_ncc(&central_ref, &central_aligned);
@@ -560,6 +562,7 @@ fn test_warp_with_detected_transform() {
 #[test]
 fn test_interpolation_quality_ordering() {
     let (ref_pixels, width, height) = generate_test_field(77777);
+    let ref_buf = Buffer2::new(width, height, ref_pixels.clone());
 
     // Apply a transform that requires interpolation
     let forward = TransformMatrix::similarity(3.7, -2.3, 1.0_f64.to_radians(), 1.01);
@@ -575,8 +578,9 @@ fn test_interpolation_quality_ordering() {
             clamp_output: false,
         };
 
-        let warped = warp_image(&ref_pixels, width, height, width, height, &forward, &config);
-        let restored = warp_image(&warped, width, height, width, height, &inverse, &config);
+        let warped = warp_image(&ref_buf, width, height, &forward, &config);
+        let warped_buf = Buffer2::new(width, height, warped.into_vec());
+        let restored = warp_image(&warped_buf, width, height, &inverse, &config);
 
         let margin = 50;
         let (central_ref, central_restored) =

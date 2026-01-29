@@ -3,6 +3,7 @@
 #[cfg(target_arch = "aarch64")]
 use std::arch::aarch64::*;
 
+use crate::star_detection::Buffer2;
 use crate::star_detection::background::BackgroundMap;
 
 /// Number of SIMD vectors to process per unrolled iteration.
@@ -22,15 +23,15 @@ const UNROLL_WIDTH: usize = UNROLL_FACTOR * NEON_WIDTH;
 #[target_feature(enable = "neon")]
 #[allow(unsafe_op_in_unsafe_fn)]
 pub unsafe fn create_threshold_mask_neon(
-    pixels: &[f32],
+    pixels: &Buffer2<f32>,
     background: &BackgroundMap,
     sigma_threshold: f32,
-    mask: &mut [bool],
+    mask: &mut Buffer2<bool>,
 ) {
     let len = pixels.len();
     debug_assert_eq!(len, mask.len());
 
-    let mask_ptr = mask.as_mut_ptr();
+    let mask_ptr = mask.pixels_mut().as_mut_ptr();
 
     let sigma_vec = vdupq_n_f32(sigma_threshold);
     let min_noise_vec = vdupq_n_f32(1e-6);
@@ -121,9 +122,10 @@ pub unsafe fn create_threshold_mask_neon(
     }
 
     // Handle remaining elements (0-3 elements)
+    let pixels_slice = pixels.pixels();
     while i < len {
         let threshold = background.background[i] + sigma_threshold * background.noise[i].max(1e-6);
-        *mask_ptr.add(i) = pixels[i] > threshold;
+        *mask_ptr.add(i) = pixels_slice[i] > threshold;
         i += 1;
     }
 }
@@ -138,15 +140,15 @@ pub unsafe fn create_threshold_mask_neon(
 #[target_feature(enable = "neon")]
 #[allow(unsafe_op_in_unsafe_fn)]
 pub unsafe fn create_threshold_mask_filtered_neon(
-    filtered: &[f32],
+    filtered: &Buffer2<f32>,
     background: &BackgroundMap,
     sigma_threshold: f32,
-    mask: &mut [bool],
+    mask: &mut Buffer2<bool>,
 ) {
     let len = filtered.len();
     debug_assert_eq!(len, mask.len());
 
-    let mask_ptr = mask.as_mut_ptr();
+    let mask_ptr = mask.pixels_mut().as_mut_ptr();
 
     let sigma_vec = vdupq_n_f32(sigma_threshold);
     let min_noise_vec = vdupq_n_f32(1e-6);
@@ -224,9 +226,10 @@ pub unsafe fn create_threshold_mask_filtered_neon(
     }
 
     // Handle remaining elements (0-3 elements)
+    let filtered_slice = filtered.pixels();
     while i < len {
         let threshold = sigma_threshold * background.noise[i].max(1e-6);
-        *mask_ptr.add(i) = filtered[i] > threshold;
+        *mask_ptr.add(i) = filtered_slice[i] > threshold;
         i += 1;
     }
 }

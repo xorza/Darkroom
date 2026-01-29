@@ -5,6 +5,7 @@ use super::{
     connected_components, create_threshold_mask, detect_stars, detect_stars_filtered,
     extract_candidates,
 };
+use crate::common::Buffer2;
 use crate::star_detection::StarDetectionConfig;
 use crate::star_detection::background::BackgroundMap;
 use crate::star_detection::constants::dilate_mask;
@@ -53,20 +54,10 @@ fn generate_test_image(width: usize, height: usize, num_stars: usize) -> Vec<f32
 
 /// Create a background map for benchmarking.
 fn create_background_map(width: usize, height: usize) -> BackgroundMap {
-    let size = width * height;
     BackgroundMap {
-        background: vec![0.1f32; size],
-        noise: vec![0.01f32; size],
-        width,
-        height,
+        background: Buffer2::new_filled(width, height, 0.1f32),
+        noise: Buffer2::new_filled(width, height, 0.01f32),
     }
-}
-
-/// Helper to create threshold mask for benchmarks.
-fn make_threshold_mask(pixels: &[f32], background: &BackgroundMap, sigma: f32) -> Vec<bool> {
-    let mut mask = vec![false; pixels.len()];
-    create_threshold_mask(pixels, background, sigma, &mut mask);
-    mask
 }
 
 /// Register detection benchmarks with Criterion.
@@ -84,11 +75,12 @@ pub fn benchmarks(c: &mut Criterion) {
     mask_group.sample_size(10);
     mask_group.throughput(Throughput::Elements((WIDTH * HEIGHT) as u64));
 
-    let mut mask = vec![false; pixels.len()];
+    let pixels_buf = Buffer2::new(WIDTH, HEIGHT, pixels.clone());
+    let mut mask = Buffer2::new_filled(WIDTH, HEIGHT, false);
     mask_group.bench_function(BenchmarkId::new("create_threshold_mask", &size_name), |b| {
         b.iter(|| {
             create_threshold_mask(
-                black_box(&pixels),
+                black_box(&pixels_buf),
                 black_box(&background),
                 black_box(3.0),
                 black_box(&mut mask),
@@ -103,18 +95,11 @@ pub fn benchmarks(c: &mut Criterion) {
     dilate_group.sample_size(10);
     dilate_group.throughput(Throughput::Elements((WIDTH * HEIGHT) as u64));
 
-    let mask = make_threshold_mask(&pixels, &background, 3.0);
-    let mut output = vec![false; mask.len()];
+    let mut mask = Buffer2::new_filled(WIDTH, HEIGHT, false);
+    create_threshold_mask(&pixels_buf, &background, 3.0, &mut mask);
+    let mut output = Buffer2::new_filled(WIDTH, HEIGHT, false);
     dilate_group.bench_function(BenchmarkId::new(&size_name, "radius_1"), |b| {
-        b.iter(|| {
-            dilate_mask(
-                black_box(&mask),
-                black_box(WIDTH),
-                black_box(HEIGHT),
-                black_box(1),
-                black_box(&mut output),
-            )
-        })
+        b.iter(|| dilate_mask(black_box(&mask), black_box(1), black_box(&mut output)))
     });
 
     dilate_group.finish();
@@ -124,19 +109,14 @@ pub fn benchmarks(c: &mut Criterion) {
     cc_group.sample_size(10);
     cc_group.throughput(Throughput::Elements((WIDTH * HEIGHT) as u64));
 
-    let mut dilated_mask = make_threshold_mask(&pixels, &background, 3.0);
-    let mut dilated = vec![false; dilated_mask.len()];
-    dilate_mask(&dilated_mask, WIDTH, HEIGHT, 1, &mut dilated);
+    let mut dilated_mask = Buffer2::new_filled(WIDTH, HEIGHT, false);
+    create_threshold_mask(&pixels_buf, &background, 3.0, &mut dilated_mask);
+    let mut dilated = Buffer2::new_filled(WIDTH, HEIGHT, false);
+    dilate_mask(&dilated_mask, 1, &mut dilated);
     std::mem::swap(&mut dilated_mask, &mut dilated);
 
     cc_group.bench_function(BenchmarkId::new("connected_components", &size_name), |b| {
-        b.iter(|| {
-            black_box(connected_components(
-                black_box(&dilated_mask),
-                black_box(WIDTH),
-                black_box(HEIGHT),
-            ))
-        })
+        b.iter(|| black_box(connected_components(black_box(&dilated_mask))))
     });
 
     cc_group.finish();
@@ -145,7 +125,7 @@ pub fn benchmarks(c: &mut Criterion) {
     let mut extract_group = c.benchmark_group("extract_candidates");
     extract_group.sample_size(10);
 
-    let (labels, num_labels) = connected_components(&dilated_mask, WIDTH, HEIGHT);
+    let (labels, num_labels) = connected_components(dilated_mask.pixels(), WIDTH, HEIGHT);
 
     let deblend_config = DeblendConfig {
         min_separation: 3,

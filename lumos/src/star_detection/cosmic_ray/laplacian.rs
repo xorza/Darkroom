@@ -7,6 +7,7 @@
 //! Reference: van Dokkum 2001, PASP 113, 1420
 
 use super::simd;
+use crate::common::Buffer2;
 
 /// Compute the Laplacian of an image using a 3x3 kernel.
 ///
@@ -19,14 +20,18 @@ use super::simd;
 ///
 /// Edge pixels are handled by clamping to image bounds.
 /// Uses SIMD acceleration for interior pixels on supported platforms.
-pub fn compute_laplacian(pixels: &[f32], width: usize, height: usize) -> Vec<f32> {
+pub fn compute_laplacian(pixels: &Buffer2<f32>) -> Buffer2<f32> {
+    let width = pixels.width();
+    let height = pixels.height();
+
     // Use SIMD-accelerated version for larger images
     if width >= 10 && height >= 3 {
-        return simd::compute_laplacian_simd(pixels, width, height);
+        simd::compute_laplacian_simd(pixels)
+    } else {
+        // Scalar fallback for small images
+        let data = compute_laplacian_scalar(pixels, width, height);
+        Buffer2::new(width, height, data)
     }
-
-    // Scalar fallback for small images
-    compute_laplacian_scalar(pixels, width, height)
 }
 
 /// Scalar implementation of Laplacian computation.
@@ -74,8 +79,6 @@ fn compute_laplacian_scalar(pixels: &[f32], width: usize, height: usize) -> Vec<
 ///
 /// # Arguments
 /// * `pixels` - Image pixel data
-/// * `width` - Image width
-/// * `height` - Image height
 /// * `cx` - Star center x coordinate
 /// * `cy` - Star center y coordinate
 /// * `stamp_radius` - Radius of analysis stamp
@@ -84,17 +87,16 @@ fn compute_laplacian_scalar(pixels: &[f32], width: usize, height: usize) -> Vec<
 ///
 /// # Returns
 /// Laplacian SNR value. Higher = more cosmic ray-like.
-#[allow(clippy::too_many_arguments)]
 pub fn compute_laplacian_snr(
-    pixels: &[f32],
-    width: usize,
-    height: usize,
+    pixels: &Buffer2<f32>,
     cx: f32,
     cy: f32,
     stamp_radius: usize,
     background: f32,
     noise: f32,
 ) -> f32 {
+    let width = pixels.width();
+    let height = pixels.height();
     let icx = cx.round() as isize;
     let icy = cy.round() as isize;
 
@@ -127,8 +129,8 @@ mod tests {
     #[test]
     fn test_compute_laplacian_flat_image() {
         // Flat image should have zero Laplacian
-        let pixels = vec![0.5f32; 25];
-        let laplacian = compute_laplacian(&pixels, 5, 5);
+        let pixels = Buffer2::new(5, 5, vec![0.5f32; 25]);
+        let laplacian = compute_laplacian(&pixels);
 
         // All interior points should be zero
         for y in 1..4 {
@@ -148,10 +150,11 @@ mod tests {
     #[test]
     fn test_compute_laplacian_single_peak() {
         // Single pixel peak should have negative Laplacian (peak detection)
-        let mut pixels = vec![0.0f32; 25];
-        pixels[2 * 5 + 2] = 1.0; // Center peak
+        let mut pixels_data = vec![0.0f32; 25];
+        pixels_data[2 * 5 + 2] = 1.0; // Center peak
+        let pixels = Buffer2::new(5, 5, pixels_data);
 
-        let laplacian = compute_laplacian(&pixels, 5, 5);
+        let laplacian = compute_laplacian(&pixels);
 
         // Center should have negative Laplacian (sharp peak)
         assert!(
@@ -170,23 +173,25 @@ mod tests {
     #[test]
     fn test_compute_laplacian_gaussian_peak() {
         // Gaussian peak should have smaller (less negative) Laplacian than sharp peak
-        let mut sharp = vec![0.0f32; 49];
-        sharp[3 * 7 + 3] = 1.0;
+        let mut sharp_data = vec![0.0f32; 49];
+        sharp_data[3 * 7 + 3] = 1.0;
+        let sharp = Buffer2::new(7, 7, sharp_data);
 
-        let mut gaussian = vec![0.0f32; 49];
+        let mut gaussian_data = vec![0.0f32; 49];
         // Simple 3x3 Gaussian-ish pattern
-        gaussian[3 * 7 + 3] = 1.0;
-        gaussian[3 * 7 + 2] = 0.5;
-        gaussian[3 * 7 + 4] = 0.5;
-        gaussian[2 * 7 + 3] = 0.5;
-        gaussian[4 * 7 + 3] = 0.5;
-        gaussian[2 * 7 + 2] = 0.25;
-        gaussian[2 * 7 + 4] = 0.25;
-        gaussian[4 * 7 + 2] = 0.25;
-        gaussian[4 * 7 + 4] = 0.25;
+        gaussian_data[3 * 7 + 3] = 1.0;
+        gaussian_data[3 * 7 + 2] = 0.5;
+        gaussian_data[3 * 7 + 4] = 0.5;
+        gaussian_data[2 * 7 + 3] = 0.5;
+        gaussian_data[4 * 7 + 3] = 0.5;
+        gaussian_data[2 * 7 + 2] = 0.25;
+        gaussian_data[2 * 7 + 4] = 0.25;
+        gaussian_data[4 * 7 + 2] = 0.25;
+        gaussian_data[4 * 7 + 4] = 0.25;
+        let gaussian = Buffer2::new(7, 7, gaussian_data);
 
-        let lapl_sharp = compute_laplacian(&sharp, 7, 7);
-        let lapl_gaussian = compute_laplacian(&gaussian, 7, 7);
+        let lapl_sharp = compute_laplacian(&sharp);
+        let lapl_gaussian = compute_laplacian(&gaussian);
 
         // Sharp peak has more negative Laplacian than Gaussian
         assert!(
@@ -200,10 +205,11 @@ mod tests {
     #[test]
     fn test_compute_laplacian_snr_cosmic_ray() {
         // Sharp peak has high Laplacian SNR
-        let mut pixels = vec![0.1f32; 49];
-        pixels[3 * 7 + 3] = 1.0;
+        let mut pixels_data = vec![0.1f32; 49];
+        pixels_data[3 * 7 + 3] = 1.0;
+        let pixels = Buffer2::new(7, 7, pixels_data);
 
-        let snr = compute_laplacian_snr(&pixels, 7, 7, 3.0, 3.0, 2, 0.1, 0.01);
+        let snr = compute_laplacian_snr(&pixels, 3.0, 3.0, 2, 0.1, 0.01);
 
         assert!(
             snr > 50.0,
@@ -218,7 +224,7 @@ mod tests {
         let size = 15;
         let center = 7;
         let sigma = 2.0f32; // Wider Gaussian simulating real seeing
-        let mut pixels = vec![0.1f32; size * size];
+        let mut pixels_data = vec![0.1f32; size * size];
 
         for y in 0..size {
             for x in 0..size {
@@ -227,35 +233,21 @@ mod tests {
                 let r2 = dx * dx + dy * dy;
                 let value = 0.8 * (-r2 / (2.0 * sigma * sigma)).exp();
                 if value > 0.001 {
-                    pixels[y * size + x] = 0.1 + value;
+                    pixels_data[y * size + x] = 0.1 + value;
                 }
             }
         }
+        let pixels = Buffer2::new(size, size, pixels_data);
 
-        let gaussian_snr = compute_laplacian_snr(
-            &pixels,
-            size,
-            size,
-            center as f32,
-            center as f32,
-            3,
-            0.1,
-            0.01,
-        );
+        let gaussian_snr =
+            compute_laplacian_snr(&pixels, center as f32, center as f32, 3, 0.1, 0.01);
 
         // Compare to a cosmic ray (single sharp pixel)
-        let mut cr_pixels = vec![0.1f32; size * size];
-        cr_pixels[center * size + center] = 0.9;
-        let cr_snr = compute_laplacian_snr(
-            &cr_pixels,
-            size,
-            size,
-            center as f32,
-            center as f32,
-            3,
-            0.1,
-            0.01,
-        );
+        let mut cr_pixels_data = vec![0.1f32; size * size];
+        cr_pixels_data[center * size + center] = 0.9;
+        let cr_pixels = Buffer2::new(size, size, cr_pixels_data);
+
+        let cr_snr = compute_laplacian_snr(&cr_pixels, center as f32, center as f32, 3, 0.1, 0.01);
 
         // Cosmic ray should have significantly higher Laplacian SNR than Gaussian star
         assert!(

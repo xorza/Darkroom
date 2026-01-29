@@ -7,6 +7,7 @@
 //! 4. Assigning pixels to nearest peak using Voronoi partitioning
 
 use super::DeblendConfig;
+use crate::common::Buffer2;
 
 /// A pixel with its coordinates and value.
 #[derive(Debug, Clone, Copy)]
@@ -53,11 +54,12 @@ pub struct DeblendedCandidate {
 /// Only returns peaks that are sufficiently separated and prominent.
 pub fn find_local_maxima(
     data: &ComponentData,
-    pixels: &[f32],
-    width: usize,
+    pixels: &Buffer2<f32>,
     config: &DeblendConfig,
 ) -> Vec<Pixel> {
     let mut peaks: Vec<Pixel> = Vec::new();
+    let width = pixels.width();
+    let height = pixels.height();
 
     // Find global maximum first
     let global_max = data.pixels.iter().map(|p| p.value).fold(f32::MIN, f32::max);
@@ -84,9 +86,8 @@ pub fn find_local_maxima(
                 if nx >= 0 && ny >= 0 {
                     let nx = nx as usize;
                     let ny = ny as usize;
-                    let neighbor_idx = ny * width + nx;
 
-                    if neighbor_idx < pixels.len() && pixels[neighbor_idx] >= pixel.value {
+                    if nx < width && ny < height && pixels[(nx, ny)] >= pixel.value {
                         is_maximum = false;
                         break;
                     }
@@ -200,11 +201,10 @@ pub fn deblend_by_nearest_peak(data: &ComponentData, peaks: &[Pixel]) -> Vec<Deb
 /// candidates if the component contains multiple peaks.
 pub fn deblend_local_maxima(
     data: &ComponentData,
-    pixels: &[f32],
-    width: usize,
+    pixels: &Buffer2<f32>,
     config: &DeblendConfig,
 ) -> Vec<DeblendedCandidate> {
-    let peaks = find_local_maxima(data, pixels, width, config);
+    let peaks = find_local_maxima(data, pixels, config);
 
     if peaks.len() <= 1 {
         // Single peak - create one candidate
@@ -281,15 +281,15 @@ mod tests {
         // Create full image
         let width = 100;
         let height = 100;
-        let mut pixels = vec![0.0f32; width * height];
+        let mut pixels = Buffer2::new_filled(width, height, 0.0f32);
         for p in &star {
             if p.x < width && p.y < height {
-                pixels[p.y * width + p.x] = p.value;
+                pixels[(p.x, p.y)] = p.value;
             }
         }
 
         let config = DeblendConfig::default();
-        let peaks = find_local_maxima(&data, &pixels, width, &config);
+        let peaks = find_local_maxima(&data, &pixels, &config);
 
         assert_eq!(peaks.len(), 1, "Should find exactly one peak");
         assert!(
@@ -308,15 +308,15 @@ mod tests {
 
         // Combine into one component
         let mut all_pixels: Vec<Pixel> = Vec::new();
-        let mut image = vec![0.0f32; width * height];
+        let mut image = Buffer2::new_filled(width, height, 0.0f32);
 
         for p in star1.iter().chain(star2.iter()) {
             if p.x < width && p.y < height {
-                image[p.y * width + p.x] += p.value;
+                image[(p.x, p.y)] += p.value;
                 all_pixels.push(Pixel {
                     x: p.x,
                     y: p.y,
-                    value: image[p.y * width + p.x],
+                    value: image[(p.x, p.y)],
                 });
             }
         }
@@ -344,7 +344,7 @@ mod tests {
             min_prominence: 0.3,
             ..Default::default()
         };
-        let peaks = find_local_maxima(&data, &image, width, &config);
+        let peaks = find_local_maxima(&data, &image, &config);
 
         assert_eq!(peaks.len(), 2, "Should find two peaks");
     }
@@ -358,15 +358,15 @@ mod tests {
         let star2 = make_gaussian_star(70, 50, 0.8, 2.5);
 
         let mut all_pixels: Vec<Pixel> = Vec::new();
-        let mut image = vec![0.0f32; width * height];
+        let mut image = Buffer2::new_filled(width, height, 0.0f32);
 
         for p in star1.iter().chain(star2.iter()) {
             if p.x < width && p.y < height {
-                image[p.y * width + p.x] += p.value;
+                image[(p.x, p.y)] += p.value;
                 all_pixels.push(Pixel {
                     x: p.x,
                     y: p.y,
-                    value: image[p.y * width + p.x],
+                    value: image[(p.x, p.y)],
                 });
             }
         }
@@ -394,7 +394,7 @@ mod tests {
             ..Default::default()
         };
 
-        let candidates = deblend_local_maxima(&data, &image, width, &config);
+        let candidates = deblend_local_maxima(&data, &image, &config);
 
         assert_eq!(candidates.len(), 2, "Should create two candidates");
         assert!(candidates[0].area > 0);

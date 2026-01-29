@@ -42,6 +42,7 @@ pub mod star_profiles;
 pub mod transforms;
 
 // Re-export main types and functions for convenience
+use crate::common::Buffer2;
 pub use artifacts::add_cosmic_rays;
 pub use backgrounds::{
     NebulaConfig, add_gradient_background, add_nebula_background, add_uniform_background,
@@ -65,7 +66,7 @@ pub use transforms::{
 /// Generate a sparse star field with 20 well-separated stars.
 ///
 /// Good for testing basic detection accuracy without crowding issues.
-pub fn sparse_field(width: usize, height: usize) -> (Vec<f32>, Vec<GroundTruthStar>) {
+pub fn sparse_field(width: usize, height: usize) -> (Buffer2<f32>, Vec<GroundTruthStar>) {
     let config = StarFieldConfig {
         width,
         height,
@@ -77,7 +78,7 @@ pub fn sparse_field(width: usize, height: usize) -> (Vec<f32>, Vec<GroundTruthSt
 /// Generate a dense star field with 200 stars.
 ///
 /// Good for testing detection in moderately crowded fields.
-pub fn dense_field(width: usize, height: usize) -> (Vec<f32>, Vec<GroundTruthStar>) {
+pub fn dense_field(width: usize, height: usize) -> (Buffer2<f32>, Vec<GroundTruthStar>) {
     let config = StarFieldConfig {
         width,
         height,
@@ -89,7 +90,7 @@ pub fn dense_field(width: usize, height: usize) -> (Vec<f32>, Vec<GroundTruthSta
 /// Generate a crowded cluster with 500 stars.
 ///
 /// Good for testing deblending and crowded field handling.
-pub fn crowded_cluster(width: usize, height: usize) -> (Vec<f32>, Vec<GroundTruthStar>) {
+pub fn crowded_cluster(width: usize, height: usize) -> (Buffer2<f32>, Vec<GroundTruthStar>) {
     let config = StarFieldConfig {
         width,
         height,
@@ -101,7 +102,7 @@ pub fn crowded_cluster(width: usize, height: usize) -> (Vec<f32>, Vec<GroundTrut
 /// Generate faint stars near detection limit.
 ///
 /// Good for testing detection sensitivity and SNR thresholds.
-pub fn faint_field(width: usize, height: usize) -> (Vec<f32>, Vec<GroundTruthStar>) {
+pub fn faint_field(width: usize, height: usize) -> (Buffer2<f32>, Vec<GroundTruthStar>) {
     let config = StarFieldConfig {
         width,
         height,
@@ -113,7 +114,7 @@ pub fn faint_field(width: usize, height: usize) -> (Vec<f32>, Vec<GroundTruthSta
 /// Generate elliptical stars simulating tracking errors.
 ///
 /// Good for testing detection with elongated PSFs.
-pub fn elliptical_field(width: usize, height: usize) -> (Vec<f32>, Vec<GroundTruthStar>) {
+pub fn elliptical_field(width: usize, height: usize) -> (Buffer2<f32>, Vec<GroundTruthStar>) {
     let config = StarFieldConfig {
         width,
         height,
@@ -248,7 +249,7 @@ impl StarFieldBuilder {
     }
 
     /// Build and generate the star field.
-    pub fn build(self) -> (Vec<f32>, Vec<GroundTruthStar>) {
+    pub fn build(self) -> (Buffer2<f32>, Vec<GroundTruthStar>) {
         generate_star_field(&self.config)
     }
 

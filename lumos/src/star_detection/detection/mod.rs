@@ -16,6 +16,7 @@ use super::deblend::{
     ComponentData, DeblendConfig, MultiThresholdDeblendConfig, Pixel,
     deblend_component as multi_threshold_deblend, deblend_local_maxima,
 };
+use crate::common::Buffer2;
 #[cfg(target_arch = "x86_64")]
 use crate::common::cpu_features;
 
@@ -85,21 +86,19 @@ impl From<&StarDetectionConfig> for DetectionConfig {
 ///
 /// # Arguments
 /// * `pixels` - Image pixel data
-/// * `width` - Image width
-/// * `height` - Image height
 /// * `background` - Background map from `estimate_background`
 /// * `config` - Detection configuration
 pub fn detect_stars(
-    pixels: &[f32],
-    width: usize,
-    height: usize,
+    pixels: &Buffer2<f32>,
     background: &BackgroundMap,
     config: &StarDetectionConfig,
 ) -> Vec<StarCandidate> {
+    let width = pixels.width();
+    let height = pixels.height();
     let detection_config = DetectionConfig::from(config);
 
     // Create binary mask of above-threshold pixels
-    let mut mask = vec![false; pixels.len()];
+    let mut mask = Buffer2::new_filled(width, height, false);
     create_threshold_mask(
         pixels,
         background,
@@ -110,12 +109,12 @@ pub fn detect_stars(
     // Dilate mask to connect nearby pixels that may be separated due to
     // Bayer pattern artifacts or noise. Use radius 1 (3x3 structuring element)
     // to minimize merging of close stars while still connecting fragmented detections.
-    let mut dilated = vec![false; mask.len()];
-    dilate_mask(&mask, width, height, 1, &mut dilated);
+    let mut dilated = Buffer2::new_filled(width, height, false);
+    dilate_mask(&mask, 1, &mut dilated);
     std::mem::swap(&mut mask, &mut dilated);
 
     // Find connected components
-    let (labels, num_labels) = connected_components(&mask, width, height);
+    let (labels, num_labels) = connected_components(&mask);
 
     // Extract candidate properties with deblending
     let deblend_config = DeblendConfig::from(config);
@@ -123,8 +122,6 @@ pub fn detect_stars(
         pixels,
         &labels,
         num_labels,
-        width,
-        height,
         &deblend_config,
         detection_config.max_area,
     );
@@ -146,10 +143,10 @@ pub fn detect_stars(
 /// Create binary mask of pixels above threshold, with SIMD dispatch.
 #[cfg(target_arch = "x86_64")]
 pub fn create_threshold_mask(
-    pixels: &[f32],
+    pixels: &Buffer2<f32>,
     background: &BackgroundMap,
     sigma_threshold: f32,
-    mask: &mut [bool],
+    mask: &mut Buffer2<bool>,
 ) {
     if cpu_features::has_sse4_1() {
         // SAFETY: We've checked that SSE4.1 is available.
@@ -164,10 +161,10 @@ pub fn create_threshold_mask(
 /// Create binary mask of pixels above threshold, with NEON dispatch (aarch64).
 #[cfg(target_arch = "aarch64")]
 pub fn create_threshold_mask(
-    pixels: &[f32],
+    pixels: &Buffer2<f32>,
     background: &BackgroundMap,
     sigma_threshold: f32,
-    mask: &mut [bool],
+    mask: &mut Buffer2<bool>,
 ) {
     // SAFETY: NEON is always available on aarch64.
     unsafe {
@@ -178,10 +175,10 @@ pub fn create_threshold_mask(
 /// Create binary mask of pixels above threshold (scalar fallback for other architectures).
 #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
 pub fn create_threshold_mask(
-    pixels: &[f32],
+    pixels: &Buffer2<f32>,
     background: &BackgroundMap,
     sigma_threshold: f32,
-    mask: &mut [bool],
+    mask: &mut Buffer2<bool>,
 ) {
     scalar::create_threshold_mask(pixels, background, sigma_threshold, mask)
 }
@@ -193,11 +190,10 @@ pub fn create_threshold_mask(
 /// 2. Second pass: Parallel label flattening using precomputed root mapping
 ///
 /// For images >1M pixels, the second pass is parallelized using rayon.
-pub(crate) fn connected_components(
-    mask: &[bool],
-    width: usize,
-    height: usize,
-) -> (Vec<u32>, usize) {
+pub(crate) fn connected_components(mask: &Buffer2<bool>) -> (Vec<u32>, usize) {
+    let width = mask.width();
+    let height = mask.height();
+
     let mut labels = vec![0u32; width * height];
     let mut parent: Vec<u32> = Vec::new();
     let mut next_label = 1u32;
@@ -332,23 +328,23 @@ fn union(parent: &mut [u32], a: u32, b: u32) {
 /// # Arguments
 /// * `pixels` - Original image pixel data (for peak values)
 /// * `filtered` - Matched-filtered image (background-subtracted and convolved)
-/// * `width` - Image width
-/// * `height` - Image height
 /// * `background` - Background map (for noise estimates)
 /// * `config` - Detection configuration
 pub fn detect_stars_filtered(
-    pixels: &[f32],
-    filtered: &[f32],
-    width: usize,
-    height: usize,
+    pixels: &Buffer2<f32>,
+    filtered: &Buffer2<f32>,
     background: &BackgroundMap,
     config: &StarDetectionConfig,
 ) -> Vec<StarCandidate> {
+    let width = pixels.width();
+    let height = pixels.height();
+    debug_assert_eq!(width, filtered.width());
+    debug_assert_eq!(height, filtered.height());
     let detection_config = DetectionConfig::from(config);
 
     // Create binary mask from the filtered image
     // The threshold is based on noise in the filtered image
-    let mut mask = vec![false; filtered.len()];
+    let mut mask = Buffer2::new_filled(width, height, false);
     create_threshold_mask_filtered(
         filtered,
         background,
@@ -359,13 +355,13 @@ pub fn detect_stars_filtered(
     // Dilate mask with radius 1 to connect fragmented detections while
     // minimizing merging of close stars. Matched filtering already provides
     // good connectivity, so minimal dilation is needed.
-    let mut dilated = vec![false; mask.len()];
-    dilate_mask(&mask, width, height, 1, &mut dilated);
+    let mut dilated = Buffer2::new_filled(width, height, false);
+    dilate_mask(&mask, 1, &mut dilated);
     std::mem::swap(&mut mask, &mut dilated);
     drop(dilated);
 
     // Find connected components
-    let (labels, num_labels) = connected_components(&mask, width, height);
+    let (labels, num_labels) = connected_components(&mask);
 
     // Extract candidate properties using ORIGINAL pixels for peak values, with deblending
     let deblend_config = DeblendConfig::from(config);
@@ -373,8 +369,6 @@ pub fn detect_stars_filtered(
         pixels,
         &labels,
         num_labels,
-        width,
-        height,
         &deblend_config,
         detection_config.max_area,
     );
@@ -400,10 +394,10 @@ pub fn detect_stars_filtered(
 /// being positive and above a noise-scaled threshold.
 #[cfg(target_arch = "x86_64")]
 pub fn create_threshold_mask_filtered(
-    filtered: &[f32],
+    filtered: &Buffer2<f32>,
     background: &BackgroundMap,
     sigma_threshold: f32,
-    mask: &mut [bool],
+    mask: &mut Buffer2<bool>,
 ) {
     if cpu_features::has_sse4_1() {
         // SAFETY: We've checked that SSE4.1 is available.
@@ -423,10 +417,10 @@ pub fn create_threshold_mask_filtered(
 /// Create binary mask from a filtered (convolved) image, with NEON dispatch (aarch64).
 #[cfg(target_arch = "aarch64")]
 pub fn create_threshold_mask_filtered(
-    filtered: &[f32],
+    filtered: &Buffer2<f32>,
     background: &BackgroundMap,
     sigma_threshold: f32,
-    mask: &mut [bool],
+    mask: &mut Buffer2<bool>,
 ) {
     // SAFETY: NEON is always available on aarch64.
     unsafe {
@@ -442,10 +436,10 @@ pub fn create_threshold_mask_filtered(
 /// Create binary mask from a filtered (convolved) image (scalar fallback for other architectures).
 #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
 pub fn create_threshold_mask_filtered(
-    filtered: &[f32],
+    filtered: &Buffer2<f32>,
     background: &BackgroundMap,
     sigma_threshold: f32,
-    mask: &mut [bool],
+    mask: &mut Buffer2<bool>,
 ) {
     scalar::create_threshold_mask_filtered(filtered, background, sigma_threshold, mask);
 }
@@ -472,11 +466,9 @@ impl From<&StarDetectionConfig> for DeblendConfig {
 /// processing of pathologically large regions (e.g., when the entire image
 /// is erroneously detected as one component due to bad thresholding).
 pub(crate) fn extract_candidates(
-    pixels: &[f32],
+    pixels: &Buffer2<f32>,
     labels: &[u32],
     num_labels: usize,
-    width: usize,
-    _height: usize,
     deblend_config: &DeblendConfig,
     max_area: usize,
 ) -> Vec<StarCandidate> {
@@ -484,6 +476,7 @@ pub(crate) fn extract_candidates(
         return Vec::new();
     }
     use rayon::prelude::*;
+    let width = pixels.width();
 
     // Collect component data in single pass
     // Stop collecting pixels for components that exceed max_area to avoid
@@ -556,7 +549,7 @@ pub(crate) fn extract_candidates(
                     .collect::<Vec<_>>()
             } else {
                 // Use simple local-maxima deblending from deblend module
-                let deblended = deblend_local_maxima(&data, pixels, width, deblend_config);
+                let deblended = deblend_local_maxima(&data, pixels, deblend_config);
 
                 deblended
                     .into_iter()

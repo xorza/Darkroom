@@ -27,6 +27,8 @@ pub mod simd;
 #[cfg(test)]
 mod tests;
 
+use crate::common::Buffer2;
+
 // Re-export public API
 pub use fine_structure::compute_fine_structure;
 // median_of_n is now in median_filter module
@@ -64,21 +66,19 @@ impl Default for LACosmicConfig {
 pub struct LACosmicResult {
     /// Boolean mask where true = cosmic ray pixel.
     #[allow(dead_code)]
-    pub cosmic_ray_mask: Vec<bool>,
+    pub cosmic_ray_mask: Buffer2<bool>,
     /// Number of cosmic ray pixels detected.
     #[allow(dead_code)]
     pub cosmic_ray_count: usize,
     /// Laplacian image (for debugging).
     #[allow(dead_code)]
-    pub laplacian: Vec<f32>,
+    pub laplacian: Buffer2<f32>,
 }
 
 /// Detect cosmic rays using the L.A.Cosmic algorithm.
 ///
 /// # Arguments
 /// * `pixels` - Image pixel data (grayscale, normalized 0.0-1.0)
-/// * `width` - Image width
-/// * `height` - Image height
 /// * `background` - Background level per pixel
 /// * `noise` - Noise level per pixel (sigma)
 /// * `config` - Detection configuration
@@ -87,30 +87,32 @@ pub struct LACosmicResult {
 /// LACosmicResult containing the cosmic ray mask and diagnostics.
 #[allow(dead_code)]
 pub fn detect_cosmic_rays(
-    pixels: &[f32],
-    width: usize,
-    height: usize,
-    background: &[f32],
-    noise: &[f32],
+    pixels: &Buffer2<f32>,
+    background: &Buffer2<f32>,
+    noise: &Buffer2<f32>,
     config: &LACosmicConfig,
 ) -> LACosmicResult {
-    assert_eq!(pixels.len(), width * height);
-    assert_eq!(background.len(), width * height);
-    assert_eq!(noise.len(), width * height);
+    let width = pixels.width();
+    let height = pixels.height();
+    debug_assert_eq!(width, background.width());
+    debug_assert_eq!(height, background.height());
+    debug_assert_eq!(width, noise.width());
+    debug_assert_eq!(height, noise.height());
 
     // Step 1: Compute Laplacian of background-subtracted image
     // First subtract background
-    let subtracted: Vec<f32> = pixels
+    let subtracted_data: Vec<f32> = pixels
         .iter()
         .zip(background.iter())
         .map(|(&p, &b)| (p - b).max(0.0))
         .collect();
+    let subtracted = Buffer2::new(width, height, subtracted_data);
 
     // Compute Laplacian
-    let laplacian_img = compute_laplacian(&subtracted, width, height);
+    let laplacian_img = compute_laplacian(&subtracted);
 
     // Step 2: Compute fine structure image for comparison
-    let fine_structure = compute_fine_structure(&subtracted, width, height);
+    let fine_structure = compute_fine_structure(&subtracted);
 
     // Step 3: Create initial cosmic ray mask
     // A pixel is flagged if:
@@ -168,11 +170,11 @@ pub fn detect_cosmic_rays(
         let grown_mask = grow_mask(&mask, width, height, config.grow_radius, &subtracted);
         let new_count = grown_mask.iter().filter(|&&m| m).count();
         cosmic_ray_count = new_count;
-        mask.copy_from_slice(&grown_mask);
+        mask = grown_mask;
     }
 
     LACosmicResult {
-        cosmic_ray_mask: mask,
+        cosmic_ray_mask: Buffer2::new(width, height, mask),
         cosmic_ray_count,
         laplacian: laplacian_img,
     }
@@ -184,7 +186,7 @@ fn grow_mask(
     width: usize,
     height: usize,
     radius: usize,
-    pixels: &[f32],
+    pixels: &Buffer2<f32>,
 ) -> Vec<bool> {
     let mut grown = mask.to_vec();
 

@@ -5,6 +5,8 @@
 //! - NEON on aarch64
 //! - Scalar fallback on other platforms
 
+use crate::common::Buffer2;
+
 #[cfg(target_arch = "x86_64")]
 use crate::common::cpu_features;
 
@@ -79,7 +81,9 @@ fn compute_laplacian_row_scalar(pixels: &[f32], width: usize, y: usize, output: 
 /// Compute full image Laplacian using SIMD acceleration.
 ///
 /// Handles edge pixels with clamping, uses SIMD for interior rows.
-pub fn compute_laplacian_simd(pixels: &[f32], width: usize, height: usize) -> Vec<f32> {
+pub fn compute_laplacian_simd(pixels: &Buffer2<f32>) -> Buffer2<f32> {
+    let width = pixels.width();
+    let height = pixels.height();
     let mut output = vec![0.0f32; pixels.len()];
 
     // Handle edge rows with scalar code (clamping)
@@ -125,14 +129,16 @@ pub fn compute_laplacian_simd(pixels: &[f32], width: usize, height: usize) -> Ve
         }
     }
 
-    output
+    Buffer2::new(width, height, output)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn compute_laplacian_reference(pixels: &[f32], width: usize, height: usize) -> Vec<f32> {
+    fn compute_laplacian_reference(pixels: &Buffer2<f32>) -> Buffer2<f32> {
+        let width = pixels.width();
+        let height = pixels.height();
         let mut output = vec![0.0f32; pixels.len()];
         for y in 0..height {
             for x in 0..width {
@@ -156,19 +162,23 @@ mod tests {
                 output[idx] = left + right + above + below - 4.0 * pixels[idx];
             }
         }
-        output
+        Buffer2::new(width, height, output)
     }
 
     #[test]
     fn test_compute_laplacian_simd_matches_reference() {
         let width = 64;
         let height = 32;
-        let pixels: Vec<f32> = (0..width * height)
-            .map(|i| ((i * 7) % 100) as f32 * 0.01)
-            .collect();
+        let pixels = Buffer2::new(
+            width,
+            height,
+            (0..width * height)
+                .map(|i| ((i * 7) % 100) as f32 * 0.01)
+                .collect(),
+        );
 
-        let expected = compute_laplacian_reference(&pixels, width, height);
-        let result = compute_laplacian_simd(&pixels, width, height);
+        let expected = compute_laplacian_reference(&pixels);
+        let result = compute_laplacian_simd(&pixels);
 
         for y in 0..height {
             for x in 0..width {
@@ -189,9 +199,9 @@ mod tests {
     fn test_compute_laplacian_simd_flat_image() {
         let width = 32;
         let height = 16;
-        let pixels = vec![0.5f32; width * height];
+        let pixels = Buffer2::new_filled(width, height, 0.5f32);
 
-        let result = compute_laplacian_simd(&pixels, width, height);
+        let result = compute_laplacian_simd(&pixels);
 
         // Interior pixels should have zero Laplacian for flat image
         for y in 1..height - 1 {
@@ -212,10 +222,11 @@ mod tests {
     fn test_compute_laplacian_simd_sharp_peak() {
         let width = 32;
         let height = 16;
-        let mut pixels = vec![0.1f32; width * height];
-        pixels[8 * width + 16] = 1.0; // Sharp peak
+        let mut pixels_data = vec![0.1f32; width * height];
+        pixels_data[8 * width + 16] = 1.0; // Sharp peak
+        let pixels = Buffer2::new(width, height, pixels_data);
 
-        let result = compute_laplacian_simd(&pixels, width, height);
+        let result = compute_laplacian_simd(&pixels);
 
         // Peak should have strongly negative Laplacian
         let peak_laplacian = result[8 * width + 16];
@@ -257,12 +268,16 @@ mod tests {
         // Test images smaller than SIMD width threshold
         for width in 4..16 {
             for height in 3..8 {
-                let pixels: Vec<f32> = (0..width * height)
-                    .map(|i| (i as f32 * 0.1).sin() + 1.0)
-                    .collect();
+                let pixels = Buffer2::new(
+                    width,
+                    height,
+                    (0..width * height)
+                        .map(|i| (i as f32 * 0.1).sin() + 1.0)
+                        .collect(),
+                );
 
-                let expected = compute_laplacian_reference(&pixels, width, height);
-                let result = compute_laplacian_simd(&pixels, width, height);
+                let expected = compute_laplacian_reference(&pixels);
+                let result = compute_laplacian_simd(&pixels);
 
                 for y in 0..height {
                     for x in 0..width {
@@ -287,12 +302,16 @@ mod tests {
     fn test_compute_laplacian_simd_edge_rows() {
         let width = 64;
         let height = 32;
-        let pixels: Vec<f32> = (0..width * height)
-            .map(|i| (i as f32 * 0.05).cos() * 10.0 + 50.0)
-            .collect();
+        let pixels = Buffer2::new(
+            width,
+            height,
+            (0..width * height)
+                .map(|i| (i as f32 * 0.05).cos() * 10.0 + 50.0)
+                .collect(),
+        );
 
-        let expected = compute_laplacian_reference(&pixels, width, height);
-        let result = compute_laplacian_simd(&pixels, width, height);
+        let expected = compute_laplacian_reference(&pixels);
+        let result = compute_laplacian_simd(&pixels);
 
         // Specifically check edge rows (y=0 and y=height-1)
         for x in 0..width {
@@ -322,12 +341,16 @@ mod tests {
     fn test_compute_laplacian_simd_edge_columns() {
         let width = 64;
         let height = 32;
-        let pixels: Vec<f32> = (0..width * height)
-            .map(|i| (i as f32 * 0.03).sin() * 20.0 + 100.0)
-            .collect();
+        let pixels = Buffer2::new(
+            width,
+            height,
+            (0..width * height)
+                .map(|i| (i as f32 * 0.03).sin() * 20.0 + 100.0)
+                .collect(),
+        );
 
-        let expected = compute_laplacian_reference(&pixels, width, height);
-        let result = compute_laplacian_simd(&pixels, width, height);
+        let expected = compute_laplacian_reference(&pixels);
+        let result = compute_laplacian_simd(&pixels);
 
         // Specifically check edge columns (x=0 and x=width-1)
         for y in 0..height {
@@ -357,10 +380,14 @@ mod tests {
     fn test_compute_laplacian_simd_corners() {
         let width = 64;
         let height = 32;
-        let pixels: Vec<f32> = (0..width * height).map(|i| (i % 50) as f32 * 0.1).collect();
+        let pixels = Buffer2::new(
+            width,
+            height,
+            (0..width * height).map(|i| (i % 50) as f32 * 0.1).collect(),
+        );
 
-        let expected = compute_laplacian_reference(&pixels, width, height);
-        let result = compute_laplacian_simd(&pixels, width, height);
+        let expected = compute_laplacian_reference(&pixels);
+        let result = compute_laplacian_simd(&pixels);
 
         // Check all four corners
         let corners = [
@@ -387,12 +414,16 @@ mod tests {
     fn test_compute_laplacian_simd_negative_values() {
         let width = 48;
         let height = 24;
-        let pixels: Vec<f32> = (0..width * height)
-            .map(|i| (i as f32 * 0.2).sin() * 50.0) // Mix of positive and negative
-            .collect();
+        let pixels = Buffer2::new(
+            width,
+            height,
+            (0..width * height)
+                .map(|i| (i as f32 * 0.2).sin() * 50.0) // Mix of positive and negative
+                .collect(),
+        );
 
-        let expected = compute_laplacian_reference(&pixels, width, height);
-        let result = compute_laplacian_simd(&pixels, width, height);
+        let expected = compute_laplacian_reference(&pixels);
+        let result = compute_laplacian_simd(&pixels);
 
         for y in 0..height {
             for x in 0..width {
@@ -413,12 +444,16 @@ mod tests {
     fn test_compute_laplacian_simd_large_image() {
         let width = 256;
         let height = 128;
-        let pixels: Vec<f32> = (0..width * height)
-            .map(|i| ((i * 13) % 256) as f32 * 0.01)
-            .collect();
+        let pixels = Buffer2::new(
+            width,
+            height,
+            (0..width * height)
+                .map(|i| ((i * 13) % 256) as f32 * 0.01)
+                .collect(),
+        );
 
-        let expected = compute_laplacian_reference(&pixels, width, height);
-        let result = compute_laplacian_simd(&pixels, width, height);
+        let expected = compute_laplacian_reference(&pixels);
+        let result = compute_laplacian_simd(&pixels);
 
         for y in 0..height {
             for x in 0..width {
@@ -439,16 +474,17 @@ mod tests {
     fn test_compute_laplacian_simd_multiple_peaks() {
         let width = 64;
         let height = 32;
-        let mut pixels = vec![0.1f32; width * height];
+        let mut pixels_data = vec![0.1f32; width * height];
 
         // Add multiple sharp peaks
         let peaks = [(10, 8), (30, 12), (50, 20), (20, 25)];
         for (px, py) in peaks {
-            pixels[py * width + px] = 1.0;
+            pixels_data[py * width + px] = 1.0;
         }
+        let pixels = Buffer2::new(width, height, pixels_data);
 
-        let expected = compute_laplacian_reference(&pixels, width, height);
-        let result = compute_laplacian_simd(&pixels, width, height);
+        let expected = compute_laplacian_reference(&pixels);
+        let result = compute_laplacian_simd(&pixels);
 
         // Check all pixels match
         for y in 0..height {
@@ -483,16 +519,20 @@ mod tests {
         // Test with a linear gradient (should have small Laplacian)
         let width = 64;
         let height = 32;
-        let pixels: Vec<f32> = (0..width * height)
-            .map(|i| {
-                let x = i % width;
-                let y = i / width;
-                (x as f32 * 0.1) + (y as f32 * 0.2)
-            })
-            .collect();
+        let pixels = Buffer2::new(
+            width,
+            height,
+            (0..width * height)
+                .map(|i| {
+                    let x = i % width;
+                    let y = i / width;
+                    (x as f32 * 0.1) + (y as f32 * 0.2)
+                })
+                .collect(),
+        );
 
-        let expected = compute_laplacian_reference(&pixels, width, height);
-        let result = compute_laplacian_simd(&pixels, width, height);
+        let expected = compute_laplacian_reference(&pixels);
+        let result = compute_laplacian_simd(&pixels);
 
         for y in 0..height {
             for x in 0..width {
@@ -561,12 +601,16 @@ mod tests {
         let height = 10;
 
         for width in widths {
-            let pixels: Vec<f32> = (0..width * height)
-                .map(|i| (i as f32 * 0.13).cos() * 25.0 + 50.0)
-                .collect();
+            let pixels = Buffer2::new(
+                width,
+                height,
+                (0..width * height)
+                    .map(|i| (i as f32 * 0.13).cos() * 25.0 + 50.0)
+                    .collect(),
+            );
 
-            let expected = compute_laplacian_reference(&pixels, width, height);
-            let result = compute_laplacian_simd(&pixels, width, height);
+            let expected = compute_laplacian_reference(&pixels);
+            let result = compute_laplacian_simd(&pixels);
 
             for y in 0..height {
                 for x in 0..width {

@@ -1,6 +1,7 @@
 //! Debug test that outputs intermediate steps of star detection.
 
 use super::{SyntheticFieldConfig, SyntheticStar, generate_star_field};
+use crate::common::Buffer2;
 use crate::star_detection::tests::common::{gray_to_rgb_image_stretched, save_image};
 use crate::{AstroImage, ImageDimensions};
 
@@ -99,12 +100,8 @@ fn test_debug_synthetic_steps() {
     println!("Saved: {:?}", path);
 
     let detection_config = StarDetectionConfig::default();
-    let background = estimate_background(
-        &grayscale,
-        width,
-        height,
-        detection_config.background_tile_size,
-    );
+    let grayscale_buf = Buffer2::new(width, height, grayscale.clone());
+    let background = estimate_background(&grayscale_buf, detection_config.background_tile_size);
 
     println!(
         "Background stats: min={:.4}, max={:.4}",
@@ -159,8 +156,8 @@ fn test_debug_synthetic_steps() {
         &grayscale,
         width,
         height,
-        &background.background,
-        &background.noise,
+        background.background.pixels(),
+        background.noise.pixels(),
         detection_config.detection_sigma,
     );
     let mask_count = mask.iter().filter(|&&b| b).count();
@@ -177,8 +174,10 @@ fn test_debug_synthetic_steps() {
     mask_img.save(&path).unwrap();
     println!("Saved: {:?}", path);
 
-    let mut dilated = vec![false; mask.len()];
-    dilate_mask(&mask, width, height, 2, &mut dilated);
+    let mask_buf = Buffer2::new(width, height, mask.clone());
+    let mut dilated_buf = Buffer2::new_filled(width, height, false);
+    dilate_mask(&mask_buf, 2, &mut dilated_buf);
+    let dilated = dilated_buf.into_vec();
     let dilated_count = dilated.iter().filter(|&&b| b).count();
     println!(
         "Dilated mask: {} pixels ({:.2}%)",

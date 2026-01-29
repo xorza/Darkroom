@@ -2,6 +2,7 @@
 //!
 //! Tests the star deblending logic for overlapping/blended stars.
 
+use crate::common::Buffer2;
 use crate::star_detection::StarDetectionConfig;
 use crate::star_detection::background::estimate_background;
 use crate::star_detection::detection::detect_stars;
@@ -61,7 +62,8 @@ fn test_deblend_star_pair() {
     );
 
     // Estimate background
-    let background = estimate_background(&pixels, width, height, TILE_SIZE);
+    let pixels_buf = Buffer2::new(width, height, pixels.clone());
+    let background = estimate_background(&pixels_buf, TILE_SIZE);
 
     // Run detection with deblending enabled
     let config = StarDetectionConfig {
@@ -70,7 +72,7 @@ fn test_deblend_star_pair() {
         ..Default::default()
     };
 
-    let candidates = detect_stars(&pixels, width, height, &background, &config);
+    let candidates = detect_stars(&pixels_buf, &background, &config);
 
     // Create overlay
     let mut img = gray_to_rgb_image_stretched(&pixels, width, height);
@@ -156,7 +158,8 @@ fn test_deblend_chain() {
     );
 
     // Estimate background
-    let background = estimate_background(&pixels, width, height, TILE_SIZE);
+    let pixels_buf = Buffer2::new(width, height, pixels.clone());
+    let background = estimate_background(&pixels_buf, TILE_SIZE);
 
     // Run detection with deblending enabled
     let config = StarDetectionConfig {
@@ -165,7 +168,7 @@ fn test_deblend_chain() {
         ..Default::default()
     };
 
-    let candidates = detect_stars(&pixels, width, height, &background, &config);
+    let candidates = detect_stars(&pixels_buf, &background, &config);
 
     // Create overlay
     let mut img = gray_to_rgb_image_stretched(&pixels, width, height);
@@ -252,7 +255,8 @@ fn test_deblend_unequal_pair() {
     );
 
     // Estimate background
-    let background = estimate_background(&pixels, width, height, TILE_SIZE);
+    let pixels_buf = Buffer2::new(width, height, pixels.clone());
+    let background = estimate_background(&pixels_buf, TILE_SIZE);
 
     // Run detection with deblending enabled
     let config = StarDetectionConfig {
@@ -262,7 +266,7 @@ fn test_deblend_unequal_pair() {
         ..Default::default()
     };
 
-    let candidates = detect_stars(&pixels, width, height, &background, &config);
+    let candidates = detect_stars(&pixels_buf, &background, &config);
 
     // Create overlay
     let mut img = gray_to_rgb_image_stretched(&pixels, width, height);

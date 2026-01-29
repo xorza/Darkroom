@@ -2,7 +2,7 @@
 
 use std::collections::HashSet;
 
-use crate::common::buffer2::Buffer2;
+use crate::common::Buffer2;
 
 /// Map of known sensor defects (hot pixels, dead pixels, bad columns).
 ///
@@ -288,13 +288,13 @@ mod tests {
     #[test]
     fn test_apply_defect_mask_single_hot_pixel() {
         // 5x5 image with uniform value 1.0, one hot pixel at (2,2) with value 10.0
-        let mut pixels: Buffer2<f32> = Buffer2::new_filled(5, 5, 1.0f32);
-
-        pixels[(2, 2)] = 10.0; // Hot pixel
+        let mut pixels = vec![1.0f32; 25];
+        pixels[2 * 5 + 2] = 10.0; // Hot pixel at (2,2)
 
         let map = DefectMap::new(5, 5, &[(2, 2)], &[], &[], &[]);
-        let mut output = Buffer2::new_filled(5, 5, 0.0f32);
-        apply_defect_mask(&pixels, &map, &mut output);
+        let input = Buffer2::new(5, 5, pixels);
+        let mut output = Buffer2::new_default(5, 5);
+        apply_defect_mask(&input, &map, &mut output);
 
         // Hot pixel should be replaced with median of neighbors (all 1.0)
         assert!((output[2 * 5 + 2] - 1.0).abs() < 0.01);
@@ -307,7 +307,9 @@ mod tests {
         pixels[0] = 10.0; // Hot pixel at (0,0)
 
         let map = DefectMap::new(5, 5, &[(0, 0)], &[], &[], &[]);
-        let output = apply_mask(&pixels, 5, 5, &map);
+        let input = Buffer2::new(5, 5, pixels);
+        let mut output = Buffer2::new_default(5, 5);
+        apply_defect_mask(&input, &map, &mut output);
 
         // Corner has only 3 neighbors, median should still be 1.0
         assert!((output[0] - 1.0).abs() < 0.01);
@@ -320,7 +322,9 @@ mod tests {
         pixels[2] = 10.0; // Hot pixel at (2,0)
 
         let map = DefectMap::new(5, 5, &[(2, 0)], &[], &[], &[]);
-        let output = apply_mask(&pixels, 5, 5, &map);
+        let input = Buffer2::new(5, 5, pixels);
+        let mut output = Buffer2::new_default(5, 5);
+        apply_defect_mask(&input, &map, &mut output);
 
         // Edge has 5 neighbors, median should be 1.0
         assert!((output[2] - 1.0).abs() < 0.01);
@@ -334,7 +338,9 @@ mod tests {
         pixels[18] = 20.0; // (3,3) = 3*5+3 = 18
 
         let map = DefectMap::new(5, 5, &[(1, 1), (3, 3)], &[], &[], &[]);
-        let output = apply_mask(&pixels, 5, 5, &map);
+        let input = Buffer2::new(5, 5, pixels);
+        let mut output = Buffer2::new_default(5, 5);
+        apply_defect_mask(&input, &map, &mut output);
 
         assert!((output[6] - 1.0).abs() < 0.01);
         assert!((output[18] - 1.0).abs() < 0.01);
@@ -348,7 +354,9 @@ mod tests {
         pixels[2 * 5 + 3] = 15.0; // (3,2)
 
         let map = DefectMap::new(5, 5, &[(2, 2), (3, 2)], &[], &[], &[]);
-        let output = apply_mask(&pixels, 5, 5, &map);
+        let input = Buffer2::new(5, 5, pixels);
+        let mut output = Buffer2::new_default(5, 5);
+        apply_defect_mask(&input, &map, &mut output);
 
         // Both should be replaced with median of their non-defective neighbors
         assert!((output[2 * 5 + 2] - 1.0).abs() < 0.01);
@@ -367,7 +375,9 @@ mod tests {
         ];
 
         let map = DefectMap::new(5, 5, &[(2, 2)], &[], &[], &[]);
-        let output = apply_mask(&pixels, 5, 5, &map);
+        let input = Buffer2::new(5, 5, pixels);
+        let mut output = Buffer2::new_default(5, 5);
+        apply_defect_mask(&input, &map, &mut output);
 
         // Neighbors of (2,2): 3,4,5, 4,6, 5,6,7 -> sorted: 3,4,4,5,5,6,6,7 -> median = 5
         assert!((output[2 * 5 + 2] - 5.0).abs() < 0.01);
@@ -378,10 +388,12 @@ mod tests {
         let pixels = vec![1.0, 2.0, 3.0, 4.0];
 
         let map = DefectMap::new(2, 2, &[], &[], &[], &[]);
-        let output = apply_mask(&pixels, 2, 2, &map);
+        let input = Buffer2::new(2, 2, pixels.clone());
+        let mut output = Buffer2::new_default(2, 2);
+        apply_defect_mask(&input, &map, &mut output);
 
         // No changes when map is empty
-        assert_eq!(output, pixels);
+        assert_eq!(output, Buffer2::new(2, 2, pixels));
     }
 
     #[test]
@@ -397,7 +409,9 @@ mod tests {
         let all_pixels: Vec<(usize, usize)> =
             (0..3).flat_map(|y| (0..3).map(move |x| (x, y))).collect();
         let map = DefectMap::new(3, 3, &all_pixels, &[], &[], &[]);
-        let output = apply_mask(&pixels, 3, 3, &map);
+        let input = Buffer2::new(3, 3, pixels);
+        let mut output = Buffer2::new_default(3, 3);
+        apply_defect_mask(&input, &map, &mut output);
 
         // When all neighbors are defective, pixel keeps its original value
         // (1,1) = 1*3+1 = 4
@@ -413,7 +427,9 @@ mod tests {
         }
 
         let map = DefectMap::new(5, 5, &[], &[], &[2], &[]);
-        let output = apply_mask(&pixels, 5, 5, &map);
+        let input = Buffer2::new(5, 5, pixels);
+        let mut output = Buffer2::new_default(5, 5);
+        apply_defect_mask(&input, &map, &mut output);
 
         // All pixels in column 2 should be replaced
         for y in 0..5 {

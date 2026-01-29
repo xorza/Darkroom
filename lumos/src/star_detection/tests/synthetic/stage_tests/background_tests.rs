@@ -2,6 +2,7 @@
 //!
 //! Tests the background estimation with various synthetic backgrounds.
 
+use crate::common::Buffer2;
 use crate::star_detection::background::estimate_background;
 use crate::star_detection::tests::common::output::save_grayscale;
 use crate::testing::init_tracing;
@@ -36,20 +37,19 @@ fn test_background_uniform() {
     let (pixels, _ground_truth) = generate_star_field(&config);
 
     // Estimate background
-    let background = estimate_background(&pixels, width, height, TILE_SIZE);
+    let background = estimate_background(&pixels, TILE_SIZE);
 
     // Save input image
     save_grayscale(
-        &pixels,
+        pixels.pixels(),
         width,
         height,
         &test_output_path("synthetic_starfield/stage_bg_uniform_input.png"),
     );
 
     // Save background map
-    let bg_pixels = background.background.clone();
     save_grayscale(
-        &bg_pixels,
+        background.background.pixels(),
         width,
         height,
         &test_output_path("synthetic_starfield/stage_bg_uniform_background.png"),
@@ -69,7 +69,8 @@ fn test_background_uniform() {
     );
 
     // Verify background level is approximately correct
-    let mean_bg: f32 = bg_pixels.iter().sum::<f32>() / bg_pixels.len() as f32;
+    let mean_bg: f32 =
+        background.background.iter().sum::<f32>() / background.background.len() as f32;
     println!("Expected background: {:.4}", bg_level);
     println!("Estimated mean background: {:.4}", mean_bg);
 
@@ -112,7 +113,7 @@ fn test_background_gradient() {
     }
 
     // Estimate background
-    let background = estimate_background(&pixels, width, height, TILE_SIZE);
+    let background = estimate_background(&Buffer2::new(width, height, pixels.clone()), TILE_SIZE);
 
     // Save images
     save_grayscale(
@@ -122,9 +123,8 @@ fn test_background_gradient() {
         &test_output_path("synthetic_starfield/stage_bg_gradient_input.png"),
     );
 
-    let bg_pixels = background.background.clone();
     save_grayscale(
-        &bg_pixels,
+        background.background.pixels(),
         width,
         height,
         &test_output_path("synthetic_starfield/stage_bg_gradient_background.png"),
@@ -188,7 +188,7 @@ fn test_background_vignette() {
     }
 
     // Estimate background
-    let background = estimate_background(&pixels, width, height, TILE_SIZE);
+    let background = estimate_background(&Buffer2::new(width, height, pixels.clone()), TILE_SIZE);
 
     // Save images
     save_grayscale(
@@ -198,9 +198,8 @@ fn test_background_vignette() {
         &test_output_path("synthetic_starfield/stage_bg_vignette_input.png"),
     );
 
-    let bg_pixels = background.background.clone();
     save_grayscale(
-        &bg_pixels,
+        background.background.pixels(),
         width,
         height,
         &test_output_path("synthetic_starfield/stage_bg_vignette_background.png"),
@@ -277,7 +276,7 @@ fn test_background_nebula() {
     }
 
     // Estimate background
-    let background = estimate_background(&pixels, width, height, TILE_SIZE);
+    let background = estimate_background(&Buffer2::new(width, height, pixels.clone()), TILE_SIZE);
 
     // Save images
     save_grayscale(
@@ -287,9 +286,8 @@ fn test_background_nebula() {
         &test_output_path("synthetic_starfield/stage_bg_nebula_input.png"),
     );
 
-    let bg_pixels = background.background.clone();
     save_grayscale(
-        &bg_pixels,
+        background.background.pixels(),
         width,
         height,
         &test_output_path("synthetic_starfield/stage_bg_nebula_background.png"),

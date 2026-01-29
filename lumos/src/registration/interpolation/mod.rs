@@ -17,6 +17,7 @@ use std::sync::OnceLock;
 
 use rayon::prelude::*;
 
+use crate::common::Buffer2;
 use crate::registration::types::TransformMatrix;
 
 /// Number of rows to process per parallel chunk.
@@ -407,14 +408,10 @@ fn interpolate_lanczos(
 }
 
 /// Interpolate a single pixel at sub-pixel coordinates.
-pub fn interpolate_pixel(
-    data: &[f32],
-    width: usize,
-    height: usize,
-    x: f32,
-    y: f32,
-    config: &WarpConfig,
-) -> f32 {
+#[cfg(any(test, feature = "bench"))]
+pub fn interpolate_pixel(data: &Buffer2<f32>, x: f32, y: f32, config: &WarpConfig) -> f32 {
+    let width = data.width();
+    let height = data.height();
     match config.method {
         InterpolationMethod::Nearest => {
             interpolate_nearest(data, width, height, x, y, config.border_value)
@@ -473,9 +470,7 @@ pub fn interpolate_pixel(
 ///
 /// # Arguments
 ///
-/// * `input` - Input image data (row-major, single channel)
-/// * `input_width` - Width of input image
-/// * `input_height` - Height of input image
+/// * `input` - Input image data
 /// * `output_width` - Width of output image
 /// * `output_height` - Height of output image
 /// * `transform` - Transformation from input to output coordinates
@@ -483,21 +478,16 @@ pub fn interpolate_pixel(
 ///
 /// # Returns
 ///
-/// Output image data (row-major)
+/// Output image data
 pub fn warp_image(
-    input: &[f32],
-    input_width: usize,
-    input_height: usize,
+    input: &Buffer2<f32>,
     output_width: usize,
     output_height: usize,
     transform: &TransformMatrix,
     config: &WarpConfig,
-) -> Vec<f32> {
-    assert_eq!(
-        input.len(),
-        input_width * input_height,
-        "Input size mismatch"
-    );
+) -> Buffer2<f32> {
+    let input_width = input.width();
+    let input_height = input.height();
 
     let mut output = vec![config.border_value; output_width * output_height];
 
@@ -528,7 +518,7 @@ pub fn warp_image(
                     );
                 }
             });
-        return output;
+        return Buffer2::new(output_width, output_height, output);
     }
 
     // Parallel path for other interpolation methods (Lanczos, Bicubic, etc.)
@@ -546,7 +536,7 @@ pub fn warp_image(
                     let (src_x, src_y) = inverse.apply(x as f64, y as f64);
 
                     // Interpolate input at source coordinates
-                    chunk[row_in_chunk * output_width + x] = interpolate_pixel(
+                    chunk[row_in_chunk * output_width + x] = interpolate_pixel_internal(
                         input,
                         input_width,
                         input_height,
@@ -558,5 +548,61 @@ pub fn warp_image(
             }
         });
 
-    output
+    Buffer2::new(output_width, output_height, output)
+}
+
+/// Internal interpolate_pixel that takes raw slice parameters for use in tight loops.
+#[inline]
+fn interpolate_pixel_internal(
+    data: &[f32],
+    width: usize,
+    height: usize,
+    x: f32,
+    y: f32,
+    config: &WarpConfig,
+) -> f32 {
+    match config.method {
+        InterpolationMethod::Nearest => {
+            interpolate_nearest(data, width, height, x, y, config.border_value)
+        }
+        InterpolationMethod::Bilinear => {
+            interpolate_bilinear(data, width, height, x, y, config.border_value)
+        }
+        InterpolationMethod::Bicubic => {
+            interpolate_bicubic(data, width, height, x, y, config.border_value)
+        }
+        InterpolationMethod::Lanczos2 => interpolate_lanczos(
+            data,
+            width,
+            height,
+            x,
+            y,
+            config.border_value,
+            2,
+            config.normalize_kernel,
+            config.clamp_output,
+        ),
+        InterpolationMethod::Lanczos3 => interpolate_lanczos(
+            data,
+            width,
+            height,
+            x,
+            y,
+            config.border_value,
+            3,
+            config.normalize_kernel,
+            config.clamp_output,
+        ),
+        InterpolationMethod::Lanczos4 => interpolate_lanczos(
+            data,
+            width,
+            height,
+            x,
+            y,
+            config.border_value,
+            4,
+            config.normalize_kernel,
+            config.clamp_output,
+        ),
+    }
 }

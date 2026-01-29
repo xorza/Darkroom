@@ -15,6 +15,7 @@
 use std::time::Instant;
 
 use crate::ImageDimensions;
+use crate::common::Buffer2;
 use crate::registration::{
     interpolation::{InterpolationMethod, WarpConfig, warp_image},
     phase_correlation::{PhaseCorrelationConfig, PhaseCorrelator},
@@ -279,12 +280,10 @@ impl Registrator {
 ///
 /// Internal helper used by [`warp_to_reference_image`].
 fn warp_to_reference(
-    target_image: &[f32],
-    width: usize,
-    height: usize,
+    target_image: &Buffer2<f32>,
     transform: &TransformMatrix,
     method: InterpolationMethod,
-) -> Vec<f32> {
+) -> Buffer2<f32> {
     let config = WarpConfig {
         method,
         border_value: 0.0,
@@ -301,10 +300,8 @@ fn warp_to_reference(
 
     warp_image(
         target_image,
-        width,
-        height,
-        width,
-        height,
+        target_image.width(),
+        target_image.height(),
         &inverse,
         &config,
     )
@@ -336,11 +333,12 @@ pub fn warp_to_reference_image(
     let channels = target.channels();
 
     // Warp each channel in parallel using planar access
-    let warped_channels: Vec<Vec<f32>> = (0..channels)
+    let warped_channels: Vec<Buffer2<f32>> = (0..channels)
         .into_par_iter()
         .map(|c| {
-            let channel = target.channel(c);
-            warp_to_reference(channel, width, height, transform, method)
+            let channel_data = target.channel(c);
+            let channel = Buffer2::new(width, height, channel_data.to_vec());
+            warp_to_reference(&channel, transform, method)
         })
         .collect();
 

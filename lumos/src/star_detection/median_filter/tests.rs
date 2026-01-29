@@ -1,20 +1,15 @@
 //! Tests for 3x3 median filter.
 
 use super::*;
-
-/// Helper to call median_filter_3x3 with automatic output allocation
-fn filter(pixels: &[f32], width: usize, height: usize) -> Vec<f32> {
-    let mut output = vec![0.0f32; pixels.len()];
-    median_filter_3x3(pixels, width, height, &mut output);
-    output
-}
+use crate::common::Buffer2;
 
 #[test]
 fn test_uniform_image() {
-    let pixels = vec![0.5f32; 100 * 100];
-    let result = filter(&pixels, 100, 100);
+    let pixels = Buffer2::new_filled(100, 100, 0.5f32);
+    let mut output = Buffer2::new_default(100, 100);
+    median_filter_3x3(&pixels, &mut output);
 
-    for (i, &val) in result.iter().enumerate() {
+    for (i, &val) in output.iter().enumerate() {
         assert!(
             (val - 0.5).abs() < 1e-6,
             "Pixel {} should be 0.5, got {}",
@@ -27,16 +22,17 @@ fn test_uniform_image() {
 #[test]
 fn test_single_hot_pixel() {
     // 5x5 image with a hot pixel in center
-    let mut pixels = vec![0.1f32; 25];
-    pixels[12] = 1.0; // Center pixel
+    let mut pixels = Buffer2::new_filled(5, 5, 0.1f32);
+    pixels[(2, 2)] = 1.0; // Center pixel
 
-    let result = filter(&pixels, 5, 5);
+    let mut output = Buffer2::new_default(5, 5);
+    median_filter_3x3(&pixels, &mut output);
 
     // Hot pixel should be replaced with median of neighbors (0.1)
     assert!(
-        (result[12] - 0.1).abs() < 1e-6,
+        (output[(2, 2)] - 0.1).abs() < 1e-6,
         "Hot pixel should be filtered to 0.1, got {}",
-        result[12]
+        output[(2, 2)]
     );
 }
 
@@ -45,52 +41,57 @@ fn test_preserves_edges() {
     // Gradient image - edges should be mostly preserved
     let width = 10;
     let height = 10;
-    let pixels: Vec<f32> = (0..height)
+    let data: Vec<f32> = (0..height)
         .flat_map(|y| (0..width).map(move |x| (x + y) as f32 / 20.0))
         .collect();
+    let pixels = Buffer2::new(width, height, data);
 
-    let result = filter(&pixels, width, height);
+    let mut output = Buffer2::new_default(width, height);
+    median_filter_3x3(&pixels, &mut output);
 
     // Check that general gradient direction is preserved
-    assert!(result[0] < result[99], "Gradient should be preserved");
+    assert!(output[0] < output[99], "Gradient should be preserved");
 }
 
 #[test]
 fn test_small_image_2x2() {
-    let pixels = vec![0.1, 0.2, 0.3, 0.4];
-    let result = filter(&pixels, 2, 2);
+    let pixels = Buffer2::new(2, 2, vec![0.1, 0.2, 0.3, 0.4]);
+    let mut output = Buffer2::new_default(2, 2);
+    median_filter_3x3(&pixels, &mut output);
 
     // Image too small, should return copy
-    assert_eq!(result.len(), 4);
+    assert_eq!(output.len(), 4);
 }
 
 #[test]
 fn test_small_image_1x1() {
-    let pixels = vec![0.5];
-    let result = filter(&pixels, 1, 1);
+    let pixels = Buffer2::new(1, 1, vec![0.5]);
+    let mut output = Buffer2::new_default(1, 1);
+    median_filter_3x3(&pixels, &mut output);
 
-    assert_eq!(result.len(), 1);
-    assert!((result[0] - 0.5).abs() < 1e-6);
+    assert_eq!(output.len(), 1);
+    assert!((output[0] - 0.5).abs() < 1e-6);
 }
 
 #[test]
 fn test_3x3_image() {
     // Exactly 3x3 - each pixel has different neighborhood size
     #[rustfmt::skip]
-    let pixels = vec![
+    let pixels = Buffer2::new(3, 3, vec![
         0.1, 0.2, 0.3,
         0.4, 0.5, 0.6,
         0.7, 0.8, 0.9,
-    ];
+    ]);
 
-    let result = filter(&pixels, 3, 3);
+    let mut output = Buffer2::new_default(3, 3);
+    median_filter_3x3(&pixels, &mut output);
 
     // Center pixel has full 9-element neighborhood
     // Median of [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9] = 0.5
     assert!(
-        (result[4] - 0.5).abs() < 1e-6,
+        (output[(1, 1)] - 0.5).abs() < 1e-6,
         "Center median should be 0.5, got {}",
-        result[4]
+        output[(1, 1)]
     );
 }
 
@@ -98,21 +99,22 @@ fn test_3x3_image() {
 fn test_corner_pixels() {
     // 4x4 image
     #[rustfmt::skip]
-    let pixels = vec![
+    let pixels = Buffer2::new(4, 4, vec![
         0.1, 0.2, 0.3, 0.4,
         0.5, 0.6, 0.7, 0.8,
         0.9, 1.0, 1.1, 1.2,
         1.3, 1.4, 1.5, 1.6,
-    ];
+    ]);
 
-    let result = filter(&pixels, 4, 4);
+    let mut output = Buffer2::new_default(4, 4);
+    median_filter_3x3(&pixels, &mut output);
 
     // Top-left corner has 4 neighbors: [0.1, 0.2, 0.5, 0.6]
     // Median of 4 = average of middle two = (0.2 + 0.5) / 2 = 0.35
     assert!(
-        (result[0] - 0.35).abs() < 1e-6,
+        (output[(0, 0)] - 0.35).abs() < 1e-6,
         "Top-left corner median should be 0.35, got {}",
-        result[0]
+        output[(0, 0)]
     );
 }
 
@@ -120,52 +122,54 @@ fn test_corner_pixels() {
 fn test_edge_pixels() {
     // 4x4 image
     #[rustfmt::skip]
-    let pixels = vec![
+    let pixels = Buffer2::new(4, 4, vec![
         0.1, 0.2, 0.3, 0.4,
         0.5, 0.6, 0.7, 0.8,
         0.9, 1.0, 1.1, 1.2,
         1.3, 1.4, 1.5, 1.6,
-    ];
+    ]);
 
-    let result = filter(&pixels, 4, 4);
+    let mut output = Buffer2::new_default(4, 4);
+    median_filter_3x3(&pixels, &mut output);
 
     // Top edge (1,0) has 6 neighbors: [0.1, 0.2, 0.3, 0.5, 0.6, 0.7]
     // Sorted: [0.1, 0.2, 0.3, 0.5, 0.6, 0.7]
     // Median of 6 = average of middle two = (0.3 + 0.5) / 2 = 0.4
     assert!(
-        (result[1] - 0.4).abs() < 1e-6,
+        (output[(1, 0)] - 0.4).abs() < 1e-6,
         "Top edge median should be 0.4, got {}",
-        result[1]
+        output[(1, 0)]
     );
 }
 
 #[test]
 fn test_salt_and_pepper_noise() {
     // Image with salt and pepper noise
-    let mut pixels = vec![0.5f32; 100];
+    let mut pixels = Buffer2::new_filled(10, 10, 0.5f32);
     // Add noise
     pixels[23] = 0.0; // pepper
     pixels[45] = 1.0; // salt
     pixels[67] = 0.0; // pepper
     pixels[89] = 1.0; // salt
 
-    let result = filter(&pixels, 10, 10);
+    let mut output = Buffer2::new_default(10, 10);
+    median_filter_3x3(&pixels, &mut output);
 
     // All noisy pixels should be close to 0.5 after filtering
     assert!(
-        (result[23] - 0.5).abs() < 0.1,
+        (output[23] - 0.5).abs() < 0.1,
         "Pepper noise should be filtered"
     );
     assert!(
-        (result[45] - 0.5).abs() < 0.1,
+        (output[45] - 0.5).abs() < 0.1,
         "Salt noise should be filtered"
     );
     assert!(
-        (result[67] - 0.5).abs() < 0.1,
+        (output[67] - 0.5).abs() < 0.1,
         "Pepper noise should be filtered"
     );
     assert!(
-        (result[89] - 0.5).abs() < 0.1,
+        (output[89] - 0.5).abs() < 0.1,
         "Salt noise should be filtered"
     );
 }
@@ -175,16 +179,18 @@ fn test_large_image_parallel() {
     // Test that parallel processing works correctly
     let width = 256;
     let height = 256;
-    let pixels: Vec<f32> = (0..width * height)
+    let data: Vec<f32> = (0..width * height)
         .map(|i| (i % 256) as f32 / 255.0)
         .collect();
+    let pixels = Buffer2::new(width, height, data);
 
-    let result = filter(&pixels, width, height);
+    let mut output = Buffer2::new_default(width, height);
+    median_filter_3x3(&pixels, &mut output);
 
-    assert_eq!(result.len(), width * height);
+    assert_eq!(output.len(), width * height);
 
     // Check no NaN or Inf
-    for (i, &val) in result.iter().enumerate() {
+    for (i, &val) in output.iter().enumerate() {
         assert!(val.is_finite(), "Pixel {} is not finite: {}", i, val);
         assert!(
             (0.0..=1.0).contains(&val),
@@ -251,18 +257,20 @@ fn test_median9_reverse_sorted() {
 fn test_non_square_image() {
     let width = 20;
     let height = 10;
-    let pixels = vec![0.5f32; width * height];
+    let pixels = Buffer2::new_filled(width, height, 0.5f32);
 
-    let result = filter(&pixels, width, height);
+    let mut output = Buffer2::new_default(width, height);
+    median_filter_3x3(&pixels, &mut output);
 
-    assert_eq!(result.len(), width * height);
+    assert_eq!(output.len(), width * height);
 }
 
 #[test]
-#[should_panic(expected = "Pixel count must match")]
+#[should_panic(expected = "pixels length must equal width * height")]
 fn test_wrong_pixel_count() {
-    let pixels = vec![0.5f32; 100];
-    filter(&pixels, 20, 10); // Expects 200 pixels
+    let pixels = Buffer2::new(20, 10, vec![0.5f32; 100]); // Expects 200 pixels
+    let mut output = Buffer2::new_default(20, 10);
+    median_filter_3x3(&pixels, &mut output);
 }
 
 #[test]
@@ -270,19 +278,21 @@ fn test_bayer_pattern_removal() {
     // Simulate Bayer pattern with alternating row brightness
     let width = 10;
     let height = 10;
-    let pixels: Vec<f32> = (0..height)
+    let data: Vec<f32> = (0..height)
         .flat_map(|y| {
             let base = if y % 2 == 0 { 0.4 } else { 0.6 };
             (0..width).map(move |_| base)
         })
         .collect();
+    let pixels = Buffer2::new(width, height, data);
 
-    let result = filter(&pixels, width, height);
+    let mut output = Buffer2::new_default(width, height);
+    median_filter_3x3(&pixels, &mut output);
 
     // After filtering, the pattern should be smoothed
     // Interior pixels should be close to 0.5
     let interior_mean: f32 =
-        result[11..89].iter().filter(|&&v| v > 0.0).sum::<f32>() / result[11..89].len() as f32;
+        output[11..89].iter().filter(|&&v| v > 0.0).sum::<f32>() / output[11..89].len() as f32;
 
     assert!(
         (interior_mean - 0.5).abs() < 0.15,
@@ -614,20 +624,21 @@ fn test_filter_edge_row_bottom() {
 fn test_4x4_all_corners_and_edges() {
     // Test all positions in a 4x4 image
     #[rustfmt::skip]
-    let pixels = vec![
+    let pixels = Buffer2::new(4, 4, vec![
         1.0, 2.0, 3.0, 4.0,
         5.0, 6.0, 7.0, 8.0,
         9.0, 10.0, 11.0, 12.0,
         13.0, 14.0, 15.0, 16.0,
-    ];
+    ]);
 
-    let result = filter(&pixels, 4, 4);
+    let mut output = Buffer2::new_default(4, 4);
+    median_filter_3x3(&pixels, &mut output);
 
     // All 16 pixels should be computed
-    assert_eq!(result.len(), 16);
+    assert_eq!(output.len(), 16);
 
     // Check all values are finite and reasonable
-    for (i, &val) in result.iter().enumerate() {
+    for (i, &val) in output.iter().enumerate() {
         assert!(val.is_finite(), "Pixel {} is not finite", i);
         assert!(
             (1.0..=16.0).contains(&val),
@@ -643,12 +654,13 @@ fn test_wide_image() {
     // Very wide, short image
     let width = 100;
     let height = 4;
-    let pixels = vec![0.5f32; width * height];
+    let pixels = Buffer2::new_filled(width, height, 0.5f32);
 
-    let result = filter(&pixels, width, height);
+    let mut output = Buffer2::new_default(width, height);
+    median_filter_3x3(&pixels, &mut output);
 
-    assert_eq!(result.len(), width * height);
-    for &val in &result {
+    assert_eq!(output.len(), width * height);
+    for &val in output.iter() {
         assert!((val - 0.5).abs() < 1e-6);
     }
 }
@@ -658,12 +670,13 @@ fn test_tall_image() {
     // Very tall, narrow image
     let width = 4;
     let height = 100;
-    let pixels = vec![0.5f32; width * height];
+    let pixels = Buffer2::new_filled(width, height, 0.5f32);
 
-    let result = filter(&pixels, width, height);
+    let mut output = Buffer2::new_default(width, height);
+    median_filter_3x3(&pixels, &mut output);
 
-    assert_eq!(result.len(), width * height);
-    for &val in &result {
+    assert_eq!(output.len(), width * height);
+    for &val in output.iter() {
         assert!((val - 0.5).abs() < 1e-6);
     }
 }
@@ -727,12 +740,13 @@ fn test_chunk_boundary() {
     // This ensures chunk boundary handling is correct
     for height in [7, 9, 15, 17, 23, 25] {
         let width = 10;
-        let pixels = vec![0.5f32; width * height];
+        let pixels = Buffer2::new_filled(width, height, 0.5f32);
 
-        let result = filter(&pixels, width, height);
+        let mut output = Buffer2::new_default(width, height);
+        median_filter_3x3(&pixels, &mut output);
 
-        assert_eq!(result.len(), width * height);
-        for (i, &val) in result.iter().enumerate() {
+        assert_eq!(output.len(), width * height);
+        for (i, &val) in output.iter().enumerate() {
             assert!(
                 (val - 0.5).abs() < 1e-6,
                 "Height {}: Pixel {} should be 0.5, got {}",

@@ -3,6 +3,8 @@
 //! This module centralizes mathematical and algorithmic constants used across
 //! the star detection pipeline to avoid magic numbers and ensure consistency.
 
+use crate::common::Buffer2;
+
 /// FWHM to Gaussian sigma conversion factor.
 ///
 /// For a Gaussian distribution, FWHM = 2√(2ln2) × σ ≈ 2.3548 × σ.
@@ -84,17 +86,19 @@ pub fn compute_stamp_radius(expected_fwhm: f32) -> usize {
 ///
 /// # Arguments
 /// * `mask` - Input binary mask
-/// * `width` - Image width
-/// * `height` - Image height
 /// * `radius` - Dilation radius in pixels
 /// * `output` - Output buffer for dilated mask (will be cleared and filled)
-pub fn dilate_mask(mask: &[bool], width: usize, height: usize, radius: usize, output: &mut [bool]) {
-    assert_eq!(mask.len(), output.len());
+pub fn dilate_mask(mask: &Buffer2<bool>, radius: usize, output: &mut Buffer2<bool>) {
+    assert_eq!(mask.width(), output.width(), "width mismatch");
+    assert_eq!(mask.height(), output.height(), "height mismatch");
     output.fill(false);
+
+    let width = mask.width();
+    let height = mask.height();
 
     for y in 0..height {
         for x in 0..width {
-            if mask[y * width + x] {
+            if mask[(x, y)] {
                 // Set all pixels within radius
                 let y_min = y.saturating_sub(radius);
                 let y_max = (y + radius).min(height - 1);
@@ -103,7 +107,7 @@ pub fn dilate_mask(mask: &[bool], width: usize, height: usize, radius: usize, ou
 
                 for dy in y_min..=y_max {
                     for dx in x_min..=x_max {
-                        output[dy * width + dx] = true;
+                        output[(dx, dy)] = true;
                     }
                 }
             }

@@ -20,10 +20,11 @@ fn run_pipeline_test(
     detection_config: &StarDetectionConfig,
 ) -> DetectionMetrics {
     let (pixels, ground_truth) = generate_star_field(field_config);
+    let pixels_vec = pixels.into_vec();
 
     // Save input
     save_grayscale(
-        &pixels,
+        &pixels_vec,
         field_config.width,
         field_config.height,
         &test_output_path(&format!("synthetic_starfield/pipeline_{}_input.png", name)),
@@ -32,7 +33,7 @@ fn run_pipeline_test(
     // Run detection
     let image = AstroImage::from_pixels(
         ImageDimensions::new(field_config.width, field_config.height, 1),
-        pixels.clone(),
+        pixels_vec.clone(),
     );
     let result = find_stars(&image, detection_config);
     let stars = result.stars;
@@ -43,7 +44,7 @@ fn run_pipeline_test(
 
     // Save comparison image
     save_comparison(
-        &pixels,
+        &pixels_vec,
         field_config.width,
         field_config.height,
         &ground_truth,

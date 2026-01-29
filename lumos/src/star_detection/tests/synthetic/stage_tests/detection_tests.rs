@@ -53,24 +53,18 @@ fn test_detection_sparse() {
 
     // Save input
     save_grayscale(
-        &pixels,
+        pixels.pixels(),
         config.width,
         config.height,
         &test_output_path("synthetic_starfield/stage_det_sparse_input.png"),
     );
 
     // Estimate background
-    let background = estimate_background(&pixels, config.width, config.height, TILE_SIZE);
+    let background = estimate_background(&pixels, TILE_SIZE);
 
     // Detect candidates
     let det_config = StarDetectionConfig::default();
-    let candidates = detect_stars(
-        &pixels,
-        config.width,
-        config.height,
-        &background,
-        &det_config,
-    );
+    let candidates = detect_stars(&pixels, &background, &det_config);
 
     println!("Ground truth: {} stars", ground_truth.len());
     println!("Detected candidates: {}", candidates.len());
@@ -80,7 +74,7 @@ fn test_detection_sparse() {
     let candidate_positions: Vec<(usize, usize)> =
         candidates.iter().map(|c| (c.peak_x, c.peak_y)).collect();
     let overlay = create_detection_overlay(
-        &pixels,
+        pixels.pixels(),
         config.width,
         config.height,
         &candidate_positions,
@@ -140,14 +134,14 @@ fn test_detection_thresholds() {
 
     // Save input
     save_grayscale(
-        &pixels,
+        pixels.pixels(),
         width,
         height,
         &test_output_path("synthetic_starfield/stage_det_thresholds_input.png"),
     );
 
     // Estimate background
-    let background = estimate_background(&pixels, width, height, TILE_SIZE);
+    let background = estimate_background(&pixels, TILE_SIZE);
 
     // Test different thresholds
     for sigma in [2.0, 3.0, 5.0, 10.0] {
@@ -155,13 +149,13 @@ fn test_detection_thresholds() {
             detection_sigma: sigma,
             ..Default::default()
         };
-        let candidates = detect_stars(&pixels, width, height, &background, &det_config);
+        let candidates = detect_stars(&pixels, &background, &det_config);
 
         let truth_positions: Vec<(f32, f32)> = ground_truth.iter().map(|s| (s.x, s.y)).collect();
         let candidate_positions: Vec<(usize, usize)> =
             candidates.iter().map(|c| (c.peak_x, c.peak_y)).collect();
         let overlay = create_detection_overlay(
-            &pixels,
+            pixels.pixels(),
             width,
             height,
             &candidate_positions,
@@ -230,14 +224,14 @@ fn test_detection_area_filter() {
 
     // Save input
     save_grayscale(
-        &pixels,
+        pixels.pixels(),
         width,
         height,
         &test_output_path("synthetic_starfield/stage_det_area_filter_input.png"),
     );
 
     // Estimate background
-    let background = estimate_background(&pixels, width, height, TILE_SIZE);
+    let background = estimate_background(&pixels, TILE_SIZE);
 
     // Test with different area filters
     for (min_area, max_area, label) in [
@@ -250,13 +244,13 @@ fn test_detection_area_filter() {
             max_area,
             ..Default::default()
         };
-        let candidates = detect_stars(&pixels, width, height, &background, &det_config);
+        let candidates = detect_stars(&pixels, &background, &det_config);
 
         let truth_positions: Vec<(f32, f32)> = ground_truth.iter().map(|s| (s.x, s.y)).collect();
         let candidate_positions: Vec<(usize, usize)> =
             candidates.iter().map(|c| (c.peak_x, c.peak_y)).collect();
         let overlay = create_detection_overlay(
-            &pixels,
+            pixels.pixels(),
             width,
             height,
             &candidate_positions,

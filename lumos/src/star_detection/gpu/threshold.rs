@@ -13,6 +13,7 @@ use imaginarium::ProcessingContext;
 use wgpu::util::DeviceExt;
 
 use super::pipeline::{GpuDilateMaskPipeline, GpuThresholdMaskPipeline};
+use crate::common::Buffer2;
 use crate::star_detection::StarDetectionConfig;
 use crate::star_detection::background::BackgroundMap;
 use crate::star_detection::deblend::DeblendConfig;
@@ -119,8 +120,8 @@ impl GpuThresholdDetector {
         background: &BackgroundMap,
         config: &GpuThresholdConfig,
     ) -> Vec<bool> {
-        let width = background.width;
-        let height = background.height;
+        let width = background.width();
+        let height = background.height();
 
         assert_eq!(
             pixels.len(),
@@ -137,6 +138,8 @@ impl GpuThresholdDetector {
             width * height,
             "Noise data length mismatch"
         );
+        debug_assert_eq!(background.background.width(), width);
+        debug_assert_eq!(background.noise.width(), width);
 
         // Get GPU context and pipeline together to manage borrow lifetimes
         let gpu_ctx = self.ctx.gpu_context().expect("GPU context not available");
@@ -163,7 +166,7 @@ impl GpuThresholdDetector {
 
         let background_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("threshold_background_buffer"),
-            contents: bytemuck::cast_slice(&background.background),
+            contents: bytemuck::cast_slice(background.background.pixels()),
             usage: wgpu::BufferUsages::STORAGE,
         });
 
@@ -447,19 +450,19 @@ pub fn detect_stars_gpu_with_detector(
     );
 
     // Create threshold mask on GPU (already includes dilation)
-    let mask = detector.create_mask(pixels, background, &gpu_config);
+    let mask_vec = detector.create_mask(pixels, background, &gpu_config);
+    let mask = Buffer2::new(width, height, mask_vec);
 
     // Connected component labeling on CPU (optimal for sparse images)
-    let (labels, num_labels) = connected_components(&mask, width, height);
+    let (labels, num_labels) = connected_components(&mask);
 
     // Extract candidate properties with deblending
     let deblend_config = DeblendConfig::from(config);
+    let pixels_buf = Buffer2::new(width, height, pixels.to_vec());
     let mut candidates = extract_candidates(
-        pixels,
+        &pixels_buf,
         &labels,
         num_labels,
-        width,
-        height,
         &deblend_config,
         detection_config.max_area,
     );
@@ -485,6 +488,13 @@ mod tests {
     fn test_gpu_available() -> bool {
         let detector = GpuThresholdDetector::new();
         detector.gpu_available()
+    }
+
+    fn make_background(width: usize, height: usize, bg_val: f32, noise_val: f32) -> BackgroundMap {
+        BackgroundMap {
+            background: Buffer2::new_filled(width, height, bg_val),
+            noise: Buffer2::new_filled(width, height, noise_val),
+        }
     }
 
     #[test]
@@ -557,12 +567,7 @@ mod tests {
         let mut pixels = vec![0.1f32; width * height];
         pixels[3 * width + 3] = 0.2; // Bright pixel
 
-        let background = BackgroundMap {
-            background: vec![0.1f32; width * height],
-            noise: vec![0.01f32; width * height],
-            width,
-            height,
-        };
+        let background = make_background(width, height, 0.1, 0.01);
 
         let mask = detector.create_mask(&pixels, &background, &config);
 
@@ -602,12 +607,7 @@ mod tests {
         let mut pixels = vec![0.1f32; width * height];
         pixels[4 * width + 4] = 0.2;
 
-        let background = BackgroundMap {
-            background: vec![0.1f32; width * height],
-            noise: vec![0.01f32; width * height],
-            width,
-            height,
-        };
+        let background = make_background(width, height, 0.1, 0.01);
 
         let mask = detector.create_mask(&pixels, &background, &config);
 
@@ -643,12 +643,7 @@ mod tests {
 
         // All pixels at background level
         let pixels = vec![0.1f32; width * height];
-        let background = BackgroundMap {
-            background: vec![0.1f32; width * height],
-            noise: vec![0.01f32; width * height],
-            width,
-            height,
-        };
+        let background = make_background(width, height, 0.1, 0.01);
 
         let mask = detector.create_mask(&pixels, &background, &config);
 
@@ -675,12 +670,7 @@ mod tests {
         pixels[200 * width + 200] = 0.5;
         pixels[300 * width + 300] = 0.5;
 
-        let background = BackgroundMap {
-            background: vec![0.1f32; width * height],
-            noise: vec![0.02f32; width * height],
-            width,
-            height,
-        };
+        let background = make_background(width, height, 0.1, 0.02);
 
         let mask = detector.create_mask(&pixels, &background, &config);
 
@@ -716,12 +706,7 @@ mod tests {
             }
         }
 
-        let background = BackgroundMap {
-            background: vec![0.1f32; width * height],
-            noise: vec![0.01f32; width * height],
-            width,
-            height,
-        };
+        let background = make_background(width, height, 0.1, 0.01);
 
         let config = StarDetectionConfig {
             detection_sigma: 3.0,
@@ -780,12 +765,7 @@ mod tests {
             }
         }
 
-        let background = BackgroundMap {
-            background: vec![0.1f32; width * height],
-            noise: vec![0.02f32; width * height],
-            width,
-            height,
-        };
+        let background = make_background(width, height, 0.1, 0.02);
 
         let config = StarDetectionConfig {
             detection_sigma: 3.0,
@@ -819,12 +799,7 @@ mod tests {
         // All pixels at background level
         let pixels = vec![0.1f32; width * height];
 
-        let background = BackgroundMap {
-            background: vec![0.1f32; width * height],
-            noise: vec![0.01f32; width * height],
-            width,
-            height,
-        };
+        let background = make_background(width, height, 0.1, 0.01);
 
         let config = StarDetectionConfig {
             detection_sigma: 4.0,
@@ -860,12 +835,7 @@ mod tests {
         let mut pixels = vec![0.1f32; width * height];
         pixels[16 * width + 16] = 0.5;
 
-        let background = BackgroundMap {
-            background: vec![0.1f32; width * height],
-            noise: vec![0.01f32; width * height],
-            width,
-            height,
-        };
+        let background = make_background(width, height, 0.1, 0.01);
 
         let config = StarDetectionConfig {
             detection_sigma: 3.0,
@@ -915,12 +885,7 @@ mod tests {
         // Another star too close to edge (should be rejected)
         pixels[58 * width + 58] = 0.5;
 
-        let background = BackgroundMap {
-            background: vec![0.1f32; width * height],
-            noise: vec![0.01f32; width * height],
-            width,
-            height,
-        };
+        let background = make_background(width, height, 0.1, 0.01);
 
         let config = StarDetectionConfig {
             detection_sigma: 3.0,

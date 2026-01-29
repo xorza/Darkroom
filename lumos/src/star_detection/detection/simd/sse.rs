@@ -1,6 +1,7 @@
 //! SSE-accelerated thresholding.
 use std::arch::x86_64::*;
 
+use crate::star_detection::Buffer2;
 use crate::star_detection::background::BackgroundMap;
 
 /// Number of SIMD vectors to process per unrolled iteration.
@@ -13,15 +14,15 @@ const UNROLL_WIDTH: usize = UNROLL_FACTOR * SSE_WIDTH;
 #[target_feature(enable = "sse4.1")]
 #[allow(unsafe_op_in_unsafe_fn)]
 pub unsafe fn create_threshold_mask_sse(
-    pixels: &[f32],
+    pixels: &Buffer2<f32>,
     background: &BackgroundMap,
     sigma_threshold: f32,
-    mask: &mut [bool],
+    mask: &mut Buffer2<bool>,
 ) {
     let len = pixels.len();
     debug_assert_eq!(len, mask.len());
 
-    let mask_ptr = mask.as_mut_ptr();
+    let mask_ptr = mask.pixels_mut().as_mut_ptr();
 
     let sigma_vec = _mm_set1_ps(sigma_threshold);
     let min_noise_vec = _mm_set1_ps(1e-6);
@@ -124,15 +125,15 @@ pub unsafe fn create_threshold_mask_sse(
 #[target_feature(enable = "sse4.1")]
 #[allow(unsafe_op_in_unsafe_fn)]
 pub unsafe fn create_threshold_mask_filtered_sse(
-    filtered: &[f32],
+    filtered: &Buffer2<f32>,
     background: &BackgroundMap,
     sigma_threshold: f32,
-    mask: &mut [bool],
+    mask: &mut Buffer2<bool>,
 ) {
     let len = filtered.len();
     debug_assert_eq!(len, mask.len());
 
-    let mask_ptr = mask.as_mut_ptr();
+    let mask_ptr = mask.pixels_mut().as_mut_ptr();
 
     let sigma_vec = _mm_set1_ps(sigma_threshold);
     let min_noise_vec = _mm_set1_ps(1e-6);

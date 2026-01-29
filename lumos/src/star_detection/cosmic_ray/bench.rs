@@ -4,24 +4,21 @@
 use super::laplacian::compute_laplacian;
 use super::simd::compute_laplacian_simd;
 use super::{LACosmicConfig, detect_cosmic_rays};
+use crate::common::Buffer2;
 use criterion::{BenchmarkId, Criterion, Throughput};
 use std::hint::black_box;
 
 /// Benchmark data for cosmic ray detection.
 pub struct BenchData {
-    pub pixels: Vec<f32>,
-    pub background: Vec<f32>,
-    pub noise: Vec<f32>,
-    pub width: usize,
-    pub height: usize,
+    pub pixels: Buffer2<f32>,
+    pub background: Buffer2<f32>,
+    pub noise: Buffer2<f32>,
 }
 
 impl BenchData {
     /// Create benchmark data with synthetic stars and cosmic rays.
     pub fn new(width: usize, height: usize, num_stars: usize, num_cosmic_rays: usize) -> Self {
-        let mut pixels = vec![0.1f32; width * height];
-        let background = vec![0.1f32; width * height];
-        let noise = vec![0.01f32; width * height];
+        let mut pixels_data = vec![0.1f32; width * height];
 
         // Add Gaussian stars
         let sigma = 2.5f32;
@@ -38,7 +35,7 @@ impl BenchData {
                     if x < width && y < height {
                         let r2 = (dx * dx + dy * dy) as f32;
                         let value = amplitude * (-r2 / (2.0 * sigma * sigma)).exp();
-                        pixels[y * width + x] += value;
+                        pixels_data[y * width + x] += value;
                     }
                 }
             }
@@ -48,35 +45,26 @@ impl BenchData {
         for i in 0..num_cosmic_rays {
             let x = ((i * 127 + 31) % width).max(1).min(width - 2);
             let y = ((i * 89 + 17) % height).max(1).min(height - 2);
-            pixels[y * width + x] = 0.9;
+            pixels_data[y * width + x] = 0.9;
         }
 
         Self {
-            pixels,
-            background,
-            noise,
-            width,
-            height,
+            pixels: Buffer2::new(width, height, pixels_data),
+            background: Buffer2::new(width, height, vec![0.1f32; width * height]),
+            noise: Buffer2::new(width, height, vec![0.01f32; width * height]),
         }
     }
 }
 
 /// Run Laplacian computation benchmark.
-pub fn bench_laplacian(data: &BenchData) -> Vec<f32> {
-    compute_laplacian(&data.pixels, data.width, data.height)
+pub fn bench_laplacian(data: &BenchData) -> Buffer2<f32> {
+    compute_laplacian(&data.pixels)
 }
 
 /// Run full cosmic ray detection benchmark.
 pub fn bench_detect_cosmic_rays(data: &BenchData) -> usize {
     let config = LACosmicConfig::default();
-    let result = detect_cosmic_rays(
-        &data.pixels,
-        data.width,
-        data.height,
-        &data.background,
-        &data.noise,
-        &config,
-    );
+    let result = detect_cosmic_rays(&data.pixels, &data.background, &data.noise, &config);
     result.cosmic_ray_count
 }
 
@@ -119,7 +107,7 @@ pub fn benchmarks(c: &mut Criterion) {
 
         laplacian_group.throughput(Throughput::Elements((width * height) as u64));
         laplacian_group.bench_function(BenchmarkId::new("compute_laplacian", &size_name), |b| {
-            b.iter(|| black_box(compute_laplacian(black_box(&data.pixels), width, height)))
+            b.iter(|| black_box(compute_laplacian(black_box(&data.pixels))))
         });
     }
 
@@ -146,13 +134,7 @@ pub fn benchmarks(c: &mut Criterion) {
         });
 
         simd_group.bench_function(BenchmarkId::new("simd", &size_name), |b| {
-            b.iter(|| {
-                black_box(compute_laplacian_simd(
-                    black_box(&data.pixels),
-                    width,
-                    height,
-                ))
-            })
+            b.iter(|| black_box(compute_laplacian_simd(black_box(&data.pixels))))
         });
     }
 
@@ -175,8 +157,6 @@ pub fn benchmarks(c: &mut Criterion) {
             b.iter(|| {
                 black_box(detect_cosmic_rays(
                     black_box(&data.pixels),
-                    width,
-                    height,
                     black_box(&data.background),
                     black_box(&data.noise),
                     black_box(&config),

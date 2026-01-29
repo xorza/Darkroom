@@ -10,7 +10,7 @@ use anyhow::Result;
 use imaginarium::{ChannelCount, ColorFormat, Image, ImageDesc};
 use std::path::Path;
 
-use crate::common::buffer2::Buffer2;
+use crate::common::Buffer2;
 
 /// FITS BITPIX values representing pixel data types.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]

@@ -3,6 +3,7 @@
 
 use bench::quick_bench;
 
+use crate::common::Buffer2;
 use crate::{IterativeBackgroundConfig, estimate_background_iterative};
 
 use std::hint::black_box;
@@ -54,16 +55,8 @@ fn estimate_background_iterative_6k(b: ::bench::Bencher) {
     let width = 6144;
     let height = 6144;
 
-    let pixels = generate_test_image(width, height);
+    let pixels = Buffer2::new(width, height, generate_test_image(width, height));
     let iter_config = IterativeBackgroundConfig::default();
 
-    b.bench(|| {
-        black_box(estimate_background_iterative(
-            &pixels,
-            width,
-            height,
-            64,
-            &iter_config,
-        ))
-    });
+    b.bench(|| black_box(estimate_background_iterative(&pixels, 64, &iter_config)));
 }

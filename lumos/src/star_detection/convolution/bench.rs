@@ -3,12 +3,13 @@
 
 use super::simd::convolve_row_simd;
 use super::{gaussian_convolve, gaussian_kernel_1d, matched_filter};
+use crate::star_detection::Buffer2;
 use crate::star_detection::constants::fwhm_to_sigma;
 use criterion::{BenchmarkId, Criterion, Throughput};
 use std::hint::black_box;
 
 /// Generate a synthetic star field image for benchmarking.
-fn generate_test_image(width: usize, height: usize) -> Vec<f32> {
+fn generate_test_image(width: usize, height: usize) -> Buffer2<f32> {
     let mut pixels = vec![0.1f32; width * height];
 
     // Add deterministic "noise" pattern using simple hash
@@ -43,12 +44,12 @@ fn generate_test_image(width: usize, height: usize) -> Vec<f32> {
         }
     }
 
-    pixels
+    Buffer2::new(width, height, pixels)
 }
 
 /// Generate a flat background map for benchmarking.
-fn generate_background(width: usize, height: usize) -> Vec<f32> {
-    vec![0.1f32; width * height]
+fn generate_background(width: usize, height: usize) -> Buffer2<f32> {
+    Buffer2::new(width, height, vec![0.1f32; width * height])
 }
 
 /// Register convolution benchmarks with Criterion.
@@ -80,16 +81,7 @@ pub fn benchmarks(c: &mut Criterion) {
         for sigma in [1.0, 2.0, 3.0] {
             conv_group.bench_function(
                 BenchmarkId::new(&size_name, format!("sigma_{}", sigma)),
-                |b| {
-                    b.iter(|| {
-                        black_box(gaussian_convolve(
-                            black_box(&pixels),
-                            black_box(width),
-                            black_box(height),
-                            black_box(sigma),
-                        ))
-                    })
-                },
+                |b| b.iter(|| black_box(gaussian_convolve(black_box(&pixels), black_box(sigma)))),
             );
         }
     }
@@ -115,8 +107,6 @@ pub fn benchmarks(c: &mut Criterion) {
                     b.iter(|| {
                         black_box(matched_filter(
                             black_box(&pixels),
-                            black_box(width),
-                            black_box(height),
                             black_box(&background),
                             black_box(fwhm),
                         ))

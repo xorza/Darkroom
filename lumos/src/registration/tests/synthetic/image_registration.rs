@@ -6,6 +6,7 @@
 
 use crate::{AstroImage, ImageDimensions};
 
+use crate::common::Buffer2;
 use crate::registration::interpolation::{InterpolationMethod, WarpConfig, warp_image};
 use crate::registration::types::TransformMatrix;
 use crate::registration::{RegistrationConfig, Registrator};
@@ -48,29 +49,15 @@ fn transform_image(
     scale: f64,
 ) -> Vec<f32> {
     let transform = TransformMatrix::similarity(dx, dy, angle_rad, scale);
-    warp_image(
-        src_pixels,
-        width,
-        height,
-        width,
-        height,
-        &transform,
-        &warp_config(),
-    )
+    let src_buf = Buffer2::new(width, height, src_pixels.to_vec());
+    warp_image(&src_buf, width, height, &transform, &warp_config()).into_vec()
 }
 
 /// Apply a translation to an image.
 fn translate_image(src_pixels: &[f32], width: usize, height: usize, dx: f64, dy: f64) -> Vec<f32> {
     let transform = TransformMatrix::translation(dx, dy);
-    warp_image(
-        src_pixels,
-        width,
-        height,
-        width,
-        height,
-        &transform,
-        &warp_config(),
-    )
+    let src_buf = Buffer2::new(width, height, src_pixels.to_vec());
+    warp_image(&src_buf, width, height, &transform, &warp_config()).into_vec()
 }
 
 #[test]
@@ -85,14 +72,15 @@ fn test_image_registration_translation() {
     let height = config.height;
 
     let (ref_pixels, _ground_truth) = synthetic::generate_star_field(&config);
+    let ref_pixels_vec = ref_pixels.into_vec();
 
     // Apply a known translation to create target image
     let dx = 15.5;
     let dy = -12.3;
-    let target_pixels = translate_image(&ref_pixels, width, height, dx, dy);
+    let target_pixels = translate_image(&ref_pixels_vec, width, height, dx, dy);
 
     // Create AstroImages
-    let ref_image = create_astro_image(ref_pixels, width, height);
+    let ref_image = create_astro_image(ref_pixels_vec, width, height);
     let target_image = create_astro_image(target_pixels, width, height);
 
     // Detect stars in both images
@@ -175,6 +163,7 @@ fn test_image_registration_rotation() {
     let height = config.height;
 
     let (ref_pixels, _) = synthetic::generate_star_field(&config);
+    let ref_pixels_vec = ref_pixels.into_vec();
 
     // Apply rotation + small translation
     let dx = 5.0;
@@ -182,9 +171,9 @@ fn test_image_registration_rotation() {
     let angle_deg: f64 = 1.0;
     let angle_rad = angle_deg.to_radians();
 
-    let target_pixels = transform_image(&ref_pixels, width, height, dx, dy, angle_rad, 1.0);
+    let target_pixels = transform_image(&ref_pixels_vec, width, height, dx, dy, angle_rad, 1.0);
 
-    let ref_image = create_astro_image(ref_pixels, width, height);
+    let ref_image = create_astro_image(ref_pixels_vec, width, height);
     let target_image = create_astro_image(target_pixels, width, height);
 
     let det = detector();
@@ -244,6 +233,7 @@ fn test_image_registration_similarity() {
     let height = config.height;
 
     let (ref_pixels, _) = synthetic::generate_star_field(&config);
+    let ref_pixels_vec = ref_pixels.into_vec();
 
     // Apply similarity transform (translation + rotation + scale)
     let dx = 8.0;
@@ -252,9 +242,9 @@ fn test_image_registration_similarity() {
     let angle_rad = angle_deg.to_radians();
     let scale = 1.005;
 
-    let target_pixels = transform_image(&ref_pixels, width, height, dx, dy, angle_rad, scale);
+    let target_pixels = transform_image(&ref_pixels_vec, width, height, dx, dy, angle_rad, scale);
 
-    let ref_image = create_astro_image(ref_pixels, width, height);
+    let ref_image = create_astro_image(ref_pixels_vec, width, height);
     let target_image = create_astro_image(target_pixels, width, height);
 
     let det = detector();
@@ -326,13 +316,14 @@ fn test_image_registration_with_noise() {
     let height = config.height;
 
     let (ref_pixels, _) = synthetic::generate_star_field(&config);
+    let ref_pixels_vec = ref_pixels.into_vec();
 
     // Apply translation
     let dx = 20.0;
     let dy = -15.0;
-    let target_pixels = translate_image(&ref_pixels, width, height, dx, dy);
+    let target_pixels = translate_image(&ref_pixels_vec, width, height, dx, dy);
 
-    let ref_image = create_astro_image(ref_pixels, width, height);
+    let ref_image = create_astro_image(ref_pixels_vec, width, height);
     let target_image = create_astro_image(target_pixels, width, height);
 
     let det = StarDetector::from_config(StarDetectionConfig {
@@ -400,14 +391,15 @@ fn test_image_registration_dense_field() {
     let height = config.height;
 
     let (ref_pixels, _) = synthetic::generate_star_field(&config);
+    let ref_pixels_vec = ref_pixels.into_vec();
 
     let dx = 10.0;
     let dy = 8.0;
     let angle_rad = 0.5_f64.to_radians();
 
-    let target_pixels = transform_image(&ref_pixels, width, height, dx, dy, angle_rad, 1.0);
+    let target_pixels = transform_image(&ref_pixels_vec, width, height, dx, dy, angle_rad, 1.0);
 
-    let ref_image = create_astro_image(ref_pixels, width, height);
+    let ref_image = create_astro_image(ref_pixels_vec, width, height);
     let target_image = create_astro_image(target_pixels, width, height);
 
     let det = detector();
@@ -470,13 +462,14 @@ fn test_image_registration_large_image() {
     let height = config.height;
 
     let (ref_pixels, _) = synthetic::generate_star_field(&config);
+    let ref_pixels_vec = ref_pixels.into_vec();
 
     // Larger translation for larger image
     let dx = 50.0;
     let dy = -35.0;
-    let target_pixels = translate_image(&ref_pixels, width, height, dx, dy);
+    let target_pixels = translate_image(&ref_pixels_vec, width, height, dx, dy);
 
-    let ref_image = create_astro_image(ref_pixels, width, height);
+    let ref_image = create_astro_image(ref_pixels_vec, width, height);
     let target_image = create_astro_image(target_pixels, width, height);
 
     let det = detector();

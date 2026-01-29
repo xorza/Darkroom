@@ -11,6 +11,7 @@ pub mod simd;
 #[cfg(test)]
 mod tests;
 
+use crate::common::Buffer2;
 use rayon::prelude::*;
 
 use super::constants::ROWS_PER_CHUNK;
@@ -19,12 +20,11 @@ use super::constants::ROWS_PER_CHUNK;
 ///
 /// Uses parallel processing for large images. Separates interior pixels
 /// (full 9-element neighborhood) from edge pixels for better performance.
-pub fn median_filter_3x3(pixels: &[f32], width: usize, height: usize, output: &mut [f32]) {
-    assert_eq!(
-        pixels.len(),
-        width * height,
-        "Pixel count must match width * height"
-    );
+pub fn median_filter_3x3(pixels: &Buffer2<f32>, output: &mut Buffer2<f32>) {
+    let width = pixels.width();
+    let height = pixels.height();
+    debug_assert_eq!(width, output.width());
+    debug_assert_eq!(height, output.height());
 
     if width < 3 || height < 3 {
         output.copy_from_slice(pixels);

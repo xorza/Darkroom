@@ -27,6 +27,7 @@ use super::constants::{self, CENTROID_CONVERGENCE_THRESHOLD, MAX_CENTROID_ITERAT
 use super::cosmic_ray::compute_laplacian_snr;
 use super::detection::StarCandidate;
 use super::{CentroidMethod, Star, StarDetectionConfig};
+use crate::common::Buffer2;
 
 /// Maximum iterations for centroid refinement.
 pub(crate) const MAX_ITERATIONS: usize = MAX_CENTROID_ITERATIONS;
@@ -149,13 +150,13 @@ fn sigma_clipped_median_mad(values: &mut [f32], kappa: f32, iterations: usize) -
 /// - `GaussianFit`: 2D Gaussian fitting (~0.01 pixel accuracy, slower)
 /// - `MoffatFit`: 2D Moffat fitting (~0.01 pixel accuracy, best for atmospheric seeing)
 pub fn compute_centroid(
-    pixels: &[f32],
-    width: usize,
-    height: usize,
+    pixels: &Buffer2<f32>,
     background: &BackgroundMap,
     candidate: &StarCandidate,
     config: &StarDetectionConfig,
 ) -> Option<Star> {
+    let width = pixels.width();
+    let height = pixels.height();
     // Compute adaptive stamp radius based on expected FWHM
     let stamp_radius = compute_stamp_radius(config.expected_fwhm);
 
@@ -199,17 +200,9 @@ pub fn compute_centroid(
     match config.centroid_method {
         CentroidMethod::GaussianFit => {
             let fit_config = GaussianFitConfig::default();
-            if let Some(result) = fit_gaussian_2d(
-                pixels,
-                width,
-                height,
-                cx,
-                cy,
-                stamp_radius,
-                local_bg,
-                &fit_config,
-            )
-            .filter(|r| r.converged)
+            if let Some(result) =
+                fit_gaussian_2d(pixels, cx, cy, stamp_radius, local_bg, &fit_config)
+                    .filter(|r| r.converged)
             {
                 cx = result.x;
                 cy = result.y;
@@ -221,17 +214,8 @@ pub fn compute_centroid(
                 fixed_beta: beta,
                 ..MoffatFitConfig::default()
             };
-            if let Some(result) = fit_moffat_2d(
-                pixels,
-                width,
-                height,
-                cx,
-                cy,
-                stamp_radius,
-                local_bg,
-                &fit_config,
-            )
-            .filter(|r| r.converged)
+            if let Some(result) = fit_moffat_2d(pixels, cx, cy, stamp_radius, local_bg, &fit_config)
+                .filter(|r| r.converged)
             {
                 cx = result.x;
                 cy = result.y;
@@ -256,16 +240,8 @@ pub fn compute_centroid(
     )?;
 
     // Compute L.A.Cosmic Laplacian SNR for cosmic ray detection
-    let laplacian_snr_value = compute_laplacian_snr(
-        pixels,
-        width,
-        height,
-        cx,
-        cy,
-        stamp_radius,
-        local_bg,
-        local_noise,
-    );
+    let laplacian_snr_value =
+        compute_laplacian_snr(pixels, cx, cy, stamp_radius, local_bg, local_noise);
 
     Some(Star {
         x: cx,

@@ -4,6 +4,7 @@
 //! It captures small-scale structure including cosmic rays, but also real fine features
 //! like stellar cores.
 
+use crate::common::Buffer2;
 use crate::star_detection::median_filter::median_of_n;
 
 /// Compute fine structure image using 3x3 median filter.
@@ -11,7 +12,9 @@ use crate::star_detection::median_filter::median_of_n;
 /// The fine structure is the difference between the original and
 /// median-filtered image. It captures small-scale structure including
 /// cosmic rays, but also real fine features like stellar cores.
-pub fn compute_fine_structure(pixels: &[f32], width: usize, height: usize) -> Vec<f32> {
+pub fn compute_fine_structure(pixels: &Buffer2<f32>) -> Buffer2<f32> {
+    let width = pixels.width();
+    let height = pixels.height();
     let mut fine_structure = vec![0.0f32; pixels.len()];
 
     for y in 0..height {
@@ -42,7 +45,7 @@ pub fn compute_fine_structure(pixels: &[f32], width: usize, height: usize) -> Ve
         }
     }
 
-    fine_structure
+    Buffer2::new(width, height, fine_structure)
 }
 
 #[cfg(test)]
@@ -64,21 +67,22 @@ mod tests {
 
     #[test]
     fn test_fine_structure_flat() {
-        let pixels = vec![0.5f32; 25];
-        let fine = compute_fine_structure(&pixels, 5, 5);
+        let pixels = Buffer2::new(5, 5, vec![0.5f32; 25]);
+        let fine = compute_fine_structure(&pixels);
 
         // Flat image has no fine structure
-        for &v in &fine {
+        for &v in fine.iter() {
             assert!(v.abs() < 1e-6);
         }
     }
 
     #[test]
     fn test_fine_structure_peak() {
-        let mut pixels = vec![0.0f32; 25];
-        pixels[2 * 5 + 2] = 1.0;
+        let mut pixels_data = vec![0.0f32; 25];
+        pixels_data[2 * 5 + 2] = 1.0;
+        let pixels = Buffer2::new(5, 5, pixels_data);
 
-        let fine = compute_fine_structure(&pixels, 5, 5);
+        let fine = compute_fine_structure(&pixels);
 
         // Peak should have positive fine structure
         assert!(fine[2 * 5 + 2] > 0.5);

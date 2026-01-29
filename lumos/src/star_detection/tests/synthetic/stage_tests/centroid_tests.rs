@@ -2,6 +2,7 @@
 //!
 //! Tests sub-pixel centroid accuracy on synthetic stars.
 
+use crate::common::Buffer2;
 use crate::star_detection::StarDetectionConfig;
 use crate::star_detection::background::estimate_background;
 use crate::star_detection::centroid::compute_centroid;
@@ -68,7 +69,8 @@ fn test_centroid_accuracy() {
     );
 
     // Estimate background
-    let background = estimate_background(&pixels, width, height, TILE_SIZE);
+    let pixels_buf = Buffer2::new(width, height, pixels.clone());
+    let background = estimate_background(&pixels_buf, TILE_SIZE);
 
     // Test centroid computation for each star
     let mut errors = Vec::new();
@@ -93,7 +95,7 @@ fn test_centroid_accuracy() {
             area: 50,
         };
 
-        let result = compute_centroid(&pixels, width, height, &background, &candidate, &config);
+        let result = compute_centroid(&pixels_buf, &background, &candidate, &config);
 
         if let Some(star) = result {
             let error = ((star.x - true_x).powi(2) + (star.y - true_y).powi(2)).sqrt();
@@ -136,7 +138,7 @@ fn test_centroid_accuracy() {
             area: 50,
         };
 
-        let result = compute_centroid(&pixels, width, height, &background, &candidate, &config);
+        let result = compute_centroid(&pixels_buf, &background, &candidate, &config);
 
         if let Some(star) = result {
             draw_cross(&mut img, star.x, star.y, 3.0, green, 1.0);
@@ -214,7 +216,8 @@ fn test_centroid_snr() {
     );
 
     // Estimate background
-    let background = estimate_background(&pixels, width, height, TILE_SIZE);
+    let pixels_buf = Buffer2::new(width, height, pixels.clone());
+    let background = estimate_background(&pixels_buf, TILE_SIZE);
 
     // Create overlay
     let mut img = gray_to_rgb_image_stretched(&pixels, width, height);
@@ -247,7 +250,7 @@ fn test_centroid_snr() {
             area: 50,
         };
 
-        let result = compute_centroid(&pixels, width, height, &background, &candidate, &config);
+        let result = compute_centroid(&pixels_buf, &background, &candidate, &config);
 
         if let Some(star) = result {
             let error = ((star.x - true_x).powi(2) + (star.y - true_y).powi(2)).sqrt();

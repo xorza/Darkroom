@@ -1,5 +1,6 @@
 use super::*;
 use crate::AstroImage;
+use crate::common::Buffer2;
 use crate::registration::types::TransformType;
 use std::f64::consts::PI;
 
@@ -212,10 +213,9 @@ fn test_warp_to_reference_image_roundtrip() {
 
     // Create target image by warping reference with the transform
     // (simulates what the camera would see if shifted/rotated)
+    let ref_buf = Buffer2::new(width, height, ref_pixels.clone());
     let target_pixels = crate::registration::interpolation::warp_image(
-        &ref_pixels,
-        width,
-        height,
+        &ref_buf,
         width,
         height,
         &transform,
@@ -227,8 +227,10 @@ fn test_warp_to_reference_image_roundtrip() {
         },
     );
 
-    let target_image =
-        AstroImage::from_pixels(ImageDimensions::new(width, height, 1), target_pixels);
+    let target_image = AstroImage::from_pixels(
+        ImageDimensions::new(width, height, 1),
+        target_pixels.into_vec(),
+    );
 
     // Now use warp_to_reference_image to align target back to reference frame
     let aligned = warp_to_reference_image(&target_image, &transform, InterpolationMethod::Lanczos3);

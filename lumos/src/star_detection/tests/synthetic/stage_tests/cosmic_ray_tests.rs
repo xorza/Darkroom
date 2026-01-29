@@ -37,13 +37,14 @@ fn test_cosmic_ray_rejection() {
         cosmic_ray_count: 0,
         ..Default::default()
     };
-    let (mut pixels, ground_truth) = generate_star_field(&config);
+    let (pixels, ground_truth) = generate_star_field(&config);
+    let mut pixels_vec = pixels.into_vec();
 
     // Add cosmic rays manually so we know their positions
-    let cr_positions = add_cosmic_rays(&mut pixels, width, 15, (0.5, 1.0), 123);
+    let cr_positions = add_cosmic_rays(&mut pixels_vec, width, 15, (0.5, 1.0), 123);
 
     save_grayscale(
-        &pixels,
+        &pixels_vec,
         width,
         height,
         &test_output_path("synthetic_starfield/stage_cr_rejection_input.png"),
@@ -55,12 +56,12 @@ fn test_cosmic_ray_rejection() {
         ..Default::default()
     };
 
-    let image = AstroImage::from_pixels(ImageDimensions::new(width, height, 1), pixels.clone());
+    let image = AstroImage::from_pixels(ImageDimensions::new(width, height, 1), pixels_vec.clone());
     let result = find_stars(&image, &detection_config);
     let stars = result.stars;
 
     // Create overlay
-    let mut img = gray_to_rgb_image_stretched(&pixels, width, height);
+    let mut img = gray_to_rgb_image_stretched(&pixels_vec, width, height);
 
     // Draw cosmic ray positions in red
     let red = Color::rgb(1.0, 0.2, 0.2);
@@ -163,13 +164,14 @@ fn test_laplacian_snr_visualization() {
         cosmic_ray_count: 0,
         ..Default::default()
     };
-    let (mut pixels, ground_truth) = generate_star_field(&config);
+    let (pixels, ground_truth) = generate_star_field(&config);
+    let mut pixels_vec = pixels.into_vec();
 
     // Add cosmic rays
-    let cr_positions = add_cosmic_rays(&mut pixels, width, 10, (0.6, 0.9), 456);
+    let cr_positions = add_cosmic_rays(&mut pixels_vec, width, 10, (0.6, 0.9), 456);
 
     save_grayscale(
-        &pixels,
+        &pixels_vec,
         width,
         height,
         &test_output_path("synthetic_starfield/stage_laplacian_snr_input.png"),
@@ -181,7 +183,7 @@ fn test_laplacian_snr_visualization() {
         ..Default::default()
     };
 
-    let image = AstroImage::from_pixels(ImageDimensions::new(width, height, 1), pixels.clone());
+    let image = AstroImage::from_pixels(ImageDimensions::new(width, height, 1), pixels_vec.clone());
     let result = find_stars(&image, &detection_config);
     let stars = result.stars;
 
@@ -203,7 +205,7 @@ fn test_laplacian_snr_visualization() {
     }
 
     // Create composite visualization
-    let mut img = gray_to_rgb_image_stretched(&pixels, width, height);
+    let mut img = gray_to_rgb_image_stretched(&pixels_vec, width, height);
 
     // Mark CR positions
     let red = Color::rgb(1.0, 0.4, 0.4);

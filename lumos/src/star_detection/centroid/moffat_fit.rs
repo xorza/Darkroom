@@ -13,6 +13,8 @@
 // These are public API functions exported for external use
 #![allow(dead_code)]
 
+use crate::common::Buffer2;
+
 // Use shared linear solvers
 use super::linear_solver::{solve_5x5, solve_6x6};
 
@@ -82,8 +84,6 @@ pub struct MoffatFitResult {
 ///
 /// # Arguments
 /// * `pixels` - Image pixel data
-/// * `width` - Image width
-/// * `height` - Image height
 /// * `cx` - Initial X estimate (from weighted centroid)
 /// * `cy` - Initial Y estimate (from weighted centroid)
 /// * `stamp_radius` - Radius of stamp to fit
@@ -100,7 +100,7 @@ pub struct MoffatFitResult {
 /// // Extract a stamp around the star (21x21 pixels centered on star)
 /// let width = 21;
 /// let height = 21;
-/// let pixels: Vec<f32> = /* star stamp data */;
+/// let pixels: Buffer2<f32> = /* star stamp data */;
 ///
 /// // Initial centroid estimate from weighted moments
 /// let cx = 10.5;
@@ -115,23 +115,23 @@ pub struct MoffatFitResult {
 ///     ..MoffatFitConfig::default()
 /// };
 ///
-/// if let Some(result) = fit_moffat_2d(&pixels, width, height, cx, cy, stamp_radius, background, &config) {
+/// if let Some(result) = fit_moffat_2d(&pixels, cx, cy, stamp_radius, background, &config) {
 ///     println!("Sub-pixel position: ({:.3}, {:.3})", result.x, result.y);
 ///     println!("FWHM: {:.2} pixels", result.fwhm);
 ///     println!("Converged: {}", result.converged);
 /// }
 /// ```
-#[allow(clippy::too_many_arguments)]
 pub fn fit_moffat_2d(
-    pixels: &[f32],
-    width: usize,
-    height: usize,
+    pixels: &Buffer2<f32>,
     cx: f32,
     cy: f32,
     stamp_radius: usize,
     background: f32,
     config: &MoffatFitConfig,
 ) -> Option<MoffatFitResult> {
+    let width = pixels.width();
+    let height = pixels.height();
+
     // Extract stamp
     let icx = cx.round() as isize;
     let icy = cy.round() as isize;
@@ -620,6 +620,7 @@ pub fn fwhm_beta_to_alpha(fwhm: f32, beta: f32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::common::Buffer2;
 
     #[allow(clippy::too_many_arguments)]
     fn make_moffat_stamp(
@@ -659,13 +660,14 @@ mod tests {
         let pixels = make_moffat_stamp(
             width, height, true_cx, true_cy, true_amp, true_alpha, true_beta, true_bg,
         );
+        let pixels_buf = Buffer2::new(width, height, pixels);
 
         let config = MoffatFitConfig {
             fit_beta: false,
             fixed_beta: true_beta,
             ..Default::default()
         };
-        let result = fit_moffat_2d(&pixels, width, height, 10.0, 10.0, 8, true_bg, &config);
+        let result = fit_moffat_2d(&pixels_buf, 10.0, 10.0, 8, true_bg, &config);
 
         assert!(result.is_some(), "Fit should succeed");
         let result = result.unwrap();
@@ -705,6 +707,7 @@ mod tests {
         let pixels = make_moffat_stamp(
             width, height, true_cx, true_cy, true_amp, true_alpha, true_beta, true_bg,
         );
+        let pixels_buf = Buffer2::new(width, height, pixels);
 
         let config = MoffatFitConfig {
             fit_beta: false,
@@ -712,7 +715,7 @@ mod tests {
             ..Default::default()
         };
         // Start closer to true center (within 1 pixel)
-        let result = fit_moffat_2d(&pixels, width, height, 10.0, 10.0, 8, true_bg, &config);
+        let result = fit_moffat_2d(&pixels_buf, 10.0, 10.0, 8, true_bg, &config);
 
         assert!(result.is_some(), "Fit should succeed");
         let result = result.unwrap();
@@ -746,6 +749,7 @@ mod tests {
         let pixels = make_moffat_stamp(
             width, height, true_cx, true_cy, true_amp, true_alpha, true_beta, true_bg,
         );
+        let pixels_buf = Buffer2::new(width, height, pixels);
 
         let config = MoffatFitConfig {
             fit_beta: true,
@@ -753,7 +757,7 @@ mod tests {
             max_iterations: 100, // More iterations for beta fitting
             ..Default::default()
         };
-        let result = fit_moffat_2d(&pixels, width, height, 10.0, 10.0, 8, true_bg, &config);
+        let result = fit_moffat_2d(&pixels_buf, 10.0, 10.0, 8, true_bg, &config);
 
         assert!(result.is_some(), "Fit should succeed");
         let result = result.unwrap();
@@ -805,9 +809,10 @@ mod tests {
         let width = 21;
         let height = 21;
         let pixels = vec![0.1f32; width * height];
+        let pixels_buf = Buffer2::new(width, height, pixels);
 
         let config = MoffatFitConfig::default();
-        let result = fit_moffat_2d(&pixels, width, height, 2.0, 10.0, 8, 0.1, &config);
+        let result = fit_moffat_2d(&pixels_buf, 2.0, 10.0, 8, 0.1, &config);
 
         assert!(result.is_none(), "Fit should fail for edge position");
     }

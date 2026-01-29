@@ -4,14 +4,24 @@
 #![allow(clippy::identity_op, clippy::erasing_op)]
 
 use super::*;
+use crate::common::Buffer2;
 use crate::star_detection::background::{BackgroundMap, estimate_background};
 use crate::star_detection::constants::dilate_mask;
 
-/// Helper to dilate a mask (allocates output)
-fn dilate_mask_test(mask: &[bool], width: usize, height: usize, radius: usize) -> Vec<bool> {
-    let mut output = vec![false; mask.len()];
-    dilate_mask(mask, width, height, radius, &mut output);
-    output
+/// Helper to construct BackgroundMap from slices
+fn make_bg(background: Vec<f32>, noise: Vec<f32>, width: usize, height: usize) -> BackgroundMap {
+    BackgroundMap {
+        background: Buffer2::new(width, height, background),
+        noise: Buffer2::new(width, height, noise),
+    }
+}
+
+/// Helper to construct BackgroundMap with uniform values
+fn make_bg_uniform(width: usize, height: usize, bg_val: f32, noise_val: f32) -> BackgroundMap {
+    BackgroundMap {
+        background: Buffer2::new_filled(width, height, bg_val),
+        noise: Buffer2::new_filled(width, height, noise_val),
+    }
 }
 
 /// Default deblend config for tests
@@ -31,7 +41,7 @@ fn make_test_image_with_star(
     height: usize,
     star_x: usize,
     star_y: usize,
-) -> Vec<f32> {
+) -> Buffer2<f32> {
     let mut pixels = vec![0.1f32; width * height];
 
     // Add a Gaussian-like star
@@ -47,7 +57,7 @@ fn make_test_image_with_star(
         }
     }
 
-    pixels
+    Buffer2::new(width, height, pixels)
 }
 
 #[test]
@@ -56,9 +66,9 @@ fn test_detect_single_star() {
     let height = 64;
     let pixels = make_test_image_with_star(width, height, 32, 32);
 
-    let bg = estimate_background(&pixels, width, height, 32);
+    let bg = estimate_background(&pixels, 32);
     let config = StarDetectionConfig::default();
-    let candidates = detect_stars(&pixels, width, height, &bg, &config);
+    let candidates = detect_stars(&pixels, &bg, &config);
 
     assert_eq!(candidates.len(), 1, "Should detect exactly one star");
     let star = &candidates[0];
@@ -93,12 +103,13 @@ fn test_detect_multiple_stars() {
         }
     }
 
-    let bg = estimate_background(&pixels, width, height, 32);
+    let pixels_buf = Buffer2::new(width, height, pixels);
+    let bg = estimate_background(&pixels_buf, 32);
     let config = StarDetectionConfig {
         edge_margin: 5,
         ..Default::default()
     };
-    let candidates = detect_stars(&pixels, width, height, &bg, &config);
+    let candidates = detect_stars(&pixels_buf, &bg, &config);
 
     assert_eq!(candidates.len(), 3, "Should detect three stars");
 }
@@ -110,12 +121,12 @@ fn test_reject_edge_stars() {
     // Star at edge (x=5, y=32) should be rejected with edge_margin=10
     let pixels = make_test_image_with_star(width, height, 5, 32);
 
-    let bg = estimate_background(&pixels, width, height, 32);
+    let bg = estimate_background(&pixels, 32);
     let config = StarDetectionConfig {
         edge_margin: 10,
         ..Default::default()
     };
-    let candidates = detect_stars(&pixels, width, height, &bg, &config);
+    let candidates = detect_stars(&pixels, &bg, &config);
 
     assert!(candidates.is_empty(), "Edge star should be rejected");
 }
@@ -130,12 +141,13 @@ fn test_reject_small_objects() {
     // Use min_area > 25 to reject single-pixel noise.
     pixels[32 * width + 32] = 0.9;
 
-    let bg = estimate_background(&pixels, width, height, 32);
+    let pixels_buf = Buffer2::new(width, height, pixels);
+    let bg = estimate_background(&pixels_buf, 32);
     let config = StarDetectionConfig {
         min_area: 26, // Must be > 25 to reject dilated single pixel (radius 2 = 5x5 = 25)
         ..Default::default()
     };
-    let candidates = detect_stars(&pixels, width, height, &bg, &config);
+    let candidates = detect_stars(&pixels_buf, &bg, &config);
 
     assert!(candidates.is_empty(), "Single pixel should be rejected");
 }
@@ -146,9 +158,10 @@ fn test_empty_image() {
     let height = 64;
     let pixels = vec![0.1f32; width * height];
 
-    let bg = estimate_background(&pixels, width, height, 32);
+    let pixels_buf = Buffer2::new(width, height, pixels);
+    let bg = estimate_background(&pixels_buf, 32);
     let config = StarDetectionConfig::default();
-    let candidates = detect_stars(&pixels, width, height, &bg, &config);
+    let candidates = detect_stars(&pixels_buf, &bg, &config);
 
     assert!(candidates.is_empty(), "Uniform image should have no stars");
 }
@@ -159,8 +172,8 @@ fn test_empty_image() {
 
 #[test]
 fn test_connected_components_empty_mask() {
-    let mask = vec![false; 16];
-    let (labels, num_labels) = connected_components(&mask, 4, 4);
+    let mask = Buffer2::new(4, 4, vec![false; 16]);
+    let (labels, num_labels) = connected_components(&mask);
 
     assert_eq!(num_labels, 0);
     assert!(labels.iter().all(|&l| l == 0));
@@ -169,10 +182,11 @@ fn test_connected_components_empty_mask() {
 #[test]
 fn test_connected_components_single_pixel() {
     // 4x4 mask with single pixel at (1, 1)
-    let mut mask = vec![false; 16];
-    mask[1 * 4 + 1] = true;
+    let mut mask_data = vec![false; 16];
+    mask_data[1 * 4 + 1] = true;
+    let mask = Buffer2::new(4, 4, mask_data);
 
-    let (labels, num_labels) = connected_components(&mask, 4, 4);
+    let (labels, num_labels) = connected_components(&mask);
 
     assert_eq!(num_labels, 1);
     assert_eq!(labels[1 * 4 + 1], 1);
@@ -185,12 +199,13 @@ fn test_connected_components_horizontal_line() {
     // .....
     // ###..
     // .....
-    let mut mask = vec![false; 15];
-    mask[1 * 5 + 0] = true;
-    mask[1 * 5 + 1] = true;
-    mask[1 * 5 + 2] = true;
+    let mut mask_data = vec![false; 15];
+    mask_data[1 * 5 + 0] = true;
+    mask_data[1 * 5 + 1] = true;
+    mask_data[1 * 5 + 2] = true;
+    let mask = Buffer2::new(5, 3, mask_data);
 
-    let (labels, num_labels) = connected_components(&mask, 5, 3);
+    let (labels, num_labels) = connected_components(&mask);
 
     assert_eq!(num_labels, 1);
     // All three pixels should have the same label
@@ -203,13 +218,14 @@ fn test_connected_components_horizontal_line() {
 #[test]
 fn test_connected_components_vertical_line() {
     // 3x5 mask with vertical line in middle column
-    let mut mask = vec![false; 15];
-    mask[0 * 3 + 1] = true;
-    mask[1 * 3 + 1] = true;
-    mask[2 * 3 + 1] = true;
-    mask[3 * 3 + 1] = true;
+    let mut mask_data = vec![false; 15];
+    mask_data[0 * 3 + 1] = true;
+    mask_data[1 * 3 + 1] = true;
+    mask_data[2 * 3 + 1] = true;
+    mask_data[3 * 3 + 1] = true;
+    let mask = Buffer2::new(3, 5, mask_data);
 
-    let (labels, num_labels) = connected_components(&mask, 3, 5);
+    let (labels, num_labels) = connected_components(&mask);
 
     assert_eq!(num_labels, 1);
     let label = labels[0 * 3 + 1];
@@ -225,11 +241,12 @@ fn test_connected_components_two_separate_regions() {
     // #....#
     // ......
     // ......
-    let mut mask = vec![false; 18];
-    mask[0] = true; // (0, 0)
-    mask[5] = true; // (5, 0)
+    let mut mask_data = vec![false; 18];
+    mask_data[0] = true; // (0, 0)
+    mask_data[5] = true; // (5, 0)
+    let mask = Buffer2::new(6, 3, mask_data);
 
-    let (labels, num_labels) = connected_components(&mask, 6, 3);
+    let (labels, num_labels) = connected_components(&mask);
 
     assert_eq!(num_labels, 2);
     assert!(labels[0] > 0);
@@ -244,13 +261,14 @@ fn test_connected_components_l_shape() {
     // #...
     // ##..
     // ....
-    let mut mask = vec![false; 16];
-    mask[0 * 4 + 0] = true;
-    mask[1 * 4 + 0] = true;
-    mask[2 * 4 + 0] = true;
-    mask[2 * 4 + 1] = true;
+    let mut mask_data = vec![false; 16];
+    mask_data[0 * 4 + 0] = true;
+    mask_data[1 * 4 + 0] = true;
+    mask_data[2 * 4 + 0] = true;
+    mask_data[2 * 4 + 1] = true;
+    let mask = Buffer2::new(4, 4, mask_data);
 
-    let (labels, num_labels) = connected_components(&mask, 4, 4);
+    let (labels, num_labels) = connected_components(&mask);
 
     assert_eq!(num_labels, 1);
     let label = labels[0];
@@ -266,12 +284,13 @@ fn test_connected_components_diagonal_not_connected() {
     // #..
     // .#.
     // ..#
-    let mut mask = vec![false; 9];
-    mask[0 * 3 + 0] = true;
-    mask[1 * 3 + 1] = true;
-    mask[2 * 3 + 2] = true;
+    let mut mask_data = vec![false; 9];
+    mask_data[0 * 3 + 0] = true;
+    mask_data[1 * 3 + 1] = true;
+    mask_data[2 * 3 + 2] = true;
+    let mask = Buffer2::new(3, 3, mask_data);
 
-    let (_labels, num_labels) = connected_components(&mask, 3, 3);
+    let (_labels, num_labels) = connected_components(&mask);
 
     // With 4-connectivity, diagonal pixels are NOT connected
     assert_eq!(num_labels, 3);
@@ -284,28 +303,29 @@ fn test_connected_components_u_shape_union_find() {
     // #...#
     // #...#
     // #####
-    let mut mask = vec![false; 15];
+    let mut mask_data = vec![false; 15];
     // Left column
-    mask[0 * 5 + 0] = true;
-    mask[1 * 5 + 0] = true;
-    mask[2 * 5 + 0] = true;
+    mask_data[0 * 5 + 0] = true;
+    mask_data[1 * 5 + 0] = true;
+    mask_data[2 * 5 + 0] = true;
     // Right column
-    mask[0 * 5 + 4] = true;
-    mask[1 * 5 + 4] = true;
-    mask[2 * 5 + 4] = true;
+    mask_data[0 * 5 + 4] = true;
+    mask_data[1 * 5 + 4] = true;
+    mask_data[2 * 5 + 4] = true;
     // Bottom row connecting them
-    mask[2 * 5 + 1] = true;
-    mask[2 * 5 + 2] = true;
-    mask[2 * 5 + 3] = true;
+    mask_data[2 * 5 + 1] = true;
+    mask_data[2 * 5 + 2] = true;
+    mask_data[2 * 5 + 3] = true;
+    let mask = Buffer2::new(5, 3, mask_data.clone());
 
-    let (labels, num_labels) = connected_components(&mask, 5, 3);
+    let (labels, num_labels) = connected_components(&mask);
 
     // All pixels should be in one component due to union-find
     assert_eq!(num_labels, 1);
     let label = labels[0];
     assert!(label > 0);
     for i in 0..15 {
-        if mask[i] {
+        if mask_data[i] {
             assert_eq!(
                 labels[i], label,
                 "All U-shape pixels should have same label"
@@ -321,16 +341,17 @@ fn test_connected_components_checkerboard() {
     // .#.#
     // #.#.
     // .#.#
-    let mut mask = vec![false; 16];
+    let mut mask_data = vec![false; 16];
     for y in 0..4 {
         for x in 0..4 {
             if (x + y) % 2 == 0 {
-                mask[y * 4 + x] = true;
+                mask_data[y * 4 + x] = true;
             }
         }
     }
+    let mask = Buffer2::new(4, 4, mask_data);
 
-    let (_labels, num_labels) = connected_components(&mask, 4, 4);
+    let (_labels, num_labels) = connected_components(&mask);
 
     // Each pixel is isolated (4-connectivity)
     assert_eq!(num_labels, 8);
@@ -339,8 +360,8 @@ fn test_connected_components_checkerboard() {
 #[test]
 fn test_connected_components_filled_rectangle() {
     // 3x3 all true
-    let mask = vec![true; 9];
-    let (labels, num_labels) = connected_components(&mask, 3, 3);
+    let mask = Buffer2::new(3, 3, vec![true; 9]);
+    let (labels, num_labels) = connected_components(&mask);
 
     assert_eq!(num_labels, 1);
     assert!(labels.iter().all(|&l| l == 1));
@@ -350,12 +371,13 @@ fn test_connected_components_filled_rectangle() {
 fn test_connected_components_labels_are_sequential() {
     // 6x1 with three separate pixels
     // #.#.#.
-    let mut mask = vec![false; 6];
-    mask[0] = true;
-    mask[2] = true;
-    mask[4] = true;
+    let mut mask_data = vec![false; 6];
+    mask_data[0] = true;
+    mask_data[2] = true;
+    mask_data[4] = true;
+    let mask = Buffer2::new(6, 1, mask_data);
 
-    let (labels, num_labels) = connected_components(&mask, 6, 1);
+    let (labels, num_labels) = connected_components(&mask);
 
     assert_eq!(num_labels, 3);
     // Labels should be 1, 2, 3 (sequential)
@@ -370,57 +392,71 @@ fn test_connected_components_labels_are_sequential() {
 
 #[test]
 fn test_dilate_mask_empty() {
-    let mask = vec![false; 9];
-    let dilated = dilate_mask_test(&mask, 3, 3, 1);
+    let mask = Buffer2::new(3, 3, vec![false; 9]);
+    let mut dilated = Buffer2::new_filled(3, 3, false);
+    dilate_mask(&mask, 1, &mut dilated);
     assert!(dilated.iter().all(|&x| !x));
 }
 
 #[test]
 fn test_dilate_mask_single_pixel_radius_0() {
     // Radius 0 should not expand
-    let mut mask = vec![false; 9];
-    mask[4] = true; // center
-
-    let dilated = dilate_mask_test(&mask, 3, 3, 0);
+    let mut mask_data = vec![false; 9];
+    mask_data[4] = true; // center
+    let mask = Buffer2::new(3, 3, mask_data);
+    let mut dilated = Buffer2::new_filled(3, 3, false);
+    dilate_mask(&mask, 0, &mut dilated);
 
     assert_eq!(dilated.iter().filter(|&&x| x).count(), 1);
-    assert!(dilated[4]);
+    assert!(dilated.pixels()[4]);
 }
 
 #[test]
 fn test_dilate_mask_single_pixel_radius_1() {
     // 3x3 mask with center pixel, radius 1 should create 3x3 square
-    let mut mask = vec![false; 25]; // 5x5
-    mask[2 * 5 + 2] = true; // center at (2, 2)
-
-    let dilated = dilate_mask_test(&mask, 5, 5, 1);
+    let mut mask_data = vec![false; 25]; // 5x5
+    mask_data[2 * 5 + 2] = true; // center at (2, 2)
+    let mask = Buffer2::new(5, 5, mask_data);
+    let mut dilated = Buffer2::new_filled(5, 5, false);
+    dilate_mask(&mask, 1, &mut dilated);
 
     // Should dilate to 3x3 square centered at (2,2)
     for y in 1..=3 {
         for x in 1..=3 {
-            assert!(dilated[y * 5 + x], "Pixel ({}, {}) should be true", x, y);
+            assert!(
+                dilated.pixels()[y * 5 + x],
+                "Pixel ({}, {}) should be true",
+                x,
+                y
+            );
         }
     }
     // Corners should be false
-    assert!(!dilated[0 * 5 + 0]);
-    assert!(!dilated[0 * 5 + 4]);
-    assert!(!dilated[4 * 5 + 0]);
-    assert!(!dilated[4 * 5 + 4]);
+    assert!(!dilated.pixels()[0 * 5 + 0]);
+    assert!(!dilated.pixels()[0 * 5 + 4]);
+    assert!(!dilated.pixels()[4 * 5 + 0]);
+    assert!(!dilated.pixels()[4 * 5 + 4]);
 }
 
 #[test]
 fn test_dilate_mask_single_pixel_radius_2() {
     // 7x7 mask with center pixel, radius 2 should create 5x5 square
-    let mut mask = vec![false; 49];
-    mask[3 * 7 + 3] = true; // center at (3, 3)
-
-    let dilated = dilate_mask_test(&mask, 7, 7, 2);
+    let mut mask_data = vec![false; 49];
+    mask_data[3 * 7 + 3] = true; // center at (3, 3)
+    let mask = Buffer2::new(7, 7, mask_data);
+    let mut dilated = Buffer2::new_filled(7, 7, false);
+    dilate_mask(&mask, 2, &mut dilated);
 
     // Should dilate to 5x5 square centered at (3,3)
     let mut count = 0;
     for y in 1..=5 {
         for x in 1..=5 {
-            assert!(dilated[y * 7 + x], "Pixel ({}, {}) should be true", x, y);
+            assert!(
+                dilated.pixels()[y * 7 + x],
+                "Pixel ({}, {}) should be true",
+                x,
+                y
+            );
             count += 1;
         }
     }
@@ -430,47 +466,50 @@ fn test_dilate_mask_single_pixel_radius_2() {
 #[test]
 fn test_dilate_mask_corner_pixel() {
     // Pixel at corner (0,0), dilation should be clipped to image bounds
-    let mut mask = vec![false; 16];
-    mask[0] = true;
-
-    let dilated = dilate_mask_test(&mask, 4, 4, 1);
+    let mut mask_data = vec![false; 16];
+    mask_data[0] = true;
+    let mask = Buffer2::new(4, 4, mask_data);
+    let mut dilated = Buffer2::new_filled(4, 4, false);
+    dilate_mask(&mask, 1, &mut dilated);
 
     // Only 2x2 corner should be dilated
-    assert!(dilated[0 * 4 + 0]);
-    assert!(dilated[0 * 4 + 1]);
-    assert!(dilated[1 * 4 + 0]);
-    assert!(dilated[1 * 4 + 1]);
+    assert!(dilated.pixels()[0 * 4 + 0]);
+    assert!(dilated.pixels()[0 * 4 + 1]);
+    assert!(dilated.pixels()[1 * 4 + 0]);
+    assert!(dilated.pixels()[1 * 4 + 1]);
     // Rest should be false
-    assert!(!dilated[0 * 4 + 2]);
-    assert!(!dilated[2 * 4 + 0]);
+    assert!(!dilated.pixels()[0 * 4 + 2]);
+    assert!(!dilated.pixels()[2 * 4 + 0]);
 }
 
 #[test]
 fn test_dilate_mask_edge_pixel() {
     // Pixel at edge (0, 2) in 5x5
-    let mut mask = vec![false; 25];
-    mask[2 * 5 + 0] = true;
-
-    let dilated = dilate_mask_test(&mask, 5, 5, 1);
+    let mut mask_data = vec![false; 25];
+    mask_data[2 * 5 + 0] = true;
+    let mask = Buffer2::new(5, 5, mask_data);
+    let mut dilated = Buffer2::new_filled(5, 5, false);
+    dilate_mask(&mask, 1, &mut dilated);
 
     // Should expand but clip at left edge
-    assert!(dilated[1 * 5 + 0]);
-    assert!(dilated[1 * 5 + 1]);
-    assert!(dilated[2 * 5 + 0]);
-    assert!(dilated[2 * 5 + 1]);
-    assert!(dilated[3 * 5 + 0]);
-    assert!(dilated[3 * 5 + 1]);
+    assert!(dilated.pixels()[1 * 5 + 0]);
+    assert!(dilated.pixels()[1 * 5 + 1]);
+    assert!(dilated.pixels()[2 * 5 + 0]);
+    assert!(dilated.pixels()[2 * 5 + 1]);
+    assert!(dilated.pixels()[3 * 5 + 0]);
+    assert!(dilated.pixels()[3 * 5 + 1]);
 }
 
 #[test]
 fn test_dilate_mask_merges_nearby_pixels() {
     // Two pixels separated by gap, dilation should merge them
     // 7x1: #..#...
-    let mut mask = vec![false; 7];
-    mask[0] = true;
-    mask[3] = true;
-
-    let dilated = dilate_mask_test(&mask, 7, 1, 2);
+    let mut mask_data = vec![false; 7];
+    mask_data[0] = true;
+    mask_data[3] = true;
+    let mask = Buffer2::new(7, 1, mask_data);
+    let mut dilated = Buffer2::new_filled(7, 1, false);
+    dilate_mask(&mask, 2, &mut dilated);
 
     // Both should expand and merge
     // Pixel 0 expands to 0,1,2
@@ -479,7 +518,7 @@ fn test_dilate_mask_merges_nearby_pixels() {
     for (i, &val) in dilated.iter().enumerate().take(6) {
         assert!(val, "Pixel {} should be true after dilation", i);
     }
-    assert!(!dilated[6]);
+    assert!(!dilated.pixels()[6]);
 }
 
 // =============================================================================
@@ -487,21 +526,20 @@ fn test_dilate_mask_merges_nearby_pixels() {
 // =============================================================================
 
 /// Helper to create threshold mask for tests
-fn create_threshold_mask_test(pixels: &[f32], background: &BackgroundMap, sigma: f32) -> Vec<bool> {
-    let mut mask = vec![false; pixels.len()];
+fn create_threshold_mask_test(
+    pixels: &Buffer2<f32>,
+    background: &BackgroundMap,
+    sigma: f32,
+) -> Buffer2<bool> {
+    let mut mask = Buffer2::new_filled(pixels.width(), pixels.height(), false);
     create_threshold_mask(pixels, background, sigma, &mut mask);
     mask
 }
 
 #[test]
 fn test_create_threshold_mask_all_below() {
-    let pixels = vec![0.5, 0.5, 0.5, 0.5];
-    let background = BackgroundMap {
-        background: vec![1.0, 1.0, 1.0, 1.0],
-        noise: vec![0.1, 0.1, 0.1, 0.1],
-        width: 2,
-        height: 2,
-    };
+    let pixels = Buffer2::new(2, 2, vec![0.5, 0.5, 0.5, 0.5]);
+    let background = make_bg_uniform(2, 2, 1.0, 0.1);
     let mask = create_threshold_mask_test(&pixels, &background, 3.0);
 
     assert!(mask.iter().all(|&x| !x));
@@ -509,13 +547,8 @@ fn test_create_threshold_mask_all_below() {
 
 #[test]
 fn test_create_threshold_mask_all_above() {
-    let pixels = vec![2.0, 2.0, 2.0, 2.0];
-    let background = BackgroundMap {
-        background: vec![1.0, 1.0, 1.0, 1.0],
-        noise: vec![0.1, 0.1, 0.1, 0.1],
-        width: 2,
-        height: 2,
-    };
+    let pixels = Buffer2::new(2, 2, vec![2.0, 2.0, 2.0, 2.0]);
+    let background = make_bg_uniform(2, 2, 1.0, 0.1);
 
     // threshold = 1.0 + 3.0 * 0.1 = 1.3
     // pixels at 2.0 > 1.3, so all true
@@ -526,13 +559,8 @@ fn test_create_threshold_mask_all_above() {
 
 #[test]
 fn test_create_threshold_mask_mixed() {
-    let pixels = vec![1.0, 2.0, 0.5, 1.5];
-    let background = BackgroundMap {
-        background: vec![1.0, 1.0, 1.0, 1.0],
-        noise: vec![0.1, 0.1, 0.1, 0.1],
-        width: 2,
-        height: 2,
-    };
+    let pixels = Buffer2::new(2, 2, vec![1.0, 2.0, 0.5, 1.5]);
+    let background = make_bg_uniform(2, 2, 1.0, 0.1);
 
     // threshold = 1.0 + 3.0 * 0.1 = 1.3
     // pixel 0: 1.0 <= 1.3 -> false
@@ -541,21 +569,16 @@ fn test_create_threshold_mask_mixed() {
     // pixel 3: 1.5 > 1.3 -> true
     let mask = create_threshold_mask_test(&pixels, &background, 3.0);
 
-    assert!(!mask[0]);
-    assert!(mask[1]);
-    assert!(!mask[2]);
-    assert!(mask[3]);
+    assert!(!mask.pixels()[0]);
+    assert!(mask.pixels()[1]);
+    assert!(!mask.pixels()[2]);
+    assert!(mask.pixels()[3]);
 }
 
 #[test]
 fn test_create_threshold_mask_variable_background() {
-    let pixels = vec![1.5, 1.5, 1.5, 1.5];
-    let background = BackgroundMap {
-        background: vec![1.0, 1.2, 1.4, 0.8],
-        noise: vec![0.1, 0.1, 0.1, 0.1],
-        width: 2,
-        height: 2,
-    };
+    let pixels = Buffer2::new(2, 2, vec![1.5, 1.5, 1.5, 1.5]);
+    let background = make_bg(vec![1.0, 1.2, 1.4, 0.8], vec![0.1, 0.1, 0.1, 0.1], 2, 2);
 
     // thresholds: 1.3, 1.5, 1.7, 1.1
     // pixel 0: 1.5 > 1.3 -> true
@@ -564,60 +587,45 @@ fn test_create_threshold_mask_variable_background() {
     // pixel 3: 1.5 > 1.1 -> true
     let mask = create_threshold_mask_test(&pixels, &background, 3.0);
 
-    assert!(mask[0]);
-    assert!(!mask[1]);
-    assert!(!mask[2]);
-    assert!(mask[3]);
+    assert!(mask.pixels()[0]);
+    assert!(!mask.pixels()[1]);
+    assert!(!mask.pixels()[2]);
+    assert!(mask.pixels()[3]);
 }
 
 #[test]
 fn test_create_threshold_mask_zero_noise_uses_epsilon() {
-    let pixels = vec![1.1, 0.9];
-    let background = BackgroundMap {
-        background: vec![1.0, 1.0],
-        noise: vec![0.0, 0.0], // Zero noise
-        width: 2,
-        height: 1,
-    };
+    let pixels = Buffer2::new(2, 1, vec![1.1, 0.9]);
+    let background = make_bg(vec![1.0, 1.0], vec![0.0, 0.0], 2, 1); // Zero noise
 
     // With noise.max(1e-6), threshold ≈ 1.0 + 3.0 * 1e-6 ≈ 1.000003
     // pixel 0: 1.1 > 1.000003 -> true
     // pixel 1: 0.9 <= 1.000003 -> false
     let mask = create_threshold_mask_test(&pixels, &background, 3.0);
 
-    assert!(mask[0]);
-    assert!(!mask[1]);
+    assert!(mask.pixels()[0]);
+    assert!(!mask.pixels()[1]);
 }
 
 #[test]
 fn test_create_threshold_mask_exact_threshold_is_false() {
     // Pixel exactly at threshold should NOT be detected (must be strictly greater)
-    let pixels = vec![1.3, 1.30001];
-    let background = BackgroundMap {
-        background: vec![1.0, 1.0],
-        noise: vec![0.1, 0.1],
-        width: 2,
-        height: 1,
-    };
+    let pixels = Buffer2::new(2, 1, vec![1.3, 1.30001]);
+    let background = make_bg(vec![1.0, 1.0], vec![0.1, 0.1], 2, 1);
 
     // threshold = 1.0 + 3.0 * 0.1 = 1.3
     // pixel 0: 1.3 is NOT > 1.3 -> false
     // pixel 1: 1.30001 > 1.3 -> true
     let mask = create_threshold_mask_test(&pixels, &background, 3.0);
 
-    assert!(!mask[0], "Exact threshold value should be false");
-    assert!(mask[1], "Just above threshold should be true");
+    assert!(!mask.pixels()[0], "Exact threshold value should be false");
+    assert!(mask.pixels()[1], "Just above threshold should be true");
 }
 
 #[test]
 fn test_create_threshold_mask_different_sigma_values() {
-    let pixels = vec![1.5, 1.5, 1.5, 1.5];
-    let background = BackgroundMap {
-        background: vec![1.0, 1.0, 1.0, 1.0],
-        noise: vec![0.1, 0.1, 0.1, 0.1],
-        width: 2,
-        height: 2,
-    };
+    let pixels = Buffer2::new(2, 2, vec![1.5, 1.5, 1.5, 1.5]);
+    let background = make_bg_uniform(2, 2, 1.0, 0.1);
 
     // sigma=3: threshold=1.3, 1.5 > 1.3 -> all true
     let mask_sigma3 = create_threshold_mask_test(&pixels, &background, 3.0);
@@ -635,21 +643,16 @@ fn test_create_threshold_mask_different_sigma_values() {
 #[test]
 fn test_create_threshold_mask_high_noise_region() {
     // High noise regions require higher pixel values
-    let pixels = vec![2.0, 2.0];
-    let background = BackgroundMap {
-        background: vec![1.0, 1.0],
-        noise: vec![0.1, 0.5], // Second pixel has high noise
-        width: 2,
-        height: 1,
-    };
+    let pixels = Buffer2::new(2, 1, vec![2.0, 2.0]);
+    let background = make_bg(vec![1.0, 1.0], vec![0.1, 0.5], 2, 1); // Second pixel has high noise
 
     // pixel 0: threshold = 1.0 + 3.0*0.1 = 1.3, 2.0 > 1.3 -> true
     // pixel 1: threshold = 1.0 + 3.0*0.5 = 2.5, 2.0 NOT > 2.5 -> false
     let mask = create_threshold_mask_test(&pixels, &background, 3.0);
 
-    assert!(mask[0]);
+    assert!(mask.pixels()[0]);
     assert!(
-        !mask[1],
+        !mask.pixels()[1],
         "High noise region should require higher threshold"
     );
 }
@@ -660,33 +663,33 @@ fn test_create_threshold_mask_high_noise_region() {
 
 /// Helper to create threshold mask using scalar implementation
 fn create_threshold_mask_scalar(
-    pixels: &[f32],
+    pixels: &Buffer2<f32>,
     background: &BackgroundMap,
     sigma: f32,
-) -> Vec<bool> {
-    let mut mask = vec![false; pixels.len()];
+) -> Buffer2<bool> {
+    let mut mask = Buffer2::new_filled(pixels.width(), pixels.height(), false);
     scalar::create_threshold_mask(pixels, background, sigma, &mut mask);
     mask
 }
 
 /// Helper to create filtered threshold mask using scalar implementation
 fn create_threshold_mask_filtered_scalar(
-    filtered: &[f32],
+    filtered: &Buffer2<f32>,
     background: &BackgroundMap,
     sigma: f32,
-) -> Vec<bool> {
-    let mut mask = vec![false; filtered.len()];
+) -> Buffer2<bool> {
+    let mut mask = Buffer2::new_filled(filtered.width(), filtered.height(), false);
     scalar::create_threshold_mask_filtered(filtered, background, sigma, &mut mask);
     mask
 }
 
 /// Helper to create filtered threshold mask for tests (uses dispatch)
 fn create_threshold_mask_filtered_test(
-    filtered: &[f32],
+    filtered: &Buffer2<f32>,
     background: &BackgroundMap,
     sigma: f32,
-) -> Vec<bool> {
-    let mut mask = vec![false; filtered.len()];
+) -> Buffer2<bool> {
+    let mut mask = Buffer2::new_filled(filtered.width(), filtered.height(), false);
     create_threshold_mask_filtered(filtered, background, sigma, &mut mask);
     mask
 }
@@ -694,13 +697,8 @@ fn create_threshold_mask_filtered_test(
 #[test]
 fn test_simd_vs_scalar_consistency_small() {
     // Small input that fits in one SIMD vector
-    let pixels = vec![0.5, 1.5, 2.0, 0.8];
-    let background = BackgroundMap {
-        background: vec![1.0, 1.0, 1.0, 1.0],
-        noise: vec![0.1, 0.1, 0.1, 0.1],
-        width: 2,
-        height: 2,
-    };
+    let pixels = Buffer2::new(2, 2, vec![0.5, 1.5, 2.0, 0.8]);
+    let background = make_bg_uniform(2, 2, 1.0, 0.1);
 
     let dispatch_mask = create_threshold_mask_test(&pixels, &background, 3.0);
     let scalar_mask = create_threshold_mask_scalar(&pixels, &background, 3.0);
@@ -715,13 +713,9 @@ fn test_simd_vs_scalar_consistency_small() {
 fn test_simd_vs_scalar_consistency_unaligned() {
     // Input sizes that don't align with SIMD width (4) or unroll factor (16)
     for size in [1, 2, 3, 5, 7, 13, 15, 17, 19, 31, 33] {
-        let pixels: Vec<f32> = (0..size).map(|i| (i as f32) * 0.1).collect();
-        let background = BackgroundMap {
-            background: vec![0.5; size],
-            noise: vec![0.1; size],
-            width: size,
-            height: 1,
-        };
+        let pixels: Buffer2<f32> =
+            Buffer2::new(size, 1, (0..size).map(|i| (i as f32) * 0.1).collect());
+        let background = make_bg_uniform(size, 1, 0.5, 0.1);
 
         let dispatch_mask = create_threshold_mask_test(&pixels, &background, 3.0);
         let scalar_mask = create_threshold_mask_scalar(&pixels, &background, 3.0);
@@ -738,23 +732,19 @@ fn test_simd_vs_scalar_consistency_unaligned() {
 fn test_simd_vs_scalar_consistency_large() {
     // Large input that exercises unrolled loop
     let size = 1024;
-    let mut pixels = vec![0.0f32; size];
+    let mut pixels_data = vec![0.0f32; size];
     let mut bg = vec![1.0f32; size];
     let mut noise = vec![0.1f32; size];
 
     // Create varied data
     for i in 0..size {
-        pixels[i] = ((i * 17) % 100) as f32 / 50.0; // 0.0 to 2.0
+        pixels_data[i] = ((i * 17) % 100) as f32 / 50.0; // 0.0 to 2.0
         bg[i] = 1.0 + ((i * 7) % 10) as f32 / 100.0; // 1.0 to 1.1
         noise[i] = 0.05 + ((i * 3) % 10) as f32 / 100.0; // 0.05 to 0.15
     }
 
-    let background = BackgroundMap {
-        background: bg,
-        noise,
-        width: size,
-        height: 1,
-    };
+    let background = make_bg(bg, noise, size, 1);
+    let pixels = Buffer2::new(size, 1, pixels_data);
 
     let dispatch_mask = create_threshold_mask_test(&pixels, &background, 3.0);
     let scalar_mask = create_threshold_mask_scalar(&pixels, &background, 3.0);
@@ -769,13 +759,8 @@ fn test_simd_vs_scalar_consistency_large() {
 fn test_simd_vs_scalar_consistency_filtered() {
     // Test filtered variant consistency
     let size = 100;
-    let filtered: Vec<f32> = (0..size).map(|i| (i as f32) * 0.05).collect();
-    let background = BackgroundMap {
-        background: vec![0.0; size], // Not used for filtered
-        noise: vec![0.1; size],
-        width: size,
-        height: 1,
-    };
+    let filtered = Buffer2::new(size, 1, (0..size).map(|i| (i as f32) * 0.05).collect());
+    let background = make_bg_uniform(size, 1, 0.0, 0.1); // background not used for filtered
 
     let dispatch_mask = create_threshold_mask_filtered_test(&filtered, &background, 3.0);
     let scalar_mask = create_threshold_mask_filtered_scalar(&filtered, &background, 3.0);
@@ -791,15 +776,14 @@ fn test_simd_remainder_handling() {
     // Test that remainder handling works correctly for all possible remainder sizes
     for remainder in 0..16 {
         let size = 64 + remainder; // 64 is cleanly divisible by 16
-        let pixels: Vec<f32> = (0..size)
-            .map(|i| if i % 2 == 0 { 2.0 } else { 0.5 })
-            .collect();
-        let background = BackgroundMap {
-            background: vec![1.0; size],
-            noise: vec![0.1; size],
-            width: size,
-            height: 1,
-        };
+        let pixels = Buffer2::new(
+            size,
+            1,
+            (0..size)
+                .map(|i| if i % 2 == 0 { 2.0 } else { 0.5 })
+                .collect(),
+        );
+        let background = make_bg_uniform(size, 1, 1.0, 0.1);
 
         let dispatch_mask = create_threshold_mask_test(&pixels, &background, 3.0);
         let scalar_mask = create_threshold_mask_scalar(&pixels, &background, 3.0);
@@ -821,13 +805,8 @@ fn test_simd_remainder_handling() {
 #[test]
 fn test_filtered_threshold_mask_basic() {
     // filtered image is already background-subtracted, so threshold = sigma * noise
-    let filtered = vec![0.2, 0.4, 0.6, 0.8];
-    let background = BackgroundMap {
-        background: vec![0.0; 4], // Not used
-        noise: vec![0.1, 0.1, 0.1, 0.1],
-        width: 2,
-        height: 2,
-    };
+    let filtered = Buffer2::new(2, 2, vec![0.2, 0.4, 0.6, 0.8]);
+    let background = make_bg_uniform(2, 2, 0.0, 0.1); // Not used
 
     // threshold = 3.0 * 0.1 = 0.3
     // 0.2 <= 0.3 -> false
@@ -844,13 +823,8 @@ fn test_filtered_threshold_mask_basic() {
 
 #[test]
 fn test_filtered_threshold_mask_variable_noise() {
-    let filtered = vec![0.5, 0.5, 0.5, 0.5];
-    let background = BackgroundMap {
-        background: vec![0.0; 4],
-        noise: vec![0.1, 0.2, 0.3, 0.05],
-        width: 2,
-        height: 2,
-    };
+    let filtered = Buffer2::new(2, 2, vec![0.5, 0.5, 0.5, 0.5]);
+    let background = make_bg(vec![0.0; 4], vec![0.1, 0.2, 0.3, 0.05], 2, 2);
 
     // thresholds: 0.3, 0.6, 0.9, 0.15
     // 0.5 > 0.3 -> true
@@ -872,10 +846,11 @@ fn test_filtered_threshold_mask_variable_noise() {
 #[test]
 fn test_dilate_mask_large_radius() {
     // 11x11 image with center pixel, radius 5 should fill most of image
-    let mut mask = vec![false; 121];
-    mask[5 * 11 + 5] = true; // center
-
-    let dilated = dilate_mask_test(&mask, 11, 11, 5);
+    let mut mask_data = vec![false; 121];
+    mask_data[5 * 11 + 5] = true; // center
+    let mask = Buffer2::new(11, 11, mask_data);
+    let mut dilated = Buffer2::new_filled(11, 11, false);
+    dilate_mask(&mask, 5, &mut dilated);
 
     // Should create 11x11 square (capped at image bounds)
     assert!(dilated.iter().all(|&x| x), "All pixels should be dilated");
@@ -884,10 +859,11 @@ fn test_dilate_mask_large_radius() {
 #[test]
 fn test_dilate_mask_radius_larger_than_image() {
     // Radius larger than image dimensions
-    let mut mask = vec![false; 9];
-    mask[4] = true; // center of 3x3
-
-    let dilated = dilate_mask_test(&mask, 3, 3, 100);
+    let mut mask_data = vec![false; 9];
+    mask_data[4] = true; // center of 3x3
+    let mask = Buffer2::new(3, 3, mask_data);
+    let mut dilated = Buffer2::new_filled(3, 3, false);
+    dilate_mask(&mask, 100, &mut dilated);
 
     // Should fill entire image
     assert!(dilated.iter().all(|&x| x));
@@ -896,34 +872,36 @@ fn test_dilate_mask_radius_larger_than_image() {
 #[test]
 fn test_dilate_mask_all_corners() {
     // All four corners set
-    let mut mask = vec![false; 25]; // 5x5
-    mask[0 * 5 + 0] = true; // top-left
-    mask[0 * 5 + 4] = true; // top-right
-    mask[4 * 5 + 0] = true; // bottom-left
-    mask[4 * 5 + 4] = true; // bottom-right
-
-    let dilated = dilate_mask_test(&mask, 5, 5, 1);
+    let mut mask_data = vec![false; 25]; // 5x5
+    mask_data[0 * 5 + 0] = true; // top-left
+    mask_data[0 * 5 + 4] = true; // top-right
+    mask_data[4 * 5 + 0] = true; // bottom-left
+    mask_data[4 * 5 + 4] = true; // bottom-right
+    let mask = Buffer2::new(5, 5, mask_data);
+    let mut dilated = Buffer2::new_filled(5, 5, false);
+    dilate_mask(&mask, 1, &mut dilated);
 
     // Check corner expansions
     // Top-left expands to (0,0), (0,1), (1,0), (1,1)
-    assert!(dilated[0 * 5 + 0]);
-    assert!(dilated[0 * 5 + 1]);
-    assert!(dilated[1 * 5 + 0]);
-    assert!(dilated[1 * 5 + 1]);
+    assert!(dilated.pixels()[0 * 5 + 0]);
+    assert!(dilated.pixels()[0 * 5 + 1]);
+    assert!(dilated.pixels()[1 * 5 + 0]);
+    assert!(dilated.pixels()[1 * 5 + 1]);
 
     // Center should still be false (corners don't reach it with radius 1)
-    assert!(!dilated[2 * 5 + 2]);
+    assert!(!dilated.pixels()[2 * 5 + 2]);
 }
 
 #[test]
 fn test_dilate_mask_full_coverage_radius_2() {
     // Two pixels that should merge with radius 2
     // 9x1: #...#....
-    let mut mask = vec![false; 9];
-    mask[0] = true;
-    mask[4] = true;
-
-    let dilated = dilate_mask_test(&mask, 9, 1, 2);
+    let mut mask_data = vec![false; 9];
+    mask_data[0] = true;
+    mask_data[4] = true;
+    let mask = Buffer2::new(9, 1, mask_data);
+    let mut dilated = Buffer2::new_filled(9, 1, false);
+    dilate_mask(&mask, 2, &mut dilated);
 
     // Pixel 0 expands to 0,1,2
     // Pixel 4 expands to 2,3,4,5,6
@@ -931,43 +909,50 @@ fn test_dilate_mask_full_coverage_radius_2() {
     for (i, &val) in dilated.iter().enumerate().take(7) {
         assert!(val, "Pixel {} should be true", i);
     }
-    assert!(!dilated[7]);
-    assert!(!dilated[8]);
+    assert!(!dilated.pixels()[7]);
+    assert!(!dilated.pixels()[8]);
 }
 
 #[test]
 fn test_dilate_mask_non_square_image() {
     // 7x3 image with pixel at (3, 1)
-    let mut mask = vec![false; 21];
-    mask[1 * 7 + 3] = true;
-
-    let dilated = dilate_mask_test(&mask, 7, 3, 1);
+    let mut mask_data = vec![false; 21];
+    mask_data[1 * 7 + 3] = true;
+    let mask = Buffer2::new(7, 3, mask_data);
+    let mut dilated = Buffer2::new_filled(7, 3, false);
+    dilate_mask(&mask, 1, &mut dilated);
 
     // Should create 3x3 square centered at (3, 1)
     for y in 0..3 {
         for x in 2..=4 {
-            assert!(dilated[y * 7 + x], "Pixel ({}, {}) should be true", x, y);
+            assert!(
+                dilated.pixels()[y * 7 + x],
+                "Pixel ({}, {}) should be true",
+                x,
+                y
+            );
         }
     }
     // Outside should be false
-    assert!(!dilated[0 * 7 + 0]);
-    assert!(!dilated[0 * 7 + 6]);
+    assert!(!dilated.pixels()[0 * 7 + 0]);
+    assert!(!dilated.pixels()[0 * 7 + 6]);
 }
 
 #[test]
 fn test_dilate_mask_preserves_original_pixels() {
     // Original pixels should always be in dilated result
-    let mut mask = vec![false; 25];
-    mask[0] = true;
-    mask[12] = true; // center
-    mask[24] = true;
-
-    let dilated = dilate_mask_test(&mask, 5, 5, 1);
+    let mut mask_data = vec![false; 25];
+    mask_data[0] = true;
+    mask_data[12] = true; // center
+    mask_data[24] = true;
+    let mask = Buffer2::new(5, 5, mask_data);
+    let mut dilated = Buffer2::new_filled(5, 5, false);
+    dilate_mask(&mask, 1, &mut dilated);
 
     // All original pixels must be present
-    assert!(dilated[0]);
-    assert!(dilated[12]);
-    assert!(dilated[24]);
+    assert!(dilated.pixels()[0]);
+    assert!(dilated.pixels()[12]);
+    assert!(dilated.pixels()[24]);
 }
 
 // =============================================================================
@@ -976,18 +961,10 @@ fn test_dilate_mask_preserves_original_pixels() {
 
 #[test]
 fn test_extract_candidates_empty() {
-    let pixels = vec![0.5; 9];
+    let pixels = Buffer2::new(3, 3, vec![0.5; 9]);
     let labels = vec![0u32; 9];
 
-    let candidates = extract_candidates(
-        &pixels,
-        &labels,
-        0,
-        3,
-        3,
-        &TEST_DEBLEND_CONFIG,
-        TEST_MAX_AREA,
-    );
+    let candidates = extract_candidates(&pixels, &labels, 0, &TEST_DEBLEND_CONFIG, TEST_MAX_AREA);
 
     assert!(candidates.is_empty());
 }
@@ -995,26 +972,22 @@ fn test_extract_candidates_empty() {
 #[test]
 fn test_extract_candidates_single_component() {
     // 3x3 with single component covering center 3 pixels horizontally
-    let pixels = vec![
-        0.1, 0.1, 0.1, //
-        0.5, 0.9, 0.6, // <- component here
-        0.1, 0.1, 0.1,
-    ];
+    let pixels = Buffer2::new(
+        3,
+        3,
+        vec![
+            0.1, 0.1, 0.1, //
+            0.5, 0.9, 0.6, // <- component here
+            0.1, 0.1, 0.1,
+        ],
+    );
     let labels = vec![
         0, 0, 0, //
         1, 1, 1, //
         0, 0, 0,
     ];
 
-    let candidates = extract_candidates(
-        &pixels,
-        &labels,
-        1,
-        3,
-        3,
-        &TEST_DEBLEND_CONFIG,
-        TEST_MAX_AREA,
-    );
+    let candidates = extract_candidates(&pixels, &labels, 1, &TEST_DEBLEND_CONFIG, TEST_MAX_AREA);
 
     assert_eq!(candidates.len(), 1);
     let c = &candidates[0];
@@ -1031,26 +1004,22 @@ fn test_extract_candidates_single_component() {
 #[test]
 fn test_extract_candidates_two_components() {
     // 5x3 with two separate components
-    let pixels = vec![
-        0.8, 0.1, 0.1, 0.1, 0.7, //
-        0.1, 0.1, 0.1, 0.1, 0.1, //
-        0.1, 0.1, 0.1, 0.1, 0.1,
-    ];
+    let pixels = Buffer2::new(
+        5,
+        3,
+        vec![
+            0.8, 0.1, 0.1, 0.1, 0.7, //
+            0.1, 0.1, 0.1, 0.1, 0.1, //
+            0.1, 0.1, 0.1, 0.1, 0.1,
+        ],
+    );
     let labels = vec![
         1, 0, 0, 0, 2, //
         0, 0, 0, 0, 0, //
         0, 0, 0, 0, 0,
     ];
 
-    let candidates = extract_candidates(
-        &pixels,
-        &labels,
-        2,
-        5,
-        3,
-        &TEST_DEBLEND_CONFIG,
-        TEST_MAX_AREA,
-    );
+    let candidates = extract_candidates(&pixels, &labels, 2, &TEST_DEBLEND_CONFIG, TEST_MAX_AREA);
 
     assert_eq!(candidates.len(), 2);
 
@@ -1070,28 +1039,21 @@ fn test_extract_candidates_two_components() {
 #[test]
 fn test_extract_candidates_bounding_box() {
     // 5x5 with L-shaped component
-    let mut pixels = vec![0.1; 25];
+    let mut pixels_data = vec![0.1; 25];
     let mut labels = vec![0u32; 25];
 
     // L-shape: (0,0), (0,1), (0,2), (1,2)
     labels[0 * 5 + 0] = 1;
-    pixels[0 * 5 + 0] = 0.5;
+    pixels_data[0 * 5 + 0] = 0.5;
     labels[1 * 5 + 0] = 1;
-    pixels[1 * 5 + 0] = 0.6;
+    pixels_data[1 * 5 + 0] = 0.6;
     labels[2 * 5 + 0] = 1;
-    pixels[2 * 5 + 0] = 0.9; // peak
+    pixels_data[2 * 5 + 0] = 0.9; // peak
     labels[2 * 5 + 1] = 1;
-    pixels[2 * 5 + 1] = 0.7;
+    pixels_data[2 * 5 + 1] = 0.7;
 
-    let candidates = extract_candidates(
-        &pixels,
-        &labels,
-        1,
-        5,
-        5,
-        &TEST_DEBLEND_CONFIG,
-        TEST_MAX_AREA,
-    );
+    let pixels = Buffer2::new(5, 5, pixels_data);
+    let candidates = extract_candidates(&pixels, &labels, 1, &TEST_DEBLEND_CONFIG, TEST_MAX_AREA);
 
     assert_eq!(candidates.len(), 1);
     let c = &candidates[0];
@@ -1107,19 +1069,11 @@ fn test_extract_candidates_bounding_box() {
 
 #[test]
 fn test_extract_candidates_width_height() {
-    let pixels = vec![0.5; 6];
+    let pixels = Buffer2::new(3, 2, vec![0.5; 6]);
     // 3x2 component covering full image
     let labels = vec![1u32; 6];
 
-    let candidates = extract_candidates(
-        &pixels,
-        &labels,
-        1,
-        3,
-        2,
-        &TEST_DEBLEND_CONFIG,
-        TEST_MAX_AREA,
-    );
+    let candidates = extract_candidates(&pixels, &labels, 1, &TEST_DEBLEND_CONFIG, TEST_MAX_AREA);
 
     assert_eq!(candidates.len(), 1);
     let c = &candidates[0];
@@ -1130,7 +1084,7 @@ fn test_extract_candidates_width_height() {
 #[test]
 fn test_extract_candidates_max_area_filter() {
     // Test that components exceeding max_area are skipped early
-    let pixels = vec![0.5; 100]; // 10x10 image
+    let pixels = Buffer2::new(10, 10, vec![0.5; 100]); // 10x10 image
     let mut labels = vec![0u32; 100];
 
     // Create a component with 50 pixels (labels 1)
@@ -1143,38 +1097,34 @@ fn test_extract_candidates_max_area_filter() {
     }
 
     // With max_area=10, the large component should be skipped
-    let candidates = extract_candidates(&pixels, &labels, 2, 10, 10, &TEST_DEBLEND_CONFIG, 10);
+    let candidates = extract_candidates(&pixels, &labels, 2, &TEST_DEBLEND_CONFIG, 10);
     assert_eq!(candidates.len(), 1, "Only small component should be found");
     assert_eq!(candidates[0].area, 5);
 
     // With max_area=100, both should be found
-    let candidates = extract_candidates(&pixels, &labels, 2, 10, 10, &TEST_DEBLEND_CONFIG, 100);
+    let candidates = extract_candidates(&pixels, &labels, 2, &TEST_DEBLEND_CONFIG, 100);
     assert_eq!(candidates.len(), 2, "Both components should be found");
 }
 
 #[test]
 fn test_extract_candidates_multiple_peaks_same_value() {
     // When multiple pixels have the same peak value, one of them is selected as peak
-    let pixels = vec![
-        0.1, 0.1, 0.1, //
-        0.9, 0.9, 0.9, // Three pixels with same peak value
-        0.1, 0.1, 0.1,
-    ];
+    let pixels = Buffer2::new(
+        3,
+        3,
+        vec![
+            0.1, 0.1, 0.1, //
+            0.9, 0.9, 0.9, // Three pixels with same peak value
+            0.1, 0.1, 0.1,
+        ],
+    );
     let labels = vec![
         0, 0, 0, //
         1, 1, 1, //
         0, 0, 0,
     ];
 
-    let candidates = extract_candidates(
-        &pixels,
-        &labels,
-        1,
-        3,
-        3,
-        &TEST_DEBLEND_CONFIG,
-        TEST_MAX_AREA,
-    );
+    let candidates = extract_candidates(&pixels, &labels, 1, &TEST_DEBLEND_CONFIG, TEST_MAX_AREA);
 
     assert_eq!(candidates.len(), 1);
     let c = &candidates[0];
@@ -1187,26 +1137,22 @@ fn test_extract_candidates_multiple_peaks_same_value() {
 #[test]
 fn test_extract_candidates_peak_at_corner() {
     // Component with peak at corner of bounding box
-    let pixels = vec![
-        0.9, 0.5, 0.1, //
-        0.5, 0.3, 0.1, //
-        0.1, 0.1, 0.1,
-    ];
+    let pixels = Buffer2::new(
+        3,
+        3,
+        vec![
+            0.9, 0.5, 0.1, //
+            0.5, 0.3, 0.1, //
+            0.1, 0.1, 0.1,
+        ],
+    );
     let labels = vec![
         1, 1, 0, //
         1, 1, 0, //
         0, 0, 0,
     ];
 
-    let candidates = extract_candidates(
-        &pixels,
-        &labels,
-        1,
-        3,
-        3,
-        &TEST_DEBLEND_CONFIG,
-        TEST_MAX_AREA,
-    );
+    let candidates = extract_candidates(&pixels, &labels, 1, &TEST_DEBLEND_CONFIG, TEST_MAX_AREA);
 
     assert_eq!(candidates.len(), 1);
     let c = &candidates[0];
@@ -1220,26 +1166,22 @@ fn test_extract_candidates_peak_at_corner() {
 
 #[test]
 fn test_extract_candidates_single_pixel_component() {
-    let pixels = vec![
-        0.1, 0.1, 0.1, //
-        0.1, 0.8, 0.1, //
-        0.1, 0.1, 0.1,
-    ];
+    let pixels = Buffer2::new(
+        3,
+        3,
+        vec![
+            0.1, 0.1, 0.1, //
+            0.1, 0.8, 0.1, //
+            0.1, 0.1, 0.1,
+        ],
+    );
     let labels = vec![
         0, 0, 0, //
         0, 1, 0, //
         0, 0, 0,
     ];
 
-    let candidates = extract_candidates(
-        &pixels,
-        &labels,
-        1,
-        3,
-        3,
-        &TEST_DEBLEND_CONFIG,
-        TEST_MAX_AREA,
-    );
+    let candidates = extract_candidates(&pixels, &labels, 1, &TEST_DEBLEND_CONFIG, TEST_MAX_AREA);
 
     assert_eq!(candidates.len(), 1);
     let c = &candidates[0];
@@ -1258,26 +1200,22 @@ fn test_extract_candidates_single_pixel_component() {
 fn test_extract_candidates_diagonal_component() {
     // Diagonal stripe (connected via 4-connectivity would be separate,
     // but here we test extraction from pre-labeled data)
-    let pixels = vec![
-        0.9, 0.1, 0.1, //
-        0.1, 0.8, 0.1, //
-        0.1, 0.1, 0.7,
-    ];
+    let pixels = Buffer2::new(
+        3,
+        3,
+        vec![
+            0.9, 0.1, 0.1, //
+            0.1, 0.8, 0.1, //
+            0.1, 0.1, 0.7,
+        ],
+    );
     let labels = vec![
         1, 0, 0, //
         0, 1, 0, //
         0, 0, 1,
     ];
 
-    let candidates = extract_candidates(
-        &pixels,
-        &labels,
-        1,
-        3,
-        3,
-        &TEST_DEBLEND_CONFIG,
-        TEST_MAX_AREA,
-    );
+    let candidates = extract_candidates(&pixels, &labels, 1, &TEST_DEBLEND_CONFIG, TEST_MAX_AREA);
 
     assert_eq!(candidates.len(), 1);
     let c = &candidates[0];
@@ -1295,11 +1233,15 @@ fn test_extract_candidates_diagonal_component() {
 fn test_extract_candidates_sparse_labels() {
     // Labels are not contiguous (1 and 3, no 2)
     // Empty components (label 2) are skipped in the output
-    let pixels = vec![
-        0.8, 0.1, 0.7, //
-        0.1, 0.1, 0.1, //
-        0.1, 0.1, 0.1,
-    ];
+    let pixels = Buffer2::new(
+        3,
+        3,
+        vec![
+            0.8, 0.1, 0.7, //
+            0.1, 0.1, 0.1, //
+            0.1, 0.1, 0.1,
+        ],
+    );
     let labels = vec![
         1, 0, 3, //
         0, 0, 0, //
@@ -1307,15 +1249,7 @@ fn test_extract_candidates_sparse_labels() {
     ];
 
     // num_labels should be 3 to account for label 3
-    let candidates = extract_candidates(
-        &pixels,
-        &labels,
-        3,
-        3,
-        3,
-        &TEST_DEBLEND_CONFIG,
-        TEST_MAX_AREA,
-    );
+    let candidates = extract_candidates(&pixels, &labels, 3, &TEST_DEBLEND_CONFIG, TEST_MAX_AREA);
 
     // Only non-empty components are returned (labels 1 and 3)
     assert_eq!(candidates.len(), 2);
@@ -1330,18 +1264,10 @@ fn test_extract_candidates_sparse_labels() {
 #[test]
 fn test_extract_candidates_full_image_component() {
     // Component covering entire image
-    let pixels: Vec<f32> = (0..9).map(|i| 0.1 + i as f32 * 0.1).collect();
+    let pixels = Buffer2::new(3, 3, (0..9).map(|i| 0.1 + i as f32 * 0.1).collect());
     let labels = vec![1u32; 9];
 
-    let candidates = extract_candidates(
-        &pixels,
-        &labels,
-        1,
-        3,
-        3,
-        &TEST_DEBLEND_CONFIG,
-        TEST_MAX_AREA,
-    );
+    let candidates = extract_candidates(&pixels, &labels, 1, &TEST_DEBLEND_CONFIG, TEST_MAX_AREA);
 
     assert_eq!(candidates.len(), 1);
     let c = &candidates[0];
@@ -1359,26 +1285,22 @@ fn test_extract_candidates_full_image_component() {
 #[test]
 fn test_extract_candidates_negative_pixel_values() {
     // Negative pixel values (can happen with background subtraction)
-    let pixels = vec![
-        -0.5, -0.1, 0.1, //
-        -0.1, 0.3, 0.1, //
-        0.1, 0.1, 0.1,
-    ];
+    let pixels = Buffer2::new(
+        3,
+        3,
+        vec![
+            -0.5, -0.1, 0.1, //
+            -0.1, 0.3, 0.1, //
+            0.1, 0.1, 0.1,
+        ],
+    );
     let labels = vec![
         1, 1, 0, //
         1, 1, 0, //
         0, 0, 0,
     ];
 
-    let candidates = extract_candidates(
-        &pixels,
-        &labels,
-        1,
-        3,
-        3,
-        &TEST_DEBLEND_CONFIG,
-        TEST_MAX_AREA,
-    );
+    let candidates = extract_candidates(&pixels, &labels, 1, &TEST_DEBLEND_CONFIG, TEST_MAX_AREA);
 
     assert_eq!(candidates.len(), 1);
     let c = &candidates[0];
@@ -1391,24 +1313,17 @@ fn test_extract_candidates_negative_pixel_values() {
 #[test]
 fn test_extract_candidates_many_components() {
     // 10 separate single-pixel components
-    let mut pixels = vec![0.1f32; 100];
+    let mut pixels_data = vec![0.1f32; 100];
     let mut labels = vec![0u32; 100];
 
     for i in 0..10 {
         let idx = i * 10 + i; // Diagonal positions
-        pixels[idx] = 0.5 + i as f32 * 0.05;
+        pixels_data[idx] = 0.5 + i as f32 * 0.05;
         labels[idx] = (i + 1) as u32;
     }
 
-    let candidates = extract_candidates(
-        &pixels,
-        &labels,
-        10,
-        10,
-        10,
-        &TEST_DEBLEND_CONFIG,
-        TEST_MAX_AREA,
-    );
+    let pixels = Buffer2::new(10, 10, pixels_data);
+    let candidates = extract_candidates(&pixels, &labels, 10, &TEST_DEBLEND_CONFIG, TEST_MAX_AREA);
 
     assert_eq!(candidates.len(), 10);
     for (i, c) in candidates.iter().enumerate() {
@@ -1421,24 +1336,20 @@ fn test_extract_candidates_many_components() {
 #[test]
 fn test_extract_candidates_non_square_image() {
     // Wide image (7x2)
-    let pixels = vec![
-        0.1, 0.2, 0.9, 0.2, 0.1, 0.8, 0.1, //
-        0.1, 0.2, 0.3, 0.2, 0.1, 0.7, 0.1,
-    ];
+    let pixels = Buffer2::new(
+        7,
+        2,
+        vec![
+            0.1, 0.2, 0.9, 0.2, 0.1, 0.8, 0.1, //
+            0.1, 0.2, 0.3, 0.2, 0.1, 0.7, 0.1,
+        ],
+    );
     let labels = vec![
         0, 1, 1, 1, 0, 2, 0, //
         0, 1, 1, 1, 0, 2, 0,
     ];
 
-    let candidates = extract_candidates(
-        &pixels,
-        &labels,
-        2,
-        7,
-        2,
-        &TEST_DEBLEND_CONFIG,
-        TEST_MAX_AREA,
-    );
+    let candidates = extract_candidates(&pixels, &labels, 2, &TEST_DEBLEND_CONFIG, TEST_MAX_AREA);
 
     assert_eq!(candidates.len(), 2);
 
@@ -1490,13 +1401,12 @@ fn test_connected_components_and_extract_integration() {
     // Peak at (7, 7)
     pixels[7 * 10 + 7] = 0.8;
 
-    let (labels, num_labels) = connected_components(&mask, 10, 10);
+    let (labels, num_labels) = connected_components(&Buffer2::new(10, 10, mask));
+    let pixels = Buffer2::new(10, 10, pixels);
     let candidates = extract_candidates(
         &pixels,
         &labels,
         num_labels,
-        10,
-        10,
         &TEST_DEBLEND_CONFIG,
         TEST_MAX_AREA,
     );
@@ -1541,7 +1451,7 @@ fn test_connected_components_complex_merge() {
     mask[7] = true;
     mask[8] = true;
 
-    let (labels, num_labels) = connected_components(&mask, 3, 3);
+    let (labels, num_labels) = connected_components(&Buffer2::new(3, 3, mask));
 
     // All should be one component connected through the right column
     assert_eq!(num_labels, 1);
@@ -1599,15 +1509,8 @@ fn test_deblend_star_pair() {
         }
     }
 
-    let candidates = extract_candidates(
-        &pixels,
-        &labels,
-        1,
-        width,
-        height,
-        &TEST_DEBLEND_CONFIG,
-        TEST_MAX_AREA,
-    );
+    let pixels = Buffer2::new(width, height, pixels);
+    let candidates = extract_candidates(&pixels, &labels, 1, &TEST_DEBLEND_CONFIG, TEST_MAX_AREA);
 
     // Should deblend into 2 candidates
     assert_eq!(
@@ -1681,15 +1584,8 @@ fn test_no_deblend_for_close_peaks() {
         }
     }
 
-    let candidates = extract_candidates(
-        &pixels,
-        &labels,
-        1,
-        width,
-        height,
-        &TEST_DEBLEND_CONFIG,
-        TEST_MAX_AREA,
-    );
+    let pixels = Buffer2::new(width, height, pixels);
+    let candidates = extract_candidates(&pixels, &labels, 1, &TEST_DEBLEND_CONFIG, TEST_MAX_AREA);
 
     // Should NOT deblend - only one candidate because peaks are too close
     assert_eq!(
@@ -1733,15 +1629,8 @@ fn test_deblend_respects_prominence() {
         }
     }
 
-    let candidates = extract_candidates(
-        &pixels,
-        &labels,
-        1,
-        width,
-        height,
-        &TEST_DEBLEND_CONFIG,
-        TEST_MAX_AREA,
-    );
+    let pixels = Buffer2::new(width, height, pixels);
+    let candidates = extract_candidates(&pixels, &labels, 1, &TEST_DEBLEND_CONFIG, TEST_MAX_AREA);
 
     // Should NOT deblend - secondary peak is not prominent enough
     assert_eq!(
@@ -1808,15 +1697,8 @@ fn test_multi_threshold_deblend_star_pair() {
         min_contrast: 0.005,
     };
 
-    let candidates = extract_candidates(
-        &pixels,
-        &labels,
-        1,
-        width,
-        height,
-        &mt_config,
-        TEST_MAX_AREA,
-    );
+    let pixels = Buffer2::new(width, height, pixels);
+    let candidates = extract_candidates(&pixels, &labels, 1, &mt_config, TEST_MAX_AREA);
 
     // Should deblend into 2 candidates
     assert_eq!(
@@ -1889,15 +1771,8 @@ fn test_multi_threshold_vs_simple_deblend_consistency() {
         n_thresholds: 32,
         min_contrast: 0.005,
     };
-    let simple_candidates = extract_candidates(
-        &pixels,
-        &labels,
-        1,
-        width,
-        height,
-        &simple_config,
-        TEST_MAX_AREA,
-    );
+    let pixels = Buffer2::new(width, height, pixels);
+    let simple_candidates = extract_candidates(&pixels, &labels, 1, &simple_config, TEST_MAX_AREA);
 
     // Multi-threshold deblending
     let mt_config = DeblendConfig {
@@ -1907,15 +1782,7 @@ fn test_multi_threshold_vs_simple_deblend_consistency() {
         n_thresholds: 32,
         min_contrast: 0.005,
     };
-    let mt_candidates = extract_candidates(
-        &pixels,
-        &labels,
-        1,
-        width,
-        height,
-        &mt_config,
-        TEST_MAX_AREA,
-    );
+    let mt_candidates = extract_candidates(&pixels, &labels, 1, &mt_config, TEST_MAX_AREA);
 
     // Both should find 2 stars
     assert_eq!(
@@ -1995,7 +1862,8 @@ fn test_multi_threshold_deblend_high_contrast_disables() {
         min_contrast: 1.0, // Disabled
     };
 
-    let candidates = extract_candidates(&pixels, &labels, 1, width, height, &config, TEST_MAX_AREA);
+    let pixels = Buffer2::new(width, height, pixels);
+    let candidates = extract_candidates(&pixels, &labels, 1, &config, TEST_MAX_AREA);
 
     // Should return single candidate (deblending disabled)
     assert_eq!(
@@ -2011,7 +1879,7 @@ mod quick_benches {
     use ::bench::quick_bench;
 
     /// Generate a raw test image with background + stars (for pixels parameter)
-    fn generate_timing_test_image(width: usize, height: usize, num_stars: usize) -> Vec<f32> {
+    fn generate_timing_test_image(width: usize, height: usize, num_stars: usize) -> Buffer2<f32> {
         let background = 0.1f32;
         let mut pixels = vec![background; width * height];
 
@@ -2022,12 +1890,16 @@ mod quick_benches {
         }
 
         add_stars_to_image(&mut pixels, width, height, num_stars);
-        pixels
+        Buffer2::new(width, height, pixels)
     }
 
     /// Generate a filtered test image (background-subtracted, stars only)
     /// This simulates the output of matched filtering where background is near zero
-    fn generate_timing_filtered_image(width: usize, height: usize, num_stars: usize) -> Vec<f32> {
+    fn generate_timing_filtered_image(
+        width: usize,
+        height: usize,
+        num_stars: usize,
+    ) -> Buffer2<f32> {
         let noise_level = 0.01f32;
         let mut pixels = vec![0.0f32; width * height];
 
@@ -2038,7 +1910,7 @@ mod quick_benches {
         }
 
         add_stars_to_image(&mut pixels, width, height, num_stars);
-        pixels
+        Buffer2::new(width, height, pixels)
     }
 
     fn add_stars_to_image(pixels: &mut [f32], width: usize, height: usize, num_stars: usize) {
@@ -2068,13 +1940,7 @@ mod quick_benches {
     }
 
     fn create_timing_background_map(width: usize, height: usize) -> BackgroundMap {
-        let size = width * height;
-        BackgroundMap {
-            background: vec![0.1f32; size],
-            noise: vec![0.01f32; size],
-            width,
-            height,
-        }
+        make_bg_uniform(width, height, 0.1, 0.01)
     }
 
     #[quick_bench(warmup_iters = 2, iters = 5)]
@@ -2084,7 +1950,7 @@ mod quick_benches {
         let background = create_timing_background_map(1024, 1024);
         let config = StarDetectionConfig::default();
 
-        b.bench(|| detect_stars_filtered(&pixels, &filtered, 1024, 1024, &background, &config));
+        b.bench(|| detect_stars_filtered(&pixels, &filtered, &background, &config));
     }
 
     #[quick_bench(warmup_iters = 1, iters = 3)]
@@ -2094,6 +1960,6 @@ mod quick_benches {
         let background = create_timing_background_map(6144, 6144);
         let config = StarDetectionConfig::default();
 
-        b.bench(|| detect_stars_filtered(&pixels, &filtered, 6144, 6144, &background, &config));
+        b.bench(|| detect_stars_filtered(&pixels, &filtered, &background, &config));
     }
 }

@@ -1,14 +1,15 @@
 //! Tests for background estimation.
 
 use super::*;
+use crate::common::Buffer2;
 
 #[test]
 fn test_uniform_background() {
     let width = 128;
     let height = 128;
-    let pixels: Vec<f32> = vec![0.5; width * height];
+    let pixels = Buffer2::new(width, height, vec![0.5; width * height]);
 
-    let bg = estimate_background(&pixels, width, height, 32);
+    let bg = estimate_background(&pixels, 32);
 
     for y in 0..height {
         for x in 0..width {
@@ -28,11 +29,15 @@ fn test_uniform_background() {
 fn test_gradient_background() {
     let width = 128;
     let height = 128;
-    let pixels: Vec<f32> = (0..height)
-        .flat_map(|y| (0..width).map(move |x| (x + y) as f32 / 256.0))
-        .collect();
+    let pixels = Buffer2::new(
+        width,
+        height,
+        (0..height)
+            .flat_map(|y| (0..width).map(move |x| (x + y) as f32 / 256.0))
+            .collect(),
+    );
 
-    let bg = estimate_background(&pixels, width, height, 32);
+    let bg = estimate_background(&pixels, 32);
 
     let corner_00 = bg.get_background(0, 0);
     let corner_end = bg.get_background(127, 127);
@@ -43,14 +48,15 @@ fn test_gradient_background() {
 fn test_background_with_stars() {
     let width = 128;
     let height = 128;
-    let mut pixels: Vec<f32> = vec![0.1; width * height];
+    let mut data = vec![0.1; width * height];
 
     // Add bright spots (stars)
-    pixels[64 * width + 64] = 1.0;
-    pixels[32 * width + 32] = 0.9;
-    pixels[96 * width + 96] = 0.95;
+    data[64 * width + 64] = 1.0;
+    data[32 * width + 32] = 0.9;
+    data[96 * width + 96] = 0.95;
 
-    let bg = estimate_background(&pixels, width, height, 32);
+    let pixels = Buffer2::new(width, height, data);
+    let bg = estimate_background(&pixels, 32);
 
     // Median is robust to outliers
     let center_bg = bg.get_background(64, 64);
@@ -65,9 +71,9 @@ fn test_background_with_stars() {
 fn test_noise_estimation() {
     let width = 128;
     let height = 128;
-    let pixels: Vec<f32> = vec![0.5; width * height];
+    let pixels = Buffer2::new(width, height, vec![0.5; width * height]);
 
-    let bg = estimate_background(&pixels, width, height, 32);
+    let bg = estimate_background(&pixels, 32);
 
     let noise = bg.get_noise(64, 64);
     assert!(noise < 0.01, "Noise = {}, expected near zero", noise);
@@ -77,11 +83,12 @@ fn test_noise_estimation() {
 fn test_subtract_method() {
     let width = 128;
     let height = 128;
-    let pixels: Vec<f32> = vec![0.3; width * height];
+    let data = vec![0.3; width * height];
+    let pixels = Buffer2::new(width, height, data.clone());
 
-    let bg = estimate_background(&pixels, width, height, 32);
+    let bg = estimate_background(&pixels, 32);
 
-    let subtracted = bg.subtract(&pixels, 64, 64);
+    let subtracted = bg.subtract(&data, 64, 64);
     assert!(
         subtracted.abs() < 0.01,
         "Subtracted = {}, expected ~0",
@@ -89,7 +96,7 @@ fn test_subtract_method() {
     );
 
     // Test with bright pixel
-    let mut bright = pixels.clone();
+    let mut bright = data.clone();
     bright[64 * width + 64] = 0.8;
     let sub_bright = bg.subtract(&bright, 64, 64);
     assert!(
@@ -103,12 +110,12 @@ fn test_subtract_method() {
 fn test_non_square_image() {
     let width = 256;
     let height = 64;
-    let pixels: Vec<f32> = vec![0.4; width * height];
+    let pixels = Buffer2::new(width, height, vec![0.4; width * height]);
 
-    let bg = estimate_background(&pixels, width, height, 32);
+    let bg = estimate_background(&pixels, 32);
 
-    assert_eq!(bg.width, width);
-    assert_eq!(bg.height, height);
+    assert_eq!(bg.width(), width);
+    assert_eq!(bg.height(), height);
     assert!((bg.get_background(0, 0) - 0.4).abs() < 0.01);
     assert!((bg.get_background(255, 63) - 0.4).abs() < 0.01);
 }
@@ -117,14 +124,15 @@ fn test_non_square_image() {
 fn test_sigma_clipping_rejects_outliers() {
     let width = 64;
     let height = 64;
-    let mut pixels: Vec<f32> = vec![0.2; width * height];
+    let mut data = vec![0.2; width * height];
 
     // 10% bright outliers
     for i in 0..(width * height / 10) {
-        pixels[i * 10] = 0.95;
+        data[i * 10] = 0.95;
     }
 
-    let bg = estimate_background(&pixels, width, height, 32);
+    let pixels = Buffer2::new(width, height, data);
+    let bg = estimate_background(&pixels, 32);
 
     let bg_val = bg.get_background(32, 32);
     assert!(
@@ -140,11 +148,15 @@ fn test_interpolation_produces_valid_values() {
     let width = 64;
     let height = 64;
 
-    let pixels: Vec<f32> = (0..height)
-        .flat_map(|y| (0..width).map(move |x| (x + y) as f32 / 128.0))
-        .collect();
+    let pixels = Buffer2::new(
+        width,
+        height,
+        (0..height)
+            .flat_map(|y| (0..width).map(move |x| (x + y) as f32 / 128.0))
+            .collect(),
+    );
 
-    let bg = estimate_background(&pixels, width, height, 16);
+    let bg = estimate_background(&pixels, 16);
 
     // Sample every 4th pixel instead of every pixel
     for y in (0..height).step_by(4) {
@@ -166,9 +178,9 @@ fn test_interpolation_produces_valid_values() {
 fn test_large_image() {
     let width = 256;
     let height = 256;
-    let pixels: Vec<f32> = vec![0.33; width * height];
+    let pixels = Buffer2::new(width, height, vec![0.33; width * height]);
 
-    let bg = estimate_background(&pixels, width, height, 64);
+    let bg = estimate_background(&pixels, 64);
 
     assert!((bg.get_background(0, 0) - 0.33).abs() < 0.01);
     assert!((bg.get_background(127, 127) - 0.33).abs() < 0.01);
@@ -179,11 +191,12 @@ fn test_large_image() {
 fn test_different_tile_sizes() {
     let width = 128;
     let height = 128;
-    let pixels: Vec<f32> = vec![0.5; width * height];
+    let data = vec![0.5; width * height];
 
     // Test representative tile sizes (min, mid, max)
     for tile_size in [16, 64, 128] {
-        let bg = estimate_background(&pixels, width, height, tile_size);
+        let pixels = Buffer2::new(width, height, data.clone());
+        let bg = estimate_background(&pixels, tile_size);
         assert!(
             (bg.get_background(64, 64) - 0.5).abs() < 0.01,
             "Failed for tile_size={}",
@@ -195,22 +208,22 @@ fn test_different_tile_sizes() {
 #[test]
 #[should_panic(expected = "Tile size must be between 16 and 256")]
 fn test_tile_size_too_small() {
-    let pixels: Vec<f32> = vec![0.5; 64 * 64];
-    estimate_background(&pixels, 64, 64, 8);
+    let pixels = Buffer2::new(64, 64, vec![0.5; 64 * 64]);
+    estimate_background(&pixels, 8);
 }
 
 #[test]
 #[should_panic(expected = "Tile size must be between 16 and 256")]
 fn test_tile_size_too_large() {
-    let pixels: Vec<f32> = vec![0.5; 64 * 64];
-    estimate_background(&pixels, 64, 64, 512);
+    let pixels = Buffer2::new(64, 64, vec![0.5; 64 * 64]);
+    estimate_background(&pixels, 512);
 }
 
 #[test]
 #[should_panic(expected = "Image must be at least tile_size x tile_size")]
 fn test_image_too_small() {
-    let pixels: Vec<f32> = vec![0.5; 32 * 32];
-    estimate_background(&pixels, 32, 32, 64);
+    let pixels = Buffer2::new(32, 32, vec![0.5; 32 * 32]);
+    estimate_background(&pixels, 64);
 }
 
 // =============================================================================
@@ -222,10 +235,10 @@ fn test_iterative_background_uniform() {
     // Uniform image should produce same result as non-iterative
     let width = 128;
     let height = 128;
-    let pixels: Vec<f32> = vec![0.5; width * height];
+    let pixels = Buffer2::new(width, height, vec![0.5; width * height]);
 
     let config = IterativeBackgroundConfig::default();
-    let bg = estimate_background_iterative(&pixels, width, height, 32, &config);
+    let bg = estimate_background_iterative(&pixels, 32, &config);
 
     // All background values should be close to 0.5
     for y in (0..height).step_by(10) {
@@ -247,7 +260,7 @@ fn test_iterative_background_with_bright_stars() {
     // Background with bright stars should be better estimated with iterative refinement
     let width = 128;
     let height = 128;
-    let mut pixels: Vec<f32> = vec![0.1; width * height];
+    let mut data = vec![0.1; width * height];
 
     // Add multiple bright Gaussian stars
     let stars: [(i32, i32); 5] = [(32, 32), (64, 64), (96, 96), (32, 96), (96, 32)];
@@ -259,14 +272,16 @@ fn test_iterative_background_with_bright_stars() {
                 if x >= 0 && x < width as i32 && y >= 0 && y < height as i32 {
                     let dist_sq = (dx * dx + dy * dy) as f32;
                     let value = 0.8 * (-dist_sq / 4.0).exp();
-                    pixels[y as usize * width + x as usize] += value;
+                    data[y as usize * width + x as usize] += value;
                 }
             }
         }
     }
 
+    let pixels = Buffer2::new(width, height, data);
+
     // Non-iterative estimate
-    let bg_simple = estimate_background(&pixels, width, height, 32);
+    let bg_simple = estimate_background(&pixels, 32);
 
     // Iterative estimate (should be better at excluding stars)
     let config = IterativeBackgroundConfig {
@@ -275,7 +290,7 @@ fn test_iterative_background_with_bright_stars() {
         mask_dilation: 5,
         min_unmasked_fraction: 0.3,
     };
-    let bg_iterative = estimate_background_iterative(&pixels, width, height, 32, &config);
+    let bg_iterative = estimate_background_iterative(&pixels, 32, &config);
 
     // Check background at a point away from stars
     let test_x = 16;
@@ -302,7 +317,7 @@ fn test_iterative_background_preserves_gradient() {
     // Background gradient should be preserved with iterative estimation
     let width = 64;
     let height = 64;
-    let mut pixels: Vec<f32> = (0..height)
+    let mut data: Vec<f32> = (0..height)
         .flat_map(|y| (0..width).map(move |x| (x + y) as f32 / 128.0))
         .collect();
 
@@ -313,13 +328,14 @@ fn test_iterative_background_preserves_gradient() {
             let y = 32 + dy;
             if x >= 0 && x < width as i32 && y >= 0 && y < height as i32 {
                 let dist_sq = (dx * dx + dy * dy) as f32;
-                pixels[y as usize * width + x as usize] += 0.5 * (-dist_sq / 2.0).exp();
+                data[y as usize * width + x as usize] += 0.5 * (-dist_sq / 2.0).exp();
             }
         }
     }
 
+    let pixels = Buffer2::new(width, height, data);
     let config = IterativeBackgroundConfig::default();
-    let bg = estimate_background_iterative(&pixels, width, height, 16, &config);
+    let bg = estimate_background_iterative(&pixels, 16, &config);
 
     // Gradient should be preserved
     let corner_00 = bg.get_background(0, 0);
@@ -347,13 +363,13 @@ fn test_iterative_background_zero_iterations() {
     // Zero iterations should be equivalent to non-iterative
     let width = 64;
     let height = 64;
-    let pixels: Vec<f32> = vec![0.3; width * height];
+    let pixels = Buffer2::new(width, height, vec![0.3; width * height]);
 
     let config = IterativeBackgroundConfig {
         iterations: 0,
         ..Default::default()
     };
-    let bg = estimate_background_iterative(&pixels, width, height, 32, &config);
+    let bg = estimate_background_iterative(&pixels, 32, &config);
 
     let val = bg.get_background(32, 32);
     assert!(
@@ -668,12 +684,11 @@ fn test_background_regression() {
         .packed();
     let astro_image: crate::AstroImage = imag_image.convert(ColorFormat::L_F32).unwrap().into();
 
-    let width = astro_image.width();
-    let height = astro_image.height();
-    let pixels = astro_image.channel(0);
-
     // Estimate background
-    let bg = estimate_background(pixels, width, height, 64);
+    let pixels = astro_image.to_grayscale_buffer();
+    let width = pixels.width();
+    let height = pixels.height();
+    let bg = estimate_background(&pixels, 64);
 
     // Load reference images
     let ref_bg_path = test_resources.join("background_map.tiff");

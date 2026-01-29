@@ -14,45 +14,51 @@ mod tests;
 mod simd;
 
 use super::constants::{self, ROWS_PER_CHUNK};
-use crate::AstroImage;
+use crate::common::Buffer2;
 use rayon::prelude::*;
 
 /// Background map with per-pixel background and noise estimates.
 #[derive(Debug, Clone)]
 pub struct BackgroundMap {
     /// Per-pixel background values.
-    pub background: Vec<f32>,
+    pub background: Buffer2<f32>,
     /// Per-pixel noise (sigma) estimates.
-    pub noise: Vec<f32>,
-    /// Image width.
-    #[allow(dead_code)] // Public API for external use
-    pub width: usize,
-    /// Image height.
-    #[allow(dead_code)] // Public API for external use
-    pub height: usize,
+    pub noise: Buffer2<f32>,
 }
 
 impl BackgroundMap {
+    /// Get image width.
+    #[inline]
+    pub fn width(&self) -> usize {
+        self.background.width()
+    }
+
+    /// Get image height.
+    #[inline]
+    pub fn height(&self) -> usize {
+        self.background.height()
+    }
+
     /// Get background value at a pixel position.
     #[allow(dead_code)] // Public API for external use
     #[inline]
     pub fn get_background(&self, x: usize, y: usize) -> f32 {
-        self.background[y * self.width + x]
+        self.background[(x, y)]
     }
 
     /// Get noise estimate at a pixel position.
     #[allow(dead_code)] // Public API for external use
     #[inline]
     pub fn get_noise(&self, x: usize, y: usize) -> f32 {
-        self.noise[y * self.width + x]
+        self.noise[(x, y)]
     }
 
     /// Get background-subtracted value at a pixel position.
     #[allow(dead_code)] // Public API for external use
     #[inline]
     pub fn subtract(&self, pixels: &[f32], x: usize, y: usize) -> f32 {
-        let idx = y * self.width + x;
-        pixels[idx] - self.background[idx]
+        let idx = y * self.width() + x;
+        pixels[idx] - self.background[(x, y)]
     }
 }
 
@@ -155,16 +161,11 @@ fn median_of_slice(values: &mut [f32]) -> f32 {
 /// 3. Bilinearly interpolate between tile centers to get per-pixel values
 ///
 /// # Arguments
-/// * `pixels` - Grayscale image data
-/// * `width` - Image width
-/// * `height` - Image height
+/// * `pixels` - Grayscale image buffer
 /// * `tile_size` - Size of tiles (typically 32-128 pixels)
-pub fn estimate_background(
-    pixels: &[f32],
-    width: usize,
-    height: usize,
-    tile_size: usize,
-) -> BackgroundMap {
+pub fn estimate_background(pixels: &Buffer2<f32>, tile_size: usize) -> BackgroundMap {
+    let width = pixels.width();
+    let height = pixels.height();
     assert!(
         (16..=256).contains(&tile_size),
         "Tile size must be between 16 and 256"
@@ -258,10 +259,8 @@ pub fn estimate_background(
         });
 
     BackgroundMap {
-        background,
-        noise,
-        width,
-        height,
+        background: Buffer2::new(width, height, background),
+        noise: Buffer2::new(width, height, noise),
     }
 }
 
@@ -440,25 +439,22 @@ impl Default for IterativeBackgroundConfig {
 /// stars and other bright objects from the estimation.
 ///
 /// # Arguments
-/// * `pixels` - Grayscale image data
-/// * `width` - Image width
-/// * `height` - Image height
+/// * `pixels` - Grayscale image buffer
 /// * `tile_size` - Size of tiles for background estimation
 /// * `config` - Iterative refinement configuration
 pub fn estimate_background_iterative(
-    pixels: &[f32],
-    width: usize,
-    height: usize,
+    pixels: &Buffer2<f32>,
     tile_size: usize,
     config: &IterativeBackgroundConfig,
 ) -> BackgroundMap {
     // Start with initial background estimate
-    let mut background = estimate_background(pixels, width, height, tile_size);
+    let mut background = estimate_background(pixels, tile_size);
 
     // Pre-allocate mask buffers for reuse across iterations
-    let num_pixels = pixels.len();
-    let mut mask = vec![false; num_pixels];
-    let mut scratch = vec![false; num_pixels];
+    let width = pixels.width();
+    let height = pixels.height();
+    let mut mask = Buffer2::new_filled(width, height, false);
+    let mut scratch = Buffer2::new_filled(width, height, false);
 
     for _iter in 0..config.iterations {
         // Create mask of pixels above threshold
@@ -467,8 +463,6 @@ pub fn estimate_background_iterative(
             &background,
             config.detection_sigma,
             config.mask_dilation,
-            width,
-            height,
             &mut mask,
             &mut scratch,
         );
@@ -476,8 +470,6 @@ pub fn estimate_background_iterative(
         // Re-estimate background with masked pixels excluded
         estimate_background_masked(
             pixels,
-            width,
-            height,
             tile_size,
             &mask,
             config.min_unmasked_fraction,
@@ -491,16 +483,13 @@ pub fn estimate_background_iterative(
 /// Create a mask of pixels that are likely objects (above threshold).
 ///
 /// `output` is used as the mask buffer. `scratch` is used for dilation if needed.
-#[allow(clippy::too_many_arguments)]
 fn create_object_mask(
-    pixels: &[f32],
+    pixels: &Buffer2<f32>,
     background: &BackgroundMap,
     detection_sigma: f32,
     dilation_radius: usize,
-    width: usize,
-    height: usize,
-    output: &mut [bool],
-    scratch: &mut [bool],
+    output: &mut Buffer2<bool>,
+    scratch: &mut Buffer2<bool>,
 ) {
     // Initial mask: pixels above threshold
     for (i, ((&px, &bg), &noise)) in pixels
@@ -510,26 +499,27 @@ fn create_object_mask(
         .enumerate()
     {
         let threshold = bg + detection_sigma * noise.max(1e-6);
-        output[i] = px > threshold;
+        output.pixels_mut()[i] = px > threshold;
     }
 
     // Dilate mask to cover object wings
     if dilation_radius > 0 {
-        constants::dilate_mask(output, width, height, dilation_radius, scratch);
-        output.copy_from_slice(scratch);
+        constants::dilate_mask(output, dilation_radius, scratch);
+        output.copy_from(scratch);
     }
 }
 
 /// Estimate background with masked pixels excluded.
 fn estimate_background_masked(
-    pixels: &[f32],
-    width: usize,
-    height: usize,
+    pixels: &Buffer2<f32>,
     tile_size: usize,
-    mask: &[bool],
+    mask: &Buffer2<bool>,
     min_unmasked_fraction: f32,
     output: &mut BackgroundMap,
 ) {
+    let width = pixels.width();
+    let height = pixels.height();
+
     assert!(
         (16..=256).contains(&tile_size),
         "Tile size must be between 16 and 256"
@@ -566,7 +556,6 @@ fn estimate_background_masked(
                 compute_tile_stats_masked(
                     pixels,
                     mask,
-                    width,
                     x_start,
                     x_end,
                     y_start,
@@ -603,16 +592,13 @@ fn estimate_background_masked(
     // Apply median filter
     grid.apply_median_filter();
 
-    // Interpolate into output
-    output.width = width;
-    output.height = height;
-    output.background.resize(width * height, 0.0);
-    output.noise.resize(width * height, 0.0);
+    // Allocate output buffers
+    let mut background = vec![0.0f32; width * height];
+    let mut noise = vec![0.0f32; width * height];
 
-    output
-        .background
+    background
         .par_chunks_mut(width * ROWS_PER_CHUNK)
-        .zip(output.noise.par_chunks_mut(width * ROWS_PER_CHUNK))
+        .zip(noise.par_chunks_mut(width * ROWS_PER_CHUNK))
         .enumerate()
         .for_each(|(chunk_idx, (bg_chunk, noise_chunk))| {
             let y_start = chunk_idx * ROWS_PER_CHUNK;
@@ -627,14 +613,16 @@ fn estimate_background_masked(
                 interpolate_row(bg_row, noise_row, y, &grid);
             }
         });
+
+    output.background = Buffer2::new(width, height, background);
+    output.noise = Buffer2::new(width, height, noise);
 }
 
 /// Compute tile statistics with masked pixels excluded.
 #[allow(clippy::too_many_arguments)]
 fn compute_tile_stats_masked(
-    pixels: &[f32],
-    mask: &[bool],
-    width: usize,
+    pixels: &Buffer2<f32>,
+    mask: &Buffer2<bool>,
     x_start: usize,
     x_end: usize,
     y_start: usize,
@@ -643,6 +631,8 @@ fn compute_tile_stats_masked(
     values: &mut Vec<f32>,
     deviations: &mut Vec<f32>,
 ) -> TileStats {
+    let width = pixels.width();
+
     // Collect unmasked pixels
     values.clear();
     for y in y_start..y_end {
@@ -665,65 +655,4 @@ fn compute_tile_stats_masked(
     }
 
     sigma_clipped_stats(values, deviations, 3.0, 3)
-}
-
-/// Estimate background from an AstroImage using tiled sigma-clipped statistics.
-///
-/// This is a convenience wrapper around [`estimate_background`] that takes an
-/// `AstroImage` instead of raw pixel data. For RGB images, only the first
-/// channel (red) is used.
-///
-/// # Arguments
-/// * `image` - Astronomical image (grayscale or RGB)
-/// * `tile_size` - Size of tiles for background estimation (typically 32-128)
-///
-/// # Example
-/// ```rust,ignore
-/// use lumos::{AstroImage, estimate_background_image};
-///
-/// let image = AstroImage::from_file("light.fits")?;
-/// let background = estimate_background_image(&image, 64);
-/// ```
-pub fn estimate_background_image(image: &AstroImage, tile_size: usize) -> BackgroundMap {
-    let grayscale = image.clone().into_grayscale();
-    estimate_background(
-        grayscale.channel(0),
-        grayscale.width(),
-        grayscale.height(),
-        tile_size,
-    )
-}
-
-/// Estimate background from an AstroImage with iterative refinement.
-///
-/// This is a convenience wrapper around [`estimate_background_iterative`] that
-/// takes an `AstroImage` instead of raw pixel data. For RGB images, only the
-/// first channel (red) is used.
-///
-/// # Arguments
-/// * `image` - Astronomical image (grayscale or RGB)
-/// * `tile_size` - Size of tiles for background estimation (typically 32-128)
-/// * `config` - Iterative refinement configuration
-///
-/// # Example
-/// ```rust,ignore
-/// use lumos::{AstroImage, estimate_background_iterative_image, IterativeBackgroundConfig};
-///
-/// let image = AstroImage::from_file("crowded_field.fits")?;
-/// let config = IterativeBackgroundConfig::default();
-/// let background = estimate_background_iterative_image(&image, 64, &config);
-/// ```
-pub fn estimate_background_iterative_image(
-    image: &AstroImage,
-    tile_size: usize,
-    config: &IterativeBackgroundConfig,
-) -> BackgroundMap {
-    let grayscale = image.clone().into_grayscale();
-    estimate_background_iterative(
-        grayscale.channel(0),
-        grayscale.width(),
-        grayscale.height(),
-        tile_size,
-        config,
-    )
 }

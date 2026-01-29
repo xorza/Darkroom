@@ -56,8 +56,7 @@ pub use centroid::LocalBackgroundMethod;
 // Internal re-exports for advanced users (may change in future versions)
 // Background estimation (used by calibration and advanced pipelines)
 pub use background::{
-    BackgroundMap, IterativeBackgroundConfig, estimate_background, estimate_background_image,
-    estimate_background_iterative, estimate_background_iterative_image,
+    BackgroundMap, IterativeBackgroundConfig, estimate_background, estimate_background_iterative,
 };
 
 // Profile fitting (for custom centroiding pipelines)
@@ -73,6 +72,7 @@ pub(crate) use detection::{detect_stars, detect_stars_filtered};
 pub(crate) use median_filter::median_filter_3x3;
 
 use crate::astro_image::AstroImage;
+use crate::common::Buffer2;
 
 /// Method for computing sub-pixel centroids.
 ///
@@ -938,26 +938,20 @@ fn find_stars(image: &AstroImage, config: &StarDetectionConfig) -> StarDetection
     let width = image.width();
     let height = image.height();
     let mut pixels = image.to_grayscale_buffer();
-    let mut output = vec![0.0f32; pixels.len()];
+    let mut output = Buffer2::new_default(width, height);
 
     let mut diagnostics = StarDetectionDiagnostics::default();
 
     // Step 0a: Apply defect mask if provided
     if config.defect_map.as_ref().is_some_and(|m| !m.is_empty()) {
-        apply_defect_mask(
-            &pixels,
-            width,
-            height,
-            config.defect_map.as_ref().unwrap(),
-            &mut output,
-        );
+        apply_defect_mask(&pixels, config.defect_map.as_ref().unwrap(), &mut output);
         std::mem::swap(&mut pixels, &mut output);
     }
 
     // Step 0b: Apply 3x3 median filter to remove Bayer pattern artifacts
     // Only applied for CFA sensors; skip for monochrome (~6ms faster on 4K images)
     if image.metadata.is_cfa {
-        median_filter_3x3(&pixels, width, height, &mut output);
+        median_filter_3x3(&pixels, &mut output);
         std::mem::swap(&mut pixels, &mut output);
     }
 
@@ -972,16 +966,10 @@ fn find_stars(image: &AstroImage, config: &StarDetectionConfig) -> StarDetection
                 detection_sigma: config.detection_sigma,
                 ..IterativeBackgroundConfig::default()
             };
-            estimate_background_iterative(
-                &pixels,
-                width,
-                height,
-                config.background_tile_size,
-                &iter_config,
-            )
+            estimate_background_iterative(&pixels, config.background_tile_size, &iter_config)
         } else {
             // Single-pass background estimation (faster)
-            estimate_background(&pixels, width, height, config.background_tile_size)
+            estimate_background(&pixels, config.background_tile_size)
         }
     };
 
@@ -999,8 +987,6 @@ fn find_stars(image: &AstroImage, config: &StarDetectionConfig) -> StarDetection
                 );
                 matched_filter_elliptical(
                     &pixels,
-                    width,
-                    height,
                     &background.background,
                     config.expected_fwhm,
                     config.psf_axis_ratio,
@@ -1011,18 +997,12 @@ fn find_stars(image: &AstroImage, config: &StarDetectionConfig) -> StarDetection
                     "Applying matched filter with FWHM={:.1} pixels",
                     config.expected_fwhm
                 );
-                matched_filter(
-                    &pixels,
-                    width,
-                    height,
-                    &background.background,
-                    config.expected_fwhm,
-                )
+                matched_filter(&pixels, &background.background, config.expected_fwhm)
             };
-            detect_stars_filtered(&pixels, &filtered, width, height, &background, config)
+            detect_stars_filtered(&pixels, &filtered, &background, config)
         } else {
             // No matched filter - use standard detection
-            detect_stars(&pixels, width, height, &background, config)
+            detect_stars(&pixels, &background, config)
         }
     };
     diagnostics.candidates_after_filtering = candidates.len();
@@ -1032,9 +1012,7 @@ fn find_stars(image: &AstroImage, config: &StarDetectionConfig) -> StarDetection
     let mut stars: Vec<Star> = {
         candidates
             .into_iter()
-            .filter_map(|candidate| {
-                compute_centroid(&pixels, width, height, &background, &candidate, config)
-            })
+            .filter_map(|candidate| compute_centroid(&pixels, &background, &candidate, config))
             .collect()
     };
     diagnostics.stars_after_centroid = stars.len();

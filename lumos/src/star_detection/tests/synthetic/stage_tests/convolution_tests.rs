@@ -2,6 +2,7 @@
 //!
 //! Tests the Gaussian filtering for star enhancement.
 
+use crate::star_detection::Buffer2;
 use crate::star_detection::background::estimate_background;
 use crate::star_detection::constants::fwhm_to_sigma;
 use crate::star_detection::convolution::gaussian_convolve;
@@ -47,14 +48,14 @@ fn test_gaussian_filter_sparse() {
 
     // Save input
     save_grayscale(
-        &pixels,
+        pixels.pixels(),
         width,
         height,
         &test_output_path("synthetic_starfield/stage_conv_sparse_input.png"),
     );
 
     // Estimate and subtract background
-    let background = estimate_background(&pixels, width, height, TILE_SIZE);
+    let background = estimate_background(&pixels, TILE_SIZE);
 
     let bg_subtracted: Vec<f32> = pixels
         .iter()
@@ -71,10 +72,11 @@ fn test_gaussian_filter_sparse() {
 
     // Apply Gaussian filter (matched filter for star detection)
     let sigma = fwhm_to_sigma(fwhm);
-    let filtered = gaussian_convolve(&bg_subtracted, width, height, sigma);
+    let bg_subtracted_buf = Buffer2::new(width, height, bg_subtracted);
+    let filtered = gaussian_convolve(&bg_subtracted_buf, sigma);
 
     // Normalize for display
-    let filtered_display = normalize_for_display(&filtered);
+    let filtered_display = normalize_for_display(filtered.pixels());
 
     save_grayscale(
         &filtered_display,
@@ -138,14 +140,14 @@ fn test_gaussian_filter_fwhm_range() {
 
     // Save input
     save_grayscale(
-        &pixels,
+        pixels.pixels(),
         width,
         height,
         &test_output_path("synthetic_starfield/stage_conv_fwhm_range_input.png"),
     );
 
     // Background subtraction
-    let background = estimate_background(&pixels, width, height, TILE_SIZE);
+    let background = estimate_background(&pixels, TILE_SIZE);
 
     let bg_subtracted: Vec<f32> = pixels
         .iter()
@@ -156,8 +158,9 @@ fn test_gaussian_filter_fwhm_range() {
     // Test with different kernel sizes
     for target_fwhm in [2.5, 4.0, 5.5] {
         let sigma = fwhm_to_sigma(target_fwhm);
-        let filtered = gaussian_convolve(&bg_subtracted, width, height, sigma);
-        let filtered_display = normalize_for_display(&filtered);
+        let bg_subtracted_buf = Buffer2::new(width, height, bg_subtracted.clone());
+        let filtered = gaussian_convolve(&bg_subtracted_buf, sigma);
+        let filtered_display = normalize_for_display(filtered.pixels());
 
         save_grayscale(
             &filtered_display,
@@ -201,14 +204,14 @@ fn test_gaussian_filter_noise() {
 
     // Save input
     save_grayscale(
-        &pixels,
+        pixels.pixels(),
         width,
         height,
         &test_output_path("synthetic_starfield/stage_conv_noise_input.png"),
     );
 
     // Background subtraction
-    let background = estimate_background(&pixels, width, height, TILE_SIZE);
+    let background = estimate_background(&pixels, TILE_SIZE);
 
     let bg_subtracted: Vec<f32> = pixels
         .iter()
@@ -225,8 +228,9 @@ fn test_gaussian_filter_noise() {
 
     // Apply Gaussian filter
     let sigma = fwhm_to_sigma(fwhm);
-    let filtered = gaussian_convolve(&bg_subtracted, width, height, sigma);
-    let filtered_display = normalize_for_display(&filtered);
+    let bg_subtracted_buf = Buffer2::new(width, height, bg_subtracted);
+    let filtered = gaussian_convolve(&bg_subtracted_buf, sigma);
+    let filtered_display = normalize_for_display(filtered.pixels());
 
     save_grayscale(
         &filtered_display,
@@ -251,7 +255,7 @@ fn test_gaussian_filter_noise() {
 
     // Compute noise level in filtered image
     let sorted: Vec<f32> = {
-        let mut v = filtered.clone();
+        let mut v = filtered.into_vec();
         v.sort_by(|a, b| a.partial_cmp(b).unwrap());
         v
     };

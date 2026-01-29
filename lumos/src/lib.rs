@@ -73,9 +73,7 @@ pub use star_detection::{
     StarDetector,
     alpha_beta_to_fwhm,
     estimate_background,
-    estimate_background_image,
     estimate_background_iterative,
-    estimate_background_iterative_image,
 
     fit_gaussian_2d,
     fit_moffat_2d,

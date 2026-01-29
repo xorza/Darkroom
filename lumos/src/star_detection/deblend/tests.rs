@@ -1,6 +1,7 @@
 //! Integration tests for deblending algorithms.
 
 use super::*;
+use crate::common::Buffer2;
 use std::collections::HashMap;
 
 fn make_gaussian_star(cx: usize, cy: usize, amplitude: f32, sigma: f32) -> Vec<Pixel> {
@@ -46,8 +47,10 @@ fn test_local_vs_multi_threshold_single_star() {
         pixels: star.clone(),
     };
 
+    let pixels_buf = Buffer2::new(width, height, pixels);
+
     let local_config = DeblendConfig::default();
-    let local_result = deblend_local_maxima(&data, &pixels, width, &local_config);
+    let local_result = deblend_local_maxima(&data, &pixels_buf, &local_config);
 
     // Multi-threshold deblending
     let mt_config = MultiThresholdDeblendConfig::default();
@@ -103,12 +106,14 @@ fn test_local_vs_multi_threshold_two_stars() {
         pixels: component_pixels.clone(),
     };
 
+    let image_buf = Buffer2::new(width, height, image);
+
     let local_config = DeblendConfig {
         min_separation: 3,
         min_prominence: 0.3,
         ..Default::default()
     };
-    let local_result = deblend_local_maxima(&data, &image, width, &local_config);
+    let local_result = deblend_local_maxima(&data, &image_buf, &local_config);
 
     // Multi-threshold deblending
     let mt_config = MultiThresholdDeblendConfig {

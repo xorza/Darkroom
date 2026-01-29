@@ -1,6 +1,7 @@
 //! Tests for centroid computation.
 
 use super::*;
+use crate::common::Buffer2;
 use crate::star_detection::background::{BackgroundMap, estimate_background};
 use crate::star_detection::constants::FWHM_TO_SIGMA;
 use crate::star_detection::detection::{StarCandidate, detect_stars};
@@ -15,7 +16,7 @@ fn make_gaussian_star(
     cy: f32,
     sigma: f32,
     amplitude: f32,
-) -> Vec<f32> {
+) -> Buffer2<f32> {
     let mut pixels = vec![0.1f32; width * height];
 
     for y in 0..height {
@@ -30,7 +31,7 @@ fn make_gaussian_star(
         }
     }
 
-    pixels
+    Buffer2::new(width, height, pixels)
 }
 
 #[test]
@@ -42,14 +43,14 @@ fn test_centroid_accuracy() {
     let true_y = 64.7f32;
     let pixels = make_gaussian_star(width, height, true_x, true_y, 2.5, 0.8);
 
-    let bg = estimate_background(&pixels, width, height, 32);
+    let bg = estimate_background(&pixels, 32);
     let config = StarDetectionConfig::default();
-    let candidates = detect_stars(&pixels, width, height, &bg, &config);
+    let candidates = detect_stars(&pixels, &bg, &config);
 
     assert_eq!(candidates.len(), 1);
 
-    let star = compute_centroid(&pixels, width, height, &bg, &candidates[0], &config)
-        .expect("Should compute centroid");
+    let star =
+        compute_centroid(&pixels, &bg, &candidates[0], &config).expect("Should compute centroid");
 
     let error_x = (star.x - true_x).abs();
     let error_y = (star.y - true_y).abs();
@@ -80,18 +81,18 @@ fn test_fwhm_estimation() {
     let expected_fwhm = FWHM_TO_SIGMA * sigma;
     let pixels = make_gaussian_star(width, height, 64.0, 64.0, sigma, 0.8);
 
-    let bg = estimate_background(&pixels, width, height, 32);
+    let bg = estimate_background(&pixels, 32);
     // Use higher max_area because dilation (radius=2) expands the star region
     let config = StarDetectionConfig {
         max_area: 1000,
         ..StarDetectionConfig::default()
     };
-    let candidates = detect_stars(&pixels, width, height, &bg, &config);
+    let candidates = detect_stars(&pixels, &bg, &config);
 
     assert_eq!(candidates.len(), 1);
 
-    let star = compute_centroid(&pixels, width, height, &bg, &candidates[0], &config)
-        .expect("Should compute centroid");
+    let star =
+        compute_centroid(&pixels, &bg, &candidates[0], &config).expect("Should compute centroid");
 
     // FWHM estimation from weighted second moments has systematic bias due to
     // finite aperture and background noise - 40% tolerance is reasonable
@@ -111,12 +112,12 @@ fn test_circular_star_eccentricity() {
     let height = 64;
     let pixels = make_gaussian_star(width, height, 32.0, 32.0, 2.5, 0.8);
 
-    let bg = estimate_background(&pixels, width, height, 32);
+    let bg = estimate_background(&pixels, 32);
     let config = StarDetectionConfig::default();
-    let candidates = detect_stars(&pixels, width, height, &bg, &config);
+    let candidates = detect_stars(&pixels, &bg, &config);
 
-    let star = compute_centroid(&pixels, width, height, &bg, &candidates[0], &config)
-        .expect("Should compute centroid");
+    let star =
+        compute_centroid(&pixels, &bg, &candidates[0], &config).expect("Should compute centroid");
 
     assert!(
         star.eccentricity < 0.3,
@@ -131,12 +132,12 @@ fn test_snr_positive() {
     let height = 64;
     let pixels = make_gaussian_star(width, height, 32.0, 32.0, 2.5, 0.8);
 
-    let bg = estimate_background(&pixels, width, height, 32);
+    let bg = estimate_background(&pixels, 32);
     let config = StarDetectionConfig::default();
-    let candidates = detect_stars(&pixels, width, height, &bg, &config);
+    let candidates = detect_stars(&pixels, &bg, &config);
 
-    let star = compute_centroid(&pixels, width, height, &bg, &candidates[0], &config)
-        .expect("Should compute centroid");
+    let star =
+        compute_centroid(&pixels, &bg, &candidates[0], &config).expect("Should compute centroid");
 
     assert!(star.snr > 0.0, "SNR should be positive");
     assert!(star.flux > 0.0, "Flux should be positive");
@@ -315,10 +316,8 @@ fn make_uniform_background(
     noise: f32,
 ) -> BackgroundMap {
     BackgroundMap {
-        background: vec![bg_value; width * height],
-        noise: vec![noise; width * height],
-        width,
-        height,
+        background: Buffer2::new_filled(width, height, bg_value),
+        noise: Buffer2::new_filled(width, height, noise),
     }
 }
 
@@ -630,7 +629,7 @@ fn make_elliptical_star(
     sigma_x: f32,
     sigma_y: f32,
     amplitude: f32,
-) -> Vec<f32> {
+) -> Buffer2<f32> {
     let mut pixels = vec![0.1f32; width * height];
 
     for y in 0..height {
@@ -645,7 +644,7 @@ fn make_elliptical_star(
         }
     }
 
-    pixels
+    Buffer2::new(width, height, pixels)
 }
 
 #[test]
@@ -1181,7 +1180,7 @@ fn test_eccentricity_increases_with_elongation() {
 fn test_compute_centroid_returns_none_for_edge_candidate() {
     let width = 64;
     let height = 64;
-    let pixels = vec![0.5f32; width * height];
+    let pixels = Buffer2::new_filled(width, height, 0.5f32);
     let bg = make_uniform_background(width, height, 0.1, 0.01);
     let config = StarDetectionConfig::default();
 
@@ -1197,7 +1196,7 @@ fn test_compute_centroid_returns_none_for_edge_candidate() {
         area: 18,
     };
 
-    let result = compute_centroid(&pixels, width, height, &bg, &candidate, &config);
+    let result = compute_centroid(&pixels, &bg, &candidate, &config);
     assert!(
         result.is_none(),
         "Should reject candidate too close to edge"
@@ -1244,19 +1243,20 @@ fn test_compute_centroid_multiple_stars_independent() {
         }
     }
 
-    let bg = estimate_background(&pixels, width, height, 32);
+    let pixels = Buffer2::new(width, height, pixels);
+    let bg = estimate_background(&pixels, 32);
     let config = StarDetectionConfig {
         edge_margin: 10,
         ..StarDetectionConfig::default()
     };
-    let candidates = detect_stars(&pixels, width, height, &bg, &config);
+    let candidates = detect_stars(&pixels, &bg, &config);
 
     assert_eq!(candidates.len(), 2, "Should detect two stars");
 
     // Compute centroids for both
     let stars: Vec<_> = candidates
         .iter()
-        .filter_map(|c| compute_centroid(&pixels, width, height, &bg, c, &config))
+        .filter_map(|c| compute_centroid(&pixels, &bg, c, &config))
         .collect();
 
     assert_eq!(stars.len(), 2, "Should compute centroids for both stars");
@@ -1285,14 +1285,14 @@ fn test_circular_star_roundness() {
     let height = 64;
     let pixels = make_gaussian_star(width, height, 32.0, 32.0, 2.5, 0.8);
 
-    let bg = estimate_background(&pixels, width, height, 32);
+    let bg = estimate_background(&pixels, 32);
     let config = StarDetectionConfig::default();
-    let candidates = detect_stars(&pixels, width, height, &bg, &config);
+    let candidates = detect_stars(&pixels, &bg, &config);
 
     assert_eq!(candidates.len(), 1);
 
-    let star = compute_centroid(&pixels, width, height, &bg, &candidates[0], &config)
-        .expect("Should compute centroid");
+    let star =
+        compute_centroid(&pixels, &bg, &candidates[0], &config).expect("Should compute centroid");
 
     // Circular star should have roundness close to 0
     assert!(
@@ -1332,14 +1332,15 @@ fn test_elongated_x_star_roundness() {
         }
     }
 
-    let bg = estimate_background(&pixels, width, height, 32);
+    let pixels = Buffer2::new(width, height, pixels);
+    let bg = estimate_background(&pixels, 32);
     let config = StarDetectionConfig::default();
-    let candidates = detect_stars(&pixels, width, height, &bg, &config);
+    let candidates = detect_stars(&pixels, &bg, &config);
 
     assert!(!candidates.is_empty());
 
-    let star = compute_centroid(&pixels, width, height, &bg, &candidates[0], &config)
-        .expect("Should compute centroid");
+    let star =
+        compute_centroid(&pixels, &bg, &candidates[0], &config).expect("Should compute centroid");
 
     // X-elongated star: more flux in x marginal -> higher Hx -> negative roundness1
     // (roundness1 = (Hx - Hy) / (Hx + Hy), but Hx is sum in y direction)
@@ -1379,14 +1380,15 @@ fn test_asymmetric_star_roundness2() {
         }
     }
 
-    let bg = estimate_background(&pixels, width, height, 32);
+    let pixels = Buffer2::new(width, height, pixels);
+    let bg = estimate_background(&pixels, 32);
     let config = StarDetectionConfig::default();
-    let candidates = detect_stars(&pixels, width, height, &bg, &config);
+    let candidates = detect_stars(&pixels, &bg, &config);
 
     assert!(!candidates.is_empty());
 
-    let star = compute_centroid(&pixels, width, height, &bg, &candidates[0], &config)
-        .expect("Should compute centroid");
+    let star =
+        compute_centroid(&pixels, &bg, &candidates[0], &config).expect("Should compute centroid");
 
     // Asymmetric source should have higher roundness2 (symmetry metric)
     // The tail adds more flux to the right side
@@ -1403,15 +1405,14 @@ fn test_laplacian_snr_computed_for_star() {
     let width = 64;
     let height = 64;
     let pixels = make_gaussian_star(width, height, 32.0, 32.0, 2.5, 0.8);
-
-    let bg = estimate_background(&pixels, width, height, 32);
+    let bg = estimate_background(&pixels, 32);
     let config = StarDetectionConfig::default();
-    let candidates = detect_stars(&pixels, width, height, &bg, &config);
+    let candidates = detect_stars(&pixels, &bg, &config);
 
     assert_eq!(candidates.len(), 1);
 
-    let star = compute_centroid(&pixels, width, height, &bg, &candidates[0], &config)
-        .expect("Should compute centroid");
+    let star =
+        compute_centroid(&pixels, &bg, &candidates[0], &config).expect("Should compute centroid");
 
     // Laplacian SNR should be computed (non-negative value)
     // The actual value depends on the noise estimate from background

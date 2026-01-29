@@ -8,6 +8,8 @@
 // These are public API functions exported for external use
 #![allow(dead_code)]
 
+use crate::common::Buffer2;
+
 /// Configuration for Gaussian fitting.
 #[derive(Debug, Clone)]
 pub struct GaussianFitConfig {
@@ -65,8 +67,6 @@ pub struct GaussianFitResult {
 ///
 /// # Arguments
 /// * `pixels` - Image pixel data
-/// * `width` - Image width
-/// * `height` - Image height
 /// * `cx` - Initial X estimate (from weighted centroid)
 /// * `cy` - Initial Y estimate (from weighted centroid)
 /// * `stamp_radius` - Radius of stamp to fit
@@ -83,7 +83,7 @@ pub struct GaussianFitResult {
 /// // Extract a stamp around the star (21x21 pixels centered on star)
 /// let width = 21;
 /// let height = 21;
-/// let pixels: Vec<f32> = /* star stamp data */;
+/// let pixels: Buffer2<f32> = /* star stamp data */;
 ///
 /// // Initial centroid estimate from weighted moments
 /// let cx = 10.5;
@@ -92,23 +92,23 @@ pub struct GaussianFitResult {
 /// let stamp_radius = 8;
 ///
 /// let config = GaussianFitConfig::default();
-/// if let Some(result) = fit_gaussian_2d(&pixels, width, height, cx, cy, stamp_radius, background, &config) {
+/// if let Some(result) = fit_gaussian_2d(&pixels, cx, cy, stamp_radius, background, &config) {
 ///     println!("Sub-pixel position: ({:.3}, {:.3})", result.x, result.y);
 ///     println!("Sigma: ({:.2}, {:.2})", result.sigma_x, result.sigma_y);
 ///     println!("Converged: {}", result.converged);
 /// }
 /// ```
-#[allow(clippy::too_many_arguments)]
 pub fn fit_gaussian_2d(
-    pixels: &[f32],
-    width: usize,
-    height: usize,
+    pixels: &Buffer2<f32>,
     cx: f32,
     cy: f32,
     stamp_radius: usize,
     background: f32,
     config: &GaussianFitConfig,
 ) -> Option<GaussianFitResult> {
+    let width = pixels.width();
+    let height = pixels.height();
+
     // Extract stamp
     let icx = cx.round() as isize;
     let icy = cy.round() as isize;
@@ -358,6 +358,7 @@ use super::linear_solver::solve_6x6;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::common::Buffer2;
     use crate::star_detection::constants::{fwhm_to_sigma, sigma_to_fwhm};
 
     fn make_gaussian_stamp(
@@ -394,9 +395,10 @@ mod tests {
         let pixels = make_gaussian_stamp(
             width, height, true_cx, true_cy, true_amp, true_sigma, true_bg,
         );
+        let pixels_buf = Buffer2::new(width, height, pixels);
 
         let config = GaussianFitConfig::default();
-        let result = fit_gaussian_2d(&pixels, width, height, 10.0, 10.0, 8, true_bg, &config);
+        let result = fit_gaussian_2d(&pixels_buf, 10.0, 10.0, 8, true_bg, &config);
 
         assert!(result.is_some(), "Fit should succeed");
         let result = result.unwrap();
@@ -437,10 +439,11 @@ mod tests {
         let pixels = make_gaussian_stamp(
             width, height, true_cx, true_cy, true_amp, true_sigma, true_bg,
         );
+        let pixels_buf = Buffer2::new(width, height, pixels);
 
         let config = GaussianFitConfig::default();
         // Start from integer position
-        let result = fit_gaussian_2d(&pixels, width, height, 10.0, 11.0, 8, true_bg, &config);
+        let result = fit_gaussian_2d(&pixels_buf, 10.0, 11.0, 8, true_bg, &config);
 
         assert!(result.is_some(), "Fit should succeed");
         let result = result.unwrap();
@@ -484,9 +487,10 @@ mod tests {
                 pixels[y * width + x] += value;
             }
         }
+        let pixels_buf = Buffer2::new(width, height, pixels);
 
         let config = GaussianFitConfig::default();
-        let result = fit_gaussian_2d(&pixels, width, height, 10.0, 10.0, 8, bg, &config);
+        let result = fit_gaussian_2d(&pixels_buf, 10.0, 10.0, 8, bg, &config);
 
         assert!(result.is_some(), "Fit should succeed");
         let result = result.unwrap();
@@ -524,10 +528,11 @@ mod tests {
         let width = 21;
         let height = 21;
         let pixels = vec![0.1f32; width * height];
+        let pixels_buf = Buffer2::new(width, height, pixels);
 
         let config = GaussianFitConfig::default();
         // Position too close to edge
-        let result = fit_gaussian_2d(&pixels, width, height, 2.0, 10.0, 8, 0.1, &config);
+        let result = fit_gaussian_2d(&pixels_buf, 2.0, 10.0, 8, 0.1, &config);
 
         assert!(result.is_none(), "Fit should fail for edge position");
     }

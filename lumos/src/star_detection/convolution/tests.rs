@@ -1,6 +1,7 @@
 //! Tests for Gaussian convolution.
 
 use super::*;
+use crate::star_detection::Buffer2;
 use crate::star_detection::constants::FWHM_TO_SIGMA;
 
 // ============================================================================
@@ -104,11 +105,11 @@ fn test_gaussian_convolve_uniform_image() {
     // Convolving a uniform image should return the same uniform value
     let width = 32;
     let height = 32;
-    let pixels = vec![0.5f32; width * height];
+    let pixels = Buffer2::new(width, height, vec![0.5f32; width * height]);
 
-    let result = gaussian_convolve(&pixels, width, height, 2.0);
+    let result = gaussian_convolve(&pixels, 2.0);
 
-    for &v in &result {
+    for v in result {
         assert!(
             (v - 0.5).abs() < 1e-5,
             "Uniform image should stay uniform after convolution"
@@ -126,7 +127,8 @@ fn test_gaussian_convolve_preserves_total_flux() {
     // Add a point source in the center
     pixels[32 * width + 32] = 1.0;
 
-    let result = gaussian_convolve(&pixels, width, height, 2.0);
+    let pixels = Buffer2::new(width, height, pixels);
+    let result = gaussian_convolve(&pixels, 2.0);
 
     let input_sum: f32 = pixels.iter().sum();
     let output_sum: f32 = result.iter().sum();
@@ -151,7 +153,8 @@ fn test_gaussian_convolve_spreads_point_source() {
     pixels[cy * width + cx] = 1.0;
 
     let sigma = 2.0;
-    let result = gaussian_convolve(&pixels, width, height, sigma);
+    let pixels = Buffer2::new(width, height, pixels);
+    let result = gaussian_convolve(&pixels, sigma);
 
     // Peak should be at center but reduced
     let peak = result[cy * width + cx];
@@ -174,7 +177,8 @@ fn test_gaussian_convolve_symmetry() {
     // Point source at center
     pixels[16 * width + 16] = 1.0;
 
-    let result = gaussian_convolve(&pixels, width, height, 2.0);
+    let pixels = Buffer2::new(width, height, pixels);
+    let result = gaussian_convolve(&pixels, 2.0);
 
     // Check symmetry around center
     for dy in 1..8 {
@@ -198,8 +202,9 @@ fn test_gaussian_convolve_larger_sigma_more_spread() {
     let mut pixels = vec![0.0f32; width * height];
     pixels[32 * width + 32] = 1.0;
 
-    let result_small = gaussian_convolve(&pixels, width, height, 1.0);
-    let result_large = gaussian_convolve(&pixels, width, height, 3.0);
+    let pixels = Buffer2::new(width, height, pixels);
+    let result_small = gaussian_convolve(&pixels, 1.0);
+    let result_large = gaussian_convolve(&pixels, 3.0);
 
     // Larger sigma should result in lower peak
     let peak_small = result_small[32 * width + 32];
@@ -222,10 +227,11 @@ fn test_gaussian_convolve_edge_handling() {
     // Point source near edge
     pixels[2 * width + 2] = 1.0;
 
-    let result = gaussian_convolve(&pixels, width, height, 1.5);
+    let pixels = Buffer2::new(width, height, pixels);
+    let result = gaussian_convolve(&pixels, 1.5);
 
     // Should not have NaN or Inf
-    for &v in &result {
+    for v in result.iter() {
         assert!(v.is_finite(), "All values should be finite");
     }
 
@@ -240,7 +246,8 @@ fn test_gaussian_convolve_non_square_image() {
     let mut pixels = vec![0.0f32; width * height];
     pixels[16 * width + 32] = 1.0;
 
-    let result = gaussian_convolve(&pixels, width, height, 2.0);
+    let pixels = Buffer2::new(width, height, pixels);
+    let result = gaussian_convolve(&pixels, 2.0);
 
     assert_eq!(result.len(), width * height);
 
@@ -254,14 +261,14 @@ fn test_gaussian_convolve_small_image() {
     // Test with image smaller than typical kernel
     let width = 8;
     let height = 8;
-    let pixels = vec![1.0f32; width * height];
+    let pixels = Buffer2::new(width, height, vec![1.0f32; width * height]);
 
-    let result = gaussian_convolve(&pixels, width, height, 2.0);
+    let result = gaussian_convolve(&pixels, 2.0);
 
     // Should still work and preserve value approximately
-    for &v in &result {
+    for v in result.iter() {
         assert!(v.is_finite());
-        assert!((v - 1.0).abs() < 0.1, "Uniform should stay ~uniform");
+        assert!((*v - 1.0).abs() < 0.1, "Uniform should stay ~uniform");
     }
 }
 
@@ -273,13 +280,13 @@ fn test_gaussian_convolve_small_image() {
 fn test_matched_filter_subtracts_background() {
     let width = 32;
     let height = 32;
-    let background = vec![0.3f32; width * height];
-    let pixels = vec![0.3f32; width * height]; // Same as background
+    let background = Buffer2::new(width, height, vec![0.3f32; width * height]);
+    let pixels = Buffer2::new(width, height, vec![0.3f32; width * height]); // Same as background
 
-    let result = matched_filter(&pixels, width, height, &background, 3.0);
+    let result = matched_filter(&pixels, &background, 3.0);
 
     // Result should be near zero
-    for &v in &result {
+    for v in result.iter() {
         assert!(v.abs() < 1e-5, "Flat field at background should give ~0");
     }
 }
@@ -288,7 +295,7 @@ fn test_matched_filter_subtracts_background() {
 fn test_matched_filter_detects_star() {
     let width = 32;
     let height = 32;
-    let background = vec![0.1f32; width * height];
+    let background = Buffer2::new(width, height, vec![0.1f32; width * height]);
     let mut pixels = vec![0.1f32; width * height];
 
     // Add a star
@@ -296,7 +303,8 @@ fn test_matched_filter_detects_star() {
     let cy = 16;
     pixels[cy * width + cx] = 0.5;
 
-    let result = matched_filter(&pixels, width, height, &background, 3.0);
+    let pixels = Buffer2::new(width, height, pixels);
+    let result = matched_filter(&pixels, &background, 3.0);
 
     // Peak should be positive and significant
     let peak = result[cy * width + cx];
@@ -310,7 +318,7 @@ fn test_matched_filter_detects_star() {
 fn test_matched_filter_boosts_snr() {
     let width = 64;
     let height = 64;
-    let background = vec![0.1f32; width * height];
+    let background = Buffer2::new(width, height, vec![0.1f32; width * height]);
 
     // Create star with noise
     let mut pixels = vec![0.1f32; width * height];
@@ -335,7 +343,8 @@ fn test_matched_filter_boosts_snr() {
     }
 
     let fwhm = sigma * FWHM_TO_SIGMA;
-    let result = matched_filter(&pixels, width, height, &background, fwhm);
+    let pixels = Buffer2::new(width, height, pixels);
+    let result = matched_filter(&pixels, &background, fwhm);
 
     // Peak should be at star location
     let mut max_val = f32::MIN;
@@ -360,13 +369,13 @@ fn test_matched_filter_boosts_snr() {
 fn test_matched_filter_clips_negative() {
     let width = 16;
     let height = 16;
-    let background = vec![0.5f32; width * height];
-    let pixels = vec![0.3f32; width * height]; // Below background
+    let background = Buffer2::new(width, height, vec![0.5f32; width * height]);
+    let pixels = Buffer2::new(width, height, vec![0.3f32; width * height]); // Below background
 
-    let result = matched_filter(&pixels, width, height, &background, 2.0);
+    let result = matched_filter(&pixels, &background, 2.0);
 
     // Should be clipped to zero before convolution
-    for &v in &result {
+    for &v in result.iter() {
         assert!(v >= 0.0, "Negative values should be clipped");
     }
 }
@@ -388,8 +397,9 @@ fn test_separable_vs_direct_equivalence() {
     }
 
     let sigma = 1.5;
-    let result_sep = gaussian_convolve(&pixels, width, height, sigma);
-    let result_direct = gaussian_convolve_2d_direct(&pixels, width, height, sigma);
+    let pixels = Buffer2::new(width, height, pixels);
+    let result_sep = gaussian_convolve(&pixels, sigma);
+    let result_direct = gaussian_convolve_2d_direct(&pixels, sigma);
 
     for (i, (&a, &b)) in result_sep.iter().zip(result_direct.iter()).enumerate() {
         assert!(
@@ -407,9 +417,9 @@ fn test_large_image_convolution() {
     // Just verify it completes without error
     let width = 512;
     let height = 512;
-    let pixels = vec![0.5f32; width * height];
+    let pixels = Buffer2::new(width, height, vec![0.5f32; width * height]);
 
-    let result = gaussian_convolve(&pixels, width, height, 3.0);
+    let result = gaussian_convolve(&pixels, 3.0);
 
     assert_eq!(result.len(), width * height);
     assert!(result[0].is_finite());

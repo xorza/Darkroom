@@ -12,6 +12,7 @@ use super::star_profiles::{
     fwhm_to_moffat_alpha, fwhm_to_sigma, render_elliptical_star, render_gaussian_star,
     render_moffat_star, render_saturated_star,
 };
+use crate::common::Buffer2;
 use std::f32::consts::PI;
 
 /// Ground truth star information for validation.
@@ -145,7 +146,7 @@ impl Default for StarFieldConfig {
 /// Generate a synthetic star field.
 ///
 /// Returns the pixel data and ground truth star information.
-pub fn generate_star_field(config: &StarFieldConfig) -> (Vec<f32>, Vec<GroundTruthStar>) {
+pub fn generate_star_field(config: &StarFieldConfig) -> (Buffer2<f32>, Vec<GroundTruthStar>) {
     let mut pixels = vec![0.0f32; config.width * config.height];
     let mut ground_truth = Vec::with_capacity(config.num_stars);
 
@@ -326,7 +327,10 @@ pub fn generate_star_field(config: &StarFieldConfig) -> (Vec<f32>, Vec<GroundTru
         *p = p.clamp(0.0, 1.0);
     }
 
-    (pixels, ground_truth)
+    (
+        Buffer2::new(config.width, config.height, pixels),
+        ground_truth,
+    )
 }
 
 /// Generate star positions based on crowding type.
@@ -514,8 +518,8 @@ mod tests {
         assert_eq!(ground_truth.len(), config.num_stars);
 
         // Check all pixels are in valid range
-        for &p in &pixels {
-            assert!((0.0..=1.0).contains(&p));
+        for p in pixels.iter() {
+            assert!((0.0..=1.0).contains(p));
         }
     }
 

@@ -17,6 +17,7 @@ mod simd;
 use rayon::prelude::*;
 
 use super::constants::{ROWS_PER_CHUNK, fwhm_to_sigma};
+use crate::star_detection::Buffer2;
 
 /// Compute 1D Gaussian kernel.
 ///
@@ -59,32 +60,31 @@ pub fn gaussian_kernel_1d(sigma: f32) -> Vec<f32> {
 /// This is O(n×k) instead of O(n×k²) for a 2D convolution.
 ///
 /// # Arguments
-/// * `pixels` - Input image data
-/// * `width` - Image width
-/// * `height` - Image height
+/// * `pixels` - Input image buffer
 /// * `sigma` - Gaussian sigma (use `fwhm_to_sigma` to convert from FWHM)
 ///
 /// # Returns
 /// Convolved image of the same size
-pub fn gaussian_convolve(pixels: &[f32], width: usize, height: usize, sigma: f32) -> Vec<f32> {
-    assert_eq!(pixels.len(), width * height, "Pixel count mismatch");
+pub fn gaussian_convolve(pixels: &Buffer2<f32>, sigma: f32) -> Buffer2<f32> {
     assert!(sigma > 0.0, "Sigma must be positive");
 
+    let width = pixels.width();
+    let height = pixels.height();
     let kernel = gaussian_kernel_1d(sigma);
     let radius = kernel.len() / 2;
 
     // If kernel is larger than image dimension, fall back to direct 2D convolution
     if radius >= width.min(height) / 2 {
-        return gaussian_convolve_2d_direct(pixels, width, height, sigma);
+        return gaussian_convolve_2d_direct(pixels, sigma);
     }
 
     // Step 1: Convolve rows (horizontal pass)
-    let mut temp = vec![0.0f32; width * height];
-    convolve_rows_parallel(pixels, &mut temp, width, &kernel);
+    let mut temp = Buffer2::new_default(width, height);
+    convolve_rows_parallel(pixels, &mut temp, &kernel);
 
     // Step 2: Convolve columns (vertical pass)
-    let mut output = vec![0.0f32; width * height];
-    convolve_cols_parallel(&temp, &mut output, width, height, &kernel);
+    let mut output = Buffer2::new_default(width, height);
+    convolve_cols_parallel(&temp, &mut output, &kernel);
 
     output
 }
@@ -94,10 +94,12 @@ pub fn gaussian_convolve(pixels: &[f32], width: usize, height: usize, sigma: f32
 /// Instead of giving each thread a single row, we process multiple rows per chunk.
 /// This improves cache locality and reduces potential false sharing when output
 /// rows are close together in memory.
-fn convolve_rows_parallel(input: &[f32], output: &mut [f32], width: usize, kernel: &[f32]) {
+fn convolve_rows_parallel(input: &Buffer2<f32>, output: &mut Buffer2<f32>, kernel: &[f32]) {
+    let width = input.width();
     let radius = kernel.len() / 2;
 
     output
+        .pixels_mut()
         .par_chunks_mut(width * ROWS_PER_CHUNK)
         .enumerate()
         .for_each(|(chunk_idx, out_chunk)| {
@@ -125,16 +127,13 @@ fn convolve_row(input: &[f32], output: &mut [f32], kernel: &[f32], radius: usize
 ///
 /// Processes multiple rows per chunk to improve cache locality and reduce
 /// false sharing between threads writing to adjacent output rows.
-fn convolve_cols_parallel(
-    input: &[f32],
-    output: &mut [f32],
-    width: usize,
-    height: usize,
-    kernel: &[f32],
-) {
+fn convolve_cols_parallel(input: &Buffer2<f32>, output: &mut Buffer2<f32>, kernel: &[f32]) {
+    let width = input.width();
+    let height = input.height();
     let radius = kernel.len() / 2;
 
     output
+        .pixels_mut()
         .par_chunks_mut(width * ROWS_PER_CHUNK)
         .enumerate()
         .for_each(|(chunk_idx, out_chunk)| {
@@ -170,12 +169,9 @@ fn convolve_cols_parallel(
 }
 
 /// Direct 2D Gaussian convolution for small images or large kernels.
-fn gaussian_convolve_2d_direct(
-    pixels: &[f32],
-    width: usize,
-    height: usize,
-    sigma: f32,
-) -> Vec<f32> {
+fn gaussian_convolve_2d_direct(pixels: &Buffer2<f32>, sigma: f32) -> Buffer2<f32> {
+    let width = pixels.width();
+    let height = pixels.height();
     let kernel_1d = gaussian_kernel_1d(sigma);
     let radius = kernel_1d.len() / 2;
 
@@ -200,18 +196,18 @@ fn gaussian_convolve_2d_direct(
                     let sy = y as isize + ky as isize - radius as isize;
 
                     // Mirror boundary
-                    let sx = if sx < 0 {
+                    let sx: usize = if sx < 0 {
                         (-sx) as usize
                     } else if sx >= width as isize {
-                        (2 * width - 2).saturating_sub(sx as usize)
+                        2 * width - 2 - sx as usize
                     } else {
                         sx as usize
                     };
 
-                    let sy = if sy < 0 {
+                    let sy: usize = if sy < 0 {
                         (-sy) as usize
                     } else if sy >= height as isize {
-                        (2 * height - 2).saturating_sub(sy as usize)
+                        2 * height - 2 - sy as usize
                     } else {
                         sy as usize
                     };
@@ -224,7 +220,7 @@ fn gaussian_convolve_2d_direct(
         }
     }
 
-    output
+    Buffer2::new(width, height, output)
 }
 
 /// Apply matched filter convolution optimized for star detection.
@@ -234,34 +230,29 @@ fn gaussian_convolve_2d_direct(
 /// and can be directly thresholded.
 ///
 /// # Arguments
-/// * `pixels` - Input image data
-/// * `width` - Image width
-/// * `height` - Image height
+/// * `pixels` - Input image buffer
 /// * `background` - Per-pixel background values
 /// * `fwhm` - Expected FWHM of stars in pixels
 ///
 /// # Returns
 /// Convolved, background-subtracted image
-pub fn matched_filter(
-    pixels: &[f32],
-    width: usize,
-    height: usize,
-    background: &[f32],
-    fwhm: f32,
-) -> Vec<f32> {
-    assert_eq!(pixels.len(), width * height);
-    assert_eq!(background.len(), width * height);
+pub fn matched_filter(pixels: &Buffer2<f32>, background: &Buffer2<f32>, fwhm: f32) -> Buffer2<f32> {
+    assert_eq!(pixels.width(), background.width());
+    assert_eq!(pixels.height(), background.height());
 
     // Subtract background first
     let subtracted: Vec<f32> = pixels
         .iter()
         .zip(background.iter())
-        .map(|(&p, &b)| (p - b).max(0.0))
+        .map(|(&p, &b): (&f32, &f32)| (p - b).max(0.0))
         .collect();
 
     // Convolve with Gaussian matching expected PSF
     let sigma = fwhm_to_sigma(fwhm);
-    gaussian_convolve(&subtracted, width, height, sigma)
+    gaussian_convolve(
+        &Buffer2::new(pixels.width(), pixels.height(), subtracted),
+        sigma,
+    )
 }
 
 /// Apply matched filter with an elliptical Gaussian kernel.
@@ -270,9 +261,7 @@ pub fn matched_filter(
 /// elongated due to tracking errors, field rotation, or optical aberrations.
 ///
 /// # Arguments
-/// * `pixels` - Input image data
-/// * `width` - Image width
-/// * `height` - Image height
+/// * `pixels` - Input image buffer
 /// * `background` - Per-pixel background values
 /// * `fwhm` - Expected FWHM of stars in pixels (major axis)
 /// * `axis_ratio` - Ratio of minor to major axis (0 < ratio <= 1, where 1 = circular)
@@ -281,16 +270,14 @@ pub fn matched_filter(
 /// # Returns
 /// Convolved, background-subtracted image
 pub fn matched_filter_elliptical(
-    pixels: &[f32],
-    width: usize,
-    height: usize,
-    background: &[f32],
+    pixels: &Buffer2<f32>,
+    background: &Buffer2<f32>,
     fwhm: f32,
     axis_ratio: f32,
     angle: f32,
-) -> Vec<f32> {
-    assert_eq!(pixels.len(), width * height);
-    assert_eq!(background.len(), width * height);
+) -> Buffer2<f32> {
+    assert_eq!(pixels.width(), background.width());
+    assert_eq!(pixels.height(), background.height());
     assert!(
         axis_ratio > 0.0 && axis_ratio <= 1.0,
         "Axis ratio must be in (0, 1]"
@@ -300,12 +287,17 @@ pub fn matched_filter_elliptical(
     let subtracted: Vec<f32> = pixels
         .iter()
         .zip(background.iter())
-        .map(|(&p, &b)| (p - b).max(0.0))
+        .map(|(&p, &b): (&f32, &f32)| (p - b).max(0.0))
         .collect();
 
     // Convolve with elliptical Gaussian kernel
     let sigma = fwhm_to_sigma(fwhm);
-    elliptical_gaussian_convolve(&subtracted, width, height, sigma, axis_ratio, angle)
+    elliptical_gaussian_convolve(
+        &Buffer2::new(pixels.width(), pixels.height(), subtracted),
+        sigma,
+        axis_ratio,
+        angle,
+    )
 }
 
 /// Compute 2D elliptical Gaussian kernel.
@@ -378,9 +370,7 @@ pub fn elliptical_gaussian_kernel_2d(sigma: f32, axis_ratio: f32, angle: f32) ->
 /// is known to be non-circular.
 ///
 /// # Arguments
-/// * `pixels` - Input image data
-/// * `width` - Image width
-/// * `height` - Image height
+/// * `pixels` - Input image buffer
 /// * `sigma` - Gaussian sigma along major axis (use `fwhm_to_sigma` to convert from FWHM)
 /// * `axis_ratio` - Ratio of minor to major axis (0 < ratio <= 1, where 1 = circular)
 /// * `angle` - Position angle of major axis in radians (0 = along x-axis)
@@ -388,18 +378,17 @@ pub fn elliptical_gaussian_kernel_2d(sigma: f32, axis_ratio: f32, angle: f32) ->
 /// # Returns
 /// Convolved image of the same size
 pub fn elliptical_gaussian_convolve(
-    pixels: &[f32],
-    width: usize,
-    height: usize,
+    pixels: &Buffer2<f32>,
     sigma: f32,
     axis_ratio: f32,
     angle: f32,
-) -> Vec<f32> {
-    assert_eq!(pixels.len(), width * height, "Pixel count mismatch");
+) -> Buffer2<f32> {
+    let width = pixels.width();
+    let height = pixels.height();
 
     // For axis_ratio very close to 1.0, use faster separable convolution
     if (axis_ratio - 1.0).abs() < 0.01 {
-        return gaussian_convolve(pixels, width, height, sigma);
+        return gaussian_convolve(pixels, sigma);
     }
 
     let (kernel, ksize) = elliptical_gaussian_kernel_2d(sigma, axis_ratio, angle);
@@ -427,18 +416,18 @@ pub fn elliptical_gaussian_convolve(
                             let sy = y as isize + ky as isize - radius as isize;
 
                             // Mirror boundary handling
-                            let sx = if sx < 0 {
+                            let sx: usize = if sx < 0 {
                                 (-sx) as usize
                             } else if sx >= width as isize {
-                                (2 * width - 2).saturating_sub(sx as usize)
+                                2 * width - 2 - sx as usize
                             } else {
                                 sx as usize
                             };
 
-                            let sy = if sy < 0 {
+                            let sy: usize = if sy < 0 {
                                 (-sy) as usize
                             } else if sy >= height as isize {
-                                (2 * height - 2).saturating_sub(sy as usize)
+                                2 * height - 2 - sy as usize
                             } else {
                                 sy as usize
                             };
@@ -452,5 +441,5 @@ pub fn elliptical_gaussian_convolve(
             }
         });
 
-    output
+    Buffer2::new(width, height, output)
 }
