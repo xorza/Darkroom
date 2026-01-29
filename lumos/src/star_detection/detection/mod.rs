@@ -538,13 +538,8 @@ pub(crate) fn extract_candidates(
                 let detection_threshold =
                     data.pixels.iter().map(|p| p.value).fold(f32::MAX, f32::min);
 
-                let deblended = multi_threshold_deblend(
-                    pixels,
-                    &data.pixels,
-                    width,
-                    detection_threshold,
-                    &mt_config,
-                );
+                let deblended =
+                    multi_threshold_deblend(&data.pixels, width, detection_threshold, &mt_config);
 
                 deblended
                     .into_iter()

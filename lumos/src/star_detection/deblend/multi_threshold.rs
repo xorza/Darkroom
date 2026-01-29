@@ -87,7 +87,6 @@ pub struct DeblendedObject {
 /// # Returns
 /// Vector of deblended objects, or single object if no deblending occurs.
 pub fn deblend_component(
-    pixels: &[f32],
     component_pixels: &[Pixel],
     width: usize,
     detection_threshold: f32,
@@ -118,13 +117,7 @@ pub fn deblend_component(
     let thresholds = create_threshold_levels(detection_threshold, peak_value, config.n_thresholds);
 
     // Build deblending tree by analyzing connectivity at each threshold
-    let tree = build_deblend_tree(
-        pixels,
-        component_pixels,
-        width,
-        &thresholds,
-        config.min_separation,
-    );
+    let tree = build_deblend_tree(component_pixels, width, &thresholds, config.min_separation);
 
     // If tree has only one leaf (no branching), return single object
     if tree.is_empty() {
@@ -163,7 +156,6 @@ fn create_threshold_levels(low: f32, high: f32, n: usize) -> Vec<f32> {
 
 /// Build the deblending tree by tracking connectivity at each threshold level.
 fn build_deblend_tree(
-    _pixels: &[f32],
     component_pixels: &[Pixel],
     width: usize,
     thresholds: &[f32],
@@ -606,7 +598,7 @@ mod tests {
             }
         }
 
-        let result = deblend_component(&pixels, &star, width, 0.01, &config);
+        let result = deblend_component(&star, width, 0.01, &config);
 
         assert_eq!(result.len(), 1, "Single star should produce one object");
         assert!((result[0].peak_x as i32 - 50).abs() <= 1);
@@ -653,7 +645,7 @@ mod tests {
             min_separation: 3,
         };
 
-        let result = deblend_component(&pixels, &component, width, 0.01, &config);
+        let result = deblend_component(&component, width, 0.01, &config);
 
         // Should deblend into 2 separate objects
         assert_eq!(
@@ -714,7 +706,7 @@ mod tests {
             min_separation: 3,
         };
 
-        let result = deblend_component(&pixels, &component, width, 0.01, &config);
+        let result = deblend_component(&component, width, 0.01, &config);
 
         // Faint star should be absorbed - contrast too low
         assert_eq!(
@@ -782,7 +774,7 @@ mod tests {
             min_separation: 5, // Larger than 4 pixel separation
         };
 
-        let result = deblend_component(&pixels, &component, width, 0.01, &config);
+        let result = deblend_component(&component, width, 0.01, &config);
 
         // Should NOT deblend - peaks too close
         assert_eq!(result.len(), 1, "Close peaks should not be deblended");
@@ -794,7 +786,7 @@ mod tests {
         let component: Vec<Pixel> = Vec::new();
         let config = MultiThresholdDeblendConfig::default();
 
-        let result = deblend_component(&pixels, &component, 10, 0.01, &config);
+        let result = deblend_component(&component, 10, 0.01, &config);
 
         assert!(result.is_empty());
     }
@@ -837,7 +829,7 @@ mod tests {
             min_separation: 3,
         };
 
-        let result = deblend_component(&pixels, &component, width, 0.01, &config);
+        let result = deblend_component(&component, width, 0.01, &config);
 
         assert_eq!(
             result.len(),
