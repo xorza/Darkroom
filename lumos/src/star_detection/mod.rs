@@ -732,7 +732,6 @@ impl StarDetector {
     pub fn new() -> Self {
         Self {
             config: StarDetectionConfig::default(),
-            bump: bumpalo::Bump::new(),
         }
     }
 
