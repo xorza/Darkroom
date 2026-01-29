@@ -937,7 +937,7 @@ fn find_stars(image: &AstroImage, config: &StarDetectionConfig) -> StarDetection
 
     let width = image.width();
     let height = image.height();
-    let mut pixels = image.to_grayscale_pixels();
+    let mut pixels = image.to_grayscale_buffer();
     let mut output = vec![0.0f32; pixels.len()];
 
     let mut diagnostics = StarDetectionDiagnostics::default();

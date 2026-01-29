@@ -10,6 +10,8 @@ use anyhow::Result;
 use imaginarium::{ChannelCount, ColorFormat, Image, ImageDesc};
 use std::path::Path;
 
+use crate::common::buffer2::Buffer2;
+
 /// FITS BITPIX values representing pixel data types.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum BitPix {
@@ -548,14 +550,16 @@ impl AstroImage {
     ///
     /// Use this when you only need read-only access to grayscale data without
     /// modifying or taking ownership of the original image.
-    pub fn to_grayscale_pixels(&self) -> Vec<f32> {
+    pub fn to_grayscale_buffer(&self) -> Buffer2<f32> {
         match &self.pixels {
-            PixelData::L(data) => data.clone(),
+            PixelData::L(data) => {
+                Buffer2::new(self.dimensions.width, self.dimensions.height, data.clone())
+            }
             PixelData::Rgb([r, g, b]) => {
                 let pixel_count = self.dimensions.width * self.dimensions.height;
                 let mut gray = vec![0.0f32; pixel_count];
                 rgb_to_luminance(r, g, b, &mut gray);
-                gray
+                Buffer2::new(self.dimensions.width, self.dimensions.height, gray)
             }
         }
     }

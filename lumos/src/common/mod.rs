@@ -1,8 +1,8 @@
 //! Common utilities for lumos.
 
-#[cfg(target_arch = "x86_64")]
-pub mod cpu_features;
+pub(crate) mod cpu_features;
 
+pub(crate) mod buffer2;
 mod parallel;
 
 pub use parallel::parallel_chunked;

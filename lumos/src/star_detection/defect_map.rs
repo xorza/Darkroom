@@ -2,6 +2,8 @@
 
 use std::collections::HashSet;
 
+use crate::common::buffer2::Buffer2;
+
 /// Map of known sensor defects (hot pixels, dead pixels, bad columns).
 ///
 /// Used to mask out defective pixels before star detection to prevent
@@ -89,16 +91,14 @@ impl DefectMap {
 /// of their non-defective neighbors. This prevents hot pixels and other
 /// defects from being detected as stars or affecting centroid computation.
 pub(crate) fn apply_defect_mask(
-    input: &[f32],
-    width: usize,
-    height: usize,
+    input: &Buffer2<f32>,
     defect_map: &DefectMap,
-    output: &mut [f32],
+    output: &mut Buffer2<f32>,
 ) {
     assert_eq!(input.len(), output.len());
 
     // Copy input to output first
-    output.copy_from_slice(input);
+    output.copy_from(input);
 
     let defective_indices = defect_map.defective_indices();
     if defective_indices.is_empty() {
@@ -107,17 +107,15 @@ pub(crate) fn apply_defect_mask(
 
     // Replace defective pixels with local median
     for &idx in defective_indices {
-        let x = idx % width;
-        let y = idx / width;
-        output[idx] = local_median_excluding_defects(input, width, height, x, y, defective_indices);
+        let x = idx % input.width();
+        let y = idx / input.width();
+        output[idx] = local_median_excluding_defects(input, x, y, defective_indices);
     }
 }
 
 /// Compute local median of 3x3 neighborhood, excluding defective pixels.
 fn local_median_excluding_defects(
-    pixels: &[f32],
-    width: usize,
-    height: usize,
+    pixels: &Buffer2<f32>,
     cx: usize,
     cy: usize,
     defective_indices: &[usize],
@@ -130,8 +128,8 @@ fn local_median_excluding_defects(
             let nx = cx as i32 + dx;
             let ny = cy as i32 + dy;
 
-            if nx >= 0 && nx < width as i32 && ny >= 0 && ny < height as i32 {
-                let nidx = ny as usize * width + nx as usize;
+            if nx >= 0 && nx < pixels.width() as i32 && ny >= 0 && ny < pixels.height() as i32 {
+                let nidx = ny as usize * pixels.width() + nx as usize;
                 if defective_indices.binary_search(&nidx).is_err() {
                     values[count] = pixels[nidx];
                     count += 1;
@@ -142,7 +140,7 @@ fn local_median_excluding_defects(
 
     if count == 0 {
         // All neighbors are defective, use the pixel value itself
-        pixels[cy * width + cx]
+        pixels[cy * pixels.width() + cx]
     } else {
         let slice = &mut values[..count];
         slice.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
@@ -287,20 +285,16 @@ mod tests {
     // apply_defect_mask Tests
     // =============================================================================
 
-    fn apply_mask(input: &[f32], width: usize, height: usize, map: &DefectMap) -> Vec<f32> {
-        let mut output = vec![0.0f32; input.len()];
-        apply_defect_mask(input, width, height, map, &mut output);
-        output
-    }
-
     #[test]
     fn test_apply_defect_mask_single_hot_pixel() {
         // 5x5 image with uniform value 1.0, one hot pixel at (2,2) with value 10.0
-        let mut pixels = vec![1.0f32; 25];
-        pixels[2 * 5 + 2] = 10.0; // Hot pixel
+        let mut pixels: Buffer2<f32> = Buffer2::new_filled(5, 5, 1.0f32);
+
+        pixels[(2, 2)] = 10.0; // Hot pixel
 
         let map = DefectMap::new(5, 5, &[(2, 2)], &[], &[], &[]);
-        let output = apply_mask(&pixels, 5, 5, &map);
+        let mut output = Buffer2::new_filled(5, 5, 0.0f32);
+        apply_defect_mask(&pixels, &map, &mut output);
 
         // Hot pixel should be replaced with median of neighbors (all 1.0)
         assert!((output[2 * 5 + 2] - 1.0).abs() < 0.01);
