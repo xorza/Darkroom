@@ -1,6 +1,8 @@
 [workspace]
 members = [
+    "bench",
     "common",
+    "common-macros",
     "scenarium",
     "prism",
     "imaginarium",
@@ -17,6 +19,8 @@ edition = "2024"
 
 [workspace.dependencies]
 common = { path = "common" }
+common-macros = { path = "common-macros" }
+bench = { path = "bench" }
 scenarium = { path = "scenarium" }
 prism = { path = "prism" }
 imaginarium = { path = "imaginarium" }
@@ -58,6 +62,9 @@ bytes = { version = "*" }
 lazy_static = { version = "*" }
 mlua = { version = "*", features = ["serialize", "send", "anyhow", "async", "lua54", "vendored"] }
 criterion = { version = "*" }
+syn = { version = "*", features = ["full"] }
+quote = { version = "*" }
+proc-macro2 = { version = "*" }
 memmap2 = { version = "*" }
 tiff = { version = "*" }
 image = { version = "*" }

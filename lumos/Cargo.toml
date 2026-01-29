@@ -36,6 +36,7 @@ ureq = { workspace = true }
 bumpalo = { workspace = true }
 
 [dev-dependencies]
+bench ={ workspace = true }
 criterion = { workspace = true }
 image = { workspace = true }
 reqwest = { workspace = true }

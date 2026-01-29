@@ -1864,74 +1864,32 @@ fn create_timing_background_map(width: usize, height: usize) -> BackgroundMap {
     }
 }
 
-#[test]
-fn timing_detect_stars_filtered_1k() {
-    if common::is_debug() {
-        println!("Debug mode enabled");
-    } else {
-        println!("Release mode enabled");
-    }
+use bench::quick_bench;
 
+#[quick_bench(iterations = 5)]
+fn bench_detect_stars_filtered_1k(b: bench::Bencher) {
     const WIDTH: usize = 1024;
     const HEIGHT: usize = 1024;
     const NUM_STARS: usize = 100;
-    const ITERATIONS: usize = 5;
 
     let pixels = generate_timing_test_image(WIDTH, HEIGHT, NUM_STARS);
     let filtered = generate_timing_test_image(WIDTH, HEIGHT, NUM_STARS);
     let background = create_timing_background_map(WIDTH, HEIGHT);
     let config = StarDetectionConfig::default();
 
-    // Warmup
-    let _ = detect_stars_filtered(&pixels, &filtered, WIDTH, HEIGHT, &background, &config);
-
-    let start = std::time::Instant::now();
-    for _ in 0..ITERATIONS {
-        let _ = detect_stars_filtered(&pixels, &filtered, WIDTH, HEIGHT, &background, &config);
-    }
-    let elapsed = start.elapsed();
-
-    println!(
-        "\n[TIMING] detect_stars_filtered 1K ({}x{}, {} stars): {:?} per iter ({} iters)\n",
-        WIDTH,
-        HEIGHT,
-        NUM_STARS,
-        elapsed / ITERATIONS as u32,
-        ITERATIONS
-    );
+    b.bench(|| detect_stars_filtered(&pixels, &filtered, WIDTH, HEIGHT, &background, &config));
 }
 
-#[test]
-fn timing_detect_stars_filtered_6k() {
+#[quick_bench(iterations = 3)]
+fn bench_detect_stars_filtered_6k(b: bench::Bencher) {
     const WIDTH: usize = 6144;
     const HEIGHT: usize = 6144;
     const NUM_STARS: usize = 3000;
-    const ITERATIONS: usize = 3;
-
-    if common::is_debug() {
-        println!("Debug mode enabled");
-    }
 
     let pixels = generate_timing_test_image(WIDTH, HEIGHT, NUM_STARS);
     let filtered = generate_timing_test_image(WIDTH, HEIGHT, NUM_STARS);
     let background = create_timing_background_map(WIDTH, HEIGHT);
     let config = StarDetectionConfig::default();
 
-    // Warmup
-    let _ = detect_stars_filtered(&pixels, &filtered, WIDTH, HEIGHT, &background, &config);
-
-    let start = std::time::Instant::now();
-    for _ in 0..ITERATIONS {
-        let _ = detect_stars_filtered(&pixels, &filtered, WIDTH, HEIGHT, &background, &config);
-    }
-    let elapsed = start.elapsed();
-
-    println!(
-        "\n[TIMING] detect_stars_filtered 6K ({}x{}, {} stars): {:?} per iter ({} iters)\n",
-        WIDTH,
-        HEIGHT,
-        NUM_STARS,
-        elapsed / ITERATIONS as u32,
-        ITERATIONS
-    );
+    b.bench(|| detect_stars_filtered(&pixels, &filtered, WIDTH, HEIGHT, &background, &config));
 }
