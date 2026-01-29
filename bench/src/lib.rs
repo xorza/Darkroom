@@ -115,6 +115,9 @@ impl Bencher {
     where
         F: FnMut() -> R,
     {
+        #[cfg(debug_assertions)]
+        println!("\n⚠️  DEBUG MODE - benchmarks should be run with --release\n");
+
         // Warmup
         for _ in 0..self.warmup_iterations {
             black_box(f());

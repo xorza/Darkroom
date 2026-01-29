@@ -5,7 +5,7 @@ edition.workspace = true
 description = ""
 
 [features]
-bench = ["dep:criterion"]
+bench = ["dep:criterion", "dep:bench"]
 real-data = []
 
 [dependencies]
@@ -27,6 +27,7 @@ tracing-subscriber = { workspace = true }
 memmap2 = { workspace = true }
 sysinfo = { workspace = true }
 criterion = { workspace = true, optional = true }
+bench = { workspace = true, optional = true }
 rustfft = { workspace = true }
 rand = { workspace = true }
 rand_chacha = { workspace = true }
@@ -36,7 +37,7 @@ ureq = { workspace = true }
 bumpalo = { workspace = true }
 
 [dev-dependencies]
-bench ={ workspace = true }
+bench = { workspace = true }
 criterion = { workspace = true }
 image = { workspace = true }
 reqwest = { workspace = true }

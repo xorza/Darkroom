@@ -1811,7 +1811,7 @@ fn test_multi_threshold_deblend_high_contrast_disables() {
 }
 
 // =============================================================================
-// Timing Tests (run with `cargo test --release -- --nocapture timing`)
+// Quick benchmarks (run with: cargo test -p lumos --release -- --ignored bench_)
 // =============================================================================
 
 /// Generate a synthetic star field image for timing tests.
