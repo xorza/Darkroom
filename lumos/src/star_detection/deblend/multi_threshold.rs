@@ -9,6 +9,8 @@
 
 use std::collections::HashMap;
 
+use super::local_maxima::Pixel;
+
 /// Configuration for multi-threshold deblending.
 #[derive(Debug, Clone, Copy)]
 pub struct MultiThresholdDeblendConfig {
@@ -43,7 +45,7 @@ struct DeblendNode {
     /// Pixel positions (x, y) belonging to this node at its threshold level.
     pixels: Vec<(usize, usize)>,
     /// Peak position and value.
-    peak: (usize, usize, f32),
+    peak: Pixel,
     /// Total flux in this branch.
     flux: f32,
     /// Child nodes (branches that split from this node at higher threshold).
@@ -64,8 +66,8 @@ pub struct DeblendedObject {
     pub peak_value: f32,
     /// Total flux.
     pub flux: f32,
-    /// Pixels belonging to this object: (x, y, value).
-    pub pixels: Vec<(usize, usize, f32)>,
+    /// Pixels belonging to this object.
+    pub pixels: Vec<Pixel>,
     /// Bounding box (x_min, x_max, y_min, y_max).
     pub bbox: (usize, usize, usize, usize),
 }
@@ -77,7 +79,7 @@ pub struct DeblendedObject {
 ///
 /// # Arguments
 /// * `pixels` - Pixel data for the entire image
-/// * `component_pixels` - List of (x, y, value) for pixels in this component
+/// * `component_pixels` - List of pixels in this component
 /// * `width` - Image width
 /// * `detection_threshold` - The threshold used for initial detection
 /// * `config` - Deblending configuration
@@ -86,7 +88,7 @@ pub struct DeblendedObject {
 /// Vector of deblended objects, or single object if no deblending occurs.
 pub fn deblend_component(
     pixels: &[f32],
-    component_pixels: &[(usize, usize, f32)],
+    component_pixels: &[Pixel],
     width: usize,
     detection_threshold: f32,
     config: &MultiThresholdDeblendConfig,
@@ -104,7 +106,7 @@ pub fn deblend_component(
     // Find peak value in the component
     let peak_value = component_pixels
         .iter()
-        .map(|&(_, _, v)| v)
+        .map(|p| p.value)
         .fold(f32::MIN, f32::max);
 
     // If peak barely above threshold, no deblending possible
@@ -162,7 +164,7 @@ fn create_threshold_levels(low: f32, high: f32, n: usize) -> Vec<f32> {
 /// Build the deblending tree by tracking connectivity at each threshold level.
 fn build_deblend_tree(
     _pixels: &[f32],
-    component_pixels: &[(usize, usize, f32)],
+    component_pixels: &[Pixel],
     width: usize,
     thresholds: &[f32],
     min_separation: usize,
@@ -177,7 +179,7 @@ fn build_deblend_tree(
     let pixel_map: HashMap<(usize, usize), usize> = component_pixels
         .iter()
         .enumerate()
-        .map(|(i, &(x, y, _))| ((x, y), i))
+        .map(|(i, p)| ((p.x, p.y), i))
         .collect();
 
     // Track which node each pixel belongs to at current level
@@ -187,9 +189,9 @@ fn build_deblend_tree(
     // Process each threshold level from low to high
     for (level, &threshold) in thresholds.iter().enumerate() {
         // Find pixels above this threshold
-        let above_threshold: Vec<(usize, usize, f32)> = component_pixels
+        let above_threshold: Vec<Pixel> = component_pixels
             .iter()
-            .filter(|&&(_, _, v)| v >= threshold)
+            .filter(|p| p.value >= threshold)
             .copied()
             .collect();
 
@@ -205,14 +207,14 @@ fn build_deblend_tree(
             for region in regions {
                 let node_idx = tree.len();
                 let peak = find_region_peak(&region);
-                let flux = region.iter().map(|&(_, _, v)| v).sum();
+                let flux = region.iter().map(|p| p.value).sum();
 
-                for &(x, y, _) in &region {
-                    pixel_to_node.insert((x, y), node_idx);
+                for p in &region {
+                    pixel_to_node.insert((p.x, p.y), node_idx);
                 }
 
                 tree.push(DeblendNode {
-                    pixels: region.iter().map(|&(x, y, _)| (x, y)).collect(),
+                    pixels: region.iter().map(|p| (p.x, p.y)).collect(),
                     peak,
                     flux,
                     children: Vec::new(),
@@ -223,11 +225,11 @@ fn build_deblend_tree(
             // Higher levels: check for splits
             for region in regions {
                 // Find which parent node(s) this region comes from
-                let mut parent_nodes: HashMap<usize, Vec<(usize, usize, f32)>> = HashMap::new();
+                let mut parent_nodes: HashMap<usize, Vec<Pixel>> = HashMap::new();
 
-                for &(x, y, v) in &region {
-                    if let Some(&parent_idx) = pixel_to_node.get(&(x, y)) {
-                        parent_nodes.entry(parent_idx).or_default().push((x, y, v));
+                for &p in &region {
+                    if let Some(&parent_idx) = pixel_to_node.get(&(p.x, p.y)) {
+                        parent_nodes.entry(parent_idx).or_default().push(p);
                     }
                 }
 
@@ -246,8 +248,8 @@ fn build_deblend_tree(
                         .filter(|&&(x, y)| {
                             component_pixels
                                 .iter()
-                                .find(|&&(px, py, _)| px == x && py == y)
-                                .is_some_and(|&(_, _, v)| v >= threshold)
+                                .find(|p| p.x == x && p.y == y)
+                                .is_some_and(|p| p.value >= threshold)
                         })
                         .collect();
 
@@ -255,13 +257,13 @@ fn build_deblend_tree(
                     // check if multiple distinct regions formed
                     if region.len() < parent_pixels_above.len() {
                         // Check if other regions formed from same parent
-                        let other_regions: Vec<Vec<(usize, usize, f32)>> = find_connected_regions(
+                        let other_regions: Vec<Vec<Pixel>> = find_connected_regions(
                             &parent_pixels_above
                                 .iter()
                                 .filter_map(|&&(x, y)| {
                                     component_pixels
                                         .iter()
-                                        .find(|&&(px, py, _)| px == x && py == y)
+                                        .find(|p| p.x == x && p.y == y)
                                         .copied()
                                 })
                                 .collect::<Vec<_>>(),
@@ -279,10 +281,10 @@ fn build_deblend_tree(
                                 // Check minimum separation from existing children
                                 let too_close = child_indices.iter().any(|&idx: &usize| {
                                     let sibling = &tree[idx];
-                                    let dx = (child_peak.0 as i32 - sibling.peak.0 as i32)
+                                    let dx = (child_peak.x as i32 - sibling.peak.x as i32)
                                         .unsigned_abs()
                                         as usize;
-                                    let dy = (child_peak.1 as i32 - sibling.peak.1 as i32)
+                                    let dy = (child_peak.y as i32 - sibling.peak.y as i32)
                                         .unsigned_abs()
                                         as usize;
                                     dx < min_separation && dy < min_separation
@@ -293,14 +295,14 @@ fn build_deblend_tree(
                                 }
 
                                 let child_idx = tree.len();
-                                let child_flux = child_region.iter().map(|&(_, _, v)| v).sum();
+                                let child_flux = child_region.iter().map(|p| p.value).sum();
 
-                                for &(x, y, _) in &child_region {
-                                    pixel_to_node.insert((x, y), child_idx);
+                                for p in &child_region {
+                                    pixel_to_node.insert((p.x, p.y), child_idx);
                                 }
 
                                 tree.push(DeblendNode {
-                                    pixels: child_region.iter().map(|&(x, y, _)| (x, y)).collect(),
+                                    pixels: child_region.iter().map(|p| (p.x, p.y)).collect(),
                                     peak: child_peak,
                                     flux: child_flux,
                                     children: Vec::new(),
@@ -323,43 +325,51 @@ fn build_deblend_tree(
 }
 
 /// Find the peak (brightest pixel) in a region.
-fn find_region_peak(region: &[(usize, usize, f32)]) -> (usize, usize, f32) {
+fn find_region_peak(region: &[Pixel]) -> Pixel {
     region
         .iter()
-        .max_by(|a, b| a.2.partial_cmp(&b.2).unwrap_or(std::cmp::Ordering::Equal))
-        .map(|&(x, y, v)| (x, y, v))
-        .unwrap_or((0, 0, 0.0))
+        .max_by(|a, b| {
+            a.value
+                .partial_cmp(&b.value)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
+        .copied()
+        .unwrap_or(Pixel {
+            x: 0,
+            y: 0,
+            value: 0.0,
+        })
 }
 
 /// Find connected regions within a set of pixels using 8-connectivity.
 fn find_connected_regions(
-    pixels: &[(usize, usize, f32)],
+    pixels: &[Pixel],
     _pixel_map: &HashMap<(usize, usize), usize>,
     _width: usize,
-) -> Vec<Vec<(usize, usize, f32)>> {
+) -> Vec<Vec<Pixel>> {
     if pixels.is_empty() {
         return Vec::new();
     }
 
     // Create a set of pixel positions for quick lookup
     let pixel_set: HashMap<(usize, usize), f32> =
-        pixels.iter().map(|&(x, y, v)| ((x, y), v)).collect();
+        pixels.iter().map(|p| ((p.x, p.y), p.value)).collect();
 
     let mut visited: HashMap<(usize, usize), bool> = HashMap::new();
     let mut regions = Vec::new();
 
-    for &(x, y, v) in pixels {
-        if visited.get(&(x, y)).is_some_and(|&b| b) {
+    for p in pixels {
+        if visited.get(&(p.x, p.y)).is_some_and(|&b| b) {
             continue;
         }
 
         // BFS to find connected component
         let mut region = Vec::new();
-        let mut queue = vec![(x, y, v)];
-        visited.insert((x, y), true);
+        let mut queue = vec![*p];
+        visited.insert((p.x, p.y), true);
 
-        while let Some((cx, cy, cv)) = queue.pop() {
-            region.push((cx, cy, cv));
+        while let Some(current) = queue.pop() {
+            region.push(current);
 
             // Check 8 neighbors
             for dy in -1i32..=1 {
@@ -368,8 +378,8 @@ fn find_connected_regions(
                         continue;
                     }
 
-                    let nx = (cx as i32 + dx) as usize;
-                    let ny = (cy as i32 + dy) as usize;
+                    let nx = (current.x as i32 + dx) as usize;
+                    let ny = (current.y as i32 + dy) as usize;
 
                     if visited.get(&(nx, ny)).is_some_and(|&b| b) {
                         continue;
@@ -377,7 +387,11 @@ fn find_connected_regions(
 
                     if let Some(&nv) = pixel_set.get(&(nx, ny)) {
                         visited.insert((nx, ny), true);
-                        queue.push((nx, ny, nv));
+                        queue.push(Pixel {
+                            x: nx,
+                            y: ny,
+                            value: nv,
+                        });
                     }
                 }
             }
@@ -465,7 +479,7 @@ fn collect_significant_leaves(
 
 /// Assign pixels to their nearest object (based on peak positions).
 fn assign_pixels_to_objects(
-    component_pixels: &[(usize, usize, f32)],
+    component_pixels: &[Pixel],
     tree: &[DeblendNode],
     leaf_indices: &[usize],
 ) -> Vec<DeblendedObject> {
@@ -474,15 +488,15 @@ fn assign_pixels_to_objects(
     }
 
     // Get peak positions for each leaf
-    let peaks: Vec<(usize, usize, f32)> = leaf_indices.iter().map(|&i| tree[i].peak).collect();
+    let peaks: Vec<Pixel> = leaf_indices.iter().map(|&i| tree[i].peak).collect();
 
     // Initialize objects
     let mut objects: Vec<DeblendedObject> = peaks
         .iter()
-        .map(|&(px, py, pv)| DeblendedObject {
-            peak_x: px,
-            peak_y: py,
-            peak_value: pv,
+        .map(|p| DeblendedObject {
+            peak_x: p.x,
+            peak_y: p.y,
+            peak_value: p.value,
             flux: 0.0,
             pixels: Vec::new(),
             bbox: (usize::MAX, 0, usize::MAX, 0),
@@ -490,13 +504,13 @@ fn assign_pixels_to_objects(
         .collect();
 
     // Assign each pixel to nearest peak
-    for &(x, y, v) in component_pixels {
+    for &p in component_pixels {
         let mut min_dist_sq = usize::MAX;
         let mut nearest = 0;
 
-        for (i, &(px, py, _)) in peaks.iter().enumerate() {
-            let dx = (x as i32 - px as i32).unsigned_abs() as usize;
-            let dy = (y as i32 - py as i32).unsigned_abs() as usize;
+        for (i, peak) in peaks.iter().enumerate() {
+            let dx = (p.x as i32 - peak.x as i32).unsigned_abs() as usize;
+            let dy = (p.y as i32 - peak.y as i32).unsigned_abs() as usize;
             let dist_sq = dx * dx + dy * dy;
 
             if dist_sq < min_dist_sq {
@@ -506,12 +520,12 @@ fn assign_pixels_to_objects(
         }
 
         let obj = &mut objects[nearest];
-        obj.pixels.push((x, y, v));
-        obj.flux += v;
-        obj.bbox.0 = obj.bbox.0.min(x);
-        obj.bbox.1 = obj.bbox.1.max(x);
-        obj.bbox.2 = obj.bbox.2.min(y);
-        obj.bbox.3 = obj.bbox.3.max(y);
+        obj.pixels.push(p);
+        obj.flux += p.value;
+        obj.bbox.0 = obj.bbox.0.min(p.x);
+        obj.bbox.1 = obj.bbox.1.max(p.x);
+        obj.bbox.2 = obj.bbox.2.min(p.y);
+        obj.bbox.3 = obj.bbox.3.max(p.y);
     }
 
     // Filter out objects with no pixels
@@ -521,24 +535,32 @@ fn assign_pixels_to_objects(
 }
 
 /// Create a single object from all pixels (no deblending).
-fn create_single_object(pixels: &[(usize, usize, f32)]) -> DeblendedObject {
-    let (peak_x, peak_y, peak_value) = pixels
+fn create_single_object(pixels: &[Pixel]) -> DeblendedObject {
+    let peak = pixels
         .iter()
-        .max_by(|a, b| a.2.partial_cmp(&b.2).unwrap_or(std::cmp::Ordering::Equal))
-        .map(|&(x, y, v)| (x, y, v))
-        .unwrap_or((0, 0, 0.0));
+        .max_by(|a, b| {
+            a.value
+                .partial_cmp(&b.value)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
+        .copied()
+        .unwrap_or(Pixel {
+            x: 0,
+            y: 0,
+            value: 0.0,
+        });
 
-    let flux: f32 = pixels.iter().map(|&(_, _, v)| v).sum();
+    let flux: f32 = pixels.iter().map(|p| p.value).sum();
 
-    let x_min = pixels.iter().map(|&(x, _, _)| x).min().unwrap_or(0);
-    let x_max = pixels.iter().map(|&(x, _, _)| x).max().unwrap_or(0);
-    let y_min = pixels.iter().map(|&(_, y, _)| y).min().unwrap_or(0);
-    let y_max = pixels.iter().map(|&(_, y, _)| y).max().unwrap_or(0);
+    let x_min = pixels.iter().map(|p| p.x).min().unwrap_or(0);
+    let x_max = pixels.iter().map(|p| p.x).max().unwrap_or(0);
+    let y_min = pixels.iter().map(|p| p.y).min().unwrap_or(0);
+    let y_max = pixels.iter().map(|p| p.y).max().unwrap_or(0);
 
     DeblendedObject {
-        peak_x,
-        peak_y,
-        peak_value,
+        peak_x: peak.x,
+        peak_y: peak.y,
+        peak_value: peak.value,
         flux,
         pixels: pixels.to_vec(),
         bbox: (x_min, x_max, y_min, y_max),
@@ -549,12 +571,7 @@ fn create_single_object(pixels: &[(usize, usize, f32)]) -> DeblendedObject {
 mod tests {
     use super::*;
 
-    fn make_gaussian_star(
-        cx: usize,
-        cy: usize,
-        amplitude: f32,
-        sigma: f32,
-    ) -> Vec<(usize, usize, f32)> {
+    fn make_gaussian_star(cx: usize, cy: usize, amplitude: f32, sigma: f32) -> Vec<Pixel> {
         let mut pixels = Vec::new();
         let radius = (sigma * 4.0).ceil() as i32;
 
@@ -565,7 +582,7 @@ mod tests {
                 let r2 = (dx * dx + dy * dy) as f32;
                 let value = amplitude * (-r2 / (2.0 * sigma * sigma)).exp();
                 if value > 0.001 {
-                    pixels.push((x, y, value));
+                    pixels.push(Pixel { x, y, value });
                 }
             }
         }
@@ -583,9 +600,9 @@ mod tests {
         let width = 100;
         let height = 100;
         let mut pixels = vec![0.0f32; width * height];
-        for &(x, y, v) in &star {
-            if x < width && y < height {
-                pixels[y * width + x] = v;
+        for p in &star {
+            if p.x < width && p.y < height {
+                pixels[p.y * width + p.x] = p.value;
             }
         }
 
@@ -606,22 +623,29 @@ mod tests {
         let star2 = make_gaussian_star(70, 50, 0.8, 2.5);
 
         // Combine stars into one "component" (simulating blended detection)
-        let mut component: Vec<(usize, usize, f32)> = Vec::new();
+        let mut component: Vec<Pixel> = Vec::new();
         let mut pixels = vec![0.0f32; width * height];
 
-        for &(x, y, v) in star1.iter().chain(star2.iter()) {
-            if x < width && y < height {
-                pixels[y * width + x] += v;
-                component.push((x, y, pixels[y * width + x]));
+        for p in star1.iter().chain(star2.iter()) {
+            if p.x < width && p.y < height {
+                pixels[p.y * width + p.x] += p.value;
+                component.push(Pixel {
+                    x: p.x,
+                    y: p.y,
+                    value: pixels[p.y * width + p.x],
+                });
             }
         }
 
         // Deduplicate component pixels
         let mut seen: HashMap<(usize, usize), f32> = HashMap::new();
-        for (x, y, v) in component {
-            seen.insert((x, y), v);
+        for p in component {
+            seen.insert((p.x, p.y), p.value);
         }
-        let component: Vec<_> = seen.into_iter().map(|((x, y), v)| (x, y, v)).collect();
+        let component: Vec<_> = seen
+            .into_iter()
+            .map(|((x, y), value)| Pixel { x, y, value })
+            .collect();
 
         let config = MultiThresholdDeblendConfig {
             n_thresholds: 32,
@@ -661,21 +685,28 @@ mod tests {
         let star1 = make_gaussian_star(30, 50, 1.0, 2.5);
         let star2 = make_gaussian_star(70, 50, 0.001, 2.5); // Very faint
 
-        let mut component: Vec<(usize, usize, f32)> = Vec::new();
+        let mut component: Vec<Pixel> = Vec::new();
         let mut pixels = vec![0.0f32; width * height];
 
-        for &(x, y, v) in star1.iter().chain(star2.iter()) {
-            if x < width && y < height {
-                pixels[y * width + x] += v;
-                component.push((x, y, pixels[y * width + x]));
+        for p in star1.iter().chain(star2.iter()) {
+            if p.x < width && p.y < height {
+                pixels[p.y * width + p.x] += p.value;
+                component.push(Pixel {
+                    x: p.x,
+                    y: p.y,
+                    value: pixels[p.y * width + p.x],
+                });
             }
         }
 
         let mut seen: HashMap<(usize, usize), f32> = HashMap::new();
-        for (x, y, v) in component {
-            seen.insert((x, y), v);
+        for p in component {
+            seen.insert((p.x, p.y), p.value);
         }
-        let component: Vec<_> = seen.into_iter().map(|((x, y), v)| (x, y, v)).collect();
+        let component: Vec<_> = seen
+            .into_iter()
+            .map(|((x, y), value)| Pixel { x, y, value })
+            .collect();
 
         let config = MultiThresholdDeblendConfig {
             n_thresholds: 32,
@@ -722,21 +753,28 @@ mod tests {
         let star1 = make_gaussian_star(48, 50, 1.0, 2.0);
         let star2 = make_gaussian_star(52, 50, 0.9, 2.0);
 
-        let mut component: Vec<(usize, usize, f32)> = Vec::new();
+        let mut component: Vec<Pixel> = Vec::new();
         let mut pixels = vec![0.0f32; width * height];
 
-        for &(x, y, v) in star1.iter().chain(star2.iter()) {
-            if x < width && y < height {
-                pixels[y * width + x] += v;
-                component.push((x, y, pixels[y * width + x]));
+        for p in star1.iter().chain(star2.iter()) {
+            if p.x < width && p.y < height {
+                pixels[p.y * width + p.x] += p.value;
+                component.push(Pixel {
+                    x: p.x,
+                    y: p.y,
+                    value: pixels[p.y * width + p.x],
+                });
             }
         }
 
         let mut seen: HashMap<(usize, usize), f32> = HashMap::new();
-        for (x, y, v) in component {
-            seen.insert((x, y), v);
+        for p in component {
+            seen.insert((p.x, p.y), p.value);
         }
-        let component: Vec<_> = seen.into_iter().map(|((x, y), v)| (x, y, v)).collect();
+        let component: Vec<_> = seen
+            .into_iter()
+            .map(|((x, y), value)| Pixel { x, y, value })
+            .collect();
 
         let config = MultiThresholdDeblendConfig {
             n_thresholds: 32,
@@ -753,7 +791,7 @@ mod tests {
     #[test]
     fn test_empty_component() {
         let pixels = vec![0.0f32; 100];
-        let component: Vec<(usize, usize, f32)> = Vec::new();
+        let component: Vec<Pixel> = Vec::new();
         let config = MultiThresholdDeblendConfig::default();
 
         let result = deblend_component(&pixels, &component, 10, 0.01, &config);
@@ -770,21 +808,28 @@ mod tests {
         let star1 = make_gaussian_star(30, 50, 1.0, 2.5);
         let star2 = make_gaussian_star(70, 50, 0.8, 2.5);
 
-        let mut component: Vec<(usize, usize, f32)> = Vec::new();
+        let mut component: Vec<Pixel> = Vec::new();
         let mut pixels = vec![0.0f32; width * height];
 
-        for &(x, y, v) in star1.iter().chain(star2.iter()) {
-            if x < width && y < height {
-                pixels[y * width + x] += v;
-                component.push((x, y, pixels[y * width + x]));
+        for p in star1.iter().chain(star2.iter()) {
+            if p.x < width && p.y < height {
+                pixels[p.y * width + p.x] += p.value;
+                component.push(Pixel {
+                    x: p.x,
+                    y: p.y,
+                    value: pixels[p.y * width + p.x],
+                });
             }
         }
 
         let mut seen: HashMap<(usize, usize), f32> = HashMap::new();
-        for (x, y, v) in component {
-            seen.insert((x, y), v);
+        for p in component {
+            seen.insert((p.x, p.y), p.value);
         }
-        let component: Vec<_> = seen.into_iter().map(|((x, y), v)| (x, y, v)).collect();
+        let component: Vec<_> = seen
+            .into_iter()
+            .map(|((x, y), value)| Pixel { x, y, value })
+            .collect();
 
         let config = MultiThresholdDeblendConfig {
             n_thresholds: 32,

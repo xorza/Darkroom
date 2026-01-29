@@ -538,13 +538,9 @@ pub(crate) fn extract_candidates(
                 let detection_threshold =
                     data.pixels.iter().map(|p| p.value).fold(f32::MAX, f32::min);
 
-                // Convert to tuple format for multi_threshold_deblend
-                let pixels_tuples: Vec<(usize, usize, f32)> =
-                    data.pixels.iter().map(|p| (p.x, p.y, p.value)).collect();
-
                 let deblended = multi_threshold_deblend(
                     pixels,
-                    &pixels_tuples,
+                    &data.pixels,
                     width,
                     detection_threshold,
                     &mt_config,

@@ -12,8 +12,6 @@ use std::hint::black_box;
 pub struct BenchData {
     pub image: Vec<f32>,
     pub components: Vec<ComponentData>,
-    /// Tuple format for multi_threshold compatibility
-    pub component_pixels: Vec<Vec<(usize, usize, f32)>>,
     pub width: usize,
     pub height: usize,
 }
@@ -23,7 +21,6 @@ impl BenchData {
     pub fn new(width: usize, height: usize, num_pairs: usize, separation: usize) -> Self {
         let mut image = vec![0.0f32; width * height];
         let mut components = Vec::with_capacity(num_pairs);
-        let mut component_pixels = Vec::with_capacity(num_pairs);
 
         let sigma = 2.5f32;
 
@@ -43,7 +40,7 @@ impl BenchData {
             let amplitude1 = 1.0;
             let amplitude2 = 0.8;
 
-            let mut pair_pixels: Vec<(usize, usize, f32)> = Vec::new();
+            let mut pair_pixels: Vec<Pixel> = Vec::new();
 
             // Add first star
             let radius = (sigma * 4.0).ceil() as i32;
@@ -56,7 +53,11 @@ impl BenchData {
                         let value = amplitude1 * (-r2 / (2.0 * sigma * sigma)).exp();
                         if value > 0.001 {
                             image[y * width + x] += value;
-                            pair_pixels.push((x, y, image[y * width + x]));
+                            pair_pixels.push(Pixel {
+                                x,
+                                y,
+                                value: image[y * width + x],
+                            });
                         }
                     }
                 }
@@ -72,7 +73,11 @@ impl BenchData {
                         let value = amplitude2 * (-r2 / (2.0 * sigma * sigma)).exp();
                         if value > 0.001 {
                             image[y * width + x] += value;
-                            pair_pixels.push((x, y, image[y * width + x]));
+                            pair_pixels.push(Pixel {
+                                x,
+                                y,
+                                value: image[y * width + x],
+                            });
                         }
                     }
                 }
@@ -80,32 +85,28 @@ impl BenchData {
 
             // Deduplicate
             let mut seen: HashMap<(usize, usize), f32> = HashMap::new();
-            for (x, y, v) in pair_pixels {
-                seen.insert((x, y), v);
+            for p in pair_pixels {
+                seen.insert((p.x, p.y), p.value);
             }
-            let unique_pixels: Vec<_> = seen.into_iter().map(|((x, y), v)| (x, y, v)).collect();
-
-            let pixels_structs: Vec<Pixel> = unique_pixels
-                .iter()
-                .map(|&(x, y, value)| Pixel { x, y, value })
+            let unique_pixels: Vec<Pixel> = seen
+                .into_iter()
+                .map(|((x, y), value)| Pixel { x, y, value })
                 .collect();
 
             let data = ComponentData {
-                x_min: unique_pixels.iter().map(|p| p.0).min().unwrap_or(0),
-                x_max: unique_pixels.iter().map(|p| p.0).max().unwrap_or(0),
-                y_min: unique_pixels.iter().map(|p| p.1).min().unwrap_or(0),
-                y_max: unique_pixels.iter().map(|p| p.1).max().unwrap_or(0),
-                pixels: pixels_structs,
+                x_min: unique_pixels.iter().map(|p| p.x).min().unwrap_or(0),
+                x_max: unique_pixels.iter().map(|p| p.x).max().unwrap_or(0),
+                y_min: unique_pixels.iter().map(|p| p.y).min().unwrap_or(0),
+                y_max: unique_pixels.iter().map(|p| p.y).max().unwrap_or(0),
+                pixels: unique_pixels,
             };
 
             components.push(data);
-            component_pixels.push(unique_pixels);
         }
 
         Self {
             image,
             components,
-            component_pixels,
             width,
             height,
         }
@@ -130,8 +131,8 @@ pub fn bench_multi_threshold(data: &BenchData) -> usize {
     let config = MultiThresholdDeblendConfig::default();
     let mut total_objects = 0;
 
-    for pixels in &data.component_pixels {
-        let result = deblend_component(&data.image, pixels, data.width, 0.01, &config);
+    for component in &data.components {
+        let result = deblend_component(&data.image, &component.pixels, data.width, 0.01, &config);
         total_objects += result.len();
     }
 
@@ -176,10 +177,10 @@ pub fn benchmarks(c: &mut Criterion) {
         mt_group.throughput(Throughput::Elements(num_pairs as u64));
         mt_group.bench_function(BenchmarkId::new("multi_threshold", &name), |b| {
             b.iter(|| {
-                for pixels in &data.component_pixels {
+                for component in &data.components {
                     black_box(deblend_component(
                         black_box(&data.image),
-                        black_box(pixels),
+                        black_box(&component.pixels),
                         data.width,
                         0.01,
                         black_box(&config),
@@ -200,7 +201,6 @@ mod bench_tests {
     fn test_bench_data_creation() {
         let data = BenchData::new(256, 256, 10, 20);
         assert!(!data.components.is_empty());
-        assert_eq!(data.components.len(), data.component_pixels.len());
     }
 
     #[test]
@@ -214,6 +214,6 @@ mod bench_tests {
     fn test_bench_multi_threshold() {
         let data = BenchData::new(256, 256, 10, 20);
         let count = bench_multi_threshold(&data);
-        assert!(count >= data.component_pixels.len());
+        assert!(count >= data.components.len());
     }
 }

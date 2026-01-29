@@ -22,11 +22,6 @@ fn make_gaussian_star(cx: usize, cy: usize, amplitude: f32, sigma: f32) -> Vec<P
     pixels
 }
 
-/// Convert Pixel slice to tuples for multi_threshold compatibility
-fn pixels_to_tuples(pixels: &[Pixel]) -> Vec<(usize, usize, f32)> {
-    pixels.iter().map(|p| (p.x, p.y, p.value)).collect()
-}
-
 #[test]
 fn test_local_vs_multi_threshold_single_star() {
     // Both algorithms should produce same result for single star
@@ -54,10 +49,9 @@ fn test_local_vs_multi_threshold_single_star() {
     let local_config = DeblendConfig::default();
     let local_result = deblend_local_maxima(&data, &pixels, width, &local_config);
 
-    // Multi-threshold deblending (needs tuple format)
-    let star_tuples = pixels_to_tuples(&star);
+    // Multi-threshold deblending
     let mt_config = MultiThresholdDeblendConfig::default();
-    let mt_result = deblend_component(&pixels, &star_tuples, width, 0.01, &mt_config);
+    let mt_result = deblend_component(&pixels, &star, width, 0.01, &mt_config);
 
     assert_eq!(local_result.len(), 1);
     assert_eq!(mt_result.len(), 1);
@@ -116,14 +110,13 @@ fn test_local_vs_multi_threshold_two_stars() {
     };
     let local_result = deblend_local_maxima(&data, &image, width, &local_config);
 
-    // Multi-threshold deblending (needs tuple format)
-    let component_tuples = pixels_to_tuples(&component_pixels);
+    // Multi-threshold deblending
     let mt_config = MultiThresholdDeblendConfig {
         n_thresholds: 32,
         min_contrast: 0.005,
         min_separation: 3,
     };
-    let mt_result = deblend_component(&image, &component_tuples, width, 0.01, &mt_config);
+    let mt_result = deblend_component(&image, &component_pixels, width, 0.01, &mt_config);
 
     assert_eq!(local_result.len(), 2, "Local maxima should find 2 stars");
     assert_eq!(mt_result.len(), 2, "Multi-threshold should find 2 stars");
