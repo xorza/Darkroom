@@ -26,8 +26,10 @@ mod colors {
 #[derive(Debug)]
 pub struct Bencher {
     name: String,
-    iterations: usize,
-    warmup_iterations: usize,
+    warmup_time: Option<Duration>,
+    time: Option<Duration>,
+    warmup_iters: Option<u64>,
+    iters: Option<u64>,
     output_dir: Option<PathBuf>,
 }
 
@@ -58,8 +60,10 @@ impl Default for Bencher {
     fn default() -> Self {
         Self {
             name: String::new(),
-            iterations: 10,
-            warmup_iterations: 1,
+            warmup_time: Some(Duration::from_secs(1)),
+            time: Some(Duration::from_secs(5)),
+            warmup_iters: None,
+            iters: None,
             output_dir: None,
         }
     }
@@ -74,17 +78,45 @@ impl Bencher {
         }
     }
 
-    /// Set the number of timed iterations.
+    /// Set the warmup time in milliseconds.
     #[must_use]
-    pub fn with_iterations(mut self, iterations: usize) -> Self {
-        self.iterations = iterations;
+    pub fn with_warmup_time_ms(mut self, ms: u64) -> Self {
+        self.warmup_time = Some(Duration::from_millis(ms));
         self
     }
 
-    /// Set the number of warmup iterations (not timed).
+    /// Set the benchmark time in milliseconds.
     #[must_use]
-    pub fn with_warmup(mut self, warmup: usize) -> Self {
-        self.warmup_iterations = warmup;
+    pub fn with_bench_time_ms(mut self, ms: u64) -> Self {
+        self.time = Some(Duration::from_millis(ms));
+        self
+    }
+
+    /// Disable warmup time limit (use only iteration count).
+    #[must_use]
+    pub fn without_warmup_time(mut self) -> Self {
+        self.warmup_time = None;
+        self
+    }
+
+    /// Disable bench time limit (use only iteration count).
+    #[must_use]
+    pub fn without_bench_time(mut self) -> Self {
+        self.time = None;
+        self
+    }
+
+    /// Set the maximum number of warmup iterations.
+    #[must_use]
+    pub fn with_warmup_iters(mut self, iters: u64) -> Self {
+        self.warmup_iters = Some(iters);
+        self
+    }
+
+    /// Set the maximum number of benchmark iterations.
+    #[must_use]
+    pub fn with_iters(mut self, iters: u64) -> Self {
+        self.iters = Some(iters);
         self
     }
 
@@ -97,11 +129,23 @@ impl Bencher {
 
     /// Run the benchmark.
     ///
-    /// The closure is called `iterations` times after warmup.
+    /// Runs warmup iterations until warmup_time is reached or warmup_iters is hit (whichever comes first),
+    /// then runs benchmark iterations until bench_time is reached or iters is hit (whichever comes first).
+    ///
+    /// At least one of time or iterations must be set for both warmup and bench phases.
     pub fn bench<F, R>(self, mut f: F) -> BenchResult
     where
         F: FnMut() -> R,
     {
+        assert!(
+            self.warmup_time.is_some() || self.warmup_iters.is_some(),
+            "Either warmup_time or warmup_iters must be set"
+        );
+        assert!(
+            self.time.is_some() || self.iters.is_some(),
+            "Either bench_time or iters must be set"
+        );
+
         #[cfg(debug_assertions)]
         println!(
             "\n{}{}⚠️ WARNING:{} DEBUG MODE - benchmarks should be run with --release\n",
@@ -110,14 +154,38 @@ impl Bencher {
             colors::RESET
         );
 
-        // Warmup
-        for _ in 0..self.warmup_iterations {
+        // Warmup: run until warmup_time is reached or warmup_iters is hit
+        let warmup_start = Instant::now();
+        let mut warmup_count = 0u64;
+        loop {
+            if let Some(time) = self.warmup_time
+                && warmup_start.elapsed() >= time
+            {
+                break;
+            }
+            if let Some(max) = self.warmup_iters
+                && warmup_count >= max
+            {
+                break;
+            }
             black_box(f());
+            warmup_count += 1;
         }
 
-        // Timed runs
-        let mut times = Vec::with_capacity(self.iterations);
-        for _ in 0..self.iterations {
+        // Timed runs: run until bench_time is reached or iters is hit
+        let mut times = Vec::with_capacity(1000);
+        let bench_start = Instant::now();
+        loop {
+            if let Some(time) = self.time
+                && bench_start.elapsed() >= time
+            {
+                break;
+            }
+            if let Some(max) = self.iters
+                && times.len() as u64 >= max
+            {
+                break;
+            }
             let start = Instant::now();
             black_box(f());
             times.push(start.elapsed());
@@ -256,21 +324,21 @@ mod tests {
     fn test_bencher_new() {
         let b = Bencher::new("test_name");
         assert_eq!(b.name, "test_name");
-        assert_eq!(b.iterations, 10);
-        assert_eq!(b.warmup_iterations, 1);
+        assert_eq!(b.warmup_time, Some(Duration::from_secs(1)));
+        assert_eq!(b.time, Some(Duration::from_secs(5)));
         assert!(b.output_dir.is_none());
     }
 
     #[test]
-    fn test_bencher_with_iterations() {
-        let b = Bencher::new("test").with_iterations(50);
-        assert_eq!(b.iterations, 50);
+    fn test_bencher_with_warmup_time_ms() {
+        let b = Bencher::new("test").with_warmup_time_ms(500);
+        assert_eq!(b.warmup_time, Some(Duration::from_millis(500)));
     }
 
     #[test]
-    fn test_bencher_with_warmup() {
-        let b = Bencher::new("test").with_warmup(5);
-        assert_eq!(b.warmup_iterations, 5);
+    fn test_bencher_with_bench_time_ms() {
+        let b = Bencher::new("test").with_bench_time_ms(2000);
+        assert_eq!(b.time, Some(Duration::from_millis(2000)));
     }
 
     #[test]
@@ -280,22 +348,38 @@ mod tests {
     }
 
     #[test]
+    fn test_bencher_with_warmup_iters() {
+        let b = Bencher::new("test").with_warmup_iters(100);
+        assert_eq!(b.warmup_iters, Some(100));
+    }
+
+    #[test]
+    fn test_bencher_with_iters() {
+        let b = Bencher::new("test").with_iters(500);
+        assert_eq!(b.iters, Some(500));
+    }
+
+    #[test]
     fn test_bencher_chaining() {
         let b = Bencher::new("chained")
-            .with_iterations(20)
-            .with_warmup(3)
+            .with_warmup_time_ms(100)
+            .with_bench_time_ms(200)
+            .with_warmup_iters(50)
+            .with_iters(1000)
             .with_output_dir("/tmp");
         assert_eq!(b.name, "chained");
-        assert_eq!(b.iterations, 20);
-        assert_eq!(b.warmup_iterations, 3);
+        assert_eq!(b.warmup_time, Some(Duration::from_millis(100)));
+        assert_eq!(b.time, Some(Duration::from_millis(200)));
+        assert_eq!(b.warmup_iters, Some(50));
+        assert_eq!(b.iters, Some(1000));
         assert_eq!(b.output_dir, Some(PathBuf::from("/tmp")));
     }
 
     #[test]
     fn test_bench_returns_result() {
         let result = Bencher::new("simple_bench")
-            .with_iterations(5)
-            .with_warmup(1)
+            .with_warmup_time_ms(10)
+            .with_bench_time_ms(50)
             .bench(|| {
                 let mut sum = 0u64;
                 for i in 0..100 {
@@ -305,7 +389,7 @@ mod tests {
             });
 
         assert_eq!(result.name, "simple_bench");
-        assert_eq!(result.iterations, 5);
+        assert!(result.iterations > 0);
         assert!(result.min <= result.mean);
         assert!(result.mean <= result.max);
         assert!(result.min <= result.median);
@@ -405,7 +489,8 @@ mod tests {
         let _ = fs::remove_dir_all(&temp_dir);
 
         let _result = Bencher::new("test_file_write")
-            .with_iterations(3)
+            .with_warmup_time_ms(10)
+            .with_bench_time_ms(50)
             .with_output_dir(&temp_dir)
             .bench(|| std::thread::sleep(Duration::from_micros(100)));
 
@@ -418,7 +503,7 @@ mod tests {
         assert!(content.contains("min:"));
         assert!(content.contains("max:"));
         assert!(content.contains("median:"));
-        assert!(content.contains("iterations: 3"));
+        assert!(content.contains("iterations:"));
 
         let _ = fs::remove_dir_all(&temp_dir);
     }
@@ -470,22 +555,24 @@ mod tests {
         let _ = fs::remove_dir_all(&temp_dir);
 
         let _result1 = Bencher::new("test_overwrite")
-            .with_iterations(2)
+            .with_warmup_time_ms(10)
+            .with_bench_time_ms(30)
             .with_output_dir(&temp_dir)
             .bench(|| std::thread::sleep(Duration::from_micros(50)));
 
         let file_path = temp_dir.join("bench-results/test_overwrite.txt");
-        let _content1 = fs::read_to_string(&file_path).unwrap();
+        let content1 = fs::read_to_string(&file_path).unwrap();
+        assert!(content1.contains("name: test_overwrite"));
 
         let _result2 = Bencher::new("test_overwrite")
-            .with_iterations(3)
+            .with_warmup_time_ms(10)
+            .with_bench_time_ms(30)
             .with_output_dir(&temp_dir)
             .bench(|| std::thread::sleep(Duration::from_micros(50)));
 
         let content2 = fs::read_to_string(&file_path).unwrap();
 
-        assert!(content2.contains("iterations: 3"));
-        assert!(!content2.contains("iterations: 2"));
+        // File should still have exactly one name entry (overwritten, not appended)
         assert_eq!(content2.matches("name:").count(), 1);
 
         let _ = fs::remove_dir_all(&temp_dir);
@@ -494,13 +581,13 @@ mod tests {
     #[test]
     fn test_bench_result_statistics() {
         let result = Bencher::new("stats_test")
-            .with_iterations(10)
-            .with_warmup(2)
+            .with_warmup_time_ms(10)
+            .with_bench_time_ms(50)
             .bench(|| {
                 std::thread::sleep(Duration::from_millis(1));
             });
 
-        assert!(result.total >= Duration::from_millis(10));
+        assert!(result.iterations > 0);
         assert!(result.mean >= Duration::from_millis(1));
         assert!(result.min <= result.max);
         assert!(result.median >= result.min);
@@ -511,8 +598,54 @@ mod tests {
     fn test_default_bencher() {
         let b = Bencher::default();
         assert!(b.name.is_empty());
-        assert_eq!(b.iterations, 10);
-        assert_eq!(b.warmup_iterations, 1);
+        assert_eq!(b.warmup_time, Some(Duration::from_secs(1)));
+        assert_eq!(b.time, Some(Duration::from_secs(5)));
+        assert!(b.warmup_iters.is_none());
+        assert!(b.iters.is_none());
         assert!(b.output_dir.is_none());
+    }
+
+    #[test]
+    fn test_max_iters_limits_iterations() {
+        let result = Bencher::new("max_iters_test")
+            .with_warmup_time_ms(10)
+            .with_bench_time_ms(5000)
+            .with_iters(10)
+            .bench(|| {
+                std::thread::sleep(Duration::from_micros(100));
+            });
+
+        assert_eq!(result.iterations, 10);
+    }
+
+    #[test]
+    fn test_without_time_limits() {
+        let b = Bencher::new("test")
+            .without_warmup_time()
+            .without_bench_time()
+            .with_warmup_iters(5)
+            .with_iters(10);
+        assert!(b.warmup_time.is_none());
+        assert!(b.time.is_none());
+        assert_eq!(b.warmup_iters, Some(5));
+        assert_eq!(b.iters, Some(10));
+    }
+
+    #[test]
+    fn test_iters_only_bench() {
+        let result = Bencher::new("iters_only_test")
+            .without_warmup_time()
+            .without_bench_time()
+            .with_warmup_iters(5)
+            .with_iters(20)
+            .bench(|| {
+                let mut sum = 0u64;
+                for i in 0..100 {
+                    sum += i;
+                }
+                sum
+            });
+
+        assert_eq!(result.iterations, 20);
     }
 }

@@ -6,24 +6,50 @@ use syn::{FnArg, ItemFn, LitInt, Pat, Token, parse::Parse, parse::ParseStream, p
 
 /// Arguments for the quick_bench attribute.
 struct QuickBenchArgs {
-    iterations: Option<usize>,
+    warmup_time_ms: Option<u64>,
+    bench_time_ms: Option<u64>,
+    warmup_iters: Option<u64>,
+    iters: Option<u64>,
+    ignore: bool,
 }
 
 impl Parse for QuickBenchArgs {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         if input.is_empty() {
-            return Ok(QuickBenchArgs { iterations: None });
+            return Ok(QuickBenchArgs {
+                warmup_time_ms: None,
+                bench_time_ms: None,
+                warmup_iters: None,
+                iters: None,
+                ignore: true,
+            });
         }
 
-        let mut iterations = None;
+        let mut warmup_time_ms = None;
+        let mut bench_time_ms = None;
+        let mut warmup_iters = None;
+        let mut iters = None;
+        let mut ignore = true;
 
         while !input.is_empty() {
             let ident: syn::Ident = input.parse()?;
             input.parse::<Token![=]>()?;
 
-            if ident == "iterations" {
+            if ident == "warmup_time_ms" {
                 let lit: LitInt = input.parse()?;
-                iterations = Some(lit.base10_parse()?);
+                warmup_time_ms = Some(lit.base10_parse()?);
+            } else if ident == "bench_time_ms" {
+                let lit: LitInt = input.parse()?;
+                bench_time_ms = Some(lit.base10_parse()?);
+            } else if ident == "warmup_iters" {
+                let lit: LitInt = input.parse()?;
+                warmup_iters = Some(lit.base10_parse()?);
+            } else if ident == "iters" {
+                let lit: LitInt = input.parse()?;
+                iters = Some(lit.base10_parse()?);
+            } else if ident == "ignore" {
+                let lit: syn::LitBool = input.parse()?;
+                ignore = lit.value();
             }
 
             if input.peek(Token![,]) {
@@ -31,7 +57,13 @@ impl Parse for QuickBenchArgs {
             }
         }
 
-        Ok(QuickBenchArgs { iterations })
+        Ok(QuickBenchArgs {
+            warmup_time_ms,
+            bench_time_ms,
+            warmup_iters,
+            iters,
+            ignore,
+        })
     }
 }
 
@@ -40,8 +72,8 @@ impl Parse for QuickBenchArgs {
 /// # Usage
 ///
 /// ```ignore
-/// use common::quick_bench;
-/// use common::bench::Bencher;
+/// use bench::quick_bench;
+/// use bench::Bencher;
 ///
 /// #[quick_bench]
 /// fn bench_something(b: Bencher) {
@@ -50,8 +82,33 @@ impl Parse for QuickBenchArgs {
 ///     });
 /// }
 ///
-/// #[quick_bench(iterations = 20)]
-/// fn bench_with_iterations(b: Bencher) {
+/// // Time-based: runs for specified duration
+/// #[quick_bench(warmup_time_ms = 500, bench_time_ms = 2000)]
+/// fn bench_time_based(b: Bencher) {
+///     b.bench(|| {
+///         // code to benchmark
+///     });
+/// }
+///
+/// // Iteration-based: runs exact number of iterations
+/// #[quick_bench(warmup_iters = 100, iters = 1000)]
+/// fn bench_iteration_based(b: Bencher) {
+///     b.bench(|| {
+///         // code to benchmark
+///     });
+/// }
+///
+/// // Combined: stops at whichever limit is reached first
+/// #[quick_bench(warmup_time_ms = 500, warmup_iters = 100, bench_time_ms = 2000, iters = 500)]
+/// fn bench_combined(b: Bencher) {
+///     b.bench(|| {
+///         // code to benchmark
+///     });
+/// }
+///
+/// // Run as a normal test (not ignored)
+/// #[quick_bench(ignore = false)]
+/// fn bench_not_ignored(b: Bencher) {
 ///     b.bench(|| {
 ///         // code to benchmark
 ///     });
@@ -100,14 +157,52 @@ pub fn quick_bench(attr: TokenStream, item: TokenStream) -> TokenStream {
         }
     };
 
-    let iterations = args.iterations.unwrap_or(10);
+    let ignore_attr = if args.ignore {
+        quote! { #[ignore] }
+    } else {
+        quote! {}
+    };
+
+    // When only iters are specified, disable time limits
+    let disable_warmup_time = if args.warmup_iters.is_some() && args.warmup_time_ms.is_none() {
+        quote! { .without_warmup_time() }
+    } else {
+        quote! {}
+    };
+
+    let disable_bench_time = if args.iters.is_some() && args.bench_time_ms.is_none() {
+        quote! { .without_bench_time() }
+    } else {
+        quote! {}
+    };
+
+    let warmup_time_call = args.warmup_time_ms.map(|ms| {
+        quote! { .with_warmup_time_ms(#ms) }
+    });
+
+    let bench_time_call = args.bench_time_ms.map(|ms| {
+        quote! { .with_bench_time_ms(#ms) }
+    });
+
+    let warmup_iters_call = args.warmup_iters.map(|iters| {
+        quote! { .with_warmup_iters(#iters) }
+    });
+
+    let iters_call = args.iters.map(|iters| {
+        quote! { .with_iters(#iters) }
+    });
 
     let expanded = quote! {
         #[test]
-        #[ignore]
+        #ignore_attr
         #fn_vis fn #fn_name() {
             let #param_name = ::bench_impl::Bencher::new(#fn_name_str)
-                .with_iterations(#iterations)
+                #disable_warmup_time
+                #disable_bench_time
+                #warmup_time_call
+                #bench_time_call
+                #warmup_iters_call
+                #iters_call
                 .with_output_dir(env!("CARGO_MANIFEST_DIR"));
             #fn_body
         }
