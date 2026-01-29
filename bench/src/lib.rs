@@ -224,7 +224,7 @@ impl Bencher {
                 let file_path = bench_dir.join(format!("{}.txt", self.name));
 
                 // Read previous result for comparison
-                if let Some(prev_mean) = Self::read_previous_result(&file_path) {
+                let comparison = if let Some(prev_mean) = Self::read_previous_result(&file_path) {
                     let diff = result.mean.as_secs_f64() - prev_mean.as_secs_f64();
                     let pct = (diff / prev_mean.as_secs_f64()) * 100.0;
                     let sign = if diff >= 0.0 { "+" } else { "" };
@@ -246,7 +246,13 @@ impl Bencher {
                         indicator,
                         colors::RESET
                     );
-                }
+                    Some(format!(
+                        "vs_previous: {:?} -> {:?} ({sign}{:.1}%) {indicator}\n",
+                        prev_mean, result.mean, pct
+                    ))
+                } else {
+                    None
+                };
 
                 // Overwrite result file
                 match OpenOptions::new()
@@ -256,7 +262,7 @@ impl Bencher {
                     .open(&file_path)
                 {
                     Ok(mut file) => {
-                        let content = format!(
+                        let mut content = format!(
                             "name: {}\nmean: {:?}\nmin: {:?}\nmax: {:?}\nmedian: {:?}\niterations: {}\n",
                             self.name,
                             result.mean,
@@ -265,6 +271,9 @@ impl Bencher {
                             result.median,
                             result.iterations
                         );
+                        if let Some(cmp) = comparison {
+                            content.push_str(&cmp);
+                        }
                         if let Err(e) = file.write_all(content.as_bytes()) {
                             eprintln!("Failed to write benchmark result: {e}");
                         }
