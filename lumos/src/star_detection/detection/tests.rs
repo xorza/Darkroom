@@ -1810,86 +1810,74 @@ fn test_multi_threshold_deblend_high_contrast_disables() {
     );
 }
 
-// =============================================================================
-// Quick benchmarks (run with: cargo test -p lumos --release -- --ignored bench_)
-// =============================================================================
+#[cfg(feature = "bench")]
+mod quick_benches {
+    use super::*;
+    use ::bench::quick_bench;
 
-/// Generate a synthetic star field image for timing tests.
-fn generate_timing_test_image(width: usize, height: usize, num_stars: usize) -> Vec<f32> {
-    let background = 0.1f32;
-    let mut pixels = vec![background; width * height];
+    fn generate_timing_test_image(width: usize, height: usize, num_stars: usize) -> Vec<f32> {
+        let background = 0.1f32;
+        let mut pixels = vec![background; width * height];
 
-    // Add deterministic noise
-    for (i, p) in pixels.iter_mut().enumerate() {
-        let hash = ((i as u32).wrapping_mul(2654435761)) as f32 / u32::MAX as f32;
-        *p += (hash - 0.5) * 0.02;
-    }
+        for (i, p) in pixels.iter_mut().enumerate() {
+            let hash = ((i as u32).wrapping_mul(2654435761)) as f32 / u32::MAX as f32;
+            *p += (hash - 0.5) * 0.02;
+        }
 
-    // Add synthetic stars at deterministic positions
-    for star_idx in 0..num_stars {
-        let hash1 = ((star_idx as u32).wrapping_mul(2654435761)) as usize;
-        let hash2 = ((star_idx as u32).wrapping_mul(1597334677)) as usize;
-        let hash3 = ((star_idx as u32).wrapping_mul(805306457)) as usize;
-        let hash4 = ((star_idx as u32).wrapping_mul(402653189)) as usize;
+        for star_idx in 0..num_stars {
+            let hash1 = ((star_idx as u32).wrapping_mul(2654435761)) as usize;
+            let hash2 = ((star_idx as u32).wrapping_mul(1597334677)) as usize;
+            let hash3 = ((star_idx as u32).wrapping_mul(805306457)) as usize;
+            let hash4 = ((star_idx as u32).wrapping_mul(402653189)) as usize;
 
-        let cx = 15 + (hash1 % (width - 30));
-        let cy = 15 + (hash2 % (height - 30));
-        let brightness = 0.5 + (hash3 % 500) as f32 / 1000.0;
-        let sigma = 1.5 + (hash4 % 100) as f32 / 100.0;
+            let cx = 15 + (hash1 % (width - 30));
+            let cy = 15 + (hash2 % (height - 30));
+            let brightness = 0.5 + (hash3 % 500) as f32 / 1000.0;
+            let sigma = 1.5 + (hash4 % 100) as f32 / 100.0;
 
-        for dy in -8i32..=8 {
-            for dx in -8i32..=8 {
-                let x = (cx as i32 + dx) as usize;
-                let y = (cy as i32 + dy) as usize;
-                if x < width && y < height {
-                    let r2 = (dx * dx + dy * dy) as f32;
-                    let value = brightness * (-r2 / (2.0 * sigma * sigma)).exp();
-                    pixels[y * width + x] += value;
+            for dy in -8i32..=8 {
+                for dx in -8i32..=8 {
+                    let x = (cx as i32 + dx) as usize;
+                    let y = (cy as i32 + dy) as usize;
+                    if x < width && y < height {
+                        let r2 = (dx * dx + dy * dy) as f32;
+                        let value = brightness * (-r2 / (2.0 * sigma * sigma)).exp();
+                        pixels[y * width + x] += value;
+                    }
                 }
             }
         }
+
+        pixels
     }
 
-    pixels
-}
-
-/// Create a background map for timing tests.
-fn create_timing_background_map(width: usize, height: usize) -> BackgroundMap {
-    let size = width * height;
-    BackgroundMap {
-        background: vec![0.1f32; size],
-        noise: vec![0.01f32; size],
-        width,
-        height,
+    fn create_timing_background_map(width: usize, height: usize) -> BackgroundMap {
+        let size = width * height;
+        BackgroundMap {
+            background: vec![0.1f32; size],
+            noise: vec![0.01f32; size],
+            width,
+            height,
+        }
     }
-}
 
-use ::bench::quick_bench;
+    #[quick_bench(warmup_iters = 2, iters = 5, ignore = false)]
+    fn bench_detect_stars_filtered_1k(b: ::bench::Bencher) {
+        let pixels = generate_timing_test_image(1024, 1024, 100);
+        let filtered = generate_timing_test_image(1024, 1024, 100);
+        let background = create_timing_background_map(1024, 1024);
+        let config = StarDetectionConfig::default();
 
-#[quick_bench(warmup_iters = 2, iters = 5, ignore = false)]
-fn bench_detect_stars_filtered_1k(b: ::bench::Bencher) {
-    const WIDTH: usize = 1024;
-    const HEIGHT: usize = 1024;
-    const NUM_STARS: usize = 100;
+        b.bench(|| detect_stars_filtered(&pixels, &filtered, 1024, 1024, &background, &config));
+    }
 
-    let pixels = generate_timing_test_image(WIDTH, HEIGHT, NUM_STARS);
-    let filtered = generate_timing_test_image(WIDTH, HEIGHT, NUM_STARS);
-    let background = create_timing_background_map(WIDTH, HEIGHT);
-    let config = StarDetectionConfig::default();
+    #[quick_bench(warmup_iters = 1, iters = 3)]
+    fn bench_detect_stars_filtered_6k(b: ::bench::Bencher) {
+        let pixels = generate_timing_test_image(6144, 6144, 3000);
+        let filtered = generate_timing_test_image(6144, 6144, 3000);
+        let background = create_timing_background_map(6144, 6144);
+        let config = StarDetectionConfig::default();
 
-    b.bench(|| detect_stars_filtered(&pixels, &filtered, WIDTH, HEIGHT, &background, &config));
-}
-
-#[quick_bench(warmup_iters = 1, iters = 3)]
-fn bench_detect_stars_filtered_6k(b: ::bench::Bencher) {
-    const WIDTH: usize = 6144;
-    const HEIGHT: usize = 6144;
-    const NUM_STARS: usize = 3000;
-
-    let pixels = generate_timing_test_image(WIDTH, HEIGHT, NUM_STARS);
-    let filtered = generate_timing_test_image(WIDTH, HEIGHT, NUM_STARS);
-    let background = create_timing_background_map(WIDTH, HEIGHT);
-    let config = StarDetectionConfig::default();
-
-    b.bench(|| detect_stars_filtered(&pixels, &filtered, WIDTH, HEIGHT, &background, &config));
+        b.bench(|| detect_stars_filtered(&pixels, &filtered, 6144, 6144, &background, &config));
+    }
 }
