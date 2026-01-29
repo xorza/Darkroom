@@ -196,7 +196,7 @@ pub fn quick_bench(attr: TokenStream, item: TokenStream) -> TokenStream {
         #[test]
         #ignore_attr
         #fn_vis fn #fn_name() {
-            let #param_name = ::bench::Bencher::new(#fn_name_str)
+            let #param_name = ::bench_impl::Bencher::new(#fn_name_str)
                 #disable_warmup_time
                 #disable_bench_time
                 #warmup_time_call
