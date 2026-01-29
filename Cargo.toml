@@ -2,7 +2,6 @@
 members = [
     "bench",
     "common",
-    "common-macros",
     "scenarium",
     "prism",
     "imaginarium",
@@ -19,7 +18,6 @@ edition = "2024"
 
 [workspace.dependencies]
 common = { path = "common" }
-common-macros = { path = "common-macros" }
 bench = { path = "bench" }
 scenarium = { path = "scenarium" }
 prism = { path = "prism" }

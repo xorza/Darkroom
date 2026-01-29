@@ -104,6 +104,7 @@ pub fn quick_bench(attr: TokenStream, item: TokenStream) -> TokenStream {
 
     let expanded = quote! {
         #[test]
+        #[ignore]
         #fn_vis fn #fn_name() {
             let #param_name = ::bench::Bencher::new(#fn_name_str)
                 .with_iterations(#iterations);

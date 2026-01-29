@@ -43,7 +43,7 @@
 use std::hint::black_box;
 use std::time::{Duration, Instant};
 
-pub use common_macros::quick_bench;
+pub use bench_macros::quick_bench;
 
 /// A simple bencher for measuring execution time in tests.
 #[derive(Debug)]
@@ -108,32 +108,6 @@ impl Bencher {
         self
     }
 
-    /// Run the benchmark with setup that runs once before all iterations.
-    ///
-    /// The setup function returns data that is passed to the benchmark function.
-    pub fn bench_with_setup<T, S, F, R>(self, setup: S, mut f: F) -> BenchResult
-    where
-        S: FnOnce() -> T,
-        F: FnMut(&T) -> R,
-    {
-        let data = setup();
-
-        // Warmup
-        for _ in 0..self.warmup_iterations {
-            black_box(f(&data));
-        }
-
-        // Timed runs
-        let mut times = Vec::with_capacity(self.iterations);
-        for _ in 0..self.iterations {
-            let start = Instant::now();
-            black_box(f(black_box(&data)));
-            times.push(start.elapsed());
-        }
-
-        self.compute_result(times)
-    }
-
     /// Run the benchmark.
     ///
     /// The closure is called `iterations` times after warmup.
@@ -151,27 +125,6 @@ impl Bencher {
         for _ in 0..self.iterations {
             let start = Instant::now();
             black_box(f());
-            times.push(start.elapsed());
-        }
-
-        self.compute_result(times)
-    }
-
-    /// Run the benchmark, passing the iteration index to the closure.
-    pub fn bench_indexed<F, R>(self, mut f: F) -> BenchResult
-    where
-        F: FnMut(usize) -> R,
-    {
-        // Warmup
-        for i in 0..self.warmup_iterations {
-            black_box(f(i));
-        }
-
-        // Timed runs
-        let mut times = Vec::with_capacity(self.iterations);
-        for i in 0..self.iterations {
-            let start = Instant::now();
-            black_box(f(i));
             times.push(start.elapsed());
         }
 
@@ -221,13 +174,5 @@ mod tests {
                 }
                 sum
             });
-    }
-
-    #[test]
-    fn bench_example_with_setup() {
-        let data = vec![1u64; 10_000];
-        Bencher::new("example_with_setup")
-            .with_iterations(20)
-            .bench(|| data.iter().sum::<u64>());
     }
 }

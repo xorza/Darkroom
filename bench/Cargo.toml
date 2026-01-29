@@ -4,4 +4,4 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
-common-macros = { workspace = true }
+bench-macros = { path = "macros" }
