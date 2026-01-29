@@ -1,6 +1,6 @@
 name: bench_detect_stars_filtered_1k
-mean: 142.505364ms
-min: 141.553524ms
-max: 143.676968ms
-median: 142.425437ms
+mean: 141.949012ms
+min: 140.68702ms
+max: 143.824789ms
+median: 141.264205ms
 iterations: 5
