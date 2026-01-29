@@ -1,17 +1,14 @@
 //! Benchmark module for star detection algorithms.
-//! Run with: cargo bench --package lumos --features bench detection
+//! Run with: cargo bench --package lumos --features bench --bench star_detection_detection
 
-#[cfg(target_arch = "x86_64")]
-use super::simd;
 use super::{
-    connected_components, create_threshold_mask, create_threshold_mask_filtered, detect_stars,
-    detect_stars_filtered, extract_candidates, scalar,
+    connected_components, create_threshold_mask, detect_stars, detect_stars_filtered,
+    extract_candidates,
 };
 use crate::star_detection::StarDetectionConfig;
 use crate::star_detection::background::BackgroundMap;
 use crate::star_detection::constants::dilate_mask;
 use crate::star_detection::deblend::DeblendConfig;
-use crate::star_detection::gpu::{GpuThresholdDetector, detect_stars_gpu_with_detector};
 use criterion::{BenchmarkId, Criterion, Throughput};
 use std::hint::black_box;
 
@@ -67,467 +64,179 @@ fn create_background_map(width: usize, height: usize) -> BackgroundMap {
 
 /// Helper to create threshold mask for benchmarks.
 fn make_threshold_mask(pixels: &[f32], background: &BackgroundMap, sigma: f32) -> Vec<bool> {
-    let mut mask = Vec::with_capacity(pixels.len());
+    let mut mask = vec![false; pixels.len()];
     create_threshold_mask(pixels, background, sigma, &mut mask);
     mask
 }
 
 /// Register detection benchmarks with Criterion.
 pub fn benchmarks(c: &mut Criterion) {
-    // Scalar vs SIMD threshold mask benchmarks
-    scalar_vs_simd_threshold_benchmarks(c);
+    const WIDTH: usize = 6144;
+    const HEIGHT: usize = 6144;
+    const NUM_STARS: usize = 3000;
 
-    // Threshold mask creation benchmarks
+    let pixels = generate_test_image(WIDTH, HEIGHT, NUM_STARS);
+    let background = create_background_map(WIDTH, HEIGHT);
+    let size_name = format!("{}x{}_{}stars", WIDTH, HEIGHT, NUM_STARS);
+
+    // Threshold mask creation benchmark
     let mut mask_group = c.benchmark_group("threshold_mask");
-    mask_group.sample_size(30);
+    mask_group.sample_size(10);
+    mask_group.throughput(Throughput::Elements((WIDTH * HEIGHT) as u64));
 
-    for &(width, height) in &[(512, 512), (1024, 1024), (2048, 2048)] {
-        let pixels = generate_test_image(width, height, 100);
-        let background = create_background_map(width, height);
-        let size_name = format!("{}x{}", width, height);
-
-        mask_group.throughput(Throughput::Elements((width * height) as u64));
-
-        mask_group.bench_function(BenchmarkId::new("create_threshold_mask", &size_name), |b| {
-            b.iter(|| {
-                let mut mask = Vec::with_capacity(pixels.len());
-                create_threshold_mask(
-                    black_box(&pixels),
-                    black_box(&background),
-                    black_box(3.0),
-                    &mut mask,
-                );
-                black_box(mask)
-            })
-        });
-    }
+    let mut mask = vec![false; pixels.len()];
+    mask_group.bench_function(BenchmarkId::new("create_threshold_mask", &size_name), |b| {
+        b.iter(|| {
+            create_threshold_mask(
+                black_box(&pixels),
+                black_box(&background),
+                black_box(3.0),
+                black_box(&mut mask),
+            );
+        })
+    });
 
     mask_group.finish();
 
-    // Dilation benchmarks
+    // Dilation benchmark
     let mut dilate_group = c.benchmark_group("dilate_mask");
-    dilate_group.sample_size(30);
+    dilate_group.sample_size(10);
+    dilate_group.throughput(Throughput::Elements((WIDTH * HEIGHT) as u64));
 
-    for &(width, height) in &[(512, 512), (1024, 1024), (2048, 2048)] {
-        let pixels = generate_test_image(width, height, 100);
-        let background = create_background_map(width, height);
-        let mask = make_threshold_mask(&pixels, &background, 3.0);
-        let size_name = format!("{}x{}", width, height);
-
-        dilate_group.throughput(Throughput::Elements((width * height) as u64));
-
-        for radius in [1, 2, 3] {
-            let mut output = vec![false; mask.len()];
-            dilate_group.bench_function(
-                BenchmarkId::new(&size_name, format!("radius_{}", radius)),
-                |b| {
-                    b.iter(|| {
-                        dilate_mask(
-                            black_box(&mask),
-                            black_box(width),
-                            black_box(height),
-                            black_box(radius),
-                            black_box(&mut output),
-                        )
-                    })
-                },
-            );
-        }
-    }
+    let mask = make_threshold_mask(&pixels, &background, 3.0);
+    let mut output = vec![false; mask.len()];
+    dilate_group.bench_function(BenchmarkId::new(&size_name, "radius_1"), |b| {
+        b.iter(|| {
+            dilate_mask(
+                black_box(&mask),
+                black_box(WIDTH),
+                black_box(HEIGHT),
+                black_box(1),
+                black_box(&mut output),
+            )
+        })
+    });
 
     dilate_group.finish();
 
-    // Connected components benchmarks
+    // Connected components benchmark
     let mut cc_group = c.benchmark_group("connected_components");
-    cc_group.sample_size(30);
+    cc_group.sample_size(10);
+    cc_group.throughput(Throughput::Elements((WIDTH * HEIGHT) as u64));
 
-    for &(width, height, num_stars) in &[
-        (512, 512, 50),
-        (1024, 1024, 200),
-        (2048, 2048, 800),
-        (4096, 4096, 3200),
-    ] {
-        let pixels = generate_test_image(width, height, num_stars);
-        let background = create_background_map(width, height);
-        let mut mask = make_threshold_mask(&pixels, &background, 3.0);
-        let mut dilated = vec![false; mask.len()];
-        dilate_mask(&mask, width, height, 1, &mut dilated);
-        std::mem::swap(&mut mask, &mut dilated);
-        let size_name = format!("{}x{}_{}stars", width, height, num_stars);
+    let mut dilated_mask = make_threshold_mask(&pixels, &background, 3.0);
+    let mut dilated = vec![false; dilated_mask.len()];
+    dilate_mask(&dilated_mask, WIDTH, HEIGHT, 1, &mut dilated);
+    std::mem::swap(&mut dilated_mask, &mut dilated);
 
-        cc_group.throughput(Throughput::Elements((width * height) as u64));
-
-        cc_group.bench_function(BenchmarkId::new("connected_components", &size_name), |b| {
-            b.iter(|| {
-                black_box(connected_components(
-                    black_box(&mask),
-                    black_box(width),
-                    black_box(height),
-                ))
-            })
-        });
-    }
+    cc_group.bench_function(BenchmarkId::new("connected_components", &size_name), |b| {
+        b.iter(|| {
+            black_box(connected_components(
+                black_box(&dilated_mask),
+                black_box(WIDTH),
+                black_box(HEIGHT),
+            ))
+        })
+    });
 
     cc_group.finish();
 
-    // Extract candidates benchmarks
+    // Extract candidates benchmark
     let mut extract_group = c.benchmark_group("extract_candidates");
-    extract_group.sample_size(30);
+    extract_group.sample_size(10);
 
-    for &(width, height, num_stars) in &[(512, 512, 50), (1024, 1024, 200)] {
-        let pixels = generate_test_image(width, height, num_stars);
-        let background = create_background_map(width, height);
-        let mut mask = make_threshold_mask(&pixels, &background, 3.0);
-        let mut dilated = vec![false; mask.len()];
-        dilate_mask(&mask, width, height, 1, &mut dilated);
-        std::mem::swap(&mut mask, &mut dilated);
-        let (labels, num_labels) = connected_components(&mask, width, height);
-        let size_name = format!("{}x{}_{}stars", width, height, num_stars);
+    let (labels, num_labels) = connected_components(&dilated_mask, WIDTH, HEIGHT);
 
-        let deblend_config = DeblendConfig {
-            min_separation: 3,
-            min_prominence: 0.1,
-            multi_threshold: false,
-            n_thresholds: 32,
-            min_contrast: 0.005,
-        };
+    let deblend_config = DeblendConfig {
+        min_separation: 3,
+        min_prominence: 0.1,
+        multi_threshold: false,
+        n_thresholds: 32,
+        min_contrast: 0.005,
+    };
 
-        extract_group.bench_function(
-            BenchmarkId::new("extract_candidates_simple", &size_name),
-            |b| {
-                b.iter(|| {
-                    black_box(extract_candidates(
-                        black_box(&pixels),
-                        black_box(&labels),
-                        black_box(num_labels),
-                        black_box(width),
-                        black_box(height),
-                        black_box(&deblend_config),
-                    ))
-                })
-            },
-        );
+    extract_group.bench_function(
+        BenchmarkId::new("extract_candidates_simple", &size_name),
+        |b| {
+            b.iter(|| {
+                black_box(extract_candidates(
+                    black_box(&pixels),
+                    black_box(&labels),
+                    black_box(num_labels),
+                    black_box(WIDTH),
+                    black_box(HEIGHT),
+                    black_box(&deblend_config),
+                ))
+            })
+        },
+    );
 
-        // Multi-threshold deblending
-        let mt_deblend_config = DeblendConfig {
-            min_separation: 3,
-            min_prominence: 0.1,
-            multi_threshold: true,
-            n_thresholds: 32,
-            min_contrast: 0.005,
-        };
+    let mt_deblend_config = DeblendConfig {
+        min_separation: 3,
+        min_prominence: 0.1,
+        multi_threshold: true,
+        n_thresholds: 32,
+        min_contrast: 0.005,
+    };
 
-        extract_group.bench_function(
-            BenchmarkId::new("extract_candidates_multi_threshold", &size_name),
-            |b| {
-                b.iter(|| {
-                    black_box(extract_candidates(
-                        black_box(&pixels),
-                        black_box(&labels),
-                        black_box(num_labels),
-                        black_box(width),
-                        black_box(height),
-                        black_box(&mt_deblend_config),
-                    ))
-                })
-            },
-        );
-    }
+    extract_group.bench_function(
+        BenchmarkId::new("extract_candidates_multi_threshold", &size_name),
+        |b| {
+            b.iter(|| {
+                black_box(extract_candidates(
+                    black_box(&pixels),
+                    black_box(&labels),
+                    black_box(num_labels),
+                    black_box(WIDTH),
+                    black_box(HEIGHT),
+                    black_box(&mt_deblend_config),
+                ))
+            })
+        },
+    );
 
     extract_group.finish();
 
-    // Full detect_stars benchmarks
+    // Full detect_stars benchmark
     let mut detect_group = c.benchmark_group("detect_stars");
-    detect_group.sample_size(20);
+    detect_group.sample_size(10);
+    detect_group.throughput(Throughput::Elements((WIDTH * HEIGHT) as u64));
 
-    for &(width, height, num_stars) in &[(512, 512, 50), (1024, 1024, 200), (2048, 2048, 800)] {
-        let pixels = generate_test_image(width, height, num_stars);
-        let background = create_background_map(width, height);
-        let config = StarDetectionConfig::default();
-        let size_name = format!("{}x{}_{}stars", width, height, num_stars);
+    let config = StarDetectionConfig::default();
 
-        detect_group.throughput(Throughput::Elements((width * height) as u64));
-
-        detect_group.bench_function(BenchmarkId::new("detect_stars", &size_name), |b| {
-            b.iter(|| {
-                black_box(detect_stars(
-                    black_box(&pixels),
-                    black_box(width),
-                    black_box(height),
-                    black_box(&background),
-                    black_box(&config),
-                ))
-            })
-        });
-    }
+    detect_group.bench_function(BenchmarkId::new("detect_stars", &size_name), |b| {
+        b.iter(|| {
+            black_box(detect_stars(
+                black_box(&pixels),
+                black_box(WIDTH),
+                black_box(HEIGHT),
+                black_box(&background),
+                black_box(&config),
+            ))
+        })
+    });
 
     detect_group.finish();
 
-    // detect_stars_filtered benchmarks
+    // detect_stars_filtered benchmark
     let mut filtered_group = c.benchmark_group("detect_stars_filtered");
-    filtered_group.sample_size(20);
+    filtered_group.sample_size(10);
+    filtered_group.throughput(Throughput::Elements((WIDTH * HEIGHT) as u64));
 
-    for &(width, height, num_stars) in &[(512, 512, 50), (1024, 1024, 200)] {
-        let pixels = generate_test_image(width, height, num_stars);
-        let filtered = generate_test_image(width, height, num_stars); // Simulated filtered image
-        let background = create_background_map(width, height);
-        let config = StarDetectionConfig::default();
-        let size_name = format!("{}x{}_{}stars", width, height, num_stars);
+    let filtered = generate_test_image(WIDTH, HEIGHT, NUM_STARS);
 
-        filtered_group.throughput(Throughput::Elements((width * height) as u64));
-
-        filtered_group.bench_function(BenchmarkId::new("detect_stars_filtered", &size_name), |b| {
-            b.iter(|| {
-                black_box(detect_stars_filtered(
-                    black_box(&pixels),
-                    black_box(&filtered),
-                    black_box(width),
-                    black_box(height),
-                    black_box(&background),
-                    black_box(&config),
-                ))
-            })
-        });
-    }
+    filtered_group.bench_function(BenchmarkId::new("detect_stars_filtered", &size_name), |b| {
+        b.iter(|| {
+            black_box(detect_stars_filtered(
+                black_box(&pixels),
+                black_box(&filtered),
+                black_box(WIDTH),
+                black_box(HEIGHT),
+                black_box(&background),
+                black_box(&config),
+            ))
+        })
+    });
 
     filtered_group.finish();
-
-    // GPU vs CPU threshold mask benchmarks
-    gpu_threshold_benchmarks(c);
-
-    // GPU vs CPU full detection benchmarks
-    gpu_detect_stars_benchmarks(c);
-}
-
-/// GPU threshold mask benchmarks.
-fn gpu_threshold_benchmarks(c: &mut Criterion) {
-    let mut detector = GpuThresholdDetector::new();
-    if !detector.gpu_available() {
-        eprintln!("Skipping GPU threshold benchmarks: no GPU available");
-        return;
-    }
-
-    let mut group = c.benchmark_group("gpu_threshold_mask");
-    group.sample_size(30);
-
-    for &(width, height) in &[(512, 512), (1024, 1024), (2048, 2048), (4096, 4096)] {
-        let pixels = generate_test_image(width, height, 100);
-        let background = create_background_map(width, height);
-        let size_name = format!("{}x{}", width, height);
-        let config = crate::star_detection::gpu::GpuThresholdConfig::new(3.0, 1);
-
-        group.throughput(Throughput::Elements((width * height) as u64));
-
-        // CPU version (dispatch to SIMD)
-        let mut dilated = vec![false; width * height];
-        group.bench_function(BenchmarkId::new("cpu", &size_name), |b| {
-            b.iter(|| {
-                let mut mask = Vec::with_capacity(pixels.len());
-                create_threshold_mask(
-                    black_box(&pixels),
-                    black_box(&background),
-                    black_box(3.0),
-                    &mut mask,
-                );
-                dilate_mask(&mask, width, height, 1, black_box(&mut dilated))
-            })
-        });
-
-        // GPU version
-        group.bench_function(BenchmarkId::new("gpu", &size_name), |b| {
-            b.iter(|| {
-                black_box(detector.create_mask(
-                    black_box(&pixels),
-                    black_box(&background),
-                    black_box(&config),
-                ))
-            })
-        });
-    }
-
-    group.finish();
-}
-
-/// GPU vs CPU full detection benchmarks.
-fn gpu_detect_stars_benchmarks(c: &mut Criterion) {
-    let mut detector = GpuThresholdDetector::new();
-    if !detector.gpu_available() {
-        eprintln!("Skipping GPU detect_stars benchmarks: no GPU available");
-        return;
-    }
-
-    let mut group = c.benchmark_group("gpu_detect_stars");
-    group.sample_size(20);
-
-    for &(width, height, num_stars) in &[(512, 512, 50), (1024, 1024, 200), (2048, 2048, 800)] {
-        let pixels = generate_test_image(width, height, num_stars);
-        let background = create_background_map(width, height);
-        let config = StarDetectionConfig::default();
-        let size_name = format!("{}x{}_{}stars", width, height, num_stars);
-
-        group.throughput(Throughput::Elements((width * height) as u64));
-
-        // CPU version
-        group.bench_function(BenchmarkId::new("cpu", &size_name), |b| {
-            b.iter(|| {
-                black_box(detect_stars(
-                    black_box(&pixels),
-                    black_box(width),
-                    black_box(height),
-                    black_box(&background),
-                    black_box(&config),
-                ))
-            })
-        });
-
-        // GPU version
-        group.bench_function(BenchmarkId::new("gpu", &size_name), |b| {
-            b.iter(|| {
-                black_box(detect_stars_gpu_with_detector(
-                    black_box(&mut detector),
-                    black_box(&pixels),
-                    black_box(width),
-                    black_box(height),
-                    black_box(&background),
-                    black_box(&config),
-                ))
-            })
-        });
-    }
-
-    group.finish();
-}
-
-/// Scalar vs SIMD threshold mask benchmarks.
-#[cfg(target_arch = "x86_64")]
-fn scalar_vs_simd_threshold_benchmarks(c: &mut Criterion) {
-    use crate::common::cpu_features;
-
-    if !cpu_features::has_sse4_1() {
-        eprintln!("Skipping scalar vs SIMD benchmarks: SSE4.1 not available");
-        return;
-    }
-
-    let mut group = c.benchmark_group("scalar_vs_simd_threshold");
-    group.sample_size(50);
-
-    for &(width, height) in &[(512, 512), (1024, 1024), (2048, 2048), (4096, 4096)] {
-        let pixels = generate_test_image(width, height, 100);
-        let background = create_background_map(width, height);
-        let size_name = format!("{}x{}", width, height);
-
-        group.throughput(Throughput::Elements((width * height) as u64));
-
-        // Scalar version - standard threshold mask
-        group.bench_function(BenchmarkId::new("scalar", &size_name), |b| {
-            b.iter(|| {
-                let mut mask = Vec::with_capacity(pixels.len());
-                scalar::create_threshold_mask(
-                    black_box(&pixels),
-                    black_box(&background),
-                    black_box(3.0),
-                    &mut mask,
-                );
-                black_box(mask)
-            })
-        });
-
-        // SIMD version - standard threshold mask
-        group.bench_function(BenchmarkId::new("simd_sse", &size_name), |b| {
-            b.iter(|| {
-                let mut mask = Vec::with_capacity(pixels.len());
-                // SAFETY: We've checked that SSE4.1 is available above.
-                unsafe {
-                    simd::sse::create_threshold_mask_sse(
-                        black_box(&pixels),
-                        black_box(&background),
-                        black_box(3.0),
-                        &mut mask,
-                    );
-                }
-                black_box(mask)
-            })
-        });
-
-        // Dispatch version (auto-selects SIMD when available)
-        group.bench_function(BenchmarkId::new("dispatch", &size_name), |b| {
-            b.iter(|| {
-                let mut mask = Vec::with_capacity(pixels.len());
-                create_threshold_mask(
-                    black_box(&pixels),
-                    black_box(&background),
-                    black_box(3.0),
-                    &mut mask,
-                );
-                black_box(mask)
-            })
-        });
-    }
-
-    group.finish();
-
-    // Filtered threshold mask benchmarks
-    let mut filtered_group = c.benchmark_group("scalar_vs_simd_threshold_filtered");
-    filtered_group.sample_size(50);
-
-    for &(width, height) in &[(512, 512), (1024, 1024), (2048, 2048), (4096, 4096)] {
-        let filtered = generate_test_image(width, height, 100);
-        let background = create_background_map(width, height);
-        let size_name = format!("{}x{}", width, height);
-
-        filtered_group.throughput(Throughput::Elements((width * height) as u64));
-
-        // Scalar version - filtered threshold mask
-        filtered_group.bench_function(BenchmarkId::new("scalar", &size_name), |b| {
-            b.iter(|| {
-                let mut mask = Vec::with_capacity(filtered.len());
-                scalar::create_threshold_mask_filtered(
-                    black_box(&filtered),
-                    black_box(&background),
-                    black_box(3.0),
-                    &mut mask,
-                );
-                black_box(mask)
-            })
-        });
-
-        // SIMD version - filtered threshold mask
-        filtered_group.bench_function(BenchmarkId::new("simd_sse", &size_name), |b| {
-            b.iter(|| {
-                let mut mask = Vec::with_capacity(filtered.len());
-                // SAFETY: We've checked that SSE4.1 is available above.
-                unsafe {
-                    simd::sse::create_threshold_mask_filtered_sse(
-                        black_box(&filtered),
-                        black_box(&background),
-                        black_box(3.0),
-                        &mut mask,
-                    );
-                }
-                black_box(mask)
-            })
-        });
-
-        // Dispatch version (auto-selects SIMD when available)
-        filtered_group.bench_function(BenchmarkId::new("dispatch", &size_name), |b| {
-            b.iter(|| {
-                let mut mask = Vec::with_capacity(filtered.len());
-                create_threshold_mask_filtered(
-                    black_box(&filtered),
-                    black_box(&background),
-                    black_box(3.0),
-                    &mut mask,
-                );
-                black_box(mask)
-            })
-        });
-    }
-
-    filtered_group.finish();
-}
-
-/// Scalar vs SIMD threshold mask benchmarks (non-x86_64 stub).
-#[cfg(not(target_arch = "x86_64"))]
-fn scalar_vs_simd_threshold_benchmarks(_c: &mut Criterion) {
-    eprintln!("Skipping scalar vs SIMD benchmarks: not on x86_64");
 }

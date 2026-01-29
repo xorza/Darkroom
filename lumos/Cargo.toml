@@ -91,6 +91,12 @@ path = "benches/star_detection/full_pipeline.rs"
 harness = false
 required-features = ["bench"]
 
+[[bench]]
+name = "star_detection_detection"
+path = "benches/star_detection/detection.rs"
+harness = false
+required-features = ["bench"]
+
 # =============================================================================
 # Image Processing Benchmarks
 # =============================================================================

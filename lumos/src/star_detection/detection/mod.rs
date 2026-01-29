@@ -460,7 +460,7 @@ pub(crate) fn extract_candidates(
     labels: &[u32],
     num_labels: usize,
     width: usize,
-    height: usize,
+    _height: usize,
     deblend_config: &DeblendConfig,
 ) -> Vec<StarCandidate> {
     if num_labels == 0 {
@@ -468,36 +468,28 @@ pub(crate) fn extract_candidates(
     }
     use rayon::prelude::*;
 
-    // Collect component data in first pass
-    // Pre-allocate with estimated ~50 pixels per component to reduce reallocations
-    let estimated_pixels_per_component = 50;
-    let mut component_data: Vec<ComponentData> = (0..num_labels)
-        .map(|_| ComponentData {
-            x_min: usize::MAX,
-            x_max: 0,
-            y_min: usize::MAX,
-            y_max: 0,
-            pixels: Vec::with_capacity(estimated_pixels_per_component),
-        })
-        .collect();
+    // Collect component data in single pass
+    let mut component_data: Vec<ComponentData> = Vec::with_capacity(num_labels);
+    component_data.resize_with(num_labels, || ComponentData {
+        x_min: usize::MAX,
+        x_max: 0,
+        y_min: usize::MAX,
+        y_max: 0,
+        pixels: Vec::with_capacity(50),
+    });
 
-    for y in 0..height {
-        for x in 0..width {
-            let idx = y * width + x;
-            let label = labels[idx];
-            if label == 0 {
-                continue;
-            }
-
-            let i = (label - 1) as usize;
-            let data = &mut component_data[i];
-
-            data.x_min = data.x_min.min(x);
-            data.x_max = data.x_max.max(x);
-            data.y_min = data.y_min.min(y);
-            data.y_max = data.y_max.max(y);
-            data.pixels.push((x, y, pixels[idx]));
+    for (idx, &label) in labels.iter().enumerate() {
+        if label == 0 {
+            continue;
         }
+        let x = idx % width;
+        let y = idx / width;
+        let data = &mut component_data[(label - 1) as usize];
+        data.x_min = data.x_min.min(x);
+        data.x_max = data.x_max.max(x);
+        data.y_min = data.y_min.min(y);
+        data.y_max = data.y_max.max(y);
+        data.pixels.push((x, y, pixels[idx]));
     }
 
     // Process each component in parallel, deblending into multiple candidates
