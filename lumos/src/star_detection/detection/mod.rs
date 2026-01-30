@@ -151,28 +151,7 @@ pub(crate) fn connected_components(mask: &BitBuffer2) -> (Buffer2<u32>, usize) {
         return (labels, 0);
     }
 
-    // Flatten all roots first (sequential, but small - just parent.len() elements)
-    let mut root_to_final = vec![0u32; parent.len() + 1];
-    let mut num_labels = 0u32;
-    for label in 1..=parent.len() as u32 {
-        let root = find(&mut parent, label);
-        if root_to_final[root as usize] == 0 {
-            num_labels += 1;
-            root_to_final[root as usize] = num_labels;
-        }
-    }
-
-    // Create direct mapping from provisional label to final label
-    let label_map: Vec<u32> = (0..=parent.len() as u32)
-        .map(|label| {
-            if label == 0 {
-                0
-            } else {
-                let root = find(&mut parent, label);
-                root_to_final[root as usize]
-            }
-        })
-        .collect();
+    let (label_map, num_labels) = build_label_map(&mut parent);
 
     // Second pass: apply label mapping
     // Parallelize for large images (>4M pixels, i.e., 2K×2K and larger)
@@ -193,7 +172,7 @@ pub(crate) fn connected_components(mask: &BitBuffer2) -> (Buffer2<u32>, usize) {
         }
     }
 
-    (labels, num_labels as usize)
+    (labels, num_labels)
 }
 
 /// First pass of connected components: assign provisional labels using union-find.
@@ -240,6 +219,38 @@ fn assign_provisional_labels(mask: &BitBuffer2, labels: &mut Buffer2<u32>, paren
             };
         }
     }
+}
+
+/// Build a mapping from provisional labels to final sequential labels.
+///
+/// Flattens the union-find structure and assigns sequential final labels
+/// to each unique component root.
+fn build_label_map(parent: &mut [u32]) -> (Vec<u32>, usize) {
+    // Map each root to a sequential final label
+    let mut root_to_final = vec![0u32; parent.len() + 1];
+    let mut num_labels = 0usize;
+
+    for label in 1..=parent.len() as u32 {
+        let root = find(parent, label);
+        if root_to_final[root as usize] == 0 {
+            num_labels += 1;
+            root_to_final[root as usize] = num_labels as u32;
+        }
+    }
+
+    // Create direct mapping from provisional label to final label
+    let label_map: Vec<u32> = (0..=parent.len() as u32)
+        .map(|label| {
+            if label == 0 {
+                0
+            } else {
+                let root = find(parent, label);
+                root_to_final[root as usize]
+            }
+        })
+        .collect();
+
+    (label_map, num_labels)
 }
 
 /// Find root of a label with path compression.
