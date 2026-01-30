@@ -38,16 +38,25 @@ impl TileGrid {
         let tiles_y = height.div_ceil(tile_size);
         let max_tile_pixels = tile_size * tile_size;
 
-        let tile_stats: Vec<TileStats> = (0..tiles_y * tiles_x)
-            .into_par_iter()
-            .map_init(
+        let mut grid = Self {
+            stats: Buffer2::new_default(tiles_x, tiles_y),
+            tile_size,
+            width,
+            height,
+        };
+
+        grid.stats
+            .pixels_mut()
+            .par_iter_mut()
+            .enumerate()
+            .for_each_init(
                 || {
                     (
                         Vec::with_capacity(max_tile_pixels),
                         Vec::with_capacity(max_tile_pixels),
                     )
                 },
-                |(values_buf, deviations_buf), idx| {
+                |(values_buf, deviations_buf), (idx, out)| {
                     let ty = idx / tiles_x;
                     let tx = idx % tiles_x;
 
@@ -56,7 +65,7 @@ impl TileGrid {
                     let x_end = (x_start + tile_size).min(width);
                     let y_end = (y_start + tile_size).min(height);
 
-                    Self::compute_tile_stats(
+                    *out = Self::compute_tile_stats(
                         pixels,
                         mask,
                         x_start,
@@ -66,17 +75,9 @@ impl TileGrid {
                         min_pixels,
                         values_buf,
                         deviations_buf,
-                    )
+                    );
                 },
-            )
-            .collect();
-
-        let mut grid = Self {
-            stats: Buffer2::new(tiles_x, tiles_y, tile_stats),
-            tile_size,
-            width,
-            height,
-        };
+            );
 
         grid.apply_median_filter();
         grid
