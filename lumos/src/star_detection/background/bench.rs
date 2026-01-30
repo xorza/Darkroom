@@ -15,7 +15,10 @@ fn estimate_background_iterative_6k(b: ::bench::Bencher) {
     let num_stars = (width * height) / 1000;
 
     let pixels = stamps::benchmark_star_field(width, height, num_stars, 0.1, 0.01, 42);
-    let iter_config = BackgroundConfig::default();
+    let iter_config = BackgroundConfig {
+        tile_size: 64,
+        ..Default::default()
+    };
 
-    b.bench(|| black_box(estimate_background_iterative(&pixels, 64, &iter_config)));
+    b.bench(|| black_box(estimate_background_iterative(&pixels, &iter_config)));
 }

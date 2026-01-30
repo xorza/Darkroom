@@ -413,6 +413,8 @@ pub struct BackgroundConfig {
     /// If too many pixels are masked, use original (unrefined) estimate.
     /// Typical value: 0.3-0.5
     pub min_unmasked_fraction: f32,
+
+    pub tile_size: usize,
 }
 
 impl Default for BackgroundConfig {
@@ -422,6 +424,7 @@ impl Default for BackgroundConfig {
             iterations: 0,
             mask_dilation: 3,
             min_unmasked_fraction: 0.3,
+            tile_size: 64,
         }
     }
 }
@@ -452,6 +455,11 @@ impl BackgroundConfig {
             "min_unmasked_fraction must be in [0, 1], got {}",
             self.min_unmasked_fraction
         );
+        assert!(
+            (16..=256).contains(&self.tile_size),
+            "tile_size must be in [16, 256], got {}",
+            self.tile_size
+        );
     }
 }
 
@@ -473,11 +481,10 @@ impl BackgroundConfig {
 /// * `config` - Iterative refinement configuration
 pub fn estimate_background_iterative(
     pixels: &Buffer2<f32>,
-    tile_size: usize,
     config: &BackgroundConfig,
 ) -> BackgroundMap {
     // Start with initial background estimate
-    let mut background = estimate_background(pixels, tile_size);
+    let mut background = estimate_background(pixels, config.tile_size);
 
     // Pre-allocate mask buffers for reuse across iterations
     let width = pixels.width();
@@ -499,7 +506,7 @@ pub fn estimate_background_iterative(
         // Re-estimate background with masked pixels excluded
         estimate_background_masked(
             pixels,
-            tile_size,
+            config.tile_size,
             &mask,
             config.min_unmasked_fraction,
             &mut background,

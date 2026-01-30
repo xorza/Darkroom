@@ -18,8 +18,6 @@ pub struct StarDetectionConfig {
     pub edge_margin: usize,
     /// Minimum SNR for a star to be considered valid.
     pub min_snr: f32,
-    /// Tile size for background estimation.
-    pub background_tile_size: usize,
     /// Maximum FWHM deviation from median in MAD (median absolute deviation) units.
     /// Stars with FWHM > median + max_fwhm_deviation * MAD are rejected as spurious.
     /// Typical value is 3.0-5.0 (similar to sigma clipping). Set to 0.0 to disable.
@@ -107,7 +105,6 @@ impl Default for StarDetectionConfig {
             max_eccentricity: 0.6,
             edge_margin: 10,
             min_snr: 10.0,
-            background_tile_size: 64,
             max_fwhm_deviation: 3.0,
             expected_fwhm: 4.0,
             psf_axis_ratio: 1.0,
@@ -161,11 +158,6 @@ impl StarDetectionConfig {
             self.min_snr > 0.0,
             "min_snr must be positive, got {}",
             self.min_snr
-        );
-        assert!(
-            (16..=256).contains(&self.background_tile_size),
-            "background_tile_size must be in [16, 256], got {}",
-            self.background_tile_size
         );
         assert!(
             self.expected_fwhm >= 0.0,

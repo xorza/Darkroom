@@ -186,14 +186,10 @@ impl StarDetector {
         let background = {
             if self.config.background_config.iterations > 0 {
                 // Use iterative background estimation for crowded fields
-                estimate_background_iterative(
-                    &pixels,
-                    self.config.background_tile_size,
-                    &self.config.background_config,
-                )
+                estimate_background_iterative(&pixels, &self.config.background_config)
             } else {
                 // Single-pass background estimation (faster)
-                estimate_background(&pixels, self.config.background_tile_size)
+                estimate_background(&pixels, self.config.background_config.tile_size)
             }
         };
 
@@ -230,8 +226,10 @@ impl StarDetector {
             }
         };
 
-        let mut diagnostics = StarDetectionDiagnostics::default();
-        diagnostics.candidates_after_filtering = candidates.len();
+        let mut diagnostics = StarDetectionDiagnostics {
+            candidates_after_filtering: candidates.len(),
+            ..Default::default()
+        };
         tracing::debug!("Detected {} star candidates", candidates.len());
 
         // Step 3: Compute precise centroids
