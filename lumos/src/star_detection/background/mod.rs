@@ -278,11 +278,11 @@ impl BackgroundConfig {
             .pixels_mut()
             .par_zip(background.noise.pixels_mut())
             .par_rows_mut_auto(width)
-            .for_each(|(y_start, (bg_chunk, noise_chunk))| {
+            .for_each(|(chunk_start_row, (bg_chunk, noise_chunk))| {
                 let rows_in_chunk = bg_chunk.len() / width;
 
                 for local_y in 0..rows_in_chunk {
-                    let y = y_start + local_y;
+                    let y = chunk_start_row + local_y;
                     let row_offset = local_y * width;
                     let bg_row = &mut bg_chunk[row_offset..row_offset + width];
                     let noise_row = &mut noise_chunk[row_offset..row_offset + width];
@@ -369,10 +369,10 @@ fn create_object_mask(
     output
         .pixels_mut()
         .par_rows_mut_auto(width)
-        .for_each(|(y_start, out_chunk)| {
+        .for_each(|(chunk_start_row, out_chunk)| {
             let rows_in_chunk = out_chunk.len() / width;
             for local_y in 0..rows_in_chunk {
-                let y = y_start + local_y;
+                let y = chunk_start_row + local_y;
                 let row_offset = local_y * width;
                 let out_row = &mut out_chunk[row_offset..row_offset + width];
 
@@ -532,11 +532,11 @@ fn estimate_background_masked(
         .pixels_mut()
         .par_zip(output.noise.pixels_mut())
         .par_rows_mut_auto(width)
-        .for_each(|(y_start, (bg_chunk, noise_chunk))| {
+        .for_each(|(chunk_start_row, (bg_chunk, noise_chunk))| {
             let rows_in_chunk = bg_chunk.len() / width;
 
             for local_y in 0..rows_in_chunk {
-                let y = y_start + local_y;
+                let y = chunk_start_row + local_y;
                 let row_offset = local_y * width;
                 let bg_row = &mut bg_chunk[row_offset..row_offset + width];
                 let noise_row = &mut noise_chunk[row_offset..row_offset + width];

@@ -34,11 +34,11 @@ pub fn median_filter_3x3(pixels: &Buffer2<f32>, output: &mut Buffer2<f32>) {
     output
         .pixels_mut()
         .par_rows_mut_auto(width)
-        .for_each(|(y_start, chunk)| {
+        .for_each(|(chunk_start_row, chunk)| {
             let rows_in_chunk = chunk.len() / width;
 
             for local_y in 0..rows_in_chunk {
-                let y = y_start + local_y;
+                let y = chunk_start_row + local_y;
                 let row = &mut chunk[local_y * width..(local_y + 1) * width];
 
                 if y == 0 || y == height - 1 {

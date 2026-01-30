@@ -24,7 +24,7 @@ pub trait ParRowsMutAuto<'a, T: Send + 'a> {
     type Iter: IndexedParallelIterator;
 
     /// Split into mutable parallel chunks aligned to row boundaries.
-    /// Returns an iterator yielding `(y_start, chunk)` pairs where chunk contains complete rows.
+    /// Returns an iterator yielding `(chunk_start_row, chunk)` pairs where chunk contains complete rows.
     fn par_rows_mut_auto(&'a mut self, width: usize) -> Self::Iter;
 }
 
@@ -171,7 +171,7 @@ type Zip4Inner<'a, A, B, C, D> =
     rayon::iter::Zip<Zip3Inner<'a, A, B, C>, rayon::slice::ChunksMut<'a, D>>;
 
 /// Parallel iterator over two zipped row-aligned mutable chunks.
-/// Yields `(y_start, (&mut [A], &mut [B]))` tuples.
+/// Yields `(chunk_start_row, (&mut [A], &mut [B]))` tuples.
 pub struct ParRows2MutWithOffset<'a, A: Send, B: Send> {
     inner: rayon::iter::Zip<rayon::slice::ChunksMut<'a, A>, rayon::slice::ChunksMut<'a, B>>,
     chunk_rows: usize,
@@ -326,7 +326,7 @@ impl<'a, A: Send + 'a, B: Send + 'a, C: Send + 'a, D: Send + 'a> IndexedParallel
     }
 }
 
-/// Parallel iterator over row-aligned mutable chunks that yields `(y_start, chunk)` pairs.
+/// Parallel iterator over row-aligned mutable chunks that yields `(chunk_start_row, chunk)` pairs.
 pub struct ParRowsMutWithOffset<'a, T: Send> {
     inner: rayon::slice::ChunksMut<'a, T>,
     chunk_rows: usize,
@@ -514,15 +514,16 @@ mod tests {
         let height = 20;
         let mut data: Vec<usize> = vec![0; width * height];
 
-        data.par_rows_mut_auto(width).for_each(|(y_start, chunk)| {
-            let rows_in_chunk = chunk.len() / width;
-            for local_y in 0..rows_in_chunk {
-                let y = y_start + local_y;
-                for x in 0..width {
-                    chunk[local_y * width + x] = y * width + x;
+        data.par_rows_mut_auto(width)
+            .for_each(|(chunk_start_row, chunk)| {
+                let rows_in_chunk = chunk.len() / width;
+                for local_y in 0..rows_in_chunk {
+                    let y = chunk_start_row + local_y;
+                    for x in 0..width {
+                        chunk[local_y * width + x] = y * width + x;
+                    }
                 }
-            }
-        });
+            });
 
         for (i, &v) in data.iter().enumerate() {
             assert_eq!(v, i);
@@ -535,16 +536,17 @@ mod tests {
         let height = 13;
         let mut data: Vec<u32> = vec![0; width * height];
 
-        data.par_rows_mut_auto(width).for_each(|(y_start, chunk)| {
-            assert_eq!(chunk.len() % width, 0, "Chunk not row-aligned");
-            let rows_in_chunk = chunk.len() / width;
-            for local_y in 0..rows_in_chunk {
-                let y = y_start + local_y;
-                for x in 0..width {
-                    chunk[local_y * width + x] = y as u32;
+        data.par_rows_mut_auto(width)
+            .for_each(|(chunk_start_row, chunk)| {
+                assert_eq!(chunk.len() % width, 0, "Chunk not row-aligned");
+                let rows_in_chunk = chunk.len() / width;
+                for local_y in 0..rows_in_chunk {
+                    let y = chunk_start_row + local_y;
+                    for x in 0..width {
+                        chunk[local_y * width + x] = y as u32;
+                    }
                 }
-            }
-        });
+            });
 
         for y in 0..height {
             for x in 0..width {
@@ -563,10 +565,10 @@ mod tests {
         a.as_mut_slice()
             .par_zip(&mut b)
             .par_rows_mut_auto(width)
-            .for_each(|(y_start, (a_chunk, b_chunk))| {
+            .for_each(|(chunk_start_row, (a_chunk, b_chunk))| {
                 let rows_in_chunk = a_chunk.len() / width;
                 for local_y in 0..rows_in_chunk {
-                    let y = y_start + local_y;
+                    let y = chunk_start_row + local_y;
                     for x in 0..width {
                         let idx = local_y * width + x;
                         a_chunk[idx] = (y * width + x) as f32;
@@ -593,10 +595,10 @@ mod tests {
             .par_zip(&mut b)
             .par_zip(&mut c)
             .par_rows_mut_auto(width)
-            .for_each(|(y_start, (a_chunk, b_chunk, c_chunk))| {
+            .for_each(|(chunk_start_row, (a_chunk, b_chunk, c_chunk))| {
                 let rows_in_chunk = a_chunk.len() / width;
                 for local_y in 0..rows_in_chunk {
-                    let y = y_start + local_y;
+                    let y = chunk_start_row + local_y;
                     for x in 0..width {
                         let idx = local_y * width + x;
                         let val = (y * width + x) as i32;
@@ -628,10 +630,10 @@ mod tests {
             .par_zip(&mut c)
             .par_zip(&mut d)
             .par_rows_mut_auto(width)
-            .for_each(|(y_start, (a_chunk, b_chunk, c_chunk, d_chunk))| {
+            .for_each(|(chunk_start_row, (a_chunk, b_chunk, c_chunk, d_chunk))| {
                 let rows_in_chunk = a_chunk.len() / width;
                 for local_y in 0..rows_in_chunk {
-                    let y = y_start + local_y;
+                    let y = chunk_start_row + local_y;
                     for x in 0..width {
                         let idx = local_y * width + x;
                         let val = (y * width + x) as u8;
@@ -670,12 +672,13 @@ mod tests {
         let height = 1;
         let mut data: Vec<usize> = vec![0; width * height];
 
-        data.par_rows_mut_auto(width).for_each(|(y_start, chunk)| {
-            assert_eq!(y_start, 0);
-            for (x, val) in chunk.iter_mut().enumerate() {
-                *val = x;
-            }
-        });
+        data.par_rows_mut_auto(width)
+            .for_each(|(chunk_start_row, chunk)| {
+                assert_eq!(chunk_start_row, 0);
+                for (x, val) in chunk.iter_mut().enumerate() {
+                    *val = x;
+                }
+            });
 
         for (i, &v) in data.iter().enumerate() {
             assert_eq!(v, i);
@@ -688,15 +691,16 @@ mod tests {
         let height = 1080;
         let mut data: Vec<u32> = vec![0; width * height];
 
-        data.par_rows_mut_auto(width).for_each(|(y_start, chunk)| {
-            let rows_in_chunk = chunk.len() / width;
-            for local_y in 0..rows_in_chunk {
-                let y = y_start + local_y;
-                for x in 0..width {
-                    chunk[local_y * width + x] = (y * width + x) as u32;
+        data.par_rows_mut_auto(width)
+            .for_each(|(chunk_start_row, chunk)| {
+                let rows_in_chunk = chunk.len() / width;
+                for local_y in 0..rows_in_chunk {
+                    let y = chunk_start_row + local_y;
+                    for x in 0..width {
+                        chunk[local_y * width + x] = (y * width + x) as u32;
+                    }
                 }
-            }
-        });
+            });
 
         // Spot check some values
         assert_eq!(data[0], 0);
@@ -726,10 +730,10 @@ mod tests {
             .as_mut_slice()
             .par_zip(&mut ints)
             .par_rows_mut_auto(width)
-            .for_each(|(y_start, (f_chunk, i_chunk))| {
+            .for_each(|(chunk_start_row, (f_chunk, i_chunk))| {
                 let rows_in_chunk = f_chunk.len() / width;
                 for local_y in 0..rows_in_chunk {
-                    let y = y_start + local_y;
+                    let y = chunk_start_row + local_y;
                     for x in 0..width {
                         let idx = local_y * width + x;
                         let val = y * width + x;
