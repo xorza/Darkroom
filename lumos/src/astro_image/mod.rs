@@ -180,23 +180,34 @@ fn deinterleave_rgb(interleaved: &[f32], r: &mut [f32], g: &mut [f32], b: &mut [
 
 /// Interleave separate R, G, B planes into RGB data (RGBRGB...).
 fn interleave_rgb(r: &[f32], g: &[f32], b: &[f32], interleaved: &mut [f32]) {
+    use crate::common::parallel::ParChunksMutAutoWithOffset;
+    use rayon::prelude::*;
+
     debug_assert_eq!(interleaved.len(), r.len() * 3);
     debug_assert_eq!(r.len(), g.len());
     debug_assert_eq!(g.len(), b.len());
 
-    crate::common::parallel_chunked(interleaved, |i| {
-        let pixel_idx = i / 3;
-        let channel = i % 3;
-        match channel {
-            0 => r[pixel_idx],
-            1 => g[pixel_idx],
-            _ => b[pixel_idx],
-        }
-    });
+    interleaved
+        .par_chunks_mut_auto()
+        .for_each(|(start_idx, chunk)| {
+            for (j, val) in chunk.iter_mut().enumerate() {
+                let i = start_idx + j;
+                let pixel_idx = i / 3;
+                let channel = i % 3;
+                *val = match channel {
+                    0 => r[pixel_idx],
+                    1 => g[pixel_idx],
+                    _ => b[pixel_idx],
+                };
+            }
+        });
 }
 
 /// Convert RGB planes to luminance using Rec. 709 weights.
 fn rgb_to_luminance(r: &[f32], g: &[f32], b: &[f32], gray: &mut [f32]) {
+    use crate::common::parallel::ParChunksMutAutoWithOffset;
+    use rayon::prelude::*;
+
     debug_assert_eq!(r.len(), g.len());
     debug_assert_eq!(g.len(), b.len());
     debug_assert_eq!(b.len(), gray.len());
@@ -205,8 +216,11 @@ fn rgb_to_luminance(r: &[f32], g: &[f32], b: &[f32], gray: &mut [f32]) {
     const G_WEIGHT: f32 = 0.7152;
     const B_WEIGHT: f32 = 0.0722;
 
-    crate::common::parallel_chunked(gray, |i| {
-        R_WEIGHT * r[i] + G_WEIGHT * g[i] + B_WEIGHT * b[i]
+    gray.par_chunks_mut_auto().for_each(|(start_idx, chunk)| {
+        for (j, val) in chunk.iter_mut().enumerate() {
+            let i = start_idx + j;
+            *val = R_WEIGHT * r[i] + G_WEIGHT * g[i] + B_WEIGHT * b[i];
+        }
     });
 }
 

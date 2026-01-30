@@ -5,7 +5,8 @@ use std::path::Path;
 use std::slice;
 use std::time::Instant;
 
-use crate::common::parallel_chunked;
+use crate::common::parallel::ParChunksMutAutoWithOffset;
+use rayon::prelude::*;
 
 use super::demosaic::xtrans::process_xtrans;
 use super::demosaic::{BayerImage, CfaPattern, demosaic_bilinear};
@@ -304,20 +305,25 @@ fn process_monochrome(
     // Extract the active area and normalize using parallel map
     let output_size = width * height;
     let mut mono_pixels = vec![0.0f32; output_size];
-    parallel_chunked(&mut mono_pixels, |i| {
-        let y = i / width;
-        let x = i % width;
-        let src_y = top_margin + y;
-        let src_x = left_margin + x;
-        let idx = src_y * raw_width + src_x;
-        debug_assert!(
-            idx < pixel_count,
-            "Index out of bounds: {} >= {}",
-            idx,
-            pixel_count
-        );
-        ((raw_data[idx] as f32) - black).max(0.0) / range
-    });
+    mono_pixels
+        .par_chunks_mut_auto()
+        .for_each(|(start_idx, chunk)| {
+            for (j, val) in chunk.iter_mut().enumerate() {
+                let i = start_idx + j;
+                let y = i / width;
+                let x = i % width;
+                let src_y = top_margin + y;
+                let src_x = left_margin + x;
+                let idx = src_y * raw_width + src_x;
+                debug_assert!(
+                    idx < pixel_count,
+                    "Index out of bounds: {} >= {}",
+                    idx,
+                    pixel_count
+                );
+                *val = ((raw_data[idx] as f32) - black).max(0.0) / range;
+            }
+        });
 
     Ok((mono_pixels, 1))
 }

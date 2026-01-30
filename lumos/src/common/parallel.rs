@@ -13,6 +13,136 @@ fn auto_chunk_size(len: usize) -> usize {
     (len / num_chunks).max(1)
 }
 
+// ============================================================================
+// Generic parallel iterator wrapper with offset
+// ============================================================================
+
+/// Generic parallel iterator that prepends an offset to each item.
+/// Used to wrap chunked iterators and provide `(offset, item)` pairs.
+pub struct WithOffset<I, T, F> {
+    inner: I,
+    multiplier: usize,
+    transform: F,
+    _phantom: std::marker::PhantomData<T>,
+}
+
+impl<I, T, F> WithOffset<I, T, F> {
+    fn new(inner: I, multiplier: usize, transform: F) -> Self {
+        Self {
+            inner,
+            multiplier,
+            transform,
+            _phantom: std::marker::PhantomData,
+        }
+    }
+}
+
+impl<I, T, F> ParallelIterator for WithOffset<I, T, F>
+where
+    I: IndexedParallelIterator,
+    T: Send,
+    F: Fn(I::Item) -> T + Send + Sync,
+{
+    type Item = (usize, T);
+
+    fn drive_unindexed<C>(self, consumer: C) -> C::Result
+    where
+        C: rayon::iter::plumbing::UnindexedConsumer<Self::Item>,
+    {
+        let multiplier = self.multiplier;
+        let transform = self.transform;
+        self.inner
+            .enumerate()
+            .map(move |(idx, item)| (idx * multiplier, transform(item)))
+            .drive_unindexed(consumer)
+    }
+}
+
+impl<I, T, F> IndexedParallelIterator for WithOffset<I, T, F>
+where
+    I: IndexedParallelIterator,
+    T: Send,
+    F: Fn(I::Item) -> T + Send + Sync,
+{
+    fn len(&self) -> usize {
+        self.inner.len()
+    }
+
+    fn drive<C>(self, consumer: C) -> C::Result
+    where
+        C: rayon::iter::plumbing::Consumer<Self::Item>,
+    {
+        let multiplier = self.multiplier;
+        let transform = self.transform;
+        self.inner
+            .enumerate()
+            .map(move |(idx, item)| (idx * multiplier, transform(item)))
+            .drive(consumer)
+    }
+
+    fn with_producer<CB>(self, callback: CB) -> CB::Output
+    where
+        CB: rayon::iter::plumbing::ProducerCallback<Self::Item>,
+    {
+        let multiplier = self.multiplier;
+        let transform = self.transform;
+        self.inner
+            .enumerate()
+            .map(move |(idx, item)| (idx * multiplier, transform(item)))
+            .with_producer(callback)
+    }
+}
+
+// ============================================================================
+// Type aliases for common iterator types
+// ============================================================================
+
+/// Parallel iterator over row-aligned mutable chunks that yields `(chunk_start_row, chunk)` pairs.
+pub type ParRowsMutWithOffset<'a, T> =
+    WithOffset<rayon::slice::ChunksMut<'a, T>, &'a mut [T], fn(&'a mut [T]) -> &'a mut [T]>;
+
+/// Parallel iterator over mutable chunks that yields `(offset, chunk)` pairs.
+pub type ParChunksMutWithOffset<'a, T> =
+    WithOffset<rayon::slice::ChunksMut<'a, T>, &'a mut [T], fn(&'a mut [T]) -> &'a mut [T]>;
+
+/// Parallel iterator over two zipped row-aligned mutable chunks.
+pub type ParRows2MutWithOffset<'a, A, B> = WithOffset<
+    rayon::iter::Zip<rayon::slice::ChunksMut<'a, A>, rayon::slice::ChunksMut<'a, B>>,
+    (&'a mut [A], &'a mut [B]),
+    fn((&'a mut [A], &'a mut [B])) -> (&'a mut [A], &'a mut [B]),
+>;
+
+/// Parallel iterator over three zipped row-aligned mutable chunks.
+#[allow(dead_code)]
+pub type ParRows3MutWithOffset<'a, A, B, C> = WithOffset<
+    rayon::iter::Zip<
+        rayon::iter::Zip<rayon::slice::ChunksMut<'a, A>, rayon::slice::ChunksMut<'a, B>>,
+        rayon::slice::ChunksMut<'a, C>,
+    >,
+    (&'a mut [A], &'a mut [B], &'a mut [C]),
+    fn(((&'a mut [A], &'a mut [B]), &'a mut [C])) -> (&'a mut [A], &'a mut [B], &'a mut [C]),
+>;
+
+/// Parallel iterator over four zipped row-aligned mutable chunks.
+#[allow(dead_code)]
+pub type ParRows4MutWithOffset<'a, A, B, C, D> = WithOffset<
+    rayon::iter::Zip<
+        rayon::iter::Zip<
+            rayon::iter::Zip<rayon::slice::ChunksMut<'a, A>, rayon::slice::ChunksMut<'a, B>>,
+            rayon::slice::ChunksMut<'a, C>,
+        >,
+        rayon::slice::ChunksMut<'a, D>,
+    >,
+    (&'a mut [A], &'a mut [B], &'a mut [C], &'a mut [D]),
+    fn(
+        (((&'a mut [A], &'a mut [B]), &'a mut [C]), &'a mut [D]),
+    ) -> (&'a mut [A], &'a mut [B], &'a mut [C], &'a mut [D]),
+>;
+
+// ============================================================================
+// Extension traits
+// ============================================================================
+
 /// Extension trait for row-aligned mutable parallel chunks with automatic sizing.
 pub trait ParRowsMutAuto<'a, T: Send + 'a> {
     type Iter: IndexedParallelIterator;
@@ -28,11 +158,16 @@ impl<'a, T: Send + 'a> ParRowsMutAuto<'a, T> for [T] {
     fn par_rows_mut_auto(&'a mut self, width: usize) -> ParRowsMutWithOffset<'a, T> {
         let height = self.len() / width;
         let chunk_rows = auto_chunk_size(height);
-        ParRowsMutWithOffset {
-            inner: self.par_chunks_mut(width * chunk_rows),
+        WithOffset::new(
+            self.par_chunks_mut(width * chunk_rows),
             chunk_rows,
-        }
+            identity as fn(&'a mut [T]) -> &'a mut [T],
+        )
     }
+}
+
+fn identity<T>(x: T) -> T {
+    x
 }
 
 /// Extension trait for chaining `par_zip` calls on mutable slices.
@@ -67,13 +202,13 @@ impl<'a, A: Send + 'a, B: Send + 'a> ZippedSlices2<'a, A, B> {
         let height = self.0.len() / width;
         let chunk_rows = auto_chunk_size(height);
         let chunk_size = width * chunk_rows;
-        ParRows2MutWithOffset {
-            inner: self
-                .0
+        WithOffset::new(
+            self.0
                 .par_chunks_mut(chunk_size)
                 .zip(self.1.par_chunks_mut(chunk_size)),
             chunk_rows,
-        }
+            identity as fn((&'a mut [A], &'a mut [B])) -> (&'a mut [A], &'a mut [B]),
+        )
     }
 }
 
@@ -107,15 +242,22 @@ impl<'a, A: Send + 'a, B: Send + 'a, C: Send + 'a> ZippedSlices3<'a, A, B, C> {
         let height = self.0.len() / width;
         let chunk_rows = auto_chunk_size(height);
         let chunk_size = width * chunk_rows;
-        ParRows3MutWithOffset {
-            inner: self
-                .0
+        WithOffset::new(
+            self.0
                 .par_chunks_mut(chunk_size)
                 .zip(self.1.par_chunks_mut(chunk_size))
                 .zip(self.2.par_chunks_mut(chunk_size)),
             chunk_rows,
-        }
+            flatten_zip3
+                as fn(
+                    ((&'a mut [A], &'a mut [B]), &'a mut [C]),
+                ) -> (&'a mut [A], &'a mut [B], &'a mut [C]),
+        )
     }
+}
+
+fn flatten_zip3<A, B, C>(((a, b), c): ((A, B), C)) -> (A, B, C) {
+    (a, b, c)
 }
 
 /// Four zipped mutable slices ready for parallel row iteration.
@@ -149,233 +291,23 @@ impl<'a, A: Send + 'a, B: Send + 'a, C: Send + 'a, D: Send + 'a> ZippedSlices4<'
         let height = self.0.len() / width;
         let chunk_rows = auto_chunk_size(height);
         let chunk_size = width * chunk_rows;
-        ParRows4MutWithOffset {
-            inner: self
-                .0
+        WithOffset::new(
+            self.0
                 .par_chunks_mut(chunk_size)
                 .zip(self.1.par_chunks_mut(chunk_size))
                 .zip(self.2.par_chunks_mut(chunk_size))
                 .zip(self.3.par_chunks_mut(chunk_size)),
             chunk_rows,
-        }
+            flatten_zip4
+                as fn(
+                    (((&'a mut [A], &'a mut [B]), &'a mut [C]), &'a mut [D]),
+                ) -> (&'a mut [A], &'a mut [B], &'a mut [C], &'a mut [D]),
+        )
     }
 }
 
-// Type aliases for nested zips
-#[allow(dead_code)]
-type Zip3Inner<'a, A, B, C> = rayon::iter::Zip<
-    rayon::iter::Zip<rayon::slice::ChunksMut<'a, A>, rayon::slice::ChunksMut<'a, B>>,
-    rayon::slice::ChunksMut<'a, C>,
->;
-#[allow(dead_code)]
-type Zip4Inner<'a, A, B, C, D> =
-    rayon::iter::Zip<Zip3Inner<'a, A, B, C>, rayon::slice::ChunksMut<'a, D>>;
-
-/// Parallel iterator over two zipped row-aligned mutable chunks.
-/// Yields `(chunk_start_row, (&mut [A], &mut [B]))` tuples.
-pub struct ParRows2MutWithOffset<'a, A: Send, B: Send> {
-    inner: rayon::iter::Zip<rayon::slice::ChunksMut<'a, A>, rayon::slice::ChunksMut<'a, B>>,
-    chunk_rows: usize,
-}
-
-impl<'a, A: Send + 'a, B: Send + 'a> ParallelIterator for ParRows2MutWithOffset<'a, A, B> {
-    type Item = (usize, (&'a mut [A], &'a mut [B]));
-
-    fn drive_unindexed<C>(self, consumer: C) -> C::Result
-    where
-        C: rayon::iter::plumbing::UnindexedConsumer<Self::Item>,
-    {
-        let chunk_rows = self.chunk_rows;
-        self.inner
-            .enumerate()
-            .map(|(idx, (a, b))| (idx * chunk_rows, (a, b)))
-            .drive_unindexed(consumer)
-    }
-}
-
-impl<'a, A: Send + 'a, B: Send + 'a> IndexedParallelIterator for ParRows2MutWithOffset<'a, A, B> {
-    fn len(&self) -> usize {
-        self.inner.len()
-    }
-
-    fn drive<C>(self, consumer: C) -> C::Result
-    where
-        C: rayon::iter::plumbing::Consumer<Self::Item>,
-    {
-        let chunk_rows = self.chunk_rows;
-        self.inner
-            .enumerate()
-            .map(|(idx, (a, b))| (idx * chunk_rows, (a, b)))
-            .drive(consumer)
-    }
-
-    fn with_producer<CB>(self, callback: CB) -> CB::Output
-    where
-        CB: rayon::iter::plumbing::ProducerCallback<Self::Item>,
-    {
-        let chunk_rows = self.chunk_rows;
-        self.inner
-            .enumerate()
-            .map(|(idx, (a, b))| (idx * chunk_rows, (a, b)))
-            .with_producer(callback)
-    }
-}
-
-/// Parallel iterator over three zipped row-aligned mutable chunks.
-#[allow(dead_code)]
-pub struct ParRows3MutWithOffset<'a, A: Send, B: Send, C: Send> {
-    inner: Zip3Inner<'a, A, B, C>,
-    chunk_rows: usize,
-}
-
-impl<'a, A: Send + 'a, B: Send + 'a, C: Send + 'a> ParallelIterator
-    for ParRows3MutWithOffset<'a, A, B, C>
-{
-    type Item = (usize, (&'a mut [A], &'a mut [B], &'a mut [C]));
-
-    fn drive_unindexed<Co>(self, consumer: Co) -> Co::Result
-    where
-        Co: rayon::iter::plumbing::UnindexedConsumer<Self::Item>,
-    {
-        let chunk_rows = self.chunk_rows;
-        self.inner
-            .enumerate()
-            .map(|(idx, ((a, b), c))| (idx * chunk_rows, (a, b, c)))
-            .drive_unindexed(consumer)
-    }
-}
-
-impl<'a, A: Send + 'a, B: Send + 'a, C: Send + 'a> IndexedParallelIterator
-    for ParRows3MutWithOffset<'a, A, B, C>
-{
-    fn len(&self) -> usize {
-        self.inner.len()
-    }
-
-    fn drive<Co>(self, consumer: Co) -> Co::Result
-    where
-        Co: rayon::iter::plumbing::Consumer<Self::Item>,
-    {
-        let chunk_rows = self.chunk_rows;
-        self.inner
-            .enumerate()
-            .map(|(idx, ((a, b), c))| (idx * chunk_rows, (a, b, c)))
-            .drive(consumer)
-    }
-
-    fn with_producer<CB>(self, callback: CB) -> CB::Output
-    where
-        CB: rayon::iter::plumbing::ProducerCallback<Self::Item>,
-    {
-        let chunk_rows = self.chunk_rows;
-        self.inner
-            .enumerate()
-            .map(|(idx, ((a, b), c))| (idx * chunk_rows, (a, b, c)))
-            .with_producer(callback)
-    }
-}
-
-/// Parallel iterator over four zipped row-aligned mutable chunks.
-#[allow(dead_code)]
-pub struct ParRows4MutWithOffset<'a, A: Send, B: Send, C: Send, D: Send> {
-    inner: Zip4Inner<'a, A, B, C, D>,
-    chunk_rows: usize,
-}
-
-impl<'a, A: Send + 'a, B: Send + 'a, C: Send + 'a, D: Send + 'a> ParallelIterator
-    for ParRows4MutWithOffset<'a, A, B, C, D>
-{
-    type Item = (usize, (&'a mut [A], &'a mut [B], &'a mut [C], &'a mut [D]));
-
-    fn drive_unindexed<Co>(self, consumer: Co) -> Co::Result
-    where
-        Co: rayon::iter::plumbing::UnindexedConsumer<Self::Item>,
-    {
-        let chunk_rows = self.chunk_rows;
-        self.inner
-            .enumerate()
-            .map(|(idx, (((a, b), c), d))| (idx * chunk_rows, (a, b, c, d)))
-            .drive_unindexed(consumer)
-    }
-}
-
-impl<'a, A: Send + 'a, B: Send + 'a, C: Send + 'a, D: Send + 'a> IndexedParallelIterator
-    for ParRows4MutWithOffset<'a, A, B, C, D>
-{
-    fn len(&self) -> usize {
-        self.inner.len()
-    }
-
-    fn drive<Co>(self, consumer: Co) -> Co::Result
-    where
-        Co: rayon::iter::plumbing::Consumer<Self::Item>,
-    {
-        let chunk_rows = self.chunk_rows;
-        self.inner
-            .enumerate()
-            .map(|(idx, (((a, b), c), d))| (idx * chunk_rows, (a, b, c, d)))
-            .drive(consumer)
-    }
-
-    fn with_producer<CB>(self, callback: CB) -> CB::Output
-    where
-        CB: rayon::iter::plumbing::ProducerCallback<Self::Item>,
-    {
-        let chunk_rows = self.chunk_rows;
-        self.inner
-            .enumerate()
-            .map(|(idx, (((a, b), c), d))| (idx * chunk_rows, (a, b, c, d)))
-            .with_producer(callback)
-    }
-}
-
-/// Parallel iterator over row-aligned mutable chunks that yields `(chunk_start_row, chunk)` pairs.
-pub struct ParRowsMutWithOffset<'a, T: Send> {
-    inner: rayon::slice::ChunksMut<'a, T>,
-    chunk_rows: usize,
-}
-
-impl<'a, T: Send + 'a> ParallelIterator for ParRowsMutWithOffset<'a, T> {
-    type Item = (usize, &'a mut [T]);
-
-    fn drive_unindexed<C>(self, consumer: C) -> C::Result
-    where
-        C: rayon::iter::plumbing::UnindexedConsumer<Self::Item>,
-    {
-        let chunk_rows = self.chunk_rows;
-        self.inner
-            .enumerate()
-            .map(|(idx, chunk)| (idx * chunk_rows, chunk))
-            .drive_unindexed(consumer)
-    }
-}
-
-impl<'a, T: Send + 'a> IndexedParallelIterator for ParRowsMutWithOffset<'a, T> {
-    fn len(&self) -> usize {
-        self.inner.len()
-    }
-
-    fn drive<C>(self, consumer: C) -> C::Result
-    where
-        C: rayon::iter::plumbing::Consumer<Self::Item>,
-    {
-        let chunk_rows = self.chunk_rows;
-        self.inner
-            .enumerate()
-            .map(|(idx, chunk)| (idx * chunk_rows, chunk))
-            .drive(consumer)
-    }
-
-    fn with_producer<CB>(self, callback: CB) -> CB::Output
-    where
-        CB: rayon::iter::plumbing::ProducerCallback<Self::Item>,
-    {
-        let chunk_rows = self.chunk_rows;
-        self.inner
-            .enumerate()
-            .map(|(idx, chunk)| (idx * chunk_rows, chunk))
-            .with_producer(callback)
-    }
+fn flatten_zip4<A, B, C, D>((((a, b), c), d): (((A, B), C), D)) -> (A, B, C, D) {
+    (a, b, c, d)
 }
 
 /// Extension trait for mutable parallel chunks with automatic sizing and offsets.
@@ -388,83 +320,12 @@ pub trait ParChunksMutAutoWithOffset<'a, T: Send + 'a> {
 impl<'a, T: Send + 'a> ParChunksMutAutoWithOffset<'a, T> for [T] {
     fn par_chunks_mut_auto(&'a mut self) -> ParChunksMutWithOffset<'a, T> {
         let chunk_size = auto_chunk_size(self.len());
-        ParChunksMutWithOffset {
-            inner: self.par_chunks_mut(chunk_size),
+        WithOffset::new(
+            self.par_chunks_mut(chunk_size),
             chunk_size,
-        }
+            identity as fn(&'a mut [T]) -> &'a mut [T],
+        )
     }
-}
-
-/// Parallel iterator over mutable chunks that yields `(offset, chunk)` pairs.
-pub struct ParChunksMutWithOffset<'a, T: Send> {
-    inner: rayon::slice::ChunksMut<'a, T>,
-    chunk_size: usize,
-}
-
-impl<'a, T: Send + 'a> ParallelIterator for ParChunksMutWithOffset<'a, T> {
-    type Item = (usize, &'a mut [T]);
-
-    fn drive_unindexed<C>(self, consumer: C) -> C::Result
-    where
-        C: rayon::iter::plumbing::UnindexedConsumer<Self::Item>,
-    {
-        let chunk_size = self.chunk_size;
-        self.inner
-            .enumerate()
-            .map(|(idx, chunk)| (idx * chunk_size, chunk))
-            .drive_unindexed(consumer)
-    }
-}
-
-impl<'a, T: Send + 'a> IndexedParallelIterator for ParChunksMutWithOffset<'a, T> {
-    fn len(&self) -> usize {
-        self.inner.len()
-    }
-
-    fn drive<C>(self, consumer: C) -> C::Result
-    where
-        C: rayon::iter::plumbing::Consumer<Self::Item>,
-    {
-        let chunk_size = self.chunk_size;
-        self.inner
-            .enumerate()
-            .map(|(idx, chunk)| (idx * chunk_size, chunk))
-            .drive(consumer)
-    }
-
-    fn with_producer<CB>(self, callback: CB) -> CB::Output
-    where
-        CB: rayon::iter::plumbing::ProducerCallback<Self::Item>,
-    {
-        let chunk_size = self.chunk_size;
-        self.inner
-            .enumerate()
-            .map(|(idx, chunk)| (idx * chunk_size, chunk))
-            .with_producer(callback)
-    }
-}
-
-//todo remove parallel_chunked
-
-/// Apply a function to each index in parallel, modifying the slice in place.
-///
-/// # Arguments
-/// * `data` - Mutable slice to fill with values
-/// * `f` - Function that takes an index and returns a value
-pub fn parallel_chunked<T, F>(data: &mut [T], f: F)
-where
-    T: Send + Sync,
-    F: Fn(usize) -> T + Sync + Send,
-{
-    if data.is_empty() {
-        return;
-    }
-
-    data.par_chunks_mut_auto().for_each(|(start_idx, chunk)| {
-        for (i, val) in chunk.iter_mut().enumerate() {
-            *val = f(start_idx + i);
-        }
-    });
 }
 
 #[cfg(test)]
@@ -481,34 +342,6 @@ mod tests {
         });
         for (i, &v) in data.iter().enumerate() {
             assert_eq!(v, i);
-        }
-    }
-
-    #[test]
-    fn test_parallel_chunked_f32() {
-        let mut result = vec![0.0f32; 10];
-        parallel_chunked(&mut result, |i| i as f32 * 2.0);
-        assert_eq!(result.len(), 10);
-        for (i, &v) in result.iter().enumerate() {
-            assert!((v - i as f32 * 2.0).abs() < f32::EPSILON);
-        }
-    }
-
-    #[test]
-    fn test_parallel_chunked_empty() {
-        let mut result: Vec<i32> = vec![];
-        parallel_chunked(&mut result, |i| i as i32);
-        assert!(result.is_empty());
-    }
-
-    #[test]
-    fn test_parallel_chunked_large() {
-        let len = 100_000;
-        let mut result = vec![0u32; len];
-        parallel_chunked(&mut result, |i| i as u32);
-        assert_eq!(result.len(), len);
-        for (i, &v) in result.iter().enumerate() {
-            assert_eq!(v, i as u32);
         }
     }
 

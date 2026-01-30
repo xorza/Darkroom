@@ -8,4 +8,3 @@ mod buffer2;
 
 pub use bit_buffer2::BitBuffer2;
 pub use buffer2::Buffer2;
-pub use parallel::parallel_chunked;
