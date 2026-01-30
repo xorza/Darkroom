@@ -151,6 +151,12 @@ pub fn deblend_local_maxima(
     labels: &LabelMap,
     config: &DeblendConfig,
 ) -> ArrayVec<DeblendedCandidate, MAX_PEAKS> {
+    debug_assert_eq!(
+        (pixels.width(), pixels.height()),
+        (labels.width(), labels.height()),
+        "pixels and labels must have same dimensions"
+    );
+
     let peaks = find_local_maxima(data, pixels, labels, config);
 
     if peaks.len() <= 1 {
@@ -190,9 +196,13 @@ pub fn find_local_maxima(
     labels: &LabelMap,
     config: &DeblendConfig,
 ) -> ArrayVec<Pixel, MAX_PEAKS> {
+    debug_assert_eq!(
+        (pixels.width(), pixels.height()),
+        (labels.width(), labels.height()),
+        "pixels and labels must have same dimensions"
+    );
+
     let mut peaks: ArrayVec<Pixel, MAX_PEAKS> = ArrayVec::new();
-    let width = pixels.width();
-    let height = pixels.height();
 
     // Find global max using find_peak (single iteration)
     let global_peak = data.find_peak(pixels, labels);
@@ -204,7 +214,7 @@ pub fn find_local_maxima(
             continue;
         }
 
-        if !is_local_maximum(pixel, pixels, width, height) {
+        if !is_local_maximum(pixel, pixels) {
             continue;
         }
 
@@ -231,6 +241,12 @@ pub fn deblend_by_nearest_peak(
     labels: &LabelMap,
     peaks: &[Pixel],
 ) -> ArrayVec<DeblendedCandidate, MAX_PEAKS> {
+    debug_assert_eq!(
+        (pixels.width(), pixels.height()),
+        (labels.width(), labels.height()),
+        "pixels and labels must have same dimensions"
+    );
+
     let mut result: ArrayVec<DeblendedCandidate, MAX_PEAKS> = ArrayVec::new();
 
     if peaks.is_empty() {
@@ -277,10 +293,12 @@ pub fn deblend_by_nearest_peak(
 /// Check if a pixel is a local maximum (greater than all 8 neighbors).
 /// Uses explicit neighbor checks instead of loops for better performance.
 #[inline]
-fn is_local_maximum(pixel: Pixel, pixels: &Buffer2<f32>, width: usize, height: usize) -> bool {
+fn is_local_maximum(pixel: Pixel, pixels: &Buffer2<f32>) -> bool {
     let x = pixel.x;
     let y = pixel.y;
     let v = pixel.value;
+    let width = pixels.width();
+    let height = pixels.height();
 
     // Check all 8 neighbors explicitly (avoids loop overhead)
     (x == 0 || pixels[(x - 1, y)] < v)
