@@ -1,9 +1,9 @@
-//! ARM NEON-accelerated thresholding.
+//! ARM NEON-accelerated threshold mask creation.
 
 #[cfg(target_arch = "aarch64")]
 use std::arch::aarch64::*;
 
-use crate::star_detection::Buffer2;
+use crate::common::Buffer2;
 use crate::star_detection::background::BackgroundMap;
 
 /// Number of SIMD vectors to process per unrolled iteration.
@@ -15,7 +15,7 @@ const UNROLL_WIDTH: usize = UNROLL_FACTOR * NEON_WIDTH;
 
 /// NEON-accelerated threshold mask creation.
 ///
-/// Creates a binary mask where `mask[i] = pixels[i] > background[i] + sigma * noise[i]`.
+/// Sets `mask[i] = true` where `pixels[i] > background[i] + sigma * noise[i]`.
 ///
 /// # Safety
 /// Requires NEON support (always available on aarch64).
@@ -79,7 +79,6 @@ pub unsafe fn create_threshold_mask_neon(
         let cmp3 = vcgtq_f32(px3, thresh3);
 
         // Extract comparison results and write to mask
-        // vgetq_lane_u32 extracts individual lanes (returns 0xFFFFFFFF or 0)
         *mask_ptr.add(i) = vgetq_lane_u32(cmp0, 0) != 0;
         *mask_ptr.add(i + 1) = vgetq_lane_u32(cmp0, 1) != 0;
         *mask_ptr.add(i + 2) = vgetq_lane_u32(cmp0, 2) != 0;
@@ -132,7 +131,7 @@ pub unsafe fn create_threshold_mask_neon(
 
 /// NEON-accelerated threshold mask for filtered (background-subtracted) images.
 ///
-/// For filtered images, the threshold is simply sigma * noise (no background addition).
+/// Sets `mask[i] = true` where `filtered[i] > sigma * noise[i]`.
 ///
 /// # Safety
 /// Requires NEON support (always available on aarch64).

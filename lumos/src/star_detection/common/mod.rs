@@ -1,7 +1,9 @@
-//! Shared constants for star detection algorithms.
+//! Shared constants and utilities for star detection algorithms.
 //!
 //! This module centralizes mathematical and algorithmic constants used across
 //! the star detection pipeline to avoid magic numbers and ensure consistency.
+
+pub mod threshold_mask;
 
 use crate::common::Buffer2;
 use crate::math::mad_to_sigma;

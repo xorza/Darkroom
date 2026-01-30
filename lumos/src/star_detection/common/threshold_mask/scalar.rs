@@ -1,9 +1,11 @@
-//! Scalar implementation of detection algorithms.
-use crate::star_detection::Buffer2;
+//! Scalar implementation of threshold mask creation.
+
+use crate::common::Buffer2;
 use crate::star_detection::background::BackgroundMap;
 
-/// Scalar implementation for threshold mask, writing to an existing mask slice.
-#[allow(dead_code)] // Used in tests and as fallback for non-SIMD architectures
+/// Scalar implementation for threshold mask.
+///
+/// Sets `mask[i] = true` where `pixels[i] > background[i] + sigma * noise[i]`.
 pub fn create_threshold_mask(
     pixels: &Buffer2<f32>,
     background: &BackgroundMap,
@@ -18,8 +20,9 @@ pub fn create_threshold_mask(
     }
 }
 
-/// Scalar implementation for filtered images, writing to an existing mask slice.
-#[allow(dead_code)] // Used in tests and as fallback for non-SIMD architectures
+/// Scalar implementation for filtered images.
+///
+/// Sets `mask[i] = true` where `filtered[i] > sigma * noise[i]`.
 pub fn create_threshold_mask_filtered(
     filtered: &Buffer2<f32>,
     background: &BackgroundMap,

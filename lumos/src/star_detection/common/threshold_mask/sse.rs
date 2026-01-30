@@ -1,7 +1,9 @@
-//! SSE-accelerated thresholding.
+//! SSE-accelerated threshold mask creation.
+
+#[cfg(target_arch = "x86_64")]
 use std::arch::x86_64::*;
 
-use crate::star_detection::Buffer2;
+use crate::common::Buffer2;
 use crate::star_detection::background::BackgroundMap;
 
 /// Number of SIMD vectors to process per unrolled iteration.
@@ -11,6 +13,13 @@ const SSE_WIDTH: usize = 4;
 /// Floats processed per unrolled iteration.
 const UNROLL_WIDTH: usize = UNROLL_FACTOR * SSE_WIDTH;
 
+/// SSE-accelerated threshold mask creation.
+///
+/// Sets `mask[i] = true` where `pixels[i] > background[i] + sigma * noise[i]`.
+///
+/// # Safety
+/// Requires SSE4.1 support.
+#[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "sse4.1")]
 #[allow(unsafe_op_in_unsafe_fn)]
 pub unsafe fn create_threshold_mask_sse(
@@ -121,7 +130,11 @@ pub unsafe fn create_threshold_mask_sse(
 
 /// SSE-accelerated threshold mask for filtered (background-subtracted) images.
 ///
-/// For filtered images, the threshold is simply sigma * noise (no background addition).
+/// Sets `mask[i] = true` where `filtered[i] > sigma * noise[i]`.
+///
+/// # Safety
+/// Requires SSE4.1 support.
+#[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "sse4.1")]
 #[allow(unsafe_op_in_unsafe_fn)]
 pub unsafe fn create_threshold_mask_filtered_sse(

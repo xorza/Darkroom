@@ -6,19 +6,15 @@ mod tests;
 #[cfg(feature = "bench")]
 pub mod bench;
 
-pub mod scalar;
-pub mod simd;
-
 use super::StarDetectionConfig;
 use super::background::BackgroundMap;
 use super::common::dilate_mask;
+use super::common::threshold_mask::{create_threshold_mask, create_threshold_mask_filtered};
 use super::deblend::{
     ComponentData, DeblendConfig, MultiThresholdDeblendConfig, Pixel,
     deblend_component as multi_threshold_deblend, deblend_local_maxima,
 };
 use crate::common::Buffer2;
-#[cfg(target_arch = "x86_64")]
-use crate::common::cpu_features;
 
 /// A candidate star region before centroid refinement.
 #[derive(Debug)]
@@ -138,49 +134,6 @@ pub fn detect_stars(
     });
 
     candidates
-}
-
-/// Create binary mask of pixels above threshold, with SIMD dispatch.
-#[cfg(target_arch = "x86_64")]
-pub fn create_threshold_mask(
-    pixels: &Buffer2<f32>,
-    background: &BackgroundMap,
-    sigma_threshold: f32,
-    mask: &mut Buffer2<bool>,
-) {
-    if cpu_features::has_sse4_1() {
-        // SAFETY: We've checked that SSE4.1 is available.
-        unsafe {
-            simd::sse::create_threshold_mask_sse(pixels, background, sigma_threshold, mask);
-        }
-    } else {
-        scalar::create_threshold_mask(pixels, background, sigma_threshold, mask);
-    }
-}
-
-/// Create binary mask of pixels above threshold, with NEON dispatch (aarch64).
-#[cfg(target_arch = "aarch64")]
-pub fn create_threshold_mask(
-    pixels: &Buffer2<f32>,
-    background: &BackgroundMap,
-    sigma_threshold: f32,
-    mask: &mut Buffer2<bool>,
-) {
-    // SAFETY: NEON is always available on aarch64.
-    unsafe {
-        simd::neon::create_threshold_mask_neon(pixels, background, sigma_threshold, mask);
-    }
-}
-
-/// Create binary mask of pixels above threshold (scalar fallback for other architectures).
-#[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
-pub fn create_threshold_mask(
-    pixels: &Buffer2<f32>,
-    background: &BackgroundMap,
-    sigma_threshold: f32,
-    mask: &mut Buffer2<bool>,
-) {
-    scalar::create_threshold_mask(pixels, background, sigma_threshold, mask)
 }
 
 /// Connected component labeling using union-find with parallel second pass.
@@ -385,63 +338,6 @@ pub fn detect_stars_filtered(
     });
 
     candidates
-}
-
-/// Create binary mask from a filtered (convolved) image, with SIMD dispatch.
-///
-/// For matched-filtered images, the noise is reduced by a factor related to
-/// the kernel size. We use a simpler threshold based on the filtered values
-/// being positive and above a noise-scaled threshold.
-#[cfg(target_arch = "x86_64")]
-pub fn create_threshold_mask_filtered(
-    filtered: &Buffer2<f32>,
-    background: &BackgroundMap,
-    sigma_threshold: f32,
-    mask: &mut Buffer2<bool>,
-) {
-    if cpu_features::has_sse4_1() {
-        // SAFETY: We've checked that SSE4.1 is available.
-        unsafe {
-            simd::sse::create_threshold_mask_filtered_sse(
-                filtered,
-                background,
-                sigma_threshold,
-                mask,
-            );
-        }
-    } else {
-        scalar::create_threshold_mask_filtered(filtered, background, sigma_threshold, mask);
-    }
-}
-
-/// Create binary mask from a filtered (convolved) image, with NEON dispatch (aarch64).
-#[cfg(target_arch = "aarch64")]
-pub fn create_threshold_mask_filtered(
-    filtered: &Buffer2<f32>,
-    background: &BackgroundMap,
-    sigma_threshold: f32,
-    mask: &mut Buffer2<bool>,
-) {
-    // SAFETY: NEON is always available on aarch64.
-    unsafe {
-        simd::neon::create_threshold_mask_filtered_neon(
-            filtered,
-            background,
-            sigma_threshold,
-            mask,
-        );
-    }
-}
-
-/// Create binary mask from a filtered (convolved) image (scalar fallback for other architectures).
-#[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
-pub fn create_threshold_mask_filtered(
-    filtered: &Buffer2<f32>,
-    background: &BackgroundMap,
-    sigma_threshold: f32,
-    mask: &mut Buffer2<bool>,
-) {
-    scalar::create_threshold_mask_filtered(filtered, background, sigma_threshold, mask);
 }
 
 impl From<&StarDetectionConfig> for DeblendConfig {

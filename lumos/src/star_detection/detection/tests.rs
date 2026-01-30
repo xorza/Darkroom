@@ -7,6 +7,7 @@ use super::*;
 use crate::common::Buffer2;
 use crate::star_detection::background::{BackgroundConfig, BackgroundMap};
 use crate::star_detection::common::dilate_mask;
+use crate::star_detection::common::threshold_mask::scalar as threshold_scalar;
 use crate::testing::synthetic::background_map;
 
 /// Helper to construct BackgroundMap from slices (for tests with specific per-pixel values)
@@ -671,7 +672,7 @@ fn create_threshold_mask_scalar(
     sigma: f32,
 ) -> Buffer2<bool> {
     let mut mask = Buffer2::new_filled(pixels.width(), pixels.height(), false);
-    scalar::create_threshold_mask(pixels, background, sigma, &mut mask);
+    threshold_scalar::create_threshold_mask(pixels, background, sigma, &mut mask);
     mask
 }
 
@@ -682,7 +683,7 @@ fn create_threshold_mask_filtered_scalar(
     sigma: f32,
 ) -> Buffer2<bool> {
     let mut mask = Buffer2::new_filled(filtered.width(), filtered.height(), false);
-    scalar::create_threshold_mask_filtered(filtered, background, sigma, &mut mask);
+    threshold_scalar::create_threshold_mask_filtered(filtered, background, sigma, &mut mask);
     mask
 }
 

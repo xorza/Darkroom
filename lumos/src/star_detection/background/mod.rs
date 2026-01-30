@@ -15,7 +15,7 @@ mod simd;
 mod tile_grid;
 
 use crate::common::Buffer2;
-use crate::common::parallel::{ParRowsMutAuto, ParZipMut};
+use crate::common::parallel::ParZipMut;
 use rayon::prelude::*;
 
 use tile_grid::TileGrid;
@@ -239,27 +239,13 @@ fn create_object_mask(
     output: &mut Buffer2<bool>,
     scratch: &mut Buffer2<bool>,
 ) {
-    // Initial mask: pixels above threshold (parallel by chunks)
-    let width = pixels.width();
-    output
-        .pixels_mut()
-        .par_rows_mut_auto(width)
-        .for_each(|(chunk_start_row, out_chunk)| {
-            let rows_in_chunk = out_chunk.len() / width;
-            for local_y in 0..rows_in_chunk {
-                let y = chunk_start_row + local_y;
-                let row_offset = local_y * width;
-                let out_row = &mut out_chunk[row_offset..row_offset + width];
-
-                for (x, out) in out_row.iter_mut().enumerate() {
-                    let px = pixels[(x, y)];
-                    let bg = background.background[(x, y)];
-                    let noise = background.noise[(x, y)];
-                    let threshold = bg + detection_sigma * noise.max(1e-6);
-                    *out = px > threshold;
-                }
-            }
-        });
+    // Create threshold mask using SIMD-optimized implementation
+    super::common::threshold_mask::create_threshold_mask(
+        pixels,
+        background,
+        detection_sigma,
+        output,
+    );
 
     // Dilate mask to cover object wings
     if dilation_radius > 0 {
