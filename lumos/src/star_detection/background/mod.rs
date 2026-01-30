@@ -14,7 +14,7 @@ mod tests;
 mod simd;
 
 use crate::common::Buffer2;
-use crate::common::parallel::{ParRowsMutAuto, Zip2Mut};
+use crate::common::parallel::{ParRowsMutAuto, ParZipMut};
 use crate::math::median_f32_mut;
 use rayon::prelude::*;
 
@@ -273,7 +273,9 @@ impl BackgroundConfig {
         let mut background_pixels = vec![0.0f32; width * height];
         let mut noise_pixels = vec![0.0f32; width * height];
 
-        Zip2Mut(&mut background_pixels, &mut noise_pixels)
+        background_pixels
+            .as_mut_slice()
+            .par_zip(&mut noise_pixels)
             .par_rows_mut_auto(width)
             .for_each(|(y_start, (bg_chunk, noise_chunk))| {
                 let rows_in_chunk = bg_chunk.len() / width;
@@ -530,7 +532,9 @@ fn estimate_background_masked(
     let mut background = vec![0.0f32; width * height];
     let mut noise = vec![0.0f32; width * height];
 
-    Zip2Mut(&mut background, &mut noise)
+    background
+        .as_mut_slice()
+        .par_zip(&mut noise)
         .par_rows_mut_auto(width)
         .for_each(|(y_start, (bg_chunk, noise_chunk))| {
             let rows_in_chunk = bg_chunk.len() / width;

@@ -41,29 +41,134 @@ impl<'a, T: Send + 'a> ParRowsMutAuto<'a, T> for [T] {
     }
 }
 
-/// Wrapper for zipping two mutable slices before applying `par_rows_mut_auto`.
-pub struct Zip2Mut<'a, A: Send, B: Send>(pub &'a mut [A], pub &'a mut [B]);
+/// Extension trait for chaining `par_zip` calls on mutable slices.
+pub trait ParZipMut<'a, T: Send + 'a> {
+    /// Zip this slice with another for parallel row-based iteration.
+    fn par_zip<U: Send + 'a>(self, other: &'a mut [U]) -> ZippedSlices2<'a, T, U>;
+}
 
-impl<'a, A: Send + 'a, B: Send + 'a> ParRowsMutAuto<'a, (A, B)> for Zip2Mut<'a, A, B> {
-    type Iter = ParRows2MutWithOffset<'a, A, B>;
+impl<'a, T: Send + 'a> ParZipMut<'a, T> for &'a mut [T] {
+    fn par_zip<U: Send + 'a>(self, other: &'a mut [U]) -> ZippedSlices2<'a, T, U> {
+        ZippedSlices2(self, other)
+    }
+}
 
-    fn par_rows_mut_auto(&'a mut self, width: usize) -> Self::Iter {
+/// Two zipped mutable slices ready for parallel row iteration.
+pub struct ZippedSlices2<'a, A: Send, B: Send>(pub &'a mut [A], pub &'a mut [B]);
+
+impl<'a, A: Send + 'a, B: Send + 'a> ZippedSlices2<'a, A, B> {
+    /// Zip with a third slice.
+    pub fn par_zip<C: Send + 'a>(self, other: &'a mut [C]) -> ZippedSlices3<'a, A, B, C> {
+        ZippedSlices3(self.0, self.1, other)
+    }
+
+    /// Split into parallel row-aligned chunks.
+    pub fn par_rows_mut_auto(self, width: usize) -> ParRows2MutWithOffset<'a, A, B> {
         assert_eq!(
             self.0.len(),
             self.1.len(),
-            "Zip2Mut slices must have equal length"
+            "Zipped slices must have equal length"
         );
         let height = self.0.len() / width;
         let chunk_rows = auto_chunk_size(height);
+        let chunk_size = width * chunk_rows;
         ParRows2MutWithOffset {
             inner: self
                 .0
-                .par_chunks_mut(width * chunk_rows)
-                .zip(self.1.par_chunks_mut(width * chunk_rows)),
+                .par_chunks_mut(chunk_size)
+                .zip(self.1.par_chunks_mut(chunk_size)),
             chunk_rows,
         }
     }
 }
+
+/// Three zipped mutable slices ready for parallel row iteration.
+pub struct ZippedSlices3<'a, A: Send, B: Send, C: Send>(
+    pub &'a mut [A],
+    pub &'a mut [B],
+    pub &'a mut [C],
+);
+
+impl<'a, A: Send + 'a, B: Send + 'a, C: Send + 'a> ZippedSlices3<'a, A, B, C> {
+    /// Zip with a fourth slice.
+    pub fn par_zip<D: Send + 'a>(self, other: &'a mut [D]) -> ZippedSlices4<'a, A, B, C, D> {
+        ZippedSlices4(self.0, self.1, self.2, other)
+    }
+
+    /// Split into parallel row-aligned chunks.
+    pub fn par_rows_mut_auto(self, width: usize) -> ParRows3MutWithOffset<'a, A, B, C> {
+        assert_eq!(
+            self.0.len(),
+            self.1.len(),
+            "Zipped slices must have equal length"
+        );
+        assert_eq!(
+            self.0.len(),
+            self.2.len(),
+            "Zipped slices must have equal length"
+        );
+        let height = self.0.len() / width;
+        let chunk_rows = auto_chunk_size(height);
+        let chunk_size = width * chunk_rows;
+        ParRows3MutWithOffset {
+            inner: self
+                .0
+                .par_chunks_mut(chunk_size)
+                .zip(self.1.par_chunks_mut(chunk_size))
+                .zip(self.2.par_chunks_mut(chunk_size)),
+            chunk_rows,
+        }
+    }
+}
+
+/// Four zipped mutable slices ready for parallel row iteration.
+pub struct ZippedSlices4<'a, A: Send, B: Send, C: Send, D: Send>(
+    pub &'a mut [A],
+    pub &'a mut [B],
+    pub &'a mut [C],
+    pub &'a mut [D],
+);
+
+impl<'a, A: Send + 'a, B: Send + 'a, C: Send + 'a, D: Send + 'a> ZippedSlices4<'a, A, B, C, D> {
+    /// Split into parallel row-aligned chunks.
+    pub fn par_rows_mut_auto(self, width: usize) -> ParRows4MutWithOffset<'a, A, B, C, D> {
+        assert_eq!(
+            self.0.len(),
+            self.1.len(),
+            "Zipped slices must have equal length"
+        );
+        assert_eq!(
+            self.0.len(),
+            self.2.len(),
+            "Zipped slices must have equal length"
+        );
+        assert_eq!(
+            self.0.len(),
+            self.3.len(),
+            "Zipped slices must have equal length"
+        );
+        let height = self.0.len() / width;
+        let chunk_rows = auto_chunk_size(height);
+        let chunk_size = width * chunk_rows;
+        ParRows4MutWithOffset {
+            inner: self
+                .0
+                .par_chunks_mut(chunk_size)
+                .zip(self.1.par_chunks_mut(chunk_size))
+                .zip(self.2.par_chunks_mut(chunk_size))
+                .zip(self.3.par_chunks_mut(chunk_size)),
+            chunk_rows,
+        }
+    }
+}
+
+// Type aliases for nested zips
+type Zip3Inner<'a, A, B, C> = rayon::iter::Zip<
+    rayon::iter::Zip<rayon::slice::ChunksMut<'a, A>, rayon::slice::ChunksMut<'a, B>>,
+    rayon::slice::ChunksMut<'a, C>,
+>;
+type Zip4Inner<'a, A, B, C, D> =
+    rayon::iter::Zip<Zip3Inner<'a, A, B, C>, rayon::slice::ChunksMut<'a, D>>;
 
 /// Parallel iterator over two zipped row-aligned mutable chunks.
 /// Yields `(y_start, (&mut [A], &mut [B]))` tuples.
@@ -111,6 +216,112 @@ impl<'a, A: Send + 'a, B: Send + 'a> IndexedParallelIterator for ParRows2MutWith
         self.inner
             .enumerate()
             .map(|(idx, (a, b))| (idx * chunk_rows, (a, b)))
+            .with_producer(callback)
+    }
+}
+
+/// Parallel iterator over three zipped row-aligned mutable chunks.
+pub struct ParRows3MutWithOffset<'a, A: Send, B: Send, C: Send> {
+    inner: Zip3Inner<'a, A, B, C>,
+    chunk_rows: usize,
+}
+
+impl<'a, A: Send + 'a, B: Send + 'a, C: Send + 'a> ParallelIterator
+    for ParRows3MutWithOffset<'a, A, B, C>
+{
+    type Item = (usize, (&'a mut [A], &'a mut [B], &'a mut [C]));
+
+    fn drive_unindexed<Co>(self, consumer: Co) -> Co::Result
+    where
+        Co: rayon::iter::plumbing::UnindexedConsumer<Self::Item>,
+    {
+        let chunk_rows = self.chunk_rows;
+        self.inner
+            .enumerate()
+            .map(|(idx, ((a, b), c))| (idx * chunk_rows, (a, b, c)))
+            .drive_unindexed(consumer)
+    }
+}
+
+impl<'a, A: Send + 'a, B: Send + 'a, C: Send + 'a> IndexedParallelIterator
+    for ParRows3MutWithOffset<'a, A, B, C>
+{
+    fn len(&self) -> usize {
+        self.inner.len()
+    }
+
+    fn drive<Co>(self, consumer: Co) -> Co::Result
+    where
+        Co: rayon::iter::plumbing::Consumer<Self::Item>,
+    {
+        let chunk_rows = self.chunk_rows;
+        self.inner
+            .enumerate()
+            .map(|(idx, ((a, b), c))| (idx * chunk_rows, (a, b, c)))
+            .drive(consumer)
+    }
+
+    fn with_producer<CB>(self, callback: CB) -> CB::Output
+    where
+        CB: rayon::iter::plumbing::ProducerCallback<Self::Item>,
+    {
+        let chunk_rows = self.chunk_rows;
+        self.inner
+            .enumerate()
+            .map(|(idx, ((a, b), c))| (idx * chunk_rows, (a, b, c)))
+            .with_producer(callback)
+    }
+}
+
+/// Parallel iterator over four zipped row-aligned mutable chunks.
+pub struct ParRows4MutWithOffset<'a, A: Send, B: Send, C: Send, D: Send> {
+    inner: Zip4Inner<'a, A, B, C, D>,
+    chunk_rows: usize,
+}
+
+impl<'a, A: Send + 'a, B: Send + 'a, C: Send + 'a, D: Send + 'a> ParallelIterator
+    for ParRows4MutWithOffset<'a, A, B, C, D>
+{
+    type Item = (usize, (&'a mut [A], &'a mut [B], &'a mut [C], &'a mut [D]));
+
+    fn drive_unindexed<Co>(self, consumer: Co) -> Co::Result
+    where
+        Co: rayon::iter::plumbing::UnindexedConsumer<Self::Item>,
+    {
+        let chunk_rows = self.chunk_rows;
+        self.inner
+            .enumerate()
+            .map(|(idx, (((a, b), c), d))| (idx * chunk_rows, (a, b, c, d)))
+            .drive_unindexed(consumer)
+    }
+}
+
+impl<'a, A: Send + 'a, B: Send + 'a, C: Send + 'a, D: Send + 'a> IndexedParallelIterator
+    for ParRows4MutWithOffset<'a, A, B, C, D>
+{
+    fn len(&self) -> usize {
+        self.inner.len()
+    }
+
+    fn drive<Co>(self, consumer: Co) -> Co::Result
+    where
+        Co: rayon::iter::plumbing::Consumer<Self::Item>,
+    {
+        let chunk_rows = self.chunk_rows;
+        self.inner
+            .enumerate()
+            .map(|(idx, (((a, b), c), d))| (idx * chunk_rows, (a, b, c, d)))
+            .drive(consumer)
+    }
+
+    fn with_producer<CB>(self, callback: CB) -> CB::Output
+    where
+        CB: rayon::iter::plumbing::ProducerCallback<Self::Item>,
+    {
+        let chunk_rows = self.chunk_rows;
+        self.inner
+            .enumerate()
+            .map(|(idx, (((a, b), c), d))| (idx * chunk_rows, (a, b, c, d)))
             .with_producer(callback)
     }
 }
