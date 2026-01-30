@@ -18,11 +18,14 @@ use crate::common::color_format::ColorFormat;
 use common::cpu_features;
 
 #[cfg(target_arch = "x86_64")]
-mod avx;
+pub(crate) mod avx;
 #[cfg(target_arch = "aarch64")]
-mod neon;
+pub(crate) mod neon;
 #[cfg(target_arch = "x86_64")]
-mod sse;
+pub(crate) mod sse;
+
+#[cfg(test)]
+mod tests;
 
 // Rec. 709 luminance weights scaled to fixed-point (shift by 16)
 const LUMA_R: u32 = 13933;

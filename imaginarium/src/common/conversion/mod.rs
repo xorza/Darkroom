@@ -4,8 +4,6 @@ pub(crate) mod conversion_simd;
 #[cfg(test)]
 mod bench;
 #[cfg(test)]
-mod simd_tests;
-#[cfg(test)]
 mod tests;
 
 use common::parallel;
