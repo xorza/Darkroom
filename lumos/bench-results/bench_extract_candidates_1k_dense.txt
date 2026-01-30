@@ -1,0 +1,6 @@
+name: bench_extract_candidates_1k_dense
+mean: 941.946µs
+min: 900.65µs
+max: 972.477µs
+median: 958.17µs
+iterations: 5

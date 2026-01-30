@@ -1,6 +1,8 @@
 //! Star candidate detection using thresholding and connected components.
 
 #[cfg(test)]
+mod bench;
+#[cfg(test)]
 mod tests;
 
 use super::background::BackgroundMap;

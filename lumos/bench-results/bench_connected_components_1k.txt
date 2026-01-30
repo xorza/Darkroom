@@ -1,0 +1,6 @@
+name: bench_connected_components_1k
+mean: 2.715258ms
+min: 2.533508ms
+max: 3.400874ms
+median: 2.543326ms
+iterations: 5

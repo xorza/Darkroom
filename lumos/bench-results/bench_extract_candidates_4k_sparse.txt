@@ -1,0 +1,7 @@
+name: bench_extract_candidates_4k_sparse
+mean: 13.806896ms
+min: 13.313484ms
+max: 14.633134ms
+median: 13.474071ms
+iterations: 3
+vs_previous: 15.22348ms -> 13.806896ms (-9.3%) faster
