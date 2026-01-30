@@ -152,4 +152,7 @@ pub fn create_threshold_mask_filtered(
 }
 
 #[cfg(test)]
+mod bench;
+
+#[cfg(test)]
 mod tests;
