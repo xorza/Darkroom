@@ -21,12 +21,16 @@ pub fn rows_per_chunk(height: usize) -> usize {
 
 /// Extension trait for row-aligned mutable parallel chunks with automatic sizing.
 pub trait ParRowsMutAuto<'a, T: Send + 'a> {
+    type Iter: IndexedParallelIterator;
+
     /// Split into mutable parallel chunks aligned to row boundaries.
     /// Returns an iterator yielding `(y_start, chunk)` pairs where chunk contains complete rows.
-    fn par_rows_mut_auto(&'a mut self, width: usize) -> ParRowsMutWithOffset<'a, T>;
+    fn par_rows_mut_auto(&'a mut self, width: usize) -> Self::Iter;
 }
 
 impl<'a, T: Send + 'a> ParRowsMutAuto<'a, T> for [T] {
+    type Iter = ParRowsMutWithOffset<'a, T>;
+
     fn par_rows_mut_auto(&'a mut self, width: usize) -> ParRowsMutWithOffset<'a, T> {
         let height = self.len() / width;
         let chunk_rows = auto_chunk_size(height);
@@ -34,6 +38,27 @@ impl<'a, T: Send + 'a> ParRowsMutAuto<'a, T> for [T] {
             inner: self.par_chunks_mut(width * chunk_rows),
             chunk_rows,
         }
+    }
+}
+
+/// Wrapper for zipping two mutable slices before applying `par_rows_mut_auto`.
+pub struct Zip2Mut<'a, A: Send, B: Send>(pub &'a mut [A], pub &'a mut [B]);
+
+impl<'a, A: Send + 'a, B: Send + 'a> ParRowsMutAuto<'a, (A, B)> for Zip2Mut<'a, A, B> {
+    type Iter = rayon::iter::Zip<ParRowsMutWithOffset<'a, A>, ParRowsMutWithOffset<'a, B>>;
+
+    fn par_rows_mut_auto(&'a mut self, width: usize) -> Self::Iter {
+        let height = self.0.len() / width;
+        let chunk_rows = auto_chunk_size(height);
+        let iter_a = ParRowsMutWithOffset {
+            inner: self.0.par_chunks_mut(width * chunk_rows),
+            chunk_rows,
+        };
+        let iter_b = ParRowsMutWithOffset {
+            inner: self.1.par_chunks_mut(width * chunk_rows),
+            chunk_rows,
+        };
+        iter_a.zip(iter_b)
     }
 }
 
