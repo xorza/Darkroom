@@ -133,7 +133,7 @@ fn refine(background: &mut BackgroundMap, pixels: &Buffer2<f32>, config: &Backgr
         create_object_mask(
             pixels,
             background,
-            config.detection_sigma,
+            config.sigma_threshold,
             config.mask_dilation,
             &mut mask,
             &mut scratch,

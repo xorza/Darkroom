@@ -714,7 +714,7 @@ mod tests {
             max_area: 50,
             edge_margin: 5,
             background_config: BackgroundConfig {
-                detection_sigma: 3.0,
+                sigma_threshold: 3.0,
                 ..Default::default()
             },
             ..Default::default()
@@ -776,7 +776,7 @@ mod tests {
             max_area: 50,
             edge_margin: 5,
             background_config: BackgroundConfig {
-                detection_sigma: 3.0,
+                sigma_threshold: 3.0,
                 ..Default::default()
             },
             ..Default::default()
@@ -813,7 +813,7 @@ mod tests {
             max_area: 50,
             edge_margin: 5,
             background_config: BackgroundConfig {
-                detection_sigma: 4.0,
+                sigma_threshold: 4.0,
                 ..Default::default()
             },
             ..Default::default()
@@ -852,7 +852,7 @@ mod tests {
             max_area: 50,
             edge_margin: 5,
             background_config: BackgroundConfig {
-                detection_sigma: 3.0,
+                sigma_threshold: 3.0,
                 ..Default::default()
             },
             ..Default::default()
@@ -905,7 +905,7 @@ mod tests {
             max_area: 50,
             edge_margin: 10, // Large edge margin to reject edge stars
             background_config: BackgroundConfig {
-                detection_sigma: 3.0,
+                sigma_threshold: 3.0,
                 ..Default::default()
             },
             ..Default::default()

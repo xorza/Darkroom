@@ -11,8 +11,7 @@ use super::common::dilate_mask;
 use super::common::threshold_mask::{create_threshold_mask, create_threshold_mask_filtered};
 use super::config::{DeblendConfig, StarDetectionConfig};
 use super::deblend::{
-    ComponentData, MultiThresholdDeblendConfig, deblend_component as multi_threshold_deblend,
-    deblend_local_maxima,
+    ComponentData, deblend_component as multi_threshold_deblend, deblend_local_maxima,
 };
 use crate::common::{BitBuffer2, Buffer2};
 use crate::math::{Aabb, Vec2us};
@@ -158,7 +157,17 @@ pub(crate) fn extract_candidates(
         .filter(|data| data.area > 0 && data.area <= max_area)
         .flat_map_iter(|data| {
             if deblend_config.multi_threshold {
-                deblend_multi_threshold(&data, pixels, label_map, deblend_config)
+                multi_threshold_deblend(&data, pixels, label_map, deblend_config)
+                    .into_iter()
+                    .map(|obj| StarCandidate {
+                        bbox: obj.bbox,
+                        peak_x: obj.peak.x,
+                        peak_y: obj.peak.y,
+                        peak_value: obj.peak_value,
+                        area: obj.pixels.len(),
+                    })
+                    //todo remove allocation
+                    .collect::<Vec<_>>()
             } else {
                 deblend_local_maxima(&data, pixels, label_map, deblend_config)
                     .into_iter()
@@ -169,7 +178,8 @@ pub(crate) fn extract_candidates(
                         peak_value: obj.peak_value,
                         area: obj.area,
                     })
-                    .collect()
+                    //todo remove allocation
+                    .collect::<Vec<_>>()
             }
         })
         .collect()
@@ -206,38 +216,4 @@ fn collect_component_data(
     }
 
     component_data
-}
-
-/// Deblend a component using multi-threshold algorithm.
-fn deblend_multi_threshold(
-    data: &ComponentData,
-    pixels: &Buffer2<f32>,
-    label_map: &LabelMap,
-    deblend_config: &DeblendConfig,
-) -> Vec<StarCandidate> {
-    let mt_config = MultiThresholdDeblendConfig {
-        n_thresholds: deblend_config.n_thresholds,
-        min_contrast: deblend_config.min_contrast,
-        min_separation: deblend_config.min_separation,
-    };
-
-    // Estimate detection threshold from the minimum pixel value in component
-    let detection_threshold = data
-        .iter_pixels(pixels, label_map)
-        .map(|p| p.value)
-        .fold(f32::MAX, f32::min);
-
-    let deblended =
-        multi_threshold_deblend(data, pixels, label_map, detection_threshold, &mt_config);
-
-    deblended
-        .into_iter()
-        .map(|obj| StarCandidate {
-            bbox: obj.bbox,
-            peak_x: obj.peak.x,
-            peak_y: obj.peak.y,
-            peak_value: obj.peak_value,
-            area: obj.pixels.len(),
-        })
-        .collect()
 }

@@ -14,7 +14,7 @@ pub struct BackgroundConfig {
     /// Detection threshold in sigma above background for masking objects.
     /// Higher values = more conservative masking (only mask very bright objects).
     /// Typical value: 3.0-5.0
-    pub detection_sigma: f32,
+    pub sigma_threshold: f32,
     /// Number of refinement iterations. Usually 1-2 is sufficient.
     pub iterations: usize,
     /// Dilation radius for object masks in pixels.
@@ -32,7 +32,7 @@ pub struct BackgroundConfig {
 impl Default for BackgroundConfig {
     fn default() -> Self {
         Self {
-            detection_sigma: 4.0,
+            sigma_threshold: 4.0,
             iterations: 0,
             mask_dilation: 3,
             min_unmasked_fraction: 0.3,
@@ -48,9 +48,9 @@ impl BackgroundConfig {
     /// Panics with a descriptive message if any parameter is out of valid range.
     pub fn validate(&self) {
         assert!(
-            self.detection_sigma > 0.0,
+            self.sigma_threshold > 0.0,
             "detection_sigma must be positive, got {}",
-            self.detection_sigma
+            self.sigma_threshold
         );
         assert!(
             self.iterations <= 10,
@@ -94,7 +94,7 @@ pub struct DetectionConfig {
 impl From<&StarDetectionConfig> for DetectionConfig {
     fn from(config: &StarDetectionConfig) -> Self {
         Self {
-            sigma_threshold: config.background_config.detection_sigma,
+            sigma_threshold: config.background_config.sigma_threshold,
             min_area: config.min_area,
             max_area: config.max_area,
             edge_margin: config.edge_margin,

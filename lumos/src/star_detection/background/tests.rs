@@ -340,7 +340,7 @@ fn test_iterative_background_with_bright_stars() {
 
     // Iterative estimate (should be better at excluding stars)
     let config = BackgroundConfig {
-        detection_sigma: 3.0,
+        sigma_threshold: 3.0,
         iterations: 2,
         mask_dilation: 5,
         min_unmasked_fraction: 0.3,
@@ -411,7 +411,7 @@ fn test_iterative_background_preserves_gradient() {
 fn test_iterative_background_config_default() {
     let config = BackgroundConfig::default();
 
-    assert!((config.detection_sigma - 4.0).abs() < 1e-6);
+    assert!((config.sigma_threshold - 4.0).abs() < 1e-6);
     assert_eq!(config.iterations, 0);
     assert_eq!(config.mask_dilation, 3);
     assert!((config.min_unmasked_fraction - 0.3).abs() < 1e-6);

@@ -528,7 +528,7 @@ fn test_faint_in_noise() {
     let detection_config = StarDetectionConfig {
         min_snr: 3.0,
         background_config: BackgroundConfig {
-            detection_sigma: 2.5,
+            sigma_threshold: 2.5,
             ..Default::default()
         },
         ..Default::default()
@@ -563,7 +563,7 @@ fn test_very_low_snr() {
     let detection_config = StarDetectionConfig {
         min_snr: 2.5,
         background_config: BackgroundConfig {
-            detection_sigma: 2.0,
+            sigma_threshold: 2.0,
             ..Default::default()
         },
         ..Default::default()

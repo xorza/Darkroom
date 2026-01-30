@@ -159,7 +159,7 @@ fn test_detection_thresholds() {
     for sigma in [2.0, 3.0, 5.0, 10.0] {
         let det_config = StarDetectionConfig {
             background_config: BackgroundConfig {
-                detection_sigma: sigma,
+                sigma_threshold: sigma,
                 ..Default::default()
             },
             ..Default::default()

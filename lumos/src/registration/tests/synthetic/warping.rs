@@ -483,7 +483,7 @@ fn test_warp_with_detected_transform() {
         expected_fwhm: 0.0,
         min_snr: 5.0,
         background_config: BackgroundConfig {
-            detection_sigma: 3.0,
+            sigma_threshold: 3.0,
             ..Default::default()
         },
         ..Default::default()

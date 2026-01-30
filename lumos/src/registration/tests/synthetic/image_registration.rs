@@ -19,7 +19,7 @@ fn detector() -> StarDetector {
         expected_fwhm: 0.0, // Disable matched filter for synthetic images
         min_snr: 5.0,
         background_config: BackgroundConfig {
-            detection_sigma: 3.0,
+            sigma_threshold: 3.0,
             ..Default::default()
         },
         ..Default::default()
@@ -332,7 +332,7 @@ fn test_image_registration_with_noise() {
         expected_fwhm: 0.0,
         min_snr: 8.0,
         background_config: BackgroundConfig {
-            detection_sigma: 4.0, // Higher threshold for noisy image
+            sigma_threshold: 4.0, // Higher threshold for noisy image
             ..Default::default()
         },
         ..Default::default()

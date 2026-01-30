@@ -12,35 +12,8 @@ use std::collections::HashMap;
 use super::{ComponentData, Pixel};
 use crate::common::Buffer2;
 use crate::math::{Aabb, Vec2us};
+use crate::star_detection::config::DeblendConfig;
 use crate::star_detection::detection::LabelMap;
-
-/// Configuration for multi-threshold deblending.
-#[derive(Debug, Clone, Copy)]
-pub struct MultiThresholdDeblendConfig {
-    /// Number of deblending sub-thresholds between detection and peak.
-    /// SExtractor default is 32. Higher values give finer deblending
-    /// but use more memory and CPU. Typical range: 16-64.
-    pub n_thresholds: usize,
-    /// Minimum contrast parameter (0.0-1.0).
-    /// A branch is considered a separate object only if its flux is
-    /// at least min_contrast × total_flux of the parent.
-    /// SExtractor default: 0.005. Lower values deblend more aggressively.
-    /// Set to 1.0 to disable deblending entirely.
-    pub min_contrast: f32,
-    /// Minimum separation between peaks in pixels.
-    /// Peaks closer than this are merged even if they pass contrast criterion.
-    pub min_separation: usize,
-}
-
-impl Default for MultiThresholdDeblendConfig {
-    fn default() -> Self {
-        Self {
-            n_thresholds: 32,
-            min_contrast: 0.005,
-            min_separation: 3,
-        }
-    }
-}
 
 /// A node in the deblending tree.
 #[derive(Debug, Clone)]
@@ -91,8 +64,7 @@ pub fn deblend_component(
     data: &ComponentData,
     pixels: &Buffer2<f32>,
     labels: &LabelMap,
-    detection_threshold: f32,
-    config: &MultiThresholdDeblendConfig,
+    config: &DeblendConfig,
 ) -> Vec<DeblendedObject> {
     debug_assert_eq!(
         (pixels.width(), pixels.height()),
@@ -113,6 +85,12 @@ pub fn deblend_component(
     // Find peak value in the component
     let peak = data.find_peak(pixels, labels);
     let peak_value = peak.value;
+
+    // Estimate detection threshold from the minimum pixel value in component
+    let detection_threshold = data
+        .iter_pixels(pixels, labels)
+        .map(|p| p.value)
+        .fold(f32::MAX, f32::min);
 
     // If peak barely above threshold, no deblending possible
     if peak_value <= detection_threshold * 1.01 {
@@ -617,9 +595,9 @@ mod tests {
     #[test]
     fn test_single_star_no_deblending() {
         let (pixels, labels, data) = make_test_component(100, 100, &[(50, 50, 1.0, 3.0)]);
-        let config = MultiThresholdDeblendConfig::default();
+        let config = DeblendConfig::default();
 
-        let result = deblend_component(&data, &pixels, &labels, 0.01, &config);
+        let result = deblend_component(&data, &pixels, &labels, &config);
 
         assert_eq!(result.len(), 1, "Single star should produce one object");
         assert!((result[0].peak.x as i32 - 50).abs() <= 1);
@@ -631,13 +609,14 @@ mod tests {
         let (pixels, labels, data) =
             make_test_component(100, 100, &[(30, 50, 1.0, 2.5), (70, 50, 0.8, 2.5)]);
 
-        let config = MultiThresholdDeblendConfig {
+        let config = DeblendConfig {
             n_thresholds: 32,
             min_contrast: 0.005,
             min_separation: 3,
+            ..Default::default()
         };
 
-        let result = deblend_component(&data, &pixels, &labels, 0.01, &config);
+        let result = deblend_component(&data, &pixels, &labels, &config);
 
         // Should deblend into 2 separate objects
         assert_eq!(
@@ -666,13 +645,14 @@ mod tests {
         let (pixels, labels, data) =
             make_test_component(100, 100, &[(30, 50, 1.0, 2.5), (70, 50, 0.001, 2.5)]);
 
-        let config = MultiThresholdDeblendConfig {
+        let config = DeblendConfig {
             n_thresholds: 32,
             min_contrast: 0.01, // 1% contrast required
             min_separation: 3,
+            ..Default::default()
         };
 
-        let result = deblend_component(&data, &pixels, &labels, 0.01, &config);
+        let result = deblend_component(&data, &pixels, &labels, &config);
 
         // Faint star should be absorbed - contrast too low
         assert_eq!(
@@ -708,13 +688,14 @@ mod tests {
         let (pixels, labels, data) =
             make_test_component(100, 100, &[(48, 50, 1.0, 2.0), (52, 50, 0.9, 2.0)]);
 
-        let config = MultiThresholdDeblendConfig {
+        let config = DeblendConfig {
             n_thresholds: 32,
             min_contrast: 0.005,
             min_separation: 5, // Larger than 4 pixel separation
+            ..Default::default()
         };
 
-        let result = deblend_component(&data, &pixels, &labels, 0.01, &config);
+        let result = deblend_component(&data, &pixels, &labels, &config);
 
         // Should NOT deblend - peaks too close
         assert_eq!(result.len(), 1, "Close peaks should not be deblended");
@@ -730,9 +711,9 @@ mod tests {
             label: 1,
             area: 0,
         };
-        let config = MultiThresholdDeblendConfig::default();
+        let config = DeblendConfig::default();
 
-        let result = deblend_component(&data, &pixels, &labels, 0.01, &config);
+        let result = deblend_component(&data, &pixels, &labels, &config);
 
         assert!(result.is_empty());
     }
@@ -743,13 +724,14 @@ mod tests {
         let (pixels, labels, data) =
             make_test_component(100, 100, &[(30, 50, 1.0, 2.5), (70, 50, 0.8, 2.5)]);
 
-        let config = MultiThresholdDeblendConfig {
+        let config = DeblendConfig {
             n_thresholds: 32,
             min_contrast: 1.0, // Require 100% contrast = disabled
             min_separation: 3,
+            ..Default::default()
         };
 
-        let result = deblend_component(&data, &pixels, &labels, 0.01, &config);
+        let result = deblend_component(&data, &pixels, &labels, &config);
 
         assert_eq!(
             result.len(),

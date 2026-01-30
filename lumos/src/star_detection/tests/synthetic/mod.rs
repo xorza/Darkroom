@@ -78,7 +78,7 @@ fn test_synthetic_star_detection() {
         max_area: 500,
         min_snr: 20.0,
         background_config: BackgroundConfig {
-            detection_sigma: 3.0,
+            sigma_threshold: 3.0,
             ..Default::default()
         },
         ..Default::default()
