@@ -15,6 +15,7 @@ mod simd;
 
 use super::constants::{self, ROWS_PER_CHUNK};
 use crate::common::Buffer2;
+use crate::math::median_f32_mut;
 use rayon::prelude::*;
 
 /// Background map with per-pixel background and noise estimates.
@@ -123,8 +124,8 @@ impl TileGrid {
                 }
 
                 // Compute median of neighborhoods
-                let filtered_median = median_of_slice(&mut medians[..count]);
-                let filtered_sigma = median_of_slice(&mut sigmas[..count]);
+                let filtered_median = median_f32_mut(&mut medians[..count]);
+                let filtered_sigma = median_f32_mut(&mut sigmas[..count]);
 
                 TileStats {
                     median: filtered_median,
@@ -134,21 +135,6 @@ impl TileGrid {
             .collect();
 
         self.stats = filtered_stats;
-    }
-}
-
-/// Compute median of a small slice (up to 9 elements).
-#[inline]
-fn median_of_slice(values: &mut [f32]) -> f32 {
-    if values.is_empty() {
-        return 0.0;
-    }
-    values.sort_unstable_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-    let mid = values.len() / 2;
-    if values.len().is_multiple_of(2) {
-        (values[mid - 1] + values[mid]) * 0.5
-    } else {
-        values[mid]
     }
 }
 
