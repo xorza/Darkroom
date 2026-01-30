@@ -1,0 +1,7 @@
+name: bench_row_conversions/RGB u16_to_RGB f32/simd
+mean: 601ns
+min: 591ns
+max: 612ns
+median: 601ns
+iterations: 20
+vs_previous: 822ns -> 601ns (-26.9%) faster

@@ -1,6 +1,7 @@
 name: bench_row_conversions/RGBA u8_to_RGB u8/simd
-mean: 592ns
-min: 571ns
-max: 701ns
+mean: 596ns
+min: 581ns
+max: 681ns
 median: 591ns
 iterations: 20
+vs_previous: 593ns -> 596ns (+0.5%) same

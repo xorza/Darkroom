@@ -382,6 +382,48 @@ pub(super) unsafe fn convert_f32_to_u8_row_neon(src: &[f32], dst: &mut [u8]) {
 }
 
 #[cfg(target_arch = "aarch64")]
+pub(super) unsafe fn convert_u8_to_f32_row_neon(src: &[u8], dst: &mut [f32]) {
+    use std::arch::aarch64::*;
+
+    let len = src.len();
+    let simd_width = len / 16;
+    let remainder = len % 16;
+
+    let scale = vdupq_n_f32(1.0 / 255.0);
+
+    for i in 0..simd_width {
+        let src_offset = i * 16;
+        let dst_offset = i * 16;
+
+        let bytes = vld1q_u8(src.as_ptr().add(src_offset));
+
+        // Unpack bytes to 16-bit words
+        let words_lo = vmovl_u8(vget_low_u8(bytes));
+        let words_hi = vmovl_u8(vget_high_u8(bytes));
+
+        // Unpack 16-bit words to 32-bit dwords and convert to float
+        let dwords_0 = vmovl_u16(vget_low_u16(words_lo));
+        let dwords_1 = vmovl_u16(vget_high_u16(words_lo));
+        let dwords_2 = vmovl_u16(vget_low_u16(words_hi));
+        let dwords_3 = vmovl_u16(vget_high_u16(words_hi));
+
+        let floats_0 = vmulq_f32(vcvtq_f32_u32(dwords_0), scale);
+        let floats_1 = vmulq_f32(vcvtq_f32_u32(dwords_1), scale);
+        let floats_2 = vmulq_f32(vcvtq_f32_u32(dwords_2), scale);
+        let floats_3 = vmulq_f32(vcvtq_f32_u32(dwords_3), scale);
+
+        vst1q_f32(dst.as_mut_ptr().add(dst_offset), floats_0);
+        vst1q_f32(dst.as_mut_ptr().add(dst_offset + 4), floats_1);
+        vst1q_f32(dst.as_mut_ptr().add(dst_offset + 8), floats_2);
+        vst1q_f32(dst.as_mut_ptr().add(dst_offset + 12), floats_3);
+    }
+
+    for i in 0..remainder {
+        dst[simd_width * 16 + i] = src[simd_width * 16 + i] as f32 / 255.0;
+    }
+}
+
+#[cfg(target_arch = "aarch64")]
 pub(super) unsafe fn convert_u8_to_u16_row_neon(src: &[u8], dst: &mut [u16]) {
     use std::arch::aarch64::*;
 

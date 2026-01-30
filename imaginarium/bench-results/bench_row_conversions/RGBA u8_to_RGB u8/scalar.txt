@@ -1,6 +1,7 @@
 name: bench_row_conversions/RGBA u8_to_RGB u8/scalar
-mean: 13.455µs
-min: 7.034µs
-max: 15.88µs
-median: 15.85µs
+mean: 31.959µs
+min: 30.969µs
+max: 34.947µs
+median: 31.3µs
 iterations: 20
+vs_previous: 7.109µs -> 31.959µs (+349.6%) SLOWER

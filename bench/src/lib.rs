@@ -236,7 +236,7 @@ impl Bencher {
             median,
         };
 
-        println!("\n{result}\n");
+        println!("\n{result}");
 
         // Write to file and compare with previous if output_dir is set
         if let Some(dir) = &self.output_dir {
@@ -259,7 +259,7 @@ impl Bencher {
                         ("same", colors::DIM)
                     };
                     println!(
-                        "  {}vs previous:{} {:?} -> {:?} ({sign}{:.1}%) {}{}{}\n",
+                        "  {}vs previous:{} {:?} -> {:?} ({sign}{:.1}%) {}{}{}",
                         colors::DIM,
                         colors::RESET,
                         prev_mean,
@@ -270,7 +270,7 @@ impl Bencher {
                         colors::RESET
                     );
                     Some(format!(
-                        "vs_previous: {:?} -> {:?} ({sign}{:.1}%) {indicator}\n",
+                        "vs_previous: {:?} -> {:?} ({sign}{:.1}%) {indicator}",
                         prev_mean, result.mean, pct
                     ))
                 } else {

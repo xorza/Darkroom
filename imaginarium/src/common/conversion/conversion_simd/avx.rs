@@ -192,6 +192,51 @@ pub(super) unsafe fn convert_f32_to_u8_row_avx2(src: &[f32], dst: &mut [u8]) {
 
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2")]
+pub(super) unsafe fn convert_u8_to_f32_row_avx2(src: &[u8], dst: &mut [f32]) {
+    use std::arch::x86_64::*;
+
+    let len = src.len();
+    let simd_width = len / 32;
+    let remainder = len % 32;
+
+    let scale = _mm256_set1_ps(1.0 / 255.0);
+
+    for i in 0..simd_width {
+        let src_offset = i * 32;
+        let dst_offset = i * 32;
+
+        let bytes = _mm256_loadu_si256(src.as_ptr().add(src_offset) as *const __m256i);
+
+        // Extract low and high 128-bit lanes
+        let bytes_lo = _mm256_castsi256_si128(bytes);
+        let bytes_hi = _mm256_extracti128_si256(bytes, 1);
+
+        // Use AVX2 zero-extend instructions for efficient conversion
+        let dwords_0 = _mm256_cvtepu8_epi32(bytes_lo);
+        let dwords_1 = _mm256_cvtepu8_epi32(_mm_srli_si128(bytes_lo, 8));
+        let dwords_2 = _mm256_cvtepu8_epi32(bytes_hi);
+        let dwords_3 = _mm256_cvtepu8_epi32(_mm_srli_si128(bytes_hi, 8));
+
+        // Convert to float and scale
+        let floats_0 = _mm256_mul_ps(_mm256_cvtepi32_ps(dwords_0), scale);
+        let floats_1 = _mm256_mul_ps(_mm256_cvtepi32_ps(dwords_1), scale);
+        let floats_2 = _mm256_mul_ps(_mm256_cvtepi32_ps(dwords_2), scale);
+        let floats_3 = _mm256_mul_ps(_mm256_cvtepi32_ps(dwords_3), scale);
+
+        _mm256_storeu_ps(dst.as_mut_ptr().add(dst_offset), floats_0);
+        _mm256_storeu_ps(dst.as_mut_ptr().add(dst_offset + 8), floats_1);
+        _mm256_storeu_ps(dst.as_mut_ptr().add(dst_offset + 16), floats_2);
+        _mm256_storeu_ps(dst.as_mut_ptr().add(dst_offset + 24), floats_3);
+    }
+
+    // Handle remainder with SSE2
+    if remainder > 0 {
+        sse::convert_u8_to_f32_row_sse2(&src[simd_width * 32..], &mut dst[simd_width * 32..]);
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
 pub(super) unsafe fn convert_u8_to_u16_row_avx2(src: &[u8], dst: &mut [u16]) {
     use std::arch::x86_64::*;
 

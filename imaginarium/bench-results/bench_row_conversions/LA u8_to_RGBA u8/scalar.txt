@@ -1,6 +1,7 @@
 name: bench_row_conversions/LA u8_to_RGBA u8/scalar
-mean: 6.606µs
-min: 6.592µs
-max: 6.613µs
-median: 6.603µs
+mean: 6.649µs
+min: 6.632µs
+max: 6.743µs
+median: 6.643µs
 iterations: 20
+vs_previous: 6.644µs -> 6.649µs (+0.1%) same

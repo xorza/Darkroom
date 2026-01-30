@@ -505,6 +505,51 @@ pub(super) unsafe fn convert_f32_to_u8_row_sse2(src: &[f32], dst: &mut [u8]) {
 
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "sse2")]
+pub(super) unsafe fn convert_u8_to_f32_row_sse2(src: &[u8], dst: &mut [f32]) {
+    use std::arch::x86_64::*;
+
+    let len = src.len();
+    let simd_width = len / 16;
+    let remainder = len % 16;
+
+    let scale = _mm_set1_ps(1.0 / 255.0);
+    let zero = _mm_setzero_si128();
+
+    for i in 0..simd_width {
+        let src_offset = i * 16;
+        let dst_offset = i * 16;
+
+        let bytes = _mm_loadu_si128(src.as_ptr().add(src_offset) as *const __m128i);
+
+        // Unpack bytes to 16-bit words
+        let words_lo = _mm_unpacklo_epi8(bytes, zero);
+        let words_hi = _mm_unpackhi_epi8(bytes, zero);
+
+        // Unpack 16-bit words to 32-bit dwords
+        let dwords_0 = _mm_unpacklo_epi16(words_lo, zero);
+        let dwords_1 = _mm_unpackhi_epi16(words_lo, zero);
+        let dwords_2 = _mm_unpacklo_epi16(words_hi, zero);
+        let dwords_3 = _mm_unpackhi_epi16(words_hi, zero);
+
+        // Convert to float and scale
+        let floats_0 = _mm_mul_ps(_mm_cvtepi32_ps(dwords_0), scale);
+        let floats_1 = _mm_mul_ps(_mm_cvtepi32_ps(dwords_1), scale);
+        let floats_2 = _mm_mul_ps(_mm_cvtepi32_ps(dwords_2), scale);
+        let floats_3 = _mm_mul_ps(_mm_cvtepi32_ps(dwords_3), scale);
+
+        _mm_storeu_ps(dst.as_mut_ptr().add(dst_offset), floats_0);
+        _mm_storeu_ps(dst.as_mut_ptr().add(dst_offset + 4), floats_1);
+        _mm_storeu_ps(dst.as_mut_ptr().add(dst_offset + 8), floats_2);
+        _mm_storeu_ps(dst.as_mut_ptr().add(dst_offset + 12), floats_3);
+    }
+
+    for i in 0..remainder {
+        dst[simd_width * 16 + i] = src[simd_width * 16 + i] as f32 / 255.0;
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "sse2")]
 pub(super) unsafe fn convert_u8_to_u16_row_sse2(src: &[u8], dst: &mut [u16]) {
     use std::arch::x86_64::*;
 
