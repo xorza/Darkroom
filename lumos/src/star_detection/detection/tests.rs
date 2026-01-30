@@ -4,11 +4,22 @@
 #![allow(clippy::identity_op, clippy::erasing_op)]
 
 use super::*;
-use crate::common::Buffer2;
+use crate::common::{BitBuffer2, Buffer2};
 use crate::star_detection::background::BackgroundConfig;
 use crate::star_detection::common::dilate_mask;
 
 use crate::testing::synthetic::background_map;
+
+/// Helper to create a BitBuffer2 from a Vec<bool> for tests.
+fn make_bit_mask(width: usize, height: usize, data: Vec<bool>) -> BitBuffer2 {
+    let mut mask = BitBuffer2::new_filled(width, height, false);
+    for (i, &v) in data.iter().enumerate() {
+        if v {
+            mask.set(i, true);
+        }
+    }
+    mask
+}
 
 /// Default deblend config for tests
 const TEST_DEBLEND_CONFIG: DeblendConfig = DeblendConfig {
@@ -178,7 +189,7 @@ fn test_empty_image() {
 
 #[test]
 fn test_connected_components_empty_mask() {
-    let mask = Buffer2::new(4, 4, vec![false; 16]);
+    let mask = make_bit_mask(4, 4, vec![false; 16]);
     let (labels, num_labels) = connected_components(&mask);
 
     assert_eq!(num_labels, 0);
@@ -190,7 +201,7 @@ fn test_connected_components_single_pixel() {
     // 4x4 mask with single pixel at (1, 1)
     let mut mask_data = vec![false; 16];
     mask_data[1 * 4 + 1] = true;
-    let mask = Buffer2::new(4, 4, mask_data);
+    let mask = make_bit_mask(4, 4, mask_data);
 
     let (labels, num_labels) = connected_components(&mask);
 
@@ -209,7 +220,7 @@ fn test_connected_components_horizontal_line() {
     mask_data[1 * 5 + 0] = true;
     mask_data[1 * 5 + 1] = true;
     mask_data[1 * 5 + 2] = true;
-    let mask = Buffer2::new(5, 3, mask_data);
+    let mask = make_bit_mask(5, 3, mask_data);
 
     let (labels, num_labels) = connected_components(&mask);
 
@@ -229,7 +240,7 @@ fn test_connected_components_vertical_line() {
     mask_data[1 * 3 + 1] = true;
     mask_data[2 * 3 + 1] = true;
     mask_data[3 * 3 + 1] = true;
-    let mask = Buffer2::new(3, 5, mask_data);
+    let mask = make_bit_mask(3, 5, mask_data);
 
     let (labels, num_labels) = connected_components(&mask);
 
@@ -250,7 +261,7 @@ fn test_connected_components_two_separate_regions() {
     let mut mask_data = vec![false; 18];
     mask_data[0] = true; // (0, 0)
     mask_data[5] = true; // (5, 0)
-    let mask = Buffer2::new(6, 3, mask_data);
+    let mask = make_bit_mask(6, 3, mask_data);
 
     let (labels, num_labels) = connected_components(&mask);
 
@@ -272,7 +283,7 @@ fn test_connected_components_l_shape() {
     mask_data[1 * 4 + 0] = true;
     mask_data[2 * 4 + 0] = true;
     mask_data[2 * 4 + 1] = true;
-    let mask = Buffer2::new(4, 4, mask_data);
+    let mask = make_bit_mask(4, 4, mask_data);
 
     let (labels, num_labels) = connected_components(&mask);
 
@@ -294,7 +305,7 @@ fn test_connected_components_diagonal_not_connected() {
     mask_data[0 * 3 + 0] = true;
     mask_data[1 * 3 + 1] = true;
     mask_data[2 * 3 + 2] = true;
-    let mask = Buffer2::new(3, 3, mask_data);
+    let mask = make_bit_mask(3, 3, mask_data);
 
     let (_labels, num_labels) = connected_components(&mask);
 
@@ -322,7 +333,7 @@ fn test_connected_components_u_shape_union_find() {
     mask_data[2 * 5 + 1] = true;
     mask_data[2 * 5 + 2] = true;
     mask_data[2 * 5 + 3] = true;
-    let mask = Buffer2::new(5, 3, mask_data.clone());
+    let mask = make_bit_mask(5, 3, mask_data.clone());
 
     let (labels, num_labels) = connected_components(&mask);
 
@@ -355,7 +366,7 @@ fn test_connected_components_checkerboard() {
             }
         }
     }
-    let mask = Buffer2::new(4, 4, mask_data);
+    let mask = make_bit_mask(4, 4, mask_data);
 
     let (_labels, num_labels) = connected_components(&mask);
 
@@ -366,7 +377,7 @@ fn test_connected_components_checkerboard() {
 #[test]
 fn test_connected_components_filled_rectangle() {
     // 3x3 all true
-    let mask = Buffer2::new(3, 3, vec![true; 9]);
+    let mask = make_bit_mask(3, 3, vec![true; 9]);
     let (labels, num_labels) = connected_components(&mask);
 
     assert_eq!(num_labels, 1);
@@ -381,7 +392,7 @@ fn test_connected_components_labels_are_sequential() {
     mask_data[0] = true;
     mask_data[2] = true;
     mask_data[4] = true;
-    let mask = Buffer2::new(6, 1, mask_data);
+    let mask = make_bit_mask(6, 1, mask_data);
 
     let (labels, num_labels) = connected_components(&mask);
 
@@ -398,10 +409,10 @@ fn test_connected_components_labels_are_sequential() {
 
 #[test]
 fn test_dilate_mask_empty() {
-    let mask = Buffer2::new(3, 3, vec![false; 9]);
-    let mut dilated = Buffer2::new_filled(3, 3, false);
+    let mask = make_bit_mask(3, 3, vec![false; 9]);
+    let mut dilated = BitBuffer2::new_filled(3, 3, false);
     dilate_mask(&mask, 1, &mut dilated);
-    assert!(dilated.iter().all(|&x| !x));
+    assert!(dilated.iter().all(|x| !x));
 }
 
 #[test]
@@ -409,12 +420,12 @@ fn test_dilate_mask_single_pixel_radius_0() {
     // Radius 0 should not expand
     let mut mask_data = vec![false; 9];
     mask_data[4] = true; // center
-    let mask = Buffer2::new(3, 3, mask_data);
-    let mut dilated = Buffer2::new_filled(3, 3, false);
+    let mask = make_bit_mask(3, 3, mask_data);
+    let mut dilated = BitBuffer2::new_filled(3, 3, false);
     dilate_mask(&mask, 0, &mut dilated);
 
-    assert_eq!(dilated.iter().filter(|&&x| x).count(), 1);
-    assert!(dilated[4]);
+    assert_eq!(dilated.iter().filter(|x| *x).count(), 1);
+    assert!(dilated.get(4));
 }
 
 #[test]
@@ -422,21 +433,26 @@ fn test_dilate_mask_single_pixel_radius_1() {
     // 3x3 mask with center pixel, radius 1 should create 3x3 square
     let mut mask_data = vec![false; 25]; // 5x5
     mask_data[2 * 5 + 2] = true; // center at (2, 2)
-    let mask = Buffer2::new(5, 5, mask_data);
-    let mut dilated = Buffer2::new_filled(5, 5, false);
+    let mask = make_bit_mask(5, 5, mask_data);
+    let mut dilated = BitBuffer2::new_filled(5, 5, false);
     dilate_mask(&mask, 1, &mut dilated);
 
     // Should dilate to 3x3 square centered at (2,2)
     for y in 1..=3 {
         for x in 1..=3 {
-            assert!(dilated[y * 5 + x], "Pixel ({}, {}) should be true", x, y);
+            assert!(
+                dilated.get(y * 5 + x),
+                "Pixel ({}, {}) should be true",
+                x,
+                y
+            );
         }
     }
     // Corners should be false
-    assert!(!dilated[0 * 5 + 0]);
-    assert!(!dilated[0 * 5 + 4]);
-    assert!(!dilated[4 * 5 + 0]);
-    assert!(!dilated[4 * 5 + 4]);
+    assert!(!dilated.get(0 * 5 + 0));
+    assert!(!dilated.get(0 * 5 + 4));
+    assert!(!dilated.get(4 * 5 + 0));
+    assert!(!dilated.get(4 * 5 + 4));
 }
 
 #[test]
@@ -444,15 +460,20 @@ fn test_dilate_mask_single_pixel_radius_2() {
     // 7x7 mask with center pixel, radius 2 should create 5x5 square
     let mut mask_data = vec![false; 49];
     mask_data[3 * 7 + 3] = true; // center at (3, 3)
-    let mask = Buffer2::new(7, 7, mask_data);
-    let mut dilated = Buffer2::new_filled(7, 7, false);
+    let mask = make_bit_mask(7, 7, mask_data);
+    let mut dilated = BitBuffer2::new_filled(7, 7, false);
     dilate_mask(&mask, 2, &mut dilated);
 
     // Should dilate to 5x5 square centered at (3,3)
     let mut count = 0;
     for y in 1..=5 {
         for x in 1..=5 {
-            assert!(dilated[y * 7 + x], "Pixel ({}, {}) should be true", x, y);
+            assert!(
+                dilated.get(y * 7 + x),
+                "Pixel ({}, {}) should be true",
+                x,
+                y
+            );
             count += 1;
         }
     }
@@ -464,18 +485,18 @@ fn test_dilate_mask_corner_pixel() {
     // Pixel at corner (0,0), dilation should be clipped to image bounds
     let mut mask_data = vec![false; 16];
     mask_data[0] = true;
-    let mask = Buffer2::new(4, 4, mask_data);
-    let mut dilated = Buffer2::new_filled(4, 4, false);
+    let mask = make_bit_mask(4, 4, mask_data);
+    let mut dilated = BitBuffer2::new_filled(4, 4, false);
     dilate_mask(&mask, 1, &mut dilated);
 
     // Only 2x2 corner should be dilated
-    assert!(dilated[0 * 4 + 0]);
-    assert!(dilated[0 * 4 + 1]);
-    assert!(dilated[1 * 4 + 0]);
-    assert!(dilated[1 * 4 + 1]);
+    assert!(dilated.get(0 * 4 + 0));
+    assert!(dilated.get(0 * 4 + 1));
+    assert!(dilated.get(1 * 4 + 0));
+    assert!(dilated.get(1 * 4 + 1));
     // Rest should be false
-    assert!(!dilated[0 * 4 + 2]);
-    assert!(!dilated[2 * 4 + 0]);
+    assert!(!dilated.get(0 * 4 + 2));
+    assert!(!dilated.get(2 * 4 + 0));
 }
 
 #[test]
@@ -483,17 +504,17 @@ fn test_dilate_mask_edge_pixel() {
     // Pixel at edge (0, 2) in 5x5
     let mut mask_data = vec![false; 25];
     mask_data[2 * 5 + 0] = true;
-    let mask = Buffer2::new(5, 5, mask_data);
-    let mut dilated = Buffer2::new_filled(5, 5, false);
+    let mask = make_bit_mask(5, 5, mask_data);
+    let mut dilated = BitBuffer2::new_filled(5, 5, false);
     dilate_mask(&mask, 1, &mut dilated);
 
     // Should expand but clip at left edge
-    assert!(dilated[1 * 5 + 0]);
-    assert!(dilated[1 * 5 + 1]);
-    assert!(dilated[2 * 5 + 0]);
-    assert!(dilated[2 * 5 + 1]);
-    assert!(dilated[3 * 5 + 0]);
-    assert!(dilated[3 * 5 + 1]);
+    assert!(dilated.get(1 * 5 + 0));
+    assert!(dilated.get(1 * 5 + 1));
+    assert!(dilated.get(2 * 5 + 0));
+    assert!(dilated.get(2 * 5 + 1));
+    assert!(dilated.get(3 * 5 + 0));
+    assert!(dilated.get(3 * 5 + 1));
 }
 
 #[test]
@@ -503,18 +524,18 @@ fn test_dilate_mask_merges_nearby_pixels() {
     let mut mask_data = vec![false; 7];
     mask_data[0] = true;
     mask_data[3] = true;
-    let mask = Buffer2::new(7, 1, mask_data);
-    let mut dilated = Buffer2::new_filled(7, 1, false);
+    let mask = make_bit_mask(7, 1, mask_data);
+    let mut dilated = BitBuffer2::new_filled(7, 1, false);
     dilate_mask(&mask, 2, &mut dilated);
 
     // Both should expand and merge
     // Pixel 0 expands to 0,1,2
     // Pixel 3 expands to 1,2,3,4,5
     // Merged: 0,1,2,3,4,5
-    for (i, &val) in dilated.iter().enumerate().take(6) {
-        assert!(val, "Pixel {} should be true after dilation", i);
+    for i in 0..6 {
+        assert!(dilated.get(i), "Pixel {} should be true after dilation", i);
     }
-    assert!(!dilated[6]);
+    assert!(!dilated.get(6));
 }
 
 // =============================================================================
@@ -526,12 +547,12 @@ fn test_dilate_mask_large_radius() {
     // 11x11 image with center pixel, radius 5 should fill most of image
     let mut mask_data = vec![false; 121];
     mask_data[5 * 11 + 5] = true; // center
-    let mask = Buffer2::new(11, 11, mask_data);
-    let mut dilated = Buffer2::new_filled(11, 11, false);
+    let mask = make_bit_mask(11, 11, mask_data);
+    let mut dilated = BitBuffer2::new_filled(11, 11, false);
     dilate_mask(&mask, 5, &mut dilated);
 
     // Should create 11x11 square (capped at image bounds)
-    assert!(dilated.iter().all(|&x| x), "All pixels should be dilated");
+    assert!(dilated.iter().all(|x| x), "All pixels should be dilated");
 }
 
 #[test]
@@ -539,12 +560,12 @@ fn test_dilate_mask_radius_larger_than_image() {
     // Radius larger than image dimensions
     let mut mask_data = vec![false; 9];
     mask_data[4] = true; // center of 3x3
-    let mask = Buffer2::new(3, 3, mask_data);
-    let mut dilated = Buffer2::new_filled(3, 3, false);
+    let mask = make_bit_mask(3, 3, mask_data);
+    let mut dilated = BitBuffer2::new_filled(3, 3, false);
     dilate_mask(&mask, 100, &mut dilated);
 
     // Should fill entire image
-    assert!(dilated.iter().all(|&x| x));
+    assert!(dilated.iter().all(|x| x));
 }
 
 #[test]
@@ -555,19 +576,19 @@ fn test_dilate_mask_all_corners() {
     mask_data[0 * 5 + 4] = true; // top-right
     mask_data[4 * 5 + 0] = true; // bottom-left
     mask_data[4 * 5 + 4] = true; // bottom-right
-    let mask = Buffer2::new(5, 5, mask_data);
-    let mut dilated = Buffer2::new_filled(5, 5, false);
+    let mask = make_bit_mask(5, 5, mask_data);
+    let mut dilated = BitBuffer2::new_filled(5, 5, false);
     dilate_mask(&mask, 1, &mut dilated);
 
     // Check corner expansions
     // Top-left expands to (0,0), (0,1), (1,0), (1,1)
-    assert!(dilated[0 * 5 + 0]);
-    assert!(dilated[0 * 5 + 1]);
-    assert!(dilated[1 * 5 + 0]);
-    assert!(dilated[1 * 5 + 1]);
+    assert!(dilated.get(0 * 5 + 0));
+    assert!(dilated.get(0 * 5 + 1));
+    assert!(dilated.get(1 * 5 + 0));
+    assert!(dilated.get(1 * 5 + 1));
 
     // Center should still be false (corners don't reach it with radius 1)
-    assert!(!dilated[2 * 5 + 2]);
+    assert!(!dilated.get(2 * 5 + 2));
 }
 
 #[test]
@@ -577,18 +598,18 @@ fn test_dilate_mask_full_coverage_radius_2() {
     let mut mask_data = vec![false; 9];
     mask_data[0] = true;
     mask_data[4] = true;
-    let mask = Buffer2::new(9, 1, mask_data);
-    let mut dilated = Buffer2::new_filled(9, 1, false);
+    let mask = make_bit_mask(9, 1, mask_data);
+    let mut dilated = BitBuffer2::new_filled(9, 1, false);
     dilate_mask(&mask, 2, &mut dilated);
 
     // Pixel 0 expands to 0,1,2
     // Pixel 4 expands to 2,3,4,5,6
     // Together: 0,1,2,3,4,5,6 (overlap at 2)
-    for (i, &val) in dilated.iter().enumerate().take(7) {
-        assert!(val, "Pixel {} should be true", i);
+    for i in 0..7 {
+        assert!(dilated.get(i), "Pixel {} should be true", i);
     }
-    assert!(!dilated[7]);
-    assert!(!dilated[8]);
+    assert!(!dilated.get(7));
+    assert!(!dilated.get(8));
 }
 
 #[test]
@@ -596,19 +617,24 @@ fn test_dilate_mask_non_square_image() {
     // 7x3 image with pixel at (3, 1)
     let mut mask_data = vec![false; 21];
     mask_data[1 * 7 + 3] = true;
-    let mask = Buffer2::new(7, 3, mask_data);
-    let mut dilated = Buffer2::new_filled(7, 3, false);
+    let mask = make_bit_mask(7, 3, mask_data);
+    let mut dilated = BitBuffer2::new_filled(7, 3, false);
     dilate_mask(&mask, 1, &mut dilated);
 
     // Should create 3x3 square centered at (3, 1)
     for y in 0..3 {
         for x in 2..=4 {
-            assert!(dilated[y * 7 + x], "Pixel ({}, {}) should be true", x, y);
+            assert!(
+                dilated.get(y * 7 + x),
+                "Pixel ({}, {}) should be true",
+                x,
+                y
+            );
         }
     }
     // Outside should be false
-    assert!(!dilated[0 * 7 + 0]);
-    assert!(!dilated[0 * 7 + 6]);
+    assert!(!dilated.get(0 * 7 + 0));
+    assert!(!dilated.get(0 * 7 + 6));
 }
 
 #[test]
@@ -618,14 +644,14 @@ fn test_dilate_mask_preserves_original_pixels() {
     mask_data[0] = true;
     mask_data[12] = true; // center
     mask_data[24] = true;
-    let mask = Buffer2::new(5, 5, mask_data);
-    let mut dilated = Buffer2::new_filled(5, 5, false);
+    let mask = make_bit_mask(5, 5, mask_data);
+    let mut dilated = BitBuffer2::new_filled(5, 5, false);
     dilate_mask(&mask, 1, &mut dilated);
 
     // All original pixels must be present
-    assert!(dilated[0]);
-    assert!(dilated[12]);
-    assert!(dilated[24]);
+    assert!(dilated.get(0));
+    assert!(dilated.get(12));
+    assert!(dilated.get(24));
 }
 
 // =============================================================================
@@ -1074,7 +1100,7 @@ fn test_connected_components_and_extract_integration() {
     // Peak at (7, 7)
     pixels[7 * 10 + 7] = 0.8;
 
-    let (labels, num_labels) = connected_components(&Buffer2::new(10, 10, mask));
+    let (labels, num_labels) = connected_components(&make_bit_mask(10, 10, mask));
     let pixels = Buffer2::new(10, 10, pixels);
     let candidates = extract_candidates(
         &pixels,
@@ -1124,7 +1150,7 @@ fn test_connected_components_complex_merge() {
     mask[7] = true;
     mask[8] = true;
 
-    let (labels, num_labels) = connected_components(&Buffer2::new(3, 3, mask));
+    let (labels, num_labels) = connected_components(&make_bit_mask(3, 3, mask));
 
     // All should be one component connected through the right column
     assert_eq!(num_labels, 1);

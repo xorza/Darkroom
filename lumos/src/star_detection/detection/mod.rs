@@ -6,12 +6,12 @@ mod tests;
 use super::StarDetectionConfig;
 use super::background::BackgroundMap;
 use super::common::dilate_mask;
-use super::common::threshold_mask::{create_threshold_mask, create_threshold_mask_filtered};
+use super::common::threshold_mask::packed::create_threshold_mask_packed;
 use super::deblend::{
     ComponentData, DeblendConfig, MultiThresholdDeblendConfig, Pixel,
     deblend_component as multi_threshold_deblend, deblend_local_maxima,
 };
-use crate::common::Buffer2;
+use crate::common::{BitBuffer2, Buffer2};
 
 /// A candidate star region before centroid refinement.
 #[derive(Debug)]
@@ -91,10 +91,11 @@ pub fn detect_stars(
     let detection_config = DetectionConfig::from(config);
 
     // Create binary mask of above-threshold pixels
-    let mut mask = Buffer2::new_filled(width, height, false);
-    create_threshold_mask(
-        pixels,
-        background,
+    let mut mask = BitBuffer2::new_filled(width, height, false);
+    create_threshold_mask_packed(
+        pixels.pixels(),
+        background.background.pixels(),
+        background.noise.pixels(),
         detection_config.sigma_threshold,
         &mut mask,
     );
@@ -102,7 +103,7 @@ pub fn detect_stars(
     // Dilate mask to connect nearby pixels that may be separated due to
     // Bayer pattern artifacts or noise. Use radius 1 (3x3 structuring element)
     // to minimize merging of close stars while still connecting fragmented detections.
-    let mut dilated = Buffer2::new_filled(width, height, false);
+    let mut dilated = BitBuffer2::new_filled(width, height, false);
     dilate_mask(&mask, 1, &mut dilated);
     std::mem::swap(&mut mask, &mut dilated);
 
@@ -140,7 +141,7 @@ pub fn detect_stars(
 /// 2. Second pass: Parallel label flattening using precomputed root mapping
 ///
 /// For images >1M pixels, the second pass is parallelized using rayon.
-pub(crate) fn connected_components(mask: &Buffer2<bool>) -> (Vec<u32>, usize) {
+pub(crate) fn connected_components(mask: &BitBuffer2) -> (Vec<u32>, usize) {
     let width = mask.width();
     let height = mask.height();
 
@@ -154,18 +155,18 @@ pub(crate) fn connected_components(mask: &Buffer2<bool>) -> (Vec<u32>, usize) {
         let row_start = y * width;
         for x in 0..width {
             let idx = row_start + x;
-            if !mask[idx] {
+            if !mask.get(idx) {
                 continue;
             }
 
             // Check neighbors: left and top only (for forward scan)
-            let left_label = if x > 0 && mask[idx - 1] {
+            let left_label = if x > 0 && mask.get(idx - 1) {
                 labels[idx - 1]
             } else {
                 0
             };
 
-            let top_label = if y > 0 && mask[idx - width] {
+            let top_label = if y > 0 && mask.get(idx - width) {
                 labels[idx - width]
             } else {
                 0
@@ -294,10 +295,13 @@ pub fn detect_stars_filtered(
 
     // Create binary mask from the filtered image
     // The threshold is based on noise in the filtered image
-    let mut mask = Buffer2::new_filled(width, height, false);
-    create_threshold_mask_filtered(
-        filtered,
-        background,
+    // For filtered images, background is already subtracted, so pass zeros for bg
+    let mut mask = BitBuffer2::new_filled(width, height, false);
+    let zeros = vec![0.0f32; width * height];
+    super::common::threshold_mask::packed::create_threshold_mask_packed_impl::<false>(
+        filtered.pixels(),
+        &zeros,
+        background.noise.pixels(),
         detection_config.sigma_threshold,
         &mut mask,
     );
@@ -305,7 +309,7 @@ pub fn detect_stars_filtered(
     // Dilate mask with radius 1 to connect fragmented detections while
     // minimizing merging of close stars. Matched filtering already provides
     // good connectivity, so minimal dilation is needed.
-    let mut dilated = Buffer2::new_filled(width, height, false);
+    let mut dilated = BitBuffer2::new_filled(width, height, false);
     dilate_mask(&mask, 1, &mut dilated);
     std::mem::swap(&mut mask, &mut dilated);
     drop(dilated);

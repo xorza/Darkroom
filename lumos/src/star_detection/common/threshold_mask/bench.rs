@@ -1,10 +1,11 @@
 //! Benchmarks for threshold mask creation.
 
 use super::*;
+use crate::common::BitBuffer2;
 use ::bench::quick_bench;
 use std::hint::black_box;
 
-fn create_bench_data(size: usize) -> (Buffer2<f32>, BackgroundMap, Buffer2<bool>) {
+fn create_bench_data(size: usize) -> (Vec<f32>, Vec<f32>, Vec<f32>) {
     let mut pixels_data = vec![0.0f32; size];
     let mut bg = vec![1.0f32; size];
     let mut noise = vec![0.1f32; size];
@@ -19,37 +20,25 @@ fn create_bench_data(size: usize) -> (Buffer2<f32>, BackgroundMap, Buffer2<bool>
     let height = size / width;
     let actual_size = width * height;
 
-    let pixels = Buffer2::new(width, height, pixels_data[..actual_size].to_vec());
-    let background = BackgroundMap {
-        background: Buffer2::new(width, height, bg[..actual_size].to_vec()),
-        noise: Buffer2::new(width, height, noise[..actual_size].to_vec()),
-    };
-    let mask = Buffer2::new_filled(width, height, false);
-
-    (pixels, background, mask)
+    (
+        pixels_data[..actual_size].to_vec(),
+        bg[..actual_size].to_vec(),
+        noise[..actual_size].to_vec(),
+    )
 }
 
 #[quick_bench(warmup_iters = 3, iters = 10)]
 fn bench_threshold_mask_4k(b: ::bench::Bencher) {
-    let (pixels, background, mut mask) = create_bench_data(4096 * 4096);
+    let (pixels, bg, noise) = create_bench_data(4096 * 4096);
+    let mut packed_mask = BitBuffer2::new_filled(4096, 4096, false);
 
-    b.bench_labeled("scalar", || {
-        scalar::process_chunk_scalar::<true>(
-            black_box(pixels.pixels()),
-            black_box(background.background.pixels()),
-            black_box(background.noise.pixels()),
+    b.bench_labeled("packed", || {
+        packed::create_threshold_mask_packed(
+            black_box(&pixels),
+            black_box(&bg),
+            black_box(&noise),
             black_box(3.0),
-            black_box(mask.pixels_mut()),
-        );
-    });
-
-    b.bench_labeled("simd", || {
-        process_chunk_simd::<true>(
-            black_box(pixels.pixels()),
-            black_box(background.background.pixels()),
-            black_box(background.noise.pixels()),
-            black_box(3.0),
-            black_box(mask.pixels_mut()),
+            black_box(&mut packed_mask),
         );
     });
 }

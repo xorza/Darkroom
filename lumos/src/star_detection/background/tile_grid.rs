@@ -1,6 +1,6 @@
 //! Tile grid for background estimation interpolation.
 
-use crate::common::Buffer2;
+use crate::common::{BitBuffer2, Buffer2};
 use crate::math::median_f32_mut;
 use crate::star_detection::common::sigma_clipped_median_mad;
 use rayon::prelude::*;
@@ -29,7 +29,7 @@ impl TileGrid {
     pub fn new_with_mask(
         pixels: &Buffer2<f32>,
         tile_size: usize,
-        mask: Option<&Buffer2<bool>>,
+        mask: Option<&BitBuffer2>,
         min_pixels: usize,
     ) -> Self {
         let width = pixels.width();
@@ -56,7 +56,7 @@ impl TileGrid {
     #[allow(clippy::too_many_arguments)]
     fn compute_tile_stats(
         pixels: &Buffer2<f32>,
-        mask: Option<&Buffer2<bool>>,
+        mask: Option<&BitBuffer2>,
         x_start: usize,
         x_end: usize,
         y_start: usize,
@@ -74,7 +74,7 @@ impl TileGrid {
                 let row_start = y * width;
                 for x in x_start..x_end {
                     let idx = row_start + x;
-                    if !mask[idx] {
+                    if !mask.get(idx) {
                         values.push(pixels[idx]);
                     }
                 }
@@ -158,7 +158,7 @@ impl TileGrid {
     fn fill_tile_stats(
         &mut self,
         pixels: &Buffer2<f32>,
-        mask: Option<&Buffer2<bool>>,
+        mask: Option<&BitBuffer2>,
         min_pixels: usize,
     ) {
         let tiles_x = self.tiles_x();
@@ -431,13 +431,12 @@ mod tests {
         let pixels = Buffer2::new(width, height, data);
 
         // Mask out the top-left quadrant (the 0.8 values)
-        let mut mask_data = vec![false; width * height];
+        let mut mask = BitBuffer2::new_filled(width, height, false);
         for y in 0..32 {
             for x in 0..32 {
-                mask_data[y * width + x] = true;
+                mask.set_xy(x, y, true);
             }
         }
-        let mask = Buffer2::new(width, height, mask_data);
 
         let grid = TileGrid::new_with_mask(&pixels, 32, Some(&mask), 100);
 
@@ -463,15 +462,14 @@ mod tests {
         let pixels = Buffer2::new(width, height, data);
 
         // Mask almost all pixels in top-left tile
-        let mut mask_data = vec![false; width * height];
+        let mut mask = BitBuffer2::new_filled(width, height, false);
         for y in 0..32 {
             for x in 0..32 {
                 if !(x == 0 && y == 0) {
-                    mask_data[y * width + x] = true;
+                    mask.set_xy(x, y, true);
                 }
             }
         }
-        let mask = Buffer2::new(width, height, mask_data);
 
         // min_pixels = 100, but only 1 pixel unmasked, so should fall back
         let grid = TileGrid::new_with_mask(&pixels, 32, Some(&mask), 100);

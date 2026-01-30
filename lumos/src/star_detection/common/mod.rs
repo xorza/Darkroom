@@ -5,7 +5,7 @@
 
 pub mod threshold_mask;
 
-use crate::common::Buffer2;
+use crate::common::BitBuffer2;
 use crate::math::mad_to_sigma;
 
 /// Stamp radius as a multiple of FWHM.
@@ -49,10 +49,10 @@ pub fn compute_stamp_radius(expected_fwhm: f32) -> usize {
 /// estimation to mask object wings.
 ///
 /// # Arguments
-/// * `mask` - Input binary mask
+/// * `mask` - Input binary mask (BitBuffer2)
 /// * `radius` - Dilation radius in pixels
 /// * `output` - Output buffer for dilated mask (will be cleared and filled)
-pub fn dilate_mask(mask: &Buffer2<bool>, radius: usize, output: &mut Buffer2<bool>) {
+pub fn dilate_mask(mask: &BitBuffer2, radius: usize, output: &mut BitBuffer2) {
     assert_eq!(mask.width(), output.width(), "width mismatch");
     assert_eq!(mask.height(), output.height(), "height mismatch");
     output.fill(false);
@@ -62,7 +62,7 @@ pub fn dilate_mask(mask: &Buffer2<bool>, radius: usize, output: &mut Buffer2<boo
 
     for y in 0..height {
         for x in 0..width {
-            if mask[(x, y)] {
+            if mask.get_xy(x, y) {
                 // Set all pixels within radius
                 let y_min = y.saturating_sub(radius);
                 let y_max = (y + radius).min(height - 1);
@@ -71,7 +71,7 @@ pub fn dilate_mask(mask: &Buffer2<bool>, radius: usize, output: &mut Buffer2<boo
 
                 for dy in y_min..=y_max {
                     for dx in x_min..=x_max {
-                        output[(dx, dy)] = true;
+                        output.set_xy(dx, dy, true);
                     }
                 }
             }

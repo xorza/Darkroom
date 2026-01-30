@@ -13,7 +13,7 @@ use imaginarium::ProcessingContext;
 use wgpu::util::DeviceExt;
 
 use super::pipeline::{GpuDilateMaskPipeline, GpuThresholdMaskPipeline};
-use crate::common::Buffer2;
+use crate::common::{BitBuffer2, Buffer2};
 use crate::star_detection::StarDetectionConfig;
 use crate::star_detection::background::BackgroundMap;
 use crate::star_detection::deblend::DeblendConfig;
@@ -451,7 +451,14 @@ pub fn detect_stars_gpu_with_detector(
 
     // Create threshold mask on GPU (already includes dilation)
     let mask_vec = detector.create_mask(pixels, background, &gpu_config);
-    let mask = Buffer2::new(width, height, mask_vec);
+
+    // Convert Vec<bool> to BitBuffer2 for connected components
+    let mut mask = BitBuffer2::new_filled(width, height, false);
+    for (i, &v) in mask_vec.iter().enumerate() {
+        if v {
+            mask.set(i, true);
+        }
+    }
 
     // Connected component labeling on CPU (optimal for sparse images)
     let (labels, num_labels) = connected_components(&mask);

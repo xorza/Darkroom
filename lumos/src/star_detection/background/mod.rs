@@ -13,8 +13,8 @@ mod tests;
 mod simd;
 mod tile_grid;
 
-use crate::common::Buffer2;
 use crate::common::parallel::ParZipMut;
+use crate::common::{BitBuffer2, Buffer2};
 use rayon::prelude::*;
 
 use tile_grid::TileGrid;
@@ -172,8 +172,8 @@ impl BackgroundConfig {
         let width = pixels.width();
         let height = pixels.height();
 
-        let mut mask = Buffer2::new_filled(width, height, false);
-        let mut scratch = Buffer2::new_filled(width, height, false);
+        let mut mask = BitBuffer2::new_filled(width, height, false);
+        let mut scratch = BitBuffer2::new_filled(width, height, false);
 
         for _iter in 0..self.iterations {
             create_object_mask(
@@ -235,13 +235,14 @@ fn create_object_mask(
     background: &BackgroundMap,
     detection_sigma: f32,
     dilation_radius: usize,
-    output: &mut Buffer2<bool>,
-    scratch: &mut Buffer2<bool>,
+    output: &mut BitBuffer2,
+    scratch: &mut BitBuffer2,
 ) {
-    // Create threshold mask using SIMD-optimized implementation
-    super::common::threshold_mask::create_threshold_mask(
-        pixels,
-        background,
+    // Create threshold mask using packed SIMD-optimized implementation
+    super::common::threshold_mask::packed::create_threshold_mask_packed(
+        pixels.pixels(),
+        background.background.pixels(),
+        background.noise.pixels(),
         detection_sigma,
         output,
     );
@@ -257,7 +258,7 @@ fn create_object_mask(
 fn estimate_background_masked(
     pixels: &Buffer2<f32>,
     tile_size: usize,
-    mask: &Buffer2<bool>,
+    mask: &BitBuffer2,
     min_unmasked_fraction: f32,
     output: &mut BackgroundMap,
 ) {
