@@ -50,6 +50,11 @@ impl<T> Buffer2<T> {
     }
 
     #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.pixels.is_empty()
+    }
+
+    #[inline]
     pub fn width(&self) -> usize {
         self.width
     }
