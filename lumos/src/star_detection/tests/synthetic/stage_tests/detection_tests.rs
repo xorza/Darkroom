@@ -67,7 +67,7 @@ fn test_detection_sparse() {
 
     // Detect candidates
     let det_config = StarDetectionConfig::default();
-    let candidates = detect_stars(&pixels, &background, &det_config);
+    let candidates = detect_stars(&pixels, None, &background, &det_config);
 
     println!("Ground truth: {} stars", ground_truth.len());
     println!("Detected candidates: {}", candidates.len());
@@ -159,7 +159,7 @@ fn test_detection_thresholds() {
             },
             ..Default::default()
         };
-        let candidates = detect_stars(&pixels, &background, &det_config);
+        let candidates = detect_stars(&pixels, None, &background, &det_config);
 
         let truth_positions: Vec<(f32, f32)> = ground_truth.iter().map(|s| (s.x, s.y)).collect();
         let candidate_positions: Vec<(usize, usize)> =
@@ -258,7 +258,7 @@ fn test_detection_area_filter() {
             max_area,
             ..Default::default()
         };
-        let candidates = detect_stars(&pixels, &background, &det_config);
+        let candidates = detect_stars(&pixels, None, &background, &det_config);
 
         let truth_positions: Vec<(f32, f32)> = ground_truth.iter().map(|s| (s.x, s.y)).collect();
         let candidate_positions: Vec<(usize, usize)> =

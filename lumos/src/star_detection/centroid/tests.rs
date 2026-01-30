@@ -49,7 +49,7 @@ fn test_centroid_accuracy() {
     }
     .estimate(&pixels);
     let config = StarDetectionConfig::default();
-    let candidates = detect_stars(&pixels, &bg, &config);
+    let candidates = detect_stars(&pixels, None, &bg, &config);
 
     assert_eq!(candidates.len(), 1);
 
@@ -95,7 +95,7 @@ fn test_fwhm_estimation() {
         max_area: 1000,
         ..StarDetectionConfig::default()
     };
-    let candidates = detect_stars(&pixels, &bg, &config);
+    let candidates = detect_stars(&pixels, None, &bg, &config);
 
     assert_eq!(candidates.len(), 1);
 
@@ -126,7 +126,7 @@ fn test_circular_star_eccentricity() {
     }
     .estimate(&pixels);
     let config = StarDetectionConfig::default();
-    let candidates = detect_stars(&pixels, &bg, &config);
+    let candidates = detect_stars(&pixels, None, &bg, &config);
 
     let star =
         compute_centroid(&pixels, &bg, &candidates[0], &config).expect("Should compute centroid");
@@ -150,7 +150,7 @@ fn test_snr_positive() {
     }
     .estimate(&pixels);
     let config = StarDetectionConfig::default();
-    let candidates = detect_stars(&pixels, &bg, &config);
+    let candidates = detect_stars(&pixels, None, &bg, &config);
 
     let star =
         compute_centroid(&pixels, &bg, &candidates[0], &config).expect("Should compute centroid");
@@ -1269,7 +1269,7 @@ fn test_compute_centroid_multiple_stars_independent() {
         edge_margin: 10,
         ..StarDetectionConfig::default()
     };
-    let candidates = detect_stars(&pixels, &bg, &config);
+    let candidates = detect_stars(&pixels, None, &bg, &config);
 
     assert_eq!(candidates.len(), 2, "Should detect two stars");
 
@@ -1311,7 +1311,7 @@ fn test_circular_star_roundness() {
     }
     .estimate(&pixels);
     let config = StarDetectionConfig::default();
-    let candidates = detect_stars(&pixels, &bg, &config);
+    let candidates = detect_stars(&pixels, None, &bg, &config);
 
     assert_eq!(candidates.len(), 1);
 
@@ -1363,7 +1363,7 @@ fn test_elongated_x_star_roundness() {
     }
     .estimate(&pixels);
     let config = StarDetectionConfig::default();
-    let candidates = detect_stars(&pixels, &bg, &config);
+    let candidates = detect_stars(&pixels, None, &bg, &config);
 
     assert!(!candidates.is_empty());
 
@@ -1415,7 +1415,7 @@ fn test_asymmetric_star_roundness2() {
     }
     .estimate(&pixels);
     let config = StarDetectionConfig::default();
-    let candidates = detect_stars(&pixels, &bg, &config);
+    let candidates = detect_stars(&pixels, None, &bg, &config);
 
     assert!(!candidates.is_empty());
 
@@ -1443,7 +1443,7 @@ fn test_laplacian_snr_computed_for_star() {
     }
     .estimate(&pixels);
     let config = StarDetectionConfig::default();
-    let candidates = detect_stars(&pixels, &bg, &config);
+    let candidates = detect_stars(&pixels, None, &bg, &config);
 
     assert_eq!(candidates.len(), 1);
 

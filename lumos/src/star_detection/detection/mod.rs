@@ -72,17 +72,19 @@ impl From<&StarDetectionConfig> for DetectionConfig {
     }
 }
 
-/// Detect star candidates in an image (without matched filtering).
+/// Detect star candidates in an image.
 ///
 /// Uses connected component labeling to find regions above the detection threshold.
-/// For better faint-star detection, use `find_stars()` with `expected_fwhm > 0`.
 ///
 /// # Arguments
-/// * `pixels` - Image pixel data
+/// * `pixels` - Image pixel data (used for peak values and centroiding)
+/// * `filtered` - Optional matched-filtered image for thresholding (background-subtracted).
+///   If None, thresholds against `pixels` using background map.
 /// * `background` - Background map from `estimate_background`
 /// * `config` - Detection configuration
 pub fn detect_stars(
     pixels: &Buffer2<f32>,
+    filtered: Option<&Buffer2<f32>>,
     background: &BackgroundMap,
     config: &StarDetectionConfig,
 ) -> Vec<StarCandidate> {
@@ -92,13 +94,26 @@ pub fn detect_stars(
 
     // Create binary mask of above-threshold pixels
     let mut mask = BitBuffer2::new_filled(width, height, false);
-    create_threshold_mask(
-        pixels.pixels(),
-        background.background.pixels(),
-        background.noise.pixels(),
-        detection_config.sigma_threshold,
-        &mut mask,
-    );
+    if let Some(filtered) = filtered {
+        debug_assert_eq!(width, filtered.width());
+        debug_assert_eq!(height, filtered.height());
+        // Filtered image is background-subtracted, threshold = sigma * noise
+        create_threshold_mask_filtered(
+            filtered.pixels(),
+            background.noise.pixels(),
+            detection_config.sigma_threshold,
+            &mut mask,
+        );
+    } else {
+        // No filtering, threshold = background + sigma * noise
+        create_threshold_mask(
+            pixels.pixels(),
+            background.background.pixels(),
+            background.noise.pixels(),
+            detection_config.sigma_threshold,
+            &mut mask,
+        );
+    }
 
     // Dilate mask to connect nearby pixels that may be separated due to
     // Bayer pattern artifacts or noise. Use radius 1 (3x3 structuring element)
@@ -110,7 +125,7 @@ pub fn detect_stars(
     // Find connected components
     let (labels, num_labels) = connected_components(&mask);
 
-    // Extract candidate properties with deblending
+    // Extract candidate properties with deblending (always use original pixels for peak values)
     let deblend_config = DeblendConfig::from(config);
     let mut candidates = extract_candidates(
         pixels,
@@ -268,74 +283,6 @@ fn union(parent: &mut [u32], a: u32, b: u32) {
             parent[(root_a - 1) as usize] = root_b;
         }
     }
-}
-
-/// Detect star candidates using a filtered image for thresholding.
-///
-/// This variant uses matched filtering (Gaussian convolution) to improve SNR
-/// for faint star detection. The filtered image is used for thresholding,
-/// while the original image is used for peak values and centroiding.
-///
-/// # Arguments
-/// * `pixels` - Original image pixel data (for peak values)
-/// * `filtered` - Matched-filtered image (background-subtracted and convolved)
-/// * `background` - Background map (for noise estimates)
-/// * `config` - Detection configuration
-pub fn detect_stars_filtered(
-    pixels: &Buffer2<f32>,
-    filtered: &Buffer2<f32>,
-    background: &BackgroundMap,
-    config: &StarDetectionConfig,
-) -> Vec<StarCandidate> {
-    let width = pixels.width();
-    let height = pixels.height();
-    debug_assert_eq!(width, filtered.width());
-    debug_assert_eq!(height, filtered.height());
-    let detection_config = DetectionConfig::from(config);
-
-    // Create binary mask from the filtered image
-    // The threshold is based on noise in the filtered image
-    let mut mask = BitBuffer2::new_filled(width, height, false);
-    create_threshold_mask_filtered(
-        filtered.pixels(),
-        background.noise.pixels(),
-        detection_config.sigma_threshold,
-        &mut mask,
-    );
-
-    // Dilate mask with radius 1 to connect fragmented detections while
-    // minimizing merging of close stars. Matched filtering already provides
-    // good connectivity, so minimal dilation is needed.
-    let mut dilated = BitBuffer2::new_filled(width, height, false);
-    dilate_mask(&mask, 1, &mut dilated);
-    std::mem::swap(&mut mask, &mut dilated);
-    drop(dilated);
-
-    // Find connected components
-    let (labels, num_labels) = connected_components(&mask);
-
-    // Extract candidate properties using ORIGINAL pixels for peak values, with deblending
-    let deblend_config = DeblendConfig::from(config);
-    let mut candidates = extract_candidates(
-        pixels,
-        &labels,
-        num_labels,
-        &deblend_config,
-        detection_config.max_area,
-    );
-
-    // Filter candidates
-    candidates.retain(|c| {
-        // Size filter
-        c.area >= detection_config.min_area
-            // Edge filter
-            && c.x_min >= detection_config.edge_margin
-            && c.y_min >= detection_config.edge_margin
-            && c.x_max < width - detection_config.edge_margin
-            && c.y_max < height - detection_config.edge_margin
-    });
-
-    candidates
 }
 
 impl From<&StarDetectionConfig> for DeblendConfig {

@@ -186,7 +186,7 @@ fn gaussian_convolve_2d_direct(pixels: &Buffer2<f32>, sigma: f32) -> Buffer2<f32
     }
 
     let mut output = vec![0.0f32; width * height];
-
+    // todo paralelyze
     for y in 0..height {
         for x in 0..width {
             let mut sum = 0.0f32;
@@ -230,47 +230,19 @@ fn gaussian_convolve_2d_direct(pixels: &Buffer2<f32>, sigma: f32) -> Buffer2<f32
 /// matching the expected PSF. The result is normalized to preserve flux
 /// and can be directly thresholded.
 ///
-/// # Arguments
-/// * `pixels` - Input image buffer
-/// * `background` - Per-pixel background values
-/// * `fwhm` - Expected FWHM of stars in pixels
-///
-/// # Returns
-/// Convolved, background-subtracted image
-pub fn matched_filter(pixels: &Buffer2<f32>, background: &Buffer2<f32>, fwhm: f32) -> Buffer2<f32> {
-    assert_eq!(pixels.width(), background.width());
-    assert_eq!(pixels.height(), background.height());
-
-    // Subtract background first
-    let subtracted: Vec<f32> = pixels
-        .iter()
-        .zip(background.iter())
-        .map(|(&p, &b): (&f32, &f32)| (p - b).max(0.0))
-        .collect();
-
-    // Convolve with Gaussian matching expected PSF
-    let sigma = fwhm_to_sigma(fwhm);
-    gaussian_convolve(
-        &Buffer2::new(pixels.width(), pixels.height(), subtracted),
-        sigma,
-    )
-}
-
-/// Apply matched filter with an elliptical Gaussian kernel.
-///
-/// This variant allows for non-circular PSF shapes, useful when stars are
-/// elongated due to tracking errors, field rotation, or optical aberrations.
+/// Supports elliptical PSF shapes for stars elongated due to tracking errors,
+/// field rotation, or optical aberrations. For circular PSFs, use `axis_ratio = 1.0`.
 ///
 /// # Arguments
 /// * `pixels` - Input image buffer
 /// * `background` - Per-pixel background values
-/// * `fwhm` - Expected FWHM of stars in pixels (major axis)
+/// * `fwhm` - Expected FWHM of stars in pixels (major axis for elliptical)
 /// * `axis_ratio` - Ratio of minor to major axis (0 < ratio <= 1, where 1 = circular)
 /// * `angle` - Position angle of major axis in radians (0 = along x-axis)
 ///
 /// # Returns
 /// Convolved, background-subtracted image
-pub fn matched_filter_elliptical(
+pub fn matched_filter(
     pixels: &Buffer2<f32>,
     background: &Buffer2<f32>,
     fwhm: f32,

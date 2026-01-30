@@ -50,8 +50,8 @@ pub use centroid::{
 
 // Low-level detection (for custom pipelines)
 pub(crate) use centroid::compute_centroid;
-pub(crate) use convolution::{matched_filter, matched_filter_elliptical};
-pub(crate) use detection::{detect_stars, detect_stars_filtered};
+pub(crate) use convolution::matched_filter;
+pub(crate) use detection::detect_stars;
 pub(crate) use median_filter::median_filter_3x3;
 
 // Configuration types
@@ -169,37 +169,25 @@ impl StarDetector {
         let background = self.config.background_config.estimate(&pixels);
 
         // Step 2: Detect star candidates
-        let candidates = {
-            if self.config.expected_fwhm > f32::EPSILON {
-                // Apply matched filter (Gaussian convolution) for better faint star detection
-                // This is the DAOFIND/SExtractor technique
-                let filtered = if self.config.psf_axis_ratio < 0.99 {
-                    tracing::debug!(
-                        "Applying elliptical matched filter with FWHM={:.1}, axis_ratio={:.2}, angle={:.2}",
-                        self.config.expected_fwhm,
-                        self.config.psf_axis_ratio,
-                        self.config.psf_angle
-                    );
-                    matched_filter_elliptical(
-                        &pixels,
-                        &background.background,
-                        self.config.expected_fwhm,
-                        self.config.psf_axis_ratio,
-                        self.config.psf_angle,
-                    )
-                } else {
-                    tracing::debug!(
-                        "Applying matched filter with FWHM={:.1} pixels",
-                        self.config.expected_fwhm
-                    );
-                    matched_filter(&pixels, &background.background, self.config.expected_fwhm)
-                };
-                detect_stars_filtered(&pixels, &filtered, &background, &self.config)
-            } else {
-                // No matched filter - use standard detection
-                detect_stars(&pixels, &background, &self.config)
-            }
+        // Optionally apply matched filter (Gaussian convolution) for better faint star detection
+        let filtered = if self.config.expected_fwhm > f32::EPSILON {
+            tracing::debug!(
+                "Applying matched filter with FWHM={:.1}, axis_ratio={:.2}, angle={:.1}°",
+                self.config.expected_fwhm,
+                self.config.psf_axis_ratio,
+                self.config.psf_angle.to_degrees()
+            );
+            Some(matched_filter(
+                &pixels,
+                &background.background,
+                self.config.expected_fwhm,
+                self.config.psf_axis_ratio,
+                self.config.psf_angle,
+            ))
+        } else {
+            None
         };
+        let candidates = detect_stars(&pixels, filtered.as_ref(), &background, &self.config);
 
         let mut diagnostics = StarDetectionDiagnostics {
             candidates_after_filtering: candidates.len(),
@@ -211,6 +199,7 @@ impl StarDetector {
         let mut stars: Vec<Star> = {
             candidates
                 .into_iter()
+                //paralelyze
                 .filter_map(|candidate| {
                     compute_centroid(&pixels, &background, &candidate, &self.config)
                 })

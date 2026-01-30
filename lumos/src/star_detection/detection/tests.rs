@@ -58,7 +58,7 @@ fn test_detect_single_star() {
     }
     .estimate(&pixels);
     let config = StarDetectionConfig::default();
-    let candidates = detect_stars(&pixels, &bg, &config);
+    let candidates = detect_stars(&pixels, None, &bg, &config);
 
     assert_eq!(candidates.len(), 1, "Should detect exactly one star");
     let star = &candidates[0];
@@ -103,7 +103,7 @@ fn test_detect_multiple_stars() {
         edge_margin: 5,
         ..Default::default()
     };
-    let candidates = detect_stars(&pixels_buf, &bg, &config);
+    let candidates = detect_stars(&pixels_buf, None, &bg, &config);
 
     assert_eq!(candidates.len(), 3, "Should detect three stars");
 }
@@ -124,7 +124,7 @@ fn test_reject_edge_stars() {
         edge_margin: 10,
         ..Default::default()
     };
-    let candidates = detect_stars(&pixels, &bg, &config);
+    let candidates = detect_stars(&pixels, None, &bg, &config);
 
     assert!(candidates.is_empty(), "Edge star should be rejected");
 }
@@ -149,7 +149,7 @@ fn test_reject_small_objects() {
         min_area: 26, // Must be > 25 to reject dilated single pixel (radius 2 = 5x5 = 25)
         ..Default::default()
     };
-    let candidates = detect_stars(&pixels_buf, &bg, &config);
+    let candidates = detect_stars(&pixels_buf, None, &bg, &config);
 
     assert!(candidates.is_empty(), "Single pixel should be rejected");
 }
@@ -167,7 +167,7 @@ fn test_empty_image() {
     }
     .estimate(&pixels_buf);
     let config = StarDetectionConfig::default();
-    let candidates = detect_stars(&pixels_buf, &bg, &config);
+    let candidates = detect_stars(&pixels_buf, None, &bg, &config);
 
     assert!(candidates.is_empty(), "Uniform image should have no stars");
 }
@@ -1574,7 +1574,7 @@ mod quick_benches {
         let background = background_map::uniform(1024, 1024, 0.1, 0.01);
         let config = StarDetectionConfig::default();
 
-        b.bench(|| detect_stars_filtered(&pixels, &filtered, &background, &config));
+        b.bench(|| detect_stars(&pixels, Some(&filtered), &background, &config));
     }
 
     #[quick_bench(warmup_iters = 1, iters = 3)]
@@ -1584,6 +1584,6 @@ mod quick_benches {
         let background = background_map::uniform(6144, 6144, 0.1, 0.01);
         let config = StarDetectionConfig::default();
 
-        b.bench(|| detect_stars_filtered(&pixels, &filtered, &background, &config));
+        b.bench(|| detect_stars(&pixels, Some(&filtered), &background, &config));
     }
 }

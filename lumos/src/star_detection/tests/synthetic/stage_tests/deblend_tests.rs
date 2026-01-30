@@ -76,7 +76,7 @@ fn test_deblend_star_pair() {
         ..Default::default()
     };
 
-    let candidates = detect_stars(&pixels_buf, &background, &config);
+    let candidates = detect_stars(&pixels_buf, None, &background, &config);
 
     // Create overlay
     let mut img = gray_to_rgb_image_stretched(&pixels, width, height);
@@ -176,7 +176,7 @@ fn test_deblend_chain() {
         ..Default::default()
     };
 
-    let candidates = detect_stars(&pixels_buf, &background, &config);
+    let candidates = detect_stars(&pixels_buf, None, &background, &config);
 
     // Create overlay
     let mut img = gray_to_rgb_image_stretched(&pixels, width, height);
@@ -278,7 +278,7 @@ fn test_deblend_unequal_pair() {
         ..Default::default()
     };
 
-    let candidates = detect_stars(&pixels_buf, &background, &config);
+    let candidates = detect_stars(&pixels_buf, None, &background, &config);
 
     // Create overlay
     let mut img = gray_to_rgb_image_stretched(&pixels, width, height);

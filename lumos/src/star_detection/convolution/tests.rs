@@ -262,7 +262,7 @@ fn test_matched_filter_subtracts_background() {
     let background = Buffer2::new(width, height, vec![0.3f32; width * height]);
     let pixels = Buffer2::new(width, height, vec![0.3f32; width * height]); // Same as background
 
-    let result = matched_filter(&pixels, &background, 3.0);
+    let result = matched_filter(&pixels, &background, 3.0, 1.0, 0.0);
 
     // Result should be near zero
     for v in result.iter() {
@@ -283,7 +283,7 @@ fn test_matched_filter_detects_star() {
     pixels[cy * width + cx] = 0.5;
 
     let pixels = Buffer2::new(width, height, pixels);
-    let result = matched_filter(&pixels, &background, 3.0);
+    let result = matched_filter(&pixels, &background, 3.0, 1.0, 0.0);
 
     // Peak should be positive and significant
     let peak = result[cy * width + cx];
@@ -323,7 +323,7 @@ fn test_matched_filter_boosts_snr() {
 
     let fwhm = sigma * FWHM_TO_SIGMA;
     let pixels = Buffer2::new(width, height, pixels);
-    let result = matched_filter(&pixels, &background, fwhm);
+    let result = matched_filter(&pixels, &background, fwhm, 1.0, 0.0);
 
     // Peak should be at star location
     let mut max_val = f32::MIN;
@@ -351,7 +351,7 @@ fn test_matched_filter_clips_negative() {
     let background = Buffer2::new(width, height, vec![0.5f32; width * height]);
     let pixels = Buffer2::new(width, height, vec![0.3f32; width * height]); // Below background
 
-    let result = matched_filter(&pixels, &background, 2.0);
+    let result = matched_filter(&pixels, &background, 2.0, 1.0, 0.0);
 
     // Should be clipped to zero before convolution
     for &v in result.iter() {
