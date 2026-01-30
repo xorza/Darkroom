@@ -13,31 +13,36 @@ pub mod sse;
 pub mod neon;
 
 use crate::common::Buffer2;
+use crate::common::parallel::ParChunksMutAutoWithOffset;
 use crate::star_detection::background::BackgroundMap;
+use rayon::prelude::*;
 
 #[cfg(target_arch = "x86_64")]
 use crate::common::cpu_features;
 
-/// Internal dispatch to SIMD or scalar implementation.
+/// Process a chunk of the threshold mask.
 ///
 /// When `INCLUDE_BACKGROUND` is true:
 ///   Sets `mask[i] = true` where `pixels[i] > background[i] + sigma * noise[i]`.
 ///
 /// When `INCLUDE_BACKGROUND` is false:
 ///   Sets `mask[i] = true` where `pixels[i] > sigma * noise[i]`.
-fn create_threshold_mask_impl<const INCLUDE_BACKGROUND: bool>(
-    pixels: &Buffer2<f32>,
-    background: &BackgroundMap,
+#[inline]
+fn process_chunk<const INCLUDE_BACKGROUND: bool>(
+    pixels: &[f32],
+    bg: &[f32],
+    noise: &[f32],
     sigma_threshold: f32,
-    mask: &mut Buffer2<bool>,
+    mask: &mut [bool],
 ) {
     #[cfg(target_arch = "aarch64")]
     {
         // SAFETY: NEON is always available on aarch64.
         unsafe {
-            neon::create_threshold_mask_neon_impl::<INCLUDE_BACKGROUND>(
+            neon::process_chunk_neon::<INCLUDE_BACKGROUND>(
                 pixels,
-                background,
+                bg,
+                noise,
                 sigma_threshold,
                 mask,
             );
@@ -50,9 +55,10 @@ fn create_threshold_mask_impl<const INCLUDE_BACKGROUND: bool>(
         if cpu_features::has_sse4_1() {
             // SAFETY: We've checked that SSE4.1 is available.
             unsafe {
-                sse::create_threshold_mask_sse_impl::<INCLUDE_BACKGROUND>(
+                sse::process_chunk_sse::<INCLUDE_BACKGROUND>(
                     pixels,
-                    background,
+                    bg,
+                    noise,
                     sigma_threshold,
                     mask,
                 );
@@ -61,12 +67,40 @@ fn create_threshold_mask_impl<const INCLUDE_BACKGROUND: bool>(
         }
     }
 
-    scalar::create_threshold_mask_impl::<INCLUDE_BACKGROUND>(
-        pixels,
-        background,
-        sigma_threshold,
-        mask,
-    );
+    scalar::process_chunk_scalar::<INCLUDE_BACKGROUND>(pixels, bg, noise, sigma_threshold, mask);
+}
+
+/// Internal dispatch to parallel SIMD or scalar implementation.
+fn create_threshold_mask_impl<const INCLUDE_BACKGROUND: bool>(
+    pixels: &Buffer2<f32>,
+    background: &BackgroundMap,
+    sigma_threshold: f32,
+    mask: &mut Buffer2<bool>,
+) {
+    debug_assert_eq!(pixels.len(), mask.len());
+    debug_assert_eq!(pixels.len(), background.background.len());
+    debug_assert_eq!(pixels.len(), background.noise.len());
+
+    let pixels_slice = pixels.pixels();
+    let bg_slice = background.background.pixels();
+    let noise_slice = background.noise.pixels();
+
+    mask.pixels_mut()
+        .par_chunks_mut_auto()
+        .for_each(|(offset, mask_chunk)| {
+            let end = offset + mask_chunk.len();
+            let px_chunk = &pixels_slice[offset..end];
+            let bg_chunk = &bg_slice[offset..end];
+            let noise_chunk = &noise_slice[offset..end];
+
+            process_chunk::<INCLUDE_BACKGROUND>(
+                px_chunk,
+                bg_chunk,
+                noise_chunk,
+                sigma_threshold,
+                mask_chunk,
+            );
+        });
 }
 
 /// Create binary mask of pixels above threshold.
@@ -97,60 +131,4 @@ pub fn create_threshold_mask_filtered(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn create_test_data(len: usize) -> (Buffer2<f32>, BackgroundMap, Buffer2<bool>) {
-        let width = len;
-        let height = 1;
-        let pixels = Buffer2::new_filled(width, height, 100.0);
-        let background = BackgroundMap {
-            background: Buffer2::new_filled(width, height, 50.0),
-            noise: Buffer2::new_filled(width, height, 10.0),
-        };
-        let mask = Buffer2::new_filled(width, height, false);
-        (pixels, background, mask)
-    }
-
-    #[test]
-    fn test_threshold_mask_above() {
-        let (pixels, background, mut mask) = create_test_data(10);
-        // threshold = 50 + 3 * 10 = 80, pixels = 100 > 80
-        create_threshold_mask(&pixels, &background, 3.0, &mut mask);
-        assert!(mask.iter().all(|&v| v));
-    }
-
-    #[test]
-    fn test_threshold_mask_below() {
-        let (mut pixels, background, mut mask) = create_test_data(10);
-        pixels.fill(60.0);
-        // threshold = 50 + 3 * 10 = 80, pixels = 60 < 80
-        create_threshold_mask(&pixels, &background, 3.0, &mut mask);
-        assert!(mask.iter().all(|&v| !v));
-    }
-
-    #[test]
-    fn test_threshold_mask_filtered() {
-        let width = 10;
-        let height = 1;
-        let filtered = Buffer2::new_filled(width, height, 50.0);
-        let background = BackgroundMap {
-            background: Buffer2::new_filled(width, height, 0.0), // not used
-            noise: Buffer2::new_filled(width, height, 10.0),
-        };
-        let mut mask = Buffer2::new_filled(width, height, false);
-        // threshold = 3 * 10 = 30, filtered = 50 > 30
-        create_threshold_mask_filtered(&filtered, &background, 3.0, &mut mask);
-        assert!(mask.iter().all(|&v| v));
-    }
-
-    #[test]
-    fn test_various_lengths() {
-        // Test edge cases for SIMD remainder handling
-        for len in [1, 3, 4, 5, 15, 16, 17, 31, 32, 33, 100] {
-            let (pixels, background, mut mask) = create_test_data(len);
-            create_threshold_mask(&pixels, &background, 3.0, &mut mask);
-            assert!(mask.iter().all(|&v| v), "failed for len={}", len);
-        }
-    }
-}
+mod tests;

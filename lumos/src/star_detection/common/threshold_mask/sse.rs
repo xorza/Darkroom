@@ -3,9 +3,6 @@
 #[cfg(target_arch = "x86_64")]
 use std::arch::x86_64::*;
 
-use crate::common::Buffer2;
-use crate::star_detection::background::BackgroundMap;
-
 /// Number of SIMD vectors to process per unrolled iteration.
 const UNROLL_FACTOR: usize = 4;
 /// Floats per SSE vector.
@@ -13,10 +10,10 @@ const SSE_WIDTH: usize = 4;
 /// Floats processed per unrolled iteration.
 const UNROLL_WIDTH: usize = UNROLL_FACTOR * SSE_WIDTH;
 
-/// SSE-accelerated threshold mask creation.
+/// SSE-accelerated threshold mask creation on a chunk.
 ///
 /// When `INCLUDE_BACKGROUND` is true:
-///   Sets `mask[i] = true` where `pixels[i] > background[i] + sigma * noise[i]`.
+///   Sets `mask[i] = true` where `pixels[i] > bg[i] + sigma * noise[i]`.
 ///
 /// When `INCLUDE_BACKGROUND` is false:
 ///   Sets `mask[i] = true` where `pixels[i] > sigma * noise[i]`.
@@ -26,24 +23,25 @@ const UNROLL_WIDTH: usize = UNROLL_FACTOR * SSE_WIDTH;
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "sse4.1")]
 #[allow(unsafe_op_in_unsafe_fn)]
-pub unsafe fn create_threshold_mask_sse_impl<const INCLUDE_BACKGROUND: bool>(
-    pixels: &Buffer2<f32>,
-    background: &BackgroundMap,
+pub unsafe fn process_chunk_sse<const INCLUDE_BACKGROUND: bool>(
+    pixels: &[f32],
+    bg: &[f32],
+    noise: &[f32],
     sigma_threshold: f32,
-    mask: &mut Buffer2<bool>,
+    mask: &mut [bool],
 ) {
     let len = pixels.len();
     debug_assert_eq!(len, mask.len());
 
-    let mask_ptr = mask.pixels_mut().as_mut_ptr();
+    let mask_ptr = mask.as_mut_ptr();
 
     let sigma_vec = _mm_set1_ps(sigma_threshold);
     let min_noise_vec = _mm_set1_ps(1e-6);
     let zero_vec = _mm_setzero_ps();
 
     let pixels_ptr = pixels.as_ptr();
-    let bg_ptr = background.background.as_ptr();
-    let noise_ptr = background.noise.as_ptr();
+    let bg_ptr = bg.as_ptr();
+    let noise_ptr = noise.as_ptr();
 
     // Process 16 floats (4 SSE vectors) per unrolled iteration
     let unrolled_end = len - (len % UNROLL_WIDTH);
@@ -137,12 +135,8 @@ pub unsafe fn create_threshold_mask_sse_impl<const INCLUDE_BACKGROUND: bool>(
 
     // Handle remaining elements (0-3 elements)
     while i < len {
-        let base = if INCLUDE_BACKGROUND {
-            background.background[i]
-        } else {
-            0.0
-        };
-        let threshold = base + sigma_threshold * background.noise[i].max(1e-6);
+        let base = if INCLUDE_BACKGROUND { bg[i] } else { 0.0 };
+        let threshold = base + sigma_threshold * noise[i].max(1e-6);
         *mask_ptr.add(i) = pixels[i] > threshold;
         i += 1;
     }
