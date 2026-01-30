@@ -36,7 +36,6 @@ impl TileGrid {
 
         let tiles_x = width.div_ceil(tile_size);
         let tiles_y = height.div_ceil(tile_size);
-        let max_tile_pixels = tile_size * tile_size;
 
         let mut grid = Self {
             stats: Buffer2::new_default(tiles_x, tiles_y),
@@ -45,41 +44,9 @@ impl TileGrid {
             height,
         };
 
-        grid.stats
-            .pixels_mut()
-            .par_iter_mut()
-            .enumerate()
-            .for_each_init(
-                || {
-                    (
-                        Vec::with_capacity(max_tile_pixels),
-                        Vec::with_capacity(max_tile_pixels),
-                    )
-                },
-                |(values_buf, deviations_buf), (idx, out)| {
-                    let ty = idx / tiles_x;
-                    let tx = idx % tiles_x;
-
-                    let x_start = tx * tile_size;
-                    let y_start = ty * tile_size;
-                    let x_end = (x_start + tile_size).min(width);
-                    let y_end = (y_start + tile_size).min(height);
-
-                    *out = Self::compute_tile_stats(
-                        pixels,
-                        mask,
-                        x_start,
-                        x_end,
-                        y_start,
-                        y_end,
-                        min_pixels,
-                        values_buf,
-                        deviations_buf,
-                    );
-                },
-            );
-
+        grid.fill_tile_stats(pixels, mask, min_pixels);
         grid.apply_median_filter();
+
         grid
     }
 
@@ -173,6 +140,53 @@ impl TileGrid {
             }
         }
         0
+    }
+
+    fn fill_tile_stats(
+        &mut self,
+        pixels: &Buffer2<f32>,
+        mask: Option<&Buffer2<bool>>,
+        min_pixels: usize,
+    ) {
+        let tiles_x = self.tiles_x();
+        let tile_size = self.tile_size;
+        let width = self.width;
+        let height = self.height;
+        let max_tile_pixels = tile_size * tile_size;
+
+        self.stats
+            .pixels_mut()
+            .par_iter_mut()
+            .enumerate()
+            .for_each_init(
+                || {
+                    (
+                        Vec::with_capacity(max_tile_pixels),
+                        Vec::with_capacity(max_tile_pixels),
+                    )
+                },
+                |(values_buf, deviations_buf), (idx, out)| {
+                    let ty = idx / tiles_x;
+                    let tx = idx % tiles_x;
+
+                    let x_start = tx * tile_size;
+                    let y_start = ty * tile_size;
+                    let x_end = (x_start + tile_size).min(width);
+                    let y_end = (y_start + tile_size).min(height);
+
+                    *out = Self::compute_tile_stats(
+                        pixels,
+                        mask,
+                        x_start,
+                        x_end,
+                        y_start,
+                        y_end,
+                        min_pixels,
+                        values_buf,
+                        deviations_buf,
+                    );
+                },
+            );
     }
 
     /// Apply median filter to the tile grid statistics.
