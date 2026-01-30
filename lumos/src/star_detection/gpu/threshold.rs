@@ -478,10 +478,10 @@ pub fn detect_stars_gpu_with_detector(
         // Size filter
         c.area >= detection_config.min_area
             // Edge filter
-            && c.bbox.x_min >= detection_config.edge_margin
-            && c.bbox.y_min >= detection_config.edge_margin
-            && c.bbox.x_max < width - detection_config.edge_margin
-            && c.bbox.y_max < height - detection_config.edge_margin
+            && c.bbox.min.x >= detection_config.edge_margin
+            && c.bbox.min.y >= detection_config.edge_margin
+            && c.bbox.max.x < width - detection_config.edge_margin
+            && c.bbox.max.y < height - detection_config.edge_margin
     });
 
     candidates

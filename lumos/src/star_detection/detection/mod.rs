@@ -15,7 +15,7 @@ use super::deblend::{
     deblend_local_maxima,
 };
 use crate::common::{BitBuffer2, Buffer2};
-use crate::math::Aabb;
+use crate::math::{Aabb, Vec2us};
 
 pub use labels::LabelMap;
 
@@ -118,10 +118,10 @@ pub fn detect_stars(
         // Size filter
         c.area >= detection_config.min_area
             // Edge filter
-            && c.bbox.x_min >= detection_config.edge_margin
-            && c.bbox.y_min >= detection_config.edge_margin
-            && c.bbox.x_max < width - detection_config.edge_margin
-            && c.bbox.y_max < height - detection_config.edge_margin
+            && c.bbox.min.x >= detection_config.edge_margin
+            && c.bbox.min.y >= detection_config.edge_margin
+            && c.bbox.max.x < width - detection_config.edge_margin
+            && c.bbox.max.y < height - detection_config.edge_margin
     });
 
     candidates
@@ -185,7 +185,7 @@ fn extract_candidates_local_maxima(
         }
         let x = idx % width;
         let y = idx / width;
-        data.bbox.include(x, y);
+        data.bbox.include(Vec2us::new(x, y));
         data.label = label;
         data.area += 1;
     }
@@ -238,7 +238,7 @@ fn extract_candidates_multi_threshold(
         data.area += 1;
         let x = idx % width;
         let y = idx / width;
-        data.bbox.include(x, y);
+        data.bbox.include(Vec2us::new(x, y));
     }
 
     // Process each component in parallel

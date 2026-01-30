@@ -20,6 +20,11 @@ pub mod multi_threshold;
 #[cfg(test)]
 mod tests;
 
+// Re-export config types used by submodules
+pub use super::config::DeblendConfig;
+pub use local_maxima::deblend_local_maxima;
+pub use multi_threshold::{MultiThresholdDeblendConfig, deblend_component};
+
 // ============================================================================
 // Constants
 // ============================================================================
@@ -65,8 +70,8 @@ impl ComponentData {
     ) -> impl Iterator<Item = Pixel> + 'a {
         let width = pixels.width();
         let bbox = &self.bbox;
-        (bbox.y_min..=bbox.y_max).flat_map(move |y| {
-            (bbox.x_min..=bbox.x_max).filter_map(move |x| {
+        (bbox.min.y..=bbox.max.y).flat_map(move |y| {
+            (bbox.min.x..=bbox.max.x).filter_map(move |x| {
                 let idx = y * width + x;
                 if labels[idx] == self.label {
                     Some(Pixel {
@@ -90,22 +95,8 @@ impl ComponentData {
                     .unwrap_or(std::cmp::Ordering::Equal)
             })
             .unwrap_or(Pixel {
-                pos: Vec2us::new(self.bbox.x_min, self.bbox.y_min),
+                pos: self.bbox.min,
                 value: 0.0,
             })
     }
 }
-
-// ============================================================================
-// Re-exports
-// ============================================================================
-
-pub use local_maxima::deblend_local_maxima;
-#[allow(unused_imports)]
-pub use local_maxima::{DeblendedCandidate, deblend_by_nearest_peak, find_local_maxima};
-#[allow(unused_imports)]
-pub use multi_threshold::DeblendedObject;
-pub use multi_threshold::{MultiThresholdDeblendConfig, deblend_component};
-
-// Re-export DeblendConfig from config module
-pub use super::config::DeblendConfig;

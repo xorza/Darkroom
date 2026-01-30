@@ -2,6 +2,8 @@
 
 use super::*;
 use crate::common::Buffer2;
+use crate::math::Vec2us;
+use crate::star_detection::config::DeblendConfig;
 use crate::star_detection::detection::LabelMap;
 
 /// Create a test image with Gaussian stars and return pixels, labels, and component data.
@@ -31,7 +33,7 @@ fn make_test_component(
                         pixels[(x, y)] += value;
                         if labels[(x, y)] == 0 {
                             labels[(x, y)] = 1;
-                            bbox.include(x, y);
+                            bbox.include(Vec2us::new(x, y));
                             area += 1;
                         }
                     }

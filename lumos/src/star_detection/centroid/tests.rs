@@ -2,8 +2,8 @@
 
 use super::*;
 use crate::common::Buffer2;
-use crate::math::Aabb;
 use crate::math::FWHM_TO_SIGMA;
+use crate::math::{Aabb, Vec2us};
 use crate::star_detection::background::{BackgroundConfig, BackgroundMap};
 use crate::star_detection::detection::{StarCandidate, detect_stars};
 
@@ -1211,7 +1211,7 @@ fn test_compute_centroid_returns_none_for_edge_candidate() {
 
     // Create candidate near edge
     let candidate = StarCandidate {
-        bbox: Aabb::new(0, 5, 30, 35),
+        bbox: Aabb::new(Vec2us::new(0, 30), Vec2us::new(5, 35)),
         peak_x: 3,
         peak_y: 32,
         peak_value: 0.9,

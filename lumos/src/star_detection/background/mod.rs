@@ -90,14 +90,6 @@ impl BackgroundMap {
     pub fn get_noise(&self, x: usize, y: usize) -> f32 {
         self.noise[(x, y)]
     }
-
-    /// Get background-subtracted value at a pixel position.
-    #[allow(dead_code)] // Public API for external use
-    #[inline]
-    pub fn subtract(&self, pixels: &[f32], x: usize, y: usize) -> f32 {
-        let idx = y * self.width() + x;
-        pixels[idx] - self.background[(x, y)]
-    }
 }
 
 fn interpolate_from_grid(pixels: &Buffer2<f32>, grid: &TileGrid) -> BackgroundMap {

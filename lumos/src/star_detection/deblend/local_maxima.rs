@@ -167,7 +167,7 @@ pub fn deblend_by_nearest_peak(
     for pixel in data.iter_pixels(pixels, labels) {
         let nearest = find_nearest_peak(pixel, peaks, num_peaks);
         let pd = &mut peak_data[nearest];
-        pd.bbox.include(pixel.pos.x, pixel.pos.y);
+        pd.bbox.include(pixel.pos);
         pd.area += 1;
     }
 
@@ -294,7 +294,7 @@ mod tests {
                             pixels[(x, y)] += value;
                             if labels[(x, y)] == 0 {
                                 labels[(x, y)] = 1;
-                                bbox.include(x, y);
+                                bbox.include(Vec2us::new(x, y));
                                 area += 1;
                             }
                         }
@@ -442,8 +442,8 @@ mod tests {
 
         assert_eq!(candidates.len(), 1);
         assert_eq!(candidates[0].area, data.area);
-        assert_eq!(candidates[0].bbox.x_min, data.bbox.x_min);
-        assert_eq!(candidates[0].bbox.x_max, data.bbox.x_max);
+        assert_eq!(candidates[0].bbox.min.x, data.bbox.min.x);
+        assert_eq!(candidates[0].bbox.max.x, data.bbox.max.x);
     }
 
     #[test]
@@ -603,12 +603,12 @@ mod tests {
         // Each candidate should have its peak inside its bounding box
         for candidate in &candidates {
             assert!(
-                candidate.peak.x >= candidate.bbox.x_min
-                    && candidate.peak.x <= candidate.bbox.x_max
+                candidate.peak.x >= candidate.bbox.min.x
+                    && candidate.peak.x <= candidate.bbox.max.x
             );
             assert!(
-                candidate.peak.y >= candidate.bbox.y_min
-                    && candidate.peak.y <= candidate.bbox.y_max
+                candidate.peak.y >= candidate.bbox.min.y
+                    && candidate.peak.y <= candidate.bbox.max.y
             );
         }
     }

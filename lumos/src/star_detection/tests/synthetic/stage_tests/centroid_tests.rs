@@ -3,7 +3,7 @@
 //! Tests sub-pixel centroid accuracy on synthetic stars.
 
 use crate::common::Buffer2;
-use crate::math::Aabb;
+use crate::math::{Aabb, Vec2us};
 use crate::star_detection::StarDetectionConfig;
 use crate::star_detection::background::{BackgroundConfig, BackgroundMap};
 use crate::star_detection::centroid::compute_centroid;
@@ -93,10 +93,8 @@ fn test_centroid_accuracy() {
 
         let candidate = StarCandidate {
             bbox: Aabb::new(
-                peak_x.saturating_sub(5),
-                (peak_x + 5).min(width - 1),
-                peak_y.saturating_sub(5),
-                (peak_y + 5).min(height - 1),
+                Vec2us::new(peak_x.saturating_sub(5), peak_y.saturating_sub(5)),
+                Vec2us::new((peak_x + 5).min(width - 1), (peak_y + 5).min(height - 1)),
             ),
             peak_x,
             peak_y,
@@ -138,10 +136,8 @@ fn test_centroid_accuracy() {
 
         let candidate = StarCandidate {
             bbox: Aabb::new(
-                peak_x.saturating_sub(5),
-                (peak_x + 5).min(width - 1),
-                peak_y.saturating_sub(5),
-                (peak_y + 5).min(height - 1),
+                Vec2us::new(peak_x.saturating_sub(5), peak_y.saturating_sub(5)),
+                Vec2us::new((peak_x + 5).min(width - 1), (peak_y + 5).min(height - 1)),
             ),
             peak_x,
             peak_y,
@@ -258,10 +254,8 @@ fn test_centroid_snr() {
 
         let candidate = StarCandidate {
             bbox: Aabb::new(
-                peak_x.saturating_sub(5),
-                (peak_x + 5).min(width - 1),
-                peak_y.saturating_sub(5),
-                (peak_y + 5).min(height - 1),
+                Vec2us::new(peak_x.saturating_sub(5), peak_y.saturating_sub(5)),
+                Vec2us::new((peak_x + 5).min(width - 1), (peak_y + 5).min(height - 1)),
             ),
             peak_x,
             peak_y,

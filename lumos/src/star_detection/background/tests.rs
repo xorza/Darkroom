@@ -105,39 +105,6 @@ fn test_noise_estimation() {
 }
 
 #[test]
-fn test_subtract_method() {
-    let width = 128;
-    let height = 128;
-    let data = vec![0.3; width * height];
-    let pixels = Buffer2::new(width, height, data.clone());
-
-    let bg = BackgroundMap::new(
-        &pixels,
-        &BackgroundConfig {
-            tile_size: 32,
-            ..Default::default()
-        },
-    );
-
-    let subtracted = bg.subtract(&data, 64, 64);
-    assert!(
-        subtracted.abs() < 0.01,
-        "Subtracted = {}, expected ~0",
-        subtracted
-    );
-
-    // Test with bright pixel
-    let mut bright = data.clone();
-    bright[64 * width + 64] = 0.8;
-    let sub_bright = bg.subtract(&bright, 64, 64);
-    assert!(
-        (sub_bright - 0.5).abs() < 0.05,
-        "Subtracted bright = {}, expected ~0.5",
-        sub_bright
-    );
-}
-
-#[test]
 fn test_non_square_image() {
     let width = 256;
     let height = 64;
