@@ -12,7 +12,6 @@ use super::LUMA_R;
 // SSSE3 implementations
 // =============================================================================
 
-#[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "ssse3")]
 pub(super) unsafe fn convert_rgba_to_rgb_row_ssse3(src: &[u8], dst: &mut [u8], width: usize) {
     use std::arch::x86_64::*;
@@ -57,7 +56,6 @@ pub(super) unsafe fn convert_rgba_to_rgb_row_ssse3(src: &[u8], dst: &mut [u8], w
     }
 }
 
-#[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "ssse3")]
 pub(super) unsafe fn convert_rgb_to_rgba_row_ssse3(src: &[u8], dst: &mut [u8], width: usize) {
     use std::arch::x86_64::*;
@@ -102,7 +100,6 @@ pub(super) unsafe fn convert_rgb_to_rgba_row_ssse3(src: &[u8], dst: &mut [u8], w
     }
 }
 
-#[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "ssse3")]
 pub(super) unsafe fn convert_rgba_to_l_row_ssse3(src: &[u8], dst: &mut [u8], width: usize) {
     use std::arch::x86_64::*;
@@ -163,7 +160,6 @@ pub(super) unsafe fn convert_rgba_to_l_row_ssse3(src: &[u8], dst: &mut [u8], wid
     }
 }
 
-#[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "ssse3")]
 pub(super) unsafe fn convert_rgb_to_l_row_ssse3(src: &[u8], dst: &mut [u8], width: usize) {
     use std::arch::x86_64::*;
@@ -268,7 +264,6 @@ pub(super) unsafe fn convert_rgb_to_l_row_ssse3(src: &[u8], dst: &mut [u8], widt
     }
 }
 
-#[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "ssse3")]
 pub(super) unsafe fn convert_l_to_rgba_row_ssse3(src: &[u8], dst: &mut [u8], width: usize) {
     use std::arch::x86_64::*;
@@ -314,7 +309,6 @@ pub(super) unsafe fn convert_l_to_rgba_row_ssse3(src: &[u8], dst: &mut [u8], wid
     }
 }
 
-#[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "ssse3")]
 pub(super) unsafe fn convert_l_to_rgb_row_ssse3(src: &[u8], dst: &mut [u8], width: usize) {
     use std::arch::x86_64::*;
@@ -355,7 +349,6 @@ pub(super) unsafe fn convert_l_to_rgb_row_ssse3(src: &[u8], dst: &mut [u8], widt
     }
 }
 
-#[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "ssse3")]
 pub(super) unsafe fn convert_la_to_rgba_row_ssse3(src: &[u8], dst: &mut [u8], width: usize) {
     use std::arch::x86_64::*;
@@ -393,7 +386,6 @@ pub(super) unsafe fn convert_la_to_rgba_row_ssse3(src: &[u8], dst: &mut [u8], wi
     }
 }
 
-#[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "ssse3")]
 pub(super) unsafe fn convert_rgba_to_la_row_ssse3(src: &[u8], dst: &mut [u8], width: usize) {
     use std::arch::x86_64::*;
@@ -458,7 +450,6 @@ pub(super) unsafe fn convert_rgba_to_la_row_ssse3(src: &[u8], dst: &mut [u8], wi
 // SSE2 implementations
 // =============================================================================
 
-#[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "sse2")]
 pub(super) unsafe fn convert_f32_to_u8_row_sse2(src: &[f32], dst: &mut [u8]) {
     use std::arch::x86_64::*;
@@ -503,7 +494,6 @@ pub(super) unsafe fn convert_f32_to_u8_row_sse2(src: &[f32], dst: &mut [u8]) {
     }
 }
 
-#[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "sse2")]
 pub(super) unsafe fn convert_u8_to_f32_row_sse2(src: &[u8], dst: &mut [f32]) {
     use std::arch::x86_64::*;
@@ -548,7 +538,6 @@ pub(super) unsafe fn convert_u8_to_f32_row_sse2(src: &[u8], dst: &mut [f32]) {
     }
 }
 
-#[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "sse2")]
 pub(super) unsafe fn convert_u8_to_u16_row_sse2(src: &[u8], dst: &mut [u16]) {
     use std::arch::x86_64::*;
@@ -581,7 +570,6 @@ pub(super) unsafe fn convert_u8_to_u16_row_sse2(src: &[u8], dst: &mut [u16]) {
     }
 }
 
-#[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "sse2")]
 pub(super) unsafe fn convert_u16_to_u8_row_sse2(src: &[u16], dst: &mut [u8]) {
     use std::arch::x86_64::*;
@@ -609,7 +597,6 @@ pub(super) unsafe fn convert_u16_to_u8_row_sse2(src: &[u16], dst: &mut [u8]) {
     }
 }
 
-#[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "sse2")]
 pub(super) unsafe fn convert_u16_to_f32_row_sse2(src: &[u16], dst: &mut [f32]) {
     use std::arch::x86_64::*;
@@ -641,7 +628,6 @@ pub(super) unsafe fn convert_u16_to_f32_row_sse2(src: &[u16], dst: &mut [f32]) {
     }
 }
 
-#[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "sse2")]
 pub(super) unsafe fn convert_f32_to_u16_row_sse2(src: &[f32], dst: &mut [u16]) {
     use std::arch::x86_64::*;

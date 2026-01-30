@@ -10,7 +10,6 @@ use super::sse;
 // AVX2 implementations
 // =============================================================================
 
-#[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2")]
 pub(super) unsafe fn convert_rgba_to_rgb_row_avx2(src: &[u8], dst: &mut [u8], width: usize) {
     use std::arch::x86_64::*;
@@ -85,7 +84,6 @@ pub(super) unsafe fn convert_rgba_to_rgb_row_avx2(src: &[u8], dst: &mut [u8], wi
     }
 }
 
-#[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2")]
 pub(super) unsafe fn convert_rgb_to_rgba_row_avx2(src: &[u8], dst: &mut [u8], width: usize) {
     // For simplicity, fall back to SSSE3 for this operation
@@ -93,49 +91,42 @@ pub(super) unsafe fn convert_rgb_to_rgba_row_avx2(src: &[u8], dst: &mut [u8], wi
     sse::convert_rgb_to_rgba_row_ssse3(src, dst, width);
 }
 
-#[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2")]
 pub(super) unsafe fn convert_rgba_to_l_row_avx2(src: &[u8], dst: &mut [u8], width: usize) {
     // Fall back to SSSE3 - AVX2 luminance conversion is complex
     sse::convert_rgba_to_l_row_ssse3(src, dst, width);
 }
 
-#[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2")]
 pub(super) unsafe fn convert_rgb_to_l_row_avx2(src: &[u8], dst: &mut [u8], width: usize) {
     // Fall back to SSSE3
     sse::convert_rgb_to_l_row_ssse3(src, dst, width);
 }
 
-#[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2")]
 pub(super) unsafe fn convert_l_to_rgba_row_avx2(src: &[u8], dst: &mut [u8], width: usize) {
     // Fall back to SSSE3 for simplicity
     sse::convert_l_to_rgba_row_ssse3(src, dst, width);
 }
 
-#[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2")]
 pub(super) unsafe fn convert_l_to_rgb_row_avx2(src: &[u8], dst: &mut [u8], width: usize) {
     // Fall back to SSSE3
     sse::convert_l_to_rgb_row_ssse3(src, dst, width);
 }
 
-#[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2")]
 pub(super) unsafe fn convert_la_to_rgba_row_avx2(src: &[u8], dst: &mut [u8], width: usize) {
     // Fall back to SSSE3
     sse::convert_la_to_rgba_row_ssse3(src, dst, width);
 }
 
-#[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2")]
 pub(super) unsafe fn convert_rgba_to_la_row_avx2(src: &[u8], dst: &mut [u8], width: usize) {
     // Fall back to SSSE3
     sse::convert_rgba_to_la_row_ssse3(src, dst, width);
 }
 
-#[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2")]
 pub(super) unsafe fn convert_f32_to_u8_row_avx2(src: &[f32], dst: &mut [u8]) {
     use std::arch::x86_64::*;
@@ -190,7 +181,6 @@ pub(super) unsafe fn convert_f32_to_u8_row_avx2(src: &[f32], dst: &mut [u8]) {
     }
 }
 
-#[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2")]
 pub(super) unsafe fn convert_u8_to_f32_row_avx2(src: &[u8], dst: &mut [f32]) {
     use std::arch::x86_64::*;
@@ -235,7 +225,6 @@ pub(super) unsafe fn convert_u8_to_f32_row_avx2(src: &[u8], dst: &mut [f32]) {
     }
 }
 
-#[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2")]
 pub(super) unsafe fn convert_u8_to_u16_row_avx2(src: &[u8], dst: &mut [u16]) {
     use std::arch::x86_64::*;
@@ -284,7 +273,6 @@ pub(super) unsafe fn convert_u8_to_u16_row_avx2(src: &[u8], dst: &mut [u16]) {
     }
 }
 
-#[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2")]
 pub(super) unsafe fn convert_u16_to_u8_row_avx2(src: &[u16], dst: &mut [u8]) {
     use std::arch::x86_64::*;
@@ -314,7 +302,6 @@ pub(super) unsafe fn convert_u16_to_u8_row_avx2(src: &[u16], dst: &mut [u8]) {
     }
 }
 
-#[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2")]
 pub(super) unsafe fn convert_u16_to_f32_row_avx2(src: &[u16], dst: &mut [f32]) {
     use std::arch::x86_64::*;
@@ -349,7 +336,6 @@ pub(super) unsafe fn convert_u16_to_f32_row_avx2(src: &[u16], dst: &mut [f32]) {
     }
 }
 
-#[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2")]
 pub(super) unsafe fn convert_f32_to_u16_row_avx2(src: &[f32], dst: &mut [u16]) {
     use std::arch::x86_64::*;

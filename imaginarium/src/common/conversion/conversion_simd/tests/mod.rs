@@ -10,16 +10,18 @@
 //! - `avx_tests`: x86_64 AVX2 specific tests
 //! - `neon_tests`: aarch64 NEON specific tests
 
+use common::{cfg_aarch64, cfg_x86_64};
+
 mod common_tests;
 
-#[cfg(target_arch = "x86_64")]
-mod sse_tests;
+cfg_x86_64! {
+    mod sse_tests;
+    mod avx_tests;
+}
 
-#[cfg(target_arch = "x86_64")]
-mod avx_tests;
-
-#[cfg(target_arch = "aarch64")]
-mod neon_tests;
+cfg_aarch64! {
+    mod neon_tests;
+}
 
 use crate::common::color_format::ColorFormat;
 use crate::image::{Image, ImageDesc};

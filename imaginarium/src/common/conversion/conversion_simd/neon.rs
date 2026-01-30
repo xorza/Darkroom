@@ -12,7 +12,6 @@ use super::LUMA_R;
 // NEON implementations (aarch64)
 // =============================================================================
 
-#[cfg(target_arch = "aarch64")]
 pub(super) unsafe fn convert_rgba_to_rgb_row_neon(src: &[u8], dst: &mut [u8], width: usize) {
     use std::arch::aarch64::*;
 
@@ -42,7 +41,6 @@ pub(super) unsafe fn convert_rgba_to_rgb_row_neon(src: &[u8], dst: &mut [u8], wi
     }
 }
 
-#[cfg(target_arch = "aarch64")]
 pub(super) unsafe fn convert_rgb_to_rgba_row_neon(src: &[u8], dst: &mut [u8], width: usize) {
     use std::arch::aarch64::*;
 
@@ -75,7 +73,6 @@ pub(super) unsafe fn convert_rgb_to_rgba_row_neon(src: &[u8], dst: &mut [u8], wi
     }
 }
 
-#[cfg(target_arch = "aarch64")]
 pub(super) unsafe fn convert_rgba_to_l_row_neon(src: &[u8], dst: &mut [u8], width: usize) {
     use std::arch::aarch64::*;
 
@@ -130,7 +127,6 @@ pub(super) unsafe fn convert_rgba_to_l_row_neon(src: &[u8], dst: &mut [u8], widt
     }
 }
 
-#[cfg(target_arch = "aarch64")]
 pub(super) unsafe fn convert_rgb_to_l_row_neon(src: &[u8], dst: &mut [u8], width: usize) {
     use std::arch::aarch64::*;
 
@@ -185,7 +181,6 @@ pub(super) unsafe fn convert_rgb_to_l_row_neon(src: &[u8], dst: &mut [u8], width
     }
 }
 
-#[cfg(target_arch = "aarch64")]
 pub(super) unsafe fn convert_l_to_rgba_row_neon(src: &[u8], dst: &mut [u8], width: usize) {
     use std::arch::aarch64::*;
 
@@ -216,7 +211,6 @@ pub(super) unsafe fn convert_l_to_rgba_row_neon(src: &[u8], dst: &mut [u8], widt
     }
 }
 
-#[cfg(target_arch = "aarch64")]
 pub(super) unsafe fn convert_l_to_rgb_row_neon(src: &[u8], dst: &mut [u8], width: usize) {
     use std::arch::aarch64::*;
 
@@ -244,7 +238,6 @@ pub(super) unsafe fn convert_l_to_rgb_row_neon(src: &[u8], dst: &mut [u8], width
     }
 }
 
-#[cfg(target_arch = "aarch64")]
 pub(super) unsafe fn convert_la_to_rgba_row_neon(src: &[u8], dst: &mut [u8], width: usize) {
     use std::arch::aarch64::*;
 
@@ -277,7 +270,6 @@ pub(super) unsafe fn convert_la_to_rgba_row_neon(src: &[u8], dst: &mut [u8], wid
     }
 }
 
-#[cfg(target_arch = "aarch64")]
 pub(super) unsafe fn convert_rgba_to_la_row_neon(src: &[u8], dst: &mut [u8], width: usize) {
     use std::arch::aarch64::*;
 
@@ -336,7 +328,6 @@ pub(super) unsafe fn convert_rgba_to_la_row_neon(src: &[u8], dst: &mut [u8], wid
     }
 }
 
-#[cfg(target_arch = "aarch64")]
 pub(super) unsafe fn convert_f32_to_u8_row_neon(src: &[f32], dst: &mut [u8]) {
     use std::arch::aarch64::*;
 
@@ -381,7 +372,6 @@ pub(super) unsafe fn convert_f32_to_u8_row_neon(src: &[f32], dst: &mut [u8]) {
     }
 }
 
-#[cfg(target_arch = "aarch64")]
 pub(super) unsafe fn convert_u8_to_f32_row_neon(src: &[u8], dst: &mut [f32]) {
     use std::arch::aarch64::*;
 
@@ -423,7 +413,6 @@ pub(super) unsafe fn convert_u8_to_f32_row_neon(src: &[u8], dst: &mut [f32]) {
     }
 }
 
-#[cfg(target_arch = "aarch64")]
 pub(super) unsafe fn convert_u8_to_u16_row_neon(src: &[u8], dst: &mut [u16]) {
     use std::arch::aarch64::*;
 
@@ -452,7 +441,6 @@ pub(super) unsafe fn convert_u8_to_u16_row_neon(src: &[u8], dst: &mut [u16]) {
     }
 }
 
-#[cfg(target_arch = "aarch64")]
 pub(super) unsafe fn convert_u16_to_u8_row_neon(src: &[u16], dst: &mut [u8]) {
     use std::arch::aarch64::*;
 
@@ -480,7 +468,6 @@ pub(super) unsafe fn convert_u16_to_u8_row_neon(src: &[u16], dst: &mut [u8]) {
     }
 }
 
-#[cfg(target_arch = "aarch64")]
 pub(super) unsafe fn convert_u16_to_f32_row_neon(src: &[u16], dst: &mut [f32]) {
     use std::arch::aarch64::*;
 
@@ -511,7 +498,6 @@ pub(super) unsafe fn convert_u16_to_f32_row_neon(src: &[u16], dst: &mut [f32]) {
     }
 }
 
-#[cfg(target_arch = "aarch64")]
 pub(super) unsafe fn convert_f32_to_u16_row_neon(src: &[f32], dst: &mut [u16]) {
     use std::arch::aarch64::*;
 
