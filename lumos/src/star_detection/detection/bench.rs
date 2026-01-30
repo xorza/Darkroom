@@ -94,6 +94,25 @@ fn bench_extract_candidates_4k_dense(b: ::bench::Bencher) {
     });
 }
 
+#[quick_bench(warmup_iters = 1, iters = 3)]
+fn bench_extract_candidates_4k_dense_multithreshold(b: ::bench::Bencher) {
+    // 4K image with ~2000 stars (crowded field)
+    let pixels = benchmark_star_field(4096, 4096, 2000, 0.1, 0.01, 42);
+    let mask = create_test_mask(&pixels, 0.05);
+    let label_map = LabelMap::from_mask(&mask);
+    let mut config = DeblendConfig::default();
+    config.multi_threshold = true;
+
+    b.bench(|| {
+        black_box(extract_candidates(
+            black_box(&pixels),
+            black_box(&label_map),
+            black_box(&config),
+            black_box(500),
+        ))
+    });
+}
+
 // Benchmark LabelMap::from_mask separately to understand the breakdown
 #[quick_bench(warmup_iters = 2, iters = 5)]
 fn bench_label_map_from_mask_1k(b: ::bench::Bencher) {
