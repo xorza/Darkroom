@@ -127,6 +127,29 @@ impl Bencher {
         self
     }
 
+    /// Run a labeled benchmark variant without consuming self.
+    ///
+    /// This allows running multiple benchmark variants in a single test function:
+    /// ```ignore
+    /// b.bench_labeled("scalar", || scalar_impl());
+    /// b.bench_labeled("simd", || simd_impl());
+    /// ```
+    pub fn bench_labeled<F, R>(&self, label: &str, f: F) -> BenchResult
+    where
+        F: FnMut() -> R,
+    {
+        let labeled_name = format!("{}/{}", self.name, label);
+        let bencher = Bencher {
+            name: labeled_name,
+            warmup_time: self.warmup_time,
+            time: self.time,
+            warmup_iters: self.warmup_iters,
+            iters: self.iters,
+            output_dir: self.output_dir.clone(),
+        };
+        bencher.bench(f)
+    }
+
     /// Run the benchmark.
     ///
     /// Runs warmup iterations until warmup_time is reached or warmup_iters is hit (whichever comes first),

@@ -172,10 +172,10 @@ mod quick_benches {
     }
 
     #[quick_bench(warmup_iters = 3, iters = 10)]
-    fn bench_threshold_mask_scalar_4k(b: ::bench::Bencher) {
+    fn bench_threshold_mask_4k(b: ::bench::Bencher) {
         let (pixels, background, mut mask) = create_bench_data(4096 * 4096);
 
-        b.bench(|| {
+        b.bench_labeled("scalar", || {
             scalar::process_chunk_scalar::<true>(
                 black_box(pixels.pixels()),
                 black_box(background.background.pixels()),
@@ -184,13 +184,8 @@ mod quick_benches {
                 black_box(mask.pixels_mut()),
             );
         });
-    }
 
-    #[quick_bench(warmup_iters = 3, iters = 10)]
-    fn bench_threshold_mask_simd_parallel_4k(b: ::bench::Bencher) {
-        let (pixels, background, mut mask) = create_bench_data(4096 * 4096);
-
-        b.bench(|| {
+        b.bench_labeled("simd+parallel", || {
             create_threshold_mask(
                 black_box(&pixels),
                 black_box(&background),
