@@ -69,20 +69,22 @@ fn bench_convolve_row_large_kernel(b: ::bench::Bencher) {
 #[quick_bench(warmup_iters = 2, iters = 5)]
 fn bench_gaussian_convolve_1k(b: ::bench::Bencher) {
     let pixels = benchmark_star_field(1024, 1024, 100, 0.1, 0.01, 42);
+    let mut output = Buffer2::new_default(1024, 1024);
     let sigma = 2.0;
 
     b.bench(|| {
-        black_box(gaussian_convolve(black_box(&pixels), black_box(sigma)));
+        gaussian_convolve(black_box(&pixels), black_box(sigma), black_box(&mut output));
     });
 }
 
 #[quick_bench(warmup_iters = 1, iters = 3)]
 fn bench_gaussian_convolve_4k(b: ::bench::Bencher) {
     let pixels = benchmark_star_field(4096, 4096, 500, 0.1, 0.01, 42);
+    let mut output = Buffer2::new_default(4096, 4096);
     let sigma = 2.0;
 
     b.bench(|| {
-        black_box(gaussian_convolve(black_box(&pixels), black_box(sigma)));
+        gaussian_convolve(black_box(&pixels), black_box(sigma), black_box(&mut output));
     });
 }
 
@@ -91,36 +93,40 @@ fn bench_gaussian_convolve_4k(b: ::bench::Bencher) {
 #[quick_bench(warmup_iters = 2, iters = 5)]
 fn bench_elliptical_convolve_1k(b: ::bench::Bencher) {
     let pixels = benchmark_star_field(1024, 1024, 100, 0.1, 0.01, 42);
+    let mut output = Buffer2::new_default(1024, 1024);
     let sigma = 2.0;
     let axis_ratio = 0.7;
     let angle = 0.5;
 
     b.bench(|| {
-        black_box(elliptical_gaussian_convolve(
+        elliptical_gaussian_convolve(
             black_box(&pixels),
             black_box(sigma),
             black_box(axis_ratio),
             black_box(angle),
-        ));
+            black_box(&mut output),
+        );
     });
 }
 
 #[quick_bench(warmup_iters = 2, iters = 5)]
 fn bench_elliptical_vs_circular_1k(b: ::bench::Bencher) {
     let pixels = benchmark_star_field(1024, 1024, 100, 0.1, 0.01, 42);
+    let mut output = Buffer2::new_default(1024, 1024);
     let sigma = 2.0;
 
     b.bench_labeled("circular", || {
-        black_box(gaussian_convolve(black_box(&pixels), black_box(sigma)));
+        gaussian_convolve(black_box(&pixels), black_box(sigma), black_box(&mut output));
     });
 
     b.bench_labeled("elliptical_0.7", || {
-        black_box(elliptical_gaussian_convolve(
+        elliptical_gaussian_convolve(
             black_box(&pixels),
             black_box(sigma),
             black_box(0.7),
             black_box(0.5),
-        ));
+            black_box(&mut output),
+        );
     });
 }
 

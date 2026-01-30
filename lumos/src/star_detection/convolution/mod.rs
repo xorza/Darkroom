@@ -70,12 +70,15 @@ pub fn matched_filter(
 
     // Convolve with elliptical Gaussian kernel
     let sigma = fwhm_to_sigma(fwhm);
+    let mut output = Buffer2::new_default(pixels.width(), pixels.height());
     elliptical_gaussian_convolve(
         &Buffer2::new(pixels.width(), pixels.height(), subtracted),
         sigma,
         axis_ratio,
         angle,
-    )
+        &mut output,
+    );
+    output
 }
 
 // ============================================================================
@@ -86,8 +89,10 @@ pub fn matched_filter(
 ///
 /// Uses separable convolution: first convolve rows, then columns.
 /// This is O(n×k) instead of O(n×k²) for a 2D convolution.
-pub(super) fn gaussian_convolve(pixels: &Buffer2<f32>, sigma: f32) -> Buffer2<f32> {
+pub(super) fn gaussian_convolve(pixels: &Buffer2<f32>, sigma: f32, output: &mut Buffer2<f32>) {
     assert!(sigma > 0.0, "Sigma must be positive");
+    assert_eq!(pixels.width(), output.width());
+    assert_eq!(pixels.height(), output.height());
 
     let width = pixels.width();
     let height = pixels.height();
@@ -96,7 +101,8 @@ pub(super) fn gaussian_convolve(pixels: &Buffer2<f32>, sigma: f32) -> Buffer2<f3
 
     // If kernel is larger than image dimension, fall back to direct 2D convolution
     if radius >= width.min(height) / 2 {
-        return gaussian_convolve_2d_direct(pixels, sigma);
+        gaussian_convolve_2d_direct(pixels, sigma, output);
+        return;
     }
 
     // Step 1: Convolve rows (horizontal pass)
@@ -104,10 +110,7 @@ pub(super) fn gaussian_convolve(pixels: &Buffer2<f32>, sigma: f32) -> Buffer2<f3
     convolve_rows_parallel(pixels, &mut temp, &kernel);
 
     // Step 2: Convolve columns (vertical pass)
-    let mut output = Buffer2::new_default(width, height);
-    convolve_cols_parallel(&temp, &mut output, &kernel);
-
-    output
+    convolve_cols_parallel(&temp, output, &kernel);
 }
 
 /// Apply elliptical Gaussian convolution to an image.
@@ -120,21 +123,24 @@ pub(super) fn elliptical_gaussian_convolve(
     sigma: f32,
     axis_ratio: f32,
     angle: f32,
-) -> Buffer2<f32> {
+    output: &mut Buffer2<f32>,
+) {
     let width = pixels.width();
     let height = pixels.height();
+    assert_eq!(width, output.width());
+    assert_eq!(height, output.height());
 
     // For axis_ratio very close to 1.0, use faster separable convolution
     if (axis_ratio - 1.0).abs() < 0.01 {
-        return gaussian_convolve(pixels, sigma);
+        gaussian_convolve(pixels, sigma, output);
+        return;
     }
 
     let (kernel, ksize) = elliptical_gaussian_kernel_2d(sigma, axis_ratio, angle);
     let radius = ksize / 2;
 
-    let mut output = vec![0.0f32; width * height];
-
     output
+        .pixels_mut()
         .par_rows_mut_auto(width)
         .for_each(|(y_start, out_chunk)| {
             let rows_in_chunk = out_chunk.len() / width;
@@ -176,8 +182,6 @@ pub(super) fn elliptical_gaussian_convolve(
                 }
             }
         });
-
-    Buffer2::new(width, height, output)
 }
 
 /// Compute 1D Gaussian kernel (normalized to sum to 1.0).
@@ -270,7 +274,7 @@ fn convolve_cols_parallel(input: &Buffer2<f32>, output: &mut Buffer2<f32>, kerne
 }
 
 /// Direct 2D Gaussian convolution for small images or large kernels.
-fn gaussian_convolve_2d_direct(pixels: &Buffer2<f32>, sigma: f32) -> Buffer2<f32> {
+fn gaussian_convolve_2d_direct(pixels: &Buffer2<f32>, sigma: f32, output: &mut Buffer2<f32>) {
     let width = pixels.width();
     let height = pixels.height();
     let kernel_1d = gaussian_kernel_1d(sigma);
@@ -285,8 +289,8 @@ fn gaussian_convolve_2d_direct(pixels: &Buffer2<f32>, sigma: f32) -> Buffer2<f32
         }
     }
 
-    let mut output = vec![0.0f32; width * height];
-
+    let output_pixels = output.pixels_mut();
+    // todo paralelize
     for y in 0..height {
         for x in 0..width {
             let mut sum = 0.0f32;
@@ -317,11 +321,9 @@ fn gaussian_convolve_2d_direct(pixels: &Buffer2<f32>, sigma: f32) -> Buffer2<f32
                 }
             }
 
-            output[y * width + x] = sum;
+            output_pixels[y * width + x] = sum;
         }
     }
-
-    Buffer2::new(width, height, output)
 }
 
 /// Compute 2D elliptical Gaussian kernel (normalized to sum to 1.0).

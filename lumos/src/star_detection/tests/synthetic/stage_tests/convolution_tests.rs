@@ -77,7 +77,8 @@ fn test_gaussian_filter_sparse() {
     // Apply Gaussian filter (matched filter for star detection)
     let sigma = fwhm_to_sigma(fwhm);
     let bg_subtracted_buf = Buffer2::new(width, height, bg_subtracted);
-    let filtered = gaussian_convolve(&bg_subtracted_buf, sigma);
+    let mut filtered = Buffer2::new_default(width, height);
+    gaussian_convolve(&bg_subtracted_buf, sigma, &mut filtered);
 
     // Normalize for display
     let filtered_display = normalize_for_display(filtered.pixels());
@@ -167,7 +168,8 @@ fn test_gaussian_filter_fwhm_range() {
     for target_fwhm in [2.5, 4.0, 5.5] {
         let sigma = fwhm_to_sigma(target_fwhm);
         let bg_subtracted_buf = Buffer2::new(width, height, bg_subtracted.clone());
-        let filtered = gaussian_convolve(&bg_subtracted_buf, sigma);
+        let mut filtered = Buffer2::new_default(width, height);
+        gaussian_convolve(&bg_subtracted_buf, sigma, &mut filtered);
         let filtered_display = normalize_for_display(filtered.pixels());
 
         save_grayscale(
@@ -241,7 +243,8 @@ fn test_gaussian_filter_noise() {
     // Apply Gaussian filter
     let sigma = fwhm_to_sigma(fwhm);
     let bg_subtracted_buf = Buffer2::new(width, height, bg_subtracted);
-    let filtered = gaussian_convolve(&bg_subtracted_buf, sigma);
+    let mut filtered = Buffer2::new_default(width, height);
+    gaussian_convolve(&bg_subtracted_buf, sigma, &mut filtered);
     let filtered_display = normalize_for_display(filtered.pixels());
 
     save_grayscale(

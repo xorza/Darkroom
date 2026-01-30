@@ -86,9 +86,10 @@ fn test_gaussian_convolve_uniform_image() {
     let height = 32;
     let pixels = Buffer2::new(width, height, vec![0.5f32; width * height]);
 
-    let result = gaussian_convolve(&pixels, 2.0);
+    let mut result = Buffer2::new_default(width, height);
+    gaussian_convolve(&pixels, 2.0, &mut result);
 
-    for v in result {
+    for v in result.iter() {
         assert!(
             (v - 0.5).abs() < 1e-5,
             "Uniform image should stay uniform after convolution"
@@ -107,7 +108,8 @@ fn test_gaussian_convolve_preserves_total_flux() {
     pixels[32 * width + 32] = 1.0;
 
     let pixels = Buffer2::new(width, height, pixels);
-    let result = gaussian_convolve(&pixels, 2.0);
+    let mut result = Buffer2::new_default(width, height);
+    gaussian_convolve(&pixels, 2.0, &mut result);
 
     let input_sum: f32 = pixels.iter().sum();
     let output_sum: f32 = result.iter().sum();
@@ -133,7 +135,8 @@ fn test_gaussian_convolve_spreads_point_source() {
 
     let sigma = 2.0;
     let pixels = Buffer2::new(width, height, pixels);
-    let result = gaussian_convolve(&pixels, sigma);
+    let mut result = Buffer2::new_default(width, height);
+    gaussian_convolve(&pixels, sigma, &mut result);
 
     // Peak should be at center but reduced
     let peak = result[cy * width + cx];
@@ -157,7 +160,8 @@ fn test_gaussian_convolve_symmetry() {
     pixels[16 * width + 16] = 1.0;
 
     let pixels = Buffer2::new(width, height, pixels);
-    let result = gaussian_convolve(&pixels, 2.0);
+    let mut result = Buffer2::new_default(width, height);
+    gaussian_convolve(&pixels, 2.0, &mut result);
 
     // Check symmetry around center
     for dy in 1..8 {
@@ -182,8 +186,10 @@ fn test_gaussian_convolve_larger_sigma_more_spread() {
     pixels[32 * width + 32] = 1.0;
 
     let pixels = Buffer2::new(width, height, pixels);
-    let result_small = gaussian_convolve(&pixels, 1.0);
-    let result_large = gaussian_convolve(&pixels, 3.0);
+    let mut result_small = Buffer2::new_default(width, height);
+    let mut result_large = Buffer2::new_default(width, height);
+    gaussian_convolve(&pixels, 1.0, &mut result_small);
+    gaussian_convolve(&pixels, 3.0, &mut result_large);
 
     // Larger sigma should result in lower peak
     let peak_small = result_small[32 * width + 32];
@@ -207,7 +213,8 @@ fn test_gaussian_convolve_edge_handling() {
     pixels[2 * width + 2] = 1.0;
 
     let pixels = Buffer2::new(width, height, pixels);
-    let result = gaussian_convolve(&pixels, 1.5);
+    let mut result = Buffer2::new_default(width, height);
+    gaussian_convolve(&pixels, 1.5, &mut result);
 
     // Should not have NaN or Inf
     for v in result.iter() {
@@ -226,7 +233,8 @@ fn test_gaussian_convolve_non_square_image() {
     pixels[16 * width + 32] = 1.0;
 
     let pixels = Buffer2::new(width, height, pixels);
-    let result = gaussian_convolve(&pixels, 2.0);
+    let mut result = Buffer2::new_default(width, height);
+    gaussian_convolve(&pixels, 2.0, &mut result);
 
     assert_eq!(result.len(), width * height);
 
@@ -242,7 +250,8 @@ fn test_gaussian_convolve_small_image() {
     let height = 8;
     let pixels = Buffer2::new(width, height, vec![1.0f32; width * height]);
 
-    let result = gaussian_convolve(&pixels, 2.0);
+    let mut result = Buffer2::new_default(width, height);
+    gaussian_convolve(&pixels, 2.0, &mut result);
 
     // Should still work and preserve value approximately
     for v in result.iter() {
@@ -377,8 +386,10 @@ fn test_separable_vs_direct_equivalence() {
 
     let sigma = 1.5;
     let pixels = Buffer2::new(width, height, pixels);
-    let result_sep = gaussian_convolve(&pixels, sigma);
-    let result_direct = gaussian_convolve_2d_direct(&pixels, sigma);
+    let mut result_sep = Buffer2::new_default(width, height);
+    let mut result_direct = Buffer2::new_default(width, height);
+    gaussian_convolve(&pixels, sigma, &mut result_sep);
+    gaussian_convolve_2d_direct(&pixels, sigma, &mut result_direct);
 
     for (i, (&a, &b)) in result_sep.iter().zip(result_direct.iter()).enumerate() {
         assert!(
@@ -398,7 +409,8 @@ fn test_large_image_convolution() {
     let height = 512;
     let pixels = Buffer2::new(width, height, vec![0.5f32; width * height]);
 
-    let result = gaussian_convolve(&pixels, 3.0);
+    let mut result = Buffer2::new_default(width, height);
+    gaussian_convolve(&pixels, 3.0, &mut result);
 
     assert_eq!(result.len(), width * height);
     assert!(result[0].is_finite());
