@@ -18,7 +18,7 @@ use crate::star_detection::StarDetectionConfig;
 use crate::star_detection::background::BackgroundMap;
 use crate::star_detection::deblend::DeblendConfig;
 use crate::star_detection::detection::{
-    DetectionConfig, StarCandidate, connected_components, extract_candidates,
+    DetectionConfig, LabelMap, StarCandidate, extract_candidates,
 };
 
 /// Maximum dilation radius supported by the GPU shader.
@@ -461,15 +461,14 @@ pub fn detect_stars_gpu_with_detector(
     }
 
     // Connected component labeling on CPU (optimal for sparse images)
-    let (labels, num_labels) = connected_components(&mask);
+    let label_map = LabelMap::from_mask(&mask);
 
     // Extract candidate properties with deblending
     let deblend_config = DeblendConfig::from(config);
     let pixels_buf = Buffer2::new(width, height, pixels.to_vec());
     let mut candidates = extract_candidates(
         &pixels_buf,
-        &labels,
-        num_labels,
+        &label_map,
         &deblend_config,
         detection_config.max_area,
     );

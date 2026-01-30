@@ -8,6 +8,7 @@
 
 use super::DeblendConfig;
 use crate::common::Buffer2;
+use crate::star_detection::detection::LabelMap;
 
 /// A pixel with its coordinates and value.
 #[derive(Debug, Clone, Copy)]
@@ -41,7 +42,7 @@ impl ComponentData {
     pub fn iter_pixels<'a>(
         &'a self,
         pixels: &'a Buffer2<f32>,
-        labels: &'a Buffer2<u32>,
+        labels: &'a LabelMap,
     ) -> impl Iterator<Item = Pixel> + 'a {
         let width = pixels.width();
         (self.y_min..=self.y_max).flat_map(move |y| {
@@ -62,7 +63,7 @@ impl ComponentData {
 
     /// Find the global maximum pixel value in this component.
     #[inline]
-    pub fn global_max(&self, pixels: &Buffer2<f32>, labels: &Buffer2<u32>) -> f32 {
+    pub fn global_max(&self, pixels: &Buffer2<f32>, labels: &LabelMap) -> f32 {
         self.iter_pixels(pixels, labels)
             .map(|p| p.value)
             .fold(f32::MIN, f32::max)
@@ -70,7 +71,7 @@ impl ComponentData {
 
     /// Find the peak pixel (maximum value) in this component.
     #[inline]
-    pub fn find_peak(&self, pixels: &Buffer2<f32>, labels: &Buffer2<u32>) -> Pixel {
+    pub fn find_peak(&self, pixels: &Buffer2<f32>, labels: &LabelMap) -> Pixel {
         self.iter_pixels(pixels, labels)
             .max_by(|a, b| {
                 a.value
@@ -113,7 +114,7 @@ pub struct DeblendedCandidate {
 pub fn find_local_maxima(
     data: &ComponentData,
     pixels: &Buffer2<f32>,
-    labels: &Buffer2<u32>,
+    labels: &LabelMap,
     config: &DeblendConfig,
 ) -> Vec<Pixel> {
     let mut peaks: Vec<Pixel> = Vec::new();
@@ -198,7 +199,7 @@ pub fn find_local_maxima(
 pub fn deblend_by_nearest_peak(
     data: &ComponentData,
     pixels: &Buffer2<f32>,
-    labels: &Buffer2<u32>,
+    labels: &LabelMap,
     peaks: &[Pixel],
 ) -> Vec<DeblendedCandidate> {
     if peaks.is_empty() {
@@ -265,7 +266,7 @@ pub fn deblend_by_nearest_peak(
 pub fn deblend_local_maxima(
     data: &ComponentData,
     pixels: &Buffer2<f32>,
-    labels: &Buffer2<u32>,
+    labels: &LabelMap,
     config: &DeblendConfig,
 ) -> Vec<DeblendedCandidate> {
     let peaks = find_local_maxima(data, pixels, labels, config);
@@ -303,7 +304,7 @@ mod tests {
         width: usize,
         height: usize,
         stars: &[(usize, usize, f32, f32)], // (cx, cy, amplitude, sigma)
-    ) -> (Buffer2<f32>, Buffer2<u32>) {
+    ) -> (Buffer2<f32>, LabelMap) {
         let mut pixels = Buffer2::new_filled(width, height, 0.0f32);
         let mut labels = Buffer2::new_filled(width, height, 0u32);
 
@@ -327,10 +328,11 @@ mod tests {
             }
         }
 
-        (pixels, labels)
+        let label_map = LabelMap::from_raw(labels, 1);
+        (pixels, label_map)
     }
 
-    fn compute_bbox(labels: &Buffer2<u32>, label: u32) -> (usize, usize, usize, usize, usize) {
+    fn compute_bbox(labels: &LabelMap, label: u32) -> (usize, usize, usize, usize, usize) {
         let mut x_min = usize::MAX;
         let mut x_max = 0;
         let mut y_min = usize::MAX;

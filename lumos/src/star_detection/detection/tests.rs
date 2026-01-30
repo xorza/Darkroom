@@ -183,34 +183,34 @@ fn test_empty_image() {
 }
 
 // =============================================================================
-// Connected Components Tests
+// Connected Components Tests (LabelMap::from_mask)
 // =============================================================================
 
 #[test]
-fn test_connected_components_empty_mask() {
+fn test_label_map_empty_mask() {
     let mask = BitBuffer2::from_slice(4, 4, &[false; 16]);
-    let (labels, num_labels) = connected_components(&mask);
+    let label_map = LabelMap::from_mask(&mask);
 
-    assert_eq!(num_labels, 0);
-    assert!(labels.iter().all(|&l| l == 0));
+    assert_eq!(label_map.num_labels(), 0);
+    assert!(label_map.iter().all(|&l| l == 0));
 }
 
 #[test]
-fn test_connected_components_single_pixel() {
+fn test_label_map_single_pixel() {
     // 4x4 mask with single pixel at (1, 1)
     let mut mask_data = vec![false; 16];
     mask_data[1 * 4 + 1] = true;
     let mask = BitBuffer2::from_slice(4, 4, &mask_data);
 
-    let (labels, num_labels) = connected_components(&mask);
+    let label_map = LabelMap::from_mask(&mask);
 
-    assert_eq!(num_labels, 1);
-    assert_eq!(labels[1 * 4 + 1], 1);
-    assert_eq!(labels.iter().filter(|&&l| l == 1).count(), 1);
+    assert_eq!(label_map.num_labels(), 1);
+    assert_eq!(label_map[1 * 4 + 1], 1);
+    assert_eq!(label_map.iter().filter(|&&l| l == 1).count(), 1);
 }
 
 #[test]
-fn test_connected_components_horizontal_line() {
+fn test_label_map_horizontal_line() {
     // 5x3 mask with horizontal line in middle row
     // .....
     // ###..
@@ -221,18 +221,18 @@ fn test_connected_components_horizontal_line() {
     mask_data[1 * 5 + 2] = true;
     let mask = BitBuffer2::from_slice(5, 3, &mask_data);
 
-    let (labels, num_labels) = connected_components(&mask);
+    let label_map = LabelMap::from_mask(&mask);
 
-    assert_eq!(num_labels, 1);
+    assert_eq!(label_map.num_labels(), 1);
     // All three pixels should have the same label
-    let label = labels[1 * 5 + 0];
+    let label = label_map[1 * 5 + 0];
     assert!(label > 0);
-    assert_eq!(labels[1 * 5 + 1], label);
-    assert_eq!(labels[1 * 5 + 2], label);
+    assert_eq!(label_map[1 * 5 + 1], label);
+    assert_eq!(label_map[1 * 5 + 2], label);
 }
 
 #[test]
-fn test_connected_components_vertical_line() {
+fn test_label_map_vertical_line() {
     // 3x5 mask with vertical line in middle column
     let mut mask_data = vec![false; 15];
     mask_data[0 * 3 + 1] = true;
@@ -241,18 +241,18 @@ fn test_connected_components_vertical_line() {
     mask_data[3 * 3 + 1] = true;
     let mask = BitBuffer2::from_slice(3, 5, &mask_data);
 
-    let (labels, num_labels) = connected_components(&mask);
+    let label_map = LabelMap::from_mask(&mask);
 
-    assert_eq!(num_labels, 1);
-    let label = labels[0 * 3 + 1];
+    assert_eq!(label_map.num_labels(), 1);
+    let label = label_map[0 * 3 + 1];
     assert!(label > 0);
-    assert_eq!(labels[1 * 3 + 1], label);
-    assert_eq!(labels[2 * 3 + 1], label);
-    assert_eq!(labels[3 * 3 + 1], label);
+    assert_eq!(label_map[1 * 3 + 1], label);
+    assert_eq!(label_map[2 * 3 + 1], label);
+    assert_eq!(label_map[3 * 3 + 1], label);
 }
 
 #[test]
-fn test_connected_components_two_separate_regions() {
+fn test_label_map_two_separate_regions() {
     // 6x3 mask with two separate single pixels
     // #....#
     // ......
@@ -262,16 +262,16 @@ fn test_connected_components_two_separate_regions() {
     mask_data[5] = true; // (5, 0)
     let mask = BitBuffer2::from_slice(6, 3, &mask_data);
 
-    let (labels, num_labels) = connected_components(&mask);
+    let label_map = LabelMap::from_mask(&mask);
 
-    assert_eq!(num_labels, 2);
-    assert!(labels[0] > 0);
-    assert!(labels[5] > 0);
-    assert_ne!(labels[0], labels[5]);
+    assert_eq!(label_map.num_labels(), 2);
+    assert!(label_map[0] > 0);
+    assert!(label_map[5] > 0);
+    assert_ne!(label_map[0], label_map[5]);
 }
 
 #[test]
-fn test_connected_components_l_shape() {
+fn test_label_map_l_shape() {
     // 4x4 mask with L-shape
     // #...
     // #...
@@ -284,18 +284,18 @@ fn test_connected_components_l_shape() {
     mask_data[2 * 4 + 1] = true;
     let mask = BitBuffer2::from_slice(4, 4, &mask_data);
 
-    let (labels, num_labels) = connected_components(&mask);
+    let label_map = LabelMap::from_mask(&mask);
 
-    assert_eq!(num_labels, 1);
-    let label = labels[0];
+    assert_eq!(label_map.num_labels(), 1);
+    let label = label_map[0];
     assert!(label > 0);
-    assert_eq!(labels[1 * 4 + 0], label);
-    assert_eq!(labels[2 * 4 + 0], label);
-    assert_eq!(labels[2 * 4 + 1], label);
+    assert_eq!(label_map[1 * 4 + 0], label);
+    assert_eq!(label_map[2 * 4 + 0], label);
+    assert_eq!(label_map[2 * 4 + 1], label);
 }
 
 #[test]
-fn test_connected_components_diagonal_not_connected() {
+fn test_label_map_diagonal_not_connected() {
     // 3x3 mask with diagonal pixels (4-connectivity means they're separate)
     // #..
     // .#.
@@ -306,14 +306,14 @@ fn test_connected_components_diagonal_not_connected() {
     mask_data[2 * 3 + 2] = true;
     let mask = BitBuffer2::from_slice(3, 3, &mask_data);
 
-    let (_labels, num_labels) = connected_components(&mask);
+    let label_map = LabelMap::from_mask(&mask);
 
     // With 4-connectivity, diagonal pixels are NOT connected
-    assert_eq!(num_labels, 3);
+    assert_eq!(label_map.num_labels(), 3);
 }
 
 #[test]
-fn test_connected_components_u_shape_union_find() {
+fn test_label_map_u_shape_union_find() {
     // This tests the union-find when labels need to be merged
     // 5x3 mask forming a U shape:
     // #...#
@@ -334,16 +334,16 @@ fn test_connected_components_u_shape_union_find() {
     mask_data[2 * 5 + 3] = true;
     let mask = BitBuffer2::from_slice(5, 3, &mask_data);
 
-    let (labels, num_labels) = connected_components(&mask);
+    let label_map = LabelMap::from_mask(&mask);
 
     // All pixels should be in one component due to union-find
-    assert_eq!(num_labels, 1);
-    let label = labels[0];
+    assert_eq!(label_map.num_labels(), 1);
+    let label = label_map[0];
     assert!(label > 0);
     for i in 0..15 {
         if mask_data[i] {
             assert_eq!(
-                labels[i], label,
+                label_map[i], label,
                 "All U-shape pixels should have same label"
             );
         }
@@ -351,7 +351,7 @@ fn test_connected_components_u_shape_union_find() {
 }
 
 #[test]
-fn test_connected_components_checkerboard() {
+fn test_label_map_checkerboard() {
     // 4x4 checkerboard pattern - no pixels should be connected
     // #.#.
     // .#.#
@@ -367,24 +367,24 @@ fn test_connected_components_checkerboard() {
     }
     let mask = BitBuffer2::from_slice(4, 4, &mask_data);
 
-    let (_labels, num_labels) = connected_components(&mask);
+    let label_map = LabelMap::from_mask(&mask);
 
     // Each pixel is isolated (4-connectivity)
-    assert_eq!(num_labels, 8);
+    assert_eq!(label_map.num_labels(), 8);
 }
 
 #[test]
-fn test_connected_components_filled_rectangle() {
+fn test_label_map_filled_rectangle() {
     // 3x3 all true
     let mask = BitBuffer2::from_slice(3, 3, &[true; 9]);
-    let (labels, num_labels) = connected_components(&mask);
+    let label_map = LabelMap::from_mask(&mask);
 
-    assert_eq!(num_labels, 1);
-    assert!(labels.iter().all(|&l| l == 1));
+    assert_eq!(label_map.num_labels(), 1);
+    assert!(label_map.iter().all(|&l| l == 1));
 }
 
 #[test]
-fn test_connected_components_labels_are_sequential() {
+fn test_label_map_labels_are_sequential() {
     // 6x1 with three separate pixels
     // #.#.#.
     let mut mask_data = vec![false; 6];
@@ -393,13 +393,13 @@ fn test_connected_components_labels_are_sequential() {
     mask_data[4] = true;
     let mask = BitBuffer2::from_slice(6, 1, &mask_data);
 
-    let (labels, num_labels) = connected_components(&mask);
+    let label_map = LabelMap::from_mask(&mask);
 
-    assert_eq!(num_labels, 3);
+    assert_eq!(label_map.num_labels(), 3);
     // Labels should be 1, 2, 3 (sequential)
-    assert_eq!(labels[0], 1);
-    assert_eq!(labels[2], 2);
-    assert_eq!(labels[4], 3);
+    assert_eq!(label_map[0], 1);
+    assert_eq!(label_map[2], 2);
+    assert_eq!(label_map[4], 3);
 }
 
 // =============================================================================
@@ -660,9 +660,9 @@ fn test_dilate_mask_preserves_original_pixels() {
 #[test]
 fn test_extract_candidates_empty() {
     let pixels = Buffer2::new(3, 3, vec![0.5; 9]);
-    let labels = Buffer2::new(3, 3, vec![0u32; 9]);
+    let label_map = LabelMap::from_raw(Buffer2::new(3, 3, vec![0u32; 9]), 0);
 
-    let candidates = extract_candidates(&pixels, &labels, 0, &TEST_DEBLEND_CONFIG, TEST_MAX_AREA);
+    let candidates = extract_candidates(&pixels, &label_map, &TEST_DEBLEND_CONFIG, TEST_MAX_AREA);
 
     assert!(candidates.is_empty());
 }
@@ -679,17 +679,20 @@ fn test_extract_candidates_single_component() {
             0.1, 0.1, 0.1,
         ],
     );
-    let labels = Buffer2::new(
-        3,
-        3,
-        vec![
-            0, 0, 0, //
-            1, 1, 1, //
-            0, 0, 0,
-        ],
+    let label_map = LabelMap::from_raw(
+        Buffer2::new(
+            3,
+            3,
+            vec![
+                0, 0, 0, //
+                1, 1, 1, //
+                0, 0, 0,
+            ],
+        ),
+        1,
     );
 
-    let candidates = extract_candidates(&pixels, &labels, 1, &TEST_DEBLEND_CONFIG, TEST_MAX_AREA);
+    let candidates = extract_candidates(&pixels, &label_map, &TEST_DEBLEND_CONFIG, TEST_MAX_AREA);
 
     assert_eq!(candidates.len(), 1);
     let c = &candidates[0];
@@ -715,17 +718,20 @@ fn test_extract_candidates_two_components() {
             0.1, 0.1, 0.1, 0.1, 0.1,
         ],
     );
-    let labels = Buffer2::new(
-        5,
-        3,
-        vec![
-            1, 0, 0, 0, 2, //
-            0, 0, 0, 0, 0, //
-            0, 0, 0, 0, 0,
-        ],
+    let label_map = LabelMap::from_raw(
+        Buffer2::new(
+            5,
+            3,
+            vec![
+                1, 0, 0, 0, 2, //
+                0, 0, 0, 0, 0, //
+                0, 0, 0, 0, 0,
+            ],
+        ),
+        2,
     );
 
-    let candidates = extract_candidates(&pixels, &labels, 2, &TEST_DEBLEND_CONFIG, TEST_MAX_AREA);
+    let candidates = extract_candidates(&pixels, &label_map, &TEST_DEBLEND_CONFIG, TEST_MAX_AREA);
 
     assert_eq!(candidates.len(), 2);
 
@@ -759,8 +765,8 @@ fn test_extract_candidates_bounding_box() {
     pixels_data[2 * 5 + 1] = 0.7;
 
     let pixels = Buffer2::new(5, 5, pixels_data);
-    let labels = Buffer2::new(5, 5, labels_data);
-    let candidates = extract_candidates(&pixels, &labels, 1, &TEST_DEBLEND_CONFIG, TEST_MAX_AREA);
+    let label_map = LabelMap::from_raw(Buffer2::new(5, 5, labels_data), 1);
+    let candidates = extract_candidates(&pixels, &label_map, &TEST_DEBLEND_CONFIG, TEST_MAX_AREA);
 
     assert_eq!(candidates.len(), 1);
     let c = &candidates[0];
@@ -778,9 +784,9 @@ fn test_extract_candidates_bounding_box() {
 fn test_extract_candidates_width_height() {
     let pixels = Buffer2::new(3, 2, vec![0.5; 6]);
     // 3x2 component covering full image
-    let labels = Buffer2::new(3, 2, vec![1u32; 6]);
+    let label_map = LabelMap::from_raw(Buffer2::new(3, 2, vec![1u32; 6]), 1);
 
-    let candidates = extract_candidates(&pixels, &labels, 1, &TEST_DEBLEND_CONFIG, TEST_MAX_AREA);
+    let candidates = extract_candidates(&pixels, &label_map, &TEST_DEBLEND_CONFIG, TEST_MAX_AREA);
 
     assert_eq!(candidates.len(), 1);
     let c = &candidates[0];
@@ -803,15 +809,15 @@ fn test_extract_candidates_max_area_filter() {
         *label = 2;
     }
 
-    let labels = Buffer2::new(10, 10, labels_data);
+    let label_map = LabelMap::from_raw(Buffer2::new(10, 10, labels_data), 2);
 
     // With max_area=10, the large component should be skipped
-    let candidates = extract_candidates(&pixels, &labels, 2, &TEST_DEBLEND_CONFIG, 10);
+    let candidates = extract_candidates(&pixels, &label_map, &TEST_DEBLEND_CONFIG, 10);
     assert_eq!(candidates.len(), 1, "Only small component should be found");
     assert_eq!(candidates[0].area, 5);
 
     // With max_area=100, both should be found
-    let candidates = extract_candidates(&pixels, &labels, 2, &TEST_DEBLEND_CONFIG, 100);
+    let candidates = extract_candidates(&pixels, &label_map, &TEST_DEBLEND_CONFIG, 100);
     assert_eq!(candidates.len(), 2, "Both components should be found");
 }
 
@@ -827,17 +833,20 @@ fn test_extract_candidates_multiple_peaks_same_value() {
             0.1, 0.1, 0.1,
         ],
     );
-    let labels = Buffer2::new(
-        3,
-        3,
-        vec![
-            0, 0, 0, //
-            1, 1, 1, //
-            0, 0, 0,
-        ],
+    let label_map = LabelMap::from_raw(
+        Buffer2::new(
+            3,
+            3,
+            vec![
+                0, 0, 0, //
+                1, 1, 1, //
+                0, 0, 0,
+            ],
+        ),
+        1,
     );
 
-    let candidates = extract_candidates(&pixels, &labels, 1, &TEST_DEBLEND_CONFIG, TEST_MAX_AREA);
+    let candidates = extract_candidates(&pixels, &label_map, &TEST_DEBLEND_CONFIG, TEST_MAX_AREA);
 
     assert_eq!(candidates.len(), 1);
     let c = &candidates[0];
@@ -859,17 +868,20 @@ fn test_extract_candidates_peak_at_corner() {
             0.1, 0.1, 0.1,
         ],
     );
-    let labels = Buffer2::new(
-        3,
-        3,
-        vec![
-            1, 1, 0, //
-            1, 1, 0, //
-            0, 0, 0,
-        ],
+    let label_map = LabelMap::from_raw(
+        Buffer2::new(
+            3,
+            3,
+            vec![
+                1, 1, 0, //
+                1, 1, 0, //
+                0, 0, 0,
+            ],
+        ),
+        1,
     );
 
-    let candidates = extract_candidates(&pixels, &labels, 1, &TEST_DEBLEND_CONFIG, TEST_MAX_AREA);
+    let candidates = extract_candidates(&pixels, &label_map, &TEST_DEBLEND_CONFIG, TEST_MAX_AREA);
 
     assert_eq!(candidates.len(), 1);
     let c = &candidates[0];
@@ -892,17 +904,20 @@ fn test_extract_candidates_single_pixel_component() {
             0.1, 0.1, 0.1,
         ],
     );
-    let labels = Buffer2::new(
-        3,
-        3,
-        vec![
-            0, 0, 0, //
-            0, 1, 0, //
-            0, 0, 0,
-        ],
+    let label_map = LabelMap::from_raw(
+        Buffer2::new(
+            3,
+            3,
+            vec![
+                0, 0, 0, //
+                0, 1, 0, //
+                0, 0, 0,
+            ],
+        ),
+        1,
     );
 
-    let candidates = extract_candidates(&pixels, &labels, 1, &TEST_DEBLEND_CONFIG, TEST_MAX_AREA);
+    let candidates = extract_candidates(&pixels, &label_map, &TEST_DEBLEND_CONFIG, TEST_MAX_AREA);
 
     assert_eq!(candidates.len(), 1);
     let c = &candidates[0];
@@ -930,17 +945,20 @@ fn test_extract_candidates_diagonal_component() {
             0.1, 0.1, 0.7,
         ],
     );
-    let labels = Buffer2::new(
-        3,
-        3,
-        vec![
-            1, 0, 0, //
-            0, 1, 0, //
-            0, 0, 1,
-        ],
+    let label_map = LabelMap::from_raw(
+        Buffer2::new(
+            3,
+            3,
+            vec![
+                1, 0, 0, //
+                0, 1, 0, //
+                0, 0, 1,
+            ],
+        ),
+        1,
     );
 
-    let candidates = extract_candidates(&pixels, &labels, 1, &TEST_DEBLEND_CONFIG, TEST_MAX_AREA);
+    let candidates = extract_candidates(&pixels, &label_map, &TEST_DEBLEND_CONFIG, TEST_MAX_AREA);
 
     assert_eq!(candidates.len(), 1);
     let c = &candidates[0];
@@ -967,18 +985,20 @@ fn test_extract_candidates_sparse_labels() {
             0.1, 0.1, 0.1,
         ],
     );
-    let labels = Buffer2::new(
-        3,
-        3,
-        vec![
-            1, 0, 3, //
-            0, 0, 0, //
-            0, 0, 0,
-        ],
-    );
-
     // num_labels should be 3 to account for label 3
-    let candidates = extract_candidates(&pixels, &labels, 3, &TEST_DEBLEND_CONFIG, TEST_MAX_AREA);
+    let label_map = LabelMap::from_raw(
+        Buffer2::new(
+            3,
+            3,
+            vec![
+                1, 0, 3, //
+                0, 0, 0, //
+                0, 0, 0,
+            ],
+        ),
+        3,
+    );
+    let candidates = extract_candidates(&pixels, &label_map, &TEST_DEBLEND_CONFIG, TEST_MAX_AREA);
 
     // Only non-empty components are returned (labels 1 and 3)
     assert_eq!(candidates.len(), 2);
@@ -994,9 +1014,9 @@ fn test_extract_candidates_sparse_labels() {
 fn test_extract_candidates_full_image_component() {
     // Component covering entire image
     let pixels = Buffer2::new(3, 3, (0..9).map(|i| 0.1 + i as f32 * 0.1).collect());
-    let labels = Buffer2::new(3, 3, vec![1u32; 9]);
+    let label_map = LabelMap::from_raw(Buffer2::new(3, 3, vec![1u32; 9]), 1);
 
-    let candidates = extract_candidates(&pixels, &labels, 1, &TEST_DEBLEND_CONFIG, TEST_MAX_AREA);
+    let candidates = extract_candidates(&pixels, &label_map, &TEST_DEBLEND_CONFIG, TEST_MAX_AREA);
 
     assert_eq!(candidates.len(), 1);
     let c = &candidates[0];
@@ -1023,17 +1043,20 @@ fn test_extract_candidates_negative_pixel_values() {
             0.1, 0.1, 0.1,
         ],
     );
-    let labels = Buffer2::new(
-        3,
-        3,
-        vec![
-            1, 1, 0, //
-            1, 1, 0, //
-            0, 0, 0,
-        ],
+    let label_map = LabelMap::from_raw(
+        Buffer2::new(
+            3,
+            3,
+            vec![
+                1, 1, 0, //
+                1, 1, 0, //
+                0, 0, 0,
+            ],
+        ),
+        1,
     );
 
-    let candidates = extract_candidates(&pixels, &labels, 1, &TEST_DEBLEND_CONFIG, TEST_MAX_AREA);
+    let candidates = extract_candidates(&pixels, &label_map, &TEST_DEBLEND_CONFIG, TEST_MAX_AREA);
 
     assert_eq!(candidates.len(), 1);
     let c = &candidates[0];
@@ -1056,8 +1079,8 @@ fn test_extract_candidates_many_components() {
     }
 
     let pixels = Buffer2::new(10, 10, pixels_data);
-    let labels = Buffer2::new(10, 10, labels_data);
-    let candidates = extract_candidates(&pixels, &labels, 10, &TEST_DEBLEND_CONFIG, TEST_MAX_AREA);
+    let label_map = LabelMap::from_raw(Buffer2::new(10, 10, labels_data), 10);
+    let candidates = extract_candidates(&pixels, &label_map, &TEST_DEBLEND_CONFIG, TEST_MAX_AREA);
 
     assert_eq!(candidates.len(), 10);
     for (i, c) in candidates.iter().enumerate() {
@@ -1078,16 +1101,19 @@ fn test_extract_candidates_non_square_image() {
             0.1, 0.2, 0.3, 0.2, 0.1, 0.7, 0.1,
         ],
     );
-    let labels = Buffer2::new(
-        7,
+    let label_map = LabelMap::from_raw(
+        Buffer2::new(
+            7,
+            2,
+            vec![
+                0, 1, 1, 1, 0, 2, 0, //
+                0, 1, 1, 1, 0, 2, 0,
+            ],
+        ),
         2,
-        vec![
-            0, 1, 1, 1, 0, 2, 0, //
-            0, 1, 1, 1, 0, 2, 0,
-        ],
     );
 
-    let candidates = extract_candidates(&pixels, &labels, 2, &TEST_DEBLEND_CONFIG, TEST_MAX_AREA);
+    let candidates = extract_candidates(&pixels, &label_map, &TEST_DEBLEND_CONFIG, TEST_MAX_AREA);
 
     assert_eq!(candidates.len(), 2);
 
@@ -1139,17 +1165,11 @@ fn test_connected_components_and_extract_integration() {
     // Peak at (7, 7)
     pixels[7 * 10 + 7] = 0.8;
 
-    let (labels, num_labels) = connected_components(&BitBuffer2::from_slice(10, 10, &mask));
+    let label_map = LabelMap::from_mask(&BitBuffer2::from_slice(10, 10, &mask));
     let pixels = Buffer2::new(10, 10, pixels);
-    let candidates = extract_candidates(
-        &pixels,
-        &labels,
-        num_labels,
-        &TEST_DEBLEND_CONFIG,
-        TEST_MAX_AREA,
-    );
+    let candidates = extract_candidates(&pixels, &label_map, &TEST_DEBLEND_CONFIG, TEST_MAX_AREA);
 
-    assert_eq!(num_labels, 2);
+    assert_eq!(label_map.num_labels(), 2);
     assert_eq!(candidates.len(), 2);
 
     // Verify star 1
@@ -1189,13 +1209,17 @@ fn test_connected_components_complex_merge() {
     mask[7] = true;
     mask[8] = true;
 
-    let (labels, num_labels) = connected_components(&BitBuffer2::from_slice(3, 3, &mask));
+    let label_map = LabelMap::from_mask(&BitBuffer2::from_slice(3, 3, &mask));
 
     // All should be one component connected through the right column
-    assert_eq!(num_labels, 1);
-    let label = labels[0];
+    assert_eq!(label_map.num_labels(), 1);
+    let label = label_map[0];
     for i in [0, 1, 2, 5, 6, 7, 8] {
-        assert_eq!(labels[i], label, "Pixel {} should be in same component", i);
+        assert_eq!(
+            label_map[i], label,
+            "Pixel {} should be in same component",
+            i
+        );
     }
 }
 
@@ -1248,8 +1272,8 @@ fn test_deblend_star_pair() {
     }
 
     let pixels = Buffer2::new(width, height, pixels);
-    let labels = Buffer2::new(width, height, labels_data);
-    let candidates = extract_candidates(&pixels, &labels, 1, &TEST_DEBLEND_CONFIG, TEST_MAX_AREA);
+    let label_map = LabelMap::from_raw(Buffer2::new(width, height, labels_data), 1);
+    let candidates = extract_candidates(&pixels, &label_map, &TEST_DEBLEND_CONFIG, TEST_MAX_AREA);
 
     // Should deblend into 2 candidates
     assert_eq!(
@@ -1324,8 +1348,8 @@ fn test_no_deblend_for_close_peaks() {
     }
 
     let pixels = Buffer2::new(width, height, pixels);
-    let labels = Buffer2::new(width, height, labels_data);
-    let candidates = extract_candidates(&pixels, &labels, 1, &TEST_DEBLEND_CONFIG, TEST_MAX_AREA);
+    let label_map = LabelMap::from_raw(Buffer2::new(width, height, labels_data), 1);
+    let candidates = extract_candidates(&pixels, &label_map, &TEST_DEBLEND_CONFIG, TEST_MAX_AREA);
 
     // Should NOT deblend - only one candidate because peaks are too close
     assert_eq!(
@@ -1370,8 +1394,8 @@ fn test_deblend_respects_prominence() {
     }
 
     let pixels = Buffer2::new(width, height, pixels);
-    let labels = Buffer2::new(width, height, labels_data);
-    let candidates = extract_candidates(&pixels, &labels, 1, &TEST_DEBLEND_CONFIG, TEST_MAX_AREA);
+    let label_map = LabelMap::from_raw(Buffer2::new(width, height, labels_data), 1);
+    let candidates = extract_candidates(&pixels, &label_map, &TEST_DEBLEND_CONFIG, TEST_MAX_AREA);
 
     // Should NOT deblend - secondary peak is not prominent enough
     assert_eq!(
@@ -1439,8 +1463,8 @@ fn test_multi_threshold_deblend_star_pair() {
     };
 
     let pixels = Buffer2::new(width, height, pixels);
-    let labels = Buffer2::new(width, height, labels_data);
-    let candidates = extract_candidates(&pixels, &labels, 1, &mt_config, TEST_MAX_AREA);
+    let label_map = LabelMap::from_raw(Buffer2::new(width, height, labels_data), 1);
+    let candidates = extract_candidates(&pixels, &label_map, &mt_config, TEST_MAX_AREA);
 
     // Should deblend into 2 candidates
     assert_eq!(
@@ -1514,8 +1538,8 @@ fn test_multi_threshold_vs_simple_deblend_consistency() {
         min_contrast: 0.005,
     };
     let pixels = Buffer2::new(width, height, pixels);
-    let labels = Buffer2::new(width, height, labels_data);
-    let simple_candidates = extract_candidates(&pixels, &labels, 1, &simple_config, TEST_MAX_AREA);
+    let label_map = LabelMap::from_raw(Buffer2::new(width, height, labels_data), 1);
+    let simple_candidates = extract_candidates(&pixels, &label_map, &simple_config, TEST_MAX_AREA);
 
     // Multi-threshold deblending
     let mt_config = DeblendConfig {
@@ -1525,7 +1549,7 @@ fn test_multi_threshold_vs_simple_deblend_consistency() {
         n_thresholds: 32,
         min_contrast: 0.005,
     };
-    let mt_candidates = extract_candidates(&pixels, &labels, 1, &mt_config, TEST_MAX_AREA);
+    let mt_candidates = extract_candidates(&pixels, &label_map, &mt_config, TEST_MAX_AREA);
 
     // Both should find 2 stars
     assert_eq!(
@@ -1606,8 +1630,8 @@ fn test_multi_threshold_deblend_high_contrast_disables() {
     };
 
     let pixels = Buffer2::new(width, height, pixels);
-    let labels = Buffer2::new(width, height, labels_data);
-    let candidates = extract_candidates(&pixels, &labels, 1, &config, TEST_MAX_AREA);
+    let label_map = LabelMap::from_raw(Buffer2::new(width, height, labels_data), 1);
+    let candidates = extract_candidates(&pixels, &label_map, &config, TEST_MAX_AREA);
 
     // Should return single candidate (deblending disabled)
     assert_eq!(

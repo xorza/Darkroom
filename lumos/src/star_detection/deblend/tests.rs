@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::common::Buffer2;
+use crate::star_detection::detection::LabelMap;
 
 fn make_gaussian_star(cx: usize, cy: usize, amplitude: f32, sigma: f32) -> Vec<Pixel> {
     let mut pixels = Vec::new();
@@ -28,7 +29,7 @@ fn create_image_and_labels(
     height: usize,
     star_pixels: &[Pixel],
     label: u32,
-) -> (Buffer2<f32>, Buffer2<u32>) {
+) -> (Buffer2<f32>, LabelMap) {
     let mut pixels = Buffer2::new_filled(width, height, 0.0f32);
     let mut labels = Buffer2::new_filled(width, height, 0u32);
 
@@ -39,11 +40,12 @@ fn create_image_and_labels(
         }
     }
 
-    (pixels, labels)
+    let label_map = LabelMap::from_raw(labels, 1);
+    (pixels, label_map)
 }
 
 /// Compute bounding box and area from labels.
-fn compute_bbox(labels: &Buffer2<u32>, label: u32) -> (usize, usize, usize, usize, usize) {
+fn compute_bbox(labels: &LabelMap, label: u32) -> (usize, usize, usize, usize, usize) {
     let mut x_min = usize::MAX;
     let mut x_max = 0;
     let mut y_min = usize::MAX;
@@ -111,17 +113,17 @@ fn test_local_vs_multi_threshold_two_stars() {
     let star2 = make_gaussian_star(70, 50, 0.8, 2.5);
 
     let mut image = Buffer2::new_filled(width, height, 0.0f32);
-    let mut labels = Buffer2::new_filled(width, height, 0u32);
+    let mut labels_buf = Buffer2::new_filled(width, height, 0u32);
 
     for p in star1.iter().chain(star2.iter()) {
         if p.x < width && p.y < height {
             image[(p.x, p.y)] += p.value;
-            labels[(p.x, p.y)] = 1; // All pixels in same component
+            labels_buf[(p.x, p.y)] = 1; // All pixels in same component
         }
     }
 
     // Collect component pixels for multi-threshold (which still uses Vec<Pixel>)
-    let component_pixels: Vec<Pixel> = labels
+    let component_pixels: Vec<Pixel> = labels_buf
         .iter()
         .enumerate()
         .filter(|&(_, &l)| l == 1)
@@ -132,6 +134,7 @@ fn test_local_vs_multi_threshold_two_stars() {
         })
         .collect();
 
+    let labels = LabelMap::from_raw(labels_buf, 1);
     let (x_min, x_max, y_min, y_max, area) = compute_bbox(&labels, 1);
 
     // Local maxima deblending

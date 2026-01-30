@@ -2,6 +2,7 @@
 
 #[cfg(test)]
 mod bench;
+mod labels;
 #[cfg(test)]
 mod tests;
 
@@ -14,6 +15,8 @@ use super::deblend::{
     deblend_component as multi_threshold_deblend, deblend_local_maxima,
 };
 use crate::common::{BitBuffer2, Buffer2};
+
+pub use labels::LabelMap;
 
 // Re-export DetectionConfig from config module
 pub use super::config::DetectionConfig;
@@ -105,13 +108,12 @@ pub fn detect_stars(
     std::mem::swap(&mut mask, &mut dilated);
 
     // Find connected components
-    let (labels, num_labels) = connected_components(&mask);
+    let label_map = LabelMap::from_mask(&mask);
 
     // Extract candidate properties with deblending (always use original pixels for peak values)
     let mut candidates = extract_candidates(
         pixels,
-        &labels,
-        num_labels,
+        &label_map,
         &deblend_config,
         detection_config.max_area,
     );
@@ -128,150 +130,6 @@ pub fn detect_stars(
     });
 
     candidates
-}
-
-/// Connected component labeling using union-find with parallel second pass.
-///
-/// Uses a two-pass algorithm:
-/// 1. First pass: Sequential scan assigning provisional labels with union-find
-/// 2. Second pass: Parallel label flattening using precomputed root mapping
-///
-/// For images >1M pixels, the second pass is parallelized using rayon.
-pub(crate) fn connected_components(mask: &BitBuffer2) -> (Buffer2<u32>, usize) {
-    let width = mask.width();
-    let height = mask.height();
-
-    let mut labels = Buffer2::new_filled(width, height, 0u32);
-    let mut parent: Vec<u32> = Vec::new();
-
-    // First pass: assign provisional labels with union-find
-    assign_provisional_labels(mask, &mut labels, &mut parent);
-
-    if parent.is_empty() {
-        return (labels, 0);
-    }
-
-    let (label_map, num_labels) = build_label_map(&mut parent);
-
-    // Second pass: apply label mapping
-    // Parallelize for large images (>4M pixels, i.e., 2K×2K and larger)
-    let pixel_count = width * height;
-    let labels_data = labels.pixels_mut();
-    if pixel_count > 4_000_000 {
-        use rayon::prelude::*;
-        labels_data.par_iter_mut().for_each(|label| {
-            if *label != 0 {
-                *label = label_map[*label as usize];
-            }
-        });
-    } else {
-        for label in labels_data.iter_mut() {
-            if *label != 0 {
-                *label = label_map[*label as usize];
-            }
-        }
-    }
-
-    (labels, num_labels)
-}
-
-/// First pass of connected components: assign provisional labels using union-find.
-///
-/// Scans the mask sequentially, assigning labels to foreground pixels and
-/// merging components when neighbors from different components meet.
-fn assign_provisional_labels(mask: &BitBuffer2, labels: &mut Buffer2<u32>, parent: &mut Vec<u32>) {
-    assert_eq!(
-        (mask.width(), mask.height()),
-        (labels.width(), labels.height()),
-        "mask and labels must have same dimensions"
-    );
-
-    let width = mask.width();
-    let height = mask.height();
-    let mut next_label = 1u32;
-
-    for y in 0..height {
-        let row_start = y * width;
-        for x in 0..width {
-            let idx = row_start + x;
-            if !mask.get(idx) {
-                continue;
-            }
-
-            // Check neighbors: left and top only (for forward scan)
-            let left = (x > 0 && mask.get(idx - 1)).then(|| labels[idx - 1]);
-            let top = (y > 0 && mask.get(idx - width)).then(|| labels[idx - width]);
-
-            labels[idx] = match (left, top) {
-                (None, None) => {
-                    parent.push(next_label);
-                    next_label += 1;
-                    next_label - 1
-                }
-                (Some(l), None) => l,
-                (None, Some(t)) => t,
-                (Some(l), Some(t)) => {
-                    if l != t {
-                        union(parent, l, t);
-                    }
-                    l.min(t)
-                }
-            };
-        }
-    }
-}
-
-/// Build a mapping from provisional labels to final sequential labels.
-///
-/// Flattens the union-find structure and assigns sequential final labels
-/// to each unique component root. Uses single-pass optimization: after
-/// path compression, parent[i] points directly to the root, so we can
-/// build the label map without additional find() calls.
-fn build_label_map(parent: &mut [u32]) -> (Vec<u32>, usize) {
-    // First pass: flatten all paths and assign sequential labels to roots
-    let mut root_to_final = vec![0u32; parent.len() + 1];
-    let mut num_labels = 0usize;
-
-    for label in 1..=parent.len() as u32 {
-        let root = find(parent, label);
-        if root_to_final[root as usize] == 0 {
-            num_labels += 1;
-            root_to_final[root as usize] = num_labels as u32;
-        }
-    }
-
-    // Second pass: build label_map using already-flattened parent array.
-    // After path compression above, parent[i-1] == root for all labels,
-    // so we can look up final labels directly without calling find().
-    let mut label_map = vec![0u32; parent.len() + 1];
-    for (i, &root) in parent.iter().enumerate() {
-        label_map[i + 1] = root_to_final[root as usize];
-    }
-
-    (label_map, num_labels)
-}
-
-/// Find root of a label with path compression.
-fn find(parent: &mut [u32], label: u32) -> u32 {
-    let idx = (label - 1) as usize;
-    if parent[idx] != label {
-        parent[idx] = find(parent, parent[idx]); // Path compression
-    }
-    parent[idx]
-}
-
-/// Union two labels.
-fn union(parent: &mut [u32], a: u32, b: u32) {
-    let root_a = find(parent, a);
-    let root_b = find(parent, b);
-    if root_a != root_b {
-        // Union by making smaller root point to larger
-        if root_a < root_b {
-            parent[(root_b - 1) as usize] = root_a;
-        } else {
-            parent[(root_a - 1) as usize] = root_b;
-        }
-    }
 }
 
 /// Data for a component when using multi-threshold deblending.
@@ -295,34 +153,33 @@ struct MultiThresholdComponentData {
 /// is erroneously detected as one component due to bad thresholding).
 pub(crate) fn extract_candidates(
     pixels: &Buffer2<f32>,
-    labels: &Buffer2<u32>,
-    num_labels: usize,
+    label_map: &LabelMap,
     deblend_config: &DeblendConfig,
     max_area: usize,
 ) -> Vec<StarCandidate> {
-    if num_labels == 0 {
+    if label_map.num_labels() == 0 {
         return Vec::new();
     }
 
     if deblend_config.multi_threshold {
         // Multi-threshold deblending needs pixel data for tree-building
-        extract_candidates_multi_threshold(pixels, labels, num_labels, deblend_config, max_area)
+        extract_candidates_multi_threshold(pixels, label_map, deblend_config, max_area)
     } else {
         // Local-maxima deblending uses allocation-free ComponentData
-        extract_candidates_local_maxima(pixels, labels, num_labels, deblend_config, max_area)
+        extract_candidates_local_maxima(pixels, label_map, deblend_config, max_area)
     }
 }
 
 /// Extract candidates using allocation-free local-maxima deblending.
 fn extract_candidates_local_maxima(
     pixels: &Buffer2<f32>,
-    labels: &Buffer2<u32>,
-    num_labels: usize,
+    label_map: &LabelMap,
     deblend_config: &DeblendConfig,
     max_area: usize,
 ) -> Vec<StarCandidate> {
     use rayon::prelude::*;
     let width = pixels.width();
+    let num_labels = label_map.num_labels();
 
     // Collect component bounding boxes and areas in single pass (no pixel allocation)
     let mut component_data: Vec<ComponentData> = Vec::with_capacity(num_labels);
@@ -335,7 +192,7 @@ fn extract_candidates_local_maxima(
         area: 0,
     });
 
-    for (idx, &label) in labels.pixels().iter().enumerate() {
+    for (idx, &label) in label_map.iter().enumerate() {
         if label == 0 {
             continue;
         }
@@ -361,7 +218,7 @@ fn extract_candidates_local_maxima(
         .into_par_iter()
         .filter(|data| data.area > 0 && data.area <= max_area)
         .flat_map(|data| {
-            let deblended = deblend_local_maxima(&data, pixels, labels, deblend_config);
+            let deblended = deblend_local_maxima(&data, pixels, label_map, deblend_config);
 
             deblended
                 .into_iter()
@@ -383,13 +240,13 @@ fn extract_candidates_local_maxima(
 /// Extract candidates using multi-threshold deblending (requires pixel allocation).
 fn extract_candidates_multi_threshold(
     pixels: &Buffer2<f32>,
-    labels: &Buffer2<u32>,
-    num_labels: usize,
+    label_map: &LabelMap,
     deblend_config: &DeblendConfig,
     max_area: usize,
 ) -> Vec<StarCandidate> {
     use rayon::prelude::*;
     let width = pixels.width();
+    let num_labels = label_map.num_labels();
 
     // Multi-threshold needs actual pixel data for its tree-building algorithm
     let mut component_data: Vec<MultiThresholdComponentData> = Vec::with_capacity(num_labels);
@@ -401,7 +258,7 @@ fn extract_candidates_multi_threshold(
         pixels: Vec::with_capacity(50),
     });
 
-    for (idx, &label) in labels.pixels().iter().enumerate() {
+    for (idx, &label) in label_map.iter().enumerate() {
         if label == 0 {
             continue;
         }
