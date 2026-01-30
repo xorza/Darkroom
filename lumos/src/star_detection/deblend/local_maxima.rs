@@ -504,4 +504,244 @@ mod tests {
         let peaks_separate = find_local_maxima(&data, &pixels, &labels, &config_separate);
         assert_eq!(peaks_separate.len(), 2, "Distant peaks should separate");
     }
+
+    #[test]
+    fn test_prominence_filter() {
+        // Bright primary peak and dim secondary that should be filtered
+        let (pixels, labels, data) =
+            make_test_component(100, 100, &[(30, 50, 1.0, 2.5), (70, 50, 0.2, 2.5)]);
+
+        // With high prominence threshold, only bright peak survives
+        let config_high = DeblendConfig {
+            min_separation: 3,
+            min_prominence: 0.5,
+            ..Default::default()
+        };
+        let peaks = find_local_maxima(&data, &pixels, &labels, &config_high);
+        assert_eq!(peaks.len(), 1, "Dim peak should be filtered by prominence");
+
+        // With low prominence threshold, both peaks survive
+        let config_low = DeblendConfig {
+            min_separation: 3,
+            min_prominence: 0.1,
+            ..Default::default()
+        };
+        let peaks = find_local_maxima(&data, &pixels, &labels, &config_low);
+        assert_eq!(peaks.len(), 2, "Both peaks should pass low prominence");
+    }
+
+    #[test]
+    fn test_deblend_empty_peaks() {
+        let (pixels, labels, data) = make_test_component(100, 100, &[(50, 50, 1.0, 3.0)]);
+        let empty_peaks: &[Pixel] = &[];
+
+        let candidates = deblend_by_nearest_peak(&data, &pixels, &labels, empty_peaks);
+        assert!(
+            candidates.is_empty(),
+            "Empty peaks should return empty result"
+        );
+    }
+
+    #[test]
+    fn test_deblend_single_peak_returns_full_component() {
+        let (pixels, labels, data) = make_test_component(100, 100, &[(50, 50, 1.0, 3.0)]);
+
+        let config = DeblendConfig::default();
+        let candidates = deblend_local_maxima(&data, &pixels, &labels, &config);
+
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].area, data.area);
+        assert_eq!(candidates[0].x_min, data.x_min);
+        assert_eq!(candidates[0].x_max, data.x_max);
+    }
+
+    #[test]
+    fn test_peaks_sorted_by_brightness() {
+        let (pixels, labels, data) = make_test_component(
+            100,
+            100,
+            &[(30, 50, 0.5, 2.5), (50, 50, 1.0, 2.5), (70, 50, 0.7, 2.5)],
+        );
+
+        let config = DeblendConfig {
+            min_separation: 3,
+            min_prominence: 0.3,
+            ..Default::default()
+        };
+        let peaks = find_local_maxima(&data, &pixels, &labels, &config);
+
+        assert_eq!(peaks.len(), 3);
+        assert!(
+            peaks[0].value >= peaks[1].value && peaks[1].value >= peaks[2].value,
+            "Peaks should be sorted by brightness descending"
+        );
+    }
+
+    #[test]
+    fn test_find_peak_returns_global_max() {
+        let (pixels, labels, data) = make_test_component(
+            100,
+            100,
+            &[(30, 50, 0.5, 2.5), (50, 50, 1.0, 2.5), (70, 50, 0.7, 2.5)],
+        );
+
+        let peak = data.find_peak(&pixels, &labels);
+        assert!(
+            (peak.x as i32 - 50).abs() <= 1 && (peak.y as i32 - 50).abs() <= 1,
+            "find_peak should return the brightest star's position"
+        );
+        assert!(peak.value > 0.9, "Peak value should be close to 1.0");
+    }
+
+    #[test]
+    fn test_deblend_area_conservation() {
+        // Total area of deblended candidates should equal original component area
+        let (pixels, labels, data) =
+            make_test_component(100, 100, &[(30, 50, 1.0, 2.5), (70, 50, 0.8, 2.5)]);
+
+        let config = DeblendConfig {
+            min_separation: 3,
+            min_prominence: 0.3,
+            ..Default::default()
+        };
+        let candidates = deblend_local_maxima(&data, &pixels, &labels, &config);
+
+        let total_area: usize = candidates.iter().map(|c| c.area).sum();
+        assert_eq!(
+            total_area, data.area,
+            "Deblending should conserve total area"
+        );
+    }
+
+    #[test]
+    fn test_peak_replacement_when_brighter() {
+        // Two very close peaks - brighter one should replace dimmer
+        let (pixels, labels, data) =
+            make_test_component(100, 100, &[(50, 50, 1.0, 1.5), (51, 50, 0.8, 1.5)]);
+
+        let config = DeblendConfig {
+            min_separation: 5, // Force them to be "too close"
+            min_prominence: 0.3,
+            ..Default::default()
+        };
+        let peaks = find_local_maxima(&data, &pixels, &labels, &config);
+
+        assert_eq!(peaks.len(), 1, "Should merge to single peak");
+        assert!(
+            peaks[0].value > 0.9,
+            "Merged peak should be the brighter one"
+        );
+    }
+
+    #[test]
+    fn test_is_local_maximum_edge_cases() {
+        // Test local maximum detection at image boundaries
+        let mut pixels = Buffer2::new_filled(10, 10, 0.0f32);
+
+        // Corner pixel (0,0) as local max
+        pixels[(0, 0)] = 1.0;
+        pixels[(1, 0)] = 0.5;
+        pixels[(0, 1)] = 0.5;
+        pixels[(1, 1)] = 0.5;
+
+        let corner_pixel = Pixel {
+            x: 0,
+            y: 0,
+            value: 1.0,
+        };
+        assert!(
+            is_local_maximum(corner_pixel, &pixels),
+            "Corner pixel should be local max"
+        );
+
+        // Edge pixel
+        pixels[(5, 0)] = 1.0;
+        pixels[(4, 0)] = 0.5;
+        pixels[(6, 0)] = 0.5;
+        pixels[(4, 1)] = 0.5;
+        pixels[(5, 1)] = 0.5;
+        pixels[(6, 1)] = 0.5;
+
+        let edge_pixel = Pixel {
+            x: 5,
+            y: 0,
+            value: 1.0,
+        };
+        assert!(
+            is_local_maximum(edge_pixel, &pixels),
+            "Edge pixel should be local max"
+        );
+    }
+
+    #[test]
+    fn test_is_local_maximum_not_max() {
+        let mut pixels = Buffer2::new_filled(10, 10, 0.0f32);
+
+        // Center pixel with brighter neighbor
+        pixels[(5, 5)] = 0.5;
+        pixels[(6, 5)] = 1.0; // Brighter neighbor
+
+        let pixel = Pixel {
+            x: 5,
+            y: 5,
+            value: 0.5,
+        };
+        assert!(
+            !is_local_maximum(pixel, &pixels),
+            "Pixel with brighter neighbor is not local max"
+        );
+    }
+
+    #[test]
+    fn test_voronoi_partitioning() {
+        // Create component with two well-separated peaks
+        let (pixels, labels, data) =
+            make_test_component(100, 100, &[(25, 50, 1.0, 3.0), (75, 50, 1.0, 3.0)]);
+
+        let peaks = vec![
+            Pixel {
+                x: 25,
+                y: 50,
+                value: 1.0,
+            },
+            Pixel {
+                x: 75,
+                y: 50,
+                value: 1.0,
+            },
+        ];
+
+        let candidates = deblend_by_nearest_peak(&data, &pixels, &labels, &peaks);
+
+        assert_eq!(candidates.len(), 2);
+        // Each candidate should have its peak inside its bounding box
+        for candidate in &candidates {
+            assert!(candidate.peak_x >= candidate.x_min && candidate.peak_x <= candidate.x_max);
+            assert!(candidate.peak_y >= candidate.y_min && candidate.peak_y <= candidate.y_max);
+        }
+    }
+
+    #[test]
+    fn test_many_peaks_limited_to_max() {
+        // Create component with more peaks than MAX_PEAKS
+        let stars: Vec<_> = (0..12)
+            .map(|i| (10 + i * 8, 50usize, 1.0 - i as f32 * 0.05, 1.5f32))
+            .collect();
+
+        let (pixels, labels, data) = make_test_component(120, 100, &stars);
+
+        let config = DeblendConfig {
+            min_separation: 2,
+            min_prominence: 0.1,
+            ..Default::default()
+        };
+        let peaks = find_local_maxima(&data, &pixels, &labels, &config);
+
+        assert!(
+            peaks.len() <= MAX_PEAKS,
+            "Should not exceed MAX_PEAKS ({}), got {}",
+            MAX_PEAKS,
+            peaks.len()
+        );
+    }
 }
