@@ -143,57 +143,9 @@ pub(crate) fn connected_components(mask: &BitBuffer2) -> (Buffer2<u32>, usize) {
 
     let mut labels = Buffer2::new_filled(width, height, 0u32);
     let mut parent: Vec<u32> = Vec::new();
-    let mut next_label = 1u32;
 
-    // First pass: assign provisional labels
-    // This must be sequential due to union-find dependencies
-    for y in 0..height {
-        let row_start = y * width;
-        for x in 0..width {
-            let idx = row_start + x;
-            if !mask.get(idx) {
-                continue;
-            }
-
-            // Check neighbors: left and top only (for forward scan)
-            let left_label = if x > 0 && mask.get(idx - 1) {
-                labels[idx - 1]
-            } else {
-                0
-            };
-
-            let top_label = if y > 0 && mask.get(idx - width) {
-                labels[idx - width]
-            } else {
-                0
-            };
-
-            match (left_label, top_label) {
-                (0, 0) => {
-                    // New component
-                    labels[idx] = next_label;
-                    parent.push(next_label);
-                    next_label += 1;
-                }
-                (l, 0) => {
-                    // Only left neighbor
-                    labels[idx] = l;
-                }
-                (0, t) => {
-                    // Only top neighbor
-                    labels[idx] = t;
-                }
-                (l, t) => {
-                    // Both neighbors - use minimum and union
-                    let min_label = l.min(t);
-                    labels[idx] = min_label;
-                    if l != t {
-                        union(&mut parent, l, t);
-                    }
-                }
-            }
-        }
-    }
+    // First pass: assign provisional labels with union-find
+    assign_provisional_labels(mask, &mut labels, &mut parent);
 
     if parent.is_empty() {
         return (labels, 0);
@@ -242,6 +194,52 @@ pub(crate) fn connected_components(mask: &BitBuffer2) -> (Buffer2<u32>, usize) {
     }
 
     (labels, num_labels as usize)
+}
+
+/// First pass of connected components: assign provisional labels using union-find.
+///
+/// Scans the mask sequentially, assigning labels to foreground pixels and
+/// merging components when neighbors from different components meet.
+fn assign_provisional_labels(mask: &BitBuffer2, labels: &mut Buffer2<u32>, parent: &mut Vec<u32>) {
+    assert_eq!(
+        (mask.width(), mask.height()),
+        (labels.width(), labels.height()),
+        "mask and labels must have same dimensions"
+    );
+
+    let width = mask.width();
+    let height = mask.height();
+    let mut next_label = 1u32;
+
+    for y in 0..height {
+        let row_start = y * width;
+        for x in 0..width {
+            let idx = row_start + x;
+            if !mask.get(idx) {
+                continue;
+            }
+
+            // Check neighbors: left and top only (for forward scan)
+            let left = (x > 0 && mask.get(idx - 1)).then(|| labels[idx - 1]);
+            let top = (y > 0 && mask.get(idx - width)).then(|| labels[idx - width]);
+
+            labels[idx] = match (left, top) {
+                (None, None) => {
+                    parent.push(next_label);
+                    next_label += 1;
+                    next_label - 1
+                }
+                (Some(l), None) => l,
+                (None, Some(t)) => t,
+                (Some(l), Some(t)) => {
+                    if l != t {
+                        union(parent, l, t);
+                    }
+                    l.min(t)
+                }
+            };
+        }
+    }
 }
 
 /// Find root of a label with path compression.
