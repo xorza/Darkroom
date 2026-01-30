@@ -251,3 +251,357 @@ impl TileGrid {
         std::mem::swap(&mut self.stats, &mut dst);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn create_uniform_image(width: usize, height: usize, value: f32) -> Buffer2<f32> {
+        Buffer2::new(width, height, vec![value; width * height])
+    }
+
+    // ==========================================================================
+    // TileGrid construction tests
+    // ==========================================================================
+
+    #[test]
+    fn test_tile_grid_dimensions() {
+        let pixels = create_uniform_image(128, 64, 0.5);
+        let grid = TileGrid::new(&pixels, 32);
+
+        assert_eq!(grid.tiles_x(), 4); // 128 / 32 = 4
+        assert_eq!(grid.tiles_y(), 2); // 64 / 32 = 2
+    }
+
+    #[test]
+    fn test_tile_grid_dimensions_non_divisible() {
+        let pixels = create_uniform_image(100, 70, 0.5);
+        let grid = TileGrid::new(&pixels, 32);
+
+        assert_eq!(grid.tiles_x(), 4); // ceil(100 / 32) = 4
+        assert_eq!(grid.tiles_y(), 3); // ceil(70 / 32) = 3
+    }
+
+    #[test]
+    fn test_tile_grid_uniform_image() {
+        let pixels = create_uniform_image(64, 64, 0.3);
+        let grid = TileGrid::new(&pixels, 32);
+
+        for ty in 0..grid.tiles_y() {
+            for tx in 0..grid.tiles_x() {
+                let stats = grid.get(tx, ty);
+                assert!(
+                    (stats.median - 0.3).abs() < 0.01,
+                    "Tile ({}, {}) median {} != 0.3",
+                    tx,
+                    ty,
+                    stats.median
+                );
+                assert!(
+                    stats.sigma < 0.01,
+                    "Tile ({}, {}) sigma {} should be near zero",
+                    tx,
+                    ty,
+                    stats.sigma
+                );
+            }
+        }
+    }
+
+    // ==========================================================================
+    // Center computation tests
+    // ==========================================================================
+
+    #[test]
+    fn test_center_x_full_tiles() {
+        let pixels = create_uniform_image(128, 64, 0.5);
+        let grid = TileGrid::new(&pixels, 32);
+
+        // Full tiles: center = start + tile_size/2
+        assert!((grid.center_x(0) - 16.0).abs() < 0.01); // (0 + 32) / 2 = 16
+        assert!((grid.center_x(1) - 48.0).abs() < 0.01); // (32 + 64) / 2 = 48
+        assert!((grid.center_x(2) - 80.0).abs() < 0.01); // (64 + 96) / 2 = 80
+        assert!((grid.center_x(3) - 112.0).abs() < 0.01); // (96 + 128) / 2 = 112
+    }
+
+    #[test]
+    fn test_center_x_partial_tile() {
+        let pixels = create_uniform_image(100, 64, 0.5);
+        let grid = TileGrid::new(&pixels, 32);
+
+        // Last tile is partial: 96 to 100
+        assert!((grid.center_x(3) - 98.0).abs() < 0.01); // (96 + 100) / 2 = 98
+    }
+
+    #[test]
+    fn test_center_y_full_tiles() {
+        let pixels = create_uniform_image(64, 128, 0.5);
+        let grid = TileGrid::new(&pixels, 32);
+
+        assert!((grid.center_y(0) - 16.0).abs() < 0.01);
+        assert!((grid.center_y(1) - 48.0).abs() < 0.01);
+        assert!((grid.center_y(2) - 80.0).abs() < 0.01);
+        assert!((grid.center_y(3) - 112.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_center_y_partial_tile() {
+        let pixels = create_uniform_image(64, 100, 0.5);
+        let grid = TileGrid::new(&pixels, 32);
+
+        // Last tile is partial: 96 to 100
+        assert!((grid.center_y(3) - 98.0).abs() < 0.01);
+    }
+
+    // ==========================================================================
+    // find_lower_tile_y tests (binary search)
+    // ==========================================================================
+
+    #[test]
+    fn test_find_lower_tile_y_exact_center() {
+        let pixels = create_uniform_image(64, 128, 0.5);
+        let grid = TileGrid::new(&pixels, 32);
+
+        // Exact center positions
+        assert_eq!(grid.find_lower_tile_y(16.0), 0);
+        assert_eq!(grid.find_lower_tile_y(48.0), 1);
+        assert_eq!(grid.find_lower_tile_y(80.0), 2);
+        assert_eq!(grid.find_lower_tile_y(112.0), 3);
+    }
+
+    #[test]
+    fn test_find_lower_tile_y_between_centers() {
+        let pixels = create_uniform_image(64, 128, 0.5);
+        let grid = TileGrid::new(&pixels, 32);
+
+        // Between centers should return lower tile
+        assert_eq!(grid.find_lower_tile_y(30.0), 0); // between 16 and 48
+        assert_eq!(grid.find_lower_tile_y(60.0), 1); // between 48 and 80
+        assert_eq!(grid.find_lower_tile_y(100.0), 2); // between 80 and 112
+    }
+
+    #[test]
+    fn test_find_lower_tile_y_before_first_center() {
+        let pixels = create_uniform_image(64, 128, 0.5);
+        let grid = TileGrid::new(&pixels, 32);
+
+        // Before first center should return 0
+        assert_eq!(grid.find_lower_tile_y(0.0), 0);
+        assert_eq!(grid.find_lower_tile_y(10.0), 0);
+    }
+
+    #[test]
+    fn test_find_lower_tile_y_after_last_center() {
+        let pixels = create_uniform_image(64, 128, 0.5);
+        let grid = TileGrid::new(&pixels, 32);
+
+        // After last center should return last tile
+        assert_eq!(grid.find_lower_tile_y(120.0), 3);
+        assert_eq!(grid.find_lower_tile_y(1000.0), 3);
+    }
+
+    #[test]
+    fn test_find_lower_tile_y_single_tile() {
+        let pixels = create_uniform_image(32, 32, 0.5);
+        let grid = TileGrid::new(&pixels, 32);
+
+        assert_eq!(grid.tiles_y(), 1);
+        assert_eq!(grid.find_lower_tile_y(0.0), 0);
+        assert_eq!(grid.find_lower_tile_y(16.0), 0);
+        assert_eq!(grid.find_lower_tile_y(100.0), 0);
+    }
+
+    // ==========================================================================
+    // Mask tests
+    // ==========================================================================
+
+    #[test]
+    fn test_tile_grid_with_mask_excludes_masked() {
+        let width = 64;
+        let height = 64;
+        let mut data = vec![0.2; width * height];
+
+        // Set top-left quadrant to 0.8
+        for y in 0..32 {
+            for x in 0..32 {
+                data[y * width + x] = 0.8;
+            }
+        }
+
+        let pixels = Buffer2::new(width, height, data);
+
+        // Mask out the top-left quadrant (the 0.8 values)
+        let mut mask_data = vec![false; width * height];
+        for y in 0..32 {
+            for x in 0..32 {
+                mask_data[y * width + x] = true;
+            }
+        }
+        let mask = Buffer2::new(width, height, mask_data);
+
+        let grid = TileGrid::new_with_mask(&pixels, 32, Some(&mask), 100);
+
+        // Top-left tile (0,0) has all pixels masked, should fall back to all pixels
+        // Other tiles should have median ~0.2
+        let stats_11 = grid.get(1, 1);
+        assert!(
+            (stats_11.median - 0.2).abs() < 0.05,
+            "Tile (1,1) median {} should be ~0.2",
+            stats_11.median
+        );
+    }
+
+    #[test]
+    fn test_tile_grid_with_mask_fallback_when_too_few_unmasked() {
+        let width = 64;
+        let height = 64;
+        let mut data = vec![0.5; width * height];
+
+        // Put a bright value in top-left tile
+        data[0] = 0.9;
+
+        let pixels = Buffer2::new(width, height, data);
+
+        // Mask almost all pixels in top-left tile
+        let mut mask_data = vec![false; width * height];
+        for y in 0..32 {
+            for x in 0..32 {
+                if !(x == 0 && y == 0) {
+                    mask_data[y * width + x] = true;
+                }
+            }
+        }
+        let mask = Buffer2::new(width, height, mask_data);
+
+        // min_pixels = 100, but only 1 pixel unmasked, so should fall back
+        let grid = TileGrid::new_with_mask(&pixels, 32, Some(&mask), 100);
+
+        let stats = grid.get(0, 0);
+        // Fallback uses all pixels, median should be ~0.5
+        assert!(
+            (stats.median - 0.5).abs() < 0.05,
+            "Tile (0,0) median {} should be ~0.5 after fallback",
+            stats.median
+        );
+    }
+
+    // ==========================================================================
+    // Median filter tests
+    // ==========================================================================
+
+    #[test]
+    fn test_median_filter_uniform_unchanged() {
+        let pixels = create_uniform_image(128, 128, 0.4);
+        let grid = TileGrid::new(&pixels, 32);
+
+        // All tiles should still be ~0.4 after median filtering
+        for ty in 0..grid.tiles_y() {
+            for tx in 0..grid.tiles_x() {
+                let stats = grid.get(tx, ty);
+                assert!(
+                    (stats.median - 0.4).abs() < 0.01,
+                    "Tile ({}, {}) median {} should be ~0.4",
+                    tx,
+                    ty,
+                    stats.median
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_median_filter_rejects_outlier_tile() {
+        let width = 128;
+        let height = 128;
+        let mut data = vec![0.3; width * height];
+
+        // Make center tile (1,1) very bright
+        for y in 32..64 {
+            for x in 32..64 {
+                data[y * width + x] = 0.9;
+            }
+        }
+
+        let pixels = Buffer2::new(width, height, data);
+        let grid = TileGrid::new(&pixels, 32);
+
+        // Center tile after median filter should be closer to neighbors (~0.3)
+        // because median of [0.3, 0.3, 0.3, 0.3, 0.9, 0.3, 0.3, 0.3, 0.3] = 0.3
+        let center_stats = grid.get(1, 1);
+        assert!(
+            (center_stats.median - 0.3).abs() < 0.1,
+            "Center tile median {} should be ~0.3 after filtering",
+            center_stats.median
+        );
+    }
+
+    #[test]
+    fn test_median_filter_skipped_for_small_grid() {
+        // Grid smaller than 3x3 tiles should skip median filter
+        let pixels = create_uniform_image(64, 64, 0.5);
+        let grid = TileGrid::new(&pixels, 32);
+
+        assert_eq!(grid.tiles_x(), 2);
+        assert_eq!(grid.tiles_y(), 2);
+
+        // Should still work, just no filtering applied
+        let stats = grid.get(0, 0);
+        assert!(
+            (stats.median - 0.5).abs() < 0.01,
+            "Tile median {} should be ~0.5",
+            stats.median
+        );
+    }
+
+    // ==========================================================================
+    // Edge cases
+    // ==========================================================================
+
+    #[test]
+    fn test_single_tile_image() {
+        let pixels = create_uniform_image(32, 32, 0.6);
+        let grid = TileGrid::new(&pixels, 32);
+
+        assert_eq!(grid.tiles_x(), 1);
+        assert_eq!(grid.tiles_y(), 1);
+
+        let stats = grid.get(0, 0);
+        assert!((stats.median - 0.6).abs() < 0.01);
+
+        assert!((grid.center_x(0) - 16.0).abs() < 0.01);
+        assert!((grid.center_y(0) - 16.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_tile_stats_with_gradient() {
+        let width = 64;
+        let height = 64;
+        let data: Vec<f32> = (0..height)
+            .flat_map(|y| (0..width).map(move |x| (x + y) as f32 / 128.0))
+            .collect();
+
+        let pixels = Buffer2::new(width, height, data);
+        let grid = TileGrid::new(&pixels, 32);
+
+        // Top-left tile should have lower median than bottom-right
+        let tl = grid.get(0, 0);
+        let br = grid.get(1, 1);
+
+        assert!(
+            br.median > tl.median,
+            "Bottom-right median {} should be > top-left {}",
+            br.median,
+            tl.median
+        );
+    }
+
+    #[test]
+    fn test_debug_impl() {
+        let pixels = create_uniform_image(64, 64, 0.5);
+        let grid = TileGrid::new(&pixels, 32);
+
+        // Should not panic
+        let debug_str = format!("{:?}", grid);
+        assert!(debug_str.contains("TileGrid"));
+    }
+}
