@@ -138,138 +138,6 @@ impl TileGrid {
     }
 }
 
-/// Compute sigma-clipped statistics for a single tile using provided scratch buffers.
-#[allow(clippy::too_many_arguments)]
-fn compute_tile_stats(
-    pixels: &[f32],
-    width: usize,
-    x_start: usize,
-    x_end: usize,
-    y_start: usize,
-    y_end: usize,
-    values: &mut Vec<f32>,
-    deviations: &mut Vec<f32>,
-) -> TileStats {
-    // Clear and fill values buffer
-    values.clear();
-    for y in y_start..y_end {
-        let row_start = y * width + x_start;
-        values.extend_from_slice(&pixels[row_start..row_start + (x_end - x_start)]);
-    }
-
-    // Sigma-clipped statistics (3 iterations, 3-sigma clip)
-    sigma_clipped_stats(values, deviations, 3.0, 3)
-}
-
-/// Compute sigma-clipped tile statistics using the shared implementation.
-#[inline]
-pub(crate) fn sigma_clipped_stats(
-    values: &mut [f32],
-    deviations: &mut Vec<f32>,
-    kappa: f32,
-    iterations: usize,
-) -> TileStats {
-    let (median, sigma) =
-        constants::sigma_clipped_median_mad(values, deviations, kappa, iterations);
-    TileStats { median, sigma }
-}
-
-/// Interpolate an entire row using segment-based bilinear interpolation.
-///
-/// Instead of computing tile indices per-pixel, we process the row in segments
-/// where each segment has constant tile corners. This amortizes tile lookups
-/// and Y-weight calculations across many pixels.
-fn interpolate_row(bg_row: &mut [f32], noise_row: &mut [f32], y: usize, grid: &TileGrid) {
-    let fy = y as f32;
-    let width = bg_row.len();
-
-    // Compute Y tile indices and weight once for the entire row
-    let ty0 = find_lower_tile(fy, &grid.centers_y);
-    let ty1 = (ty0 + 1).min(grid.tiles_y - 1);
-
-    let wy = if ty1 != ty0 {
-        ((fy - grid.centers_y[ty0]) / (grid.centers_y[ty1] - grid.centers_y[ty0])).clamp(0.0, 1.0)
-    } else {
-        0.0
-    };
-    let wy_inv = 1.0 - wy;
-
-    // Process row in segments between tile center X boundaries
-    let mut x = 0usize;
-
-    for tx0 in 0..grid.tiles_x {
-        let tx1 = (tx0 + 1).min(grid.tiles_x - 1);
-
-        // Segment runs from current x to next tile center (or end of row)
-        let segment_end = if tx0 + 1 < grid.tiles_x {
-            // Segment ends at next tile center
-            (grid.centers_x[tx0 + 1].floor() as usize).min(width)
-        } else {
-            width
-        };
-
-        // Skip if segment is empty or we've passed it
-        if segment_end <= x {
-            continue;
-        }
-
-        // Fetch the four corner tiles for this segment
-        let t00 = grid.get(tx0, ty0);
-        let t10 = grid.get(tx1, ty0);
-        let t01 = grid.get(tx0, ty1);
-        let t11 = grid.get(tx1, ty1);
-
-        // Precompute Y-blended values for left and right tile columns
-        let left_bg = wy_inv * t00.median + wy * t01.median;
-        let right_bg = wy_inv * t10.median + wy * t11.median;
-        let left_noise = wy_inv * t00.sigma + wy * t01.sigma;
-        let right_noise = wy_inv * t10.sigma + wy * t11.sigma;
-
-        let bg_segment = &mut bg_row[x..segment_end];
-        let noise_segment = &mut noise_row[x..segment_end];
-
-        if tx1 != tx0 {
-            // Interpolation needed - use SIMD-accelerated version
-            let inv_dx = 1.0 / (grid.centers_x[tx1] - grid.centers_x[tx0]);
-            let x_offset = grid.centers_x[tx0];
-            let wx_start = (x as f32 - x_offset) * inv_dx;
-            let wx_step = inv_dx;
-
-            simd::interpolate_segment_simd(
-                bg_segment,
-                noise_segment,
-                left_bg,
-                right_bg,
-                left_noise,
-                right_noise,
-                wx_start,
-                wx_step,
-            );
-        } else {
-            // Constant fill (single tile column)
-            bg_segment.fill(left_bg);
-            noise_segment.fill(left_noise);
-        }
-
-        x = segment_end;
-        if x >= width {
-            break;
-        }
-    }
-}
-
-/// Find the tile index whose center is at or before the given position.
-#[inline]
-fn find_lower_tile(pos: f32, centers: &[f32]) -> usize {
-    // Linear search is efficient for small tile counts (typically < 20)
-    for i in (0..centers.len()).rev() {
-        if centers[i] <= pos {
-            return i;
-        }
-    }
-    0
-}
-
 /// Configuration for iterative background refinement.
 #[derive(Debug, Clone)]
 pub struct BackgroundConfig {
@@ -511,6 +379,68 @@ fn create_object_mask(
     }
 }
 
+/// Compute tile statistics with masked pixels excluded.
+#[allow(clippy::too_many_arguments)]
+fn compute_tile_stats_masked(
+    pixels: &Buffer2<f32>,
+    mask: &Buffer2<bool>,
+    x_start: usize,
+    x_end: usize,
+    y_start: usize,
+    y_end: usize,
+    min_pixels: usize,
+    values: &mut Vec<f32>,
+    deviations: &mut Vec<f32>,
+) -> TileStats {
+    let width = pixels.width();
+
+    // Collect unmasked pixels
+    values.clear();
+    for y in y_start..y_end {
+        let row_start = y * width;
+        for x in x_start..x_end {
+            let idx = row_start + x;
+            if !mask[idx] {
+                values.push(pixels[idx]);
+            }
+        }
+    }
+
+    // If too few unmasked pixels, fall back to all pixels (unmasked)
+    if values.len() < min_pixels {
+        values.clear();
+        for y in y_start..y_end {
+            let row_start = y * width + x_start;
+            values.extend_from_slice(&pixels[row_start..row_start + (x_end - x_start)]);
+        }
+    }
+
+    sigma_clipped_stats(values, deviations, 3.0, 3)
+}
+
+/// Compute sigma-clipped statistics for a single tile using provided scratch buffers.
+#[allow(clippy::too_many_arguments)]
+fn compute_tile_stats(
+    pixels: &[f32],
+    width: usize,
+    x_start: usize,
+    x_end: usize,
+    y_start: usize,
+    y_end: usize,
+    values: &mut Vec<f32>,
+    deviations: &mut Vec<f32>,
+) -> TileStats {
+    // Clear and fill values buffer
+    values.clear();
+    for y in y_start..y_end {
+        let row_start = y * width + x_start;
+        values.extend_from_slice(&pixels[row_start..row_start + (x_end - x_start)]);
+    }
+
+    // Sigma-clipped statistics (3 iterations, 3-sigma clip)
+    sigma_clipped_stats(values, deviations, 3.0, 3)
+}
+
 /// Estimate background with masked pixels excluded.
 fn estimate_background_masked(
     pixels: &Buffer2<f32>,
@@ -620,41 +550,111 @@ fn estimate_background_masked(
     output.noise = Buffer2::new(width, height, noise);
 }
 
-/// Compute tile statistics with masked pixels excluded.
-#[allow(clippy::too_many_arguments)]
-fn compute_tile_stats_masked(
-    pixels: &Buffer2<f32>,
-    mask: &Buffer2<bool>,
-    x_start: usize,
-    x_end: usize,
-    y_start: usize,
-    y_end: usize,
-    min_pixels: usize,
-    values: &mut Vec<f32>,
+/// Compute sigma-clipped tile statistics using the shared implementation.
+#[inline]
+pub(crate) fn sigma_clipped_stats(
+    values: &mut [f32],
     deviations: &mut Vec<f32>,
+    kappa: f32,
+    iterations: usize,
 ) -> TileStats {
-    let width = pixels.width();
+    let (median, sigma) =
+        constants::sigma_clipped_median_mad(values, deviations, kappa, iterations);
+    TileStats { median, sigma }
+}
 
-    // Collect unmasked pixels
-    values.clear();
-    for y in y_start..y_end {
-        let row_start = y * width;
-        for x in x_start..x_end {
-            let idx = row_start + x;
-            if !mask[idx] {
-                values.push(pixels[idx]);
-            }
+/// Interpolate an entire row using segment-based bilinear interpolation.
+///
+/// Instead of computing tile indices per-pixel, we process the row in segments
+/// where each segment has constant tile corners. This amortizes tile lookups
+/// and Y-weight calculations across many pixels.
+fn interpolate_row(bg_row: &mut [f32], noise_row: &mut [f32], y: usize, grid: &TileGrid) {
+    let fy = y as f32;
+    let width = bg_row.len();
+
+    // Compute Y tile indices and weight once for the entire row
+    let ty0 = find_lower_tile(fy, &grid.centers_y);
+    let ty1 = (ty0 + 1).min(grid.tiles_y - 1);
+
+    let wy = if ty1 != ty0 {
+        ((fy - grid.centers_y[ty0]) / (grid.centers_y[ty1] - grid.centers_y[ty0])).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    let wy_inv = 1.0 - wy;
+
+    // Process row in segments between tile center X boundaries
+    let mut x = 0usize;
+
+    for tx0 in 0..grid.tiles_x {
+        let tx1 = (tx0 + 1).min(grid.tiles_x - 1);
+
+        // Segment runs from current x to next tile center (or end of row)
+        let segment_end = if tx0 + 1 < grid.tiles_x {
+            // Segment ends at next tile center
+            (grid.centers_x[tx0 + 1].floor() as usize).min(width)
+        } else {
+            width
+        };
+
+        // Skip if segment is empty or we've passed it
+        if segment_end <= x {
+            continue;
+        }
+
+        // Fetch the four corner tiles for this segment
+        let t00 = grid.get(tx0, ty0);
+        let t10 = grid.get(tx1, ty0);
+        let t01 = grid.get(tx0, ty1);
+        let t11 = grid.get(tx1, ty1);
+
+        // Precompute Y-blended values for left and right tile columns
+        let left_bg = wy_inv * t00.median + wy * t01.median;
+        let right_bg = wy_inv * t10.median + wy * t11.median;
+        let left_noise = wy_inv * t00.sigma + wy * t01.sigma;
+        let right_noise = wy_inv * t10.sigma + wy * t11.sigma;
+
+        let bg_segment = &mut bg_row[x..segment_end];
+        let noise_segment = &mut noise_row[x..segment_end];
+
+        if tx1 != tx0 {
+            // Interpolation needed - use SIMD-accelerated version
+            let inv_dx = 1.0 / (grid.centers_x[tx1] - grid.centers_x[tx0]);
+            let x_offset = grid.centers_x[tx0];
+            let wx_start = (x as f32 - x_offset) * inv_dx;
+            let wx_step = inv_dx;
+
+            simd::interpolate_segment_simd(
+                bg_segment,
+                noise_segment,
+                left_bg,
+                right_bg,
+                left_noise,
+                right_noise,
+                wx_start,
+                wx_step,
+            );
+        } else {
+            // Constant fill (single tile column)
+            bg_segment.fill(left_bg);
+            noise_segment.fill(left_noise);
+        }
+
+        x = segment_end;
+        if x >= width {
+            break;
         }
     }
+}
 
-    // If too few unmasked pixels, fall back to all pixels (unmasked)
-    if values.len() < min_pixels {
-        values.clear();
-        for y in y_start..y_end {
-            let row_start = y * width + x_start;
-            values.extend_from_slice(&pixels[row_start..row_start + (x_end - x_start)]);
+/// Find the tile index whose center is at or before the given position.
+#[inline]
+fn find_lower_tile(pos: f32, centers: &[f32]) -> usize {
+    // Linear search is efficient for small tile counts (typically < 20)
+    for i in (0..centers.len()).rev() {
+        if centers[i] <= pos {
+            return i;
         }
     }
-
-    sigma_clipped_stats(values, deviations, 3.0, 3)
+    0
 }
