@@ -13,7 +13,7 @@ mod simd;
 
 use rayon::prelude::*;
 
-use crate::common::parallel::rows_per_chunk;
+use crate::common::parallel::{ParChunksMutAutoWithOffset, rows_per_chunk};
 use crate::math::fwhm_to_sigma;
 use crate::star_detection::Buffer2;
 
@@ -256,12 +256,18 @@ pub fn matched_filter(
         "Axis ratio must be in (0, 1]"
     );
 
-    // Subtract background first
-    let subtracted: Vec<f32> = pixels
-        .iter()
-        .zip(background.iter())
-        .map(|(&p, &b): (&f32, &f32)| (p - b).max(0.0))
-        .collect();
+    // Subtract background first (parallel)
+    let mut subtracted = vec![0.0f32; pixels.len()];
+    let pixels_data = pixels.pixels();
+    let bg_data = background.pixels();
+    subtracted
+        .par_chunks_mut_auto()
+        .for_each(|(offset, chunk)| {
+            for (i, out) in chunk.iter_mut().enumerate() {
+                let idx = offset + i;
+                *out = (pixels_data[idx] - bg_data[idx]).max(0.0);
+            }
+        });
 
     // Convolve with elliptical Gaussian kernel
     let sigma = fwhm_to_sigma(fwhm);
