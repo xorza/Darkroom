@@ -652,7 +652,7 @@ fn test_sigma_clipped_stats_handles_two_values() {
     // median_f32_mut on [0.3, 0.7] returns the middle element after sorting = values[1] = 0.7
     // But it could also average - let's just check it's reasonable
     assert!(
-        median >= 0.3 && median <= 0.7,
+        (0.3..=0.7).contains(&median),
         "Median {} should be between 0.3 and 0.7",
         median
     );

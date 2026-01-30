@@ -432,7 +432,7 @@ pub(crate) fn compute_metrics(
     // So sigma^2 = sum(r^2 * I) / sum(I) / 2
     // FWHM = 2.355 * sigma
     let sigma_sq = sum_r2 / flux / 2.0;
-    let fwhm = constants::sigma_to_fwhm(sigma_sq.sqrt());
+    let fwhm = crate::math::sigma_to_fwhm(sigma_sq.sqrt());
 
     // Eccentricity from covariance matrix
     // eigenvalues of [[sum_x2, sum_xy], [sum_xy, sum_y2]] / flux

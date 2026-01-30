@@ -1,6 +1,6 @@
 //! Synthetic star field generation for testing star detection algorithms.
 
-use crate::star_detection::constants::FWHM_TO_SIGMA;
+use crate::math::FWHM_TO_SIGMA;
 
 /// A synthetic star to be placed in a generated image.
 #[allow(dead_code)]

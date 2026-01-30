@@ -359,7 +359,7 @@ use super::linear_solver::solve_6x6;
 mod tests {
     use super::*;
     use crate::common::Buffer2;
-    use crate::star_detection::constants::{fwhm_to_sigma, sigma_to_fwhm};
+    use crate::math::{fwhm_to_sigma, sigma_to_fwhm};
 
     fn make_gaussian_stamp(
         width: usize,

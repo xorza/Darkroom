@@ -1,8 +1,8 @@
 //! Tests for Gaussian convolution.
 
 use super::*;
+use crate::math::FWHM_TO_SIGMA;
 use crate::star_detection::Buffer2;
-use crate::star_detection::constants::FWHM_TO_SIGMA;
 
 // ============================================================================
 // Kernel generation tests
@@ -73,27 +73,6 @@ fn test_gaussian_kernel_1d_zero_sigma_panics() {
 #[should_panic(expected = "Sigma must be positive")]
 fn test_gaussian_kernel_1d_negative_sigma_panics() {
     gaussian_kernel_1d(-1.0);
-}
-
-// ============================================================================
-// FWHM to sigma conversion tests
-// ============================================================================
-
-#[test]
-fn test_fwhm_to_sigma() {
-    // FWHM = 2.355 * sigma
-    let fwhm = 4.71; // ~2 * sigma
-    let sigma = fwhm_to_sigma(fwhm);
-    assert!((sigma - 2.0).abs() < 0.01);
-}
-
-#[test]
-fn test_fwhm_to_sigma_roundtrip() {
-    use crate::star_detection::constants::FWHM_TO_SIGMA;
-    let sigma = 3.0;
-    let fwhm = sigma * FWHM_TO_SIGMA;
-    let sigma_back = fwhm_to_sigma(fwhm);
-    assert!((sigma_back - sigma).abs() < 1e-6);
 }
 
 // ============================================================================

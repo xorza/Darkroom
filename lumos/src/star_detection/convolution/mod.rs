@@ -16,7 +16,8 @@ mod simd;
 
 use rayon::prelude::*;
 
-use super::constants::{ROWS_PER_CHUNK, fwhm_to_sigma};
+use super::constants::ROWS_PER_CHUNK;
+use crate::math::fwhm_to_sigma;
 use crate::star_detection::Buffer2;
 
 /// Compute 1D Gaussian kernel.

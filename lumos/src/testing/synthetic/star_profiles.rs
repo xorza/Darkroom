@@ -6,18 +6,8 @@
 //! - Elliptical Gaussian (tracking errors)
 //! - Saturated stars (flat-topped profiles)
 
-/// Convert FWHM to Gaussian sigma.
-/// FWHM = 2 * sqrt(2 * ln(2)) * sigma ≈ 2.355 * sigma
-#[inline]
-pub fn fwhm_to_sigma(fwhm: f32) -> f32 {
-    fwhm / 2.354_82
-}
-
-/// Convert Gaussian sigma to FWHM.
-#[inline]
-pub fn sigma_to_fwhm(sigma: f32) -> f32 {
-    sigma * 2.354_82
-}
+// Re-export from math module
+pub use crate::math::{fwhm_to_sigma, sigma_to_fwhm};
 
 /// Render a circular Gaussian star profile.
 ///

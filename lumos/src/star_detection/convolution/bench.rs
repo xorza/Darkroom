@@ -3,7 +3,7 @@
 
 use super::simd::convolve_row_simd;
 use super::{gaussian_convolve, gaussian_kernel_1d, matched_filter};
-use crate::star_detection::constants::fwhm_to_sigma;
+use crate::math::fwhm_to_sigma;
 use crate::testing::synthetic::{patterns, stamps};
 use criterion::{BenchmarkId, Criterion, Throughput};
 use std::hint::black_box;

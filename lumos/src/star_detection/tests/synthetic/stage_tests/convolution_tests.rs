@@ -2,9 +2,9 @@
 //!
 //! Tests the Gaussian filtering for star enhancement.
 
+use crate::math::fwhm_to_sigma;
 use crate::star_detection::Buffer2;
 use crate::star_detection::background::BackgroundConfig;
-use crate::star_detection::constants::fwhm_to_sigma;
 use crate::star_detection::convolution::gaussian_convolve;
 use crate::star_detection::tests::common::output::save_grayscale;
 use crate::testing::init_tracing;

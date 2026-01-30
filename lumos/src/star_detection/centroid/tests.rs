@@ -2,8 +2,8 @@
 
 use super::*;
 use crate::common::Buffer2;
+use crate::math::FWHM_TO_SIGMA;
 use crate::star_detection::background::{BackgroundConfig, BackgroundMap};
-use crate::star_detection::constants::FWHM_TO_SIGMA;
 use crate::star_detection::detection::{StarCandidate, detect_stars};
 
 /// Default stamp radius for tests (matching expected FWHM of ~4 pixels).
