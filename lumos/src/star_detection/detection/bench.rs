@@ -101,7 +101,7 @@ fn bench_extract_candidates_4k_dense_multithreshold(b: ::bench::Bencher) {
     let mask = create_test_mask(&pixels, 0.05);
     let label_map = LabelMap::from_mask(&mask);
     let config = DeblendConfig {
-        multi_threshold: true,
+        n_thresholds: 32,
         ..Default::default()
     };
 

@@ -156,7 +156,7 @@ pub(crate) fn extract_candidates(
         .into_par_iter()
         .filter(|data| data.area > 0 && data.area <= max_area)
         .flat_map_iter(|data| {
-            if deblend_config.multi_threshold {
+            if deblend_config.is_multi_threshold() {
                 multi_threshold_deblend(&data, pixels, label_map, deblend_config)
                     .into_iter()
                     .map(|obj| StarCandidate {

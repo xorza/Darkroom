@@ -105,14 +105,13 @@ fn test_deblend_config_conversion() {
     let config = DeblendConfig {
         min_separation: 5,
         min_prominence: 0.5,
-        multi_threshold: true,
         n_thresholds: 64,
         min_contrast: 0.01,
     };
 
     assert_eq!(config.min_separation, 5);
     assert!((config.min_prominence - 0.5).abs() < 1e-6);
-    assert!(config.multi_threshold);
+    assert!(config.is_multi_threshold());
     assert_eq!(config.n_thresholds, 64);
     assert!((config.min_contrast - 0.01).abs() < 1e-6);
 }

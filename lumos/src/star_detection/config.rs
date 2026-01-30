@@ -113,12 +113,21 @@ pub struct DeblendConfig {
     pub min_separation: usize,
     /// Minimum peak prominence as fraction of primary peak for deblending.
     pub min_prominence: f32,
-    /// Enable multi-threshold deblending (SExtractor-style).
-    pub multi_threshold: bool,
     /// Number of sub-thresholds for multi-threshold deblending.
+    /// Set to 0 for simple local-maxima deblending (faster).
+    /// Set to 32+ for SExtractor-style tree-based deblending (more accurate).
     pub n_thresholds: usize,
     /// Minimum contrast for multi-threshold deblending.
     pub min_contrast: f32,
+}
+
+impl DeblendConfig {
+    /// Returns true if multi-threshold deblending is enabled.
+    /// Multi-threshold is enabled when n_thresholds > 0.
+    #[inline]
+    pub const fn is_multi_threshold(&self) -> bool {
+        self.n_thresholds > 0
+    }
 }
 
 impl Default for DeblendConfig {
@@ -126,8 +135,7 @@ impl Default for DeblendConfig {
         Self {
             min_separation: 3,
             min_prominence: 0.3,
-            multi_threshold: false,
-            n_thresholds: 32,
+            n_thresholds: 0,
             min_contrast: 0.005,
         }
     }
@@ -138,8 +146,7 @@ impl From<&StarDetectionConfig> for DeblendConfig {
         Self {
             min_separation: config.deblend_min_separation,
             min_prominence: config.deblend_min_prominence,
-            multi_threshold: config.multi_threshold_deblend,
-            n_thresholds: config.deblend_nthresh,
+            n_thresholds: config.deblend_n_thresh,
             min_contrast: config.deblend_min_contrast,
         }
     }
@@ -199,15 +206,11 @@ pub struct StarDetectionConfig {
     /// Circular sources have roundness near 0. Cosmic rays, satellite trails,
     /// and galaxies have higher absolute roundness. Set to 1.0 to disable.
     pub max_roundness: f32,
-    /// Enable multi-threshold deblending (SExtractor-style).
-    /// When enabled, uses tree-based deblending with multiple threshold levels
-    /// instead of simple local maxima detection. More accurate for crowded fields
-    /// but slower. Set to true for better crowded field handling.
-    pub multi_threshold_deblend: bool,
     /// Number of deblending sub-thresholds for multi-threshold deblending.
-    /// Higher values give finer deblending resolution but use more CPU.
-    /// SExtractor default: 32. Typical range: 16-64.
-    pub deblend_nthresh: usize,
+    /// Set to 0 for simple local-maxima deblending (faster, default).
+    /// Set to 32+ for SExtractor-style tree-based deblending (more accurate for crowded fields).
+    /// Typical range when enabled: 16-64.
+    pub deblend_n_thresh: usize,
     /// Minimum contrast for multi-threshold deblending (0.0-1.0).
     /// A branch is considered a separate object only if its flux is
     /// at least this fraction of the total flux. Lower values deblend more aggressively.
@@ -258,8 +261,7 @@ impl Default for StarDetectionConfig {
             deblend_min_prominence: 0.3,
             duplicate_min_separation: 8.0,
             max_roundness: 1.0,
-            multi_threshold_deblend: false,
-            deblend_nthresh: 32,
+            deblend_n_thresh: 0,
             deblend_min_contrast: 0.005,
             gain: None,
             read_noise: None,
@@ -334,9 +336,9 @@ impl StarDetectionConfig {
             self.max_roundness
         );
         assert!(
-            self.deblend_nthresh >= 2,
-            "deblend_nthresh must be at least 2, got {}",
-            self.deblend_nthresh
+            self.deblend_n_thresh == 0 || self.deblend_n_thresh >= 2,
+            "deblend_n_thresh must be 0 (disabled) or at least 2, got {}",
+            self.deblend_n_thresh
         );
         assert!(
             (0.0..=1.0).contains(&self.deblend_min_contrast),
@@ -379,7 +381,7 @@ impl StarDetectionConfig {
     /// Create config for crowded fields (aggressive deblending).
     pub fn for_crowded_field() -> Self {
         Self {
-            multi_threshold_deblend: true,
+            deblend_n_thresh: 32,
             deblend_min_separation: 2,
             background_config: BackgroundConfig {
                 iterations: 2,

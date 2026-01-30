@@ -14,8 +14,7 @@ use crate::testing::synthetic::background_map;
 const TEST_DEBLEND_CONFIG: DeblendConfig = DeblendConfig {
     min_separation: 3,
     min_prominence: 0.3,
-    multi_threshold: false,
-    n_thresholds: 32,
+    n_thresholds: 0,
     min_contrast: 0.005,
 };
 
@@ -1457,7 +1456,6 @@ fn test_multi_threshold_deblend_star_pair() {
     let mt_config = DeblendConfig {
         min_separation: 3,
         min_prominence: 0.3,
-        multi_threshold: true,
         n_thresholds: 32,
         min_contrast: 0.005,
     };
@@ -1529,23 +1527,21 @@ fn test_multi_threshold_vs_simple_deblend_consistency() {
         }
     }
 
-    // Simple deblending
+    // Simple deblending (n_thresholds = 0)
     let simple_config = DeblendConfig {
         min_separation: 3,
         min_prominence: 0.3,
-        multi_threshold: false,
-        n_thresholds: 32,
+        n_thresholds: 0,
         min_contrast: 0.005,
     };
     let pixels = Buffer2::new(width, height, pixels);
     let label_map = LabelMap::from_raw(Buffer2::new(width, height, labels_data), 1);
     let simple_candidates = extract_candidates(&pixels, &label_map, &simple_config, TEST_MAX_AREA);
 
-    // Multi-threshold deblending
+    // Multi-threshold deblending (n_thresholds > 0)
     let mt_config = DeblendConfig {
         min_separation: 3,
         min_prominence: 0.3,
-        multi_threshold: true,
         n_thresholds: 32,
         min_contrast: 0.005,
     };
@@ -1624,7 +1620,6 @@ fn test_multi_threshold_deblend_high_contrast_disables() {
     let config = DeblendConfig {
         min_separation: 3,
         min_prominence: 0.3,
-        multi_threshold: true,
         n_thresholds: 32,
         min_contrast: 1.0, // Disabled
     };

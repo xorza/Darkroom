@@ -74,7 +74,7 @@ fn test_deblend_star_pair() {
     // Run detection with deblending enabled
     let config = StarDetectionConfig {
         expected_fwhm: fwhm,
-        multi_threshold_deblend: true,
+        deblend_n_thresh: 32,
         ..Default::default()
     };
 
@@ -176,7 +176,7 @@ fn test_deblend_chain() {
     // Run detection with deblending enabled
     let config = StarDetectionConfig {
         expected_fwhm: fwhm,
-        multi_threshold_deblend: true,
+        deblend_n_thresh: 32,
         ..Default::default()
     };
 
@@ -279,7 +279,7 @@ fn test_deblend_unequal_pair() {
     // Run detection with deblending enabled
     let config = StarDetectionConfig {
         expected_fwhm: fwhm,
-        multi_threshold_deblend: true,
+        deblend_n_thresh: 32,
         deblend_min_contrast: 0.005, // Lower contrast to catch faint companion
         ..Default::default()
     };
