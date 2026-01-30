@@ -5,7 +5,7 @@
 
 use super::*;
 use crate::common::{BitBuffer2, Buffer2};
-use crate::star_detection::background::BackgroundConfig;
+use crate::star_detection::background::{BackgroundConfig, BackgroundMap};
 use crate::star_detection::common::dilate_mask;
 
 use crate::testing::synthetic::background_map;
@@ -52,11 +52,13 @@ fn test_detect_single_star() {
     let height = 64;
     let pixels = make_test_image_with_star(width, height, 32, 32);
 
-    let bg = BackgroundConfig {
-        tile_size: 32,
-        ..Default::default()
-    }
-    .estimate(&pixels);
+    let bg = BackgroundMap::new(
+        &pixels,
+        &BackgroundConfig {
+            tile_size: 32,
+            ..Default::default()
+        },
+    );
     let config = StarDetectionConfig::default();
     let candidates = detect_stars(&pixels, None, &bg, &config);
 
@@ -94,11 +96,13 @@ fn test_detect_multiple_stars() {
     }
 
     let pixels_buf = Buffer2::new(width, height, pixels);
-    let bg = BackgroundConfig {
-        tile_size: 32,
-        ..Default::default()
-    }
-    .estimate(&pixels_buf);
+    let bg = BackgroundMap::new(
+        &pixels_buf,
+        &BackgroundConfig {
+            tile_size: 32,
+            ..Default::default()
+        },
+    );
     let config = StarDetectionConfig {
         edge_margin: 5,
         ..Default::default()
@@ -115,11 +119,13 @@ fn test_reject_edge_stars() {
     // Star at edge (x=5, y=32) should be rejected with edge_margin=10
     let pixels = make_test_image_with_star(width, height, 5, 32);
 
-    let bg = BackgroundConfig {
-        tile_size: 32,
-        ..Default::default()
-    }
-    .estimate(&pixels);
+    let bg = BackgroundMap::new(
+        &pixels,
+        &BackgroundConfig {
+            tile_size: 32,
+            ..Default::default()
+        },
+    );
     let config = StarDetectionConfig {
         edge_margin: 10,
         ..Default::default()
@@ -140,11 +146,13 @@ fn test_reject_small_objects() {
     pixels[32 * width + 32] = 0.9;
 
     let pixels_buf = Buffer2::new(width, height, pixels);
-    let bg = BackgroundConfig {
-        tile_size: 32,
-        ..Default::default()
-    }
-    .estimate(&pixels_buf);
+    let bg = BackgroundMap::new(
+        &pixels_buf,
+        &BackgroundConfig {
+            tile_size: 32,
+            ..Default::default()
+        },
+    );
     let config = StarDetectionConfig {
         min_area: 26, // Must be > 25 to reject dilated single pixel (radius 2 = 5x5 = 25)
         ..Default::default()
@@ -161,11 +169,13 @@ fn test_empty_image() {
     let pixels = vec![0.1f32; width * height];
 
     let pixels_buf = Buffer2::new(width, height, pixels);
-    let bg = BackgroundConfig {
-        tile_size: 32,
-        ..Default::default()
-    }
-    .estimate(&pixels_buf);
+    let bg = BackgroundMap::new(
+        &pixels_buf,
+        &BackgroundConfig {
+            tile_size: 32,
+            ..Default::default()
+        },
+    );
     let config = StarDetectionConfig::default();
     let candidates = detect_stars(&pixels_buf, None, &bg, &config);
 

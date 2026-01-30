@@ -2,6 +2,7 @@
 //!
 //! Tests the peak detection and thresholding logic.
 
+use crate::star_detection::background::BackgroundMap;
 use crate::star_detection::detection::detect_stars;
 use crate::star_detection::tests::common::output::{
     gray_to_rgb_image_stretched, save_grayscale, save_image,
@@ -59,11 +60,13 @@ fn test_detection_sparse() {
     );
 
     // Estimate background
-    let background = BackgroundConfig {
-        tile_size: TILE_SIZE,
-        ..Default::default()
-    }
-    .estimate(&pixels);
+    let background = BackgroundMap::new(
+        &pixels,
+        &BackgroundConfig {
+            tile_size: TILE_SIZE,
+            ..Default::default()
+        },
+    );
 
     // Detect candidates
     let det_config = StarDetectionConfig::default();
@@ -144,11 +147,13 @@ fn test_detection_thresholds() {
     );
 
     // Estimate background
-    let background = BackgroundConfig {
-        tile_size: TILE_SIZE,
-        ..Default::default()
-    }
-    .estimate(&pixels);
+    let background = BackgroundMap::new(
+        &pixels,
+        &BackgroundConfig {
+            tile_size: TILE_SIZE,
+            ..Default::default()
+        },
+    );
 
     // Test different thresholds
     for sigma in [2.0, 3.0, 5.0, 10.0] {
@@ -241,11 +246,13 @@ fn test_detection_area_filter() {
     );
 
     // Estimate background
-    let background = BackgroundConfig {
-        tile_size: TILE_SIZE,
-        ..Default::default()
-    }
-    .estimate(&pixels);
+    let background = BackgroundMap::new(
+        &pixels,
+        &BackgroundConfig {
+            tile_size: TILE_SIZE,
+            ..Default::default()
+        },
+    );
 
     // Test with different area filters
     for (min_area, max_area, label) in [

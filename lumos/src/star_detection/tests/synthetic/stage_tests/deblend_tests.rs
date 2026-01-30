@@ -4,7 +4,7 @@
 
 use crate::common::Buffer2;
 use crate::star_detection::StarDetectionConfig;
-use crate::star_detection::background::BackgroundConfig;
+use crate::star_detection::background::{BackgroundConfig, BackgroundMap};
 use crate::star_detection::detection::detect_stars;
 use crate::star_detection::tests::common::output::{
     gray_to_rgb_image_stretched, save_grayscale, save_image,
@@ -63,11 +63,13 @@ fn test_deblend_star_pair() {
 
     // Estimate background
     let pixels_buf = Buffer2::new(width, height, pixels.clone());
-    let background = BackgroundConfig {
-        tile_size: TILE_SIZE,
-        ..Default::default()
-    }
-    .estimate(&pixels_buf);
+    let background = BackgroundMap::new(
+        &pixels_buf,
+        &BackgroundConfig {
+            tile_size: TILE_SIZE,
+            ..Default::default()
+        },
+    );
 
     // Run detection with deblending enabled
     let config = StarDetectionConfig {
@@ -163,11 +165,13 @@ fn test_deblend_chain() {
 
     // Estimate background
     let pixels_buf = Buffer2::new(width, height, pixels.clone());
-    let background = BackgroundConfig {
-        tile_size: TILE_SIZE,
-        ..Default::default()
-    }
-    .estimate(&pixels_buf);
+    let background = BackgroundMap::new(
+        &pixels_buf,
+        &BackgroundConfig {
+            tile_size: TILE_SIZE,
+            ..Default::default()
+        },
+    );
 
     // Run detection with deblending enabled
     let config = StarDetectionConfig {
@@ -264,11 +268,13 @@ fn test_deblend_unequal_pair() {
 
     // Estimate background
     let pixels_buf = Buffer2::new(width, height, pixels.clone());
-    let background = BackgroundConfig {
-        tile_size: TILE_SIZE,
-        ..Default::default()
-    }
-    .estimate(&pixels_buf);
+    let background = BackgroundMap::new(
+        &pixels_buf,
+        &BackgroundConfig {
+            tile_size: TILE_SIZE,
+            ..Default::default()
+        },
+    );
 
     // Run detection with deblending enabled
     let config = StarDetectionConfig {

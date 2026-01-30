@@ -5,6 +5,7 @@ use crate::common::{BitBuffer2, Buffer2};
 use crate::star_detection::tests::common::{gray_to_rgb_image_stretched, save_image};
 use crate::{AstroImage, ImageDimensions};
 
+use crate::star_detection::background::BackgroundMap;
 use crate::star_detection::common::dilate_mask;
 use crate::star_detection::{StarDetectionConfig, StarDetector};
 use crate::testing::init_tracing;
@@ -100,7 +101,7 @@ fn test_debug_synthetic_steps() {
 
     let detection_config = StarDetectionConfig::default();
     let grayscale_buf = Buffer2::new(width, height, grayscale.clone());
-    let background = detection_config.background_config.estimate(&grayscale_buf);
+    let background = BackgroundMap::new(&grayscale_buf, &detection_config.background_config);
 
     println!(
         "Background stats: min={:.4}, max={:.4}",

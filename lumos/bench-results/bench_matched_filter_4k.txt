@@ -1,0 +1,6 @@
+name: bench_matched_filter_4k
+mean: 89.725603ms
+min: 84.532177ms
+max: 95.116971ms
+median: 89.527662ms
+iterations: 3

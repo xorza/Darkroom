@@ -19,6 +19,9 @@ use rayon::prelude::*;
 
 use tile_grid::TileGrid;
 
+// Re-export BackgroundConfig from config module
+pub use super::config::BackgroundConfig;
+
 /// Background map with per-pixel background and noise estimates.
 #[derive(Debug, Clone)]
 pub struct BackgroundMap {
@@ -29,6 +32,39 @@ pub struct BackgroundMap {
 }
 
 impl BackgroundMap {
+    /// Estimate background from image pixels using the given configuration.
+    ///
+    /// Uses a tiled approach with sigma-clipped statistics:
+    /// 1. Divide image into tiles of `tile_size` pixels
+    /// 2. For each tile, compute sigma-clipped median and standard deviation
+    /// 3. Bilinearly interpolate between tile centers to get per-pixel values
+    ///
+    /// If `config.iterations > 0`, uses iterative refinement (SExtractor-style):
+    /// 1. Estimate initial background
+    /// 2. Detect pixels above threshold (potential objects)
+    /// 3. Create dilated mask of detected regions
+    /// 4. Re-estimate background excluding masked pixels
+    /// 5. Repeat for specified iterations
+    ///
+    /// This provides cleaner background maps for crowded fields by excluding
+    /// stars and other bright objects from the estimation.
+    pub fn new(pixels: &Buffer2<f32>, config: &BackgroundConfig) -> Self {
+        config.validate();
+        assert!(
+            pixels.width() >= config.tile_size && pixels.height() >= config.tile_size,
+            "Image must be at least tile_size x tile_size"
+        );
+
+        let grid = TileGrid::new(pixels, config.tile_size);
+        let mut background = interpolate_from_grid(pixels, &grid);
+
+        if config.iterations > 0 {
+            refine(&mut background, pixels, config);
+        }
+
+        background
+    }
+
     /// Get image width.
     #[inline]
     pub fn width(&self) -> usize {
@@ -64,165 +100,59 @@ impl BackgroundMap {
     }
 }
 
-/// Configuration for iterative background refinement.
-#[derive(Debug, Clone)]
-pub struct BackgroundConfig {
-    /// Detection threshold in sigma above background for masking objects.
-    /// Higher values = more conservative masking (only mask very bright objects).
-    /// Typical value: 3.0-5.0
-    pub detection_sigma: f32,
-    /// Number of refinement iterations. Usually 1-2 is sufficient.
-    pub iterations: usize,
-    /// Dilation radius for object masks in pixels.
-    /// Expands masked regions to ensure object wings are excluded.
-    /// Typical value: 2-5 pixels.
-    pub mask_dilation: usize,
-    /// Minimum fraction of pixels that must remain unmasked per tile.
-    /// If too many pixels are masked, use original (unrefined) estimate.
-    /// Typical value: 0.3-0.5
-    pub min_unmasked_fraction: f32,
+fn interpolate_from_grid(pixels: &Buffer2<f32>, grid: &TileGrid) -> BackgroundMap {
+    let width = pixels.width();
+    let height = pixels.height();
 
-    pub tile_size: usize,
+    let mut background = BackgroundMap {
+        background: Buffer2::new_filled(width, height, 0.0),
+        noise: Buffer2::new_filled(width, height, 0.0),
+    };
+
+    parallel::par_chunks_auto_aligned_zip2(
+        background.background.pixels_mut(),
+        background.noise.pixels_mut(),
+        width,
+    )
+    .for_each(|(chunk_start_row, (bg_chunk, noise_chunk))| {
+        let rows_in_chunk = bg_chunk.len() / width;
+
+        for local_y in 0..rows_in_chunk {
+            let y = chunk_start_row + local_y;
+            let row_offset = local_y * width;
+            let bg_row = &mut bg_chunk[row_offset..row_offset + width];
+            let noise_row = &mut noise_chunk[row_offset..row_offset + width];
+
+            interpolate_row(bg_row, noise_row, y, grid);
+        }
+    });
+
+    background
 }
 
-impl Default for BackgroundConfig {
-    fn default() -> Self {
-        Self {
-            detection_sigma: 4.0,
-            iterations: 0,
-            mask_dilation: 3,
-            min_unmasked_fraction: 0.3,
-            tile_size: 64,
-        }
-    }
-}
+fn refine(background: &mut BackgroundMap, pixels: &Buffer2<f32>, config: &BackgroundConfig) {
+    let width = pixels.width();
+    let height = pixels.height();
 
-impl BackgroundConfig {
-    /// Estimate background using this configuration.
-    ///
-    /// Uses a tiled approach with sigma-clipped statistics:
-    /// 1. Divide image into tiles of `tile_size` pixels
-    /// 2. For each tile, compute sigma-clipped median and standard deviation
-    /// 3. Bilinearly interpolate between tile centers to get per-pixel values
-    ///
-    /// If `iterations > 0`, uses iterative refinement (SExtractor-style):
-    /// 1. Estimate initial background
-    /// 2. Detect pixels above threshold (potential objects)
-    /// 3. Create dilated mask of detected regions
-    /// 4. Re-estimate background excluding masked pixels
-    /// 5. Repeat for specified iterations
-    ///
-    /// This provides cleaner background maps for crowded fields by excluding
-    /// stars and other bright objects from the estimation.
-    pub fn estimate(&self, pixels: &Buffer2<f32>) -> BackgroundMap {
-        self.validate();
-        self.validate_image_size(pixels);
+    let mut mask = BitBuffer2::new_filled(width, height, false);
+    let mut scratch = BitBuffer2::new_filled(width, height, false);
 
-        let grid = TileGrid::new(pixels, self.tile_size);
-
-        let mut background = self.interpolate_background(pixels, &grid);
-
-        self.refine_background(pixels, &mut background);
-
-        background
-    }
-
-    fn validate_image_size(&self, pixels: &Buffer2<f32>) {
-        assert!(
-            pixels.width() >= self.tile_size && pixels.height() >= self.tile_size,
-            "Image must be at least tile_size x tile_size"
+    for _iter in 0..config.iterations {
+        create_object_mask(
+            pixels,
+            background,
+            config.detection_sigma,
+            config.mask_dilation,
+            &mut mask,
+            &mut scratch,
         );
-    }
 
-    fn interpolate_background(&self, pixels: &Buffer2<f32>, grid: &TileGrid) -> BackgroundMap {
-        let width = pixels.width();
-        let height = pixels.height();
-
-        let mut background = BackgroundMap {
-            background: Buffer2::new_filled(width, height, 0.0),
-            noise: Buffer2::new_filled(width, height, 0.0),
-        };
-
-        parallel::par_chunks_auto_aligned_zip2(
-            background.background.pixels_mut(),
-            background.noise.pixels_mut(),
-            width,
-        )
-        .for_each(|(chunk_start_row, (bg_chunk, noise_chunk))| {
-            let rows_in_chunk = bg_chunk.len() / width;
-
-            for local_y in 0..rows_in_chunk {
-                let y = chunk_start_row + local_y;
-                let row_offset = local_y * width;
-                let bg_row = &mut bg_chunk[row_offset..row_offset + width];
-                let noise_row = &mut noise_chunk[row_offset..row_offset + width];
-
-                interpolate_row(bg_row, noise_row, y, grid);
-            }
-        });
-
-        background
-    }
-
-    fn refine_background(&self, pixels: &Buffer2<f32>, background: &mut BackgroundMap) {
-        if self.iterations == 0 {
-            return;
-        }
-
-        let width = pixels.width();
-        let height = pixels.height();
-
-        let mut mask = BitBuffer2::new_filled(width, height, false);
-        let mut scratch = BitBuffer2::new_filled(width, height, false);
-
-        for _iter in 0..self.iterations {
-            create_object_mask(
-                pixels,
-                background,
-                self.detection_sigma,
-                self.mask_dilation,
-                &mut mask,
-                &mut scratch,
-            );
-
-            estimate_background_masked(
-                pixels,
-                self.tile_size,
-                &mask,
-                self.min_unmasked_fraction,
-                background,
-            );
-        }
-    }
-
-    /// Validate the configuration and panic if invalid.
-    ///
-    /// # Panics
-    /// Panics with a descriptive message if any parameter is out of valid range.
-    pub fn validate(&self) {
-        assert!(
-            self.detection_sigma > 0.0,
-            "detection_sigma must be positive, got {}",
-            self.detection_sigma
-        );
-        assert!(
-            self.iterations <= 10,
-            "iterations must be <= 10, got {}",
-            self.iterations
-        );
-        assert!(
-            self.mask_dilation <= 50,
-            "mask_dilation must be <= 50, got {}",
-            self.mask_dilation
-        );
-        assert!(
-            (0.0..=1.0).contains(&self.min_unmasked_fraction),
-            "min_unmasked_fraction must be in [0, 1], got {}",
-            self.min_unmasked_fraction
-        );
-        assert!(
-            (16..=256).contains(&self.tile_size),
-            "Tile size must be between 16 and 256"
+        estimate_background_masked(
+            pixels,
+            config.tile_size,
+            &mask,
+            config.min_unmasked_fraction,
+            background,
         );
     }
 }

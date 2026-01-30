@@ -3,15 +3,18 @@
 #[cfg(test)]
 mod tests;
 
-use super::StarDetectionConfig;
 use super::background::BackgroundMap;
 use super::common::dilate_mask;
 use super::common::threshold_mask::{create_threshold_mask, create_threshold_mask_filtered};
+use super::config::{DeblendConfig, StarDetectionConfig};
 use super::deblend::{
-    ComponentData, DeblendConfig, MultiThresholdDeblendConfig, Pixel,
+    ComponentData, MultiThresholdDeblendConfig, Pixel,
     deblend_component as multi_threshold_deblend, deblend_local_maxima,
 };
 use crate::common::{BitBuffer2, Buffer2};
+
+// Re-export DetectionConfig from config module
+pub use super::config::DetectionConfig;
 
 /// A candidate star region before centroid refinement.
 #[derive(Debug)]
@@ -48,30 +51,6 @@ impl StarCandidate {
     }
 }
 
-/// Configuration for detection algorithm.
-#[derive(Debug, Clone)]
-pub struct DetectionConfig {
-    /// Detection threshold in sigma above background.
-    pub sigma_threshold: f32,
-    /// Minimum area in pixels.
-    pub min_area: usize,
-    /// Maximum area in pixels.
-    pub max_area: usize,
-    /// Edge margin (reject candidates near edges).
-    pub edge_margin: usize,
-}
-
-impl From<&StarDetectionConfig> for DetectionConfig {
-    fn from(config: &StarDetectionConfig) -> Self {
-        Self {
-            sigma_threshold: config.background_config.detection_sigma,
-            min_area: config.min_area,
-            max_area: config.max_area,
-            edge_margin: config.edge_margin,
-        }
-    }
-}
-
 /// Detect star candidates in an image.
 ///
 /// Uses connected component labeling to find regions above the detection threshold.
@@ -91,6 +70,7 @@ pub fn detect_stars(
     let width = pixels.width();
     let height = pixels.height();
     let detection_config = DetectionConfig::from(config);
+    let deblend_config = DeblendConfig::from(config);
 
     // Create binary mask of above-threshold pixels
     let mut mask = BitBuffer2::new_filled(width, height, false);
@@ -126,7 +106,6 @@ pub fn detect_stars(
     let (labels, num_labels) = connected_components(&mask);
 
     // Extract candidate properties with deblending (always use original pixels for peak values)
-    let deblend_config = DeblendConfig::from(config);
     let mut candidates = extract_candidates(
         pixels,
         &labels,
@@ -266,6 +245,7 @@ pub(crate) fn connected_components(mask: &BitBuffer2) -> (Vec<u32>, usize) {
 fn find(parent: &mut [u32], label: u32) -> u32 {
     let idx = (label - 1) as usize;
     if parent[idx] != label {
+        // flatten recursion
         parent[idx] = find(parent, parent[idx]); // Path compression
     }
     parent[idx]
@@ -281,18 +261,6 @@ fn union(parent: &mut [u32], a: u32, b: u32) {
             parent[(root_b - 1) as usize] = root_a;
         } else {
             parent[(root_a - 1) as usize] = root_b;
-        }
-    }
-}
-
-impl From<&StarDetectionConfig> for DeblendConfig {
-    fn from(config: &StarDetectionConfig) -> Self {
-        Self {
-            min_separation: config.deblend_min_separation,
-            min_prominence: config.deblend_min_prominence,
-            multi_threshold: config.multi_threshold_deblend,
-            n_thresholds: config.deblend_nthresh,
-            min_contrast: config.deblend_min_contrast,
         }
     }
 }

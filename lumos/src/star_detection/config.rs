@@ -1,9 +1,153 @@
 //! Configuration types for star detection.
 
 use super::CentroidMethod;
-use super::background::BackgroundConfig;
 use super::centroid::LocalBackgroundMethod;
 use super::defect_map::DefectMap;
+
+// ============================================================================
+// Background Configuration
+// ============================================================================
+
+/// Configuration for iterative background refinement.
+#[derive(Debug, Clone)]
+pub struct BackgroundConfig {
+    /// Detection threshold in sigma above background for masking objects.
+    /// Higher values = more conservative masking (only mask very bright objects).
+    /// Typical value: 3.0-5.0
+    pub detection_sigma: f32,
+    /// Number of refinement iterations. Usually 1-2 is sufficient.
+    pub iterations: usize,
+    /// Dilation radius for object masks in pixels.
+    /// Expands masked regions to ensure object wings are excluded.
+    /// Typical value: 2-5 pixels.
+    pub mask_dilation: usize,
+    /// Minimum fraction of pixels that must remain unmasked per tile.
+    /// If too many pixels are masked, use original (unrefined) estimate.
+    /// Typical value: 0.3-0.5
+    pub min_unmasked_fraction: f32,
+    /// Tile size for background estimation in pixels.
+    pub tile_size: usize,
+}
+
+impl Default for BackgroundConfig {
+    fn default() -> Self {
+        Self {
+            detection_sigma: 4.0,
+            iterations: 0,
+            mask_dilation: 3,
+            min_unmasked_fraction: 0.3,
+            tile_size: 64,
+        }
+    }
+}
+
+impl BackgroundConfig {
+    /// Validate the configuration and panic if invalid.
+    ///
+    /// # Panics
+    /// Panics with a descriptive message if any parameter is out of valid range.
+    pub fn validate(&self) {
+        assert!(
+            self.detection_sigma > 0.0,
+            "detection_sigma must be positive, got {}",
+            self.detection_sigma
+        );
+        assert!(
+            self.iterations <= 10,
+            "iterations must be <= 10, got {}",
+            self.iterations
+        );
+        assert!(
+            self.mask_dilation <= 50,
+            "mask_dilation must be <= 50, got {}",
+            self.mask_dilation
+        );
+        assert!(
+            (0.0..=1.0).contains(&self.min_unmasked_fraction),
+            "min_unmasked_fraction must be in [0, 1], got {}",
+            self.min_unmasked_fraction
+        );
+        assert!(
+            (16..=256).contains(&self.tile_size),
+            "Tile size must be between 16 and 256"
+        );
+    }
+}
+
+// ============================================================================
+// Detection Configuration
+// ============================================================================
+
+/// Configuration for the detection algorithm.
+#[derive(Debug, Clone)]
+pub struct DetectionConfig {
+    /// Detection threshold in sigma above background.
+    pub sigma_threshold: f32,
+    /// Minimum area in pixels.
+    pub min_area: usize,
+    /// Maximum area in pixels.
+    pub max_area: usize,
+    /// Edge margin (reject candidates near edges).
+    pub edge_margin: usize,
+}
+
+impl From<&StarDetectionConfig> for DetectionConfig {
+    fn from(config: &StarDetectionConfig) -> Self {
+        Self {
+            sigma_threshold: config.background_config.detection_sigma,
+            min_area: config.min_area,
+            max_area: config.max_area,
+            edge_margin: config.edge_margin,
+        }
+    }
+}
+
+// ============================================================================
+// Deblend Configuration
+// ============================================================================
+
+/// Configuration for the deblending algorithm.
+#[derive(Debug, Clone, Copy)]
+pub struct DeblendConfig {
+    /// Minimum separation between peaks for deblending (in pixels).
+    pub min_separation: usize,
+    /// Minimum peak prominence as fraction of primary peak for deblending.
+    pub min_prominence: f32,
+    /// Enable multi-threshold deblending (SExtractor-style).
+    pub multi_threshold: bool,
+    /// Number of sub-thresholds for multi-threshold deblending.
+    pub n_thresholds: usize,
+    /// Minimum contrast for multi-threshold deblending.
+    pub min_contrast: f32,
+}
+
+impl Default for DeblendConfig {
+    fn default() -> Self {
+        Self {
+            min_separation: 3,
+            min_prominence: 0.3,
+            multi_threshold: false,
+            n_thresholds: 32,
+            min_contrast: 0.005,
+        }
+    }
+}
+
+impl From<&StarDetectionConfig> for DeblendConfig {
+    fn from(config: &StarDetectionConfig) -> Self {
+        Self {
+            min_separation: config.deblend_min_separation,
+            min_prominence: config.deblend_min_prominence,
+            multi_threshold: config.multi_threshold_deblend,
+            n_thresholds: config.deblend_nthresh,
+            min_contrast: config.deblend_min_contrast,
+        }
+    }
+}
+
+// ============================================================================
+// Star Detection Configuration
+// ============================================================================
 
 /// Configuration for star detection.
 #[derive(Debug, Clone)]

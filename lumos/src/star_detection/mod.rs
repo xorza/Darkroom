@@ -166,7 +166,7 @@ impl StarDetector {
         drop(output);
 
         // Step 1: Estimate background
-        let background = self.config.background_config.estimate(&pixels);
+        let background = BackgroundMap::new(&pixels, &self.config.background_config);
 
         // Step 2: Detect star candidates
         // Optionally apply matched filter (Gaussian convolution) for better faint star detection

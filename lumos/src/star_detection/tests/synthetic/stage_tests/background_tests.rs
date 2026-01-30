@@ -3,7 +3,7 @@
 //! Tests the background estimation with various synthetic backgrounds.
 
 use crate::common::Buffer2;
-use crate::star_detection::background::BackgroundConfig;
+use crate::star_detection::background::{BackgroundConfig, BackgroundMap};
 use crate::star_detection::tests::common::output::save_grayscale;
 use crate::testing::init_tracing;
 use crate::testing::synthetic::{
@@ -37,11 +37,13 @@ fn test_background_uniform() {
     let (pixels, _ground_truth) = generate_star_field(&config);
 
     // Estimate background
-    let background = BackgroundConfig {
-        tile_size: TILE_SIZE,
-        ..Default::default()
-    }
-    .estimate(&pixels);
+    let background = BackgroundMap::new(
+        &pixels,
+        &BackgroundConfig {
+            tile_size: TILE_SIZE,
+            ..Default::default()
+        },
+    );
 
     // Save input image
     save_grayscale(
@@ -117,11 +119,13 @@ fn test_background_gradient() {
     }
 
     // Estimate background
-    let background = BackgroundConfig {
-        tile_size: TILE_SIZE,
-        ..Default::default()
-    }
-    .estimate(&Buffer2::new(width, height, pixels.clone()));
+    let background = BackgroundMap::new(
+        &Buffer2::new(width, height, pixels.clone()),
+        &BackgroundConfig {
+            tile_size: TILE_SIZE,
+            ..Default::default()
+        },
+    );
 
     // Save images
     save_grayscale(
@@ -196,11 +200,13 @@ fn test_background_vignette() {
     }
 
     // Estimate background
-    let background = BackgroundConfig {
-        tile_size: TILE_SIZE,
-        ..Default::default()
-    }
-    .estimate(&Buffer2::new(width, height, pixels.clone()));
+    let background = BackgroundMap::new(
+        &Buffer2::new(width, height, pixels.clone()),
+        &BackgroundConfig {
+            tile_size: TILE_SIZE,
+            ..Default::default()
+        },
+    );
 
     // Save images
     save_grayscale(
@@ -288,11 +294,13 @@ fn test_background_nebula() {
     }
 
     // Estimate background
-    let background = BackgroundConfig {
-        tile_size: TILE_SIZE,
-        ..Default::default()
-    }
-    .estimate(&Buffer2::new(width, height, pixels.clone()));
+    let background = BackgroundMap::new(
+        &Buffer2::new(width, height, pixels.clone()),
+        &BackgroundConfig {
+            tile_size: TILE_SIZE,
+            ..Default::default()
+        },
+    );
 
     // Save images
     save_grayscale(

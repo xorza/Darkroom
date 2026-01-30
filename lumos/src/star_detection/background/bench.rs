@@ -4,6 +4,7 @@
 use bench::quick_bench;
 
 use crate::BackgroundConfig;
+use crate::star_detection::background::BackgroundMap;
 use crate::testing::synthetic::stamps;
 
 use std::hint::black_box;
@@ -20,5 +21,5 @@ fn background_estimate_6k(b: ::bench::Bencher) {
         ..Default::default()
     };
 
-    b.bench(|| black_box(config.estimate(&pixels)));
+    b.bench(|| black_box(BackgroundMap::new(&pixels, &config)));
 }

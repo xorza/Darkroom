@@ -1,7 +1,7 @@
 name: bench_threshold_mask_4k/scalar
-mean: 15.612084ms
-min: 15.333905ms
-max: 15.783791ms
-median: 15.692648ms
+mean: 15.606664ms
+min: 15.383785ms
+max: 15.944355ms
+median: 15.599907ms
 iterations: 10
-vs_previous: 15.987451ms -> 15.612084ms (-2.3%) same
+vs_previous: 15.612084ms -> 15.606664ms (-0.0%) same
