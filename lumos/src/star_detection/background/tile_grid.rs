@@ -13,6 +13,7 @@ pub(crate) struct TileStats {
 }
 
 /// Tile grid with precomputed centers for interpolation.
+#[derive(Debug)]
 pub(super) struct TileGrid {
     stats: Buffer2<TileStats>,
     tile_size: usize,
@@ -134,12 +135,24 @@ impl TileGrid {
     /// Find the tile index whose center is at or before the given Y position.
     #[inline]
     pub fn find_lower_tile_y(&self, pos: f32) -> usize {
-        for i in (0..self.tiles_y()).rev() {
-            if self.center_y(i) <= pos {
-                return i;
+        let tiles_y = self.tiles_y();
+        if tiles_y == 0 {
+            return 0;
+        }
+
+        // Binary search for the largest tile index whose center <= pos
+        let mut lo = 0;
+        let mut hi = tiles_y;
+        while lo < hi {
+            let mid = lo + (hi - lo) / 2;
+            if self.center_y(mid) <= pos {
+                lo = mid + 1;
+            } else {
+                hi = mid;
             }
         }
-        0
+
+        lo.saturating_sub(1)
     }
 
     fn fill_tile_stats(
@@ -201,9 +214,13 @@ impl TileGrid {
             return; // Not enough tiles for filtering
         }
 
-        let filtered_stats: Vec<TileStats> = (0..tiles_y * tiles_x)
-            .into_par_iter()
-            .map(|idx| {
+        let src = self.stats.pixels();
+        let mut dst: Buffer2<TileStats> = Buffer2::new_default(tiles_x, tiles_y);
+
+        dst.pixels_mut()
+            .par_iter_mut()
+            .enumerate()
+            .for_each(|(idx, out)| {
                 let ty = idx / tiles_x;
                 let tx = idx % tiles_x;
 
@@ -218,7 +235,7 @@ impl TileGrid {
                         let ny = ty as i32 + dy;
 
                         if nx >= 0 && nx < tiles_x as i32 && ny >= 0 && ny < tiles_y as i32 {
-                            let neighbor = self.get(nx as usize, ny as usize);
+                            let neighbor = src[ny as usize * tiles_x + nx as usize];
                             medians[count] = neighbor.median;
                             sigmas[count] = neighbor.sigma;
                             count += 1;
@@ -227,16 +244,10 @@ impl TileGrid {
                 }
 
                 // Compute median of neighborhoods
-                let filtered_median = median_f32_mut(&mut medians[..count]);
-                let filtered_sigma = median_f32_mut(&mut sigmas[..count]);
+                out.median = median_f32_mut(&mut medians[..count]);
+                out.sigma = median_f32_mut(&mut sigmas[..count]);
+            });
 
-                TileStats {
-                    median: filtered_median,
-                    sigma: filtered_sigma,
-                }
-            })
-            .collect();
-
-        self.stats = Buffer2::new(tiles_x, tiles_y, filtered_stats);
+        std::mem::swap(&mut self.stats, &mut dst);
     }
 }
