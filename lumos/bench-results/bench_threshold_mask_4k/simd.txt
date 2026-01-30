@@ -1,0 +1,7 @@
+name: bench_threshold_mask_4k/simd
+mean: 7.849219ms
+min: 7.782698ms
+max: 8.297332ms
+median: 7.795231ms
+iterations: 10
+vs_previous: 8.802036ms -> 7.849219ms (-10.8%) faster

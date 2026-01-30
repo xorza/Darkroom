@@ -277,6 +277,11 @@ impl Bencher {
                     None
                 };
 
+                // Create parent directories for the file if needed (for labeled benchmarks with '/')
+                if let Some(parent) = file_path.parent() {
+                    let _ = create_dir_all(parent);
+                }
+
                 // Overwrite result file
                 match OpenOptions::new()
                     .create(true)
