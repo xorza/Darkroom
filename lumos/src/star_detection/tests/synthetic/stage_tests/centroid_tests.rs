@@ -6,6 +6,7 @@ use crate::common::Buffer2;
 use crate::star_detection::StarDetectionConfig;
 use crate::star_detection::background::{BackgroundConfig, BackgroundMap};
 use crate::star_detection::centroid::compute_centroid;
+use crate::star_detection::deblend::BoundingBox;
 use crate::star_detection::detection::StarCandidate;
 use crate::star_detection::tests::common::output::{
     gray_to_rgb_image_stretched, save_grayscale, save_image,
@@ -91,10 +92,12 @@ fn test_centroid_accuracy() {
         let peak_y = true_y.round() as usize;
 
         let candidate = StarCandidate {
-            x_min: peak_x.saturating_sub(5),
-            x_max: (peak_x + 5).min(width - 1),
-            y_min: peak_y.saturating_sub(5),
-            y_max: (peak_y + 5).min(height - 1),
+            bbox: BoundingBox::new(
+                peak_x.saturating_sub(5),
+                (peak_x + 5).min(width - 1),
+                peak_y.saturating_sub(5),
+                (peak_y + 5).min(height - 1),
+            ),
             peak_x,
             peak_y,
             peak_value: pixels[peak_y * width + peak_x],
@@ -134,10 +137,12 @@ fn test_centroid_accuracy() {
         let peak_y = true_y.round() as usize;
 
         let candidate = StarCandidate {
-            x_min: peak_x.saturating_sub(5),
-            x_max: (peak_x + 5).min(width - 1),
-            y_min: peak_y.saturating_sub(5),
-            y_max: (peak_y + 5).min(height - 1),
+            bbox: BoundingBox::new(
+                peak_x.saturating_sub(5),
+                (peak_x + 5).min(width - 1),
+                peak_y.saturating_sub(5),
+                (peak_y + 5).min(height - 1),
+            ),
             peak_x,
             peak_y,
             peak_value: pixels[peak_y * width + peak_x],
@@ -252,10 +257,12 @@ fn test_centroid_snr() {
         draw_circle(&mut img, *true_x, *true_y, 6.0, blue, 1.0);
 
         let candidate = StarCandidate {
-            x_min: peak_x.saturating_sub(5),
-            x_max: (peak_x + 5).min(width - 1),
-            y_min: peak_y.saturating_sub(5),
-            y_max: (peak_y + 5).min(height - 1),
+            bbox: BoundingBox::new(
+                peak_x.saturating_sub(5),
+                (peak_x + 5).min(width - 1),
+                peak_y.saturating_sub(5),
+                (peak_y + 5).min(height - 1),
+            ),
             peak_x,
             peak_y,
             peak_value: pixels[peak_y * width + peak_x],

@@ -11,8 +11,8 @@ use super::common::dilate_mask;
 use super::common::threshold_mask::{create_threshold_mask, create_threshold_mask_filtered};
 use super::config::{DeblendConfig, StarDetectionConfig};
 use super::deblend::{
-    ComponentData, MultiThresholdDeblendConfig, deblend_component as multi_threshold_deblend,
-    deblend_local_maxima,
+    BoundingBox, ComponentData, MultiThresholdDeblendConfig,
+    deblend_component as multi_threshold_deblend, deblend_local_maxima,
 };
 use crate::common::{BitBuffer2, Buffer2};
 
@@ -24,14 +24,8 @@ pub use super::config::DetectionConfig;
 /// A candidate star region before centroid refinement.
 #[derive(Debug)]
 pub struct StarCandidate {
-    /// Bounding box min X.
-    pub x_min: usize,
-    /// Bounding box max X.
-    pub x_max: usize,
-    /// Bounding box min Y.
-    pub y_min: usize,
-    /// Bounding box max Y.
-    pub y_max: usize,
+    /// Bounding box.
+    pub bbox: BoundingBox,
     /// Peak pixel X coordinate.
     pub peak_x: usize,
     /// Peak pixel Y coordinate.
@@ -46,13 +40,13 @@ impl StarCandidate {
     /// Width of bounding box.
     #[allow(dead_code)]
     pub fn width(&self) -> usize {
-        self.x_max - self.x_min + 1
+        self.bbox.width()
     }
 
     /// Height of bounding box.
     #[allow(dead_code)]
     pub fn height(&self) -> usize {
-        self.y_max - self.y_min + 1
+        self.bbox.height()
     }
 }
 
@@ -123,10 +117,10 @@ pub fn detect_stars(
         // Size filter
         c.area >= detection_config.min_area
             // Edge filter
-            && c.x_min >= detection_config.edge_margin
-            && c.y_min >= detection_config.edge_margin
-            && c.x_max < width - detection_config.edge_margin
-            && c.y_max < height - detection_config.edge_margin
+            && c.bbox.x_min >= detection_config.edge_margin
+            && c.bbox.y_min >= detection_config.edge_margin
+            && c.bbox.x_max < width - detection_config.edge_margin
+            && c.bbox.y_max < height - detection_config.edge_margin
     });
 
     candidates
@@ -174,10 +168,7 @@ fn extract_candidates_local_maxima(
     // Collect component bounding boxes and areas in single pass (no pixel allocation)
     let mut component_data: Vec<ComponentData> = Vec::with_capacity(num_labels);
     component_data.resize_with(num_labels, || ComponentData {
-        x_min: usize::MAX,
-        x_max: 0,
-        y_min: usize::MAX,
-        y_max: 0,
+        bbox: BoundingBox::empty(),
         label: 0,
         area: 0,
     });
@@ -193,10 +184,7 @@ fn extract_candidates_local_maxima(
         }
         let x = idx % width;
         let y = idx / width;
-        data.x_min = data.x_min.min(x);
-        data.x_max = data.x_max.max(x);
-        data.y_min = data.y_min.min(y);
-        data.y_max = data.y_max.max(y);
+        data.bbox.include(x, y);
         data.label = label;
         data.area += 1;
     }
@@ -211,10 +199,7 @@ fn extract_candidates_local_maxima(
             let deblended = deblend_local_maxima(&data, pixels, label_map, deblend_config);
 
             deblended.into_iter().map(|obj| StarCandidate {
-                x_min: obj.x_min,
-                x_max: obj.x_max,
-                y_min: obj.y_min,
-                y_max: obj.y_max,
+                bbox: obj.bbox,
                 peak_x: obj.peak_x,
                 peak_y: obj.peak_y,
                 peak_value: obj.peak_value,
@@ -238,10 +223,7 @@ fn extract_candidates_multi_threshold(
     // Build component metadata (no pixel storage - reads on-demand)
     let mut component_data: Vec<ComponentData> = Vec::with_capacity(num_labels);
     component_data.resize_with(num_labels, || ComponentData {
-        x_min: usize::MAX,
-        x_max: 0,
-        y_min: usize::MAX,
-        y_max: 0,
+        bbox: BoundingBox::empty(),
         label: 0,
         area: 0,
     });
@@ -255,10 +237,7 @@ fn extract_candidates_multi_threshold(
         data.area += 1;
         let x = idx % width;
         let y = idx / width;
-        data.x_min = data.x_min.min(x);
-        data.x_max = data.x_max.max(x);
-        data.y_min = data.y_min.min(y);
-        data.y_max = data.y_max.max(y);
+        data.bbox.include(x, y);
     }
 
     // Process each component in parallel
@@ -282,10 +261,7 @@ fn extract_candidates_multi_threshold(
                 multi_threshold_deblend(&data, pixels, label_map, detection_threshold, &mt_config);
 
             deblended.into_iter().map(|obj| StarCandidate {
-                x_min: obj.bbox.0,
-                x_max: obj.bbox.1,
-                y_min: obj.bbox.2,
-                y_max: obj.bbox.3,
+                bbox: obj.bbox,
                 peak_x: obj.peak_x,
                 peak_y: obj.peak_y,
                 peak_value: obj.peak_value,

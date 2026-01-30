@@ -4,6 +4,7 @@ use super::*;
 use crate::common::Buffer2;
 use crate::math::FWHM_TO_SIGMA;
 use crate::star_detection::background::{BackgroundConfig, BackgroundMap};
+use crate::star_detection::deblend::BoundingBox;
 use crate::star_detection::detection::{StarCandidate, detect_stars};
 
 /// Default stamp radius for tests (matching expected FWHM of ~4 pixels).
@@ -1210,10 +1211,7 @@ fn test_compute_centroid_returns_none_for_edge_candidate() {
 
     // Create candidate near edge
     let candidate = StarCandidate {
-        x_min: 0,
-        x_max: 5,
-        y_min: 30,
-        y_max: 35,
+        bbox: BoundingBox::new(0, 5, 30, 35),
         peak_x: 3,
         peak_y: 32,
         peak_value: 0.9,

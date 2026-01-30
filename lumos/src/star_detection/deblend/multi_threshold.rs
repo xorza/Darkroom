@@ -9,7 +9,7 @@
 
 use std::collections::HashMap;
 
-use super::{ComponentData, Pixel};
+use super::{BoundingBox, ComponentData, Pixel};
 use crate::common::Buffer2;
 use crate::star_detection::detection::LabelMap;
 
@@ -70,8 +70,8 @@ pub struct DeblendedObject {
     pub flux: f32,
     /// Pixels belonging to this object.
     pub pixels: Vec<Pixel>,
-    /// Bounding box (x_min, x_max, y_min, y_max).
-    pub bbox: (usize, usize, usize, usize),
+    /// Bounding box.
+    pub bbox: BoundingBox,
 }
 
 /// Multi-threshold deblending of a connected component.
@@ -514,7 +514,7 @@ fn assign_pixels_to_objects(
             peak_value: p.value,
             flux: 0.0,
             pixels: Vec::new(),
-            bbox: (usize::MAX, 0, usize::MAX, 0),
+            bbox: BoundingBox::empty(),
         })
         .collect();
 
@@ -537,10 +537,7 @@ fn assign_pixels_to_objects(
         let obj = &mut objects[nearest];
         obj.pixels.push(p);
         obj.flux += p.value;
-        obj.bbox.0 = obj.bbox.0.min(p.x);
-        obj.bbox.1 = obj.bbox.1.max(p.x);
-        obj.bbox.2 = obj.bbox.2.min(p.y);
-        obj.bbox.3 = obj.bbox.3.max(p.y);
+        obj.bbox.include(p.x, p.y);
     }
 
     // Filter out objects with no pixels
@@ -571,7 +568,7 @@ fn create_single_object(
         peak_value: peak.value,
         flux,
         pixels: pixel_list,
-        bbox: (data.x_min, data.x_max, data.y_min, data.y_max),
+        bbox: data.bbox,
     }
 }
 
@@ -588,10 +585,7 @@ mod tests {
         let mut pixels = Buffer2::new_filled(width, height, 0.0f32);
         let mut labels = Buffer2::new_filled(width, height, 0u32);
 
-        let mut x_min = usize::MAX;
-        let mut x_max = 0;
-        let mut y_min = usize::MAX;
-        let mut y_max = 0;
+        let mut bbox = BoundingBox::empty();
         let mut area = 0;
 
         for (cx, cy, amplitude, sigma) in stars {
@@ -609,10 +603,7 @@ mod tests {
                             pixels[(x, y)] += value;
                             if labels[(x, y)] == 0 {
                                 labels[(x, y)] = 1;
-                                x_min = x_min.min(x);
-                                x_max = x_max.max(x);
-                                y_min = y_min.min(y);
-                                y_max = y_max.max(y);
+                                bbox.include(x, y);
                                 area += 1;
                             }
                         }
@@ -623,10 +614,7 @@ mod tests {
 
         let label_map = LabelMap::from_raw(labels, 1);
         let component = ComponentData {
-            x_min,
-            x_max,
-            y_min,
-            y_max,
+            bbox,
             label: 1,
             area,
         };
@@ -746,10 +734,7 @@ mod tests {
         let labels_buf = Buffer2::new_filled(10, 10, 0u32);
         let labels = LabelMap::from_raw(labels_buf, 0);
         let data = ComponentData {
-            x_min: 0,
-            x_max: 0,
-            y_min: 0,
-            y_max: 0,
+            bbox: BoundingBox::default(),
             label: 1,
             area: 0,
         };

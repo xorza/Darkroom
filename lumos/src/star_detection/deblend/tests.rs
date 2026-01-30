@@ -13,10 +13,7 @@ fn make_test_component(
     let mut pixels = Buffer2::new_filled(width, height, 0.0f32);
     let mut labels = Buffer2::new_filled(width, height, 0u32);
 
-    let mut x_min = usize::MAX;
-    let mut x_max = 0;
-    let mut y_min = usize::MAX;
-    let mut y_max = 0;
+    let mut bbox = BoundingBox::empty();
     let mut area = 0;
 
     for (cx, cy, amplitude, sigma) in stars {
@@ -34,10 +31,7 @@ fn make_test_component(
                         pixels[(x, y)] += value;
                         if labels[(x, y)] == 0 {
                             labels[(x, y)] = 1;
-                            x_min = x_min.min(x);
-                            x_max = x_max.max(x);
-                            y_min = y_min.min(y);
-                            y_max = y_max.max(y);
+                            bbox.include(x, y);
                             area += 1;
                         }
                     }
@@ -48,10 +42,7 @@ fn make_test_component(
 
     let label_map = LabelMap::from_raw(labels, 1);
     let component = ComponentData {
-        x_min,
-        x_max,
-        y_min,
-        y_max,
+        bbox,
         label: 1,
         area,
     };

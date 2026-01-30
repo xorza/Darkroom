@@ -39,16 +39,67 @@ pub struct Pixel {
     pub value: f32,
 }
 
+/// Axis-aligned bounding box.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct BoundingBox {
+    pub x_min: usize,
+    pub x_max: usize,
+    pub y_min: usize,
+    pub y_max: usize,
+}
+
+impl BoundingBox {
+    /// Create a new bounding box with the given bounds.
+    #[allow(dead_code)] // Used in tests
+    pub fn new(x_min: usize, x_max: usize, y_min: usize, y_max: usize) -> Self {
+        Self {
+            x_min,
+            x_max,
+            y_min,
+            y_max,
+        }
+    }
+
+    /// Create an empty bounding box (for accumulation).
+    pub fn empty() -> Self {
+        Self {
+            x_min: usize::MAX,
+            x_max: 0,
+            y_min: usize::MAX,
+            y_max: 0,
+        }
+    }
+
+    /// Expand this bounding box to include the given point.
+    #[inline]
+    pub fn include(&mut self, x: usize, y: usize) {
+        self.x_min = self.x_min.min(x);
+        self.x_max = self.x_max.max(x);
+        self.y_min = self.y_min.min(y);
+        self.y_max = self.y_max.max(y);
+    }
+
+    /// Width of the bounding box.
+    #[inline]
+    pub fn width(&self) -> usize {
+        self.x_max.saturating_sub(self.x_min) + 1
+    }
+
+    /// Height of the bounding box.
+    #[inline]
+    pub fn height(&self) -> usize {
+        self.y_max.saturating_sub(self.y_min) + 1
+    }
+}
+
 /// Data for a connected component (allocation-free).
 ///
 /// Instead of storing pixel coordinates, we store the component label
 /// and iterate over the bounding box on-demand, checking the labels buffer.
 #[derive(Debug, Clone, Copy)]
 pub struct ComponentData {
-    pub x_min: usize,
-    pub x_max: usize,
-    pub y_min: usize,
-    pub y_max: usize,
+    /// Bounding box of the component.
+    pub bbox: BoundingBox,
     /// Component label in the labels buffer.
     pub label: u32,
     /// Number of pixels in the component (pre-computed).
@@ -66,8 +117,9 @@ impl ComponentData {
         labels: &'a LabelMap,
     ) -> impl Iterator<Item = Pixel> + 'a {
         let width = pixels.width();
-        (self.y_min..=self.y_max).flat_map(move |y| {
-            (self.x_min..=self.x_max).filter_map(move |x| {
+        let bbox = &self.bbox;
+        (bbox.y_min..=bbox.y_max).flat_map(move |y| {
+            (bbox.x_min..=bbox.x_max).filter_map(move |x| {
                 let idx = y * width + x;
                 if labels[idx] == self.label {
                     Some(Pixel {
@@ -92,8 +144,8 @@ impl ComponentData {
                     .unwrap_or(std::cmp::Ordering::Equal)
             })
             .unwrap_or(Pixel {
-                x: self.x_min,
-                y: self.y_min,
+                x: self.bbox.x_min,
+                y: self.bbox.y_min,
                 value: 0.0,
             })
     }

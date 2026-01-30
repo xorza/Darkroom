@@ -11,7 +11,7 @@
 
 use arrayvec::ArrayVec;
 
-use super::{ComponentData, DeblendConfig, MAX_PEAKS, Pixel};
+use super::{BoundingBox, ComponentData, DeblendConfig, MAX_PEAKS, Pixel};
 use crate::common::Buffer2;
 use crate::star_detection::detection::LabelMap;
 
@@ -22,10 +22,7 @@ use crate::star_detection::detection::LabelMap;
 /// Result of deblending a single connected component.
 #[derive(Debug)]
 pub struct DeblendedCandidate {
-    pub x_min: usize,
-    pub x_max: usize,
-    pub y_min: usize,
-    pub y_max: usize,
+    pub bbox: BoundingBox,
     pub peak_x: usize,
     pub peak_y: usize,
     pub peak_value: f32,
@@ -35,20 +32,14 @@ pub struct DeblendedCandidate {
 /// Per-peak bounding box and area data (internal).
 #[derive(Debug, Copy, Clone)]
 struct PeakData {
-    x_min: usize,
-    x_max: usize,
-    y_min: usize,
-    y_max: usize,
+    bbox: BoundingBox,
     area: usize,
 }
 
 impl Default for PeakData {
     fn default() -> Self {
         Self {
-            x_min: usize::MAX,
-            x_max: 0,
-            y_min: usize::MAX,
-            y_max: 0,
+            bbox: BoundingBox::empty(),
             area: 0,
         }
     }
@@ -89,10 +80,7 @@ pub fn deblend_local_maxima(
 
         let mut result = ArrayVec::new();
         result.push(DeblendedCandidate {
-            x_min: data.x_min,
-            x_max: data.x_max,
-            y_min: data.y_min,
-            y_max: data.y_max,
+            bbox: data.bbox,
             peak_x: peak.x,
             peak_y: peak.y,
             peak_value: peak.value,
@@ -180,10 +168,7 @@ pub fn deblend_by_nearest_peak(
     for pixel in data.iter_pixels(pixels, labels) {
         let nearest = find_nearest_peak(pixel, peaks, num_peaks);
         let pd = &mut peak_data[nearest];
-        pd.x_min = pd.x_min.min(pixel.x);
-        pd.x_max = pd.x_max.max(pixel.x);
-        pd.y_min = pd.y_min.min(pixel.y);
-        pd.y_max = pd.y_max.max(pixel.y);
+        pd.bbox.include(pixel.x, pixel.y);
         pd.area += 1;
     }
 
@@ -191,10 +176,7 @@ pub fn deblend_by_nearest_peak(
     for (peak, pd) in peaks.iter().take(num_peaks).zip(peak_data.iter()) {
         if pd.area > 0 {
             result.push(DeblendedCandidate {
-                x_min: pd.x_min,
-                x_max: pd.x_max,
-                y_min: pd.y_min,
-                y_max: pd.y_max,
+                bbox: pd.bbox,
                 peak_x: peak.x,
                 peak_y: peak.y,
                 peak_value: peak.value,
@@ -296,10 +278,7 @@ mod tests {
         let mut pixels = Buffer2::new_filled(width, height, 0.0f32);
         let mut labels = Buffer2::new_filled(width, height, 0u32);
 
-        let mut x_min = usize::MAX;
-        let mut x_max = 0;
-        let mut y_min = usize::MAX;
-        let mut y_max = 0;
+        let mut bbox = BoundingBox::empty();
         let mut area = 0;
 
         for (cx, cy, amplitude, sigma) in stars {
@@ -317,10 +296,7 @@ mod tests {
                             pixels[(x, y)] += value;
                             if labels[(x, y)] == 0 {
                                 labels[(x, y)] = 1;
-                                x_min = x_min.min(x);
-                                x_max = x_max.max(x);
-                                y_min = y_min.min(y);
-                                y_max = y_max.max(y);
+                                bbox.include(x, y);
                                 area += 1;
                             }
                         }
@@ -331,10 +307,7 @@ mod tests {
 
         let label_map = LabelMap::from_raw(labels, 1);
         let component = ComponentData {
-            x_min,
-            x_max,
-            y_min,
-            y_max,
+            bbox,
             label: 1,
             area,
         };
@@ -471,8 +444,8 @@ mod tests {
 
         assert_eq!(candidates.len(), 1);
         assert_eq!(candidates[0].area, data.area);
-        assert_eq!(candidates[0].x_min, data.x_min);
-        assert_eq!(candidates[0].x_max, data.x_max);
+        assert_eq!(candidates[0].bbox.x_min, data.bbox.x_min);
+        assert_eq!(candidates[0].bbox.x_max, data.bbox.x_max);
     }
 
     #[test]
@@ -636,8 +609,14 @@ mod tests {
         assert_eq!(candidates.len(), 2);
         // Each candidate should have its peak inside its bounding box
         for candidate in &candidates {
-            assert!(candidate.peak_x >= candidate.x_min && candidate.peak_x <= candidate.x_max);
-            assert!(candidate.peak_y >= candidate.y_min && candidate.peak_y <= candidate.y_max);
+            assert!(
+                candidate.peak_x >= candidate.bbox.x_min
+                    && candidate.peak_x <= candidate.bbox.x_max
+            );
+            assert!(
+                candidate.peak_y >= candidate.bbox.y_min
+                    && candidate.peak_y <= candidate.bbox.y_max
+            );
         }
     }
 

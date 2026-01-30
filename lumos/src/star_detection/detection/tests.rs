@@ -697,10 +697,10 @@ fn test_extract_candidates_single_component() {
     assert_eq!(candidates.len(), 1);
     let c = &candidates[0];
     assert_eq!(c.area, 3);
-    assert_eq!(c.x_min, 0);
-    assert_eq!(c.x_max, 2);
-    assert_eq!(c.y_min, 1);
-    assert_eq!(c.y_max, 1);
+    assert_eq!(c.bbox.x_min, 0);
+    assert_eq!(c.bbox.x_max, 2);
+    assert_eq!(c.bbox.y_min, 1);
+    assert_eq!(c.bbox.y_max, 1);
     assert_eq!(c.peak_x, 1);
     assert_eq!(c.peak_y, 1);
     assert!((c.peak_value - 0.9).abs() < 1e-6);
@@ -771,10 +771,10 @@ fn test_extract_candidates_bounding_box() {
     assert_eq!(candidates.len(), 1);
     let c = &candidates[0];
     assert_eq!(c.area, 4);
-    assert_eq!(c.x_min, 0);
-    assert_eq!(c.x_max, 1);
-    assert_eq!(c.y_min, 0);
-    assert_eq!(c.y_max, 2);
+    assert_eq!(c.bbox.x_min, 0);
+    assert_eq!(c.bbox.x_max, 1);
+    assert_eq!(c.bbox.y_min, 0);
+    assert_eq!(c.bbox.y_max, 2);
     assert_eq!(c.peak_x, 0);
     assert_eq!(c.peak_y, 2);
     assert!((c.peak_value - 0.9).abs() < 1e-6);
@@ -887,10 +887,10 @@ fn test_extract_candidates_peak_at_corner() {
     let c = &candidates[0];
     assert_eq!(c.peak_x, 0);
     assert_eq!(c.peak_y, 0);
-    assert_eq!(c.x_min, 0);
-    assert_eq!(c.x_max, 1);
-    assert_eq!(c.y_min, 0);
-    assert_eq!(c.y_max, 1);
+    assert_eq!(c.bbox.x_min, 0);
+    assert_eq!(c.bbox.x_max, 1);
+    assert_eq!(c.bbox.y_min, 0);
+    assert_eq!(c.bbox.y_max, 1);
 }
 
 #[test]
@@ -922,10 +922,10 @@ fn test_extract_candidates_single_pixel_component() {
     assert_eq!(candidates.len(), 1);
     let c = &candidates[0];
     assert_eq!(c.area, 1);
-    assert_eq!(c.x_min, 1);
-    assert_eq!(c.x_max, 1);
-    assert_eq!(c.y_min, 1);
-    assert_eq!(c.y_max, 1);
+    assert_eq!(c.bbox.x_min, 1);
+    assert_eq!(c.bbox.x_max, 1);
+    assert_eq!(c.bbox.y_min, 1);
+    assert_eq!(c.bbox.y_max, 1);
     assert_eq!(c.width(), 1);
     assert_eq!(c.height(), 1);
     assert_eq!(c.peak_x, 1);
@@ -963,10 +963,10 @@ fn test_extract_candidates_diagonal_component() {
     assert_eq!(candidates.len(), 1);
     let c = &candidates[0];
     assert_eq!(c.area, 3);
-    assert_eq!(c.x_min, 0);
-    assert_eq!(c.x_max, 2);
-    assert_eq!(c.y_min, 0);
-    assert_eq!(c.y_max, 2);
+    assert_eq!(c.bbox.x_min, 0);
+    assert_eq!(c.bbox.x_max, 2);
+    assert_eq!(c.bbox.y_min, 0);
+    assert_eq!(c.bbox.y_max, 2);
     // Peak is at (0, 0) with value 0.9
     assert_eq!(c.peak_x, 0);
     assert_eq!(c.peak_y, 0);
@@ -1021,10 +1021,10 @@ fn test_extract_candidates_full_image_component() {
     assert_eq!(candidates.len(), 1);
     let c = &candidates[0];
     assert_eq!(c.area, 9);
-    assert_eq!(c.x_min, 0);
-    assert_eq!(c.x_max, 2);
-    assert_eq!(c.y_min, 0);
-    assert_eq!(c.y_max, 2);
+    assert_eq!(c.bbox.x_min, 0);
+    assert_eq!(c.bbox.x_max, 2);
+    assert_eq!(c.bbox.y_min, 0);
+    assert_eq!(c.bbox.y_max, 2);
     // Peak is last pixel (2, 2) with value 0.9
     assert_eq!(c.peak_x, 2);
     assert_eq!(c.peak_y, 2);
@@ -1119,15 +1119,15 @@ fn test_extract_candidates_non_square_image() {
 
     // Component 1: columns 1-3, both rows
     assert_eq!(candidates[0].area, 6);
-    assert_eq!(candidates[0].x_min, 1);
-    assert_eq!(candidates[0].x_max, 3);
+    assert_eq!(candidates[0].bbox.x_min, 1);
+    assert_eq!(candidates[0].bbox.x_max, 3);
     assert_eq!(candidates[0].peak_x, 2);
     assert_eq!(candidates[0].peak_y, 0);
 
     // Component 2: column 5, both rows
     assert_eq!(candidates[1].area, 2);
-    assert_eq!(candidates[1].x_min, 5);
-    assert_eq!(candidates[1].x_max, 5);
+    assert_eq!(candidates[1].bbox.x_min, 5);
+    assert_eq!(candidates[1].bbox.x_max, 5);
     assert_eq!(candidates[1].peak_x, 5);
     assert_eq!(candidates[1].peak_y, 0);
 }
