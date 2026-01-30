@@ -369,16 +369,30 @@ fn create_object_mask(
     output: &mut Buffer2<bool>,
     scratch: &mut Buffer2<bool>,
 ) {
-    // Initial mask: pixels above threshold
-    for (i, ((&px, &bg), &noise)) in pixels
-        .iter()
-        .zip(background.background.iter())
-        .zip(background.noise.iter())
-        .enumerate()
-    {
-        let threshold = bg + detection_sigma * noise.max(1e-6);
-        output.pixels_mut()[i] = px > threshold;
-    }
+    // Initial mask: pixels above threshold (parallel by chunks)
+    let width = pixels.width();
+    pixels
+        .pixels()
+        .par_chunks(width * ROWS_PER_CHUNK)
+        .zip(
+            background
+                .background
+                .pixels()
+                .par_chunks(width * ROWS_PER_CHUNK),
+        )
+        .zip(background.noise.pixels().par_chunks(width * ROWS_PER_CHUNK))
+        .zip(output.pixels_mut().par_chunks_mut(width * ROWS_PER_CHUNK))
+        .for_each(|(((px_chunk, bg_chunk), noise_chunk), out_chunk)| {
+            for (((px, bg), noise), out) in px_chunk
+                .iter()
+                .zip(bg_chunk.iter())
+                .zip(noise_chunk.iter())
+                .zip(out_chunk.iter_mut())
+            {
+                let threshold = bg + detection_sigma * noise.max(1e-6);
+                *out = *px > threshold;
+            }
+        });
 
     // Dilate mask to cover object wings
     if dilation_radius > 0 {
