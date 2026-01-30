@@ -18,7 +18,7 @@ pub mod neon;
 ///
 /// Falls back to scalar implementation on unsupported platforms.
 #[inline]
-pub fn convolve_row_simd(input: &[f32], output: &mut [f32], kernel: &[f32], radius: usize) {
+pub(super) fn convolve_row_simd(input: &[f32], output: &mut [f32], kernel: &[f32], radius: usize) {
     #[cfg(target_arch = "x86_64")]
     {
         if cpu_features::has_avx2_fma() {
@@ -50,7 +50,12 @@ pub fn convolve_row_simd(input: &[f32], output: &mut [f32], kernel: &[f32], radi
 
 /// Scalar implementation of row convolution.
 #[inline]
-fn convolve_row_scalar(input: &[f32], output: &mut [f32], kernel: &[f32], radius: usize) {
+pub(super) fn convolve_row_scalar(
+    input: &[f32],
+    output: &mut [f32],
+    kernel: &[f32],
+    radius: usize,
+) {
     let width = input.len();
 
     for (x, out) in output.iter_mut().enumerate() {

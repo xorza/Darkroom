@@ -7,6 +7,8 @@
 //! Uses SIMD acceleration when available (AVX2/SSE on x86_64, NEON on aarch64).
 
 #[cfg(test)]
+mod bench;
+#[cfg(test)]
 mod tests;
 
 mod simd;
