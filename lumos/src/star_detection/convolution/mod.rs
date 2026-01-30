@@ -15,7 +15,7 @@ mod simd;
 
 use rayon::prelude::*;
 
-use crate::common::parallel::{ParChunksMutAutoWithOffset, rows_per_chunk};
+use crate::common::parallel::{ParChunksMutAutoWithOffset, ParRowsMutAuto};
 use crate::math::fwhm_to_sigma;
 use crate::star_detection::Buffer2;
 
@@ -29,7 +29,7 @@ use crate::star_detection::Buffer2;
 ///
 /// # Returns
 /// Vector containing the kernel values, length is 2 * radius + 1
-pub fn gaussian_kernel_1d(sigma: f32) -> Vec<f32> {
+pub(super) fn gaussian_kernel_1d(sigma: f32) -> Vec<f32> {
     assert!(sigma > 0.0, "Sigma must be positive");
 
     let radius = (3.0 * sigma).ceil() as usize;
@@ -89,58 +89,36 @@ pub fn gaussian_convolve(pixels: &Buffer2<f32>, sigma: f32) -> Buffer2<f32> {
     output
 }
 
-/// Convolve all rows in parallel with chunking to reduce false cache sharing.
-///
-/// Instead of giving each thread a single row, we process multiple rows per chunk.
-/// This improves cache locality and reduces potential false sharing when output
-/// rows are close together in memory.
+/// Convolve all rows in parallel with auto-sized chunking.
 fn convolve_rows_parallel(input: &Buffer2<f32>, output: &mut Buffer2<f32>, kernel: &[f32]) {
     let width = input.width();
-    let height = input.height();
     let radius = kernel.len() / 2;
-    let chunk_rows = rows_per_chunk(height);
 
     output
         .pixels_mut()
-        .par_chunks_mut(width * chunk_rows)
-        .enumerate()
-        .for_each(|(chunk_idx, out_chunk)| {
-            let y_start = chunk_idx * chunk_rows;
+        .par_rows_mut_auto(width)
+        .for_each(|(y_start, out_chunk)| {
             let rows_in_chunk = out_chunk.len() / width;
 
             for local_y in 0..rows_in_chunk {
                 let y = y_start + local_y;
                 let in_row = &input[y * width..(y + 1) * width];
                 let out_row = &mut out_chunk[local_y * width..(local_y + 1) * width];
-                convolve_row(in_row, out_row, kernel, radius);
+                simd::convolve_row(in_row, out_row, kernel, radius);
             }
         });
 }
 
-/// Convolve a single row with 1D kernel.
-///
-/// Uses SIMD acceleration when available (AVX2/SSE on x86_64, NEON on aarch64).
-#[inline]
-fn convolve_row(input: &[f32], output: &mut [f32], kernel: &[f32], radius: usize) {
-    simd::convolve_row_simd(input, output, kernel, radius);
-}
-
-/// Convolve all columns in parallel with chunking to reduce false cache sharing.
-///
-/// Processes multiple rows per chunk to improve cache locality and reduce
-/// false sharing between threads writing to adjacent output rows.
+/// Convolve all columns in parallel with auto-sized chunking.
 fn convolve_cols_parallel(input: &Buffer2<f32>, output: &mut Buffer2<f32>, kernel: &[f32]) {
     let width = input.width();
     let height = input.height();
     let radius = kernel.len() / 2;
-    let chunk_rows = rows_per_chunk(height);
 
     output
         .pixels_mut()
-        .par_chunks_mut(width * chunk_rows)
-        .enumerate()
-        .for_each(|(chunk_idx, out_chunk)| {
-            let y_start = chunk_idx * chunk_rows;
+        .par_rows_mut_auto(width)
+        .for_each(|(y_start, out_chunk)| {
             let rows_in_chunk = out_chunk.len() / width;
 
             for local_y in 0..rows_in_chunk {
@@ -374,15 +352,12 @@ pub fn elliptical_gaussian_convolve(
 
     let (kernel, ksize) = elliptical_gaussian_kernel_2d(sigma, axis_ratio, angle);
     let radius = ksize / 2;
-    let chunk_rows = rows_per_chunk(height);
 
     let mut output = vec![0.0f32; width * height];
 
     output
-        .par_chunks_mut(width * chunk_rows)
-        .enumerate()
-        .for_each(|(chunk_idx, out_chunk)| {
-            let y_start = chunk_idx * chunk_rows;
+        .par_rows_mut_auto(width)
+        .for_each(|(y_start, out_chunk)| {
             let rows_in_chunk = out_chunk.len() / width;
 
             for local_y in 0..rows_in_chunk {

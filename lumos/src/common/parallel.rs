@@ -13,12 +13,6 @@ fn auto_chunk_size(len: usize) -> usize {
     (len / num_chunks).max(1)
 }
 
-/// Compute optimal rows per chunk for parallel image processing.
-#[inline]
-pub fn rows_per_chunk(height: usize) -> usize {
-    auto_chunk_size(height)
-}
-
 /// Extension trait for row-aligned mutable parallel chunks with automatic sizing.
 pub trait ParRowsMutAuto<'a, T: Send + 'a> {
     type Iter: IndexedParallelIterator;

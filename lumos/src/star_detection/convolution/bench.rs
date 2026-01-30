@@ -1,6 +1,6 @@
 //! Benchmarks for convolution operations.
 
-use super::simd::convolve_row_simd;
+use super::simd::convolve_row;
 use super::{elliptical_gaussian_convolve, gaussian_convolve, gaussian_kernel_1d, matched_filter};
 use crate::common::Buffer2;
 use crate::star_detection::convolution::simd::convolve_row_scalar;
@@ -19,7 +19,7 @@ fn bench_convolve_row_4k(b: ::bench::Bencher) {
     let mut output = vec![0.0f32; width];
 
     b.bench_labeled("simd", || {
-        convolve_row_simd(
+        convolve_row(
             black_box(&input),
             black_box(&mut output),
             black_box(&kernel),
@@ -46,7 +46,7 @@ fn bench_convolve_row_large_kernel(b: ::bench::Bencher) {
     let mut output = vec![0.0f32; width];
 
     b.bench_labeled("simd", || {
-        convolve_row_simd(
+        convolve_row(
             black_box(&input),
             black_box(&mut output),
             black_box(&kernel),
