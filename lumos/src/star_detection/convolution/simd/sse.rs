@@ -7,8 +7,9 @@
 // explicit index control for pointer arithmetic
 #![allow(clippy::needless_range_loop)]
 
-#[cfg(target_arch = "x86_64")]
 use std::arch::x86_64::*;
+
+use super::convolve_pixel_scalar;
 
 /// Convolve a row using AVX2 + FMA intrinsics.
 ///
@@ -16,7 +17,6 @@ use std::arch::x86_64::*;
 ///
 /// # Safety
 /// Caller must ensure AVX2 and FMA are available (use `is_x86_feature_detected!`).
-#[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2,fma")]
 pub unsafe fn convolve_row_avx2(input: &[f32], output: &mut [f32], kernel: &[f32], radius: usize) {
     unsafe {
@@ -76,7 +76,6 @@ pub unsafe fn convolve_row_avx2(input: &[f32], output: &mut [f32], kernel: &[f32
 ///
 /// # Safety
 /// Caller must ensure SSE4.1 is available (use `is_x86_feature_detected!`).
-#[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "sse4.1")]
 pub unsafe fn convolve_row_sse41(input: &[f32], output: &mut [f32], kernel: &[f32], radius: usize) {
     unsafe {
@@ -130,43 +129,12 @@ pub unsafe fn convolve_row_sse41(input: &[f32], output: &mut [f32], kernel: &[f3
     }
 }
 
-/// Scalar convolution for a single pixel with mirror boundary handling.
-#[inline]
-fn convolve_pixel_scalar(
-    input: &[f32],
-    kernel: &[f32],
-    radius: usize,
-    x: usize,
-    width: usize,
-) -> f32 {
-    let mut sum = 0.0f32;
-
-    for (k, &kval) in kernel.iter().enumerate() {
-        let sx = x as isize + k as isize - radius as isize;
-
-        // Mirror boundary handling
-        let sx = if sx < 0 {
-            (-sx) as usize
-        } else if sx >= width as isize {
-            2 * width - 2 - sx as usize
-        } else {
-            sx as usize
-        };
-
-        sum += input[sx] * kval;
-    }
-
-    sum
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[cfg(target_arch = "x86_64")]
     use common::cpu_features;
 
     #[test]
-    #[cfg(target_arch = "x86_64")]
     fn test_avx2_matches_scalar() {
         if !cpu_features::has_avx2_fma() {
             eprintln!("Skipping AVX2 test: CPU does not support AVX2+FMA");
@@ -200,7 +168,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(target_arch = "x86_64")]
     fn test_sse41_matches_scalar() {
         if !cpu_features::has_sse4_1() {
             eprintln!("Skipping SSE4.1 test: CPU does not support SSE4.1");

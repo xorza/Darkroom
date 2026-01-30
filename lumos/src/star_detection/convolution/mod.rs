@@ -8,6 +8,8 @@
 
 mod simd;
 
+use simd::mirror_index;
+
 #[cfg(test)]
 mod bench;
 #[cfg(test)]
@@ -144,22 +146,8 @@ pub(super) fn elliptical_gaussian_convolve(
                             let sx = x as isize + kx as isize - radius as isize;
                             let sy = y as isize + ky as isize - radius as isize;
 
-                            // Mirror boundary handling
-                            let sx: usize = if sx < 0 {
-                                (-sx) as usize
-                            } else if sx >= width as isize {
-                                2 * width - 2 - sx as usize
-                            } else {
-                                sx as usize
-                            };
-
-                            let sy: usize = if sy < 0 {
-                                (-sy) as usize
-                            } else if sy >= height as isize {
-                                2 * height - 2 - sy as usize
-                            } else {
-                                sy as usize
-                            };
+                            let sx = mirror_index(sx, width);
+                            let sy = mirror_index(sy, height);
 
                             sum += pixels[sy * width + sx] * kernel[ky * ksize + kx];
                         }
@@ -239,16 +227,7 @@ fn convolve_cols_parallel(input: &Buffer2<f32>, output: &mut Buffer2<f32>, kerne
 
                     for (k, &kval) in kernel.iter().enumerate() {
                         let sy = y as isize + k as isize - radius as isize;
-
-                        // Mirror boundary handling
-                        let sy = if sy < 0 {
-                            (-sy) as usize
-                        } else if sy >= height as isize {
-                            2 * height - 2 - sy as usize
-                        } else {
-                            sy as usize
-                        };
-
+                        let sy = mirror_index(sy, height);
                         sum += input[sy * width + x] * kval;
                     }
 
@@ -291,22 +270,8 @@ fn gaussian_convolve_2d_direct(pixels: &Buffer2<f32>, sigma: f32, output: &mut B
                             let sx = x as isize + kx as isize - radius as isize;
                             let sy = y as isize + ky as isize - radius as isize;
 
-                            // Mirror boundary
-                            let sx: usize = if sx < 0 {
-                                (-sx) as usize
-                            } else if sx >= width as isize {
-                                2 * width - 2 - sx as usize
-                            } else {
-                                sx as usize
-                            };
-
-                            let sy: usize = if sy < 0 {
-                                (-sy) as usize
-                            } else if sy >= height as isize {
-                                2 * height - 2 - sy as usize
-                            } else {
-                                sy as usize
-                            };
+                            let sx = mirror_index(sx, width);
+                            let sy = mirror_index(sy, height);
 
                             sum += pixels[sy * width + sx] * kernel_2d[ky * ksize + kx];
                         }

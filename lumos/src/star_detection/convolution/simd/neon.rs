@@ -2,8 +2,9 @@
 //!
 //! Processes 4 pixels at a time using 128-bit vectors.
 
-#[cfg(target_arch = "aarch64")]
 use std::arch::aarch64::*;
+
+use super::convolve_pixel_scalar;
 
 /// Convolve a row using NEON intrinsics.
 ///
@@ -11,7 +12,6 @@ use std::arch::aarch64::*;
 ///
 /// # Safety
 /// Caller must ensure running on aarch64 (NEON is always available on aarch64).
-#[cfg(target_arch = "aarch64")]
 pub unsafe fn convolve_row_neon(input: &[f32], output: &mut [f32], kernel: &[f32], radius: usize) {
     let width = input.len();
 
@@ -66,37 +66,7 @@ pub unsafe fn convolve_row_neon(input: &[f32], output: &mut [f32], kernel: &[f32
     }
 }
 
-/// Scalar convolution for a single pixel with mirror boundary handling.
-#[inline]
-fn convolve_pixel_scalar(
-    input: &[f32],
-    kernel: &[f32],
-    radius: usize,
-    x: usize,
-    width: usize,
-) -> f32 {
-    let mut sum = 0.0f32;
-
-    for (k, &kval) in kernel.iter().enumerate() {
-        let sx = x as isize + k as isize - radius as isize;
-
-        // Mirror boundary handling
-        let sx = if sx < 0 {
-            (-sx) as usize
-        } else if sx >= width as isize {
-            2 * width - 2 - sx as usize
-        } else {
-            sx as usize
-        };
-
-        sum += input[sx] * kval;
-    }
-
-    sum
-}
-
 #[cfg(test)]
-#[cfg(target_arch = "aarch64")]
 mod tests {
     use super::*;
 

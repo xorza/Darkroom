@@ -5,17 +5,65 @@
 //! - NEON on aarch64
 //! - Scalar fallback on other platforms
 
+use common::{cfg_aarch64, cfg_x86_64};
+
 #[cfg(target_arch = "x86_64")]
 use common::cpu_features;
 
-#[cfg(target_arch = "x86_64")]
-pub mod sse;
+cfg_x86_64! {
+    pub mod sse;
+}
 
-#[cfg(target_arch = "aarch64")]
-pub mod neon;
+cfg_aarch64! {
+    pub mod neon;
+}
 
 #[cfg(test)]
 mod tests;
+
+// ============================================================================
+// Shared utilities
+// ============================================================================
+
+/// Mirror boundary handling for convolution.
+///
+/// Maps an index that may be out of bounds to a valid index using reflection.
+/// For index < 0: reflects at 0 (e.g., -1 -> 1, -2 -> 2)
+/// For index >= len: reflects at len-1 (e.g., len -> len-2, len+1 -> len-3)
+#[inline]
+pub fn mirror_index(i: isize, len: usize) -> usize {
+    if i < 0 {
+        (-i) as usize
+    } else if i >= len as isize {
+        2 * len - 2 - i as usize
+    } else {
+        i as usize
+    }
+}
+
+/// Scalar convolution for a single pixel with mirror boundary handling.
+#[inline]
+pub fn convolve_pixel_scalar(
+    input: &[f32],
+    kernel: &[f32],
+    radius: usize,
+    x: usize,
+    width: usize,
+) -> f32 {
+    let mut sum = 0.0f32;
+
+    for (k, &kval) in kernel.iter().enumerate() {
+        let sx = x as isize + k as isize - radius as isize;
+        let sx = mirror_index(sx, width);
+        sum += input[sx] * kval;
+    }
+
+    sum
+}
+
+// ============================================================================
+// Row convolution dispatch
+// ============================================================================
 
 /// Convolve a single row with 1D kernel using SIMD when available.
 ///
@@ -62,23 +110,6 @@ pub(super) fn convolve_row_scalar(
     let width = input.len();
 
     for (x, out) in output.iter_mut().enumerate() {
-        let mut sum = 0.0f32;
-
-        for (k, &kval) in kernel.iter().enumerate() {
-            let sx = x as isize + k as isize - radius as isize;
-
-            // Mirror boundary handling
-            let sx = if sx < 0 {
-                (-sx) as usize
-            } else if sx >= width as isize {
-                2 * width - 2 - sx as usize
-            } else {
-                sx as usize
-            };
-
-            sum += input[sx] * kval;
-        }
-
-        *out = sum;
+        *out = convolve_pixel_scalar(input, kernel, radius, x, width);
     }
 }
