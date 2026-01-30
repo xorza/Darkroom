@@ -421,7 +421,7 @@ fn test_dilate_mask_single_pixel_radius_0() {
     dilate_mask(&mask, 0, &mut dilated);
 
     assert_eq!(dilated.iter().filter(|&&x| x).count(), 1);
-    assert!(dilated.pixels()[4]);
+    assert!(dilated[4]);
 }
 
 #[test]
@@ -436,19 +436,14 @@ fn test_dilate_mask_single_pixel_radius_1() {
     // Should dilate to 3x3 square centered at (2,2)
     for y in 1..=3 {
         for x in 1..=3 {
-            assert!(
-                dilated.pixels()[y * 5 + x],
-                "Pixel ({}, {}) should be true",
-                x,
-                y
-            );
+            assert!(dilated[y * 5 + x], "Pixel ({}, {}) should be true", x, y);
         }
     }
     // Corners should be false
-    assert!(!dilated.pixels()[0 * 5 + 0]);
-    assert!(!dilated.pixels()[0 * 5 + 4]);
-    assert!(!dilated.pixels()[4 * 5 + 0]);
-    assert!(!dilated.pixels()[4 * 5 + 4]);
+    assert!(!dilated[0 * 5 + 0]);
+    assert!(!dilated[0 * 5 + 4]);
+    assert!(!dilated[4 * 5 + 0]);
+    assert!(!dilated[4 * 5 + 4]);
 }
 
 #[test]
@@ -464,12 +459,7 @@ fn test_dilate_mask_single_pixel_radius_2() {
     let mut count = 0;
     for y in 1..=5 {
         for x in 1..=5 {
-            assert!(
-                dilated.pixels()[y * 7 + x],
-                "Pixel ({}, {}) should be true",
-                x,
-                y
-            );
+            assert!(dilated[y * 7 + x], "Pixel ({}, {}) should be true", x, y);
             count += 1;
         }
     }
@@ -486,13 +476,13 @@ fn test_dilate_mask_corner_pixel() {
     dilate_mask(&mask, 1, &mut dilated);
 
     // Only 2x2 corner should be dilated
-    assert!(dilated.pixels()[0 * 4 + 0]);
-    assert!(dilated.pixels()[0 * 4 + 1]);
-    assert!(dilated.pixels()[1 * 4 + 0]);
-    assert!(dilated.pixels()[1 * 4 + 1]);
+    assert!(dilated[0 * 4 + 0]);
+    assert!(dilated[0 * 4 + 1]);
+    assert!(dilated[1 * 4 + 0]);
+    assert!(dilated[1 * 4 + 1]);
     // Rest should be false
-    assert!(!dilated.pixels()[0 * 4 + 2]);
-    assert!(!dilated.pixels()[2 * 4 + 0]);
+    assert!(!dilated[0 * 4 + 2]);
+    assert!(!dilated[2 * 4 + 0]);
 }
 
 #[test]
@@ -505,12 +495,12 @@ fn test_dilate_mask_edge_pixel() {
     dilate_mask(&mask, 1, &mut dilated);
 
     // Should expand but clip at left edge
-    assert!(dilated.pixels()[1 * 5 + 0]);
-    assert!(dilated.pixels()[1 * 5 + 1]);
-    assert!(dilated.pixels()[2 * 5 + 0]);
-    assert!(dilated.pixels()[2 * 5 + 1]);
-    assert!(dilated.pixels()[3 * 5 + 0]);
-    assert!(dilated.pixels()[3 * 5 + 1]);
+    assert!(dilated[1 * 5 + 0]);
+    assert!(dilated[1 * 5 + 1]);
+    assert!(dilated[2 * 5 + 0]);
+    assert!(dilated[2 * 5 + 1]);
+    assert!(dilated[3 * 5 + 0]);
+    assert!(dilated[3 * 5 + 1]);
 }
 
 #[test]
@@ -531,7 +521,7 @@ fn test_dilate_mask_merges_nearby_pixels() {
     for (i, &val) in dilated.iter().enumerate().take(6) {
         assert!(val, "Pixel {} should be true after dilation", i);
     }
-    assert!(!dilated.pixels()[6]);
+    assert!(!dilated[6]);
 }
 
 // =============================================================================
@@ -582,10 +572,10 @@ fn test_create_threshold_mask_mixed() {
     // pixel 3: 1.5 > 1.3 -> true
     let mask = create_threshold_mask_test(&pixels, &background, 3.0);
 
-    assert!(!mask.pixels()[0]);
-    assert!(mask.pixels()[1]);
-    assert!(!mask.pixels()[2]);
-    assert!(mask.pixels()[3]);
+    assert!(!mask[0]);
+    assert!(mask[1]);
+    assert!(!mask[2]);
+    assert!(mask[3]);
 }
 
 #[test]
@@ -600,10 +590,10 @@ fn test_create_threshold_mask_variable_background() {
     // pixel 3: 1.5 > 1.1 -> true
     let mask = create_threshold_mask_test(&pixels, &background, 3.0);
 
-    assert!(mask.pixels()[0]);
-    assert!(!mask.pixels()[1]);
-    assert!(!mask.pixels()[2]);
-    assert!(mask.pixels()[3]);
+    assert!(mask[0]);
+    assert!(!mask[1]);
+    assert!(!mask[2]);
+    assert!(mask[3]);
 }
 
 #[test]
@@ -616,8 +606,8 @@ fn test_create_threshold_mask_zero_noise_uses_epsilon() {
     // pixel 1: 0.9 <= 1.000003 -> false
     let mask = create_threshold_mask_test(&pixels, &background, 3.0);
 
-    assert!(mask.pixels()[0]);
-    assert!(!mask.pixels()[1]);
+    assert!(mask[0]);
+    assert!(!mask[1]);
 }
 
 #[test]
@@ -631,8 +621,8 @@ fn test_create_threshold_mask_exact_threshold_is_false() {
     // pixel 1: 1.30001 > 1.3 -> true
     let mask = create_threshold_mask_test(&pixels, &background, 3.0);
 
-    assert!(!mask.pixels()[0], "Exact threshold value should be false");
-    assert!(mask.pixels()[1], "Just above threshold should be true");
+    assert!(!mask[0], "Exact threshold value should be false");
+    assert!(mask[1], "Just above threshold should be true");
 }
 
 #[test]
@@ -663,9 +653,9 @@ fn test_create_threshold_mask_high_noise_region() {
     // pixel 1: threshold = 1.0 + 3.0*0.5 = 2.5, 2.0 NOT > 2.5 -> false
     let mask = create_threshold_mask_test(&pixels, &background, 3.0);
 
-    assert!(mask.pixels()[0]);
+    assert!(mask[0]);
     assert!(
-        !mask.pixels()[1],
+        !mask[1],
         "High noise region should require higher threshold"
     );
 }
@@ -896,13 +886,13 @@ fn test_dilate_mask_all_corners() {
 
     // Check corner expansions
     // Top-left expands to (0,0), (0,1), (1,0), (1,1)
-    assert!(dilated.pixels()[0 * 5 + 0]);
-    assert!(dilated.pixels()[0 * 5 + 1]);
-    assert!(dilated.pixels()[1 * 5 + 0]);
-    assert!(dilated.pixels()[1 * 5 + 1]);
+    assert!(dilated[0 * 5 + 0]);
+    assert!(dilated[0 * 5 + 1]);
+    assert!(dilated[1 * 5 + 0]);
+    assert!(dilated[1 * 5 + 1]);
 
     // Center should still be false (corners don't reach it with radius 1)
-    assert!(!dilated.pixels()[2 * 5 + 2]);
+    assert!(!dilated[2 * 5 + 2]);
 }
 
 #[test]
@@ -922,8 +912,8 @@ fn test_dilate_mask_full_coverage_radius_2() {
     for (i, &val) in dilated.iter().enumerate().take(7) {
         assert!(val, "Pixel {} should be true", i);
     }
-    assert!(!dilated.pixels()[7]);
-    assert!(!dilated.pixels()[8]);
+    assert!(!dilated[7]);
+    assert!(!dilated[8]);
 }
 
 #[test]
@@ -938,17 +928,12 @@ fn test_dilate_mask_non_square_image() {
     // Should create 3x3 square centered at (3, 1)
     for y in 0..3 {
         for x in 2..=4 {
-            assert!(
-                dilated.pixels()[y * 7 + x],
-                "Pixel ({}, {}) should be true",
-                x,
-                y
-            );
+            assert!(dilated[y * 7 + x], "Pixel ({}, {}) should be true", x, y);
         }
     }
     // Outside should be false
-    assert!(!dilated.pixels()[0 * 7 + 0]);
-    assert!(!dilated.pixels()[0 * 7 + 6]);
+    assert!(!dilated[0 * 7 + 0]);
+    assert!(!dilated[0 * 7 + 6]);
 }
 
 #[test]
@@ -963,9 +948,9 @@ fn test_dilate_mask_preserves_original_pixels() {
     dilate_mask(&mask, 1, &mut dilated);
 
     // All original pixels must be present
-    assert!(dilated.pixels()[0]);
-    assert!(dilated.pixels()[12]);
-    assert!(dilated.pixels()[24]);
+    assert!(dilated[0]);
+    assert!(dilated[12]);
+    assert!(dilated[24]);
 }
 
 // =============================================================================
