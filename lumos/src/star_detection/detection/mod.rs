@@ -224,9 +224,11 @@ fn assign_provisional_labels(mask: &BitBuffer2, labels: &mut Buffer2<u32>, paren
 /// Build a mapping from provisional labels to final sequential labels.
 ///
 /// Flattens the union-find structure and assigns sequential final labels
-/// to each unique component root.
+/// to each unique component root. Uses single-pass optimization: after
+/// path compression, parent[i] points directly to the root, so we can
+/// build the label map without additional find() calls.
 fn build_label_map(parent: &mut [u32]) -> (Vec<u32>, usize) {
-    // Map each root to a sequential final label
+    // First pass: flatten all paths and assign sequential labels to roots
     let mut root_to_final = vec![0u32; parent.len() + 1];
     let mut num_labels = 0usize;
 
@@ -238,17 +240,13 @@ fn build_label_map(parent: &mut [u32]) -> (Vec<u32>, usize) {
         }
     }
 
-    // Create direct mapping from provisional label to final label
-    let label_map: Vec<u32> = (0..=parent.len() as u32)
-        .map(|label| {
-            if label == 0 {
-                0
-            } else {
-                let root = find(parent, label);
-                root_to_final[root as usize]
-            }
-        })
-        .collect();
+    // Second pass: build label_map using already-flattened parent array.
+    // After path compression above, parent[i-1] == root for all labels,
+    // so we can look up final labels directly without calling find().
+    let mut label_map = vec![0u32; parent.len() + 1];
+    for (i, &root) in parent.iter().enumerate() {
+        label_map[i + 1] = root_to_final[root as usize];
+    }
 
     (label_map, num_labels)
 }
@@ -257,7 +255,6 @@ fn build_label_map(parent: &mut [u32]) -> (Vec<u32>, usize) {
 fn find(parent: &mut [u32], label: u32) -> u32 {
     let idx = (label - 1) as usize;
     if parent[idx] != label {
-        // flatten recursion
         parent[idx] = find(parent, parent[idx]); // Path compression
     }
     parent[idx]
