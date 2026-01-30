@@ -82,11 +82,16 @@ pub fn deblend_component(
         return vec![create_single_object(data, pixels, labels)];
     }
 
-    // Create threshold levels (exponentially spaced for better resolution at faint levels)
-    let thresholds = create_threshold_levels(detection_threshold, peak_value, config.n_thresholds);
-
     // Build deblending tree by analyzing connectivity at each threshold
-    let tree = build_deblend_tree(data, pixels, labels, &thresholds, config.min_separation);
+    let tree = build_deblend_tree(
+        data,
+        pixels,
+        labels,
+        detection_threshold,
+        peak_value,
+        config.n_thresholds,
+        config.min_separation,
+    );
 
     // If tree has only one leaf (no branching), return single object
     if tree.is_empty() {
@@ -104,36 +109,30 @@ pub fn deblend_component(
     assign_pixels_to_objects(data, pixels, labels, &tree, &leaves)
 }
 
-/// Create exponentially spaced threshold levels.
-fn create_threshold_levels(low: f32, high: f32, n: usize) -> Vec<f32> {
-    if n == 0 {
-        return vec![low];
+/// Build the deblending tree by tracking connectivity at each threshold level.
+///
+/// Uses exponentially spaced thresholds for better resolution at faint levels.
+fn build_deblend_tree(
+    data: &ComponentData,
+    pixels: &Buffer2<f32>,
+    labels: &LabelMap,
+    low: f32,
+    high: f32,
+    n_thresholds: usize,
+    min_separation: usize,
+) -> Vec<DeblendNode> {
+    if data.area == 0 {
+        return Vec::new();
     }
 
     // Use exponential spacing: threshold[i] = low * (high/low)^(i/n)
     // This gives finer resolution near the detection threshold where
     // blended objects are more likely to separate.
     let ratio = (high / low).max(1.0);
-
-    (0..=n)
-        .map(|i| {
-            let t = i as f32 / n as f32;
-            low * ratio.powf(t)
-        })
-        .collect()
-}
-
-/// Build the deblending tree by tracking connectivity at each threshold level.
-fn build_deblend_tree(
-    data: &ComponentData,
-    pixels: &Buffer2<f32>,
-    labels: &LabelMap,
-    thresholds: &[f32],
-    min_separation: usize,
-) -> Vec<DeblendNode> {
-    if thresholds.is_empty() || data.area == 0 {
-        return Vec::new();
-    }
+    let threshold_iter = (0..=n_thresholds).map(|i| {
+        let t = i as f32 / n_thresholds.max(1) as f32;
+        low * ratio.powf(t)
+    });
 
     let mut tree: Vec<DeblendNode> = Vec::new();
 
@@ -145,7 +144,7 @@ fn build_deblend_tree(
     let mut pixel_to_node: HashMap<Vec2us, usize> = HashMap::with_capacity(component_pixels.len());
 
     // Process each threshold level from low to high
-    for (level, &threshold) in thresholds.iter().enumerate() {
+    for (level, threshold) in threshold_iter.enumerate() {
         // Find pixels above this threshold
         let above_threshold: Vec<Pixel> = component_pixels
             .iter()
@@ -616,7 +615,16 @@ mod tests {
 
     #[test]
     fn test_threshold_levels_exponential() {
-        let thresholds = create_threshold_levels(0.1, 1.0, 10);
+        let low = 0.1f32;
+        let high = 1.0f32;
+        let n = 10usize;
+        let ratio = (high / low).max(1.0);
+        let thresholds: Vec<f32> = (0..=n)
+            .map(|i| {
+                let t = i as f32 / n as f32;
+                low * ratio.powf(t)
+            })
+            .collect();
 
         assert_eq!(thresholds.len(), 11); // 0..=10
         assert!((thresholds[0] - 0.1).abs() < 1e-6);
@@ -624,10 +632,10 @@ mod tests {
 
         // Check exponential spacing (ratio should be constant)
         for i in 1..thresholds.len() {
-            let ratio = thresholds[i] / thresholds[i - 1];
+            let step_ratio = thresholds[i] / thresholds[i - 1];
             let expected_ratio = (1.0f32 / 0.1).powf(1.0 / 10.0);
             assert!(
-                (ratio - expected_ratio).abs() < 0.01,
+                (step_ratio - expected_ratio).abs() < 0.01,
                 "Threshold spacing should be exponential"
             );
         }
