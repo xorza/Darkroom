@@ -39,58 +39,8 @@ pub struct Pixel {
     pub value: f32,
 }
 
-/// Axis-aligned bounding box.
-#[derive(Debug, Clone, Copy, Default)]
-pub struct BoundingBox {
-    pub x_min: usize,
-    pub x_max: usize,
-    pub y_min: usize,
-    pub y_max: usize,
-}
-
-impl BoundingBox {
-    /// Create a new bounding box with the given bounds.
-    #[allow(dead_code)] // Used in tests
-    pub fn new(x_min: usize, x_max: usize, y_min: usize, y_max: usize) -> Self {
-        Self {
-            x_min,
-            x_max,
-            y_min,
-            y_max,
-        }
-    }
-
-    /// Create an empty bounding box (for accumulation).
-    pub fn empty() -> Self {
-        Self {
-            x_min: usize::MAX,
-            x_max: 0,
-            y_min: usize::MAX,
-            y_max: 0,
-        }
-    }
-
-    /// Expand this bounding box to include the given point.
-    #[inline]
-    pub fn include(&mut self, x: usize, y: usize) {
-        self.x_min = self.x_min.min(x);
-        self.x_max = self.x_max.max(x);
-        self.y_min = self.y_min.min(y);
-        self.y_max = self.y_max.max(y);
-    }
-
-    /// Width of the bounding box.
-    #[inline]
-    pub fn width(&self) -> usize {
-        self.x_max.saturating_sub(self.x_min) + 1
-    }
-
-    /// Height of the bounding box.
-    #[inline]
-    pub fn height(&self) -> usize {
-        self.y_max.saturating_sub(self.y_min) + 1
-    }
-}
+// Re-export BoundingBox from math module
+pub use crate::math::BoundingBox;
 
 /// Data for a connected component (allocation-free).
 ///

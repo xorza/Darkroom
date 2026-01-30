@@ -2,7 +2,12 @@
 //!
 //! Provides optimized math operations with platform-specific SIMD for ARM NEON (aarch64) and x86 SSE4.
 
+mod bbox;
 pub mod scalar;
+mod vec2;
+
+pub use bbox::BoundingBox;
+pub use vec2::Vec2usize;
 
 /// FWHM to Gaussian sigma conversion factor.
 ///
