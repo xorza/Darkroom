@@ -1,0 +1,6 @@
+name: bench_convolve_row_large_kernel/scalar
+mean: 75.161µs
+min: 75.095µs
+max: 75.235µs
+median: 75.164µs
+iterations: 10
