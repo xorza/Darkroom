@@ -33,10 +33,10 @@ pub fn create_threshold_mask(
     if cpu_features::has_sse4_1() {
         // SAFETY: We've checked that SSE4.1 is available.
         unsafe {
-            sse::create_threshold_mask_sse(pixels, background, sigma_threshold, mask);
+            sse::create_threshold_mask_sse_impl::<true>(pixels, background, sigma_threshold, mask);
         }
     } else {
-        scalar::create_threshold_mask(pixels, background, sigma_threshold, mask);
+        scalar::create_threshold_mask_impl::<true>(pixels, background, sigma_threshold, mask);
     }
 }
 
@@ -50,7 +50,7 @@ pub fn create_threshold_mask(
 ) {
     // SAFETY: NEON is always available on aarch64.
     unsafe {
-        neon::create_threshold_mask_neon(pixels, background, sigma_threshold, mask);
+        neon::create_threshold_mask_neon_impl::<true>(pixels, background, sigma_threshold, mask);
     }
 }
 
@@ -62,7 +62,7 @@ pub fn create_threshold_mask(
     sigma_threshold: f32,
     mask: &mut Buffer2<bool>,
 ) {
-    scalar::create_threshold_mask(pixels, background, sigma_threshold, mask);
+    scalar::create_threshold_mask_impl::<true>(pixels, background, sigma_threshold, mask);
 }
 
 /// Create binary mask from a filtered (background-subtracted) image.
@@ -79,10 +79,15 @@ pub fn create_threshold_mask_filtered(
     if cpu_features::has_sse4_1() {
         // SAFETY: We've checked that SSE4.1 is available.
         unsafe {
-            sse::create_threshold_mask_filtered_sse(filtered, background, sigma_threshold, mask);
+            sse::create_threshold_mask_sse_impl::<false>(
+                filtered,
+                background,
+                sigma_threshold,
+                mask,
+            );
         }
     } else {
-        scalar::create_threshold_mask_filtered(filtered, background, sigma_threshold, mask);
+        scalar::create_threshold_mask_impl::<false>(filtered, background, sigma_threshold, mask);
     }
 }
 
@@ -96,7 +101,7 @@ pub fn create_threshold_mask_filtered(
 ) {
     // SAFETY: NEON is always available on aarch64.
     unsafe {
-        neon::create_threshold_mask_filtered_neon(filtered, background, sigma_threshold, mask);
+        neon::create_threshold_mask_neon_impl::<false>(filtered, background, sigma_threshold, mask);
     }
 }
 
@@ -108,7 +113,7 @@ pub fn create_threshold_mask_filtered(
     sigma_threshold: f32,
     mask: &mut Buffer2<bool>,
 ) {
-    scalar::create_threshold_mask_filtered(filtered, background, sigma_threshold, mask);
+    scalar::create_threshold_mask_impl::<false>(filtered, background, sigma_threshold, mask);
 }
 
 #[cfg(test)]

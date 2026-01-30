@@ -672,7 +672,7 @@ fn create_threshold_mask_scalar(
     sigma: f32,
 ) -> Buffer2<bool> {
     let mut mask = Buffer2::new_filled(pixels.width(), pixels.height(), false);
-    threshold_scalar::create_threshold_mask(pixels, background, sigma, &mut mask);
+    threshold_scalar::create_threshold_mask_impl::<true>(pixels, background, sigma, &mut mask);
     mask
 }
 
@@ -683,7 +683,7 @@ fn create_threshold_mask_filtered_scalar(
     sigma: f32,
 ) -> Buffer2<bool> {
     let mut mask = Buffer2::new_filled(filtered.width(), filtered.height(), false);
-    threshold_scalar::create_threshold_mask_filtered(filtered, background, sigma, &mut mask);
+    threshold_scalar::create_threshold_mask_impl::<false>(filtered, background, sigma, &mut mask);
     mask
 }
 
