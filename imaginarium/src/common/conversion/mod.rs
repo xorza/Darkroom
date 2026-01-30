@@ -1,6 +1,8 @@
 pub(crate) mod conversion_scalar;
-mod conversion_simd;
+pub(crate) mod conversion_simd;
 
+#[cfg(test)]
+mod bench;
 #[cfg(test)]
 mod simd_tests;
 #[cfg(test)]

@@ -1,0 +1,7 @@
+name: bench_rgba_u8_to_l_u8/simd
+mean: 795ns
+min: 791ns
+max: 821ns
+median: 792ns
+iterations: 20
+vs_previous: 1.775µs -> 795ns (-55.2%) faster

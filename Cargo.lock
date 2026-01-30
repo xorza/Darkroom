@@ -1966,6 +1966,7 @@ dependencies = [
  "aligned-vec",
  "anyhow",
  "atomic_refcell",
+ "bench",
  "bytemuck",
  "common",
  "glam 0.31.0",

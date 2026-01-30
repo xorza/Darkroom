@@ -1,0 +1,6 @@
+name: bench_l_u8_to_rgba_u8/simd
+mean: 244ns
+min: 230ns
+max: 321ns
+median: 241ns
+iterations: 20
