@@ -1,0 +1,7 @@
+name: bench_convolve_cols_1k/simd_transpose
+mean: 1.259484ms
+min: 1.122875ms
+max: 1.538951ms
+median: 1.169725ms
+iterations: 5
+vs_previous: 1.428307ms -> 1.259484ms (-11.8%) faster

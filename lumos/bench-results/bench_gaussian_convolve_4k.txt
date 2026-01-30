@@ -1,0 +1,7 @@
+name: bench_gaussian_convolve_4k
+mean: 73.434946ms
+min: 70.237232ms
+max: 76.016791ms
+median: 74.050816ms
+iterations: 3
+vs_previous: 93.649358ms -> 73.434946ms (-21.6%) faster

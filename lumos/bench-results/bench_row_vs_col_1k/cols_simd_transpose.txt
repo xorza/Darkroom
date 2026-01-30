@@ -1,0 +1,6 @@
+name: bench_row_vs_col_1k/cols_simd_transpose
+mean: 1.221795ms
+min: 1.049845ms
+max: 1.529902ms
+median: 1.169744ms
+iterations: 5

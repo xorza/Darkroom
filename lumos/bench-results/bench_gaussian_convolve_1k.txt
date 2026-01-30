@@ -1,0 +1,7 @@
+name: bench_gaussian_convolve_1k
+mean: 33.888443ms
+min: 5.776414ms
+max: 82.548537ms
+median: 6.124659ms
+iterations: 5
+vs_previous: 45.560297ms -> 33.888443ms (-25.6%) faster

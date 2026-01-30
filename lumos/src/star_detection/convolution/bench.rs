@@ -1,9 +1,15 @@
 //! Benchmarks for convolution operations.
 
 use super::simd::convolve_row;
-use super::{elliptical_gaussian_convolve, gaussian_convolve, gaussian_kernel_1d, matched_filter};
+use super::{
+    convolve_rows_parallel, elliptical_gaussian_convolve, gaussian_convolve, gaussian_kernel_1d,
+    matched_filter,
+};
 use crate::common::Buffer2;
 use crate::star_detection::convolution::simd::convolve_row_scalar;
+use crate::star_detection::convolution::{
+    convolve_cols_scalar_parallel, convolve_cols_simd_transpose_parallel,
+};
 use crate::testing::synthetic::stamps::benchmark_star_field;
 use ::bench::quick_bench;
 use std::hint::black_box;
@@ -60,6 +66,87 @@ fn bench_convolve_row_large_kernel(b: ::bench::Bencher) {
             black_box(&mut output),
             black_box(&kernel),
             radius,
+        );
+    });
+}
+
+// ============ Column convolution: SIMD (transpose) vs Scalar ============
+
+#[quick_bench(warmup_iters = 2, iters = 5)]
+fn bench_convolve_cols_1k(b: ::bench::Bencher) {
+    let pixels = benchmark_star_field(1024, 1024, 100, 0.1, 0.01, 42);
+    let kernel = gaussian_kernel_1d(2.0);
+    let mut output = Buffer2::new_default(1024, 1024);
+
+    b.bench_labeled("simd_transpose", || {
+        convolve_cols_simd_transpose_parallel(
+            black_box(&pixels),
+            black_box(&mut output),
+            black_box(&kernel),
+        );
+    });
+
+    b.bench_labeled("scalar", || {
+        convolve_cols_scalar_parallel(
+            black_box(&pixels),
+            black_box(&mut output),
+            black_box(&kernel),
+        );
+    });
+}
+
+#[quick_bench(warmup_iters = 1, iters = 3)]
+fn bench_convolve_cols_4k(b: ::bench::Bencher) {
+    let pixels = benchmark_star_field(4096, 4096, 500, 0.1, 0.01, 42);
+    let kernel = gaussian_kernel_1d(2.0);
+    let mut output = Buffer2::new_default(4096, 4096);
+
+    b.bench_labeled("simd_transpose", || {
+        convolve_cols_simd_transpose_parallel(
+            black_box(&pixels),
+            black_box(&mut output),
+            black_box(&kernel),
+        );
+    });
+
+    b.bench_labeled("scalar", || {
+        convolve_cols_scalar_parallel(
+            black_box(&pixels),
+            black_box(&mut output),
+            black_box(&kernel),
+        );
+    });
+}
+
+// ============ Row vs Column convolution comparison ============
+
+#[quick_bench(warmup_iters = 2, iters = 5)]
+fn bench_row_vs_col_1k(b: ::bench::Bencher) {
+    let pixels = benchmark_star_field(1024, 1024, 100, 0.1, 0.01, 42);
+    let kernel = gaussian_kernel_1d(2.0);
+    let mut output = Buffer2::new_default(1024, 1024);
+
+    b.bench_labeled("rows_simd", || {
+        convolve_rows_parallel(
+            black_box(&pixels),
+            black_box(&mut output),
+            black_box(&kernel),
+        );
+    });
+
+    b.bench_labeled("cols_simd_transpose", || {
+        convolve_cols_simd_transpose_parallel(
+            black_box(&pixels),
+            black_box(&mut output),
+            black_box(&kernel),
+        );
+    });
+
+    b.bench_labeled("cols_scalar", || {
+        convolve_cols_scalar_parallel(
+            black_box(&pixels),
+            black_box(&mut output),
+            black_box(&kernel),
         );
     });
 }
