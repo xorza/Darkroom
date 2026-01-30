@@ -26,8 +26,8 @@ use rayon::iter::ParallelIterator;
 use crate::common::cpu_features;
 
 /// Scalar implementation for packed threshold mask with background.
-#[inline]
-fn process_words_scalar(
+#[cfg_attr(not(test), inline)]
+pub(super) fn process_words_scalar(
     pixels: &[f32],
     bg: &[f32],
     noise: &[f32],
@@ -91,8 +91,8 @@ fn process_words_filtered_scalar(
 }
 
 /// Process words with best available SIMD (with background).
-#[inline]
-fn process_words(
+#[cfg_attr(not(test), inline)]
+pub(super) fn process_words(
     pixels: &[f32],
     bg: &[f32],
     noise: &[f32],

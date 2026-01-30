@@ -59,7 +59,7 @@ pub fn dilate_mask(mask: &BitBuffer2, radius: usize, output: &mut BitBuffer2) {
 
     let width = mask.width();
     let height = mask.height();
-
+    // todo paralelise
     for y in 0..height {
         for x in 0..width {
             if mask.get_xy(x, y) {

@@ -1,6 +1,6 @@
 //! Benchmarks for threshold mask creation.
 
-use super::create_threshold_mask;
+use super::{process_words, process_words_scalar};
 use crate::common::BitBuffer2;
 use ::bench::quick_bench;
 use std::hint::black_box;
@@ -30,15 +30,32 @@ fn create_bench_data(size: usize) -> (Vec<f32>, Vec<f32>, Vec<f32>) {
 #[quick_bench(warmup_iters = 3, iters = 10)]
 fn bench_threshold_mask_4k(b: ::bench::Bencher) {
     let (pixels, bg, noise) = create_bench_data(4096 * 4096);
-    let mut packed_mask = BitBuffer2::new_filled(4096, 4096, false);
+    let mut mask = BitBuffer2::new_filled(4096, 4096, false);
+    let total_pixels = pixels.len();
 
-    b.bench_labeled("packed", || {
-        create_threshold_mask(
+    b.bench_labeled("simd", || {
+        let words = black_box(&mut mask).words_mut();
+        process_words(
             black_box(&pixels),
             black_box(&bg),
             black_box(&noise),
             black_box(3.0),
-            black_box(&mut packed_mask),
+            words,
+            0,
+            total_pixels,
+        );
+    });
+
+    b.bench_labeled("scalar", || {
+        let words = black_box(&mut mask).words_mut();
+        process_words_scalar(
+            black_box(&pixels),
+            black_box(&bg),
+            black_box(&noise),
+            black_box(3.0),
+            words,
+            0,
+            total_pixels,
         );
     });
 }
