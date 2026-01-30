@@ -225,11 +225,12 @@ impl BackgroundConfig {
 
                     compute_tile_stats(
                         pixels,
-                        width,
+                        None,
                         x_start,
                         x_end,
                         y_start,
                         y_end,
+                        0,
                         values_buf,
                         deviations_buf,
                     )
@@ -379,11 +380,12 @@ fn create_object_mask(
     }
 }
 
-/// Compute tile statistics with masked pixels excluded.
+/// Compute sigma-clipped statistics for a single tile using provided scratch buffers.
+/// If mask is provided, excludes masked pixels (falls back to all pixels if too few unmasked).
 #[allow(clippy::too_many_arguments)]
-fn compute_tile_stats_masked(
+fn compute_tile_stats(
     pixels: &Buffer2<f32>,
-    mask: &Buffer2<bool>,
+    mask: Option<&Buffer2<bool>>,
     x_start: usize,
     x_end: usize,
     y_start: usize,
@@ -393,48 +395,34 @@ fn compute_tile_stats_masked(
     deviations: &mut Vec<f32>,
 ) -> TileStats {
     let width = pixels.width();
-
-    // Collect unmasked pixels
     values.clear();
-    for y in y_start..y_end {
-        let row_start = y * width;
-        for x in x_start..x_end {
-            let idx = row_start + x;
-            if !mask[idx] {
-                values.push(pixels[idx]);
+
+    if let Some(mask) = mask {
+        // Collect unmasked pixels
+        for y in y_start..y_end {
+            let row_start = y * width;
+            for x in x_start..x_end {
+                let idx = row_start + x;
+                if !mask[idx] {
+                    values.push(pixels[idx]);
+                }
             }
         }
-    }
 
-    // If too few unmasked pixels, fall back to all pixels (unmasked)
-    if values.len() < min_pixels {
-        values.clear();
+        // If too few unmasked pixels, fall back to all pixels
+        if values.len() < min_pixels {
+            values.clear();
+            for y in y_start..y_end {
+                let row_start = y * width + x_start;
+                values.extend_from_slice(&pixels[row_start..row_start + (x_end - x_start)]);
+            }
+        }
+    } else {
+        // No mask - collect all pixels
         for y in y_start..y_end {
             let row_start = y * width + x_start;
             values.extend_from_slice(&pixels[row_start..row_start + (x_end - x_start)]);
         }
-    }
-
-    sigma_clipped_stats(values, deviations, 3.0, 3)
-}
-
-/// Compute sigma-clipped statistics for a single tile using provided scratch buffers.
-#[allow(clippy::too_many_arguments)]
-fn compute_tile_stats(
-    pixels: &[f32],
-    width: usize,
-    x_start: usize,
-    x_end: usize,
-    y_start: usize,
-    y_end: usize,
-    values: &mut Vec<f32>,
-    deviations: &mut Vec<f32>,
-) -> TileStats {
-    // Clear and fill values buffer
-    values.clear();
-    for y in y_start..y_end {
-        let row_start = y * width + x_start;
-        values.extend_from_slice(&pixels[row_start..row_start + (x_end - x_start)]);
     }
 
     // Sigma-clipped statistics (3 iterations, 3-sigma clip)
@@ -485,9 +473,9 @@ fn estimate_background_masked(
                 let x_end = (x_start + tile_size).min(width);
                 let y_end = (y_start + tile_size).min(height);
 
-                compute_tile_stats_masked(
+                compute_tile_stats(
                     pixels,
-                    mask,
+                    Some(mask),
                     x_start,
                     x_end,
                     y_start,
