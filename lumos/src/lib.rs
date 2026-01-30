@@ -67,7 +67,6 @@ pub use star_detection::{
     // Main API
     Star,
     StarDetectionConfig,
-    StarDetectionConfigBuilder,
     StarDetectionDiagnostics,
     StarDetectionResult,
     StarDetector,

@@ -15,10 +15,7 @@ pub use crate::{AstroImage, AstroImageMetadata, BitPix, HotPixelMap, ImageDimens
 pub use crate::CalibrationMasters;
 
 // Star detection - main API
-pub use crate::{
-    Star, StarDetectionConfig, StarDetectionConfigBuilder, StarDetectionDiagnostics,
-    StarDetectionResult,
-};
+pub use crate::{Star, StarDetectionConfig, StarDetectionDiagnostics, StarDetectionResult};
 
 // Star detection - background estimation
 pub use crate::{

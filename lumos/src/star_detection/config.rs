@@ -1,0 +1,284 @@
+//! Configuration types for star detection.
+
+use super::CentroidMethod;
+use super::background::BackgroundConfig;
+use super::centroid::LocalBackgroundMethod;
+use super::defect_map::DefectMap;
+
+/// Configuration for star detection.
+#[derive(Debug, Clone)]
+pub struct StarDetectionConfig {
+    /// Minimum star area in pixels.
+    pub min_area: usize,
+    /// Maximum star area in pixels.
+    pub max_area: usize,
+    /// Maximum eccentricity (0-1, higher = more elongated allowed).
+    pub max_eccentricity: f32,
+    /// Edge margin in pixels (stars too close to edge are rejected).
+    pub edge_margin: usize,
+    /// Minimum SNR for a star to be considered valid.
+    pub min_snr: f32,
+    /// Tile size for background estimation.
+    pub background_tile_size: usize,
+    /// Maximum FWHM deviation from median in MAD (median absolute deviation) units.
+    /// Stars with FWHM > median + max_fwhm_deviation * MAD are rejected as spurious.
+    /// Typical value is 3.0-5.0 (similar to sigma clipping). Set to 0.0 to disable.
+    pub max_fwhm_deviation: f32,
+    /// Expected FWHM of stars in pixels for matched filtering.
+    /// The matched filter (Gaussian convolution) dramatically improves detection of
+    /// faint stars by boosting SNR. Set to 0.0 to disable matched filtering.
+    /// Typical values are 2.0-6.0 pixels depending on seeing and sampling.
+    pub expected_fwhm: f32,
+    /// Axis ratio for elliptical Gaussian matched filter (minor/major axis).
+    /// Value of 1.0 means circular PSF (default), smaller values mean more elongated.
+    /// Useful for tracking errors, field rotation, or optical aberrations.
+    /// Must be in range (0, 1].
+    pub psf_axis_ratio: f32,
+    /// Position angle of PSF major axis in radians (0 = along x-axis).
+    /// Only used when psf_axis_ratio < 1.0.
+    pub psf_angle: f32,
+    /// Maximum sharpness for a star to be considered valid.
+    /// Sharpness = peak_value / flux_in_3x3_core. Cosmic rays have very high sharpness
+    /// (>0.7) because most flux is in a single pixel. Real stars spread flux across
+    /// multiple pixels due to PSF, giving sharpness 0.2-0.5. Set to 1.0 to disable.
+    pub max_sharpness: f32,
+    /// Minimum separation between peaks for deblending star pairs (in pixels).
+    /// Peaks closer than this are merged. Set to 0 to disable deblending.
+    pub deblend_min_separation: usize,
+    /// Minimum peak prominence for deblending (0.0-1.0).
+    /// Secondary peaks must be at least this fraction of the primary peak to be
+    /// considered for deblending. Prevents noise spikes from causing false splits.
+    pub deblend_min_prominence: f32,
+    /// Minimum separation between stars for duplicate removal (in pixels).
+    /// Stars closer than this are considered duplicates; only brightest is kept.
+    pub duplicate_min_separation: f32,
+    /// Maximum roundness for a star to be considered valid.
+    /// Roundness metrics (GROUND and SROUND from DAOFIND) measure asymmetry.
+    /// Circular sources have roundness near 0. Cosmic rays, satellite trails,
+    /// and galaxies have higher absolute roundness. Set to 1.0 to disable.
+    pub max_roundness: f32,
+    /// Enable multi-threshold deblending (SExtractor-style).
+    /// When enabled, uses tree-based deblending with multiple threshold levels
+    /// instead of simple local maxima detection. More accurate for crowded fields
+    /// but slower. Set to true for better crowded field handling.
+    pub multi_threshold_deblend: bool,
+    /// Number of deblending sub-thresholds for multi-threshold deblending.
+    /// Higher values give finer deblending resolution but use more CPU.
+    /// SExtractor default: 32. Typical range: 16-64.
+    pub deblend_nthresh: usize,
+    /// Minimum contrast for multi-threshold deblending (0.0-1.0).
+    /// A branch is considered a separate object only if its flux is
+    /// at least this fraction of the total flux. Lower values deblend more aggressively.
+    /// SExtractor default: 0.005. Set to 1.0 to disable deblending.
+    pub deblend_min_contrast: f32,
+    /// Camera gain in electrons per ADU (e-/ADU).
+    /// Used for accurate SNR calculation using the full CCD noise equation.
+    /// When None, uses simplified background-dominated SNR formula.
+    /// Typical values: 0.5-4.0 e-/ADU for modern CMOS sensors.
+    pub gain: Option<f32>,
+    /// Read noise in electrons (e-).
+    /// Used for accurate SNR calculation, especially important for short exposures.
+    /// When None, read noise is ignored in SNR calculation.
+    /// Typical values: 1-10 e- for modern CMOS sensors.
+    pub read_noise: Option<f32>,
+    /// Optional defect map for masking bad pixels.
+    /// When provided, defective pixels are replaced with local median before detection,
+    /// and stars with centroids near defects are flagged.
+    pub defect_map: Option<DefectMap>,
+    /// Method for computing sub-pixel centroids.
+    /// WeightedMoments (default) is fast (~0.05 pixel accuracy).
+    /// GaussianFit and MoffatFit provide higher precision (~0.01 pixel) but are slower.
+    pub centroid_method: CentroidMethod,
+    /// Method for computing local background during centroid refinement.
+    /// GlobalMap (default) uses the precomputed background map.
+    /// Annulus and OuterRing compute local background around each star,
+    /// which is more accurate in regions with variable nebulosity.
+    pub local_background_method: LocalBackgroundMethod,
+
+    /// Background estimation configuration.
+    pub background_config: BackgroundConfig,
+}
+
+impl Default for StarDetectionConfig {
+    fn default() -> Self {
+        Self {
+            min_area: 5,
+            max_area: 500,
+            max_eccentricity: 0.6,
+            edge_margin: 10,
+            min_snr: 10.0,
+            background_tile_size: 64,
+            max_fwhm_deviation: 3.0,
+            expected_fwhm: 4.0,
+            psf_axis_ratio: 1.0,
+            psf_angle: 0.0,
+            max_sharpness: 0.7,
+            deblend_min_separation: 3,
+            deblend_min_prominence: 0.3,
+            duplicate_min_separation: 8.0,
+            max_roundness: 1.0,
+            multi_threshold_deblend: false,
+            deblend_nthresh: 32,
+            deblend_min_contrast: 0.005,
+            gain: None,
+            read_noise: None,
+            defect_map: None,
+            centroid_method: CentroidMethod::WeightedMoments,
+            local_background_method: LocalBackgroundMethod::GlobalMap,
+            background_config: BackgroundConfig::default(),
+        }
+    }
+}
+
+impl StarDetectionConfig {
+    /// Validate the configuration and panic if invalid.
+    ///
+    /// This is called automatically by `find_stars()` but can be called
+    /// manually to check configuration before processing.
+    ///
+    /// # Panics
+    /// Panics with a descriptive message if any parameter is out of valid range.
+    pub fn validate(&self) {
+        self.background_config.validate();
+
+        assert!(
+            self.min_area >= 1,
+            "min_area must be at least 1, got {}",
+            self.min_area
+        );
+        assert!(
+            self.max_area >= self.min_area,
+            "max_area ({}) must be >= min_area ({})",
+            self.max_area,
+            self.min_area
+        );
+        assert!(
+            (0.0..=1.0).contains(&self.max_eccentricity),
+            "max_eccentricity must be in [0, 1], got {}",
+            self.max_eccentricity
+        );
+        assert!(
+            self.min_snr > 0.0,
+            "min_snr must be positive, got {}",
+            self.min_snr
+        );
+        assert!(
+            (16..=256).contains(&self.background_tile_size),
+            "background_tile_size must be in [16, 256], got {}",
+            self.background_tile_size
+        );
+        assert!(
+            self.expected_fwhm >= 0.0,
+            "expected_fwhm must be non-negative (0.0 disables matched filter), got {}",
+            self.expected_fwhm
+        );
+        assert!(
+            (0.0..=1.0).contains(&self.psf_axis_ratio),
+            "psf_axis_ratio must be in (0, 1], got {}",
+            self.psf_axis_ratio
+        );
+        assert!(
+            (0.0..=1.0).contains(&self.max_sharpness),
+            "max_sharpness must be in [0, 1], got {}",
+            self.max_sharpness
+        );
+        assert!(
+            (0.0..=1.0).contains(&self.deblend_min_prominence),
+            "deblend_min_prominence must be in [0, 1], got {}",
+            self.deblend_min_prominence
+        );
+        assert!(
+            self.duplicate_min_separation >= 0.0,
+            "duplicate_min_separation must be non-negative, got {}",
+            self.duplicate_min_separation
+        );
+        assert!(
+            (0.0..=1.0).contains(&self.max_roundness),
+            "max_roundness must be in [0, 1], got {}",
+            self.max_roundness
+        );
+        assert!(
+            self.deblend_nthresh >= 2,
+            "deblend_nthresh must be at least 2, got {}",
+            self.deblend_nthresh
+        );
+        assert!(
+            (0.0..=1.0).contains(&self.deblend_min_contrast),
+            "deblend_min_contrast must be in [0, 1], got {}",
+            self.deblend_min_contrast
+        );
+        if let Some(gain) = self.gain {
+            assert!(gain > 0.0, "gain must be positive, got {}", gain);
+        }
+        if let Some(read_noise) = self.read_noise {
+            assert!(
+                read_noise >= 0.0,
+                "read_noise must be non-negative, got {}",
+                read_noise
+            );
+        }
+    }
+
+    /// Create config for wide-field imaging (larger stars, relaxed filtering).
+    pub fn for_wide_field() -> Self {
+        Self {
+            expected_fwhm: 6.0,
+            max_area: 1000,
+            max_eccentricity: 0.7,
+            ..Default::default()
+        }
+    }
+
+    /// Create config for high-resolution imaging (smaller stars, stricter filtering).
+    pub fn for_high_resolution() -> Self {
+        Self {
+            expected_fwhm: 2.5,
+            max_area: 200,
+            max_eccentricity: 0.5,
+            min_snr: 15.0,
+            ..Default::default()
+        }
+    }
+
+    /// Create config for crowded fields (aggressive deblending).
+    pub fn for_crowded_field() -> Self {
+        Self {
+            multi_threshold_deblend: true,
+            deblend_min_separation: 2,
+            background_config: BackgroundConfig {
+                iterations: 2,
+                ..Default::default()
+            },
+            ..Default::default()
+        }
+    }
+
+    /// Set expected FWHM for matched filtering.
+    #[must_use]
+    pub fn with_fwhm(mut self, fwhm: f32) -> Self {
+        self.expected_fwhm = fwhm;
+        self
+    }
+
+    /// Set minimum SNR threshold.
+    #[must_use]
+    pub fn with_min_snr(mut self, snr: f32) -> Self {
+        self.min_snr = snr;
+        self
+    }
+
+    /// Set edge margin in pixels.
+    #[must_use]
+    pub fn with_edge_margin(mut self, margin: usize) -> Self {
+        self.edge_margin = margin;
+        self
+    }
+
+    /// Set camera noise model for accurate SNR calculation.
+    #[must_use]
+    pub fn with_noise_model(mut self, gain: f32, read_noise: f32) -> Self {
+        self.gain = Some(gain);
+        self.read_noise = Some(read_noise);
+        self
+    }
+}

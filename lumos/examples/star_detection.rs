@@ -14,7 +14,7 @@
 use std::env;
 use std::path::Path;
 
-use lumos::{AstroImage, StarDetector};
+use lumos::{AstroImage, StarDetectionConfig, StarDetector};
 
 fn main() {
     // Get image path from command line
@@ -47,10 +47,8 @@ fn main() {
 
     // === Detection with wide-field preset ===
     println!("\n--- Detection with wide-field preset ---");
-    let detector = StarDetector::new()
-        .for_wide_field()
-        .with_min_snr(15.0)
-        .build();
+    let config = StarDetectionConfig::for_wide_field().with_min_snr(15.0);
+    let detector = StarDetector::from_config(config);
     let result = detector.detect(&image);
 
     println!("Stars detected: {}", result.stars.len());
@@ -58,10 +56,8 @@ fn main() {
 
     // === Detection with high-resolution preset ===
     println!("\n--- Detection with high-resolution preset ---");
-    let detector = StarDetector::new()
-        .for_high_resolution()
-        .with_cosmic_ray_rejection(0.7)
-        .build();
+    let config = StarDetectionConfig::for_high_resolution();
+    let detector = StarDetector::from_config(config);
     let result = detector.detect(&image);
 
     println!("Stars detected: {}", result.stars.len());
@@ -69,10 +65,8 @@ fn main() {
 
     // === Detection with crowded field preset ===
     println!("\n--- Detection with crowded field preset ---");
-    let detector = StarDetector::new()
-        .for_crowded_field()
-        .with_min_snr(8.0)
-        .build();
+    let config = StarDetectionConfig::for_crowded_field().with_min_snr(8.0);
+    let detector = StarDetector::from_config(config);
     let result = detector.detect(&image);
 
     println!("Stars detected: {}", result.stars.len());
