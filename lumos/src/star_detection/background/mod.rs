@@ -275,7 +275,7 @@ impl BackgroundConfig {
 
         Zip2Mut(&mut background_pixels, &mut noise_pixels)
             .par_rows_mut_auto(width)
-            .for_each(|((y_start, bg_chunk), (_, noise_chunk))| {
+            .for_each(|(y_start, (bg_chunk, noise_chunk))| {
                 let rows_in_chunk = bg_chunk.len() / width;
 
                 for local_y in 0..rows_in_chunk {
@@ -532,7 +532,7 @@ fn estimate_background_masked(
 
     Zip2Mut(&mut background, &mut noise)
         .par_rows_mut_auto(width)
-        .for_each(|((y_start, bg_chunk), (_, noise_chunk))| {
+        .for_each(|(y_start, (bg_chunk, noise_chunk))| {
             let rows_in_chunk = bg_chunk.len() / width;
 
             for local_y in 0..rows_in_chunk {

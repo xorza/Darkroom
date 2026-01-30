@@ -45,20 +45,73 @@ impl<'a, T: Send + 'a> ParRowsMutAuto<'a, T> for [T] {
 pub struct Zip2Mut<'a, A: Send, B: Send>(pub &'a mut [A], pub &'a mut [B]);
 
 impl<'a, A: Send + 'a, B: Send + 'a> ParRowsMutAuto<'a, (A, B)> for Zip2Mut<'a, A, B> {
-    type Iter = rayon::iter::Zip<ParRowsMutWithOffset<'a, A>, ParRowsMutWithOffset<'a, B>>;
+    type Iter = ParRows2MutWithOffset<'a, A, B>;
 
     fn par_rows_mut_auto(&'a mut self, width: usize) -> Self::Iter {
+        assert_eq!(
+            self.0.len(),
+            self.1.len(),
+            "Zip2Mut slices must have equal length"
+        );
         let height = self.0.len() / width;
         let chunk_rows = auto_chunk_size(height);
-        let iter_a = ParRowsMutWithOffset {
-            inner: self.0.par_chunks_mut(width * chunk_rows),
+        ParRows2MutWithOffset {
+            inner: self
+                .0
+                .par_chunks_mut(width * chunk_rows)
+                .zip(self.1.par_chunks_mut(width * chunk_rows)),
             chunk_rows,
-        };
-        let iter_b = ParRowsMutWithOffset {
-            inner: self.1.par_chunks_mut(width * chunk_rows),
-            chunk_rows,
-        };
-        iter_a.zip(iter_b)
+        }
+    }
+}
+
+/// Parallel iterator over two zipped row-aligned mutable chunks.
+/// Yields `(y_start, (&mut [A], &mut [B]))` tuples.
+pub struct ParRows2MutWithOffset<'a, A: Send, B: Send> {
+    inner: rayon::iter::Zip<rayon::slice::ChunksMut<'a, A>, rayon::slice::ChunksMut<'a, B>>,
+    chunk_rows: usize,
+}
+
+impl<'a, A: Send + 'a, B: Send + 'a> ParallelIterator for ParRows2MutWithOffset<'a, A, B> {
+    type Item = (usize, (&'a mut [A], &'a mut [B]));
+
+    fn drive_unindexed<C>(self, consumer: C) -> C::Result
+    where
+        C: rayon::iter::plumbing::UnindexedConsumer<Self::Item>,
+    {
+        let chunk_rows = self.chunk_rows;
+        self.inner
+            .enumerate()
+            .map(|(idx, (a, b))| (idx * chunk_rows, (a, b)))
+            .drive_unindexed(consumer)
+    }
+}
+
+impl<'a, A: Send + 'a, B: Send + 'a> IndexedParallelIterator for ParRows2MutWithOffset<'a, A, B> {
+    fn len(&self) -> usize {
+        self.inner.len()
+    }
+
+    fn drive<C>(self, consumer: C) -> C::Result
+    where
+        C: rayon::iter::plumbing::Consumer<Self::Item>,
+    {
+        let chunk_rows = self.chunk_rows;
+        self.inner
+            .enumerate()
+            .map(|(idx, (a, b))| (idx * chunk_rows, (a, b)))
+            .drive(consumer)
+    }
+
+    fn with_producer<CB>(self, callback: CB) -> CB::Output
+    where
+        CB: rayon::iter::plumbing::ProducerCallback<Self::Item>,
+    {
+        let chunk_rows = self.chunk_rows;
+        self.inner
+            .enumerate()
+            .map(|(idx, (a, b))| (idx * chunk_rows, (a, b)))
+            .with_producer(callback)
     }
 }
 
