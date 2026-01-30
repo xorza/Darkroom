@@ -137,16 +137,17 @@ pub fn detect_stars(
 /// 2. Second pass: Parallel label flattening using precomputed root mapping
 ///
 /// For images >1M pixels, the second pass is parallelized using rayon.
-pub(crate) fn connected_components(mask: &BitBuffer2) -> (Vec<u32>, usize) {
+pub(crate) fn connected_components(mask: &BitBuffer2) -> (Buffer2<u32>, usize) {
     let width = mask.width();
     let height = mask.height();
-    // todo buffer2<u32>
-    let mut labels = vec![0u32; width * height];
+
+    let mut labels = Buffer2::new_filled(width, height, 0u32);
     let mut parent: Vec<u32> = Vec::new();
     let mut next_label = 1u32;
 
     // First pass: assign provisional labels
     // This must be sequential due to union-find dependencies
+    let labels_data = labels.pixels_mut();
     for y in 0..height {
         let row_start = y * width;
         for x in 0..width {
@@ -157,13 +158,13 @@ pub(crate) fn connected_components(mask: &BitBuffer2) -> (Vec<u32>, usize) {
 
             // Check neighbors: left and top only (for forward scan)
             let left_label = if x > 0 && mask.get(idx - 1) {
-                labels[idx - 1]
+                labels_data[idx - 1]
             } else {
                 0
             };
 
             let top_label = if y > 0 && mask.get(idx - width) {
-                labels[idx - width]
+                labels_data[idx - width]
             } else {
                 0
             };
@@ -171,22 +172,22 @@ pub(crate) fn connected_components(mask: &BitBuffer2) -> (Vec<u32>, usize) {
             match (left_label, top_label) {
                 (0, 0) => {
                     // New component
-                    labels[idx] = next_label;
+                    labels_data[idx] = next_label;
                     parent.push(next_label);
                     next_label += 1;
                 }
                 (l, 0) => {
                     // Only left neighbor
-                    labels[idx] = l;
+                    labels_data[idx] = l;
                 }
                 (0, t) => {
                     // Only top neighbor
-                    labels[idx] = t;
+                    labels_data[idx] = t;
                 }
                 (l, t) => {
                     // Both neighbors - use minimum and union
                     let min_label = l.min(t);
-                    labels[idx] = min_label;
+                    labels_data[idx] = min_label;
                     if l != t {
                         union(&mut parent, l, t);
                     }
@@ -225,15 +226,16 @@ pub(crate) fn connected_components(mask: &BitBuffer2) -> (Vec<u32>, usize) {
     // Second pass: apply label mapping
     // Parallelize for large images (>4M pixels, i.e., 2K×2K and larger)
     let pixel_count = width * height;
+    let labels_data = labels.pixels_mut();
     if pixel_count > 4_000_000 {
         use rayon::prelude::*;
-        labels.par_iter_mut().for_each(|label| {
+        labels_data.par_iter_mut().for_each(|label| {
             if *label != 0 {
                 *label = label_map[*label as usize];
             }
         });
     } else {
-        for label in labels.iter_mut() {
+        for label in labels_data.iter_mut() {
             if *label != 0 {
                 *label = label_map[*label as usize];
             }
@@ -288,7 +290,7 @@ struct MultiThresholdComponentData {
 /// is erroneously detected as one component due to bad thresholding).
 pub(crate) fn extract_candidates(
     pixels: &Buffer2<f32>,
-    labels: &[u32],
+    labels: &Buffer2<u32>,
     num_labels: usize,
     deblend_config: &DeblendConfig,
     max_area: usize,
@@ -309,7 +311,7 @@ pub(crate) fn extract_candidates(
 /// Extract candidates using allocation-free local-maxima deblending.
 fn extract_candidates_local_maxima(
     pixels: &Buffer2<f32>,
-    labels: &[u32],
+    labels: &Buffer2<u32>,
     num_labels: usize,
     deblend_config: &DeblendConfig,
     max_area: usize,
@@ -328,7 +330,7 @@ fn extract_candidates_local_maxima(
         area: 0,
     });
 
-    for (idx, &label) in labels.iter().enumerate() {
+    for (idx, &label) in labels.pixels().iter().enumerate() {
         if label == 0 {
             continue;
         }
@@ -354,7 +356,7 @@ fn extract_candidates_local_maxima(
         .into_par_iter()
         .filter(|data| data.area > 0 && data.area <= max_area)
         .flat_map(|data| {
-            let deblended = deblend_local_maxima(&data, pixels, labels, deblend_config);
+            let deblended = deblend_local_maxima(&data, pixels, labels.pixels(), deblend_config);
 
             deblended
                 .into_iter()
@@ -376,7 +378,7 @@ fn extract_candidates_local_maxima(
 /// Extract candidates using multi-threshold deblending (requires pixel allocation).
 fn extract_candidates_multi_threshold(
     pixels: &Buffer2<f32>,
-    labels: &[u32],
+    labels: &Buffer2<u32>,
     num_labels: usize,
     deblend_config: &DeblendConfig,
     max_area: usize,
@@ -394,7 +396,7 @@ fn extract_candidates_multi_threshold(
         pixels: Vec::with_capacity(50),
     });
 
-    for (idx, &label) in labels.iter().enumerate() {
+    for (idx, &label) in labels.pixels().iter().enumerate() {
         if label == 0 {
             continue;
         }

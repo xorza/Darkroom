@@ -660,7 +660,7 @@ fn test_dilate_mask_preserves_original_pixels() {
 #[test]
 fn test_extract_candidates_empty() {
     let pixels = Buffer2::new(3, 3, vec![0.5; 9]);
-    let labels = vec![0u32; 9];
+    let labels = Buffer2::new(3, 3, vec![0u32; 9]);
 
     let candidates = extract_candidates(&pixels, &labels, 0, &TEST_DEBLEND_CONFIG, TEST_MAX_AREA);
 
@@ -679,11 +679,15 @@ fn test_extract_candidates_single_component() {
             0.1, 0.1, 0.1,
         ],
     );
-    let labels = vec![
-        0, 0, 0, //
-        1, 1, 1, //
-        0, 0, 0,
-    ];
+    let labels = Buffer2::new(
+        3,
+        3,
+        vec![
+            0, 0, 0, //
+            1, 1, 1, //
+            0, 0, 0,
+        ],
+    );
 
     let candidates = extract_candidates(&pixels, &labels, 1, &TEST_DEBLEND_CONFIG, TEST_MAX_AREA);
 
@@ -711,11 +715,15 @@ fn test_extract_candidates_two_components() {
             0.1, 0.1, 0.1, 0.1, 0.1,
         ],
     );
-    let labels = vec![
-        1, 0, 0, 0, 2, //
-        0, 0, 0, 0, 0, //
-        0, 0, 0, 0, 0,
-    ];
+    let labels = Buffer2::new(
+        5,
+        3,
+        vec![
+            1, 0, 0, 0, 2, //
+            0, 0, 0, 0, 0, //
+            0, 0, 0, 0, 0,
+        ],
+    );
 
     let candidates = extract_candidates(&pixels, &labels, 2, &TEST_DEBLEND_CONFIG, TEST_MAX_AREA);
 
@@ -738,19 +746,20 @@ fn test_extract_candidates_two_components() {
 fn test_extract_candidates_bounding_box() {
     // 5x5 with L-shaped component
     let mut pixels_data = vec![0.1; 25];
-    let mut labels = vec![0u32; 25];
+    let mut labels_data = vec![0u32; 25];
 
     // L-shape: (0,0), (0,1), (0,2), (1,2)
-    labels[0 * 5 + 0] = 1;
+    labels_data[0 * 5 + 0] = 1;
     pixels_data[0 * 5 + 0] = 0.5;
-    labels[1 * 5 + 0] = 1;
+    labels_data[1 * 5 + 0] = 1;
     pixels_data[1 * 5 + 0] = 0.6;
-    labels[2 * 5 + 0] = 1;
+    labels_data[2 * 5 + 0] = 1;
     pixels_data[2 * 5 + 0] = 0.9; // peak
-    labels[2 * 5 + 1] = 1;
+    labels_data[2 * 5 + 1] = 1;
     pixels_data[2 * 5 + 1] = 0.7;
 
     let pixels = Buffer2::new(5, 5, pixels_data);
+    let labels = Buffer2::new(5, 5, labels_data);
     let candidates = extract_candidates(&pixels, &labels, 1, &TEST_DEBLEND_CONFIG, TEST_MAX_AREA);
 
     assert_eq!(candidates.len(), 1);
@@ -769,7 +778,7 @@ fn test_extract_candidates_bounding_box() {
 fn test_extract_candidates_width_height() {
     let pixels = Buffer2::new(3, 2, vec![0.5; 6]);
     // 3x2 component covering full image
-    let labels = vec![1u32; 6];
+    let labels = Buffer2::new(3, 2, vec![1u32; 6]);
 
     let candidates = extract_candidates(&pixels, &labels, 1, &TEST_DEBLEND_CONFIG, TEST_MAX_AREA);
 
@@ -783,16 +792,18 @@ fn test_extract_candidates_width_height() {
 fn test_extract_candidates_max_area_filter() {
     // Test that components exceeding max_area are skipped early
     let pixels = Buffer2::new(10, 10, vec![0.5; 100]); // 10x10 image
-    let mut labels = vec![0u32; 100];
+    let mut labels_data = vec![0u32; 100];
 
     // Create a component with 50 pixels (labels 1)
-    for label in labels.iter_mut().take(50) {
+    for label in labels_data.iter_mut().take(50) {
         *label = 1;
     }
     // Create a small component with 5 pixels (labels 2)
-    for label in labels.iter_mut().take(55).skip(50) {
+    for label in labels_data.iter_mut().take(55).skip(50) {
         *label = 2;
     }
+
+    let labels = Buffer2::new(10, 10, labels_data);
 
     // With max_area=10, the large component should be skipped
     let candidates = extract_candidates(&pixels, &labels, 2, &TEST_DEBLEND_CONFIG, 10);
@@ -816,11 +827,15 @@ fn test_extract_candidates_multiple_peaks_same_value() {
             0.1, 0.1, 0.1,
         ],
     );
-    let labels = vec![
-        0, 0, 0, //
-        1, 1, 1, //
-        0, 0, 0,
-    ];
+    let labels = Buffer2::new(
+        3,
+        3,
+        vec![
+            0, 0, 0, //
+            1, 1, 1, //
+            0, 0, 0,
+        ],
+    );
 
     let candidates = extract_candidates(&pixels, &labels, 1, &TEST_DEBLEND_CONFIG, TEST_MAX_AREA);
 
@@ -844,11 +859,15 @@ fn test_extract_candidates_peak_at_corner() {
             0.1, 0.1, 0.1,
         ],
     );
-    let labels = vec![
-        1, 1, 0, //
-        1, 1, 0, //
-        0, 0, 0,
-    ];
+    let labels = Buffer2::new(
+        3,
+        3,
+        vec![
+            1, 1, 0, //
+            1, 1, 0, //
+            0, 0, 0,
+        ],
+    );
 
     let candidates = extract_candidates(&pixels, &labels, 1, &TEST_DEBLEND_CONFIG, TEST_MAX_AREA);
 
@@ -873,11 +892,15 @@ fn test_extract_candidates_single_pixel_component() {
             0.1, 0.1, 0.1,
         ],
     );
-    let labels = vec![
-        0, 0, 0, //
-        0, 1, 0, //
-        0, 0, 0,
-    ];
+    let labels = Buffer2::new(
+        3,
+        3,
+        vec![
+            0, 0, 0, //
+            0, 1, 0, //
+            0, 0, 0,
+        ],
+    );
 
     let candidates = extract_candidates(&pixels, &labels, 1, &TEST_DEBLEND_CONFIG, TEST_MAX_AREA);
 
@@ -907,11 +930,15 @@ fn test_extract_candidates_diagonal_component() {
             0.1, 0.1, 0.7,
         ],
     );
-    let labels = vec![
-        1, 0, 0, //
-        0, 1, 0, //
-        0, 0, 1,
-    ];
+    let labels = Buffer2::new(
+        3,
+        3,
+        vec![
+            1, 0, 0, //
+            0, 1, 0, //
+            0, 0, 1,
+        ],
+    );
 
     let candidates = extract_candidates(&pixels, &labels, 1, &TEST_DEBLEND_CONFIG, TEST_MAX_AREA);
 
@@ -940,11 +967,15 @@ fn test_extract_candidates_sparse_labels() {
             0.1, 0.1, 0.1,
         ],
     );
-    let labels = vec![
-        1, 0, 3, //
-        0, 0, 0, //
-        0, 0, 0,
-    ];
+    let labels = Buffer2::new(
+        3,
+        3,
+        vec![
+            1, 0, 3, //
+            0, 0, 0, //
+            0, 0, 0,
+        ],
+    );
 
     // num_labels should be 3 to account for label 3
     let candidates = extract_candidates(&pixels, &labels, 3, &TEST_DEBLEND_CONFIG, TEST_MAX_AREA);
@@ -963,7 +994,7 @@ fn test_extract_candidates_sparse_labels() {
 fn test_extract_candidates_full_image_component() {
     // Component covering entire image
     let pixels = Buffer2::new(3, 3, (0..9).map(|i| 0.1 + i as f32 * 0.1).collect());
-    let labels = vec![1u32; 9];
+    let labels = Buffer2::new(3, 3, vec![1u32; 9]);
 
     let candidates = extract_candidates(&pixels, &labels, 1, &TEST_DEBLEND_CONFIG, TEST_MAX_AREA);
 
@@ -992,11 +1023,15 @@ fn test_extract_candidates_negative_pixel_values() {
             0.1, 0.1, 0.1,
         ],
     );
-    let labels = vec![
-        1, 1, 0, //
-        1, 1, 0, //
-        0, 0, 0,
-    ];
+    let labels = Buffer2::new(
+        3,
+        3,
+        vec![
+            1, 1, 0, //
+            1, 1, 0, //
+            0, 0, 0,
+        ],
+    );
 
     let candidates = extract_candidates(&pixels, &labels, 1, &TEST_DEBLEND_CONFIG, TEST_MAX_AREA);
 
@@ -1012,15 +1047,16 @@ fn test_extract_candidates_negative_pixel_values() {
 fn test_extract_candidates_many_components() {
     // 10 separate single-pixel components
     let mut pixels_data = vec![0.1f32; 100];
-    let mut labels = vec![0u32; 100];
+    let mut labels_data = vec![0u32; 100];
 
     for i in 0..10 {
         let idx = i * 10 + i; // Diagonal positions
         pixels_data[idx] = 0.5 + i as f32 * 0.05;
-        labels[idx] = (i + 1) as u32;
+        labels_data[idx] = (i + 1) as u32;
     }
 
     let pixels = Buffer2::new(10, 10, pixels_data);
+    let labels = Buffer2::new(10, 10, labels_data);
     let candidates = extract_candidates(&pixels, &labels, 10, &TEST_DEBLEND_CONFIG, TEST_MAX_AREA);
 
     assert_eq!(candidates.len(), 10);
@@ -1042,10 +1078,14 @@ fn test_extract_candidates_non_square_image() {
             0.1, 0.2, 0.3, 0.2, 0.1, 0.7, 0.1,
         ],
     );
-    let labels = vec![
-        0, 1, 1, 1, 0, 2, 0, //
-        0, 1, 1, 1, 0, 2, 0,
-    ];
+    let labels = Buffer2::new(
+        7,
+        2,
+        vec![
+            0, 1, 1, 1, 0, 2, 0, //
+            0, 1, 1, 1, 0, 2, 0,
+        ],
+    );
 
     let candidates = extract_candidates(&pixels, &labels, 2, &TEST_DEBLEND_CONFIG, TEST_MAX_AREA);
 
@@ -1198,16 +1238,17 @@ fn test_deblend_star_pair() {
     }
 
     // Create a single connected component covering both stars
-    let mut labels = vec![0u32; width * height];
+    let mut labels_data = vec![0u32; width * height];
     for y in 1..8 {
         for x in 1..14 {
             if pixels[y * width + x] > 0.15 {
-                labels[y * width + x] = 1;
+                labels_data[y * width + x] = 1;
             }
         }
     }
 
     let pixels = Buffer2::new(width, height, pixels);
+    let labels = Buffer2::new(width, height, labels_data);
     let candidates = extract_candidates(&pixels, &labels, 1, &TEST_DEBLEND_CONFIG, TEST_MAX_AREA);
 
     // Should deblend into 2 candidates
@@ -1273,16 +1314,17 @@ fn test_no_deblend_for_close_peaks() {
     }
 
     // Create single component
-    let mut labels = vec![0u32; width * height];
+    let mut labels_data = vec![0u32; width * height];
     for y in 2..7 {
         for x in 1..7 {
             if pixels[y * width + x] > 0.15 {
-                labels[y * width + x] = 1;
+                labels_data[y * width + x] = 1;
             }
         }
     }
 
     let pixels = Buffer2::new(width, height, pixels);
+    let labels = Buffer2::new(width, height, labels_data);
     let candidates = extract_candidates(&pixels, &labels, 1, &TEST_DEBLEND_CONFIG, TEST_MAX_AREA);
 
     // Should NOT deblend - only one candidate because peaks are too close
@@ -1318,16 +1360,17 @@ fn test_deblend_respects_prominence() {
     pixels[4 * width + 7] = 0.28; // 0.1 bg + 0.18 = 0.28 (0.18/0.9 = 20%)
 
     // Create single component
-    let mut labels = vec![0u32; width * height];
+    let mut labels_data = vec![0u32; width * height];
     for y in 0..height {
         for x in 0..width {
             if pixels[y * width + x] > 0.15 {
-                labels[y * width + x] = 1;
+                labels_data[y * width + x] = 1;
             }
         }
     }
 
     let pixels = Buffer2::new(width, height, pixels);
+    let labels = Buffer2::new(width, height, labels_data);
     let candidates = extract_candidates(&pixels, &labels, 1, &TEST_DEBLEND_CONFIG, TEST_MAX_AREA);
 
     // Should NOT deblend - secondary peak is not prominent enough
@@ -1377,11 +1420,11 @@ fn test_multi_threshold_deblend_star_pair() {
     }
 
     // Create a single connected component covering both stars
-    let mut labels = vec![0u32; width * height];
+    let mut labels_data = vec![0u32; width * height];
     for y in 0..height {
         for x in 0..width {
             if pixels[y * width + x] > 0.15 {
-                labels[y * width + x] = 1;
+                labels_data[y * width + x] = 1;
             }
         }
     }
@@ -1396,6 +1439,7 @@ fn test_multi_threshold_deblend_star_pair() {
     };
 
     let pixels = Buffer2::new(width, height, pixels);
+    let labels = Buffer2::new(width, height, labels_data);
     let candidates = extract_candidates(&pixels, &labels, 1, &mt_config, TEST_MAX_AREA);
 
     // Should deblend into 2 candidates
@@ -1452,11 +1496,11 @@ fn test_multi_threshold_vs_simple_deblend_consistency() {
     }
 
     // Create a single component
-    let mut labels = vec![0u32; width * height];
+    let mut labels_data = vec![0u32; width * height];
     for y in 0..height {
         for x in 0..width {
             if pixels[y * width + x] > 0.15 {
-                labels[y * width + x] = 1;
+                labels_data[y * width + x] = 1;
             }
         }
     }
@@ -1470,6 +1514,7 @@ fn test_multi_threshold_vs_simple_deblend_consistency() {
         min_contrast: 0.005,
     };
     let pixels = Buffer2::new(width, height, pixels);
+    let labels = Buffer2::new(width, height, labels_data);
     let simple_candidates = extract_candidates(&pixels, &labels, 1, &simple_config, TEST_MAX_AREA);
 
     // Multi-threshold deblending
@@ -1542,11 +1587,11 @@ fn test_multi_threshold_deblend_high_contrast_disables() {
     }
 
     // Create a single component
-    let mut labels = vec![0u32; width * height];
+    let mut labels_data = vec![0u32; width * height];
     for y in 0..height {
         for x in 0..width {
             if pixels[y * width + x] > 0.15 {
-                labels[y * width + x] = 1;
+                labels_data[y * width + x] = 1;
             }
         }
     }
@@ -1561,6 +1606,7 @@ fn test_multi_threshold_deblend_high_contrast_disables() {
     };
 
     let pixels = Buffer2::new(width, height, pixels);
+    let labels = Buffer2::new(width, height, labels_data);
     let candidates = extract_candidates(&pixels, &labels, 1, &config, TEST_MAX_AREA);
 
     // Should return single candidate (deblending disabled)
