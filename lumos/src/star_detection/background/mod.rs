@@ -239,7 +239,7 @@ fn create_object_mask(
     scratch: &mut BitBuffer2,
 ) {
     // Create threshold mask using packed SIMD-optimized implementation
-    super::common::threshold_mask::create_threshold_mask_packed(
+    super::common::threshold_mask::create_threshold_mask(
         pixels.pixels(),
         background.background.pixels(),
         background.noise.pixels(),

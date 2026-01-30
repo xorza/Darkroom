@@ -1,6 +1,6 @@
 //! Tests for threshold mask creation (packed BitBuffer2 version).
 
-use super::{create_threshold_mask_filtered_packed, create_threshold_mask_packed};
+use super::{create_threshold_mask, create_threshold_mask_filtered};
 use crate::common::BitBuffer2;
 
 /// Helper to create threshold mask for tests using packed version
@@ -13,7 +13,7 @@ fn create_threshold_mask_test(
     height: usize,
 ) -> BitBuffer2 {
     let mut mask = BitBuffer2::new_filled(width, height, false);
-    create_threshold_mask_packed(pixels, bg, noise, sigma, &mut mask);
+    create_threshold_mask(pixels, bg, noise, sigma, &mut mask);
     mask
 }
 
@@ -26,7 +26,7 @@ fn create_threshold_mask_filtered_test(
     height: usize,
 ) -> BitBuffer2 {
     let mut mask = BitBuffer2::new_filled(width, height, false);
-    create_threshold_mask_filtered_packed(filtered, noise, sigma, &mut mask);
+    create_threshold_mask_filtered(filtered, noise, sigma, &mut mask);
     mask
 }
 
@@ -291,4 +291,140 @@ fn test_large_image() {
         let expected = i % 100 == 0;
         assert_eq!(mask.get(i), expected, "Index {} should be {}", i, expected);
     }
+}
+
+#[test]
+fn test_negative_values() {
+    // Test with negative pixel values (common in background-subtracted images)
+    let pixels = vec![-0.5f32, 0.5, -1.0, 1.0];
+    let bg = vec![0.0f32; 4];
+    let noise = vec![0.1f32; 4];
+
+    // threshold = 0.0 + 3.0 * 0.1 = 0.3
+    // -0.5 <= 0.3 -> false
+    // 0.5 > 0.3 -> true
+    // -1.0 <= 0.3 -> false
+    // 1.0 > 0.3 -> true
+    let mask = create_threshold_mask_test(&pixels, &bg, &noise, 3.0, 2, 2);
+
+    assert!(!mask.get(0));
+    assert!(mask.get(1));
+    assert!(!mask.get(2));
+    assert!(mask.get(3));
+}
+
+#[test]
+fn test_negative_background() {
+    // Negative background can occur in calibrated images
+    let pixels = vec![0.0f32; 4];
+    let bg = vec![-1.0f32, -0.5, 0.0, 0.5];
+    let noise = vec![0.1f32; 4];
+
+    // thresholds: -1.0 + 0.3 = -0.7, -0.5 + 0.3 = -0.2, 0.0 + 0.3 = 0.3, 0.5 + 0.3 = 0.8
+    // 0.0 > -0.7 -> true
+    // 0.0 > -0.2 -> true
+    // 0.0 <= 0.3 -> false
+    // 0.0 <= 0.8 -> false
+    let mask = create_threshold_mask_test(&pixels, &bg, &noise, 3.0, 2, 2);
+
+    assert!(mask.get(0));
+    assert!(mask.get(1));
+    assert!(!mask.get(2));
+    assert!(!mask.get(3));
+}
+
+#[test]
+fn test_tiny_image_1x1() {
+    let pixels = vec![2.0f32];
+    let bg = vec![1.0f32];
+    let noise = vec![0.1f32];
+
+    // threshold = 1.0 + 3.0 * 0.1 = 1.3, pixel = 2.0 > 1.3
+    let mask = create_threshold_mask_test(&pixels, &bg, &noise, 3.0, 1, 1);
+    assert!(mask.get(0));
+
+    // Below threshold
+    let pixels_below = vec![1.0f32];
+    let mask_below = create_threshold_mask_test(&pixels_below, &bg, &noise, 3.0, 1, 1);
+    assert!(!mask_below.get(0));
+}
+
+#[test]
+fn test_tiny_image_2x2() {
+    let pixels = vec![2.0f32, 1.0, 1.5, 0.5];
+    let bg = vec![1.0f32; 4];
+    let noise = vec![0.1f32; 4];
+
+    // threshold = 1.3
+    // 2.0 > 1.3 -> true
+    // 1.0 <= 1.3 -> false
+    // 1.5 > 1.3 -> true
+    // 0.5 <= 1.3 -> false
+    let mask = create_threshold_mask_test(&pixels, &bg, &noise, 3.0, 2, 2);
+
+    assert!(mask.get(0));
+    assert!(!mask.get(1));
+    assert!(mask.get(2));
+    assert!(!mask.get(3));
+}
+
+#[test]
+fn test_tiny_image_1xn() {
+    // Single row images
+    for width in 1..=10 {
+        let pixels = vec![2.0f32; width];
+        let bg = vec![1.0f32; width];
+        let noise = vec![0.1f32; width];
+
+        let mask = create_threshold_mask_test(&pixels, &bg, &noise, 3.0, width, 1);
+        assert!(mask.iter().all(|v| v), "Failed for 1x{}", width);
+    }
+}
+
+#[test]
+fn test_tiny_image_nx1() {
+    // Single column images
+    for height in 1..=10 {
+        let pixels = vec![2.0f32; height];
+        let bg = vec![1.0f32; height];
+        let noise = vec![0.1f32; height];
+
+        let mask = create_threshold_mask_test(&pixels, &bg, &noise, 3.0, 1, height);
+        assert!(mask.iter().all(|v| v), "Failed for {}x1", height);
+    }
+}
+
+#[test]
+fn test_filtered_negative_values() {
+    // Filtered images commonly have negative values where background was over-subtracted
+    let filtered = vec![-0.5f32, 0.5, -0.1, 0.4];
+    let noise = vec![0.1f32; 4];
+
+    // threshold = 3.0 * 0.1 = 0.3
+    // -0.5 <= 0.3 -> false
+    // 0.5 > 0.3 -> true
+    // -0.1 <= 0.3 -> false
+    // 0.4 > 0.3 -> true
+    let mask = create_threshold_mask_filtered_test(&filtered, &noise, 3.0, 2, 2);
+
+    assert!(!mask.get(0));
+    assert!(mask.get(1));
+    assert!(!mask.get(2));
+    assert!(mask.get(3));
+}
+
+#[test]
+fn test_negative_noise_clamped() {
+    // Negative noise should be clamped to epsilon (1e-6)
+    let pixels = vec![1.1f32, 0.9];
+    let bg = vec![1.0f32; 2];
+    let noise = vec![-0.1f32; 2]; // Negative noise
+
+    // With noise.max(1e-6), threshold ≈ 1.0 + 3.0 * 1e-6 ≈ 1.000003
+    // 1.1 > 1.000003 -> true
+    // 0.9 <= 1.000003 -> false
+    let mask = create_threshold_mask_test(&pixels, &bg, &noise, 3.0, 2, 1);
+
+    assert!(mask.get(0));
+    assert!(!mask.get(1));
 }

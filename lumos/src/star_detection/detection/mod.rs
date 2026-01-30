@@ -6,7 +6,7 @@ mod tests;
 use super::StarDetectionConfig;
 use super::background::BackgroundMap;
 use super::common::dilate_mask;
-use super::common::threshold_mask::create_threshold_mask_packed;
+use super::common::threshold_mask::{create_threshold_mask, create_threshold_mask_filtered};
 use super::deblend::{
     ComponentData, DeblendConfig, MultiThresholdDeblendConfig, Pixel,
     deblend_component as multi_threshold_deblend, deblend_local_maxima,
@@ -92,7 +92,7 @@ pub fn detect_stars(
 
     // Create binary mask of above-threshold pixels
     let mut mask = BitBuffer2::new_filled(width, height, false);
-    create_threshold_mask_packed(
+    create_threshold_mask(
         pixels.pixels(),
         background.background.pixels(),
         background.noise.pixels(),
@@ -295,12 +295,9 @@ pub fn detect_stars_filtered(
 
     // Create binary mask from the filtered image
     // The threshold is based on noise in the filtered image
-    // For filtered images, background is already subtracted, so pass zeros for bg
     let mut mask = BitBuffer2::new_filled(width, height, false);
-    let zeros = vec![0.0f32; width * height];
-    super::common::threshold_mask::create_threshold_mask_packed(
+    create_threshold_mask_filtered(
         filtered.pixels(),
-        &zeros,
         background.noise.pixels(),
         detection_config.sigma_threshold,
         &mut mask,
