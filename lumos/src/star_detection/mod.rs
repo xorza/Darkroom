@@ -107,7 +107,6 @@ pub enum CentroidMethod {
 }
 
 pub use defect_map::DefectMap;
-use defect_map::apply_defect_mask;
 
 /// Star detector with builder pattern for convenient star detection.
 ///
@@ -166,20 +165,11 @@ impl StarDetector {
         let mut pixels = image.to_grayscale_buffer();
         let mut output = Buffer2::new_default(width, height);
 
-        let mut diagnostics = StarDetectionDiagnostics::default();
-
         // Step 0a: Apply defect mask if provided
-        if self
-            .config
-            .defect_map
-            .as_ref()
-            .is_some_and(|m| !m.is_empty())
+        if let Some(defect_map) = self.config.defect_map.as_ref()
+            && !defect_map.is_empty()
         {
-            apply_defect_mask(
-                &pixels,
-                self.config.defect_map.as_ref().unwrap(),
-                &mut output,
-            );
+            defect_map.apply(&pixels, &mut output);
             std::mem::swap(&mut pixels, &mut output);
         }
 
@@ -239,6 +229,8 @@ impl StarDetector {
                 detect_stars(&pixels, &background, &self.config)
             }
         };
+
+        let mut diagnostics = StarDetectionDiagnostics::default();
         diagnostics.candidates_after_filtering = candidates.len();
         tracing::debug!("Detected {} star candidates", candidates.len());
 
