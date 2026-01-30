@@ -189,7 +189,7 @@ impl<'a> BayerImage<'a> {
 #[cfg(target_arch = "x86_64")]
 pub fn demosaic_bilinear(bayer: &BayerImage) -> Vec<f32> {
     let use_parallel = bayer.width >= MIN_PARALLEL_SIZE && bayer.height >= MIN_PARALLEL_SIZE;
-    let use_simd = crate::common::cpu_features::has_sse3() && bayer.width >= 8 && bayer.height >= 4;
+    let use_simd = common::cpu_features::has_sse3() && bayer.width >= 8 && bayer.height >= 4;
 
     if use_parallel {
         demosaic_parallel(bayer, use_simd)

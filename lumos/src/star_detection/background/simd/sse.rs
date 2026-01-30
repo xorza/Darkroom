@@ -193,7 +193,7 @@ pub unsafe fn sum_abs_deviations_sse41(values: &[f32], median: f32) -> f32 {
 mod tests {
     use super::*;
     #[cfg(target_arch = "x86_64")]
-    use crate::common::cpu_features;
+    use common::cpu_features;
 
     #[test]
     #[cfg(target_arch = "x86_64")]

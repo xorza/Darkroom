@@ -14,7 +14,7 @@
 //! using SIMD for the min/max operations in the sorting network.
 
 #[cfg(target_arch = "x86_64")]
-use crate::common::cpu_features;
+use common::cpu_features;
 
 #[cfg(target_arch = "x86_64")]
 pub mod sse;

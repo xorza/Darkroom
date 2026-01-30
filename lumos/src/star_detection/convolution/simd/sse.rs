@@ -163,7 +163,7 @@ fn convolve_pixel_scalar(
 mod tests {
     use super::*;
     #[cfg(target_arch = "x86_64")]
-    use crate::common::cpu_features;
+    use common::cpu_features;
 
     #[test]
     #[cfg(target_arch = "x86_64")]

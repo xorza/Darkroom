@@ -1,9 +1,4 @@
 //! Common utilities for lumos.
 
-pub(crate) mod cpu_features;
-
-mod bit_buffer2;
-mod buffer2;
-
-pub use bit_buffer2::BitBuffer2;
-pub use buffer2::Buffer2;
+pub use common::bit_buffer2::BitBuffer2;
+pub use common::buffer2::Buffer2;

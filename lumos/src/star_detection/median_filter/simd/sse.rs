@@ -260,7 +260,7 @@ unsafe fn median9_sse41(
 mod tests {
     use super::*;
     #[cfg(target_arch = "x86_64")]
-    use crate::common::cpu_features;
+    use common::cpu_features;
 
     fn median9_reference(values: &mut [f32; 9]) -> f32 {
         values.sort_by(|a, b| a.partial_cmp(b).unwrap());

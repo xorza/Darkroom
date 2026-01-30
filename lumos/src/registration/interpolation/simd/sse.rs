@@ -314,9 +314,9 @@ fn sample_pixel_scalar(
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[cfg(target_arch = "x86_64")]
-    use crate::common::cpu_features;
     use crate::testing::synthetic::patterns;
+    #[cfg(target_arch = "x86_64")]
+    use common::cpu_features;
 
     #[test]
     #[cfg(target_arch = "x86_64")]

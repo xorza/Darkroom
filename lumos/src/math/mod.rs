@@ -52,7 +52,7 @@ pub fn sum_f32(values: &[f32]) -> f32 {
 /// Sum f32 values using SIMD when available.
 #[cfg(target_arch = "x86_64")]
 pub fn sum_f32(values: &[f32]) -> f32 {
-    if values.len() < 4 || !crate::common::cpu_features::has_sse4_1() {
+    if values.len() < 4 || !common::cpu_features::has_sse4_1() {
         return scalar::sum_f32(values);
     }
     unsafe { sse::sum_f32(values) }
@@ -108,7 +108,7 @@ pub fn sum_squared_diff(values: &[f32], mean: f32) -> f32 {
 /// Calculate sum of squared differences from mean using SIMD.
 #[cfg(target_arch = "x86_64")]
 pub fn sum_squared_diff(values: &[f32], mean: f32) -> f32 {
-    if values.len() < 4 || !crate::common::cpu_features::has_sse4_1() {
+    if values.len() < 4 || !common::cpu_features::has_sse4_1() {
         return scalar::sum_squared_diff(values, mean);
     }
     unsafe { sse::sum_squared_diff(values, mean) }

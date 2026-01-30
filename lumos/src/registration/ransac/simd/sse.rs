@@ -248,7 +248,7 @@ pub unsafe fn count_inliers_sse2(
 mod tests {
     use super::*;
     #[cfg(target_arch = "x86_64")]
-    use crate::common::cpu_features;
+    use common::cpu_features;
 
     fn count_inliers_scalar(
         ref_points: &[(f64, f64)],

@@ -245,7 +245,7 @@ pub fn demosaic_xtrans_bilinear(xtrans: &XTransImage) -> Vec<f32> {
     let lookups = [&red_lookup, &green_lookup, &blue_lookup];
 
     let use_parallel = xtrans.width >= MIN_PARALLEL_SIZE && xtrans.height >= MIN_PARALLEL_SIZE;
-    let use_simd = crate::common::cpu_features::has_sse4_1() && xtrans.width >= MIN_SIMD_WIDTH;
+    let use_simd = common::cpu_features::has_sse4_1() && xtrans.width >= MIN_SIMD_WIDTH;
 
     if use_parallel || use_simd {
         // Create linear lookups once for SIMD path
@@ -688,7 +688,7 @@ mod tests {
         let scalar_result = demosaic_scalar(&xtrans, &lookups);
 
         // Get SIMD result if SSE4.1 is available
-        if crate::common::cpu_features::has_sse4_1() {
+        if common::cpu_features::has_sse4_1() {
             let mut simd_result = vec![0.0f32; size * size * 3];
             for y in 0..size {
                 let row_start = y * size * 3;
@@ -733,7 +733,7 @@ mod tests {
 
         let scalar_result = demosaic_scalar(&xtrans, &lookups);
 
-        if crate::common::cpu_features::has_sse4_1() {
+        if common::cpu_features::has_sse4_1() {
             // demosaic_xtrans_bilinear will use parallel SIMD path for large images
             let simd_parallel_result = demosaic_xtrans_bilinear(&xtrans);
 

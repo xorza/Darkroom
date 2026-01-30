@@ -23,7 +23,7 @@ use common::parallel;
 use rayon::iter::ParallelIterator;
 
 #[cfg(target_arch = "x86_64")]
-use crate::common::cpu_features;
+use common::cpu_features;
 
 /// Scalar implementation for packed threshold mask with background.
 #[cfg_attr(not(test), inline)]

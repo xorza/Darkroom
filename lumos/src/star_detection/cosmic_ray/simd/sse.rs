@@ -141,7 +141,7 @@ pub unsafe fn compute_laplacian_row_sse41(
 mod tests {
     use super::*;
     #[cfg(target_arch = "x86_64")]
-    use crate::common::cpu_features;
+    use common::cpu_features;
 
     fn compute_laplacian_scalar(pixels: &[f32], width: usize, height: usize) -> Vec<f32> {
         let mut output = vec![0.0f32; pixels.len()];

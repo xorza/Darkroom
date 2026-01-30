@@ -1,8 +1,11 @@
 #[macro_use]
 pub mod macros;
+pub mod bit_buffer2;
 pub mod bool_ext;
+pub mod buffer2;
 pub mod bump_vec_deque;
 pub mod constants;
+pub mod cpu_features;
 pub mod debug;
 pub mod file_format;
 pub mod file_utils;
@@ -25,7 +28,9 @@ pub mod test_utils;
 pub mod toggle;
 pub mod yaml_format;
 
+pub use bit_buffer2::BitBuffer2;
 pub use bool_ext::BoolExt;
+pub use buffer2::Buffer2;
 pub use bump_vec_deque::BumpVecDeque;
 pub use constants::EPSILON;
 pub use debug::is_debug;
