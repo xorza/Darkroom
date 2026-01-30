@@ -280,41 +280,42 @@ fn gaussian_convolve_2d_direct(pixels: &Buffer2<f32>, sigma: f32, output: &mut B
         }
     }
 
-    let output_pixels = output.pixels_mut();
-    // todo paralelize
-    for y in 0..height {
-        for x in 0..width {
-            let mut sum = 0.0f32;
+    output
+        .pixels_mut()
+        .par_rows_mut_auto(width)
+        .for_each(|(y, out_row)| {
+            for (x, out_pixel) in out_row.iter_mut().enumerate() {
+                let mut sum = 0.0f32;
 
-            for ky in 0..ksize {
-                for kx in 0..ksize {
-                    let sx = x as isize + kx as isize - radius as isize;
-                    let sy = y as isize + ky as isize - radius as isize;
+                for ky in 0..ksize {
+                    for kx in 0..ksize {
+                        let sx = x as isize + kx as isize - radius as isize;
+                        let sy = y as isize + ky as isize - radius as isize;
 
-                    // Mirror boundary
-                    let sx: usize = if sx < 0 {
-                        (-sx) as usize
-                    } else if sx >= width as isize {
-                        2 * width - 2 - sx as usize
-                    } else {
-                        sx as usize
-                    };
+                        // Mirror boundary
+                        let sx: usize = if sx < 0 {
+                            (-sx) as usize
+                        } else if sx >= width as isize {
+                            2 * width - 2 - sx as usize
+                        } else {
+                            sx as usize
+                        };
 
-                    let sy: usize = if sy < 0 {
-                        (-sy) as usize
-                    } else if sy >= height as isize {
-                        2 * height - 2 - sy as usize
-                    } else {
-                        sy as usize
-                    };
+                        let sy: usize = if sy < 0 {
+                            (-sy) as usize
+                        } else if sy >= height as isize {
+                            2 * height - 2 - sy as usize
+                        } else {
+                            sy as usize
+                        };
 
-                    sum += pixels[sy * width + sx] * kernel_2d[ky * ksize + kx];
+                        sum += pixels[sy * width + sx] * kernel_2d[ky * ksize + kx];
+                    }
                 }
-            }
 
-            output_pixels[y * width + x] = sum;
-        }
-    }
+                *out_pixel = sum;
+            }
+        });
 }
 
 /// Compute 2D elliptical Gaussian kernel (normalized to sum to 1.0).
