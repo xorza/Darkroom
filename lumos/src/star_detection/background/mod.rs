@@ -447,7 +447,8 @@ fn compute_tile_stats(
     }
 
     // Sigma-clipped statistics (3 iterations, 3-sigma clip)
-    sigma_clipped_stats(values, deviations, 3.0, 3)
+    let (median, sigma) = constants::sigma_clipped_median_mad(values, deviations, 3.0, 3);
+    TileStats { median, sigma }
 }
 
 /// Estimate background with masked pixels excluded.
@@ -555,19 +556,6 @@ fn estimate_background_masked(
 
     output.background = Buffer2::new(width, height, background);
     output.noise = Buffer2::new(width, height, noise);
-}
-
-/// Compute sigma-clipped tile statistics using the shared implementation.
-#[inline]
-pub(crate) fn sigma_clipped_stats(
-    values: &mut [f32],
-    deviations: &mut Vec<f32>,
-    kappa: f32,
-    iterations: usize,
-) -> TileStats {
-    let (median, sigma) =
-        constants::sigma_clipped_median_mad(values, deviations, kappa, iterations);
-    TileStats { median, sigma }
 }
 
 /// Interpolate an entire row using segment-based bilinear interpolation.
