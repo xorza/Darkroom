@@ -119,8 +119,7 @@ impl BackgroundConfig {
         self.validate();
         self.validate_image_size(pixels);
 
-        let mut grid = TileGrid::new(pixels, self.tile_size);
-        grid.apply_median_filter();
+        let grid = TileGrid::new(pixels, self.tile_size);
 
         let mut background = self.interpolate_background(pixels, &grid);
 
@@ -292,8 +291,7 @@ fn estimate_background_masked(
     let max_tile_pixels = tile_size * tile_size;
     let min_pixels = (max_tile_pixels as f32 * min_unmasked_fraction) as usize;
 
-    let mut grid = TileGrid::new_with_mask(pixels, tile_size, Some(mask), min_pixels);
-    grid.apply_median_filter();
+    let grid = TileGrid::new_with_mask(pixels, tile_size, Some(mask), min_pixels);
 
     output.background = Buffer2::new_filled(width, height, 0.0);
     output.noise = Buffer2::new_filled(width, height, 0.0);

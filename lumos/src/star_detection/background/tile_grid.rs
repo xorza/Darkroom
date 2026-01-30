@@ -72,7 +72,7 @@ impl TileGrid {
             )
             .collect();
 
-        Self {
+        let mut grid = Self {
             stats: Buffer2::new(tiles_x, tiles_y, tile_stats),
             centers_x: (0..tiles_x)
                 .map(|tx| {
@@ -88,7 +88,10 @@ impl TileGrid {
                     (y_start + y_end) as f32 * 0.5
                 })
                 .collect(),
-        }
+        };
+
+        grid.apply_median_filter();
+        grid
     }
 
     /// Compute sigma-clipped statistics for a single tile using provided scratch buffers.
@@ -160,7 +163,7 @@ impl TileGrid {
     ///
     /// This makes the background estimation more robust to bright stars by
     /// replacing each tile's statistics with the median of its 3x3 neighborhood.
-    pub fn apply_median_filter(&mut self) {
+    fn apply_median_filter(&mut self) {
         let tiles_x = self.tiles_x();
         let tiles_y = self.tiles_y();
 
