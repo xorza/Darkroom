@@ -64,7 +64,7 @@ impl BackgroundMap {
 }
 
 /// Tile statistics computed during background estimation.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct TileStats {
     median: f32,
     sigma: f32,
@@ -72,17 +72,27 @@ pub(crate) struct TileStats {
 
 /// Tile grid with precomputed centers for interpolation.
 struct TileGrid {
-    stats: Vec<TileStats>,
+    stats: Buffer2<TileStats>,
+    /// X center for each tile column (one per column).
     centers_x: Vec<f32>,
+    /// Y center for each tile row (one per row).
     centers_y: Vec<f32>,
-    tiles_x: usize,
-    tiles_y: usize,
 }
 
 impl TileGrid {
     #[inline]
     fn get(&self, tx: usize, ty: usize) -> TileStats {
-        self.stats[ty * self.tiles_x + tx]
+        self.stats[(tx, ty)]
+    }
+
+    #[inline]
+    fn tiles_x(&self) -> usize {
+        self.stats.width()
+    }
+
+    #[inline]
+    fn tiles_y(&self) -> usize {
+        self.stats.height()
     }
 
     /// Apply median filter to the tile grid statistics.
@@ -90,15 +100,18 @@ impl TileGrid {
     /// This makes the background estimation more robust to bright stars by
     /// replacing each tile's statistics with the median of its 3x3 neighborhood.
     fn apply_median_filter(&mut self) {
-        if self.tiles_x < 3 || self.tiles_y < 3 {
+        let tiles_x = self.tiles_x();
+        let tiles_y = self.tiles_y();
+
+        if tiles_x < 3 || tiles_y < 3 {
             return; // Not enough tiles for filtering
         }
 
-        let filtered_stats: Vec<TileStats> = (0..self.tiles_y * self.tiles_x)
+        let filtered_stats: Vec<TileStats> = (0..tiles_y * tiles_x)
             .into_par_iter()
             .map(|idx| {
-                let ty = idx / self.tiles_x;
-                let tx = idx % self.tiles_x;
+                let ty = idx / tiles_x;
+                let tx = idx % tiles_x;
 
                 // Gather 3x3 neighborhood values
                 let mut medians = [0.0f32; 9];
@@ -110,11 +123,7 @@ impl TileGrid {
                         let nx = tx as i32 + dx;
                         let ny = ty as i32 + dy;
 
-                        if nx >= 0
-                            && nx < self.tiles_x as i32
-                            && ny >= 0
-                            && ny < self.tiles_y as i32
-                        {
+                        if nx >= 0 && nx < tiles_x as i32 && ny >= 0 && ny < tiles_y as i32 {
                             let neighbor = self.get(nx as usize, ny as usize);
                             medians[count] = neighbor.median;
                             sigmas[count] = neighbor.sigma;
@@ -134,7 +143,7 @@ impl TileGrid {
             })
             .collect();
 
-        self.stats = filtered_stats;
+        self.stats = Buffer2::new(tiles_x, tiles_y, filtered_stats);
     }
 }
 
@@ -240,7 +249,7 @@ impl BackgroundConfig {
 
         // Build tile grid with precomputed centers
         let mut grid = TileGrid {
-            stats: tile_stats,
+            stats: Buffer2::new(tiles_x, tiles_y, tile_stats),
             centers_x: (0..tiles_x)
                 .map(|tx| {
                     let x_start = tx * tile_size;
@@ -255,8 +264,6 @@ impl BackgroundConfig {
                     (y_start + y_end) as f32 * 0.5
                 })
                 .collect(),
-            tiles_x,
-            tiles_y,
         };
 
         // Apply median filter to tile grid to reject bright star contamination
@@ -490,7 +497,7 @@ fn estimate_background_masked(
 
     // Build tile grid
     let mut grid = TileGrid {
-        stats: tile_stats,
+        stats: Buffer2::new(tiles_x, tiles_y, tile_stats),
         centers_x: (0..tiles_x)
             .map(|tx| {
                 let x_start = tx * tile_size;
@@ -505,8 +512,6 @@ fn estimate_background_masked(
                 (y_start + y_end) as f32 * 0.5
             })
             .collect(),
-        tiles_x,
-        tiles_y,
     };
 
     // Apply median filter
@@ -562,7 +567,7 @@ fn interpolate_row(bg_row: &mut [f32], noise_row: &mut [f32], y: usize, grid: &T
 
     // Compute Y tile indices and weight once for the entire row
     let ty0 = find_lower_tile(fy, &grid.centers_y);
-    let ty1 = (ty0 + 1).min(grid.tiles_y - 1);
+    let ty1 = (ty0 + 1).min(grid.tiles_y() - 1);
 
     let wy = if ty1 != ty0 {
         ((fy - grid.centers_y[ty0]) / (grid.centers_y[ty1] - grid.centers_y[ty0])).clamp(0.0, 1.0)
@@ -574,11 +579,11 @@ fn interpolate_row(bg_row: &mut [f32], noise_row: &mut [f32], y: usize, grid: &T
     // Process row in segments between tile center X boundaries
     let mut x = 0usize;
 
-    for tx0 in 0..grid.tiles_x {
-        let tx1 = (tx0 + 1).min(grid.tiles_x - 1);
+    for tx0 in 0..grid.tiles_x() {
+        let tx1 = (tx0 + 1).min(grid.tiles_x() - 1);
 
         // Segment runs from current x to next tile center (or end of row)
-        let segment_end = if tx0 + 1 < grid.tiles_x {
+        let segment_end = if tx0 + 1 < grid.tiles_x() {
             // Segment ends at next tile center
             (grid.centers_x[tx0 + 1].floor() as usize).min(width)
         } else {
