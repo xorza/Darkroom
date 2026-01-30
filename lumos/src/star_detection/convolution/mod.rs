@@ -15,9 +15,9 @@ mod tests;
 
 use rayon::prelude::*;
 
-use crate::common::parallel::{ParChunksMutAutoWithOffset, ParRowsMutAuto};
 use crate::math::fwhm_to_sigma;
 use crate::star_detection::Buffer2;
+use common::parallel::{ParChunksMutAutoWithOffset, ParRowsMutAuto};
 
 // ============================================================================
 // Public API

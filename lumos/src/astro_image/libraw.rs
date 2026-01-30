@@ -5,7 +5,7 @@ use std::path::Path;
 use std::slice;
 use std::time::Instant;
 
-use crate::common::parallel::ParChunksMutAutoWithOffset;
+use common::parallel::ParChunksMutAutoWithOffset;
 use rayon::prelude::*;
 
 use super::demosaic::xtrans::process_xtrans;

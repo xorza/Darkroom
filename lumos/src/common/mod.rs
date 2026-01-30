@@ -1,7 +1,6 @@
 //! Common utilities for lumos.
 
 pub(crate) mod cpu_features;
-pub(crate) mod parallel;
 
 mod bit_buffer2;
 mod buffer2;

@@ -9,7 +9,7 @@ pub mod simd;
 mod tests;
 
 use crate::common::Buffer2;
-use crate::common::parallel::ParRowsMutAuto;
+use common::parallel::ParRowsMutAuto;
 use rayon::prelude::*;
 
 /// Apply 3x3 median filter to remove Bayer pattern artifacts.

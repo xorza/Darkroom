@@ -19,7 +19,7 @@ mod bench;
 mod tests;
 
 use crate::common::BitBuffer2;
-use crate::common::parallel::ParChunksMutAutoWithOffset;
+use common::parallel::ParChunksMutAutoWithOffset;
 use rayon::iter::ParallelIterator;
 
 #[cfg(target_arch = "x86_64")]

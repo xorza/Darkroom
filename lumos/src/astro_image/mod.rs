@@ -180,7 +180,7 @@ fn deinterleave_rgb(interleaved: &[f32], r: &mut [f32], g: &mut [f32], b: &mut [
 
 /// Interleave separate R, G, B planes into RGB data (RGBRGB...).
 fn interleave_rgb(r: &[f32], g: &[f32], b: &[f32], interleaved: &mut [f32]) {
-    use crate::common::parallel::ParChunksMutAutoWithOffset;
+    use common::parallel::ParChunksMutAutoWithOffset;
     use rayon::prelude::*;
 
     debug_assert_eq!(interleaved.len(), r.len() * 3);
@@ -205,7 +205,7 @@ fn interleave_rgb(r: &[f32], g: &[f32], b: &[f32], interleaved: &mut [f32]) {
 
 /// Convert RGB planes to luminance using Rec. 709 weights.
 fn rgb_to_luminance(r: &[f32], g: &[f32], b: &[f32], gray: &mut [f32]) {
-    use crate::common::parallel::ParChunksMutAutoWithOffset;
+    use common::parallel::ParChunksMutAutoWithOffset;
     use rayon::prelude::*;
 
     debug_assert_eq!(r.len(), g.len());

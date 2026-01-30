@@ -6,8 +6,8 @@
 pub mod threshold_mask;
 
 use crate::common::BitBuffer2;
-use crate::common::parallel::ParChunksMutAutoWithOffset;
 use crate::math::mad_to_sigma;
+use common::parallel::ParChunksMutAutoWithOffset;
 use rayon::iter::ParallelIterator;
 
 /// Stamp radius as a multiple of FWHM.

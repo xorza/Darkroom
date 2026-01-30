@@ -13,8 +13,8 @@ mod tests;
 mod simd;
 mod tile_grid;
 
-use crate::common::parallel::ParZipMut;
 use crate::common::{BitBuffer2, Buffer2};
+use common::parallel::ParZipMut;
 use rayon::prelude::*;
 
 use tile_grid::TileGrid;
