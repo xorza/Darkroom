@@ -1,11 +1,8 @@
 use std::mem::size_of;
 
 use bytemuck::Pod;
-use rayon::prelude::*;
 
 use crate::common::color_format::*;
-use crate::common::error::Result;
-use crate::image::Image;
 
 // =============================================================================
 // Internal trait for channel conversion
@@ -174,190 +171,223 @@ impl OpaqueAlpha for f32 {
 }
 
 // =============================================================================
-// Image conversion using traits (scalar implementation)
+// Row conversion functions (scalar implementation)
 // =============================================================================
 
-macro_rules! dispatch_to {
-    ($from:expr, $to:expr, $from_rust:ty, { $($to_type:ident => $to_rust:ty),+ }) => {
-        match $to.desc().color_format.channel_type {
-            $(ChannelType::$to_type => convert_pixels::<$from_rust, $to_rust>($from, $to),)+
-            #[allow(unreachable_patterns)]
-            _ => unreachable!("Unsupported channel type conversion"),
-        }
-    };
-}
-
-macro_rules! dispatch_from {
-    ($from:expr, $to:expr, { $($from_type:ident => $from_rust:ty),+ }, $to_types:tt) => {
-        match $from.desc().color_format.channel_type {
-            $(ChannelType::$from_type => dispatch_to!($from, $to, $from_rust, $to_types),)+
-            #[allow(unreachable_patterns)]
-            _ => unreachable!("Unsupported channel type conversion"),
-        }
-    };
-}
-
-pub fn convert_image(from: &Image, to: &mut Image) -> Result<()> {
-    let from_size = from.desc().color_format.channel_size;
-    let to_size = to.desc().color_format.channel_size;
-
-    match (from_size, to_size) {
-        (ChannelSize::_8bit, ChannelSize::_8bit) => dispatch_from!(from, to,
-            { UInt => u8 },
-            { UInt => u8 }
-        ),
-        (ChannelSize::_8bit, ChannelSize::_16bit) => dispatch_from!(from, to,
-            { UInt => u8 },
-            { UInt => u16 }
-        ),
-        (ChannelSize::_8bit, ChannelSize::_32bit) => dispatch_from!(from, to,
-            { UInt => u8 },
-            { Float => f32 }
-        ),
-        (ChannelSize::_16bit, ChannelSize::_8bit) => dispatch_from!(from, to,
-            { UInt => u16 },
-            { UInt => u8 }
-        ),
-        (ChannelSize::_16bit, ChannelSize::_16bit) => dispatch_from!(from, to,
-            { UInt => u16 },
-            { UInt => u16 }
-        ),
-        (ChannelSize::_16bit, ChannelSize::_32bit) => dispatch_from!(from, to,
-            { UInt => u16 },
-            { Float => f32 }
-        ),
-        (ChannelSize::_32bit, ChannelSize::_8bit) => dispatch_from!(from, to,
-            { Float => f32 },
-            { UInt => u8 }
-        ),
-        (ChannelSize::_32bit, ChannelSize::_16bit) => dispatch_from!(from, to,
-            { Float => f32 },
-            { UInt => u16 }
-        ),
-        (ChannelSize::_32bit, ChannelSize::_32bit) => dispatch_from!(from, to,
-            { Float => f32 },
-            { Float => f32 }
-        ),
-    }
-
-    Ok(())
-}
-
-fn convert_pixels<From, To>(from: &Image, to: &mut Image)
-where
-    From: Pod + ChannelConvert<To> + RgbToLuminance + Sync,
-    To: Pod + OpaqueAlpha + Send,
+/// Convert a single row of pixels using scalar code.
+/// This is the fallback when SIMD is not available.
+#[inline]
+pub(crate) fn convert_row_scalar<From, To>(
+    from_row: &[u8],
+    to_row: &mut [u8],
+    width: usize,
+    from_channels: usize,
+    to_channels: usize,
+) where
+    From: Pod + ChannelConvert<To> + RgbToLuminance,
+    To: Pod + OpaqueAlpha,
 {
-    debug_assert_eq!(from.desc().width, to.desc().width);
-    debug_assert_eq!(from.desc().height, to.desc().height);
-    debug_assert_eq!(
-        from.desc().color_format.channel_size.byte_count() as usize,
-        size_of::<From>()
-    );
-    debug_assert_eq!(
-        to.desc().color_format.channel_size.byte_count() as usize,
-        size_of::<To>()
-    );
-
-    if from.desc().color_format == to.desc().color_format {
-        return;
-    }
-
-    let width = from.desc().width;
-    let to_channels = to.desc().color_format.channel_count.channel_count() as usize;
-    let from_channels = from.desc().color_format.channel_count.channel_count() as usize;
-    let from_stride = from.desc().stride;
-    let to_stride = to.desc().stride;
     let from_row_bytes = width * from_channels * size_of::<From>();
     let to_row_bytes = width * to_channels * size_of::<To>();
 
-    to.bytes_mut()
-        .par_chunks_mut(to_stride)
-        .enumerate()
-        .for_each(|(y, to_row)| {
-            let from_row = &from.bytes()[y * from_stride..];
-            let from_row: &[From] = bytemuck::cast_slice(&from_row[..from_row_bytes]);
-            let to_row: &mut [To] = bytemuck::cast_slice_mut(&mut to_row[..to_row_bytes]);
+    let from_row: &[From] = bytemuck::cast_slice(&from_row[..from_row_bytes]);
+    let to_row: &mut [To] = bytemuck::cast_slice_mut(&mut to_row[..to_row_bytes]);
 
-            for x in 0..width {
-                let src = &from_row[x * from_channels..];
-                let dst = &mut to_row[x * to_channels..];
+    for x in 0..width {
+        let src = &from_row[x * from_channels..];
+        let dst = &mut to_row[x * to_channels..];
 
-                match (to_channels, from_channels) {
-                    (1, 1) => dst[0] = src[0].convert(),
-                    (1, 2) => dst[0] = src[0].convert(),
-                    (1, 3) => dst[0] = From::luminance(src[0], src[1], src[2]).convert(),
-                    (1, 4) => dst[0] = From::luminance(src[0], src[1], src[2]).convert(),
+        match (to_channels, from_channels) {
+            (1, 1) => dst[0] = src[0].convert(),
+            (1, 2) => dst[0] = src[0].convert(),
+            (1, 3) => dst[0] = From::luminance(src[0], src[1], src[2]).convert(),
+            (1, 4) => dst[0] = From::luminance(src[0], src[1], src[2]).convert(),
 
-                    (2, 1) => {
-                        dst[0] = src[0].convert();
-                        dst[1] = To::opaque_alpha();
-                    }
-                    (2, 2) => {
-                        dst[0] = src[0].convert();
-                        dst[1] = src[1].convert();
-                    }
-                    (2, 3) => {
-                        dst[0] = From::luminance(src[0], src[1], src[2]).convert();
-                        dst[1] = To::opaque_alpha();
-                    }
-                    (2, 4) => {
-                        dst[0] = From::luminance(src[0], src[1], src[2]).convert();
-                        dst[1] = src[3].convert();
-                    }
-
-                    (3, 1) => {
-                        let v = src[0].convert();
-                        dst[0] = v;
-                        dst[1] = v;
-                        dst[2] = v;
-                    }
-                    (3, 2) => {
-                        let v = src[0].convert();
-                        dst[0] = v;
-                        dst[1] = v;
-                        dst[2] = v;
-                    }
-                    (3, 3) => {
-                        dst[0] = src[0].convert();
-                        dst[1] = src[1].convert();
-                        dst[2] = src[2].convert();
-                    }
-                    (3, 4) => {
-                        dst[0] = src[0].convert();
-                        dst[1] = src[1].convert();
-                        dst[2] = src[2].convert();
-                    }
-
-                    (4, 1) => {
-                        let v = src[0].convert();
-                        dst[0] = v;
-                        dst[1] = v;
-                        dst[2] = v;
-                        dst[3] = To::opaque_alpha();
-                    }
-                    (4, 2) => {
-                        let v = src[0].convert();
-                        dst[0] = v;
-                        dst[1] = v;
-                        dst[2] = v;
-                        dst[3] = src[1].convert();
-                    }
-                    (4, 3) => {
-                        dst[0] = src[0].convert();
-                        dst[1] = src[1].convert();
-                        dst[2] = src[2].convert();
-                        dst[3] = To::opaque_alpha();
-                    }
-                    (4, 4) => {
-                        dst[0] = src[0].convert();
-                        dst[1] = src[1].convert();
-                        dst[2] = src[2].convert();
-                        dst[3] = src[3].convert();
-                    }
-
-                    _ => unreachable!(),
-                }
+            (2, 1) => {
+                dst[0] = src[0].convert();
+                dst[1] = To::opaque_alpha();
             }
-        });
+            (2, 2) => {
+                dst[0] = src[0].convert();
+                dst[1] = src[1].convert();
+            }
+            (2, 3) => {
+                dst[0] = From::luminance(src[0], src[1], src[2]).convert();
+                dst[1] = To::opaque_alpha();
+            }
+            (2, 4) => {
+                dst[0] = From::luminance(src[0], src[1], src[2]).convert();
+                dst[1] = src[3].convert();
+            }
+
+            (3, 1) => {
+                let v = src[0].convert();
+                dst[0] = v;
+                dst[1] = v;
+                dst[2] = v;
+            }
+            (3, 2) => {
+                let v = src[0].convert();
+                dst[0] = v;
+                dst[1] = v;
+                dst[2] = v;
+            }
+            (3, 3) => {
+                dst[0] = src[0].convert();
+                dst[1] = src[1].convert();
+                dst[2] = src[2].convert();
+            }
+            (3, 4) => {
+                dst[0] = src[0].convert();
+                dst[1] = src[1].convert();
+                dst[2] = src[2].convert();
+            }
+
+            (4, 1) => {
+                let v = src[0].convert();
+                dst[0] = v;
+                dst[1] = v;
+                dst[2] = v;
+                dst[3] = To::opaque_alpha();
+            }
+            (4, 2) => {
+                let v = src[0].convert();
+                dst[0] = v;
+                dst[1] = v;
+                dst[2] = v;
+                dst[3] = src[1].convert();
+            }
+            (4, 3) => {
+                dst[0] = src[0].convert();
+                dst[1] = src[1].convert();
+                dst[2] = src[2].convert();
+                dst[3] = To::opaque_alpha();
+            }
+            (4, 4) => {
+                dst[0] = src[0].convert();
+                dst[1] = src[1].convert();
+                dst[2] = src[2].convert();
+                dst[3] = src[3].convert();
+            }
+
+            _ => unreachable!(),
+        }
+    }
+}
+
+// =============================================================================
+// Format dispatch helpers
+// =============================================================================
+
+/// Get the Rust type size and conversion function for a given channel size/type pair.
+#[derive(Clone, Copy)]
+pub(crate) struct ConversionInfo {
+    pub from_channels: usize,
+    pub to_channels: usize,
+    pub from_size: ChannelSize,
+    pub to_size: ChannelSize,
+}
+
+impl ConversionInfo {
+    pub fn new(from_fmt: ColorFormat, to_fmt: ColorFormat) -> Self {
+        Self {
+            from_channels: from_fmt.channel_count.channel_count() as usize,
+            to_channels: to_fmt.channel_count.channel_count() as usize,
+            from_size: from_fmt.channel_size,
+            to_size: to_fmt.channel_size,
+        }
+    }
+}
+
+/// Dispatch row conversion based on channel sizes.
+/// This calls the appropriate generic convert_row_scalar with the right types.
+pub(crate) fn dispatch_convert_row_scalar(
+    from_row: &[u8],
+    to_row: &mut [u8],
+    width: usize,
+    info: &ConversionInfo,
+) {
+    match (info.from_size, info.to_size) {
+        (ChannelSize::_8bit, ChannelSize::_8bit) => {
+            convert_row_scalar::<u8, u8>(
+                from_row,
+                to_row,
+                width,
+                info.from_channels,
+                info.to_channels,
+            );
+        }
+        (ChannelSize::_8bit, ChannelSize::_16bit) => {
+            convert_row_scalar::<u8, u16>(
+                from_row,
+                to_row,
+                width,
+                info.from_channels,
+                info.to_channels,
+            );
+        }
+        (ChannelSize::_8bit, ChannelSize::_32bit) => {
+            convert_row_scalar::<u8, f32>(
+                from_row,
+                to_row,
+                width,
+                info.from_channels,
+                info.to_channels,
+            );
+        }
+        (ChannelSize::_16bit, ChannelSize::_8bit) => {
+            convert_row_scalar::<u16, u8>(
+                from_row,
+                to_row,
+                width,
+                info.from_channels,
+                info.to_channels,
+            );
+        }
+        (ChannelSize::_16bit, ChannelSize::_16bit) => {
+            convert_row_scalar::<u16, u16>(
+                from_row,
+                to_row,
+                width,
+                info.from_channels,
+                info.to_channels,
+            );
+        }
+        (ChannelSize::_16bit, ChannelSize::_32bit) => {
+            convert_row_scalar::<u16, f32>(
+                from_row,
+                to_row,
+                width,
+                info.from_channels,
+                info.to_channels,
+            );
+        }
+        (ChannelSize::_32bit, ChannelSize::_8bit) => {
+            convert_row_scalar::<f32, u8>(
+                from_row,
+                to_row,
+                width,
+                info.from_channels,
+                info.to_channels,
+            );
+        }
+        (ChannelSize::_32bit, ChannelSize::_16bit) => {
+            convert_row_scalar::<f32, u16>(
+                from_row,
+                to_row,
+                width,
+                info.from_channels,
+                info.to_channels,
+            );
+        }
+        (ChannelSize::_32bit, ChannelSize::_32bit) => {
+            convert_row_scalar::<f32, f32>(
+                from_row,
+                to_row,
+                width,
+                info.from_channels,
+                info.to_channels,
+            );
+        }
+    }
 }

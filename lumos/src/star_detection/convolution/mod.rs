@@ -17,7 +17,7 @@ use rayon::prelude::*;
 
 use crate::math::fwhm_to_sigma;
 use crate::star_detection::Buffer2;
-use common::parallel::{ParChunksMutAutoWithOffset, ParRowsMutAuto};
+use common::parallel;
 
 // ============================================================================
 // Public API
@@ -52,14 +52,12 @@ pub fn matched_filter(
     let mut subtracted = vec![0.0f32; pixels.len()];
     let pixels_data = pixels.pixels();
     let bg_data = background.pixels();
-    subtracted
-        .par_chunks_mut_auto()
-        .for_each(|(offset, chunk)| {
-            for (i, out) in chunk.iter_mut().enumerate() {
-                let idx = offset + i;
-                *out = (pixels_data[idx] - bg_data[idx]).max(0.0);
-            }
-        });
+    parallel::par_chunks_auto(&mut subtracted).for_each(|(offset, chunk)| {
+        for (i, out) in chunk.iter_mut().enumerate() {
+            let idx = offset + i;
+            *out = (pixels_data[idx] - bg_data[idx]).max(0.0);
+        }
+    });
 
     // Convolve with elliptical Gaussian kernel
     let sigma = fwhm_to_sigma(fwhm);
@@ -130,10 +128,8 @@ pub(super) fn elliptical_gaussian_convolve(
     let (kernel, ksize) = elliptical_gaussian_kernel_2d(sigma, axis_ratio, angle);
     let radius = ksize / 2;
 
-    output
-        .pixels_mut()
-        .par_rows_mut_auto(width)
-        .for_each(|(y_start, out_chunk)| {
+    parallel::par_chunks_auto_aligned(output.pixels_mut(), width).for_each(
+        |(y_start, out_chunk)| {
             let rows_in_chunk = out_chunk.len() / width;
 
             for local_y in 0..rows_in_chunk {
@@ -172,7 +168,8 @@ pub(super) fn elliptical_gaussian_convolve(
                     *out_px = sum;
                 }
             }
-        });
+        },
+    );
 }
 
 /// Compute 1D Gaussian kernel (normalized to sum to 1.0).
@@ -209,10 +206,8 @@ fn convolve_rows_parallel(input: &Buffer2<f32>, output: &mut Buffer2<f32>, kerne
     let width = input.width();
     let radius = kernel.len() / 2;
 
-    output
-        .pixels_mut()
-        .par_rows_mut_auto(width)
-        .for_each(|(y_start, out_chunk)| {
+    parallel::par_chunks_auto_aligned(output.pixels_mut(), width).for_each(
+        |(y_start, out_chunk)| {
             let rows_in_chunk = out_chunk.len() / width;
 
             for local_y in 0..rows_in_chunk {
@@ -221,7 +216,8 @@ fn convolve_rows_parallel(input: &Buffer2<f32>, output: &mut Buffer2<f32>, kerne
                 let out_row = &mut out_chunk[local_y * width..(local_y + 1) * width];
                 simd::convolve_row(in_row, out_row, kernel, radius);
             }
-        });
+        },
+    );
 }
 
 /// Convolve all columns in parallel.
@@ -230,10 +226,8 @@ fn convolve_cols_parallel(input: &Buffer2<f32>, output: &mut Buffer2<f32>, kerne
     let height = input.height();
     let radius = kernel.len() / 2;
 
-    output
-        .pixels_mut()
-        .par_rows_mut_auto(width)
-        .for_each(|(y_start, out_chunk)| {
+    parallel::par_chunks_auto_aligned(output.pixels_mut(), width).for_each(
+        |(y_start, out_chunk)| {
             let rows_in_chunk = out_chunk.len() / width;
 
             for local_y in 0..rows_in_chunk {
@@ -261,7 +255,8 @@ fn convolve_cols_parallel(input: &Buffer2<f32>, output: &mut Buffer2<f32>, kerne
                     out_row[x] = sum;
                 }
             }
-        });
+        },
+    );
 }
 
 /// Direct 2D Gaussian convolution for small images or large kernels.
@@ -280,42 +275,48 @@ fn gaussian_convolve_2d_direct(pixels: &Buffer2<f32>, sigma: f32, output: &mut B
         }
     }
 
-    output
-        .pixels_mut()
-        .par_rows_mut_auto(width)
-        .for_each(|(y, out_row)| {
-            for (x, out_pixel) in out_row.iter_mut().enumerate() {
-                let mut sum = 0.0f32;
+    parallel::par_chunks_auto_aligned(output.pixels_mut(), width).for_each(
+        |(y_start, out_chunk)| {
+            let rows_in_chunk = out_chunk.len() / width;
 
-                for ky in 0..ksize {
-                    for kx in 0..ksize {
-                        let sx = x as isize + kx as isize - radius as isize;
-                        let sy = y as isize + ky as isize - radius as isize;
+            for local_y in 0..rows_in_chunk {
+                let y = y_start + local_y;
+                let out_row = &mut out_chunk[local_y * width..(local_y + 1) * width];
 
-                        // Mirror boundary
-                        let sx: usize = if sx < 0 {
-                            (-sx) as usize
-                        } else if sx >= width as isize {
-                            2 * width - 2 - sx as usize
-                        } else {
-                            sx as usize
-                        };
+                for (x, out_pixel) in out_row.iter_mut().enumerate() {
+                    let mut sum = 0.0f32;
 
-                        let sy: usize = if sy < 0 {
-                            (-sy) as usize
-                        } else if sy >= height as isize {
-                            2 * height - 2 - sy as usize
-                        } else {
-                            sy as usize
-                        };
+                    for ky in 0..ksize {
+                        for kx in 0..ksize {
+                            let sx = x as isize + kx as isize - radius as isize;
+                            let sy = y as isize + ky as isize - radius as isize;
 
-                        sum += pixels[sy * width + sx] * kernel_2d[ky * ksize + kx];
+                            // Mirror boundary
+                            let sx: usize = if sx < 0 {
+                                (-sx) as usize
+                            } else if sx >= width as isize {
+                                2 * width - 2 - sx as usize
+                            } else {
+                                sx as usize
+                            };
+
+                            let sy: usize = if sy < 0 {
+                                (-sy) as usize
+                            } else if sy >= height as isize {
+                                2 * height - 2 - sy as usize
+                            } else {
+                                sy as usize
+                            };
+
+                            sum += pixels[sy * width + sx] * kernel_2d[ky * ksize + kx];
+                        }
                     }
-                }
 
-                *out_pixel = sum;
+                    *out_pixel = sum;
+                }
             }
-        });
+        },
+    );
 }
 
 /// Compute 2D elliptical Gaussian kernel (normalized to sum to 1.0).

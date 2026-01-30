@@ -19,7 +19,7 @@ mod bench;
 mod tests;
 
 use crate::common::BitBuffer2;
-use common::parallel::ParChunksMutAutoWithOffset;
+use common::parallel;
 use rayon::iter::ParallelIterator;
 
 #[cfg(target_arch = "x86_64")]
@@ -222,21 +222,19 @@ pub fn create_threshold_mask(
 
     let words = mask.words_mut();
 
-    words
-        .par_chunks_mut_auto()
-        .for_each(|(word_offset, word_chunk)| {
-            let pixel_offset = word_offset * 64;
+    parallel::par_chunks_auto(words).for_each(|(word_offset, word_chunk)| {
+        let pixel_offset = word_offset * 64;
 
-            process_words(
-                pixels,
-                bg,
-                noise,
-                sigma_threshold,
-                word_chunk,
-                pixel_offset,
-                total_pixels,
-            );
-        });
+        process_words(
+            pixels,
+            bg,
+            noise,
+            sigma_threshold,
+            word_chunk,
+            pixel_offset,
+            total_pixels,
+        );
+    });
 }
 
 /// Create binary mask from a filtered (background-subtracted) image.
@@ -255,20 +253,18 @@ pub fn create_threshold_mask_filtered(
 
     let words = mask.words_mut();
 
-    words
-        .par_chunks_mut_auto()
-        .for_each(|(word_offset, word_chunk)| {
-            let pixel_offset = word_offset * 64;
+    parallel::par_chunks_auto(words).for_each(|(word_offset, word_chunk)| {
+        let pixel_offset = word_offset * 64;
 
-            process_words_filtered(
-                filtered,
-                noise,
-                sigma_threshold,
-                word_chunk,
-                pixel_offset,
-                total_pixels,
-            );
-        });
+        process_words_filtered(
+            filtered,
+            noise,
+            sigma_threshold,
+            word_chunk,
+            pixel_offset,
+            total_pixels,
+        );
+    });
 }
 
 #[cfg(test)]

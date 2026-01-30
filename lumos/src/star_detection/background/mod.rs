@@ -14,7 +14,7 @@ mod simd;
 mod tile_grid;
 
 use crate::common::{BitBuffer2, Buffer2};
-use common::parallel::ParZipMut;
+use common::parallel;
 use rayon::prelude::*;
 
 use tile_grid::TileGrid;
@@ -143,23 +143,23 @@ impl BackgroundConfig {
             noise: Buffer2::new_filled(width, height, 0.0),
         };
 
-        background
-            .background
-            .pixels_mut()
-            .par_zip(background.noise.pixels_mut())
-            .par_rows_mut_auto(width)
-            .for_each(|(chunk_start_row, (bg_chunk, noise_chunk))| {
-                let rows_in_chunk = bg_chunk.len() / width;
+        parallel::par_chunks_auto_aligned_zip2(
+            background.background.pixels_mut(),
+            background.noise.pixels_mut(),
+            width,
+        )
+        .for_each(|(chunk_start_row, (bg_chunk, noise_chunk))| {
+            let rows_in_chunk = bg_chunk.len() / width;
 
-                for local_y in 0..rows_in_chunk {
-                    let y = chunk_start_row + local_y;
-                    let row_offset = local_y * width;
-                    let bg_row = &mut bg_chunk[row_offset..row_offset + width];
-                    let noise_row = &mut noise_chunk[row_offset..row_offset + width];
+            for local_y in 0..rows_in_chunk {
+                let y = chunk_start_row + local_y;
+                let row_offset = local_y * width;
+                let bg_row = &mut bg_chunk[row_offset..row_offset + width];
+                let noise_row = &mut noise_chunk[row_offset..row_offset + width];
 
-                    interpolate_row(bg_row, noise_row, y, grid);
-                }
-            });
+                interpolate_row(bg_row, noise_row, y, grid);
+            }
+        });
 
         background
     }
@@ -282,23 +282,23 @@ fn estimate_background_masked(
     output.background = Buffer2::new_filled(width, height, 0.0);
     output.noise = Buffer2::new_filled(width, height, 0.0);
 
-    output
-        .background
-        .pixels_mut()
-        .par_zip(output.noise.pixels_mut())
-        .par_rows_mut_auto(width)
-        .for_each(|(chunk_start_row, (bg_chunk, noise_chunk))| {
-            let rows_in_chunk = bg_chunk.len() / width;
+    parallel::par_chunks_auto_aligned_zip2(
+        output.background.pixels_mut(),
+        output.noise.pixels_mut(),
+        width,
+    )
+    .for_each(|(chunk_start_row, (bg_chunk, noise_chunk))| {
+        let rows_in_chunk = bg_chunk.len() / width;
 
-            for local_y in 0..rows_in_chunk {
-                let y = chunk_start_row + local_y;
-                let row_offset = local_y * width;
-                let bg_row = &mut bg_chunk[row_offset..row_offset + width];
-                let noise_row = &mut noise_chunk[row_offset..row_offset + width];
+        for local_y in 0..rows_in_chunk {
+            let y = chunk_start_row + local_y;
+            let row_offset = local_y * width;
+            let bg_row = &mut bg_chunk[row_offset..row_offset + width];
+            let noise_row = &mut noise_chunk[row_offset..row_offset + width];
 
-                interpolate_row(bg_row, noise_row, y, &grid);
-            }
-        });
+            interpolate_row(bg_row, noise_row, y, &grid);
+        }
+    });
 }
 
 /// Interpolate an entire row using segment-based bilinear interpolation.

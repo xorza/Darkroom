@@ -9,7 +9,7 @@ pub mod simd;
 mod tests;
 
 use crate::common::Buffer2;
-use common::parallel::ParRowsMutAuto;
+use common::parallel;
 use rayon::prelude::*;
 
 /// Apply 3x3 median filter to remove Bayer pattern artifacts.
@@ -28,10 +28,8 @@ pub fn median_filter_3x3(pixels: &Buffer2<f32>, output: &mut Buffer2<f32>) {
         return;
     }
 
-    output
-        .pixels_mut()
-        .par_rows_mut_auto(width)
-        .for_each(|(chunk_start_row, chunk)| {
+    parallel::par_chunks_auto_aligned(output.pixels_mut(), width).for_each(
+        |(chunk_start_row, chunk)| {
             let rows_in_chunk = chunk.len() / width;
 
             for local_y in 0..rows_in_chunk {
@@ -46,7 +44,8 @@ pub fn median_filter_3x3(pixels: &Buffer2<f32>, output: &mut Buffer2<f32>) {
                     filter_interior_row(pixels, width, y, row);
                 }
             }
-        });
+        },
+    );
 }
 
 /// Filter an interior row (y is not 0 or height-1).
