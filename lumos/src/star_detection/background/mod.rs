@@ -266,16 +266,17 @@ impl BackgroundConfig {
                 .collect(),
         };
 
-        // Apply median filter to tile grid to reject bright star contamination
         grid.apply_median_filter();
 
-        // Allocate output buffers
-        let mut background_pixels = vec![0.0f32; width * height];
-        let mut noise_pixels = vec![0.0f32; width * height];
+        let mut background = BackgroundMap {
+            background: Buffer2::new_filled(width, height, 0.0),
+            noise: Buffer2::new_filled(width, height, 0.0),
+        };
 
-        background_pixels
-            .as_mut_slice()
-            .par_zip(&mut noise_pixels)
+        background
+            .background
+            .pixels_mut()
+            .par_zip(background.noise.pixels_mut())
             .par_rows_mut_auto(width)
             .for_each(|(y_start, (bg_chunk, noise_chunk))| {
                 let rows_in_chunk = bg_chunk.len() / width;
@@ -289,11 +290,6 @@ impl BackgroundConfig {
                     interpolate_row(bg_row, noise_row, y, &grid);
                 }
             });
-
-        let mut background = BackgroundMap {
-            background: Buffer2::new(width, height, background_pixels),
-            noise: Buffer2::new(width, height, noise_pixels),
-        };
 
         // Iterative refinement if requested
         if self.iterations > 0 {
@@ -528,13 +524,13 @@ fn estimate_background_masked(
     // Apply median filter
     grid.apply_median_filter();
 
-    // Allocate output buffers
-    let mut background = vec![0.0f32; width * height];
-    let mut noise = vec![0.0f32; width * height];
+    output.background = Buffer2::new_filled(width, height, 0.0);
+    output.noise = Buffer2::new_filled(width, height, 0.0);
 
-    background
-        .as_mut_slice()
-        .par_zip(&mut noise)
+    output
+        .background
+        .pixels_mut()
+        .par_zip(output.noise.pixels_mut())
         .par_rows_mut_auto(width)
         .for_each(|(y_start, (bg_chunk, noise_chunk))| {
             let rows_in_chunk = bg_chunk.len() / width;
@@ -548,9 +544,6 @@ fn estimate_background_masked(
                 interpolate_row(bg_row, noise_row, y, &grid);
             }
         });
-
-    output.background = Buffer2::new(width, height, background);
-    output.noise = Buffer2::new(width, height, noise);
 }
 
 /// Interpolate an entire row using segment-based bilinear interpolation.
