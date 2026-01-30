@@ -186,11 +186,12 @@ mod quick_benches {
         });
 
         b.bench_labeled("simd+parallel", || {
-            create_threshold_mask(
-                black_box(&pixels),
-                black_box(&background),
+            process_chunk_simd::<true>(
+                black_box(pixels.pixels()),
+                black_box(background.background.pixels()),
+                black_box(background.noise.pixels()),
                 black_box(3.0),
-                black_box(&mut mask),
+                black_box(mask.pixels_mut()),
             );
         });
     }

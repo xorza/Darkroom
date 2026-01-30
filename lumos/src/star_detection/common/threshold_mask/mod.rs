@@ -20,21 +20,16 @@ use rayon::prelude::*;
 #[cfg(target_arch = "x86_64")]
 use crate::common::cpu_features;
 
-/// Process a chunk of the threshold mask.
-///
-/// When `INCLUDE_BACKGROUND` is true:
-///   Sets `mask[i] = true` where `pixels[i] > background[i] + sigma * noise[i]`.
-///
-/// When `INCLUDE_BACKGROUND` is false:
-///   Sets `mask[i] = true` where `pixels[i] > sigma * noise[i]`.
+/// SIMD implementation for processing a chunk.
+/// Returns true if SIMD was used, false if scalar fallback is needed.
 #[inline]
-fn process_chunk<const INCLUDE_BACKGROUND: bool>(
+fn process_chunk_simd<const INCLUDE_BACKGROUND: bool>(
     pixels: &[f32],
     bg: &[f32],
     noise: &[f32],
     sigma_threshold: f32,
     mask: &mut [bool],
-) {
+) -> bool {
     #[cfg(target_arch = "aarch64")]
     {
         // SAFETY: NEON is always available on aarch64.
@@ -47,7 +42,7 @@ fn process_chunk<const INCLUDE_BACKGROUND: bool>(
                 mask,
             );
         }
-        return;
+        return true;
     }
 
     #[cfg(target_arch = "x86_64")]
@@ -63,11 +58,37 @@ fn process_chunk<const INCLUDE_BACKGROUND: bool>(
                     mask,
                 );
             }
-            return;
+            return true;
         }
     }
 
-    scalar::process_chunk_scalar::<INCLUDE_BACKGROUND>(pixels, bg, noise, sigma_threshold, mask);
+    false
+}
+
+/// Process a chunk of the threshold mask.
+///
+/// When `INCLUDE_BACKGROUND` is true:
+///   Sets `mask[i] = true` where `pixels[i] > background[i] + sigma * noise[i]`.
+///
+/// When `INCLUDE_BACKGROUND` is false:
+///   Sets `mask[i] = true` where `pixels[i] > sigma * noise[i]`.
+#[inline]
+fn process_chunk<const INCLUDE_BACKGROUND: bool>(
+    pixels: &[f32],
+    bg: &[f32],
+    noise: &[f32],
+    sigma_threshold: f32,
+    mask: &mut [bool],
+) {
+    if !process_chunk_simd::<INCLUDE_BACKGROUND>(pixels, bg, noise, sigma_threshold, mask) {
+        scalar::process_chunk_scalar::<INCLUDE_BACKGROUND>(
+            pixels,
+            bg,
+            noise,
+            sigma_threshold,
+            mask,
+        );
+    }
 }
 
 /// Internal dispatch to parallel SIMD or scalar implementation.
