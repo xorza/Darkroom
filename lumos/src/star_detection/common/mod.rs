@@ -6,13 +6,6 @@
 use crate::common::Buffer2;
 use crate::math::mad_to_sigma;
 
-/// Number of rows to process per parallel chunk.
-///
-/// This value is chosen to minimize false sharing between CPU cores while
-/// maintaining good cache utilization. 8 rows × 64 bytes/cache line provides
-/// enough separation for most image widths.
-pub const ROWS_PER_CHUNK: usize = 8;
-
 /// Stamp radius as a multiple of FWHM.
 ///
 /// A stamp radius of 1.75 × FWHM captures approximately 99% of the PSF flux

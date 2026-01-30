@@ -16,7 +16,7 @@ mod simd;
 
 use rayon::prelude::*;
 
-use super::common::ROWS_PER_CHUNK;
+use crate::common::parallel::rows_per_chunk;
 use crate::math::fwhm_to_sigma;
 use crate::star_detection::Buffer2;
 
@@ -97,14 +97,16 @@ pub fn gaussian_convolve(pixels: &Buffer2<f32>, sigma: f32) -> Buffer2<f32> {
 /// rows are close together in memory.
 fn convolve_rows_parallel(input: &Buffer2<f32>, output: &mut Buffer2<f32>, kernel: &[f32]) {
     let width = input.width();
+    let height = input.height();
     let radius = kernel.len() / 2;
+    let chunk_rows = rows_per_chunk(height);
 
     output
         .pixels_mut()
-        .par_chunks_mut(width * ROWS_PER_CHUNK)
+        .par_chunks_mut(width * chunk_rows)
         .enumerate()
         .for_each(|(chunk_idx, out_chunk)| {
-            let y_start = chunk_idx * ROWS_PER_CHUNK;
+            let y_start = chunk_idx * chunk_rows;
             let rows_in_chunk = out_chunk.len() / width;
 
             for local_y in 0..rows_in_chunk {
@@ -132,13 +134,14 @@ fn convolve_cols_parallel(input: &Buffer2<f32>, output: &mut Buffer2<f32>, kerne
     let width = input.width();
     let height = input.height();
     let radius = kernel.len() / 2;
+    let chunk_rows = rows_per_chunk(height);
 
     output
         .pixels_mut()
-        .par_chunks_mut(width * ROWS_PER_CHUNK)
+        .par_chunks_mut(width * chunk_rows)
         .enumerate()
         .for_each(|(chunk_idx, out_chunk)| {
-            let y_start = chunk_idx * ROWS_PER_CHUNK;
+            let y_start = chunk_idx * chunk_rows;
             let rows_in_chunk = out_chunk.len() / width;
 
             for local_y in 0..rows_in_chunk {
@@ -394,14 +397,15 @@ pub fn elliptical_gaussian_convolve(
 
     let (kernel, ksize) = elliptical_gaussian_kernel_2d(sigma, axis_ratio, angle);
     let radius = ksize / 2;
+    let chunk_rows = rows_per_chunk(height);
 
     let mut output = vec![0.0f32; width * height];
 
     output
-        .par_chunks_mut(width * ROWS_PER_CHUNK)
+        .par_chunks_mut(width * chunk_rows)
         .enumerate()
         .for_each(|(chunk_idx, out_chunk)| {
-            let y_start = chunk_idx * ROWS_PER_CHUNK;
+            let y_start = chunk_idx * chunk_rows;
             let rows_in_chunk = out_chunk.len() / width;
 
             for local_y in 0..rows_in_chunk {

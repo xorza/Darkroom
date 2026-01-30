@@ -13,8 +13,8 @@ mod tests;
 
 mod simd;
 
-use super::common::ROWS_PER_CHUNK;
 use crate::common::Buffer2;
+use crate::common::parallel::rows_per_chunk;
 use crate::math::median_f32_mut;
 use rayon::prelude::*;
 
@@ -273,12 +273,13 @@ impl BackgroundConfig {
         let mut background_pixels = vec![0.0f32; width * height];
         let mut noise_pixels = vec![0.0f32; width * height];
 
+        let chunk_rows = rows_per_chunk(height);
         background_pixels
-            .par_chunks_mut(width * ROWS_PER_CHUNK)
-            .zip(noise_pixels.par_chunks_mut(width * ROWS_PER_CHUNK))
+            .par_chunks_mut(width * chunk_rows)
+            .zip(noise_pixels.par_chunks_mut(width * chunk_rows))
             .enumerate()
             .for_each(|(chunk_idx, (bg_chunk, noise_chunk))| {
-                let y_start = chunk_idx * ROWS_PER_CHUNK;
+                let y_start = chunk_idx * chunk_rows;
                 let rows_in_chunk = bg_chunk.len() / width;
 
                 for local_y in 0..rows_in_chunk {
@@ -371,17 +372,19 @@ fn create_object_mask(
 ) {
     // Initial mask: pixels above threshold (parallel by chunks)
     let width = pixels.width();
+    let height = pixels.height();
+    let chunk_rows = rows_per_chunk(height);
     pixels
         .pixels()
-        .par_chunks(width * ROWS_PER_CHUNK)
+        .par_chunks(width * chunk_rows)
         .zip(
             background
                 .background
                 .pixels()
-                .par_chunks(width * ROWS_PER_CHUNK),
+                .par_chunks(width * chunk_rows),
         )
-        .zip(background.noise.pixels().par_chunks(width * ROWS_PER_CHUNK))
-        .zip(output.pixels_mut().par_chunks_mut(width * ROWS_PER_CHUNK))
+        .zip(background.noise.pixels().par_chunks(width * chunk_rows))
+        .zip(output.pixels_mut().par_chunks_mut(width * chunk_rows))
         .for_each(|(((px_chunk, bg_chunk), noise_chunk), out_chunk)| {
             for (((px, bg), noise), out) in px_chunk
                 .iter()
@@ -536,12 +539,13 @@ fn estimate_background_masked(
     let mut background = vec![0.0f32; width * height];
     let mut noise = vec![0.0f32; width * height];
 
+    let chunk_rows = rows_per_chunk(height);
     background
-        .par_chunks_mut(width * ROWS_PER_CHUNK)
-        .zip(noise.par_chunks_mut(width * ROWS_PER_CHUNK))
+        .par_chunks_mut(width * chunk_rows)
+        .zip(noise.par_chunks_mut(width * chunk_rows))
         .enumerate()
         .for_each(|(chunk_idx, (bg_chunk, noise_chunk))| {
-            let y_start = chunk_idx * ROWS_PER_CHUNK;
+            let y_start = chunk_idx * chunk_rows;
             let rows_in_chunk = bg_chunk.len() / width;
 
             for local_y in 0..rows_in_chunk {
