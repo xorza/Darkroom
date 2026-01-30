@@ -15,10 +15,9 @@ pub(crate) struct TileStats {
 /// Tile grid with precomputed centers for interpolation.
 pub(super) struct TileGrid {
     stats: Buffer2<TileStats>,
-    /// X center for each tile column (one per column).
-    pub centers_x: Vec<f32>,
-    /// Y center for each tile row (one per row).
-    pub centers_y: Vec<f32>,
+    tile_size: usize,
+    width: usize,
+    height: usize,
 }
 
 impl TileGrid {
@@ -74,20 +73,9 @@ impl TileGrid {
 
         let mut grid = Self {
             stats: Buffer2::new(tiles_x, tiles_y, tile_stats),
-            centers_x: (0..tiles_x)
-                .map(|tx| {
-                    let x_start = tx * tile_size;
-                    let x_end = (x_start + tile_size).min(width);
-                    (x_start + x_end) as f32 * 0.5
-                })
-                .collect(),
-            centers_y: (0..tiles_y)
-                .map(|ty| {
-                    let y_start = ty * tile_size;
-                    let y_end = (y_start + tile_size).min(height);
-                    (y_start + y_end) as f32 * 0.5
-                })
-                .collect(),
+            tile_size,
+            width,
+            height,
         };
 
         grid.apply_median_filter();
@@ -157,6 +145,33 @@ impl TileGrid {
     #[inline]
     pub fn tiles_y(&self) -> usize {
         self.stats.height()
+    }
+
+    /// Compute the X center for a tile column.
+    #[inline]
+    pub fn center_x(&self, tx: usize) -> f32 {
+        let x_start = tx * self.tile_size;
+        let x_end = (x_start + self.tile_size).min(self.width);
+        (x_start + x_end) as f32 * 0.5
+    }
+
+    /// Compute the Y center for a tile row.
+    #[inline]
+    pub fn center_y(&self, ty: usize) -> f32 {
+        let y_start = ty * self.tile_size;
+        let y_end = (y_start + self.tile_size).min(self.height);
+        (y_start + y_end) as f32 * 0.5
+    }
+
+    /// Find the tile index whose center is at or before the given Y position.
+    #[inline]
+    pub fn find_lower_tile_y(&self, pos: f32) -> usize {
+        for i in (0..self.tiles_y()).rev() {
+            if self.center_y(i) <= pos {
+                return i;
+            }
+        }
+        0
     }
 
     /// Apply median filter to the tile grid statistics.

@@ -325,11 +325,13 @@ fn interpolate_row(bg_row: &mut [f32], noise_row: &mut [f32], y: usize, grid: &T
     let width = bg_row.len();
 
     // Compute Y tile indices and weight once for the entire row
-    let ty0 = find_lower_tile(fy, &grid.centers_y);
+    let ty0 = grid.find_lower_tile_y(fy);
     let ty1 = (ty0 + 1).min(grid.tiles_y() - 1);
 
+    let center_y0 = grid.center_y(ty0);
+    let center_y1 = grid.center_y(ty1);
     let wy = if ty1 != ty0 {
-        ((fy - grid.centers_y[ty0]) / (grid.centers_y[ty1] - grid.centers_y[ty0])).clamp(0.0, 1.0)
+        ((fy - center_y0) / (center_y1 - center_y0)).clamp(0.0, 1.0)
     } else {
         0.0
     };
@@ -344,7 +346,7 @@ fn interpolate_row(bg_row: &mut [f32], noise_row: &mut [f32], y: usize, grid: &T
         // Segment runs from current x to next tile center (or end of row)
         let segment_end = if tx0 + 1 < grid.tiles_x() {
             // Segment ends at next tile center
-            (grid.centers_x[tx0 + 1].floor() as usize).min(width)
+            (grid.center_x(tx0 + 1).floor() as usize).min(width)
         } else {
             width
         };
@@ -369,11 +371,12 @@ fn interpolate_row(bg_row: &mut [f32], noise_row: &mut [f32], y: usize, grid: &T
         let bg_segment = &mut bg_row[x..segment_end];
         let noise_segment = &mut noise_row[x..segment_end];
 
+        let center_x0 = grid.center_x(tx0);
+        let center_x1 = grid.center_x(tx1);
         if tx1 != tx0 {
             // Interpolation needed - use SIMD-accelerated version
-            let inv_dx = 1.0 / (grid.centers_x[tx1] - grid.centers_x[tx0]);
-            let x_offset = grid.centers_x[tx0];
-            let wx_start = (x as f32 - x_offset) * inv_dx;
+            let inv_dx = 1.0 / (center_x1 - center_x0);
+            let wx_start = (x as f32 - center_x0) * inv_dx;
             let wx_step = inv_dx;
 
             simd::interpolate_segment_simd(
@@ -397,16 +400,4 @@ fn interpolate_row(bg_row: &mut [f32], noise_row: &mut [f32], y: usize, grid: &T
             break;
         }
     }
-}
-
-/// Find the tile index whose center is at or before the given position.
-#[inline]
-fn find_lower_tile(pos: f32, centers: &[f32]) -> usize {
-    // Linear search is efficient for small tile counts (typically < 20)
-    for i in (0..centers.len()).rev() {
-        if centers[i] <= pos {
-            return i;
-        }
-    }
-    0
 }
