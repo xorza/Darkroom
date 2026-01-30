@@ -30,6 +30,7 @@ mod defect_map;
 pub(crate) mod detection;
 pub mod gpu;
 mod median_filter;
+mod star;
 
 #[cfg(test)]
 pub mod tests;
@@ -48,8 +49,6 @@ pub mod benches {
     pub use super::detection::bench as detection;
     pub use super::median_filter::bench as median_filter;
 }
-
-use core::f32;
 
 // Public API exports - main entry points for external consumers
 pub use centroid::LocalBackgroundMethod;
@@ -74,6 +73,9 @@ pub(crate) use median_filter::median_filter_3x3;
 
 // Configuration types
 pub use config::StarDetectionConfig;
+
+// Star type
+pub use star::Star;
 
 use crate::astro_image::AstroImage;
 use crate::common::Buffer2;
@@ -104,90 +106,6 @@ pub enum CentroidMethod {
     },
 }
 
-/// A detected star with sub-pixel position and quality metrics.
-#[derive(Debug, Clone, Copy)]
-pub struct Star {
-    /// X coordinate (sub-pixel accurate).
-    pub x: f32,
-    /// Y coordinate (sub-pixel accurate).
-    pub y: f32,
-    /// Total flux (sum of background-subtracted pixel values).
-    pub flux: f32,
-    /// Full Width at Half Maximum in pixels.
-    pub fwhm: f32,
-    /// Eccentricity (0 = circular, 1 = elongated). Used to reject non-stellar objects.
-    pub eccentricity: f32,
-    /// Signal-to-noise ratio.
-    pub snr: f32,
-    /// Peak pixel value (for saturation detection).
-    pub peak: f32,
-    /// Sharpness metric (peak / flux_in_core). Cosmic rays have high sharpness (>0.8),
-    /// real stars have lower sharpness (typically 0.2-0.6 depending on seeing).
-    pub sharpness: f32,
-    /// Roundness based on marginal Gaussian fits (DAOFIND GROUND).
-    /// (Hx - Hy) / (Hx + Hy) where Hx, Hy are heights of marginal x and y fits.
-    /// Circular sources → 0, x-extended → negative, y-extended → positive.
-    pub roundness1: f32,
-    /// Roundness based on symmetry (DAOFIND SROUND).
-    /// Measures bilateral vs four-fold symmetry. Circular → 0, asymmetric → non-zero.
-    pub roundness2: f32,
-    /// L.A.Cosmic Laplacian SNR metric for cosmic ray detection.
-    /// Cosmic rays have very sharp edges (high Laplacian), stars have smooth edges.
-    /// Values > 50 typically indicate cosmic rays. Based on van Dokkum 2001.
-    pub laplacian_snr: f32,
-}
-
-impl Star {
-    /// Check if star is likely saturated.
-    ///
-    /// Stars with peak values near the maximum (>0.95 for normalized data)
-    /// have unreliable centroids.
-    pub fn is_saturated(&self) -> bool {
-        self.peak > 0.95
-    }
-
-    /// Check if star is likely a cosmic ray (very sharp, single-pixel spike).
-    ///
-    /// Cosmic rays typically have sharpness > 0.7, while real stars are 0.2-0.5.
-    pub fn is_cosmic_ray(&self, max_sharpness: f32) -> bool {
-        self.sharpness > max_sharpness
-    }
-
-    /// Check if star is likely a cosmic ray using L.A.Cosmic Laplacian metric.
-    ///
-    /// Based on van Dokkum 2001: cosmic rays have very sharp edges that produce
-    /// high Laplacian values. Stars, being smoothed by the PSF, have lower values.
-    /// Threshold of ~50 is typical for rejecting cosmic rays.
-    pub fn is_cosmic_ray_laplacian(&self, max_laplacian_snr: f32) -> bool {
-        self.laplacian_snr > max_laplacian_snr
-    }
-
-    /// Check if star passes roundness filters.
-    ///
-    /// Both roundness metrics should be close to zero for circular sources.
-    pub fn is_round(&self, max_roundness: f32) -> bool {
-        self.roundness1.abs() <= max_roundness && self.roundness2.abs() <= max_roundness
-    }
-
-    /// Check if star passes quality filters for registration.
-    ///
-    /// Filters out saturated, elongated, low-SNR stars, cosmic rays, and non-round objects.
-    /// Unlike simple `is_*` predicates, this method combines multiple quality criteria.
-    pub fn passes_quality_filters(
-        &self,
-        min_snr: f32,
-        max_eccentricity: f32,
-        max_sharpness: f32,
-        max_roundness: f32,
-    ) -> bool {
-        !self.is_saturated()
-            && self.snr >= min_snr
-            && self.eccentricity <= max_eccentricity
-            && !self.is_cosmic_ray(max_sharpness)
-            && self.is_round(max_roundness)
-    }
-}
-
 pub use defect_map::DefectMap;
 use defect_map::apply_defect_mask;
 
@@ -216,15 +134,9 @@ use defect_map::apply_defect_mask;
 /// // Batch detection (parallel)
 /// let results = detector.detect_all(&images);
 /// ```
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct StarDetector {
     config: StarDetectionConfig,
-}
-
-impl Default for StarDetector {
-    fn default() -> Self {
-        Self::new()
-    }
 }
 
 impl StarDetector {
@@ -247,7 +159,156 @@ impl StarDetector {
 
     /// Detect stars in a single image.
     pub fn detect(&self, image: &AstroImage) -> StarDetectionResult {
-        find_stars(image, &self.config)
+        self.config.validate();
+
+        let width = image.width();
+        let height = image.height();
+        let mut pixels = image.to_grayscale_buffer();
+        let mut output = Buffer2::new_default(width, height);
+
+        let mut diagnostics = StarDetectionDiagnostics::default();
+
+        // Step 0a: Apply defect mask if provided
+        if self
+            .config
+            .defect_map
+            .as_ref()
+            .is_some_and(|m| !m.is_empty())
+        {
+            apply_defect_mask(
+                &pixels,
+                self.config.defect_map.as_ref().unwrap(),
+                &mut output,
+            );
+            std::mem::swap(&mut pixels, &mut output);
+        }
+
+        // Step 0b: Apply 3x3 median filter to remove Bayer pattern artifacts
+        // Only applied for CFA sensors; skip for monochrome (~6ms faster on 4K images)
+        if image.metadata.is_cfa {
+            median_filter_3x3(&pixels, &mut output);
+            std::mem::swap(&mut pixels, &mut output);
+        }
+
+        drop(output);
+
+        // Step 1: Estimate background
+        let background = {
+            if self.config.background_config.iterations > 0 {
+                // Use iterative background estimation for crowded fields
+                estimate_background_iterative(
+                    &pixels,
+                    self.config.background_tile_size,
+                    &self.config.background_config,
+                )
+            } else {
+                // Single-pass background estimation (faster)
+                estimate_background(&pixels, self.config.background_tile_size)
+            }
+        };
+
+        // Step 2: Detect star candidates
+        let candidates = {
+            if self.config.expected_fwhm > f32::EPSILON {
+                // Apply matched filter (Gaussian convolution) for better faint star detection
+                // This is the DAOFIND/SExtractor technique
+                let filtered = if self.config.psf_axis_ratio < 0.99 {
+                    tracing::debug!(
+                        "Applying elliptical matched filter with FWHM={:.1}, axis_ratio={:.2}, angle={:.2}",
+                        self.config.expected_fwhm,
+                        self.config.psf_axis_ratio,
+                        self.config.psf_angle
+                    );
+                    matched_filter_elliptical(
+                        &pixels,
+                        &background.background,
+                        self.config.expected_fwhm,
+                        self.config.psf_axis_ratio,
+                        self.config.psf_angle,
+                    )
+                } else {
+                    tracing::debug!(
+                        "Applying matched filter with FWHM={:.1} pixels",
+                        self.config.expected_fwhm
+                    );
+                    matched_filter(&pixels, &background.background, self.config.expected_fwhm)
+                };
+                detect_stars_filtered(&pixels, &filtered, &background, &self.config)
+            } else {
+                // No matched filter - use standard detection
+                detect_stars(&pixels, &background, &self.config)
+            }
+        };
+        diagnostics.candidates_after_filtering = candidates.len();
+        tracing::debug!("Detected {} star candidates", candidates.len());
+
+        // Step 3: Compute precise centroids
+        let mut stars: Vec<Star> = {
+            candidates
+                .into_iter()
+                .filter_map(|candidate| {
+                    compute_centroid(&pixels, &background, &candidate, &self.config)
+                })
+                .collect()
+        };
+        diagnostics.stars_after_centroid = stars.len();
+
+        // Step 4: Apply quality filters and count rejections
+        stars.retain(|star| {
+            if star.is_saturated() {
+                diagnostics.rejected_saturated += 1;
+                false
+            } else if star.snr < self.config.min_snr {
+                diagnostics.rejected_low_snr += 1;
+                false
+            } else if star.eccentricity > self.config.max_eccentricity {
+                diagnostics.rejected_high_eccentricity += 1;
+                false
+            } else if star.is_cosmic_ray(self.config.max_sharpness) {
+                diagnostics.rejected_cosmic_rays += 1;
+                false
+            } else if !star.is_round(self.config.max_roundness) {
+                diagnostics.rejected_roundness += 1;
+                false
+            } else {
+                true
+            }
+        });
+
+        // Sort by flux (brightest first)
+        stars.sort_by(|a, b| {
+            b.flux
+                .partial_cmp(&a.flux)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+
+        // Filter FWHM outliers - spurious detections often have abnormally large FWHM
+        let removed = filter_fwhm_outliers(&mut stars, self.config.max_fwhm_deviation);
+        diagnostics.rejected_fwhm_outliers = removed;
+        if removed > 0 {
+            tracing::debug!("Removed {} stars with abnormally large FWHM", removed);
+        }
+
+        // Remove duplicate detections - keep only the brightest star within min_separation pixels
+        let removed = remove_duplicate_stars(&mut stars, self.config.duplicate_min_separation);
+        diagnostics.rejected_duplicates = removed;
+        if removed > 0 {
+            tracing::debug!("Removed {} duplicate star detections", removed);
+        }
+
+        // Compute final statistics
+        diagnostics.final_star_count = stars.len();
+
+        if !stars.is_empty() {
+            let mut buf: Vec<f32> = stars.iter().map(|s| s.fwhm).collect();
+            diagnostics.median_fwhm = crate::math::median_f32_mut(&mut buf);
+
+            buf.clear();
+            buf.extend(stars.iter().map(|s| s.snr));
+            diagnostics.median_snr = crate::math::median_f32_mut(&mut buf);
+        }
+
+        StarDetectionResult { stars, diagnostics }
     }
 }
 
@@ -296,159 +357,6 @@ pub struct StarDetectionDiagnostics {
     pub median_fwhm: f32,
     /// Median SNR of detected stars.
     pub median_snr: f32,
-}
-
-/// Detect stars in an astronomical image.
-///
-/// Returns detected stars sorted by flux (brightest first) along with
-/// diagnostic information from the detection pipeline.
-///
-/// For RGB images, only the first channel (red) is used. For grayscale
-/// images, the single channel is used directly.
-///
-/// # Arguments
-/// * `image` - Astronomical image (grayscale or RGB, normalized 0.0-1.0)
-/// * `config` - Detection configuration
-fn find_stars(image: &AstroImage, config: &StarDetectionConfig) -> StarDetectionResult {
-    config.validate();
-
-    let width = image.width();
-    let height = image.height();
-    let mut pixels = image.to_grayscale_buffer();
-    let mut output = Buffer2::new_default(width, height);
-
-    let mut diagnostics = StarDetectionDiagnostics::default();
-
-    // Step 0a: Apply defect mask if provided
-    if config.defect_map.as_ref().is_some_and(|m| !m.is_empty()) {
-        apply_defect_mask(&pixels, config.defect_map.as_ref().unwrap(), &mut output);
-        std::mem::swap(&mut pixels, &mut output);
-    }
-
-    // Step 0b: Apply 3x3 median filter to remove Bayer pattern artifacts
-    // Only applied for CFA sensors; skip for monochrome (~6ms faster on 4K images)
-    if image.metadata.is_cfa {
-        median_filter_3x3(&pixels, &mut output);
-        std::mem::swap(&mut pixels, &mut output);
-    }
-
-    drop(output);
-
-    // Step 1: Estimate background
-    let background = {
-        if config.background_config.iterations > 0 {
-            // Use iterative background estimation for crowded fields
-            estimate_background_iterative(
-                &pixels,
-                config.background_tile_size,
-                &config.background_config,
-            )
-        } else {
-            // Single-pass background estimation (faster)
-            estimate_background(&pixels, config.background_tile_size)
-        }
-    };
-
-    // Step 2: Detect star candidates
-    let candidates = {
-        if config.expected_fwhm > f32::EPSILON {
-            // Apply matched filter (Gaussian convolution) for better faint star detection
-            // This is the DAOFIND/SExtractor technique
-            let filtered = if config.psf_axis_ratio < 0.99 {
-                tracing::debug!(
-                    "Applying elliptical matched filter with FWHM={:.1}, axis_ratio={:.2}, angle={:.2}",
-                    config.expected_fwhm,
-                    config.psf_axis_ratio,
-                    config.psf_angle
-                );
-                matched_filter_elliptical(
-                    &pixels,
-                    &background.background,
-                    config.expected_fwhm,
-                    config.psf_axis_ratio,
-                    config.psf_angle,
-                )
-            } else {
-                tracing::debug!(
-                    "Applying matched filter with FWHM={:.1} pixels",
-                    config.expected_fwhm
-                );
-                matched_filter(&pixels, &background.background, config.expected_fwhm)
-            };
-            detect_stars_filtered(&pixels, &filtered, &background, config)
-        } else {
-            // No matched filter - use standard detection
-            detect_stars(&pixels, &background, config)
-        }
-    };
-    diagnostics.candidates_after_filtering = candidates.len();
-    tracing::debug!("Detected {} star candidates", candidates.len());
-
-    // Step 3: Compute precise centroids
-    let mut stars: Vec<Star> = {
-        candidates
-            .into_iter()
-            .filter_map(|candidate| compute_centroid(&pixels, &background, &candidate, config))
-            .collect()
-    };
-    diagnostics.stars_after_centroid = stars.len();
-
-    // Step 4: Apply quality filters and count rejections
-    stars.retain(|star| {
-        if star.is_saturated() {
-            diagnostics.rejected_saturated += 1;
-            false
-        } else if star.snr < config.min_snr {
-            diagnostics.rejected_low_snr += 1;
-            false
-        } else if star.eccentricity > config.max_eccentricity {
-            diagnostics.rejected_high_eccentricity += 1;
-            false
-        } else if star.is_cosmic_ray(config.max_sharpness) {
-            diagnostics.rejected_cosmic_rays += 1;
-            false
-        } else if !star.is_round(config.max_roundness) {
-            diagnostics.rejected_roundness += 1;
-            false
-        } else {
-            true
-        }
-    });
-
-    // Sort by flux (brightest first)
-    stars.sort_by(|a, b| {
-        b.flux
-            .partial_cmp(&a.flux)
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
-
-    // Filter FWHM outliers - spurious detections often have abnormally large FWHM
-    let removed = filter_fwhm_outliers(&mut stars, config.max_fwhm_deviation);
-    diagnostics.rejected_fwhm_outliers = removed;
-    if removed > 0 {
-        tracing::debug!("Removed {} stars with abnormally large FWHM", removed);
-    }
-
-    // Remove duplicate detections - keep only the brightest star within min_separation pixels
-    let removed = remove_duplicate_stars(&mut stars, config.duplicate_min_separation);
-    diagnostics.rejected_duplicates = removed;
-    if removed > 0 {
-        tracing::debug!("Removed {} duplicate star detections", removed);
-    }
-
-    // Compute final statistics
-    diagnostics.final_star_count = stars.len();
-
-    if !stars.is_empty() {
-        let mut buf: Vec<f32> = stars.iter().map(|s| s.fwhm).collect();
-        diagnostics.median_fwhm = crate::math::median_f32_mut(&mut buf);
-
-        buf.clear();
-        buf.extend(stars.iter().map(|s| s.snr));
-        diagnostics.median_snr = crate::math::median_f32_mut(&mut buf);
-    }
-
-    StarDetectionResult { stars, diagnostics }
 }
 
 /// Remove duplicate star detections that are too close together.

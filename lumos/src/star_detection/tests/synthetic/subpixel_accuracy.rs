@@ -7,7 +7,7 @@ use super::{SyntheticFieldConfig, SyntheticStar, generate_star_field};
 use crate::{AstroImage, ImageDimensions};
 
 use crate::star_detection::tests::common::save_image;
-use crate::star_detection::{Star, StarDetectionConfig, find_stars};
+use crate::star_detection::{Star, StarDetectionConfig, StarDetector};
 use imaginarium::Color;
 use imaginarium::drawing::{draw_circle, draw_cross};
 
@@ -118,8 +118,9 @@ fn test_subpixel_shift_detection() {
         ImageDimensions::new(config.width, config.height, 1),
         pixels2.clone(),
     );
-    let detected1 = find_stars(&image1, &detection_config).stars;
-    let detected2 = find_stars(&image2, &detection_config).stars;
+    let detector = StarDetector::from_config(detection_config.clone());
+    let detected1 = detector.detect(&image1).stars;
+    let detected2 = detector.detect(&image2).stars;
 
     println!("\nDetection results:");
     println!("  Image 1: {} stars detected", detected1.len());
@@ -264,7 +265,8 @@ fn test_subpixel_accuracy_sweep() {
         ImageDimensions::new(config.width, config.height, 1),
         pixels1,
     );
-    let detected1 = find_stars(&image1, &detection_config).stars;
+    let detector = StarDetector::from_config(detection_config);
+    let detected1 = detector.detect(&image1).stars;
 
     for (shift_x, shift_y) in test_shifts {
         let shifted_stars: Vec<SyntheticStar> = base_stars
@@ -277,7 +279,7 @@ fn test_subpixel_accuracy_sweep() {
             ImageDimensions::new(config.width, config.height, 1),
             pixels2,
         );
-        let detected2 = find_stars(&image2, &detection_config).stars;
+        let detected2 = detector.detect(&image2).stars;
 
         let pairs = match_stars(&detected1, &detected2, 3.0);
         let (detected_dx, detected_dy) = compute_median_shift(&pairs);

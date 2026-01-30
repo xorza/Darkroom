@@ -7,7 +7,7 @@ use crate::{AstroImage, ImageDimensions};
 use crate::star_detection::tests::common::output::{
     gray_to_rgb_image_stretched, save_grayscale, save_image,
 };
-use crate::star_detection::{StarDetectionConfig, find_stars};
+use crate::star_detection::{StarDetectionConfig, StarDetector};
 use crate::testing::init_tracing;
 use crate::testing::synthetic::{StarFieldConfig, add_cosmic_rays, generate_star_field};
 use common::test_utils::test_output_path;
@@ -57,7 +57,8 @@ fn test_cosmic_ray_rejection() {
     };
 
     let image = AstroImage::from_pixels(ImageDimensions::new(width, height, 1), pixels_vec.clone());
-    let result = find_stars(&image, &detection_config);
+    let detector = StarDetector::from_config(detection_config.clone());
+    let result = detector.detect(&image);
     let stars = result.stars;
 
     // Create overlay
@@ -184,7 +185,8 @@ fn test_laplacian_snr_visualization() {
     };
 
     let image = AstroImage::from_pixels(ImageDimensions::new(width, height, 1), pixels_vec.clone());
-    let result = find_stars(&image, &detection_config);
+    let detector = StarDetector::from_config(detection_config);
+    let result = detector.detect(&image);
     let stars = result.stars;
 
     println!("\nLaplacian SNR Analysis:");

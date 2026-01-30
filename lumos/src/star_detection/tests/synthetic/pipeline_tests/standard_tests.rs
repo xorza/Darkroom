@@ -6,7 +6,7 @@ use crate::star_detection::tests::common::output::{
     DetectionMetrics, check_pass, compute_detection_metrics, save_comparison, save_grayscale,
     save_metrics, standard_criteria,
 };
-use crate::star_detection::{StarDetectionConfig, find_stars};
+use crate::star_detection::{StarDetectionConfig, StarDetector};
 use crate::testing::init_tracing;
 use crate::testing::synthetic::{
     StarFieldConfig, dense_field_config, generate_star_field, sparse_field_config,
@@ -35,7 +35,8 @@ fn run_pipeline_test(
         ImageDimensions::new(field_config.width, field_config.height, 1),
         pixels_vec.clone(),
     );
-    let result = find_stars(&image, detection_config);
+    let detector = StarDetector::from_config(detection_config.clone());
+    let result = detector.detect(&image);
     let stars = result.stars;
 
     // Compute metrics

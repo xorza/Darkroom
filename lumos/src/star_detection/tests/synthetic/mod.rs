@@ -12,7 +12,7 @@ mod subpixel_accuracy;
 pub use star_field::{SyntheticFieldConfig, SyntheticStar, generate_star_field};
 
 use crate::star_detection::tests::common::{gray_to_rgb_image_stretched, save_image};
-use crate::star_detection::{BackgroundConfig, StarDetectionConfig, find_stars};
+use crate::star_detection::{BackgroundConfig, StarDetectionConfig, StarDetector};
 use crate::testing::init_tracing;
 use crate::{AstroImage, ImageDimensions};
 use image::GrayImage;
@@ -88,7 +88,8 @@ fn test_synthetic_star_detection() {
         ImageDimensions::new(config.width, config.height, 1),
         pixels.clone(),
     );
-    let result = find_stars(&image, &detection_config);
+    let detector = StarDetector::from_config(detection_config);
+    let result = detector.detect(&image);
     let detected_stars = result.stars;
     println!("\nDetected {} stars", detected_stars.len());
 

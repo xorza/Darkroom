@@ -7,7 +7,7 @@ use crate::{AstroImage, ImageDimensions};
 
 use crate::star_detection::background::estimate_background;
 use crate::star_detection::constants::dilate_mask;
-use crate::star_detection::{StarDetectionConfig, find_stars};
+use crate::star_detection::{StarDetectionConfig, StarDetector};
 use crate::testing::init_tracing;
 use image::GrayImage;
 use imaginarium::Color;
@@ -192,7 +192,8 @@ fn test_debug_synthetic_steps() {
     println!("Saved: {:?}", path);
 
     let image = AstroImage::from_pixels(ImageDimensions::new(width, height, 1), grayscale.clone());
-    let detection_result = find_stars(&image, &detection_config);
+    let detector = StarDetector::from_config(detection_config.clone());
+    let detection_result = detector.detect(&image);
     let stars = detection_result.stars;
     println!(
         "\nDetected {} stars (expected {})",
