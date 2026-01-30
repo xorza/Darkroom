@@ -1,7 +1,7 @@
 name: background_estimate_6k
-mean: 130.475266ms
-min: 127.526007ms
-max: 135.47942ms
-median: 129.87118ms
+mean: 119.428023ms
+min: 118.891075ms
+max: 120.257397ms
+median: 119.288315ms
 iterations: 5
-vs_previous: 132.12031ms -> 130.475266ms (-1.2%) same
+vs_previous: 130.475266ms -> 119.428023ms (-8.5%) faster
