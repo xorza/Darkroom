@@ -1,0 +1,6 @@
+name: bench_row_conversions/LA f32_to_LA u8/scalar
+mean: 8.496µs
+min: 7.985µs
+max: 12.003µs
+median: 8.025µs
+iterations: 20

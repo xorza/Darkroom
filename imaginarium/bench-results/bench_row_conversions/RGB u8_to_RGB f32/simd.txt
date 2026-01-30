@@ -1,0 +1,6 @@
+name: bench_row_conversions/RGB u8_to_RGB f32/simd
+mean: 599ns
+min: 581ns
+max: 621ns
+median: 601ns
+iterations: 20

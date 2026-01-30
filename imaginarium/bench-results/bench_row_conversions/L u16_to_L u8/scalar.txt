@@ -1,0 +1,6 @@
+name: bench_row_conversions/L u16_to_L u8/scalar
+mean: 5.552µs
+min: 5.28µs
+max: 7.605µs
+median: 5.29µs
+iterations: 20

@@ -1,6 +1,0 @@
-name: bench_rgba_f32_to_rgba_u8/scalar
-mean: 14.982µs
-min: 12.434µs
-max: 28.044µs
-median: 12.474µs
-iterations: 20

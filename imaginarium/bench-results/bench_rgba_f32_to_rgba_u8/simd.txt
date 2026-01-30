@@ -1,6 +1,0 @@
-name: bench_rgba_f32_to_rgba_u8/simd
-mean: 1.921µs
-min: 1.893µs
-max: 1.974µs
-median: 1.914µs
-iterations: 20

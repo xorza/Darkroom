@@ -1,0 +1,6 @@
+name: bench_row_conversions/L u8_to_L f32/simd
+mean: 171ns
+min: 170ns
+max: 191ns
+median: 170ns
+iterations: 20

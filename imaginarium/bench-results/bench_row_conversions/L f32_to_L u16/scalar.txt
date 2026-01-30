@@ -1,7 +1,6 @@
 name: bench_row_conversions/L f32_to_L u16/scalar
-mean: 7.975µs
-min: 7.955µs
-max: 8.016µs
-median: 7.966µs
+mean: 8.193µs
+min: 7.915µs
+max: 10.43µs
+median: 7.925µs
 iterations: 20
-vs_previous: 24.016µs -> 7.975µs (-66.8%) faster

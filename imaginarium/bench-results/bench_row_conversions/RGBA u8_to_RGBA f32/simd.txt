@@ -1,7 +1,6 @@
 name: bench_row_conversions/RGBA u8_to_RGBA f32/simd
-mean: 773ns
-min: 761ns
-max: 801ns
-median: 772ns
+mean: 820ns
+min: 751ns
+max: 871ns
+median: 822ns
 iterations: 20
-vs_previous: 1.13µs -> 773ns (-31.6%) faster

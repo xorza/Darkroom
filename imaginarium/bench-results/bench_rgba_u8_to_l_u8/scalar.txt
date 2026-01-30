@@ -1,7 +1,0 @@
-name: bench_rgba_u8_to_l_u8/scalar
-mean: 7.483µs
-min: 7.153µs
-max: 13.455µs
-median: 7.164µs
-iterations: 20
-vs_previous: 15.999µs -> 7.483µs (-53.2%) faster
