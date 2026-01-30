@@ -142,31 +142,46 @@ pub(crate) fn extract_candidates(
     deblend_config: &DeblendConfig,
     max_area: usize,
 ) -> Vec<StarCandidate> {
+    use rayon::prelude::*;
+
     if label_map.num_labels() == 0 {
         return Vec::new();
     }
 
-    if deblend_config.multi_threshold {
-        // Multi-threshold deblending needs pixel data for tree-building
-        extract_candidates_multi_threshold(pixels, label_map, deblend_config, max_area)
-    } else {
-        // Local-maxima deblending uses allocation-free ComponentData
-        extract_candidates_local_maxima(pixels, label_map, deblend_config, max_area)
-    }
+    let component_data = collect_component_data(label_map, pixels.width(), max_area);
+
+    // Process each component in parallel, deblending into multiple candidates.
+    // Skip components that are too large - they can't be stars and would be
+    // expensive to process (e.g., deblending a million-pixel component).
+    component_data
+        .into_par_iter()
+        .filter(|data| data.area > 0 && data.area <= max_area)
+        .flat_map_iter(|data| {
+            if deblend_config.multi_threshold {
+                deblend_multi_threshold(&data, pixels, label_map, deblend_config)
+            } else {
+                deblend_local_maxima(&data, pixels, label_map, deblend_config)
+                    .into_iter()
+                    .map(|obj| StarCandidate {
+                        bbox: obj.bbox,
+                        peak_x: obj.peak.x,
+                        peak_y: obj.peak.y,
+                        peak_value: obj.peak_value,
+                        area: obj.area,
+                    })
+                    .collect()
+            }
+        })
+        .collect()
 }
 
-/// Extract candidates using allocation-free local-maxima deblending.
-fn extract_candidates_local_maxima(
-    pixels: &Buffer2<f32>,
+/// Collect component metadata (bounding boxes and areas) from label map.
+fn collect_component_data(
     label_map: &LabelMap,
-    deblend_config: &DeblendConfig,
+    width: usize,
     max_area: usize,
-) -> Vec<StarCandidate> {
-    use rayon::prelude::*;
-    let width = pixels.width();
+) -> Vec<ComponentData> {
     let num_labels = label_map.num_labels();
-
-    // Collect component bounding boxes and areas in single pass (no pixel allocation)
     let mut component_data: Vec<ComponentData> = Vec::with_capacity(num_labels);
     component_data.resize_with(num_labels, || ComponentData {
         bbox: Aabb::empty(),
@@ -179,7 +194,7 @@ fn extract_candidates_local_maxima(
             continue;
         }
         let data = &mut component_data[(label - 1) as usize];
-        // Skip area counting for oversized components
+        // Skip area counting for oversized components (early termination)
         if data.area > max_area {
             continue;
         }
@@ -190,84 +205,39 @@ fn extract_candidates_local_maxima(
         data.area += 1;
     }
 
-    // Process each component in parallel, deblending into multiple candidates
-    // Skip components that are too large - they can't be stars and would be
-    // expensive to process (e.g., deblending a million-pixel component)
     component_data
-        .into_par_iter()
-        .filter(|data| data.area > 0 && data.area <= max_area)
-        .flat_map_iter(|data| {
-            let deblended = deblend_local_maxima(&data, pixels, label_map, deblend_config);
-
-            deblended.into_iter().map(|obj| StarCandidate {
-                bbox: obj.bbox,
-                peak_x: obj.peak.x,
-                peak_y: obj.peak.y,
-                peak_value: obj.peak_value,
-                area: obj.area,
-            })
-        })
-        .collect()
 }
 
-/// Extract candidates using multi-threshold deblending.
-fn extract_candidates_multi_threshold(
+/// Deblend a component using multi-threshold algorithm.
+fn deblend_multi_threshold(
+    data: &ComponentData,
     pixels: &Buffer2<f32>,
     label_map: &LabelMap,
     deblend_config: &DeblendConfig,
-    max_area: usize,
 ) -> Vec<StarCandidate> {
-    use rayon::prelude::*;
-    let width = pixels.width();
-    let num_labels = label_map.num_labels();
+    let mt_config = MultiThresholdDeblendConfig {
+        n_thresholds: deblend_config.n_thresholds,
+        min_contrast: deblend_config.min_contrast,
+        min_separation: deblend_config.min_separation,
+    };
 
-    // Build component metadata (no pixel storage - reads on-demand)
-    let mut component_data: Vec<ComponentData> = Vec::with_capacity(num_labels);
-    component_data.resize_with(num_labels, || ComponentData {
-        bbox: Aabb::empty(),
-        label: 0,
-        area: 0,
-    });
+    // Estimate detection threshold from the minimum pixel value in component
+    let detection_threshold = data
+        .iter_pixels(pixels, label_map)
+        .map(|p| p.value)
+        .fold(f32::MAX, f32::min);
 
-    for (idx, &label) in label_map.iter().enumerate() {
-        if label == 0 {
-            continue;
-        }
-        let data = &mut component_data[(label - 1) as usize];
-        data.label = label;
-        data.area += 1;
-        let x = idx % width;
-        let y = idx / width;
-        data.bbox.include(Vec2us::new(x, y));
-    }
+    let deblended =
+        multi_threshold_deblend(data, pixels, label_map, detection_threshold, &mt_config);
 
-    // Process each component in parallel
-    component_data
-        .into_par_iter()
-        .filter(|data| data.area > 0 && data.area <= max_area)
-        .flat_map_iter(|data| {
-            let mt_config = MultiThresholdDeblendConfig {
-                n_thresholds: deblend_config.n_thresholds,
-                min_contrast: deblend_config.min_contrast,
-                min_separation: deblend_config.min_separation,
-            };
-
-            // Estimate detection threshold from the minimum pixel value in component
-            let detection_threshold = data
-                .iter_pixels(pixels, label_map)
-                .map(|p| p.value)
-                .fold(f32::MAX, f32::min);
-
-            let deblended =
-                multi_threshold_deblend(&data, pixels, label_map, detection_threshold, &mt_config);
-
-            deblended.into_iter().map(|obj| StarCandidate {
-                bbox: obj.bbox,
-                peak_x: obj.peak.x,
-                peak_y: obj.peak.y,
-                peak_value: obj.peak_value,
-                area: obj.pixels.len(),
-            })
+    deblended
+        .into_iter()
+        .map(|obj| StarCandidate {
+            bbox: obj.bbox,
+            peak_x: obj.peak.x,
+            peak_y: obj.peak.y,
+            peak_value: obj.peak_value,
+            area: obj.pixels.len(),
         })
         .collect()
 }

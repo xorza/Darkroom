@@ -1,7 +1,7 @@
 name: bench_extract_candidates_4k_dense_multithreshold
-mean: 13.572209ms
-min: 13.559235ms
-max: 13.586487ms
-median: 13.570907ms
+mean: 27.897911ms
+min: 27.760319ms
+max: 28.125106ms
+median: 27.80831ms
 iterations: 3
-vs_previous: 13.44826ms -> 13.572209ms (+0.9%) same
+vs_previous: 27.792547ms -> 27.897911ms (+0.4%) same

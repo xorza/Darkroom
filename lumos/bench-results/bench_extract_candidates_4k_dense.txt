@@ -1,7 +1,7 @@
 name: bench_extract_candidates_4k_dense
-mean: 10.842568ms
-min: 10.831651ms
-max: 10.849365ms
-median: 10.84669ms
+mean: 11.02044ms
+min: 10.838055ms
+max: 11.365073ms
+median: 10.858194ms
 iterations: 3
-vs_previous: 10.949907ms -> 10.842568ms (-1.0%) same
+vs_previous: 10.842568ms -> 11.02044ms (+1.6%) same
