@@ -12,9 +12,8 @@ pub mod simd;
 mod tests;
 
 use crate::common::Buffer2;
+use crate::common::parallel::ParRowsMutAuto;
 use rayon::prelude::*;
-
-use crate::common::parallel::rows_per_chunk;
 
 /// Apply 3x3 median filter to remove Bayer pattern artifacts.
 ///
@@ -27,16 +26,15 @@ pub fn median_filter_3x3(pixels: &Buffer2<f32>, output: &mut Buffer2<f32>) {
     debug_assert_eq!(height, output.height());
 
     if width < 3 || height < 3 {
+        // todo swap?
         output.copy_from_slice(pixels);
         return;
     }
 
-    let chunk_rows = rows_per_chunk(height);
     output
-        .par_chunks_mut(width * chunk_rows)
-        .enumerate()
-        .for_each(|(chunk_idx, chunk)| {
-            let y_start = chunk_idx * chunk_rows;
+        .pixels_mut()
+        .par_rows_mut_auto(width)
+        .for_each(|(y_start, chunk)| {
             let rows_in_chunk = chunk.len() / width;
 
             for local_y in 0..rows_in_chunk {
