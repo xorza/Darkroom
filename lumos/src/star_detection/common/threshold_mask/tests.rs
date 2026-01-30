@@ -185,7 +185,7 @@ mod quick_benches {
             );
         });
 
-        b.bench_labeled("simd+parallel", || {
+        b.bench_labeled("simd", || {
             process_chunk_simd::<true>(
                 black_box(pixels.pixels()),
                 black_box(background.background.pixels()),
