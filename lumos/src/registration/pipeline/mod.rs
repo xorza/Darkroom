@@ -28,9 +28,6 @@ use crate::star_detection::Star;
 #[cfg(test)]
 mod tests;
 
-#[cfg(feature = "bench")]
-pub mod bench;
-
 /// Image registrator that aligns target images to a reference.
 #[derive(Debug)]
 pub struct Registrator {

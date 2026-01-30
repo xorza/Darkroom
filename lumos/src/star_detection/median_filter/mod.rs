@@ -3,9 +3,6 @@
 //! This filter is essential for images from color sensors where alternating rows
 //! have different sensitivities due to the Bayer color filter array.
 
-#[cfg(feature = "bench")]
-pub mod bench;
-
 pub mod simd;
 
 #[cfg(test)]

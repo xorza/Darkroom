@@ -13,9 +13,6 @@ pub mod moffat_fit;
 #[cfg(test)]
 mod tests;
 
-#[cfg(feature = "bench")]
-pub mod bench;
-
 // Re-export fitting functions and types for convenience
 pub use gaussian_fit::{GaussianFitConfig, GaussianFitResult, fit_gaussian_2d};
 pub use moffat_fit::{MoffatFitConfig, MoffatFitResult, fit_moffat_2d};

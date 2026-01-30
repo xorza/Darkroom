@@ -3,9 +3,6 @@
 #[cfg(test)]
 mod tests;
 
-#[cfg(feature = "bench")]
-pub mod bench;
-
 /// Supported transformation models with increasing degrees of freedom.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum TransformType {

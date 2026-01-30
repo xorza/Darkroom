@@ -75,24 +75,6 @@ pub(crate) mod types;
 #[cfg(test)]
 mod tests;
 
-#[cfg(feature = "bench")]
-pub mod bench {
-    //! Benchmark module for registration operations.
-
-    use criterion::Criterion;
-
-    /// Register all registration benchmarks with Criterion.
-    pub fn benchmarks(c: &mut Criterion) {
-        super::types::bench::benchmarks(c);
-        super::triangle::bench::benchmarks(c);
-        super::ransac::bench::benchmarks(c);
-        super::phase_correlation::bench::benchmarks(c);
-        super::interpolation::bench::benchmarks(c);
-        super::pipeline::bench::benchmarks(c);
-        super::quality::bench::benchmarks(c);
-    }
-}
-
 // Re-export main public API types
 // High-level pipeline API (primary entry point)
 pub use pipeline::{

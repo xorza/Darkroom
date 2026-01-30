@@ -31,9 +31,6 @@
 #[cfg(test)]
 mod tests;
 
-#[cfg(feature = "bench")]
-pub mod bench;
-
 use std::collections::HashMap;
 
 use crate::registration::constants::{
@@ -327,7 +324,7 @@ impl TriangleHashTable {
 
     /// Find candidate triangles that might match the query.
     /// Returns indices into the original triangle array.
-    #[cfg(any(test, feature = "bench"))]
+    #[cfg(test)]
     pub fn find_candidates(&self, query: &Triangle, tolerance: f64) -> Vec<usize> {
         let mut candidates = Vec::new();
         self.find_candidates_into(query, tolerance, &mut candidates);
@@ -411,7 +408,7 @@ impl Default for TriangleMatchConfig {
 /// Form all triangles from a list of star positions (brute-force O(n³)).
 ///
 /// For large star counts, prefer `form_triangles_kdtree` which is O(n·k²).
-#[cfg_attr(not(any(test, feature = "bench")), allow(dead_code))]
+#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn form_triangles(positions: &[(f64, f64)], max_stars: usize) -> Vec<Triangle> {
     let n = positions.len().min(max_stars);
     if n < 3 {
@@ -441,7 +438,7 @@ pub(crate) fn form_triangles(positions: &[(f64, f64)], max_stars: usize) -> Vec<
 /// counts (>50 stars), use `match_triangles` instead.
 ///
 /// Returns a list of matched star pairs with confidence scores.
-#[cfg_attr(not(any(test, feature = "bench")), allow(dead_code))]
+#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn match_stars_triangles(
     ref_positions: &[(f64, f64)],
     target_positions: &[(f64, f64)],

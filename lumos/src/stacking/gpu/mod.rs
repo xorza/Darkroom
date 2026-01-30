@@ -23,9 +23,6 @@
 //! let result = pipeline.stack_from_paths(&paths, width, height)?;
 //! ```
 
-#[cfg(feature = "bench")]
-pub mod bench;
-
 mod batch_pipeline;
 mod pipeline;
 mod sigma_clip;

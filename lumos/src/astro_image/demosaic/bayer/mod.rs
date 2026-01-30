@@ -20,9 +20,6 @@ pub(crate) mod simd_neon;
 #[cfg(test)]
 mod tests;
 
-#[cfg(feature = "bench")]
-pub mod bench;
-
 use rayon::prelude::*;
 
 /// Minimum image size to use parallel processing (avoids overhead for small images).

@@ -9,9 +9,6 @@
 #[cfg(test)]
 mod tests;
 
-#[cfg(feature = "bench")]
-pub mod bench;
-
 mod simd;
 
 use rayon::prelude::*;

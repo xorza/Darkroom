@@ -1,4 +1,4 @@
-use super::Convert;
+use super::conversion_scalar::ChannelConvert;
 
 macro_rules! test_identity {
     ($name:ident, $t:ty, $vals:expr) => {

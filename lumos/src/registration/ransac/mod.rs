@@ -11,9 +11,6 @@
 #[cfg(test)]
 mod tests;
 
-#[cfg(feature = "bench")]
-pub mod bench;
-
 pub mod simd;
 
 use nalgebra::{DMatrix, SVD};

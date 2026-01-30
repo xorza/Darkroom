@@ -3,9 +3,6 @@
 //! Automatically chooses between in-memory and disk-based processing
 //! based on available system memory.
 
-#[cfg(feature = "bench")]
-pub mod bench;
-
 use std::path::Path;
 
 use crate::astro_image::AstroImage;

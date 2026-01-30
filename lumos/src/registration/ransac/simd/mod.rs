@@ -63,7 +63,7 @@ pub(crate) fn count_inliers_simd(
 }
 
 /// Scalar implementation of inlier counting.
-#[cfg(any(feature = "bench", test))]
+#[cfg(test)]
 pub(crate) fn count_inliers_scalar(
     ref_points: &[(f64, f64)],
     target_points: &[(f64, f64)],
@@ -73,7 +73,7 @@ pub(crate) fn count_inliers_scalar(
     count_inliers_scalar_impl(ref_points, target_points, transform, threshold)
 }
 
-#[cfg(not(any(feature = "bench", test)))]
+#[cfg(not(test))]
 fn count_inliers_scalar(
     ref_points: &[(f64, f64)],
     target_points: &[(f64, f64)],

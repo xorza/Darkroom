@@ -1,9 +1,0 @@
-demosaic/bilinear/scalar
-                        time:   [111.85 ms 112.05 ms 112.29 ms]
-Found 3 outliers among 20 measurements (15.00%)
-  1 (5.00%) low mild
-  1 (5.00%) high mild
-  1 (5.00%) high severe
-demosaic/bilinear/optimized
-                        time:   [56.476 ms 56.854 ms 57.236 ms]
-

@@ -35,21 +35,6 @@ mod star;
 #[cfg(test)]
 pub mod tests;
 
-#[cfg(feature = "bench")]
-pub mod bench;
-
-#[cfg(feature = "bench")]
-pub mod benches {
-    pub use super::background::bench as background;
-    pub use super::bench as full_pipeline;
-    pub use super::centroid::bench as centroid;
-    pub use super::convolution::bench as convolution;
-    pub use super::cosmic_ray::bench as cosmic_ray;
-    pub use super::deblend::bench as deblend;
-    pub use super::detection::bench as detection;
-    pub use super::median_filter::bench as median_filter;
-}
-
 // Public API exports - main entry points for external consumers
 pub use centroid::LocalBackgroundMethod;
 

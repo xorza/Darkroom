@@ -29,7 +29,7 @@ pub(crate) mod registration;
 pub(crate) mod stacking;
 pub(crate) mod star_detection;
 
-#[cfg(any(test, feature = "bench"))]
+#[cfg(test)]
 pub mod testing;
 
 pub mod prelude;
@@ -213,48 +213,3 @@ pub use stacking::{
     remove_gradient_image,
     remove_gradient_simple,
 };
-
-// ============================================================================
-// Benchmark support (feature = "bench")
-// ============================================================================
-
-#[cfg(feature = "bench")]
-mod bench_impl;
-
-/// Benchmark proxies for internal functions.
-///
-/// This module exposes internal implementation details for benchmarking purposes.
-/// These APIs are unstable and not meant for production use.
-#[cfg(feature = "bench")]
-pub mod bench {
-    // Demosaicing benchmarks
-    pub use crate::astro_image::demosaic::bench as demosaic;
-    pub use crate::astro_image::hot_pixels::bench as hot_pixels;
-
-    // Pipeline benchmarks
-    pub use crate::bench_impl::pipeline;
-
-    // Math benchmarks
-    pub use crate::math::bench as math;
-
-    // Stacking benchmarks
-    pub use crate::stacking::bench::{gpu, mean, median, sigma_clipped};
-
-    // Star detection benchmarks
-    pub use crate::star_detection::benches::{
-        background, centroid, convolution, cosmic_ray, deblend, detection, full_pipeline,
-        median_filter,
-    };
-
-    // Testing utilities for benchmarks
-    pub use crate::testing::{calibration_dir, calibration_masters_dir, first_raw_file};
-
-    // Re-export registration bench module
-    pub use crate::registration::bench as registration;
-
-    // Re-export internal types needed by some benchmarks
-    pub use crate::star_detection::background::BackgroundMap;
-    pub use crate::star_detection::common::threshold_mask::{
-        create_threshold_mask, scalar as threshold_mask_scalar,
-    };
-}

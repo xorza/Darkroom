@@ -1,4 +1,4 @@
-use crate::common::conversion::Convert;
+use crate::common::conversion::conversion_scalar::ChannelConvert;
 use crate::common::test_utils::{
     load_lena_rgba_f32_895x551, load_lena_rgba_u8_895x551, test_output_path,
 };

@@ -72,14 +72,6 @@ pub use live::{
     LiveStackConfigBuilder, LiveStackError, LiveStackMode, LiveStackResult, LiveStackStats,
 };
 
-#[cfg(feature = "bench")]
-pub mod bench {
-    pub use super::gpu::bench as gpu;
-    pub use super::mean::bench as mean;
-    pub use super::median::bench as median;
-    pub use super::sigma_clipped::bench as sigma_clipped;
-}
-
 use crate::AstroImage;
 
 /// Type of calibration frame being stacked.

@@ -1,5 +1,0 @@
-hot_pixels/from_master_dark/sigma_5.0
-                        time:   [32.755 ms 32.971 ms 33.177 ms]
-Found 1 outliers among 20 measurements (5.00%)
-  1 (5.00%) high severe
-

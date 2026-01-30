@@ -21,9 +21,6 @@ mod simd_sse4;
 #[cfg(target_arch = "aarch64")]
 mod simd_neon;
 
-#[cfg(feature = "bench")]
-pub mod bench;
-
 use std::time::Instant;
 
 pub use scalar::demosaic_xtrans_bilinear;

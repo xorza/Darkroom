@@ -3,9 +3,6 @@
 #[cfg(test)]
 mod tests;
 
-#[cfg(feature = "bench")]
-pub mod bench;
-
 use super::StarDetectionConfig;
 use super::background::BackgroundMap;
 use super::common::dilate_mask;

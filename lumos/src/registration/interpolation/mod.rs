@@ -27,9 +27,6 @@ const ROWS_PER_CHUNK: usize = 32;
 #[cfg(test)]
 mod tests;
 
-#[cfg(feature = "bench")]
-pub mod bench;
-
 pub mod simd;
 
 /// Interpolation method for image resampling.
@@ -408,7 +405,7 @@ fn interpolate_lanczos(
 }
 
 /// Interpolate a single pixel at sub-pixel coordinates.
-#[cfg(any(test, feature = "bench"))]
+#[cfg(test)]
 pub fn interpolate_pixel(data: &Buffer2<f32>, x: f32, y: f32, config: &WarpConfig) -> f32 {
     let width = data.width();
     let height = data.height();

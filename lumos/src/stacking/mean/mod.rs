@@ -1,8 +1,5 @@
 //! Mean stacking implementation.
 
-#[cfg(feature = "bench")]
-pub mod bench;
-
 use std::io;
 use std::path::Path;
 

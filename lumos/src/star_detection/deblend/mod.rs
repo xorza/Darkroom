@@ -13,9 +13,6 @@
 pub mod local_maxima;
 pub mod multi_threshold;
 
-#[cfg(feature = "bench")]
-pub mod bench;
-
 #[cfg(test)]
 mod tests;
 

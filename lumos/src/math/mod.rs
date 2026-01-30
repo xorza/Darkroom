@@ -40,9 +40,6 @@ mod neon;
 #[cfg(target_arch = "x86_64")]
 mod sse;
 
-#[cfg(feature = "bench")]
-pub mod bench;
-
 /// Sum f32 values using SIMD when available.
 #[cfg(target_arch = "aarch64")]
 pub fn sum_f32(values: &[f32]) -> f32 {

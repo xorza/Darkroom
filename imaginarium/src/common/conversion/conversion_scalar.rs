@@ -197,7 +197,6 @@ macro_rules! dispatch_from {
     };
 }
 
-#[cfg_attr(feature = "bench", allow(dead_code))]
 pub fn convert_image(from: &Image, to: &mut Image) -> Result<()> {
     let from_size = from.desc().color_format.channel_size;
     let to_size = to.desc().color_format.channel_size;

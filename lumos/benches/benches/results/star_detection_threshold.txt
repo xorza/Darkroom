@@ -1,5 +1,0 @@
-create_threshold_mask/dispatch
-                        time:   [4.8463 ms 4.8722 ms 4.8979 ms]
-create_threshold_mask/scalar
-                        time:   [6.5435 ms 6.5858 ms 6.6283 ms]
-
