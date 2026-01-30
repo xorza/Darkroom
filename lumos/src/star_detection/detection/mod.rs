@@ -147,7 +147,6 @@ pub(crate) fn connected_components(mask: &BitBuffer2) -> (Buffer2<u32>, usize) {
 
     // First pass: assign provisional labels
     // This must be sequential due to union-find dependencies
-    let labels_data = labels.pixels_mut();
     for y in 0..height {
         let row_start = y * width;
         for x in 0..width {
@@ -158,13 +157,13 @@ pub(crate) fn connected_components(mask: &BitBuffer2) -> (Buffer2<u32>, usize) {
 
             // Check neighbors: left and top only (for forward scan)
             let left_label = if x > 0 && mask.get(idx - 1) {
-                labels_data[idx - 1]
+                labels[idx - 1]
             } else {
                 0
             };
 
             let top_label = if y > 0 && mask.get(idx - width) {
-                labels_data[idx - width]
+                labels[idx - width]
             } else {
                 0
             };
@@ -172,22 +171,22 @@ pub(crate) fn connected_components(mask: &BitBuffer2) -> (Buffer2<u32>, usize) {
             match (left_label, top_label) {
                 (0, 0) => {
                     // New component
-                    labels_data[idx] = next_label;
+                    labels[idx] = next_label;
                     parent.push(next_label);
                     next_label += 1;
                 }
                 (l, 0) => {
                     // Only left neighbor
-                    labels_data[idx] = l;
+                    labels[idx] = l;
                 }
                 (0, t) => {
                     // Only top neighbor
-                    labels_data[idx] = t;
+                    labels[idx] = t;
                 }
                 (l, t) => {
                     // Both neighbors - use minimum and union
                     let min_label = l.min(t);
-                    labels_data[idx] = min_label;
+                    labels[idx] = min_label;
                     if l != t {
                         union(&mut parent, l, t);
                     }
