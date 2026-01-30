@@ -217,22 +217,19 @@ fn extract_candidates_local_maxima(
     component_data
         .into_par_iter()
         .filter(|data| data.area > 0 && data.area <= max_area)
-        .flat_map(|data| {
+        .flat_map_iter(|data| {
             let deblended = deblend_local_maxima(&data, pixels, label_map, deblend_config);
 
-            deblended
-                .into_iter()
-                .map(|obj| StarCandidate {
-                    x_min: obj.x_min,
-                    x_max: obj.x_max,
-                    y_min: obj.y_min,
-                    y_max: obj.y_max,
-                    peak_x: obj.peak_x,
-                    peak_y: obj.peak_y,
-                    peak_value: obj.peak_value,
-                    area: obj.area,
-                })
-                .collect::<Vec<_>>()
+            deblended.into_iter().map(|obj| StarCandidate {
+                x_min: obj.x_min,
+                x_max: obj.x_max,
+                y_min: obj.y_min,
+                y_max: obj.y_max,
+                peak_x: obj.peak_x,
+                peak_y: obj.peak_y,
+                peak_value: obj.peak_value,
+                area: obj.area,
+            })
         })
         .collect()
 }

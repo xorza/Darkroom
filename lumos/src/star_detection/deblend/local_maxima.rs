@@ -17,7 +17,7 @@ use crate::star_detection::detection::LabelMap;
 
 /// Maximum number of peaks/candidates per component.
 /// Components with more peaks than this will have excess peaks ignored.
-const MAX_PEAKS: usize = 8;
+pub const MAX_PEAKS: usize = 8;
 
 /// A pixel with its coordinates and value.
 #[derive(Debug, Clone, Copy)]
