@@ -7,7 +7,7 @@ use std::hint::black_box;
 
 use crate::AstroImage;
 use crate::astro_image::ImageDimensions;
-use crate::star_detection::StarDetector;
+use crate::star_detection::{StarDetectionConfig, StarDetector};
 use crate::testing::synthetic::stamps;
 
 /// Register full pipeline benchmarks with Criterion.
@@ -37,7 +37,8 @@ pub fn benchmarks(c: &mut Criterion) {
         });
 
         // With matched filter (FWHM = 4.0)
-        let detector_matched = StarDetector::new().with_fwhm(4.0);
+        let detector_matched =
+            StarDetector::from_config(StarDetectionConfig::default().with_fwhm(4.0));
         group.bench_function(BenchmarkId::new("matched_filter", &size_name), |b| {
             b.iter(|| black_box(detector_matched.detect(black_box(&image))))
         });
