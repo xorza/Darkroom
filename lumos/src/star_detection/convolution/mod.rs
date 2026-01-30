@@ -6,12 +6,12 @@
 //!
 //! Uses SIMD acceleration when available (AVX2/SSE on x86_64, NEON on aarch64).
 
+mod simd;
+
 #[cfg(test)]
 mod bench;
 #[cfg(test)]
 mod tests;
-
-mod simd;
 
 use rayon::prelude::*;
 
@@ -19,190 +19,9 @@ use crate::common::parallel::{ParChunksMutAutoWithOffset, ParRowsMutAuto};
 use crate::math::fwhm_to_sigma;
 use crate::star_detection::Buffer2;
 
-/// Compute 1D Gaussian kernel.
-///
-/// The kernel is normalized so that it sums to 1.0.
-/// Kernel radius is chosen as ceil(3 * sigma) to capture 99.7% of the Gaussian.
-///
-/// # Arguments
-/// * `sigma` - Standard deviation of the Gaussian (in pixels)
-///
-/// # Returns
-/// Vector containing the kernel values, length is 2 * radius + 1
-pub(super) fn gaussian_kernel_1d(sigma: f32) -> Vec<f32> {
-    assert!(sigma > 0.0, "Sigma must be positive");
-
-    let radius = (3.0 * sigma).ceil() as usize;
-    let size = 2 * radius + 1;
-    let mut kernel = vec![0.0f32; size];
-
-    let two_sigma_sq = 2.0 * sigma * sigma;
-    let mut sum = 0.0f32;
-
-    for (i, k) in kernel.iter_mut().enumerate() {
-        let x = i as f32 - radius as f32;
-        let value = (-x * x / two_sigma_sq).exp();
-        *k = value;
-        sum += value;
-    }
-
-    // Normalize
-    for v in &mut kernel {
-        *v /= sum;
-    }
-
-    kernel
-}
-
-/// Apply separable Gaussian convolution to an image.
-///
-/// Uses separable convolution: first convolve rows, then columns.
-/// This is O(n×k) instead of O(n×k²) for a 2D convolution.
-///
-/// # Arguments
-/// * `pixels` - Input image buffer
-/// * `sigma` - Gaussian sigma (use `fwhm_to_sigma` to convert from FWHM)
-///
-/// # Returns
-/// Convolved image of the same size
-pub(super) fn gaussian_convolve(pixels: &Buffer2<f32>, sigma: f32) -> Buffer2<f32> {
-    assert!(sigma > 0.0, "Sigma must be positive");
-
-    let width = pixels.width();
-    let height = pixels.height();
-    let kernel = gaussian_kernel_1d(sigma);
-    let radius = kernel.len() / 2;
-
-    // If kernel is larger than image dimension, fall back to direct 2D convolution
-    if radius >= width.min(height) / 2 {
-        return gaussian_convolve_2d_direct(pixels, sigma);
-    }
-
-    // Step 1: Convolve rows (horizontal pass)
-    let mut temp = Buffer2::new_default(width, height);
-    convolve_rows_parallel(pixels, &mut temp, &kernel);
-
-    // Step 2: Convolve columns (vertical pass)
-    let mut output = Buffer2::new_default(width, height);
-    convolve_cols_parallel(&temp, &mut output, &kernel);
-
-    output
-}
-
-/// Convolve all rows in parallel with auto-sized chunking.
-fn convolve_rows_parallel(input: &Buffer2<f32>, output: &mut Buffer2<f32>, kernel: &[f32]) {
-    let width = input.width();
-    let radius = kernel.len() / 2;
-
-    output
-        .pixels_mut()
-        .par_rows_mut_auto(width)
-        .for_each(|(y_start, out_chunk)| {
-            let rows_in_chunk = out_chunk.len() / width;
-
-            for local_y in 0..rows_in_chunk {
-                let y = y_start + local_y;
-                let in_row = &input[y * width..(y + 1) * width];
-                let out_row = &mut out_chunk[local_y * width..(local_y + 1) * width];
-                simd::convolve_row(in_row, out_row, kernel, radius);
-            }
-        });
-}
-
-/// Convolve all columns in parallel with auto-sized chunking.
-fn convolve_cols_parallel(input: &Buffer2<f32>, output: &mut Buffer2<f32>, kernel: &[f32]) {
-    let width = input.width();
-    let height = input.height();
-    let radius = kernel.len() / 2;
-
-    output
-        .pixels_mut()
-        .par_rows_mut_auto(width)
-        .for_each(|(y_start, out_chunk)| {
-            let rows_in_chunk = out_chunk.len() / width;
-
-            for local_y in 0..rows_in_chunk {
-                let y = y_start + local_y;
-                let out_row = &mut out_chunk[local_y * width..(local_y + 1) * width];
-
-                for x in 0..width {
-                    let mut sum = 0.0f32;
-
-                    for (k, &kval) in kernel.iter().enumerate() {
-                        let sy = y as isize + k as isize - radius as isize;
-
-                        // Mirror boundary handling
-                        let sy = if sy < 0 {
-                            (-sy) as usize
-                        } else if sy >= height as isize {
-                            2 * height - 2 - sy as usize
-                        } else {
-                            sy as usize
-                        };
-
-                        sum += input[sy * width + x] * kval;
-                    }
-
-                    out_row[x] = sum;
-                }
-            }
-        });
-}
-
-/// Direct 2D Gaussian convolution for small images or large kernels.
-fn gaussian_convolve_2d_direct(pixels: &Buffer2<f32>, sigma: f32) -> Buffer2<f32> {
-    let width = pixels.width();
-    let height = pixels.height();
-    let kernel_1d = gaussian_kernel_1d(sigma);
-    let radius = kernel_1d.len() / 2;
-
-    // Build 2D kernel
-    let ksize = kernel_1d.len();
-    let mut kernel_2d = vec![0.0f32; ksize * ksize];
-    for ky in 0..ksize {
-        for kx in 0..ksize {
-            kernel_2d[ky * ksize + kx] = kernel_1d[ky] * kernel_1d[kx];
-        }
-    }
-
-    let mut output = vec![0.0f32; width * height];
-    // todo paralelyze
-    for y in 0..height {
-        for x in 0..width {
-            let mut sum = 0.0f32;
-
-            for ky in 0..ksize {
-                for kx in 0..ksize {
-                    let sx = x as isize + kx as isize - radius as isize;
-                    let sy = y as isize + ky as isize - radius as isize;
-
-                    // Mirror boundary
-                    let sx: usize = if sx < 0 {
-                        (-sx) as usize
-                    } else if sx >= width as isize {
-                        2 * width - 2 - sx as usize
-                    } else {
-                        sx as usize
-                    };
-
-                    let sy: usize = if sy < 0 {
-                        (-sy) as usize
-                    } else if sy >= height as isize {
-                        2 * height - 2 - sy as usize
-                    } else {
-                        sy as usize
-                    };
-
-                    sum += pixels[sy * width + sx] * kernel_2d[ky * ksize + kx];
-                }
-            }
-
-            output[y * width + x] = sum;
-        }
-    }
-
-    Buffer2::new(width, height, output)
-}
+// ============================================================================
+// Public API
+// ============================================================================
 
 /// Apply matched filter convolution optimized for star detection.
 ///
@@ -259,67 +78,36 @@ pub fn matched_filter(
     )
 }
 
-/// Compute 2D elliptical Gaussian kernel.
+// ============================================================================
+// Internal API (visible to parent module and tests)
+// ============================================================================
+
+/// Apply separable Gaussian convolution to an image.
 ///
-/// The kernel is normalized so that it sums to 1.0.
-///
-/// # Arguments
-/// * `sigma` - Standard deviation along the major axis (in pixels)
-/// * `axis_ratio` - Ratio of minor to major axis (0 < ratio <= 1)
-/// * `angle` - Position angle of major axis in radians (0 = along x-axis)
-///
-/// # Returns
-/// Tuple of (kernel values, kernel width, kernel height)
-fn elliptical_gaussian_kernel_2d(sigma: f32, axis_ratio: f32, angle: f32) -> (Vec<f32>, usize) {
+/// Uses separable convolution: first convolve rows, then columns.
+/// This is O(n×k) instead of O(n×k²) for a 2D convolution.
+pub(super) fn gaussian_convolve(pixels: &Buffer2<f32>, sigma: f32) -> Buffer2<f32> {
     assert!(sigma > 0.0, "Sigma must be positive");
-    assert!(
-        axis_ratio > 0.0 && axis_ratio <= 1.0,
-        "Axis ratio must be in (0, 1]"
-    );
 
-    // Kernel radius based on major axis sigma
-    let radius = (3.0 * sigma).ceil() as usize;
-    let size = 2 * radius + 1;
+    let width = pixels.width();
+    let height = pixels.height();
+    let kernel = gaussian_kernel_1d(sigma);
+    let radius = kernel.len() / 2;
 
-    // Sigma values for major and minor axes
-    let sigma_major = sigma;
-    let sigma_minor = sigma * axis_ratio;
-
-    // Precompute rotation matrix components
-    let cos_a = angle.cos();
-    let sin_a = angle.sin();
-
-    // Precompute denominators
-    let two_sigma_major_sq = 2.0 * sigma_major * sigma_major;
-    let two_sigma_minor_sq = 2.0 * sigma_minor * sigma_minor;
-
-    let mut kernel = vec![0.0f32; size * size];
-    let mut sum = 0.0f32;
-
-    for ky in 0..size {
-        for kx in 0..size {
-            let x = kx as f32 - radius as f32;
-            let y = ky as f32 - radius as f32;
-
-            // Rotate coordinates to align with ellipse axes
-            let x_rot = x * cos_a + y * sin_a;
-            let y_rot = -x * sin_a + y * cos_a;
-
-            // Compute elliptical Gaussian value
-            let value =
-                (-x_rot * x_rot / two_sigma_major_sq - y_rot * y_rot / two_sigma_minor_sq).exp();
-
-            kernel[ky * size + kx] = value;
-            sum += value;
-        }
+    // If kernel is larger than image dimension, fall back to direct 2D convolution
+    if radius >= width.min(height) / 2 {
+        return gaussian_convolve_2d_direct(pixels, sigma);
     }
 
-    // Normalize
-    for v in &mut kernel {
-        *v /= sum;
-    }
+    // Step 1: Convolve rows (horizontal pass)
+    let mut temp = Buffer2::new_default(width, height);
+    convolve_rows_parallel(pixels, &mut temp, &kernel);
 
-    (kernel, size)
+    // Step 2: Convolve columns (vertical pass)
+    let mut output = Buffer2::new_default(width, height);
+    convolve_cols_parallel(&temp, &mut output, &kernel);
+
+    output
 }
 
 /// Apply elliptical Gaussian convolution to an image.
@@ -327,16 +115,7 @@ fn elliptical_gaussian_kernel_2d(sigma: f32, axis_ratio: f32, angle: f32) -> (Ve
 /// Unlike separable convolution for circular Gaussians, elliptical Gaussians
 /// require full 2D convolution which is O(n×k²). This is used when the PSF
 /// is known to be non-circular.
-///
-/// # Arguments
-/// * `pixels` - Input image buffer
-/// * `sigma` - Gaussian sigma along major axis (use `fwhm_to_sigma` to convert from FWHM)
-/// * `axis_ratio` - Ratio of minor to major axis (0 < ratio <= 1, where 1 = circular)
-/// * `angle` - Position angle of major axis in radians (0 = along x-axis)
-///
-/// # Returns
-/// Convolved image of the same size
-pub fn elliptical_gaussian_convolve(
+pub(super) fn elliptical_gaussian_convolve(
     pixels: &Buffer2<f32>,
     sigma: f32,
     axis_ratio: f32,
@@ -399,4 +178,195 @@ pub fn elliptical_gaussian_convolve(
         });
 
     Buffer2::new(width, height, output)
+}
+
+/// Compute 1D Gaussian kernel (normalized to sum to 1.0).
+pub(super) fn gaussian_kernel_1d(sigma: f32) -> Vec<f32> {
+    assert!(sigma > 0.0, "Sigma must be positive");
+
+    let radius = (3.0 * sigma).ceil() as usize;
+    let size = 2 * radius + 1;
+    let mut kernel = vec![0.0f32; size];
+
+    let two_sigma_sq = 2.0 * sigma * sigma;
+    let mut sum = 0.0f32;
+
+    for (i, k) in kernel.iter_mut().enumerate() {
+        let x = i as f32 - radius as f32;
+        let value = (-x * x / two_sigma_sq).exp();
+        *k = value;
+        sum += value;
+    }
+
+    for v in &mut kernel {
+        *v /= sum;
+    }
+
+    kernel
+}
+
+// ============================================================================
+// Private implementation
+// ============================================================================
+
+/// Convolve all rows in parallel.
+fn convolve_rows_parallel(input: &Buffer2<f32>, output: &mut Buffer2<f32>, kernel: &[f32]) {
+    let width = input.width();
+    let radius = kernel.len() / 2;
+
+    output
+        .pixels_mut()
+        .par_rows_mut_auto(width)
+        .for_each(|(y_start, out_chunk)| {
+            let rows_in_chunk = out_chunk.len() / width;
+
+            for local_y in 0..rows_in_chunk {
+                let y = y_start + local_y;
+                let in_row = &input[y * width..(y + 1) * width];
+                let out_row = &mut out_chunk[local_y * width..(local_y + 1) * width];
+                simd::convolve_row(in_row, out_row, kernel, radius);
+            }
+        });
+}
+
+/// Convolve all columns in parallel.
+fn convolve_cols_parallel(input: &Buffer2<f32>, output: &mut Buffer2<f32>, kernel: &[f32]) {
+    let width = input.width();
+    let height = input.height();
+    let radius = kernel.len() / 2;
+
+    output
+        .pixels_mut()
+        .par_rows_mut_auto(width)
+        .for_each(|(y_start, out_chunk)| {
+            let rows_in_chunk = out_chunk.len() / width;
+
+            for local_y in 0..rows_in_chunk {
+                let y = y_start + local_y;
+                let out_row = &mut out_chunk[local_y * width..(local_y + 1) * width];
+
+                for x in 0..width {
+                    let mut sum = 0.0f32;
+
+                    for (k, &kval) in kernel.iter().enumerate() {
+                        let sy = y as isize + k as isize - radius as isize;
+
+                        // Mirror boundary handling
+                        let sy = if sy < 0 {
+                            (-sy) as usize
+                        } else if sy >= height as isize {
+                            2 * height - 2 - sy as usize
+                        } else {
+                            sy as usize
+                        };
+
+                        sum += input[sy * width + x] * kval;
+                    }
+
+                    out_row[x] = sum;
+                }
+            }
+        });
+}
+
+/// Direct 2D Gaussian convolution for small images or large kernels.
+fn gaussian_convolve_2d_direct(pixels: &Buffer2<f32>, sigma: f32) -> Buffer2<f32> {
+    let width = pixels.width();
+    let height = pixels.height();
+    let kernel_1d = gaussian_kernel_1d(sigma);
+    let radius = kernel_1d.len() / 2;
+
+    // Build 2D kernel
+    let ksize = kernel_1d.len();
+    let mut kernel_2d = vec![0.0f32; ksize * ksize];
+    for ky in 0..ksize {
+        for kx in 0..ksize {
+            kernel_2d[ky * ksize + kx] = kernel_1d[ky] * kernel_1d[kx];
+        }
+    }
+
+    let mut output = vec![0.0f32; width * height];
+
+    for y in 0..height {
+        for x in 0..width {
+            let mut sum = 0.0f32;
+
+            for ky in 0..ksize {
+                for kx in 0..ksize {
+                    let sx = x as isize + kx as isize - radius as isize;
+                    let sy = y as isize + ky as isize - radius as isize;
+
+                    // Mirror boundary
+                    let sx: usize = if sx < 0 {
+                        (-sx) as usize
+                    } else if sx >= width as isize {
+                        2 * width - 2 - sx as usize
+                    } else {
+                        sx as usize
+                    };
+
+                    let sy: usize = if sy < 0 {
+                        (-sy) as usize
+                    } else if sy >= height as isize {
+                        2 * height - 2 - sy as usize
+                    } else {
+                        sy as usize
+                    };
+
+                    sum += pixels[sy * width + sx] * kernel_2d[ky * ksize + kx];
+                }
+            }
+
+            output[y * width + x] = sum;
+        }
+    }
+
+    Buffer2::new(width, height, output)
+}
+
+/// Compute 2D elliptical Gaussian kernel (normalized to sum to 1.0).
+fn elliptical_gaussian_kernel_2d(sigma: f32, axis_ratio: f32, angle: f32) -> (Vec<f32>, usize) {
+    assert!(sigma > 0.0, "Sigma must be positive");
+    assert!(
+        axis_ratio > 0.0 && axis_ratio <= 1.0,
+        "Axis ratio must be in (0, 1]"
+    );
+
+    let radius = (3.0 * sigma).ceil() as usize;
+    let size = 2 * radius + 1;
+
+    let sigma_major = sigma;
+    let sigma_minor = sigma * axis_ratio;
+
+    let cos_a = angle.cos();
+    let sin_a = angle.sin();
+
+    let two_sigma_major_sq = 2.0 * sigma_major * sigma_major;
+    let two_sigma_minor_sq = 2.0 * sigma_minor * sigma_minor;
+
+    let mut kernel = vec![0.0f32; size * size];
+    let mut sum = 0.0f32;
+
+    for ky in 0..size {
+        for kx in 0..size {
+            let x = kx as f32 - radius as f32;
+            let y = ky as f32 - radius as f32;
+
+            // Rotate coordinates to align with ellipse axes
+            let x_rot = x * cos_a + y * sin_a;
+            let y_rot = -x * sin_a + y * cos_a;
+
+            let value =
+                (-x_rot * x_rot / two_sigma_major_sq - y_rot * y_rot / two_sigma_minor_sq).exp();
+
+            kernel[ky * size + kx] = value;
+            sum += value;
+        }
+    }
+
+    for v in &mut kernel {
+        *v /= sum;
+    }
+
+    (kernel, size)
 }
