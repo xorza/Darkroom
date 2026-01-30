@@ -254,5 +254,7 @@ pub mod bench {
 
     // Re-export internal types needed by some benchmarks
     pub use crate::star_detection::background::BackgroundMap;
-    pub use crate::star_detection::detection::{create_threshold_mask, scalar as detection_scalar};
+    pub use crate::star_detection::common::threshold_mask::{
+        create_threshold_mask, scalar as threshold_mask_scalar,
+    };
 }
