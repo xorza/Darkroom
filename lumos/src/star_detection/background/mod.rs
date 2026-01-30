@@ -397,7 +397,7 @@ fn create_object_mask(
     // Dilate mask to cover object wings
     if dilation_radius > 0 {
         super::common::dilate_mask(output, dilation_radius, scratch);
-        output.copy_from(scratch);
+        std::mem::swap(output, scratch);
     }
 }
 
