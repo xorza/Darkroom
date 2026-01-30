@@ -292,7 +292,7 @@ pub fn matched_filter(
 ///
 /// # Returns
 /// Tuple of (kernel values, kernel width, kernel height)
-pub fn elliptical_gaussian_kernel_2d(sigma: f32, axis_ratio: f32, angle: f32) -> (Vec<f32>, usize) {
+fn elliptical_gaussian_kernel_2d(sigma: f32, axis_ratio: f32, angle: f32) -> (Vec<f32>, usize) {
     assert!(sigma > 0.0, "Sigma must be positive");
     assert!(
         axis_ratio > 0.0 && axis_ratio <= 1.0,
