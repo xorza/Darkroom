@@ -6,7 +6,9 @@
 pub mod threshold_mask;
 
 use crate::common::BitBuffer2;
+use crate::common::parallel::ParChunksMutAutoWithOffset;
 use crate::math::mad_to_sigma;
+use rayon::iter::ParallelIterator;
 
 /// Stamp radius as a multiple of FWHM.
 ///
@@ -55,28 +57,48 @@ pub fn compute_stamp_radius(expected_fwhm: f32) -> usize {
 pub fn dilate_mask(mask: &BitBuffer2, radius: usize, output: &mut BitBuffer2) {
     assert_eq!(mask.width(), output.width(), "width mismatch");
     assert_eq!(mask.height(), output.height(), "height mismatch");
-    output.fill(false);
 
     let width = mask.width();
     let height = mask.height();
-    // todo paralelise
-    for y in 0..height {
-        for x in 0..width {
-            if mask.get_xy(x, y) {
-                // Set all pixels within radius
-                let y_min = y.saturating_sub(radius);
-                let y_max = (y + radius).min(height - 1);
-                let x_min = x.saturating_sub(radius);
-                let x_max = (x + radius).min(width - 1);
 
-                for dy in y_min..=y_max {
-                    for dx in x_min..=x_max {
-                        output.set_xy(dx, dy, true);
+    // Parallel dilation: for each output pixel, check if any input pixel within radius is set
+    output
+        .words_mut()
+        .par_chunks_mut_auto()
+        .for_each(|(word_offset, word_chunk)| {
+            for (local_word_idx, word) in word_chunk.iter_mut().enumerate() {
+                let word_idx = word_offset + local_word_idx;
+                let base_idx = word_idx * 64;
+                let mut bits = 0u64;
+
+                for bit in 0..64 {
+                    let idx = base_idx + bit;
+                    if idx >= width * height {
+                        break;
+                    }
+
+                    let x = idx % width;
+                    let y = idx / width;
+
+                    // Check if any pixel in the neighborhood is set
+                    let y_min = y.saturating_sub(radius);
+                    let y_max = (y + radius).min(height - 1);
+                    let x_min = x.saturating_sub(radius);
+                    let x_max = (x + radius).min(width - 1);
+
+                    'outer: for sy in y_min..=y_max {
+                        for sx in x_min..=x_max {
+                            if mask.get_xy(sx, sy) {
+                                bits |= 1u64 << bit;
+                                break 'outer;
+                            }
+                        }
                     }
                 }
+
+                *word = bits;
             }
-        }
-    }
+        });
 }
 
 /// Compute sigma-clipped median and MAD-based sigma.
