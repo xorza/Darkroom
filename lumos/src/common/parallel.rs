@@ -58,6 +58,7 @@ pub struct ZippedSlices2<'a, A: Send, B: Send>(pub &'a mut [A], pub &'a mut [B])
 
 impl<'a, A: Send + 'a, B: Send + 'a> ZippedSlices2<'a, A, B> {
     /// Zip with a third slice.
+    #[allow(dead_code)]
     pub fn par_zip<C: Send + 'a>(self, other: &'a mut [C]) -> ZippedSlices3<'a, A, B, C> {
         ZippedSlices3(self.0, self.1, other)
     }
@@ -83,12 +84,14 @@ impl<'a, A: Send + 'a, B: Send + 'a> ZippedSlices2<'a, A, B> {
 }
 
 /// Three zipped mutable slices ready for parallel row iteration.
+#[allow(dead_code)]
 pub struct ZippedSlices3<'a, A: Send, B: Send, C: Send>(
     pub &'a mut [A],
     pub &'a mut [B],
     pub &'a mut [C],
 );
 
+#[allow(dead_code)]
 impl<'a, A: Send + 'a, B: Send + 'a, C: Send + 'a> ZippedSlices3<'a, A, B, C> {
     /// Zip with a fourth slice.
     pub fn par_zip<D: Send + 'a>(self, other: &'a mut [D]) -> ZippedSlices4<'a, A, B, C, D> {
@@ -122,6 +125,7 @@ impl<'a, A: Send + 'a, B: Send + 'a, C: Send + 'a> ZippedSlices3<'a, A, B, C> {
 }
 
 /// Four zipped mutable slices ready for parallel row iteration.
+#[allow(dead_code)]
 pub struct ZippedSlices4<'a, A: Send, B: Send, C: Send, D: Send>(
     pub &'a mut [A],
     pub &'a mut [B],
@@ -129,6 +133,7 @@ pub struct ZippedSlices4<'a, A: Send, B: Send, C: Send, D: Send>(
     pub &'a mut [D],
 );
 
+#[allow(dead_code)]
 impl<'a, A: Send + 'a, B: Send + 'a, C: Send + 'a, D: Send + 'a> ZippedSlices4<'a, A, B, C, D> {
     /// Split into parallel row-aligned chunks.
     pub fn par_rows_mut_auto(self, width: usize) -> ParRows4MutWithOffset<'a, A, B, C, D> {
@@ -163,10 +168,12 @@ impl<'a, A: Send + 'a, B: Send + 'a, C: Send + 'a, D: Send + 'a> ZippedSlices4<'
 }
 
 // Type aliases for nested zips
+#[allow(dead_code)]
 type Zip3Inner<'a, A, B, C> = rayon::iter::Zip<
     rayon::iter::Zip<rayon::slice::ChunksMut<'a, A>, rayon::slice::ChunksMut<'a, B>>,
     rayon::slice::ChunksMut<'a, C>,
 >;
+#[allow(dead_code)]
 type Zip4Inner<'a, A, B, C, D> =
     rayon::iter::Zip<Zip3Inner<'a, A, B, C>, rayon::slice::ChunksMut<'a, D>>;
 
@@ -221,6 +228,7 @@ impl<'a, A: Send + 'a, B: Send + 'a> IndexedParallelIterator for ParRows2MutWith
 }
 
 /// Parallel iterator over three zipped row-aligned mutable chunks.
+#[allow(dead_code)]
 pub struct ParRows3MutWithOffset<'a, A: Send, B: Send, C: Send> {
     inner: Zip3Inner<'a, A, B, C>,
     chunk_rows: usize,
@@ -274,6 +282,7 @@ impl<'a, A: Send + 'a, B: Send + 'a, C: Send + 'a> IndexedParallelIterator
 }
 
 /// Parallel iterator over four zipped row-aligned mutable chunks.
+#[allow(dead_code)]
 pub struct ParRows4MutWithOffset<'a, A: Send, B: Send, C: Send, D: Send> {
     inner: Zip4Inner<'a, A, B, C, D>,
     chunk_rows: usize,
@@ -441,12 +450,13 @@ impl<'a, T: Send + 'a> IndexedParallelIterator for ParChunksMutWithOffset<'a, T>
     }
 }
 
+//todo remove parallel_chunked
+
 /// Apply a function to each index in parallel, modifying the slice in place.
 ///
 /// # Arguments
 /// * `data` - Mutable slice to fill with values
 /// * `f` - Function that takes an index and returns a value
-/// todo remove
 pub fn parallel_chunked<T, F>(data: &mut [T], f: F)
 where
     T: Send + Sync,
