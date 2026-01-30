@@ -55,9 +55,7 @@ pub use centroid::LocalBackgroundMethod;
 
 // Internal re-exports for advanced users (may change in future versions)
 // Background estimation (used by calibration and advanced pipelines)
-pub use background::{
-    BackgroundConfig, BackgroundMap, estimate_background, estimate_background_iterative,
-};
+pub use background::{BackgroundConfig, BackgroundMap, estimate_background};
 
 // Profile fitting (for custom centroiding pipelines)
 pub use centroid::{GaussianFitConfig, GaussianFitResult, fit_gaussian_2d};

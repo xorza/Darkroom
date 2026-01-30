@@ -164,104 +164,11 @@ fn median_of_slice(values: &mut [f32]) -> f32 {
 /// * `pixels` - Grayscale image buffer
 /// * `tile_size` - Size of tiles (typically 32-128 pixels)
 pub fn estimate_background(pixels: &Buffer2<f32>, tile_size: usize) -> BackgroundMap {
-    let width = pixels.width();
-    let height = pixels.height();
-    assert!(
-        (16..=256).contains(&tile_size),
-        "Tile size must be between 16 and 256"
-    );
-    assert!(
-        width >= tile_size && height >= tile_size,
-        "Image must be at least tile_size x tile_size"
-    );
-
-    let tiles_x = width.div_ceil(tile_size);
-    let tiles_y = height.div_ceil(tile_size);
-    let max_tile_pixels = tile_size * tile_size;
-
-    // Compute statistics for each tile in parallel with per-thread scratch buffers
-    let tile_stats: Vec<TileStats> = (0..tiles_y * tiles_x)
-        .into_par_iter()
-        .map_init(
-            || {
-                (
-                    Vec::with_capacity(max_tile_pixels),
-                    Vec::with_capacity(max_tile_pixels),
-                )
-            },
-            |(values_buf, deviations_buf), idx| {
-                let ty = idx / tiles_x;
-                let tx = idx % tiles_x;
-
-                let x_start = tx * tile_size;
-                let y_start = ty * tile_size;
-                let x_end = (x_start + tile_size).min(width);
-                let y_end = (y_start + tile_size).min(height);
-
-                compute_tile_stats(
-                    pixels,
-                    width,
-                    x_start,
-                    x_end,
-                    y_start,
-                    y_end,
-                    values_buf,
-                    deviations_buf,
-                )
-            },
-        )
-        .collect();
-
-    // Build tile grid with precomputed centers
-    let mut grid = TileGrid {
-        stats: tile_stats,
-        centers_x: (0..tiles_x)
-            .map(|tx| {
-                let x_start = tx * tile_size;
-                let x_end = (x_start + tile_size).min(width);
-                (x_start + x_end) as f32 * 0.5
-            })
-            .collect(),
-        centers_y: (0..tiles_y)
-            .map(|ty| {
-                let y_start = ty * tile_size;
-                let y_end = (y_start + tile_size).min(height);
-                (y_start + y_end) as f32 * 0.5
-            })
-            .collect(),
-        tiles_x,
-        tiles_y,
-    };
-
-    // Apply median filter to tile grid to reject bright star contamination
-    grid.apply_median_filter();
-
-    // Allocate output buffers
-    let mut background = vec![0.0f32; width * height];
-    let mut noise = vec![0.0f32; width * height];
-
-    background
-        .par_chunks_mut(width * ROWS_PER_CHUNK)
-        .zip(noise.par_chunks_mut(width * ROWS_PER_CHUNK))
-        .enumerate()
-        .for_each(|(chunk_idx, (bg_chunk, noise_chunk))| {
-            let y_start = chunk_idx * ROWS_PER_CHUNK;
-            let rows_in_chunk = bg_chunk.len() / width;
-
-            for local_y in 0..rows_in_chunk {
-                let y = y_start + local_y;
-                let row_offset = local_y * width;
-                let bg_row = &mut bg_chunk[row_offset..row_offset + width];
-                let noise_row = &mut noise_chunk[row_offset..row_offset + width];
-
-                interpolate_row(bg_row, noise_row, y, &grid);
-            }
-        });
-
-    BackgroundMap {
-        background: Buffer2::new(width, height, background),
-        noise: Buffer2::new(width, height, noise),
+    BackgroundConfig {
+        tile_size,
+        ..Default::default()
     }
+    .estimate(pixels)
 }
 
 /// Compute sigma-clipped statistics for a single tile using provided scratch buffers.
@@ -432,15 +339,148 @@ impl Default for BackgroundConfig {
 impl BackgroundConfig {
     /// Estimate background using this configuration.
     ///
-    /// Automatically chooses between single-pass and iterative estimation
-    /// based on the `iterations` field. If `iterations > 0`, uses iterative
-    /// refinement which is better for crowded fields.
+    /// Uses a tiled approach with sigma-clipped statistics:
+    /// 1. Divide image into tiles of `tile_size` pixels
+    /// 2. For each tile, compute sigma-clipped median and standard deviation
+    /// 3. Bilinearly interpolate between tile centers to get per-pixel values
+    ///
+    /// If `iterations > 0`, uses iterative refinement (SExtractor-style):
+    /// 1. Estimate initial background
+    /// 2. Detect pixels above threshold (potential objects)
+    /// 3. Create dilated mask of detected regions
+    /// 4. Re-estimate background excluding masked pixels
+    /// 5. Repeat for specified iterations
+    ///
+    /// This provides cleaner background maps for crowded fields by excluding
+    /// stars and other bright objects from the estimation.
     pub fn estimate(&self, pixels: &Buffer2<f32>) -> BackgroundMap {
+        self.validate();
+
+        let width = pixels.width();
+        let height = pixels.height();
+        let tile_size = self.tile_size;
+
+        assert!(
+            width >= tile_size && height >= tile_size,
+            "Image must be at least tile_size x tile_size"
+        );
+
+        let tiles_x = width.div_ceil(tile_size);
+        let tiles_y = height.div_ceil(tile_size);
+        let max_tile_pixels = tile_size * tile_size;
+
+        // Compute statistics for each tile in parallel with per-thread scratch buffers
+        let tile_stats: Vec<TileStats> = (0..tiles_y * tiles_x)
+            .into_par_iter()
+            .map_init(
+                || {
+                    (
+                        Vec::with_capacity(max_tile_pixels),
+                        Vec::with_capacity(max_tile_pixels),
+                    )
+                },
+                |(values_buf, deviations_buf), idx| {
+                    let ty = idx / tiles_x;
+                    let tx = idx % tiles_x;
+
+                    let x_start = tx * tile_size;
+                    let y_start = ty * tile_size;
+                    let x_end = (x_start + tile_size).min(width);
+                    let y_end = (y_start + tile_size).min(height);
+
+                    compute_tile_stats(
+                        pixels,
+                        width,
+                        x_start,
+                        x_end,
+                        y_start,
+                        y_end,
+                        values_buf,
+                        deviations_buf,
+                    )
+                },
+            )
+            .collect();
+
+        // Build tile grid with precomputed centers
+        let mut grid = TileGrid {
+            stats: tile_stats,
+            centers_x: (0..tiles_x)
+                .map(|tx| {
+                    let x_start = tx * tile_size;
+                    let x_end = (x_start + tile_size).min(width);
+                    (x_start + x_end) as f32 * 0.5
+                })
+                .collect(),
+            centers_y: (0..tiles_y)
+                .map(|ty| {
+                    let y_start = ty * tile_size;
+                    let y_end = (y_start + tile_size).min(height);
+                    (y_start + y_end) as f32 * 0.5
+                })
+                .collect(),
+            tiles_x,
+            tiles_y,
+        };
+
+        // Apply median filter to tile grid to reject bright star contamination
+        grid.apply_median_filter();
+
+        // Allocate output buffers
+        let mut background_pixels = vec![0.0f32; width * height];
+        let mut noise_pixels = vec![0.0f32; width * height];
+
+        background_pixels
+            .par_chunks_mut(width * ROWS_PER_CHUNK)
+            .zip(noise_pixels.par_chunks_mut(width * ROWS_PER_CHUNK))
+            .enumerate()
+            .for_each(|(chunk_idx, (bg_chunk, noise_chunk))| {
+                let y_start = chunk_idx * ROWS_PER_CHUNK;
+                let rows_in_chunk = bg_chunk.len() / width;
+
+                for local_y in 0..rows_in_chunk {
+                    let y = y_start + local_y;
+                    let row_offset = local_y * width;
+                    let bg_row = &mut bg_chunk[row_offset..row_offset + width];
+                    let noise_row = &mut noise_chunk[row_offset..row_offset + width];
+
+                    interpolate_row(bg_row, noise_row, y, &grid);
+                }
+            });
+
+        let mut background = BackgroundMap {
+            background: Buffer2::new(width, height, background_pixels),
+            noise: Buffer2::new(width, height, noise_pixels),
+        };
+
+        // Iterative refinement if requested
         if self.iterations > 0 {
-            estimate_background_iterative(pixels, self)
-        } else {
-            estimate_background(pixels, self.tile_size)
+            let mut mask = Buffer2::new_filled(width, height, false);
+            let mut scratch = Buffer2::new_filled(width, height, false);
+
+            for _iter in 0..self.iterations {
+                // Create mask of pixels above threshold
+                create_object_mask(
+                    pixels,
+                    &background,
+                    self.detection_sigma,
+                    self.mask_dilation,
+                    &mut mask,
+                    &mut scratch,
+                );
+
+                // Re-estimate background with masked pixels excluded
+                estimate_background_masked(
+                    pixels,
+                    self.tile_size,
+                    &mask,
+                    self.min_unmasked_fraction,
+                    &mut background,
+                );
+            }
         }
+
+        background
     }
 
     /// Validate the configuration and panic if invalid.
@@ -470,63 +510,9 @@ impl BackgroundConfig {
         );
         assert!(
             (16..=256).contains(&self.tile_size),
-            "tile_size must be in [16, 256], got {}",
-            self.tile_size
+            "Tile size must be between 16 and 256"
         );
     }
-}
-
-/// Estimate background with iterative refinement.
-///
-/// This implements the SExtractor-style iterative approach:
-/// 1. Estimate initial background
-/// 2. Detect pixels above threshold (potential objects)
-/// 3. Create dilated mask of detected regions
-/// 4. Re-estimate background excluding masked pixels
-/// 5. Repeat for specified iterations
-///
-/// This provides cleaner background maps for crowded fields by excluding
-/// stars and other bright objects from the estimation.
-///
-/// # Arguments
-/// * `pixels` - Grayscale image buffer
-/// * `tile_size` - Size of tiles for background estimation
-/// * `config` - Iterative refinement configuration
-pub fn estimate_background_iterative(
-    pixels: &Buffer2<f32>,
-    config: &BackgroundConfig,
-) -> BackgroundMap {
-    // Start with initial background estimate
-    let mut background = estimate_background(pixels, config.tile_size);
-
-    // Pre-allocate mask buffers for reuse across iterations
-    let width = pixels.width();
-    let height = pixels.height();
-    let mut mask = Buffer2::new_filled(width, height, false);
-    let mut scratch = Buffer2::new_filled(width, height, false);
-
-    for _iter in 0..config.iterations {
-        // Create mask of pixels above threshold
-        create_object_mask(
-            pixels,
-            &background,
-            config.detection_sigma,
-            config.mask_dilation,
-            &mut mask,
-            &mut scratch,
-        );
-
-        // Re-estimate background with masked pixels excluded
-        estimate_background_masked(
-            pixels,
-            config.tile_size,
-            &mask,
-            config.min_unmasked_fraction,
-            &mut background,
-        );
-    }
-
-    background
 }
 
 /// Create a mask of pixels that are likely objects (above threshold).

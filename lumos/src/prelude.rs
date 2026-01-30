@@ -18,9 +18,7 @@ pub use crate::CalibrationMasters;
 pub use crate::{Star, StarDetectionConfig, StarDetectionDiagnostics, StarDetectionResult};
 
 // Star detection - background estimation
-pub use crate::{
-    BackgroundConfig, BackgroundMap, estimate_background, estimate_background_iterative,
-};
+pub use crate::{BackgroundConfig, BackgroundMap, estimate_background};
 
 // Registration - main API
 pub use crate::{

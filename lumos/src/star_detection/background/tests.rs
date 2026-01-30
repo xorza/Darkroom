@@ -241,7 +241,7 @@ fn test_iterative_background_uniform() {
         tile_size: 32,
         ..Default::default()
     };
-    let bg = estimate_background_iterative(&pixels, &config);
+    let bg = config.estimate(&pixels);
 
     // All background values should be close to 0.5
     for y in (0..height).step_by(10) {
@@ -294,7 +294,7 @@ fn test_iterative_background_with_bright_stars() {
         min_unmasked_fraction: 0.3,
         tile_size: 32,
     };
-    let bg_iterative = estimate_background_iterative(&pixels, &config);
+    let bg_iterative = config.estimate(&pixels);
 
     // Check background at a point away from stars
     let test_x = 16;
@@ -342,7 +342,7 @@ fn test_iterative_background_preserves_gradient() {
         tile_size: 16,
         ..Default::default()
     };
-    let bg = estimate_background_iterative(&pixels, &config);
+    let bg = config.estimate(&pixels);
 
     // Gradient should be preserved
     let corner_00 = bg.get_background(0, 0);
@@ -377,7 +377,7 @@ fn test_iterative_background_zero_iterations() {
         tile_size: 32,
         ..Default::default()
     };
-    let bg = estimate_background_iterative(&pixels, &config);
+    let bg = config.estimate(&pixels);
 
     let val = bg.get_background(32, 32);
     assert!(
