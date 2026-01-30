@@ -136,26 +136,29 @@ fn bench_elliptical_vs_circular_1k(b: ::bench::Bencher) {
 fn bench_matched_filter_1k(b: ::bench::Bencher) {
     let pixels = benchmark_star_field(1024, 1024, 100, 0.1, 0.01, 42);
     let background = Buffer2::new_filled(1024, 1024, 0.1);
+    let mut output = Buffer2::new_default(1024, 1024);
     let fwhm = 4.0;
 
     b.bench_labeled("circular", || {
-        black_box(matched_filter(
+        matched_filter(
             black_box(&pixels),
             black_box(&background),
             black_box(fwhm),
             black_box(1.0),
             black_box(0.0),
-        ));
+            black_box(&mut output),
+        );
     });
 
     b.bench_labeled("elliptical", || {
-        black_box(matched_filter(
+        matched_filter(
             black_box(&pixels),
             black_box(&background),
             black_box(fwhm),
             black_box(0.7),
             black_box(0.5),
-        ));
+            black_box(&mut output),
+        );
     });
 }
 
@@ -163,15 +166,17 @@ fn bench_matched_filter_1k(b: ::bench::Bencher) {
 fn bench_matched_filter_4k(b: ::bench::Bencher) {
     let pixels = benchmark_star_field(4096, 4096, 500, 0.1, 0.01, 42);
     let background = Buffer2::new_filled(4096, 4096, 0.1);
+    let mut output = Buffer2::new_default(4096, 4096);
     let fwhm = 4.0;
 
     b.bench(|| {
-        black_box(matched_filter(
+        matched_filter(
             black_box(&pixels),
             black_box(&background),
             black_box(fwhm),
             black_box(1.0),
             black_box(0.0),
-        ));
+            black_box(&mut output),
+        );
     });
 }

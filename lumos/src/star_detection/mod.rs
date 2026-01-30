@@ -177,13 +177,16 @@ impl StarDetector {
                 self.config.psf_axis_ratio,
                 self.config.psf_angle.to_degrees()
             );
-            Some(matched_filter(
+            let mut filtered = Buffer2::new_default(pixels.width(), pixels.height());
+            matched_filter(
                 &pixels,
                 &background.background,
                 self.config.expected_fwhm,
                 self.config.psf_axis_ratio,
                 self.config.psf_angle,
-            ))
+                &mut filtered,
+            );
+            Some(filtered)
         } else {
             None
         };

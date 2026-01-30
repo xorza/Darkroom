@@ -31,25 +31,18 @@ use crate::star_detection::Buffer2;
 ///
 /// Supports elliptical PSF shapes for stars elongated due to tracking errors,
 /// field rotation, or optical aberrations. For circular PSFs, use `axis_ratio = 1.0`.
-///
-/// # Arguments
-/// * `pixels` - Input image buffer
-/// * `background` - Per-pixel background values
-/// * `fwhm` - Expected FWHM of stars in pixels (major axis for elliptical)
-/// * `axis_ratio` - Ratio of minor to major axis (0 < ratio <= 1, where 1 = circular)
-/// * `angle` - Position angle of major axis in radians (0 = along x-axis)
-///
-/// # Returns
-/// Convolved, background-subtracted image
 pub fn matched_filter(
     pixels: &Buffer2<f32>,
     background: &Buffer2<f32>,
     fwhm: f32,
     axis_ratio: f32,
     angle: f32,
-) -> Buffer2<f32> {
+    output: &mut Buffer2<f32>,
+) {
     assert_eq!(pixels.width(), background.width());
     assert_eq!(pixels.height(), background.height());
+    assert_eq!(pixels.width(), output.width());
+    assert_eq!(pixels.height(), output.height());
     assert!(
         axis_ratio > 0.0 && axis_ratio <= 1.0,
         "Axis ratio must be in (0, 1]"
@@ -70,15 +63,13 @@ pub fn matched_filter(
 
     // Convolve with elliptical Gaussian kernel
     let sigma = fwhm_to_sigma(fwhm);
-    let mut output = Buffer2::new_default(pixels.width(), pixels.height());
     elliptical_gaussian_convolve(
         &Buffer2::new(pixels.width(), pixels.height(), subtracted),
         sigma,
         axis_ratio,
         angle,
-        &mut output,
+        output,
     );
-    output
 }
 
 // ============================================================================
