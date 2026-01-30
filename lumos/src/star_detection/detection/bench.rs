@@ -100,8 +100,10 @@ fn bench_extract_candidates_4k_dense_multithreshold(b: ::bench::Bencher) {
     let pixels = benchmark_star_field(4096, 4096, 2000, 0.1, 0.01, 42);
     let mask = create_test_mask(&pixels, 0.05);
     let label_map = LabelMap::from_mask(&mask);
-    let mut config = DeblendConfig::default();
-    config.multi_threshold = true;
+    let config = DeblendConfig {
+        multi_threshold: true,
+        ..Default::default()
+    };
 
     b.bench(|| {
         black_box(extract_candidates(

@@ -15,9 +15,17 @@ use super::DeblendConfig;
 use crate::common::Buffer2;
 use crate::star_detection::detection::LabelMap;
 
+// ============================================================================
+// Constants
+// ============================================================================
+
 /// Maximum number of peaks/candidates per component.
 /// Components with more peaks than this will have excess peaks ignored.
 pub const MAX_PEAKS: usize = 8;
+
+// ============================================================================
+// Types
+// ============================================================================
 
 /// A pixel with its coordinates and value.
 #[derive(Debug, Clone, Copy)]
@@ -42,6 +50,45 @@ pub struct ComponentData {
     /// Number of pixels in the component (pre-computed).
     pub area: usize,
 }
+
+/// Result of deblending a single connected component.
+#[derive(Debug)]
+pub struct DeblendedCandidate {
+    pub x_min: usize,
+    pub x_max: usize,
+    pub y_min: usize,
+    pub y_max: usize,
+    pub peak_x: usize,
+    pub peak_y: usize,
+    pub peak_value: f32,
+    pub area: usize,
+}
+
+/// Per-peak bounding box and area data (internal).
+#[derive(Debug, Clone, Copy)]
+struct PeakData {
+    x_min: usize,
+    x_max: usize,
+    y_min: usize,
+    y_max: usize,
+    area: usize,
+}
+
+impl Default for PeakData {
+    fn default() -> Self {
+        Self {
+            x_min: usize::MAX,
+            x_max: 0,
+            y_min: usize::MAX,
+            y_max: 0,
+            area: 0,
+        }
+    }
+}
+
+// ============================================================================
+// ComponentData implementation
+// ============================================================================
 
 impl ComponentData {
     /// Iterate over all pixels in this component.
@@ -95,25 +142,49 @@ impl ComponentData {
     }
 }
 
-/// Result of deblending a single connected component.
-#[derive(Debug)]
-pub struct DeblendedCandidate {
-    /// Bounding box min X.
-    pub x_min: usize,
-    /// Bounding box max X.
-    pub x_max: usize,
-    /// Bounding box min Y.
-    pub y_min: usize,
-    /// Bounding box max Y.
-    pub y_max: usize,
-    /// Peak pixel X coordinate.
-    pub peak_x: usize,
-    /// Peak pixel Y coordinate.
-    pub peak_y: usize,
-    /// Peak pixel value.
-    pub peak_value: f32,
-    /// Number of pixels in the region.
-    pub area: usize,
+// ============================================================================
+// Public API
+// ============================================================================
+
+/// Deblend a component using local maxima detection.
+///
+/// Combines `find_local_maxima` and `deblend_by_nearest_peak`.
+/// Returns a single candidate if no deblending is needed, or multiple
+/// candidates if the component contains multiple peaks.
+///
+/// Uses `ArrayVec` to avoid heap allocation.
+pub fn deblend_local_maxima(
+    data: &ComponentData,
+    pixels: &Buffer2<f32>,
+    labels: &LabelMap,
+    config: &DeblendConfig,
+) -> ArrayVec<DeblendedCandidate, MAX_PEAKS> {
+    let peaks = find_local_maxima(data, pixels, labels, config);
+
+    if peaks.len() <= 1 {
+        // Single peak - create one candidate
+        let peak = if peaks.is_empty() {
+            data.find_peak(pixels, labels)
+        } else {
+            peaks[0]
+        };
+
+        let mut result = ArrayVec::new();
+        result.push(DeblendedCandidate {
+            x_min: data.x_min,
+            x_max: data.x_max,
+            y_min: data.y_min,
+            y_max: data.y_max,
+            peak_x: peak.x,
+            peak_y: peak.y,
+            peak_value: peak.value,
+            area: data.area,
+        });
+        result
+    } else {
+        // Multiple peaks - deblend by assigning pixels to nearest peak
+        deblend_by_nearest_peak(data, pixels, labels, &peaks)
+    }
 }
 
 /// Find local maxima within a component for deblending.
@@ -131,68 +202,19 @@ pub fn find_local_maxima(
     let width = pixels.width();
     let height = pixels.height();
 
-    // Find global maximum first
     let global_max = data.global_max(pixels, labels);
     let min_peak_value = global_max * config.min_prominence;
 
-    // Check each pixel for local maximum
     for pixel in data.iter_pixels(pixels, labels) {
         if pixel.value < min_peak_value {
             continue;
         }
 
-        // Check if this is a local maximum (greater than all 8 neighbors)
-        let mut is_maximum = true;
-        for dy in -1i32..=1 {
-            for dx in -1i32..=1 {
-                if dx == 0 && dy == 0 {
-                    continue;
-                }
-
-                let nx = pixel.x as i32 + dx;
-                let ny = pixel.y as i32 + dy;
-
-                if nx >= 0 && ny >= 0 {
-                    let nx = nx as usize;
-                    let ny = ny as usize;
-
-                    if nx < width && ny < height && pixels[(nx, ny)] >= pixel.value {
-                        is_maximum = false;
-                        break;
-                    }
-                }
-            }
-            if !is_maximum {
-                break;
-            }
+        if !is_local_maximum(pixel, pixels, width, height) {
+            continue;
         }
 
-        if is_maximum {
-            // Check separation from existing peaks
-            let min_sep = config.min_separation;
-            let well_separated = peaks.iter().all(|peak| {
-                let dx = (pixel.x as i32 - peak.x as i32).unsigned_abs() as usize;
-                let dy = (pixel.y as i32 - peak.y as i32).unsigned_abs() as usize;
-                dx >= min_sep || dy >= min_sep
-            });
-
-            if well_separated {
-                // Only add if we have capacity
-                if !peaks.is_full() {
-                    peaks.push(pixel);
-                }
-            } else {
-                // Keep the brighter peak
-                for peak in &mut peaks {
-                    let dx = (pixel.x as i32 - peak.x as i32).unsigned_abs() as usize;
-                    let dy = (pixel.y as i32 - peak.y as i32).unsigned_abs() as usize;
-                    if dx < min_sep && dy < min_sep && pixel.value > peak.value {
-                        *peak = pixel;
-                        break;
-                    }
-                }
-            }
-        }
+        add_or_replace_peak(&mut peaks, pixel, config.min_separation);
     }
 
     // Sort by brightness (brightest first)
@@ -203,28 +225,6 @@ pub fn find_local_maxima(
     });
 
     peaks
-}
-
-/// Per-peak bounding box and area data.
-#[derive(Debug, Clone, Copy)]
-struct PeakData {
-    x_min: usize,
-    x_max: usize,
-    y_min: usize,
-    y_max: usize,
-    area: usize,
-}
-
-impl Default for PeakData {
-    fn default() -> Self {
-        Self {
-            x_min: usize::MAX,
-            x_max: 0,
-            y_min: usize::MAX,
-            y_max: 0,
-            area: 0,
-        }
-    }
 }
 
 /// Deblend a component into multiple candidates based on peak positions.
@@ -243,27 +243,13 @@ pub fn deblend_by_nearest_peak(
         return result;
     }
 
-    // Initialize per-peak data using fixed-size array
     let mut peak_data: [PeakData; MAX_PEAKS] = [PeakData::default(); MAX_PEAKS];
     let num_peaks = peaks.len().min(MAX_PEAKS);
 
     // Assign each pixel to nearest peak
     for pixel in data.iter_pixels(pixels, labels) {
-        let mut min_dist_sq = usize::MAX;
-        let mut nearest_peak = 0;
-
-        for (i, peak) in peaks.iter().take(num_peaks).enumerate() {
-            let dx = (pixel.x as i32 - peak.x as i32).unsigned_abs() as usize;
-            let dy = (pixel.y as i32 - peak.y as i32).unsigned_abs() as usize;
-            let dist_sq = dx * dx + dy * dy;
-
-            if dist_sq < min_dist_sq {
-                min_dist_sq = dist_sq;
-                nearest_peak = i;
-            }
-        }
-
-        let pd = &mut peak_data[nearest_peak];
+        let nearest = find_nearest_peak(pixel, peaks, num_peaks);
+        let pd = &mut peak_data[nearest];
         pd.x_min = pd.x_min.min(pixel.x);
         pd.x_max = pd.x_max.max(pixel.x);
         pd.y_min = pd.y_min.min(pixel.y);
@@ -290,48 +276,89 @@ pub fn deblend_by_nearest_peak(
     result
 }
 
-/// Deblend a component using local maxima detection.
-///
-/// This is a convenience function that combines `find_local_maxima` and
-/// `deblend_by_nearest_peak`.
-///
-/// Returns a single candidate if no deblending is needed, or multiple
-/// candidates if the component contains multiple peaks.
-/// Uses `ArrayVec` to avoid heap allocation.
-pub fn deblend_local_maxima(
-    data: &ComponentData,
-    pixels: &Buffer2<f32>,
-    labels: &LabelMap,
-    config: &DeblendConfig,
-) -> ArrayVec<DeblendedCandidate, MAX_PEAKS> {
-    let peaks = find_local_maxima(data, pixels, labels, config);
+// ============================================================================
+// Internal helpers
+// ============================================================================
 
-    if peaks.len() <= 1 {
-        // Single peak - create one candidate
-        let peak = if peaks.is_empty() {
-            // Fallback: use global maximum
-            data.find_peak(pixels, labels)
-        } else {
-            peaks[0]
-        };
+/// Check if a pixel is a local maximum (greater than all 8 neighbors).
+#[inline]
+fn is_local_maximum(pixel: Pixel, pixels: &Buffer2<f32>, width: usize, height: usize) -> bool {
+    for dy in -1i32..=1 {
+        for dx in -1i32..=1 {
+            if dx == 0 && dy == 0 {
+                continue;
+            }
 
-        let mut result = ArrayVec::new();
-        result.push(DeblendedCandidate {
-            x_min: data.x_min,
-            x_max: data.x_max,
-            y_min: data.y_min,
-            y_max: data.y_max,
-            peak_x: peak.x,
-            peak_y: peak.y,
-            peak_value: peak.value,
-            area: data.area,
-        });
-        result
+            let nx = pixel.x as i32 + dx;
+            let ny = pixel.y as i32 + dy;
+
+            if nx >= 0 && ny >= 0 {
+                let nx = nx as usize;
+                let ny = ny as usize;
+
+                if nx < width && ny < height && pixels[(nx, ny)] >= pixel.value {
+                    return false;
+                }
+            }
+        }
+    }
+    true
+}
+
+/// Add a peak to the list, or replace an existing nearby peak if this one is brighter.
+#[inline]
+fn add_or_replace_peak(
+    peaks: &mut ArrayVec<Pixel, MAX_PEAKS>,
+    pixel: Pixel,
+    min_separation: usize,
+) {
+    // Check separation from existing peaks
+    let well_separated = peaks.iter().all(|peak| {
+        let dx = (pixel.x as i32 - peak.x as i32).unsigned_abs() as usize;
+        let dy = (pixel.y as i32 - peak.y as i32).unsigned_abs() as usize;
+        dx >= min_separation || dy >= min_separation
+    });
+
+    if well_separated {
+        if !peaks.is_full() {
+            peaks.push(pixel);
+        }
     } else {
-        // Multiple peaks - deblend by assigning pixels to nearest peak
-        deblend_by_nearest_peak(data, pixels, labels, &peaks)
+        // Replace nearby peak if this one is brighter
+        for peak in peaks.iter_mut() {
+            let dx = (pixel.x as i32 - peak.x as i32).unsigned_abs() as usize;
+            let dy = (pixel.y as i32 - peak.y as i32).unsigned_abs() as usize;
+            if dx < min_separation && dy < min_separation && pixel.value > peak.value {
+                *peak = pixel;
+                break;
+            }
+        }
     }
 }
+
+/// Find the index of the nearest peak to a pixel.
+#[inline]
+fn find_nearest_peak(pixel: Pixel, peaks: &[Pixel], num_peaks: usize) -> usize {
+    let mut min_dist_sq = usize::MAX;
+    let mut nearest = 0;
+
+    for (i, peak) in peaks.iter().take(num_peaks).enumerate() {
+        let dx = (pixel.x as i32 - peak.x as i32).unsigned_abs() as usize;
+        let dy = (pixel.y as i32 - peak.y as i32).unsigned_abs() as usize;
+        let dist_sq = dx * dx + dy * dy;
+
+        if dist_sq < min_dist_sq {
+            min_dist_sq = dist_sq;
+            nearest = i;
+        }
+    }
+
+    nearest
+}
+
+// ============================================================================
+// Tests
+// ============================================================================
 
 #[cfg(test)]
 mod tests {
@@ -358,7 +385,7 @@ mod tests {
                         let value = amplitude * (-r2 / (2.0 * sigma * sigma)).exp();
                         if value > 0.001 {
                             pixels[(x, y)] += value;
-                            labels[(x, y)] = 1; // All stars in component 1
+                            labels[(x, y)] = 1;
                         }
                     }
                 }
@@ -392,19 +419,22 @@ mod tests {
         (x_min, x_max, y_min, y_max, area)
     }
 
-    #[test]
-    fn test_find_single_peak() {
-        let (pixels, labels) = make_gaussian_image(100, 100, &[(50, 50, 1.0, 3.0)]);
-        let (x_min, x_max, y_min, y_max, area) = compute_bbox(&labels, 1);
-
-        let data = ComponentData {
+    fn make_component(labels: &LabelMap, label: u32) -> ComponentData {
+        let (x_min, x_max, y_min, y_max, area) = compute_bbox(labels, label);
+        ComponentData {
             x_min,
             x_max,
             y_min,
             y_max,
-            label: 1,
+            label,
             area,
-        };
+        }
+    }
+
+    #[test]
+    fn test_find_single_peak() {
+        let (pixels, labels) = make_gaussian_image(100, 100, &[(50, 50, 1.0, 3.0)]);
+        let data = make_component(&labels, 1);
 
         let config = DeblendConfig::default();
         let peaks = find_local_maxima(&data, &pixels, &labels, &config);
@@ -420,16 +450,7 @@ mod tests {
     fn test_find_two_peaks() {
         let (pixels, labels) =
             make_gaussian_image(100, 100, &[(30, 50, 1.0, 2.5), (70, 50, 0.8, 2.5)]);
-        let (x_min, x_max, y_min, y_max, area) = compute_bbox(&labels, 1);
-
-        let data = ComponentData {
-            x_min,
-            x_max,
-            y_min,
-            y_max,
-            label: 1,
-            area,
-        };
+        let data = make_component(&labels, 1);
 
         let config = DeblendConfig {
             min_separation: 3,
@@ -445,16 +466,7 @@ mod tests {
     fn test_deblend_creates_separate_candidates() {
         let (pixels, labels) =
             make_gaussian_image(100, 100, &[(30, 50, 1.0, 2.5), (70, 50, 0.8, 2.5)]);
-        let (x_min, x_max, y_min, y_max, area) = compute_bbox(&labels, 1);
-
-        let data = ComponentData {
-            x_min,
-            x_max,
-            y_min,
-            y_max,
-            label: 1,
-            area,
-        };
+        let data = make_component(&labels, 1);
 
         let config = DeblendConfig {
             min_separation: 3,
@@ -472,20 +484,11 @@ mod tests {
     #[test]
     fn test_iter_pixels_count() {
         let (pixels, labels) = make_gaussian_image(100, 100, &[(50, 50, 1.0, 3.0)]);
-        let (x_min, x_max, y_min, y_max, area) = compute_bbox(&labels, 1);
-
-        let data = ComponentData {
-            x_min,
-            x_max,
-            y_min,
-            y_max,
-            label: 1,
-            area,
-        };
+        let data = make_component(&labels, 1);
 
         let iter_count = data.iter_pixels(&pixels, &labels).count();
         assert_eq!(
-            iter_count, area,
+            iter_count, data.area,
             "iter_pixels should yield exactly area pixels"
         );
     }
