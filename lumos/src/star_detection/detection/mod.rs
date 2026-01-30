@@ -11,8 +11,8 @@ use super::common::dilate_mask;
 use super::common::threshold_mask::{create_threshold_mask, create_threshold_mask_filtered};
 use super::config::{DeblendConfig, StarDetectionConfig};
 use super::deblend::{
-    ComponentData, MultiThresholdComponentData, MultiThresholdDeblendConfig, Pixel,
-    deblend_component as multi_threshold_deblend, deblend_local_maxima,
+    ComponentData, MultiThresholdDeblendConfig, deblend_component as multi_threshold_deblend,
+    deblend_local_maxima,
 };
 use crate::common::{BitBuffer2, Buffer2};
 
@@ -224,7 +224,7 @@ fn extract_candidates_local_maxima(
         .collect()
 }
 
-/// Extract candidates using multi-threshold deblending (requires pixel allocation).
+/// Extract candidates using multi-threshold deblending.
 fn extract_candidates_multi_threshold(
     pixels: &Buffer2<f32>,
     label_map: &LabelMap,
@@ -235,14 +235,15 @@ fn extract_candidates_multi_threshold(
     let width = pixels.width();
     let num_labels = label_map.num_labels();
 
-    // Multi-threshold needs actual pixel data for its tree-building algorithm
-    let mut component_data: Vec<MultiThresholdComponentData> = Vec::with_capacity(num_labels);
-    component_data.resize_with(num_labels, || MultiThresholdComponentData {
+    // Build component metadata (no pixel storage - reads on-demand)
+    let mut component_data: Vec<ComponentData> = Vec::with_capacity(num_labels);
+    component_data.resize_with(num_labels, || ComponentData {
         x_min: usize::MAX,
         x_max: 0,
         y_min: usize::MAX,
         y_max: 0,
-        pixels: Vec::with_capacity(50),
+        label: 0,
+        area: 0,
     });
 
     for (idx, &label) in label_map.iter().enumerate() {
@@ -250,28 +251,21 @@ fn extract_candidates_multi_threshold(
             continue;
         }
         let data = &mut component_data[(label - 1) as usize];
-        // Skip pixel collection for oversized components
-        if data.pixels.len() > max_area {
-            continue;
-        }
+        data.label = label;
+        data.area += 1;
         let x = idx % width;
         let y = idx / width;
         data.x_min = data.x_min.min(x);
         data.x_max = data.x_max.max(x);
         data.y_min = data.y_min.min(y);
         data.y_max = data.y_max.max(y);
-        data.pixels.push(Pixel {
-            x,
-            y,
-            value: pixels[idx],
-        });
     }
 
     // Process each component in parallel
     component_data
         .into_par_iter()
-        .filter(|data| !data.pixels.is_empty() && data.pixels.len() <= max_area)
-        .flat_map(|data| {
+        .filter(|data| data.area > 0 && data.area <= max_area)
+        .flat_map_iter(|data| {
             let mt_config = MultiThresholdDeblendConfig {
                 n_thresholds: deblend_config.n_thresholds,
                 min_contrast: deblend_config.min_contrast,
@@ -279,24 +273,24 @@ fn extract_candidates_multi_threshold(
             };
 
             // Estimate detection threshold from the minimum pixel value in component
-            let detection_threshold = data.pixels.iter().map(|p| p.value).fold(f32::MAX, f32::min);
+            let detection_threshold = data
+                .iter_pixels(pixels, label_map)
+                .map(|p| p.value)
+                .fold(f32::MAX, f32::min);
 
             let deblended =
-                multi_threshold_deblend(&data.pixels, width, detection_threshold, &mt_config);
+                multi_threshold_deblend(&data, pixels, label_map, detection_threshold, &mt_config);
 
-            deblended
-                .into_iter()
-                .map(|obj| StarCandidate {
-                    x_min: obj.bbox.0,
-                    x_max: obj.bbox.1,
-                    y_min: obj.bbox.2,
-                    y_max: obj.bbox.3,
-                    peak_x: obj.peak_x,
-                    peak_y: obj.peak_y,
-                    peak_value: obj.peak_value,
-                    area: obj.pixels.len(),
-                })
-                .collect::<Vec<_>>()
+            deblended.into_iter().map(|obj| StarCandidate {
+                x_min: obj.bbox.0,
+                x_max: obj.bbox.1,
+                y_min: obj.bbox.2,
+                y_max: obj.bbox.3,
+                peak_x: obj.peak_x,
+                peak_y: obj.peak_y,
+                peak_value: obj.peak_value,
+                area: obj.pixels.len(),
+            })
         })
         .collect()
 }

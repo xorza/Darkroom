@@ -9,17 +9,9 @@
 
 use std::collections::HashMap;
 
-use super::local_maxima::Pixel;
-
-/// Data for a component when using multi-threshold deblending.
-/// Multi-threshold deblend needs the actual pixel data for its tree-building algorithm.
-pub struct MultiThresholdComponentData {
-    pub x_min: usize,
-    pub x_max: usize,
-    pub y_min: usize,
-    pub y_max: usize,
-    pub pixels: Vec<Pixel>,
-}
+use super::{ComponentData, Pixel};
+use crate::common::Buffer2;
+use crate::star_detection::detection::LabelMap;
 
 /// Configuration for multi-threshold deblending.
 #[derive(Debug, Clone, Copy)]
@@ -84,65 +76,78 @@ pub struct DeblendedObject {
 
 /// Multi-threshold deblending of a connected component.
 ///
-/// Takes a list of pixels belonging to a single connected component and
-/// attempts to split it into multiple objects using the multi-threshold approach.
+/// Uses `ComponentData` to read pixels on-demand from the image buffer,
+/// avoiding allocation of pixel vectors per component.
 ///
 /// # Arguments
-/// * `pixels` - Pixel data for the entire image
-/// * `component_pixels` - List of pixels in this component
-/// * `width` - Image width
+/// * `data` - Component metadata (bounding box, label, area)
+/// * `pixels` - Full image pixel buffer
+/// * `labels` - Label map for the image
 /// * `detection_threshold` - The threshold used for initial detection
 /// * `config` - Deblending configuration
 ///
 /// # Returns
 /// Vector of deblended objects, or single object if no deblending occurs.
 pub fn deblend_component(
-    component_pixels: &[Pixel],
-    width: usize,
+    data: &ComponentData,
+    pixels: &Buffer2<f32>,
+    labels: &LabelMap,
     detection_threshold: f32,
     config: &MultiThresholdDeblendConfig,
 ) -> Vec<DeblendedObject> {
-    if component_pixels.is_empty() {
+    debug_assert_eq!(
+        (pixels.width(), pixels.height()),
+        (labels.width(), labels.height()),
+        "pixels and labels must have same dimensions"
+    );
+
+    if data.area == 0 {
         return Vec::new();
     }
 
     // If min_contrast >= 1.0, deblending is effectively disabled
     // (no branch can have 100% of flux)
     if config.min_contrast >= 1.0 {
-        return vec![create_single_object(component_pixels)];
+        return vec![create_single_object(data, pixels, labels)];
     }
 
     // Find peak value in the component
-    let peak_value = component_pixels
-        .iter()
-        .map(|p| p.value)
-        .fold(f32::MIN, f32::max);
+    let peak = data.find_peak(pixels, labels);
+    let peak_value = peak.value;
 
     // If peak barely above threshold, no deblending possible
     if peak_value <= detection_threshold * 1.01 {
-        return vec![create_single_object(component_pixels)];
+        return vec![create_single_object(data, pixels, labels)];
     }
 
     // Create threshold levels (exponentially spaced for better resolution at faint levels)
     let thresholds = create_threshold_levels(detection_threshold, peak_value, config.n_thresholds);
 
     // Build deblending tree by analyzing connectivity at each threshold
-    let tree = build_deblend_tree(component_pixels, width, &thresholds, config.min_separation);
+    let width = pixels.width();
+    let tree = build_deblend_tree(
+        data,
+        pixels,
+        labels,
+        width,
+        &thresholds,
+        config.min_separation,
+    );
 
     // If tree has only one leaf (no branching), return single object
     if tree.is_empty() {
-        return vec![create_single_object(component_pixels)];
+        return vec![create_single_object(data, pixels, labels)];
     }
 
     // Find leaf nodes (objects) using contrast criterion
     let leaves = find_significant_branches(&tree, config.min_contrast);
 
     if leaves.len() <= 1 {
-        return vec![create_single_object(component_pixels)];
+        return vec![create_single_object(data, pixels, labels)];
     }
 
     // Assign all pixels to nearest leaf peak
-    assign_pixels_to_objects(component_pixels, &tree, &leaves)
+    assign_pixels_to_objects(data, pixels, labels, &tree, &leaves)
 }
 
 /// Create exponentially spaced threshold levels.
@@ -166,16 +171,22 @@ fn create_threshold_levels(low: f32, high: f32, n: usize) -> Vec<f32> {
 
 /// Build the deblending tree by tracking connectivity at each threshold level.
 fn build_deblend_tree(
-    component_pixels: &[Pixel],
+    data: &ComponentData,
+    pixels: &Buffer2<f32>,
+    labels: &LabelMap,
     width: usize,
     thresholds: &[f32],
     min_separation: usize,
 ) -> Vec<DeblendNode> {
-    if thresholds.is_empty() || component_pixels.is_empty() {
+    if thresholds.is_empty() || data.area == 0 {
         return Vec::new();
     }
 
     let mut tree: Vec<DeblendNode> = Vec::new();
+
+    // Collect component pixels once for the tree-building algorithm
+    // (multi-threshold needs repeated access at different threshold levels)
+    let component_pixels: Vec<Pixel> = data.iter_pixels(pixels, labels).collect();
 
     // Create a map from (x, y) to index for quick lookup
     let pixel_map: HashMap<(usize, usize), usize> = component_pixels
@@ -481,12 +492,14 @@ fn collect_significant_leaves(
 
 /// Assign pixels to their nearest object (based on peak positions).
 fn assign_pixels_to_objects(
-    component_pixels: &[Pixel],
+    data: &ComponentData,
+    pixels: &Buffer2<f32>,
+    labels: &LabelMap,
     tree: &[DeblendNode],
     leaf_indices: &[usize],
 ) -> Vec<DeblendedObject> {
     if leaf_indices.is_empty() {
-        return vec![create_single_object(component_pixels)];
+        return vec![create_single_object(data, pixels, labels)];
     }
 
     // Get peak positions for each leaf
@@ -506,7 +519,7 @@ fn assign_pixels_to_objects(
         .collect();
 
     // Assign each pixel to nearest peak
-    for &p in component_pixels {
+    for p in data.iter_pixels(pixels, labels) {
         let mut min_dist_sq = usize::MAX;
         let mut nearest = 0;
 
@@ -537,35 +550,28 @@ fn assign_pixels_to_objects(
 }
 
 /// Create a single object from all pixels (no deblending).
-fn create_single_object(pixels: &[Pixel]) -> DeblendedObject {
-    let peak = pixels
-        .iter()
-        .max_by(|a, b| {
-            a.value
-                .partial_cmp(&b.value)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        })
-        .copied()
-        .unwrap_or(Pixel {
-            x: 0,
-            y: 0,
-            value: 0.0,
-        });
+fn create_single_object(
+    data: &ComponentData,
+    pixels: &Buffer2<f32>,
+    labels: &LabelMap,
+) -> DeblendedObject {
+    let peak = data.find_peak(pixels, labels);
 
-    let flux: f32 = pixels.iter().map(|p| p.value).sum();
+    let mut flux = 0.0f32;
+    let mut pixel_list = Vec::with_capacity(data.area);
 
-    let x_min = pixels.iter().map(|p| p.x).min().unwrap_or(0);
-    let x_max = pixels.iter().map(|p| p.x).max().unwrap_or(0);
-    let y_min = pixels.iter().map(|p| p.y).min().unwrap_or(0);
-    let y_max = pixels.iter().map(|p| p.y).max().unwrap_or(0);
+    for p in data.iter_pixels(pixels, labels) {
+        flux += p.value;
+        pixel_list.push(p);
+    }
 
     DeblendedObject {
         peak_x: peak.x,
         peak_y: peak.y,
         peak_value: peak.value,
         flux,
-        pixels: pixels.to_vec(),
-        bbox: (x_min, x_max, y_min, y_max),
+        pixels: pixel_list,
+        bbox: (data.x_min, data.x_max, data.y_min, data.y_max),
     }
 }
 
@@ -573,42 +579,67 @@ fn create_single_object(pixels: &[Pixel]) -> DeblendedObject {
 mod tests {
     use super::*;
 
-    fn make_gaussian_star(cx: usize, cy: usize, amplitude: f32, sigma: f32) -> Vec<Pixel> {
-        let mut pixels = Vec::new();
-        let radius = (sigma * 4.0).ceil() as i32;
+    /// Create a test image with Gaussian stars and return pixels, labels, and component data.
+    fn make_test_component(
+        width: usize,
+        height: usize,
+        stars: &[(usize, usize, f32, f32)], // (cx, cy, amplitude, sigma)
+    ) -> (Buffer2<f32>, LabelMap, ComponentData) {
+        let mut pixels = Buffer2::new_filled(width, height, 0.0f32);
+        let mut labels = Buffer2::new_filled(width, height, 0u32);
 
-        for dy in -radius..=radius {
-            for dx in -radius..=radius {
-                let x = (cx as i32 + dx) as usize;
-                let y = (cy as i32 + dy) as usize;
-                let r2 = (dx * dx + dy * dy) as f32;
-                let value = amplitude * (-r2 / (2.0 * sigma * sigma)).exp();
-                if value > 0.001 {
-                    pixels.push(Pixel { x, y, value });
+        let mut x_min = usize::MAX;
+        let mut x_max = 0;
+        let mut y_min = usize::MAX;
+        let mut y_max = 0;
+        let mut area = 0;
+
+        for (cx, cy, amplitude, sigma) in stars {
+            let radius = (sigma * 4.0).ceil() as i32;
+
+            for dy in -radius..=radius {
+                for dx in -radius..=radius {
+                    let x = (*cx as i32 + dx) as usize;
+                    let y = (*cy as i32 + dy) as usize;
+
+                    if x < width && y < height {
+                        let r2 = (dx * dx + dy * dy) as f32;
+                        let value = amplitude * (-r2 / (2.0 * sigma * sigma)).exp();
+                        if value > 0.001 {
+                            pixels[(x, y)] += value;
+                            if labels[(x, y)] == 0 {
+                                labels[(x, y)] = 1;
+                                x_min = x_min.min(x);
+                                x_max = x_max.max(x);
+                                y_min = y_min.min(y);
+                                y_max = y_max.max(y);
+                                area += 1;
+                            }
+                        }
+                    }
                 }
             }
         }
 
-        pixels
+        let label_map = LabelMap::from_raw(labels, 1);
+        let component = ComponentData {
+            x_min,
+            x_max,
+            y_min,
+            y_max,
+            label: 1,
+            area,
+        };
+
+        (pixels, label_map, component)
     }
 
     #[test]
     fn test_single_star_no_deblending() {
-        // Single isolated star should not be deblended
-        let star = make_gaussian_star(50, 50, 1.0, 3.0);
+        let (pixels, labels, data) = make_test_component(100, 100, &[(50, 50, 1.0, 3.0)]);
         let config = MultiThresholdDeblendConfig::default();
 
-        // Create full image
-        let width = 100;
-        let height = 100;
-        let mut pixels = vec![0.0f32; width * height];
-        for p in &star {
-            if p.x < width && p.y < height {
-                pixels[p.y * width + p.x] = p.value;
-            }
-        }
-
-        let result = deblend_component(&star, width, 0.01, &config);
+        let result = deblend_component(&data, &pixels, &labels, 0.01, &config);
 
         assert_eq!(result.len(), 1, "Single star should produce one object");
         assert!((result[0].peak_x as i32 - 50).abs() <= 1);
@@ -617,37 +648,8 @@ mod tests {
 
     #[test]
     fn test_two_separated_stars_deblend() {
-        // Two well-separated stars should be deblended
-        let width = 100;
-        let height = 100;
-
-        let star1 = make_gaussian_star(30, 50, 1.0, 2.5);
-        let star2 = make_gaussian_star(70, 50, 0.8, 2.5);
-
-        // Combine stars into one "component" (simulating blended detection)
-        let mut component: Vec<Pixel> = Vec::new();
-        let mut pixels = vec![0.0f32; width * height];
-
-        for p in star1.iter().chain(star2.iter()) {
-            if p.x < width && p.y < height {
-                pixels[p.y * width + p.x] += p.value;
-                component.push(Pixel {
-                    x: p.x,
-                    y: p.y,
-                    value: pixels[p.y * width + p.x],
-                });
-            }
-        }
-
-        // Deduplicate component pixels
-        let mut seen: HashMap<(usize, usize), f32> = HashMap::new();
-        for p in component {
-            seen.insert((p.x, p.y), p.value);
-        }
-        let component: Vec<_> = seen
-            .into_iter()
-            .map(|((x, y), value)| Pixel { x, y, value })
-            .collect();
+        let (pixels, labels, data) =
+            make_test_component(100, 100, &[(30, 50, 1.0, 2.5), (70, 50, 0.8, 2.5)]);
 
         let config = MultiThresholdDeblendConfig {
             n_thresholds: 32,
@@ -655,7 +657,7 @@ mod tests {
             min_separation: 3,
         };
 
-        let result = deblend_component(&component, width, 0.01, &config);
+        let result = deblend_component(&data, &pixels, &labels, 0.01, &config);
 
         // Should deblend into 2 separate objects
         assert_eq!(
@@ -681,34 +683,8 @@ mod tests {
     #[test]
     fn test_faint_secondary_below_contrast() {
         // Very faint secondary should NOT be deblended (below contrast threshold)
-        let width = 100;
-        let height = 100;
-
-        let star1 = make_gaussian_star(30, 50, 1.0, 2.5);
-        let star2 = make_gaussian_star(70, 50, 0.001, 2.5); // Very faint
-
-        let mut component: Vec<Pixel> = Vec::new();
-        let mut pixels = vec![0.0f32; width * height];
-
-        for p in star1.iter().chain(star2.iter()) {
-            if p.x < width && p.y < height {
-                pixels[p.y * width + p.x] += p.value;
-                component.push(Pixel {
-                    x: p.x,
-                    y: p.y,
-                    value: pixels[p.y * width + p.x],
-                });
-            }
-        }
-
-        let mut seen: HashMap<(usize, usize), f32> = HashMap::new();
-        for p in component {
-            seen.insert((p.x, p.y), p.value);
-        }
-        let component: Vec<_> = seen
-            .into_iter()
-            .map(|((x, y), value)| Pixel { x, y, value })
-            .collect();
+        let (pixels, labels, data) =
+            make_test_component(100, 100, &[(30, 50, 1.0, 2.5), (70, 50, 0.001, 2.5)]);
 
         let config = MultiThresholdDeblendConfig {
             n_thresholds: 32,
@@ -716,7 +692,7 @@ mod tests {
             min_separation: 3,
         };
 
-        let result = deblend_component(&component, width, 0.01, &config);
+        let result = deblend_component(&data, &pixels, &labels, 0.01, &config);
 
         // Faint star should be absorbed - contrast too low
         assert_eq!(
@@ -748,35 +724,9 @@ mod tests {
     #[test]
     fn test_close_peaks_merge() {
         // Two peaks closer than min_separation should be merged
-        let width = 100;
-        let height = 100;
-
         // Stars only 4 pixels apart (with min_separation=5)
-        let star1 = make_gaussian_star(48, 50, 1.0, 2.0);
-        let star2 = make_gaussian_star(52, 50, 0.9, 2.0);
-
-        let mut component: Vec<Pixel> = Vec::new();
-        let mut pixels = vec![0.0f32; width * height];
-
-        for p in star1.iter().chain(star2.iter()) {
-            if p.x < width && p.y < height {
-                pixels[p.y * width + p.x] += p.value;
-                component.push(Pixel {
-                    x: p.x,
-                    y: p.y,
-                    value: pixels[p.y * width + p.x],
-                });
-            }
-        }
-
-        let mut seen: HashMap<(usize, usize), f32> = HashMap::new();
-        for p in component {
-            seen.insert((p.x, p.y), p.value);
-        }
-        let component: Vec<_> = seen
-            .into_iter()
-            .map(|((x, y), value)| Pixel { x, y, value })
-            .collect();
+        let (pixels, labels, data) =
+            make_test_component(100, 100, &[(48, 50, 1.0, 2.0), (52, 50, 0.9, 2.0)]);
 
         let config = MultiThresholdDeblendConfig {
             n_thresholds: 32,
@@ -784,7 +734,7 @@ mod tests {
             min_separation: 5, // Larger than 4 pixel separation
         };
 
-        let result = deblend_component(&component, width, 0.01, &config);
+        let result = deblend_component(&data, &pixels, &labels, 0.01, &config);
 
         // Should NOT deblend - peaks too close
         assert_eq!(result.len(), 1, "Close peaks should not be deblended");
@@ -792,10 +742,20 @@ mod tests {
 
     #[test]
     fn test_empty_component() {
-        let component: Vec<Pixel> = Vec::new();
+        let pixels = Buffer2::new_filled(10, 10, 0.0f32);
+        let labels_buf = Buffer2::new_filled(10, 10, 0u32);
+        let labels = LabelMap::from_raw(labels_buf, 0);
+        let data = ComponentData {
+            x_min: 0,
+            x_max: 0,
+            y_min: 0,
+            y_max: 0,
+            label: 1,
+            area: 0,
+        };
         let config = MultiThresholdDeblendConfig::default();
 
-        let result = deblend_component(&component, 10, 0.01, &config);
+        let result = deblend_component(&data, &pixels, &labels, 0.01, &config);
 
         assert!(result.is_empty());
     }
@@ -803,34 +763,8 @@ mod tests {
     #[test]
     fn test_deblend_disabled_with_high_contrast() {
         // Setting min_contrast to 1.0 should disable deblending
-        let width = 100;
-        let height = 100;
-
-        let star1 = make_gaussian_star(30, 50, 1.0, 2.5);
-        let star2 = make_gaussian_star(70, 50, 0.8, 2.5);
-
-        let mut component: Vec<Pixel> = Vec::new();
-        let mut pixels = vec![0.0f32; width * height];
-
-        for p in star1.iter().chain(star2.iter()) {
-            if p.x < width && p.y < height {
-                pixels[p.y * width + p.x] += p.value;
-                component.push(Pixel {
-                    x: p.x,
-                    y: p.y,
-                    value: pixels[p.y * width + p.x],
-                });
-            }
-        }
-
-        let mut seen: HashMap<(usize, usize), f32> = HashMap::new();
-        for p in component {
-            seen.insert((p.x, p.y), p.value);
-        }
-        let component: Vec<_> = seen
-            .into_iter()
-            .map(|((x, y), value)| Pixel { x, y, value })
-            .collect();
+        let (pixels, labels, data) =
+            make_test_component(100, 100, &[(30, 50, 1.0, 2.5), (70, 50, 0.8, 2.5)]);
 
         let config = MultiThresholdDeblendConfig {
             n_thresholds: 32,
@@ -838,7 +772,7 @@ mod tests {
             min_separation: 3,
         };
 
-        let result = deblend_component(&component, width, 0.01, &config);
+        let result = deblend_component(&data, &pixels, &labels, 0.01, &config);
 
         assert_eq!(
             result.len(),

@@ -11,45 +11,13 @@
 
 use arrayvec::ArrayVec;
 
-use super::DeblendConfig;
+use super::{ComponentData, DeblendConfig, MAX_PEAKS, Pixel};
 use crate::common::Buffer2;
 use crate::star_detection::detection::LabelMap;
 
 // ============================================================================
-// Constants
-// ============================================================================
-
-/// Maximum number of peaks/candidates per component.
-/// Components with more peaks than this will have excess peaks ignored.
-pub const MAX_PEAKS: usize = 8;
-
-// ============================================================================
 // Types
 // ============================================================================
-
-/// A pixel with its coordinates and value.
-#[derive(Debug, Clone, Copy)]
-pub struct Pixel {
-    pub x: usize,
-    pub y: usize,
-    pub value: f32,
-}
-
-/// Data for a connected component (allocation-free).
-///
-/// Instead of storing pixel coordinates, we store the component label
-/// and iterate over the bounding box on-demand, checking the labels buffer.
-#[derive(Debug, Clone, Copy)]
-pub struct ComponentData {
-    pub x_min: usize,
-    pub x_max: usize,
-    pub y_min: usize,
-    pub y_max: usize,
-    /// Component label in the labels buffer.
-    pub label: u32,
-    /// Number of pixels in the component (pre-computed).
-    pub area: usize,
-}
 
 /// Result of deblending a single connected component.
 #[derive(Debug)]
@@ -83,54 +51,6 @@ impl Default for PeakData {
             y_max: 0,
             area: 0,
         }
-    }
-}
-
-// ============================================================================
-// ComponentData implementation
-// ============================================================================
-
-impl ComponentData {
-    /// Iterate over all pixels in this component.
-    ///
-    /// Scans the bounding box and yields pixels that match the component label.
-    #[inline]
-    pub fn iter_pixels<'a>(
-        &'a self,
-        pixels: &'a Buffer2<f32>,
-        labels: &'a LabelMap,
-    ) -> impl Iterator<Item = Pixel> + 'a {
-        let width = pixels.width();
-        (self.y_min..=self.y_max).flat_map(move |y| {
-            (self.x_min..=self.x_max).filter_map(move |x| {
-                let idx = y * width + x;
-                if labels[idx] == self.label {
-                    Some(Pixel {
-                        x,
-                        y,
-                        value: pixels[idx],
-                    })
-                } else {
-                    None
-                }
-            })
-        })
-    }
-
-    /// Find the peak pixel (maximum value) in this component.
-    #[inline]
-    pub fn find_peak(&self, pixels: &Buffer2<f32>, labels: &LabelMap) -> Pixel {
-        self.iter_pixels(pixels, labels)
-            .max_by(|a, b| {
-                a.value
-                    .partial_cmp(&b.value)
-                    .unwrap_or(std::cmp::Ordering::Equal)
-            })
-            .unwrap_or(Pixel {
-                x: self.x_min,
-                y: self.y_min,
-                value: 0.0,
-            })
     }
 }
 

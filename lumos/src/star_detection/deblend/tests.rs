@@ -4,82 +4,50 @@ use super::*;
 use crate::common::Buffer2;
 use crate::star_detection::detection::LabelMap;
 
-fn make_gaussian_star(cx: usize, cy: usize, amplitude: f32, sigma: f32) -> Vec<Pixel> {
-    let mut pixels = Vec::new();
-    let radius = (sigma * 4.0).ceil() as i32;
-
-    for dy in -radius..=radius {
-        for dx in -radius..=radius {
-            let x = (cx as i32 + dx) as usize;
-            let y = (cy as i32 + dy) as usize;
-            let r2 = (dx * dx + dy * dy) as f32;
-            let value = amplitude * (-r2 / (2.0 * sigma * sigma)).exp();
-            if value > 0.001 {
-                pixels.push(Pixel { x, y, value });
-            }
-        }
-    }
-
-    pixels
-}
-
-/// Helper to create image and labels from star pixels.
-fn create_image_and_labels(
+/// Create a test image with Gaussian stars and return pixels, labels, and component data.
+fn make_test_component(
     width: usize,
     height: usize,
-    star_pixels: &[Pixel],
-    label: u32,
-) -> (Buffer2<f32>, LabelMap) {
+    stars: &[(usize, usize, f32, f32)], // (cx, cy, amplitude, sigma)
+) -> (Buffer2<f32>, LabelMap, ComponentData) {
     let mut pixels = Buffer2::new_filled(width, height, 0.0f32);
     let mut labels = Buffer2::new_filled(width, height, 0u32);
 
-    for p in star_pixels {
-        if p.x < width && p.y < height {
-            pixels[(p.x, p.y)] = p.value;
-            labels[(p.x, p.y)] = label;
-        }
-    }
-
-    let label_map = LabelMap::from_raw(labels, 1);
-    (pixels, label_map)
-}
-
-/// Compute bounding box and area from labels.
-fn compute_bbox(labels: &LabelMap, label: u32) -> (usize, usize, usize, usize, usize) {
     let mut x_min = usize::MAX;
     let mut x_max = 0;
     let mut y_min = usize::MAX;
     let mut y_max = 0;
     let mut area = 0;
-    let width = labels.width();
 
-    for (idx, &l) in labels.iter().enumerate() {
-        if l == label {
-            let x = idx % width;
-            let y = idx / width;
-            x_min = x_min.min(x);
-            x_max = x_max.max(x);
-            y_min = y_min.min(y);
-            y_max = y_max.max(y);
-            area += 1;
+    for (cx, cy, amplitude, sigma) in stars {
+        let radius = (sigma * 4.0).ceil() as i32;
+
+        for dy in -radius..=radius {
+            for dx in -radius..=radius {
+                let x = (*cx as i32 + dx) as usize;
+                let y = (*cy as i32 + dy) as usize;
+
+                if x < width && y < height {
+                    let r2 = (dx * dx + dy * dy) as f32;
+                    let value = amplitude * (-r2 / (2.0 * sigma * sigma)).exp();
+                    if value > 0.001 {
+                        pixels[(x, y)] += value;
+                        if labels[(x, y)] == 0 {
+                            labels[(x, y)] = 1;
+                            x_min = x_min.min(x);
+                            x_max = x_max.max(x);
+                            y_min = y_min.min(y);
+                            y_max = y_max.max(y);
+                            area += 1;
+                        }
+                    }
+                }
+            }
         }
     }
 
-    (x_min, x_max, y_min, y_max, area)
-}
-
-#[test]
-fn test_local_vs_multi_threshold_single_star() {
-    // Both algorithms should produce same result for single star
-    let width = 100;
-    let height = 100;
-
-    let star = make_gaussian_star(50, 50, 1.0, 3.0);
-    let (pixels_buf, labels) = create_image_and_labels(width, height, &star, 1);
-    let (x_min, x_max, y_min, y_max, area) = compute_bbox(&labels, 1);
-
-    // Local maxima deblending
-    let data = ComponentData {
+    let label_map = LabelMap::from_raw(labels, 1);
+    let component = ComponentData {
         x_min,
         x_max,
         y_min,
@@ -88,12 +56,21 @@ fn test_local_vs_multi_threshold_single_star() {
         area,
     };
 
+    (pixels, label_map, component)
+}
+
+#[test]
+fn test_local_vs_multi_threshold_single_star() {
+    // Both algorithms should produce same result for single star
+    let (pixels, labels, data) = make_test_component(100, 100, &[(50, 50, 1.0, 3.0)]);
+
+    // Local maxima deblending
     let local_config = DeblendConfig::default();
-    let local_result = deblend_local_maxima(&data, &pixels_buf, &labels, &local_config);
+    let local_result = deblend_local_maxima(&data, &pixels, &labels, &local_config);
 
     // Multi-threshold deblending
     let mt_config = MultiThresholdDeblendConfig::default();
-    let mt_result = deblend_component(&star, width, 0.01, &mt_config);
+    let mt_result = deblend_component(&data, &pixels, &labels, 0.01, &mt_config);
 
     assert_eq!(local_result.len(), 1);
     assert_eq!(mt_result.len(), 1);
@@ -106,53 +83,16 @@ fn test_local_vs_multi_threshold_single_star() {
 #[test]
 fn test_local_vs_multi_threshold_two_stars() {
     // Both algorithms should find two stars when well-separated
-    let width = 100;
-    let height = 100;
-
-    let star1 = make_gaussian_star(30, 50, 1.0, 2.5);
-    let star2 = make_gaussian_star(70, 50, 0.8, 2.5);
-
-    let mut image = Buffer2::new_filled(width, height, 0.0f32);
-    let mut labels_buf = Buffer2::new_filled(width, height, 0u32);
-
-    for p in star1.iter().chain(star2.iter()) {
-        if p.x < width && p.y < height {
-            image[(p.x, p.y)] += p.value;
-            labels_buf[(p.x, p.y)] = 1; // All pixels in same component
-        }
-    }
-
-    // Collect component pixels for multi-threshold (which still uses Vec<Pixel>)
-    let component_pixels: Vec<Pixel> = labels_buf
-        .iter()
-        .enumerate()
-        .filter(|&(_, &l)| l == 1)
-        .map(|(idx, _)| Pixel {
-            x: idx % width,
-            y: idx / width,
-            value: image[idx],
-        })
-        .collect();
-
-    let labels = LabelMap::from_raw(labels_buf, 1);
-    let (x_min, x_max, y_min, y_max, area) = compute_bbox(&labels, 1);
+    let (pixels, labels, data) =
+        make_test_component(100, 100, &[(30, 50, 1.0, 2.5), (70, 50, 0.8, 2.5)]);
 
     // Local maxima deblending
-    let data = ComponentData {
-        x_min,
-        x_max,
-        y_min,
-        y_max,
-        label: 1,
-        area,
-    };
-
     let local_config = DeblendConfig {
         min_separation: 3,
         min_prominence: 0.3,
         ..Default::default()
     };
-    let local_result = deblend_local_maxima(&data, &image, &labels, &local_config);
+    let local_result = deblend_local_maxima(&data, &pixels, &labels, &local_config);
 
     // Multi-threshold deblending
     let mt_config = MultiThresholdDeblendConfig {
@@ -160,7 +100,7 @@ fn test_local_vs_multi_threshold_two_stars() {
         min_contrast: 0.005,
         min_separation: 3,
     };
-    let mt_result = deblend_component(&component_pixels, width, 0.01, &mt_config);
+    let mt_result = deblend_component(&data, &pixels, &labels, 0.01, &mt_config);
 
     assert_eq!(local_result.len(), 2, "Local maxima should find 2 stars");
     assert_eq!(mt_result.len(), 2, "Multi-threshold should find 2 stars");
