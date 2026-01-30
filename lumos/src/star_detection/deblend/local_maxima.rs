@@ -17,14 +17,72 @@ pub struct Pixel {
     pub value: f32,
 }
 
-/// Temporary data for a connected component.
-#[derive(Debug)]
+/// Data for a connected component (allocation-free).
+///
+/// Instead of storing pixel coordinates, we store the component label
+/// and iterate over the bounding box on-demand, checking the labels buffer.
+#[derive(Debug, Clone, Copy)]
 pub struct ComponentData {
     pub x_min: usize,
     pub x_max: usize,
     pub y_min: usize,
     pub y_max: usize,
-    pub pixels: Vec<Pixel>,
+    /// Component label in the labels buffer.
+    pub label: u32,
+    /// Number of pixels in the component (pre-computed).
+    pub area: usize,
+}
+
+impl ComponentData {
+    /// Iterate over all pixels in this component.
+    ///
+    /// Scans the bounding box and yields pixels that match the component label.
+    #[inline]
+    pub fn iter_pixels<'a>(
+        &'a self,
+        pixels: &'a Buffer2<f32>,
+        labels: &'a [u32],
+    ) -> impl Iterator<Item = Pixel> + 'a {
+        let width = pixels.width();
+        (self.y_min..=self.y_max).flat_map(move |y| {
+            (self.x_min..=self.x_max).filter_map(move |x| {
+                let idx = y * width + x;
+                if labels[idx] == self.label {
+                    Some(Pixel {
+                        x,
+                        y,
+                        value: pixels[idx],
+                    })
+                } else {
+                    None
+                }
+            })
+        })
+    }
+
+    /// Find the global maximum pixel value in this component.
+    #[inline]
+    pub fn global_max(&self, pixels: &Buffer2<f32>, labels: &[u32]) -> f32 {
+        self.iter_pixels(pixels, labels)
+            .map(|p| p.value)
+            .fold(f32::MIN, f32::max)
+    }
+
+    /// Find the peak pixel (maximum value) in this component.
+    #[inline]
+    pub fn find_peak(&self, pixels: &Buffer2<f32>, labels: &[u32]) -> Pixel {
+        self.iter_pixels(pixels, labels)
+            .max_by(|a, b| {
+                a.value
+                    .partial_cmp(&b.value)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .unwrap_or(Pixel {
+                x: self.x_min,
+                y: self.y_min,
+                value: 0.0,
+            })
+    }
 }
 
 /// Result of deblending a single connected component.
@@ -55,6 +113,7 @@ pub struct DeblendedCandidate {
 pub fn find_local_maxima(
     data: &ComponentData,
     pixels: &Buffer2<f32>,
+    labels: &[u32],
     config: &DeblendConfig,
 ) -> Vec<Pixel> {
     let mut peaks: Vec<Pixel> = Vec::new();
@@ -62,12 +121,11 @@ pub fn find_local_maxima(
     let height = pixels.height();
 
     // Find global maximum first
-    let global_max = data.pixels.iter().map(|p| p.value).fold(f32::MIN, f32::max);
-
+    let global_max = data.global_max(pixels, labels);
     let min_peak_value = global_max * config.min_prominence;
 
     // Check each pixel for local maximum
-    for &pixel in &data.pixels {
+    for pixel in data.iter_pixels(pixels, labels) {
         if pixel.value < min_peak_value {
             continue;
         }
@@ -137,7 +195,12 @@ pub fn find_local_maxima(
 ///
 /// Each pixel is assigned to the nearest peak (Voronoi partitioning),
 /// creating separate candidates.
-pub fn deblend_by_nearest_peak(data: &ComponentData, peaks: &[Pixel]) -> Vec<DeblendedCandidate> {
+pub fn deblend_by_nearest_peak(
+    data: &ComponentData,
+    pixels: &Buffer2<f32>,
+    labels: &[u32],
+    peaks: &[Pixel],
+) -> Vec<DeblendedCandidate> {
     if peaks.is_empty() {
         return Vec::new();
     }
@@ -149,7 +212,7 @@ pub fn deblend_by_nearest_peak(data: &ComponentData, peaks: &[Pixel]) -> Vec<Deb
         .collect();
 
     // Assign each pixel to nearest peak
-    for pixel in &data.pixels {
+    for pixel in data.iter_pixels(pixels, labels) {
         let mut min_dist_sq = usize::MAX;
         let mut nearest_peak = 0;
 
@@ -202,27 +265,16 @@ pub fn deblend_by_nearest_peak(data: &ComponentData, peaks: &[Pixel]) -> Vec<Deb
 pub fn deblend_local_maxima(
     data: &ComponentData,
     pixels: &Buffer2<f32>,
+    labels: &[u32],
     config: &DeblendConfig,
 ) -> Vec<DeblendedCandidate> {
-    let peaks = find_local_maxima(data, pixels, config);
+    let peaks = find_local_maxima(data, pixels, labels, config);
 
     if peaks.len() <= 1 {
         // Single peak - create one candidate
         let peak = if peaks.is_empty() {
             // Fallback: use global maximum
-            data.pixels
-                .iter()
-                .max_by(|a, b| {
-                    a.value
-                        .partial_cmp(&b.value)
-                        .unwrap_or(std::cmp::Ordering::Equal)
-                })
-                .copied()
-                .unwrap_or(Pixel {
-                    x: data.x_min,
-                    y: data.y_min,
-                    value: 0.0,
-                })
+            data.find_peak(pixels, labels)
         } else {
             peaks[0]
         };
@@ -235,11 +287,11 @@ pub fn deblend_local_maxima(
             peak_x: peak.x,
             peak_y: peak.y,
             peak_value: peak.value,
-            area: data.pixels.len(),
+            area: data.area,
         }]
     } else {
         // Multiple peaks - deblend by assigning pixels to nearest peak
-        deblend_by_nearest_peak(data, &peaks)
+        deblend_by_nearest_peak(data, pixels, labels, &peaks)
     }
 }
 
@@ -247,49 +299,79 @@ pub fn deblend_local_maxima(
 mod tests {
     use super::*;
 
-    fn make_gaussian_star(cx: usize, cy: usize, amplitude: f32, sigma: f32) -> Vec<Pixel> {
-        let mut pixels = Vec::new();
-        let radius = (sigma * 4.0).ceil() as i32;
+    fn make_gaussian_image(
+        width: usize,
+        height: usize,
+        stars: &[(usize, usize, f32, f32)], // (cx, cy, amplitude, sigma)
+    ) -> (Buffer2<f32>, Vec<u32>) {
+        let mut pixels = Buffer2::new_filled(width, height, 0.0f32);
+        let mut labels = vec![0u32; width * height];
 
-        for dy in -radius..=radius {
-            for dx in -radius..=radius {
-                let x = (cx as i32 + dx) as usize;
-                let y = (cy as i32 + dy) as usize;
-                let r2 = (dx * dx + dy * dy) as f32;
-                let value = amplitude * (-r2 / (2.0 * sigma * sigma)).exp();
-                if value > 0.001 {
-                    pixels.push(Pixel { x, y, value });
+        for (cx, cy, amplitude, sigma) in stars {
+            let radius = (sigma * 4.0).ceil() as i32;
+
+            for dy in -radius..=radius {
+                for dx in -radius..=radius {
+                    let x = (*cx as i32 + dx) as usize;
+                    let y = (*cy as i32 + dy) as usize;
+
+                    if x < width && y < height {
+                        let r2 = (dx * dx + dy * dy) as f32;
+                        let value = amplitude * (-r2 / (2.0 * sigma * sigma)).exp();
+                        if value > 0.001 {
+                            pixels[(x, y)] += value;
+                            labels[y * width + x] = 1; // All stars in component 1
+                        }
+                    }
                 }
             }
         }
 
-        pixels
+        (pixels, labels)
+    }
+
+    fn compute_bbox(
+        labels: &[u32],
+        width: usize,
+        label: u32,
+    ) -> (usize, usize, usize, usize, usize) {
+        let mut x_min = usize::MAX;
+        let mut x_max = 0;
+        let mut y_min = usize::MAX;
+        let mut y_max = 0;
+        let mut area = 0;
+
+        for (idx, &l) in labels.iter().enumerate() {
+            if l == label {
+                let x = idx % width;
+                let y = idx / width;
+                x_min = x_min.min(x);
+                x_max = x_max.max(x);
+                y_min = y_min.min(y);
+                y_max = y_max.max(y);
+                area += 1;
+            }
+        }
+
+        (x_min, x_max, y_min, y_max, area)
     }
 
     #[test]
     fn test_find_single_peak() {
-        let star = make_gaussian_star(50, 50, 1.0, 3.0);
+        let (pixels, labels) = make_gaussian_image(100, 100, &[(50, 50, 1.0, 3.0)]);
+        let (x_min, x_max, y_min, y_max, area) = compute_bbox(&labels, 100, 1);
 
         let data = ComponentData {
-            x_min: star.iter().map(|p| p.x).min().unwrap(),
-            x_max: star.iter().map(|p| p.x).max().unwrap(),
-            y_min: star.iter().map(|p| p.y).min().unwrap(),
-            y_max: star.iter().map(|p| p.y).max().unwrap(),
-            pixels: star.clone(),
+            x_min,
+            x_max,
+            y_min,
+            y_max,
+            label: 1,
+            area,
         };
 
-        // Create full image
-        let width = 100;
-        let height = 100;
-        let mut pixels = Buffer2::new_filled(width, height, 0.0f32);
-        for p in &star {
-            if p.x < width && p.y < height {
-                pixels[(p.x, p.y)] = p.value;
-            }
-        }
-
         let config = DeblendConfig::default();
-        let peaks = find_local_maxima(&data, &pixels, &config);
+        let peaks = find_local_maxima(&data, &pixels, &labels, &config);
 
         assert_eq!(peaks.len(), 1, "Should find exactly one peak");
         assert!(
@@ -300,43 +382,17 @@ mod tests {
 
     #[test]
     fn test_find_two_peaks() {
-        let width = 100;
-        let height = 100;
-
-        let star1 = make_gaussian_star(30, 50, 1.0, 2.5);
-        let star2 = make_gaussian_star(70, 50, 0.8, 2.5);
-
-        // Combine into one component
-        let mut all_pixels: Vec<Pixel> = Vec::new();
-        let mut image = Buffer2::new_filled(width, height, 0.0f32);
-
-        for p in star1.iter().chain(star2.iter()) {
-            if p.x < width && p.y < height {
-                image[(p.x, p.y)] += p.value;
-                all_pixels.push(Pixel {
-                    x: p.x,
-                    y: p.y,
-                    value: image[(p.x, p.y)],
-                });
-            }
-        }
-
-        // Deduplicate
-        let mut seen = std::collections::HashMap::new();
-        for p in all_pixels {
-            seen.insert((p.x, p.y), p.value);
-        }
-        let component_pixels: Vec<_> = seen
-            .into_iter()
-            .map(|((x, y), value)| Pixel { x, y, value })
-            .collect();
+        let (pixels, labels) =
+            make_gaussian_image(100, 100, &[(30, 50, 1.0, 2.5), (70, 50, 0.8, 2.5)]);
+        let (x_min, x_max, y_min, y_max, area) = compute_bbox(&labels, 100, 1);
 
         let data = ComponentData {
-            x_min: component_pixels.iter().map(|p| p.x).min().unwrap(),
-            x_max: component_pixels.iter().map(|p| p.x).max().unwrap(),
-            y_min: component_pixels.iter().map(|p| p.y).min().unwrap(),
-            y_max: component_pixels.iter().map(|p| p.y).max().unwrap(),
-            pixels: component_pixels,
+            x_min,
+            x_max,
+            y_min,
+            y_max,
+            label: 1,
+            area,
         };
 
         let config = DeblendConfig {
@@ -344,48 +400,24 @@ mod tests {
             min_prominence: 0.3,
             ..Default::default()
         };
-        let peaks = find_local_maxima(&data, &image, &config);
+        let peaks = find_local_maxima(&data, &pixels, &labels, &config);
 
         assert_eq!(peaks.len(), 2, "Should find two peaks");
     }
 
     #[test]
     fn test_deblend_creates_separate_candidates() {
-        let width = 100;
-        let height = 100;
-
-        let star1 = make_gaussian_star(30, 50, 1.0, 2.5);
-        let star2 = make_gaussian_star(70, 50, 0.8, 2.5);
-
-        let mut all_pixels: Vec<Pixel> = Vec::new();
-        let mut image = Buffer2::new_filled(width, height, 0.0f32);
-
-        for p in star1.iter().chain(star2.iter()) {
-            if p.x < width && p.y < height {
-                image[(p.x, p.y)] += p.value;
-                all_pixels.push(Pixel {
-                    x: p.x,
-                    y: p.y,
-                    value: image[(p.x, p.y)],
-                });
-            }
-        }
-
-        let mut seen = std::collections::HashMap::new();
-        for p in all_pixels {
-            seen.insert((p.x, p.y), p.value);
-        }
-        let component_pixels: Vec<_> = seen
-            .into_iter()
-            .map(|((x, y), value)| Pixel { x, y, value })
-            .collect();
+        let (pixels, labels) =
+            make_gaussian_image(100, 100, &[(30, 50, 1.0, 2.5), (70, 50, 0.8, 2.5)]);
+        let (x_min, x_max, y_min, y_max, area) = compute_bbox(&labels, 100, 1);
 
         let data = ComponentData {
-            x_min: component_pixels.iter().map(|p| p.x).min().unwrap(),
-            x_max: component_pixels.iter().map(|p| p.x).max().unwrap(),
-            y_min: component_pixels.iter().map(|p| p.y).min().unwrap(),
-            y_max: component_pixels.iter().map(|p| p.y).max().unwrap(),
-            pixels: component_pixels,
+            x_min,
+            x_max,
+            y_min,
+            y_max,
+            label: 1,
+            area,
         };
 
         let config = DeblendConfig {
@@ -394,10 +426,31 @@ mod tests {
             ..Default::default()
         };
 
-        let candidates = deblend_local_maxima(&data, &image, &config);
+        let candidates = deblend_local_maxima(&data, &pixels, &labels, &config);
 
         assert_eq!(candidates.len(), 2, "Should create two candidates");
         assert!(candidates[0].area > 0);
         assert!(candidates[1].area > 0);
+    }
+
+    #[test]
+    fn test_iter_pixels_count() {
+        let (pixels, labels) = make_gaussian_image(100, 100, &[(50, 50, 1.0, 3.0)]);
+        let (x_min, x_max, y_min, y_max, area) = compute_bbox(&labels, 100, 1);
+
+        let data = ComponentData {
+            x_min,
+            x_max,
+            y_min,
+            y_max,
+            label: 1,
+            area,
+        };
+
+        let iter_count = data.iter_pixels(&pixels, &labels).count();
+        assert_eq!(
+            iter_count, area,
+            "iter_pixels should yield exactly area pixels"
+        );
     }
 }
