@@ -56,7 +56,7 @@ pub use centroid::LocalBackgroundMethod;
 // Internal re-exports for advanced users (may change in future versions)
 // Background estimation (used by calibration and advanced pipelines)
 pub use background::{
-    BackgroundMap, IterativeBackgroundConfig, estimate_background, estimate_background_iterative,
+    BackgroundConfig, BackgroundMap, estimate_background, estimate_background_iterative,
 };
 
 // Profile fitting (for custom centroiding pipelines)
@@ -308,8 +308,6 @@ pub(crate) struct CentroidParams {
 /// Configuration for star detection.
 #[derive(Debug, Clone)]
 pub struct StarDetectionConfig {
-    /// Detection threshold in sigma above background (typically 3.0-5.0).
-    pub detection_sigma: f32,
     /// Minimum star area in pixels.
     pub min_area: usize,
     /// Maximum star area in pixels.
@@ -387,11 +385,6 @@ pub struct StarDetectionConfig {
     /// When provided, defective pixels are replaced with local median before detection,
     /// and stars with centroids near defects are flagged.
     pub defect_map: Option<DefectMap>,
-    /// Number of background estimation passes (0 = single pass).
-    /// When > 0, the background is re-estimated after masking detected objects,
-    /// which improves accuracy in crowded fields. SExtractor-style algorithm.
-    /// Typical value: 1-2 for crowded fields, 0 for sparse fields.
-    pub background_passes: usize,
     /// Method for computing sub-pixel centroids.
     /// WeightedMoments (default) is fast (~0.05 pixel accuracy).
     /// GaussianFit and MoffatFit provide higher precision (~0.01 pixel) but are slower.
@@ -401,12 +394,13 @@ pub struct StarDetectionConfig {
     /// Annulus and OuterRing compute local background around each star,
     /// which is more accurate in regions with variable nebulosity.
     pub local_background_method: LocalBackgroundMethod,
+
+    pub background_config: BackgroundConfig,
 }
 
 impl Default for StarDetectionConfig {
     fn default() -> Self {
         Self {
-            detection_sigma: 4.0,
             min_area: 5,
             max_area: 500,
             max_eccentricity: 0.6,
@@ -428,9 +422,9 @@ impl Default for StarDetectionConfig {
             gain: None, // Use simplified SNR formula by default
             read_noise: None,
             defect_map: None,
-            background_passes: 0, // Single pass by default (fastest)
             centroid_method: CentroidMethod::WeightedMoments,
             local_background_method: LocalBackgroundMethod::GlobalMap,
+            background_config: BackgroundConfig::default(),
         }
     }
 }
@@ -444,11 +438,8 @@ impl StarDetectionConfig {
     /// # Panics
     /// Panics with a descriptive message if any parameter is out of valid range.
     pub fn validate(&self) {
-        assert!(
-            self.detection_sigma > 0.0,
-            "detection_sigma must be positive, got {}",
-            self.detection_sigma
-        );
+        self.background_config.validate();
+
         assert!(
             self.min_area >= 1,
             "min_area must be at least 1, got {}",
@@ -527,11 +518,6 @@ impl StarDetectionConfig {
         }
     }
 
-    /// Create a new builder for constructing StarDetectionConfig.
-    pub fn builder() -> StarDetectionConfigBuilder {
-        StarDetectionConfigBuilder::default()
-    }
-
     /// Create config from sub-struct parameters.
     pub(crate) fn from_params(
         detection: DetectionParams,
@@ -541,7 +527,6 @@ impl StarDetectionConfig {
         centroid: CentroidParams,
     ) -> Self {
         Self {
-            detection_sigma: detection.detection_sigma,
             min_area: detection.min_area,
             max_area: detection.max_area,
             edge_margin: detection.edge_margin,
@@ -549,7 +534,6 @@ impl StarDetectionConfig {
             psf_axis_ratio: detection.psf_axis_ratio,
             psf_angle: detection.psf_angle,
             background_tile_size: detection.background_tile_size,
-            background_passes: detection.background_passes,
             max_eccentricity: quality.max_eccentricity,
             min_snr: quality.min_snr,
             max_fwhm_deviation: quality.max_fwhm_deviation,
@@ -566,6 +550,11 @@ impl StarDetectionConfig {
             deblend_min_contrast: deblend.min_contrast,
             centroid_method: centroid.method,
             local_background_method: centroid.local_background,
+            background_config: BackgroundConfig {
+                iterations: detection.background_passes,
+                detection_sigma: detection.detection_sigma,
+                ..Default::default()
+            },
         }
     }
 }
@@ -771,13 +760,6 @@ impl StarDetector {
         self
     }
 
-    /// Set detection threshold in sigma.
-    #[must_use]
-    pub fn with_detection_sigma(mut self, sigma: f32) -> Self {
-        self.config.detection_sigma = sigma;
-        self
-    }
-
     /// Set minimum SNR threshold.
     #[must_use]
     pub fn with_min_snr(mut self, snr: f32) -> Self {
@@ -959,14 +941,13 @@ fn find_stars(image: &AstroImage, config: &StarDetectionConfig) -> StarDetection
 
     // Step 1: Estimate background
     let background = {
-        if config.background_passes > 0 {
+        if config.background_config.iterations > 0 {
             // Use iterative background estimation for crowded fields
-            let iter_config = IterativeBackgroundConfig {
-                iterations: config.background_passes,
-                detection_sigma: config.detection_sigma,
-                ..IterativeBackgroundConfig::default()
-            };
-            estimate_background_iterative(&pixels, config.background_tile_size, &iter_config)
+            estimate_background_iterative(
+                &pixels,
+                config.background_tile_size,
+                &config.background_config,
+            )
         } else {
             // Single-pass background estimation (faster)
             estimate_background(&pixels, config.background_tile_size)

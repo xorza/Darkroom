@@ -158,7 +158,7 @@ fn test_debug_synthetic_steps() {
         height,
         background.background.pixels(),
         background.noise.pixels(),
-        detection_config.detection_sigma,
+        detection_config.background_config.detection_sigma,
     );
     let mask_count = mask.iter().filter(|&&b| b).count();
     println!(

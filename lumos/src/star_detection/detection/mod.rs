@@ -71,7 +71,7 @@ pub struct DetectionConfig {
 impl From<&StarDetectionConfig> for DetectionConfig {
     fn from(config: &StarDetectionConfig) -> Self {
         Self {
-            sigma_threshold: config.detection_sigma,
+            sigma_threshold: config.background_config.detection_sigma,
             min_area: config.min_area,
             max_area: config.max_area,
             edge_margin: config.edge_margin,

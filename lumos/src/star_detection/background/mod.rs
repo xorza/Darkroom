@@ -398,7 +398,7 @@ fn find_lower_tile(pos: f32, centers: &[f32]) -> usize {
 
 /// Configuration for iterative background refinement.
 #[derive(Debug, Clone)]
-pub struct IterativeBackgroundConfig {
+pub struct BackgroundConfig {
     /// Detection threshold in sigma above background for masking objects.
     /// Higher values = more conservative masking (only mask very bright objects).
     /// Typical value: 3.0-5.0
@@ -415,14 +415,43 @@ pub struct IterativeBackgroundConfig {
     pub min_unmasked_fraction: f32,
 }
 
-impl Default for IterativeBackgroundConfig {
+impl Default for BackgroundConfig {
     fn default() -> Self {
         Self {
-            detection_sigma: 3.0,
-            iterations: 1,
+            detection_sigma: 4.0,
+            iterations: 0,
             mask_dilation: 3,
             min_unmasked_fraction: 0.3,
         }
+    }
+}
+
+impl BackgroundConfig {
+    /// Validate the configuration and panic if invalid.
+    ///
+    /// # Panics
+    /// Panics with a descriptive message if any parameter is out of valid range.
+    pub fn validate(&self) {
+        assert!(
+            self.detection_sigma > 0.0,
+            "detection_sigma must be positive, got {}",
+            self.detection_sigma
+        );
+        assert!(
+            self.iterations <= 10,
+            "iterations must be <= 10, got {}",
+            self.iterations
+        );
+        assert!(
+            self.mask_dilation <= 50,
+            "mask_dilation must be <= 50, got {}",
+            self.mask_dilation
+        );
+        assert!(
+            (0.0..=1.0).contains(&self.min_unmasked_fraction),
+            "min_unmasked_fraction must be in [0, 1], got {}",
+            self.min_unmasked_fraction
+        );
     }
 }
 
@@ -445,7 +474,7 @@ impl Default for IterativeBackgroundConfig {
 pub fn estimate_background_iterative(
     pixels: &Buffer2<f32>,
     tile_size: usize,
-    config: &IterativeBackgroundConfig,
+    config: &BackgroundConfig,
 ) -> BackgroundMap {
     // Start with initial background estimate
     let mut background = estimate_background(pixels, tile_size);

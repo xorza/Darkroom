@@ -2,12 +2,12 @@
 //!
 //! Tests the peak detection and thresholding logic.
 
-use crate::star_detection::StarDetectionConfig;
 use crate::star_detection::background::estimate_background;
 use crate::star_detection::detection::detect_stars;
 use crate::star_detection::tests::common::output::{
     gray_to_rgb_image_stretched, save_grayscale, save_image,
 };
+use crate::star_detection::{BackgroundConfig, StarDetectionConfig};
 use crate::testing::init_tracing;
 use crate::testing::synthetic::{StarFieldConfig, generate_star_field, sparse_field_config};
 use common::test_utils::test_output_path;
@@ -146,7 +146,10 @@ fn test_detection_thresholds() {
     // Test different thresholds
     for sigma in [2.0, 3.0, 5.0, 10.0] {
         let det_config = StarDetectionConfig {
-            detection_sigma: sigma,
+            background_config: BackgroundConfig {
+                detection_sigma: sigma,
+                ..Default::default()
+            },
             ..Default::default()
         };
         let candidates = detect_stars(&pixels, &background, &det_config);

@@ -10,15 +10,18 @@ use crate::common::Buffer2;
 use crate::registration::interpolation::{InterpolationMethod, WarpConfig, warp_image};
 use crate::registration::types::TransformMatrix;
 use crate::registration::{RegistrationConfig, Registrator};
-use crate::star_detection::{StarDetectionConfig, StarDetector};
+use crate::star_detection::{BackgroundConfig, StarDetectionConfig, StarDetector};
 use crate::testing::synthetic::{self, StarFieldConfig};
 
 /// Default star detector for synthetic images.
 fn detector() -> StarDetector {
     StarDetector::from_config(StarDetectionConfig {
         expected_fwhm: 0.0, // Disable matched filter for synthetic images
-        detection_sigma: 3.0,
         min_snr: 5.0,
+        background_config: BackgroundConfig {
+            detection_sigma: 3.0,
+            ..Default::default()
+        },
         ..Default::default()
     })
 }
@@ -327,8 +330,11 @@ fn test_image_registration_with_noise() {
 
     let det = StarDetector::from_config(StarDetectionConfig {
         expected_fwhm: 0.0,
-        detection_sigma: 4.0, // Higher threshold for noisy image
         min_snr: 8.0,
+        background_config: BackgroundConfig {
+            detection_sigma: 4.0, // Higher threshold for noisy image
+            ..Default::default()
+        },
         ..Default::default()
     });
 

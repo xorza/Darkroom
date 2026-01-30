@@ -237,7 +237,7 @@ fn test_iterative_background_uniform() {
     let height = 128;
     let pixels = Buffer2::new(width, height, vec![0.5; width * height]);
 
-    let config = IterativeBackgroundConfig::default();
+    let config = BackgroundConfig::default();
     let bg = estimate_background_iterative(&pixels, 32, &config);
 
     // All background values should be close to 0.5
@@ -284,7 +284,7 @@ fn test_iterative_background_with_bright_stars() {
     let bg_simple = estimate_background(&pixels, 32);
 
     // Iterative estimate (should be better at excluding stars)
-    let config = IterativeBackgroundConfig {
+    let config = BackgroundConfig {
         detection_sigma: 3.0,
         iterations: 2,
         mask_dilation: 5,
@@ -334,7 +334,7 @@ fn test_iterative_background_preserves_gradient() {
     }
 
     let pixels = Buffer2::new(width, height, data);
-    let config = IterativeBackgroundConfig::default();
+    let config = BackgroundConfig::default();
     let bg = estimate_background_iterative(&pixels, 16, &config);
 
     // Gradient should be preserved
@@ -350,10 +350,10 @@ fn test_iterative_background_preserves_gradient() {
 
 #[test]
 fn test_iterative_background_config_default() {
-    let config = IterativeBackgroundConfig::default();
+    let config = BackgroundConfig::default();
 
-    assert!((config.detection_sigma - 3.0).abs() < 1e-6);
-    assert_eq!(config.iterations, 1);
+    assert!((config.detection_sigma - 4.0).abs() < 1e-6);
+    assert_eq!(config.iterations, 0);
     assert_eq!(config.mask_dilation, 3);
     assert!((config.min_unmasked_fraction - 0.3).abs() < 1e-6);
 }
@@ -365,7 +365,7 @@ fn test_iterative_background_zero_iterations() {
     let height = 64;
     let pixels = Buffer2::new(width, height, vec![0.3; width * height]);
 
-    let config = IterativeBackgroundConfig {
+    let config = BackgroundConfig {
         iterations: 0,
         ..Default::default()
     };

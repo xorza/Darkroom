@@ -484,6 +484,7 @@ pub fn detect_stars_gpu_with_detector(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::star_detection::BackgroundConfig;
     use crate::testing::synthetic::background_map;
 
     fn test_gpu_available() -> bool {
@@ -703,10 +704,13 @@ mod tests {
         let background = background_map::uniform(width, height, 0.1, 0.01);
 
         let config = StarDetectionConfig {
-            detection_sigma: 3.0,
             min_area: 3,
             max_area: 50,
             edge_margin: 5,
+            background_config: BackgroundConfig {
+                detection_sigma: 3.0,
+                ..Default::default()
+            },
             ..Default::default()
         };
 
@@ -762,10 +766,13 @@ mod tests {
         let background = background_map::uniform(width, height, 0.1, 0.02);
 
         let config = StarDetectionConfig {
-            detection_sigma: 3.0,
             min_area: 3,
             max_area: 50,
             edge_margin: 5,
+            background_config: BackgroundConfig {
+                detection_sigma: 3.0,
+                ..Default::default()
+            },
             ..Default::default()
         };
 
@@ -796,10 +803,13 @@ mod tests {
         let background = background_map::uniform(width, height, 0.1, 0.01);
 
         let config = StarDetectionConfig {
-            detection_sigma: 4.0,
             min_area: 3,
             max_area: 50,
             edge_margin: 5,
+            background_config: BackgroundConfig {
+                detection_sigma: 4.0,
+                ..Default::default()
+            },
             ..Default::default()
         };
 
@@ -832,10 +842,13 @@ mod tests {
         let background = background_map::uniform(width, height, 0.1, 0.01);
 
         let config = StarDetectionConfig {
-            detection_sigma: 3.0,
             min_area: 1,
             max_area: 50,
             edge_margin: 5,
+            background_config: BackgroundConfig {
+                detection_sigma: 3.0,
+                ..Default::default()
+            },
             ..Default::default()
         };
 
@@ -882,10 +895,13 @@ mod tests {
         let background = background_map::uniform(width, height, 0.1, 0.01);
 
         let config = StarDetectionConfig {
-            detection_sigma: 3.0,
             min_area: 1,
             max_area: 50,
             edge_margin: 10, // Large edge margin to reject edge stars
+            background_config: BackgroundConfig {
+                detection_sigma: 3.0,
+                ..Default::default()
+            },
             ..Default::default()
         };
 

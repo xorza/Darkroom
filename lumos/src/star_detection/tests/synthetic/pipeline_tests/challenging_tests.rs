@@ -6,7 +6,7 @@ use crate::star_detection::tests::common::output::{
     PassCriteria, check_pass, compute_detection_metrics, crowded_criteria, faint_star_criteria,
     save_comparison, save_grayscale, save_metrics,
 };
-use crate::star_detection::{StarDetectionConfig, find_stars};
+use crate::star_detection::{BackgroundConfig, StarDetectionConfig, find_stars};
 use crate::testing::init_tracing;
 use crate::testing::synthetic::{
     CrowdingType, ElongationType, NebulaConfig, StarFieldConfig, crowded_cluster_config,
@@ -526,7 +526,10 @@ fn test_faint_in_noise() {
     // Use lower SNR threshold for faint stars
     let detection_config = StarDetectionConfig {
         min_snr: 3.0,
-        detection_sigma: 2.5,
+        background_config: BackgroundConfig {
+            detection_sigma: 2.5,
+            ..Default::default()
+        },
         ..Default::default()
     };
 
@@ -558,7 +561,10 @@ fn test_very_low_snr() {
 
     let detection_config = StarDetectionConfig {
         min_snr: 2.5,
-        detection_sigma: 2.0,
+        background_config: BackgroundConfig {
+            detection_sigma: 2.0,
+            ..Default::default()
+        },
         ..Default::default()
     };
 

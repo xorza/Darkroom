@@ -22,7 +22,7 @@ pub use crate::{
 
 // Star detection - background estimation
 pub use crate::{
-    BackgroundMap, IterativeBackgroundConfig, estimate_background, estimate_background_iterative,
+    BackgroundConfig, BackgroundMap, estimate_background, estimate_background_iterative,
 };
 
 // Registration - main API

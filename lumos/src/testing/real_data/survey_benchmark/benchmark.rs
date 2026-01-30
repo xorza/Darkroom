@@ -10,7 +10,7 @@ use crate::astro_image::AstroImage;
 use crate::star_detection::tests::common::output::{
     DetectionMetrics, compute_detection_metrics, save_comparison, save_grayscale, save_metrics,
 };
-use crate::star_detection::{Star, StarDetectionConfig, StarDetector};
+use crate::star_detection::{BackgroundConfig, Star, StarDetectionConfig, StarDetector};
 use crate::testing::synthetic::GroundTruthStar;
 use anyhow::{Context, Result};
 use std::io::Write;
@@ -722,7 +722,10 @@ mod tests {
 
             let config = StarDetectionConfig {
                 expected_fwhm: field.expected_fwhm_pixels(0.396),
-                detection_sigma: 3.0,
+                background_config: BackgroundConfig {
+                    detection_sigma: 3.0,
+                    ..Default::default()
+                },
                 ..Default::default()
             };
 
@@ -789,7 +792,10 @@ mod tests {
         for sigma in [2.0, 3.0, 4.0, 5.0, 7.0, 10.0] {
             let config = StarDetectionConfig {
                 expected_fwhm: field.expected_fwhm_pixels(0.396),
-                detection_sigma: sigma,
+                background_config: BackgroundConfig {
+                    detection_sigma: sigma,
+                    ..Default::default()
+                },
                 ..Default::default()
             };
 

@@ -91,7 +91,7 @@ pub use wcs::{SkyBounds, WCS};
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::star_detection::StarDetectionConfig;
+    use crate::star_detection::{BackgroundConfig, StarDetectionConfig};
     use crate::testing::init_tracing;
 
     #[test]
@@ -104,8 +104,11 @@ mod tests {
 
         let config = StarDetectionConfig {
             expected_fwhm: field.expected_fwhm_pixels(0.396),
-            detection_sigma: 5.0, // Higher threshold to match catalog bright stars
-            min_snr: 20.0,        // Only detect brighter stars
+            min_snr: 20.0, // Only detect brighter stars
+            background_config: BackgroundConfig {
+                detection_sigma: 5.0, // Higher threshold to match catalog bright stars
+                ..Default::default()
+            },
             ..Default::default()
         };
 
@@ -142,7 +145,10 @@ mod tests {
 
             let config = StarDetectionConfig {
                 expected_fwhm: field.expected_fwhm_pixels(0.396),
-                detection_sigma: 3.0,
+                background_config: BackgroundConfig {
+                    detection_sigma: 3.0,
+                    ..Default::default()
+                },
                 ..Default::default()
             };
 

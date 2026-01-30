@@ -51,6 +51,7 @@ pub use calibration_masters::CalibrationMasters;
 // ============================================================================
 
 pub use star_detection::{
+    BackgroundConfig,
     // Advanced: background estimation
     BackgroundMap,
     // Centroid methods
@@ -60,7 +61,6 @@ pub use star_detection::{
     // Advanced: profile fitting
     GaussianFitConfig,
     GaussianFitResult,
-    IterativeBackgroundConfig,
     LocalBackgroundMethod,
     MoffatFitConfig,
     MoffatFitResult,

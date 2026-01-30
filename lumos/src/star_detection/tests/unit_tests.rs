@@ -76,7 +76,7 @@ fn test_star_passes_quality_filters() {
 #[test]
 fn test_default_config() {
     let config = StarDetectionConfig::default();
-    assert_eq!(config.detection_sigma, 4.0);
+    assert_eq!(config.background_config.detection_sigma, 4.0);
     assert_eq!(config.min_area, 5);
     assert_eq!(config.background_tile_size, 64);
 }
