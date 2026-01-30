@@ -101,15 +101,7 @@ pub fn deblend_component(
     let thresholds = create_threshold_levels(detection_threshold, peak_value, config.n_thresholds);
 
     // Build deblending tree by analyzing connectivity at each threshold
-    let width = pixels.width();
-    let tree = build_deblend_tree(
-        data,
-        pixels,
-        labels,
-        width,
-        &thresholds,
-        config.min_separation,
-    );
+    let tree = build_deblend_tree(data, pixels, labels, &thresholds, config.min_separation);
 
     // If tree has only one leaf (no branching), return single object
     if tree.is_empty() {
@@ -151,7 +143,6 @@ fn build_deblend_tree(
     data: &ComponentData,
     pixels: &Buffer2<f32>,
     labels: &LabelMap,
-    width: usize,
     thresholds: &[f32],
     min_separation: usize,
 ) -> Vec<DeblendNode> {
@@ -164,13 +155,6 @@ fn build_deblend_tree(
     // Collect component pixels once for the tree-building algorithm
     // (multi-threshold needs repeated access at different threshold levels)
     let component_pixels: Vec<Pixel> = data.iter_pixels(pixels, labels).collect();
-
-    // Create a map from (x, y) to index for quick lookup
-    let pixel_map: HashMap<Vec2us, usize> = component_pixels
-        .iter()
-        .enumerate()
-        .map(|(i, p)| (p.pos, i))
-        .collect();
 
     // Track which node each pixel belongs to at current level
     let mut pixel_to_node: HashMap<Vec2us, usize> = HashMap::with_capacity(component_pixels.len());
@@ -189,7 +173,7 @@ fn build_deblend_tree(
         }
 
         // Find connected components at this threshold level
-        let regions = find_connected_regions(&above_threshold, &pixel_map, width);
+        let regions = find_connected_regions(&above_threshold);
 
         if level == 0 {
             // First level: create root node(s)
@@ -253,8 +237,6 @@ fn build_deblend_tree(
                                     component_pixels.iter().find(|p| p.pos == *pos).copied()
                                 })
                                 .collect::<Vec<_>>(),
-                            &pixel_map,
-                            width,
                         );
 
                         if other_regions.len() > 1 {
@@ -327,11 +309,7 @@ fn find_region_peak(region: &[Pixel]) -> Pixel {
 }
 
 /// Find connected regions within a set of pixels using 8-connectivity.
-fn find_connected_regions(
-    pixels: &[Pixel],
-    _pixel_map: &HashMap<Vec2us, usize>,
-    _width: usize,
-) -> Vec<Vec<Pixel>> {
+fn find_connected_regions(pixels: &[Pixel]) -> Vec<Vec<Pixel>> {
     if pixels.is_empty() {
         return Vec::new();
     }
