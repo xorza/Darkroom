@@ -65,7 +65,7 @@ pub(super) fn gaussian_kernel_1d(sigma: f32) -> Vec<f32> {
 ///
 /// # Returns
 /// Convolved image of the same size
-pub fn gaussian_convolve(pixels: &Buffer2<f32>, sigma: f32) -> Buffer2<f32> {
+pub(super) fn gaussian_convolve(pixels: &Buffer2<f32>, sigma: f32) -> Buffer2<f32> {
     assert!(sigma > 0.0, "Sigma must be positive");
 
     let width = pixels.width();
