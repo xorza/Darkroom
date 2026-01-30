@@ -12,7 +12,7 @@ use std::hint::black_box;
 
 #[quick_bench(warmup_iters = 3, iters = 10)]
 fn bench_convolve_row_4k(b: ::bench::Bencher) {
-    let width = 4096;
+    let width = 4096 * 10;
     let input: Vec<f32> = (0..width).map(|i| (i as f32 * 0.1).sin() * 100.0).collect();
     let kernel = gaussian_kernel_1d(2.0); // FWHM ~4.7 pixels
     let radius = kernel.len() / 2;
