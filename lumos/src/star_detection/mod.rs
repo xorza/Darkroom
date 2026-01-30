@@ -183,15 +183,7 @@ impl StarDetector {
         drop(output);
 
         // Step 1: Estimate background
-        let background = {
-            if self.config.background_config.iterations > 0 {
-                // Use iterative background estimation for crowded fields
-                estimate_background_iterative(&pixels, &self.config.background_config)
-            } else {
-                // Single-pass background estimation (faster)
-                estimate_background(&pixels, self.config.background_config.tile_size)
-            }
-        };
+        let background = self.config.background_config.estimate(&pixels);
 
         // Step 2: Detect star candidates
         let candidates = {

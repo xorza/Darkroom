@@ -430,6 +430,19 @@ impl Default for BackgroundConfig {
 }
 
 impl BackgroundConfig {
+    /// Estimate background using this configuration.
+    ///
+    /// Automatically chooses between single-pass and iterative estimation
+    /// based on the `iterations` field. If `iterations > 0`, uses iterative
+    /// refinement which is better for crowded fields.
+    pub fn estimate(&self, pixels: &Buffer2<f32>) -> BackgroundMap {
+        if self.iterations > 0 {
+            estimate_background_iterative(pixels, self)
+        } else {
+            estimate_background(pixels, self.tile_size)
+        }
+    }
+
     /// Validate the configuration and panic if invalid.
     ///
     /// # Panics
