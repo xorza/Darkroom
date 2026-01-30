@@ -11,10 +11,11 @@ use super::common::dilate_mask;
 use super::common::threshold_mask::{create_threshold_mask, create_threshold_mask_filtered};
 use super::config::{DeblendConfig, StarDetectionConfig};
 use super::deblend::{
-    BoundingBox, ComponentData, MultiThresholdDeblendConfig,
-    deblend_component as multi_threshold_deblend, deblend_local_maxima,
+    ComponentData, MultiThresholdDeblendConfig, deblend_component as multi_threshold_deblend,
+    deblend_local_maxima,
 };
 use crate::common::{BitBuffer2, Buffer2};
+use crate::math::Aabb;
 
 pub use labels::LabelMap;
 
@@ -25,7 +26,7 @@ pub use super::config::DetectionConfig;
 #[derive(Debug)]
 pub struct StarCandidate {
     /// Bounding box.
-    pub bbox: BoundingBox,
+    pub bbox: Aabb,
     /// Peak pixel X coordinate.
     pub peak_x: usize,
     /// Peak pixel Y coordinate.
@@ -168,7 +169,7 @@ fn extract_candidates_local_maxima(
     // Collect component bounding boxes and areas in single pass (no pixel allocation)
     let mut component_data: Vec<ComponentData> = Vec::with_capacity(num_labels);
     component_data.resize_with(num_labels, || ComponentData {
-        bbox: BoundingBox::empty(),
+        bbox: Aabb::empty(),
         label: 0,
         area: 0,
     });
@@ -200,8 +201,8 @@ fn extract_candidates_local_maxima(
 
             deblended.into_iter().map(|obj| StarCandidate {
                 bbox: obj.bbox,
-                peak_x: obj.peak_x,
-                peak_y: obj.peak_y,
+                peak_x: obj.peak.x,
+                peak_y: obj.peak.y,
                 peak_value: obj.peak_value,
                 area: obj.area,
             })
@@ -223,7 +224,7 @@ fn extract_candidates_multi_threshold(
     // Build component metadata (no pixel storage - reads on-demand)
     let mut component_data: Vec<ComponentData> = Vec::with_capacity(num_labels);
     component_data.resize_with(num_labels, || ComponentData {
-        bbox: BoundingBox::empty(),
+        bbox: Aabb::empty(),
         label: 0,
         area: 0,
     });
@@ -262,8 +263,8 @@ fn extract_candidates_multi_threshold(
 
             deblended.into_iter().map(|obj| StarCandidate {
                 bbox: obj.bbox,
-                peak_x: obj.peak_x,
-                peak_y: obj.peak_y,
+                peak_x: obj.peak.x,
+                peak_y: obj.peak.y,
                 peak_value: obj.peak_value,
                 area: obj.pixels.len(),
             })

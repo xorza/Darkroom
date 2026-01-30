@@ -7,12 +7,12 @@ use std::ops::{Add, Sub};
 /// Unlike glam's vector types (which use `i32`, `u32`, or `f32`),
 /// this uses `usize` for direct array indexing without casts.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
-pub struct Vec2usize {
+pub struct Vec2us {
     pub x: usize,
     pub y: usize,
 }
 
-impl Vec2usize {
+impl Vec2us {
     /// Create a new vector.
     #[inline]
     pub const fn new(x: usize, y: usize) -> Self {
@@ -38,7 +38,7 @@ impl Vec2usize {
     }
 }
 
-impl Add for Vec2usize {
+impl Add for Vec2us {
     type Output = Self;
 
     #[inline]
@@ -50,7 +50,7 @@ impl Add for Vec2usize {
     }
 }
 
-impl Sub for Vec2usize {
+impl Sub for Vec2us {
     type Output = Self;
 
     #[inline]
@@ -62,16 +62,16 @@ impl Sub for Vec2usize {
     }
 }
 
-impl From<(usize, usize)> for Vec2usize {
+impl From<(usize, usize)> for Vec2us {
     #[inline]
     fn from((x, y): (usize, usize)) -> Self {
         Self { x, y }
     }
 }
 
-impl From<Vec2usize> for (usize, usize) {
+impl From<Vec2us> for (usize, usize) {
     #[inline]
-    fn from(v: Vec2usize) -> Self {
+    fn from(v: Vec2us) -> Self {
         (v.x, v.y)
     }
 }
@@ -82,46 +82,46 @@ mod tests {
 
     #[test]
     fn test_new() {
-        let v = Vec2usize::new(3, 5);
+        let v = Vec2us::new(3, 5);
         assert_eq!(v.x, 3);
         assert_eq!(v.y, 5);
     }
 
     #[test]
     fn test_to_index() {
-        let v = Vec2usize::new(3, 2);
+        let v = Vec2us::new(3, 2);
         assert_eq!(v.to_index(10), 23); // 2 * 10 + 3
     }
 
     #[test]
     fn test_from_index() {
-        let v = Vec2usize::from_index(23, 10);
-        assert_eq!(v, Vec2usize::new(3, 2));
+        let v = Vec2us::from_index(23, 10);
+        assert_eq!(v, Vec2us::new(3, 2));
     }
 
     #[test]
     fn test_add() {
-        let a = Vec2usize::new(1, 2);
-        let b = Vec2usize::new(3, 4);
-        assert_eq!(a + b, Vec2usize::new(4, 6));
+        let a = Vec2us::new(1, 2);
+        let b = Vec2us::new(3, 4);
+        assert_eq!(a + b, Vec2us::new(4, 6));
     }
 
     #[test]
     fn test_sub() {
-        let a = Vec2usize::new(5, 7);
-        let b = Vec2usize::new(2, 3);
-        assert_eq!(a - b, Vec2usize::new(3, 4));
+        let a = Vec2us::new(5, 7);
+        let b = Vec2us::new(2, 3);
+        assert_eq!(a - b, Vec2us::new(3, 4));
     }
 
     #[test]
     fn test_from_tuple() {
-        let v: Vec2usize = (3, 5).into();
-        assert_eq!(v, Vec2usize::new(3, 5));
+        let v: Vec2us = (3, 5).into();
+        assert_eq!(v, Vec2us::new(3, 5));
     }
 
     #[test]
     fn test_into_tuple() {
-        let v = Vec2usize::new(3, 5);
+        let v = Vec2us::new(3, 5);
         let t: (usize, usize) = v.into();
         assert_eq!(t, (3, 5));
     }

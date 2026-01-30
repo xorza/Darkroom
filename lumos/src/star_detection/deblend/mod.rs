@@ -11,6 +11,7 @@
 //!    blended sources. More accurate for crowded fields but slower.
 
 use crate::common::Buffer2;
+use crate::math::{Aabb, Vec2us};
 use crate::star_detection::detection::LabelMap;
 
 pub mod local_maxima;
@@ -34,13 +35,9 @@ pub const MAX_PEAKS: usize = 8;
 /// A pixel with its coordinates and value.
 #[derive(Debug, Clone, Copy)]
 pub struct Pixel {
-    pub x: usize,
-    pub y: usize,
+    pub pos: Vec2us,
     pub value: f32,
 }
-
-// Re-export BoundingBox from math module
-pub use crate::math::BoundingBox;
 
 /// Data for a connected component (allocation-free).
 ///
@@ -49,7 +46,7 @@ pub use crate::math::BoundingBox;
 #[derive(Debug, Clone, Copy)]
 pub struct ComponentData {
     /// Bounding box of the component.
-    pub bbox: BoundingBox,
+    pub bbox: Aabb,
     /// Component label in the labels buffer.
     pub label: u32,
     /// Number of pixels in the component (pre-computed).
@@ -73,8 +70,7 @@ impl ComponentData {
                 let idx = y * width + x;
                 if labels[idx] == self.label {
                     Some(Pixel {
-                        x,
-                        y,
+                        pos: Vec2us::new(x, y),
                         value: pixels[idx],
                     })
                 } else {
@@ -94,8 +90,7 @@ impl ComponentData {
                     .unwrap_or(std::cmp::Ordering::Equal)
             })
             .unwrap_or(Pixel {
-                x: self.bbox.x_min,
-                y: self.bbox.y_min,
+                pos: Vec2us::new(self.bbox.x_min, self.bbox.y_min),
                 value: 0.0,
             })
     }

@@ -3,10 +3,10 @@
 //! Tests sub-pixel centroid accuracy on synthetic stars.
 
 use crate::common::Buffer2;
+use crate::math::Aabb;
 use crate::star_detection::StarDetectionConfig;
 use crate::star_detection::background::{BackgroundConfig, BackgroundMap};
 use crate::star_detection::centroid::compute_centroid;
-use crate::star_detection::deblend::BoundingBox;
 use crate::star_detection::detection::StarCandidate;
 use crate::star_detection::tests::common::output::{
     gray_to_rgb_image_stretched, save_grayscale, save_image,
@@ -92,7 +92,7 @@ fn test_centroid_accuracy() {
         let peak_y = true_y.round() as usize;
 
         let candidate = StarCandidate {
-            bbox: BoundingBox::new(
+            bbox: Aabb::new(
                 peak_x.saturating_sub(5),
                 (peak_x + 5).min(width - 1),
                 peak_y.saturating_sub(5),
@@ -137,7 +137,7 @@ fn test_centroid_accuracy() {
         let peak_y = true_y.round() as usize;
 
         let candidate = StarCandidate {
-            bbox: BoundingBox::new(
+            bbox: Aabb::new(
                 peak_x.saturating_sub(5),
                 (peak_x + 5).min(width - 1),
                 peak_y.saturating_sub(5),
@@ -257,7 +257,7 @@ fn test_centroid_snr() {
         draw_circle(&mut img, *true_x, *true_y, 6.0, blue, 1.0);
 
         let candidate = StarCandidate {
-            bbox: BoundingBox::new(
+            bbox: Aabb::new(
                 peak_x.saturating_sub(5),
                 (peak_x + 5).min(width - 1),
                 peak_y.saturating_sub(5),

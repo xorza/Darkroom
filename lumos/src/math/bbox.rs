@@ -6,7 +6,7 @@
 /// Uses inclusive bounds: a pixel at (x, y) is inside if
 /// `x_min <= x <= x_max` and `y_min <= y <= y_max`.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct BoundingBox {
+pub struct Aabb {
     pub x_min: usize,
     pub x_max: usize,
     pub y_min: usize,
@@ -14,7 +14,7 @@ pub struct BoundingBox {
 }
 
 #[allow(dead_code)] // Public API - used by tests and downstream code
-impl BoundingBox {
+impl Aabb {
     /// Create a new bounding box with the given bounds.
     #[inline]
     pub const fn new(x_min: usize, x_max: usize, y_min: usize, y_max: usize) -> Self {
@@ -80,7 +80,7 @@ mod tests {
 
     #[test]
     fn test_new() {
-        let bbox = BoundingBox::new(1, 5, 2, 8);
+        let bbox = Aabb::new(1, 5, 2, 8);
         assert_eq!(bbox.x_min, 1);
         assert_eq!(bbox.x_max, 5);
         assert_eq!(bbox.y_min, 2);
@@ -89,7 +89,7 @@ mod tests {
 
     #[test]
     fn test_empty() {
-        let bbox = BoundingBox::empty();
+        let bbox = Aabb::empty();
         assert_eq!(bbox.x_min, usize::MAX);
         assert_eq!(bbox.x_max, 0);
         assert_eq!(bbox.y_min, usize::MAX);
@@ -98,27 +98,27 @@ mod tests {
 
     #[test]
     fn test_include() {
-        let mut bbox = BoundingBox::empty();
+        let mut bbox = Aabb::empty();
         bbox.include(5, 3);
-        assert_eq!(bbox, BoundingBox::new(5, 5, 3, 3));
+        assert_eq!(bbox, Aabb::new(5, 5, 3, 3));
 
         bbox.include(2, 7);
-        assert_eq!(bbox, BoundingBox::new(2, 5, 3, 7));
+        assert_eq!(bbox, Aabb::new(2, 5, 3, 7));
 
         bbox.include(8, 1);
-        assert_eq!(bbox, BoundingBox::new(2, 8, 1, 7));
+        assert_eq!(bbox, Aabb::new(2, 8, 1, 7));
     }
 
     #[test]
     fn test_width_height() {
-        let bbox = BoundingBox::new(2, 5, 3, 8);
+        let bbox = Aabb::new(2, 5, 3, 8);
         assert_eq!(bbox.width(), 4); // 5 - 2 + 1
         assert_eq!(bbox.height(), 6); // 8 - 3 + 1
     }
 
     #[test]
     fn test_single_pixel() {
-        let bbox = BoundingBox::new(3, 3, 5, 5);
+        let bbox = Aabb::new(3, 3, 5, 5);
         assert_eq!(bbox.width(), 1);
         assert_eq!(bbox.height(), 1);
         assert_eq!(bbox.area(), 1);
@@ -126,7 +126,7 @@ mod tests {
 
     #[test]
     fn test_contains() {
-        let bbox = BoundingBox::new(2, 5, 3, 8);
+        let bbox = Aabb::new(2, 5, 3, 8);
         assert!(bbox.contains(2, 3)); // corner
         assert!(bbox.contains(5, 8)); // corner
         assert!(bbox.contains(3, 5)); // inside
@@ -138,7 +138,7 @@ mod tests {
 
     #[test]
     fn test_area() {
-        let bbox = BoundingBox::new(0, 9, 0, 4);
+        let bbox = Aabb::new(0, 9, 0, 4);
         assert_eq!(bbox.area(), 50); // 10 * 5
     }
 }

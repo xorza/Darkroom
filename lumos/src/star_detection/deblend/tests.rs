@@ -13,7 +13,7 @@ fn make_test_component(
     let mut pixels = Buffer2::new_filled(width, height, 0.0f32);
     let mut labels = Buffer2::new_filled(width, height, 0u32);
 
-    let mut bbox = BoundingBox::empty();
+    let mut bbox = Aabb::empty();
     let mut area = 0;
 
     for (cx, cy, amplitude, sigma) in stars {
@@ -67,8 +67,8 @@ fn test_local_vs_multi_threshold_single_star() {
     assert_eq!(mt_result.len(), 1);
 
     // Peak positions should be similar
-    assert!((local_result[0].peak_x as i32 - mt_result[0].peak_x as i32).abs() <= 1);
-    assert!((local_result[0].peak_y as i32 - mt_result[0].peak_y as i32).abs() <= 1);
+    assert!((local_result[0].peak.x as i32 - mt_result[0].peak.x as i32).abs() <= 1);
+    assert!((local_result[0].peak.y as i32 - mt_result[0].peak.y as i32).abs() <= 1);
 }
 
 #[test]

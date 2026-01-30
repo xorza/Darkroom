@@ -11,8 +11,9 @@
 
 use arrayvec::ArrayVec;
 
-use super::{BoundingBox, ComponentData, DeblendConfig, MAX_PEAKS, Pixel};
+use super::{ComponentData, DeblendConfig, MAX_PEAKS, Pixel};
 use crate::common::Buffer2;
+use crate::math::{Aabb, Vec2us};
 use crate::star_detection::detection::LabelMap;
 
 // ============================================================================
@@ -22,9 +23,8 @@ use crate::star_detection::detection::LabelMap;
 /// Result of deblending a single connected component.
 #[derive(Debug)]
 pub struct DeblendedCandidate {
-    pub bbox: BoundingBox,
-    pub peak_x: usize,
-    pub peak_y: usize,
+    pub bbox: Aabb,
+    pub peak: Vec2us,
     pub peak_value: f32,
     pub area: usize,
 }
@@ -32,14 +32,14 @@ pub struct DeblendedCandidate {
 /// Per-peak bounding box and area data (internal).
 #[derive(Debug, Copy, Clone)]
 struct PeakData {
-    bbox: BoundingBox,
+    bbox: Aabb,
     area: usize,
 }
 
 impl Default for PeakData {
     fn default() -> Self {
         Self {
-            bbox: BoundingBox::empty(),
+            bbox: Aabb::empty(),
             area: 0,
         }
     }
@@ -81,8 +81,7 @@ pub fn deblend_local_maxima(
         let mut result = ArrayVec::new();
         result.push(DeblendedCandidate {
             bbox: data.bbox,
-            peak_x: peak.x,
-            peak_y: peak.y,
+            peak: peak.pos,
             peak_value: peak.value,
             area: data.area,
         });
@@ -168,7 +167,7 @@ pub fn deblend_by_nearest_peak(
     for pixel in data.iter_pixels(pixels, labels) {
         let nearest = find_nearest_peak(pixel, peaks, num_peaks);
         let pd = &mut peak_data[nearest];
-        pd.bbox.include(pixel.x, pixel.y);
+        pd.bbox.include(pixel.pos.x, pixel.pos.y);
         pd.area += 1;
     }
 
@@ -177,8 +176,7 @@ pub fn deblend_by_nearest_peak(
         if pd.area > 0 {
             result.push(DeblendedCandidate {
                 bbox: pd.bbox,
-                peak_x: peak.x,
-                peak_y: peak.y,
+                peak: peak.pos,
                 peak_value: peak.value,
                 area: pd.area,
             });
@@ -196,8 +194,8 @@ pub fn deblend_by_nearest_peak(
 /// Uses explicit neighbor checks instead of loops for better performance.
 #[inline]
 fn is_local_maximum(pixel: Pixel, pixels: &Buffer2<f32>) -> bool {
-    let x = pixel.x;
-    let y = pixel.y;
+    let x = pixel.pos.x;
+    let y = pixel.pos.y;
     let v = pixel.value;
     let width = pixels.width();
     let height = pixels.height();
@@ -219,8 +217,8 @@ fn is_local_maximum(pixel: Pixel, pixels: &Buffer2<f32>) -> bool {
 fn add_or_replace_peak(peaks: &mut ArrayVec<Pixel, MAX_PEAKS>, pixel: Pixel, min_sep_sq: usize) {
     // Check separation from existing peaks using squared Euclidean distance
     let well_separated = peaks.iter().all(|peak| {
-        let dx = (pixel.x as i32 - peak.x as i32).unsigned_abs() as usize;
-        let dy = (pixel.y as i32 - peak.y as i32).unsigned_abs() as usize;
+        let dx = (pixel.pos.x as i32 - peak.pos.x as i32).unsigned_abs() as usize;
+        let dy = (pixel.pos.y as i32 - peak.pos.y as i32).unsigned_abs() as usize;
         dx * dx + dy * dy >= min_sep_sq
     });
 
@@ -231,8 +229,8 @@ fn add_or_replace_peak(peaks: &mut ArrayVec<Pixel, MAX_PEAKS>, pixel: Pixel, min
     } else {
         // Replace nearby peak if this one is brighter
         for peak in peaks.iter_mut() {
-            let dx = (pixel.x as i32 - peak.x as i32).unsigned_abs() as usize;
-            let dy = (pixel.y as i32 - peak.y as i32).unsigned_abs() as usize;
+            let dx = (pixel.pos.x as i32 - peak.pos.x as i32).unsigned_abs() as usize;
+            let dy = (pixel.pos.y as i32 - peak.pos.y as i32).unsigned_abs() as usize;
             if dx * dx + dy * dy < min_sep_sq && pixel.value > peak.value {
                 *peak = pixel;
                 break;
@@ -248,8 +246,8 @@ fn find_nearest_peak(pixel: Pixel, peaks: &[Pixel], num_peaks: usize) -> usize {
     let mut nearest = 0;
 
     for (i, peak) in peaks.iter().take(num_peaks).enumerate() {
-        let dx = (pixel.x as i32 - peak.x as i32).unsigned_abs() as usize;
-        let dy = (pixel.y as i32 - peak.y as i32).unsigned_abs() as usize;
+        let dx = (pixel.pos.x as i32 - peak.pos.x as i32).unsigned_abs() as usize;
+        let dy = (pixel.pos.y as i32 - peak.pos.y as i32).unsigned_abs() as usize;
         let dist_sq = dx * dx + dy * dy;
 
         if dist_sq < min_dist_sq {
@@ -278,7 +276,7 @@ mod tests {
         let mut pixels = Buffer2::new_filled(width, height, 0.0f32);
         let mut labels = Buffer2::new_filled(width, height, 0u32);
 
-        let mut bbox = BoundingBox::empty();
+        let mut bbox = Aabb::empty();
         let mut area = 0;
 
         for (cx, cy, amplitude, sigma) in stars {
@@ -324,7 +322,7 @@ mod tests {
 
         assert_eq!(peaks.len(), 1, "Should find exactly one peak");
         assert!(
-            (peaks[0].x as i32 - 50).abs() <= 1,
+            (peaks[0].pos.x as i32 - 50).abs() <= 1,
             "Peak should be near center"
         );
     }
@@ -480,7 +478,7 @@ mod tests {
 
         let peak = data.find_peak(&pixels, &labels);
         assert!(
-            (peak.x as i32 - 50).abs() <= 1 && (peak.y as i32 - 50).abs() <= 1,
+            (peak.pos.x as i32 - 50).abs() <= 1 && (peak.pos.y as i32 - 50).abs() <= 1,
             "find_peak should return the brightest star's position"
         );
         assert!(peak.value > 0.9, "Peak value should be close to 1.0");
@@ -538,8 +536,7 @@ mod tests {
         pixels[(1, 1)] = 0.5;
 
         let corner_pixel = Pixel {
-            x: 0,
-            y: 0,
+            pos: Vec2us::new(0, 0),
             value: 1.0,
         };
         assert!(
@@ -556,8 +553,7 @@ mod tests {
         pixels[(6, 1)] = 0.5;
 
         let edge_pixel = Pixel {
-            x: 5,
-            y: 0,
+            pos: Vec2us::new(5, 0),
             value: 1.0,
         };
         assert!(
@@ -575,8 +571,7 @@ mod tests {
         pixels[(6, 5)] = 1.0; // Brighter neighbor
 
         let pixel = Pixel {
-            x: 5,
-            y: 5,
+            pos: Vec2us::new(5, 5),
             value: 0.5,
         };
         assert!(
@@ -593,13 +588,11 @@ mod tests {
 
         let peaks = vec![
             Pixel {
-                x: 25,
-                y: 50,
+                pos: Vec2us::new(25, 50),
                 value: 1.0,
             },
             Pixel {
-                x: 75,
-                y: 50,
+                pos: Vec2us::new(75, 50),
                 value: 1.0,
             },
         ];
@@ -610,12 +603,12 @@ mod tests {
         // Each candidate should have its peak inside its bounding box
         for candidate in &candidates {
             assert!(
-                candidate.peak_x >= candidate.bbox.x_min
-                    && candidate.peak_x <= candidate.bbox.x_max
+                candidate.peak.x >= candidate.bbox.x_min
+                    && candidate.peak.x <= candidate.bbox.x_max
             );
             assert!(
-                candidate.peak_y >= candidate.bbox.y_min
-                    && candidate.peak_y <= candidate.bbox.y_max
+                candidate.peak.y >= candidate.bbox.y_min
+                    && candidate.peak.y <= candidate.bbox.y_max
             );
         }
     }

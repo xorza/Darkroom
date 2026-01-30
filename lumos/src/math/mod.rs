@@ -6,8 +6,8 @@ mod bbox;
 pub mod scalar;
 mod vec2;
 
-pub use bbox::BoundingBox;
-pub use vec2::Vec2usize;
+pub use bbox::Aabb;
+pub use vec2::Vec2us;
 
 /// FWHM to Gaussian sigma conversion factor.
 ///

@@ -9,8 +9,9 @@
 
 use std::collections::HashMap;
 
-use super::{BoundingBox, ComponentData, Pixel};
+use super::{ComponentData, Pixel};
 use crate::common::Buffer2;
+use crate::math::{Aabb, Vec2us};
 use crate::star_detection::detection::LabelMap;
 
 /// Configuration for multi-threshold deblending.
@@ -60,10 +61,8 @@ struct DeblendNode {
 /// Result of deblending a single connected component.
 #[derive(Debug)]
 pub struct DeblendedObject {
-    /// X coordinate of peak.
-    pub peak_x: usize,
-    /// Y coordinate of peak.
-    pub peak_y: usize,
+    /// Peak position.
+    pub peak: Vec2us,
     /// Peak pixel value.
     pub peak_value: f32,
     /// Total flux.
@@ -71,7 +70,7 @@ pub struct DeblendedObject {
     /// Pixels belonging to this object.
     pub pixels: Vec<Pixel>,
     /// Bounding box.
-    pub bbox: BoundingBox,
+    pub bbox: Aabb,
 }
 
 /// Multi-threshold deblending of a connected component.
@@ -192,7 +191,7 @@ fn build_deblend_tree(
     let pixel_map: HashMap<(usize, usize), usize> = component_pixels
         .iter()
         .enumerate()
-        .map(|(i, p)| ((p.x, p.y), i))
+        .map(|(i, p)| ((p.pos.x, p.pos.y), i))
         .collect();
 
     // Track which node each pixel belongs to at current level
@@ -223,11 +222,11 @@ fn build_deblend_tree(
                 let flux = region.iter().map(|p| p.value).sum();
 
                 for p in &region {
-                    pixel_to_node.insert((p.x, p.y), node_idx);
+                    pixel_to_node.insert((p.pos.x, p.pos.y), node_idx);
                 }
 
                 tree.push(DeblendNode {
-                    pixels: region.iter().map(|p| (p.x, p.y)).collect(),
+                    pixels: region.iter().map(|p| (p.pos.x, p.pos.y)).collect(),
                     peak,
                     flux,
                     children: Vec::new(),
@@ -241,7 +240,7 @@ fn build_deblend_tree(
                 let mut parent_nodes: HashMap<usize, Vec<Pixel>> = HashMap::new();
 
                 for &p in &region {
-                    if let Some(&parent_idx) = pixel_to_node.get(&(p.x, p.y)) {
+                    if let Some(&parent_idx) = pixel_to_node.get(&(p.pos.x, p.pos.y)) {
                         parent_nodes.entry(parent_idx).or_default().push(p);
                     }
                 }
@@ -261,7 +260,7 @@ fn build_deblend_tree(
                         .filter(|&&(x, y)| {
                             component_pixels
                                 .iter()
-                                .find(|p| p.x == x && p.y == y)
+                                .find(|p| p.pos.x == x && p.pos.y == y)
                                 .is_some_and(|p| p.value >= threshold)
                         })
                         .collect();
@@ -276,7 +275,7 @@ fn build_deblend_tree(
                                 .filter_map(|&&(x, y)| {
                                     component_pixels
                                         .iter()
-                                        .find(|p| p.x == x && p.y == y)
+                                        .find(|p| p.pos.x == x && p.pos.y == y)
                                         .copied()
                                 })
                                 .collect::<Vec<_>>(),
@@ -294,10 +293,10 @@ fn build_deblend_tree(
                                 // Check minimum separation from existing children
                                 let too_close = child_indices.iter().any(|&idx: &usize| {
                                     let sibling = &tree[idx];
-                                    let dx = (child_peak.x as i32 - sibling.peak.x as i32)
+                                    let dx = (child_peak.pos.x as i32 - sibling.peak.pos.x as i32)
                                         .unsigned_abs()
                                         as usize;
-                                    let dy = (child_peak.y as i32 - sibling.peak.y as i32)
+                                    let dy = (child_peak.pos.y as i32 - sibling.peak.pos.y as i32)
                                         .unsigned_abs()
                                         as usize;
                                     dx < min_separation && dy < min_separation
@@ -311,11 +310,14 @@ fn build_deblend_tree(
                                 let child_flux = child_region.iter().map(|p| p.value).sum();
 
                                 for p in &child_region {
-                                    pixel_to_node.insert((p.x, p.y), child_idx);
+                                    pixel_to_node.insert((p.pos.x, p.pos.y), child_idx);
                                 }
 
                                 tree.push(DeblendNode {
-                                    pixels: child_region.iter().map(|p| (p.x, p.y)).collect(),
+                                    pixels: child_region
+                                        .iter()
+                                        .map(|p| (p.pos.x, p.pos.y))
+                                        .collect(),
                                     peak: child_peak,
                                     flux: child_flux,
                                     children: Vec::new(),
@@ -348,8 +350,7 @@ fn find_region_peak(region: &[Pixel]) -> Pixel {
         })
         .copied()
         .unwrap_or(Pixel {
-            x: 0,
-            y: 0,
+            pos: Vec2us::new(0, 0),
             value: 0.0,
         })
 }
@@ -365,21 +366,23 @@ fn find_connected_regions(
     }
 
     // Create a set of pixel positions for quick lookup
-    let pixel_set: HashMap<(usize, usize), f32> =
-        pixels.iter().map(|p| ((p.x, p.y), p.value)).collect();
+    let pixel_set: HashMap<(usize, usize), f32> = pixels
+        .iter()
+        .map(|p| ((p.pos.x, p.pos.y), p.value))
+        .collect();
 
     let mut visited: HashMap<(usize, usize), bool> = HashMap::new();
     let mut regions = Vec::new();
 
     for p in pixels {
-        if visited.get(&(p.x, p.y)).is_some_and(|&b| b) {
+        if visited.get(&(p.pos.x, p.pos.y)).is_some_and(|&b| b) {
             continue;
         }
 
         // BFS to find connected component
         let mut region = Vec::new();
         let mut queue = vec![*p];
-        visited.insert((p.x, p.y), true);
+        visited.insert((p.pos.x, p.pos.y), true);
 
         while let Some(current) = queue.pop() {
             region.push(current);
@@ -391,8 +394,8 @@ fn find_connected_regions(
                         continue;
                     }
 
-                    let nx = (current.x as i32 + dx) as usize;
-                    let ny = (current.y as i32 + dy) as usize;
+                    let nx = (current.pos.x as i32 + dx) as usize;
+                    let ny = (current.pos.y as i32 + dy) as usize;
 
                     if visited.get(&(nx, ny)).is_some_and(|&b| b) {
                         continue;
@@ -401,8 +404,7 @@ fn find_connected_regions(
                     if let Some(&nv) = pixel_set.get(&(nx, ny)) {
                         visited.insert((nx, ny), true);
                         queue.push(Pixel {
-                            x: nx,
-                            y: ny,
+                            pos: Vec2us::new(nx, ny),
                             value: nv,
                         });
                     }
@@ -509,12 +511,11 @@ fn assign_pixels_to_objects(
     let mut objects: Vec<DeblendedObject> = peaks
         .iter()
         .map(|p| DeblendedObject {
-            peak_x: p.x,
-            peak_y: p.y,
+            peak: p.pos,
             peak_value: p.value,
             flux: 0.0,
             pixels: Vec::new(),
-            bbox: BoundingBox::empty(),
+            bbox: Aabb::empty(),
         })
         .collect();
 
@@ -524,8 +525,8 @@ fn assign_pixels_to_objects(
         let mut nearest = 0;
 
         for (i, peak) in peaks.iter().enumerate() {
-            let dx = (p.x as i32 - peak.x as i32).unsigned_abs() as usize;
-            let dy = (p.y as i32 - peak.y as i32).unsigned_abs() as usize;
+            let dx = (p.pos.x as i32 - peak.pos.x as i32).unsigned_abs() as usize;
+            let dy = (p.pos.y as i32 - peak.pos.y as i32).unsigned_abs() as usize;
             let dist_sq = dx * dx + dy * dy;
 
             if dist_sq < min_dist_sq {
@@ -537,7 +538,7 @@ fn assign_pixels_to_objects(
         let obj = &mut objects[nearest];
         obj.pixels.push(p);
         obj.flux += p.value;
-        obj.bbox.include(p.x, p.y);
+        obj.bbox.include(p.pos.x, p.pos.y);
     }
 
     // Filter out objects with no pixels
@@ -563,8 +564,7 @@ fn create_single_object(
     }
 
     DeblendedObject {
-        peak_x: peak.x,
-        peak_y: peak.y,
+        peak: peak.pos,
         peak_value: peak.value,
         flux,
         pixels: pixel_list,
@@ -585,7 +585,7 @@ mod tests {
         let mut pixels = Buffer2::new_filled(width, height, 0.0f32);
         let mut labels = Buffer2::new_filled(width, height, 0u32);
 
-        let mut bbox = BoundingBox::empty();
+        let mut bbox = Aabb::empty();
         let mut area = 0;
 
         for (cx, cy, amplitude, sigma) in stars {
@@ -630,8 +630,8 @@ mod tests {
         let result = deblend_component(&data, &pixels, &labels, 0.01, &config);
 
         assert_eq!(result.len(), 1, "Single star should produce one object");
-        assert!((result[0].peak_x as i32 - 50).abs() <= 1);
-        assert!((result[0].peak_y as i32 - 50).abs() <= 1);
+        assert!((result[0].peak.x as i32 - 50).abs() <= 1);
+        assert!((result[0].peak.y as i32 - 50).abs() <= 1);
     }
 
     #[test]
@@ -655,7 +655,7 @@ mod tests {
         );
 
         // Check peak positions
-        let mut peaks: Vec<_> = result.iter().map(|o| (o.peak_x, o.peak_y)).collect();
+        let mut peaks: Vec<_> = result.iter().map(|o| (o.peak.x, o.peak.y)).collect();
         peaks.sort_by_key(|&(x, _)| x);
 
         assert!(
@@ -734,7 +734,7 @@ mod tests {
         let labels_buf = Buffer2::new_filled(10, 10, 0u32);
         let labels = LabelMap::from_raw(labels_buf, 0);
         let data = ComponentData {
-            bbox: BoundingBox::default(),
+            bbox: Aabb::default(),
             label: 1,
             area: 0,
         };
