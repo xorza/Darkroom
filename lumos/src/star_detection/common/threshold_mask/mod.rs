@@ -59,8 +59,8 @@ pub(super) fn process_words_scalar(
 }
 
 /// Scalar implementation for packed threshold mask without background (filtered).
-#[inline]
-fn process_words_filtered_scalar(
+#[cfg_attr(not(test), inline)]
+pub(super) fn process_words_filtered_scalar(
     pixels: &[f32],
     noise: &[f32],
     sigma_threshold: f32,
@@ -150,7 +150,7 @@ pub(super) fn process_words(
 
 /// Process words with best available SIMD (without background, for filtered images).
 #[inline]
-fn process_words_filtered(
+pub(super) fn process_words_filtered(
     pixels: &[f32],
     noise: &[f32],
     sigma_threshold: f32,
