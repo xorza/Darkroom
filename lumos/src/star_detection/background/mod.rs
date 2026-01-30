@@ -12,11 +12,13 @@ pub mod bench;
 mod tests;
 
 mod simd;
+mod tile_grid;
 
 use crate::common::Buffer2;
 use crate::common::parallel::{ParRowsMutAuto, ParZipMut};
-use crate::math::median_f32_mut;
 use rayon::prelude::*;
+
+use tile_grid::TileGrid;
 
 /// Background map with per-pixel background and noise estimates.
 #[derive(Debug, Clone)]
@@ -60,90 +62,6 @@ impl BackgroundMap {
     pub fn subtract(&self, pixels: &[f32], x: usize, y: usize) -> f32 {
         let idx = y * self.width() + x;
         pixels[idx] - self.background[(x, y)]
-    }
-}
-
-/// Tile statistics computed during background estimation.
-#[derive(Clone, Copy, Debug, Default)]
-pub(crate) struct TileStats {
-    median: f32,
-    sigma: f32,
-}
-
-/// Tile grid with precomputed centers for interpolation.
-struct TileGrid {
-    stats: Buffer2<TileStats>,
-    /// X center for each tile column (one per column).
-    centers_x: Vec<f32>,
-    /// Y center for each tile row (one per row).
-    centers_y: Vec<f32>,
-}
-
-impl TileGrid {
-    #[inline]
-    fn get(&self, tx: usize, ty: usize) -> TileStats {
-        self.stats[(tx, ty)]
-    }
-
-    #[inline]
-    fn tiles_x(&self) -> usize {
-        self.stats.width()
-    }
-
-    #[inline]
-    fn tiles_y(&self) -> usize {
-        self.stats.height()
-    }
-
-    /// Apply median filter to the tile grid statistics.
-    ///
-    /// This makes the background estimation more robust to bright stars by
-    /// replacing each tile's statistics with the median of its 3x3 neighborhood.
-    fn apply_median_filter(&mut self) {
-        let tiles_x = self.tiles_x();
-        let tiles_y = self.tiles_y();
-
-        if tiles_x < 3 || tiles_y < 3 {
-            return; // Not enough tiles for filtering
-        }
-
-        let filtered_stats: Vec<TileStats> = (0..tiles_y * tiles_x)
-            .into_par_iter()
-            .map(|idx| {
-                let ty = idx / tiles_x;
-                let tx = idx % tiles_x;
-
-                // Gather 3x3 neighborhood values
-                let mut medians = [0.0f32; 9];
-                let mut sigmas = [0.0f32; 9];
-                let mut count = 0;
-
-                for dy in -1i32..=1 {
-                    for dx in -1i32..=1 {
-                        let nx = tx as i32 + dx;
-                        let ny = ty as i32 + dy;
-
-                        if nx >= 0 && nx < tiles_x as i32 && ny >= 0 && ny < tiles_y as i32 {
-                            let neighbor = self.get(nx as usize, ny as usize);
-                            medians[count] = neighbor.median;
-                            sigmas[count] = neighbor.sigma;
-                            count += 1;
-                        }
-                    }
-                }
-
-                // Compute median of neighborhoods
-                let filtered_median = median_f32_mut(&mut medians[..count]);
-                let filtered_sigma = median_f32_mut(&mut sigmas[..count]);
-
-                TileStats {
-                    median: filtered_median,
-                    sigma: filtered_sigma,
-                }
-            })
-            .collect();
-
-        self.stats = Buffer2::new(tiles_x, tiles_y, filtered_stats);
     }
 }
 
@@ -199,74 +117,28 @@ impl BackgroundConfig {
     /// stars and other bright objects from the estimation.
     pub fn estimate(&self, pixels: &Buffer2<f32>) -> BackgroundMap {
         self.validate();
+        self.validate_image_size(pixels);
 
-        let width = pixels.width();
-        let height = pixels.height();
-        let tile_size = self.tile_size;
+        let mut grid = TileGrid::new(pixels, self.tile_size);
+        grid.apply_median_filter();
 
+        let mut background = self.interpolate_background(pixels, &grid);
+
+        self.refine_background(pixels, &mut background);
+
+        background
+    }
+
+    fn validate_image_size(&self, pixels: &Buffer2<f32>) {
         assert!(
-            width >= tile_size && height >= tile_size,
+            pixels.width() >= self.tile_size && pixels.height() >= self.tile_size,
             "Image must be at least tile_size x tile_size"
         );
+    }
 
-        let tiles_x = width.div_ceil(tile_size);
-        let tiles_y = height.div_ceil(tile_size);
-        let max_tile_pixels = tile_size * tile_size;
-
-        // Compute statistics for each tile in parallel with per-thread scratch buffers
-        let tile_stats: Vec<TileStats> = (0..tiles_y * tiles_x)
-            .into_par_iter()
-            .map_init(
-                || {
-                    (
-                        Vec::with_capacity(max_tile_pixels),
-                        Vec::with_capacity(max_tile_pixels),
-                    )
-                },
-                |(values_buf, deviations_buf), idx| {
-                    let ty = idx / tiles_x;
-                    let tx = idx % tiles_x;
-
-                    let x_start = tx * tile_size;
-                    let y_start = ty * tile_size;
-                    let x_end = (x_start + tile_size).min(width);
-                    let y_end = (y_start + tile_size).min(height);
-
-                    compute_tile_stats(
-                        pixels,
-                        None,
-                        x_start,
-                        x_end,
-                        y_start,
-                        y_end,
-                        0,
-                        values_buf,
-                        deviations_buf,
-                    )
-                },
-            )
-            .collect();
-
-        // Build tile grid with precomputed centers
-        let mut grid = TileGrid {
-            stats: Buffer2::new(tiles_x, tiles_y, tile_stats),
-            centers_x: (0..tiles_x)
-                .map(|tx| {
-                    let x_start = tx * tile_size;
-                    let x_end = (x_start + tile_size).min(width);
-                    (x_start + x_end) as f32 * 0.5
-                })
-                .collect(),
-            centers_y: (0..tiles_y)
-                .map(|ty| {
-                    let y_start = ty * tile_size;
-                    let y_end = (y_start + tile_size).min(height);
-                    (y_start + y_end) as f32 * 0.5
-                })
-                .collect(),
-        };
-
-        grid.apply_median_filter();
+    fn interpolate_background(&self, pixels: &Buffer2<f32>, grid: &TileGrid) -> BackgroundMap {
+        let width = pixels.width();
+        let height = pixels.height();
 
         let mut background = BackgroundMap {
             background: Buffer2::new_filled(width, height, 0.0),
@@ -287,38 +159,42 @@ impl BackgroundConfig {
                     let bg_row = &mut bg_chunk[row_offset..row_offset + width];
                     let noise_row = &mut noise_chunk[row_offset..row_offset + width];
 
-                    interpolate_row(bg_row, noise_row, y, &grid);
+                    interpolate_row(bg_row, noise_row, y, grid);
                 }
             });
 
-        // Iterative refinement if requested
-        if self.iterations > 0 {
-            let mut mask = Buffer2::new_filled(width, height, false);
-            let mut scratch = Buffer2::new_filled(width, height, false);
+        background
+    }
 
-            for _iter in 0..self.iterations {
-                // Create mask of pixels above threshold
-                create_object_mask(
-                    pixels,
-                    &background,
-                    self.detection_sigma,
-                    self.mask_dilation,
-                    &mut mask,
-                    &mut scratch,
-                );
-
-                // Re-estimate background with masked pixels excluded
-                estimate_background_masked(
-                    pixels,
-                    self.tile_size,
-                    &mask,
-                    self.min_unmasked_fraction,
-                    &mut background,
-                );
-            }
+    fn refine_background(&self, pixels: &Buffer2<f32>, background: &mut BackgroundMap) {
+        if self.iterations == 0 {
+            return;
         }
 
-        background
+        let width = pixels.width();
+        let height = pixels.height();
+
+        let mut mask = Buffer2::new_filled(width, height, false);
+        let mut scratch = Buffer2::new_filled(width, height, false);
+
+        for _iter in 0..self.iterations {
+            create_object_mask(
+                pixels,
+                background,
+                self.detection_sigma,
+                self.mask_dilation,
+                &mut mask,
+                &mut scratch,
+            );
+
+            estimate_background_masked(
+                pixels,
+                self.tile_size,
+                &mask,
+                self.min_unmasked_fraction,
+                background,
+            );
+        }
     }
 
     /// Validate the configuration and panic if invalid.
@@ -393,56 +269,6 @@ fn create_object_mask(
     }
 }
 
-/// Compute sigma-clipped statistics for a single tile using provided scratch buffers.
-/// If mask is provided, excludes masked pixels (falls back to all pixels if too few unmasked).
-#[allow(clippy::too_many_arguments)]
-fn compute_tile_stats(
-    pixels: &Buffer2<f32>,
-    mask: Option<&Buffer2<bool>>,
-    x_start: usize,
-    x_end: usize,
-    y_start: usize,
-    y_end: usize,
-    min_pixels: usize,
-    values: &mut Vec<f32>,
-    deviations: &mut Vec<f32>,
-) -> TileStats {
-    let width = pixels.width();
-    values.clear();
-
-    if let Some(mask) = mask {
-        // Collect unmasked pixels
-        for y in y_start..y_end {
-            let row_start = y * width;
-            for x in x_start..x_end {
-                let idx = row_start + x;
-                if !mask[idx] {
-                    values.push(pixels[idx]);
-                }
-            }
-        }
-
-        // If too few unmasked pixels, fall back to all pixels
-        if values.len() < min_pixels {
-            values.clear();
-            for y in y_start..y_end {
-                let row_start = y * width + x_start;
-                values.extend_from_slice(&pixels[row_start..row_start + (x_end - x_start)]);
-            }
-        }
-    } else {
-        // No mask - collect all pixels
-        for y in y_start..y_end {
-            let row_start = y * width + x_start;
-            values.extend_from_slice(&pixels[row_start..row_start + (x_end - x_start)]);
-        }
-    }
-
-    // Sigma-clipped statistics (3 iterations, 3-sigma clip)
-    let (median, sigma) = super::common::sigma_clipped_median_mad(values, deviations, 3.0, 3);
-    TileStats { median, sigma }
-}
-
 /// Estimate background with masked pixels excluded.
 fn estimate_background_masked(
     pixels: &Buffer2<f32>,
@@ -463,65 +289,10 @@ fn estimate_background_masked(
         "Image must be at least tile_size x tile_size"
     );
 
-    let tiles_x = width.div_ceil(tile_size);
-    let tiles_y = height.div_ceil(tile_size);
     let max_tile_pixels = tile_size * tile_size;
     let min_pixels = (max_tile_pixels as f32 * min_unmasked_fraction) as usize;
 
-    // Compute statistics for each tile with masking
-    let tile_stats: Vec<TileStats> = (0..tiles_y * tiles_x)
-        .into_par_iter()
-        .map_init(
-            || {
-                (
-                    Vec::with_capacity(max_tile_pixels),
-                    Vec::with_capacity(max_tile_pixels),
-                )
-            },
-            |(values_buf, deviations_buf), idx| {
-                let ty = idx / tiles_x;
-                let tx = idx % tiles_x;
-
-                let x_start = tx * tile_size;
-                let y_start = ty * tile_size;
-                let x_end = (x_start + tile_size).min(width);
-                let y_end = (y_start + tile_size).min(height);
-
-                compute_tile_stats(
-                    pixels,
-                    Some(mask),
-                    x_start,
-                    x_end,
-                    y_start,
-                    y_end,
-                    min_pixels,
-                    values_buf,
-                    deviations_buf,
-                )
-            },
-        )
-        .collect();
-
-    // Build tile grid
-    let mut grid = TileGrid {
-        stats: Buffer2::new(tiles_x, tiles_y, tile_stats),
-        centers_x: (0..tiles_x)
-            .map(|tx| {
-                let x_start = tx * tile_size;
-                let x_end = (x_start + tile_size).min(width);
-                (x_start + x_end) as f32 * 0.5
-            })
-            .collect(),
-        centers_y: (0..tiles_y)
-            .map(|ty| {
-                let y_start = ty * tile_size;
-                let y_end = (y_start + tile_size).min(height);
-                (y_start + y_end) as f32 * 0.5
-            })
-            .collect(),
-    };
-
-    // Apply median filter
+    let mut grid = TileGrid::new_with_mask(pixels, tile_size, Some(mask), min_pixels);
     grid.apply_median_filter();
 
     output.background = Buffer2::new_filled(width, height, 0.0);
