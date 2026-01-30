@@ -1,12 +1,12 @@
 **/.DS_Store
-**/.idea/
-**/target/
 **/._.DS_Store
-
 /.claude/settings.local.json
 
+**/.idea/
+**/target/
+
+
 /test_output/
-/lumos/claude_auto_impl/logs/
 /log/
 
 /patch.diff
