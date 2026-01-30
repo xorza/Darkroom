@@ -14,7 +14,7 @@ mod tests;
 mod simd;
 
 use crate::common::Buffer2;
-use crate::common::parallel::rows_per_chunk;
+use crate::common::parallel::ParRowsMutAuto;
 use crate::math::median_f32_mut;
 use rayon::prelude::*;
 
@@ -273,13 +273,10 @@ impl BackgroundConfig {
         let mut background_pixels = vec![0.0f32; width * height];
         let mut noise_pixels = vec![0.0f32; width * height];
 
-        let chunk_rows = rows_per_chunk(height);
         background_pixels
-            .par_chunks_mut(width * chunk_rows)
-            .zip(noise_pixels.par_chunks_mut(width * chunk_rows))
-            .enumerate()
-            .for_each(|(chunk_idx, (bg_chunk, noise_chunk))| {
-                let y_start = chunk_idx * chunk_rows;
+            .par_rows_mut_auto(width)
+            .zip(noise_pixels.par_rows_mut_auto(width))
+            .for_each(|((y_start, bg_chunk), (_, noise_chunk))| {
                 let rows_in_chunk = bg_chunk.len() / width;
 
                 for local_y in 0..rows_in_chunk {
@@ -372,28 +369,23 @@ fn create_object_mask(
 ) {
     // Initial mask: pixels above threshold (parallel by chunks)
     let width = pixels.width();
-    let height = pixels.height();
-    let chunk_rows = rows_per_chunk(height);
-    pixels
-        .pixels()
-        .par_chunks(width * chunk_rows)
-        .zip(
-            background
-                .background
-                .pixels()
-                .par_chunks(width * chunk_rows),
-        )
-        .zip(background.noise.pixels().par_chunks(width * chunk_rows))
-        .zip(output.pixels_mut().par_chunks_mut(width * chunk_rows))
-        .for_each(|(((px_chunk, bg_chunk), noise_chunk), out_chunk)| {
-            for (((px, bg), noise), out) in px_chunk
-                .iter()
-                .zip(bg_chunk.iter())
-                .zip(noise_chunk.iter())
-                .zip(out_chunk.iter_mut())
-            {
-                let threshold = bg + detection_sigma * noise.max(1e-6);
-                *out = *px > threshold;
+    output
+        .pixels_mut()
+        .par_rows_mut_auto(width)
+        .for_each(|(y_start, out_chunk)| {
+            let rows_in_chunk = out_chunk.len() / width;
+            for local_y in 0..rows_in_chunk {
+                let y = y_start + local_y;
+                let row_offset = local_y * width;
+                let out_row = &mut out_chunk[row_offset..row_offset + width];
+
+                for (x, out) in out_row.iter_mut().enumerate() {
+                    let px = pixels[(x, y)];
+                    let bg = background.background[(x, y)];
+                    let noise = background.noise[(x, y)];
+                    let threshold = bg + detection_sigma * noise.max(1e-6);
+                    *out = px > threshold;
+                }
             }
         });
 
@@ -539,13 +531,10 @@ fn estimate_background_masked(
     let mut background = vec![0.0f32; width * height];
     let mut noise = vec![0.0f32; width * height];
 
-    let chunk_rows = rows_per_chunk(height);
     background
-        .par_chunks_mut(width * chunk_rows)
-        .zip(noise.par_chunks_mut(width * chunk_rows))
-        .enumerate()
-        .for_each(|(chunk_idx, (bg_chunk, noise_chunk))| {
-            let y_start = chunk_idx * chunk_rows;
+        .par_rows_mut_auto(width)
+        .zip(noise.par_rows_mut_auto(width))
+        .for_each(|((y_start, bg_chunk), (_, noise_chunk))| {
             let rows_in_chunk = bg_chunk.len() / width;
 
             for local_y in 0..rows_in_chunk {
