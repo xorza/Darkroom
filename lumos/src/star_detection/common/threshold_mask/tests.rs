@@ -1,6 +1,6 @@
 //! Tests for threshold mask creation (packed BitBuffer2 version).
 
-use super::packed::{create_threshold_mask_filtered_packed, create_threshold_mask_packed};
+use super::{create_threshold_mask_filtered_packed, create_threshold_mask_packed};
 use crate::common::BitBuffer2;
 
 /// Helper to create threshold mask for tests using packed version

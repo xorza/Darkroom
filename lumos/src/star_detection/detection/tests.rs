@@ -10,17 +10,6 @@ use crate::star_detection::common::dilate_mask;
 
 use crate::testing::synthetic::background_map;
 
-/// Helper to create a BitBuffer2 from a Vec<bool> for tests.
-fn make_bit_mask(width: usize, height: usize, data: Vec<bool>) -> BitBuffer2 {
-    let mut mask = BitBuffer2::new_filled(width, height, false);
-    for (i, &v) in data.iter().enumerate() {
-        if v {
-            mask.set(i, true);
-        }
-    }
-    mask
-}
-
 /// Default deblend config for tests
 const TEST_DEBLEND_CONFIG: DeblendConfig = DeblendConfig {
     min_separation: 3,
@@ -189,7 +178,7 @@ fn test_empty_image() {
 
 #[test]
 fn test_connected_components_empty_mask() {
-    let mask = make_bit_mask(4, 4, vec![false; 16]);
+    let mask = BitBuffer2::from_slice(4, 4, &[false; 16]);
     let (labels, num_labels) = connected_components(&mask);
 
     assert_eq!(num_labels, 0);
@@ -201,7 +190,7 @@ fn test_connected_components_single_pixel() {
     // 4x4 mask with single pixel at (1, 1)
     let mut mask_data = vec![false; 16];
     mask_data[1 * 4 + 1] = true;
-    let mask = make_bit_mask(4, 4, mask_data);
+    let mask = BitBuffer2::from_slice(4, 4, &mask_data);
 
     let (labels, num_labels) = connected_components(&mask);
 
@@ -220,7 +209,7 @@ fn test_connected_components_horizontal_line() {
     mask_data[1 * 5 + 0] = true;
     mask_data[1 * 5 + 1] = true;
     mask_data[1 * 5 + 2] = true;
-    let mask = make_bit_mask(5, 3, mask_data);
+    let mask = BitBuffer2::from_slice(5, 3, &mask_data);
 
     let (labels, num_labels) = connected_components(&mask);
 
@@ -240,7 +229,7 @@ fn test_connected_components_vertical_line() {
     mask_data[1 * 3 + 1] = true;
     mask_data[2 * 3 + 1] = true;
     mask_data[3 * 3 + 1] = true;
-    let mask = make_bit_mask(3, 5, mask_data);
+    let mask = BitBuffer2::from_slice(3, 5, &mask_data);
 
     let (labels, num_labels) = connected_components(&mask);
 
@@ -261,7 +250,7 @@ fn test_connected_components_two_separate_regions() {
     let mut mask_data = vec![false; 18];
     mask_data[0] = true; // (0, 0)
     mask_data[5] = true; // (5, 0)
-    let mask = make_bit_mask(6, 3, mask_data);
+    let mask = BitBuffer2::from_slice(6, 3, &mask_data);
 
     let (labels, num_labels) = connected_components(&mask);
 
@@ -283,7 +272,7 @@ fn test_connected_components_l_shape() {
     mask_data[1 * 4 + 0] = true;
     mask_data[2 * 4 + 0] = true;
     mask_data[2 * 4 + 1] = true;
-    let mask = make_bit_mask(4, 4, mask_data);
+    let mask = BitBuffer2::from_slice(4, 4, &mask_data);
 
     let (labels, num_labels) = connected_components(&mask);
 
@@ -305,7 +294,7 @@ fn test_connected_components_diagonal_not_connected() {
     mask_data[0 * 3 + 0] = true;
     mask_data[1 * 3 + 1] = true;
     mask_data[2 * 3 + 2] = true;
-    let mask = make_bit_mask(3, 3, mask_data);
+    let mask = BitBuffer2::from_slice(3, 3, &mask_data);
 
     let (_labels, num_labels) = connected_components(&mask);
 
@@ -333,7 +322,7 @@ fn test_connected_components_u_shape_union_find() {
     mask_data[2 * 5 + 1] = true;
     mask_data[2 * 5 + 2] = true;
     mask_data[2 * 5 + 3] = true;
-    let mask = make_bit_mask(5, 3, mask_data.clone());
+    let mask = BitBuffer2::from_slice(5, 3, &mask_data);
 
     let (labels, num_labels) = connected_components(&mask);
 
@@ -366,7 +355,7 @@ fn test_connected_components_checkerboard() {
             }
         }
     }
-    let mask = make_bit_mask(4, 4, mask_data);
+    let mask = BitBuffer2::from_slice(4, 4, &mask_data);
 
     let (_labels, num_labels) = connected_components(&mask);
 
@@ -377,7 +366,7 @@ fn test_connected_components_checkerboard() {
 #[test]
 fn test_connected_components_filled_rectangle() {
     // 3x3 all true
-    let mask = make_bit_mask(3, 3, vec![true; 9]);
+    let mask = BitBuffer2::from_slice(3, 3, &[true; 9]);
     let (labels, num_labels) = connected_components(&mask);
 
     assert_eq!(num_labels, 1);
@@ -392,7 +381,7 @@ fn test_connected_components_labels_are_sequential() {
     mask_data[0] = true;
     mask_data[2] = true;
     mask_data[4] = true;
-    let mask = make_bit_mask(6, 1, mask_data);
+    let mask = BitBuffer2::from_slice(6, 1, &mask_data);
 
     let (labels, num_labels) = connected_components(&mask);
 
@@ -409,7 +398,7 @@ fn test_connected_components_labels_are_sequential() {
 
 #[test]
 fn test_dilate_mask_empty() {
-    let mask = make_bit_mask(3, 3, vec![false; 9]);
+    let mask = BitBuffer2::from_slice(3, 3, &[false; 9]);
     let mut dilated = BitBuffer2::new_filled(3, 3, false);
     dilate_mask(&mask, 1, &mut dilated);
     assert!(dilated.iter().all(|x| !x));
@@ -420,7 +409,7 @@ fn test_dilate_mask_single_pixel_radius_0() {
     // Radius 0 should not expand
     let mut mask_data = vec![false; 9];
     mask_data[4] = true; // center
-    let mask = make_bit_mask(3, 3, mask_data);
+    let mask = BitBuffer2::from_slice(3, 3, &mask_data);
     let mut dilated = BitBuffer2::new_filled(3, 3, false);
     dilate_mask(&mask, 0, &mut dilated);
 
@@ -433,7 +422,7 @@ fn test_dilate_mask_single_pixel_radius_1() {
     // 3x3 mask with center pixel, radius 1 should create 3x3 square
     let mut mask_data = vec![false; 25]; // 5x5
     mask_data[2 * 5 + 2] = true; // center at (2, 2)
-    let mask = make_bit_mask(5, 5, mask_data);
+    let mask = BitBuffer2::from_slice(5, 5, &mask_data);
     let mut dilated = BitBuffer2::new_filled(5, 5, false);
     dilate_mask(&mask, 1, &mut dilated);
 
@@ -460,7 +449,7 @@ fn test_dilate_mask_single_pixel_radius_2() {
     // 7x7 mask with center pixel, radius 2 should create 5x5 square
     let mut mask_data = vec![false; 49];
     mask_data[3 * 7 + 3] = true; // center at (3, 3)
-    let mask = make_bit_mask(7, 7, mask_data);
+    let mask = BitBuffer2::from_slice(7, 7, &mask_data);
     let mut dilated = BitBuffer2::new_filled(7, 7, false);
     dilate_mask(&mask, 2, &mut dilated);
 
@@ -485,7 +474,7 @@ fn test_dilate_mask_corner_pixel() {
     // Pixel at corner (0,0), dilation should be clipped to image bounds
     let mut mask_data = vec![false; 16];
     mask_data[0] = true;
-    let mask = make_bit_mask(4, 4, mask_data);
+    let mask = BitBuffer2::from_slice(4, 4, &mask_data);
     let mut dilated = BitBuffer2::new_filled(4, 4, false);
     dilate_mask(&mask, 1, &mut dilated);
 
@@ -504,7 +493,7 @@ fn test_dilate_mask_edge_pixel() {
     // Pixel at edge (0, 2) in 5x5
     let mut mask_data = vec![false; 25];
     mask_data[2 * 5 + 0] = true;
-    let mask = make_bit_mask(5, 5, mask_data);
+    let mask = BitBuffer2::from_slice(5, 5, &mask_data);
     let mut dilated = BitBuffer2::new_filled(5, 5, false);
     dilate_mask(&mask, 1, &mut dilated);
 
@@ -524,7 +513,7 @@ fn test_dilate_mask_merges_nearby_pixels() {
     let mut mask_data = vec![false; 7];
     mask_data[0] = true;
     mask_data[3] = true;
-    let mask = make_bit_mask(7, 1, mask_data);
+    let mask = BitBuffer2::from_slice(7, 1, &mask_data);
     let mut dilated = BitBuffer2::new_filled(7, 1, false);
     dilate_mask(&mask, 2, &mut dilated);
 
@@ -547,7 +536,7 @@ fn test_dilate_mask_large_radius() {
     // 11x11 image with center pixel, radius 5 should fill most of image
     let mut mask_data = vec![false; 121];
     mask_data[5 * 11 + 5] = true; // center
-    let mask = make_bit_mask(11, 11, mask_data);
+    let mask = BitBuffer2::from_slice(11, 11, &mask_data);
     let mut dilated = BitBuffer2::new_filled(11, 11, false);
     dilate_mask(&mask, 5, &mut dilated);
 
@@ -560,7 +549,7 @@ fn test_dilate_mask_radius_larger_than_image() {
     // Radius larger than image dimensions
     let mut mask_data = vec![false; 9];
     mask_data[4] = true; // center of 3x3
-    let mask = make_bit_mask(3, 3, mask_data);
+    let mask = BitBuffer2::from_slice(3, 3, &mask_data);
     let mut dilated = BitBuffer2::new_filled(3, 3, false);
     dilate_mask(&mask, 100, &mut dilated);
 
@@ -576,7 +565,7 @@ fn test_dilate_mask_all_corners() {
     mask_data[0 * 5 + 4] = true; // top-right
     mask_data[4 * 5 + 0] = true; // bottom-left
     mask_data[4 * 5 + 4] = true; // bottom-right
-    let mask = make_bit_mask(5, 5, mask_data);
+    let mask = BitBuffer2::from_slice(5, 5, &mask_data);
     let mut dilated = BitBuffer2::new_filled(5, 5, false);
     dilate_mask(&mask, 1, &mut dilated);
 
@@ -598,7 +587,7 @@ fn test_dilate_mask_full_coverage_radius_2() {
     let mut mask_data = vec![false; 9];
     mask_data[0] = true;
     mask_data[4] = true;
-    let mask = make_bit_mask(9, 1, mask_data);
+    let mask = BitBuffer2::from_slice(9, 1, &mask_data);
     let mut dilated = BitBuffer2::new_filled(9, 1, false);
     dilate_mask(&mask, 2, &mut dilated);
 
@@ -617,7 +606,7 @@ fn test_dilate_mask_non_square_image() {
     // 7x3 image with pixel at (3, 1)
     let mut mask_data = vec![false; 21];
     mask_data[1 * 7 + 3] = true;
-    let mask = make_bit_mask(7, 3, mask_data);
+    let mask = BitBuffer2::from_slice(7, 3, &mask_data);
     let mut dilated = BitBuffer2::new_filled(7, 3, false);
     dilate_mask(&mask, 1, &mut dilated);
 
@@ -644,7 +633,7 @@ fn test_dilate_mask_preserves_original_pixels() {
     mask_data[0] = true;
     mask_data[12] = true; // center
     mask_data[24] = true;
-    let mask = make_bit_mask(5, 5, mask_data);
+    let mask = BitBuffer2::from_slice(5, 5, &mask_data);
     let mut dilated = BitBuffer2::new_filled(5, 5, false);
     dilate_mask(&mask, 1, &mut dilated);
 
@@ -1100,7 +1089,7 @@ fn test_connected_components_and_extract_integration() {
     // Peak at (7, 7)
     pixels[7 * 10 + 7] = 0.8;
 
-    let (labels, num_labels) = connected_components(&make_bit_mask(10, 10, mask));
+    let (labels, num_labels) = connected_components(&BitBuffer2::from_slice(10, 10, &mask));
     let pixels = Buffer2::new(10, 10, pixels);
     let candidates = extract_candidates(
         &pixels,
@@ -1150,7 +1139,7 @@ fn test_connected_components_complex_merge() {
     mask[7] = true;
     mask[8] = true;
 
-    let (labels, num_labels) = connected_components(&make_bit_mask(3, 3, mask));
+    let (labels, num_labels) = connected_components(&BitBuffer2::from_slice(3, 3, &mask));
 
     // All should be one component connected through the right column
     assert_eq!(num_labels, 1);

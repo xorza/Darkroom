@@ -1,6 +1,6 @@
 //! Benchmarks for threshold mask creation.
 
-use super::*;
+use super::create_threshold_mask_packed;
 use crate::common::BitBuffer2;
 use ::bench::quick_bench;
 use std::hint::black_box;
@@ -33,7 +33,7 @@ fn bench_threshold_mask_4k(b: ::bench::Bencher) {
     let mut packed_mask = BitBuffer2::new_filled(4096, 4096, false);
 
     b.bench_labeled("packed", || {
-        packed::create_threshold_mask_packed(
+        create_threshold_mask_packed(
             black_box(&pixels),
             black_box(&bg),
             black_box(&noise),
