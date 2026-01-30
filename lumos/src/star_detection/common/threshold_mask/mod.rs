@@ -23,21 +23,30 @@ use crate::common::cpu_features;
 /// Sets `mask[i] = true` where `pixels[i] > background[i] + sigma * noise[i]`.
 ///
 /// Uses SIMD acceleration when available (SSE4.1 on x86_64, NEON on aarch64).
-#[cfg(target_arch = "x86_64")]
+
 pub fn create_threshold_mask(
     pixels: &Buffer2<f32>,
     background: &BackgroundMap,
     sigma_threshold: f32,
     mask: &mut Buffer2<bool>,
 ) {
-    if cpu_features::has_sse4_1() {
-        // SAFETY: We've checked that SSE4.1 is available.
-        unsafe {
-            sse::create_threshold_mask_sse_impl::<true>(pixels, background, sigma_threshold, mask);
-        }
-    } else {
-        scalar::create_threshold_mask_impl::<true>(pixels, background, sigma_threshold, mask);
+    #[cfg(target_arch = "aarch64")]
+    unsafe {
+        // SAFETY: NEON is always available on aarch64.
+        neon::create_threshold_mask_neon_impl::<true>(pixels, background, sigma_threshold, mask);
+        return;
     }
+
+    #[cfg(target_arch = "x86_64")]
+    unsafe {
+        if cpu_features::has_sse4_1() {
+            // SAFETY: We've checked that SSE4.1 is available.
+            sse::create_threshold_mask_sse_impl::<true>(pixels, background, sigma_threshold, mask);
+            return;
+        }
+    }
+
+    scalar::create_threshold_mask_impl::<true>(pixels, background, sigma_threshold, mask);
 }
 
 /// Create binary mask of pixels above threshold (aarch64).
@@ -48,10 +57,6 @@ pub fn create_threshold_mask(
     sigma_threshold: f32,
     mask: &mut Buffer2<bool>,
 ) {
-    // SAFETY: NEON is always available on aarch64.
-    unsafe {
-        neon::create_threshold_mask_neon_impl::<true>(pixels, background, sigma_threshold, mask);
-    }
 }
 
 /// Create binary mask of pixels above threshold (scalar fallback).
