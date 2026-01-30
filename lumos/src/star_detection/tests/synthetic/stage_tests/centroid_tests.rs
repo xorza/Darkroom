@@ -4,7 +4,7 @@
 
 use crate::common::Buffer2;
 use crate::star_detection::StarDetectionConfig;
-use crate::star_detection::background::estimate_background;
+use crate::star_detection::background::BackgroundConfig;
 use crate::star_detection::centroid::compute_centroid;
 use crate::star_detection::detection::StarCandidate;
 use crate::star_detection::tests::common::output::{
@@ -70,7 +70,11 @@ fn test_centroid_accuracy() {
 
     // Estimate background
     let pixels_buf = Buffer2::new(width, height, pixels.clone());
-    let background = estimate_background(&pixels_buf, TILE_SIZE);
+    let background = BackgroundConfig {
+        tile_size: TILE_SIZE,
+        ..Default::default()
+    }
+    .estimate(&pixels_buf);
 
     // Test centroid computation for each star
     let mut errors = Vec::new();
@@ -217,7 +221,11 @@ fn test_centroid_snr() {
 
     // Estimate background
     let pixels_buf = Buffer2::new(width, height, pixels.clone());
-    let background = estimate_background(&pixels_buf, TILE_SIZE);
+    let background = BackgroundConfig {
+        tile_size: TILE_SIZE,
+        ..Default::default()
+    }
+    .estimate(&pixels_buf);
 
     // Create overlay
     let mut img = gray_to_rgb_image_stretched(&pixels, width, height);

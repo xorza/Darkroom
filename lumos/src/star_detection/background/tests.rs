@@ -9,7 +9,11 @@ fn test_uniform_background() {
     let height = 128;
     let pixels = Buffer2::new(width, height, vec![0.5; width * height]);
 
-    let bg = estimate_background(&pixels, 32);
+    let bg = BackgroundConfig {
+        tile_size: 32,
+        ..Default::default()
+    }
+    .estimate(&pixels);
 
     for y in 0..height {
         for x in 0..width {
@@ -37,7 +41,11 @@ fn test_gradient_background() {
             .collect(),
     );
 
-    let bg = estimate_background(&pixels, 32);
+    let bg = BackgroundConfig {
+        tile_size: 32,
+        ..Default::default()
+    }
+    .estimate(&pixels);
 
     let corner_00 = bg.get_background(0, 0);
     let corner_end = bg.get_background(127, 127);
@@ -56,7 +64,11 @@ fn test_background_with_stars() {
     data[96 * width + 96] = 0.95;
 
     let pixels = Buffer2::new(width, height, data);
-    let bg = estimate_background(&pixels, 32);
+    let bg = BackgroundConfig {
+        tile_size: 32,
+        ..Default::default()
+    }
+    .estimate(&pixels);
 
     // Median is robust to outliers
     let center_bg = bg.get_background(64, 64);
@@ -73,7 +85,11 @@ fn test_noise_estimation() {
     let height = 128;
     let pixels = Buffer2::new(width, height, vec![0.5; width * height]);
 
-    let bg = estimate_background(&pixels, 32);
+    let bg = BackgroundConfig {
+        tile_size: 32,
+        ..Default::default()
+    }
+    .estimate(&pixels);
 
     let noise = bg.get_noise(64, 64);
     assert!(noise < 0.01, "Noise = {}, expected near zero", noise);
@@ -86,7 +102,11 @@ fn test_subtract_method() {
     let data = vec![0.3; width * height];
     let pixels = Buffer2::new(width, height, data.clone());
 
-    let bg = estimate_background(&pixels, 32);
+    let bg = BackgroundConfig {
+        tile_size: 32,
+        ..Default::default()
+    }
+    .estimate(&pixels);
 
     let subtracted = bg.subtract(&data, 64, 64);
     assert!(
@@ -112,7 +132,11 @@ fn test_non_square_image() {
     let height = 64;
     let pixels = Buffer2::new(width, height, vec![0.4; width * height]);
 
-    let bg = estimate_background(&pixels, 32);
+    let bg = BackgroundConfig {
+        tile_size: 32,
+        ..Default::default()
+    }
+    .estimate(&pixels);
 
     assert_eq!(bg.width(), width);
     assert_eq!(bg.height(), height);
@@ -132,7 +156,11 @@ fn test_sigma_clipping_rejects_outliers() {
     }
 
     let pixels = Buffer2::new(width, height, data);
-    let bg = estimate_background(&pixels, 32);
+    let bg = BackgroundConfig {
+        tile_size: 32,
+        ..Default::default()
+    }
+    .estimate(&pixels);
 
     let bg_val = bg.get_background(32, 32);
     assert!(
@@ -156,7 +184,11 @@ fn test_interpolation_produces_valid_values() {
             .collect(),
     );
 
-    let bg = estimate_background(&pixels, 16);
+    let bg = BackgroundConfig {
+        tile_size: 16,
+        ..Default::default()
+    }
+    .estimate(&pixels);
 
     // Sample every 4th pixel instead of every pixel
     for y in (0..height).step_by(4) {
@@ -180,7 +212,11 @@ fn test_large_image() {
     let height = 256;
     let pixels = Buffer2::new(width, height, vec![0.33; width * height]);
 
-    let bg = estimate_background(&pixels, 64);
+    let bg = BackgroundConfig {
+        tile_size: 64,
+        ..Default::default()
+    }
+    .estimate(&pixels);
 
     assert!((bg.get_background(0, 0) - 0.33).abs() < 0.01);
     assert!((bg.get_background(127, 127) - 0.33).abs() < 0.01);
@@ -196,7 +232,11 @@ fn test_different_tile_sizes() {
     // Test representative tile sizes (min, mid, max)
     for tile_size in [16, 64, 128] {
         let pixels = Buffer2::new(width, height, data.clone());
-        let bg = estimate_background(&pixels, tile_size);
+        let bg = BackgroundConfig {
+            tile_size,
+            ..Default::default()
+        }
+        .estimate(&pixels);
         assert!(
             (bg.get_background(64, 64) - 0.5).abs() < 0.01,
             "Failed for tile_size={}",
@@ -209,21 +249,33 @@ fn test_different_tile_sizes() {
 #[should_panic(expected = "Tile size must be between 16 and 256")]
 fn test_tile_size_too_small() {
     let pixels = Buffer2::new(64, 64, vec![0.5; 64 * 64]);
-    estimate_background(&pixels, 8);
+    BackgroundConfig {
+        tile_size: 8,
+        ..Default::default()
+    }
+    .estimate(&pixels);
 }
 
 #[test]
 #[should_panic(expected = "Tile size must be between 16 and 256")]
 fn test_tile_size_too_large() {
     let pixels = Buffer2::new(64, 64, vec![0.5; 64 * 64]);
-    estimate_background(&pixels, 512);
+    BackgroundConfig {
+        tile_size: 512,
+        ..Default::default()
+    }
+    .estimate(&pixels);
 }
 
 #[test]
 #[should_panic(expected = "Image must be at least tile_size x tile_size")]
 fn test_image_too_small() {
     let pixels = Buffer2::new(32, 32, vec![0.5; 32 * 32]);
-    estimate_background(&pixels, 64);
+    BackgroundConfig {
+        tile_size: 64,
+        ..Default::default()
+    }
+    .estimate(&pixels);
 }
 
 // =============================================================================
@@ -284,7 +336,11 @@ fn test_iterative_background_with_bright_stars() {
     let pixels = Buffer2::new(width, height, data);
 
     // Non-iterative estimate
-    let bg_simple = estimate_background(&pixels, 32);
+    let bg_simple = BackgroundConfig {
+        tile_size: 32,
+        ..Default::default()
+    }
+    .estimate(&pixels);
 
     // Iterative estimate (should be better at excluding stars)
     let config = BackgroundConfig {
@@ -696,7 +752,11 @@ fn test_background_regression() {
     let pixels = astro_image.to_grayscale_buffer();
     let width = pixels.width();
     let height = pixels.height();
-    let bg = estimate_background(&pixels, 64);
+    let bg = BackgroundConfig {
+        tile_size: 64,
+        ..Default::default()
+    }
+    .estimate(&pixels);
 
     // Load reference images
     let ref_bg_path = test_resources.join("background_map.tiff");

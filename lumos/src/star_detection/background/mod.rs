@@ -152,25 +152,6 @@ fn median_of_slice(values: &mut [f32]) -> f32 {
     }
 }
 
-/// Estimate background using tiled sigma-clipped statistics.
-///
-/// # Algorithm
-///
-/// 1. Divide image into tiles of size `tile_size × tile_size`
-/// 2. For each tile, compute sigma-clipped median and standard deviation
-/// 3. Bilinearly interpolate between tile centers to get per-pixel values
-///
-/// # Arguments
-/// * `pixels` - Grayscale image buffer
-/// * `tile_size` - Size of tiles (typically 32-128 pixels)
-pub fn estimate_background(pixels: &Buffer2<f32>, tile_size: usize) -> BackgroundMap {
-    BackgroundConfig {
-        tile_size,
-        ..Default::default()
-    }
-    .estimate(pixels)
-}
-
 /// Compute sigma-clipped statistics for a single tile using provided scratch buffers.
 #[allow(clippy::too_many_arguments)]
 fn compute_tile_stats(

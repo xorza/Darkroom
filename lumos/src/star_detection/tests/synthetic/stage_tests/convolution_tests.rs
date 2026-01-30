@@ -3,7 +3,7 @@
 //! Tests the Gaussian filtering for star enhancement.
 
 use crate::star_detection::Buffer2;
-use crate::star_detection::background::estimate_background;
+use crate::star_detection::background::BackgroundConfig;
 use crate::star_detection::constants::fwhm_to_sigma;
 use crate::star_detection::convolution::gaussian_convolve;
 use crate::star_detection::tests::common::output::save_grayscale;
@@ -55,7 +55,11 @@ fn test_gaussian_filter_sparse() {
     );
 
     // Estimate and subtract background
-    let background = estimate_background(&pixels, TILE_SIZE);
+    let background = BackgroundConfig {
+        tile_size: TILE_SIZE,
+        ..Default::default()
+    }
+    .estimate(&pixels);
 
     let bg_subtracted: Vec<f32> = pixels
         .iter()
@@ -147,7 +151,11 @@ fn test_gaussian_filter_fwhm_range() {
     );
 
     // Background subtraction
-    let background = estimate_background(&pixels, TILE_SIZE);
+    let background = BackgroundConfig {
+        tile_size: TILE_SIZE,
+        ..Default::default()
+    }
+    .estimate(&pixels);
 
     let bg_subtracted: Vec<f32> = pixels
         .iter()
@@ -211,7 +219,11 @@ fn test_gaussian_filter_noise() {
     );
 
     // Background subtraction
-    let background = estimate_background(&pixels, TILE_SIZE);
+    let background = BackgroundConfig {
+        tile_size: TILE_SIZE,
+        ..Default::default()
+    }
+    .estimate(&pixels);
 
     let bg_subtracted: Vec<f32> = pixels
         .iter()

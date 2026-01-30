@@ -2,7 +2,7 @@
 
 use super::*;
 use crate::common::Buffer2;
-use crate::star_detection::background::{BackgroundMap, estimate_background};
+use crate::star_detection::background::{BackgroundConfig, BackgroundMap};
 use crate::star_detection::constants::FWHM_TO_SIGMA;
 use crate::star_detection::detection::{StarCandidate, detect_stars};
 
@@ -43,7 +43,11 @@ fn test_centroid_accuracy() {
     let true_y = 64.7f32;
     let pixels = make_gaussian_star(width, height, true_x, true_y, 2.5, 0.8);
 
-    let bg = estimate_background(&pixels, 32);
+    let bg = BackgroundConfig {
+        tile_size: 32,
+        ..Default::default()
+    }
+    .estimate(&pixels);
     let config = StarDetectionConfig::default();
     let candidates = detect_stars(&pixels, &bg, &config);
 
@@ -81,7 +85,11 @@ fn test_fwhm_estimation() {
     let expected_fwhm = FWHM_TO_SIGMA * sigma;
     let pixels = make_gaussian_star(width, height, 64.0, 64.0, sigma, 0.8);
 
-    let bg = estimate_background(&pixels, 32);
+    let bg = BackgroundConfig {
+        tile_size: 32,
+        ..Default::default()
+    }
+    .estimate(&pixels);
     // Use higher max_area because dilation (radius=2) expands the star region
     let config = StarDetectionConfig {
         max_area: 1000,
@@ -112,7 +120,11 @@ fn test_circular_star_eccentricity() {
     let height = 64;
     let pixels = make_gaussian_star(width, height, 32.0, 32.0, 2.5, 0.8);
 
-    let bg = estimate_background(&pixels, 32);
+    let bg = BackgroundConfig {
+        tile_size: 32,
+        ..Default::default()
+    }
+    .estimate(&pixels);
     let config = StarDetectionConfig::default();
     let candidates = detect_stars(&pixels, &bg, &config);
 
@@ -132,7 +144,11 @@ fn test_snr_positive() {
     let height = 64;
     let pixels = make_gaussian_star(width, height, 32.0, 32.0, 2.5, 0.8);
 
-    let bg = estimate_background(&pixels, 32);
+    let bg = BackgroundConfig {
+        tile_size: 32,
+        ..Default::default()
+    }
+    .estimate(&pixels);
     let config = StarDetectionConfig::default();
     let candidates = detect_stars(&pixels, &bg, &config);
 
@@ -1244,7 +1260,11 @@ fn test_compute_centroid_multiple_stars_independent() {
     }
 
     let pixels = Buffer2::new(width, height, pixels);
-    let bg = estimate_background(&pixels, 32);
+    let bg = BackgroundConfig {
+        tile_size: 32,
+        ..Default::default()
+    }
+    .estimate(&pixels);
     let config = StarDetectionConfig {
         edge_margin: 10,
         ..StarDetectionConfig::default()
@@ -1285,7 +1305,11 @@ fn test_circular_star_roundness() {
     let height = 64;
     let pixels = make_gaussian_star(width, height, 32.0, 32.0, 2.5, 0.8);
 
-    let bg = estimate_background(&pixels, 32);
+    let bg = BackgroundConfig {
+        tile_size: 32,
+        ..Default::default()
+    }
+    .estimate(&pixels);
     let config = StarDetectionConfig::default();
     let candidates = detect_stars(&pixels, &bg, &config);
 
@@ -1333,7 +1357,11 @@ fn test_elongated_x_star_roundness() {
     }
 
     let pixels = Buffer2::new(width, height, pixels);
-    let bg = estimate_background(&pixels, 32);
+    let bg = BackgroundConfig {
+        tile_size: 32,
+        ..Default::default()
+    }
+    .estimate(&pixels);
     let config = StarDetectionConfig::default();
     let candidates = detect_stars(&pixels, &bg, &config);
 
@@ -1381,7 +1409,11 @@ fn test_asymmetric_star_roundness2() {
     }
 
     let pixels = Buffer2::new(width, height, pixels);
-    let bg = estimate_background(&pixels, 32);
+    let bg = BackgroundConfig {
+        tile_size: 32,
+        ..Default::default()
+    }
+    .estimate(&pixels);
     let config = StarDetectionConfig::default();
     let candidates = detect_stars(&pixels, &bg, &config);
 
@@ -1405,7 +1437,11 @@ fn test_laplacian_snr_computed_for_star() {
     let width = 64;
     let height = 64;
     let pixels = make_gaussian_star(width, height, 32.0, 32.0, 2.5, 0.8);
-    let bg = estimate_background(&pixels, 32);
+    let bg = BackgroundConfig {
+        tile_size: 32,
+        ..Default::default()
+    }
+    .estimate(&pixels);
     let config = StarDetectionConfig::default();
     let candidates = detect_stars(&pixels, &bg, &config);
 
