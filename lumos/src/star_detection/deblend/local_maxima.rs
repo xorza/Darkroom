@@ -5,10 +5,19 @@
 //! 2. Filtering by prominence (peak must be significant fraction of primary)
 //! 3. Filtering by separation (peaks must be sufficiently far apart)
 //! 4. Assigning pixels to nearest peak using Voronoi partitioning
+//!
+//! Uses `ArrayVec` for small fixed-capacity collections to avoid heap allocations
+//! in the common case (most components have ≤8 peaks).
+
+use arrayvec::ArrayVec;
 
 use super::DeblendConfig;
 use crate::common::Buffer2;
 use crate::star_detection::detection::LabelMap;
+
+/// Maximum number of peaks/candidates per component.
+/// Components with more peaks than this will have excess peaks ignored.
+const MAX_PEAKS: usize = 8;
 
 /// A pixel with its coordinates and value.
 #[derive(Debug, Clone, Copy)]
@@ -111,13 +120,14 @@ pub struct DeblendedCandidate {
 ///
 /// A pixel is a local maximum if it's greater than all 8 neighbors.
 /// Only returns peaks that are sufficiently separated and prominent.
+/// Returns at most `MAX_PEAKS` peaks to avoid heap allocation.
 pub fn find_local_maxima(
     data: &ComponentData,
     pixels: &Buffer2<f32>,
     labels: &LabelMap,
     config: &DeblendConfig,
-) -> Vec<Pixel> {
-    let mut peaks: Vec<Pixel> = Vec::new();
+) -> ArrayVec<Pixel, MAX_PEAKS> {
+    let mut peaks: ArrayVec<Pixel, MAX_PEAKS> = ArrayVec::new();
     let width = pixels.width();
     let height = pixels.height();
 
@@ -167,7 +177,10 @@ pub fn find_local_maxima(
             });
 
             if well_separated {
-                peaks.push(pixel);
+                // Only add if we have capacity
+                if !peaks.is_full() {
+                    peaks.push(pixel);
+                }
             } else {
                 // Keep the brighter peak
                 for peak in &mut peaks {
@@ -192,32 +205,54 @@ pub fn find_local_maxima(
     peaks
 }
 
+/// Per-peak bounding box and area data.
+#[derive(Debug, Clone, Copy)]
+struct PeakData {
+    x_min: usize,
+    x_max: usize,
+    y_min: usize,
+    y_max: usize,
+    area: usize,
+}
+
+impl Default for PeakData {
+    fn default() -> Self {
+        Self {
+            x_min: usize::MAX,
+            x_max: 0,
+            y_min: usize::MAX,
+            y_max: 0,
+            area: 0,
+        }
+    }
+}
+
 /// Deblend a component into multiple candidates based on peak positions.
 ///
 /// Each pixel is assigned to the nearest peak (Voronoi partitioning),
-/// creating separate candidates.
+/// creating separate candidates. Uses fixed-size arrays to avoid heap allocation.
 pub fn deblend_by_nearest_peak(
     data: &ComponentData,
     pixels: &Buffer2<f32>,
     labels: &LabelMap,
     peaks: &[Pixel],
-) -> Vec<DeblendedCandidate> {
+) -> ArrayVec<DeblendedCandidate, MAX_PEAKS> {
+    let mut result: ArrayVec<DeblendedCandidate, MAX_PEAKS> = ArrayVec::new();
+
     if peaks.is_empty() {
-        return Vec::new();
+        return result;
     }
 
-    // Initialize per-peak data
-    let mut peak_data: Vec<(usize, usize, usize, usize, usize)> = peaks
-        .iter()
-        .map(|_| (usize::MAX, 0, usize::MAX, 0, 0)) // (x_min, x_max, y_min, y_max, area)
-        .collect();
+    // Initialize per-peak data using fixed-size array
+    let mut peak_data: [PeakData; MAX_PEAKS] = [PeakData::default(); MAX_PEAKS];
+    let num_peaks = peaks.len().min(MAX_PEAKS);
 
     // Assign each pixel to nearest peak
     for pixel in data.iter_pixels(pixels, labels) {
         let mut min_dist_sq = usize::MAX;
         let mut nearest_peak = 0;
 
-        for (i, peak) in peaks.iter().enumerate() {
+        for (i, peak) in peaks.iter().take(num_peaks).enumerate() {
             let dx = (pixel.x as i32 - peak.x as i32).unsigned_abs() as usize;
             let dy = (pixel.y as i32 - peak.y as i32).unsigned_abs() as usize;
             let dist_sq = dx * dx + dy * dy;
@@ -229,31 +264,30 @@ pub fn deblend_by_nearest_peak(
         }
 
         let pd = &mut peak_data[nearest_peak];
-        pd.0 = pd.0.min(pixel.x);
-        pd.1 = pd.1.max(pixel.x);
-        pd.2 = pd.2.min(pixel.y);
-        pd.3 = pd.3.max(pixel.y);
-        pd.4 += 1;
+        pd.x_min = pd.x_min.min(pixel.x);
+        pd.x_max = pd.x_max.max(pixel.x);
+        pd.y_min = pd.y_min.min(pixel.y);
+        pd.y_max = pd.y_max.max(pixel.y);
+        pd.area += 1;
     }
 
     // Build candidates
-    peaks
-        .iter()
-        .zip(peak_data.iter())
-        .filter(|(_, pd)| pd.4 > 0) // Only include peaks with assigned pixels
-        .map(
-            |(peak, &(x_min, x_max, y_min, y_max, area))| DeblendedCandidate {
-                x_min,
-                x_max,
-                y_min,
-                y_max,
+    for (peak, pd) in peaks.iter().take(num_peaks).zip(peak_data.iter()) {
+        if pd.area > 0 {
+            result.push(DeblendedCandidate {
+                x_min: pd.x_min,
+                x_max: pd.x_max,
+                y_min: pd.y_min,
+                y_max: pd.y_max,
                 peak_x: peak.x,
                 peak_y: peak.y,
                 peak_value: peak.value,
-                area,
-            },
-        )
-        .collect()
+                area: pd.area,
+            });
+        }
+    }
+
+    result
 }
 
 /// Deblend a component using local maxima detection.
@@ -263,12 +297,13 @@ pub fn deblend_by_nearest_peak(
 ///
 /// Returns a single candidate if no deblending is needed, or multiple
 /// candidates if the component contains multiple peaks.
+/// Uses `ArrayVec` to avoid heap allocation.
 pub fn deblend_local_maxima(
     data: &ComponentData,
     pixels: &Buffer2<f32>,
     labels: &LabelMap,
     config: &DeblendConfig,
-) -> Vec<DeblendedCandidate> {
+) -> ArrayVec<DeblendedCandidate, MAX_PEAKS> {
     let peaks = find_local_maxima(data, pixels, labels, config);
 
     if peaks.len() <= 1 {
@@ -280,7 +315,8 @@ pub fn deblend_local_maxima(
             peaks[0]
         };
 
-        vec![DeblendedCandidate {
+        let mut result = ArrayVec::new();
+        result.push(DeblendedCandidate {
             x_min: data.x_min,
             x_max: data.x_max,
             y_min: data.y_min,
@@ -289,7 +325,8 @@ pub fn deblend_local_maxima(
             peak_y: peak.y,
             peak_value: peak.value,
             area: data.area,
-        }]
+        });
+        result
     } else {
         // Multiple peaks - deblend by assigning pixels to nearest peak
         deblend_by_nearest_peak(data, pixels, labels, &peaks)

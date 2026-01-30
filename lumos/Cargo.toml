@@ -32,6 +32,7 @@ nalgebra = { workspace = true }
 wgpu = { workspace = true }
 ureq = { workspace = true }
 bumpalo = { workspace = true }
+arrayvec = { workspace = true }
 
 [dev-dependencies]
 bench = { workspace = true }
