@@ -3,8 +3,9 @@
 
 use super::gaussian_fit::{GaussianFitConfig, fit_gaussian_2d};
 use super::moffat_fit::{MoffatFitConfig, fit_moffat_2d};
-use super::{compute_centroid, compute_metrics, compute_stamp_radius, refine_centroid};
+use super::{compute_centroid, compute_metrics, refine_centroid};
 use crate::star_detection::StarDetectionConfig;
+use crate::star_detection::common::compute_stamp_radius;
 use crate::star_detection::detection::StarCandidate;
 use crate::testing::synthetic::{background_map, stamps};
 use criterion::{BenchmarkId, Criterion, Throughput};

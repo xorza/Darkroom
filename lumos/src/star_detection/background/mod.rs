@@ -13,7 +13,7 @@ mod tests;
 
 mod simd;
 
-use super::constants::{self, ROWS_PER_CHUNK};
+use super::common::ROWS_PER_CHUNK;
 use crate::common::Buffer2;
 use crate::math::median_f32_mut;
 use rayon::prelude::*;
@@ -396,7 +396,7 @@ fn create_object_mask(
 
     // Dilate mask to cover object wings
     if dilation_radius > 0 {
-        constants::dilate_mask(output, dilation_radius, scratch);
+        super::common::dilate_mask(output, dilation_radius, scratch);
         output.copy_from(scratch);
     }
 }
@@ -447,7 +447,7 @@ fn compute_tile_stats(
     }
 
     // Sigma-clipped statistics (3 iterations, 3-sigma clip)
-    let (median, sigma) = constants::sigma_clipped_median_mad(values, deviations, 3.0, 3);
+    let (median, sigma) = super::common::sigma_clipped_median_mad(values, deviations, 3.0, 3);
     TileStats { median, sigma }
 }
 

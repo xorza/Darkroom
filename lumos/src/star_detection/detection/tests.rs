@@ -6,7 +6,7 @@
 use super::*;
 use crate::common::Buffer2;
 use crate::star_detection::background::{BackgroundConfig, BackgroundMap};
-use crate::star_detection::constants::dilate_mask;
+use crate::star_detection::common::dilate_mask;
 use crate::testing::synthetic::background_map;
 
 /// Helper to construct BackgroundMap from slices (for tests with specific per-pixel values)

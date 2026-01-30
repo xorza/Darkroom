@@ -14,7 +14,7 @@ mod tests;
 use crate::common::Buffer2;
 use rayon::prelude::*;
 
-use super::constants::ROWS_PER_CHUNK;
+use super::common::ROWS_PER_CHUNK;
 
 /// Apply 3x3 median filter to remove Bayer pattern artifacts.
 ///

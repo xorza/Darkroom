@@ -11,7 +11,7 @@ pub mod simd;
 
 use super::StarDetectionConfig;
 use super::background::BackgroundMap;
-use super::constants::dilate_mask;
+use super::common::dilate_mask;
 use super::deblend::{
     ComponentData, DeblendConfig, MultiThresholdDeblendConfig, Pixel,
     deblend_component as multi_threshold_deblend, deblend_local_maxima,

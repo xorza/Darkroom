@@ -7,7 +7,7 @@ use super::{
 };
 use crate::common::Buffer2;
 use crate::star_detection::StarDetectionConfig;
-use crate::star_detection::constants::dilate_mask;
+use crate::star_detection::common::dilate_mask;
 use crate::star_detection::deblend::DeblendConfig;
 use crate::testing::synthetic::{background_map, stamps};
 use criterion::{BenchmarkId, Criterion, Throughput};

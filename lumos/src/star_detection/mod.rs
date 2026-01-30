@@ -21,8 +21,8 @@
 
 pub(crate) mod background;
 mod centroid;
+pub(crate) mod common;
 mod config;
-pub(crate) mod constants;
 mod convolution;
 mod cosmic_ray;
 mod deblend;

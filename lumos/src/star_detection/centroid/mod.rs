@@ -23,7 +23,7 @@ pub use moffat_fit::{MoffatFitConfig, MoffatFitResult, fit_moffat_2d};
 pub use moffat_fit::{alpha_beta_to_fwhm, fwhm_beta_to_alpha};
 
 use super::background::BackgroundMap;
-use super::constants::{self, CENTROID_CONVERGENCE_THRESHOLD, MAX_CENTROID_ITERATIONS};
+use super::common::{CENTROID_CONVERGENCE_THRESHOLD, MAX_CENTROID_ITERATIONS};
 use super::cosmic_ray::compute_laplacian_snr;
 use super::detection::StarCandidate;
 use super::{CentroidMethod, Star, StarDetectionConfig};
@@ -46,15 +46,6 @@ pub enum LocalBackgroundMethod {
     /// Inner radius is based on stamp_radius, outer radius is 1.5× that.
     /// More accurate in regions with variable nebulosity.
     LocalAnnulus,
-}
-
-/// Compute adaptive stamp radius based on expected FWHM.
-///
-/// The stamp should be large enough to capture most of the PSF flux (~3.5× FWHM)
-/// while not being so large that it includes too much noise or neighboring stars.
-#[inline]
-pub(crate) fn compute_stamp_radius(expected_fwhm: f32) -> usize {
-    constants::compute_stamp_radius(expected_fwhm)
 }
 
 /// Check if position is within valid bounds for stamp extraction.
@@ -136,7 +127,7 @@ fn compute_annulus_background(
 #[inline]
 fn sigma_clipped_median_mad(values: &mut [f32], kappa: f32, iterations: usize) -> (f32, f32) {
     let mut deviations = Vec::with_capacity(values.len());
-    constants::sigma_clipped_median_mad(values, &mut deviations, kappa, iterations)
+    super::common::sigma_clipped_median_mad(values, &mut deviations, kappa, iterations)
 }
 
 /// Compute sub-pixel centroid and quality metrics for a star candidate.
@@ -158,7 +149,7 @@ pub fn compute_centroid(
     let width = pixels.width();
     let height = pixels.height();
     // Compute adaptive stamp radius based on expected FWHM
-    let stamp_radius = compute_stamp_radius(config.expected_fwhm);
+    let stamp_radius = super::common::compute_stamp_radius(config.expected_fwhm);
 
     // Initial position from peak
     let mut cx = candidate.peak_x as f32;
@@ -377,7 +368,7 @@ pub(crate) fn compute_metrics(
     // For roundness calculation: marginal sums
     // Use fixed-size arrays to avoid allocation (max stamp_radius is 15, so max size is 31)
     let stamp_size = 2 * stamp_radius + 1;
-    const MAX_STAMP_SIZE: usize = 2 * super::constants::MAX_STAMP_RADIUS + 1; // 31
+    const MAX_STAMP_SIZE: usize = 2 * super::common::MAX_STAMP_RADIUS + 1; // 31
     let mut marginal_x = [0.0f32; MAX_STAMP_SIZE];
     let mut marginal_y = [0.0f32; MAX_STAMP_SIZE];
 
