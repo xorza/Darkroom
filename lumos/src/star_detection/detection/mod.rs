@@ -11,7 +11,7 @@ use super::common::dilate_mask;
 use super::common::threshold_mask::{create_threshold_mask, create_threshold_mask_filtered};
 use super::config::{DeblendConfig, StarDetectionConfig};
 use super::deblend::{
-    ComponentData, MultiThresholdDeblendConfig, Pixel,
+    ComponentData, MultiThresholdComponentData, MultiThresholdDeblendConfig, Pixel,
     deblend_component as multi_threshold_deblend, deblend_local_maxima,
 };
 use crate::common::{BitBuffer2, Buffer2};
@@ -130,16 +130,6 @@ pub fn detect_stars(
     });
 
     candidates
-}
-
-/// Data for a component when using multi-threshold deblending.
-/// Multi-threshold deblend needs the actual pixel data for its tree-building algorithm.
-struct MultiThresholdComponentData {
-    x_min: usize,
-    x_max: usize,
-    y_min: usize,
-    y_max: usize,
-    pixels: Vec<Pixel>,
 }
 
 /// Extract candidate properties from labeled image with deblending.

@@ -11,6 +11,16 @@ use std::collections::HashMap;
 
 use super::local_maxima::Pixel;
 
+/// Data for a component when using multi-threshold deblending.
+/// Multi-threshold deblend needs the actual pixel data for its tree-building algorithm.
+pub struct MultiThresholdComponentData {
+    pub x_min: usize,
+    pub x_max: usize,
+    pub y_min: usize,
+    pub y_max: usize,
+    pub pixels: Vec<Pixel>,
+}
+
 /// Configuration for multi-threshold deblending.
 #[derive(Debug, Clone, Copy)]
 pub struct MultiThresholdDeblendConfig {

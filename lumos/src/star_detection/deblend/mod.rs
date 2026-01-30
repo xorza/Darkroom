@@ -22,7 +22,9 @@ pub use local_maxima::{ComponentData, Pixel, deblend_local_maxima};
 pub use local_maxima::{DeblendedCandidate, deblend_by_nearest_peak, find_local_maxima};
 #[allow(unused_imports)]
 pub use multi_threshold::DeblendedObject;
-pub use multi_threshold::{MultiThresholdDeblendConfig, deblend_component};
+pub use multi_threshold::{
+    MultiThresholdComponentData, MultiThresholdDeblendConfig, deblend_component,
+};
 
 // Re-export DeblendConfig from config module
 pub use super::config::DeblendConfig;
