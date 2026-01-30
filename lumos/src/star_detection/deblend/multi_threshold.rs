@@ -9,7 +9,7 @@
 
 use std::collections::HashMap;
 
-use super::{ComponentData, Pixel};
+use super::{ComponentData, DeblendedCandidate, Pixel};
 use crate::common::Buffer2;
 use crate::math::{Aabb, Vec2us};
 use crate::star_detection::config::DeblendConfig;
@@ -31,21 +31,6 @@ struct DeblendNode {
     threshold_level: usize,
 }
 
-/// Result of deblending a single connected component.
-#[derive(Debug)]
-pub struct DeblendedObject {
-    /// Peak position.
-    pub peak: Vec2us,
-    /// Peak pixel value.
-    pub peak_value: f32,
-    /// Total flux.
-    pub flux: f32,
-    /// Pixels belonging to this object.
-    pub pixels: Vec<Pixel>,
-    /// Bounding box.
-    pub bbox: Aabb,
-}
-
 /// Multi-threshold deblending of a connected component.
 ///
 /// Uses `ComponentData` to read pixels on-demand from the image buffer,
@@ -65,7 +50,7 @@ pub fn deblend_component(
     pixels: &Buffer2<f32>,
     labels: &LabelMap,
     config: &DeblendConfig,
-) -> Vec<DeblendedObject> {
+) -> Vec<DeblendedCandidate> {
     debug_assert_eq!(
         (pixels.width(), pixels.height()),
         (labels.width(), labels.height()),
@@ -447,7 +432,7 @@ fn assign_pixels_to_objects(
     labels: &LabelMap,
     tree: &[DeblendNode],
     leaf_indices: &[usize],
-) -> Vec<DeblendedObject> {
+) -> Vec<DeblendedCandidate> {
     if leaf_indices.is_empty() {
         return vec![create_single_object(data, pixels, labels)];
     }
@@ -456,14 +441,13 @@ fn assign_pixels_to_objects(
     let peaks: Vec<Pixel> = leaf_indices.iter().map(|&i| tree[i].peak).collect();
 
     // Initialize objects
-    let mut objects: Vec<DeblendedObject> = peaks
+    let mut objects: Vec<DeblendedCandidate> = peaks
         .iter()
-        .map(|p| DeblendedObject {
+        .map(|p| DeblendedCandidate {
+            bbox: Aabb::empty(),
             peak: p.pos,
             peak_value: p.value,
-            flux: 0.0,
-            pixels: Vec::new(),
-            bbox: Aabb::empty(),
+            area: 0,
         })
         .collect();
 
@@ -484,13 +468,12 @@ fn assign_pixels_to_objects(
         }
 
         let obj = &mut objects[nearest];
-        obj.pixels.push(p);
-        obj.flux += p.value;
+        obj.area += 1;
         obj.bbox.include(p.pos);
     }
 
     // Filter out objects with no pixels
-    objects.retain(|o| !o.pixels.is_empty());
+    objects.retain(|o| o.area > 0);
 
     objects
 }
@@ -500,23 +483,14 @@ fn create_single_object(
     data: &ComponentData,
     pixels: &Buffer2<f32>,
     labels: &LabelMap,
-) -> DeblendedObject {
+) -> DeblendedCandidate {
     let peak = data.find_peak(pixels, labels);
 
-    let mut flux = 0.0f32;
-    let mut pixel_list = Vec::with_capacity(data.area);
-
-    for p in data.iter_pixels(pixels, labels) {
-        flux += p.value;
-        pixel_list.push(p);
-    }
-
-    DeblendedObject {
+    DeblendedCandidate {
+        bbox: data.bbox,
         peak: peak.pos,
         peak_value: peak.value,
-        flux,
-        pixels: pixel_list,
-        bbox: data.bbox,
+        area: data.area,
     }
 }
 

@@ -11,23 +11,10 @@
 
 use arrayvec::ArrayVec;
 
-use super::{ComponentData, DeblendConfig, MAX_PEAKS, Pixel};
+use super::{ComponentData, DeblendConfig, DeblendedCandidate, MAX_PEAKS, Pixel};
 use crate::common::Buffer2;
-use crate::math::{Aabb, Vec2us};
+use crate::math::Aabb;
 use crate::star_detection::detection::LabelMap;
-
-// ============================================================================
-// Types
-// ============================================================================
-
-/// Result of deblending a single connected component.
-#[derive(Debug)]
-pub struct DeblendedCandidate {
-    pub bbox: Aabb,
-    pub peak: Vec2us,
-    pub peak_value: f32,
-    pub area: usize,
-}
 
 /// Per-peak bounding box and area data (internal).
 #[derive(Debug, Copy, Clone)]
@@ -266,6 +253,7 @@ fn find_nearest_peak(pixel: Pixel, peaks: &[Pixel], num_peaks: usize) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::math::Vec2us;
 
     /// Create a test image with Gaussian stars and return pixels, labels, and component data.
     fn make_test_component(

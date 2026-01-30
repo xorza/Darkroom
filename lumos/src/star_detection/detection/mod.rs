@@ -156,31 +156,22 @@ pub(crate) fn extract_candidates(
         .into_par_iter()
         .filter(|data| data.area > 0 && data.area <= max_area)
         .flat_map_iter(|data| {
-            if deblend_config.is_multi_threshold() {
+            let candidates = if deblend_config.is_multi_threshold() {
                 multi_threshold_deblend(&data, pixels, label_map, deblend_config)
-                    .into_iter()
-                    .map(|obj| StarCandidate {
-                        bbox: obj.bbox,
-                        peak_x: obj.peak.x,
-                        peak_y: obj.peak.y,
-                        peak_value: obj.peak_value,
-                        area: obj.pixels.len(),
-                    })
-                    //todo remove allocation
-                    .collect::<Vec<_>>()
             } else {
-                deblend_local_maxima(&data, pixels, label_map, deblend_config)
-                    .into_iter()
-                    .map(|obj| StarCandidate {
-                        bbox: obj.bbox,
-                        peak_x: obj.peak.x,
-                        peak_y: obj.peak.y,
-                        peak_value: obj.peak_value,
-                        area: obj.area,
-                    })
-                    //todo remove allocation
-                    .collect::<Vec<_>>()
-            }
+                deblend_local_maxima(&data, pixels, label_map, deblend_config).to_vec()
+            };
+            //todo remove allocation
+            candidates
+                .into_iter()
+                .map(|obj| StarCandidate {
+                    bbox: obj.bbox,
+                    peak_x: obj.peak.x,
+                    peak_y: obj.peak.y,
+                    peak_value: obj.peak_value,
+                    area: obj.area,
+                })
+                .collect::<Vec<_>>()
         })
         .collect()
 }

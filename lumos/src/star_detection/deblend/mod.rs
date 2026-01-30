@@ -44,6 +44,15 @@ pub struct Pixel {
     pub value: f32,
 }
 
+/// Result of deblending a single connected component.
+#[derive(Debug, Clone)]
+pub struct DeblendedCandidate {
+    pub bbox: Aabb,
+    pub peak: Vec2us,
+    pub peak_value: f32,
+    pub area: usize,
+}
+
 /// Data for a connected component (allocation-free).
 ///
 /// Instead of storing pixel coordinates, we store the component label
