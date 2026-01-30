@@ -65,7 +65,7 @@ pub struct DeblendedCandidate {
 }
 
 /// Per-peak bounding box and area data (internal).
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Copy, Clone)]
 struct PeakData {
     x_min: usize,
     x_max: usize,
@@ -115,14 +115,6 @@ impl ComponentData {
                 }
             })
         })
-    }
-
-    /// Find the global maximum pixel value in this component.
-    #[inline]
-    pub fn global_max(&self, pixels: &Buffer2<f32>, labels: &LabelMap) -> f32 {
-        self.iter_pixels(pixels, labels)
-            .map(|p| p.value)
-            .fold(f32::MIN, f32::max)
     }
 
     /// Find the peak pixel (maximum value) in this component.
@@ -202,8 +194,10 @@ pub fn find_local_maxima(
     let width = pixels.width();
     let height = pixels.height();
 
-    let global_max = data.global_max(pixels, labels);
-    let min_peak_value = global_max * config.min_prominence;
+    // Find global max using find_peak (single iteration)
+    let global_peak = data.find_peak(pixels, labels);
+    let min_peak_value = global_peak.value * config.min_prominence;
+    let min_sep_sq = config.min_separation * config.min_separation;
 
     for pixel in data.iter_pixels(pixels, labels) {
         if pixel.value < min_peak_value {
@@ -214,7 +208,7 @@ pub fn find_local_maxima(
             continue;
         }
 
-        add_or_replace_peak(&mut peaks, pixel, config.min_separation);
+        add_or_replace_peak(&mut peaks, pixel, min_sep_sq);
     }
 
     // Sort by brightness (brightest first)
@@ -281,42 +275,33 @@ pub fn deblend_by_nearest_peak(
 // ============================================================================
 
 /// Check if a pixel is a local maximum (greater than all 8 neighbors).
+/// Uses explicit neighbor checks instead of loops for better performance.
 #[inline]
 fn is_local_maximum(pixel: Pixel, pixels: &Buffer2<f32>, width: usize, height: usize) -> bool {
-    for dy in -1i32..=1 {
-        for dx in -1i32..=1 {
-            if dx == 0 && dy == 0 {
-                continue;
-            }
+    let x = pixel.x;
+    let y = pixel.y;
+    let v = pixel.value;
 
-            let nx = pixel.x as i32 + dx;
-            let ny = pixel.y as i32 + dy;
-
-            if nx >= 0 && ny >= 0 {
-                let nx = nx as usize;
-                let ny = ny as usize;
-
-                if nx < width && ny < height && pixels[(nx, ny)] >= pixel.value {
-                    return false;
-                }
-            }
-        }
-    }
-    true
+    // Check all 8 neighbors explicitly (avoids loop overhead)
+    (x == 0 || pixels[(x - 1, y)] < v)
+        && (x + 1 >= width || pixels[(x + 1, y)] < v)
+        && (y == 0 || pixels[(x, y - 1)] < v)
+        && (y + 1 >= height || pixels[(x, y + 1)] < v)
+        && (x == 0 || y == 0 || pixels[(x - 1, y - 1)] < v)
+        && (x + 1 >= width || y == 0 || pixels[(x + 1, y - 1)] < v)
+        && (x == 0 || y + 1 >= height || pixels[(x - 1, y + 1)] < v)
+        && (x + 1 >= width || y + 1 >= height || pixels[(x + 1, y + 1)] < v)
 }
 
 /// Add a peak to the list, or replace an existing nearby peak if this one is brighter.
+/// Uses squared Euclidean distance for consistency with `find_nearest_peak`.
 #[inline]
-fn add_or_replace_peak(
-    peaks: &mut ArrayVec<Pixel, MAX_PEAKS>,
-    pixel: Pixel,
-    min_separation: usize,
-) {
-    // Check separation from existing peaks
+fn add_or_replace_peak(peaks: &mut ArrayVec<Pixel, MAX_PEAKS>, pixel: Pixel, min_sep_sq: usize) {
+    // Check separation from existing peaks using squared Euclidean distance
     let well_separated = peaks.iter().all(|peak| {
         let dx = (pixel.x as i32 - peak.x as i32).unsigned_abs() as usize;
         let dy = (pixel.y as i32 - peak.y as i32).unsigned_abs() as usize;
-        dx >= min_separation || dy >= min_separation
+        dx * dx + dy * dy >= min_sep_sq
     });
 
     if well_separated {
@@ -328,7 +313,7 @@ fn add_or_replace_peak(
         for peak in peaks.iter_mut() {
             let dx = (pixel.x as i32 - peak.x as i32).unsigned_abs() as usize;
             let dy = (pixel.y as i32 - peak.y as i32).unsigned_abs() as usize;
-            if dx < min_separation && dy < min_separation && pixel.value > peak.value {
+            if dx * dx + dy * dy < min_sep_sq && pixel.value > peak.value {
                 *peak = pixel;
                 break;
             }
@@ -364,13 +349,20 @@ fn find_nearest_peak(pixel: Pixel, peaks: &[Pixel], num_peaks: usize) -> usize {
 mod tests {
     use super::*;
 
-    fn make_gaussian_image(
+    /// Create a test image with Gaussian stars and return pixels, labels, and component data.
+    fn make_test_component(
         width: usize,
         height: usize,
         stars: &[(usize, usize, f32, f32)], // (cx, cy, amplitude, sigma)
-    ) -> (Buffer2<f32>, LabelMap) {
+    ) -> (Buffer2<f32>, LabelMap, ComponentData) {
         let mut pixels = Buffer2::new_filled(width, height, 0.0f32);
         let mut labels = Buffer2::new_filled(width, height, 0u32);
+
+        let mut x_min = usize::MAX;
+        let mut x_max = 0;
+        let mut y_min = usize::MAX;
+        let mut y_max = 0;
+        let mut area = 0;
 
         for (cx, cy, amplitude, sigma) in stars {
             let radius = (sigma * 4.0).ceil() as i32;
@@ -385,7 +377,14 @@ mod tests {
                         let value = amplitude * (-r2 / (2.0 * sigma * sigma)).exp();
                         if value > 0.001 {
                             pixels[(x, y)] += value;
-                            labels[(x, y)] = 1;
+                            if labels[(x, y)] == 0 {
+                                labels[(x, y)] = 1;
+                                x_min = x_min.min(x);
+                                x_max = x_max.max(x);
+                                y_min = y_min.min(y);
+                                y_max = y_max.max(y);
+                                area += 1;
+                            }
                         }
                     }
                 }
@@ -393,48 +392,21 @@ mod tests {
         }
 
         let label_map = LabelMap::from_raw(labels, 1);
-        (pixels, label_map)
-    }
-
-    fn compute_bbox(labels: &LabelMap, label: u32) -> (usize, usize, usize, usize, usize) {
-        let mut x_min = usize::MAX;
-        let mut x_max = 0;
-        let mut y_min = usize::MAX;
-        let mut y_max = 0;
-        let mut area = 0;
-        let width = labels.width();
-
-        for (idx, &l) in labels.iter().enumerate() {
-            if l == label {
-                let x = idx % width;
-                let y = idx / width;
-                x_min = x_min.min(x);
-                x_max = x_max.max(x);
-                y_min = y_min.min(y);
-                y_max = y_max.max(y);
-                area += 1;
-            }
-        }
-
-        (x_min, x_max, y_min, y_max, area)
-    }
-
-    fn make_component(labels: &LabelMap, label: u32) -> ComponentData {
-        let (x_min, x_max, y_min, y_max, area) = compute_bbox(labels, label);
-        ComponentData {
+        let component = ComponentData {
             x_min,
             x_max,
             y_min,
             y_max,
-            label,
+            label: 1,
             area,
-        }
+        };
+
+        (pixels, label_map, component)
     }
 
     #[test]
     fn test_find_single_peak() {
-        let (pixels, labels) = make_gaussian_image(100, 100, &[(50, 50, 1.0, 3.0)]);
-        let data = make_component(&labels, 1);
+        let (pixels, labels, data) = make_test_component(100, 100, &[(50, 50, 1.0, 3.0)]);
 
         let config = DeblendConfig::default();
         let peaks = find_local_maxima(&data, &pixels, &labels, &config);
@@ -448,9 +420,8 @@ mod tests {
 
     #[test]
     fn test_find_two_peaks() {
-        let (pixels, labels) =
-            make_gaussian_image(100, 100, &[(30, 50, 1.0, 2.5), (70, 50, 0.8, 2.5)]);
-        let data = make_component(&labels, 1);
+        let (pixels, labels, data) =
+            make_test_component(100, 100, &[(30, 50, 1.0, 2.5), (70, 50, 0.8, 2.5)]);
 
         let config = DeblendConfig {
             min_separation: 3,
@@ -464,9 +435,8 @@ mod tests {
 
     #[test]
     fn test_deblend_creates_separate_candidates() {
-        let (pixels, labels) =
-            make_gaussian_image(100, 100, &[(30, 50, 1.0, 2.5), (70, 50, 0.8, 2.5)]);
-        let data = make_component(&labels, 1);
+        let (pixels, labels, data) =
+            make_test_component(100, 100, &[(30, 50, 1.0, 2.5), (70, 50, 0.8, 2.5)]);
 
         let config = DeblendConfig {
             min_separation: 3,
@@ -483,13 +453,37 @@ mod tests {
 
     #[test]
     fn test_iter_pixels_count() {
-        let (pixels, labels) = make_gaussian_image(100, 100, &[(50, 50, 1.0, 3.0)]);
-        let data = make_component(&labels, 1);
+        let (pixels, labels, data) = make_test_component(100, 100, &[(50, 50, 1.0, 3.0)]);
 
         let iter_count = data.iter_pixels(&pixels, &labels).count();
         assert_eq!(
             iter_count, data.area,
             "iter_pixels should yield exactly area pixels"
         );
+    }
+
+    #[test]
+    fn test_euclidean_separation() {
+        // Two peaks at distance sqrt(18) ≈ 4.24 apart (diagonal)
+        // With min_separation=5, they should be merged (5^2=25 > 18)
+        // With min_separation=4, they should be separate (4^2=16 < 18)
+        let (pixels, labels, data) =
+            make_test_component(100, 100, &[(50, 50, 1.0, 1.5), (53, 53, 0.9, 1.5)]);
+
+        let config_merge = DeblendConfig {
+            min_separation: 5,
+            min_prominence: 0.3,
+            ..Default::default()
+        };
+        let peaks_merge = find_local_maxima(&data, &pixels, &labels, &config_merge);
+        assert_eq!(peaks_merge.len(), 1, "Close peaks should merge");
+
+        let config_separate = DeblendConfig {
+            min_separation: 4,
+            min_prominence: 0.3,
+            ..Default::default()
+        };
+        let peaks_separate = find_local_maxima(&data, &pixels, &labels, &config_separate);
+        assert_eq!(peaks_separate.len(), 2, "Distant peaks should separate");
     }
 }
