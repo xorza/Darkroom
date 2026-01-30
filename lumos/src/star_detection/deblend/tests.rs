@@ -28,28 +28,28 @@ fn create_image_and_labels(
     height: usize,
     star_pixels: &[Pixel],
     label: u32,
-) -> (Buffer2<f32>, Vec<u32>) {
-    let mut pixels = vec![0.0f32; width * height];
-    let mut labels = vec![0u32; width * height];
+) -> (Buffer2<f32>, Buffer2<u32>) {
+    let mut pixels = Buffer2::new_filled(width, height, 0.0f32);
+    let mut labels = Buffer2::new_filled(width, height, 0u32);
 
     for p in star_pixels {
         if p.x < width && p.y < height {
-            let idx = p.y * width + p.x;
-            pixels[idx] = p.value;
-            labels[idx] = label;
+            pixels[(p.x, p.y)] = p.value;
+            labels[(p.x, p.y)] = label;
         }
     }
 
-    (Buffer2::new(width, height, pixels), labels)
+    (pixels, labels)
 }
 
 /// Compute bounding box and area from labels.
-fn compute_bbox(labels: &[u32], width: usize, label: u32) -> (usize, usize, usize, usize, usize) {
+fn compute_bbox(labels: &Buffer2<u32>, label: u32) -> (usize, usize, usize, usize, usize) {
     let mut x_min = usize::MAX;
     let mut x_max = 0;
     let mut y_min = usize::MAX;
     let mut y_max = 0;
     let mut area = 0;
+    let width = labels.width();
 
     for (idx, &l) in labels.iter().enumerate() {
         if l == label {
@@ -74,7 +74,7 @@ fn test_local_vs_multi_threshold_single_star() {
 
     let star = make_gaussian_star(50, 50, 1.0, 3.0);
     let (pixels_buf, labels) = create_image_and_labels(width, height, &star, 1);
-    let (x_min, x_max, y_min, y_max, area) = compute_bbox(&labels, width, 1);
+    let (x_min, x_max, y_min, y_max, area) = compute_bbox(&labels, 1);
 
     // Local maxima deblending
     let data = ComponentData {
@@ -110,14 +110,13 @@ fn test_local_vs_multi_threshold_two_stars() {
     let star1 = make_gaussian_star(30, 50, 1.0, 2.5);
     let star2 = make_gaussian_star(70, 50, 0.8, 2.5);
 
-    let mut image = vec![0.0f32; width * height];
-    let mut labels = vec![0u32; width * height];
+    let mut image = Buffer2::new_filled(width, height, 0.0f32);
+    let mut labels = Buffer2::new_filled(width, height, 0u32);
 
     for p in star1.iter().chain(star2.iter()) {
         if p.x < width && p.y < height {
-            let idx = p.y * width + p.x;
-            image[idx] += p.value;
-            labels[idx] = 1; // All pixels in same component
+            image[(p.x, p.y)] += p.value;
+            labels[(p.x, p.y)] = 1; // All pixels in same component
         }
     }
 
@@ -133,8 +132,7 @@ fn test_local_vs_multi_threshold_two_stars() {
         })
         .collect();
 
-    let image_buf = Buffer2::new(width, height, image);
-    let (x_min, x_max, y_min, y_max, area) = compute_bbox(&labels, width, 1);
+    let (x_min, x_max, y_min, y_max, area) = compute_bbox(&labels, 1);
 
     // Local maxima deblending
     let data = ComponentData {
@@ -151,7 +149,7 @@ fn test_local_vs_multi_threshold_two_stars() {
         min_prominence: 0.3,
         ..Default::default()
     };
-    let local_result = deblend_local_maxima(&data, &image_buf, &labels, &local_config);
+    let local_result = deblend_local_maxima(&data, &image, &labels, &local_config);
 
     // Multi-threshold deblending
     let mt_config = MultiThresholdDeblendConfig {

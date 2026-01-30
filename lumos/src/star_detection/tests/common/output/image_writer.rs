@@ -80,7 +80,7 @@ pub fn mask_to_gray(mask: &[bool], width: usize, height: usize) -> GrayImage {
 /// Convert labeled image to colored visualization.
 ///
 /// Each label gets a unique color for easy visualization.
-pub fn labels_to_rgb(labels: &[u32], width: usize, height: usize) -> RgbImage {
+pub fn labels_to_rgb(labels: &crate::common::Buffer2<u32>) -> RgbImage {
     // Generate distinct colors for labels using golden ratio
     let label_to_color = |label: u32| -> Rgb<u8> {
         if label == 0 {
@@ -98,7 +98,7 @@ pub fn labels_to_rgb(labels: &[u32], width: usize, height: usize) -> RgbImage {
         })
         .collect();
 
-    RgbImage::from_raw(width as u32, height as u32, pixels).unwrap()
+    RgbImage::from_raw(labels.width() as u32, labels.height() as u32, pixels).unwrap()
 }
 
 /// Convert HSV to RGB color.

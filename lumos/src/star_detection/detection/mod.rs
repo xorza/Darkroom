@@ -356,7 +356,7 @@ fn extract_candidates_local_maxima(
         .into_par_iter()
         .filter(|data| data.area > 0 && data.area <= max_area)
         .flat_map(|data| {
-            let deblended = deblend_local_maxima(&data, pixels, labels.pixels(), deblend_config);
+            let deblended = deblend_local_maxima(&data, pixels, labels, deblend_config);
 
             deblended
                 .into_iter()
