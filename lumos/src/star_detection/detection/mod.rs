@@ -105,12 +105,7 @@ pub fn detect_stars(
     let label_map = LabelMap::from_mask(&mask);
 
     // Extract candidate properties with deblending (always use original pixels for peak values)
-    let mut candidates = extract_candidates(
-        pixels,
-        &label_map,
-        &deblend_config,
-        detection_config.max_area,
-    );
+    let mut candidates = extract_candidates(pixels, &label_map, &deblend_config);
 
     // Filter candidates
     candidates.retain(|c| {
@@ -132,14 +127,13 @@ pub fn detect_stars(
 /// splits them into separate candidates based on peak positions.
 /// Supports both simple local-maxima deblending and multi-threshold deblending.
 ///
-/// Components larger than `max_area` are skipped early to avoid expensive
-/// processing of pathologically large regions (e.g., when the entire image
-/// is erroneously detected as one component due to bad thresholding).
+/// Components larger than `deblend_config.max_area` are skipped early to avoid
+/// expensive processing of pathologically large regions (e.g., when the entire
+/// image is erroneously detected as one component due to bad thresholding).
 pub(crate) fn extract_candidates(
     pixels: &Buffer2<f32>,
     label_map: &LabelMap,
     deblend_config: &DeblendConfig,
-    max_area: usize,
 ) -> Vec<StarCandidate> {
     use rayon::prelude::*;
 
@@ -147,6 +141,7 @@ pub(crate) fn extract_candidates(
         return Vec::new();
     }
 
+    let max_area = deblend_config.max_area;
     let component_data = collect_component_data(label_map, pixels.width(), max_area);
 
     // Process each component in parallel, deblending into multiple candidates.

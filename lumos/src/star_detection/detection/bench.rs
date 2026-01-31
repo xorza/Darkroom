@@ -35,7 +35,6 @@ fn bench_extract_candidates_1k_sparse(b: ::bench::Bencher) {
             black_box(&pixels),
             black_box(&label_map),
             black_box(&config),
-            black_box(500),
         ))
     });
 }
@@ -53,7 +52,6 @@ fn bench_extract_candidates_1k_dense(b: ::bench::Bencher) {
             black_box(&pixels),
             black_box(&label_map),
             black_box(&config),
-            black_box(500),
         ))
     });
 }
@@ -71,7 +69,6 @@ fn bench_extract_candidates_4k_sparse(b: ::bench::Bencher) {
             black_box(&pixels),
             black_box(&label_map),
             black_box(&config),
-            black_box(500),
         ))
     });
 }
@@ -89,7 +86,6 @@ fn bench_extract_candidates_4k_dense(b: ::bench::Bencher) {
             black_box(&pixels),
             black_box(&label_map),
             black_box(&config),
-            black_box(500),
         ))
     });
 }
@@ -110,7 +106,29 @@ fn bench_extract_candidates_4k_dense_multithreshold(b: ::bench::Bencher) {
             black_box(&pixels),
             black_box(&label_map),
             black_box(&config),
-            black_box(500),
+        ))
+    });
+}
+
+#[quick_bench(warmup_iters = 1, iters = 3)]
+fn bench_extract_candidates_6k_globular_cluster(b: ::bench::Bencher) {
+    use crate::testing::synthetic::generate_globular_cluster;
+
+    // 6K globular cluster with 50000 stars - extreme crowding
+    let pixels = generate_globular_cluster(6144, 6144, 50000, 42);
+    let mask = create_test_mask(&pixels, 0.05);
+    let label_map = LabelMap::from_mask(&mask);
+    let config = DeblendConfig {
+        n_thresholds: 32,
+        max_area: 5000,
+        ..Default::default()
+    };
+
+    b.bench(|| {
+        black_box(extract_candidates(
+            black_box(&pixels),
+            black_box(&label_map),
+            black_box(&config),
         ))
     });
 }

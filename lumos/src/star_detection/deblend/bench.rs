@@ -69,7 +69,7 @@ fn create_components_from_pixels(
 
 /// Save a synthetic dense field image for visual inspection.
 #[test]
-fn save_dense_field_image() {
+fn save_globular_cluster_image() {
     use image::GrayImage;
 
     let width = 6144;
@@ -163,6 +163,8 @@ fn bench_deblend_local_maxima_6k_dense_tight_separation(b: ::bench::Bencher) {
         ..Default::default()
     };
 
+    println!("Using config: {:?}", components.len());
+
     b.bench(|| {
         for component in &components {
             black_box(deblend_local_maxima(
@@ -184,8 +186,8 @@ fn bench_deblend_multi_threshold_6k_dense(b: ::bench::Bencher) {
     let pixels = generate_globular_cluster(6144, 6144, 50000, 42);
     let (labels, components) = create_components_from_pixels(&pixels, 0.05);
 
-    // Filter out huge components - multi-threshold is O(n²) and not practical for >100k pixels
-    let reasonable_components: Vec<_> = components.iter().filter(|c| c.area < 100_000).collect();
+    // // Filter out huge components - multi-threshold is O(n²) and not practical for >100k pixels
+    // let reasonable_components: Vec<_> = components.iter().filter(|c| c.area < 100_000).collect();
 
     let config = DeblendConfig {
         n_thresholds: 32,
@@ -195,7 +197,7 @@ fn bench_deblend_multi_threshold_6k_dense(b: ::bench::Bencher) {
     };
 
     b.bench(|| {
-        for component in &reasonable_components {
+        for component in &components {
             black_box(deblend_multi_threshold(
                 black_box(component),
                 black_box(&pixels),

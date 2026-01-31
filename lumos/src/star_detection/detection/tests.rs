@@ -16,10 +16,8 @@ const TEST_DEBLEND_CONFIG: DeblendConfig = DeblendConfig {
     min_prominence: 0.3,
     n_thresholds: 0,
     min_contrast: 0.005,
+    max_area: 10000, // large enough to not filter anything in small test images
 };
-
-/// Default max_area for tests (large enough to not filter anything in small test images)
-const TEST_MAX_AREA: usize = 10000;
 
 fn make_test_image_with_star(
     width: usize,
@@ -661,7 +659,7 @@ fn test_extract_candidates_empty() {
     let pixels = Buffer2::new(3, 3, vec![0.5; 9]);
     let label_map = LabelMap::from_raw(Buffer2::new(3, 3, vec![0u32; 9]), 0);
 
-    let candidates = extract_candidates(&pixels, &label_map, &TEST_DEBLEND_CONFIG, TEST_MAX_AREA);
+    let candidates = extract_candidates(&pixels, &label_map, &TEST_DEBLEND_CONFIG);
 
     assert!(candidates.is_empty());
 }
@@ -691,7 +689,7 @@ fn test_extract_candidates_single_component() {
         1,
     );
 
-    let candidates = extract_candidates(&pixels, &label_map, &TEST_DEBLEND_CONFIG, TEST_MAX_AREA);
+    let candidates = extract_candidates(&pixels, &label_map, &TEST_DEBLEND_CONFIG);
 
     assert_eq!(candidates.len(), 1);
     let c = &candidates[0];
@@ -730,7 +728,7 @@ fn test_extract_candidates_two_components() {
         2,
     );
 
-    let candidates = extract_candidates(&pixels, &label_map, &TEST_DEBLEND_CONFIG, TEST_MAX_AREA);
+    let candidates = extract_candidates(&pixels, &label_map, &TEST_DEBLEND_CONFIG);
 
     assert_eq!(candidates.len(), 2);
 
@@ -765,7 +763,7 @@ fn test_extract_candidates_bounding_box() {
 
     let pixels = Buffer2::new(5, 5, pixels_data);
     let label_map = LabelMap::from_raw(Buffer2::new(5, 5, labels_data), 1);
-    let candidates = extract_candidates(&pixels, &label_map, &TEST_DEBLEND_CONFIG, TEST_MAX_AREA);
+    let candidates = extract_candidates(&pixels, &label_map, &TEST_DEBLEND_CONFIG);
 
     assert_eq!(candidates.len(), 1);
     let c = &candidates[0];
@@ -785,7 +783,7 @@ fn test_extract_candidates_width_height() {
     // 3x2 component covering full image
     let label_map = LabelMap::from_raw(Buffer2::new(3, 2, vec![1u32; 6]), 1);
 
-    let candidates = extract_candidates(&pixels, &label_map, &TEST_DEBLEND_CONFIG, TEST_MAX_AREA);
+    let candidates = extract_candidates(&pixels, &label_map, &TEST_DEBLEND_CONFIG);
 
     assert_eq!(candidates.len(), 1);
     let c = &candidates[0];
@@ -811,12 +809,20 @@ fn test_extract_candidates_max_area_filter() {
     let label_map = LabelMap::from_raw(Buffer2::new(10, 10, labels_data), 2);
 
     // With max_area=10, the large component should be skipped
-    let candidates = extract_candidates(&pixels, &label_map, &TEST_DEBLEND_CONFIG, 10);
+    let config_small = DeblendConfig {
+        max_area: 10,
+        ..TEST_DEBLEND_CONFIG
+    };
+    let candidates = extract_candidates(&pixels, &label_map, &config_small);
     assert_eq!(candidates.len(), 1, "Only small component should be found");
     assert_eq!(candidates[0].area, 5);
 
     // With max_area=100, both should be found
-    let candidates = extract_candidates(&pixels, &label_map, &TEST_DEBLEND_CONFIG, 100);
+    let config_large = DeblendConfig {
+        max_area: 100,
+        ..TEST_DEBLEND_CONFIG
+    };
+    let candidates = extract_candidates(&pixels, &label_map, &config_large);
     assert_eq!(candidates.len(), 2, "Both components should be found");
 }
 
@@ -845,7 +851,7 @@ fn test_extract_candidates_multiple_peaks_same_value() {
         1,
     );
 
-    let candidates = extract_candidates(&pixels, &label_map, &TEST_DEBLEND_CONFIG, TEST_MAX_AREA);
+    let candidates = extract_candidates(&pixels, &label_map, &TEST_DEBLEND_CONFIG);
 
     assert_eq!(candidates.len(), 1);
     let c = &candidates[0];
@@ -880,7 +886,7 @@ fn test_extract_candidates_peak_at_corner() {
         1,
     );
 
-    let candidates = extract_candidates(&pixels, &label_map, &TEST_DEBLEND_CONFIG, TEST_MAX_AREA);
+    let candidates = extract_candidates(&pixels, &label_map, &TEST_DEBLEND_CONFIG);
 
     assert_eq!(candidates.len(), 1);
     let c = &candidates[0];
@@ -916,7 +922,7 @@ fn test_extract_candidates_single_pixel_component() {
         1,
     );
 
-    let candidates = extract_candidates(&pixels, &label_map, &TEST_DEBLEND_CONFIG, TEST_MAX_AREA);
+    let candidates = extract_candidates(&pixels, &label_map, &TEST_DEBLEND_CONFIG);
 
     assert_eq!(candidates.len(), 1);
     let c = &candidates[0];
@@ -957,7 +963,7 @@ fn test_extract_candidates_diagonal_component() {
         1,
     );
 
-    let candidates = extract_candidates(&pixels, &label_map, &TEST_DEBLEND_CONFIG, TEST_MAX_AREA);
+    let candidates = extract_candidates(&pixels, &label_map, &TEST_DEBLEND_CONFIG);
 
     assert_eq!(candidates.len(), 1);
     let c = &candidates[0];
@@ -997,7 +1003,7 @@ fn test_extract_candidates_sparse_labels() {
         ),
         3,
     );
-    let candidates = extract_candidates(&pixels, &label_map, &TEST_DEBLEND_CONFIG, TEST_MAX_AREA);
+    let candidates = extract_candidates(&pixels, &label_map, &TEST_DEBLEND_CONFIG);
 
     // Only non-empty components are returned (labels 1 and 3)
     assert_eq!(candidates.len(), 2);
@@ -1015,7 +1021,7 @@ fn test_extract_candidates_full_image_component() {
     let pixels = Buffer2::new(3, 3, (0..9).map(|i| 0.1 + i as f32 * 0.1).collect());
     let label_map = LabelMap::from_raw(Buffer2::new(3, 3, vec![1u32; 9]), 1);
 
-    let candidates = extract_candidates(&pixels, &label_map, &TEST_DEBLEND_CONFIG, TEST_MAX_AREA);
+    let candidates = extract_candidates(&pixels, &label_map, &TEST_DEBLEND_CONFIG);
 
     assert_eq!(candidates.len(), 1);
     let c = &candidates[0];
@@ -1055,7 +1061,7 @@ fn test_extract_candidates_negative_pixel_values() {
         1,
     );
 
-    let candidates = extract_candidates(&pixels, &label_map, &TEST_DEBLEND_CONFIG, TEST_MAX_AREA);
+    let candidates = extract_candidates(&pixels, &label_map, &TEST_DEBLEND_CONFIG);
 
     assert_eq!(candidates.len(), 1);
     let c = &candidates[0];
@@ -1079,7 +1085,7 @@ fn test_extract_candidates_many_components() {
 
     let pixels = Buffer2::new(10, 10, pixels_data);
     let label_map = LabelMap::from_raw(Buffer2::new(10, 10, labels_data), 10);
-    let candidates = extract_candidates(&pixels, &label_map, &TEST_DEBLEND_CONFIG, TEST_MAX_AREA);
+    let candidates = extract_candidates(&pixels, &label_map, &TEST_DEBLEND_CONFIG);
 
     assert_eq!(candidates.len(), 10);
     for (i, c) in candidates.iter().enumerate() {
@@ -1112,7 +1118,7 @@ fn test_extract_candidates_non_square_image() {
         2,
     );
 
-    let candidates = extract_candidates(&pixels, &label_map, &TEST_DEBLEND_CONFIG, TEST_MAX_AREA);
+    let candidates = extract_candidates(&pixels, &label_map, &TEST_DEBLEND_CONFIG);
 
     assert_eq!(candidates.len(), 2);
 
@@ -1166,7 +1172,7 @@ fn test_connected_components_and_extract_integration() {
 
     let label_map = LabelMap::from_mask(&BitBuffer2::from_slice(10, 10, &mask));
     let pixels = Buffer2::new(10, 10, pixels);
-    let candidates = extract_candidates(&pixels, &label_map, &TEST_DEBLEND_CONFIG, TEST_MAX_AREA);
+    let candidates = extract_candidates(&pixels, &label_map, &TEST_DEBLEND_CONFIG);
 
     assert_eq!(label_map.num_labels(), 2);
     assert_eq!(candidates.len(), 2);
@@ -1272,7 +1278,7 @@ fn test_deblend_star_pair() {
 
     let pixels = Buffer2::new(width, height, pixels);
     let label_map = LabelMap::from_raw(Buffer2::new(width, height, labels_data), 1);
-    let candidates = extract_candidates(&pixels, &label_map, &TEST_DEBLEND_CONFIG, TEST_MAX_AREA);
+    let candidates = extract_candidates(&pixels, &label_map, &TEST_DEBLEND_CONFIG);
 
     // Should deblend into 2 candidates
     assert_eq!(
@@ -1348,7 +1354,7 @@ fn test_no_deblend_for_close_peaks() {
 
     let pixels = Buffer2::new(width, height, pixels);
     let label_map = LabelMap::from_raw(Buffer2::new(width, height, labels_data), 1);
-    let candidates = extract_candidates(&pixels, &label_map, &TEST_DEBLEND_CONFIG, TEST_MAX_AREA);
+    let candidates = extract_candidates(&pixels, &label_map, &TEST_DEBLEND_CONFIG);
 
     // Should NOT deblend - only one candidate because peaks are too close
     assert_eq!(
@@ -1394,7 +1400,7 @@ fn test_deblend_respects_prominence() {
 
     let pixels = Buffer2::new(width, height, pixels);
     let label_map = LabelMap::from_raw(Buffer2::new(width, height, labels_data), 1);
-    let candidates = extract_candidates(&pixels, &label_map, &TEST_DEBLEND_CONFIG, TEST_MAX_AREA);
+    let candidates = extract_candidates(&pixels, &label_map, &TEST_DEBLEND_CONFIG);
 
     // Should NOT deblend - secondary peak is not prominent enough
     assert_eq!(
@@ -1458,11 +1464,12 @@ fn test_multi_threshold_deblend_star_pair() {
         min_prominence: 0.3,
         n_thresholds: 32,
         min_contrast: 0.005,
+        ..Default::default()
     };
 
     let pixels = Buffer2::new(width, height, pixels);
     let label_map = LabelMap::from_raw(Buffer2::new(width, height, labels_data), 1);
-    let candidates = extract_candidates(&pixels, &label_map, &mt_config, TEST_MAX_AREA);
+    let candidates = extract_candidates(&pixels, &label_map, &mt_config);
 
     // Should deblend into 2 candidates
     assert_eq!(
@@ -1533,10 +1540,11 @@ fn test_multi_threshold_vs_simple_deblend_consistency() {
         min_prominence: 0.3,
         n_thresholds: 0,
         min_contrast: 0.005,
+        ..Default::default()
     };
     let pixels = Buffer2::new(width, height, pixels);
     let label_map = LabelMap::from_raw(Buffer2::new(width, height, labels_data), 1);
-    let simple_candidates = extract_candidates(&pixels, &label_map, &simple_config, TEST_MAX_AREA);
+    let simple_candidates = extract_candidates(&pixels, &label_map, &simple_config);
 
     // Multi-threshold deblending (n_thresholds > 0)
     let mt_config = DeblendConfig {
@@ -1544,8 +1552,9 @@ fn test_multi_threshold_vs_simple_deblend_consistency() {
         min_prominence: 0.3,
         n_thresholds: 32,
         min_contrast: 0.005,
+        ..Default::default()
     };
-    let mt_candidates = extract_candidates(&pixels, &label_map, &mt_config, TEST_MAX_AREA);
+    let mt_candidates = extract_candidates(&pixels, &label_map, &mt_config);
 
     // Both should find 2 stars
     assert_eq!(
@@ -1622,11 +1631,12 @@ fn test_multi_threshold_deblend_high_contrast_disables() {
         min_prominence: 0.3,
         n_thresholds: 32,
         min_contrast: 1.0, // Disabled
+        ..Default::default()
     };
 
     let pixels = Buffer2::new(width, height, pixels);
     let label_map = LabelMap::from_raw(Buffer2::new(width, height, labels_data), 1);
-    let candidates = extract_candidates(&pixels, &label_map, &config, TEST_MAX_AREA);
+    let candidates = extract_candidates(&pixels, &label_map, &config);
 
     // Should return single candidate (deblending disabled)
     assert_eq!(

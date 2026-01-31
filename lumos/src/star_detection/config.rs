@@ -85,8 +85,6 @@ pub struct DetectionConfig {
     pub sigma_threshold: f32,
     /// Minimum area in pixels.
     pub min_area: usize,
-    /// Maximum area in pixels.
-    pub max_area: usize,
     /// Edge margin (reject candidates near edges).
     pub edge_margin: usize,
 }
@@ -96,7 +94,6 @@ impl From<&StarDetectionConfig> for DetectionConfig {
         Self {
             sigma_threshold: config.background_config.sigma_threshold,
             min_area: config.min_area,
-            max_area: config.max_area,
             edge_margin: config.edge_margin,
         }
     }
@@ -119,6 +116,11 @@ pub struct DeblendConfig {
     pub n_thresholds: usize,
     /// Minimum contrast for multi-threshold deblending.
     pub min_contrast: f32,
+    /// Maximum component area to process (in pixels).
+    /// Components larger than this are skipped to avoid expensive processing
+    /// of pathologically large regions. Also serves as a sanity check since
+    /// very large components are unlikely to be real stars.
+    pub max_area: usize,
 }
 
 impl DeblendConfig {
@@ -137,6 +139,7 @@ impl Default for DeblendConfig {
             min_prominence: 0.3,
             n_thresholds: 0,
             min_contrast: 0.005,
+            max_area: 10_000,
         }
     }
 }
@@ -148,6 +151,7 @@ impl From<&StarDetectionConfig> for DeblendConfig {
             min_prominence: config.deblend_min_prominence,
             n_thresholds: config.deblend_n_thresh,
             min_contrast: config.deblend_min_contrast,
+            max_area: config.max_area,
         }
     }
 }
