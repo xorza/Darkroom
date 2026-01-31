@@ -2281,6 +2281,7 @@ dependencies = [
  "rustfft",
  "serde",
  "serde_json",
+ "smallvec",
  "strum",
  "strum_macros",
  "sysinfo",

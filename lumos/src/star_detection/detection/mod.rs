@@ -10,7 +10,9 @@ use super::background::BackgroundMap;
 use super::common::dilate_mask;
 use super::common::threshold_mask::{create_threshold_mask, create_threshold_mask_filtered};
 use super::config::{DeblendConfig, StarDetectionConfig};
-use super::deblend::{ComponentData, deblend_local_maxima, deblend_multi_threshold};
+use super::deblend::{
+    ComponentData, DeblendedCandidate, deblend_local_maxima, deblend_multi_threshold,
+};
 use crate::common::{BitBuffer2, Buffer2};
 use crate::math::{Aabb, Vec2us};
 
@@ -154,22 +156,26 @@ pub(crate) fn extract_candidates(
         .into_par_iter()
         .filter(|data| data.area > 0 && data.area <= max_area)
         .flat_map_iter(|data| {
-            let candidates = if deblend_config.is_multi_threshold() {
-                deblend_multi_threshold(&data, pixels, label_map, deblend_config)
-            } else {
-                deblend_local_maxima(&data, pixels, label_map, deblend_config).to_vec()
+            let map_to_candidate = |obj: DeblendedCandidate| StarCandidate {
+                bbox: obj.bbox,
+                peak_x: obj.peak.x,
+                peak_y: obj.peak.y,
+                peak_value: obj.peak_value,
+                area: obj.area,
             };
+
             //todo remove allocation
-            candidates
-                .into_iter()
-                .map(|obj| StarCandidate {
-                    bbox: obj.bbox,
-                    peak_x: obj.peak.x,
-                    peak_y: obj.peak.y,
-                    peak_value: obj.peak_value,
-                    area: obj.area,
-                })
-                .collect::<Vec<_>>()
+            if deblend_config.is_multi_threshold() {
+                deblend_multi_threshold(&data, pixels, label_map, deblend_config)
+                    .into_iter()
+                    .map(map_to_candidate)
+                    .collect::<Vec<_>>()
+            } else {
+                deblend_local_maxima(&data, pixels, label_map, deblend_config)
+                    .into_iter()
+                    .map(map_to_candidate)
+                    .collect::<Vec<_>>()
+            }
         })
         .collect()
 }

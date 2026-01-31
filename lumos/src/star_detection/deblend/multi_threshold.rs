@@ -9,6 +9,8 @@
 
 use std::collections::HashMap;
 
+use smallvec::SmallVec;
+
 use super::{ComponentData, DeblendedCandidate, Pixel};
 use crate::common::Buffer2;
 use crate::math::{Aabb, Vec2us};
@@ -50,7 +52,7 @@ pub fn deblend_multi_threshold(
     pixels: &Buffer2<f32>,
     labels: &LabelMap,
     config: &DeblendConfig,
-) -> Vec<DeblendedCandidate> {
+) -> SmallVec<[DeblendedCandidate; 4]> {
     debug_assert_eq!(
         (pixels.width(), pixels.height()),
         (labels.width(), labels.height()),
@@ -58,13 +60,13 @@ pub fn deblend_multi_threshold(
     );
 
     if data.area == 0 {
-        return Vec::new();
+        return SmallVec::new();
     }
 
     // If min_contrast >= 1.0, deblending is effectively disabled
     // (no branch can have 100% of flux)
     if config.min_contrast >= 1.0 {
-        return vec![create_single_object(data, pixels, labels)];
+        return smallvec::smallvec![create_single_object(data, pixels, labels)];
     }
 
     // Find peak value in the component
@@ -79,7 +81,7 @@ pub fn deblend_multi_threshold(
 
     // If peak barely above threshold, no deblending possible
     if peak_value <= detection_threshold * 1.01 {
-        return vec![create_single_object(data, pixels, labels)];
+        return smallvec::smallvec![create_single_object(data, pixels, labels)];
     }
 
     // Build deblending tree by analyzing connectivity at each threshold
@@ -95,14 +97,14 @@ pub fn deblend_multi_threshold(
 
     // If tree has only one leaf (no branching), return single object
     if tree.is_empty() {
-        return vec![create_single_object(data, pixels, labels)];
+        return smallvec::smallvec![create_single_object(data, pixels, labels)];
     }
 
     // Find leaf nodes (objects) using contrast criterion
     let leaves = find_significant_branches(&tree, config.min_contrast);
 
     if leaves.len() <= 1 {
-        return vec![create_single_object(data, pixels, labels)];
+        return smallvec::smallvec![create_single_object(data, pixels, labels)];
     }
 
     // Assign all pixels to nearest leaf peak
@@ -431,16 +433,16 @@ fn assign_pixels_to_objects(
     labels: &LabelMap,
     tree: &[DeblendNode],
     leaf_indices: &[usize],
-) -> Vec<DeblendedCandidate> {
+) -> SmallVec<[DeblendedCandidate; 4]> {
     if leaf_indices.is_empty() {
-        return vec![create_single_object(data, pixels, labels)];
+        return smallvec::smallvec![create_single_object(data, pixels, labels)];
     }
 
     // Get peak positions for each leaf
-    let peaks: Vec<Pixel> = leaf_indices.iter().map(|&i| tree[i].peak).collect();
+    let peaks: SmallVec<[Pixel; 4]> = leaf_indices.iter().map(|&i| tree[i].peak).collect();
 
     // Initialize objects
-    let mut objects: Vec<DeblendedCandidate> = peaks
+    let mut objects: SmallVec<[DeblendedCandidate; 4]> = peaks
         .iter()
         .map(|p| DeblendedCandidate {
             bbox: Aabb::empty(),
