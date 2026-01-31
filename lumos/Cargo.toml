@@ -5,7 +5,6 @@ edition.workspace = true
 description = ""
 
 [features]
-bench = []
 real-data = []
 
 [dependencies]
