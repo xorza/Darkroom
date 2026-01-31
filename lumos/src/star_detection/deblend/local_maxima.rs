@@ -624,4 +624,260 @@ mod tests {
             peaks.len()
         );
     }
+
+    #[test]
+    fn test_plateau_no_local_max() {
+        // Flat plateau should have no local maximum (strict inequality)
+        let mut pixels = Buffer2::new_filled(10, 10, 0.0f32);
+        let mut labels_buf = Buffer2::new_filled(10, 10, 0u32);
+
+        // Create a 3x3 plateau of equal values
+        for y in 3..6 {
+            for x in 3..6 {
+                pixels[(x, y)] = 1.0;
+                labels_buf[(x, y)] = 1;
+            }
+        }
+
+        let labels = LabelMap::from_raw(labels_buf, 1);
+        let data = ComponentData {
+            bbox: Aabb::new(Vec2us::new(3, 3), Vec2us::new(5, 5)),
+            label: 1,
+            area: 9,
+        };
+
+        let config = DeblendConfig {
+            min_separation: 1,
+            min_prominence: 0.1,
+            ..Default::default()
+        };
+        let peaks = find_local_maxima(&data, &pixels, &labels, &config);
+
+        // No pixel is strictly greater than all neighbors on a plateau
+        assert_eq!(peaks.len(), 0, "Plateau should have no local maxima");
+    }
+
+    #[test]
+    fn test_single_pixel_is_local_max() {
+        // A single isolated pixel is always a local maximum
+        let mut pixels = Buffer2::new_filled(10, 10, 0.0f32);
+        let mut labels_buf = Buffer2::new_filled(10, 10, 0u32);
+
+        pixels[(5, 5)] = 1.0;
+        labels_buf[(5, 5)] = 1;
+
+        let labels = LabelMap::from_raw(labels_buf, 1);
+        let data = ComponentData {
+            bbox: Aabb::new(Vec2us::new(5, 5), Vec2us::new(5, 5)),
+            label: 1,
+            area: 1,
+        };
+
+        let config = DeblendConfig {
+            min_separation: 1,
+            min_prominence: 0.1,
+            ..Default::default()
+        };
+        let peaks = find_local_maxima(&data, &pixels, &labels, &config);
+
+        assert_eq!(peaks.len(), 1, "Single pixel should be local max");
+        assert_eq!(peaks[0].pos, Vec2us::new(5, 5));
+    }
+
+    #[test]
+    fn test_equal_brightness_tie_breaking() {
+        // Two stars with exactly equal brightness - both should be found
+        let (pixels, labels, data) =
+            make_test_component(100, 100, &[(30, 50, 1.0, 2.5), (70, 50, 1.0, 2.5)]);
+
+        let config = DeblendConfig {
+            min_separation: 3,
+            min_prominence: 0.3,
+            ..Default::default()
+        };
+        let peaks = find_local_maxima(&data, &pixels, &labels, &config);
+
+        assert_eq!(
+            peaks.len(),
+            2,
+            "Both equal-brightness peaks should be found"
+        );
+    }
+
+    #[test]
+    fn test_voronoi_midpoint_assignment() {
+        // Pixel exactly between two peaks goes to first peak (deterministic)
+        let mut pixels = Buffer2::new_filled(100, 100, 0.0f32);
+        let mut labels_buf = Buffer2::new_filled(100, 100, 0u32);
+
+        // Create a horizontal line of pixels
+        for x in 20..80 {
+            pixels[(x, 50)] = 0.5;
+            labels_buf[(x, 50)] = 1;
+        }
+        // Two peaks at ends
+        pixels[(20, 50)] = 1.0;
+        pixels[(79, 50)] = 1.0;
+
+        let labels = LabelMap::from_raw(labels_buf, 1);
+        let data = ComponentData {
+            bbox: Aabb::new(Vec2us::new(20, 50), Vec2us::new(79, 50)),
+            label: 1,
+            area: 60,
+        };
+
+        let peaks = vec![
+            Pixel {
+                pos: Vec2us::new(20, 50),
+                value: 1.0,
+            },
+            Pixel {
+                pos: Vec2us::new(79, 50),
+                value: 1.0,
+            },
+        ];
+
+        let candidates = deblend_by_nearest_peak(&data, &pixels, &labels, &peaks);
+
+        assert_eq!(candidates.len(), 2);
+        // Total area should be conserved
+        let total_area: usize = candidates.iter().map(|c| c.area).sum();
+        assert_eq!(total_area, 60);
+        // Areas should be roughly equal (midpoint goes to one side)
+        assert!(candidates[0].area >= 29 && candidates[0].area <= 31);
+        assert!(candidates[1].area >= 29 && candidates[1].area <= 31);
+    }
+
+    #[test]
+    fn test_diagonal_neighbors() {
+        // Peak with diagonal neighbors only
+        let mut pixels = Buffer2::new_filled(10, 10, 0.0f32);
+        let mut labels_buf = Buffer2::new_filled(10, 10, 0u32);
+
+        // Center peak
+        pixels[(5, 5)] = 1.0;
+        labels_buf[(5, 5)] = 1;
+        // Diagonal neighbors only
+        pixels[(4, 4)] = 0.5;
+        labels_buf[(4, 4)] = 1;
+        pixels[(6, 6)] = 0.5;
+        labels_buf[(6, 6)] = 1;
+        pixels[(4, 6)] = 0.5;
+        labels_buf[(4, 6)] = 1;
+        pixels[(6, 4)] = 0.5;
+        labels_buf[(6, 4)] = 1;
+
+        let _labels = LabelMap::from_raw(labels_buf, 1);
+
+        let pixel = Pixel {
+            pos: Vec2us::new(5, 5),
+            value: 1.0,
+        };
+        assert!(
+            is_local_maximum(pixel, &pixels),
+            "Center should be local max with diagonal neighbors"
+        );
+    }
+
+    #[test]
+    fn test_all_corners_local_max() {
+        // Test all four corners can be local maxima
+        let mut pixels = Buffer2::new_filled(5, 5, 0.0f32);
+
+        // Set corners as peaks
+        pixels[(0, 0)] = 1.0;
+        pixels[(4, 0)] = 1.0;
+        pixels[(0, 4)] = 1.0;
+        pixels[(4, 4)] = 1.0;
+
+        let corners = [
+            Pixel {
+                pos: Vec2us::new(0, 0),
+                value: 1.0,
+            },
+            Pixel {
+                pos: Vec2us::new(4, 0),
+                value: 1.0,
+            },
+            Pixel {
+                pos: Vec2us::new(0, 4),
+                value: 1.0,
+            },
+            Pixel {
+                pos: Vec2us::new(4, 4),
+                value: 1.0,
+            },
+        ];
+
+        for corner in &corners {
+            assert!(
+                is_local_maximum(*corner, &pixels),
+                "Corner {:?} should be local max",
+                corner.pos
+            );
+        }
+    }
+
+    #[test]
+    fn test_zero_min_separation() {
+        // With min_separation=0, separation check always passes (dist² >= 0)
+        // Create two peaks that are well-separated (distinct local maxima)
+        let (pixels, labels, data) =
+            make_test_component(100, 100, &[(30, 50, 1.0, 2.0), (70, 50, 0.9, 2.0)]);
+
+        let config = DeblendConfig {
+            min_separation: 0,
+            min_prominence: 0.1,
+            ..Default::default()
+        };
+        let peaks = find_local_maxima(&data, &pixels, &labels, &config);
+
+        // With zero separation, no merging should occur - both peaks found
+        assert_eq!(peaks.len(), 2, "Zero separation should allow all peaks");
+    }
+
+    #[test]
+    fn test_bbox_contains_peak() {
+        // Each deblended candidate's bbox should contain its peak
+        let (pixels, labels, data) = make_test_component(
+            100,
+            100,
+            &[(25, 25, 1.0, 2.5), (75, 25, 0.9, 2.5), (50, 75, 0.8, 2.5)],
+        );
+
+        let config = DeblendConfig {
+            min_separation: 3,
+            min_prominence: 0.3,
+            ..Default::default()
+        };
+        let candidates = deblend_local_maxima(&data, &pixels, &labels, &config);
+
+        for candidate in &candidates {
+            assert!(
+                candidate.bbox.contains(candidate.peak),
+                "Candidate bbox {:?} should contain peak {:?}",
+                candidate.bbox,
+                candidate.peak
+            );
+        }
+    }
+
+    #[test]
+    fn test_peak_value_matches_pixel() {
+        // Candidate's peak_value should match the actual pixel value
+        let (pixels, labels, data) = make_test_component(100, 100, &[(50, 50, 1.0, 2.5)]);
+
+        let config = DeblendConfig::default();
+        let candidates = deblend_local_maxima(&data, &pixels, &labels, &config);
+
+        assert_eq!(candidates.len(), 1);
+        let candidate = &candidates[0];
+        let actual_value = pixels[(candidate.peak.x, candidate.peak.y)];
+        assert!(
+            (candidate.peak_value - actual_value).abs() < 1e-6,
+            "peak_value {} should match pixel value {}",
+            candidate.peak_value,
+            actual_value
+        );
+    }
 }
