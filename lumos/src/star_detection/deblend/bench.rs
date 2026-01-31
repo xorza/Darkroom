@@ -69,6 +69,7 @@ fn create_components_from_pixels(
 
 /// Save a synthetic dense field image for visual inspection.
 #[test]
+#[ignore]
 fn save_globular_cluster_image() {
     use image::GrayImage;
 

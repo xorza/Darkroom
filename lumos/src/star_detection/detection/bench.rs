@@ -5,6 +5,7 @@ use crate::common::{BitBuffer2, Buffer2};
 use crate::star_detection::background::{BackgroundConfig, BackgroundMap};
 use crate::star_detection::common::{dilate_mask, threshold_mask::create_threshold_mask};
 use crate::star_detection::config::DeblendConfig;
+use crate::testing::init_tracing;
 use crate::testing::synthetic::stamps::benchmark_star_field;
 use ::bench::quick_bench;
 use std::hint::black_box;
@@ -125,6 +126,8 @@ fn bench_extract_candidates_4k_dense_multithreshold(b: ::bench::Bencher) {
 
 #[quick_bench(warmup_iters = 1, iters = 3)]
 fn bench_extract_candidates_6k_globular_cluster(b: ::bench::Bencher) {
+    init_tracing();
+
     use crate::testing::synthetic::generate_globular_cluster;
 
     // 6K globular cluster with 50000 stars - extreme crowding

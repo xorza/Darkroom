@@ -143,11 +143,19 @@ pub(crate) fn extract_candidates(
 
     let max_area = deblend_config.max_area;
     let component_data = collect_component_data(label_map, pixels.width(), max_area);
+    let total_components = component_data.len();
+
+    tracing::debug!(
+        total_components,
+        max_area,
+        multi_threshold = deblend_config.is_multi_threshold(),
+        "Processing components for candidate extraction"
+    );
 
     // Process each component in parallel, deblending into multiple candidates.
     // Skip components that are too large - they can't be stars and would be
     // expensive to process (e.g., deblending a million-pixel component).
-    component_data
+    let candidates: Vec<StarCandidate> = component_data
         .into_par_iter()
         .filter(|data| data.area > 0 && data.area <= max_area)
         .flat_map_iter(|data| {
@@ -175,7 +183,14 @@ pub(crate) fn extract_candidates(
                 )
             }
         })
-        .collect()
+        .collect();
+
+    tracing::debug!(
+        candidates = candidates.len(),
+        "Candidate extraction complete"
+    );
+
+    candidates
 }
 
 /// Collect component metadata (bounding boxes and areas) from label map.
