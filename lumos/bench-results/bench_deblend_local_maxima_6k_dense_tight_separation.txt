@@ -1,0 +1,6 @@
+name: bench_deblend_local_maxima_6k_dense_tight_separation
+mean: 651.398194ms
+min: 645.947245ms
+max: 664.121802ms
+median: 647.245122ms
+iterations: 5

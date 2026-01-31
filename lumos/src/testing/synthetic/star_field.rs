@@ -505,6 +505,122 @@ pub fn faint_stars_config() -> StarFieldConfig {
     }
 }
 
+/// Generate a globular cluster-like dense core region.
+///
+/// Creates an extremely dense star field with:
+/// - A bright concentrated core with exponentially increasing star density
+/// - Stars getting brighter toward the center
+/// - Many overlapping/blended stars forming complex connected components
+/// - A diffuse glow from unresolved stars in the core
+///
+/// This is useful for stress-testing deblending algorithms with realistic
+/// crowded field conditions similar to globular clusters or galactic bulge regions.
+///
+/// # Arguments
+/// * `width` - Image width in pixels
+/// * `height` - Image height in pixels
+/// * `num_stars` - Number of stars to generate (typically 20000-100000)
+/// * `seed` - Random seed for reproducibility
+///
+/// # Returns
+/// Buffer with pixel values in range 0.0-1.0
+pub fn generate_globular_cluster(
+    width: usize,
+    height: usize,
+    num_stars: usize,
+    seed: u64,
+) -> Buffer2<f32> {
+    let background = 0.02f32;
+    let mut pixels = vec![background; width * height];
+
+    // LCG for reproducible random positions
+    let mut state = seed;
+    let mut next_rand = || -> f64 {
+        state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+        // Use full 64-bit state for better distribution
+        (state as f64) / (u64::MAX as f64)
+    };
+
+    let center_x = width as f64 / 2.0;
+    let center_y = height as f64 / 2.0;
+    let core_radius = (width.min(height) as f64) * 0.05; // Dense core
+    let halo_radius = (width.min(height) as f64) * 0.35; // Extended halo
+
+    // Generate stars with radial distribution using exponential profile
+    // More stars near center, density falls off exponentially
+    for _ in 0..num_stars {
+        // Use Box-Muller for 2D Gaussian distribution centered on cluster
+        // Scale parameter controls the concentration
+        let u1 = next_rand().max(1e-10);
+        let u2 = next_rand();
+
+        // Exponential radial distribution: r = -scale * ln(u)
+        // This gives high density at center
+        let scale = core_radius * 2.5;
+        let r = -scale * u1.ln();
+        let r = r.min(halo_radius);
+
+        // Random angle (full circle)
+        let theta = u2 * 2.0 * std::f64::consts::PI;
+
+        let cx = center_x + r * theta.cos();
+        let cy = center_y + r * theta.sin();
+
+        // Skip if outside image bounds
+        if cx < 10.0 || cx >= (width - 10) as f64 || cy < 10.0 || cy >= (height - 10) as f64 {
+            continue;
+        }
+
+        // Brightness increases toward center (brighter giants in core)
+        let dist_from_center = ((cx - center_x).powi(2) + (cy - center_y).powi(2)).sqrt();
+        let brightness_boost = 1.0 + 2.0 * (1.0 - (dist_from_center / halo_radius).min(1.0));
+        let base_brightness = 0.15 + next_rand() * 0.6;
+        let brightness = (base_brightness * brightness_boost).min(1.0) as f32;
+
+        // Smaller sigma for tighter stars, slight variation
+        let sigma = 1.8 + next_rand() as f32 * 0.8;
+        let two_sigma_sq = 2.0 * sigma * sigma;
+
+        let radius = (sigma * 4.0).ceil() as i32;
+        let cx_i = cx as i32;
+        let cy_i = cy as i32;
+
+        for dy in -radius..=radius {
+            for dx in -radius..=radius {
+                let x = (cx_i + dx) as usize;
+                let y = (cy_i + dy) as usize;
+                if x < width && y < height {
+                    let fx = x as f32 - cx as f32;
+                    let fy = y as f32 - cy as f32;
+                    let r2 = fx * fx + fy * fy;
+                    let value = brightness * (-r2 / two_sigma_sq).exp();
+                    pixels[y * width + x] += value;
+                }
+            }
+        }
+    }
+
+    // Add faint diffuse glow in the core (unresolved stars)
+    let glow_sigma = core_radius as f32 * 2.0;
+    let two_glow_sigma_sq = 2.0 * glow_sigma * glow_sigma;
+    for y in 0..height {
+        for x in 0..width {
+            let dx = x as f32 - center_x as f32;
+            let dy = y as f32 - center_y as f32;
+            let r2 = dx * dx + dy * dy;
+            let glow = 0.1 * (-r2 / two_glow_sigma_sq).exp();
+            pixels[y * width + x] += glow;
+        }
+    }
+
+    // Clamp values
+    for p in &mut pixels {
+        *p = p.min(1.0);
+    }
+
+    Buffer2::new(width, height, pixels)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

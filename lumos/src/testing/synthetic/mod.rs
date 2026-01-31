@@ -56,8 +56,8 @@ pub use backgrounds::{
 };
 pub use star_field::{
     CrowdingType, ElongationType, GroundTruthStar, StarFieldConfig, crowded_cluster_config,
-    dense_field_config, elliptical_stars_config, faint_stars_config, generate_star_field,
-    sparse_field_config,
+    dense_field_config, elliptical_stars_config, faint_stars_config, generate_globular_cluster,
+    generate_star_field, sparse_field_config,
 };
 pub use star_profiles::{fwhm_to_sigma, render_gaussian_star};
 pub use transforms::{

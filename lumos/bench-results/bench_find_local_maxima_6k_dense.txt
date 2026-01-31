@@ -1,0 +1,6 @@
+name: bench_find_local_maxima_6k_dense
+mean: 16.007148ms
+min: 15.654633ms
+max: 16.424523ms
+median: 15.837502ms
+iterations: 5
