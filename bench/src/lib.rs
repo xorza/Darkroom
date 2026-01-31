@@ -171,7 +171,7 @@ impl Bencher {
 
         #[cfg(debug_assertions)]
         println!(
-            "\n{}{}⚠️ WARNING:{} DEBUG MODE - benchmarks should be run with --release\n",
+            "\n{}{}⚠️  WARNING:{} DEBUG MODE - benchmarks should be run with --release\n",
             colors::YELLOW,
             colors::BOLD,
             colors::RESET
