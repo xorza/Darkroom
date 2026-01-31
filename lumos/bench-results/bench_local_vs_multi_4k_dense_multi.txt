@@ -1,0 +1,6 @@
+name: bench_local_vs_multi_4k_dense_multi
+mean: 684.445024ms
+min: 635.944904ms
+max: 780.567103ms
+median: 636.823065ms
+iterations: 3

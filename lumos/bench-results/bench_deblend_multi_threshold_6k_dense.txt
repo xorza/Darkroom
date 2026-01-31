@@ -1,0 +1,7 @@
+name: bench_deblend_multi_threshold_6k_dense
+mean: 1.340271644s
+min: 1.334468386s
+max: 1.345463382s
+median: 1.340883166s
+iterations: 3
+vs_previous: 1.511519786s -> 1.340271644s (-11.3%) faster

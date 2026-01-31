@@ -183,6 +183,10 @@ fn bench_deblend_local_maxima_6k_dense_tight_separation(b: ::bench::Bencher) {
 fn bench_deblend_multi_threshold_6k_dense(b: ::bench::Bencher) {
     let pixels = generate_globular_cluster(6144, 6144, 50000, 42);
     let (labels, components) = create_components_from_pixels(&pixels, 0.05);
+
+    // Filter out huge components - multi-threshold is O(n²) and not practical for >100k pixels
+    let reasonable_components: Vec<_> = components.iter().filter(|c| c.area < 100_000).collect();
+
     let config = DeblendConfig {
         n_thresholds: 32,
         min_contrast: 0.005,
@@ -191,7 +195,7 @@ fn bench_deblend_multi_threshold_6k_dense(b: ::bench::Bencher) {
     };
 
     b.bench(|| {
-        for component in &components {
+        for component in &reasonable_components {
             black_box(deblend_multi_threshold(
                 black_box(component),
                 black_box(&pixels),
@@ -206,6 +210,10 @@ fn bench_deblend_multi_threshold_6k_dense(b: ::bench::Bencher) {
 fn bench_deblend_multi_threshold_6k_dense_fewer_levels(b: ::bench::Bencher) {
     let pixels = generate_globular_cluster(6144, 6144, 50000, 42);
     let (labels, components) = create_components_from_pixels(&pixels, 0.05);
+
+    // Filter out huge components - multi-threshold is O(n²) and not practical for >100k pixels
+    let reasonable_components: Vec<_> = components.iter().filter(|c| c.area < 100_000).collect();
+
     let config = DeblendConfig {
         n_thresholds: 16,
         min_contrast: 0.005,
@@ -214,7 +222,7 @@ fn bench_deblend_multi_threshold_6k_dense_fewer_levels(b: ::bench::Bencher) {
     };
 
     b.bench(|| {
-        for component in &components {
+        for component in &reasonable_components {
             black_box(deblend_multi_threshold(
                 black_box(component),
                 black_box(&pixels),
@@ -251,6 +259,10 @@ fn bench_local_vs_multi_4k_dense_local(b: ::bench::Bencher) {
 fn bench_local_vs_multi_4k_dense_multi(b: ::bench::Bencher) {
     let pixels = generate_globular_cluster(4096, 4096, 20000, 42);
     let (labels, components) = create_components_from_pixels(&pixels, 0.05);
+
+    // Filter out huge components - multi-threshold is O(n²) and not practical for >100k pixels
+    let reasonable_components: Vec<_> = components.iter().filter(|c| c.area < 100_000).collect();
+
     let config = DeblendConfig {
         n_thresholds: 32,
         min_contrast: 0.005,
@@ -259,7 +271,7 @@ fn bench_local_vs_multi_4k_dense_multi(b: ::bench::Bencher) {
     };
 
     b.bench(|| {
-        for component in &components {
+        for component in &reasonable_components {
             black_box(deblend_multi_threshold(
                 black_box(component),
                 black_box(&pixels),
