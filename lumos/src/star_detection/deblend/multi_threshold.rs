@@ -7,7 +7,8 @@
 //!
 //! Reference: Bertin & Arnouts (1996), A&AS 117, 393
 
-use hashbrown::HashMap;
+use arrayvec::ArrayVec;
+use hashbrown::{HashMap, HashSet};
 use smallvec::SmallVec;
 
 use super::{ComponentData, DeblendedCandidate, MAX_PEAKS, Pixel};
@@ -15,6 +16,13 @@ use crate::common::Buffer2;
 use crate::math::{Aabb, Vec2us};
 use crate::star_detection::config::DeblendConfig;
 use crate::star_detection::detection::LabelMap;
+
+// ============================================================================
+// Constants
+// ============================================================================
+
+/// Maximum children per node (same as MAX_PEAKS since each child becomes a candidate).
+const MAX_CHILDREN: usize = MAX_PEAKS;
 
 // ============================================================================
 // Types
@@ -28,7 +36,31 @@ struct DeblendNode {
     /// Total flux in this branch.
     flux: f32,
     /// Child nodes (branches that split from this node at higher threshold).
-    children: Vec<usize>,
+    /// Uses SmallVec to avoid heap allocation for common case (0-2 children).
+    children: SmallVec<[usize; MAX_CHILDREN]>,
+}
+
+/// Reusable buffers for tree building to avoid repeated allocations.
+struct TreeBuildBuffers {
+    /// Pixels above current threshold.
+    above_threshold: Vec<Pixel>,
+    /// Pixels belonging to a parent that are above threshold.
+    parent_pixels_above: Vec<Pixel>,
+    /// BFS queue for connected component finding.
+    bfs_queue: Vec<Pixel>,
+    /// Temporary storage for regions.
+    regions: Vec<Vec<Pixel>>,
+}
+
+impl TreeBuildBuffers {
+    fn new(capacity: usize) -> Self {
+        Self {
+            above_threshold: Vec::with_capacity(capacity),
+            parent_pixels_above: Vec::with_capacity(capacity),
+            bfs_queue: Vec::with_capacity(capacity.min(1024)),
+            regions: Vec::with_capacity(MAX_PEAKS),
+        }
+    }
 }
 
 // ============================================================================
@@ -66,7 +98,6 @@ pub fn deblend_multi_threshold(
     }
 
     // If min_contrast >= 1.0, deblending is effectively disabled
-    // (no branch can have 100% of flux)
     if config.min_contrast >= 1.0 {
         return smallvec::smallvec![create_single_object(data, pixels, labels)];
     }
@@ -132,13 +163,7 @@ fn build_deblend_tree(
     }
 
     // Use exponential spacing: threshold[i] = low * (high/low)^(i/n)
-    // This gives finer resolution near the detection threshold where
-    // blended objects are more likely to separate.
     let ratio = (high / low).max(1.0);
-    let threshold_iter = (0..=n_thresholds).map(|i| {
-        let t = i as f32 / n_thresholds.max(1) as f32;
-        low * ratio.powf(t)
-    });
 
     let mut tree: Vec<DeblendNode> = Vec::new();
 
@@ -148,30 +173,48 @@ fn build_deblend_tree(
     // Track which node each pixel belongs to at current level
     let mut pixel_to_node: HashMap<Vec2us, usize> = HashMap::with_capacity(component_pixels.len());
 
-    // Process each threshold level from low to high
-    for (level, threshold) in threshold_iter.enumerate() {
-        let above_threshold: Vec<Pixel> = component_pixels
-            .iter()
-            .filter(|p| p.value >= threshold)
-            .copied()
-            .collect();
+    // Reusable buffers to avoid allocations per threshold level
+    let mut buffers = TreeBuildBuffers::new(component_pixels.len());
 
-        if above_threshold.is_empty() {
+    // Visited set for connected component finding (reused across calls)
+    let mut visited: HashSet<Vec2us> = HashSet::with_capacity(component_pixels.len());
+
+    // Process each threshold level from low to high
+    for level in 0..=n_thresholds {
+        let t = level as f32 / n_thresholds.max(1) as f32;
+        let threshold = low * ratio.powf(t);
+
+        // Filter pixels above threshold (reuse buffer)
+        buffers.above_threshold.clear();
+        buffers
+            .above_threshold
+            .extend(component_pixels.iter().filter(|p| p.value >= threshold));
+
+        if buffers.above_threshold.is_empty() {
             continue;
         }
 
-        let regions = find_connected_regions(&above_threshold);
+        // Find connected regions (reuses visited set and queue)
+        find_connected_regions_reuse(
+            &buffers.above_threshold,
+            &mut buffers.regions,
+            &mut visited,
+            &mut buffers.bfs_queue,
+        );
 
         if level == 0 {
-            process_root_level(&mut tree, &mut pixel_to_node, regions);
+            process_root_level(&mut tree, &mut pixel_to_node, &buffers.regions);
         } else {
             process_higher_level(
                 &mut tree,
                 &mut pixel_to_node,
                 &component_pixels,
-                regions,
+                &buffers.regions,
                 threshold,
                 min_separation,
+                &mut buffers.parent_pixels_above,
+                &mut visited,
+                &mut buffers.bfs_queue,
             );
         }
     }
@@ -183,68 +226,76 @@ fn build_deblend_tree(
 fn process_root_level(
     tree: &mut Vec<DeblendNode>,
     pixel_to_node: &mut HashMap<Vec2us, usize>,
-    regions: Vec<Vec<Pixel>>,
+    regions: &[Vec<Pixel>],
 ) {
     for region in regions {
         let node_idx = tree.len();
-        let peak = find_region_peak(&region);
+        let peak = find_region_peak(region);
         let flux = region.iter().map(|p| p.value).sum();
 
-        for p in &region {
+        for p in region {
             pixel_to_node.insert(p.pos, node_idx);
         }
 
         tree.push(DeblendNode {
             peak,
             flux,
-            children: Vec::new(),
+            children: SmallVec::new(),
         });
     }
 }
 
 /// Process higher threshold levels - check for region splits.
+#[allow(clippy::too_many_arguments)]
 fn process_higher_level(
     tree: &mut Vec<DeblendNode>,
     pixel_to_node: &mut HashMap<Vec2us, usize>,
     component_pixels: &[Pixel],
-    regions: Vec<Vec<Pixel>>,
+    regions: &[Vec<Pixel>],
     threshold: f32,
     min_separation: usize,
+    parent_pixels_buf: &mut Vec<Pixel>,
+    visited: &mut HashSet<Vec2us>,
+    bfs_queue: &mut Vec<Pixel>,
 ) {
     for region in regions {
-        // Find which parent node(s) this region comes from
-        let mut parent_nodes: HashMap<usize, Vec<Pixel>> = HashMap::new();
+        // Find the single parent node for this region
+        // (all pixels in a connected region should come from same parent)
+        let parent_idx = match find_single_parent(region, pixel_to_node) {
+            Some(idx) => idx,
+            None => continue, // Skip if no parent or multiple parents
+        };
 
-        for &p in &region {
-            if let Some(&parent_idx) = pixel_to_node.get(&p.pos) {
-                parent_nodes.entry(parent_idx).or_default().push(p);
-            }
-        }
-
-        // Skip if region spans multiple parents (shouldn't happen)
-        if parent_nodes.len() != 1 {
-            continue;
-        }
-
-        let (&parent_idx, _) = parent_nodes.iter().next().unwrap();
-
-        // Find all pixels belonging to this parent that are above threshold
-        let parent_pixels_above: Vec<Pixel> = component_pixels
+        // Count pixels belonging to this parent that are above threshold
+        // (avoid allocation by counting first)
+        let parent_above_count = component_pixels
             .iter()
             .filter(|p| pixel_to_node.get(&p.pos) == Some(&parent_idx) && p.value >= threshold)
-            .copied()
-            .collect();
+            .count();
 
         // Check if multiple distinct regions formed from same parent
-        if region.len() < parent_pixels_above.len() {
-            let child_regions = find_connected_regions(&parent_pixels_above);
+        if region.len() < parent_above_count {
+            // Collect parent pixels above threshold (reuse buffer)
+            parent_pixels_buf.clear();
+            parent_pixels_buf.extend(
+                component_pixels
+                    .iter()
+                    .filter(|p| {
+                        pixel_to_node.get(&p.pos) == Some(&parent_idx) && p.value >= threshold
+                    })
+                    .copied(),
+            );
+
+            // Find child regions (reuse buffers)
+            let mut child_regions: ArrayVec<Vec<Pixel>, MAX_CHILDREN> = ArrayVec::new();
+            find_connected_regions_into(parent_pixels_buf, &mut child_regions, visited, bfs_queue);
 
             if child_regions.len() > 1 {
                 create_child_nodes(
                     tree,
                     pixel_to_node,
                     parent_idx,
-                    child_regions,
+                    &child_regions,
                     min_separation,
                 );
             }
@@ -252,21 +303,43 @@ fn process_higher_level(
     }
 }
 
+/// Find the single parent node for a region, or None if multiple/no parents.
+#[inline]
+fn find_single_parent(region: &[Pixel], pixel_to_node: &HashMap<Vec2us, usize>) -> Option<usize> {
+    let mut parent: Option<usize> = None;
+
+    for p in region {
+        if let Some(&idx) = pixel_to_node.get(&p.pos) {
+            match parent {
+                None => parent = Some(idx),
+                Some(existing) if existing != idx => return None, // Multiple parents
+                _ => {}
+            }
+        }
+    }
+
+    parent
+}
+
 /// Create child nodes when a split is detected.
 fn create_child_nodes(
     tree: &mut Vec<DeblendNode>,
     pixel_to_node: &mut HashMap<Vec2us, usize>,
     parent_idx: usize,
-    child_regions: Vec<Vec<Pixel>>,
+    child_regions: &[Vec<Pixel>],
     min_separation: usize,
 ) {
-    let mut child_indices = Vec::new();
+    let mut child_indices: ArrayVec<usize, MAX_CHILDREN> = ArrayVec::new();
 
     for child_region in child_regions {
-        let child_peak = find_region_peak(&child_region);
+        if child_indices.is_full() {
+            break;
+        }
+
+        let child_peak = find_region_peak(child_region);
 
         // Check minimum separation from existing children
-        let too_close = child_indices.iter().any(|&idx: &usize| {
+        let too_close = child_indices.iter().any(|&idx| {
             let sibling = &tree[idx];
             let dx = (child_peak.pos.x as i32 - sibling.peak.pos.x as i32).unsigned_abs() as usize;
             let dy = (child_peak.pos.y as i32 - sibling.peak.pos.y as i32).unsigned_abs() as usize;
@@ -280,21 +353,21 @@ fn create_child_nodes(
         let child_idx = tree.len();
         let child_flux = child_region.iter().map(|p| p.value).sum();
 
-        for p in &child_region {
+        for p in child_region {
             pixel_to_node.insert(p.pos, child_idx);
         }
 
         tree.push(DeblendNode {
             peak: child_peak,
             flux: child_flux,
-            children: Vec::new(),
+            children: SmallVec::new(),
         });
 
         child_indices.push(child_idx);
     }
 
     // Update parent's children
-    tree[parent_idx].children = child_indices;
+    tree[parent_idx].children = child_indices.into_iter().collect();
 }
 
 // ============================================================================
@@ -304,29 +377,58 @@ fn create_child_nodes(
 /// Find significant branches (leaves) that pass the contrast criterion.
 ///
 /// Returns indices of nodes that should be treated as separate objects.
-fn find_significant_branches(tree: &[DeblendNode], min_contrast: f32) -> Vec<usize> {
+fn find_significant_branches(
+    tree: &[DeblendNode],
+    min_contrast: f32,
+) -> SmallVec<[usize; MAX_PEAKS]> {
     if tree.is_empty() {
-        return Vec::new();
+        return SmallVec::new();
     }
 
     // Find root nodes (nodes that are not children of any other node)
-    let all_children: Vec<usize> = tree
-        .iter()
-        .flat_map(|n| n.children.iter().copied())
-        .collect();
-    let roots: Vec<usize> = (0..tree.len())
-        .filter(|&i| !all_children.contains(&i))
-        .collect();
+    // Use a fixed-size set for small trees
+    let mut is_child = [false; 64]; // Supports trees up to 64 nodes without allocation
+    let use_array = tree.len() <= 64;
 
-    let mut leaves = Vec::new();
+    let mut child_set: HashSet<usize> = HashSet::new();
 
-    for &root_idx in &roots {
-        collect_significant_leaves(tree, root_idx, min_contrast, &mut leaves);
+    for node in tree {
+        for &child_idx in &node.children {
+            if use_array {
+                is_child[child_idx] = true;
+            } else {
+                child_set.insert(child_idx);
+            }
+        }
+    }
+
+    let mut leaves: SmallVec<[usize; MAX_PEAKS]> = SmallVec::new();
+
+    // Process each root
+    for i in 0..tree.len() {
+        let is_root = if use_array {
+            !is_child.get(i).copied().unwrap_or(false)
+        } else {
+            !child_set.contains(&i)
+        };
+
+        if is_root {
+            collect_significant_leaves(tree, i, min_contrast, &mut leaves);
+        }
     }
 
     // If no leaves found (all contrast criteria failed), return roots
     if leaves.is_empty() {
-        return roots;
+        for i in 0..tree.len() {
+            let is_root = if use_array {
+                !is_child.get(i).copied().unwrap_or(false)
+            } else {
+                !child_set.contains(&i)
+            };
+            if is_root {
+                leaves.push(i);
+            }
+        }
     }
 
     leaves
@@ -340,35 +442,37 @@ fn collect_significant_leaves(
     tree: &[DeblendNode],
     node_idx: usize,
     min_contrast: f32,
-    leaves: &mut Vec<usize>,
+    leaves: &mut SmallVec<[usize; MAX_PEAKS]>,
 ) {
     let node = &tree[node_idx];
 
     if node.children.is_empty() {
-        leaves.push(node_idx);
+        if leaves.len() < MAX_PEAKS {
+            leaves.push(node_idx);
+        }
         return;
     }
 
     // Check if children pass contrast criterion relative to THIS node's flux
     let parent_flux = node.flux;
-    let children_pass_contrast: Vec<bool> = node
-        .children
-        .iter()
-        .map(|&child_idx| {
-            let child_flux = tree[child_idx].flux;
-            child_flux >= min_contrast * parent_flux
-        })
-        .collect();
+    let min_flux = min_contrast * parent_flux;
 
-    let num_pass = children_pass_contrast.iter().filter(|&&b| b).count();
+    let mut num_pass = 0;
+    for &child_idx in &node.children {
+        if tree[child_idx].flux >= min_flux {
+            num_pass += 1;
+        }
+    }
 
     if num_pass <= 1 {
         // Not enough children pass contrast - treat this node as a leaf
-        leaves.push(node_idx);
+        if leaves.len() < MAX_PEAKS {
+            leaves.push(node_idx);
+        }
     } else {
         // Multiple children pass - recurse into each
-        for (i, &child_idx) in node.children.iter().enumerate() {
-            if children_pass_contrast[i] {
+        for &child_idx in &node.children {
+            if tree[child_idx].flux >= min_flux {
                 collect_significant_leaves(tree, child_idx, min_contrast, leaves);
             }
         }
@@ -391,10 +495,14 @@ fn assign_pixels_to_objects(
         return smallvec::smallvec![create_single_object(data, pixels, labels)];
     }
 
-    // Get peak positions for each leaf
-    let peaks: SmallVec<[Pixel; MAX_PEAKS]> = leaf_indices.iter().map(|&i| tree[i].peak).collect();
+    // Get peak positions for each leaf (stack allocated)
+    let peaks: ArrayVec<Pixel, MAX_PEAKS> = leaf_indices
+        .iter()
+        .take(MAX_PEAKS)
+        .map(|&i| tree[i].peak)
+        .collect();
 
-    // Initialize objects
+    // Initialize objects (stack allocated)
     let mut objects: SmallVec<[DeblendedCandidate; MAX_PEAKS]> = peaks
         .iter()
         .map(|p| DeblendedCandidate {
@@ -440,10 +548,130 @@ fn find_nearest_peak_index(pos: Vec2us, peaks: &[Pixel]) -> usize {
 }
 
 // ============================================================================
+// Connected Component Finding
+// ============================================================================
+
+/// Find connected regions, reusing provided buffers.
+fn find_connected_regions_reuse(
+    pixels: &[Pixel],
+    regions: &mut Vec<Vec<Pixel>>,
+    visited: &mut HashSet<Vec2us>,
+    queue: &mut Vec<Pixel>,
+) {
+    regions.clear();
+    visited.clear();
+
+    if pixels.is_empty() {
+        return;
+    }
+
+    // Build pixel lookup set
+    let pixel_set: HashMap<Vec2us, f32> = pixels.iter().map(|p| (p.pos, p.value)).collect();
+
+    for p in pixels {
+        if visited.contains(&p.pos) {
+            continue;
+        }
+
+        // BFS to find connected component
+        let mut region = Vec::new();
+        queue.clear();
+        queue.push(*p);
+        visited.insert(p.pos);
+
+        while let Some(current) = queue.pop() {
+            region.push(current);
+            visit_neighbors(current.pos, &pixel_set, visited, queue);
+        }
+
+        regions.push(region);
+    }
+}
+
+/// Find connected regions into an ArrayVec (limited capacity).
+fn find_connected_regions_into<const N: usize>(
+    pixels: &[Pixel],
+    regions: &mut ArrayVec<Vec<Pixel>, N>,
+    visited: &mut HashSet<Vec2us>,
+    queue: &mut Vec<Pixel>,
+) {
+    regions.clear();
+    visited.clear();
+
+    if pixels.is_empty() {
+        return;
+    }
+
+    let pixel_set: HashMap<Vec2us, f32> = pixels.iter().map(|p| (p.pos, p.value)).collect();
+
+    for p in pixels {
+        if regions.is_full() {
+            break;
+        }
+
+        if visited.contains(&p.pos) {
+            continue;
+        }
+
+        let mut region = Vec::new();
+        queue.clear();
+        queue.push(*p);
+        visited.insert(p.pos);
+
+        while let Some(current) = queue.pop() {
+            region.push(current);
+            visit_neighbors(current.pos, &pixel_set, visited, queue);
+        }
+
+        regions.push(region);
+    }
+}
+
+/// Visit 8-connected neighbors and add unvisited ones to the queue.
+#[inline]
+fn visit_neighbors(
+    pos: Vec2us,
+    pixel_set: &HashMap<Vec2us, f32>,
+    visited: &mut HashSet<Vec2us>,
+    queue: &mut Vec<Pixel>,
+) {
+    for dy in -1i32..=1 {
+        for dx in -1i32..=1 {
+            if dx == 0 && dy == 0 {
+                continue;
+            }
+
+            let nx = pos.x as i32 + dx;
+            let ny = pos.y as i32 + dy;
+
+            // Skip negative coordinates
+            if nx < 0 || ny < 0 {
+                continue;
+            }
+
+            let npos = Vec2us::new(nx as usize, ny as usize);
+
+            if visited.contains(&npos) {
+                continue;
+            }
+
+            if let Some(&nv) = pixel_set.get(&npos) {
+                visited.insert(npos);
+                queue.push(Pixel {
+                    pos: npos,
+                    value: nv,
+                });
+            }
+        }
+    }
+}
+
+// ============================================================================
 // Helper Functions
 // ============================================================================
 
 /// Find the peak (brightest pixel) in a region.
+#[inline]
 fn find_region_peak(region: &[Pixel]) -> Pixel {
     region
         .iter()
@@ -459,63 +687,8 @@ fn find_region_peak(region: &[Pixel]) -> Pixel {
         })
 }
 
-/// Find connected regions within a set of pixels using 8-connectivity.
-fn find_connected_regions(pixels: &[Pixel]) -> Vec<Vec<Pixel>> {
-    if pixels.is_empty() {
-        return Vec::new();
-    }
-
-    let pixel_set: HashMap<Vec2us, f32> = pixels.iter().map(|p| (p.pos, p.value)).collect();
-    let mut visited: HashMap<Vec2us, bool> = HashMap::new();
-    let mut regions = Vec::new();
-
-    for p in pixels {
-        if visited.get(&p.pos).is_some_and(|&b| b) {
-            continue;
-        }
-
-        // BFS to find connected component
-        let mut region = Vec::new();
-        let mut queue = vec![*p];
-        visited.insert(p.pos, true);
-
-        while let Some(current) = queue.pop() {
-            region.push(current);
-
-            // Check 8 neighbors
-            for dy in -1i32..=1 {
-                for dx in -1i32..=1 {
-                    if dx == 0 && dy == 0 {
-                        continue;
-                    }
-
-                    let npos = Vec2us::new(
-                        (current.pos.x as i32 + dx) as usize,
-                        (current.pos.y as i32 + dy) as usize,
-                    );
-
-                    if visited.get(&npos).is_some_and(|&b| b) {
-                        continue;
-                    }
-
-                    if let Some(&nv) = pixel_set.get(&npos) {
-                        visited.insert(npos, true);
-                        queue.push(Pixel {
-                            pos: npos,
-                            value: nv,
-                        });
-                    }
-                }
-            }
-        }
-
-        regions.push(region);
-    }
-
-    regions
-}
-
 /// Create a single object from all pixels (no deblending).
+#[inline]
 fn create_single_object(
     data: &ComponentData,
     pixels: &Buffer2<f32>,
@@ -993,5 +1166,234 @@ mod tests {
             1,
             "Flat profile should not deblend into multiple objects"
         );
+    }
+
+    // ========================================================================
+    // Additional tests for optimized code paths
+    // ========================================================================
+
+    #[test]
+    fn test_many_stars_max_peaks_limit() {
+        // Create more stars than MAX_PEAKS to test limiting behavior
+        let stars: Vec<_> = (0..12)
+            .map(|i| (15 + i * 12, 50usize, 1.0 - i as f32 * 0.05, 2.0f32))
+            .collect();
+
+        let (pixels, labels, data) = make_test_component(180, 100, &stars);
+
+        let config = DeblendConfig {
+            n_thresholds: 32,
+            min_contrast: 0.005,
+            min_separation: 3,
+            ..Default::default()
+        };
+
+        let result = deblend_multi_threshold(&data, &pixels, &labels, &config);
+
+        // Should not exceed MAX_PEAKS
+        assert!(
+            result.len() <= MAX_PEAKS,
+            "Should not exceed MAX_PEAKS ({}), got {}",
+            MAX_PEAKS,
+            result.len()
+        );
+
+        // Area should still be conserved
+        let total_area: usize = result.iter().map(|o| o.area).sum();
+        assert_eq!(total_area, data.area, "Area should be conserved");
+    }
+
+    #[test]
+    fn test_large_tree_over_64_nodes() {
+        // Create a scenario that might produce > 64 nodes to test HashSet fallback
+        // Use many small stars that will create many tree nodes
+        let mut stars = Vec::new();
+        for row in 0..4 {
+            for col in 0..4 {
+                let x = 20 + col * 25;
+                let y = 20 + row * 25;
+                let amp = 1.0 - (row * 4 + col) as f32 * 0.03;
+                stars.push((x, y, amp, 2.0f32));
+            }
+        }
+
+        let (pixels, labels, data) = make_test_component(150, 150, &stars);
+
+        let config = DeblendConfig {
+            n_thresholds: 64, // More thresholds = more potential nodes
+            min_contrast: 0.005,
+            min_separation: 3,
+            ..Default::default()
+        };
+
+        let result = deblend_multi_threshold(&data, &pixels, &labels, &config);
+
+        // Should find multiple objects
+        assert!(result.len() >= 2, "Should find multiple objects");
+
+        // Area conservation
+        let total_area: usize = result.iter().map(|o| o.area).sum();
+        assert_eq!(total_area, data.area, "Area should be conserved");
+    }
+
+    #[test]
+    fn test_buffer_reuse_consistency() {
+        // Run the same deblending multiple times to ensure buffer reuse doesn't cause issues
+        let (pixels, labels, data) =
+            make_test_component(100, 100, &[(30, 50, 1.0, 2.5), (70, 50, 0.8, 2.5)]);
+
+        let config = DeblendConfig {
+            n_thresholds: 32,
+            min_contrast: 0.005,
+            min_separation: 3,
+            ..Default::default()
+        };
+
+        let result1 = deblend_multi_threshold(&data, &pixels, &labels, &config);
+        let result2 = deblend_multi_threshold(&data, &pixels, &labels, &config);
+        let result3 = deblend_multi_threshold(&data, &pixels, &labels, &config);
+
+        // All runs should produce identical results
+        assert_eq!(result1.len(), result2.len());
+        assert_eq!(result2.len(), result3.len());
+
+        for i in 0..result1.len() {
+            assert_eq!(result1[i].peak, result2[i].peak);
+            assert_eq!(result2[i].peak, result3[i].peak);
+            assert_eq!(result1[i].area, result2[i].area);
+            assert_eq!(result2[i].area, result3[i].area);
+        }
+    }
+
+    #[test]
+    fn test_connected_regions_complex_shape() {
+        // Test with a dumbbell-shaped component (two blobs connected by thin bridge)
+        // The two blobs have distinct peaks that should be deblended
+        let (pixels, labels, data) = make_test_component(
+            100,
+            50,
+            &[
+                (20, 25, 1.0, 3.0), // Left blob
+                (80, 25, 0.9, 3.0), // Right blob
+            ],
+        );
+
+        let config = DeblendConfig {
+            n_thresholds: 32,
+            min_contrast: 0.005,
+            min_separation: 3,
+            ..Default::default()
+        };
+
+        let result = deblend_multi_threshold(&data, &pixels, &labels, &config);
+
+        // Should find both peaks
+        assert_eq!(result.len(), 2, "Should find both peaks");
+
+        // Area conservation
+        let total_area: usize = result.iter().map(|o| o.area).sum();
+        assert_eq!(total_area, data.area, "Area should be conserved");
+
+        // Peaks should be at expected positions
+        let mut peak_xs: Vec<_> = result.iter().map(|c| c.peak.x).collect();
+        peak_xs.sort();
+        assert!((peak_xs[0] as i32 - 20).abs() <= 1);
+        assert!((peak_xs[1] as i32 - 80).abs() <= 1);
+    }
+
+    #[test]
+    fn test_bbox_contains_all_peaks() {
+        // Verify that each deblended object's bbox contains its peak
+        let (pixels, labels, data) = make_test_component(
+            150,
+            100,
+            &[(30, 30, 1.0, 2.5), (75, 50, 0.9, 2.5), (120, 70, 0.8, 2.5)],
+        );
+
+        let config = DeblendConfig {
+            n_thresholds: 32,
+            min_contrast: 0.005,
+            min_separation: 3,
+            ..Default::default()
+        };
+
+        let result = deblend_multi_threshold(&data, &pixels, &labels, &config);
+
+        for candidate in &result {
+            assert!(
+                candidate.bbox.contains(candidate.peak),
+                "Candidate bbox {:?} should contain peak {:?}",
+                candidate.bbox,
+                candidate.peak
+            );
+        }
+    }
+
+    #[test]
+    fn test_peak_values_match_image() {
+        // Verify that peak_value matches the actual pixel value
+        let (pixels, labels, data) =
+            make_test_component(100, 100, &[(30, 50, 1.0, 2.5), (70, 50, 0.8, 2.5)]);
+
+        let config = DeblendConfig {
+            n_thresholds: 32,
+            min_contrast: 0.005,
+            min_separation: 3,
+            ..Default::default()
+        };
+
+        let result = deblend_multi_threshold(&data, &pixels, &labels, &config);
+
+        for candidate in &result {
+            let actual_value = pixels[(candidate.peak.x, candidate.peak.y)];
+            assert!(
+                (candidate.peak_value - actual_value).abs() < 1e-6,
+                "peak_value {} should match pixel value {}",
+                candidate.peak_value,
+                actual_value
+            );
+        }
+    }
+
+    #[test]
+    fn test_single_threshold_level() {
+        // Test with n_thresholds = 1 (edge case)
+        let (pixels, labels, data) =
+            make_test_component(100, 100, &[(30, 50, 1.0, 2.5), (70, 50, 0.8, 2.5)]);
+
+        let config = DeblendConfig {
+            n_thresholds: 1,
+            min_contrast: 0.005,
+            min_separation: 3,
+            ..Default::default()
+        };
+
+        let result = deblend_multi_threshold(&data, &pixels, &labels, &config);
+
+        // Should still produce valid output
+        assert!(!result.is_empty(), "Should produce at least one object");
+
+        // Area conservation
+        let total_area: usize = result.iter().map(|o| o.area).sum();
+        assert_eq!(total_area, data.area, "Area should be conserved");
+    }
+
+    #[test]
+    fn test_zero_threshold_level() {
+        // Test with n_thresholds = 0 (edge case - should still work)
+        let (pixels, labels, data) = make_test_component(100, 100, &[(50, 50, 1.0, 2.5)]);
+
+        let config = DeblendConfig {
+            n_thresholds: 0,
+            min_contrast: 0.005,
+            min_separation: 3,
+            ..Default::default()
+        };
+
+        let result = deblend_multi_threshold(&data, &pixels, &labels, &config);
+
+        // Should produce single object
+        assert_eq!(result.len(), 1, "Should produce one object");
+        assert_eq!(result[0].area, data.area);
     }
 }
