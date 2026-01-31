@@ -549,16 +549,19 @@ pub fn generate_globular_cluster(
     // Generate stars with radial distribution using exponential profile
     // More stars near center, density falls off exponentially
     for _ in 0..num_stars {
-        // Use Box-Muller for 2D Gaussian distribution centered on cluster
-        // Scale parameter controls the concentration
+        // Exponential radial distribution: r = -scale * ln(u)
+        // This gives high density at center
         let u1 = next_rand().max(1e-10);
         let u2 = next_rand();
 
-        // Exponential radial distribution: r = -scale * ln(u)
-        // This gives high density at center
         let scale = core_radius * 2.5;
         let r = -scale * u1.ln();
-        let r = r.min(halo_radius);
+
+        // Skip stars too far out (they'll be outside the image anyway)
+        // No hard cutoff - just skip if way outside
+        if r > halo_radius * 1.5 {
+            continue;
+        }
 
         // Random angle (full circle)
         let theta = u2 * 2.0 * std::f64::consts::PI;
