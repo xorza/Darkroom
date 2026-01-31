@@ -20,6 +20,8 @@
 //! 5. **Quality metrics**: Compute FWHM, SNR, and eccentricity for each star.
 
 pub(crate) mod background;
+#[cfg(test)]
+mod bench;
 mod centroid;
 pub(crate) mod common;
 mod config;
