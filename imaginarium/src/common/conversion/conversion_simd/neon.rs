@@ -243,12 +243,12 @@ pub(super) unsafe fn convert_la_to_rgba_row_neon(src: &[u8], dst: &mut [u8], wid
 
     let src_ptr = src.as_ptr();
     let dst_ptr = dst.as_mut_ptr();
-    let simd_width = width / 8;
-    let remainder = width % 8;
+    let simd_width = width / 16;
+    let remainder = width % 16;
 
     for i in 0..simd_width {
-        let src_offset = i * 16;
-        let dst_offset = i * 32;
+        let src_offset = i * 32; // 16 pixels × 2 bytes (LA)
+        let dst_offset = i * 64; // 16 pixels × 4 bytes (RGBA)
 
         let la = vld2q_u8(src_ptr.add(src_offset));
         let l = la.0;
@@ -258,8 +258,8 @@ pub(super) unsafe fn convert_la_to_rgba_row_neon(src: &[u8], dst: &mut [u8], wid
         vst4q_u8(dst_ptr.add(dst_offset), rgba);
     }
 
-    let src_rem = &src[simd_width * 16..];
-    let dst_rem = &mut dst[simd_width * 32..];
+    let src_rem = &src[simd_width * 32..];
+    let dst_rem = &mut dst[simd_width * 64..];
     for i in 0..remainder {
         let l = src_rem[i * 2];
         let a = src_rem[i * 2 + 1];
