@@ -159,17 +159,20 @@ pub(crate) fn extract_candidates(
                 area: obj.area,
             };
 
-            //todo remove allocation
+            // Both deblend functions return stack-allocated collections (ArrayVec/SmallVec),
+            // so we can iterate directly without heap allocation.
             if deblend_config.is_multi_threshold() {
-                deblend_multi_threshold(&data, pixels, label_map, deblend_config)
-                    .into_iter()
-                    .map(map_to_candidate)
-                    .collect::<Vec<_>>()
+                rayon::iter::Either::Left(
+                    deblend_multi_threshold(&data, pixels, label_map, deblend_config)
+                        .into_iter()
+                        .map(map_to_candidate),
+                )
             } else {
-                deblend_local_maxima(&data, pixels, label_map, deblend_config)
-                    .into_iter()
-                    .map(map_to_candidate)
-                    .collect::<Vec<_>>()
+                rayon::iter::Either::Right(
+                    deblend_local_maxima(&data, pixels, label_map, deblend_config)
+                        .into_iter()
+                        .map(map_to_candidate),
+                )
             }
         })
         .collect()
