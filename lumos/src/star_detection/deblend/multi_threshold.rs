@@ -7,11 +7,10 @@
 //!
 //! Reference: Bertin & Arnouts (1996), A&AS 117, 393
 
-use std::collections::HashMap;
-
+use hashbrown::HashMap;
 use smallvec::SmallVec;
 
-use super::{ComponentData, DeblendedCandidate, Pixel};
+use super::{ComponentData, DeblendedCandidate, MAX_PEAKS, Pixel};
 use crate::common::Buffer2;
 use crate::math::{Aabb, Vec2us};
 use crate::star_detection::config::DeblendConfig;
@@ -20,17 +19,12 @@ use crate::star_detection::detection::LabelMap;
 /// A node in the deblending tree.
 #[derive(Debug, Clone)]
 struct DeblendNode {
-    /// Pixel positions belonging to this node at its threshold level.
-    pixels: Vec<Vec2us>,
     /// Peak position and value.
     peak: Pixel,
     /// Total flux in this branch.
     flux: f32,
     /// Child nodes (branches that split from this node at higher threshold).
     children: Vec<usize>,
-    /// Threshold level where this node exists (used for debugging).
-    #[allow(dead_code)]
-    threshold_level: usize,
 }
 
 /// Multi-threshold deblending of a connected component.
@@ -52,7 +46,7 @@ pub fn deblend_multi_threshold(
     pixels: &Buffer2<f32>,
     labels: &LabelMap,
     config: &DeblendConfig,
-) -> SmallVec<[DeblendedCandidate; 4]> {
+) -> SmallVec<[DeblendedCandidate; MAX_PEAKS]> {
     debug_assert_eq!(
         (pixels.width(), pixels.height()),
         (labels.width(), labels.height()),
@@ -173,11 +167,9 @@ fn build_deblend_tree(
                 }
 
                 tree.push(DeblendNode {
-                    pixels: region.iter().map(|p| p.pos).collect(),
                     peak,
                     flux,
                     children: Vec::new(),
-                    threshold_level: level,
                 });
             }
         } else {
@@ -199,37 +191,26 @@ fn build_deblend_tree(
                 }
 
                 if let Some((&parent_idx, _)) = parent_nodes.iter().next() {
-                    // Check if this is the same region or a split occurred
-                    let parent = &tree[parent_idx];
-                    let parent_pixels_above: Vec<_> = parent
-                        .pixels
+                    // Find all pixels belonging to this parent that are above threshold
+                    let parent_pixels_above: Vec<Pixel> = component_pixels
                         .iter()
-                        .filter(|&pos| {
-                            component_pixels
-                                .iter()
-                                .find(|p| p.pos == *pos)
-                                .is_some_and(|p| p.value >= threshold)
+                        .filter(|p| {
+                            pixel_to_node.get(&p.pos) == Some(&parent_idx) && p.value >= threshold
                         })
+                        .copied()
                         .collect();
 
-                    // If number of pixels above threshold is less than parent's pixels,
+                    // If number of pixels above threshold is less than region size,
                     // check if multiple distinct regions formed
                     if region.len() < parent_pixels_above.len() {
-                        // Check if other regions formed from same parent
-                        let other_regions: Vec<Vec<Pixel>> = find_connected_regions(
-                            &parent_pixels_above
-                                .iter()
-                                .filter_map(|&pos| {
-                                    component_pixels.iter().find(|p| p.pos == *pos).copied()
-                                })
-                                .collect::<Vec<_>>(),
-                        );
+                        // Check if multiple regions formed from same parent
+                        let child_regions = find_connected_regions(&parent_pixels_above);
 
-                        if other_regions.len() > 1 {
+                        if child_regions.len() > 1 {
                             // Split occurred! Create child nodes
                             let mut child_indices = Vec::new();
 
-                            for child_region in other_regions {
+                            for child_region in child_regions {
                                 let child_peak = find_region_peak(&child_region);
 
                                 // Check minimum separation from existing children
@@ -256,11 +237,9 @@ fn build_deblend_tree(
                                 }
 
                                 tree.push(DeblendNode {
-                                    pixels: child_region.iter().map(|p| p.pos).collect(),
                                     peak: child_peak,
                                     flux: child_flux,
                                     children: Vec::new(),
-                                    threshold_level: level,
                                 });
 
                                 child_indices.push(child_idx);
@@ -433,16 +412,16 @@ fn assign_pixels_to_objects(
     labels: &LabelMap,
     tree: &[DeblendNode],
     leaf_indices: &[usize],
-) -> SmallVec<[DeblendedCandidate; 4]> {
+) -> SmallVec<[DeblendedCandidate; MAX_PEAKS]> {
     if leaf_indices.is_empty() {
         return smallvec::smallvec![create_single_object(data, pixels, labels)];
     }
 
     // Get peak positions for each leaf
-    let peaks: SmallVec<[Pixel; 4]> = leaf_indices.iter().map(|&i| tree[i].peak).collect();
+    let peaks: SmallVec<[Pixel; MAX_PEAKS]> = leaf_indices.iter().map(|&i| tree[i].peak).collect();
 
     // Initialize objects
-    let mut objects: SmallVec<[DeblendedCandidate; 4]> = peaks
+    let mut objects: SmallVec<[DeblendedCandidate; MAX_PEAKS]> = peaks
         .iter()
         .map(|p| DeblendedCandidate {
             bbox: Aabb::empty(),
