@@ -4,6 +4,7 @@
 //! at startup. Use these functions instead of `is_x86_feature_detected!` macro
 //! directly to avoid repeated CPUID calls.
 
+#[cfg(target_arch = "x86_64")]
 use std::sync::OnceLock;
 
 /// CPU feature flags detected once at startup.
@@ -17,6 +18,7 @@ pub struct X86Features {
     pub fma: bool,
 }
 
+#[cfg(target_arch = "x86_64")]
 static FEATURES: OnceLock<X86Features> = OnceLock::new();
 
 /// Get cached CPU features (detected once on first call).

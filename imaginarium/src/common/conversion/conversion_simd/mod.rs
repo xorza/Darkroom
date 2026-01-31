@@ -15,7 +15,9 @@
 #![allow(unsafe_op_in_unsafe_fn)]
 
 use crate::common::color_format::ColorFormat;
-use common::{cfg_aarch64, cfg_x86_64, cpu_features};
+#[cfg(target_arch = "x86_64")]
+use common::cpu_features;
+use common::{cfg_aarch64, cfg_x86_64};
 
 cfg_x86_64! {
     pub(crate) mod avx;

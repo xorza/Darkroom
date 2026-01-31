@@ -27,6 +27,7 @@ use common::cpu_features;
 
 /// Scalar implementation for packed threshold mask with background.
 #[cfg_attr(not(test), inline)]
+#[cfg(any(test, target_arch = "x86_64", not(target_arch = "aarch64")))]
 pub(super) fn process_words_scalar(
     pixels: &[f32],
     bg: &[f32],
@@ -60,6 +61,7 @@ pub(super) fn process_words_scalar(
 
 /// Scalar implementation for packed threshold mask without background (filtered).
 #[cfg_attr(not(test), inline)]
+#[cfg(any(test, target_arch = "x86_64", not(target_arch = "aarch64")))]
 pub(super) fn process_words_filtered_scalar(
     pixels: &[f32],
     noise: &[f32],
@@ -115,7 +117,6 @@ pub(super) fn process_words(
                 total_pixels,
             );
         }
-        return;
     }
 
     #[cfg(target_arch = "x86_64")]
@@ -135,17 +136,30 @@ pub(super) fn process_words(
             }
             return;
         }
+
+        process_words_scalar(
+            pixels,
+            bg,
+            noise,
+            sigma_threshold,
+            words,
+            pixel_offset,
+            total_pixels,
+        );
     }
 
-    process_words_scalar(
-        pixels,
-        bg,
-        noise,
-        sigma_threshold,
-        words,
-        pixel_offset,
-        total_pixels,
-    );
+    #[cfg(not(any(target_arch = "aarch64", target_arch = "x86_64")))]
+    {
+        process_words_scalar(
+            pixels,
+            bg,
+            noise,
+            sigma_threshold,
+            words,
+            pixel_offset,
+            total_pixels,
+        );
+    }
 }
 
 /// Process words with best available SIMD (without background, for filtered images).
@@ -171,7 +185,6 @@ pub(super) fn process_words_filtered(
                 total_pixels,
             );
         }
-        return;
     }
 
     #[cfg(target_arch = "x86_64")]
@@ -190,16 +203,28 @@ pub(super) fn process_words_filtered(
             }
             return;
         }
+
+        process_words_filtered_scalar(
+            pixels,
+            noise,
+            sigma_threshold,
+            words,
+            pixel_offset,
+            total_pixels,
+        );
     }
 
-    process_words_filtered_scalar(
-        pixels,
-        noise,
-        sigma_threshold,
-        words,
-        pixel_offset,
-        total_pixels,
-    );
+    #[cfg(not(any(target_arch = "aarch64", target_arch = "x86_64")))]
+    {
+        process_words_filtered_scalar(
+            pixels,
+            noise,
+            sigma_threshold,
+            words,
+            pixel_offset,
+            total_pixels,
+        );
+    }
 }
 
 /// Create binary mask of pixels above threshold into a BitBuffer2.

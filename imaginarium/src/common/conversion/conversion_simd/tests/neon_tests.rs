@@ -170,26 +170,26 @@ fn test_neon_rgb_to_l_various_widths() {
 #[test]
 fn test_neon_luminance_primary_colors() {
     // Test primary colors
-    let test_cases = [
-        ([255u8, 0, 0, 255], (255.0 * 0.2126).round() as u8), // Red
-        ([0, 255, 0, 255], (255.0 * 0.7152).round() as u8),   // Green
-        ([0, 0, 255, 255], (255.0 * 0.0722).round() as u8),   // Blue
-        ([255, 255, 255, 255], 255),                          // White
-        ([0, 0, 0, 255], 0),                                  // Black
+    let test_cases: [([u8; 4], u8); 5] = [
+        ([255u8, 0, 0, 255], (255.0_f32 * 0.2126).round() as u8), // Red
+        ([0, 255, 0, 255], (255.0_f32 * 0.7152).round() as u8),   // Green
+        ([0, 0, 255, 255], (255.0_f32 * 0.0722).round() as u8),   // Blue
+        ([255, 255, 255, 255], 255),                              // White
+        ([0, 0, 0, 255], 0),                                      // Black
     ];
 
-    for (src, expected) in test_cases {
+    for (src, expected) in test_cases.iter() {
         let mut dst = [0u8; 1];
 
         unsafe {
-            neon::convert_rgba_to_l_row_neon(&src, &mut dst, 1);
+            neon::convert_rgba_to_l_row_neon(src, &mut dst, 1);
         }
 
         assert!(
-            within_tolerance(dst[0], expected, 1),
+            within_tolerance(dst[0], *expected, 1),
             "Primary color test failed: {:?} -> expected {}, got {}",
             src,
-            expected,
+            *expected,
             dst[0]
         );
     }
