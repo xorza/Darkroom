@@ -1,7 +1,7 @@
 name: bench_extract_candidates_6k_globular_cluster_multithreshold
-mean: 454.530796ms
-min: 434.366784ms
-max: 474.601724ms
-median: 454.62388ms
+mean: 444.268717ms
+min: 441.740711ms
+max: 446.310444ms
+median: 444.754996ms
 iterations: 3
-vs_previous: 434.172496ms -> 454.530796ms (+4.7%) same
+vs_previous: 454.530796ms -> 444.268717ms (-2.3%) same
