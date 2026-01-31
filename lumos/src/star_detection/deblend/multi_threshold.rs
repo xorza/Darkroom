@@ -45,7 +45,7 @@ struct DeblendNode {
 ///
 /// # Returns
 /// Vector of deblended objects, or single object if no deblending occurs.
-pub fn deblend_component(
+pub fn deblend_multi_threshold(
     data: &ComponentData,
     pixels: &Buffer2<f32>,
     labels: &LabelMap,
@@ -548,7 +548,7 @@ mod tests {
         let (pixels, labels, data) = make_test_component(100, 100, &[(50, 50, 1.0, 3.0)]);
         let config = DeblendConfig::default();
 
-        let result = deblend_component(&data, &pixels, &labels, &config);
+        let result = deblend_multi_threshold(&data, &pixels, &labels, &config);
 
         assert_eq!(result.len(), 1, "Single star should produce one object");
         assert!((result[0].peak.x as i32 - 50).abs() <= 1);
@@ -567,7 +567,7 @@ mod tests {
             ..Default::default()
         };
 
-        let result = deblend_component(&data, &pixels, &labels, &config);
+        let result = deblend_multi_threshold(&data, &pixels, &labels, &config);
 
         // Should deblend into 2 separate objects
         assert_eq!(
@@ -603,7 +603,7 @@ mod tests {
             ..Default::default()
         };
 
-        let result = deblend_component(&data, &pixels, &labels, &config);
+        let result = deblend_multi_threshold(&data, &pixels, &labels, &config);
 
         // Faint star should be absorbed - contrast too low
         assert_eq!(
@@ -655,7 +655,7 @@ mod tests {
             ..Default::default()
         };
 
-        let result = deblend_component(&data, &pixels, &labels, &config);
+        let result = deblend_multi_threshold(&data, &pixels, &labels, &config);
 
         // Should NOT deblend - peaks too close
         assert_eq!(result.len(), 1, "Close peaks should not be deblended");
@@ -673,7 +673,7 @@ mod tests {
         };
         let config = DeblendConfig::default();
 
-        let result = deblend_component(&data, &pixels, &labels, &config);
+        let result = deblend_multi_threshold(&data, &pixels, &labels, &config);
 
         assert!(result.is_empty());
     }
@@ -691,7 +691,7 @@ mod tests {
             ..Default::default()
         };
 
-        let result = deblend_component(&data, &pixels, &labels, &config);
+        let result = deblend_multi_threshold(&data, &pixels, &labels, &config);
 
         assert_eq!(
             result.len(),

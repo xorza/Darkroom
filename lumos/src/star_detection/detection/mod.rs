@@ -10,9 +10,7 @@ use super::background::BackgroundMap;
 use super::common::dilate_mask;
 use super::common::threshold_mask::{create_threshold_mask, create_threshold_mask_filtered};
 use super::config::{DeblendConfig, StarDetectionConfig};
-use super::deblend::{
-    ComponentData, deblend_component as multi_threshold_deblend, deblend_local_maxima,
-};
+use super::deblend::{ComponentData, deblend_local_maxima, deblend_multi_threshold};
 use crate::common::{BitBuffer2, Buffer2};
 use crate::math::{Aabb, Vec2us};
 
@@ -157,7 +155,7 @@ pub(crate) fn extract_candidates(
         .filter(|data| data.area > 0 && data.area <= max_area)
         .flat_map_iter(|data| {
             let candidates = if deblend_config.is_multi_threshold() {
-                multi_threshold_deblend(&data, pixels, label_map, deblend_config)
+                deblend_multi_threshold(&data, pixels, label_map, deblend_config)
             } else {
                 deblend_local_maxima(&data, pixels, label_map, deblend_config).to_vec()
             };

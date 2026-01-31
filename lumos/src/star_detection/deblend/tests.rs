@@ -63,7 +63,7 @@ fn test_local_vs_multi_threshold_single_star() {
 
     // Multi-threshold deblending
     let mt_config = DeblendConfig::default();
-    let mt_result = deblend_component(&data, &pixels, &labels, &mt_config);
+    let mt_result = deblend_multi_threshold(&data, &pixels, &labels, &mt_config);
 
     assert_eq!(local_result.len(), 1);
     assert_eq!(mt_result.len(), 1);
@@ -94,7 +94,7 @@ fn test_local_vs_multi_threshold_two_stars() {
         min_separation: 3,
         ..Default::default()
     };
-    let mt_result = deblend_component(&data, &pixels, &labels, &mt_config);
+    let mt_result = deblend_multi_threshold(&data, &pixels, &labels, &mt_config);
 
     assert_eq!(local_result.len(), 2, "Local maxima should find 2 stars");
     assert_eq!(mt_result.len(), 2, "Multi-threshold should find 2 stars");
