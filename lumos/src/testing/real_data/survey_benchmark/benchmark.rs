@@ -723,7 +723,7 @@ mod tests {
             let config = StarDetectionConfig {
                 expected_fwhm: field.expected_fwhm_pixels(0.396),
                 background_config: BackgroundConfig {
-                    detection_sigma: 3.0,
+                    sigma_threshold: 3.0,
                     ..Default::default()
                 },
                 ..Default::default()
@@ -793,7 +793,7 @@ mod tests {
             let config = StarDetectionConfig {
                 expected_fwhm: field.expected_fwhm_pixels(0.396),
                 background_config: BackgroundConfig {
-                    detection_sigma: sigma,
+                    sigma_threshold: sigma,
                     ..Default::default()
                 },
                 ..Default::default()

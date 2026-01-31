@@ -152,12 +152,14 @@ fn test_background_on_real_image() {
 
     println!("Loaded image: {}x{}", width, height);
 
+    use crate::star_detection::BackgroundMap;
+
     let pixels_buf = Buffer2::new(width, height, pixels.to_vec());
-    let bg = BackgroundConfig {
+    let config = BackgroundConfig {
         tile_size: 64,
         ..Default::default()
-    }
-    .estimate(&pixels_buf);
+    };
+    let bg = BackgroundMap::new(&pixels_buf, &config);
 
     let bg_img = to_gray_image(bg.background.pixels(), width, height);
     let path = common::test_utils::test_output_path("real_data/background_map.tiff");
@@ -180,7 +182,7 @@ fn test_background_on_real_image() {
     let subtracted: Vec<f32> = pixels
         .iter()
         .zip(bg.background.iter())
-        .map(|(&p, &b)| (p - b + 0.5).clamp(0.0, 1.0))
+        .map(|(p, b)| ((*p - *b) + 0.5).clamp(0.0, 1.0))
         .collect();
     let sub_img = to_gray_image(&subtracted, width, height);
     let path = common::test_utils::test_output_path("real_data/background_subtracted.png");

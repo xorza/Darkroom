@@ -27,4 +27,6 @@ pub mod astrometry_benchmark;
 #[cfg(feature = "real-data")]
 mod calibration_tests;
 #[cfg(feature = "real-data")]
+mod dense_field_tests;
+#[cfg(feature = "real-data")]
 pub mod survey_benchmark;
