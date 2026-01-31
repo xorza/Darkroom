@@ -110,12 +110,13 @@ cargo nextest run -p lumos
 ## Benchmarks
 
 ```bash
-cargo bench -p lumos --features bench --bench <name>
+cargo test -p lumos --release <bench_name> -- --ignored --nocapture
 ```
 
-Available benchmarks:
-- `stack_gpu_sigma_clip` - GPU vs CPU sigma clipping
-- `math` - Core math operations
+Example:
+```bash
+cargo test -p lumos --release bench_extract_candidates -- --ignored --nocapture
+```
 
 ## License
 

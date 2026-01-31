@@ -1,6 +1,6 @@
 //! Benchmarks for deblending algorithms.
 //!
-//! Run with: `cargo bench -p lumos --features bench --bench deblend`
+//! Run with: `cargo test -p lumos --release bench_deblend -- --ignored --nocapture`
 //!
 //! To generate the dense field image for inspection:
 //! `cargo test -p lumos save_dense_field_image -- --nocapture`

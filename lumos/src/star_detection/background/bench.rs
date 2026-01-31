@@ -1,5 +1,5 @@
 //! Benchmark module for background estimation.
-//! Run with: cargo bench --package lumos --features bench background
+//! Run with: cargo test -p lumos --release bench_background -- --ignored --nocapture
 
 use bench::quick_bench;
 

@@ -1,6 +1,6 @@
 //! Benchmarks for full star detection pipeline.
 //!
-//! Run with: `cargo bench -p lumos --features bench --bench star_detection`
+//! Run with: `cargo test -p lumos --release bench_star_detection -- --ignored --nocapture`
 
 use ::bench::quick_bench;
 use std::hint::black_box;

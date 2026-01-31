@@ -457,7 +457,7 @@ if clipper.gpu_available() {
 
 **Benchmark:**
 ```bash
-cargo bench -p lumos --features bench --bench stack_gpu_sigma_clip
+cargo test -p lumos --release bench_sigma_clip -- --ignored --nocapture
 ```
 Benchmarks GPU vs CPU for various image sizes (256x256 to 2048x2048) and frame counts (10-50).
 

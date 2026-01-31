@@ -59,7 +59,7 @@ with tests and running verification commands per project conventions.
 - `pipeline.rs`: wgpu compute pipeline setup
 - `sigma_clip.rs`: Rust API (`GpuSigmaClipper`, `GpuSigmaClipConfig`)
 - 11 unit tests passing
-- Benchmark available via `cargo bench -p lumos --features bench --bench stack_gpu_sigma_clip`
+- Benchmark available via `cargo test -p lumos --release bench_sigma_clip -- --ignored --nocapture`
 
 ### 2.3 GPU Star Detection
 - [x] Design GPU kernel for threshold detection
@@ -77,7 +77,7 @@ with tests and running verification commands per project conventions.
 
 **Architecture Decision**: CCL remains on CPU (union-find) - this is optimal for sparse astronomical images (<5% foreground). GPU CCL algorithms are designed for dense images (>50% foreground) and perform worse than CPU on sparse data. The threshold mask creation is the main per-pixel operation and benefits from GPU acceleration.
 
-**Note**: Benchmark code added to `src/star_detection/detection/bench.rs` with GPU vs CPU comparison for threshold mask creation and full star detection. Pre-existing issues in the bench feature (`--features bench`) prevent running benchmarks - these are unrelated to GPU star detection and affect other modules too.
+**Note**: Benchmark code added to `src/star_detection/detection/bench.rs` with GPU vs CPU comparison for threshold mask creation and full star detection.
 
 ### 2.4 Batch Processing Pipeline
 - [x] Implement overlapped compute/transfer for frame processing
@@ -303,7 +303,7 @@ cargo nextest run -p lumos && cargo fmt && cargo check && cargo clippy --all-tar
 
 For benchmarks:
 ```bash
-cargo bench -p lumos --features bench --bench <name> | tee benches/<name>_results.txt
+cargo test -p lumos --release <bench_name> -- --ignored --nocapture
 ```
 
 ---
