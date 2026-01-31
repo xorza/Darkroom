@@ -1,7 +1,7 @@
 name: bench_extract_candidates_6k_globular_cluster
-mean: 223.805961ms
-min: 223.377375ms
-max: 224.250568ms
-median: 223.789941ms
+mean: 433.756152ms
+min: 431.236499ms
+max: 436.364544ms
+median: 433.667415ms
 iterations: 3
-vs_previous: 225.96534ms -> 223.805961ms (-1.0%) same
+vs_previous: 440.47878ms -> 433.756152ms (-1.5%) same
