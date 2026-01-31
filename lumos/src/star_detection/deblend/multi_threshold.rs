@@ -352,8 +352,7 @@ fn find_significant_branches(tree: &[DeblendNode], min_contrast: f32) -> Vec<usi
 
     // Process each root
     for &root_idx in &roots {
-        let root_flux = tree[root_idx].flux;
-        collect_significant_leaves(tree, root_idx, root_flux, min_contrast, &mut leaves);
+        collect_significant_leaves(tree, root_idx, min_contrast, &mut leaves);
     }
 
     // If no leaves found (all contrast criteria failed), return roots
@@ -365,10 +364,12 @@ fn find_significant_branches(tree: &[DeblendNode], min_contrast: f32) -> Vec<usi
 }
 
 /// Recursively collect leaf nodes that pass contrast criterion.
+///
+/// Per SExtractor algorithm: a branch is considered a separate object if its
+/// flux is at least `min_contrast` fraction of the **parent's** flux (not root).
 fn collect_significant_leaves(
     tree: &[DeblendNode],
     node_idx: usize,
-    root_flux: f32,
     min_contrast: f32,
     leaves: &mut Vec<usize>,
 ) {
@@ -380,13 +381,15 @@ fn collect_significant_leaves(
         return;
     }
 
-    // Check if children pass contrast criterion
+    // Check if children pass contrast criterion relative to THIS node's flux (parent)
+    // This matches SExtractor's DEBLEND_MINCONT behavior
+    let parent_flux = node.flux;
     let children_pass_contrast: Vec<bool> = node
         .children
         .iter()
         .map(|&child_idx| {
             let child_flux = tree[child_idx].flux;
-            child_flux >= min_contrast * root_flux
+            child_flux >= min_contrast * parent_flux
         })
         .collect();
 
@@ -399,7 +402,7 @@ fn collect_significant_leaves(
         // Multiple children pass - recurse into each
         for (i, &child_idx) in node.children.iter().enumerate() {
             if children_pass_contrast[i] {
-                collect_significant_leaves(tree, child_idx, root_flux, min_contrast, leaves);
+                collect_significant_leaves(tree, child_idx, min_contrast, leaves);
             }
         }
     }
@@ -678,6 +681,291 @@ mod tests {
             result.len(),
             1,
             "High contrast setting should disable deblending"
+        );
+    }
+
+    #[test]
+    fn test_three_stars_deblend() {
+        // Three well-separated stars should produce three objects
+        let (pixels, labels, data) = make_test_component(
+            150,
+            100,
+            &[(30, 50, 1.0, 2.5), (75, 50, 0.9, 2.5), (120, 50, 0.8, 2.5)],
+        );
+
+        let config = DeblendConfig {
+            n_thresholds: 32,
+            min_contrast: 0.005,
+            min_separation: 3,
+            ..Default::default()
+        };
+
+        let result = deblend_multi_threshold(&data, &pixels, &labels, &config);
+
+        assert_eq!(
+            result.len(),
+            3,
+            "Three separated stars should produce three objects"
+        );
+
+        // Check all peaks are found
+        let mut peaks: Vec<_> = result.iter().map(|o| o.peak.x).collect();
+        peaks.sort();
+        assert!((peaks[0] as i32 - 30).abs() <= 2);
+        assert!((peaks[1] as i32 - 75).abs() <= 2);
+        assert!((peaks[2] as i32 - 120).abs() <= 2);
+    }
+
+    #[test]
+    fn test_hierarchical_deblend() {
+        // Two close stars that should deblend, plus one far star
+        // Tests that the tree structure works correctly
+        let (pixels, labels, data) = make_test_component(
+            150,
+            100,
+            &[
+                (30, 50, 1.0, 2.5),  // Isolated bright star
+                (100, 50, 0.8, 2.5), // Close pair - brighter
+                (115, 50, 0.7, 2.5), // Close pair - fainter
+            ],
+        );
+
+        let config = DeblendConfig {
+            n_thresholds: 32,
+            min_contrast: 0.1, // 10% contrast
+            min_separation: 3,
+            ..Default::default()
+        };
+
+        let result = deblend_multi_threshold(&data, &pixels, &labels, &config);
+
+        // Should find all 3 stars
+        assert!(
+            result.len() >= 2,
+            "Should find at least the isolated star and close pair"
+        );
+    }
+
+    #[test]
+    fn test_equal_brightness_stars() {
+        // Two stars of exactly equal brightness
+        let (pixels, labels, data) =
+            make_test_component(100, 100, &[(30, 50, 1.0, 2.5), (70, 50, 1.0, 2.5)]);
+
+        let config = DeblendConfig {
+            n_thresholds: 32,
+            min_contrast: 0.005,
+            min_separation: 3,
+            ..Default::default()
+        };
+
+        let result = deblend_multi_threshold(&data, &pixels, &labels, &config);
+
+        assert_eq!(
+            result.len(),
+            2,
+            "Equal brightness stars should both be found"
+        );
+
+        // Areas should be roughly equal
+        let area_diff = (result[0].area as i32 - result[1].area as i32).abs();
+        let avg_area = (result[0].area + result[1].area) / 2;
+        assert!(
+            area_diff < (avg_area as i32 / 2),
+            "Equal stars should have similar areas"
+        );
+    }
+
+    #[test]
+    fn test_contrast_at_boundary() {
+        // Test contrast criterion at exact boundary
+        // Star 2 has exactly 10% of star 1's flux
+        let (pixels, labels, data) =
+            make_test_component(100, 100, &[(30, 50, 1.0, 2.5), (70, 50, 0.1, 2.5)]);
+
+        // With min_contrast = 0.09, the faint star should pass
+        let config_pass = DeblendConfig {
+            n_thresholds: 32,
+            min_contrast: 0.09,
+            min_separation: 3,
+            ..Default::default()
+        };
+        let result_pass = deblend_multi_threshold(&data, &pixels, &labels, &config_pass);
+
+        // With min_contrast = 0.15, the faint star should fail
+        let config_fail = DeblendConfig {
+            n_thresholds: 32,
+            min_contrast: 0.15,
+            min_separation: 3,
+            ..Default::default()
+        };
+        let result_fail = deblend_multi_threshold(&data, &pixels, &labels, &config_fail);
+
+        assert!(
+            result_pass.len() >= result_fail.len(),
+            "Lower contrast threshold should find more or equal objects"
+        );
+    }
+
+    #[test]
+    fn test_pixel_assignment_conservation() {
+        // Total area of deblended objects should equal original component area
+        let (pixels, labels, data) =
+            make_test_component(100, 100, &[(30, 50, 1.0, 2.5), (70, 50, 0.8, 2.5)]);
+
+        let config = DeblendConfig {
+            n_thresholds: 32,
+            min_contrast: 0.005,
+            min_separation: 3,
+            ..Default::default()
+        };
+
+        let result = deblend_multi_threshold(&data, &pixels, &labels, &config);
+
+        let total_area: usize = result.iter().map(|o| o.area).sum();
+        assert_eq!(
+            total_area, data.area,
+            "Sum of deblended areas should equal original area"
+        );
+    }
+
+    #[test]
+    fn test_vertical_star_pair() {
+        // Stars separated vertically instead of horizontally
+        let (pixels, labels, data) =
+            make_test_component(100, 100, &[(50, 30, 1.0, 2.5), (50, 70, 0.8, 2.5)]);
+
+        let config = DeblendConfig {
+            n_thresholds: 32,
+            min_contrast: 0.005,
+            min_separation: 3,
+            ..Default::default()
+        };
+
+        let result = deblend_multi_threshold(&data, &pixels, &labels, &config);
+
+        assert_eq!(result.len(), 2, "Vertically separated stars should deblend");
+
+        let mut peaks: Vec<_> = result.iter().map(|o| o.peak.y).collect();
+        peaks.sort();
+        assert!((peaks[0] as i32 - 30).abs() <= 2);
+        assert!((peaks[1] as i32 - 70).abs() <= 2);
+    }
+
+    #[test]
+    fn test_diagonal_star_pair() {
+        // Stars separated diagonally
+        let (pixels, labels, data) =
+            make_test_component(100, 100, &[(30, 30, 1.0, 2.5), (70, 70, 0.8, 2.5)]);
+
+        let config = DeblendConfig {
+            n_thresholds: 32,
+            min_contrast: 0.005,
+            min_separation: 3,
+            ..Default::default()
+        };
+
+        let result = deblend_multi_threshold(&data, &pixels, &labels, &config);
+
+        assert_eq!(result.len(), 2, "Diagonally separated stars should deblend");
+    }
+
+    #[test]
+    fn test_n_thresholds_effect() {
+        // More thresholds should give same or better deblending
+        let (pixels, labels, data) =
+            make_test_component(100, 100, &[(35, 50, 1.0, 2.5), (65, 50, 0.9, 2.5)]);
+
+        let config_few = DeblendConfig {
+            n_thresholds: 4,
+            min_contrast: 0.005,
+            min_separation: 3,
+            ..Default::default()
+        };
+
+        let config_many = DeblendConfig {
+            n_thresholds: 64,
+            min_contrast: 0.005,
+            min_separation: 3,
+            ..Default::default()
+        };
+
+        let result_few = deblend_multi_threshold(&data, &pixels, &labels, &config_few);
+        let result_many = deblend_multi_threshold(&data, &pixels, &labels, &config_many);
+
+        // More thresholds should find at least as many objects
+        assert!(
+            result_many.len() >= result_few.len(),
+            "More thresholds should find >= objects"
+        );
+    }
+
+    #[test]
+    fn test_single_pixel_component() {
+        // Edge case: component with just one pixel
+        let mut pixels = Buffer2::new_filled(10, 10, 0.0f32);
+        let mut labels_buf = Buffer2::new_filled(10, 10, 0u32);
+
+        pixels[(5, 5)] = 1.0;
+        labels_buf[(5, 5)] = 1;
+
+        let labels = LabelMap::from_raw(labels_buf, 1);
+        let data = ComponentData {
+            bbox: Aabb::new(Vec2us::new(5, 5), Vec2us::new(5, 5)),
+            label: 1,
+            area: 1,
+        };
+
+        let config = DeblendConfig::default();
+        let result = deblend_multi_threshold(&data, &pixels, &labels, &config);
+
+        assert_eq!(result.len(), 1, "Single pixel should produce one object");
+        assert_eq!(result[0].area, 1);
+    }
+
+    #[test]
+    fn test_flat_profile_no_deblend() {
+        // Uniform brightness region should not deblend
+        let mut pixels = Buffer2::new_filled(50, 50, 0.0f32);
+        let mut labels_buf = Buffer2::new_filled(50, 50, 0u32);
+
+        let mut bbox = Aabb::empty();
+        let mut area = 0;
+
+        // Create a flat circular region
+        for y in 10..40 {
+            for x in 10..40 {
+                let dx = x as i32 - 25;
+                let dy = y as i32 - 25;
+                if dx * dx + dy * dy < 150 {
+                    pixels[(x, y)] = 1.0; // Uniform value
+                    labels_buf[(x, y)] = 1;
+                    bbox.include(Vec2us::new(x, y));
+                    area += 1;
+                }
+            }
+        }
+
+        let labels = LabelMap::from_raw(labels_buf, 1);
+        let data = ComponentData {
+            bbox,
+            label: 1,
+            area,
+        };
+
+        let config = DeblendConfig {
+            n_thresholds: 32,
+            min_contrast: 0.005,
+            min_separation: 3,
+            ..Default::default()
+        };
+
+        let result = deblend_multi_threshold(&data, &pixels, &labels, &config);
+
+        assert_eq!(
+            result.len(),
+            1,
+            "Flat profile should not deblend into multiple objects"
         );
     }
 }

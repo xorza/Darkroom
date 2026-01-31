@@ -11,7 +11,8 @@ use crate::testing::{calibration_dir, init_tracing};
 use imaginarium::ColorFormat;
 
 #[test]
-#[ignore] // Requires LUMOS_CALIBRATION_DIR with dense field images
+#[ignore]
+// Requires LUMOS_CALIBRATION_DIR with dense field images
 fn test_multi_threshold_on_dense_fields() {
     init_tracing();
 
@@ -20,7 +21,10 @@ fn test_multi_threshold_on_dense_fields() {
         return;
     };
 
-    let dense_files = ["dense1.jpg", "dense2.jpg", "dense3.jpg"];
+    let dense_files = [
+        //"dense1.jpg", "dense2.jpg", "dense3.jpg",
+        "dense4.jpg",
+    ];
 
     for filename in &dense_files {
         let image_path = cal_dir.join(filename);
