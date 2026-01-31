@@ -16,6 +16,10 @@ use crate::math::{Aabb, Vec2us};
 use crate::star_detection::config::DeblendConfig;
 use crate::star_detection::detection::LabelMap;
 
+// ============================================================================
+// Types
+// ============================================================================
+
 /// A node in the deblending tree.
 #[derive(Debug, Clone)]
 struct DeblendNode {
@@ -27,6 +31,10 @@ struct DeblendNode {
     children: Vec<usize>,
 }
 
+// ============================================================================
+// Public API
+// ============================================================================
+
 /// Multi-threshold deblending of a connected component.
 ///
 /// Uses `ComponentData` to read pixels on-demand from the image buffer,
@@ -36,7 +44,6 @@ struct DeblendNode {
 /// * `data` - Component metadata (bounding box, label, area)
 /// * `pixels` - Full image pixel buffer
 /// * `labels` - Label map for the image
-/// * `detection_threshold` - The threshold used for initial detection
 /// * `config` - Deblending configuration
 ///
 /// # Returns
@@ -53,6 +60,7 @@ pub fn deblend_multi_threshold(
         "pixels and labels must have same dimensions"
     );
 
+    // Early exit for empty components
     if data.area == 0 {
         return SmallVec::new();
     }
@@ -63,11 +71,9 @@ pub fn deblend_multi_threshold(
         return smallvec::smallvec![create_single_object(data, pixels, labels)];
     }
 
-    // Find peak value in the component
+    // Find peak value and detection threshold
     let peak = data.find_peak(pixels, labels);
     let peak_value = peak.value;
-
-    // Estimate detection threshold from the minimum pixel value in component
     let detection_threshold = data
         .iter_pixels(pixels, labels)
         .map(|p| p.value)
@@ -105,6 +111,10 @@ pub fn deblend_multi_threshold(
     assign_pixels_to_objects(data, pixels, labels, &tree, &leaves)
 }
 
+// ============================================================================
+// Tree Building
+// ============================================================================
+
 /// Build the deblending tree by tracking connectivity at each threshold level.
 ///
 /// Uses exponentially spaced thresholds for better resolution at faint levels.
@@ -132,8 +142,7 @@ fn build_deblend_tree(
 
     let mut tree: Vec<DeblendNode> = Vec::new();
 
-    // Collect component pixels once for the tree-building algorithm
-    // (multi-threshold needs repeated access at different threshold levels)
+    // Collect component pixels once (multi-threshold needs repeated access)
     let component_pixels: Vec<Pixel> = data.iter_pixels(pixels, labels).collect();
 
     // Track which node each pixel belongs to at current level
@@ -141,7 +150,6 @@ fn build_deblend_tree(
 
     // Process each threshold level from low to high
     for (level, threshold) in threshold_iter.enumerate() {
-        // Find pixels above this threshold
         let above_threshold: Vec<Pixel> = component_pixels
             .iter()
             .filter(|p| p.value >= threshold)
@@ -152,110 +160,288 @@ fn build_deblend_tree(
             continue;
         }
 
-        // Find connected components at this threshold level
         let regions = find_connected_regions(&above_threshold);
 
         if level == 0 {
-            // First level: create root node(s)
-            for region in regions {
-                let node_idx = tree.len();
-                let peak = find_region_peak(&region);
-                let flux = region.iter().map(|p| p.value).sum();
-
-                for p in &region {
-                    pixel_to_node.insert(p.pos, node_idx);
-                }
-
-                tree.push(DeblendNode {
-                    peak,
-                    flux,
-                    children: Vec::new(),
-                });
-            }
+            process_root_level(&mut tree, &mut pixel_to_node, regions);
         } else {
-            // Higher levels: check for splits
-            for region in regions {
-                // Find which parent node(s) this region comes from
-                let mut parent_nodes: HashMap<usize, Vec<Pixel>> = HashMap::new();
-
-                for &p in &region {
-                    if let Some(&parent_idx) = pixel_to_node.get(&p.pos) {
-                        parent_nodes.entry(parent_idx).or_default().push(p);
-                    }
-                }
-
-                if parent_nodes.len() > 1 {
-                    // This region spans multiple parent nodes - shouldn't happen
-                    // but handle gracefully by keeping pixels with their parents
-                    continue;
-                }
-
-                if let Some((&parent_idx, _)) = parent_nodes.iter().next() {
-                    // Find all pixels belonging to this parent that are above threshold
-                    let parent_pixels_above: Vec<Pixel> = component_pixels
-                        .iter()
-                        .filter(|p| {
-                            pixel_to_node.get(&p.pos) == Some(&parent_idx) && p.value >= threshold
-                        })
-                        .copied()
-                        .collect();
-
-                    // If number of pixels above threshold is less than region size,
-                    // check if multiple distinct regions formed
-                    if region.len() < parent_pixels_above.len() {
-                        // Check if multiple regions formed from same parent
-                        let child_regions = find_connected_regions(&parent_pixels_above);
-
-                        if child_regions.len() > 1 {
-                            // Split occurred! Create child nodes
-                            let mut child_indices = Vec::new();
-
-                            for child_region in child_regions {
-                                let child_peak = find_region_peak(&child_region);
-
-                                // Check minimum separation from existing children
-                                let too_close = child_indices.iter().any(|&idx: &usize| {
-                                    let sibling = &tree[idx];
-                                    let dx = (child_peak.pos.x as i32 - sibling.peak.pos.x as i32)
-                                        .unsigned_abs()
-                                        as usize;
-                                    let dy = (child_peak.pos.y as i32 - sibling.peak.pos.y as i32)
-                                        .unsigned_abs()
-                                        as usize;
-                                    dx < min_separation && dy < min_separation
-                                });
-
-                                if too_close {
-                                    continue;
-                                }
-
-                                let child_idx = tree.len();
-                                let child_flux = child_region.iter().map(|p| p.value).sum();
-
-                                for p in &child_region {
-                                    pixel_to_node.insert(p.pos, child_idx);
-                                }
-
-                                tree.push(DeblendNode {
-                                    peak: child_peak,
-                                    flux: child_flux,
-                                    children: Vec::new(),
-                                });
-
-                                child_indices.push(child_idx);
-                            }
-
-                            // Update parent's children
-                            tree[parent_idx].children = child_indices;
-                        }
-                    }
-                }
-            }
+            process_higher_level(
+                &mut tree,
+                &mut pixel_to_node,
+                &component_pixels,
+                regions,
+                threshold,
+                min_separation,
+            );
         }
     }
 
     tree
 }
+
+/// Process the first threshold level - create root nodes.
+fn process_root_level(
+    tree: &mut Vec<DeblendNode>,
+    pixel_to_node: &mut HashMap<Vec2us, usize>,
+    regions: Vec<Vec<Pixel>>,
+) {
+    for region in regions {
+        let node_idx = tree.len();
+        let peak = find_region_peak(&region);
+        let flux = region.iter().map(|p| p.value).sum();
+
+        for p in &region {
+            pixel_to_node.insert(p.pos, node_idx);
+        }
+
+        tree.push(DeblendNode {
+            peak,
+            flux,
+            children: Vec::new(),
+        });
+    }
+}
+
+/// Process higher threshold levels - check for region splits.
+fn process_higher_level(
+    tree: &mut Vec<DeblendNode>,
+    pixel_to_node: &mut HashMap<Vec2us, usize>,
+    component_pixels: &[Pixel],
+    regions: Vec<Vec<Pixel>>,
+    threshold: f32,
+    min_separation: usize,
+) {
+    for region in regions {
+        // Find which parent node(s) this region comes from
+        let mut parent_nodes: HashMap<usize, Vec<Pixel>> = HashMap::new();
+
+        for &p in &region {
+            if let Some(&parent_idx) = pixel_to_node.get(&p.pos) {
+                parent_nodes.entry(parent_idx).or_default().push(p);
+            }
+        }
+
+        // Skip if region spans multiple parents (shouldn't happen)
+        if parent_nodes.len() != 1 {
+            continue;
+        }
+
+        let (&parent_idx, _) = parent_nodes.iter().next().unwrap();
+
+        // Find all pixels belonging to this parent that are above threshold
+        let parent_pixels_above: Vec<Pixel> = component_pixels
+            .iter()
+            .filter(|p| pixel_to_node.get(&p.pos) == Some(&parent_idx) && p.value >= threshold)
+            .copied()
+            .collect();
+
+        // Check if multiple distinct regions formed from same parent
+        if region.len() < parent_pixels_above.len() {
+            let child_regions = find_connected_regions(&parent_pixels_above);
+
+            if child_regions.len() > 1 {
+                create_child_nodes(
+                    tree,
+                    pixel_to_node,
+                    parent_idx,
+                    child_regions,
+                    min_separation,
+                );
+            }
+        }
+    }
+}
+
+/// Create child nodes when a split is detected.
+fn create_child_nodes(
+    tree: &mut Vec<DeblendNode>,
+    pixel_to_node: &mut HashMap<Vec2us, usize>,
+    parent_idx: usize,
+    child_regions: Vec<Vec<Pixel>>,
+    min_separation: usize,
+) {
+    let mut child_indices = Vec::new();
+
+    for child_region in child_regions {
+        let child_peak = find_region_peak(&child_region);
+
+        // Check minimum separation from existing children
+        let too_close = child_indices.iter().any(|&idx: &usize| {
+            let sibling = &tree[idx];
+            let dx = (child_peak.pos.x as i32 - sibling.peak.pos.x as i32).unsigned_abs() as usize;
+            let dy = (child_peak.pos.y as i32 - sibling.peak.pos.y as i32).unsigned_abs() as usize;
+            dx < min_separation && dy < min_separation
+        });
+
+        if too_close {
+            continue;
+        }
+
+        let child_idx = tree.len();
+        let child_flux = child_region.iter().map(|p| p.value).sum();
+
+        for p in &child_region {
+            pixel_to_node.insert(p.pos, child_idx);
+        }
+
+        tree.push(DeblendNode {
+            peak: child_peak,
+            flux: child_flux,
+            children: Vec::new(),
+        });
+
+        child_indices.push(child_idx);
+    }
+
+    // Update parent's children
+    tree[parent_idx].children = child_indices;
+}
+
+// ============================================================================
+// Tree Analysis
+// ============================================================================
+
+/// Find significant branches (leaves) that pass the contrast criterion.
+///
+/// Returns indices of nodes that should be treated as separate objects.
+fn find_significant_branches(tree: &[DeblendNode], min_contrast: f32) -> Vec<usize> {
+    if tree.is_empty() {
+        return Vec::new();
+    }
+
+    // Find root nodes (nodes that are not children of any other node)
+    let all_children: Vec<usize> = tree
+        .iter()
+        .flat_map(|n| n.children.iter().copied())
+        .collect();
+    let roots: Vec<usize> = (0..tree.len())
+        .filter(|&i| !all_children.contains(&i))
+        .collect();
+
+    let mut leaves = Vec::new();
+
+    for &root_idx in &roots {
+        collect_significant_leaves(tree, root_idx, min_contrast, &mut leaves);
+    }
+
+    // If no leaves found (all contrast criteria failed), return roots
+    if leaves.is_empty() {
+        return roots;
+    }
+
+    leaves
+}
+
+/// Recursively collect leaf nodes that pass contrast criterion.
+///
+/// Per SExtractor algorithm: a branch is considered a separate object if its
+/// flux is at least `min_contrast` fraction of the **parent's** flux (not root).
+fn collect_significant_leaves(
+    tree: &[DeblendNode],
+    node_idx: usize,
+    min_contrast: f32,
+    leaves: &mut Vec<usize>,
+) {
+    let node = &tree[node_idx];
+
+    if node.children.is_empty() {
+        leaves.push(node_idx);
+        return;
+    }
+
+    // Check if children pass contrast criterion relative to THIS node's flux
+    let parent_flux = node.flux;
+    let children_pass_contrast: Vec<bool> = node
+        .children
+        .iter()
+        .map(|&child_idx| {
+            let child_flux = tree[child_idx].flux;
+            child_flux >= min_contrast * parent_flux
+        })
+        .collect();
+
+    let num_pass = children_pass_contrast.iter().filter(|&&b| b).count();
+
+    if num_pass <= 1 {
+        // Not enough children pass contrast - treat this node as a leaf
+        leaves.push(node_idx);
+    } else {
+        // Multiple children pass - recurse into each
+        for (i, &child_idx) in node.children.iter().enumerate() {
+            if children_pass_contrast[i] {
+                collect_significant_leaves(tree, child_idx, min_contrast, leaves);
+            }
+        }
+    }
+}
+
+// ============================================================================
+// Pixel Assignment
+// ============================================================================
+
+/// Assign pixels to their nearest object (based on peak positions).
+fn assign_pixels_to_objects(
+    data: &ComponentData,
+    pixels: &Buffer2<f32>,
+    labels: &LabelMap,
+    tree: &[DeblendNode],
+    leaf_indices: &[usize],
+) -> SmallVec<[DeblendedCandidate; MAX_PEAKS]> {
+    if leaf_indices.is_empty() {
+        return smallvec::smallvec![create_single_object(data, pixels, labels)];
+    }
+
+    // Get peak positions for each leaf
+    let peaks: SmallVec<[Pixel; MAX_PEAKS]> = leaf_indices.iter().map(|&i| tree[i].peak).collect();
+
+    // Initialize objects
+    let mut objects: SmallVec<[DeblendedCandidate; MAX_PEAKS]> = peaks
+        .iter()
+        .map(|p| DeblendedCandidate {
+            bbox: Aabb::empty(),
+            peak: p.pos,
+            peak_value: p.value,
+            area: 0,
+        })
+        .collect();
+
+    // Assign each pixel to nearest peak
+    for p in data.iter_pixels(pixels, labels) {
+        let nearest = find_nearest_peak_index(p.pos, &peaks);
+        let obj = &mut objects[nearest];
+        obj.area += 1;
+        obj.bbox.include(p.pos);
+    }
+
+    // Filter out objects with no pixels
+    objects.retain(|o| o.area > 0);
+
+    objects
+}
+
+/// Find the index of the nearest peak to a position.
+#[inline]
+fn find_nearest_peak_index(pos: Vec2us, peaks: &[Pixel]) -> usize {
+    let mut min_dist_sq = usize::MAX;
+    let mut nearest = 0;
+
+    for (i, peak) in peaks.iter().enumerate() {
+        let dx = (pos.x as i32 - peak.pos.x as i32).unsigned_abs() as usize;
+        let dy = (pos.y as i32 - peak.pos.y as i32).unsigned_abs() as usize;
+        let dist_sq = dx * dx + dy * dy;
+
+        if dist_sq < min_dist_sq {
+            min_dist_sq = dist_sq;
+            nearest = i;
+        }
+    }
+
+    nearest
+}
+
+// ============================================================================
+// Helper Functions
+// ============================================================================
 
 /// Find the peak (brightest pixel) in a region.
 fn find_region_peak(region: &[Pixel]) -> Pixel {
@@ -279,9 +465,7 @@ fn find_connected_regions(pixels: &[Pixel]) -> Vec<Vec<Pixel>> {
         return Vec::new();
     }
 
-    // Create a set of pixel positions for quick lookup
     let pixel_set: HashMap<Vec2us, f32> = pixels.iter().map(|p| (p.pos, p.value)).collect();
-
     let mut visited: HashMap<Vec2us, bool> = HashMap::new();
     let mut regions = Vec::new();
 
@@ -331,136 +515,6 @@ fn find_connected_regions(pixels: &[Pixel]) -> Vec<Vec<Pixel>> {
     regions
 }
 
-/// Find significant branches (leaves) that pass the contrast criterion.
-///
-/// Returns indices of nodes that should be treated as separate objects.
-fn find_significant_branches(tree: &[DeblendNode], min_contrast: f32) -> Vec<usize> {
-    if tree.is_empty() {
-        return Vec::new();
-    }
-
-    // Find root nodes (nodes that are not children of any other node)
-    let all_children: Vec<usize> = tree
-        .iter()
-        .flat_map(|n| n.children.iter().copied())
-        .collect();
-    let roots: Vec<usize> = (0..tree.len())
-        .filter(|&i| !all_children.contains(&i))
-        .collect();
-
-    let mut leaves = Vec::new();
-
-    // Process each root
-    for &root_idx in &roots {
-        collect_significant_leaves(tree, root_idx, min_contrast, &mut leaves);
-    }
-
-    // If no leaves found (all contrast criteria failed), return roots
-    if leaves.is_empty() {
-        return roots;
-    }
-
-    leaves
-}
-
-/// Recursively collect leaf nodes that pass contrast criterion.
-///
-/// Per SExtractor algorithm: a branch is considered a separate object if its
-/// flux is at least `min_contrast` fraction of the **parent's** flux (not root).
-fn collect_significant_leaves(
-    tree: &[DeblendNode],
-    node_idx: usize,
-    min_contrast: f32,
-    leaves: &mut Vec<usize>,
-) {
-    let node = &tree[node_idx];
-
-    if node.children.is_empty() {
-        // This is a leaf - add it
-        leaves.push(node_idx);
-        return;
-    }
-
-    // Check if children pass contrast criterion relative to THIS node's flux (parent)
-    // This matches SExtractor's DEBLEND_MINCONT behavior
-    let parent_flux = node.flux;
-    let children_pass_contrast: Vec<bool> = node
-        .children
-        .iter()
-        .map(|&child_idx| {
-            let child_flux = tree[child_idx].flux;
-            child_flux >= min_contrast * parent_flux
-        })
-        .collect();
-
-    let num_pass = children_pass_contrast.iter().filter(|&&b| b).count();
-
-    if num_pass <= 1 {
-        // Not enough children pass contrast - treat this node as a leaf
-        leaves.push(node_idx);
-    } else {
-        // Multiple children pass - recurse into each
-        for (i, &child_idx) in node.children.iter().enumerate() {
-            if children_pass_contrast[i] {
-                collect_significant_leaves(tree, child_idx, min_contrast, leaves);
-            }
-        }
-    }
-}
-
-/// Assign pixels to their nearest object (based on peak positions).
-fn assign_pixels_to_objects(
-    data: &ComponentData,
-    pixels: &Buffer2<f32>,
-    labels: &LabelMap,
-    tree: &[DeblendNode],
-    leaf_indices: &[usize],
-) -> SmallVec<[DeblendedCandidate; MAX_PEAKS]> {
-    if leaf_indices.is_empty() {
-        return smallvec::smallvec![create_single_object(data, pixels, labels)];
-    }
-
-    // Get peak positions for each leaf
-    let peaks: SmallVec<[Pixel; MAX_PEAKS]> = leaf_indices.iter().map(|&i| tree[i].peak).collect();
-
-    // Initialize objects
-    let mut objects: SmallVec<[DeblendedCandidate; MAX_PEAKS]> = peaks
-        .iter()
-        .map(|p| DeblendedCandidate {
-            bbox: Aabb::empty(),
-            peak: p.pos,
-            peak_value: p.value,
-            area: 0,
-        })
-        .collect();
-
-    // Assign each pixel to nearest peak
-    for p in data.iter_pixels(pixels, labels) {
-        let mut min_dist_sq = usize::MAX;
-        let mut nearest = 0;
-
-        for (i, peak) in peaks.iter().enumerate() {
-            let dx = (p.pos.x as i32 - peak.pos.x as i32).unsigned_abs() as usize;
-            let dy = (p.pos.y as i32 - peak.pos.y as i32).unsigned_abs() as usize;
-            let dist_sq = dx * dx + dy * dy;
-
-            if dist_sq < min_dist_sq {
-                min_dist_sq = dist_sq;
-                nearest = i;
-            }
-        }
-
-        let obj = &mut objects[nearest];
-        obj.area += 1;
-        obj.bbox.include(p.pos);
-    }
-
-    // Filter out objects with no pixels
-    objects.retain(|o| o.area > 0);
-
-    objects
-}
-
 /// Create a single object from all pixels (no deblending).
 fn create_single_object(
     data: &ComponentData,
@@ -476,6 +530,10 @@ fn create_single_object(
         area: data.area,
     }
 }
+
+// ============================================================================
+// Tests
+// ============================================================================
 
 #[cfg(test)]
 mod tests {
@@ -553,14 +611,12 @@ mod tests {
 
         let result = deblend_multi_threshold(&data, &pixels, &labels, &config);
 
-        // Should deblend into 2 separate objects
         assert_eq!(
             result.len(),
             2,
             "Two separated stars should produce two objects"
         );
 
-        // Check peak positions
         let mut peaks: Vec<_> = result.iter().map(|o| (o.peak.x, o.peak.y)).collect();
         peaks.sort_by_key(|&(x, _)| x);
 
@@ -576,20 +632,18 @@ mod tests {
 
     #[test]
     fn test_faint_secondary_below_contrast() {
-        // Very faint secondary should NOT be deblended (below contrast threshold)
         let (pixels, labels, data) =
             make_test_component(100, 100, &[(30, 50, 1.0, 2.5), (70, 50, 0.001, 2.5)]);
 
         let config = DeblendConfig {
             n_thresholds: 32,
-            min_contrast: 0.01, // 1% contrast required
+            min_contrast: 0.01,
             min_separation: 3,
             ..Default::default()
         };
 
         let result = deblend_multi_threshold(&data, &pixels, &labels, &config);
 
-        // Faint star should be absorbed - contrast too low
         assert_eq!(
             result.len(),
             1,
@@ -610,11 +664,10 @@ mod tests {
             })
             .collect();
 
-        assert_eq!(thresholds.len(), 11); // 0..=10
+        assert_eq!(thresholds.len(), 11);
         assert!((thresholds[0] - 0.1).abs() < 1e-6);
         assert!((thresholds[10] - 1.0).abs() < 1e-6);
 
-        // Check exponential spacing (ratio should be constant)
         for i in 1..thresholds.len() {
             let step_ratio = thresholds[i] / thresholds[i - 1];
             let expected_ratio = (1.0f32 / 0.1).powf(1.0 / 10.0);
@@ -627,21 +680,18 @@ mod tests {
 
     #[test]
     fn test_close_peaks_merge() {
-        // Two peaks closer than min_separation should be merged
-        // Stars only 4 pixels apart (with min_separation=5)
         let (pixels, labels, data) =
             make_test_component(100, 100, &[(48, 50, 1.0, 2.0), (52, 50, 0.9, 2.0)]);
 
         let config = DeblendConfig {
             n_thresholds: 32,
             min_contrast: 0.005,
-            min_separation: 5, // Larger than 4 pixel separation
+            min_separation: 5,
             ..Default::default()
         };
 
         let result = deblend_multi_threshold(&data, &pixels, &labels, &config);
 
-        // Should NOT deblend - peaks too close
         assert_eq!(result.len(), 1, "Close peaks should not be deblended");
     }
 
@@ -664,13 +714,12 @@ mod tests {
 
     #[test]
     fn test_deblend_disabled_with_high_contrast() {
-        // Setting min_contrast to 1.0 should disable deblending
         let (pixels, labels, data) =
             make_test_component(100, 100, &[(30, 50, 1.0, 2.5), (70, 50, 0.8, 2.5)]);
 
         let config = DeblendConfig {
             n_thresholds: 32,
-            min_contrast: 1.0, // Require 100% contrast = disabled
+            min_contrast: 1.0,
             min_separation: 3,
             ..Default::default()
         };
@@ -686,7 +735,6 @@ mod tests {
 
     #[test]
     fn test_three_stars_deblend() {
-        // Three well-separated stars should produce three objects
         let (pixels, labels, data) = make_test_component(
             150,
             100,
@@ -708,7 +756,6 @@ mod tests {
             "Three separated stars should produce three objects"
         );
 
-        // Check all peaks are found
         let mut peaks: Vec<_> = result.iter().map(|o| o.peak.x).collect();
         peaks.sort();
         assert!((peaks[0] as i32 - 30).abs() <= 2);
@@ -718,28 +765,21 @@ mod tests {
 
     #[test]
     fn test_hierarchical_deblend() {
-        // Two close stars that should deblend, plus one far star
-        // Tests that the tree structure works correctly
         let (pixels, labels, data) = make_test_component(
             150,
             100,
-            &[
-                (30, 50, 1.0, 2.5),  // Isolated bright star
-                (100, 50, 0.8, 2.5), // Close pair - brighter
-                (115, 50, 0.7, 2.5), // Close pair - fainter
-            ],
+            &[(30, 50, 1.0, 2.5), (100, 50, 0.8, 2.5), (115, 50, 0.7, 2.5)],
         );
 
         let config = DeblendConfig {
             n_thresholds: 32,
-            min_contrast: 0.1, // 10% contrast
+            min_contrast: 0.1,
             min_separation: 3,
             ..Default::default()
         };
 
         let result = deblend_multi_threshold(&data, &pixels, &labels, &config);
 
-        // Should find all 3 stars
         assert!(
             result.len() >= 2,
             "Should find at least the isolated star and close pair"
@@ -748,7 +788,6 @@ mod tests {
 
     #[test]
     fn test_equal_brightness_stars() {
-        // Two stars of exactly equal brightness
         let (pixels, labels, data) =
             make_test_component(100, 100, &[(30, 50, 1.0, 2.5), (70, 50, 1.0, 2.5)]);
 
@@ -767,7 +806,6 @@ mod tests {
             "Equal brightness stars should both be found"
         );
 
-        // Areas should be roughly equal
         let area_diff = (result[0].area as i32 - result[1].area as i32).abs();
         let avg_area = (result[0].area + result[1].area) / 2;
         assert!(
@@ -778,12 +816,9 @@ mod tests {
 
     #[test]
     fn test_contrast_at_boundary() {
-        // Test contrast criterion at exact boundary
-        // Star 2 has exactly 10% of star 1's flux
         let (pixels, labels, data) =
             make_test_component(100, 100, &[(30, 50, 1.0, 2.5), (70, 50, 0.1, 2.5)]);
 
-        // With min_contrast = 0.09, the faint star should pass
         let config_pass = DeblendConfig {
             n_thresholds: 32,
             min_contrast: 0.09,
@@ -792,7 +827,6 @@ mod tests {
         };
         let result_pass = deblend_multi_threshold(&data, &pixels, &labels, &config_pass);
 
-        // With min_contrast = 0.15, the faint star should fail
         let config_fail = DeblendConfig {
             n_thresholds: 32,
             min_contrast: 0.15,
@@ -809,7 +843,6 @@ mod tests {
 
     #[test]
     fn test_pixel_assignment_conservation() {
-        // Total area of deblended objects should equal original component area
         let (pixels, labels, data) =
             make_test_component(100, 100, &[(30, 50, 1.0, 2.5), (70, 50, 0.8, 2.5)]);
 
@@ -831,7 +864,6 @@ mod tests {
 
     #[test]
     fn test_vertical_star_pair() {
-        // Stars separated vertically instead of horizontally
         let (pixels, labels, data) =
             make_test_component(100, 100, &[(50, 30, 1.0, 2.5), (50, 70, 0.8, 2.5)]);
 
@@ -854,7 +886,6 @@ mod tests {
 
     #[test]
     fn test_diagonal_star_pair() {
-        // Stars separated diagonally
         let (pixels, labels, data) =
             make_test_component(100, 100, &[(30, 30, 1.0, 2.5), (70, 70, 0.8, 2.5)]);
 
@@ -872,7 +903,6 @@ mod tests {
 
     #[test]
     fn test_n_thresholds_effect() {
-        // More thresholds should give same or better deblending
         let (pixels, labels, data) =
             make_test_component(100, 100, &[(35, 50, 1.0, 2.5), (65, 50, 0.9, 2.5)]);
 
@@ -893,7 +923,6 @@ mod tests {
         let result_few = deblend_multi_threshold(&data, &pixels, &labels, &config_few);
         let result_many = deblend_multi_threshold(&data, &pixels, &labels, &config_many);
 
-        // More thresholds should find at least as many objects
         assert!(
             result_many.len() >= result_few.len(),
             "More thresholds should find >= objects"
@@ -902,7 +931,6 @@ mod tests {
 
     #[test]
     fn test_single_pixel_component() {
-        // Edge case: component with just one pixel
         let mut pixels = Buffer2::new_filled(10, 10, 0.0f32);
         let mut labels_buf = Buffer2::new_filled(10, 10, 0u32);
 
@@ -925,20 +953,18 @@ mod tests {
 
     #[test]
     fn test_flat_profile_no_deblend() {
-        // Uniform brightness region should not deblend
         let mut pixels = Buffer2::new_filled(50, 50, 0.0f32);
         let mut labels_buf = Buffer2::new_filled(50, 50, 0u32);
 
         let mut bbox = Aabb::empty();
         let mut area = 0;
 
-        // Create a flat circular region
         for y in 10..40 {
             for x in 10..40 {
                 let dx = x as i32 - 25;
                 let dy = y as i32 - 25;
                 if dx * dx + dy * dy < 150 {
-                    pixels[(x, y)] = 1.0; // Uniform value
+                    pixels[(x, y)] = 1.0;
                     labels_buf[(x, y)] = 1;
                     bbox.include(Vec2us::new(x, y));
                     area += 1;
