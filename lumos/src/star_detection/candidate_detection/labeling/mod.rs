@@ -197,6 +197,7 @@ impl LabelMap {
     /// 2. Label each strip in parallel using word-level bit scanning
     /// 3. Merge labels at strip boundaries using atomic union-find
     /// 4. Flatten labels in parallel
+    #[allow(dead_code)]
     pub fn from_mask(mask: &BitBuffer2) -> Self {
         Self::from_mask_with_connectivity(mask, Connectivity::Four)
     }

@@ -34,7 +34,6 @@ mod deblend;
 mod defect_map;
 mod detector;
 mod fwhm_estimation;
-pub mod gpu;
 mod mask_dilation;
 mod median_filter;
 mod star;

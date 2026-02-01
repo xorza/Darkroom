@@ -7,7 +7,8 @@
 //! centroid computation (~0.01 pixel accuracy).
 
 pub mod gaussian_fit;
-pub mod linear_solver;
+mod linear_solver;
+mod lm_optimizer;
 pub mod moffat_fit;
 
 #[cfg(test)]
