@@ -72,7 +72,7 @@ fn runs_connected(prev: &Run, curr: &Run, connectivity: Connectivity) -> bool {
 
 ### Parallel Processing
 
-For large images (> 100k pixels), the algorithm switches to parallel mode:
+For large images (> 65k pixels), the algorithm switches to parallel mode:
 
 1. **Strip division**: Split image into horizontal strips (64 rows minimum per strip)
 2. **Parallel labeling**: Each strip labeled via `label_strip()` using shared `AtomicUnionFind`
@@ -167,9 +167,12 @@ let all_labels: &[u32] = label_map.labels();
 
 ## Test Coverage
 
-The module includes 45 tests covering:
+The module includes 59 tests covering:
 - Basic shapes: single pixel, lines, L-shapes, U-shapes
 - Edge cases: empty masks, zero dimensions, word boundaries
 - Parallel processing: strip boundaries, large images, sparse/dense patterns
 - RLE-specific: long runs, multiple runs per row, run merging
 - 8-connectivity: diagonal connections, checkerboard patterns
+- Ground truth: comparison against reference flood-fill implementation
+- Property-based: random masks with invariant verification
+- Pixel-level: exact label value verification for known patterns
