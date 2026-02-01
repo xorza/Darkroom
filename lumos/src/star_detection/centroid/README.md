@@ -391,9 +391,8 @@ centroid/
 ├── moffat_fit.rs    # 2D Moffat fitting with L-M optimization
 ├── lm_optimizer.rs  # Shared Levenberg-Marquardt optimizer (with weighted variants)
 ├── linear_solver.rs # Generic NxN linear system solver
-├── tests.rs         # Comprehensive test suite
-├── README.md        # This file
-└── plan.md          # Implementation plan and status
+├── tests.rs         # Comprehensive test suite (~90 tests)
+└── README.md        # This file
 ```
 
 ### Public API
