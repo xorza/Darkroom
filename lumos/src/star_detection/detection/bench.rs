@@ -165,3 +165,13 @@ fn bench_label_map_from_mask_4k(b: ::bench::Bencher) {
 
     b.bench(|| black_box(LabelMap::from_mask(black_box(&mask))));
 }
+
+#[quick_bench(warmup_iters = 1, iters = 10)]
+fn bench_label_map_from_mask_6k_globular(b: ::bench::Bencher) {
+    use crate::testing::synthetic::generate_globular_cluster;
+
+    let pixels = generate_globular_cluster(6144, 6144, 50000, 42);
+    let mask = create_detection_mask(&pixels, 4.0);
+
+    b.bench(|| black_box(LabelMap::from_mask(black_box(&mask))));
+}

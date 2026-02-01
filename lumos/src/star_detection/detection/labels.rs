@@ -1,6 +1,8 @@
 //! Connected component labeling using union-find.
 
 use crate::common::{BitBuffer2, Buffer2};
+use common::parallel;
+use rayon::iter::ParallelIterator;
 
 /// A 2D label map from connected component analysis.
 ///
@@ -45,24 +47,15 @@ impl LabelMap {
 
         let (label_map, num_labels) = Self::build_label_map(&mut parent);
 
-        // Second pass: apply label mapping
-        // Parallelize for large images (>4M pixels, i.e., 2K×2K and larger)
-        let pixel_count = width * height;
+        // Second pass: apply label mapping using chunked parallel iteration
         let labels_data = labels.pixels_mut();
-        if pixel_count > 4_000_000 {
-            use rayon::prelude::*;
-            labels_data.par_iter_mut().for_each(|label| {
-                if *label != 0 {
-                    *label = label_map[*label as usize];
-                }
-            });
-        } else {
-            for label in labels_data.iter_mut() {
+        parallel::par_chunks_auto(labels_data).for_each(|(_, chunk)| {
+            for label in chunk.iter_mut() {
                 if *label != 0 {
                     *label = label_map[*label as usize];
                 }
             }
-        }
+        });
 
         Self { labels, num_labels }
     }
