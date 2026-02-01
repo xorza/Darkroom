@@ -126,7 +126,7 @@ pub fn parallel_sum_f32(values: &[f32]) -> f32 {
     use rayon::prelude::*;
     values
         .par_chunks(PARALLEL_CHUNK_SIZE)
-        .map(|chunk| chunk.iter().sum::<f32>())
+        .map(|chunk| sum_f32(chunk))
         .sum()
 }
 
