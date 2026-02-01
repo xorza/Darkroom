@@ -2,12 +2,30 @@
 //!
 //! Provides optimized math operations with platform-specific SIMD for ARM NEON (aarch64) and x86 SSE4.
 
+// =============================================================================
+// Submodules
+// =============================================================================
+
 mod bbox;
 pub mod scalar;
 mod vec2;
 
+#[cfg(target_arch = "aarch64")]
+mod neon;
+
+#[cfg(target_arch = "x86_64")]
+mod sse;
+
+// =============================================================================
+// Re-exports
+// =============================================================================
+
 pub use bbox::Aabb;
 pub use vec2::Vec2us;
+
+// =============================================================================
+// Constants
+// =============================================================================
 
 /// FWHM to Gaussian sigma conversion factor.
 ///
@@ -20,6 +38,14 @@ pub const FWHM_TO_SIGMA: f32 = 2.354_82;
 /// For a normal distribution, σ ≈ 1.4826 × MAD.
 /// This is the exact value: 1 / Φ⁻¹(3/4) where Φ⁻¹ is the inverse CDF.
 pub const MAD_TO_SIGMA: f32 = 1.4826022;
+
+/// Chunk size for parallel operations.
+/// 16KB worth of f32 values (4096 elements) balances parallelism with overhead.
+const PARALLEL_CHUNK_SIZE: usize = 4096;
+
+// =============================================================================
+// Unit Conversion Functions
+// =============================================================================
 
 /// Convert FWHM to Gaussian sigma.
 #[inline]
@@ -39,11 +65,9 @@ pub fn mad_to_sigma(mad: f32) -> f32 {
     mad * MAD_TO_SIGMA
 }
 
-#[cfg(target_arch = "aarch64")]
-mod neon;
-
-#[cfg(target_arch = "x86_64")]
-mod sse;
+// =============================================================================
+// Basic Arithmetic (SIMD-accelerated)
+// =============================================================================
 
 /// Sum f32 values using SIMD when available.
 pub fn sum_f32(values: &[f32]) -> f32 {
@@ -62,11 +86,53 @@ pub fn sum_f32(values: &[f32]) -> f32 {
     scalar::sum_f32(values)
 }
 
+/// Calculate sum of squared differences from mean using SIMD when available.
+pub fn sum_squared_diff(values: &[f32], mean: f32) -> f32 {
+    #[cfg(target_arch = "aarch64")]
+    {
+        if values.len() >= 4 {
+            return unsafe { neon::sum_squared_diff(values, mean) };
+        }
+    }
+    #[cfg(target_arch = "x86_64")]
+    {
+        if values.len() >= 4 && common::cpu_features::has_sse4_1() {
+            return unsafe { sse::sum_squared_diff(values, mean) };
+        }
+    }
+    scalar::sum_squared_diff(values, mean)
+}
+
 /// Calculate the mean of f32 values using SIMD-accelerated sum.
 pub fn mean_f32(values: &[f32]) -> f32 {
     debug_assert!(!values.is_empty());
     sum_f32(values) / values.len() as f32
 }
+
+/// Accumulate src into dst (dst[i] += src[i]).
+#[inline]
+pub fn accumulate(dst: &mut [f32], src: &[f32]) {
+    scalar::accumulate(dst, src)
+}
+
+/// Scale values in-place (data[i] *= scale).
+#[inline]
+pub fn scale(data: &mut [f32], scale_val: f32) {
+    scalar::scale(data, scale_val)
+}
+
+/// Compute sum of f32 slice in parallel using rayon.
+pub fn parallel_sum_f32(values: &[f32]) -> f32 {
+    use rayon::prelude::*;
+    values
+        .par_chunks(PARALLEL_CHUNK_SIZE)
+        .map(|chunk| chunk.iter().sum::<f32>())
+        .sum()
+}
+
+// =============================================================================
+// Statistical Functions
+// =============================================================================
 
 /// Calculate the median of f32 values in-place using quickselect (O(n) average).
 /// Mutates the input buffer (partial sort).
@@ -97,8 +163,6 @@ pub fn median_f32_mut(data: &mut [f32]) -> f32 {
 /// Compute MAD (Median Absolute Deviation) using a scratch buffer.
 ///
 /// MAD = median(|x_i - median(x)|)
-///
-/// Uses the provided scratch buffer to avoid allocation.
 #[inline]
 pub fn mad_f32_with_scratch(values: &[f32], median: f32, scratch: &mut Vec<f32>) -> f32 {
     if values.is_empty() {
@@ -210,50 +274,17 @@ pub fn sigma_clipped_median_mad(
     (median, sigma)
 }
 
-/// Calculate sum of squared differences from mean using SIMD when available.
-pub fn sum_squared_diff(values: &[f32], mean: f32) -> f32 {
-    #[cfg(target_arch = "aarch64")]
-    {
-        if values.len() >= 4 {
-            return unsafe { neon::sum_squared_diff(values, mean) };
-        }
-    }
-    #[cfg(target_arch = "x86_64")]
-    {
-        if values.len() >= 4 && common::cpu_features::has_sse4_1() {
-            return unsafe { sse::sum_squared_diff(values, mean) };
-        }
-    }
-    scalar::sum_squared_diff(values, mean)
-}
-
-/// Accumulate src into dst (dst[i] += src[i]).
-/// Uses scalar implementation (compiler auto-vectorizes effectively).
-#[inline]
-pub fn accumulate(dst: &mut [f32], src: &[f32]) {
-    scalar::accumulate(dst, src)
-}
-
-/// Scale values in-place (data[i] *= scale).
-/// Uses scalar implementation (compiler auto-vectorizes effectively).
-#[inline]
-pub fn scale(data: &mut [f32], scale_val: f32) {
-    scalar::scale(data, scale_val)
-}
-
-/// Compute sum of f32 slice in parallel using rayon.
-/// Each thread computes a partial sum, then results are combined.
-pub fn parallel_sum_f32(values: &[f32]) -> f32 {
-    use rayon::prelude::*;
-    values
-        .par_chunks(rayon::current_num_threads())
-        .map(|chunk| chunk.iter().sum::<f32>())
-        .sum()
-}
+// =============================================================================
+// Tests
+// =============================================================================
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // -------------------------------------------------------------------------
+    // Unit Conversion Tests
+    // -------------------------------------------------------------------------
 
     #[test]
     fn test_fwhm_sigma_conversion_roundtrip() {
@@ -265,61 +296,68 @@ mod tests {
 
     #[test]
     fn test_fwhm_to_sigma_known_value() {
-        // For FWHM = 2.3548, sigma should be ~1.0
         let sigma = fwhm_to_sigma(FWHM_TO_SIGMA);
         assert!((sigma - 1.0).abs() < 1e-6);
     }
 
     #[test]
     fn test_mad_to_sigma_known_value() {
-        // For MAD = 1.0, sigma should be ~1.4826
         let sigma = mad_to_sigma(1.0);
         assert!((sigma - MAD_TO_SIGMA).abs() < 1e-6);
     }
 
-    #[test]
-    fn test_median_odd() {
-        let mut values = [1.0f32, 3.0, 2.0, 5.0, 4.0];
-        assert!((median_f32_mut(&mut values) - 3.0).abs() < f32::EPSILON);
-    }
-
-    #[test]
-    fn test_median_even() {
-        let mut values = [1.0f32, 2.0, 3.0, 4.0];
-        assert!((median_f32_mut(&mut values) - 2.5).abs() < f32::EPSILON);
-    }
+    // -------------------------------------------------------------------------
+    // Sum Tests
+    // -------------------------------------------------------------------------
 
     #[test]
     fn test_sum_f32() {
         let values: Vec<f32> = (1..=16).map(|x| x as f32).collect();
         let expected: f32 = values.iter().sum();
-        let result = sum_f32(&values);
-        assert!((result - expected).abs() < 1e-4);
+        assert!((sum_f32(&values) - expected).abs() < 1e-4);
     }
 
     #[test]
     fn test_sum_f32_remainder() {
         let values: Vec<f32> = (1..=13).map(|x| x as f32).collect();
         let expected: f32 = values.iter().sum();
-        let result = sum_f32(&values);
-        assert!((result - expected).abs() < 1e-4);
+        assert!((sum_f32(&values) - expected).abs() < 1e-4);
     }
 
     #[test]
     fn test_sum_f32_small() {
         let values = vec![1.0f32, 2.0, 3.0];
         let expected: f32 = values.iter().sum();
-        let result = sum_f32(&values);
-        assert!((result - expected).abs() < 1e-4);
+        assert!((sum_f32(&values) - expected).abs() < 1e-4);
     }
+
+    #[test]
+    fn test_sum_f32_single() {
+        assert!((sum_f32(&[42.0]) - 42.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_sum_f32_empty() {
+        assert!((sum_f32(&[]) - 0.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_sum_f32_negative() {
+        let values: Vec<f32> = vec![-1.0, -2.0, -3.0, -4.0, 5.0, 6.0, 7.0, 8.0];
+        let expected: f32 = values.iter().sum();
+        assert!((sum_f32(&values) - expected).abs() < 1e-4);
+    }
+
+    // -------------------------------------------------------------------------
+    // Sum Squared Diff Tests
+    // -------------------------------------------------------------------------
 
     #[test]
     fn test_sum_squared_diff() {
         let values: Vec<f32> = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
         let mean_val: f32 = 4.5;
         let expected: f32 = values.iter().map(|v| (v - mean_val).powi(2)).sum();
-        let result = sum_squared_diff(&values, mean_val);
-        assert!((result - expected).abs() < 1e-4);
+        assert!((sum_squared_diff(&values, mean_val) - expected).abs() < 1e-4);
     }
 
     #[test]
@@ -327,8 +365,7 @@ mod tests {
         let values: Vec<f32> = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0];
         let mean_val: f32 = 4.0;
         let expected: f32 = values.iter().map(|v| (v - mean_val).powi(2)).sum();
-        let result = sum_squared_diff(&values, mean_val);
-        assert!((result - expected).abs() < 1e-4);
+        assert!((sum_squared_diff(&values, mean_val) - expected).abs() < 1e-4);
     }
 
     #[test]
@@ -336,83 +373,7 @@ mod tests {
         let values: Vec<f32> = vec![1.0, 2.0, 3.0];
         let mean_val: f32 = 2.0;
         let expected: f32 = values.iter().map(|v| (v - mean_val).powi(2)).sum();
-        let result = sum_squared_diff(&values, mean_val);
-        assert!((result - expected).abs() < 1e-4);
-    }
-
-    #[test]
-    fn test_mean_f32() {
-        let values: Vec<f32> = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
-        let expected = 4.5;
-        let result = mean_f32(&values);
-        assert!((result - expected).abs() < 1e-4);
-    }
-
-    #[test]
-    fn test_mean_f32_single() {
-        let values = vec![42.0f32];
-        assert!((mean_f32(&values) - 42.0).abs() < f32::EPSILON);
-    }
-
-    #[test]
-    fn test_sum_f32_single() {
-        let values = vec![42.0f32];
-        assert!((sum_f32(&values) - 42.0).abs() < f32::EPSILON);
-    }
-
-    #[test]
-    fn test_sum_f32_empty() {
-        let values: Vec<f32> = vec![];
-        assert!((sum_f32(&values) - 0.0).abs() < f32::EPSILON);
-    }
-
-    #[test]
-    fn test_median_f32_single() {
-        let mut values = [42.0f32];
-        assert!((median_f32_mut(&mut values) - 42.0).abs() < f32::EPSILON);
-    }
-
-    #[test]
-    fn test_median_and_mad_odd() {
-        // [2.0, 3.0, 4.0] -> median = 3.0
-        // deviations: [1.0, 0.0, 1.0] -> MAD = 1.0
-        let mut values = [2.0f32, 4.0, 3.0];
-        let (median, mad) = median_and_mad_f32_mut(&mut values);
-        assert!((median - 3.0).abs() < 1e-6);
-        assert!((mad - 1.0).abs() < 1e-6);
-    }
-
-    #[test]
-    fn test_median_and_mad_uniform() {
-        // All same values -> MAD = 0
-        let mut values = [3.5f32, 3.5, 3.5, 3.5, 3.5];
-        let (median, mad) = median_and_mad_f32_mut(&mut values);
-        assert!((median - 3.5).abs() < 1e-6);
-        assert!(mad.abs() < 1e-6);
-    }
-
-    #[test]
-    fn test_mad_with_scratch() {
-        let values = [2.0f32, 4.0, 3.0];
-        let mut scratch = Vec::new();
-        let mad = mad_f32_with_scratch(&values, 3.0, &mut scratch);
-        assert!((mad - 1.0).abs() < 1e-6);
-    }
-
-    #[test]
-    fn test_mad_with_scratch_empty() {
-        let values: [f32; 0] = [];
-        let mut scratch = Vec::new();
-        let mad = mad_f32_with_scratch(&values, 0.0, &mut scratch);
-        assert!(mad.abs() < f32::EPSILON);
-    }
-
-    #[test]
-    fn test_sum_f32_negative() {
-        let values: Vec<f32> = vec![-1.0, -2.0, -3.0, -4.0, 5.0, 6.0, 7.0, 8.0];
-        let expected: f32 = values.iter().sum();
-        let result = sum_f32(&values);
-        assert!((result - expected).abs() < 1e-4);
+        assert!((sum_squared_diff(&values, mean_val) - expected).abs() < 1e-4);
     }
 
     #[test]
@@ -420,42 +381,27 @@ mod tests {
         let values: Vec<f32> = vec![-4.0, -2.0, 0.0, 2.0, 4.0, 6.0, 8.0, 10.0];
         let mean_val: f32 = 3.0;
         let expected: f32 = values.iter().map(|v| (v - mean_val).powi(2)).sum();
-        let result = sum_squared_diff(&values, mean_val);
-        assert!((result - expected).abs() < 1e-4);
+        assert!((sum_squared_diff(&values, mean_val) - expected).abs() < 1e-4);
+    }
+
+    // -------------------------------------------------------------------------
+    // Mean Tests
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_mean_f32() {
+        let values: Vec<f32> = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
+        assert!((mean_f32(&values) - 4.5).abs() < 1e-4);
     }
 
     #[test]
-    fn test_median_f32_negative() {
-        let mut values = [-5.0f32, -3.0, -1.0, 2.0, 4.0];
-        assert!((median_f32_mut(&mut values) - (-1.0)).abs() < f32::EPSILON);
+    fn test_mean_f32_single() {
+        assert!((mean_f32(&[42.0]) - 42.0).abs() < f32::EPSILON);
     }
 
-    #[test]
-    fn test_simd_vs_scalar_sum() {
-        let values: Vec<f32> = (0..1000).map(|x| x as f32 * 0.1).collect();
-        let scalar_result = scalar::sum_f32(&values);
-        let simd_result = sum_f32(&values);
-        assert!(
-            (scalar_result - simd_result).abs() < 1e-2,
-            "scalar={}, simd={}",
-            scalar_result,
-            simd_result
-        );
-    }
-
-    #[test]
-    fn test_simd_vs_scalar_sum_squared_diff() {
-        let values: Vec<f32> = (0..1000).map(|x| x as f32 * 0.1).collect();
-        let mean = values.iter().sum::<f32>() / values.len() as f32;
-        let scalar_result = scalar::sum_squared_diff(&values, mean);
-        let simd_result = sum_squared_diff(&values, mean);
-        assert!(
-            (scalar_result - simd_result).abs() < 1e-1,
-            "scalar={}, simd={}",
-            scalar_result,
-            simd_result
-        );
-    }
+    // -------------------------------------------------------------------------
+    // Accumulate & Scale Tests
+    // -------------------------------------------------------------------------
 
     #[test]
     fn test_accumulate() {
@@ -502,6 +448,60 @@ mod tests {
         assert_eq!(data, vec![1.0, 2.0]);
     }
 
+    // -------------------------------------------------------------------------
+    // Parallel Sum Tests
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_parallel_sum_f32() {
+        let values: Vec<f32> = (1..=100).map(|x| x as f32).collect();
+        let expected: f32 = values.iter().sum();
+        assert!((parallel_sum_f32(&values) - expected).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_parallel_sum_f32_large() {
+        let values: Vec<f32> = (0..10000).map(|x| x as f32 * 0.1).collect();
+        let expected: f32 = values.iter().sum();
+        assert!((parallel_sum_f32(&values) - expected).abs() < 1.0);
+    }
+
+    #[test]
+    fn test_parallel_sum_f32_empty() {
+        assert!((parallel_sum_f32(&[]) - 0.0).abs() < f32::EPSILON);
+    }
+
+    // -------------------------------------------------------------------------
+    // SIMD vs Scalar Consistency Tests
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_simd_vs_scalar_sum() {
+        let values: Vec<f32> = (0..1000).map(|x| x as f32 * 0.1).collect();
+        let scalar_result = scalar::sum_f32(&values);
+        let simd_result = sum_f32(&values);
+        assert!(
+            (scalar_result - simd_result).abs() < 1e-2,
+            "scalar={}, simd={}",
+            scalar_result,
+            simd_result
+        );
+    }
+
+    #[test]
+    fn test_simd_vs_scalar_sum_squared_diff() {
+        let values: Vec<f32> = (0..1000).map(|x| x as f32 * 0.1).collect();
+        let mean = values.iter().sum::<f32>() / values.len() as f32;
+        let scalar_result = scalar::sum_squared_diff(&values, mean);
+        let simd_result = sum_squared_diff(&values, mean);
+        assert!(
+            (scalar_result - simd_result).abs() < 1e-1,
+            "scalar={}, simd={}",
+            scalar_result,
+            simd_result
+        );
+    }
+
     #[test]
     fn test_simd_vs_scalar_accumulate() {
         let mut dst_scalar: Vec<f32> = (0..1000).map(|x| x as f32).collect();
@@ -529,15 +529,79 @@ mod tests {
         }
     }
 
+    // -------------------------------------------------------------------------
+    // Median Tests
+    // -------------------------------------------------------------------------
+
     #[test]
-    fn test_parallel_sum_f32() {
-        let values: Vec<f32> = (1..=100).map(|x| x as f32).collect();
-        let result = parallel_sum_f32(&values);
-        let expected: f32 = values.iter().sum();
-        assert!((result - expected).abs() < f32::EPSILON);
+    fn test_median_odd() {
+        let mut values = [1.0f32, 3.0, 2.0, 5.0, 4.0];
+        assert!((median_f32_mut(&mut values) - 3.0).abs() < f32::EPSILON);
     }
 
-    // --- sigma_clipped_median_mad tests ---
+    #[test]
+    fn test_median_even() {
+        let mut values = [1.0f32, 2.0, 3.0, 4.0];
+        assert!((median_f32_mut(&mut values) - 2.5).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_median_two_elements() {
+        let mut values = [1.0f32, 5.0];
+        assert!((median_f32_mut(&mut values) - 3.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_median_f32_single() {
+        let mut values = [42.0f32];
+        assert!((median_f32_mut(&mut values) - 42.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_median_f32_negative() {
+        let mut values = [-5.0f32, -3.0, -1.0, 2.0, 4.0];
+        assert!((median_f32_mut(&mut values) - (-1.0)).abs() < f32::EPSILON);
+    }
+
+    // -------------------------------------------------------------------------
+    // MAD Tests
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_median_and_mad_odd() {
+        let mut values = [2.0f32, 4.0, 3.0];
+        let (median, mad) = median_and_mad_f32_mut(&mut values);
+        assert!((median - 3.0).abs() < 1e-6);
+        assert!((mad - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_median_and_mad_uniform() {
+        let mut values = [3.5f32, 3.5, 3.5, 3.5, 3.5];
+        let (median, mad) = median_and_mad_f32_mut(&mut values);
+        assert!((median - 3.5).abs() < 1e-6);
+        assert!(mad.abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_mad_with_scratch() {
+        let values = [2.0f32, 4.0, 3.0];
+        let mut scratch = Vec::new();
+        let mad = mad_f32_with_scratch(&values, 3.0, &mut scratch);
+        assert!((mad - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_mad_with_scratch_empty() {
+        let values: [f32; 0] = [];
+        let mut scratch = Vec::new();
+        let mad = mad_f32_with_scratch(&values, 0.0, &mut scratch);
+        assert!(mad.abs() < f32::EPSILON);
+    }
+
+    // -------------------------------------------------------------------------
+    // Sigma-Clipped Median/MAD Tests
+    // -------------------------------------------------------------------------
 
     #[test]
     fn test_sigma_clipped_empty_input() {
@@ -562,7 +626,6 @@ mod tests {
         let mut values = vec![2.0, 4.0];
         let mut deviations = Vec::new();
         let (median, _sigma) = sigma_clipped_median_mad(&mut values, &mut deviations, 3.0, 3);
-        // Median of [2, 4] = 3
         assert!((median - 3.0).abs() < 0.01);
     }
 
@@ -577,20 +640,15 @@ mod tests {
 
     #[test]
     fn test_sigma_clipped_no_outliers() {
-        // Normal-ish distribution with no extreme outliers
         let mut values: Vec<f32> = (0..100).map(|i| 50.0 + (i as f32 - 50.0) * 0.1).collect();
         let mut deviations = Vec::new();
         let (median, sigma) = sigma_clipped_median_mad(&mut values, &mut deviations, 3.0, 3);
-        // Median should be close to 50
         assert!((median - 50.0).abs() < 1.0);
-        // Sigma should be small and non-zero
-        assert!(sigma > 0.0);
-        assert!(sigma < 10.0);
+        assert!(sigma > 0.0 && sigma < 10.0);
     }
 
     #[test]
     fn test_sigma_clipped_rejects_outliers() {
-        // 97 values around 10, plus 3 extreme outliers
         let mut values: Vec<f32> = vec![10.0; 97];
         values.extend([1000.0, 2000.0, 3000.0]);
         let original_len = values.len();
@@ -598,11 +656,8 @@ mod tests {
 
         let (median, sigma) = sigma_clipped_median_mad(&mut values, &mut deviations, 3.0, 3);
 
-        // After clipping, median should be ~10 (outliers rejected)
         assert!((median - 10.0).abs() < 0.1);
-        // Sigma should be very small (uniform after clipping)
         assert!(sigma < 1.0);
-        // Original slice reordered but length unchanged
         assert_eq!(values.len(), original_len);
     }
 
@@ -617,15 +672,12 @@ mod tests {
 
     #[test]
     fn test_sigma_clipped_mixed_outliers() {
-        // Values centered at 100 with outliers on both sides
         let mut values: Vec<f32> = vec![100.0; 90];
-        values.extend([0.0, 1.0, 2.0, 198.0, 199.0, 200.0]); // outliers
-        values.extend([99.0, 100.0, 101.0, 102.0]); // normal values
+        values.extend([0.0, 1.0, 2.0, 198.0, 199.0, 200.0]);
+        values.extend([99.0, 100.0, 101.0, 102.0]);
         let mut deviations = Vec::new();
 
         let (median, _sigma) = sigma_clipped_median_mad(&mut values, &mut deviations, 3.0, 3);
-
-        // After clipping, median should be close to 100
         assert!((median - 100.0).abs() < 2.0);
     }
 
@@ -634,32 +686,27 @@ mod tests {
         let mut values = vec![1.0, 2.0, 3.0, 1000.0];
         let mut deviations = Vec::new();
         let (median, _sigma) = sigma_clipped_median_mad(&mut values, &mut deviations, 3.0, 0);
-        // With 0 iterations, should just return median/MAD of all values
-        // Median of [1, 2, 3, 1000] = 2.5
         assert!((median - 2.5).abs() < 0.1);
     }
 
     #[test]
     fn test_sigma_clipped_one_iteration() {
-        // 10 normal values plus one extreme outlier
         let mut values: Vec<f32> = vec![10.0; 10];
         values.push(10000.0);
         let mut deviations = Vec::new();
 
         let (median, sigma) = sigma_clipped_median_mad(&mut values, &mut deviations, 3.0, 1);
 
-        // One iteration should reject the extreme outlier
         assert!((median - 10.0).abs() < 0.1);
         assert!(sigma < 1.0);
     }
 
     #[test]
     fn test_sigma_clipped_kappa_affects_clipping() {
-        // Same data, different kappa values
         let base_values: Vec<f32> = {
             let mut v = vec![50.0; 90];
-            v.extend([20.0, 25.0, 75.0, 80.0]); // moderate outliers
-            v.extend([0.0, 100.0]); // extreme outliers
+            v.extend([20.0, 25.0, 75.0, 80.0]);
+            v.extend([0.0, 100.0]);
             v
         };
 
@@ -667,18 +714,13 @@ mod tests {
         let mut values_loose = base_values.clone();
         let mut deviations = Vec::new();
 
-        // Strict kappa (1.5) should clip more aggressively
         let (median_strict, sigma_strict) =
             sigma_clipped_median_mad(&mut values_strict, &mut deviations, 1.5, 3);
-
-        // Loose kappa (5.0) should clip less
         let (median_loose, sigma_loose) =
             sigma_clipped_median_mad(&mut values_loose, &mut deviations, 5.0, 3);
 
-        // Both should converge to similar median
         assert!((median_strict - 50.0).abs() < 5.0);
         assert!((median_loose - 50.0).abs() < 5.0);
-        // Strict clipping should give smaller sigma
         assert!(sigma_strict <= sigma_loose);
     }
 
@@ -693,15 +735,12 @@ mod tests {
 
         sigma_clipped_median_mad(&mut values2, &mut deviations, 3.0, 2);
 
-        // Buffer should be reused (capacity not reduced)
         assert!(deviations.capacity() >= cap_after_first.min(values2.len()));
     }
 
     #[test]
     fn test_sigma_clipped_large_dataset() {
-        // 10000 values with some outliers
         let mut values: Vec<f32> = (0..10000).map(|i| 100.0 + (i % 10) as f32).collect();
-        // Add 100 outliers
         for i in 0..100 {
             values[i * 100] = 1000.0;
         }
@@ -709,14 +748,12 @@ mod tests {
 
         let (median, sigma) = sigma_clipped_median_mad(&mut values, &mut deviations, 3.0, 3);
 
-        // Should converge to values around 100-109
         assert!((100.0..=110.0).contains(&median));
         assert!(sigma > 0.0 && sigma < 20.0);
     }
 
     #[test]
     fn test_sigma_clipped_all_same_then_one_different() {
-        // Edge case: many identical values plus one outlier
         let mut values: Vec<f32> = vec![42.0; 999];
         values.push(9999.0);
         let mut deviations = Vec::new();
@@ -724,7 +761,6 @@ mod tests {
         let (median, sigma) = sigma_clipped_median_mad(&mut values, &mut deviations, 3.0, 3);
 
         assert!((median - 42.0).abs() < 0.01);
-        // After clipping outlier, sigma should be 0 (all identical)
         assert!(sigma < 0.01);
     }
 }
