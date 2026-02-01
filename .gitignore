@@ -4,6 +4,7 @@
 
 **/.idea/
 **/target/
+**/bench-results/
 
 
 /test_output/

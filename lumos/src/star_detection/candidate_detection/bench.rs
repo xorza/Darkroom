@@ -170,7 +170,7 @@ fn bench_extract_candidates_6k_globular_cluster_multithreshold(b: ::bench::Bench
     });
 }
 
-#[quick_bench(warmup_iters = 1, iters = 10)]
+#[quick_bench(warmup_iters = 1, iters = 40)]
 fn bench_detect_stars_6k_50000(b: ::bench::Bencher) {
     init_tracing();
 
