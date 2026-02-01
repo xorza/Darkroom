@@ -124,6 +124,25 @@ fn bench_extract_candidates_4k_dense_multithreshold(b: ::bench::Bencher) {
     });
 }
 
+#[quick_bench(warmup_iters = 3, iters = 30)]
+fn bench_extract_candidates_6k_dense(b: ::bench::Bencher) {
+    init_tracing();
+
+    // 6K image with ~10000 stars (dense field)
+    let pixels = benchmark_star_field(6144, 6144, 10000, 0.1, 0.01, 42);
+    let mask = create_detection_mask(&pixels, 4.0);
+    let label_map = LabelMap::from_mask(&mask);
+    let config = DeblendConfig::default();
+
+    b.bench(|| {
+        black_box(extract_candidates(
+            black_box(&pixels),
+            black_box(&label_map),
+            black_box(&config),
+        ))
+    });
+}
+
 #[quick_bench(warmup_iters = 1, iters = 10)]
 fn bench_extract_candidates_6k_globular_cluster_multithreshold(b: ::bench::Bencher) {
     init_tracing();
