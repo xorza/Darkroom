@@ -12,6 +12,8 @@ mod lm_optimizer;
 pub mod moffat_fit;
 
 #[cfg(test)]
+mod bench;
+#[cfg(test)]
 mod tests;
 
 // Re-export fitting functions and types for convenience
