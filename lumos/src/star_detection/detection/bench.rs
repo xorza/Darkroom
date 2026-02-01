@@ -132,7 +132,8 @@ fn bench_extract_candidates_6k_dense(b: ::bench::Bencher) {
     let pixels = benchmark_star_field(6144, 6144, 50000, 0.1, 0.01, 42);
     let mask = create_detection_mask(&pixels, 4.0);
     let label_map = LabelMap::from_mask(&mask);
-    let config = DeblendConfig::default();
+
+    let config: DeblendConfig = (&StarDetectionConfig::for_crowded_field()).into();
 
     b.bench(|| {
         black_box(extract_candidates(
