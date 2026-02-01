@@ -1,9 +1,21 @@
 //! Tests for threshold mask creation (packed BitBuffer2 version).
+//!
+//! Test organization:
+//! - Basic threshold tests: Core functionality for standard thresholding
+//! - Edge cases: Boundary conditions, special values, tiny images
+//! - SIMD validation: Remainder handling, alignment, SIMD vs scalar consistency
+//! - Filtered threshold tests: Background-subtracted image thresholding
+//! - Adaptive threshold tests: Per-pixel sigma thresholding
+//! - Multi-row tests: 2D image patterns and row boundary handling
 
 use super::{
     create_adaptive_threshold_mask, create_threshold_mask, create_threshold_mask_filtered,
 };
 use crate::common::{BitBuffer2, Buffer2};
+
+// ============================================================================
+// Test helpers
+// ============================================================================
 
 /// Helper to create threshold mask for tests using packed version
 fn create_threshold_mask_test(
@@ -36,6 +48,72 @@ fn create_threshold_mask_filtered_test(
     create_threshold_mask_filtered(&filtered, &noise, sigma, &mut mask);
     mask
 }
+
+/// Helper to create adaptive threshold mask for tests
+fn create_adaptive_threshold_mask_test(
+    pixels: &[f32],
+    bg: &[f32],
+    noise: &[f32],
+    adaptive_sigma: &[f32],
+    width: usize,
+    height: usize,
+) -> BitBuffer2 {
+    let pixels = Buffer2::new(width, height, pixels.to_vec());
+    let bg = Buffer2::new(width, height, bg.to_vec());
+    let noise = Buffer2::new(width, height, noise.to_vec());
+    let adaptive_sigma = Buffer2::new(width, height, adaptive_sigma.to_vec());
+    let mut mask = BitBuffer2::new_filled(width, height, false);
+    create_adaptive_threshold_mask(&pixels, &bg, &noise, &adaptive_sigma, &mut mask);
+    mask
+}
+
+/// Reference scalar implementation for testing SIMD correctness
+fn scalar_threshold(pixels: &[f32], bg: &[f32], noise: &[f32], sigma: f32) -> Vec<bool> {
+    pixels
+        .iter()
+        .zip(bg.iter())
+        .zip(noise.iter())
+        .map(|((&px, &b), &n)| {
+            let threshold = b + sigma * n.max(1e-6);
+            px > threshold
+        })
+        .collect()
+}
+
+/// Reference scalar implementation for filtered threshold
+fn scalar_threshold_filtered(pixels: &[f32], noise: &[f32], sigma: f32) -> Vec<bool> {
+    pixels
+        .iter()
+        .zip(noise.iter())
+        .map(|(&px, &n)| {
+            let threshold = sigma * n.max(1e-6);
+            px > threshold
+        })
+        .collect()
+}
+
+/// Reference scalar implementation for adaptive threshold
+fn scalar_threshold_adaptive(
+    pixels: &[f32],
+    bg: &[f32],
+    noise: &[f32],
+    adaptive_sigma: &[f32],
+) -> Vec<bool> {
+    pixels
+        .iter()
+        .zip(bg.iter())
+        .zip(noise.iter())
+        .zip(adaptive_sigma.iter())
+        .map(|(((&px, &b), &n), &s)| {
+            let threshold = b + s * n.max(1e-6);
+            px > threshold
+        })
+        .collect()
+}
+
+// ============================================================================
+// Basic threshold tests
+// ============================================================================
 
 #[test]
 fn test_threshold_mask_above() {
@@ -85,6 +163,10 @@ fn test_various_lengths() {
         assert!(mask.iter().all(|v| v), "failed for len={}", len);
     }
 }
+
+// ============================================================================
+// Edge cases: special values, boundaries
+// ============================================================================
 
 #[test]
 fn test_all_below() {
@@ -210,6 +292,10 @@ fn test_high_noise_region() {
     );
 }
 
+// ============================================================================
+// SIMD validation: remainder handling, alignment
+// ============================================================================
+
 #[test]
 fn test_remainder_handling() {
     // Test that remainder handling works correctly for all possible remainder sizes
@@ -237,6 +323,10 @@ fn test_remainder_handling() {
         }
     }
 }
+
+// ============================================================================
+// Filtered threshold tests
+// ============================================================================
 
 #[test]
 fn test_filtered_basic() {
@@ -437,26 +527,8 @@ fn test_negative_noise_clamped() {
 }
 
 // ============================================================================
-// Adaptive threshold mask tests
+// Adaptive threshold tests
 // ============================================================================
-
-/// Helper to create adaptive threshold mask for tests
-fn create_adaptive_threshold_mask_test(
-    pixels: &[f32],
-    bg: &[f32],
-    noise: &[f32],
-    adaptive_sigma: &[f32],
-    width: usize,
-    height: usize,
-) -> BitBuffer2 {
-    let pixels = Buffer2::new(width, height, pixels.to_vec());
-    let bg = Buffer2::new(width, height, bg.to_vec());
-    let noise = Buffer2::new(width, height, noise.to_vec());
-    let adaptive_sigma = Buffer2::new(width, height, adaptive_sigma.to_vec());
-    let mut mask = BitBuffer2::new_filled(width, height, false);
-    create_adaptive_threshold_mask(&pixels, &bg, &noise, &adaptive_sigma, &mut mask);
-    mask
-}
 
 #[test]
 fn test_adaptive_threshold_uniform_sigma() {
@@ -627,19 +699,6 @@ fn test_adaptive_threshold_zero_noise() {
 // SIMD vs Scalar consistency tests
 // ============================================================================
 
-/// Reference scalar implementation for testing
-fn scalar_threshold(pixels: &[f32], bg: &[f32], noise: &[f32], sigma: f32) -> Vec<bool> {
-    pixels
-        .iter()
-        .zip(bg.iter())
-        .zip(noise.iter())
-        .map(|((&px, &b), &n)| {
-            let threshold = b + sigma * n.max(1e-6);
-            px > threshold
-        })
-        .collect()
-}
-
 #[test]
 fn test_packed_matches_scalar() {
     let width = 100;
@@ -698,4 +757,330 @@ fn test_packed_non_aligned_size() {
 
     // All should be set
     assert_eq!(mask.count_ones(), size);
+}
+
+#[test]
+fn test_filtered_matches_scalar() {
+    let width = 100;
+    let height = 100;
+    let size = width * height;
+
+    let mut pixels_data = vec![0.0f32; size];
+    let mut noise_data = vec![0.1f32; size];
+
+    for i in 0..size {
+        pixels_data[i] = ((i * 17) % 100) as f32 / 100.0;
+        noise_data[i] = 0.05 + ((i * 3) % 10) as f32 / 100.0;
+    }
+
+    let sigma = 3.0;
+
+    // Compute with scalar reference
+    let scalar_mask = scalar_threshold_filtered(&pixels_data, &noise_data, sigma);
+
+    // Compute with packed BitBuffer2
+    let mask = create_threshold_mask_filtered_test(&pixels_data, &noise_data, sigma, width, height);
+
+    // Compare results
+    for (i, &scalar_val) in scalar_mask.iter().enumerate() {
+        assert_eq!(
+            scalar_val,
+            mask.get(i),
+            "Filtered mismatch at index {}: scalar={}, packed={}",
+            i,
+            scalar_val,
+            mask.get(i)
+        );
+    }
+}
+
+#[test]
+fn test_adaptive_matches_scalar() {
+    let width = 100;
+    let height = 100;
+    let size = width * height;
+
+    let mut pixels_data = vec![0.0f32; size];
+    let mut bg_data = vec![1.0f32; size];
+    let mut noise_data = vec![0.1f32; size];
+    let mut sigma_data = vec![3.0f32; size];
+
+    for i in 0..size {
+        pixels_data[i] = ((i * 17) % 100) as f32 / 50.0;
+        bg_data[i] = 1.0 + ((i * 7) % 10) as f32 / 100.0;
+        noise_data[i] = 0.05 + ((i * 3) % 10) as f32 / 100.0;
+        sigma_data[i] = 2.0 + ((i * 11) % 50) as f32 / 10.0; // Varies 2.0-7.0
+    }
+
+    // Compute with scalar reference
+    let scalar_mask = scalar_threshold_adaptive(&pixels_data, &bg_data, &noise_data, &sigma_data);
+
+    // Compute with packed BitBuffer2
+    let mask = create_adaptive_threshold_mask_test(
+        &pixels_data,
+        &bg_data,
+        &noise_data,
+        &sigma_data,
+        width,
+        height,
+    );
+
+    // Compare results
+    for (i, &scalar_val) in scalar_mask.iter().enumerate() {
+        assert_eq!(
+            scalar_val,
+            mask.get(i),
+            "Adaptive mismatch at index {}: scalar={}, packed={}",
+            i,
+            scalar_val,
+            mask.get(i)
+        );
+    }
+}
+
+// ============================================================================
+// Multi-row tests: 2D patterns, row boundaries
+// ============================================================================
+
+#[test]
+fn test_multirow_checkerboard_pattern() {
+    // Test 2D checkerboard pattern to verify row handling
+    let width = 10;
+    let height = 10;
+    let size = width * height;
+
+    let mut pixels = vec![0.5f32; size];
+    let bg = vec![1.0f32; size];
+    let noise = vec![0.1f32; size];
+
+    // Create checkerboard: (x + y) % 2 == 0 -> above threshold
+    for y in 0..height {
+        for x in 0..width {
+            if (x + y) % 2 == 0 {
+                pixels[y * width + x] = 2.0; // Above threshold (1.3)
+            }
+        }
+    }
+
+    let mask = create_threshold_mask_test(&pixels, &bg, &noise, 3.0, width, height);
+
+    for y in 0..height {
+        for x in 0..width {
+            let expected = (x + y) % 2 == 0;
+            assert_eq!(
+                mask.get(y * width + x),
+                expected,
+                "Checkerboard mismatch at ({}, {})",
+                x,
+                y
+            );
+        }
+    }
+}
+
+#[test]
+fn test_multirow_horizontal_stripes() {
+    // Test horizontal stripe pattern
+    let width = 100;
+    let height = 10;
+    let size = width * height;
+
+    let mut pixels = vec![0.5f32; size];
+    let bg = vec![1.0f32; size];
+    let noise = vec![0.1f32; size];
+
+    // Even rows above threshold, odd rows below
+    for y in 0..height {
+        if y % 2 == 0 {
+            for x in 0..width {
+                pixels[y * width + x] = 2.0;
+            }
+        }
+    }
+
+    let mask = create_threshold_mask_test(&pixels, &bg, &noise, 3.0, width, height);
+
+    for y in 0..height {
+        for x in 0..width {
+            let expected = y % 2 == 0;
+            assert_eq!(
+                mask.get(y * width + x),
+                expected,
+                "Stripe mismatch at ({}, {})",
+                x,
+                y
+            );
+        }
+    }
+}
+
+#[test]
+fn test_multirow_vertical_stripes() {
+    // Test vertical stripe pattern
+    let width = 100;
+    let height = 10;
+    let size = width * height;
+
+    let mut pixels = vec![0.5f32; size];
+    let bg = vec![1.0f32; size];
+    let noise = vec![0.1f32; size];
+
+    // Even columns above threshold, odd columns below
+    for y in 0..height {
+        for x in 0..width {
+            if x % 2 == 0 {
+                pixels[y * width + x] = 2.0;
+            }
+        }
+    }
+
+    let mask = create_threshold_mask_test(&pixels, &bg, &noise, 3.0, width, height);
+
+    for y in 0..height {
+        for x in 0..width {
+            let expected = x % 2 == 0;
+            assert_eq!(
+                mask.get(y * width + x),
+                expected,
+                "Vertical stripe mismatch at ({}, {})",
+                x,
+                y
+            );
+        }
+    }
+}
+
+#[test]
+fn test_row_boundary_at_word_edge() {
+    // Test where row width aligns exactly with 64-bit word boundary
+    let width = 64;
+    let height = 4;
+    let size = width * height;
+
+    let mut pixels = vec![0.5f32; size];
+    let bg = vec![1.0f32; size];
+    let noise = vec![0.1f32; size];
+
+    // Set specific pixels at row boundaries
+    pixels[63] = 2.0; // Last pixel of row 0
+    pixels[64] = 2.0; // First pixel of row 1
+    pixels[127] = 2.0; // Last pixel of row 1
+    pixels[128] = 2.0; // First pixel of row 2
+
+    let mask = create_threshold_mask_test(&pixels, &bg, &noise, 3.0, width, height);
+
+    assert!(mask.get(63), "Last pixel of row 0");
+    assert!(mask.get(64), "First pixel of row 1");
+    assert!(mask.get(127), "Last pixel of row 1");
+    assert!(mask.get(128), "First pixel of row 2");
+
+    // Verify neighbors are not set
+    assert!(!mask.get(62));
+    assert!(!mask.get(65));
+    assert!(!mask.get(126));
+    assert!(!mask.get(129));
+}
+
+#[test]
+fn test_row_boundary_non_aligned() {
+    // Test where row width doesn't align with word boundary
+    let width = 70; // Not divisible by 64
+    let height = 4;
+    let size = width * height;
+
+    let mut pixels = vec![0.5f32; size];
+    let bg = vec![1.0f32; size];
+    let noise = vec![0.1f32; size];
+
+    // Set pixels at row boundaries
+    pixels[69] = 2.0; // Last pixel of row 0
+    pixels[70] = 2.0; // First pixel of row 1
+    pixels[139] = 2.0; // Last pixel of row 1
+    pixels[140] = 2.0; // First pixel of row 2
+
+    let mask = create_threshold_mask_test(&pixels, &bg, &noise, 3.0, width, height);
+
+    assert!(mask.get(69), "Last pixel of row 0");
+    assert!(mask.get(70), "First pixel of row 1");
+    assert!(mask.get(139), "Last pixel of row 1");
+    assert!(mask.get(140), "First pixel of row 2");
+
+    // Verify neighbors are not set
+    assert!(!mask.get(68));
+    assert!(!mask.get(71));
+}
+
+// ============================================================================
+// Filtered threshold: additional coverage
+// ============================================================================
+
+#[test]
+fn test_filtered_remainder_handling() {
+    // Test remainder handling for filtered variant
+    for remainder in 0..64 {
+        let size = 128 + remainder;
+        let filtered: Vec<f32> = (0..size)
+            .map(|i| if i % 2 == 0 { 0.5 } else { 0.1 })
+            .collect();
+        let noise = vec![0.1f32; size];
+
+        // threshold = 3.0 * 0.1 = 0.3
+        // even indices: 0.5 > 0.3 -> true
+        // odd indices: 0.1 <= 0.3 -> false
+        let mask = create_threshold_mask_filtered_test(&filtered, &noise, 3.0, size, 1);
+
+        for i in 0..size {
+            let expected = i % 2 == 0;
+            assert_eq!(
+                mask.get(i),
+                expected,
+                "Filtered remainder: index {} should be {} for size {}",
+                i,
+                expected,
+                size
+            );
+        }
+    }
+}
+
+#[test]
+fn test_filtered_zero_noise() {
+    let filtered = vec![0.1f32, -0.1];
+    let noise = vec![0.0f32; 2];
+
+    // With noise.max(1e-6), threshold ≈ 3.0 * 1e-6 ≈ 0.000003
+    let mask = create_threshold_mask_filtered_test(&filtered, &noise, 3.0, 2, 1);
+
+    assert!(mask.get(0)); // 0.1 > 0.000003
+    assert!(!mask.get(1)); // -0.1 <= 0.000003
+}
+
+#[test]
+fn test_filtered_large_image() {
+    let width = 512;
+    let height = 512;
+    let size = width * height;
+
+    let mut filtered = vec![0.1f32; size];
+    let noise = vec![0.1f32; size];
+
+    // Set diagonal pixels above threshold
+    for i in 0..width.min(height) {
+        filtered[i * width + i] = 0.5; // threshold = 0.3, 0.5 > 0.3
+    }
+
+    let mask = create_threshold_mask_filtered_test(&filtered, &noise, 3.0, width, height);
+
+    for y in 0..height {
+        for x in 0..width {
+            let expected = x == y && x < width.min(height);
+            assert_eq!(
+                mask.get(y * width + x),
+                expected,
+                "Filtered diagonal at ({}, {})",
+                x,
+                y
+            );
+        }
+    }
 }
