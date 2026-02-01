@@ -2,7 +2,7 @@
 
 use crate::common::{BitBuffer2, Buffer2};
 use crate::math::median_f32_mut;
-use crate::star_detection::common::sigma_clipped_median_mad;
+use crate::math::sigma_clipped_median_mad;
 use crate::star_detection::config;
 use rayon::prelude::*;
 

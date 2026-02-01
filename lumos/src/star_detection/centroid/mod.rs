@@ -124,7 +124,7 @@ fn compute_annulus_background(
 #[inline]
 fn sigma_clipped_median_mad(values: &mut [f32], kappa: f32, iterations: usize) -> (f32, f32) {
     let mut deviations = Vec::with_capacity(values.len());
-    super::common::sigma_clipped_median_mad(values, &mut deviations, kappa, iterations)
+    crate::math::sigma_clipped_median_mad(values, &mut deviations, kappa, iterations)
 }
 
 /// Compute sub-pixel centroid and quality metrics for a star candidate.

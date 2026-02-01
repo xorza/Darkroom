@@ -444,7 +444,7 @@ fn test_iterative_background_zero_iterations() {
 // Sigma-Clipped Statistics Tests (tests common::sigma_clipped_median_mad)
 // =============================================================================
 
-use crate::star_detection::common::sigma_clipped_median_mad;
+use crate::math::sigma_clipped_median_mad;
 
 #[test]
 fn test_sigma_clipped_stats_empty_values() {

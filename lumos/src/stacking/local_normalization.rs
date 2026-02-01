@@ -19,7 +19,7 @@
 use rayon::prelude::*;
 
 use crate::common::Buffer2;
-use crate::star_detection::common::sigma_clipped_median_mad;
+use crate::math::sigma_clipped_median_mad;
 
 /// Number of rows to process per parallel chunk for interpolation.
 const ROWS_PER_CHUNK: usize = 8;

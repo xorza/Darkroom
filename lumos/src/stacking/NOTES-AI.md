@@ -79,7 +79,7 @@ Local Normalization corrects illumination differences across frames by matching 
 
 **Algorithm Steps**:
 1. **Tile Division**: Divide image into tiles (default: 128×128, configurable 64-256)
-2. **Per-Tile Statistics**: Compute sigma-clipped median and MAD for each tile (reuses `sigma_clipped_median_mad()` from `star_detection/constants`)
+2. **Per-Tile Statistics**: Compute sigma-clipped median and MAD for each tile (uses `sigma_clipped_median_mad()` from `math` module)
 3. **Compute Correction Factors**:
    - `offset = ref_median` (per tile)
    - `scale = ref_scale / target_scale` (clamped to avoid division by near-zero)
