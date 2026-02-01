@@ -18,46 +18,29 @@ Implemented RLE-based CCL:
 
 ---
 
-## Next Up: 8-Connectivity Option
-
-### Why 8-Connectivity?
+### 2. 8-Connectivity Option - DONE
 **Impact:** Fewer fragmented detections for undersampled PSFs
 
-Current 4-connectivity may split:
-- Diagonal PSF features
-- Stars near Nyquist sampling limit
-- Elongated/trailed sources
-- Slightly defocused or seeing-affected stars
+Implemented configurable connectivity:
+- Added `Connectivity` enum (`Four` default, `Eight`) in `config.rs`
+- Added `runs_overlap()` helper function that handles both modes
+- 4-conn: `prev.start < curr.end && prev.end > curr.start`
+- 8-conn: `prev.start < curr.end + 1 && prev.end + 1 > curr.start`
+- Connectivity propagated through parallel strip processing and boundary merging
+- Added `from_mask_with_connectivity()` method to `LabelMap`
 
-### Implementation Plan
+**Location:** `labels.rs` - `runs_overlap()`, `from_mask_with_connectivity()`
 
-1. **Add connectivity enum:**
-```rust
-#[derive(Debug, Clone, Copy, Default)]
-pub enum Connectivity {
-    #[default]
-    Four,
-    Eight,
-}
-```
-
-2. **Modify RLE run overlap check:**
-   - 4-conn: runs overlap if `prev.start < curr.end && prev.end > curr.start`
-   - 8-conn: runs overlap if `prev.start < curr.end + 1 && prev.end + 1 > curr.start`
-   (adjacent runs at diagonal are connected)
-
-3. **Add config option:**
-```rust
-pub struct StarDetectionConfig {
-    // ...
-    pub connectivity: Connectivity,
-}
-```
-
-4. **Update tests** to cover 8-connectivity cases
-
-**Effort:** Low (mostly changing overlap condition)
-**Files:** `labels.rs`, `config.rs`, `tests.rs`
+**Tests:** `tests.rs` - `label_map_tests::eight_connectivity` module (9 tests)
+- `diagonal_connected` - diagonal line detection
+- `anti_diagonal_connected` - anti-diagonal line
+- `checkerboard_8conn` - full checkerboard connectivity
+- `adjacent_runs_diagonal` - adjacent runs with diagonal touch
+- `l_shape_diagonal_gap` - L-shape with diagonal chain
+- `parallel_strip_boundary_diagonal` - parallel processing boundary case
+- `corner_touch_only` - single pixel diagonal touch
+- `horizontal_still_connected` - 4-conn still works
+- `vertical_still_connected` - 4-conn still works
 
 ---
 
@@ -109,8 +92,8 @@ Use SIMD gather operations for label mapping pass.
 | Improvement | Effort | Impact | Status |
 |-------------|--------|--------|--------|
 | RLE-based CCL | High | High (perf) | **DONE** (~50% faster) |
-| 8-connectivity option | Low | Medium (quality) | **NEXT** |
-| Adaptive thresholding | High | High (quality) | Pending |
+| 8-connectivity option | Low | Medium (quality) | **DONE** |
+| Adaptive thresholding | High | High (quality) | **NEXT** |
 | Auto-estimate FWHM | Medium | Medium (usability) | Pending |
 | Atomic path compression | Low | Low-Medium | Pending |
 | Vectorized label flatten | Low | Low | Pending |
@@ -119,6 +102,8 @@ Use SIMD gather operations for label mapping pass.
 
 ## Recommendation
 
-**Next:** Implement **8-connectivity option** - low effort, improves quality for undersampled PSFs and diagonal star features.
+**Next:** Implement **Adaptive local thresholding** - high effort but high impact for images with variable nebulosity (bright nebulae, dust lanes, gradients).
 
-After that: **Adaptive thresholding** for images with variable nebulosity (higher effort but high impact for real-world astrophotography).
+Alternative quick wins:
+- **Auto-estimate FWHM** - medium effort, improves usability by removing manual tuning
+- **Atomic path compression** - low effort, may improve CCL performance (benchmark needed)
