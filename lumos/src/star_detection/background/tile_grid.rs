@@ -1,9 +1,149 @@
 //! Tile grid for background estimation interpolation.
+//!
+//! Optimizations:
+//! - Sampling: Large tiles use subsampling (~1024 pixels) instead of all pixels
+//! - Word-level mask operations: Process 64 mask bits at a time
+//! - Reduced iterations: 2 sigma-clipping iterations instead of 3
+//! - Direct slicing: No pixel collection when no mask (work directly on rows)
 
 use crate::common::{BitBuffer2, Buffer2};
 use crate::math::median_f32_mut;
 use crate::star_detection::common::sigma_clipped_median_mad;
 use rayon::prelude::*;
+
+/// Maximum samples per tile for statistics computation.
+/// Using ~1024 samples gives accurate median estimates while being much faster.
+const MAX_TILE_SAMPLES: usize = 1024;
+
+/// Number of sigma-clipping iterations (2 is sufficient for background estimation).
+const SIGMA_CLIP_ITERATIONS: usize = 2;
+
+// ============================================================================
+// Helper functions for efficient pixel collection
+// ============================================================================
+
+/// Collect sampled pixels from a tile region (no mask).
+/// Uses strided sampling to get approximately MAX_TILE_SAMPLES pixels.
+#[inline]
+fn collect_sampled_pixels(
+    pixels: &Buffer2<f32>,
+    x_start: usize,
+    x_end: usize,
+    y_start: usize,
+    y_end: usize,
+    width: usize,
+    values: &mut Vec<f32>,
+) {
+    let tile_width = x_end - x_start;
+    let tile_height = y_end - y_start;
+    let tile_pixels = tile_width * tile_height;
+
+    // Calculate stride to get ~MAX_TILE_SAMPLES pixels
+    let stride = (tile_pixels / MAX_TILE_SAMPLES).max(1);
+
+    // Sample using row and column strides
+    let row_stride = (stride as f32).sqrt().ceil() as usize;
+    let col_stride = row_stride;
+
+    for y in (y_start..y_end).step_by(row_stride) {
+        let row_start = y * width;
+        for x in (x_start..x_end).step_by(col_stride) {
+            values.push(pixels[row_start + x]);
+        }
+    }
+}
+
+/// Collect unmasked pixels using word-level bit operations for efficiency.
+#[inline]
+#[allow(clippy::too_many_arguments)]
+fn collect_unmasked_pixels_fast(
+    pixels: &Buffer2<f32>,
+    mask: &BitBuffer2,
+    x_start: usize,
+    x_end: usize,
+    y_start: usize,
+    y_end: usize,
+    width: usize,
+    values: &mut Vec<f32>,
+) {
+    let mask_words = mask.words();
+    let words_per_row = mask.words_per_row();
+
+    for y in y_start..y_end {
+        let row_start = y * width;
+        let word_row_start = y * words_per_row;
+
+        // Process the tile row
+        let mut x = x_start;
+        while x < x_end {
+            let word_idx = x / 64;
+            let bit_offset = x % 64;
+
+            // Get the mask word
+            let mask_word = mask_words[word_row_start + word_idx];
+
+            // Calculate how many bits we can process from this word
+            let bits_in_word = 64 - bit_offset;
+            let bits_to_process = bits_in_word.min(x_end - x);
+
+            // Create a mask for only the bits we care about
+            let relevant_bits = if bits_to_process == 64 {
+                !0u64
+            } else {
+                ((1u64 << bits_to_process) - 1) << bit_offset
+            };
+
+            // Get unmasked bits (where mask is 0)
+            let unmasked = !mask_word & relevant_bits;
+
+            if unmasked != 0 {
+                // Process each unmasked pixel using trailing_zeros
+                let mut bits = unmasked >> bit_offset;
+                let mut local_x = x;
+
+                while bits != 0 && local_x < x_end {
+                    let offset = bits.trailing_zeros() as usize;
+                    local_x = x + offset;
+
+                    if local_x < x_end {
+                        values.push(pixels[row_start + local_x]);
+                    }
+
+                    bits &= bits - 1; // Clear lowest set bit
+                }
+            }
+
+            x += bits_to_process;
+        }
+    }
+}
+
+/// Subsample a vector in place to approximately target_size elements.
+/// Uses strided selection for deterministic results.
+#[inline]
+fn subsample_in_place(values: &mut Vec<f32>, target_size: usize) {
+    let len = values.len();
+    if len <= target_size {
+        return;
+    }
+
+    let stride = len / target_size;
+    let mut write_idx = 0;
+
+    for read_idx in (0..len).step_by(stride) {
+        values[write_idx] = values[read_idx];
+        write_idx += 1;
+        if write_idx >= target_size {
+            break;
+        }
+    }
+
+    values.truncate(write_idx);
+}
+
+// ============================================================================
+// TileStats and TileGrid
+// ============================================================================
 
 /// Tile statistics computed during background estimation.
 #[derive(Clone, Copy, Debug, Default)]
@@ -52,7 +192,7 @@ impl TileGrid {
     }
 
     /// Compute sigma-clipped statistics for a single tile using provided scratch buffers.
-    /// If mask is provided, excludes masked pixels (falls back to all pixels if too few unmasked).
+    /// Uses sampling for large tiles and word-level mask operations for efficiency.
     #[allow(clippy::too_many_arguments)]
     fn compute_tile_stats(
         pixels: &Buffer2<f32>,
@@ -66,38 +206,47 @@ impl TileGrid {
         deviations: &mut Vec<f32>,
     ) -> TileStats {
         let width = pixels.width();
+        let tile_width = x_end - x_start;
+        let tile_height = y_end - y_start;
+        let tile_pixels = tile_width * tile_height;
+
         values.clear();
 
         if let Some(mask) = mask {
-            // Collect unmasked pixels
-            for y in y_start..y_end {
-                let row_start = y * width;
-                for x in x_start..x_end {
-                    let idx = row_start + x;
-                    if !mask.get(idx) {
-                        values.push(pixels[idx]);
-                    }
-                }
-            }
+            // Collect unmasked pixels using word-level operations
+            collect_unmasked_pixels_fast(
+                pixels, mask, x_start, x_end, y_start, y_end, width, values,
+            );
 
-            // If too few unmasked pixels, fall back to all pixels
+            // If too few unmasked pixels, fall back to sampled pixels
             if values.len() < min_pixels {
                 values.clear();
-                for y in y_start..y_end {
-                    let row_start = y * width + x_start;
-                    values.extend_from_slice(&pixels[row_start..row_start + (x_end - x_start)]);
-                }
+                collect_sampled_pixels(pixels, x_start, x_end, y_start, y_end, width, values);
+            } else if values.len() > MAX_TILE_SAMPLES {
+                // Subsample if we have too many unmasked pixels
+                subsample_in_place(values, MAX_TILE_SAMPLES);
             }
         } else {
-            // No mask - collect all pixels
-            for y in y_start..y_end {
-                let row_start = y * width + x_start;
-                values.extend_from_slice(&pixels[row_start..row_start + (x_end - x_start)]);
+            // No mask - collect sampled pixels directly
+            if tile_pixels <= MAX_TILE_SAMPLES {
+                // Small tile: collect all pixels
+                for y in y_start..y_end {
+                    let row_start = y * width + x_start;
+                    values.extend_from_slice(&pixels[row_start..row_start + tile_width]);
+                }
+            } else {
+                // Large tile: use sampling
+                collect_sampled_pixels(pixels, x_start, x_end, y_start, y_end, width, values);
             }
         }
 
-        // Sigma-clipped statistics (3 iterations, 3-sigma clip)
-        let (median, sigma) = sigma_clipped_median_mad(values, deviations, 3.0, 3);
+        if values.is_empty() {
+            return TileStats::default();
+        }
+
+        // Sigma-clipped statistics (2 iterations, 3-sigma clip)
+        let (median, sigma) =
+            sigma_clipped_median_mad(values, deviations, 3.0, SIGMA_CLIP_ITERATIONS);
         TileStats { median, sigma }
     }
 

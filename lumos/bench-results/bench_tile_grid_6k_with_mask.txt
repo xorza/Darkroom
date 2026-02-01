@@ -1,7 +1,7 @@
 name: bench_tile_grid_6k_with_mask
-mean: 69.001205ms
-min: 66.347417ms
-max: 83.752917ms
-median: 68.841417ms
+mean: 31.754272ms
+min: 27.20075ms
+max: 62.745459ms
+median: 28.21975ms
 iterations: 50
-vs_previous: 69.145755ms -> 69.001205ms (-0.2%) same
+vs_previous: 69.001205ms -> 31.754272ms (-54.0%) faster
