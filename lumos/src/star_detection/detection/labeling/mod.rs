@@ -173,7 +173,8 @@ impl LabelMap {
             };
         }
 
-        let num_labels = if width * height < 100_000 {
+        // Threshold determined by benchmark: parallel wins at ~65k pixels
+        let num_labels = if width * height < 65_000 {
             label_mask_sequential(mask, &mut labels, connectivity)
         } else {
             label_mask_parallel(mask, &mut labels, connectivity)
@@ -229,7 +230,8 @@ impl std::ops::Index<usize> for LabelMap {
 // ============================================================================
 
 /// Sequential RLE-based CCL for small images.
-fn label_mask_sequential(
+#[cfg_attr(test, allow(dead_code))]
+pub(super) fn label_mask_sequential(
     mask: &BitBuffer2,
     labels: &mut Buffer2<u32>,
     connectivity: Connectivity,
@@ -305,7 +307,8 @@ fn label_mask_sequential(
 // ============================================================================
 
 /// Parallel RLE-based CCL for large images.
-fn label_mask_parallel(
+#[cfg_attr(test, allow(dead_code))]
+pub(super) fn label_mask_parallel(
     mask: &BitBuffer2,
     labels: &mut Buffer2<u32>,
     connectivity: Connectivity,

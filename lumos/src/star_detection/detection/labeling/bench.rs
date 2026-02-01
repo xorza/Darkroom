@@ -57,3 +57,98 @@ fn bench_label_map_from_mask_6k_globular(b: ::bench::Bencher) {
 
     b.bench(|| black_box(LabelMap::from_mask(black_box(&mask))));
 }
+
+/// Benchmark to find optimal sequential/parallel threshold.
+/// Tests various image sizes around the current threshold (100k pixels).
+#[test]
+#[ignore]
+fn bench_threshold_sweep() {
+    use super::{label_mask_parallel, label_mask_sequential};
+    use crate::common::Buffer2;
+    use crate::star_detection::config::Connectivity;
+    use std::time::Instant;
+
+    println!("\n=== Sequential vs Parallel Threshold Benchmark ===\n");
+    println!(
+        "{:>10} {:>10} {:>12} {:>12} {:>10}",
+        "Pixels", "Size", "Sequential", "Parallel", "Winner"
+    );
+    println!("{}", "-".repeat(60));
+
+    // Test sizes from 10k to 500k pixels
+    let test_sizes: Vec<(usize, usize)> = vec![
+        (100, 100),   // 10k
+        (150, 150),   // 22.5k
+        (200, 200),   // 40k
+        (250, 250),   // 62.5k
+        (300, 300),   // 90k
+        (316, 316),   // ~100k (current threshold)
+        (350, 350),   // 122.5k
+        (400, 400),   // 160k
+        (450, 450),   // 202.5k
+        (500, 500),   // 250k
+        (600, 600),   // 360k
+        (700, 700),   // 490k
+        (800, 800),   // 640k
+        (1000, 1000), // 1M
+    ];
+
+    for (width, height) in test_sizes {
+        let pixels = benchmark_star_field(width, height, width * height / 200, 0.1, 0.01, 42);
+        let mask = create_detection_mask(&pixels, 4.0);
+        let total_pixels = width * height;
+
+        // Warmup
+        for _ in 0..2 {
+            let mut labels = Buffer2::new_filled(width, height, 0u32);
+            label_mask_sequential(&mask, &mut labels, Connectivity::Four);
+            let mut labels = Buffer2::new_filled(width, height, 0u32);
+            label_mask_parallel(&mask, &mut labels, Connectivity::Four);
+        }
+
+        // Benchmark sequential
+        let iterations = if total_pixels < 100_000 { 20 } else { 10 };
+        let start = Instant::now();
+        for _ in 0..iterations {
+            let mut labels = Buffer2::new_filled(width, height, 0u32);
+            black_box(label_mask_sequential(
+                black_box(&mask),
+                &mut labels,
+                Connectivity::Four,
+            ));
+        }
+        let seq_time = start.elapsed() / iterations;
+
+        // Benchmark parallel
+        let start = Instant::now();
+        for _ in 0..iterations {
+            let mut labels = Buffer2::new_filled(width, height, 0u32);
+            black_box(label_mask_parallel(
+                black_box(&mask),
+                &mut labels,
+                Connectivity::Four,
+            ));
+        }
+        let par_time = start.elapsed() / iterations;
+
+        let winner = if seq_time <= par_time { "seq" } else { "par" };
+        let speedup = if seq_time <= par_time {
+            par_time.as_nanos() as f64 / seq_time.as_nanos() as f64
+        } else {
+            seq_time.as_nanos() as f64 / par_time.as_nanos() as f64
+        };
+
+        println!(
+            "{:>10} {:>4}x{:<4} {:>10.1}µs {:>10.1}µs {:>6} ({:.2}x)",
+            total_pixels,
+            width,
+            height,
+            seq_time.as_nanos() as f64 / 1000.0,
+            par_time.as_nanos() as f64 / 1000.0,
+            winner,
+            speedup
+        );
+    }
+
+    println!("\nNote: Current threshold is 100,000 pixels");
+}
