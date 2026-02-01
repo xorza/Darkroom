@@ -165,7 +165,7 @@ fn bench_compute_centroid_batch_100(b: ::bench::Bencher) {
 }
 
 #[quick_bench(warmup_iters = 2, iters = 10)]
-fn bench_compute_centroid_batch_2000(b: ::bench::Bencher) {
+fn bench_compute_centroid_batch_6k_10000(b: ::bench::Bencher) {
     // 2000 stars on 4K image - compare all centroid methods
     let pixels = benchmark_star_field(6144, 6144, 10000, 0.1, 0.01, 42);
     let bg = BackgroundMap::new(&pixels, &BackgroundConfig::default());
