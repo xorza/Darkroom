@@ -562,6 +562,227 @@ fn test_dilate_mask_2d_crosses_word_boundary() {
 }
 
 #[test]
+fn test_dilate_mask_sliding_window_dense_column() {
+    // Dense column where every row has different bits set - stresses sliding window recomputation
+    let width = 64;
+    let height = 20;
+    let radius = 3;
+    let mut mask_data = vec![false; width * height];
+
+    // Set different columns for each row to force unique bits per row
+    for y in 0..height {
+        mask_data[y * width + (y % 60)] = true; // Different x for each row
+    }
+
+    let mask = BitBuffer2::from_slice(width, height, &mask_data);
+    let mut dilated = BitBuffer2::new_filled(width, height, false);
+    dilate_mask(&mask, radius, &mut dilated);
+
+    // Verify with naive check
+    for y in 0..height {
+        for x in 0..width {
+            let mut expected = false;
+            for sy in y.saturating_sub(radius)..=(y + radius).min(height - 1) {
+                for sx in x.saturating_sub(radius)..=(x + radius).min(width - 1) {
+                    if mask.get_xy(sx, sy) {
+                        expected = true;
+                        break;
+                    }
+                }
+                if expected {
+                    break;
+                }
+            }
+            assert_eq!(
+                dilated.get_xy(x, y),
+                expected,
+                "Dense column mismatch at ({}, {})",
+                x,
+                y
+            );
+        }
+    }
+}
+
+#[test]
+fn test_dilate_mask_sliding_window_all_same_word() {
+    // All rows have same word value - should never need recomputation
+    let width = 64;
+    let height = 10;
+    let radius = 2;
+    let mut mask_data = vec![false; width * height];
+
+    // Set same pixel in every row
+    for y in 0..height {
+        mask_data[y * width + 32] = true;
+    }
+
+    let mask = BitBuffer2::from_slice(width, height, &mask_data);
+    let mut dilated = BitBuffer2::new_filled(width, height, false);
+    dilate_mask(&mask, radius, &mut dilated);
+
+    // All rows should have same horizontal dilation (30-34)
+    for y in 0..height {
+        for x in 30..=34 {
+            assert!(dilated.get_xy(x, y), "Pixel ({}, {}) should be set", x, y);
+        }
+    }
+}
+
+#[test]
+fn test_dilate_mask_sliding_window_sparse_then_dense() {
+    // Pattern: sparse rows, then dense rows, then sparse
+    // Tests transition between sliding and recompute modes
+    let width = 64;
+    let height = 30;
+    let radius = 2;
+    let mut mask_data = vec![false; width * height];
+
+    // Sparse section (rows 0-9): one pixel every 3 rows
+    for y in (0..10).step_by(3) {
+        mask_data[y * width + 10] = true;
+    }
+
+    // Dense section (rows 10-19): every row has different pixel
+    for y in 10..20 {
+        mask_data[y * width + (y - 10)] = true;
+    }
+
+    // Sparse section (rows 20-29): one pixel every 3 rows
+    for y in (20..30).step_by(3) {
+        mask_data[y * width + 50] = true;
+    }
+
+    let mask = BitBuffer2::from_slice(width, height, &mask_data);
+    let mut dilated = BitBuffer2::new_filled(width, height, false);
+    dilate_mask(&mask, radius, &mut dilated);
+
+    // Verify against naive
+    for y in 0..height {
+        for x in 0..width {
+            let mut expected = false;
+            for sy in y.saturating_sub(radius)..=(y + radius).min(height - 1) {
+                for sx in x.saturating_sub(radius)..=(x + radius).min(width - 1) {
+                    if mask.get_xy(sx, sy) {
+                        expected = true;
+                        break;
+                    }
+                }
+                if expected {
+                    break;
+                }
+            }
+            assert_eq!(
+                dilated.get_xy(x, y),
+                expected,
+                "Sparse/dense transition mismatch at ({}, {})",
+                x,
+                y
+            );
+        }
+    }
+}
+
+#[test]
+fn test_dilate_mask_last_row_only() {
+    // Only last row has pixels - tests vertical dilation upward
+    let width = 64;
+    let height = 10;
+    let radius = 3;
+    let mut mask_data = vec![false; width * height];
+
+    mask_data[(height - 1) * width + 32] = true;
+
+    let mask = BitBuffer2::from_slice(width, height, &mask_data);
+    let mut dilated = BitBuffer2::new_filled(width, height, false);
+    dilate_mask(&mask, radius, &mut dilated);
+
+    // Rows 6-9 should have dilation, rows 0-5 should not
+    for y in 0..height {
+        let expected_row = y >= height - 1 - radius; // rows 6-9
+        assert_eq!(
+            dilated.get_xy(32, y),
+            expected_row,
+            "Row {} center pixel mismatch",
+            y
+        );
+    }
+}
+
+#[test]
+fn test_dilate_mask_first_row_only() {
+    // Only first row has pixels - tests vertical dilation downward
+    let width = 64;
+    let height = 10;
+    let radius = 3;
+    let mut mask_data = vec![false; width * height];
+
+    mask_data[32] = true; // row 0
+
+    let mask = BitBuffer2::from_slice(width, height, &mask_data);
+    let mut dilated = BitBuffer2::new_filled(width, height, false);
+    dilate_mask(&mask, radius, &mut dilated);
+
+    // Rows 0-3 should have dilation, rows 4-9 should not
+    for y in 0..height {
+        let expected_row = y <= radius; // rows 0-3
+        assert_eq!(
+            dilated.get_xy(32, y),
+            expected_row,
+            "Row {} center pixel mismatch",
+            y
+        );
+    }
+}
+
+#[test]
+fn test_dilate_mask_radius_equals_height() {
+    // Radius equals height - single pixel should fill entire column
+    let width = 64;
+    let height = 5;
+    let radius = 5;
+    let mut mask_data = vec![false; width * height];
+
+    mask_data[2 * width + 32] = true; // middle row
+
+    let mask = BitBuffer2::from_slice(width, height, &mask_data);
+    let mut dilated = BitBuffer2::new_filled(width, height, false);
+    dilate_mask(&mask, radius, &mut dilated);
+
+    // All rows should be dilated at x=32
+    for y in 0..height {
+        assert!(dilated.get_xy(32, y), "Row {} should be set", y);
+    }
+}
+
+#[test]
+fn test_dilate_mask_checkerboard_pattern() {
+    // Checkerboard pattern - alternating pixels in 2D
+    let width = 64;
+    let height = 64;
+    let radius = 1;
+    let mut mask_data = vec![false; width * height];
+
+    for y in 0..height {
+        for x in 0..width {
+            if (x + y) % 2 == 0 {
+                mask_data[y * width + x] = true;
+            }
+        }
+    }
+
+    let mask = BitBuffer2::from_slice(width, height, &mask_data);
+    let mut dilated = BitBuffer2::new_filled(width, height, false);
+    dilate_mask(&mask, radius, &mut dilated);
+
+    // Radius 1 on checkerboard should fill everything
+    assert!(
+        dilated.iter().all(|x| x),
+        "Checkerboard with radius 1 should fill all"
+    );
+}
+
+#[test]
 fn test_dilate_mask_compare_with_naive() {
     // Compare optimized version with naive implementation
     let width = 100;

@@ -17,7 +17,7 @@ fn create_sparse_mask(width: usize, height: usize) -> BitBuffer2 {
     mask
 }
 
-#[quick_bench(warmup_iters = 1, iters = 40)]
+#[quick_bench(warmup_iters = 1, iters = 200)]
 fn bench_dilate_mask_6k(b: ::bench::Bencher) {
     let mask = create_sparse_mask(6144, 6144);
     let mut output = BitBuffer2::new_default(6144, 6144);

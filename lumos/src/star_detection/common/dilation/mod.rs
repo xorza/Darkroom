@@ -100,7 +100,12 @@ pub fn dilate_mask(mask: &BitBuffer2, radius: usize, output: &mut BitBuffer2) {
         });
 }
 
-/// Vertical dilation using sliding window - O(height) instead of O(height * radius).
+/// Vertical dilation using sliding window - O(height) for sparse data.
+///
+/// For each position y, we need OR of column[y-radius..=y+radius].
+/// Uses incremental OR with recomputation when the leaving element contributed bits.
+/// This is O(height) for sparse masks (typical in star detection) since recomputation
+/// is rare when most rows are zero.
 #[inline]
 fn dilate_column_sliding(column: &[u64], output: &mut [u64], radius: usize) {
     let height = column.len();
