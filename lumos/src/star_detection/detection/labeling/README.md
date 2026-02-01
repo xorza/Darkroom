@@ -148,15 +148,13 @@ Run extraction benchmark comparing CTZ vs bit-by-bit scanning (4096-wide rows):
 
 The CTZ approach excels for sparse masks typical in star detection (<5% density).
 
-### Potential Improvements
-
-1. **SIMD parallel bit scanning**: Use AVX2/NEON for processing multiple words simultaneously
-
 ### Investigated but Not Beneficial
 
 - **Atomic path compression**: Path splitting was tested but showed no improvement because strip-based parallel processing already keeps trees shallow. The extra CAS overhead negates any tree-depth benefits.
 
 - **Precomputed lookup tables**: For sparse masks (<5% density), CTZ-based scanning already achieves 7-10x speedup. Lookup tables add memory pressure and are more beneficial for dense masks or SIMD implementations where multiple bytes are processed in parallel.
+
+- **SIMD run extraction**: Implemented SSE2/AVX2/NEON versions that batch-detect all-zero and all-one words (2-4 words at once). Benchmarks showed no improvement over scalar CTZ for sparse astronomical masks because: (1) most words are already zeros (fast-path in scalar), (2) SIMD dispatch overhead negates gains, (3) mixed words still require scalar CTZ for bit transitions. The SIMD approach may benefit dense masks but not typical star detection workloads.
 
 ## API
 
