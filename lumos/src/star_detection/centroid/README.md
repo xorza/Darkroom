@@ -20,11 +20,11 @@ Sub-pixel centroid computation is essential for precise astrometry and photometr
 **Achievable Accuracy:**
 - Weighted centroid methods: ~0.05-0.1 pixel
 - Gaussian/Moffat fitting: ~0.01-0.02 pixel
-- State-of-the-art (Kalman filtering): ~0.008 pixel
+- State-of-the-art (Kalman filtering): ~0.008 pixel (requires multi-frame)
 
 Our implementation uses a two-stage approach:
-1. **Fast initial estimate** using iterative weighted centroid
-2. **Optional refinement** using Gaussian or Moffat profile fitting
+1. **Fast initial estimate** using iterative weighted centroid with adaptive σ
+2. **Optional refinement** using Gaussian or Moffat profile fitting with moment-based initialization
 
 ---
 
@@ -55,9 +55,13 @@ x_iwc = Σ(x × I²(x,y)) / Σ(I²(x,y))
 
 ### Iterative Weighted Centroid (Our Implementation)
 
-Our algorithm uses Gaussian-weighted moments with iterative refinement:
+Our algorithm uses Gaussian-weighted moments with iterative refinement and **adaptive σ**:
 
 ```rust
+// Adaptive sigma based on expected FWHM
+// sigma ≈ FWHM / 2.355, use 0.8× for tighter weighting
+let sigma = (expected_fwhm / 2.355 * 0.8).clamp(1.0, stamp_radius * 0.5);
+
 // Weight pixels by Gaussian distance from current center
 weight = value × exp(-dist² / (2σ²))
 
@@ -69,7 +73,7 @@ new_cy = Σ(y × weight) / Σ(weight)
 ```
 
 **Key parameters:**
-- `σ = 2.0` pixels (Gaussian weight sigma)
+- `σ` = adaptive based on expected FWHM (not fixed!)
 - Convergence threshold: 0.01 pixel
 - Max iterations: 10
 
@@ -91,6 +95,20 @@ This method shows excellent noise resistance and processing speed.
 ### Why Profile Fitting?
 
 While weighted centroid is fast (~0.05 pixel accuracy), profile fitting achieves ~0.01 pixel accuracy by modeling the actual PSF shape.
+
+### Moment-Based Initial Estimate
+
+Before L-M optimization, we estimate sigma from weighted second moments:
+
+```rust
+// For Gaussian: E[r²] = 2σ², so σ = sqrt(E[r²]/2)
+let sigma_est = (sum_r2 / sum_w / 2.0).sqrt();
+```
+
+This provides a much better starting point than a fixed σ=2.0, leading to:
+- Faster convergence (fewer L-M iterations)
+- Fewer local minima issues
+- Better accuracy for non-standard PSF sizes
 
 ### Gaussian Profile
 
@@ -158,6 +176,22 @@ else:
 - Convergence when max parameter change < 1e-6
 - Maximum 50 iterations
 - Validate results (center within stamp, reasonable σ/α values)
+
+### Noise-Weighted Fitting
+
+For optimal accuracy when noise characteristics are known, we support **inverse-variance weighting**:
+
+```rust
+// Weight = 1/variance where:
+// variance = signal/gain + noise² + read_noise²/gain²
+
+pub fn fit_gaussian_2d_weighted(
+    pixels, cx, cy, stamp_radius, background,
+    noise, gain, read_noise, config
+) -> Option<GaussianFitResult>;
+```
+
+This down-weights noisy pixels (wings, background) and provides optimal estimation in low-SNR regimes.
 
 ---
 
@@ -330,6 +364,10 @@ Results are rejected if:
    - [Lost Infinity - Star Centroid with Sub-pixel Accuracy](https://www.lost-infinity.com/night-sky-image-processing-part-4-calculate-the-star-centroid-with-sub-pixel-accuracy/)
    - [Fast Gaussian Fitting for Star Sensors](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC6163372/)
 
+5. **S-Curve Error** (for undersampled PSFs):
+   - [S-curve centroiding error correction (ResearchGate)](https://www.researchgate.net/publication/261102712_S-curve_centroiding_error_correction_for_star_sensor)
+   - [Centroiding Undersampled PSFs with Lookup Table (arXiv)](https://arxiv.org/html/2407.04072v1)
+
 ### Software Implementations
 
 1. **photutils** (Python): [Documentation](https://photutils.readthedocs.io/)
@@ -351,9 +389,11 @@ centroid/
 ├── mod.rs           # Main API: compute_centroid(), refine_centroid(), compute_metrics()
 ├── gaussian_fit.rs  # 2D Gaussian fitting with L-M optimization
 ├── moffat_fit.rs    # 2D Moffat fitting with L-M optimization
-├── lm_optimizer.rs  # Shared Levenberg-Marquardt optimizer
+├── lm_optimizer.rs  # Shared Levenberg-Marquardt optimizer (with weighted variants)
 ├── linear_solver.rs # Generic NxN linear system solver
-└── tests.rs         # Comprehensive test suite
+├── tests.rs         # Comprehensive test suite
+├── README.md        # This file
+└── plan.md          # Implementation plan and status
 ```
 
 ### Public API
@@ -367,9 +407,20 @@ pub fn compute_centroid(
     config: &StarDetectionConfig,
 ) -> Option<Star>;
 
-// Profile fitting
+// Profile fitting (standard)
 pub fn fit_gaussian_2d(...) -> Option<GaussianFitResult>;
 pub fn fit_moffat_2d(...) -> Option<MoffatFitResult>;
+
+// Profile fitting (noise-weighted for optimal estimation)
+pub fn fit_gaussian_2d_weighted(
+    pixels, cx, cy, stamp_radius, background,
+    noise, gain, read_noise, config
+) -> Option<GaussianFitResult>;
+
+pub fn fit_moffat_2d_weighted(
+    pixels, cx, cy, stamp_radius, background,
+    noise, gain, read_noise, config
+) -> Option<MoffatFitResult>;
 
 // Utility functions
 pub fn alpha_beta_to_fwhm(alpha: f32, beta: f32) -> f32;

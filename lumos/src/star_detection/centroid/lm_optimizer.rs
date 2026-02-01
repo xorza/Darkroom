@@ -118,6 +118,75 @@ pub fn optimize_5<M: LMModel<5>>(
     }
 }
 
+/// Run L-M optimization for 5-parameter model with inverse-variance weights.
+///
+/// Weights should be 1/variance for optimal estimation.
+pub fn optimize_5_weighted<M: LMModel<5>>(
+    model: &M,
+    data_x: &[f32],
+    data_y: &[f32],
+    data_z: &[f32],
+    weights: &[f32],
+    initial_params: [f32; 5],
+    config: &LMConfig,
+) -> LMResult<5> {
+    let mut params = initial_params;
+    let mut lambda = config.initial_lambda;
+    let mut prev_chi2 = compute_chi2_weighted(model, data_x, data_y, data_z, weights, &params);
+    let mut converged = false;
+    let mut iterations = 0;
+
+    for iter in 0..config.max_iterations {
+        iterations = iter + 1;
+
+        let (jacobian, residuals) =
+            compute_jacobian_residuals(model, data_x, data_y, data_z, &params);
+        let (hessian, gradient) =
+            compute_weighted_hessian_gradient_5(&jacobian, &residuals, weights);
+
+        let mut damped_hessian = hessian;
+        for (i, row) in damped_hessian.iter_mut().enumerate() {
+            row[i] *= 1.0 + lambda;
+        }
+
+        let Some(delta) = solve_5x5(&damped_hessian, &gradient) else {
+            break;
+        };
+
+        let mut new_params = params;
+        for (p, d) in new_params.iter_mut().zip(delta.iter()) {
+            *p += d;
+        }
+        model.constrain(&mut new_params);
+
+        let new_chi2 = compute_chi2_weighted(model, data_x, data_y, data_z, weights, &new_params);
+
+        if new_chi2 < prev_chi2 {
+            params = new_params;
+            lambda *= config.lambda_down;
+            prev_chi2 = new_chi2;
+
+            let max_delta = delta.iter().map(|d| d.abs()).fold(0.0f32, f32::max);
+            if max_delta < config.convergence_threshold {
+                converged = true;
+                break;
+            }
+        } else {
+            lambda *= config.lambda_up;
+            if lambda > 1e10 {
+                break;
+            }
+        }
+    }
+
+    LMResult {
+        params,
+        chi2: prev_chi2,
+        converged,
+        iterations,
+    }
+}
+
 /// Run L-M optimization for 6-parameter model.
 pub fn optimize_6<M: LMModel<6>>(
     model: &M,
@@ -184,6 +253,75 @@ pub fn optimize_6<M: LMModel<6>>(
     }
 }
 
+/// Run L-M optimization for 6-parameter model with inverse-variance weights.
+///
+/// Weights should be 1/variance for optimal estimation.
+pub fn optimize_6_weighted<M: LMModel<6>>(
+    model: &M,
+    data_x: &[f32],
+    data_y: &[f32],
+    data_z: &[f32],
+    weights: &[f32],
+    initial_params: [f32; 6],
+    config: &LMConfig,
+) -> LMResult<6> {
+    let mut params = initial_params;
+    let mut lambda = config.initial_lambda;
+    let mut prev_chi2 = compute_chi2_weighted(model, data_x, data_y, data_z, weights, &params);
+    let mut converged = false;
+    let mut iterations = 0;
+
+    for iter in 0..config.max_iterations {
+        iterations = iter + 1;
+
+        let (jacobian, residuals) =
+            compute_jacobian_residuals(model, data_x, data_y, data_z, &params);
+        let (hessian, gradient) =
+            compute_weighted_hessian_gradient_6(&jacobian, &residuals, weights);
+
+        let mut damped_hessian = hessian;
+        for (i, row) in damped_hessian.iter_mut().enumerate() {
+            row[i] *= 1.0 + lambda;
+        }
+
+        let Some(delta) = solve_6x6(&damped_hessian, &gradient) else {
+            break;
+        };
+
+        let mut new_params = params;
+        for (p, d) in new_params.iter_mut().zip(delta.iter()) {
+            *p += d;
+        }
+        model.constrain(&mut new_params);
+
+        let new_chi2 = compute_chi2_weighted(model, data_x, data_y, data_z, weights, &new_params);
+
+        if new_chi2 < prev_chi2 {
+            params = new_params;
+            lambda *= config.lambda_down;
+            prev_chi2 = new_chi2;
+
+            let max_delta = delta.iter().map(|d| d.abs()).fold(0.0f32, f32::max);
+            if max_delta < config.convergence_threshold {
+                converged = true;
+                break;
+            }
+        } else {
+            lambda *= config.lambda_up;
+            if lambda > 1e10 {
+                break;
+            }
+        }
+    }
+
+    LMResult {
+        params,
+        chi2: prev_chi2,
+        converged,
+        iterations,
+    }
+}
+
 fn compute_chi2<const N: usize, M: LMModel<N>>(
     model: &M,
     data_x: &[f32],
@@ -198,6 +336,26 @@ fn compute_chi2<const N: usize, M: LMModel<N>>(
         .map(|((&x, &y), &z)| {
             let residual = z - model.evaluate(x, y, params);
             residual * residual
+        })
+        .sum()
+}
+
+fn compute_chi2_weighted<const N: usize, M: LMModel<N>>(
+    model: &M,
+    data_x: &[f32],
+    data_y: &[f32],
+    data_z: &[f32],
+    weights: &[f32],
+    params: &[f32; N],
+) -> f32 {
+    data_x
+        .iter()
+        .zip(data_y.iter())
+        .zip(data_z.iter())
+        .zip(weights.iter())
+        .map(|(((&x, &y), &z), &w)| {
+            let residual = z - model.evaluate(x, y, params);
+            w * residual * residual
         })
         .sum()
 }
@@ -223,6 +381,48 @@ fn compute_jacobian_residuals<const N: usize, M: LMModel<N>>(
     }
 
     (jacobian, residuals)
+}
+
+/// Compute weighted Hessian (J^T W J) and gradient (J^T W r) for 5-parameter model.
+fn compute_weighted_hessian_gradient_5(
+    jacobian: &[[f32; 5]],
+    residuals: &[f32],
+    weights: &[f32],
+) -> ([[f32; 5]; 5], [f32; 5]) {
+    let mut hessian = [[0.0f32; 5]; 5];
+    let mut gradient = [0.0f32; 5];
+
+    for ((row, &r), &w) in jacobian.iter().zip(residuals.iter()).zip(weights.iter()) {
+        for i in 0..5 {
+            gradient[i] += w * row[i] * r;
+            for j in 0..5 {
+                hessian[i][j] += w * row[i] * row[j];
+            }
+        }
+    }
+
+    (hessian, gradient)
+}
+
+/// Compute weighted Hessian (J^T W J) and gradient (J^T W r) for 6-parameter model.
+fn compute_weighted_hessian_gradient_6(
+    jacobian: &[[f32; 6]],
+    residuals: &[f32],
+    weights: &[f32],
+) -> ([[f32; 6]; 6], [f32; 6]) {
+    let mut hessian = [[0.0f32; 6]; 6];
+    let mut gradient = [0.0f32; 6];
+
+    for ((row, &r), &w) in jacobian.iter().zip(residuals.iter()).zip(weights.iter()) {
+        for i in 0..6 {
+            gradient[i] += w * row[i] * r;
+            for j in 0..6 {
+                hessian[i][j] += w * row[i] * row[j];
+            }
+        }
+    }
+
+    (hessian, gradient)
 }
 
 fn compute_hessian_5(jacobian: &[[f32; 5]]) -> [[f32; 5]; 5] {

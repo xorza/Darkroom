@@ -10,6 +10,9 @@ use crate::star_detection::candidate_detection::{StarCandidate, detect_stars};
 /// Default stamp radius for tests (matching expected FWHM of ~4 pixels).
 const TEST_STAMP_RADIUS: usize = 7;
 
+/// Default expected FWHM for tests (sigma=2.5 -> FWHM≈5.9 pixels).
+const TEST_EXPECTED_FWHM: f32 = 5.9;
+
 fn make_gaussian_star(
     width: usize,
     height: usize,
@@ -356,7 +359,16 @@ fn test_refine_centroid_centered_star() {
     let pixels = make_gaussian_star(width, height, cx, cy, 2.5, 0.8);
     let bg = make_uniform_background(width, height, 0.1, 0.01);
 
-    let result = refine_centroid(&pixels, width, height, &bg, cx, cy, TEST_STAMP_RADIUS);
+    let result = refine_centroid(
+        &pixels,
+        width,
+        height,
+        &bg,
+        cx,
+        cy,
+        TEST_STAMP_RADIUS,
+        TEST_EXPECTED_FWHM,
+    );
 
     assert!(result.is_some());
     let (new_cx, new_cy) = result.unwrap();
@@ -386,6 +398,7 @@ fn test_refine_centroid_offset_converges() {
         start_cx,
         start_cy,
         TEST_STAMP_RADIUS,
+        TEST_EXPECTED_FWHM,
     );
 
     assert!(result.is_some());
@@ -409,7 +422,16 @@ fn test_refine_centroid_invalid_position_returns_none() {
     let bg = make_uniform_background(width, height, 0.1, 0.01);
 
     // Position too close to edge
-    let result = refine_centroid(&pixels, width, height, &bg, 3.0, 32.0, TEST_STAMP_RADIUS);
+    let result = refine_centroid(
+        &pixels,
+        width,
+        height,
+        &bg,
+        3.0,
+        32.0,
+        TEST_STAMP_RADIUS,
+        TEST_EXPECTED_FWHM,
+    );
     assert!(result.is_none());
 }
 
@@ -421,7 +443,16 @@ fn test_refine_centroid_zero_flux_returns_none() {
     let pixels = vec![0.1f32; width * height];
     let bg = make_uniform_background(width, height, 0.1, 0.01);
 
-    let result = refine_centroid(&pixels, width, height, &bg, 32.0, 32.0, TEST_STAMP_RADIUS);
+    let result = refine_centroid(
+        &pixels,
+        width,
+        height,
+        &bg,
+        32.0,
+        32.0,
+        TEST_STAMP_RADIUS,
+        TEST_EXPECTED_FWHM,
+    );
     assert!(result.is_none());
 }
 
@@ -435,7 +466,16 @@ fn test_refine_centroid_rejects_large_movement() {
 
     // Start far from the actual star - the stamp won't contain the star,
     // so there's no signal, which should cause rejection
-    let result = refine_centroid(&pixels, width, height, &bg, 32.0, 32.0, TEST_STAMP_RADIUS);
+    let result = refine_centroid(
+        &pixels,
+        width,
+        height,
+        &bg,
+        32.0,
+        32.0,
+        TEST_STAMP_RADIUS,
+        TEST_EXPECTED_FWHM,
+    );
 
     // With no star in the stamp (star is at 50,50, stamp centered at 32,32 with radius 7),
     // the weighted centroid has zero or near-zero flux
@@ -456,7 +496,16 @@ fn test_refine_centroid_iterative_convergence() {
     let mut cy = 32.0f32;
 
     for iteration in 0..MAX_ITERATIONS {
-        let result = refine_centroid(&pixels, width, height, &bg, cx, cy, TEST_STAMP_RADIUS);
+        let result = refine_centroid(
+            &pixels,
+            width,
+            height,
+            &bg,
+            cx,
+            cy,
+            TEST_STAMP_RADIUS,
+            TEST_EXPECTED_FWHM,
+        );
         assert!(result.is_some(), "Iteration {} failed", iteration);
 
         let (new_cx, new_cy) = result.unwrap();
@@ -697,6 +746,7 @@ fn test_centroid_with_noisy_background() {
         true_cx,
         true_cy,
         TEST_STAMP_RADIUS,
+        TEST_EXPECTED_FWHM,
     );
     assert!(result.is_some());
 

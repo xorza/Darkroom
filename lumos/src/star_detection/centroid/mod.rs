@@ -156,8 +156,16 @@ pub fn compute_centroid(
     // First pass: always use weighted moments for initial refinement
     // This gives a good starting point for fitting methods
     for _ in 0..MAX_ITERATIONS {
-        let (new_cx, new_cy) =
-            refine_centroid(pixels, width, height, background, cx, cy, stamp_radius)?;
+        let (new_cx, new_cy) = refine_centroid(
+            pixels,
+            width,
+            height,
+            background,
+            cx,
+            cy,
+            stamp_radius,
+            config.expected_fwhm,
+        )?;
 
         let dx = new_cx - cx;
         let dy = new_cy - cy;
@@ -248,6 +256,10 @@ pub fn compute_centroid(
 /// Single iteration of centroid refinement.
 ///
 /// Returns (new_x, new_y) or None if position is invalid.
+///
+/// The Gaussian weighting sigma is adaptive based on expected FWHM:
+/// sigma ≈ FWHM / 2.355 × 0.8 (slightly tighter to reduce noise influence)
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn refine_centroid(
     pixels: &[f32],
     width: usize,
@@ -256,6 +268,7 @@ pub(crate) fn refine_centroid(
     cx: f32,
     cy: f32,
     stamp_radius: usize,
+    expected_fwhm: f32,
 ) -> Option<(f32, f32)> {
     if !is_valid_stamp_position(cx, cy, width, height, stamp_radius) {
         return None;
@@ -264,7 +277,9 @@ pub(crate) fn refine_centroid(
     let icx = cx.round() as isize;
     let icy = cy.round() as isize;
 
-    let sigma = 2.0f32; // Gaussian weight sigma
+    // Adaptive sigma based on expected FWHM
+    // sigma ≈ FWHM / 2.355, use 0.8× for tighter weighting to reduce noise
+    let sigma = (expected_fwhm / 2.355 * 0.8).clamp(1.0, stamp_radius as f32 * 0.5);
     let two_sigma_sq = 2.0 * sigma * sigma;
 
     let mut sum_x = 0.0f32;

@@ -12,7 +12,10 @@
 
 #![allow(dead_code)]
 
-use super::lm_optimizer::{LMConfig, LMModel, optimize_5, optimize_6};
+use super::gaussian_fit::{compute_pixel_weights, estimate_sigma_from_moments};
+use super::lm_optimizer::{
+    LMConfig, LMModel, optimize_5, optimize_5_weighted, optimize_6, optimize_6_weighted,
+};
 use crate::common::Buffer2;
 
 /// Configuration for Moffat profile fitting.
@@ -164,7 +167,14 @@ pub fn fit_moffat_2d(
     }
 
     let initial_amplitude = (peak_value - background).max(0.01);
-    let initial_alpha = 2.0;
+
+    // Estimate sigma from moments, then convert to alpha
+    // For Moffat: FWHM = 2*alpha*sqrt(2^(1/beta)-1), and FWHM ≈ 2.355*sigma
+    // So alpha ≈ sigma * 2.355 / (2 * sqrt(2^(1/beta)-1))
+    let sigma_est = estimate_sigma_from_moments(&data_x, &data_y, &data_z, cx, cy, background);
+    let beta_for_init = config.fixed_beta;
+    let initial_alpha = sigma_est * 2.355 / (2.0 * (2.0f32.powf(1.0 / beta_for_init) - 1.0).sqrt());
+    let initial_alpha = initial_alpha.clamp(0.5, stamp_radius as f32);
 
     if config.fit_beta {
         fit_with_variable_beta(
@@ -185,6 +195,74 @@ pub fn fit_moffat_2d(
             &data_x,
             &data_y,
             &data_z,
+            cx,
+            cy,
+            initial_amplitude,
+            initial_alpha,
+            background,
+            stamp_radius,
+            n,
+            config,
+        )
+    }
+}
+
+/// Fit a 2D Moffat profile to a star stamp with inverse-variance weighting.
+///
+/// Uses weighted Levenberg-Marquardt optimization for optimal estimation
+/// when noise characteristics are known.
+#[allow(clippy::too_many_arguments)]
+pub fn fit_moffat_2d_weighted(
+    pixels: &Buffer2<f32>,
+    cx: f32,
+    cy: f32,
+    stamp_radius: usize,
+    background: f32,
+    noise: f32,
+    gain: Option<f32>,
+    read_noise: Option<f32>,
+    config: &MoffatFitConfig,
+) -> Option<MoffatFitResult> {
+    let (data_x, data_y, data_z, peak_value) = extract_stamp(pixels, cx, cy, stamp_radius)?;
+
+    let n = data_x.len();
+    let n_params = if config.fit_beta { 6 } else { 5 };
+    if n < n_params + 1 {
+        return None;
+    }
+
+    // Compute inverse-variance weights
+    let weights = compute_pixel_weights(&data_z, background, noise, gain, read_noise);
+
+    let initial_amplitude = (peak_value - background).max(0.01);
+
+    // Estimate sigma from moments, then convert to alpha
+    let sigma_est = estimate_sigma_from_moments(&data_x, &data_y, &data_z, cx, cy, background);
+    let beta_for_init = config.fixed_beta;
+    let initial_alpha = sigma_est * 2.355 / (2.0 * (2.0f32.powf(1.0 / beta_for_init) - 1.0).sqrt());
+    let initial_alpha = initial_alpha.clamp(0.5, stamp_radius as f32);
+
+    if config.fit_beta {
+        fit_with_variable_beta_weighted(
+            &data_x,
+            &data_y,
+            &data_z,
+            &weights,
+            cx,
+            cy,
+            initial_amplitude,
+            initial_alpha,
+            background,
+            stamp_radius,
+            n,
+            config,
+        )
+    } else {
+        fit_with_fixed_beta_weighted(
+            &data_x,
+            &data_y,
+            &data_z,
+            &weights,
             cx,
             cy,
             initial_amplitude,
@@ -313,6 +391,120 @@ fn fit_with_variable_beta(
     };
 
     let result = optimize_6(&model, data_x, data_y, data_z, initial_params, &config.lm);
+
+    let [x0, y0, amplitude, alpha, beta, bg] = result.params;
+
+    if !validate_position(x0, y0, cx, cy, alpha, stamp_radius) {
+        return None;
+    }
+
+    let rms = (result.chi2 / n as f32).sqrt();
+    let fwhm = alpha_beta_to_fwhm(alpha, beta);
+
+    Some(MoffatFitResult {
+        x: x0,
+        y: y0,
+        amplitude,
+        alpha,
+        beta,
+        background: bg,
+        fwhm,
+        rms_residual: rms,
+        converged: result.converged,
+        iterations: result.iterations,
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn fit_with_fixed_beta_weighted(
+    data_x: &[f32],
+    data_y: &[f32],
+    data_z: &[f32],
+    weights: &[f32],
+    cx: f32,
+    cy: f32,
+    initial_amplitude: f32,
+    initial_alpha: f32,
+    background: f32,
+    stamp_radius: usize,
+    n: usize,
+    config: &MoffatFitConfig,
+) -> Option<MoffatFitResult> {
+    let initial_params = [cx, cy, initial_amplitude, initial_alpha, background];
+    let model = MoffatFixedBeta {
+        beta: config.fixed_beta,
+        stamp_radius: stamp_radius as f32,
+    };
+
+    let result = optimize_5_weighted(
+        &model,
+        data_x,
+        data_y,
+        data_z,
+        weights,
+        initial_params,
+        &config.lm,
+    );
+
+    let [x0, y0, amplitude, alpha, bg] = result.params;
+
+    if !validate_position(x0, y0, cx, cy, alpha, stamp_radius) {
+        return None;
+    }
+
+    let rms = (result.chi2 / n as f32).sqrt();
+    let fwhm = alpha_beta_to_fwhm(alpha, config.fixed_beta);
+
+    Some(MoffatFitResult {
+        x: x0,
+        y: y0,
+        amplitude,
+        alpha,
+        beta: config.fixed_beta,
+        background: bg,
+        fwhm,
+        rms_residual: rms,
+        converged: result.converged,
+        iterations: result.iterations,
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn fit_with_variable_beta_weighted(
+    data_x: &[f32],
+    data_y: &[f32],
+    data_z: &[f32],
+    weights: &[f32],
+    cx: f32,
+    cy: f32,
+    initial_amplitude: f32,
+    initial_alpha: f32,
+    background: f32,
+    stamp_radius: usize,
+    n: usize,
+    config: &MoffatFitConfig,
+) -> Option<MoffatFitResult> {
+    let initial_params = [
+        cx,
+        cy,
+        initial_amplitude,
+        initial_alpha,
+        config.fixed_beta,
+        background,
+    ];
+    let model = MoffatVariableBeta {
+        stamp_radius: stamp_radius as f32,
+    };
+
+    let result = optimize_6_weighted(
+        &model,
+        data_x,
+        data_y,
+        data_z,
+        weights,
+        initial_params,
+        &config.lm,
+    );
 
     let [x0, y0, amplitude, alpha, beta, bg] = result.params;
 
