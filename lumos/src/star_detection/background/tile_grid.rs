@@ -602,4 +602,110 @@ mod tests {
         let debug_str = format!("{:?}", grid);
         assert!(debug_str.contains("TileGrid"));
     }
+
+    #[test]
+    fn test_image_smaller_than_tile() {
+        // Image is 20x20, tile size is 64 -> single tile
+        let pixels = create_uniform_image(20, 20, 0.7);
+        let grid = TileGrid::new(&pixels, 64);
+
+        assert_eq!(grid.tiles_x(), 1);
+        assert_eq!(grid.tiles_y(), 1);
+
+        let stats = grid.get(0, 0);
+        assert!((stats.median - 0.7).abs() < 0.01);
+
+        // Center should be at (10, 10)
+        assert!((grid.center_x(0) - 10.0).abs() < 0.01);
+        assert!((grid.center_y(0) - 10.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_all_pixels_masked_fallback() {
+        let width = 64;
+        let height = 64;
+        let pixels = create_uniform_image(width, height, 0.4);
+
+        // Mask all pixels
+        let mask = BitBuffer2::new_filled(width, height, true);
+
+        let grid = TileGrid::new_with_mask(&pixels, 32, Some(&mask), 100);
+
+        // Should fallback to all pixels, median ~0.4
+        let stats = grid.get(0, 0);
+        assert!(
+            (stats.median - 0.4).abs() < 0.05,
+            "Median {} should be ~0.4 after fallback",
+            stats.median
+        );
+    }
+
+    #[test]
+    fn test_no_mask_same_as_none() {
+        let pixels = create_uniform_image(64, 64, 0.5);
+
+        let grid_none = TileGrid::new(&pixels, 32);
+        let grid_empty = TileGrid::new_with_mask(&pixels, 32, None, 0);
+
+        // Both should produce same results
+        for ty in 0..grid_none.tiles_y() {
+            for tx in 0..grid_none.tiles_x() {
+                let s1 = grid_none.get(tx, ty);
+                let s2 = grid_empty.get(tx, ty);
+                assert!(
+                    (s1.median - s2.median).abs() < 0.001,
+                    "Tile ({},{}) medians differ: {} vs {}",
+                    tx,
+                    ty,
+                    s1.median,
+                    s2.median
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_large_tile_size() {
+        // Tile size larger than image dimension
+        let pixels = create_uniform_image(100, 50, 0.3);
+        let grid = TileGrid::new(&pixels, 200);
+
+        assert_eq!(grid.tiles_x(), 1);
+        assert_eq!(grid.tiles_y(), 1);
+
+        let stats = grid.get(0, 0);
+        assert!((stats.median - 0.3).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_tile_grid_very_wide_image() {
+        // Very wide, short image
+        let pixels = create_uniform_image(1000, 10, 0.5);
+        let grid = TileGrid::new(&pixels, 64);
+
+        assert_eq!(grid.tiles_x(), 16); // ceil(1000/64) = 16
+        assert_eq!(grid.tiles_y(), 1);
+
+        // All tiles should have same stats
+        for tx in 0..grid.tiles_x() {
+            let stats = grid.get(tx, 0);
+            assert!((stats.median - 0.5).abs() < 0.01);
+        }
+    }
+
+    #[test]
+    fn test_tile_grid_very_tall_image() {
+        // Very tall, narrow image
+        let pixels = create_uniform_image(10, 1000, 0.5);
+        let grid = TileGrid::new(&pixels, 64);
+
+        assert_eq!(grid.tiles_x(), 1);
+        assert_eq!(grid.tiles_y(), 16); // ceil(1000/64) = 16
+
+        // All tiles should have same stats
+        for ty in 0..grid.tiles_y() {
+            let stats = grid.get(0, ty);
+            assert!((stats.median - 0.5).abs() < 0.01);
+        }
+    }
 }
