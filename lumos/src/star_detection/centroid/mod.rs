@@ -20,6 +20,8 @@ pub use moffat_fit::{MoffatFitConfig, MoffatFitResult, fit_moffat_2d};
 #[allow(unused_imports)]
 pub use moffat_fit::{alpha_beta_to_fwhm, fwhm_beta_to_alpha};
 
+use arrayvec::ArrayVec;
+
 use super::background::BackgroundMap;
 use super::candidate_detection::StarCandidate;
 use super::common::{CENTROID_CONVERGENCE_THRESHOLD, MAX_CENTROID_ITERATIONS};
@@ -27,6 +29,9 @@ use super::cosmic_ray::compute_laplacian_snr;
 use super::{CentroidMethod, Star, StarDetectionConfig};
 use crate::common::Buffer2;
 use crate::math::FWHM_TO_SIGMA;
+
+/// Maximum stamp pixels (31×31 for stamp_radius=15).
+const MAX_STAMP_PIXELS: usize = (2 * super::common::MAX_STAMP_RADIUS + 1).pow(2);
 
 /// Maximum iterations for centroid refinement.
 pub(crate) const MAX_ITERATIONS: usize = MAX_CENTROID_ITERATIONS;
@@ -64,12 +69,19 @@ pub(crate) fn is_valid_stamp_position(
         && icy < (height - stamp_radius) as isize
 }
 
-/// Extracted stamp data: (x coords, y coords, values, peak value).
-pub(crate) type StampData = (Vec<f32>, Vec<f32>, Vec<f32>, f32);
+/// Stack-allocated stamp data: (x coords, y coords, values, peak value).
+/// Uses ArrayVec to avoid heap allocations for typical stamp sizes.
+pub(crate) type StampData = (
+    ArrayVec<f32, MAX_STAMP_PIXELS>,
+    ArrayVec<f32, MAX_STAMP_PIXELS>,
+    ArrayVec<f32, MAX_STAMP_PIXELS>,
+    f32,
+);
 
 /// Extract a square stamp of pixel data around a position.
 ///
 /// Returns (x_coords, y_coords, values, peak_value) or None if position is invalid.
+/// Uses stack-allocated ArrayVec to avoid heap allocations.
 pub(crate) fn extract_stamp(
     pixels: &Buffer2<f32>,
     cx: f32,
@@ -86,10 +98,9 @@ pub(crate) fn extract_stamp(
     let icx = cx.round() as isize;
     let icy = cy.round() as isize;
     let stamp_radius_i32 = stamp_radius as i32;
-    let stamp_size = (2 * stamp_radius + 1) * (2 * stamp_radius + 1);
-    let mut data_x = Vec::with_capacity(stamp_size);
-    let mut data_y = Vec::with_capacity(stamp_size);
-    let mut data_z = Vec::with_capacity(stamp_size);
+    let mut data_x = ArrayVec::new();
+    let mut data_y = ArrayVec::new();
+    let mut data_z = ArrayVec::new();
     let mut peak_value = f32::MIN;
 
     for dy in -stamp_radius_i32..=stamp_radius_i32 {
@@ -114,13 +125,14 @@ pub(crate) fn extract_stamp(
 /// Weight = 1/variance
 ///
 /// If gain is None, uses simplified model: variance = noise² + signal (approx Poisson)
+/// Uses stack-allocated ArrayVec to avoid heap allocations.
 pub(crate) fn compute_pixel_weights(
     data_z: &[f32],
     background: f32,
     noise: f32,
     gain: Option<f32>,
     read_noise: Option<f32>,
-) -> Vec<f32> {
+) -> ArrayVec<f32, MAX_STAMP_PIXELS> {
     data_z
         .iter()
         .map(|&z| {

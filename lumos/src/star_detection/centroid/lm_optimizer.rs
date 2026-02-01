@@ -1,6 +1,7 @@
 //! Levenberg-Marquardt optimizer for profile fitting.
 //!
 //! Generic implementation that can be used for both Gaussian and Moffat fitting.
+//! Optimized to reuse buffers across iterations to minimize allocations.
 
 use super::linear_solver::{solve_5x5, solve_6x6};
 
@@ -67,13 +68,24 @@ pub fn optimize_5<M: LMModel<5>>(
     let mut converged = false;
     let mut iterations = 0;
 
+    // Pre-allocate buffers once, reuse across iterations
+    let n = data_x.len();
+    let mut jacobian = Vec::with_capacity(n);
+    let mut residuals = Vec::with_capacity(n);
+
     for iter in 0..config.max_iterations {
         iterations = iter + 1;
 
-        let (jacobian, residuals) =
-            compute_jacobian_residuals(model, data_x, data_y, data_z, &params);
-        let hessian = compute_hessian_5(&jacobian);
-        let gradient = compute_gradient_5(&jacobian, &residuals);
+        fill_jacobian_residuals(
+            model,
+            data_x,
+            data_y,
+            data_z,
+            &params,
+            &mut jacobian,
+            &mut residuals,
+        );
+        let (hessian, gradient) = compute_hessian_gradient_5(&jacobian, &residuals);
 
         let mut damped_hessian = hessian;
         for (i, row) in damped_hessian.iter_mut().enumerate() {
@@ -97,7 +109,7 @@ pub fn optimize_5<M: LMModel<5>>(
             lambda *= config.lambda_down;
             prev_chi2 = new_chi2;
 
-            let max_delta = delta.iter().map(|d| d.abs()).fold(0.0f32, f32::max);
+            let max_delta = delta.iter().copied().fold(0.0f32, |a, d| a.max(d.abs()));
             if max_delta < config.convergence_threshold {
                 converged = true;
                 break;
@@ -119,8 +131,6 @@ pub fn optimize_5<M: LMModel<5>>(
 }
 
 /// Run L-M optimization for 5-parameter model with inverse-variance weights.
-///
-/// Weights should be 1/variance for optimal estimation.
 pub fn optimize_5_weighted<M: LMModel<5>>(
     model: &M,
     data_x: &[f32],
@@ -136,11 +146,23 @@ pub fn optimize_5_weighted<M: LMModel<5>>(
     let mut converged = false;
     let mut iterations = 0;
 
+    // Pre-allocate buffers once, reuse across iterations
+    let n = data_x.len();
+    let mut jacobian = Vec::with_capacity(n);
+    let mut residuals = Vec::with_capacity(n);
+
     for iter in 0..config.max_iterations {
         iterations = iter + 1;
 
-        let (jacobian, residuals) =
-            compute_jacobian_residuals(model, data_x, data_y, data_z, &params);
+        fill_jacobian_residuals(
+            model,
+            data_x,
+            data_y,
+            data_z,
+            &params,
+            &mut jacobian,
+            &mut residuals,
+        );
         let (hessian, gradient) =
             compute_weighted_hessian_gradient_5(&jacobian, &residuals, weights);
 
@@ -166,7 +188,7 @@ pub fn optimize_5_weighted<M: LMModel<5>>(
             lambda *= config.lambda_down;
             prev_chi2 = new_chi2;
 
-            let max_delta = delta.iter().map(|d| d.abs()).fold(0.0f32, f32::max);
+            let max_delta = delta.iter().copied().fold(0.0f32, |a, d| a.max(d.abs()));
             if max_delta < config.convergence_threshold {
                 converged = true;
                 break;
@@ -202,13 +224,24 @@ pub fn optimize_6<M: LMModel<6>>(
     let mut converged = false;
     let mut iterations = 0;
 
+    // Pre-allocate buffers once, reuse across iterations
+    let n = data_x.len();
+    let mut jacobian = Vec::with_capacity(n);
+    let mut residuals = Vec::with_capacity(n);
+
     for iter in 0..config.max_iterations {
         iterations = iter + 1;
 
-        let (jacobian, residuals) =
-            compute_jacobian_residuals(model, data_x, data_y, data_z, &params);
-        let hessian = compute_hessian_6(&jacobian);
-        let gradient = compute_gradient_6(&jacobian, &residuals);
+        fill_jacobian_residuals(
+            model,
+            data_x,
+            data_y,
+            data_z,
+            &params,
+            &mut jacobian,
+            &mut residuals,
+        );
+        let (hessian, gradient) = compute_hessian_gradient_6(&jacobian, &residuals);
 
         let mut damped_hessian = hessian;
         for (i, row) in damped_hessian.iter_mut().enumerate() {
@@ -232,7 +265,7 @@ pub fn optimize_6<M: LMModel<6>>(
             lambda *= config.lambda_down;
             prev_chi2 = new_chi2;
 
-            let max_delta = delta.iter().map(|d| d.abs()).fold(0.0f32, f32::max);
+            let max_delta = delta.iter().copied().fold(0.0f32, |a, d| a.max(d.abs()));
             if max_delta < config.convergence_threshold {
                 converged = true;
                 break;
@@ -254,8 +287,6 @@ pub fn optimize_6<M: LMModel<6>>(
 }
 
 /// Run L-M optimization for 6-parameter model with inverse-variance weights.
-///
-/// Weights should be 1/variance for optimal estimation.
 pub fn optimize_6_weighted<M: LMModel<6>>(
     model: &M,
     data_x: &[f32],
@@ -271,11 +302,23 @@ pub fn optimize_6_weighted<M: LMModel<6>>(
     let mut converged = false;
     let mut iterations = 0;
 
+    // Pre-allocate buffers once, reuse across iterations
+    let n = data_x.len();
+    let mut jacobian = Vec::with_capacity(n);
+    let mut residuals = Vec::with_capacity(n);
+
     for iter in 0..config.max_iterations {
         iterations = iter + 1;
 
-        let (jacobian, residuals) =
-            compute_jacobian_residuals(model, data_x, data_y, data_z, &params);
+        fill_jacobian_residuals(
+            model,
+            data_x,
+            data_y,
+            data_z,
+            &params,
+            &mut jacobian,
+            &mut residuals,
+        );
         let (hessian, gradient) =
             compute_weighted_hessian_gradient_6(&jacobian, &residuals, weights);
 
@@ -301,7 +344,7 @@ pub fn optimize_6_weighted<M: LMModel<6>>(
             lambda *= config.lambda_down;
             prev_chi2 = new_chi2;
 
-            let max_delta = delta.iter().map(|d| d.abs()).fold(0.0f32, f32::max);
+            let max_delta = delta.iter().copied().fold(0.0f32, |a, d| a.max(d.abs()));
             if max_delta < config.convergence_threshold {
                 converged = true;
                 break;
@@ -360,27 +403,63 @@ fn compute_chi2_weighted<const N: usize, M: LMModel<N>>(
         .sum()
 }
 
-fn compute_jacobian_residuals<const N: usize, M: LMModel<N>>(
+/// Fill jacobian and residuals buffers, reusing existing allocations.
+fn fill_jacobian_residuals<const N: usize, M: LMModel<N>>(
     model: &M,
     data_x: &[f32],
     data_y: &[f32],
     data_z: &[f32],
     params: &[f32; N],
-) -> (Vec<[f32; N]>, Vec<f32>) {
-    let n = data_x.len();
-    let mut jacobian = Vec::with_capacity(n);
-    let mut residuals = Vec::with_capacity(n);
+    jacobian: &mut Vec<[f32; N]>,
+    residuals: &mut Vec<f32>,
+) {
+    jacobian.clear();
+    residuals.clear();
 
-    for i in 0..n {
-        let x = data_x[i];
-        let y = data_y[i];
-        let z = data_z[i];
-
+    for ((&x, &y), &z) in data_x.iter().zip(data_y.iter()).zip(data_z.iter()) {
         jacobian.push(model.jacobian_row(x, y, params));
         residuals.push(z - model.evaluate(x, y, params));
     }
+}
 
-    (jacobian, residuals)
+/// Compute Hessian (J^T J) and gradient (J^T r) for 5-parameter model.
+fn compute_hessian_gradient_5(
+    jacobian: &[[f32; 5]],
+    residuals: &[f32],
+) -> ([[f32; 5]; 5], [f32; 5]) {
+    let mut hessian = [[0.0f32; 5]; 5];
+    let mut gradient = [0.0f32; 5];
+
+    for (row, &r) in jacobian.iter().zip(residuals.iter()) {
+        for i in 0..5 {
+            gradient[i] += row[i] * r;
+            for j in 0..5 {
+                hessian[i][j] += row[i] * row[j];
+            }
+        }
+    }
+
+    (hessian, gradient)
+}
+
+/// Compute Hessian (J^T J) and gradient (J^T r) for 6-parameter model.
+fn compute_hessian_gradient_6(
+    jacobian: &[[f32; 6]],
+    residuals: &[f32],
+) -> ([[f32; 6]; 6], [f32; 6]) {
+    let mut hessian = [[0.0f32; 6]; 6];
+    let mut gradient = [0.0f32; 6];
+
+    for (row, &r) in jacobian.iter().zip(residuals.iter()) {
+        for i in 0..6 {
+            gradient[i] += row[i] * r;
+            for j in 0..6 {
+                hessian[i][j] += row[i] * row[j];
+            }
+        }
+    }
+
+    (hessian, gradient)
 }
 
 /// Compute weighted Hessian (J^T W J) and gradient (J^T W r) for 5-parameter model.
@@ -423,48 +502,4 @@ fn compute_weighted_hessian_gradient_6(
     }
 
     (hessian, gradient)
-}
-
-fn compute_hessian_5(jacobian: &[[f32; 5]]) -> [[f32; 5]; 5] {
-    let mut hessian = [[0.0f32; 5]; 5];
-    for row in jacobian {
-        for i in 0..5 {
-            for j in 0..5 {
-                hessian[i][j] += row[i] * row[j];
-            }
-        }
-    }
-    hessian
-}
-
-fn compute_hessian_6(jacobian: &[[f32; 6]]) -> [[f32; 6]; 6] {
-    let mut hessian = [[0.0f32; 6]; 6];
-    for row in jacobian {
-        for i in 0..6 {
-            for j in 0..6 {
-                hessian[i][j] += row[i] * row[j];
-            }
-        }
-    }
-    hessian
-}
-
-fn compute_gradient_5(jacobian: &[[f32; 5]], residuals: &[f32]) -> [f32; 5] {
-    let mut gradient = [0.0f32; 5];
-    for (row, &r) in jacobian.iter().zip(residuals.iter()) {
-        for i in 0..5 {
-            gradient[i] += row[i] * r;
-        }
-    }
-    gradient
-}
-
-fn compute_gradient_6(jacobian: &[[f32; 6]], residuals: &[f32]) -> [f32; 6] {
-    let mut gradient = [0.0f32; 6];
-    for (row, &r) in jacobian.iter().zip(residuals.iter()) {
-        for i in 0..6 {
-            gradient[i] += row[i] * r;
-        }
-    }
-    gradient
 }
