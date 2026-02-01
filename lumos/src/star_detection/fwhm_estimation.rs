@@ -46,13 +46,15 @@ pub fn estimate_fwhm(
     max_eccentricity: f32,
     max_sharpness: f32,
 ) -> FwhmEstimate {
-    // Filter stars for quality
+    // Filter stars for quality and collect FWHM values
     let mut fwhms: Vec<f32> = stars
         .iter()
-        .filter(|s| !s.is_saturated())
-        .filter(|s| s.eccentricity <= max_eccentricity)
-        .filter(|s| s.fwhm > 0.5 && s.fwhm < 20.0) // Reasonable FWHM range
-        .filter(|s| s.sharpness < max_sharpness) // Not cosmic ray
+        .filter(|s| {
+            !s.is_saturated()
+                && s.eccentricity <= max_eccentricity
+                && s.sharpness < max_sharpness
+                && (0.5..20.0).contains(&s.fwhm)
+        })
         .map(|s| s.fwhm)
         .collect();
 
@@ -71,58 +73,61 @@ pub fn estimate_fwhm(
         };
     }
 
-    // First pass: compute median and MAD
+    // Scratch buffer for MAD computation (reused to avoid allocations)
+    let mut scratch = Vec::with_capacity(fwhms.len());
+
+    // Compute median and MAD for outlier rejection
     let median = median_f32_mut(&mut fwhms);
-    let mut deviations: Vec<f32> = fwhms.iter().map(|&f| (f - median).abs()).collect();
-    let mad = median_f32_mut(&mut deviations);
+    let mad = compute_mad(&fwhms, median, &mut scratch);
 
-    // Reject outliers: keep only stars within 3*MAD of median
-    // Use effective MAD with floor to handle uniform distributions
-    let effective_mad = mad.max(median * 0.1);
-    let max_fwhm = median + 3.0 * effective_mad;
-    let min_fwhm = (median - 3.0 * effective_mad).max(0.5);
+    // Reject outliers: keep within 3×MAD of median (with floor for uniform distributions)
+    let threshold = 3.0 * mad.max(median * 0.1);
+    let count_before = fwhms.len();
+    fwhms.retain(|&f| (f - median).abs() <= threshold);
 
-    let mut filtered_fwhms: Vec<f32> = fwhms
-        .into_iter()
-        .filter(|&f| f >= min_fwhm && f <= max_fwhm)
-        .collect();
-
-    if filtered_fwhms.len() < min_stars {
+    // If too many rejected, use pre-rejection median
+    if fwhms.len() < min_stars {
         tracing::debug!(
             "Too many outliers rejected ({} -> {}), using pre-rejection median {:.2}",
-            deviations.len(),
-            filtered_fwhms.len(),
+            count_before,
+            fwhms.len(),
             median
         );
         return FwhmEstimate {
             fwhm: median,
-            star_count: filtered_fwhms.len(),
+            star_count: fwhms.len(),
             mad,
             is_estimated: true,
         };
     }
 
     // Final estimate from filtered stars
-    let final_median = median_f32_mut(&mut filtered_fwhms);
-    let mut final_deviations: Vec<f32> = filtered_fwhms
-        .iter()
-        .map(|&f| (f - final_median).abs())
-        .collect();
-    let final_mad = median_f32_mut(&mut final_deviations);
+    let final_median = median_f32_mut(&mut fwhms);
+    let final_mad = compute_mad(&fwhms, final_median, &mut scratch);
 
     tracing::info!(
         "Estimated FWHM: {:.2} pixels (MAD: {:.2}, from {} stars)",
         final_median,
         final_mad,
-        filtered_fwhms.len()
+        fwhms.len()
     );
 
     FwhmEstimate {
         fwhm: final_median,
-        star_count: filtered_fwhms.len(),
+        star_count: fwhms.len(),
         mad: final_mad,
         is_estimated: true,
     }
+}
+
+/// Compute Median Absolute Deviation from median using provided scratch buffer.
+fn compute_mad(values: &[f32], median: f32, scratch: &mut Vec<f32>) -> f32 {
+    if values.is_empty() {
+        return 0.0;
+    }
+    scratch.clear();
+    scratch.extend(values.iter().map(|&v| (v - median).abs()));
+    median_f32_mut(scratch)
 }
 
 #[cfg(test)]
