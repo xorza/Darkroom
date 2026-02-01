@@ -211,19 +211,15 @@ fn bench_jacobian_simd_vs_scalar(b: bench::Bencher) {
         let mut jacobian = Vec::new();
         let mut residuals = Vec::new();
 
-        if simd::is_avx2_available() {
-            unsafe {
-                simd::fill_jacobian_residuals_simd_fixed_beta(
-                    &data_x,
-                    &data_y,
-                    &data_z,
-                    &params,
-                    beta,
-                    &mut jacobian,
-                    &mut residuals,
-                );
-            }
-        }
+        simd::fill_jacobian_residuals_simd_fixed_beta(
+            &data_x,
+            &data_y,
+            &data_z,
+            &params,
+            beta,
+            &mut jacobian,
+            &mut residuals,
+        );
         black_box(jacobian.len() + residuals.len())
     });
 }
@@ -255,11 +251,7 @@ fn bench_chi2_simd_vs_scalar(b: bench::Bencher) {
     });
 
     b.bench_labeled("simd", || {
-        let chi2 = if simd::is_avx2_available() {
-            unsafe { simd::compute_chi2_simd_fixed_beta(&data_x, &data_y, &data_z, &params, beta) }
-        } else {
-            0.0
-        };
+        let chi2 = simd::compute_chi2_simd_fixed_beta(&data_x, &data_y, &data_z, &params, beta);
         black_box(chi2)
     });
 }
