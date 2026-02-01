@@ -246,10 +246,10 @@ impl Bencher {
             } else {
                 let file_path = bench_dir.join(format!("{}.txt", self.name));
 
-                // Read previous result for comparison
-                let comparison = if let Some(prev_mean) = Self::read_previous_result(&file_path) {
-                    let diff = result.mean.as_secs_f64() - prev_mean.as_secs_f64();
-                    let pct = (diff / prev_mean.as_secs_f64()) * 100.0;
+                // Read previous result for comparison (using median for stability)
+                let comparison = if let Some(prev_median) = Self::read_previous_median(&file_path) {
+                    let diff = result.median.as_secs_f64() - prev_median.as_secs_f64();
+                    let pct = (diff / prev_median.as_secs_f64()) * 100.0;
                     let sign = if diff >= 0.0 { "+" } else { "" };
                     let (indicator, color) = if pct < -5.0 {
                         ("faster", colors::GREEN)
@@ -262,8 +262,8 @@ impl Bencher {
                         "  {}vs previous:{} {:?} -> {:?} ({sign}{:.1}%) {}{}{}",
                         colors::DIM,
                         colors::RESET,
-                        prev_mean,
-                        result.mean,
+                        prev_median,
+                        result.median,
                         pct,
                         color,
                         indicator,
@@ -271,7 +271,7 @@ impl Bencher {
                     );
                     Some(format!(
                         "vs_previous: {:?} -> {:?} ({sign}{:.1}%) {indicator}",
-                        prev_mean, result.mean, pct
+                        prev_median, result.median, pct
                     ))
                 } else {
                     None
@@ -314,16 +314,16 @@ impl Bencher {
         result
     }
 
-    /// Read the previous result from a benchmark file.
-    fn read_previous_result(file_path: &PathBuf) -> Option<Duration> {
+    /// Read the previous median from a benchmark file.
+    fn read_previous_median(file_path: &PathBuf) -> Option<Duration> {
         let content = read_to_string(file_path).ok()?;
 
-        // Find the "mean:" line and parse its value
+        // Find the "median:" line and parse its value
         content
             .lines()
-            .find(|line| line.starts_with("mean:"))
+            .find(|line| line.starts_with("median:"))
             .and_then(|line| {
-                line.strip_prefix("mean:")
+                line.strip_prefix("median:")
                     .map(str::trim)
                     .and_then(parse_duration)
             })
