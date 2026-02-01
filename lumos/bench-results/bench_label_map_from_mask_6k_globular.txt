@@ -1,7 +1,7 @@
 name: bench_label_map_from_mask_6k_globular
-mean: 15.93282ms
-min: 15.543542ms
-max: 16.382459ms
-median: 15.99575ms
+mean: 15.252166ms
+min: 14.579292ms
+max: 16.096833ms
+median: 15.3325ms
 iterations: 10
-vs_previous: 16.861879ms -> 15.93282ms (-5.5%) faster
+vs_previous: 15.93282ms -> 15.252166ms (-4.3%) same

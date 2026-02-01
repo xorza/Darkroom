@@ -716,6 +716,84 @@ fn test_label_map_compare_sequential_parallel() {
     assert_eq!(large_labels, large_expected);
 }
 
+#[test]
+fn test_label_map_zero_dimensions() {
+    // Zero width
+    let mask = BitBuffer2::from_slice(0, 10, &[]);
+    let label_map = LabelMap::from_mask(&mask);
+    assert_eq!(label_map.num_labels(), 0);
+
+    // Zero height
+    let mask = BitBuffer2::from_slice(10, 0, &[]);
+    let label_map = LabelMap::from_mask(&mask);
+    assert_eq!(label_map.num_labels(), 0);
+}
+
+#[test]
+fn test_label_map_edge_touching_components() {
+    // Components touching all four edges
+    let width = 10;
+    let height = 10;
+    let mut mask_data = vec![false; width * height];
+
+    // Top edge component
+    mask_data[0] = true;
+    mask_data[1] = true;
+    // Bottom edge component
+    mask_data[9 * width + 8] = true;
+    mask_data[9 * width + 9] = true;
+    // Left edge component
+    mask_data[5 * width] = true;
+    // Right edge component
+    mask_data[3 * width + 9] = true;
+
+    let mask = BitBuffer2::from_slice(width, height, &mask_data);
+    let label_map = LabelMap::from_mask(&mask);
+
+    assert_eq!(label_map.num_labels(), 4);
+}
+
+#[test]
+fn test_label_map_alternating_rows_large() {
+    // Alternating rows pattern that stresses strip boundary merging
+    let width = 400;
+    let height = 300;
+    let mut mask_data = vec![false; width * height];
+
+    // Fill every other row completely
+    for y in (0..height).step_by(2) {
+        for x in 0..width {
+            mask_data[y * width + x] = true;
+        }
+    }
+
+    let mask = BitBuffer2::from_slice(width, height, &mask_data);
+    let label_map = LabelMap::from_mask(&mask);
+
+    // Each row is a separate component (no vertical connectivity)
+    let expected = height.div_ceil(2);
+    assert_eq!(label_map.num_labels(), expected);
+}
+
+#[test]
+fn test_label_map_sparse_large() {
+    // Very sparse: few pixels spread across large image
+    let width = 1000;
+    let height = 1000;
+    let mut mask_data = vec![false; width * height];
+
+    // Only 4 isolated pixels in corners
+    mask_data[10 * width + 10] = true;
+    mask_data[10 * width + 990] = true;
+    mask_data[990 * width + 10] = true;
+    mask_data[990 * width + 990] = true;
+
+    let mask = BitBuffer2::from_slice(width, height, &mask_data);
+    let label_map = LabelMap::from_mask(&mask);
+
+    assert_eq!(label_map.num_labels(), 4);
+}
+
 // =============================================================================
 // Extract Candidates Tests
 // =============================================================================
