@@ -1,7 +1,7 @@
 name: bench_detect_stars_6k_50000
-mean: 234.241529ms
-min: 228.205833ms
-max: 242.480875ms
-median: 231.780459ms
+mean: 235.173987ms
+min: 232.386125ms
+max: 244.174375ms
+median: 234.4045ms
 iterations: 10
-vs_previous: 232.758208ms -> 231.780459ms (-0.4%) same
+vs_previous: 243.75275ms -> 234.4045ms (-3.8%) same

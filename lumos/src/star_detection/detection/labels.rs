@@ -1,16 +1,100 @@
 //! Connected component labeling using union-find.
 //!
 //! Optimized for sparse binary masks (typical in star detection):
+//! - Run-length encoding (RLE) based labeling for efficient processing
 //! - Word-level bit scanning using trailing_zeros() to skip background
 //! - Block-based parallel labeling with boundary merging
 //! - Lock-free union-find with atomic operations
 
 use std::sync::atomic::{AtomicU32, Ordering};
 
-use rayon::iter::ParallelIterator;
-
 use crate::common::{BitBuffer2, Buffer2};
-use common::parallel;
+
+// ============================================================================
+// Run-Length Encoding
+// ============================================================================
+
+/// A horizontal run of foreground pixels.
+#[derive(Debug, Clone, Copy)]
+struct Run {
+    /// Starting x coordinate (inclusive).
+    start: u16,
+    /// Ending x coordinate (exclusive).
+    end: u16,
+    /// Provisional label assigned to this run.
+    label: u32,
+}
+
+/// Extract runs from a single row of the mask using word-level bit scanning.
+#[inline]
+fn extract_runs_from_row(
+    mask_words: &[u64],
+    word_row_start: usize,
+    words_per_row: usize,
+    width: usize,
+    runs: &mut Vec<Run>,
+) {
+    let mut in_run = false;
+    let mut run_start = 0u16;
+
+    for word_idx in 0..words_per_row {
+        let word = mask_words[word_row_start + word_idx];
+        let base_x = word_idx * 64;
+
+        if word == 0 {
+            // All zeros - close any open run
+            if in_run {
+                let end = (base_x as u16).min(width as u16);
+                runs.push(Run {
+                    start: run_start,
+                    end,
+                    label: 0,
+                });
+                in_run = false;
+            }
+            continue;
+        }
+
+        if word == !0u64 {
+            // All ones - extend or start run
+            if !in_run {
+                run_start = base_x as u16;
+                in_run = true;
+            }
+            continue;
+        }
+
+        // Mixed word - process bit by bit
+        for bit in 0..64 {
+            let x = base_x + bit;
+            if x >= width {
+                break;
+            }
+
+            let is_set = (word >> bit) & 1 != 0;
+            if is_set && !in_run {
+                run_start = x as u16;
+                in_run = true;
+            } else if !is_set && in_run {
+                runs.push(Run {
+                    start: run_start,
+                    end: x as u16,
+                    label: 0,
+                });
+                in_run = false;
+            }
+        }
+    }
+
+    // Close final run if still open
+    if in_run {
+        runs.push(Run {
+            start: run_start,
+            end: width as u16,
+            label: 0,
+        });
+    }
+}
 
 // ============================================================================
 // LabelMap
@@ -106,7 +190,12 @@ impl std::ops::Index<usize> for LabelMap {
 // Sequential labeling (small images)
 // ============================================================================
 
-/// Sequential algorithm for small images.
+/// Sequential RLE-based algorithm for small images.
+///
+/// Uses run-length encoding for efficient processing:
+/// 1. Extract runs from each row
+/// 2. Label runs and merge with overlapping runs from previous row
+/// 3. Write labels to output buffer
 fn label_mask_sequential(mask: &BitBuffer2, labels: &mut Buffer2<u32>) -> usize {
     let width = mask.width();
     let height = mask.height();
@@ -116,60 +205,77 @@ fn label_mask_sequential(mask: &BitBuffer2, labels: &mut Buffer2<u32>) -> usize 
     let mut parent: Vec<u32> = Vec::new();
     let mut next_label = 1u32;
 
+    // Storage for runs from current and previous rows
+    let mut prev_runs: Vec<Run> = Vec::with_capacity(width / 4);
+    let mut curr_runs: Vec<Run> = Vec::with_capacity(width / 4);
+
     for y in 0..height {
-        let row_start = y * width;
         let word_row_start = y * words_per_row;
 
-        for word_idx in 0..words_per_row {
-            let mut word = mask_words[word_row_start + word_idx];
-            let base_x = word_idx * 64;
+        // Extract runs from current row
+        curr_runs.clear();
+        extract_runs_from_row(
+            mask_words,
+            word_row_start,
+            words_per_row,
+            width,
+            &mut curr_runs,
+        );
 
-            if word == 0 {
-                continue;
+        if curr_runs.is_empty() {
+            prev_runs.clear();
+            continue;
+        }
+
+        // Label runs and merge with overlapping runs from previous row
+        let mut prev_idx = 0;
+        for run in &mut curr_runs {
+            // Find overlapping runs from previous row (4-connectivity: same x range)
+            let mut assigned_label = None;
+
+            while prev_idx < prev_runs.len() && prev_runs[prev_idx].end <= run.start {
+                prev_idx += 1;
             }
 
-            // Process set bits using trailing_zeros
-            while word != 0 {
-                let bit_pos = word.trailing_zeros() as usize;
-                let x = base_x + bit_pos;
-
-                if x >= width {
-                    break;
-                }
-
-                let idx = row_start + x;
-
-                // Check neighbors: left and top
-                let left = if x > 0 && mask.get(idx - 1) {
-                    Some(labels[idx - 1])
-                } else {
-                    None
-                };
-                let top = if y > 0 && mask.get(idx - width) {
-                    Some(labels[idx - width])
-                } else {
-                    None
-                };
-
-                labels[idx] = match (left, top) {
-                    (None, None) => {
-                        parent.push(next_label);
-                        next_label += 1;
-                        next_label - 1
-                    }
-                    (Some(l), None) => l,
-                    (None, Some(t)) => t,
-                    (Some(l), Some(t)) => {
-                        if l != t {
-                            union(&mut parent, l, t);
+            let mut check_idx = prev_idx;
+            while check_idx < prev_runs.len() && prev_runs[check_idx].start < run.end {
+                let prev_run = &prev_runs[check_idx];
+                // Runs overlap if they share any x coordinate
+                if prev_run.start < run.end && prev_run.end > run.start {
+                    if let Some(label) = assigned_label {
+                        // Already have a label - union with overlapping run
+                        if label != prev_run.label {
+                            union(&mut parent, label, prev_run.label);
                         }
-                        l.min(t)
+                    } else {
+                        // First overlap - take its label
+                        assigned_label = Some(prev_run.label);
                     }
-                };
+                }
+                check_idx += 1;
+            }
 
-                word &= word - 1;
+            // Assign label
+            run.label = match assigned_label {
+                Some(label) => label,
+                None => {
+                    // New component
+                    parent.push(next_label);
+                    let label = next_label;
+                    next_label += 1;
+                    label
+                }
+            };
+
+            // Write labels to output buffer
+            let row_start = y * width;
+            for x in run.start..run.end {
+                labels[row_start + x as usize] = run.label;
             }
         }
+
+        // Swap current and previous runs
+        std::mem::swap(&mut prev_runs, &mut curr_runs);
     }
 
     if parent.is_empty() {
@@ -192,7 +298,13 @@ fn label_mask_sequential(mask: &BitBuffer2, labels: &mut Buffer2<u32>) -> usize 
 // Parallel labeling (large images)
 // ============================================================================
 
-/// Parallel algorithm for large images using block-based CCL.
+/// Parallel RLE-based algorithm for large images.
+///
+/// Uses run-length encoding for efficient processing:
+/// 1. Extract runs from each strip in parallel
+/// 2. Label runs within each strip
+/// 3. Merge labels at strip boundaries
+/// 4. Write labels to output buffer in parallel
 fn label_mask_parallel(mask: &BitBuffer2, labels: &mut Buffer2<u32>) -> usize {
     let width = mask.width();
     let height = mask.height();
@@ -213,13 +325,12 @@ fn label_mask_parallel(mask: &BitBuffer2, labels: &mut Buffer2<u32>) -> usize {
     let parent: Vec<AtomicU32> = (0..max_labels).map(|_| AtomicU32::new(0)).collect();
     let next_label = AtomicU32::new(1);
 
-    // Phase 1: Label each strip in parallel
-    let labels_ptr = labels.pixels_mut().as_mut_ptr();
-    // SAFETY: Each strip writes to disjoint rows
-    let labels_slice = unsafe { std::slice::from_raw_parts_mut(labels_ptr, width * height) };
-
-    rayon::scope(|s| {
-        for strip_idx in 0..num_strips {
+    // Phase 1: Extract runs and label each strip in parallel
+    // Each strip stores its runs with row indices for boundary merging
+    use rayon::prelude::*;
+    let strip_runs: Vec<Vec<(usize, Run)>> = (0..num_strips)
+        .into_par_iter()
+        .map(|strip_idx| {
             let y_start = strip_idx * rows_per_strip;
             let y_end = if strip_idx == num_strips - 1 {
                 height
@@ -227,37 +338,27 @@ fn label_mask_parallel(mask: &BitBuffer2, labels: &mut Buffer2<u32>) -> usize {
                 (strip_idx + 1) * rows_per_strip
             };
 
-            let parent_ref = &parent;
-            let next_label_ref = &next_label;
+            label_strip_rle(
+                mask_words,
+                width,
+                words_per_row,
+                y_start,
+                y_end,
+                &parent,
+                &next_label,
+            )
+        })
+        .collect();
 
-            let strip_start = y_start * width;
-            let strip_len = (y_end - y_start) * width;
-            let strip_labels = unsafe {
-                std::slice::from_raw_parts_mut(
-                    labels_slice.as_mut_ptr().add(strip_start),
-                    strip_len,
-                )
-            };
-
-            s.spawn(move |_| {
-                label_strip(
-                    mask_words,
-                    strip_labels,
-                    width,
-                    words_per_row,
-                    y_start,
-                    y_end,
-                    parent_ref,
-                    next_label_ref,
-                    mask,
-                );
-            });
-        }
-    });
-
-    // Phase 2: Merge labels at strip boundaries
+    // Phase 2: Merge labels at strip boundaries using runs
     for strip_idx in 1..num_strips {
-        merge_strip_boundary(mask, labels, width, strip_idx * rows_per_strip, &parent);
+        let boundary_y = strip_idx * rows_per_strip;
+        merge_strip_boundary_rle(
+            &strip_runs[strip_idx - 1],
+            &strip_runs[strip_idx],
+            boundary_y,
+            &parent,
+        );
     }
 
     // Get final label count
@@ -266,7 +367,7 @@ fn label_mask_parallel(mask: &BitBuffer2, labels: &mut Buffer2<u32>) -> usize {
         return 0;
     }
 
-    // Phase 3: Build label mapping (reuses single allocation)
+    // Phase 3: Build label mapping
     let mut label_map = vec![0u32; total_labels + 1];
 
     // First pass: find roots and assign sequential labels
@@ -285,12 +386,27 @@ fn label_mask_parallel(mask: &BitBuffer2, labels: &mut Buffer2<u32>) -> usize {
         label_map[i] = label_map[root as usize];
     }
 
-    // Phase 4: Apply label mapping in parallel
-    parallel::par_chunks_auto(labels.pixels_mut()).for_each(|(_, chunk)| {
-        for label in chunk {
-            let l = *label as usize;
-            if l != 0 && l < label_map.len() {
-                *label = label_map[l];
+    // Phase 4: Write labels to output buffer in parallel
+    // Flatten all runs and write in parallel chunks
+    let all_runs: Vec<(usize, Run)> = strip_runs.into_iter().flatten().collect();
+
+    // SAFETY: Each run writes to disjoint pixels, and we use atomic operations
+    // to ensure thread safety. We convert the pointer to usize to satisfy Send.
+    let labels_ptr = labels.pixels_mut().as_mut_ptr() as usize;
+
+    all_runs.par_iter().for_each(|&(y, run)| {
+        let row_start = y * width;
+        let final_label = if (run.label as usize) < label_map.len() {
+            label_map[run.label as usize]
+        } else {
+            0
+        };
+
+        // SAFETY: Each run writes to disjoint pixels
+        let ptr = labels_ptr as *mut u32;
+        for x in run.start..run.end {
+            unsafe {
+                *ptr.add(row_start + x as usize) = final_label;
             }
         }
     });
@@ -298,102 +414,116 @@ fn label_mask_parallel(mask: &BitBuffer2, labels: &mut Buffer2<u32>) -> usize {
     num_labels as usize
 }
 
-/// Label a horizontal strip using word-level bit scanning.
-#[allow(clippy::too_many_arguments)]
-fn label_strip(
+/// Label a strip using RLE and return runs with row indices.
+fn label_strip_rle(
     mask_words: &[u64],
-    strip_labels: &mut [u32],
     width: usize,
     words_per_row: usize,
     y_start: usize,
     y_end: usize,
     parent: &[AtomicU32],
     next_label: &AtomicU32,
-    mask: &BitBuffer2,
-) {
+) -> Vec<(usize, Run)> {
+    let mut all_runs: Vec<(usize, Run)> = Vec::new();
+    let mut prev_runs: Vec<Run> = Vec::with_capacity(width / 4);
+    let mut curr_runs: Vec<Run> = Vec::with_capacity(width / 4);
+
     for y in y_start..y_end {
-        let local_y = y - y_start;
-        let row_start = local_y * width;
         let word_row_start = y * words_per_row;
 
-        for word_idx in 0..words_per_row {
-            let mut word = mask_words[word_row_start + word_idx];
-            let base_x = word_idx * 64;
+        // Extract runs from current row
+        curr_runs.clear();
+        extract_runs_from_row(
+            mask_words,
+            word_row_start,
+            words_per_row,
+            width,
+            &mut curr_runs,
+        );
 
-            if word == 0 {
-                continue;
-            }
-
-            while word != 0 {
-                let bit_pos = word.trailing_zeros() as usize;
-                let x = base_x + bit_pos;
-
-                if x >= width {
-                    break;
-                }
-
-                let local_idx = row_start + x;
-                let global_idx = y * width + x;
-
-                // Check left neighbor (within strip)
-                let left = if x > 0 && mask.get(global_idx - 1) {
-                    Some(strip_labels[local_idx - 1])
-                } else {
-                    None
-                };
-
-                // Check top neighbor (within strip only - cross-strip handled in merge)
-                let top = if local_y > 0 && mask.get(global_idx - width) {
-                    Some(strip_labels[local_idx - width])
-                } else {
-                    None
-                };
-
-                strip_labels[local_idx] = match (left, top) {
-                    (None, None) => {
-                        let label = next_label.fetch_add(1, Ordering::SeqCst);
-                        if (label as usize) < parent.len() {
-                            parent[label as usize - 1].store(label, Ordering::SeqCst);
-                        }
-                        label
-                    }
-                    (Some(l), None) => l,
-                    (None, Some(t)) => t,
-                    (Some(l), Some(t)) => {
-                        if l != t {
-                            atomic_union(parent, l, t);
-                        }
-                        l.min(t)
-                    }
-                };
-
-                word &= word - 1;
-            }
+        if curr_runs.is_empty() {
+            prev_runs.clear();
+            continue;
         }
+
+        // Label runs and merge with overlapping runs from previous row
+        let mut prev_idx = 0;
+        for run in &mut curr_runs {
+            let mut assigned_label = None;
+
+            // Skip runs that end before current run starts
+            while prev_idx < prev_runs.len() && prev_runs[prev_idx].end <= run.start {
+                prev_idx += 1;
+            }
+
+            // Check all overlapping runs from previous row
+            let mut check_idx = prev_idx;
+            while check_idx < prev_runs.len() && prev_runs[check_idx].start < run.end {
+                let prev_run = &prev_runs[check_idx];
+                if prev_run.start < run.end && prev_run.end > run.start {
+                    if let Some(label) = assigned_label {
+                        if label != prev_run.label {
+                            atomic_union(parent, label, prev_run.label);
+                        }
+                    } else {
+                        assigned_label = Some(prev_run.label);
+                    }
+                }
+                check_idx += 1;
+            }
+
+            // Assign label
+            run.label = match assigned_label {
+                Some(label) => label,
+                None => {
+                    let label = next_label.fetch_add(1, Ordering::SeqCst);
+                    if (label as usize) < parent.len() {
+                        parent[label as usize - 1].store(label, Ordering::SeqCst);
+                    }
+                    label
+                }
+            };
+
+            // Store run with row index
+            all_runs.push((y, *run));
+        }
+
+        std::mem::swap(&mut prev_runs, &mut curr_runs);
     }
+
+    all_runs
 }
 
-/// Merge labels at strip boundary.
-fn merge_strip_boundary(
-    mask: &BitBuffer2,
-    labels: &Buffer2<u32>,
-    width: usize,
+/// Merge labels at strip boundary using runs.
+fn merge_strip_boundary_rle(
+    above_runs: &[(usize, Run)],
+    below_runs: &[(usize, Run)],
     boundary_y: usize,
     parent: &[AtomicU32],
 ) {
-    let above_row_start = (boundary_y - 1) * width;
-    let below_row_start = boundary_y * width;
+    // Find runs from the row just above the boundary
+    let above_boundary_runs: Vec<&Run> = above_runs
+        .iter()
+        .filter(|(y, _)| *y == boundary_y - 1)
+        .map(|(_, run)| run)
+        .collect();
 
-    for x in 0..width {
-        let above_idx = above_row_start + x;
-        let below_idx = below_row_start + x;
+    // Find runs from the row at the boundary
+    let below_boundary_runs: Vec<&Run> = below_runs
+        .iter()
+        .filter(|(y, _)| *y == boundary_y)
+        .map(|(_, run)| run)
+        .collect();
 
-        if mask.get(above_idx) && mask.get(below_idx) {
-            let above_label = labels[above_idx];
-            let below_label = labels[below_idx];
-
-            if above_label != 0 && below_label != 0 && above_label != below_label {
-                atomic_union(parent, above_label, below_label);
+    // Merge overlapping runs
+    for above_run in &above_boundary_runs {
+        for below_run in &below_boundary_runs {
+            // Check if runs overlap (4-connectivity) and have different labels
+            if above_run.start < below_run.end
+                && above_run.end > below_run.start
+                && above_run.label != below_run.label
+            {
+                atomic_union(parent, above_run.label, below_run.label);
             }
         }
     }

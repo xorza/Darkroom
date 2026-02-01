@@ -1,36 +1,17 @@
 # Detection Module Improvement Plan
 
-## High-Priority (Performance)
+## Completed Optimizations
 
-### 1. Run-Length Encoding (RLE) for CCL
-**Expected speedup:** 1.7-1.9x
+### 1. Run-Length Encoding (RLE) for CCL - DONE
+**Achieved speedup:** ~50% faster (15ms -> 8ms on 6K globular cluster)
 
-Current word-level bit scanning is a partial step toward RLE. Full RLE would:
-- Encode mask as runs of consecutive 1s
-- Merge runs instead of individual pixels
-- Better SIMD utilization (process entire runs at once)
+Implemented RLE-based CCL:
+- Extract runs from mask using word-level bit scanning
+- Label runs and merge with overlapping runs from previous row
+- Parallel strip processing with RLE-based boundary merging
+- Write labels to output buffer in parallel
 
-**Implementation:**
-- Add `RunLengthMask` struct with `(start, length)` pairs per row
-- Modify `LabelMap::from_mask` to accept RLE input
-- Run merging uses same union-find, but operates on runs
-
-**Reference:** [SIMD RLE CCL algorithms](https://hal.science/hal-02492824)
-
-### 2. Decision Tree for Neighbor Checks
-**Expected speedup:** ~2x neighbor access reduction
-
-Wu-Otoo-Suzuki algorithm exploits local topology:
-- If top-center neighbor has label, copy it (no union needed)
-- Only check other neighbors when necessary
-- Reduces average neighbor checks from 4 to ~2
-
-**Implementation:**
-- Replace linear neighbor loop with decision tree in `label_pixel()`
-- Order: top-center → top-left → left → top-right
-- Early exit when label found without union
-
-**Reference:** [Optimizing two-pass CCL](https://www.osti.gov/servlets/purl/887435)
+**Location:** `labels.rs` - `label_mask_sequential()`, `label_mask_parallel()`, `label_strip_rle()`
 
 ---
 
@@ -118,18 +99,17 @@ Final `flatten_labels()` pass could use SIMD:
 
 ## Priority Matrix
 
-| Improvement | Effort | Impact | Recommended Order |
-|-------------|--------|--------|-------------------|
-| Decision tree neighbors | Medium | High (perf) | 1 |
-| 8-connectivity option | Low | Medium (quality) | 2 |
-| Adaptive thresholding | High | High (quality) | 3 |
-| RLE-based CCL | High | High (perf) | 4 |
-| Auto-estimate FWHM | Medium | Medium (usability) | 5 |
-| Atomic path compression | Low | Low-Medium | 6 |
-| Vectorized label flatten | Low | Low | 7 |
+| Improvement | Effort | Impact | Status |
+|-------------|--------|--------|--------|
+| RLE-based CCL | High | High (perf) | **DONE** (~50% faster) |
+| 8-connectivity option | Low | Medium (quality) | Pending |
+| Adaptive thresholding | High | High (quality) | Pending |
+| Auto-estimate FWHM | Medium | Medium (usability) | Pending |
+| Atomic path compression | Low | Low-Medium | Pending |
+| Vectorized label flatten | Low | Low | Pending |
 
 ---
 
 ## Recommendation
 
-Start with **Decision tree for neighbor checks** - medium effort, high impact, self-contained change in `labels.rs`. Then add **8-connectivity option** as it's low effort and improves quality for certain use cases.
+Next priority: **8-connectivity option** - low effort, improves quality for undersampled PSFs. Then **Adaptive thresholding** for images with variable nebulosity.

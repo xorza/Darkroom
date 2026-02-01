@@ -37,7 +37,7 @@ StarDetector::detect()
 | **SIMD threshold mask** | Done | `common/threshold_mask/` (SSE4.1, NEON) |
 | **Matched filtering** | Done | `convolution/mod.rs` (separable Gaussian, SIMD) |
 | **Elliptical PSF support** | Done | `convolution/mod.rs` (axis_ratio, angle params) |
-| **Word-level bit scanning** | Done | `labels.rs` (trailing_zeros for sparse masks) |
+| **RLE-based CCL** | Done | `labels.rs` (run-length encoding, ~50% faster) |
 | **Block-based parallel CCL** | Done | `labels.rs` (strip-based with boundary merge) |
 | **Lock-free atomic union-find** | Done | `labels.rs` (CAS operations) |
 | **Touched-label tracking** | Done | `mod.rs` (collect_component_data) |
@@ -51,7 +51,7 @@ StarDetector::detect()
 
 2. **Matched filter convolution** - Separable Gaussian with SIMD (O(n*k) instead of O(n*k^2)), boosts SNR for faint star detection.
 
-3. **Word-level bit scanning** in `labels.rs` using `trailing_zeros()` to skip background pixels efficiently.
+3. **RLE-based CCL** in `labels.rs` - run-length encoding processes runs instead of individual pixels, ~50% faster than pixel-based approach.
 
 4. **Block-based parallel CCL** with boundary merging - divides image into horizontal strips, labels in parallel, then merges at boundaries.
 
@@ -116,29 +116,25 @@ Key papers and their contributions:
 
 ### High Impact (Not Yet Implemented)
 
-1. **Run-based CCL**: Convert to RLE representation, then merge runs. Research shows 1.7-1.9x speedup possible.
-
-2. **Decision tree for neighbor access**: Implement Wu-Otoo-Suzuki style decision tree to reduce neighbor checks from 4 to ~2 average.
-
-3. **Adaptive local thresholding**: Instead of single sigma threshold, use local adaptive thresholds for images with variable nebulosity.
+1. **Adaptive local thresholding**: Instead of single sigma threshold, use local adaptive thresholds for images with variable nebulosity.
 
 ### Medium Impact
 
-4. **Atomic path compression**: Add path compression to `atomic_find` during labeling phase.
+2. **Atomic path compression**: Add path compression to `atomic_find` during labeling phase.
 
-5. **Better strip sizing**: Current 64-row minimum might not be optimal for all cache sizes.
+3. **Better strip sizing**: Current 64-row minimum might not be optimal for all cache sizes.
 
-6. **Vectorized label flattening**: The final label mapping pass could use SIMD.
+4. **Vectorized label flattening**: The final label mapping pass could use SIMD.
 
-7. **8-connectivity option**: Add optional 8-connectivity mode for better handling of undersampled PSFs.
+5. **8-connectivity option**: Add optional 8-connectivity mode for better handling of undersampled PSFs.
 
 ### Low Impact (Already Well Optimized)
 
-8. ~~SIMD threshold mask~~ - **Done**
-9. ~~Matched filtering~~ - **Done**
-10. ~~Touched-label tracking~~ - **Done**
-11. ~~Word-level bit scanning~~ - **Done**
-12. ~~Early area filtering~~ - **Done**
+6. ~~SIMD threshold mask~~ - **Done**
+7. ~~Matched filtering~~ - **Done**
+8. ~~RLE-based CCL~~ - **Done** (~50% faster)
+9. ~~Touched-label tracking~~ - **Done**
+10. ~~Early area filtering~~ - **Done**
 
 ## Detection Precision Improvements
 
@@ -167,9 +163,10 @@ For improving detection accuracy (not just speed):
 
 | Benchmark | Median Time | Notes |
 |-----------|-------------|-------|
-| detect_stars_6k_50000 | ~232ms | Full pipeline, 6144x6144, 50k stars |
-| detect_6k_globular_cluster | ~365ms | Dense field with crowding |
-| label_map_from_mask_6k_globular | ~15ms | CCL only |
+| detect_stars_6k_50000 | ~234ms | Full pipeline, 6144x6144, 50k stars |
+| detect_6k_globular_cluster | ~369ms | Dense field with crowding |
+| label_map_from_mask_6k_globular | ~8ms | CCL only (RLE-based, 50% faster) |
+| label_map_from_mask_1k | ~346µs | CCL on 1K image |
 | extract_candidates_6k_dense | ~206ms | Component extraction + deblending |
 | matched_filter_4k | ~90ms | Gaussian convolution only |
 
