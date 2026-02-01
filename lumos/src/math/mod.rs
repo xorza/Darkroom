@@ -152,6 +152,11 @@ pub fn sigma_clipped_median_mad(
 
     let mut len = values.len();
 
+    // Pre-allocate deviations buffer to avoid reallocations
+    if deviations.capacity() < len {
+        deviations.reserve(len - deviations.capacity());
+    }
+
     for _ in 0..iterations {
         if len < 3 {
             break;
@@ -162,7 +167,7 @@ pub fn sigma_clipped_median_mad(
         // Compute median
         let median = median_f32_mut(active);
 
-        // Compute MAD using deviations buffer
+        // Compute deviations - reuse for both MAD and clipping
         deviations.clear();
         deviations.extend(active.iter().map(|v| (v - median).abs()));
         let mad = median_f32_mut(deviations);
@@ -172,23 +177,24 @@ pub fn sigma_clipped_median_mad(
             return (median, 0.0);
         }
 
-        // Clip values outside threshold
+        // Clip values outside threshold, using already-computed deviations
         let threshold = kappa * sigma;
         let mut write_idx = 0;
         for i in 0..len {
-            if (values[i] - median).abs() <= threshold {
+            if deviations[i] <= threshold {
                 values[write_idx] = values[i];
                 write_idx += 1;
             }
         }
 
         if write_idx == len {
-            break;
+            // Converged - no values clipped, current stats are final
+            return (median, sigma);
         }
         len = write_idx;
     }
 
-    // Final statistics
+    // Compute final statistics after all iterations
     let active = &mut values[..len];
     if active.is_empty() {
         return (0.0, 0.0);
