@@ -101,6 +101,39 @@ pub fn median_f32_mut(data: &mut [f32]) -> f32 {
     }
 }
 
+/// Compute MAD (Median Absolute Deviation) using a scratch buffer.
+///
+/// MAD = median(|x_i - median(x)|)
+///
+/// Uses the provided scratch buffer to avoid allocation.
+#[inline]
+pub fn mad_f32_with_scratch(values: &[f32], median: f32, scratch: &mut Vec<f32>) -> f32 {
+    if values.is_empty() {
+        return 0.0;
+    }
+    scratch.clear();
+    scratch.extend(values.iter().map(|&v| (v - median).abs()));
+    median_f32_mut(scratch)
+}
+
+/// Compute median and MAD (Median Absolute Deviation) together.
+///
+/// More efficient than computing separately since median is needed for MAD.
+/// Mutates the input buffer.
+pub fn median_and_mad_f32_mut(data: &mut [f32]) -> (f32, f32) {
+    debug_assert!(!data.is_empty());
+
+    let median = median_f32_mut(data);
+
+    // Compute MAD in-place by replacing values with absolute deviations
+    for v in data.iter_mut() {
+        *v = (*v - median).abs();
+    }
+    let mad = median_f32_mut(data);
+
+    (median, mad)
+}
+
 /// Calculate sum of squared differences from mean using SIMD.
 #[cfg(target_arch = "aarch64")]
 pub fn sum_squared_diff(values: &[f32], mean: f32) -> f32 {
@@ -273,6 +306,41 @@ mod tests {
     fn test_median_f32_single() {
         let mut values = [42.0f32];
         assert!((median_f32_mut(&mut values) - 42.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_median_and_mad_odd() {
+        // [2.0, 3.0, 4.0] -> median = 3.0
+        // deviations: [1.0, 0.0, 1.0] -> MAD = 1.0
+        let mut values = [2.0f32, 4.0, 3.0];
+        let (median, mad) = median_and_mad_f32_mut(&mut values);
+        assert!((median - 3.0).abs() < 1e-6);
+        assert!((mad - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_median_and_mad_uniform() {
+        // All same values -> MAD = 0
+        let mut values = [3.5f32, 3.5, 3.5, 3.5, 3.5];
+        let (median, mad) = median_and_mad_f32_mut(&mut values);
+        assert!((median - 3.5).abs() < 1e-6);
+        assert!(mad.abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_mad_with_scratch() {
+        let values = [2.0f32, 4.0, 3.0];
+        let mut scratch = Vec::new();
+        let mad = mad_f32_with_scratch(&values, 3.0, &mut scratch);
+        assert!((mad - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_mad_with_scratch_empty() {
+        let values: [f32; 0] = [];
+        let mut scratch = Vec::new();
+        let mad = mad_f32_with_scratch(&values, 0.0, &mut scratch);
+        assert!(mad.abs() < f32::EPSILON);
     }
 
     #[test]

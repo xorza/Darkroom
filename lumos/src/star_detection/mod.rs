@@ -224,45 +224,19 @@ impl StarDetector {
         tracing::debug!("Detected {} star candidates", candidates.len());
 
         // Step 3: Compute precise centroids
-        let mut stars: Vec<Star> = {
-            candidates
-                .into_iter()
-                //paralelyze
-                .filter_map(|candidate| {
-                    compute_centroid(&pixels, &background, &candidate, &self.config)
-                })
-                .collect()
-        };
+        let mut stars = compute_centroids(candidates, &pixels, &background, &self.config);
         diagnostics.stars_after_centroid = stars.len();
 
-        // Step 4: Apply quality filters and count rejections
-        stars.retain(|star| {
-            if star.is_saturated() {
-                diagnostics.rejected_saturated += 1;
-                false
-            } else if star.snr < self.config.min_snr {
-                diagnostics.rejected_low_snr += 1;
-                false
-            } else if star.eccentricity > self.config.max_eccentricity {
-                diagnostics.rejected_high_eccentricity += 1;
-                false
-            } else if star.is_cosmic_ray(self.config.max_sharpness) {
-                diagnostics.rejected_cosmic_rays += 1;
-                false
-            } else if !star.is_round(self.config.max_roundness) {
-                diagnostics.rejected_roundness += 1;
-                false
-            } else {
-                true
-            }
-        });
+        // Step 4: Apply quality filters
+        let filter_stats = apply_quality_filters(&mut stars, &self.config);
+        diagnostics.rejected_saturated = filter_stats.saturated;
+        diagnostics.rejected_low_snr = filter_stats.low_snr;
+        diagnostics.rejected_high_eccentricity = filter_stats.high_eccentricity;
+        diagnostics.rejected_cosmic_rays = filter_stats.cosmic_rays;
+        diagnostics.rejected_roundness = filter_stats.roundness;
 
         // Sort by flux (brightest first)
-        stars.sort_by(|a, b| {
-            b.flux
-                .partial_cmp(&a.flux)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
+        sort_by_flux(&mut stars);
 
         // Filter FWHM outliers - spurious detections often have abnormally large FWHM
         let removed = filter_fwhm_outliers(&mut stars, self.config.max_fwhm_deviation);
@@ -325,33 +299,30 @@ impl StarDetector {
         pixels: &Buffer2<f32>,
         background: &BackgroundMap,
     ) -> fwhm_estimation::FwhmEstimate {
-        // Create first-pass config: high sigma, no matched filter
-        let mut first_pass_config = self.config.clone();
-        first_pass_config.background_config.sigma_threshold *=
-            self.config.fwhm_estimation_sigma_factor;
-        first_pass_config.expected_fwhm = 0.0; // No matched filter for first pass
-        first_pass_config.adaptive_threshold = None; // Disable adaptive for speed
-        first_pass_config.min_area = 3; // Smaller minimum area
+        // Create first-pass config: high sigma threshold, no matched filter
+        let first_pass_config = StarDetectionConfig {
+            background_config: BackgroundConfig {
+                sigma_threshold: self.config.background_config.sigma_threshold
+                    * self.config.fwhm_estimation_sigma_factor,
+                ..self.config.background_config.clone()
+            },
+            expected_fwhm: 0.0,                 // No matched filter
+            adaptive_threshold: None,           // Skip for speed
+            min_area: 3,                        // Smaller minimum
+            min_snr: self.config.min_snr * 2.0, // Stricter SNR for bright stars
+            ..self.config.clone()
+        };
 
-        // Detect candidates without matched filter
+        // Detect and compute centroids
         let candidates = detect_stars(pixels, None, background, &first_pass_config);
-
         tracing::debug!(
             "FWHM estimation: first pass detected {} bright star candidates",
             candidates.len()
         );
 
-        // Compute centroids and metrics for candidates
-        let stars: Vec<Star> = candidates
-            .into_iter()
-            .filter_map(|candidate| {
-                compute_centroid(pixels, background, &candidate, &first_pass_config)
-            })
-            .filter(|star| !star.is_saturated())
-            .filter(|star| star.snr >= self.config.min_snr * 2.0) // Extra SNR filter for bright stars
-            .collect();
+        let stars = compute_centroids(candidates, pixels, background, &first_pass_config);
 
-        // Estimate FWHM from detected stars
+        // Estimate FWHM with quality filtering
         fwhm_estimation::estimate_fwhm(
             &stars,
             self.config.min_stars_for_fwhm_estimation,
@@ -415,6 +386,72 @@ pub struct StarDetectionDiagnostics {
     pub fwhm_was_auto_estimated: bool,
 }
 
+/// Compute centroids for star candidates.
+///
+/// Takes detection candidates and computes sub-pixel centroids with quality metrics.
+fn compute_centroids(
+    candidates: Vec<detection::StarCandidate>,
+    pixels: &Buffer2<f32>,
+    background: &BackgroundMap,
+    config: &StarDetectionConfig,
+) -> Vec<Star> {
+    candidates
+        .into_iter()
+        .filter_map(|candidate| compute_centroid(pixels, background, &candidate, config))
+        .collect()
+}
+
+/// Apply quality filters to stars, returning rejection counts.
+///
+/// Filters: saturated, low SNR, high eccentricity, cosmic rays, non-round.
+fn apply_quality_filters(
+    stars: &mut Vec<Star>,
+    config: &StarDetectionConfig,
+) -> QualityFilterStats {
+    let mut stats = QualityFilterStats::default();
+
+    stars.retain(|star| {
+        if star.is_saturated() {
+            stats.saturated += 1;
+            false
+        } else if star.snr < config.min_snr {
+            stats.low_snr += 1;
+            false
+        } else if star.eccentricity > config.max_eccentricity {
+            stats.high_eccentricity += 1;
+            false
+        } else if star.is_cosmic_ray(config.max_sharpness) {
+            stats.cosmic_rays += 1;
+            false
+        } else if !star.is_round(config.max_roundness) {
+            stats.roundness += 1;
+            false
+        } else {
+            true
+        }
+    });
+
+    stats
+}
+
+#[derive(Debug, Default)]
+struct QualityFilterStats {
+    saturated: usize,
+    low_snr: usize,
+    high_eccentricity: usize,
+    cosmic_rays: usize,
+    roundness: usize,
+}
+
+/// Sort stars by flux (brightest first).
+fn sort_by_flux(stars: &mut [Star]) {
+    stars.sort_by(|a, b| {
+        b.flux
+            .partial_cmp(&a.flux)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+}
+
 /// Remove duplicate star detections that are too close together.
 ///
 /// Keeps the brightest star (by flux) within `min_separation` pixels of each other.
@@ -462,23 +499,6 @@ fn remove_duplicate_stars(stars: &mut Vec<Star>, min_separation: f32) -> usize {
     removed_count
 }
 
-/// Compute median and MAD (median absolute deviation) for FWHM filtering.
-///
-/// Returns (median, mad) computed from the given FWHM values.
-fn compute_fwhm_median_mad(fwhms: Vec<f32>) -> (f32, f32) {
-    assert!(!fwhms.is_empty(), "Need at least one FWHM value");
-
-    let mut sorted: Vec<f32> = fwhms;
-    sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-    let median = sorted[sorted.len() / 2];
-
-    let mut deviations: Vec<f32> = sorted.iter().map(|&f| (f - median).abs()).collect();
-    deviations.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-    let mad = deviations[deviations.len() / 2];
-
-    (median, mad)
-}
-
 /// Filter stars by FWHM using MAD-based outlier detection.
 ///
 /// Removes stars with FWHM > median + max_deviation * effective_mad.
@@ -493,8 +513,8 @@ fn filter_fwhm_outliers(stars: &mut Vec<Star>, max_deviation: f32) -> usize {
 
     // Use top half for robust median/MAD estimate
     let reference_count = (stars.len() / 2).max(5).min(stars.len());
-    let fwhms: Vec<f32> = stars.iter().take(reference_count).map(|s| s.fwhm).collect();
-    let (median_fwhm, mad) = compute_fwhm_median_mad(fwhms);
+    let mut fwhms: Vec<f32> = stars.iter().take(reference_count).map(|s| s.fwhm).collect();
+    let (median_fwhm, mad) = crate::math::median_and_mad_f32_mut(&mut fwhms);
 
     // Use at least 10% of median as minimum MAD
     let effective_mad = mad.max(median_fwhm * 0.1);

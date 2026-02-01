@@ -4,7 +4,7 @@
 //! It uses median and MAD (Median Absolute Deviation) statistics to handle
 //! outliers from cosmic rays, saturated stars, and edge artifacts.
 
-use crate::math::median_f32_mut;
+use crate::math::{mad_f32_with_scratch, median_f32_mut};
 
 use super::Star;
 
@@ -78,7 +78,7 @@ pub fn estimate_fwhm(
 
     // Compute median and MAD for outlier rejection
     let median = median_f32_mut(&mut fwhms);
-    let mad = compute_mad(&fwhms, median, &mut scratch);
+    let mad = mad_f32_with_scratch(&fwhms, median, &mut scratch);
 
     // Reject outliers: keep within 3×MAD of median (with floor for uniform distributions)
     let threshold = 3.0 * mad.max(median * 0.1);
@@ -103,7 +103,7 @@ pub fn estimate_fwhm(
 
     // Final estimate from filtered stars
     let final_median = median_f32_mut(&mut fwhms);
-    let final_mad = compute_mad(&fwhms, final_median, &mut scratch);
+    let final_mad = mad_f32_with_scratch(&fwhms, final_median, &mut scratch);
 
     tracing::info!(
         "Estimated FWHM: {:.2} pixels (MAD: {:.2}, from {} stars)",
@@ -118,16 +118,6 @@ pub fn estimate_fwhm(
         mad: final_mad,
         is_estimated: true,
     }
-}
-
-/// Compute Median Absolute Deviation from median using provided scratch buffer.
-fn compute_mad(values: &[f32], median: f32, scratch: &mut Vec<f32>) -> f32 {
-    if values.is_empty() {
-        return 0.0;
-    }
-    scratch.clear();
-    scratch.extend(values.iter().map(|&v| (v - median).abs()));
-    median_f32_mut(scratch)
 }
 
 #[cfg(test)]
