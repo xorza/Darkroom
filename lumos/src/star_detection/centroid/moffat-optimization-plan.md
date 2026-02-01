@@ -1,5 +1,22 @@
 # Moffat PSF Fitting Optimization Plan
 
+## Implementation Status
+
+| Priority | Description | Status | Result |
+|----------|-------------|--------|--------|
+| P1 | Improved damping strategy | ❌ Reverted | Made performance worse (+54% slower) |
+| P7 | Cached power computations | ✅ Done | **16% speedup** (728ms → 610ms) |
+
+### Benchmark Results (6K image, 10000 stars)
+
+| Method | Baseline | After P7 | Improvement |
+|--------|----------|----------|-------------|
+| weighted_moments | 29.8ms | 30.2ms | — |
+| gaussian_fit | 207.1ms | 213.4ms | — |
+| **moffat_fit** | **728.2ms** | **620.3ms** | **-14.8%** |
+
+---
+
 ## Current Implementation Review
 
 The current `moffat_fit.rs` implements 2D Moffat profile fitting using Levenberg-Marquardt optimization with the following features:

@@ -88,15 +88,17 @@ impl LMModel<5> for MoffatFixedBeta {
         let dy = y - y0;
         let r2 = dx * dx + dy * dy;
         let u = 1.0 + r2 / alpha2;
+        // Cache power computation: compute u^(-beta) once, derive u^(-beta-1) from it
         let u_neg_beta = u.powf(-self.beta);
-        let u_neg_beta_m1 = u.powf(-self.beta - 1.0);
+        let u_neg_beta_m1 = u_neg_beta / u; // u^(-beta-1) = u^(-beta) / u
+        let common = 2.0 * amp * self.beta / alpha2 * u_neg_beta_m1;
 
         [
-            2.0 * amp * self.beta * dx / alpha2 * u_neg_beta_m1, // df/dx0
-            2.0 * amp * self.beta * dy / alpha2 * u_neg_beta_m1, // df/dy0
-            u_neg_beta,                                          // df/damp
-            2.0 * amp * self.beta * r2 / (alpha2 * alpha) * u_neg_beta_m1, // df/dalpha
-            1.0,                                                 // df/dbg
+            common * dx,         // df/dx0
+            common * dy,         // df/dy0
+            u_neg_beta,          // df/damp
+            common * r2 / alpha, // df/dalpha
+            1.0,                 // df/dbg
         ]
     }
 
@@ -129,16 +131,19 @@ impl LMModel<6> for MoffatVariableBeta {
         let dy = y - y0;
         let r2 = dx * dx + dy * dy;
         let u = 1.0 + r2 / alpha2;
-        let u_neg_beta = u.powf(-beta);
-        let u_neg_beta_m1 = u.powf(-beta - 1.0);
+        // Cache power computation: compute ln(u) and u^(-beta) once
+        let ln_u = u.ln();
+        let u_neg_beta = (-beta * ln_u).exp(); // u^(-beta) = exp(-beta * ln(u))
+        let u_neg_beta_m1 = u_neg_beta / u; // u^(-beta-1) = u^(-beta) / u
+        let common = 2.0 * amp * beta / alpha2 * u_neg_beta_m1;
 
         [
-            2.0 * amp * beta * dx / alpha2 * u_neg_beta_m1, // df/dx0
-            2.0 * amp * beta * dy / alpha2 * u_neg_beta_m1, // df/dy0
-            u_neg_beta,                                     // df/damp
-            2.0 * amp * beta * r2 / (alpha2 * alpha) * u_neg_beta_m1, // df/dalpha
-            -amp * u.ln() * u_neg_beta,                     // df/dbeta
-            1.0,                                            // df/dbg
+            common * dx,              // df/dx0
+            common * dy,              // df/dy0
+            u_neg_beta,               // df/damp
+            common * r2 / alpha,      // df/dalpha
+            -amp * ln_u * u_neg_beta, // df/dbeta
+            1.0,                      // df/dbg
         ]
     }
 

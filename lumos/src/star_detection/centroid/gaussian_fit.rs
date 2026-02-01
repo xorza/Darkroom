@@ -61,16 +61,19 @@ impl LMModel<6> for Gaussian2D {
 
         let dx = x - x0;
         let dy = y - y0;
-        let exponent = -0.5 * (dx * dx / sigma_x2 + dy * dy / sigma_y2);
+        let dx2 = dx * dx;
+        let dy2 = dy * dy;
+        let exponent = -0.5 * (dx2 / sigma_x2 + dy2 / sigma_y2);
         let exp_val = exponent.exp();
+        let amp_exp = amp * exp_val;
 
         [
-            amp * exp_val * dx / sigma_x2,                  // df/dx0
-            amp * exp_val * dy / sigma_y2,                  // df/dy0
-            exp_val,                                        // df/damp
-            amp * exp_val * dx * dx / (sigma_x2 * sigma_x), // df/dsigma_x
-            amp * exp_val * dy * dy / (sigma_y2 * sigma_y), // df/dsigma_y
-            1.0,                                            // df/dbg
+            amp_exp * dx / sigma_x2,              // df/dx0
+            amp_exp * dy / sigma_y2,              // df/dy0
+            exp_val,                              // df/damp
+            amp_exp * dx2 / (sigma_x2 * sigma_x), // df/dsigma_x
+            amp_exp * dy2 / (sigma_y2 * sigma_y), // df/dsigma_y
+            1.0,                                  // df/dbg
         ]
     }
 
