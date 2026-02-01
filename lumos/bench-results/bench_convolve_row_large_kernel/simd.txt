@@ -1,6 +1,0 @@
-name: bench_convolve_row_large_kernel/simd
-mean: 12.308µs
-min: 12.203µs
-max: 12.454µs
-median: 12.314µs
-iterations: 10

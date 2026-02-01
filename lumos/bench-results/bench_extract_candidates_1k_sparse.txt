@@ -1,7 +1,0 @@
-name: bench_extract_candidates_1k_sparse
-mean: 695.997µs
-min: 684.698µs
-max: 710.737µs
-median: 693.775µs
-iterations: 5
-vs_previous: 936.722µs -> 695.997µs (-25.7%) faster

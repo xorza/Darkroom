@@ -1,7 +1,0 @@
-name: bench_connected_components_4k
-mean: 43.843373ms
-min: 43.300386ms
-max: 44.330033ms
-median: 43.899701ms
-iterations: 3
-vs_previous: 44.51672ms -> 43.843373ms (-1.5%) same

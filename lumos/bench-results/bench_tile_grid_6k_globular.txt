@@ -1,7 +1,0 @@
-name: bench_tile_grid_6k_globular
-mean: 45.028691ms
-min: 18.121292ms
-max: 71.474417ms
-median: 45.09ms
-iterations: 10
-vs_previous: 130.715074ms -> 45.028691ms (-65.6%) faster

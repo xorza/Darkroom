@@ -1,6 +1,0 @@
-name: bench_row_vs_col_1k/cols_scalar
-mean: 3.115946ms
-min: 2.856986ms
-max: 3.462863ms
-median: 2.945054ms
-iterations: 5

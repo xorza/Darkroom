@@ -1,7 +1,0 @@
-name: bench_convolve_row_4k/scalar
-mean: 299.904µs
-min: 294.212µs
-max: 305.774µs
-median: 300.514µs
-iterations: 10
-vs_previous: 33.248µs -> 299.904µs (+802.0%) SLOWER

@@ -1,6 +1,0 @@
-name: bench_matched_filter_1k/circular
-mean: 6.053327ms
-min: 5.733614ms
-max: 6.416299ms
-median: 5.896236ms
-iterations: 5

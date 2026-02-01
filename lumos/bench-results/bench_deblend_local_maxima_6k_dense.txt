@@ -1,7 +1,0 @@
-name: bench_deblend_local_maxima_6k_dense
-mean: 121.881184ms
-min: 119.412877ms
-max: 130.34323ms
-median: 119.852646ms
-iterations: 5
-vs_previous: 1.353878109s -> 121.881184ms (-91.0%) faster

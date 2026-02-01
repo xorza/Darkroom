@@ -1,6 +1,0 @@
-name: bench_row_vs_col_1k/rows_simd
-mean: 224.384µs
-min: 218.517µs
-max: 234.017µs
-median: 223.036µs
-iterations: 5

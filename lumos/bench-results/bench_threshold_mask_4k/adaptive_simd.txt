@@ -1,7 +1,0 @@
-name: bench_threshold_mask_4k/adaptive_simd
-mean: 8.180765ms
-min: 7.620854ms
-max: 19.617622ms
-median: 7.936603ms
-iterations: 200
-vs_previous: 7.759692ms -> 7.936603ms (+2.3%) same

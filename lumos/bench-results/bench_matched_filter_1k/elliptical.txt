@@ -1,6 +1,0 @@
-name: bench_matched_filter_1k/elliptical
-mean: 28.561841ms
-min: 27.615814ms
-max: 29.69677ms
-median: 28.382639ms
-iterations: 5

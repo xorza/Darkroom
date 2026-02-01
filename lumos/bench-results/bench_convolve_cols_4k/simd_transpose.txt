@@ -1,7 +1,0 @@
-name: bench_convolve_cols_4k/simd_transpose
-mean: 73.204603ms
-min: 69.591106ms
-max: 75.293692ms
-median: 74.729013ms
-iterations: 3
-vs_previous: 72.187882ms -> 73.204603ms (+1.4%) same

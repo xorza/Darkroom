@@ -1,7 +1,0 @@
-name: bench_convolve_cols_1k/scalar
-mean: 3.098867ms
-min: 2.899018ms
-max: 3.442817ms
-median: 2.978891ms
-iterations: 5
-vs_previous: 21.924522ms -> 3.098867ms (-85.9%) faster

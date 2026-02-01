@@ -1,7 +1,0 @@
-name: bench_convolve_row_4k/simd
-mean: 20.728µs
-min: 19.547µs
-max: 30.257µs
-median: 19.618µs
-iterations: 10
-vs_previous: 4.514µs -> 20.728µs (+359.2%) SLOWER

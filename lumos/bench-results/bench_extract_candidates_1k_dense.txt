@@ -1,7 +1,0 @@
-name: bench_extract_candidates_1k_dense
-mean: 697.708µs
-min: 682.414µs
-max: 709.084µs
-median: 700.167µs
-iterations: 5
-vs_previous: 941.946µs -> 697.708µs (-25.9%) faster
