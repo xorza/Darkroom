@@ -741,4 +741,163 @@ mod tests {
             assert!((stats.median - 0.5).abs() < 0.01);
         }
     }
+
+    // --- Helper function tests ---
+
+    #[test]
+    fn test_subsample_in_place_no_change_when_small() {
+        let mut values = vec![1.0, 2.0, 3.0, 4.0, 5.0];
+        subsample_in_place(&mut values, 10);
+        assert_eq!(values.len(), 5);
+    }
+
+    #[test]
+    fn test_subsample_in_place_reduces_size() {
+        let mut values: Vec<f32> = (0..1000).map(|i| i as f32).collect();
+        subsample_in_place(&mut values, 100);
+        assert!(values.len() <= 100);
+        // First element should be preserved
+        assert_eq!(values[0], 0.0);
+    }
+
+    #[test]
+    fn test_collect_sampled_pixels_small_tile() {
+        let pixels = create_uniform_image(32, 32, 0.5);
+        let mut values = Vec::new();
+        collect_sampled_pixels(&pixels, 0, 32, 0, 32, 32, &mut values);
+        // Small tile should collect all or most pixels
+        assert!(values.len() >= 100);
+        assert!(values.iter().all(|&v| (v - 0.5).abs() < 0.01));
+    }
+
+    #[test]
+    fn test_collect_sampled_pixels_large_tile() {
+        let pixels = create_uniform_image(256, 256, 0.5);
+        let mut values = Vec::new();
+        collect_sampled_pixels(&pixels, 0, 256, 0, 256, 256, &mut values);
+        // Large tile should sample ~MAX_TILE_SAMPLES
+        assert!(values.len() <= MAX_TILE_SAMPLES * 2);
+        assert!(values.iter().all(|&v| (v - 0.5).abs() < 0.01));
+    }
+
+    #[test]
+    fn test_collect_unmasked_pixels_none_masked() {
+        let pixels = create_uniform_image(64, 64, 0.5);
+        let mask = BitBuffer2::new_filled(64, 64, false);
+        let mut values = Vec::new();
+        collect_unmasked_pixels(&pixels, &mask, 0, 64, 0, 64, 64, &mut values);
+        assert_eq!(values.len(), 64 * 64);
+    }
+
+    #[test]
+    fn test_collect_unmasked_pixels_all_masked() {
+        let pixels = create_uniform_image(64, 64, 0.5);
+        let mask = BitBuffer2::new_filled(64, 64, true);
+        let mut values = Vec::new();
+        collect_unmasked_pixels(&pixels, &mask, 0, 64, 0, 64, 64, &mut values);
+        assert_eq!(values.len(), 0);
+    }
+
+    #[test]
+    fn test_collect_unmasked_pixels_partial_mask() {
+        let width = 64;
+        let height = 64;
+        let pixels = create_uniform_image(width, height, 0.5);
+
+        // Mask every other pixel
+        let mut mask = BitBuffer2::new_filled(width, height, false);
+        for y in 0..height {
+            for x in 0..width {
+                if (x + y) % 2 == 0 {
+                    mask.set_xy(x, y, true);
+                }
+            }
+        }
+
+        let mut values = Vec::new();
+        collect_unmasked_pixels(&pixels, &mask, 0, 64, 0, 64, 64, &mut values);
+        // Half pixels should be unmasked
+        assert_eq!(values.len(), 64 * 64 / 2);
+    }
+
+    #[test]
+    fn test_collect_unmasked_pixels_partial_tile() {
+        let pixels = create_uniform_image(100, 100, 0.5);
+        let mask = BitBuffer2::new_filled(100, 100, false);
+        let mut values = Vec::new();
+        // Collect from a sub-region not aligned to 64-bit boundaries
+        collect_unmasked_pixels(&pixels, &mask, 10, 70, 20, 80, 100, &mut values);
+        assert_eq!(values.len(), 60 * 60);
+    }
+
+    #[test]
+    fn test_tile_with_outliers_sigma_clipped() {
+        let width = 64;
+        let height = 64;
+        let mut data = vec![0.5; width * height];
+
+        // Add some outliers
+        for val in data.iter_mut().take(10) {
+            *val = 10.0; // Bright outliers
+        }
+
+        let pixels = Buffer2::new(width, height, data);
+        let grid = TileGrid::new(&pixels, 64);
+
+        let stats = grid.get(0, 0);
+        // Median should be close to 0.5 despite outliers
+        assert!((stats.median - 0.5).abs() < 0.1);
+    }
+
+    #[test]
+    fn test_tile_stats_sigma_nonzero_for_varied_data() {
+        let width = 64;
+        let height = 64;
+        // Create data with variation
+        let data: Vec<f32> = (0..width * height)
+            .map(|i| 0.5 + (i % 10) as f32 * 0.01)
+            .collect();
+
+        let pixels = Buffer2::new(width, height, data);
+        let grid = TileGrid::new(&pixels, 64);
+
+        let stats = grid.get(0, 0);
+        assert!(stats.sigma > 0.0);
+    }
+
+    #[test]
+    fn test_median_filter_corner_tiles() {
+        // Test that corner tiles (with fewer neighbors) are handled correctly
+        let pixels = create_uniform_image(128, 128, 0.5);
+        let grid = TileGrid::new(&pixels, 32);
+
+        // Corner tiles should still have valid stats
+        let corners = [(0, 0), (3, 0), (0, 3), (3, 3)];
+        for (tx, ty) in corners {
+            let stats = grid.get(tx, ty);
+            assert!((stats.median - 0.5).abs() < 0.01);
+        }
+    }
+
+    #[test]
+    fn test_negative_pixel_values() {
+        let width = 64;
+        let height = 64;
+        let data = vec![-0.5; width * height];
+
+        let pixels = Buffer2::new(width, height, data);
+        let grid = TileGrid::new(&pixels, 32);
+
+        let stats = grid.get(0, 0);
+        assert!((stats.median - (-0.5)).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_find_lower_tile_y_negative_pos() {
+        let pixels = create_uniform_image(64, 128, 0.5);
+        let grid = TileGrid::new(&pixels, 32);
+
+        // Negative position should return 0
+        assert_eq!(grid.find_lower_tile_y(-10.0), 0);
+    }
 }
