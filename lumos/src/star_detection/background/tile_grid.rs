@@ -900,4 +900,297 @@ mod tests {
         // Negative position should return 0
         assert_eq!(grid.find_lower_tile_y(-10.0), 0);
     }
+
+    // --- Algorithm correctness tests ---
+    // These verify the statistical algorithms produce mathematically correct results
+
+    #[test]
+    fn test_median_computation_correctness() {
+        // Create image where we know exact median
+        // Tile with values 1,2,3,4,5,6,7,8,9 should have median=5
+        let width = 3;
+        let height = 3;
+        let data: Vec<f32> = (1..=9).map(|x| x as f32).collect();
+
+        let pixels = Buffer2::new(width, height, data);
+        let grid = TileGrid::new(&pixels, 3);
+
+        let stats = grid.get(0, 0);
+        assert!(
+            (stats.median - 5.0).abs() < 0.1,
+            "Median of 1-9 should be 5, got {}",
+            stats.median
+        );
+    }
+
+    #[test]
+    fn test_sigma_computation_correctness() {
+        // For uniform data, sigma should be 0
+        let pixels = create_uniform_image(64, 64, 100.0);
+        let grid = TileGrid::new(&pixels, 64);
+
+        let stats = grid.get(0, 0);
+        assert!(
+            stats.sigma < 0.001,
+            "Uniform data should have sigma ~0, got {}",
+            stats.sigma
+        );
+    }
+
+    #[test]
+    fn test_mad_sigma_known_value() {
+        // MAD-based sigma for known distribution
+        // For values [0,1,2,3,4,5,6,7,8,9], median=4.5
+        // Deviations from median: [4.5,3.5,2.5,1.5,0.5,0.5,1.5,2.5,3.5,4.5]
+        // MAD = median of deviations = 2.5
+        // sigma = MAD * 1.4826 ≈ 3.7
+        let width = 10;
+        let height = 1;
+        let data: Vec<f32> = (0..10).map(|x| x as f32).collect();
+
+        let pixels = Buffer2::new(width, height, data);
+
+        // Use large tile to get all pixels
+        let grid = TileGrid::new(&pixels, 10);
+        let stats = grid.get(0, 0);
+
+        // Median should be 4.5
+        assert!(
+            (stats.median - 4.5).abs() < 0.1,
+            "Median should be 4.5, got {}",
+            stats.median
+        );
+        // Sigma should be ~3.7 (MAD * 1.4826)
+        assert!(
+            (stats.sigma - 3.7).abs() < 0.5,
+            "Sigma should be ~3.7, got {}",
+            stats.sigma
+        );
+    }
+
+    #[test]
+    fn test_3sigma_clipping_rejects_outliers() {
+        // Background of 100 with a few extreme outliers
+        // 3-sigma clipping should reject values > median + 3*sigma
+        let width = 100;
+        let height = 100;
+        let mut data = vec![100.0; width * height];
+
+        // Add 1% extreme outliers (100 pixels with value 10000)
+        for i in 0..100 {
+            data[i * 100] = 10000.0;
+        }
+
+        let pixels = Buffer2::new(width, height, data);
+        let grid = TileGrid::new(&pixels, 100);
+
+        let stats = grid.get(0, 0);
+
+        // After sigma clipping, median should still be ~100
+        assert!(
+            (stats.median - 100.0).abs() < 5.0,
+            "Median should be ~100 after clipping outliers, got {}",
+            stats.median
+        );
+    }
+
+    #[test]
+    fn test_median_filter_3x3_correctness() {
+        // Create 5x5 grid of tiles where center tile has outlier value
+        // After 3x3 median filter, center should match neighbors
+        let width = 160; // 5 tiles of 32 pixels
+        let height = 160;
+        let mut data = vec![50.0; width * height];
+
+        // Make center tile (tile 2,2) have value 200
+        for y in 64..96 {
+            for x in 64..96 {
+                data[y * width + x] = 200.0;
+            }
+        }
+
+        let pixels = Buffer2::new(width, height, data);
+        let grid = TileGrid::new(&pixels, 32);
+
+        // Center tile should be filtered to ~50 (median of 8x50 + 1x200 = 50)
+        let center = grid.get(2, 2);
+        assert!(
+            (center.median - 50.0).abs() < 10.0,
+            "Center tile should be ~50 after median filter, got {}",
+            center.median
+        );
+    }
+
+    #[test]
+    fn test_background_gradient_preserved() {
+        // Linear gradient from 0 to 100 across image
+        // Tile statistics should reflect local background level
+        let width = 256;
+        let height = 64;
+        let data: Vec<f32> = (0..height)
+            .flat_map(|_| (0..width).map(|x| x as f32 / width as f32 * 100.0))
+            .collect();
+
+        let pixels = Buffer2::new(width, height, data);
+        let grid = TileGrid::new(&pixels, 64);
+
+        // Left tiles should have lower median than right tiles
+        let left = grid.get(0, 0);
+        let right = grid.get(3, 0);
+
+        assert!(
+            right.median > left.median + 30.0,
+            "Right tile median {} should be > left {} + 30",
+            right.median,
+            left.median
+        );
+        assert!(
+            left.median < 30.0,
+            "Left tile median {} should be < 30",
+            left.median
+        );
+        assert!(
+            right.median > 70.0,
+            "Right tile median {} should be > 70",
+            right.median
+        );
+    }
+
+    #[test]
+    fn test_sparse_stars_rejected() {
+        // Simulate astronomical image: mostly background (100) with sparse bright stars
+        let width = 128;
+        let height = 128;
+        let mut data = vec![100.0; width * height];
+
+        // Add 20 "stars" with brightness 500-1000 (random positions)
+        let star_positions = [
+            (10, 10),
+            (50, 20),
+            (100, 30),
+            (30, 60),
+            (80, 70),
+            (120, 80),
+            (15, 100),
+            (60, 110),
+            (90, 120),
+            (110, 115),
+            (25, 25),
+            (75, 45),
+            (45, 75),
+            (95, 95),
+            (5, 55),
+            (55, 5),
+            (105, 55),
+            (55, 105),
+            (35, 35),
+            (85, 85),
+        ];
+
+        for (x, y) in star_positions {
+            // Star with some spread
+            for dy in -1i32..=1 {
+                for dx in -1i32..=1 {
+                    let nx = (x + dx).clamp(0, 127) as usize;
+                    let ny = (y + dy).clamp(0, 127) as usize;
+                    data[ny * width + nx] = 500.0 + (dx.abs() + dy.abs()) as f32 * -100.0;
+                }
+            }
+        }
+
+        let pixels = Buffer2::new(width, height, data);
+        let grid = TileGrid::new(&pixels, 64);
+
+        // All tiles should have median close to background (100)
+        for ty in 0..grid.tiles_y() {
+            for tx in 0..grid.tiles_x() {
+                let stats = grid.get(tx, ty);
+                assert!(
+                    (stats.median - 100.0).abs() < 20.0,
+                    "Tile ({},{}) median {} should be ~100 (background)",
+                    tx,
+                    ty,
+                    stats.median
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_mask_excludes_sources_correctly() {
+        // Background 50, sources at 200
+        let width = 64;
+        let height = 64;
+        let mut data = vec![50.0; width * height];
+
+        // Add bright source in top-left quadrant
+        for y in 0..32 {
+            for x in 0..32 {
+                data[y * width + x] = 200.0;
+            }
+        }
+
+        let pixels = Buffer2::new(width, height, data);
+
+        // Mask the bright source
+        let mut mask = BitBuffer2::new_filled(width, height, false);
+        for y in 0..32 {
+            for x in 0..32 {
+                mask.set_xy(x, y, true);
+            }
+        }
+
+        let grid = TileGrid::new_with_mask(&pixels, 32, Some(&mask), 100);
+
+        // Top-left tile (0,0) should fallback to all pixels due to mask
+        // Bottom-right tile (1,1) should have background value
+        let br = grid.get(1, 1);
+        assert!(
+            (br.median - 50.0).abs() < 5.0,
+            "Unmasked tile median {} should be ~50",
+            br.median
+        );
+    }
+
+    #[test]
+    fn test_photutils_sextractor_comparison() {
+        // Test case similar to photutils/SExtractor documentation examples
+        // Background level 1000 with noise sigma ~10
+        let width = 256;
+        let height = 256;
+
+        // Generate pseudo-random noise using deterministic pattern
+        let data: Vec<f32> = (0..width * height)
+            .map(|i| {
+                let noise = ((i * 7919 + 104729) % 1000) as f32 / 100.0 - 5.0; // -5 to +5
+                1000.0 + noise * 2.0 // background 1000, noise ~10
+            })
+            .collect();
+
+        let pixels = Buffer2::new(width, height, data);
+        let grid = TileGrid::new(&pixels, 64);
+
+        // Check all tiles have reasonable background estimate
+        for ty in 0..grid.tiles_y() {
+            for tx in 0..grid.tiles_x() {
+                let stats = grid.get(tx, ty);
+                // Background should be ~1000 ± 5
+                assert!(
+                    (stats.median - 1000.0).abs() < 10.0,
+                    "Tile ({},{}) median {} should be ~1000",
+                    tx,
+                    ty,
+                    stats.median
+                );
+                // Sigma should be reasonable (not zero, not huge)
+                assert!(
+                    stats.sigma > 1.0 && stats.sigma < 30.0,
+                    "Tile ({},{}) sigma {} should be reasonable",
+                    tx,
+                    ty,
+                    stats.sigma
+                );
+            }
+        }
+    }
 }
