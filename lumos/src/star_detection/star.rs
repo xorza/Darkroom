@@ -83,3 +83,78 @@ impl Star {
             && self.is_round(max_roundness)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_test_star() -> Star {
+        Star {
+            x: 10.0,
+            y: 10.0,
+            flux: 100.0,
+            fwhm: 3.0,
+            eccentricity: 0.1,
+            snr: 50.0,
+            peak: 0.5,
+            sharpness: 0.3,
+            roundness1: 0.0,
+            roundness2: 0.0,
+            laplacian_snr: 0.0,
+        }
+    }
+
+    #[test]
+    fn test_is_saturated() {
+        let star = Star {
+            peak: 0.96,
+            ..make_test_star()
+        };
+        assert!(star.is_saturated());
+
+        let star2 = Star {
+            peak: 0.8,
+            ..make_test_star()
+        };
+        assert!(!star2.is_saturated());
+    }
+
+    #[test]
+    fn test_passes_quality_filters() {
+        let star = Star {
+            eccentricity: 0.2,
+            peak: 0.8,
+            ..make_test_star()
+        };
+        assert!(star.passes_quality_filters(10.0, 0.5, 0.7, 1.0));
+
+        // Low SNR
+        let low_snr = Star { snr: 5.0, ..star };
+        assert!(!low_snr.passes_quality_filters(10.0, 0.5, 0.7, 1.0));
+
+        // Too elongated
+        let elongated = Star {
+            eccentricity: 0.7,
+            ..star
+        };
+        assert!(!elongated.passes_quality_filters(10.0, 0.5, 0.7, 1.0));
+
+        // Saturated
+        let saturated = Star { peak: 0.98, ..star };
+        assert!(!saturated.passes_quality_filters(10.0, 0.5, 0.7, 1.0));
+
+        // Cosmic ray (too sharp)
+        let cosmic_ray = Star {
+            sharpness: 0.9,
+            ..star
+        };
+        assert!(!cosmic_ray.passes_quality_filters(10.0, 0.5, 0.7, 1.0));
+
+        // Non-round (fails roundness check)
+        let non_round = Star {
+            roundness1: 0.5,
+            ..star
+        };
+        assert!(!non_round.passes_quality_filters(10.0, 0.5, 0.7, 0.3));
+    }
+}

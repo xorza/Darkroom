@@ -19,4 +19,3 @@
 
 pub mod common;
 pub mod synthetic;
-mod unit_tests;

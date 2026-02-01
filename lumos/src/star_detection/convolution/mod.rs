@@ -17,8 +17,8 @@ mod tests;
 
 use rayon::prelude::*;
 
+use crate::common::Buffer2;
 use crate::math::fwhm_to_sigma;
-use crate::star_detection::Buffer2;
 use common::parallel;
 
 // ============================================================================

@@ -1,8 +1,8 @@
 //! Tests for Gaussian convolution.
 
 use super::*;
+use crate::common::Buffer2;
 use crate::math::FWHM_TO_SIGMA;
-use crate::star_detection::Buffer2;
 
 // ============================================================================
 // Kernel generation tests

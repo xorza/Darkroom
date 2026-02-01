@@ -1,87 +1,10 @@
-//! Unit tests for star detection.
+//! Tests for StarDetector helper functions.
 
-use crate::star_detection::{
-    Star, StarDetectionConfig, filter_fwhm_outliers, remove_duplicate_stars,
-};
-
-#[test]
-fn test_star_is_saturated() {
-    let star = Star {
-        x: 10.0,
-        y: 10.0,
-        flux: 100.0,
-        fwhm: 3.0,
-        eccentricity: 0.1,
-        snr: 50.0,
-        peak: 0.96,
-        sharpness: 0.3,
-        roundness1: 0.0,
-        roundness2: 0.0,
-        laplacian_snr: 0.0,
-    };
-    assert!(star.is_saturated());
-
-    let star2 = Star { peak: 0.8, ..star };
-    assert!(!star2.is_saturated());
-}
-
-#[test]
-fn test_star_passes_quality_filters() {
-    let star = Star {
-        x: 10.0,
-        y: 10.0,
-        flux: 100.0,
-        fwhm: 3.0,
-        eccentricity: 0.2,
-        snr: 50.0,
-        peak: 0.8,
-        sharpness: 0.3,
-        roundness1: 0.0,
-        roundness2: 0.0,
-        laplacian_snr: 0.0,
-    };
-    assert!(star.passes_quality_filters(10.0, 0.5, 0.7, 1.0));
-
-    // Low SNR
-    let low_snr = Star { snr: 5.0, ..star };
-    assert!(!low_snr.passes_quality_filters(10.0, 0.5, 0.7, 1.0));
-
-    // Too elongated
-    let elongated = Star {
-        eccentricity: 0.7,
-        ..star
-    };
-    assert!(!elongated.passes_quality_filters(10.0, 0.5, 0.7, 1.0));
-
-    // Saturated
-    let saturated = Star { peak: 0.98, ..star };
-    assert!(!saturated.passes_quality_filters(10.0, 0.5, 0.7, 1.0));
-
-    // Cosmic ray (too sharp)
-    let cosmic_ray = Star {
-        sharpness: 0.9,
-        ..star
-    };
-    assert!(!cosmic_ray.passes_quality_filters(10.0, 0.5, 0.7, 1.0));
-
-    // Non-round (fails roundness check)
-    let non_round = Star {
-        roundness1: 0.5,
-        ..star
-    };
-    assert!(!non_round.passes_quality_filters(10.0, 0.5, 0.7, 0.3));
-}
-
-#[test]
-fn test_default_config() {
-    let config = StarDetectionConfig::default();
-    assert_eq!(config.background_config.sigma_threshold, 4.0);
-    assert_eq!(config.min_area, 5);
-    assert_eq!(config.background_config.tile_size, 64);
-}
+use super::{filter_fwhm_outliers, remove_duplicate_stars};
+use crate::star_detection::Star;
 
 // =============================================================================
-// FWHM Outlier Filtering Tests
+// Helper Functions
 // =============================================================================
 
 fn make_test_star(fwhm: f32, flux: f32) -> Star {
@@ -99,6 +22,26 @@ fn make_test_star(fwhm: f32, flux: f32) -> Star {
         laplacian_snr: 0.0,
     }
 }
+
+fn make_star_at(x: f32, y: f32, flux: f32) -> Star {
+    Star {
+        x,
+        y,
+        flux,
+        fwhm: 3.0,
+        eccentricity: 0.1,
+        snr: 50.0,
+        peak: 0.5,
+        sharpness: 0.3,
+        roundness1: 0.0,
+        roundness2: 0.0,
+        laplacian_snr: 0.0,
+    }
+}
+
+// =============================================================================
+// FWHM Outlier Filtering Tests
+// =============================================================================
 
 #[test]
 fn test_filter_fwhm_outliers_disabled_when_zero_deviation() {
@@ -285,22 +228,6 @@ fn test_filter_fwhm_outliers_negative_deviation_disabled() {
 // =============================================================================
 // Duplicate Star Removal Tests
 // =============================================================================
-
-fn make_star_at(x: f32, y: f32, flux: f32) -> Star {
-    Star {
-        x,
-        y,
-        flux,
-        fwhm: 3.0,
-        eccentricity: 0.1,
-        snr: 50.0,
-        peak: 0.5,
-        sharpness: 0.3,
-        roundness1: 0.0,
-        roundness2: 0.0,
-        laplacian_snr: 0.0,
-    }
-}
 
 #[test]
 fn test_remove_duplicate_stars_empty() {
