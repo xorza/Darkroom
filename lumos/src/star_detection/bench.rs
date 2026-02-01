@@ -10,7 +10,7 @@ use crate::testing::init_tracing;
 use crate::testing::synthetic::generate_globular_cluster;
 use crate::{AstroImage, StarDetectionConfig, StarDetector};
 
-#[quick_bench(warmup_iters = 1, iters = 10)]
+#[quick_bench(warmup_iters = 1, iters = 30)]
 fn bench_detect_6k_globular_cluster(b: ::bench::Bencher) {
     init_tracing();
 
