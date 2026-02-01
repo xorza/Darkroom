@@ -9,7 +9,7 @@ mod bench;
 mod tests;
 
 use crate::common::BitBuffer2;
-use rayon::iter::{IntoParallelIterator, ParallelIterator};
+use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 
 /// Dilate a binary mask by the given radius (morphological dilation).
 ///
@@ -41,9 +41,10 @@ pub fn dilate_mask(mask: &BitBuffer2, radius: usize, output: &mut BitBuffer2) {
             std::slice::from_raw_parts_mut(output.words().as_ptr() as *mut u64, output.num_words())
         };
 
+        let row = &input_words[row_start..row_start + words_per_row];
+
         for word_idx in 0..words_per_row {
             let base_x = word_idx * 64;
-            let row = &input_words[row_start..row_start + words_per_row];
 
             let mut result = if radius <= 63 {
                 dilate_word_fast(row, word_idx, radius)
@@ -62,26 +63,80 @@ pub fn dilate_mask(mask: &BitBuffer2, radius: usize, output: &mut BitBuffer2) {
         }
     });
 
-    // Vertical dilation pass
-    (0..words_per_row).into_par_iter().for_each(|word_idx| {
-        // SAFETY: Each thread accesses a disjoint word index across all rows
-        let output_words = unsafe {
-            std::slice::from_raw_parts_mut(output.words().as_ptr() as *mut u64, output.num_words())
-        };
+    // Vertical dilation pass with sliding window
+    let chunk_size = 64.max(words_per_row / rayon::current_num_threads().max(1));
 
-        let original: Vec<u64> = (0..height)
-            .map(|y| output_words[y * words_per_row + word_idx])
-            .collect();
+    (0..words_per_row)
+        .into_par_iter()
+        .step_by(chunk_size)
+        .for_each(|chunk_start| {
+            let chunk_end = (chunk_start + chunk_size).min(words_per_row);
 
-        for y in 0..height {
-            let y_min = y.saturating_sub(radius);
-            let y_max = (y + radius).min(height - 1);
+            // SAFETY: Each thread accesses disjoint word indices
+            let output_words = unsafe {
+                std::slice::from_raw_parts_mut(
+                    output.words().as_ptr() as *mut u64,
+                    output.num_words(),
+                )
+            };
 
-            output_words[y * words_per_row + word_idx] = original[y_min..=y_max]
-                .iter()
-                .fold(0u64, |acc, &word| acc | word);
+            let mut column_data = vec![0u64; height];
+            let mut dilated = vec![0u64; height];
+
+            for word_idx in chunk_start..chunk_end {
+                // Read column
+                for (y, col) in column_data.iter_mut().enumerate() {
+                    *col = output_words[y * words_per_row + word_idx];
+                }
+
+                // Sliding window vertical dilation
+                dilate_column_sliding(&column_data, &mut dilated, radius);
+
+                // Write back
+                for (y, &val) in dilated.iter().enumerate() {
+                    output_words[y * words_per_row + word_idx] = val;
+                }
+            }
+        });
+}
+
+/// Vertical dilation using sliding window - O(height) instead of O(height * radius).
+#[inline]
+fn dilate_column_sliding(column: &[u64], output: &mut [u64], radius: usize) {
+    let height = column.len();
+    if height == 0 {
+        return;
+    }
+
+    // Initialize window OR for row 0
+    let mut window_or = 0u64;
+    let initial_end = radius.min(height - 1);
+    for &val in &column[0..=initial_end] {
+        window_or |= val;
+    }
+    output[0] = window_or;
+
+    // Slide the window down
+    for y in 1..height {
+        // Remove the element leaving the window (if any)
+        if y > radius {
+            let leaving = column[y - radius - 1];
+            if leaving != 0 && window_or & leaving != 0 {
+                // Need to recompute - the leaving element contributed bits
+                let y_min = y.saturating_sub(radius);
+                let y_max = (y + radius).min(height - 1);
+                window_or = column[y_min..=y_max].iter().fold(0u64, |acc, &v| acc | v);
+            }
         }
-    });
+
+        // Add the element entering the window (if any)
+        let entering_y = y + radius;
+        if entering_y < height {
+            window_or |= column[entering_y];
+        }
+
+        output[y] = window_or;
+    }
 }
 
 /// Fast horizontal dilation using word-level bit operations (radius <= 63).
@@ -90,7 +145,7 @@ fn dilate_word_fast(row: &[u64], word_idx: usize, radius: usize) -> u64 {
     let current = row[word_idx];
     let mut result = current;
 
-    // Dilate within current word
+    // Dilate within current word using bit smearing
     for shift in 1..=radius {
         result |= current << shift;
         result |= current >> shift;
@@ -142,29 +197,33 @@ fn dilate_word_slow(row: &[u64], word_idx: usize, width: usize, radius: usize) -
     result
 }
 
-/// Check if any bit is set in the given x range.
+/// Check if any bit is set in the given x range using word masks.
 #[inline]
 fn has_set_bit_in_range(row: &[u64], x_min: usize, x_max: usize) -> bool {
     let word_min = x_min / 64;
     let word_max = (x_max / 64).min(row.len() - 1);
 
-    for (word_idx, &word) in row.iter().enumerate().take(word_max + 1).skip(word_min) {
+    for (i, &word) in row[word_min..=word_max].iter().enumerate() {
         if word == 0 {
             continue;
         }
 
+        let word_idx = word_min + i;
         let word_start = word_idx * 64;
-        for bit in 0..64 {
-            let x = word_start + bit;
-            if x < x_min {
-                continue;
-            }
-            if x > x_max {
-                break;
-            }
-            if (word >> bit) & 1 != 0 {
-                return true;
-            }
+
+        // Calculate bit range within this word
+        let bit_start = x_min.saturating_sub(word_start);
+        let bit_end = (x_max - word_start).min(63);
+
+        // Create mask for the relevant bits
+        let mask = if bit_end >= 63 {
+            !0u64 << bit_start
+        } else {
+            ((1u64 << (bit_end + 1)) - 1) & (!0u64 << bit_start)
+        };
+
+        if word & mask != 0 {
+            return true;
         }
     }
 
