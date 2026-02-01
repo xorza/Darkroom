@@ -39,10 +39,6 @@ pub const FWHM_TO_SIGMA: f32 = 2.354_82;
 /// This is the exact value: 1 / Φ⁻¹(3/4) where Φ⁻¹ is the inverse CDF.
 pub const MAD_TO_SIGMA: f32 = 1.4826022;
 
-/// Chunk size for parallel operations.
-/// 16KB worth of f32 values (4096 elements) balances parallelism with overhead.
-const PARALLEL_CHUNK_SIZE: usize = 4096;
-
 // =============================================================================
 // Unit Conversion Functions
 // =============================================================================
@@ -119,15 +115,6 @@ pub fn accumulate(dst: &mut [f32], src: &[f32]) {
 #[inline]
 pub fn scale(data: &mut [f32], scale_val: f32) {
     scalar::scale(data, scale_val)
-}
-
-/// Compute sum of f32 slice in parallel using rayon.
-pub fn parallel_sum_f32(values: &[f32]) -> f32 {
-    use rayon::prelude::*;
-    values
-        .par_chunks(PARALLEL_CHUNK_SIZE)
-        .map(|chunk| sum_f32(chunk))
-        .sum()
 }
 
 // =============================================================================
@@ -446,29 +433,6 @@ mod tests {
         let mut data: Vec<f32> = vec![2.0, 4.0];
         scale(&mut data, 0.5);
         assert_eq!(data, vec![1.0, 2.0]);
-    }
-
-    // -------------------------------------------------------------------------
-    // Parallel Sum Tests
-    // -------------------------------------------------------------------------
-
-    #[test]
-    fn test_parallel_sum_f32() {
-        let values: Vec<f32> = (1..=100).map(|x| x as f32).collect();
-        let expected: f32 = values.iter().sum();
-        assert!((parallel_sum_f32(&values) - expected).abs() < f32::EPSILON);
-    }
-
-    #[test]
-    fn test_parallel_sum_f32_large() {
-        let values: Vec<f32> = (0..10000).map(|x| x as f32 * 0.1).collect();
-        let expected: f32 = values.iter().sum();
-        assert!((parallel_sum_f32(&values) - expected).abs() < 1.0);
-    }
-
-    #[test]
-    fn test_parallel_sum_f32_empty() {
-        assert!((parallel_sum_f32(&[]) - 0.0).abs() < f32::EPSILON);
     }
 
     // -------------------------------------------------------------------------

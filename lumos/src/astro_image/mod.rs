@@ -540,15 +540,20 @@ impl AstroImage {
 
     /// Calculate the mean pixel value across all channels using parallel processing.
     pub fn mean(&self) -> f32 {
+        fn parallel_sum(values: &[f32]) -> f32 {
+            use rayon::iter::ParallelIterator;
+            common::parallel::par_iter_auto(values.len())
+                .map(|(_, start, end)| crate::math::sum_f32(&values[start..end]))
+                .sum()
+        }
+
         match &self.pixels {
             PixelData::L(data) => {
                 debug_assert!(!data.is_empty());
-                crate::math::parallel_sum_f32(data) / data.len() as f32
+                parallel_sum(data) / data.len() as f32
             }
             PixelData::Rgb([r, g, b]) => {
-                let total = crate::math::parallel_sum_f32(r)
-                    + crate::math::parallel_sum_f32(g)
-                    + crate::math::parallel_sum_f32(b);
+                let total = parallel_sum(r) + parallel_sum(g) + parallel_sum(b);
                 let count = r.len() + g.len() + b.len();
                 total / count as f32
             }
