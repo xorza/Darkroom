@@ -3,13 +3,12 @@
 //! This module centralizes mathematical and algorithmic constants used across
 //! the star detection pipeline to avoid magic numbers and ensure consistency.
 
-#[cfg(test)]
-mod bench;
+mod dilation;
 pub mod threshold_mask;
 
-use crate::common::BitBuffer2;
+pub use dilation::dilate_mask;
+
 use crate::math::mad_to_sigma;
-use rayon::iter::{IntoParallelIterator, ParallelIterator};
 
 /// Stamp radius as a multiple of FWHM.
 ///
@@ -43,119 +42,6 @@ pub const MAX_CENTROID_ITERATIONS: usize = 10;
 pub fn compute_stamp_radius(expected_fwhm: f32) -> usize {
     let radius = (expected_fwhm * STAMP_RADIUS_FWHM_FACTOR).ceil() as usize;
     radius.clamp(MIN_STAMP_RADIUS, MAX_STAMP_RADIUS)
-}
-
-/// Dilate a binary mask by the given radius (morphological dilation).
-///
-/// This connects nearby pixels that might be separated due to variable threshold.
-/// Used in star detection to merge fragmented detections and in background
-/// estimation to mask object wings.
-///
-/// Uses separable dilation (horizontal then vertical passes) for O(r) complexity
-/// per pixel instead of O(r²). Operates on packed 64-bit words for efficiency.
-///
-/// # Arguments
-/// * `mask` - Input binary mask (BitBuffer2)
-/// * `radius` - Dilation radius in pixels
-/// * `output` - Output buffer for dilated mask (will be cleared and filled)
-pub fn dilate_mask(mask: &BitBuffer2, radius: usize, output: &mut BitBuffer2) {
-    assert_eq!(mask.width(), output.width(), "width mismatch");
-    assert_eq!(mask.height(), output.height(), "height mismatch");
-
-    if radius == 0 {
-        output.copy_from(mask);
-        return;
-    }
-
-    let width = mask.width();
-    let height = mask.height();
-    let words_per_row = mask.words_per_row();
-
-    // Horizontal dilation pass using word-level bit operations
-    // For each output bit, we need to OR together input bits within radius
-    (0..height).into_par_iter().for_each(|y| {
-        let row_start = y * words_per_row;
-
-        // SAFETY: Each thread writes to a disjoint set of rows
-        let input_words = mask.words();
-        let output_words = unsafe {
-            std::slice::from_raw_parts_mut(output.words().as_ptr() as *mut u64, output.num_words())
-        };
-
-        for word_idx in 0..words_per_row {
-            let base_x = word_idx * 64;
-            let mut result = 0u64;
-
-            // Get current word and dilate using shifts
-            let current = input_words[row_start + word_idx];
-
-            // Start with the current word
-            result |= current;
-
-            // Shift left and right within the word
-            for shift in 1..=radius.min(63) {
-                result |= current << shift;
-                result |= current >> shift;
-            }
-
-            // Handle bits that need to come from adjacent words
-            // Bits from previous word's high bits shift into our low bits
-            if word_idx > 0 {
-                let prev = input_words[row_start + word_idx - 1];
-                for shift in 1..=radius.min(63) {
-                    // prev's bit 63 shifts into our bit (63-shift) when we shift right
-                    // So prev >> (64 - shift) gives us prev's high bits in our low positions
-                    result |= prev >> (64 - shift);
-                }
-            }
-
-            // Bits from next word's low bits shift into our high bits
-            if word_idx + 1 < words_per_row {
-                let next = input_words[row_start + word_idx + 1];
-                for shift in 1..=radius.min(63) {
-                    // next's bit 0 shifts into our bit 64 (which wraps), so
-                    // next << (64 - shift) gives us next's low bits in our high positions
-                    result |= next << (64 - shift);
-                }
-            }
-
-            // Mask off bits beyond width for the last word
-            if base_x < width && base_x + 64 > width {
-                let valid_bits = width - base_x;
-                if valid_bits < 64 {
-                    result &= (1u64 << valid_bits) - 1;
-                }
-            }
-
-            output_words[row_start + word_idx] = result;
-        }
-    });
-
-    // Vertical dilation pass: process words instead of individual columns
-    // This is more cache-friendly as we access consecutive memory
-    (0..words_per_row).into_par_iter().for_each(|word_idx| {
-        // SAFETY: Each thread accesses a disjoint word index across all rows
-        let output_words = unsafe {
-            std::slice::from_raw_parts_mut(output.words().as_ptr() as *mut u64, output.num_words())
-        };
-
-        // Store original values since we're reading and writing the same buffer
-        let original: Vec<u64> = (0..height)
-            .map(|y| output_words[y * words_per_row + word_idx])
-            .collect();
-
-        // For each row, OR together all words in [y-radius, y+radius]
-        for y in 0..height {
-            let y_min = y.saturating_sub(radius);
-            let y_max = (y + radius).min(height - 1);
-
-            let dilated = original[y_min..=y_max]
-                .iter()
-                .fold(0u64, |acc, &word| acc | word);
-
-            output_words[y * words_per_row + word_idx] = dilated;
-        }
-    });
 }
 
 /// Compute sigma-clipped median and MAD-based sigma.

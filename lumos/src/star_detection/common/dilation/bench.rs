@@ -1,4 +1,4 @@
-//! Benchmarks for common star detection utilities.
+//! Benchmarks for morphological dilation.
 
 use super::dilate_mask;
 use crate::common::BitBuffer2;
