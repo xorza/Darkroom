@@ -3,6 +3,8 @@
 //! This module centralizes mathematical and algorithmic constants used across
 //! the star detection pipeline to avoid magic numbers and ensure consistency.
 
+#[cfg(test)]
+mod bench;
 pub mod threshold_mask;
 
 use crate::common::BitBuffer2;
