@@ -57,6 +57,27 @@ pub fn is_sse4_available() -> bool {
 // Scalar fallback implementation
 // ============================================================================
 
+/// Resize vectors to n elements, reusing capacity when possible.
+/// This avoids allocation if capacity >= n.
+#[inline]
+fn resize_buffers(jacobian: &mut Vec<[f32; 5]>, residuals: &mut Vec<f32>, n: usize) {
+    // Clear and resize - Vec::resize only allocates if capacity < n
+    jacobian.clear();
+    residuals.clear();
+
+    // Use resize_with to avoid unnecessary zeroing when we'll overwrite anyway
+    if jacobian.capacity() >= n {
+        // SAFETY: We're about to fill all n elements
+        unsafe {
+            jacobian.set_len(n);
+            residuals.set_len(n);
+        }
+    } else {
+        jacobian.resize(n, [0.0; 5]);
+        residuals.resize(n, 0.0);
+    }
+}
+
 /// Scalar implementation of Jacobian/residual computation.
 #[inline]
 pub fn fill_jacobian_residuals_scalar(
@@ -69,10 +90,7 @@ pub fn fill_jacobian_residuals_scalar(
     residuals: &mut Vec<f32>,
 ) {
     let n = data_x.len();
-    jacobian.clear();
-    jacobian.resize(n, [0.0; 5]);
-    residuals.clear();
-    residuals.resize(n, 0.0);
+    resize_buffers(jacobian, residuals, n);
 
     let [x0, y0, amp, alpha, bg] = *params;
     let alpha2 = alpha * alpha;

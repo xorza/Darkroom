@@ -189,10 +189,18 @@ pub unsafe fn fill_jacobian_residuals_neon_fixed_beta(
     residuals: &mut Vec<f32>,
 ) {
     let n = data_x.len();
+
+    // Resize buffers, reusing capacity when possible
     jacobian.clear();
-    jacobian.resize(n, [0.0; 5]);
     residuals.clear();
-    residuals.resize(n, 0.0);
+    if jacobian.capacity() >= n {
+        // SAFETY: We're about to fill all n elements
+        jacobian.set_len(n);
+        residuals.set_len(n);
+    } else {
+        jacobian.resize(n, [0.0; 5]);
+        residuals.resize(n, 0.0);
+    }
 
     let simd_end = (n / 4) * 4;
 
