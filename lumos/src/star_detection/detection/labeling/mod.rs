@@ -6,6 +6,11 @@
 //! - Block-based parallel labeling with boundary merging
 //! - Lock-free union-find with atomic operations
 
+#[cfg(test)]
+mod bench;
+#[cfg(test)]
+mod tests;
+
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use crate::common::{BitBuffer2, Buffer2};

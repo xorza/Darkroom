@@ -169,31 +169,6 @@ fn bench_extract_candidates_6k_globular_cluster_multithreshold(b: ::bench::Bench
     });
 }
 
-// Benchmark LabelMap::from_mask separately to understand the breakdown
-#[quick_bench(warmup_iters = 2, iters = 5)]
-fn bench_label_map_from_mask_1k(b: ::bench::Bencher) {
-    let pixels = benchmark_star_field(1024, 1024, 500, 0.1, 0.01, 42);
-    let mask = create_detection_mask(&pixels, 4.0);
-
-    b.bench(|| black_box(LabelMap::from_mask(black_box(&mask))));
-}
-
-#[quick_bench(warmup_iters = 1, iters = 3)]
-fn bench_label_map_from_mask_4k(b: ::bench::Bencher) {
-    let pixels = benchmark_star_field(4096, 4096, 2000, 0.1, 0.01, 42);
-    let mask = create_detection_mask(&pixels, 4.0);
-
-    b.bench(|| black_box(LabelMap::from_mask(black_box(&mask))));
-}
-
-#[quick_bench(warmup_iters = 1, iters = 10)]
-fn bench_label_map_from_mask_6k_globular(b: ::bench::Bencher) {
-    let pixels = benchmark_star_field(4096, 4096, 50000, 0.1, 0.01, 42);
-    let mask = create_detection_mask(&pixels, 4.0);
-
-    b.bench(|| black_box(LabelMap::from_mask(black_box(&mask))));
-}
-
 #[quick_bench(warmup_iters = 1, iters = 10)]
 fn bench_detect_stars_6k_50000(b: ::bench::Bencher) {
     init_tracing();

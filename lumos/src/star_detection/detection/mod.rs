@@ -2,7 +2,7 @@
 
 #[cfg(test)]
 mod bench;
-mod labels;
+mod labeling;
 #[cfg(test)]
 mod tests;
 
@@ -16,7 +16,7 @@ use super::deblend::{
 use crate::common::{BitBuffer2, Buffer2};
 use crate::math::{Aabb, Vec2us};
 
-pub use labels::LabelMap;
+pub use labeling::LabelMap;
 
 // Re-export DetectionConfig from config module
 pub use super::config::DetectionConfig;
