@@ -217,8 +217,6 @@ pub fn compute_centroid(
     // Compute quality metrics
     let metrics = compute_metrics(
         pixels,
-        width,
-        height,
         background,
         cx,
         cy,
@@ -334,9 +332,7 @@ pub(crate) struct StarMetrics {
 /// `SNR = flux / (σ_sky × sqrt(npix))`
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn compute_metrics(
-    pixels: &[f32],
-    width: usize,
-    height: usize,
+    pixels: &Buffer2<f32>,
     background: &BackgroundMap,
     cx: f32,
     cy: f32,
@@ -344,6 +340,9 @@ pub(crate) fn compute_metrics(
     gain: Option<f32>,
     read_noise: Option<f32>,
 ) -> Option<StarMetrics> {
+    let width = pixels.width();
+    let height = pixels.height();
+
     if !is_valid_stamp_position(cx, cy, width, height, stamp_radius) {
         return None;
     }
