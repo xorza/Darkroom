@@ -1,7 +1,7 @@
 name: bench_extract_candidates_6k_dense
-mean: 72.825777ms
-min: 69.355667ms
-max: 110.446834ms
-median: 71.798292ms
-iterations: 430
-vs_previous: 76.860542ms -> 71.798292ms (-6.6%) faster
+mean: 206.33391ms
+min: 198.71275ms
+max: 213.171583ms
+median: 206.461667ms
+iterations: 50
+vs_previous: 208.735ms -> 206.461667ms (-1.1%) same

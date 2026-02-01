@@ -124,7 +124,7 @@ fn bench_extract_candidates_4k_dense_multithreshold(b: ::bench::Bencher) {
     });
 }
 
-#[quick_bench(warmup_iters = 3, iters = 430)]
+#[quick_bench(warmup_iters = 3, iters = 50)]
 fn bench_extract_candidates_6k_dense(b: ::bench::Bencher) {
     init_tracing();
 
