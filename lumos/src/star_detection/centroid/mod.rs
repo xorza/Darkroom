@@ -86,9 +86,10 @@ pub(crate) fn extract_stamp(
     let icx = cx.round() as isize;
     let icy = cy.round() as isize;
     let stamp_radius_i32 = stamp_radius as i32;
-    let mut data_x = Vec::new();
-    let mut data_y = Vec::new();
-    let mut data_z = Vec::new();
+    let stamp_size = (2 * stamp_radius + 1) * (2 * stamp_radius + 1);
+    let mut data_x = Vec::with_capacity(stamp_size);
+    let mut data_y = Vec::with_capacity(stamp_size);
+    let mut data_z = Vec::with_capacity(stamp_size);
     let mut peak_value = f32::MIN;
 
     for dy in -stamp_radius_i32..=stamp_radius_i32 {
