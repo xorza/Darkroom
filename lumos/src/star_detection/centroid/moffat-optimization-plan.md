@@ -5,21 +5,107 @@
 | Priority | Description | Status | Result |
 |----------|-------------|--------|--------|
 | P1 | Improved damping strategy | ❌ Reverted | Made performance worse (+54% slower) |
-| P7 | Cached power computations | ✅ Done | **16% speedup** (728ms → 610ms) |
+| P2 | Geodesic acceleration | ⏳ Pending | Medium effort, high impact |
+| P3 | Elliptical Moffat support | ⏳ Pending | Feature addition, not perf |
+| P4 | SIMD vectorization | ✅ Done | **73% speedup** (620ms → 155ms) |
+| P5 | Improved initial guess | ⏳ Pending | Low effort, low impact |
+| P6 | Parallel batch processing | ⏳ Pending | Check if already done at detector level |
+| P7 | Cached power computations | ✅ Done | **15% speedup** (728ms → 620ms) |
 
 ### Benchmark Results (6K image, 10000 stars)
 
-| Method | Baseline | After P7 | Improvement |
-|--------|----------|----------|-------------|
-| weighted_moments | 29.8ms | 30.2ms | — |
-| gaussian_fit | 207.1ms | 213.4ms | — |
-| **moffat_fit** | **728.2ms** | **620.3ms** | **-14.8%** |
+| Method | Baseline | After P7 | After P4 (SIMD) | Total Improvement |
+|--------|----------|----------|-----------------|-------------------|
+| weighted_moments | 29.8ms | 30.2ms | 30.2ms | — |
+| gaussian_fit | 207.1ms | 213.4ms | 219.2ms | — |
+| **moffat_fit** | **728.2ms** | **620.3ms** | **155.0ms** | **-78.7%** |
+
+---
+
+## Completed Optimizations
+
+### P4: SIMD Vectorization ✅ (73% speedup)
+
+Implemented AVX2 SIMD for Moffat fixed-beta optimization:
+
+**Architecture**:
+- `moffat_fit/simd/mod.rs` - Module exports and AVX2 detection
+- `moffat_fit/simd/avx2.rs` - AVX2 SIMD implementations
+- `moffat_fit/mod.rs` - SIMD-optimized L-M optimizer with fallback
+
+**Key functions**:
+- `compute_jacobian_residuals_8_fixed_beta()` - Processes 8 pixels in parallel
+- `compute_chi2_8_fixed_beta()` - Computes chi² for 8 pixels
+- `fill_jacobian_residuals_simd_fixed_beta()` - Wrapper with scalar fallback
+- `compute_chi2_simd_fixed_beta()` - Wrapper with scalar fallback
+
+**Approach**: Hybrid scalar+SIMD
+- Uses **scalar `powf()`** for accuracy (L-M needs accurate gradients)
+- Uses **SIMD (AVX2) for all other arithmetic** (dx, dy, r², divisions, multiplications)
+- This gives accuracy of scalar with most of the SIMD benefit
+
+**Convergence fix**: Added chi² stagnation detection for numerical precision limits:
+```rust
+// Check if chi2 is essentially the same (numerical precision limit)
+let chi2_rel_diff = (new_chi2 - prev_chi2) / prev_chi2.max(1e-30);
+if chi2_rel_diff < 1e-6 {
+    converged = true;
+    break;
+}
+```
+
+### P7: Cached Power Computations ✅ (15% speedup)
+
+Optimized Jacobian to compute `powf()` once and derive related values:
+
+```rust
+// Before: 2 expensive powf() calls
+let u_neg_beta = u.powf(-self.beta);
+let u_neg_beta_m1 = u.powf(-self.beta - 1.0);
+
+// After: 1 powf() + 1 division
+let u_neg_beta = u.powf(-self.beta);
+let u_neg_beta_m1 = u_neg_beta / u;
+```
+
+For variable beta, use `ln()` + `exp()`:
+```rust
+let ln_u = u.ln();
+let u_neg_beta = (-beta * ln_u).exp();
+let u_neg_beta_m1 = u_neg_beta / u;
+```
+
+### P1: Delayed Gratification ❌ (Reverted)
+
+Tested `lambda_up=2.0, lambda_down=0.33` but it caused 54% slower performance.
+The algorithm took more iterations to escape bad regions with smaller lambda increases.
+Original values (`lambda_up=10.0, lambda_down=0.1`) work better for this use case.
+
+---
+
+## Recommended Next Steps
+
+### 1. **P6: Parallel Batch Processing** (Recommended Next)
+- **Why**: Embarrassingly parallel, each star is independent
+- **Effort**: Low - just add rayon
+- **Expected**: Linear scaling with cores (8x on 8-core CPU)
+- **Note**: First verify this isn't already done at detector level
+
+### 2. **P2: Geodesic Acceleration** (Research needed)
+- **Why**: Can reduce iterations by 2-5x for difficult cases
+- **Effort**: Medium - requires second derivatives
+- **Risk**: May not help much if current convergence is already fast
+
+### 3. **Apply SIMD to Gaussian fitting**
+- **Why**: Same approach should work for Gaussian fitting
+- **Effort**: Low - copy SIMD pattern from Moffat
+- **Expected**: Similar speedup (~3-4x)
 
 ---
 
 ## Current Implementation Review
 
-The current `moffat_fit.rs` implements 2D Moffat profile fitting using Levenberg-Marquardt optimization with the following features:
+The current `moffat_fit/` module implements 2D Moffat profile fitting using Levenberg-Marquardt optimization with the following features:
 
 ### Strengths
 1. **Analytical Jacobians**: Correctly implements analytical derivatives for all parameters
@@ -28,13 +114,15 @@ The current `moffat_fit.rs` implements 2D Moffat profile fitting using Levenberg
 4. **Buffer reuse**: L-M optimizer reuses jacobian/residual buffers across iterations
 5. **Stack allocation**: Uses ArrayVec for stamp data extraction (no heap allocation)
 6. **Parameter constraints**: Applies bounds to amplitude, alpha, and beta
+7. **Cached power computations**: Single `powf()` call per pixel in Jacobian
+8. **SIMD vectorization**: AVX2 SIMD for fixed-beta fitting (73% speedup)
+9. **Numerical convergence detection**: Handles floating-point precision limits
 
-### Current Limitations
+### Remaining Limitations
 1. **Circular PSF only**: No support for elliptical Moffat (rotation, axis ratio)
-2. **Single-threaded**: No SIMD vectorization or parallel processing
-3. **Fixed damping strategy**: Uses simple lambda up/down factors
+2. **Single-threaded batch**: No parallel processing of multiple stars
+3. **Variable beta not SIMD**: Only fixed-beta mode uses SIMD optimization
 4. **No geodesic acceleration**: Missing second-order convergence improvements
-5. **Limited initial guess**: Relies on moment-based sigma estimation
 
 ---
 
@@ -59,47 +147,12 @@ From [Astropy Moffat2D](https://docs.astropy.org/en/stable/api/astropy.modeling.
 
 From [Wikipedia L-M](https://en.wikipedia.org/wiki/Levenberg%E2%80%93Marquardt_algorithm) and [arXiv:1201.5885](https://arxiv.org/pdf/1201.5885):
 - **Geodesic acceleration**: Second-order correction for faster convergence in narrow canyons
-- **Delayed gratification**: Increase lambda slowly (×1.5-2), decrease quickly (×3-5)
+- **Delayed gratification**: Increase lambda slowly (×1.5-2), decrease quickly (×3-5) — *did not help in our case*
 - **Adaptive damping**: Better convergence for highly coupled parameters
 
-### Elliptical PSF Support
-
-From [AsPyLib](http://www.aspylib.com/doc/aspylib_fitting.html) and [PampelMuse](https://pampelmuse.readthedocs.io/en/latest/psf.html):
-- Elliptical Moffat requires 2 additional parameters: ellipticity (e) and position angle (θ)
-- Off-axis optical aberrations make star shapes more elliptical
-- Standard 8-parameter elliptical Moffat: x₀, y₀, amplitude, alpha, beta, background, ellipticity, theta
-
-### Initial Guess Strategies
-
-From [Stetson photometry guide](https://ned.ipac.caltech.edu/level5/Stetson/Stetson2_2_1.html):
-- Initial guesses don't need to be optimal, just "vaguely all right"
-- Peak value for amplitude, measured FWHM for alpha
-- For variable beta, start with typical value (2.5-3.0)
-
 ---
 
-## Optimization Priorities
-
-### Priority 1: Improved Damping Strategy (Medium Impact, Low Effort)
-
-**Problem**: Current fixed lambda_up=10, lambda_down=0.1 may be suboptimal.
-
-**Solution**: Implement delayed gratification strategy.
-
-```rust
-// Current
-lambda_up: 10.0,
-lambda_down: 0.1,
-
-// Improved (delayed gratification)
-lambda_up: 2.0,    // Increase slowly
-lambda_down: 0.33, // Decrease by factor of 3
-```
-
-**References**:
-- [ResearchGate: Damping-undamping Strategies](https://www.researchgate.net/publication/242548995_Damping-undamping_Strategies_for_the_Levenberg-Marquardt_Nonlinear_Least_Squares_Method)
-
----
+## Pending Optimizations Detail
 
 ### Priority 2: Geodesic Acceleration (High Impact, Medium Effort)
 
@@ -124,7 +177,7 @@ delta_improved = delta + 0.5 * accel
 
 ---
 
-### Priority 3: Elliptical Moffat Support (High Impact, Medium Effort)
+### Priority 3: Elliptical Moffat Support (Feature, Medium Effort)
 
 **Problem**: Real PSFs are often elliptical due to tracking errors, field rotation, or optics.
 
@@ -157,75 +210,6 @@ impl LMModel<8> for MoffatElliptical {
 }
 ```
 
-**References**:
-- [AsPyLib elliptical Moffat](http://www.aspylib.com/doc/aspylib_fitting.html)
-- [PampelMuse PSF documentation](https://pampelmuse.readthedocs.io/en/latest/psf.html)
-
----
-
-### Priority 4: SIMD Vectorization of Jacobian (Medium Impact, Medium Effort)
-
-**Problem**: Jacobian computation iterates over all stamp pixels serially.
-
-**Solution**: Vectorize the inner loop using SIMD.
-
-```rust
-#[cfg(target_arch = "x86_64")]
-use std::arch::x86_64::*;
-
-fn fill_jacobian_simd(
-    data_x: &[f32],
-    data_y: &[f32],
-    params: &[f32; 5],
-    jacobian: &mut [[f32; 5]],
-) {
-    // Process 8 pixels at a time with AVX2
-    let chunks = data_x.len() / 8;
-    for i in 0..chunks {
-        // Load 8 x,y coordinates
-        let x = _mm256_loadu_ps(&data_x[i * 8]);
-        let y = _mm256_loadu_ps(&data_y[i * 8]);
-        
-        // Compute dx, dy, r2, u, etc. in parallel
-        // ...
-    }
-}
-```
-
-**Expected improvement**: 4-8x speedup for Jacobian computation.
-
----
-
-### Priority 5: Improved Initial Guess (Low Impact, Low Effort)
-
-**Problem**: Moment-based sigma estimation may be poor for Moffat profiles.
-
-**Solution**: Use 1D radial profile fitting for initial alpha/beta.
-
-```rust
-fn estimate_moffat_params_radial(
-    data_x: &[f32],
-    data_y: &[f32],
-    data_z: &[f32],
-    cx: f32,
-    cy: f32,
-    background: f32,
-) -> (f32, f32) {
-    // Compute radial distances and values
-    let mut radial: Vec<(f32, f32)> = data_x.iter()
-        .zip(data_y.iter())
-        .zip(data_z.iter())
-        .map(|((&x, &y), &z)| {
-            let r = ((x - cx).powi(2) + (y - cy).powi(2)).sqrt();
-            (r, (z - background).max(0.0))
-        })
-        .collect();
-    
-    // Fit 1D Moffat to radial profile
-    // ...
-}
-```
-
 ---
 
 ### Priority 6: Parallel Batch Processing (High Impact, Low Effort)
@@ -250,81 +234,7 @@ pub fn compute_centroids_parallel(
 }
 ```
 
-**Note**: Already may be implemented at detector level; verify before adding.
-
----
-
-### Priority 7: Cached Power Computations (Low Impact, Low Effort)
-
-**Problem**: `powf()` is expensive, called multiple times with same base.
-
-**Solution**: Cache intermediate power values.
-
-```rust
-fn jacobian_row(&self, x: f32, y: f32, params: &[f32; 5]) -> [f32; 5] {
-    let [x0, y0, amp, alpha, _bg] = *params;
-    let alpha2 = alpha * alpha;
-    let dx = x - x0;
-    let dy = y - y0;
-    let r2 = dx * dx + dy * dy;
-    let u = 1.0 + r2 / alpha2;
-    
-    // Cache: compute ln(u) once, use for both powers
-    let ln_u = u.ln();
-    let u_neg_beta = (-self.beta * ln_u).exp();  // u^(-beta) = exp(-beta * ln(u))
-    let u_neg_beta_m1 = u_neg_beta / u;          // u^(-beta-1) = u^(-beta) / u
-    
-    // ... rest of jacobian
-}
-```
-
----
-
-## Implementation Order
-
-| Phase | Priority | Description | Effort | Impact |
-|-------|----------|-------------|--------|--------|
-| 1 | P1 | Improved damping strategy | Low | Medium |
-| 2 | P5 | Improved initial guess | Low | Low |
-| 3 | P7 | Cached power computations | Low | Low |
-| 4 | P2 | Geodesic acceleration | Medium | High |
-| 5 | P3 | Elliptical Moffat support | Medium | High |
-| 6 | P4 | SIMD vectorization | Medium | Medium |
-| 7 | P6 | Parallel batch processing | Low | High |
-
----
-
-## Benchmarking Strategy
-
-Before and after each optimization:
-
-```rust
-#[quick_bench(warmup_iters = 10, iters = 100)]
-fn bench_moffat_fit_single(b: ::bench::Bencher) {
-    // Single Moffat fit timing
-}
-
-#[quick_bench(warmup_iters = 2, iters = 10)]
-fn bench_moffat_fit_batch_1000(b: ::bench::Bencher) {
-    // 1000 stars batch timing
-}
-
-#[quick_bench(warmup_iters = 5, iters = 50)]
-fn bench_moffat_convergence_iterations(b: ::bench::Bencher) {
-    // Measure average iterations to convergence
-}
-```
-
----
-
-## Expected Results
-
-| Optimization | Current | Expected | Speedup |
-|--------------|---------|----------|---------|
-| Single Moffat fit | ~90µs | ~45µs | 2x |
-| Batch 1000 (serial) | ~90ms | ~45ms | 2x |
-| Batch 1000 (parallel, 8 cores) | ~90ms | ~8ms | 11x |
-| Iterations to converge | ~20 | ~10 | 2x |
+**Note**: Check if already implemented at detector level before adding.
 
 ---
 

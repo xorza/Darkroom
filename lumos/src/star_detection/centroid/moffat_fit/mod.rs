@@ -12,6 +12,11 @@
 
 #![allow(dead_code)]
 
+pub(crate) mod simd;
+#[cfg(test)]
+mod tests;
+
+use super::linear_solver::solve_5x5;
 use super::lm_optimizer::{
     LMConfig, LMModel, optimize_5, optimize_5_weighted, optimize_6, optimize_6_weighted,
 };
@@ -67,9 +72,9 @@ pub struct MoffatFitResult {
 
 /// Moffat model with fixed beta (5 parameters).
 /// Parameters: [x0, y0, amplitude, alpha, background]
-struct MoffatFixedBeta {
-    beta: f32,
-    stamp_radius: f32,
+pub(crate) struct MoffatFixedBeta {
+    pub beta: f32,
+    pub stamp_radius: f32,
 }
 
 impl LMModel<5> for MoffatFixedBeta {
@@ -111,8 +116,8 @@ impl LMModel<5> for MoffatFixedBeta {
 
 /// Moffat model with variable beta (6 parameters).
 /// Parameters: [x0, y0, amplitude, alpha, beta, background]
-struct MoffatVariableBeta {
-    stamp_radius: f32,
+pub(crate) struct MoffatVariableBeta {
+    pub stamp_radius: f32,
 }
 
 impl LMModel<6> for MoffatVariableBeta {
@@ -295,12 +300,17 @@ fn fit_with_fixed_beta(
     config: &MoffatFitConfig,
 ) -> Option<MoffatFitResult> {
     let initial_params = [cx, cy, initial_amplitude, initial_alpha, background];
-    let model = MoffatFixedBeta {
-        beta: config.fixed_beta,
-        stamp_radius: stamp_radius as f32,
-    };
 
-    let result = optimize_5(&model, data_x, data_y, data_z, initial_params, &config.lm);
+    // Use SIMD-optimized optimizer when available
+    let result = optimize_moffat_fixed_beta_simd(
+        data_x,
+        data_y,
+        data_z,
+        initial_params,
+        config.fixed_beta,
+        stamp_radius as f32,
+        &config.lm,
+    );
 
     let [x0, y0, amplitude, alpha, bg] = result.params;
 
@@ -514,146 +524,158 @@ pub fn fwhm_beta_to_alpha(fwhm: f32, beta: f32) -> f32 {
     fwhm / (2.0 * (2.0f32.powf(1.0 / beta) - 1.0).sqrt())
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+/// SIMD-optimized L-M optimizer for Moffat with fixed beta.
+///
+/// Uses AVX2 SIMD when available for faster Jacobian/residual computation.
+/// Falls back to scalar code when AVX2 is not available.
+pub(crate) fn optimize_moffat_fixed_beta_simd(
+    data_x: &[f32],
+    data_y: &[f32],
+    data_z: &[f32],
+    initial_params: [f32; 5],
+    beta: f32,
+    stamp_radius: f32,
+    config: &LMConfig,
+) -> super::lm_optimizer::LMResult<5> {
+    #[cfg(target_arch = "x86_64")]
+    if simd::is_avx2_available() {
+        // SAFETY: We checked that AVX2 is available
+        return unsafe {
+            optimize_moffat_fixed_beta_avx2(
+                data_x,
+                data_y,
+                data_z,
+                initial_params,
+                beta,
+                stamp_radius,
+                config,
+            )
+        };
+    }
 
-    #[allow(clippy::too_many_arguments)]
-    fn make_moffat_stamp(
-        width: usize,
-        height: usize,
-        cx: f32,
-        cy: f32,
-        amplitude: f32,
-        alpha: f32,
-        beta: f32,
-        background: f32,
-    ) -> Vec<f32> {
-        let mut pixels = vec![background; width * height];
-        for y in 0..height {
-            for x in 0..width {
-                let r2 = (x as f32 - cx).powi(2) + (y as f32 - cy).powi(2);
-                let value = amplitude * (1.0 + r2 / (alpha * alpha)).powf(-beta);
-                pixels[y * width + x] += value;
+    // Fallback to generic optimizer
+    let model = MoffatFixedBeta { beta, stamp_radius };
+    optimize_5(&model, data_x, data_y, data_z, initial_params, config)
+}
+
+/// AVX2-accelerated L-M optimization for Moffat with fixed beta.
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2", enable = "fma")]
+#[allow(unsafe_op_in_unsafe_fn)]
+unsafe fn optimize_moffat_fixed_beta_avx2(
+    data_x: &[f32],
+    data_y: &[f32],
+    data_z: &[f32],
+    initial_params: [f32; 5],
+    beta: f32,
+    stamp_radius: f32,
+    config: &LMConfig,
+) -> super::lm_optimizer::LMResult<5> {
+    let mut params = initial_params;
+    let mut lambda = config.initial_lambda;
+    let mut prev_chi2 = simd::compute_chi2_simd_fixed_beta(data_x, data_y, data_z, &params, beta);
+    let mut converged = false;
+    let mut iterations = 0;
+
+    // Pre-allocate buffers
+    let n = data_x.len();
+    let mut jacobian = Vec::with_capacity(n);
+    let mut residuals = Vec::with_capacity(n);
+
+    for iter in 0..config.max_iterations {
+        iterations = iter + 1;
+
+        // Use SIMD to fill Jacobian and residuals
+        simd::fill_jacobian_residuals_simd_fixed_beta(
+            data_x,
+            data_y,
+            data_z,
+            &params,
+            beta,
+            &mut jacobian,
+            &mut residuals,
+        );
+
+        let (hessian, gradient) = compute_hessian_gradient_5(&jacobian, &residuals);
+
+        let mut damped_hessian = hessian;
+        for (i, row) in damped_hessian.iter_mut().enumerate() {
+            row[i] *= 1.0 + lambda;
+        }
+
+        let Some(delta) = solve_5x5(&damped_hessian, &gradient) else {
+            break;
+        };
+
+        let mut new_params = params;
+        for (p, d) in new_params.iter_mut().zip(delta.iter()) {
+            *p += d;
+        }
+        constrain_moffat_params(&mut new_params, stamp_radius);
+
+        let new_chi2 =
+            simd::compute_chi2_simd_fixed_beta(data_x, data_y, data_z, &new_params, beta);
+
+        if new_chi2 < prev_chi2 {
+            params = new_params;
+            lambda *= config.lambda_down;
+
+            // Check for chi2 stagnation (converged to machine precision)
+            let chi2_rel_change = (prev_chi2 - new_chi2) / prev_chi2.max(1e-30);
+            prev_chi2 = new_chi2;
+
+            let max_delta = delta.iter().copied().fold(0.0f32, |a, d| a.max(d.abs()));
+            if max_delta < config.convergence_threshold || chi2_rel_change < 1e-6 {
+                converged = true;
+                break;
+            }
+        } else {
+            // Check if chi2 is essentially the same (numerical precision limit)
+            let chi2_rel_diff = (new_chi2 - prev_chi2) / prev_chi2.max(1e-30);
+            if chi2_rel_diff < 1e-6 {
+                // Converged to numerical precision
+                converged = true;
+                break;
+            }
+
+            lambda *= config.lambda_up;
+            if lambda > 1e10 {
+                break;
             }
         }
-        pixels
     }
 
-    #[test]
-    fn test_moffat_fit_centered_fixed_beta() {
-        let width = 21;
-        let height = 21;
-        let true_cx = 10.0;
-        let true_cy = 10.0;
-        let true_amp = 1.0;
-        let true_alpha = 2.5;
-        let true_beta = 2.5;
-        let true_bg = 0.1;
+    super::lm_optimizer::LMResult {
+        params,
+        chi2: prev_chi2,
+        converged,
+        iterations,
+    }
+}
 
-        let pixels = make_moffat_stamp(
-            width, height, true_cx, true_cy, true_amp, true_alpha, true_beta, true_bg,
-        );
-        let pixels_buf = Buffer2::new(width, height, pixels);
+/// Apply Moffat parameter constraints.
+#[inline]
+fn constrain_moffat_params(params: &mut [f32; 5], stamp_radius: f32) {
+    params[2] = params[2].max(0.01); // Amplitude > 0
+    params[3] = params[3].clamp(0.5, stamp_radius); // Alpha
+}
 
-        let config = MoffatFitConfig {
-            fit_beta: false,
-            fixed_beta: true_beta,
-            ..Default::default()
-        };
-        let result = fit_moffat_2d(&pixels_buf, 10.0, 10.0, 8, true_bg, &config);
+/// Compute Hessian (J^T J) and gradient (J^T r) for 5-parameter model.
+fn compute_hessian_gradient_5(
+    jacobian: &[[f32; 5]],
+    residuals: &[f32],
+) -> ([[f32; 5]; 5], [f32; 5]) {
+    let mut hessian = [[0.0f32; 5]; 5];
+    let mut gradient = [0.0f32; 5];
 
-        assert!(result.is_some());
-        let result = result.unwrap();
-        assert!(result.converged);
-        assert!((result.x - true_cx).abs() < 0.1);
-        assert!((result.y - true_cy).abs() < 0.1);
-        assert!((result.alpha - true_alpha).abs() < 0.3);
+    for (row, &r) in jacobian.iter().zip(residuals.iter()) {
+        for i in 0..5 {
+            gradient[i] += row[i] * r;
+            for j in 0..5 {
+                hessian[i][j] += row[i] * row[j];
+            }
+        }
     }
 
-    #[test]
-    fn test_moffat_fit_subpixel_offset() {
-        let width = 21;
-        let height = 21;
-        let true_cx = 10.3;
-        let true_cy = 10.7;
-        let true_amp = 1.0;
-        let true_alpha = 2.5;
-        let true_beta = 2.5;
-        let true_bg = 0.1;
-
-        let pixels = make_moffat_stamp(
-            width, height, true_cx, true_cy, true_amp, true_alpha, true_beta, true_bg,
-        );
-        let pixels_buf = Buffer2::new(width, height, pixels);
-
-        let config = MoffatFitConfig {
-            fit_beta: false,
-            fixed_beta: true_beta,
-            ..Default::default()
-        };
-        let result = fit_moffat_2d(&pixels_buf, 10.0, 10.0, 8, true_bg, &config);
-
-        assert!(result.is_some());
-        let result = result.unwrap();
-        assert!(result.converged);
-        assert!((result.x - true_cx).abs() < 0.05);
-        assert!((result.y - true_cy).abs() < 0.05);
-    }
-
-    #[test]
-    fn test_moffat_fit_with_beta() {
-        let width = 21;
-        let height = 21;
-        let true_cx = 10.0;
-        let true_cy = 10.0;
-        let true_amp = 1.0;
-        let true_alpha = 2.5;
-        let true_beta = 3.5;
-        let true_bg = 0.1;
-
-        let pixels = make_moffat_stamp(
-            width, height, true_cx, true_cy, true_amp, true_alpha, true_beta, true_bg,
-        );
-        let pixels_buf = Buffer2::new(width, height, pixels);
-
-        let config = MoffatFitConfig {
-            fit_beta: true,
-            fixed_beta: 3.0,
-            lm: LMConfig {
-                max_iterations: 100,
-                ..Default::default()
-            },
-        };
-        let result = fit_moffat_2d(&pixels_buf, 10.0, 10.0, 8, true_bg, &config);
-
-        assert!(result.is_some());
-        let result = result.unwrap();
-        assert!(result.converged);
-        assert!((result.x - true_cx).abs() < 0.1);
-        assert!((result.y - true_cy).abs() < 0.1);
-        assert!((result.beta - true_beta).abs() < 0.5);
-    }
-
-    #[test]
-    fn test_alpha_beta_fwhm_conversion() {
-        let alpha = 2.0;
-        let beta = 2.5;
-        let fwhm = alpha_beta_to_fwhm(alpha, beta);
-        let alpha_back = fwhm_beta_to_alpha(fwhm, beta);
-        assert!((alpha_back - alpha).abs() < 1e-6);
-        assert!((fwhm - 2.26).abs() < 0.1);
-    }
-
-    #[test]
-    fn test_moffat_fit_edge_position() {
-        let width = 21;
-        let height = 21;
-        let pixels = vec![0.1f32; width * height];
-        let pixels_buf = Buffer2::new(width, height, pixels);
-
-        let config = MoffatFitConfig::default();
-        let result = fit_moffat_2d(&pixels_buf, 2.0, 10.0, 8, 0.1, &config);
-        assert!(result.is_none());
-    }
+    (hessian, gradient)
 }
