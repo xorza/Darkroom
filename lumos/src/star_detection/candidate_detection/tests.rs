@@ -1478,7 +1478,7 @@ mod sigma_threshold_tests {
 
 mod dilation_tests {
     use super::*;
-    use crate::star_detection::common::dilate_mask;
+    use crate::star_detection::mask_dilation::dilate_mask;
 
     #[test]
     fn connects_nearby_pixels() {

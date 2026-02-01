@@ -3,7 +3,8 @@
 use super::LabelMap;
 use crate::common::BitBuffer2;
 use crate::star_detection::background::{BackgroundConfig, BackgroundMap};
-use crate::star_detection::common::{dilate_mask, threshold_mask::create_threshold_mask};
+use crate::star_detection::mask_dilation::dilate_mask;
+use crate::star_detection::threshold_mask::create_threshold_mask;
 use crate::testing::synthetic::stamps::benchmark_star_field;
 use ::bench::quick_bench;
 use std::hint::black_box;

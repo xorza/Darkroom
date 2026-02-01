@@ -3,8 +3,9 @@
 use super::{LabelMap, detect_stars, extract_candidates};
 use crate::common::{BitBuffer2, Buffer2};
 use crate::star_detection::background::{BackgroundConfig, BackgroundMap};
-use crate::star_detection::common::{dilate_mask, threshold_mask::create_threshold_mask};
 use crate::star_detection::config::{DeblendConfig, StarDetectionConfig};
+use crate::star_detection::mask_dilation::dilate_mask;
+use crate::star_detection::threshold_mask::create_threshold_mask;
 use crate::testing::init_tracing;
 use crate::testing::synthetic::stamps::benchmark_star_field;
 use ::bench::quick_bench;

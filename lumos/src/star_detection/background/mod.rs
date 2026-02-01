@@ -254,7 +254,7 @@ fn create_object_mask(
     scratch: &mut BitBuffer2,
 ) {
     // Create threshold mask using packed SIMD-optimized implementation
-    super::common::threshold_mask::create_threshold_mask(
+    super::threshold_mask::create_threshold_mask(
         pixels,
         &background.background,
         &background.noise,
@@ -264,7 +264,7 @@ fn create_object_mask(
 
     // Dilate mask to cover object wings
     if dilation_radius > 0 {
-        super::common::dilate_mask(output, dilation_radius, scratch);
+        super::mask_dilation::dilate_mask(output, dilation_radius, scratch);
         std::mem::swap(output, scratch);
     }
 }

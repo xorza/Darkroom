@@ -3,11 +3,6 @@
 //! This module centralizes mathematical and algorithmic constants used across
 //! the star detection pipeline to avoid magic numbers and ensure consistency.
 
-mod dilation;
-pub mod threshold_mask;
-
-pub use dilation::dilate_mask;
-
 use crate::math::mad_to_sigma;
 
 /// Stamp radius as a multiple of FWHM.

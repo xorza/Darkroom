@@ -36,8 +36,10 @@ mod deblend;
 mod defect_map;
 mod fwhm_estimation;
 pub mod gpu;
+mod mask_dilation;
 mod median_filter;
 mod star;
+pub(crate) mod threshold_mask;
 
 #[cfg(test)]
 pub mod tests;

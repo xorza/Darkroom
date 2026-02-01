@@ -7,13 +7,13 @@ mod labeling;
 mod tests;
 
 use super::background::BackgroundMap;
-use super::common::dilate_mask;
-use super::common::threshold_mask::{
-    create_adaptive_threshold_mask, create_threshold_mask, create_threshold_mask_filtered,
-};
 use super::config::{DeblendConfig, StarDetectionConfig};
 use super::deblend::{
     ComponentData, DeblendedCandidate, deblend_local_maxima, deblend_multi_threshold,
+};
+use super::mask_dilation::dilate_mask;
+use super::threshold_mask::{
+    create_adaptive_threshold_mask, create_threshold_mask, create_threshold_mask_filtered,
 };
 use crate::common::{BitBuffer2, Buffer2};
 use crate::math::{Aabb, Vec2us};
