@@ -1,7 +1,7 @@
 name: bench_dilate_mask_6k
-mean: 1.944514ms
-min: 1.753334ms
-max: 4.739167ms
-median: 1.834333ms
-iterations: 40
-vs_previous: 2.31694ms -> 1.944514ms (-16.1%) faster
+mean: 1.808835ms
+min: 1.726666ms
+max: 2.165417ms
+median: 1.794333ms
+iterations: 200
+vs_previous: 1.944514ms -> 1.808835ms (-7.0%) faster
