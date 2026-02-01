@@ -12,6 +12,8 @@
 
 #![allow(dead_code)]
 
+#[cfg(test)]
+mod bench;
 pub(crate) mod simd;
 #[cfg(test)]
 mod tests;
