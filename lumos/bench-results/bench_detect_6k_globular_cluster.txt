@@ -1,7 +1,7 @@
 name: bench_detect_6k_globular_cluster
-mean: 1.219166195s
-min: 1.190035916s
-max: 1.365896833s
-median: 1.2045175s
+mean: 776.283891ms
+min: 742.195375ms
+max: 847.622083ms
+median: 769.134167ms
 iterations: 10
-vs_previous: 1.178963018s -> 1.219166195s (+3.4%) same
+vs_previous: 1.219166195s -> 776.283891ms (-36.3%) faster
