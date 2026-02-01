@@ -51,13 +51,23 @@ With both optimizations, any sequence of m operations on n elements runs in O(m 
 - **4-connectivity** (default): Runs must share at least one x coordinate to be connected
 - **8-connectivity**: Runs can be diagonally adjacent (useful for undersampled PSFs)
 
-The overlap check differs by connectivity:
+The `Run` struct encapsulates connectivity-specific search window calculation:
 ```rust
-// 4-connectivity: runs overlap if they share any x coordinate
-prev.start < curr.end && prev.end > curr.start
+impl Run {
+    fn search_window(&self, connectivity: Connectivity) -> (u16, u16) {
+        match connectivity {
+            Connectivity::Four => (self.start, self.end),
+            Connectivity::Eight => (self.start.saturating_sub(1), self.end + 1),
+        }
+    }
+}
 
-// 8-connectivity: runs overlap if they touch (including diagonally)
-prev.start < curr.end + 1 && prev.end + 1 > curr.start
+fn runs_connected(prev: &Run, curr: &Run, connectivity: Connectivity) -> bool {
+    match connectivity {
+        Connectivity::Four => prev.start < curr.end && prev.end > curr.start,
+        Connectivity::Eight => prev.start < curr.end + 1 && prev.end + 1 > curr.start,
+    }
+}
 ```
 
 ### Parallel Processing
@@ -65,24 +75,36 @@ prev.start < curr.end + 1 && prev.end + 1 > curr.start
 For large images (> 100k pixels), the algorithm switches to parallel mode:
 
 1. **Strip division**: Split image into horizontal strips (64 rows minimum per strip)
-2. **Parallel labeling**: Each strip is labeled independently using thread-local union-find
-3. **Boundary merging**: Merge labels at strip boundaries using atomic union-find with lock-free CAS operations
+2. **Parallel labeling**: Each strip labeled via `label_strip()` using shared `AtomicUnionFind`
+3. **Boundary merging**: Merge labels at strip boundaries via `merge_strip_boundary()` with lock-free CAS
 4. **Parallel output**: Write final labels to output buffer in parallel
 
-The atomic union-find uses `compare_exchange_weak` for lock-free merging:
+The union-find is encapsulated in dedicated structs:
 ```rust
-fn atomic_union(parent: &[AtomicU32], a: u32, b: u32) {
-    let mut root_a = atomic_find(parent, a);
-    let mut root_b = atomic_find(parent, b);
-    while root_a != root_b {
-        if root_a > root_b {
-            std::mem::swap(&mut root_a, &mut root_b);
-        }
-        match parent[idx_b].compare_exchange_weak(root_b, root_a, ...) {
-            Ok(_) => break,
-            Err(current) => { /* retry with updated roots */ }
-        }
-    }
+// Sequential processing (small images)
+struct UnionFind {
+    parent: Vec<u32>,
+    next_label: u32,
+}
+
+impl UnionFind {
+    fn make_set(&mut self) -> u32 { ... }
+    fn find(&mut self, label: u32) -> u32 { ... }  // with path compression
+    fn union(&mut self, a: u32, b: u32) { ... }
+    fn flatten_labels(&mut self, labels: &mut [u32]) -> usize { ... }
+}
+
+// Parallel processing (large images)
+struct AtomicUnionFind {
+    parent: Vec<AtomicU32>,
+    next_label: AtomicU32,
+}
+
+impl AtomicUnionFind {
+    fn make_set(&self) -> u32 { ... }          // atomic increment
+    fn find(&self, label: u32) -> u32 { ... }  // read-only traversal
+    fn union(&self, a: u32, b: u32) { ... }    // CAS-based merging
+    fn build_label_map(&self, total: usize) -> Vec<u32> { ... }
 }
 ```
 
@@ -106,16 +128,17 @@ The RLE optimization provides ~50% speedup over pixel-based approaches for typic
 |-----------|--------|-------|
 | RLE representation | Yes | Compact encoding, fast extraction |
 | Union by rank | Partial | Uses smaller-root-wins heuristic |
-| Path compression | Yes | In sequential find() |
-| Parallel strip processing | Yes | Lock-free atomic operations |
+| Path compression | Yes | In sequential `UnionFind::find()` |
+| Parallel strip processing | Yes | Lock-free `AtomicUnionFind` |
 | Word-level bit scanning | Yes | 64-bit words with fast-paths |
+| 8-connectivity | Yes | Via `Run::search_window()` and `runs_connected()` |
+| Struct-based organization | Yes | Encapsulated `UnionFind` and `AtomicUnionFind` |
 
 ### Potential Improvements
 
 1. **SIMD RLE extraction**: Use AVX2/NEON for parallel bit scanning (research shows ~5x speedup possible)
 2. **Atomic path compression**: Currently read-only in parallel mode; adding compression may reduce tree depth
 3. **Precomputed lookup tables**: Cache 16-bit binary patterns for faster run detection (as in recent MDPI paper)
-4. **Streaming/single-pass**: For FPGA or memory-constrained scenarios
 
 ## API
 

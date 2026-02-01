@@ -2,19 +2,26 @@
 
 ## Completed Optimizations
 
-### 1. Run-Length Encoding (RLE) for CCL - DONE
+### 1. RLE-based Connected Component Labeling - DONE
 **Achieved speedup:** ~50% faster (15ms -> 8ms on 6K globular cluster)
 
-Implemented RLE-based CCL:
-- Extract runs from mask using word-level bit scanning
-- Label runs and merge with overlapping runs from previous row
-- Parallel strip processing with RLE-based boundary merging
-- Write labels to output buffer in parallel
-- Added 9 RLE-specific tests for correctness verification
+Implemented RLE-based CCL with union-find:
+- Run extraction using word-level bit scanning (64-bit fast-paths)
+- Label runs and merge overlapping runs from previous row
+- Parallel strip processing with atomic boundary merging
+- Lock-free CAS-based union-find for thread safety
 
-**Location:** `labels.rs` - `label_mask_sequential()`, `label_mask_parallel()`, `label_strip_rle()`
+**Location:** `labeling/mod.rs`
+- `UnionFind` struct - sequential union-find with path compression
+- `AtomicUnionFind` struct - lock-free parallel union-find
+- `label_mask_sequential()` - for images < 100k pixels
+- `label_mask_parallel()` - strip-based parallel algorithm
 
-**Tests:** `tests.rs` - `label_map_tests::rle_specific` module
+**Tests:** `labeling/tests.rs` - 45 tests total
+- Basic shapes, edge cases, word boundaries
+- Parallel processing (strip boundaries, large images)
+- RLE-specific (runs, merging, boundaries)
+- 8-connectivity (9 tests)
 
 ---
 
@@ -22,25 +29,33 @@ Implemented RLE-based CCL:
 **Impact:** Fewer fragmented detections for undersampled PSFs
 
 Implemented configurable connectivity:
-- Added `Connectivity` enum (`Four` default, `Eight`) in `config.rs`
-- Added `runs_overlap()` helper function that handles both modes
-- 4-conn: `prev.start < curr.end && prev.end > curr.start`
-- 8-conn: `prev.start < curr.end + 1 && prev.end + 1 > curr.start`
-- Connectivity propagated through parallel strip processing and boundary merging
-- Added `from_mask_with_connectivity()` method to `LabelMap`
+- `Connectivity` enum (`Four` default, `Eight`) in `config.rs`
+- `Run::search_window()` method handles connectivity-specific overlap
+- `runs_connected()` function for adjacency checks
+- Propagated through parallel strip processing
 
-**Location:** `labels.rs` - `runs_overlap()`, `from_mask_with_connectivity()`
+**API:**
+```rust
+LabelMap::from_mask(&mask)  // 4-connectivity (default)
+LabelMap::from_mask_with_connectivity(&mask, Connectivity::Eight)
+```
 
-**Tests:** `tests.rs` - `label_map_tests::eight_connectivity` module (9 tests)
-- `diagonal_connected` - diagonal line detection
-- `anti_diagonal_connected` - anti-diagonal line
-- `checkerboard_8conn` - full checkerboard connectivity
-- `adjacent_runs_diagonal` - adjacent runs with diagonal touch
-- `l_shape_diagonal_gap` - L-shape with diagonal chain
-- `parallel_strip_boundary_diagonal` - parallel processing boundary case
-- `corner_touch_only` - single pixel diagonal touch
-- `horizontal_still_connected` - 4-conn still works
-- `vertical_still_connected` - 4-conn still works
+---
+
+### 3. Code Organization - DONE
+Moved labeling to separate module with clean structure:
+
+```
+detection/
+├── mod.rs              # detect_stars(), extract_candidates()
+├── tests.rs            # Detection tests
+├── bench.rs            # Detection benchmarks
+└── labeling/
+    ├── mod.rs          # LabelMap, UnionFind, AtomicUnionFind
+    ├── tests.rs        # 45 labeling tests
+    ├── bench.rs        # Labeling benchmarks
+    └── README.md       # Algorithm documentation
+```
 
 ---
 
@@ -48,6 +63,7 @@ Implemented configurable connectivity:
 
 ### Adaptive Local Thresholding
 **Impact:** Better detection in variable nebulosity
+**Effort:** High
 
 Current single sigma threshold fails when:
 - Bright nebulae raise local background
@@ -59,31 +75,26 @@ Current single sigma threshold fails when:
 - **Sliding window:** Local sigma in NxN neighborhood
 - **Hybrid:** Use local noise estimate, not just global
 
-**Effort:** High
-
 ### Auto-Estimate FWHM
 **Impact:** Better matched filter without manual tuning
+**Effort:** Medium
 
 Currently `expected_fwhm` is manual config. Auto-estimation:
 1. Detect brightest N stars with conservative threshold
 2. Fit Gaussian/Moffat to estimate FWHM
 3. Use median FWHM for matched filter
 
-**Effort:** Medium
-
 ### Atomic Path Compression
 **Expected improvement:** Reduced tree depth, faster merges
-
-Current `atomic_find()` only reads without compression. Adding path compression could reduce tree depth but adds more atomic operations.
-
 **Effort:** Low (benchmark needed to verify benefit)
 
-### Vectorized Label Flattening
-**Expected speedup:** Minor (~5-10% of CCL time)
+Current `AtomicUnionFind::find()` only reads without compression. Adding atomic path compression could reduce tree depth but adds more atomic operations.
 
-Use SIMD gather operations for label mapping pass.
+### SIMD RLE Extraction
+**Expected speedup:** ~5x for run extraction (based on research)
+**Effort:** Medium
 
-**Effort:** Low
+Use AVX2/NEON for parallel bit scanning and run extraction.
 
 ---
 
@@ -93,10 +104,11 @@ Use SIMD gather operations for label mapping pass.
 |-------------|--------|--------|--------|
 | RLE-based CCL | High | High (perf) | **DONE** (~50% faster) |
 | 8-connectivity option | Low | Medium (quality) | **DONE** |
+| Code organization | Low | Medium (maintainability) | **DONE** |
 | Adaptive thresholding | High | High (quality) | **NEXT** |
 | Auto-estimate FWHM | Medium | Medium (usability) | Pending |
 | Atomic path compression | Low | Low-Medium | Pending |
-| Vectorized label flatten | Low | Low | Pending |
+| SIMD RLE extraction | Medium | Medium (perf) | Pending |
 
 ---
 
