@@ -4,8 +4,8 @@
 use super::*;
 use crate::common::Buffer2;
 use crate::math::Vec2us;
+use crate::star_detection::candidate_detection::LabelMap;
 use crate::star_detection::config::DeblendConfig;
-use crate::star_detection::detection::LabelMap;
 
 /// Create a test image with Gaussian stars and return pixels, labels, and component data.
 fn make_test_component(

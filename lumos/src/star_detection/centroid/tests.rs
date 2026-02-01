@@ -5,7 +5,7 @@ use crate::common::Buffer2;
 use crate::math::FWHM_TO_SIGMA;
 use crate::math::{Aabb, Vec2us};
 use crate::star_detection::background::{BackgroundConfig, BackgroundMap};
-use crate::star_detection::detection::{StarCandidate, detect_stars};
+use crate::star_detection::candidate_detection::{StarCandidate, detect_stars};
 
 /// Default stamp radius for tests (matching expected FWHM of ~4 pixels).
 const TEST_STAMP_RADIUS: usize = 7;

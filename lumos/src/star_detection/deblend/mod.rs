@@ -12,13 +12,13 @@
 
 use crate::common::Buffer2;
 use crate::math::{Aabb, Vec2us};
-use crate::star_detection::detection::LabelMap;
+use crate::star_detection::candidate_detection::LabelMap;
 
 pub mod local_maxima;
 pub mod multi_threshold;
 
 #[cfg(test)]
-mod integration_tests;
+mod tests;
 
 // Re-export config types used by submodules
 pub use super::config::DeblendConfig;

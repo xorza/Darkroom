@@ -8,9 +8,9 @@ use std::hint::black_box;
 use super::{deblend_local_maxima, find_local_maxima};
 use crate::common::{BitBuffer2, Buffer2};
 use crate::math::{Aabb, Vec2us};
+use crate::star_detection::candidate_detection::LabelMap;
 use crate::star_detection::config::DeblendConfig;
 use crate::star_detection::deblend::ComponentData;
-use crate::star_detection::detection::LabelMap;
 use crate::testing::synthetic::generate_globular_cluster;
 
 /// Create components from a pixel buffer for benchmarking.

@@ -20,9 +20,9 @@ pub use moffat_fit::{MoffatFitConfig, MoffatFitResult, fit_moffat_2d};
 pub use moffat_fit::{alpha_beta_to_fwhm, fwhm_beta_to_alpha};
 
 use super::background::BackgroundMap;
+use super::candidate_detection::StarCandidate;
 use super::common::{CENTROID_CONVERGENCE_THRESHOLD, MAX_CENTROID_ITERATIONS};
 use super::cosmic_ray::compute_laplacian_snr;
-use super::detection::StarCandidate;
 use super::{CentroidMethod, Star, StarDetectionConfig};
 use crate::common::Buffer2;
 

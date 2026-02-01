@@ -5,7 +5,7 @@
 use crate::common::Buffer2;
 use crate::star_detection::StarDetectionConfig;
 use crate::star_detection::background::{BackgroundConfig, BackgroundMap};
-use crate::star_detection::detection::detect_stars;
+use crate::star_detection::candidate_detection::detect_stars;
 use crate::star_detection::tests::common::output::{
     gray_to_rgb_image_stretched, save_grayscale, save_image,
 };

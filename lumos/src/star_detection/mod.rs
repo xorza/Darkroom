@@ -26,6 +26,7 @@
 pub(crate) mod background;
 #[cfg(test)]
 mod bench;
+pub(crate) mod candidate_detection;
 mod centroid;
 pub(crate) mod common;
 mod config;
@@ -33,7 +34,6 @@ mod convolution;
 mod cosmic_ray;
 mod deblend;
 mod defect_map;
-pub(crate) mod detection;
 mod fwhm_estimation;
 pub mod gpu;
 mod median_filter;
@@ -67,9 +67,9 @@ pub use centroid::{
 // Internal Re-exports (for custom pipelines)
 // =============================================================================
 
+pub(crate) use candidate_detection::detect_stars;
 pub(crate) use centroid::compute_centroid;
 pub(crate) use convolution::matched_filter;
-pub(crate) use detection::detect_stars;
 pub(crate) use median_filter::median_filter_3x3;
 
 // =============================================================================
@@ -341,7 +341,10 @@ impl StarDetector {
         pixels: &Buffer2<f32>,
         background: &BackgroundMap,
         effective_fwhm: f32,
-    ) -> (Vec<detection::StarCandidate>, Option<Buffer2<f32>>) {
+    ) -> (
+        Vec<candidate_detection::StarCandidate>,
+        Option<Buffer2<f32>>,
+    ) {
         let filtered = if effective_fwhm > f32::EPSILON {
             tracing::debug!(
                 "Applying matched filter with FWHM={:.1}, axis_ratio={:.2}, angle={:.1}°",
@@ -410,7 +413,7 @@ impl StarDetector {
 
 /// Compute centroids for star candidates in parallel.
 fn compute_centroids(
-    candidates: Vec<detection::StarCandidate>,
+    candidates: Vec<candidate_detection::StarCandidate>,
     pixels: &Buffer2<f32>,
     background: &BackgroundMap,
     config: &StarDetectionConfig,

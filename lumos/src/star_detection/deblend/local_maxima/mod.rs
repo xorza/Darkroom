@@ -14,7 +14,7 @@ use arrayvec::ArrayVec;
 use super::{ComponentData, DeblendConfig, DeblendedCandidate, MAX_PEAKS, Pixel};
 use crate::common::Buffer2;
 use crate::math::Aabb;
-use crate::star_detection::detection::LabelMap;
+use crate::star_detection::candidate_detection::LabelMap;
 
 #[cfg(test)]
 mod tests;

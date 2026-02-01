@@ -16,10 +16,10 @@ use super::pipeline::{GpuDilateMaskPipeline, GpuThresholdMaskPipeline};
 use crate::common::{BitBuffer2, Buffer2};
 use crate::star_detection::StarDetectionConfig;
 use crate::star_detection::background::BackgroundMap;
-use crate::star_detection::deblend::DeblendConfig;
-use crate::star_detection::detection::{
+use crate::star_detection::candidate_detection::{
     DetectionConfig, LabelMap, StarCandidate, extract_candidates,
 };
+use crate::star_detection::deblend::DeblendConfig;
 
 /// Maximum dilation radius supported by the GPU shader.
 pub const MAX_DILATION_RADIUS: u32 = 8;

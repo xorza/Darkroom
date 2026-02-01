@@ -2,7 +2,7 @@
 
 use super::*;
 use crate::math::Vec2us;
-use crate::star_detection::detection::LabelMap;
+use crate::star_detection::candidate_detection::LabelMap;
 
 // Re-export internal function for testing
 use super::is_local_maximum;
