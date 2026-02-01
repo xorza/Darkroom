@@ -26,8 +26,8 @@ Traditional pixel-by-pixel CCL algorithms process every pixel, which is ineffici
 Each row is encoded as a sequence of `Run` structs:
 ```rust
 struct Run {
-    start: u16,  // Starting x coordinate (inclusive)
-    end: u16,    // Ending x coordinate (exclusive)
+    start: u32,  // Starting x coordinate (inclusive)
+    end: u32,    // Ending x coordinate (exclusive)
     label: u32,  // Provisional label
 }
 ```
@@ -54,7 +54,7 @@ With both optimizations, any sequence of m operations on n elements runs in O(m 
 The `Run` struct encapsulates connectivity-specific search window calculation:
 ```rust
 impl Run {
-    fn search_window(&self, connectivity: Connectivity) -> (u16, u16) {
+    fn search_window(&self, connectivity: Connectivity) -> (u32, u32) {
         match connectivity {
             Connectivity::Four => (self.start, self.end),
             Connectivity::Eight => (self.start.saturating_sub(1), self.end + 1),

@@ -25,8 +25,8 @@ use crate::star_detection::config::Connectivity;
 /// A horizontal run of foreground pixels.
 #[derive(Debug, Clone, Copy)]
 struct Run {
-    start: u16, // Starting x coordinate (inclusive)
-    end: u16,   // Ending x coordinate (exclusive)
+    start: u32, // Starting x coordinate (inclusive)
+    end: u32,   // Ending x coordinate (exclusive)
     label: u32, // Provisional label
 }
 
@@ -34,7 +34,7 @@ impl Run {
     /// Get the search window for finding overlapping runs in the previous row.
     /// Returns (start, end) where end is exclusive.
     #[inline]
-    fn search_window(&self, connectivity: Connectivity) -> (u16, u16) {
+    fn search_window(&self, connectivity: Connectivity) -> (u32, u32) {
         match connectivity {
             Connectivity::Four => (self.start, self.end),
             Connectivity::Eight => (self.start.saturating_sub(1), self.end + 1),
@@ -61,7 +61,7 @@ fn extract_runs_from_row(
     runs: &mut Vec<Run>,
 ) {
     let mut in_run = false;
-    let mut run_start = 0u16;
+    let mut run_start = 0u32;
 
     for word_idx in 0..words_per_row {
         let word = mask_words[word_row_start + word_idx];
@@ -70,7 +70,7 @@ fn extract_runs_from_row(
         if word == 0 {
             // All zeros - close any open run
             if in_run {
-                let end = (base_x as u16).min(width as u16);
+                let end = (base_x as u32).min(width as u32);
                 runs.push(Run {
                     start: run_start,
                     end,
@@ -84,7 +84,7 @@ fn extract_runs_from_row(
         if word == !0u64 {
             // All ones - extend or start run
             if !in_run {
-                run_start = base_x as u16;
+                run_start = base_x as u32;
                 in_run = true;
             }
             continue;
@@ -99,12 +99,12 @@ fn extract_runs_from_row(
 
             let is_set = (word >> bit) & 1 != 0;
             if is_set && !in_run {
-                run_start = x as u16;
+                run_start = x as u32;
                 in_run = true;
             } else if !is_set && in_run {
                 runs.push(Run {
                     start: run_start,
-                    end: x as u16,
+                    end: x as u32,
                     label: 0,
                 });
                 in_run = false;
@@ -116,7 +116,7 @@ fn extract_runs_from_row(
     if in_run {
         runs.push(Run {
             start: run_start,
-            end: width as u16,
+            end: width as u32,
             label: 0,
         });
     }
