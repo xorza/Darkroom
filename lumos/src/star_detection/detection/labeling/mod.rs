@@ -2,7 +2,7 @@
 //!
 //! Optimized for sparse binary masks (typical in star detection):
 //! - Run-length encoding (RLE) based labeling for efficient processing
-//! - Word-level bit scanning using trailing_zeros() to skip background
+//! - Word-level bit scanning to skip background regions
 //! - Block-based parallel labeling with boundary merging
 //! - Lock-free union-find with atomic operations
 
@@ -12,6 +12,8 @@ mod bench;
 mod tests;
 
 use std::sync::atomic::{AtomicU32, Ordering};
+
+use rayon::prelude::*;
 
 use crate::common::{BitBuffer2, Buffer2};
 use crate::star_detection::config::Connectivity;
@@ -23,30 +25,29 @@ use crate::star_detection::config::Connectivity;
 /// A horizontal run of foreground pixels.
 #[derive(Debug, Clone, Copy)]
 struct Run {
-    /// Starting x coordinate (inclusive).
-    start: u16,
-    /// Ending x coordinate (exclusive).
-    end: u16,
-    /// Provisional label assigned to this run.
-    label: u32,
+    start: u16, // Starting x coordinate (inclusive)
+    end: u16,   // Ending x coordinate (exclusive)
+    label: u32, // Provisional label
 }
 
-/// Check if two runs overlap vertically (are connected).
-///
-/// For 4-connectivity: runs must share at least one x coordinate.
-/// For 8-connectivity: runs can be diagonally adjacent (off by one).
+impl Run {
+    /// Get the search window for finding overlapping runs in the previous row.
+    /// Returns (start, end) where end is exclusive.
+    #[inline]
+    fn search_window(&self, connectivity: Connectivity) -> (u16, u16) {
+        match connectivity {
+            Connectivity::Four => (self.start, self.end),
+            Connectivity::Eight => (self.start.saturating_sub(1), self.end + 1),
+        }
+    }
+}
+
+/// Check if two runs from adjacent rows are connected.
 #[inline]
-fn runs_overlap(prev: &Run, curr: &Run, connectivity: Connectivity) -> bool {
+fn runs_connected(prev: &Run, curr: &Run, connectivity: Connectivity) -> bool {
     match connectivity {
-        Connectivity::Four => {
-            // 4-conn: runs overlap if they share any x coordinate
-            prev.start < curr.end && prev.end > curr.start
-        }
-        Connectivity::Eight => {
-            // 8-conn: runs overlap if they touch (including diagonally)
-            // Diagonal adjacency means prev.end == curr.start or prev.start == curr.end
-            prev.start < curr.end + 1 && prev.end + 1 > curr.start
-        }
+        Connectivity::Four => prev.start < curr.end && prev.end > curr.start,
+        Connectivity::Eight => prev.start < curr.end + 1 && prev.end + 1 > curr.start,
     }
 }
 
@@ -227,12 +228,7 @@ impl std::ops::Index<usize> for LabelMap {
 // Sequential labeling (small images)
 // ============================================================================
 
-/// Sequential RLE-based algorithm for small images.
-///
-/// Uses run-length encoding for efficient processing:
-/// 1. Extract runs from each row
-/// 2. Label runs and merge with overlapping runs from previous row
-/// 3. Write labels to output buffer
+/// Sequential RLE-based CCL for small images.
 fn label_mask_sequential(
     mask: &BitBuffer2,
     labels: &mut Buffer2<u32>,
@@ -243,21 +239,15 @@ fn label_mask_sequential(
     let words_per_row = mask.words_per_row();
     let mask_words = mask.words();
 
-    let mut parent: Vec<u32> = Vec::new();
-    let mut next_label = 1u32;
-
-    // Storage for runs from current and previous rows
+    let mut uf = UnionFind::new();
     let mut prev_runs: Vec<Run> = Vec::with_capacity(width / 4);
     let mut curr_runs: Vec<Run> = Vec::with_capacity(width / 4);
 
     for y in 0..height {
-        let word_row_start = y * words_per_row;
-
-        // Extract runs from current row
         curr_runs.clear();
         extract_runs_from_row(
             mask_words,
-            word_row_start,
+            y * words_per_row,
             words_per_row,
             width,
             &mut curr_runs,
@@ -271,94 +261,50 @@ fn label_mask_sequential(
         // Label runs and merge with overlapping runs from previous row
         let mut prev_idx = 0;
         for run in &mut curr_runs {
-            // Find overlapping runs from previous row
-            let mut assigned_label = None;
+            let (search_start, search_end) = run.search_window(connectivity);
 
-            // For 8-connectivity, we need to check one position earlier
-            let search_start = if connectivity == Connectivity::Eight && run.start > 0 {
-                run.start - 1
-            } else {
-                run.start
-            };
-
+            // Skip runs that end before our search window
             while prev_idx < prev_runs.len() && prev_runs[prev_idx].end <= search_start {
                 prev_idx += 1;
             }
 
-            // For 8-connectivity, check one position further
-            let search_end = if connectivity == Connectivity::Eight {
-                run.end + 1
-            } else {
-                run.end
-            };
-
+            // Find all overlapping runs and merge their labels
+            let mut assigned_label = None;
             let mut check_idx = prev_idx;
             while check_idx < prev_runs.len() && prev_runs[check_idx].start < search_end {
                 let prev_run = &prev_runs[check_idx];
-                if runs_overlap(prev_run, run, connectivity) {
-                    if let Some(label) = assigned_label {
-                        // Already have a label - union with overlapping run
-                        if label != prev_run.label {
-                            union(&mut parent, label, prev_run.label);
+                if runs_connected(prev_run, run, connectivity) {
+                    match assigned_label {
+                        Some(label) if label != prev_run.label => {
+                            uf.union(label, prev_run.label);
                         }
-                    } else {
-                        // First overlap - take its label
-                        assigned_label = Some(prev_run.label);
+                        None => assigned_label = Some(prev_run.label),
+                        _ => {}
                     }
                 }
                 check_idx += 1;
             }
 
-            // Assign label
-            run.label = match assigned_label {
-                Some(label) => label,
-                None => {
-                    // New component
-                    parent.push(next_label);
-                    let label = next_label;
-                    next_label += 1;
-                    label
-                }
-            };
+            run.label = assigned_label.unwrap_or_else(|| uf.make_set());
 
-            // Write labels to output buffer
+            // Write labels to output
             let row_start = y * width;
             for x in run.start..run.end {
                 labels[row_start + x as usize] = run.label;
             }
         }
 
-        // Swap current and previous runs
         std::mem::swap(&mut prev_runs, &mut curr_runs);
     }
 
-    if parent.is_empty() {
-        return 0;
-    }
-
-    let (label_map, num_labels) = build_label_map(&mut parent);
-
-    // Apply label mapping
-    for label in labels.pixels_mut().iter_mut() {
-        if *label != 0 {
-            *label = label_map[*label as usize];
-        }
-    }
-
-    num_labels
+    uf.flatten_labels(labels.pixels_mut())
 }
 
 // ============================================================================
 // Parallel labeling (large images)
 // ============================================================================
 
-/// Parallel RLE-based algorithm for large images.
-///
-/// Uses run-length encoding for efficient processing:
-/// 1. Extract runs from each strip in parallel
-/// 2. Label runs within each strip
-/// 3. Merge labels at strip boundaries
-/// 4. Write labels to output buffer in parallel
+/// Parallel RLE-based CCL for large images.
 fn label_mask_parallel(
     mask: &BitBuffer2,
     labels: &mut Buffer2<u32>,
@@ -369,23 +315,15 @@ fn label_mask_parallel(
     let words_per_row = mask.words_per_row();
     let mask_words = mask.words();
 
-    // Determine strip configuration
+    // Strip configuration: min 64 rows per strip, max num_threads strips
     let num_threads = rayon::current_num_threads();
-    let min_rows_per_strip = 64;
-    let num_strips = (height / min_rows_per_strip).clamp(1, num_threads);
+    let num_strips = (height / 64).clamp(1, num_threads);
     let rows_per_strip = height / num_strips;
 
-    // Estimate max labels: sparse masks typical in star detection
-    // Use 5% of pixels as upper bound, minimum 1024 for small images
-    let max_labels = ((width * height) / 20).max(1024);
+    // Atomic union-find for parallel merging (5% of pixels as upper bound)
+    let uf = AtomicUnionFind::new(((width * height) / 20).max(1024));
 
-    // Atomic parent array for lock-free union-find
-    let parent: Vec<AtomicU32> = (0..max_labels).map(|_| AtomicU32::new(0)).collect();
-    let next_label = AtomicU32::new(1);
-
-    // Phase 1: Extract runs and label each strip in parallel
-    // Each strip stores its runs with row indices for boundary merging
-    use rayon::prelude::*;
+    // Phase 1: Label each strip in parallel
     let strip_runs: Vec<Vec<(usize, Run)>> = (0..num_strips)
         .into_par_iter()
         .map(|strip_idx| {
@@ -395,73 +333,45 @@ fn label_mask_parallel(
             } else {
                 (strip_idx + 1) * rows_per_strip
             };
-
-            label_strip_rle(
+            label_strip(
                 mask_words,
                 width,
                 words_per_row,
                 y_start,
                 y_end,
-                &parent,
-                &next_label,
+                &uf,
                 connectivity,
             )
         })
         .collect();
 
-    // Phase 2: Merge labels at strip boundaries using runs
+    // Phase 2: Merge labels at strip boundaries
     for strip_idx in 1..num_strips {
         let boundary_y = strip_idx * rows_per_strip;
-        merge_strip_boundary_rle(
+        merge_strip_boundary(
             &strip_runs[strip_idx - 1],
             &strip_runs[strip_idx],
             boundary_y,
-            &parent,
+            &uf,
             connectivity,
         );
     }
 
-    // Get final label count
-    let total_labels = (next_label.load(Ordering::Relaxed) - 1) as usize;
+    let total_labels = uf.label_count();
     if total_labels == 0 {
         return 0;
     }
 
-    // Phase 3: Build label mapping
-    let mut label_map = vec![0u32; total_labels + 1];
+    // Phase 3: Build final label mapping
+    let label_map = uf.build_label_map(total_labels);
 
-    // First pass: find roots and assign sequential labels
-    let mut num_labels = 0u32;
-    for i in 0..total_labels {
-        let root = atomic_find_readonly(&parent, (i + 1) as u32);
-        if label_map[root as usize] == 0 {
-            num_labels += 1;
-            label_map[root as usize] = num_labels;
-        }
-    }
-
-    // Second pass: map each label to its root's final label
-    for i in (1..=total_labels).rev() {
-        let root = atomic_find_readonly(&parent, i as u32);
-        label_map[i] = label_map[root as usize];
-    }
-
-    // Phase 4: Write labels to output buffer in parallel
-    // Flatten all runs and write in parallel chunks
+    // Phase 4: Write labels in parallel
     let all_runs: Vec<(usize, Run)> = strip_runs.into_iter().flatten().collect();
-
-    // SAFETY: Each run writes to disjoint pixels, and we use atomic operations
-    // to ensure thread safety. We convert the pointer to usize to satisfy Send.
     let labels_ptr = labels.pixels_mut().as_mut_ptr() as usize;
 
     all_runs.par_iter().for_each(|&(y, run)| {
         let row_start = y * width;
-        let final_label = if (run.label as usize) < label_map.len() {
-            label_map[run.label as usize]
-        } else {
-            0
-        };
-
+        let final_label = label_map.get(run.label as usize).copied().unwrap_or(0);
         // SAFETY: Each run writes to disjoint pixels
         let ptr = labels_ptr as *mut u32;
         for x in run.start..run.end {
@@ -471,33 +381,33 @@ fn label_mask_parallel(
         }
     });
 
-    num_labels as usize
+    label_map
+        .iter()
+        .filter(|&&l| l > 0)
+        .max()
+        .copied()
+        .unwrap_or(0) as usize
 }
 
-/// Label a strip using RLE and return runs with row indices.
-#[allow(clippy::too_many_arguments)]
-fn label_strip_rle(
+/// Label a single strip and return runs with row indices.
+fn label_strip(
     mask_words: &[u64],
     width: usize,
     words_per_row: usize,
     y_start: usize,
     y_end: usize,
-    parent: &[AtomicU32],
-    next_label: &AtomicU32,
+    uf: &AtomicUnionFind,
     connectivity: Connectivity,
 ) -> Vec<(usize, Run)> {
-    let mut all_runs: Vec<(usize, Run)> = Vec::new();
+    let mut all_runs = Vec::new();
     let mut prev_runs: Vec<Run> = Vec::with_capacity(width / 4);
     let mut curr_runs: Vec<Run> = Vec::with_capacity(width / 4);
 
     for y in y_start..y_end {
-        let word_row_start = y * words_per_row;
-
-        // Extract runs from current row
         curr_runs.clear();
         extract_runs_from_row(
             mask_words,
-            word_row_start,
+            y * words_per_row,
             words_per_row,
             width,
             &mut curr_runs,
@@ -508,59 +418,29 @@ fn label_strip_rle(
             continue;
         }
 
-        // Label runs and merge with overlapping runs from previous row
         let mut prev_idx = 0;
         for run in &mut curr_runs {
-            let mut assigned_label = None;
+            let (search_start, search_end) = run.search_window(connectivity);
 
-            // For 8-connectivity, we need to check one position earlier
-            let search_start = if connectivity == Connectivity::Eight && run.start > 0 {
-                run.start - 1
-            } else {
-                run.start
-            };
-
-            // Skip runs that end before search region starts
             while prev_idx < prev_runs.len() && prev_runs[prev_idx].end <= search_start {
                 prev_idx += 1;
             }
 
-            // For 8-connectivity, check one position further
-            let search_end = if connectivity == Connectivity::Eight {
-                run.end + 1
-            } else {
-                run.end
-            };
-
-            // Check all overlapping runs from previous row
+            let mut assigned_label = None;
             let mut check_idx = prev_idx;
             while check_idx < prev_runs.len() && prev_runs[check_idx].start < search_end {
                 let prev_run = &prev_runs[check_idx];
-                if runs_overlap(prev_run, run, connectivity) {
-                    if let Some(label) = assigned_label {
-                        if label != prev_run.label {
-                            atomic_union(parent, label, prev_run.label);
-                        }
-                    } else {
-                        assigned_label = Some(prev_run.label);
+                if runs_connected(prev_run, run, connectivity) {
+                    match assigned_label {
+                        Some(label) if label != prev_run.label => uf.union(label, prev_run.label),
+                        None => assigned_label = Some(prev_run.label),
+                        _ => {}
                     }
                 }
                 check_idx += 1;
             }
 
-            // Assign label
-            run.label = match assigned_label {
-                Some(label) => label,
-                None => {
-                    let label = next_label.fetch_add(1, Ordering::SeqCst);
-                    if (label as usize) < parent.len() {
-                        parent[label as usize - 1].store(label, Ordering::SeqCst);
-                    }
-                    label
-                }
-            };
-
-            // Store run with row index
+            run.label = assigned_label.unwrap_or_else(|| uf.make_set());
             all_runs.push((y, *run));
         }
 
@@ -570,36 +450,29 @@ fn label_strip_rle(
     all_runs
 }
 
-/// Merge labels at strip boundary using runs.
-fn merge_strip_boundary_rle(
+/// Merge labels at strip boundary.
+fn merge_strip_boundary(
     above_runs: &[(usize, Run)],
     below_runs: &[(usize, Run)],
     boundary_y: usize,
-    parent: &[AtomicU32],
+    uf: &AtomicUnionFind,
     connectivity: Connectivity,
 ) {
-    // Find runs from the row just above the boundary
-    let above_boundary_runs: Vec<&Run> = above_runs
+    let above: Vec<_> = above_runs
         .iter()
         .filter(|(y, _)| *y == boundary_y - 1)
-        .map(|(_, run)| run)
+        .map(|(_, r)| r)
         .collect();
-
-    // Find runs from the row at the boundary
-    let below_boundary_runs: Vec<&Run> = below_runs
+    let below: Vec<_> = below_runs
         .iter()
         .filter(|(y, _)| *y == boundary_y)
-        .map(|(_, run)| run)
+        .map(|(_, r)| r)
         .collect();
 
-    // Merge overlapping runs
-    for above_run in &above_boundary_runs {
-        for below_run in &below_boundary_runs {
-            // Check if runs overlap and have different labels
-            if runs_overlap(above_run, below_run, connectivity)
-                && above_run.label != below_run.label
-            {
-                atomic_union(parent, above_run.label, below_run.label);
+    for a in &above {
+        for b in &below {
+            if runs_connected(a, b, connectivity) && a.label != b.label {
+                uf.union(a.label, b.label);
             }
         }
     }
@@ -609,50 +482,89 @@ fn merge_strip_boundary_rle(
 // Union-Find (sequential)
 // ============================================================================
 
-/// Build a mapping from provisional labels to final sequential labels.
-fn build_label_map(parent: &mut [u32]) -> (Vec<u32>, usize) {
-    let mut root_to_final = vec![0u32; parent.len() + 1];
-    let mut num_labels = 0usize;
+/// Sequential union-find for small images.
+struct UnionFind {
+    parent: Vec<u32>,
+    next_label: u32,
+}
 
-    for label in 1..=parent.len() as u32 {
-        let root = find(parent, label);
-        if root_to_final[root as usize] == 0 {
-            num_labels += 1;
-            root_to_final[root as usize] = num_labels as u32;
+impl UnionFind {
+    fn new() -> Self {
+        Self {
+            parent: Vec::new(),
+            next_label: 1,
         }
     }
 
-    let mut label_map = vec![0u32; parent.len() + 1];
-    for (i, &root) in parent.iter().enumerate() {
-        label_map[i + 1] = root_to_final[root as usize];
+    /// Create a new set and return its label.
+    fn make_set(&mut self) -> u32 {
+        let label = self.next_label;
+        self.parent.push(label);
+        self.next_label += 1;
+        label
     }
 
-    (label_map, num_labels)
-}
-
-/// Find root with path compression.
-fn find(parent: &mut [u32], label: u32) -> u32 {
-    let idx = (label - 1) as usize;
-    if idx >= parent.len() {
-        return label;
-    }
-    if parent[idx] != label && parent[idx] != 0 {
-        parent[idx] = find(parent, parent[idx]);
-    }
-    if parent[idx] == 0 { label } else { parent[idx] }
-}
-
-/// Union two labels.
-fn union(parent: &mut [u32], a: u32, b: u32) {
-    let root_a = find(parent, a);
-    let root_b = find(parent, b);
-    if root_a != root_b {
-        let (smaller, larger) = if root_a < root_b {
-            (root_a, root_b)
+    /// Find root with path compression.
+    fn find(&mut self, label: u32) -> u32 {
+        let idx = (label - 1) as usize;
+        if idx >= self.parent.len() {
+            return label;
+        }
+        if self.parent[idx] != label && self.parent[idx] != 0 {
+            self.parent[idx] = self.find(self.parent[idx]);
+        }
+        if self.parent[idx] == 0 {
+            label
         } else {
-            (root_b, root_a)
-        };
-        parent[(larger - 1) as usize] = smaller;
+            self.parent[idx]
+        }
+    }
+
+    /// Union two sets (smaller root wins).
+    fn union(&mut self, a: u32, b: u32) {
+        let root_a = self.find(a);
+        let root_b = self.find(b);
+        if root_a != root_b {
+            let (smaller, larger) = if root_a < root_b {
+                (root_a, root_b)
+            } else {
+                (root_b, root_a)
+            };
+            self.parent[(larger - 1) as usize] = smaller;
+        }
+    }
+
+    /// Flatten labels to sequential 1..n and apply to buffer.
+    fn flatten_labels(&mut self, labels: &mut [u32]) -> usize {
+        if self.parent.is_empty() {
+            return 0;
+        }
+
+        // Map roots to sequential labels
+        let mut root_to_final = vec![0u32; self.parent.len() + 1];
+        let mut num_labels = 0u32;
+        for label in 1..=self.parent.len() as u32 {
+            let root = self.find(label);
+            if root_to_final[root as usize] == 0 {
+                num_labels += 1;
+                root_to_final[root as usize] = num_labels;
+            }
+        }
+
+        // Build label map
+        let mut label_map = vec![0u32; self.parent.len() + 1];
+        for (i, &root) in self.parent.iter().enumerate() {
+            label_map[i + 1] = root_to_final[root as usize];
+        }
+
+        // Apply mapping
+        for l in labels.iter_mut() {
+            if *l != 0 {
+                *l = label_map[*l as usize];
+            }
+        }
+
+        num_labels as usize
     }
 }
 
@@ -660,66 +572,99 @@ fn union(parent: &mut [u32], a: u32, b: u32) {
 // Union-Find (atomic/parallel)
 // ============================================================================
 
-/// Atomic find with path compression (used during labeling).
-fn atomic_find(parent: &[AtomicU32], label: u32) -> u32 {
-    let mut current = label;
-    loop {
-        let idx = (current - 1) as usize;
-        if idx >= parent.len() {
-            return current;
-        }
-        let p = parent[idx].load(Ordering::Relaxed);
-        if p == current || p == 0 {
-            return current;
-        }
-        current = p;
-    }
+/// Lock-free atomic union-find for parallel labeling.
+struct AtomicUnionFind {
+    parent: Vec<AtomicU32>,
+    next_label: AtomicU32,
 }
 
-/// Read-only find for final label mapping (no writes needed).
-#[inline]
-fn atomic_find_readonly(parent: &[AtomicU32], label: u32) -> u32 {
-    let mut current = label;
-    loop {
-        let idx = (current - 1) as usize;
-        if idx >= parent.len() {
-            return current;
+impl AtomicUnionFind {
+    fn new(capacity: usize) -> Self {
+        Self {
+            parent: (0..capacity).map(|_| AtomicU32::new(0)).collect(),
+            next_label: AtomicU32::new(1),
         }
-        let p = parent[idx].load(Ordering::Relaxed);
-        if p == current || p == 0 {
-            return current;
-        }
-        current = p;
     }
-}
 
-/// Atomic union with lock-free CAS.
-fn atomic_union(parent: &[AtomicU32], a: u32, b: u32) {
-    let mut root_a = atomic_find(parent, a);
-    let mut root_b = atomic_find(parent, b);
-
-    while root_a != root_b {
-        // Make larger root point to smaller
-        if root_a > root_b {
-            std::mem::swap(&mut root_a, &mut root_b);
+    /// Create a new set and return its label.
+    fn make_set(&self) -> u32 {
+        let label = self.next_label.fetch_add(1, Ordering::SeqCst);
+        if (label as usize) <= self.parent.len() {
+            self.parent[label as usize - 1].store(label, Ordering::SeqCst);
         }
+        label
+    }
 
-        let idx_b = (root_b - 1) as usize;
-        if idx_b >= parent.len() {
-            break;
+    /// Find root (read-only, no path compression).
+    fn find(&self, label: u32) -> u32 {
+        let mut current = label;
+        loop {
+            let idx = (current - 1) as usize;
+            if idx >= self.parent.len() {
+                return current;
+            }
+            let p = self.parent[idx].load(Ordering::Relaxed);
+            if p == current || p == 0 {
+                return current;
+            }
+            current = p;
         }
+    }
 
-        match parent[idx_b].compare_exchange_weak(
-            root_b,
-            root_a,
-            Ordering::AcqRel,
-            Ordering::Relaxed,
-        ) {
-            Ok(_) => break,
-            Err(current) => {
-                root_a = atomic_find(parent, root_a);
-                root_b = atomic_find(parent, current);
+    /// Union two sets using lock-free CAS.
+    fn union(&self, a: u32, b: u32) {
+        let mut root_a = self.find(a);
+        let mut root_b = self.find(b);
+
+        while root_a != root_b {
+            if root_a > root_b {
+                std::mem::swap(&mut root_a, &mut root_b);
+            }
+
+            let idx_b = (root_b - 1) as usize;
+            if idx_b >= self.parent.len() {
+                break;
+            }
+
+            match self.parent[idx_b].compare_exchange_weak(
+                root_b,
+                root_a,
+                Ordering::AcqRel,
+                Ordering::Relaxed,
+            ) {
+                Ok(_) => break,
+                Err(current) => {
+                    root_a = self.find(root_a);
+                    root_b = self.find(current);
+                }
             }
         }
+    }
+
+    fn label_count(&self) -> usize {
+        (self.next_label.load(Ordering::Relaxed) - 1) as usize
+    }
+
+    /// Build sequential label mapping.
+    fn build_label_map(&self, total_labels: usize) -> Vec<u32> {
+        let mut label_map = vec![0u32; total_labels + 1];
+        let mut num_labels = 0u32;
+
+        // First pass: assign sequential labels to roots
+        for i in 0..total_labels {
+            let root = self.find((i + 1) as u32);
+            if label_map[root as usize] == 0 {
+                num_labels += 1;
+                label_map[root as usize] = num_labels;
+            }
+        }
+
+        // Second pass: map each label to its root's final label
+        for i in (1..=total_labels).rev() {
+            let root = self.find(i as u32);
+            label_map[i] = label_map[root as usize];
+        }
+
+        label_map
     }
 }
