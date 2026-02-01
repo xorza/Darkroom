@@ -28,6 +28,82 @@ pub enum Connectivity {
 }
 
 // ============================================================================
+// Adaptive Threshold Configuration
+// ============================================================================
+
+/// Configuration for adaptive local thresholding.
+///
+/// Adaptive thresholding adjusts the detection sigma based on local image
+/// characteristics. In high-contrast regions (nebulosity, gradients), the
+/// sigma is increased to reduce false positives. In uniform sky regions,
+/// the base sigma is used for maximum sensitivity.
+#[derive(Debug, Clone, Copy)]
+pub struct AdaptiveThresholdConfig {
+    /// Base sigma threshold used in low-contrast (uniform sky) regions.
+    /// Default: 3.5
+    pub base_sigma: f32,
+
+    /// Maximum sigma threshold used in high-contrast (nebulous) regions.
+    /// Default: 6.0
+    pub max_sigma: f32,
+
+    /// Contrast sensitivity factor (higher = more sensitive to contrast).
+    /// Controls how quickly sigma increases with local contrast.
+    /// Default: 2.0
+    pub contrast_factor: f32,
+}
+
+impl Default for AdaptiveThresholdConfig {
+    fn default() -> Self {
+        Self {
+            base_sigma: 3.5,
+            max_sigma: 6.0,
+            contrast_factor: 2.0,
+        }
+    }
+}
+
+impl AdaptiveThresholdConfig {
+    /// Validate the configuration.
+    pub fn validate(&self) {
+        assert!(
+            self.base_sigma > 0.0,
+            "base_sigma must be positive, got {}",
+            self.base_sigma
+        );
+        assert!(
+            self.max_sigma >= self.base_sigma,
+            "max_sigma ({}) must be >= base_sigma ({})",
+            self.max_sigma,
+            self.base_sigma
+        );
+        assert!(
+            self.contrast_factor > 0.0,
+            "contrast_factor must be positive, got {}",
+            self.contrast_factor
+        );
+    }
+
+    /// Create a conservative config (higher thresholds, fewer false positives).
+    pub fn conservative() -> Self {
+        Self {
+            base_sigma: 4.0,
+            max_sigma: 8.0,
+            contrast_factor: 3.0,
+        }
+    }
+
+    /// Create an aggressive config (lower thresholds, more detections).
+    pub fn aggressive() -> Self {
+        Self {
+            base_sigma: 3.0,
+            max_sigma: 5.0,
+            contrast_factor: 1.5,
+        }
+    }
+}
+
+// ============================================================================
 // Background Configuration
 // ============================================================================
 
@@ -287,6 +363,11 @@ pub struct StarDetectionConfig {
 
     /// Background estimation configuration.
     pub background_config: BackgroundConfig,
+
+    /// Adaptive threshold configuration.
+    /// When Some, uses per-pixel adaptive sigma thresholds based on local contrast.
+    /// When None, uses the global sigma_threshold from background_config.
+    pub adaptive_threshold: Option<AdaptiveThresholdConfig>,
 }
 
 impl Default for StarDetectionConfig {
@@ -315,6 +396,7 @@ impl Default for StarDetectionConfig {
             local_background_method: LocalBackgroundMethod::GlobalMap,
             connectivity: Connectivity::Four,
             background_config: BackgroundConfig::default(),
+            adaptive_threshold: None, // Disabled by default for backward compatibility
         }
     }
 }
@@ -401,6 +483,9 @@ impl StarDetectionConfig {
                 read_noise
             );
         }
+        if let Some(ref adaptive) = self.adaptive_threshold {
+            adaptive.validate();
+        }
     }
 
     /// Create config for wide-field imaging (larger stars, relaxed filtering).
@@ -437,6 +522,21 @@ impl StarDetectionConfig {
         }
     }
 
+    /// Create config for nebulous fields (adaptive thresholding enabled).
+    ///
+    /// Uses adaptive sigma thresholds that are higher in nebulous regions
+    /// to reduce false positives while maintaining sensitivity in clear sky.
+    pub fn for_nebulous_field() -> Self {
+        Self {
+            adaptive_threshold: Some(AdaptiveThresholdConfig::default()),
+            background_config: BackgroundConfig {
+                iterations: 1, // Refinement helps with nebulosity
+                ..Default::default()
+            },
+            ..Default::default()
+        }
+    }
+
     /// Set expected FWHM for matched filtering.
     #[must_use]
     pub fn with_fwhm(mut self, fwhm: f32) -> Self {
@@ -464,5 +564,163 @@ impl StarDetectionConfig {
         self.gain = Some(gain);
         self.read_noise = Some(read_noise);
         self
+    }
+
+    /// Enable adaptive thresholding with default configuration.
+    ///
+    /// Adaptive thresholding adjusts the detection sigma based on local
+    /// image characteristics, reducing false positives in nebulous regions.
+    #[must_use]
+    pub fn with_adaptive_threshold(mut self) -> Self {
+        self.adaptive_threshold = Some(AdaptiveThresholdConfig::default());
+        self
+    }
+
+    /// Enable adaptive thresholding with custom configuration.
+    #[must_use]
+    pub fn with_adaptive_threshold_config(mut self, config: AdaptiveThresholdConfig) -> Self {
+        self.adaptive_threshold = Some(config);
+        self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // =========================================================================
+    // AdaptiveThresholdConfig Tests
+    // =========================================================================
+
+    #[test]
+    fn test_adaptive_threshold_config_default() {
+        let config = AdaptiveThresholdConfig::default();
+
+        assert!((config.base_sigma - 3.5).abs() < 1e-6);
+        assert!((config.max_sigma - 6.0).abs() < 1e-6);
+        assert!((config.contrast_factor - 2.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_adaptive_threshold_config_conservative() {
+        let config = AdaptiveThresholdConfig::conservative();
+
+        assert!((config.base_sigma - 4.0).abs() < 1e-6);
+        assert!((config.max_sigma - 8.0).abs() < 1e-6);
+        assert!((config.contrast_factor - 3.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_adaptive_threshold_config_aggressive() {
+        let config = AdaptiveThresholdConfig::aggressive();
+
+        assert!((config.base_sigma - 3.0).abs() < 1e-6);
+        assert!((config.max_sigma - 5.0).abs() < 1e-6);
+        assert!((config.contrast_factor - 1.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_adaptive_threshold_config_validate_valid() {
+        let config = AdaptiveThresholdConfig::default();
+        config.validate(); // Should not panic
+    }
+
+    #[test]
+    #[should_panic(expected = "base_sigma must be positive")]
+    fn test_adaptive_threshold_config_validate_zero_base_sigma() {
+        let config = AdaptiveThresholdConfig {
+            base_sigma: 0.0,
+            ..Default::default()
+        };
+        config.validate();
+    }
+
+    #[test]
+    #[should_panic(expected = "base_sigma must be positive")]
+    fn test_adaptive_threshold_config_validate_negative_base_sigma() {
+        let config = AdaptiveThresholdConfig {
+            base_sigma: -1.0,
+            ..Default::default()
+        };
+        config.validate();
+    }
+
+    #[test]
+    #[should_panic(expected = "max_sigma")]
+    fn test_adaptive_threshold_config_validate_max_less_than_base() {
+        let config = AdaptiveThresholdConfig {
+            base_sigma: 5.0,
+            max_sigma: 3.0,
+            ..Default::default()
+        };
+        config.validate();
+    }
+
+    #[test]
+    #[should_panic(expected = "contrast_factor must be positive")]
+    fn test_adaptive_threshold_config_validate_zero_contrast_factor() {
+        let config = AdaptiveThresholdConfig {
+            contrast_factor: 0.0,
+            ..Default::default()
+        };
+        config.validate();
+    }
+
+    // =========================================================================
+    // StarDetectionConfig Adaptive Threshold Tests
+    // =========================================================================
+
+    #[test]
+    fn test_star_detection_config_default_no_adaptive() {
+        let config = StarDetectionConfig::default();
+        assert!(config.adaptive_threshold.is_none());
+    }
+
+    #[test]
+    fn test_star_detection_config_for_nebulous_field() {
+        let config = StarDetectionConfig::for_nebulous_field();
+        assert!(config.adaptive_threshold.is_some());
+    }
+
+    #[test]
+    fn test_star_detection_config_with_adaptive_threshold() {
+        let config = StarDetectionConfig::default().with_adaptive_threshold();
+        assert!(config.adaptive_threshold.is_some());
+        let adaptive = config.adaptive_threshold.unwrap();
+        assert!((adaptive.base_sigma - 3.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_star_detection_config_with_adaptive_threshold_config() {
+        let custom = AdaptiveThresholdConfig {
+            base_sigma: 2.5,
+            max_sigma: 7.0,
+            contrast_factor: 1.0,
+        };
+        let config = StarDetectionConfig::default().with_adaptive_threshold_config(custom);
+
+        assert!(config.adaptive_threshold.is_some());
+        let adaptive = config.adaptive_threshold.unwrap();
+        assert!((adaptive.base_sigma - 2.5).abs() < 1e-6);
+        assert!((adaptive.max_sigma - 7.0).abs() < 1e-6);
+        assert!((adaptive.contrast_factor - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_star_detection_config_validate_with_adaptive() {
+        let config = StarDetectionConfig::for_nebulous_field();
+        config.validate(); // Should not panic
+    }
+
+    #[test]
+    #[should_panic(expected = "base_sigma must be positive")]
+    fn test_star_detection_config_validate_invalid_adaptive() {
+        let config = StarDetectionConfig::default().with_adaptive_threshold_config(
+            AdaptiveThresholdConfig {
+                base_sigma: -1.0,
+                ..Default::default()
+            },
+        );
+        config.validate();
     }
 }

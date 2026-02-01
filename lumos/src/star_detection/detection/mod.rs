@@ -8,7 +8,9 @@ mod tests;
 
 use super::background::BackgroundMap;
 use super::common::dilate_mask;
-use super::common::threshold_mask::{create_threshold_mask, create_threshold_mask_filtered};
+use super::common::threshold_mask::{
+    create_adaptive_threshold_mask, create_threshold_mask, create_threshold_mask_filtered,
+};
 use super::config::{DeblendConfig, StarDetectionConfig};
 use super::deblend::{
     ComponentData, DeblendedCandidate, deblend_local_maxima, deblend_multi_threshold,
@@ -73,22 +75,38 @@ pub fn detect_stars(
 
     // Create binary mask of above-threshold pixels
     let mut mask = BitBuffer2::new_filled(width, height, false);
-    if let Some(filtered) = filtered {
+
+    // Check if we have adaptive sigma available (from BackgroundMap)
+    let use_adaptive = background.adaptive_sigma.is_some() && filtered.is_none();
+
+    if use_adaptive {
+        // Use per-pixel adaptive sigma thresholds
+        let adaptive_sigma = background.adaptive_sigma.as_ref().unwrap();
+        create_adaptive_threshold_mask(
+            pixels,
+            &background.background,
+            &background.noise,
+            adaptive_sigma,
+            &mut mask,
+        );
+    } else if let Some(filtered) = filtered {
         debug_assert_eq!(width, filtered.width());
         debug_assert_eq!(height, filtered.height());
         // Filtered image is background-subtracted, threshold = sigma * noise
+        // Note: Adaptive thresholding with filtered images is not yet supported
+        // because the matched filter changes the noise characteristics.
         create_threshold_mask_filtered(
-            filtered.pixels(),
-            background.noise.pixels(),
+            filtered,
+            &background.noise,
             detection_config.sigma_threshold,
             &mut mask,
         );
     } else {
         // No filtering, threshold = background + sigma * noise
         create_threshold_mask(
-            pixels.pixels(),
-            background.background.pixels(),
-            background.noise.pixels(),
+            pixels,
+            &background.background,
+            &background.noise,
             detection_config.sigma_threshold,
             &mut mask,
         );

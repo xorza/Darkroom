@@ -10,6 +10,7 @@ pub fn uniform(width: usize, height: usize, background: f32, noise: f32) -> Back
     BackgroundMap {
         background: Buffer2::new_filled(width, height, background),
         noise: Buffer2::new_filled(width, height, noise),
+        adaptive_sigma: None,
     }
 }
 
@@ -35,6 +36,7 @@ pub fn horizontal_gradient(
     BackgroundMap {
         background: Buffer2::new(width, height, bg_pixels),
         noise: Buffer2::new_filled(width, height, noise),
+        adaptive_sigma: None,
     }
 }
 
@@ -61,6 +63,7 @@ pub fn vertical_gradient(
     BackgroundMap {
         background: Buffer2::new(width, height, bg_pixels),
         noise: Buffer2::new_filled(width, height, noise),
+        adaptive_sigma: None,
     }
 }
 
@@ -89,6 +92,7 @@ pub fn vignette(
     BackgroundMap {
         background: Buffer2::new(width, height, bg_pixels),
         noise: Buffer2::new_filled(width, height, noise),
+        adaptive_sigma: None,
     }
 }
 
@@ -96,7 +100,11 @@ pub fn vignette(
 pub fn from_buffers(background: Buffer2<f32>, noise: Buffer2<f32>) -> BackgroundMap {
     debug_assert_eq!(background.width(), noise.width());
     debug_assert_eq!(background.height(), noise.height());
-    BackgroundMap { background, noise }
+    BackgroundMap {
+        background,
+        noise,
+        adaptive_sigma: None,
+    }
 }
 
 #[cfg(test)]

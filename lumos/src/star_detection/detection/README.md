@@ -7,6 +7,7 @@ This module implements star candidate detection using thresholding and connected
 ```
 detect_stars()
 ├── create_threshold_mask()  [SIMD: SSE4.1, NEON]
+│   └── or create_adaptive_threshold_mask()  [per-pixel sigma]
 ├── dilate_mask()            [3x3 structuring element]
 ├── LabelMap::from_mask()    [RLE-based CCL with union-find]
 ├── extract_candidates()     [Component extraction + deblending]
@@ -20,6 +21,7 @@ StarDetector::detect()
 ├── Apply defect mask (optional)
 ├── 3x3 median filter (for CFA sensors)
 ├── BackgroundMap::new()     [Background estimation]
+│   └── or new_with_adaptive_sigma()  [Adaptive thresholding]
 ├── matched_filter()         [SIMD Gaussian convolution]
 ├── detect_stars()           [Thresholding + CCL]
 ├── compute_centroid()       [Sub-pixel refinement]
@@ -33,6 +35,7 @@ StarDetector::detect()
 | Feature | Location | Notes |
 |---------|----------|-------|
 | SIMD threshold mask | `common/threshold_mask/` | SSE4.1, NEON |
+| Adaptive threshold mask | `common/threshold_mask/` | Per-pixel sigma, SIMD |
 | Matched filtering | `convolution/mod.rs` | Separable Gaussian, SIMD |
 | Elliptical PSF support | `convolution/mod.rs` | axis_ratio, angle params |
 | RLE-based CCL | `labeling/mod.rs` | ~50% faster than pixel-based |
@@ -55,6 +58,40 @@ StarDetector::detect()
 | detect_stars_6k_50000 | ~234ms | Full pipeline, 6K image |
 | matched_filter_4k | ~90ms | Gaussian convolution only |
 
+## Adaptive Thresholding
+
+Adaptive thresholding adjusts the detection sigma based on local image characteristics:
+
+- **Low-contrast regions** (uniform sky): Uses base sigma (default 3.5)
+- **High-contrast regions** (nebulae, gradients): Uses higher sigma (up to 6.0)
+
+### Usage
+
+```rust
+// Enable with default settings
+let config = StarDetectionConfig::default()
+    .with_adaptive_threshold();
+
+// Use preset for nebulous fields
+let config = StarDetectionConfig::for_nebulous_field();
+
+// Custom configuration
+let config = StarDetectionConfig::default()
+    .with_adaptive_threshold_config(AdaptiveThresholdConfig {
+        base_sigma: 3.5,    // Low-contrast threshold
+        max_sigma: 6.0,     // High-contrast threshold
+        contrast_factor: 2.0, // Sensitivity to contrast
+    });
+```
+
+### Algorithm
+
+1. **Tile statistics**: Computes contrast metric (CV = sigma/median) per tile
+2. **Adaptive sigma**: `sigma = base + contrast × (max - base)` clamped to [base, max]
+3. **Median filter**: 3×3 smoothing of adaptive sigma across tiles
+4. **Interpolation**: Bilinear interpolation to per-pixel values
+5. **Threshold**: `pixel > background + adaptive_sigma × noise`
+
 ## Code Structure
 
 ```
@@ -62,6 +99,7 @@ detection/
 ├── mod.rs              # detect_stars(), extract_candidates()
 ├── tests.rs            # Detection tests
 ├── bench.rs            # Detection benchmarks
+├── plan.md             # Implementation plan and notes
 └── labeling/
     ├── mod.rs          # LabelMap, UnionFind, AtomicUnionFind
     ├── tests.rs        # 59 labeling tests
@@ -97,16 +135,7 @@ let label_map = LabelMap::from_mask_with_connectivity(
 | Deblending | Multi-threshold | Watershed | Both methods |
 | Bit-level optimization | No | No | Yes (CTZ) |
 | SIMD threshold | No | Via numpy | Yes (SSE4.1/NEON) |
-
-## Investigated Optimizations (Not Beneficial)
-
-These were tested but showed no improvement for star detection workloads:
-
-- **Atomic path compression**: Strip-based processing already keeps trees shallow
-- **SIMD run extraction**: Most words are zeros (fast-path in scalar), dispatch overhead negates gains
-- **Precomputed lookup tables**: CTZ already achieves 10x for sparse masks
-
-See `labeling/README.md` for detailed benchmarks.
+| Adaptive threshold | Local background | Via segmentation | Per-pixel sigma |
 
 ## References
 

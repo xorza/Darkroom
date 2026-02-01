@@ -23,6 +23,45 @@
 ### 3. Code Organization ✓
 Clean module structure with comprehensive tests (59 tests).
 
+### 4. Adaptive Local Thresholding ✓
+**Impact:** Better detection in variable nebulosity, dust lanes, gradients
+
+Implemented tile-adaptive sigma thresholds based on local contrast:
+
+**Algorithm:**
+- Computes contrast metric (CV = sigma/median) per tile during background estimation
+- Interpolates per-pixel adaptive sigma alongside background/noise
+- Higher sigma in high-contrast regions (nebulae), lower in uniform sky
+- SIMD-accelerated threshold mask creation (SSE4.1/NEON)
+
+**Configuration:**
+```rust
+// Enable with default settings
+let config = StarDetectionConfig::default()
+    .with_adaptive_threshold();
+
+// Or use preset for nebulous fields
+let config = StarDetectionConfig::for_nebulous_field();
+
+// Or customize
+let config = StarDetectionConfig::default()
+    .with_adaptive_threshold_config(AdaptiveThresholdConfig {
+        base_sigma: 3.5,    // Low-contrast regions
+        max_sigma: 6.0,     // High-contrast regions
+        contrast_factor: 2.0,
+    });
+```
+
+**Files modified:**
+- `background/tile_grid.rs` - Added `adaptive_sigma` to TileStats, contrast computation
+- `background/mod.rs` - Added `new_with_adaptive_sigma()`, third interpolation channel
+- `common/threshold_mask/mod.rs` - Added `create_adaptive_threshold_mask()`
+- `common/threshold_mask/sse.rs` - SIMD implementation for x86_64
+- `common/threshold_mask/neon.rs` - SIMD implementation for aarch64
+- `config.rs` - Added `AdaptiveThresholdConfig`
+- `detection/mod.rs` - Integrated adaptive thresholding into `detect_stars()`
+- `mod.rs` - Uses `new_with_adaptive_sigma()` when configured
+
 ---
 
 ## Investigated but Not Beneficial
@@ -39,21 +78,7 @@ These optimizations were tested and showed no improvement:
 
 ## Pending Improvements
 
-### 1. Adaptive Local Thresholding
-**Impact:** High (detection quality)
-**Effort:** High
-
-Current single sigma threshold fails when:
-- Bright nebulae raise local background
-- Dust lanes lower local signal
-- Gradient across field
-
-**Options:**
-- **Tile-based:** Different sigma per background tile (already have tiles)
-- **Sliding window:** Local sigma in NxN neighborhood
-- **Hybrid:** Use local noise estimate, not just global
-
-### 2. Auto-Estimate FWHM
+### 1. Auto-Estimate FWHM
 **Impact:** Medium (usability)
 **Effort:** Medium
 
@@ -62,11 +87,19 @@ Currently `expected_fwhm` is manual config. Auto-estimation:
 2. Fit Gaussian/Moffat to estimate FWHM
 3. Use median FWHM for matched filter
 
-### 3. SIMD Label Flattening
+### 2. SIMD Label Flattening
 **Impact:** Low (performance)
 **Effort:** Low
 
 The final label mapping pass could use SIMD for vectorized lookup.
+
+### 3. Adaptive Threshold with Matched Filter
+**Impact:** Medium (quality)
+**Effort:** Medium
+
+Currently adaptive thresholding is disabled when matched filter is used
+because the filter changes noise characteristics. Could be enabled by
+scaling the adaptive sigma based on filter kernel size.
 
 ---
 
@@ -78,25 +111,44 @@ The final label mapping pass could use SIMD for vectorized lookup.
 | CTZ run extraction | Medium | High (perf) | **Done** (10x for sparse) |
 | 8-connectivity option | Low | Medium (quality) | **Done** |
 | Code organization | Low | Medium (maintainability) | **Done** |
-| Atomic path compression | Low | - | **Tested, no benefit** |
-| SIMD run extraction | Medium | - | **Tested, no benefit** |
-| Adaptive thresholding | High | High (quality) | Pending |
+| Adaptive thresholding | High | High (quality) | **Done** |
 | Auto-estimate FWHM | Medium | Medium (usability) | Pending |
 | SIMD label flattening | Low | Low (perf) | Pending |
+| Adaptive + matched filter | Medium | Medium (quality) | Pending |
 
 ---
 
-## Recommendation
+## API Summary
 
-**Next steps in priority order:**
+### Adaptive Thresholding
 
-1. **Adaptive local thresholding** - High effort but high impact for images with variable nebulosity. This is the main remaining quality improvement.
+```rust
+// Method 1: Builder pattern
+let config = StarDetectionConfig::default()
+    .with_adaptive_threshold();
 
-2. **Auto-estimate FWHM** - Medium effort, removes need for manual tuning. Good usability win.
+// Method 2: Preset
+let config = StarDetectionConfig::for_nebulous_field();
 
-3. **SIMD label flattening** - Low effort, minor performance gain. Quick win if needed.
+// Method 3: Custom configuration
+let config = StarDetectionConfig::default()
+    .with_adaptive_threshold_config(AdaptiveThresholdConfig {
+        base_sigma: 3.5,
+        max_sigma: 6.0,
+        contrast_factor: 2.0,
+    });
 
-The CCL labeling is now well-optimized. Further performance gains would come from:
-- Reducing work in `extract_candidates()` (currently ~200ms for dense fields)
-- Optimizing deblending for crowded regions
-- Profile-guided optimization of hot paths
+// Direct BackgroundMap usage
+let adaptive = AdaptiveSigmaConfig {
+    base_sigma: 3.5,
+    max_sigma: 6.0,
+    contrast_factor: 2.0,
+};
+let bg = BackgroundMap::new_with_adaptive_sigma(&pixels, &bg_config, adaptive);
+```
+
+### Performance Notes
+
+- Memory: +24MB for 6K image (one `Buffer2<f32>` for adaptive sigma)
+- Compute: ~30% overhead in background estimation (third channel interpolation)
+- Threshold mask: ~20% slower due to per-pixel sigma load (still SIMD accelerated)

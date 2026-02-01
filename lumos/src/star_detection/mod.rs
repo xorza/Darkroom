@@ -169,7 +169,22 @@ impl StarDetector {
         drop(output);
 
         // Step 1: Estimate background
-        let background = BackgroundMap::new(&pixels, &self.config.background_config);
+        // Use adaptive thresholding if configured
+        let background = if let Some(ref adaptive_config) = self.config.adaptive_threshold {
+            use background::AdaptiveSigmaConfig;
+            let adaptive = AdaptiveSigmaConfig {
+                base_sigma: adaptive_config.base_sigma,
+                max_sigma: adaptive_config.max_sigma,
+                contrast_factor: adaptive_config.contrast_factor,
+            };
+            BackgroundMap::new_with_adaptive_sigma(
+                &pixels,
+                &self.config.background_config,
+                adaptive,
+            )
+        } else {
+            BackgroundMap::new(&pixels, &self.config.background_config)
+        };
 
         // Step 2: Detect star candidates
         // Optionally apply matched filter (Gaussian convolution) for better faint star detection

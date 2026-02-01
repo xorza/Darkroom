@@ -38,6 +38,7 @@ fn bench_tile_grid_6k_globular(b: ::bench::Bencher) {
             None,
             0,
             BENCH_SIGMA_CLIP_ITERATIONS,
+            None,
         ))
     });
 }
@@ -71,6 +72,7 @@ fn bench_tile_grid_6k_with_mask(b: ::bench::Bencher) {
             Some(&mask),
             100,
             BENCH_SIGMA_CLIP_ITERATIONS,
+            None,
         ))
     });
 }

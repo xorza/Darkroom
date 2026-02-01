@@ -22,6 +22,9 @@ use tile_grid::TileGrid;
 // Re-export BackgroundConfig from config module
 pub use super::config::BackgroundConfig;
 
+// Re-export AdaptiveSigmaConfig for public API
+pub use tile_grid::AdaptiveSigmaConfig;
+
 /// Background map with per-pixel background and noise estimates.
 #[derive(Debug, Clone)]
 pub struct BackgroundMap {
@@ -29,6 +32,10 @@ pub struct BackgroundMap {
     pub background: Buffer2<f32>,
     /// Per-pixel noise (sigma) estimates.
     pub noise: Buffer2<f32>,
+    /// Per-pixel adaptive detection threshold in sigma units.
+    /// Higher in nebulous/high-contrast regions, lower in uniform sky.
+    /// Only populated when adaptive thresholding is enabled.
+    pub adaptive_sigma: Option<Buffer2<f32>>,
 }
 
 impl BackgroundMap {
@@ -61,6 +68,7 @@ impl BackgroundMap {
             None,
             0,
             config.sigma_clip_iterations,
+            None, // No adaptive thresholding during initial background estimation
         );
         let mut background = interpolate_from_grid(pixels, &grid);
 
@@ -96,6 +104,83 @@ impl BackgroundMap {
     pub fn get_noise(&self, x: usize, y: usize) -> f32 {
         self.noise[(x, y)]
     }
+
+    /// Estimate background with adaptive sigma thresholds.
+    ///
+    /// This is similar to `new()` but also computes per-pixel adaptive
+    /// detection thresholds based on local contrast. Use this for images
+    /// with variable nebulosity, gradients, or other complex backgrounds.
+    ///
+    /// The adaptive sigma is higher in high-contrast regions (nebulae, gradients)
+    /// and lower in uniform sky regions, reducing false positives while
+    /// maintaining sensitivity in clean areas.
+    pub fn new_with_adaptive_sigma(
+        pixels: &Buffer2<f32>,
+        config: &BackgroundConfig,
+        adaptive_config: AdaptiveSigmaConfig,
+    ) -> Self {
+        config.validate();
+        assert!(
+            pixels.width() >= config.tile_size && pixels.height() >= config.tile_size,
+            "Image must be at least tile_size x tile_size"
+        );
+
+        let grid = TileGrid::new_with_options(
+            pixels,
+            config.tile_size,
+            None,
+            0,
+            config.sigma_clip_iterations,
+            Some(adaptive_config),
+        );
+        let mut background = interpolate_from_grid_with_adaptive(pixels, &grid);
+
+        if config.iterations > 0 {
+            refine(&mut background, pixels, config);
+        }
+
+        background
+    }
+}
+
+/// Interpolate from grid including adaptive sigma channel.
+fn interpolate_from_grid_with_adaptive(pixels: &Buffer2<f32>, grid: &TileGrid) -> BackgroundMap {
+    let width = pixels.width();
+    let height = pixels.height();
+
+    let mut bg_data = Buffer2::new_filled(width, height, 0.0);
+    let mut noise_data = Buffer2::new_filled(width, height, 0.0);
+    let mut adaptive_data = Buffer2::new_filled(width, height, 0.0);
+
+    // Process in parallel chunks
+    let bg_ptr = bg_data.pixels_mut().as_mut_ptr() as usize;
+    let noise_ptr = noise_data.pixels_mut().as_mut_ptr() as usize;
+    let adaptive_ptr = adaptive_data.pixels_mut().as_mut_ptr() as usize;
+
+    parallel::par_iter_auto(height).for_each(|(_, start_row, end_row)| {
+        for y in start_row..end_row {
+            let row_offset = y * width;
+
+            // SAFETY: Each row is processed by only one thread
+            let bg_row = unsafe {
+                std::slice::from_raw_parts_mut((bg_ptr as *mut f32).add(row_offset), width)
+            };
+            let noise_row = unsafe {
+                std::slice::from_raw_parts_mut((noise_ptr as *mut f32).add(row_offset), width)
+            };
+            let adaptive_row = unsafe {
+                std::slice::from_raw_parts_mut((adaptive_ptr as *mut f32).add(row_offset), width)
+            };
+
+            interpolate_row(bg_row, noise_row, Some(adaptive_row), y, grid);
+        }
+    });
+
+    BackgroundMap {
+        background: bg_data,
+        noise: noise_data,
+        adaptive_sigma: Some(adaptive_data),
+    }
 }
 
 fn interpolate_from_grid(pixels: &Buffer2<f32>, grid: &TileGrid) -> BackgroundMap {
@@ -105,6 +190,7 @@ fn interpolate_from_grid(pixels: &Buffer2<f32>, grid: &TileGrid) -> BackgroundMa
     let mut background = BackgroundMap {
         background: Buffer2::new_filled(width, height, 0.0),
         noise: Buffer2::new_filled(width, height, 0.0),
+        adaptive_sigma: None,
     };
 
     parallel::par_chunks_auto_aligned_zip2(
@@ -121,7 +207,7 @@ fn interpolate_from_grid(pixels: &Buffer2<f32>, grid: &TileGrid) -> BackgroundMa
             let bg_row = &mut bg_chunk[row_offset..row_offset + width];
             let noise_row = &mut noise_chunk[row_offset..row_offset + width];
 
-            interpolate_row(bg_row, noise_row, y, grid);
+            interpolate_row(bg_row, noise_row, None, y, grid);
         }
     });
 
@@ -169,9 +255,9 @@ fn create_object_mask(
 ) {
     // Create threshold mask using packed SIMD-optimized implementation
     super::common::threshold_mask::create_threshold_mask(
-        pixels.pixels(),
-        background.background.pixels(),
-        background.noise.pixels(),
+        pixels,
+        &background.background,
+        &background.noise,
         detection_sigma,
         output,
     );
@@ -213,10 +299,12 @@ fn estimate_background_masked(
         Some(mask),
         min_pixels,
         sigma_clip_iterations,
+        None, // No adaptive thresholding during refinement
     );
 
     output.background = Buffer2::new_filled(width, height, 0.0);
     output.noise = Buffer2::new_filled(width, height, 0.0);
+    output.adaptive_sigma = None;
 
     parallel::par_chunks_auto_aligned_zip2(
         output.background.pixels_mut(),
@@ -232,7 +320,7 @@ fn estimate_background_masked(
             let bg_row = &mut bg_chunk[row_offset..row_offset + width];
             let noise_row = &mut noise_chunk[row_offset..row_offset + width];
 
-            interpolate_row(bg_row, noise_row, y, &grid);
+            interpolate_row(bg_row, noise_row, None, y, &grid);
         }
     });
 }
@@ -242,7 +330,15 @@ fn estimate_background_masked(
 /// Instead of computing tile indices per-pixel, we process the row in segments
 /// where each segment has constant tile corners. This amortizes tile lookups
 /// and Y-weight calculations across many pixels.
-fn interpolate_row(bg_row: &mut [f32], noise_row: &mut [f32], y: usize, grid: &TileGrid) {
+///
+/// If `adaptive_row` is Some, also interpolates the adaptive_sigma channel.
+fn interpolate_row(
+    bg_row: &mut [f32],
+    noise_row: &mut [f32],
+    adaptive_row: Option<&mut [f32]>,
+    y: usize,
+    grid: &TileGrid,
+) {
     let fy = y as f32;
     let width = bg_row.len();
 
@@ -315,6 +411,36 @@ fn interpolate_row(bg_row: &mut [f32], noise_row: &mut [f32], y: usize, grid: &T
             // Constant fill (single tile column)
             bg_segment.fill(left_bg);
             noise_segment.fill(left_noise);
+        }
+
+        // Interpolate adaptive sigma if requested
+        if let Some(ref adaptive_row) = adaptive_row {
+            let left_adaptive = wy_inv * t00.adaptive_sigma + wy * t01.adaptive_sigma;
+            let right_adaptive = wy_inv * t10.adaptive_sigma + wy * t11.adaptive_sigma;
+
+            // Get mutable reference to adaptive segment
+            // SAFETY: We have exclusive access via the Option<&mut [f32]>
+            let adaptive_segment = unsafe {
+                std::slice::from_raw_parts_mut(
+                    adaptive_row.as_ptr().add(x) as *mut f32,
+                    segment_end - x,
+                )
+            };
+
+            if tx1 != tx0 {
+                let inv_dx = 1.0 / (center_x1 - center_x0);
+                let wx_start = (x as f32 - center_x0) * inv_dx;
+                let wx_step = inv_dx;
+
+                // Simple scalar interpolation for adaptive sigma (less performance critical)
+                let delta = right_adaptive - left_adaptive;
+                for (i, val) in adaptive_segment.iter_mut().enumerate() {
+                    let wx = (wx_start + i as f32 * wx_step).clamp(0.0, 1.0);
+                    *val = left_adaptive + wx * delta;
+                }
+            } else {
+                adaptive_segment.fill(left_adaptive);
+            }
         }
 
         x = segment_end;

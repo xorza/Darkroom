@@ -20,9 +20,9 @@ fn create_detection_mask(pixels: &crate::common::Buffer2<f32>, sigma_threshold: 
     // Create threshold mask
     let mut mask = BitBuffer2::new_filled(width, height, false);
     create_threshold_mask(
-        pixels.pixels(),
-        background.background.pixels(),
-        background.noise.pixels(),
+        pixels,
+        &background.background,
+        &background.noise,
         sigma_threshold,
         &mut mask,
     );

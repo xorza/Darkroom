@@ -1,0 +1,7 @@
+name: bench_threshold_mask_4k/adaptive_scalar
+mean: 22.171062ms
+min: 20.939275ms
+max: 27.813378ms
+median: 22.137413ms
+iterations: 200
+vs_previous: 22.616426ms -> 22.137413ms (-2.1%) same

@@ -343,6 +343,7 @@ fn make_uniform_background(
     BackgroundMap {
         background: Buffer2::new_filled(width, height, bg_value),
         noise: Buffer2::new_filled(width, height, noise),
+        adaptive_sigma: None,
     }
 }
 

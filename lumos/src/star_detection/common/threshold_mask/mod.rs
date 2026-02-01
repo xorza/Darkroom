@@ -18,7 +18,7 @@ mod bench;
 #[cfg(test)]
 mod tests;
 
-use crate::common::BitBuffer2;
+use crate::common::{BitBuffer2, Buffer2};
 use common::parallel;
 use rayon::iter::ParallelIterator;
 
@@ -92,17 +92,56 @@ pub(super) fn process_words_filtered_scalar(
     }
 }
 
-/// Process words with best available SIMD (with background).
+/// Scalar implementation for adaptive threshold mask with per-pixel sigma.
 #[cfg_attr(not(test), inline)]
-pub(super) fn process_words(
+#[cfg(any(test, target_arch = "x86_64", not(target_arch = "aarch64")))]
+pub(super) fn process_words_adaptive_scalar(
     pixels: &[f32],
     bg: &[f32],
     noise: &[f32],
+    adaptive_sigma: &[f32],
+    words: &mut [u64],
+    pixel_offset: usize,
+    total_pixels: usize,
+) {
+    for (word_idx, word) in words.iter_mut().enumerate() {
+        let base_pixel = pixel_offset + word_idx * 64;
+        let mut bits = 0u64;
+
+        for bit in 0..64 {
+            let px_idx = base_pixel + bit;
+            if px_idx >= total_pixels {
+                break;
+            }
+
+            let px = pixels[px_idx];
+            let sigma = adaptive_sigma[px_idx];
+            let threshold = bg[px_idx] + sigma * noise[px_idx].max(1e-6);
+
+            if px > threshold {
+                bits |= 1u64 << bit;
+            }
+        }
+
+        *word = bits;
+    }
+}
+
+/// Process words with best available SIMD (with background).
+#[cfg_attr(not(test), inline)]
+pub(super) fn process_words(
+    pixels: &Buffer2<f32>,
+    bg: &Buffer2<f32>,
+    noise: &Buffer2<f32>,
     sigma_threshold: f32,
     words: &mut [u64],
     pixel_offset: usize,
     total_pixels: usize,
 ) {
+    let pixels = pixels.pixels();
+    let bg = bg.pixels();
+    let noise = noise.pixels();
+
     #[cfg(target_arch = "aarch64")]
     {
         // SAFETY: NEON is always available on aarch64.
@@ -165,13 +204,16 @@ pub(super) fn process_words(
 /// Process words with best available SIMD (without background, for filtered images).
 #[inline]
 pub(super) fn process_words_filtered(
-    pixels: &[f32],
-    noise: &[f32],
+    pixels: &Buffer2<f32>,
+    noise: &Buffer2<f32>,
     sigma_threshold: f32,
     words: &mut [u64],
     pixel_offset: usize,
     total_pixels: usize,
 ) {
+    let pixels = pixels.pixels();
+    let noise = noise.pixels();
+
     #[cfg(target_arch = "aarch64")]
     {
         // SAFETY: NEON is always available on aarch64.
@@ -227,6 +269,81 @@ pub(super) fn process_words_filtered(
     }
 }
 
+/// Process words with adaptive per-pixel sigma threshold.
+#[inline]
+pub(super) fn process_words_adaptive(
+    pixels: &Buffer2<f32>,
+    bg: &Buffer2<f32>,
+    noise: &Buffer2<f32>,
+    adaptive_sigma: &Buffer2<f32>,
+    words: &mut [u64],
+    pixel_offset: usize,
+    total_pixels: usize,
+) {
+    let pixels = pixels.pixels();
+    let bg = bg.pixels();
+    let noise = noise.pixels();
+    let adaptive_sigma = adaptive_sigma.pixels();
+
+    #[cfg(target_arch = "aarch64")]
+    {
+        // SAFETY: NEON is always available on aarch64.
+        unsafe {
+            neon::process_words_adaptive_neon(
+                pixels,
+                bg,
+                noise,
+                adaptive_sigma,
+                words,
+                pixel_offset,
+                total_pixels,
+            );
+        }
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    {
+        if cpu_features::has_sse4_1() {
+            // SAFETY: We've checked that SSE4.1 is available.
+            unsafe {
+                sse::process_words_adaptive_sse(
+                    pixels,
+                    bg,
+                    noise,
+                    adaptive_sigma,
+                    words,
+                    pixel_offset,
+                    total_pixels,
+                );
+            }
+            return;
+        }
+
+        process_words_adaptive_scalar(
+            pixels,
+            bg,
+            noise,
+            adaptive_sigma,
+            words,
+            pixel_offset,
+            total_pixels,
+        );
+    }
+
+    #[cfg(not(any(target_arch = "aarch64", target_arch = "x86_64")))]
+    {
+        process_words_adaptive_scalar(
+            pixels,
+            bg,
+            noise,
+            adaptive_sigma,
+            words,
+            pixel_offset,
+            total_pixels,
+        );
+    }
+}
+
 /// Create binary mask of pixels above threshold into a BitBuffer2.
 ///
 /// Sets bit `i` to 1 where `pixels[i] > background[i] + sigma * noise[i]`.
@@ -234,21 +351,23 @@ pub(super) fn process_words_filtered(
 /// Uses SIMD acceleration when available (SSE4.1 on x86_64, NEON on aarch64).
 /// Writes directly to packed u64 words for better memory efficiency.
 ///
-/// Note: Input pixel arrays should be in row-major order (width * height elements).
+/// Note: All input buffers must have the same dimensions as the mask.
 /// The output mask has row-aligned storage (stride may differ from width).
 pub fn create_threshold_mask(
-    pixels: &[f32],
-    bg: &[f32],
-    noise: &[f32],
+    pixels: &Buffer2<f32>,
+    bg: &Buffer2<f32>,
+    noise: &Buffer2<f32>,
     sigma_threshold: f32,
     mask: &mut BitBuffer2,
 ) {
     let width = mask.width();
     let height = mask.height();
-    let total_pixels = width * height;
-    debug_assert_eq!(total_pixels, pixels.len());
-    debug_assert_eq!(total_pixels, bg.len());
-    debug_assert_eq!(total_pixels, noise.len());
+    debug_assert_eq!(width, pixels.width());
+    debug_assert_eq!(height, pixels.height());
+    debug_assert_eq!(width, bg.width());
+    debug_assert_eq!(height, bg.height());
+    debug_assert_eq!(width, noise.width());
+    debug_assert_eq!(height, noise.height());
 
     let words_per_row = mask.words_per_row();
     let num_words = mask.num_words();
@@ -279,24 +398,81 @@ pub fn create_threshold_mask(
     });
 }
 
+/// Create binary mask using per-pixel adaptive sigma thresholds.
+///
+/// Sets bit `i` to 1 where `pixels[i] > background[i] + adaptive_sigma[i] * noise[i]`.
+///
+/// This is used for adaptive thresholding where the sigma threshold varies
+/// across the image based on local contrast (higher in nebulous regions,
+/// lower in uniform sky regions).
+///
+/// Note: All input buffers must have the same dimensions as the mask.
+/// The output mask has row-aligned storage (stride may differ from width).
+pub fn create_adaptive_threshold_mask(
+    pixels: &Buffer2<f32>,
+    bg: &Buffer2<f32>,
+    noise: &Buffer2<f32>,
+    adaptive_sigma: &Buffer2<f32>,
+    mask: &mut BitBuffer2,
+) {
+    let width = mask.width();
+    let height = mask.height();
+    debug_assert_eq!(width, pixels.width());
+    debug_assert_eq!(height, pixels.height());
+    debug_assert_eq!(width, bg.width());
+    debug_assert_eq!(height, bg.height());
+    debug_assert_eq!(width, noise.width());
+    debug_assert_eq!(height, noise.height());
+    debug_assert_eq!(width, adaptive_sigma.width());
+    debug_assert_eq!(height, adaptive_sigma.height());
+
+    let words_per_row = mask.words_per_row();
+    let num_words = mask.num_words();
+
+    // SAFETY: We partition rows into disjoint chunks, each thread writes only to its chunk
+    let words_ptr = mask.words().as_ptr() as usize;
+
+    parallel::par_iter_auto(height).for_each(|(_, start_row, end_row)| {
+        // SAFETY: Each chunk writes to disjoint rows
+        let words = unsafe { std::slice::from_raw_parts_mut(words_ptr as *mut u64, num_words) };
+
+        for y in start_row..end_row {
+            let row_pixel_start = y * width;
+            let row_word_start = y * words_per_row;
+            let row_words = &mut words[row_word_start..row_word_start + words_per_row];
+
+            process_words_adaptive(
+                pixels,
+                bg,
+                noise,
+                adaptive_sigma,
+                row_words,
+                row_pixel_start,
+                row_pixel_start + width,
+            );
+        }
+    });
+}
+
 /// Create binary mask from a filtered (background-subtracted) image.
 ///
 /// Sets bit `i` to 1 where `filtered[i] > sigma * noise[i]`.
 /// Used for matched-filtered images where background is already subtracted.
 ///
-/// Note: Input pixel arrays should be in row-major order (width * height elements).
+/// Note: All input buffers must have the same dimensions as the mask.
 /// The output mask has row-aligned storage (stride may differ from width).
 pub fn create_threshold_mask_filtered(
-    filtered: &[f32],
-    noise: &[f32],
+    filtered: &Buffer2<f32>,
+    noise: &Buffer2<f32>,
     sigma_threshold: f32,
     mask: &mut BitBuffer2,
 ) {
     let width = mask.width();
     let height = mask.height();
-    let total_pixels = width * height;
-    debug_assert_eq!(total_pixels, filtered.len());
-    debug_assert_eq!(total_pixels, noise.len());
+    debug_assert_eq!(width, filtered.width());
+    debug_assert_eq!(height, filtered.height());
+    debug_assert_eq!(width, noise.width());
+    debug_assert_eq!(height, noise.height());
 
     let words_per_row = mask.words_per_row();
     let num_words = mask.num_words();
@@ -324,79 +500,4 @@ pub fn create_threshold_mask_filtered(
             );
         }
     });
-}
-
-#[cfg(test)]
-mod mask_tests {
-    use super::*;
-
-    /// Reference scalar implementation for testing
-    fn scalar_threshold(pixels: &[f32], bg: &[f32], noise: &[f32], sigma: f32) -> Vec<bool> {
-        pixels
-            .iter()
-            .zip(bg.iter())
-            .zip(noise.iter())
-            .map(|((&px, &b), &n)| {
-                let threshold = b + sigma * n.max(1e-6);
-                px > threshold
-            })
-            .collect()
-    }
-
-    #[test]
-    fn test_packed_matches_scalar() {
-        let width = 100;
-        let height = 100;
-        let size = width * height;
-
-        let mut pixels = vec![0.0f32; size];
-        let mut bg = vec![1.0f32; size];
-        let mut noise = vec![0.1f32; size];
-
-        // Create some test pattern
-        for i in 0..size {
-            pixels[i] = ((i * 17) % 100) as f32 / 50.0;
-            bg[i] = 1.0 + ((i * 7) % 10) as f32 / 100.0;
-            noise[i] = 0.05 + ((i * 3) % 10) as f32 / 100.0;
-        }
-
-        let sigma = 3.0;
-
-        // Compute with scalar reference
-        let scalar_mask = scalar_threshold(&pixels, &bg, &noise, sigma);
-
-        // Compute with packed BitBuffer2
-        let mut packed_mask = BitBuffer2::new_filled(width, height, false);
-        create_threshold_mask(&pixels, &bg, &noise, sigma, &mut packed_mask);
-
-        // Compare results
-        for (i, &scalar_val) in scalar_mask.iter().enumerate() {
-            assert_eq!(
-                scalar_val,
-                packed_mask.get(i),
-                "Mismatch at index {}: scalar={}, packed={}",
-                i,
-                scalar_val,
-                packed_mask.get(i)
-            );
-        }
-    }
-
-    #[test]
-    fn test_packed_non_aligned_size() {
-        // Test with size that doesn't align to 64 bits
-        let width = 100;
-        let height = 73; // 7300 pixels, not divisible by 64
-        let size = width * height;
-
-        let pixels = vec![2.0f32; size]; // All above threshold
-        let bg = vec![0.0f32; size];
-        let noise = vec![0.1f32; size];
-
-        let mut mask = BitBuffer2::new_filled(width, height, false);
-        create_threshold_mask(&pixels, &bg, &noise, 3.0, &mut mask);
-
-        // All should be set
-        assert_eq!(mask.count_ones(), size);
-    }
 }
