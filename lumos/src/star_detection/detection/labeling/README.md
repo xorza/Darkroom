@@ -150,12 +150,13 @@ The CTZ approach excels for sparse masks typical in star detection (<5% density)
 
 ### Potential Improvements
 
-1. **Precomputed lookup tables**: Cache 8-bit or 16-bit binary patterns for faster run detection
-2. **SIMD parallel bit scanning**: Use AVX2/NEON for processing multiple words simultaneously
+1. **SIMD parallel bit scanning**: Use AVX2/NEON for processing multiple words simultaneously
 
 ### Investigated but Not Beneficial
 
 - **Atomic path compression**: Path splitting was tested but showed no improvement because strip-based parallel processing already keeps trees shallow. The extra CAS overhead negates any tree-depth benefits.
+
+- **Precomputed lookup tables**: For sparse masks (<5% density), CTZ-based scanning already achieves 7-10x speedup. Lookup tables add memory pressure and are more beneficial for dense masks or SIMD implementations where multiple bytes are processed in parallel.
 
 ## API
 
