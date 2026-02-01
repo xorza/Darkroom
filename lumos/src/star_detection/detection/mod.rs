@@ -199,19 +199,16 @@ fn collect_component_data(
     width: usize,
     max_area: usize,
 ) -> Vec<ComponentData> {
+    use common::parallel;
     use rayon::prelude::*;
 
     let num_labels = label_map.num_labels();
-    let labels = label_map.labels();
-    let height = label_map.height();
 
     // Process rows in parallel, each thread builds partial component data
-    let chunk_size = (height / rayon::current_num_threads()).max(64);
-
-    let partial_results: Vec<Vec<ComponentData>> = labels
-        .par_chunks(chunk_size * width)
-        .enumerate()
-        .map(|(chunk_idx, chunk)| {
+    // Need to cast away mutability since par_chunks_auto_aligned requires &mut
+    // but we only read the labels. Use par_iter_auto instead.
+    let partial_results: Vec<Vec<ComponentData>> = parallel::par_iter_auto(label_map.height())
+        .map(|(_, start_row, end_row)| {
             let mut local_data: Vec<ComponentData> = Vec::with_capacity(num_labels);
             local_data.resize_with(num_labels, || ComponentData {
                 bbox: Aabb::empty(),
@@ -219,17 +216,19 @@ fn collect_component_data(
                 area: 0,
             });
 
-            let base_row = chunk_idx * chunk_size;
-            for (local_idx, &label) in chunk.iter().enumerate() {
-                if label == 0 {
-                    continue;
+            let labels = label_map.labels();
+            for y in start_row..end_row {
+                let row_start = y * width;
+                for x in 0..width {
+                    let label = labels[row_start + x];
+                    if label == 0 {
+                        continue;
+                    }
+                    let data = &mut local_data[(label - 1) as usize];
+                    data.bbox.include(Vec2us::new(x, y));
+                    data.label = label;
+                    data.area += 1;
                 }
-                let data = &mut local_data[(label - 1) as usize];
-                let x = local_idx % width;
-                let y = base_row + local_idx / width;
-                data.bbox.include(Vec2us::new(x, y));
-                data.label = label;
-                data.area += 1;
             }
 
             local_data
