@@ -228,14 +228,36 @@ impl BitBuffer2 {
     /// Count the number of set bits (true values, excluding padding).
     #[inline]
     pub fn count_ones(&self) -> usize {
-        let mut count = 0;
+        if self.width == 0 || self.height == 0 {
+            return 0;
+        }
+
+        let words_per_row = self.words_per_row();
+        let bits_in_last_word = self.width % BITS_PER_WORD;
+        // Number of words that contain valid data (not just padding)
+        let data_words_per_row = self.width.div_ceil(BITS_PER_WORD);
+        // Number of fully-used words (all 64 bits valid)
+        let full_words_per_row = self.width / BITS_PER_WORD;
+
+        let mut count = 0usize;
+
         for y in 0..self.height {
-            for x in 0..self.width {
-                if self.get_xy(x, y) {
-                    count += 1;
-                }
+            let row_start = y * words_per_row;
+
+            // Count full words (all 64 bits valid)
+            for w in 0..full_words_per_row {
+                count += self.words[row_start + w].count_ones() as usize;
+            }
+
+            // Handle partial last word if width is not a multiple of 64
+            if bits_in_last_word != 0 && data_words_per_row > 0 {
+                let last_word = self.words[row_start + full_words_per_row];
+                // Mask off padding bits
+                let mask = (1u64 << bits_in_last_word) - 1;
+                count += (last_word & mask).count_ones() as usize;
             }
         }
+
         count
     }
 
@@ -561,5 +583,178 @@ mod tests {
         let result: Vec<bool> = buf.into();
 
         assert_eq!(original, result);
+    }
+
+    #[test]
+    fn test_count_ones_empty() {
+        let buf = BitBuffer2::new_filled(0, 0, false);
+        assert_eq!(buf.count_ones(), 0);
+
+        let buf = BitBuffer2::new_filled(0, 10, false);
+        assert_eq!(buf.count_ones(), 0);
+
+        let buf = BitBuffer2::new_filled(10, 0, false);
+        assert_eq!(buf.count_ones(), 0);
+    }
+
+    #[test]
+    fn test_count_ones_all_set() {
+        // Test various widths to cover alignment edge cases
+        for width in [1, 7, 63, 64, 65, 100, 127, 128, 129, 200] {
+            let buf = BitBuffer2::new_filled(width, 10, true);
+            assert_eq!(
+                buf.count_ones(),
+                width * 10,
+                "count_ones failed for width {}",
+                width
+            );
+        }
+    }
+
+    #[test]
+    fn test_count_ones_partial_word() {
+        // Width 7: only 7 bits per row, tests partial word handling
+        let mut buf = BitBuffer2::new_filled(7, 3, false);
+        buf.set_xy(0, 0, true);
+        buf.set_xy(6, 0, true);
+        buf.set_xy(3, 1, true);
+        buf.set_xy(0, 2, true);
+        buf.set_xy(6, 2, true);
+        assert_eq!(buf.count_ones(), 5);
+    }
+
+    #[test]
+    fn test_count_ones_exact_word_boundary() {
+        // Width 64: exactly one word per row
+        let mut buf = BitBuffer2::new_filled(64, 2, false);
+        buf.set_xy(0, 0, true);
+        buf.set_xy(63, 0, true);
+        buf.set_xy(32, 1, true);
+        assert_eq!(buf.count_ones(), 3);
+    }
+
+    #[test]
+    fn test_count_ones_multiple_words() {
+        // Width 200: multiple words per row with partial last word
+        let mut buf = BitBuffer2::new_filled(200, 3, false);
+        // Set some bits in each word region
+        buf.set_xy(0, 0, true); // first word
+        buf.set_xy(63, 0, true); // first word
+        buf.set_xy(64, 0, true); // second word
+        buf.set_xy(127, 0, true); // second word
+        buf.set_xy(128, 0, true); // third word
+        buf.set_xy(199, 0, true); // last word (partial)
+        buf.set_xy(100, 1, true);
+        buf.set_xy(150, 2, true);
+        assert_eq!(buf.count_ones(), 8);
+    }
+
+    #[test]
+    fn test_copy_from() {
+        let mut src = BitBuffer2::new_filled(100, 50, false);
+        src.set_xy(10, 10, true);
+        src.set_xy(50, 25, true);
+
+        let mut dst = BitBuffer2::new_filled(100, 50, false);
+        dst.copy_from(&src);
+
+        assert!(dst.get_xy(10, 10));
+        assert!(dst.get_xy(50, 25));
+        assert!(!dst.get_xy(0, 0));
+    }
+
+    #[test]
+    fn test_swap() {
+        let mut a = BitBuffer2::new_filled(50, 50, false);
+        a.set_xy(10, 10, true);
+
+        let mut b = BitBuffer2::new_filled(50, 50, false);
+        b.set_xy(20, 20, true);
+
+        a.swap(&mut b);
+
+        assert!(a.get_xy(20, 20));
+        assert!(!a.get_xy(10, 10));
+        assert!(b.get_xy(10, 10));
+        assert!(!b.get_xy(20, 20));
+    }
+
+    #[test]
+    fn test_is_empty() {
+        assert!(BitBuffer2::new_filled(0, 0, false).is_empty());
+        assert!(BitBuffer2::new_filled(0, 10, false).is_empty());
+        assert!(BitBuffer2::new_filled(10, 0, false).is_empty());
+        assert!(!BitBuffer2::new_filled(1, 1, false).is_empty());
+    }
+
+    #[test]
+    fn test_words_mut() {
+        let mut buf = BitBuffer2::new_filled(128, 2, false);
+        let words = buf.words_mut();
+        // Set all bits in first word
+        words[0] = !0u64;
+
+        // First 64 pixels should be true
+        for x in 0..64 {
+            assert!(buf.get_xy(x, 0), "bit {} should be set", x);
+        }
+        for x in 64..128 {
+            assert!(!buf.get_xy(x, 0), "bit {} should not be set", x);
+        }
+    }
+
+    #[test]
+    fn test_iter_exact_size() {
+        let buf = BitBuffer2::new_filled(73, 17, false);
+        let iter = buf.iter();
+        assert_eq!(iter.len(), 73 * 17);
+    }
+
+    #[test]
+    fn test_tiny_buffers() {
+        // 1x1
+        let mut buf = BitBuffer2::new_filled(1, 1, false);
+        assert_eq!(buf.len(), 1);
+        assert!(!buf.get(0));
+        buf.set(0, true);
+        assert!(buf.get(0));
+        assert_eq!(buf.count_ones(), 1);
+
+        // 1x100
+        let buf = BitBuffer2::new_filled(1, 100, true);
+        assert_eq!(buf.count_ones(), 100);
+
+        // 100x1
+        let buf = BitBuffer2::new_filled(100, 1, true);
+        assert_eq!(buf.count_ones(), 100);
+    }
+
+    #[test]
+    fn test_set_clears_bit() {
+        let mut buf = BitBuffer2::new_filled(10, 10, true);
+        assert!(buf.get_xy(5, 5));
+
+        buf.set_xy(5, 5, false);
+        assert!(!buf.get_xy(5, 5));
+
+        // Other bits unchanged
+        assert!(buf.get_xy(4, 5));
+        assert!(buf.get_xy(6, 5));
+    }
+
+    #[test]
+    fn test_stride_padding_isolation() {
+        // Verify that padding bits don't affect count_ones or iteration
+        let mut buf = BitBuffer2::new_filled(7, 2, false);
+
+        // Manually set a padding bit (bit 7 in first row, which is padding)
+        // This simulates potential corruption
+        buf.words_mut()[0] |= 1u64 << 7;
+
+        // count_ones should still be 0 (padding excluded)
+        assert_eq!(buf.count_ones(), 0);
+
+        // iter should return all false (padding excluded)
+        assert!(buf.iter().all(|b| !b));
     }
 }
