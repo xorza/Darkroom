@@ -1113,3 +1113,676 @@ mod eight_connectivity {
         assert_eq!(label_map_8.num_labels(), 1);
     }
 }
+
+// ============================================================================
+// Strong verification tests
+// ============================================================================
+
+/// Simple flood-fill reference implementation for ground truth comparison.
+/// This is intentionally naive and slow but obviously correct.
+fn reference_ccl_4conn(mask: &[bool], width: usize, height: usize) -> (Vec<u32>, usize) {
+    let mut labels = vec![0u32; width * height];
+    let mut current_label = 0u32;
+
+    for start_y in 0..height {
+        for start_x in 0..width {
+            let start_idx = start_y * width + start_x;
+            if !mask[start_idx] || labels[start_idx] != 0 {
+                continue;
+            }
+
+            // New component - flood fill
+            current_label += 1;
+            let mut stack = vec![(start_x, start_y)];
+
+            while let Some((x, y)) = stack.pop() {
+                let idx = y * width + x;
+                if labels[idx] != 0 || !mask[idx] {
+                    continue;
+                }
+                labels[idx] = current_label;
+
+                // 4-connectivity neighbors
+                if x > 0 {
+                    stack.push((x - 1, y));
+                }
+                if x + 1 < width {
+                    stack.push((x + 1, y));
+                }
+                if y > 0 {
+                    stack.push((x, y - 1));
+                }
+                if y + 1 < height {
+                    stack.push((x, y + 1));
+                }
+            }
+        }
+    }
+
+    (labels, current_label as usize)
+}
+
+/// Simple flood-fill reference implementation for 8-connectivity.
+fn reference_ccl_8conn(mask: &[bool], width: usize, height: usize) -> (Vec<u32>, usize) {
+    let mut labels = vec![0u32; width * height];
+    let mut current_label = 0u32;
+
+    for start_y in 0..height {
+        for start_x in 0..width {
+            let start_idx = start_y * width + start_x;
+            if !mask[start_idx] || labels[start_idx] != 0 {
+                continue;
+            }
+
+            // New component - flood fill
+            current_label += 1;
+            let mut stack = vec![(start_x, start_y)];
+
+            while let Some((x, y)) = stack.pop() {
+                let idx = y * width + x;
+                if labels[idx] != 0 || !mask[idx] {
+                    continue;
+                }
+                labels[idx] = current_label;
+
+                // 8-connectivity neighbors
+                for dy in -1i32..=1 {
+                    for dx in -1i32..=1 {
+                        if dx == 0 && dy == 0 {
+                            continue;
+                        }
+                        let nx = x as i32 + dx;
+                        let ny = y as i32 + dy;
+                        if nx >= 0 && nx < width as i32 && ny >= 0 && ny < height as i32 {
+                            stack.push((nx as usize, ny as usize));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    (labels, current_label as usize)
+}
+
+/// Verify CCL invariants on any label map.
+fn verify_ccl_invariants(
+    mask: &[bool],
+    labels: &[u32],
+    width: usize,
+    height: usize,
+    connectivity: Connectivity,
+) {
+    // Invariant 1: Background pixels have label 0
+    for (i, (&m, &l)) in mask.iter().zip(labels.iter()).enumerate() {
+        if !m {
+            assert_eq!(
+                l, 0,
+                "Background pixel at index {} has non-zero label {}",
+                i, l
+            );
+        }
+    }
+
+    // Invariant 2: Foreground pixels have non-zero labels
+    for (i, (&m, &l)) in mask.iter().zip(labels.iter()).enumerate() {
+        if m {
+            assert!(l > 0, "Foreground pixel at index {} has zero label", i);
+        }
+    }
+
+    // Invariant 3: Connected pixels have the same label
+    for y in 0..height {
+        for x in 0..width {
+            let idx = y * width + x;
+            if !mask[idx] {
+                continue;
+            }
+            let label = labels[idx];
+
+            // Check all neighbors based on connectivity
+            let neighbors: Vec<(i32, i32)> = match connectivity {
+                Connectivity::Four => vec![(-1, 0), (1, 0), (0, -1), (0, 1)],
+                Connectivity::Eight => vec![
+                    (-1, -1),
+                    (0, -1),
+                    (1, -1),
+                    (-1, 0),
+                    (1, 0),
+                    (-1, 1),
+                    (0, 1),
+                    (1, 1),
+                ],
+            };
+
+            for (dx, dy) in neighbors {
+                let nx = x as i32 + dx;
+                let ny = y as i32 + dy;
+                if nx >= 0 && nx < width as i32 && ny >= 0 && ny < height as i32 {
+                    let nidx = ny as usize * width + nx as usize;
+                    if mask[nidx] {
+                        assert_eq!(
+                            labels[nidx], label,
+                            "Connected pixels at ({},{}) and ({},{}) have different labels: {} vs {}",
+                            x, y, nx, ny, label, labels[nidx]
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    // Invariant 4: Labels are sequential starting from 1
+    let max_label = *labels.iter().max().unwrap_or(&0);
+    if max_label > 0 {
+        let mut label_present = vec![false; max_label as usize + 1];
+        for &l in labels {
+            if l > 0 {
+                label_present[l as usize] = true;
+            }
+        }
+        for l in 1..=max_label {
+            assert!(
+                label_present[l as usize],
+                "Label {} is missing from sequential range 1..{}",
+                l, max_label
+            );
+        }
+    }
+}
+
+/// Compare our implementation against reference flood-fill.
+fn compare_with_reference(mask_data: &[bool], width: usize, height: usize) {
+    let mask = BitBuffer2::from_slice(width, height, mask_data);
+
+    // Test 4-connectivity
+    let label_map_4 = LabelMap::from_mask_with_connectivity(&mask, Connectivity::Four);
+    let (ref_labels_4, ref_count_4) = reference_ccl_4conn(mask_data, width, height);
+
+    assert_eq!(
+        label_map_4.num_labels(),
+        ref_count_4,
+        "4-conn: Component count mismatch: got {}, expected {}",
+        label_map_4.num_labels(),
+        ref_count_4
+    );
+
+    verify_ccl_invariants(
+        mask_data,
+        label_map_4.labels(),
+        width,
+        height,
+        Connectivity::Four,
+    );
+
+    // Verify same grouping (labels may differ but grouping must match)
+    verify_same_grouping(label_map_4.labels(), &ref_labels_4, width * height);
+
+    // Test 8-connectivity
+    let label_map_8 = LabelMap::from_mask_with_connectivity(&mask, Connectivity::Eight);
+    let (ref_labels_8, ref_count_8) = reference_ccl_8conn(mask_data, width, height);
+
+    assert_eq!(
+        label_map_8.num_labels(),
+        ref_count_8,
+        "8-conn: Component count mismatch: got {}, expected {}",
+        label_map_8.num_labels(),
+        ref_count_8
+    );
+
+    verify_ccl_invariants(
+        mask_data,
+        label_map_8.labels(),
+        width,
+        height,
+        Connectivity::Eight,
+    );
+    verify_same_grouping(label_map_8.labels(), &ref_labels_8, width * height);
+}
+
+/// Verify two labelings have the same grouping (same pixels grouped together).
+fn verify_same_grouping(labels_a: &[u32], labels_b: &[u32], len: usize) {
+    // Two labelings are equivalent if: for all i,j:
+    // labels_a[i] == labels_a[j] <=> labels_b[i] == labels_b[j]
+    // We check this by verifying that mapping from a->b is consistent
+
+    use std::collections::HashMap;
+    let mut a_to_b: HashMap<u32, u32> = HashMap::new();
+
+    for i in 0..len {
+        let la = labels_a[i];
+        let lb = labels_b[i];
+
+        if la == 0 && lb == 0 {
+            continue; // Both background
+        }
+
+        if la == 0 || lb == 0 {
+            panic!(
+                "Pixel {} has label {} in A but {} in B (one is background)",
+                i, la, lb
+            );
+        }
+
+        match a_to_b.get(&la) {
+            Some(&expected_b) => {
+                assert_eq!(
+                    lb, expected_b,
+                    "Inconsistent grouping: label {} in A maps to both {} and {} in B",
+                    la, expected_b, lb
+                );
+            }
+            None => {
+                a_to_b.insert(la, lb);
+            }
+        }
+    }
+}
+
+mod ground_truth {
+    use super::*;
+
+    #[test]
+    fn simple_shapes() {
+        // Single pixel
+        let mut mask = vec![false; 16];
+        mask[5] = true;
+        compare_with_reference(&mask, 4, 4);
+
+        // Horizontal line
+        let mut mask = vec![false; 20];
+        for x in 2..7 {
+            mask[1 * 5 + x % 5] = true;
+        }
+        compare_with_reference(&mask, 5, 4);
+
+        // Vertical line
+        let mut mask = vec![false; 20];
+        for y in 0..4 {
+            mask[y * 5 + 2] = true;
+        }
+        compare_with_reference(&mask, 5, 4);
+
+        // L-shape
+        let mut mask = vec![false; 16];
+        mask[0] = true;
+        mask[4] = true;
+        mask[8] = true;
+        mask[9] = true;
+        compare_with_reference(&mask, 4, 4);
+    }
+
+    #[test]
+    fn multiple_components() {
+        // Two separate blobs
+        let mut mask = vec![false; 25];
+        mask[0] = true;
+        mask[1] = true;
+        mask[5] = true;
+        mask[23] = true;
+        mask[24] = true;
+        compare_with_reference(&mask, 5, 5);
+
+        // Three diagonal pixels (separate in 4-conn, together in 8-conn)
+        let mut mask = vec![false; 9];
+        mask[0] = true;
+        mask[4] = true;
+        mask[8] = true;
+        compare_with_reference(&mask, 3, 3);
+    }
+
+    #[test]
+    fn checkerboard_patterns() {
+        // Small checkerboard
+        let mask: Vec<bool> = (0..16)
+            .map(|i| {
+                let x = i % 4;
+                let y = i / 4;
+                (x + y) % 2 == 0
+            })
+            .collect();
+        compare_with_reference(&mask, 4, 4);
+
+        // Larger checkerboard
+        let mask: Vec<bool> = (0..64)
+            .map(|i| {
+                let x = i % 8;
+                let y = i / 8;
+                (x + y) % 2 == 0
+            })
+            .collect();
+        compare_with_reference(&mask, 8, 8);
+    }
+
+    #[test]
+    fn spiral_shape() {
+        // Spiral pattern - tests complex connectivity
+        let width = 9;
+        let height = 9;
+        let mut mask = vec![false; width * height];
+
+        // Outer ring
+        for x in 0..9 {
+            mask[0 * width + x] = true;
+        }
+        for y in 1..9 {
+            mask[y * width + 8] = true;
+        }
+        for x in 0..8 {
+            mask[8 * width + x] = true;
+        }
+        for y in 2..8 {
+            mask[y * width + 0] = true;
+        }
+
+        // Inner part
+        for x in 2..7 {
+            mask[2 * width + x] = true;
+        }
+        for y in 3..7 {
+            mask[y * width + 6] = true;
+        }
+        for x in 2..6 {
+            mask[6 * width + x] = true;
+        }
+        for y in 4..6 {
+            mask[y * width + 2] = true;
+        }
+        mask[4 * width + 4] = true;
+
+        compare_with_reference(&mask, width, height);
+    }
+
+    #[test]
+    fn concentric_squares() {
+        // Concentric squares (nested loops)
+        let width = 11;
+        let height = 11;
+        let mut mask = vec![false; width * height];
+
+        // Outer square
+        for x in 0..11 {
+            mask[0 * width + x] = true;
+            mask[10 * width + x] = true;
+        }
+        for y in 1..10 {
+            mask[y * width + 0] = true;
+            mask[y * width + 10] = true;
+        }
+
+        // Inner square (separate component)
+        for x in 4..7 {
+            mask[4 * width + x] = true;
+            mask[6 * width + x] = true;
+        }
+        for y in 5..6 {
+            mask[y * width + 4] = true;
+            mask[y * width + 6] = true;
+        }
+
+        compare_with_reference(&mask, width, height);
+    }
+}
+
+mod property_based {
+    use super::*;
+
+    /// Simple PRNG for deterministic tests
+    fn simple_rng(seed: u64, index: usize) -> bool {
+        let mut x = seed.wrapping_add(index as u64);
+        x ^= x >> 12;
+        x ^= x << 25;
+        x ^= x >> 27;
+        x.wrapping_mul(0x2545F4914F6CDD1D) & 1 == 0
+    }
+
+    #[test]
+    fn random_sparse_masks() {
+        // Test random sparse masks (typical for star detection)
+        for seed in 0..10 {
+            let width = 50 + seed * 7;
+            let height = 50 + seed * 5;
+            let mask: Vec<bool> = (0..width * height)
+                .map(|i| simple_rng(seed as u64 * 1000, i) && simple_rng(seed as u64 * 1001, i))
+                .collect();
+
+            compare_with_reference(&mask, width, height);
+        }
+    }
+
+    #[test]
+    fn random_dense_masks() {
+        // Test random dense masks
+        for seed in 0..5 {
+            let width = 30 + seed * 3;
+            let height = 30 + seed * 4;
+            let mask: Vec<bool> = (0..width * height)
+                .map(|i| simple_rng(seed as u64 * 2000, i))
+                .collect();
+
+            compare_with_reference(&mask, width, height);
+        }
+    }
+
+    #[test]
+    fn random_large_masks() {
+        // Test larger masks that use parallel algorithm
+        for seed in 0..3 {
+            let width = 400;
+            let height = 300;
+            // Sparse: ~5% density
+            let mask: Vec<bool> = (0..width * height)
+                .map(|i| {
+                    simple_rng(seed as u64 * 3000, i)
+                        && simple_rng(seed as u64 * 3001, i)
+                        && simple_rng(seed as u64 * 3002, i)
+                        && simple_rng(seed as u64 * 3003, i)
+                })
+                .collect();
+
+            compare_with_reference(&mask, width, height);
+        }
+    }
+
+    #[test]
+    fn invariants_on_random_masks() {
+        // Verify invariants hold on various random masks
+        for seed in 0..20 {
+            let width = 20 + (seed % 30);
+            let height = 20 + (seed % 25);
+            let density = (seed % 5) as f64 * 0.15 + 0.05; // 5% to 65%
+
+            let mask: Vec<bool> = (0..width * height)
+                .map(|i| {
+                    let hash = simple_rng(seed as u64 * 5000, i);
+                    let threshold = (density * u64::MAX as f64) as u64;
+                    let val = (seed as u64 * 5000)
+                        .wrapping_add(i as u64)
+                        .wrapping_mul(0x2545F4914F6CDD1D);
+                    hash && val < threshold
+                })
+                .collect();
+
+            let bit_mask = BitBuffer2::from_slice(width, height, &mask);
+
+            let label_map_4 = LabelMap::from_mask_with_connectivity(&bit_mask, Connectivity::Four);
+            verify_ccl_invariants(
+                &mask,
+                label_map_4.labels(),
+                width,
+                height,
+                Connectivity::Four,
+            );
+
+            let label_map_8 = LabelMap::from_mask_with_connectivity(&bit_mask, Connectivity::Eight);
+            verify_ccl_invariants(
+                &mask,
+                label_map_8.labels(),
+                width,
+                height,
+                Connectivity::Eight,
+            );
+        }
+    }
+}
+
+mod pixel_level {
+    use super::*;
+    use crate::star_detection::config::Connectivity;
+
+    #[test]
+    fn exact_labels_simple_grid() {
+        // 4x4 grid with known layout:
+        // ##..
+        // ##..
+        // ..##
+        // ..##
+        // Should produce 2 components
+        let mut mask = vec![false; 16];
+        mask[0] = true;
+        mask[1] = true;
+        mask[4] = true;
+        mask[5] = true;
+        mask[10] = true;
+        mask[11] = true;
+        mask[14] = true;
+        mask[15] = true;
+
+        let bit_mask = BitBuffer2::from_slice(4, 4, &mask);
+        let label_map = LabelMap::from_mask(&bit_mask);
+
+        assert_eq!(label_map.num_labels(), 2);
+
+        // First component (top-left 2x2)
+        let label_a = label_map[0];
+        assert!(label_a > 0);
+        assert_eq!(label_map[1], label_a);
+        assert_eq!(label_map[4], label_a);
+        assert_eq!(label_map[5], label_a);
+
+        // Second component (bottom-right 2x2)
+        let label_b = label_map[10];
+        assert!(label_b > 0);
+        assert_ne!(label_b, label_a);
+        assert_eq!(label_map[11], label_b);
+        assert_eq!(label_map[14], label_b);
+        assert_eq!(label_map[15], label_b);
+
+        // Background
+        assert_eq!(label_map[2], 0);
+        assert_eq!(label_map[3], 0);
+        assert_eq!(label_map[8], 0);
+        assert_eq!(label_map[9], 0);
+    }
+
+    #[test]
+    fn exact_labels_diagonal_8conn() {
+        // 3x3 diagonal:
+        // #..
+        // .#.
+        // ..#
+        let mut mask = vec![false; 9];
+        mask[0] = true;
+        mask[4] = true;
+        mask[8] = true;
+
+        let bit_mask = BitBuffer2::from_slice(3, 3, &mask);
+
+        // 4-connectivity: 3 separate labels
+        let label_map_4 = LabelMap::from_mask_with_connectivity(&bit_mask, Connectivity::Four);
+        assert_eq!(label_map_4.num_labels(), 3);
+        assert_ne!(label_map_4[0], label_map_4[4]);
+        assert_ne!(label_map_4[4], label_map_4[8]);
+        assert_ne!(label_map_4[0], label_map_4[8]);
+
+        // 8-connectivity: all same label
+        let label_map_8 = LabelMap::from_mask_with_connectivity(&bit_mask, Connectivity::Eight);
+        assert_eq!(label_map_8.num_labels(), 1);
+        let label = label_map_8[0];
+        assert_eq!(label_map_8[4], label);
+        assert_eq!(label_map_8[8], label);
+    }
+
+    #[test]
+    fn exact_labels_u_shape() {
+        // U-shape that requires union-find merging:
+        // #.#
+        // #.#
+        // ###
+        let mut mask = vec![false; 9];
+        mask[0] = true;
+        mask[2] = true;
+        mask[3] = true;
+        mask[5] = true;
+        mask[6] = true;
+        mask[7] = true;
+        mask[8] = true;
+
+        let bit_mask = BitBuffer2::from_slice(3, 3, &mask);
+        let label_map = LabelMap::from_mask(&bit_mask);
+
+        assert_eq!(label_map.num_labels(), 1);
+
+        // All foreground pixels should have the same label
+        let label = label_map[0];
+        assert!(label > 0);
+        for &idx in &[0, 2, 3, 5, 6, 7, 8] {
+            assert_eq!(
+                label_map[idx], label,
+                "Pixel {} should have label {}",
+                idx, label
+            );
+        }
+
+        // Background pixels
+        assert_eq!(label_map[1], 0);
+        assert_eq!(label_map[4], 0);
+    }
+
+    #[test]
+    fn exact_labels_cross_pattern() {
+        // Cross pattern:
+        // .#.
+        // ###
+        // .#.
+        let mut mask = vec![false; 9];
+        mask[1] = true;
+        mask[3] = true;
+        mask[4] = true;
+        mask[5] = true;
+        mask[7] = true;
+
+        let bit_mask = BitBuffer2::from_slice(3, 3, &mask);
+        let label_map = LabelMap::from_mask(&bit_mask);
+
+        assert_eq!(label_map.num_labels(), 1);
+
+        let label = label_map[1];
+        assert!(label > 0);
+        for &idx in &[1, 3, 4, 5, 7] {
+            assert_eq!(label_map[idx], label);
+        }
+
+        // Corners are background
+        for &idx in &[0, 2, 6, 8] {
+            assert_eq!(label_map[idx], 0);
+        }
+    }
+
+    #[test]
+    fn labels_deterministic() {
+        // Same input should always produce same output
+        let mut mask = vec![false; 100];
+        for i in [5, 15, 25, 35, 45, 50, 51, 52, 60, 70, 80, 90] {
+            mask[i] = true;
+        }
+
+        let bit_mask = BitBuffer2::from_slice(10, 10, &mask);
+
+        let label_map_1 = LabelMap::from_mask(&bit_mask);
+        let label_map_2 = LabelMap::from_mask(&bit_mask);
+
+        assert_eq!(label_map_1.num_labels(), label_map_2.num_labels());
+        assert_eq!(label_map_1.labels(), label_map_2.labels());
+    }
+}
