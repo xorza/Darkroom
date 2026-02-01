@@ -19,6 +19,10 @@
 //!
 //! 5. **Quality metrics**: Compute FWHM, SNR, and eccentricity for each star.
 
+// =============================================================================
+// Submodules
+// =============================================================================
+
 pub(crate) mod background;
 #[cfg(test)]
 mod bench;
@@ -38,34 +42,46 @@ mod star;
 #[cfg(test)]
 pub mod tests;
 
-// Public API exports - main entry points for external consumers
-pub use centroid::LocalBackgroundMethod;
+// =============================================================================
+// Public API Exports
+// =============================================================================
 
-// Internal re-exports for advanced users (may change in future versions)
-// Background estimation (used by calibration and advanced pipelines)
+// Main types
+#[allow(unused_imports)] // Re-exported for public API
+pub use config::Connectivity;
+pub use config::StarDetectionConfig;
+pub use defect_map::DefectMap;
+pub use star::Star;
+
+// Background estimation
 pub use background::{BackgroundConfig, BackgroundMap};
 
-// Profile fitting (for custom centroiding pipelines)
+// Centroid methods
+pub use centroid::LocalBackgroundMethod;
 pub use centroid::{GaussianFitConfig, GaussianFitResult, fit_gaussian_2d};
 pub use centroid::{
     MoffatFitConfig, MoffatFitResult, alpha_beta_to_fwhm, fit_moffat_2d, fwhm_beta_to_alpha,
 };
 
-// Low-level detection (for custom pipelines)
+// =============================================================================
+// Internal Re-exports (for custom pipelines)
+// =============================================================================
+
 pub(crate) use centroid::compute_centroid;
 pub(crate) use convolution::matched_filter;
 pub(crate) use detection::detect_stars;
 pub(crate) use median_filter::median_filter_3x3;
 
-// Configuration types
-#[allow(unused_imports)] // Re-exported for public API
-pub use config::{Connectivity, StarDetectionConfig};
-
-// Star type
-pub use star::Star;
+// =============================================================================
+// Imports
+// =============================================================================
 
 use crate::astro_image::AstroImage;
 use crate::common::Buffer2;
+
+// =============================================================================
+// Types
+// =============================================================================
 
 /// Method for computing sub-pixel centroids.
 ///
@@ -93,7 +109,62 @@ pub enum CentroidMethod {
     },
 }
 
-pub use defect_map::DefectMap;
+/// Result of star detection with diagnostics.
+#[derive(Debug, Clone)]
+pub struct StarDetectionResult {
+    /// Detected stars sorted by flux (brightest first).
+    pub stars: Vec<Star>,
+    /// Diagnostic information from the detection pipeline.
+    pub diagnostics: StarDetectionDiagnostics,
+}
+
+/// Diagnostic information from star detection.
+///
+/// Contains statistics and counts from each stage of the detection pipeline
+/// for debugging and tuning purposes.
+#[derive(Debug, Clone, Default)]
+pub struct StarDetectionDiagnostics {
+    /// Number of pixels above detection threshold.
+    pub pixels_above_threshold: usize,
+    /// Number of connected components found.
+    pub connected_components: usize,
+    /// Number of candidates after size/edge filtering.
+    pub candidates_after_filtering: usize,
+    /// Number of candidates that were deblended into multiple stars.
+    pub deblended_components: usize,
+    /// Number of stars after centroid computation (before quality filtering).
+    pub stars_after_centroid: usize,
+    /// Number of stars rejected for low SNR.
+    pub rejected_low_snr: usize,
+    /// Number of stars rejected for high eccentricity.
+    pub rejected_high_eccentricity: usize,
+    /// Number of stars rejected as cosmic rays (high sharpness).
+    pub rejected_cosmic_rays: usize,
+    /// Number of stars rejected as saturated.
+    pub rejected_saturated: usize,
+    /// Number of stars rejected for non-circular shape (roundness).
+    pub rejected_roundness: usize,
+    /// Number of stars rejected for abnormal FWHM.
+    pub rejected_fwhm_outliers: usize,
+    /// Number of duplicate detections removed.
+    pub rejected_duplicates: usize,
+    /// Final number of stars returned.
+    pub final_star_count: usize,
+    /// Median FWHM of detected stars (pixels).
+    pub median_fwhm: f32,
+    /// Median SNR of detected stars.
+    pub median_snr: f32,
+    /// Estimated FWHM from auto-estimation (0.0 if not used or disabled).
+    pub estimated_fwhm: f32,
+    /// Number of stars used for FWHM estimation.
+    pub fwhm_estimation_star_count: usize,
+    /// Whether FWHM was auto-estimated (true) or manual/disabled (false).
+    pub fwhm_was_auto_estimated: bool,
+}
+
+// =============================================================================
+// StarDetector
+// =============================================================================
 
 /// Star detector with builder pattern for convenient star detection.
 ///
@@ -170,49 +241,13 @@ impl StarDetector {
         drop(output);
 
         // Step 1: Estimate background
-        // Use adaptive thresholding if configured
-        let background = if let Some(ref adaptive_config) = self.config.adaptive_threshold {
-            use background::AdaptiveSigmaConfig;
-            let adaptive = AdaptiveSigmaConfig {
-                base_sigma: adaptive_config.base_sigma,
-                max_sigma: adaptive_config.max_sigma,
-                contrast_factor: adaptive_config.contrast_factor,
-            };
-            BackgroundMap::new_with_adaptive_sigma(
-                &pixels,
-                &self.config.background_config,
-                adaptive,
-            )
-        } else {
-            BackgroundMap::new(&pixels, &self.config.background_config)
-        };
+        let background = self.estimate_background(&pixels);
 
-        // Step 1.5: Determine effective FWHM (manual > auto-estimate > disabled)
+        // Step 2: Determine effective FWHM (manual > auto-estimate > disabled)
         let (effective_fwhm, fwhm_estimate) = self.determine_effective_fwhm(&pixels, &background);
 
-        // Step 2: Detect star candidates
-        // Optionally apply matched filter (Gaussian convolution) for better faint star detection
-        let filtered = if effective_fwhm > f32::EPSILON {
-            tracing::debug!(
-                "Applying matched filter with FWHM={:.1}, axis_ratio={:.2}, angle={:.1}°",
-                effective_fwhm,
-                self.config.psf_axis_ratio,
-                self.config.psf_angle.to_degrees()
-            );
-            let mut filtered = Buffer2::new_default(pixels.width(), pixels.height());
-            matched_filter(
-                &pixels,
-                &background.background,
-                effective_fwhm,
-                self.config.psf_axis_ratio,
-                self.config.psf_angle,
-                &mut filtered,
-            );
-            Some(filtered)
-        } else {
-            None
-        };
-        let candidates = detect_stars(&pixels, filtered.as_ref(), &background, &self.config);
+        // Step 3: Detect star candidates (with optional matched filter)
+        let (candidates, filtered) = self.detect_candidates(&pixels, &background, effective_fwhm);
 
         let mut diagnostics = StarDetectionDiagnostics {
             candidates_after_filtering: candidates.len(),
@@ -222,12 +257,13 @@ impl StarDetector {
             ..Default::default()
         };
         tracing::debug!("Detected {} star candidates", candidates.len());
+        drop(filtered);
 
-        // Step 3: Compute precise centroids
+        // Step 4: Compute precise centroids (parallel)
         let mut stars = compute_centroids(candidates, &pixels, &background, &self.config);
         diagnostics.stars_after_centroid = stars.len();
 
-        // Step 4: Apply quality filters
+        // Step 5: Apply quality filters
         let filter_stats = apply_quality_filters(&mut stars, &self.config);
         diagnostics.rejected_saturated = filter_stats.saturated;
         diagnostics.rejected_low_snr = filter_stats.low_snr;
@@ -235,26 +271,23 @@ impl StarDetector {
         diagnostics.rejected_cosmic_rays = filter_stats.cosmic_rays;
         diagnostics.rejected_roundness = filter_stats.roundness;
 
-        // Sort by flux (brightest first)
+        // Step 6: Post-processing
         sort_by_flux(&mut stars);
 
-        // Filter FWHM outliers - spurious detections often have abnormally large FWHM
         let removed = filter_fwhm_outliers(&mut stars, self.config.max_fwhm_deviation);
         diagnostics.rejected_fwhm_outliers = removed;
         if removed > 0 {
             tracing::debug!("Removed {} stars with abnormally large FWHM", removed);
         }
 
-        // Remove duplicate detections - keep only the brightest star within min_separation pixels
         let removed = remove_duplicate_stars(&mut stars, self.config.duplicate_min_separation);
         diagnostics.rejected_duplicates = removed;
         if removed > 0 {
             tracing::debug!("Removed {} duplicate star detections", removed);
         }
 
-        // Compute final statistics
+        // Step 7: Compute final statistics
         diagnostics.final_star_count = stars.len();
-
         if !stars.is_empty() {
             let mut buf: Vec<f32> = stars.iter().map(|s| s.fwhm).collect();
             diagnostics.median_fwhm = crate::math::median_f32_mut(&mut buf);
@@ -267,30 +300,71 @@ impl StarDetector {
         StarDetectionResult { stars, diagnostics }
     }
 
+    /// Estimate background, optionally with adaptive thresholding.
+    fn estimate_background(&self, pixels: &Buffer2<f32>) -> BackgroundMap {
+        if let Some(ref adaptive_config) = self.config.adaptive_threshold {
+            use background::AdaptiveSigmaConfig;
+            let adaptive = AdaptiveSigmaConfig {
+                base_sigma: adaptive_config.base_sigma,
+                max_sigma: adaptive_config.max_sigma,
+                contrast_factor: adaptive_config.contrast_factor,
+            };
+            BackgroundMap::new_with_adaptive_sigma(pixels, &self.config.background_config, adaptive)
+        } else {
+            BackgroundMap::new(pixels, &self.config.background_config)
+        }
+    }
+
     /// Determine effective FWHM for matched filtering.
     ///
     /// Priority: manual expected_fwhm > auto-estimate > disabled (0.0)
-    ///
-    /// Returns (effective_fwhm, Option<FwhmEstimate>).
-    /// The FwhmEstimate is Some only when auto-estimation was performed.
     fn determine_effective_fwhm(
         &self,
         pixels: &Buffer2<f32>,
         background: &BackgroundMap,
     ) -> (f32, Option<fwhm_estimation::FwhmEstimate>) {
-        // Manual override takes precedence
         if self.config.expected_fwhm > f32::EPSILON {
             return (self.config.expected_fwhm, None);
         }
 
-        // Auto-estimation if enabled
         if self.config.auto_estimate_fwhm {
             let estimate = self.estimate_fwhm_from_bright_stars(pixels, background);
             return (estimate.fwhm, Some(estimate));
         }
 
-        // Disabled - no matched filter
         (0.0, None)
+    }
+
+    /// Detect star candidates, optionally applying matched filter.
+    fn detect_candidates(
+        &self,
+        pixels: &Buffer2<f32>,
+        background: &BackgroundMap,
+        effective_fwhm: f32,
+    ) -> (Vec<detection::StarCandidate>, Option<Buffer2<f32>>) {
+        let filtered = if effective_fwhm > f32::EPSILON {
+            tracing::debug!(
+                "Applying matched filter with FWHM={:.1}, axis_ratio={:.2}, angle={:.1}°",
+                effective_fwhm,
+                self.config.psf_axis_ratio,
+                self.config.psf_angle.to_degrees()
+            );
+            let mut filtered = Buffer2::new_default(pixels.width(), pixels.height());
+            matched_filter(
+                pixels,
+                &background.background,
+                effective_fwhm,
+                self.config.psf_axis_ratio,
+                self.config.psf_angle,
+                &mut filtered,
+            );
+            Some(filtered)
+        } else {
+            None
+        };
+
+        let candidates = detect_stars(pixels, filtered.as_ref(), background, &self.config);
+        (candidates, filtered)
     }
 
     /// Perform first-pass detection and estimate FWHM from bright stars.
@@ -299,21 +373,19 @@ impl StarDetector {
         pixels: &Buffer2<f32>,
         background: &BackgroundMap,
     ) -> fwhm_estimation::FwhmEstimate {
-        // Create first-pass config: high sigma threshold, no matched filter
         let first_pass_config = StarDetectionConfig {
             background_config: BackgroundConfig {
                 sigma_threshold: self.config.background_config.sigma_threshold
                     * self.config.fwhm_estimation_sigma_factor,
                 ..self.config.background_config.clone()
             },
-            expected_fwhm: 0.0,                 // No matched filter
-            adaptive_threshold: None,           // Skip for speed
-            min_area: 3,                        // Smaller minimum
-            min_snr: self.config.min_snr * 2.0, // Stricter SNR for bright stars
+            expected_fwhm: 0.0,
+            adaptive_threshold: None,
+            min_area: 3,
+            min_snr: self.config.min_snr * 2.0,
             ..self.config.clone()
         };
 
-        // Detect and compute centroids
         let candidates = detect_stars(pixels, None, background, &first_pass_config);
         tracing::debug!(
             "FWHM estimation: first pass detected {} bright star candidates",
@@ -322,73 +394,21 @@ impl StarDetector {
 
         let stars = compute_centroids(candidates, pixels, background, &first_pass_config);
 
-        // Estimate FWHM with quality filtering
         fwhm_estimation::estimate_fwhm(
             &stars,
             self.config.min_stars_for_fwhm_estimation,
-            4.0, // Default FWHM fallback
+            4.0,
             self.config.max_eccentricity,
             self.config.max_sharpness,
         )
     }
 }
 
-/// Result of star detection with diagnostics.
-#[derive(Debug, Clone)]
-pub struct StarDetectionResult {
-    /// Detected stars sorted by flux (brightest first).
-    pub stars: Vec<Star>,
-    /// Diagnostic information from the detection pipeline.
-    pub diagnostics: StarDetectionDiagnostics,
-}
-
-/// Diagnostic information from star detection.
-///
-/// Contains statistics and counts from each stage of the detection pipeline
-/// for debugging and tuning purposes.
-#[derive(Debug, Clone, Default)]
-pub struct StarDetectionDiagnostics {
-    /// Number of pixels above detection threshold.
-    pub pixels_above_threshold: usize,
-    /// Number of connected components found.
-    pub connected_components: usize,
-    /// Number of candidates after size/edge filtering.
-    pub candidates_after_filtering: usize,
-    /// Number of candidates that were deblended into multiple stars.
-    pub deblended_components: usize,
-    /// Number of stars after centroid computation (before quality filtering).
-    pub stars_after_centroid: usize,
-    /// Number of stars rejected for low SNR.
-    pub rejected_low_snr: usize,
-    /// Number of stars rejected for high eccentricity.
-    pub rejected_high_eccentricity: usize,
-    /// Number of stars rejected as cosmic rays (high sharpness).
-    pub rejected_cosmic_rays: usize,
-    /// Number of stars rejected as saturated.
-    pub rejected_saturated: usize,
-    /// Number of stars rejected for non-circular shape (roundness).
-    pub rejected_roundness: usize,
-    /// Number of stars rejected for abnormal FWHM.
-    pub rejected_fwhm_outliers: usize,
-    /// Number of duplicate detections removed.
-    pub rejected_duplicates: usize,
-    /// Final number of stars returned.
-    pub final_star_count: usize,
-    /// Median FWHM of detected stars (pixels).
-    pub median_fwhm: f32,
-    /// Median SNR of detected stars.
-    pub median_snr: f32,
-    /// Estimated FWHM from auto-estimation (0.0 if not used or disabled).
-    pub estimated_fwhm: f32,
-    /// Number of stars used for FWHM estimation.
-    pub fwhm_estimation_star_count: usize,
-    /// Whether FWHM was auto-estimated (true) or manual/disabled (false).
-    pub fwhm_was_auto_estimated: bool,
-}
+// =============================================================================
+// Helper Functions
+// =============================================================================
 
 /// Compute centroids for star candidates in parallel.
-///
-/// Takes detection candidates and computes sub-pixel centroids with quality metrics.
 fn compute_centroids(
     candidates: Vec<detection::StarCandidate>,
     pixels: &Buffer2<f32>,
@@ -404,8 +424,6 @@ fn compute_centroids(
 }
 
 /// Apply quality filters to stars, returning rejection counts.
-///
-/// Filters: saturated, low SNR, high eccentricity, cosmic rays, non-round.
 fn apply_quality_filters(
     stars: &mut Vec<Star>,
     config: &StarDetectionConfig,
@@ -456,9 +474,8 @@ fn sort_by_flux(stars: &mut [Star]) {
 
 /// Remove duplicate star detections that are too close together.
 ///
-/// Keeps the brightest star (by flux) within `min_separation` pixels of each other.
+/// Keeps the brightest star (by flux) within `min_separation` pixels.
 /// Stars must be sorted by flux (brightest first) before calling.
-/// Returns the number of stars removed.
 fn remove_duplicate_stars(stars: &mut Vec<Star>, min_separation: f32) -> usize {
     if stars.len() < 2 {
         return 0;
@@ -478,7 +495,6 @@ fn remove_duplicate_stars(stars: &mut Vec<Star>, min_separation: f32) -> usize {
             let dx = stars[i].x - stars[j].x;
             let dy = stars[i].y - stars[j].y;
             if dx * dx + dy * dy < min_sep_sq {
-                // Keep i (higher flux since sorted), mark j for removal
                 kept[j] = false;
             }
         }
@@ -486,7 +502,6 @@ fn remove_duplicate_stars(stars: &mut Vec<Star>, min_separation: f32) -> usize {
 
     let removed_count = kept.iter().filter(|&&k| !k).count();
 
-    // Filter in place
     let mut write_idx = 0;
     for read_idx in 0..stars.len() {
         if kept[read_idx] {
@@ -503,22 +518,17 @@ fn remove_duplicate_stars(stars: &mut Vec<Star>, min_separation: f32) -> usize {
 
 /// Filter stars by FWHM using MAD-based outlier detection.
 ///
-/// Removes stars with FWHM > median + max_deviation * effective_mad.
-/// The effective_mad is max(mad, median * 0.1) to handle uniform FWHM.
-///
+/// Removes stars with FWHM > median + max_deviation × effective_mad.
 /// Stars should be sorted by flux (brightest first) before calling.
-/// Returns the number of stars removed.
 fn filter_fwhm_outliers(stars: &mut Vec<Star>, max_deviation: f32) -> usize {
     if max_deviation <= 0.0 || stars.len() < 5 {
         return 0;
     }
 
-    // Use top half for robust median/MAD estimate
     let reference_count = (stars.len() / 2).max(5).min(stars.len());
     let mut fwhms: Vec<f32> = stars.iter().take(reference_count).map(|s| s.fwhm).collect();
     let (median_fwhm, mad) = crate::math::median_and_mad_f32_mut(&mut fwhms);
 
-    // Use at least 10% of median as minimum MAD
     let effective_mad = mad.max(median_fwhm * 0.1);
     let max_fwhm = median_fwhm + max_deviation * effective_mad;
 
