@@ -188,7 +188,7 @@ fn test_label_map_empty_mask() {
     let label_map = LabelMap::from_mask(&mask);
 
     assert_eq!(label_map.num_labels(), 0);
-    assert!(label_map.iter().all(|&l| l == 0));
+    assert!(label_map.labels().iter().all(|&l| l == 0));
 }
 
 #[test]
@@ -202,7 +202,7 @@ fn test_label_map_single_pixel() {
 
     assert_eq!(label_map.num_labels(), 1);
     assert_eq!(label_map[1 * 4 + 1], 1);
-    assert_eq!(label_map.iter().filter(|&&l| l == 1).count(), 1);
+    assert_eq!(label_map.labels().iter().filter(|&&l| l == 1).count(), 1);
 }
 
 #[test]
@@ -376,7 +376,7 @@ fn test_label_map_filled_rectangle() {
     let label_map = LabelMap::from_mask(&mask);
 
     assert_eq!(label_map.num_labels(), 1);
-    assert!(label_map.iter().all(|&l| l == 1));
+    assert!(label_map.labels().iter().all(|&l| l == 1));
 }
 
 #[test]
@@ -682,7 +682,7 @@ fn test_label_map_all_pixels_set_large() {
     let label_map = LabelMap::from_mask(&mask);
 
     assert_eq!(label_map.num_labels(), 1);
-    assert!(label_map.iter().all(|&l| l == 1));
+    assert!(label_map.labels().iter().all(|&l| l == 1));
 }
 
 #[test]

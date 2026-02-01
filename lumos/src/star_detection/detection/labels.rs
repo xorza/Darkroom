@@ -86,9 +86,10 @@ impl LabelMap {
         self.labels.height()
     }
 
+    /// Get the raw labels slice.
     #[inline]
-    pub fn iter(&self) -> impl Iterator<Item = &u32> {
-        self.labels.iter()
+    pub fn labels(&self) -> &[u32] {
+        self.labels.pixels()
     }
 }
 

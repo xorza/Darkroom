@@ -65,6 +65,15 @@ impl Aabb {
     pub const fn area(&self) -> usize {
         self.width() * self.height()
     }
+
+    /// Merge two bounding boxes, returning a box that contains both.
+    #[inline]
+    pub fn merge(&self, other: &Self) -> Self {
+        Self {
+            min: Vec2us::new(self.min.x.min(other.min.x), self.min.y.min(other.min.y)),
+            max: Vec2us::new(self.max.x.max(other.max.x), self.max.y.max(other.max.y)),
+        }
+    }
 }
 
 #[cfg(test)]

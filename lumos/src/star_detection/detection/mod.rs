@@ -199,7 +199,44 @@ fn collect_component_data(
     width: usize,
     max_area: usize,
 ) -> Vec<ComponentData> {
+    use rayon::prelude::*;
+
     let num_labels = label_map.num_labels();
+    let labels = label_map.labels();
+    let height = label_map.height();
+
+    // Process rows in parallel, each thread builds partial component data
+    let chunk_size = (height / rayon::current_num_threads()).max(64);
+
+    let partial_results: Vec<Vec<ComponentData>> = labels
+        .par_chunks(chunk_size * width)
+        .enumerate()
+        .map(|(chunk_idx, chunk)| {
+            let mut local_data: Vec<ComponentData> = Vec::with_capacity(num_labels);
+            local_data.resize_with(num_labels, || ComponentData {
+                bbox: Aabb::empty(),
+                label: 0,
+                area: 0,
+            });
+
+            let base_row = chunk_idx * chunk_size;
+            for (local_idx, &label) in chunk.iter().enumerate() {
+                if label == 0 {
+                    continue;
+                }
+                let data = &mut local_data[(label - 1) as usize];
+                let x = local_idx % width;
+                let y = base_row + local_idx / width;
+                data.bbox.include(Vec2us::new(x, y));
+                data.label = label;
+                data.area += 1;
+            }
+
+            local_data
+        })
+        .collect();
+
+    // Merge partial results
     let mut component_data: Vec<ComponentData> = Vec::with_capacity(num_labels);
     component_data.resize_with(num_labels, || ComponentData {
         bbox: Aabb::empty(),
@@ -207,20 +244,23 @@ fn collect_component_data(
         area: 0,
     });
 
-    for (idx, &label) in label_map.iter().enumerate() {
-        if label == 0 {
-            continue;
+    for partial in partial_results {
+        for (i, partial_comp) in partial.into_iter().enumerate() {
+            if partial_comp.area == 0 {
+                continue;
+            }
+            let data = &mut component_data[i];
+            data.bbox = data.bbox.merge(&partial_comp.bbox);
+            data.label = partial_comp.label;
+            data.area += partial_comp.area;
         }
-        let data = &mut component_data[(label - 1) as usize];
-        // Skip area counting for oversized components (early termination)
+    }
+
+    // Mark oversized components (set area to max_area + 1 so they're filtered later)
+    for data in &mut component_data {
         if data.area > max_area {
-            continue;
+            data.area = max_area + 1;
         }
-        let x = idx % width;
-        let y = idx / width;
-        data.bbox.include(Vec2us::new(x, y));
-        data.label = label;
-        data.area += 1;
     }
 
     component_data
