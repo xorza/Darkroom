@@ -22,50 +22,42 @@ StarDetector::detect()
 ├── 3x3 median filter (for CFA sensors)
 ├── BackgroundMap::new()     [Background estimation]
 │   └── or new_with_adaptive_sigma()  [Adaptive thresholding]
+├── determine_effective_fwhm()  [Auto-estimate or manual]
 ├── matched_filter()         [SIMD Gaussian convolution]
 ├── detect_stars()           [Thresholding + CCL]
 ├── compute_centroid()       [Sub-pixel refinement]
 └── Quality filters (SNR, eccentricity, sharpness, etc.)
 ```
 
-## Implementation Status
+## Features
 
-### Completed Features
+### RLE-based Connected Component Labeling
 
-| Feature | Location | Notes |
-|---------|----------|-------|
-| SIMD threshold mask | `common/threshold_mask/` | SSE4.1, NEON |
-| Adaptive threshold mask | `common/threshold_mask/` | Per-pixel sigma, SIMD |
-| Matched filtering | `convolution/mod.rs` | Separable Gaussian, SIMD |
-| Elliptical PSF support | `convolution/mod.rs` | axis_ratio, angle params |
-| RLE-based CCL | `labeling/mod.rs` | ~50% faster than pixel-based |
-| Block-based parallel CCL | `labeling/mod.rs` | Strip-based with boundary merge |
-| Lock-free union-find | `labeling/mod.rs` | CAS-based atomic operations |
-| CTZ run extraction | `labeling/mod.rs` | 10x faster for sparse masks |
-| 4/8-connectivity | `labeling/mod.rs` | Configurable via `Connectivity` |
-| Multi-threshold deblending | `deblend/multi_threshold.rs` | SExtractor-style |
-| Local maxima deblending | `deblend/local_maxima.rs` | Fast, default |
-| Touched-label tracking | `mod.rs` | Efficient component collection |
-| Early area filtering | `mod.rs` | Skip oversized components |
+~50% faster than pixel-based methods (15ms → 5.5ms on 6K globular cluster):
 
-### Performance
+- Run extraction using word-level bit scanning (64-bit fast-paths)
+- CTZ-based scanning for mixed words (10x faster for sparse masks)
+- Label runs and merge overlapping runs from previous row
+- Parallel strip processing with atomic boundary merging
+- Lock-free CAS-based union-find for thread safety
 
-| Benchmark | Median Time | Notes |
-|-----------|-------------|-------|
-| label_map_from_mask_1k | ~346µs | 1K image, 500 stars |
-| label_map_from_mask_4k | ~2ms | 4K image, 2000 stars |
-| label_map_from_mask_6k_globular | ~5.5ms | 4K image, 50k stars (dense) |
-| detect_stars_6k_50000 | ~234ms | Full pipeline, 6K image |
-| matched_filter_4k | ~90ms | Gaussian convolution only |
+### 8-Connectivity Option
 
-## Adaptive Thresholding
+For undersampled PSFs where 4-connectivity fragments detections:
 
-Adaptive thresholding adjusts the detection sigma based on local image characteristics:
+```rust
+let label_map = LabelMap::from_mask_with_connectivity(
+    &binary_mask,
+    Connectivity::Eight
+);
+```
+
+### Adaptive Thresholding
+
+Adjusts detection sigma based on local image characteristics:
 
 - **Low-contrast regions** (uniform sky): Uses base sigma (default 3.5)
 - **High-contrast regions** (nebulae, gradients): Uses higher sigma (up to 6.0)
-
-### Usage
 
 ```rust
 // Enable with default settings
@@ -84,13 +76,72 @@ let config = StarDetectionConfig::default()
     });
 ```
 
-### Algorithm
+**Algorithm:**
+1. Computes contrast metric (CV = sigma/median) per tile during background estimation
+2. Interpolates per-pixel adaptive sigma alongside background/noise
+3. Higher sigma in high-contrast regions, lower in uniform sky
+4. SIMD-accelerated threshold mask creation (SSE4.1/NEON)
 
-1. **Tile statistics**: Computes contrast metric (CV = sigma/median) per tile
-2. **Adaptive sigma**: `sigma = base + contrast × (max - base)` clamped to [base, max]
-3. **Median filter**: 3×3 smoothing of adaptive sigma across tiles
-4. **Interpolation**: Bilinear interpolation to per-pixel values
-5. **Threshold**: `pixel > background + adaptive_sigma × noise`
+**Note:** Adaptive thresholding is disabled when matched filter is used because the filter changes noise characteristics. Future work could enable this by scaling adaptive sigma based on filter kernel size.
+
+### Auto-Estimate FWHM
+
+Two-pass detection with automatic FWHM estimation from bright stars:
+
+```rust
+// Enable auto-estimation
+let config = StarDetectionConfig::default()
+    .with_auto_fwhm();
+
+// Check diagnostics for estimated FWHM
+let result = detector.detect(&image);
+if result.diagnostics.fwhm_was_auto_estimated {
+    println!("Estimated FWHM: {:.2} pixels (from {} stars)",
+        result.diagnostics.estimated_fwhm,
+        result.diagnostics.fwhm_estimation_star_count);
+}
+
+// Manual FWHM always takes precedence
+let config = StarDetectionConfig::default()
+    .with_fwhm(4.0);  // Manual overrides auto
+```
+
+**Algorithm:**
+1. First pass: Detect bright stars without matched filter (2x sigma threshold)
+2. Estimate FWHM using robust median + MAD outlier rejection
+3. Second pass: Full detection with estimated FWHM matched filter
+
+**Quality filters for estimation:**
+- Filters saturated stars (bloated FWHM)
+- Filters cosmic rays (high sharpness, small FWHM)
+- Filters elongated sources (high eccentricity)
+- Uses median + 3×MAD outlier rejection
+- Falls back to default 4.0 pixels if insufficient stars
+
+## Performance
+
+| Benchmark | Median Time | Notes |
+|-----------|-------------|-------|
+| label_map_from_mask_1k | ~346µs | 1K image, 500 stars |
+| label_map_from_mask_4k | ~2ms | 4K image, 2000 stars |
+| label_map_from_mask_6k_globular | ~5.5ms | 4K image, 50k stars (dense) |
+| detect_stars_6k_50000 | ~234ms | Full pipeline, 6K image |
+| matched_filter_4k | ~90ms | Gaussian convolution only |
+
+**Overhead:**
+- Adaptive thresholding: +24MB memory (adaptive sigma buffer), ~30% background estimation overhead
+- Auto-FWHM: ~15-25% overhead (first-pass detection)
+
+## Design Decisions
+
+### Investigated but Not Beneficial
+
+| Optimization | Why Not Beneficial |
+|--------------|-------------------|
+| Atomic path compression | Strip-based processing keeps trees shallow |
+| SIMD run extraction | Most words are zeros (scalar fast-path), dispatch overhead |
+| Precomputed lookup tables | CTZ already 10x faster for sparse masks |
+| SIMD label flattening | Label mapping is already fast, not a bottleneck |
 
 ## Code Structure
 
@@ -99,7 +150,6 @@ detection/
 ├── mod.rs              # detect_stars(), extract_candidates()
 ├── tests.rs            # Detection tests
 ├── bench.rs            # Detection benchmarks
-├── plan.md             # Implementation plan and notes
 └── labeling/
     ├── mod.rs          # LabelMap, UnionFind, AtomicUnionFind
     ├── tests.rs        # 59 labeling tests
@@ -136,6 +186,7 @@ let label_map = LabelMap::from_mask_with_connectivity(
 | Bit-level optimization | No | No | Yes (CTZ) |
 | SIMD threshold | No | Via numpy | Yes (SSE4.1/NEON) |
 | Adaptive threshold | Local background | Via segmentation | Per-pixel sigma |
+| Auto FWHM estimation | No | No | Yes (two-pass) |
 
 ## References
 
