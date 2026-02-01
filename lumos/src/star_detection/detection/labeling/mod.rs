@@ -666,7 +666,10 @@ impl AtomicUnionFind {
         label
     }
 
-    /// Find root (read-only, no path compression).
+    /// Find root (read-only traversal).
+    ///
+    /// Note: Atomic path compression was tested but showed no benefit for our
+    /// workload because strip-based parallel processing already keeps trees shallow.
     fn find(&self, label: u32) -> u32 {
         let mut current = label;
         loop {
@@ -674,11 +677,11 @@ impl AtomicUnionFind {
             if idx >= self.parent.len() {
                 return current;
             }
-            let p = self.parent[idx].load(Ordering::Relaxed);
-            if p == current || p == 0 {
+            let parent = self.parent[idx].load(Ordering::Relaxed);
+            if parent == current || parent == 0 {
                 return current;
             }
-            current = p;
+            current = parent;
         }
     }
 

@@ -150,9 +150,12 @@ The CTZ approach excels for sparse masks typical in star detection (<5% density)
 
 ### Potential Improvements
 
-1. **Atomic path compression**: Currently read-only in parallel mode; adding compression may reduce tree depth
-2. **Precomputed lookup tables**: Cache 16-bit binary patterns for faster run detection (as in recent MDPI paper)
-3. **SIMD parallel bit scanning**: Use AVX2/NEON for processing multiple words simultaneously
+1. **Precomputed lookup tables**: Cache 8-bit or 16-bit binary patterns for faster run detection
+2. **SIMD parallel bit scanning**: Use AVX2/NEON for processing multiple words simultaneously
+
+### Investigated but Not Beneficial
+
+- **Atomic path compression**: Path splitting was tested but showed no improvement because strip-based parallel processing already keeps trees shallow. The extra CAS overhead negates any tree-depth benefits.
 
 ## API
 
