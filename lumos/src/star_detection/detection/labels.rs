@@ -204,88 +204,97 @@ fn label_mask_parallel(mask: &BitBuffer2, labels: &mut Buffer2<u32>) -> usize {
     let num_strips = (height / min_rows_per_strip).clamp(1, num_threads);
     let rows_per_strip = height / num_strips;
 
-    // Estimate max labels (sparse for star detection)
-    let max_labels = ((width * height) / 10).max(1024);
+    // Estimate max labels: sparse masks typical in star detection
+    // Use 5% of pixels as upper bound, minimum 1024 for small images
+    let max_labels = ((width * height) / 20).max(1024);
 
     // Atomic parent array for lock-free union-find
     let parent: Vec<AtomicU32> = (0..max_labels).map(|_| AtomicU32::new(0)).collect();
     let next_label = AtomicU32::new(1);
 
     // Phase 1: Label each strip in parallel
-    {
-        let labels_ptr = labels.pixels_mut().as_mut_ptr();
-        // SAFETY: Each strip writes to disjoint rows
-        let labels_slice = unsafe { std::slice::from_raw_parts_mut(labels_ptr, width * height) };
+    let labels_ptr = labels.pixels_mut().as_mut_ptr();
+    // SAFETY: Each strip writes to disjoint rows
+    let labels_slice = unsafe { std::slice::from_raw_parts_mut(labels_ptr, width * height) };
 
-        rayon::scope(|s| {
-            for strip_idx in 0..num_strips {
-                let y_start = strip_idx * rows_per_strip;
-                let y_end = if strip_idx == num_strips - 1 {
-                    height
-                } else {
-                    (strip_idx + 1) * rows_per_strip
-                };
+    rayon::scope(|s| {
+        for strip_idx in 0..num_strips {
+            let y_start = strip_idx * rows_per_strip;
+            let y_end = if strip_idx == num_strips - 1 {
+                height
+            } else {
+                (strip_idx + 1) * rows_per_strip
+            };
 
-                let parent_ref = &parent;
-                let next_label_ref = &next_label;
+            let parent_ref = &parent;
+            let next_label_ref = &next_label;
 
-                let strip_start = y_start * width;
-                let strip_end = y_end * width;
-                let strip_labels = unsafe {
-                    std::slice::from_raw_parts_mut(
-                        labels_slice.as_mut_ptr().add(strip_start),
-                        strip_end - strip_start,
-                    )
-                };
+            let strip_start = y_start * width;
+            let strip_len = (y_end - y_start) * width;
+            let strip_labels = unsafe {
+                std::slice::from_raw_parts_mut(
+                    labels_slice.as_mut_ptr().add(strip_start),
+                    strip_len,
+                )
+            };
 
-                s.spawn(move |_| {
-                    label_strip(
-                        mask_words,
-                        strip_labels,
-                        width,
-                        words_per_row,
-                        y_start,
-                        y_end,
-                        parent_ref,
-                        next_label_ref,
-                        mask,
-                    );
-                });
-            }
-        });
-    }
+            s.spawn(move |_| {
+                label_strip(
+                    mask_words,
+                    strip_labels,
+                    width,
+                    words_per_row,
+                    y_start,
+                    y_end,
+                    parent_ref,
+                    next_label_ref,
+                    mask,
+                );
+            });
+        }
+    });
 
     // Phase 2: Merge labels at strip boundaries
     for strip_idx in 1..num_strips {
-        let boundary_y = strip_idx * rows_per_strip;
-        merge_strip_boundary(mask, labels, width, boundary_y, &parent);
+        merge_strip_boundary(mask, labels, width, strip_idx * rows_per_strip, &parent);
     }
 
     // Get final label count
-    let total_labels = next_label.load(Ordering::SeqCst) - 1;
+    let total_labels = (next_label.load(Ordering::Relaxed) - 1) as usize;
     if total_labels == 0 {
         return 0;
     }
 
-    // Phase 3: Build final label mapping
-    let mut parent_vec: Vec<u32> = parent
-        .iter()
-        .take(total_labels as usize)
-        .map(|a| a.load(Ordering::SeqCst))
-        .collect();
+    // Phase 3: Build label mapping (reuses single allocation)
+    let mut label_map = vec![0u32; total_labels + 1];
 
-    let (label_map, num_labels) = build_label_map(&mut parent_vec);
+    // First pass: find roots and assign sequential labels
+    let mut num_labels = 0u32;
+    for i in 0..total_labels {
+        let root = atomic_find_readonly(&parent, (i + 1) as u32);
+        if label_map[root as usize] == 0 {
+            num_labels += 1;
+            label_map[root as usize] = num_labels;
+        }
+    }
+
+    // Second pass: map each label to its root's final label
+    for i in (1..=total_labels).rev() {
+        let root = atomic_find_readonly(&parent, i as u32);
+        label_map[i] = label_map[root as usize];
+    }
 
     // Phase 4: Apply label mapping in parallel
     parallel::par_chunks_auto(labels.pixels_mut()).for_each(|(_, chunk)| {
-        for label in chunk.iter_mut() {
-            if *label != 0 && (*label as usize) < label_map.len() {
-                *label = label_map[*label as usize];
+        for label in chunk {
+            let l = *label as usize;
+            if l != 0 && l < label_map.len() {
+                *label = label_map[l];
             }
         }
     });
 
-    num_labels
+    num_labels as usize
 }
 
 /// Label a horizontal strip using word-level bit scanning.
@@ -444,16 +453,32 @@ fn union(parent: &mut [u32], a: u32, b: u32) {
 // Union-Find (atomic/parallel)
 // ============================================================================
 
-/// Atomic find with path compression.
+/// Atomic find with path compression (used during labeling).
 fn atomic_find(parent: &[AtomicU32], label: u32) -> u32 {
-    let idx = (label - 1) as usize;
-    if idx >= parent.len() {
-        return label;
-    }
-
     let mut current = label;
     loop {
-        let p = parent[(current - 1) as usize].load(Ordering::SeqCst);
+        let idx = (current - 1) as usize;
+        if idx >= parent.len() {
+            return current;
+        }
+        let p = parent[idx].load(Ordering::Relaxed);
+        if p == current || p == 0 {
+            return current;
+        }
+        current = p;
+    }
+}
+
+/// Read-only find for final label mapping (no writes needed).
+#[inline]
+fn atomic_find_readonly(parent: &[AtomicU32], label: u32) -> u32 {
+    let mut current = label;
+    loop {
+        let idx = (current - 1) as usize;
+        if idx >= parent.len() {
+            return current;
+        }
+        let p = parent[idx].load(Ordering::Relaxed);
         if p == current || p == 0 {
             return current;
         }
@@ -477,7 +502,12 @@ fn atomic_union(parent: &[AtomicU32], a: u32, b: u32) {
             break;
         }
 
-        match parent[idx_b].compare_exchange(root_b, root_a, Ordering::SeqCst, Ordering::SeqCst) {
+        match parent[idx_b].compare_exchange_weak(
+            root_b,
+            root_a,
+            Ordering::AcqRel,
+            Ordering::Relaxed,
+        ) {
             Ok(_) => break,
             Err(current) => {
                 root_a = atomic_find(parent, root_a);

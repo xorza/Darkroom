@@ -1,0 +1,6 @@
+name: bench_label_map_from_mask_1k
+mean: 739.341µs
+min: 571.583µs
+max: 903.916µs
+median: 723.333µs
+iterations: 5
