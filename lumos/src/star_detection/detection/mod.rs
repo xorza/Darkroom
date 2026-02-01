@@ -217,25 +217,32 @@ fn collect_component_data(
         num_labels
     ]);
 
-    // Process in parallel with thread-local buffers, merge at end of each job
+    // Thread-local state: (component_data, touched_labels)
+    // Track which labels were touched to avoid resetting/iterating all labels
     parallel::par_iter_auto(label_map.height()).for_each_init(
         || {
-            vec![
-                ComponentData {
+            (
+                vec![
+                    ComponentData {
+                        bbox: Aabb::empty(),
+                        label: 0,
+                        area: 0,
+                    };
+                    num_labels
+                ],
+                Vec::<usize>::with_capacity(1024), // touched label indices
+            )
+        },
+        |(local_data, touched), (_, start_row, end_row)| {
+            // Reset only touched labels from previous chunk
+            for &idx in touched.iter() {
+                local_data[idx] = ComponentData {
                     bbox: Aabb::empty(),
                     label: 0,
                     area: 0,
                 };
-                num_labels
-            ]
-        },
-        |local_data, (_, start_row, end_row)| {
-            // Reset local buffer for reuse
-            for data in local_data.iter_mut() {
-                data.bbox = Aabb::empty();
-                data.label = 0;
-                data.area = 0;
             }
+            touched.clear();
 
             // Collect component data for this chunk
             for y in start_row..end_row {
@@ -245,20 +252,23 @@ fn collect_component_data(
                     if label == 0 {
                         continue;
                     }
-                    let data = &mut local_data[(label - 1) as usize];
+                    let idx = (label - 1) as usize;
+                    let data = &mut local_data[idx];
+                    if data.area == 0 {
+                        // First time seeing this label in this chunk
+                        touched.push(idx);
+                    }
                     data.bbox.include(Vec2us::new(x, y));
                     data.label = label;
                     data.area += 1;
                 }
             }
 
-            // Merge into shared result
+            // Merge only touched labels into shared result
             let mut result = result.lock().unwrap();
-            for (i, partial_comp) in local_data.iter().enumerate() {
-                if partial_comp.area == 0 {
-                    continue;
-                }
-                let data = &mut result[i];
+            for &idx in touched.iter() {
+                let partial_comp = &local_data[idx];
+                let data = &mut result[idx];
                 data.bbox = data.bbox.merge(&partial_comp.bbox);
                 data.label = partial_comp.label;
                 data.area += partial_comp.area;
