@@ -8,8 +8,8 @@ fn test_par_iter_auto_covers_all_items() {
     let covered: Vec<AtomicBool> = (0..total).map(|_| AtomicBool::new(false)).collect();
 
     par_iter_auto(total).for_each(|(_, start, end)| {
-        for i in start..end {
-            covered[i].store(true, Ordering::Relaxed);
+        for c in &covered[start..end] {
+            c.store(true, Ordering::Relaxed);
         }
     });
 
@@ -27,8 +27,8 @@ fn test_par_iter_auto_no_overlap() {
     let counts: Vec<AtomicUsize> = (0..total).map(|_| AtomicUsize::new(0)).collect();
 
     par_iter_auto(total).for_each(|(_, start, end)| {
-        for i in start..end {
-            counts[i].fetch_add(1, Ordering::Relaxed);
+        for c in &counts[start..end] {
+            c.fetch_add(1, Ordering::Relaxed);
         }
     });
 
@@ -52,8 +52,8 @@ fn test_par_iter_auto_small_total() {
     let covered: Vec<AtomicBool> = (0..total).map(|_| AtomicBool::new(false)).collect();
 
     par_iter_auto(total).for_each(|(_, start, end)| {
-        for i in start..end {
-            covered[i].store(true, Ordering::Relaxed);
+        for c in &covered[start..end] {
+            c.store(true, Ordering::Relaxed);
         }
     });
 

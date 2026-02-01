@@ -34,7 +34,7 @@ pub fn auto_num_jobs() -> usize {
 /// });
 /// ```
 pub fn par_iter_auto(total: usize) -> impl IndexedParallelIterator<Item = (usize, usize, usize)> {
-    let num_jobs = auto_num_jobs();
+    let num_jobs = auto_num_jobs().min(total).max(1);
     let items_per_job = (total / num_jobs).max(1);
 
     (0..num_jobs).into_par_iter().map(move |job_idx| {

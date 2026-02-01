@@ -35,6 +35,7 @@ bumpalo = { workspace = true }
 arrayvec = { workspace = true }
 smallvec = { workspace = true }
 hashbrown = { workspace = true }
+parking_lot = { workspace = true }
 
 [dev-dependencies]
 bench = { workspace = true }

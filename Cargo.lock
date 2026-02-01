@@ -2276,6 +2276,7 @@ dependencies = [
  "libraw-rs-sys",
  "memmap2",
  "nalgebra",
+ "parking_lot",
  "rand",
  "rand_chacha",
  "rayon",

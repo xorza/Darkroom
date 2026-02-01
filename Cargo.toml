@@ -78,6 +78,7 @@ async-trait = { version = "*" }
 aligned-vec = { version = "*" }
 arrayvec = { version = "*" }
 smallvec = { version = "*" }
+parking_lot = { version = "*" }
 reqwest = { version = "*", features = ["blocking", "json", "form", "query", "multipart"] }
 bzip2 = { version = "*" }
 dirs = { version = "*" }

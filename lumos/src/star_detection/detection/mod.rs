@@ -199,9 +199,8 @@ fn collect_component_data(
     width: usize,
     max_area: usize,
 ) -> Vec<ComponentData> {
-    use std::sync::Mutex;
-
     use common::parallel;
+    use parking_lot::Mutex;
     use rayon::prelude::*;
 
     let num_labels = label_map.num_labels();
@@ -265,7 +264,7 @@ fn collect_component_data(
             }
 
             // Merge only touched labels into shared result
-            let mut result = result.lock().unwrap();
+            let mut result = result.lock();
             for &idx in touched.iter() {
                 let partial_comp = &local_data[idx];
                 let data = &mut result[idx];
@@ -276,7 +275,7 @@ fn collect_component_data(
         },
     );
 
-    let mut component_data = result.into_inner().unwrap();
+    let mut component_data = result.into_inner();
 
     // Mark oversized components (set area to max_area + 1 so they're filtered later)
     for data in &mut component_data {
