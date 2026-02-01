@@ -573,44 +573,9 @@ pub(crate) fn compute_metrics(
         background.noise[icy as usize * width + icx as usize]
     };
 
-    let aperture_area = (2 * stamp_radius + 1).pow(2) as f32;
-    let npix = aperture_area;
+    let npix = (2 * stamp_radius + 1).pow(2) as f32;
 
-    let snr = match (gain, read_noise) {
-        // Full CCD noise equation when gain is provided:
-        // SNR = flux / sqrt(flux/gain + npix × (σ_sky² + σ_read²/gain²))
-        // flux is in ADU, σ_sky is in ADU, σ_read is in electrons
-        (Some(g), Some(rn)) if g > f32::EPSILON => {
-            let shot_noise_var = flux / g; // Poisson noise in electrons² converted to ADU²
-            let sky_noise_var = avg_noise * avg_noise; // Background noise variance in ADU²
-            let read_noise_var = (rn * rn) / (g * g); // Read noise in ADU²
-            let total_noise_var = shot_noise_var + npix * (sky_noise_var + read_noise_var);
-            if total_noise_var > f32::EPSILON {
-                flux / total_noise_var.sqrt()
-            } else {
-                flux / f32::EPSILON
-            }
-        }
-        // Partial: gain only (no read noise), useful for shot-noise dominated regime
-        (Some(g), None) if g > f32::EPSILON => {
-            let shot_noise_var = flux / g;
-            let sky_noise_var = avg_noise * avg_noise;
-            let total_noise_var = shot_noise_var + npix * sky_noise_var;
-            if total_noise_var > f32::EPSILON {
-                flux / total_noise_var.sqrt()
-            } else {
-                flux / f32::EPSILON
-            }
-        }
-        // Simplified background-dominated formula (default)
-        _ => {
-            if avg_noise > f32::EPSILON {
-                flux / (avg_noise * npix.sqrt())
-            } else {
-                flux / f32::EPSILON
-            }
-        }
-    };
+    let snr = compute_snr(flux, avg_noise, npix, gain, read_noise);
 
     // Sharpness = peak / core_flux
     // Cosmic rays: most flux in single pixel -> sharpness ~= 1/9 to 1.0
@@ -641,53 +606,80 @@ pub(crate) fn compute_metrics(
 /// Returns (GROUND, SROUND):
 /// - GROUND: (Hx - Hy) / (Hx + Hy) where Hx, Hy are heights of marginal distributions
 /// - SROUND: Symmetry-based roundness measuring bilateral asymmetry
-///
-/// Note: marginal_x and marginal_y contain background-subtracted flux sums.
 fn compute_roundness(marginal_x: &[f32], marginal_y: &[f32]) -> (f32, f32) {
-    // GROUND: Compare heights of marginal distributions
-    // The "height" is the peak of the marginal distribution
-    // marginal_x[i] = sum of background-subtracted values along column i
-    // marginal_y[i] = sum of background-subtracted values along row i
-    let hx = marginal_x.iter().fold(0.0f32, |a, &b| a.max(b));
-    let hy = marginal_y.iter().fold(0.0f32, |a, &b| a.max(b));
-
-    let roundness1 = if hx + hy > f32::EPSILON {
-        (hx - hy) / (hx + hy)
-    } else {
-        0.0
-    };
+    // GROUND: Compare peak heights of marginal distributions
+    let hx = marginal_x.iter().copied().fold(0.0f32, f32::max);
+    let hy = marginal_y.iter().copied().fold(0.0f32, f32::max);
+    let roundness1 = safe_ratio(hx - hy, hx + hy);
 
     // SROUND: Symmetry-based roundness using marginal distributions
-    // Compare sums on opposite sides of center
-    let n = marginal_x.len();
-    let center = n / 2;
-
-    // Sum left half vs right half of x marginal (excluding center)
-    let sum_left: f32 = marginal_x[..center].iter().sum();
-    let sum_right: f32 = marginal_x[center + 1..].iter().sum();
-
-    // Sum top half vs bottom half of y marginal (excluding center)
-    let sum_top: f32 = marginal_y[..center].iter().sum();
-    let sum_bottom: f32 = marginal_y[center + 1..].iter().sum();
+    let center = marginal_x.len() / 2;
 
     // Compute asymmetry in x and y directions
-    let total_x = sum_left + sum_right;
-    let total_y = sum_top + sum_bottom;
+    let (sum_left, sum_right) = split_sums(marginal_x, center);
+    let (sum_top, sum_bottom) = split_sums(marginal_y, center);
 
-    let asym_x = if total_x > f32::EPSILON {
-        (sum_right - sum_left) / total_x
-    } else {
-        0.0
-    };
-
-    let asym_y = if total_y > f32::EPSILON {
-        (sum_bottom - sum_top) / total_y
-    } else {
-        0.0
-    };
+    let asym_x = safe_ratio(sum_right - sum_left, sum_left + sum_right);
+    let asym_y = safe_ratio(sum_bottom - sum_top, sum_top + sum_bottom);
 
     // SROUND is the RMS asymmetry
-    let roundness2 = (asym_x * asym_x + asym_y * asym_y).sqrt();
+    let roundness2 = asym_x.hypot(asym_y);
 
     (roundness1.clamp(-1.0, 1.0), roundness2.clamp(0.0, 1.0))
+}
+
+/// Compute sums of left and right halves of a slice (excluding center).
+#[inline]
+fn split_sums(slice: &[f32], center: usize) -> (f32, f32) {
+    let left: f32 = slice[..center].iter().sum();
+    let right: f32 = slice[center + 1..].iter().sum();
+    (left, right)
+}
+
+/// Safe division returning 0.0 when denominator is near zero.
+#[inline]
+fn safe_ratio(numerator: f32, denominator: f32) -> f32 {
+    if denominator > f32::EPSILON {
+        numerator / denominator
+    } else {
+        0.0
+    }
+}
+
+/// Compute SNR using appropriate noise model based on available parameters.
+///
+/// Uses full CCD noise equation when gain is provided:
+/// `SNR = flux / sqrt(flux/gain + npix × (σ_sky² + σ_read²/gain²))`
+///
+/// Otherwise, uses simplified background-dominated formula:
+/// `SNR = flux / (σ_sky × sqrt(npix))`
+fn compute_snr(
+    flux: f32,
+    sky_noise: f32,
+    npix: f32,
+    gain: Option<f32>,
+    read_noise: Option<f32>,
+) -> f32 {
+    let sky_var = sky_noise * sky_noise;
+
+    let total_var = match (gain, read_noise) {
+        (Some(g), Some(rn)) if g > f32::EPSILON => {
+            // Full CCD noise model: shot + sky + read noise
+            flux / g + npix * (sky_var + (rn * rn) / (g * g))
+        }
+        (Some(g), None) if g > f32::EPSILON => {
+            // Shot noise + sky noise (no read noise)
+            flux / g + npix * sky_var
+        }
+        _ => {
+            // Background-dominated: npix × sky_var
+            npix * sky_var
+        }
+    };
+
+    if total_var > f32::EPSILON {
+        flux / total_var.sqrt()
+    } else {
+        flux / f32::EPSILON
+    }
 }
