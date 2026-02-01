@@ -400,11 +400,18 @@ fn clone_image() {
 // =============================================================================
 
 #[test]
-fn image_bytes_are_8_byte_aligned() {
+fn image_bytes_are_16_byte_aligned() {
     let desc = ImageDesc::new_with_stride(100, 100, ColorFormat::RGBA_U8);
     let img = Image::new_black(desc).unwrap();
     let ptr = img.bytes().as_ptr() as usize;
-    assert_eq!(ptr % 8, 0, "Image bytes should be 8-byte aligned");
+    assert_eq!(ptr % 16, 0, "Image bytes should be 16-byte aligned");
+
+    // Also test with new_with_data when source is aligned
+    let desc = ImageDesc::new_with_stride(10, 10, ColorFormat::RGBA_U8);
+    let data = vec![0u8; desc.size_in_bytes()];
+    let img = Image::new_with_data(desc, data).unwrap();
+    let ptr = img.bytes().as_ptr() as usize;
+    assert_eq!(ptr % 16, 0, "Image bytes should be 16-byte aligned");
 }
 
 #[test]

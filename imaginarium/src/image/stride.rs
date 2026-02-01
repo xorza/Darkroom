@@ -1,4 +1,4 @@
-use aligned_vec::AVec;
+use aligned_vec::{AVec, ConstAlign};
 
 use super::ALIGNMENT;
 
@@ -9,12 +9,12 @@ pub(crate) fn align_stride(n: usize) -> usize {
 
 /// Adds stride padding to tightly packed pixel data.
 pub(crate) fn add_stride_padding(
-    src: AVec<u8>,
+    src: AVec<u8, ConstAlign<ALIGNMENT>>,
     width: usize,
     height: usize,
     stride: usize,
     bpp: u8,
-) -> AVec<u8> {
+) -> AVec<u8, ConstAlign<ALIGNMENT>> {
     let row_bytes = width * bpp as usize;
 
     if row_bytes == stride {
@@ -32,12 +32,12 @@ pub(crate) fn add_stride_padding(
 
 /// Strips stride padding from image bytes, returning tightly packed pixel data.
 pub(crate) fn strip_stride_padding(
-    src: AVec<u8>,
+    src: AVec<u8, ConstAlign<ALIGNMENT>>,
     width: usize,
     height: usize,
     stride: usize,
     bpp: u8,
-) -> AVec<u8> {
+) -> AVec<u8, ConstAlign<ALIGNMENT>> {
     let row_bytes = width * bpp as usize;
 
     if row_bytes == stride {

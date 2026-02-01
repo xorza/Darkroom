@@ -7,7 +7,7 @@ mod tests;
 
 use std::path::Path;
 
-use aligned_vec::AVec;
+use aligned_vec::{AVec, ConstAlign};
 
 /// Supported image file extensions for reading and writing.
 pub const SUPPORTED_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg", "tiff", "tif"];
@@ -34,7 +34,7 @@ pub struct ImageDesc {
 #[derive(Clone, Debug)]
 pub struct Image {
     desc: ImageDesc,
-    bytes: AVec<u8>,
+    bytes: AVec<u8, ConstAlign<ALIGNMENT>>,
 }
 
 impl Image {
@@ -56,7 +56,7 @@ impl Image {
     }
 
     /// Convert to owned aligned bytes (internal use).
-    fn into_aligned_bytes(self) -> AVec<u8> {
+    fn into_aligned_bytes(self) -> AVec<u8, ConstAlign<ALIGNMENT>> {
         self.bytes
     }
 
@@ -214,7 +214,7 @@ impl Image {
 }
 
 /// Convert Vec<u8> to AVec<u8>, zero-copy if already aligned, otherwise copies.
-fn vec_to_avec(bytes: Vec<u8>) -> AVec<u8> {
+fn vec_to_avec(bytes: Vec<u8>) -> AVec<u8, ConstAlign<ALIGNMENT>> {
     let ptr = bytes.as_ptr();
     if (ptr as usize).is_multiple_of(ALIGNMENT) {
         // Already aligned - zero-copy conversion
