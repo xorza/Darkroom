@@ -1,10 +1,10 @@
 //! Benchmarks for star candidate detection.
 
-use super::{LabelMap, extract_candidates};
+use super::{LabelMap, detect_stars, extract_candidates};
 use crate::common::{BitBuffer2, Buffer2};
 use crate::star_detection::background::{BackgroundConfig, BackgroundMap};
 use crate::star_detection::common::{dilate_mask, threshold_mask::create_threshold_mask};
-use crate::star_detection::config::DeblendConfig;
+use crate::star_detection::config::{DeblendConfig, StarDetectionConfig};
 use crate::testing::init_tracing;
 use crate::testing::synthetic::stamps::benchmark_star_field;
 use ::bench::quick_bench;
@@ -191,4 +191,23 @@ fn bench_label_map_from_mask_6k_globular(b: ::bench::Bencher) {
     let mask = create_detection_mask(&pixels, 4.0);
 
     b.bench(|| black_box(LabelMap::from_mask(black_box(&mask))));
+}
+
+#[quick_bench(warmup_iters = 1, iters = 10)]
+fn bench_detect_stars_6k_50000(b: ::bench::Bencher) {
+    init_tracing();
+
+    // 6K image with 50000 stars - full detect_stars pipeline
+    let pixels = benchmark_star_field(6144, 6144, 50000, 0.1, 0.01, 42);
+    let background = BackgroundMap::new(&pixels, &BackgroundConfig::default());
+    let config = StarDetectionConfig::for_crowded_field();
+
+    b.bench(|| {
+        black_box(detect_stars(
+            black_box(&pixels),
+            black_box(None),
+            black_box(&background),
+            black_box(&config),
+        ))
+    });
 }
