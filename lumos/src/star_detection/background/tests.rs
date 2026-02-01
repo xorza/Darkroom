@@ -345,6 +345,7 @@ fn test_iterative_background_with_bright_stars() {
         mask_dilation: 5,
         min_unmasked_fraction: 0.3,
         tile_size: 32,
+        sigma_clip_iterations: 2,
     };
     let bg_iterative = BackgroundMap::new(&pixels, &config);
 

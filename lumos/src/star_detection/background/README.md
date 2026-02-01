@@ -81,11 +81,12 @@ This is similar to Photutils' recommendation to use source masks for accurate ba
 
 ```rust
 BackgroundConfig {
-    tile_size: 64,           // Tile size in pixels (32-512 typical)
-    iterations: 1,           // Refinement iterations (0 = none)
-    sigma_threshold: 3.0,    // Detection threshold for masking
-    mask_dilation: 5,        // Mask dilation radius
+    tile_size: 64,              // Tile size in pixels (32-512 typical)
+    iterations: 1,              // Refinement iterations (0 = none)
+    sigma_threshold: 3.0,       // Detection threshold for masking
+    mask_dilation: 5,           // Mask dilation radius
     min_unmasked_fraction: 0.1, // Min unmasked pixels per tile
+    sigma_clip_iterations: 2,   // Sigma clipping iterations (2-5 typical)
 }
 ```
 

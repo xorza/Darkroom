@@ -12,8 +12,9 @@ use rayon::prelude::*;
 /// Maximum samples per tile for statistics computation.
 const MAX_TILE_SAMPLES: usize = 1024;
 
-/// Number of sigma-clipping iterations.
-const SIGMA_CLIP_ITERATIONS: usize = 2;
+/// Default number of sigma-clipping iterations for tests.
+#[cfg(test)]
+const TEST_SIGMA_CLIP_ITERATIONS: usize = 2;
 
 // ============================================================================
 // Types
@@ -40,15 +41,12 @@ pub(super) struct TileGrid {
 // ============================================================================
 
 impl TileGrid {
-    pub fn new(pixels: &Buffer2<f32>, tile_size: usize) -> Self {
-        Self::new_with_mask(pixels, tile_size, None, 0)
-    }
-
-    pub fn new_with_mask(
+    pub fn new_with_options(
         pixels: &Buffer2<f32>,
         tile_size: usize,
         mask: Option<&BitBuffer2>,
         min_pixels: usize,
+        sigma_clip_iterations: usize,
     ) -> Self {
         let width = pixels.width();
         let height = pixels.height();
@@ -62,7 +60,7 @@ impl TileGrid {
             height,
         };
 
-        grid.fill_tile_stats(pixels, mask, min_pixels);
+        grid.fill_tile_stats(pixels, mask, min_pixels, sigma_clip_iterations);
         grid.apply_median_filter();
         grid
     }
@@ -131,6 +129,7 @@ impl TileGrid {
         pixels: &Buffer2<f32>,
         mask: Option<&BitBuffer2>,
         min_pixels: usize,
+        sigma_clip_iterations: usize,
     ) {
         let tiles_x = self.tiles_x();
         let tile_size = self.tile_size;
@@ -159,7 +158,15 @@ impl TileGrid {
                     let y_end = (y_start + tile_size).min(height);
 
                     *out = compute_tile_stats(
-                        pixels, mask, x_start, x_end, y_start, y_end, min_pixels, values,
+                        pixels,
+                        mask,
+                        x_start,
+                        x_end,
+                        y_start,
+                        y_end,
+                        min_pixels,
+                        sigma_clip_iterations,
+                        values,
                         deviations,
                     );
                 },
@@ -224,6 +231,7 @@ fn compute_tile_stats(
     y_start: usize,
     y_end: usize,
     min_pixels: usize,
+    sigma_clip_iterations: usize,
     values: &mut Vec<f32>,
     deviations: &mut Vec<f32>,
 ) -> TileStats {
@@ -256,7 +264,7 @@ fn compute_tile_stats(
         return TileStats::default();
     }
 
-    let (median, sigma) = sigma_clipped_median_mad(values, deviations, 3.0, SIGMA_CLIP_ITERATIONS);
+    let (median, sigma) = sigma_clipped_median_mad(values, deviations, 3.0, sigma_clip_iterations);
     TileStats { median, sigma }
 }
 
@@ -393,12 +401,33 @@ mod tests {
         Buffer2::new(width, height, vec![value; width * height])
     }
 
+    /// Create a TileGrid with default test parameters (no mask, default sigma clip iterations)
+    fn make_grid(pixels: &Buffer2<f32>, tile_size: usize) -> TileGrid {
+        TileGrid::new_with_options(pixels, tile_size, None, 0, TEST_SIGMA_CLIP_ITERATIONS)
+    }
+
+    /// Create a TileGrid with mask
+    fn make_grid_with_mask(
+        pixels: &Buffer2<f32>,
+        tile_size: usize,
+        mask: &BitBuffer2,
+        min_pixels: usize,
+    ) -> TileGrid {
+        TileGrid::new_with_options(
+            pixels,
+            tile_size,
+            Some(mask),
+            min_pixels,
+            TEST_SIGMA_CLIP_ITERATIONS,
+        )
+    }
+
     // --- Construction ---
 
     #[test]
     fn test_tile_grid_dimensions() {
         let pixels = create_uniform_image(128, 64, 0.5);
-        let grid = TileGrid::new(&pixels, 32);
+        let grid = make_grid(&pixels, 32);
 
         assert_eq!(grid.tiles_x(), 4);
         assert_eq!(grid.tiles_y(), 2);
@@ -407,7 +436,7 @@ mod tests {
     #[test]
     fn test_tile_grid_dimensions_non_divisible() {
         let pixels = create_uniform_image(100, 70, 0.5);
-        let grid = TileGrid::new(&pixels, 32);
+        let grid = make_grid(&pixels, 32);
 
         assert_eq!(grid.tiles_x(), 4);
         assert_eq!(grid.tiles_y(), 3);
@@ -416,7 +445,7 @@ mod tests {
     #[test]
     fn test_tile_grid_uniform_image() {
         let pixels = create_uniform_image(64, 64, 0.3);
-        let grid = TileGrid::new(&pixels, 32);
+        let grid = make_grid(&pixels, 32);
 
         for ty in 0..grid.tiles_y() {
             for tx in 0..grid.tiles_x() {
@@ -432,7 +461,7 @@ mod tests {
     #[test]
     fn test_center_x_full_tiles() {
         let pixels = create_uniform_image(128, 64, 0.5);
-        let grid = TileGrid::new(&pixels, 32);
+        let grid = make_grid(&pixels, 32);
 
         assert!((grid.center_x(0) - 16.0).abs() < 0.01);
         assert!((grid.center_x(1) - 48.0).abs() < 0.01);
@@ -443,7 +472,7 @@ mod tests {
     #[test]
     fn test_center_x_partial_tile() {
         let pixels = create_uniform_image(100, 64, 0.5);
-        let grid = TileGrid::new(&pixels, 32);
+        let grid = make_grid(&pixels, 32);
 
         assert!((grid.center_x(3) - 98.0).abs() < 0.01);
     }
@@ -451,7 +480,7 @@ mod tests {
     #[test]
     fn test_center_y_full_tiles() {
         let pixels = create_uniform_image(64, 128, 0.5);
-        let grid = TileGrid::new(&pixels, 32);
+        let grid = make_grid(&pixels, 32);
 
         assert!((grid.center_y(0) - 16.0).abs() < 0.01);
         assert!((grid.center_y(1) - 48.0).abs() < 0.01);
@@ -462,7 +491,7 @@ mod tests {
     #[test]
     fn test_center_y_partial_tile() {
         let pixels = create_uniform_image(64, 100, 0.5);
-        let grid = TileGrid::new(&pixels, 32);
+        let grid = make_grid(&pixels, 32);
 
         assert!((grid.center_y(3) - 98.0).abs() < 0.01);
     }
@@ -472,7 +501,7 @@ mod tests {
     #[test]
     fn test_find_lower_tile_y_exact_center() {
         let pixels = create_uniform_image(64, 128, 0.5);
-        let grid = TileGrid::new(&pixels, 32);
+        let grid = make_grid(&pixels, 32);
 
         assert_eq!(grid.find_lower_tile_y(16.0), 0);
         assert_eq!(grid.find_lower_tile_y(48.0), 1);
@@ -483,7 +512,7 @@ mod tests {
     #[test]
     fn test_find_lower_tile_y_between_centers() {
         let pixels = create_uniform_image(64, 128, 0.5);
-        let grid = TileGrid::new(&pixels, 32);
+        let grid = make_grid(&pixels, 32);
 
         assert_eq!(grid.find_lower_tile_y(30.0), 0);
         assert_eq!(grid.find_lower_tile_y(60.0), 1);
@@ -493,7 +522,7 @@ mod tests {
     #[test]
     fn test_find_lower_tile_y_before_first_center() {
         let pixels = create_uniform_image(64, 128, 0.5);
-        let grid = TileGrid::new(&pixels, 32);
+        let grid = make_grid(&pixels, 32);
 
         assert_eq!(grid.find_lower_tile_y(0.0), 0);
         assert_eq!(grid.find_lower_tile_y(10.0), 0);
@@ -502,7 +531,7 @@ mod tests {
     #[test]
     fn test_find_lower_tile_y_after_last_center() {
         let pixels = create_uniform_image(64, 128, 0.5);
-        let grid = TileGrid::new(&pixels, 32);
+        let grid = make_grid(&pixels, 32);
 
         assert_eq!(grid.find_lower_tile_y(120.0), 3);
         assert_eq!(grid.find_lower_tile_y(1000.0), 3);
@@ -511,7 +540,7 @@ mod tests {
     #[test]
     fn test_find_lower_tile_y_single_tile() {
         let pixels = create_uniform_image(32, 32, 0.5);
-        let grid = TileGrid::new(&pixels, 32);
+        let grid = make_grid(&pixels, 32);
 
         assert_eq!(grid.tiles_y(), 1);
         assert_eq!(grid.find_lower_tile_y(0.0), 0);
@@ -542,7 +571,7 @@ mod tests {
             }
         }
 
-        let grid = TileGrid::new_with_mask(&pixels, 32, Some(&mask), 100);
+        let grid = make_grid_with_mask(&pixels, 32, &mask, 100);
 
         let stats_11 = grid.get(1, 1);
         assert!((stats_11.median - 0.2).abs() < 0.05);
@@ -566,7 +595,7 @@ mod tests {
             }
         }
 
-        let grid = TileGrid::new_with_mask(&pixels, 32, Some(&mask), 100);
+        let grid = make_grid_with_mask(&pixels, 32, &mask, 100);
 
         let stats = grid.get(0, 0);
         assert!((stats.median - 0.5).abs() < 0.05);
@@ -579,7 +608,7 @@ mod tests {
         let pixels = create_uniform_image(width, height, 0.4);
         let mask = BitBuffer2::new_filled(width, height, true);
 
-        let grid = TileGrid::new_with_mask(&pixels, 32, Some(&mask), 100);
+        let grid = make_grid_with_mask(&pixels, 32, &mask, 100);
 
         let stats = grid.get(0, 0);
         assert!((stats.median - 0.4).abs() < 0.05);
@@ -589,8 +618,9 @@ mod tests {
     fn test_no_mask_same_as_none() {
         let pixels = create_uniform_image(64, 64, 0.5);
 
-        let grid_none = TileGrid::new(&pixels, 32);
-        let grid_empty = TileGrid::new_with_mask(&pixels, 32, None, 0);
+        let grid_none = make_grid(&pixels, 32);
+        let grid_empty =
+            TileGrid::new_with_options(&pixels, 32, None, 0, TEST_SIGMA_CLIP_ITERATIONS);
 
         for ty in 0..grid_none.tiles_y() {
             for tx in 0..grid_none.tiles_x() {
@@ -606,7 +636,7 @@ mod tests {
     #[test]
     fn test_median_filter_uniform_unchanged() {
         let pixels = create_uniform_image(128, 128, 0.4);
-        let grid = TileGrid::new(&pixels, 32);
+        let grid = make_grid(&pixels, 32);
 
         for ty in 0..grid.tiles_y() {
             for tx in 0..grid.tiles_x() {
@@ -629,7 +659,7 @@ mod tests {
         }
 
         let pixels = Buffer2::new(width, height, data);
-        let grid = TileGrid::new(&pixels, 32);
+        let grid = make_grid(&pixels, 32);
 
         let center_stats = grid.get(1, 1);
         assert!((center_stats.median - 0.3).abs() < 0.1);
@@ -638,7 +668,7 @@ mod tests {
     #[test]
     fn test_median_filter_skipped_for_small_grid() {
         let pixels = create_uniform_image(64, 64, 0.5);
-        let grid = TileGrid::new(&pixels, 32);
+        let grid = make_grid(&pixels, 32);
 
         assert_eq!(grid.tiles_x(), 2);
         assert_eq!(grid.tiles_y(), 2);
@@ -652,7 +682,7 @@ mod tests {
     #[test]
     fn test_single_tile_image() {
         let pixels = create_uniform_image(32, 32, 0.6);
-        let grid = TileGrid::new(&pixels, 32);
+        let grid = make_grid(&pixels, 32);
 
         assert_eq!(grid.tiles_x(), 1);
         assert_eq!(grid.tiles_y(), 1);
@@ -672,7 +702,7 @@ mod tests {
             .collect();
 
         let pixels = Buffer2::new(width, height, data);
-        let grid = TileGrid::new(&pixels, 32);
+        let grid = make_grid(&pixels, 32);
 
         let tl = grid.get(0, 0);
         let br = grid.get(1, 1);
@@ -682,7 +712,7 @@ mod tests {
     #[test]
     fn test_debug_impl() {
         let pixels = create_uniform_image(64, 64, 0.5);
-        let grid = TileGrid::new(&pixels, 32);
+        let grid = make_grid(&pixels, 32);
 
         let debug_str = format!("{:?}", grid);
         assert!(debug_str.contains("TileGrid"));
@@ -691,7 +721,7 @@ mod tests {
     #[test]
     fn test_image_smaller_than_tile() {
         let pixels = create_uniform_image(20, 20, 0.7);
-        let grid = TileGrid::new(&pixels, 64);
+        let grid = make_grid(&pixels, 64);
 
         assert_eq!(grid.tiles_x(), 1);
         assert_eq!(grid.tiles_y(), 1);
@@ -705,7 +735,7 @@ mod tests {
     #[test]
     fn test_large_tile_size() {
         let pixels = create_uniform_image(100, 50, 0.3);
-        let grid = TileGrid::new(&pixels, 200);
+        let grid = make_grid(&pixels, 200);
 
         assert_eq!(grid.tiles_x(), 1);
         assert_eq!(grid.tiles_y(), 1);
@@ -717,7 +747,7 @@ mod tests {
     #[test]
     fn test_tile_grid_very_wide_image() {
         let pixels = create_uniform_image(1000, 10, 0.5);
-        let grid = TileGrid::new(&pixels, 64);
+        let grid = make_grid(&pixels, 64);
 
         assert_eq!(grid.tiles_x(), 16);
         assert_eq!(grid.tiles_y(), 1);
@@ -731,7 +761,7 @@ mod tests {
     #[test]
     fn test_tile_grid_very_tall_image() {
         let pixels = create_uniform_image(10, 1000, 0.5);
-        let grid = TileGrid::new(&pixels, 64);
+        let grid = make_grid(&pixels, 64);
 
         assert_eq!(grid.tiles_x(), 1);
         assert_eq!(grid.tiles_y(), 16);
@@ -842,7 +872,7 @@ mod tests {
         }
 
         let pixels = Buffer2::new(width, height, data);
-        let grid = TileGrid::new(&pixels, 64);
+        let grid = make_grid(&pixels, 64);
 
         let stats = grid.get(0, 0);
         // Median should be close to 0.5 despite outliers
@@ -859,7 +889,7 @@ mod tests {
             .collect();
 
         let pixels = Buffer2::new(width, height, data);
-        let grid = TileGrid::new(&pixels, 64);
+        let grid = make_grid(&pixels, 64);
 
         let stats = grid.get(0, 0);
         assert!(stats.sigma > 0.0);
@@ -869,7 +899,7 @@ mod tests {
     fn test_median_filter_corner_tiles() {
         // Test that corner tiles (with fewer neighbors) are handled correctly
         let pixels = create_uniform_image(128, 128, 0.5);
-        let grid = TileGrid::new(&pixels, 32);
+        let grid = make_grid(&pixels, 32);
 
         // Corner tiles should still have valid stats
         let corners = [(0, 0), (3, 0), (0, 3), (3, 3)];
@@ -886,7 +916,7 @@ mod tests {
         let data = vec![-0.5; width * height];
 
         let pixels = Buffer2::new(width, height, data);
-        let grid = TileGrid::new(&pixels, 32);
+        let grid = make_grid(&pixels, 32);
 
         let stats = grid.get(0, 0);
         assert!((stats.median - (-0.5)).abs() < 0.01);
@@ -895,7 +925,7 @@ mod tests {
     #[test]
     fn test_find_lower_tile_y_negative_pos() {
         let pixels = create_uniform_image(64, 128, 0.5);
-        let grid = TileGrid::new(&pixels, 32);
+        let grid = make_grid(&pixels, 32);
 
         // Negative position should return 0
         assert_eq!(grid.find_lower_tile_y(-10.0), 0);
@@ -913,7 +943,7 @@ mod tests {
         let data: Vec<f32> = (1..=9).map(|x| x as f32).collect();
 
         let pixels = Buffer2::new(width, height, data);
-        let grid = TileGrid::new(&pixels, 3);
+        let grid = make_grid(&pixels, 3);
 
         let stats = grid.get(0, 0);
         assert!(
@@ -927,7 +957,7 @@ mod tests {
     fn test_sigma_computation_correctness() {
         // For uniform data, sigma should be 0
         let pixels = create_uniform_image(64, 64, 100.0);
-        let grid = TileGrid::new(&pixels, 64);
+        let grid = make_grid(&pixels, 64);
 
         let stats = grid.get(0, 0);
         assert!(
@@ -951,7 +981,7 @@ mod tests {
         let pixels = Buffer2::new(width, height, data);
 
         // Use large tile to get all pixels
-        let grid = TileGrid::new(&pixels, 10);
+        let grid = make_grid(&pixels, 10);
         let stats = grid.get(0, 0);
 
         // Median should be 4.5
@@ -982,7 +1012,7 @@ mod tests {
         }
 
         let pixels = Buffer2::new(width, height, data);
-        let grid = TileGrid::new(&pixels, 100);
+        let grid = make_grid(&pixels, 100);
 
         let stats = grid.get(0, 0);
 
@@ -1010,7 +1040,7 @@ mod tests {
         }
 
         let pixels = Buffer2::new(width, height, data);
-        let grid = TileGrid::new(&pixels, 32);
+        let grid = make_grid(&pixels, 32);
 
         // Center tile should be filtered to ~50 (median of 8x50 + 1x200 = 50)
         let center = grid.get(2, 2);
@@ -1032,7 +1062,7 @@ mod tests {
             .collect();
 
         let pixels = Buffer2::new(width, height, data);
-        let grid = TileGrid::new(&pixels, 64);
+        let grid = make_grid(&pixels, 64);
 
         // Left tiles should have lower median than right tiles
         let left = grid.get(0, 0);
@@ -1099,7 +1129,7 @@ mod tests {
         }
 
         let pixels = Buffer2::new(width, height, data);
-        let grid = TileGrid::new(&pixels, 64);
+        let grid = make_grid(&pixels, 64);
 
         // All tiles should have median close to background (100)
         for ty in 0..grid.tiles_y() {
@@ -1140,7 +1170,7 @@ mod tests {
             }
         }
 
-        let grid = TileGrid::new_with_mask(&pixels, 32, Some(&mask), 100);
+        let grid = make_grid_with_mask(&pixels, 32, &mask, 100);
 
         // Top-left tile (0,0) should fallback to all pixels due to mask
         // Bottom-right tile (1,1) should have background value
@@ -1168,7 +1198,7 @@ mod tests {
             .collect();
 
         let pixels = Buffer2::new(width, height, data);
-        let grid = TileGrid::new(&pixels, 64);
+        let grid = make_grid(&pixels, 64);
 
         // Check all tiles have reasonable background estimate
         for ty in 0..grid.tiles_y() {

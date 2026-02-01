@@ -56,9 +56,11 @@ Final:   median=100, σ≈0 (correct background)
 | Parameter | Value | Rationale |
 |-----------|-------|-----------|
 | Sigma | 3.0 | Standard; rejects 0.27% of Gaussian |
-| Iterations | 2 | MAD converges quickly |
+| Iterations | 2 (configurable) | MAD converges quickly; configurable via `sigma_clip_iterations` |
 | Center | Median | Robust to outliers |
 | Scale | MAD × 1.4826 | Robust σ estimator |
+
+The number of sigma clipping iterations is configurable via `BackgroundConfig::sigma_clip_iterations`. With MAD-based sigma estimation, 2-3 iterations typically suffice (vs. 5-10 with standard deviation).
 
 ### MAD-Based Sigma
 

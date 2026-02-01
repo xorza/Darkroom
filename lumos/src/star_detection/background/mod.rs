@@ -55,7 +55,13 @@ impl BackgroundMap {
             "Image must be at least tile_size x tile_size"
         );
 
-        let grid = TileGrid::new(pixels, config.tile_size);
+        let grid = TileGrid::new_with_options(
+            pixels,
+            config.tile_size,
+            None,
+            0,
+            config.sigma_clip_iterations,
+        );
         let mut background = interpolate_from_grid(pixels, &grid);
 
         if config.iterations > 0 {
@@ -144,6 +150,7 @@ fn refine(background: &mut BackgroundMap, pixels: &Buffer2<f32>, config: &Backgr
             config.tile_size,
             &mask,
             config.min_unmasked_fraction,
+            config.sigma_clip_iterations,
             background,
         );
     }
@@ -182,6 +189,7 @@ fn estimate_background_masked(
     tile_size: usize,
     mask: &BitBuffer2,
     min_unmasked_fraction: f32,
+    sigma_clip_iterations: usize,
     output: &mut BackgroundMap,
 ) {
     let width = pixels.width();
@@ -199,7 +207,13 @@ fn estimate_background_masked(
     let max_tile_pixels = tile_size * tile_size;
     let min_pixels = (max_tile_pixels as f32 * min_unmasked_fraction) as usize;
 
-    let grid = TileGrid::new_with_mask(pixels, tile_size, Some(mask), min_pixels);
+    let grid = TileGrid::new_with_options(
+        pixels,
+        tile_size,
+        Some(mask),
+        min_pixels,
+        sigma_clip_iterations,
+    );
 
     output.background = Buffer2::new_filled(width, height, 0.0);
     output.noise = Buffer2::new_filled(width, height, 0.0);

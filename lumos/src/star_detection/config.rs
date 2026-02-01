@@ -27,6 +27,11 @@ pub struct BackgroundConfig {
     pub min_unmasked_fraction: f32,
     /// Tile size for background estimation in pixels.
     pub tile_size: usize,
+    /// Number of sigma-clipping iterations for tile statistics.
+    /// With MAD-based sigma, 2-3 iterations typically suffice.
+    /// SExtractor/Photutils use 5-10 with standard deviation.
+    /// Typical value: 2-5
+    pub sigma_clip_iterations: usize,
 }
 
 impl Default for BackgroundConfig {
@@ -37,6 +42,7 @@ impl Default for BackgroundConfig {
             mask_dilation: 3,
             min_unmasked_fraction: 0.3,
             tile_size: 64,
+            sigma_clip_iterations: 5,
         }
     }
 }
@@ -70,6 +76,11 @@ impl BackgroundConfig {
         assert!(
             (16..=256).contains(&self.tile_size),
             "Tile size must be between 16 and 256"
+        );
+        assert!(
+            self.sigma_clip_iterations <= 10,
+            "sigma_clip_iterations must be <= 10, got {}",
+            self.sigma_clip_iterations
         );
     }
 }
