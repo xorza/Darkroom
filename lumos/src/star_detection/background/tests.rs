@@ -866,3 +866,74 @@ fn test_background_regression() {
         })
     }
 }
+
+/// Regenerate reference images for regression test.
+/// Run with: cargo test -p lumos regenerate_background_reference -- --ignored --nocapture
+#[test]
+#[ignore]
+fn regenerate_background_reference() {
+    use image::GrayImage;
+    use imaginarium::ColorFormat;
+
+    let test_resources = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .join("test_resources");
+
+    let image_path = test_resources.join("calibrated_light_500x500_stretched.tiff");
+    assert!(
+        image_path.exists(),
+        "Input image not found: {:?}",
+        image_path
+    );
+
+    // Load input image
+    let imag_image = imaginarium::Image::read_file(&image_path)
+        .expect("Failed to load image")
+        .packed();
+    let astro_image: crate::AstroImage = imag_image.convert(ColorFormat::L_F32).unwrap().into();
+
+    // Estimate background with default config
+    let pixels = astro_image.to_grayscale_buffer();
+    let width = pixels.width();
+    let height = pixels.height();
+    let bg = BackgroundMap::new(
+        &pixels,
+        &BackgroundConfig {
+            tile_size: 64,
+            ..Default::default()
+        },
+    );
+
+    // Convert to grayscale images
+    let bg_img = GrayImage::from_fn(width as u32, height as u32, |x, y| {
+        let val = bg.background[y as usize * width + x as usize];
+        image::Luma([(val.clamp(0.0, 1.0) * 255.0) as u8])
+    });
+
+    // Auto-scale noise
+    let noise_min = bg.noise.iter().cloned().fold(f32::INFINITY, f32::min);
+    let noise_max = bg.noise.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+    let noise_range = (noise_max - noise_min).max(f32::EPSILON);
+    let noise_img = GrayImage::from_fn(width as u32, height as u32, |x, y| {
+        let val = bg.noise[y as usize * width + x as usize];
+        let scaled = (val - noise_min) / noise_range;
+        image::Luma([(scaled.clamp(0.0, 1.0) * 255.0) as u8])
+    });
+
+    // Save reference images
+    let bg_path = test_resources.join("background_map.tiff");
+    let noise_path = test_resources.join("background_noise.tiff");
+
+    bg_img
+        .save(&bg_path)
+        .expect("Failed to save background_map.tiff");
+    noise_img
+        .save(&noise_path)
+        .expect("Failed to save background_noise.tiff");
+
+    println!("Regenerated reference images:");
+    println!("  - {:?}", bg_path);
+    println!("  - {:?}", noise_path);
+    println!("Background config used: {:?}", BackgroundConfig::default());
+}

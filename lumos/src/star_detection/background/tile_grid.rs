@@ -12,10 +12,6 @@ use rayon::prelude::*;
 /// Maximum samples per tile for statistics computation.
 const MAX_TILE_SAMPLES: usize = 1024;
 
-/// Default number of sigma-clipping iterations for tests.
-#[cfg(test)]
-const TEST_SIGMA_CLIP_ITERATIONS: usize = 2;
-
 // ============================================================================
 // Types
 // ============================================================================
@@ -396,6 +392,9 @@ fn subsample_in_place(values: &mut Vec<f32>, target_size: usize) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Number of sigma-clipping iterations for tests.
+    const TEST_SIGMA_CLIP_ITERATIONS: usize = 2;
 
     fn create_uniform_image(width: usize, height: usize, value: f32) -> Buffer2<f32> {
         Buffer2::new(width, height, vec![value; width * height])
