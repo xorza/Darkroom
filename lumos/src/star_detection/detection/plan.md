@@ -10,14 +10,60 @@ Implemented RLE-based CCL:
 - Label runs and merge with overlapping runs from previous row
 - Parallel strip processing with RLE-based boundary merging
 - Write labels to output buffer in parallel
+- Added 9 RLE-specific tests for correctness verification
 
 **Location:** `labels.rs` - `label_mask_sequential()`, `label_mask_parallel()`, `label_strip_rle()`
 
+**Tests:** `tests.rs` - `label_map_tests::rle_specific` module
+
 ---
 
-## High-Priority (Detection Quality)
+## Next Up: 8-Connectivity Option
 
-### 3. Adaptive Local Thresholding
+### Why 8-Connectivity?
+**Impact:** Fewer fragmented detections for undersampled PSFs
+
+Current 4-connectivity may split:
+- Diagonal PSF features
+- Stars near Nyquist sampling limit
+- Elongated/trailed sources
+- Slightly defocused or seeing-affected stars
+
+### Implementation Plan
+
+1. **Add connectivity enum:**
+```rust
+#[derive(Debug, Clone, Copy, Default)]
+pub enum Connectivity {
+    #[default]
+    Four,
+    Eight,
+}
+```
+
+2. **Modify RLE run overlap check:**
+   - 4-conn: runs overlap if `prev.start < curr.end && prev.end > curr.start`
+   - 8-conn: runs overlap if `prev.start < curr.end + 1 && prev.end + 1 > curr.start`
+   (adjacent runs at diagonal are connected)
+
+3. **Add config option:**
+```rust
+pub struct StarDetectionConfig {
+    // ...
+    pub connectivity: Connectivity,
+}
+```
+
+4. **Update tests** to cover 8-connectivity cases
+
+**Effort:** Low (mostly changing overlap condition)
+**Files:** `labels.rs`, `config.rs`, `tests.rs`
+
+---
+
+## Pending Improvements
+
+### Adaptive Local Thresholding
 **Impact:** Better detection in variable nebulosity
 
 Current single sigma threshold fails when:
@@ -30,47 +76,9 @@ Current single sigma threshold fails when:
 - **Sliding window:** Local sigma in NxN neighborhood
 - **Hybrid:** Use local noise estimate, not just global
 
-**Implementation:**
-- Add `AdaptiveThresholdConfig` with window size
-- Modify `create_threshold_mask` to accept local thresholds
-- Consider performance impact (may need SIMD optimization)
+**Effort:** High
 
-### 4. 8-Connectivity Option
-**Impact:** Fewer fragmented detections for undersampled PSFs
-
-Current 4-connectivity may split:
-- Diagonal PSF features
-- Stars near Nyquist sampling limit
-- Elongated/trailed sources
-
-**Implementation:**
-- Add `connectivity: Connectivity` enum (Four, Eight)
-- Modify neighbor iteration in `label_pixel()`
-- 8-conn checks 8 neighbors vs 4 (2x more work, but often worth it)
-
----
-
-## Medium-Priority
-
-### 5. Atomic Path Compression
-**Expected improvement:** Reduced tree depth, faster merges
-
-Current `atomic_find()` only reads without compression. Adding path compression:
-```rust
-fn atomic_find_with_compression(labels: &[AtomicU32], mut x: u32) -> u32 {
-    let root = atomic_find(labels, x);  // Find root first
-    // Compress path
-    while labels[x].load(Relaxed) != root {
-        let parent = labels[x].swap(root, Relaxed);
-        x = parent;
-    }
-    root
-}
-```
-
-**Trade-off:** More atomic operations vs shorter trees. Benchmark needed.
-
-### 6. Auto-Estimate FWHM
+### Auto-Estimate FWHM
 **Impact:** Better matched filter without manual tuning
 
 Currently `expected_fwhm` is manual config. Auto-estimation:
@@ -78,22 +86,21 @@ Currently `expected_fwhm` is manual config. Auto-estimation:
 2. Fit Gaussian/Moffat to estimate FWHM
 3. Use median FWHM for matched filter
 
-**Implementation:**
-- Add `auto_fwhm: bool` to config
-- Two-pass detection: coarse → estimate FWHM → fine with matched filter
-- Cache FWHM estimate for batch processing
+**Effort:** Medium
 
-### 7. Vectorized Label Flattening
+### Atomic Path Compression
+**Expected improvement:** Reduced tree depth, faster merges
+
+Current `atomic_find()` only reads without compression. Adding path compression could reduce tree depth but adds more atomic operations.
+
+**Effort:** Low (benchmark needed to verify benefit)
+
+### Vectorized Label Flattening
 **Expected speedup:** Minor (~5-10% of CCL time)
 
-Final `flatten_labels()` pass could use SIMD:
-- Load 4-8 labels at once
-- Lookup in parent array (gather operation)
-- Store flattened labels
+Use SIMD gather operations for label mapping pass.
 
-**Implementation:**
-- Use `_mm256_i32gather_epi32` on AVX2
-- Fallback to scalar for non-AVX2
+**Effort:** Low
 
 ---
 
@@ -102,7 +109,7 @@ Final `flatten_labels()` pass could use SIMD:
 | Improvement | Effort | Impact | Status |
 |-------------|--------|--------|--------|
 | RLE-based CCL | High | High (perf) | **DONE** (~50% faster) |
-| 8-connectivity option | Low | Medium (quality) | Pending |
+| 8-connectivity option | Low | Medium (quality) | **NEXT** |
 | Adaptive thresholding | High | High (quality) | Pending |
 | Auto-estimate FWHM | Medium | Medium (usability) | Pending |
 | Atomic path compression | Low | Low-Medium | Pending |
@@ -112,4 +119,6 @@ Final `flatten_labels()` pass could use SIMD:
 
 ## Recommendation
 
-Next priority: **8-connectivity option** - low effort, improves quality for undersampled PSFs. Then **Adaptive thresholding** for images with variable nebulosity.
+**Next:** Implement **8-connectivity option** - low effort, improves quality for undersampled PSFs and diagonal star features.
+
+After that: **Adaptive thresholding** for images with variable nebulosity (higher effort but high impact for real-world astrophotography).
