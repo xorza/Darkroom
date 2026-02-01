@@ -1,7 +1,7 @@
 name: bench_label_map_from_mask_1k
-mean: 397.958µs
-min: 318.916µs
-max: 518.25µs
-median: 404.25µs
+mean: 242.483µs
+min: 184µs
+max: 356.125µs
+median: 214.083µs
 iterations: 5
-vs_previous: 346.125µs -> 404.25µs (+16.8%) SLOWER
+vs_previous: 226.958µs -> 214.083µs (-5.7%) faster

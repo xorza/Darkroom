@@ -32,10 +32,10 @@ struct Run {
 }
 ```
 
-Run extraction uses **word-level bit scanning**:
+Run extraction uses **word-level bit scanning with CTZ optimization**:
 - Process 64 bits at a time using the mask's internal `u64` word storage
 - Fast-path for all-zero words (skip entirely) and all-one words (extend run)
-- Bit-by-bit processing only for mixed words
+- **CTZ-based scanning** for mixed words: uses `trailing_zeros()` to jump directly to bit transitions instead of checking each bit individually
 
 ### Union-Find Data Structure
 
@@ -131,14 +131,28 @@ The RLE optimization provides ~50% speedup over pixel-based approaches for typic
 | Path compression | Yes | In sequential `UnionFind::find()` |
 | Parallel strip processing | Yes | Lock-free `AtomicUnionFind` |
 | Word-level bit scanning | Yes | 64-bit words with fast-paths |
+| CTZ-based run extraction | Yes | 10x faster for sparse masks (2% density) |
 | 8-connectivity | Yes | Via `Run::search_window()` and `runs_connected()` |
 | Struct-based organization | Yes | Encapsulated `UnionFind` and `AtomicUnionFind` |
 
+### CTZ Optimization Performance
+
+Run extraction benchmark comparing CTZ vs bit-by-bit scanning (4096-wide rows):
+
+| Density | Runs/row | Bit-by-bit | CTZ | Speedup |
+|---------|----------|------------|-----|---------|
+| 2% (sparse) | 83 | 2.65µs | 0.26µs | **10.2x** |
+| 10% | 409 | 2.64µs | 1.24µs | **2.1x** |
+| 30% | 1229 | 3.10µs | 4.08µs | 0.76x |
+| 50% (dense) | 1565 | 3.23µs | 4.46µs | 0.72x |
+
+The CTZ approach excels for sparse masks typical in star detection (<5% density).
+
 ### Potential Improvements
 
-1. **SIMD RLE extraction**: Use AVX2/NEON for parallel bit scanning (research shows ~5x speedup possible)
-2. **Atomic path compression**: Currently read-only in parallel mode; adding compression may reduce tree depth
-3. **Precomputed lookup tables**: Cache 16-bit binary patterns for faster run detection (as in recent MDPI paper)
+1. **Atomic path compression**: Currently read-only in parallel mode; adding compression may reduce tree depth
+2. **Precomputed lookup tables**: Cache 16-bit binary patterns for faster run detection (as in recent MDPI paper)
+3. **SIMD parallel bit scanning**: Use AVX2/NEON for processing multiple words simultaneously
 
 ## API
 

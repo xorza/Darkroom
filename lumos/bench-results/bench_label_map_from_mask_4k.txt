@@ -1,7 +1,7 @@
 name: bench_label_map_from_mask_4k
-mean: 2.128416ms
-min: 2.0235ms
-max: 2.3065ms
-median: 2.05525ms
+mean: 1.616916ms
+min: 1.554625ms
+max: 1.691542ms
+median: 1.604583ms
 iterations: 3
-vs_previous: 5.137792ms -> 2.05525ms (-60.0%) faster
+vs_previous: 1.747666ms -> 1.604583ms (-8.2%) faster

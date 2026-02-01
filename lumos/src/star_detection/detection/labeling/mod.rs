@@ -24,7 +24,7 @@ use crate::star_detection::config::Connectivity;
 
 /// A horizontal run of foreground pixels.
 #[derive(Debug, Clone, Copy)]
-struct Run {
+pub(super) struct Run {
     start: u32, // Starting x coordinate (inclusive)
     end: u32,   // Ending x coordinate (exclusive)
     label: u32, // Provisional label
@@ -52,8 +52,12 @@ fn runs_connected(prev: &Run, curr: &Run, connectivity: Connectivity) -> bool {
 }
 
 /// Extract runs from a single row of the mask using word-level bit scanning.
+///
+/// Uses trailing zero counting (CTZ) for efficient run boundary detection.
+/// This is faster than bit-by-bit scanning for mixed words.
 #[inline]
-fn extract_runs_from_row(
+#[cfg_attr(test, allow(dead_code))]
+pub(super) fn extract_runs_from_row(
     mask_words: &[u64],
     word_row_start: usize,
     words_per_row: usize,
@@ -65,12 +69,12 @@ fn extract_runs_from_row(
 
     for word_idx in 0..words_per_row {
         let word = mask_words[word_row_start + word_idx];
-        let base_x = word_idx * 64;
+        let base_x = (word_idx * 64) as u32;
 
         if word == 0 {
             // All zeros - close any open run
             if in_run {
-                let end = (base_x as u32).min(width as u32);
+                let end = base_x.min(width as u32);
                 runs.push(Run {
                     start: run_start,
                     end,
@@ -84,32 +88,21 @@ fn extract_runs_from_row(
         if word == !0u64 {
             // All ones - extend or start run
             if !in_run {
-                run_start = base_x as u32;
+                run_start = base_x;
                 in_run = true;
             }
             continue;
         }
 
-        // Mixed word - process bit by bit
-        for bit in 0..64 {
-            let x = base_x + bit;
-            if x >= width {
-                break;
-            }
-
-            let is_set = (word >> bit) & 1 != 0;
-            if is_set && !in_run {
-                run_start = x as u32;
-                in_run = true;
-            } else if !is_set && in_run {
-                runs.push(Run {
-                    start: run_start,
-                    end: x as u32,
-                    label: 0,
-                });
-                in_run = false;
-            }
-        }
+        // Mixed word - use CTZ-based scanning for run transitions
+        extract_runs_from_mixed_word(
+            word,
+            base_x,
+            width as u32,
+            &mut in_run,
+            &mut run_start,
+            runs,
+        );
     }
 
     // Close final run if still open
@@ -119,6 +112,81 @@ fn extract_runs_from_row(
             end: width as u32,
             label: 0,
         });
+    }
+}
+
+/// Extract runs from a mixed word (contains both 0s and 1s) using CTZ.
+///
+/// Uses trailing zero counting to jump directly to bit transitions instead
+/// of checking each bit individually. This is significantly faster for
+/// words with few transitions.
+#[inline]
+fn extract_runs_from_mixed_word(
+    word: u64,
+    base_x: u32,
+    width: u32,
+    in_run: &mut bool,
+    run_start: &mut u32,
+    runs: &mut Vec<Run>,
+) {
+    let word_end = (base_x + 64).min(width);
+
+    // If we're in a run, we need to find where it ends (first 0 bit)
+    // If we're not in a run, we need to find where one starts (first 1 bit)
+    //
+    // Strategy: XOR with mask to find transitions, then use CTZ to jump
+    // to each transition point.
+
+    let mut pos = base_x;
+
+    loop {
+        if pos >= word_end {
+            break;
+        }
+
+        let bit_offset = pos - base_x;
+        let remaining_bits = word >> bit_offset;
+
+        if *in_run {
+            // Find next 0 bit (end of run)
+            if remaining_bits == !0u64 >> bit_offset {
+                // All remaining bits are 1s - run continues past this word
+                break;
+            }
+            // Invert to find first 0 (which becomes first 1 after invert)
+            let inverted = !remaining_bits;
+            let zeros_until_end = inverted.trailing_zeros();
+            let end_pos = pos + zeros_until_end;
+
+            if end_pos >= word_end {
+                // Run extends past this word
+                break;
+            }
+
+            runs.push(Run {
+                start: *run_start,
+                end: end_pos,
+                label: 0,
+            });
+            *in_run = false;
+            pos = end_pos;
+        } else {
+            // Find next 1 bit (start of run)
+            if remaining_bits == 0 {
+                // No more 1 bits in this word
+                break;
+            }
+            let zeros_until_start = remaining_bits.trailing_zeros();
+            let start_pos = pos + zeros_until_start;
+
+            if start_pos >= word_end {
+                break;
+            }
+
+            *run_start = start_pos;
+            *in_run = true;
+            pos = start_pos;
+        }
     }
 }
 
