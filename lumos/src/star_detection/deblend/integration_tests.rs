@@ -1,4 +1,5 @@
 //! Integration tests for deblending algorithms.
+//! These tests compare behavior between local_maxima and multi_threshold.
 
 use super::*;
 use crate::common::Buffer2;
