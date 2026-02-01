@@ -9,6 +9,45 @@ mod tests;
 /// Using 3x threads provides good load balancing when some chunks finish faster.
 const CHUNKS_PER_THREAD: usize = 3;
 
+/// Compute the optimal number of parallel jobs.
+#[inline]
+pub fn auto_num_jobs() -> usize {
+    rayon::current_num_threads() * CHUNKS_PER_THREAD
+}
+
+/// Create a parallel iterator over job indices with automatic job count.
+///
+/// Returns an iterator yielding `(job_index, start, end)` tuples where:
+/// - `job_index`: the index of this job (0..num_jobs)
+/// - `start`: the starting index for this job's range
+/// - `end`: the ending index (exclusive) for this job's range
+///
+/// Use this when you need to partition work into parallel jobs manually,
+/// e.g., when working with raw pointers or complex data structures.
+///
+/// # Example
+/// ```ignore
+/// par_iter_auto(height).for_each(|(_, start_row, end_row)| {
+///     for row in start_row..end_row {
+///         // process row
+///     }
+/// });
+/// ```
+pub fn par_iter_auto(total: usize) -> impl IndexedParallelIterator<Item = (usize, usize, usize)> {
+    let num_jobs = auto_num_jobs();
+    let items_per_job = (total / num_jobs).max(1);
+
+    (0..num_jobs).into_par_iter().map(move |job_idx| {
+        let start = job_idx * items_per_job;
+        let end = if job_idx == num_jobs - 1 {
+            total
+        } else {
+            ((job_idx + 1) * items_per_job).min(total)
+        };
+        (job_idx, start, end)
+    })
+}
+
 /// Compute optimal chunk size for the given length.
 #[inline]
 fn auto_chunk_size(len: usize) -> usize {

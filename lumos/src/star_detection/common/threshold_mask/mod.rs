@@ -19,6 +19,7 @@ mod bench;
 mod tests;
 
 use crate::common::BitBuffer2;
+use common::parallel;
 use rayon::iter::ParallelIterator;
 
 #[cfg(target_arch = "x86_64")]
@@ -250,28 +251,31 @@ pub fn create_threshold_mask(
     debug_assert_eq!(total_pixels, noise.len());
 
     let words_per_row = mask.words_per_row();
+    let num_words = mask.num_words();
 
-    // Process each row independently to handle stride correctly
-    rayon::iter::IntoParallelIterator::into_par_iter(0..height).for_each(|y| {
-        let row_pixel_start = y * width;
-        let row_word_start = y * words_per_row;
+    // SAFETY: We partition rows into disjoint chunks, each thread writes only to its chunk
+    // Store pointer as usize to satisfy Send+Sync bounds
+    let words_ptr = mask.words().as_ptr() as usize;
 
-        // SAFETY: Each thread writes to a disjoint set of rows
-        let words = unsafe {
-            std::slice::from_raw_parts_mut(mask.words().as_ptr() as *mut u64, mask.num_words())
-        };
+    parallel::par_iter_auto(height).for_each(|(_, start_row, end_row)| {
+        // SAFETY: Each chunk writes to disjoint rows
+        let words = unsafe { std::slice::from_raw_parts_mut(words_ptr as *mut u64, num_words) };
 
-        let row_words = &mut words[row_word_start..row_word_start + words_per_row];
+        for y in start_row..end_row {
+            let row_pixel_start = y * width;
+            let row_word_start = y * words_per_row;
+            let row_words = &mut words[row_word_start..row_word_start + words_per_row];
 
-        process_words(
-            pixels,
-            bg,
-            noise,
-            sigma_threshold,
-            row_words,
-            row_pixel_start,
-            row_pixel_start + width, // Only process up to row width, not stride
-        );
+            process_words(
+                pixels,
+                bg,
+                noise,
+                sigma_threshold,
+                row_words,
+                row_pixel_start,
+                row_pixel_start + width,
+            );
+        }
     });
 }
 
@@ -295,27 +299,30 @@ pub fn create_threshold_mask_filtered(
     debug_assert_eq!(total_pixels, noise.len());
 
     let words_per_row = mask.words_per_row();
+    let num_words = mask.num_words();
 
-    // Process each row independently to handle stride correctly
-    rayon::iter::IntoParallelIterator::into_par_iter(0..height).for_each(|y| {
-        let row_pixel_start = y * width;
-        let row_word_start = y * words_per_row;
+    // SAFETY: We partition rows into disjoint chunks, each thread writes only to its chunk
+    // Store pointer as usize to satisfy Send+Sync bounds
+    let words_ptr = mask.words().as_ptr() as usize;
 
-        // SAFETY: Each thread writes to a disjoint set of rows
-        let words = unsafe {
-            std::slice::from_raw_parts_mut(mask.words().as_ptr() as *mut u64, mask.num_words())
-        };
+    parallel::par_iter_auto(height).for_each(|(_, start_row, end_row)| {
+        // SAFETY: Each chunk writes to disjoint rows
+        let words = unsafe { std::slice::from_raw_parts_mut(words_ptr as *mut u64, num_words) };
 
-        let row_words = &mut words[row_word_start..row_word_start + words_per_row];
+        for y in start_row..end_row {
+            let row_pixel_start = y * width;
+            let row_word_start = y * words_per_row;
+            let row_words = &mut words[row_word_start..row_word_start + words_per_row];
 
-        process_words_filtered(
-            filtered,
-            noise,
-            sigma_threshold,
-            row_words,
-            row_pixel_start,
-            row_pixel_start + width, // Only process up to row width, not stride
-        );
+            process_words_filtered(
+                filtered,
+                noise,
+                sigma_threshold,
+                row_words,
+                row_pixel_start,
+                row_pixel_start + width,
+            );
+        }
     });
 }
 

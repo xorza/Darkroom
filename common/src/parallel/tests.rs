@@ -1,6 +1,69 @@
 use super::*;
 
 #[test]
+fn test_par_iter_auto_covers_all_items() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    let total = 1000;
+    let covered: Vec<AtomicBool> = (0..total).map(|_| AtomicBool::new(false)).collect();
+
+    par_iter_auto(total).for_each(|(_, start, end)| {
+        for i in start..end {
+            covered[i].store(true, Ordering::Relaxed);
+        }
+    });
+
+    assert!(
+        covered.iter().all(|c| c.load(Ordering::Relaxed)),
+        "Not all items were covered"
+    );
+}
+
+#[test]
+fn test_par_iter_auto_no_overlap() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let total = 500;
+    let counts: Vec<AtomicUsize> = (0..total).map(|_| AtomicUsize::new(0)).collect();
+
+    par_iter_auto(total).for_each(|(_, start, end)| {
+        for i in start..end {
+            counts[i].fetch_add(1, Ordering::Relaxed);
+        }
+    });
+
+    for (i, count) in counts.iter().enumerate() {
+        assert_eq!(
+            count.load(Ordering::Relaxed),
+            1,
+            "Item {} was visited {} times",
+            i,
+            count.load(Ordering::Relaxed)
+        );
+    }
+}
+
+#[test]
+fn test_par_iter_auto_small_total() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    // Test with total smaller than num_jobs
+    let total = 3;
+    let covered: Vec<AtomicBool> = (0..total).map(|_| AtomicBool::new(false)).collect();
+
+    par_iter_auto(total).for_each(|(_, start, end)| {
+        for i in start..end {
+            covered[i].store(true, Ordering::Relaxed);
+        }
+    });
+
+    assert!(
+        covered.iter().all(|c| c.load(Ordering::Relaxed)),
+        "Not all items were covered for small total"
+    );
+}
+
+#[test]
 fn test_par_chunks_auto_offsets() {
     let mut data: Vec<usize> = vec![0; 100];
     par_chunks_auto(&mut data).for_each(|(offset, chunk)| {

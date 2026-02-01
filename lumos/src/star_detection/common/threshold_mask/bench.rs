@@ -29,7 +29,7 @@ fn create_bench_data(size: usize) -> (Vec<f32>, Vec<f32>, Vec<f32>) {
     )
 }
 
-#[quick_bench(warmup_iters = 3, iters = 10)]
+#[quick_bench(warmup_iters = 3, iters = 200)]
 fn bench_threshold_mask_4k(b: ::bench::Bencher) {
     let (pixels, bg, noise) = create_bench_data(4096 * 4096);
     let mut mask = BitBuffer2::new_filled(4096, 4096, false);
