@@ -1921,3 +1921,463 @@ fn test_roundness2_symmetric_source() {
         metrics.roundness2
     );
 }
+
+// =============================================================================
+// Moment-based Sigma Estimation Tests
+// =============================================================================
+
+#[test]
+fn test_estimate_sigma_from_moments_gaussian() {
+    use super::gaussian_fit::estimate_sigma_from_moments;
+
+    let width = 21;
+    let height = 21;
+    let cx = 10.0f32;
+    let cy = 10.0f32;
+    let true_sigma = 2.5f32;
+    let background = 0.1f32;
+
+    // Create Gaussian star
+    let mut data_x = Vec::new();
+    let mut data_y = Vec::new();
+    let mut data_z = Vec::new();
+
+    for y in 0..height {
+        for x in 0..width {
+            let dx = x as f32 - cx;
+            let dy = y as f32 - cy;
+            let value =
+                background + 1.0 * (-0.5 * (dx * dx + dy * dy) / (true_sigma * true_sigma)).exp();
+            data_x.push(x as f32);
+            data_y.push(y as f32);
+            data_z.push(value);
+        }
+    }
+
+    let estimated_sigma =
+        estimate_sigma_from_moments(&data_x, &data_y, &data_z, cx, cy, background);
+
+    // Should be within 20% of true sigma
+    let error = (estimated_sigma - true_sigma).abs() / true_sigma;
+    assert!(
+        error < 0.2,
+        "Sigma estimate error {:.1}% too large (expected={}, got={})",
+        error * 100.0,
+        true_sigma,
+        estimated_sigma
+    );
+}
+
+#[test]
+fn test_estimate_sigma_from_moments_various_sigmas() {
+    use super::gaussian_fit::estimate_sigma_from_moments;
+
+    let width = 21;
+    let height = 21;
+    let cx = 10.0f32;
+    let cy = 10.0f32;
+    let background = 0.1f32;
+
+    for true_sigma in [1.5f32, 2.0, 2.5, 3.0, 4.0] {
+        let mut data_x = Vec::new();
+        let mut data_y = Vec::new();
+        let mut data_z = Vec::new();
+
+        for y in 0..height {
+            for x in 0..width {
+                let dx = x as f32 - cx;
+                let dy = y as f32 - cy;
+                let value = background
+                    + 1.0 * (-0.5 * (dx * dx + dy * dy) / (true_sigma * true_sigma)).exp();
+                data_x.push(x as f32);
+                data_y.push(y as f32);
+                data_z.push(value);
+            }
+        }
+
+        let estimated_sigma =
+            estimate_sigma_from_moments(&data_x, &data_y, &data_z, cx, cy, background);
+
+        let error = (estimated_sigma - true_sigma).abs() / true_sigma;
+        assert!(
+            error < 0.25,
+            "Sigma={}: estimate error {:.1}% too large (got={})",
+            true_sigma,
+            error * 100.0,
+            estimated_sigma
+        );
+    }
+}
+
+// =============================================================================
+// Inverse-Variance Weight Computation Tests
+// =============================================================================
+
+#[test]
+fn test_compute_pixel_weights_basic() {
+    use super::gaussian_fit::compute_pixel_weights;
+
+    let background = 100.0f32;
+    let noise = 10.0f32;
+
+    // Pixels with varying signal levels
+    let data_z = vec![100.0, 150.0, 200.0, 500.0];
+
+    let weights = compute_pixel_weights(&data_z, background, noise, None, None);
+
+    assert_eq!(weights.len(), 4);
+    // All weights should be positive
+    for w in &weights {
+        assert!(*w > 0.0, "Weight should be positive");
+    }
+    // Higher signal should have lower weight (more variance)
+    // Since variance ~ signal, weight = 1/variance decreases with signal
+    assert!(
+        weights[0] >= weights[3],
+        "Background pixel should have higher weight than bright pixel"
+    );
+}
+
+#[test]
+fn test_compute_pixel_weights_with_gain() {
+    use super::gaussian_fit::compute_pixel_weights;
+
+    let background = 100.0f32;
+    let noise = 10.0f32;
+    let gain = 2.0f32;
+    let read_noise = 5.0f32;
+
+    let data_z = vec![100.0, 200.0, 500.0];
+
+    let weights = compute_pixel_weights(&data_z, background, noise, Some(gain), Some(read_noise));
+
+    assert_eq!(weights.len(), 3);
+    // All weights should be positive
+    for w in &weights {
+        assert!(*w > 0.0, "Weight should be positive");
+    }
+    // Weights should decrease with signal (more shot noise)
+    assert!(
+        weights[0] > weights[2],
+        "Low-signal pixel should have higher weight"
+    );
+}
+
+#[test]
+fn test_compute_pixel_weights_zero_signal() {
+    use super::gaussian_fit::compute_pixel_weights;
+
+    let background = 100.0f32;
+    let noise = 10.0f32;
+
+    // Pixel at background level (zero signal above background)
+    let data_z = vec![100.0];
+
+    let weights = compute_pixel_weights(&data_z, background, noise, None, None);
+
+    assert_eq!(weights.len(), 1);
+    assert!(
+        weights[0] > 0.0,
+        "Weight should be positive even for zero signal"
+    );
+    assert!(weights[0].is_finite(), "Weight should be finite");
+}
+
+// =============================================================================
+// Weighted Gaussian Fitting Tests
+// =============================================================================
+
+#[test]
+fn test_fit_gaussian_2d_weighted_basic() {
+    use super::gaussian_fit::{GaussianFitConfig, fit_gaussian_2d_weighted};
+
+    let width = 21;
+    let height = 21;
+    let true_cx = 10.3f32;
+    let true_cy = 10.7f32;
+    let true_sigma = 2.5f32;
+    let background = 0.1f32;
+    let noise = 0.02f32;
+
+    // Create Gaussian star
+    let mut pixels = vec![background; width * height];
+    for y in 0..height {
+        for x in 0..width {
+            let dx = x as f32 - true_cx;
+            let dy = y as f32 - true_cy;
+            pixels[y * width + x] +=
+                1.0 * (-0.5 * (dx * dx + dy * dy) / (true_sigma * true_sigma)).exp();
+        }
+    }
+    let pixels_buf = Buffer2::new(width, height, pixels);
+
+    let config = GaussianFitConfig::default();
+    let result = fit_gaussian_2d_weighted(
+        &pixels_buf,
+        10.0,
+        10.0,
+        8,
+        background,
+        noise,
+        None,
+        None,
+        &config,
+    );
+
+    assert!(result.is_some(), "Weighted fit should succeed");
+    let result = result.unwrap();
+
+    let error = ((result.x - true_cx).powi(2) + (result.y - true_cy).powi(2)).sqrt();
+    assert!(
+        error < 0.1,
+        "Weighted Gaussian fit position error {} too large",
+        error
+    );
+}
+
+#[test]
+fn test_fit_gaussian_2d_weighted_with_gain() {
+    use super::gaussian_fit::{GaussianFitConfig, fit_gaussian_2d_weighted};
+
+    let width = 21;
+    let height = 21;
+    let true_cx = 10.0f32;
+    let true_cy = 10.0f32;
+    let true_sigma = 2.5f32;
+    let background = 0.1f32;
+    let noise = 0.02f32;
+    let gain = 2.0f32;
+    let read_noise = 5.0f32;
+
+    let mut pixels = vec![background; width * height];
+    for y in 0..height {
+        for x in 0..width {
+            let dx = x as f32 - true_cx;
+            let dy = y as f32 - true_cy;
+            pixels[y * width + x] +=
+                1.0 * (-0.5 * (dx * dx + dy * dy) / (true_sigma * true_sigma)).exp();
+        }
+    }
+    let pixels_buf = Buffer2::new(width, height, pixels);
+
+    let config = GaussianFitConfig::default();
+    let result = fit_gaussian_2d_weighted(
+        &pixels_buf,
+        10.0,
+        10.0,
+        8,
+        background,
+        noise,
+        Some(gain),
+        Some(read_noise),
+        &config,
+    );
+
+    assert!(result.is_some(), "Weighted fit with gain should succeed");
+    let result = result.unwrap();
+
+    // Should achieve good accuracy
+    let error = ((result.x - true_cx).powi(2) + (result.y - true_cy).powi(2)).sqrt();
+    assert!(
+        error < 0.1,
+        "Weighted Gaussian fit with gain position error {} too large",
+        error
+    );
+}
+
+// =============================================================================
+// Weighted Moffat Fitting Tests
+// =============================================================================
+
+#[test]
+fn test_fit_moffat_2d_weighted_basic() {
+    use super::moffat_fit::{MoffatFitConfig, fit_moffat_2d_weighted};
+
+    let width = 21;
+    let height = 21;
+    let true_cx = 10.3f32;
+    let true_cy = 10.7f32;
+    let true_alpha = 2.5f32;
+    let true_beta = 2.5f32;
+    let background = 0.1f32;
+    let noise = 0.02f32;
+
+    let mut pixels = vec![background; width * height];
+    for y in 0..height {
+        for x in 0..width {
+            let r2 = (x as f32 - true_cx).powi(2) + (y as f32 - true_cy).powi(2);
+            pixels[y * width + x] += 1.0 * (1.0 + r2 / (true_alpha * true_alpha)).powf(-true_beta);
+        }
+    }
+    let pixels_buf = Buffer2::new(width, height, pixels);
+
+    let config = MoffatFitConfig {
+        fit_beta: false,
+        fixed_beta: true_beta,
+        ..Default::default()
+    };
+    let result = fit_moffat_2d_weighted(
+        &pixels_buf,
+        10.0,
+        10.0,
+        8,
+        background,
+        noise,
+        None,
+        None,
+        &config,
+    );
+
+    assert!(result.is_some(), "Weighted Moffat fit should succeed");
+    let result = result.unwrap();
+
+    let error = ((result.x - true_cx).powi(2) + (result.y - true_cy).powi(2)).sqrt();
+    assert!(
+        error < 0.1,
+        "Weighted Moffat fit position error {} too large",
+        error
+    );
+}
+
+#[test]
+fn test_fit_moffat_2d_weighted_variable_beta() {
+    use super::moffat_fit::{MoffatFitConfig, fit_moffat_2d_weighted};
+
+    let width = 21;
+    let height = 21;
+    let true_cx = 10.0f32;
+    let true_cy = 10.0f32;
+    let true_alpha = 2.5f32;
+    let true_beta = 3.5f32;
+    let background = 0.1f32;
+    let noise = 0.02f32;
+
+    let mut pixels = vec![background; width * height];
+    for y in 0..height {
+        for x in 0..width {
+            let r2 = (x as f32 - true_cx).powi(2) + (y as f32 - true_cy).powi(2);
+            pixels[y * width + x] += 1.0 * (1.0 + r2 / (true_alpha * true_alpha)).powf(-true_beta);
+        }
+    }
+    let pixels_buf = Buffer2::new(width, height, pixels);
+
+    let config = MoffatFitConfig {
+        fit_beta: true,
+        fixed_beta: 3.0, // initial guess
+        lm: super::lm_optimizer::LMConfig {
+            max_iterations: 100,
+            ..Default::default()
+        },
+    };
+    let result = fit_moffat_2d_weighted(
+        &pixels_buf,
+        10.0,
+        10.0,
+        8,
+        background,
+        noise,
+        None,
+        None,
+        &config,
+    );
+
+    assert!(
+        result.is_some(),
+        "Weighted Moffat fit with variable beta should succeed"
+    );
+    let result = result.unwrap();
+
+    // Position should be accurate
+    let error = ((result.x - true_cx).powi(2) + (result.y - true_cy).powi(2)).sqrt();
+    assert!(
+        error < 0.1,
+        "Weighted Moffat fit position error {} too large",
+        error
+    );
+
+    // Beta should be recovered within tolerance
+    let beta_error = (result.beta - true_beta).abs();
+    assert!(
+        beta_error < 0.5,
+        "Beta error {} too large (expected={}, got={})",
+        beta_error,
+        true_beta,
+        result.beta
+    );
+}
+
+// =============================================================================
+// Adaptive Sigma Tests
+// =============================================================================
+
+#[test]
+fn test_refine_centroid_adaptive_sigma_small_fwhm() {
+    let width = 64;
+    let height = 64;
+    let true_cx = 32.3f32;
+    let true_cy = 32.7f32;
+    let sigma = 1.5f32; // Small sigma
+    let expected_fwhm = FWHM_TO_SIGMA * sigma;
+
+    let pixels = make_gaussian_star(width, height, true_cx, true_cy, sigma, 0.8);
+    let bg = make_uniform_background(width, height, 0.1, 0.01);
+
+    // Use small expected FWHM
+    let result = refine_centroid(
+        &pixels,
+        width,
+        height,
+        &bg,
+        32.0,
+        32.0,
+        TEST_STAMP_RADIUS,
+        expected_fwhm,
+    );
+
+    assert!(result.is_some());
+    let (new_cx, new_cy) = result.unwrap();
+
+    // Should converge towards true position
+    let error = ((new_cx - true_cx).powi(2) + (new_cy - true_cy).powi(2)).sqrt();
+    assert!(
+        error < 0.5,
+        "Centroid error {} too large for small FWHM",
+        error
+    );
+}
+
+#[test]
+fn test_refine_centroid_adaptive_sigma_large_fwhm() {
+    let width = 64;
+    let height = 64;
+    let true_cx = 32.3f32;
+    let true_cy = 32.7f32;
+    let sigma = 4.0f32; // Large sigma
+    let expected_fwhm = FWHM_TO_SIGMA * sigma;
+
+    let pixels = make_gaussian_star(width, height, true_cx, true_cy, sigma, 0.8);
+    let bg = make_uniform_background(width, height, 0.1, 0.01);
+
+    // Use large expected FWHM
+    let result = refine_centroid(
+        &pixels,
+        width,
+        height,
+        &bg,
+        32.0,
+        32.0,
+        TEST_STAMP_RADIUS,
+        expected_fwhm,
+    );
+
+    assert!(result.is_some());
+    let (new_cx, new_cy) = result.unwrap();
+
+    // Should converge towards true position
+    let error = ((new_cx - true_cx).powi(2) + (new_cy - true_cy).powi(2)).sqrt();
+    assert!(
+        error < 0.5,
+        "Centroid error {} too large for large FWHM",
+        error
+    );
+}
