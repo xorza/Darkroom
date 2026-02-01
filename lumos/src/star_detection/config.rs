@@ -5,6 +5,29 @@ use super::centroid::LocalBackgroundMethod;
 use super::defect_map::DefectMap;
 
 // ============================================================================
+// Connectivity
+// ============================================================================
+
+/// Pixel connectivity for connected component labeling.
+///
+/// Determines which pixels are considered neighbors when grouping
+/// above-threshold pixels into connected components.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Connectivity {
+    /// 4-connectivity: only horizontal and vertical neighbors.
+    /// Pixels at (x±1, y) and (x, y±1) are connected.
+    /// Diagonal pixels are NOT connected.
+    /// This is the default and matches SExtractor behavior.
+    #[default]
+    Four,
+    /// 8-connectivity: includes diagonal neighbors.
+    /// All 8 surrounding pixels are connected.
+    /// Better for undersampled PSFs or elongated sources,
+    /// but may merge close star pairs more aggressively.
+    Eight,
+}
+
+// ============================================================================
 // Background Configuration
 // ============================================================================
 
@@ -98,6 +121,8 @@ pub struct DetectionConfig {
     pub min_area: usize,
     /// Edge margin (reject candidates near edges).
     pub edge_margin: usize,
+    /// Pixel connectivity for connected component labeling.
+    pub connectivity: Connectivity,
 }
 
 impl From<&StarDetectionConfig> for DetectionConfig {
@@ -106,6 +131,7 @@ impl From<&StarDetectionConfig> for DetectionConfig {
             sigma_threshold: config.background_config.sigma_threshold,
             min_area: config.min_area,
             edge_margin: config.edge_margin,
+            connectivity: config.connectivity,
         }
     }
 }
@@ -254,6 +280,10 @@ pub struct StarDetectionConfig {
     /// Annulus and OuterRing compute local background around each star,
     /// which is more accurate in regions with variable nebulosity.
     pub local_background_method: LocalBackgroundMethod,
+    /// Pixel connectivity for connected component labeling.
+    /// Four (default): only horizontal/vertical neighbors are connected.
+    /// Eight: diagonal neighbors are also connected (better for undersampled PSFs).
+    pub connectivity: Connectivity,
 
     /// Background estimation configuration.
     pub background_config: BackgroundConfig,
@@ -283,6 +313,7 @@ impl Default for StarDetectionConfig {
             defect_map: None,
             centroid_method: CentroidMethod::WeightedMoments,
             local_background_method: LocalBackgroundMethod::GlobalMap,
+            connectivity: Connectivity::Four,
             background_config: BackgroundConfig::default(),
         }
     }

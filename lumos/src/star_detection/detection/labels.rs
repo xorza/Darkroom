@@ -9,6 +9,7 @@
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use crate::common::{BitBuffer2, Buffer2};
+use crate::star_detection::config::Connectivity;
 
 // ============================================================================
 // Run-Length Encoding
@@ -23,6 +24,25 @@ struct Run {
     end: u16,
     /// Provisional label assigned to this run.
     label: u32,
+}
+
+/// Check if two runs overlap vertically (are connected).
+///
+/// For 4-connectivity: runs must share at least one x coordinate.
+/// For 8-connectivity: runs can be diagonally adjacent (off by one).
+#[inline]
+fn runs_overlap(prev: &Run, curr: &Run, connectivity: Connectivity) -> bool {
+    match connectivity {
+        Connectivity::Four => {
+            // 4-conn: runs overlap if they share any x coordinate
+            prev.start < curr.end && prev.end > curr.start
+        }
+        Connectivity::Eight => {
+            // 8-conn: runs overlap if they touch (including diagonally)
+            // Diagonal adjacency means prev.end == curr.start or prev.start == curr.end
+            prev.start < curr.end + 1 && prev.end + 1 > curr.start
+        }
+    }
 }
 
 /// Extract runs from a single row of the mask using word-level bit scanning.
@@ -117,12 +137,24 @@ impl LabelMap {
 
     /// Create a label map from a binary mask using connected component labeling.
     ///
+    /// Uses 4-connectivity (only horizontal/vertical neighbors).
+    /// For 8-connectivity, use `from_mask_with_connectivity`.
+    ///
     /// Uses block-based parallel algorithm for large images:
     /// 1. Divide image into horizontal strips
     /// 2. Label each strip in parallel using word-level bit scanning
     /// 3. Merge labels at strip boundaries using atomic union-find
     /// 4. Flatten labels in parallel
     pub fn from_mask(mask: &BitBuffer2) -> Self {
+        Self::from_mask_with_connectivity(mask, Connectivity::Four)
+    }
+
+    /// Create a label map from a binary mask with specified connectivity.
+    ///
+    /// # Arguments
+    /// * `mask` - Binary mask of foreground pixels
+    /// * `connectivity` - Four (default) or Eight connectivity
+    pub fn from_mask_with_connectivity(mask: &BitBuffer2, connectivity: Connectivity) -> Self {
         let width = mask.width();
         let height = mask.height();
 
@@ -136,9 +168,9 @@ impl LabelMap {
         }
 
         let num_labels = if width * height < 100_000 {
-            label_mask_sequential(mask, &mut labels)
+            label_mask_sequential(mask, &mut labels, connectivity)
         } else {
-            label_mask_parallel(mask, &mut labels)
+            label_mask_parallel(mask, &mut labels, connectivity)
         };
 
         Self { labels, num_labels }
@@ -196,7 +228,11 @@ impl std::ops::Index<usize> for LabelMap {
 /// 1. Extract runs from each row
 /// 2. Label runs and merge with overlapping runs from previous row
 /// 3. Write labels to output buffer
-fn label_mask_sequential(mask: &BitBuffer2, labels: &mut Buffer2<u32>) -> usize {
+fn label_mask_sequential(
+    mask: &BitBuffer2,
+    labels: &mut Buffer2<u32>,
+    connectivity: Connectivity,
+) -> usize {
     let width = mask.width();
     let height = mask.height();
     let words_per_row = mask.words_per_row();
@@ -230,18 +266,31 @@ fn label_mask_sequential(mask: &BitBuffer2, labels: &mut Buffer2<u32>) -> usize 
         // Label runs and merge with overlapping runs from previous row
         let mut prev_idx = 0;
         for run in &mut curr_runs {
-            // Find overlapping runs from previous row (4-connectivity: same x range)
+            // Find overlapping runs from previous row
             let mut assigned_label = None;
 
-            while prev_idx < prev_runs.len() && prev_runs[prev_idx].end <= run.start {
+            // For 8-connectivity, we need to check one position earlier
+            let search_start = if connectivity == Connectivity::Eight && run.start > 0 {
+                run.start - 1
+            } else {
+                run.start
+            };
+
+            while prev_idx < prev_runs.len() && prev_runs[prev_idx].end <= search_start {
                 prev_idx += 1;
             }
 
+            // For 8-connectivity, check one position further
+            let search_end = if connectivity == Connectivity::Eight {
+                run.end + 1
+            } else {
+                run.end
+            };
+
             let mut check_idx = prev_idx;
-            while check_idx < prev_runs.len() && prev_runs[check_idx].start < run.end {
+            while check_idx < prev_runs.len() && prev_runs[check_idx].start < search_end {
                 let prev_run = &prev_runs[check_idx];
-                // Runs overlap if they share any x coordinate
-                if prev_run.start < run.end && prev_run.end > run.start {
+                if runs_overlap(prev_run, run, connectivity) {
                     if let Some(label) = assigned_label {
                         // Already have a label - union with overlapping run
                         if label != prev_run.label {
@@ -305,7 +354,11 @@ fn label_mask_sequential(mask: &BitBuffer2, labels: &mut Buffer2<u32>) -> usize 
 /// 2. Label runs within each strip
 /// 3. Merge labels at strip boundaries
 /// 4. Write labels to output buffer in parallel
-fn label_mask_parallel(mask: &BitBuffer2, labels: &mut Buffer2<u32>) -> usize {
+fn label_mask_parallel(
+    mask: &BitBuffer2,
+    labels: &mut Buffer2<u32>,
+    connectivity: Connectivity,
+) -> usize {
     let width = mask.width();
     let height = mask.height();
     let words_per_row = mask.words_per_row();
@@ -346,6 +399,7 @@ fn label_mask_parallel(mask: &BitBuffer2, labels: &mut Buffer2<u32>) -> usize {
                 y_end,
                 &parent,
                 &next_label,
+                connectivity,
             )
         })
         .collect();
@@ -358,6 +412,7 @@ fn label_mask_parallel(mask: &BitBuffer2, labels: &mut Buffer2<u32>) -> usize {
             &strip_runs[strip_idx],
             boundary_y,
             &parent,
+            connectivity,
         );
     }
 
@@ -415,6 +470,7 @@ fn label_mask_parallel(mask: &BitBuffer2, labels: &mut Buffer2<u32>) -> usize {
 }
 
 /// Label a strip using RLE and return runs with row indices.
+#[allow(clippy::too_many_arguments)]
 fn label_strip_rle(
     mask_words: &[u64],
     width: usize,
@@ -423,6 +479,7 @@ fn label_strip_rle(
     y_end: usize,
     parent: &[AtomicU32],
     next_label: &AtomicU32,
+    connectivity: Connectivity,
 ) -> Vec<(usize, Run)> {
     let mut all_runs: Vec<(usize, Run)> = Vec::new();
     let mut prev_runs: Vec<Run> = Vec::with_capacity(width / 4);
@@ -451,16 +508,30 @@ fn label_strip_rle(
         for run in &mut curr_runs {
             let mut assigned_label = None;
 
-            // Skip runs that end before current run starts
-            while prev_idx < prev_runs.len() && prev_runs[prev_idx].end <= run.start {
+            // For 8-connectivity, we need to check one position earlier
+            let search_start = if connectivity == Connectivity::Eight && run.start > 0 {
+                run.start - 1
+            } else {
+                run.start
+            };
+
+            // Skip runs that end before search region starts
+            while prev_idx < prev_runs.len() && prev_runs[prev_idx].end <= search_start {
                 prev_idx += 1;
             }
 
+            // For 8-connectivity, check one position further
+            let search_end = if connectivity == Connectivity::Eight {
+                run.end + 1
+            } else {
+                run.end
+            };
+
             // Check all overlapping runs from previous row
             let mut check_idx = prev_idx;
-            while check_idx < prev_runs.len() && prev_runs[check_idx].start < run.end {
+            while check_idx < prev_runs.len() && prev_runs[check_idx].start < search_end {
                 let prev_run = &prev_runs[check_idx];
-                if prev_run.start < run.end && prev_run.end > run.start {
+                if runs_overlap(prev_run, run, connectivity) {
                     if let Some(label) = assigned_label {
                         if label != prev_run.label {
                             atomic_union(parent, label, prev_run.label);
@@ -500,6 +571,7 @@ fn merge_strip_boundary_rle(
     below_runs: &[(usize, Run)],
     boundary_y: usize,
     parent: &[AtomicU32],
+    connectivity: Connectivity,
 ) {
     // Find runs from the row just above the boundary
     let above_boundary_runs: Vec<&Run> = above_runs
@@ -518,9 +590,8 @@ fn merge_strip_boundary_rle(
     // Merge overlapping runs
     for above_run in &above_boundary_runs {
         for below_run in &below_boundary_runs {
-            // Check if runs overlap (4-connectivity) and have different labels
-            if above_run.start < below_run.end
-                && above_run.end > below_run.start
+            // Check if runs overlap and have different labels
+            if runs_overlap(above_run, below_run, connectivity)
                 && above_run.label != below_run.label
             {
                 atomic_union(parent, above_run.label, below_run.label);

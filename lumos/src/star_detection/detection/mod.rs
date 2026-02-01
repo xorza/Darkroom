@@ -102,7 +102,7 @@ pub fn detect_stars(
     std::mem::swap(&mut mask, &mut dilated);
 
     // Find connected components
-    let label_map = LabelMap::from_mask(&mask);
+    let label_map = LabelMap::from_mask_with_connectivity(&mask, detection_config.connectivity);
 
     // Extract candidate properties with deblending (always use original pixels for peak values)
     let mut candidates = extract_candidates(pixels, &label_map, &deblend_config);

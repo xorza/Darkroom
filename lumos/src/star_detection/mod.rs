@@ -57,7 +57,8 @@ pub(crate) use detection::detect_stars;
 pub(crate) use median_filter::median_filter_3x3;
 
 // Configuration types
-pub use config::StarDetectionConfig;
+#[allow(unused_imports)] // Re-exported for public API
+pub use config::{Connectivity, StarDetectionConfig};
 
 // Star type
 pub use star::Star;
