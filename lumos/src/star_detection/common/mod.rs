@@ -9,8 +9,7 @@ pub mod threshold_mask;
 
 use crate::common::BitBuffer2;
 use crate::math::mad_to_sigma;
-use common::parallel;
-use rayon::iter::ParallelIterator;
+use rayon::iter::{IntoParallelIterator, ParallelIterator};
 
 /// Stamp radius as a multiple of FWHM.
 ///
@@ -52,6 +51,9 @@ pub fn compute_stamp_radius(expected_fwhm: f32) -> usize {
 /// Used in star detection to merge fragmented detections and in background
 /// estimation to mask object wings.
 ///
+/// Uses separable dilation (horizontal then vertical passes) for O(r) complexity
+/// per pixel instead of O(r²). Operates on packed 64-bit words for efficiency.
+///
 /// # Arguments
 /// * `mask` - Input binary mask (BitBuffer2)
 /// * `radius` - Dilation radius in pixels
@@ -60,42 +62,117 @@ pub fn dilate_mask(mask: &BitBuffer2, radius: usize, output: &mut BitBuffer2) {
     assert_eq!(mask.width(), output.width(), "width mismatch");
     assert_eq!(mask.height(), output.height(), "height mismatch");
 
+    if radius == 0 {
+        output.copy_from(mask);
+        return;
+    }
+
     let width = mask.width();
     let height = mask.height();
+    let words_per_row = mask.words_per_row();
 
-    // Parallel dilation: for each output pixel, check if any input pixel within radius is set
-    parallel::par_chunks_auto(output.words_mut()).for_each(|(word_offset, word_chunk)| {
-        for (local_word_idx, word) in word_chunk.iter_mut().enumerate() {
-            let word_idx = word_offset + local_word_idx;
-            let base_idx = word_idx * 64;
-            let mut bits = 0u64;
+    // Horizontal dilation pass: dilate each row independently
+    // Result stored in output buffer
+    (0..height).into_par_iter().for_each(|y| {
+        let row_word_start = y * words_per_row;
 
+        // SAFETY: Each thread writes to a disjoint set of rows
+        let output_words = unsafe {
+            std::slice::from_raw_parts_mut(output.words().as_ptr() as *mut u64, output.num_words())
+        };
+
+        for word_idx in 0..words_per_row {
+            let global_word_idx = row_word_start + word_idx;
+            let base_x = word_idx * 64;
+
+            let mut result = 0u64;
+
+            // For each bit in this word
             for bit in 0..64 {
-                let idx = base_idx + bit;
-                if idx >= width * height {
+                let x = base_x + bit;
+                if x >= width {
                     break;
                 }
 
-                let x = idx % width;
-                let y = idx / width;
-
-                // Check if any pixel in the neighborhood is set
-                let y_min = y.saturating_sub(radius);
-                let y_max = (y + radius).min(height - 1);
+                // Check if any pixel in [x-radius, x+radius] is set
                 let x_min = x.saturating_sub(radius);
                 let x_max = (x + radius).min(width - 1);
 
-                'outer: for sy in y_min..=y_max {
-                    for sx in x_min..=x_max {
-                        if mask.get_xy(sx, sy) {
-                            bits |= 1u64 << bit;
-                            break 'outer;
-                        }
+                let mut found = false;
+                for sx in x_min..=x_max {
+                    if mask.get_xy(sx, y) {
+                        found = true;
+                        break;
                     }
+                }
+
+                if found {
+                    result |= 1u64 << bit;
                 }
             }
 
-            *word = bits;
+            output_words[global_word_idx] = result;
+        }
+    });
+
+    // Vertical dilation pass: dilate each column using the horizontally-dilated result
+    // We need to read from output and write back to output, so we process column by column
+    (0..width).into_par_iter().for_each(|x| {
+        let word_in_row = x / 64;
+        let bit_in_word = x % 64;
+        let bit_mask = 1u64 << bit_in_word;
+
+        // SAFETY: Each thread accesses a disjoint bit position across all rows
+        let output_words = unsafe {
+            std::slice::from_raw_parts_mut(output.words().as_ptr() as *mut u64, output.num_words())
+        };
+
+        // First pass: compute dilated values and store in a temporary column buffer
+        // We use a sliding window sum to track if any of the previous `radius` rows had a set bit
+        let mut column_results = vec![false; height];
+
+        // Count of set bits in current window
+        let mut window_count = 0usize;
+
+        // Initialize window with first `radius` rows (looking ahead)
+        for y in 0..radius.min(height) {
+            let word_idx = y * words_per_row + word_in_row;
+            if (output_words[word_idx] & bit_mask) != 0 {
+                window_count += 1;
+            }
+        }
+
+        for (y, result) in column_results.iter_mut().enumerate() {
+            // Add the row at y+radius to window (if in bounds)
+            let add_y = y + radius;
+            if add_y < height {
+                let word_idx = add_y * words_per_row + word_in_row;
+                if (output_words[word_idx] & bit_mask) != 0 {
+                    window_count += 1;
+                }
+            }
+
+            // The result for row y is true if any row in [y-radius, y+radius] is set
+            *result = window_count > 0;
+
+            // Remove the row at y-radius from window (if it was in bounds)
+            if y >= radius {
+                let remove_y = y - radius;
+                let word_idx = remove_y * words_per_row + word_in_row;
+                if (output_words[word_idx] & bit_mask) != 0 {
+                    window_count -= 1;
+                }
+            }
+        }
+
+        // Write results back
+        for (y, &result) in column_results.iter().enumerate() {
+            let word_idx = y * words_per_row + word_in_row;
+            if result {
+                output_words[word_idx] |= bit_mask;
+            } else {
+                output_words[word_idx] &= !bit_mask;
+            }
         }
     });
 }

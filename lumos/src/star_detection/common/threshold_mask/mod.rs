@@ -19,7 +19,6 @@ mod bench;
 mod tests;
 
 use crate::common::BitBuffer2;
-use common::parallel;
 use rayon::iter::ParallelIterator;
 
 #[cfg(target_arch = "x86_64")]
@@ -233,6 +232,9 @@ pub(super) fn process_words_filtered(
 ///
 /// Uses SIMD acceleration when available (SSE4.1 on x86_64, NEON on aarch64).
 /// Writes directly to packed u64 words for better memory efficiency.
+///
+/// Note: Input pixel arrays should be in row-major order (width * height elements).
+/// The output mask has row-aligned storage (stride may differ from width).
 pub fn create_threshold_mask(
     pixels: &[f32],
     bg: &[f32],
@@ -240,24 +242,35 @@ pub fn create_threshold_mask(
     sigma_threshold: f32,
     mask: &mut BitBuffer2,
 ) {
-    let total_pixels = pixels.len();
-    debug_assert_eq!(total_pixels, mask.len());
+    let width = mask.width();
+    let height = mask.height();
+    let total_pixels = width * height;
+    debug_assert_eq!(total_pixels, pixels.len());
     debug_assert_eq!(total_pixels, bg.len());
     debug_assert_eq!(total_pixels, noise.len());
 
-    let words = mask.words_mut();
+    let words_per_row = mask.words_per_row();
 
-    parallel::par_chunks_auto(words).for_each(|(word_offset, word_chunk)| {
-        let pixel_offset = word_offset * 64;
+    // Process each row independently to handle stride correctly
+    rayon::iter::IntoParallelIterator::into_par_iter(0..height).for_each(|y| {
+        let row_pixel_start = y * width;
+        let row_word_start = y * words_per_row;
+
+        // SAFETY: Each thread writes to a disjoint set of rows
+        let words = unsafe {
+            std::slice::from_raw_parts_mut(mask.words().as_ptr() as *mut u64, mask.num_words())
+        };
+
+        let row_words = &mut words[row_word_start..row_word_start + words_per_row];
 
         process_words(
             pixels,
             bg,
             noise,
             sigma_threshold,
-            word_chunk,
-            pixel_offset,
-            total_pixels,
+            row_words,
+            row_pixel_start,
+            row_pixel_start + width, // Only process up to row width, not stride
         );
     });
 }
@@ -266,28 +279,42 @@ pub fn create_threshold_mask(
 ///
 /// Sets bit `i` to 1 where `filtered[i] > sigma * noise[i]`.
 /// Used for matched-filtered images where background is already subtracted.
+///
+/// Note: Input pixel arrays should be in row-major order (width * height elements).
+/// The output mask has row-aligned storage (stride may differ from width).
 pub fn create_threshold_mask_filtered(
     filtered: &[f32],
     noise: &[f32],
     sigma_threshold: f32,
     mask: &mut BitBuffer2,
 ) {
-    let total_pixels = filtered.len();
-    debug_assert_eq!(total_pixels, mask.len());
+    let width = mask.width();
+    let height = mask.height();
+    let total_pixels = width * height;
+    debug_assert_eq!(total_pixels, filtered.len());
     debug_assert_eq!(total_pixels, noise.len());
 
-    let words = mask.words_mut();
+    let words_per_row = mask.words_per_row();
 
-    parallel::par_chunks_auto(words).for_each(|(word_offset, word_chunk)| {
-        let pixel_offset = word_offset * 64;
+    // Process each row independently to handle stride correctly
+    rayon::iter::IntoParallelIterator::into_par_iter(0..height).for_each(|y| {
+        let row_pixel_start = y * width;
+        let row_word_start = y * words_per_row;
+
+        // SAFETY: Each thread writes to a disjoint set of rows
+        let words = unsafe {
+            std::slice::from_raw_parts_mut(mask.words().as_ptr() as *mut u64, mask.num_words())
+        };
+
+        let row_words = &mut words[row_word_start..row_word_start + words_per_row];
 
         process_words_filtered(
             filtered,
             noise,
             sigma_threshold,
-            word_chunk,
-            pixel_offset,
-            total_pixels,
+            row_words,
+            row_pixel_start,
+            row_pixel_start + width, // Only process up to row width, not stride
         );
     });
 }

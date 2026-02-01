@@ -4,6 +4,7 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
+aligned-vec = { workspace = true }
 anyhow = { workspace = true }
 rayon = { workspace = true }
 tracing = { workspace = true }

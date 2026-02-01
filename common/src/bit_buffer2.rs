@@ -1,25 +1,36 @@
 //! Bit-packed 2D buffer for boolean masks.
 //!
 //! Uses 1 bit per element instead of 1 byte, reducing memory by 8x.
+//! Rows are aligned to 128 bits (16 bytes) for efficient SIMD operations.
+//! Memory is 16-byte aligned for optimal SIMD load/store operations.
 //! Provides the same API as `Buffer2<bool>` for easy migration.
 
+use aligned_vec::AVec;
 use std::ops::Index;
 
 /// Number of bits per storage word.
 const BITS_PER_WORD: usize = 64;
 
+/// Row alignment in bits (128 bits = 16 bytes = 2 words).
+const ROW_ALIGNMENT_BITS: usize = 128;
+
+/// Memory alignment in bytes (16 bytes for SIMD).
+const ALIGNMENT: usize = 16;
+
 /// A 2D buffer storing boolean values packed as bits.
 ///
 /// Uses `u64` words internally, with 64 bits per word.
+/// Rows are aligned to 128 bits (2 words) for efficient SIMD access.
+/// Memory is 16-byte aligned for optimal SIMD load/store operations.
 /// This reduces memory usage by 8x compared to `Vec<bool>`.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct BitBuffer2 {
-    /// Packed bit storage. Each u64 holds 64 boolean values.
-    words: Vec<u64>,
+    /// Packed bit storage. Each u64 holds 64 boolean values. 16-byte aligned.
+    words: AVec<u64, aligned_vec::ConstAlign<ALIGNMENT>>,
     width: usize,
     height: usize,
-    /// Total number of bits (width * height).
-    len: usize,
+    /// Number of bits per row including padding (aligned to 128 bits).
+    stride: usize,
 }
 
 #[allow(dead_code)] // Public API - methods will be used as Buffer2<bool> is migrated
@@ -27,14 +38,18 @@ impl BitBuffer2 {
     /// Create a new bit buffer filled with the given value.
     #[inline]
     pub fn new_filled(width: usize, height: usize, value: bool) -> Self {
-        let len = width * height;
-        let num_words = len.div_ceil(BITS_PER_WORD);
+        // Align stride to 128 bits (2 words)
+        let stride = width.div_ceil(ROW_ALIGNMENT_BITS) * ROW_ALIGNMENT_BITS;
+        let total_bits = stride * height;
+        let num_words = total_bits.div_ceil(BITS_PER_WORD);
         let fill = if value { !0u64 } else { 0u64 };
+        let mut words = AVec::with_capacity(ALIGNMENT, num_words);
+        words.resize(num_words, fill);
         Self {
-            words: vec![fill; num_words],
+            words,
             width,
             height,
-            len,
+            stride,
         }
     }
 
@@ -60,14 +75,20 @@ impl BitBuffer2 {
             len
         );
 
-        let num_words = len.div_ceil(BITS_PER_WORD);
-        let mut words = vec![0u64; num_words];
+        let stride = width.div_ceil(ROW_ALIGNMENT_BITS) * ROW_ALIGNMENT_BITS;
+        let total_bits = stride * height;
+        let num_words = total_bits.div_ceil(BITS_PER_WORD);
+        let mut words = AVec::with_capacity(ALIGNMENT, num_words);
+        words.resize(num_words, 0u64);
 
-        for (i, &value) in data.iter().enumerate() {
-            if value {
-                let word_idx = i / BITS_PER_WORD;
-                let bit_idx = i % BITS_PER_WORD;
-                words[word_idx] |= 1u64 << bit_idx;
+        for y in 0..height {
+            for x in 0..width {
+                if data[y * width + x] {
+                    let bit_idx = y * stride + x;
+                    let word_idx = bit_idx / BITS_PER_WORD;
+                    let bit_in_word = bit_idx % BITS_PER_WORD;
+                    words[word_idx] |= 1u64 << bit_in_word;
+                }
             }
         }
 
@@ -75,7 +96,7 @@ impl BitBuffer2 {
             words,
             width,
             height,
-            len,
+            stride,
         }
     }
 
@@ -91,52 +112,70 @@ impl BitBuffer2 {
         self.height
     }
 
-    /// Get the total number of bits.
+    /// Get the stride (bits per row including padding).
+    #[inline]
+    pub fn stride(&self) -> usize {
+        self.stride
+    }
+
+    /// Get the number of words per row.
+    #[inline]
+    pub fn words_per_row(&self) -> usize {
+        self.stride / BITS_PER_WORD
+    }
+
+    /// Get the total number of bits (width * height, excluding padding).
     #[inline]
     pub fn len(&self) -> usize {
-        self.len
+        self.width * self.height
     }
 
     /// Check if the buffer is empty.
     #[inline]
     pub fn is_empty(&self) -> bool {
-        self.len == 0
+        self.width == 0 || self.height == 0
     }
 
-    /// Get a bit value at the given linear index.
+    /// Get a bit value at the given linear index (row-major, no padding).
     #[inline]
     pub fn get(&self, idx: usize) -> bool {
-        debug_assert!(idx < self.len);
-        let word_idx = idx / BITS_PER_WORD;
-        let bit_idx = idx % BITS_PER_WORD;
-        (self.words[word_idx] >> bit_idx) & 1 != 0
+        debug_assert!(idx < self.len());
+        let x = idx % self.width;
+        let y = idx / self.width;
+        self.get_xy(x, y)
     }
 
-    /// Set a bit value at the given linear index.
+    /// Set a bit value at the given linear index (row-major, no padding).
     #[inline]
     pub fn set(&mut self, idx: usize, value: bool) {
-        debug_assert!(idx < self.len);
-        let word_idx = idx / BITS_PER_WORD;
-        let bit_idx = idx % BITS_PER_WORD;
-        if value {
-            self.words[word_idx] |= 1u64 << bit_idx;
-        } else {
-            self.words[word_idx] &= !(1u64 << bit_idx);
-        }
+        debug_assert!(idx < self.len());
+        let x = idx % self.width;
+        let y = idx / self.width;
+        self.set_xy(x, y, value);
     }
 
     /// Get a bit value at the given (x, y) coordinates.
     #[inline]
     pub fn get_xy(&self, x: usize, y: usize) -> bool {
         debug_assert!(x < self.width && y < self.height);
-        self.get(y * self.width + x)
+        let bit_idx = y * self.stride + x;
+        let word_idx = bit_idx / BITS_PER_WORD;
+        let bit_in_word = bit_idx % BITS_PER_WORD;
+        (self.words[word_idx] >> bit_in_word) & 1 != 0
     }
 
     /// Set a bit value at the given (x, y) coordinates.
     #[inline]
     pub fn set_xy(&mut self, x: usize, y: usize, value: bool) {
         debug_assert!(x < self.width && y < self.height);
-        self.set(y * self.width + x, value);
+        let bit_idx = y * self.stride + x;
+        let word_idx = bit_idx / BITS_PER_WORD;
+        let bit_in_word = bit_idx % BITS_PER_WORD;
+        if value {
+            self.words[word_idx] |= 1u64 << bit_in_word;
+        } else {
+            self.words[word_idx] &= !(1u64 << bit_in_word);
+        }
     }
 
     /// Fill all bits with the given value.
@@ -173,6 +212,7 @@ impl BitBuffer2 {
     pub fn copy_from(&mut self, other: &Self) {
         assert_eq!(self.width, other.width, "width mismatch");
         assert_eq!(self.height, other.height, "height mismatch");
+        assert_eq!(self.stride, other.stride, "stride mismatch");
         self.words.copy_from_slice(&other.words);
     }
 
@@ -181,21 +221,31 @@ impl BitBuffer2 {
     pub fn swap(&mut self, other: &mut Self) {
         assert_eq!(self.width, other.width, "width mismatch");
         assert_eq!(self.height, other.height, "height mismatch");
+        assert_eq!(self.stride, other.stride, "stride mismatch");
         std::mem::swap(&mut self.words, &mut other.words);
     }
 
-    /// Count the number of set bits (true values).
+    /// Count the number of set bits (true values, excluding padding).
     #[inline]
     pub fn count_ones(&self) -> usize {
-        self.words.iter().map(|w| w.count_ones() as usize).sum()
+        let mut count = 0;
+        for y in 0..self.height {
+            for x in 0..self.width {
+                if self.get_xy(x, y) {
+                    count += 1;
+                }
+            }
+        }
+        count
     }
 
-    /// Iterate over all bit values.
+    /// Iterate over all bit values (row-major order, skipping padding).
     #[inline]
     pub fn iter(&self) -> BitIter<'_> {
         BitIter {
             buffer: self,
-            idx: 0,
+            x: 0,
+            y: 0,
         }
     }
 }
@@ -242,11 +292,12 @@ impl From<&BitBuffer2> for Vec<bool> {
     }
 }
 
-/// Iterator over bit values.
+/// Iterator over bit values (row-major order, skipping padding).
 #[allow(dead_code)] // Public API - will be used as Buffer2<bool> is migrated
 pub struct BitIter<'a> {
     buffer: &'a BitBuffer2,
-    idx: usize,
+    x: usize,
+    y: usize,
 }
 
 impl Iterator for BitIter<'_> {
@@ -254,18 +305,22 @@ impl Iterator for BitIter<'_> {
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
-        if self.idx < self.buffer.len {
-            let value = self.buffer.get(self.idx);
-            self.idx += 1;
-            Some(value)
-        } else {
-            None
+        if self.y >= self.buffer.height {
+            return None;
         }
+
+        let value = self.buffer.get_xy(self.x, self.y);
+        self.x += 1;
+        if self.x >= self.buffer.width {
+            self.x = 0;
+            self.y += 1;
+        }
+        Some(value)
     }
 
     #[inline]
     fn size_hint(&self) -> (usize, Option<usize>) {
-        let remaining = self.buffer.len - self.idx;
+        let remaining = self.buffer.width * (self.buffer.height - self.y) - self.x;
         (remaining, Some(remaining))
     }
 }
@@ -378,10 +433,43 @@ mod tests {
 
     #[test]
     fn test_memory_size() {
-        // 4096x4096 = 16M bits = 2M bytes = 256K words
+        // 4096x4096: width already aligned to 128, so stride = 4096
+        // Total bits = 4096 * 4096 = 16M bits = 256K words
         let buf = BitBuffer2::new_filled(4096, 4096, false);
-        assert_eq!(buf.num_words(), 4096 * 4096 / 64);
+        assert_eq!(buf.stride(), 4096);
+        assert_eq!(buf.words_per_row(), 64); // 4096 / 64
+        assert_eq!(buf.num_words(), 4096 * 64);
         // Memory: 256K * 8 bytes = 2MB (vs 16MB for Vec<bool>)
+    }
+
+    #[test]
+    fn test_row_alignment() {
+        // Width 100 should be aligned to 128 bits
+        let buf = BitBuffer2::new_filled(100, 50, false);
+        assert_eq!(buf.stride(), 128);
+        assert_eq!(buf.words_per_row(), 2);
+
+        // Width 200 should be aligned to 256 bits (next multiple of 128)
+        let buf = BitBuffer2::new_filled(200, 50, false);
+        assert_eq!(buf.stride(), 256);
+        assert_eq!(buf.words_per_row(), 4);
+
+        // Width 128 is already aligned
+        let buf = BitBuffer2::new_filled(128, 50, false);
+        assert_eq!(buf.stride(), 128);
+        assert_eq!(buf.words_per_row(), 2);
+    }
+
+    #[test]
+    fn test_memory_alignment() {
+        // Verify that the underlying memory is 16-byte aligned
+        let buf = BitBuffer2::new_filled(100, 100, false);
+        let ptr = buf.words().as_ptr() as usize;
+        assert_eq!(ptr % 16, 0, "Memory should be 16-byte aligned");
+
+        let buf = BitBuffer2::from_slice(10, 10, &[false; 100]);
+        let ptr = buf.words().as_ptr() as usize;
+        assert_eq!(ptr % 16, 0, "Memory should be 16-byte aligned");
     }
 
     #[test]
