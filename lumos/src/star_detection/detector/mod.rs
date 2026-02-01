@@ -24,36 +24,6 @@ use super::fwhm_estimation;
 use super::median_filter::median_filter_3x3;
 use super::star::Star;
 
-// =============================================================================
-// Types
-// =============================================================================
-
-/// Method for computing sub-pixel centroids.
-///
-/// Different methods offer tradeoffs between accuracy and speed.
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
-pub enum CentroidMethod {
-    /// Iterative weighted centroid using Gaussian weights.
-    /// Fast (~0.05 pixel accuracy). This is the default.
-    #[default]
-    WeightedMoments,
-
-    /// 2D Gaussian profile fitting via Levenberg-Marquardt optimization.
-    /// High precision (~0.01 pixel accuracy) but ~8x slower than WeightedMoments.
-    /// Best for well-sampled, symmetric PSFs.
-    GaussianFit,
-
-    /// 2D Moffat profile fitting with configurable beta parameter.
-    /// High precision (~0.01 pixel accuracy), similar speed to GaussianFit.
-    /// Better model for atmospheric seeing (extended wings).
-    /// Beta parameter controls wing slope: 2.5 typical for ground-based, 4.5 for space-based.
-    MoffatFit {
-        /// Power law slope controlling wing falloff. Typical range: 2.0-5.0.
-        /// Lower values = more extended wings.
-        beta: f32,
-    },
-}
-
 /// Result of star detection with diagnostics.
 #[derive(Debug, Clone)]
 pub struct StarDetectionResult {

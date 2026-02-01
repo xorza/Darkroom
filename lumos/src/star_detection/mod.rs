@@ -46,9 +46,10 @@ pub mod tests;
 // =============================================================================
 
 // Main detector types
-pub use detector::{CentroidMethod, StarDetectionDiagnostics, StarDetectionResult, StarDetector};
+pub use detector::{StarDetectionDiagnostics, StarDetectionResult, StarDetector};
 
 // Configuration
+pub use config::CentroidMethod;
 #[allow(unused_imports)] // Re-exported for public API
 pub use config::Connectivity;
 pub use config::StarDetectionConfig;
