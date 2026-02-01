@@ -2736,3 +2736,48 @@ fn test_roundness_bounds() {
         );
     }
 }
+
+// =============================================================================
+// compute_stamp_radius Tests
+// =============================================================================
+
+#[test]
+fn test_compute_stamp_radius_typical_fwhm() {
+    use super::compute_stamp_radius;
+    // FWHM = 4.0 -> radius = ceil(4.0 * 1.75) = 7
+    assert_eq!(compute_stamp_radius(4.0), 7);
+}
+
+#[test]
+fn test_compute_stamp_radius_clamped_min() {
+    use super::MIN_STAMP_RADIUS;
+    use super::compute_stamp_radius;
+    // Very small FWHM should clamp to minimum
+    assert_eq!(compute_stamp_radius(1.0), MIN_STAMP_RADIUS);
+}
+
+#[test]
+fn test_compute_stamp_radius_clamped_max() {
+    use super::MAX_STAMP_RADIUS;
+    use super::compute_stamp_radius;
+    // Very large FWHM should clamp to maximum
+    assert_eq!(compute_stamp_radius(20.0), MAX_STAMP_RADIUS);
+}
+
+#[test]
+fn test_compute_stamp_radius_various_fwhm() {
+    use super::compute_stamp_radius;
+    use super::{MAX_STAMP_RADIUS, MIN_STAMP_RADIUS, STAMP_RADIUS_FWHM_FACTOR};
+
+    // Test various FWHM values
+    for fwhm in [2.0f32, 3.0, 4.0, 5.0, 6.0, 8.0, 10.0] {
+        let radius = compute_stamp_radius(fwhm);
+        let expected = (fwhm * STAMP_RADIUS_FWHM_FACTOR).ceil() as usize;
+        let expected_clamped = expected.clamp(MIN_STAMP_RADIUS, MAX_STAMP_RADIUS);
+        assert_eq!(
+            radius, expected_clamped,
+            "FWHM={}: expected {}, got {}",
+            fwhm, expected_clamped, radius
+        );
+    }
+}

@@ -94,7 +94,7 @@ fn fill_jacobian_residuals<const N: usize, M: LMModel<N>>(
 use arrayvec::ArrayVec;
 
 /// Maximum stamp pixels (31×31 for stamp_radius=15).
-const MAX_STAMP_PIXELS: usize = (2 * super::common::MAX_STAMP_RADIUS + 1).pow(2);
+const MAX_STAMP_PIXELS: usize = (2 * MAX_STAMP_RADIUS + 1).pow(2);
 
 /// Stack-allocated stamp data: (x coords, y coords, values, peak value).
 pub(crate) type StampData = (

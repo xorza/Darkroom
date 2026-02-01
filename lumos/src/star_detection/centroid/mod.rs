@@ -24,21 +24,55 @@ use arrayvec::ArrayVec;
 
 use super::background::BackgroundMap;
 use super::candidate_detection::StarCandidate;
-use super::common::{CENTROID_CONVERGENCE_THRESHOLD, MAX_CENTROID_ITERATIONS};
 use super::cosmic_ray::compute_laplacian_snr;
 use super::{CentroidMethod, Star, StarDetectionConfig};
 use crate::common::Buffer2;
 use crate::math::FWHM_TO_SIGMA;
 
-/// Maximum stamp pixels (31×31 for stamp_radius=15).
-const MAX_STAMP_PIXELS: usize = (2 * super::common::MAX_STAMP_RADIUS + 1).pow(2);
+// =============================================================================
+// Stamp and Centroid Constants
+// =============================================================================
 
-/// Maximum iterations for centroid refinement.
-pub(crate) const MAX_ITERATIONS: usize = MAX_CENTROID_ITERATIONS;
+/// Stamp radius as a multiple of FWHM.
+///
+/// A stamp radius of 1.75 × FWHM captures approximately 99% of the PSF flux
+/// for a Gaussian profile, providing accurate centroid and flux measurements
+/// while minimizing background contamination.
+const STAMP_RADIUS_FWHM_FACTOR: f32 = 1.75;
+
+/// Minimum stamp radius in pixels.
+///
+/// Ensures sufficient pixels for accurate centroid computation even for
+/// very small PSFs or undersampled images.
+const MIN_STAMP_RADIUS: usize = 4;
+
+/// Maximum stamp radius in pixels.
+///
+/// Limits computation time and prevents excessive background inclusion
+/// for very large PSFs.
+const MAX_STAMP_RADIUS: usize = 15;
+
+/// Maximum stamp pixels (31×31 for stamp_radius=15).
+const MAX_STAMP_PIXELS: usize = (2 * MAX_STAMP_RADIUS + 1).pow(2);
+
+/// Centroid convergence threshold in pixels.
+///
+/// Iteration stops when the distance moved is less than this value.
+const CENTROID_CONVERGENCE_THRESHOLD: f32 = 0.001;
+
+/// Maximum centroid iterations before giving up.
+pub(crate) const MAX_ITERATIONS: usize = 10;
 
 /// Convergence threshold in pixels squared.
 pub(crate) const CONVERGENCE_THRESHOLD_SQ: f32 =
     CENTROID_CONVERGENCE_THRESHOLD * CENTROID_CONVERGENCE_THRESHOLD;
+
+/// Compute stamp radius from expected FWHM.
+#[inline]
+fn compute_stamp_radius(expected_fwhm: f32) -> usize {
+    let radius = (expected_fwhm * STAMP_RADIUS_FWHM_FACTOR).ceil() as usize;
+    radius.clamp(MIN_STAMP_RADIUS, MAX_STAMP_RADIUS)
+}
 
 /// Method for computing local background during centroid refinement.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
@@ -270,7 +304,7 @@ pub fn compute_centroid(
     let width = pixels.width();
     let height = pixels.height();
     // Compute adaptive stamp radius based on expected FWHM
-    let stamp_radius = super::common::compute_stamp_radius(config.expected_fwhm);
+    let stamp_radius = compute_stamp_radius(config.expected_fwhm);
 
     // Initial position from peak
     let mut cx = candidate.peak_x as f32;
@@ -503,7 +537,7 @@ pub(crate) fn compute_metrics(
     // For roundness calculation: marginal sums
     // Use fixed-size arrays to avoid allocation (max stamp_radius is 15, so max size is 31)
     let stamp_size = 2 * stamp_radius + 1;
-    const MAX_STAMP_SIZE: usize = 2 * super::common::MAX_STAMP_RADIUS + 1; // 31
+    const MAX_STAMP_SIZE: usize = 2 * MAX_STAMP_RADIUS + 1; // 31
     let mut marginal_x = [0.0f32; MAX_STAMP_SIZE];
     let mut marginal_y = [0.0f32; MAX_STAMP_SIZE];
 

@@ -26,7 +26,6 @@
 pub(crate) mod background;
 pub(crate) mod candidate_detection;
 mod centroid;
-pub(crate) mod common;
 mod config;
 mod convolution;
 mod cosmic_ray;
