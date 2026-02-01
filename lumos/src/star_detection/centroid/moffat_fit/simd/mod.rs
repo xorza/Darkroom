@@ -12,12 +12,12 @@ use common::{cfg_aarch64, cfg_x86_64};
 use common::cpu_features;
 
 cfg_x86_64! {
-    mod avx2;
-    mod sse;
+    pub mod avx2;
+    pub mod sse;
 }
 
 cfg_aarch64! {
-    mod neon;
+    pub mod neon;
 }
 
 #[cfg(test)]
@@ -59,7 +59,7 @@ pub fn is_sse4_available() -> bool {
 
 /// Scalar implementation of Jacobian/residual computation.
 #[inline]
-fn fill_jacobian_residuals_scalar(
+pub fn fill_jacobian_residuals_scalar(
     data_x: &[f32],
     data_y: &[f32],
     data_z: &[f32],
@@ -105,7 +105,7 @@ fn fill_jacobian_residuals_scalar(
 
 /// Scalar implementation of chi² computation.
 #[inline]
-fn compute_chi2_scalar(
+pub fn compute_chi2_scalar(
     data_x: &[f32],
     data_y: &[f32],
     data_z: &[f32],
