@@ -199,24 +199,45 @@ fn collect_component_data(
     width: usize,
     max_area: usize,
 ) -> Vec<ComponentData> {
+    use std::sync::Mutex;
+
     use common::parallel;
     use rayon::prelude::*;
 
     let num_labels = label_map.num_labels();
+    let labels = label_map.labels();
 
-    // Process rows in parallel, each thread builds partial component data
-    // Need to cast away mutability since par_chunks_auto_aligned requires &mut
-    // but we only read the labels. Use par_iter_auto instead.
-    let partial_results: Vec<Vec<ComponentData>> = parallel::par_iter_auto(label_map.height())
-        .map(|(_, start_row, end_row)| {
-            let mut local_data: Vec<ComponentData> = Vec::with_capacity(num_labels);
-            local_data.resize_with(num_labels, || ComponentData {
-                bbox: Aabb::empty(),
-                label: 0,
-                area: 0,
-            });
+    // Shared result protected by mutex - only locked once per thread at the end
+    let result = Mutex::new(vec![
+        ComponentData {
+            bbox: Aabb::empty(),
+            label: 0,
+            area: 0,
+        };
+        num_labels
+    ]);
 
-            let labels = label_map.labels();
+    // Process in parallel with thread-local buffers, merge at end of each job
+    parallel::par_iter_auto(label_map.height()).for_each_init(
+        || {
+            vec![
+                ComponentData {
+                    bbox: Aabb::empty(),
+                    label: 0,
+                    area: 0,
+                };
+                num_labels
+            ]
+        },
+        |local_data, (_, start_row, end_row)| {
+            // Reset local buffer for reuse
+            for data in local_data.iter_mut() {
+                data.bbox = Aabb::empty();
+                data.label = 0;
+                data.area = 0;
+            }
+
+            // Collect component data for this chunk
             for y in start_row..end_row {
                 let row_start = y * width;
                 for x in 0..width {
@@ -231,29 +252,21 @@ fn collect_component_data(
                 }
             }
 
-            local_data
-        })
-        .collect();
-
-    // Merge partial results
-    let mut component_data: Vec<ComponentData> = Vec::with_capacity(num_labels);
-    component_data.resize_with(num_labels, || ComponentData {
-        bbox: Aabb::empty(),
-        label: 0,
-        area: 0,
-    });
-
-    for partial in partial_results {
-        for (i, partial_comp) in partial.into_iter().enumerate() {
-            if partial_comp.area == 0 {
-                continue;
+            // Merge into shared result
+            let mut result = result.lock().unwrap();
+            for (i, partial_comp) in local_data.iter().enumerate() {
+                if partial_comp.area == 0 {
+                    continue;
+                }
+                let data = &mut result[i];
+                data.bbox = data.bbox.merge(&partial_comp.bbox);
+                data.label = partial_comp.label;
+                data.area += partial_comp.area;
             }
-            let data = &mut component_data[i];
-            data.bbox = data.bbox.merge(&partial_comp.bbox);
-            data.label = partial_comp.label;
-            data.area += partial_comp.area;
-        }
-    }
+        },
+    );
+
+    let mut component_data = result.into_inner().unwrap();
 
     // Mark oversized components (set area to max_area + 1 so they're filtered later)
     for data in &mut component_data {
