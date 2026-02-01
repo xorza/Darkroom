@@ -8,6 +8,7 @@
 #![allow(dead_code)]
 
 use super::lm_optimizer::{LMConfig, LMModel, LMResult, optimize_6, optimize_6_weighted};
+use super::{compute_pixel_weights, estimate_sigma_from_moments, extract_stamp};
 use crate::common::Buffer2;
 
 /// Configuration for Gaussian fitting.
@@ -198,116 +199,6 @@ pub fn fit_gaussian_2d_weighted(
     );
 
     validate_result(&result, cx, cy, stamp_radius, n)
-}
-
-/// Extracted stamp data: (x coords, y coords, values, peak value).
-type StampData = (Vec<f32>, Vec<f32>, Vec<f32>, f32);
-
-/// Compute inverse-variance weights for each pixel based on CCD noise model.
-///
-/// For each pixel: variance = signal/gain + noise² + read_noise²/gain²
-/// Weight = 1/variance
-///
-/// If gain is None, uses simplified model: variance = noise² + signal (approx Poisson)
-pub(super) fn compute_pixel_weights(
-    data_z: &[f32],
-    background: f32,
-    noise: f32,
-    gain: Option<f32>,
-    read_noise: Option<f32>,
-) -> Vec<f32> {
-    data_z
-        .iter()
-        .map(|&z| {
-            let signal = (z - background).max(0.0);
-            let variance = match (gain, read_noise) {
-                (Some(g), Some(rn)) if g > f32::EPSILON => {
-                    // Full CCD noise model
-                    signal / g + noise * noise + (rn * rn) / (g * g)
-                }
-                (Some(g), None) if g > f32::EPSILON => {
-                    // Shot noise + sky noise
-                    signal / g + noise * noise
-                }
-                _ => {
-                    // Approximate: sky noise + Poisson-like term
-                    noise * noise + signal.max(1.0) * 0.01
-                }
-            };
-            1.0 / variance.max(0.01)
-        })
-        .collect()
-}
-
-/// Estimate sigma from weighted second moments of the stamp data.
-///
-/// For a Gaussian: E[r²] = 2σ², so σ = sqrt(E[r²]/2)
-/// This gives a better initial guess for L-M optimization than a fixed value.
-pub(super) fn estimate_sigma_from_moments(
-    data_x: &[f32],
-    data_y: &[f32],
-    data_z: &[f32],
-    cx: f32,
-    cy: f32,
-    background: f32,
-) -> f32 {
-    let mut sum_r2 = 0.0f32;
-    let mut sum_w = 0.0f32;
-
-    for ((&x, &y), &z) in data_x.iter().zip(data_y.iter()).zip(data_z.iter()) {
-        let w = (z - background).max(0.0);
-        let r2 = (x - cx).powi(2) + (y - cy).powi(2);
-        sum_r2 += w * r2;
-        sum_w += w;
-    }
-
-    if sum_w > f32::EPSILON {
-        // For Gaussian: E[r²] = 2σ², so σ = sqrt(E[r²]/2)
-        (sum_r2 / sum_w / 2.0).sqrt().clamp(0.5, 10.0)
-    } else {
-        2.0 // fallback
-    }
-}
-
-fn extract_stamp(
-    pixels: &Buffer2<f32>,
-    cx: f32,
-    cy: f32,
-    stamp_radius: usize,
-) -> Option<StampData> {
-    let width = pixels.width();
-    let height = pixels.height();
-    let icx = cx.round() as isize;
-    let icy = cy.round() as isize;
-
-    if icx < stamp_radius as isize
-        || icy < stamp_radius as isize
-        || icx >= (width - stamp_radius) as isize
-        || icy >= (height - stamp_radius) as isize
-    {
-        return None;
-    }
-
-    let stamp_radius_i32 = stamp_radius as i32;
-    let mut data_x = Vec::new();
-    let mut data_y = Vec::new();
-    let mut data_z = Vec::new();
-    let mut peak_value = f32::MIN;
-
-    for dy in -stamp_radius_i32..=stamp_radius_i32 {
-        for dx in -stamp_radius_i32..=stamp_radius_i32 {
-            let x = (icx + dx as isize) as usize;
-            let y = (icy + dy as isize) as usize;
-            let value = pixels[y * width + x];
-
-            data_x.push(x as f32);
-            data_y.push(y as f32);
-            data_z.push(value);
-            peak_value = peak_value.max(value);
-        }
-    }
-
-    Some((data_x, data_y, data_z, peak_value))
 }
 
 fn validate_result(

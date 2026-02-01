@@ -26,6 +26,7 @@ use super::common::{CENTROID_CONVERGENCE_THRESHOLD, MAX_CENTROID_ITERATIONS};
 use super::cosmic_ray::compute_laplacian_snr;
 use super::{CentroidMethod, Star, StarDetectionConfig};
 use crate::common::Buffer2;
+use crate::math::FWHM_TO_SIGMA;
 
 /// Maximum iterations for centroid refinement.
 pub(crate) const MAX_ITERATIONS: usize = MAX_CENTROID_ITERATIONS;
@@ -61,6 +62,115 @@ pub(crate) fn is_valid_stamp_position(
         && icy >= stamp_radius as isize
         && icx < (width - stamp_radius) as isize
         && icy < (height - stamp_radius) as isize
+}
+
+/// Extracted stamp data: (x coords, y coords, values, peak value).
+pub(crate) type StampData = (Vec<f32>, Vec<f32>, Vec<f32>, f32);
+
+/// Extract a square stamp of pixel data around a position.
+///
+/// Returns (x_coords, y_coords, values, peak_value) or None if position is invalid.
+pub(crate) fn extract_stamp(
+    pixels: &Buffer2<f32>,
+    cx: f32,
+    cy: f32,
+    stamp_radius: usize,
+) -> Option<StampData> {
+    let width = pixels.width();
+    let height = pixels.height();
+
+    if !is_valid_stamp_position(cx, cy, width, height, stamp_radius) {
+        return None;
+    }
+
+    let icx = cx.round() as isize;
+    let icy = cy.round() as isize;
+    let stamp_radius_i32 = stamp_radius as i32;
+    let mut data_x = Vec::new();
+    let mut data_y = Vec::new();
+    let mut data_z = Vec::new();
+    let mut peak_value = f32::MIN;
+
+    for dy in -stamp_radius_i32..=stamp_radius_i32 {
+        for dx in -stamp_radius_i32..=stamp_radius_i32 {
+            let x = (icx + dx as isize) as usize;
+            let y = (icy + dy as isize) as usize;
+            let value = pixels[y * width + x];
+
+            data_x.push(x as f32);
+            data_y.push(y as f32);
+            data_z.push(value);
+            peak_value = peak_value.max(value);
+        }
+    }
+
+    Some((data_x, data_y, data_z, peak_value))
+}
+
+/// Compute inverse-variance weights for each pixel based on CCD noise model.
+///
+/// For each pixel: variance = signal/gain + noise² + read_noise²/gain²
+/// Weight = 1/variance
+///
+/// If gain is None, uses simplified model: variance = noise² + signal (approx Poisson)
+pub(crate) fn compute_pixel_weights(
+    data_z: &[f32],
+    background: f32,
+    noise: f32,
+    gain: Option<f32>,
+    read_noise: Option<f32>,
+) -> Vec<f32> {
+    data_z
+        .iter()
+        .map(|&z| {
+            let signal = (z - background).max(0.0);
+            let variance = match (gain, read_noise) {
+                (Some(g), Some(rn)) if g > f32::EPSILON => {
+                    // Full CCD noise model
+                    signal / g + noise * noise + (rn * rn) / (g * g)
+                }
+                (Some(g), None) if g > f32::EPSILON => {
+                    // Shot noise + sky noise
+                    signal / g + noise * noise
+                }
+                _ => {
+                    // Approximate: sky noise + Poisson-like term
+                    noise * noise + signal.max(1.0) * 0.01
+                }
+            };
+            1.0 / variance.max(0.01)
+        })
+        .collect()
+}
+
+/// Estimate sigma from weighted second moments of the stamp data.
+///
+/// For a Gaussian: E[r²] = 2σ², so σ = sqrt(E[r²]/2)
+/// This gives a better initial guess for L-M optimization than a fixed value.
+pub(crate) fn estimate_sigma_from_moments(
+    data_x: &[f32],
+    data_y: &[f32],
+    data_z: &[f32],
+    cx: f32,
+    cy: f32,
+    background: f32,
+) -> f32 {
+    let mut sum_r2 = 0.0f32;
+    let mut sum_w = 0.0f32;
+
+    for ((&x, &y), &z) in data_x.iter().zip(data_y.iter()).zip(data_z.iter()) {
+        let w = (z - background).max(0.0);
+        let r2 = (x - cx).powi(2) + (y - cy).powi(2);
+        sum_r2 += w * r2;
+        sum_w += w;
+    }
+
+    if sum_w > f32::EPSILON {
+        // For Gaussian: E[r²] = 2σ², so σ = sqrt(E[r²]/2)
+        (sum_r2 / sum_w / 2.0).sqrt().clamp(0.5, 10.0)
+    } else {
+        2.0 // fallback
+    }
 }
 
 /// Compute local background and noise using an annular region around the star.
@@ -278,8 +388,8 @@ pub(crate) fn refine_centroid(
     let icy = cy.round() as isize;
 
     // Adaptive sigma based on expected FWHM
-    // sigma ≈ FWHM / 2.355, use 0.8× for tighter weighting to reduce noise
-    let sigma = (expected_fwhm / 2.355 * 0.8).clamp(1.0, stamp_radius as f32 * 0.5);
+    // sigma ≈ FWHM / FWHM_TO_SIGMA, use 0.8× for tighter weighting to reduce noise
+    let sigma = (expected_fwhm / FWHM_TO_SIGMA * 0.8).clamp(1.0, stamp_radius as f32 * 0.5);
     let two_sigma_sq = 2.0 * sigma * sigma;
 
     let mut sum_x = 0.0f32;

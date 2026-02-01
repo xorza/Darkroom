@@ -12,11 +12,12 @@
 
 #![allow(dead_code)]
 
-use super::gaussian_fit::{compute_pixel_weights, estimate_sigma_from_moments};
 use super::lm_optimizer::{
     LMConfig, LMModel, optimize_5, optimize_5_weighted, optimize_6, optimize_6_weighted,
 };
+use super::{compute_pixel_weights, estimate_sigma_from_moments, extract_stamp};
 use crate::common::Buffer2;
+use crate::math::FWHM_TO_SIGMA;
 
 /// Configuration for Moffat profile fitting.
 #[derive(Debug, Clone)]
@@ -169,12 +170,11 @@ pub fn fit_moffat_2d(
     let initial_amplitude = (peak_value - background).max(0.01);
 
     // Estimate sigma from moments, then convert to alpha
-    // For Moffat: FWHM = 2*alpha*sqrt(2^(1/beta)-1), and FWHM ≈ 2.355*sigma
-    // So alpha ≈ sigma * 2.355 / (2 * sqrt(2^(1/beta)-1))
+    // For Moffat: FWHM ≈ FWHM_TO_SIGMA*sigma, so use fwhm_beta_to_alpha
     let sigma_est = estimate_sigma_from_moments(&data_x, &data_y, &data_z, cx, cy, background);
-    let beta_for_init = config.fixed_beta;
-    let initial_alpha = sigma_est * 2.355 / (2.0 * (2.0f32.powf(1.0 / beta_for_init) - 1.0).sqrt());
-    let initial_alpha = initial_alpha.clamp(0.5, stamp_radius as f32);
+    let fwhm_est = sigma_est * FWHM_TO_SIGMA;
+    let initial_alpha =
+        fwhm_beta_to_alpha(fwhm_est, config.fixed_beta).clamp(0.5, stamp_radius as f32);
 
     if config.fit_beta {
         fit_with_variable_beta(
@@ -238,9 +238,9 @@ pub fn fit_moffat_2d_weighted(
 
     // Estimate sigma from moments, then convert to alpha
     let sigma_est = estimate_sigma_from_moments(&data_x, &data_y, &data_z, cx, cy, background);
-    let beta_for_init = config.fixed_beta;
-    let initial_alpha = sigma_est * 2.355 / (2.0 * (2.0f32.powf(1.0 / beta_for_init) - 1.0).sqrt());
-    let initial_alpha = initial_alpha.clamp(0.5, stamp_radius as f32);
+    let fwhm_est = sigma_est * FWHM_TO_SIGMA;
+    let initial_alpha =
+        fwhm_beta_to_alpha(fwhm_est, config.fixed_beta).clamp(0.5, stamp_radius as f32);
 
     if config.fit_beta {
         fit_with_variable_beta_weighted(
@@ -273,50 +273,6 @@ pub fn fit_moffat_2d_weighted(
             config,
         )
     }
-}
-
-/// Extracted stamp data: (x coords, y coords, values, peak value).
-type StampData = (Vec<f32>, Vec<f32>, Vec<f32>, f32);
-
-fn extract_stamp(
-    pixels: &Buffer2<f32>,
-    cx: f32,
-    cy: f32,
-    stamp_radius: usize,
-) -> Option<StampData> {
-    let width = pixels.width();
-    let height = pixels.height();
-    let icx = cx.round() as isize;
-    let icy = cy.round() as isize;
-
-    if icx < stamp_radius as isize
-        || icy < stamp_radius as isize
-        || icx >= (width - stamp_radius) as isize
-        || icy >= (height - stamp_radius) as isize
-    {
-        return None;
-    }
-
-    let stamp_radius_i32 = stamp_radius as i32;
-    let mut data_x = Vec::new();
-    let mut data_y = Vec::new();
-    let mut data_z = Vec::new();
-    let mut peak_value = f32::MIN;
-
-    for dy in -stamp_radius_i32..=stamp_radius_i32 {
-        for dx in -stamp_radius_i32..=stamp_radius_i32 {
-            let x = (icx + dx as isize) as usize;
-            let y = (icy + dy as isize) as usize;
-            let value = pixels[y * width + x];
-
-            data_x.push(x as f32);
-            data_y.push(y as f32);
-            data_z.push(value);
-            peak_value = peak_value.max(value);
-        }
-    }
-
-    Some((data_x, data_y, data_z, peak_value))
 }
 
 #[allow(clippy::too_many_arguments)]

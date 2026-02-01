@@ -1928,7 +1928,7 @@ fn test_roundness2_symmetric_source() {
 
 #[test]
 fn test_estimate_sigma_from_moments_gaussian() {
-    use super::gaussian_fit::estimate_sigma_from_moments;
+    use super::estimate_sigma_from_moments;
 
     let width = 21;
     let height = 21;
@@ -1970,7 +1970,7 @@ fn test_estimate_sigma_from_moments_gaussian() {
 
 #[test]
 fn test_estimate_sigma_from_moments_various_sigmas() {
-    use super::gaussian_fit::estimate_sigma_from_moments;
+    use super::estimate_sigma_from_moments;
 
     let width = 21;
     let height = 21;
@@ -2015,7 +2015,7 @@ fn test_estimate_sigma_from_moments_various_sigmas() {
 
 #[test]
 fn test_compute_pixel_weights_basic() {
-    use super::gaussian_fit::compute_pixel_weights;
+    use super::compute_pixel_weights;
 
     let background = 100.0f32;
     let noise = 10.0f32;
@@ -2040,7 +2040,7 @@ fn test_compute_pixel_weights_basic() {
 
 #[test]
 fn test_compute_pixel_weights_with_gain() {
-    use super::gaussian_fit::compute_pixel_weights;
+    use super::compute_pixel_weights;
 
     let background = 100.0f32;
     let noise = 10.0f32;
@@ -2065,7 +2065,7 @@ fn test_compute_pixel_weights_with_gain() {
 
 #[test]
 fn test_compute_pixel_weights_zero_signal() {
-    use super::gaussian_fit::compute_pixel_weights;
+    use super::compute_pixel_weights;
 
     let background = 100.0f32;
     let noise = 10.0f32;
