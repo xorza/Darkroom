@@ -496,15 +496,8 @@ pub(crate) fn compute_metrics(
     };
 
     // Compute roundness metrics (DAOFIND style)
-    let (roundness1, roundness2) = compute_roundness(
-        &marginal_x[..stamp_size],
-        &marginal_y[..stamp_size],
-        stamp_radius,
-        pixels,
-        width,
-        icx,
-        icy,
-    );
+    let (roundness1, roundness2) =
+        compute_roundness(&marginal_x[..stamp_size], &marginal_y[..stamp_size]);
 
     Some(StarMetrics {
         flux,
@@ -520,19 +513,15 @@ pub(crate) fn compute_metrics(
 /// Compute DAOFIND-style roundness metrics.
 ///
 /// Returns (GROUND, SROUND):
-/// - GROUND: (Hx - Hy) / (Hx + Hy) where Hx, Hy are heights of marginal Gaussian fits
-/// - SROUND: Symmetry-based roundness measuring bilateral vs four-fold symmetry
-fn compute_roundness(
-    marginal_x: &[f32],
-    marginal_y: &[f32],
-    stamp_radius: usize,
-    pixels: &[f32],
-    width: usize,
-    icx: isize,
-    icy: isize,
-) -> (f32, f32) {
+/// - GROUND: (Hx - Hy) / (Hx + Hy) where Hx, Hy are heights of marginal distributions
+/// - SROUND: Symmetry-based roundness measuring bilateral asymmetry
+///
+/// Note: marginal_x and marginal_y contain background-subtracted flux sums.
+fn compute_roundness(marginal_x: &[f32], marginal_y: &[f32]) -> (f32, f32) {
     // GROUND: Compare heights of marginal distributions
     // The "height" is the peak of the marginal distribution
+    // marginal_x[i] = sum of background-subtracted values along column i
+    // marginal_y[i] = sum of background-subtracted values along row i
     let hx = marginal_x.iter().fold(0.0f32, |a, &b| a.max(b));
     let hy = marginal_y.iter().fold(0.0f32, |a, &b| a.max(b));
 
@@ -542,37 +531,18 @@ fn compute_roundness(
         0.0
     };
 
-    // SROUND: Symmetry-based roundness
-    // Compare sum of pixels on opposite sides of center
-    // A symmetric source should have equal flux on all sides
-    let stamp_radius_i32 = stamp_radius as i32;
-    let mut sum_left = 0.0f32;
-    let mut sum_right = 0.0f32;
-    let mut sum_top = 0.0f32;
-    let mut sum_bottom = 0.0f32;
+    // SROUND: Symmetry-based roundness using marginal distributions
+    // Compare sums on opposite sides of center
+    let n = marginal_x.len();
+    let center = n / 2;
 
-    for dy in -stamp_radius_i32..=stamp_radius_i32 {
-        for dx in -stamp_radius_i32..=stamp_radius_i32 {
-            if dx == 0 && dy == 0 {
-                continue;
-            }
-            let x = (icx + dx as isize) as usize;
-            let y = (icy + dy as isize) as usize;
-            let idx = y * width + x;
-            let value = pixels[idx];
+    // Sum left half vs right half of x marginal (excluding center)
+    let sum_left: f32 = marginal_x[..center].iter().sum();
+    let sum_right: f32 = marginal_x[center + 1..].iter().sum();
 
-            if dx < 0 {
-                sum_left += value;
-            } else if dx > 0 {
-                sum_right += value;
-            }
-            if dy < 0 {
-                sum_top += value;
-            } else if dy > 0 {
-                sum_bottom += value;
-            }
-        }
-    }
+    // Sum top half vs bottom half of y marginal (excluding center)
+    let sum_top: f32 = marginal_y[..center].iter().sum();
+    let sum_bottom: f32 = marginal_y[center + 1..].iter().sum();
 
     // Compute asymmetry in x and y directions
     let total_x = sum_left + sum_right;
