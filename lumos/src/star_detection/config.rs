@@ -368,6 +368,28 @@ pub struct StarDetectionConfig {
     /// When Some, uses per-pixel adaptive sigma thresholds based on local contrast.
     /// When None, uses the global sigma_threshold from background_config.
     pub adaptive_threshold: Option<AdaptiveThresholdConfig>,
+
+    /// Enable automatic FWHM estimation from bright stars.
+    ///
+    /// When enabled, performs a two-pass detection:
+    /// 1. First pass: detect bright stars without matched filter (high sigma threshold)
+    /// 2. Estimate FWHM from detected stars using robust median
+    /// 3. Second pass: full detection with estimated FWHM matched filter
+    ///
+    /// Manual `expected_fwhm > 0` overrides auto-estimation.
+    /// Default: false (disabled for backward compatibility)
+    pub auto_estimate_fwhm: bool,
+
+    /// Minimum number of stars required for valid FWHM estimation.
+    /// If fewer stars are detected in the first pass, falls back to default FWHM (4.0).
+    /// Default: 10
+    pub min_stars_for_fwhm_estimation: usize,
+
+    /// Sigma threshold multiplier for first-pass bright star detection.
+    /// Higher values detect only bright stars (faster, more reliable FWHM).
+    /// First pass uses `background_config.sigma_threshold * fwhm_estimation_sigma_factor`.
+    /// Default: 2.0 (e.g., if base sigma is 4.0, first pass uses 8.0)
+    pub fwhm_estimation_sigma_factor: f32,
 }
 
 impl Default for StarDetectionConfig {
@@ -397,6 +419,9 @@ impl Default for StarDetectionConfig {
             connectivity: Connectivity::Four,
             background_config: BackgroundConfig::default(),
             adaptive_threshold: None, // Disabled by default for backward compatibility
+            auto_estimate_fwhm: false, // Disabled by default for backward compatibility
+            min_stars_for_fwhm_estimation: 10,
+            fwhm_estimation_sigma_factor: 2.0,
         }
     }
 }
@@ -486,6 +511,17 @@ impl StarDetectionConfig {
         if let Some(ref adaptive) = self.adaptive_threshold {
             adaptive.validate();
         }
+        // Auto FWHM estimation validation
+        assert!(
+            self.min_stars_for_fwhm_estimation >= 5,
+            "min_stars_for_fwhm_estimation must be at least 5, got {}",
+            self.min_stars_for_fwhm_estimation
+        );
+        assert!(
+            self.fwhm_estimation_sigma_factor >= 1.0,
+            "fwhm_estimation_sigma_factor must be >= 1.0, got {}",
+            self.fwhm_estimation_sigma_factor
+        );
     }
 
     /// Create config for wide-field imaging (larger stars, relaxed filtering).
@@ -580,6 +616,22 @@ impl StarDetectionConfig {
     #[must_use]
     pub fn with_adaptive_threshold_config(mut self, config: AdaptiveThresholdConfig) -> Self {
         self.adaptive_threshold = Some(config);
+        self
+    }
+
+    /// Enable automatic FWHM estimation from bright stars.
+    ///
+    /// When enabled, performs a two-pass detection:
+    /// 1. First pass detects bright stars without matched filter
+    /// 2. Estimates FWHM from detected stars using robust median
+    /// 3. Second pass uses estimated FWHM for matched filtering
+    ///
+    /// This is useful when the FWHM is unknown or varies between images.
+    /// Manual `expected_fwhm > 0` always takes precedence over auto-estimation.
+    #[must_use]
+    pub fn with_auto_fwhm(mut self) -> Self {
+        self.auto_estimate_fwhm = true;
+        self.expected_fwhm = 0.0; // Clear manual FWHM so auto-estimation is used
         self
     }
 }

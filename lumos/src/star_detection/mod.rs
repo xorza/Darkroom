@@ -30,6 +30,7 @@ mod cosmic_ray;
 mod deblend;
 mod defect_map;
 pub(crate) mod detection;
+mod fwhm_estimation;
 pub mod gpu;
 mod median_filter;
 mod star;
@@ -186,12 +187,15 @@ impl StarDetector {
             BackgroundMap::new(&pixels, &self.config.background_config)
         };
 
+        // Step 1.5: Determine effective FWHM (manual > auto-estimate > disabled)
+        let (effective_fwhm, fwhm_estimate) = self.determine_effective_fwhm(&pixels, &background);
+
         // Step 2: Detect star candidates
         // Optionally apply matched filter (Gaussian convolution) for better faint star detection
-        let filtered = if self.config.expected_fwhm > f32::EPSILON {
+        let filtered = if effective_fwhm > f32::EPSILON {
             tracing::debug!(
                 "Applying matched filter with FWHM={:.1}, axis_ratio={:.2}, angle={:.1}°",
-                self.config.expected_fwhm,
+                effective_fwhm,
                 self.config.psf_axis_ratio,
                 self.config.psf_angle.to_degrees()
             );
@@ -199,7 +203,7 @@ impl StarDetector {
             matched_filter(
                 &pixels,
                 &background.background,
-                self.config.expected_fwhm,
+                effective_fwhm,
                 self.config.psf_axis_ratio,
                 self.config.psf_angle,
                 &mut filtered,
@@ -212,6 +216,9 @@ impl StarDetector {
 
         let mut diagnostics = StarDetectionDiagnostics {
             candidates_after_filtering: candidates.len(),
+            estimated_fwhm: fwhm_estimate.as_ref().map_or(0.0, |e| e.fwhm),
+            fwhm_estimation_star_count: fwhm_estimate.as_ref().map_or(0, |e| e.star_count),
+            fwhm_was_auto_estimated: fwhm_estimate.as_ref().is_some_and(|e| e.is_estimated),
             ..Default::default()
         };
         tracing::debug!("Detected {} star candidates", candidates.len());
@@ -285,6 +292,74 @@ impl StarDetector {
 
         StarDetectionResult { stars, diagnostics }
     }
+
+    /// Determine effective FWHM for matched filtering.
+    ///
+    /// Priority: manual expected_fwhm > auto-estimate > disabled (0.0)
+    ///
+    /// Returns (effective_fwhm, Option<FwhmEstimate>).
+    /// The FwhmEstimate is Some only when auto-estimation was performed.
+    fn determine_effective_fwhm(
+        &self,
+        pixels: &Buffer2<f32>,
+        background: &BackgroundMap,
+    ) -> (f32, Option<fwhm_estimation::FwhmEstimate>) {
+        // Manual override takes precedence
+        if self.config.expected_fwhm > f32::EPSILON {
+            return (self.config.expected_fwhm, None);
+        }
+
+        // Auto-estimation if enabled
+        if self.config.auto_estimate_fwhm {
+            let estimate = self.estimate_fwhm_from_bright_stars(pixels, background);
+            return (estimate.fwhm, Some(estimate));
+        }
+
+        // Disabled - no matched filter
+        (0.0, None)
+    }
+
+    /// Perform first-pass detection and estimate FWHM from bright stars.
+    fn estimate_fwhm_from_bright_stars(
+        &self,
+        pixels: &Buffer2<f32>,
+        background: &BackgroundMap,
+    ) -> fwhm_estimation::FwhmEstimate {
+        // Create first-pass config: high sigma, no matched filter
+        let mut first_pass_config = self.config.clone();
+        first_pass_config.background_config.sigma_threshold *=
+            self.config.fwhm_estimation_sigma_factor;
+        first_pass_config.expected_fwhm = 0.0; // No matched filter for first pass
+        first_pass_config.adaptive_threshold = None; // Disable adaptive for speed
+        first_pass_config.min_area = 3; // Smaller minimum area
+
+        // Detect candidates without matched filter
+        let candidates = detect_stars(pixels, None, background, &first_pass_config);
+
+        tracing::debug!(
+            "FWHM estimation: first pass detected {} bright star candidates",
+            candidates.len()
+        );
+
+        // Compute centroids and metrics for candidates
+        let stars: Vec<Star> = candidates
+            .into_iter()
+            .filter_map(|candidate| {
+                compute_centroid(pixels, background, &candidate, &first_pass_config)
+            })
+            .filter(|star| !star.is_saturated())
+            .filter(|star| star.snr >= self.config.min_snr * 2.0) // Extra SNR filter for bright stars
+            .collect();
+
+        // Estimate FWHM from detected stars
+        fwhm_estimation::estimate_fwhm(
+            &stars,
+            self.config.min_stars_for_fwhm_estimation,
+            4.0, // Default FWHM fallback
+            self.config.max_eccentricity,
+            self.config.max_sharpness,
+        )
+    }
 }
 
 /// Result of star detection with diagnostics.
@@ -332,6 +407,12 @@ pub struct StarDetectionDiagnostics {
     pub median_fwhm: f32,
     /// Median SNR of detected stars.
     pub median_snr: f32,
+    /// Estimated FWHM from auto-estimation (0.0 if not used or disabled).
+    pub estimated_fwhm: f32,
+    /// Number of stars used for FWHM estimation.
+    pub fwhm_estimation_star_count: usize,
+    /// Whether FWHM was auto-estimated (true) or manual/disabled (false).
+    pub fwhm_was_auto_estimated: bool,
 }
 
 /// Remove duplicate star detections that are too close together.

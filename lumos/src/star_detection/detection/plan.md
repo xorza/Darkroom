@@ -76,18 +76,45 @@ These optimizations were tested and showed no improvement:
 
 ---
 
+### 5. Auto-Estimate FWHM ✓
+**Impact:** Medium (usability)
+
+Implemented two-pass detection with automatic FWHM estimation:
+
+**Algorithm:**
+1. First pass: Detect bright stars without matched filter (2x sigma threshold)
+2. Estimate FWHM from detected stars using robust median + MAD outlier rejection
+3. Second pass: Full detection with estimated FWHM matched filter
+
+**Configuration:**
+```rust
+// Enable auto-estimation
+let config = StarDetectionConfig::default()
+    .with_auto_fwhm();
+
+// Manual FWHM always takes precedence
+let config = StarDetectionConfig::default()
+    .with_fwhm(4.0);  // Manual overrides auto
+```
+
+**Files modified:**
+- `config.rs` - Added `auto_estimate_fwhm`, `min_stars_for_fwhm_estimation`, `fwhm_estimation_sigma_factor`
+- `fwhm_estimation.rs` - New module with robust FWHM estimation logic
+- `mod.rs` - Added `determine_effective_fwhm()`, `estimate_fwhm_from_bright_stars()`
+- `StarDetectionDiagnostics` - Added `estimated_fwhm`, `fwhm_estimation_star_count`, `fwhm_was_auto_estimated`
+
+**Quality filters for FWHM estimation:**
+- Filters saturated stars (bloated FWHM)
+- Filters cosmic rays (high sharpness, small FWHM)
+- Filters elongated sources (high eccentricity)
+- Uses median + 3×MAD outlier rejection
+- Falls back to default 4.0 pixels if insufficient stars
+
+---
+
 ## Pending Improvements
 
-### 1. Auto-Estimate FWHM
-**Impact:** Medium (usability)
-**Effort:** Medium
-
-Currently `expected_fwhm` is manual config. Auto-estimation:
-1. Detect brightest N stars with conservative threshold
-2. Fit Gaussian/Moffat to estimate FWHM
-3. Use median FWHM for matched filter
-
-### 2. SIMD Label Flattening
+### 1. SIMD Label Flattening
 **Impact:** Low (performance)
 **Effort:** Low
 
@@ -112,7 +139,7 @@ scaling the adaptive sigma based on filter kernel size.
 | 8-connectivity option | Low | Medium (quality) | **Done** |
 | Code organization | Low | Medium (maintainability) | **Done** |
 | Adaptive thresholding | High | High (quality) | **Done** |
-| Auto-estimate FWHM | Medium | Medium (usability) | Pending |
+| Auto-estimate FWHM | Medium | Medium (usability) | **Done** |
 | SIMD label flattening | Low | Low (perf) | Pending |
 | Adaptive + matched filter | Medium | Medium (quality) | Pending |
 
@@ -147,8 +174,25 @@ let adaptive = AdaptiveSigmaConfig {
 let bg = BackgroundMap::new_with_adaptive_sigma(&pixels, &bg_config, adaptive);
 ```
 
+### Auto-FWHM Estimation
+
+```rust
+// Enable auto-estimation (two-pass detection)
+let config = StarDetectionConfig::default()
+    .with_auto_fwhm();
+
+// Check diagnostics for estimated FWHM
+let result = detector.detect(&image);
+if result.diagnostics.fwhm_was_auto_estimated {
+    println!("Estimated FWHM: {:.2} pixels (from {} stars)",
+        result.diagnostics.estimated_fwhm,
+        result.diagnostics.fwhm_estimation_star_count);
+}
+```
+
 ### Performance Notes
 
 - Memory: +24MB for 6K image (one `Buffer2<f32>` for adaptive sigma)
 - Compute: ~30% overhead in background estimation (third channel interpolation)
 - Threshold mask: ~20% slower due to per-pixel sigma load (still SIMD accelerated)
+- Auto-FWHM: ~15-25% overhead (first-pass detection without matched filter)
