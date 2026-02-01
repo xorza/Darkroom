@@ -1,5 +1,8 @@
 //! Tests for morphological dilation.
 
+// Allow identity operations like `y * width + x` for clarity in 2D indexing
+#![allow(clippy::identity_op, clippy::erasing_op)]
+
 use super::dilate_mask;
 use crate::common::BitBuffer2;
 
@@ -518,9 +521,9 @@ fn test_dilate_mask_sparse_pattern_across_words() {
     dilate_mask(&mask, 3, &mut dilated);
 
     // Check each pixel's expansion
-    for center in [10, 70, 130, 200] {
+    for center in [10i32, 70, 130, 200] {
         for offset in -3i32..=3 {
-            let pos = (center as i32 + offset) as usize;
+            let pos = (center + offset) as usize;
             if pos < width {
                 assert!(
                     dilated.get(pos),
@@ -566,10 +569,9 @@ fn test_dilate_mask_compare_with_naive() {
     let radius = 4;
 
     // Create random-ish pattern
-    let mut mask_data = vec![false; width * height];
-    for i in 0..mask_data.len() {
-        mask_data[i] = (i * 7 + i / 13) % 11 == 0;
-    }
+    let mask_data: Vec<bool> = (0..width * height)
+        .map(|i| (i * 7 + i / 13) % 11 == 0)
+        .collect();
 
     let mask = BitBuffer2::from_slice(width, height, &mask_data);
     let mut dilated = BitBuffer2::new_filled(width, height, false);
