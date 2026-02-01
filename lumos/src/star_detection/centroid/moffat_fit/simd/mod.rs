@@ -11,15 +11,18 @@ mod tests;
 #[cfg(target_arch = "x86_64")]
 pub(crate) use avx2::*;
 
-/// Check if AVX2 is available at runtime.
 #[cfg(target_arch = "x86_64")]
-#[inline]
-pub fn is_avx2_available() -> bool {
-    is_x86_feature_detected!("avx2") && is_x86_feature_detected!("fma")
-}
+use common::cpu_features;
 
-#[cfg(not(target_arch = "x86_64"))]
+/// Check if AVX2+FMA is available at runtime.
 #[inline]
 pub fn is_avx2_available() -> bool {
-    false
+    #[cfg(target_arch = "x86_64")]
+    {
+        cpu_features::has_avx2_fma()
+    }
+    #[cfg(not(target_arch = "x86_64"))]
+    {
+        false
+    }
 }
