@@ -23,6 +23,7 @@ pub struct LabelMap {
 impl LabelMap {
     /// Create a label map from pre-computed labels (for testing).
     #[cfg(test)]
+    //todo remove
     pub(crate) fn from_raw(labels: Buffer2<u32>, num_labels: usize) -> Self {
         Self { labels, num_labels }
     }
@@ -38,28 +39,31 @@ impl LabelMap {
         let width = mask.width();
         let height = mask.height();
 
+        let mut labels = Buffer2::new_filled(width, height, 0u32);
+
         if width == 0 || height == 0 {
             return Self {
-                labels: Buffer2::new_filled(width, height, 0u32),
+                labels,
                 num_labels: 0,
             };
         }
 
         // For small images, use sequential algorithm
-        if width * height < 100_000 {
-            return Self::from_mask_sequential(mask);
-        }
+        let num_labels = if width * height < 100_000 {
+            Self::label_mask_sequential(mask, &mut labels)
+        } else {
+            Self::label_mask_parallel(mask, &mut labels)
+        };
 
-        Self::from_mask_parallel(mask)
+        Self { labels, num_labels }
     }
 
     /// Sequential algorithm for small images.
-    fn from_mask_sequential(mask: &BitBuffer2) -> Self {
+    fn label_mask_sequential(mask: &BitBuffer2, labels: &mut Buffer2<u32>) -> usize {
         let width = mask.width();
         let height = mask.height();
         let words_per_row = mask.words_per_row();
 
-        let mut labels = Buffer2::new_filled(width, height, 0u32);
         let mut parent: Vec<u32> = Vec::new();
         let mut next_label = 1u32;
 
@@ -125,10 +129,7 @@ impl LabelMap {
         }
 
         if parent.is_empty() {
-            return Self {
-                labels,
-                num_labels: 0,
-            };
+            return 0;
         }
 
         let (label_map, num_labels) = Self::build_label_map(&mut parent);
@@ -140,11 +141,11 @@ impl LabelMap {
             }
         }
 
-        Self { labels, num_labels }
+        num_labels
     }
 
     /// Parallel algorithm for large images using block-based CCL.
-    fn from_mask_parallel(mask: &BitBuffer2) -> Self {
+    fn label_mask_parallel(mask: &BitBuffer2, labels: &mut Buffer2<u32>) -> usize {
         let width = mask.width();
         let height = mask.height();
         let words_per_row = mask.words_per_row();
@@ -154,9 +155,6 @@ impl LabelMap {
         let min_rows_per_strip = 64;
         let num_strips = (height / min_rows_per_strip).clamp(1, num_threads);
         let rows_per_strip = height / num_strips;
-
-        // Pre-allocate labels buffer
-        let mut labels = Buffer2::new_filled(width, height, 0u32);
 
         // Estimate max labels: worst case is checkerboard pattern = pixels/2
         // But for star detection, it's much sparser. Use 10% of foreground estimate.
@@ -219,16 +217,13 @@ impl LabelMap {
         // Phase 2: Merge labels at strip boundaries
         for strip_idx in 1..num_strips {
             let boundary_y = strip_idx * rows_per_strip;
-            Self::merge_strip_boundary(mask, &labels, width, boundary_y, &parent);
+            Self::merge_strip_boundary(mask, labels, width, boundary_y, &parent);
         }
 
         // Get final label count
         let total_labels = next_label.load(Ordering::SeqCst) - 1;
         if total_labels == 0 {
-            return Self {
-                labels,
-                num_labels: 0,
-            };
+            return 0;
         }
 
         // Phase 3: Build final label mapping
@@ -250,7 +245,7 @@ impl LabelMap {
             }
         });
 
-        Self { labels, num_labels }
+        num_labels
     }
 
     /// Label a horizontal strip using word-level bit scanning.
