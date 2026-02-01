@@ -386,7 +386,7 @@ pub struct StarDetectionDiagnostics {
     pub fwhm_was_auto_estimated: bool,
 }
 
-/// Compute centroids for star candidates.
+/// Compute centroids for star candidates in parallel.
 ///
 /// Takes detection candidates and computes sub-pixel centroids with quality metrics.
 fn compute_centroids(
@@ -395,8 +395,10 @@ fn compute_centroids(
     background: &BackgroundMap,
     config: &StarDetectionConfig,
 ) -> Vec<Star> {
+    use rayon::prelude::*;
+
     candidates
-        .into_iter()
+        .into_par_iter()
         .filter_map(|candidate| compute_centroid(pixels, background, &candidate, config))
         .collect()
 }
