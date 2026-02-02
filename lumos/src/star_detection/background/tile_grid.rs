@@ -1040,10 +1040,11 @@ mod tests {
     #[test]
     fn test_mad_sigma_known_value() {
         // MAD-based sigma for known distribution
-        // For values [0,1,2,3,4,5,6,7,8,9], median=4.5
-        // Deviations from median: [4.5,3.5,2.5,1.5,0.5,0.5,1.5,2.5,3.5,4.5]
-        // MAD = median of deviations = 2.5
-        // sigma = MAD * 1.4826 ≈ 3.7
+        // For values [0,1,2,3,4,5,6,7,8,9]:
+        // - Approximate median (used for performance) = 5 (upper-middle for even length)
+        // - Deviations from median: [5,4,3,2,1,0,1,2,3,4]
+        // - MAD = approximate median of deviations = 3
+        // - sigma = MAD * 1.4826 ≈ 4.4
         let width = 10;
         let height = 1;
         let data: Vec<f32> = (0..10).map(|x| x as f32).collect();
@@ -1054,16 +1055,16 @@ mod tests {
         let grid = make_grid(&pixels, 10);
         let stats = grid.get(0, 0);
 
-        // Median should be 4.5
+        // Approximate median for even-length array returns upper-middle element
         assert!(
-            (stats.median - 4.5).abs() < 0.1,
-            "Median should be 4.5, got {}",
+            (stats.median - 5.0).abs() < 0.1,
+            "Median should be 5.0 (approx), got {}",
             stats.median
         );
-        // Sigma should be ~3.7 (MAD * 1.4826)
+        // Sigma should be ~4.4 (MAD=3 * 1.4826)
         assert!(
-            (stats.sigma - 3.7).abs() < 0.5,
-            "Sigma should be ~3.7, got {}",
+            (stats.sigma - 4.4).abs() < 0.5,
+            "Sigma should be ~4.4, got {}",
             stats.sigma
         );
     }
