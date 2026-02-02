@@ -400,6 +400,13 @@ pub fn deblend_multi_threshold(
 /// Build the deblending tree by tracking connectivity at each threshold level.
 ///
 /// Uses exponentially spaced thresholds for better resolution at faint levels.
+/// Inline capacity for deblend tree SmallVec.
+/// Measurements show avg ~3 nodes, max ~170, so 16 covers most cases on stack.
+const TREE_INLINE_CAP: usize = 16;
+
+/// SmallVec type for deblend trees - avoids heap for typical small trees.
+type DeblendTree = SmallVec<[DeblendNode; TREE_INLINE_CAP]>;
+
 fn build_deblend_tree(
     data: &ComponentData,
     pixels: &Buffer2<f32>,
@@ -408,15 +415,15 @@ fn build_deblend_tree(
     high: f32,
     n_thresholds: usize,
     min_separation: usize,
-) -> Vec<DeblendNode> {
+) -> DeblendTree {
     if data.area == 0 {
-        return Vec::new();
+        return SmallVec::new();
     }
 
     // Use exponential spacing: threshold[i] = low * (high/low)^(i/n)
     let ratio = (high / low).max(1.0);
 
-    let mut tree: Vec<DeblendNode> = Vec::new();
+    let mut tree: DeblendTree = SmallVec::new();
 
     // Collect component pixels once (multi-threshold needs repeated access)
     let component_pixels: Vec<Pixel> = data.iter_pixels(pixels, labels).collect();
@@ -473,7 +480,7 @@ fn build_deblend_tree(
 
 /// Process the first threshold level - create root nodes.
 fn process_root_level(
-    tree: &mut Vec<DeblendNode>,
+    tree: &mut DeblendTree,
     pixel_to_node: &mut NodeGrid,
     regions: &[Vec<Pixel>],
 ) {
@@ -497,7 +504,7 @@ fn process_root_level(
 /// Process higher threshold levels - check for region splits.
 #[allow(clippy::too_many_arguments)]
 fn process_higher_level(
-    tree: &mut Vec<DeblendNode>,
+    tree: &mut DeblendTree,
     pixel_to_node: &mut NodeGrid,
     component_pixels: &[Pixel],
     regions: &[Vec<Pixel>],
@@ -580,7 +587,7 @@ fn find_single_parent_grid(region: &[Pixel], pixel_to_node: &NodeGrid) -> Option
 
 /// Create child nodes when a split is detected.
 fn create_child_nodes(
-    tree: &mut Vec<DeblendNode>,
+    tree: &mut DeblendTree,
     pixel_to_node: &mut NodeGrid,
     parent_idx: usize,
     child_regions: &[Vec<Pixel>],
