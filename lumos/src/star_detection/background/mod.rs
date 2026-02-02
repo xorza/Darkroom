@@ -36,6 +36,21 @@ pub struct BackgroundMap {
 }
 
 impl BackgroundMap {
+    /// Create an uninitialized BackgroundMap with pre-allocated buffers.
+    ///
+    /// Use this with `estimate` to reuse allocations across multiple images.
+    pub fn new_uninit(width: usize, height: usize, with_adaptive: bool) -> Self {
+        Self {
+            background: Buffer2::new_default(width, height),
+            noise: Buffer2::new_default(width, height),
+            adaptive_sigma: if with_adaptive {
+                Some(Buffer2::new_default(width, height))
+            } else {
+                None
+            },
+        }
+    }
+
     /// Estimate background from image pixels using the given configuration.
     ///
     /// Uses a tiled approach with sigma-clipped statistics:
@@ -60,36 +75,9 @@ impl BackgroundMap {
     /// and lower in uniform sky regions, reducing false positives while
     /// maintaining sensitivity in clean areas.
     pub fn new(pixels: &Buffer2<f32>, config: &BackgroundConfig) -> Self {
-        config.validate();
-        assert!(
-            pixels.width() >= config.tile_size && pixels.height() >= config.tile_size,
-            "Image must be at least tile_size x tile_size"
-        );
-
-        let width = pixels.width();
-        let height = pixels.height();
         let has_adaptive = config.adaptive_sigma.is_some();
-
-        let grid = TileGrid::new_with_options(
-            pixels,
-            config.tile_size,
-            None,
-            0,
-            config.sigma_clip_iterations,
-            config.adaptive_sigma,
-        );
-
-        let mut background = BackgroundMap {
-            background: Buffer2::new_filled(width, height, 0.0),
-            noise: Buffer2::new_filled(width, height, 0.0),
-            adaptive_sigma: if has_adaptive {
-                Some(Buffer2::new_filled(width, height, 0.0))
-            } else {
-                None
-            },
-        };
-
-        interpolate_from_grid(&grid, &mut background);
+        let mut background = Self::new_uninit(pixels.width(), pixels.height(), has_adaptive);
+        background.estimate(pixels, config);
 
         if config.iterations > 0 {
             refine(&mut background, pixels, config);
@@ -108,6 +96,61 @@ impl BackgroundMap {
     #[inline]
     pub fn height(&self) -> usize {
         self.background.height()
+    }
+
+    /// Estimate background into this pre-allocated BackgroundMap.
+    ///
+    /// This variant reuses the existing buffers, avoiding allocation overhead.
+    /// Use with `new_uninit` for buffer pooling scenarios.
+    ///
+    /// For iterative refinement, call `refine_into` after this method.
+    ///
+    /// # Panics
+    /// Panics if the buffer dimensions don't match the image dimensions.
+    pub fn estimate(&mut self, pixels: &Buffer2<f32>, config: &BackgroundConfig) {
+        config.validate();
+        debug_assert_eq!(self.background.width(), pixels.width());
+        debug_assert_eq!(self.background.height(), pixels.height());
+        assert!(
+            pixels.width() >= config.tile_size && pixels.height() >= config.tile_size,
+            "Image must be at least tile_size x tile_size"
+        );
+
+        let has_adaptive = config.adaptive_sigma.is_some();
+
+        // Update adaptive_sigma buffer state to match config
+        if has_adaptive && self.adaptive_sigma.is_none() {
+            self.adaptive_sigma = Some(Buffer2::new_default(pixels.width(), pixels.height()));
+        } else if !has_adaptive {
+            self.adaptive_sigma = None;
+        }
+
+        let grid = TileGrid::new_with_options(
+            pixels,
+            config.tile_size,
+            None,
+            0,
+            config.sigma_clip_iterations,
+            config.adaptive_sigma,
+        );
+
+        interpolate_from_grid(&grid, self);
+    }
+
+    /// Refine background estimate using iterative object masking.
+    ///
+    /// Call this after `estimate` when `config.iterations > 0`.
+    /// Requires pre-allocated bit buffers for mask and scratch space.
+    pub fn refine_into(
+        &mut self,
+        pixels: &Buffer2<f32>,
+        config: &BackgroundConfig,
+        mask: &mut BitBuffer2,
+        scratch: &mut BitBuffer2,
+    ) {
+        if config.iterations > 0 {
+            refine_with_buffers(self, pixels, config, mask, scratch);
+        }
     }
 }
 
@@ -153,20 +196,30 @@ fn refine(background: &mut BackgroundMap, pixels: &Buffer2<f32>, config: &Backgr
     let mut mask = BitBuffer2::new_filled(width, height, false);
     let mut scratch = BitBuffer2::new_filled(width, height, false);
 
+    refine_with_buffers(background, pixels, config, &mut mask, &mut scratch);
+}
+
+fn refine_with_buffers(
+    background: &mut BackgroundMap,
+    pixels: &Buffer2<f32>,
+    config: &BackgroundConfig,
+    mask: &mut BitBuffer2,
+    scratch: &mut BitBuffer2,
+) {
     for _iter in 0..config.iterations {
         create_object_mask(
             pixels,
             background,
             config.sigma_threshold,
             config.mask_dilation,
-            &mut mask,
-            &mut scratch,
+            mask,
+            scratch,
         );
 
         estimate_background_masked(
             pixels,
             config.tile_size,
-            &mask,
+            mask,
             config.min_unmasked_fraction,
             config.sigma_clip_iterations,
             background,

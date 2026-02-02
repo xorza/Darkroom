@@ -118,7 +118,7 @@ fn test_subpixel_shift_detection() {
         ImageDimensions::new(config.width, config.height, 1),
         pixels2.clone(),
     );
-    let detector = StarDetector::from_config(detection_config.clone());
+    let mut detector = StarDetector::from_config(detection_config.clone());
     let detected1 = detector.detect(&image1).stars;
     let detected2 = detector.detect(&image2).stars;
 
@@ -265,7 +265,7 @@ fn test_subpixel_accuracy_sweep() {
         ImageDimensions::new(config.width, config.height, 1),
         pixels1,
     );
-    let detector = StarDetector::from_config(detection_config);
+    let mut detector = StarDetector::from_config(detection_config);
     let detected1 = detector.detect(&image1).stars;
 
     for (shift_x, shift_y) in test_shifts {

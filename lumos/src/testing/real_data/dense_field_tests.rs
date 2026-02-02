@@ -57,7 +57,7 @@ fn test_multi_threshold_on_dense_fields() {
             ..StarDetectionConfig::for_crowded_field()
         };
 
-        let detector = StarDetector::from_config(config);
+        let mut detector = StarDetector::from_config(config);
 
         let start = std::time::Instant::now();
         let result = detector.detect(&astro_image);

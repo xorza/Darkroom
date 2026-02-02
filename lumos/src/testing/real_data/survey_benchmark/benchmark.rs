@@ -285,7 +285,7 @@ impl SurveyBenchmark {
 
         // Step 5: Run star detection
         let start = Instant::now();
-        let detector = StarDetector::from_config(config.clone());
+        let mut detector = StarDetector::from_config(config.clone());
         let result = detector.detect(&image);
         let runtime_ms = start.elapsed().as_millis() as u64;
 
@@ -1017,7 +1017,7 @@ mod tests {
             expected_fwhm: field.expected_fwhm_pixels(0.396),
             ..Default::default()
         };
-        let detector = StarDetector::from_config(config.clone());
+        let mut detector = StarDetector::from_config(config.clone());
         let result = detector.detect(&image);
         let match_radius = config.expected_fwhm * 2.0;
 

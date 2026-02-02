@@ -215,7 +215,7 @@ impl Session {
     /// # Returns
     /// * `Ok(Self)` - Session with quality metrics populated
     /// * `Err` - If frame loading or star detection fails
-    pub fn assess_quality(mut self, detector: &StarDetector) -> anyhow::Result<Self> {
+    pub fn assess_quality(mut self, detector: &mut StarDetector) -> anyhow::Result<Self> {
         if self.frame_paths.is_empty() {
             return Ok(self);
         }

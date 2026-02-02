@@ -58,7 +58,7 @@ fn main() {
         LiveStackAccumulator::from_reference(&reference, config).expect("Failed to create stack");
 
     // Star detector for quality assessment
-    let detector = StarDetector::new();
+    let mut detector = StarDetector::new();
 
     // Process frames in real-time
     println!("Processing frames...");
@@ -79,7 +79,7 @@ fn main() {
         };
 
         // Compute frame quality from star detection
-        let quality = compute_frame_quality(&frame, &detector);
+        let quality = compute_frame_quality(&frame, &mut detector);
 
         // Add frame to stack
         let stats = stack
@@ -128,7 +128,7 @@ fn main() {
 }
 
 /// Compute frame quality metrics from star detection.
-fn compute_frame_quality(frame: &AstroImage, detector: &StarDetector) -> LiveFrameQuality {
+fn compute_frame_quality(frame: &AstroImage, detector: &mut StarDetector) -> LiveFrameQuality {
     let result = detector.detect(frame);
 
     if result.stars.is_empty() {

@@ -338,7 +338,7 @@ fn detect_stars_in_all_images(calibrated_paths: &[PathBuf]) -> Vec<Vec<Star>> {
         },
         ..Default::default()
     };
-    let detector = StarDetector::from_config(config);
+    let mut detector = StarDetector::from_config(config);
 
     let mut all_stars = Vec::with_capacity(calibrated_paths.len());
 

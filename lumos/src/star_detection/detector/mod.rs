@@ -5,6 +5,7 @@
 
 #[cfg(test)]
 mod bench;
+mod buffer_pool;
 #[cfg(test)]
 mod tests;
 
@@ -23,6 +24,8 @@ use super::convolution::matched_filter;
 use super::fwhm_estimation;
 use super::median_filter::median_filter_3x3;
 use super::star::Star;
+
+pub use buffer_pool::BufferPool;
 
 /// Result of star detection with diagnostics.
 #[derive(Debug, Clone)]
@@ -84,7 +87,8 @@ pub struct StarDetectionDiagnostics {
 /// Star detector with builder pattern for convenient star detection.
 ///
 /// Wraps [`StarDetectionConfig`] and provides methods for detecting stars
-/// in single images or batches.
+/// in single images or batches. Includes a buffer pool for efficient memory
+/// reuse across multiple detections.
 ///
 /// # Example
 ///
@@ -92,7 +96,7 @@ pub struct StarDetectionDiagnostics {
 /// use lumos::{StarDetector, AstroImage};
 ///
 /// // Simple usage with defaults
-/// let detector = StarDetector::new();
+/// let mut detector = StarDetector::new();
 /// let result = detector.detect(&image);
 ///
 /// // With custom configuration
@@ -108,15 +112,20 @@ pub struct StarDetectionDiagnostics {
 ///     },
 ///     ..Default::default()
 /// };
-/// let detector = StarDetector::from_config(config);
+/// let mut detector = StarDetector::from_config(config);
 /// let result = detector.detect(&image);
 ///
-/// // Batch detection (parallel)
-/// let results = detector.detect_all(&images);
+/// // Batch detection reuses buffers automatically
+/// for image in images {
+///     let result = detector.detect(&image);
+/// }
 /// ```
 #[derive(Debug, Default)]
 pub struct StarDetector {
     config: StarDetectionConfig,
+    /// Buffer pool for reusing allocations across detections.
+    /// Lazily initialized on first detect() call.
+    buffer_pool: Option<BufferPool>,
 }
 
 impl StarDetector {
@@ -124,12 +133,16 @@ impl StarDetector {
     pub fn new() -> Self {
         Self {
             config: StarDetectionConfig::default(),
+            buffer_pool: None,
         }
     }
 
     /// Create a star detector from an existing configuration.
     pub fn from_config(config: StarDetectionConfig) -> Self {
-        Self { config }
+        Self {
+            config,
+            buffer_pool: None,
+        }
     }
 
     /// Get reference to the underlying configuration.
@@ -137,14 +150,34 @@ impl StarDetector {
         &self.config
     }
 
+    /// Clear the buffer pool, freeing all cached memory.
+    ///
+    /// The pool will be recreated on the next `detect()` call.
+    pub fn clear_buffer_pool(&mut self) {
+        self.buffer_pool = None;
+    }
+
     /// Detect stars in a single image.
-    pub fn detect(&self, image: &AstroImage) -> StarDetectionResult {
+    ///
+    /// Uses an internal buffer pool to reuse allocations across multiple calls.
+    /// For best performance when processing multiple images of the same size,
+    /// reuse the same `StarDetector` instance.
+    pub fn detect(&mut self, image: &AstroImage) -> StarDetectionResult {
         self.config.validate();
 
         let width = image.width();
         let height = image.height();
-        let mut grayscale_image = image.to_grayscale_buffer();
-        let mut scratch = Buffer2::new_default(width, height);
+
+        // Initialize or reset buffer pool for current dimensions
+        let pool = self
+            .buffer_pool
+            .get_or_insert_with(|| BufferPool::new(width, height));
+        pool.reset(width, height);
+
+        // Acquire buffers from pool
+        let mut grayscale_image = pool.acquire_f32();
+        image.to_grayscale_buffer_into(&mut grayscale_image);
+        let mut scratch = pool.acquire_f32();
 
         // Step 0a: Apply defect mask if provided
         if let Some(defect_map) = self.config.defect_map.as_ref()
@@ -161,17 +194,50 @@ impl StarDetector {
             std::mem::swap(&mut grayscale_image, &mut scratch);
         }
 
-        // Step 1: Estimate background
-        let background = BackgroundMap::new(&grayscale_image, &self.config.background);
+        // Step 1: Estimate background using pooled BackgroundMap
+        let has_adaptive = self.config.background.adaptive_sigma.is_some();
+        let has_iterations = self.config.background.iterations > 0;
+
+        // Estimate background
+        {
+            let pool = self.buffer_pool.as_mut().unwrap();
+            let background = pool.acquire_background_map(has_adaptive);
+            background.estimate(&grayscale_image, &self.config.background);
+        }
+
+        // Refine background if iterations requested
+        if has_iterations {
+            let pool = self.buffer_pool.as_mut().unwrap();
+            let mut mask = pool.acquire_bit();
+            let mut scratch_bit = pool.acquire_bit();
+
+            {
+                let pool = self.buffer_pool.as_mut().unwrap();
+                let background = pool.acquire_background_map(has_adaptive);
+                background.refine_into(
+                    &grayscale_image,
+                    &self.config.background,
+                    &mut mask,
+                    &mut scratch_bit,
+                );
+            }
+
+            let pool = self.buffer_pool.as_mut().unwrap();
+            pool.release_bit(mask);
+            pool.release_bit(scratch_bit);
+        }
+
+        // Re-borrow background as immutable for the rest of detection
+        let background = self.buffer_pool.as_ref().unwrap().background_map().unwrap();
 
         // Step 2: Determine effective FWHM (manual > auto-estimate > disabled)
         let (effective_fwhm, fwhm_estimate) =
-            self.determine_effective_fwhm(&grayscale_image, &background);
+            self.determine_effective_fwhm(&grayscale_image, background);
 
         // Step 3: Detect star candidates (with optional matched filter)
         // Reuse scratch buffer for matched filter output
         let candidates =
-            self.detect_candidates(&grayscale_image, &background, effective_fwhm, &mut scratch);
+            self.detect_candidates(&grayscale_image, background, effective_fwhm, &mut scratch);
 
         let mut diagnostics = StarDetectionDiagnostics {
             candidates_after_filtering: candidates.len(),
@@ -183,7 +249,7 @@ impl StarDetector {
         tracing::debug!("Detected {} star candidates", candidates.len());
 
         // Step 4: Compute precise centroids (parallel)
-        let mut stars = compute_centroids(candidates, &grayscale_image, &background, &self.config);
+        let mut stars = compute_centroids(candidates, &grayscale_image, background, &self.config);
         diagnostics.stars_after_centroid = stars.len();
 
         // Step 5: Apply quality filters
@@ -220,6 +286,11 @@ impl StarDetector {
             buf.extend(stars.iter().map(|s| s.snr));
             diagnostics.median_snr = crate::math::median_f32_mut(&mut buf);
         }
+
+        // Release buffers back to pool
+        let pool = self.buffer_pool.as_mut().unwrap();
+        pool.release_f32(grayscale_image);
+        pool.release_f32(scratch);
 
         StarDetectionResult { stars, diagnostics }
     }

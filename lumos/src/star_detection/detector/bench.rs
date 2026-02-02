@@ -21,7 +21,7 @@ fn bench_detect_6k_globular_cluster(b: ::bench::Bencher) {
         pixels.into_vec(),
     );
     let config = StarDetectionConfig::for_crowded_field();
-    let detector = StarDetector::from_config(config);
+    let mut detector = StarDetector::from_config(config);
 
     b.bench(|| black_box(detector.detect(black_box(&image))));
 }
@@ -36,7 +36,7 @@ fn bench_detect_4k_dense(b: ::bench::Bencher) {
         ImageDimensions::new(pixels.width(), pixels.height(), 1),
         pixels.into_vec(),
     );
-    let detector = StarDetector::new();
+    let mut detector = StarDetector::new();
 
     b.bench(|| black_box(detector.detect(black_box(&image))));
 }
@@ -51,7 +51,7 @@ fn bench_detect_1k_sparse(b: ::bench::Bencher) {
         ImageDimensions::new(pixels.width(), pixels.height(), 1),
         pixels.into_vec(),
     );
-    let detector = StarDetector::new();
+    let mut detector = StarDetector::new();
 
     b.bench(|| black_box(detector.detect(black_box(&image))));
 }

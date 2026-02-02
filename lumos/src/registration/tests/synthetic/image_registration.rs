@@ -89,7 +89,7 @@ fn test_image_registration_translation() {
         AstroImage::from_pixels(ImageDimensions::new(width, height, 1), target_pixels);
 
     // Detect stars in both images
-    let det = detector();
+    let mut det = detector();
     let ref_result = det.detect(&ref_image);
     let target_result = det.detect(&target_image);
 
@@ -182,7 +182,7 @@ fn test_image_registration_rotation() {
     let target_image =
         AstroImage::from_pixels(ImageDimensions::new(width, height, 1), target_pixels);
 
-    let det = detector();
+    let mut det = detector();
     let ref_result = det.detect(&ref_image);
     let target_result = det.detect(&target_image);
 
@@ -254,7 +254,7 @@ fn test_image_registration_similarity() {
     let target_image =
         AstroImage::from_pixels(ImageDimensions::new(width, height, 1), target_pixels);
 
-    let det = detector();
+    let mut det = detector();
     let ref_result = det.detect(&ref_image);
     let target_result = det.detect(&target_image);
 
@@ -334,7 +334,7 @@ fn test_image_registration_with_noise() {
     let target_image =
         AstroImage::from_pixels(ImageDimensions::new(width, height, 1), target_pixels);
 
-    let det = StarDetector::from_config(StarDetectionConfig {
+    let mut det = StarDetector::from_config(StarDetectionConfig {
         psf: crate::star_detection::PsfConfig {
             expected_fwhm: 0.0,
             ..Default::default()
@@ -420,7 +420,7 @@ fn test_image_registration_dense_field() {
     let target_image =
         AstroImage::from_pixels(ImageDimensions::new(width, height, 1), target_pixels);
 
-    let det = detector();
+    let mut det = detector();
     let ref_result = det.detect(&ref_image);
     let target_result = det.detect(&target_image);
 
@@ -491,7 +491,7 @@ fn test_image_registration_large_image() {
     let target_image =
         AstroImage::from_pixels(ImageDimensions::new(width, height, 1), target_pixels);
 
-    let det = detector();
+    let mut det = detector();
     let ref_result = det.detect(&ref_image);
     let target_result = det.detect(&target_image);
 

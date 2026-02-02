@@ -198,7 +198,7 @@ impl AstrometryBenchmark {
         // Run our detector
         let start = Instant::now();
         let image = AstroImage::from_pixels(ImageDimensions::new(width, height, 1), pixels.clone());
-        let detector = StarDetector::from_config(config.clone());
+        let mut detector = StarDetector::from_config(config.clone());
         let result = detector.detect(&image);
         let runtime_ms = start.elapsed().as_millis() as u64;
 

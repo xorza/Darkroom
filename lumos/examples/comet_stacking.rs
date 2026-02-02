@@ -92,7 +92,7 @@ fn main() {
         .collect();
 
     // Star detector
-    let detector = StarDetector::new();
+    let mut detector = StarDetector::new();
 
     // Detect stars in reference
     println!("\nDetecting stars in reference...");

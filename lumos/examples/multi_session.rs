@@ -50,7 +50,7 @@ fn main() {
     println!("Found {} session(s)", session_groups.len());
 
     // Create sessions with quality assessment
-    let detector = StarDetector::new();
+    let mut detector = StarDetector::new();
     let mut sessions = Vec::new();
 
     for (idx, (session_id, paths)) in session_groups.iter().enumerate() {
@@ -64,7 +64,7 @@ fn main() {
         // Create session and assess quality
         let session = Session::new(session_id.clone())
             .with_frames(paths)
-            .assess_quality(&detector)
+            .assess_quality(&mut detector)
             .expect("Failed to assess session quality");
 
         // Print session quality metrics

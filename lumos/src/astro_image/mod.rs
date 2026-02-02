@@ -581,6 +581,26 @@ impl AstroImage {
         }
     }
 
+    /// Convert to grayscale into an existing buffer.
+    ///
+    /// For grayscale images, copies the pixel data.
+    /// For RGB images, computes luminance using Rec. 709 weights: 0.2126*R + 0.7152*G + 0.0722*B
+    ///
+    /// The output buffer must have the same dimensions as the image.
+    pub fn to_grayscale_buffer_into(&self, output: &mut Buffer2<f32>) {
+        debug_assert_eq!(output.width(), self.dimensions.width);
+        debug_assert_eq!(output.height(), self.dimensions.height);
+
+        match &self.pixels {
+            PixelData::L(data) => {
+                output.pixels_mut().copy_from_slice(data);
+            }
+            PixelData::Rgb([r, g, b]) => {
+                rgb_to_luminance(r, g, b, output.pixels_mut());
+            }
+        }
+    }
+
     /// Convert to grayscale using luminance weights.
     ///
     /// Consumes self. If already grayscale, returns self unchanged.

@@ -60,7 +60,7 @@ fn test_cosmic_ray_rejection() {
     };
 
     let image = AstroImage::from_pixels(ImageDimensions::new(width, height, 1), pixels_vec.clone());
-    let detector = StarDetector::from_config(detection_config.clone());
+    let mut detector = StarDetector::from_config(detection_config.clone());
     let result = detector.detect(&image);
     let stars = result.stars;
 
@@ -191,7 +191,7 @@ fn test_laplacian_snr_visualization() {
     };
 
     let image = AstroImage::from_pixels(ImageDimensions::new(width, height, 1), pixels_vec.clone());
-    let detector = StarDetector::from_config(detection_config);
+    let mut detector = StarDetector::from_config(detection_config);
     let result = detector.detect(&image);
     let stars = result.stars;
 

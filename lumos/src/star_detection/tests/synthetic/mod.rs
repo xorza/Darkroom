@@ -91,7 +91,7 @@ fn test_synthetic_star_detection() {
         ImageDimensions::new(config.width, config.height, 1),
         pixels.clone(),
     );
-    let detector = StarDetector::from_config(detection_config);
+    let mut detector = StarDetector::from_config(detection_config);
     let result = detector.detect(&image);
     let detected_stars = result.stars;
     println!("\nDetected {} stars", detected_stars.len());

@@ -479,7 +479,7 @@ fn test_warp_with_detected_transform() {
     let target_pixels = warp_image(&ref_pixels, width, height, &true_transform, &warp_config);
 
     // Detect stars in both images
-    let det = StarDetector::from_config(StarDetectionConfig {
+    let mut det = StarDetector::from_config(StarDetectionConfig {
         psf: crate::star_detection::PsfConfig {
             expected_fwhm: 0.0,
             ..Default::default()

@@ -61,7 +61,7 @@ fn test_find_stars_on_light_frame() {
 
     let config = StarDetectionConfig::default();
     let start = std::time::Instant::now();
-    let detector = StarDetector::from_config(config);
+    let mut detector = StarDetector::from_config(config);
     let result = detector.detect(&image);
     println!(
         "Found {} stars in {:?}",
