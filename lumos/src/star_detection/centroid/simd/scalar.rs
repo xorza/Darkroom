@@ -71,3 +71,255 @@ pub fn refine_centroid_scalar(
 
     Some((new_cx, new_cy))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::common::Buffer2;
+    use crate::star_detection::background::BackgroundConfig;
+
+    /// Create a synthetic Gaussian star for testing.
+    fn make_gaussian_star(
+        width: usize,
+        height: usize,
+        cx: f32,
+        cy: f32,
+        sigma: f32,
+        amplitude: f32,
+        background: f32,
+    ) -> Buffer2<f32> {
+        let mut pixels = vec![background; width * height];
+        for y in 0..height {
+            for x in 0..width {
+                let dx = x as f32 - cx;
+                let dy = y as f32 - cy;
+                let r2 = dx * dx + dy * dy;
+                let value = amplitude * (-r2 / (2.0 * sigma * sigma)).exp();
+                if value > 0.001 {
+                    pixels[y * width + x] += value;
+                }
+            }
+        }
+        Buffer2::new(width, height, pixels)
+    }
+
+    fn make_uniform_background(width: usize, height: usize, value: f32) -> Buffer2<f32> {
+        Buffer2::new(width, height, vec![value; width * height])
+    }
+
+    #[test]
+    fn test_centered_star() {
+        let width = 64;
+        let height = 64;
+        let pixels = make_gaussian_star(width, height, 32.0, 32.0, 2.5, 0.8, 0.1);
+        let bg = crate::testing::estimate_background(&pixels, BackgroundConfig::default());
+
+        let result = refine_centroid_scalar(&pixels, width, height, &bg, 32.0, 32.0, 7, 4.0);
+
+        assert!(result.is_some());
+        let (cx, cy) = result.unwrap();
+        assert!((cx - 32.0).abs() < 0.1, "cx={cx} should be close to 32.0");
+        assert!((cy - 32.0).abs() < 0.1, "cy={cy} should be close to 32.0");
+    }
+
+    #[test]
+    fn test_offset_star() {
+        let width = 64;
+        let height = 64;
+        let true_cx = 32.3;
+        let true_cy = 32.7;
+        let pixels = make_gaussian_star(width, height, true_cx, true_cy, 2.5, 0.8, 0.1);
+        let bg = crate::testing::estimate_background(&pixels, BackgroundConfig::default());
+
+        let result = refine_centroid_scalar(&pixels, width, height, &bg, 32.0, 32.0, 7, 4.0);
+
+        assert!(result.is_some());
+        let (cx, cy) = result.unwrap();
+        // Single iteration moves toward true center but may not fully converge
+        assert!(
+            (cx - 32.0).abs() < 0.5,
+            "cx={cx} should have moved toward {true_cx}"
+        );
+        assert!(
+            (cy - 32.0).abs() < 0.5,
+            "cy={cy} should have moved toward {true_cy}"
+        );
+    }
+
+    #[test]
+    fn test_invalid_position_left_edge() {
+        let width = 64;
+        let height = 64;
+        let pixels = make_gaussian_star(width, height, 32.0, 32.0, 2.5, 0.8, 0.1);
+        let bg = crate::testing::estimate_background(&pixels, BackgroundConfig::default());
+
+        let result = refine_centroid_scalar(&pixels, width, height, &bg, 3.0, 32.0, 7, 4.0);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_invalid_position_right_edge() {
+        let width = 64;
+        let height = 64;
+        let pixels = make_gaussian_star(width, height, 32.0, 32.0, 2.5, 0.8, 0.1);
+        let bg = crate::testing::estimate_background(&pixels, BackgroundConfig::default());
+
+        let result = refine_centroid_scalar(&pixels, width, height, &bg, 61.0, 32.0, 7, 4.0);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_invalid_position_top_edge() {
+        let width = 64;
+        let height = 64;
+        let pixels = make_gaussian_star(width, height, 32.0, 32.0, 2.5, 0.8, 0.1);
+        let bg = crate::testing::estimate_background(&pixels, BackgroundConfig::default());
+
+        let result = refine_centroid_scalar(&pixels, width, height, &bg, 32.0, 3.0, 7, 4.0);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_invalid_position_bottom_edge() {
+        let width = 64;
+        let height = 64;
+        let pixels = make_gaussian_star(width, height, 32.0, 32.0, 2.5, 0.8, 0.1);
+        let bg = crate::testing::estimate_background(&pixels, BackgroundConfig::default());
+
+        let result = refine_centroid_scalar(&pixels, width, height, &bg, 32.0, 61.0, 7, 4.0);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_zero_signal() {
+        let width = 64;
+        let height = 64;
+        let pixels = make_uniform_background(width, height, 0.1);
+        let bg = crate::testing::estimate_background(&pixels, BackgroundConfig::default());
+
+        let result = refine_centroid_scalar(&pixels, width, height, &bg, 32.0, 32.0, 7, 4.0);
+        assert!(result.is_none(), "Should return None for zero signal");
+    }
+
+    #[test]
+    fn test_different_stamp_radii() {
+        let width = 128;
+        let height = 128;
+        let pixels = make_gaussian_star(width, height, 64.3, 64.7, 4.0, 0.8, 0.1);
+        let bg = crate::testing::estimate_background(&pixels, BackgroundConfig::default());
+
+        // Test with small stamp (9x9)
+        let result_small = refine_centroid_scalar(&pixels, width, height, &bg, 64.0, 64.0, 4, 6.0);
+        assert!(result_small.is_some());
+
+        // Test with medium stamp (15x15)
+        let result_med = refine_centroid_scalar(&pixels, width, height, &bg, 64.0, 64.0, 7, 6.0);
+        assert!(result_med.is_some());
+
+        // Test with large stamp (21x21)
+        let result_large = refine_centroid_scalar(&pixels, width, height, &bg, 64.0, 64.0, 10, 6.0);
+        assert!(result_large.is_some());
+
+        // All should produce reasonable results
+        for (name, result) in [
+            ("small", result_small),
+            ("medium", result_med),
+            ("large", result_large),
+        ] {
+            let (cx, cy) = result.unwrap();
+            assert!(
+                (cx - 64.0).abs() < 0.5,
+                "{name}: cx={cx} should be reasonable"
+            );
+            assert!(
+                (cy - 64.0).abs() < 0.5,
+                "{name}: cy={cy} should be reasonable"
+            );
+        }
+    }
+
+    #[test]
+    fn test_centroid_moves_too_far() {
+        let width = 64;
+        let height = 64;
+        // Star at (45, 45) but we start search at (32, 32) - too far
+        let pixels = make_gaussian_star(width, height, 45.0, 45.0, 2.5, 0.8, 0.1);
+        let bg = crate::testing::estimate_background(&pixels, BackgroundConfig::default());
+
+        // With stamp_radius=7, max_move = 15/4 = 3.75 pixels
+        let result = refine_centroid_scalar(&pixels, width, height, &bg, 32.0, 32.0, 7, 4.0);
+        assert!(
+            result.is_none(),
+            "Should reject when centroid moves too far"
+        );
+    }
+
+    #[test]
+    fn test_negative_background_subtraction() {
+        let width = 64;
+        let height = 64;
+        // Create image where background is higher than star in some areas
+        let mut pixels = vec![0.5f32; width * height];
+        for y in 28..36 {
+            for x in 28..36 {
+                let dx = x as f32 - 32.0;
+                let dy = y as f32 - 32.0;
+                let r2 = dx * dx + dy * dy;
+                pixels[y * width + x] += 0.8 * (-r2 / 8.0).exp();
+            }
+        }
+        let pixels = Buffer2::new(width, height, pixels);
+        let bg = crate::testing::estimate_background(&pixels, BackgroundConfig::default());
+
+        // Should still work - negative values clamped to 0
+        let result = refine_centroid_scalar(&pixels, width, height, &bg, 32.0, 32.0, 7, 4.0);
+        assert!(result.is_some());
+    }
+
+    #[test]
+    fn test_very_bright_star() {
+        let width = 64;
+        let height = 64;
+        let pixels = make_gaussian_star(width, height, 32.3, 32.7, 2.5, 10000.0, 0.1);
+        let bg = crate::testing::estimate_background(&pixels, BackgroundConfig::default());
+
+        let result = refine_centroid_scalar(&pixels, width, height, &bg, 32.0, 32.0, 7, 4.0);
+        assert!(result.is_some());
+        let (cx, cy) = result.unwrap();
+        assert!((cx - 32.0).abs() < 0.5);
+        assert!((cy - 32.0).abs() < 0.5);
+    }
+
+    #[test]
+    fn test_very_faint_star() {
+        let width = 64;
+        let height = 64;
+        let pixels = make_gaussian_star(width, height, 32.3, 32.7, 2.5, 0.01, 0.1);
+        let bg = crate::testing::estimate_background(&pixels, BackgroundConfig::default());
+
+        // May or may not succeed - just checking it doesn't crash
+        let _ = refine_centroid_scalar(&pixels, width, height, &bg, 32.0, 32.0, 7, 4.0);
+    }
+
+    #[test]
+    fn test_minimum_stamp_radius() {
+        let width = 64;
+        let height = 64;
+        let pixels = make_gaussian_star(width, height, 32.0, 32.0, 1.5, 0.8, 0.1);
+        let bg = crate::testing::estimate_background(&pixels, BackgroundConfig::default());
+
+        let result = refine_centroid_scalar(&pixels, width, height, &bg, 32.0, 32.0, 4, 2.0);
+        assert!(result.is_some());
+    }
+
+    #[test]
+    fn test_maximum_stamp_radius() {
+        let width = 128;
+        let height = 128;
+        let pixels = make_gaussian_star(width, height, 64.0, 64.0, 5.0, 0.8, 0.1);
+        let bg = crate::testing::estimate_background(&pixels, BackgroundConfig::default());
+
+        let result = refine_centroid_scalar(&pixels, width, height, &bg, 64.0, 64.0, 15, 10.0);
+        assert!(result.is_some());
+    }
+}

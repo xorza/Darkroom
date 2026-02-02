@@ -162,3 +162,235 @@ unsafe fn horizontal_sum_128(v: __m128) -> f32 {
     let sums = _mm_add_ss(sums, shuf);
     _mm_cvtss_f32(sums)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::common::Buffer2;
+    use crate::star_detection::background::BackgroundConfig;
+    use crate::star_detection::centroid::simd::refine_centroid_scalar;
+    use common::cpu_features;
+
+    fn make_gaussian_star(
+        width: usize,
+        height: usize,
+        cx: f32,
+        cy: f32,
+        sigma: f32,
+        amplitude: f32,
+        background: f32,
+    ) -> Buffer2<f32> {
+        let mut pixels = vec![background; width * height];
+        for y in 0..height {
+            for x in 0..width {
+                let dx = x as f32 - cx;
+                let dy = y as f32 - cy;
+                let r2 = dx * dx + dy * dy;
+                let value = amplitude * (-r2 / (2.0 * sigma * sigma)).exp();
+                if value > 0.001 {
+                    pixels[y * width + x] += value;
+                }
+            }
+        }
+        Buffer2::new(width, height, pixels)
+    }
+
+    fn make_uniform_background(width: usize, height: usize, value: f32) -> Buffer2<f32> {
+        Buffer2::new(width, height, vec![value; width * height])
+    }
+
+    fn run_if_sse41<F: FnOnce()>(f: F) {
+        if cpu_features::has_sse4_1() {
+            f();
+        } else {
+            eprintln!("Skipping SSE4.1 test: CPU does not support SSE4.1");
+        }
+    }
+
+    #[test]
+    fn test_matches_scalar_centered() {
+        run_if_sse41(|| {
+            let width = 64;
+            let height = 64;
+            let pixels = make_gaussian_star(width, height, 32.0, 32.0, 2.5, 0.8, 0.1);
+            let bg = crate::testing::estimate_background(&pixels, BackgroundConfig::default());
+
+            let scalar =
+                refine_centroid_scalar(&pixels, width, height, &bg, 32.0, 32.0, 7, 4.0).unwrap();
+            let sse = unsafe {
+                refine_centroid_sse(&pixels, width, height, &bg, 32.0, 32.0, 7, 4.0).unwrap()
+            };
+
+            assert!(
+                (scalar.0 - sse.0).abs() < 0.01,
+                "SSE cx={} should match scalar cx={}",
+                sse.0,
+                scalar.0
+            );
+            assert!(
+                (scalar.1 - sse.1).abs() < 0.01,
+                "SSE cy={} should match scalar cy={}",
+                sse.1,
+                scalar.1
+            );
+        });
+    }
+
+    #[test]
+    fn test_matches_scalar_offset() {
+        run_if_sse41(|| {
+            let width = 64;
+            let height = 64;
+            let pixels = make_gaussian_star(width, height, 32.3, 32.7, 2.5, 0.8, 0.1);
+            let bg = crate::testing::estimate_background(&pixels, BackgroundConfig::default());
+
+            let scalar =
+                refine_centroid_scalar(&pixels, width, height, &bg, 32.0, 32.0, 7, 4.0).unwrap();
+            let sse = unsafe {
+                refine_centroid_sse(&pixels, width, height, &bg, 32.0, 32.0, 7, 4.0).unwrap()
+            };
+
+            assert!(
+                (scalar.0 - sse.0).abs() < 0.01,
+                "SSE cx={} should match scalar cx={}",
+                sse.0,
+                scalar.0
+            );
+            assert!(
+                (scalar.1 - sse.1).abs() < 0.01,
+                "SSE cy={} should match scalar cy={}",
+                sse.1,
+                scalar.1
+            );
+        });
+    }
+
+    #[test]
+    fn test_invalid_position() {
+        run_if_sse41(|| {
+            let width = 64;
+            let height = 64;
+            let pixels = make_gaussian_star(width, height, 32.0, 32.0, 2.5, 0.8, 0.1);
+            let bg = crate::testing::estimate_background(&pixels, BackgroundConfig::default());
+
+            let result =
+                unsafe { refine_centroid_sse(&pixels, width, height, &bg, 3.0, 32.0, 7, 4.0) };
+            assert!(result.is_none());
+        });
+    }
+
+    #[test]
+    fn test_zero_signal() {
+        run_if_sse41(|| {
+            let width = 64;
+            let height = 64;
+            let pixels = make_uniform_background(width, height, 0.1);
+            let bg = crate::testing::estimate_background(&pixels, BackgroundConfig::default());
+
+            let result =
+                unsafe { refine_centroid_sse(&pixels, width, height, &bg, 32.0, 32.0, 7, 4.0) };
+            assert!(result.is_none());
+        });
+    }
+
+    #[test]
+    fn test_different_stamp_sizes() {
+        run_if_sse41(|| {
+            let width = 128;
+            let height = 128;
+            let pixels = make_gaussian_star(width, height, 64.3, 64.7, 4.0, 0.8, 0.1);
+            let bg = crate::testing::estimate_background(&pixels, BackgroundConfig::default());
+
+            // Test various stamp radii that exercise different remainder handling
+            for stamp_radius in [4, 5, 6, 7, 8, 9, 10] {
+                let scalar = refine_centroid_scalar(
+                    &pixels,
+                    width,
+                    height,
+                    &bg,
+                    64.0,
+                    64.0,
+                    stamp_radius,
+                    6.0,
+                );
+                let sse = unsafe {
+                    refine_centroid_sse(&pixels, width, height, &bg, 64.0, 64.0, stamp_radius, 6.0)
+                };
+
+                match (scalar, sse) {
+                    (Some(s), Some(e)) => {
+                        assert!(
+                            (s.0 - e.0).abs() < 0.01,
+                            "stamp_radius={}: SSE cx={} should match scalar cx={}",
+                            stamp_radius,
+                            e.0,
+                            s.0
+                        );
+                        assert!(
+                            (s.1 - e.1).abs() < 0.01,
+                            "stamp_radius={}: SSE cy={} should match scalar cy={}",
+                            stamp_radius,
+                            e.1,
+                            s.1
+                        );
+                    }
+                    (None, None) => {}
+                    _ => panic!(
+                        "stamp_radius={}: scalar and SSE should have same Some/None",
+                        stamp_radius
+                    ),
+                }
+            }
+        });
+    }
+
+    #[test]
+    fn test_consistency_multiple_positions() {
+        run_if_sse41(|| {
+            let width = 128;
+            let height = 128;
+
+            let positions = [
+                (40.1, 40.2),
+                (64.5, 64.5),
+                (80.7, 80.3),
+                (50.0, 70.0),
+                (70.0, 50.0),
+            ];
+
+            for (true_cx, true_cy) in positions {
+                let pixels = make_gaussian_star(width, height, true_cx, true_cy, 3.0, 0.8, 0.1);
+                let bg = crate::testing::estimate_background(&pixels, BackgroundConfig::default());
+
+                let start_cx = true_cx.round();
+                let start_cy = true_cy.round();
+
+                let scalar =
+                    refine_centroid_scalar(&pixels, width, height, &bg, start_cx, start_cy, 7, 5.0);
+                let sse = unsafe {
+                    refine_centroid_sse(&pixels, width, height, &bg, start_cx, start_cy, 7, 5.0)
+                };
+
+                let (s_cx, s_cy) = scalar.unwrap();
+                let (e_cx, e_cy) = sse.unwrap();
+
+                assert!(
+                    (s_cx - e_cx).abs() < 0.01,
+                    "pos=({}, {}): SSE cx={} should match scalar cx={}",
+                    true_cx,
+                    true_cy,
+                    e_cx,
+                    s_cx
+                );
+                assert!(
+                    (s_cy - e_cy).abs() < 0.01,
+                    "pos=({}, {}): SSE cy={} should match scalar cy={}",
+                    true_cx,
+                    true_cy,
+                    e_cy,
+                    s_cy
+                );
+            }
+        });
+    }
+}
