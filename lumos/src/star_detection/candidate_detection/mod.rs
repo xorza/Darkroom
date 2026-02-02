@@ -7,6 +7,7 @@ mod labeling;
 mod tests;
 
 use super::background::BackgroundMap;
+use super::buffer_pool::BufferPool;
 use super::config::{DeblendConfig, StarDetectionConfig};
 use super::deblend::{
     ComponentData, DeblendedCandidate, deblend_local_maxima, deblend_multi_threshold,
@@ -117,10 +118,91 @@ pub fn detect_stars(
     // Find connected components
     let label_map = LabelMap::from_mask_with_connectivity(&mask, config.filtering.connectivity);
 
+    extract_and_filter_candidates(pixels, &label_map, config, width, height)
+}
+
+/// Detect star candidates using a buffer pool for the label map.
+///
+/// Same as `detect_stars` but reuses the label buffer from the pool.
+pub fn detect_stars_with_pool(
+    pixels: &Buffer2<f32>,
+    filtered: Option<&Buffer2<f32>>,
+    background: &BackgroundMap,
+    config: &StarDetectionConfig,
+    pool: &mut BufferPool,
+) -> Vec<StarCandidate> {
+    let width = pixels.width();
+    let height = pixels.height();
+
+    // Create binary mask of above-threshold pixels
+    let mut mask = BitBuffer2::new_filled(width, height, false);
+
+    // Check if we have adaptive sigma available (from BackgroundMap)
+    let use_adaptive = background.adaptive_sigma.is_some() && filtered.is_none();
+
+    if use_adaptive {
+        // Use per-pixel adaptive sigma thresholds
+        let adaptive_sigma = background.adaptive_sigma.as_ref().unwrap();
+        create_adaptive_threshold_mask(
+            pixels,
+            &background.background,
+            &background.noise,
+            adaptive_sigma,
+            &mut mask,
+        );
+    } else if let Some(filtered) = filtered {
+        debug_assert_eq!(width, filtered.width());
+        debug_assert_eq!(height, filtered.height());
+        // Filtered image is background-subtracted, threshold = sigma * noise
+        // Note: Adaptive thresholding with filtered images is not yet supported
+        // because the matched filter changes the noise characteristics.
+        create_threshold_mask_filtered(
+            filtered,
+            &background.noise,
+            config.background.sigma_threshold,
+            &mut mask,
+        );
+    } else {
+        // No filtering, threshold = background + sigma * noise
+        create_threshold_mask(
+            pixels,
+            &background.background,
+            &background.noise,
+            config.background.sigma_threshold,
+            &mut mask,
+        );
+    }
+
+    // Dilate mask to connect nearby pixels that may be separated due to
+    // Bayer pattern artifacts or noise. Use radius 1 (3x3 structuring element)
+    // to minimize merging of close stars while still connecting fragmented detections.
+    let mut dilated = BitBuffer2::new_filled(width, height, false);
+    dilate_mask(&mask, 1, &mut dilated);
+    std::mem::swap(&mut mask, &mut dilated);
+
+    // Find connected components using pooled buffer
+    let label_map = LabelMap::from_pool(&mask, config.filtering.connectivity, pool);
+
+    let candidates = extract_and_filter_candidates(pixels, &label_map, config, width, height);
+
+    // Return label buffer to pool
+    label_map.release_to_pool(pool);
+
+    candidates
+}
+
+/// Extract candidates from label map and filter by size/edge constraints.
+fn extract_and_filter_candidates(
+    pixels: &Buffer2<f32>,
+    label_map: &LabelMap,
+    config: &StarDetectionConfig,
+    width: usize,
+    height: usize,
+) -> Vec<StarCandidate> {
     // Extract candidate properties with deblending (always use original pixels for peak values)
     let mut candidates = extract_candidates(
         pixels,
-        &label_map,
+        label_map,
         &config.deblend,
         config.filtering.max_area,
     );

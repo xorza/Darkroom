@@ -17,7 +17,7 @@ use crate::common::Buffer2;
 
 use super::background::{BackgroundConfig, BackgroundMap};
 use super::buffer_pool::BufferPool;
-use super::candidate_detection::{self, detect_stars};
+use super::candidate_detection::{self, detect_stars, detect_stars_with_pool};
 use super::centroid::compute_centroid;
 use super::config::StarDetectionConfig;
 use super::convolution::matched_filter;
@@ -199,19 +199,37 @@ impl StarDetector {
         let effective_fwhm = self.determine_effective_fwhm(&grayscale_image, &background);
 
         // Step 3: Detect star candidates (with optional matched filter)
-        let pool = self.buffer_pool.as_mut().unwrap();
-        let mut convolution_scratch = pool.acquire_f32();
+        let candidates = {
+            let pool = self.buffer_pool.as_mut().unwrap();
+            let mut convolution_scratch = pool.acquire_f32();
 
-        let candidates = self.detect_candidates(
-            &grayscale_image,
-            &background,
-            effective_fwhm.fwhm(),
-            &mut scratch,
-            &mut convolution_scratch,
-        );
+            let filtered: Option<&Buffer2<f32>> = if let Some(fwhm) = effective_fwhm.fwhm() {
+                tracing::debug!(
+                    "Applying matched filter with FWHM={:.1}, axis_ratio={:.2}, angle={:.1}°",
+                    fwhm,
+                    self.config.psf.axis_ratio,
+                    self.config.psf.angle.to_degrees()
+                );
+                matched_filter(
+                    &grayscale_image,
+                    &background.background,
+                    fwhm,
+                    self.config.psf.axis_ratio,
+                    self.config.psf.angle,
+                    &mut scratch,
+                    &mut convolution_scratch,
+                );
+                Some(&scratch)
+            } else {
+                None
+            };
 
-        let pool = self.buffer_pool.as_mut().unwrap();
-        pool.release_f32(convolution_scratch);
+            let candidates =
+                detect_stars_with_pool(&grayscale_image, filtered, &background, &self.config, pool);
+
+            pool.release_f32(convolution_scratch);
+            candidates
+        };
 
         let fwhm_estimate = effective_fwhm.estimate();
         let mut diagnostics = StarDetectionDiagnostics {
@@ -315,39 +333,6 @@ impl StarDetector {
         }
 
         fwhm_estimation::EffectiveFwhm::Disabled
-    }
-
-    /// Detect star candidates, optionally applying matched filter.
-    fn detect_candidates(
-        &self,
-        pixels: &Buffer2<f32>,
-        background: &BackgroundMap,
-        effective_fwhm: Option<f32>,
-        scratch: &mut Buffer2<f32>,
-        convolution_scratch: &mut Buffer2<f32>,
-    ) -> Vec<candidate_detection::StarCandidate> {
-        let filtered: Option<&Buffer2<f32>> = if let Some(fwhm) = effective_fwhm {
-            tracing::debug!(
-                "Applying matched filter with FWHM={:.1}, axis_ratio={:.2}, angle={:.1}°",
-                fwhm,
-                self.config.psf.axis_ratio,
-                self.config.psf.angle.to_degrees()
-            );
-            matched_filter(
-                pixels,
-                &background.background,
-                fwhm,
-                self.config.psf.axis_ratio,
-                self.config.psf.angle,
-                scratch,
-                convolution_scratch,
-            );
-            Some(scratch)
-        } else {
-            None
-        };
-
-        detect_stars(pixels, filtered, background, &self.config)
     }
 
     /// Perform first-pass detection and estimate FWHM from bright stars.

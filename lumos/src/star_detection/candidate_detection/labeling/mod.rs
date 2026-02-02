@@ -17,6 +17,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use rayon::prelude::*;
 
 use crate::common::{BitBuffer2, Buffer2};
+use crate::star_detection::buffer_pool::BufferPool;
 use crate::star_detection::config::Connectivity;
 
 // ============================================================================
@@ -228,6 +229,46 @@ impl LabelMap {
         };
 
         Self { labels, num_labels }
+    }
+
+    /// Create a label map by acquiring a buffer from a pool.
+    ///
+    /// # Arguments
+    /// * `mask` - Binary mask of foreground pixels
+    /// * `connectivity` - Four (default) or Eight connectivity
+    /// * `pool` - Buffer pool to acquire the u32 buffer from
+    pub fn from_pool(mask: &BitBuffer2, connectivity: Connectivity, pool: &mut BufferPool) -> Self {
+        let width = mask.width();
+        let height = mask.height();
+
+        debug_assert_eq!(width, pool.width());
+        debug_assert_eq!(height, pool.height());
+
+        let mut labels = pool.acquire_u32();
+
+        if width == 0 || height == 0 {
+            return Self {
+                labels,
+                num_labels: 0,
+            };
+        }
+
+        // Clear the buffer (it may contain old labels)
+        labels.pixels_mut().fill(0);
+
+        // Threshold determined by benchmark: parallel wins at ~65k pixels
+        let num_labels = if width * height < 65_000 {
+            label_mask_sequential(mask, &mut labels, connectivity)
+        } else {
+            label_mask_parallel(mask, &mut labels, connectivity)
+        };
+
+        Self { labels, num_labels }
+    }
+
+    /// Release this LabelMap's buffer back to the pool.
+    pub fn release_to_pool(self, pool: &mut BufferPool) {
+        pool.release_u32(self.labels);
     }
 
     /// Create a label map from pre-computed labels (for testing).

@@ -87,7 +87,6 @@ impl BufferPool {
     }
 
     /// Acquire the u32 buffer (for label map), or allocate a new one.
-    #[allow(dead_code)]
     pub fn acquire_u32(&mut self) -> Buffer2<u32> {
         self.u32_buffer
             .take()
@@ -97,7 +96,6 @@ impl BufferPool {
     /// Return the u32 buffer to the pool for reuse.
     ///
     /// The buffer must have the correct dimensions.
-    #[allow(dead_code)]
     pub fn release_u32(&mut self, buffer: Buffer2<u32>) {
         debug_assert_eq!(buffer.width(), self.width);
         debug_assert_eq!(buffer.height(), self.height);
