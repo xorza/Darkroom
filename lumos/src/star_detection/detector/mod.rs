@@ -201,7 +201,6 @@ impl StarDetector {
         // Step 3: Detect star candidates (with optional matched filter)
         let candidates = {
             let pool = self.buffer_pool.as_mut().unwrap();
-            let mut convolution_scratch = pool.acquire_f32();
 
             let filtered: Option<&Buffer2<f32>> = if let Some(fwhm) = effective_fwhm.fwhm() {
                 tracing::debug!(
@@ -210,6 +209,8 @@ impl StarDetector {
                     self.config.psf.axis_ratio,
                     self.config.psf.angle.to_degrees()
                 );
+
+                let mut convolution_scratch = pool.acquire_f32();
                 matched_filter(
                     &grayscale_image,
                     &background.background,
@@ -219,6 +220,8 @@ impl StarDetector {
                     &mut scratch,
                     &mut convolution_scratch,
                 );
+                pool.release_f32(convolution_scratch);
+
                 Some(&scratch)
             } else {
                 None
@@ -227,7 +230,8 @@ impl StarDetector {
             let candidates =
                 detect_stars(&grayscale_image, filtered, &background, &self.config, pool);
 
-            pool.release_f32(convolution_scratch);
+            pool.release_f32(scratch);
+
             candidates
         };
 
@@ -284,7 +288,6 @@ impl StarDetector {
         let pool = self.buffer_pool.as_mut().unwrap();
         background.release_to_pool(pool);
         pool.release_f32(grayscale_image);
-        pool.release_f32(scratch);
 
         StarDetectionResult { stars, diagnostics }
     }
