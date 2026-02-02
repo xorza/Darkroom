@@ -47,7 +47,7 @@ fn generate_gaussian_data(
 // ============================================================================
 
 #[quick_bench(warmup_iters = 100, iters = 1000)]
-fn bench_jacobian_small(b: bench::Bencher) {
+fn bench_gaussian_jacobian_small(b: bench::Bencher) {
     // Small stamp: 17x17 = 289 pixels
     let (data_x, data_y, data_z) = generate_gaussian_data(289, 8.5, 8.5, 1.0, 2.5, 2.5, 0.1);
     let params = [8.5f32, 8.5, 1.0, 2.5, 2.5, 0.1];
@@ -125,7 +125,7 @@ fn bench_jacobian_small(b: bench::Bencher) {
 }
 
 #[quick_bench(warmup_iters = 50, iters = 500)]
-fn bench_jacobian_medium(b: bench::Bencher) {
+fn bench_gaussian_jacobian_medium(b: bench::Bencher) {
     // Medium stamp: 25x25 = 625 pixels
     let (data_x, data_y, data_z) = generate_gaussian_data(625, 12.5, 12.5, 1.0, 3.0, 3.0, 0.1);
     let params = [12.5f32, 12.5, 1.0, 3.0, 3.0, 0.1];
@@ -203,7 +203,7 @@ fn bench_jacobian_medium(b: bench::Bencher) {
 }
 
 #[quick_bench(warmup_iters = 20, iters = 200)]
-fn bench_jacobian_large(b: bench::Bencher) {
+fn bench_gaussian_jacobian_large(b: bench::Bencher) {
     // Large stamp: 33x33 = 1089 pixels
     let (data_x, data_y, data_z) = generate_gaussian_data(1089, 16.5, 16.5, 1.0, 4.0, 4.0, 0.1);
     let params = [16.5f32, 16.5, 1.0, 4.0, 4.0, 0.1];
@@ -285,7 +285,7 @@ fn bench_jacobian_large(b: bench::Bencher) {
 // ============================================================================
 
 #[quick_bench(warmup_iters = 100, iters = 1000)]
-fn bench_chi2_small(b: bench::Bencher) {
+fn bench_gaussian_chi2_small(b: bench::Bencher) {
     // Small stamp: 17x17 = 289 pixels
     let (data_x, data_y, data_z) = generate_gaussian_data(289, 8.5, 8.5, 1.0, 2.5, 2.5, 0.1);
     let params = [8.5f32, 8.5, 1.0, 2.5, 2.5, 0.1];
@@ -321,7 +321,7 @@ fn bench_chi2_small(b: bench::Bencher) {
 }
 
 #[quick_bench(warmup_iters = 50, iters = 500)]
-fn bench_chi2_medium(b: bench::Bencher) {
+fn bench_gaussian_chi2_medium(b: bench::Bencher) {
     // Medium stamp: 25x25 = 625 pixels
     let (data_x, data_y, data_z) = generate_gaussian_data(625, 12.5, 12.5, 1.0, 3.0, 3.0, 0.1);
     let params = [12.5f32, 12.5, 1.0, 3.0, 3.0, 0.1];
@@ -357,7 +357,7 @@ fn bench_chi2_medium(b: bench::Bencher) {
 }
 
 #[quick_bench(warmup_iters = 20, iters = 200)]
-fn bench_chi2_large(b: bench::Bencher) {
+fn bench_gaussian_chi2_large(b: bench::Bencher) {
     // Large stamp: 33x33 = 1089 pixels
     let (data_x, data_y, data_z) = generate_gaussian_data(1089, 16.5, 16.5, 1.0, 4.0, 4.0, 0.1);
     let params = [16.5f32, 16.5, 1.0, 4.0, 4.0, 0.1];
@@ -397,7 +397,7 @@ fn bench_chi2_large(b: bench::Bencher) {
 // ============================================================================
 
 #[quick_bench(warmup_iters = 5, iters = 30)]
-fn bench_batch_1000_jacobian(b: bench::Bencher) {
+fn bench_gaussian_batch_1000_jacobian(b: bench::Bencher) {
     let n_stars = 1000;
     let stamp_size = 289; // 17x17
 
@@ -485,7 +485,7 @@ fn bench_batch_1000_jacobian(b: bench::Bencher) {
 }
 
 #[quick_bench(warmup_iters = 5, iters = 30)]
-fn bench_batch_1000_chi2(b: bench::Bencher) {
+fn bench_gaussian_batch_1000_chi2(b: bench::Bencher) {
     let n_stars = 1000;
     let stamp_size = 289; // 17x17
 

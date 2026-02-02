@@ -1,6 +1,0 @@
-name: bench_row_conversions/RGBA u8_to_L u8/simd
-mean: 1.022µs
-min: 972ns
-max: 1.172µs
-median: 1.012µs
-iterations: 20

@@ -1,6 +1,0 @@
-name: bench_row_conversions/RGBA f32_to_RGBA u8/scalar
-mean: 12.739µs
-min: 12.434µs
-max: 16.421µs
-median: 12.484µs
-iterations: 20

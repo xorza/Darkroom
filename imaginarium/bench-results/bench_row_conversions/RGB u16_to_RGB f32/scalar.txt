@@ -1,6 +1,0 @@
-name: bench_row_conversions/RGB u16_to_RGB f32/scalar
-mean: 8.745µs
-min: 8.396µs
-max: 11.271µs
-median: 8.446µs
-iterations: 20

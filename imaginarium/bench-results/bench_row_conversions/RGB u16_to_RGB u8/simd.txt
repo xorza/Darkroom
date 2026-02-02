@@ -1,6 +1,0 @@
-name: bench_row_conversions/RGB u16_to_RGB u8/simd
-mean: 238ns
-min: 220ns
-max: 271ns
-median: 240ns
-iterations: 20

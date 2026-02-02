@@ -1,6 +1,0 @@
-name: bench_row_conversions/RGB u8_to_RGB f32/scalar
-mean: 8.255µs
-min: 7.965µs
-max: 10.83µs
-median: 7.976µs
-iterations: 20

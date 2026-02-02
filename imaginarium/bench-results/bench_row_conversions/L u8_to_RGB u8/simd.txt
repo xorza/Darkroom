@@ -1,6 +1,0 @@
-name: bench_row_conversions/L u8_to_RGB u8/simd
-mean: 183ns
-min: 180ns
-max: 201ns
-median: 181ns
-iterations: 20

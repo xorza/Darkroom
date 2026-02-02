@@ -1,6 +1,0 @@
-name: bench_row_conversions/RGB u8_to_L u8/scalar
-mean: 7.181µs
-min: 7.113µs
-max: 7.775µs
-median: 7.124µs
-iterations: 20

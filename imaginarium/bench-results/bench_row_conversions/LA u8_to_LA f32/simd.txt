@@ -1,6 +1,0 @@
-name: bench_row_conversions/LA u8_to_LA f32/simd
-mean: 390ns
-min: 370ns
-max: 411ns
-median: 391ns
-iterations: 20

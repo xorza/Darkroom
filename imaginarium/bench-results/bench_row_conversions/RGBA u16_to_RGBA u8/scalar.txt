@@ -1,6 +1,0 @@
-name: bench_row_conversions/RGBA u16_to_RGBA u8/scalar
-mean: 8.218µs
-min: 7.915µs
-max: 11.271µs
-median: 7.925µs
-iterations: 20

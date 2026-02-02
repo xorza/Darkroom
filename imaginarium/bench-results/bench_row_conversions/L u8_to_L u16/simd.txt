@@ -1,6 +1,0 @@
-name: bench_row_conversions/L u8_to_L u16/simd
-mean: 129ns
-min: 120ns
-max: 151ns
-median: 130ns
-iterations: 20

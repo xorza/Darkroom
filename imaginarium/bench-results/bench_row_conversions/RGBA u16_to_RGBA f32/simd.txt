@@ -1,6 +1,0 @@
-name: bench_row_conversions/RGBA u16_to_RGBA f32/simd
-mean: 780ns
-min: 761ns
-max: 802ns
-median: 782ns
-iterations: 20

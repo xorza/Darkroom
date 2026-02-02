@@ -1,6 +1,0 @@
-name: bench_row_conversions/LA f32_to_LA u16/simd
-mean: 470ns
-min: 450ns
-max: 491ns
-median: 471ns
-iterations: 20
