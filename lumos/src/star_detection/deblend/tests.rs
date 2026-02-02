@@ -108,7 +108,6 @@ fn test_deblend_config_conversion() {
         min_prominence: 0.5,
         n_thresholds: 64,
         min_contrast: 0.01,
-        ..Default::default()
     };
 
     assert_eq!(config.min_separation, 5);

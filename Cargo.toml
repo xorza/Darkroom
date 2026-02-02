@@ -15,6 +15,9 @@ resolver = "2"
 version = "0.1.0"
 edition = "2024"
 
+[workspace.lints.rust]
+unused_imports = "allow"
+
 
 [workspace.dependencies]
 common = { path = "common" }

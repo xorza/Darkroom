@@ -480,9 +480,15 @@ fn test_warp_with_detected_transform() {
 
     // Detect stars in both images
     let det = StarDetector::from_config(StarDetectionConfig {
-        expected_fwhm: 0.0,
-        min_snr: 5.0,
-        background_config: BackgroundConfig {
+        psf: crate::star_detection::PsfConfig {
+            expected_fwhm: 0.0,
+            ..Default::default()
+        },
+        filtering: crate::star_detection::FilteringConfig {
+            min_snr: 5.0,
+            ..Default::default()
+        },
+        background: BackgroundConfig {
             sigma_threshold: 3.0,
             ..Default::default()
         },

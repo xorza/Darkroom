@@ -101,7 +101,7 @@ fn test_debug_synthetic_steps() {
 
     let detection_config = StarDetectionConfig::default();
     let grayscale_buf = Buffer2::new(width, height, grayscale.clone());
-    let background = BackgroundMap::new(&grayscale_buf, &detection_config.background_config);
+    let background = BackgroundMap::new(&grayscale_buf, &detection_config.background);
 
     println!(
         "Background stats: min={:.4}, max={:.4}",
@@ -158,7 +158,7 @@ fn test_debug_synthetic_steps() {
         height,
         background.background.pixels(),
         background.noise.pixels(),
-        detection_config.background_config.sigma_threshold,
+        detection_config.background.sigma_threshold,
     );
     let mask_count = mask.iter().filter(|&&b| b).count();
     println!(

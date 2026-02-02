@@ -6,6 +6,7 @@ use crate::math::FWHM_TO_SIGMA;
 use crate::math::{Aabb, Vec2us};
 use crate::star_detection::background::{BackgroundConfig, BackgroundMap};
 use crate::star_detection::candidate_detection::{StarCandidate, detect_stars};
+use crate::star_detection::{CentroidConfig, FilteringConfig};
 
 /// Default stamp radius for tests (matching expected FWHM of ~4 pixels).
 const TEST_STAMP_RADIUS: usize = 7;
@@ -100,7 +101,10 @@ fn test_fwhm_estimation() {
     );
     // Use higher max_area because dilation (radius=2) expands the star region
     let config = StarDetectionConfig {
-        max_area: 1000,
+        filtering: FilteringConfig {
+            max_area: 1000,
+            ..Default::default()
+        },
         ..StarDetectionConfig::default()
     };
     let candidates = detect_stars(&pixels, None, &bg, &config);
@@ -1112,7 +1116,10 @@ fn test_compute_centroid_multiple_stars_independent() {
         },
     );
     let config = StarDetectionConfig {
-        edge_margin: 10,
+        filtering: FilteringConfig {
+            edge_margin: 10,
+            ..Default::default()
+        },
         ..StarDetectionConfig::default()
     };
     let candidates = detect_stars(&pixels, None, &bg, &config);
@@ -1384,7 +1391,10 @@ fn test_weighted_centroid_precision_statistical() {
                 },
             );
             let config = StarDetectionConfig {
-                centroid_method: CentroidMethod::WeightedMoments,
+                centroid: CentroidConfig {
+                    method: CentroidMethod::WeightedMoments,
+                    ..Default::default()
+                },
                 ..Default::default()
             };
             let candidates = detect_stars(&pixels, None, &bg, &config);
@@ -2498,7 +2508,7 @@ fn test_extract_stamp_fractional_position() {
 
 #[test]
 fn test_local_annulus_background_uniform() {
-    use super::LocalBackgroundMethod;
+    use crate::star_detection::LocalBackgroundMethod;
 
     let width = 128;
     let height = 128;
@@ -2528,7 +2538,10 @@ fn test_local_annulus_background_uniform() {
         },
     );
     let config = StarDetectionConfig {
-        local_background_method: LocalBackgroundMethod::LocalAnnulus,
+        centroid: CentroidConfig {
+            local_background_method: LocalBackgroundMethod::LocalAnnulus,
+            ..Default::default()
+        },
         ..Default::default()
     };
     let candidates = detect_stars(&pixels, None, &bg, &config);
@@ -2546,7 +2559,7 @@ fn test_local_annulus_background_uniform() {
 
 #[test]
 fn test_local_annulus_vs_global_map() {
-    use super::LocalBackgroundMethod;
+    use crate::star_detection::LocalBackgroundMethod;
 
     let width = 128;
     let height = 128;
@@ -2563,7 +2576,10 @@ fn test_local_annulus_vs_global_map() {
 
     // Detect with GlobalMap
     let config_global = StarDetectionConfig {
-        local_background_method: LocalBackgroundMethod::GlobalMap,
+        centroid: CentroidConfig {
+            local_background_method: LocalBackgroundMethod::GlobalMap,
+            ..Default::default()
+        },
         ..Default::default()
     };
     let candidates = detect_stars(&pixels, None, &bg, &config_global);
@@ -2572,7 +2588,10 @@ fn test_local_annulus_vs_global_map() {
 
     // Detect with LocalAnnulus
     let config_annulus = StarDetectionConfig {
-        local_background_method: LocalBackgroundMethod::LocalAnnulus,
+        centroid: CentroidConfig {
+            local_background_method: LocalBackgroundMethod::LocalAnnulus,
+            ..Default::default()
+        },
         ..Default::default()
     };
     let star_annulus =
@@ -2595,7 +2614,7 @@ fn test_local_annulus_vs_global_map() {
 
 #[test]
 fn test_local_annulus_near_edge_fallback() {
-    use super::LocalBackgroundMethod;
+    use crate::star_detection::LocalBackgroundMethod;
 
     let width = 64;
     let height = 64;
@@ -2613,8 +2632,14 @@ fn test_local_annulus_near_edge_fallback() {
     );
 
     let config = StarDetectionConfig {
-        local_background_method: LocalBackgroundMethod::LocalAnnulus,
-        edge_margin: 15, // Allow detection near edge
+        centroid: CentroidConfig {
+            local_background_method: LocalBackgroundMethod::LocalAnnulus,
+            ..Default::default()
+        },
+        filtering: FilteringConfig {
+            edge_margin: 15, // Allow detection near edge
+            ..Default::default()
+        },
         ..Default::default()
     };
     let candidates = detect_stars(&pixels, None, &bg, &config);

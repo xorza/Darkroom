@@ -2,7 +2,8 @@
 
 use super::*;
 use crate::common::Buffer2;
-use crate::star_detection::background::{AdaptiveSigmaConfig, BackgroundMap};
+use crate::star_detection::background::BackgroundMap;
+use crate::star_detection::config::AdaptiveSigmaConfig;
 
 #[test]
 fn test_uniform_background() {
@@ -234,7 +235,7 @@ fn test_different_tile_sizes() {
 }
 
 #[test]
-#[should_panic(expected = "Tile size must be between 16 and 256")]
+#[should_panic(expected = "tile_size must be between 16 and 256")]
 fn test_tile_size_too_small() {
     let pixels = Buffer2::new(64, 64, vec![0.5; 64 * 64]);
     BackgroundMap::new(
@@ -247,7 +248,7 @@ fn test_tile_size_too_small() {
 }
 
 #[test]
-#[should_panic(expected = "Tile size must be between 16 and 256")]
+#[should_panic(expected = "tile_size must be between 16 and 256")]
 fn test_tile_size_too_large() {
     let pixels = Buffer2::new(64, 64, vec![0.5; 64 * 64]);
     BackgroundMap::new(
@@ -346,6 +347,7 @@ fn test_iterative_background_with_bright_stars() {
         min_unmasked_fraction: 0.3,
         tile_size: 32,
         sigma_clip_iterations: 2,
+        adaptive_sigma: None,
     };
     let bg_iterative = BackgroundMap::new(&pixels, &config);
 
@@ -741,19 +743,17 @@ fn test_adaptive_sigma_uniform_background() {
     let height = 128;
     let pixels = Buffer2::new(width, height, vec![0.5; width * height]);
 
-    let adaptive_config = AdaptiveSigmaConfig {
-        base_sigma: 3.0,
-        max_sigma: 10.0,
-        contrast_factor: 2.0,
-    };
-
-    let bg = BackgroundMap::new_with_adaptive_sigma(
+    let bg = BackgroundMap::new(
         &pixels,
         &BackgroundConfig {
             tile_size: 32,
+            adaptive_sigma: Some(AdaptiveSigmaConfig {
+                base_sigma: 3.0,
+                max_sigma: 10.0,
+                contrast_factor: 2.0,
+            }),
             ..Default::default()
         },
-        adaptive_config,
     );
 
     // Adaptive sigma should exist
@@ -792,19 +792,17 @@ fn test_adaptive_sigma_values_in_valid_range() {
 
     let pixels = Buffer2::new(width, height, data);
 
-    let adaptive_config = AdaptiveSigmaConfig {
-        base_sigma: 3.0,
-        max_sigma: 10.0,
-        contrast_factor: 2.0,
-    };
-
-    let bg = BackgroundMap::new_with_adaptive_sigma(
+    let bg = BackgroundMap::new(
         &pixels,
         &BackgroundConfig {
             tile_size: 32,
+            adaptive_sigma: Some(AdaptiveSigmaConfig {
+                base_sigma: 3.0,
+                max_sigma: 10.0,
+                contrast_factor: 2.0,
+            }),
             ..Default::default()
         },
-        adaptive_config,
     );
 
     let adaptive_sigma = bg.adaptive_sigma.as_ref().unwrap();
@@ -837,19 +835,17 @@ fn test_adaptive_sigma_respects_max() {
 
     let pixels = Buffer2::new(width, height, data);
 
-    let adaptive_config = AdaptiveSigmaConfig {
-        base_sigma: 3.0,
-        max_sigma: 8.0,        // Limit to 8
-        contrast_factor: 10.0, // High contrast factor
-    };
-
-    let bg = BackgroundMap::new_with_adaptive_sigma(
+    let bg = BackgroundMap::new(
         &pixels,
         &BackgroundConfig {
             tile_size: 32,
+            adaptive_sigma: Some(AdaptiveSigmaConfig {
+                base_sigma: 3.0,
+                max_sigma: 8.0,        // Limit to 8
+                contrast_factor: 10.0, // High contrast factor
+            }),
             ..Default::default()
         },
-        adaptive_config,
     );
 
     let adaptive_sigma = bg.adaptive_sigma.as_ref().unwrap();
@@ -882,13 +878,13 @@ fn test_adaptive_sigma_dimensions_match() {
     let height = 80;
     let pixels = Buffer2::new(width, height, vec![0.5; width * height]);
 
-    let bg = BackgroundMap::new_with_adaptive_sigma(
+    let bg = BackgroundMap::new(
         &pixels,
         &BackgroundConfig {
             tile_size: 32,
+            adaptive_sigma: Some(AdaptiveSigmaConfig::default()),
             ..Default::default()
         },
-        AdaptiveSigmaConfig::default(),
     );
 
     let adaptive_sigma = bg.adaptive_sigma.as_ref().unwrap();
@@ -905,13 +901,13 @@ fn test_adaptive_sigma_accessible() {
     let height = 64;
     let pixels = Buffer2::new(width, height, vec![0.5; width * height]);
 
-    let bg = BackgroundMap::new_with_adaptive_sigma(
+    let bg = BackgroundMap::new(
         &pixels,
         &BackgroundConfig {
             tile_size: 32,
+            adaptive_sigma: Some(AdaptiveSigmaConfig::default()),
             ..Default::default()
         },
-        AdaptiveSigmaConfig::default(),
     );
 
     // adaptive_sigma should be Some for adaptive background

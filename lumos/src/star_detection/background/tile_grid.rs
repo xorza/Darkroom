@@ -3,7 +3,7 @@
 use crate::common::{BitBuffer2, Buffer2};
 use crate::math::median_f32_mut;
 use crate::math::sigma_clipped_median_mad;
-use crate::star_detection::config;
+use crate::star_detection::config::{self, AdaptiveSigmaConfig};
 use rayon::prelude::*;
 
 // ============================================================================
@@ -27,27 +27,6 @@ pub(crate) struct TileStats {
     pub adaptive_sigma: f32,
 }
 
-/// Configuration for adaptive sigma threshold computation.
-#[derive(Debug, Clone, Copy)]
-pub struct AdaptiveSigmaConfig {
-    /// Base sigma threshold used in low-contrast regions.
-    pub base_sigma: f32,
-    /// Maximum sigma threshold used in high-contrast regions.
-    pub max_sigma: f32,
-    /// Contrast sensitivity factor (higher = more sensitive to contrast).
-    pub contrast_factor: f32,
-}
-
-impl Default for AdaptiveSigmaConfig {
-    fn default() -> Self {
-        Self {
-            base_sigma: 4.0,
-            max_sigma: 8.0,
-            contrast_factor: 2.0,
-        }
-    }
-}
-
 /// Tile grid with precomputed centers for interpolation.
 #[derive(Debug)]
 pub(super) struct TileGrid {
@@ -55,6 +34,7 @@ pub(super) struct TileGrid {
     tile_size: usize,
     width: usize,
     height: usize,
+    has_adaptive_sigma: bool,
 }
 
 // ============================================================================
@@ -80,6 +60,7 @@ impl TileGrid {
             tile_size,
             width,
             height,
+            has_adaptive_sigma: adaptive_config.is_some(),
         };
 
         grid.fill_tile_stats(
@@ -124,6 +105,12 @@ impl TileGrid {
         let y_start = ty * self.tile_size;
         let y_end = (y_start + self.tile_size).min(self.height);
         (y_start + y_end) as f32 * 0.5
+    }
+
+    /// Returns true if adaptive sigma values were computed for this grid.
+    #[inline]
+    pub fn has_adaptive_sigma(&self) -> bool {
+        self.has_adaptive_sigma
     }
 
     /// Find the tile index whose center is at or before the given Y position.

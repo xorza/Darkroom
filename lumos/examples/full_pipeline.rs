@@ -54,9 +54,9 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use lumos::{
-    AstroImage, CalibrationMasters, FrameType, ImageStack, InterpolationMethod, MedianConfig,
-    ProgressCallback, RegistrationConfig, Registrator, SigmaClippedConfig, StackingMethod,
-    StackingProgress, StackingStage, Star, StarDetectionConfig, StarDetector,
+    AstroImage, CalibrationMasters, FilteringConfig, FrameType, ImageStack, InterpolationMethod,
+    MedianConfig, ProgressCallback, RegistrationConfig, Registrator, SigmaClippedConfig,
+    StackingMethod, StackingProgress, StackingStage, Star, StarDetectionConfig, StarDetector,
 };
 use tracing_subscriber::EnvFilter;
 
@@ -330,9 +330,14 @@ fn calibrate_light_frames(
 fn detect_stars_in_all_images(calibrated_paths: &[PathBuf]) -> Vec<Vec<Star>> {
     let start = Instant::now();
 
-    let config = StarDetectionConfig::default()
-        .with_edge_margin(20)
-        .with_min_snr(10.0);
+    let config = StarDetectionConfig {
+        filtering: FilteringConfig {
+            edge_margin: 20,
+            min_snr: 10.0,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
     let detector = StarDetector::from_config(config);
 
     let mut all_stars = Vec::with_capacity(calibrated_paths.len());

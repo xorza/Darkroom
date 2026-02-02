@@ -58,12 +58,16 @@ pub use star_detection::{
     CentroidMethod,
     // Sensor defects
     DefectMap,
+    // Sub-configs
+    FilteringConfig,
     // Advanced: profile fitting
     GaussianFitConfig,
     GaussianFitResult,
     LocalBackgroundMethod,
     MoffatFitConfig,
     MoffatFitResult,
+    NoiseModel,
+    PsfConfig,
     // Main API
     Star,
     StarDetectionConfig,

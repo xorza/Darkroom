@@ -96,11 +96,19 @@ pub struct StarDetectionDiagnostics {
 /// let result = detector.detect(&image);
 ///
 /// // With custom configuration
-/// let detector = StarDetector::new()
-///     .with_fwhm(4.0)
-///     .with_min_snr(15.0)
-///     .with_edge_margin(20)
-///     .build();
+/// let config = StarDetectionConfig {
+///     psf: PsfConfig {
+///         expected_fwhm: 4.0,
+///         ..Default::default()
+///     },
+///     filtering: FilteringConfig {
+///         min_snr: 15.0,
+///         edge_margin: 20,
+///         ..Default::default()
+///     },
+///     ..Default::default()
+/// };
+/// let detector = StarDetector::from_config(config);
 /// let result = detector.detect(&image);
 ///
 /// // Batch detection (parallel)
@@ -189,13 +197,14 @@ impl StarDetector {
         // Step 6: Post-processing
         sort_by_flux(&mut stars);
 
-        let removed = filter_fwhm_outliers(&mut stars, self.config.max_fwhm_deviation);
+        let removed = filter_fwhm_outliers(&mut stars, self.config.filtering.max_fwhm_deviation);
         diagnostics.rejected_fwhm_outliers = removed;
         if removed > 0 {
             tracing::debug!("Removed {} stars with abnormally large FWHM", removed);
         }
 
-        let removed = remove_duplicate_stars(&mut stars, self.config.duplicate_min_separation);
+        let removed =
+            remove_duplicate_stars(&mut stars, self.config.filtering.duplicate_min_separation);
         diagnostics.rejected_duplicates = removed;
         if removed > 0 {
             tracing::debug!("Removed {} duplicate star detections", removed);
@@ -217,17 +226,7 @@ impl StarDetector {
 
     /// Estimate background, optionally with adaptive thresholding.
     fn estimate_background(&self, pixels: &Buffer2<f32>) -> BackgroundMap {
-        if let Some(ref adaptive_config) = self.config.adaptive_threshold {
-            use super::background::AdaptiveSigmaConfig;
-            let adaptive = AdaptiveSigmaConfig {
-                base_sigma: adaptive_config.base_sigma,
-                max_sigma: adaptive_config.max_sigma,
-                contrast_factor: adaptive_config.contrast_factor,
-            };
-            BackgroundMap::new_with_adaptive_sigma(pixels, &self.config.background_config, adaptive)
-        } else {
-            BackgroundMap::new(pixels, &self.config.background_config)
-        }
+        BackgroundMap::new(pixels, &self.config.background)
     }
 
     /// Determine effective FWHM for matched filtering.
@@ -238,11 +237,11 @@ impl StarDetector {
         pixels: &Buffer2<f32>,
         background: &BackgroundMap,
     ) -> (f32, Option<fwhm_estimation::FwhmEstimate>) {
-        if self.config.expected_fwhm > f32::EPSILON {
-            return (self.config.expected_fwhm, None);
+        if self.config.psf.expected_fwhm > f32::EPSILON {
+            return (self.config.psf.expected_fwhm, None);
         }
 
-        if self.config.auto_estimate_fwhm {
+        if self.config.psf.auto_estimate {
             let estimate = self.estimate_fwhm_from_bright_stars(pixels, background);
             return (estimate.fwhm, Some(estimate));
         }
@@ -264,16 +263,16 @@ impl StarDetector {
             tracing::debug!(
                 "Applying matched filter with FWHM={:.1}, axis_ratio={:.2}, angle={:.1}°",
                 effective_fwhm,
-                self.config.psf_axis_ratio,
-                self.config.psf_angle.to_degrees()
+                self.config.psf.axis_ratio,
+                self.config.psf.angle.to_degrees()
             );
             let mut filtered = Buffer2::new_default(pixels.width(), pixels.height());
             matched_filter(
                 pixels,
                 &background.background,
                 effective_fwhm,
-                self.config.psf_axis_ratio,
-                self.config.psf_angle,
+                self.config.psf.axis_ratio,
+                self.config.psf.angle,
                 &mut filtered,
             );
             Some(filtered)
@@ -292,15 +291,20 @@ impl StarDetector {
         background: &BackgroundMap,
     ) -> fwhm_estimation::FwhmEstimate {
         let first_pass_config = StarDetectionConfig {
-            background_config: BackgroundConfig {
-                sigma_threshold: self.config.background_config.sigma_threshold
-                    * self.config.fwhm_estimation_sigma_factor,
-                ..self.config.background_config.clone()
+            background: BackgroundConfig {
+                sigma_threshold: self.config.background.sigma_threshold
+                    * self.config.psf.estimation_sigma_factor,
+                ..self.config.background.clone()
             },
-            expected_fwhm: 0.0,
-            adaptive_threshold: None,
-            min_area: 3,
-            min_snr: self.config.min_snr * 2.0,
+            psf: super::config::PsfConfig {
+                expected_fwhm: 0.0,
+                ..self.config.psf
+            },
+            filtering: super::config::FilteringConfig {
+                min_area: 3,
+                min_snr: self.config.filtering.min_snr * 2.0,
+                ..self.config.filtering
+            },
             ..self.config.clone()
         };
 
@@ -314,10 +318,10 @@ impl StarDetector {
 
         fwhm_estimation::estimate_fwhm(
             &stars,
-            self.config.min_stars_for_fwhm_estimation,
+            self.config.psf.min_stars_for_estimation,
             4.0,
-            self.config.max_eccentricity,
-            self.config.max_sharpness,
+            self.config.filtering.max_eccentricity,
+            self.config.filtering.max_sharpness,
         )
     }
 }
@@ -352,16 +356,16 @@ fn apply_quality_filters(
         if star.is_saturated() {
             stats.saturated += 1;
             false
-        } else if star.snr < config.min_snr {
+        } else if star.snr < config.filtering.min_snr {
             stats.low_snr += 1;
             false
-        } else if star.eccentricity > config.max_eccentricity {
+        } else if star.eccentricity > config.filtering.max_eccentricity {
             stats.high_eccentricity += 1;
             false
-        } else if star.is_cosmic_ray(config.max_sharpness) {
+        } else if star.is_cosmic_ray(config.filtering.max_sharpness) {
             stats.cosmic_rays += 1;
             false
-        } else if !star.is_round(config.max_roundness) {
+        } else if !star.is_round(config.filtering.max_roundness) {
             stats.roundness += 1;
             false
         } else {

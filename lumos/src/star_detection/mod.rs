@@ -49,9 +49,19 @@ pub mod tests;
 pub use detector::{StarDetectionDiagnostics, StarDetectionResult, StarDetector};
 
 // Configuration
+#[allow(unused_imports)] // Re-exported for public API
+pub use config::CentroidConfig;
 pub use config::CentroidMethod;
 #[allow(unused_imports)] // Re-exported for public API
 pub use config::Connectivity;
+#[allow(unused_imports)] // Re-exported for public API
+pub use config::DeblendConfig;
+#[allow(unused_imports)] // Re-exported for public API
+pub use config::FilteringConfig;
+#[allow(unused_imports)] // Re-exported for public API
+pub use config::NoiseModel;
+#[allow(unused_imports)] // Re-exported for public API
+pub use config::PsfConfig;
 pub use config::StarDetectionConfig;
 pub use defect_map::DefectMap;
 pub use star::Star;
@@ -60,8 +70,8 @@ pub use star::Star;
 pub use background::{BackgroundConfig, BackgroundMap};
 
 // Centroid methods
-pub use centroid::LocalBackgroundMethod;
 pub use centroid::{GaussianFitConfig, GaussianFitResult, fit_gaussian_2d};
 pub use centroid::{
     MoffatFitConfig, MoffatFitResult, alpha_beta_to_fwhm, fit_moffat_2d, fwhm_beta_to_alpha,
 };
+pub use config::LocalBackgroundMethod;

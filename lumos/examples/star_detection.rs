@@ -47,7 +47,8 @@ fn main() {
 
     // === Detection with wide-field preset ===
     println!("\n--- Detection with wide-field preset ---");
-    let config = StarDetectionConfig::for_wide_field().with_min_snr(15.0);
+    let mut config = StarDetectionConfig::for_wide_field();
+    config.filtering.min_snr = 15.0;
     let detector = StarDetector::from_config(config);
     let result = detector.detect(&image);
 
@@ -65,7 +66,8 @@ fn main() {
 
     // === Detection with crowded field preset ===
     println!("\n--- Detection with crowded field preset ---");
-    let config = StarDetectionConfig::for_crowded_field().with_min_snr(8.0);
+    let mut config = StarDetectionConfig::for_crowded_field();
+    config.filtering.min_snr = 8.0;
     let detector = StarDetector::from_config(config);
     let result = detector.detect(&image);
 

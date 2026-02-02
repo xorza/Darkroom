@@ -7,7 +7,7 @@ use crate::star_detection::candidate_detection::detect_stars;
 use crate::star_detection::tests::common::output::{
     gray_to_rgb_image_stretched, save_grayscale, save_image,
 };
-use crate::star_detection::{BackgroundConfig, StarDetectionConfig};
+use crate::star_detection::{BackgroundConfig, FilteringConfig, StarDetectionConfig};
 use crate::testing::init_tracing;
 use crate::testing::synthetic::{StarFieldConfig, generate_star_field, sparse_field_config};
 use common::test_utils::test_output_path;
@@ -158,7 +158,7 @@ fn test_detection_thresholds() {
     // Test different thresholds
     for sigma in [2.0, 3.0, 5.0, 10.0] {
         let det_config = StarDetectionConfig {
-            background_config: BackgroundConfig {
+            background: BackgroundConfig {
                 sigma_threshold: sigma,
                 ..Default::default()
             },
@@ -261,8 +261,11 @@ fn test_detection_area_filter() {
         (9, 200, "strict"),
     ] {
         let det_config = StarDetectionConfig {
-            min_area,
-            max_area,
+            filtering: FilteringConfig {
+                min_area,
+                max_area,
+                ..Default::default()
+            },
             ..Default::default()
         };
         let candidates = detect_stars(&pixels, None, &background, &det_config);

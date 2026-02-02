@@ -15,9 +15,52 @@ pub mod simd;
 
 use nalgebra::{DMatrix, SVD};
 use rand::prelude::*;
-use rand_chacha::ChaCha8Rng;
 
 use crate::registration::types::{StarMatch, TransformMatrix, TransformType};
+
+// Wrapper for seeded vs non-seeded RNG
+enum RngWrapper {
+    Seeded(Box<rand_chacha::ChaCha8Rng>),
+    Thread(rand::rngs::ThreadRng),
+}
+
+impl RngWrapper {
+    fn new(seed: Option<u64>) -> Self {
+        match seed {
+            Some(s) => {
+                use rand_chacha::rand_core::SeedableRng;
+                RngWrapper::Seeded(Box::new(rand_chacha::ChaCha8Rng::seed_from_u64(s)))
+            }
+            None => RngWrapper::Thread(rand::rng()),
+        }
+    }
+}
+
+impl rand::RngCore for RngWrapper {
+    fn next_u32(&mut self) -> u32 {
+        use rand_chacha::rand_core::Rng;
+        match self {
+            RngWrapper::Seeded(rng) => rng.next_u32(),
+            RngWrapper::Thread(rng) => rand::RngCore::next_u32(rng),
+        }
+    }
+
+    fn next_u64(&mut self) -> u64 {
+        use rand_chacha::rand_core::Rng;
+        match self {
+            RngWrapper::Seeded(rng) => rng.next_u64(),
+            RngWrapper::Thread(rng) => rand::RngCore::next_u64(rng),
+        }
+    }
+
+    fn fill_bytes(&mut self, dest: &mut [u8]) {
+        use rand_chacha::rand_core::Rng;
+        match self {
+            RngWrapper::Seeded(rng) => rng.fill_bytes(dest),
+            RngWrapper::Thread(rng) => rand::RngCore::fill_bytes(rng, dest),
+        }
+    }
+}
 
 /// RANSAC configuration.
 #[derive(Debug, Clone)]
@@ -99,10 +142,7 @@ impl RansacEstimator {
             return None;
         }
 
-        let mut rng: ChaCha8Rng = match self.config.seed {
-            Some(seed) => ChaCha8Rng::seed_from_u64(seed),
-            None => ChaCha8Rng::from_os_rng(),
-        };
+        let mut rng = RngWrapper::new(self.config.seed);
 
         let mut best_transform: Option<TransformMatrix> = None;
         let mut best_inliers: Vec<usize> = Vec::new();
@@ -305,10 +345,7 @@ impl RansacEstimator {
             return None;
         }
 
-        let mut rng: ChaCha8Rng = match self.config.seed {
-            Some(seed) => ChaCha8Rng::seed_from_u64(seed),
-            None => ChaCha8Rng::from_os_rng(),
-        };
+        let mut rng = RngWrapper::new(self.config.seed);
 
         // Build sorted index by confidence (descending)
         let mut sorted_indices: Vec<usize> = (0..n).collect();

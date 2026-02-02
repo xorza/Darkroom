@@ -20,9 +20,6 @@ use crate::math::{Aabb, Vec2us};
 
 pub use labeling::LabelMap;
 
-// Re-export DetectionConfig from config module
-pub use super::config::DetectionConfig;
-
 /// A candidate star region before centroid refinement.
 #[derive(Debug)]
 pub struct StarCandidate {
@@ -70,8 +67,6 @@ pub fn detect_stars(
 ) -> Vec<StarCandidate> {
     let width = pixels.width();
     let height = pixels.height();
-    let detection_config = DetectionConfig::from(config);
-    let deblend_config = DeblendConfig::from(config);
 
     // Create binary mask of above-threshold pixels
     let mut mask = BitBuffer2::new_filled(width, height, false);
@@ -98,7 +93,7 @@ pub fn detect_stars(
         create_threshold_mask_filtered(
             filtered,
             &background.noise,
-            detection_config.sigma_threshold,
+            config.background.sigma_threshold,
             &mut mask,
         );
     } else {
@@ -107,7 +102,7 @@ pub fn detect_stars(
             pixels,
             &background.background,
             &background.noise,
-            detection_config.sigma_threshold,
+            config.background.sigma_threshold,
             &mut mask,
         );
     }
@@ -120,20 +115,25 @@ pub fn detect_stars(
     std::mem::swap(&mut mask, &mut dilated);
 
     // Find connected components
-    let label_map = LabelMap::from_mask_with_connectivity(&mask, detection_config.connectivity);
+    let label_map = LabelMap::from_mask_with_connectivity(&mask, config.filtering.connectivity);
 
     // Extract candidate properties with deblending (always use original pixels for peak values)
-    let mut candidates = extract_candidates(pixels, &label_map, &deblend_config);
+    let mut candidates = extract_candidates(
+        pixels,
+        &label_map,
+        &config.deblend,
+        config.filtering.max_area,
+    );
 
     // Filter candidates
     candidates.retain(|c| {
         // Size filter
-        c.area >= detection_config.min_area
+        c.area >= config.filtering.min_area
             // Edge filter
-            && c.bbox.min.x >= detection_config.edge_margin
-            && c.bbox.min.y >= detection_config.edge_margin
-            && c.bbox.max.x < width - detection_config.edge_margin
-            && c.bbox.max.y < height - detection_config.edge_margin
+            && c.bbox.min.x >= config.filtering.edge_margin
+            && c.bbox.min.y >= config.filtering.edge_margin
+            && c.bbox.max.x < width - config.filtering.edge_margin
+            && c.bbox.max.y < height - config.filtering.edge_margin
     });
 
     candidates
@@ -145,21 +145,20 @@ pub fn detect_stars(
 /// splits them into separate candidates based on peak positions.
 /// Supports both simple local-maxima deblending and multi-threshold deblending.
 ///
-/// Components larger than `deblend_config.max_area` are skipped early to avoid
+/// Components larger than `max_area` are skipped early to avoid
 /// expensive processing of pathologically large regions (e.g., when the entire
 /// image is erroneously detected as one component due to bad thresholding).
 pub(crate) fn extract_candidates(
     pixels: &Buffer2<f32>,
     label_map: &LabelMap,
     deblend_config: &DeblendConfig,
+    max_area: usize,
 ) -> Vec<StarCandidate> {
     use rayon::prelude::*;
 
     if label_map.num_labels() == 0 {
         return Vec::new();
     }
-
-    let max_area = deblend_config.max_area;
     let component_data = collect_component_data(label_map, pixels.width(), max_area);
     let total_components = component_data.len();
 

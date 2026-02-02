@@ -21,7 +21,7 @@ StarDetector::detect()
 ├── Apply defect mask (optional)
 ├── 3x3 median filter (for CFA sensors)
 ├── BackgroundMap::new()     [Background estimation]
-│   └── or new_with_adaptive_sigma()  [Adaptive thresholding]
+│   └── with adaptive_sigma config    [Adaptive thresholding]
 ├── determine_effective_fwhm()  [Auto-estimate or manual]
 ├── matched_filter()         [SIMD Gaussian convolution]
 ├── detect_stars()           [Thresholding + CCL]
@@ -90,8 +90,14 @@ Two-pass detection with automatic FWHM estimation from bright stars:
 
 ```rust
 // Enable auto-estimation
-let config = StarDetectionConfig::default()
-    .with_auto_fwhm();
+let config = StarDetectionConfig {
+    psf: PsfConfig {
+        auto_estimate: true,
+        expected_fwhm: 0.0,  // Will be estimated
+        ..Default::default()
+    },
+    ..Default::default()
+};
 
 // Check diagnostics for estimated FWHM
 let result = detector.detect(&image);
@@ -101,9 +107,14 @@ if result.diagnostics.fwhm_was_auto_estimated {
         result.diagnostics.fwhm_estimation_star_count);
 }
 
-// Manual FWHM always takes precedence
-let config = StarDetectionConfig::default()
-    .with_fwhm(4.0);  // Manual overrides auto
+// Manual FWHM always takes precedence over auto-estimation
+let config = StarDetectionConfig {
+    psf: PsfConfig {
+        expected_fwhm: 4.0,  // Manual overrides auto
+        ..Default::default()
+    },
+    ..Default::default()
+};
 ```
 
 **Algorithm:**

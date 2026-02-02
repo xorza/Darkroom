@@ -22,9 +22,6 @@ use tile_grid::TileGrid;
 // Re-export BackgroundConfig from config module
 pub use super::config::BackgroundConfig;
 
-// Re-export AdaptiveSigmaConfig for public API
-pub use tile_grid::AdaptiveSigmaConfig;
-
 /// Background map with per-pixel background and noise estimates.
 #[derive(Debug, Clone)]
 pub struct BackgroundMap {
@@ -55,6 +52,13 @@ impl BackgroundMap {
     ///
     /// This provides cleaner background maps for crowded fields by excluding
     /// stars and other bright objects from the estimation.
+    ///
+    /// If `config.adaptive_sigma` is set, also computes per-pixel adaptive
+    /// detection thresholds based on local contrast. Use this for images
+    /// with variable nebulosity, gradients, or other complex backgrounds.
+    /// The adaptive sigma is higher in high-contrast regions (nebulae, gradients)
+    /// and lower in uniform sky regions, reducing false positives while
+    /// maintaining sensitivity in clean areas.
     pub fn new(pixels: &Buffer2<f32>, config: &BackgroundConfig) -> Self {
         config.validate();
         assert!(
@@ -68,9 +72,14 @@ impl BackgroundMap {
             None,
             0,
             config.sigma_clip_iterations,
-            None, // No adaptive thresholding during initial background estimation
+            config.adaptive_sigma,
         );
-        let mut background = interpolate_from_grid(pixels, &grid);
+
+        let mut background = if grid.has_adaptive_sigma() {
+            interpolate_from_grid_with_adaptive(pixels, &grid)
+        } else {
+            interpolate_from_grid(pixels, &grid)
+        };
 
         if config.iterations > 0 {
             refine(&mut background, pixels, config);
@@ -103,43 +112,6 @@ impl BackgroundMap {
     #[inline]
     pub fn get_noise(&self, x: usize, y: usize) -> f32 {
         self.noise[(x, y)]
-    }
-
-    /// Estimate background with adaptive sigma thresholds.
-    ///
-    /// This is similar to `new()` but also computes per-pixel adaptive
-    /// detection thresholds based on local contrast. Use this for images
-    /// with variable nebulosity, gradients, or other complex backgrounds.
-    ///
-    /// The adaptive sigma is higher in high-contrast regions (nebulae, gradients)
-    /// and lower in uniform sky regions, reducing false positives while
-    /// maintaining sensitivity in clean areas.
-    pub fn new_with_adaptive_sigma(
-        pixels: &Buffer2<f32>,
-        config: &BackgroundConfig,
-        adaptive_config: AdaptiveSigmaConfig,
-    ) -> Self {
-        config.validate();
-        assert!(
-            pixels.width() >= config.tile_size && pixels.height() >= config.tile_size,
-            "Image must be at least tile_size x tile_size"
-        );
-
-        let grid = TileGrid::new_with_options(
-            pixels,
-            config.tile_size,
-            None,
-            0,
-            config.sigma_clip_iterations,
-            Some(adaptive_config),
-        );
-        let mut background = interpolate_from_grid_with_adaptive(pixels, &grid);
-
-        if config.iterations > 0 {
-            refine(&mut background, pixels, config);
-        }
-
-        background
     }
 }
 

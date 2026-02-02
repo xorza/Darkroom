@@ -16,9 +16,15 @@ use crate::testing::synthetic::{self, StarFieldConfig};
 /// Default star detector for synthetic images.
 fn detector() -> StarDetector {
     StarDetector::from_config(StarDetectionConfig {
-        expected_fwhm: 0.0, // Disable matched filter for synthetic images
-        min_snr: 5.0,
-        background_config: BackgroundConfig {
+        psf: crate::star_detection::PsfConfig {
+            expected_fwhm: 0.0, // Disable matched filter for synthetic images
+            ..Default::default()
+        },
+        filtering: crate::star_detection::FilteringConfig {
+            min_snr: 5.0,
+            ..Default::default()
+        },
+        background: BackgroundConfig {
             sigma_threshold: 3.0,
             ..Default::default()
         },
@@ -329,9 +335,15 @@ fn test_image_registration_with_noise() {
         AstroImage::from_pixels(ImageDimensions::new(width, height, 1), target_pixels);
 
     let det = StarDetector::from_config(StarDetectionConfig {
-        expected_fwhm: 0.0,
-        min_snr: 8.0,
-        background_config: BackgroundConfig {
+        psf: crate::star_detection::PsfConfig {
+            expected_fwhm: 0.0,
+            ..Default::default()
+        },
+        filtering: crate::star_detection::FilteringConfig {
+            min_snr: 8.0,
+            ..Default::default()
+        },
+        background: BackgroundConfig {
             sigma_threshold: 4.0, // Higher threshold for noisy image
             ..Default::default()
         },

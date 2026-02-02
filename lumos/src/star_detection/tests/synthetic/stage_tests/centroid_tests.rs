@@ -4,13 +4,13 @@
 
 use crate::common::Buffer2;
 use crate::math::{Aabb, Vec2us};
-use crate::star_detection::StarDetectionConfig;
 use crate::star_detection::background::{BackgroundConfig, BackgroundMap};
 use crate::star_detection::candidate_detection::StarCandidate;
 use crate::star_detection::centroid::compute_centroid;
 use crate::star_detection::tests::common::output::{
     gray_to_rgb_image_stretched, save_grayscale, save_image,
 };
+use crate::star_detection::{PsfConfig, StarDetectionConfig};
 use crate::testing::init_tracing;
 use crate::testing::synthetic::{fwhm_to_sigma, render_gaussian_star};
 use common::test_utils::test_output_path;
@@ -82,7 +82,10 @@ fn test_centroid_accuracy() {
     // Test centroid computation for each star
     let mut errors = Vec::new();
     let config = StarDetectionConfig {
-        expected_fwhm: fwhm,
+        psf: PsfConfig {
+            expected_fwhm: fwhm,
+            ..Default::default()
+        },
         ..Default::default()
     };
 
@@ -239,7 +242,10 @@ fn test_centroid_snr() {
     let green = Color::GREEN;
 
     let config = StarDetectionConfig {
-        expected_fwhm: fwhm,
+        psf: PsfConfig {
+            expected_fwhm: fwhm,
+            ..Default::default()
+        },
         ..Default::default()
     };
 

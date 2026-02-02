@@ -27,7 +27,7 @@ use arrayvec::ArrayVec;
 use super::background::BackgroundMap;
 use super::candidate_detection::StarCandidate;
 use super::cosmic_ray::compute_laplacian_snr;
-use super::{CentroidMethod, Star, StarDetectionConfig};
+use super::{CentroidMethod, LocalBackgroundMethod, Star, StarDetectionConfig};
 use crate::common::Buffer2;
 use crate::math::FWHM_TO_SIGMA;
 
@@ -81,18 +81,6 @@ pub(crate) const CONVERGENCE_THRESHOLD_SQ: f32 =
 fn compute_stamp_radius(expected_fwhm: f32) -> usize {
     let radius = (expected_fwhm * STAMP_RADIUS_FWHM_FACTOR).ceil() as usize;
     radius.clamp(MIN_STAMP_RADIUS, MAX_STAMP_RADIUS)
-}
-
-/// Method for computing local background during centroid refinement.
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
-pub enum LocalBackgroundMethod {
-    /// Use the global background map (default, fastest).
-    #[default]
-    GlobalMap,
-    /// Compute local background using an annular region around the star.
-    /// Inner radius is based on stamp_radius, outer radius is 1.5× that.
-    /// More accurate in regions with variable nebulosity.
-    LocalAnnulus,
 }
 
 /// Check if position is within valid bounds for stamp extraction.
@@ -317,7 +305,7 @@ pub fn compute_centroid(
     let width = pixels.width();
     let height = pixels.height();
     // Compute adaptive stamp radius based on expected FWHM
-    let stamp_radius = compute_stamp_radius(config.expected_fwhm);
+    let stamp_radius = compute_stamp_radius(config.psf.expected_fwhm);
 
     // Initial position from peak
     let mut cx = candidate.peak_x as f32;
@@ -334,7 +322,7 @@ pub fn compute_centroid(
             cx,
             cy,
             stamp_radius,
-            config.expected_fwhm,
+            config.psf.expected_fwhm,
         )?;
 
         let dx = new_cx - cx;
@@ -353,7 +341,7 @@ pub fn compute_centroid(
     let idx = icy as usize * width + icx as usize;
     let global_fallback = || (background.background[idx], background.noise[idx]);
 
-    let (local_bg, local_noise) = match config.local_background_method {
+    let (local_bg, local_noise) = match config.centroid.local_background_method {
         LocalBackgroundMethod::GlobalMap => global_fallback(),
         LocalBackgroundMethod::LocalAnnulus => {
             let inner_radius = stamp_radius;
@@ -364,7 +352,7 @@ pub fn compute_centroid(
     };
 
     // Refine with profile fitting if requested
-    match config.centroid_method {
+    match config.centroid.method {
         CentroidMethod::GaussianFit => {
             let fit_config = GaussianFitConfig::default();
             if let Some(result) =
@@ -394,15 +382,12 @@ pub fn compute_centroid(
     }
 
     // Compute quality metrics
-    let metrics = compute_metrics(
-        pixels,
-        background,
-        cx,
-        cy,
-        stamp_radius,
-        config.gain,
-        config.read_noise,
-    )?;
+    let (gain, read_noise) = config
+        .noise_model
+        .as_ref()
+        .map(|nm| (Some(nm.gain), Some(nm.read_noise)))
+        .unwrap_or((None, None));
+    let metrics = compute_metrics(pixels, background, cx, cy, stamp_radius, gain, read_noise)?;
 
     // Compute L.A.Cosmic Laplacian SNR for cosmic ray detection
     let laplacian_snr_value =

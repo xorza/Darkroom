@@ -5,13 +5,15 @@
 use ::bench::quick_bench;
 use std::hint::black_box;
 
+use super::compute_centroid;
 use super::gaussian_fit::{GaussianFitConfig, fit_gaussian_2d};
 use super::moffat_fit::{MoffatFitConfig, fit_moffat_2d};
-use super::{LocalBackgroundMethod, compute_centroid};
 use crate::common::Buffer2;
 use crate::star_detection::background::{BackgroundConfig, BackgroundMap};
 use crate::star_detection::candidate_detection::detect_stars;
-use crate::star_detection::{CentroidMethod, StarDetectionConfig};
+use crate::star_detection::{
+    CentroidConfig, CentroidMethod, LocalBackgroundMethod, StarDetectionConfig,
+};
 use crate::testing::synthetic::stamps::benchmark_star_field;
 
 /// Create a synthetic Gaussian star for benchmarking.
@@ -53,7 +55,10 @@ fn bench_compute_centroid_single(b: ::bench::Bencher) {
     let candidates = detect_stars(&pixels, None, &bg, &StarDetectionConfig::default());
     let candidate = candidates.first().expect("Should detect star");
     let config = StarDetectionConfig {
-        centroid_method: CentroidMethod::WeightedMoments,
+        centroid: CentroidConfig {
+            method: CentroidMethod::WeightedMoments,
+            ..Default::default()
+        },
         ..Default::default()
     };
 
@@ -77,7 +82,10 @@ fn bench_compute_centroid_gaussian_fit(b: ::bench::Bencher) {
     let candidates = detect_stars(&pixels, None, &bg, &StarDetectionConfig::default());
     let candidate = candidates.first().expect("Should detect star");
     let config = StarDetectionConfig {
-        centroid_method: CentroidMethod::GaussianFit,
+        centroid: CentroidConfig {
+            method: CentroidMethod::GaussianFit,
+            ..Default::default()
+        },
         ..Default::default()
     };
 
@@ -101,7 +109,10 @@ fn bench_compute_centroid_moffat_fit(b: ::bench::Bencher) {
     let candidates = detect_stars(&pixels, None, &bg, &StarDetectionConfig::default());
     let candidate = candidates.first().expect("Should detect star");
     let config = StarDetectionConfig {
-        centroid_method: CentroidMethod::MoffatFit { beta: 2.5 },
+        centroid: CentroidConfig {
+            method: CentroidMethod::MoffatFit { beta: 2.5 },
+            ..Default::default()
+        },
         ..Default::default()
     };
 
@@ -125,8 +136,10 @@ fn bench_compute_centroid_local_annulus(b: ::bench::Bencher) {
     let candidates = detect_stars(&pixels, None, &bg, &StarDetectionConfig::default());
     let candidate = candidates.first().expect("Should detect star");
     let config = StarDetectionConfig {
-        centroid_method: CentroidMethod::WeightedMoments,
-        local_background_method: LocalBackgroundMethod::LocalAnnulus,
+        centroid: CentroidConfig {
+            method: CentroidMethod::WeightedMoments,
+            local_background_method: LocalBackgroundMethod::LocalAnnulus,
+        },
         ..Default::default()
     };
 
@@ -151,7 +164,10 @@ fn bench_compute_centroid_batch_100(b: ::bench::Bencher) {
     let bg = BackgroundMap::new(&pixels, &BackgroundConfig::default());
     let candidates = detect_stars(&pixels, None, &bg, &StarDetectionConfig::default());
     let config = StarDetectionConfig {
-        centroid_method: CentroidMethod::WeightedMoments,
+        centroid: CentroidConfig {
+            method: CentroidMethod::WeightedMoments,
+            ..Default::default()
+        },
         ..Default::default()
     };
 
@@ -172,15 +188,24 @@ fn bench_compute_centroid_batch_6k_10000(b: ::bench::Bencher) {
     let candidates = detect_stars(&pixels, None, &bg, &StarDetectionConfig::default());
 
     let config_moments = StarDetectionConfig {
-        centroid_method: CentroidMethod::WeightedMoments,
+        centroid: CentroidConfig {
+            method: CentroidMethod::WeightedMoments,
+            ..Default::default()
+        },
         ..Default::default()
     };
     let config_gaussian = StarDetectionConfig {
-        centroid_method: CentroidMethod::GaussianFit,
+        centroid: CentroidConfig {
+            method: CentroidMethod::GaussianFit,
+            ..Default::default()
+        },
         ..Default::default()
     };
     let config_moffat = StarDetectionConfig {
-        centroid_method: CentroidMethod::MoffatFit { beta: 2.5 },
+        centroid: CentroidConfig {
+            method: CentroidMethod::MoffatFit { beta: 2.5 },
+            ..Default::default()
+        },
         ..Default::default()
     };
 
