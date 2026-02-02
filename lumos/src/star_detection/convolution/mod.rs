@@ -130,6 +130,7 @@ pub(super) fn elliptical_gaussian_convolve(
     let (kernel, ksize) = elliptical_gaussian_kernel_2d(sigma, axis_ratio, angle);
     let radius = ksize / 2;
 
+    // Parallel SIMD 2D convolution - process rows in parallel
     parallel::par_chunks_auto_aligned(output.pixels_mut(), width).for_each(
         |(y_start, out_chunk)| {
             let rows_in_chunk = out_chunk.len() / width;
@@ -138,23 +139,17 @@ pub(super) fn elliptical_gaussian_convolve(
                 let y = y_start + local_y;
                 let out_row = &mut out_chunk[local_y * width..(local_y + 1) * width];
 
-                for (x, out_px) in out_row.iter_mut().enumerate() {
-                    let mut sum = 0.0f32;
-
-                    for ky in 0..ksize {
-                        for kx in 0..ksize {
-                            let sx = x as isize + kx as isize - radius as isize;
-                            let sy = y as isize + ky as isize - radius as isize;
-
-                            let sx = mirror_index(sx, width);
-                            let sy = mirror_index(sy, height);
-
-                            sum += pixels[sy * width + sx] * kernel[ky * ksize + kx];
-                        }
-                    }
-
-                    *out_px = sum;
-                }
+                // Use SIMD for this row
+                simd::convolve_2d_row(
+                    pixels.pixels(),
+                    out_row,
+                    width,
+                    height,
+                    y,
+                    &kernel,
+                    ksize,
+                    radius,
+                );
             }
         },
     );
@@ -213,11 +208,10 @@ pub(super) fn convolve_rows_parallel(
     );
 }
 
-/// Convolve all columns in parallel using the optimal method.
+/// Convolve all columns in parallel using direct SIMD.
 ///
-/// For smaller images (< 4M pixels), uses transpose → SIMD row convolve → transpose.
-/// For larger images, uses scalar column convolution which has better cache behavior
-/// and avoids the transpose memory overhead.
+/// Processes multiple columns simultaneously using SIMD vectors.
+/// Each SIMD lane handles a different column with row-major traversal for cache locality.
 #[cfg_attr(test, allow(dead_code))]
 pub(super) fn convolve_cols_parallel(
     input: &Buffer2<f32>,
@@ -226,138 +220,16 @@ pub(super) fn convolve_cols_parallel(
 ) {
     let width = input.width();
     let height = input.height();
-    let total_pixels = width * height;
-
-    // Threshold determined by benchmarks:
-    // - Below ~4M pixels: SIMD transpose is faster
-    // - Above ~4M pixels: scalar is faster due to transpose memory overhead
-    const SIMD_TRANSPOSE_THRESHOLD: usize = 4 * 1024 * 1024;
-
-    if total_pixels < SIMD_TRANSPOSE_THRESHOLD {
-        convolve_cols_simd_transpose_parallel(input, output, kernel);
-    } else {
-        convolve_cols_scalar_parallel(input, output, kernel);
-    }
-}
-
-/// Convolve columns using SIMD via transpose.
-///
-/// Uses the approach: transpose → row convolve (SIMD) → transpose back.
-pub(super) fn convolve_cols_simd_transpose_parallel(
-    input: &Buffer2<f32>,
-    output: &mut Buffer2<f32>,
-    kernel: &[f32],
-) {
-    let width = input.width();
-    let height = input.height();
     let radius = kernel.len() / 2;
 
-    // Transpose input (width×height → height×width)
-    let mut transposed_in = vec![0.0f32; width * height];
-    transpose_parallel(input.pixels(), &mut transposed_in, width, height);
-
-    // Convolve rows on transposed data (now columns become rows)
-    let mut transposed_out = vec![0.0f32; width * height];
-    // After transpose: dimensions are (height, width) - height rows of width elements
-    parallel::par_chunks_auto_aligned(&mut transposed_out, width).for_each(
-        |(y_start, out_chunk)| {
-            let rows_in_chunk = out_chunk.len() / width;
-
-            for local_y in 0..rows_in_chunk {
-                let y = y_start + local_y;
-                let in_row = &transposed_in[y * width..(y + 1) * width];
-                let out_row = &mut out_chunk[local_y * width..(local_y + 1) * width];
-                simd::convolve_row(in_row, out_row, kernel, radius);
-            }
-        },
+    simd::convolve_cols_direct(
+        input.pixels(),
+        output.pixels_mut(),
+        width,
+        height,
+        kernel,
+        radius,
     );
-
-    // Transpose back (height×width → width×height)
-    transpose_parallel(&transposed_out, output.pixels_mut(), height, width);
-}
-
-/// Convolve columns using scalar operations.
-///
-/// Better for large images where transpose memory overhead exceeds SIMD benefit.
-pub(super) fn convolve_cols_scalar_parallel(
-    input: &Buffer2<f32>,
-    output: &mut Buffer2<f32>,
-    kernel: &[f32],
-) {
-    let width = input.width();
-    let height = input.height();
-    let radius = kernel.len() / 2;
-
-    parallel::par_chunks_auto_aligned(output.pixels_mut(), width).for_each(
-        |(y_start, out_chunk)| {
-            let rows_in_chunk = out_chunk.len() / width;
-
-            for local_y in 0..rows_in_chunk {
-                let y = y_start + local_y;
-                let out_row = &mut out_chunk[local_y * width..(local_y + 1) * width];
-
-                for x in 0..width {
-                    let mut sum = 0.0f32;
-
-                    for (k, &kval) in kernel.iter().enumerate() {
-                        let sy = y as isize + k as isize - radius as isize;
-                        let sy = mirror_index(sy, height);
-                        sum += input[sy * width + x] * kval;
-                    }
-
-                    out_row[x] = sum;
-                }
-            }
-        },
-    );
-}
-
-/// Transpose a 2D buffer in parallel.
-///
-/// Transposes data from row-major (width×height) to column-major (height×width).
-/// Uses cache-friendly block transposition for better performance.
-fn transpose_parallel(input: &[f32], output: &mut [f32], width: usize, height: usize) {
-    use std::sync::atomic::{AtomicU32, Ordering};
-
-    const BLOCK_SIZE: usize = 64;
-
-    // Reinterpret output as atomic for safe parallel writes
-    // Safety: f32 and AtomicU32 have the same size and alignment
-    let output_atomic =
-        unsafe { std::slice::from_raw_parts(output.as_ptr() as *const AtomicU32, output.len()) };
-
-    // Process in blocks for cache efficiency
-    let block_rows = height.div_ceil(BLOCK_SIZE);
-    let block_cols = width.div_ceil(BLOCK_SIZE);
-
-    (0..block_rows * block_cols)
-        .into_par_iter()
-        .for_each(|block_idx| {
-            let block_y = block_idx / block_cols;
-            let block_x = block_idx % block_cols;
-
-            let y_start = block_y * BLOCK_SIZE;
-            let x_start = block_x * BLOCK_SIZE;
-            let y_end = (y_start + BLOCK_SIZE).min(height);
-            let x_end = (x_start + BLOCK_SIZE).min(width);
-
-            for y in y_start..y_end {
-                for x in x_start..x_end {
-                    // input[y, x] -> output[x, y]
-                    // input is width×height, output is height×width
-                    let src_idx = y * width + x;
-                    let dst_idx = x * height + y;
-                    // Safety: indices are within bounds by construction, and each
-                    // (x, y) pair maps to a unique dst_idx, so no data races
-                    unsafe {
-                        let val = *input.get_unchecked(src_idx);
-                        output_atomic
-                            .get_unchecked(dst_idx)
-                            .store(val.to_bits(), Ordering::Relaxed);
-                    }
-                }
-            }
-        });
 }
 
 /// Direct 2D Gaussian convolution for small images or large kernels.

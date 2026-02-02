@@ -113,3 +113,223 @@ pub(super) fn convolve_row_scalar(
         *out = convolve_pixel_scalar(input, kernel, radius, x, width);
     }
 }
+
+// ============================================================================
+// Column convolution dispatch
+// ============================================================================
+
+/// Convolve columns using direct SIMD when available.
+///
+/// Falls back to scalar implementation on unsupported platforms.
+#[inline]
+pub(super) fn convolve_cols_direct(
+    input: &[f32],
+    output: &mut [f32],
+    width: usize,
+    height: usize,
+    kernel: &[f32],
+    radius: usize,
+) {
+    #[cfg(target_arch = "x86_64")]
+    {
+        if cpu_features::has_avx2_fma() {
+            unsafe {
+                sse::convolve_cols_avx2(input, output, width, height, kernel, radius);
+            }
+            return;
+        }
+        if cpu_features::has_sse4_1() {
+            unsafe {
+                sse::convolve_cols_sse41(input, output, width, height, kernel, radius);
+            }
+            return;
+        }
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    {
+        unsafe {
+            neon::convolve_cols_neon(input, output, width, height, kernel, radius);
+        }
+        return;
+    }
+
+    // Scalar fallback
+    #[allow(unreachable_code)]
+    convolve_cols_scalar(input, output, width, height, kernel, radius);
+}
+
+/// Scalar implementation of column convolution.
+#[inline]
+pub(super) fn convolve_cols_scalar(
+    input: &[f32],
+    output: &mut [f32],
+    width: usize,
+    height: usize,
+    kernel: &[f32],
+    radius: usize,
+) {
+    for x in 0..width {
+        for y in 0..height {
+            let mut sum = 0.0f32;
+            for (k, &kval) in kernel.iter().enumerate() {
+                let sy = y as isize + k as isize - radius as isize;
+                let sy = mirror_index(sy, height);
+                sum += input[sy * width + x] * kval;
+            }
+            output[y * width + x] = sum;
+        }
+    }
+}
+
+// ============================================================================
+// 2D convolution dispatch
+// ============================================================================
+
+/// Apply 2D convolution using SIMD when available.
+///
+/// Falls back to scalar implementation on unsupported platforms.
+#[inline]
+#[allow(dead_code)]
+pub(super) fn convolve_2d(
+    input: &[f32],
+    output: &mut [f32],
+    width: usize,
+    height: usize,
+    kernel: &[f32],
+    ksize: usize,
+) {
+    #[cfg(target_arch = "x86_64")]
+    {
+        if cpu_features::has_avx2_fma() {
+            unsafe {
+                sse::convolve_2d_avx2(input, output, width, height, kernel, ksize);
+            }
+            return;
+        }
+        if cpu_features::has_sse4_1() {
+            unsafe {
+                sse::convolve_2d_sse41(input, output, width, height, kernel, ksize);
+            }
+            return;
+        }
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    {
+        unsafe {
+            neon::convolve_2d_neon(input, output, width, height, kernel, ksize);
+        }
+        return;
+    }
+
+    // Scalar fallback
+    #[allow(unreachable_code)]
+    convolve_2d_scalar(input, output, width, height, kernel, ksize);
+}
+
+/// Scalar implementation of 2D convolution.
+#[inline]
+#[allow(dead_code)]
+pub(super) fn convolve_2d_scalar(
+    input: &[f32],
+    output: &mut [f32],
+    width: usize,
+    height: usize,
+    kernel: &[f32],
+    ksize: usize,
+) {
+    let radius = ksize / 2;
+
+    for y in 0..height {
+        for x in 0..width {
+            let mut sum = 0.0f32;
+            for ky in 0..ksize {
+                let sy = y as isize + ky as isize - radius as isize;
+                let sy = mirror_index(sy, height);
+                for kx in 0..ksize {
+                    let sx = x as isize + kx as isize - radius as isize;
+                    let sx = mirror_index(sx, width);
+                    sum += input[sy * width + sx] * kernel[ky * ksize + kx];
+                }
+            }
+            output[y * width + x] = sum;
+        }
+    }
+}
+
+/// Convolve a single row using 2D convolution with SIMD.
+///
+/// This processes one output row at a given y coordinate.
+#[inline]
+#[allow(clippy::too_many_arguments)]
+pub(super) fn convolve_2d_row(
+    input: &[f32],
+    output_row: &mut [f32],
+    width: usize,
+    height: usize,
+    y: usize,
+    kernel: &[f32],
+    ksize: usize,
+    radius: usize,
+) {
+    #[cfg(target_arch = "x86_64")]
+    {
+        if cpu_features::has_avx2_fma() {
+            unsafe {
+                sse::convolve_2d_row_avx2(
+                    input, output_row, width, height, y, kernel, ksize, radius,
+                );
+            }
+            return;
+        }
+        if cpu_features::has_sse4_1() {
+            unsafe {
+                sse::convolve_2d_row_sse41(
+                    input, output_row, width, height, y, kernel, ksize, radius,
+                );
+            }
+            return;
+        }
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    {
+        unsafe {
+            neon::convolve_2d_row_neon(input, output_row, width, height, y, kernel, ksize, radius);
+        }
+        return;
+    }
+
+    // Scalar fallback
+    #[allow(unreachable_code)]
+    convolve_2d_row_scalar(input, output_row, width, height, y, kernel, ksize, radius);
+}
+
+/// Scalar implementation of single-row 2D convolution.
+#[inline]
+#[allow(clippy::too_many_arguments)]
+pub(super) fn convolve_2d_row_scalar(
+    input: &[f32],
+    output_row: &mut [f32],
+    width: usize,
+    height: usize,
+    y: usize,
+    kernel: &[f32],
+    ksize: usize,
+    radius: usize,
+) {
+    for (x, out_px) in output_row.iter_mut().enumerate() {
+        let mut sum = 0.0f32;
+        for ky in 0..ksize {
+            let sy = y as isize + ky as isize - radius as isize;
+            let sy = mirror_index(sy, height);
+            for kx in 0..ksize {
+                let sx = x as isize + kx as isize - radius as isize;
+                let sx = mirror_index(sx, width);
+                sum += input[sy * width + sx] * kernel[ky * ksize + kx];
+            }
+        }
+        *out_px = sum;
+    }
+}

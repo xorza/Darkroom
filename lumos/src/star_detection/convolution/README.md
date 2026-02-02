@@ -2,149 +2,110 @@
 
 Gaussian convolution for matched filtering in star detection. This module implements separable Gaussian convolution used by algorithms like DAOFIND and SExtractor to boost SNR for faint star detection.
 
-## Current Implementation
+## Performance
 
-- **Separable Convolution**: O(n×k) instead of O(n×k²) for circular Gaussians
-- **SIMD Acceleration**: AVX2/SSE on x86_64, NEON on aarch64
-- **Parallel Processing**: Row/column passes parallelized with rayon
-- **Adaptive Strategy**: Automatic selection between SIMD-transpose and scalar column convolution based on image size threshold (4M pixels)
-- **Mirror Boundary Handling**: Reflects pixels at image edges
+| Benchmark | Time | Notes |
+|-----------|------|-------|
+| Gaussian 1K | 1.8ms | Separable convolution |
+| Gaussian 4K | 23.8ms | Memory bandwidth limited |
+| Elliptical 1K | 2.8ms | Full 2D convolution |
+| Matched filter 1K circular | 2.8ms | With background subtraction |
+| Matched filter 1K elliptical | 3.3ms | With background subtraction |
+| Matched filter 4K | 33.5ms | With background subtraction |
 
-## Optimization Best Practices
+## Implementation
 
-### 1. Separable Kernels
+### Separable Convolution (Circular Gaussian)
+- O(n×k) instead of O(n×k²) where k is kernel size
+- Separate row and column passes
+- Column pass uses row-major SIMD processing for cache locality
 
-For separable kernels (Gaussian, box filters), decompose 2D convolution into two 1D passes:
-- Complexity drops from O(n×k²) to O(n×2k) where k is kernel size
-- Our implementation uses this for circular Gaussians
-- Elliptical Gaussians require full 2D convolution (not separable)
-
-### 2. SIMD Vectorization
-
-Current SIMD optimizations:
-- Process 8 pixels per iteration (AVX2) or 4 pixels (SSE/NEON)
-- Aligned memory access where possible
+### SIMD Acceleration
+- **Row convolution**: Process 8 pixels (AVX2), 4 pixels (SSE/NEON) per iteration
+- **Column convolution**: Row-major processing, loads contiguous memory for all kernel rows per output pixel
+- **2D convolution**: Per-row SIMD with parallel dispatch via rayon
+- FMA intrinsics for fused multiply-add
 - Horizontal sum via store+scalar (faster than `hadd` chains)
 
-Further SIMD improvements:
-- **Prefetching**: Use `_mm_prefetch` for upcoming rows
-- **FMA**: Use `_mm256_fmadd_ps` on supported CPUs (requires FMA feature detection)
-- **Kernel broadcasting**: Pre-broadcast kernel values to SIMD registers outside inner loop
-- **Unrolled loops**: 2x or 4x unrolling can hide latency
+### Parallel Processing
+- Row/column passes parallelized with rayon
+- 2D elliptical convolution uses parallel row dispatch
 
-### 3. Cache-Friendly Access Patterns
+### Boundary Handling
+- Mirror reflection at image edges
+- Scalar fallback at boundaries where SIMD width exceeds available pixels
 
-Current optimizations:
-- Block transposition with 64×64 blocks for column convolution
-- Row-major processing to maximize L1/L2 cache hits
+## Architecture
 
-Additional strategies:
-- **Strip mining**: Process vertical strips that fit in L2 cache
-- **Loop tiling**: Tile both passes to keep working set in cache
-- **Prefetch distance tuning**: Adjust prefetch distance based on memory latency
+### Files
+- `mod.rs`: Main convolution logic, separable and 2D convolution
+- `simd/mod.rs`: SIMD dispatch functions with runtime CPU feature detection
+- `simd/sse.rs`: AVX2 and SSE4.1 implementations
+- `simd/neon.rs`: ARM NEON implementations
 
-### 4. FFT vs Direct Convolution
+### Key Functions
+- `gaussian_convolve`: Separable convolution for circular Gaussian
+- `elliptical_gaussian_convolve`: Full 2D convolution for elliptical Gaussian
+- `matched_filter_convolve`: Convolution with background subtraction
 
-**When to use FFT (O(n log n)):**
-- Kernel size > ~15-20 for single precision
-- Fixed kernel applied to many images
-- Frequency domain operations needed anyway
+### SIMD Dispatch
+- `simd::convolve_row`: Row convolution (AVX2 → SSE → NEON → scalar fallback)
+- `simd::convolve_cols_direct`: Column convolution with row-major access
+- `simd::convolve_2d_row`: Per-row 2D convolution for elliptical kernels
 
-**When to use direct (O(n×k)):**
-- Small kernels (k < 15)
-- Variable kernel sizes
-- Memory-constrained environments (FFT needs complex buffers)
+## Design Decisions
 
-**Hybrid approaches:**
-- Overlap-add/overlap-save for streaming data
-- Winograd transforms for small fixed kernels
+### Direct SIMD Column Convolution vs Transpose
+Initially tested transpose-based column convolution (transpose → row SIMD → transpose back).
 
-### 5. Parallel Strategies
+**Result**: Direct SIMD was faster.
+- Transpose overhead exceeded SIMD benefits
+- Two full-image memory copies added latency
+- 1K images: transpose was 24% slower
+- 4K images: transpose was 6% slower
 
-Current implementation:
-- Row-parallel processing with rayon
-- Automatic chunk sizing via `par_chunks_auto_aligned`
+Current implementation uses row-major SIMD processing: iterates output row-by-row, processing 8 columns (AVX2) at a time, loading contiguous memory for each kernel row.
 
-Advanced parallelism:
-- **NUMA awareness**: Pin threads to local memory nodes for large images
-- **Work stealing**: Already provided by rayon
-- **Pipeline parallelism**: Overlap I/O with computation for streaming
+### Separate vs Fused Background Subtraction
+Tested fusing background subtraction into convolution to avoid a separate pass.
 
-### 6. Gaussian Approximations
+**Result**: Separate passes were faster.
+- Fused approach couldn't use SIMD row convolution (fell back to scalar)
+- Matched filter 1K: fused was 36% slower (3.8ms vs 2.8ms)
 
-For approximate Gaussian blur (if exact convolution not required):
+Current implementation: SIMD background subtraction followed by SIMD convolution.
 
-| Method | Complexity | Quality | Notes |
-|--------|------------|---------|-------|
-| Box blur (3-pass) | O(n) | ~97% | Sum area table or sliding window |
-| Stack blur | O(n) | ~95% | Single pass, good for real-time |
-| IIR recursive | O(n) | ~99% | Deriche/van Vliet filters |
-| Binomial filter | O(n×k) | Exact at integer σ | Limited to σ = √(k/4) |
+### Skip Near-Zero Kernel Values
+For elliptical 2D convolution, kernel values below 1e-10 are skipped. Sparse kernels (Gaussian tails) benefit from this optimization.
 
-**IIR Recursive Filters (Deriche/van Vliet):**
-- O(n) regardless of sigma
-- Forward-backward pass for zero phase
-- Coefficients precomputed from sigma
-- Caution: numerical stability at large sigma
+### Scalar Boundary Fallback
+Rather than pre-padding buffers to eliminate boundary checks, the implementation uses scalar fallback for edge pixels. Pre-padding would require:
+- Additional memory allocation
+- Rewriting all SIMD functions
+- Marginal benefit (only ~2×radius pixels per row affected)
 
-### 7. GPU Convolution
+## Benchmarking
 
-For batch processing or real-time applications:
-
-**Approaches:**
-- Texture memory with hardware interpolation
-- Shared memory tiling for compute shaders
-- Separable passes with intermediate texture
-
-**Considerations:**
-- Memory transfer overhead (CPU→GPU→CPU)
-- Occupancy optimization
-- Warp divergence at boundaries
-
-### 8. Boundary Handling
-
-Current: Mirror reflection (`mirror_index`)
-
-Options by cost:
-1. **Zero padding**: Fastest, but darkens edges
-2. **Clamp/replicate**: Fast, slight edge artifacts
-3. **Mirror/reflect**: Current choice, good quality
-4. **Wrap**: For periodic signals only
-5. **Custom**: Pre-pad buffer to avoid branch in inner loop
-
-**Pre-padding optimization:**
-```
-Pad input buffer by kernel radius, then inner loop needs no boundary checks.
-Memory overhead: 2×radius×(width+height) floats
-Benefit: Branchless inner loop, better SIMD utilization
-```
-
-## Benchmarking Notes
-
-Key benchmarks to run:
 ```bash
 cargo test -p lumos --release bench_convolve -- --ignored --nocapture
 ```
 
-Performance factors to measure:
-- Varying image sizes (1K×1K to 16K×16K)
-- Varying kernel sizes (σ = 1.0 to 5.0)
-- SIMD vs scalar throughput
-- Transpose threshold validation (currently 4M pixels)
+## Future Considerations
 
-## Future Optimization Opportunities
+### IIR Recursive Gaussian
+For sigma > 5, IIR filters (Deriche/van Vliet) become O(n) regardless of sigma. Current typical sigma is 1.5-3.0, where direct convolution is competitive.
 
-1. **Pre-padded buffers**: Eliminate boundary checks in inner loop
-2. **FMA intrinsics**: Fused multiply-add for ~2x throughput
-3. **Streaming SIMD**: Process multiple rows simultaneously
-4. **IIR filters**: O(n) alternative for large sigma values
-5. **GPU offload**: For batch processing pipelines
-6. **AVX-512**: 16 floats per iteration on supported hardware
+### AVX-512
+Would process 16 floats per iteration but has limited CPU support and can cause frequency throttling.
+
+### GPU Offload
+Makes sense for batch processing; transfer overhead too high for single images.
+
+### 4K Performance
+Large images are memory-bandwidth limited. Column pass requires strided access patterns that cannot be fully hidden by SIMD.
 
 ## References
 
 - DAOFIND algorithm (Stetson 1987)
 - SExtractor (Bertin & Arnouts 1996)
-- Deriche recursive Gaussian filter
 - Intel Intrinsics Guide for SIMD optimization
-- "Image Processing on GPU" (GPU Gems)

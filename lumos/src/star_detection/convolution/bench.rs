@@ -2,14 +2,11 @@
 
 use super::simd::convolve_row;
 use super::{
-    convolve_rows_parallel, elliptical_gaussian_convolve, gaussian_convolve, gaussian_kernel_1d,
-    matched_filter,
+    convolve_cols_parallel, convolve_rows_parallel, elliptical_gaussian_convolve,
+    gaussian_convolve, gaussian_kernel_1d, matched_filter,
 };
 use crate::common::Buffer2;
 use crate::star_detection::convolution::simd::convolve_row_scalar;
-use crate::star_detection::convolution::{
-    convolve_cols_scalar_parallel, convolve_cols_simd_transpose_parallel,
-};
 use crate::testing::synthetic::stamps::benchmark_star_field;
 use ::bench::quick_bench;
 use std::hint::black_box;
@@ -70,7 +67,7 @@ fn bench_convolve_row_large_kernel(b: ::bench::Bencher) {
     });
 }
 
-// ============ Column convolution: SIMD (transpose) vs Scalar ============
+// ============ Column convolution ============
 
 #[quick_bench(warmup_iters = 2, iters = 5)]
 fn bench_convolve_cols_1k(b: ::bench::Bencher) {
@@ -78,16 +75,8 @@ fn bench_convolve_cols_1k(b: ::bench::Bencher) {
     let kernel = gaussian_kernel_1d(2.0);
     let mut output = Buffer2::new_default(1024, 1024);
 
-    b.bench_labeled("simd_transpose", || {
-        convolve_cols_simd_transpose_parallel(
-            black_box(&pixels),
-            black_box(&mut output),
-            black_box(&kernel),
-        );
-    });
-
-    b.bench_labeled("scalar", || {
-        convolve_cols_scalar_parallel(
+    b.bench(|| {
+        convolve_cols_parallel(
             black_box(&pixels),
             black_box(&mut output),
             black_box(&kernel),
@@ -101,16 +90,8 @@ fn bench_convolve_cols_4k(b: ::bench::Bencher) {
     let kernel = gaussian_kernel_1d(2.0);
     let mut output = Buffer2::new_default(4096, 4096);
 
-    b.bench_labeled("simd_transpose", || {
-        convolve_cols_simd_transpose_parallel(
-            black_box(&pixels),
-            black_box(&mut output),
-            black_box(&kernel),
-        );
-    });
-
-    b.bench_labeled("scalar", || {
-        convolve_cols_scalar_parallel(
+    b.bench(|| {
+        convolve_cols_parallel(
             black_box(&pixels),
             black_box(&mut output),
             black_box(&kernel),
@@ -126,7 +107,7 @@ fn bench_row_vs_col_1k(b: ::bench::Bencher) {
     let kernel = gaussian_kernel_1d(2.0);
     let mut output = Buffer2::new_default(1024, 1024);
 
-    b.bench_labeled("rows_simd", || {
+    b.bench_labeled("rows", || {
         convolve_rows_parallel(
             black_box(&pixels),
             black_box(&mut output),
@@ -134,16 +115,8 @@ fn bench_row_vs_col_1k(b: ::bench::Bencher) {
         );
     });
 
-    b.bench_labeled("cols_simd_transpose", || {
-        convolve_cols_simd_transpose_parallel(
-            black_box(&pixels),
-            black_box(&mut output),
-            black_box(&kernel),
-        );
-    });
-
-    b.bench_labeled("cols_scalar", || {
-        convolve_cols_scalar_parallel(
+    b.bench_labeled("cols", || {
+        convolve_cols_parallel(
             black_box(&pixels),
             black_box(&mut output),
             black_box(&kernel),

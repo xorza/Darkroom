@@ -1,6 +1,9 @@
 //! Tests for SIMD convolution implementations.
 
-use super::{convolve_row, convolve_row_scalar};
+use super::{
+    convolve_2d_row, convolve_2d_row_scalar, convolve_cols_direct, convolve_cols_scalar,
+    convolve_row, convolve_row_scalar, mirror_index,
+};
 
 #[test]
 fn test_convolve_row_scalar_identity() {
@@ -328,5 +331,383 @@ fn test_convolve_row_edge_only() {
             output_simd[i],
             output_scalar[i]
         );
+    }
+}
+
+// ========== Mirror index tests ==========
+
+#[test]
+fn test_mirror_index_in_bounds() {
+    // In-bounds indices should pass through unchanged
+    for len in [5, 10, 100] {
+        for i in 0..len {
+            assert_eq!(mirror_index(i as isize, len), i);
+        }
+    }
+}
+
+#[test]
+fn test_mirror_index_negative() {
+    // Negative indices should reflect: -1 -> 1, -2 -> 2, etc.
+    let len = 10;
+    assert_eq!(mirror_index(-1, len), 1);
+    assert_eq!(mirror_index(-2, len), 2);
+    assert_eq!(mirror_index(-3, len), 3);
+}
+
+#[test]
+fn test_mirror_index_overflow() {
+    // Indices >= len should reflect: len -> len-2, len+1 -> len-3, etc.
+    let len = 10;
+    assert_eq!(mirror_index(10, len), 8); // 2*10-2-10 = 8
+    assert_eq!(mirror_index(11, len), 7); // 2*10-2-11 = 7
+    assert_eq!(mirror_index(12, len), 6); // 2*10-2-12 = 6
+}
+
+// ========== Column convolution tests ==========
+
+#[test]
+fn test_convolve_cols_matches_scalar() {
+    let width = 16;
+    let height = 32;
+    let input: Vec<f32> = (0..width * height)
+        .map(|i| (i as f32 * 0.1).sin())
+        .collect();
+    let kernel = vec![0.1, 0.2, 0.4, 0.2, 0.1];
+    let radius = 2;
+
+    let mut output_simd = vec![0.0f32; width * height];
+    let mut output_scalar = vec![0.0f32; width * height];
+
+    convolve_cols_direct(&input, &mut output_simd, width, height, &kernel, radius);
+    convolve_cols_scalar(&input, &mut output_scalar, width, height, &kernel, radius);
+
+    for i in 0..width * height {
+        assert!(
+            (output_simd[i] - output_scalar[i]).abs() < 1e-5,
+            "Column convolution mismatch at {}: {} vs {}",
+            i,
+            output_simd[i],
+            output_scalar[i]
+        );
+    }
+}
+
+#[test]
+fn test_convolve_cols_uniform_input() {
+    let width = 32;
+    let height = 32;
+    let input = vec![42.0f32; width * height];
+    let kernel = vec![0.1, 0.2, 0.4, 0.2, 0.1]; // Sums to 1.0
+    let radius = 2;
+
+    let mut output = vec![0.0f32; width * height];
+    convolve_cols_direct(&input, &mut output, width, height, &kernel, radius);
+
+    for (i, &v) in output.iter().enumerate() {
+        assert!(
+            (v - 42.0).abs() < 1e-5,
+            "Uniform input should stay uniform at {}: {}",
+            i,
+            v
+        );
+    }
+}
+
+#[test]
+fn test_convolve_cols_impulse_response() {
+    let width = 8;
+    let height = 16;
+    let mut input = vec![0.0f32; width * height];
+    // Single impulse at (4, 8)
+    input[8 * width + 4] = 1.0;
+
+    // Use odd-sized kernel (radius = ksize/2)
+    let kernel = vec![0.1, 0.2, 0.4, 0.2, 0.1];
+    let radius = kernel.len() / 2;
+
+    let mut output = vec![0.0f32; width * height];
+    convolve_cols_direct(&input, &mut output, width, height, &kernel, radius);
+
+    // Check vertical spread at column 4
+    // The impulse at y=8 spreads to y-radius..y+radius
+    for (ky, &kval) in kernel.iter().enumerate() {
+        let y = (8_isize + ky as isize - radius as isize) as usize;
+        assert!(
+            (output[y * width + 4] - kval).abs() < 1e-5,
+            "Impulse response at y={}: {} vs expected {}",
+            y,
+            output[y * width + 4],
+            kval
+        );
+    }
+
+    // Other columns should be zero
+    for x in 0..width {
+        if x != 4 {
+            for y in 0..height {
+                assert!(
+                    output[y * width + x].abs() < 1e-6,
+                    "Non-impulse column should be zero at ({}, {})",
+                    x,
+                    y
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn test_convolve_cols_various_sizes() {
+    for (width, height) in [(8, 8), (16, 32), (64, 16), (100, 100)] {
+        let input: Vec<f32> = (0..width * height).map(|i| i as f32 * 0.01).collect();
+        let kernel = vec![0.25, 0.5, 0.25];
+        let radius = 1;
+
+        let mut output_simd = vec![0.0f32; width * height];
+        let mut output_scalar = vec![0.0f32; width * height];
+
+        convolve_cols_direct(&input, &mut output_simd, width, height, &kernel, radius);
+        convolve_cols_scalar(&input, &mut output_scalar, width, height, &kernel, radius);
+
+        for i in 0..width * height {
+            assert!(
+                (output_simd[i] - output_scalar[i]).abs() < 1e-4,
+                "Size {}x{} mismatch at {}: {} vs {}",
+                width,
+                height,
+                i,
+                output_simd[i],
+                output_scalar[i]
+            );
+        }
+    }
+}
+
+// ========== 2D convolution tests ==========
+
+#[test]
+fn test_convolve_2d_row_matches_scalar() {
+    let width = 32;
+    let height = 32;
+    let input: Vec<f32> = (0..width * height)
+        .map(|i| (i as f32 * 0.1).sin())
+        .collect();
+
+    // 3x3 kernel
+    let ksize = 3;
+    let radius = 1;
+    let kernel = vec![
+        0.0625, 0.125, 0.0625, 0.125, 0.25, 0.125, 0.0625, 0.125, 0.0625,
+    ]; // Gaussian-like, sums to 1.0
+
+    for y in 0..height {
+        let mut output_simd = vec![0.0f32; width];
+        let mut output_scalar = vec![0.0f32; width];
+
+        convolve_2d_row(
+            &input,
+            &mut output_simd,
+            width,
+            height,
+            y,
+            &kernel,
+            ksize,
+            radius,
+        );
+        convolve_2d_row_scalar(
+            &input,
+            &mut output_scalar,
+            width,
+            height,
+            y,
+            &kernel,
+            ksize,
+            radius,
+        );
+
+        for x in 0..width {
+            assert!(
+                (output_simd[x] - output_scalar[x]).abs() < 1e-5,
+                "2D row {} mismatch at x={}: {} vs {}",
+                y,
+                x,
+                output_simd[x],
+                output_scalar[x]
+            );
+        }
+    }
+}
+
+#[test]
+fn test_convolve_2d_row_uniform() {
+    let width = 16;
+    let height = 16;
+    let input = vec![42.0f32; width * height];
+
+    // Normalized 5x5 kernel
+    let ksize = 5;
+    let radius = 2;
+    let kernel = vec![1.0 / 25.0; 25];
+
+    for y in 0..height {
+        let mut output = vec![0.0f32; width];
+        convolve_2d_row(
+            &input,
+            &mut output,
+            width,
+            height,
+            y,
+            &kernel,
+            ksize,
+            radius,
+        );
+
+        for (x, &v) in output.iter().enumerate() {
+            assert!(
+                (v - 42.0).abs() < 1e-4,
+                "Uniform input should stay uniform at row {} x {}: {}",
+                y,
+                x,
+                v
+            );
+        }
+    }
+}
+
+#[test]
+fn test_convolve_2d_row_impulse() {
+    let width = 16;
+    let height = 16;
+    let mut input = vec![0.0f32; width * height];
+    // Impulse at (8, 8)
+    input[8 * width + 8] = 1.0;
+
+    // 3x3 identity-ish kernel
+    let ksize = 3;
+    let radius = 1;
+    let kernel = vec![0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0];
+
+    let mut output = vec![0.0f32; width];
+    convolve_2d_row(
+        &input,
+        &mut output,
+        width,
+        height,
+        8,
+        &kernel,
+        ksize,
+        radius,
+    );
+
+    // Only position 8 should have value 1.0
+    assert!(
+        (output[8] - 1.0).abs() < 1e-6,
+        "Impulse should pass through"
+    );
+    for (x, &v) in output.iter().enumerate() {
+        if x != 8 {
+            assert!(v.abs() < 1e-6, "Non-impulse position should be zero");
+        }
+    }
+}
+
+#[test]
+fn test_convolve_2d_row_various_kernel_sizes() {
+    let width = 32;
+    let height = 32;
+    let input: Vec<f32> = (0..width * height).map(|i| i as f32 * 0.01).collect();
+
+    for ksize in [3, 5, 7, 9] {
+        let radius = ksize / 2;
+        let kernel: Vec<f32> = vec![1.0 / (ksize * ksize) as f32; ksize * ksize];
+
+        for y in [0, height / 2, height - 1] {
+            let mut output_simd = vec![0.0f32; width];
+            let mut output_scalar = vec![0.0f32; width];
+
+            convolve_2d_row(
+                &input,
+                &mut output_simd,
+                width,
+                height,
+                y,
+                &kernel,
+                ksize,
+                radius,
+            );
+            convolve_2d_row_scalar(
+                &input,
+                &mut output_scalar,
+                width,
+                height,
+                y,
+                &kernel,
+                ksize,
+                radius,
+            );
+
+            for x in 0..width {
+                assert!(
+                    (output_simd[x] - output_scalar[x]).abs() < 1e-4,
+                    "Kernel size {}, row {}, x {}: {} vs {}",
+                    ksize,
+                    y,
+                    x,
+                    output_simd[x],
+                    output_scalar[x]
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn test_convolve_2d_row_boundary_handling() {
+    let width = 8;
+    let height = 8;
+    let input: Vec<f32> = (0..width * height).map(|i| (i + 1) as f32).collect();
+
+    let ksize = 5;
+    let radius = 2;
+    let kernel: Vec<f32> = vec![1.0 / 25.0; 25];
+
+    // Test boundary rows
+    for y in [0, 1, height - 2, height - 1] {
+        let mut output_simd = vec![0.0f32; width];
+        let mut output_scalar = vec![0.0f32; width];
+
+        convolve_2d_row(
+            &input,
+            &mut output_simd,
+            width,
+            height,
+            y,
+            &kernel,
+            ksize,
+            radius,
+        );
+        convolve_2d_row_scalar(
+            &input,
+            &mut output_scalar,
+            width,
+            height,
+            y,
+            &kernel,
+            ksize,
+            radius,
+        );
+
+        for x in 0..width {
+            assert!(
+                (output_simd[x] - output_scalar[x]).abs() < 1e-4,
+                "Boundary row {}, x {}: {} vs {}",
+                y,
+                x,
+                output_simd[x],
+                output_scalar[x]
+            );
+            assert!(output_simd[x].is_finite(), "Output should be finite");
+        }
     }
 }
