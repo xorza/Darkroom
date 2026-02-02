@@ -23,21 +23,32 @@ pub fn median_f32_mut(data: &mut [f32]) -> f32 {
     let len = data.len();
     let mid = len / 2;
 
-    if len.is_multiple_of(2) {
-        // For even length, need both middle elements
-        let (_, right_median, _) =
-            data.select_nth_unstable_by(mid, |a, b| a.partial_cmp(b).unwrap());
-        let right = *right_median;
-        // Left median is max of left partition
-        let left = data[..mid]
-            .iter()
-            .copied()
-            .fold(f32::NEG_INFINITY, f32::max);
-        (left + right) / 2.0
-    } else {
+    if len & 1 == 1 {
+        // Odd length: single middle element
         let (_, median, _) = data.select_nth_unstable_by(mid, |a, b| a.partial_cmp(b).unwrap());
         *median
+    } else {
+        // Even length: average of two middle elements
+        // First find the right median (element at mid)
+        let (left_part, right_median, _) =
+            data.select_nth_unstable_by(mid, |a, b| a.partial_cmp(b).unwrap());
+        let right = *right_median;
+        // Left median is max of left partition (all elements < right_median)
+        let left = left_part.iter().copied().reduce(f32::max).unwrap();
+        (left + right) * 0.5
     }
+}
+
+/// Fast approximate median using single quickselect partition.
+/// For even-length arrays, returns the upper-middle element instead of averaging.
+/// This is sufficient for iterative algorithms like sigma clipping where
+/// exactness is not critical.
+#[inline]
+fn median_f32_approx(data: &mut [f32]) -> f32 {
+    debug_assert!(!data.is_empty());
+    let mid = data.len() / 2;
+    let (_, median, _) = data.select_nth_unstable_by(mid, |a, b| a.partial_cmp(b).unwrap());
+    *median
 }
 
 /// Compute MAD (Median Absolute Deviation) using a scratch buffer.
@@ -85,14 +96,14 @@ fn sigma_clip_iteration(
 
     let active = &mut values[..*len];
 
-    // Compute median
-    let median = median_f32_mut(active);
+    // Compute approximate median (faster - skips averaging for even lengths)
+    let median = median_f32_approx(active);
 
     // Compute deviations using SIMD - copy values first, then transform
     deviations[..*len].copy_from_slice(active);
     abs_deviation_inplace(&mut deviations[..*len], median);
 
-    let mad = median_f32_mut(&mut deviations[..*len]);
+    let mad = median_f32_approx(&mut deviations[..*len]);
     let sigma = mad_to_sigma(mad);
 
     if sigma < f32::EPSILON {

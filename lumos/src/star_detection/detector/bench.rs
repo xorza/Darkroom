@@ -6,9 +6,10 @@ use ::bench::quick_bench;
 use std::hint::black_box;
 
 use crate::astro_image::ImageDimensions;
+use crate::star_detection::config::BackgroundRefinement;
 use crate::testing::init_tracing;
 use crate::testing::synthetic::generate_globular_cluster;
-use crate::{AstroImage, StarDetectionConfig, StarDetector};
+use crate::{AstroImage, CentroidMethod, StarDetectionConfig, StarDetector};
 
 #[quick_bench(warmup_iters = 3, iters = 10)]
 fn bench_detect_6k_globular_cluster(b: ::bench::Bencher) {
@@ -21,6 +22,8 @@ fn bench_detect_6k_globular_cluster(b: ::bench::Bencher) {
         pixels.into_vec(),
     );
     let config = StarDetectionConfig::for_crowded_field();
+    // config.centroid.method = CentroidMethod::GaussianFit;
+    // config.background.refinement = BackgroundRefinement::Iterative { iterations: 5 };
     let mut detector = StarDetector::from_config(config);
 
     b.bench(|| black_box(detector.detect(black_box(&image))));
