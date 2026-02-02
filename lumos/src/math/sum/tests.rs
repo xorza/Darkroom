@@ -205,3 +205,81 @@ fn test_simd_vs_scalar_scale() {
         assert!((s - d).abs() < 1e-4, "scalar={}, simd={}", s, d);
     }
 }
+
+// ---------------------------------------------------------------------------
+// SIMD boundary tests (exact chunk sizes for SSE/AVX2)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_sum_f32_simd_boundaries() {
+    // Test exact SIMD chunk boundaries: 4 (SSE), 8 (AVX2), 16, 32
+    for size in [4, 8, 16, 32] {
+        let values: Vec<f32> = (1..=size).map(|x| x as f32).collect();
+        let expected: f32 = values.iter().sum();
+        let result = sum_f32(&values);
+        assert!(
+            (result - expected).abs() < 1e-4,
+            "size={}, expected={}, got={}",
+            size,
+            expected,
+            result
+        );
+    }
+}
+
+#[test]
+fn test_sum_f32_simd_boundary_minus_one() {
+    // Test one less than chunk boundaries (remainder handling)
+    for size in [3, 7, 15, 31] {
+        let values: Vec<f32> = (1..=size).map(|x| x as f32).collect();
+        let expected: f32 = values.iter().sum();
+        let result = sum_f32(&values);
+        assert!(
+            (result - expected).abs() < 1e-4,
+            "size={}, expected={}, got={}",
+            size,
+            expected,
+            result
+        );
+    }
+}
+
+#[test]
+fn test_sum_f32_simd_boundary_plus_one() {
+    // Test one more than chunk boundaries
+    for size in [5, 9, 17, 33] {
+        let values: Vec<f32> = (1..=size).map(|x| x as f32).collect();
+        let expected: f32 = values.iter().sum();
+        let result = sum_f32(&values);
+        assert!(
+            (result - expected).abs() < 1e-4,
+            "size={}, expected={}, got={}",
+            size,
+            expected,
+            result
+        );
+    }
+}
+
+#[test]
+fn test_sum_squared_diff_simd_boundaries() {
+    for size in [4, 8, 16, 32] {
+        let values: Vec<f32> = (1..=size).map(|x| x as f32).collect();
+        let mean = values.iter().sum::<f32>() / values.len() as f32;
+        let expected: f32 = values.iter().map(|v| (v - mean).powi(2)).sum();
+        let result = sum_squared_diff(&values, mean);
+        assert!(
+            (result - expected).abs() < 1e-3,
+            "size={}, expected={}, got={}",
+            size,
+            expected,
+            result
+        );
+    }
+}
+
+#[test]
+fn test_mean_f32_two_elements() {
+    let values = [3.0f32, 7.0];
+    assert!((mean_f32(&values) - 5.0).abs() < f32::EPSILON);
+}

@@ -6,6 +6,9 @@ pub mod scalar;
 mod neon;
 
 #[cfg(target_arch = "x86_64")]
+mod avx2;
+
+#[cfg(target_arch = "x86_64")]
 mod sse;
 
 /// Sum f32 values using SIMD when available.
@@ -18,6 +21,9 @@ pub fn sum_f32(values: &[f32]) -> f32 {
     }
     #[cfg(target_arch = "x86_64")]
     {
+        if values.len() >= 8 && common::cpu_features::has_avx2() {
+            return unsafe { avx2::sum_f32(values) };
+        }
         if values.len() >= 4 && common::cpu_features::has_sse4_1() {
             return unsafe { sse::sum_f32(values) };
         }
@@ -35,6 +41,9 @@ pub fn sum_squared_diff(values: &[f32], mean: f32) -> f32 {
     }
     #[cfg(target_arch = "x86_64")]
     {
+        if values.len() >= 8 && common::cpu_features::has_avx2() {
+            return unsafe { avx2::sum_squared_diff(values, mean) };
+        }
         if values.len() >= 4 && common::cpu_features::has_sse4_1() {
             return unsafe { sse::sum_squared_diff(values, mean) };
         }

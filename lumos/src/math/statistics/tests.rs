@@ -246,3 +246,94 @@ fn test_mad_to_sigma_known_value() {
     let sigma = mad_to_sigma(1.0);
     assert!((sigma - MAD_TO_SIGMA).abs() < 1e-6);
 }
+
+// ---------------------------------------------------------------------------
+// mad_f32_with_scratch edge cases
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_mad_with_scratch_single() {
+    let values = [5.0f32];
+    let mut scratch = Vec::new();
+    let mad = mad_f32_with_scratch(&values, 5.0, &mut scratch);
+    assert!(mad.abs() < f32::EPSILON);
+}
+
+#[test]
+fn test_mad_with_scratch_two_elements() {
+    let values = [2.0f32, 8.0];
+    let mut scratch = Vec::new();
+    // median of [2, 8] = 5, deviations = [3, 3], MAD = 3
+    let mad = mad_f32_with_scratch(&values, 5.0, &mut scratch);
+    assert!((mad - 3.0).abs() < 1e-6);
+}
+
+// ---------------------------------------------------------------------------
+// sigma_clipped_median_mad_arrayvec tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_sigma_clipped_arrayvec_basic() {
+    let mut values = vec![1.0f32, 2.0, 3.0, 4.0, 5.0];
+    let mut deviations: arrayvec::ArrayVec<f32, 16> = arrayvec::ArrayVec::new();
+    let (median, sigma) = sigma_clipped_median_mad_arrayvec(&mut values, &mut deviations, 3.0, 3);
+    assert!((median - 3.0).abs() < 0.1);
+    assert!(sigma > 0.0);
+}
+
+#[test]
+fn test_sigma_clipped_arrayvec_empty() {
+    let mut values: Vec<f32> = vec![];
+    let mut deviations: arrayvec::ArrayVec<f32, 16> = arrayvec::ArrayVec::new();
+    let (median, sigma) = sigma_clipped_median_mad_arrayvec(&mut values, &mut deviations, 3.0, 3);
+    assert_eq!(median, 0.0);
+    assert_eq!(sigma, 0.0);
+}
+
+#[test]
+fn test_sigma_clipped_arrayvec_single() {
+    let mut values = vec![42.0f32];
+    let mut deviations: arrayvec::ArrayVec<f32, 16> = arrayvec::ArrayVec::new();
+    let (median, sigma) = sigma_clipped_median_mad_arrayvec(&mut values, &mut deviations, 3.0, 3);
+    assert_eq!(median, 42.0);
+    assert_eq!(sigma, 0.0);
+}
+
+#[test]
+fn test_sigma_clipped_arrayvec_rejects_outliers() {
+    let mut values: Vec<f32> = vec![10.0; 12];
+    values.extend([1000.0, 2000.0]);
+    let mut deviations: arrayvec::ArrayVec<f32, 16> = arrayvec::ArrayVec::new();
+
+    let (median, sigma) = sigma_clipped_median_mad_arrayvec(&mut values, &mut deviations, 3.0, 3);
+
+    assert!((median - 10.0).abs() < 0.1);
+    assert!(sigma < 1.0);
+}
+
+#[test]
+fn test_sigma_clipped_arrayvec_uniform() {
+    let mut values = vec![5.0f32; 10];
+    let mut deviations: arrayvec::ArrayVec<f32, 16> = arrayvec::ArrayVec::new();
+    let (median, sigma) = sigma_clipped_median_mad_arrayvec(&mut values, &mut deviations, 3.0, 3);
+    assert_eq!(median, 5.0);
+    assert_eq!(sigma, 0.0);
+}
+
+#[test]
+fn test_sigma_clipped_arrayvec_matches_vec_version() {
+    let base_values: Vec<f32> = vec![1.0, 2.0, 3.0, 100.0, 4.0, 5.0, 6.0, 200.0];
+
+    let mut values_vec = base_values.clone();
+    let mut deviations_vec = Vec::new();
+    let (median_vec, sigma_vec) =
+        sigma_clipped_median_mad(&mut values_vec, &mut deviations_vec, 3.0, 3);
+
+    let mut values_arrayvec = base_values.clone();
+    let mut deviations_arrayvec: arrayvec::ArrayVec<f32, 16> = arrayvec::ArrayVec::new();
+    let (median_arrayvec, sigma_arrayvec) =
+        sigma_clipped_median_mad_arrayvec(&mut values_arrayvec, &mut deviations_arrayvec, 3.0, 3);
+
+    assert!((median_vec - median_arrayvec).abs() < 1e-6);
+    assert!((sigma_vec - sigma_arrayvec).abs() < 1e-6);
+}
