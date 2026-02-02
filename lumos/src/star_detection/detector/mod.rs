@@ -143,34 +143,35 @@ impl StarDetector {
 
         let width = image.width();
         let height = image.height();
-        let mut pixels = image.to_grayscale_buffer();
+        let mut grayscale_image = image.to_grayscale_buffer();
         let mut scratch = Buffer2::new_default(width, height);
 
         // Step 0a: Apply defect mask if provided
         if let Some(defect_map) = self.config.defect_map.as_ref()
             && !defect_map.is_empty()
         {
-            defect_map.apply(&pixels, &mut scratch);
-            std::mem::swap(&mut pixels, &mut scratch);
+            defect_map.apply(&grayscale_image, &mut scratch);
+            std::mem::swap(&mut grayscale_image, &mut scratch);
         }
 
         // Step 0b: Apply 3x3 median filter to remove Bayer pattern artifacts
         // Only applied for CFA sensors; skip for monochrome (~6ms faster on 4K images)
         if image.metadata.is_cfa {
-            median_filter_3x3(&pixels, &mut scratch);
-            std::mem::swap(&mut pixels, &mut scratch);
+            median_filter_3x3(&grayscale_image, &mut scratch);
+            std::mem::swap(&mut grayscale_image, &mut scratch);
         }
 
         drop(scratch);
 
         // Step 1: Estimate background
-        let background = BackgroundMap::new(&pixels, &self.config.background);
+        let background = BackgroundMap::new(&grayscale_image, &self.config.background);
 
         // Step 2: Determine effective FWHM (manual > auto-estimate > disabled)
-        let (effective_fwhm, fwhm_estimate) = self.determine_effective_fwhm(&pixels, &background);
+        let (effective_fwhm, fwhm_estimate) =
+            self.determine_effective_fwhm(&grayscale_image, &background);
 
         // Step 3: Detect star candidates (with optional matched filter)
-        let candidates = self.detect_candidates(&pixels, &background, effective_fwhm);
+        let candidates = self.detect_candidates(&grayscale_image, &background, effective_fwhm);
 
         let mut diagnostics = StarDetectionDiagnostics {
             candidates_after_filtering: candidates.len(),
@@ -182,7 +183,7 @@ impl StarDetector {
         tracing::debug!("Detected {} star candidates", candidates.len());
 
         // Step 4: Compute precise centroids (parallel)
-        let mut stars = compute_centroids(candidates, &pixels, &background, &self.config);
+        let mut stars = compute_centroids(candidates, &grayscale_image, &background, &self.config);
         diagnostics.stars_after_centroid = stars.len();
 
         // Step 5: Apply quality filters
