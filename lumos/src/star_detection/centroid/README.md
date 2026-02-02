@@ -6,10 +6,11 @@ This document covers sub-pixel centroid computation algorithms, quality metrics,
 
 1. [Overview](#overview)
 2. [Centroid Algorithms](#centroid-algorithms)
-3. [Profile Fitting](#profile-fitting)
-4. [Quality Metrics](#quality-metrics)
-5. [Implementation Details](#implementation-details)
-6. [References](#references)
+3. [SIMD Optimization](#simd-optimization)
+4. [Profile Fitting](#profile-fitting)
+5. [Quality Metrics](#quality-metrics)
+6. [Implementation Details](#implementation-details)
+7. [References](#references)
 
 ---
 
@@ -87,6 +88,54 @@ A robust approach used in star trackers:
 2. **Sub-pixel refinement:** Apply weighted centroid in fixed window around peak
 
 This method shows excellent noise resistance and processing speed.
+
+---
+
+## SIMD Optimization
+
+The centroid refinement inner loop is heavily optimized using SIMD vectorization.
+
+### Architecture
+
+```
+centroid/simd/
+├── mod.rs      # Dispatcher with runtime CPU feature detection
+├── scalar.rs   # Reference scalar implementation
+├── sse.rs      # SSE4.1 implementation (4 pixels/iteration)
+├── avx2.rs     # AVX2+FMA implementation (8 pixels/iteration)
+├── neon.rs     # ARM NEON implementation (4 pixels/iteration)
+└── bench.rs    # Comparison benchmarks
+```
+
+### Implementation Details
+
+**AVX2 version** processes 8 pixels per iteration:
+- `_mm256_loadu_ps` for loading pixels and backgrounds
+- Vectorized Schraudolph's `fast_exp` using `_mm256_castsi256_ps` bit reinterpretation
+- FMA instructions for weighted accumulation (`_mm256_fmadd_ps`)
+- Efficient horizontal sum using `_mm256_extractf128_ps` + SSE reductions
+
+**Runtime dispatch** selects the best available implementation:
+1. AVX2+FMA (x86_64 with CPU support)
+2. SSE4.1 (x86_64 fallback)
+3. NEON (aarch64)
+4. Scalar (universal fallback)
+
+### Performance Results
+
+| Implementation | Single Centroid | Batch (1000) | Speedup |
+|---------------|-----------------|--------------|---------|
+| Scalar        | 672ns           | 641µs        | baseline |
+| AVX2+FMA      | 391ns           | 373µs        | **1.7x** |
+
+The ~42% speedup is achieved by processing 8 pixels per iteration with fallback scalar code for remainder pixels.
+
+### Rejected Optimizations
+
+**Gaussian Weight LUT** was attempted but rejected (60% slower than `fast_exp`):
+- `fast_exp` uses Schraudolph's bit manipulation (~5 instructions)
+- LUT access has cache miss overhead
+- Linear interpolation adds computation (2 loads, 2 multiplies, 1 add)
 
 ---
 
@@ -368,6 +417,12 @@ Results are rejected if:
    - [S-curve centroiding error correction (ResearchGate)](https://www.researchgate.net/publication/261102712_S-curve_centroiding_error_correction_for_star_sensor)
    - [Centroiding Undersampled PSFs with Lookup Table (arXiv)](https://arxiv.org/html/2407.04072v1)
 
+### SIMD Optimization
+
+- [SIMD Vectorization Guide (Lei Mao)](https://leimao.github.io/blog/SSE-AVX-SIMD-Vectorization-Intrinsics/)
+- [AVX-512 Performance Analysis](https://shihab-shahriar.github.io//blog/2026/AVX-512-First-Impressions-on-Performance-and-Programmability/)
+- [Stack Overflow: SIMD Use Cases](https://stackoverflow.blog/2020/07/08/improving-performance-with-simd-intrinsics-in-three-use-cases/)
+
 ### Software Implementations
 
 1. **photutils** (Python): [Documentation](https://photutils.readthedocs.io/)
@@ -391,7 +446,13 @@ centroid/
 ├── moffat_fit.rs    # 2D Moffat fitting with L-M optimization
 ├── lm_optimizer.rs  # Shared Levenberg-Marquardt optimizer (with weighted variants)
 ├── linear_solver.rs # Generic NxN linear system solver
-├── tests.rs         # Comprehensive test suite (~90 tests)
+├── simd/            # SIMD-optimized centroid refinement
+│   ├── mod.rs       # Dispatcher with runtime CPU detection
+│   ├── scalar.rs    # Reference implementation
+│   ├── sse.rs       # SSE4.1 (4 pixels/iteration)
+│   ├── avx2.rs      # AVX2+FMA (8 pixels/iteration)
+│   ├── neon.rs      # ARM NEON (4 pixels/iteration)
+│   └── bench.rs     # Benchmarks
 └── README.md        # This file
 ```
 
