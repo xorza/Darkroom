@@ -39,6 +39,10 @@ pub unsafe fn compute_jacobian_residuals_4_fixed_beta(
     let alpha2 = alpha * alpha;
     let neg_beta = -beta;
 
+    // Precompute all reciprocals to avoid repeated divisions
+    let inv_alpha2 = 1.0 / alpha2;
+    let inv_alpha = 1.0 / alpha;
+
     // Load 4 pixel coordinates and values
     let vx = vld1q_f32(data_x.as_ptr().add(offset));
     let vy = vld1q_f32(data_y.as_ptr().add(offset));
@@ -47,23 +51,18 @@ pub unsafe fn compute_jacobian_residuals_4_fixed_beta(
     let vx0 = vdupq_n_f32(x0);
     let vy0 = vdupq_n_f32(y0);
 
-    // Compute dx, dy using SIMD
+    // Compute dx, dy using SIMD (keep in registers for later use)
     let vdx = vsubq_f32(vx, vx0);
     let vdy = vsubq_f32(vy, vy0);
 
     // Compute r^2 = dx^2 + dy^2 using SIMD with FMA
     let vr2 = vfmaq_f32(vmulq_f32(vdy, vdy), vdx, vdx);
 
-    // Store dx, dy, r^2 to compute u and call scalar powf
-    let mut dx_arr = [0.0f32; 4];
-    let mut dy_arr = [0.0f32; 4];
+    // Store only r^2 to compute u (dx/dy stay in registers)
     let mut r2_arr = [0.0f32; 4];
-    vst1q_f32(dx_arr.as_mut_ptr(), vdx);
-    vst1q_f32(dy_arr.as_mut_ptr(), vdy);
     vst1q_f32(r2_arr.as_mut_ptr(), vr2);
 
     // Compute u = 1 + r^2/alpha^2 for each pixel
-    let inv_alpha2 = 1.0 / alpha2;
     let u_arr: [f32; 4] = [
         1.0 + r2_arr[0] * inv_alpha2,
         1.0 + r2_arr[1] * inv_alpha2,
@@ -94,11 +93,10 @@ pub unsafe fn compute_jacobian_residuals_4_fixed_beta(
     let vcommon_base = vdupq_n_f32(common_scalar);
     let vcommon = vmulq_f32(vcommon_base, vu_neg_beta_m1);
 
-    // Jacobian components using SIMD
+    // Jacobian components using SIMD (use precomputed inv_alpha)
     let vj0 = vmulq_f32(vcommon, vdx); // df/dx0
     let vj1 = vmulq_f32(vcommon, vdy); // df/dy0
     let vj2 = vu_neg_beta; // df/damp
-    let inv_alpha = 1.0 / alpha;
     let vinv_alpha = vdupq_n_f32(inv_alpha);
     let vj3 = vmulq_f32(vmulq_f32(vcommon, vr2), vinv_alpha); // df/dalpha
 

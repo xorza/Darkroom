@@ -48,6 +48,10 @@ pub unsafe fn compute_jacobian_residuals_8_fixed_beta(
     let alpha2 = alpha * alpha;
     let neg_beta = -beta;
 
+    // Precompute all reciprocals to avoid repeated divisions
+    let inv_alpha2 = 1.0 / alpha2;
+    let inv_alpha = 1.0 / alpha;
+
     // Load 8 pixel coordinates and values
     let vx = _mm256_loadu_ps(data_x.as_ptr().add(offset));
     let vy = _mm256_loadu_ps(data_y.as_ptr().add(offset));
@@ -56,23 +60,18 @@ pub unsafe fn compute_jacobian_residuals_8_fixed_beta(
     let vx0 = _mm256_set1_ps(x0);
     let vy0 = _mm256_set1_ps(y0);
 
-    // Compute dx, dy using SIMD
+    // Compute dx, dy using SIMD (keep in registers for later use)
     let vdx = _mm256_sub_ps(vx, vx0);
     let vdy = _mm256_sub_ps(vy, vy0);
 
     // Compute r^2 = dx^2 + dy^2 using SIMD
     let vr2 = _mm256_fmadd_ps(vdx, vdx, _mm256_mul_ps(vdy, vdy));
 
-    // Store dx, dy, r^2 to compute u and call scalar powf
-    let mut dx_arr = [0.0f32; 8];
-    let mut dy_arr = [0.0f32; 8];
+    // Store only r^2 to compute u (dx/dy stay in registers)
     let mut r2_arr = [0.0f32; 8];
-    _mm256_storeu_ps(dx_arr.as_mut_ptr(), vdx);
-    _mm256_storeu_ps(dy_arr.as_mut_ptr(), vdy);
     _mm256_storeu_ps(r2_arr.as_mut_ptr(), vr2);
 
     // Compute u = 1 + r^2/alpha^2 for each pixel
-    let inv_alpha2 = 1.0 / alpha2;
     let u_arr: [f32; 8] = [
         1.0 + r2_arr[0] * inv_alpha2,
         1.0 + r2_arr[1] * inv_alpha2,
@@ -107,11 +106,10 @@ pub unsafe fn compute_jacobian_residuals_8_fixed_beta(
     let vcommon_base = _mm256_set1_ps(common_scalar);
     let vcommon = _mm256_mul_ps(vcommon_base, vu_neg_beta_m1);
 
-    // Jacobian components using SIMD
+    // Jacobian components using SIMD (use precomputed inv_alpha)
     let vj0 = _mm256_mul_ps(vcommon, vdx); // df/dx0
     let vj1 = _mm256_mul_ps(vcommon, vdy); // df/dy0
     let vj2 = vu_neg_beta; // df/damp
-    let inv_alpha = 1.0 / alpha;
     let vinv_alpha = _mm256_set1_ps(inv_alpha);
     let vj3 = _mm256_mul_ps(_mm256_mul_ps(vcommon, vr2), vinv_alpha); // df/dalpha
 
@@ -192,13 +190,18 @@ pub unsafe fn compute_chi2_8_fixed_beta(
     let vresidual = _mm256_sub_ps(vz, vmodel);
     let vresidual_sq = _mm256_mul_ps(vresidual, vresidual);
 
-    // Horizontal sum of 8 floats
-    let sum1 = _mm256_hadd_ps(vresidual_sq, vresidual_sq);
-    let sum2 = _mm256_hadd_ps(sum1, sum1);
-    let low = _mm256_extractf128_ps(sum2, 0);
-    let high = _mm256_extractf128_ps(sum2, 1);
-    let sum = _mm_add_ss(low, high);
-    _mm_cvtss_f32(sum)
+    // Horizontal sum of 8 floats using store+scalar sum
+    // This is faster than multiple hadd operations
+    let mut res_arr = [0.0f32; 8];
+    _mm256_storeu_ps(res_arr.as_mut_ptr(), vresidual_sq);
+    res_arr[0]
+        + res_arr[1]
+        + res_arr[2]
+        + res_arr[3]
+        + res_arr[4]
+        + res_arr[5]
+        + res_arr[6]
+        + res_arr[7]
 }
 
 /// Fill Jacobian and residuals using SIMD where possible.
