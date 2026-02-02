@@ -8,6 +8,7 @@ use std::hint::black_box;
 use super::compute_centroid;
 use super::gaussian_fit::{GaussianFitConfig, fit_gaussian_2d};
 use super::moffat_fit::{MoffatFitConfig, fit_moffat_2d};
+use super::refine_centroid;
 use crate::common::Buffer2;
 use crate::star_detection::background::{BackgroundConfig, BackgroundMap};
 use crate::star_detection::candidate_detection::detect_stars_test;
@@ -231,6 +232,60 @@ fn bench_compute_centroid_batch_6k_10000(b: ::bench::Bencher) {
             .filter_map(|c| compute_centroid(&pixels, &bg, c, &config_moffat))
             .collect();
         black_box(stars)
+    });
+}
+
+// =============================================================================
+// refine_centroid Benchmark (isolates exp() performance)
+// =============================================================================
+
+#[quick_bench(warmup_iters = 10, iters = 1000)]
+fn bench_refine_centroid_single(b: ::bench::Bencher) {
+    // Single refine_centroid call - isolates the exp() hot path
+    let width = 64;
+    let height = 64;
+    let pixels = make_gaussian_star(width, height, 32.3, 32.7, 2.5, 0.8, 0.1);
+    let bg = crate::testing::estimate_background(&pixels, BackgroundConfig::default());
+    let stamp_radius = 7; // typical for FWHM ~4
+    let expected_fwhm = 4.0;
+
+    b.bench(|| {
+        black_box(refine_centroid(
+            black_box(&*pixels),
+            black_box(width),
+            black_box(height),
+            black_box(&bg),
+            black_box(32.0),
+            black_box(32.0),
+            black_box(stamp_radius),
+            black_box(expected_fwhm),
+        ))
+    });
+}
+
+#[quick_bench(warmup_iters = 5, iters = 100)]
+fn bench_refine_centroid_batch_1000(b: ::bench::Bencher) {
+    // 1000 refine_centroid calls to amplify exp() cost
+    let width = 64;
+    let height = 64;
+    let pixels = make_gaussian_star(width, height, 32.3, 32.7, 2.5, 0.8, 0.1);
+    let bg = crate::testing::estimate_background(&pixels, BackgroundConfig::default());
+    let stamp_radius = 7;
+    let expected_fwhm = 4.0;
+
+    b.bench(|| {
+        for _ in 0..1000 {
+            black_box(refine_centroid(
+                black_box(&*pixels),
+                black_box(width),
+                black_box(height),
+                black_box(&bg),
+                black_box(32.0),
+                black_box(32.0),
+                black_box(stamp_radius),
+                black_box(expected_fwhm),
+            ));
+        }
     });
 }
 

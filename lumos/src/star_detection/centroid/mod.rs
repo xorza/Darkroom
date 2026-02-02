@@ -29,7 +29,7 @@ use super::candidate_detection::StarCandidate;
 use super::cosmic_ray::compute_laplacian_snr;
 use super::{CentroidMethod, LocalBackgroundMethod, Star, StarDetectionConfig};
 use crate::common::Buffer2;
-use crate::math::FWHM_TO_SIGMA;
+use crate::math::{FWHM_TO_SIGMA, fast_exp};
 
 // =============================================================================
 // Stamp and Centroid Constants
@@ -452,10 +452,11 @@ pub(crate) fn refine_centroid(
             let value = (pixels[idx] - background.background[idx]).max(0.0);
 
             // Gaussian weight based on distance from current centroid
+            // Using fast_exp approximation (~4% max error) for performance
             let fx = x as f32 - cx;
             let fy = y as f32 - cy;
             let dist_sq = fx * fx + fy * fy;
-            let weight = value * (-dist_sq / two_sigma_sq).exp();
+            let weight = value * fast_exp(-dist_sq / two_sigma_sq);
 
             sum_x += x as f32 * weight;
             sum_y += y as f32 * weight;
