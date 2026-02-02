@@ -212,26 +212,8 @@ impl LabelMap {
     /// * `mask` - Binary mask of foreground pixels
     /// * `connectivity` - Four (default) or Eight connectivity
     pub fn from_mask_with_connectivity(mask: &BitBuffer2, connectivity: Connectivity) -> Self {
-        let width = mask.width();
-        let height = mask.height();
-
-        let mut labels = Buffer2::new_filled(width, height, 0u32);
-
-        if width == 0 || height == 0 {
-            return Self {
-                labels,
-                num_labels: 0,
-            };
-        }
-
-        // Threshold determined by benchmark: parallel wins at ~65k pixels
-        let num_labels = if width * height < 65_000 {
-            label_mask_sequential(mask, &mut labels, connectivity)
-        } else {
-            label_mask_parallel(mask, &mut labels, connectivity)
-        };
-
-        Self { labels, num_labels }
+        let labels = Buffer2::new_filled(mask.width(), mask.height(), 0u32);
+        Self::from_buffer(mask, connectivity, labels)
     }
 
     /// Create a label map by acquiring a buffer from a pool.
@@ -241,13 +223,29 @@ impl LabelMap {
     /// * `connectivity` - Four (default) or Eight connectivity
     /// * `pool` - Buffer pool to acquire the u32 buffer from
     pub fn from_pool(mask: &BitBuffer2, connectivity: Connectivity, pool: &mut BufferPool) -> Self {
+        debug_assert_eq!(mask.width(), pool.width());
+        debug_assert_eq!(mask.height(), pool.height());
+
+        let mut labels = pool.acquire_u32();
+        // Clear the buffer (it may contain old labels)
+        labels.pixels_mut().fill(0);
+
+        Self::from_buffer(mask, connectivity, labels)
+    }
+
+    /// Core constructor that accepts mask, connectivity, and a pre-allocated buffer.
+    ///
+    /// The buffer must be zeroed and have the same dimensions as the mask.
+    fn from_buffer(
+        mask: &BitBuffer2,
+        connectivity: Connectivity,
+        mut labels: Buffer2<u32>,
+    ) -> Self {
         let width = mask.width();
         let height = mask.height();
 
-        debug_assert_eq!(width, pool.width());
-        debug_assert_eq!(height, pool.height());
-
-        let mut labels = pool.acquire_u32();
+        debug_assert_eq!(width, labels.width());
+        debug_assert_eq!(height, labels.height());
 
         if width == 0 || height == 0 {
             return Self {
@@ -255,9 +253,6 @@ impl LabelMap {
                 num_labels: 0,
             };
         }
-
-        // Clear the buffer (it may contain old labels)
-        labels.pixels_mut().fill(0);
 
         // Threshold determined by benchmark: parallel wins at ~65k pixels
         let num_labels = if width * height < 65_000 {
