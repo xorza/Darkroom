@@ -274,6 +274,122 @@ fn test_image_too_small() {
 }
 
 // =============================================================================
+// Edge Case Tests
+// =============================================================================
+
+#[test]
+fn test_single_tile_image() {
+    // Image size equals tile size - exercises tx1 == tx0 branch in interpolation
+    let size = 32;
+    let pixels = Buffer2::new(size, size, vec![0.42; size * size]);
+
+    let bg = BackgroundMap::new(
+        &pixels,
+        &BackgroundConfig {
+            tile_size: 32,
+            ..Default::default()
+        },
+    );
+
+    // All values should be constant (no interpolation needed)
+    for y in (0..size).step_by(8) {
+        for x in (0..size).step_by(8) {
+            let val = bg.background[(x, y)];
+            assert!(
+                (val - 0.42).abs() < 0.01,
+                "Background at ({}, {}) = {}, expected ~0.42",
+                x,
+                y,
+                val
+            );
+        }
+    }
+}
+
+#[test]
+fn test_noise_estimation_with_actual_noise() {
+    // Image with real noise should have non-zero sigma estimation
+    let width = 128;
+    let height = 128;
+    let mut data = vec![0.5; width * height];
+
+    // Add Gaussian-like noise pattern (deterministic for reproducibility)
+    for (i, val) in data.iter_mut().enumerate() {
+        let noise = ((i * 7919) % 1000) as f32 / 10000.0 - 0.05; // [-0.05, 0.05]
+        *val += noise;
+    }
+
+    let pixels = Buffer2::new(width, height, data);
+    let bg = BackgroundMap::new(
+        &pixels,
+        &BackgroundConfig {
+            tile_size: 32,
+            ..Default::default()
+        },
+    );
+
+    let noise = bg.noise[(64, 64)];
+    assert!(
+        noise > 0.01,
+        "Noise = {}, expected > 0.01 for noisy image",
+        noise
+    );
+    assert!(
+        noise < 0.15,
+        "Noise = {}, expected < 0.15 (not too high)",
+        noise
+    );
+}
+
+#[test]
+fn test_interpolation_smooth_at_tile_boundaries() {
+    // Verify interpolation is continuous at tile boundaries
+    let width = 128;
+    let height = 128;
+
+    // Create gradient that will have different values in each tile
+    let data: Vec<f32> = (0..height)
+        .flat_map(|y| (0..width).map(move |x| (x + y) as f32 / 256.0))
+        .collect();
+
+    let pixels = Buffer2::new(width, height, data);
+    let bg = BackgroundMap::new(
+        &pixels,
+        &BackgroundConfig {
+            tile_size: 32,
+            ..Default::default()
+        },
+    );
+
+    // Check that adjacent pixels have similar values (no discontinuities)
+    let max_jump = 0.05;
+    for y in 1..height {
+        for x in 1..width {
+            let val = bg.background[(x, y)];
+            let val_left = bg.background[(x - 1, y)];
+            let val_up = bg.background[(x, y - 1)];
+
+            assert!(
+                (val - val_left).abs() < max_jump,
+                "Discontinuity at ({}, {}): {} vs {} (left)",
+                x,
+                y,
+                val,
+                val_left
+            );
+            assert!(
+                (val - val_up).abs() < max_jump,
+                "Discontinuity at ({}, {}): {} vs {} (up)",
+                x,
+                y,
+                val,
+                val_up
+            );
+        }
+    }
+}
+
+// =============================================================================
 // Iterative Background Refinement Tests
 // =============================================================================
 
@@ -407,6 +523,46 @@ fn test_iterative_background_preserves_gradient() {
         "Gradient not preserved: corner_00={}, corner_end={}",
         corner_00,
         corner_end
+    );
+}
+
+#[test]
+fn test_iterative_background_no_dilation() {
+    // Test iterative refinement with mask_dilation = 0
+    let width = 128;
+    let height = 128;
+    let mut data = vec![0.2; width * height];
+
+    // Add a bright star
+    for dy in -3i32..=3 {
+        for dx in -3i32..=3 {
+            let x = 64 + dx;
+            let y = 64 + dy;
+            if x >= 0 && x < width as i32 && y >= 0 && y < height as i32 {
+                let dist_sq = (dx * dx + dy * dy) as f32;
+                data[y as usize * width + x as usize] += 0.7 * (-dist_sq / 2.0).exp();
+            }
+        }
+    }
+
+    let pixels = Buffer2::new(width, height, data);
+    let config = BackgroundConfig {
+        sigma_threshold: 3.0,
+        iterations: 1,
+        mask_dilation: 0, // No dilation
+        min_unmasked_fraction: 0.3,
+        tile_size: 32,
+        sigma_clip_iterations: 2,
+        adaptive_sigma: None,
+    };
+    let bg = BackgroundMap::new(&pixels, &config);
+
+    // Background away from star should be close to 0.2
+    let val = bg.background[(16, 16)];
+    assert!(
+        (val - 0.2).abs() < 0.05,
+        "Background {} should be ~0.2",
+        val
     );
 }
 
