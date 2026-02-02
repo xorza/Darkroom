@@ -57,6 +57,13 @@ const MAX_STAMP_RADIUS: usize = 15;
 /// Maximum stamp pixels (31×31 for stamp_radius=15).
 const MAX_STAMP_PIXELS: usize = (2 * MAX_STAMP_RADIUS + 1).pow(2);
 
+/// Maximum annulus outer radius (1.5 × MAX_STAMP_RADIUS, rounded up).
+const MAX_ANNULUS_OUTER_RADIUS: usize = (MAX_STAMP_RADIUS * 3).div_ceil(2); // = 23
+
+/// Maximum annulus pixels for LocalAnnulus background method.
+/// Computed as the area of a square with side 2×outer_radius+1.
+const MAX_ANNULUS_PIXELS: usize = (2 * MAX_ANNULUS_OUTER_RADIUS + 1).pow(2); // = 47² = 2209
+
 /// Centroid convergence threshold in pixels.
 ///
 /// Iteration stops when the distance moved is less than this value.
@@ -252,7 +259,8 @@ fn compute_annulus_background(
     let inner_r2 = (inner_radius * inner_radius) as f32;
     let outer_r2 = (outer_radius * outer_radius) as f32;
 
-    let mut values = Vec::with_capacity(4 * outer_radius * outer_radius);
+    // Use stack-allocated ArrayVec to avoid heap allocation
+    let mut values: ArrayVec<f32, MAX_ANNULUS_PIXELS> = ArrayVec::new();
 
     let outer_r_i32 = outer_radius as i32;
     for dy in -outer_r_i32..=outer_r_i32 {
@@ -281,10 +289,13 @@ fn compute_annulus_background(
 }
 
 /// Compute sigma-clipped median and MAD using the shared implementation.
+/// Uses stack-allocated ArrayVec for deviations to avoid heap allocation.
 #[inline]
 fn sigma_clipped_median_mad(values: &mut [f32], kappa: f32, iterations: usize) -> (f32, f32) {
-    let mut deviations = Vec::with_capacity(values.len());
-    crate::math::sigma_clipped_median_mad(values, &mut deviations, kappa, iterations)
+    let mut deviations: ArrayVec<f32, MAX_ANNULUS_PIXELS> = ArrayVec::new();
+    // Resize to match values length
+    deviations.extend(std::iter::repeat_n(0.0, values.len()));
+    crate::math::sigma_clipped_median_mad_arrayvec(values, &mut deviations, kappa, iterations)
 }
 
 /// Compute sub-pixel centroid and quality metrics for a star candidate.

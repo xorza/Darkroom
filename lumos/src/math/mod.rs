@@ -261,6 +261,89 @@ pub fn sigma_clipped_median_mad(
     (median, sigma)
 }
 
+/// Sigma-clipped median and MAD computation using ArrayVec for zero heap allocation.
+///
+/// This is identical to `sigma_clipped_median_mad` but works with ArrayVec
+/// instead of Vec for the deviations buffer, enabling stack allocation.
+///
+/// # Arguments
+/// * `values` - Mutable slice of values (will be reordered)
+/// * `deviations` - Pre-sized ArrayVec scratch buffer for deviations
+/// * `kappa` - Number of sigma for clipping threshold
+/// * `iterations` - Number of clipping iterations
+///
+/// # Returns
+/// Tuple of (median, sigma) after clipping
+pub fn sigma_clipped_median_mad_arrayvec<const N: usize>(
+    values: &mut [f32],
+    deviations: &mut arrayvec::ArrayVec<f32, N>,
+    kappa: f32,
+    iterations: usize,
+) -> (f32, f32) {
+    if values.is_empty() {
+        return (0.0, 0.0);
+    }
+
+    let mut len = values.len();
+
+    for _ in 0..iterations {
+        if len < 3 {
+            break;
+        }
+
+        let active = &mut values[..len];
+
+        // Compute median
+        let median = median_f32_mut(active);
+
+        // Compute deviations - reuse for both MAD and clipping
+        deviations.clear();
+        for v in active.iter() {
+            deviations.push((v - median).abs());
+        }
+        let mad = median_f32_mut(deviations.as_mut_slice());
+        let sigma = mad_to_sigma(mad);
+
+        if sigma < f32::EPSILON {
+            return (median, 0.0);
+        }
+
+        // Clip values outside threshold, using already-computed deviations
+        let threshold = kappa * sigma;
+        let mut write_idx = 0;
+        for i in 0..len {
+            if deviations[i] <= threshold {
+                values[write_idx] = values[i];
+                write_idx += 1;
+            }
+        }
+
+        if write_idx == len {
+            // Converged - no values clipped, current stats are final
+            return (median, sigma);
+        }
+
+        len = write_idx;
+    }
+
+    // Compute final statistics after all iterations
+    let active = &mut values[..len];
+    if active.is_empty() {
+        return (0.0, 0.0);
+    }
+
+    let median = median_f32_mut(active);
+
+    deviations.clear();
+    for v in active.iter() {
+        deviations.push((v - median).abs());
+    }
+    let mad = median_f32_mut(deviations.as_mut_slice());
+    let sigma = mad_to_sigma(mad);
+
+    (median, sigma)
+}
+
 // =============================================================================
 // Tests
 // =============================================================================
