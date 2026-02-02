@@ -17,6 +17,7 @@ use crate::common::{BitBuffer2, Buffer2};
 use common::parallel;
 use rayon::iter::ParallelIterator;
 
+use super::buffer_pool::BufferPool;
 use tile_grid::TileGrid;
 
 // Re-export BackgroundConfig from config module
@@ -36,9 +37,10 @@ pub struct BackgroundMap {
 }
 
 impl BackgroundMap {
-    /// Create an uninitialized BackgroundMap with pre-allocated buffers.
+    /// Create an uninitialized BackgroundMap with given dimensions.
     ///
-    /// Use this with `estimate` to reuse allocations across multiple images.
+    /// Buffers are allocated but not filled with meaningful values.
+    /// Use `estimate` to populate them.
     pub fn new_uninit(width: usize, height: usize, with_adaptive: bool) -> Self {
         Self {
             background: Buffer2::new_default(width, height),
@@ -48,6 +50,28 @@ impl BackgroundMap {
             } else {
                 None
             },
+        }
+    }
+
+    /// Create a BackgroundMap by acquiring buffers from a pool.
+    pub fn from_pool(pool: &mut BufferPool, with_adaptive: bool) -> Self {
+        Self {
+            background: pool.acquire_f32(),
+            noise: pool.acquire_f32(),
+            adaptive_sigma: if with_adaptive {
+                Some(pool.acquire_f32())
+            } else {
+                None
+            },
+        }
+    }
+
+    /// Release this BackgroundMap's buffers back to the pool.
+    pub fn release_to_pool(self, pool: &mut BufferPool) {
+        pool.release_f32(self.background);
+        pool.release_f32(self.noise);
+        if let Some(adaptive) = self.adaptive_sigma {
+            pool.release_f32(adaptive);
         }
     }
 

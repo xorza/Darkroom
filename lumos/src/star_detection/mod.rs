@@ -24,6 +24,7 @@
 // =============================================================================
 
 pub(crate) mod background;
+mod buffer_pool;
 pub(crate) mod candidate_detection;
 mod centroid;
 mod config;
@@ -46,6 +47,7 @@ pub mod tests;
 // =============================================================================
 
 // Main detector types
+pub use buffer_pool::BufferPool;
 pub use detector::{StarDetectionDiagnostics, StarDetectionResult, StarDetector};
 
 // Configuration

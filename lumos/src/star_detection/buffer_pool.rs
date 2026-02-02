@@ -4,7 +4,6 @@
 //! when processing multiple images of the same dimensions.
 
 use crate::common::{BitBuffer2, Buffer2};
-use crate::star_detection::background::BackgroundMap;
 
 /// Pool of reusable buffers for star detection.
 ///
@@ -20,8 +19,6 @@ pub struct BufferPool {
     bit_buffers: Vec<BitBuffer2>,
     /// Single u32 buffer for label map (only one needed at a time)
     u32_buffer: Option<Buffer2<u32>>,
-    /// Pre-allocated BackgroundMap (reused across detections)
-    background_map: Option<BackgroundMap>,
 }
 
 impl BufferPool {
@@ -33,7 +30,6 @@ impl BufferPool {
             f32_buffers: Vec::new(),
             bit_buffers: Vec::new(),
             u32_buffer: None,
-            background_map: None,
         }
     }
 
@@ -108,28 +104,11 @@ impl BufferPool {
         self.u32_buffer = Some(buffer);
     }
 
-    /// Acquire a mutable reference to the background map, creating it if needed.
-    ///
-    /// The `with_adaptive` parameter indicates whether adaptive sigma is needed.
-    pub fn acquire_background_map(&mut self, with_adaptive: bool) -> &mut BackgroundMap {
-        self.background_map.get_or_insert_with(|| {
-            BackgroundMap::new_uninit(self.width, self.height, with_adaptive)
-        })
-    }
-
-    /// Get an immutable reference to the background map.
-    ///
-    /// Returns `None` if the background map hasn't been acquired yet.
-    pub fn background_map(&self) -> Option<&BackgroundMap> {
-        self.background_map.as_ref()
-    }
-
     /// Clear all pooled buffers, freeing memory.
     pub fn clear(&mut self) {
         self.f32_buffers.clear();
         self.bit_buffers.clear();
         self.u32_buffer = None;
-        self.background_map = None;
     }
 
     /// Reset the pool for new dimensions, clearing all buffers.

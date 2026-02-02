@@ -5,7 +5,6 @@
 
 #[cfg(test)]
 mod bench;
-mod buffer_pool;
 #[cfg(test)]
 mod tests;
 
@@ -17,6 +16,7 @@ use crate::astro_image::AstroImage;
 use crate::common::Buffer2;
 
 use super::background::{BackgroundConfig, BackgroundMap};
+use super::buffer_pool::BufferPool;
 use super::candidate_detection::{self, detect_stars};
 use super::centroid::compute_centroid;
 use super::config::StarDetectionConfig;
@@ -24,8 +24,6 @@ use super::convolution::matched_filter;
 use super::fwhm_estimation;
 use super::median_filter::median_filter_3x3;
 use super::star::Star;
-
-pub use buffer_pool::BufferPool;
 
 /// Result of star detection with diagnostics.
 #[derive(Debug, Clone)]
@@ -194,16 +192,13 @@ impl StarDetector {
             std::mem::swap(&mut grayscale_image, &mut scratch);
         }
 
-        // Step 1: Estimate background using pooled BackgroundMap
+        // Step 1: Estimate background using pooled buffers
         let has_adaptive = self.config.background.adaptive_sigma.is_some();
         let has_iterations = self.config.background.iterations > 0;
 
-        // Estimate background
-        {
-            let pool = self.buffer_pool.as_mut().unwrap();
-            let background = pool.acquire_background_map(has_adaptive);
-            background.estimate(&grayscale_image, &self.config.background);
-        }
+        let pool = self.buffer_pool.as_mut().unwrap();
+        let mut background = BackgroundMap::from_pool(pool, has_adaptive);
+        background.estimate(&grayscale_image, &self.config.background);
 
         // Refine background if iterations requested
         if has_iterations {
@@ -211,33 +206,26 @@ impl StarDetector {
             let mut mask = pool.acquire_bit();
             let mut scratch_bit = pool.acquire_bit();
 
-            {
-                let pool = self.buffer_pool.as_mut().unwrap();
-                let background = pool.acquire_background_map(has_adaptive);
-                background.refine(
-                    &grayscale_image,
-                    &self.config.background,
-                    &mut mask,
-                    &mut scratch_bit,
-                );
-            }
+            background.refine(
+                &grayscale_image,
+                &self.config.background,
+                &mut mask,
+                &mut scratch_bit,
+            );
 
             let pool = self.buffer_pool.as_mut().unwrap();
             pool.release_bit(mask);
             pool.release_bit(scratch_bit);
         }
 
-        // Re-borrow background as immutable for the rest of detection
-        let background = self.buffer_pool.as_ref().unwrap().background_map().unwrap();
-
         // Step 2: Determine effective FWHM (manual > auto-estimate > disabled)
         let (effective_fwhm, fwhm_estimate) =
-            self.determine_effective_fwhm(&grayscale_image, background);
+            self.determine_effective_fwhm(&grayscale_image, &background);
 
         // Step 3: Detect star candidates (with optional matched filter)
         // Reuse scratch buffer for matched filter output
         let candidates =
-            self.detect_candidates(&grayscale_image, background, effective_fwhm, &mut scratch);
+            self.detect_candidates(&grayscale_image, &background, effective_fwhm, &mut scratch);
 
         let mut diagnostics = StarDetectionDiagnostics {
             candidates_after_filtering: candidates.len(),
@@ -249,7 +237,7 @@ impl StarDetector {
         tracing::debug!("Detected {} star candidates", candidates.len());
 
         // Step 4: Compute precise centroids (parallel)
-        let mut stars = compute_centroids(candidates, &grayscale_image, background, &self.config);
+        let mut stars = compute_centroids(candidates, &grayscale_image, &background, &self.config);
         diagnostics.stars_after_centroid = stars.len();
 
         // Step 5: Apply quality filters
@@ -289,6 +277,7 @@ impl StarDetector {
 
         // Release buffers back to pool
         let pool = self.buffer_pool.as_mut().unwrap();
+        background.release_to_pool(pool);
         pool.release_f32(grayscale_image);
         pool.release_f32(scratch);
 
