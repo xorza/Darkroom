@@ -1,6 +1,6 @@
-//! Test star detection on dense4.png real image.
+//! Test star detection on rho-opiuchi.jpg real image.
 //!
-//! Run with: `cargo test -p lumos --features real-data dense4 -- --ignored --nocapture`
+//! Run with: `cargo test -p lumos --features real-data rho_opiuchi -- --ignored --nocapture`
 
 use crate::AstroImage;
 use crate::CentroidMethod;
@@ -15,38 +15,9 @@ use imaginarium::Color;
 use imaginarium::ColorFormat;
 use imaginarium::drawing::draw_circle;
 
-#[test]
-#[ignore] // Requires LUMOS_CALIBRATION_DIR
-fn test_detect_rho_opiuchi() {
-    init_tracing();
-
-    let Some(cal_dir) = calibration_dir() else {
-        eprintln!("LUMOS_CALIBRATION_DIR not set, skipping test");
-        return;
-    };
-
-    let image_path = cal_dir.join("rho-opiuchi.jpg");
-    if !image_path.exists() {
-        panic!("rho-opiuchi.jpg not found in {:?}", cal_dir);
-    }
-
-    println!("Loading: {:?}", image_path);
-
-    let img = imaginarium::Image::read_file(&image_path)
-        .expect("Failed to load image")
-        .packed()
-        .convert(ColorFormat::L_F32)
-        .expect("Failed to convert to grayscale");
-
-    let astro_image: AstroImage = img.into();
-    println!(
-        "Image size: {}x{}",
-        astro_image.width(),
-        astro_image.height()
-    );
-
-    // Config optimized for Rho Ophiuchi: nebulosity + dense star field (M4 cluster)
-    let config = StarDetectionConfig {
+/// Config optimized for Rho Ophiuchi: nebulosity + dense star field (M4 cluster)
+fn rho_opiuchi_config() -> StarDetectionConfig {
+    StarDetectionConfig {
         background: BackgroundConfig {
             sigma_threshold: 3.0,
             mask_dilation: 5,
@@ -91,9 +62,40 @@ fn test_detect_rho_opiuchi() {
         },
         noise_model: None,
         defect_map: None,
+    }
+}
+
+#[test]
+#[ignore] // Requires LUMOS_CALIBRATION_DIR
+fn test_detect_rho_opiuchi() {
+    init_tracing();
+
+    let Some(cal_dir) = calibration_dir() else {
+        eprintln!("LUMOS_CALIBRATION_DIR not set, skipping test");
+        return;
     };
 
-    let mut detector = StarDetector::from_config(config);
+    let image_path = cal_dir.join("rho-opiuchi.jpg");
+    if !image_path.exists() {
+        panic!("rho-opiuchi.jpg not found in {:?}", cal_dir);
+    }
+
+    println!("Loading: {:?}", image_path);
+
+    let img = imaginarium::Image::read_file(&image_path)
+        .expect("Failed to load image")
+        .packed()
+        .convert(ColorFormat::L_F32)
+        .expect("Failed to convert to grayscale");
+
+    let astro_image: AstroImage = img.into();
+    println!(
+        "Image size: {}x{}",
+        astro_image.width(),
+        astro_image.height()
+    );
+
+    let mut detector = StarDetector::from_config(rho_opiuchi_config());
 
     let start = std::time::Instant::now();
     let result = detector.detect(&astro_image);
@@ -155,4 +157,35 @@ fn test_detect_rho_opiuchi() {
         !result.stars.is_empty(),
         "Should find stars in rho-opiuchi.jpg"
     );
+}
+
+#[bench::quick_bench(warmup_iters = 1, iters = 10)]
+fn quick_bench_detect_rho_opiuchi(b: bench::Bencher) {
+    let Some(cal_dir) = calibration_dir() else {
+        eprintln!("LUMOS_CALIBRATION_DIR not set, skipping bench");
+        return;
+    };
+
+    let image_path = cal_dir.join("rho-opiuchi.jpg");
+    if !image_path.exists() {
+        panic!("rho-opiuchi.jpg not found in {:?}", cal_dir);
+    }
+
+    // Preload image outside of benchmark loop
+    let img = imaginarium::Image::read_file(&image_path)
+        .expect("Failed to load image")
+        .packed()
+        .convert(ColorFormat::L_F32)
+        .expect("Failed to convert to grayscale");
+
+    let astro_image: AstroImage = img.into();
+    println!(
+        "Image size: {}x{}",
+        astro_image.width(),
+        astro_image.height()
+    );
+
+    let mut detector = StarDetector::from_config(rho_opiuchi_config());
+
+    b.bench(|| detector.detect(&astro_image));
 }
