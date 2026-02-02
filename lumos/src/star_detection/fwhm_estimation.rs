@@ -73,7 +73,7 @@ pub fn estimate_fwhm(
         };
     }
 
-    // Scratch buffer for MAD computation (reused to avoid allocations)
+    // Scratch buffer for MAD computation (reused across calls)
     let mut scratch = Vec::with_capacity(fwhms.len());
 
     // Compute median and MAD for outlier rejection
@@ -88,10 +88,8 @@ pub fn estimate_fwhm(
     // If too many rejected, use pre-rejection median
     if fwhms.len() < min_stars {
         tracing::debug!(
-            "Too many outliers rejected ({} -> {}), using pre-rejection median {:.2}",
-            count_before,
+            "Too many outliers rejected ({count_before} -> {}), using pre-rejection median {median:.2}",
             fwhms.len(),
-            median
         );
         return FwhmEstimate {
             fwhm: median,
@@ -106,9 +104,7 @@ pub fn estimate_fwhm(
     let final_mad = mad_f32_with_scratch(&fwhms, final_median, &mut scratch);
 
     tracing::info!(
-        "Estimated FWHM: {:.2} pixels (MAD: {:.2}, from {} stars)",
-        final_median,
-        final_mad,
+        "Estimated FWHM: {final_median:.2} pixels (MAD: {final_mad:.2}, from {} stars)",
         fwhms.len()
     );
 
