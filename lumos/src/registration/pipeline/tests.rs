@@ -37,7 +37,7 @@ fn generate_star_grid(
     stars
 }
 
-fn transform_stars(stars: &[(f64, f64)], transform: &TransformMatrix) -> Vec<(f64, f64)> {
+fn transform_stars(stars: &[(f64, f64)], transform: &Transform) -> Vec<(f64, f64)> {
     stars.iter().map(|&(x, y)| transform.apply(x, y)).collect()
 }
 
@@ -59,7 +59,7 @@ fn test_registration_identity() {
 #[test]
 fn test_registration_translation() {
     let ref_stars = generate_star_grid(5, 5, 100.0, (100.0, 100.0));
-    let translation = TransformMatrix::translation(50.0, -30.0);
+    let translation = Transform::translation(50.0, -30.0);
     let target_stars = transform_stars(&ref_stars, &translation);
 
     let result =
@@ -73,7 +73,7 @@ fn test_registration_translation() {
 #[test]
 fn test_registration_rotation() {
     let ref_stars = generate_star_grid(5, 5, 100.0, (200.0, 200.0));
-    let rotation = TransformMatrix::euclidean(10.0, -5.0, 0.1); // ~5.7 degrees
+    let rotation = Transform::euclidean(10.0, -5.0, 0.1); // ~5.7 degrees
     let target_stars = transform_stars(&ref_stars, &rotation);
 
     let result =
@@ -90,7 +90,7 @@ fn test_registration_rotation() {
 #[test]
 fn test_registration_similarity() {
     let ref_stars = generate_star_grid(5, 5, 100.0, (200.0, 200.0));
-    let similarity = TransformMatrix::similarity(20.0, 15.0, 0.05, 1.02);
+    let similarity = Transform::similarity(20.0, 15.0, 0.05, 1.02);
     let target_stars = transform_stars(&ref_stars, &similarity);
 
     let result =
@@ -107,7 +107,7 @@ fn test_registration_similarity() {
 #[test]
 fn test_registration_with_outliers() {
     let ref_stars = generate_star_grid(6, 6, 80.0, (100.0, 100.0));
-    let translation = TransformMatrix::translation(25.0, 40.0);
+    let translation = Transform::translation(25.0, 40.0);
     let mut target_stars = transform_stars(&ref_stars, &translation);
 
     // Add outliers (wrong matches)
@@ -167,7 +167,7 @@ fn test_warp_to_reference_image() {
 
     // Transform maps reference -> target: ref(32,32) -> target(37,35)
     // So translation is (5, 3)
-    let transform = TransformMatrix::translation(5.0, 3.0);
+    let transform = Transform::translation(5.0, 3.0);
 
     // warp_to_reference_image should align target to reference frame
     // The pixel at target(37,35) should appear at reference(32,32) after warping
@@ -210,7 +210,7 @@ fn test_warp_to_reference_image_roundtrip() {
     }
 
     // Define transform: reference -> target
-    let transform = TransformMatrix::similarity(10.0, -5.0, 0.1, 1.02);
+    let transform = Transform::similarity(10.0, -5.0, 0.1, 1.02);
 
     // Create target image by warping reference with the transform
     // (simulates what the camera would see if shifted/rotated)
@@ -283,7 +283,7 @@ fn test_warp_to_reference_image_end_to_end() {
     let ref_pixels = generate_synthetic_star_image(width, height, &ref_stars, 1.0, 4.0);
 
     // Apply known transform to star positions
-    let known_transform = TransformMatrix::similarity(12.0, -8.0, 0.05, 1.01);
+    let known_transform = Transform::similarity(12.0, -8.0, 0.05, 1.01);
     let target_stars = transform_stars(&ref_stars, &known_transform);
 
     // Create target image with transformed star positions
@@ -357,7 +357,7 @@ fn test_warp_to_reference_image_end_to_end() {
 #[test]
 fn test_quick_register() {
     let ref_stars = generate_star_grid(4, 4, 150.0, (100.0, 100.0));
-    let translation = TransformMatrix::translation(10.0, -15.0);
+    let translation = Transform::translation(10.0, -15.0);
     let target_stars = transform_stars(&ref_stars, &translation);
 
     let transform = quick_register(&ref_stars, &target_stars).unwrap();
@@ -384,7 +384,7 @@ fn test_registration_result_quality() {
 fn test_registration_large_rotation() {
     let ref_stars = generate_star_grid(5, 5, 100.0, (250.0, 250.0));
     // 30 degree rotation around image center
-    let rotation = TransformMatrix::rotation_around(300.0, 300.0, PI / 6.0);
+    let rotation = Transform::rotation_around(300.0, 300.0, PI / 6.0);
     let target_stars = transform_stars(&ref_stars, &rotation);
 
     let result =
@@ -445,7 +445,7 @@ fn test_pipeline_ground_truth_synthetic() {
     let ref_stars = generate_star_grid(6, 6, 35.0, (30.0, 30.0));
 
     // Apply known transform
-    let known_transform = TransformMatrix::similarity(15.0, -10.0, 0.05, 1.02);
+    let known_transform = Transform::similarity(15.0, -10.0, 0.05, 1.02);
     let target_stars = transform_stars(&ref_stars, &known_transform);
 
     // Create synthetic images
@@ -510,7 +510,7 @@ fn test_pipeline_ground_truth_synthetic() {
 fn test_pipeline_partial_overlap() {
     // Stars with large translation (50% overlap)
     let ref_stars = generate_star_grid(6, 6, 50.0, (50.0, 50.0));
-    let large_translation = TransformMatrix::translation(150.0, 0.0);
+    let large_translation = Transform::translation(150.0, 0.0);
     let target_stars = transform_stars(&ref_stars, &large_translation);
 
     let result =
@@ -536,7 +536,7 @@ fn test_pipeline_partial_overlap() {
 #[test]
 fn test_pipeline_with_position_noise() {
     let ref_stars = generate_star_grid(6, 6, 80.0, (100.0, 100.0));
-    let transform = TransformMatrix::similarity(10.0, -5.0, 0.03, 1.01);
+    let transform = Transform::similarity(10.0, -5.0, 0.03, 1.01);
 
     // Add noise to target positions
     let mut target_stars = transform_stars(&ref_stars, &transform);
@@ -571,7 +571,7 @@ fn test_pipeline_with_position_noise() {
 #[test]
 fn test_pipeline_consistency() {
     let ref_stars = generate_star_grid(5, 5, 100.0, (100.0, 100.0));
-    let transform = TransformMatrix::similarity(20.0, 15.0, 0.08, 1.03);
+    let transform = Transform::similarity(20.0, 15.0, 0.08, 1.03);
     let target_stars = transform_stars(&ref_stars, &transform);
 
     // Run registration multiple times
@@ -612,7 +612,7 @@ fn test_pipeline_affine_transform() {
     let ref_stars = generate_star_grid(6, 6, 80.0, (100.0, 100.0));
 
     // Affine with slight shear
-    let affine = TransformMatrix::affine([1.02, 0.03, 15.0, -0.02, 0.98, 10.0]);
+    let affine = Transform::affine([1.02, 0.03, 15.0, -0.02, 0.98, 10.0]);
     let target_stars = transform_stars(&ref_stars, &affine);
 
     let result = register_star_positions(&ref_stars, &target_stars, TransformType::Affine).unwrap();
@@ -637,7 +637,7 @@ fn test_pipeline_affine_transform() {
 fn test_multiscale_registration_basic() {
     // Create a large star field
     let ref_stars = generate_star_grid(10, 10, 50.0, (50.0, 50.0));
-    let translation = TransformMatrix::translation(25.0, -15.0);
+    let translation = Transform::translation(25.0, -15.0);
     let target_stars = transform_stars(&ref_stars, &translation);
 
     let config = RegistrationConfig {
@@ -670,7 +670,7 @@ fn test_multiscale_registration_with_rotation() {
 
     // Apply rotation + translation
     let angle = PI / 20.0; // 9 degrees
-    let transform = TransformMatrix::similarity(30.0, -20.0, angle, 1.0);
+    let transform = Transform::similarity(30.0, -20.0, angle, 1.0);
     let target_stars = transform_stars(&ref_stars, &transform);
 
     let config = RegistrationConfig {
@@ -741,7 +741,7 @@ fn test_build_pyramid() {
 
 #[test]
 fn test_scale_transform() {
-    let transform = TransformMatrix::translation(10.0, 20.0);
+    let transform = Transform::translation(10.0, 20.0);
     let scaled = super::scale_transform(&transform, 2.0);
 
     let (tx, ty) = scaled.translation_components();
@@ -823,7 +823,7 @@ fn test_integration_dithered_exposures() {
     let dither_offsets = [(10.0, 15.0), (-20.0, 5.0), (8.0, -12.0), (-5.0, 25.0)];
 
     for (dx, dy) in dither_offsets {
-        let transform = TransformMatrix::translation(dx, dy);
+        let transform = Transform::translation(dx, dy);
         let target_positions: Vec<(f64, f64)> = ref_positions
             .iter()
             .map(|&(x, y)| transform.apply(x, y))
@@ -878,7 +878,7 @@ fn test_integration_mosaic_panels() {
     ];
 
     for (dx, dy, angle) in panel_transforms {
-        let transform = TransformMatrix::euclidean(dx, dy, angle);
+        let transform = Transform::euclidean(dx, dy, angle);
         let target_positions: Vec<(f64, f64)> = ref_positions
             .iter()
             .map(|&(x, y)| transform.apply(x, y))
@@ -1008,7 +1008,7 @@ fn test_integration_with_centroid_noise() {
     let ref_positions: Vec<(f64, f64)> = ref_noisy.iter().map(|&(x, y, _)| (x, y)).collect();
 
     // Apply transform to original stars, then add noise
-    let transform = TransformMatrix::similarity(50.0, -30.0, 0.02, 1.01);
+    let transform = Transform::similarity(50.0, -30.0, 0.02, 1.01);
     let target_stars: Vec<(f64, f64, f64)> = ref_stars
         .iter()
         .map(|&(x, y, b)| {
@@ -1057,7 +1057,7 @@ fn test_integration_partial_overlap() {
     let ref_positions: Vec<(f64, f64)> = ref_stars.iter().map(|&(x, y, _)| (x, y)).collect();
 
     // Large translation causing ~50% overlap
-    let transform = TransformMatrix::translation(1000.0, 500.0);
+    let transform = Transform::translation(1000.0, 500.0);
 
     // Target stars are transformed, but filter out those that would be outside frame
     let target_positions: Vec<(f64, f64)> = ref_positions
@@ -1154,7 +1154,7 @@ fn test_integration_quality_metrics() {
     let ref_positions: Vec<(f64, f64)> = ref_stars.iter().map(|&(x, y, _)| (x, y)).collect();
 
     // Apply known transform
-    let transform = TransformMatrix::similarity(100.0, -75.0, 0.05, 1.02);
+    let transform = Transform::similarity(100.0, -75.0, 0.05, 1.02);
     let target_positions: Vec<(f64, f64)> = ref_positions
         .iter()
         .map(|&(x, y)| transform.apply(x, y))
@@ -1196,7 +1196,7 @@ fn test_integration_minimum_stars() {
         (150.0, 150.0),
     ];
 
-    let transform = TransformMatrix::translation(10.0, 5.0);
+    let transform = Transform::translation(10.0, 5.0);
     let target_positions: Vec<(f64, f64)> = ref_positions
         .iter()
         .map(|&(x, y)| transform.apply(x, y))

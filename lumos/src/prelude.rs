@@ -23,7 +23,7 @@ pub use crate::{BackgroundConfig, BackgroundMap};
 // Registration - main API
 pub use crate::{
     InterpolationMethod, RegistrationConfig, RegistrationError, RegistrationResult, Registrator,
-    TransformMatrix, TransformType, WarpConfig,
+    Transform, TransformType, WarpConfig,
 };
 
 // Registration - convenience functions

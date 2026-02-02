@@ -16,8 +16,8 @@ pub mod simd;
 use nalgebra::{DMatrix, SVD};
 use rand::prelude::*;
 
-use crate::registration::transform::{TransformMatrix, TransformType};
-use crate::registration::types::StarMatch;
+use crate::registration::transform::{Transform, TransformType};
+use crate::registration::triangle::StarMatch;
 
 // Wrapper for seeded vs non-seeded RNG
 enum RngWrapper {
@@ -101,7 +101,7 @@ impl Default for RansacConfig {
 #[derive(Debug, Clone)]
 pub struct RansacResult {
     /// Best transformation found.
-    pub transform: TransformMatrix,
+    pub transform: Transform,
     /// Indices of inlier matches.
     pub inliers: Vec<usize>,
     /// Number of iterations performed.
@@ -145,7 +145,7 @@ impl RansacEstimator {
 
         let mut rng = RngWrapper::new(self.config.seed);
 
-        let mut best_transform: Option<TransformMatrix> = None;
+        let mut best_transform: Option<Transform> = None;
         let mut best_inliers: Vec<usize> = Vec::new();
         let mut best_score = 0;
 
@@ -263,10 +263,10 @@ impl RansacEstimator {
         &self,
         ref_points: &[(f64, f64)],
         target_points: &[(f64, f64)],
-        initial_transform: &TransformMatrix,
+        initial_transform: &Transform,
         initial_inliers: &[usize],
         transform_type: TransformType,
-    ) -> (TransformMatrix, Vec<usize>, usize) {
+    ) -> (Transform, Vec<usize>, usize) {
         let min_samples = transform_type.min_points();
         let mut current_transform = initial_transform.clone();
         let mut current_inliers = initial_inliers.to_vec();
@@ -363,7 +363,7 @@ impl RansacEstimator {
             .map(|&c| (c + 0.1).powi(2)) // Square to emphasize high-confidence matches
             .collect();
 
-        let mut best_transform: Option<TransformMatrix> = None;
+        let mut best_transform: Option<Transform> = None;
         let mut best_inliers: Vec<usize> = Vec::new();
         let mut best_score = 0;
 
@@ -619,7 +619,7 @@ fn random_sample_into<R: Rng>(rng: &mut R, n: usize, k: usize, buffer: &mut Vec<
 fn count_inliers(
     ref_points: &[(f64, f64)],
     target_points: &[(f64, f64)],
-    transform: &TransformMatrix,
+    transform: &Transform,
     threshold: f64,
 ) -> (Vec<usize>, usize) {
     simd::count_inliers_simd(ref_points, target_points, transform, threshold)
@@ -653,7 +653,7 @@ pub(crate) fn estimate_transform(
     ref_points: &[(f64, f64)],
     target_points: &[(f64, f64)],
     transform_type: TransformType,
-) -> Option<TransformMatrix> {
+) -> Option<Transform> {
     match transform_type {
         TransformType::Translation => estimate_translation(ref_points, target_points),
         TransformType::Euclidean => estimate_euclidean(ref_points, target_points),
@@ -667,7 +667,7 @@ pub(crate) fn estimate_transform(
 fn estimate_translation(
     ref_points: &[(f64, f64)],
     target_points: &[(f64, f64)],
-) -> Option<TransformMatrix> {
+) -> Option<Transform> {
     if ref_points.is_empty() {
         return None;
     }
@@ -681,26 +681,26 @@ fn estimate_translation(
     }
 
     let n = ref_points.len() as f64;
-    Some(TransformMatrix::translation(dx_sum / n, dy_sum / n))
+    Some(Transform::translation(dx_sum / n, dy_sum / n))
 }
 
 /// Estimate Euclidean transform (translation + rotation).
 fn estimate_euclidean(
     ref_points: &[(f64, f64)],
     target_points: &[(f64, f64)],
-) -> Option<TransformMatrix> {
+) -> Option<Transform> {
     // Use similarity estimation with scale=1
     let sim = estimate_similarity(ref_points, target_points)?;
     let (dx, dy) = sim.translation_components();
     let angle = sim.rotation_angle();
-    Some(TransformMatrix::euclidean(dx, dy, angle))
+    Some(Transform::euclidean(dx, dy, angle))
 }
 
 /// Estimate similarity transform (translation + rotation + uniform scale).
 pub(crate) fn estimate_similarity(
     ref_points: &[(f64, f64)],
     target_points: &[(f64, f64)],
-) -> Option<TransformMatrix> {
+) -> Option<Transform> {
     if ref_points.len() < 2 {
         return None;
     }
@@ -754,14 +754,14 @@ pub(crate) fn estimate_similarity(
     let dx = tar_cx - scale * (cos_a * ref_cx - sin_a * ref_cy);
     let dy = tar_cy - scale * (sin_a * ref_cx + cos_a * ref_cy);
 
-    Some(TransformMatrix::similarity(dx, dy, angle, scale))
+    Some(Transform::similarity(dx, dy, angle, scale))
 }
 
 /// Estimate affine transform using least squares.
 pub(crate) fn estimate_affine(
     ref_points: &[(f64, f64)],
     target_points: &[(f64, f64)],
-) -> Option<TransformMatrix> {
+) -> Option<Transform> {
     if ref_points.len() < 3 {
         return None;
     }
@@ -837,7 +837,7 @@ pub(crate) fn estimate_affine(
     let d = m10 * sum_x_ty + m11 * sum_y_ty + m12 * sum_ty;
     let f = m20 * sum_x_ty + m21 * sum_y_ty + m22 * sum_ty;
 
-    let transform = TransformMatrix::affine([a, b, e, c, d, f]);
+    let transform = Transform::affine([a, b, e, c, d, f]);
 
     if transform.is_valid() {
         Some(transform)
@@ -850,7 +850,7 @@ pub(crate) fn estimate_affine(
 pub(crate) fn estimate_homography(
     ref_points: &[(f64, f64)],
     target_points: &[(f64, f64)],
-) -> Option<TransformMatrix> {
+) -> Option<Transform> {
     if ref_points.len() < 4 {
         return None;
     }
@@ -890,7 +890,7 @@ pub(crate) fn estimate_homography(
     let h = solve_homogeneous_9x9(&ata)?;
 
     // Denormalize: H = T_target^-1 * H_norm * T_ref
-    let h_norm = TransformMatrix::matrix(h, TransformType::Homography);
+    let h_norm = Transform::matrix(h, TransformType::Homography);
     let tar_t_inv = tar_t.inverse(); // Normalization transforms are always invertible
 
     let h_denorm = tar_t_inv.compose(&h_norm).compose(&ref_t);
@@ -906,7 +906,7 @@ pub(crate) fn estimate_homography(
         *d /= scale;
     }
 
-    let result = TransformMatrix::matrix(data, TransformType::Homography);
+    let result = Transform::matrix(data, TransformType::Homography);
 
     if result.is_valid() {
         Some(result)
@@ -916,9 +916,9 @@ pub(crate) fn estimate_homography(
 }
 
 /// Normalize points for numerical stability.
-pub(crate) fn normalize_points(points: &[(f64, f64)]) -> (Vec<(f64, f64)>, TransformMatrix) {
+pub(crate) fn normalize_points(points: &[(f64, f64)]) -> (Vec<(f64, f64)>, Transform) {
     if points.is_empty() {
-        return (Vec::new(), TransformMatrix::identity());
+        return (Vec::new(), Transform::identity());
     }
 
     // Compute centroid
@@ -932,7 +932,7 @@ pub(crate) fn normalize_points(points: &[(f64, f64)]) -> (Vec<(f64, f64)>, Trans
     avg_dist /= points.len() as f64;
 
     if avg_dist < 1e-10 {
-        return (points.to_vec(), TransformMatrix::identity());
+        return (points.to_vec(), Transform::identity());
     }
 
     // Scale so average distance is sqrt(2)
@@ -944,7 +944,7 @@ pub(crate) fn normalize_points(points: &[(f64, f64)]) -> (Vec<(f64, f64)>, Trans
         .collect();
 
     // Transformation matrix: translate then scale
-    let t = TransformMatrix::matrix(
+    let t = Transform::matrix(
         [
             scale,
             0.0,
@@ -1010,6 +1010,6 @@ pub(crate) fn refine_transform(
     ref_points: &[(f64, f64)],
     target_points: &[(f64, f64)],
     transform_type: TransformType,
-) -> Option<TransformMatrix> {
+) -> Option<Transform> {
     estimate_transform(ref_points, target_points, transform_type)
 }

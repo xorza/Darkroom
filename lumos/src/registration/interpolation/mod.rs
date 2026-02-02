@@ -18,7 +18,7 @@ use std::sync::OnceLock;
 use rayon::prelude::*;
 
 use crate::common::Buffer2;
-use crate::registration::transform::TransformMatrix;
+use crate::registration::transform::Transform;
 
 /// Number of rows to process per parallel chunk.
 /// Balances parallelism overhead vs cache locality.
@@ -480,7 +480,7 @@ pub fn warp_image(
     input: &Buffer2<f32>,
     output_width: usize,
     output_height: usize,
-    transform: &TransformMatrix,
+    transform: &Transform,
     config: &WarpConfig,
 ) -> Buffer2<f32> {
     let input_width = input.width();

@@ -5,7 +5,7 @@
 #[cfg(target_arch = "x86_64")]
 use std::arch::x86_64::*;
 
-use crate::registration::transform::TransformMatrix;
+use crate::registration::transform::Transform;
 
 /// Count inliers using AVX2 SIMD (processes 4 points at a time with f64).
 ///
@@ -17,7 +17,7 @@ use crate::registration::transform::TransformMatrix;
 pub unsafe fn count_inliers_avx2(
     ref_points: &[(f64, f64)],
     target_points: &[(f64, f64)],
-    transform: &TransformMatrix,
+    transform: &Transform,
     threshold: f64,
 ) -> (Vec<usize>, usize) {
     unsafe {
@@ -146,7 +146,7 @@ pub unsafe fn count_inliers_avx2(
 pub unsafe fn count_inliers_sse2(
     ref_points: &[(f64, f64)],
     target_points: &[(f64, f64)],
-    transform: &TransformMatrix,
+    transform: &Transform,
     threshold: f64,
 ) -> (Vec<usize>, usize) {
     unsafe {
@@ -253,7 +253,7 @@ mod tests {
     fn count_inliers_scalar(
         ref_points: &[(f64, f64)],
         target_points: &[(f64, f64)],
-        transform: &TransformMatrix,
+        transform: &Transform,
         threshold: f64,
     ) -> (Vec<usize>, usize) {
         let threshold_sq = threshold * threshold;
@@ -281,7 +281,7 @@ mod tests {
             return;
         }
 
-        let transform = TransformMatrix::translation(10.0, 5.0);
+        let transform = Transform::translation(10.0, 5.0);
         let ref_points: Vec<(f64, f64)> =
             (0..20).map(|i| (i as f64 * 5.0, i as f64 * 3.0)).collect();
         let target_points: Vec<(f64, f64)> = ref_points
@@ -315,7 +315,7 @@ mod tests {
             return;
         }
 
-        let transform = TransformMatrix::similarity(5.0, 10.0, 0.1, 1.1);
+        let transform = Transform::similarity(5.0, 10.0, 0.1, 1.1);
         let ref_points: Vec<(f64, f64)> =
             (0..15).map(|i| (i as f64 * 7.0, i as f64 * 4.0)).collect();
         let target_points: Vec<(f64, f64)> = ref_points

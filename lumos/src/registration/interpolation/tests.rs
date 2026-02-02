@@ -292,7 +292,7 @@ fn test_border_handling() {
 fn test_warp_identity() {
     let input: Vec<f32> = (0..16).map(|i| i as f32).collect();
     let input_buf = Buffer2::new(4, 4, input.clone());
-    let transform = TransformMatrix::identity();
+    let transform = Transform::identity();
     let config = WarpConfig {
         method: InterpolationMethod::Bilinear,
         ..Default::default()
@@ -320,7 +320,7 @@ fn test_warp_translation() {
     let input_buf = Buffer2::new(4, 4, input);
 
     // Translate by (1, 1)
-    let transform = TransformMatrix::translation(1.0, 1.0);
+    let transform = Transform::translation(1.0, 1.0);
     let config = WarpConfig {
         method: InterpolationMethod::Bilinear,
         ..Default::default()
@@ -340,7 +340,7 @@ fn test_warp_scale() {
     let input_buf = Buffer2::new(2, 2, input);
 
     // Scale 2x
-    let transform = TransformMatrix::scale(2.0, 2.0);
+    let transform = Transform::scale(2.0, 2.0);
     let config = WarpConfig {
         method: InterpolationMethod::Bilinear,
         ..Default::default()
@@ -390,7 +390,7 @@ fn test_warp_rotation() {
     let input_buf = Buffer2::new(8, 8, input);
 
     // Rotate 90 degrees around center
-    let transform = TransformMatrix::rotation_around(4.0, 4.0, std::f64::consts::FRAC_PI_2);
+    let transform = Transform::rotation_around(4.0, 4.0, std::f64::consts::FRAC_PI_2);
     let config = WarpConfig {
         method: InterpolationMethod::Bilinear,
         ..Default::default()

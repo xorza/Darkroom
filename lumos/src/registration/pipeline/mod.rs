@@ -26,7 +26,7 @@ use crate::registration::{
     interpolation::{InterpolationMethod, WarpConfig, warp_image},
     phase_correlation::{PhaseCorrelationConfig, PhaseCorrelator},
     ransac::{RansacConfig, RansacEstimator},
-    transform::TransformMatrix,
+    transform::Transform,
     transform::TransformType,
     triangle::{TriangleMatchConfig, match_triangles},
 };
@@ -266,7 +266,7 @@ impl Registrator {
         // If we used phase correlation, compose the transforms
         if let Some(pr) = phase_result {
             let (dx, dy) = pr.translation;
-            let phase_transform = TransformMatrix::translation(dx, dy);
+            let phase_transform = Transform::translation(dx, dy);
             result.transform = result.transform.compose(&phase_transform);
         }
 
@@ -285,7 +285,7 @@ impl Registrator {
 /// Internal helper used by [`warp_to_reference_image`].
 fn warp_to_reference(
     target_image: &Buffer2<f32>,
-    transform: &TransformMatrix,
+    transform: &Transform,
     method: InterpolationMethod,
 ) -> Buffer2<f32> {
     let config = WarpConfig {
@@ -327,7 +327,7 @@ fn warp_to_reference(
 /// Warped image aligned to reference frame.
 pub fn warp_to_reference_image(
     target: &crate::AstroImage,
-    transform: &TransformMatrix,
+    transform: &Transform,
     method: InterpolationMethod,
 ) -> crate::AstroImage {
     use rayon::prelude::*;
@@ -394,7 +394,7 @@ pub fn warp_to_reference_image(
 pub fn quick_register(
     ref_stars: &[(f64, f64)],
     target_stars: &[(f64, f64)],
-) -> Result<TransformMatrix, RegistrationError> {
+) -> Result<Transform, RegistrationError> {
     let config = RegistrationConfig {
         transform_type: TransformType::Similarity,
         ransac_iterations: 500,
@@ -542,7 +542,7 @@ impl MultiScaleRegistrator {
         }
 
         // Start from coarsest level and work down
-        let mut current_transform = TransformMatrix::identity();
+        let mut current_transform = Transform::identity();
         let mut last_result: Option<RegistrationResult> = None;
 
         for level in (0..num_levels).rev() {
@@ -637,7 +637,7 @@ impl MultiScaleRegistrator {
             + 1;
         let num_levels = self.multiscale_config.levels.min(max_levels).max(1);
 
-        let mut current_transform = TransformMatrix::identity();
+        let mut current_transform = Transform::identity();
 
         // Build image pyramid
         let ref_pyramid = build_pyramid(
@@ -669,7 +669,7 @@ impl MultiScaleRegistrator {
                 if let Some(pr) = correlator.correlate(level_ref, level_target) {
                     let (dx, dy) = pr.translation;
                     // Scale translation to full resolution
-                    let phase_transform = TransformMatrix::translation(dx * scale, dy * scale);
+                    let phase_transform = Transform::translation(dx * scale, dy * scale);
                     current_transform = phase_transform.compose(&current_transform);
                 }
             }
@@ -729,13 +729,13 @@ impl MultiScaleRegistrator {
 }
 
 /// Scale a transformation from one resolution to another.
-fn scale_transform(transform: &TransformMatrix, scale: f64) -> TransformMatrix {
+fn scale_transform(transform: &Transform, scale: f64) -> Transform {
     // For a transform T that works at scale s, the equivalent at scale 1 is:
     // Scale the translation by s, keep rotation/scale the same
     let mut data = transform.data;
     data[2] *= scale; // tx
     data[5] *= scale; // ty
-    TransformMatrix::matrix(data, transform.transform_type)
+    Transform::matrix(data, transform.transform_type)
 }
 
 /// Build an image pyramid by successive downsampling.

@@ -32,7 +32,7 @@ fn test_estimate_similarity() {
     let dx = 20.0;
     let dy = -10.0;
 
-    let known = TransformMatrix::similarity(dx, dy, angle, scale);
+    let known = Transform::similarity(dx, dy, angle, scale);
     let target_points: Vec<(f64, f64)> =
         ref_points.iter().map(|&(x, y)| known.apply(x, y)).collect();
 
@@ -59,7 +59,7 @@ fn test_estimate_affine() {
     ];
 
     // Apply known affine transform (with shear)
-    let known = TransformMatrix::affine([1.2, 0.3, 5.0, -0.1, 0.9, -3.0]);
+    let known = Transform::affine([1.2, 0.3, 5.0, -0.1, 0.9, -3.0]);
     let target_points: Vec<(f64, f64)> =
         ref_points.iter().map(|&(x, y)| known.apply(x, y)).collect();
 
@@ -85,7 +85,7 @@ fn test_estimate_homography() {
     ];
 
     // Apply known homography
-    let known = TransformMatrix::homography([1.1, 0.1, 5.0, -0.05, 1.0, 3.0, 0.0001, 0.00005]);
+    let known = Transform::homography([1.1, 0.1, 5.0, -0.05, 1.0, 3.0, 0.0001, 0.00005]);
     let target_points: Vec<(f64, f64)> =
         ref_points.iter().map(|&(x, y)| known.apply(x, y)).collect();
 
@@ -152,7 +152,7 @@ fn test_ransac_perfect_similarity() {
         (9.0, 1.0),
     ];
 
-    let known = TransformMatrix::similarity(5.0, -3.0, PI / 4.0, 1.2);
+    let known = Transform::similarity(5.0, -3.0, PI / 4.0, 1.2);
     let target_points: Vec<(f64, f64)> =
         ref_points.iter().map(|&(x, y)| known.apply(x, y)).collect();
 
@@ -183,7 +183,7 @@ fn test_ransac_with_outliers() {
         (200.0, 200.0), // Outliers
     ];
 
-    let known = TransformMatrix::translation(5.0, 3.0);
+    let known = Transform::translation(5.0, 3.0);
     let mut target_points: Vec<(f64, f64)> =
         ref_points.iter().map(|&(x, y)| known.apply(x, y)).collect();
 
@@ -270,7 +270,7 @@ fn test_ransac_affine() {
         (33.0, 66.0),
     ];
 
-    let known = TransformMatrix::affine([1.1, 0.2, 10.0, -0.1, 0.95, 5.0]);
+    let known = Transform::affine([1.1, 0.2, 10.0, -0.1, 0.95, 5.0]);
     let target_points: Vec<(f64, f64)> =
         ref_points.iter().map(|&(x, y)| known.apply(x, y)).collect();
 
@@ -300,7 +300,7 @@ fn test_ransac_homography() {
     ];
 
     // Use a mild homography
-    let known = TransformMatrix::homography([1.0, 0.1, 5.0, -0.05, 1.0, 3.0, 0.0001, 0.00005]);
+    let known = Transform::homography([1.0, 0.1, 5.0, -0.05, 1.0, 3.0, 0.0001, 0.00005]);
     let target_points: Vec<(f64, f64)> =
         ref_points.iter().map(|&(x, y)| known.apply(x, y)).collect();
 
@@ -330,7 +330,7 @@ fn test_lo_ransac_improves_inlier_count() {
         })
         .collect();
 
-    let known = TransformMatrix::similarity(10.0, -5.0, PI / 8.0, 1.1);
+    let known = Transform::similarity(10.0, -5.0, PI / 8.0, 1.1);
     let mut target_points: Vec<(f64, f64)> =
         ref_points.iter().map(|&(x, y)| known.apply(x, y)).collect();
 
@@ -385,7 +385,7 @@ fn test_lo_ransac_converges() {
         (8.0, 8.0),
     ];
 
-    let known = TransformMatrix::translation(5.0, 3.0);
+    let known = Transform::translation(5.0, 3.0);
     let target_points: Vec<(f64, f64)> =
         ref_points.iter().map(|&(x, y)| known.apply(x, y)).collect();
 
@@ -429,7 +429,7 @@ fn test_ransac_30_percent_outliers() {
         (250.0, 150.0), // outlier
     ];
 
-    let known = TransformMatrix::translation(5.0, 3.0);
+    let known = Transform::translation(5.0, 3.0);
     let mut target_points: Vec<(f64, f64)> =
         ref_points.iter().map(|&(x, y)| known.apply(x, y)).collect();
 
@@ -471,7 +471,7 @@ fn test_ransac_numerical_stability_large_coords() {
         })
         .collect();
 
-    let known = TransformMatrix::similarity(50.0, -30.0, PI / 16.0, 1.05);
+    let known = Transform::similarity(50.0, -30.0, PI / 16.0, 1.05);
     let target_points: Vec<(f64, f64)> =
         ref_points.iter().map(|&(x, y)| known.apply(x, y)).collect();
 
@@ -632,7 +632,7 @@ fn test_progressive_ransac_finds_solution_faster() {
 
     let angle = PI / 12.0; // 15 degrees
     let scale = 1.2;
-    let known = TransformMatrix::similarity(5.0, -3.0, angle, scale);
+    let known = Transform::similarity(5.0, -3.0, angle, scale);
     let target_points: Vec<(f64, f64)> =
         ref_points.iter().map(|&(x, y)| known.apply(x, y)).collect();
 
@@ -683,7 +683,7 @@ fn test_ransac_extreme_scale_1e6() {
         })
         .collect();
 
-    let known = TransformMatrix::translation(5000.0, -3000.0);
+    let known = Transform::translation(5000.0, -3000.0);
     let target_points: Vec<(f64, f64)> =
         ref_points.iter().map(|&(x, y)| known.apply(x, y)).collect();
 
@@ -714,7 +714,7 @@ fn test_ransac_small_coordinates() {
         })
         .collect();
 
-    let known = TransformMatrix::translation(0.5, -0.3);
+    let known = Transform::translation(0.5, -0.3);
     let target_points: Vec<(f64, f64)> =
         ref_points.iter().map(|&(x, y)| known.apply(x, y)).collect();
 
@@ -750,7 +750,7 @@ fn test_ransac_mixed_scale_coordinates() {
         (100.0, 100.0),
     ];
 
-    let known = TransformMatrix::translation(10.0, -5.0);
+    let known = Transform::translation(10.0, -5.0);
     let target_points: Vec<(f64, f64)> =
         ref_points.iter().map(|&(x, y)| known.apply(x, y)).collect();
 
@@ -785,7 +785,7 @@ fn test_homography_near_affine() {
     ];
 
     // Homography with tiny perspective components
-    let known = TransformMatrix::homography([1.0, 0.1, 5.0, -0.05, 1.0, 3.0, 1e-8, 1e-8]);
+    let known = Transform::homography([1.0, 0.1, 5.0, -0.05, 1.0, 3.0, 1e-8, 1e-8]);
     let target_points: Vec<(f64, f64)> =
         ref_points.iter().map(|&(x, y)| known.apply(x, y)).collect();
 
@@ -824,7 +824,7 @@ fn test_similarity_very_small_rotation() {
         .collect();
 
     let tiny_angle = 0.001; // ~0.057 degrees
-    let known = TransformMatrix::similarity(5.0, 3.0, tiny_angle, 1.0);
+    let known = Transform::similarity(5.0, 3.0, tiny_angle, 1.0);
     let target_points: Vec<(f64, f64)> =
         ref_points.iter().map(|&(x, y)| known.apply(x, y)).collect();
 
@@ -860,7 +860,7 @@ fn test_similarity_near_unity_scale() {
         .collect();
 
     let tiny_scale = 1.0001; // 0.01% scale difference
-    let known = TransformMatrix::similarity(2.0, -1.0, 0.0, tiny_scale);
+    let known = Transform::similarity(2.0, -1.0, 0.0, tiny_scale);
     let target_points: Vec<(f64, f64)> =
         ref_points.iter().map(|&(x, y)| known.apply(x, y)).collect();
 
@@ -895,7 +895,7 @@ fn test_affine_with_shear() {
         .collect();
 
     // Shear: x' = x + 0.3*y, y' = y + 0.1*x
-    let known = TransformMatrix::affine([1.0, 0.3, 10.0, 0.1, 1.0, -5.0]);
+    let known = Transform::affine([1.0, 0.3, 10.0, 0.1, 1.0, -5.0]);
     let target_points: Vec<(f64, f64)> =
         ref_points.iter().map(|&(x, y)| known.apply(x, y)).collect();
 
@@ -968,7 +968,7 @@ fn test_ransac_100_percent_inliers() {
         (33.0, 66.0),
     ];
 
-    let transform = TransformMatrix::similarity(10.0, -5.0, 0.2, 1.1);
+    let transform = Transform::similarity(10.0, -5.0, 0.2, 1.1);
     let target_points: Vec<(f64, f64)> = ref_points
         .iter()
         .map(|&(x, y)| transform.apply(x, y))
@@ -1085,7 +1085,7 @@ fn test_ransac_early_termination() {
     // All perfect inliers - should terminate early
     let ref_points: Vec<(f64, f64)> = (0..50).map(|i| (i as f64 * 10.0, i as f64 * 5.0)).collect();
 
-    let transform = TransformMatrix::translation(7.0, 3.0);
+    let transform = Transform::translation(7.0, 3.0);
     let target_points: Vec<(f64, f64)> = ref_points
         .iter()
         .map(|&(x, y)| transform.apply(x, y))
@@ -1125,7 +1125,7 @@ fn test_homography_nearly_degenerate() {
         (100.0, 100.0), // This one breaks collinearity
     ];
 
-    let transform = TransformMatrix::translation(10.0, 10.0);
+    let transform = Transform::translation(10.0, 10.0);
     let target_points: Vec<(f64, f64)> = ref_points
         .iter()
         .map(|&(x, y)| transform.apply(x, y))
@@ -1157,7 +1157,7 @@ fn test_progressive_ransac_uses_weights() {
     // Create points with varying confidence
     let ref_points: Vec<(f64, f64)> = (0..20).map(|i| (i as f64 * 10.0, i as f64 * 5.0)).collect();
 
-    let transform = TransformMatrix::translation(5.0, 3.0);
+    let transform = Transform::translation(5.0, 3.0);
     let mut target_points: Vec<(f64, f64)> = ref_points
         .iter()
         .map(|&(x, y)| transform.apply(x, y))
@@ -1225,7 +1225,7 @@ fn test_ransac_minimum_points() {
 
 #[test]
 fn test_estimate_with_matches_basic() {
-    use crate::registration::types::StarMatch;
+    use crate::registration::triangle::StarMatch;
 
     // Create reference and target stars
     let ref_stars: Vec<(f64, f64)> = vec![
@@ -1285,7 +1285,7 @@ fn test_estimate_with_matches_basic() {
 
 #[test]
 fn test_estimate_with_matches_empty() {
-    use crate::registration::types::StarMatch;
+    use crate::registration::triangle::StarMatch;
 
     let matches: Vec<StarMatch> = vec![];
     let ref_stars: Vec<(f64, f64)> = vec![];
@@ -1304,7 +1304,7 @@ fn test_estimate_with_matches_empty() {
 
 #[test]
 fn test_estimate_with_matches_uses_confidence() {
-    use crate::registration::types::StarMatch;
+    use crate::registration::triangle::StarMatch;
 
     // Create points where one outlier has low confidence
     let ref_stars: Vec<(f64, f64)> = vec![

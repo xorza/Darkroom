@@ -5,7 +5,7 @@
 #[cfg(target_arch = "x86_64")]
 use std::arch::x86_64::*;
 
-use crate::registration::transform::TransformMatrix;
+use crate::registration::transform::Transform;
 
 /// Warp a row using AVX2 SIMD with bilinear interpolation.
 ///
@@ -21,7 +21,7 @@ pub unsafe fn warp_row_bilinear_avx2(
     input_height: usize,
     output_row: &mut [f32],
     output_y: usize,
-    inverse: &TransformMatrix,
+    inverse: &Transform,
     border_value: f32,
 ) {
     unsafe {
@@ -173,7 +173,7 @@ pub unsafe fn warp_row_bilinear_sse(
     input_height: usize,
     output_row: &mut [f32],
     output_y: usize,
-    inverse: &TransformMatrix,
+    inverse: &Transform,
     border_value: f32,
 ) {
     unsafe {
@@ -329,7 +329,7 @@ mod tests {
         let width = 128;
         let height = 64;
         let input = patterns::diagonal_gradient(width, height);
-        let transform = TransformMatrix::translation(2.5, 1.5);
+        let transform = Transform::translation(2.5, 1.5);
         let inverse = transform.inverse();
 
         let mut output_avx2 = vec![0.0f32; width];
@@ -380,7 +380,7 @@ mod tests {
         let width = 64;
         let height = 64;
         let input = patterns::diagonal_gradient(width, height);
-        let transform = TransformMatrix::similarity(1.0, 2.0, 0.05, 1.02);
+        let transform = Transform::similarity(1.0, 2.0, 0.05, 1.02);
         let inverse = transform.inverse();
 
         let mut output_sse = vec![0.0f32; width];

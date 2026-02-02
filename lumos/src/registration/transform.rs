@@ -49,20 +49,20 @@ impl TransformType {
 /// | g  h  1  |   | data[6] data[7] data[8] |
 /// ```
 #[derive(Debug, Clone)]
-pub struct TransformMatrix {
+pub struct Transform {
     /// Row-major 3x3 matrix elements.
     pub data: [f64; 9],
     /// The type of transformation this matrix represents.
     pub transform_type: TransformType,
 }
 
-impl Default for TransformMatrix {
+impl Default for Transform {
     fn default() -> Self {
         Self::identity()
     }
 }
 
-impl std::fmt::Display for TransformMatrix {
+impl std::fmt::Display for Transform {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let (tx, ty) = self.translation_components();
         let rotation_deg = self.rotation_angle().to_degrees();
@@ -104,7 +104,7 @@ impl std::fmt::Display for TransformMatrix {
     }
 }
 
-impl TransformMatrix {
+impl Transform {
     /// Create identity transform.
     pub fn identity() -> Self {
         Self {
@@ -359,8 +359,17 @@ mod tests {
     }
 
     #[test]
+    fn test_transform_type_min_points() {
+        assert_eq!(TransformType::Translation.min_points(), 1);
+        assert_eq!(TransformType::Euclidean.min_points(), 2);
+        assert_eq!(TransformType::Similarity.min_points(), 2);
+        assert_eq!(TransformType::Affine.min_points(), 3);
+        assert_eq!(TransformType::Homography.min_points(), 4);
+    }
+
+    #[test]
     fn test_identity_transform() {
-        let t = TransformMatrix::identity();
+        let t = Transform::identity();
         let (x, y) = t.apply(5.0, 7.0);
         assert!(approx_eq(x, 5.0));
         assert!(approx_eq(y, 7.0));
@@ -368,7 +377,7 @@ mod tests {
 
     #[test]
     fn test_translation_transform() {
-        let t = TransformMatrix::translation(10.0, -5.0);
+        let t = Transform::translation(10.0, -5.0);
         let (x, y) = t.apply(3.0, 4.0);
         assert!(approx_eq(x, 13.0));
         assert!(approx_eq(y, -1.0));
@@ -376,7 +385,7 @@ mod tests {
 
     #[test]
     fn test_rotation_90_degrees() {
-        let t = TransformMatrix::euclidean(0.0, 0.0, PI / 2.0);
+        let t = Transform::euclidean(0.0, 0.0, PI / 2.0);
         let (x, y) = t.apply(1.0, 0.0);
         assert!(approx_eq(x, 0.0));
         assert!(approx_eq(y, 1.0));
@@ -384,7 +393,7 @@ mod tests {
 
     #[test]
     fn test_rotation_180_degrees() {
-        let t = TransformMatrix::euclidean(0.0, 0.0, PI);
+        let t = Transform::euclidean(0.0, 0.0, PI);
         let (x, y) = t.apply(1.0, 0.0);
         assert!(approx_eq(x, -1.0));
         assert!(approx_eq(y, 0.0));
@@ -392,7 +401,7 @@ mod tests {
 
     #[test]
     fn test_scale_transform() {
-        let t = TransformMatrix::similarity(0.0, 0.0, 0.0, 2.0);
+        let t = Transform::similarity(0.0, 0.0, 0.0, 2.0);
         let (x, y) = t.apply(3.0, 4.0);
         assert!(approx_eq(x, 6.0));
         assert!(approx_eq(y, 8.0));
@@ -400,7 +409,7 @@ mod tests {
 
     #[test]
     fn test_similarity_with_rotation_and_scale() {
-        let t = TransformMatrix::similarity(5.0, 10.0, PI / 2.0, 2.0);
+        let t = Transform::similarity(5.0, 10.0, PI / 2.0, 2.0);
         let (x, y) = t.apply(1.0, 0.0);
         // Rotate 90° then scale 2x: (1,0) -> (0,1) -> (0,2), then translate
         assert!(approx_eq(x, 5.0));
@@ -410,7 +419,7 @@ mod tests {
     #[test]
     fn test_affine_transform() {
         // Shear transform
-        let t = TransformMatrix::affine([1.0, 0.5, 0.0, 0.0, 1.0, 0.0]);
+        let t = Transform::affine([1.0, 0.5, 0.0, 0.0, 1.0, 0.0]);
         let (x, y) = t.apply(2.0, 2.0);
         assert!(approx_eq(x, 3.0)); // 2 + 0.5*2
         assert!(approx_eq(y, 2.0));
@@ -418,7 +427,7 @@ mod tests {
 
     #[test]
     fn test_transform_inverse() {
-        let t = TransformMatrix::similarity(10.0, -5.0, PI / 4.0, 1.5);
+        let t = Transform::similarity(10.0, -5.0, PI / 4.0, 1.5);
         let inv = t.inverse();
 
         let (x1, y1) = t.apply(3.0, 7.0);
@@ -431,10 +440,10 @@ mod tests {
     #[test]
     fn test_apply_roundtrip() {
         let transforms = vec![
-            TransformMatrix::translation(5.0, -3.0),
-            TransformMatrix::euclidean(2.0, 3.0, 0.7),
-            TransformMatrix::similarity(1.0, 2.0, -0.5, 1.3),
-            TransformMatrix::affine([1.1, 0.2, 5.0, -0.1, 0.9, -3.0]),
+            Transform::translation(5.0, -3.0),
+            Transform::euclidean(2.0, 3.0, 0.7),
+            Transform::similarity(1.0, 2.0, -0.5, 1.3),
+            Transform::affine([1.1, 0.2, 5.0, -0.1, 0.9, -3.0]),
         ];
 
         for t in transforms {
@@ -456,8 +465,8 @@ mod tests {
 
     #[test]
     fn test_compose_translations() {
-        let t1 = TransformMatrix::translation(5.0, 3.0);
-        let t2 = TransformMatrix::translation(2.0, -1.0);
+        let t1 = Transform::translation(5.0, 3.0);
+        let t2 = Transform::translation(2.0, -1.0);
         let composed = t1.compose(&t2);
 
         let (x, y) = composed.apply(0.0, 0.0);
@@ -468,8 +477,8 @@ mod tests {
 
     #[test]
     fn test_compose_rotations() {
-        let t1 = TransformMatrix::euclidean(0.0, 0.0, PI / 4.0);
-        let t2 = TransformMatrix::euclidean(0.0, 0.0, PI / 4.0);
+        let t1 = Transform::euclidean(0.0, 0.0, PI / 4.0);
+        let t2 = Transform::euclidean(0.0, 0.0, PI / 4.0);
         let composed = t1.compose(&t2);
 
         let (x, y) = composed.apply(1.0, 0.0);
@@ -480,7 +489,7 @@ mod tests {
 
     #[test]
     fn test_translation_components() {
-        let t = TransformMatrix::translation(7.0, -3.0);
+        let t = Transform::translation(7.0, -3.0);
         let (tx, ty) = t.translation_components();
         assert!(approx_eq(tx, 7.0));
         assert!(approx_eq(ty, -3.0));
@@ -489,24 +498,24 @@ mod tests {
     #[test]
     fn test_rotation_angle() {
         let angle = 0.5;
-        let t = TransformMatrix::euclidean(0.0, 0.0, angle);
+        let t = Transform::euclidean(0.0, 0.0, angle);
         assert!(approx_eq(t.rotation_angle(), angle));
     }
 
     #[test]
     fn test_scale_factor() {
         let scale = 2.5;
-        let t = TransformMatrix::similarity(0.0, 0.0, 0.0, scale);
+        let t = Transform::similarity(0.0, 0.0, 0.0, scale);
         assert!(approx_eq(t.scale_factor(), scale));
     }
 
     #[test]
     fn test_is_valid() {
-        let valid = TransformMatrix::similarity(1.0, 2.0, 0.5, 1.5);
+        let valid = Transform::similarity(1.0, 2.0, 0.5, 1.5);
         assert!(valid.is_valid());
 
         // Degenerate matrix (zero scale)
-        let degenerate = TransformMatrix::matrix(
+        let degenerate = Transform::matrix(
             [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0],
             TransformType::Affine,
         );
@@ -516,7 +525,7 @@ mod tests {
     #[test]
     fn test_homography_transform() {
         // Simple homography that acts like translation
-        let t = TransformMatrix::homography([1.0, 0.0, 5.0, 0.0, 1.0, 3.0, 0.0, 0.0]);
+        let t = Transform::homography([1.0, 0.0, 5.0, 0.0, 1.0, 3.0, 0.0, 0.0]);
         let (x, y) = t.apply(2.0, 4.0);
         assert!(approx_eq(x, 7.0));
         assert!(approx_eq(y, 7.0));
@@ -525,7 +534,7 @@ mod tests {
     #[test]
     fn test_homography_perspective() {
         // Homography with perspective component
-        let t = TransformMatrix::homography([1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.001, 0.0]);
+        let t = Transform::homography([1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.001, 0.0]);
         let (x, y) = t.apply(100.0, 0.0);
         // w = 0.001 * 100 + 1 = 1.1
         // x' = 100 / 1.1 ≈ 90.9

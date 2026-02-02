@@ -133,7 +133,7 @@ pub use registration::{
     TangentialDistortionConfig,
     ThinPlateSpline,
     TpsConfig,
-    TransformMatrix,
+    Transform,
     TransformType,
     // Triangle matching
     TriangleMatchConfig,

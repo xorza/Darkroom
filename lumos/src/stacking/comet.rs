@@ -24,7 +24,7 @@
 //! let comet_transform = config.comet_aligned_transform(&star_transform, frame_timestamp, 0.0);
 //! ```
 
-use crate::registration::TransformMatrix;
+use crate::registration::Transform;
 use crate::stacking::local_normalization::NormalizationMethod;
 use crate::stacking::weighted::RejectionMethod;
 
@@ -191,12 +191,12 @@ impl CometStackConfig {
     /// star_transform is applied first, then the offset.
     pub fn comet_aligned_transform(
         &self,
-        star_transform: &TransformMatrix,
+        star_transform: &Transform,
         frame_timestamp: f64,
         ref_timestamp: f64,
-    ) -> TransformMatrix {
+    ) -> Transform {
         let (dx, dy) = compute_comet_offset(self, frame_timestamp, ref_timestamp);
-        let offset_transform = TransformMatrix::translation(dx, dy);
+        let offset_transform = Transform::translation(dx, dy);
 
         // offset_transform.compose(star_transform) means:
         // Apply star_transform first, then offset_transform
@@ -341,11 +341,11 @@ pub fn compute_comet_offset(
 /// }
 /// ```
 pub fn apply_comet_offset_to_transform(
-    star_transform: &TransformMatrix,
+    star_transform: &Transform,
     config: &CometStackConfig,
     frame_timestamp: f64,
     ref_timestamp: f64,
-) -> TransformMatrix {
+) -> Transform {
     config.comet_aligned_transform(star_transform, frame_timestamp, ref_timestamp)
 }
 
@@ -722,7 +722,7 @@ mod tests {
         let config = CometStackConfig::new(pos_start, pos_end);
 
         // Identity star transform
-        let star_transform = TransformMatrix::identity();
+        let star_transform = Transform::identity();
 
         // At reference timestamp, comet offset should be zero
         let comet_transform = config.comet_aligned_transform(&star_transform, 0.0, 0.0);
@@ -740,7 +740,7 @@ mod tests {
         let config = CometStackConfig::new(pos_start, pos_end);
 
         // Identity star transform
-        let star_transform = TransformMatrix::identity();
+        let star_transform = Transform::identity();
 
         // After 50 seconds, comet moved 5 pixels in x, 10 pixels in y
         // To align ON comet, we need offset (-5, -10)
@@ -758,7 +758,7 @@ mod tests {
         let config = CometStackConfig::new(pos_start, pos_end);
 
         // Star transform with existing translation
-        let star_transform = TransformMatrix::translation(10.0, 20.0);
+        let star_transform = Transform::translation(10.0, 20.0);
 
         // After 50 seconds, comet offset is (-5, -10)
         // Combined with star translation (10, 20), result should be (5, 10)
@@ -777,7 +777,7 @@ mod tests {
 
         // Star transform with 90 degree rotation
         let angle = std::f64::consts::FRAC_PI_2;
-        let star_transform = TransformMatrix::euclidean(0.0, 0.0, angle);
+        let star_transform = Transform::euclidean(0.0, 0.0, angle);
 
         // After 50 seconds, comet offset is (-50, 0)
         // But the compose operation applies star_transform first, then offset
@@ -798,7 +798,7 @@ mod tests {
         let pos_end = ObjectPosition::new(110.0, 220.0, 100.0);
         let config = CometStackConfig::new(pos_start, pos_end);
 
-        let star_transform = TransformMatrix::identity();
+        let star_transform = Transform::identity();
 
         // Test that the standalone function gives same result as method
         let via_method = config.comet_aligned_transform(&star_transform, 50.0, 0.0);
@@ -817,7 +817,7 @@ mod tests {
         let pos_end = ObjectPosition::new(200.0, 150.0, 100.0);
         let config = CometStackConfig::new(pos_start, pos_end);
 
-        let star_transform = TransformMatrix::translation(5.0, 10.0);
+        let star_transform = Transform::translation(5.0, 10.0);
 
         // Frame at t=50: comet has moved (50, 25) pixels from start
         // Comet offset: (-50, -25)
@@ -1180,7 +1180,7 @@ mod integration_tests {
         src: &[f32],
         width: usize,
         height: usize,
-        transform: &TransformMatrix,
+        transform: &Transform,
     ) -> Vec<f32> {
         let mut dst = vec![0.0f32; width * height];
 
@@ -1327,7 +1327,7 @@ mod integration_tests {
         let config = CometStackConfig::new(pos_start, pos_end);
 
         // Star transform is identity (reference frame)
-        let star_transform = TransformMatrix::identity();
+        let star_transform = Transform::identity();
         let ref_timestamp = 0.0;
 
         // At each frame, compute comet-aligned transform and verify it centers the comet
@@ -1407,7 +1407,7 @@ mod integration_tests {
         let mut comet_aligned_frames = Vec::new();
         for (frame_idx, frame) in frames.iter().enumerate() {
             let frame_timestamp = frame_idx as f64;
-            let star_transform = TransformMatrix::identity();
+            let star_transform = Transform::identity();
             let comet_transform =
                 config.comet_aligned_transform(&star_transform, frame_timestamp, ref_timestamp);
 
@@ -1606,7 +1606,7 @@ mod integration_tests {
 
         // Star transform with small rotation (1 degree)
         let angle = 1.0f64.to_radians();
-        let star_transform = TransformMatrix::euclidean(0.0, 0.0, angle);
+        let star_transform = Transform::euclidean(0.0, 0.0, angle);
 
         // At t=50, comet has moved 10 pixels in x
         let comet_transform = config.comet_aligned_transform(&star_transform, 50.0, 0.0);

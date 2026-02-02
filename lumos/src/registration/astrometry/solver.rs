@@ -4,7 +4,7 @@ use super::catalog::{CatalogError, CatalogSource, CatalogStar};
 use super::quad_hash::QuadHasher;
 use super::wcs::{PixelSkyMatch, Wcs};
 use crate::registration::ransac::{RansacConfig, RansacEstimator};
-use crate::registration::transform::TransformMatrix;
+use crate::registration::transform::Transform;
 use crate::registration::transform::TransformType;
 use std::fmt;
 
@@ -388,7 +388,7 @@ impl PlateSolver {
     /// Compute WCS from the transformation and matched stars.
     fn compute_wcs_from_transform(
         &self,
-        transform: &TransformMatrix,
+        transform: &Transform,
         matched_stars: &[PixelSkyMatch],
         _approx_center: (f64, f64),
         approx_scale: f64,

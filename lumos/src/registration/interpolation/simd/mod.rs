@@ -17,7 +17,7 @@ pub mod sse;
 
 #[cfg(test)]
 use crate::registration::interpolation::lanczos_kernel;
-use crate::registration::transform::TransformMatrix;
+use crate::registration::transform::Transform;
 
 /// Warp a row of pixels using SIMD-accelerated bilinear interpolation.
 ///
@@ -38,7 +38,7 @@ pub(crate) fn warp_row_bilinear_simd(
     input_height: usize,
     output_row: &mut [f32],
     output_y: usize,
-    inverse: &TransformMatrix,
+    inverse: &Transform,
     border_value: f32,
 ) {
     #[cfg(target_arch = "x86_64")]
@@ -93,7 +93,7 @@ pub(crate) fn warp_row_bilinear_scalar(
     input_height: usize,
     output_row: &mut [f32],
     output_y: usize,
-    inverse: &TransformMatrix,
+    inverse: &Transform,
     border_value: f32,
 ) {
     let y = output_y as f64;
@@ -182,7 +182,7 @@ pub fn warp_row_lanczos3(
     input_height: usize,
     output_row: &mut [f32],
     output_y: usize,
-    inverse: &TransformMatrix,
+    inverse: &Transform,
     border_value: f32,
     normalize: bool,
     clamp: bool,
@@ -209,7 +209,7 @@ pub fn warp_row_lanczos3_scalar(
     input_height: usize,
     output_row: &mut [f32],
     output_y: usize,
-    inverse: &TransformMatrix,
+    inverse: &Transform,
     border_value: f32,
     normalize: bool,
     clamp: bool,
@@ -289,7 +289,7 @@ pub fn warp_image_lanczos3(
     input_height: usize,
     output_width: usize,
     output_height: usize,
-    transform: &TransformMatrix,
+    transform: &Transform,
     border_value: f32,
     normalize: bool,
     clamp: bool,
@@ -326,7 +326,7 @@ mod tests {
         let width = 100;
         let height = 100;
         let input = patterns::diagonal_gradient(width, height);
-        let identity = TransformMatrix::identity();
+        let identity = Transform::identity();
 
         let mut output_row = vec![0.0f32; width];
         let y = 50;
@@ -361,7 +361,7 @@ mod tests {
         let input = patterns::diagonal_gradient(width, height);
 
         // Translate by (5, 3)
-        let transform = TransformMatrix::translation(5.0, 3.0);
+        let transform = Transform::translation(5.0, 3.0);
         let inverse = transform.inverse();
 
         let mut output_row = vec![0.0f32; width];
@@ -403,9 +403,9 @@ mod tests {
 
         // Test with various transforms
         let transforms = vec![
-            TransformMatrix::identity(),
-            TransformMatrix::translation(2.5, 1.7),
-            TransformMatrix::similarity(3.0, 2.0, 0.1, 1.05),
+            Transform::identity(),
+            Transform::translation(2.5, 1.7),
+            Transform::similarity(3.0, 2.0, 0.1, 1.05),
         ];
 
         for transform in transforms {
@@ -466,7 +466,7 @@ mod tests {
                 .take(width * height)
                 .copied()
                 .collect();
-            let identity = TransformMatrix::identity();
+            let identity = Transform::identity();
 
             let mut output_simd = vec![0.0f32; width];
             let mut output_scalar = vec![0.0f32; width];
@@ -493,7 +493,7 @@ mod tests {
         let width = 100;
         let height = 100;
         let input = patterns::diagonal_gradient(width, height);
-        let identity = TransformMatrix::identity();
+        let identity = Transform::identity();
 
         let mut output_row = vec![0.0f32; width];
         let y = 50;
@@ -536,7 +536,7 @@ mod tests {
                 .take(width * height)
                 .copied()
                 .collect();
-            let transform = TransformMatrix::translation(1.5, 0.5);
+            let transform = Transform::translation(1.5, 0.5);
             let inverse = transform.inverse();
 
             let mut output = vec![0.0f32; width];
@@ -578,7 +578,7 @@ mod tests {
         let height = 64;
         let input = patterns::diagonal_gradient(width, height);
 
-        let transform = TransformMatrix::identity();
+        let transform = Transform::identity();
 
         let output = warp_image_lanczos3(
             input.pixels(),

@@ -37,7 +37,15 @@ use crate::registration::constants::{
     DENSE_VOTE_THRESHOLD, MIN_TRIANGLE_AREA_SQ, MIN_TRIANGLE_SIDE,
 };
 use crate::registration::spatial::{KdTree, form_triangles_from_neighbors};
-use crate::registration::types::StarMatch;
+
+/// A matched star pair between reference and target.
+#[derive(Debug, Clone, Copy)]
+pub struct StarMatch {
+    pub ref_idx: usize,
+    pub target_idx: usize,
+    pub votes: usize,
+    pub confidence: f64,
+}
 
 /// Vote matrix storage - either dense (Vec) or sparse (HashMap).
 enum VoteMatrix {

@@ -33,14 +33,14 @@ fn test_quality_metrics_low_inlier_ratio() {
 
 #[test]
 fn test_estimate_overlap_identity() {
-    let transform = TransformMatrix::identity();
+    let transform = Transform::identity();
     let overlap = estimate_overlap(100, 100, &transform);
     assert!((overlap - 1.0).abs() < 0.01);
 }
 
 #[test]
 fn test_estimate_overlap_translation() {
-    let transform = TransformMatrix::translation(50.0, 0.0);
+    let transform = Transform::translation(50.0, 0.0);
     let overlap = estimate_overlap(100, 100, &transform);
     // 50% horizontal shift -> ~50% overlap
     assert!((overlap - 0.5).abs() < 0.1);
@@ -48,7 +48,7 @@ fn test_estimate_overlap_translation() {
 
 #[test]
 fn test_estimate_overlap_no_overlap() {
-    let transform = TransformMatrix::translation(200.0, 0.0);
+    let transform = Transform::translation(200.0, 0.0);
     let overlap = estimate_overlap(100, 100, &transform);
     assert!(overlap < 0.01);
 }
@@ -82,7 +82,7 @@ fn test_quadrant_consistency_uniform() {
         (75.0, 75.0), // BR
     ];
     let target_points = ref_points.clone();
-    let transform = TransformMatrix::identity();
+    let transform = Transform::identity();
 
     let consistency = check_quadrant_consistency(&ref_points, &target_points, &transform, 100, 100);
 
@@ -101,7 +101,7 @@ fn test_quadrant_consistency_non_uniform() {
     let mut target_points = ref_points.clone();
     target_points[3] = (85.0, 85.0); // Shift BR point
 
-    let transform = TransformMatrix::identity();
+    let transform = Transform::identity();
 
     let consistency = check_quadrant_consistency(&ref_points, &target_points, &transform, 100, 100);
 
@@ -149,7 +149,7 @@ fn test_quadrant_consistency_truly_inconsistent() {
         }
     }
 
-    let transform = TransformMatrix::translation(5.0, 5.0);
+    let transform = Transform::translation(5.0, 5.0);
     let consistency = check_quadrant_consistency(&ref_points, &target_points, &transform, 100, 100);
 
     // BR quadrant (index 3) should have much higher error
@@ -164,7 +164,7 @@ fn test_quadrant_consistency_truly_inconsistent() {
 #[test]
 fn test_estimate_overlap_complete_disjoint() {
     // Large translation way beyond image boundaries
-    let transform = TransformMatrix::translation(1000.0, 1000.0);
+    let transform = Transform::translation(1000.0, 1000.0);
     let overlap = estimate_overlap(100, 100, &transform);
     assert!(
         overlap < 0.01,
@@ -176,7 +176,7 @@ fn test_estimate_overlap_complete_disjoint() {
 /// Test overlap estimation with 100% overlap (identity)
 #[test]
 fn test_estimate_overlap_perfect() {
-    let transform = TransformMatrix::identity();
+    let transform = Transform::identity();
     let overlap = estimate_overlap(100, 100, &transform);
     assert!(
         (overlap - 1.0).abs() < 0.01,
@@ -188,7 +188,7 @@ fn test_estimate_overlap_perfect() {
 /// Test overlap with negative coordinate shift
 #[test]
 fn test_estimate_overlap_negative_coords() {
-    let transform = TransformMatrix::translation(-30.0, -30.0);
+    let transform = Transform::translation(-30.0, -30.0);
     let overlap = estimate_overlap(100, 100, &transform);
     // 70% overlap in each dimension -> ~49% overlap area
     assert!(
@@ -203,7 +203,7 @@ fn test_estimate_overlap_negative_coords() {
 fn test_estimate_overlap_rotation() {
     // Small rotation around center - corners stay in bounds
     let angle = 0.1; // ~6 degrees
-    let transform = TransformMatrix::rotation_around(50.0, 50.0, angle);
+    let transform = Transform::rotation_around(50.0, 50.0, angle);
     let overlap = estimate_overlap(100, 100, &transform);
 
     // Small rotation should have high overlap (corners stay mostly in bounds)
@@ -215,7 +215,7 @@ fn test_estimate_overlap_rotation() {
 
     // 90 degree rotation around center - all corners still inside
     let angle_90 = std::f64::consts::PI / 2.0;
-    let transform_90 = TransformMatrix::rotation_around(50.0, 50.0, angle_90);
+    let transform_90 = Transform::rotation_around(50.0, 50.0, angle_90);
     let overlap_90 = estimate_overlap(100, 100, &transform_90);
     assert!(
         overlap_90 > 0.9,

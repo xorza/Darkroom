@@ -3,7 +3,7 @@
 //! Provides tools for assessing alignment quality, detecting misregistrations,
 //! and computing overlap statistics.
 
-use crate::registration::transform::TransformMatrix;
+use crate::registration::transform::Transform;
 
 #[cfg(test)]
 mod tests;
@@ -199,7 +199,7 @@ fn validate_registration(
 /// let overlap = estimate_overlap(width, height, &result.transform);
 /// println!("Image overlap: {:.1}%", overlap * 100.0);
 /// ```
-pub fn estimate_overlap(width: usize, height: usize, transform: &TransformMatrix) -> f64 {
+pub fn estimate_overlap(width: usize, height: usize, transform: &Transform) -> f64 {
     // Sample corners and compute bounding box of transformed reference in target space
     let corners = [
         (0.0, 0.0),
@@ -359,7 +359,7 @@ fn percentile(sorted: &[f64], p: f64) -> f64 {
 pub fn check_quadrant_consistency(
     ref_points: &[(f64, f64)],
     target_points: &[(f64, f64)],
-    transform: &TransformMatrix,
+    transform: &Transform,
     width: usize,
     height: usize,
 ) -> QuadrantConsistency {

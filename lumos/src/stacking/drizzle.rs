@@ -28,7 +28,7 @@ use std::path::Path;
 
 use crate::ImageDimensions;
 use crate::astro_image::AstroImage;
-use crate::registration::transform::TransformMatrix;
+use crate::registration::transform::Transform;
 use crate::stacking::error::Error;
 use crate::stacking::progress::{ProgressCallback, StackingStage, report_progress};
 
@@ -181,7 +181,7 @@ impl DrizzleAccumulator {
     ///
     /// The transform maps input pixel coordinates to reference (output) coordinates.
     /// It should include any registration alignment computed from star matching.
-    pub fn add_image(&mut self, image: AstroImage, transform: &TransformMatrix, weight: f32) {
+    pub fn add_image(&mut self, image: AstroImage, transform: &Transform, weight: f32) {
         let input_width = image.width();
         let input_height = image.height();
         let input_channels = image.channels();
@@ -243,7 +243,7 @@ impl DrizzleAccumulator {
     fn add_image_square(
         &mut self,
         pixels: &[f32],
-        transform: &TransformMatrix,
+        transform: &Transform,
         weight: f32,
         input_width: usize,
         input_height: usize,
@@ -312,7 +312,7 @@ impl DrizzleAccumulator {
     fn add_image_point(
         &mut self,
         pixels: &[f32],
-        transform: &TransformMatrix,
+        transform: &Transform,
         weight: f32,
         input_width: usize,
         input_height: usize,
@@ -350,7 +350,7 @@ impl DrizzleAccumulator {
     fn add_image_gaussian(
         &mut self,
         pixels: &[f32],
-        transform: &TransformMatrix,
+        transform: &Transform,
         weight: f32,
         input_width: usize,
         input_height: usize,
@@ -442,7 +442,7 @@ impl DrizzleAccumulator {
     fn add_image_lanczos(
         &mut self,
         pixels: &[f32],
-        transform: &TransformMatrix,
+        transform: &Transform,
         weight: f32,
         input_width: usize,
         input_height: usize,
@@ -619,7 +619,7 @@ fn compute_square_overlap(
 /// | d  e  f | = | data[3] data[4] data[5] |
 /// | g  h  1 |   | data[6] data[7] data[8] |
 #[inline]
-fn transform_point(transform: &TransformMatrix, x: f32, y: f32) -> (f32, f32) {
+fn transform_point(transform: &Transform, x: f32, y: f32) -> (f32, f32) {
     let m = &transform.data;
     let x64 = x as f64;
     let y64 = y as f64;
@@ -658,7 +658,7 @@ fn lanczos_kernel(x: f32, a: f32) -> f32 {
 /// The drizzled result with image and coverage map.
 pub fn drizzle_stack<P: AsRef<Path> + Sync>(
     paths: &[P],
-    transforms: &[TransformMatrix],
+    transforms: &[Transform],
     weights: Option<&[f32]>,
     config: &DrizzleConfig,
     progress: ProgressCallback,
@@ -838,7 +838,7 @@ mod tests {
 
     #[test]
     fn test_transform_point_identity() {
-        let identity = TransformMatrix::identity();
+        let identity = Transform::identity();
         let (x, y) = transform_point(&identity, 10.0, 20.0);
         assert!((x - 10.0).abs() < f32::EPSILON);
         assert!((y - 20.0).abs() < f32::EPSILON);
@@ -846,7 +846,7 @@ mod tests {
 
     #[test]
     fn test_transform_point_translation() {
-        let translation = TransformMatrix::translation(5.0, -3.0);
+        let translation = Transform::translation(5.0, -3.0);
         let (x, y) = transform_point(&translation, 10.0, 20.0);
         assert!((x - 15.0).abs() < f32::EPSILON);
         assert!((y - 17.0).abs() < f32::EPSILON);
@@ -861,7 +861,7 @@ mod tests {
         let config = DrizzleConfig::x2();
         let mut acc = DrizzleAccumulator::new(100, 100, 1, config);
 
-        let identity = TransformMatrix::identity();
+        let identity = Transform::identity();
         acc.add_image(image, &identity, 1.0);
 
         let result = acc.finalize();
@@ -889,7 +889,7 @@ mod tests {
         let config = DrizzleConfig::x2().with_kernel(DrizzleKernel::Point);
         let mut acc = DrizzleAccumulator::new(10, 10, 1, config);
 
-        let identity = TransformMatrix::identity();
+        let identity = Transform::identity();
         acc.add_image(image, &identity, 1.0);
 
         let result = acc.finalize();
@@ -900,7 +900,7 @@ mod tests {
     #[test]
     fn test_drizzle_stack_empty_paths() {
         let paths: Vec<std::path::PathBuf> = vec![];
-        let transforms: Vec<TransformMatrix> = vec![];
+        let transforms: Vec<Transform> = vec![];
         let config = DrizzleConfig::default();
 
         let result = drizzle_stack(
@@ -930,7 +930,7 @@ mod tests {
         let config = DrizzleConfig::x2();
         let mut acc = DrizzleAccumulator::new(50, 50, 3, config);
 
-        let identity = TransformMatrix::identity();
+        let identity = Transform::identity();
         acc.add_image(image, &identity, 1.0);
 
         let result = acc.finalize();
@@ -951,7 +951,7 @@ mod tests {
         let mut acc = DrizzleAccumulator::new(20, 20, 1, config);
 
         // Add with small translation
-        let transform = TransformMatrix::translation(0.5, 0.5);
+        let transform = Transform::translation(0.5, 0.5);
         acc.add_image(image, &transform, 1.0);
 
         let result = acc.finalize();

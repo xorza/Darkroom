@@ -14,7 +14,7 @@ pub mod sse;
 #[cfg(target_arch = "aarch64")]
 pub mod neon;
 
-use crate::registration::transform::TransformMatrix;
+use crate::registration::transform::Transform;
 
 /// Count inliers and compute score using SIMD acceleration.
 ///
@@ -26,7 +26,7 @@ use crate::registration::transform::TransformMatrix;
 pub(crate) fn count_inliers_simd(
     ref_points: &[(f64, f64)],
     target_points: &[(f64, f64)],
-    transform: &TransformMatrix,
+    transform: &Transform,
     threshold: f64,
 ) -> (Vec<usize>, usize) {
     let len = ref_points.len();
@@ -67,7 +67,7 @@ pub(crate) fn count_inliers_simd(
 pub(crate) fn count_inliers_scalar(
     ref_points: &[(f64, f64)],
     target_points: &[(f64, f64)],
-    transform: &TransformMatrix,
+    transform: &Transform,
     threshold: f64,
 ) -> (Vec<usize>, usize) {
     count_inliers_scalar_impl(ref_points, target_points, transform, threshold)
@@ -77,7 +77,7 @@ pub(crate) fn count_inliers_scalar(
 fn count_inliers_scalar(
     ref_points: &[(f64, f64)],
     target_points: &[(f64, f64)],
-    transform: &TransformMatrix,
+    transform: &Transform,
     threshold: f64,
 ) -> (Vec<usize>, usize) {
     count_inliers_scalar_impl(ref_points, target_points, transform, threshold)
@@ -87,7 +87,7 @@ fn count_inliers_scalar(
 fn count_inliers_scalar_impl(
     ref_points: &[(f64, f64)],
     target_points: &[(f64, f64)],
-    transform: &TransformMatrix,
+    transform: &Transform,
     threshold: f64,
 ) -> (Vec<usize>, usize) {
     let threshold_sq = threshold * threshold;
@@ -112,14 +112,14 @@ fn count_inliers_scalar_impl(
 mod tests {
     use super::*;
 
-    fn create_test_transform() -> TransformMatrix {
+    fn create_test_transform() -> Transform {
         // Simple translation: shift by (10, 5)
-        TransformMatrix::translation(10.0, 5.0)
+        Transform::translation(10.0, 5.0)
     }
 
-    fn create_similarity_transform() -> TransformMatrix {
+    fn create_similarity_transform() -> Transform {
         // Rotation of 30 degrees, scale 1.5, translation (10, 20)
-        TransformMatrix::similarity(10.0, 20.0, std::f64::consts::PI / 6.0, 1.5)
+        Transform::similarity(10.0, 20.0, std::f64::consts::PI / 6.0, 1.5)
     }
 
     #[test]

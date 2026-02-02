@@ -109,3 +109,49 @@ impl RegistrationConfig {
         );
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_config_default_values() {
+        let config = RegistrationConfig::default();
+        assert_eq!(config.transform_type, TransformType::Similarity);
+        assert_eq!(config.ransac_iterations, 1000);
+        assert!((config.ransac_threshold - 2.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_config_struct_init() {
+        let config = RegistrationConfig {
+            transform_type: TransformType::Euclidean,
+            ransac_iterations: 500,
+            ransac_threshold: 3.0,
+            max_stars_for_matching: 100,
+            ..Default::default()
+        };
+
+        assert_eq!(config.transform_type, TransformType::Euclidean);
+        assert_eq!(config.ransac_iterations, 500);
+        assert!((config.ransac_threshold - 3.0).abs() < 1e-10);
+        assert_eq!(config.max_stars_for_matching, 100);
+    }
+
+    #[test]
+    fn test_config_validation() {
+        // Valid config should not panic
+        let config = RegistrationConfig::default();
+        config.validate();
+    }
+
+    #[test]
+    #[should_panic(expected = "RANSAC iterations must be positive")]
+    fn test_config_invalid_iterations() {
+        let config = RegistrationConfig {
+            ransac_iterations: 0,
+            ..Default::default()
+        };
+        config.validate();
+    }
+}

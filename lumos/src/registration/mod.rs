@@ -71,7 +71,6 @@ pub(crate) mod ransac;
 pub(crate) mod spatial;
 pub(crate) mod transform;
 pub(crate) mod triangle;
-pub(crate) mod types;
 
 #[cfg(test)]
 mod tests;
@@ -85,8 +84,8 @@ pub use pipeline::{
 };
 
 // Core types needed by users
-pub use transform::{TransformMatrix, TransformType};
-pub use types::StarMatch;
+pub use transform::{Transform, TransformType};
+pub use triangle::StarMatch;
 
 // Configuration types
 pub use distortion::{

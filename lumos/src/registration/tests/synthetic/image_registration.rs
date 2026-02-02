@@ -8,7 +8,7 @@ use crate::{AstroImage, ImageDimensions};
 
 use crate::common::Buffer2;
 use crate::registration::interpolation::{InterpolationMethod, WarpConfig, warp_image};
-use crate::registration::transform::TransformMatrix;
+use crate::registration::transform::Transform;
 use crate::registration::{RegistrationConfig, Registrator, TransformType};
 use crate::star_detection::{BackgroundConfig, StarDetectionConfig, StarDetector};
 use crate::testing::synthetic::{self, StarFieldConfig};
@@ -52,14 +52,14 @@ fn transform_image(
     angle_rad: f64,
     scale: f64,
 ) -> Vec<f32> {
-    let transform = TransformMatrix::similarity(dx, dy, angle_rad, scale);
+    let transform = Transform::similarity(dx, dy, angle_rad, scale);
     let src_buf = Buffer2::new(width, height, src_pixels.to_vec());
     warp_image(&src_buf, width, height, &transform, &warp_config()).into_vec()
 }
 
 /// Apply a translation to an image.
 fn translate_image(src_pixels: &[f32], width: usize, height: usize, dx: f64, dy: f64) -> Vec<f32> {
-    let transform = TransformMatrix::translation(dx, dy);
+    let transform = Transform::translation(dx, dy);
     let src_buf = Buffer2::new(width, height, src_pixels.to_vec());
     warp_image(&src_buf, width, height, &transform, &warp_config()).into_vec()
 }

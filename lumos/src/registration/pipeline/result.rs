@@ -1,6 +1,6 @@
 //! Registration result and error types.
 
-use crate::registration::transform::TransformMatrix;
+use crate::registration::transform::Transform;
 
 /// Reason for RANSAC failure.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -100,7 +100,7 @@ impl std::error::Error for RegistrationError {}
 #[derive(Debug, Clone)]
 pub struct RegistrationResult {
     /// Computed transformation matrix.
-    pub transform: TransformMatrix,
+    pub transform: Transform,
 
     /// Matched star pairs as (reference_idx, target_idx).
     pub matched_stars: Vec<(usize, usize)>,
@@ -127,7 +127,7 @@ pub struct RegistrationResult {
 impl RegistrationResult {
     /// Create a new registration result.
     pub fn new(
-        transform: TransformMatrix,
+        transform: Transform,
         matched_stars: Vec<(usize, usize)>,
         residuals: Vec<f64>,
     ) -> Self {
@@ -170,5 +170,35 @@ impl RegistrationResult {
     pub fn with_elapsed(mut self, ms: f64) -> Self {
         self.elapsed_ms = ms;
         self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_registration_result_new() {
+        let transform = Transform::translation(1.0, 2.0);
+        let matches = vec![(0, 0), (1, 1), (2, 2)];
+        let residuals = vec![0.1, 0.2, 0.15];
+
+        let result = RegistrationResult::new(transform, matches, residuals);
+
+        assert_eq!(result.num_inliers, 3);
+        assert!(result.rms_error > 0.0);
+        assert!(result.max_error > 0.0);
+        assert!(result.quality_score >= 0.0 && result.quality_score <= 1.0);
+    }
+
+    #[test]
+    fn test_registration_error_display() {
+        let err = RegistrationError::InsufficientStars {
+            found: 5,
+            required: 10,
+        };
+        let msg = format!("{}", err);
+        assert!(msg.contains("5"));
+        assert!(msg.contains("10"));
     }
 }
