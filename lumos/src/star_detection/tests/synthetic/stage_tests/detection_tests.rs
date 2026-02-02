@@ -3,7 +3,7 @@
 //! Tests the peak detection and thresholding logic.
 
 use crate::star_detection::background::BackgroundMap;
-use crate::star_detection::candidate_detection::detect_stars;
+use crate::star_detection::candidate_detection::detect_stars_test;
 use crate::star_detection::tests::common::output::{
     gray_to_rgb_image_stretched, save_grayscale, save_image,
 };
@@ -70,7 +70,7 @@ fn test_detection_sparse() {
 
     // Detect candidates
     let det_config = StarDetectionConfig::default();
-    let candidates = detect_stars(&pixels, None, &background, &det_config);
+    let candidates = detect_stars_test(&pixels, None, &background, &det_config);
 
     println!("Ground truth: {} stars", ground_truth.len());
     println!("Detected candidates: {}", candidates.len());
@@ -164,7 +164,7 @@ fn test_detection_thresholds() {
             },
             ..Default::default()
         };
-        let candidates = detect_stars(&pixels, None, &background, &det_config);
+        let candidates = detect_stars_test(&pixels, None, &background, &det_config);
 
         let truth_positions: Vec<(f32, f32)> = ground_truth.iter().map(|s| (s.x, s.y)).collect();
         let candidate_positions: Vec<(usize, usize)> =
@@ -268,7 +268,7 @@ fn test_detection_area_filter() {
             },
             ..Default::default()
         };
-        let candidates = detect_stars(&pixels, None, &background, &det_config);
+        let candidates = detect_stars_test(&pixels, None, &background, &det_config);
 
         let truth_positions: Vec<(f32, f32)> = ground_truth.iter().map(|s| (s.x, s.y)).collect();
         let candidate_positions: Vec<(usize, usize)> =

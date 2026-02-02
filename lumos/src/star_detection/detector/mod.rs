@@ -17,7 +17,7 @@ use crate::common::Buffer2;
 
 use super::background::{BackgroundConfig, BackgroundMap};
 use super::buffer_pool::BufferPool;
-use super::candidate_detection::{self, detect_stars, detect_stars_with_pool};
+use super::candidate_detection::{self, detect_stars};
 use super::centroid::compute_centroid;
 use super::config::StarDetectionConfig;
 use super::convolution::matched_filter;
@@ -225,7 +225,7 @@ impl StarDetector {
             };
 
             let candidates =
-                detect_stars_with_pool(&grayscale_image, filtered, &background, &self.config, pool);
+                detect_stars(&grayscale_image, filtered, &background, &self.config, pool);
 
             pool.release_f32(convolution_scratch);
             candidates
@@ -319,7 +319,7 @@ impl StarDetector {
     ///
     /// Priority: manual expected_fwhm > auto-estimate > disabled
     fn determine_effective_fwhm(
-        &self,
+        &mut self,
         pixels: &Buffer2<f32>,
         background: &BackgroundMap,
     ) -> fwhm_estimation::EffectiveFwhm {
@@ -337,7 +337,7 @@ impl StarDetector {
 
     /// Perform first-pass detection and estimate FWHM from bright stars.
     fn estimate_fwhm_from_bright_stars(
-        &self,
+        &mut self,
         pixels: &Buffer2<f32>,
         background: &BackgroundMap,
     ) -> fwhm_estimation::FwhmEstimate {
@@ -364,7 +364,8 @@ impl StarDetector {
             ..self.config.clone()
         };
 
-        let candidates = detect_stars(pixels, None, background, &first_pass_config);
+        let pool = self.buffer_pool.as_mut().unwrap();
+        let candidates = detect_stars(pixels, None, background, &first_pass_config, pool);
         tracing::debug!(
             "FWHM estimation: first pass detected {} bright star candidates",
             candidates.len()

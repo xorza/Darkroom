@@ -3,6 +3,7 @@
 use super::{detect_stars, extract_candidates, label_map_from_mask_with_connectivity};
 use crate::common::{BitBuffer2, Buffer2};
 use crate::star_detection::background::{BackgroundConfig, BackgroundMap};
+use crate::star_detection::buffer_pool::BufferPool;
 use crate::star_detection::config::{DeblendConfig, FilteringConfig, StarDetectionConfig};
 use crate::star_detection::mask_dilation::dilate_mask;
 use crate::star_detection::threshold_mask::create_threshold_mask;
@@ -213,6 +214,7 @@ fn bench_detect_stars_6k_50000(b: ::bench::Bencher) {
     let pixels = benchmark_star_field(6144, 6144, 50000, 0.1, 0.01, 42);
     let background = crate::testing::estimate_background(&pixels, BackgroundConfig::default());
     let config = StarDetectionConfig::for_crowded_field();
+    let mut pool = BufferPool::new(pixels.width(), pixels.height());
 
     b.bench(|| {
         black_box(detect_stars(
@@ -220,6 +222,7 @@ fn bench_detect_stars_6k_50000(b: ::bench::Bencher) {
             black_box(None),
             black_box(&background),
             black_box(&config),
+            &mut pool,
         ))
     });
 }

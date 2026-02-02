@@ -4,7 +4,7 @@
 
 use crate::common::Buffer2;
 use crate::star_detection::background::{BackgroundConfig, BackgroundMap};
-use crate::star_detection::candidate_detection::detect_stars;
+use crate::star_detection::candidate_detection::detect_stars_test;
 use crate::star_detection::tests::common::output::{
     gray_to_rgb_image_stretched, save_grayscale, save_image,
 };
@@ -84,7 +84,7 @@ fn test_deblend_star_pair() {
         ..Default::default()
     };
 
-    let candidates = detect_stars(&pixels_buf, None, &background, &config);
+    let candidates = detect_stars_test(&pixels_buf, None, &background, &config);
 
     // Create overlay
     let mut img = gray_to_rgb_image_stretched(&pixels, width, height);
@@ -192,7 +192,7 @@ fn test_deblend_chain() {
         ..Default::default()
     };
 
-    let candidates = detect_stars(&pixels_buf, None, &background, &config);
+    let candidates = detect_stars_test(&pixels_buf, None, &background, &config);
 
     // Create overlay
     let mut img = gray_to_rgb_image_stretched(&pixels, width, height);
@@ -302,7 +302,7 @@ fn test_deblend_unequal_pair() {
         ..Default::default()
     };
 
-    let candidates = detect_stars(&pixels_buf, None, &background, &config);
+    let candidates = detect_stars_test(&pixels_buf, None, &background, &config);
 
     // Create overlay
     let mut img = gray_to_rgb_image_stretched(&pixels, width, height);

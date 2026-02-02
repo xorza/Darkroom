@@ -7,8 +7,23 @@ use super::label_map_from_raw;
 use super::*;
 use crate::common::{BitBuffer2, Buffer2};
 use crate::star_detection::background::{BackgroundConfig, BackgroundMap};
+use crate::star_detection::buffer_pool::BufferPool;
 use crate::star_detection::config::FilteringConfig;
 use crate::testing::synthetic::background_map;
+
+/// Test utility: detect stars with automatic buffer pool management.
+///
+/// Creates a temporary buffer pool internally. For benchmarks, use
+/// `detect_stars_with_pool` directly with a pre-allocated pool.
+pub(crate) fn detect_stars_test(
+    pixels: &Buffer2<f32>,
+    filtered: Option<&Buffer2<f32>>,
+    background: &BackgroundMap,
+    config: &StarDetectionConfig,
+) -> Vec<StarCandidate> {
+    let mut pool = BufferPool::new(pixels.width(), pixels.height());
+    detect_stars(pixels, filtered, background, config, &mut pool)
+}
 
 /// Default deblend config for tests
 const TEST_DEBLEND_CONFIG: DeblendConfig = DeblendConfig {
@@ -66,7 +81,7 @@ mod detect_stars_tests {
             },
         );
         let config = StarDetectionConfig::default();
-        let candidates = detect_stars(&pixels, None, &bg, &config);
+        let candidates = detect_stars_test(&pixels, None, &bg, &config);
 
         assert_eq!(candidates.len(), 1, "Should detect exactly one star");
         let star = &candidates[0];
@@ -116,7 +131,7 @@ mod detect_stars_tests {
             },
             ..Default::default()
         };
-        let candidates = detect_stars(&pixels_buf, None, &bg, &config);
+        let candidates = detect_stars_test(&pixels_buf, None, &bg, &config);
 
         assert_eq!(candidates.len(), 3, "Should detect three stars");
     }
@@ -142,7 +157,7 @@ mod detect_stars_tests {
             },
             ..Default::default()
         };
-        let candidates = detect_stars(&pixels, None, &bg, &config);
+        let candidates = detect_stars_test(&pixels, None, &bg, &config);
 
         assert!(candidates.is_empty(), "Edge star should be rejected");
     }
@@ -172,7 +187,7 @@ mod detect_stars_tests {
             },
             ..Default::default()
         };
-        let candidates = detect_stars(&pixels_buf, None, &bg, &config);
+        let candidates = detect_stars_test(&pixels_buf, None, &bg, &config);
 
         assert!(candidates.is_empty(), "Single pixel should be rejected");
     }
@@ -192,7 +207,7 @@ mod detect_stars_tests {
             },
         );
         let config = StarDetectionConfig::default();
-        let candidates = detect_stars(&pixels_buf, None, &bg, &config);
+        let candidates = detect_stars_test(&pixels_buf, None, &bg, &config);
 
         assert!(candidates.is_empty(), "Uniform image should have no stars");
     }
@@ -343,8 +358,8 @@ mod extract_candidates_tests {
 
         assert_eq!(candidates.len(), 1);
         let c = &candidates[0];
-        assert_eq!(c.width(), 3);
-        assert_eq!(c.height(), 2);
+        assert_eq!(c.bbox.width(), 3);
+        assert_eq!(c.bbox.height(), 2);
     }
 
     #[test]
@@ -482,8 +497,8 @@ mod extract_candidates_tests {
         assert_eq!(c.bbox.max.x, 1);
         assert_eq!(c.bbox.min.y, 1);
         assert_eq!(c.bbox.max.y, 1);
-        assert_eq!(c.width(), 1);
-        assert_eq!(c.height(), 1);
+        assert_eq!(c.bbox.width(), 1);
+        assert_eq!(c.bbox.height(), 1);
         assert_eq!(c.peak_x, 1);
         assert_eq!(c.peak_y, 1);
     }
@@ -1275,7 +1290,7 @@ mod filtered_image_tests {
         let config = StarDetectionConfig::default();
 
         // Detection with filtered image
-        let candidates = detect_stars(&pixels, Some(&filtered), &bg, &config);
+        let candidates = detect_stars_test(&pixels, Some(&filtered), &bg, &config);
 
         assert_eq!(
             candidates.len(),
@@ -1324,7 +1339,7 @@ mod filtered_image_tests {
         let config = StarDetectionConfig::default();
 
         // Without filtered image
-        let candidates_unfiltered = detect_stars(&pixels, None, &bg, &config);
+        let candidates_unfiltered = detect_stars_test(&pixels, None, &bg, &config);
 
         // Create background-subtracted image
         let filtered: Vec<f32> = pixels
@@ -1336,7 +1351,7 @@ mod filtered_image_tests {
         let filtered = Buffer2::new(width, height, filtered);
 
         // With filtered image
-        let candidates_filtered = detect_stars(&pixels, Some(&filtered), &bg, &config);
+        let candidates_filtered = detect_stars_test(&pixels, Some(&filtered), &bg, &config);
 
         // Both should detect same number of stars
         assert_eq!(
@@ -1407,7 +1422,7 @@ mod sigma_threshold_tests {
         let bg = background_map::uniform(width, height, background_level, noise_level);
         let config = StarDetectionConfig::default();
 
-        let candidates = detect_stars(&pixels, None, &bg, &config);
+        let candidates = detect_stars_test(&pixels, None, &bg, &config);
 
         // Should only detect the bright star, not the faint one
         assert_eq!(
@@ -1460,7 +1475,7 @@ mod sigma_threshold_tests {
             },
             ..Default::default()
         };
-        let candidates_high = detect_stars(&pixels, None, &bg, &config_high);
+        let candidates_high = detect_stars_test(&pixels, None, &bg, &config_high);
 
         // Medium threshold (4-sigma) - should detect 2 stars
         let config_med = StarDetectionConfig {
@@ -1470,7 +1485,7 @@ mod sigma_threshold_tests {
             },
             ..Default::default()
         };
-        let candidates_med = detect_stars(&pixels, None, &bg, &config_med);
+        let candidates_med = detect_stars_test(&pixels, None, &bg, &config_med);
 
         // Low threshold (2-sigma) - should detect all 3
         let config_low = StarDetectionConfig {
@@ -1480,7 +1495,7 @@ mod sigma_threshold_tests {
             },
             ..Default::default()
         };
-        let candidates_low = detect_stars(&pixels, None, &bg, &config_low);
+        let candidates_low = detect_stars_test(&pixels, None, &bg, &config_low);
 
         assert!(
             candidates_high.len() <= candidates_med.len(),
@@ -1590,7 +1605,7 @@ mod dilation_tests {
         );
         let config = StarDetectionConfig::default();
 
-        let candidates = detect_stars(&pixels, None, &bg, &config);
+        let candidates = detect_stars_test(&pixels, None, &bg, &config);
 
         // With dilation, the fragmented pixels should be connected into ONE star
         assert_eq!(
@@ -1622,7 +1637,7 @@ mod regression_tests {
         );
         let config = StarDetectionConfig::default();
 
-        let candidates = detect_stars(&pixels, None, &bg, &config);
+        let candidates = detect_stars_test(&pixels, None, &bg, &config);
 
         // Should detect some stars (exact count depends on random placement,
         // edge margin, overlaps, SNR thresholds, etc.)
@@ -1658,7 +1673,7 @@ mod regression_tests {
             ..Default::default()
         };
 
-        let candidates = detect_stars(&pixels, None, &bg, &config);
+        let candidates = detect_stars_test(&pixels, None, &bg, &config);
 
         // Should detect some stars (exact count depends on overlaps and edge margin)
         assert!(
@@ -1698,8 +1713,8 @@ mod regression_tests {
         let config = StarDetectionConfig::default();
 
         // Run detection multiple times - should give identical results
-        let candidates1 = detect_stars(&pixels, None, &bg, &config);
-        let candidates2 = detect_stars(&pixels, None, &bg, &config);
+        let candidates1 = detect_stars_test(&pixels, None, &bg, &config);
+        let candidates2 = detect_stars_test(&pixels, None, &bg, &config);
 
         assert_eq!(
             candidates1.len(),
@@ -1822,7 +1837,7 @@ mod quick_benches {
         let background = background_map::uniform(1024, 1024, 0.1, 0.01);
         let config = StarDetectionConfig::default();
 
-        b.bench(|| detect_stars(&pixels, Some(&filtered), &background, &config));
+        b.bench(|| detect_stars_test(&pixels, Some(&filtered), &background, &config));
     }
 
     #[quick_bench(warmup_iters = 1, iters = 3)]
@@ -1832,6 +1847,6 @@ mod quick_benches {
         let background = background_map::uniform(6144, 6144, 0.1, 0.01);
         let config = StarDetectionConfig::default();
 
-        b.bench(|| detect_stars(&pixels, Some(&filtered), &background, &config));
+        b.bench(|| detect_stars_test(&pixels, Some(&filtered), &background, &config));
     }
 }
