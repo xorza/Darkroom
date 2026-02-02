@@ -73,7 +73,7 @@ fn bench_deblend_multi_threshold_6k_dense(b: ::bench::Bencher) {
     };
 
     b.bench(|| {
-        for component in &components {
+        for component in components.iter() {
             black_box(deblend_multi_threshold(
                 black_box(component),
                 black_box(&pixels),
