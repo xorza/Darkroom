@@ -77,6 +77,29 @@ For crowded fields, iterative refinement improves accuracy:
 
 This is similar to Photutils' recommendation to use source masks for accurate background estimation.
 
+## Adaptive Sigma Thresholding
+
+The `adaptive_sigma` feature provides per-pixel detection thresholds that vary based on local image contrast. This is useful for images with nebulosity or other structured backgrounds where a fixed sigma threshold would cause false detections in high-contrast regions.
+
+### How It Works
+
+During tile statistics computation, local contrast is measured using the coefficient of variation (CV = σ/median). Higher contrast regions get higher detection thresholds:
+
+- Low contrast (uniform sky): threshold ≈ `base_sigma` (default 3.0)
+- High contrast (nebulae): threshold up to `max_sigma` (default 8.0)
+
+### Important: Mutual Exclusivity with Refinement
+
+**Adaptive sigma and iterative refinement are mutually exclusive.** When `iterations > 0`, the `adaptive_sigma` configuration is ignored and no adaptive threshold buffer is allocated.
+
+Rationale:
+- **Refinement** improves background accuracy by masking detected sources and re-estimating. After refinement, the background closely follows the true sky, making adaptive thresholds less necessary.
+- **Adaptive sigma** compensates for imperfect background estimation in single-pass mode by raising thresholds in noisy regions.
+
+Choose one approach:
+- `iterations > 0`: Use refinement for accurate background in crowded fields
+- `iterations == 0` with `adaptive_sigma`: Use adaptive thresholds for nebulous regions without refinement overhead
+
 ## Configuration
 
 ```rust

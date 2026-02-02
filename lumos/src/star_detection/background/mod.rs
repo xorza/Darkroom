@@ -46,11 +46,16 @@ impl BackgroundMap {
     /// Buffers are allocated but not filled with meaningful values.
     /// Use `estimate` to populate them.
     ///
+    /// Note: `adaptive_sigma` is only allocated when `config.adaptive_sigma` is set
+    /// AND `config.iterations == 0`. When refinement is enabled, adaptive thresholding
+    /// is not used because the refined background already accounts for sources.
+    ///
     /// # Panics
     /// Panics if config validation fails.
     pub fn new_uninit(width: usize, height: usize, config: BackgroundConfig) -> Self {
         config.validate();
-        let has_adaptive = config.adaptive_sigma.is_some();
+        // Only use adaptive sigma when no refinement iterations - refinement makes it redundant
+        let has_adaptive = config.adaptive_sigma.is_some() && config.iterations == 0;
         Self {
             tile_grid: TileGrid::new_uninit(width, height, config.tile_size),
             config,
@@ -66,11 +71,16 @@ impl BackgroundMap {
 
     /// Create a BackgroundMap by acquiring buffers from a pool.
     ///
+    /// Note: `adaptive_sigma` is only allocated when `config.adaptive_sigma` is set
+    /// AND `config.iterations == 0`. When refinement is enabled, adaptive thresholding
+    /// is not used because the refined background already accounts for sources.
+    ///
     /// # Panics
     /// Panics if config validation fails.
     pub fn from_pool(pool: &mut BufferPool, config: BackgroundConfig) -> Self {
         config.validate();
-        let has_adaptive = config.adaptive_sigma.is_some();
+        // Only use adaptive sigma when no refinement iterations - refinement makes it redundant
+        let has_adaptive = config.adaptive_sigma.is_some() && config.iterations == 0;
         let width = pool.width();
         let height = pool.height();
         Self {
@@ -129,12 +139,20 @@ impl BackgroundMap {
             "Image must be at least tile_size x tile_size"
         );
 
+        // Only compute adaptive sigma stats if we have the buffer allocated
+        // (i.e., adaptive_sigma config is set AND iterations == 0)
+        let adaptive_config = if self.adaptive_sigma.is_some() {
+            self.config.adaptive_sigma
+        } else {
+            None
+        };
+
         self.tile_grid.compute(
             pixels,
             None,
             0,
             self.config.sigma_clip_iterations,
-            self.config.adaptive_sigma,
+            adaptive_config,
         );
 
         interpolate_from_grid(
@@ -149,14 +167,19 @@ impl BackgroundMap {
     ///
     /// Call this after `estimate` when `config.iterations > 0`.
     /// Requires pre-allocated bit buffers for mask and scratch space.
+    ///
+    /// Note: `adaptive_sigma` is not used during refinement. When `iterations > 0`,
+    /// the constructors don't allocate the adaptive_sigma buffer even if configured.
     pub fn refine(
         &mut self,
         pixels: &Buffer2<f32>,
         scratch1: &mut BitBuffer2,
         scratch2: &mut BitBuffer2,
     ) {
-        // Clear adaptive_sigma since refinement doesn't use it
-        self.adaptive_sigma = None;
+        debug_assert!(
+            self.adaptive_sigma.is_none(),
+            "adaptive_sigma should not be allocated when refinement is enabled"
+        );
 
         let max_tile_pixels = self.config.tile_size * self.config.tile_size;
         let min_pixels = (max_tile_pixels as f32 * self.config.min_unmasked_fraction) as usize;

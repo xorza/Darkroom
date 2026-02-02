@@ -1089,3 +1089,53 @@ fn test_regular_background_has_no_adaptive_sigma() {
     // Regular BackgroundMap should not have adaptive_sigma
     assert!(bg.adaptive_sigma.is_none());
 }
+
+#[test]
+fn test_adaptive_sigma_disabled_when_iterations_enabled() {
+    // When iterations > 0, adaptive_sigma should not be allocated even if configured
+    let width = 64;
+    let height = 64;
+    let pixels = Buffer2::new(width, height, vec![0.5; width * height]);
+
+    let mut bg = BackgroundMap::new_uninit(
+        width,
+        height,
+        BackgroundConfig {
+            iterations: 1,                                        // Enable refinement
+            adaptive_sigma: Some(AdaptiveSigmaConfig::default()), // Configure adaptive
+            ..Default::default()
+        },
+    );
+    bg.estimate(&pixels);
+
+    // adaptive_sigma should be None because iterations > 0
+    assert!(
+        bg.adaptive_sigma.is_none(),
+        "adaptive_sigma should not be allocated when iterations > 0"
+    );
+}
+
+#[test]
+fn test_adaptive_sigma_enabled_when_no_iterations() {
+    // When iterations == 0 and adaptive_sigma is configured, it should be allocated
+    let width = 64;
+    let height = 64;
+    let pixels = Buffer2::new(width, height, vec![0.5; width * height]);
+
+    let mut bg = BackgroundMap::new_uninit(
+        width,
+        height,
+        BackgroundConfig {
+            iterations: 0,                                        // No refinement
+            adaptive_sigma: Some(AdaptiveSigmaConfig::default()), // Configure adaptive
+            ..Default::default()
+        },
+    );
+    bg.estimate(&pixels);
+
+    // adaptive_sigma should be Some because iterations == 0
+    assert!(
+        bg.adaptive_sigma.is_some(),
+        "adaptive_sigma should be allocated when iterations == 0 and adaptive_sigma is configured"
+    );
+}
