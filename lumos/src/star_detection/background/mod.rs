@@ -53,37 +53,22 @@ impl BackgroundMap {
 
     /// Estimate background from image pixels using the given configuration.
     ///
-    /// Uses a tiled approach with sigma-clipped statistics:
-    /// 1. Divide image into tiles of `tile_size` pixels
-    /// 2. For each tile, compute sigma-clipped median and standard deviation
-    /// 3. Bilinearly interpolate between tile centers to get per-pixel values
-    ///
-    /// If `config.iterations > 0`, uses iterative refinement (SExtractor-style):
-    /// 1. Estimate initial background
-    /// 2. Detect pixels above threshold (potential objects)
-    /// 3. Create dilated mask of detected regions
-    /// 4. Re-estimate background excluding masked pixels
-    /// 5. Repeat for specified iterations
-    ///
-    /// This provides cleaner background maps for crowded fields by excluding
-    /// stars and other bright objects from the estimation.
-    ///
-    /// If `config.adaptive_sigma` is set, also computes per-pixel adaptive
-    /// detection thresholds based on local contrast. Use this for images
-    /// with variable nebulosity, gradients, or other complex backgrounds.
-    /// The adaptive sigma is higher in high-contrast regions (nebulae, gradients)
-    /// and lower in uniform sky regions, reducing false positives while
-    /// maintaining sensitivity in clean areas.
+    /// Convenience constructor that allocates buffers and estimates background.
+    /// For buffer pooling scenarios, use `new_uninit` + `estimate` + `refine` instead.
     pub fn new(pixels: &Buffer2<f32>, config: &BackgroundConfig) -> Self {
         let has_adaptive = config.adaptive_sigma.is_some();
-        let mut background = Self::new_uninit(pixels.width(), pixels.height(), has_adaptive);
-        background.estimate(pixels, config);
+        let mut bg = Self::new_uninit(pixels.width(), pixels.height(), has_adaptive);
+        bg.estimate(pixels, config);
 
         if config.iterations > 0 {
-            refine(&mut background, pixels, config);
+            let width = pixels.width();
+            let height = pixels.height();
+            let mut mask = BitBuffer2::new_filled(width, height, false);
+            let mut scratch = BitBuffer2::new_filled(width, height, false);
+            bg.refine(pixels, config, &mut mask, &mut scratch);
         }
 
-        background
+        bg
     }
 
     /// Get image width.
@@ -103,7 +88,7 @@ impl BackgroundMap {
     /// This variant reuses the existing buffers, avoiding allocation overhead.
     /// Use with `new_uninit` for buffer pooling scenarios.
     ///
-    /// For iterative refinement, call `refine_into` after this method.
+    /// For iterative refinement, call `refine` after this method.
     ///
     /// # Panics
     /// Panics if the buffer dimensions don't match the image dimensions.
@@ -141,15 +126,31 @@ impl BackgroundMap {
     ///
     /// Call this after `estimate` when `config.iterations > 0`.
     /// Requires pre-allocated bit buffers for mask and scratch space.
-    pub fn refine_into(
+    pub fn refine(
         &mut self,
         pixels: &Buffer2<f32>,
         config: &BackgroundConfig,
         mask: &mut BitBuffer2,
         scratch: &mut BitBuffer2,
     ) {
-        if config.iterations > 0 {
-            refine_with_buffers(self, pixels, config, mask, scratch);
+        for _iter in 0..config.iterations {
+            create_object_mask(
+                pixels,
+                self,
+                config.sigma_threshold,
+                config.mask_dilation,
+                mask,
+                scratch,
+            );
+
+            estimate_background_masked(
+                pixels,
+                config.tile_size,
+                mask,
+                config.min_unmasked_fraction,
+                config.sigma_clip_iterations,
+                self,
+            );
         }
     }
 }
@@ -187,44 +188,6 @@ fn interpolate_from_grid(grid: &TileGrid, output: &mut BackgroundMap) {
             interpolate_row(bg_row, noise_row, adaptive_row, y, grid);
         }
     });
-}
-
-fn refine(background: &mut BackgroundMap, pixels: &Buffer2<f32>, config: &BackgroundConfig) {
-    let width = pixels.width();
-    let height = pixels.height();
-
-    let mut mask = BitBuffer2::new_filled(width, height, false);
-    let mut scratch = BitBuffer2::new_filled(width, height, false);
-
-    refine_with_buffers(background, pixels, config, &mut mask, &mut scratch);
-}
-
-fn refine_with_buffers(
-    background: &mut BackgroundMap,
-    pixels: &Buffer2<f32>,
-    config: &BackgroundConfig,
-    mask: &mut BitBuffer2,
-    scratch: &mut BitBuffer2,
-) {
-    for _iter in 0..config.iterations {
-        create_object_mask(
-            pixels,
-            background,
-            config.sigma_threshold,
-            config.mask_dilation,
-            mask,
-            scratch,
-        );
-
-        estimate_background_masked(
-            pixels,
-            config.tile_size,
-            mask,
-            config.min_unmasked_fraction,
-            config.sigma_clip_iterations,
-            background,
-        );
-    }
 }
 
 /// Create a mask of pixels that are likely objects (above threshold).

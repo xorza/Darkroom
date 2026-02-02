@@ -214,7 +214,7 @@ impl StarDetector {
             {
                 let pool = self.buffer_pool.as_mut().unwrap();
                 let background = pool.acquire_background_map(has_adaptive);
-                background.refine_into(
+                background.refine(
                     &grayscale_image,
                     &self.config.background,
                     &mut mask,
