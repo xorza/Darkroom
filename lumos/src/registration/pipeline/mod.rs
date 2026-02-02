@@ -12,6 +12,12 @@
 //! 5. **Refinement** - Optimize transformation using all inliers
 //! 6. **Warping** - Apply transformation to align target to reference
 
+mod config;
+mod result;
+
+pub use config::RegistrationConfig;
+pub use result::RegistrationResult;
+
 use std::time::Instant;
 
 use crate::ImageDimensions;
@@ -21,9 +27,7 @@ use crate::registration::{
     phase_correlation::{PhaseCorrelationConfig, PhaseCorrelator},
     ransac::{RansacConfig, RansacEstimator},
     triangle::{TriangleMatchConfig, match_triangles},
-    types::{
-        RegistrationConfig, RegistrationError, RegistrationResult, TransformMatrix, TransformType,
-    },
+    types::{RegistrationError, TransformMatrix, TransformType},
 };
 use crate::star_detection::Star;
 

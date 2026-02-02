@@ -79,14 +79,13 @@ mod tests;
 // Re-export main public API types
 // High-level pipeline API (primary entry point)
 pub use pipeline::{
-    MultiScaleConfig, MultiScaleRegistrator, Registrator, quick_register, quick_register_stars,
-    warp_to_reference_image,
+    MultiScaleConfig, MultiScaleRegistrator, RegistrationConfig, RegistrationResult, Registrator,
+    quick_register, quick_register_stars, warp_to_reference_image,
 };
 
 // Core types needed by users
 pub use types::{
-    RansacFailureReason, RegistrationConfig, RegistrationError, RegistrationResult, StarMatch,
-    TransformMatrix, TransformType,
+    RansacFailureReason, RegistrationError, StarMatch, TransformMatrix, TransformType,
 };
 
 // GPU-accelerated warping

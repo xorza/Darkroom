@@ -1,6 +1,7 @@
 //! Tests for core registration types.
 
 use super::*;
+use crate::registration::pipeline::{RegistrationConfig, RegistrationResult};
 use std::f64::consts::PI;
 
 const EPSILON: f64 = 1e-10;
