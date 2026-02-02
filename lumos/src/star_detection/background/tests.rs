@@ -21,7 +21,7 @@ fn test_uniform_background() {
 
     for y in 0..height {
         for x in 0..width {
-            let val = bg.get_background(x, y);
+            let val = bg.background[(x, y)];
             assert!(
                 (val - 0.5).abs() < 0.01,
                 "Background at ({}, {}) = {}, expected ~0.5",
@@ -53,8 +53,8 @@ fn test_gradient_background() {
         },
     );
 
-    let corner_00 = bg.get_background(0, 0);
-    let corner_end = bg.get_background(127, 127);
+    let corner_00 = bg.background[(0, 0)];
+    let corner_end = bg.background[(127, 127)];
     assert!(corner_end > corner_00, "Gradient not preserved");
 }
 
@@ -79,7 +79,7 @@ fn test_background_with_stars() {
     );
 
     // Median is robust to outliers
-    let center_bg = bg.get_background(64, 64);
+    let center_bg = bg.background[(64, 64)];
     assert!(
         (center_bg - 0.1).abs() < 0.05,
         "Background at star = {}, expected ~0.1",
@@ -101,7 +101,7 @@ fn test_noise_estimation() {
         },
     );
 
-    let noise = bg.get_noise(64, 64);
+    let noise = bg.noise[(64, 64)];
     assert!(noise < 0.01, "Noise = {}, expected near zero", noise);
 }
 
@@ -121,8 +121,8 @@ fn test_non_square_image() {
 
     assert_eq!(bg.width(), width);
     assert_eq!(bg.height(), height);
-    assert!((bg.get_background(0, 0) - 0.4).abs() < 0.01);
-    assert!((bg.get_background(255, 63) - 0.4).abs() < 0.01);
+    assert!((bg.background[(0, 0)] - 0.4).abs() < 0.01);
+    assert!((bg.background[(255, 63)] - 0.4).abs() < 0.01);
 }
 
 #[test]
@@ -145,7 +145,7 @@ fn test_sigma_clipping_rejects_outliers() {
         },
     );
 
-    let bg_val = bg.get_background(32, 32);
+    let bg_val = bg.background[(32, 32)];
     assert!(
         (bg_val - 0.2).abs() < 0.05,
         "Background = {}, expected ~0.2",
@@ -178,7 +178,7 @@ fn test_interpolation_produces_valid_values() {
     // Sample every 4th pixel instead of every pixel
     for y in (0..height).step_by(4) {
         for x in (0..width).step_by(4) {
-            let val = bg.get_background(x, y);
+            let val = bg.background[(x, y)];
             assert!(val.is_finite(), "NaN/Inf at ({},{})", x, y);
             assert!(
                 (0.0..=1.0).contains(&val),
@@ -205,9 +205,9 @@ fn test_large_image() {
         },
     );
 
-    assert!((bg.get_background(0, 0) - 0.33).abs() < 0.01);
-    assert!((bg.get_background(127, 127) - 0.33).abs() < 0.01);
-    assert!((bg.get_background(255, 255) - 0.33).abs() < 0.01);
+    assert!((bg.background[(0, 0)] - 0.33).abs() < 0.01);
+    assert!((bg.background[(127, 127)] - 0.33).abs() < 0.01);
+    assert!((bg.background[(255, 255)] - 0.33).abs() < 0.01);
 }
 
 #[test]
@@ -227,7 +227,7 @@ fn test_different_tile_sizes() {
             },
         );
         assert!(
-            (bg.get_background(64, 64) - 0.5).abs() < 0.01,
+            (bg.background[(64, 64)] - 0.5).abs() < 0.01,
             "Failed for tile_size={}",
             tile_size
         );
@@ -293,7 +293,7 @@ fn test_iterative_background_uniform() {
     // All background values should be close to 0.5
     for y in (0..height).step_by(10) {
         for x in (0..width).step_by(10) {
-            let val = bg.get_background(x, y);
+            let val = bg.background[(x, y)];
             assert!(
                 (val - 0.5).abs() < 0.01,
                 "Background at ({}, {}) = {}, expected ~0.5",
@@ -354,8 +354,8 @@ fn test_iterative_background_with_bright_stars() {
     // Check background at a point away from stars
     let test_x = 16;
     let test_y = 64;
-    let simple_bg = bg_simple.get_background(test_x, test_y);
-    let iter_bg = bg_iterative.get_background(test_x, test_y);
+    let simple_bg = bg_simple.background[(test_x, test_y)];
+    let iter_bg = bg_iterative.background[(test_x, test_y)];
 
     // Both should be close to 0.1, but iterative should be at least as good
     assert!(
@@ -400,8 +400,8 @@ fn test_iterative_background_preserves_gradient() {
     let bg = BackgroundMap::new(&pixels, &config);
 
     // Gradient should be preserved
-    let corner_00 = bg.get_background(0, 0);
-    let corner_end = bg.get_background(63, 63);
+    let corner_00 = bg.background[(0, 0)];
+    let corner_end = bg.background[(63, 63)];
     assert!(
         corner_end > corner_00,
         "Gradient not preserved: corner_00={}, corner_end={}",
@@ -434,7 +434,7 @@ fn test_iterative_background_zero_iterations() {
     };
     let bg = BackgroundMap::new(&pixels, &config);
 
-    let val = bg.get_background(32, 32);
+    let val = bg.background[(32, 32)];
     assert!(
         (val - 0.3).abs() < 0.01,
         "Background {} should be ~0.3",

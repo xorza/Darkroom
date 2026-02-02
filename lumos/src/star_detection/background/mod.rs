@@ -15,7 +15,7 @@ mod tile_grid;
 
 use crate::common::{BitBuffer2, Buffer2};
 use common::parallel;
-use rayon::prelude::*;
+use rayon::iter::ParallelIterator;
 
 use tile_grid::TileGrid;
 
@@ -94,20 +94,6 @@ impl BackgroundMap {
     #[inline]
     pub fn height(&self) -> usize {
         self.background.height()
-    }
-
-    /// Get background value at a pixel position.
-    #[allow(dead_code)] // Public API for external use
-    #[inline]
-    pub fn get_background(&self, x: usize, y: usize) -> f32 {
-        self.background[(x, y)]
-    }
-
-    /// Get noise estimate at a pixel position.
-    #[allow(dead_code)] // Public API for external use
-    #[inline]
-    pub fn get_noise(&self, x: usize, y: usize) -> f32 {
-        self.noise[(x, y)]
     }
 }
 
@@ -224,18 +210,6 @@ fn estimate_background_masked(
     sigma_clip_iterations: usize,
     output: &mut BackgroundMap,
 ) {
-    let width = pixels.width();
-    let height = pixels.height();
-
-    assert!(
-        (16..=256).contains(&tile_size),
-        "Tile size must be between 16 and 256"
-    );
-    assert!(
-        width >= tile_size && height >= tile_size,
-        "Image must be at least tile_size x tile_size"
-    );
-
     let max_tile_pixels = tile_size * tile_size;
     let min_pixels = (max_tile_pixels as f32 * min_unmasked_fraction) as usize;
 
@@ -248,27 +222,7 @@ fn estimate_background_masked(
         None, // No adaptive thresholding during refinement
     );
 
-    output.background = Buffer2::new_filled(width, height, 0.0);
-    output.noise = Buffer2::new_filled(width, height, 0.0);
-    output.adaptive_sigma = None;
-
-    parallel::par_chunks_auto_aligned_zip2(
-        output.background.pixels_mut(),
-        output.noise.pixels_mut(),
-        width,
-    )
-    .for_each(|(chunk_start_row, (bg_chunk, noise_chunk))| {
-        let rows_in_chunk = bg_chunk.len() / width;
-
-        for local_y in 0..rows_in_chunk {
-            let y = chunk_start_row + local_y;
-            let row_offset = local_y * width;
-            let bg_row = &mut bg_chunk[row_offset..row_offset + width];
-            let noise_row = &mut noise_chunk[row_offset..row_offset + width];
-
-            interpolate_row(bg_row, noise_row, None, y, &grid);
-        }
-    });
+    *output = interpolate_from_grid(pixels, &grid);
 }
 
 /// Interpolate an entire row using segment-based bilinear interpolation.
