@@ -17,7 +17,7 @@ use imaginarium::drawing::draw_circle;
 
 #[test]
 #[ignore] // Requires LUMOS_CALIBRATION_DIR
-fn test_detect_dense4() {
+fn test_detect_rho_opiuchi() {
     init_tracing();
 
     let Some(cal_dir) = calibration_dir() else {
@@ -121,12 +121,12 @@ fn test_detect_dense4() {
         }
     }
 
-    // Load original image for visualization (RGB for colored circles)
+    // Load original image for visualization (RGB_F32 for drawing functions)
     let mut output_img = imaginarium::Image::read_file(&image_path)
         .expect("Failed to load image")
         .packed()
-        .convert(ColorFormat::RGB_U8)
-        .expect("Failed to convert to RGB");
+        .convert(ColorFormat::RGB_F32)
+        .expect("Failed to convert to RGB_F32");
 
     // Draw circles around detected stars (top 500 by flux)
     let num_to_draw = result.stars.len().min(500);
@@ -134,6 +134,11 @@ fn test_detect_dense4() {
         let radius = (star.fwhm * 1.5).max(3.0);
         draw_circle(&mut output_img, star.x, star.y, radius, Color::GREEN, 1.0);
     }
+
+    // Convert back to RGB_U8 for saving
+    let output_img = output_img
+        .convert(ColorFormat::RGB_U8)
+        .expect("Failed to convert to RGB_U8");
 
     // Save output
     let output_path = test_output_path("rho-opiuchi-detection.jpg");
