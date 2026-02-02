@@ -423,6 +423,8 @@ fn fill_jacobian_residuals<const N: usize, M: LMModel<N>>(
 }
 
 /// Compute Hessian (J^T J) and gradient (J^T r) for 5-parameter model.
+/// Exploits symmetry: only computes upper triangle, then mirrors.
+#[allow(clippy::needless_range_loop)]
 fn compute_hessian_gradient_5(
     jacobian: &[[f32; 5]],
     residuals: &[f32],
@@ -433,9 +435,17 @@ fn compute_hessian_gradient_5(
     for (row, &r) in jacobian.iter().zip(residuals.iter()) {
         for i in 0..5 {
             gradient[i] += row[i] * r;
-            for j in 0..5 {
+            // Only compute upper triangle (j >= i)
+            for j in i..5 {
                 hessian[i][j] += row[i] * row[j];
             }
+        }
+    }
+
+    // Mirror upper triangle to lower
+    for i in 1..5 {
+        for j in 0..i {
+            hessian[i][j] = hessian[j][i];
         }
     }
 
@@ -443,6 +453,8 @@ fn compute_hessian_gradient_5(
 }
 
 /// Compute Hessian (J^T J) and gradient (J^T r) for 6-parameter model.
+/// Exploits symmetry: only computes upper triangle, then mirrors.
+#[allow(clippy::needless_range_loop)]
 fn compute_hessian_gradient_6(
     jacobian: &[[f32; 6]],
     residuals: &[f32],
@@ -453,9 +465,17 @@ fn compute_hessian_gradient_6(
     for (row, &r) in jacobian.iter().zip(residuals.iter()) {
         for i in 0..6 {
             gradient[i] += row[i] * r;
-            for j in 0..6 {
+            // Only compute upper triangle (j >= i)
+            for j in i..6 {
                 hessian[i][j] += row[i] * row[j];
             }
+        }
+    }
+
+    // Mirror upper triangle to lower
+    for i in 1..6 {
+        for j in 0..i {
+            hessian[i][j] = hessian[j][i];
         }
     }
 
@@ -463,6 +483,8 @@ fn compute_hessian_gradient_6(
 }
 
 /// Compute weighted Hessian (J^T W J) and gradient (J^T W r) for 5-parameter model.
+/// Exploits symmetry and precomputes weighted row elements.
+#[allow(clippy::needless_range_loop)]
 fn compute_weighted_hessian_gradient_5(
     jacobian: &[[f32; 5]],
     residuals: &[f32],
@@ -473,10 +495,19 @@ fn compute_weighted_hessian_gradient_5(
 
     for ((row, &r), &w) in jacobian.iter().zip(residuals.iter()).zip(weights.iter()) {
         for i in 0..5 {
-            gradient[i] += w * row[i] * r;
-            for j in 0..5 {
-                hessian[i][j] += w * row[i] * row[j];
+            let w_row_i = w * row[i];
+            gradient[i] += w_row_i * r;
+            // Only compute upper triangle (j >= i)
+            for j in i..5 {
+                hessian[i][j] += w_row_i * row[j];
             }
+        }
+    }
+
+    // Mirror upper triangle to lower
+    for i in 1..5 {
+        for j in 0..i {
+            hessian[i][j] = hessian[j][i];
         }
     }
 
@@ -484,6 +515,8 @@ fn compute_weighted_hessian_gradient_5(
 }
 
 /// Compute weighted Hessian (J^T W J) and gradient (J^T W r) for 6-parameter model.
+/// Exploits symmetry and precomputes weighted row elements.
+#[allow(clippy::needless_range_loop)]
 fn compute_weighted_hessian_gradient_6(
     jacobian: &[[f32; 6]],
     residuals: &[f32],
@@ -494,10 +527,19 @@ fn compute_weighted_hessian_gradient_6(
 
     for ((row, &r), &w) in jacobian.iter().zip(residuals.iter()).zip(weights.iter()) {
         for i in 0..6 {
-            gradient[i] += w * row[i] * r;
-            for j in 0..6 {
-                hessian[i][j] += w * row[i] * row[j];
+            let w_row_i = w * row[i];
+            gradient[i] += w_row_i * r;
+            // Only compute upper triangle (j >= i)
+            for j in i..6 {
+                hessian[i][j] += w_row_i * row[j];
             }
+        }
+    }
+
+    // Mirror upper triangle to lower
+    for i in 1..6 {
+        for j in 0..i {
+            hessian[i][j] = hessian[j][i];
         }
     }
 

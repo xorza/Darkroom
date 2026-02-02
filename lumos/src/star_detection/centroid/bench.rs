@@ -213,7 +213,7 @@ fn bench_compute_centroid_batch_6k_10000(b: ::bench::Bencher) {
 // Low-Level Fitting Benchmarks
 // =============================================================================
 
-#[quick_bench(warmup_iters = 10, iters = 200)]
+#[quick_bench(warmup_iters = 10, iters = 2000)]
 fn bench_gaussian_fit_single(b: ::bench::Bencher) {
     // Single Gaussian fit (L-M optimization only)
     let width = 21;
@@ -246,7 +246,7 @@ fn bench_gaussian_fit_single(b: ::bench::Bencher) {
     });
 }
 
-#[quick_bench(warmup_iters = 10, iters = 200)]
+#[quick_bench(warmup_iters = 10, iters = 2000)]
 fn bench_moffat_fit_single(b: ::bench::Bencher) {
     // Single Moffat fit (L-M optimization only)
     let width = 21;
@@ -283,7 +283,7 @@ fn bench_moffat_fit_single(b: ::bench::Bencher) {
     });
 }
 
-#[quick_bench(warmup_iters = 10, iters = 200)]
+#[quick_bench(warmup_iters = 10, iters = 2000)]
 fn bench_moffat_fit_variable_beta(b: ::bench::Bencher) {
     // Single Moffat fit with variable beta (6-parameter fit)
     let width = 21;
