@@ -25,9 +25,9 @@ fn test_detect_dense4() {
         return;
     };
 
-    let image_path = cal_dir.join("dense4.png");
+    let image_path = cal_dir.join("rho-opiuchi.jpg");
     if !image_path.exists() {
-        panic!("dense4.png not found in {:?}", cal_dir);
+        panic!("rho-opiuchi.jpg not found in {:?}", cal_dir);
     }
 
     println!("Loading: {:?}", image_path);

@@ -6,6 +6,7 @@
 //! Run with: `cargo test -p lumos --features real-data dense_field -- --ignored --nocapture`
 
 use crate::AstroImage;
+use crate::star_detection::config::DeblendConfig;
 use crate::star_detection::{StarDetectionConfig, StarDetector};
 use crate::testing::{calibration_dir, init_tracing};
 use imaginarium::ColorFormat;
@@ -51,9 +52,12 @@ fn test_multi_threshold_on_dense_fields() {
             astro_image.height()
         );
 
-        // Multi-threshold config (enabled when deblend_n_thresh > 0)
+        // Multi-threshold config (enabled when n_thresholds > 0)
         let config = StarDetectionConfig {
-            deblend_n_thresh: 32,
+            deblend: DeblendConfig {
+                n_thresholds: 32,
+                ..Default::default()
+            },
             ..StarDetectionConfig::for_crowded_field()
         };
 
@@ -132,15 +136,21 @@ fn test_compare_local_maxima_vs_multi_threshold() {
         astro_image.height()
     );
 
-    // Local maxima (simple) - deblend_n_thresh = 0
+    // Local maxima (simple) - n_thresholds = 0
     let config_local = StarDetectionConfig {
-        deblend_n_thresh: 0,
+        deblend: DeblendConfig {
+            n_thresholds: 0,
+            ..Default::default()
+        },
         ..StarDetectionConfig::for_crowded_field()
     };
 
-    // Multi-threshold - deblend_n_thresh = 32
+    // Multi-threshold - n_thresholds = 32
     let config_multi = StarDetectionConfig {
-        deblend_n_thresh: 32,
+        deblend: DeblendConfig {
+            n_thresholds: 32,
+            ..Default::default()
+        },
         ..StarDetectionConfig::for_crowded_field()
     };
 

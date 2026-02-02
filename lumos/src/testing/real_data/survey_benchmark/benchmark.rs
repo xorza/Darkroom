@@ -292,7 +292,7 @@ impl SurveyBenchmark {
         tracing::info!("Detected {} stars in {} ms", result.stars.len(), runtime_ms);
 
         // Step 6: Compute metrics
-        let match_radius = config.expected_fwhm * 2.0; // 2 FWHM matching radius
+        let match_radius = config.psf.expected_fwhm * 2.0; // 2 FWHM matching radius
         let metrics = compute_detection_metrics(&ground_truth, &result.stars, match_radius);
 
         // Step 7: Compute magnitude-binned statistics
@@ -669,7 +669,10 @@ mod tests {
         let field = super::super::fields::sparse_field();
 
         let config = StarDetectionConfig {
-            expected_fwhm: field.expected_fwhm_pixels(0.396), // SDSS plate scale
+            psf: crate::star_detection::config::PsfConfig {
+                expected_fwhm: field.expected_fwhm_pixels(0.396), // SDSS plate scale
+                ..Default::default()
+            },
             ..Default::default()
         };
 
@@ -721,8 +724,11 @@ mod tests {
             println!("Testing field: {}", field.name);
 
             let config = StarDetectionConfig {
-                expected_fwhm: field.expected_fwhm_pixels(0.396),
-                background_config: BackgroundConfig {
+                psf: crate::star_detection::config::PsfConfig {
+                    expected_fwhm: field.expected_fwhm_pixels(0.396),
+                    ..Default::default()
+                },
+                background: BackgroundConfig {
                     sigma_threshold: 3.0,
                     ..Default::default()
                 },
@@ -791,8 +797,11 @@ mod tests {
 
         for sigma in [2.0, 3.0, 4.0, 5.0, 7.0, 10.0] {
             let config = StarDetectionConfig {
-                expected_fwhm: field.expected_fwhm_pixels(0.396),
-                background_config: BackgroundConfig {
+                psf: crate::star_detection::config::PsfConfig {
+                    expected_fwhm: field.expected_fwhm_pixels(0.396),
+                    ..Default::default()
+                },
+                background: BackgroundConfig {
                     sigma_threshold: sigma,
                     ..Default::default()
                 },
@@ -1014,12 +1023,15 @@ mod tests {
             catalog_to_ground_truth_with_mag(&catalog_stars, &wcs, width, height, &field);
 
         let config = StarDetectionConfig {
-            expected_fwhm: field.expected_fwhm_pixels(0.396),
+            psf: crate::star_detection::config::PsfConfig {
+                expected_fwhm: field.expected_fwhm_pixels(0.396),
+                ..Default::default()
+            },
             ..Default::default()
         };
         let mut detector = StarDetector::from_config(config.clone());
         let result = detector.detect(&image);
-        let match_radius = config.expected_fwhm * 2.0;
+        let match_radius = config.psf.expected_fwhm * 2.0;
 
         println!("\n=== Bright Catalog Stars (mag < 18) ===");
         println!("Match radius: {:.1} pixels", match_radius);
