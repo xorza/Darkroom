@@ -456,6 +456,7 @@ fn sort_by_flux(stars: &mut [Star]) {
 
 /// Remove duplicate star detections that are too close together.
 ///
+/// Uses spatial hashing for O(n) average case instead of O(n²).
 /// Keeps the brightest star (by flux) within `min_separation` pixels.
 /// Stars must be sorted by flux (brightest first) before calling.
 pub(crate) fn remove_duplicate_stars(stars: &mut Vec<Star>, min_separation: f32) -> usize {
@@ -463,6 +464,96 @@ pub(crate) fn remove_duplicate_stars(stars: &mut Vec<Star>, min_separation: f32)
         return 0;
     }
 
+    // For small star counts, O(n²) is faster due to lower overhead
+    if stars.len() < 100 {
+        return remove_duplicate_stars_simple(stars, min_separation);
+    }
+
+    let min_sep_sq = min_separation * min_separation;
+
+    // Find bounding box
+    let mut min_x = f32::MAX;
+    let mut min_y = f32::MAX;
+    let mut max_x = f32::MIN;
+    let mut max_y = f32::MIN;
+    for star in stars.iter() {
+        min_x = min_x.min(star.x);
+        min_y = min_y.min(star.y);
+        max_x = max_x.max(star.x);
+        max_y = max_y.max(star.y);
+    }
+
+    // Cell size = min_separation ensures we only need to check 3x3 neighborhood
+    let cell_size = min_separation;
+    let grid_width = ((max_x - min_x) / cell_size).ceil() as usize + 1;
+    let grid_height = ((max_y - min_y) / cell_size).ceil() as usize + 1;
+
+    // Grid stores indices of kept stars in each cell
+    // Use SmallVec to avoid heap allocation for sparse cells
+    let mut grid: Vec<smallvec::SmallVec<[usize; 4]>> =
+        vec![smallvec::SmallVec::new(); grid_width * grid_height];
+
+    let mut kept = vec![true; stars.len()];
+
+    // Process stars in flux order (brightest first, already sorted)
+    for i in 0..stars.len() {
+        let star = &stars[i];
+        let cell_x = ((star.x - min_x) / cell_size) as usize;
+        let cell_y = ((star.y - min_y) / cell_size) as usize;
+
+        // Check 3x3 neighborhood for duplicates
+        let mut is_duplicate = false;
+        'outer: for dy in 0..3 {
+            let ny = cell_y.wrapping_add(dy).wrapping_sub(1);
+            if ny >= grid_height {
+                continue;
+            }
+            for dx in 0..3 {
+                let nx = cell_x.wrapping_add(dx).wrapping_sub(1);
+                if nx >= grid_width {
+                    continue;
+                }
+                let cell_idx = ny * grid_width + nx;
+                for &other_idx in &grid[cell_idx] {
+                    let other = &stars[other_idx];
+                    let ddx = star.x - other.x;
+                    let ddy = star.y - other.y;
+                    if ddx * ddx + ddy * ddy < min_sep_sq {
+                        is_duplicate = true;
+                        break 'outer;
+                    }
+                }
+            }
+        }
+
+        if is_duplicate {
+            kept[i] = false;
+        } else {
+            // Add to grid
+            let cell_idx = cell_y * grid_width + cell_x;
+            grid[cell_idx].push(i);
+        }
+    }
+
+    let removed_count = kept.iter().filter(|&&k| !k).count();
+
+    // Compact the array
+    let mut write_idx = 0;
+    for read_idx in 0..stars.len() {
+        if kept[read_idx] {
+            if write_idx != read_idx {
+                stars[write_idx] = stars[read_idx];
+            }
+            write_idx += 1;
+        }
+    }
+    stars.truncate(write_idx);
+
+    removed_count
+}
+
+/// Simple O(n²) duplicate removal for small star counts.
+fn remove_duplicate_stars_simple(stars: &mut Vec<Star>, min_separation: f32) -> usize {
     let min_sep_sq = min_separation * min_separation;
     let mut kept = vec![true; stars.len()];
 

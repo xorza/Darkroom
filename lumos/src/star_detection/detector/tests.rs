@@ -454,3 +454,126 @@ fn test_remove_duplicate_stars_many_duplicates() {
     assert!(removed > 10);
     assert!(stars.len() < 10);
 }
+
+#[test]
+fn test_remove_duplicate_stars_spatial_hash_path() {
+    // Test with >100 stars to exercise spatial hashing code path
+    // Create a grid of stars with some duplicates
+    let mut stars: Vec<Star> = Vec::new();
+
+    // Create 150 stars in a grid pattern (15x10)
+    for y in 0..10 {
+        for x in 0..15 {
+            let px = x as f32 * 20.0 + 10.0; // 20 pixel spacing
+            let py = y as f32 * 20.0 + 10.0;
+            let flux = 1000.0 - (y * 15 + x) as f32; // Decreasing flux
+            stars.push(make_star_at(px, py, flux));
+        }
+    }
+
+    // Add some duplicates close to existing stars
+    stars.push(make_star_at(12.0, 12.0, 50.0)); // Close to (10, 10)
+    stars.push(make_star_at(32.0, 12.0, 45.0)); // Close to (30, 10)
+    stars.push(make_star_at(52.0, 32.0, 40.0)); // Close to (50, 30)
+
+    // Sort by flux (required)
+    stars.sort_by(|a, b| b.flux.partial_cmp(&a.flux).unwrap());
+
+    let initial_count = stars.len();
+    let removed = remove_duplicate_stars(&mut stars, 8.0);
+
+    // Should remove the 3 duplicates
+    assert_eq!(removed, 3);
+    assert_eq!(stars.len(), initial_count - 3);
+
+    // Verify no remaining stars are too close
+    for i in 0..stars.len() {
+        for j in (i + 1)..stars.len() {
+            let dx = stars[i].x - stars[j].x;
+            let dy = stars[i].y - stars[j].y;
+            let dist_sq = dx * dx + dy * dy;
+            assert!(
+                dist_sq >= 64.0, // 8.0^2
+                "Stars at ({}, {}) and ({}, {}) are too close: dist={}",
+                stars[i].x,
+                stars[i].y,
+                stars[j].x,
+                stars[j].y,
+                dist_sq.sqrt()
+            );
+        }
+    }
+}
+
+#[test]
+fn test_remove_duplicate_stars_spatial_hash_edge_cases() {
+    // Test edge cases for spatial hashing: stars at grid cell boundaries
+    let mut stars: Vec<Star> = Vec::new();
+
+    // Create 200 stars spread across a large area
+    for i in 0..200 {
+        let x = (i % 20) as f32 * 100.0 + 50.0;
+        let y = (i / 20) as f32 * 100.0 + 50.0;
+        stars.push(make_star_at(x, y, 1000.0 - i as f32));
+    }
+
+    // Add duplicates at cell boundaries (separation = 5.0, so cell size = 5.0)
+    // Star at boundary between cells
+    stars.push(make_star_at(52.0, 50.0, 10.0)); // Close to (50, 50)
+
+    stars.sort_by(|a, b| b.flux.partial_cmp(&a.flux).unwrap());
+
+    let removed = remove_duplicate_stars(&mut stars, 5.0);
+
+    assert_eq!(removed, 1);
+    assert_eq!(stars.len(), 200);
+}
+
+#[test]
+fn test_remove_duplicate_stars_spatial_hash_consistency() {
+    // Verify spatial hash gives same results as simple algorithm
+    use rand::prelude::*;
+
+    let mut rng = StdRng::seed_from_u64(12345);
+
+    // Generate 500 random stars
+    let base_stars: Vec<Star> = (0..500)
+        .map(|i| {
+            make_star_at(
+                rng.random_range(0.0..1000.0),
+                rng.random_range(0.0..1000.0),
+                1000.0 - i as f32,
+            )
+        })
+        .collect();
+
+    // Run with spatial hash (>100 stars)
+    let mut stars_hash = base_stars.clone();
+    stars_hash.sort_by(|a, b| b.flux.partial_cmp(&a.flux).unwrap());
+    let removed_hash = remove_duplicate_stars(&mut stars_hash, 10.0);
+
+    // Run with simple algorithm (force by using small chunks)
+    let mut stars_simple = base_stars;
+    stars_simple.sort_by(|a, b| b.flux.partial_cmp(&a.flux).unwrap());
+    let removed_simple = super::remove_duplicate_stars_simple(&mut stars_simple, 10.0);
+
+    // Results should match
+    assert_eq!(
+        removed_hash, removed_simple,
+        "Spatial hash removed {} but simple removed {}",
+        removed_hash, removed_simple
+    );
+    assert_eq!(stars_hash.len(), stars_simple.len());
+
+    // Verify same stars kept (by position)
+    for (h, s) in stars_hash.iter().zip(stars_simple.iter()) {
+        assert!(
+            (h.x - s.x).abs() < 0.001 && (h.y - s.y).abs() < 0.001,
+            "Mismatch: hash({}, {}) vs simple({}, {})",
+            h.x,
+            h.y,
+            s.x,
+            s.y
+        );
+    }
+}

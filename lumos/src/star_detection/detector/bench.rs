@@ -103,3 +103,72 @@ fn bench_detect_1k_sparse(b: ::bench::Bencher) {
 
     b.bench(|| black_box(detector.detect(black_box(&image))));
 }
+
+// ============================================================================
+// Component benchmarks
+// ============================================================================
+
+/// Benchmark remove_duplicate_stars with varying star counts.
+/// Simulates dense star field scenario similar to rho-opiuchi detection.
+#[quick_bench(warmup_iters = 5, iters = 20)]
+fn bench_remove_duplicate_stars_5000(b: ::bench::Bencher) {
+    use crate::star_detection::Star;
+    use crate::star_detection::detector::remove_duplicate_stars;
+    use rand::prelude::*;
+
+    // Generate 5000 stars in a 4K image area (similar to dense field)
+    let mut rng = StdRng::seed_from_u64(42);
+    let base_stars: Vec<Star> = (0..5000)
+        .map(|_| Star {
+            x: rng.random_range(0.0..4096.0),
+            y: rng.random_range(0.0..4096.0),
+            flux: rng.random_range(100.0..10000.0),
+            fwhm: rng.random_range(2.0..6.0),
+            eccentricity: rng.random_range(0.0..0.3),
+            snr: rng.random_range(10.0..100.0),
+            peak: rng.random_range(0.1..0.9),
+            sharpness: rng.random_range(0.2..0.5),
+            roundness1: rng.random_range(-0.1..0.1),
+            roundness2: rng.random_range(-0.1..0.1),
+            laplacian_snr: rng.random_range(0.0..20.0),
+        })
+        .collect();
+
+    b.bench(|| {
+        let mut stars = base_stars.clone();
+        // Sort by flux (required by the algorithm)
+        stars.sort_by(|a, b| b.flux.partial_cmp(&a.flux).unwrap());
+        black_box(remove_duplicate_stars(&mut stars, 5.0))
+    });
+}
+
+#[quick_bench(warmup_iters = 5, iters = 20)]
+fn bench_remove_duplicate_stars_10000(b: ::bench::Bencher) {
+    use crate::star_detection::Star;
+    use crate::star_detection::detector::remove_duplicate_stars;
+    use rand::prelude::*;
+
+    // Generate 10000 stars - extreme case
+    let mut rng = StdRng::seed_from_u64(42);
+    let base_stars: Vec<Star> = (0..10000)
+        .map(|_| Star {
+            x: rng.random_range(0.0..8000.0),
+            y: rng.random_range(0.0..6000.0),
+            flux: rng.random_range(100.0..10000.0),
+            fwhm: rng.random_range(2.0..6.0),
+            eccentricity: rng.random_range(0.0..0.3),
+            snr: rng.random_range(10.0..100.0),
+            peak: rng.random_range(0.1..0.9),
+            sharpness: rng.random_range(0.2..0.5),
+            roundness1: rng.random_range(-0.1..0.1),
+            roundness2: rng.random_range(-0.1..0.1),
+            laplacian_snr: rng.random_range(0.0..20.0),
+        })
+        .collect();
+
+    b.bench(|| {
+        let mut stars = base_stars.clone();
+        stars.sort_by(|a, b| b.flux.partial_cmp(&a.flux).unwrap());
+        black_box(remove_duplicate_stars(&mut stars, 5.0))
+    });
+}
