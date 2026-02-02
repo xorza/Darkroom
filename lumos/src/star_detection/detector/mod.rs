@@ -161,8 +161,6 @@ impl StarDetector {
             std::mem::swap(&mut grayscale_image, &mut scratch);
         }
 
-        drop(scratch);
-
         // Step 1: Estimate background
         let background = BackgroundMap::new(&grayscale_image, &self.config.background);
 
@@ -171,7 +169,9 @@ impl StarDetector {
             self.determine_effective_fwhm(&grayscale_image, &background);
 
         // Step 3: Detect star candidates (with optional matched filter)
-        let candidates = self.detect_candidates(&grayscale_image, &background, effective_fwhm);
+        // Reuse scratch buffer for matched filter output
+        let candidates =
+            self.detect_candidates(&grayscale_image, &background, effective_fwhm, &mut scratch);
 
         let mut diagnostics = StarDetectionDiagnostics {
             candidates_after_filtering: candidates.len(),
@@ -250,29 +250,29 @@ impl StarDetector {
         pixels: &Buffer2<f32>,
         background: &BackgroundMap,
         effective_fwhm: f32,
+        scratch: &mut Buffer2<f32>,
     ) -> Vec<candidate_detection::StarCandidate> {
-        let filtered = if effective_fwhm > f32::EPSILON {
+        let filtered: Option<&Buffer2<f32>> = if effective_fwhm > f32::EPSILON {
             tracing::debug!(
                 "Applying matched filter with FWHM={:.1}, axis_ratio={:.2}, angle={:.1}°",
                 effective_fwhm,
                 self.config.psf.axis_ratio,
                 self.config.psf.angle.to_degrees()
             );
-            let mut filtered = Buffer2::new_default(pixels.width(), pixels.height());
             matched_filter(
                 pixels,
                 &background.background,
                 effective_fwhm,
                 self.config.psf.axis_ratio,
                 self.config.psf.angle,
-                &mut filtered,
+                scratch,
             );
-            Some(filtered)
+            Some(scratch)
         } else {
             None
         };
 
-        detect_stars(pixels, filtered.as_ref(), background, &self.config)
+        detect_stars(pixels, filtered, background, &self.config)
     }
 
     /// Perform first-pass detection and estimate FWHM from bright stars.
