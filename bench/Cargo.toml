@@ -5,3 +5,4 @@ edition.workspace = true
 
 [dependencies]
 bench-macros = { path = "macros" }
+named-lock = "*"

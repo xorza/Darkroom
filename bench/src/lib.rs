@@ -2,6 +2,12 @@
 //!
 //! This crate provides a lightweight benchmarking framework that runs as regular tests
 //! but measures execution time with proper warmup and statistics.
+//!
+//! ## Cross-Process Serialization
+//!
+//! Benchmarks are automatically serialized across processes using a named system lock.
+//! This ensures that even if multiple `cargo test` invocations run simultaneously,
+//! benchmarks will execute one at a time to avoid interference.
 
 use std::fs::{OpenOptions, create_dir_all, read_to_string};
 use std::hint::black_box;
@@ -9,7 +15,13 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
+use named_lock::NamedLock;
+
 pub use bench_macros::quick_bench;
+
+/// Global lock name for cross-process benchmark serialization.
+/// All benchmarks in the Scenarium project will use this lock.
+const BENCH_LOCK_NAME: &str = "quick-bench-lock";
 
 // ANSI color codes
 mod colors {
@@ -156,6 +168,12 @@ impl Bencher {
     /// then runs benchmark iterations until bench_time is reached or iters is hit (whichever comes first).
     ///
     /// At least one of time or iterations must be set for both warmup and bench phases.
+    ///
+    /// ## Cross-Process Serialization
+    ///
+    /// This method acquires a system-wide named lock before running the benchmark.
+    /// This ensures benchmarks never run in parallel, even across different processes.
+    /// The lock is held for the entire duration of the benchmark (warmup + measurement + result writing).
     pub fn bench<F, R>(self, mut f: F) -> BenchResult
     where
         F: FnMut() -> R,
@@ -168,6 +186,10 @@ impl Bencher {
             self.time.is_some() || self.iters.is_some(),
             "Either bench_time or iters must be set"
         );
+
+        // Acquire cross-process lock to ensure benchmarks run sequentially
+        let lock = NamedLock::create(BENCH_LOCK_NAME).expect("Failed to create benchmark lock");
+        let _guard = lock.lock().expect("Failed to acquire benchmark lock");
 
         #[cfg(debug_assertions)]
         println!(
