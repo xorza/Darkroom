@@ -239,7 +239,7 @@ fn bench_compute_centroid_batch_6k_10000(b: ::bench::Bencher) {
 // refine_centroid Benchmark (isolates exp() performance)
 // =============================================================================
 
-#[quick_bench(warmup_iters = 10, iters = 1000)]
+#[quick_bench(warmup_iters = 10, iters = 10000)]
 fn bench_refine_centroid_single(b: ::bench::Bencher) {
     // Single refine_centroid call - isolates the exp() hot path
     let width = 64;
