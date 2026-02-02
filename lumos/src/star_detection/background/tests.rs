@@ -3,7 +3,7 @@
 use super::*;
 use crate::common::Buffer2;
 use crate::star_detection::background::BackgroundMap;
-use crate::star_detection::config::AdaptiveSigmaConfig;
+use crate::star_detection::config::{AdaptiveSigmaConfig, BackgroundRefinement};
 
 #[test]
 fn test_uniform_background() {
@@ -458,12 +458,11 @@ fn test_iterative_background_with_bright_stars() {
     // Iterative estimate (should be better at excluding stars)
     let config = BackgroundConfig {
         sigma_threshold: 3.0,
-        iterations: 2,
+        refinement: BackgroundRefinement::Iterative { iterations: 2 },
         mask_dilation: 5,
         min_unmasked_fraction: 0.3,
         tile_size: 32,
         sigma_clip_iterations: 2,
-        adaptive_sigma: None,
     };
     let bg_iterative = crate::testing::estimate_background(&pixels, config.clone());
 
@@ -548,12 +547,11 @@ fn test_iterative_background_no_dilation() {
     let pixels = Buffer2::new(width, height, data);
     let config = BackgroundConfig {
         sigma_threshold: 3.0,
-        iterations: 1,
+        refinement: BackgroundRefinement::Iterative { iterations: 1 },
         mask_dilation: 0, // No dilation
         min_unmasked_fraction: 0.3,
         tile_size: 32,
         sigma_clip_iterations: 2,
-        adaptive_sigma: None,
     };
     let bg = crate::testing::estimate_background(&pixels, config.clone());
 
@@ -571,20 +569,20 @@ fn test_iterative_background_config_default() {
     let config = BackgroundConfig::default();
 
     assert!((config.sigma_threshold - 4.0).abs() < 1e-6);
-    assert_eq!(config.iterations, 0);
+    assert!(matches!(config.refinement, BackgroundRefinement::None));
     assert_eq!(config.mask_dilation, 3);
     assert!((config.min_unmasked_fraction - 0.3).abs() < 1e-6);
 }
 
 #[test]
-fn test_iterative_background_zero_iterations() {
-    // Zero iterations should be equivalent to non-iterative
+fn test_iterative_background_no_refinement() {
+    // No refinement should work fine
     let width = 64;
     let height = 64;
     let pixels = Buffer2::new(width, height, vec![0.3; width * height]);
 
     let config = BackgroundConfig {
-        iterations: 0,
+        refinement: BackgroundRefinement::None,
         tile_size: 32,
         ..Default::default()
     };
@@ -903,7 +901,7 @@ fn test_adaptive_sigma_uniform_background() {
         &pixels,
         BackgroundConfig {
             tile_size: 32,
-            adaptive_sigma: Some(AdaptiveSigmaConfig {
+            refinement: BackgroundRefinement::AdaptiveSigma(AdaptiveSigmaConfig {
                 base_sigma: 3.0,
                 max_sigma: 10.0,
                 contrast_factor: 2.0,
@@ -952,7 +950,7 @@ fn test_adaptive_sigma_values_in_valid_range() {
         &pixels,
         BackgroundConfig {
             tile_size: 32,
-            adaptive_sigma: Some(AdaptiveSigmaConfig {
+            refinement: BackgroundRefinement::AdaptiveSigma(AdaptiveSigmaConfig {
                 base_sigma: 3.0,
                 max_sigma: 10.0,
                 contrast_factor: 2.0,
@@ -995,7 +993,7 @@ fn test_adaptive_sigma_respects_max() {
         &pixels,
         BackgroundConfig {
             tile_size: 32,
-            adaptive_sigma: Some(AdaptiveSigmaConfig {
+            refinement: BackgroundRefinement::AdaptiveSigma(AdaptiveSigmaConfig {
                 base_sigma: 3.0,
                 max_sigma: 8.0,        // Limit to 8
                 contrast_factor: 10.0, // High contrast factor
@@ -1038,7 +1036,7 @@ fn test_adaptive_sigma_dimensions_match() {
         &pixels,
         BackgroundConfig {
             tile_size: 32,
-            adaptive_sigma: Some(AdaptiveSigmaConfig::default()),
+            refinement: BackgroundRefinement::AdaptiveSigma(AdaptiveSigmaConfig::default()),
             ..Default::default()
         },
     );
@@ -1061,7 +1059,7 @@ fn test_adaptive_sigma_accessible() {
         &pixels,
         BackgroundConfig {
             tile_size: 32,
-            adaptive_sigma: Some(AdaptiveSigmaConfig::default()),
+            refinement: BackgroundRefinement::AdaptiveSigma(AdaptiveSigmaConfig::default()),
             ..Default::default()
         },
     );
@@ -1082,6 +1080,7 @@ fn test_regular_background_has_no_adaptive_sigma() {
         &pixels,
         BackgroundConfig {
             tile_size: 32,
+            refinement: BackgroundRefinement::None,
             ..Default::default()
         },
     );
@@ -1091,8 +1090,8 @@ fn test_regular_background_has_no_adaptive_sigma() {
 }
 
 #[test]
-fn test_adaptive_sigma_disabled_when_iterations_enabled() {
-    // When iterations > 0, adaptive_sigma should not be allocated even if configured
+fn test_iterative_refinement_has_no_adaptive_sigma() {
+    // Iterative refinement should not have adaptive_sigma
     let width = 64;
     let height = 64;
     let pixels = Buffer2::new(width, height, vec![0.5; width * height]);
@@ -1101,23 +1100,22 @@ fn test_adaptive_sigma_disabled_when_iterations_enabled() {
         width,
         height,
         BackgroundConfig {
-            iterations: 1,                                        // Enable refinement
-            adaptive_sigma: Some(AdaptiveSigmaConfig::default()), // Configure adaptive
+            refinement: BackgroundRefinement::Iterative { iterations: 1 },
             ..Default::default()
         },
     );
     bg.estimate(&pixels);
 
-    // adaptive_sigma should be None because iterations > 0
+    // adaptive_sigma should be None because using iterative refinement
     assert!(
         bg.adaptive_sigma.is_none(),
-        "adaptive_sigma should not be allocated when iterations > 0"
+        "adaptive_sigma should not be allocated when using iterative refinement"
     );
 }
 
 #[test]
-fn test_adaptive_sigma_enabled_when_no_iterations() {
-    // When iterations == 0 and adaptive_sigma is configured, it should be allocated
+fn test_adaptive_sigma_refinement_has_adaptive_sigma() {
+    // AdaptiveSigma refinement should have adaptive_sigma buffer
     let width = 64;
     let height = 64;
     let pixels = Buffer2::new(width, height, vec![0.5; width * height]);
@@ -1126,16 +1124,15 @@ fn test_adaptive_sigma_enabled_when_no_iterations() {
         width,
         height,
         BackgroundConfig {
-            iterations: 0,                                        // No refinement
-            adaptive_sigma: Some(AdaptiveSigmaConfig::default()), // Configure adaptive
+            refinement: BackgroundRefinement::AdaptiveSigma(AdaptiveSigmaConfig::default()),
             ..Default::default()
         },
     );
     bg.estimate(&pixels);
 
-    // adaptive_sigma should be Some because iterations == 0
+    // adaptive_sigma should be Some because using AdaptiveSigma refinement
     assert!(
         bg.adaptive_sigma.is_some(),
-        "adaptive_sigma should be allocated when iterations == 0 and adaptive_sigma is configured"
+        "adaptive_sigma should be allocated when using AdaptiveSigma refinement"
     );
 }

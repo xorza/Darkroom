@@ -20,7 +20,7 @@ use crate::star_detection::background::{BackgroundConfig, BackgroundMap};
 pub fn estimate_background(pixels: &Buffer2<f32>, config: BackgroundConfig) -> BackgroundMap {
     let width = pixels.width();
     let height = pixels.height();
-    let iterations = config.iterations;
+    let iterations = config.refinement.iterations();
 
     let mut bg = BackgroundMap::new_uninit(width, height, config);
     bg.estimate(pixels);

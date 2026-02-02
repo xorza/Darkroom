@@ -184,6 +184,85 @@ impl AdaptiveSigmaConfig {
 }
 
 // ============================================================================
+// Background Refinement
+// ============================================================================
+
+/// Strategy for refining background estimation.
+///
+/// Background estimation can be improved using one of two mutually exclusive
+/// strategies:
+///
+/// - **Iterative refinement**: Mask detected sources and re-estimate background.
+///   Best for crowded fields where initial estimate is biased by sources.
+///
+/// - **Adaptive sigma**: Use per-pixel detection thresholds based on local contrast.
+///   Best for images with nebulosity or structured backgrounds where a fixed
+///   threshold causes false detections.
+///
+/// These strategies are mutually exclusive because iterative refinement already
+/// produces an accurate background that doesn't need adaptive thresholding, and
+/// computing adaptive sigma during refinement iterations would be wasted work.
+#[derive(Debug, Clone, Copy, Default)]
+pub enum BackgroundRefinement {
+    /// No refinement - use single-pass background estimation.
+    /// Fastest option, suitable for sparse fields with uniform background.
+    #[default]
+    None,
+
+    /// Iterative refinement with source masking.
+    /// Detects sources above threshold, masks them, and re-estimates background.
+    /// Best for crowded fields.
+    Iterative {
+        /// Number of refinement iterations. Usually 1-2 is sufficient.
+        iterations: usize,
+    },
+
+    /// Adaptive per-pixel sigma thresholds based on local contrast.
+    /// Higher thresholds in nebulous regions reduce false positives.
+    /// Only used with single-pass estimation (no iterative refinement).
+    AdaptiveSigma(AdaptiveSigmaConfig),
+}
+
+impl BackgroundRefinement {
+    /// Validate the configuration.
+    pub fn validate(&self) {
+        match self {
+            Self::None => {}
+            Self::Iterative { iterations } => {
+                assert!(
+                    *iterations <= 10,
+                    "iterations must be <= 10, got {}",
+                    iterations
+                );
+                assert!(
+                    *iterations > 0,
+                    "iterations must be > 0 for Iterative refinement"
+                );
+            }
+            Self::AdaptiveSigma(config) => {
+                config.validate();
+            }
+        }
+    }
+
+    /// Returns the number of iterations (0 for None and AdaptiveSigma).
+    pub fn iterations(&self) -> usize {
+        match self {
+            Self::Iterative { iterations } => *iterations,
+            _ => 0,
+        }
+    }
+
+    /// Returns the adaptive sigma config if using that strategy.
+    pub fn adaptive_sigma(&self) -> Option<AdaptiveSigmaConfig> {
+        match self {
+            Self::AdaptiveSigma(config) => Some(*config),
+            _ => None,
+        }
+    }
+}
+
+// ============================================================================
 // Centroid Configuration
 // ============================================================================
 
@@ -440,8 +519,6 @@ pub struct BackgroundConfig {
     /// Higher values = more conservative masking (only mask very bright objects).
     /// Typical value: 3.0-5.0
     pub sigma_threshold: f32,
-    /// Number of refinement iterations. Usually 1-2 is sufficient.
-    pub iterations: usize,
     /// Dilation radius for object masks in pixels.
     /// Expands masked regions to ensure object wings are excluded.
     /// Typical value: 2-5 pixels.
@@ -456,22 +533,21 @@ pub struct BackgroundConfig {
     /// With MAD-based sigma, 2-3 iterations typically suffice.
     /// Typical value: 2-5
     pub sigma_clip_iterations: usize,
-    /// Adaptive sigma configuration for per-pixel thresholds based on local contrast.
-    /// When Some, computes adaptive detection thresholds that are higher in
-    /// nebulous/high-contrast regions. When None, uses fixed sigma_threshold.
-    pub adaptive_sigma: Option<AdaptiveSigmaConfig>,
+    /// Background refinement strategy.
+    /// Choose between iterative refinement (for crowded fields) or
+    /// adaptive sigma thresholds (for nebulous backgrounds).
+    pub refinement: BackgroundRefinement,
 }
 
 impl Default for BackgroundConfig {
     fn default() -> Self {
         Self {
             sigma_threshold: 4.0,
-            iterations: 0,
             mask_dilation: 3,
             min_unmasked_fraction: 0.3,
             tile_size: 64,
             sigma_clip_iterations: 5,
-            adaptive_sigma: None,
+            refinement: BackgroundRefinement::None,
         }
     }
 }
@@ -483,11 +559,6 @@ impl BackgroundConfig {
             self.sigma_threshold > 0.0,
             "sigma_threshold must be positive, got {}",
             self.sigma_threshold
-        );
-        assert!(
-            self.iterations <= 10,
-            "iterations must be <= 10, got {}",
-            self.iterations
         );
         assert!(
             self.mask_dilation <= 50,
@@ -509,9 +580,7 @@ impl BackgroundConfig {
             "sigma_clip_iterations must be <= 10, got {}",
             self.sigma_clip_iterations
         );
-        if let Some(ref adaptive) = self.adaptive_sigma {
-            adaptive.validate();
-        }
+        self.refinement.validate();
     }
 }
 
@@ -601,7 +670,7 @@ impl StarDetectionConfig {
                 ..Default::default()
             },
             background: BackgroundConfig {
-                iterations: 2,
+                refinement: BackgroundRefinement::Iterative { iterations: 2 },
                 ..Default::default()
             },
             ..Default::default()
@@ -612,8 +681,7 @@ impl StarDetectionConfig {
     pub fn for_nebulous_field() -> Self {
         Self {
             background: BackgroundConfig {
-                adaptive_sigma: Some(AdaptiveSigmaConfig::default()),
-                iterations: 1,
+                refinement: BackgroundRefinement::AdaptiveSigma(AdaptiveSigmaConfig::default()),
                 ..Default::default()
             },
             ..Default::default()
@@ -900,7 +968,7 @@ mod tests {
     #[test]
     fn test_star_detection_config_default() {
         let config = StarDetectionConfig::default();
-        assert!(config.background.adaptive_sigma.is_none());
+        assert!(config.background.refinement.adaptive_sigma().is_none());
         assert!(config.noise_model.is_none());
         assert!(config.defect_map.is_none());
         config.validate();
@@ -917,7 +985,7 @@ mod tests {
     #[test]
     fn test_star_detection_config_for_nebulous_field() {
         let config = StarDetectionConfig::for_nebulous_field();
-        assert!(config.background.adaptive_sigma.is_some());
+        assert!(config.background.refinement.adaptive_sigma().is_some());
         config.validate();
     }
 
@@ -935,7 +1003,7 @@ mod tests {
             },
             noise_model: Some(NoiseModel::new(1.5, 5.0)),
             background: BackgroundConfig {
-                adaptive_sigma: Some(AdaptiveSigmaConfig::default()),
+                refinement: BackgroundRefinement::AdaptiveSigma(AdaptiveSigmaConfig::default()),
                 ..Default::default()
             },
             ..Default::default()
@@ -945,7 +1013,7 @@ mod tests {
         assert!((config.filtering.min_snr - 15.0).abs() < 1e-6);
         assert_eq!(config.filtering.edge_margin, 20);
         assert!(config.noise_model.is_some());
-        assert!(config.background.adaptive_sigma.is_some());
+        assert!(config.background.refinement.adaptive_sigma().is_some());
         config.validate();
     }
 
@@ -953,12 +1021,12 @@ mod tests {
     fn test_star_detection_config_with_adaptive_sigma() {
         let config = StarDetectionConfig {
             background: BackgroundConfig {
-                adaptive_sigma: Some(AdaptiveSigmaConfig::default()),
+                refinement: BackgroundRefinement::AdaptiveSigma(AdaptiveSigmaConfig::default()),
                 ..Default::default()
             },
             ..Default::default()
         };
-        assert!(config.background.adaptive_sigma.is_some());
+        assert!(config.background.refinement.adaptive_sigma().is_some());
         config.validate();
     }
 
@@ -971,12 +1039,12 @@ mod tests {
         };
         let config = StarDetectionConfig {
             background: BackgroundConfig {
-                adaptive_sigma: Some(custom),
+                refinement: BackgroundRefinement::AdaptiveSigma(custom),
                 ..Default::default()
             },
             ..Default::default()
         };
-        let adaptive = config.background.adaptive_sigma.unwrap();
+        let adaptive = config.background.refinement.adaptive_sigma().unwrap();
         assert!((adaptive.base_sigma - 2.5).abs() < 1e-6);
         assert!((adaptive.max_sigma - 7.0).abs() < 1e-6);
         config.validate();

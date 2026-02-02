@@ -265,14 +265,14 @@ impl StarDetector {
     ///
     /// Performs initial estimation and optional iterative refinement.
     fn estimate_background(&mut self, pixels: &Buffer2<f32>) -> BackgroundMap {
-        let has_iterations = self.config.background.iterations > 0;
+        let iterations = self.config.background.refinement.iterations();
 
         let pool = self.buffer_pool.as_mut().unwrap();
         let mut background = BackgroundMap::from_pool(pool, self.config.background.clone());
         background.estimate(pixels);
 
-        // Refine background if iterations requested
-        if has_iterations {
+        // Refine background if using iterative refinement
+        if iterations > 0 {
             let pool = self.buffer_pool.as_mut().unwrap();
             let mut scratch1 = pool.acquire_bit();
             let mut scratch2 = pool.acquire_bit();

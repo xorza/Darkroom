@@ -46,16 +46,14 @@ impl BackgroundMap {
     /// Buffers are allocated but not filled with meaningful values.
     /// Use `estimate` to populate them.
     ///
-    /// Note: `adaptive_sigma` is only allocated when `config.adaptive_sigma` is set
-    /// AND `config.iterations == 0`. When refinement is enabled, adaptive thresholding
-    /// is not used because the refined background already accounts for sources.
+    /// Note: `adaptive_sigma` is only allocated when using `BackgroundRefinement::AdaptiveSigma`.
+    /// Iterative refinement produces accurate backgrounds that don't need adaptive thresholding.
     ///
     /// # Panics
     /// Panics if config validation fails.
     pub fn new_uninit(width: usize, height: usize, config: BackgroundConfig) -> Self {
         config.validate();
-        // Only use adaptive sigma when no refinement iterations - refinement makes it redundant
-        let has_adaptive = config.adaptive_sigma.is_some() && config.iterations == 0;
+        let has_adaptive = config.refinement.adaptive_sigma().is_some();
         Self {
             tile_grid: TileGrid::new_uninit(width, height, config.tile_size),
             config,
@@ -71,16 +69,14 @@ impl BackgroundMap {
 
     /// Create a BackgroundMap by acquiring buffers from a pool.
     ///
-    /// Note: `adaptive_sigma` is only allocated when `config.adaptive_sigma` is set
-    /// AND `config.iterations == 0`. When refinement is enabled, adaptive thresholding
-    /// is not used because the refined background already accounts for sources.
+    /// Note: `adaptive_sigma` is only allocated when using `BackgroundRefinement::AdaptiveSigma`.
+    /// Iterative refinement produces accurate backgrounds that don't need adaptive thresholding.
     ///
     /// # Panics
     /// Panics if config validation fails.
     pub fn from_pool(pool: &mut BufferPool, config: BackgroundConfig) -> Self {
         config.validate();
-        // Only use adaptive sigma when no refinement iterations - refinement makes it redundant
-        let has_adaptive = config.adaptive_sigma.is_some() && config.iterations == 0;
+        let has_adaptive = config.refinement.adaptive_sigma().is_some();
         let width = pool.width();
         let height = pool.height();
         Self {
@@ -140,12 +136,7 @@ impl BackgroundMap {
         );
 
         // Only compute adaptive sigma stats if we have the buffer allocated
-        // (i.e., adaptive_sigma config is set AND iterations == 0)
-        let adaptive_config = if self.adaptive_sigma.is_some() {
-            self.config.adaptive_sigma
-        } else {
-            None
-        };
+        let adaptive_config = self.config.refinement.adaptive_sigma();
 
         self.tile_grid.compute(
             pixels,
@@ -165,11 +156,11 @@ impl BackgroundMap {
 
     /// Refine background estimate using iterative object masking.
     ///
-    /// Call this after `estimate` when `config.iterations > 0`.
+    /// Call this after `estimate` when using `BackgroundRefinement::Iterative`.
     /// Requires pre-allocated bit buffers for mask and scratch space.
     ///
-    /// Note: `adaptive_sigma` is not used during refinement. When `iterations > 0`,
-    /// the constructors don't allocate the adaptive_sigma buffer even if configured.
+    /// Note: This method is only called when using iterative refinement,
+    /// which is mutually exclusive with adaptive sigma thresholding.
     pub fn refine(
         &mut self,
         pixels: &Buffer2<f32>,
@@ -178,14 +169,20 @@ impl BackgroundMap {
     ) {
         debug_assert!(
             self.adaptive_sigma.is_none(),
-            "adaptive_sigma should not be allocated when refinement is enabled"
+            "adaptive_sigma should not be allocated when using iterative refinement"
+        );
+
+        let iterations = self.config.refinement.iterations();
+        debug_assert!(
+            iterations > 0,
+            "refine() called but no iterations configured"
         );
 
         let max_tile_pixels = self.config.tile_size * self.config.tile_size;
         let min_pixels = (max_tile_pixels as f32 * self.config.min_unmasked_fraction) as usize;
 
         let mask = scratch1;
-        for _iter in 0..self.config.iterations {
+        for _iter in 0..iterations {
             create_object_mask(
                 pixels,
                 self,
