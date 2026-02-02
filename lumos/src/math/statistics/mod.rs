@@ -63,12 +63,75 @@ pub fn median_and_mad_f32_mut(data: &mut [f32]) -> (f32, f32) {
     let median = median_f32_mut(data);
 
     // Compute MAD in-place by replacing values with absolute deviations
-    for v in data.iter_mut() {
-        *v = (*v - median).abs();
-    }
+    abs_deviation_inplace(data, median);
     let mad = median_f32_mut(data);
 
     (median, mad)
+}
+
+/// Core sigma-clipping iteration logic shared between Vec and ArrayVec versions.
+///
+/// Returns (median, sigma, converged) where converged indicates no clipping occurred.
+#[inline]
+fn sigma_clip_iteration(
+    values: &mut [f32],
+    len: &mut usize,
+    deviations: &mut [f32],
+    kappa: f32,
+) -> Option<(f32, f32)> {
+    if *len < 3 {
+        return None;
+    }
+
+    let active = &mut values[..*len];
+
+    // Compute median
+    let median = median_f32_mut(active);
+
+    // Compute deviations using SIMD - copy values first, then transform
+    deviations[..*len].copy_from_slice(active);
+    abs_deviation_inplace(&mut deviations[..*len], median);
+
+    let mad = median_f32_mut(&mut deviations[..*len]);
+    let sigma = mad_to_sigma(mad);
+
+    if sigma < f32::EPSILON {
+        return Some((median, 0.0));
+    }
+
+    // Clip values outside threshold using computed deviations
+    let threshold = kappa * sigma;
+    let mut write_idx = 0;
+    for i in 0..*len {
+        if deviations[i] <= threshold {
+            values[write_idx] = values[i];
+            write_idx += 1;
+        }
+    }
+
+    if write_idx == *len {
+        // Converged - no values clipped
+        return Some((median, sigma));
+    }
+
+    *len = write_idx;
+    None
+}
+
+/// Compute final statistics from remaining values.
+#[inline]
+fn compute_final_stats(values: &mut [f32], deviations: &mut [f32]) -> (f32, f32) {
+    if values.is_empty() {
+        return (0.0, 0.0);
+    }
+
+    let median = median_f32_mut(values);
+    deviations[..values.len()].copy_from_slice(values);
+    abs_deviation_inplace(&mut deviations[..values.len()], median);
+    let mad = median_f32_mut(&mut deviations[..values.len()]);
+    let sigma = mad_to_sigma(mad);
+
+    (median, sigma)
 }
 
 /// Compute sigma-clipped median and MAD-based sigma.
@@ -97,66 +160,15 @@ pub fn sigma_clipped_median_mad(
     let mut len = values.len();
 
     // Ensure deviations buffer has enough capacity
-    if deviations.capacity() < len {
-        deviations.reserve(len - deviations.capacity());
-    }
+    deviations.resize(len, 0.0);
 
     for _ in 0..iterations {
-        if len < 3 {
-            break;
+        if let Some(result) = sigma_clip_iteration(values, &mut len, deviations, kappa) {
+            return result;
         }
-
-        let active = &mut values[..len];
-
-        // Compute median
-        let median = median_f32_mut(active);
-
-        // Compute deviations using SIMD-accelerated in-place transform
-        // We need to preserve original values for clipping, so copy first
-        deviations.clear();
-        deviations.extend_from_slice(active);
-        abs_deviation_inplace(deviations, median);
-
-        let mad = median_f32_mut(deviations);
-        let sigma = mad_to_sigma(mad);
-
-        if sigma < f32::EPSILON {
-            return (median, 0.0);
-        }
-
-        // Clip values outside threshold
-        // Recompute deviations inline to avoid dependency on partially-sorted buffer
-        let threshold = kappa * sigma;
-        let mut write_idx = 0;
-        for i in 0..len {
-            if (values[i] - median).abs() <= threshold {
-                values[write_idx] = values[i];
-                write_idx += 1;
-            }
-        }
-
-        if write_idx == len {
-            // Converged - no values clipped, current stats are final
-            return (median, sigma);
-        }
-        len = write_idx;
     }
 
-    // Compute final statistics after all iterations
-    let active = &mut values[..len];
-    if active.is_empty() {
-        return (0.0, 0.0);
-    }
-
-    let median = median_f32_mut(active);
-
-    deviations.clear();
-    deviations.extend_from_slice(active);
-    abs_deviation_inplace(deviations, median);
-    let mad = median_f32_mut(deviations);
-    let sigma = mad_to_sigma(mad);
-
-    (median, sigma)
+    compute_final_stats(&mut values[..len], &mut deviations[..len])
 }
 
 /// Sigma-clipped median and MAD computation using ArrayVec for zero heap allocation.
@@ -184,62 +196,19 @@ pub fn sigma_clipped_median_mad_arrayvec<const N: usize>(
 
     let mut len = values.len();
 
-    for _ in 0..iterations {
-        if len < 3 {
-            break;
-        }
-
-        let active = &mut values[..len];
-
-        // Compute median
-        let median = median_f32_mut(active);
-
-        // Compute deviations - reuse for both MAD and clipping
-        deviations.clear();
-        for v in active.iter() {
-            deviations.push((v - median).abs());
-        }
-        let mad = median_f32_mut(deviations.as_mut_slice());
-        let sigma = mad_to_sigma(mad);
-
-        if sigma < f32::EPSILON {
-            return (median, 0.0);
-        }
-
-        // Clip values outside threshold, using already-computed deviations
-        let threshold = kappa * sigma;
-        let mut write_idx = 0;
-        for i in 0..len {
-            if deviations[i] <= threshold {
-                values[write_idx] = values[i];
-                write_idx += 1;
-            }
-        }
-
-        if write_idx == len {
-            // Converged - no values clipped, current stats are final
-            return (median, sigma);
-        }
-
-        len = write_idx;
-    }
-
-    // Compute final statistics after all iterations
-    let active = &mut values[..len];
-    if active.is_empty() {
-        return (0.0, 0.0);
-    }
-
-    let median = median_f32_mut(active);
-
+    // Ensure deviations buffer is sized correctly
     deviations.clear();
-    for v in active.iter() {
-        deviations.push((v - median).abs());
-    }
-    let mad = median_f32_mut(deviations.as_mut_slice());
-    let sigma = mad_to_sigma(mad);
+    deviations.extend(std::iter::repeat_n(0.0f32, len.min(N)));
 
-    (median, sigma)
+    for _ in 0..iterations {
+        if let Some(result) =
+            sigma_clip_iteration(values, &mut len, deviations.as_mut_slice(), kappa)
+        {
+            return result;
+        }
+    }
+
+    compute_final_stats(&mut values[..len], &mut deviations.as_mut_slice()[..len])
 }
 
 #[cfg(test)]

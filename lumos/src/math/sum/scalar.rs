@@ -9,7 +9,13 @@ pub fn sum_f32(values: &[f32]) -> f32 {
 /// Calculate sum of squared differences from mean using scalar operations.
 #[inline]
 pub fn sum_squared_diff(values: &[f32], mean: f32) -> f32 {
-    values.iter().map(|v| (v - mean).powi(2)).sum()
+    values
+        .iter()
+        .map(|v| {
+            let diff = v - mean;
+            diff * diff
+        })
+        .sum()
 }
 
 /// Accumulate src into dst (dst[i] += src[i]).

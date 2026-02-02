@@ -42,5 +42,11 @@ pub unsafe fn sum_squared_diff(values: &[f32], mean: f32) -> f32 {
 
     // Horizontal sum
     let sum = vaddvq_f32(sum_vec);
-    sum + remainder.iter().map(|v| (v - mean).powi(2)).sum::<f32>()
+    sum + remainder
+        .iter()
+        .map(|v| {
+            let diff = v - mean;
+            diff * diff
+        })
+        .sum::<f32>()
 }
