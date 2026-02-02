@@ -6,10 +6,13 @@ use ::bench::quick_bench;
 use std::hint::black_box;
 
 use crate::astro_image::ImageDimensions;
-use crate::star_detection::config::BackgroundRefinement;
+use crate::star_detection::config::{
+    BackgroundConfig, BackgroundRefinement, CentroidConfig, Connectivity, DeblendConfig,
+    FilteringConfig, LocalBackgroundMethod, PsfConfig, StarDetectionConfig,
+};
 use crate::testing::init_tracing;
 use crate::testing::synthetic::generate_globular_cluster;
-use crate::{AstroImage, CentroidMethod, StarDetectionConfig, StarDetector};
+use crate::{AstroImage, CentroidMethod, StarDetector};
 
 #[quick_bench(warmup_iters = 3, iters = 10)]
 fn bench_detect_6k_globular_cluster(b: ::bench::Bencher) {
@@ -21,9 +24,51 @@ fn bench_detect_6k_globular_cluster(b: ::bench::Bencher) {
         ImageDimensions::new(pixels.width(), pixels.height(), 1),
         pixels.into_vec(),
     );
-    let config = StarDetectionConfig::for_crowded_field();
-    // config.centroid.method = CentroidMethod::GaussianFit;
-    // config.background.refinement = BackgroundRefinement::Iterative { iterations: 5 };
+
+    // Fully expanded config - adjust values here to experiment
+    let config = StarDetectionConfig {
+        background: BackgroundConfig {
+            sigma_threshold: 4.0,
+            mask_dilation: 3,
+            min_unmasked_fraction: 0.3,
+            tile_size: 64,
+            sigma_clip_iterations: 5,
+            refinement: BackgroundRefinement::Iterative { iterations: 2 },
+        },
+        filtering: FilteringConfig {
+            min_area: 5,
+            max_area: 500,
+            edge_margin: 10,
+            min_snr: 10.0,
+            max_eccentricity: 0.6,
+            max_sharpness: 0.7,
+            max_roundness: 1.0,
+            max_fwhm_deviation: 3.0,
+            duplicate_min_separation: 8.0,
+            connectivity: Connectivity::Four,
+        },
+        deblend: DeblendConfig {
+            min_separation: 2,
+            min_prominence: 0.3,
+            n_thresholds: 32,
+            min_contrast: 0.005,
+        },
+        centroid: CentroidConfig {
+            method: CentroidMethod::WeightedMoments,
+            local_background_method: LocalBackgroundMethod::GlobalMap,
+        },
+        psf: PsfConfig {
+            expected_fwhm: 4.0,
+            axis_ratio: 1.0,
+            angle: 0.0,
+            auto_estimate: false,
+            min_stars_for_estimation: 10,
+            estimation_sigma_factor: 2.0,
+        },
+        noise_model: None,
+        defect_map: None,
+    };
+
     let mut detector = StarDetector::from_config(config);
 
     b.bench(|| black_box(detector.detect(black_box(&image))));
