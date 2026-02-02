@@ -6,8 +6,8 @@ use crate::AstroImage;
 use crate::CentroidMethod;
 use crate::star_detection::StarDetector;
 use crate::star_detection::config::{
-    BackgroundConfig, BackgroundRefinement, CentroidConfig, Connectivity, DeblendConfig,
-    FilteringConfig, LocalBackgroundMethod, PsfConfig, StarDetectionConfig,
+    AdaptiveSigmaConfig, BackgroundConfig, BackgroundRefinement, CentroidConfig, Connectivity,
+    DeblendConfig, FilteringConfig, LocalBackgroundMethod, PsfConfig, StarDetectionConfig,
 };
 use crate::testing::{calibration_dir, init_tracing};
 use common::test_utils::test_output_path;
@@ -45,45 +45,49 @@ fn test_detect_rho_opiuchi() {
         astro_image.height()
     );
 
-    // Fully expanded config - adjust values here to experiment
+    // Config optimized for Rho Ophiuchi: nebulosity + dense star field (M4 cluster)
     let config = StarDetectionConfig {
         background: BackgroundConfig {
-            sigma_threshold: 4.0,
-            mask_dilation: 3,
-            min_unmasked_fraction: 0.3,
-            tile_size: 64,
-            sigma_clip_iterations: 5,
-            refinement: BackgroundRefinement::Iterative { iterations: 2 },
+            sigma_threshold: 3.0,
+            mask_dilation: 5,
+            min_unmasked_fraction: 0.2,
+            tile_size: 128,
+            sigma_clip_iterations: 3,
+            refinement: BackgroundRefinement::AdaptiveSigma(AdaptiveSigmaConfig {
+                base_sigma: 3.0,
+                max_sigma: 10.0,
+                contrast_factor: 3.0,
+            }),
         },
         filtering: FilteringConfig {
-            min_area: 5,
-            max_area: 500,
-            edge_margin: 10,
-            min_snr: 10.0,
-            max_eccentricity: 0.6,
-            max_sharpness: 0.7,
+            min_area: 3,
+            max_area: 2000,
+            edge_margin: 15,
+            min_snr: 5.0,
+            max_eccentricity: 0.7,
+            max_sharpness: 0.8,
             max_roundness: 1.0,
-            max_fwhm_deviation: 3.0,
-            duplicate_min_separation: 8.0,
-            connectivity: Connectivity::Four,
+            max_fwhm_deviation: 4.0,
+            duplicate_min_separation: 5.0,
+            connectivity: Connectivity::Eight,
         },
         deblend: DeblendConfig {
             min_separation: 2,
-            min_prominence: 0.3,
-            n_thresholds: 32,
-            min_contrast: 0.005,
+            min_prominence: 0.2,
+            n_thresholds: 64,
+            min_contrast: 0.003,
         },
         centroid: CentroidConfig {
             method: CentroidMethod::WeightedMoments,
-            local_background_method: LocalBackgroundMethod::GlobalMap,
+            local_background_method: LocalBackgroundMethod::LocalAnnulus,
         },
         psf: PsfConfig {
-            expected_fwhm: 4.0,
+            expected_fwhm: 3.0,
             axis_ratio: 1.0,
             angle: 0.0,
-            auto_estimate: false,
-            min_stars_for_estimation: 10,
-            estimation_sigma_factor: 2.0,
+            auto_estimate: true,
+            min_stars_for_estimation: 20,
+            estimation_sigma_factor: 2.5,
         },
         noise_model: None,
         defect_map: None,
@@ -128,12 +132,12 @@ fn test_detect_rho_opiuchi() {
         .convert(ColorFormat::RGB_F32)
         .expect("Failed to convert to RGB_F32");
 
-    // Draw circles around detected stars (top 500 by flux)
-    let num_to_draw = result.stars.len().min(500);
-    for star in result.stars.iter().take(num_to_draw) {
+    // Draw circles around all detected stars
+    for star in result.stars.iter() {
         let radius = (star.fwhm * 1.5).max(3.0);
         draw_circle(&mut output_img, star.x, star.y, radius, Color::GREEN, 1.0);
     }
+    println!("Drew {} circles", result.stars.len());
 
     // Convert back to RGB_U8 for saving
     let output_img = output_img
