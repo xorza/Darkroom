@@ -75,11 +75,7 @@ impl BackgroundMap {
             config.adaptive_sigma,
         );
 
-        let mut background = if grid.has_adaptive_sigma() {
-            interpolate_from_grid_with_adaptive(pixels, &grid)
-        } else {
-            interpolate_from_grid(pixels, &grid)
-        };
+        let mut background = interpolate_from_grid(pixels, &grid);
 
         if config.iterations > 0 {
             refine(&mut background, pixels, config);
@@ -115,19 +111,28 @@ impl BackgroundMap {
     }
 }
 
-/// Interpolate from grid including adaptive sigma channel.
-fn interpolate_from_grid_with_adaptive(pixels: &Buffer2<f32>, grid: &TileGrid) -> BackgroundMap {
+/// Interpolate background map from tile grid.
+///
+/// If `grid.has_adaptive_sigma()` is true, also interpolates the adaptive_sigma channel.
+fn interpolate_from_grid(pixels: &Buffer2<f32>, grid: &TileGrid) -> BackgroundMap {
     let width = pixels.width();
     let height = pixels.height();
+    let has_adaptive = grid.has_adaptive_sigma();
 
     let mut bg_data = Buffer2::new_filled(width, height, 0.0);
     let mut noise_data = Buffer2::new_filled(width, height, 0.0);
-    let mut adaptive_data = Buffer2::new_filled(width, height, 0.0);
+    let mut adaptive_data = if has_adaptive {
+        Some(Buffer2::new_filled(width, height, 0.0))
+    } else {
+        None
+    };
 
     // Process in parallel chunks
     let bg_ptr = bg_data.pixels_mut().as_mut_ptr() as usize;
     let noise_ptr = noise_data.pixels_mut().as_mut_ptr() as usize;
-    let adaptive_ptr = adaptive_data.pixels_mut().as_mut_ptr() as usize;
+    let adaptive_ptr = adaptive_data
+        .as_mut()
+        .map(|b| b.pixels_mut().as_mut_ptr() as usize);
 
     parallel::par_iter_auto(height).for_each(|(_, start_row, end_row)| {
         for y in start_row..end_row {
@@ -140,50 +145,19 @@ fn interpolate_from_grid_with_adaptive(pixels: &Buffer2<f32>, grid: &TileGrid) -
             let noise_row = unsafe {
                 std::slice::from_raw_parts_mut((noise_ptr as *mut f32).add(row_offset), width)
             };
-            let adaptive_row = unsafe {
-                std::slice::from_raw_parts_mut((adaptive_ptr as *mut f32).add(row_offset), width)
-            };
+            let adaptive_row = adaptive_ptr.map(|ptr| unsafe {
+                std::slice::from_raw_parts_mut((ptr as *mut f32).add(row_offset), width)
+            });
 
-            interpolate_row(bg_row, noise_row, Some(adaptive_row), y, grid);
+            interpolate_row(bg_row, noise_row, adaptive_row, y, grid);
         }
     });
 
     BackgroundMap {
         background: bg_data,
         noise: noise_data,
-        adaptive_sigma: Some(adaptive_data),
+        adaptive_sigma: adaptive_data,
     }
-}
-
-fn interpolate_from_grid(pixels: &Buffer2<f32>, grid: &TileGrid) -> BackgroundMap {
-    let width = pixels.width();
-    let height = pixels.height();
-
-    let mut background = BackgroundMap {
-        background: Buffer2::new_filled(width, height, 0.0),
-        noise: Buffer2::new_filled(width, height, 0.0),
-        adaptive_sigma: None,
-    };
-
-    parallel::par_chunks_auto_aligned_zip2(
-        background.background.pixels_mut(),
-        background.noise.pixels_mut(),
-        width,
-    )
-    .for_each(|(chunk_start_row, (bg_chunk, noise_chunk))| {
-        let rows_in_chunk = bg_chunk.len() / width;
-
-        for local_y in 0..rows_in_chunk {
-            let y = chunk_start_row + local_y;
-            let row_offset = local_y * width;
-            let bg_row = &mut bg_chunk[row_offset..row_offset + width];
-            let noise_row = &mut noise_chunk[row_offset..row_offset + width];
-
-            interpolate_row(bg_row, noise_row, None, y, grid);
-        }
-    });
-
-    background
 }
 
 fn refine(background: &mut BackgroundMap, pixels: &Buffer2<f32>, config: &BackgroundConfig) {
