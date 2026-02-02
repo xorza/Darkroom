@@ -528,6 +528,39 @@ fn test_large_tree_over_64_nodes() {
 }
 
 #[test]
+fn test_very_large_tree_heap_fallback() {
+    // Create a scenario that produces > 128 nodes to test heap fallback path
+    // Use many stars in a grid pattern with high threshold count
+    let mut stars = Vec::new();
+    for row in 0..6 {
+        for col in 0..6 {
+            let x = 15 + col * 20;
+            let y = 15 + row * 20;
+            let amp = 1.0 - (row * 6 + col) as f32 * 0.02;
+            stars.push((x, y, amp, 1.8f32));
+        }
+    }
+
+    let (pixels, labels, data) = make_test_component(150, 150, &stars);
+
+    let config = DeblendConfig {
+        n_thresholds: 128, // Very high threshold count to create many nodes
+        min_contrast: 0.001,
+        min_separation: 2,
+        ..Default::default()
+    };
+
+    let result = deblend_multi_threshold(&data, &pixels, &labels, &config);
+
+    // Should find multiple objects (exact count depends on merging)
+    assert!(!result.is_empty(), "Should find at least one object");
+
+    // Area conservation
+    let total_area: usize = result.iter().map(|o| o.area).sum();
+    assert_eq!(total_area, data.area, "Area should be conserved");
+}
+
+#[test]
 fn test_buffer_reuse_consistency() {
     // Run the same deblending multiple times to ensure buffer reuse doesn't cause issues
     let (pixels, labels, data) =
@@ -1145,6 +1178,96 @@ fn test_find_connected_regions_grid_diagonal_connectivity() {
         "Diagonal neighbors should be connected (8-connectivity)"
     );
     assert_eq!(regions[0].len(), 2);
+}
+
+#[test]
+fn test_find_significant_branches_small_tree() {
+    // Test find_significant_branches with a small tree (stack allocation path)
+    use smallvec::SmallVec as SV;
+
+    // Build a simple tree: root with 2 children
+    let tree = vec![
+        DeblendNode {
+            peak: Pixel {
+                pos: Vec2us::new(10, 10),
+                value: 1.0,
+            },
+            flux: 100.0,
+            children: SV::from_slice(&[1, 2]),
+        },
+        DeblendNode {
+            peak: Pixel {
+                pos: Vec2us::new(5, 5),
+                value: 0.8,
+            },
+            flux: 40.0,
+            children: SV::new(),
+        },
+        DeblendNode {
+            peak: Pixel {
+                pos: Vec2us::new(15, 15),
+                value: 0.7,
+            },
+            flux: 35.0,
+            children: SV::new(),
+        },
+    ];
+
+    // With low contrast, both children should be returned as leaves
+    let leaves = find_significant_branches(&tree, 0.1);
+    assert_eq!(leaves.len(), 2);
+    assert!(leaves.contains(&1));
+    assert!(leaves.contains(&2));
+
+    // With high contrast, children don't pass, root becomes leaf
+    let leaves = find_significant_branches(&tree, 0.9);
+    assert_eq!(leaves.len(), 1);
+    assert!(leaves.contains(&0));
+}
+
+#[test]
+fn test_find_significant_branches_heap_fallback() {
+    // Test find_significant_branches with a tree > MAX_TREE_SIZE (heap allocation path)
+    use smallvec::SmallVec as SV;
+
+    // Build a large tree with > 128 nodes
+    let mut tree = Vec::with_capacity(150);
+
+    // Root node with many children
+    let num_children = 140;
+    let child_indices: SV<[usize; 8]> = (1..=8.min(num_children)).collect();
+
+    tree.push(DeblendNode {
+        peak: Pixel {
+            pos: Vec2us::new(50, 50),
+            value: 1.0,
+        },
+        flux: 1000.0,
+        children: child_indices,
+    });
+
+    // Add many leaf nodes
+    for i in 1..=num_children {
+        tree.push(DeblendNode {
+            peak: Pixel {
+                pos: Vec2us::new(i, i),
+                value: 0.5,
+            },
+            flux: 10.0,
+            children: SV::new(),
+        });
+    }
+
+    assert!(
+        tree.len() > MAX_TREE_SIZE,
+        "Tree should exceed MAX_TREE_SIZE"
+    );
+
+    // Should use heap fallback but still work correctly
+    let leaves = find_significant_branches(&tree, 0.001);
+
+    // With very low contrast, children pass and become leaves
+    assert!(!leaves.is_empty());
 }
 
 #[test]

@@ -631,6 +631,11 @@ fn create_child_nodes(
 // Tree Analysis
 // ============================================================================
 
+/// Maximum expected tree size for stack allocation.
+/// Trees are small: O(n_thresholds * MAX_PEAKS) but practically much smaller
+/// since most components don't split at every level.
+const MAX_TREE_SIZE: usize = 128;
+
 /// Find significant branches (leaves) that pass the contrast criterion.
 ///
 /// Returns indices of nodes that should be treated as separate objects.
@@ -643,8 +648,13 @@ fn find_significant_branches(
     }
 
     // Find root nodes (nodes that are not children of any other node)
-    // Use Vec<bool> for O(1) lookup - trees are small (limited by MAX_PEAKS)
-    let mut is_child = vec![false; tree.len()];
+    // Use stack-allocated array for small trees, heap for larger ones
+    if tree.len() > MAX_TREE_SIZE {
+        return find_significant_branches_heap(tree, min_contrast);
+    }
+
+    let mut is_child_storage = [false; MAX_TREE_SIZE];
+    let is_child = &mut is_child_storage[..tree.len()];
 
     for node in tree {
         for &child_idx in &node.children {
@@ -662,6 +672,39 @@ fn find_significant_branches(
     }
 
     // If no leaves found (all contrast criteria failed), return roots
+    if leaves.is_empty() {
+        for (i, &child) in is_child.iter().enumerate() {
+            if !child {
+                leaves.push(i);
+            }
+        }
+    }
+
+    leaves
+}
+
+/// Heap-allocated fallback for unusually large trees (> MAX_TREE_SIZE nodes).
+#[cold]
+fn find_significant_branches_heap(
+    tree: &[DeblendNode],
+    min_contrast: f32,
+) -> SmallVec<[usize; MAX_PEAKS]> {
+    let mut is_child = vec![false; tree.len()];
+
+    for node in tree {
+        for &child_idx in &node.children {
+            is_child[child_idx] = true;
+        }
+    }
+
+    let mut leaves: SmallVec<[usize; MAX_PEAKS]> = SmallVec::new();
+
+    for (i, &child) in is_child.iter().enumerate() {
+        if !child {
+            collect_significant_leaves(tree, i, min_contrast, &mut leaves);
+        }
+    }
+
     if leaves.is_empty() {
         for (i, &child) in is_child.iter().enumerate() {
             if !child {
