@@ -164,7 +164,7 @@ impl StarDetector {
         drop(output);
 
         // Step 1: Estimate background
-        let background = self.estimate_background(&pixels);
+        let background = BackgroundMap::new(&pixels, &self.config.background);
 
         // Step 2: Determine effective FWHM (manual > auto-estimate > disabled)
         let (effective_fwhm, fwhm_estimate) = self.determine_effective_fwhm(&pixels, &background);
@@ -222,11 +222,6 @@ impl StarDetector {
         }
 
         StarDetectionResult { stars, diagnostics }
-    }
-
-    /// Estimate background, optionally with adaptive thresholding.
-    fn estimate_background(&self, pixels: &Buffer2<f32>) -> BackgroundMap {
-        BackgroundMap::new(pixels, &self.config.background)
     }
 
     /// Determine effective FWHM for matched filtering.
