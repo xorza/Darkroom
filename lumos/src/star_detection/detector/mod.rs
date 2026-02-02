@@ -193,30 +193,7 @@ impl StarDetector {
         }
 
         // Step 1: Estimate background using pooled buffers
-        let has_adaptive = self.config.background.adaptive_sigma.is_some();
-        let has_iterations = self.config.background.iterations > 0;
-
-        let pool = self.buffer_pool.as_mut().unwrap();
-        let mut background = BackgroundMap::from_pool(pool, has_adaptive);
-        background.estimate(&grayscale_image, &self.config.background);
-
-        // Refine background if iterations requested
-        if has_iterations {
-            let pool = self.buffer_pool.as_mut().unwrap();
-            let mut scratch1 = pool.acquire_bit();
-            let mut scratch2 = pool.acquire_bit();
-
-            background.refine(
-                &grayscale_image,
-                &self.config.background,
-                &mut scratch1,
-                &mut scratch2,
-            );
-
-            let pool = self.buffer_pool.as_mut().unwrap();
-            pool.release_bit(scratch1);
-            pool.release_bit(scratch2);
-        }
+        let background = self.estimate_background(&grayscale_image);
 
         // Step 2: Determine effective FWHM (manual > auto-estimate > disabled)
         let (effective_fwhm, fwhm_estimate) =
@@ -282,6 +259,37 @@ impl StarDetector {
         pool.release_f32(scratch);
 
         StarDetectionResult { stars, diagnostics }
+    }
+
+    /// Estimate background from the image using pooled buffers.
+    ///
+    /// Performs initial estimation and optional iterative refinement.
+    fn estimate_background(&mut self, pixels: &Buffer2<f32>) -> BackgroundMap {
+        let has_adaptive = self.config.background.adaptive_sigma.is_some();
+
+        let pool = self.buffer_pool.as_mut().unwrap();
+        let mut background = BackgroundMap::from_pool(pool, has_adaptive);
+        background.estimate(pixels, &self.config.background);
+
+        // Refine background if iterations requested
+        if self.config.background.iterations > 0 {
+            let pool = self.buffer_pool.as_mut().unwrap();
+            let mut scratch1 = pool.acquire_bit();
+            let mut scratch2 = pool.acquire_bit();
+
+            background.refine(
+                pixels,
+                &self.config.background,
+                &mut scratch1,
+                &mut scratch2,
+            );
+
+            let pool = self.buffer_pool.as_mut().unwrap();
+            pool.release_bit(scratch1);
+            pool.release_bit(scratch2);
+        }
+
+        background
     }
 
     /// Determine effective FWHM for matched filtering.
