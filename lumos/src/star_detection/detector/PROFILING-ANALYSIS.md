@@ -56,6 +56,11 @@ impl GridLookup {
 **Files to modify**:
 - `lumos/src/star_detection/deblend/multi_threshold/mod.rs`
 
+**Test coverage review**:
+- Existing tests in `multi_threshold/tests.rs` cover: single star, two stars, three stars, hierarchical deblending, close peaks merge, empty component, flat profile, area conservation, bbox validation, peak values
+- After optimization: Run all existing tests to verify behavior unchanged
+- Add new test: `test_grid_lookup_boundary_conditions` - verify grid handles pixels at bbox edges correctly
+
 ### Priority 2: Early Exit from Deblending (Est. 5-8% improvement)
 
 Skip expensive multi-threshold analysis for components unlikely to need deblending.
@@ -77,6 +82,13 @@ if peak_to_floor_ratio < 1.2 {
 **Files to modify**:
 - `lumos/src/star_detection/deblend/multi_threshold/mod.rs`
 
+**Test coverage review**:
+- Existing tests cover small components (`test_single_pixel_component`, `test_empty_component`)
+- Existing test `test_flat_profile_no_deblend` covers low peak-to-floor ratio case
+- After optimization: Verify early exit doesn't skip components that should be deblended
+- Add new test: `test_early_exit_small_area_threshold` - verify area threshold works correctly
+- Add new test: `test_early_exit_low_contrast_ratio` - verify low contrast components skip deblending
+
 ### Priority 3: Reuse Pixel Collection Across Threshold Levels (Est. 3-5% improvement)
 
 Currently `pixel_set` HashMap is rebuilt at each call to `find_connected_regions_reuse`. Pre-build once.
@@ -94,6 +106,12 @@ fn find_connected_regions_reuse(...) {
 **Files to modify**:
 - `lumos/src/star_detection/deblend/multi_threshold/mod.rs`
 
+**Test coverage review**:
+- Existing test `test_buffer_reuse_consistency` verifies repeated calls produce identical results
+- Existing test `test_n_thresholds_effect` tests multiple threshold levels
+- After optimization: All existing tests should pass without modification
+- No new tests needed - this is an internal refactor with no behavior change
+
 ### Priority 4: Reduce Buffer Allocations (Est. 3-5% improvement)
 
 The kernel is spending 16-20% on `clear_page_erms` (zeroing new pages).
@@ -106,12 +124,24 @@ The kernel is spending 16-20% on `clear_page_erms` (zeroing new pages).
 **Files to modify**:
 - `lumos/src/star_detection/detector/mod.rs`
 
+**Test coverage review**:
+- Existing detector tests in `detector/tests.rs` cover FWHM outlier filtering and duplicate removal
+- Existing benchmarks test full pipeline behavior
+- After optimization: Run full test suite to verify no regressions
+- No new tests needed - buffer reuse is transparent to callers
+
 ### Priority 5: Optimize `pixel_to_node` HashMap (Est. 2-3% improvement)
 
 Replace `HashMap<Vec2us, usize>` with grid-based array similar to Priority 1.
 
 **Files to modify**:
 - `lumos/src/star_detection/deblend/multi_threshold/mod.rs`
+
+**Test coverage review**:
+- Same tests as Priority 1 apply - `pixel_to_node` is used in tree building
+- Existing tests `test_hierarchical_deblend` and `test_three_stars_deblend` exercise tree building with multiple nodes
+- After optimization: All existing deblend tests should pass
+- No new tests needed if Priority 1 grid implementation is reused
 
 ---
 
