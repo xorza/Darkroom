@@ -30,12 +30,20 @@ mod tests;
 /// Maps an index that may be out of bounds to a valid index using reflection.
 /// For index < 0: reflects at 0 (e.g., -1 -> 1, -2 -> 2)
 /// For index >= len: reflects at len-1 (e.g., len -> len-2, len+1 -> len-3)
+///
+/// For indices far out of bounds, clamps to valid range after reflection.
 #[inline]
 pub fn mirror_index(i: isize, len: usize) -> usize {
+    debug_assert!(len > 0, "mirror_index requires len > 0");
+
     if i < 0 {
-        (-i) as usize
+        let reflected = (-i) as usize;
+        // Clamp to valid range if reflected index is still out of bounds
+        reflected.min(len - 1)
     } else if i >= len as isize {
-        2 * len - 2 - i as usize
+        let reflected = (2 * len).saturating_sub(2).saturating_sub(i as usize);
+        // Clamp to valid range
+        reflected.min(len - 1)
     } else {
         i as usize
     }
@@ -176,82 +184,6 @@ pub(super) fn convolve_cols_scalar(
                 let sy = y as isize + k as isize - radius as isize;
                 let sy = mirror_index(sy, height);
                 sum += input[sy * width + x] * kval;
-            }
-            output[y * width + x] = sum;
-        }
-    }
-}
-
-// ============================================================================
-// 2D convolution dispatch
-// ============================================================================
-
-/// Apply 2D convolution using SIMD when available.
-///
-/// Falls back to scalar implementation on unsupported platforms.
-#[inline]
-#[allow(dead_code)]
-pub(super) fn convolve_2d(
-    input: &[f32],
-    output: &mut [f32],
-    width: usize,
-    height: usize,
-    kernel: &[f32],
-    ksize: usize,
-) {
-    #[cfg(target_arch = "x86_64")]
-    {
-        if cpu_features::has_avx2_fma() {
-            unsafe {
-                sse::convolve_2d_avx2(input, output, width, height, kernel, ksize);
-            }
-            return;
-        }
-        if cpu_features::has_sse4_1() {
-            unsafe {
-                sse::convolve_2d_sse41(input, output, width, height, kernel, ksize);
-            }
-            return;
-        }
-    }
-
-    #[cfg(target_arch = "aarch64")]
-    {
-        unsafe {
-            neon::convolve_2d_neon(input, output, width, height, kernel, ksize);
-        }
-        return;
-    }
-
-    // Scalar fallback
-    #[allow(unreachable_code)]
-    convolve_2d_scalar(input, output, width, height, kernel, ksize);
-}
-
-/// Scalar implementation of 2D convolution.
-#[inline]
-#[allow(dead_code)]
-pub(super) fn convolve_2d_scalar(
-    input: &[f32],
-    output: &mut [f32],
-    width: usize,
-    height: usize,
-    kernel: &[f32],
-    ksize: usize,
-) {
-    let radius = ksize / 2;
-
-    for y in 0..height {
-        for x in 0..width {
-            let mut sum = 0.0f32;
-            for ky in 0..ksize {
-                let sy = y as isize + ky as isize - radius as isize;
-                let sy = mirror_index(sy, height);
-                for kx in 0..ksize {
-                    let sx = x as isize + kx as isize - radius as isize;
-                    let sx = mirror_index(sx, width);
-                    sum += input[sy * width + sx] * kernel[ky * ksize + kx];
-                }
             }
             output[y * width + x] = sum;
         }

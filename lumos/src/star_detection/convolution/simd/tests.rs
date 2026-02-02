@@ -364,6 +364,33 @@ fn test_mirror_index_overflow() {
     assert_eq!(mirror_index(12, len), 6); // 2*10-2-12 = 6
 }
 
+#[test]
+fn test_mirror_index_far_out_of_bounds() {
+    // Indices far out of bounds should clamp to valid range
+    let len = 5;
+
+    // Far negative: -5 would reflect to 5, but that's out of bounds, so clamp to 4
+    assert!(mirror_index(-5, len) < len);
+    assert!(mirror_index(-10, len) < len);
+
+    // Far positive: large indices should also stay in bounds
+    assert!(mirror_index(20, len) < len);
+    assert!(mirror_index(100, len) < len);
+
+    // All results must be valid indices
+    for i in -20..30 {
+        let result = mirror_index(i, len);
+        assert!(
+            result < len,
+            "mirror_index({}, {}) = {} should be < {}",
+            i,
+            len,
+            result,
+            len
+        );
+    }
+}
+
 // ========== Column convolution tests ==========
 
 #[test]
