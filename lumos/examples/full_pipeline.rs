@@ -57,6 +57,7 @@ use lumos::{
     AstroImage, CalibrationMasters, FilteringConfig, FrameType, ImageStack, InterpolationMethod,
     MedianConfig, ProgressCallback, RegistrationConfig, Registrator, SigmaClippedConfig,
     StackingMethod, StackingProgress, StackingStage, Star, StarDetectionConfig, StarDetector,
+    TransformType,
 };
 use tracing_subscriber::EnvFilter;
 
@@ -408,17 +409,18 @@ fn register_all_lights(
     let ref_image = AstroImage::from_file(ref_path).expect("Failed to load reference image");
 
     // Configure registration for high accuracy
-    let reg_config = RegistrationConfig::builder()
-        .full_homography() // Affine can model distortions that similarity cannot
-        .ransac_iterations(5000) // More iterations for better model
-        .ransac_threshold(1.0) // Tighter threshold = stricter inlier selection
-        .ransac_confidence(0.9999) // Higher confidence
-        .max_stars(MAX_STARS_FOR_REGISTRATION)
-        .min_matched_stars(20) // Require more matched stars
-        .max_residual(1.0) // Stricter residual limit
-        .triangle_tolerance(0.005) // Tighter triangle matching
-        .refine_with_centroids(true) // Enable centroid refinement
-        .build();
+    let reg_config = RegistrationConfig {
+        transform_type: TransformType::Homography, // Can model distortions that similarity cannot
+        ransac_iterations: 5000,                   // More iterations for better model
+        ransac_threshold: 1.0,                     // Tighter threshold = stricter inlier selection
+        ransac_confidence: 0.9999,                 // Higher confidence
+        max_stars_for_matching: MAX_STARS_FOR_REGISTRATION,
+        min_matched_stars: 20,       // Require more matched stars
+        max_residual_pixels: 1.0,    // Stricter residual limit
+        triangle_tolerance: 0.005,   // Tighter triangle matching
+        refine_with_centroids: true, // Enable centroid refinement
+        ..Default::default()
+    };
 
     let registrator = Registrator::new(reg_config);
 

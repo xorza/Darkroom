@@ -124,7 +124,6 @@ pub use registration::{
     RansacResult,
     // Core types
     RegistrationConfig,
-    RegistrationConfigBuilder,
     RegistrationError,
     RegistrationResult,
     // High-level API

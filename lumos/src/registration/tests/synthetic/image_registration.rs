@@ -9,7 +9,7 @@ use crate::{AstroImage, ImageDimensions};
 use crate::common::Buffer2;
 use crate::registration::interpolation::{InterpolationMethod, WarpConfig, warp_image};
 use crate::registration::types::TransformMatrix;
-use crate::registration::{RegistrationConfig, Registrator};
+use crate::registration::{RegistrationConfig, Registrator, TransformType};
 use crate::star_detection::{BackgroundConfig, StarDetectionConfig, StarDetector};
 use crate::testing::synthetic::{self, StarFieldConfig};
 
@@ -117,12 +117,13 @@ fn test_image_registration_translation() {
         .collect();
 
     // Register the images
-    let reg_config = RegistrationConfig::builder()
-        .translation_only()
-        .min_stars(6)
-        .min_matched_stars(4)
-        .max_residual(3.0)
-        .build();
+    let reg_config = RegistrationConfig {
+        transform_type: TransformType::Translation,
+        min_stars_for_matching: 6,
+        min_matched_stars: 4,
+        max_residual_pixels: 3.0,
+        ..Default::default()
+    };
 
     let registrator = Registrator::new(reg_config);
     let result = registrator
@@ -197,12 +198,13 @@ fn test_image_registration_rotation() {
         .map(|s| (s.x as f64, s.y as f64))
         .collect();
 
-    let reg_config = RegistrationConfig::builder()
-        .with_rotation()
-        .min_stars(6)
-        .min_matched_stars(4)
-        .max_residual(3.0)
-        .build();
+    let reg_config = RegistrationConfig {
+        transform_type: TransformType::Euclidean,
+        min_stars_for_matching: 6,
+        min_matched_stars: 4,
+        max_residual_pixels: 3.0,
+        ..Default::default()
+    };
 
     let registrator = Registrator::new(reg_config);
     let result = registrator
@@ -269,12 +271,13 @@ fn test_image_registration_similarity() {
         .map(|s| (s.x as f64, s.y as f64))
         .collect();
 
-    let reg_config = RegistrationConfig::builder()
-        .with_scale()
-        .min_stars(6)
-        .min_matched_stars(4)
-        .max_residual(3.0)
-        .build();
+    let reg_config = RegistrationConfig {
+        transform_type: TransformType::Similarity,
+        min_stars_for_matching: 6,
+        min_matched_stars: 4,
+        max_residual_pixels: 3.0,
+        ..Default::default()
+    };
 
     let registrator = Registrator::new(reg_config);
     let result = registrator
@@ -364,12 +367,13 @@ fn test_image_registration_with_noise() {
         .map(|s| (s.x as f64, s.y as f64))
         .collect();
 
-    let reg_config = RegistrationConfig::builder()
-        .translation_only()
-        .min_stars(6)
-        .min_matched_stars(4)
-        .max_residual(5.0) // Allow more error due to noise
-        .build();
+    let reg_config = RegistrationConfig {
+        transform_type: TransformType::Translation,
+        min_stars_for_matching: 6,
+        min_matched_stars: 4,
+        max_residual_pixels: 5.0, // Allow more error due to noise
+        ..Default::default()
+    };
 
     let registrator = Registrator::new(reg_config);
     let result = registrator
@@ -441,12 +445,13 @@ fn test_image_registration_dense_field() {
         .map(|s| (s.x as f64, s.y as f64))
         .collect();
 
-    let reg_config = RegistrationConfig::builder()
-        .with_rotation()
-        .min_stars(10)
-        .min_matched_stars(8)
-        .max_residual(3.0)
-        .build();
+    let reg_config = RegistrationConfig {
+        transform_type: TransformType::Euclidean,
+        min_stars_for_matching: 10,
+        min_matched_stars: 8,
+        max_residual_pixels: 3.0,
+        ..Default::default()
+    };
 
     let registrator = Registrator::new(reg_config);
     let result = registrator
@@ -506,12 +511,13 @@ fn test_image_registration_large_image() {
         .map(|s| (s.x as f64, s.y as f64))
         .collect();
 
-    let reg_config = RegistrationConfig::builder()
-        .translation_only()
-        .min_stars(6)
-        .min_matched_stars(4)
-        .max_residual(3.0)
-        .build();
+    let reg_config = RegistrationConfig {
+        transform_type: TransformType::Translation,
+        min_stars_for_matching: 6,
+        min_matched_stars: 4,
+        max_residual_pixels: 3.0,
+        ..Default::default()
+    };
 
     let registrator = Registrator::new(reg_config);
     let result = registrator

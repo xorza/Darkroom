@@ -517,12 +517,13 @@ fn test_warp_with_detected_transform() {
         .collect();
 
     // Register to find transform
-    let reg_config = RegistrationConfig::builder()
-        .with_rotation()
-        .min_stars(6)
-        .min_matched_stars(4)
-        .max_residual(3.0)
-        .build();
+    let reg_config = RegistrationConfig {
+        transform_type: TransformType::Euclidean,
+        min_stars_for_matching: 6,
+        min_matched_stars: 4,
+        max_residual_pixels: 3.0,
+        ..Default::default()
+    };
 
     let registrator = Registrator::new(reg_config);
     let result = registrator

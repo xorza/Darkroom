@@ -21,7 +21,9 @@ use crate::registration::{
     phase_correlation::{PhaseCorrelationConfig, PhaseCorrelator},
     ransac::{RansacConfig, RansacEstimator},
     triangle::{TriangleMatchConfig, match_triangles},
-    types::{RegistrationConfig, RegistrationError, RegistrationResult, TransformMatrix},
+    types::{
+        RegistrationConfig, RegistrationError, RegistrationResult, TransformMatrix, TransformType,
+    },
 };
 use crate::star_detection::Star;
 
@@ -388,12 +390,13 @@ pub fn quick_register(
     ref_stars: &[(f64, f64)],
     target_stars: &[(f64, f64)],
 ) -> Result<TransformMatrix, RegistrationError> {
-    let config = RegistrationConfig::builder()
-        .with_scale()
-        .ransac_iterations(500)
-        .max_stars(100)
-        .min_matched_stars(4)
-        .build();
+    let config = RegistrationConfig {
+        transform_type: TransformType::Similarity,
+        ransac_iterations: 500,
+        max_stars_for_matching: 100,
+        min_matched_stars: 4,
+        ..Default::default()
+    };
 
     let result = Registrator::new(config).register_positions(ref_stars, target_stars)?;
     Ok(result.transform)
@@ -435,14 +438,15 @@ pub fn quick_register_stars(
     ref_stars: &[Star],
     target_stars: &[Star],
 ) -> Result<RegistrationResult, RegistrationError> {
-    let config = RegistrationConfig::builder()
-        .full_affine() // 6 DOF for handling rotation, scale, and shear
-        .ransac_iterations(1000)
-        .ransac_threshold(2.0)
-        .max_stars(100)
-        .min_matched_stars(4)
-        .max_residual(5.0)
-        .build();
+    let config = RegistrationConfig {
+        transform_type: TransformType::Affine, // 6 DOF for handling rotation, scale, and shear
+        ransac_iterations: 1000,
+        ransac_threshold: 2.0,
+        max_stars_for_matching: 100,
+        min_matched_stars: 4,
+        max_residual_pixels: 5.0,
+        ..Default::default()
+    };
 
     Registrator::new(config).register_stars(ref_stars, target_stars)
 }

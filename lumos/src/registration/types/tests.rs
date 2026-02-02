@@ -173,13 +173,14 @@ fn test_config_default_values() {
 }
 
 #[test]
-fn test_config_builder() {
-    let config = RegistrationConfig::builder()
-        .with_rotation()
-        .ransac_iterations(500)
-        .ransac_threshold(3.0)
-        .max_stars(100)
-        .build();
+fn test_config_struct_init() {
+    let config = RegistrationConfig {
+        transform_type: TransformType::Euclidean,
+        ransac_iterations: 500,
+        ransac_threshold: 3.0,
+        max_stars_for_matching: 100,
+        ..Default::default()
+    };
 
     assert_eq!(config.transform_type, TransformType::Euclidean);
     assert_eq!(config.ransac_iterations, 500);

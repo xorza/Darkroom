@@ -111,12 +111,13 @@ use lumos::registration::{
 };
 
 // Configure registration
-let config = RegistrationConfig::builder()
-    .with_scale()                  // Similarity transform (translation + rotation + scale)
-    .ransac_iterations(1000)
-    .ransac_threshold(2.0)         // 2 pixel inlier threshold
-    .max_stars(200)                // Use brightest 200 stars
-    .build();
+let config = RegistrationConfig {
+    transform_type: TransformType::Similarity,  // translation + rotation + scale
+    ransac_iterations: 1000,
+    ransac_threshold: 2.0,           // 2 pixel inlier threshold
+    max_stars_for_matching: 200,     // Use brightest 200 stars
+    ..Default::default()
+};
 
 let registrator = Registrator::new(config);
 
@@ -172,11 +173,12 @@ let stacked = aligned_images
 For images with large offsets, enable phase correlation for coarse alignment:
 
 ```rust
-let config = RegistrationConfig::builder()
-    .with_scale()
-    .use_phase_correlation(true)  // FFT-based coarse alignment first
-    .ransac_iterations(1000)
-    .build();
+let config = RegistrationConfig {
+    transform_type: TransformType::Similarity,
+    use_phase_correlation: true,  // FFT-based coarse alignment first
+    ransac_iterations: 1000,
+    ..Default::default()
+};
 ```
 
 #### Field Rotation (Alt-Az Mounts)
@@ -184,10 +186,11 @@ let config = RegistrationConfig::builder()
 For equatorial tracking errors or alt-az field rotation:
 
 ```rust
-let config = RegistrationConfig::builder()
-    .with_scale()  // Includes rotation
-    .ransac_threshold(1.5)  // Tighter threshold
-    .build();
+let config = RegistrationConfig {
+    transform_type: TransformType::Similarity,  // Includes rotation
+    ransac_threshold: 1.5,  // Tighter threshold
+    ..Default::default()
+};
 ```
 
 #### Wide-Field Distortion
@@ -419,29 +422,32 @@ Where `a` is the kernel radius (2, 3, or 4).
 
 **Well-aligned images (small dither):**
 ```rust
-let config = RegistrationConfig::builder()
-    .with_scale()
-    .ransac_iterations(500)
-    .build();
+let config = RegistrationConfig {
+        transform_type: TransformType::Similarity,
+        ransac_iterations: 500,
+        ..Default::default(),
+    };
 ```
 
 **Large offsets:**
 ```rust
-let config = RegistrationConfig::builder()
-    .with_scale()
-    .use_phase_correlation(true)
-    .ransac_iterations(1000)
-    .build();
+let config = RegistrationConfig {
+        transform_type: TransformType::Similarity,
+        use_phase_correlation: true,
+        ransac_iterations: 1000,
+        ..Default::default(),
+    };
 ```
 
 **High accuracy:**
 ```rust
-let config = RegistrationConfig::builder()
-    .full_affine()
-    .ransac_threshold(1.0)
-    .ransac_iterations(2000)
-    .max_residual(0.5)
-    .build();
+let config = RegistrationConfig {
+        transform_type: TransformType::Affine,
+        ransac_threshold: 1.0,
+        ransac_iterations: 2000,
+        max_residual_pixels: 0.5,
+        ..Default::default(),
+    };
 ```
 
 ### All Configuration Options
@@ -580,3 +586,4 @@ println!("Translation: ({:.1}, {:.1}) px", tx, ty);
 println!("Scale: {:.4}", scale);
 println!("Rotation: {:.2}°", rotation.to_degrees());
 ```
+

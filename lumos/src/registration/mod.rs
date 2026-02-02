@@ -30,10 +30,11 @@
 //! let target_stars = vec![(110.0, 105.0), (210.0, 155.0), /* ... */];
 //!
 //! // Configure registration
-//! let config = RegistrationConfig::builder()
-//!     .with_scale()
-//!     .ransac_threshold(2.0)
-//!     .build();
+//! let config = RegistrationConfig {
+//!     transform_type: TransformType::Similarity,
+//!     ransac_threshold: 2.0,
+//!     ..Default::default()
+//! };
 //!
 //! // Run registration
 //! let registrator = Registrator::new(config);
@@ -84,8 +85,8 @@ pub use pipeline::{
 
 // Core types needed by users
 pub use types::{
-    RansacFailureReason, RegistrationConfig, RegistrationConfigBuilder, RegistrationError,
-    RegistrationResult, StarMatch, TransformMatrix, TransformType,
+    RansacFailureReason, RegistrationConfig, RegistrationError, RegistrationResult, StarMatch,
+    TransformMatrix, TransformType,
 };
 
 // GPU-accelerated warping

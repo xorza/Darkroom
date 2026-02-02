@@ -29,12 +29,13 @@ fn test_outlier_rejection_spurious_stars() {
     // Add 10 spurious stars (10% of original)
     let target_with_spurious = add_spurious_stars(&target_stars, 10, 2000.0, 2000.0, 22222);
 
-    let config = RegistrationConfig::builder()
-        .translation_only()
-        .min_stars(6)
-        .min_matched_stars(4)
-        .max_residual(3.0)
-        .build();
+    let config = RegistrationConfig {
+        transform_type: TransformType::Translation,
+        min_stars_for_matching: 6,
+        min_matched_stars: 4,
+        max_residual_pixels: 3.0,
+        ..Default::default()
+    };
 
     let registrator = Registrator::new(config);
     let result = registrator
@@ -74,12 +75,13 @@ fn test_outlier_rejection_missing_stars() {
     // Remove ~10% of stars
     let target_with_missing = remove_random_stars(&target_stars, 0.1, 44444);
 
-    let config = RegistrationConfig::builder()
-        .translation_only()
-        .min_stars(6)
-        .min_matched_stars(4)
-        .max_residual(3.0)
-        .build();
+    let config = RegistrationConfig {
+        transform_type: TransformType::Translation,
+        min_stars_for_matching: 6,
+        min_matched_stars: 4,
+        max_residual_pixels: 3.0,
+        ..Default::default()
+    };
 
     let registrator = Registrator::new(config);
     let result = registrator
@@ -115,12 +117,13 @@ fn test_outlier_rejection_combined() {
     let target_modified = remove_random_stars(&target_stars, 0.1, 66666);
     let target_modified = add_spurious_stars(&target_modified, 10, 2000.0, 2000.0, 77777);
 
-    let config = RegistrationConfig::builder()
-        .translation_only()
-        .min_stars(6)
-        .min_matched_stars(4)
-        .max_residual(3.0)
-        .build();
+    let config = RegistrationConfig {
+        transform_type: TransformType::Translation,
+        min_stars_for_matching: 6,
+        min_matched_stars: 4,
+        max_residual_pixels: 3.0,
+        ..Default::default()
+    };
 
     let registrator = Registrator::new(config);
     let result = registrator
@@ -156,12 +159,13 @@ fn test_outlier_rejection_20_percent_spurious() {
     // Add 16 spurious stars (20% of original)
     let target_with_spurious = add_spurious_stars(&target_stars, 16, 2000.0, 2000.0, 99999);
 
-    let config = RegistrationConfig::builder()
-        .with_rotation()
-        .min_stars(6)
-        .min_matched_stars(4)
-        .max_residual(3.0)
-        .build();
+    let config = RegistrationConfig {
+        transform_type: TransformType::Euclidean,
+        min_stars_for_matching: 6,
+        min_matched_stars: 4,
+        max_residual_pixels: 3.0,
+        ..Default::default()
+    };
 
     let registrator = Registrator::new(config);
     let result = registrator
@@ -211,12 +215,13 @@ fn test_partial_overlap_75_percent() {
         target_stars.len()
     );
 
-    let config = RegistrationConfig::builder()
-        .translation_only()
-        .min_stars(6)
-        .min_matched_stars(4)
-        .max_residual(3.0)
-        .build();
+    let config = RegistrationConfig {
+        transform_type: TransformType::Translation,
+        min_stars_for_matching: 6,
+        min_matched_stars: 4,
+        max_residual_pixels: 3.0,
+        ..Default::default()
+    };
 
     let registrator = Registrator::new(config);
     let result = registrator
@@ -263,12 +268,13 @@ fn test_partial_overlap_50_percent() {
         target_stars.len()
     );
 
-    let config = RegistrationConfig::builder()
-        .translation_only()
-        .min_stars(6)
-        .min_matched_stars(4)
-        .max_residual(3.0)
-        .build();
+    let config = RegistrationConfig {
+        transform_type: TransformType::Translation,
+        min_stars_for_matching: 6,
+        min_matched_stars: 4,
+        max_residual_pixels: 3.0,
+        ..Default::default()
+    };
 
     let registrator = Registrator::new(config);
     let result = registrator
@@ -309,12 +315,13 @@ fn test_partial_overlap_diagonal() {
         .copied()
         .collect();
 
-    let config = RegistrationConfig::builder()
-        .translation_only()
-        .min_stars(6)
-        .min_matched_stars(4)
-        .max_residual(3.0)
-        .build();
+    let config = RegistrationConfig {
+        transform_type: TransformType::Translation,
+        min_stars_for_matching: 6,
+        min_matched_stars: 4,
+        max_residual_pixels: 3.0,
+        ..Default::default()
+    };
 
     let registrator = Registrator::new(config);
     let result = registrator
@@ -350,12 +357,13 @@ fn test_subpixel_translation_quarter_pixel() {
     let dy = -5.75;
     let target_stars = translate_stars(&ref_stars, dx, dy);
 
-    let config = RegistrationConfig::builder()
-        .translation_only()
-        .min_stars(6)
-        .min_matched_stars(4)
-        .max_residual(1.0)
-        .build();
+    let config = RegistrationConfig {
+        transform_type: TransformType::Translation,
+        min_stars_for_matching: 6,
+        min_matched_stars: 4,
+        max_residual_pixels: 1.0,
+        ..Default::default()
+    };
 
     let registrator = Registrator::new(config);
     let result = registrator
@@ -389,12 +397,13 @@ fn test_subpixel_translation_half_pixel() {
     let dy = -15.5;
     let target_stars = translate_stars(&ref_stars, dx, dy);
 
-    let config = RegistrationConfig::builder()
-        .translation_only()
-        .min_stars(6)
-        .min_matched_stars(4)
-        .max_residual(1.0)
-        .build();
+    let config = RegistrationConfig {
+        transform_type: TransformType::Translation,
+        min_stars_for_matching: 6,
+        min_matched_stars: 4,
+        max_residual_pixels: 1.0,
+        ..Default::default()
+    };
 
     let registrator = Registrator::new(config);
     let result = registrator
@@ -426,12 +435,13 @@ fn test_subpixel_rotation() {
     let angle_rad = angle_deg.to_radians();
     let target_stars = transform_stars(&ref_stars, 5.0, -3.0, angle_rad, 1.0, 1000.0, 1000.0);
 
-    let config = RegistrationConfig::builder()
-        .with_rotation()
-        .min_stars(6)
-        .min_matched_stars(4)
-        .max_residual(1.0)
-        .build();
+    let config = RegistrationConfig {
+        transform_type: TransformType::Euclidean,
+        min_stars_for_matching: 6,
+        min_matched_stars: 4,
+        max_residual_pixels: 1.0,
+        ..Default::default()
+    };
 
     let registrator = Registrator::new(config);
     let result = registrator
@@ -459,12 +469,13 @@ fn test_subpixel_scale() {
     let scale = 1.001; // 0.1% scale change
     let target_stars = transform_stars(&ref_stars, 0.0, 0.0, 0.0, scale, 1000.0, 1000.0);
 
-    let config = RegistrationConfig::builder()
-        .with_scale()
-        .min_stars(6)
-        .min_matched_stars(4)
-        .max_residual(1.0)
-        .build();
+    let config = RegistrationConfig {
+        transform_type: TransformType::Similarity,
+        min_stars_for_matching: 6,
+        min_matched_stars: 4,
+        max_residual_pixels: 1.0,
+        ..Default::default()
+    };
 
     let registrator = Registrator::new(config);
     let result = registrator
@@ -498,12 +509,13 @@ fn test_minimum_stars_translation() {
     let dy = -10.0;
     let target_stars = translate_stars(&ref_stars, dx, dy);
 
-    let config = RegistrationConfig::builder()
-        .translation_only()
-        .min_stars(4)
-        .min_matched_stars(3)
-        .max_residual(2.0)
-        .build();
+    let config = RegistrationConfig {
+        transform_type: TransformType::Translation,
+        min_stars_for_matching: 4,
+        min_matched_stars: 3,
+        max_residual_pixels: 2.0,
+        ..Default::default()
+    };
 
     let registrator = Registrator::new(config);
     let result = registrator
@@ -538,12 +550,13 @@ fn test_minimum_stars_similarity() {
     let scale = 1.01;
     let target_stars = transform_stars(&ref_stars, dx, dy, angle_rad, scale, 500.0, 500.0);
 
-    let config = RegistrationConfig::builder()
-        .with_scale()
-        .min_stars(4)
-        .min_matched_stars(3)
-        .max_residual(2.0)
-        .build();
+    let config = RegistrationConfig {
+        transform_type: TransformType::Similarity,
+        min_stars_for_matching: 4,
+        min_matched_stars: 3,
+        max_residual_pixels: 2.0,
+        ..Default::default()
+    };
 
     let registrator = Registrator::new(config);
     let result = registrator
@@ -571,11 +584,12 @@ fn test_insufficient_stars_fails() {
     let ref_stars = generate_random_positions(3, 1000.0, 1000.0, 11110);
     let target_stars = translate_stars(&ref_stars, 10.0, 5.0);
 
-    let config = RegistrationConfig::builder()
-        .translation_only()
-        .min_stars(4)
-        .min_matched_stars(3)
-        .build();
+    let config = RegistrationConfig {
+        transform_type: TransformType::Translation,
+        min_stars_for_matching: 4,
+        min_matched_stars: 3,
+        ..Default::default()
+    };
 
     let registrator = Registrator::new(config);
     let result = registrator.register_positions(&ref_stars, &target_stars);
@@ -607,12 +621,13 @@ fn test_stress_transform_noise_outliers() {
     let target_modified = remove_random_stars(&target_noisy, 0.1, 44443);
     let target_modified = add_spurious_stars(&target_modified, 5, 2000.0, 2000.0, 55554);
 
-    let config = RegistrationConfig::builder()
-        .with_rotation()
-        .min_stars(6)
-        .min_matched_stars(4)
-        .max_residual(3.0)
-        .build();
+    let config = RegistrationConfig {
+        transform_type: TransformType::Euclidean,
+        min_stars_for_matching: 6,
+        min_matched_stars: 4,
+        max_residual_pixels: 3.0,
+        ..Default::default()
+    };
 
     let registrator = Registrator::new(config);
     let result = registrator
@@ -684,12 +699,13 @@ fn test_stress_partial_overlap_with_noise() {
         .copied()
         .collect();
 
-    let config = RegistrationConfig::builder()
-        .with_rotation()
-        .min_stars(6)
-        .min_matched_stars(4)
-        .max_residual(3.0)
-        .build();
+    let config = RegistrationConfig {
+        transform_type: TransformType::Euclidean,
+        min_stars_for_matching: 6,
+        min_matched_stars: 4,
+        max_residual_pixels: 3.0,
+        ..Default::default()
+    };
 
     let registrator = Registrator::new(config);
     let result = registrator
@@ -717,12 +733,13 @@ fn test_stress_dense_field_large_transform() {
     let scale = 1.008;
     let target_stars = transform_stars(&ref_stars, dx, dy, 0.0, scale, 1500.0, 1500.0);
 
-    let config = RegistrationConfig::builder()
-        .with_scale()
-        .min_stars(10)
-        .min_matched_stars(8)
-        .max_residual(3.0)
-        .build();
+    let config = RegistrationConfig {
+        transform_type: TransformType::Similarity,
+        min_stars_for_matching: 10,
+        min_matched_stars: 8,
+        max_residual_pixels: 3.0,
+        ..Default::default()
+    };
 
     let registrator = Registrator::new(config);
     let result = registrator
@@ -765,12 +782,13 @@ fn test_large_rotation_45_degrees() {
 
     let target_stars = transform_stars(&ref_stars, dx, dy, angle_rad, 1.0, center_x, center_y);
 
-    let config = RegistrationConfig::builder()
-        .with_rotation()
-        .min_stars(6)
-        .min_matched_stars(4)
-        .max_residual(3.0)
-        .build();
+    let config = RegistrationConfig {
+        transform_type: TransformType::Euclidean,
+        min_stars_for_matching: 6,
+        min_matched_stars: 4,
+        max_residual_pixels: 3.0,
+        ..Default::default()
+    };
 
     let registrator = Registrator::new(config);
     let result = registrator
@@ -817,12 +835,13 @@ fn test_large_rotation_90_degrees() {
 
     let target_stars = transform_stars(&ref_stars, dx, dy, angle_rad, 1.0, center_x, center_y);
 
-    let config = RegistrationConfig::builder()
-        .with_rotation()
-        .min_stars(6)
-        .min_matched_stars(4)
-        .max_residual(3.0)
-        .build();
+    let config = RegistrationConfig {
+        transform_type: TransformType::Euclidean,
+        min_stars_for_matching: 6,
+        min_matched_stars: 4,
+        max_residual_pixels: 3.0,
+        ..Default::default()
+    };
 
     let registrator = Registrator::new(config);
     let result = registrator
@@ -866,12 +885,13 @@ fn test_large_rotation_negative_45_degrees() {
 
     let target_stars = transform_stars(&ref_stars, 0.0, 0.0, angle_rad, 1.0, center_x, center_y);
 
-    let config = RegistrationConfig::builder()
-        .with_rotation()
-        .min_stars(6)
-        .min_matched_stars(4)
-        .max_residual(3.0)
-        .build();
+    let config = RegistrationConfig {
+        transform_type: TransformType::Euclidean,
+        min_stars_for_matching: 6,
+        min_matched_stars: 4,
+        max_residual_pixels: 3.0,
+        ..Default::default()
+    };
 
     let registrator = Registrator::new(config);
     let result = registrator
@@ -905,12 +925,13 @@ fn test_extreme_scale_2x() {
 
     let target_stars = transform_stars(&ref_stars, 0.0, 0.0, 0.0, scale, center_x, center_y);
 
-    let config = RegistrationConfig::builder()
-        .with_scale()
-        .min_stars(6)
-        .min_matched_stars(4)
-        .max_residual(5.0) // Allow more residual for large scale
-        .build();
+    let config = RegistrationConfig {
+        transform_type: TransformType::Similarity,
+        min_stars_for_matching: 6,
+        min_matched_stars: 4,
+        max_residual_pixels: 5.0, // Allow more residual for large scale
+        ..Default::default()
+    };
 
     let registrator = Registrator::new(config);
     let result = registrator
@@ -954,12 +975,13 @@ fn test_extreme_scale_half() {
 
     let target_stars = transform_stars(&ref_stars, 0.0, 0.0, 0.0, scale, center_x, center_y);
 
-    let config = RegistrationConfig::builder()
-        .with_scale()
-        .min_stars(6)
-        .min_matched_stars(4)
-        .max_residual(5.0)
-        .build();
+    let config = RegistrationConfig {
+        transform_type: TransformType::Similarity,
+        min_stars_for_matching: 6,
+        min_matched_stars: 4,
+        max_residual_pixels: 5.0,
+        ..Default::default()
+    };
 
     let registrator = Registrator::new(config);
     let result = registrator
@@ -1006,12 +1028,13 @@ fn test_extreme_scale_with_rotation() {
 
     let target_stars = transform_stars(&ref_stars, dx, dy, angle_rad, scale, center_x, center_y);
 
-    let config = RegistrationConfig::builder()
-        .with_scale()
-        .min_stars(6)
-        .min_matched_stars(4)
-        .max_residual(5.0)
-        .build();
+    let config = RegistrationConfig {
+        transform_type: TransformType::Similarity,
+        min_stars_for_matching: 6,
+        min_matched_stars: 4,
+        max_residual_pixels: 5.0,
+        ..Default::default()
+    };
 
     let registrator = Registrator::new(config);
     let result = registrator
@@ -1069,12 +1092,13 @@ fn test_affine_with_outliers() {
     // Add 15% spurious stars
     let target_with_spurious = add_spurious_stars(&target_stars, 15, 2000.0, 2000.0, 30002);
 
-    let config = RegistrationConfig::builder()
-        .full_affine()
-        .min_stars(6)
-        .min_matched_stars(4)
-        .max_residual(5.0)
-        .build();
+    let config = RegistrationConfig {
+        transform_type: TransformType::Affine,
+        min_stars_for_matching: 6,
+        min_matched_stars: 4,
+        max_residual_pixels: 5.0,
+        ..Default::default()
+    };
 
     let registrator = Registrator::new(config);
     let result = registrator
@@ -1117,12 +1141,13 @@ fn test_affine_with_noise_and_missing() {
     // Remove 10%
     let target_modified = remove_random_stars(&target_noisy, 0.1, 30005);
 
-    let config = RegistrationConfig::builder()
-        .full_affine()
-        .min_stars(6)
-        .min_matched_stars(4)
-        .max_residual(5.0)
-        .build();
+    let config = RegistrationConfig {
+        transform_type: TransformType::Affine,
+        min_stars_for_matching: 6,
+        min_matched_stars: 4,
+        max_residual_pixels: 5.0,
+        ..Default::default()
+    };
 
     let registrator = Registrator::new(config);
     let result = registrator
@@ -1173,12 +1198,13 @@ fn test_homography_with_outliers() {
     // Add 10% spurious
     let target_with_spurious = add_spurious_stars(&target_stars, 12, 2000.0, 2000.0, 40002);
 
-    let config = RegistrationConfig::builder()
-        .full_homography()
-        .min_stars(8)
-        .min_matched_stars(6)
-        .max_residual(5.0)
-        .build();
+    let config = RegistrationConfig {
+        transform_type: TransformType::Homography,
+        min_stars_for_matching: 8,
+        min_matched_stars: 6,
+        max_residual_pixels: 5.0,
+        ..Default::default()
+    };
 
     let registrator = Registrator::new(config);
     let result = registrator
@@ -1236,12 +1262,13 @@ fn test_homography_with_noise_and_partial_overlap() {
         .copied()
         .collect();
 
-    let config = RegistrationConfig::builder()
-        .full_homography()
-        .min_stars(8)
-        .min_matched_stars(6)
-        .max_residual(5.0)
-        .build();
+    let config = RegistrationConfig {
+        transform_type: TransformType::Homography,
+        min_stars_for_matching: 8,
+        min_matched_stars: 6,
+        max_residual_pixels: 5.0,
+        ..Default::default()
+    };
 
     let registrator = Registrator::new(config);
     let result = registrator

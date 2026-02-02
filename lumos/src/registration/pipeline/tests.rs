@@ -138,11 +138,12 @@ fn test_registration_insufficient_stars() {
 
 #[test]
 fn test_registrator_config() {
-    let config = RegistrationConfig::builder()
-        .with_rotation()
-        .ransac_iterations(2000)
-        .ransac_threshold(1.5)
-        .build();
+    let config = RegistrationConfig {
+        transform_type: TransformType::Euclidean,
+        ransac_iterations: 2000,
+        ransac_threshold: 1.5,
+        ..Default::default()
+    };
 
     let registrator = Registrator::new(config);
     assert_eq!(registrator.config().ransac_iterations, 2000);
@@ -639,11 +640,12 @@ fn test_multiscale_registration_basic() {
     let translation = TransformMatrix::translation(25.0, -15.0);
     let target_stars = transform_stars(&ref_stars, &translation);
 
-    let config = RegistrationConfig::builder()
-        .min_stars(6)
-        .min_matched_stars(4)
-        .max_residual(5.0)
-        .build();
+    let config = RegistrationConfig {
+        min_stars_for_matching: 6,
+        min_matched_stars: 4,
+        max_residual_pixels: 5.0,
+        ..Default::default()
+    };
 
     let multiscale_config = MultiScaleConfig {
         levels: 2,
@@ -671,12 +673,13 @@ fn test_multiscale_registration_with_rotation() {
     let transform = TransformMatrix::similarity(30.0, -20.0, angle, 1.0);
     let target_stars = transform_stars(&ref_stars, &transform);
 
-    let config = RegistrationConfig::builder()
-        .with_scale()
-        .min_stars(6)
-        .min_matched_stars(4)
-        .max_residual(5.0)
-        .build();
+    let config = RegistrationConfig {
+        transform_type: TransformType::Similarity,
+        min_stars_for_matching: 6,
+        min_matched_stars: 4,
+        max_residual_pixels: 5.0,
+        ..Default::default()
+    };
 
     let multiscale_config = MultiScaleConfig {
         levels: 2,
@@ -1199,10 +1202,11 @@ fn test_integration_minimum_stars() {
         .map(|&(x, y)| transform.apply(x, y))
         .collect();
 
-    let config = RegistrationConfig::builder()
-        .min_stars(4)
-        .min_matched_stars(4)
-        .build();
+    let config = RegistrationConfig {
+        min_stars_for_matching: 4,
+        min_matched_stars: 4,
+        ..Default::default()
+    };
 
     let registrator = Registrator::new(config);
     let result = registrator
