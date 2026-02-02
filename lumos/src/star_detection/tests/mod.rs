@@ -18,4 +18,6 @@
 //! ```
 
 pub mod common;
+#[cfg(test)]
+mod rho_opiuchi_detection;
 pub mod synthetic;
