@@ -144,24 +144,24 @@ impl StarDetector {
         let width = image.width();
         let height = image.height();
         let mut pixels = image.to_grayscale_buffer();
-        let mut output = Buffer2::new_default(width, height);
+        let mut scratch = Buffer2::new_default(width, height);
 
         // Step 0a: Apply defect mask if provided
         if let Some(defect_map) = self.config.defect_map.as_ref()
             && !defect_map.is_empty()
         {
-            defect_map.apply(&pixels, &mut output);
-            std::mem::swap(&mut pixels, &mut output);
+            defect_map.apply(&pixels, &mut scratch);
+            std::mem::swap(&mut pixels, &mut scratch);
         }
 
         // Step 0b: Apply 3x3 median filter to remove Bayer pattern artifacts
         // Only applied for CFA sensors; skip for monochrome (~6ms faster on 4K images)
         if image.metadata.is_cfa {
-            median_filter_3x3(&pixels, &mut output);
-            std::mem::swap(&mut pixels, &mut output);
+            median_filter_3x3(&pixels, &mut scratch);
+            std::mem::swap(&mut pixels, &mut scratch);
         }
 
-        drop(output);
+        drop(scratch);
 
         // Step 1: Estimate background
         let background = BackgroundMap::new(&pixels, &self.config.background);
@@ -170,7 +170,7 @@ impl StarDetector {
         let (effective_fwhm, fwhm_estimate) = self.determine_effective_fwhm(&pixels, &background);
 
         // Step 3: Detect star candidates (with optional matched filter)
-        let (candidates, filtered) = self.detect_candidates(&pixels, &background, effective_fwhm);
+        let candidates = self.detect_candidates(&pixels, &background, effective_fwhm);
 
         let mut diagnostics = StarDetectionDiagnostics {
             candidates_after_filtering: candidates.len(),
@@ -180,7 +180,6 @@ impl StarDetector {
             ..Default::default()
         };
         tracing::debug!("Detected {} star candidates", candidates.len());
-        drop(filtered);
 
         // Step 4: Compute precise centroids (parallel)
         let mut stars = compute_centroids(candidates, &pixels, &background, &self.config);
@@ -250,10 +249,7 @@ impl StarDetector {
         pixels: &Buffer2<f32>,
         background: &BackgroundMap,
         effective_fwhm: f32,
-    ) -> (
-        Vec<candidate_detection::StarCandidate>,
-        Option<Buffer2<f32>>,
-    ) {
+    ) -> Vec<candidate_detection::StarCandidate> {
         let filtered = if effective_fwhm > f32::EPSILON {
             tracing::debug!(
                 "Applying matched filter with FWHM={:.1}, axis_ratio={:.2}, angle={:.1}°",
@@ -275,8 +271,7 @@ impl StarDetector {
             None
         };
 
-        let candidates = detect_stars(pixels, filtered.as_ref(), background, &self.config);
-        (candidates, filtered)
+        detect_stars(pixels, filtered.as_ref(), background, &self.config)
     }
 
     /// Perform first-pass detection and estimate FWHM from bright stars.
