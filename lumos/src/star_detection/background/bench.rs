@@ -34,17 +34,11 @@ const BENCH_SIGMA_CLIP_ITERATIONS: usize = 2;
 #[quick_bench(warmup_iters = 2, iters = 10)]
 fn bench_tile_grid_6k_globular(b: ::bench::Bencher) {
     let pixels = generate_globular_cluster(6144, 6144, 50000, 42);
+    let mut grid = TileGrid::new_uninit(pixels.width(), pixels.height(), 64);
 
     b.bench(|| {
-        // todo preallocate and bench only computation
-        black_box(TileGrid::new_with_options(
-            &pixels,
-            64,
-            None,
-            0,
-            BENCH_SIGMA_CLIP_ITERATIONS,
-            None,
-        ))
+        grid.compute(&pixels, None, 0, BENCH_SIGMA_CLIP_ITERATIONS, None);
+        black_box(&grid);
     });
 }
 
@@ -70,15 +64,10 @@ fn bench_tile_grid_6k_with_mask(b: ::bench::Bencher) {
         100.0 * masked_count as f64 / (width * height) as f64
     );
 
+    let mut grid = TileGrid::new_uninit(width, height, 64);
+
     b.bench(|| {
-        // prealllocate
-        black_box(TileGrid::new_with_options(
-            &pixels,
-            64,
-            Some(&mask),
-            100,
-            BENCH_SIGMA_CLIP_ITERATIONS,
-            None,
-        ))
+        grid.compute(&pixels, Some(&mask), 100, BENCH_SIGMA_CLIP_ITERATIONS, None);
+        black_box(&grid);
     });
 }

@@ -41,35 +41,41 @@ pub(super) struct TileGrid {
 // ============================================================================
 
 impl TileGrid {
-    pub fn new_with_options(
-        pixels: &Buffer2<f32>,
-        tile_size: usize,
-        mask: Option<&BitBuffer2>,
-        min_pixels: usize,
-        sigma_clip_iterations: usize,
-        adaptive_config: Option<AdaptiveSigmaConfig>,
-    ) -> Self {
-        let width = pixels.width();
-        let height = pixels.height();
+    /// Create an uninitialized TileGrid with preallocated buffers.
+    ///
+    /// Call `compute` to fill in the tile statistics.
+    pub fn new_uninit(width: usize, height: usize, tile_size: usize) -> Self {
         let tiles_x = width.div_ceil(tile_size);
         let tiles_y = height.div_ceil(tile_size);
 
-        let mut grid = Self {
+        Self {
             stats: Buffer2::new_default(tiles_x, tiles_y),
             tile_size,
             width,
             height,
-        };
+        }
+    }
 
-        grid.fill_tile_stats(
+    /// Compute tile statistics, reusing the existing buffer.
+    pub fn compute(
+        &mut self,
+        pixels: &Buffer2<f32>,
+        mask: Option<&BitBuffer2>,
+        min_pixels: usize,
+        sigma_clip_iterations: usize,
+        adaptive_config: Option<AdaptiveSigmaConfig>,
+    ) {
+        debug_assert_eq!(pixels.width(), self.width);
+        debug_assert_eq!(pixels.height(), self.height);
+
+        self.fill_tile_stats(
             pixels,
             mask,
             min_pixels,
             sigma_clip_iterations,
             adaptive_config,
         );
-        grid.apply_median_filter();
-        grid
+        self.apply_median_filter();
     }
 
     // ------------------------------------------------------------------------
@@ -462,7 +468,9 @@ mod tests {
 
     /// Create a TileGrid with default test parameters (no mask, default sigma clip iterations)
     fn make_grid(pixels: &Buffer2<f32>, tile_size: usize) -> TileGrid {
-        TileGrid::new_with_options(pixels, tile_size, None, 0, TEST_SIGMA_CLIP_ITERATIONS, None)
+        let mut grid = TileGrid::new_uninit(pixels.width(), pixels.height(), tile_size);
+        grid.compute(pixels, None, 0, TEST_SIGMA_CLIP_ITERATIONS, None);
+        grid
     }
 
     /// Create a TileGrid with mask
@@ -472,14 +480,15 @@ mod tests {
         mask: &BitBuffer2,
         min_pixels: usize,
     ) -> TileGrid {
-        TileGrid::new_with_options(
+        let mut grid = TileGrid::new_uninit(pixels.width(), pixels.height(), tile_size);
+        grid.compute(
             pixels,
-            tile_size,
             Some(mask),
             min_pixels,
             TEST_SIGMA_CLIP_ITERATIONS,
             None,
-        )
+        );
+        grid
     }
 
     // --- Construction ---
@@ -679,8 +688,9 @@ mod tests {
         let pixels = create_uniform_image(64, 64, 0.5);
 
         let grid_none = make_grid(&pixels, 32);
-        let grid_empty =
-            TileGrid::new_with_options(&pixels, 32, None, 0, TEST_SIGMA_CLIP_ITERATIONS, None);
+
+        let mut grid_empty = TileGrid::new_uninit(64, 64, 32);
+        grid_empty.compute(&pixels, None, 0, TEST_SIGMA_CLIP_ITERATIONS, None);
 
         for ty in 0..grid_none.tiles_y() {
             for tx in 0..grid_none.tiles_x() {

@@ -24,10 +24,12 @@ use tile_grid::TileGrid;
 pub use super::config::BackgroundConfig;
 
 /// Background map with per-pixel background and noise estimates.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct BackgroundMap {
     /// Configuration used for background estimation.
     config: BackgroundConfig,
+    /// Tile grid for intermediate statistics (reused across estimates).
+    tile_grid: TileGrid,
     /// Per-pixel background values.
     pub background: Buffer2<f32>,
     /// Per-pixel noise (sigma) estimates.
@@ -50,6 +52,7 @@ impl BackgroundMap {
         config.validate();
         let has_adaptive = config.adaptive_sigma.is_some();
         Self {
+            tile_grid: TileGrid::new_uninit(width, height, config.tile_size),
             config,
             background: Buffer2::new_default(width, height),
             noise: Buffer2::new_default(width, height),
@@ -68,7 +71,10 @@ impl BackgroundMap {
     pub fn from_pool(pool: &mut BufferPool, config: BackgroundConfig) -> Self {
         config.validate();
         let has_adaptive = config.adaptive_sigma.is_some();
+        let width = pool.width();
+        let height = pool.height();
         Self {
+            tile_grid: TileGrid::new_uninit(width, height, config.tile_size),
             config,
             background: pool.acquire_f32(),
             noise: pool.acquire_f32(),
@@ -123,16 +129,20 @@ impl BackgroundMap {
             "Image must be at least tile_size x tile_size"
         );
 
-        let grid = TileGrid::new_with_options(
+        self.tile_grid.compute(
             pixels,
-            self.config.tile_size,
             None,
             0,
             self.config.sigma_clip_iterations,
             self.config.adaptive_sigma,
         );
 
-        interpolate_from_grid(&grid, self);
+        interpolate_from_grid(
+            &self.tile_grid,
+            &mut self.background,
+            &mut self.noise,
+            self.adaptive_sigma.as_mut(),
+        );
     }
 
     /// Refine background estimate using iterative object masking.
@@ -145,6 +155,12 @@ impl BackgroundMap {
         scratch1: &mut BitBuffer2,
         scratch2: &mut BitBuffer2,
     ) {
+        // Clear adaptive_sigma since refinement doesn't use it
+        self.adaptive_sigma = None;
+
+        let max_tile_pixels = self.config.tile_size * self.config.tile_size;
+        let min_pixels = (max_tile_pixels as f32 * self.config.min_unmasked_fraction) as usize;
+
         let mask = scratch1;
         for _iter in 0..self.config.iterations {
             create_object_mask(
@@ -156,32 +172,35 @@ impl BackgroundMap {
                 scratch2,
             );
 
-            estimate_background_masked(
+            self.tile_grid.compute(
                 pixels,
-                self.config.tile_size,
-                mask,
-                self.config.min_unmasked_fraction,
+                Some(mask),
+                min_pixels,
                 self.config.sigma_clip_iterations,
-                self,
+                None, // No adaptive thresholding during refinement
             );
+
+            interpolate_from_grid(&self.tile_grid, &mut self.background, &mut self.noise, None);
         }
     }
 }
 
 /// Interpolate background map from tile grid into output buffers.
 ///
-/// If `output.adaptive_sigma` is Some, also interpolates the adaptive_sigma channel.
-fn interpolate_from_grid(grid: &TileGrid, output: &mut BackgroundMap) {
-    let width = output.background.width();
-    let height = output.background.height();
+/// If `adaptive_sigma` is Some, also interpolates the adaptive_sigma channel.
+fn interpolate_from_grid(
+    grid: &TileGrid,
+    background: &mut Buffer2<f32>,
+    noise: &mut Buffer2<f32>,
+    adaptive_sigma: Option<&mut Buffer2<f32>>,
+) {
+    let width = background.width();
+    let height = background.height();
 
     // Process in parallel chunks
-    let bg_ptr = output.background.pixels_mut().as_mut_ptr() as usize;
-    let noise_ptr = output.noise.pixels_mut().as_mut_ptr() as usize;
-    let adaptive_ptr = output
-        .adaptive_sigma
-        .as_mut()
-        .map(|b| b.pixels_mut().as_mut_ptr() as usize);
+    let bg_ptr = background.pixels_mut().as_mut_ptr() as usize;
+    let noise_ptr = noise.pixels_mut().as_mut_ptr() as usize;
+    let adaptive_ptr = adaptive_sigma.map(|b| b.pixels_mut().as_mut_ptr() as usize);
 
     parallel::par_iter_auto(height).for_each(|(_, start_row, end_row)| {
         for y in start_row..end_row {
@@ -228,33 +247,6 @@ fn create_object_mask(
         super::mask_dilation::dilate_mask(output, dilation_radius, scratch);
         std::mem::swap(output, scratch);
     }
-}
-
-/// Estimate background with masked pixels excluded.
-fn estimate_background_masked(
-    pixels: &Buffer2<f32>,
-    tile_size: usize,
-    mask: &BitBuffer2,
-    min_unmasked_fraction: f32,
-    sigma_clip_iterations: usize,
-    output: &mut BackgroundMap,
-) {
-    let max_tile_pixels = tile_size * tile_size;
-    let min_pixels = (max_tile_pixels as f32 * min_unmasked_fraction) as usize;
-
-    let grid = TileGrid::new_with_options(
-        pixels,
-        tile_size,
-        Some(mask),
-        min_pixels,
-        sigma_clip_iterations,
-        None, // No adaptive thresholding during refinement
-    );
-
-    // Clear adaptive_sigma since refinement doesn't use it
-    output.adaptive_sigma = None;
-
-    interpolate_from_grid(&grid, output);
 }
 
 /// Interpolate an entire row using segment-based bilinear interpolation.
