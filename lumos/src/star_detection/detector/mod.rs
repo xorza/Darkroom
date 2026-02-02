@@ -249,6 +249,11 @@ impl StarDetector {
         let mut stars = compute_centroids(candidates, &grayscale_image, &background, &self.config);
         diagnostics.stars_after_centroid = stars.len();
 
+        // Release image buffers back to pool (no longer needed after centroid computation)
+        let pool = self.buffer_pool.as_mut().unwrap();
+        background.release_to_pool(pool);
+        pool.release_f32(grayscale_image);
+
         // Step 5: Apply quality filters
         let filter_stats = apply_quality_filters(&mut stars, &self.config);
         diagnostics.rejected_saturated = filter_stats.saturated;
@@ -283,11 +288,6 @@ impl StarDetector {
             buf.extend(stars.iter().map(|s| s.snr));
             diagnostics.median_snr = crate::math::median_f32_mut(&mut buf);
         }
-
-        // Release buffers back to pool
-        let pool = self.buffer_pool.as_mut().unwrap();
-        background.release_to_pool(pool);
-        pool.release_f32(grayscale_image);
 
         StarDetectionResult { stars, diagnostics }
     }
