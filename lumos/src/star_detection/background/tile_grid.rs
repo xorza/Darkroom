@@ -34,7 +34,6 @@ pub(super) struct TileGrid {
     tile_size: usize,
     width: usize,
     height: usize,
-    has_adaptive_sigma: bool,
 }
 
 // ============================================================================
@@ -60,7 +59,6 @@ impl TileGrid {
             tile_size,
             width,
             height,
-            has_adaptive_sigma: adaptive_config.is_some(),
         };
 
         grid.fill_tile_stats(
@@ -105,12 +103,6 @@ impl TileGrid {
         let y_start = ty * self.tile_size;
         let y_end = (y_start + self.tile_size).min(self.height);
         (y_start + y_end) as f32 * 0.5
-    }
-
-    /// Returns true if adaptive sigma values were computed for this grid.
-    #[inline]
-    pub fn has_adaptive_sigma(&self) -> bool {
-        self.has_adaptive_sigma
     }
 
     /// Find the tile index whose center is at or before the given Y position.

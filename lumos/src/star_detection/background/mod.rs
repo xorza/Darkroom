@@ -66,6 +66,10 @@ impl BackgroundMap {
             "Image must be at least tile_size x tile_size"
         );
 
+        let width = pixels.width();
+        let height = pixels.height();
+        let has_adaptive = config.adaptive_sigma.is_some();
+
         let grid = TileGrid::new_with_options(
             pixels,
             config.tile_size,
@@ -75,7 +79,17 @@ impl BackgroundMap {
             config.adaptive_sigma,
         );
 
-        let mut background = interpolate_from_grid(pixels, &grid);
+        let mut background = BackgroundMap {
+            background: Buffer2::new_filled(width, height, 0.0),
+            noise: Buffer2::new_filled(width, height, 0.0),
+            adaptive_sigma: if has_adaptive {
+                Some(Buffer2::new_filled(width, height, 0.0))
+            } else {
+                None
+            },
+        };
+
+        interpolate_from_grid(&grid, &mut background);
 
         if config.iterations > 0 {
             refine(&mut background, pixels, config);
@@ -97,26 +111,18 @@ impl BackgroundMap {
     }
 }
 
-/// Interpolate background map from tile grid.
+/// Interpolate background map from tile grid into output buffers.
 ///
-/// If `grid.has_adaptive_sigma()` is true, also interpolates the adaptive_sigma channel.
-fn interpolate_from_grid(pixels: &Buffer2<f32>, grid: &TileGrid) -> BackgroundMap {
-    let width = pixels.width();
-    let height = pixels.height();
-    let has_adaptive = grid.has_adaptive_sigma();
-
-    let mut bg_data = Buffer2::new_filled(width, height, 0.0);
-    let mut noise_data = Buffer2::new_filled(width, height, 0.0);
-    let mut adaptive_data = if has_adaptive {
-        Some(Buffer2::new_filled(width, height, 0.0))
-    } else {
-        None
-    };
+/// If `output.adaptive_sigma` is Some, also interpolates the adaptive_sigma channel.
+fn interpolate_from_grid(grid: &TileGrid, output: &mut BackgroundMap) {
+    let width = output.background.width();
+    let height = output.background.height();
 
     // Process in parallel chunks
-    let bg_ptr = bg_data.pixels_mut().as_mut_ptr() as usize;
-    let noise_ptr = noise_data.pixels_mut().as_mut_ptr() as usize;
-    let adaptive_ptr = adaptive_data
+    let bg_ptr = output.background.pixels_mut().as_mut_ptr() as usize;
+    let noise_ptr = output.noise.pixels_mut().as_mut_ptr() as usize;
+    let adaptive_ptr = output
+        .adaptive_sigma
         .as_mut()
         .map(|b| b.pixels_mut().as_mut_ptr() as usize);
 
@@ -138,12 +144,6 @@ fn interpolate_from_grid(pixels: &Buffer2<f32>, grid: &TileGrid) -> BackgroundMa
             interpolate_row(bg_row, noise_row, adaptive_row, y, grid);
         }
     });
-
-    BackgroundMap {
-        background: bg_data,
-        noise: noise_data,
-        adaptive_sigma: adaptive_data,
-    }
 }
 
 fn refine(background: &mut BackgroundMap, pixels: &Buffer2<f32>, config: &BackgroundConfig) {
@@ -222,7 +222,10 @@ fn estimate_background_masked(
         None, // No adaptive thresholding during refinement
     );
 
-    *output = interpolate_from_grid(pixels, &grid);
+    // Clear adaptive_sigma since refinement doesn't use it
+    output.adaptive_sigma = None;
+
+    interpolate_from_grid(&grid, output);
 }
 
 /// Interpolate an entire row using segment-based bilinear interpolation.
