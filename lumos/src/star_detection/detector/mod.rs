@@ -174,7 +174,7 @@ impl StarDetector {
 
         // Acquire buffers from pool
         let mut grayscale_image = pool.acquire_f32();
-        image.to_grayscale_buffer_into(&mut grayscale_image);
+        image.into_grayscale_buffer(&mut grayscale_image);
         let mut scratch = pool.acquire_f32();
 
         // Step 0a: Apply defect mask if provided
@@ -203,19 +203,19 @@ impl StarDetector {
         // Refine background if iterations requested
         if has_iterations {
             let pool = self.buffer_pool.as_mut().unwrap();
-            let mut mask = pool.acquire_bit();
-            let mut scratch_bit = pool.acquire_bit();
+            let mut scratch1 = pool.acquire_bit();
+            let mut scratch2 = pool.acquire_bit();
 
             background.refine(
                 &grayscale_image,
                 &self.config.background,
-                &mut mask,
-                &mut scratch_bit,
+                &mut scratch1,
+                &mut scratch2,
             );
 
             let pool = self.buffer_pool.as_mut().unwrap();
-            pool.release_bit(mask);
-            pool.release_bit(scratch_bit);
+            pool.release_bit(scratch1);
+            pool.release_bit(scratch2);
         }
 
         // Step 2: Determine effective FWHM (manual > auto-estimate > disabled)

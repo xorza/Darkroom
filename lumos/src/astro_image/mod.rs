@@ -587,7 +587,7 @@ impl AstroImage {
     /// For RGB images, computes luminance using Rec. 709 weights: 0.2126*R + 0.7152*G + 0.0722*B
     ///
     /// The output buffer must have the same dimensions as the image.
-    pub fn to_grayscale_buffer_into(&self, output: &mut Buffer2<f32>) {
+    pub fn into_grayscale_buffer(&self, output: &mut Buffer2<f32>) {
         debug_assert_eq!(output.width(), self.dimensions.width);
         debug_assert_eq!(output.height(), self.dimensions.height);
 

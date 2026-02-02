@@ -134,9 +134,10 @@ impl BackgroundMap {
         &mut self,
         pixels: &Buffer2<f32>,
         config: &BackgroundConfig,
-        mask: &mut BitBuffer2,
-        scratch: &mut BitBuffer2,
+        scratch1: &mut BitBuffer2,
+        scratch2: &mut BitBuffer2,
     ) {
+        let mask = scratch1;
         for _iter in 0..config.iterations {
             create_object_mask(
                 pixels,
@@ -144,7 +145,7 @@ impl BackgroundMap {
                 config.sigma_threshold,
                 config.mask_dilation,
                 mask,
-                scratch,
+                scratch2,
             );
 
             estimate_background_masked(
