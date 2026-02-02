@@ -196,38 +196,29 @@ impl StarDetector {
         let background = self.estimate_background(&grayscale_image);
 
         // Step 2: Determine effective FWHM (manual > auto-estimate > disabled)
-        let (effective_fwhm, fwhm_estimate) =
-            self.determine_effective_fwhm(&grayscale_image, &background);
+        let effective_fwhm = self.determine_effective_fwhm(&grayscale_image, &background);
 
         // Step 3: Detect star candidates (with optional matched filter)
-        // Acquire convolution scratch buffer only if matched filter will be used
-        let mut convolution_scratch = if effective_fwhm > f32::EPSILON {
-            let pool = self.buffer_pool.as_mut().unwrap();
-            Some(pool.acquire_f32())
-        } else {
-            None
-        };
+        let pool = self.buffer_pool.as_mut().unwrap();
+        let mut convolution_scratch = pool.acquire_f32();
 
-        // Reuse scratch buffer for matched filter output
         let candidates = self.detect_candidates(
             &grayscale_image,
             &background,
-            effective_fwhm,
+            effective_fwhm.fwhm(),
             &mut scratch,
-            convolution_scratch.as_mut(),
+            &mut convolution_scratch,
         );
 
-        // Release convolution scratch back to pool
-        if let Some(conv_scratch) = convolution_scratch {
-            let pool = self.buffer_pool.as_mut().unwrap();
-            pool.release_f32(conv_scratch);
-        }
+        let pool = self.buffer_pool.as_mut().unwrap();
+        pool.release_f32(convolution_scratch);
 
+        let fwhm_estimate = effective_fwhm.estimate();
         let mut diagnostics = StarDetectionDiagnostics {
             candidates_after_filtering: candidates.len(),
-            estimated_fwhm: fwhm_estimate.as_ref().map_or(0.0, |e| e.fwhm),
-            fwhm_estimation_star_count: fwhm_estimate.as_ref().map_or(0, |e| e.star_count),
-            fwhm_was_auto_estimated: fwhm_estimate.as_ref().is_some_and(|e| e.is_estimated),
+            estimated_fwhm: fwhm_estimate.map_or(0.0, |e| e.fwhm),
+            fwhm_estimation_star_count: fwhm_estimate.map_or(0, |e| e.star_count),
+            fwhm_was_auto_estimated: fwhm_estimate.is_some_and(|e| e.is_estimated),
             ..Default::default()
         };
         tracing::debug!("Detected {} star candidates", candidates.len());
@@ -308,22 +299,22 @@ impl StarDetector {
 
     /// Determine effective FWHM for matched filtering.
     ///
-    /// Priority: manual expected_fwhm > auto-estimate > disabled (0.0)
+    /// Priority: manual expected_fwhm > auto-estimate > disabled
     fn determine_effective_fwhm(
         &self,
         pixels: &Buffer2<f32>,
         background: &BackgroundMap,
-    ) -> (f32, Option<fwhm_estimation::FwhmEstimate>) {
+    ) -> fwhm_estimation::EffectiveFwhm {
         if self.config.psf.expected_fwhm > f32::EPSILON {
-            return (self.config.psf.expected_fwhm, None);
+            return fwhm_estimation::EffectiveFwhm::Manual(self.config.psf.expected_fwhm);
         }
 
         if self.config.psf.auto_estimate {
             let estimate = self.estimate_fwhm_from_bright_stars(pixels, background);
-            return (estimate.fwhm, Some(estimate));
+            return fwhm_estimation::EffectiveFwhm::Estimated(estimate);
         }
 
-        (0.0, None)
+        fwhm_estimation::EffectiveFwhm::Disabled
     }
 
     /// Detect star candidates, optionally applying matched filter.
@@ -331,27 +322,25 @@ impl StarDetector {
         &self,
         pixels: &Buffer2<f32>,
         background: &BackgroundMap,
-        effective_fwhm: f32,
+        effective_fwhm: Option<f32>,
         scratch: &mut Buffer2<f32>,
-        convolution_scratch: Option<&mut Buffer2<f32>>,
+        convolution_scratch: &mut Buffer2<f32>,
     ) -> Vec<candidate_detection::StarCandidate> {
-        let filtered: Option<&Buffer2<f32>> = if effective_fwhm > f32::EPSILON {
+        let filtered: Option<&Buffer2<f32>> = if let Some(fwhm) = effective_fwhm {
             tracing::debug!(
                 "Applying matched filter with FWHM={:.1}, axis_ratio={:.2}, angle={:.1}°",
-                effective_fwhm,
+                fwhm,
                 self.config.psf.axis_ratio,
                 self.config.psf.angle.to_degrees()
             );
-            let conv_scratch = convolution_scratch
-                .expect("convolution_scratch must be provided when effective_fwhm > 0");
             matched_filter(
                 pixels,
                 &background.background,
-                effective_fwhm,
+                fwhm,
                 self.config.psf.axis_ratio,
                 self.config.psf.angle,
                 scratch,
-                conv_scratch,
+                convolution_scratch,
             );
             Some(scratch)
         } else {

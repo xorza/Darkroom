@@ -10,16 +10,49 @@ use super::Star;
 
 /// Result of FWHM estimation.
 #[derive(Debug, Clone, Copy)]
-#[allow(dead_code)] // MAD is useful diagnostic info even if not directly used
+// MAD is useful diagnostic info even if not directly used
 pub struct FwhmEstimate {
     /// Estimated FWHM in pixels.
     pub fwhm: f32,
     /// Number of stars used for estimation (after filtering).
     pub star_count: usize,
     /// Median Absolute Deviation of FWHM values.
+    #[allow(dead_code)]
     pub mad: f32,
     /// Whether estimation succeeded (true) or fell back to default (false).
     pub is_estimated: bool,
+}
+
+/// Effective FWHM configuration for matched filtering.
+#[derive(Debug, Clone)]
+pub enum EffectiveFwhm {
+    /// No matched filtering (disabled).
+    Disabled,
+    /// Manual FWHM specified by user.
+    Manual(f32),
+    /// Auto-estimated FWHM with estimation details.
+    Estimated(FwhmEstimate),
+}
+
+impl EffectiveFwhm {
+    /// Get the FWHM value if matched filtering is enabled.
+    #[inline]
+    pub fn fwhm(&self) -> Option<f32> {
+        match self {
+            Self::Disabled => None,
+            Self::Manual(fwhm) => Some(*fwhm),
+            Self::Estimated(estimate) => Some(estimate.fwhm),
+        }
+    }
+
+    /// Get the estimation details if FWHM was auto-estimated.
+    #[inline]
+    pub fn estimate(&self) -> Option<&FwhmEstimate> {
+        match self {
+            Self::Estimated(estimate) => Some(estimate),
+            _ => None,
+        }
+    }
 }
 
 /// Estimate FWHM from a set of detected stars.
