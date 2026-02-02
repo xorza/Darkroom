@@ -33,6 +33,12 @@ pub unsafe fn compute_jacobian_residuals_4(
     let sigma_x2 = sigma_x * sigma_x;
     let sigma_y2 = sigma_y * sigma_y;
 
+    // Precompute all reciprocals to avoid repeated divisions
+    let inv_sigma_x2 = 1.0 / sigma_x2;
+    let inv_sigma_y2 = 1.0 / sigma_y2;
+    let inv_sigma_x3 = inv_sigma_x2 / sigma_x; // Reuse reciprocal
+    let inv_sigma_y3 = inv_sigma_y2 / sigma_y; // Reuse reciprocal
+
     // Load 4 pixel coordinates and values
     let vx = vld1q_f32(data_x.as_ptr().add(offset));
     let vy = vld1q_f32(data_y.as_ptr().add(offset));
@@ -41,27 +47,21 @@ pub unsafe fn compute_jacobian_residuals_4(
     let vx0 = vdupq_n_f32(x0);
     let vy0 = vdupq_n_f32(y0);
 
-    // Compute dx, dy using SIMD
+    // Compute dx, dy using SIMD (keep in registers for later use)
     let vdx = vsubq_f32(vx, vx0);
     let vdy = vsubq_f32(vy, vy0);
 
-    // Compute dx^2 and dy^2 using FMA
+    // Compute dx^2 and dy^2
     let vdx2 = vmulq_f32(vdx, vdx);
     let vdy2 = vmulq_f32(vdy, vdy);
 
-    // Store to compute exponent
-    let mut dx_arr = [0.0f32; 4];
-    let mut dy_arr = [0.0f32; 4];
+    // Store only dx2/dy2 to compute exponent (dx/dy stay in registers)
     let mut dx2_arr = [0.0f32; 4];
     let mut dy2_arr = [0.0f32; 4];
-    vst1q_f32(dx_arr.as_mut_ptr(), vdx);
-    vst1q_f32(dy_arr.as_mut_ptr(), vdy);
     vst1q_f32(dx2_arr.as_mut_ptr(), vdx2);
     vst1q_f32(dy2_arr.as_mut_ptr(), vdy2);
 
     // Compute exponent = -0.5 * (dx^2/sigma_x^2 + dy^2/sigma_y^2)
-    let inv_sigma_x2 = 1.0 / sigma_x2;
-    let inv_sigma_y2 = 1.0 / sigma_y2;
     let exponent_arr: [f32; 4] = [
         -0.5 * (dx2_arr[0] * inv_sigma_x2 + dy2_arr[0] * inv_sigma_y2),
         -0.5 * (dx2_arr[1] * inv_sigma_x2 + dy2_arr[1] * inv_sigma_y2),
@@ -86,11 +86,11 @@ pub unsafe fn compute_jacobian_residuals_4(
     // Residual: z - model
     let vresidual = vsubq_f32(vz, vmodel);
 
-    // Jacobian components using SIMD
+    // Jacobian components using SIMD (use precomputed reciprocals)
     let vinv_sigma_x2 = vdupq_n_f32(inv_sigma_x2);
     let vinv_sigma_y2 = vdupq_n_f32(inv_sigma_y2);
-    let vinv_sigma_x3 = vdupq_n_f32(1.0 / (sigma_x2 * sigma_x));
-    let vinv_sigma_y3 = vdupq_n_f32(1.0 / (sigma_y2 * sigma_y));
+    let vinv_sigma_x3 = vdupq_n_f32(inv_sigma_x3);
+    let vinv_sigma_y3 = vdupq_n_f32(inv_sigma_y3);
 
     let vj0 = vmulq_f32(vmulq_f32(vamp_exp, vdx), vinv_sigma_x2); // df/dx0
     let vj1 = vmulq_f32(vmulq_f32(vamp_exp, vdy), vinv_sigma_y2); // df/dy0

@@ -47,6 +47,12 @@ pub unsafe fn compute_jacobian_residuals_8(
     let sigma_x2 = sigma_x * sigma_x;
     let sigma_y2 = sigma_y * sigma_y;
 
+    // Precompute all reciprocals to avoid repeated divisions
+    let inv_sigma_x2 = 1.0 / sigma_x2;
+    let inv_sigma_y2 = 1.0 / sigma_y2;
+    let inv_sigma_x3 = inv_sigma_x2 / sigma_x; // Reuse reciprocal
+    let inv_sigma_y3 = inv_sigma_y2 / sigma_y; // Reuse reciprocal
+
     // Load 8 pixel coordinates and values
     let vx = _mm256_loadu_ps(data_x.as_ptr().add(offset));
     let vy = _mm256_loadu_ps(data_y.as_ptr().add(offset));
@@ -55,7 +61,7 @@ pub unsafe fn compute_jacobian_residuals_8(
     let vx0 = _mm256_set1_ps(x0);
     let vy0 = _mm256_set1_ps(y0);
 
-    // Compute dx, dy using SIMD
+    // Compute dx, dy using SIMD (keep in registers for later use)
     let vdx = _mm256_sub_ps(vx, vx0);
     let vdy = _mm256_sub_ps(vy, vy0);
 
@@ -63,19 +69,13 @@ pub unsafe fn compute_jacobian_residuals_8(
     let vdx2 = _mm256_mul_ps(vdx, vdx);
     let vdy2 = _mm256_mul_ps(vdy, vdy);
 
-    // Store to compute exponent
-    let mut dx_arr = [0.0f32; 8];
-    let mut dy_arr = [0.0f32; 8];
+    // Store only dx2/dy2 to compute exponent (dx/dy stay in registers)
     let mut dx2_arr = [0.0f32; 8];
     let mut dy2_arr = [0.0f32; 8];
-    _mm256_storeu_ps(dx_arr.as_mut_ptr(), vdx);
-    _mm256_storeu_ps(dy_arr.as_mut_ptr(), vdy);
     _mm256_storeu_ps(dx2_arr.as_mut_ptr(), vdx2);
     _mm256_storeu_ps(dy2_arr.as_mut_ptr(), vdy2);
 
     // Compute exponent = -0.5 * (dx^2/sigma_x^2 + dy^2/sigma_y^2)
-    let inv_sigma_x2 = 1.0 / sigma_x2;
-    let inv_sigma_y2 = 1.0 / sigma_y2;
     let exponent_arr: [f32; 8] = [
         -0.5 * (dx2_arr[0] * inv_sigma_x2 + dy2_arr[0] * inv_sigma_y2),
         -0.5 * (dx2_arr[1] * inv_sigma_x2 + dy2_arr[1] * inv_sigma_y2),
@@ -104,11 +104,11 @@ pub unsafe fn compute_jacobian_residuals_8(
     // Residual: z - model
     let vresidual = _mm256_sub_ps(vz, vmodel);
 
-    // Jacobian components using SIMD
+    // Jacobian components using SIMD (use precomputed reciprocals)
     let vinv_sigma_x2 = _mm256_set1_ps(inv_sigma_x2);
     let vinv_sigma_y2 = _mm256_set1_ps(inv_sigma_y2);
-    let vinv_sigma_x3 = _mm256_set1_ps(1.0 / (sigma_x2 * sigma_x));
-    let vinv_sigma_y3 = _mm256_set1_ps(1.0 / (sigma_y2 * sigma_y));
+    let vinv_sigma_x3 = _mm256_set1_ps(inv_sigma_x3);
+    let vinv_sigma_y3 = _mm256_set1_ps(inv_sigma_y3);
 
     let vj0 = _mm256_mul_ps(_mm256_mul_ps(vamp_exp, vdx), vinv_sigma_x2); // df/dx0
     let vj1 = _mm256_mul_ps(_mm256_mul_ps(vamp_exp, vdy), vinv_sigma_y2); // df/dy0
