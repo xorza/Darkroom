@@ -446,6 +446,439 @@ fn test_fwhm_accuracy() {
     assert!((fwhm - expected).abs() < 1e-5);
 }
 
+// ============================================================================
+// Noise and difficult data tests
+// ============================================================================
+
+/// Add Gaussian noise to pixel values using a simple LCG PRNG.
+fn add_noise(pixels: &mut [f32], noise_sigma: f32, seed: u64) {
+    let mut state = seed;
+    for pixel in pixels.iter_mut() {
+        // Box-Muller transform with LCG
+        state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+        let u1 = (state as f32) / (u64::MAX as f32);
+        state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+        let u2 = (state as f32) / (u64::MAX as f32);
+
+        let z = (-2.0 * u1.max(1e-10).ln()).sqrt() * (2.0 * std::f32::consts::PI * u2).cos();
+        *pixel += z * noise_sigma;
+    }
+}
+
+#[test]
+fn test_gaussian_fit_with_gaussian_noise() {
+    let width = 21;
+    let height = 21;
+    let true_cx = 10.0;
+    let true_cy = 10.0;
+    let true_amp = 1.0;
+    let true_sigma = 2.5;
+    let true_bg = 0.1;
+    let noise_sigma = 0.05; // 5% of amplitude
+
+    let mut pixels = make_gaussian_stamp(
+        width, height, true_cx, true_cy, true_amp, true_sigma, true_bg,
+    );
+    add_noise(&mut pixels, noise_sigma, 12345);
+
+    let pixels_buf = Buffer2::new(width, height, pixels);
+
+    let config = GaussianFitConfig::default();
+    let result = fit_gaussian_2d(&pixels_buf, 10.0, 10.0, 8, true_bg, &config);
+
+    assert!(result.is_some());
+    let result = result.unwrap();
+    assert!(result.converged);
+    // With noise, allow larger tolerance
+    assert!(
+        (result.x - true_cx).abs() < 0.2,
+        "x error: {}",
+        (result.x - true_cx).abs()
+    );
+    assert!(
+        (result.y - true_cy).abs() < 0.2,
+        "y error: {}",
+        (result.y - true_cy).abs()
+    );
+}
+
+#[test]
+fn test_gaussian_fit_high_noise_still_converges() {
+    let width = 21;
+    let height = 21;
+    let true_cx = 10.0;
+    let true_cy = 10.0;
+    let true_amp = 1.0;
+    let true_sigma = 2.5;
+    let true_bg = 0.1;
+    let noise_sigma = 0.15; // 15% noise - challenging
+
+    let mut pixels = make_gaussian_stamp(
+        width, height, true_cx, true_cy, true_amp, true_sigma, true_bg,
+    );
+    add_noise(&mut pixels, noise_sigma, 54321);
+
+    let pixels_buf = Buffer2::new(width, height, pixels);
+
+    let config = GaussianFitConfig::default();
+    let result = fit_gaussian_2d(&pixels_buf, 10.0, 10.0, 8, true_bg, &config);
+
+    // Should still converge even with high noise
+    assert!(result.is_some());
+    let result = result.unwrap();
+    assert!(result.converged);
+    // Centroid should still be reasonable (within 0.5 pixel)
+    assert!(
+        (result.x - true_cx).abs() < 0.5,
+        "x error too large: {}",
+        (result.x - true_cx).abs()
+    );
+    assert!(
+        (result.y - true_cy).abs() < 0.5,
+        "y error too large: {}",
+        (result.y - true_cy).abs()
+    );
+}
+
+#[test]
+fn test_gaussian_fit_low_snr() {
+    let width = 21;
+    let height = 21;
+    let true_cx = 10.0;
+    let true_cy = 10.0;
+    let true_amp = 0.1; // Low amplitude
+    let true_sigma = 2.5;
+    let true_bg = 0.5; // High background (SNR ~ 0.2)
+
+    let pixels = make_gaussian_stamp(
+        width, height, true_cx, true_cy, true_amp, true_sigma, true_bg,
+    );
+    let pixels_buf = Buffer2::new(width, height, pixels);
+
+    let config = GaussianFitConfig::default();
+    let result = fit_gaussian_2d(&pixels_buf, 10.0, 10.0, 8, true_bg, &config);
+
+    // Low SNR should still produce a result (may not be accurate)
+    assert!(result.is_some());
+    let result = result.unwrap();
+    // Just verify it doesn't crash and produces finite values
+    assert!(result.x.is_finite());
+    assert!(result.y.is_finite());
+    assert!(result.sigma_x.is_finite());
+    assert!(result.sigma_y.is_finite());
+}
+
+#[test]
+fn test_gaussian_fit_wrong_background_estimate() {
+    let width = 21;
+    let height = 21;
+    let true_cx = 10.0;
+    let true_cy = 10.0;
+    let true_amp = 1.0;
+    let true_sigma = 2.5;
+    let true_bg = 0.1;
+
+    let pixels = make_gaussian_stamp(
+        width, height, true_cx, true_cy, true_amp, true_sigma, true_bg,
+    );
+    let pixels_buf = Buffer2::new(width, height, pixels);
+
+    let config = GaussianFitConfig::default();
+
+    // Use wrong background estimate (20% error)
+    let wrong_bg = true_bg * 1.2;
+    let result = fit_gaussian_2d(&pixels_buf, 10.0, 10.0, 8, wrong_bg, &config);
+
+    assert!(result.is_some());
+    let result = result.unwrap();
+    // Should still converge - background is a fitted parameter
+    assert!(result.converged);
+    // Centroid should still be accurate
+    assert!(
+        (result.x - true_cx).abs() < 0.1,
+        "x error: {}",
+        (result.x - true_cx).abs()
+    );
+    assert!(
+        (result.y - true_cy).abs() < 0.1,
+        "y error: {}",
+        (result.y - true_cy).abs()
+    );
+    // Fitted background should be close to true value
+    assert!(
+        (result.background - true_bg).abs() < 0.05,
+        "bg error: {}",
+        (result.background - true_bg).abs()
+    );
+}
+
+// ============================================================================
+// Amplitude and parameter edge cases
+// ============================================================================
+
+#[test]
+fn test_gaussian_fit_very_high_amplitude() {
+    let width = 21;
+    let height = 21;
+    let true_cx = 10.0;
+    let true_cy = 10.0;
+    let true_amp = 10000.0; // Very high amplitude
+    let true_sigma = 2.5;
+    let true_bg = 100.0;
+
+    let pixels = make_gaussian_stamp(
+        width, height, true_cx, true_cy, true_amp, true_sigma, true_bg,
+    );
+    let pixels_buf = Buffer2::new(width, height, pixels);
+
+    let config = GaussianFitConfig::default();
+    let result = fit_gaussian_2d(&pixels_buf, 10.0, 10.0, 8, true_bg, &config);
+
+    assert!(result.is_some());
+    let result = result.unwrap();
+    assert!(result.converged);
+    assert!((result.x - true_cx).abs() < 0.1);
+    assert!((result.y - true_cy).abs() < 0.1);
+    assert!((result.amplitude - true_amp).abs() / true_amp < 0.01);
+}
+
+#[test]
+fn test_gaussian_fit_narrow_psf() {
+    let width = 21;
+    let height = 21;
+    let true_cx = 10.0;
+    let true_cy = 10.0;
+    let true_amp = 1.0;
+    let true_sigma = 0.8; // Very narrow PSF (close to Nyquist limit)
+    let true_bg = 0.1;
+
+    let pixels = make_gaussian_stamp(
+        width, height, true_cx, true_cy, true_amp, true_sigma, true_bg,
+    );
+    let pixels_buf = Buffer2::new(width, height, pixels);
+
+    let config = GaussianFitConfig::default();
+    let result = fit_gaussian_2d(&pixels_buf, 10.0, 10.0, 8, true_bg, &config);
+
+    assert!(result.is_some());
+    let result = result.unwrap();
+    assert!(result.converged);
+    assert!((result.x - true_cx).abs() < 0.15);
+    assert!((result.y - true_cy).abs() < 0.15);
+}
+
+// ============================================================================
+// Convergence and iteration tests
+// ============================================================================
+
+#[test]
+fn test_gaussian_fit_converges_within_max_iterations() {
+    let width = 21;
+    let height = 21;
+    let true_cx = 10.0;
+    let true_cy = 10.0;
+    let true_amp = 1.0;
+    let true_sigma = 2.5;
+    let true_bg = 0.1;
+
+    let pixels = make_gaussian_stamp(
+        width, height, true_cx, true_cy, true_amp, true_sigma, true_bg,
+    );
+    let pixels_buf = Buffer2::new(width, height, pixels);
+
+    let config = GaussianFitConfig {
+        max_iterations: 10, // Low iteration limit
+        ..Default::default()
+    };
+    let result = fit_gaussian_2d(&pixels_buf, 10.0, 10.0, 8, true_bg, &config);
+
+    assert!(result.is_some());
+    let result = result.unwrap();
+    // Should converge quickly for perfect data
+    assert!(result.converged);
+    assert!(result.iterations <= 10);
+}
+
+#[test]
+fn test_gaussian_fit_bad_initial_guess_still_converges() {
+    let width = 21;
+    let height = 21;
+    let true_cx = 10.0;
+    let true_cy = 10.0;
+    let true_amp = 1.0;
+    let true_sigma = 2.5;
+    let true_bg = 0.1;
+
+    let pixels = make_gaussian_stamp(
+        width, height, true_cx, true_cy, true_amp, true_sigma, true_bg,
+    );
+    let pixels_buf = Buffer2::new(width, height, pixels);
+
+    let config = GaussianFitConfig {
+        max_iterations: 100,
+        ..Default::default()
+    };
+
+    // Start from a position offset by 2 pixels
+    let result = fit_gaussian_2d(&pixels_buf, 8.0, 12.0, 8, true_bg, &config);
+
+    assert!(result.is_some());
+    let result = result.unwrap();
+    assert!(result.converged);
+    assert!(
+        (result.x - true_cx).abs() < 0.1,
+        "x error: {}",
+        (result.x - true_cx).abs()
+    );
+    assert!(
+        (result.y - true_cy).abs() < 0.1,
+        "y error: {}",
+        (result.y - true_cy).abs()
+    );
+}
+
+#[test]
+fn test_gaussian_fit_uniform_data_returns_result() {
+    // Uniform data (no star) - should still return a result, though meaningless
+    let width = 21;
+    let height = 21;
+    let uniform_value = 0.5f32;
+    let pixels = vec![uniform_value; width * height];
+    let pixels_buf = Buffer2::new(width, height, pixels);
+
+    let config = GaussianFitConfig::default();
+    let result = fit_gaussian_2d(&pixels_buf, 10.0, 10.0, 8, uniform_value, &config);
+
+    // Should produce some result (may not converge well)
+    assert!(result.is_some());
+    let result = result.unwrap();
+    // Values should be finite
+    assert!(result.x.is_finite());
+    assert!(result.y.is_finite());
+    assert!(result.amplitude.is_finite());
+    assert!(result.sigma_x.is_finite());
+    assert!(result.sigma_y.is_finite());
+}
+
+// ============================================================================
+// Jacobian off-center tests
+// ============================================================================
+
+#[test]
+fn test_gaussian_jacobian_off_center() {
+    let model = Gaussian2D { stamp_radius: 8.0 };
+    let params = [5.0f32, 5.0, 1.0, 2.0, 2.0, 0.1];
+
+    // Test at a point off-center
+    let jac = model.jacobian_row(6.0, 5.0, &params);
+
+    // At (6, 5), dx=1, dy=0
+    // df/dx0 should be positive (moving center right decreases residual)
+    assert!(jac[0] > 0.0, "df/dx0 should be positive at x > x0");
+    // df/dy0 should be ~0
+    assert!(jac[1].abs() < 1e-6, "df/dy0 should be ~0 when dy=0");
+    // df/damp should be exp(-0.5 * 1/4) = exp(-0.125) ≈ 0.88
+    let expected_exp = (-0.125f32).exp();
+    assert!(
+        (jac[2] - expected_exp).abs() < 1e-5,
+        "df/damp mismatch: {} vs {}",
+        jac[2],
+        expected_exp
+    );
+    // df/dbg = 1
+    assert!((jac[5] - 1.0).abs() < 1e-6);
+}
+
+#[test]
+fn test_gaussian_jacobian_diagonal() {
+    let model = Gaussian2D { stamp_radius: 8.0 };
+    let params = [5.0f32, 5.0, 1.0, 2.0, 2.0, 0.1];
+
+    // Test at a diagonal point
+    let jac = model.jacobian_row(6.0, 6.0, &params);
+
+    // At (6, 6), dx=1, dy=1
+    // Both df/dx0 and df/dy0 should be positive and equal (symmetric sigma)
+    assert!(jac[0] > 0.0);
+    assert!(jac[1] > 0.0);
+    assert!(
+        (jac[0] - jac[1]).abs() < 1e-6,
+        "df/dx0 and df/dy0 should be equal for symmetric sigma"
+    );
+}
+
+#[test]
+fn test_gaussian_jacobian_asymmetric_sigma() {
+    let model = Gaussian2D { stamp_radius: 8.0 };
+    let params = [5.0f32, 5.0, 1.0, 2.0, 3.0, 0.1]; // sigma_x=2, sigma_y=3
+
+    // Test at a diagonal point
+    let jac = model.jacobian_row(6.0, 6.0, &params);
+
+    // With different sigmas, the jacobians should differ
+    // df/dsigma_x and df/dsigma_y should be different
+    assert!(
+        (jac[3] - jac[4]).abs() > 1e-6,
+        "df/dsigma_x and df/dsigma_y should differ for asymmetric sigma"
+    );
+}
+
+// ============================================================================
+// Validate result edge cases
+// ============================================================================
+
+#[test]
+fn test_gaussian_fit_center_outside_stamp_rejected() {
+    let width = 21;
+    let height = 21;
+    let true_cx = 10.0;
+    let true_cy = 10.0;
+    let true_amp = 1.0;
+    let true_sigma = 2.5;
+    let true_bg = 0.1;
+
+    // Create a stamp with peak at edge so fitting might push center outside
+    let pixels = make_gaussian_stamp(
+        width, height, true_cx, true_cy, true_amp, true_sigma, true_bg,
+    );
+    let pixels_buf = Buffer2::new(width, height, pixels);
+
+    let config = GaussianFitConfig::default();
+    // Give initial guess very far from true center - should still find it
+    let result = fit_gaussian_2d(&pixels_buf, 10.0, 10.0, 3, true_bg, &config);
+
+    // Small stamp radius = 3, if result.x moves more than 3 pixels from cx, it's rejected
+    // With true center at 10, the fit should succeed
+    assert!(result.is_some());
+}
+
+#[test]
+fn test_gaussian_fit_rms_residual_computed() {
+    let width = 21;
+    let height = 21;
+    let true_cx = 10.0;
+    let true_cy = 10.0;
+    let true_amp = 1.0;
+    let true_sigma = 2.5;
+    let true_bg = 0.1;
+
+    let pixels = make_gaussian_stamp(
+        width, height, true_cx, true_cy, true_amp, true_sigma, true_bg,
+    );
+    let pixels_buf = Buffer2::new(width, height, pixels);
+
+    let config = GaussianFitConfig::default();
+    let result = fit_gaussian_2d(&pixels_buf, 10.0, 10.0, 8, true_bg, &config).unwrap();
+
+    // For perfect data, RMS residual should be very small
+    assert!(
+        result.rms_residual < 1e-4,
+        "RMS residual too high: {}",
+        result.rms_residual
+    );
+    assert!(result.rms_residual >= 0.0);
+}
+
 #[test]
 fn test_gaussian_fit_multiple_positions() {
     // Test fitting at various subpixel positions

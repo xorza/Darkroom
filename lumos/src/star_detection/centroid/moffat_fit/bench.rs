@@ -5,6 +5,9 @@
 use bench::quick_bench;
 use std::hint::black_box;
 
+#[cfg(target_arch = "x86_64")]
+use common::cpu_features;
+
 use super::simd;
 
 /// Generate test data for Moffat profile fitting.
@@ -63,7 +66,7 @@ fn bench_jacobian_small(b: bench::Bencher) {
     });
 
     #[cfg(target_arch = "x86_64")]
-    if simd::is_sse4_available() {
+    if cpu_features::has_sse4_1() {
         b.bench_labeled("sse4", || {
             let mut jacobian = Vec::new();
             let mut residuals = Vec::new();
@@ -83,7 +86,7 @@ fn bench_jacobian_small(b: bench::Bencher) {
     }
 
     #[cfg(target_arch = "x86_64")]
-    if simd::is_avx2_available() {
+    if cpu_features::has_avx2_fma() {
         b.bench_labeled("avx2", || {
             let mut jacobian = Vec::new();
             let mut residuals = Vec::new();
@@ -146,7 +149,7 @@ fn bench_jacobian_medium(b: bench::Bencher) {
     });
 
     #[cfg(target_arch = "x86_64")]
-    if simd::is_sse4_available() {
+    if cpu_features::has_sse4_1() {
         b.bench_labeled("sse4", || {
             let mut jacobian = Vec::new();
             let mut residuals = Vec::new();
@@ -166,7 +169,7 @@ fn bench_jacobian_medium(b: bench::Bencher) {
     }
 
     #[cfg(target_arch = "x86_64")]
-    if simd::is_avx2_available() {
+    if cpu_features::has_avx2_fma() {
         b.bench_labeled("avx2", || {
             let mut jacobian = Vec::new();
             let mut residuals = Vec::new();
@@ -229,7 +232,7 @@ fn bench_jacobian_large(b: bench::Bencher) {
     });
 
     #[cfg(target_arch = "x86_64")]
-    if simd::is_sse4_available() {
+    if cpu_features::has_sse4_1() {
         b.bench_labeled("sse4", || {
             let mut jacobian = Vec::new();
             let mut residuals = Vec::new();
@@ -249,7 +252,7 @@ fn bench_jacobian_large(b: bench::Bencher) {
     }
 
     #[cfg(target_arch = "x86_64")]
-    if simd::is_avx2_available() {
+    if cpu_features::has_avx2_fma() {
         b.bench_labeled("avx2", || {
             let mut jacobian = Vec::new();
             let mut residuals = Vec::new();
@@ -306,7 +309,7 @@ fn bench_chi2_small(b: bench::Bencher) {
     });
 
     #[cfg(target_arch = "x86_64")]
-    if simd::is_sse4_available() {
+    if cpu_features::has_sse4_1() {
         b.bench_labeled("sse4", || {
             let chi2 = unsafe {
                 simd::sse::compute_chi2_sse_fixed_beta(&data_x, &data_y, &data_z, &params, beta)
@@ -316,7 +319,7 @@ fn bench_chi2_small(b: bench::Bencher) {
     }
 
     #[cfg(target_arch = "x86_64")]
-    if simd::is_avx2_available() {
+    if cpu_features::has_avx2_fma() {
         b.bench_labeled("avx2", || {
             let chi2 = unsafe {
                 simd::avx2::compute_chi2_simd_fixed_beta(&data_x, &data_y, &data_z, &params, beta)
@@ -349,7 +352,7 @@ fn bench_chi2_medium(b: bench::Bencher) {
     });
 
     #[cfg(target_arch = "x86_64")]
-    if simd::is_sse4_available() {
+    if cpu_features::has_sse4_1() {
         b.bench_labeled("sse4", || {
             let chi2 = unsafe {
                 simd::sse::compute_chi2_sse_fixed_beta(&data_x, &data_y, &data_z, &params, beta)
@@ -359,7 +362,7 @@ fn bench_chi2_medium(b: bench::Bencher) {
     }
 
     #[cfg(target_arch = "x86_64")]
-    if simd::is_avx2_available() {
+    if cpu_features::has_avx2_fma() {
         b.bench_labeled("avx2", || {
             let chi2 = unsafe {
                 simd::avx2::compute_chi2_simd_fixed_beta(&data_x, &data_y, &data_z, &params, beta)
@@ -392,7 +395,7 @@ fn bench_chi2_large(b: bench::Bencher) {
     });
 
     #[cfg(target_arch = "x86_64")]
-    if simd::is_sse4_available() {
+    if cpu_features::has_sse4_1() {
         b.bench_labeled("sse4", || {
             let chi2 = unsafe {
                 simd::sse::compute_chi2_sse_fixed_beta(&data_x, &data_y, &data_z, &params, beta)
@@ -402,7 +405,7 @@ fn bench_chi2_large(b: bench::Bencher) {
     }
 
     #[cfg(target_arch = "x86_64")]
-    if simd::is_avx2_available() {
+    if cpu_features::has_avx2_fma() {
         b.bench_labeled("avx2", || {
             let chi2 = unsafe {
                 simd::avx2::compute_chi2_simd_fixed_beta(&data_x, &data_y, &data_z, &params, beta)
@@ -460,7 +463,7 @@ fn bench_batch_1000_jacobian(b: bench::Bencher) {
     });
 
     #[cfg(target_arch = "x86_64")]
-    if simd::is_sse4_available() {
+    if cpu_features::has_sse4_1() {
         b.bench_labeled("sse4", || {
             let mut jacobian = Vec::new();
             let mut residuals = Vec::new();
@@ -482,7 +485,7 @@ fn bench_batch_1000_jacobian(b: bench::Bencher) {
     }
 
     #[cfg(target_arch = "x86_64")]
-    if simd::is_avx2_available() {
+    if cpu_features::has_avx2_fma() {
         b.bench_labeled("avx2", || {
             let mut jacobian = Vec::new();
             let mut residuals = Vec::new();
@@ -551,7 +554,7 @@ fn bench_batch_1000_chi2(b: bench::Bencher) {
     });
 
     #[cfg(target_arch = "x86_64")]
-    if simd::is_sse4_available() {
+    if cpu_features::has_sse4_1() {
         b.bench_labeled("sse4", || {
             let mut total = 0.0f32;
             for (x, y, z) in &stars {
@@ -562,7 +565,7 @@ fn bench_batch_1000_chi2(b: bench::Bencher) {
     }
 
     #[cfg(target_arch = "x86_64")]
-    if simd::is_avx2_available() {
+    if cpu_features::has_avx2_fma() {
         b.bench_labeled("avx2", || {
             let mut total = 0.0f32;
             for (x, y, z) in &stars {

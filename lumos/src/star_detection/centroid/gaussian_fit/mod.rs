@@ -238,7 +238,7 @@ pub(crate) fn optimize_gaussian_simd(
     config: &LMConfig,
 ) -> LMResult<6> {
     #[cfg(target_arch = "x86_64")]
-    if simd::is_avx2_available() {
+    if common::cpu_features::has_avx2_fma() {
         return unsafe {
             optimize_gaussian_avx2(data_x, data_y, data_z, initial_params, stamp_radius, config)
         };

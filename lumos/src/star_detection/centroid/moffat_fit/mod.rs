@@ -540,7 +540,7 @@ pub(crate) fn optimize_moffat_fixed_beta_simd(
     config: &LMConfig,
 ) -> super::lm_optimizer::LMResult<5> {
     #[cfg(target_arch = "x86_64")]
-    if simd::is_avx2_available() {
+    if common::cpu_features::has_avx2_fma() {
         // SAFETY: We checked that AVX2 is available
         return unsafe {
             optimize_moffat_fixed_beta_avx2(

@@ -286,12 +286,12 @@ mod dispatch_tests {
 #[cfg(target_arch = "x86_64")]
 mod avx2_tests {
     use super::super::avx2::*;
-    use super::super::is_avx2_available;
     use super::*;
+    use common::cpu_features;
 
     #[test]
     fn test_jacobian_residuals_matches_scalar() {
-        if !is_avx2_available() {
+        if !cpu_features::has_avx2_fma() {
             println!("AVX2 not available, skipping test");
             return;
         }
@@ -340,7 +340,7 @@ mod avx2_tests {
 
     #[test]
     fn test_chi2_matches_scalar() {
-        if !is_avx2_available() {
+        if !cpu_features::has_avx2_fma() {
             println!("AVX2 not available, skipping test");
             return;
         }
@@ -371,7 +371,7 @@ mod avx2_tests {
 
     #[test]
     fn test_handles_small_arrays() {
-        if !is_avx2_available() {
+        if !cpu_features::has_avx2_fma() {
             println!("AVX2 not available, skipping test");
             return;
         }
@@ -402,7 +402,7 @@ mod avx2_tests {
 
     #[test]
     fn test_exactly_8_pixels() {
-        if !is_avx2_available() {
+        if !cpu_features::has_avx2_fma() {
             println!("AVX2 not available, skipping test");
             return;
         }
@@ -439,7 +439,7 @@ mod avx2_tests {
 
     #[test]
     fn test_9_pixels_simd_plus_scalar() {
-        if !is_avx2_available() {
+        if !cpu_features::has_avx2_fma() {
             println!("AVX2 not available, skipping test");
             return;
         }
@@ -475,7 +475,7 @@ mod avx2_tests {
 
     #[test]
     fn test_empty_arrays() {
-        if !is_avx2_available() {
+        if !cpu_features::has_avx2_fma() {
             println!("AVX2 not available, skipping test");
             return;
         }
@@ -507,7 +507,7 @@ mod avx2_tests {
 
     #[test]
     fn test_various_sigma_values() {
-        if !is_avx2_available() {
+        if !cpu_features::has_avx2_fma() {
             println!("AVX2 not available, skipping test");
             return;
         }
@@ -529,7 +529,7 @@ mod avx2_tests {
 
     #[test]
     fn test_asymmetric_sigma() {
-        if !is_avx2_available() {
+        if !cpu_features::has_avx2_fma() {
             println!("AVX2 not available, skipping test");
             return;
         }
@@ -565,7 +565,7 @@ mod avx2_tests {
 
     #[test]
     fn test_extreme_amplitude_values() {
-        if !is_avx2_available() {
+        if !cpu_features::has_avx2_fma() {
             println!("AVX2 not available, skipping test");
             return;
         }
@@ -592,7 +592,7 @@ mod avx2_tests {
 
     #[test]
     fn test_pixel_at_center() {
-        if !is_avx2_available() {
+        if !cpu_features::has_avx2_fma() {
             println!("AVX2 not available, skipping test");
             return;
         }
@@ -630,7 +630,7 @@ mod avx2_tests {
 
     #[test]
     fn test_all_results_finite() {
-        if !is_avx2_available() {
+        if !cpu_features::has_avx2_fma() {
             println!("AVX2 not available, skipping test");
             return;
         }
@@ -677,7 +677,7 @@ mod avx2_tests {
 
     #[test]
     fn test_buffer_reuse() {
-        if !is_avx2_available() {
+        if !cpu_features::has_avx2_fma() {
             println!("AVX2 not available, skipping test");
             return;
         }
@@ -736,13 +736,13 @@ mod avx2_tests {
 
 #[cfg(target_arch = "x86_64")]
 mod sse_tests {
-    use super::super::is_sse4_available;
     use super::super::sse::*;
     use super::*;
+    use common::cpu_features;
 
     #[test]
     fn test_jacobian_residuals_matches_scalar() {
-        if !is_sse4_available() {
+        if !cpu_features::has_sse4_1() {
             println!("SSE4 not available, skipping test");
             return;
         }
@@ -791,7 +791,7 @@ mod sse_tests {
 
     #[test]
     fn test_chi2_matches_scalar() {
-        if !is_sse4_available() {
+        if !cpu_features::has_sse4_1() {
             println!("SSE4 not available, skipping test");
             return;
         }
@@ -822,7 +822,7 @@ mod sse_tests {
 
     #[test]
     fn test_exactly_4_pixels() {
-        if !is_sse4_available() {
+        if !cpu_features::has_sse4_1() {
             println!("SSE4 not available, skipping test");
             return;
         }
@@ -859,7 +859,7 @@ mod sse_tests {
 
     #[test]
     fn test_5_pixels_simd_plus_scalar() {
-        if !is_sse4_available() {
+        if !cpu_features::has_sse4_1() {
             println!("SSE4 not available, skipping test");
             return;
         }
@@ -895,7 +895,7 @@ mod sse_tests {
 
     #[test]
     fn test_handles_small_arrays() {
-        if !is_sse4_available() {
+        if !cpu_features::has_sse4_1() {
             println!("SSE4 not available, skipping test");
             return;
         }
@@ -926,7 +926,7 @@ mod sse_tests {
 
     #[test]
     fn test_empty_arrays() {
-        if !is_sse4_available() {
+        if !cpu_features::has_sse4_1() {
             println!("SSE4 not available, skipping test");
             return;
         }
@@ -958,7 +958,7 @@ mod sse_tests {
 
     #[test]
     fn test_various_sizes() {
-        if !is_sse4_available() {
+        if !cpu_features::has_sse4_1() {
             println!("SSE4 not available, skipping test");
             return;
         }
@@ -983,7 +983,7 @@ mod sse_tests {
 
     #[test]
     fn test_all_results_finite() {
-        if !is_sse4_available() {
+        if !cpu_features::has_sse4_1() {
             println!("SSE4 not available, skipping test");
             return;
         }

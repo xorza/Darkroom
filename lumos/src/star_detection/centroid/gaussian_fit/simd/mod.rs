@@ -24,36 +24,6 @@ cfg_aarch64! {
 mod tests;
 
 // ============================================================================
-// Feature detection
-// ============================================================================
-
-/// Check if AVX2+FMA is available at runtime.
-#[inline]
-pub fn is_avx2_available() -> bool {
-    #[cfg(target_arch = "x86_64")]
-    {
-        cpu_features::has_avx2_fma()
-    }
-    #[cfg(not(target_arch = "x86_64"))]
-    {
-        false
-    }
-}
-
-/// Check if SSE4.1 is available at runtime.
-#[inline]
-pub fn is_sse4_available() -> bool {
-    #[cfg(target_arch = "x86_64")]
-    {
-        cpu_features::has_sse4_1()
-    }
-    #[cfg(not(target_arch = "x86_64"))]
-    {
-        false
-    }
-}
-
-// ============================================================================
 // Scalar fallback implementation
 // ============================================================================
 
