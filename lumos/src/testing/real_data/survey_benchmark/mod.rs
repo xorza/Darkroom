@@ -103,11 +103,11 @@ mod tests {
         let field = sparse_field();
 
         let config = StarDetectionConfig {
-            psf: crate::star_detection::config::PsfConfig {
+            psf: crate::star_detection::PsfConfig {
                 expected_fwhm: field.expected_fwhm_pixels(0.396),
                 ..Default::default()
             },
-            filtering: crate::star_detection::config::FilteringConfig {
+            filtering: crate::star_detection::FilteringConfig {
                 min_snr: 20.0, // Only detect brighter stars
                 ..Default::default()
             },
@@ -150,7 +150,7 @@ mod tests {
             println!("Testing field: {} - {}", field.name, field.description);
 
             let config = StarDetectionConfig {
-                psf: crate::star_detection::config::PsfConfig {
+                psf: crate::star_detection::PsfConfig {
                     expected_fwhm: field.expected_fwhm_pixels(0.396),
                     ..Default::default()
                 },

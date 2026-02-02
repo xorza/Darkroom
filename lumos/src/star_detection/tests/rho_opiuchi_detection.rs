@@ -136,11 +136,14 @@ fn test_detect_dense4() {
     }
 
     // Save output
-    let output_path = test_output_path("dense4_detection.jpg");
+    let output_path = test_output_path("rho-opiuchi-detection.jpg");
     output_img
         .save_file(&output_path)
         .expect("Failed to save output image");
     println!("\nSaved detection result to: {:?}", output_path);
 
-    assert!(!result.stars.is_empty(), "Should find stars in dense4.png");
+    assert!(
+        !result.stars.is_empty(),
+        "Should find stars in rho-opiuchi.jpg"
+    );
 }

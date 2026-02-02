@@ -6,8 +6,7 @@
 //! Run with: `cargo test -p lumos --features real-data dense_field -- --ignored --nocapture`
 
 use crate::AstroImage;
-use crate::star_detection::config::DeblendConfig;
-use crate::star_detection::{StarDetectionConfig, StarDetector};
+use crate::star_detection::{DeblendConfig, StarDetectionConfig, StarDetector};
 use crate::testing::{calibration_dir, init_tracing};
 use imaginarium::ColorFormat;
 
@@ -155,14 +154,14 @@ fn test_compare_local_maxima_vs_multi_threshold() {
     };
 
     println!("\n--- Local Maxima Deblending ---");
-    let detector_local = StarDetector::from_config(config_local);
+    let mut detector_local = StarDetector::from_config(config_local);
     let start = std::time::Instant::now();
     let result_local = detector_local.detect(&astro_image);
     println!("Time: {:?}", start.elapsed());
     println!("Stars found: {}", result_local.stars.len());
 
     println!("\n--- Multi-Threshold Deblending ---");
-    let detector_multi = StarDetector::from_config(config_multi);
+    let mut detector_multi = StarDetector::from_config(config_multi);
     let start = std::time::Instant::now();
     let result_multi = detector_multi.detect(&astro_image);
     println!("Time: {:?}", start.elapsed());

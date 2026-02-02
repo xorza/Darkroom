@@ -669,7 +669,7 @@ mod tests {
         let field = super::super::fields::sparse_field();
 
         let config = StarDetectionConfig {
-            psf: crate::star_detection::config::PsfConfig {
+            psf: crate::star_detection::PsfConfig {
                 expected_fwhm: field.expected_fwhm_pixels(0.396), // SDSS plate scale
                 ..Default::default()
             },
@@ -724,7 +724,7 @@ mod tests {
             println!("Testing field: {}", field.name);
 
             let config = StarDetectionConfig {
-                psf: crate::star_detection::config::PsfConfig {
+                psf: crate::star_detection::PsfConfig {
                     expected_fwhm: field.expected_fwhm_pixels(0.396),
                     ..Default::default()
                 },
@@ -797,7 +797,7 @@ mod tests {
 
         for sigma in [2.0, 3.0, 4.0, 5.0, 7.0, 10.0] {
             let config = StarDetectionConfig {
-                psf: crate::star_detection::config::PsfConfig {
+                psf: crate::star_detection::PsfConfig {
                     expected_fwhm: field.expected_fwhm_pixels(0.396),
                     ..Default::default()
                 },
@@ -1023,7 +1023,7 @@ mod tests {
             catalog_to_ground_truth_with_mag(&catalog_stars, &wcs, width, height, &field);
 
         let config = StarDetectionConfig {
-            psf: crate::star_detection::config::PsfConfig {
+            psf: crate::star_detection::PsfConfig {
                 expected_fwhm: field.expected_fwhm_pixels(0.396),
                 ..Default::default()
             },
