@@ -10,7 +10,8 @@
 use crate::common::Buffer2;
 use crate::registration::interpolation::{InterpolationMethod, WarpConfig, warp_image};
 use crate::registration::pipeline::warp_to_reference_image;
-use crate::registration::types::{TransformMatrix, TransformType};
+use crate::registration::transform::TransformMatrix;
+use crate::registration::transform::TransformType;
 use crate::star_detection::StarDetector;
 use crate::testing::synthetic::{self, StarFieldConfig, stamps};
 use crate::{AstroImage, ImageDimensions};

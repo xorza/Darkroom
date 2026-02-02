@@ -4,7 +4,8 @@ use super::catalog::{CatalogError, CatalogSource, CatalogStar};
 use super::quad_hash::QuadHasher;
 use super::wcs::{PixelSkyMatch, Wcs};
 use crate::registration::ransac::{RansacConfig, RansacEstimator};
-use crate::registration::types::{TransformMatrix, TransformType};
+use crate::registration::transform::TransformMatrix;
+use crate::registration::transform::TransformType;
 use std::fmt;
 
 /// Error type for plate solving.

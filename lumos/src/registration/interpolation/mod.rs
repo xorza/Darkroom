@@ -18,7 +18,7 @@ use std::sync::OnceLock;
 use rayon::prelude::*;
 
 use crate::common::Buffer2;
-use crate::registration::types::TransformMatrix;
+use crate::registration::transform::TransformMatrix;
 
 /// Number of rows to process per parallel chunk.
 /// Balances parallelism overhead vs cache locality.

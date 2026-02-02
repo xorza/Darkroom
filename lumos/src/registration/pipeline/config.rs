@@ -1,6 +1,6 @@
 //! Registration configuration.
 
-use crate::registration::types::TransformType;
+use crate::registration::transform::TransformType;
 
 /// Registration configuration.
 #[derive(Debug, Clone)]

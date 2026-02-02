@@ -14,7 +14,7 @@ pub mod sse;
 #[cfg(target_arch = "aarch64")]
 pub mod neon;
 
-use crate::registration::types::TransformMatrix;
+use crate::registration::transform::TransformMatrix;
 
 /// Count inliers and compute score using SIMD acceleration.
 ///

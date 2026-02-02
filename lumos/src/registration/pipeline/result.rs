@@ -1,6 +1,100 @@
-//! Registration result types.
+//! Registration result and error types.
 
-use crate::registration::types::TransformMatrix;
+use crate::registration::transform::TransformMatrix;
+
+/// Reason for RANSAC failure.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RansacFailureReason {
+    /// No inliers found after all iterations.
+    NoInliersFound,
+    /// Point set is degenerate (collinear, coincident, etc.).
+    DegeneratePointSet,
+    /// Matrix computation failed (singular matrix).
+    SingularMatrix,
+    /// Found some inliers but not enough to meet threshold.
+    InsufficientInliers,
+}
+
+impl std::fmt::Display for RansacFailureReason {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            RansacFailureReason::NoInliersFound => write!(f, "no inliers found"),
+            RansacFailureReason::DegeneratePointSet => write!(f, "degenerate point set"),
+            RansacFailureReason::SingularMatrix => write!(f, "singular matrix"),
+            RansacFailureReason::InsufficientInliers => write!(f, "insufficient inliers"),
+        }
+    }
+}
+
+/// Registration error types.
+#[derive(Debug, Clone)]
+pub enum RegistrationError {
+    /// Not enough stars detected.
+    InsufficientStars { found: usize, required: usize },
+    /// No matching star patterns found.
+    NoMatchingPatterns,
+    /// RANSAC failed to find valid transformation.
+    RansacFailed {
+        /// The reason for failure.
+        reason: RansacFailureReason,
+        /// Number of iterations completed.
+        iterations: usize,
+        /// Best inlier count achieved (may be 0).
+        best_inlier_count: usize,
+    },
+    /// Registration accuracy too low.
+    AccuracyTooLow { rms_error: f64, max_allowed: f64 },
+    /// Images have incompatible dimensions.
+    DimensionMismatch,
+    /// Star detection failed.
+    StarDetection(String),
+}
+
+impl std::fmt::Display for RegistrationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            RegistrationError::InsufficientStars { found, required } => {
+                write!(
+                    f,
+                    "Insufficient stars detected: found {}, need {}",
+                    found, required
+                )
+            }
+            RegistrationError::NoMatchingPatterns => {
+                write!(f, "No matching star patterns found between images")
+            }
+            RegistrationError::RansacFailed {
+                reason,
+                iterations,
+                best_inlier_count,
+            } => {
+                write!(
+                    f,
+                    "RANSAC failed: {} (iterations: {}, best inlier count: {})",
+                    reason, iterations, best_inlier_count
+                )
+            }
+            RegistrationError::AccuracyTooLow {
+                rms_error,
+                max_allowed,
+            } => {
+                write!(
+                    f,
+                    "Registration accuracy too low: {:.3} pixels (max: {:.3})",
+                    rms_error, max_allowed
+                )
+            }
+            RegistrationError::DimensionMismatch => {
+                write!(f, "Images have incompatible dimensions")
+            }
+            RegistrationError::StarDetection(msg) => {
+                write!(f, "Star detection failed: {}", msg)
+            }
+        }
+    }
+}
+
+impl std::error::Error for RegistrationError {}
 
 /// Result of image registration.
 #[derive(Debug, Clone)]

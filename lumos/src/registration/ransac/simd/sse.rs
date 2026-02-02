@@ -5,7 +5,7 @@
 #[cfg(target_arch = "x86_64")]
 use std::arch::x86_64::*;
 
-use crate::registration::types::TransformMatrix;
+use crate::registration::transform::TransformMatrix;
 
 /// Count inliers using AVX2 SIMD (processes 4 points at a time with f64).
 ///

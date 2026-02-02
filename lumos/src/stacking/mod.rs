@@ -3,15 +3,12 @@ mod cache_config;
 pub mod comet;
 mod drizzle;
 mod error;
-pub mod gpu;
 mod gradient_removal;
-pub mod live;
 mod local_normalization;
 mod mean;
 mod median;
 mod progress;
 pub mod rejection;
-pub mod session;
 mod sigma_clipped;
 mod weighted;
 
@@ -40,12 +37,6 @@ pub use weighted::{FrameQuality, RejectionMethod, WeightedConfig};
 pub use local_normalization::{
     LocalNormalizationConfig, LocalNormalizationMap, NormalizationMethod, TileNormalizationStats,
 };
-// Re-export GPU types for public API
-#[allow(unused_imports)]
-pub use gpu::{
-    BatchPipeline, BatchPipelineConfig, GpuSigmaClipConfig, GpuSigmaClipPipeline, GpuSigmaClipper,
-    MAX_GPU_FRAMES,
-};
 // Re-export comet stacking types for public API
 #[allow(unused_imports)]
 pub use comet::{
@@ -53,23 +44,11 @@ pub use comet::{
     apply_comet_offset_to_transform, composite_stacks, compute_comet_offset,
     create_comet_stack_result, interpolate_position,
 };
-// Re-export session types for public API
-#[allow(unused_imports)]
-pub use session::{
-    GlobalReferenceInfo, MultiSessionStack, MultiSessionSummary, Session, SessionConfig, SessionId,
-    SessionNormalization, SessionQuality, SessionSummary, SessionWeightedStackResult,
-};
 // Re-export gradient removal types for public API
 #[allow(unused_imports)]
 pub use gradient_removal::{
     CorrectionMethod, GradientModel, GradientRemovalConfig, GradientRemovalError,
     GradientRemovalResult, remove_gradient, remove_gradient_image, remove_gradient_simple,
-};
-// Re-export live stacking types for public API
-#[allow(unused_imports)]
-pub use live::{
-    LiveFrameQuality, LiveQualityStream, LiveStackAccumulator, LiveStackConfig,
-    LiveStackConfigBuilder, LiveStackError, LiveStackMode, LiveStackResult, LiveStackStats,
 };
 
 use crate::AstroImage;

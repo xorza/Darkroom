@@ -3,7 +3,7 @@
 //! Provides tools for assessing alignment quality, detecting misregistrations,
 //! and computing overlap statistics.
 
-use crate::registration::types::TransformMatrix;
+use crate::registration::transform::TransformMatrix;
 
 #[cfg(test)]
 mod tests;

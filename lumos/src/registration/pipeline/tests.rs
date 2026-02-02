@@ -1,7 +1,7 @@
 use super::*;
 use crate::AstroImage;
 use crate::common::Buffer2;
-use crate::registration::types::TransformType;
+use crate::registration::transform::TransformType;
 use std::f64::consts::PI;
 
 /// Test helper: register star positions with specified transform type

@@ -5,7 +5,7 @@
 #[cfg(target_arch = "aarch64")]
 use std::arch::aarch64::*;
 
-use crate::registration::types::TransformMatrix;
+use crate::registration::transform::TransformMatrix;
 
 /// Count inliers using NEON SIMD (processes 2 points at a time with f64).
 ///

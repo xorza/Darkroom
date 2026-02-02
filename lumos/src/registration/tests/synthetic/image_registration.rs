@@ -8,7 +8,7 @@ use crate::{AstroImage, ImageDimensions};
 
 use crate::common::Buffer2;
 use crate::registration::interpolation::{InterpolationMethod, WarpConfig, warp_image};
-use crate::registration::types::TransformMatrix;
+use crate::registration::transform::TransformMatrix;
 use crate::registration::{RegistrationConfig, Registrator, TransformType};
 use crate::star_detection::{BackgroundConfig, StarDetectionConfig, StarDetector};
 use crate::testing::synthetic::{self, StarFieldConfig};

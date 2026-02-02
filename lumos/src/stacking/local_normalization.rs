@@ -21,8 +21,9 @@ use rayon::prelude::*;
 use crate::common::Buffer2;
 use crate::math::sigma_clipped_median_mad;
 
-/// Number of rows to process per parallel chunk for interpolation.
-const ROWS_PER_CHUNK: usize = 8;
+/// Number of rows to process in each parallel chunk.
+#[allow(dead_code)] // Used by pending stacking pipeline integration
+const ROWS_PER_CHUNK: usize = 32;
 
 /// Normalization method for aligning frame statistics before stacking.
 ///
@@ -253,6 +254,7 @@ impl TileNormalizationStats {
 // Normalization Map Computation
 // ============================================================================
 
+#[allow(dead_code)] // Pending integration with stacking pipeline
 impl LocalNormalizationMap {
     /// Compute a normalization map from reference and target tile statistics.
     ///
@@ -497,6 +499,7 @@ impl LocalNormalizationMap {
 
 /// Find the tile index whose center is at or before the given position.
 #[inline]
+#[allow(dead_code)] // Pending integration with stacking pipeline
 fn find_lower_tile(pos: f32, centers: &[f32]) -> usize {
     // Linear search is efficient for small tile counts (typically < 20)
     for i in (0..centers.len()).rev() {
@@ -509,6 +512,7 @@ fn find_lower_tile(pos: f32, centers: &[f32]) -> usize {
 
 /// Apply constant correction to a segment.
 #[inline]
+#[allow(dead_code)] // Pending integration with stacking pipeline
 fn apply_segment_constant(segment: &mut [f32], offset: f32, scale: f32, target_median: f32) {
     for px in segment.iter_mut() {
         *px = (*px - target_median) * scale + offset;
@@ -520,6 +524,7 @@ fn apply_segment_constant(segment: &mut [f32], offset: f32, scale: f32, target_m
 /// Uses the same interpolation approach as background estimation but with
 /// custom correction formula: corrected = (pixel - target_median) * scale + offset
 #[allow(clippy::too_many_arguments)]
+#[allow(dead_code)] // Pending integration with stacking pipeline
 fn apply_segment_interpolated(
     segment: &mut [f32],
     left_offset: f32,

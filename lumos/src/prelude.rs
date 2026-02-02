@@ -35,15 +35,6 @@ pub use crate::{
     SigmaClippedConfig, StackingMethod, StackingProgress, StackingStage,
 };
 
-// Live stacking
-pub use crate::{
-    LiveFrameQuality, LiveStackAccumulator, LiveStackConfig, LiveStackConfigBuilder,
-    LiveStackError, LiveStackMode,
-};
-
-// Multi-session stacking
-pub use crate::{MultiSessionStack, Session, SessionConfig};
-
 // Gradient removal
 pub use crate::{
     GradientRemovalConfig, GradientRemovalError, remove_gradient, remove_gradient_image,

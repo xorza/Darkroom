@@ -5,7 +5,7 @@
 #[cfg(target_arch = "x86_64")]
 use std::arch::x86_64::*;
 
-use crate::registration::types::TransformMatrix;
+use crate::registration::transform::TransformMatrix;
 
 /// Warp a row using AVX2 SIMD with bilinear interpolation.
 ///

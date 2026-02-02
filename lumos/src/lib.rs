@@ -95,8 +95,6 @@ pub use registration::{
     FieldCurvatureConfig,
     FullPhaseCorrelator,
     FullPhaseResult,
-    // GPU warping
-    GpuWarper,
     // Interpolation
     InterpolationMethod,
     LogPolarCorrelator,
@@ -165,12 +163,6 @@ pub use stacking::{
     // Correction method for gradient removal
     CorrectionMethod,
     FrameType,
-    // Multi-session stacking
-    GlobalReferenceInfo,
-    // GPU stacking
-    GpuSigmaClipConfig,
-    GpuSigmaClipPipeline,
-    GpuSigmaClipper,
     // Gradient removal
     GradientModel,
     GradientRemovalConfig,
@@ -178,30 +170,9 @@ pub use stacking::{
     GradientRemovalResult,
     // Main API
     ImageStack,
-    // Live stacking
-    LiveFrameQuality,
-    LiveQualityStream,
-    LiveStackAccumulator,
-    LiveStackConfig,
-    LiveStackConfigBuilder,
-    LiveStackError,
-    LiveStackMode,
-    LiveStackResult,
-    LiveStackStats,
-    MAX_GPU_FRAMES,
     MedianConfig,
-    MultiSessionStack,
-    MultiSessionSummary,
-    ObjectPosition,
     // Progress reporting
     ProgressCallback,
-    Session,
-    SessionConfig,
-    SessionId,
-    SessionNormalization,
-    SessionQuality,
-    SessionSummary,
-    SessionWeightedStackResult,
     SigmaClipConfig,
     SigmaClippedConfig,
     StackingMethod,

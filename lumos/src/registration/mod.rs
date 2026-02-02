@@ -63,13 +63,13 @@
 pub(crate) mod astrometry;
 pub(crate) mod constants;
 pub(crate) mod distortion;
-pub(crate) mod gpu;
 pub(crate) mod interpolation;
 pub(crate) mod phase_correlation;
 pub(crate) mod pipeline;
 pub(crate) mod quality;
 pub(crate) mod ransac;
 pub(crate) mod spatial;
+pub(crate) mod transform;
 pub(crate) mod triangle;
 pub(crate) mod types;
 
@@ -79,17 +79,14 @@ mod tests;
 // Re-export main public API types
 // High-level pipeline API (primary entry point)
 pub use pipeline::{
-    MultiScaleConfig, MultiScaleRegistrator, RegistrationConfig, RegistrationResult, Registrator,
-    quick_register, quick_register_stars, warp_to_reference_image,
+    MultiScaleConfig, MultiScaleRegistrator, RansacFailureReason, RegistrationConfig,
+    RegistrationError, RegistrationResult, Registrator, quick_register, quick_register_stars,
+    warp_to_reference_image,
 };
 
 // Core types needed by users
-pub use types::{
-    RansacFailureReason, RegistrationError, StarMatch, TransformMatrix, TransformType,
-};
-
-// GPU-accelerated warping
-pub use gpu::GpuWarper;
+pub use transform::{TransformMatrix, TransformType};
+pub use types::StarMatch;
 
 // Configuration types
 pub use distortion::{

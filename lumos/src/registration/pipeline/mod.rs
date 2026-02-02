@@ -16,7 +16,7 @@ mod config;
 mod result;
 
 pub use config::RegistrationConfig;
-pub use result::RegistrationResult;
+pub use result::{RansacFailureReason, RegistrationError, RegistrationResult};
 
 use std::time::Instant;
 
@@ -26,8 +26,9 @@ use crate::registration::{
     interpolation::{InterpolationMethod, WarpConfig, warp_image},
     phase_correlation::{PhaseCorrelationConfig, PhaseCorrelator},
     ransac::{RansacConfig, RansacEstimator},
+    transform::TransformMatrix,
+    transform::TransformType,
     triangle::{TriangleMatchConfig, match_triangles},
-    types::{RegistrationError, TransformMatrix, TransformType},
 };
 use crate::star_detection::Star;
 
@@ -179,7 +180,7 @@ impl Registrator {
         let ransac_result = ransac
             .estimate(&ref_matched, &target_matched, self.config.transform_type)
             .ok_or(RegistrationError::RansacFailed {
-                reason: crate::registration::types::RansacFailureReason::NoInliersFound,
+                reason: RansacFailureReason::NoInliersFound,
                 iterations: self.config.ransac_iterations,
                 best_inlier_count: 0,
             })?;

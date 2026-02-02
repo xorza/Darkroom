@@ -17,7 +17,7 @@ pub mod sse;
 
 #[cfg(test)]
 use crate::registration::interpolation::lanczos_kernel;
-use crate::registration::types::TransformMatrix;
+use crate::registration::transform::TransformMatrix;
 
 /// Warp a row of pixels using SIMD-accelerated bilinear interpolation.
 ///

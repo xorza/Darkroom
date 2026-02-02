@@ -28,7 +28,7 @@ use std::path::Path;
 
 use crate::ImageDimensions;
 use crate::astro_image::AstroImage;
-use crate::registration::types::TransformMatrix;
+use crate::registration::transform::TransformMatrix;
 use crate::stacking::error::Error;
 use crate::stacking::progress::{ProgressCallback, StackingStage, report_progress};
 

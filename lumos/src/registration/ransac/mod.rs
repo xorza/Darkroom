@@ -16,7 +16,8 @@ pub mod simd;
 use nalgebra::{DMatrix, SVD};
 use rand::prelude::*;
 
-use crate::registration::types::{StarMatch, TransformMatrix, TransformType};
+use crate::registration::transform::{TransformMatrix, TransformType};
+use crate::registration::types::StarMatch;
 
 // Wrapper for seeded vs non-seeded RNG
 enum RngWrapper {
