@@ -285,6 +285,11 @@ impl StarDetector {
         pixels: &Buffer2<f32>,
         background: &BackgroundMap,
     ) -> fwhm_estimation::FwhmEstimate {
+        // Create a modified config for first-pass detection:
+        // - Higher sigma threshold: detect only the brightest stars for reliable FWHM measurement
+        // - No matched filter (expected_fwhm=0): we don't know the FWHM yet
+        // - Smaller min_area: more permissive to catch small bright stars
+        // - Higher min_snr: ensure high-quality stars for accurate estimation
         let first_pass_config = StarDetectionConfig {
             background: BackgroundConfig {
                 sigma_threshold: self.config.background.sigma_threshold
