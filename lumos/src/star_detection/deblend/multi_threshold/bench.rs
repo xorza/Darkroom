@@ -90,7 +90,11 @@ fn bench_deblend_multi_threshold_6k_dense_fewer_levels(b: ::bench::Bencher) {
     let (labels, components) = create_components_from_pixels(&pixels, 0.05);
 
     // Filter out huge components - multi-threshold is O(n^2) and not practical for >100k pixels
-    let reasonable_components: Vec<_> = components.iter().filter(|c| c.area < 100_000).collect();
+    let reasonable_components: Vec<_> = components
+        .iter()
+        .filter(|c| c.area < 100_000)
+        .take(5000)
+        .collect();
 
     let config = DeblendConfig {
         n_thresholds: 16,

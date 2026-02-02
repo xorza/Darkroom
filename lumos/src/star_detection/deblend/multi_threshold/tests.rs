@@ -697,7 +697,6 @@ fn test_pixel_grid_empty() {
     let grid = PixelGrid::empty();
     assert_eq!(grid.width, 0);
     assert_eq!(grid.height, 0);
-    assert!(grid.get(0, 0).is_none());
     assert!(grid.is_visited(0, 0)); // Out of bounds treated as visited
 }
 
@@ -721,24 +720,56 @@ fn test_pixel_grid_basic_operations() {
     let mut grid = PixelGrid::empty();
     grid.reset_with_pixels(&pixels);
 
-    // Check values are stored correctly
-    assert_eq!(grid.get(10, 10), Some(1.0));
-    assert_eq!(grid.get(11, 10), Some(2.0));
-    assert_eq!(grid.get(10, 11), Some(3.0));
+    // Check grid dimensions are set correctly
+    assert!(grid.width > 0);
+    assert!(grid.height > 0);
 
-    // Check empty positions return None
-    assert_eq!(grid.get(12, 10), None);
-    assert_eq!(grid.get(10, 12), None);
-
-    // Check visited flags start as false
+    // Check visited flags start as false for pixel positions
     assert!(!grid.is_visited(10, 10));
     assert!(!grid.is_visited(11, 10));
+    assert!(!grid.is_visited(10, 11));
 
     // Mark visited and check
     assert!(grid.mark_visited(10, 10)); // First mark returns true
     assert!(!grid.mark_visited(10, 10)); // Second mark returns false
     assert!(grid.is_visited(10, 10));
     assert!(!grid.is_visited(11, 10)); // Other positions unaffected
+}
+
+#[test]
+fn test_pixel_grid_connected_regions() {
+    // Test that pixel values are stored correctly by using find_connected_regions_grid
+    // which exercises the actual code path including value lookups
+    let pixels = vec![
+        Pixel {
+            pos: Vec2us::new(10, 10),
+            value: 1.0,
+        },
+        Pixel {
+            pos: Vec2us::new(11, 10),
+            value: 2.0,
+        },
+        Pixel {
+            pos: Vec2us::new(10, 11),
+            value: 3.0,
+        },
+    ];
+
+    let mut grid = PixelGrid::empty();
+    let mut queue = Vec::new();
+    let mut regions = Vec::new();
+
+    find_connected_regions_grid(&pixels, &mut regions, &mut grid, &mut queue);
+
+    // All 3 pixels should be in one connected region (they're adjacent)
+    assert_eq!(regions.len(), 1);
+    assert_eq!(regions[0].len(), 3);
+
+    // Verify the values were preserved
+    let values: std::collections::HashSet<_> = regions[0].iter().map(|p| p.value as i32).collect();
+    assert!(values.contains(&1));
+    assert!(values.contains(&2));
+    assert!(values.contains(&3));
 }
 
 #[test]
@@ -785,9 +816,7 @@ fn test_pixel_grid_boundary_conditions() {
     let mut grid = PixelGrid::empty();
     grid.reset_with_pixels(&pixels);
 
-    // Out of bounds should return None/true(visited)/false(mark)
-    assert!(grid.get(0, 0).is_none());
-    assert!(grid.get(100, 100).is_none());
+    // Out of bounds should be treated as visited (can't mark)
     assert!(grid.is_visited(0, 0)); // Out of bounds treated as visited
     assert!(grid.is_visited(100, 100));
     assert!(!grid.mark_visited(0, 0)); // Can't mark out of bounds
@@ -795,8 +824,7 @@ fn test_pixel_grid_boundary_conditions() {
 
     // Boundary pixels (1-pixel border) should work
     // With offset at min-1, the grid includes positions around the pixel
-    assert!(grid.get(4, 5).is_none()); // No pixel here but within grid
-    assert!(!grid.is_visited(4, 5));
+    assert!(!grid.is_visited(4, 5)); // Within grid border
     assert!(grid.mark_visited(4, 5));
     assert!(grid.is_visited(4, 5));
 }
@@ -832,12 +860,17 @@ fn test_pixel_grid_reuse() {
     ];
     grid.reset_with_pixels(&pixels2);
 
-    // Old positions should no longer be valid
-    assert!(grid.get(10, 10).is_none());
-
-    // New positions should work and not be visited
-    assert_eq!(grid.get(20, 20), Some(3.0));
+    // New positions should not be visited (flags reset)
     assert!(!grid.is_visited(20, 20));
+    assert!(!grid.is_visited(25, 25));
+
+    // Test that the new pixels are properly stored via connected regions
+    let mut queue = Vec::new();
+    let mut regions = Vec::new();
+    find_connected_regions_grid(&pixels2, &mut regions, &mut grid, &mut queue);
+
+    // Two separate pixels should form two regions (not adjacent)
+    assert_eq!(regions.len(), 2);
 }
 
 #[test]
@@ -850,10 +883,19 @@ fn test_pixel_grid_single_pixel() {
     let mut grid = PixelGrid::empty();
     grid.reset_with_pixels(&pixels);
 
-    assert_eq!(grid.get(50, 50), Some(42.0));
     assert!(!grid.is_visited(50, 50));
     assert!(grid.mark_visited(50, 50));
     assert!(grid.is_visited(50, 50));
+
+    // Verify value storage via connected regions
+    let mut queue = Vec::new();
+    let mut regions = Vec::new();
+    grid.reset_with_pixels(&pixels); // Reset to clear visited flags
+    find_connected_regions_grid(&pixels, &mut regions, &mut grid, &mut queue);
+
+    assert_eq!(regions.len(), 1);
+    assert_eq!(regions[0].len(), 1);
+    assert_eq!(regions[0][0].value, 42.0);
 }
 
 #[test]
@@ -863,7 +905,7 @@ fn test_pixel_grid_empty_pixels() {
 
     assert_eq!(grid.width, 0);
     assert_eq!(grid.height, 0);
-    assert!(grid.get(0, 0).is_none());
+    assert!(grid.is_visited(0, 0)); // Empty grid treats all as visited
 }
 
 // ========================================================================

@@ -127,22 +127,6 @@ impl PixelGrid {
         }
     }
 
-    /// Get pixel value at absolute coordinates, or None if no pixel there.
-    #[inline]
-    fn get(&self, x: usize, y: usize) -> Option<f32> {
-        if self.width == 0 {
-            return None;
-        }
-        let lx = x.wrapping_sub(self.offset_x);
-        let ly = y.wrapping_sub(self.offset_y);
-        if lx >= self.width || ly >= self.height {
-            return None;
-        }
-        let idx = ly * self.width + lx;
-        let v = self.values[idx];
-        if v == NO_PIXEL { None } else { Some(v) }
-    }
-
     /// Check if position has been visited (packed bit access).
     #[inline]
     fn is_visited(&self, x: usize, y: usize) -> bool {
@@ -157,7 +141,8 @@ impl PixelGrid {
         let idx = ly * self.width + lx;
         let word = idx / 64;
         let bit = idx % 64;
-        (self.visited[word] & (1u64 << bit)) != 0
+        // SAFETY: bounds checked above
+        unsafe { (*self.visited.get_unchecked(word) & (1u64 << bit)) != 0 }
     }
 
     /// Mark position as visited. Returns true if it was not already visited (packed bit access).
@@ -175,9 +160,13 @@ impl PixelGrid {
         let word = idx / 64;
         let bit = idx % 64;
         let mask = 1u64 << bit;
-        let was_visited = (self.visited[word] & mask) != 0;
-        self.visited[word] |= mask;
-        !was_visited
+        // SAFETY: bounds checked above
+        unsafe {
+            let word_ptr = self.visited.get_unchecked_mut(word);
+            let was_visited = (*word_ptr & mask) != 0;
+            *word_ptr |= mask;
+            !was_visited
+        }
     }
 }
 
@@ -880,52 +869,91 @@ fn find_connected_regions_grid_into<const N: usize>(
 
 /// Visit 8-connected neighbors using grid-based lookup.
 ///
-/// This is the hot path that was taking 17% of CPU time with HashMap.
-/// The grid-based version eliminates hash computation entirely.
+/// This is the hot path - optimized with unchecked indexing since the grid
+/// has a 1-pixel border ensuring all neighbor accesses are in-bounds.
 #[inline]
 fn visit_neighbors_grid(pos: Vec2us, grid: &mut PixelGrid, queue: &mut Vec<Pixel>) {
-    let x = pos.x;
-    let y = pos.y;
+    // Convert to local coordinates once
+    // The grid always has a 1-pixel border, so lx/ly are always >= 1 for valid pixels
+    let lx = pos.x - grid.offset_x;
+    let ly = pos.y - grid.offset_y;
+    let width = grid.width;
 
-    // Check all 8 neighbors. Grid handles boundary checks internally.
-    // Unrolled for better performance.
+    // SAFETY: The grid has a 1-pixel border on all sides (added in reset_with_pixels).
+    // Since `pos` came from a pixel in the grid, local coordinates lx, ly are >= 1
+    // (because offset_x = min_x - 1, so lx = pos.x - (min_x - 1) >= 1).
+    // Therefore all 8 neighbors (lx±1, ly±1) are guaranteed to be valid indices.
+    // The border positions contain NO_PIXEL so they won't be added to the queue.
 
-    // Top row
-    if y > 0 {
-        if x > 0 {
-            try_visit_neighbor(x - 1, y - 1, grid, queue);
-        }
-        try_visit_neighbor(x, y - 1, grid, queue);
-        try_visit_neighbor(x + 1, y - 1, grid, queue);
-    }
+    // All 8 neighbors - unrolled for better performance
+    // Using wrapping arithmetic to avoid overflow checks, then bounds-checked indexing
 
-    // Middle row (left and right)
-    if x > 0 {
-        try_visit_neighbor(x - 1, y, grid, queue);
-    }
-    try_visit_neighbor(x + 1, y, grid, queue);
-
-    // Bottom row
-    {
-        if x > 0 {
-            try_visit_neighbor(x - 1, y + 1, grid, queue);
-        }
-        try_visit_neighbor(x, y + 1, grid, queue);
-        try_visit_neighbor(x + 1, y + 1, grid, queue);
-    }
+    // Top-left
+    try_visit_neighbor_local(lx.wrapping_sub(1), ly.wrapping_sub(1), width, grid, queue);
+    // Top
+    try_visit_neighbor_local(lx, ly.wrapping_sub(1), width, grid, queue);
+    // Top-right
+    try_visit_neighbor_local(lx + 1, ly.wrapping_sub(1), width, grid, queue);
+    // Left
+    try_visit_neighbor_local(lx.wrapping_sub(1), ly, width, grid, queue);
+    // Right
+    try_visit_neighbor_local(lx + 1, ly, width, grid, queue);
+    // Bottom-left
+    try_visit_neighbor_local(lx.wrapping_sub(1), ly + 1, width, grid, queue);
+    // Bottom
+    try_visit_neighbor_local(lx, ly + 1, width, grid, queue);
+    // Bottom-right
+    try_visit_neighbor_local(lx + 1, ly + 1, width, grid, queue);
 }
 
-/// Try to visit a neighbor position. Adds to queue if valid and unvisited.
+/// Try to visit a neighbor at local grid coordinates.
+/// Performs bounds check then uses unchecked access for the actual operations.
 #[inline]
-fn try_visit_neighbor(x: usize, y: usize, grid: &mut PixelGrid, queue: &mut Vec<Pixel>) {
-    if let Some(value) = grid.get(x, y)
-        && grid.mark_visited(x, y)
-    {
-        queue.push(Pixel {
-            pos: Vec2us::new(x, y),
-            value,
-        });
+fn try_visit_neighbor_local(
+    lx: usize,
+    ly: usize,
+    width: usize,
+    grid: &mut PixelGrid,
+    queue: &mut Vec<Pixel>,
+) {
+    // Bounds check - wrapping_sub produces large values that fail this check
+    if lx >= grid.width || ly >= grid.height {
+        return;
     }
+
+    let idx = ly * width + lx;
+
+    // SAFETY: bounds checked above
+    let value = unsafe { *grid.values.get_unchecked(idx) };
+
+    // NO_PIXEL means no pixel at this position (border or gap)
+    if value == NO_PIXEL {
+        return;
+    }
+
+    // Check and set visited bit
+    let word = idx / 64;
+    let bit = idx % 64;
+    let mask = 1u64 << bit;
+
+    // SAFETY: word index is derived from valid idx, which is < width * height
+    // and visited.len() == ceil(width * height / 64), so word < visited.len()
+    let word_ptr = unsafe { grid.visited.get_unchecked_mut(word) };
+
+    if (*word_ptr & mask) != 0 {
+        return; // Already visited
+    }
+
+    *word_ptr |= mask;
+
+    // Convert back to absolute coordinates
+    let abs_x = lx + grid.offset_x;
+    let abs_y = ly + grid.offset_y;
+
+    queue.push(Pixel {
+        pos: Vec2us::new(abs_x, abs_y),
+        value,
+    });
 }
 
 // ============================================================================
