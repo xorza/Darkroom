@@ -941,6 +941,84 @@ fn test_pixel_grid_empty_pixels() {
     assert!(grid.is_visited(0, 0)); // Empty grid treats all as visited
 }
 
+#[test]
+fn test_pixel_grid_generation_counter_multiple_resets() {
+    // Test that generation counter correctly resets visited flags across many resets
+    let pixels = vec![
+        Pixel {
+            pos: Vec2us::new(10, 10),
+            value: 1.0,
+        },
+        Pixel {
+            pos: Vec2us::new(11, 10),
+            value: 2.0,
+        },
+    ];
+
+    let mut grid = PixelGrid::empty();
+
+    // Perform many reset cycles to exercise the generation counter
+    for i in 0..100 {
+        grid.reset_with_pixels(&pixels);
+
+        // After reset, nothing should be visited
+        assert!(
+            !grid.is_visited(10, 10),
+            "Iteration {}: position should not be visited after reset",
+            i
+        );
+        assert!(!grid.is_visited(11, 10));
+
+        // Mark one position
+        assert!(grid.mark_visited(10, 10));
+        assert!(grid.is_visited(10, 10));
+        assert!(!grid.is_visited(11, 10));
+
+        // Mark again should return false (already visited)
+        assert!(!grid.mark_visited(10, 10));
+    }
+}
+
+#[test]
+fn test_pixel_grid_generation_counter_different_sizes() {
+    // Test generation counter with varying grid sizes (exercises resize logic)
+    let mut grid = PixelGrid::empty();
+
+    // Small grid
+    let small_pixels = vec![Pixel {
+        pos: Vec2us::new(5, 5),
+        value: 1.0,
+    }];
+    grid.reset_with_pixels(&small_pixels);
+    grid.mark_visited(5, 5);
+    assert!(grid.is_visited(5, 5));
+
+    // Larger grid - generation counter should reset visited status
+    let large_pixels: Vec<Pixel> = (0..50)
+        .map(|i| Pixel {
+            pos: Vec2us::new(i, i),
+            value: i as f32,
+        })
+        .collect();
+    grid.reset_with_pixels(&large_pixels);
+
+    // All positions should be unvisited after reset, even those that overlap
+    // with the previous smaller grid
+    assert!(!grid.is_visited(5, 5));
+    for i in 0..50 {
+        assert!(
+            !grid.is_visited(i, i),
+            "Position ({}, {}) should not be visited",
+            i,
+            i
+        );
+    }
+
+    // Back to smaller grid
+    grid.reset_with_pixels(&small_pixels);
+    assert!(!grid.is_visited(5, 5));
+}
+
 // ========================================================================
 // Unit tests for NodeGrid
 // ========================================================================

@@ -45,12 +45,18 @@ const NO_NODE: u32 = u32::MAX;
 /// Replaces HashMap<Vec2us, f32> and HashSet<Vec2us> with flat arrays indexed by
 /// local coordinates within the bounding box. This eliminates hash computation
 /// overhead which was a major bottleneck (17% of CPU time).
+///
+/// Uses a generation counter for the visited array to avoid clearing on each reset.
+/// Each cell stores the generation when it was last visited; comparing against
+/// current_generation gives O(1) reset instead of O(n) clearing.
 #[derive(Debug)]
 struct PixelGrid {
     /// Pixel values indexed by local coordinates. NO_PIXEL means no pixel at that position.
     values: Vec<f32>,
-    /// Visited flags for BFS traversal, packed as bits (64 flags per u64).
-    visited: Vec<u64>,
+    /// Generation when each cell was last visited. Cell is visited if generation[idx] == current_generation.
+    visited_generation: Vec<u32>,
+    /// Current generation counter. Incremented on each reset.
+    current_generation: u32,
     /// Bounding box offset (min x coordinate).
     offset_x: usize,
     /// Bounding box offset (min y coordinate).
@@ -66,7 +72,8 @@ impl PixelGrid {
     fn empty() -> Self {
         Self {
             values: Vec::new(),
-            visited: Vec::new(),
+            visited_generation: Vec::new(),
+            current_generation: 0,
             offset_x: 0,
             offset_y: 0,
             width: 0,
@@ -78,12 +85,20 @@ impl PixelGrid {
     ///
     /// The grid is sized to fit the bounding box of all pixels plus a 1-pixel
     /// border to simplify boundary checks in neighbor traversal.
+    ///
+    /// Uses generation counter for visited array: instead of clearing O(n) cells,
+    /// we just increment the generation counter O(1). Cells are considered unvisited
+    /// if their stored generation != current_generation.
     fn reset_with_pixels(&mut self, pixels: &[Pixel]) {
         if pixels.is_empty() {
             self.width = 0;
             self.height = 0;
             return;
         }
+
+        // Increment generation to invalidate all previous visited marks
+        // Wrapping handles overflow (very unlikely with u32, but safe)
+        self.current_generation = self.current_generation.wrapping_add(1);
 
         // Find bounding box
         let mut min_x = usize::MAX;
@@ -106,14 +121,14 @@ impl PixelGrid {
 
         let size = width * height;
 
-        // Resize and clear vectors, reusing allocation
+        // Resize and clear values vector
         self.values.clear();
         self.values.resize(size, NO_PIXEL);
 
-        // Packed bit vector: ceil(size / 64) u64 words
-        let visited_words = size.div_ceil(64);
-        self.visited.clear();
-        self.visited.resize(visited_words, 0);
+        // Resize visited_generation only if needed (no clearing required due to generation counter)
+        if self.visited_generation.len() < size {
+            self.visited_generation.resize(size, 0);
+        }
 
         self.offset_x = offset_x;
         self.offset_y = offset_y;
@@ -127,7 +142,7 @@ impl PixelGrid {
         }
     }
 
-    /// Check if position has been visited (packed bit access).
+    /// Check if position has been visited (generation counter comparison).
     #[inline]
     fn is_visited(&self, x: usize, y: usize) -> bool {
         if self.width == 0 {
@@ -139,13 +154,11 @@ impl PixelGrid {
             return true; // Treat out-of-bounds as visited
         }
         let idx = ly * self.width + lx;
-        let word = idx / 64;
-        let bit = idx % 64;
-        // SAFETY: bounds checked above
-        unsafe { (*self.visited.get_unchecked(word) & (1u64 << bit)) != 0 }
+        // SAFETY: bounds checked above, and visited_generation.len() >= size
+        unsafe { *self.visited_generation.get_unchecked(idx) == self.current_generation }
     }
 
-    /// Mark position as visited. Returns true if it was not already visited (packed bit access).
+    /// Mark position as visited. Returns true if it was not already visited.
     #[inline]
     fn mark_visited(&mut self, x: usize, y: usize) -> bool {
         if self.width == 0 {
@@ -157,15 +170,15 @@ impl PixelGrid {
             return false;
         }
         let idx = ly * self.width + lx;
-        let word = idx / 64;
-        let bit = idx % 64;
-        let mask = 1u64 << bit;
-        // SAFETY: bounds checked above
+        // SAFETY: bounds checked above, and visited_generation.len() >= size
         unsafe {
-            let word_ptr = self.visited.get_unchecked_mut(word);
-            let was_visited = (*word_ptr & mask) != 0;
-            *word_ptr |= mask;
-            !was_visited
+            let gen_ptr = self.visited_generation.get_unchecked_mut(idx);
+            if *gen_ptr == self.current_generation {
+                false // Already visited
+            } else {
+                *gen_ptr = self.current_generation;
+                true // Newly visited
+            }
         }
     }
 }
@@ -1002,20 +1015,15 @@ fn try_visit_neighbor_local(
         return;
     }
 
-    // Check and set visited bit
-    let word = idx / 64;
-    let bit = idx % 64;
-    let mask = 1u64 << bit;
+    // Check and set visited using generation counter
+    // SAFETY: bounds checked above, and visited_generation.len() >= width * height
+    let gen_ptr = unsafe { grid.visited_generation.get_unchecked_mut(idx) };
 
-    // SAFETY: word index is derived from valid idx, which is < width * height
-    // and visited.len() == ceil(width * height / 64), so word < visited.len()
-    let word_ptr = unsafe { grid.visited.get_unchecked_mut(word) };
-
-    if (*word_ptr & mask) != 0 {
+    if *gen_ptr == grid.current_generation {
         return; // Already visited
     }
 
-    *word_ptr |= mask;
+    *gen_ptr = grid.current_generation;
 
     // Convert back to absolute coordinates
     let abs_x = lx + grid.offset_x;
