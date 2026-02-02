@@ -22,8 +22,11 @@ fn bench_background_estimate_6k(b: ::bench::Bencher) {
         ..Default::default()
     };
 
-    // todo preallocate bgmap
-    b.bench(|| black_box(crate::testing::estimate_background(&pixels, config.clone())));
+    let mut bg = BackgroundMap::new_uninit(width, height, config);
+    b.bench(|| {
+        bg.estimate(&pixels);
+        black_box(&bg);
+    });
 }
 
 const BENCH_SIGMA_CLIP_ITERATIONS: usize = 2;
@@ -33,6 +36,7 @@ fn bench_tile_grid_6k_globular(b: ::bench::Bencher) {
     let pixels = generate_globular_cluster(6144, 6144, 50000, 42);
 
     b.bench(|| {
+        // todo preallocate and bench only computation
         black_box(TileGrid::new_with_options(
             &pixels,
             64,
@@ -67,6 +71,7 @@ fn bench_tile_grid_6k_with_mask(b: ::bench::Bencher) {
     );
 
     b.bench(|| {
+        // prealllocate
         black_box(TileGrid::new_with_options(
             &pixels,
             64,
