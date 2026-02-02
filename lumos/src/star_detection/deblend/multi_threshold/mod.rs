@@ -8,7 +8,7 @@
 //! Reference: Bertin & Arnouts (1996), A&AS 117, 393
 
 use arrayvec::ArrayVec;
-use hashbrown::{HashMap, HashSet};
+
 use smallvec::SmallVec;
 
 use super::{ComponentData, DeblendedCandidate, MAX_PEAKS, Pixel};
@@ -30,9 +30,252 @@ mod bench;
 /// Maximum children per node (same as MAX_PEAKS since each child becomes a candidate).
 const MAX_CHILDREN: usize = MAX_PEAKS;
 
+/// Sentinel value indicating no pixel value at grid position.
+const NO_PIXEL: f32 = f32::NEG_INFINITY;
+
+/// Sentinel value indicating no node assignment.
+const NO_NODE: u32 = u32::MAX;
+
 // ============================================================================
 // Types
 // ============================================================================
+
+/// Grid-based pixel lookup for fast neighbor access during connected component finding.
+///
+/// Replaces HashMap<Vec2us, f32> and HashSet<Vec2us> with flat arrays indexed by
+/// local coordinates within the bounding box. This eliminates hash computation
+/// overhead which was a major bottleneck (17% of CPU time).
+#[derive(Debug)]
+struct PixelGrid {
+    /// Pixel values indexed by local coordinates. NO_PIXEL means no pixel at that position.
+    values: Vec<f32>,
+    /// Visited flags for BFS traversal, packed as bits (64 flags per u64).
+    visited: Vec<u64>,
+    /// Bounding box offset (min x coordinate).
+    offset_x: usize,
+    /// Bounding box offset (min y coordinate).
+    offset_y: usize,
+    /// Grid width (bbox width + 2 for boundary padding).
+    width: usize,
+    /// Grid height (bbox height + 2 for boundary padding).
+    height: usize,
+}
+
+impl PixelGrid {
+    /// Create an empty pixel grid.
+    fn empty() -> Self {
+        Self {
+            values: Vec::new(),
+            visited: Vec::new(),
+            offset_x: 0,
+            offset_y: 0,
+            width: 0,
+            height: 0,
+        }
+    }
+
+    /// Reset and populate the grid with new pixels, reusing allocations when possible.
+    ///
+    /// The grid is sized to fit the bounding box of all pixels plus a 1-pixel
+    /// border to simplify boundary checks in neighbor traversal.
+    fn reset_with_pixels(&mut self, pixels: &[Pixel]) {
+        if pixels.is_empty() {
+            self.width = 0;
+            self.height = 0;
+            return;
+        }
+
+        // Find bounding box
+        let mut min_x = usize::MAX;
+        let mut min_y = usize::MAX;
+        let mut max_x = 0usize;
+        let mut max_y = 0usize;
+
+        for p in pixels {
+            min_x = min_x.min(p.pos.x);
+            min_y = min_y.min(p.pos.y);
+            max_x = max_x.max(p.pos.x);
+            max_y = max_y.max(p.pos.y);
+        }
+
+        // Add 1-pixel border on each side for safe neighbor access
+        let offset_x = min_x.saturating_sub(1);
+        let offset_y = min_y.saturating_sub(1);
+        let width = (max_x - offset_x) + 3; // +1 for inclusive, +2 for borders
+        let height = (max_y - offset_y) + 3;
+
+        let size = width * height;
+
+        // Resize and clear vectors, reusing allocation
+        self.values.clear();
+        self.values.resize(size, NO_PIXEL);
+
+        // Packed bit vector: ceil(size / 64) u64 words
+        let visited_words = size.div_ceil(64);
+        self.visited.clear();
+        self.visited.resize(visited_words, 0);
+
+        self.offset_x = offset_x;
+        self.offset_y = offset_y;
+        self.width = width;
+        self.height = height;
+
+        // Populate grid with pixel values
+        for p in pixels {
+            let idx = (p.pos.y - offset_y) * width + (p.pos.x - offset_x);
+            self.values[idx] = p.value;
+        }
+    }
+
+    /// Get pixel value at absolute coordinates, or None if no pixel there.
+    #[inline]
+    fn get(&self, x: usize, y: usize) -> Option<f32> {
+        if self.width == 0 {
+            return None;
+        }
+        let lx = x.wrapping_sub(self.offset_x);
+        let ly = y.wrapping_sub(self.offset_y);
+        if lx >= self.width || ly >= self.height {
+            return None;
+        }
+        let idx = ly * self.width + lx;
+        let v = self.values[idx];
+        if v == NO_PIXEL { None } else { Some(v) }
+    }
+
+    /// Check if position has been visited (packed bit access).
+    #[inline]
+    fn is_visited(&self, x: usize, y: usize) -> bool {
+        if self.width == 0 {
+            return true;
+        }
+        let lx = x.wrapping_sub(self.offset_x);
+        let ly = y.wrapping_sub(self.offset_y);
+        if lx >= self.width || ly >= self.height {
+            return true; // Treat out-of-bounds as visited
+        }
+        let idx = ly * self.width + lx;
+        let word = idx / 64;
+        let bit = idx % 64;
+        (self.visited[word] & (1u64 << bit)) != 0
+    }
+
+    /// Mark position as visited. Returns true if it was not already visited (packed bit access).
+    #[inline]
+    fn mark_visited(&mut self, x: usize, y: usize) -> bool {
+        if self.width == 0 {
+            return false;
+        }
+        let lx = x.wrapping_sub(self.offset_x);
+        let ly = y.wrapping_sub(self.offset_y);
+        if lx >= self.width || ly >= self.height {
+            return false;
+        }
+        let idx = ly * self.width + lx;
+        let word = idx / 64;
+        let bit = idx % 64;
+        let mask = 1u64 << bit;
+        let was_visited = (self.visited[word] & mask) != 0;
+        self.visited[word] |= mask;
+        !was_visited
+    }
+}
+
+/// Grid-based node assignment for tracking which tree node each pixel belongs to.
+///
+/// Replaces HashMap<Vec2us, usize> with a flat array for O(1) lookup/update.
+#[derive(Debug)]
+struct NodeGrid {
+    /// Node index for each pixel position. NO_NODE means unassigned.
+    nodes: Vec<u32>,
+    /// Bounding box offset (min x coordinate).
+    offset_x: usize,
+    /// Bounding box offset (min y coordinate).
+    offset_y: usize,
+    /// Grid width.
+    width: usize,
+    /// Grid height.
+    height: usize,
+}
+
+impl NodeGrid {
+    /// Create an empty node grid.
+    fn empty() -> Self {
+        Self {
+            nodes: Vec::new(),
+            offset_x: 0,
+            offset_y: 0,
+            width: 0,
+            height: 0,
+        }
+    }
+
+    /// Initialize the grid from component pixels, reusing allocation when possible.
+    fn reset_with_pixels(&mut self, pixels: &[Pixel]) {
+        if pixels.is_empty() {
+            self.width = 0;
+            self.height = 0;
+            return;
+        }
+
+        // Find bounding box
+        let mut min_x = usize::MAX;
+        let mut min_y = usize::MAX;
+        let mut max_x = 0usize;
+        let mut max_y = 0usize;
+
+        for p in pixels {
+            min_x = min_x.min(p.pos.x);
+            min_y = min_y.min(p.pos.y);
+            max_x = max_x.max(p.pos.x);
+            max_y = max_y.max(p.pos.y);
+        }
+
+        self.offset_x = min_x;
+        self.offset_y = min_y;
+        self.width = max_x - min_x + 1;
+        self.height = max_y - min_y + 1;
+
+        let size = self.width * self.height;
+        self.nodes.clear();
+        self.nodes.resize(size, NO_NODE);
+    }
+
+    /// Get node index at position, or None if unassigned.
+    #[inline]
+    fn get(&self, x: usize, y: usize) -> Option<usize> {
+        if self.width == 0 {
+            return None;
+        }
+        let lx = x.wrapping_sub(self.offset_x);
+        let ly = y.wrapping_sub(self.offset_y);
+        if lx >= self.width || ly >= self.height {
+            return None;
+        }
+        let idx = ly * self.width + lx;
+        let node = self.nodes[idx];
+        if node == NO_NODE {
+            None
+        } else {
+            Some(node as usize)
+        }
+    }
+
+    /// Set node index at position.
+    #[inline]
+    fn set(&mut self, x: usize, y: usize, node_idx: usize) {
+        if self.width == 0 {
+            return;
+        }
+        let lx = x.wrapping_sub(self.offset_x);
+        let ly = y.wrapping_sub(self.offset_y);
+        if lx >= self.width || ly >= self.height {
+            return;
+        }
+        let idx = ly * self.width + lx;
+        self.nodes[idx] = node_idx as u32;
+    }
+}
 
 /// A node in the deblending tree.
 #[derive(Debug, Clone)]
@@ -56,6 +299,8 @@ struct TreeBuildBuffers {
     bfs_queue: Vec<Pixel>,
     /// Temporary storage for regions.
     regions: Vec<Vec<Pixel>>,
+    /// Grid for fast pixel lookup (replaces HashMap).
+    pixel_grid: PixelGrid,
 }
 
 impl TreeBuildBuffers {
@@ -65,6 +310,7 @@ impl TreeBuildBuffers {
             parent_pixels_above: Vec::with_capacity(capacity),
             bfs_queue: Vec::with_capacity(capacity.min(1024)),
             regions: Vec::with_capacity(MAX_PEAKS),
+            pixel_grid: PixelGrid::empty(),
         }
     }
 }
@@ -108,6 +354,13 @@ pub fn deblend_multi_threshold(
         return smallvec::smallvec![create_single_object(data, pixels, labels)];
     }
 
+    // Early exit: Component too small to contain multiple separable stars
+    // Need at least 2 * min_separation^2 pixels for two stars to be separable
+    let min_area_for_deblend = config.min_separation * config.min_separation * 2;
+    if data.area < min_area_for_deblend {
+        return smallvec::smallvec![create_single_object(data, pixels, labels)];
+    }
+
     // Find peak value and detection threshold
     let peak = data.find_peak(pixels, labels);
     let peak_value = peak.value;
@@ -116,8 +369,11 @@ pub fn deblend_multi_threshold(
         .map(|p| p.value)
         .fold(f32::MAX, f32::min);
 
-    // If peak barely above threshold, no deblending possible
-    if peak_value <= detection_threshold * 1.01 {
+    // Early exit: Peak barely above threshold - no substructure possible
+    // A secondary peak must be at least min_contrast * primary, and above detection
+    // So primary must be at least 1/(1-min_contrast) above detection for meaningful deblending
+    let min_ratio = 1.0 / (1.0 - config.min_contrast.min(0.99));
+    if peak_value < detection_threshold * min_ratio {
         return smallvec::smallvec![create_single_object(data, pixels, labels)];
     }
 
@@ -176,14 +432,12 @@ fn build_deblend_tree(
     // Collect component pixels once (multi-threshold needs repeated access)
     let component_pixels: Vec<Pixel> = data.iter_pixels(pixels, labels).collect();
 
-    // Track which node each pixel belongs to at current level
-    let mut pixel_to_node: HashMap<Vec2us, usize> = HashMap::with_capacity(component_pixels.len());
+    // Track which node each pixel belongs to at current level (grid-based for O(1) access)
+    let mut pixel_to_node = NodeGrid::empty();
+    pixel_to_node.reset_with_pixels(&component_pixels);
 
     // Reusable buffers to avoid allocations per threshold level
     let mut buffers = TreeBuildBuffers::new(component_pixels.len());
-
-    // Visited set for connected component finding (reused across calls)
-    let mut visited: HashSet<Vec2us> = HashSet::with_capacity(component_pixels.len());
 
     // Process each threshold level from low to high
     for level in 0..=n_thresholds {
@@ -200,11 +454,11 @@ fn build_deblend_tree(
             continue;
         }
 
-        // Find connected regions (reuses visited set and queue)
-        find_connected_regions_reuse(
+        // Find connected regions using grid-based lookup
+        find_connected_regions_grid(
             &buffers.above_threshold,
             &mut buffers.regions,
-            &mut visited,
+            &mut buffers.pixel_grid,
             &mut buffers.bfs_queue,
         );
 
@@ -219,7 +473,7 @@ fn build_deblend_tree(
                 threshold,
                 min_separation,
                 &mut buffers.parent_pixels_above,
-                &mut visited,
+                &mut buffers.pixel_grid,
                 &mut buffers.bfs_queue,
             );
         }
@@ -231,7 +485,7 @@ fn build_deblend_tree(
 /// Process the first threshold level - create root nodes.
 fn process_root_level(
     tree: &mut Vec<DeblendNode>,
-    pixel_to_node: &mut HashMap<Vec2us, usize>,
+    pixel_to_node: &mut NodeGrid,
     regions: &[Vec<Pixel>],
 ) {
     for region in regions {
@@ -240,7 +494,7 @@ fn process_root_level(
         let flux = region.iter().map(|p| p.value).sum();
 
         for p in region {
-            pixel_to_node.insert(p.pos, node_idx);
+            pixel_to_node.set(p.pos.x, p.pos.y, node_idx);
         }
 
         tree.push(DeblendNode {
@@ -255,19 +509,19 @@ fn process_root_level(
 #[allow(clippy::too_many_arguments)]
 fn process_higher_level(
     tree: &mut Vec<DeblendNode>,
-    pixel_to_node: &mut HashMap<Vec2us, usize>,
+    pixel_to_node: &mut NodeGrid,
     component_pixels: &[Pixel],
     regions: &[Vec<Pixel>],
     threshold: f32,
     min_separation: usize,
     parent_pixels_buf: &mut Vec<Pixel>,
-    visited: &mut HashSet<Vec2us>,
+    pixel_grid: &mut PixelGrid,
     bfs_queue: &mut Vec<Pixel>,
 ) {
     for region in regions {
         // Find the single parent node for this region
         // (all pixels in a connected region should come from same parent)
-        let parent_idx = match find_single_parent(region, pixel_to_node) {
+        let parent_idx = match find_single_parent_grid(region, pixel_to_node) {
             Some(idx) => idx,
             None => continue, // Skip if no parent or multiple parents
         };
@@ -276,7 +530,9 @@ fn process_higher_level(
         // (avoid allocation by counting first)
         let parent_above_count = component_pixels
             .iter()
-            .filter(|p| pixel_to_node.get(&p.pos) == Some(&parent_idx) && p.value >= threshold)
+            .filter(|p| {
+                pixel_to_node.get(p.pos.x, p.pos.y) == Some(parent_idx) && p.value >= threshold
+            })
             .count();
 
         // Check if multiple distinct regions formed from same parent
@@ -287,14 +543,20 @@ fn process_higher_level(
                 component_pixels
                     .iter()
                     .filter(|p| {
-                        pixel_to_node.get(&p.pos) == Some(&parent_idx) && p.value >= threshold
+                        pixel_to_node.get(p.pos.x, p.pos.y) == Some(parent_idx)
+                            && p.value >= threshold
                     })
                     .copied(),
             );
 
-            // Find child regions (reuse buffers)
+            // Find child regions using grid-based lookup
             let mut child_regions: ArrayVec<Vec<Pixel>, MAX_CHILDREN> = ArrayVec::new();
-            find_connected_regions_into(parent_pixels_buf, &mut child_regions, visited, bfs_queue);
+            find_connected_regions_grid_into(
+                parent_pixels_buf,
+                &mut child_regions,
+                pixel_grid,
+                bfs_queue,
+            );
 
             if child_regions.len() > 1 {
                 create_child_nodes(
@@ -309,13 +571,13 @@ fn process_higher_level(
     }
 }
 
-/// Find the single parent node for a region, or None if multiple/no parents.
+/// Find the single parent node for a region using grid lookup, or None if multiple/no parents.
 #[inline]
-fn find_single_parent(region: &[Pixel], pixel_to_node: &HashMap<Vec2us, usize>) -> Option<usize> {
+fn find_single_parent_grid(region: &[Pixel], pixel_to_node: &NodeGrid) -> Option<usize> {
     let mut parent: Option<usize> = None;
 
     for p in region {
-        if let Some(&idx) = pixel_to_node.get(&p.pos) {
+        if let Some(idx) = pixel_to_node.get(p.pos.x, p.pos.y) {
             match parent {
                 None => parent = Some(idx),
                 Some(existing) if existing != idx => return None, // Multiple parents
@@ -330,7 +592,7 @@ fn find_single_parent(region: &[Pixel], pixel_to_node: &HashMap<Vec2us, usize>) 
 /// Create child nodes when a split is detected.
 fn create_child_nodes(
     tree: &mut Vec<DeblendNode>,
-    pixel_to_node: &mut HashMap<Vec2us, usize>,
+    pixel_to_node: &mut NodeGrid,
     parent_idx: usize,
     child_regions: &[Vec<Pixel>],
     min_separation: usize,
@@ -360,7 +622,7 @@ fn create_child_nodes(
         let child_flux = child_region.iter().map(|p| p.value).sum();
 
         for p in child_region {
-            pixel_to_node.insert(p.pos, child_idx);
+            pixel_to_node.set(p.pos.x, p.pos.y, child_idx);
         }
 
         tree.push(DeblendNode {
@@ -392,46 +654,28 @@ fn find_significant_branches(
     }
 
     // Find root nodes (nodes that are not children of any other node)
-    // Use a fixed-size set for small trees
-    let mut is_child = [false; 64]; // Supports trees up to 64 nodes without allocation
-    let use_array = tree.len() <= 64;
-
-    let mut child_set: HashSet<usize> = HashSet::new();
+    // Use Vec<bool> for O(1) lookup - trees are small (limited by MAX_PEAKS)
+    let mut is_child = vec![false; tree.len()];
 
     for node in tree {
         for &child_idx in &node.children {
-            if use_array {
-                is_child[child_idx] = true;
-            } else {
-                child_set.insert(child_idx);
-            }
+            is_child[child_idx] = true;
         }
     }
 
     let mut leaves: SmallVec<[usize; MAX_PEAKS]> = SmallVec::new();
 
     // Process each root
-    for i in 0..tree.len() {
-        let is_root = if use_array {
-            !is_child.get(i).copied().unwrap_or(false)
-        } else {
-            !child_set.contains(&i)
-        };
-
-        if is_root {
+    for (i, &child) in is_child.iter().enumerate() {
+        if !child {
             collect_significant_leaves(tree, i, min_contrast, &mut leaves);
         }
     }
 
     // If no leaves found (all contrast criteria failed), return roots
     if leaves.is_empty() {
-        for i in 0..tree.len() {
-            let is_root = if use_array {
-                !is_child.get(i).copied().unwrap_or(false)
-            } else {
-                !child_set.contains(&i)
-            };
-            if is_root {
+        for (i, &child) in is_child.iter().enumerate() {
+            if !child {
                 leaves.push(i);
             }
         }
@@ -557,25 +801,26 @@ fn find_nearest_peak_index(pos: Vec2us, peaks: &[Pixel]) -> usize {
 // Connected Component Finding
 // ============================================================================
 
-/// Find connected regions, reusing provided buffers.
-fn find_connected_regions_reuse(
+/// Find connected regions using grid-based lookup.
+///
+/// This is the optimized version that uses PixelGrid instead of HashMap/HashSet.
+fn find_connected_regions_grid(
     pixels: &[Pixel],
     regions: &mut Vec<Vec<Pixel>>,
-    visited: &mut HashSet<Vec2us>,
+    grid: &mut PixelGrid,
     queue: &mut Vec<Pixel>,
 ) {
     regions.clear();
-    visited.clear();
 
     if pixels.is_empty() {
         return;
     }
 
-    // Build pixel lookup set
-    let pixel_set: HashMap<Vec2us, f32> = pixels.iter().map(|p| (p.pos, p.value)).collect();
+    // Rebuild grid with current pixels
+    grid.reset_with_pixels(pixels);
 
     for p in pixels {
-        if visited.contains(&p.pos) {
+        if grid.is_visited(p.pos.x, p.pos.y) {
             continue;
         }
 
@@ -583,92 +828,103 @@ fn find_connected_regions_reuse(
         let mut region = Vec::new();
         queue.clear();
         queue.push(*p);
-        visited.insert(p.pos);
+        grid.mark_visited(p.pos.x, p.pos.y);
 
         while let Some(current) = queue.pop() {
             region.push(current);
-            visit_neighbors(current.pos, &pixel_set, visited, queue);
+            visit_neighbors_grid(current.pos, grid, queue);
         }
 
         regions.push(region);
     }
 }
 
-/// Find connected regions into an ArrayVec (limited capacity).
-fn find_connected_regions_into<const N: usize>(
+/// Find connected regions into an ArrayVec (limited capacity) using grid-based lookup.
+fn find_connected_regions_grid_into<const N: usize>(
     pixels: &[Pixel],
     regions: &mut ArrayVec<Vec<Pixel>, N>,
-    visited: &mut HashSet<Vec2us>,
+    grid: &mut PixelGrid,
     queue: &mut Vec<Pixel>,
 ) {
     regions.clear();
-    visited.clear();
 
     if pixels.is_empty() {
         return;
     }
 
-    let pixel_set: HashMap<Vec2us, f32> = pixels.iter().map(|p| (p.pos, p.value)).collect();
+    // Rebuild grid with current pixels
+    grid.reset_with_pixels(pixels);
 
     for p in pixels {
         if regions.is_full() {
             break;
         }
 
-        if visited.contains(&p.pos) {
+        if grid.is_visited(p.pos.x, p.pos.y) {
             continue;
         }
 
         let mut region = Vec::new();
         queue.clear();
         queue.push(*p);
-        visited.insert(p.pos);
+        grid.mark_visited(p.pos.x, p.pos.y);
 
         while let Some(current) = queue.pop() {
             region.push(current);
-            visit_neighbors(current.pos, &pixel_set, visited, queue);
+            visit_neighbors_grid(current.pos, grid, queue);
         }
 
         regions.push(region);
     }
 }
 
-/// Visit 8-connected neighbors and add unvisited ones to the queue.
+/// Visit 8-connected neighbors using grid-based lookup.
+///
+/// This is the hot path that was taking 17% of CPU time with HashMap.
+/// The grid-based version eliminates hash computation entirely.
 #[inline]
-fn visit_neighbors(
-    pos: Vec2us,
-    pixel_set: &HashMap<Vec2us, f32>,
-    visited: &mut HashSet<Vec2us>,
-    queue: &mut Vec<Pixel>,
-) {
-    for dy in -1i32..=1 {
-        for dx in -1i32..=1 {
-            if dx == 0 && dy == 0 {
-                continue;
-            }
+fn visit_neighbors_grid(pos: Vec2us, grid: &mut PixelGrid, queue: &mut Vec<Pixel>) {
+    let x = pos.x;
+    let y = pos.y;
 
-            let nx = pos.x as i32 + dx;
-            let ny = pos.y as i32 + dy;
+    // Check all 8 neighbors. Grid handles boundary checks internally.
+    // Unrolled for better performance.
 
-            // Skip negative coordinates
-            if nx < 0 || ny < 0 {
-                continue;
-            }
-
-            let npos = Vec2us::new(nx as usize, ny as usize);
-
-            if visited.contains(&npos) {
-                continue;
-            }
-
-            if let Some(&nv) = pixel_set.get(&npos) {
-                visited.insert(npos);
-                queue.push(Pixel {
-                    pos: npos,
-                    value: nv,
-                });
-            }
+    // Top row
+    if y > 0 {
+        if x > 0 {
+            try_visit_neighbor(x - 1, y - 1, grid, queue);
         }
+        try_visit_neighbor(x, y - 1, grid, queue);
+        try_visit_neighbor(x + 1, y - 1, grid, queue);
+    }
+
+    // Middle row (left and right)
+    if x > 0 {
+        try_visit_neighbor(x - 1, y, grid, queue);
+    }
+    try_visit_neighbor(x + 1, y, grid, queue);
+
+    // Bottom row
+    {
+        if x > 0 {
+            try_visit_neighbor(x - 1, y + 1, grid, queue);
+        }
+        try_visit_neighbor(x, y + 1, grid, queue);
+        try_visit_neighbor(x + 1, y + 1, grid, queue);
+    }
+}
+
+/// Try to visit a neighbor position. Adds to queue if valid and unvisited.
+#[inline]
+fn try_visit_neighbor(x: usize, y: usize, grid: &mut PixelGrid, queue: &mut Vec<Pixel>) {
+    if let Some(value) = grid.get(x, y)
+        && grid.mark_visited(x, y)
+    {
+        queue.push(Pixel {
+            pos: Vec2us::new(x, y),
+            value,
+        });
     }
 }
 
