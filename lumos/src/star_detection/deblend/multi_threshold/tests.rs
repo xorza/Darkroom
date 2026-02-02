@@ -1,6 +1,7 @@
 //! Tests for multi-threshold deblending.
 
 use super::*;
+use crate::star_detection::candidate_detection::label_map_from_raw;
 
 /// Create a test image with Gaussian stars and return pixels, labels, and component data.
 fn make_test_component(
@@ -38,7 +39,7 @@ fn make_test_component(
         }
     }
 
-    let label_map = LabelMap::from_raw(labels, 1);
+    let label_map = label_map_from_raw(labels, 1);
     let component = ComponentData {
         bbox,
         label: 1,
@@ -162,7 +163,7 @@ fn test_close_peaks_merge() {
 fn test_empty_component() {
     let pixels = Buffer2::new_filled(10, 10, 0.0f32);
     let labels_buf = Buffer2::new_filled(10, 10, 0u32);
-    let labels = LabelMap::from_raw(labels_buf, 0);
+    let labels = label_map_from_raw(labels_buf, 0);
     let data = ComponentData {
         bbox: Aabb::default(),
         label: 1,
@@ -400,7 +401,7 @@ fn test_single_pixel_component() {
     pixels[(5, 5)] = 1.0;
     labels_buf[(5, 5)] = 1;
 
-    let labels = LabelMap::from_raw(labels_buf, 1);
+    let labels = label_map_from_raw(labels_buf, 1);
     let data = ComponentData {
         bbox: Aabb::new(Vec2us::new(5, 5), Vec2us::new(5, 5)),
         label: 1,
@@ -435,7 +436,7 @@ fn test_flat_profile_no_deblend() {
         }
     }
 
-    let labels = LabelMap::from_raw(labels_buf, 1);
+    let labels = label_map_from_raw(labels_buf, 1);
     let data = ComponentData {
         bbox,
         label: 1,

@@ -2,7 +2,7 @@
 
 use super::*;
 use crate::math::Vec2us;
-use crate::star_detection::candidate_detection::LabelMap;
+use crate::star_detection::candidate_detection::{LabelMap, label_map_from_raw};
 
 // Re-export internal function for testing
 use super::is_local_maximum;
@@ -43,7 +43,7 @@ fn make_test_component(
         }
     }
 
-    let label_map = LabelMap::from_raw(labels, 1);
+    let label_map = label_map_from_raw(labels, 1);
     let component = ComponentData {
         bbox,
         label: 1,
@@ -389,7 +389,7 @@ fn test_plateau_no_local_max() {
         }
     }
 
-    let labels = LabelMap::from_raw(labels_buf, 1);
+    let labels = label_map_from_raw(labels_buf, 1);
     let data = ComponentData {
         bbox: Aabb::new(Vec2us::new(3, 3), Vec2us::new(5, 5)),
         label: 1,
@@ -416,7 +416,7 @@ fn test_single_pixel_is_local_max() {
     pixels[(5, 5)] = 1.0;
     labels_buf[(5, 5)] = 1;
 
-    let labels = LabelMap::from_raw(labels_buf, 1);
+    let labels = label_map_from_raw(labels_buf, 1);
     let data = ComponentData {
         bbox: Aabb::new(Vec2us::new(5, 5), Vec2us::new(5, 5)),
         label: 1,
@@ -469,7 +469,7 @@ fn test_voronoi_midpoint_assignment() {
     pixels[(20, 50)] = 1.0;
     pixels[(79, 50)] = 1.0;
 
-    let labels = LabelMap::from_raw(labels_buf, 1);
+    let labels = label_map_from_raw(labels_buf, 1);
     let data = ComponentData {
         bbox: Aabb::new(Vec2us::new(20, 50), Vec2us::new(79, 50)),
         label: 1,
@@ -517,7 +517,7 @@ fn test_diagonal_neighbors() {
     pixels[(6, 4)] = 0.5;
     labels_buf[(6, 4)] = 1;
 
-    let _labels = LabelMap::from_raw(labels_buf, 1);
+    let _labels = label_map_from_raw(labels_buf, 1);
 
     let pixel = Pixel {
         pos: Vec2us::new(5, 5),

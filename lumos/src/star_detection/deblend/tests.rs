@@ -4,7 +4,7 @@
 use super::*;
 use crate::common::Buffer2;
 use crate::math::Vec2us;
-use crate::star_detection::candidate_detection::LabelMap;
+use crate::star_detection::candidate_detection::{LabelMap, label_map_from_raw};
 use crate::star_detection::config::DeblendConfig;
 
 /// Create a test image with Gaussian stars and return pixels, labels, and component data.
@@ -43,7 +43,7 @@ fn make_test_component(
         }
     }
 
-    let label_map = LabelMap::from_raw(labels, 1);
+    let label_map = label_map_from_raw(labels, 1);
     let component = ComponentData {
         bbox,
         label: 1,

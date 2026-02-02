@@ -12,6 +12,9 @@ mod bench;
 #[cfg(test)]
 mod tests;
 
+#[cfg(test)]
+pub(crate) use tests::label_map_from_raw;
+
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use rayon::prelude::*;
@@ -269,12 +272,6 @@ impl LabelMap {
     /// Release this LabelMap's buffer back to the pool.
     pub fn release_to_pool(self, pool: &mut BufferPool) {
         pool.release_u32(self.labels);
-    }
-
-    /// Create a label map from pre-computed labels (for testing).
-    #[cfg(test)]
-    pub(crate) fn from_raw(labels: Buffer2<u32>, num_labels: usize) -> Self {
-        Self { labels, num_labels }
     }
 
     /// Number of connected components (excluding background).

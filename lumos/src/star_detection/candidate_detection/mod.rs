@@ -20,6 +20,8 @@ use crate::common::{BitBuffer2, Buffer2};
 use crate::math::{Aabb, Vec2us};
 
 pub use labeling::LabelMap;
+#[cfg(test)]
+pub(crate) use labeling::label_map_from_raw;
 
 /// A candidate star region before centroid refinement.
 #[derive(Debug)]

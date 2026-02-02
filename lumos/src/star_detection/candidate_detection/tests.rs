@@ -3,6 +3,7 @@
 // Allow identity operations like `y * width + x` for clarity in 2D indexing
 #![allow(clippy::identity_op, clippy::erasing_op)]
 
+use super::label_map_from_raw;
 use super::*;
 use crate::common::{BitBuffer2, Buffer2};
 use crate::star_detection::background::{BackgroundConfig, BackgroundMap};
@@ -207,7 +208,7 @@ mod extract_candidates_tests {
     #[test]
     fn empty() {
         let pixels = Buffer2::new(3, 3, vec![0.5; 9]);
-        let label_map = LabelMap::from_raw(Buffer2::new(3, 3, vec![0u32; 9]), 0);
+        let label_map = label_map_from_raw(Buffer2::new(3, 3, vec![0u32; 9]), 0);
 
         let candidates =
             extract_candidates(&pixels, &label_map, &TEST_DEBLEND_CONFIG, TEST_MAX_AREA);
@@ -227,7 +228,7 @@ mod extract_candidates_tests {
                 0.1, 0.1, 0.1,
             ],
         );
-        let label_map = LabelMap::from_raw(
+        let label_map = label_map_from_raw(
             Buffer2::new(
                 3,
                 3,
@@ -267,7 +268,7 @@ mod extract_candidates_tests {
                 0.1, 0.1, 0.1, 0.1, 0.1,
             ],
         );
-        let label_map = LabelMap::from_raw(
+        let label_map = label_map_from_raw(
             Buffer2::new(
                 5,
                 3,
@@ -315,7 +316,7 @@ mod extract_candidates_tests {
         pixels_data[2 * 5 + 1] = 0.7;
 
         let pixels = Buffer2::new(5, 5, pixels_data);
-        let label_map = LabelMap::from_raw(Buffer2::new(5, 5, labels_data), 1);
+        let label_map = label_map_from_raw(Buffer2::new(5, 5, labels_data), 1);
         let candidates =
             extract_candidates(&pixels, &label_map, &TEST_DEBLEND_CONFIG, TEST_MAX_AREA);
 
@@ -335,7 +336,7 @@ mod extract_candidates_tests {
     fn width_height() {
         let pixels = Buffer2::new(3, 2, vec![0.5; 6]);
         // 3x2 component covering full image
-        let label_map = LabelMap::from_raw(Buffer2::new(3, 2, vec![1u32; 6]), 1);
+        let label_map = label_map_from_raw(Buffer2::new(3, 2, vec![1u32; 6]), 1);
 
         let candidates =
             extract_candidates(&pixels, &label_map, &TEST_DEBLEND_CONFIG, TEST_MAX_AREA);
@@ -361,7 +362,7 @@ mod extract_candidates_tests {
             *label = 2;
         }
 
-        let label_map = LabelMap::from_raw(Buffer2::new(10, 10, labels_data), 2);
+        let label_map = label_map_from_raw(Buffer2::new(10, 10, labels_data), 2);
 
         // With max_area=10, the large component should be skipped
         let candidates = extract_candidates(&pixels, &label_map, &TEST_DEBLEND_CONFIG, 10);
@@ -385,7 +386,7 @@ mod extract_candidates_tests {
                 0.1, 0.1, 0.1,
             ],
         );
-        let label_map = LabelMap::from_raw(
+        let label_map = label_map_from_raw(
             Buffer2::new(
                 3,
                 3,
@@ -421,7 +422,7 @@ mod extract_candidates_tests {
                 0.1, 0.1, 0.1,
             ],
         );
-        let label_map = LabelMap::from_raw(
+        let label_map = label_map_from_raw(
             Buffer2::new(
                 3,
                 3,
@@ -458,7 +459,7 @@ mod extract_candidates_tests {
                 0.1, 0.1, 0.1,
             ],
         );
-        let label_map = LabelMap::from_raw(
+        let label_map = label_map_from_raw(
             Buffer2::new(
                 3,
                 3,
@@ -500,7 +501,7 @@ mod extract_candidates_tests {
                 0.1, 0.1, 0.7,
             ],
         );
-        let label_map = LabelMap::from_raw(
+        let label_map = label_map_from_raw(
             Buffer2::new(
                 3,
                 3,
@@ -542,7 +543,7 @@ mod extract_candidates_tests {
             ],
         );
         // num_labels should be 3 to account for label 3
-        let label_map = LabelMap::from_raw(
+        let label_map = label_map_from_raw(
             Buffer2::new(
                 3,
                 3,
@@ -571,7 +572,7 @@ mod extract_candidates_tests {
     fn full_image_component() {
         // Component covering entire image
         let pixels = Buffer2::new(3, 3, (0..9).map(|i| 0.1 + i as f32 * 0.1).collect());
-        let label_map = LabelMap::from_raw(Buffer2::new(3, 3, vec![1u32; 9]), 1);
+        let label_map = label_map_from_raw(Buffer2::new(3, 3, vec![1u32; 9]), 1);
 
         let candidates =
             extract_candidates(&pixels, &label_map, &TEST_DEBLEND_CONFIG, TEST_MAX_AREA);
@@ -601,7 +602,7 @@ mod extract_candidates_tests {
                 0.1, 0.1, 0.1,
             ],
         );
-        let label_map = LabelMap::from_raw(
+        let label_map = label_map_from_raw(
             Buffer2::new(
                 3,
                 3,
@@ -638,7 +639,7 @@ mod extract_candidates_tests {
         }
 
         let pixels = Buffer2::new(10, 10, pixels_data);
-        let label_map = LabelMap::from_raw(Buffer2::new(10, 10, labels_data), 10);
+        let label_map = label_map_from_raw(Buffer2::new(10, 10, labels_data), 10);
         let candidates =
             extract_candidates(&pixels, &label_map, &TEST_DEBLEND_CONFIG, TEST_MAX_AREA);
 
@@ -661,7 +662,7 @@ mod extract_candidates_tests {
                 0.1, 0.2, 0.3, 0.2, 0.1, 0.7, 0.1,
             ],
         );
-        let label_map = LabelMap::from_raw(
+        let label_map = label_map_from_raw(
             Buffer2::new(
                 7,
                 2,
@@ -842,7 +843,7 @@ mod deblend_tests {
         }
 
         let pixels = Buffer2::new(width, height, pixels);
-        let label_map = LabelMap::from_raw(Buffer2::new(width, height, labels_data), 1);
+        let label_map = label_map_from_raw(Buffer2::new(width, height, labels_data), 1);
         let candidates =
             extract_candidates(&pixels, &label_map, &TEST_DEBLEND_CONFIG, TEST_MAX_AREA);
 
@@ -919,7 +920,7 @@ mod deblend_tests {
         }
 
         let pixels = Buffer2::new(width, height, pixels);
-        let label_map = LabelMap::from_raw(Buffer2::new(width, height, labels_data), 1);
+        let label_map = label_map_from_raw(Buffer2::new(width, height, labels_data), 1);
         let candidates =
             extract_candidates(&pixels, &label_map, &TEST_DEBLEND_CONFIG, TEST_MAX_AREA);
 
@@ -966,7 +967,7 @@ mod deblend_tests {
         }
 
         let pixels = Buffer2::new(width, height, pixels);
-        let label_map = LabelMap::from_raw(Buffer2::new(width, height, labels_data), 1);
+        let label_map = label_map_from_raw(Buffer2::new(width, height, labels_data), 1);
         let candidates =
             extract_candidates(&pixels, &label_map, &TEST_DEBLEND_CONFIG, TEST_MAX_AREA);
 
@@ -1034,7 +1035,7 @@ mod deblend_tests {
             };
 
             let pixels = Buffer2::new(width, height, pixels);
-            let label_map = LabelMap::from_raw(Buffer2::new(width, height, labels_data), 1);
+            let label_map = label_map_from_raw(Buffer2::new(width, height, labels_data), 1);
             let candidates = extract_candidates(&pixels, &label_map, &mt_config, TEST_MAX_AREA);
 
             // Should deblend into 2 candidates
@@ -1108,7 +1109,7 @@ mod deblend_tests {
                 min_contrast: 0.005,
             };
             let pixels = Buffer2::new(width, height, pixels);
-            let label_map = LabelMap::from_raw(Buffer2::new(width, height, labels_data), 1);
+            let label_map = label_map_from_raw(Buffer2::new(width, height, labels_data), 1);
             let simple_candidates =
                 extract_candidates(&pixels, &label_map, &simple_config, TEST_MAX_AREA);
 
@@ -1199,7 +1200,7 @@ mod deblend_tests {
             };
 
             let pixels = Buffer2::new(width, height, pixels);
-            let label_map = LabelMap::from_raw(Buffer2::new(width, height, labels_data), 1);
+            let label_map = label_map_from_raw(Buffer2::new(width, height, labels_data), 1);
             let candidates = extract_candidates(&pixels, &label_map, &config, TEST_MAX_AREA);
 
             // Should return single candidate (deblending disabled)

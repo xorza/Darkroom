@@ -6,6 +6,11 @@
 use super::*;
 use crate::common::BitBuffer2;
 
+/// Create a label map from pre-computed labels (for testing).
+pub(crate) fn label_map_from_raw(labels: Buffer2<u32>, num_labels: usize) -> LabelMap {
+    LabelMap { labels, num_labels }
+}
+
 #[test]
 fn empty_mask() {
     let mask = BitBuffer2::from_slice(4, 4, &[false; 16]);
