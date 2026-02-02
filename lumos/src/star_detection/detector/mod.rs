@@ -200,9 +200,28 @@ impl StarDetector {
             self.determine_effective_fwhm(&grayscale_image, &background);
 
         // Step 3: Detect star candidates (with optional matched filter)
+        // Acquire convolution scratch buffer only if matched filter will be used
+        let mut convolution_scratch = if effective_fwhm > f32::EPSILON {
+            let pool = self.buffer_pool.as_mut().unwrap();
+            Some(pool.acquire_f32())
+        } else {
+            None
+        };
+
         // Reuse scratch buffer for matched filter output
-        let candidates =
-            self.detect_candidates(&grayscale_image, &background, effective_fwhm, &mut scratch);
+        let candidates = self.detect_candidates(
+            &grayscale_image,
+            &background,
+            effective_fwhm,
+            &mut scratch,
+            convolution_scratch.as_mut(),
+        );
+
+        // Release convolution scratch back to pool
+        if let Some(conv_scratch) = convolution_scratch {
+            let pool = self.buffer_pool.as_mut().unwrap();
+            pool.release_f32(conv_scratch);
+        }
 
         let mut diagnostics = StarDetectionDiagnostics {
             candidates_after_filtering: candidates.len(),
@@ -314,6 +333,7 @@ impl StarDetector {
         background: &BackgroundMap,
         effective_fwhm: f32,
         scratch: &mut Buffer2<f32>,
+        convolution_scratch: Option<&mut Buffer2<f32>>,
     ) -> Vec<candidate_detection::StarCandidate> {
         let filtered: Option<&Buffer2<f32>> = if effective_fwhm > f32::EPSILON {
             tracing::debug!(
@@ -322,6 +342,8 @@ impl StarDetector {
                 self.config.psf.axis_ratio,
                 self.config.psf.angle.to_degrees()
             );
+            let conv_scratch = convolution_scratch
+                .expect("convolution_scratch must be provided when effective_fwhm > 0");
             matched_filter(
                 pixels,
                 &background.background,
@@ -329,6 +351,7 @@ impl StarDetector {
                 self.config.psf.axis_ratio,
                 self.config.psf.angle,
                 scratch,
+                conv_scratch,
             );
             Some(scratch)
         } else {

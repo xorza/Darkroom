@@ -33,6 +33,15 @@ use common::parallel;
 ///
 /// Supports elliptical PSF shapes for stars elongated due to tracking errors,
 /// field rotation, or optical aberrations. For circular PSFs, use `axis_ratio = 1.0`.
+///
+/// # Arguments
+/// * `pixels` - Input image
+/// * `background` - Background model to subtract
+/// * `fwhm` - Full width at half maximum of PSF
+/// * `axis_ratio` - PSF ellipticity (1.0 = circular)
+/// * `angle` - PSF rotation angle in radians
+/// * `output` - Output buffer for convolved result
+/// * `subtraction_scratch` - Scratch buffer for background subtraction (reuse to avoid allocation)
 pub fn matched_filter(
     pixels: &Buffer2<f32>,
     background: &Buffer2<f32>,
@@ -40,21 +49,23 @@ pub fn matched_filter(
     axis_ratio: f32,
     angle: f32,
     output: &mut Buffer2<f32>,
+    subtraction_scratch: &mut Buffer2<f32>,
 ) {
     assert_eq!(pixels.width(), background.width());
     assert_eq!(pixels.height(), background.height());
     assert_eq!(pixels.width(), output.width());
     assert_eq!(pixels.height(), output.height());
+    assert_eq!(pixels.width(), subtraction_scratch.width());
+    assert_eq!(pixels.height(), subtraction_scratch.height());
     assert!(
         axis_ratio > 0.0 && axis_ratio <= 1.0,
         "Axis ratio must be in (0, 1]"
     );
 
-    // Subtract background first (parallel)
-    let mut subtracted = vec![0.0f32; pixels.len()];
+    // Subtract background first (parallel) - reuse scratch buffer to avoid allocation
     let pixels_data = pixels.pixels();
     let bg_data = background.pixels();
-    parallel::par_chunks_auto(&mut subtracted).for_each(|(offset, chunk)| {
+    parallel::par_chunks_auto(subtraction_scratch.pixels_mut()).for_each(|(offset, chunk)| {
         for (i, out) in chunk.iter_mut().enumerate() {
             let idx = offset + i;
             *out = (pixels_data[idx] - bg_data[idx]).max(0.0);
@@ -63,13 +74,7 @@ pub fn matched_filter(
 
     // Convolve with elliptical Gaussian kernel
     let sigma = fwhm_to_sigma(fwhm);
-    elliptical_gaussian_convolve(
-        &Buffer2::new(pixels.width(), pixels.height(), subtracted),
-        sigma,
-        axis_ratio,
-        angle,
-        output,
-    );
+    elliptical_gaussian_convolve(subtraction_scratch, sigma, axis_ratio, angle, output);
 }
 
 // ============================================================================

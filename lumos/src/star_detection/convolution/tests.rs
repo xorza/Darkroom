@@ -272,7 +272,16 @@ fn test_matched_filter_subtracts_background() {
     let pixels = Buffer2::new(width, height, vec![0.3f32; width * height]); // Same as background
 
     let mut result = Buffer2::new_default(width, height);
-    matched_filter(&pixels, &background, 3.0, 1.0, 0.0, &mut result);
+    let mut scratch = Buffer2::new_default(width, height);
+    matched_filter(
+        &pixels,
+        &background,
+        3.0,
+        1.0,
+        0.0,
+        &mut result,
+        &mut scratch,
+    );
 
     // Result should be near zero
     for v in result.iter() {
@@ -294,7 +303,16 @@ fn test_matched_filter_detects_star() {
 
     let pixels = Buffer2::new(width, height, pixels);
     let mut result = Buffer2::new_default(width, height);
-    matched_filter(&pixels, &background, 3.0, 1.0, 0.0, &mut result);
+    let mut scratch = Buffer2::new_default(width, height);
+    matched_filter(
+        &pixels,
+        &background,
+        3.0,
+        1.0,
+        0.0,
+        &mut result,
+        &mut scratch,
+    );
 
     // Peak should be positive and significant
     let peak = result[cy * width + cx];
@@ -335,7 +353,16 @@ fn test_matched_filter_boosts_snr() {
     let fwhm = sigma * FWHM_TO_SIGMA;
     let pixels = Buffer2::new(width, height, pixels);
     let mut result = Buffer2::new_default(width, height);
-    matched_filter(&pixels, &background, fwhm, 1.0, 0.0, &mut result);
+    let mut scratch = Buffer2::new_default(width, height);
+    matched_filter(
+        &pixels,
+        &background,
+        fwhm,
+        1.0,
+        0.0,
+        &mut result,
+        &mut scratch,
+    );
 
     // Peak should be at star location
     let mut max_val = f32::MIN;
@@ -364,7 +391,16 @@ fn test_matched_filter_clips_negative() {
     let pixels = Buffer2::new(width, height, vec![0.3f32; width * height]); // Below background
 
     let mut result = Buffer2::new_default(width, height);
-    matched_filter(&pixels, &background, 2.0, 1.0, 0.0, &mut result);
+    let mut scratch = Buffer2::new_default(width, height);
+    matched_filter(
+        &pixels,
+        &background,
+        2.0,
+        1.0,
+        0.0,
+        &mut result,
+        &mut scratch,
+    );
 
     // Should be clipped to zero before convolution
     for &v in result.iter() {
