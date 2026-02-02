@@ -8,6 +8,7 @@ AI coding rules for Rust projects:
 - After changing Rust code, run in this order before confirming output:
     1. `cargo nextest run && cargo fmt && cargo check && cargo clippy --all-targets -- -D warnings`
     2. Skip doc-tests.
+- After making code changes, verify that all new or modified functionality is covered by tests. Add tests for any untested code paths. This applies to all non-GUI code (algorithms, data structures, utilities, etc.). GUI code is exempt from this requirement.
 - Add asserts for function inputs and outputs where applicable so logic errors crash instead of being swallowed. Do not use asserts for user input or network failures.
 - Check online documentation for best practices and patterns.
 - `NOTES-AI.md` files are AI-generated and contain implementation details, structure, and functionality notes. They can be placed in any directory where context is needed (root, crates, modules, etc.). Avoid editing root `README.md` unless asked; instead, update the relevant `NOTES-AI.md` and keep it current. Store only current state, not change history.
