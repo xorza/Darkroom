@@ -13,7 +13,7 @@ mod bench;
 mod tests;
 
 #[cfg(test)]
-pub(crate) use tests::label_map_from_raw;
+pub(crate) use tests::{label_map_from_mask_with_connectivity, label_map_from_raw};
 
 use std::sync::atomic::{AtomicU32, Ordering};
 
@@ -191,31 +191,6 @@ pub struct LabelMap {
 }
 
 impl LabelMap {
-    /// Create a label map from a binary mask using connected component labeling.
-    ///
-    /// Uses 4-connectivity (only horizontal/vertical neighbors).
-    /// For 8-connectivity, use `from_mask_with_connectivity`.
-    ///
-    /// Uses block-based parallel algorithm for large images:
-    /// 1. Divide image into horizontal strips
-    /// 2. Label each strip in parallel using word-level bit scanning
-    /// 3. Merge labels at strip boundaries using atomic union-find
-    /// 4. Flatten labels in parallel
-    #[allow(dead_code)]
-    pub fn from_mask(mask: &BitBuffer2) -> Self {
-        Self::from_mask_with_connectivity(mask, Connectivity::Four)
-    }
-
-    /// Create a label map from a binary mask with specified connectivity.
-    ///
-    /// # Arguments
-    /// * `mask` - Binary mask of foreground pixels
-    /// * `connectivity` - Four (default) or Eight connectivity
-    pub fn from_mask_with_connectivity(mask: &BitBuffer2, connectivity: Connectivity) -> Self {
-        let labels = Buffer2::new_filled(mask.width(), mask.height(), 0u32);
-        Self::from_buffer(mask, connectivity, labels)
-    }
-
     /// Create a label map by acquiring a buffer from a pool.
     ///
     /// # Arguments
@@ -233,10 +208,19 @@ impl LabelMap {
         Self::from_buffer(mask, connectivity, labels)
     }
 
-    /// Core constructor that accepts mask, connectivity, and a pre-allocated buffer.
+    /// Create a label map from a binary mask with a pre-allocated buffer.
     ///
-    /// The buffer must be zeroed and have the same dimensions as the mask.
-    fn from_buffer(
+    /// Uses block-based parallel algorithm for large images:
+    /// 1. Divide image into horizontal strips
+    /// 2. Label each strip in parallel using word-level bit scanning
+    /// 3. Merge labels at strip boundaries using atomic union-find
+    /// 4. Flatten labels in parallel
+    ///
+    /// # Arguments
+    /// * `mask` - Binary mask of foreground pixels
+    /// * `connectivity` - Four or Eight connectivity
+    /// * `labels` - Pre-allocated buffer (must be zeroed, same dimensions as mask)
+    pub fn from_buffer(
         mask: &BitBuffer2,
         connectivity: Connectivity,
         mut labels: Buffer2<u32>,

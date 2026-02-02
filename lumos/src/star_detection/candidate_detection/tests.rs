@@ -731,7 +731,10 @@ mod integration_tests {
         // Peak at (7, 7)
         pixels[7 * 10 + 7] = 0.8;
 
-        let label_map = LabelMap::from_mask(&BitBuffer2::from_slice(10, 10, &mask));
+        let label_map = label_map_from_mask_with_connectivity(
+            &BitBuffer2::from_slice(10, 10, &mask),
+            crate::star_detection::config::Connectivity::Four,
+        );
         let pixels = Buffer2::new(10, 10, pixels);
         let candidates =
             extract_candidates(&pixels, &label_map, &TEST_DEBLEND_CONFIG, TEST_MAX_AREA);
@@ -776,7 +779,10 @@ mod integration_tests {
         mask[7] = true;
         mask[8] = true;
 
-        let label_map = LabelMap::from_mask(&BitBuffer2::from_slice(3, 3, &mask));
+        let label_map = label_map_from_mask_with_connectivity(
+            &BitBuffer2::from_slice(3, 3, &mask),
+            crate::star_detection::config::Connectivity::Four,
+        );
 
         // All should be one component connected through the right column
         assert_eq!(label_map.num_labels(), 1);
@@ -1741,8 +1747,14 @@ mod regression_tests {
         }
 
         // Run labeling multiple times
-        let label_map1 = LabelMap::from_mask(&mask);
-        let label_map2 = LabelMap::from_mask(&mask);
+        let label_map1 = label_map_from_mask_with_connectivity(
+            &mask,
+            crate::star_detection::config::Connectivity::Four,
+        );
+        let label_map2 = label_map_from_mask_with_connectivity(
+            &mask,
+            crate::star_detection::config::Connectivity::Four,
+        );
 
         assert_eq!(
             label_map1.num_labels(),

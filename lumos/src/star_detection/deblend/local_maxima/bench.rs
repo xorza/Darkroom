@@ -8,7 +8,8 @@ use std::hint::black_box;
 use super::{deblend_local_maxima, find_local_maxima};
 use crate::common::{BitBuffer2, Buffer2};
 use crate::math::{Aabb, Vec2us};
-use crate::star_detection::candidate_detection::LabelMap;
+use crate::star_detection::candidate_detection::{LabelMap, label_map_from_mask_with_connectivity};
+use crate::star_detection::config::Connectivity;
 use crate::star_detection::config::DeblendConfig;
 use crate::star_detection::deblend::ComponentData;
 use crate::testing::synthetic::generate_globular_cluster;
@@ -28,7 +29,7 @@ fn create_components_from_pixels(
         }
     }
 
-    let labels = LabelMap::from_mask(&mask);
+    let labels = label_map_from_mask_with_connectivity(&mask, Connectivity::Four);
     let num_labels = labels.num_labels();
 
     let mut components = Vec::with_capacity(num_labels);

@@ -21,7 +21,7 @@ use crate::math::{Aabb, Vec2us};
 
 pub use labeling::LabelMap;
 #[cfg(test)]
-pub(crate) use labeling::label_map_from_raw;
+pub(crate) use labeling::{label_map_from_mask_with_connectivity, label_map_from_raw};
 
 /// A candidate star region before centroid refinement.
 #[derive(Debug)]
@@ -118,7 +118,8 @@ pub fn detect_stars(
     std::mem::swap(&mut mask, &mut dilated);
 
     // Find connected components
-    let label_map = LabelMap::from_mask_with_connectivity(&mask, config.filtering.connectivity);
+    let labels = Buffer2::new_filled(width, height, 0u32);
+    let label_map = LabelMap::from_buffer(&mask, config.filtering.connectivity, labels);
 
     extract_and_filter_candidates(pixels, &label_map, config, width, height)
 }

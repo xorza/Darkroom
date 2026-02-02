@@ -148,6 +148,8 @@ Run extraction benchmark comparing CTZ vs bit-by-bit scanning (4096-wide rows):
 
 The CTZ approach excels for sparse masks typical in star detection (<5% density).
 
+*Note: The comparison benchmark (`bench_run_extraction`) was removed after the optimization decision was finalized. The results above are preserved for reference. CTZ is now the only implementation.*
+
 ### Investigated but Not Beneficial
 
 - **Atomic path compression**: Path splitting was tested but showed no improvement because strip-based parallel processing already keeps trees shallow. The extra CAS overhead negates any tree-depth benefits.

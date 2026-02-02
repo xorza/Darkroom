@@ -1,6 +1,6 @@
 //! Benchmarks for star candidate detection.
 
-use super::{LabelMap, detect_stars, extract_candidates};
+use super::{detect_stars, extract_candidates, label_map_from_mask_with_connectivity};
 use crate::common::{BitBuffer2, Buffer2};
 use crate::star_detection::background::{BackgroundConfig, BackgroundMap};
 use crate::star_detection::config::{DeblendConfig, FilteringConfig, StarDetectionConfig};
@@ -42,7 +42,10 @@ fn bench_extract_candidates_1k_sparse(b: ::bench::Bencher) {
     // 1K image with ~100 stars (sparse field)
     let pixels = benchmark_star_field(1024, 1024, 100, 0.1, 0.01, 42);
     let mask = create_detection_mask(&pixels, 4.0);
-    let label_map = LabelMap::from_mask(&mask);
+    let label_map = label_map_from_mask_with_connectivity(
+        &mask,
+        crate::star_detection::config::Connectivity::Four,
+    );
     let config = DeblendConfig::default();
     let max_area = FilteringConfig::default().max_area;
 
@@ -61,7 +64,10 @@ fn bench_extract_candidates_1k_dense(b: ::bench::Bencher) {
     // 1K image with ~500 stars (dense field)
     let pixels = benchmark_star_field(1024, 1024, 500, 0.1, 0.01, 42);
     let mask = create_detection_mask(&pixels, 4.0);
-    let label_map = LabelMap::from_mask(&mask);
+    let label_map = label_map_from_mask_with_connectivity(
+        &mask,
+        crate::star_detection::config::Connectivity::Four,
+    );
     let config = DeblendConfig::default();
     let max_area = FilteringConfig::default().max_area;
 
@@ -80,7 +86,10 @@ fn bench_extract_candidates_4k_sparse(b: ::bench::Bencher) {
     // 4K image with ~500 stars
     let pixels = benchmark_star_field(4096, 4096, 500, 0.1, 0.01, 42);
     let mask = create_detection_mask(&pixels, 4.0);
-    let label_map = LabelMap::from_mask(&mask);
+    let label_map = label_map_from_mask_with_connectivity(
+        &mask,
+        crate::star_detection::config::Connectivity::Four,
+    );
     let config = DeblendConfig::default();
     let max_area = FilteringConfig::default().max_area;
 
@@ -99,7 +108,10 @@ fn bench_extract_candidates_4k_dense(b: ::bench::Bencher) {
     // 4K image with ~2000 stars (crowded field)
     let pixels = benchmark_star_field(4096, 4096, 2000, 0.1, 0.01, 42);
     let mask = create_detection_mask(&pixels, 4.0);
-    let label_map = LabelMap::from_mask(&mask);
+    let label_map = label_map_from_mask_with_connectivity(
+        &mask,
+        crate::star_detection::config::Connectivity::Four,
+    );
     let config = DeblendConfig::default();
     let max_area = FilteringConfig::default().max_area;
 
@@ -118,7 +130,10 @@ fn bench_extract_candidates_4k_dense_multithreshold(b: ::bench::Bencher) {
     // 4K image with ~2000 stars (crowded field)
     let pixels = benchmark_star_field(4096, 4096, 2000, 0.1, 0.01, 42);
     let mask = create_detection_mask(&pixels, 4.0);
-    let label_map = LabelMap::from_mask(&mask);
+    let label_map = label_map_from_mask_with_connectivity(
+        &mask,
+        crate::star_detection::config::Connectivity::Four,
+    );
     let config = DeblendConfig {
         n_thresholds: 32,
         ..Default::default()
@@ -142,7 +157,10 @@ fn bench_extract_candidates_6k_dense(b: ::bench::Bencher) {
     // 6K image with ~10000 stars (dense field)
     let pixels = benchmark_star_field(6144, 6144, 50000, 0.1, 0.01, 42);
     let mask = create_detection_mask(&pixels, 4.0);
-    let label_map = LabelMap::from_mask(&mask);
+    let label_map = label_map_from_mask_with_connectivity(
+        &mask,
+        crate::star_detection::config::Connectivity::Four,
+    );
 
     let crowded_config = StarDetectionConfig::for_crowded_field();
     let config = &crowded_config.deblend;
@@ -167,7 +185,10 @@ fn bench_extract_candidates_6k_globular_cluster_multithreshold(b: ::bench::Bench
     // 6K globular cluster with 50000 stars - extreme crowding
     let pixels = generate_globular_cluster(6144, 6144, 50000, 42);
     let mask = create_detection_mask(&pixels, 4.0);
-    let label_map = LabelMap::from_mask(&mask);
+    let label_map = label_map_from_mask_with_connectivity(
+        &mask,
+        crate::star_detection::config::Connectivity::Four,
+    );
     let config = DeblendConfig {
         n_thresholds: 32,
         ..Default::default()
