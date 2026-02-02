@@ -159,7 +159,7 @@ fn test_background_on_real_image() {
         tile_size: 64,
         ..Default::default()
     };
-    let bg = crate::testing::estimate_background(&pixels_buf, &config);
+    let bg = crate::testing::estimate_background(&pixels_buf, config.clone());
 
     let bg_img = to_gray_image(bg.background.pixels(), width, height);
     let path = common::test_utils::test_output_path("real_data/background_map.tiff");

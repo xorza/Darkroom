@@ -22,7 +22,8 @@ fn bench_background_estimate_6k(b: ::bench::Bencher) {
         ..Default::default()
     };
 
-    b.bench(|| black_box(crate::testing::estimate_background(&pixels, &config)));
+    // todo preallocate bgmap
+    b.bench(|| black_box(crate::testing::estimate_background(&pixels, config.clone())));
 }
 
 const BENCH_SIGMA_CLIP_ITERATIONS: usize = 2;

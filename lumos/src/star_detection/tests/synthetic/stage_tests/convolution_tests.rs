@@ -57,7 +57,7 @@ fn test_gaussian_filter_sparse() {
     // Estimate and subtract background
     let background = crate::testing::estimate_background(
         &pixels,
-        &BackgroundConfig {
+        BackgroundConfig {
             tile_size: TILE_SIZE,
             ..Default::default()
         },
@@ -156,7 +156,7 @@ fn test_gaussian_filter_fwhm_range() {
     // Background subtraction
     let background = crate::testing::estimate_background(
         &pixels,
-        &BackgroundConfig {
+        BackgroundConfig {
             tile_size: TILE_SIZE,
             ..Default::default()
         },
@@ -227,7 +227,7 @@ fn test_gaussian_filter_noise() {
     // Background subtraction
     let background = crate::testing::estimate_background(
         &pixels,
-        &BackgroundConfig {
+        BackgroundConfig {
             tile_size: TILE_SIZE,
             ..Default::default()
         },

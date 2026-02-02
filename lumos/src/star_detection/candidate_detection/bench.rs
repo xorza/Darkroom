@@ -18,7 +18,7 @@ fn create_detection_mask(pixels: &Buffer2<f32>, sigma_threshold: f32) -> BitBuff
     let height = pixels.height();
 
     // Create background map (same as real pipeline)
-    let background = crate::testing::estimate_background(pixels, &BackgroundConfig::default());
+    let background = crate::testing::estimate_background(pixels, BackgroundConfig::default());
 
     // Create threshold mask
     let mut mask = BitBuffer2::new_filled(width, height, false);
@@ -190,7 +190,7 @@ fn bench_detect_stars_6k_50000(b: ::bench::Bencher) {
 
     // 6K image with 50000 stars - full detect_stars pipeline
     let pixels = benchmark_star_field(6144, 6144, 50000, 0.1, 0.01, 42);
-    let background = crate::testing::estimate_background(&pixels, &BackgroundConfig::default());
+    let background = crate::testing::estimate_background(&pixels, BackgroundConfig::default());
     let config = StarDetectionConfig::for_crowded_field();
 
     b.bench(|| {

@@ -65,7 +65,7 @@ fn test_deblend_star_pair() {
     let pixels_buf = Buffer2::new(width, height, pixels.clone());
     let background = crate::testing::estimate_background(
         &pixels_buf,
-        &BackgroundConfig {
+        BackgroundConfig {
             tile_size: TILE_SIZE,
             ..Default::default()
         },
@@ -173,7 +173,7 @@ fn test_deblend_chain() {
     let pixels_buf = Buffer2::new(width, height, pixels.clone());
     let background = crate::testing::estimate_background(
         &pixels_buf,
-        &BackgroundConfig {
+        BackgroundConfig {
             tile_size: TILE_SIZE,
             ..Default::default()
         },
@@ -282,7 +282,7 @@ fn test_deblend_unequal_pair() {
     let pixels_buf = Buffer2::new(width, height, pixels.clone());
     let background = crate::testing::estimate_background(
         &pixels_buf,
-        &BackgroundConfig {
+        BackgroundConfig {
             tile_size: TILE_SIZE,
             ..Default::default()
         },

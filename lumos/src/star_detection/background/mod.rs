@@ -26,6 +26,8 @@ pub use super::config::BackgroundConfig;
 /// Background map with per-pixel background and noise estimates.
 #[derive(Debug, Clone)]
 pub struct BackgroundMap {
+    /// Configuration used for background estimation.
+    config: BackgroundConfig,
     /// Per-pixel background values.
     pub background: Buffer2<f32>,
     /// Per-pixel noise (sigma) estimates.
@@ -41,11 +43,17 @@ impl BackgroundMap {
     ///
     /// Buffers are allocated but not filled with meaningful values.
     /// Use `estimate` to populate them.
-    pub fn new_uninit(width: usize, height: usize, with_adaptive: bool) -> Self {
+    ///
+    /// # Panics
+    /// Panics if config validation fails.
+    pub fn new_uninit(width: usize, height: usize, config: BackgroundConfig) -> Self {
+        config.validate();
+        let has_adaptive = config.adaptive_sigma.is_some();
         Self {
+            config,
             background: Buffer2::new_default(width, height),
             noise: Buffer2::new_default(width, height),
-            adaptive_sigma: if with_adaptive {
+            adaptive_sigma: if has_adaptive {
                 Some(Buffer2::new_default(width, height))
             } else {
                 None
@@ -54,16 +62,27 @@ impl BackgroundMap {
     }
 
     /// Create a BackgroundMap by acquiring buffers from a pool.
-    pub fn from_pool(pool: &mut BufferPool, with_adaptive: bool) -> Self {
+    ///
+    /// # Panics
+    /// Panics if config validation fails.
+    pub fn from_pool(pool: &mut BufferPool, config: BackgroundConfig) -> Self {
+        config.validate();
+        let has_adaptive = config.adaptive_sigma.is_some();
         Self {
+            config,
             background: pool.acquire_f32(),
             noise: pool.acquire_f32(),
-            adaptive_sigma: if with_adaptive {
+            adaptive_sigma: if has_adaptive {
                 Some(pool.acquire_f32())
             } else {
                 None
             },
         }
+    }
+
+    /// Get reference to the configuration.
+    pub fn config(&self) -> &BackgroundConfig {
+        &self.config
     }
 
     /// Release this BackgroundMap's buffers back to the pool.
@@ -96,31 +115,21 @@ impl BackgroundMap {
     ///
     /// # Panics
     /// Panics if the buffer dimensions don't match the image dimensions.
-    pub fn estimate(&mut self, pixels: &Buffer2<f32>, config: &BackgroundConfig) {
-        config.validate();
+    pub fn estimate(&mut self, pixels: &Buffer2<f32>) {
         debug_assert_eq!(self.background.width(), pixels.width());
         debug_assert_eq!(self.background.height(), pixels.height());
         assert!(
-            pixels.width() >= config.tile_size && pixels.height() >= config.tile_size,
+            pixels.width() >= self.config.tile_size && pixels.height() >= self.config.tile_size,
             "Image must be at least tile_size x tile_size"
         );
 
-        let has_adaptive = config.adaptive_sigma.is_some();
-
-        // Update adaptive_sigma buffer state to match config
-        if has_adaptive && self.adaptive_sigma.is_none() {
-            self.adaptive_sigma = Some(Buffer2::new_default(pixels.width(), pixels.height()));
-        } else if !has_adaptive {
-            self.adaptive_sigma = None;
-        }
-
         let grid = TileGrid::new_with_options(
             pixels,
-            config.tile_size,
+            self.config.tile_size,
             None,
             0,
-            config.sigma_clip_iterations,
-            config.adaptive_sigma,
+            self.config.sigma_clip_iterations,
+            self.config.adaptive_sigma,
         );
 
         interpolate_from_grid(&grid, self);
@@ -133,27 +142,26 @@ impl BackgroundMap {
     pub fn refine(
         &mut self,
         pixels: &Buffer2<f32>,
-        config: &BackgroundConfig,
         scratch1: &mut BitBuffer2,
         scratch2: &mut BitBuffer2,
     ) {
         let mask = scratch1;
-        for _iter in 0..config.iterations {
+        for _iter in 0..self.config.iterations {
             create_object_mask(
                 pixels,
                 self,
-                config.sigma_threshold,
-                config.mask_dilation,
+                self.config.sigma_threshold,
+                self.config.mask_dilation,
                 mask,
                 scratch2,
             );
 
             estimate_background_masked(
                 pixels,
-                config.tile_size,
+                self.config.tile_size,
                 mask,
-                config.min_unmasked_fraction,
-                config.sigma_clip_iterations,
+                self.config.min_unmasked_fraction,
+                self.config.sigma_clip_iterations,
                 self,
             );
         }

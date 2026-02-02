@@ -17,18 +17,18 @@ use crate::star_detection::background::{BackgroundConfig, BackgroundMap};
 ///
 /// Creates a BackgroundMap with all necessary allocations. For production code,
 /// use `BackgroundMap::from_pool` + `estimate` + `refine` with buffer pooling.
-pub fn estimate_background(pixels: &Buffer2<f32>, config: &BackgroundConfig) -> BackgroundMap {
+pub fn estimate_background(pixels: &Buffer2<f32>, config: BackgroundConfig) -> BackgroundMap {
     let width = pixels.width();
     let height = pixels.height();
-    let has_adaptive = config.adaptive_sigma.is_some();
+    let iterations = config.iterations;
 
-    let mut bg = BackgroundMap::new_uninit(width, height, has_adaptive);
-    bg.estimate(pixels, config);
+    let mut bg = BackgroundMap::new_uninit(width, height, config);
+    bg.estimate(pixels);
 
-    if config.iterations > 0 {
+    if iterations > 0 {
         let mut mask = BitBuffer2::new_filled(width, height, false);
         let mut scratch = BitBuffer2::new_filled(width, height, false);
-        bg.refine(pixels, config, &mut mask, &mut scratch);
+        bg.refine(pixels, &mut mask, &mut scratch);
     }
 
     bg

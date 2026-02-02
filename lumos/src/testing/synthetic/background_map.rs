@@ -2,16 +2,14 @@
 //!
 //! Provides utilities to create BackgroundMap instances for benchmarks and tests.
 
-use crate::common::Buffer2;
-use crate::star_detection::background::BackgroundMap;
+use crate::star_detection::background::{BackgroundConfig, BackgroundMap};
 
 /// Create a uniform BackgroundMap with constant background and noise values.
 pub fn uniform(width: usize, height: usize, background: f32, noise: f32) -> BackgroundMap {
-    BackgroundMap {
-        background: Buffer2::new_filled(width, height, background),
-        noise: Buffer2::new_filled(width, height, noise),
-        adaptive_sigma: None,
-    }
+    let mut bg = BackgroundMap::new_uninit(width, height, BackgroundConfig::default());
+    bg.background.fill(background);
+    bg.noise.fill(noise);
+    bg
 }
 
 /// Create a BackgroundMap with a horizontal gradient in the background.
@@ -22,7 +20,7 @@ pub fn horizontal_gradient(
     bg_right: f32,
     noise: f32,
 ) -> BackgroundMap {
-    let mut bg_pixels = vec![0.0f32; width * height];
+    let mut bg = BackgroundMap::new_uninit(width, height, BackgroundConfig::default());
     for y in 0..height {
         for x in 0..width {
             let t = if width > 1 {
@@ -30,14 +28,11 @@ pub fn horizontal_gradient(
             } else {
                 0.5
             };
-            bg_pixels[y * width + x] = bg_left + t * (bg_right - bg_left);
+            bg.background[(x, y)] = bg_left + t * (bg_right - bg_left);
         }
     }
-    BackgroundMap {
-        background: Buffer2::new(width, height, bg_pixels),
-        noise: Buffer2::new_filled(width, height, noise),
-        adaptive_sigma: None,
-    }
+    bg.noise.fill(noise);
+    bg
 }
 
 /// Create a BackgroundMap with a vertical gradient in the background.
@@ -48,7 +43,7 @@ pub fn vertical_gradient(
     bg_bottom: f32,
     noise: f32,
 ) -> BackgroundMap {
-    let mut bg_pixels = vec![0.0f32; width * height];
+    let mut bg = BackgroundMap::new_uninit(width, height, BackgroundConfig::default());
     for y in 0..height {
         let t = if height > 1 {
             y as f32 / (height - 1) as f32
@@ -57,14 +52,11 @@ pub fn vertical_gradient(
         };
         let value = bg_top + t * (bg_bottom - bg_top);
         for x in 0..width {
-            bg_pixels[y * width + x] = value;
+            bg.background[(x, y)] = value;
         }
     }
-    BackgroundMap {
-        background: Buffer2::new(width, height, bg_pixels),
-        noise: Buffer2::new_filled(width, height, noise),
-        adaptive_sigma: None,
-    }
+    bg.noise.fill(noise);
+    bg
 }
 
 /// Create a BackgroundMap with radial vignette in the background.
@@ -75,7 +67,7 @@ pub fn vignette(
     bg_edge: f32,
     noise: f32,
 ) -> BackgroundMap {
-    let mut bg_pixels = vec![0.0f32; width * height];
+    let mut bg = BackgroundMap::new_uninit(width, height, BackgroundConfig::default());
     let cx = width as f32 / 2.0;
     let cy = height as f32 / 2.0;
     let max_r = (cx * cx + cy * cy).sqrt();
@@ -86,25 +78,11 @@ pub fn vignette(
             let dy = y as f32 - cy;
             let r = (dx * dx + dy * dy).sqrt();
             let t = if max_r > 0.0 { r / max_r } else { 0.0 };
-            bg_pixels[y * width + x] = bg_center + t * (bg_edge - bg_center);
+            bg.background[(x, y)] = bg_center + t * (bg_edge - bg_center);
         }
     }
-    BackgroundMap {
-        background: Buffer2::new(width, height, bg_pixels),
-        noise: Buffer2::new_filled(width, height, noise),
-        adaptive_sigma: None,
-    }
-}
-
-/// Create a BackgroundMap from existing Buffer2 data.
-pub fn from_buffers(background: Buffer2<f32>, noise: Buffer2<f32>) -> BackgroundMap {
-    debug_assert_eq!(background.width(), noise.width());
-    debug_assert_eq!(background.height(), noise.height());
-    BackgroundMap {
-        background,
-        noise,
-        adaptive_sigma: None,
-    }
+    bg.noise.fill(noise);
+    bg
 }
 
 #[cfg(test)]

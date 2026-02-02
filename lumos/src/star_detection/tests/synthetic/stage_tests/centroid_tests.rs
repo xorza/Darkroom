@@ -73,7 +73,7 @@ fn test_centroid_accuracy() {
     let pixels_buf = Buffer2::new(width, height, pixels.clone());
     let background = crate::testing::estimate_background(
         &pixels_buf,
-        &BackgroundConfig {
+        BackgroundConfig {
             tile_size: TILE_SIZE,
             ..Default::default()
         },
@@ -229,7 +229,7 @@ fn test_centroid_snr() {
     let pixels_buf = Buffer2::new(width, height, pixels.clone());
     let background = crate::testing::estimate_background(
         &pixels_buf,
-        &BackgroundConfig {
+        BackgroundConfig {
             tile_size: TILE_SIZE,
             ..Default::default()
         },

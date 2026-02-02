@@ -39,7 +39,7 @@ fn test_background_uniform() {
     // Estimate background
     let background = crate::testing::estimate_background(
         &pixels,
-        &BackgroundConfig {
+        BackgroundConfig {
             tile_size: TILE_SIZE,
             ..Default::default()
         },
@@ -121,7 +121,7 @@ fn test_background_gradient() {
     // Estimate background
     let background = crate::testing::estimate_background(
         &Buffer2::new(width, height, pixels.clone()),
-        &BackgroundConfig {
+        BackgroundConfig {
             tile_size: TILE_SIZE,
             ..Default::default()
         },
@@ -202,7 +202,7 @@ fn test_background_vignette() {
     // Estimate background
     let background = crate::testing::estimate_background(
         &Buffer2::new(width, height, pixels.clone()),
-        &BackgroundConfig {
+        BackgroundConfig {
             tile_size: TILE_SIZE,
             ..Default::default()
         },
@@ -296,7 +296,7 @@ fn test_background_nebula() {
     // Estimate background
     let background = crate::testing::estimate_background(
         &Buffer2::new(width, height, pixels.clone()),
-        &BackgroundConfig {
+        BackgroundConfig {
             tile_size: TILE_SIZE,
             ..Default::default()
         },

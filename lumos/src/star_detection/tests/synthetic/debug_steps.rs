@@ -102,7 +102,7 @@ fn test_debug_synthetic_steps() {
     let detection_config = StarDetectionConfig::default();
     let grayscale_buf = Buffer2::new(width, height, grayscale.clone());
     let background =
-        crate::testing::estimate_background(&grayscale_buf, &detection_config.background);
+        crate::testing::estimate_background(&grayscale_buf, detection_config.background.clone());
 
     println!(
         "Background stats: min={:.4}, max={:.4}",

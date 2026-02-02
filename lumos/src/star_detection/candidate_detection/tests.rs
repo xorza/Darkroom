@@ -59,7 +59,7 @@ mod detect_stars_tests {
 
         let bg = crate::testing::estimate_background(
             &pixels,
-            &BackgroundConfig {
+            BackgroundConfig {
                 tile_size: 32,
                 ..Default::default()
             },
@@ -103,7 +103,7 @@ mod detect_stars_tests {
         let pixels_buf = Buffer2::new(width, height, pixels);
         let bg = crate::testing::estimate_background(
             &pixels_buf,
-            &BackgroundConfig {
+            BackgroundConfig {
                 tile_size: 32,
                 ..Default::default()
             },
@@ -129,7 +129,7 @@ mod detect_stars_tests {
 
         let bg = crate::testing::estimate_background(
             &pixels,
-            &BackgroundConfig {
+            BackgroundConfig {
                 tile_size: 32,
                 ..Default::default()
             },
@@ -159,7 +159,7 @@ mod detect_stars_tests {
         let pixels_buf = Buffer2::new(width, height, pixels);
         let bg = crate::testing::estimate_background(
             &pixels_buf,
-            &BackgroundConfig {
+            BackgroundConfig {
                 tile_size: 32,
                 ..Default::default()
             },
@@ -185,7 +185,7 @@ mod detect_stars_tests {
         let pixels_buf = Buffer2::new(width, height, pixels);
         let bg = crate::testing::estimate_background(
             &pixels_buf,
-            &BackgroundConfig {
+            BackgroundConfig {
                 tile_size: 32,
                 ..Default::default()
             },
@@ -1260,7 +1260,7 @@ mod filtered_image_tests {
 
         let bg = crate::testing::estimate_background(
             &pixels,
-            &BackgroundConfig {
+            BackgroundConfig {
                 tile_size: 32,
                 ..Default::default()
             },
@@ -1309,7 +1309,7 @@ mod filtered_image_tests {
 
         let bg = crate::testing::estimate_background(
             &pixels,
-            &BackgroundConfig {
+            BackgroundConfig {
                 tile_size: 32,
                 ..Default::default()
             },
@@ -1576,7 +1576,7 @@ mod dilation_tests {
         let pixels = Buffer2::new(width, height, pixels);
         let bg = crate::testing::estimate_background(
             &pixels,
-            &BackgroundConfig {
+            BackgroundConfig {
                 tile_size: 16,
                 ..Default::default()
             },
@@ -1608,7 +1608,7 @@ mod regression_tests {
         let pixels = benchmark_star_field(256, 256, 100, 0.1, 0.01, 42);
         let bg = crate::testing::estimate_background(
             &pixels,
-            &BackgroundConfig {
+            BackgroundConfig {
                 tile_size: 32,
                 ..Default::default()
             },
@@ -1638,7 +1638,7 @@ mod regression_tests {
         let pixels = benchmark_star_field(256, 256, 50, 0.1, 0.01, 42);
         let bg = crate::testing::estimate_background(
             &pixels,
-            &BackgroundConfig {
+            BackgroundConfig {
                 tile_size: 32,
                 ..Default::default()
             },
@@ -1683,7 +1683,7 @@ mod regression_tests {
         let pixels = benchmark_star_field(400, 300, 50, 0.1, 0.01, 12345);
         let bg = crate::testing::estimate_background(
             &pixels,
-            &BackgroundConfig {
+            BackgroundConfig {
                 tile_size: 32,
                 ..Default::default()
             },
@@ -1721,7 +1721,7 @@ mod regression_tests {
         let pixels = benchmark_star_field(400, 300, 100, 0.1, 0.01, 42);
         let bg = crate::testing::estimate_background(
             &pixels,
-            &BackgroundConfig {
+            BackgroundConfig {
                 tile_size: 32,
                 ..Default::default()
             },

@@ -50,7 +50,7 @@ fn test_centroid_accuracy() {
 
     let bg = crate::testing::estimate_background(
         &pixels,
-        &BackgroundConfig {
+        BackgroundConfig {
             tile_size: 32,
             ..Default::default()
         },
@@ -94,7 +94,7 @@ fn test_fwhm_estimation() {
 
     let bg = crate::testing::estimate_background(
         &pixels,
-        &BackgroundConfig {
+        BackgroundConfig {
             tile_size: 32,
             ..Default::default()
         },
@@ -134,7 +134,7 @@ fn test_circular_star_eccentricity() {
 
     let bg = crate::testing::estimate_background(
         &pixels,
-        &BackgroundConfig {
+        BackgroundConfig {
             tile_size: 32,
             ..Default::default()
         },
@@ -160,7 +160,7 @@ fn test_snr_positive() {
 
     let bg = crate::testing::estimate_background(
         &pixels,
-        &BackgroundConfig {
+        BackgroundConfig {
             tile_size: 32,
             ..Default::default()
         },
@@ -347,11 +347,10 @@ fn make_uniform_background(
     bg_value: f32,
     noise: f32,
 ) -> BackgroundMap {
-    BackgroundMap {
-        background: Buffer2::new_filled(width, height, bg_value),
-        noise: Buffer2::new_filled(width, height, noise),
-        adaptive_sigma: None,
-    }
+    let mut bg = BackgroundMap::new_uninit(width, height, BackgroundConfig::default());
+    bg.background.fill(bg_value);
+    bg.noise.fill(noise);
+    bg
 }
 
 #[test]
@@ -1110,7 +1109,7 @@ fn test_compute_centroid_multiple_stars_independent() {
     let pixels = Buffer2::new(width, height, pixels);
     let bg = crate::testing::estimate_background(
         &pixels,
-        &BackgroundConfig {
+        BackgroundConfig {
             tile_size: 32,
             ..Default::default()
         },
@@ -1160,7 +1159,7 @@ fn test_circular_star_roundness() {
 
     let bg = crate::testing::estimate_background(
         &pixels,
-        &BackgroundConfig {
+        BackgroundConfig {
             tile_size: 32,
             ..Default::default()
         },
@@ -1214,7 +1213,7 @@ fn test_elongated_x_star_roundness() {
     let pixels = Buffer2::new(width, height, pixels);
     let bg = crate::testing::estimate_background(
         &pixels,
-        &BackgroundConfig {
+        BackgroundConfig {
             tile_size: 32,
             ..Default::default()
         },
@@ -1268,7 +1267,7 @@ fn test_asymmetric_star_roundness2() {
     let pixels = Buffer2::new(width, height, pixels);
     let bg = crate::testing::estimate_background(
         &pixels,
-        &BackgroundConfig {
+        BackgroundConfig {
             tile_size: 32,
             ..Default::default()
         },
@@ -1298,7 +1297,7 @@ fn test_laplacian_snr_computed_for_star() {
     let pixels = make_gaussian_star(width, height, 32.0, 32.0, 2.5, 0.8);
     let bg = crate::testing::estimate_background(
         &pixels,
-        &BackgroundConfig {
+        BackgroundConfig {
             tile_size: 32,
             ..Default::default()
         },
@@ -1385,7 +1384,7 @@ fn test_weighted_centroid_precision_statistical() {
             let pixels = make_gaussian_star(width, height, true_cx, true_cy, sigma, 1.0);
             let bg = crate::testing::estimate_background(
                 &pixels,
-                &BackgroundConfig {
+                BackgroundConfig {
                     tile_size: 32,
                     ..Default::default()
                 },
@@ -2532,7 +2531,7 @@ fn test_local_annulus_background_uniform() {
 
     let bg = crate::testing::estimate_background(
         &pixels,
-        &BackgroundConfig {
+        BackgroundConfig {
             tile_size: 32,
             ..Default::default()
         },
@@ -2568,7 +2567,7 @@ fn test_local_annulus_vs_global_map() {
     let pixels = make_gaussian_star(width, height, 64.0, 64.0, 2.5, 0.8);
     let bg = crate::testing::estimate_background(
         &pixels,
-        &BackgroundConfig {
+        BackgroundConfig {
             tile_size: 32,
             ..Default::default()
         },
@@ -2625,7 +2624,7 @@ fn test_local_annulus_near_edge_fallback() {
     let pixels = make_gaussian_star(width, height, cx, cy, 2.0, 0.8);
     let bg = crate::testing::estimate_background(
         &pixels,
-        &BackgroundConfig {
+        BackgroundConfig {
             tile_size: 32,
             ..Default::default()
         },
