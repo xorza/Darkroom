@@ -198,13 +198,18 @@ pub unsafe fn compute_chi2_8(
     let vresidual = _mm256_sub_ps(vz, vmodel);
     let vresidual_sq = _mm256_mul_ps(vresidual, vresidual);
 
-    // Horizontal sum of 8 floats
-    let sum1 = _mm256_hadd_ps(vresidual_sq, vresidual_sq);
-    let sum2 = _mm256_hadd_ps(sum1, sum1);
-    let low = _mm256_extractf128_ps(sum2, 0);
-    let high = _mm256_extractf128_ps(sum2, 1);
-    let sum = _mm_add_ss(low, high);
-    _mm_cvtss_f32(sum)
+    // Horizontal sum of 8 floats using store+scalar sum
+    // This is faster than multiple hadd operations
+    let mut res_arr = [0.0f32; 8];
+    _mm256_storeu_ps(res_arr.as_mut_ptr(), vresidual_sq);
+    res_arr[0]
+        + res_arr[1]
+        + res_arr[2]
+        + res_arr[3]
+        + res_arr[4]
+        + res_arr[5]
+        + res_arr[6]
+        + res_arr[7]
 }
 
 /// Fill Jacobian and residuals using AVX2 where possible.
