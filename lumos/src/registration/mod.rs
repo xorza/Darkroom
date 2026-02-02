@@ -61,7 +61,6 @@
 //! See `IMPLEMENTATION_PLAN.md` for detailed algorithm documentation.
 
 pub(crate) mod astrometry;
-pub(crate) mod constants;
 pub(crate) mod distortion;
 pub(crate) mod interpolation;
 pub(crate) mod phase_correlation;

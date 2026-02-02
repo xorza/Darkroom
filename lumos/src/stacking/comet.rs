@@ -1176,12 +1176,7 @@ mod integration_tests {
     }
 
     /// Apply a transform to warp a frame (simple nearest-neighbor for testing).
-    fn warp_frame(
-        src: &[f32],
-        width: usize,
-        height: usize,
-        transform: &Transform,
-    ) -> Vec<f32> {
+    fn warp_frame(src: &[f32], width: usize, height: usize, transform: &Transform) -> Vec<f32> {
         let mut dst = vec![0.0f32; width * height];
 
         for y in 0..height {
