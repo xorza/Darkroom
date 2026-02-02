@@ -51,26 +51,6 @@ impl BackgroundMap {
         }
     }
 
-    /// Estimate background from image pixels using the given configuration.
-    ///
-    /// Convenience constructor that allocates buffers and estimates background.
-    /// For buffer pooling scenarios, use `new_uninit` + `estimate` + `refine` instead.
-    pub fn new(pixels: &Buffer2<f32>, config: &BackgroundConfig) -> Self {
-        let has_adaptive = config.adaptive_sigma.is_some();
-        let mut bg = Self::new_uninit(pixels.width(), pixels.height(), has_adaptive);
-        bg.estimate(pixels, config);
-
-        if config.iterations > 0 {
-            let width = pixels.width();
-            let height = pixels.height();
-            let mut mask = BitBuffer2::new_filled(width, height, false);
-            let mut scratch = BitBuffer2::new_filled(width, height, false);
-            bg.refine(pixels, config, &mut mask, &mut scratch);
-        }
-
-        bg
-    }
-
     /// Get image width.
     #[inline]
     pub fn width(&self) -> usize {

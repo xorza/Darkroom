@@ -48,7 +48,7 @@ fn test_centroid_accuracy() {
     let true_y = 64.7f32;
     let pixels = make_gaussian_star(width, height, true_x, true_y, 2.5, 0.8);
 
-    let bg = BackgroundMap::new(
+    let bg = crate::testing::estimate_background(
         &pixels,
         &BackgroundConfig {
             tile_size: 32,
@@ -92,7 +92,7 @@ fn test_fwhm_estimation() {
     let expected_fwhm = FWHM_TO_SIGMA * sigma;
     let pixels = make_gaussian_star(width, height, 64.0, 64.0, sigma, 0.8);
 
-    let bg = BackgroundMap::new(
+    let bg = crate::testing::estimate_background(
         &pixels,
         &BackgroundConfig {
             tile_size: 32,
@@ -132,7 +132,7 @@ fn test_circular_star_eccentricity() {
     let height = 64;
     let pixels = make_gaussian_star(width, height, 32.0, 32.0, 2.5, 0.8);
 
-    let bg = BackgroundMap::new(
+    let bg = crate::testing::estimate_background(
         &pixels,
         &BackgroundConfig {
             tile_size: 32,
@@ -158,7 +158,7 @@ fn test_snr_positive() {
     let height = 64;
     let pixels = make_gaussian_star(width, height, 32.0, 32.0, 2.5, 0.8);
 
-    let bg = BackgroundMap::new(
+    let bg = crate::testing::estimate_background(
         &pixels,
         &BackgroundConfig {
             tile_size: 32,
@@ -1108,7 +1108,7 @@ fn test_compute_centroid_multiple_stars_independent() {
     }
 
     let pixels = Buffer2::new(width, height, pixels);
-    let bg = BackgroundMap::new(
+    let bg = crate::testing::estimate_background(
         &pixels,
         &BackgroundConfig {
             tile_size: 32,
@@ -1158,7 +1158,7 @@ fn test_circular_star_roundness() {
     let height = 64;
     let pixels = make_gaussian_star(width, height, 32.0, 32.0, 2.5, 0.8);
 
-    let bg = BackgroundMap::new(
+    let bg = crate::testing::estimate_background(
         &pixels,
         &BackgroundConfig {
             tile_size: 32,
@@ -1212,7 +1212,7 @@ fn test_elongated_x_star_roundness() {
     }
 
     let pixels = Buffer2::new(width, height, pixels);
-    let bg = BackgroundMap::new(
+    let bg = crate::testing::estimate_background(
         &pixels,
         &BackgroundConfig {
             tile_size: 32,
@@ -1266,7 +1266,7 @@ fn test_asymmetric_star_roundness2() {
     }
 
     let pixels = Buffer2::new(width, height, pixels);
-    let bg = BackgroundMap::new(
+    let bg = crate::testing::estimate_background(
         &pixels,
         &BackgroundConfig {
             tile_size: 32,
@@ -1296,7 +1296,7 @@ fn test_laplacian_snr_computed_for_star() {
     let width = 64;
     let height = 64;
     let pixels = make_gaussian_star(width, height, 32.0, 32.0, 2.5, 0.8);
-    let bg = BackgroundMap::new(
+    let bg = crate::testing::estimate_background(
         &pixels,
         &BackgroundConfig {
             tile_size: 32,
@@ -1383,7 +1383,7 @@ fn test_weighted_centroid_precision_statistical() {
             let true_cy = 64.0 + dy as f32 * 0.1;
 
             let pixels = make_gaussian_star(width, height, true_cx, true_cy, sigma, 1.0);
-            let bg = BackgroundMap::new(
+            let bg = crate::testing::estimate_background(
                 &pixels,
                 &BackgroundConfig {
                     tile_size: 32,
@@ -2530,7 +2530,7 @@ fn test_local_annulus_background_uniform() {
     }
     let pixels = Buffer2::new(width, height, pixels);
 
-    let bg = BackgroundMap::new(
+    let bg = crate::testing::estimate_background(
         &pixels,
         &BackgroundConfig {
             tile_size: 32,
@@ -2566,7 +2566,7 @@ fn test_local_annulus_vs_global_map() {
 
     // Create star on uniform background
     let pixels = make_gaussian_star(width, height, 64.0, 64.0, 2.5, 0.8);
-    let bg = BackgroundMap::new(
+    let bg = crate::testing::estimate_background(
         &pixels,
         &BackgroundConfig {
             tile_size: 32,
@@ -2623,7 +2623,7 @@ fn test_local_annulus_near_edge_fallback() {
     let cx = 20.0f32;
     let cy = 32.0f32;
     let pixels = make_gaussian_star(width, height, cx, cy, 2.0, 0.8);
-    let bg = BackgroundMap::new(
+    let bg = crate::testing::estimate_background(
         &pixels,
         &BackgroundConfig {
             tile_size: 32,

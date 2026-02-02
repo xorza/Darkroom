@@ -57,7 +57,7 @@ mod detect_stars_tests {
         let height = 64;
         let pixels = make_test_image_with_star(width, height, 32, 32);
 
-        let bg = BackgroundMap::new(
+        let bg = crate::testing::estimate_background(
             &pixels,
             &BackgroundConfig {
                 tile_size: 32,
@@ -101,7 +101,7 @@ mod detect_stars_tests {
         }
 
         let pixels_buf = Buffer2::new(width, height, pixels);
-        let bg = BackgroundMap::new(
+        let bg = crate::testing::estimate_background(
             &pixels_buf,
             &BackgroundConfig {
                 tile_size: 32,
@@ -127,7 +127,7 @@ mod detect_stars_tests {
         // Star at edge (x=5, y=32) should be rejected with edge_margin=10
         let pixels = make_test_image_with_star(width, height, 5, 32);
 
-        let bg = BackgroundMap::new(
+        let bg = crate::testing::estimate_background(
             &pixels,
             &BackgroundConfig {
                 tile_size: 32,
@@ -157,7 +157,7 @@ mod detect_stars_tests {
         pixels[32 * width + 32] = 0.9;
 
         let pixels_buf = Buffer2::new(width, height, pixels);
-        let bg = BackgroundMap::new(
+        let bg = crate::testing::estimate_background(
             &pixels_buf,
             &BackgroundConfig {
                 tile_size: 32,
@@ -183,7 +183,7 @@ mod detect_stars_tests {
         let pixels = vec![0.1f32; width * height];
 
         let pixels_buf = Buffer2::new(width, height, pixels);
-        let bg = BackgroundMap::new(
+        let bg = crate::testing::estimate_background(
             &pixels_buf,
             &BackgroundConfig {
                 tile_size: 32,
@@ -1258,7 +1258,7 @@ mod filtered_image_tests {
         }
         let filtered = Buffer2::new(width, height, filtered);
 
-        let bg = BackgroundMap::new(
+        let bg = crate::testing::estimate_background(
             &pixels,
             &BackgroundConfig {
                 tile_size: 32,
@@ -1307,7 +1307,7 @@ mod filtered_image_tests {
         }
         let pixels = Buffer2::new(width, height, pixels);
 
-        let bg = BackgroundMap::new(
+        let bg = crate::testing::estimate_background(
             &pixels,
             &BackgroundConfig {
                 tile_size: 32,
@@ -1574,7 +1574,7 @@ mod dilation_tests {
         }
 
         let pixels = Buffer2::new(width, height, pixels);
-        let bg = BackgroundMap::new(
+        let bg = crate::testing::estimate_background(
             &pixels,
             &BackgroundConfig {
                 tile_size: 16,
@@ -1606,7 +1606,7 @@ mod regression_tests {
     fn detect_stars_6k() {
         // Regression test for image detection - ensures consistency
         let pixels = benchmark_star_field(256, 256, 100, 0.1, 0.01, 42);
-        let bg = BackgroundMap::new(
+        let bg = crate::testing::estimate_background(
             &pixels,
             &BackgroundConfig {
                 tile_size: 32,
@@ -1636,7 +1636,7 @@ mod regression_tests {
         // Test with moderately dense star field - verifies deblending works
         // 256x256 with 50 stars is moderately dense but not overwhelming
         let pixels = benchmark_star_field(256, 256, 50, 0.1, 0.01, 42);
-        let bg = BackgroundMap::new(
+        let bg = crate::testing::estimate_background(
             &pixels,
             &BackgroundConfig {
                 tile_size: 32,
@@ -1681,7 +1681,7 @@ mod regression_tests {
         // Test that parallel processing gives consistent results
         // Large enough to trigger parallel path (>100k pixels)
         let pixels = benchmark_star_field(400, 300, 50, 0.1, 0.01, 12345);
-        let bg = BackgroundMap::new(
+        let bg = crate::testing::estimate_background(
             &pixels,
             &BackgroundConfig {
                 tile_size: 32,
@@ -1719,7 +1719,7 @@ mod regression_tests {
         // Verify parallel CCL gives consistent component structure
         // Note: Label IDs may differ between runs, but component grouping must be consistent
         let pixels = benchmark_star_field(400, 300, 100, 0.1, 0.01, 42);
-        let bg = BackgroundMap::new(
+        let bg = crate::testing::estimate_background(
             &pixels,
             &BackgroundConfig {
                 tile_size: 32,

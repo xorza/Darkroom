@@ -60,7 +60,7 @@ fn test_detection_sparse() {
     );
 
     // Estimate background
-    let background = BackgroundMap::new(
+    let background = crate::testing::estimate_background(
         &pixels,
         &BackgroundConfig {
             tile_size: TILE_SIZE,
@@ -147,7 +147,7 @@ fn test_detection_thresholds() {
     );
 
     // Estimate background
-    let background = BackgroundMap::new(
+    let background = crate::testing::estimate_background(
         &pixels,
         &BackgroundConfig {
             tile_size: TILE_SIZE,
@@ -246,7 +246,7 @@ fn test_detection_area_filter() {
     );
 
     // Estimate background
-    let background = BackgroundMap::new(
+    let background = crate::testing::estimate_background(
         &pixels,
         &BackgroundConfig {
             tile_size: TILE_SIZE,

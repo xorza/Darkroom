@@ -37,7 +37,7 @@ fn test_background_uniform() {
     let (pixels, _ground_truth) = generate_star_field(&config);
 
     // Estimate background
-    let background = BackgroundMap::new(
+    let background = crate::testing::estimate_background(
         &pixels,
         &BackgroundConfig {
             tile_size: TILE_SIZE,
@@ -119,7 +119,7 @@ fn test_background_gradient() {
     }
 
     // Estimate background
-    let background = BackgroundMap::new(
+    let background = crate::testing::estimate_background(
         &Buffer2::new(width, height, pixels.clone()),
         &BackgroundConfig {
             tile_size: TILE_SIZE,
@@ -200,7 +200,7 @@ fn test_background_vignette() {
     }
 
     // Estimate background
-    let background = BackgroundMap::new(
+    let background = crate::testing::estimate_background(
         &Buffer2::new(width, height, pixels.clone()),
         &BackgroundConfig {
             tile_size: TILE_SIZE,
@@ -294,7 +294,7 @@ fn test_background_nebula() {
     }
 
     // Estimate background
-    let background = BackgroundMap::new(
+    let background = crate::testing::estimate_background(
         &Buffer2::new(width, height, pixels.clone()),
         &BackgroundConfig {
             tile_size: TILE_SIZE,

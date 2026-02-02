@@ -22,7 +22,7 @@ fn bench_background_estimate_6k(b: ::bench::Bencher) {
         ..Default::default()
     };
 
-    b.bench(|| black_box(BackgroundMap::new(&pixels, &config)));
+    b.bench(|| black_box(crate::testing::estimate_background(&pixels, &config)));
 }
 
 const BENCH_SIGMA_CLIP_ITERATIONS: usize = 2;

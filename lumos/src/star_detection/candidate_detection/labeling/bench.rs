@@ -16,7 +16,7 @@ fn create_detection_mask(pixels: &crate::common::Buffer2<f32>, sigma_threshold: 
     let height = pixels.height();
 
     // Create background map (same as real pipeline)
-    let background = BackgroundMap::new(pixels, &BackgroundConfig::default());
+    let background = crate::testing::estimate_background(pixels, &BackgroundConfig::default());
 
     // Create threshold mask
     let mut mask = BitBuffer2::new_filled(width, height, false);

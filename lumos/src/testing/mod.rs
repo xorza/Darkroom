@@ -8,6 +8,28 @@ pub mod synthetic;
 use std::path::PathBuf;
 
 use crate::AstroImage;
+use crate::common::{BitBuffer2, Buffer2};
+use crate::star_detection::background::{BackgroundConfig, BackgroundMap};
+
+/// Convenience function to estimate background for tests.
+///
+/// Creates a BackgroundMap with all necessary allocations. For production code,
+/// use `BackgroundMap::new_uninit` + `estimate` + `refine` with buffer pooling.
+pub fn estimate_background(pixels: &Buffer2<f32>, config: &BackgroundConfig) -> BackgroundMap {
+    let has_adaptive = config.adaptive_sigma.is_some();
+    let mut bg = BackgroundMap::new_uninit(pixels.width(), pixels.height(), has_adaptive);
+    bg.estimate(pixels, config);
+
+    if config.iterations > 0 {
+        let width = pixels.width();
+        let height = pixels.height();
+        let mut mask = BitBuffer2::new_filled(width, height, false);
+        let mut scratch = BitBuffer2::new_filled(width, height, false);
+        bg.refine(pixels, config, &mut mask, &mut scratch);
+    }
+
+    bg
+}
 
 /// Returns the calibration directory from LUMOS_CALIBRATION_DIR env var.
 /// Prints a message if not set.
