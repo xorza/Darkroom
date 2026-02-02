@@ -218,6 +218,10 @@ After each optimization step:
 | Priority 2 | Early exit from deblending | ~245ms | ~245ms | ~0% (helps sparse fields) |
 | Priority 5 | Grid-based pixel_to_node | ~245ms | ~237ms | ~3% improvement |
 | Bit-packed visited | Packed bit vector for visited flags | ~237ms | ~236ms | ~0.5% + 8x less memory |
+| Priority 4 | Sequential prefault (reverted) | ~248ms | ~277ms | -11.1% (slower) |
+| Priority 4 | Parallel prefault (reverted) | ~277ms | ~270ms | -2.1% (within noise) |
+
+**Current best**: ~236ms (3-4% improvement from 244ms baseline)
 
 ### Priority 1 Details (Completed 2026-02-02)
 
@@ -308,7 +312,40 @@ After each optimization step:
 **Memory savings**: For a 100x100 pixel component, visited array goes from 10KB to 1.25KB.
 
 **Final total improvement**: ~3-4% (244ms → ~236ms)
-| | | | | |
+
+### Priority 4: Reduce Buffer Allocations - `clear_page_erms` Investigation (2026-02-02)
+
+**Problem**: `clear_page_erms` consumes ~24% of CPU time. This is the kernel zeroing newly allocated memory pages when they're first written to.
+
+**Root cause analysis**:
+- Profiling showed `clear_page_erms` is triggered by `interpolate_segment_avx2` writing to newly allocated `Buffer2` buffers in background estimation
+- For a 6K×6K image, each buffer is ~150MB (37.7M pixels × 4 bytes)
+- Three buffers allocated: `bg_data`, `noise_data`, and sometimes `adaptive_data`
+- When parallel interpolation writes to these buffers, it triggers page faults and kernel page zeroing
+
+**Approaches attempted**:
+
+1. **Sequential first-touch pass** (reverted)
+   - Added `Buffer2::new_prefaulted()` that touches every page sequentially before parallel use
+   - Result: **11.1% slower** (277ms vs 248ms baseline)
+   - Reason: Sequential memory initialization is slow for large buffers, adds overhead without benefit
+
+2. **Parallel prefaulting** (reverted)
+   - Changed to parallel initialization using rayon to match NUMA topology
+   - Each thread initializes its own chunk, faulting pages locally
+   - Result: **~same performance** (-2.1%, within noise at 270ms)
+   - Reason: Parallel initialization overhead offsets any gains from avoiding page faults during interpolation
+
+**Conclusion**: The `clear_page_erms` overhead is difficult to avoid with simple prefaulting strategies. The kernel's page fault handling during `vec![value; size]` allocation is already well-optimized. Options that might help:
+
+| Approach | Description | Effort | Expected Impact |
+|----------|-------------|--------|-----------------|
+| Buffer pooling | Reuse buffers across multiple `detect()` calls | Medium | High (eliminates allocation entirely) |
+| Huge pages | Use 2MB pages via `madvise(MADV_HUGEPAGE)` | Low | Medium (reduces TLB pressure) |
+| mmap + MAP_POPULATE | Pre-fault pages during mmap | High | Medium (moves cost, doesn't eliminate) |
+| Custom allocator | jemalloc/mimalloc with huge page support | Low | Low-Medium |
+
+**Recommendation**: For applications calling `detect()` repeatedly on similar-sized images, implement buffer pooling at the `StarDetector` level. This would completely eliminate the allocation overhead by reusing already-faulted memory.
 
 ---
 
