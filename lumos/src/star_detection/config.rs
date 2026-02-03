@@ -366,7 +366,9 @@ pub struct FilteringConfig {
     /// (>0.7) because most flux is in a single pixel. Set to 1.0 to disable.
     pub max_sharpness: f32,
     /// Maximum roundness for a star to be considered valid.
-    /// Roundness metrics measure asymmetry. Circular sources have roundness near 0.
+    /// Two metrics are checked: roundness1 (peak height asymmetry between x/y
+    /// marginals) and roundness2 (bilateral asymmetry). Circular sources have
+    /// both metrics near 0; well-behaved stars are typically < 0.1.
     /// Set to 1.0 to disable.
     pub max_roundness: f32,
     /// Maximum FWHM deviation from median in MAD units.
@@ -389,7 +391,7 @@ impl Default for FilteringConfig {
             min_snr: 10.0,
             max_eccentricity: 0.6,
             max_sharpness: 0.7,
-            max_roundness: 1.0,
+            max_roundness: 0.5,
             max_fwhm_deviation: 3.0,
             duplicate_min_separation: 8.0,
             connectivity: Connectivity::Four,
@@ -531,7 +533,8 @@ pub struct BackgroundConfig {
     pub tile_size: usize,
     /// Number of sigma-clipping iterations for tile statistics.
     /// With MAD-based sigma, 2-3 iterations typically suffice.
-    /// Typical value: 2-5
+    /// Early termination stops iteration when no values are clipped.
+    /// Typical value: 2-3
     pub sigma_clip_iterations: usize,
     /// Background refinement strategy.
     /// Choose between iterative refinement (for crowded fields) or
@@ -546,7 +549,7 @@ impl Default for BackgroundConfig {
             mask_dilation: 3,
             min_unmasked_fraction: 0.3,
             tile_size: 64,
-            sigma_clip_iterations: 5,
+            sigma_clip_iterations: 3,
             refinement: BackgroundRefinement::None,
         }
     }
@@ -715,7 +718,7 @@ impl StarDetectionConfig {
                 min_snr: 10.0,
                 max_eccentricity: 0.6,
                 max_sharpness: 0.7,
-                max_roundness: 1.0,
+                max_roundness: 0.5,
                 max_fwhm_deviation: 3.0,
                 duplicate_min_separation: 5.0,
                 connectivity: Connectivity::Eight,

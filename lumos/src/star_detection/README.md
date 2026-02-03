@@ -79,7 +79,7 @@ let config = StarDetectionConfig {
         min_snr: 10.0,             // Minimum signal-to-noise ratio
         max_eccentricity: 0.6,     // Filter elongated sources
         max_sharpness: 0.7,        // Filter cosmic rays / hot pixels
-        max_roundness: 1.0,        // Filter asymmetric sources
+        max_roundness: 0.5,        // Filter asymmetric sources
         max_fwhm_deviation: 3.0,   // FWHM outlier rejection (MAD units)
         duplicate_min_separation: 8.0, // Deduplication distance
         ..Default::default()

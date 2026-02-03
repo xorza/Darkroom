@@ -534,7 +534,7 @@ mod tests {
     #[test]
     fn test_triangle_config_default() {
         let config = TriangleMatchConfig::default();
-        assert_eq!(config.max_stars, 50);
+        assert_eq!(config.max_stars, 200);
         assert!((config.ratio_tolerance - 0.01).abs() < 1e-10);
         config.validate();
     }
