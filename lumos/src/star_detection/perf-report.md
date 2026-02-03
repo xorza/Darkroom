@@ -1,54 +1,56 @@
 # Star Detection Performance Report
 
-**Benchmark:** `quick_bench_detect_rho_opiuchi` (`precise_ground()` + `GaussianFit` centroid)
+**Benchmark:** `quick_bench_detect_rho_opiuchi` (`precise_ground()` + `MoffatFit { beta: 2.5 }` centroid)
 **Image:** rho-opiuchi.jpg, 8584x5874 pixels, grayscale
-**Runtime:** 445ms median (release, 10 iters)
-**Samples:** 196,981 (perf record -F 3000, --call-graph dwarf, --no-inline)
+**Runtime:** 502ms median (release, 10 iters)
+**Samples:** 203,856 (perf record -F 3000, --call-graph dwarf, --no-inline)
 **Date:** 2026-02-03
-**Last updated:** 2026-02-03 (after centroid optimizations 6+7)
+**Last updated:** 2026-02-03 (switched from GaussianFit to MoffatFit)
 
 ## Top Functions (self time)
 
 | %      | Function | Module |
 |--------|----------|--------|
-| 12.37% | `bfs_region` | deblend |
-| 8.74%  | `deblend_multi_threshold` | deblend |
-| 7.49%  | `refine_centroid_avx2` | centroid |
-| 6.34%  | `clear_page_erms` (kernel) | convolution (page faults) |
-| 6.07%  | `fill_jacobian_residuals_avx2` | gaussian_fit (SIMD) |
-| 5.60%  | closure (FnMut) | background interpolation |
-| 5.52%  | `compute_hessian_gradient_6` | gaussian_fit (AVX2) |
-| 3.95%  | iterator fold (map) | various |
-| 3.46%  | `convolve_row_avx2` | convolution |
-| 3.22%  | `process_words_filtered_sse` | threshold_mask |
-| 3.09%  | `compute_chi2_avx2` | gaussian_fit (SIMD) |
-| 2.83%  | `compute_metrics` | centroid |
-| 2.62%  | `NeverShortCircuit` closure | iterator internals |
-| 2.21%  | `quicksort::partition` | sorting |
+| 13.35% | `optimize_moffat_fixed_beta_avx2` | moffat_fit (L-M optimizer) |
+| 11.72% | `bfs_region` | deblend |
+| 8.58%  | `deblend_multi_threshold` | deblend |
+| 6.00%  | `compute_pow_neg_beta_8` | moffat_fit (SIMD pow) |
+| 5.64%  | closure (FnMut) | background interpolation |
+| 5.15%  | `fill_jacobian_residuals_simd_fixed_beta` | moffat_fit (SIMD) |
+| 4.07%  | iterator fold (map) | various |
+| 3.27%  | `convolve_row_avx2` | convolution |
+| 3.16%  | `process_words_filtered_sse` | threshold_mask |
+| 2.67%  | `refine_centroid_avx2` | centroid |
+| 2.55%  | `compute_metrics` | centroid |
+| 2.52%  | `NeverShortCircuit` closure | iterator internals |
+| 2.40%  | `clear_page_erms` (kernel) | page faults |
+| 2.34%  | `compute_chi2_simd_fixed_beta` | moffat_fit (SIMD) |
+| 2.01%  | `quicksort::partition` | sorting |
 | 1.84%  | `interpolate_segment_avx2` | background |
-| 1.82%  | closure (Fn) | various |
-| 1.79%  | `compute_centroid` | centroid |
-| 1.70%  | `__memmove_avx_unaligned_erms` | libc (memcpy) |
-| 1.65%  | `PixelGrid::reset_with_pixels` | deblend |
-| 1.45%  | `solve_generic` | gaussian_fit (linear solver) |
-| 0.99%  | `find_connected_regions_grid` | deblend |
+| 1.81%  | `compute_centroid` | centroid |
+| 1.76%  | closure (Fn) | various |
+| 1.56%  | `__memmove_avx_unaligned_erms` | libc (memcpy) |
+| 1.55%  | `PixelGrid::reset_with_pixels` | deblend |
+| 1.00%  | `find_connected_regions_grid` | deblend |
+| 0.93%  | `roundf` | libm |
 | 0.91%  | `from_elem` | allocator (vec init) |
-| 0.89%  | `extend_desugared` | allocator (vec extend) |
-| 0.76%  | `convolve_cols_avx2` | convolution |
-| 0.70%  | `sigma_clip_iteration` | background |
-| 0.67%  | `extract_stamp` | centroid |
+| 0.89%  | `convolve_cols_avx2` | convolution |
+| 0.88%  | `solve_generic` | moffat_fit (linear solver) |
+| 0.86%  | `extend_desugared` | allocator (vec extend) |
+| 0.65%  | `extract_stamp` | centroid |
+| 0.65%  | `sigma_clip_iteration` | background |
 
 ## Grouped by Pipeline Stage
 
 | Stage | % of total | Key functions |
 |-------|-----------|---------------|
-| **Deblending** | ~24% | `bfs_region` (12.4%), `deblend_multi_threshold` (8.7%), `reset_with_pixels` (1.7%), `find_connected_regions_grid` (1.0%) |
-| **Gaussian fitting** | ~17% | `fill_jacobian` (6.1%), `compute_hessian_gradient_6` (5.5%), `compute_chi2` (3.1%), `solve_generic` (1.5%), `extract_stamp` (0.7%) |
-| **Centroid + metrics** | ~12% | `refine_centroid_avx2` (7.5%), `compute_metrics` (2.8%), `compute_centroid` (1.8%) |
-| **Convolution** | ~11% | `clear_page_erms` (6.3%), `convolve_row_avx2` (3.5%), `convolve_cols_avx2` (0.8%) |
+| **Moffat fitting** | ~28% | `optimize_moffat_fixed_beta_avx2` (13.4%), `compute_pow_neg_beta_8` (6.0%), `fill_jacobian_residuals_simd_fixed_beta` (5.2%), `compute_chi2_simd_fixed_beta` (2.3%), `solve_generic` (0.9%) |
+| **Deblending** | ~23% | `bfs_region` (11.7%), `deblend_multi_threshold` (8.6%), `reset_with_pixels` (1.6%), `find_connected_regions_grid` (1.0%) |
+| **Centroid + metrics** | ~7% | `refine_centroid_avx2` (2.7%), `compute_metrics` (2.6%), `compute_centroid` (1.8%) |
 | **Background** | ~8% | closures (5.6%), `interpolate_segment_avx2` (1.8%), `sigma_clip_iteration` (0.7%) |
+| **Convolution** | ~7% | `convolve_row_avx2` (3.3%), `clear_page_erms` (2.4%), `convolve_cols_avx2` (0.9%) |
 | **Threshold mask** | ~3% | `process_words_filtered_sse` (3.2%) |
-| **Other** | ~25% | iterator overhead (10.4%), sorting (2.2%), memcpy (1.7%), allocator (1.8%), rayon scheduling (1.1%) |
+| **Other** | ~24% | iterator overhead (8.4%), sorting (2.0%), memcpy (1.6%), allocator (1.8%), rayon scheduling |
 
 ## Change History
 
@@ -183,4 +185,5 @@ Despite two rounds of optimization, deblending is still the largest pipeline sta
 | ~~Pool convolution temp buffer~~ | Low | **-2.8%** (492→478ms) | None | **Done** |
 | ~~Reduce centroid Phase 1 iters~~ | Low | **-2.5%** (478→462ms) | None | **Done** |
 | ~~Early L-M position termination~~ | Low | **-3.8%** (462→445ms) | None | **Done** |
-| **Cumulative done** | | **-30.4%** (639→445ms) | | |
+| **Cumulative done (GaussianFit)** | | **-30.4%** (639→445ms) | | |
+| **Current (MoffatFit)** | | **502ms** median | | |
