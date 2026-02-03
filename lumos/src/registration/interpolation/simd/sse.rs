@@ -2,6 +2,7 @@
 
 #![allow(clippy::needless_range_loop)]
 
+use glam::DVec2;
 #[cfg(target_arch = "x86_64")]
 use std::arch::x86_64::*;
 
@@ -146,13 +147,13 @@ pub unsafe fn warp_row_bilinear_avx2(
         // Handle remainder with scalar
         let remainder_start = chunks * 8;
         for x in remainder_start..output_width {
-            let (src_x, src_y) = inverse.apply(x as f64, y);
+            let src = inverse.apply(DVec2::new(x as f64, y));
             output_row[x] = super::bilinear_sample(
                 input,
                 input_width,
                 input_height,
-                src_x as f32,
-                src_y as f32,
+                src.x as f32,
+                src.y as f32,
                 border_value,
             );
         }
@@ -281,13 +282,13 @@ pub unsafe fn warp_row_bilinear_sse(
         // Handle remainder with scalar
         let remainder_start = chunks * 4;
         for x in remainder_start..output_width {
-            let (src_x, src_y) = inverse.apply(x as f64, y);
+            let src = inverse.apply(DVec2::new(x as f64, y));
             output_row[x] = super::bilinear_sample(
                 input,
                 input_width,
                 input_height,
-                src_x as f32,
-                src_y as f32,
+                src.x as f32,
+                src.y as f32,
                 border_value,
             );
         }
@@ -329,7 +330,7 @@ mod tests {
         let width = 128;
         let height = 64;
         let input = patterns::diagonal_gradient(width, height);
-        let transform = Transform::translation(2.5, 1.5);
+        let transform = Transform::translation(DVec2::new(2.5, 1.5));
         let inverse = transform.inverse();
 
         let mut output_avx2 = vec![0.0f32; width];
@@ -380,7 +381,7 @@ mod tests {
         let width = 64;
         let height = 64;
         let input = patterns::diagonal_gradient(width, height);
-        let transform = Transform::similarity(1.0, 2.0, 0.05, 1.02);
+        let transform = Transform::similarity(DVec2::new(1.0, 2.0), 0.05, 1.02);
         let inverse = transform.inverse();
 
         let mut output_sse = vec![0.0f32; width];

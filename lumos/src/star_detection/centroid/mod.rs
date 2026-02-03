@@ -309,8 +309,8 @@ pub fn compute_centroid(
     let stamp_radius = compute_stamp_radius(config.psf.expected_fwhm);
 
     // Initial position from peak
-    let mut cx = candidate.peak_x as f32;
-    let mut cy = candidate.peak_y as f32;
+    let mut cx = candidate.peak.x as f32;
+    let mut cy = candidate.peak.y as f32;
 
     // First pass: always use weighted moments for initial refinement
     // This gives a good starting point for fitting methods
@@ -360,8 +360,8 @@ pub fn compute_centroid(
                 fit_gaussian_2d(pixels, cx, cy, stamp_radius, local_bg, &fit_config)
                     .filter(|r| r.converged)
             {
-                cx = result.x;
-                cy = result.y;
+                cx = result.pos.x as f32;
+                cy = result.pos.y as f32;
             }
         }
         CentroidMethod::MoffatFit { beta } => {
@@ -373,8 +373,8 @@ pub fn compute_centroid(
             if let Some(result) = fit_moffat_2d(pixels, cx, cy, stamp_radius, local_bg, &fit_config)
                 .filter(|r| r.converged)
             {
-                cx = result.x;
-                cy = result.y;
+                cx = result.pos.x as f32;
+                cy = result.pos.y as f32;
             }
         }
         CentroidMethod::WeightedMoments => {
@@ -395,8 +395,7 @@ pub fn compute_centroid(
         compute_laplacian_snr(pixels, cx, cy, stamp_radius, local_bg, local_noise);
 
     Some(Star {
-        x: cx,
-        y: cy,
+        pos: glam::DVec2::new(cx as f64, cy as f64),
         flux: metrics.flux,
         fwhm: metrics.fwhm,
         eccentricity: metrics.eccentricity,

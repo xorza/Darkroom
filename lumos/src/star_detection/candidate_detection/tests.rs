@@ -86,11 +86,11 @@ mod detect_stars_tests {
         assert_eq!(candidates.len(), 1, "Should detect exactly one star");
         let star = &candidates[0];
         assert!(
-            star.peak_x >= 30 && star.peak_x <= 34,
+            star.peak.x >= 30 && star.peak.x <= 34,
             "Peak X should be near 32"
         );
         assert!(
-            star.peak_y >= 30 && star.peak_y <= 34,
+            star.peak.y >= 30 && star.peak.y <= 34,
             "Peak Y should be near 32"
         );
     }
@@ -266,8 +266,8 @@ mod extract_candidates_tests {
         assert_eq!(c.bbox.max.x, 2);
         assert_eq!(c.bbox.min.y, 1);
         assert_eq!(c.bbox.max.y, 1);
-        assert_eq!(c.peak_x, 1);
-        assert_eq!(c.peak_y, 1);
+        assert_eq!(c.peak.x, 1);
+        assert_eq!(c.peak.y, 1);
         assert!((c.peak_value - 0.9).abs() < 1e-6);
     }
 
@@ -303,14 +303,14 @@ mod extract_candidates_tests {
 
         // First component
         assert_eq!(candidates[0].area, 1);
-        assert_eq!(candidates[0].peak_x, 0);
-        assert_eq!(candidates[0].peak_y, 0);
+        assert_eq!(candidates[0].peak.x, 0);
+        assert_eq!(candidates[0].peak.y, 0);
         assert!((candidates[0].peak_value - 0.8).abs() < 1e-6);
 
         // Second component
         assert_eq!(candidates[1].area, 1);
-        assert_eq!(candidates[1].peak_x, 4);
-        assert_eq!(candidates[1].peak_y, 0);
+        assert_eq!(candidates[1].peak.x, 4);
+        assert_eq!(candidates[1].peak.y, 0);
         assert!((candidates[1].peak_value - 0.7).abs() < 1e-6);
     }
 
@@ -342,8 +342,8 @@ mod extract_candidates_tests {
         assert_eq!(c.bbox.max.x, 1);
         assert_eq!(c.bbox.min.y, 0);
         assert_eq!(c.bbox.max.y, 2);
-        assert_eq!(c.peak_x, 0);
-        assert_eq!(c.peak_y, 2);
+        assert_eq!(c.peak.x, 0);
+        assert_eq!(c.peak.y, 2);
         assert!((c.peak_value - 0.9).abs() < 1e-6);
     }
 
@@ -420,8 +420,8 @@ mod extract_candidates_tests {
         assert_eq!(candidates.len(), 1);
         let c = &candidates[0];
         // Peak is at one of the positions with value 0.9
-        assert_eq!(c.peak_y, 1);
-        assert!(c.peak_x <= 2); // One of 0, 1, or 2
+        assert_eq!(c.peak.y, 1);
+        assert!(c.peak.x <= 2); // One of 0, 1, or 2
         assert!((c.peak_value - 0.9).abs() < 1e-6);
     }
 
@@ -455,8 +455,8 @@ mod extract_candidates_tests {
 
         assert_eq!(candidates.len(), 1);
         let c = &candidates[0];
-        assert_eq!(c.peak_x, 0);
-        assert_eq!(c.peak_y, 0);
+        assert_eq!(c.peak.x, 0);
+        assert_eq!(c.peak.y, 0);
         assert_eq!(c.bbox.min.x, 0);
         assert_eq!(c.bbox.max.x, 1);
         assert_eq!(c.bbox.min.y, 0);
@@ -499,8 +499,8 @@ mod extract_candidates_tests {
         assert_eq!(c.bbox.max.y, 1);
         assert_eq!(c.bbox.width(), 1);
         assert_eq!(c.bbox.height(), 1);
-        assert_eq!(c.peak_x, 1);
-        assert_eq!(c.peak_y, 1);
+        assert_eq!(c.peak.x, 1);
+        assert_eq!(c.peak.y, 1);
     }
 
     #[test]
@@ -540,8 +540,8 @@ mod extract_candidates_tests {
         assert_eq!(c.bbox.min.y, 0);
         assert_eq!(c.bbox.max.y, 2);
         // Peak is at (0, 0) with value 0.9
-        assert_eq!(c.peak_x, 0);
-        assert_eq!(c.peak_y, 0);
+        assert_eq!(c.peak.x, 0);
+        assert_eq!(c.peak.y, 0);
     }
 
     #[test]
@@ -577,10 +577,10 @@ mod extract_candidates_tests {
         assert_eq!(candidates.len(), 2);
         // Label 1 at (0, 0)
         assert_eq!(candidates[0].area, 1);
-        assert_eq!(candidates[0].peak_x, 0);
+        assert_eq!(candidates[0].peak.x, 0);
         // Label 3 at (2, 0)
         assert_eq!(candidates[1].area, 1);
-        assert_eq!(candidates[1].peak_x, 2);
+        assert_eq!(candidates[1].peak.x, 2);
     }
 
     #[test]
@@ -600,8 +600,8 @@ mod extract_candidates_tests {
         assert_eq!(c.bbox.min.y, 0);
         assert_eq!(c.bbox.max.y, 2);
         // Peak is last pixel (2, 2) with value 0.9
-        assert_eq!(c.peak_x, 2);
-        assert_eq!(c.peak_y, 2);
+        assert_eq!(c.peak.x, 2);
+        assert_eq!(c.peak.y, 2);
         assert!((c.peak_value - 0.9).abs() < 1e-6);
     }
 
@@ -636,8 +636,8 @@ mod extract_candidates_tests {
         assert_eq!(candidates.len(), 1);
         let c = &candidates[0];
         // Peak is at (1, 1) with value 0.3
-        assert_eq!(c.peak_x, 1);
-        assert_eq!(c.peak_y, 1);
+        assert_eq!(c.peak.x, 1);
+        assert_eq!(c.peak.y, 1);
         assert!((c.peak_value - 0.3).abs() < 1e-6);
     }
 
@@ -661,8 +661,8 @@ mod extract_candidates_tests {
         assert_eq!(candidates.len(), 10);
         for (i, c) in candidates.iter().enumerate() {
             assert_eq!(c.area, 1);
-            assert_eq!(c.peak_x, i);
-            assert_eq!(c.peak_y, i);
+            assert_eq!(c.peak.x, i);
+            assert_eq!(c.peak.y, i);
         }
     }
 
@@ -698,15 +698,15 @@ mod extract_candidates_tests {
         assert_eq!(candidates[0].area, 6);
         assert_eq!(candidates[0].bbox.min.x, 1);
         assert_eq!(candidates[0].bbox.max.x, 3);
-        assert_eq!(candidates[0].peak_x, 2);
-        assert_eq!(candidates[0].peak_y, 0);
+        assert_eq!(candidates[0].peak.x, 2);
+        assert_eq!(candidates[0].peak.y, 0);
 
         // Component 2: column 5, both rows
         assert_eq!(candidates[1].area, 2);
         assert_eq!(candidates[1].bbox.min.x, 5);
         assert_eq!(candidates[1].bbox.max.x, 5);
-        assert_eq!(candidates[1].peak_x, 5);
-        assert_eq!(candidates[1].peak_y, 0);
+        assert_eq!(candidates[1].peak.x, 5);
+        assert_eq!(candidates[1].peak.y, 0);
     }
 }
 
@@ -760,7 +760,7 @@ mod integration_tests {
         // Verify star 1
         let star1 = candidates
             .iter()
-            .find(|c| c.peak_x == 3 && c.peak_y == 3)
+            .find(|c| c.peak.x == 3 && c.peak.y == 3)
             .unwrap();
         assert_eq!(star1.area, 9);
         assert!((star1.peak_value - 0.9).abs() < 1e-6);
@@ -768,7 +768,7 @@ mod integration_tests {
         // Verify star 2
         let star2 = candidates
             .iter()
-            .find(|c| c.peak_x == 7 && c.peak_y == 7)
+            .find(|c| c.peak.x == 7 && c.peak.y == 7)
             .unwrap();
         assert_eq!(star2.area, 4);
         assert!((star2.peak_value - 0.8).abs() < 1e-6);
@@ -878,30 +878,30 @@ mod deblend_tests {
 
         // Sort by peak_x to have consistent ordering
         let mut sorted: Vec<_> = candidates.iter().collect();
-        sorted.sort_by_key(|c| c.peak_x);
+        sorted.sort_by_key(|c| c.peak.x);
 
         // First star at approximately (4, 4)
         assert!(
-            (sorted[0].peak_x as i32 - 4).abs() <= 1,
+            (sorted[0].peak.x as i32 - 4).abs() <= 1,
             "First peak X should be near 4, got {}",
-            sorted[0].peak_x
+            sorted[0].peak.x
         );
         assert!(
-            (sorted[0].peak_y as i32 - 4).abs() <= 1,
+            (sorted[0].peak.y as i32 - 4).abs() <= 1,
             "First peak Y should be near 4, got {}",
-            sorted[0].peak_y
+            sorted[0].peak.y
         );
 
         // Second star at approximately (10, 4)
         assert!(
-            (sorted[1].peak_x as i32 - 10).abs() <= 1,
+            (sorted[1].peak.x as i32 - 10).abs() <= 1,
             "Second peak X should be near 10, got {}",
-            sorted[1].peak_x
+            sorted[1].peak.x
         );
         assert!(
-            (sorted[1].peak_y as i32 - 4).abs() <= 1,
+            (sorted[1].peak.y as i32 - 4).abs() <= 1,
             "Second peak Y should be near 4, got {}",
-            sorted[1].peak_y
+            sorted[1].peak.y
         );
     }
 
@@ -1069,18 +1069,18 @@ mod deblend_tests {
 
             // Sort by peak_x to have consistent ordering
             let mut sorted: Vec<_> = candidates.iter().collect();
-            sorted.sort_by_key(|c| c.peak_x);
+            sorted.sort_by_key(|c| c.peak.x);
 
             // Check peak positions
             assert!(
-                (sorted[0].peak_x as i32 - 7).abs() <= 1,
+                (sorted[0].peak.x as i32 - 7).abs() <= 1,
                 "First peak X should be near 7, got {}",
-                sorted[0].peak_x
+                sorted[0].peak.x
             );
             assert!(
-                (sorted[1].peak_x as i32 - 22).abs() <= 1,
+                (sorted[1].peak.x as i32 - 22).abs() <= 1,
                 "Second peak X should be near 22, got {}",
-                sorted[1].peak_x
+                sorted[1].peak.x
             );
         }
 
@@ -1157,19 +1157,19 @@ mod deblend_tests {
 
             // Peak positions should be similar
             let mut simple_sorted: Vec<_> = simple_candidates.iter().collect();
-            simple_sorted.sort_by_key(|c| c.peak_x);
+            simple_sorted.sort_by_key(|c| c.peak.x);
 
             let mut mt_sorted: Vec<_> = mt_candidates.iter().collect();
-            mt_sorted.sort_by_key(|c| c.peak_x);
+            mt_sorted.sort_by_key(|c| c.peak.x);
 
             for i in 0..2 {
                 assert!(
-                    (simple_sorted[i].peak_x as i32 - mt_sorted[i].peak_x as i32).abs() <= 2,
+                    (simple_sorted[i].peak.x as i32 - mt_sorted[i].peak.x as i32).abs() <= 2,
                     "Peak {} X positions should be similar",
                     i
                 );
                 assert!(
-                    (simple_sorted[i].peak_y as i32 - mt_sorted[i].peak_y as i32).abs() <= 2,
+                    (simple_sorted[i].peak.y as i32 - mt_sorted[i].peak.y as i32).abs() <= 2,
                     "Peak {} Y positions should be similar",
                     i
                 );
@@ -1299,11 +1299,11 @@ mod filtered_image_tests {
         );
         let star = &candidates[0];
         assert!(
-            (star.peak_x as i32 - 50).abs() <= 1,
+            (star.peak.x as i32 - 50).abs() <= 1,
             "Peak X should be near 50"
         );
         assert!(
-            (star.peak_y as i32 - 50).abs() <= 1,
+            (star.peak.y as i32 - 50).abs() <= 1,
             "Peak Y should be near 50"
         );
     }
@@ -1363,12 +1363,12 @@ mod filtered_image_tests {
 
         // Peak positions should be similar
         assert!(
-            (candidates_unfiltered[0].peak_x as i32 - candidates_filtered[0].peak_x as i32).abs()
+            (candidates_unfiltered[0].peak.x as i32 - candidates_filtered[0].peak.x as i32).abs()
                 <= 1,
             "Peak X should be similar"
         );
         assert!(
-            (candidates_unfiltered[0].peak_y as i32 - candidates_filtered[0].peak_y as i32).abs()
+            (candidates_unfiltered[0].peak.y as i32 - candidates_filtered[0].peak.y as i32).abs()
                 <= 1,
             "Peak Y should be similar"
         );
@@ -1431,7 +1431,7 @@ mod sigma_threshold_tests {
             "Should detect only 1 star (bright one), faint should be below threshold"
         );
         assert!(
-            (candidates[0].peak_x as i32 - 45).abs() <= 2,
+            (candidates[0].peak.x as i32 - 45).abs() <= 2,
             "Detected star should be the bright one at x=45"
         );
     }
@@ -1691,7 +1691,7 @@ mod regression_tests {
                 i
             );
             assert!(
-                c.peak_x < 256 && c.peak_y < 256,
+                c.peak.x < 256 && c.peak.y < 256,
                 "Candidate {} peak should be within bounds",
                 i
             );
@@ -1725,13 +1725,13 @@ mod regression_tests {
         // Sort by peak position for comparison (order may differ due to parallel processing)
         let mut sorted1: Vec<_> = candidates1.iter().collect();
         let mut sorted2: Vec<_> = candidates2.iter().collect();
-        sorted1.sort_by_key(|c| (c.peak_y, c.peak_x));
-        sorted2.sort_by_key(|c| (c.peak_y, c.peak_x));
+        sorted1.sort_by_key(|c| (c.peak.y, c.peak.x));
+        sorted2.sort_by_key(|c| (c.peak.y, c.peak.x));
 
         // Verify same peaks detected (after sorting)
         for (c1, c2) in sorted1.iter().zip(sorted2.iter()) {
-            assert_eq!(c1.peak_x, c2.peak_x, "Peak X should be identical");
-            assert_eq!(c1.peak_y, c2.peak_y, "Peak Y should be identical");
+            assert_eq!(c1.peak.x, c2.peak.x, "Peak X should be identical");
+            assert_eq!(c1.peak.y, c2.peak.y, "Peak Y should be identical");
             assert_eq!(c1.area, c2.area, "Area should be identical");
         }
     }

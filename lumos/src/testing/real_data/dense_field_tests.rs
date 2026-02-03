@@ -92,7 +92,7 @@ fn test_multi_threshold_on_dense_fields() {
             for star in result.stars.iter().take(10) {
                 println!(
                     "{:>8.1} {:>8.1} {:>10.0} {:>8.2} {:>8.1}",
-                    star.x, star.y, star.flux, star.fwhm, star.snr
+                    star.pos.x, star.pos.y, star.flux, star.fwhm, star.snr
                 );
             }
         }

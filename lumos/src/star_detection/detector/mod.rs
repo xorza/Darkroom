@@ -469,22 +469,22 @@ pub(crate) fn remove_duplicate_stars(stars: &mut Vec<Star>, min_separation: f32)
         return remove_duplicate_stars_simple(stars, min_separation);
     }
 
-    let min_sep_sq = min_separation * min_separation;
+    let min_sep_sq = (min_separation * min_separation) as f64;
 
     // Find bounding box
-    let mut min_x = f32::MAX;
-    let mut min_y = f32::MAX;
-    let mut max_x = f32::MIN;
-    let mut max_y = f32::MIN;
+    let mut min_x = f64::MAX;
+    let mut min_y = f64::MAX;
+    let mut max_x = f64::MIN;
+    let mut max_y = f64::MIN;
     for star in stars.iter() {
-        min_x = min_x.min(star.x);
-        min_y = min_y.min(star.y);
-        max_x = max_x.max(star.x);
-        max_y = max_y.max(star.y);
+        min_x = min_x.min(star.pos.x);
+        min_y = min_y.min(star.pos.y);
+        max_x = max_x.max(star.pos.x);
+        max_y = max_y.max(star.pos.y);
     }
 
     // Cell size = min_separation ensures we only need to check 3x3 neighborhood
-    let cell_size = min_separation;
+    let cell_size = min_separation as f64;
     let grid_width = ((max_x - min_x) / cell_size).ceil() as usize + 1;
     let grid_height = ((max_y - min_y) / cell_size).ceil() as usize + 1;
 
@@ -498,8 +498,8 @@ pub(crate) fn remove_duplicate_stars(stars: &mut Vec<Star>, min_separation: f32)
     // Process stars in flux order (brightest first, already sorted)
     for i in 0..stars.len() {
         let star = &stars[i];
-        let cell_x = ((star.x - min_x) / cell_size) as usize;
-        let cell_y = ((star.y - min_y) / cell_size) as usize;
+        let cell_x = ((star.pos.x - min_x) / cell_size) as usize;
+        let cell_y = ((star.pos.y - min_y) / cell_size) as usize;
 
         // Check 3x3 neighborhood for duplicates
         let mut is_duplicate = false;
@@ -516,8 +516,8 @@ pub(crate) fn remove_duplicate_stars(stars: &mut Vec<Star>, min_separation: f32)
                 let cell_idx = ny * grid_width + nx;
                 for &other_idx in &grid[cell_idx] {
                     let other = &stars[other_idx];
-                    let ddx = star.x - other.x;
-                    let ddy = star.y - other.y;
+                    let ddx = star.pos.x - other.pos.x;
+                    let ddy = star.pos.y - other.pos.y;
                     if ddx * ddx + ddy * ddy < min_sep_sq {
                         is_duplicate = true;
                         break 'outer;
@@ -554,7 +554,7 @@ pub(crate) fn remove_duplicate_stars(stars: &mut Vec<Star>, min_separation: f32)
 
 /// Simple O(n²) duplicate removal for small star counts.
 fn remove_duplicate_stars_simple(stars: &mut Vec<Star>, min_separation: f32) -> usize {
-    let min_sep_sq = min_separation * min_separation;
+    let min_sep_sq = (min_separation * min_separation) as f64;
     let mut kept = vec![true; stars.len()];
 
     for i in 0..stars.len() {
@@ -565,8 +565,8 @@ fn remove_duplicate_stars_simple(stars: &mut Vec<Star>, min_separation: f32) -> 
             if !kept[j] {
                 continue;
             }
-            let dx = stars[i].x - stars[j].x;
-            let dy = stars[i].y - stars[j].y;
+            let dx = stars[i].pos.x - stars[j].pos.x;
+            let dy = stars[i].pos.y - stars[j].pos.y;
             if dx * dx + dy * dy < min_sep_sq {
                 kept[j] = false;
             }

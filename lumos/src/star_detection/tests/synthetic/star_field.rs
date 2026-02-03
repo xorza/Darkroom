@@ -1,15 +1,14 @@
 //! Synthetic star field generation for testing star detection algorithms.
 
 use crate::math::FWHM_TO_SIGMA;
+use glam::Vec2;
 
 /// A synthetic star to be placed in a generated image.
 #[allow(dead_code)]
 #[derive(Debug, Clone, Copy)]
 pub struct SyntheticStar {
-    /// X coordinate (center).
-    pub x: f32,
-    /// Y coordinate (center).
-    pub y: f32,
+    /// Position (center).
+    pub pos: Vec2,
     /// Peak brightness (0.0-1.0).
     pub brightness: f32,
     /// Sigma of the Gaussian profile (FWHM ≈ 2.355 * sigma).
@@ -21,8 +20,7 @@ impl SyntheticStar {
     /// Create a new synthetic star.
     pub fn new(x: f32, y: f32, brightness: f32, sigma: f32) -> Self {
         Self {
-            x,
-            y,
+            pos: Vec2::new(x, y),
             brightness,
             sigma,
         }
@@ -90,8 +88,8 @@ fn add_gaussian_star(pixels: &mut [f32], width: usize, height: usize, star: &Syn
     // Only render within 4 sigma of center (covers >99.99% of flux)
     let radius = (4.0 * star.sigma).ceil() as i32;
 
-    let cx = star.x.round() as i32;
-    let cy = star.y.round() as i32;
+    let cx = star.pos.x.round() as i32;
+    let cy = star.pos.y.round() as i32;
 
     let x_min = (cx - radius).max(0) as usize;
     let x_max = ((cx + radius) as usize).min(width - 1);
@@ -102,8 +100,8 @@ fn add_gaussian_star(pixels: &mut [f32], width: usize, height: usize, star: &Syn
 
     for y in y_min..=y_max {
         for x in x_min..=x_max {
-            let dx = x as f32 - star.x;
-            let dy = y as f32 - star.y;
+            let dx = x as f32 - star.pos.x;
+            let dy = y as f32 - star.pos.y;
             let r_sq = dx * dx + dy * dy;
 
             let value = star.brightness * (-r_sq / two_sigma_sq).exp();

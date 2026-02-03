@@ -1,5 +1,7 @@
 //! Tests for StarDetector helper functions.
 
+use glam::DVec2;
+
 use super::{filter_fwhm_outliers, remove_duplicate_stars};
 use crate::star_detection::Star;
 
@@ -9,8 +11,7 @@ use crate::star_detection::Star;
 
 fn make_test_star(fwhm: f32, flux: f32) -> Star {
     Star {
-        x: 10.0,
-        y: 10.0,
+        pos: DVec2::new(10.0, 10.0),
         flux,
         fwhm,
         eccentricity: 0.1,
@@ -25,8 +26,7 @@ fn make_test_star(fwhm: f32, flux: f32) -> Star {
 
 fn make_star_at(x: f32, y: f32, flux: f32) -> Star {
     Star {
-        x,
-        y,
+        pos: DVec2::new(x as f64, y as f64),
         flux,
         fwhm: 3.0,
         eccentricity: 0.1,
@@ -275,8 +275,8 @@ fn test_remove_duplicate_stars_one_pair() {
 
     assert_eq!(removed, 1);
     assert_eq!(stars.len(), 2);
-    assert!((stars[0].x - 10.0).abs() < 0.01);
-    assert!((stars[1].x - 50.0).abs() < 0.01);
+    assert!((stars[0].pos.x - 10.0).abs() < 0.01);
+    assert!((stars[1].pos.x - 50.0).abs() < 0.01);
 }
 
 #[test]
@@ -354,8 +354,8 @@ fn test_remove_duplicate_stars_two_separate_pairs() {
 
     assert_eq!(removed, 2);
     assert_eq!(stars.len(), 2);
-    assert!((stars[0].x - 10.0).abs() < 0.01);
-    assert!((stars[1].x - 100.0).abs() < 0.01);
+    assert!((stars[0].pos.x - 10.0).abs() < 0.01);
+    assert!((stars[1].pos.x - 100.0).abs() < 0.01);
 }
 
 #[test]
@@ -489,16 +489,16 @@ fn test_remove_duplicate_stars_spatial_hash_path() {
     // Verify no remaining stars are too close
     for i in 0..stars.len() {
         for j in (i + 1)..stars.len() {
-            let dx = stars[i].x - stars[j].x;
-            let dy = stars[i].y - stars[j].y;
+            let dx = stars[i].pos.x - stars[j].pos.x;
+            let dy = stars[i].pos.y - stars[j].pos.y;
             let dist_sq = dx * dx + dy * dy;
             assert!(
                 dist_sq >= 64.0, // 8.0^2
                 "Stars at ({}, {}) and ({}, {}) are too close: dist={}",
-                stars[i].x,
-                stars[i].y,
-                stars[j].x,
-                stars[j].y,
+                stars[i].pos.x,
+                stars[i].pos.y,
+                stars[j].pos.x,
+                stars[j].pos.y,
                 dist_sq.sqrt()
             );
         }
@@ -568,12 +568,12 @@ fn test_remove_duplicate_stars_spatial_hash_consistency() {
     // Verify same stars kept (by position)
     for (h, s) in stars_hash.iter().zip(stars_simple.iter()) {
         assert!(
-            (h.x - s.x).abs() < 0.001 && (h.y - s.y).abs() < 0.001,
+            (h.pos.x - s.pos.x).abs() < 0.001 && (h.pos.y - s.pos.y).abs() < 0.001,
             "Mismatch: hash({}, {}) vs simple({}, {})",
-            h.x,
-            h.y,
-            s.x,
-            s.y
+            h.pos.x,
+            h.pos.y,
+            s.pos.x,
+            s.pos.y
         );
     }
 }

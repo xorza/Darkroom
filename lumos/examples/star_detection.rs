@@ -86,8 +86,8 @@ fn main() {
         println!(
             "{:>5} {:>8.2} {:>8.2} {:>8.1} {:>6.2} {:>6.1} {:>6.3}",
             i + 1,
-            star.x,
-            star.y,
+            star.pos.x,
+            star.pos.y,
             star.flux,
             star.fwhm,
             star.snr,

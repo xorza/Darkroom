@@ -13,6 +13,7 @@ mod tests;
 
 pub mod simd;
 
+use glam::DVec2;
 use nalgebra::{DMatrix, SVD};
 use rand::prelude::*;
 
@@ -132,8 +133,8 @@ impl RansacEstimator {
     /// Best transformation found, or None if estimation failed.
     pub fn estimate(
         &self,
-        ref_points: &[(f64, f64)],
-        target_points: &[(f64, f64)],
+        ref_points: &[DVec2],
+        target_points: &[DVec2],
         transform_type: TransformType,
     ) -> Option<RansacResult> {
         let n = ref_points.len();
@@ -151,8 +152,8 @@ impl RansacEstimator {
 
         // Pre-allocate buffers to avoid per-iteration allocations
         let mut sample_indices: Vec<usize> = Vec::with_capacity(min_samples);
-        let mut sample_ref: Vec<(f64, f64)> = Vec::with_capacity(min_samples);
-        let mut sample_target: Vec<(f64, f64)> = Vec::with_capacity(min_samples);
+        let mut sample_ref: Vec<DVec2> = Vec::with_capacity(min_samples);
+        let mut sample_target: Vec<DVec2> = Vec::with_capacity(min_samples);
 
         let mut iterations = 0;
         let max_iter = self.config.max_iterations;
@@ -223,8 +224,8 @@ impl RansacEstimator {
         if let Some(transform) = best_transform
             && best_inliers.len() >= min_samples
         {
-            let inlier_ref: Vec<(f64, f64)> = best_inliers.iter().map(|&i| ref_points[i]).collect();
-            let inlier_target: Vec<(f64, f64)> =
+            let inlier_ref: Vec<DVec2> = best_inliers.iter().map(|&i| ref_points[i]).collect();
+            let inlier_target: Vec<DVec2> =
                 best_inliers.iter().map(|&i| target_points[i]).collect();
 
             let refined =
@@ -261,8 +262,8 @@ impl RansacEstimator {
     /// This typically improves the inlier count by 5-15%.
     fn local_optimization(
         &self,
-        ref_points: &[(f64, f64)],
-        target_points: &[(f64, f64)],
+        ref_points: &[DVec2],
+        target_points: &[DVec2],
         initial_transform: &Transform,
         initial_inliers: &[usize],
         transform_type: TransformType,
@@ -286,9 +287,8 @@ impl RansacEstimator {
             }
 
             // Re-estimate transform using all current inliers
-            let inlier_ref: Vec<(f64, f64)> =
-                current_inliers.iter().map(|&i| ref_points[i]).collect();
-            let inlier_target: Vec<(f64, f64)> =
+            let inlier_ref: Vec<DVec2> = current_inliers.iter().map(|&i| ref_points[i]).collect();
+            let inlier_target: Vec<DVec2> =
                 current_inliers.iter().map(|&i| target_points[i]).collect();
 
             let refined = match estimate_transform(&inlier_ref, &inlier_target, transform_type) {
@@ -334,8 +334,8 @@ impl RansacEstimator {
     /// Best transformation found, or None if estimation failed.
     pub fn estimate_progressive(
         &self,
-        ref_points: &[(f64, f64)],
-        target_points: &[(f64, f64)],
+        ref_points: &[DVec2],
+        target_points: &[DVec2],
         confidences: &[f64],
         transform_type: TransformType,
     ) -> Option<RansacResult> {
@@ -369,8 +369,8 @@ impl RansacEstimator {
 
         // Pre-allocate buffers
         let mut sample_indices: Vec<usize> = Vec::with_capacity(min_samples);
-        let mut sample_ref: Vec<(f64, f64)> = Vec::with_capacity(min_samples);
-        let mut sample_target: Vec<(f64, f64)> = Vec::with_capacity(min_samples);
+        let mut sample_ref: Vec<DVec2> = Vec::with_capacity(min_samples);
+        let mut sample_target: Vec<DVec2> = Vec::with_capacity(min_samples);
 
         let mut iterations = 0;
         let max_iter = self.config.max_iterations;
@@ -470,8 +470,8 @@ impl RansacEstimator {
         if let Some(transform) = best_transform
             && best_inliers.len() >= min_samples
         {
-            let inlier_ref: Vec<(f64, f64)> = best_inliers.iter().map(|&i| ref_points[i]).collect();
-            let inlier_target: Vec<(f64, f64)> =
+            let inlier_ref: Vec<DVec2> = best_inliers.iter().map(|&i| ref_points[i]).collect();
+            let inlier_target: Vec<DVec2> =
                 best_inliers.iter().map(|&i| target_points[i]).collect();
 
             let refined =
@@ -514,8 +514,8 @@ impl RansacEstimator {
     pub fn estimate_with_matches(
         &self,
         matches: &[StarMatch],
-        ref_stars: &[(f64, f64)],
-        target_stars: &[(f64, f64)],
+        ref_stars: &[DVec2],
+        target_stars: &[DVec2],
         transform_type: TransformType,
     ) -> Option<RansacResult> {
         if matches.is_empty() {
@@ -523,9 +523,9 @@ impl RansacEstimator {
         }
 
         // Extract point pairs and confidences from matches
-        let ref_points: Vec<(f64, f64)> = matches.iter().map(|m| ref_stars[m.ref_idx]).collect();
+        let ref_points: Vec<DVec2> = matches.iter().map(|m| ref_stars[m.ref_idx]).collect();
 
-        let target_points: Vec<(f64, f64)> =
+        let target_points: Vec<DVec2> =
             matches.iter().map(|m| target_stars[m.target_idx]).collect();
 
         let confidences: Vec<f64> = matches.iter().map(|m| m.confidence).collect();
@@ -617,8 +617,8 @@ fn random_sample_into<R: Rng>(rng: &mut R, n: usize, k: usize, buffer: &mut Vec<
 /// Uses SIMD acceleration when available (AVX2/SSE on x86_64, NEON on aarch64).
 #[inline]
 fn count_inliers(
-    ref_points: &[(f64, f64)],
-    target_points: &[(f64, f64)],
+    ref_points: &[DVec2],
+    target_points: &[DVec2],
     transform: &Transform,
     threshold: f64,
 ) -> (Vec<usize>, usize) {
@@ -650,8 +650,8 @@ pub(crate) fn adaptive_iterations(inlier_ratio: f64, sample_size: usize, confide
 
 /// Estimate transformation from point correspondences.
 pub(crate) fn estimate_transform(
-    ref_points: &[(f64, f64)],
-    target_points: &[(f64, f64)],
+    ref_points: &[DVec2],
+    target_points: &[DVec2],
     transform_type: TransformType,
 ) -> Option<Transform> {
     match transform_type {
@@ -664,60 +664,46 @@ pub(crate) fn estimate_transform(
 }
 
 /// Estimate translation (average displacement).
-fn estimate_translation(
-    ref_points: &[(f64, f64)],
-    target_points: &[(f64, f64)],
-) -> Option<Transform> {
+fn estimate_translation(ref_points: &[DVec2], target_points: &[DVec2]) -> Option<Transform> {
     if ref_points.is_empty() {
         return None;
     }
 
-    let mut dx_sum = 0.0;
-    let mut dy_sum = 0.0;
+    let mut d_sum = DVec2::ZERO;
 
-    for ((rx, ry), (tx, ty)) in ref_points.iter().zip(target_points.iter()) {
-        dx_sum += tx - rx;
-        dy_sum += ty - ry;
+    for (r, t) in ref_points.iter().zip(target_points.iter()) {
+        d_sum += *t - *r;
     }
 
     let n = ref_points.len() as f64;
-    Some(Transform::translation(dx_sum / n, dy_sum / n))
+    Some(Transform::translation(d_sum / n))
 }
 
 /// Estimate Euclidean transform (translation + rotation).
-fn estimate_euclidean(
-    ref_points: &[(f64, f64)],
-    target_points: &[(f64, f64)],
-) -> Option<Transform> {
+fn estimate_euclidean(ref_points: &[DVec2], target_points: &[DVec2]) -> Option<Transform> {
     // Use similarity estimation with scale=1
     let sim = estimate_similarity(ref_points, target_points)?;
-    let (dx, dy) = sim.translation_components();
+    let t = sim.translation_components();
     let angle = sim.rotation_angle();
-    Some(Transform::euclidean(dx, dy, angle))
+    Some(Transform::euclidean(t, angle))
 }
 
 /// Estimate similarity transform (translation + rotation + uniform scale).
 pub(crate) fn estimate_similarity(
-    ref_points: &[(f64, f64)],
-    target_points: &[(f64, f64)],
+    ref_points: &[DVec2],
+    target_points: &[DVec2],
 ) -> Option<Transform> {
     if ref_points.len() < 2 {
         return None;
     }
 
     // Compute centroids
-    let (ref_cx, ref_cy) = centroid(ref_points);
-    let (tar_cx, tar_cy) = centroid(target_points);
+    let ref_centroid = centroid(ref_points);
+    let tar_centroid = centroid(target_points);
 
     // Center the points
-    let ref_centered: Vec<(f64, f64)> = ref_points
-        .iter()
-        .map(|(x, y)| (x - ref_cx, y - ref_cy))
-        .collect();
-    let tar_centered: Vec<(f64, f64)> = target_points
-        .iter()
-        .map(|(x, y)| (x - tar_cx, y - tar_cy))
-        .collect();
+    let ref_centered: Vec<DVec2> = ref_points.iter().map(|p| *p - ref_centroid).collect();
+    let tar_centered: Vec<DVec2> = target_points.iter().map(|p| *p - tar_centroid).collect();
 
     // Compute covariance terms
     let mut sxx = 0.0;
@@ -726,12 +712,12 @@ pub(crate) fn estimate_similarity(
     let mut syy = 0.0;
     let mut ref_var = 0.0;
 
-    for ((rx, ry), (tx, ty)) in ref_centered.iter().zip(tar_centered.iter()) {
-        sxx += rx * tx;
-        sxy += rx * ty;
-        syx += ry * tx;
-        syy += ry * ty;
-        ref_var += rx * rx + ry * ry;
+    for (r, t) in ref_centered.iter().zip(tar_centered.iter()) {
+        sxx += r.x * t.x;
+        sxy += r.x * t.y;
+        syx += r.y * t.x;
+        syy += r.y * t.y;
+        ref_var += r.x * r.x + r.y * r.y;
     }
 
     if ref_var < 1e-10 {
@@ -751,17 +737,16 @@ pub(crate) fn estimate_similarity(
     }
 
     // Compute translation
-    let dx = tar_cx - scale * (cos_a * ref_cx - sin_a * ref_cy);
-    let dy = tar_cy - scale * (sin_a * ref_cx + cos_a * ref_cy);
+    let t = DVec2::new(
+        tar_centroid.x - scale * (cos_a * ref_centroid.x - sin_a * ref_centroid.y),
+        tar_centroid.y - scale * (sin_a * ref_centroid.x + cos_a * ref_centroid.y),
+    );
 
-    Some(Transform::similarity(dx, dy, angle, scale))
+    Some(Transform::similarity(t, angle, scale))
 }
 
 /// Estimate affine transform using least squares.
-pub(crate) fn estimate_affine(
-    ref_points: &[(f64, f64)],
-    target_points: &[(f64, f64)],
-) -> Option<Transform> {
+pub(crate) fn estimate_affine(ref_points: &[DVec2], target_points: &[DVec2]) -> Option<Transform> {
     if ref_points.len() < 3 {
         return None;
     }
@@ -788,18 +773,18 @@ pub(crate) fn estimate_affine(
     let mut sum_x_ty = 0.0;
     let mut sum_y_ty = 0.0;
 
-    for ((rx, ry), (tx, ty)) in ref_points.iter().zip(target_points.iter()) {
-        sum_x += rx;
-        sum_y += ry;
-        sum_xx += rx * rx;
-        sum_xy += rx * ry;
-        sum_yy += ry * ry;
-        sum_tx += tx;
-        sum_ty += ty;
-        sum_x_tx += rx * tx;
-        sum_y_tx += ry * tx;
-        sum_x_ty += rx * ty;
-        sum_y_ty += ry * ty;
+    for (r, t) in ref_points.iter().zip(target_points.iter()) {
+        sum_x += r.x;
+        sum_y += r.y;
+        sum_xx += r.x * r.x;
+        sum_xy += r.x * r.y;
+        sum_yy += r.y * r.y;
+        sum_tx += t.x;
+        sum_ty += t.y;
+        sum_x_tx += r.x * t.x;
+        sum_y_tx += r.y * t.x;
+        sum_x_ty += r.x * t.y;
+        sum_y_ty += r.y * t.y;
     }
 
     // Build and solve 3x3 system for each target coordinate
@@ -848,8 +833,8 @@ pub(crate) fn estimate_affine(
 
 /// Estimate homography using Direct Linear Transform (DLT).
 pub(crate) fn estimate_homography(
-    ref_points: &[(f64, f64)],
-    target_points: &[(f64, f64)],
+    ref_points: &[DVec2],
+    target_points: &[DVec2],
 ) -> Option<Transform> {
     if ref_points.len() < 4 {
         return None;
@@ -871,11 +856,11 @@ pub(crate) fn estimate_homography(
     let mut ata = [[0.0f64; 9]; 9];
 
     for i in 0..n {
-        let (x, y) = ref_norm[i];
-        let (xp, yp) = tar_norm[i];
+        let r = ref_norm[i];
+        let t = tar_norm[i];
 
-        let row1 = [-x, -y, -1.0, 0.0, 0.0, 0.0, x * xp, y * xp, xp];
-        let row2 = [0.0, 0.0, 0.0, -x, -y, -1.0, x * yp, y * yp, yp];
+        let row1 = [-r.x, -r.y, -1.0, 0.0, 0.0, 0.0, r.x * t.x, r.y * t.x, t.x];
+        let row2 = [0.0, 0.0, 0.0, -r.x, -r.y, -1.0, r.x * t.y, r.y * t.y, t.y];
 
         // Add to A^T A
         for j in 0..9 {
@@ -916,18 +901,18 @@ pub(crate) fn estimate_homography(
 }
 
 /// Normalize points for numerical stability.
-pub(crate) fn normalize_points(points: &[(f64, f64)]) -> (Vec<(f64, f64)>, Transform) {
+pub(crate) fn normalize_points(points: &[DVec2]) -> (Vec<DVec2>, Transform) {
     if points.is_empty() {
         return (Vec::new(), Transform::identity());
     }
 
     // Compute centroid
-    let (cx, cy) = centroid(points);
+    let c = centroid(points);
 
     // Compute average distance from centroid
     let mut avg_dist = 0.0;
-    for &(x, y) in points {
-        avg_dist += ((x - cx).powi(2) + (y - cy).powi(2)).sqrt();
+    for p in points {
+        avg_dist += (*p - c).length();
     }
     avg_dist /= points.len() as f64;
 
@@ -938,20 +923,17 @@ pub(crate) fn normalize_points(points: &[(f64, f64)]) -> (Vec<(f64, f64)>, Trans
     // Scale so average distance is sqrt(2)
     let scale = std::f64::consts::SQRT_2 / avg_dist;
 
-    let normalized: Vec<(f64, f64)> = points
-        .iter()
-        .map(|&(x, y)| ((x - cx) * scale, (y - cy) * scale))
-        .collect();
+    let normalized: Vec<DVec2> = points.iter().map(|p| (*p - c) * scale).collect();
 
     // Transformation matrix: translate then scale
     let t = Transform::matrix(
         [
             scale,
             0.0,
-            -cx * scale,
+            -c.x * scale,
             0.0,
             scale,
-            -cy * scale,
+            -c.y * scale,
             0.0,
             0.0,
             1.0,
@@ -990,25 +972,22 @@ fn solve_homogeneous_9x9(ata: &[[f64; 9]; 9]) -> Option<[f64; 9]> {
 }
 
 /// Compute centroid of points.
-pub(crate) fn centroid(points: &[(f64, f64)]) -> (f64, f64) {
+pub(crate) fn centroid(points: &[DVec2]) -> DVec2 {
     if points.is_empty() {
-        return (0.0, 0.0);
+        return DVec2::ZERO;
     }
 
-    let mut cx = 0.0;
-    let mut cy = 0.0;
-    for &(x, y) in points {
-        cx += x;
-        cy += y;
+    let mut sum = DVec2::ZERO;
+    for p in points {
+        sum += *p;
     }
-    let n = points.len() as f64;
-    (cx / n, cy / n)
+    sum / points.len() as f64
 }
 
 /// Refine transformation using all inlier points.
 pub(crate) fn refine_transform(
-    ref_points: &[(f64, f64)],
-    target_points: &[(f64, f64)],
+    ref_points: &[DVec2],
+    target_points: &[DVec2],
     transform_type: TransformType,
 ) -> Option<Transform> {
     estimate_transform(ref_points, target_points, transform_type)

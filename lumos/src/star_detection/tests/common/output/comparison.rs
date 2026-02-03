@@ -5,6 +5,7 @@
 use super::image_writer::gray_to_rgb_image_stretched;
 use crate::star_detection::Star;
 use crate::testing::synthetic::GroundTruthStar;
+use glam::Vec2;
 use imaginarium::drawing::{draw_circle, draw_cross, draw_line};
 use imaginarium::{Color, Image};
 
@@ -53,8 +54,8 @@ pub fn create_comparison_image(
 
     // Draw ground truth stars
     for (i, truth) in ground_truth.iter().enumerate() {
-        let cx = truth.x;
-        let cy = truth.y;
+        let cx = truth.pos.x as f32;
+        let cy = truth.pos.y as f32;
         let radius = (truth.fwhm * 1.5).max(5.0);
 
         // Color depends on whether it was detected
@@ -64,27 +65,27 @@ pub fn create_comparison_image(
             colors::RED // Missed
         };
 
-        draw_circle(&mut image, cx, cy, radius, color, 1.0);
+        draw_circle(&mut image, Vec2::new(cx, cy), radius, color, 1.0);
 
         // Draw true centroid position
         if !matches.matched_truth.contains(&i) {
-            draw_cross(&mut image, cx, cy, 3.0, colors::MAGENTA, 1.0);
+            draw_cross(&mut image, Vec2::new(cx, cy), 3.0, colors::MAGENTA, 1.0);
         }
     }
 
     // Draw detected stars
     for (i, det) in detected.iter().enumerate() {
-        let cx = det.x;
-        let cy = det.y;
+        let cx = det.pos.x as f32;
+        let cy = det.pos.y as f32;
 
         if matches.matched_detected.contains(&i) {
             // True positive - draw centroid cross
-            draw_cross(&mut image, cx, cy, 3.0, colors::CYAN, 1.0);
+            draw_cross(&mut image, Vec2::new(cx, cy), 3.0, colors::CYAN, 1.0);
         } else {
             // False positive - draw yellow circle
             let radius = (det.fwhm * 0.7).max(4.0);
-            draw_circle(&mut image, cx, cy, radius, colors::YELLOW, 1.0);
-            draw_cross(&mut image, cx, cy, 3.0, colors::YELLOW, 1.0);
+            draw_circle(&mut image, Vec2::new(cx, cy), radius, colors::YELLOW, 1.0);
+            draw_cross(&mut image, Vec2::new(cx, cy), 3.0, colors::YELLOW, 1.0);
         }
     }
 
@@ -101,8 +102,8 @@ pub fn create_ground_truth_image(
     let mut image = gray_to_rgb_image_stretched(pixels, width, height);
 
     for truth in ground_truth {
-        let cx = truth.x;
-        let cy = truth.y;
+        let cx = truth.pos.x as f32;
+        let cy = truth.pos.y as f32;
         let radius = (truth.fwhm * 1.5).max(5.0);
 
         let color = if truth.is_saturated {
@@ -111,8 +112,8 @@ pub fn create_ground_truth_image(
             colors::BLUE
         };
 
-        draw_circle(&mut image, cx, cy, radius, color, 1.0);
-        draw_cross(&mut image, cx, cy, 3.0, color, 1.0);
+        draw_circle(&mut image, Vec2::new(cx, cy), radius, color, 1.0);
+        draw_cross(&mut image, Vec2::new(cx, cy), 3.0, color, 1.0);
     }
 
     image
@@ -128,12 +129,12 @@ pub fn create_detection_image(
     let mut image = gray_to_rgb_image_stretched(pixels, width, height);
 
     for det in detected {
-        let cx = det.x;
-        let cy = det.y;
+        let cx = det.pos.x as f32;
+        let cy = det.pos.y as f32;
         let radius = (det.fwhm * 0.7).max(4.0);
 
-        draw_circle(&mut image, cx, cy, radius, colors::GREEN, 1.0);
-        draw_cross(&mut image, cx, cy, 3.0, colors::GREEN, 1.0);
+        draw_circle(&mut image, Vec2::new(cx, cy), radius, colors::GREEN, 1.0);
+        draw_cross(&mut image, Vec2::new(cx, cy), 3.0, colors::GREEN, 1.0);
     }
 
     image
@@ -173,8 +174,8 @@ pub fn match_stars(
                 continue;
             }
 
-            let dx = det.x - truth.x;
-            let dy = det.y - truth.y;
+            let dx = det.pos.x as f32 - truth.pos.x as f32;
+            let dy = det.pos.y as f32 - truth.pos.y as f32;
             let dist_sq = dx * dx + dy * dy;
 
             if dist_sq < best_dist_sq && dist_sq < max_dist_sq {
@@ -198,17 +199,17 @@ pub fn match_stars(
 }
 
 /// Draw centroid refinement path on an image.
-pub fn draw_centroid_path(image: &mut Image, positions: &[(f32, f32)], color: Color) {
+pub fn draw_centroid_path(image: &mut Image, positions: &[Vec2], color: Color) {
     for window in positions.windows(2) {
-        let (x1, y1) = window[0];
-        let (x2, y2) = window[1];
+        let start = window[0];
+        let end = window[1];
 
         // Draw line between consecutive positions
-        draw_line(image, x1, y1, x2, y2, color, 1.0);
+        draw_line(image, start, end, color, 1.0);
     }
 
     // Mark each position with a small dot
-    for (i, &(x, y)) in positions.iter().enumerate() {
+    for (i, &pos) in positions.iter().enumerate() {
         let intensity = (i as f32 / positions.len() as f32) * 0.5 + 0.5;
         let scaled_color = Color::rgb(
             color.r * intensity,
@@ -216,7 +217,7 @@ pub fn draw_centroid_path(image: &mut Image, positions: &[(f32, f32)], color: Co
             color.b * intensity,
         );
 
-        imaginarium::drawing::draw_dot(image, x, y, 1.0, scaled_color);
+        imaginarium::drawing::draw_dot(image, pos, 1.0, scaled_color);
     }
 }
 
@@ -228,8 +229,7 @@ mod tests {
     fn test_match_stars_perfect() {
         let truth = vec![
             GroundTruthStar {
-                x: 10.0,
-                y: 10.0,
+                pos: glam::DVec2::new(10.0, 10.0),
                 flux: 1.0,
                 fwhm: 3.0,
                 eccentricity: 0.0,
@@ -237,8 +237,7 @@ mod tests {
                 angle: 0.0,
             },
             GroundTruthStar {
-                x: 50.0,
-                y: 50.0,
+                pos: glam::DVec2::new(50.0, 50.0),
                 flux: 1.0,
                 fwhm: 3.0,
                 eccentricity: 0.0,
@@ -249,8 +248,7 @@ mod tests {
 
         let detected = vec![
             Star {
-                x: 10.1,
-                y: 10.1,
+                pos: glam::DVec2::new(10.1, 10.1),
                 flux: 1.0,
                 fwhm: 3.0,
                 eccentricity: 0.0,
@@ -262,8 +260,7 @@ mod tests {
                 laplacian_snr: 0.0,
             },
             Star {
-                x: 50.2,
-                y: 49.8,
+                pos: glam::DVec2::new(50.2, 49.8),
                 flux: 1.0,
                 fwhm: 3.0,
                 eccentricity: 0.0,
@@ -285,8 +282,7 @@ mod tests {
     #[test]
     fn test_match_stars_with_false_positive() {
         let truth = vec![GroundTruthStar {
-            x: 10.0,
-            y: 10.0,
+            pos: glam::DVec2::new(10.0, 10.0),
             flux: 1.0,
             fwhm: 3.0,
             eccentricity: 0.0,
@@ -296,8 +292,7 @@ mod tests {
 
         let detected = vec![
             Star {
-                x: 10.1,
-                y: 10.1,
+                pos: glam::DVec2::new(10.1, 10.1),
                 flux: 1.0,
                 fwhm: 3.0,
                 eccentricity: 0.0,
@@ -309,8 +304,7 @@ mod tests {
                 laplacian_snr: 0.0,
             },
             Star {
-                x: 100.0,
-                y: 100.0,
+                pos: glam::DVec2::new(100.0, 100.0),
                 flux: 1.0,
                 fwhm: 3.0,
                 eccentricity: 0.0,

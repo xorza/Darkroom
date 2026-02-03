@@ -375,10 +375,9 @@ pub fn check_pass(metrics: &DetectionMetrics, criteria: &PassCriteria) -> Result
 mod tests {
     use super::*;
 
-    fn make_truth(x: f32, y: f32) -> GroundTruthStar {
+    fn make_truth(x: f64, y: f64) -> GroundTruthStar {
         GroundTruthStar {
-            x,
-            y,
+            pos: glam::DVec2::new(x, y),
             flux: 100.0,
             fwhm: 3.0,
             eccentricity: 0.0,
@@ -389,8 +388,7 @@ mod tests {
 
     fn make_det(x: f32, y: f32) -> Star {
         Star {
-            x,
-            y,
+            pos: glam::DVec2::new(x as f64, y as f64),
             flux: 100.0,
             fwhm: 3.0,
             eccentricity: 0.0,

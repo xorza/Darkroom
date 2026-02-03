@@ -13,15 +13,14 @@ use super::star_profiles::{
     render_moffat_star, render_saturated_star,
 };
 use crate::common::Buffer2;
+use glam::DVec2;
 use std::f32::consts::PI;
 
 /// Ground truth star information for validation.
 #[derive(Debug, Clone)]
 pub struct GroundTruthStar {
-    /// X position (sub-pixel)
-    pub x: f32,
-    /// Y position (sub-pixel)
-    pub y: f32,
+    /// Position (sub-pixel)
+    pub pos: DVec2,
     /// Flux (integrated brightness)
     pub flux: f32,
     /// FWHM in pixels
@@ -286,8 +285,7 @@ pub fn generate_star_field(config: &StarFieldConfig) -> (Buffer2<f32>, Vec<Groun
         }
 
         ground_truth.push(GroundTruthStar {
-            x: *x,
-            y: *y,
+            pos: DVec2::new(*x as f64, *y as f64),
             flux,
             fwhm,
             eccentricity,
@@ -650,25 +648,25 @@ mod tests {
         assert_eq!(ground_truth.len(), config.num_stars);
 
         // Check that stars are more concentrated near center
-        let cx = config.width as f32 / 2.0;
-        let cy = config.height as f32 / 2.0;
-        let center_radius = (config.width as f32) * 0.25;
+        let cx = config.width as f64 / 2.0;
+        let cy = config.height as f64 / 2.0;
+        let center_radius = (config.width as f64) * 0.25;
 
         let center_count = ground_truth
             .iter()
             .filter(|s| {
-                let dx = s.x - cx;
-                let dy = s.y - cy;
+                let dx = s.pos.x - cx;
+                let dy = s.pos.y - cy;
                 (dx * dx + dy * dy).sqrt() < center_radius
             })
             .count();
 
         // Should have more than uniform distribution near center
-        let expected_uniform = config.num_stars as f32
-            * (std::f32::consts::PI * center_radius * center_radius)
-            / (config.width * config.height) as f32;
+        let expected_uniform = config.num_stars as f64
+            * (std::f64::consts::PI * center_radius * center_radius)
+            / (config.width * config.height) as f64;
         assert!(
-            center_count as f32 > expected_uniform * 1.5,
+            center_count as f64 > expected_uniform * 1.5,
             "Center count {} should exceed uniform expectation {}",
             center_count,
             expected_uniform
@@ -705,8 +703,8 @@ mod tests {
 
         assert_eq!(truth1.len(), truth2.len());
         for (t1, t2) in truth1.iter().zip(truth2.iter()) {
-            assert!((t1.x - t2.x).abs() < 1e-6);
-            assert!((t1.y - t2.y).abs() < 1e-6);
+            assert!((t1.pos.x - t2.pos.x).abs() < 1e-6);
+            assert!((t1.pos.y - t2.pos.y).abs() < 1e-6);
         }
     }
 }

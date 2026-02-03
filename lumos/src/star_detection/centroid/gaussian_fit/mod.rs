@@ -17,6 +17,7 @@ use super::linear_solver::solve_6x6;
 use super::lm_optimizer::{LMConfig, LMModel, LMResult, optimize_6, optimize_6_weighted};
 use super::{compute_pixel_weights, estimate_sigma_from_moments, extract_stamp};
 use crate::common::Buffer2;
+use glam::{DVec2, Vec2};
 
 /// Configuration for Gaussian fitting.
 pub type GaussianFitConfig = LMConfig;
@@ -24,16 +25,12 @@ pub type GaussianFitConfig = LMConfig;
 /// Result of 2D Gaussian fitting.
 #[derive(Debug, Clone, Copy)]
 pub struct GaussianFitResult {
-    /// X coordinate of Gaussian center (sub-pixel).
-    pub x: f32,
-    /// Y coordinate of Gaussian center (sub-pixel).
-    pub y: f32,
+    /// Position of Gaussian center (sub-pixel).
+    pub pos: DVec2,
     /// Amplitude of Gaussian.
     pub amplitude: f32,
-    /// Sigma in X direction.
-    pub sigma_x: f32,
-    /// Sigma in Y direction.
-    pub sigma_y: f32,
+    /// Sigma in X and Y directions.
+    pub sigma: Vec2,
     /// Background level.
     pub background: f32,
     /// RMS residual of fit.
@@ -216,11 +213,9 @@ fn validate_result(
     let rms = (result.chi2 / n as f32).sqrt();
 
     Some(GaussianFitResult {
-        x: x0,
-        y: y0,
+        pos: DVec2::new(x0 as f64, y0 as f64),
         amplitude,
-        sigma_x,
-        sigma_y,
+        sigma: Vec2::new(sigma_x, sigma_y),
         background: bg,
         rms_residual: rms,
         converged: result.converged,

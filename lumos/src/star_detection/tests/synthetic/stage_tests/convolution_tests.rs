@@ -99,8 +99,8 @@ fn test_gaussian_filter_sparse() {
     // Check that star positions have high filtered values
     let mut star_responses: Vec<f32> = Vec::new();
     for star in &ground_truth {
-        let x = star.x.round() as usize;
-        let y = star.y.round() as usize;
+        let x = star.pos.x.round() as usize;
+        let y = star.pos.y.round() as usize;
         if x > 10 && x < width - 10 && y > 10 && y < height - 10 {
             let response = filtered[y * width + x];
             star_responses.push(response);
@@ -263,8 +263,8 @@ fn test_gaussian_filter_noise() {
     // Check star detectability even with noise
     let mut star_responses: Vec<f32> = Vec::new();
     for star in &ground_truth {
-        let x = star.x.round() as usize;
-        let y = star.y.round() as usize;
+        let x = star.pos.x.round() as usize;
+        let y = star.pos.y.round() as usize;
         if x > 10 && x < width - 10 && y > 10 && y < height - 10 {
             let response = filtered[y * width + x];
             star_responses.push(response);

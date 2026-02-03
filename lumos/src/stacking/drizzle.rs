@@ -753,6 +753,8 @@ pub fn drizzle_stack<P: AsRef<Path> + Sync>(
 
 #[cfg(test)]
 mod tests {
+    use glam::DVec2;
+
     use super::*;
 
     #[test]
@@ -846,7 +848,7 @@ mod tests {
 
     #[test]
     fn test_transform_point_translation() {
-        let translation = Transform::translation(5.0, -3.0);
+        let translation = Transform::translation(DVec2::new(5.0, -3.0));
         let (x, y) = transform_point(&translation, 10.0, 20.0);
         assert!((x - 15.0).abs() < f32::EPSILON);
         assert!((y - 17.0).abs() < f32::EPSILON);
@@ -951,7 +953,7 @@ mod tests {
         let mut acc = DrizzleAccumulator::new(20, 20, 1, config);
 
         // Add with small translation
-        let transform = Transform::translation(0.5, 0.5);
+        let transform = Transform::translation(DVec2::new(0.5, 0.5));
         acc.add_image(image, &transform, 1.0);
 
         let result = acc.finalize();

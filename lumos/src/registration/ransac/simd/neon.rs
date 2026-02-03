@@ -2,10 +2,11 @@
 
 #![allow(clippy::needless_range_loop)]
 
+use glam::DVec2;
 #[cfg(target_arch = "aarch64")]
 use std::arch::aarch64::*;
 
-use crate::registration::transform::TransformMatrix;
+use crate::registration::transform::Transform;
 
 /// Count inliers using NEON SIMD (processes 2 points at a time with f64).
 ///
@@ -15,9 +16,9 @@ use crate::registration::transform::TransformMatrix;
 #[cfg(target_arch = "aarch64")]
 #[target_feature(enable = "neon")]
 pub unsafe fn count_inliers_neon(
-    ref_points: &[(f64, f64)],
-    target_points: &[(f64, f64)],
-    transform: &TransformMatrix,
+    ref_points: &[DVec2],
+    target_points: &[DVec2],
+    transform: &Transform,
     threshold: f64,
 ) -> (Vec<usize>, usize) {
     unsafe {
@@ -46,22 +47,18 @@ pub unsafe fn count_inliers_neon(
             let base = chunk * 2;
 
             // Load 2 reference points
-            let rx0 = ref_points[base].0;
-            let ry0 = ref_points[base].1;
-            let rx1 = ref_points[base + 1].0;
-            let ry1 = ref_points[base + 1].1;
+            let r0 = ref_points[base];
+            let r1 = ref_points[base + 1];
 
-            let ref_x = vld1q_f64([rx0, rx1].as_ptr());
-            let ref_y = vld1q_f64([ry0, ry1].as_ptr());
+            let ref_x = vld1q_f64([r0.x, r1.x].as_ptr());
+            let ref_y = vld1q_f64([r0.y, r1.y].as_ptr());
 
             // Load 2 target points
-            let tx0 = target_points[base].0;
-            let ty0 = target_points[base].1;
-            let tx1 = target_points[base + 1].0;
-            let ty1 = target_points[base + 1].1;
+            let t0 = target_points[base];
+            let t1 = target_points[base + 1];
 
-            let tar_x = vld1q_f64([tx0, tx1].as_ptr());
-            let tar_y = vld1q_f64([ty0, ty1].as_ptr());
+            let tar_x = vld1q_f64([t0.x, t1.x].as_ptr());
+            let tar_y = vld1q_f64([t0.y, t1.y].as_ptr());
 
             // Compute transformed x': (a*x + b*y + c) / (g*x + h*y + 1)
             let ax = vmulq_f64(a, ref_x);
@@ -111,10 +108,10 @@ pub unsafe fn count_inliers_neon(
         // Handle remainder
         let remainder_start = chunks * 2;
         for i in remainder_start..len {
-            let (rx, ry) = ref_points[i];
-            let (tx, ty) = target_points[i];
-            let (px, py) = transform.apply(rx, ry);
-            let dist_sq = (px - tx).powi(2) + (py - ty).powi(2);
+            let r = ref_points[i];
+            let t = target_points[i];
+            let p = transform.apply_vec(r);
+            let dist_sq = (p - t).length_squared();
 
             if dist_sq < threshold_sq {
                 inliers.push(i);
@@ -131,18 +128,18 @@ mod tests {
     use super::*;
 
     fn count_inliers_scalar(
-        ref_points: &[(f64, f64)],
-        target_points: &[(f64, f64)],
-        transform: &TransformMatrix,
+        ref_points: &[DVec2],
+        target_points: &[DVec2],
+        transform: &Transform,
         threshold: f64,
     ) -> (Vec<usize>, usize) {
         let threshold_sq = threshold * threshold;
         let mut inliers = Vec::new();
         let mut score = 0usize;
 
-        for (i, (&(rx, ry), &(tx, ty))) in ref_points.iter().zip(target_points.iter()).enumerate() {
-            let (px, py) = transform.apply(rx, ry);
-            let dist_sq = (px - tx).powi(2) + (py - ty).powi(2);
+        for (i, (r, t)) in ref_points.iter().zip(target_points.iter()).enumerate() {
+            let p = transform.apply_vec(*r);
+            let dist_sq = (p - *t).length_squared();
 
             if dist_sq < threshold_sq {
                 inliers.push(i);
@@ -156,18 +153,19 @@ mod tests {
     #[test]
     #[cfg(target_arch = "aarch64")]
     fn test_neon_count_inliers() {
-        let transform = TransformMatrix::translation(10.0, 5.0);
-        let ref_points: Vec<(f64, f64)> =
-            (0..20).map(|i| (i as f64 * 5.0, i as f64 * 3.0)).collect();
-        let target_points: Vec<(f64, f64)> = ref_points
+        let transform = Transform::translation(10.0, 5.0);
+        let ref_points: Vec<DVec2> = (0..20)
+            .map(|i| DVec2::new(i as f64 * 5.0, i as f64 * 3.0))
+            .collect();
+        let target_points: Vec<DVec2> = ref_points
             .iter()
             .enumerate()
-            .map(|(i, &(x, y))| {
-                let (tx, ty) = transform.apply(x, y);
+            .map(|(i, p)| {
+                let t = transform.apply_vec(*p);
                 if i % 4 == 0 {
-                    (tx + 100.0, ty)
+                    t + DVec2::new(100.0, 0.0)
                 } else {
-                    (tx + 0.1, ty - 0.1)
+                    t + DVec2::new(0.1, -0.1)
                 }
             })
             .collect();

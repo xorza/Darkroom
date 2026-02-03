@@ -15,6 +15,7 @@ use crate::star_detection::tests::common::{gray_to_rgb_image_stretched, save_ima
 use crate::star_detection::{BackgroundConfig, FilteringConfig, StarDetectionConfig, StarDetector};
 use crate::testing::init_tracing;
 use crate::{AstroImage, ImageDimensions};
+use glam::Vec2;
 use image::GrayImage;
 use imaginarium::Color;
 use imaginarium::drawing::{draw_circle, draw_cross};
@@ -57,8 +58,8 @@ fn test_synthetic_star_detection() {
         println!(
             "  Star {}: pos=({:.1}, {:.1}) brightness={:.2} sigma={:.1} fwhm={:.1}",
             i + 1,
-            star.x,
-            star.y,
+            star.pos.x,
+            star.pos.y,
             star.brightness,
             star.sigma,
             star.fwhm()
@@ -100,8 +101,8 @@ fn test_synthetic_star_detection() {
         println!(
             "  Detected {}: pos=({:.1}, {:.1}) flux={:.2} fwhm={:.1} snr={:.1}",
             i + 1,
-            star.x,
-            star.y,
+            star.pos.x,
+            star.pos.y,
             star.flux,
             star.fwhm,
             star.snr
@@ -114,8 +115,7 @@ fn test_synthetic_star_detection() {
     for star in &true_stars {
         draw_circle(
             &mut output_image,
-            star.x,
-            star.y,
+            Vec2::new(star.pos.x, star.pos.y),
             star.fwhm() * 1.5,
             blue,
             1.0,
@@ -124,11 +124,16 @@ fn test_synthetic_star_detection() {
 
     let green = Color::GREEN;
     for star in &detected_stars {
-        draw_cross(&mut output_image, star.x, star.y, 3.0, green, 1.0);
+        draw_cross(
+            &mut output_image,
+            Vec2::new(star.pos.x as f32, star.pos.y as f32),
+            3.0,
+            green,
+            1.0,
+        );
         draw_circle(
             &mut output_image,
-            star.x,
-            star.y,
+            Vec2::new(star.pos.x as f32, star.pos.y as f32),
             (star.fwhm * 0.5).max(3.0),
             green,
             1.0,
@@ -143,13 +148,17 @@ fn test_synthetic_star_detection() {
     let mut matched = 0;
     for true_star in &true_stars {
         let closest = detected_stars.iter().min_by(|a, b| {
-            let da = (a.x - true_star.x).powi(2) + (a.y - true_star.y).powi(2);
-            let db = (b.x - true_star.x).powi(2) + (b.y - true_star.y).powi(2);
+            let da = (a.pos.x as f32 - true_star.pos.x).powi(2)
+                + (a.pos.y as f32 - true_star.pos.y).powi(2);
+            let db = (b.pos.x as f32 - true_star.pos.x).powi(2)
+                + (b.pos.y as f32 - true_star.pos.y).powi(2);
             da.partial_cmp(&db).unwrap()
         });
 
         if let Some(det) = closest {
-            let dist = ((det.x - true_star.x).powi(2) + (det.y - true_star.y).powi(2)).sqrt();
+            let dist = ((det.pos.x as f32 - true_star.pos.x).powi(2)
+                + (det.pos.y as f32 - true_star.pos.y).powi(2))
+            .sqrt();
             if dist < 3.0 {
                 matched += 1;
             }

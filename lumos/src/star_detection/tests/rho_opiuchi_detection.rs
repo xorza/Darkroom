@@ -11,6 +11,7 @@ use crate::star_detection::config::{
 };
 use crate::testing::{calibration_dir, init_tracing};
 use common::test_utils::test_output_path;
+use glam::Vec2;
 use imaginarium::Color;
 use imaginarium::ColorFormat;
 use imaginarium::drawing::draw_circle;
@@ -122,7 +123,7 @@ fn test_detect_rho_opiuchi() {
         for star in result.stars.iter().take(10) {
             println!(
                 "{:>8.1} {:>8.1} {:>10.0} {:>8.2} {:>8.1}",
-                star.x, star.y, star.flux, star.fwhm, star.snr
+                star.pos.x, star.pos.y, star.flux, star.fwhm, star.snr
             );
         }
     }
@@ -137,7 +138,13 @@ fn test_detect_rho_opiuchi() {
     // Draw circles around all detected stars
     for star in result.stars.iter() {
         let radius = (star.fwhm * 1.5).max(3.0);
-        draw_circle(&mut output_img, star.x, star.y, radius, Color::GREEN, 1.0);
+        draw_circle(
+            &mut output_img,
+            Vec2::new(star.pos.x as f32, star.pos.y as f32),
+            radius,
+            Color::GREEN,
+            1.0,
+        );
     }
     println!("Drew {} circles", result.stars.len());
 

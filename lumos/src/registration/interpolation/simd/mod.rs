@@ -18,6 +18,7 @@ pub mod sse;
 #[cfg(test)]
 use crate::registration::interpolation::lanczos_kernel;
 use crate::registration::transform::Transform;
+use glam::DVec2;
 
 /// Warp a row of pixels using SIMD-accelerated bilinear interpolation.
 ///
@@ -99,14 +100,14 @@ pub(crate) fn warp_row_bilinear_scalar(
     let y = output_y as f64;
 
     for (x, out_pixel) in output_row.iter_mut().enumerate() {
-        let (src_x, src_y) = inverse.apply(x as f64, y);
+        let src = inverse.apply(DVec2::new(x as f64, y));
 
         *out_pixel = bilinear_sample(
             input,
             input_width,
             input_height,
-            src_x as f32,
-            src_y as f32,
+            src.x as f32,
+            src.y as f32,
             border_value,
         );
     }
@@ -218,9 +219,9 @@ pub fn warp_row_lanczos3_scalar(
     const A: usize = 3; // Lanczos3 kernel radius
 
     for (x, out_pixel) in output_row.iter_mut().enumerate() {
-        let (src_x, src_y) = inverse.apply(x as f64, y);
-        let sx = src_x as f32;
-        let sy = src_y as f32;
+        let src = inverse.apply(DVec2::new(x as f64, y));
+        let sx = src.x as f32;
+        let sy = src.y as f32;
 
         let x0 = sx.floor() as i32;
         let y0 = sy.floor() as i32;
@@ -361,7 +362,7 @@ mod tests {
         let input = patterns::diagonal_gradient(width, height);
 
         // Translate by (5, 3)
-        let transform = Transform::translation(5.0, 3.0);
+        let transform = Transform::translation(DVec2::new(5.0, 3.0));
         let inverse = transform.inverse();
 
         let mut output_row = vec![0.0f32; width];
@@ -404,8 +405,8 @@ mod tests {
         // Test with various transforms
         let transforms = vec![
             Transform::identity(),
-            Transform::translation(2.5, 1.7),
-            Transform::similarity(3.0, 2.0, 0.1, 1.05),
+            Transform::translation(DVec2::new(2.5, 1.7)),
+            Transform::similarity(DVec2::new(3.0, 2.0), 0.1, 1.05),
         ];
 
         for transform in transforms {
@@ -536,7 +537,7 @@ mod tests {
                 .take(width * height)
                 .copied()
                 .collect();
-            let transform = Transform::translation(1.5, 0.5);
+            let transform = Transform::translation(DVec2::new(1.5, 0.5));
             let inverse = transform.inverse();
 
             let mut output = vec![0.0f32; width];

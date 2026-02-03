@@ -22,6 +22,7 @@
 use std::env;
 use std::path::Path;
 
+use glam::{DVec2, UVec2};
 use lumos::{
     AstroImage, CatalogSource, PlateSolver, PlateSolverConfig, StarDetectionConfig, StarDetector,
     Wcs,
@@ -88,10 +89,10 @@ fn main() {
     }
 
     // Extract star positions (sorted by brightness from find_stars)
-    let star_positions: Vec<(f64, f64)> = detection_result
+    let star_positions: Vec<DVec2> = detection_result
         .stars
         .iter()
-        .map(|s| (s.x as f64, s.y as f64))
+        .map(|s| DVec2::new(s.pos.x, s.pos.y))
         .collect();
 
     // Configure plate solver
@@ -116,10 +117,11 @@ fn main() {
     let solver = PlateSolver::new(solver_config);
 
     // Solve for WCS
-    let image_size = (image.width() as u32, image.height() as u32);
+    let image_size = UVec2::new(image.width() as u32, image.height() as u32);
     match solver.solve(
         &star_positions,
-        (approx_ra, approx_dec),
+        approx_ra,
+        approx_dec,
         approx_scale,
         image_size,
     ) {

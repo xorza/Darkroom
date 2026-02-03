@@ -11,6 +11,7 @@ use crate::star_detection::{PsfConfig, StarDetectionConfig, StarDetector};
 use crate::testing::init_tracing;
 use crate::testing::synthetic::{StarFieldConfig, add_cosmic_rays, generate_star_field};
 use common::test_utils::test_output_path;
+use glam::Vec2;
 use imaginarium::Color;
 use imaginarium::drawing::{draw_circle, draw_cross};
 
@@ -70,19 +71,31 @@ fn test_cosmic_ray_rejection() {
     // Draw cosmic ray positions in red
     let red = Color::rgb(1.0, 0.2, 0.2);
     for (x, y) in &cr_positions {
-        draw_cross(&mut img, *x as f32, *y as f32, 3.0, red, 1.0);
+        draw_cross(&mut img, Vec2::new(*x as f32, *y as f32), 3.0, red, 1.0);
     }
 
     // Draw true star positions in blue
     let blue = Color::rgb(0.3, 0.3, 1.0);
     for star in &ground_truth {
-        draw_circle(&mut img, star.x, star.y, 8.0, blue, 1.0);
+        draw_circle(
+            &mut img,
+            Vec2::new(star.pos.x as f32, star.pos.y as f32),
+            8.0,
+            blue,
+            1.0,
+        );
     }
 
     // Draw detected stars in green
     let green = Color::GREEN;
     for star in &stars {
-        draw_circle(&mut img, star.x, star.y, 5.0, green, 1.0);
+        draw_circle(
+            &mut img,
+            Vec2::new(star.pos.x as f32, star.pos.y as f32),
+            5.0,
+            green,
+            1.0,
+        );
     }
 
     save_image(
@@ -94,8 +107,8 @@ fn test_cosmic_ray_rejection() {
     let mut cr_false_positives = 0;
     for (cr_x, cr_y) in &cr_positions {
         for star in &stars {
-            let dx = star.x - *cr_x as f32;
-            let dy = star.y - *cr_y as f32;
+            let dx = star.pos.x as f32 - *cr_x as f32;
+            let dy = star.pos.y as f32 - *cr_y as f32;
             let dist = (dx * dx + dy * dy).sqrt();
             if dist < 3.0 {
                 cr_false_positives += 1;
@@ -108,8 +121,8 @@ fn test_cosmic_ray_rejection() {
     let mut true_detections = 0;
     for truth in &ground_truth {
         for star in &stars {
-            let dx = star.x - truth.x;
-            let dy = star.y - truth.y;
+            let dx = star.pos.x - truth.pos.x;
+            let dy = star.pos.y - truth.pos.y;
             let dist = (dx * dx + dy * dy).sqrt();
             if dist < 5.0 {
                 true_detections += 1;
@@ -200,15 +213,22 @@ fn test_laplacian_snr_visualization() {
     for (i, star) in stars.iter().enumerate() {
         // Check if this star matches a ground truth star
         let is_real = ground_truth.iter().any(|t| {
-            let dx = t.x - star.x;
-            let dy = t.y - star.y;
+            let dx = t.pos.x - star.pos.x;
+            let dy = t.pos.y - star.pos.y;
             (dx * dx + dy * dy).sqrt() < 5.0
         });
 
         let label = if is_real { "STAR" } else { "CR?" };
         println!(
             "  {}: ({:.1}, {:.1}) FWHM={:.2} SNR={:.1} Lap_SNR={:.1} sharp={:.3} [{}]",
-            i, star.x, star.y, star.fwhm, star.snr, star.laplacian_snr, star.sharpness, label
+            i,
+            star.pos.x,
+            star.pos.y,
+            star.fwhm,
+            star.snr,
+            star.laplacian_snr,
+            star.sharpness,
+            label
         );
     }
 
@@ -218,7 +238,7 @@ fn test_laplacian_snr_visualization() {
     // Mark CR positions
     let red = Color::rgb(1.0, 0.4, 0.4);
     for (x, y) in &cr_positions {
-        draw_cross(&mut img, *x as f32, *y as f32, 3.0, red, 1.0);
+        draw_cross(&mut img, Vec2::new(*x as f32, *y as f32), 3.0, red, 1.0);
     }
 
     // Mark detected stars colored by Laplacian SNR
@@ -231,7 +251,13 @@ fn test_laplacian_snr_visualization() {
         } else {
             Color::GREEN // Low: likely real star
         };
-        draw_circle(&mut img, star.x, star.y, 6.0, color, 1.0);
+        draw_circle(
+            &mut img,
+            Vec2::new(star.pos.x as f32, star.pos.y as f32),
+            6.0,
+            color,
+            1.0,
+        );
     }
 
     save_image(

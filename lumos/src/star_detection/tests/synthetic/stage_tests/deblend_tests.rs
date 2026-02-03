@@ -12,6 +12,7 @@ use crate::star_detection::{DeblendConfig, PsfConfig, StarDetectionConfig};
 use crate::testing::init_tracing;
 use crate::testing::synthetic::{fwhm_to_sigma, render_gaussian_star};
 use common::test_utils::test_output_path;
+use glam::Vec2;
 use imaginarium::Color;
 use imaginarium::drawing::{draw_circle, draw_cross};
 
@@ -91,13 +92,19 @@ fn test_deblend_star_pair() {
 
     // Draw true positions in blue
     let blue = Color::rgb(0.3, 0.3, 1.0);
-    draw_circle(&mut img, star1_x, star_y, 6.0, blue, 1.0);
-    draw_circle(&mut img, star2_x, star_y, 6.0, blue, 1.0);
+    draw_circle(&mut img, Vec2::new(star1_x, star_y), 6.0, blue, 1.0);
+    draw_circle(&mut img, Vec2::new(star2_x, star_y), 6.0, blue, 1.0);
 
     // Draw detected candidates in green
     let green = Color::GREEN;
     for c in &candidates {
-        draw_cross(&mut img, c.peak_x as f32, c.peak_y as f32, 3.0, green, 1.0);
+        draw_cross(
+            &mut img,
+            Vec2::new(c.peak.x as f32, c.peak.y as f32),
+            3.0,
+            green,
+            1.0,
+        );
     }
 
     save_image(
@@ -112,7 +119,7 @@ fn test_deblend_star_pair() {
     );
     println!("Detected candidates: {}", candidates.len());
     for (i, c) in candidates.iter().enumerate() {
-        println!("  Candidate {}: ({}, {})", i, c.peak_x, c.peak_y);
+        println!("  Candidate {}: ({}, {})", i, c.peak.x, c.peak.y);
     }
 
     // Should detect 2 separate stars
@@ -200,13 +207,19 @@ fn test_deblend_chain() {
     // Draw true positions in blue
     let blue = Color::rgb(0.3, 0.3, 1.0);
     for (x, y) in &true_positions {
-        draw_circle(&mut img, *x, *y, 6.0, blue, 1.0);
+        draw_circle(&mut img, Vec2::new(*x, *y), 6.0, blue, 1.0);
     }
 
     // Draw detected candidates in green
     let green = Color::GREEN;
     for c in &candidates {
-        draw_cross(&mut img, c.peak_x as f32, c.peak_y as f32, 3.0, green, 1.0);
+        draw_cross(
+            &mut img,
+            Vec2::new(c.peak.x as f32, c.peak.y as f32),
+            3.0,
+            green,
+            1.0,
+        );
     }
 
     save_image(
@@ -309,13 +322,19 @@ fn test_deblend_unequal_pair() {
 
     // Draw true positions in blue
     let blue = Color::rgb(0.3, 0.3, 1.0);
-    draw_circle(&mut img, star1_x, star_y, 8.0, blue, 1.0); // Bigger for bright
-    draw_circle(&mut img, star2_x, star_y, 5.0, blue, 1.0); // Smaller for faint
+    draw_circle(&mut img, Vec2::new(star1_x, star_y), 8.0, blue, 1.0); // Bigger for bright
+    draw_circle(&mut img, Vec2::new(star2_x, star_y), 5.0, blue, 1.0); // Smaller for faint
 
     // Draw detected candidates in green
     let green = Color::GREEN;
     for c in &candidates {
-        draw_cross(&mut img, c.peak_x as f32, c.peak_y as f32, 3.0, green, 1.0);
+        draw_cross(
+            &mut img,
+            Vec2::new(c.peak.x as f32, c.peak.y as f32),
+            3.0,
+            green,
+            1.0,
+        );
     }
 
     save_image(
@@ -329,7 +348,7 @@ fn test_deblend_unequal_pair() {
     );
     println!("Detected candidates: {}", candidates.len());
     for (i, c) in candidates.iter().enumerate() {
-        println!("  Candidate {}: ({}, {})", i, c.peak_x, c.peak_y);
+        println!("  Candidate {}: ({}, {})", i, c.peak.x, c.peak.y);
     }
 
     // Should detect both stars

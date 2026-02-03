@@ -14,6 +14,7 @@ use crate::star_detection::{PsfConfig, StarDetectionConfig};
 use crate::testing::init_tracing;
 use crate::testing::synthetic::{fwhm_to_sigma, render_gaussian_star};
 use common::test_utils::test_output_path;
+use glam::Vec2;
 use imaginarium::Color;
 use imaginarium::drawing::{draw_circle, draw_cross};
 
@@ -99,8 +100,7 @@ fn test_centroid_accuracy() {
                 Vec2us::new(peak_x.saturating_sub(5), peak_y.saturating_sub(5)),
                 Vec2us::new((peak_x + 5).min(width - 1), (peak_y + 5).min(height - 1)),
             ),
-            peak_x,
-            peak_y,
+            peak: Vec2us::new(peak_x, peak_y),
             peak_value: pixels[peak_y * width + peak_x],
             area: 50,
         };
@@ -108,12 +108,14 @@ fn test_centroid_accuracy() {
         let result = compute_centroid(&pixels_buf, &background, &candidate, &config);
 
         if let Some(star) = result {
-            let error = ((star.x - true_x).powi(2) + (star.y - true_y).powi(2)).sqrt();
+            let error = ((star.pos.x as f32 - true_x).powi(2)
+                + (star.pos.y as f32 - true_y).powi(2))
+            .sqrt();
             errors.push(error);
 
             println!(
                 "True: ({:.2}, {:.2}) -> Detected: ({:.3}, {:.3}), error: {:.4}px",
-                true_x, true_y, star.x, star.y, error
+                true_x, true_y, star.pos.x, star.pos.y, error
             );
         } else {
             println!(
@@ -131,7 +133,7 @@ fn test_centroid_accuracy() {
 
     for &(true_x, true_y) in &test_positions {
         // True position in blue
-        draw_circle(&mut img, true_x, true_y, 8.0, blue, 1.0);
+        draw_circle(&mut img, Vec2::new(true_x, true_y), 8.0, blue, 1.0);
 
         // Detected position
         let peak_x = true_x.round() as usize;
@@ -142,8 +144,7 @@ fn test_centroid_accuracy() {
                 Vec2us::new(peak_x.saturating_sub(5), peak_y.saturating_sub(5)),
                 Vec2us::new((peak_x + 5).min(width - 1), (peak_y + 5).min(height - 1)),
             ),
-            peak_x,
-            peak_y,
+            peak: Vec2us::new(peak_x, peak_y),
             peak_value: pixels[peak_y * width + peak_x],
             area: 50,
         };
@@ -151,7 +152,13 @@ fn test_centroid_accuracy() {
         let result = compute_centroid(&pixels_buf, &background, &candidate, &config);
 
         if let Some(star) = result {
-            draw_cross(&mut img, star.x, star.y, 3.0, green, 1.0);
+            draw_cross(
+                &mut img,
+                Vec2::new(star.pos.x as f32, star.pos.y as f32),
+                3.0,
+                green,
+                1.0,
+            );
         }
     }
 
@@ -256,15 +263,14 @@ fn test_centroid_snr() {
         let peak_x = true_x.round() as usize;
         let peak_y = true_y.round() as usize;
 
-        draw_circle(&mut img, *true_x, *true_y, 6.0, blue, 1.0);
+        draw_circle(&mut img, Vec2::new(*true_x, *true_y), 6.0, blue, 1.0);
 
         let candidate = StarCandidate {
             bbox: Aabb::new(
                 Vec2us::new(peak_x.saturating_sub(5), peak_y.saturating_sub(5)),
                 Vec2us::new((peak_x + 5).min(width - 1), (peak_y + 5).min(height - 1)),
             ),
-            peak_x,
-            peak_y,
+            peak: Vec2us::new(peak_x, peak_y),
             peak_value: pixels[peak_y * width + peak_x],
             area: 50,
         };
@@ -272,8 +278,16 @@ fn test_centroid_snr() {
         let result = compute_centroid(&pixels_buf, &background, &candidate, &config);
 
         if let Some(star) = result {
-            let error = ((star.x - true_x).powi(2) + (star.y - true_y).powi(2)).sqrt();
-            draw_cross(&mut img, star.x, star.y, 3.0, green, 1.0);
+            let error = ((star.pos.x - *true_x as f64).powi(2)
+                + (star.pos.y - *true_y as f64).powi(2))
+            .sqrt();
+            draw_cross(
+                &mut img,
+                Vec2::new(star.pos.x as f32, star.pos.y as f32),
+                3.0,
+                green,
+                1.0,
+            );
 
             println!(
                 "  Brightness={:.2}: SNR={:.1}, error={:.4}px",

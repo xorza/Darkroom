@@ -2,6 +2,7 @@
 
 #![allow(clippy::needless_range_loop)]
 
+use glam::DVec2;
 #[cfg(target_arch = "x86_64")]
 use std::arch::x86_64::*;
 
@@ -15,8 +16,8 @@ use crate::registration::transform::Transform;
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2")]
 pub unsafe fn count_inliers_avx2(
-    ref_points: &[(f64, f64)],
-    target_points: &[(f64, f64)],
+    ref_points: &[DVec2],
+    target_points: &[DVec2],
     transform: &Transform,
     threshold: f64,
 ) -> (Vec<usize>, usize) {
@@ -50,30 +51,22 @@ pub unsafe fn count_inliers_avx2(
             let base = chunk * 4;
 
             // Load 4 reference points (x0,y0), (x1,y1), (x2,y2), (x3,y3)
-            let rx0 = ref_points[base].0;
-            let ry0 = ref_points[base].1;
-            let rx1 = ref_points[base + 1].0;
-            let ry1 = ref_points[base + 1].1;
-            let rx2 = ref_points[base + 2].0;
-            let ry2 = ref_points[base + 2].1;
-            let rx3 = ref_points[base + 3].0;
-            let ry3 = ref_points[base + 3].1;
+            let r0 = ref_points[base];
+            let r1 = ref_points[base + 1];
+            let r2 = ref_points[base + 2];
+            let r3 = ref_points[base + 3];
 
-            let ref_x = _mm256_set_pd(rx3, rx2, rx1, rx0);
-            let ref_y = _mm256_set_pd(ry3, ry2, ry1, ry0);
+            let ref_x = _mm256_set_pd(r3.x, r2.x, r1.x, r0.x);
+            let ref_y = _mm256_set_pd(r3.y, r2.y, r1.y, r0.y);
 
             // Load 4 target points
-            let tx0 = target_points[base].0;
-            let ty0 = target_points[base].1;
-            let tx1 = target_points[base + 1].0;
-            let ty1 = target_points[base + 1].1;
-            let tx2 = target_points[base + 2].0;
-            let ty2 = target_points[base + 2].1;
-            let tx3 = target_points[base + 3].0;
-            let ty3 = target_points[base + 3].1;
+            let t0 = target_points[base];
+            let t1 = target_points[base + 1];
+            let t2 = target_points[base + 2];
+            let t3 = target_points[base + 3];
 
-            let tar_x = _mm256_set_pd(tx3, tx2, tx1, tx0);
-            let tar_y = _mm256_set_pd(ty3, ty2, ty1, ty0);
+            let tar_x = _mm256_set_pd(t3.x, t2.x, t1.x, t0.x);
+            let tar_y = _mm256_set_pd(t3.y, t2.y, t1.y, t0.y);
 
             // Compute transformed x': (a*x + b*y + c) / (g*x + h*y + 1)
             let num_x = _mm256_add_pd(
@@ -121,10 +114,10 @@ pub unsafe fn count_inliers_avx2(
         // Handle remainder with scalar
         let remainder_start = chunks * 4;
         for i in remainder_start..len {
-            let (rx, ry) = ref_points[i];
-            let (tx, ty) = target_points[i];
-            let (px, py) = transform.apply(rx, ry);
-            let dist_sq = (px - tx).powi(2) + (py - ty).powi(2);
+            let r = ref_points[i];
+            let t = target_points[i];
+            let p = transform.apply(r);
+            let dist_sq = (p - t).length_squared();
 
             if dist_sq < threshold_sq {
                 inliers.push(i);
@@ -144,8 +137,8 @@ pub unsafe fn count_inliers_avx2(
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "sse2")]
 pub unsafe fn count_inliers_sse2(
-    ref_points: &[(f64, f64)],
-    target_points: &[(f64, f64)],
+    ref_points: &[DVec2],
+    target_points: &[DVec2],
     transform: &Transform,
     threshold: f64,
 ) -> (Vec<usize>, usize) {
@@ -175,22 +168,18 @@ pub unsafe fn count_inliers_sse2(
             let base = chunk * 2;
 
             // Load 2 reference points
-            let rx0 = ref_points[base].0;
-            let ry0 = ref_points[base].1;
-            let rx1 = ref_points[base + 1].0;
-            let ry1 = ref_points[base + 1].1;
+            let r0 = ref_points[base];
+            let r1 = ref_points[base + 1];
 
-            let ref_x = _mm_set_pd(rx1, rx0);
-            let ref_y = _mm_set_pd(ry1, ry0);
+            let ref_x = _mm_set_pd(r1.x, r0.x);
+            let ref_y = _mm_set_pd(r1.y, r0.y);
 
             // Load 2 target points
-            let tx0 = target_points[base].0;
-            let ty0 = target_points[base].1;
-            let tx1 = target_points[base + 1].0;
-            let ty1 = target_points[base + 1].1;
+            let t0 = target_points[base];
+            let t1 = target_points[base + 1];
 
-            let tar_x = _mm_set_pd(tx1, tx0);
-            let tar_y = _mm_set_pd(ty1, ty0);
+            let tar_x = _mm_set_pd(t1.x, t0.x);
+            let tar_y = _mm_set_pd(t1.y, t0.y);
 
             // Compute transformed coordinates
             let num_x = _mm_add_pd(_mm_add_pd(_mm_mul_pd(a, ref_x), _mm_mul_pd(b, ref_y)), c);
@@ -229,10 +218,10 @@ pub unsafe fn count_inliers_sse2(
         // Handle remainder
         let remainder_start = chunks * 2;
         for i in remainder_start..len {
-            let (rx, ry) = ref_points[i];
-            let (tx, ty) = target_points[i];
-            let (px, py) = transform.apply(rx, ry);
-            let dist_sq = (px - tx).powi(2) + (py - ty).powi(2);
+            let r = ref_points[i];
+            let t = target_points[i];
+            let p = transform.apply(r);
+            let dist_sq = (p - t).length_squared();
 
             if dist_sq < threshold_sq {
                 inliers.push(i);
@@ -251,8 +240,8 @@ mod tests {
     use common::cpu_features;
 
     fn count_inliers_scalar(
-        ref_points: &[(f64, f64)],
-        target_points: &[(f64, f64)],
+        ref_points: &[DVec2],
+        target_points: &[DVec2],
         transform: &Transform,
         threshold: f64,
     ) -> (Vec<usize>, usize) {
@@ -260,9 +249,9 @@ mod tests {
         let mut inliers = Vec::new();
         let mut score = 0usize;
 
-        for (i, (&(rx, ry), &(tx, ty))) in ref_points.iter().zip(target_points.iter()).enumerate() {
-            let (px, py) = transform.apply(rx, ry);
-            let dist_sq = (px - tx).powi(2) + (py - ty).powi(2);
+        for (i, (r, t)) in ref_points.iter().zip(target_points.iter()).enumerate() {
+            let p = transform.apply_vec(*r);
+            let dist_sq = (p - *t).length_squared();
 
             if dist_sq < threshold_sq {
                 inliers.push(i);
@@ -282,17 +271,18 @@ mod tests {
         }
 
         let transform = Transform::translation(10.0, 5.0);
-        let ref_points: Vec<(f64, f64)> =
-            (0..20).map(|i| (i as f64 * 5.0, i as f64 * 3.0)).collect();
-        let target_points: Vec<(f64, f64)> = ref_points
+        let ref_points: Vec<DVec2> = (0..20)
+            .map(|i| DVec2::new(i as f64 * 5.0, i as f64 * 3.0))
+            .collect();
+        let target_points: Vec<DVec2> = ref_points
             .iter()
             .enumerate()
-            .map(|(i, &(x, y))| {
-                let (tx, ty) = transform.apply(x, y);
+            .map(|(i, p)| {
+                let t = transform.apply_vec(*p);
                 if i % 4 == 0 {
-                    (tx + 100.0, ty) // outlier
+                    t + DVec2::new(100.0, 0.0) // outlier
                 } else {
-                    (tx + 0.1, ty - 0.1)
+                    t + DVec2::new(0.1, -0.1)
                 }
             })
             .collect();
@@ -316,17 +306,18 @@ mod tests {
         }
 
         let transform = Transform::similarity(5.0, 10.0, 0.1, 1.1);
-        let ref_points: Vec<(f64, f64)> =
-            (0..15).map(|i| (i as f64 * 7.0, i as f64 * 4.0)).collect();
-        let target_points: Vec<(f64, f64)> = ref_points
+        let ref_points: Vec<DVec2> = (0..15)
+            .map(|i| DVec2::new(i as f64 * 7.0, i as f64 * 4.0))
+            .collect();
+        let target_points: Vec<DVec2> = ref_points
             .iter()
             .enumerate()
-            .map(|(i, &(x, y))| {
-                let (tx, ty) = transform.apply(x, y);
+            .map(|(i, p)| {
+                let t = transform.apply_vec(*p);
                 if i % 3 == 0 {
-                    (tx + 50.0, ty + 50.0)
+                    t + DVec2::new(50.0, 50.0)
                 } else {
-                    (tx + 0.2, ty - 0.15)
+                    t + DVec2::new(0.2, -0.15)
                 }
             })
             .collect();

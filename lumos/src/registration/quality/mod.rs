@@ -200,35 +200,34 @@ fn validate_registration(
 /// println!("Image overlap: {:.1}%", overlap * 100.0);
 /// ```
 pub fn estimate_overlap(width: usize, height: usize, transform: &Transform) -> f64 {
+    use glam::DVec2;
+
     // Sample corners and compute bounding box of transformed reference in target space
     let corners = [
-        (0.0, 0.0),
-        (width as f64, 0.0),
-        (width as f64, height as f64),
-        (0.0, height as f64),
+        DVec2::new(0.0, 0.0),
+        DVec2::new(width as f64, 0.0),
+        DVec2::new(width as f64, height as f64),
+        DVec2::new(0.0, height as f64),
     ];
 
-    let transformed: Vec<_> = corners
-        .iter()
-        .map(|&(x, y)| transform.apply(x, y))
-        .collect();
+    let transformed: Vec<_> = corners.iter().map(|&p| transform.apply(p)).collect();
 
     // Compute bounding box of transformed corners
     let min_x = transformed
         .iter()
-        .map(|p| p.0)
+        .map(|p| p.x)
         .fold(f64::INFINITY, f64::min);
     let max_x = transformed
         .iter()
-        .map(|p| p.0)
+        .map(|p| p.x)
         .fold(f64::NEG_INFINITY, f64::max);
     let min_y = transformed
         .iter()
-        .map(|p| p.1)
+        .map(|p| p.y)
         .fold(f64::INFINITY, f64::min);
     let max_y = transformed
         .iter()
-        .map(|p| p.1)
+        .map(|p| p.y)
         .fold(f64::NEG_INFINITY, f64::max);
 
     // Compute overlap with target image bounds
@@ -369,8 +368,8 @@ pub fn check_quadrant_consistency(
     let mut quadrant_residuals: [Vec<f64>; 4] = [Vec::new(), Vec::new(), Vec::new(), Vec::new()];
 
     for (&(rx, ry), &(tx, ty)) in ref_points.iter().zip(target_points.iter()) {
-        let (px, py) = transform.apply(rx, ry);
-        let residual = ((px - tx).powi(2) + (py - ty).powi(2)).sqrt();
+        let p = transform.apply(glam::DVec2::new(rx, ry));
+        let residual = ((p.x - tx).powi(2) + (p.y - ty).powi(2)).sqrt();
 
         // Determine quadrant (0=TL, 1=TR, 2=BL, 3=BR)
         let q = match (rx >= half_w, ry >= half_h) {

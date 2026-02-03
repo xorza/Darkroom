@@ -1,3 +1,5 @@
+use glam::DVec2;
+
 use super::*;
 use crate::AstroImage;
 use crate::common::Buffer2;
@@ -6,8 +8,8 @@ use std::f64::consts::PI;
 
 /// Test helper: register star positions with specified transform type
 fn register_star_positions(
-    ref_positions: &[(f64, f64)],
-    target_positions: &[(f64, f64)],
+    ref_positions: &[DVec2],
+    target_positions: &[DVec2],
     transform_type: TransformType,
 ) -> Result<RegistrationResult, RegistrationError> {
     let config = RegistrationConfig {
@@ -20,60 +22,61 @@ fn register_star_positions(
     Registrator::new(config).register_positions(ref_positions, target_positions)
 }
 
-fn generate_star_grid(
-    rows: usize,
-    cols: usize,
-    spacing: f64,
-    offset: (f64, f64),
-) -> Vec<(f64, f64)> {
+fn generate_star_grid(rows: usize, cols: usize, spacing: f64, offset: DVec2) -> Vec<DVec2> {
     let mut stars = Vec::new();
     for r in 0..rows {
         for c in 0..cols {
-            let x = offset.0 + c as f64 * spacing;
-            let y = offset.1 + r as f64 * spacing;
-            stars.push((x, y));
+            stars.push(offset + DVec2::new(c as f64 * spacing, r as f64 * spacing));
         }
     }
     stars
 }
 
-fn transform_stars(stars: &[(f64, f64)], transform: &Transform) -> Vec<(f64, f64)> {
-    stars.iter().map(|&(x, y)| transform.apply(x, y)).collect()
+fn transform_stars(stars: &[DVec2], transform: &Transform) -> Vec<DVec2> {
+    stars.iter().map(|&p| transform.apply(p)).collect()
 }
 
 #[test]
 fn test_registration_identity() {
-    let ref_stars = generate_star_grid(5, 5, 100.0, (100.0, 100.0));
+    let ref_stars = generate_star_grid(5, 5, 100.0, DVec2::new(100.0, 100.0));
     let target_stars = ref_stars.clone();
 
     let result =
         register_star_positions(&ref_stars, &target_stars, TransformType::Translation).unwrap();
 
     // Should find near-identity transform
-    let (tx, ty) = result.transform.translation_components();
-    assert!(tx.abs() < 1.0, "Expected near-zero translation, got {}", tx);
-    assert!(ty.abs() < 1.0, "Expected near-zero translation, got {}", ty);
+    let t = result.transform.translation_components();
+    assert!(
+        t.x.abs() < 1.0,
+        "Expected near-zero translation, got {}",
+        t.x
+    );
+    assert!(
+        t.y.abs() < 1.0,
+        "Expected near-zero translation, got {}",
+        t.y
+    );
     assert!(result.rms_error < 0.5, "Expected low RMS error");
 }
 
 #[test]
 fn test_registration_translation() {
-    let ref_stars = generate_star_grid(5, 5, 100.0, (100.0, 100.0));
-    let translation = Transform::translation(50.0, -30.0);
+    let ref_stars = generate_star_grid(5, 5, 100.0, DVec2::new(100.0, 100.0));
+    let translation = Transform::translation(DVec2::new(50.0, -30.0));
     let target_stars = transform_stars(&ref_stars, &translation);
 
     let result =
         register_star_positions(&ref_stars, &target_stars, TransformType::Translation).unwrap();
 
-    let (tx, ty) = result.transform.translation_components();
-    assert!((tx - 50.0).abs() < 1.0, "Expected tx=50, got {}", tx);
-    assert!((ty - (-30.0)).abs() < 1.0, "Expected ty=-30, got {}", ty);
+    let t = result.transform.translation_components();
+    assert!((t.x - 50.0).abs() < 1.0, "Expected tx=50, got {}", t.x);
+    assert!((t.y - (-30.0)).abs() < 1.0, "Expected ty=-30, got {}", t.y);
 }
 
 #[test]
 fn test_registration_rotation() {
-    let ref_stars = generate_star_grid(5, 5, 100.0, (200.0, 200.0));
-    let rotation = Transform::euclidean(10.0, -5.0, 0.1); // ~5.7 degrees
+    let ref_stars = generate_star_grid(5, 5, 100.0, DVec2::new(200.0, 200.0));
+    let rotation = Transform::euclidean(DVec2::new(10.0, -5.0), 0.1); // ~5.7 degrees
     let target_stars = transform_stars(&ref_stars, &rotation);
 
     let result =
@@ -89,8 +92,8 @@ fn test_registration_rotation() {
 
 #[test]
 fn test_registration_similarity() {
-    let ref_stars = generate_star_grid(5, 5, 100.0, (200.0, 200.0));
-    let similarity = Transform::similarity(20.0, 15.0, 0.05, 1.02);
+    let ref_stars = generate_star_grid(5, 5, 100.0, DVec2::new(200.0, 200.0));
+    let similarity = Transform::similarity(DVec2::new(20.0, 15.0), 0.05, 1.02);
     let target_stars = transform_stars(&ref_stars, &similarity);
 
     let result =
@@ -106,27 +109,27 @@ fn test_registration_similarity() {
 
 #[test]
 fn test_registration_with_outliers() {
-    let ref_stars = generate_star_grid(6, 6, 80.0, (100.0, 100.0));
-    let translation = Transform::translation(25.0, 40.0);
+    let ref_stars = generate_star_grid(6, 6, 80.0, DVec2::new(100.0, 100.0));
+    let translation = Transform::translation(DVec2::new(25.0, 40.0));
     let mut target_stars = transform_stars(&ref_stars, &translation);
 
     // Add outliers (wrong matches)
-    target_stars[0] = (500.0, 500.0);
-    target_stars[5] = (50.0, 800.0);
-    target_stars[10] = (900.0, 100.0);
+    target_stars[0] = DVec2::new(500.0, 500.0);
+    target_stars[5] = DVec2::new(50.0, 800.0);
+    target_stars[10] = DVec2::new(900.0, 100.0);
 
     let result =
         register_star_positions(&ref_stars, &target_stars, TransformType::Translation).unwrap();
 
-    let (tx, ty) = result.transform.translation_components();
+    let t = result.transform.translation_components();
     // RANSAC should still find correct translation despite outliers
-    assert!((tx - 25.0).abs() < 2.0, "Expected tx=25, got {}", tx);
-    assert!((ty - 40.0).abs() < 2.0, "Expected ty=40, got {}", ty);
+    assert!((t.x - 25.0).abs() < 2.0, "Expected tx=25, got {}", t.x);
+    assert!((t.y - 40.0).abs() < 2.0, "Expected ty=40, got {}", t.y);
 }
 
 #[test]
 fn test_registration_insufficient_stars() {
-    let ref_stars = vec![(100.0, 100.0), (200.0, 200.0)];
+    let ref_stars = vec![DVec2::new(100.0, 100.0), DVec2::new(200.0, 200.0)];
     let target_stars = ref_stars.clone();
 
     let result = register_star_positions(&ref_stars, &target_stars, TransformType::Translation);
@@ -167,7 +170,7 @@ fn test_warp_to_reference_image() {
 
     // Transform maps reference -> target: ref(32,32) -> target(37,35)
     // So translation is (5, 3)
-    let transform = Transform::translation(5.0, 3.0);
+    let transform = Transform::translation(DVec2::new(5.0, 3.0));
 
     // warp_to_reference_image should align target to reference frame
     // The pixel at target(37,35) should appear at reference(32,32) after warping
@@ -210,7 +213,7 @@ fn test_warp_to_reference_image_roundtrip() {
     }
 
     // Define transform: reference -> target
-    let transform = Transform::similarity(10.0, -5.0, 0.1, 1.02);
+    let transform = Transform::similarity(DVec2::new(10.0, -5.0), 0.1, 1.02);
 
     // Create target image by warping reference with the transform
     // (simulates what the camera would see if shifted/rotated)
@@ -277,13 +280,13 @@ fn test_warp_to_reference_image_end_to_end() {
     let height = 256;
 
     // Generate reference star positions
-    let ref_stars = generate_star_grid(6, 6, 35.0, (30.0, 30.0));
+    let ref_stars = generate_star_grid(6, 6, 35.0, DVec2::new(30.0, 30.0));
 
     // Create reference image with Gaussian stars
     let ref_pixels = generate_synthetic_star_image(width, height, &ref_stars, 1.0, 4.0);
 
     // Apply known transform to star positions
-    let known_transform = Transform::similarity(12.0, -8.0, 0.05, 1.01);
+    let known_transform = Transform::similarity(DVec2::new(12.0, -8.0), 0.05, 1.01);
     let target_stars = transform_stars(&ref_stars, &known_transform);
 
     // Create target image with transformed star positions
@@ -356,20 +359,20 @@ fn test_warp_to_reference_image_end_to_end() {
 
 #[test]
 fn test_quick_register() {
-    let ref_stars = generate_star_grid(4, 4, 150.0, (100.0, 100.0));
-    let translation = Transform::translation(10.0, -15.0);
+    let ref_stars = generate_star_grid(4, 4, 150.0, DVec2::new(100.0, 100.0));
+    let translation = Transform::translation(DVec2::new(10.0, -15.0));
     let target_stars = transform_stars(&ref_stars, &translation);
 
     let transform = quick_register(&ref_stars, &target_stars).unwrap();
-    let (tx, ty) = transform.translation_components();
+    let t = transform.translation_components();
 
-    assert!((tx - 10.0).abs() < 1.0);
-    assert!((ty - (-15.0)).abs() < 1.0);
+    assert!((t.x - 10.0).abs() < 1.0);
+    assert!((t.y - (-15.0)).abs() < 1.0);
 }
 
 #[test]
 fn test_registration_result_quality() {
-    let ref_stars = generate_star_grid(6, 6, 100.0, (50.0, 50.0));
+    let ref_stars = generate_star_grid(6, 6, 100.0, DVec2::new(50.0, 50.0));
     let target_stars = ref_stars.clone();
 
     let result =
@@ -382,9 +385,9 @@ fn test_registration_result_quality() {
 
 #[test]
 fn test_registration_large_rotation() {
-    let ref_stars = generate_star_grid(5, 5, 100.0, (250.0, 250.0));
+    let ref_stars = generate_star_grid(5, 5, 100.0, DVec2::new(250.0, 250.0));
     // 30 degree rotation around image center
-    let rotation = Transform::rotation_around(300.0, 300.0, PI / 6.0);
+    let rotation = Transform::rotation_around(DVec2::new(300.0, 300.0), PI / 6.0);
     let target_stars = transform_stars(&ref_stars, &rotation);
 
     let result =
@@ -406,18 +409,18 @@ fn test_registration_large_rotation() {
 fn generate_synthetic_star_image(
     width: usize,
     height: usize,
-    stars: &[(f64, f64)],
+    stars: &[DVec2],
     brightness: f32,
     fwhm: f32,
 ) -> Vec<f32> {
     let mut image = vec![0.0f32; width * height];
     let sigma = fwhm / 2.355; // FWHM to sigma conversion
 
-    for &(sx, sy) in stars {
+    for &star in stars {
         // Draw Gaussian profile around each star
         let radius = (3.0 * sigma) as i32;
-        let cx = sx as i32;
-        let cy = sy as i32;
+        let cx = star.x as i32;
+        let cy = star.y as i32;
 
         for dy in -radius..=radius {
             for dx in -radius..=radius {
@@ -442,10 +445,10 @@ fn test_pipeline_ground_truth_synthetic() {
     let height = 256;
 
     // Generate reference star positions
-    let ref_stars = generate_star_grid(6, 6, 35.0, (30.0, 30.0));
+    let ref_stars = generate_star_grid(6, 6, 35.0, DVec2::new(30.0, 30.0));
 
     // Apply known transform
-    let known_transform = Transform::similarity(15.0, -10.0, 0.05, 1.02);
+    let known_transform = Transform::similarity(DVec2::new(15.0, -10.0), 0.05, 1.02);
     let target_stars = transform_stars(&ref_stars, &known_transform);
 
     // Create synthetic images
@@ -459,7 +462,7 @@ fn test_pipeline_ground_truth_synthetic() {
     // Verify transform accuracy
     let estimated_scale = result.transform.scale_factor();
     let estimated_angle = result.transform.rotation_angle();
-    let (_est_tx, _est_ty) = result.transform.translation_components();
+    let _est_t = result.transform.translation_components();
 
     assert!(
         (estimated_scale - 1.02).abs() < 0.01,
@@ -509,20 +512,20 @@ fn test_pipeline_ground_truth_synthetic() {
 #[test]
 fn test_pipeline_partial_overlap() {
     // Stars with large translation (50% overlap)
-    let ref_stars = generate_star_grid(6, 6, 50.0, (50.0, 50.0));
-    let large_translation = Transform::translation(150.0, 0.0);
+    let ref_stars = generate_star_grid(6, 6, 50.0, DVec2::new(50.0, 50.0));
+    let large_translation = Transform::translation(DVec2::new(150.0, 0.0));
     let target_stars = transform_stars(&ref_stars, &large_translation);
 
     let result =
         register_star_positions(&ref_stars, &target_stars, TransformType::Translation).unwrap();
 
-    let (tx, ty) = result.transform.translation_components();
+    let t = result.transform.translation_components();
     assert!(
-        (tx - 150.0).abs() < 2.0,
+        (t.x - 150.0).abs() < 2.0,
         "Large translation error: expected 150, got {}",
-        tx
+        t.x
     );
-    assert!(ty.abs() < 2.0, "Unexpected y translation: {}", ty);
+    assert!(t.y.abs() < 2.0, "Unexpected y translation: {}", t.y);
 
     // Should still find enough inliers
     assert!(
@@ -535,8 +538,8 @@ fn test_pipeline_partial_overlap() {
 /// Test pipeline with noisy star positions
 #[test]
 fn test_pipeline_with_position_noise() {
-    let ref_stars = generate_star_grid(6, 6, 80.0, (100.0, 100.0));
-    let transform = Transform::similarity(10.0, -5.0, 0.03, 1.01);
+    let ref_stars = generate_star_grid(6, 6, 80.0, DVec2::new(100.0, 100.0));
+    let transform = Transform::similarity(DVec2::new(10.0, -5.0), 0.03, 1.01);
 
     // Add noise to target positions
     let mut target_stars = transform_stars(&ref_stars, &transform);
@@ -544,8 +547,8 @@ fn test_pipeline_with_position_noise() {
         // Deterministic "noise" based on index
         let noise_x = ((i * 7) as f64 * 0.1).sin() * 0.5;
         let noise_y = ((i * 11) as f64 * 0.1).cos() * 0.5;
-        star.0 += noise_x;
-        star.1 += noise_y;
+        star.x += noise_x;
+        star.y += noise_y;
     }
 
     let result =
@@ -570,8 +573,8 @@ fn test_pipeline_with_position_noise() {
 /// Test that registration produces consistent results across multiple runs
 #[test]
 fn test_pipeline_consistency() {
-    let ref_stars = generate_star_grid(5, 5, 100.0, (100.0, 100.0));
-    let transform = Transform::similarity(20.0, 15.0, 0.08, 1.03);
+    let ref_stars = generate_star_grid(5, 5, 100.0, DVec2::new(100.0, 100.0));
+    let transform = Transform::similarity(DVec2::new(20.0, 15.0), 0.08, 1.03);
     let target_stars = transform_stars(&ref_stars, &transform);
 
     // Run registration multiple times
@@ -609,7 +612,7 @@ fn test_pipeline_consistency() {
 /// Test affine transform recovery (includes shear)
 #[test]
 fn test_pipeline_affine_transform() {
-    let ref_stars = generate_star_grid(6, 6, 80.0, (100.0, 100.0));
+    let ref_stars = generate_star_grid(6, 6, 80.0, DVec2::new(100.0, 100.0));
 
     // Affine with slight shear
     let affine = Transform::affine([1.02, 0.03, 15.0, -0.02, 0.98, 10.0]);
@@ -619,10 +622,10 @@ fn test_pipeline_affine_transform() {
 
     // Verify by transforming reference points and checking error
     let mut total_error = 0.0;
-    for (i, &(rx, ry)) in ref_stars.iter().enumerate() {
-        let (tx, ty) = target_stars[i];
-        let (px, py) = result.transform.apply(rx, ry);
-        total_error += ((px - tx).powi(2) + (py - ty).powi(2)).sqrt();
+    for (i, &r) in ref_stars.iter().enumerate() {
+        let t = target_stars[i];
+        let p = result.transform.apply(r);
+        total_error += (p - t).length();
     }
     let mean_error = total_error / ref_stars.len() as f64;
 
@@ -636,8 +639,8 @@ fn test_pipeline_affine_transform() {
 #[test]
 fn test_multiscale_registration_basic() {
     // Create a large star field
-    let ref_stars = generate_star_grid(10, 10, 50.0, (50.0, 50.0));
-    let translation = Transform::translation(25.0, -15.0);
+    let ref_stars = generate_star_grid(10, 10, 50.0, DVec2::new(50.0, 50.0));
+    let translation = Transform::translation(DVec2::new(25.0, -15.0));
     let target_stars = transform_stars(&ref_stars, &translation);
 
     let config = RegistrationConfig {
@@ -659,18 +662,18 @@ fn test_multiscale_registration_basic() {
         .register_stars(&ref_stars, &target_stars, 1000, 1000)
         .unwrap();
 
-    let (tx, ty) = result.transform.translation_components();
-    assert!((tx - 25.0).abs() < 2.0, "Expected tx=25, got {}", tx);
-    assert!((ty - (-15.0)).abs() < 2.0, "Expected ty=-15, got {}", ty);
+    let t = result.transform.translation_components();
+    assert!((t.x - 25.0).abs() < 2.0, "Expected tx=25, got {}", t.x);
+    assert!((t.y - (-15.0)).abs() < 2.0, "Expected ty=-15, got {}", t.y);
 }
 
 #[test]
 fn test_multiscale_registration_with_rotation() {
-    let ref_stars = generate_star_grid(8, 8, 60.0, (100.0, 100.0));
+    let ref_stars = generate_star_grid(8, 8, 60.0, DVec2::new(100.0, 100.0));
 
     // Apply rotation + translation
     let angle = PI / 20.0; // 9 degrees
-    let transform = Transform::similarity(30.0, -20.0, angle, 1.0);
+    let transform = Transform::similarity(DVec2::new(30.0, -20.0), angle, 1.0);
     let target_stars = transform_stars(&ref_stars, &transform);
 
     let config = RegistrationConfig {
@@ -741,12 +744,12 @@ fn test_build_pyramid() {
 
 #[test]
 fn test_scale_transform() {
-    let transform = Transform::translation(10.0, 20.0);
+    let transform = Transform::translation(DVec2::new(10.0, 20.0));
     let scaled = super::scale_transform(&transform, 2.0);
 
-    let (tx, ty) = scaled.translation_components();
-    assert!((tx - 20.0).abs() < 0.01);
-    assert!((ty - 40.0).abs() < 0.01);
+    let t = scaled.translation_components();
+    assert!((t.x - 20.0).abs() < 0.01);
+    assert!((t.y - 40.0).abs() < 0.01);
 }
 
 // ============================================================================
@@ -759,7 +762,7 @@ fn generate_realistic_star_field(
     width: f64,
     height: f64,
     seed: u64,
-) -> Vec<(f64, f64, f64)> {
+) -> Vec<(DVec2, f64)> {
     // Deterministic pseudo-random generator (simple LCG)
     let mut state = seed;
     let mut next_rand = || {
@@ -773,20 +776,16 @@ fn generate_realistic_star_field(
         let y = next_rand() * height;
         // Brightness follows power-law distribution (more faint stars than bright)
         let brightness = 1.0 / (1.0 + next_rand() * 9.0); // Range: 0.1 to 1.0
-        stars.push((x, y, brightness));
+        stars.push((DVec2::new(x, y), brightness));
     }
 
     // Sort by brightness (brightest first, as detection would)
-    stars.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap());
+    stars.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
     stars
 }
 
 /// Simulate star detection noise (centroid uncertainty)
-fn add_centroid_noise(
-    stars: &[(f64, f64, f64)],
-    noise_sigma: f64,
-    seed: u64,
-) -> Vec<(f64, f64, f64)> {
+fn add_centroid_noise(stars: &[(DVec2, f64)], noise_sigma: f64, seed: u64) -> Vec<(DVec2, f64)> {
     let mut state = seed;
     let mut next_rand = || {
         state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
@@ -802,12 +801,11 @@ fn add_centroid_noise(
 
     stars
         .iter()
-        .map(|&(x, y, b)| {
+        .map(|&(pos, b)| {
             // Fainter stars have more centroid uncertainty
             let actual_sigma = noise_sigma / b.sqrt();
-            let nx = x + gaussian() * actual_sigma;
-            let ny = y + gaussian() * actual_sigma;
-            (nx, ny, b)
+            let noisy_pos = pos + DVec2::new(gaussian() * actual_sigma, gaussian() * actual_sigma);
+            (noisy_pos, b)
         })
         .collect()
 }

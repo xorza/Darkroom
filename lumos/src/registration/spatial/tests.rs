@@ -271,9 +271,10 @@ fn test_kdtree_with_clustered_points() {
 
 #[test]
 fn test_distance_squared() {
-    assert!((distance_squared((0.0, 0.0), (3.0, 4.0)) - 25.0).abs() < 1e-10);
-    assert!((distance_squared((1.0, 1.0), (1.0, 1.0))).abs() < 1e-10);
-    assert!((distance_squared((0.0, 0.0), (1.0, 0.0)) - 1.0).abs() < 1e-10);
+    use glam::DVec2;
+    assert!((DVec2::new(0.0, 0.0).distance_squared(DVec2::new(3.0, 4.0)) - 25.0).abs() < 1e-10);
+    assert!((DVec2::new(1.0, 1.0).distance_squared(DVec2::new(1.0, 1.0))).abs() < 1e-10);
+    assert!((DVec2::new(0.0, 0.0).distance_squared(DVec2::new(1.0, 0.0)) - 1.0).abs() < 1e-10);
 }
 
 // ============================================================================

@@ -84,17 +84,17 @@ fn test_find_stars_on_light_frame() {
     for star in stars.iter().take(10) {
         println!(
             "{:>8.2} {:>8.2} {:>10.1} {:>8.2} {:>8.1} {:>8.3}",
-            star.x, star.y, star.flux, star.fwhm, star.snr, star.eccentricity
+            star.pos.x, star.pos.y, star.flux, star.fwhm, star.snr, star.eccentricity
         );
     }
 
     for star in &stars {
         assert!(
-            star.x >= 0.0 && star.x < width as f32,
+            star.pos.x >= 0.0 && star.pos.x < width as f32,
             "Star X out of bounds"
         );
         assert!(
-            star.y >= 0.0 && star.y < height as f32,
+            star.pos.y >= 0.0 && star.pos.y < height as f32,
             "Star Y out of bounds"
         );
         assert!(star.flux > 0.0, "Star flux should be positive");

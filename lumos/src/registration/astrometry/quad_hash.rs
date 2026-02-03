@@ -3,6 +3,8 @@
 //! Implements the Astrometry.net / ASTAP approach of using tetrahedron patterns
 //! of 4 stars to compute scale and rotation invariant hash codes.
 
+use glam::DVec2;
+
 use crate::registration::spatial::KdTree;
 
 /// A quad (tetrahedron) of 4 stars with its geometric hash.
@@ -24,15 +26,14 @@ impl QuadHash {
     /// 2. C and D positions are computed in this normalized space
     ///
     /// This makes the code invariant to translation, rotation, and scale.
-    pub fn from_positions(indices: [usize; 4], positions: [(f64, f64); 4]) -> Option<Self> {
+    pub fn from_positions(indices: [usize; 4], positions: [DVec2; 4]) -> Option<Self> {
         let [a, b, c, d] = positions;
 
         // Vector from A to B
-        let ab_x = b.0 - a.0;
-        let ab_y = b.1 - a.1;
+        let ab = b - a;
 
         // Length of AB (used for normalization)
-        let ab_len_sq = ab_x * ab_x + ab_y * ab_y;
+        let ab_len_sq = ab.length_squared();
         if ab_len_sq < 1e-10 {
             return None; // A and B are too close
         }
@@ -40,23 +41,19 @@ impl QuadHash {
 
         // Create orthonormal coordinate system with A at origin
         // u-axis along AB, v-axis perpendicular
-        let u_x = ab_x / ab_len;
-        let u_y = ab_y / ab_len;
-        let v_x = -u_y;
-        let v_y = u_x;
+        let u = ab / ab_len;
+        let v = DVec2::new(-u.y, u.x);
 
         // Transform C and D into normalized coordinates
         // In this system, A is at (0,0) and B is at (ab_len, 0)
         // We further normalize by ab_len to make B at (1, 0)
-        let c_rel_x = c.0 - a.0;
-        let c_rel_y = c.1 - a.1;
-        let x_c = (c_rel_x * u_x + c_rel_y * u_y) / ab_len;
-        let y_c = (c_rel_x * v_x + c_rel_y * v_y) / ab_len;
+        let c_rel = c - a;
+        let x_c = c_rel.dot(u) / ab_len;
+        let y_c = c_rel.dot(v) / ab_len;
 
-        let d_rel_x = d.0 - a.0;
-        let d_rel_y = d.1 - a.1;
-        let x_d = (d_rel_x * u_x + d_rel_y * u_y) / ab_len;
-        let y_d = (d_rel_x * v_x + d_rel_y * v_y) / ab_len;
+        let d_rel = d - a;
+        let x_d = d_rel.dot(u) / ab_len;
+        let y_d = d_rel.dot(v) / ab_len;
 
         Some(QuadHash {
             star_indices: indices,
@@ -131,7 +128,7 @@ impl QuadHasher {
     ///
     /// Uses the N brightest stars (positions should be sorted by brightness).
     /// For each star, forms quads with its 3 nearest neighbors.
-    pub fn build_quads(&self, positions: &[(f64, f64)]) -> Vec<QuadHash> {
+    pub fn build_quads(&self, positions: &[DVec2]) -> Vec<QuadHash> {
         let n = positions.len().min(self.max_stars);
         if n < 4 {
             return Vec::new();
@@ -148,9 +145,9 @@ impl QuadHasher {
         let mut quads = Vec::new();
 
         // For each star, form quads with its nearest neighbors
-        for (i, &pos_i) in positions.iter().enumerate() {
+        for (i, pos_i) in positions.iter().enumerate() {
             // Find 4 nearest neighbors (including self)
-            let neighbors = tree.k_nearest(pos_i, 5);
+            let neighbors = tree.k_nearest(*pos_i, 5);
 
             // Filter to get 3 other stars within max radius
             let mut other_indices: Vec<usize> = neighbors
@@ -200,7 +197,7 @@ impl QuadHasher {
     fn best_quad_orientation(
         &self,
         indices: &[usize; 4],
-        positions: &[(f64, f64); 4],
+        positions: &[DVec2; 4],
     ) -> Option<QuadHash> {
         // Find the pair with maximum distance
         let mut max_dist_sq = 0.0;
@@ -208,9 +205,7 @@ impl QuadHasher {
 
         for i in 0..4 {
             for j in (i + 1)..4 {
-                let dx = positions[i].0 - positions[j].0;
-                let dy = positions[i].1 - positions[j].1;
-                let dist_sq = dx * dx + dy * dy;
+                let dist_sq = (positions[i] - positions[j]).length_squared();
                 if dist_sq > max_dist_sq {
                     max_dist_sq = dist_sq;
                     ab_pair = (i, j);
@@ -305,7 +300,12 @@ mod tests {
     #[test]
     fn test_quad_hash_from_positions() {
         // Simple square: A at origin, B at (1,0), C at (1,1), D at (0,1)
-        let positions = [(0.0, 0.0), (100.0, 0.0), (100.0, 100.0), (0.0, 100.0)];
+        let positions = [
+            DVec2::new(0.0, 0.0),
+            DVec2::new(100.0, 0.0),
+            DVec2::new(100.0, 100.0),
+            DVec2::new(0.0, 100.0),
+        ];
         let indices = [0, 1, 2, 3];
 
         let quad = QuadHash::from_positions(indices, positions).unwrap();
@@ -322,8 +322,18 @@ mod tests {
     #[test]
     fn test_quad_hash_scale_invariance() {
         // Same square, but scaled by 2
-        let pos1 = [(0.0, 0.0), (100.0, 0.0), (100.0, 100.0), (0.0, 100.0)];
-        let pos2 = [(0.0, 0.0), (200.0, 0.0), (200.0, 200.0), (0.0, 200.0)];
+        let pos1 = [
+            DVec2::new(0.0, 0.0),
+            DVec2::new(100.0, 0.0),
+            DVec2::new(100.0, 100.0),
+            DVec2::new(0.0, 100.0),
+        ];
+        let pos2 = [
+            DVec2::new(0.0, 0.0),
+            DVec2::new(200.0, 0.0),
+            DVec2::new(200.0, 200.0),
+            DVec2::new(0.0, 200.0),
+        ];
         let indices = [0, 1, 2, 3];
 
         let quad1 = QuadHash::from_positions(indices, pos1).unwrap();
@@ -345,8 +355,18 @@ mod tests {
     fn test_quad_hash_rotation_invariance() {
         // Square rotated by 45 degrees
         let s = (2.0_f64).sqrt() / 2.0 * 100.0;
-        let pos1 = [(0.0, 0.0), (100.0, 0.0), (100.0, 100.0), (0.0, 100.0)];
-        let pos2 = [(0.0, 0.0), (s, s), (0.0, 2.0 * s), (-s, s)];
+        let pos1 = [
+            DVec2::new(0.0, 0.0),
+            DVec2::new(100.0, 0.0),
+            DVec2::new(100.0, 100.0),
+            DVec2::new(0.0, 100.0),
+        ];
+        let pos2 = [
+            DVec2::new(0.0, 0.0),
+            DVec2::new(s, s),
+            DVec2::new(0.0, 2.0 * s),
+            DVec2::new(-s, s),
+        ];
         let indices = [0, 1, 2, 3];
 
         let quad1 = QuadHash::from_positions(indices, pos1).unwrap();
@@ -391,7 +411,7 @@ mod tests {
         let mut positions = Vec::new();
         for y in 0..5 {
             for x in 0..5 {
-                positions.push((x as f64 * 50.0, y as f64 * 50.0));
+                positions.push(DVec2::new(x as f64 * 50.0, y as f64 * 50.0));
             }
         }
 
@@ -416,20 +436,17 @@ mod tests {
     fn test_quad_hasher_match() {
         // Create identical star patterns
         let positions1 = vec![
-            (0.0, 0.0),
-            (100.0, 0.0),
-            (100.0, 100.0),
-            (0.0, 100.0),
-            (50.0, 50.0),
+            DVec2::new(0.0, 0.0),
+            DVec2::new(100.0, 0.0),
+            DVec2::new(100.0, 100.0),
+            DVec2::new(0.0, 100.0),
+            DVec2::new(50.0, 50.0),
         ];
 
         // Same pattern, translated and scaled
         let scale = 1.5;
-        let offset = (50.0, 30.0);
-        let positions2: Vec<_> = positions1
-            .iter()
-            .map(|(x, y)| (x * scale + offset.0, y * scale + offset.1))
-            .collect();
+        let offset = DVec2::new(50.0, 30.0);
+        let positions2: Vec<_> = positions1.iter().map(|p| *p * scale + offset).collect();
 
         let hasher = QuadHasher::new()
             .with_max_stars(5)
@@ -449,7 +466,11 @@ mod tests {
 
     #[test]
     fn test_quad_hasher_insufficient_stars() {
-        let positions = vec![(0.0, 0.0), (100.0, 0.0), (50.0, 50.0)];
+        let positions = vec![
+            DVec2::new(0.0, 0.0),
+            DVec2::new(100.0, 0.0),
+            DVec2::new(50.0, 50.0),
+        ];
 
         let hasher = QuadHasher::new();
         let quads = hasher.build_quads(&positions);
@@ -461,7 +482,12 @@ mod tests {
     #[test]
     fn test_find_star_matches() {
         // Create matching star patterns
-        let positions1 = vec![(0.0, 0.0), (100.0, 0.0), (100.0, 100.0), (0.0, 100.0)];
+        let positions1 = vec![
+            DVec2::new(0.0, 0.0),
+            DVec2::new(100.0, 0.0),
+            DVec2::new(100.0, 100.0),
+            DVec2::new(0.0, 100.0),
+        ];
 
         let positions2 = positions1.clone();
 

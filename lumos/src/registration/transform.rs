@@ -1,5 +1,7 @@
 //! Transformation matrix for image registration.
 
+use glam::DVec2;
+
 /// Supported transformation models with increasing degrees of freedom.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum TransformType {
@@ -64,40 +66,40 @@ impl Default for Transform {
 
 impl std::fmt::Display for Transform {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let (tx, ty) = self.translation_components();
+        let t = self.translation_components();
         let rotation_deg = self.rotation_angle().to_degrees();
         let scale = self.scale_factor();
 
         match self.transform_type {
             TransformType::Translation => {
-                write!(f, "Translation(dx={:.2}, dy={:.2})", tx, ty)
+                write!(f, "Translation(dx={:.2}, dy={:.2})", t.x, t.y)
             }
             TransformType::Euclidean => {
                 write!(
                     f,
                     "Euclidean(dx={:.2}, dy={:.2}, rot={:.3}°)",
-                    tx, ty, rotation_deg
+                    t.x, t.y, rotation_deg
                 )
             }
             TransformType::Similarity => {
                 write!(
                     f,
                     "Similarity(dx={:.2}, dy={:.2}, rot={:.3}°, scale={:.4})",
-                    tx, ty, rotation_deg, scale
+                    t.x, t.y, rotation_deg, scale
                 )
             }
             TransformType::Affine => {
                 write!(
                     f,
                     "Affine(dx={:.2}, dy={:.2}, rot={:.3}°, scale={:.4})",
-                    tx, ty, rotation_deg, scale
+                    t.x, t.y, rotation_deg, scale
                 )
             }
             TransformType::Homography => {
                 write!(
                     f,
                     "Homography(dx={:.2}, dy={:.2}, rot={:.3}°, scale={:.4})",
-                    tx, ty, rotation_deg, scale
+                    t.x, t.y, rotation_deg, scale
                 )
             }
         }
@@ -114,29 +116,29 @@ impl Transform {
     }
 
     /// Create translation transform.
-    pub fn translation(dx: f64, dy: f64) -> Self {
+    pub fn translation(t: DVec2) -> Self {
         Self {
-            data: [1.0, 0.0, dx, 0.0, 1.0, dy, 0.0, 0.0, 1.0],
+            data: [1.0, 0.0, t.x, 0.0, 1.0, t.y, 0.0, 0.0, 1.0],
             transform_type: TransformType::Translation,
         }
     }
 
     /// Create Euclidean transform (translation + rotation).
-    pub fn euclidean(dx: f64, dy: f64, angle: f64) -> Self {
+    pub fn euclidean(t: DVec2, angle: f64) -> Self {
         let cos_a = angle.cos();
         let sin_a = angle.sin();
         Self {
-            data: [cos_a, -sin_a, dx, sin_a, cos_a, dy, 0.0, 0.0, 1.0],
+            data: [cos_a, -sin_a, t.x, sin_a, cos_a, t.y, 0.0, 0.0, 1.0],
             transform_type: TransformType::Euclidean,
         }
     }
 
     /// Create similarity transform (translation + rotation + uniform scale).
-    pub fn similarity(dx: f64, dy: f64, angle: f64, scale: f64) -> Self {
+    pub fn similarity(t: DVec2, angle: f64, scale: f64) -> Self {
         let cos_a = angle.cos() * scale;
         let sin_a = angle.sin() * scale;
         Self {
-            data: [cos_a, -sin_a, dx, sin_a, cos_a, dy, 0.0, 0.0, 1.0],
+            data: [cos_a, -sin_a, t.x, sin_a, cos_a, t.y, 0.0, 0.0, 1.0],
             transform_type: TransformType::Similarity,
         }
     }
@@ -162,24 +164,21 @@ impl Transform {
         }
     }
 
-    /// Create uniform scale transform.
-    pub fn scale(sx: f64, sy: f64) -> Self {
+    /// Create scale transform.
+    pub fn scale(s: DVec2) -> Self {
         Self {
-            data: [sx, 0.0, 0.0, 0.0, sy, 0.0, 0.0, 0.0, 1.0],
+            data: [s.x, 0.0, 0.0, 0.0, s.y, 0.0, 0.0, 0.0, 1.0],
             transform_type: TransformType::Affine,
         }
     }
 
     /// Create rotation transform around a specified center point.
-    ///
-    /// Parameters follow the pattern (center_x, center_y, angle) for consistency
-    /// with other constructors that use (position, rotation) ordering.
-    pub fn rotation_around(cx: f64, cy: f64, angle: f64) -> Self {
+    pub fn rotation_around(center: DVec2, angle: f64) -> Self {
         let cos_a = angle.cos();
         let sin_a = angle.sin();
         // T(-cx,-cy) * R(angle) * T(cx,cy)
-        let tx = cx - cos_a * cx + sin_a * cy;
-        let ty = cy - sin_a * cx - cos_a * cy;
+        let tx = center.x - cos_a * center.x + sin_a * center.y;
+        let ty = center.y - sin_a * center.x - cos_a * center.y;
         Self {
             data: [cos_a, -sin_a, tx, sin_a, cos_a, ty, 0.0, 0.0, 1.0],
             transform_type: TransformType::Euclidean,
@@ -216,17 +215,17 @@ impl Transform {
     /// let transform = result.transform;
     ///
     /// // Map a reference point to its corresponding target location
-    /// let (target_x, target_y) = transform.apply(ref_x, ref_y);
+    /// let target_pos = transform.apply(ref_pos);
     ///
     /// // Map a target point back to reference coordinates
-    /// let (ref_x, ref_y) = transform.apply_inverse(target_x, target_y);
+    /// let ref_pos = transform.apply_inverse(target_pos);
     /// ```
-    pub fn apply(&self, x: f64, y: f64) -> (f64, f64) {
+    pub fn apply(&self, p: DVec2) -> DVec2 {
         let d = &self.data;
-        let w = d[6] * x + d[7] * y + d[8];
-        let x_prime = (d[0] * x + d[1] * y + d[2]) / w;
-        let y_prime = (d[3] * x + d[4] * y + d[5]) / w;
-        (x_prime, y_prime)
+        let w = d[6] * p.x + d[7] * p.y + d[8];
+        let x_prime = (d[0] * p.x + d[1] * p.y + d[2]) / w;
+        let y_prime = (d[3] * p.x + d[4] * p.y + d[5]) / w;
+        DVec2::new(x_prime, y_prime)
     }
 
     /// Apply inverse transform to map a point from TARGET coordinates to REFERENCE coordinates.
@@ -235,8 +234,8 @@ impl Transform {
     /// it returns the corresponding point in the reference image.
     ///
     /// See [`apply`](Self::apply) for more details on transform direction.
-    pub fn apply_inverse(&self, x: f64, y: f64) -> (f64, f64) {
-        self.inverse().apply(x, y)
+    pub fn apply_inverse(&self, p: DVec2) -> DVec2 {
+        self.inverse().apply(p)
     }
 
     /// Compute matrix inverse.
@@ -307,9 +306,9 @@ impl Transform {
         }
     }
 
-    /// Extract translation components (tx, ty).
-    pub fn translation_components(&self) -> (f64, f64) {
-        (self.data[2], self.data[5])
+    /// Extract translation components as DVec2.
+    pub fn translation_components(&self) -> DVec2 {
+        DVec2::new(self.data[2], self.data[5])
     }
 
     /// Extract rotation angle in radians (valid for Euclidean/Similarity transforms).
@@ -370,94 +369,97 @@ mod tests {
     #[test]
     fn test_identity_transform() {
         let t = Transform::identity();
-        let (x, y) = t.apply(5.0, 7.0);
-        assert!(approx_eq(x, 5.0));
-        assert!(approx_eq(y, 7.0));
+        let p = t.apply(DVec2::new(5.0, 7.0));
+        assert!(approx_eq(p.x, 5.0));
+        assert!(approx_eq(p.y, 7.0));
     }
 
     #[test]
     fn test_translation_transform() {
-        let t = Transform::translation(10.0, -5.0);
-        let (x, y) = t.apply(3.0, 4.0);
-        assert!(approx_eq(x, 13.0));
-        assert!(approx_eq(y, -1.0));
+        let t = Transform::translation(DVec2::new(10.0, -5.0));
+        let p = t.apply(DVec2::new(3.0, 4.0));
+        assert!(approx_eq(p.x, 13.0));
+        assert!(approx_eq(p.y, -1.0));
     }
 
     #[test]
     fn test_rotation_90_degrees() {
-        let t = Transform::euclidean(0.0, 0.0, PI / 2.0);
-        let (x, y) = t.apply(1.0, 0.0);
-        assert!(approx_eq(x, 0.0));
-        assert!(approx_eq(y, 1.0));
+        let t = Transform::euclidean(DVec2::ZERO, PI / 2.0);
+        let p = t.apply(DVec2::new(1.0, 0.0));
+        assert!(approx_eq(p.x, 0.0));
+        assert!(approx_eq(p.y, 1.0));
     }
 
     #[test]
     fn test_rotation_180_degrees() {
-        let t = Transform::euclidean(0.0, 0.0, PI);
-        let (x, y) = t.apply(1.0, 0.0);
-        assert!(approx_eq(x, -1.0));
-        assert!(approx_eq(y, 0.0));
+        let t = Transform::euclidean(DVec2::ZERO, PI);
+        let p = t.apply(DVec2::new(1.0, 0.0));
+        assert!(approx_eq(p.x, -1.0));
+        assert!(approx_eq(p.y, 0.0));
     }
 
     #[test]
     fn test_scale_transform() {
-        let t = Transform::similarity(0.0, 0.0, 0.0, 2.0);
-        let (x, y) = t.apply(3.0, 4.0);
-        assert!(approx_eq(x, 6.0));
-        assert!(approx_eq(y, 8.0));
+        let t = Transform::similarity(DVec2::ZERO, 0.0, 2.0);
+        let p = t.apply(DVec2::new(3.0, 4.0));
+        assert!(approx_eq(p.x, 6.0));
+        assert!(approx_eq(p.y, 8.0));
     }
 
     #[test]
     fn test_similarity_with_rotation_and_scale() {
-        let t = Transform::similarity(5.0, 10.0, PI / 2.0, 2.0);
-        let (x, y) = t.apply(1.0, 0.0);
+        let t = Transform::similarity(DVec2::new(5.0, 10.0), PI / 2.0, 2.0);
+        let p = t.apply(DVec2::new(1.0, 0.0));
         // Rotate 90° then scale 2x: (1,0) -> (0,1) -> (0,2), then translate
-        assert!(approx_eq(x, 5.0));
-        assert!(approx_eq(y, 12.0));
+        assert!(approx_eq(p.x, 5.0));
+        assert!(approx_eq(p.y, 12.0));
     }
 
     #[test]
     fn test_affine_transform() {
         // Shear transform
         let t = Transform::affine([1.0, 0.5, 0.0, 0.0, 1.0, 0.0]);
-        let (x, y) = t.apply(2.0, 2.0);
-        assert!(approx_eq(x, 3.0)); // 2 + 0.5*2
-        assert!(approx_eq(y, 2.0));
+        let p = t.apply(DVec2::new(2.0, 2.0));
+        assert!(approx_eq(p.x, 3.0)); // 2 + 0.5*2
+        assert!(approx_eq(p.y, 2.0));
     }
 
     #[test]
     fn test_transform_inverse() {
-        let t = Transform::similarity(10.0, -5.0, PI / 4.0, 1.5);
+        let t = Transform::similarity(DVec2::new(10.0, -5.0), PI / 4.0, 1.5);
         let inv = t.inverse();
 
-        let (x1, y1) = t.apply(3.0, 7.0);
-        let (x2, y2) = inv.apply(x1, y1);
+        let p1 = t.apply(DVec2::new(3.0, 7.0));
+        let p2 = inv.apply(p1);
 
-        assert!(approx_eq(x2, 3.0));
-        assert!(approx_eq(y2, 7.0));
+        assert!(approx_eq(p2.x, 3.0));
+        assert!(approx_eq(p2.y, 7.0));
     }
 
     #[test]
     fn test_apply_roundtrip() {
         let transforms = vec![
-            Transform::translation(5.0, -3.0),
-            Transform::euclidean(2.0, 3.0, 0.7),
-            Transform::similarity(1.0, 2.0, -0.5, 1.3),
+            Transform::translation(DVec2::new(5.0, -3.0)),
+            Transform::euclidean(DVec2::new(2.0, 3.0), 0.7),
+            Transform::similarity(DVec2::new(1.0, 2.0), -0.5, 1.3),
             Transform::affine([1.1, 0.2, 5.0, -0.1, 0.9, -3.0]),
         ];
 
         for t in transforms {
             let inv = t.inverse();
-            for &(x, y) in &[(0.0, 0.0), (10.0, 10.0), (-5.0, 7.0), (100.0, -50.0)] {
-                let (x1, y1) = t.apply(x, y);
-                let (x2, y2) = inv.apply(x1, y1);
+            for p in &[
+                DVec2::new(0.0, 0.0),
+                DVec2::new(10.0, 10.0),
+                DVec2::new(-5.0, 7.0),
+                DVec2::new(100.0, -50.0),
+            ] {
+                let p1 = t.apply(*p);
+                let p2 = inv.apply(p1);
                 assert!(
-                    approx_eq(x2, x) && approx_eq(y2, y),
-                    "Roundtrip failed for ({}, {}): got ({}, {})",
-                    x,
-                    y,
-                    x2,
-                    y2
+                    approx_eq(p2.x, p.x) && approx_eq(p2.y, p.y),
+                    "Roundtrip failed for {:?}: got {:?}",
+                    p,
+                    p2
                 );
             }
         }
@@ -465,53 +467,53 @@ mod tests {
 
     #[test]
     fn test_compose_translations() {
-        let t1 = Transform::translation(5.0, 3.0);
-        let t2 = Transform::translation(2.0, -1.0);
+        let t1 = Transform::translation(DVec2::new(5.0, 3.0));
+        let t2 = Transform::translation(DVec2::new(2.0, -1.0));
         let composed = t1.compose(&t2);
 
-        let (x, y) = composed.apply(0.0, 0.0);
+        let p = composed.apply(DVec2::ZERO);
         // t2 first: (0,0) -> (2,-1), then t1: (2,-1) -> (7,2)
-        assert!(approx_eq(x, 7.0));
-        assert!(approx_eq(y, 2.0));
+        assert!(approx_eq(p.x, 7.0));
+        assert!(approx_eq(p.y, 2.0));
     }
 
     #[test]
     fn test_compose_rotations() {
-        let t1 = Transform::euclidean(0.0, 0.0, PI / 4.0);
-        let t2 = Transform::euclidean(0.0, 0.0, PI / 4.0);
+        let t1 = Transform::euclidean(DVec2::ZERO, PI / 4.0);
+        let t2 = Transform::euclidean(DVec2::ZERO, PI / 4.0);
         let composed = t1.compose(&t2);
 
-        let (x, y) = composed.apply(1.0, 0.0);
+        let p = composed.apply(DVec2::new(1.0, 0.0));
         // Two 45° rotations = 90° rotation
-        assert!(approx_eq(x, 0.0));
-        assert!(approx_eq(y, 1.0));
+        assert!(approx_eq(p.x, 0.0));
+        assert!(approx_eq(p.y, 1.0));
     }
 
     #[test]
     fn test_translation_components() {
-        let t = Transform::translation(7.0, -3.0);
-        let (tx, ty) = t.translation_components();
-        assert!(approx_eq(tx, 7.0));
-        assert!(approx_eq(ty, -3.0));
+        let t = Transform::translation(DVec2::new(7.0, -3.0));
+        let tc = t.translation_components();
+        assert!(approx_eq(tc.x, 7.0));
+        assert!(approx_eq(tc.y, -3.0));
     }
 
     #[test]
     fn test_rotation_angle() {
         let angle = 0.5;
-        let t = Transform::euclidean(0.0, 0.0, angle);
+        let t = Transform::euclidean(DVec2::ZERO, angle);
         assert!(approx_eq(t.rotation_angle(), angle));
     }
 
     #[test]
     fn test_scale_factor() {
         let scale = 2.5;
-        let t = Transform::similarity(0.0, 0.0, 0.0, scale);
+        let t = Transform::similarity(DVec2::ZERO, 0.0, scale);
         assert!(approx_eq(t.scale_factor(), scale));
     }
 
     #[test]
     fn test_is_valid() {
-        let valid = Transform::similarity(1.0, 2.0, 0.5, 1.5);
+        let valid = Transform::similarity(DVec2::new(1.0, 2.0), 0.5, 1.5);
         assert!(valid.is_valid());
 
         // Degenerate matrix (zero scale)
@@ -526,19 +528,19 @@ mod tests {
     fn test_homography_transform() {
         // Simple homography that acts like translation
         let t = Transform::homography([1.0, 0.0, 5.0, 0.0, 1.0, 3.0, 0.0, 0.0]);
-        let (x, y) = t.apply(2.0, 4.0);
-        assert!(approx_eq(x, 7.0));
-        assert!(approx_eq(y, 7.0));
+        let p = t.apply(DVec2::new(2.0, 4.0));
+        assert!(approx_eq(p.x, 7.0));
+        assert!(approx_eq(p.y, 7.0));
     }
 
     #[test]
     fn test_homography_perspective() {
         // Homography with perspective component
         let t = Transform::homography([1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.001, 0.0]);
-        let (x, y) = t.apply(100.0, 0.0);
+        let p = t.apply(DVec2::new(100.0, 0.0));
         // w = 0.001 * 100 + 1 = 1.1
         // x' = 100 / 1.1 ≈ 90.9
-        assert!((x - 90.909).abs() < 0.01);
-        assert!(approx_eq(y, 0.0));
+        assert!((p.x - 90.909).abs() < 0.01);
+        assert!(approx_eq(p.y, 0.0));
     }
 }

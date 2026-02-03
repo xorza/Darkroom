@@ -2,6 +2,7 @@
 //!
 //! Tests the peak detection and thresholding logic.
 
+use crate::math::Vec2us;
 use crate::star_detection::background::BackgroundMap;
 use crate::star_detection::candidate_detection::detect_stars_test;
 use crate::star_detection::tests::common::output::{
@@ -11,6 +12,7 @@ use crate::star_detection::{BackgroundConfig, FilteringConfig, StarDetectionConf
 use crate::testing::init_tracing;
 use crate::testing::synthetic::{StarFieldConfig, generate_star_field, sparse_field_config};
 use common::test_utils::test_output_path;
+use glam::{DVec2, Vec2};
 use imaginarium::Color;
 use imaginarium::drawing::{draw_circle, draw_cross};
 
@@ -30,13 +32,13 @@ fn create_detection_overlay(
     // Draw ground truth in blue
     let blue = Color::rgb(0.3, 0.3, 1.0);
     for (x, y) in ground_truth {
-        draw_circle(&mut img, *x, *y, 8.0, blue, 1.0);
+        draw_circle(&mut img, Vec2::new(*x, *y), 8.0, blue, 1.0);
     }
 
     // Draw candidates in green
     let green = Color::GREEN;
     for &(x, y) in candidates {
-        draw_cross(&mut img, x as f32, y as f32, 3.0, green, 1.0);
+        draw_cross(&mut img, Vec2::new(x as f32, y as f32), 3.0, green, 1.0);
     }
 
     img
@@ -76,9 +78,12 @@ fn test_detection_sparse() {
     println!("Detected candidates: {}", candidates.len());
 
     // Create overlay image
-    let truth_positions: Vec<(f32, f32)> = ground_truth.iter().map(|s| (s.x, s.y)).collect();
+    let truth_positions: Vec<(f32, f32)> = ground_truth
+        .iter()
+        .map(|s| (s.pos.x as f32, s.pos.y as f32))
+        .collect();
     let candidate_positions: Vec<(usize, usize)> =
-        candidates.iter().map(|c| (c.peak_x, c.peak_y)).collect();
+        candidates.iter().map(|c| (c.peak.x, c.peak.y)).collect();
     let overlay = create_detection_overlay(
         pixels.pixels(),
         config.width,
@@ -96,8 +101,8 @@ fn test_detection_sparse() {
     let mut matched = 0;
     for (tx, ty) in &truth_positions {
         for c in &candidates {
-            let dx = c.peak_x as f32 - tx;
-            let dy = c.peak_y as f32 - ty;
+            let dx = c.peak.x as f32 - tx;
+            let dy = c.peak.y as f32 - ty;
             let dist = (dx * dx + dy * dy).sqrt();
             if dist < match_radius {
                 matched += 1;
@@ -166,9 +171,12 @@ fn test_detection_thresholds() {
         };
         let candidates = detect_stars_test(&pixels, None, &background, &det_config);
 
-        let truth_positions: Vec<(f32, f32)> = ground_truth.iter().map(|s| (s.x, s.y)).collect();
+        let truth_positions: Vec<(f32, f32)> = ground_truth
+            .iter()
+            .map(|s| (s.pos.x as f32, s.pos.y as f32))
+            .collect();
         let candidate_positions: Vec<(usize, usize)> =
-            candidates.iter().map(|c| (c.peak_x, c.peak_y)).collect();
+            candidates.iter().map(|c| (c.peak.x, c.peak.y)).collect();
         let overlay = create_detection_overlay(
             pixels.pixels(),
             width,
@@ -189,8 +197,8 @@ fn test_detection_thresholds() {
         let mut matched = 0;
         for (tx, ty) in &truth_positions {
             for c in &candidates {
-                let dx = c.peak_x as f32 - tx;
-                let dy = c.peak_y as f32 - ty;
+                let dx = c.peak.x as f32 - tx;
+                let dy = c.peak.y as f32 - ty;
                 let dist = (dx * dx + dy * dy).sqrt();
                 if dist < match_radius {
                     matched += 1;
@@ -270,9 +278,12 @@ fn test_detection_area_filter() {
         };
         let candidates = detect_stars_test(&pixels, None, &background, &det_config);
 
-        let truth_positions: Vec<(f32, f32)> = ground_truth.iter().map(|s| (s.x, s.y)).collect();
+        let truth_positions: Vec<(f32, f32)> = ground_truth
+            .iter()
+            .map(|s| (s.pos.x as f32, s.pos.y as f32))
+            .collect();
         let candidate_positions: Vec<(usize, usize)> =
-            candidates.iter().map(|c| (c.peak_x, c.peak_y)).collect();
+            candidates.iter().map(|c| (c.peak.x, c.peak.y)).collect();
         let overlay = create_detection_overlay(
             pixels.pixels(),
             width,
@@ -293,8 +304,8 @@ fn test_detection_area_filter() {
         let mut matched = 0;
         for (tx, ty) in &truth_positions {
             for c in &candidates {
-                let dx = c.peak_x as f32 - tx;
-                let dy = c.peak_y as f32 - ty;
+                let dx = c.peak.x as f32 - tx;
+                let dy = c.peak.y as f32 - ty;
                 let dist = (dx * dx + dy * dy).sqrt();
                 if dist < match_radius {
                     matched += 1;

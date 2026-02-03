@@ -442,8 +442,7 @@ mod tests {
     fn test_frame_quality_from_stars() {
         let stars = vec![
             Star {
-                x: 100.0,
-                y: 100.0,
+                pos: glam::DVec2::new(100.0, 100.0),
                 flux: 1000.0,
                 fwhm: 2.5,
                 eccentricity: 0.1,
@@ -455,8 +454,7 @@ mod tests {
                 laplacian_snr: 5.0,
             },
             Star {
-                x: 200.0,
-                y: 200.0,
+                pos: glam::DVec2::new(200.0, 200.0),
                 flux: 800.0,
                 fwhm: 2.8,
                 eccentricity: 0.15,
@@ -468,8 +466,7 @@ mod tests {
                 laplacian_snr: 4.0,
             },
             Star {
-                x: 300.0,
-                y: 300.0,
+                pos: glam::DVec2::new(300.0, 300.0),
                 flux: 600.0,
                 fwhm: 3.0,
                 eccentricity: 0.2,
@@ -505,8 +502,7 @@ mod tests {
     fn test_frame_quality_from_saturated_stars() {
         // All stars are saturated
         let stars = vec![Star {
-            x: 100.0,
-            y: 100.0,
+            pos: glam::DVec2::new(100.0, 100.0),
             flux: 1000.0,
             fwhm: 2.5,
             eccentricity: 0.1,

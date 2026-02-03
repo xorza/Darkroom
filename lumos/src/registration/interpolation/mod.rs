@@ -530,15 +530,15 @@ pub fn warp_image(
                 let y = start_y + row_in_chunk;
                 for x in 0..output_width {
                     // Transform output coordinates to input coordinates
-                    let (src_x, src_y) = inverse.apply(x as f64, y as f64);
+                    let src = inverse.apply(glam::DVec2::new(x as f64, y as f64));
 
                     // Interpolate input at source coordinates
                     chunk[row_in_chunk * output_width + x] = interpolate_pixel_internal(
                         input,
                         input_width,
                         input_height,
-                        src_x as f32,
-                        src_y as f32,
+                        src.x as f32,
+                        src.y as f32,
                         config,
                     );
                 }

@@ -509,12 +509,12 @@ fn test_warp_with_detected_transform() {
     let ref_stars: Vec<(f64, f64)> = ref_result
         .stars
         .iter()
-        .map(|s| (s.x as f64, s.y as f64))
+        .map(|s| (s.pos.x, s.pos.y))
         .collect();
     let target_stars: Vec<(f64, f64)> = target_result
         .stars
         .iter()
-        .map(|s| (s.x as f64, s.y as f64))
+        .map(|s| (s.pos.x, s.pos.y))
         .collect();
 
     // Register to find transform

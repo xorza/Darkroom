@@ -4,17 +4,19 @@
 //! Works with f32 images (L_F32 or RGB_F32).
 
 use crate::{Color, Image};
+use glam::Vec2;
 
 /// Draw a hollow circle on an image.
 ///
 /// # Arguments
 /// * `image` - The image to draw on (must be L_F32 or RGB_F32)
-/// * `cx` - Center x coordinate
-/// * `cy` - Center y coordinate
+/// * `center` - Center coordinates
 /// * `radius` - Circle radius in pixels
 /// * `color` - Color (for grayscale images, uses luminance)
 /// * `thickness` - Line thickness in pixels
-pub fn draw_circle(image: &mut Image, cx: f32, cy: f32, radius: f32, color: Color, thickness: f32) {
+pub fn draw_circle(image: &mut Image, center: Vec2, radius: f32, color: Color, thickness: f32) {
+    let cx = center.x;
+    let cy = center.y;
     let desc = *image.desc();
     let width = desc.width;
     let height = desc.height;
@@ -53,11 +55,12 @@ pub fn draw_circle(image: &mut Image, cx: f32, cy: f32, radius: f32, color: Colo
 ///
 /// # Arguments
 /// * `image` - The image to draw on (must be L_F32 or RGB_F32)
-/// * `cx` - Center x coordinate
-/// * `cy` - Center y coordinate
+/// * `center` - Center coordinates
 /// * `radius` - Circle radius in pixels
 /// * `color` - Color (for grayscale images, uses luminance)
-pub fn draw_dot(image: &mut Image, cx: f32, cy: f32, radius: f32, color: Color) {
+pub fn draw_dot(image: &mut Image, center: Vec2, radius: f32, color: Color) {
+    let cx = center.x;
+    let cy = center.y;
     let desc = *image.desc();
     let width = desc.width;
     let height = desc.height;
@@ -92,36 +95,26 @@ pub fn draw_dot(image: &mut Image, cx: f32, cy: f32, radius: f32, color: Color) 
 ///
 /// # Arguments
 /// * `image` - The image to draw on (must be L_F32 or RGB_F32)
-/// * `cx` - Center x coordinate
-/// * `cy` - Center y coordinate
+/// * `center` - Center coordinates
 /// * `arm_length` - Length of each arm from center
 /// * `color` - Color (for grayscale images, uses luminance)
 /// * `thickness` - Line thickness in pixels
-pub fn draw_cross(
-    image: &mut Image,
-    cx: f32,
-    cy: f32,
-    arm_length: f32,
-    color: Color,
-    thickness: f32,
-) {
+pub fn draw_cross(image: &mut Image, center: Vec2, arm_length: f32, color: Color, thickness: f32) {
+    let cx = center.x;
+    let cy = center.y;
     // Horizontal arm
     draw_line(
         image,
-        cx - arm_length,
-        cy,
-        cx + arm_length,
-        cy,
+        Vec2::new(cx - arm_length, cy),
+        Vec2::new(cx + arm_length, cy),
         color,
         thickness,
     );
     // Vertical arm
     draw_line(
         image,
-        cx,
-        cy - arm_length,
-        cx,
-        cy + arm_length,
+        Vec2::new(cx, cy - arm_length),
+        Vec2::new(cx, cy + arm_length),
         color,
         thickness,
     );
@@ -131,19 +124,15 @@ pub fn draw_cross(
 ///
 /// # Arguments
 /// * `image` - The image to draw on (must be L_F32 or RGB_F32)
-/// * `x1`, `y1` - Start point
-/// * `x2`, `y2` - End point
+/// * `start` - Start point
+/// * `end` - End point
 /// * `color` - Color (for grayscale images, uses luminance)
 /// * `thickness` - Line thickness in pixels
-pub fn draw_line(
-    image: &mut Image,
-    x1: f32,
-    y1: f32,
-    x2: f32,
-    y2: f32,
-    color: Color,
-    thickness: f32,
-) {
+pub fn draw_line(image: &mut Image, start: Vec2, end: Vec2, color: Color, thickness: f32) {
+    let x1 = start.x;
+    let y1 = start.y;
+    let x2 = end.x;
+    let y2 = end.y;
     let desc = *image.desc();
     let width = desc.width;
     let height = desc.height;
@@ -210,24 +199,24 @@ pub fn draw_line(
 ///
 /// # Arguments
 /// * `image` - The image to draw on (must be L_F32 or RGB_F32)
-/// * `x` - Left x coordinate
-/// * `y` - Top y coordinate
-/// * `w` - Width
-/// * `h` - Height
+/// * `top_left` - Top-left corner coordinates
+/// * `size` - Width and height as Vec2
 /// * `color` - Color (for grayscale images, uses luminance)
 /// * `thickness` - Line thickness in pixels
-pub fn draw_rect(image: &mut Image, x: f32, y: f32, w: f32, h: f32, color: Color, thickness: f32) {
-    let x2 = x + w;
-    let y2 = y + h;
+pub fn draw_rect(image: &mut Image, top_left: Vec2, size: Vec2, color: Color, thickness: f32) {
+    let x = top_left.x;
+    let y = top_left.y;
+    let x2 = x + size.x;
+    let y2 = y + size.y;
 
     // Top
-    draw_line(image, x, y, x2, y, color, thickness);
+    draw_line(image, Vec2::new(x, y), Vec2::new(x2, y), color, thickness);
     // Bottom
-    draw_line(image, x, y2, x2, y2, color, thickness);
+    draw_line(image, Vec2::new(x, y2), Vec2::new(x2, y2), color, thickness);
     // Left
-    draw_line(image, x, y, x, y2, color, thickness);
+    draw_line(image, Vec2::new(x, y), Vec2::new(x, y2), color, thickness);
     // Right
-    draw_line(image, x2, y, x2, y2, color, thickness);
+    draw_line(image, Vec2::new(x2, y), Vec2::new(x2, y2), color, thickness);
 }
 
 /// Helper to draw a single pixel with the given color.
@@ -261,7 +250,7 @@ mod tests {
     #[test]
     fn test_draw_circle() {
         let mut img = create_test_image(100, 100, 3);
-        draw_circle(&mut img, 50.0, 50.0, 20.0, Color::RED, 2.0);
+        draw_circle(&mut img, Vec2::new(50.0, 50.0), 20.0, Color::RED, 2.0);
 
         // Check that some pixels were drawn
         let pixels: &[f32] = bytemuck::cast_slice(img.bytes());
@@ -274,7 +263,7 @@ mod tests {
     #[test]
     fn test_draw_dot() {
         let mut img = create_test_image(100, 100, 3);
-        draw_dot(&mut img, 50.0, 50.0, 5.0, Color::GREEN);
+        draw_dot(&mut img, Vec2::new(50.0, 50.0), 5.0, Color::GREEN);
 
         // Check center pixel
         let pixels: &[f32] = bytemuck::cast_slice(img.bytes());
@@ -285,7 +274,7 @@ mod tests {
     #[test]
     fn test_draw_cross() {
         let mut img = create_test_image(100, 100, 3);
-        draw_cross(&mut img, 50.0, 50.0, 10.0, Color::BLUE, 1.0);
+        draw_cross(&mut img, Vec2::new(50.0, 50.0), 10.0, Color::BLUE, 1.0);
 
         // Check center pixel
         let pixels: &[f32] = bytemuck::cast_slice(img.bytes());
@@ -296,7 +285,13 @@ mod tests {
     #[test]
     fn test_draw_line() {
         let mut img = create_test_image(100, 100, 3);
-        draw_line(&mut img, 10.0, 10.0, 90.0, 90.0, Color::WHITE, 1.0);
+        draw_line(
+            &mut img,
+            Vec2::new(10.0, 10.0),
+            Vec2::new(90.0, 90.0),
+            Color::WHITE,
+            1.0,
+        );
 
         // Check a point on the diagonal
         let pixels: &[f32] = bytemuck::cast_slice(img.bytes());
@@ -307,7 +302,13 @@ mod tests {
     #[test]
     fn test_draw_rect() {
         let mut img = create_test_image(100, 100, 3);
-        draw_rect(&mut img, 20.0, 20.0, 60.0, 40.0, Color::YELLOW, 1.0);
+        draw_rect(
+            &mut img,
+            Vec2::new(20.0, 20.0),
+            Vec2::new(60.0, 40.0),
+            Color::YELLOW,
+            1.0,
+        );
 
         // Check a corner pixel
         let pixels: &[f32] = bytemuck::cast_slice(img.bytes());
@@ -321,7 +322,7 @@ mod tests {
     #[test]
     fn test_draw_on_grayscale() {
         let mut img = create_test_image(100, 100, 1);
-        draw_circle(&mut img, 50.0, 50.0, 10.0, Color::WHITE, 2.0);
+        draw_circle(&mut img, Vec2::new(50.0, 50.0), 10.0, Color::WHITE, 2.0);
 
         // Check that pixels were drawn
         let pixels: &[f32] = bytemuck::cast_slice(img.bytes());

@@ -9,6 +9,7 @@ use crate::star_detection::background::BackgroundMap;
 use crate::star_detection::mask_dilation::dilate_mask;
 use crate::star_detection::{StarDetectionConfig, StarDetector};
 use crate::testing::init_tracing;
+use glam::Vec2;
 use image::GrayImage;
 use imaginarium::Color;
 use imaginarium::drawing::{draw_circle, draw_cross};
@@ -211,26 +212,29 @@ fn test_debug_synthetic_steps() {
 
     let blue = Color::rgb(0.0, 0.4, 1.0);
     for star in &true_stars {
-        let cx = star.x;
-        let cy = star.y;
         let radius = star.fwhm() * 1.2;
-        draw_circle(&mut result_img, cx, cy, radius, blue, 1.0);
+        draw_circle(
+            &mut result_img,
+            Vec2::new(star.pos.x, star.pos.y),
+            radius,
+            blue,
+            1.0,
+        );
     }
 
     let green = Color::GREEN;
     for (i, star) in stars.iter().enumerate() {
-        let cx = star.x;
-        let cy = star.y;
+        let center = Vec2::new(star.pos.x as f32, star.pos.y as f32);
         let radius = (star.fwhm * 0.5).max(3.0);
 
-        draw_circle(&mut result_img, cx, cy, radius, green, 1.0);
-        draw_cross(&mut result_img, cx, cy, 3.0, green, 1.0);
+        draw_circle(&mut result_img, center, radius, green, 1.0);
+        draw_cross(&mut result_img, center, 3.0, green, 1.0);
 
         println!(
             "  Detected {}: pos=({:.1}, {:.1}) fwhm={:.1} snr={:.1} flux={:.2}",
             i + 1,
-            star.x,
-            star.y,
+            star.pos.x,
+            star.pos.y,
             star.fwhm,
             star.snr,
             star.flux

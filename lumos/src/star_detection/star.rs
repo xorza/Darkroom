@@ -1,12 +1,12 @@
 //! Star detection result types.
 
+use glam::DVec2;
+
 /// A detected star with sub-pixel position and quality metrics.
 #[derive(Debug, Clone, Copy)]
 pub struct Star {
-    /// X coordinate (sub-pixel accurate).
-    pub x: f32,
-    /// Y coordinate (sub-pixel accurate).
-    pub y: f32,
+    /// Position (sub-pixel accurate).
+    pub pos: DVec2,
     /// Total flux (sum of background-subtracted pixel values).
     pub flux: f32,
     /// Full Width at Half Maximum in pixels.
@@ -72,8 +72,7 @@ mod tests {
 
     fn make_test_star() -> Star {
         Star {
-            x: 10.0,
-            y: 10.0,
+            pos: DVec2::new(10.0, 10.0),
             flux: 100.0,
             fwhm: 3.0,
             eccentricity: 0.1,

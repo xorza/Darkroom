@@ -347,8 +347,7 @@ fn astrometry_to_ground_truth(stars: &[AstrometryStar]) -> Vec<GroundTruthStar> 
     stars
         .iter()
         .map(|s| GroundTruthStar {
-            x: s.x,
-            y: s.y,
+            pos: glam::DVec2::new(s.x as f64, s.y as f64),
             flux: s.flux,
             fwhm: 4.0, // Estimate - astrometry.net doesn't provide FWHM
             eccentricity: 0.0,

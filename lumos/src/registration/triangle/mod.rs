@@ -31,6 +31,7 @@
 #[cfg(test)]
 mod tests;
 
+use glam::DVec2;
 use std::collections::HashMap;
 
 use crate::registration::spatial::{KdTree, form_triangles_from_neighbors};
@@ -252,15 +253,15 @@ impl Triangle {
     /// Create a triangle from three star positions.
     ///
     /// Returns None if the triangle is degenerate (collinear points).
-    pub fn from_positions(indices: [usize; 3], positions: [(f64, f64); 3]) -> Option<Self> {
-        let (x0, y0) = positions[0];
-        let (x1, y1) = positions[1];
-        let (x2, y2) = positions[2];
+    pub fn from_positions(indices: [usize; 3], positions: [DVec2; 3]) -> Option<Self> {
+        let p0 = positions[0];
+        let p1 = positions[1];
+        let p2 = positions[2];
 
         // Compute side lengths
-        let d01 = ((x1 - x0).powi(2) + (y1 - y0).powi(2)).sqrt();
-        let d12 = ((x2 - x1).powi(2) + (y2 - y1).powi(2)).sqrt();
-        let d20 = ((x0 - x2).powi(2) + (y0 - y2).powi(2)).sqrt();
+        let d01 = (p1 - p0).length();
+        let d12 = (p2 - p1).length();
+        let d20 = (p0 - p2).length();
 
         // Check for degenerate triangle (sides too short)
         if d01 < MIN_TRIANGLE_SIDE || d12 < MIN_TRIANGLE_SIDE || d20 < MIN_TRIANGLE_SIDE {
@@ -294,7 +295,9 @@ impl Triangle {
         }
 
         // Compute orientation using cross product
-        let cross = (x1 - x0) * (y2 - y0) - (y1 - y0) * (x2 - x0);
+        let v01 = p1 - p0;
+        let v02 = p2 - p0;
+        let cross = v01.x * v02.y - v01.y * v02.x;
         if cross.abs() < 1e-10 * longest * longest {
             return None; // Degenerate
         }
@@ -439,7 +442,7 @@ impl Default for TriangleMatchConfig {
 ///
 /// For large star counts, prefer `form_triangles_kdtree` which is O(n·k²).
 #[cfg_attr(not(test), allow(dead_code))]
-pub(crate) fn form_triangles(positions: &[(f64, f64)], max_stars: usize) -> Vec<Triangle> {
+pub(crate) fn form_triangles(positions: &[DVec2], max_stars: usize) -> Vec<Triangle> {
     let n = positions.len().min(max_stars);
     if n < 3 {
         return Vec::new();
@@ -470,8 +473,8 @@ pub(crate) fn form_triangles(positions: &[(f64, f64)], max_stars: usize) -> Vec<
 /// Returns a list of matched star pairs with confidence scores.
 #[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn match_stars_triangles(
-    ref_positions: &[(f64, f64)],
-    target_positions: &[(f64, f64)],
+    ref_positions: &[DVec2],
+    target_positions: &[DVec2],
     config: &TriangleMatchConfig,
 ) -> Vec<StarMatch> {
     let n_ref = ref_positions.len().min(config.max_stars);
@@ -527,8 +530,8 @@ pub(crate) fn match_stars_triangles(
 /// Given initial matches, estimates a preliminary transform and uses it to
 /// guide a second matching pass with stricter tolerance.
 fn two_step_refine_matches(
-    ref_positions: &[(f64, f64)],
-    target_positions: &[(f64, f64)],
+    ref_positions: &[DVec2],
+    target_positions: &[DVec2],
     initial_matches: &[StarMatch],
     ref_triangles: &[Triangle],
     target_triangles: &[Triangle],
@@ -545,7 +548,7 @@ fn two_step_refine_matches(
     let transform = estimate_similarity_transform(ref_positions, target_positions, initial_matches);
 
     // If transform estimation failed, return initial matches
-    let Some((scale, rotation, tx, ty)) = transform else {
+    let Some((scale, rotation, translation)) = transform else {
         return initial_matches.to_vec();
     };
 
@@ -553,12 +556,12 @@ fn two_step_refine_matches(
     let cos_r = rotation.cos();
     let sin_r = rotation.sin();
 
-    let transformed_target: Vec<(f64, f64)> = target_positions
+    let transformed_target: Vec<DVec2> = target_positions
         .iter()
-        .map(|&(x, y)| {
-            let x_rot = (x * cos_r - y * sin_r) * scale + tx;
-            let y_rot = (x * sin_r + y * cos_r) * scale + ty;
-            (x_rot, y_rot)
+        .map(|p| {
+            let x_rot = (p.x * cos_r - p.y * sin_r) * scale + translation.x;
+            let y_rot = (p.x * sin_r + p.y * cos_r) * scale + translation.y;
+            DVec2::new(x_rot, y_rot)
         })
         .collect();
 
@@ -595,9 +598,9 @@ fn two_step_refine_matches(
 
                 // Check if transformed target position is close to reference position
                 if ref_star < ref_positions.len() && target_star < transformed_target.len() {
-                    let (rx, ry) = ref_positions[ref_star];
-                    let (tx, ty) = transformed_target[target_star];
-                    let dist_sq = (rx - tx).powi(2) + (ry - ty).powi(2);
+                    let ref_pos = ref_positions[ref_star];
+                    let tar_pos = transformed_target[target_star];
+                    let dist_sq = (ref_pos - tar_pos).length_squared();
 
                     // Only vote if positions are reasonably close
                     if dist_sq < position_threshold * position_threshold {
@@ -630,18 +633,18 @@ fn two_step_refine_matches(
 
 /// Estimate a similarity transform (rotation + uniform scale + translation) from matches.
 ///
-/// Returns (scale, rotation_radians, translate_x, translate_y) or None if estimation fails.
+/// Returns (scale, rotation_radians, translation) or None if estimation fails.
 fn estimate_similarity_transform(
-    ref_positions: &[(f64, f64)],
-    target_positions: &[(f64, f64)],
+    ref_positions: &[DVec2],
+    target_positions: &[DVec2],
     matches: &[StarMatch],
-) -> Option<(f64, f64, f64, f64)> {
+) -> Option<(f64, f64, DVec2)> {
     if matches.len() < 2 {
         return None;
     }
 
     // Collect matched point pairs
-    let pairs: Vec<((f64, f64), (f64, f64))> = matches
+    let pairs: Vec<(DVec2, DVec2)> = matches
         .iter()
         .filter_map(|m| {
             if m.ref_idx < ref_positions.len() && m.target_idx < target_positions.len() {
@@ -658,22 +661,12 @@ fn estimate_similarity_transform(
 
     // Compute centroids
     let n = pairs.len() as f64;
-    let (ref_cx, ref_cy) = pairs.iter().fold((0.0, 0.0), |(sx, sy), ((rx, ry), _)| {
-        (sx + rx / n, sy + ry / n)
-    });
-    let (tar_cx, tar_cy) = pairs.iter().fold((0.0, 0.0), |(sx, sy), (_, (tx, ty))| {
-        (sx + tx / n, sy + ty / n)
-    });
+    let ref_centroid = pairs.iter().fold(DVec2::ZERO, |acc, (r, _)| acc + *r) / n;
+    let tar_centroid = pairs.iter().fold(DVec2::ZERO, |acc, (_, t)| acc + *t) / n;
 
     // Center the points
-    let ref_centered: Vec<(f64, f64)> = pairs
-        .iter()
-        .map(|((rx, ry), _)| (rx - ref_cx, ry - ref_cy))
-        .collect();
-    let tar_centered: Vec<(f64, f64)> = pairs
-        .iter()
-        .map(|(_, (tx, ty))| (tx - tar_cx, ty - tar_cy))
-        .collect();
+    let ref_centered: Vec<DVec2> = pairs.iter().map(|(r, _)| *r - ref_centroid).collect();
+    let tar_centered: Vec<DVec2> = pairs.iter().map(|(_, t)| *t - tar_centroid).collect();
 
     // Estimate rotation and scale using least squares
     // Reference: "Closed-form solution of absolute orientation using unit quaternions" (Horn, 1987)
@@ -684,14 +677,14 @@ fn estimate_similarity_transform(
     let mut tar_norm_sq = 0.0;
 
     for i in 0..pairs.len() {
-        let (rx, ry) = ref_centered[i];
-        let (tx, ty) = tar_centered[i];
+        let r = ref_centered[i];
+        let t = tar_centered[i];
 
-        sxx += tx * rx;
-        sxy += tx * ry;
-        syx += ty * rx;
-        syy += ty * ry;
-        tar_norm_sq += tx * tx + ty * ty;
+        sxx += t.x * r.x;
+        sxy += t.x * r.y;
+        syx += t.y * r.x;
+        syy += t.y * r.y;
+        tar_norm_sq += t.x * t.x + t.y * t.y;
     }
 
     if tar_norm_sq < 1e-10 {
@@ -713,25 +706,27 @@ fn estimate_similarity_transform(
     }
 
     // Translation
-    let tx = ref_cx - scale * (tar_cx * cos_r - tar_cy * sin_r);
-    let ty = ref_cy - scale * (tar_cx * sin_r + tar_cy * cos_r);
+    let translation = DVec2::new(
+        ref_centroid.x - scale * (tar_centroid.x * cos_r - tar_centroid.y * sin_r),
+        ref_centroid.y - scale * (tar_centroid.x * sin_r + tar_centroid.y * cos_r),
+    );
 
-    Some((scale, rotation, tx, ty))
+    Some((scale, rotation, translation))
 }
 
 /// Compute a reasonable position threshold based on star field density.
-fn compute_position_threshold(positions: &[(f64, f64)]) -> f64 {
+fn compute_position_threshold(positions: &[DVec2]) -> f64 {
     if positions.len() < 2 {
         return 100.0; // Default large threshold
     }
 
     // Find average nearest-neighbor distance
     let mut total_min_dist = 0.0;
-    for (i, &(xi, yi)) in positions.iter().enumerate().take(20) {
+    for (i, pi) in positions.iter().enumerate().take(20) {
         let mut min_dist_sq = f64::MAX;
-        for (j, &(xj, yj)) in positions.iter().enumerate() {
+        for (j, pj) in positions.iter().enumerate() {
             if i != j {
-                let dist_sq = (xi - xj).powi(2) + (yi - yj).powi(2);
+                let dist_sq = (*pi - *pj).length_squared();
                 min_dist_sq = min_dist_sq.min(dist_sq);
             }
         }
@@ -745,13 +740,12 @@ fn compute_position_threshold(positions: &[(f64, f64)]) -> f64 {
 }
 
 /// Convert star matches to point pairs for transformation estimation.
-#[allow(clippy::type_complexity)]
 #[allow(dead_code)]
 pub(crate) fn matches_to_point_pairs(
     matches: &[StarMatch],
-    ref_positions: &[(f64, f64)],
-    target_positions: &[(f64, f64)],
-) -> (Vec<(f64, f64)>, Vec<(f64, f64)>) {
+    ref_positions: &[DVec2],
+    target_positions: &[DVec2],
+) -> (Vec<DVec2>, Vec<DVec2>) {
     let mut ref_points = Vec::with_capacity(matches.len());
     let mut target_points = Vec::with_capacity(matches.len());
 
@@ -772,12 +766,12 @@ pub(crate) fn matches_to_point_pairs(
 /// the number of nearest neighbors considered.
 ///
 /// # Arguments
-/// * `positions` - Star positions (x, y)
+/// * `positions` - Star positions
 /// * `k_neighbors` - Number of nearest neighbors to consider for each star
 ///
 /// # Returns
 /// Vector of triangles formed from neighboring stars
-pub fn form_triangles_kdtree(positions: &[(f64, f64)], k_neighbors: usize) -> Vec<Triangle> {
+pub fn form_triangles_kdtree(positions: &[DVec2], k_neighbors: usize) -> Vec<Triangle> {
     let tree = match KdTree::build(positions) {
         Some(t) => t,
         None => return Vec::new(),
@@ -809,15 +803,16 @@ pub fn form_triangles_kdtree(positions: &[(f64, f64)], k_neighbors: usize) -> Ve
 /// # Example
 /// ```rust,ignore
 /// use lumos::registration::{TriangleMatchConfig, match_triangles};
+/// use glam::DVec2;
 ///
 /// // Star positions from both images (sorted by brightness)
 /// let ref_positions = vec![
-///     (100.0, 200.0), (300.0, 150.0), (250.0, 400.0),
-///     (500.0, 300.0), (150.0, 350.0), (450.0, 100.0),
+///     DVec2::new(100.0, 200.0), DVec2::new(300.0, 150.0), DVec2::new(250.0, 400.0),
+///     DVec2::new(500.0, 300.0), DVec2::new(150.0, 350.0), DVec2::new(450.0, 100.0),
 /// ];
 /// let target_positions = vec![
-///     (102.0, 198.0), (302.0, 148.0), (252.0, 398.0),
-///     (502.0, 298.0), (152.0, 348.0), (452.0, 98.0),
+///     DVec2::new(102.0, 198.0), DVec2::new(302.0, 148.0), DVec2::new(252.0, 398.0),
+///     DVec2::new(502.0, 298.0), DVec2::new(152.0, 348.0), DVec2::new(452.0, 98.0),
 /// ];
 ///
 /// let config = TriangleMatchConfig::default();
@@ -829,8 +824,8 @@ pub fn form_triangles_kdtree(positions: &[(f64, f64)], k_neighbors: usize) -> Ve
 /// }
 /// ```
 pub fn match_triangles(
-    ref_positions: &[(f64, f64)],
-    target_positions: &[(f64, f64)],
+    ref_positions: &[DVec2],
+    target_positions: &[DVec2],
     config: &TriangleMatchConfig,
 ) -> Vec<StarMatch> {
     let n_ref = ref_positions.len().min(config.max_stars);

@@ -108,12 +108,12 @@ fn test_image_registration_translation() {
     let ref_stars: Vec<(f64, f64)> = ref_result
         .stars
         .iter()
-        .map(|s| (s.x as f64, s.y as f64))
+        .map(|s| (s.pos.x, s.pos.y))
         .collect();
     let target_stars: Vec<(f64, f64)> = target_result
         .stars
         .iter()
-        .map(|s| (s.x as f64, s.y as f64))
+        .map(|s| (s.pos.x, s.pos.y))
         .collect();
 
     // Register the images
@@ -190,12 +190,12 @@ fn test_image_registration_rotation() {
     let ref_stars: Vec<(f64, f64)> = ref_result
         .stars
         .iter()
-        .map(|s| (s.x as f64, s.y as f64))
+        .map(|s| (s.pos.x, s.pos.y))
         .collect();
     let target_stars: Vec<(f64, f64)> = target_result
         .stars
         .iter()
-        .map(|s| (s.x as f64, s.y as f64))
+        .map(|s| (s.pos.x, s.pos.y))
         .collect();
 
     let reg_config = RegistrationConfig {
@@ -263,12 +263,12 @@ fn test_image_registration_similarity() {
     let ref_stars: Vec<(f64, f64)> = ref_result
         .stars
         .iter()
-        .map(|s| (s.x as f64, s.y as f64))
+        .map(|s| (s.pos.x, s.pos.y))
         .collect();
     let target_stars: Vec<(f64, f64)> = target_result
         .stars
         .iter()
-        .map(|s| (s.x as f64, s.y as f64))
+        .map(|s| (s.pos.x, s.pos.y))
         .collect();
 
     let reg_config = RegistrationConfig {
@@ -359,12 +359,12 @@ fn test_image_registration_with_noise() {
     let ref_stars: Vec<(f64, f64)> = ref_result
         .stars
         .iter()
-        .map(|s| (s.x as f64, s.y as f64))
+        .map(|s| (s.pos.x, s.pos.y))
         .collect();
     let target_stars: Vec<(f64, f64)> = target_result
         .stars
         .iter()
-        .map(|s| (s.x as f64, s.y as f64))
+        .map(|s| (s.pos.x, s.pos.y))
         .collect();
 
     let reg_config = RegistrationConfig {
@@ -437,12 +437,12 @@ fn test_image_registration_dense_field() {
     let ref_stars: Vec<(f64, f64)> = ref_result
         .stars
         .iter()
-        .map(|s| (s.x as f64, s.y as f64))
+        .map(|s| (s.pos.x, s.pos.y))
         .collect();
     let target_stars: Vec<(f64, f64)> = target_result
         .stars
         .iter()
-        .map(|s| (s.x as f64, s.y as f64))
+        .map(|s| (s.pos.x, s.pos.y))
         .collect();
 
     let reg_config = RegistrationConfig {
@@ -503,12 +503,12 @@ fn test_image_registration_large_image() {
     let ref_stars: Vec<(f64, f64)> = ref_result
         .stars
         .iter()
-        .map(|s| (s.x as f64, s.y as f64))
+        .map(|s| (s.pos.x, s.pos.y))
         .collect();
     let target_stars: Vec<(f64, f64)> = target_result
         .stars
         .iter()
-        .map(|s| (s.x as f64, s.y as f64))
+        .map(|s| (s.pos.x, s.pos.y))
         .collect();
 
     let reg_config = RegistrationConfig {

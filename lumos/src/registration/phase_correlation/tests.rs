@@ -1,5 +1,7 @@
 //! Tests for phase correlation module.
 
+use glam::DVec2;
+
 use super::*;
 use crate::testing::synthetic::patterns;
 
@@ -27,14 +29,14 @@ fn test_correlate_identical_images() {
 
     // For identical images, translation should be near zero
     assert!(
-        (result.translation.0).abs() < 2.0,
+        result.translation.x.abs() < 2.0,
         "dx = {}",
-        result.translation.0
+        result.translation.x
     );
     assert!(
-        (result.translation.1).abs() < 2.0,
+        result.translation.y.abs() < 2.0,
         "dy = {}",
-        result.translation.1
+        result.translation.y
     );
 }
 
@@ -53,9 +55,9 @@ fn test_correlate_translated_5_pixels() {
 
     // Translation should detect the offset (sign depends on convention)
     assert!(
-        (result.translation.0).abs() < 10.0,
+        result.translation.x.abs() < 10.0,
         "Expected dx near ±5, got {}",
-        result.translation.0
+        result.translation.x
     );
 }
 
@@ -233,8 +235,8 @@ fn test_full_phase_correlator() {
     // Identical images should have minimal transformation
     assert!(result.rotation.abs() < 0.2, "Expected near-zero rotation");
     assert!((result.scale - 1.0).abs() < 0.2, "Expected scale ~1.0");
-    assert!(result.translation.0.abs() < 2.0, "Expected near-zero dx");
-    assert!(result.translation.1.abs() < 2.0, "Expected near-zero dy");
+    assert!(result.translation.x.abs() < 2.0, "Expected near-zero dx");
+    assert!(result.translation.y.abs() < 2.0, "Expected near-zero dy");
 }
 
 #[test]
@@ -306,7 +308,7 @@ fn test_subpixel_accuracy_parabolic() {
     let result = result.unwrap();
 
     // Check that we detect approximately the correct shift
-    let detected_shift_x = result.translation.0;
+    let detected_shift_x = result.translation.x;
 
     // The detected shift should be close to the actual shift (sign depends on convention)
     assert!(
@@ -351,14 +353,14 @@ fn test_subpixel_accuracy_gaussian() {
 
     // Self-correlation should be near zero
     assert!(
-        result.translation.0.abs() < 0.5,
+        result.translation.x.abs() < 0.5,
         "Gaussian method: expected near-zero dx, got {}",
-        result.translation.0
+        result.translation.x
     );
     assert!(
-        result.translation.1.abs() < 0.5,
+        result.translation.y.abs() < 0.5,
         "Gaussian method: expected near-zero dy, got {}",
-        result.translation.1
+        result.translation.y
     );
 }
 
@@ -395,9 +397,9 @@ fn test_subpixel_accuracy_centroid() {
 
     // Self-correlation should be near zero
     assert!(
-        result.translation.0.abs() < 0.5,
+        result.translation.x.abs() < 0.5,
         "Centroid method: expected near-zero dx, got {}",
-        result.translation.0
+        result.translation.x
     );
 }
 
@@ -445,11 +447,11 @@ fn test_large_translation_near_wraparound() {
 
     // Should detect approximately the shift
     assert!(
-        (result.translation.1.abs() - shift as f64).abs() < 5.0
-            || (result.translation.1 + shift as f64).abs() < 5.0,
+        (result.translation.y.abs() - shift as f64).abs() < 5.0
+            || (result.translation.y + shift as f64).abs() < 5.0,
         "Expected shift near {}, got {}",
         shift,
-        result.translation.1
+        result.translation.y
     );
 }
 
@@ -657,14 +659,14 @@ fn test_correlation_with_noise() {
 
     // Should still detect approximately zero offset (noisy version of same image)
     assert!(
-        result.translation.0.abs() < 5.0,
+        result.translation.x.abs() < 5.0,
         "Noisy correlation dx too large: {}",
-        result.translation.0
+        result.translation.x
     );
     assert!(
-        result.translation.1.abs() < 5.0,
+        result.translation.y.abs() < 5.0,
         "Noisy correlation dy too large: {}",
-        result.translation.1
+        result.translation.y
     );
 }
 
@@ -721,9 +723,9 @@ fn test_correlation_nyquist_checkerboard() {
     if let Some(result) = result {
         // Self-correlation of any pattern should show zero offset
         assert!(
-            result.translation.0.abs() < 2.0,
+            result.translation.x.abs() < 2.0,
             "Nyquist pattern self-correlation dx: {}",
-            result.translation.0
+            result.translation.x
         );
     }
 }
@@ -876,18 +878,17 @@ fn test_iterative_correlation_subpixel() {
 
     // Both methods should produce a result
     assert!(
-        standard_result.translation.0.is_finite(),
+        standard_result.translation.x.is_finite(),
         "Standard should produce finite result"
     );
     assert!(
-        iterative_result.translation.0.is_finite(),
+        iterative_result.translation.x.is_finite(),
         "Iterative should produce finite result"
     );
 
     // For smooth patterns, correlation should detect at least the direction
     // (Phase correlation with smooth patterns can be imprecise)
-    let detected_magnitude =
-        (standard_result.translation.0.powi(2) + standard_result.translation.1.powi(2)).sqrt();
+    let detected_magnitude = standard_result.translation.length();
     assert!(
         detected_magnitude < 50.0,
         "Should detect reasonable translation magnitude, got {}",
@@ -923,14 +924,14 @@ fn test_iterative_correlation_self() {
 
     // Self-correlation should give near-zero translation
     assert!(
-        result.translation.0.abs() < 0.5,
+        result.translation.x.abs() < 0.5,
         "Self dx should be near zero, got {}",
-        result.translation.0
+        result.translation.x
     );
     assert!(
-        result.translation.1.abs() < 0.5,
+        result.translation.y.abs() < 0.5,
         "Self dy should be near zero, got {}",
-        result.translation.1
+        result.translation.y
     );
 }
 
@@ -966,11 +967,11 @@ fn test_iterative_disabled_fallback() {
 
     // Results should be identical when iterations disabled
     assert!(
-        (standard.translation.0 - iterative.translation.0).abs() < 1e-10,
+        (standard.translation.x - iterative.translation.x).abs() < 1e-10,
         "With iterations disabled, results should match"
     );
     assert!(
-        (standard.translation.1 - iterative.translation.1).abs() < 1e-10,
+        (standard.translation.y - iterative.translation.y).abs() < 1e-10,
         "With iterations disabled, results should match"
     );
 }

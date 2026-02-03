@@ -155,8 +155,7 @@ mod tests {
 
     fn make_test_star(fwhm: f32, flux: f32) -> Star {
         Star {
-            x: 100.0,
-            y: 100.0,
+            pos: glam::DVec2::new(100.0, 100.0),
             flux,
             fwhm,
             eccentricity: 0.1,

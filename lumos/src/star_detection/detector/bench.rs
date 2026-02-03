@@ -120,8 +120,7 @@ fn bench_remove_duplicate_stars_5000(b: ::bench::Bencher) {
     let mut rng = StdRng::seed_from_u64(42);
     let base_stars: Vec<Star> = (0..5000)
         .map(|_| Star {
-            x: rng.random_range(0.0..4096.0),
-            y: rng.random_range(0.0..4096.0),
+            pos: glam::DVec2::new(rng.random_range(0.0..4096.0), rng.random_range(0.0..4096.0)),
             flux: rng.random_range(100.0..10000.0),
             fwhm: rng.random_range(2.0..6.0),
             eccentricity: rng.random_range(0.0..0.3),
@@ -152,8 +151,7 @@ fn bench_remove_duplicate_stars_10000(b: ::bench::Bencher) {
     let mut rng = StdRng::seed_from_u64(42);
     let base_stars: Vec<Star> = (0..10000)
         .map(|_| Star {
-            x: rng.random_range(0.0..8000.0),
-            y: rng.random_range(0.0..6000.0),
+            pos: glam::DVec2::new(rng.random_range(0.0..8000.0), rng.random_range(0.0..6000.0)),
             flux: rng.random_range(100.0..10000.0),
             fwhm: rng.random_range(2.0..6.0),
             eccentricity: rng.random_range(0.0..0.3),

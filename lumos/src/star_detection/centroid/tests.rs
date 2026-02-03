@@ -63,8 +63,8 @@ fn test_centroid_accuracy() {
     let star =
         compute_centroid(&pixels, &bg, &candidates[0], &config).expect("Should compute centroid");
 
-    let error_x = (star.x - true_x).abs();
-    let error_y = (star.y - true_y).abs();
+    let error_x = (star.pos.x - true_x as f64).abs();
+    let error_y = (star.pos.y - true_y as f64).abs();
 
     // Sub-pixel accuracy within 0.2 pixels is good for weighted centroid
     assert!(
@@ -72,14 +72,14 @@ fn test_centroid_accuracy() {
         "X centroid error {} too large (true={}, computed={})",
         error_x,
         true_x,
-        star.x
+        star.pos.x
     );
     assert!(
         error_y < 0.2,
         "Y centroid error {} too large (true={}, computed={})",
         error_y,
         true_y,
-        star.y
+        star.pos.y
     );
 }
 
@@ -1053,8 +1053,7 @@ fn test_compute_centroid_returns_none_for_edge_candidate() {
     // Create candidate near edge
     let candidate = StarCandidate {
         bbox: Aabb::new(Vec2us::new(0, 30), Vec2us::new(5, 35)),
-        peak_x: 3,
-        peak_y: 32,
+        peak: Vec2us::new(3, 32),
         peak_value: 0.9,
         area: 18,
     };
@@ -1135,13 +1134,15 @@ fn test_compute_centroid_multiple_stars_independent() {
 
     // Verify each star is close to its true position
     for star in &stars {
-        let near_star1 = (star.x - star1_cx).abs() < 1.0 && (star.y - star1_cy).abs() < 1.0;
-        let near_star2 = (star.x - star2_cx).abs() < 1.0 && (star.y - star2_cy).abs() < 1.0;
+        let near_star1 = (star.pos.x - star1_cx as f64).abs() < 1.0
+            && (star.pos.y - star1_cy as f64).abs() < 1.0;
+        let near_star2 = (star.pos.x - star2_cx as f64).abs() < 1.0
+            && (star.pos.y - star2_cy as f64).abs() < 1.0;
         assert!(
             near_star1 || near_star2,
             "Star at ({}, {}) not near either true position",
-            star.x,
-            star.y
+            star.pos.x,
+            star.pos.y
         );
     }
 }
@@ -1324,8 +1325,7 @@ fn test_star_is_round() {
     use crate::star_detection::Star;
 
     let round_star = Star {
-        x: 10.0,
-        y: 10.0,
+        pos: glam::DVec2::new(10.0, 10.0),
         flux: 100.0,
         fwhm: 3.0,
         eccentricity: 0.1,
@@ -1403,7 +1403,9 @@ fn test_weighted_centroid_precision_statistical() {
             }
 
             if let Some(star) = compute_centroid(&pixels, &bg, &candidates[0], &config) {
-                let error = ((star.x - true_cx).powi(2) + (star.y - true_cy).powi(2)).sqrt();
+                let error = ((star.pos.x - true_cx as f64).powi(2)
+                    + (star.pos.y - true_cy as f64).powi(2))
+                .sqrt() as f32;
                 total_error += error;
                 max_error = max_error.max(error);
                 count += 1;
@@ -1463,7 +1465,9 @@ fn test_gaussian_fit_precision_statistical() {
             if let Some(result) = fit_gaussian_2d(&pixels_buf, 10.0, 10.0, 8, background, &config)
                 && result.converged
             {
-                let error = ((result.x - true_cx).powi(2) + (result.y - true_cy).powi(2)).sqrt();
+                let error = ((result.pos.x as f32 - true_cx).powi(2)
+                    + (result.pos.y as f32 - true_cy).powi(2))
+                .sqrt();
                 total_error += error;
                 max_error = max_error.max(error);
                 count += 1;
@@ -1526,7 +1530,9 @@ fn test_moffat_fit_precision_statistical() {
             if let Some(result) = fit_moffat_2d(&pixels_buf, 10.0, 10.0, 8, background, &config)
                 && result.converged
             {
-                let error = ((result.x - true_cx).powi(2) + (result.y - true_cy).powi(2)).sqrt();
+                let error = ((result.pos.x as f32 - true_cx).powi(2)
+                    + (result.pos.y as f32 - true_cy).powi(2))
+                .sqrt();
                 total_error += error;
                 max_error = max_error.max(error);
                 count += 1;
@@ -1770,22 +1776,22 @@ fn test_gaussian_fit_sigma_recovery() {
 
         // Check that sigma values are accurate (convergence flag may be false if
         // initial guess was already close, causing small parameter changes)
-        let sigma_error_x = (result.sigma_x - true_sigma).abs() / true_sigma;
-        let sigma_error_y = (result.sigma_y - true_sigma).abs() / true_sigma;
+        let sigma_error_x = (result.sigma.x - true_sigma).abs() / true_sigma;
+        let sigma_error_y = (result.sigma.y - true_sigma).abs() / true_sigma;
 
         assert!(
             sigma_error_x < 0.1,
             "Sigma_x error {:.1}% too large for sigma={} (got={})",
             sigma_error_x * 100.0,
             true_sigma,
-            result.sigma_x
+            result.sigma.x
         );
         assert!(
             sigma_error_y < 0.1,
             "Sigma_y error {:.1}% too large for sigma={} (got={})",
             sigma_error_y * 100.0,
             true_sigma,
-            result.sigma_y
+            result.sigma.y
         );
     }
 }
@@ -1869,7 +1875,8 @@ fn test_gaussian_fit_with_noise() {
     let result = result.unwrap();
 
     // With noise, expect slightly worse but still good accuracy
-    let error = ((result.x - true_cx).powi(2) + (result.y - true_cy).powi(2)).sqrt();
+    let error =
+        ((result.pos.x as f32 - true_cx).powi(2) + (result.pos.y as f32 - true_cy).powi(2)).sqrt();
     assert!(
         error < 0.15,
         "Position error {} too large with noise",
@@ -2136,7 +2143,8 @@ fn test_fit_gaussian_2d_weighted_basic() {
     assert!(result.is_some(), "Weighted fit should succeed");
     let result = result.unwrap();
 
-    let error = ((result.x - true_cx).powi(2) + (result.y - true_cy).powi(2)).sqrt();
+    let error =
+        ((result.pos.x as f32 - true_cx).powi(2) + (result.pos.y as f32 - true_cy).powi(2)).sqrt();
     assert!(
         error < 0.1,
         "Weighted Gaussian fit position error {} too large",
@@ -2186,7 +2194,8 @@ fn test_fit_gaussian_2d_weighted_with_gain() {
     let result = result.unwrap();
 
     // Should achieve good accuracy
-    let error = ((result.x - true_cx).powi(2) + (result.y - true_cy).powi(2)).sqrt();
+    let error =
+        ((result.pos.x as f32 - true_cx).powi(2) + (result.pos.y as f32 - true_cy).powi(2)).sqrt();
     assert!(
         error < 0.1,
         "Weighted Gaussian fit with gain position error {} too large",
@@ -2240,7 +2249,8 @@ fn test_fit_moffat_2d_weighted_basic() {
     assert!(result.is_some(), "Weighted Moffat fit should succeed");
     let result = result.unwrap();
 
-    let error = ((result.x - true_cx).powi(2) + (result.y - true_cy).powi(2)).sqrt();
+    let error =
+        ((result.pos.x as f32 - true_cx).powi(2) + (result.pos.y as f32 - true_cy).powi(2)).sqrt();
     assert!(
         error < 0.1,
         "Weighted Moffat fit position error {} too large",
@@ -2297,7 +2307,8 @@ fn test_fit_moffat_2d_weighted_variable_beta() {
     let result = result.unwrap();
 
     // Position should be accurate
-    let error = ((result.x - true_cx).powi(2) + (result.y - true_cy).powi(2)).sqrt();
+    let error =
+        ((result.pos.x as f32 - true_cx).powi(2) + (result.pos.y as f32 - true_cy).powi(2)).sqrt();
     assert!(
         error < 0.1,
         "Weighted Moffat fit position error {} too large",
@@ -2597,8 +2608,8 @@ fn test_local_annulus_vs_global_map() {
         compute_centroid(&pixels, &bg, &candidates[0], &config_annulus).expect("annulus centroid");
 
     // Both should give similar position (within 0.5 pixels)
-    let pos_diff = ((star_global.x - star_annulus.x).powi(2)
-        + (star_global.y - star_annulus.y).powi(2))
+    let pos_diff = ((star_global.pos.x - star_annulus.pos.x).powi(2)
+        + (star_global.pos.y - star_annulus.pos.y).powi(2))
     .sqrt();
     assert!(
         pos_diff < 0.5,

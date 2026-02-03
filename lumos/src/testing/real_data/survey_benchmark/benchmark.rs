@@ -458,8 +458,7 @@ fn catalog_to_ground_truth_with_mag(
             let flux = 10.0_f32.powf((25.0 - star.mag) / 2.5);
 
             let gt = GroundTruthStar {
-                x: x as f32,
-                y: y as f32,
+                pos: glam::DVec2::new(x as f32 as f64, y as f32 as f64),
                 flux,
                 fwhm,
                 eccentricity: 0.0,
@@ -537,8 +536,8 @@ fn compute_magnitude_bins(
             let match_radius_sq = match_radius * match_radius;
             for (_, (gt, _)) in &stars_in_bin {
                 for det in detected {
-                    let dx = det.x - gt.x;
-                    let dy = det.y - gt.y;
+                    let dx = det.pos.x - gt.x;
+                    let dy = det.pos.y - gt.y;
                     if dx * dx + dy * dy < match_radius_sq {
                         detected_count += 1;
                         centroid_errors.push((dx * dx + dy * dy).sqrt());
@@ -595,8 +594,8 @@ fn compute_astrometric_residuals(
         let gt = &ground_truth[ti];
         let det = &detected[di];
 
-        let dx = det.x - gt.x;
-        let dy = det.y - gt.y;
+        let dx = det.pos.x - gt.x;
+        let dy = det.pos.y - gt.y;
 
         dx_values.push(dx);
         dy_values.push(dy);
@@ -833,8 +832,7 @@ mod tests {
         let ground_truth_with_mag = vec![
             (
                 GroundTruthStar {
-                    x: 100.0,
-                    y: 100.0,
+                    pos: glam::DVec2::new(100.0 as f64, 100.0 as f64),
                     flux: 1000.0,
                     fwhm: 3.0,
                     eccentricity: 0.0,
@@ -845,8 +843,7 @@ mod tests {
             ), // Bright
             (
                 GroundTruthStar {
-                    x: 200.0,
-                    y: 200.0,
+                    pos: glam::DVec2::new(200.0 as f64, 200.0 as f64),
                     flux: 100.0,
                     fwhm: 3.0,
                     eccentricity: 0.0,
@@ -857,8 +854,7 @@ mod tests {
             ), // Medium
             (
                 GroundTruthStar {
-                    x: 300.0,
-                    y: 300.0,
+                    pos: glam::DVec2::new(300.0 as f64, 300.0 as f64),
                     flux: 10.0,
                     fwhm: 3.0,
                     eccentricity: 0.0,
@@ -871,8 +867,7 @@ mod tests {
 
         let detected = vec![
             Star {
-                x: 100.1,
-                y: 100.1,
+                pos: glam::DVec2::new(100.1 as f64, 100.1 as f64),
                 flux: 1000.0,
                 fwhm: 3.0,
                 eccentricity: 0.0,
@@ -912,8 +907,7 @@ mod tests {
     fn test_astrometric_residuals_computation() {
         let ground_truth = vec![
             GroundTruthStar {
-                x: 100.0,
-                y: 100.0,
+                pos: glam::DVec2::new(100.0 as f64, 100.0 as f64),
                 flux: 1000.0,
                 fwhm: 3.0,
                 eccentricity: 0.0,
@@ -921,8 +915,7 @@ mod tests {
                 angle: 0.0,
             },
             GroundTruthStar {
-                x: 200.0,
-                y: 200.0,
+                pos: glam::DVec2::new(200.0 as f64, 200.0 as f64),
                 flux: 1000.0,
                 fwhm: 3.0,
                 eccentricity: 0.0,
@@ -934,8 +927,7 @@ mod tests {
         // Detected with small systematic offset
         let detected = vec![
             Star {
-                x: 100.1,
-                y: 100.2,
+                pos: glam::DVec2::new(100.1 as f64, 100.2 as f64),
                 flux: 1000.0,
                 fwhm: 3.0,
                 eccentricity: 0.0,
@@ -947,8 +939,7 @@ mod tests {
                 laplacian_snr: 0.0,
             },
             Star {
-                x: 200.1,
-                y: 200.2,
+                pos: glam::DVec2::new(200.1 as f64, 200.2 as f64),
                 flux: 1000.0,
                 fwhm: 3.0,
                 eccentricity: 0.0,
@@ -1046,8 +1037,8 @@ mod tests {
             let mut nearest_dist = f32::MAX;
             let mut nearest_det: Option<&Star> = None;
             for det in &result.stars {
-                let dx = det.x - gt.x;
-                let dy = det.y - gt.y;
+                let dx = det.pos.x - gt.x;
+                let dy = det.pos.y - gt.y;
                 let dist = (dx * dx + dy * dy).sqrt();
                 if dist < nearest_dist {
                     nearest_dist = dist;
@@ -1061,8 +1052,8 @@ mod tests {
                 let matched = nearest_dist < match_radius;
                 println!(
                     " -> nearest: ({:7.1}, {:7.1}) dist={:5.1}px {}",
-                    det.x,
-                    det.y,
+                    det.pos.x,
+                    det.pos.y,
                     nearest_dist,
                     if matched { "MATCH" } else { "NO MATCH" }
                 );
@@ -1096,8 +1087,8 @@ mod tests {
             let mut nearest_dx = 0.0f32;
             let mut nearest_dy = 0.0f32;
             for det in &result.stars {
-                let dx = det.x - gt.x;
-                let dy = det.y - gt.y;
+                let dx = det.pos.x - gt.x;
+                let dy = det.pos.y - gt.y;
                 let dist = (dx * dx + dy * dy).sqrt();
                 if dist < nearest_dist {
                     nearest_dist = dist;

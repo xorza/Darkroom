@@ -3,6 +3,8 @@
 //! This module provides a k-d tree implementation optimized for 2D star positions,
 //! enabling efficient nearest-neighbor queries for triangle formation.
 
+use glam::DVec2;
+
 #[cfg(test)]
 mod tests;
 
@@ -15,7 +17,7 @@ mod tests;
 #[derive(Debug)]
 pub(crate) struct KdTree {
     nodes: Vec<KdNode>,
-    points: Vec<(f64, f64)>,
+    points: Vec<DVec2>,
 }
 
 #[derive(Debug, Clone)]
@@ -36,16 +38,16 @@ impl KdTree {
     /// The tree is built using the median-split strategy for balanced trees.
     ///
     /// # Arguments
-    /// * `points` - List of (x, y) coordinates
+    /// * `points` - List of point coordinates
     ///
     /// # Returns
     /// A new k-d tree, or None if points is empty
-    pub fn build(points: &[(f64, f64)]) -> Option<Self> {
+    pub fn build(points: &[DVec2]) -> Option<Self> {
         if points.is_empty() {
             return None;
         }
 
-        let points_vec: Vec<(f64, f64)> = points.to_vec();
+        let points_vec: Vec<DVec2> = points.to_vec();
         let mut indices: Vec<usize> = (0..points.len()).collect();
         let mut nodes = Vec::with_capacity(points.len());
 
@@ -59,7 +61,7 @@ impl KdTree {
 
     /// Recursively build the tree.
     fn build_recursive(
-        points: &[(f64, f64)],
+        points: &[DVec2],
         indices: &mut [usize],
         depth: usize,
         nodes: &mut Vec<KdNode>,
@@ -73,14 +75,14 @@ impl KdTree {
         // Sort indices by the split dimension
         indices.sort_by(|&a, &b| {
             let va = if split_dim == 0 {
-                points[a].0
+                points[a].x
             } else {
-                points[a].1
+                points[a].y
             };
             let vb = if split_dim == 0 {
-                points[b].0
+                points[b].x
             } else {
-                points[b].1
+                points[b].y
             };
             va.partial_cmp(&vb).unwrap()
         });
@@ -112,12 +114,12 @@ impl KdTree {
     /// Find the k nearest neighbors to a query point.
     ///
     /// # Arguments
-    /// * `query` - The query point (x, y)
+    /// * `query` - The query point
     /// * `k` - Number of neighbors to find
     ///
     /// # Returns
     /// Vector of (index, distance_squared) pairs, sorted by distance
-    pub fn k_nearest(&self, query: (f64, f64), k: usize) -> Vec<(usize, f64)> {
+    pub fn k_nearest(&self, query: DVec2, k: usize) -> Vec<(usize, f64)> {
         if self.nodes.is_empty() || k == 0 {
             return Vec::new();
         }
@@ -131,18 +133,18 @@ impl KdTree {
     }
 
     /// Recursive k-nearest neighbor search.
-    fn k_nearest_recursive(&self, node_idx: usize, query: (f64, f64), heap: &mut BoundedMaxHeap) {
+    fn k_nearest_recursive(&self, node_idx: usize, query: DVec2, heap: &mut BoundedMaxHeap) {
         let node = &self.nodes[node_idx];
         let point = self.points[node.point_idx];
 
         // Calculate distance to current point
-        let dist_sq = distance_squared(query, point);
+        let dist_sq = (query - point).length_squared();
         heap.push(node.point_idx, dist_sq);
 
         // Determine which subtree to search first
         let split_dim = node.split_dim;
-        let query_val = if split_dim == 0 { query.0 } else { query.1 };
-        let point_val = if split_dim == 0 { point.0 } else { point.1 };
+        let query_val = if split_dim == 0 { query.x } else { query.y };
+        let point_val = if split_dim == 0 { point.x } else { point.y };
         let diff = query_val - point_val;
 
         let (first, second) = if diff < 0.0 {
@@ -168,13 +170,13 @@ impl KdTree {
     /// Find all points within a given radius.
     ///
     /// # Arguments
-    /// * `query` - The query point (x, y)
+    /// * `query` - The query point
     /// * `radius` - Search radius
     ///
     /// # Returns
     /// Vector of (index, distance_squared) pairs for all points within radius
     #[cfg(test)]
-    pub fn radius_search(&self, query: (f64, f64), radius: f64) -> Vec<(usize, f64)> {
+    pub fn radius_search(&self, query: DVec2, radius: f64) -> Vec<(usize, f64)> {
         if self.nodes.is_empty() {
             return Vec::new();
         }
@@ -191,7 +193,7 @@ impl KdTree {
     fn radius_search_recursive(
         &self,
         node_idx: usize,
-        query: (f64, f64),
+        query: DVec2,
         radius_sq: f64,
         results: &mut Vec<(usize, f64)>,
     ) {
@@ -199,15 +201,15 @@ impl KdTree {
         let point = self.points[node.point_idx];
 
         // Check if current point is within radius
-        let dist_sq = distance_squared(query, point);
+        let dist_sq = (query - point).length_squared();
         if dist_sq <= radius_sq {
             results.push((node.point_idx, dist_sq));
         }
 
         // Determine which subtrees to search
         let split_dim = node.split_dim;
-        let query_val = if split_dim == 0 { query.0 } else { query.1 };
-        let point_val = if split_dim == 0 { point.0 } else { point.1 };
+        let query_val = if split_dim == 0 { query.x } else { query.y };
+        let point_val = if split_dim == 0 { point.x } else { point.y };
         let diff = query_val - point_val;
         let diff_sq = diff * diff;
 
@@ -237,17 +239,9 @@ impl KdTree {
     }
 
     /// Get a point by index.
-    pub fn get_point(&self, idx: usize) -> (f64, f64) {
+    pub fn get_point(&self, idx: usize) -> DVec2 {
         self.points[idx]
     }
-}
-
-/// Calculate squared Euclidean distance between two points.
-#[inline]
-fn distance_squared(a: (f64, f64), b: (f64, f64)) -> f64 {
-    let dx = a.0 - b.0;
-    let dy = a.1 - b.1;
-    dx * dx + dy * dy
 }
 
 /// Maximum capacity for stack-allocated neighbor collection.

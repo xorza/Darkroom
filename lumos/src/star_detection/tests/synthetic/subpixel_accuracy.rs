@@ -8,13 +8,14 @@ use crate::{AstroImage, ImageDimensions};
 
 use crate::star_detection::tests::common::save_image;
 use crate::star_detection::{Star, StarDetectionConfig, StarDetector};
+use glam::Vec2;
 use imaginarium::Color;
 use imaginarium::drawing::{draw_circle, draw_cross};
 
 /// Match detected stars between two images based on proximity.
 /// Returns pairs of (star1, star2) that are within `max_distance` pixels.
 fn match_stars(stars1: &[Star], stars2: &[Star], max_distance: f32) -> Vec<(Star, Star)> {
-    let max_dist_sq = max_distance * max_distance;
+    let max_dist_sq = (max_distance * max_distance) as f64;
     let mut matched = Vec::new();
     let mut used2 = vec![false; stars2.len()];
 
@@ -26,8 +27,8 @@ fn match_stars(stars1: &[Star], stars2: &[Star], max_distance: f32) -> Vec<(Star
             if used2[j] {
                 continue;
             }
-            let dx = s1.x - s2.x;
-            let dy = s1.y - s2.y;
+            let dx = s1.pos.x - s2.pos.x;
+            let dy = s1.pos.y - s2.pos.y;
             let dist_sq = dx * dx + dy * dy;
             if dist_sq < best_dist_sq {
                 best_dist_sq = dist_sq;
@@ -50,14 +51,14 @@ fn compute_median_shift(pairs: &[(Star, Star)]) -> (f32, f32) {
         return (0.0, 0.0);
     }
 
-    let mut dx_values: Vec<f32> = pairs.iter().map(|(s1, s2)| s2.x - s1.x).collect();
-    let mut dy_values: Vec<f32> = pairs.iter().map(|(s1, s2)| s2.y - s1.y).collect();
+    let mut dx_values: Vec<f64> = pairs.iter().map(|(s1, s2)| s2.pos.x - s1.pos.x).collect();
+    let mut dy_values: Vec<f64> = pairs.iter().map(|(s1, s2)| s2.pos.y - s1.pos.y).collect();
 
     dx_values.sort_by(|a, b| a.partial_cmp(b).unwrap());
     dy_values.sort_by(|a, b| a.partial_cmp(b).unwrap());
 
-    let median_dx = dx_values[dx_values.len() / 2];
-    let median_dy = dy_values[dy_values.len() / 2];
+    let median_dx = dx_values[dx_values.len() / 2] as f32;
+    let median_dy = dy_values[dy_values.len() / 2] as f32;
 
     (median_dx, median_dy)
 }
@@ -96,7 +97,7 @@ fn test_subpixel_shift_detection() {
     // Create shifted stars
     let shifted_stars: Vec<SyntheticStar> = base_stars
         .iter()
-        .map(|s| SyntheticStar::new(s.x + shift_x, s.y + shift_y, s.brightness, s.sigma))
+        .map(|s| SyntheticStar::new(s.pos.x + shift_x, s.pos.y + shift_y, s.brightness, s.sigma))
         .collect();
 
     println!("Generating two synthetic star fields...");
@@ -158,17 +159,17 @@ fn test_subpixel_shift_detection() {
     // Print per-star errors
     println!("\nPer-star measurements:");
     for (i, (s1, s2)) in pairs.iter().enumerate() {
-        let dx = s2.x - s1.x;
-        let dy = s2.y - s1.y;
+        let dx = (s2.pos.x - s1.pos.x) as f32;
+        let dy = (s2.pos.y - s1.pos.y) as f32;
         let err_x = (dx - shift_x).abs();
         let err_y = (dy - shift_y).abs();
         println!(
             "  Star {}: pos1=({:.2}, {:.2}) pos2=({:.2}, {:.2}) shift=({:.3}, {:.3}) err=({:.3}, {:.3})",
             i + 1,
-            s1.x,
-            s1.y,
-            s2.x,
-            s2.y,
+            s1.pos.x,
+            s1.pos.y,
+            s2.pos.x,
+            s2.pos.y,
             dx,
             dy,
             err_x,
@@ -271,7 +272,9 @@ fn test_subpixel_accuracy_sweep() {
     for (shift_x, shift_y) in test_shifts {
         let shifted_stars: Vec<SyntheticStar> = base_stars
             .iter()
-            .map(|s| SyntheticStar::new(s.x + shift_x, s.y + shift_y, s.brightness, s.sigma))
+            .map(|s| {
+                SyntheticStar::new(s.pos.x + shift_x, s.pos.y + shift_y, s.brightness, s.sigma)
+            })
             .collect();
 
         let pixels2 = generate_star_field(&config, &shifted_stars);
@@ -372,26 +375,26 @@ fn save_subpixel_visualization(
     let yellow = Color::YELLOW;
 
     for star in detected1 {
-        let cx = star.x;
-        let cy = star.y;
-        draw_cross(&mut output, cx, cy, 3.0, green, 1.0);
+        let cx = star.pos.x as f32;
+        let cy = star.pos.y as f32;
+        draw_cross(&mut output, Vec2::new(cx, cy), 3.0, green, 1.0);
     }
 
     for star in detected2 {
-        let cx = star.x + width as f32 + 20.0;
-        let cy = star.y;
-        draw_cross(&mut output, cx, cy, 3.0, green, 1.0);
+        let cx = star.pos.x as f32 + width as f32 + 20.0;
+        let cy = star.pos.y as f32;
+        draw_cross(&mut output, Vec2::new(cx, cy), 3.0, green, 1.0);
     }
 
     // Draw circles around matched pairs
     for (s1, s2) in pairs {
-        let cx1 = s1.x;
-        let cy1 = s1.y;
-        draw_circle(&mut output, cx1, cy1, 8.0, cyan, 1.0);
+        let cx1 = s1.pos.x as f32;
+        let cy1 = s1.pos.y as f32;
+        draw_circle(&mut output, Vec2::new(cx1, cy1), 8.0, cyan, 1.0);
 
-        let cx2 = s2.x + width as f32 + 20.0;
-        let cy2 = s2.y;
-        draw_circle(&mut output, cx2, cy2, 8.0, yellow, 1.0);
+        let cx2 = s2.pos.x as f32 + width as f32 + 20.0;
+        let cy2 = s2.pos.y as f32;
+        draw_circle(&mut output, Vec2::new(cx2, cy2), 8.0, yellow, 1.0);
     }
 
     let output_path =

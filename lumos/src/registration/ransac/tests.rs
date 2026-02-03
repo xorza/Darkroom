@@ -1,40 +1,52 @@
 //! Tests for RANSAC module.
 
 use super::*;
+use glam::DVec2;
 use std::f64::consts::PI;
 
 const EPSILON: f64 = 1e-6;
 
+// todo approx_eq for dvec2
 fn approx_eq(a: f64, b: f64, eps: f64) -> bool {
     (a - b).abs() < eps
 }
 
 #[test]
 fn test_estimate_translation() {
-    let ref_points = vec![(0.0, 0.0), (10.0, 0.0), (0.0, 10.0), (10.0, 10.0)];
-    let target_points: Vec<(f64, f64)> =
-        ref_points.iter().map(|(x, y)| (x + 5.0, y - 3.0)).collect();
+    let ref_points = vec![
+        DVec2::new(0.0, 0.0),
+        DVec2::new(10.0, 0.0),
+        DVec2::new(0.0, 10.0),
+        DVec2::new(10.0, 10.0),
+    ];
+    let target_points: Vec<DVec2> = ref_points
+        .iter()
+        .map(|p| *p + DVec2::new(5.0, -3.0))
+        .collect();
 
     let t = estimate_transform(&ref_points, &target_points, TransformType::Translation).unwrap();
-    let (dx, dy) = t.translation_components();
+    let d = t.translation_components();
 
-    assert!(approx_eq(dx, 5.0, EPSILON));
-    assert!(approx_eq(dy, -3.0, EPSILON));
+    assert!(approx_eq(d.x, 5.0, EPSILON));
+    assert!(approx_eq(d.y, -3.0, EPSILON));
 }
 
 #[test]
 fn test_estimate_similarity() {
-    let ref_points = vec![(0.0, 0.0), (10.0, 0.0), (0.0, 10.0), (10.0, 10.0)];
+    let ref_points = vec![
+        DVec2::new(0.0, 0.0),
+        DVec2::new(10.0, 0.0),
+        DVec2::new(0.0, 10.0),
+        DVec2::new(10.0, 10.0),
+    ];
 
     // Apply known similarity transform
     let angle = PI / 6.0; // 30 degrees
     let scale = 1.5;
-    let dx = 20.0;
-    let dy = -10.0;
+    let t = DVec2::new(20.0, -10.0);
 
-    let known = Transform::similarity(dx, dy, angle, scale);
-    let target_points: Vec<(f64, f64)> =
-        ref_points.iter().map(|&(x, y)| known.apply(x, y)).collect();
+    let known = Transform::similarity(t, angle, scale);
+    let target_points: Vec<DVec2> = ref_points.iter().map(|&p| known.apply(p)).collect();
 
     let estimated =
         estimate_transform(&ref_points, &target_points, TransformType::Similarity).unwrap();
@@ -43,65 +55,63 @@ fn test_estimate_similarity() {
     assert!(approx_eq(estimated.rotation_angle(), angle, 0.01));
     assert!(approx_eq(estimated.scale_factor(), scale, 0.01));
 
-    let (est_dx, est_dy) = estimated.translation_components();
-    assert!(approx_eq(est_dx, dx, 0.1));
-    assert!(approx_eq(est_dy, dy, 0.1));
+    let est_t = estimated.translation_components();
+    assert!(approx_eq(est_t.x, t.x, 0.1));
+    assert!(approx_eq(est_t.y, t.y, 0.1));
 }
 
 #[test]
 fn test_estimate_affine() {
     let ref_points = vec![
-        (0.0, 0.0),
-        (10.0, 0.0),
-        (0.0, 10.0),
-        (10.0, 10.0),
-        (5.0, 5.0),
+        DVec2::new(0.0, 0.0),
+        DVec2::new(10.0, 0.0),
+        DVec2::new(0.0, 10.0),
+        DVec2::new(10.0, 10.0),
+        DVec2::new(5.0, 5.0),
     ];
 
     // Apply known affine transform (with shear)
     let known = Transform::affine([1.2, 0.3, 5.0, -0.1, 0.9, -3.0]);
-    let target_points: Vec<(f64, f64)> =
-        ref_points.iter().map(|&(x, y)| known.apply(x, y)).collect();
+    let target_points: Vec<DVec2> = ref_points.iter().map(|&p| known.apply(p)).collect();
 
     let estimated = estimate_transform(&ref_points, &target_points, TransformType::Affine).unwrap();
 
     // Check that transform produces correct results
-    for (&(rx, ry), &(tx, ty)) in ref_points.iter().zip(target_points.iter()) {
-        let (px, py) = estimated.apply(rx, ry);
-        assert!(approx_eq(px, tx, 0.01));
-        assert!(approx_eq(py, ty, 0.01));
+    for (&rp, &tp) in ref_points.iter().zip(target_points.iter()) {
+        let pp = estimated.apply(rp);
+        assert!(approx_eq(pp.x, tp.x, 0.01));
+        assert!(approx_eq(pp.y, tp.y, 0.01));
     }
 }
 
 #[test]
 fn test_estimate_homography() {
     let ref_points = vec![
-        (0.0, 0.0),
-        (100.0, 0.0),
-        (100.0, 100.0),
-        (0.0, 100.0),
-        (50.0, 50.0),
-        (25.0, 75.0),
+        DVec2::new(0.0, 0.0),
+        DVec2::new(100.0, 0.0),
+        DVec2::new(100.0, 100.0),
+        DVec2::new(0.0, 100.0),
+        DVec2::new(50.0, 50.0),
+        DVec2::new(25.0, 75.0),
     ];
 
     // Apply known homography
     let known = Transform::homography([1.1, 0.1, 5.0, -0.05, 1.0, 3.0, 0.0001, 0.00005]);
-    let target_points: Vec<(f64, f64)> =
-        ref_points.iter().map(|&(x, y)| known.apply(x, y)).collect();
+    let target_points: Vec<DVec2> = ref_points.iter().map(|&p| known.apply(p)).collect();
 
     let estimated =
         estimate_transform(&ref_points, &target_points, TransformType::Homography).unwrap();
 
     // Check that transform produces correct results
-    for (&(rx, ry), &(tx, ty)) in ref_points.iter().zip(target_points.iter()) {
-        let (px, py) = estimated.apply(rx, ry);
+    for (&rp, &tp) in ref_points.iter().zip(target_points.iter()) {
+        let pp = estimated.apply(rp);
         assert!(
-            approx_eq(px, tx, 0.5) && approx_eq(py, ty, 0.5),
+            approx_eq(pp.x, tp.x, 0.5) && approx_eq(pp.y, tp.y, 0.5),
             "Expected ({}, {}), got ({}, {})",
-            tx,
-            ty,
-            px,
-            py
+            tp.x,
+            tp.y,
+            pp.x,
+            pp.y
         );
     }
 }
@@ -109,18 +119,18 @@ fn test_estimate_homography() {
 #[test]
 fn test_ransac_perfect_translation() {
     let ref_points = vec![
-        (0.0, 0.0),
-        (10.0, 0.0),
-        (0.0, 10.0),
-        (10.0, 10.0),
-        (5.0, 5.0),
-        (7.0, 3.0),
-        (2.0, 8.0),
-        (9.0, 1.0),
+        DVec2::new(0.0, 0.0),
+        DVec2::new(10.0, 0.0),
+        DVec2::new(0.0, 10.0),
+        DVec2::new(10.0, 10.0),
+        DVec2::new(5.0, 5.0),
+        DVec2::new(7.0, 3.0),
+        DVec2::new(2.0, 8.0),
+        DVec2::new(9.0, 1.0),
     ];
-    let target_points: Vec<(f64, f64)> = ref_points
+    let target_points: Vec<DVec2> = ref_points
         .iter()
-        .map(|(x, y)| (x + 15.0, y - 7.0))
+        .map(|p| *p + DVec2::new(15.0, -7.0))
         .collect();
 
     let config = RansacConfig {
@@ -134,27 +144,26 @@ fn test_ransac_perfect_translation() {
     let result = result.unwrap();
     assert_eq!(result.inliers.len(), 8);
 
-    let (dx, dy) = result.transform.translation_components();
-    assert!(approx_eq(dx, 15.0, 0.1));
-    assert!(approx_eq(dy, -7.0, 0.1));
+    let t = result.transform.translation_components();
+    assert!(approx_eq(t.x, 15.0, 0.1));
+    assert!(approx_eq(t.y, -7.0, 0.1));
 }
 
 #[test]
 fn test_ransac_perfect_similarity() {
     let ref_points = vec![
-        (0.0, 0.0),
-        (10.0, 0.0),
-        (0.0, 10.0),
-        (10.0, 10.0),
-        (5.0, 5.0),
-        (7.0, 3.0),
-        (2.0, 8.0),
-        (9.0, 1.0),
+        DVec2::new(0.0, 0.0),
+        DVec2::new(10.0, 0.0),
+        DVec2::new(0.0, 10.0),
+        DVec2::new(10.0, 10.0),
+        DVec2::new(5.0, 5.0),
+        DVec2::new(7.0, 3.0),
+        DVec2::new(2.0, 8.0),
+        DVec2::new(9.0, 1.0),
     ];
 
-    let known = Transform::similarity(5.0, -3.0, PI / 4.0, 1.2);
-    let target_points: Vec<(f64, f64)> =
-        ref_points.iter().map(|&(x, y)| known.apply(x, y)).collect();
+    let known = Transform::similarity(DVec2::new(5.0, -3.0), PI / 4.0, 1.2);
+    let target_points: Vec<DVec2> = ref_points.iter().map(|&p| known.apply(p)).collect();
 
     let config = RansacConfig {
         seed: Some(42),
@@ -171,25 +180,24 @@ fn test_ransac_perfect_similarity() {
 #[test]
 fn test_ransac_with_outliers() {
     let ref_points = vec![
-        (0.0, 0.0),
-        (10.0, 0.0),
-        (0.0, 10.0),
-        (10.0, 10.0),
-        (5.0, 5.0),
-        (7.0, 3.0),
-        (2.0, 8.0),
-        (9.0, 1.0),
-        (100.0, 100.0),
-        (200.0, 200.0), // Outliers
+        DVec2::new(0.0, 0.0),
+        DVec2::new(10.0, 0.0),
+        DVec2::new(0.0, 10.0),
+        DVec2::new(10.0, 10.0),
+        DVec2::new(5.0, 5.0),
+        DVec2::new(7.0, 3.0),
+        DVec2::new(2.0, 8.0),
+        DVec2::new(9.0, 1.0),
+        DVec2::new(100.0, 100.0),
+        DVec2::new(200.0, 200.0), // Outliers
     ];
 
-    let known = Transform::translation(5.0, 3.0);
-    let mut target_points: Vec<(f64, f64)> =
-        ref_points.iter().map(|&(x, y)| known.apply(x, y)).collect();
+    let known = Transform::translation(DVec2::new(5.0, 3.0));
+    let mut target_points: Vec<DVec2> = ref_points.iter().map(|&p| known.apply(p)).collect();
 
     // Make last two points outliers
-    target_points[8] = (500.0, 500.0);
-    target_points[9] = (600.0, 600.0);
+    target_points[8] = DVec2::new(500.0, 500.0);
+    target_points[9] = DVec2::new(600.0, 600.0);
 
     let config = RansacConfig {
         seed: Some(42),
@@ -210,8 +218,8 @@ fn test_ransac_with_outliers() {
 
 #[test]
 fn test_ransac_insufficient_points() {
-    let ref_points = vec![(0.0, 0.0)];
-    let target_points = vec![(1.0, 1.0)];
+    let ref_points = vec![DVec2::new(0.0, 0.0)];
+    let target_points = vec![DVec2::new(1.0, 1.0)];
 
     let estimator = RansacEstimator::new(RansacConfig::default());
     let result = estimator.estimate(&ref_points, &target_points, TransformType::Similarity);
@@ -232,47 +240,53 @@ fn test_adaptive_iterations() {
 
 #[test]
 fn test_centroid() {
-    let points = vec![(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)];
-    let (cx, cy) = centroid(&points);
-    assert!(approx_eq(cx, 5.0, EPSILON));
-    assert!(approx_eq(cy, 5.0, EPSILON));
+    let points = vec![
+        DVec2::new(0.0, 0.0),
+        DVec2::new(10.0, 0.0),
+        DVec2::new(10.0, 10.0),
+        DVec2::new(0.0, 10.0),
+    ];
+    let c = centroid(&points);
+    assert!(approx_eq(c.x, 5.0, EPSILON));
+    assert!(approx_eq(c.y, 5.0, EPSILON));
 }
 
 #[test]
 fn test_normalize_points() {
-    let points = vec![(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)];
+    let points = vec![
+        DVec2::new(0.0, 0.0),
+        DVec2::new(10.0, 0.0),
+        DVec2::new(10.0, 10.0),
+        DVec2::new(0.0, 10.0),
+    ];
     let (normalized, _) = normalize_points(&points);
 
     // Check centroid is at origin
-    let (cx, cy) = centroid(&normalized);
-    assert!(approx_eq(cx, 0.0, EPSILON));
-    assert!(approx_eq(cy, 0.0, EPSILON));
+    let c = centroid(&normalized);
+    assert!(approx_eq(c.x, 0.0, EPSILON));
+    assert!(approx_eq(c.y, 0.0, EPSILON));
 
     // Check average distance is sqrt(2)
-    let avg_dist: f64 = normalized
-        .iter()
-        .map(|(x, y)| (x * x + y * y).sqrt())
-        .sum::<f64>()
-        / normalized.len() as f64;
+    let avg_dist: f64 =
+        normalized.iter().map(|p| p.length()).sum::<f64>() / normalized.len() as f64;
     assert!(approx_eq(avg_dist, std::f64::consts::SQRT_2, 0.01));
 }
 
 #[test]
 fn test_ransac_affine() {
     let ref_points = vec![
-        (0.0, 0.0),
-        (100.0, 0.0),
-        (100.0, 100.0),
-        (0.0, 100.0),
-        (50.0, 50.0),
-        (25.0, 75.0),
-        (75.0, 25.0),
-        (33.0, 66.0),
+        DVec2::new(0.0, 0.0),
+        DVec2::new(100.0, 0.0),
+        DVec2::new(100.0, 100.0),
+        DVec2::new(0.0, 100.0),
+        DVec2::new(50.0, 50.0),
+        DVec2::new(25.0, 75.0),
+        DVec2::new(75.0, 25.0),
+        DVec2::new(33.0, 66.0),
     ];
 
     let known = Transform::affine([1.1, 0.2, 10.0, -0.1, 0.95, 5.0]);
-    let target_points: Vec<(f64, f64)> =
-        ref_points.iter().map(|&(x, y)| known.apply(x, y)).collect();
+    let target_points: Vec<DVec2> = ref_points.iter().map(|&p| known.apply(p)).collect();
 
     let config = RansacConfig {
         seed: Some(42),
@@ -289,20 +303,19 @@ fn test_ransac_affine() {
 #[test]
 fn test_ransac_homography() {
     let ref_points = vec![
-        (0.0, 0.0),
-        (100.0, 0.0),
-        (100.0, 100.0),
-        (0.0, 100.0),
-        (50.0, 50.0),
-        (25.0, 75.0),
-        (75.0, 25.0),
-        (33.0, 66.0),
+        DVec2::new(0.0, 0.0),
+        DVec2::new(100.0, 0.0),
+        DVec2::new(100.0, 100.0),
+        DVec2::new(0.0, 100.0),
+        DVec2::new(50.0, 50.0),
+        DVec2::new(25.0, 75.0),
+        DVec2::new(75.0, 25.0),
+        DVec2::new(33.0, 66.0),
     ];
 
     // Use a mild homography
     let known = Transform::homography([1.0, 0.1, 5.0, -0.05, 1.0, 3.0, 0.0001, 0.00005]);
-    let target_points: Vec<(f64, f64)> =
-        ref_points.iter().map(|&(x, y)| known.apply(x, y)).collect();
+    let target_points: Vec<DVec2> = ref_points.iter().map(|&p| known.apply(p)).collect();
 
     let config = RansacConfig {
         seed: Some(42),
@@ -322,21 +335,20 @@ fn test_ransac_homography() {
 #[test]
 fn test_lo_ransac_improves_inlier_count() {
     // Create points with some noise
-    let ref_points: Vec<(f64, f64)> = (0..20)
+    let ref_points: Vec<DVec2> = (0..20)
         .map(|i| {
             let x = (i % 5) as f64 * 20.0;
             let y = (i / 5) as f64 * 20.0;
-            (x, y)
+            DVec2::new(x, y)
         })
         .collect();
 
-    let known = Transform::similarity(10.0, -5.0, PI / 8.0, 1.1);
-    let mut target_points: Vec<(f64, f64)> =
-        ref_points.iter().map(|&(x, y)| known.apply(x, y)).collect();
+    let known = Transform::similarity(DVec2::new(10.0, -5.0), PI / 8.0, 1.1);
+    let mut target_points: Vec<DVec2> = ref_points.iter().map(|&p| known.apply(p)).collect();
 
     // Add some noise to make it harder
-    target_points[5].0 += 0.5;
-    target_points[10].1 -= 0.3;
+    target_points[5].x += 0.5;
+    target_points[10].y -= 0.3;
 
     // Test with LO-RANSAC enabled
     let config_with_lo = RansacConfig {
@@ -375,19 +387,18 @@ fn test_lo_ransac_improves_inlier_count() {
 #[test]
 fn test_lo_ransac_converges() {
     let ref_points = vec![
-        (0.0, 0.0),
-        (10.0, 0.0),
-        (0.0, 10.0),
-        (10.0, 10.0),
-        (5.0, 5.0),
-        (7.0, 3.0),
-        (3.0, 7.0),
-        (8.0, 8.0),
+        DVec2::new(0.0, 0.0),
+        DVec2::new(10.0, 0.0),
+        DVec2::new(0.0, 10.0),
+        DVec2::new(10.0, 10.0),
+        DVec2::new(5.0, 5.0),
+        DVec2::new(7.0, 3.0),
+        DVec2::new(3.0, 7.0),
+        DVec2::new(8.0, 8.0),
     ];
 
-    let known = Transform::translation(5.0, 3.0);
-    let target_points: Vec<(f64, f64)> =
-        ref_points.iter().map(|&(x, y)| known.apply(x, y)).collect();
+    let known = Transform::translation(DVec2::new(5.0, 3.0));
+    let target_points: Vec<DVec2> = ref_points.iter().map(|&p| known.apply(p)).collect();
 
     let config = RansacConfig {
         seed: Some(42),
@@ -404,40 +415,39 @@ fn test_lo_ransac_converges() {
     assert_eq!(result.inliers.len(), 8);
 
     // Transform should be accurate
-    let (dx, dy) = result.transform.translation_components();
-    assert!(approx_eq(dx, 5.0, 0.1));
-    assert!(approx_eq(dy, 3.0, 0.1));
+    let t = result.transform.translation_components();
+    assert!(approx_eq(t.x, 5.0, 0.1));
+    assert!(approx_eq(t.y, 3.0, 0.1));
 }
 
 #[test]
 fn test_ransac_30_percent_outliers() {
     // 10 inliers, ~4 outliers (30%)
     let ref_points = vec![
-        (0.0, 0.0),
-        (10.0, 0.0),
-        (20.0, 0.0),
-        (0.0, 10.0),
-        (10.0, 10.0),
-        (20.0, 10.0),
-        (0.0, 20.0),
-        (10.0, 20.0),
-        (20.0, 20.0),
-        (5.0, 5.0),
-        (100.0, 100.0), // outlier
-        (150.0, 50.0),  // outlier
-        (200.0, 200.0), // outlier
-        (250.0, 150.0), // outlier
+        DVec2::new(0.0, 0.0),
+        DVec2::new(10.0, 0.0),
+        DVec2::new(20.0, 0.0),
+        DVec2::new(0.0, 10.0),
+        DVec2::new(10.0, 10.0),
+        DVec2::new(20.0, 10.0),
+        DVec2::new(0.0, 20.0),
+        DVec2::new(10.0, 20.0),
+        DVec2::new(20.0, 20.0),
+        DVec2::new(5.0, 5.0),
+        DVec2::new(100.0, 100.0), // outlier
+        DVec2::new(150.0, 50.0),  // outlier
+        DVec2::new(200.0, 200.0), // outlier
+        DVec2::new(250.0, 150.0), // outlier
     ];
 
-    let known = Transform::translation(5.0, 3.0);
-    let mut target_points: Vec<(f64, f64)> =
-        ref_points.iter().map(|&(x, y)| known.apply(x, y)).collect();
+    let known = Transform::translation(DVec2::new(5.0, 3.0));
+    let mut target_points: Vec<DVec2> = ref_points.iter().map(|&p| known.apply(p)).collect();
 
     // Make outliers actually outliers
-    target_points[10] = (500.0, 500.0);
-    target_points[11] = (600.0, 300.0);
-    target_points[12] = (700.0, 700.0);
-    target_points[13] = (800.0, 400.0);
+    target_points[10] = DVec2::new(500.0, 500.0);
+    target_points[11] = DVec2::new(600.0, 300.0);
+    target_points[12] = DVec2::new(700.0, 700.0);
+    target_points[13] = DVec2::new(800.0, 400.0);
 
     let config = RansacConfig {
         seed: Some(42),

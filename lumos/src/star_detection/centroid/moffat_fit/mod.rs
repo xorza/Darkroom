@@ -25,6 +25,7 @@ use super::lm_optimizer::{
 use super::{compute_pixel_weights, estimate_sigma_from_moments, extract_stamp};
 use crate::common::Buffer2;
 use crate::math::FWHM_TO_SIGMA;
+use glam::DVec2;
 
 /// Configuration for Moffat profile fitting.
 #[derive(Debug, Clone)]
@@ -50,10 +51,8 @@ impl Default for MoffatFitConfig {
 /// Result of 2D Moffat profile fitting.
 #[derive(Debug, Clone, Copy)]
 pub struct MoffatFitResult {
-    /// X coordinate of profile center (sub-pixel).
-    pub x: f32,
-    /// Y coordinate of profile center (sub-pixel).
-    pub y: f32,
+    /// Position of profile center (sub-pixel).
+    pub pos: DVec2,
     /// Amplitude of profile.
     pub amplitude: f32,
     /// Core width parameter (alpha).
@@ -324,8 +323,7 @@ fn fit_with_fixed_beta(
     let fwhm = alpha_beta_to_fwhm(alpha, config.fixed_beta);
 
     Some(MoffatFitResult {
-        x: x0,
-        y: y0,
+        pos: DVec2::new(x0 as f64, y0 as f64),
         amplitude,
         alpha,
         beta: config.fixed_beta,
@@ -375,8 +373,7 @@ fn fit_with_variable_beta(
     let fwhm = alpha_beta_to_fwhm(alpha, beta);
 
     Some(MoffatFitResult {
-        x: x0,
-        y: y0,
+        pos: DVec2::new(x0 as f64, y0 as f64),
         amplitude,
         alpha,
         beta,
@@ -429,8 +426,7 @@ fn fit_with_fixed_beta_weighted(
     let fwhm = alpha_beta_to_fwhm(alpha, config.fixed_beta);
 
     Some(MoffatFitResult {
-        x: x0,
-        y: y0,
+        pos: DVec2::new(x0 as f64, y0 as f64),
         amplitude,
         alpha,
         beta: config.fixed_beta,
@@ -489,8 +485,7 @@ fn fit_with_variable_beta_weighted(
     let fwhm = alpha_beta_to_fwhm(alpha, beta);
 
     Some(MoffatFitResult {
-        x: x0,
-        y: y0,
+        pos: DVec2::new(x0 as f64, y0 as f64),
         amplitude,
         alpha,
         beta,

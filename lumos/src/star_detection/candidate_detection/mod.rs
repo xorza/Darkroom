@@ -30,10 +30,8 @@ pub(crate) use tests::detect_stars_test;
 pub struct StarCandidate {
     /// Bounding box.
     pub bbox: Aabb,
-    /// Peak pixel X coordinate.
-    pub peak_x: usize,
-    /// Peak pixel Y coordinate.
-    pub peak_y: usize,
+    /// Peak pixel coordinates.
+    pub peak: Vec2us,
     /// Peak pixel value.
     pub peak_value: f32,
     /// Number of pixels in the region.
@@ -188,8 +186,7 @@ pub(crate) fn extract_candidates(
         .flat_map_iter(|data| {
             let map_to_candidate = |obj: DeblendedCandidate| StarCandidate {
                 bbox: obj.bbox,
-                peak_x: obj.peak.x,
-                peak_y: obj.peak.y,
+                peak: obj.peak,
                 peak_value: obj.peak_value,
                 area: obj.area,
             };

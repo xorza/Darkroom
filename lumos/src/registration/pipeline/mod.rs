@@ -18,6 +18,7 @@ mod result;
 pub use config::RegistrationConfig;
 pub use result::{RansacFailureReason, RegistrationError, RegistrationResult};
 
+use glam::DVec2;
 use std::time::Instant;
 
 use crate::ImageDimensions;
@@ -72,34 +73,30 @@ impl Registrator {
         ref_stars: &[Star],
         target_stars: &[Star],
     ) -> Result<RegistrationResult, RegistrationError> {
-        // Convert to (x, y) tuples and delegate to position-based method
-        let ref_positions: Vec<(f64, f64)> =
-            ref_stars.iter().map(|s| (s.x as f64, s.y as f64)).collect();
-        let target_positions: Vec<(f64, f64)> = target_stars
-            .iter()
-            .map(|s| (s.x as f64, s.y as f64))
-            .collect();
+        // Convert to DVec2 and delegate to position-based method
+        let ref_positions: Vec<DVec2> = ref_stars.iter().map(|s| s.pos).collect();
+        let target_positions: Vec<DVec2> = target_stars.iter().map(|s| s.pos).collect();
 
         self.register_positions(&ref_positions, &target_positions)
     }
 
-    /// Register target to reference using star positions as (x, y) tuples.
+    /// Register target to reference using star positions as DVec2.
     ///
     /// This is useful when you have pre-extracted positions or for testing.
     /// Positions should be sorted by brightness (brightest first) for best results.
     ///
     /// # Arguments
     ///
-    /// * `ref_positions` - Star positions (x, y) in the reference image
-    /// * `target_positions` - Star positions (x, y) in the target image
+    /// * `ref_positions` - Star positions in the reference image
+    /// * `target_positions` - Star positions in the target image
     ///
     /// # Returns
     ///
     /// Registration result containing the transformation and quality metrics.
     pub fn register_positions(
         &self,
-        ref_positions: &[(f64, f64)],
-        target_positions: &[(f64, f64)],
+        ref_positions: &[DVec2],
+        target_positions: &[DVec2],
     ) -> Result<RegistrationResult, RegistrationError> {
         let start = Instant::now();
 
@@ -197,10 +194,10 @@ impl Registrator {
             .inliers
             .iter()
             .map(|&i| {
-                let (rx, ry): (f64, f64) = ref_matched[i];
-                let (tx, ty): (f64, f64) = target_matched[i];
-                let (px, py) = ransac_result.transform.apply(rx, ry);
-                ((px - tx).powi(2) + (py - ty).powi(2)).sqrt()
+                let r = ref_matched[i];
+                let t = target_matched[i];
+                let p = ransac_result.transform.apply(r);
+                (p - t).length()
             })
             .collect();
 
@@ -236,8 +233,8 @@ impl Registrator {
         target_image: &[f32],
         width: usize,
         height: usize,
-        ref_stars: &[(f64, f64)],
-        target_stars: &[(f64, f64)],
+        ref_stars: &[DVec2],
+        target_stars: &[DVec2],
     ) -> Result<RegistrationResult, RegistrationError> {
         let start = Instant::now();
 
@@ -254,8 +251,8 @@ impl Registrator {
 
         // Apply coarse translation to target stars if phase correlation succeeded
         let adjusted_target_stars: Vec<_> = if let Some(ref pr) = phase_result {
-            let (dx, dy) = pr.translation;
-            target_stars.iter().map(|(x, y)| (x - dx, y - dy)).collect()
+            let offset = pr.translation;
+            target_stars.iter().map(|p| *p - offset).collect()
         } else {
             target_stars.to_vec()
         };
@@ -265,8 +262,7 @@ impl Registrator {
 
         // If we used phase correlation, compose the transforms
         if let Some(pr) = phase_result {
-            let (dx, dy) = pr.translation;
-            let phase_transform = Transform::translation(dx, dy);
+            let phase_transform = Transform::translation(pr.translation);
             result.transform = result.transform.compose(&phase_transform);
         }
 
@@ -362,7 +358,7 @@ pub fn warp_to_reference_image(
     result
 }
 
-/// Quick registration using default settings with position tuples.
+/// Quick registration using default settings with position vectors.
 ///
 /// Suitable for well-aligned images with good star coverage.
 /// Returns only the transformation matrix. For full registration result
@@ -370,8 +366,8 @@ pub fn warp_to_reference_image(
 ///
 /// # Arguments
 ///
-/// * `ref_stars` - Reference star positions (x, y)
-/// * `target_stars` - Target star positions (x, y)
+/// * `ref_stars` - Reference star positions
+/// * `target_stars` - Target star positions
 ///
 /// # Returns
 ///
@@ -379,11 +375,12 @@ pub fn warp_to_reference_image(
 ///
 /// # Example
 /// ```rust,ignore
+/// use glam::DVec2;
 /// use lumos::{quick_register, warp_to_reference_image, InterpolationMethod, AstroImage};
 ///
 /// // Star positions detected from both images
-/// let ref_positions = vec![(100.0, 200.0), (300.0, 150.0), /* ... */];
-/// let target_positions = vec![(102.0, 198.0), (302.0, 148.0), /* ... */];
+/// let ref_positions = vec![DVec2::new(100.0, 200.0), DVec2::new(300.0, 150.0), /* ... */];
+/// let target_positions = vec![DVec2::new(102.0, 198.0), DVec2::new(302.0, 148.0), /* ... */];
 ///
 /// // Get the transformation matrix
 /// let transform = quick_register(&ref_positions, &target_positions)?;
@@ -392,8 +389,8 @@ pub fn warp_to_reference_image(
 /// let aligned = warp_to_reference_image(&target_image, &transform, InterpolationMethod::Lanczos3);
 /// ```
 pub fn quick_register(
-    ref_stars: &[(f64, f64)],
-    target_stars: &[(f64, f64)],
+    ref_stars: &[DVec2],
+    target_stars: &[DVec2],
 ) -> Result<Transform, RegistrationError> {
     let config = RegistrationConfig {
         transform_type: TransformType::Similarity,
@@ -520,8 +517,8 @@ impl MultiScaleRegistrator {
     /// * `image_height` - Full resolution image height
     pub fn register_stars(
         &self,
-        ref_stars: &[(f64, f64)],
-        target_stars: &[(f64, f64)],
+        ref_stars: &[DVec2],
+        target_stars: &[DVec2],
         image_width: usize,
         image_height: usize,
     ) -> Result<RegistrationResult, RegistrationError> {
@@ -549,19 +546,16 @@ impl MultiScaleRegistrator {
             let scale = self.multiscale_config.scale_factor.powi(level as i32);
 
             // Scale star positions to this level
-            let scaled_ref: Vec<(f64, f64)> = ref_stars
-                .iter()
-                .map(|(x, y)| (x / scale, y / scale))
-                .collect();
+            let scaled_ref: Vec<DVec2> = ref_stars.iter().map(|p| *p / scale).collect();
 
             // Apply current transform estimate to target stars, then scale
-            let adjusted_target: Vec<(f64, f64)> = target_stars
+            let adjusted_target: Vec<DVec2> = target_stars
                 .iter()
-                .map(|(x, y)| {
+                .map(|p| {
                     // Apply inverse of current estimate to pre-align
                     let inv = current_transform.inverse();
-                    let (ax, ay) = inv.apply(*x, *y);
-                    (ax / scale, ay / scale)
+                    let a = inv.apply(*p);
+                    a / scale
                 })
                 .collect();
 
@@ -620,8 +614,8 @@ impl MultiScaleRegistrator {
         target_image: &[f32],
         width: usize,
         height: usize,
-        ref_stars: &[(f64, f64)],
-        target_stars: &[(f64, f64)],
+        ref_stars: &[DVec2],
+        target_stars: &[DVec2],
     ) -> Result<RegistrationResult, RegistrationError> {
         let start = Instant::now();
 
@@ -667,25 +661,20 @@ impl MultiScaleRegistrator {
                 let correlator = PhaseCorrelator::new(*level_width, *level_height, phase_config);
 
                 if let Some(pr) = correlator.correlate(level_ref, level_target) {
-                    let (dx, dy) = pr.translation;
                     // Scale translation to full resolution
-                    let phase_transform = Transform::translation(dx * scale, dy * scale);
+                    let phase_transform = Transform::translation(pr.translation * scale);
                     current_transform = phase_transform.compose(&current_transform);
                 }
             }
 
             // Scale star positions and do star matching
-            let scaled_ref: Vec<(f64, f64)> = ref_stars
-                .iter()
-                .map(|(x, y)| (x / scale, y / scale))
-                .collect();
+            let scaled_ref: Vec<DVec2> = ref_stars.iter().map(|p| *p / scale).collect();
 
-            let adjusted_target: Vec<(f64, f64)> = target_stars
+            let adjusted_target: Vec<DVec2> = target_stars
                 .iter()
-                .map(|(x, y)| {
+                .map(|p| {
                     let inv = current_transform.inverse();
-                    let (ax, ay) = inv.apply(*x, *y);
-                    (ax / scale, ay / scale)
+                    inv.apply_inverse(*p) / scale
                 })
                 .collect();
 
@@ -709,12 +698,9 @@ impl MultiScaleRegistrator {
         }
 
         // Final registration at full resolution with refined estimate
-        let adjusted_target: Vec<(f64, f64)> = target_stars
+        let adjusted_target: Vec<DVec2> = target_stars
             .iter()
-            .map(|(x, y)| {
-                let inv = current_transform.inverse();
-                inv.apply(*x, *y)
-            })
+            .map(|p| current_transform.inverse().apply_inverse(*p))
             .collect();
 
         let registrator = Registrator::new(self.config.clone());
@@ -831,18 +817,14 @@ fn downsample_image(
 ///
 /// # Arguments
 ///
-/// * `stars` - Star positions (x, y), assumed sorted by brightness (brightest first)
+/// * `stars` - Star positions, assumed sorted by brightness (brightest first)
 /// * `max_stars` - Maximum number of stars to select
 /// * `grid_size` - Number of grid cells in each dimension (grid_size × grid_size)
 ///
 /// # Returns
 ///
 /// Selected star positions with good spatial coverage.
-fn select_spatially_distributed(
-    stars: &[(f64, f64)],
-    max_stars: usize,
-    grid_size: usize,
-) -> Vec<(f64, f64)> {
+fn select_spatially_distributed(stars: &[DVec2], max_stars: usize, grid_size: usize) -> Vec<DVec2> {
     if stars.is_empty() || max_stars == 0 {
         return Vec::new();
     }
@@ -850,8 +832,13 @@ fn select_spatially_distributed(
     // Find bounding box of all stars
     let (min_x, max_x, min_y, max_y) = stars.iter().fold(
         (f64::MAX, f64::MIN, f64::MAX, f64::MIN),
-        |(min_x, max_x, min_y, max_y), &(x, y)| {
-            (min_x.min(x), max_x.max(x), min_y.min(y), max_y.max(y))
+        |(min_x, max_x, min_y, max_y), p| {
+            (
+                min_x.min(p.x),
+                max_x.max(p.x),
+                min_y.min(p.y),
+                max_y.max(p.y),
+            )
         },
     );
 
@@ -867,14 +854,14 @@ fn select_spatially_distributed(
 
     // Group stars by grid cell
     let num_cells = grid_size * grid_size;
-    let mut cells: Vec<Vec<(f64, f64)>> = vec![Vec::new(); num_cells];
+    let mut cells: Vec<Vec<DVec2>> = vec![Vec::new(); num_cells];
 
-    for &(x, y) in stars {
-        let cx = ((x - origin_x) / cell_width) as usize;
-        let cy = ((y - origin_y) / cell_height) as usize;
+    for &p in stars {
+        let cx = ((p.x - origin_x) / cell_width) as usize;
+        let cy = ((p.y - origin_y) / cell_height) as usize;
         let cx = cx.min(grid_size - 1);
         let cy = cy.min(grid_size - 1);
-        cells[cy * grid_size + cx].push((x, y));
+        cells[cy * grid_size + cx].push(p);
     }
 
     // Round-robin selection: take one star from each non-empty cell in turn

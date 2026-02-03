@@ -7,6 +7,7 @@
 
 #[cfg(target_arch = "x86_64")]
 use common::cpu_features;
+use glam::DVec2;
 
 #[cfg(target_arch = "x86_64")]
 pub mod sse;
@@ -24,8 +25,8 @@ use crate::registration::transform::Transform;
 /// This function dispatches to the best available SIMD implementation at runtime.
 #[inline]
 pub(crate) fn count_inliers_simd(
-    ref_points: &[(f64, f64)],
-    target_points: &[(f64, f64)],
+    ref_points: &[DVec2],
+    target_points: &[DVec2],
     transform: &Transform,
     threshold: f64,
 ) -> (Vec<usize>, usize) {
@@ -65,8 +66,8 @@ pub(crate) fn count_inliers_simd(
 /// Scalar implementation of inlier counting.
 #[cfg(test)]
 pub(crate) fn count_inliers_scalar(
-    ref_points: &[(f64, f64)],
-    target_points: &[(f64, f64)],
+    ref_points: &[DVec2],
+    target_points: &[DVec2],
     transform: &Transform,
     threshold: f64,
 ) -> (Vec<usize>, usize) {
@@ -75,8 +76,8 @@ pub(crate) fn count_inliers_scalar(
 
 #[cfg(not(test))]
 fn count_inliers_scalar(
-    ref_points: &[(f64, f64)],
-    target_points: &[(f64, f64)],
+    ref_points: &[DVec2],
+    target_points: &[DVec2],
     transform: &Transform,
     threshold: f64,
 ) -> (Vec<usize>, usize) {
@@ -85,8 +86,8 @@ fn count_inliers_scalar(
 
 #[inline]
 fn count_inliers_scalar_impl(
-    ref_points: &[(f64, f64)],
-    target_points: &[(f64, f64)],
+    ref_points: &[DVec2],
+    target_points: &[DVec2],
     transform: &Transform,
     threshold: f64,
 ) -> (Vec<usize>, usize) {
@@ -94,9 +95,9 @@ fn count_inliers_scalar_impl(
     let mut inliers = Vec::new();
     let mut score = 0usize;
 
-    for (i, (&(rx, ry), &(tx, ty))) in ref_points.iter().zip(target_points.iter()).enumerate() {
-        let (px, py) = transform.apply(rx, ry);
-        let dist_sq = (px - tx).powi(2) + (py - ty).powi(2);
+    for (i, (r, t)) in ref_points.iter().zip(target_points.iter()).enumerate() {
+        let p = transform.apply(*r);
+        let dist_sq = (p - *t).length_squared();
 
         if dist_sq < threshold_sq {
             inliers.push(i);
@@ -124,9 +125,19 @@ mod tests {
 
     #[test]
     fn test_count_inliers_simd_basic() {
-        let ref_points = vec![(0.0, 0.0), (10.0, 10.0), (20.0, 20.0), (30.0, 30.0)];
+        let ref_points = vec![
+            DVec2::new(0.0, 0.0),
+            DVec2::new(10.0, 10.0),
+            DVec2::new(20.0, 20.0),
+            DVec2::new(30.0, 30.0),
+        ];
         // Target points after translation (10, 5)
-        let target_points = vec![(10.0, 5.0), (20.0, 15.0), (30.0, 25.0), (40.0, 35.0)];
+        let target_points = vec![
+            DVec2::new(10.0, 5.0),
+            DVec2::new(20.0, 15.0),
+            DVec2::new(30.0, 25.0),
+            DVec2::new(40.0, 35.0),
+        ];
         let transform = create_test_transform();
         let threshold = 1.0;
 
@@ -142,13 +153,18 @@ mod tests {
 
     #[test]
     fn test_count_inliers_simd_with_outliers() {
-        let ref_points = vec![(0.0, 0.0), (10.0, 10.0), (20.0, 20.0), (30.0, 30.0)];
+        let ref_points = vec![
+            DVec2::new(0.0, 0.0),
+            DVec2::new(10.0, 10.0),
+            DVec2::new(20.0, 20.0),
+            DVec2::new(30.0, 30.0),
+        ];
         // Some outliers
         let target_points = vec![
-            (10.0, 5.0),    // inlier
-            (25.0, 25.0),   // outlier (distance > threshold)
-            (30.0, 25.0),   // inlier
-            (100.0, 100.0), // outlier
+            DVec2::new(10.0, 5.0),    // inlier
+            DVec2::new(25.0, 25.0),   // outlier (distance > threshold)
+            DVec2::new(30.0, 25.0),   // inlier
+            DVec2::new(100.0, 100.0), // outlier
         ];
         let transform = create_test_transform();
         let threshold = 2.0;
@@ -165,8 +181,8 @@ mod tests {
 
     #[test]
     fn test_count_inliers_simd_empty() {
-        let ref_points: Vec<(f64, f64)> = Vec::new();
-        let target_points: Vec<(f64, f64)> = Vec::new();
+        let ref_points: Vec<DVec2> = Vec::new();
+        let target_points: Vec<DVec2> = Vec::new();
         let transform = create_test_transform();
 
         let (inliers, score) = count_inliers_simd(&ref_points, &target_points, &transform, 1.0);
@@ -180,21 +196,21 @@ mod tests {
         let threshold = 2.0;
 
         for size in [1, 2, 3, 4, 5, 7, 8, 9, 15, 16, 17, 32, 64, 100] {
-            let ref_points: Vec<(f64, f64)> = (0..size)
-                .map(|i| (i as f64 * 10.0, i as f64 * 5.0))
+            let ref_points: Vec<DVec2> = (0..size)
+                .map(|i| DVec2::new(i as f64 * 10.0, i as f64 * 5.0))
                 .collect();
 
             // Create target points with some transformation applied
-            let target_points: Vec<(f64, f64)> = ref_points
+            let target_points: Vec<DVec2> = ref_points
                 .iter()
                 .enumerate()
-                .map(|(i, &(x, y))| {
-                    let (tx, ty) = transform.apply(x, y);
+                .map(|(i, p)| {
+                    let t = transform.apply_vec(*p);
                     // Add some noise/outliers
                     if i % 5 == 0 {
-                        (tx + 100.0, ty + 100.0) // outlier
+                        t + DVec2::new(100.0, 100.0) // outlier
                     } else {
-                        (tx + 0.1, ty - 0.1) // small noise
+                        t + DVec2::new(0.1, -0.1) // small noise
                     }
                 })
                 .collect();
@@ -216,8 +232,8 @@ mod tests {
     #[test]
     fn test_count_inliers_simd_score_calculation() {
         // Test that score is computed correctly
-        let ref_points = vec![(0.0, 0.0), (10.0, 0.0)];
-        let target_points = vec![(10.0, 5.0), (20.0, 5.0)]; // Exact match after translation
+        let ref_points = vec![DVec2::new(0.0, 0.0), DVec2::new(10.0, 0.0)];
+        let target_points = vec![DVec2::new(10.0, 5.0), DVec2::new(20.0, 5.0)]; // Exact match after translation
         let transform = create_test_transform();
         let threshold = 2.0;
 

@@ -24,6 +24,8 @@
 //! let comet_transform = config.comet_aligned_transform(&star_transform, frame_timestamp, 0.0);
 //! ```
 
+use glam::DVec2;
+
 use crate::registration::Transform;
 use crate::stacking::local_normalization::NormalizationMethod;
 use crate::stacking::weighted::RejectionMethod;
@@ -196,7 +198,7 @@ impl CometStackConfig {
         ref_timestamp: f64,
     ) -> Transform {
         let (dx, dy) = compute_comet_offset(self, frame_timestamp, ref_timestamp);
-        let offset_transform = Transform::translation(dx, dy);
+        let offset_transform = Transform::translation(DVec2::new(dx, dy));
 
         // offset_transform.compose(star_transform) means:
         // Apply star_transform first, then offset_transform
@@ -758,7 +760,7 @@ mod tests {
         let config = CometStackConfig::new(pos_start, pos_end);
 
         // Star transform with existing translation
-        let star_transform = Transform::translation(10.0, 20.0);
+        let star_transform = Transform::translation(DVec2::new(10.0, 20.0));
 
         // After 50 seconds, comet offset is (-5, -10)
         // Combined with star translation (10, 20), result should be (5, 10)
@@ -777,7 +779,7 @@ mod tests {
 
         // Star transform with 90 degree rotation
         let angle = std::f64::consts::FRAC_PI_2;
-        let star_transform = Transform::euclidean(0.0, 0.0, angle);
+        let star_transform = Transform::euclidean(DVec2::ZERO, angle);
 
         // After 50 seconds, comet offset is (-50, 0)
         // But the compose operation applies star_transform first, then offset
@@ -785,11 +787,11 @@ mod tests {
         let comet_transform = config.comet_aligned_transform(&star_transform, 50.0, 0.0);
 
         // Apply both transforms to origin to verify
-        let (x, y) = comet_transform.apply(0.0, 0.0);
+        let result = comet_transform.apply(DVec2::ZERO);
         // Star transform: (0,0) -> (0,0) (rotation around origin)
         // Then offset: (0,0) + (-50,0) = (-50,0)
-        assert!((x - (-50.0)).abs() < 1e-10);
-        assert!((y - 0.0).abs() < 1e-10);
+        assert!((result.x - (-50.0)).abs() < 1e-10);
+        assert!((result.y - 0.0).abs() < 1e-10);
     }
 
     #[test]
@@ -817,7 +819,7 @@ mod tests {
         let pos_end = ObjectPosition::new(200.0, 150.0, 100.0);
         let config = CometStackConfig::new(pos_start, pos_end);
 
-        let star_transform = Transform::translation(5.0, 10.0);
+        let star_transform = Transform::translation(DVec2::new(5.0, 10.0));
 
         // Frame at t=50: comet has moved (50, 25) pixels from start
         // Comet offset: (-50, -25)
@@ -825,9 +827,9 @@ mod tests {
         let comet_transform = config.comet_aligned_transform(&star_transform, 50.0, 0.0);
 
         // A point at (0, 0) should map to (-45, -15)
-        let (x, y) = comet_transform.apply(0.0, 0.0);
-        assert!((x - (-45.0)).abs() < 1e-10);
-        assert!((y - (-15.0)).abs() < 1e-10);
+        let result = comet_transform.apply(DVec2::ZERO);
+        assert!((result.x - (-45.0)).abs() < 1e-10);
+        assert!((result.y - (-15.0)).abs() < 1e-10);
     }
 
     // ========== Composite Output Tests ==========
@@ -1601,7 +1603,7 @@ mod integration_tests {
 
         // Star transform with small rotation (1 degree)
         let angle = 1.0f64.to_radians();
-        let star_transform = Transform::euclidean(0.0, 0.0, angle);
+        let star_transform = Transform::euclidean(DVec2::ZERO, angle);
 
         // At t=50, comet has moved 10 pixels in x
         let comet_transform = config.comet_aligned_transform(&star_transform, 50.0, 0.0);
@@ -1614,16 +1616,15 @@ mod integration_tests {
         );
 
         // Verify the comet at t=50 maps correctly
-        let comet_x_at_50 = 74.0; // 64 + 10
-        let comet_y_at_50 = 64.0;
+        let comet_pos_at_50 = DVec2::new(74.0, 64.0); // 64 + 10, 64
 
-        let (aligned_x, aligned_y) = comet_transform.apply(comet_x_at_50, comet_y_at_50);
+        let aligned = comet_transform.apply(comet_pos_at_50);
 
         // After the star rotation and comet offset, it should map near the reference position
         // The exact position depends on the composition order
         // The important thing is the transform is being applied correctly
         assert!(
-            aligned_x.is_finite() && aligned_y.is_finite(),
+            aligned.x.is_finite() && aligned.y.is_finite(),
             "Transform should produce valid coordinates"
         );
     }

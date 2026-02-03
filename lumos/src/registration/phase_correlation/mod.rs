@@ -9,6 +9,7 @@
 #[cfg(test)]
 mod tests;
 
+use glam::DVec2;
 use rustfft::{Fft, FftPlanner, num_complex::Complex};
 use std::sync::Arc;
 
@@ -57,7 +58,7 @@ pub enum SubpixelMethod {
 #[derive(Debug, Clone)]
 pub struct PhaseCorrelationResult {
     /// Estimated translation (dx, dy) in pixels.
-    pub translation: (f64, f64),
+    pub translation: DVec2,
     /// Peak correlation value (0.0 - 1.0).
     pub peak_value: f64,
     /// Confidence based on peak sharpness.
@@ -171,7 +172,7 @@ impl PhaseCorrelator {
         let confidence = self.compute_confidence(&correlation, peak_x, peak_y, peak_val);
 
         Some(PhaseCorrelationResult {
-            translation: (sub_dx, sub_dy),
+            translation: DVec2::new(sub_dx, sub_dy),
             peak_value: peak_val,
             confidence,
         })
@@ -213,32 +214,32 @@ impl PhaseCorrelator {
 
         // Initial correlation
         let mut result = self.correlate(reference, target)?;
-        let mut total_dx = result.translation.0;
-        let mut total_dy = result.translation.1;
+        let mut total_translation = result.translation;
 
         for _iteration in 0..self.config.max_iterations {
             // Shift original target by NEGATIVE accumulated offset to align with reference
             // If target = reference shifted by (dx, dy), then shifting target by (-dx, -dy)
             // should align it back with reference
-            let aligned_target =
-                shift_image_subpixel(target, self.width, self.height, -total_dx, -total_dy);
+            let aligned_target = shift_image_subpixel(
+                target,
+                self.width,
+                self.height,
+                -total_translation.x,
+                -total_translation.y,
+            );
 
             // Correlate reference with aligned target to find residual error
             let residual = self.correlate(reference, &aligned_target)?;
 
-            let residual_dx = residual.translation.0;
-            let residual_dy = residual.translation.1;
-
             // Check for convergence (residual should approach zero)
-            let residual_magnitude = (residual_dx * residual_dx + residual_dy * residual_dy).sqrt();
+            let residual_magnitude = residual.translation.length();
             if residual_magnitude < self.config.convergence_threshold {
                 break;
             }
 
             // Add residual to total offset
             // If aligned_target still needs to move by residual, our estimate was off by that much
-            total_dx += residual_dx;
-            total_dy += residual_dy;
+            total_translation += residual.translation;
 
             // Update result with better peak value if found
             if residual.peak_value > result.peak_value {
@@ -248,7 +249,7 @@ impl PhaseCorrelator {
         }
 
         Some(PhaseCorrelationResult {
-            translation: (total_dx, total_dy),
+            translation: total_translation,
             peak_value: result.peak_value,
             confidence: result.confidence,
         })
@@ -784,14 +785,12 @@ impl LogPolarCorrelator {
         let result = self.correlator.correlate(&ref_lp, &tar_lp)?;
 
         // Convert translation to rotation and scale
-        let (dx, dy) = result.translation;
-
         // dy corresponds to rotation (angular shift)
         // dx corresponds to scale (log-radius shift)
-        let rotation = -dy * 2.0 * std::f64::consts::PI / self.size as f64;
+        let rotation = -result.translation.y * 2.0 * std::f64::consts::PI / self.size as f64;
 
         // Scale is exp(dx * log_base / size)
-        let scale = (dx * self.log_base / self.size as f64).exp();
+        let scale = (result.translation.x * self.log_base / self.size as f64).exp();
 
         // Clamp scale to reasonable range
         let scale = scale.clamp(0.5, 2.0);
@@ -953,7 +952,7 @@ pub struct FullPhaseResult {
     /// Estimated scale factor.
     pub scale: f64,
     /// Estimated translation (dx, dy).
-    pub translation: (f64, f64),
+    pub translation: DVec2,
     /// Overall confidence.
     pub confidence: f64,
 }
