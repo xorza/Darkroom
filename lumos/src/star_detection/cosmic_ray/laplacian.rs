@@ -8,6 +8,7 @@
 
 use super::simd;
 use crate::common::Buffer2;
+use glam::Vec2;
 
 /// Compute the Laplacian of an image using a 3x3 kernel.
 ///
@@ -79,8 +80,7 @@ fn compute_laplacian_scalar(pixels: &[f32], width: usize, height: usize) -> Vec<
 ///
 /// # Arguments
 /// * `pixels` - Image pixel data
-/// * `cx` - Star center x coordinate
-/// * `cy` - Star center y coordinate
+/// * `pos` - Star center position
 /// * `stamp_radius` - Radius of analysis stamp
 /// * `background` - Background level at star position
 /// * `noise` - Noise level at star position
@@ -89,16 +89,15 @@ fn compute_laplacian_scalar(pixels: &[f32], width: usize, height: usize) -> Vec<
 /// Laplacian SNR value. Higher = more cosmic ray-like.
 pub fn compute_laplacian_snr(
     pixels: &Buffer2<f32>,
-    cx: f32,
-    cy: f32,
+    pos: Vec2,
     stamp_radius: usize,
     background: f32,
     noise: f32,
 ) -> f32 {
     let width = pixels.width();
     let height = pixels.height();
-    let icx = cx.round() as isize;
-    let icy = cy.round() as isize;
+    let icx = pos.x.round() as isize;
+    let icy = pos.y.round() as isize;
 
     // Check bounds
     let r = stamp_radius as isize;
@@ -209,7 +208,7 @@ mod tests {
         pixels_data[3 * 7 + 3] = 1.0;
         let pixels = Buffer2::new(7, 7, pixels_data);
 
-        let snr = compute_laplacian_snr(&pixels, 3.0, 3.0, 2, 0.1, 0.01);
+        let snr = compute_laplacian_snr(&pixels, Vec2::new(3.0, 3.0), 2, 0.1, 0.01);
 
         assert!(
             snr > 50.0,
@@ -239,15 +238,14 @@ mod tests {
         }
         let pixels = Buffer2::new(size, size, pixels_data);
 
-        let gaussian_snr =
-            compute_laplacian_snr(&pixels, center as f32, center as f32, 3, 0.1, 0.01);
+        let gaussian_snr = compute_laplacian_snr(&pixels, Vec2::splat(center as f32), 3, 0.1, 0.01);
 
         // Compare to a cosmic ray (single sharp pixel)
         let mut cr_pixels_data = vec![0.1f32; size * size];
         cr_pixels_data[center * size + center] = 0.9;
         let cr_pixels = Buffer2::new(size, size, cr_pixels_data);
 
-        let cr_snr = compute_laplacian_snr(&cr_pixels, center as f32, center as f32, 3, 0.1, 0.01);
+        let cr_snr = compute_laplacian_snr(&cr_pixels, Vec2::splat(center as f32), 3, 0.1, 0.01);
 
         // Cosmic ray should have significantly higher Laplacian SNR than Gaussian star
         assert!(

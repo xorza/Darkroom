@@ -3,6 +3,8 @@
 #[cfg(target_arch = "aarch64")]
 use std::arch::aarch64::*;
 
+use glam::Vec2;
+
 use crate::math::{FWHM_TO_SIGMA, fast_exp};
 use crate::star_detection::background::BackgroundMap;
 use crate::star_detection::centroid::is_valid_stamp_position;
@@ -15,23 +17,23 @@ use crate::star_detection::centroid::is_valid_stamp_position;
 /// # Safety
 /// Caller must ensure aarch64 target (NEON is mandatory on aarch64).
 #[cfg(target_arch = "aarch64")]
-#[allow(clippy::too_many_arguments)]
 pub unsafe fn refine_centroid_neon(
     pixels: &[f32],
     width: usize,
     height: usize,
     background: &BackgroundMap,
-    cx: f32,
-    cy: f32,
+    pos: Vec2,
     stamp_radius: usize,
     expected_fwhm: f32,
-) -> Option<(f32, f32)> {
-    if !is_valid_stamp_position(cx, cy, width, height, stamp_radius) {
+) -> Option<Vec2> {
+    if !is_valid_stamp_position(pos, width, height, stamp_radius) {
         return None;
     }
 
-    let icx = cx.round() as isize;
-    let icy = cy.round() as isize;
+    let cx = pos.x;
+    let cy = pos.y;
+    let icx = pos.x.round() as isize;
+    let icy = pos.y.round() as isize;
 
     // Adaptive sigma based on expected FWHM
     let sigma = (expected_fwhm / FWHM_TO_SIGMA * 0.8).clamp(1.0, stamp_radius as f32 * 0.5);
@@ -142,17 +144,16 @@ pub unsafe fn refine_centroid_neon(
         return None;
     }
 
-    let new_cx = sum_x / sum_w;
-    let new_cy = sum_y / sum_w;
+    let new_pos = Vec2::new(sum_x / sum_w, sum_y / sum_w);
 
     // Reject if centroid moved too far (likely bad detection)
     let stamp_size = 2 * stamp_radius + 1;
     let max_move = stamp_size as f32 / 4.0;
-    if (new_cx - cx).abs() > max_move || (new_cy - cy).abs() > max_move {
+    if (new_pos - pos).abs().max_element() > max_move {
         return None;
     }
 
-    Some((new_cx, new_cy))
+    Some(new_pos)
 }
 
 /// Horizontal sum of a NEON f32x4 vector (4 elements).

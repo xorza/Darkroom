@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::star_detection::centroid::lm_optimizer::LMConfig;
+use glam::Vec2;
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn make_moffat_stamp(
@@ -46,7 +47,7 @@ fn test_moffat_fit_centered_fixed_beta() {
         fixed_beta: true_beta,
         ..Default::default()
     };
-    let result = fit_moffat_2d(&pixels_buf, 10.0, 10.0, 8, true_bg, &config);
+    let result = fit_moffat_2d(&pixels_buf, Vec2::splat(10.0), 8, true_bg, &config);
 
     assert!(result.is_some());
     let result = result.unwrap();
@@ -77,7 +78,7 @@ fn test_moffat_fit_subpixel_offset() {
         fixed_beta: true_beta,
         ..Default::default()
     };
-    let result = fit_moffat_2d(&pixels_buf, 10.0, 10.0, 8, true_bg, &config);
+    let result = fit_moffat_2d(&pixels_buf, Vec2::splat(10.0), 8, true_bg, &config);
 
     assert!(result.is_some());
     let result = result.unwrap();
@@ -110,7 +111,7 @@ fn test_moffat_fit_with_beta() {
             ..Default::default()
         },
     };
-    let result = fit_moffat_2d(&pixels_buf, 10.0, 10.0, 8, true_bg, &config);
+    let result = fit_moffat_2d(&pixels_buf, Vec2::splat(10.0), 8, true_bg, &config);
 
     assert!(result.is_some());
     let result = result.unwrap();
@@ -138,7 +139,7 @@ fn test_moffat_fit_edge_position() {
     let pixels_buf = Buffer2::new(width, height, pixels);
 
     let config = MoffatFitConfig::default();
-    let result = fit_moffat_2d(&pixels_buf, 2.0, 10.0, 8, 0.1, &config);
+    let result = fit_moffat_2d(&pixels_buf, Vec2::new(2.0, 10.0), 8, 0.1, &config);
     assert!(result.is_none());
 }
 
@@ -185,7 +186,7 @@ fn test_moffat_fit_with_gaussian_noise() {
         fixed_beta: true_beta,
         ..Default::default()
     };
-    let result = fit_moffat_2d(&pixels_buf, 10.0, 10.0, 8, true_bg, &config);
+    let result = fit_moffat_2d(&pixels_buf, Vec2::splat(10.0), 8, true_bg, &config);
 
     assert!(result.is_some());
     let result = result.unwrap();
@@ -227,7 +228,7 @@ fn test_moffat_fit_high_noise_still_converges() {
         fixed_beta: true_beta,
         ..Default::default()
     };
-    let result = fit_moffat_2d(&pixels_buf, 10.0, 10.0, 8, true_bg, &config);
+    let result = fit_moffat_2d(&pixels_buf, Vec2::splat(10.0), 8, true_bg, &config);
 
     // Should still converge even with high noise
     assert!(result.is_some());
@@ -267,7 +268,7 @@ fn test_moffat_fit_low_snr() {
         fixed_beta: true_beta,
         ..Default::default()
     };
-    let result = fit_moffat_2d(&pixels_buf, 10.0, 10.0, 8, true_bg, &config);
+    let result = fit_moffat_2d(&pixels_buf, Vec2::splat(10.0), 8, true_bg, &config);
 
     // Low SNR should still produce a result (may not be accurate)
     assert!(result.is_some());
@@ -302,7 +303,7 @@ fn test_moffat_fit_wrong_background_estimate() {
 
     // Use wrong background estimate (20% error)
     let wrong_bg = true_bg * 1.2;
-    let result = fit_moffat_2d(&pixels_buf, 10.0, 10.0, 8, wrong_bg, &config);
+    let result = fit_moffat_2d(&pixels_buf, Vec2::splat(10.0), 8, wrong_bg, &config);
 
     assert!(result.is_some());
     let result = result.unwrap();
@@ -348,7 +349,7 @@ fn test_moffat_fit_wrong_beta_still_finds_centroid() {
         fixed_beta: 2.5, // Wrong beta (2.5 instead of 4.0)
         ..Default::default()
     };
-    let result = fit_moffat_2d(&pixels_buf, 10.0, 10.0, 8, true_bg, &config);
+    let result = fit_moffat_2d(&pixels_buf, Vec2::splat(10.0), 8, true_bg, &config);
 
     assert!(result.is_some());
     let result = result.unwrap();
@@ -391,7 +392,7 @@ fn test_moffat_fit_very_high_amplitude() {
         fixed_beta: true_beta,
         ..Default::default()
     };
-    let result = fit_moffat_2d(&pixels_buf, 10.0, 10.0, 8, true_bg, &config);
+    let result = fit_moffat_2d(&pixels_buf, Vec2::splat(10.0), 8, true_bg, &config);
 
     assert!(result.is_some());
     let result = result.unwrap();
@@ -422,7 +423,7 @@ fn test_moffat_fit_very_low_amplitude() {
         fixed_beta: true_beta,
         ..Default::default()
     };
-    let result = fit_moffat_2d(&pixels_buf, 10.0, 10.0, 8, true_bg, &config);
+    let result = fit_moffat_2d(&pixels_buf, Vec2::splat(10.0), 8, true_bg, &config);
 
     assert!(result.is_some());
     let result = result.unwrap();
@@ -452,7 +453,7 @@ fn test_moffat_fit_narrow_psf() {
         fixed_beta: true_beta,
         ..Default::default()
     };
-    let result = fit_moffat_2d(&pixels_buf, 10.0, 10.0, 8, true_bg, &config);
+    let result = fit_moffat_2d(&pixels_buf, Vec2::splat(10.0), 8, true_bg, &config);
 
     assert!(result.is_some());
     let result = result.unwrap();
@@ -482,7 +483,7 @@ fn test_moffat_fit_wide_psf() {
         fixed_beta: true_beta,
         ..Default::default()
     };
-    let result = fit_moffat_2d(&pixels_buf, 15.0, 15.0, 12, true_bg, &config);
+    let result = fit_moffat_2d(&pixels_buf, Vec2::splat(15.0), 12, true_bg, &config);
 
     assert!(result.is_some());
     let result = result.unwrap();
@@ -518,7 +519,7 @@ fn test_moffat_fit_various_beta_values() {
             fixed_beta: true_beta,
             ..Default::default()
         };
-        let result = fit_moffat_2d(&pixels_buf, 10.0, 10.0, 8, true_bg, &config);
+        let result = fit_moffat_2d(&pixels_buf, Vec2::splat(10.0), 8, true_bg, &config);
 
         assert!(result.is_some(), "Failed for beta={}", true_beta);
         let result = result.unwrap();
@@ -564,7 +565,7 @@ fn test_moffat_fit_converges_within_max_iterations() {
             ..Default::default()
         },
     };
-    let result = fit_moffat_2d(&pixels_buf, 10.0, 10.0, 8, true_bg, &config);
+    let result = fit_moffat_2d(&pixels_buf, Vec2::splat(10.0), 8, true_bg, &config);
 
     assert!(result.is_some());
     let result = result.unwrap();
@@ -599,7 +600,7 @@ fn test_moffat_fit_bad_initial_guess_still_converges() {
     };
 
     // Start from a position offset by 2 pixels
-    let result = fit_moffat_2d(&pixels_buf, 8.0, 12.0, 8, true_bg, &config);
+    let result = fit_moffat_2d(&pixels_buf, Vec2::new(8.0, 12.0), 8, true_bg, &config);
 
     assert!(result.is_some());
     let result = result.unwrap();
@@ -626,7 +627,7 @@ fn test_moffat_fit_uniform_data_returns_result() {
     let pixels_buf = Buffer2::new(width, height, pixels);
 
     let config = MoffatFitConfig::default();
-    let result = fit_moffat_2d(&pixels_buf, 10.0, 10.0, 8, uniform_value, &config);
+    let result = fit_moffat_2d(&pixels_buf, Vec2::splat(10.0), 8, uniform_value, &config);
 
     // Should produce some result (may not converge well)
     assert!(result.is_some());
@@ -662,7 +663,7 @@ fn test_moffat_fwhm_computed_correctly() {
         fixed_beta: true_beta,
         ..Default::default()
     };
-    let result = fit_moffat_2d(&pixels_buf, 10.0, 10.0, 8, true_bg, &config).unwrap();
+    let result = fit_moffat_2d(&pixels_buf, Vec2::splat(10.0), 8, true_bg, &config).unwrap();
 
     // FWHM should match analytical formula
     let expected_fwhm = alpha_beta_to_fwhm(true_alpha, true_beta);

@@ -26,7 +26,7 @@ pub type GaussianFitConfig = LMConfig;
 #[derive(Debug, Clone, Copy)]
 pub struct GaussianFitResult {
     /// Position of Gaussian center (sub-pixel).
-    pub pos: DVec2,
+    pub pos: Vec2,
     /// Amplitude of Gaussian.
     pub amplitude: f32,
     /// Sigma in X and Y directions.
@@ -95,13 +95,12 @@ impl LMModel<6> for Gaussian2D {
 /// parameters, achieving ~0.01 pixel centroid accuracy.
 pub fn fit_gaussian_2d(
     pixels: &Buffer2<f32>,
-    cx: f32,
-    cy: f32,
+    pos: Vec2,
     stamp_radius: usize,
     background: f32,
     config: &GaussianFitConfig,
 ) -> Option<GaussianFitResult> {
-    let (data_x, data_y, data_z, peak_value) = extract_stamp(pixels, cx, cy, stamp_radius)?;
+    let (data_x, data_y, data_z, peak_value) = extract_stamp(pixels, pos, stamp_radius)?;
 
     let n = data_x.len();
     if n < 7 {
@@ -109,11 +108,11 @@ pub fn fit_gaussian_2d(
     }
 
     // Estimate sigma from moments for better initial guess
-    let sigma_est = estimate_sigma_from_moments(&data_x, &data_y, &data_z, cx, cy, background);
+    let sigma_est = estimate_sigma_from_moments(&data_x, &data_y, &data_z, pos, background);
 
     let initial_params = [
-        cx,
-        cy,
+        pos.x,
+        pos.y,
         (peak_value - background).max(0.01),
         sigma_est,
         sigma_est,
@@ -130,7 +129,7 @@ pub fn fit_gaussian_2d(
         config,
     );
 
-    validate_result(&result, cx, cy, stamp_radius, n)
+    validate_result(&result, pos, stamp_radius, n)
 }
 
 /// Fit a 2D Gaussian to a star stamp with inverse-variance weighting.
@@ -140,8 +139,7 @@ pub fn fit_gaussian_2d(
 #[allow(clippy::too_many_arguments)]
 pub fn fit_gaussian_2d_weighted(
     pixels: &Buffer2<f32>,
-    cx: f32,
-    cy: f32,
+    pos: Vec2,
     stamp_radius: usize,
     background: f32,
     noise: f32,
@@ -149,7 +147,7 @@ pub fn fit_gaussian_2d_weighted(
     read_noise: Option<f32>,
     config: &GaussianFitConfig,
 ) -> Option<GaussianFitResult> {
-    let (data_x, data_y, data_z, peak_value) = extract_stamp(pixels, cx, cy, stamp_radius)?;
+    let (data_x, data_y, data_z, peak_value) = extract_stamp(pixels, pos, stamp_radius)?;
 
     let n = data_x.len();
     if n < 7 {
@@ -160,11 +158,11 @@ pub fn fit_gaussian_2d_weighted(
     let weights = compute_pixel_weights(&data_z, background, noise, gain, read_noise);
 
     // Estimate sigma from moments for better initial guess
-    let sigma_est = estimate_sigma_from_moments(&data_x, &data_y, &data_z, cx, cy, background);
+    let sigma_est = estimate_sigma_from_moments(&data_x, &data_y, &data_z, pos, background);
 
     let initial_params = [
-        cx,
-        cy,
+        pos.x,
+        pos.y,
         (peak_value - background).max(0.01),
         sigma_est,
         sigma_est,
@@ -184,20 +182,20 @@ pub fn fit_gaussian_2d_weighted(
         config,
     );
 
-    validate_result(&result, cx, cy, stamp_radius, n)
+    validate_result(&result, pos, stamp_radius, n)
 }
 
 fn validate_result(
     result: &LMResult<6>,
-    cx: f32,
-    cy: f32,
+    pos: Vec2,
     stamp_radius: usize,
     n: usize,
 ) -> Option<GaussianFitResult> {
     let [x0, y0, amplitude, sigma_x, sigma_y, bg] = result.params;
 
     // Check if center is within stamp
-    if (x0 - cx).abs() > stamp_radius as f32 || (y0 - cy).abs() > stamp_radius as f32 {
+    let result_pos = Vec2::new(x0, y0);
+    if (result_pos - pos).abs().max_element() > stamp_radius as f32 {
         return None;
     }
 
@@ -213,7 +211,7 @@ fn validate_result(
     let rms = (result.chi2 / n as f32).sqrt();
 
     Some(GaussianFitResult {
-        pos: DVec2::new(x0 as f64, y0 as f64),
+        pos: Vec2::new(x0, y0),
         amplitude,
         sigma: Vec2::new(sigma_x, sigma_y),
         background: bg,

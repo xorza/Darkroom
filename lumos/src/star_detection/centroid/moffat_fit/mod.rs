@@ -25,7 +25,7 @@ use super::lm_optimizer::{
 use super::{compute_pixel_weights, estimate_sigma_from_moments, extract_stamp};
 use crate::common::Buffer2;
 use crate::math::FWHM_TO_SIGMA;
-use glam::DVec2;
+use glam::{DVec2, Vec2};
 
 /// Configuration for Moffat profile fitting.
 #[derive(Debug, Clone)]
@@ -52,7 +52,7 @@ impl Default for MoffatFitConfig {
 #[derive(Debug, Clone, Copy)]
 pub struct MoffatFitResult {
     /// Position of profile center (sub-pixel).
-    pub pos: DVec2,
+    pub pos: Vec2,
     /// Amplitude of profile.
     pub amplitude: f32,
     /// Core width parameter (alpha).
@@ -164,13 +164,12 @@ impl LMModel<6> for MoffatVariableBeta {
 /// Fit a 2D Moffat profile to a star stamp.
 pub fn fit_moffat_2d(
     pixels: &Buffer2<f32>,
-    cx: f32,
-    cy: f32,
+    pos: Vec2,
     stamp_radius: usize,
     background: f32,
     config: &MoffatFitConfig,
 ) -> Option<MoffatFitResult> {
-    let (data_x, data_y, data_z, peak_value) = extract_stamp(pixels, cx, cy, stamp_radius)?;
+    let (data_x, data_y, data_z, peak_value) = extract_stamp(pixels, pos, stamp_radius)?;
 
     let n = data_x.len();
     let n_params = if config.fit_beta { 6 } else { 5 };
@@ -182,7 +181,7 @@ pub fn fit_moffat_2d(
 
     // Estimate sigma from moments, then convert to alpha
     // For Moffat: FWHM ≈ FWHM_TO_SIGMA*sigma, so use fwhm_beta_to_alpha
-    let sigma_est = estimate_sigma_from_moments(&data_x, &data_y, &data_z, cx, cy, background);
+    let sigma_est = estimate_sigma_from_moments(&data_x, &data_y, &data_z, pos, background);
     let fwhm_est = sigma_est * FWHM_TO_SIGMA;
     let initial_alpha =
         fwhm_beta_to_alpha(fwhm_est, config.fixed_beta).clamp(0.5, stamp_radius as f32);
@@ -192,8 +191,7 @@ pub fn fit_moffat_2d(
             &data_x,
             &data_y,
             &data_z,
-            cx,
-            cy,
+            pos,
             initial_amplitude,
             initial_alpha,
             background,
@@ -206,8 +204,7 @@ pub fn fit_moffat_2d(
             &data_x,
             &data_y,
             &data_z,
-            cx,
-            cy,
+            pos,
             initial_amplitude,
             initial_alpha,
             background,
@@ -225,8 +222,7 @@ pub fn fit_moffat_2d(
 #[allow(clippy::too_many_arguments)]
 pub fn fit_moffat_2d_weighted(
     pixels: &Buffer2<f32>,
-    cx: f32,
-    cy: f32,
+    pos: Vec2,
     stamp_radius: usize,
     background: f32,
     noise: f32,
@@ -234,7 +230,7 @@ pub fn fit_moffat_2d_weighted(
     read_noise: Option<f32>,
     config: &MoffatFitConfig,
 ) -> Option<MoffatFitResult> {
-    let (data_x, data_y, data_z, peak_value) = extract_stamp(pixels, cx, cy, stamp_radius)?;
+    let (data_x, data_y, data_z, peak_value) = extract_stamp(pixels, pos, stamp_radius)?;
 
     let n = data_x.len();
     let n_params = if config.fit_beta { 6 } else { 5 };
@@ -248,7 +244,7 @@ pub fn fit_moffat_2d_weighted(
     let initial_amplitude = (peak_value - background).max(0.01);
 
     // Estimate sigma from moments, then convert to alpha
-    let sigma_est = estimate_sigma_from_moments(&data_x, &data_y, &data_z, cx, cy, background);
+    let sigma_est = estimate_sigma_from_moments(&data_x, &data_y, &data_z, pos, background);
     let fwhm_est = sigma_est * FWHM_TO_SIGMA;
     let initial_alpha =
         fwhm_beta_to_alpha(fwhm_est, config.fixed_beta).clamp(0.5, stamp_radius as f32);
@@ -259,8 +255,7 @@ pub fn fit_moffat_2d_weighted(
             &data_y,
             &data_z,
             &weights,
-            cx,
-            cy,
+            pos,
             initial_amplitude,
             initial_alpha,
             background,
@@ -274,8 +269,7 @@ pub fn fit_moffat_2d_weighted(
             &data_y,
             &data_z,
             &weights,
-            cx,
-            cy,
+            pos,
             initial_amplitude,
             initial_alpha,
             background,
@@ -291,8 +285,7 @@ fn fit_with_fixed_beta(
     data_x: &[f32],
     data_y: &[f32],
     data_z: &[f32],
-    cx: f32,
-    cy: f32,
+    pos: Vec2,
     initial_amplitude: f32,
     initial_alpha: f32,
     background: f32,
@@ -300,7 +293,7 @@ fn fit_with_fixed_beta(
     n: usize,
     config: &MoffatFitConfig,
 ) -> Option<MoffatFitResult> {
-    let initial_params = [cx, cy, initial_amplitude, initial_alpha, background];
+    let initial_params = [pos.x, pos.y, initial_amplitude, initial_alpha, background];
 
     // Use SIMD-optimized optimizer when available
     let result = optimize_moffat_fixed_beta_simd(
@@ -314,8 +307,9 @@ fn fit_with_fixed_beta(
     );
 
     let [x0, y0, amplitude, alpha, bg] = result.params;
+    let result_pos = Vec2::new(x0, y0);
 
-    if !validate_position(x0, y0, cx, cy, alpha, stamp_radius) {
+    if !validate_position(result_pos, pos, alpha, stamp_radius) {
         return None;
     }
 
@@ -323,7 +317,7 @@ fn fit_with_fixed_beta(
     let fwhm = alpha_beta_to_fwhm(alpha, config.fixed_beta);
 
     Some(MoffatFitResult {
-        pos: DVec2::new(x0 as f64, y0 as f64),
+        pos: result_pos,
         amplitude,
         alpha,
         beta: config.fixed_beta,
@@ -340,8 +334,7 @@ fn fit_with_variable_beta(
     data_x: &[f32],
     data_y: &[f32],
     data_z: &[f32],
-    cx: f32,
-    cy: f32,
+    pos: Vec2,
     initial_amplitude: f32,
     initial_alpha: f32,
     background: f32,
@@ -350,8 +343,8 @@ fn fit_with_variable_beta(
     config: &MoffatFitConfig,
 ) -> Option<MoffatFitResult> {
     let initial_params = [
-        cx,
-        cy,
+        pos.x,
+        pos.y,
         initial_amplitude,
         initial_alpha,
         config.fixed_beta,
@@ -364,8 +357,9 @@ fn fit_with_variable_beta(
     let result = optimize_6(&model, data_x, data_y, data_z, initial_params, &config.lm);
 
     let [x0, y0, amplitude, alpha, beta, bg] = result.params;
+    let result_pos = Vec2::new(x0, y0);
 
-    if !validate_position(x0, y0, cx, cy, alpha, stamp_radius) {
+    if !validate_position(result_pos, pos, alpha, stamp_radius) {
         return None;
     }
 
@@ -373,7 +367,7 @@ fn fit_with_variable_beta(
     let fwhm = alpha_beta_to_fwhm(alpha, beta);
 
     Some(MoffatFitResult {
-        pos: DVec2::new(x0 as f64, y0 as f64),
+        pos: result_pos,
         amplitude,
         alpha,
         beta,
@@ -391,8 +385,7 @@ fn fit_with_fixed_beta_weighted(
     data_y: &[f32],
     data_z: &[f32],
     weights: &[f32],
-    cx: f32,
-    cy: f32,
+    pos: Vec2,
     initial_amplitude: f32,
     initial_alpha: f32,
     background: f32,
@@ -400,7 +393,7 @@ fn fit_with_fixed_beta_weighted(
     n: usize,
     config: &MoffatFitConfig,
 ) -> Option<MoffatFitResult> {
-    let initial_params = [cx, cy, initial_amplitude, initial_alpha, background];
+    let initial_params = [pos.x, pos.y, initial_amplitude, initial_alpha, background];
     let model = MoffatFixedBeta {
         beta: config.fixed_beta,
         stamp_radius: stamp_radius as f32,
@@ -417,8 +410,9 @@ fn fit_with_fixed_beta_weighted(
     );
 
     let [x0, y0, amplitude, alpha, bg] = result.params;
+    let result_pos = Vec2::new(x0, y0);
 
-    if !validate_position(x0, y0, cx, cy, alpha, stamp_radius) {
+    if !validate_position(result_pos, pos, alpha, stamp_radius) {
         return None;
     }
 
@@ -426,7 +420,7 @@ fn fit_with_fixed_beta_weighted(
     let fwhm = alpha_beta_to_fwhm(alpha, config.fixed_beta);
 
     Some(MoffatFitResult {
-        pos: DVec2::new(x0 as f64, y0 as f64),
+        pos: result_pos,
         amplitude,
         alpha,
         beta: config.fixed_beta,
@@ -444,8 +438,7 @@ fn fit_with_variable_beta_weighted(
     data_y: &[f32],
     data_z: &[f32],
     weights: &[f32],
-    cx: f32,
-    cy: f32,
+    pos: Vec2,
     initial_amplitude: f32,
     initial_alpha: f32,
     background: f32,
@@ -454,8 +447,8 @@ fn fit_with_variable_beta_weighted(
     config: &MoffatFitConfig,
 ) -> Option<MoffatFitResult> {
     let initial_params = [
-        cx,
-        cy,
+        pos.x,
+        pos.y,
         initial_amplitude,
         initial_alpha,
         config.fixed_beta,
@@ -476,8 +469,9 @@ fn fit_with_variable_beta_weighted(
     );
 
     let [x0, y0, amplitude, alpha, beta, bg] = result.params;
+    let result_pos = Vec2::new(x0, y0);
 
-    if !validate_position(x0, y0, cx, cy, alpha, stamp_radius) {
+    if !validate_position(result_pos, pos, alpha, stamp_radius) {
         return None;
     }
 
@@ -485,7 +479,7 @@ fn fit_with_variable_beta_weighted(
     let fwhm = alpha_beta_to_fwhm(alpha, beta);
 
     Some(MoffatFitResult {
-        pos: DVec2::new(x0 as f64, y0 as f64),
+        pos: result_pos,
         amplitude,
         alpha,
         beta,
@@ -497,8 +491,8 @@ fn fit_with_variable_beta_weighted(
     })
 }
 
-fn validate_position(x0: f32, y0: f32, cx: f32, cy: f32, alpha: f32, stamp_radius: usize) -> bool {
-    if (x0 - cx).abs() > stamp_radius as f32 || (y0 - cy).abs() > stamp_radius as f32 {
+fn validate_position(result_pos: Vec2, input_pos: Vec2, alpha: f32, stamp_radius: usize) -> bool {
+    if (result_pos - input_pos).abs().max_element() > stamp_radius as f32 {
         return false;
     }
     if alpha < 0.5 || alpha > stamp_radius as f32 * 2.0 {

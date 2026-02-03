@@ -4,6 +4,7 @@
 
 use ::bench::quick_bench;
 use common::cpu_features;
+use glam::Vec2;
 use std::hint::black_box;
 
 use super::scalar::refine_centroid_scalar;
@@ -61,8 +62,7 @@ fn bench_simd_centroid_comparison(b: ::bench::Bencher) {
             black_box(width),
             black_box(height),
             black_box(&bg),
-            black_box(32.0),
-            black_box(32.0),
+            black_box(Vec2::splat(32.0)),
             black_box(stamp_radius),
             black_box(expected_fwhm),
         ))
@@ -79,8 +79,7 @@ fn bench_simd_centroid_comparison(b: ::bench::Bencher) {
                     black_box(width),
                     black_box(height),
                     black_box(&bg),
-                    black_box(32.0),
-                    black_box(32.0),
+                    black_box(Vec2::splat(32.0)),
                     black_box(stamp_radius),
                     black_box(expected_fwhm),
                 ))
@@ -99,8 +98,7 @@ fn bench_simd_centroid_comparison(b: ::bench::Bencher) {
                     black_box(width),
                     black_box(height),
                     black_box(&bg),
-                    black_box(32.0),
-                    black_box(32.0),
+                    black_box(Vec2::splat(32.0)),
                     black_box(stamp_radius),
                     black_box(expected_fwhm),
                 ))
@@ -120,8 +118,7 @@ fn bench_simd_centroid_comparison(b: ::bench::Bencher) {
                     black_box(width),
                     black_box(height),
                     black_box(&bg),
-                    black_box(32.0),
-                    black_box(32.0),
+                    black_box(Vec2::splat(32.0)),
                     black_box(stamp_radius),
                     black_box(expected_fwhm),
                 ))
@@ -148,8 +145,7 @@ fn bench_simd_centroid_batch_1000(b: ::bench::Bencher) {
                 black_box(width),
                 black_box(height),
                 black_box(&bg),
-                black_box(32.0),
-                black_box(32.0),
+                black_box(Vec2::splat(32.0)),
                 black_box(stamp_radius),
                 black_box(expected_fwhm),
             ));
@@ -168,8 +164,7 @@ fn bench_simd_centroid_batch_1000(b: ::bench::Bencher) {
                         black_box(width),
                         black_box(height),
                         black_box(&bg),
-                        black_box(32.0),
-                        black_box(32.0),
+                        black_box(Vec2::splat(32.0)),
                         black_box(stamp_radius),
                         black_box(expected_fwhm),
                     ));
@@ -190,8 +185,7 @@ fn bench_simd_centroid_batch_1000(b: ::bench::Bencher) {
                         black_box(width),
                         black_box(height),
                         black_box(&bg),
-                        black_box(32.0),
-                        black_box(32.0),
+                        black_box(Vec2::splat(32.0)),
                         black_box(stamp_radius),
                         black_box(expected_fwhm),
                     ));
@@ -213,8 +207,7 @@ fn bench_simd_centroid_batch_1000(b: ::bench::Bencher) {
                         black_box(width),
                         black_box(height),
                         black_box(&bg),
-                        black_box(32.0),
-                        black_box(32.0),
+                        black_box(Vec2::splat(32.0)),
                         black_box(stamp_radius),
                         black_box(expected_fwhm),
                     ));
@@ -251,8 +244,7 @@ fn bench_simd_centroid_stamp_sizes(b: ::bench::Bencher) {
             black_box(width),
             black_box(height),
             black_box(&bg),
-            black_box(64.0),
-            black_box(64.0),
+            black_box(Vec2::splat(64.0)),
             black_box(stamp_radius_small),
             black_box(expected_fwhm_small),
         ))
@@ -264,8 +256,7 @@ fn bench_simd_centroid_stamp_sizes(b: ::bench::Bencher) {
             black_box(width),
             black_box(height),
             black_box(&bg),
-            black_box(64.0),
-            black_box(64.0),
+            black_box(Vec2::splat(64.0)),
             black_box(stamp_radius_med),
             black_box(expected_fwhm_med),
         ))
@@ -277,8 +268,7 @@ fn bench_simd_centroid_stamp_sizes(b: ::bench::Bencher) {
             black_box(width),
             black_box(height),
             black_box(&bg),
-            black_box(64.0),
-            black_box(64.0),
+            black_box(Vec2::splat(64.0)),
             black_box(stamp_radius_large),
             black_box(expected_fwhm_large),
         ))
@@ -292,8 +282,7 @@ fn bench_simd_centroid_stamp_sizes(b: ::bench::Bencher) {
                 black_box(width),
                 black_box(height),
                 black_box(&bg),
-                black_box(64.0),
-                black_box(64.0),
+                black_box(Vec2::splat(64.0)),
                 black_box(stamp_radius_small),
                 black_box(expected_fwhm_small),
             ))
@@ -305,8 +294,7 @@ fn bench_simd_centroid_stamp_sizes(b: ::bench::Bencher) {
                 black_box(width),
                 black_box(height),
                 black_box(&bg),
-                black_box(64.0),
-                black_box(64.0),
+                black_box(Vec2::splat(64.0)),
                 black_box(stamp_radius_med),
                 black_box(expected_fwhm_med),
             ))
@@ -318,8 +306,7 @@ fn bench_simd_centroid_stamp_sizes(b: ::bench::Bencher) {
                 black_box(width),
                 black_box(height),
                 black_box(&bg),
-                black_box(64.0),
-                black_box(64.0),
+                black_box(Vec2::splat(64.0)),
                 black_box(stamp_radius_large),
                 black_box(expected_fwhm_large),
             ))

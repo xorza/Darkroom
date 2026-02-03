@@ -3,6 +3,8 @@
 #[cfg(target_arch = "x86_64")]
 use std::arch::x86_64::*;
 
+use glam::Vec2;
+
 use crate::math::{FWHM_TO_SIGMA, fast_exp};
 use crate::star_detection::background::BackgroundMap;
 use crate::star_detection::centroid::is_valid_stamp_position;
@@ -15,23 +17,23 @@ use crate::star_detection::centroid::is_valid_stamp_position;
 /// Caller must ensure AVX2 and FMA are available.
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2", enable = "fma")]
-#[allow(clippy::too_many_arguments)]
 pub unsafe fn refine_centroid_avx2(
     pixels: &[f32],
     width: usize,
     height: usize,
     background: &BackgroundMap,
-    cx: f32,
-    cy: f32,
+    pos: Vec2,
     stamp_radius: usize,
     expected_fwhm: f32,
-) -> Option<(f32, f32)> {
-    if !is_valid_stamp_position(cx, cy, width, height, stamp_radius) {
+) -> Option<Vec2> {
+    if !is_valid_stamp_position(pos, width, height, stamp_radius) {
         return None;
     }
 
-    let icx = cx.round() as isize;
-    let icy = cy.round() as isize;
+    let cx = pos.x;
+    let cy = pos.y;
+    let icx = pos.x.round() as isize;
+    let icy = pos.y.round() as isize;
 
     // Adaptive sigma based on expected FWHM
     let sigma = (expected_fwhm / FWHM_TO_SIGMA * 0.8).clamp(1.0, stamp_radius as f32 * 0.5);
@@ -146,17 +148,16 @@ pub unsafe fn refine_centroid_avx2(
         return None;
     }
 
-    let new_cx = sum_x / sum_w;
-    let new_cy = sum_y / sum_w;
+    let new_pos = Vec2::new(sum_x / sum_w, sum_y / sum_w);
 
     // Reject if centroid moved too far (likely bad detection)
     let stamp_size = 2 * stamp_radius + 1;
     let max_move = stamp_size as f32 / 4.0;
-    if (new_cx - cx).abs() > max_move || (new_cy - cy).abs() > max_move {
+    if (new_pos - pos).abs().max_element() > max_move {
         return None;
     }
 
-    Some((new_cx, new_cy))
+    Some(new_pos)
 }
 
 /// Horizontal sum of a 256-bit f32 vector (8 elements).
@@ -182,6 +183,7 @@ mod tests {
     use crate::star_detection::background::BackgroundConfig;
     use crate::star_detection::centroid::simd::{refine_centroid_scalar, refine_centroid_sse};
     use common::cpu_features;
+    use glam::Vec2;
 
     fn make_gaussian_star(
         width: usize,
@@ -228,22 +230,24 @@ mod tests {
             let bg = crate::testing::estimate_background(&pixels, BackgroundConfig::default());
 
             let scalar =
-                refine_centroid_scalar(&pixels, width, height, &bg, 32.0, 32.0, 7, 4.0).unwrap();
+                refine_centroid_scalar(&pixels, width, height, &bg, Vec2::splat(32.0), 7, 4.0)
+                    .unwrap();
             let avx2 = unsafe {
-                refine_centroid_avx2(&pixels, width, height, &bg, 32.0, 32.0, 7, 4.0).unwrap()
+                refine_centroid_avx2(&pixels, width, height, &bg, Vec2::splat(32.0), 7, 4.0)
+                    .unwrap()
             };
 
             assert!(
-                (scalar.0 - avx2.0).abs() < 0.01,
+                (scalar.x - avx2.x).abs() < 0.01,
                 "AVX2 cx={} should match scalar cx={}",
-                avx2.0,
-                scalar.0
+                avx2.x,
+                scalar.x
             );
             assert!(
-                (scalar.1 - avx2.1).abs() < 0.01,
+                (scalar.y - avx2.y).abs() < 0.01,
                 "AVX2 cy={} should match scalar cy={}",
-                avx2.1,
-                scalar.1
+                avx2.y,
+                scalar.y
             );
         });
     }
@@ -257,22 +261,24 @@ mod tests {
             let bg = crate::testing::estimate_background(&pixels, BackgroundConfig::default());
 
             let scalar =
-                refine_centroid_scalar(&pixels, width, height, &bg, 32.0, 32.0, 7, 4.0).unwrap();
+                refine_centroid_scalar(&pixels, width, height, &bg, Vec2::splat(32.0), 7, 4.0)
+                    .unwrap();
             let avx2 = unsafe {
-                refine_centroid_avx2(&pixels, width, height, &bg, 32.0, 32.0, 7, 4.0).unwrap()
+                refine_centroid_avx2(&pixels, width, height, &bg, Vec2::splat(32.0), 7, 4.0)
+                    .unwrap()
             };
 
             assert!(
-                (scalar.0 - avx2.0).abs() < 0.01,
+                (scalar.x - avx2.x).abs() < 0.01,
                 "AVX2 cx={} should match scalar cx={}",
-                avx2.0,
-                scalar.0
+                avx2.x,
+                scalar.x
             );
             assert!(
-                (scalar.1 - avx2.1).abs() < 0.01,
+                (scalar.y - avx2.y).abs() < 0.01,
                 "AVX2 cy={} should match scalar cy={}",
-                avx2.1,
-                scalar.1
+                avx2.y,
+                scalar.y
             );
         });
     }
@@ -285,8 +291,9 @@ mod tests {
             let pixels = make_gaussian_star(width, height, 32.0, 32.0, 2.5, 0.8, 0.1);
             let bg = crate::testing::estimate_background(&pixels, BackgroundConfig::default());
 
-            let result =
-                unsafe { refine_centroid_avx2(&pixels, width, height, &bg, 3.0, 32.0, 7, 4.0) };
+            let result = unsafe {
+                refine_centroid_avx2(&pixels, width, height, &bg, Vec2::new(3.0, 32.0), 7, 4.0)
+            };
             assert!(result.is_none());
         });
     }
@@ -299,8 +306,9 @@ mod tests {
             let pixels = make_uniform_background(width, height, 0.1);
             let bg = crate::testing::estimate_background(&pixels, BackgroundConfig::default());
 
-            let result =
-                unsafe { refine_centroid_avx2(&pixels, width, height, &bg, 32.0, 32.0, 7, 4.0) };
+            let result = unsafe {
+                refine_centroid_avx2(&pixels, width, height, &bg, Vec2::splat(32.0), 7, 4.0)
+            };
             assert!(result.is_none());
         });
     }
@@ -320,30 +328,37 @@ mod tests {
                     width,
                     height,
                     &bg,
-                    64.0,
-                    64.0,
+                    Vec2::splat(64.0),
                     stamp_radius,
                     6.0,
                 );
                 let avx2 = unsafe {
-                    refine_centroid_avx2(&pixels, width, height, &bg, 64.0, 64.0, stamp_radius, 6.0)
+                    refine_centroid_avx2(
+                        &pixels,
+                        width,
+                        height,
+                        &bg,
+                        Vec2::splat(64.0),
+                        stamp_radius,
+                        6.0,
+                    )
                 };
 
                 match (scalar, avx2) {
                     (Some(s), Some(a)) => {
                         assert!(
-                            (s.0 - a.0).abs() < 0.01,
+                            (s.x - a.x).abs() < 0.01,
                             "stamp_radius={}: AVX2 cx={} should match scalar cx={}",
                             stamp_radius,
-                            a.0,
-                            s.0
+                            a.x,
+                            s.x
                         );
                         assert!(
-                            (s.1 - a.1).abs() < 0.01,
+                            (s.y - a.y).abs() < 0.01,
                             "stamp_radius={}: AVX2 cy={} should match scalar cy={}",
                             stamp_radius,
-                            a.1,
-                            s.1
+                            a.y,
+                            s.y
                         );
                     }
                     (None, None) => {}
@@ -374,33 +389,30 @@ mod tests {
                 let pixels = make_gaussian_star(width, height, true_cx, true_cy, 3.0, 0.8, 0.1);
                 let bg = crate::testing::estimate_background(&pixels, BackgroundConfig::default());
 
-                let start_cx = true_cx.round();
-                let start_cy = true_cy.round();
+                let start_pos = Vec2::new(true_cx.round(), true_cy.round());
 
-                let scalar =
-                    refine_centroid_scalar(&pixels, width, height, &bg, start_cx, start_cy, 7, 5.0);
-                let avx2 = unsafe {
-                    refine_centroid_avx2(&pixels, width, height, &bg, start_cx, start_cy, 7, 5.0)
-                };
+                let scalar = refine_centroid_scalar(&pixels, width, height, &bg, start_pos, 7, 5.0);
+                let avx2 =
+                    unsafe { refine_centroid_avx2(&pixels, width, height, &bg, start_pos, 7, 5.0) };
 
-                let (s_cx, s_cy) = scalar.unwrap();
-                let (a_cx, a_cy) = avx2.unwrap();
+                let s = scalar.unwrap();
+                let a = avx2.unwrap();
 
                 assert!(
-                    (s_cx - a_cx).abs() < 0.01,
+                    (s.x - a.x).abs() < 0.01,
                     "pos=({}, {}): AVX2 cx={} should match scalar cx={}",
                     true_cx,
                     true_cy,
-                    a_cx,
-                    s_cx
+                    a.x,
+                    s.x
                 );
                 assert!(
-                    (s_cy - a_cy).abs() < 0.01,
+                    (s.y - a.y).abs() < 0.01,
                     "pos=({}, {}): AVX2 cy={} should match scalar cy={}",
                     true_cx,
                     true_cy,
-                    a_cy,
-                    s_cy
+                    a.y,
+                    s.y
                 );
             }
         });
@@ -419,23 +431,24 @@ mod tests {
             let bg = crate::testing::estimate_background(&pixels, BackgroundConfig::default());
 
             let sse = unsafe {
-                refine_centroid_sse(&pixels, width, height, &bg, 32.0, 32.0, 7, 4.0).unwrap()
+                refine_centroid_sse(&pixels, width, height, &bg, Vec2::splat(32.0), 7, 4.0).unwrap()
             };
             let avx2 = unsafe {
-                refine_centroid_avx2(&pixels, width, height, &bg, 32.0, 32.0, 7, 4.0).unwrap()
+                refine_centroid_avx2(&pixels, width, height, &bg, Vec2::splat(32.0), 7, 4.0)
+                    .unwrap()
             };
 
             assert!(
-                (sse.0 - avx2.0).abs() < 0.01,
+                (sse.x - avx2.x).abs() < 0.01,
                 "AVX2 cx={} should match SSE cx={}",
-                avx2.0,
-                sse.0
+                avx2.x,
+                sse.x
             );
             assert!(
-                (sse.1 - avx2.1).abs() < 0.01,
+                (sse.y - avx2.y).abs() < 0.01,
                 "AVX2 cy={} should match SSE cy={}",
-                avx2.1,
-                sse.1
+                avx2.y,
+                sse.y
             );
         });
     }

@@ -3,6 +3,7 @@
 //! Run with: `cargo test -p lumos --release bench_centroid -- --ignored --nocapture`
 
 use ::bench::quick_bench;
+use glam::Vec2;
 use std::hint::black_box;
 
 use super::compute_centroid;
@@ -255,8 +256,7 @@ fn bench_refine_centroid_single(b: ::bench::Bencher) {
             black_box(width),
             black_box(height),
             black_box(&bg),
-            black_box(32.0),
-            black_box(32.0),
+            black_box(Vec2::splat(32.0)),
             black_box(stamp_radius),
             black_box(expected_fwhm),
         ))
@@ -280,8 +280,7 @@ fn bench_refine_centroid_batch_1000(b: ::bench::Bencher) {
                 black_box(width),
                 black_box(height),
                 black_box(&bg),
-                black_box(32.0),
-                black_box(32.0),
+                black_box(Vec2::splat(32.0)),
                 black_box(stamp_radius),
                 black_box(expected_fwhm),
             ));
@@ -317,8 +316,7 @@ fn bench_gaussian_fit_single(b: ::bench::Bencher) {
     b.bench(|| {
         black_box(fit_gaussian_2d(
             black_box(&pixels),
-            black_box(10.0),
-            black_box(10.0),
+            black_box(Vec2::splat(10.0)),
             black_box(8),
             black_box(background),
             black_box(&config),
@@ -354,8 +352,7 @@ fn bench_moffat_fit_single(b: ::bench::Bencher) {
     b.bench(|| {
         black_box(fit_moffat_2d(
             black_box(&pixels),
-            black_box(10.0),
-            black_box(10.0),
+            black_box(Vec2::splat(10.0)),
             black_box(8),
             black_box(background),
             black_box(&config),
@@ -391,8 +388,7 @@ fn bench_moffat_fit_variable_beta(b: ::bench::Bencher) {
     b.bench(|| {
         black_box(fit_moffat_2d(
             black_box(&pixels),
-            black_box(10.0),
-            black_box(10.0),
+            black_box(Vec2::splat(10.0)),
             black_box(8),
             black_box(background),
             black_box(&config),

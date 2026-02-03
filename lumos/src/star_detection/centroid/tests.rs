@@ -1,5 +1,7 @@
 //! Tests for centroid computation.
 
+use glam::Vec2;
+
 use super::*;
 use crate::common::Buffer2;
 use crate::math::FWHM_TO_SIGMA;
@@ -183,8 +185,7 @@ fn test_snr_positive() {
 fn test_valid_stamp_position_center() {
     // Center of a 64x64 image should be valid
     assert!(is_valid_stamp_position(
-        32.0,
-        32.0,
+        Vec2::splat(32.0),
         64,
         64,
         TEST_STAMP_RADIUS
@@ -196,8 +197,7 @@ fn test_valid_stamp_position_minimum_valid() {
     // Minimum valid position is at TEST_STAMP_RADIUS
     let min_pos = TEST_STAMP_RADIUS as f32;
     assert!(is_valid_stamp_position(
-        min_pos,
-        min_pos,
+        Vec2::splat(min_pos),
         64,
         64,
         TEST_STAMP_RADIUS
@@ -212,8 +212,7 @@ fn test_valid_stamp_position_maximum_valid() {
     let max_pos_x = (width - TEST_STAMP_RADIUS - 1) as f32;
     let max_pos_y = (height - TEST_STAMP_RADIUS - 1) as f32;
     assert!(is_valid_stamp_position(
-        max_pos_x,
-        max_pos_y,
+        Vec2::new(max_pos_x, max_pos_y),
         width,
         height,
         TEST_STAMP_RADIUS
@@ -225,8 +224,7 @@ fn test_valid_stamp_position_too_close_to_left_edge() {
     // Position too close to left edge
     let pos = (TEST_STAMP_RADIUS - 1) as f32;
     assert!(!is_valid_stamp_position(
-        pos,
-        32.0,
+        Vec2::new(pos, 32.0),
         64,
         64,
         TEST_STAMP_RADIUS
@@ -238,8 +236,7 @@ fn test_valid_stamp_position_too_close_to_top_edge() {
     // Position too close to top edge
     let pos = (TEST_STAMP_RADIUS - 1) as f32;
     assert!(!is_valid_stamp_position(
-        32.0,
-        pos,
+        Vec2::new(32.0, pos),
         64,
         64,
         TEST_STAMP_RADIUS
@@ -252,8 +249,7 @@ fn test_valid_stamp_position_too_close_to_right_edge() {
     let width = 64usize;
     let pos = (width - TEST_STAMP_RADIUS) as f32;
     assert!(!is_valid_stamp_position(
-        pos,
-        32.0,
+        Vec2::new(pos, 32.0),
         width,
         64,
         TEST_STAMP_RADIUS
@@ -266,8 +262,7 @@ fn test_valid_stamp_position_too_close_to_bottom_edge() {
     let height = 64usize;
     let pos = (height - TEST_STAMP_RADIUS) as f32;
     assert!(!is_valid_stamp_position(
-        32.0,
-        pos,
+        Vec2::new(32.0, pos),
         64,
         height,
         TEST_STAMP_RADIUS
@@ -278,15 +273,13 @@ fn test_valid_stamp_position_too_close_to_bottom_edge() {
 fn test_valid_stamp_position_negative_rounds_to_invalid() {
     // Negative position should be invalid
     assert!(!is_valid_stamp_position(
-        -1.0,
-        32.0,
+        Vec2::new(-1.0, 32.0),
         64,
         64,
         TEST_STAMP_RADIUS
     ));
     assert!(!is_valid_stamp_position(
-        32.0,
-        -1.0,
+        Vec2::new(32.0, -1.0),
         64,
         64,
         TEST_STAMP_RADIUS
@@ -298,16 +291,14 @@ fn test_valid_stamp_position_fractional_rounding() {
     // Test that fractional positions are rounded correctly
     // 7.4 rounds to 7, which equals TEST_STAMP_RADIUS, so it should be valid
     assert!(is_valid_stamp_position(
-        7.4,
-        32.0,
+        Vec2::new(7.4, 32.0),
         64,
         64,
         TEST_STAMP_RADIUS
     ));
     // 6.4 rounds to 6, which is less than TEST_STAMP_RADIUS (7), so invalid
     assert!(!is_valid_stamp_position(
-        6.4,
-        32.0,
+        Vec2::new(6.4, 32.0),
         64,
         64,
         TEST_STAMP_RADIUS
@@ -321,16 +312,14 @@ fn test_valid_stamp_position_small_image() {
     let min_size = 2 * TEST_STAMP_RADIUS + 1;
     // Just barely large enough - center should be valid
     assert!(is_valid_stamp_position(
-        TEST_STAMP_RADIUS as f32,
-        TEST_STAMP_RADIUS as f32,
+        Vec2::splat(TEST_STAMP_RADIUS as f32),
         min_size,
         min_size,
         TEST_STAMP_RADIUS
     ));
     // One pixel smaller - no valid positions
     assert!(!is_valid_stamp_position(
-        TEST_STAMP_RADIUS as f32,
-        TEST_STAMP_RADIUS as f32,
+        Vec2::splat(TEST_STAMP_RADIUS as f32),
         min_size - 1,
         min_size - 1,
         TEST_STAMP_RADIUS
@@ -367,17 +356,16 @@ fn test_refine_centroid_centered_star() {
         width,
         height,
         &bg,
-        cx,
-        cy,
+        Vec2::new(cx, cy),
         TEST_STAMP_RADIUS,
         TEST_EXPECTED_FWHM,
     );
 
     assert!(result.is_some());
-    let (new_cx, new_cy) = result.unwrap();
+    let new_pos = result.unwrap();
     // Should stay very close to original position
-    assert!((new_cx - cx).abs() < 0.5);
-    assert!((new_cy - cy).abs() < 0.5);
+    assert!((new_pos.x - cx).abs() < 0.5);
+    assert!((new_pos.y - cy).abs() < 0.5);
 }
 
 #[test]
@@ -390,25 +378,23 @@ fn test_refine_centroid_offset_converges() {
     let bg = make_uniform_background(width, height, 0.1, 0.01);
 
     // Start with integer guess (peak pixel position)
-    let start_cx = 32.0f32;
-    let start_cy = 33.0f32;
+    let start_pos = Vec2::new(32.0, 33.0);
 
     let result = refine_centroid(
         &pixels,
         width,
         height,
         &bg,
-        start_cx,
-        start_cy,
+        start_pos,
         TEST_STAMP_RADIUS,
         TEST_EXPECTED_FWHM,
     );
 
     assert!(result.is_some());
-    let (new_cx, new_cy) = result.unwrap();
+    let new_pos = result.unwrap();
     // Should move towards true center
-    let old_error = ((start_cx - true_cx).powi(2) + (start_cy - true_cy).powi(2)).sqrt();
-    let new_error = ((new_cx - true_cx).powi(2) + (new_cy - true_cy).powi(2)).sqrt();
+    let old_error = ((start_pos.x - true_cx).powi(2) + (start_pos.y - true_cy).powi(2)).sqrt();
+    let new_error = ((new_pos.x - true_cx).powi(2) + (new_pos.y - true_cy).powi(2)).sqrt();
     assert!(
         new_error < old_error,
         "Refinement should reduce error: {} -> {}",
@@ -430,8 +416,7 @@ fn test_refine_centroid_invalid_position_returns_none() {
         width,
         height,
         &bg,
-        3.0,
-        32.0,
+        Vec2::new(3.0, 32.0),
         TEST_STAMP_RADIUS,
         TEST_EXPECTED_FWHM,
     );
@@ -451,8 +436,7 @@ fn test_refine_centroid_zero_flux_returns_none() {
         width,
         height,
         &bg,
-        32.0,
-        32.0,
+        Vec2::splat(32.0),
         TEST_STAMP_RADIUS,
         TEST_EXPECTED_FWHM,
     );
@@ -474,8 +458,7 @@ fn test_refine_centroid_rejects_large_movement() {
         width,
         height,
         &bg,
-        32.0,
-        32.0,
+        Vec2::splat(32.0),
         TEST_STAMP_RADIUS,
         TEST_EXPECTED_FWHM,
     );
@@ -495,8 +478,7 @@ fn test_refine_centroid_iterative_convergence() {
     let bg = make_uniform_background(width, height, 0.1, 0.01);
 
     // Simulate multiple iterations like compute_centroid does
-    let mut cx = 32.0f32;
-    let mut cy = 32.0f32;
+    let mut pos = Vec2::splat(32.0);
 
     for iteration in 0..MAX_ITERATIONS {
         let result = refine_centroid(
@@ -504,26 +486,23 @@ fn test_refine_centroid_iterative_convergence() {
             width,
             height,
             &bg,
-            cx,
-            cy,
+            pos,
             TEST_STAMP_RADIUS,
             TEST_EXPECTED_FWHM,
         );
         assert!(result.is_some(), "Iteration {} failed", iteration);
 
-        let (new_cx, new_cy) = result.unwrap();
-        let dx = new_cx - cx;
-        let dy = new_cy - cy;
-        cx = new_cx;
-        cy = new_cy;
+        let new_pos = result.unwrap();
+        let delta = new_pos - pos;
+        pos = new_pos;
 
-        if dx * dx + dy * dy < CONVERGENCE_THRESHOLD_SQ {
+        if delta.length_squared() < CONVERGENCE_THRESHOLD_SQ {
             break;
         }
     }
 
     // Should converge close to true position
-    let error = ((cx - true_cx).powi(2) + (cy - true_cy).powi(2)).sqrt();
+    let error = ((pos.x - true_cx).powi(2) + (pos.y - true_cy).powi(2)).sqrt();
     assert!(error < 0.2, "Failed to converge: error = {}", error);
 }
 
@@ -538,7 +517,14 @@ fn test_compute_metrics_valid_star() {
     let pixels = make_gaussian_star(width, height, 32.0, 32.0, 2.5, 0.8);
     let bg = make_uniform_background(width, height, 0.1, 0.01);
 
-    let metrics = compute_metrics(&pixels, &bg, 32.0, 32.0, TEST_STAMP_RADIUS, None, None);
+    let metrics = compute_metrics(
+        &pixels,
+        &bg,
+        Vec2::splat(32.0),
+        TEST_STAMP_RADIUS,
+        None,
+        None,
+    );
 
     assert!(metrics.is_some());
     let m = metrics.unwrap();
@@ -559,7 +545,14 @@ fn test_compute_metrics_invalid_position_returns_none() {
     let bg = make_uniform_background(width, height, 0.1, 0.01);
 
     // Position too close to edge
-    let metrics = compute_metrics(&pixels, &bg, 3.0, 32.0, TEST_STAMP_RADIUS, None, None);
+    let metrics = compute_metrics(
+        &pixels,
+        &bg,
+        Vec2::new(3.0, 32.0),
+        TEST_STAMP_RADIUS,
+        None,
+        None,
+    );
     assert!(metrics.is_none());
 }
 
@@ -571,7 +564,14 @@ fn test_compute_metrics_zero_flux_returns_none() {
     let pixels = Buffer2::new_filled(width, height, 0.05f32);
     let bg = make_uniform_background(width, height, 0.1, 0.01);
 
-    let metrics = compute_metrics(&pixels, &bg, 32.0, 32.0, TEST_STAMP_RADIUS, None, None);
+    let metrics = compute_metrics(
+        &pixels,
+        &bg,
+        Vec2::splat(32.0),
+        TEST_STAMP_RADIUS,
+        None,
+        None,
+    );
     assert!(metrics.is_none());
 }
 
@@ -591,8 +591,7 @@ fn test_compute_metrics_fwhm_scales_with_sigma() {
     let metrics_small = compute_metrics(
         &pixels_small,
         &bg,
-        64.0,
-        64.0,
+        Vec2::splat(64.0),
         TEST_STAMP_RADIUS,
         None,
         None,
@@ -601,8 +600,7 @@ fn test_compute_metrics_fwhm_scales_with_sigma() {
     let metrics_large = compute_metrics(
         &pixels_large,
         &bg,
-        64.0,
-        64.0,
+        Vec2::splat(64.0),
         TEST_STAMP_RADIUS,
         None,
         None,
@@ -627,13 +625,19 @@ fn test_compute_metrics_snr_scales_with_amplitude() {
     let pixels_bright = make_gaussian_star(width, height, 32.0, 32.0, 2.5, 0.8);
     let bg = make_uniform_background(width, height, 0.1, 0.01);
 
-    let metrics_dim =
-        compute_metrics(&pixels_dim, &bg, 32.0, 32.0, TEST_STAMP_RADIUS, None, None).unwrap();
+    let metrics_dim = compute_metrics(
+        &pixels_dim,
+        &bg,
+        Vec2::splat(32.0),
+        TEST_STAMP_RADIUS,
+        None,
+        None,
+    )
+    .unwrap();
     let metrics_bright = compute_metrics(
         &pixels_bright,
         &bg,
-        32.0,
-        32.0,
+        Vec2::splat(32.0),
         TEST_STAMP_RADIUS,
         None,
         None,
@@ -687,7 +691,15 @@ fn test_elongated_star_high_eccentricity() {
     let pixels = make_elliptical_star(width, height, 32.0, 32.0, 4.0, 1.5, 0.8);
     let bg = make_uniform_background(width, height, 0.1, 0.01);
 
-    let metrics = compute_metrics(&pixels, &bg, 32.0, 32.0, TEST_STAMP_RADIUS, None, None).unwrap();
+    let metrics = compute_metrics(
+        &pixels,
+        &bg,
+        Vec2::splat(32.0),
+        TEST_STAMP_RADIUS,
+        None,
+        None,
+    )
+    .unwrap();
 
     // Elongated star should have high eccentricity (> 0.5)
     assert!(
@@ -706,10 +718,24 @@ fn test_circular_vs_elongated_eccentricity() {
     let elongated = make_elliptical_star(width, height, 32.0, 32.0, 4.0, 2.0, 0.8);
     let bg = make_uniform_background(width, height, 0.1, 0.01);
 
-    let metrics_circular =
-        compute_metrics(&circular, &bg, 32.0, 32.0, TEST_STAMP_RADIUS, None, None).unwrap();
-    let metrics_elongated =
-        compute_metrics(&elongated, &bg, 32.0, 32.0, TEST_STAMP_RADIUS, None, None).unwrap();
+    let metrics_circular = compute_metrics(
+        &circular,
+        &bg,
+        Vec2::splat(32.0),
+        TEST_STAMP_RADIUS,
+        None,
+        None,
+    )
+    .unwrap();
+    let metrics_elongated = compute_metrics(
+        &elongated,
+        &bg,
+        Vec2::splat(32.0),
+        TEST_STAMP_RADIUS,
+        None,
+        None,
+    )
+    .unwrap();
 
     assert!(
         metrics_elongated.eccentricity > metrics_circular.eccentricity,
@@ -746,21 +772,20 @@ fn test_centroid_with_noisy_background() {
         width,
         height,
         &bg,
-        true_cx,
-        true_cy,
+        Vec2::new(true_cx, true_cy),
         TEST_STAMP_RADIUS,
         TEST_EXPECTED_FWHM,
     );
     assert!(result.is_some());
 
-    let (new_cx, new_cy) = result.unwrap();
+    let new_pos = result.unwrap();
     // With noise, allow more tolerance
     assert!(
-        (new_cx - true_cx).abs() < 1.0,
+        (new_pos.x - true_cx).abs() < 1.0,
         "X error too large with noise"
     );
     assert!(
-        (new_cy - true_cy).abs() < 1.0,
+        (new_pos.y - true_cy).abs() < 1.0,
         "Y error too large with noise"
     );
 }
@@ -777,8 +802,7 @@ fn test_snr_decreases_with_higher_noise() {
     let metrics_low = compute_metrics(
         &pixels,
         &bg_low_noise,
-        32.0,
-        32.0,
+        Vec2::splat(32.0),
         TEST_STAMP_RADIUS,
         None,
         None,
@@ -787,8 +811,7 @@ fn test_snr_decreases_with_higher_noise() {
     let metrics_high = compute_metrics(
         &pixels,
         &bg_high_noise,
-        32.0,
-        32.0,
+        Vec2::splat(32.0),
         TEST_STAMP_RADIUS,
         None,
         None,
@@ -818,7 +841,15 @@ fn test_fwhm_formula_for_known_gaussian() {
     let pixels = make_gaussian_star(width, height, 64.0, 64.0, sigma, 0.8);
     let bg = make_uniform_background(width, height, 0.1, 0.001); // Very low noise
 
-    let metrics = compute_metrics(&pixels, &bg, 64.0, 64.0, TEST_STAMP_RADIUS, None, None).unwrap();
+    let metrics = compute_metrics(
+        &pixels,
+        &bg,
+        Vec2::splat(64.0),
+        TEST_STAMP_RADIUS,
+        None,
+        None,
+    )
+    .unwrap();
 
     // Allow 10% error due to discrete sampling and finite aperture
     let error = (metrics.fwhm - expected_fwhm).abs() / expected_fwhm;
@@ -840,10 +871,24 @@ fn test_flux_proportional_to_amplitude() {
     let pixels_amp2 = make_gaussian_star(width, height, 32.0, 32.0, 2.5, 0.8);
     let bg = make_uniform_background(width, height, 0.1, 0.01);
 
-    let metrics1 =
-        compute_metrics(&pixels_amp1, &bg, 32.0, 32.0, TEST_STAMP_RADIUS, None, None).unwrap();
-    let metrics2 =
-        compute_metrics(&pixels_amp2, &bg, 32.0, 32.0, TEST_STAMP_RADIUS, None, None).unwrap();
+    let metrics1 = compute_metrics(
+        &pixels_amp1,
+        &bg,
+        Vec2::splat(32.0),
+        TEST_STAMP_RADIUS,
+        None,
+        None,
+    )
+    .unwrap();
+    let metrics2 = compute_metrics(
+        &pixels_amp2,
+        &bg,
+        Vec2::splat(32.0),
+        TEST_STAMP_RADIUS,
+        None,
+        None,
+    )
+    .unwrap();
 
     // Flux should scale roughly proportionally with amplitude
     let flux_ratio = metrics2.flux / metrics1.flux;
@@ -874,8 +919,15 @@ fn test_eccentricity_bounds() {
         ("elongated_x", elongated_x),
         ("elongated_y", elongated_y),
     ] {
-        let metrics =
-            compute_metrics(&pixels, &bg, 32.0, 32.0, TEST_STAMP_RADIUS, None, None).unwrap();
+        let metrics = compute_metrics(
+            &pixels,
+            &bg,
+            Vec2::splat(32.0),
+            TEST_STAMP_RADIUS,
+            None,
+            None,
+        )
+        .unwrap();
         assert!(
             metrics.eccentricity >= 0.0 && metrics.eccentricity <= 1.0,
             "{} eccentricity {} out of bounds [0,1]",
@@ -895,10 +947,24 @@ fn test_eccentricity_orientation_invariant() {
     let elongated_x = make_elliptical_star(width, height, 32.0, 32.0, 4.0, 2.0, 0.8);
     let elongated_y = make_elliptical_star(width, height, 32.0, 32.0, 2.0, 4.0, 0.8);
 
-    let metrics_x =
-        compute_metrics(&elongated_x, &bg, 32.0, 32.0, TEST_STAMP_RADIUS, None, None).unwrap();
-    let metrics_y =
-        compute_metrics(&elongated_y, &bg, 32.0, 32.0, TEST_STAMP_RADIUS, None, None).unwrap();
+    let metrics_x = compute_metrics(
+        &elongated_x,
+        &bg,
+        Vec2::splat(32.0),
+        TEST_STAMP_RADIUS,
+        None,
+        None,
+    )
+    .unwrap();
+    let metrics_y = compute_metrics(
+        &elongated_y,
+        &bg,
+        Vec2::splat(32.0),
+        TEST_STAMP_RADIUS,
+        None,
+        None,
+    )
+    .unwrap();
 
     // Should have similar eccentricity (within 20%)
     let diff = (metrics_x.eccentricity - metrics_y.eccentricity).abs();
@@ -925,10 +991,24 @@ fn test_snr_formula_consistency() {
     let bg1 = make_uniform_background(width, height, 0.1, noise1);
     let bg2 = make_uniform_background(width, height, 0.1, noise2);
 
-    let metrics1 =
-        compute_metrics(&pixels, &bg1, 32.0, 32.0, TEST_STAMP_RADIUS, None, None).unwrap();
-    let metrics2 =
-        compute_metrics(&pixels, &bg2, 32.0, 32.0, TEST_STAMP_RADIUS, None, None).unwrap();
+    let metrics1 = compute_metrics(
+        &pixels,
+        &bg1,
+        Vec2::splat(32.0),
+        TEST_STAMP_RADIUS,
+        None,
+        None,
+    )
+    .unwrap();
+    let metrics2 = compute_metrics(
+        &pixels,
+        &bg2,
+        Vec2::splat(32.0),
+        TEST_STAMP_RADIUS,
+        None,
+        None,
+    )
+    .unwrap();
 
     // SNR should halve when noise doubles (same flux)
     let snr_ratio = metrics1.snr / metrics2.snr;
@@ -962,7 +1042,14 @@ fn test_metrics_with_high_background() {
     let pixels = Buffer2::new(width, height, pixels);
 
     let bg = make_uniform_background(width, height, 0.5, 0.02);
-    let metrics = compute_metrics(&pixels, &bg, 32.0, 32.0, TEST_STAMP_RADIUS, None, None);
+    let metrics = compute_metrics(
+        &pixels,
+        &bg,
+        Vec2::splat(32.0),
+        TEST_STAMP_RADIUS,
+        None,
+        None,
+    );
 
     assert!(
         metrics.is_some(),
@@ -984,13 +1071,19 @@ fn test_fwhm_independent_of_amplitude() {
     let pixels_bright = make_gaussian_star(width, height, 32.0, 32.0, sigma, 0.9);
     let bg = make_uniform_background(width, height, 0.1, 0.01);
 
-    let metrics_dim =
-        compute_metrics(&pixels_dim, &bg, 32.0, 32.0, TEST_STAMP_RADIUS, None, None).unwrap();
+    let metrics_dim = compute_metrics(
+        &pixels_dim,
+        &bg,
+        Vec2::splat(32.0),
+        TEST_STAMP_RADIUS,
+        None,
+        None,
+    )
+    .unwrap();
     let metrics_bright = compute_metrics(
         &pixels_bright,
         &bg,
-        32.0,
-        32.0,
+        Vec2::splat(32.0),
         TEST_STAMP_RADIUS,
         None,
         None,
@@ -1019,15 +1112,36 @@ fn test_eccentricity_increases_with_elongation() {
     let ratio_2_1 = make_elliptical_star(width, height, 32.0, 32.0, 4.0, 2.0, 0.8);
     let ratio_3_1 = make_elliptical_star(width, height, 32.0, 32.0, 6.0, 2.0, 0.8);
 
-    let ecc_1 = compute_metrics(&ratio_1_1, &bg, 32.0, 32.0, TEST_STAMP_RADIUS, None, None)
-        .unwrap()
-        .eccentricity;
-    let ecc_2 = compute_metrics(&ratio_2_1, &bg, 32.0, 32.0, TEST_STAMP_RADIUS, None, None)
-        .unwrap()
-        .eccentricity;
-    let ecc_3 = compute_metrics(&ratio_3_1, &bg, 32.0, 32.0, TEST_STAMP_RADIUS, None, None)
-        .unwrap()
-        .eccentricity;
+    let ecc_1 = compute_metrics(
+        &ratio_1_1,
+        &bg,
+        Vec2::splat(32.0),
+        TEST_STAMP_RADIUS,
+        None,
+        None,
+    )
+    .unwrap()
+    .eccentricity;
+    let ecc_2 = compute_metrics(
+        &ratio_2_1,
+        &bg,
+        Vec2::splat(32.0),
+        TEST_STAMP_RADIUS,
+        None,
+        None,
+    )
+    .unwrap()
+    .eccentricity;
+    let ecc_3 = compute_metrics(
+        &ratio_3_1,
+        &bg,
+        Vec2::splat(32.0),
+        TEST_STAMP_RADIUS,
+        None,
+        None,
+    )
+    .unwrap()
+    .eccentricity;
 
     assert!(
         ecc_1 < ecc_2 && ecc_2 < ecc_3,
@@ -1462,12 +1576,12 @@ fn test_gaussian_fit_precision_statistical() {
             let pixels_buf = Buffer2::new(width, height, pixels);
 
             let config = GaussianFitConfig::default();
-            if let Some(result) = fit_gaussian_2d(&pixels_buf, 10.0, 10.0, 8, background, &config)
+            if let Some(result) =
+                fit_gaussian_2d(&pixels_buf, Vec2::splat(10.0), 8, background, &config)
                 && result.converged
             {
-                let error = ((result.pos.x as f32 - true_cx).powi(2)
-                    + (result.pos.y as f32 - true_cy).powi(2))
-                .sqrt();
+                let error =
+                    ((result.pos.x - true_cx).powi(2) + (result.pos.y - true_cy).powi(2)).sqrt();
                 total_error += error;
                 max_error = max_error.max(error);
                 count += 1;
@@ -1527,12 +1641,12 @@ fn test_moffat_fit_precision_statistical() {
                 fixed_beta: beta,
                 ..Default::default()
             };
-            if let Some(result) = fit_moffat_2d(&pixels_buf, 10.0, 10.0, 8, background, &config)
+            if let Some(result) =
+                fit_moffat_2d(&pixels_buf, Vec2::splat(10.0), 8, background, &config)
                 && result.converged
             {
-                let error = ((result.pos.x as f32 - true_cx).powi(2)
-                    + (result.pos.y as f32 - true_cy).powi(2))
-                .sqrt();
+                let error =
+                    ((result.pos.x - true_cx).powi(2) + (result.pos.y - true_cy).powi(2)).sqrt();
                 total_error += error;
                 max_error = max_error.max(error);
                 count += 1;
@@ -1568,8 +1682,15 @@ fn test_fwhm_estimation_accuracy() {
         let expected_fwhm = FWHM_TO_SIGMA * sigma;
         let pixels = make_gaussian_star(width, height, 64.0, 64.0, sigma, 1.0);
 
-        let metrics =
-            compute_metrics(&pixels, &bg, 64.0, 64.0, TEST_STAMP_RADIUS, None, None).unwrap();
+        let metrics = compute_metrics(
+            &pixels,
+            &bg,
+            Vec2::splat(64.0),
+            TEST_STAMP_RADIUS,
+            None,
+            None,
+        )
+        .unwrap();
 
         let fwhm_error = (metrics.fwhm - expected_fwhm).abs() / expected_fwhm;
         assert!(
@@ -1600,8 +1721,15 @@ fn test_eccentricity_calculation_accuracy() {
 
     for (sigma_major, sigma_minor, expected_ecc) in test_cases {
         let pixels = make_elliptical_star(width, height, 32.0, 32.0, sigma_major, sigma_minor, 0.8);
-        let metrics =
-            compute_metrics(&pixels, &bg, 32.0, 32.0, TEST_STAMP_RADIUS, None, None).unwrap();
+        let metrics = compute_metrics(
+            &pixels,
+            &bg,
+            Vec2::splat(32.0),
+            TEST_STAMP_RADIUS,
+            None,
+            None,
+        )
+        .unwrap();
 
         let ecc_error = (metrics.eccentricity - expected_ecc).abs();
         assert!(
@@ -1631,15 +1759,21 @@ fn test_snr_calculation_with_gain() {
     let bg = make_uniform_background(width, height, 0.1, sky_noise);
 
     // Without gain (simplified formula)
-    let metrics_no_gain =
-        compute_metrics(&pixels, &bg, 32.0, 32.0, TEST_STAMP_RADIUS, None, None).unwrap();
+    let metrics_no_gain = compute_metrics(
+        &pixels,
+        &bg,
+        Vec2::splat(32.0),
+        TEST_STAMP_RADIUS,
+        None,
+        None,
+    )
+    .unwrap();
 
     // With gain (full CCD equation)
     let metrics_with_gain = compute_metrics(
         &pixels,
         &bg,
-        32.0,
-        32.0,
+        Vec2::splat(32.0),
         TEST_STAMP_RADIUS,
         Some(gain),
         Some(read_noise),
@@ -1680,13 +1814,27 @@ fn test_sharpness_point_vs_extended() {
 
     // Compact star (small sigma) - high sharpness
     let compact = make_gaussian_star(width, height, 32.0, 32.0, 1.5, 0.8);
-    let metrics_compact =
-        compute_metrics(&compact, &bg, 32.0, 32.0, TEST_STAMP_RADIUS, None, None).unwrap();
+    let metrics_compact = compute_metrics(
+        &compact,
+        &bg,
+        Vec2::splat(32.0),
+        TEST_STAMP_RADIUS,
+        None,
+        None,
+    )
+    .unwrap();
 
     // Extended star (large sigma) - lower sharpness
     let extended = make_gaussian_star(width, height, 32.0, 32.0, 4.0, 0.8);
-    let metrics_extended =
-        compute_metrics(&extended, &bg, 32.0, 32.0, TEST_STAMP_RADIUS, None, None).unwrap();
+    let metrics_extended = compute_metrics(
+        &extended,
+        &bg,
+        Vec2::splat(32.0),
+        TEST_STAMP_RADIUS,
+        None,
+        None,
+    )
+    .unwrap();
 
     assert!(
         metrics_compact.sharpness > metrics_extended.sharpness,
@@ -1769,7 +1917,7 @@ fn test_gaussian_fit_sigma_recovery() {
         let pixels_buf = Buffer2::new(width, height, pixels);
 
         let config = GaussianFitConfig::default();
-        let result = fit_gaussian_2d(&pixels_buf, cx, cy, 8, background, &config);
+        let result = fit_gaussian_2d(&pixels_buf, Vec2::new(cx, cy), 8, background, &config);
 
         let result =
             result.unwrap_or_else(|| panic!("Fit should return Some for sigma={}", true_sigma));
@@ -1825,7 +1973,7 @@ fn test_moffat_fit_alpha_recovery() {
             fixed_beta: beta,
             ..Default::default()
         };
-        let result = fit_moffat_2d(&pixels_buf, cx, cy, 8, background, &config)
+        let result = fit_moffat_2d(&pixels_buf, Vec2::new(cx, cy), 8, background, &config)
             .unwrap_or_else(|| panic!("Fit should return Some for alpha={}", true_alpha));
 
         // Check that alpha is accurate (convergence flag may be false if
@@ -1869,14 +2017,13 @@ fn test_gaussian_fit_with_noise() {
     let pixels_buf = Buffer2::new(width, height, pixels);
 
     let config = GaussianFitConfig::default();
-    let result = fit_gaussian_2d(&pixels_buf, 10.0, 10.0, 8, background, &config);
+    let result = fit_gaussian_2d(&pixels_buf, Vec2::splat(10.0), 8, background, &config);
 
     assert!(result.is_some(), "Fit should succeed with noise");
     let result = result.unwrap();
 
     // With noise, expect slightly worse but still good accuracy
-    let error =
-        ((result.pos.x as f32 - true_cx).powi(2) + (result.pos.y as f32 - true_cy).powi(2)).sqrt();
+    let error = ((result.pos.x - true_cx).powi(2) + (result.pos.y - true_cy).powi(2)).sqrt();
     assert!(
         error < 0.15,
         "Position error {} too large with noise",
@@ -1892,7 +2039,15 @@ fn test_roundness1_circular_source() {
     let pixels = make_gaussian_star(width, height, 32.0, 32.0, 2.5, 0.8);
     let bg = make_uniform_background(width, height, 0.1, 0.01);
 
-    let metrics = compute_metrics(&pixels, &bg, 32.0, 32.0, TEST_STAMP_RADIUS, None, None).unwrap();
+    let metrics = compute_metrics(
+        &pixels,
+        &bg,
+        Vec2::splat(32.0),
+        TEST_STAMP_RADIUS,
+        None,
+        None,
+    )
+    .unwrap();
 
     assert!(
         metrics.roundness1.abs() < 0.1,
@@ -1910,7 +2065,15 @@ fn test_roundness1_x_elongated() {
     let pixels = make_elliptical_star(width, height, 32.0, 32.0, 4.0, 2.0, 0.8);
     let bg = make_uniform_background(width, height, 0.1, 0.01);
 
-    let metrics = compute_metrics(&pixels, &bg, 32.0, 32.0, TEST_STAMP_RADIUS, None, None).unwrap();
+    let metrics = compute_metrics(
+        &pixels,
+        &bg,
+        Vec2::splat(32.0),
+        TEST_STAMP_RADIUS,
+        None,
+        None,
+    )
+    .unwrap();
 
     // For x-elongated: marginal in x has lower peak (more spread)
     // Roundness1 = (Hx - Hy) / (Hx + Hy)
@@ -1929,7 +2092,15 @@ fn test_roundness2_symmetric_source() {
     let pixels = make_gaussian_star(width, height, 32.0, 32.0, 2.5, 0.8);
     let bg = make_uniform_background(width, height, 0.1, 0.01);
 
-    let metrics = compute_metrics(&pixels, &bg, 32.0, 32.0, TEST_STAMP_RADIUS, None, None).unwrap();
+    let metrics = compute_metrics(
+        &pixels,
+        &bg,
+        Vec2::splat(32.0),
+        TEST_STAMP_RADIUS,
+        None,
+        None,
+    )
+    .unwrap();
 
     assert!(
         metrics.roundness2 < 0.1,
@@ -1971,7 +2142,7 @@ fn test_estimate_sigma_from_moments_gaussian() {
     }
 
     let estimated_sigma =
-        estimate_sigma_from_moments(&data_x, &data_y, &data_z, cx, cy, background);
+        estimate_sigma_from_moments(&data_x, &data_y, &data_z, Vec2::new(cx, cy), background);
 
     // Should be within 20% of true sigma
     let error = (estimated_sigma - true_sigma).abs() / true_sigma;
@@ -2012,7 +2183,7 @@ fn test_estimate_sigma_from_moments_various_sigmas() {
         }
 
         let estimated_sigma =
-            estimate_sigma_from_moments(&data_x, &data_y, &data_z, cx, cy, background);
+            estimate_sigma_from_moments(&data_x, &data_y, &data_z, Vec2::new(cx, cy), background);
 
         let error = (estimated_sigma - true_sigma).abs() / true_sigma;
         assert!(
@@ -2130,8 +2301,7 @@ fn test_fit_gaussian_2d_weighted_basic() {
     let config = GaussianFitConfig::default();
     let result = fit_gaussian_2d_weighted(
         &pixels_buf,
-        10.0,
-        10.0,
+        Vec2::splat(10.0),
         8,
         background,
         noise,
@@ -2143,8 +2313,7 @@ fn test_fit_gaussian_2d_weighted_basic() {
     assert!(result.is_some(), "Weighted fit should succeed");
     let result = result.unwrap();
 
-    let error =
-        ((result.pos.x as f32 - true_cx).powi(2) + (result.pos.y as f32 - true_cy).powi(2)).sqrt();
+    let error = ((result.pos.x - true_cx).powi(2) + (result.pos.y - true_cy).powi(2)).sqrt();
     assert!(
         error < 0.1,
         "Weighted Gaussian fit position error {} too large",
@@ -2180,8 +2349,7 @@ fn test_fit_gaussian_2d_weighted_with_gain() {
     let config = GaussianFitConfig::default();
     let result = fit_gaussian_2d_weighted(
         &pixels_buf,
-        10.0,
-        10.0,
+        Vec2::splat(10.0),
         8,
         background,
         noise,
@@ -2194,8 +2362,7 @@ fn test_fit_gaussian_2d_weighted_with_gain() {
     let result = result.unwrap();
 
     // Should achieve good accuracy
-    let error =
-        ((result.pos.x as f32 - true_cx).powi(2) + (result.pos.y as f32 - true_cy).powi(2)).sqrt();
+    let error = ((result.pos.x - true_cx).powi(2) + (result.pos.y - true_cy).powi(2)).sqrt();
     assert!(
         error < 0.1,
         "Weighted Gaussian fit with gain position error {} too large",
@@ -2236,8 +2403,7 @@ fn test_fit_moffat_2d_weighted_basic() {
     };
     let result = fit_moffat_2d_weighted(
         &pixels_buf,
-        10.0,
-        10.0,
+        Vec2::splat(10.0),
         8,
         background,
         noise,
@@ -2249,8 +2415,7 @@ fn test_fit_moffat_2d_weighted_basic() {
     assert!(result.is_some(), "Weighted Moffat fit should succeed");
     let result = result.unwrap();
 
-    let error =
-        ((result.pos.x as f32 - true_cx).powi(2) + (result.pos.y as f32 - true_cy).powi(2)).sqrt();
+    let error = ((result.pos.x - true_cx).powi(2) + (result.pos.y - true_cy).powi(2)).sqrt();
     assert!(
         error < 0.1,
         "Weighted Moffat fit position error {} too large",
@@ -2290,8 +2455,7 @@ fn test_fit_moffat_2d_weighted_variable_beta() {
     };
     let result = fit_moffat_2d_weighted(
         &pixels_buf,
-        10.0,
-        10.0,
+        Vec2::splat(10.0),
         8,
         background,
         noise,
@@ -2307,8 +2471,7 @@ fn test_fit_moffat_2d_weighted_variable_beta() {
     let result = result.unwrap();
 
     // Position should be accurate
-    let error =
-        ((result.pos.x as f32 - true_cx).powi(2) + (result.pos.y as f32 - true_cy).powi(2)).sqrt();
+    let error = ((result.pos.x - true_cx).powi(2) + (result.pos.y - true_cy).powi(2)).sqrt();
     assert!(
         error < 0.1,
         "Weighted Moffat fit position error {} too large",
@@ -2348,17 +2511,16 @@ fn test_refine_centroid_adaptive_sigma_small_fwhm() {
         width,
         height,
         &bg,
-        32.0,
-        32.0,
+        Vec2::splat(32.0),
         TEST_STAMP_RADIUS,
         expected_fwhm,
     );
 
     assert!(result.is_some());
-    let (new_cx, new_cy) = result.unwrap();
+    let new_pos = result.unwrap();
 
     // Should converge towards true position
-    let error = ((new_cx - true_cx).powi(2) + (new_cy - true_cy).powi(2)).sqrt();
+    let error = ((new_pos.x - true_cx).powi(2) + (new_pos.y - true_cy).powi(2)).sqrt();
     assert!(
         error < 0.5,
         "Centroid error {} too large for small FWHM",
@@ -2384,17 +2546,16 @@ fn test_refine_centroid_adaptive_sigma_large_fwhm() {
         width,
         height,
         &bg,
-        32.0,
-        32.0,
+        Vec2::splat(32.0),
         TEST_STAMP_RADIUS,
         expected_fwhm,
     );
 
     assert!(result.is_some());
-    let (new_cx, new_cy) = result.unwrap();
+    let new_pos = result.unwrap();
 
     // Should converge towards true position
-    let error = ((new_cx - true_cx).powi(2) + (new_cy - true_cy).powi(2)).sqrt();
+    let error = ((new_pos.x - true_cx).powi(2) + (new_pos.y - true_cy).powi(2)).sqrt();
     assert!(
         error < 0.5,
         "Centroid error {} too large for large FWHM",
@@ -2414,7 +2575,7 @@ fn test_extract_stamp_valid_center() {
     let height = 64;
     let pixels = Buffer2::new_filled(width, height, 0.5f32);
 
-    let result = extract_stamp(&pixels, 32.0, 32.0, 5);
+    let result = extract_stamp(&pixels, Vec2::splat(32.0), 5);
     assert!(result.is_some(), "Should extract stamp at center");
 
     let (data_x, data_y, data_z, peak) = result.unwrap();
@@ -2434,10 +2595,10 @@ fn test_extract_stamp_edge_invalid() {
     let pixels = Buffer2::new_filled(width, height, 0.5f32);
 
     // Too close to edges
-    assert!(extract_stamp(&pixels, 3.0, 32.0, 5).is_none());
-    assert!(extract_stamp(&pixels, 32.0, 3.0, 5).is_none());
-    assert!(extract_stamp(&pixels, 61.0, 32.0, 5).is_none());
-    assert!(extract_stamp(&pixels, 32.0, 61.0, 5).is_none());
+    assert!(extract_stamp(&pixels, Vec2::new(3.0, 32.0), 5).is_none());
+    assert!(extract_stamp(&pixels, Vec2::new(32.0, 3.0), 5).is_none());
+    assert!(extract_stamp(&pixels, Vec2::new(61.0, 32.0), 5).is_none());
+    assert!(extract_stamp(&pixels, Vec2::new(32.0, 61.0), 5).is_none());
 }
 
 #[test]
@@ -2451,7 +2612,7 @@ fn test_extract_stamp_peak_value() {
     pixels[32 * width + 32] = 0.9;
     let pixels = Buffer2::new(width, height, pixels);
 
-    let result = extract_stamp(&pixels, 32.0, 32.0, 5);
+    let result = extract_stamp(&pixels, Vec2::splat(32.0), 5);
     assert!(result.is_some());
 
     let (_, _, _, peak) = result.unwrap();
@@ -2466,7 +2627,7 @@ fn test_extract_stamp_coordinates() {
     let height = 64;
     let pixels = Buffer2::new_filled(width, height, 0.5f32);
 
-    let result = extract_stamp(&pixels, 32.0, 32.0, 2);
+    let result = extract_stamp(&pixels, Vec2::splat(32.0), 2);
     assert!(result.is_some());
 
     let (data_x, data_y, _, _) = result.unwrap();
@@ -2496,7 +2657,7 @@ fn test_extract_stamp_fractional_position() {
     let pixels = Buffer2::new_filled(width, height, 0.5f32);
 
     // Fractional position 32.3, 32.7 rounds to 32, 33
-    let result = extract_stamp(&pixels, 32.3, 32.7, 2);
+    let result = extract_stamp(&pixels, Vec2::new(32.3, 32.7), 2);
     assert!(result.is_some());
 
     let (data_x, data_y, _, _) = result.unwrap();

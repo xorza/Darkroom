@@ -1,27 +1,27 @@
 //! Scalar (non-SIMD) implementation of centroid refinement.
 
+use glam::Vec2;
+
 use crate::math::{FWHM_TO_SIGMA, fast_exp};
 use crate::star_detection::background::BackgroundMap;
 use crate::star_detection::centroid::is_valid_stamp_position;
 
 /// Scalar fallback for centroid refinement.
-#[allow(clippy::too_many_arguments)]
 pub fn refine_centroid_scalar(
     pixels: &[f32],
     width: usize,
     height: usize,
     background: &BackgroundMap,
-    cx: f32,
-    cy: f32,
+    pos: Vec2,
     stamp_radius: usize,
     expected_fwhm: f32,
-) -> Option<(f32, f32)> {
-    if !is_valid_stamp_position(cx, cy, width, height, stamp_radius) {
+) -> Option<Vec2> {
+    if !is_valid_stamp_position(pos, width, height, stamp_radius) {
         return None;
     }
 
-    let icx = cx.round() as isize;
-    let icy = cy.round() as isize;
+    let icx = pos.x.round() as isize;
+    let icy = pos.y.round() as isize;
 
     // Adaptive sigma based on expected FWHM
     // sigma ≈ FWHM / FWHM_TO_SIGMA, use 0.8× for tighter weighting to reduce noise
@@ -44,8 +44,8 @@ pub fn refine_centroid_scalar(
 
             // Gaussian weight based on distance from current centroid
             // Using fast_exp approximation (~4% max error) for performance
-            let fx = x as f32 - cx;
-            let fy = y as f32 - cy;
+            let fx = x as f32 - pos.x;
+            let fy = y as f32 - pos.y;
             let dist_sq = fx * fx + fy * fy;
             let weight = value * fast_exp(-dist_sq / two_sigma_sq);
 
@@ -59,17 +59,16 @@ pub fn refine_centroid_scalar(
         return None;
     }
 
-    let new_cx = sum_x / sum_w;
-    let new_cy = sum_y / sum_w;
+    let new_pos = Vec2::new(sum_x / sum_w, sum_y / sum_w);
 
     // Reject if centroid moved too far (likely bad detection)
     let stamp_size = 2 * stamp_radius + 1;
     let max_move = stamp_size as f32 / 4.0;
-    if (new_cx - cx).abs() > max_move || (new_cy - cy).abs() > max_move {
+    if (new_pos - pos).abs().max_element() > max_move {
         return None;
     }
 
-    Some((new_cx, new_cy))
+    Some(new_pos)
 }
 
 #[cfg(test)]
@@ -77,6 +76,7 @@ mod tests {
     use super::*;
     use crate::common::Buffer2;
     use crate::star_detection::background::BackgroundConfig;
+    use glam::Vec2;
 
     /// Create a synthetic Gaussian star for testing.
     fn make_gaussian_star(
@@ -114,12 +114,20 @@ mod tests {
         let pixels = make_gaussian_star(width, height, 32.0, 32.0, 2.5, 0.8, 0.1);
         let bg = crate::testing::estimate_background(&pixels, BackgroundConfig::default());
 
-        let result = refine_centroid_scalar(&pixels, width, height, &bg, 32.0, 32.0, 7, 4.0);
+        let result = refine_centroid_scalar(&pixels, width, height, &bg, Vec2::splat(32.0), 7, 4.0);
 
         assert!(result.is_some());
-        let (cx, cy) = result.unwrap();
-        assert!((cx - 32.0).abs() < 0.1, "cx={cx} should be close to 32.0");
-        assert!((cy - 32.0).abs() < 0.1, "cy={cy} should be close to 32.0");
+        let pos = result.unwrap();
+        assert!(
+            (pos.x - 32.0).abs() < 0.1,
+            "cx={} should be close to 32.0",
+            pos.x
+        );
+        assert!(
+            (pos.y - 32.0).abs() < 0.1,
+            "cy={} should be close to 32.0",
+            pos.y
+        );
     }
 
     #[test]
@@ -131,18 +139,20 @@ mod tests {
         let pixels = make_gaussian_star(width, height, true_cx, true_cy, 2.5, 0.8, 0.1);
         let bg = crate::testing::estimate_background(&pixels, BackgroundConfig::default());
 
-        let result = refine_centroid_scalar(&pixels, width, height, &bg, 32.0, 32.0, 7, 4.0);
+        let result = refine_centroid_scalar(&pixels, width, height, &bg, Vec2::splat(32.0), 7, 4.0);
 
         assert!(result.is_some());
-        let (cx, cy) = result.unwrap();
+        let pos = result.unwrap();
         // Single iteration moves toward true center but may not fully converge
         assert!(
-            (cx - 32.0).abs() < 0.5,
-            "cx={cx} should have moved toward {true_cx}"
+            (pos.x - 32.0).abs() < 0.5,
+            "cx={} should have moved toward {true_cx}",
+            pos.x
         );
         assert!(
-            (cy - 32.0).abs() < 0.5,
-            "cy={cy} should have moved toward {true_cy}"
+            (pos.y - 32.0).abs() < 0.5,
+            "cy={} should have moved toward {true_cy}",
+            pos.y
         );
     }
 
@@ -153,7 +163,8 @@ mod tests {
         let pixels = make_gaussian_star(width, height, 32.0, 32.0, 2.5, 0.8, 0.1);
         let bg = crate::testing::estimate_background(&pixels, BackgroundConfig::default());
 
-        let result = refine_centroid_scalar(&pixels, width, height, &bg, 3.0, 32.0, 7, 4.0);
+        let result =
+            refine_centroid_scalar(&pixels, width, height, &bg, Vec2::new(3.0, 32.0), 7, 4.0);
         assert!(result.is_none());
     }
 
@@ -164,7 +175,8 @@ mod tests {
         let pixels = make_gaussian_star(width, height, 32.0, 32.0, 2.5, 0.8, 0.1);
         let bg = crate::testing::estimate_background(&pixels, BackgroundConfig::default());
 
-        let result = refine_centroid_scalar(&pixels, width, height, &bg, 61.0, 32.0, 7, 4.0);
+        let result =
+            refine_centroid_scalar(&pixels, width, height, &bg, Vec2::new(61.0, 32.0), 7, 4.0);
         assert!(result.is_none());
     }
 
@@ -175,7 +187,8 @@ mod tests {
         let pixels = make_gaussian_star(width, height, 32.0, 32.0, 2.5, 0.8, 0.1);
         let bg = crate::testing::estimate_background(&pixels, BackgroundConfig::default());
 
-        let result = refine_centroid_scalar(&pixels, width, height, &bg, 32.0, 3.0, 7, 4.0);
+        let result =
+            refine_centroid_scalar(&pixels, width, height, &bg, Vec2::new(32.0, 3.0), 7, 4.0);
         assert!(result.is_none());
     }
 
@@ -186,7 +199,8 @@ mod tests {
         let pixels = make_gaussian_star(width, height, 32.0, 32.0, 2.5, 0.8, 0.1);
         let bg = crate::testing::estimate_background(&pixels, BackgroundConfig::default());
 
-        let result = refine_centroid_scalar(&pixels, width, height, &bg, 32.0, 61.0, 7, 4.0);
+        let result =
+            refine_centroid_scalar(&pixels, width, height, &bg, Vec2::new(32.0, 61.0), 7, 4.0);
         assert!(result.is_none());
     }
 
@@ -197,7 +211,7 @@ mod tests {
         let pixels = make_uniform_background(width, height, 0.1);
         let bg = crate::testing::estimate_background(&pixels, BackgroundConfig::default());
 
-        let result = refine_centroid_scalar(&pixels, width, height, &bg, 32.0, 32.0, 7, 4.0);
+        let result = refine_centroid_scalar(&pixels, width, height, &bg, Vec2::splat(32.0), 7, 4.0);
         assert!(result.is_none(), "Should return None for zero signal");
     }
 
@@ -209,15 +223,18 @@ mod tests {
         let bg = crate::testing::estimate_background(&pixels, BackgroundConfig::default());
 
         // Test with small stamp (9x9)
-        let result_small = refine_centroid_scalar(&pixels, width, height, &bg, 64.0, 64.0, 4, 6.0);
+        let result_small =
+            refine_centroid_scalar(&pixels, width, height, &bg, Vec2::splat(64.0), 4, 6.0);
         assert!(result_small.is_some());
 
         // Test with medium stamp (15x15)
-        let result_med = refine_centroid_scalar(&pixels, width, height, &bg, 64.0, 64.0, 7, 6.0);
+        let result_med =
+            refine_centroid_scalar(&pixels, width, height, &bg, Vec2::splat(64.0), 7, 6.0);
         assert!(result_med.is_some());
 
         // Test with large stamp (21x21)
-        let result_large = refine_centroid_scalar(&pixels, width, height, &bg, 64.0, 64.0, 10, 6.0);
+        let result_large =
+            refine_centroid_scalar(&pixels, width, height, &bg, Vec2::splat(64.0), 10, 6.0);
         assert!(result_large.is_some());
 
         // All should produce reasonable results
@@ -226,14 +243,16 @@ mod tests {
             ("medium", result_med),
             ("large", result_large),
         ] {
-            let (cx, cy) = result.unwrap();
+            let pos = result.unwrap();
             assert!(
-                (cx - 64.0).abs() < 0.5,
-                "{name}: cx={cx} should be reasonable"
+                (pos.x - 64.0).abs() < 0.5,
+                "{name}: cx={} should be reasonable",
+                pos.x
             );
             assert!(
-                (cy - 64.0).abs() < 0.5,
-                "{name}: cy={cy} should be reasonable"
+                (pos.y - 64.0).abs() < 0.5,
+                "{name}: cy={} should be reasonable",
+                pos.y
             );
         }
     }
@@ -247,7 +266,7 @@ mod tests {
         let bg = crate::testing::estimate_background(&pixels, BackgroundConfig::default());
 
         // With stamp_radius=7, max_move = 15/4 = 3.75 pixels
-        let result = refine_centroid_scalar(&pixels, width, height, &bg, 32.0, 32.0, 7, 4.0);
+        let result = refine_centroid_scalar(&pixels, width, height, &bg, Vec2::splat(32.0), 7, 4.0);
         assert!(
             result.is_none(),
             "Should reject when centroid moves too far"
@@ -272,7 +291,7 @@ mod tests {
         let bg = crate::testing::estimate_background(&pixels, BackgroundConfig::default());
 
         // Should still work - negative values clamped to 0
-        let result = refine_centroid_scalar(&pixels, width, height, &bg, 32.0, 32.0, 7, 4.0);
+        let result = refine_centroid_scalar(&pixels, width, height, &bg, Vec2::splat(32.0), 7, 4.0);
         assert!(result.is_some());
     }
 
@@ -283,11 +302,11 @@ mod tests {
         let pixels = make_gaussian_star(width, height, 32.3, 32.7, 2.5, 10000.0, 0.1);
         let bg = crate::testing::estimate_background(&pixels, BackgroundConfig::default());
 
-        let result = refine_centroid_scalar(&pixels, width, height, &bg, 32.0, 32.0, 7, 4.0);
+        let result = refine_centroid_scalar(&pixels, width, height, &bg, Vec2::splat(32.0), 7, 4.0);
         assert!(result.is_some());
-        let (cx, cy) = result.unwrap();
-        assert!((cx - 32.0).abs() < 0.5);
-        assert!((cy - 32.0).abs() < 0.5);
+        let pos = result.unwrap();
+        assert!((pos.x - 32.0).abs() < 0.5);
+        assert!((pos.y - 32.0).abs() < 0.5);
     }
 
     #[test]
@@ -298,7 +317,7 @@ mod tests {
         let bg = crate::testing::estimate_background(&pixels, BackgroundConfig::default());
 
         // May or may not succeed - just checking it doesn't crash
-        let _ = refine_centroid_scalar(&pixels, width, height, &bg, 32.0, 32.0, 7, 4.0);
+        let _ = refine_centroid_scalar(&pixels, width, height, &bg, Vec2::splat(32.0), 7, 4.0);
     }
 
     #[test]
@@ -308,7 +327,7 @@ mod tests {
         let pixels = make_gaussian_star(width, height, 32.0, 32.0, 1.5, 0.8, 0.1);
         let bg = crate::testing::estimate_background(&pixels, BackgroundConfig::default());
 
-        let result = refine_centroid_scalar(&pixels, width, height, &bg, 32.0, 32.0, 4, 2.0);
+        let result = refine_centroid_scalar(&pixels, width, height, &bg, Vec2::splat(32.0), 4, 2.0);
         assert!(result.is_some());
     }
 
@@ -319,7 +338,8 @@ mod tests {
         let pixels = make_gaussian_star(width, height, 64.0, 64.0, 5.0, 0.8, 0.1);
         let bg = crate::testing::estimate_background(&pixels, BackgroundConfig::default());
 
-        let result = refine_centroid_scalar(&pixels, width, height, &bg, 64.0, 64.0, 15, 10.0);
+        let result =
+            refine_centroid_scalar(&pixels, width, height, &bg, Vec2::splat(64.0), 15, 10.0);
         assert!(result.is_some());
     }
 }

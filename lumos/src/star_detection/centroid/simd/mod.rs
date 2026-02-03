@@ -18,6 +18,7 @@ mod neon;
 mod bench;
 
 use common::cpu_features;
+use glam::Vec2;
 
 use crate::star_detection::background::BackgroundMap;
 
@@ -35,17 +36,15 @@ pub use neon::refine_centroid_neon;
 ///
 /// Automatically dispatches to AVX2, SSE, NEON, or scalar based on
 /// runtime CPU feature detection.
-#[allow(clippy::too_many_arguments)]
 pub fn refine_centroid(
     pixels: &[f32],
     width: usize,
     height: usize,
     background: &BackgroundMap,
-    cx: f32,
-    cy: f32,
+    pos: Vec2,
     stamp_radius: usize,
     expected_fwhm: f32,
-) -> Option<(f32, f32)> {
+) -> Option<Vec2> {
     #[cfg(target_arch = "x86_64")]
     {
         if cpu_features::has_avx2_fma() {
@@ -56,8 +55,7 @@ pub fn refine_centroid(
                     width,
                     height,
                     background,
-                    cx,
-                    cy,
+                    pos,
                     stamp_radius,
                     expected_fwhm,
                 )
@@ -71,8 +69,7 @@ pub fn refine_centroid(
                     width,
                     height,
                     background,
-                    cx,
-                    cy,
+                    pos,
                     stamp_radius,
                     expected_fwhm,
                 )
@@ -89,8 +86,7 @@ pub fn refine_centroid(
                 width,
                 height,
                 background,
-                cx,
-                cy,
+                pos,
                 stamp_radius,
                 expected_fwhm,
             )
@@ -102,8 +98,7 @@ pub fn refine_centroid(
         width,
         height,
         background,
-        cx,
-        cy,
+        pos,
         stamp_radius,
         expected_fwhm,
     )
@@ -114,6 +109,7 @@ mod tests {
     use super::*;
     use crate::common::Buffer2;
     use crate::star_detection::background::BackgroundConfig;
+    use glam::Vec2;
 
     fn make_gaussian_star(
         width: usize,
@@ -150,12 +146,20 @@ mod tests {
         let pixels = make_gaussian_star(width, height, 32.0, 32.0, 2.5, 0.8, 0.1);
         let bg = crate::testing::estimate_background(&pixels, BackgroundConfig::default());
 
-        let result = refine_centroid(&pixels, width, height, &bg, 32.0, 32.0, 7, 4.0);
+        let result = refine_centroid(&pixels, width, height, &bg, Vec2::splat(32.0), 7, 4.0);
 
         assert!(result.is_some());
-        let (cx, cy) = result.unwrap();
-        assert!((cx - 32.0).abs() < 0.1, "cx={cx} should be close to 32.0");
-        assert!((cy - 32.0).abs() < 0.1, "cy={cy} should be close to 32.0");
+        let pos = result.unwrap();
+        assert!(
+            (pos.x - 32.0).abs() < 0.1,
+            "cx={} should be close to 32.0",
+            pos.x
+        );
+        assert!(
+            (pos.y - 32.0).abs() < 0.1,
+            "cy={} should be close to 32.0",
+            pos.y
+        );
     }
 
     #[test]
@@ -167,18 +171,20 @@ mod tests {
         let pixels = make_gaussian_star(width, height, true_cx, true_cy, 2.5, 0.8, 0.1);
         let bg = crate::testing::estimate_background(&pixels, BackgroundConfig::default());
 
-        let result = refine_centroid(&pixels, width, height, &bg, 32.0, 32.0, 7, 4.0);
+        let result = refine_centroid(&pixels, width, height, &bg, Vec2::splat(32.0), 7, 4.0);
 
         assert!(result.is_some());
-        let (cx, cy) = result.unwrap();
+        let pos = result.unwrap();
         // Single iteration moves toward true center but may not reach it
         assert!(
-            (cx - 32.0).abs() < (true_cx - 32.0).abs() + 0.1,
-            "cx={cx} should move toward {true_cx}"
+            (pos.x - 32.0).abs() < (true_cx - 32.0).abs() + 0.1,
+            "cx={} should move toward {true_cx}",
+            pos.x
         );
         assert!(
-            (cy - 32.0).abs() < (true_cy - 32.0).abs() + 0.1,
-            "cy={cy} should move toward {true_cy}"
+            (pos.y - 32.0).abs() < (true_cy - 32.0).abs() + 0.1,
+            "cy={} should move toward {true_cy}",
+            pos.y
         );
     }
 
@@ -190,21 +196,22 @@ mod tests {
         let bg = crate::testing::estimate_background(&pixels, BackgroundConfig::default());
 
         let scalar =
-            refine_centroid_scalar(&pixels, width, height, &bg, 32.0, 32.0, 7, 4.0).unwrap();
-        let dispatched = refine_centroid(&pixels, width, height, &bg, 32.0, 32.0, 7, 4.0).unwrap();
+            refine_centroid_scalar(&pixels, width, height, &bg, Vec2::splat(32.0), 7, 4.0).unwrap();
+        let dispatched =
+            refine_centroid(&pixels, width, height, &bg, Vec2::splat(32.0), 7, 4.0).unwrap();
 
         // Should be very close (SIMD uses same algorithm)
         assert!(
-            (scalar.0 - dispatched.0).abs() < 0.01,
+            (scalar.x - dispatched.x).abs() < 0.01,
             "Dispatched cx={} should match scalar cx={}",
-            dispatched.0,
-            scalar.0
+            dispatched.x,
+            scalar.x
         );
         assert!(
-            (scalar.1 - dispatched.1).abs() < 0.01,
+            (scalar.y - dispatched.y).abs() < 0.01,
             "Dispatched cy={} should match scalar cy={}",
-            dispatched.1,
-            scalar.1
+            dispatched.y,
+            scalar.y
         );
     }
 
@@ -215,10 +222,18 @@ mod tests {
         let pixels = make_gaussian_star(width, height, 32.0, 32.0, 2.5, 0.8, 0.1);
         let bg = crate::testing::estimate_background(&pixels, BackgroundConfig::default());
 
-        assert!(refine_centroid(&pixels, width, height, &bg, 3.0, 32.0, 7, 4.0).is_none());
-        assert!(refine_centroid(&pixels, width, height, &bg, 61.0, 32.0, 7, 4.0).is_none());
-        assert!(refine_centroid(&pixels, width, height, &bg, 32.0, 3.0, 7, 4.0).is_none());
-        assert!(refine_centroid(&pixels, width, height, &bg, 32.0, 61.0, 7, 4.0).is_none());
+        assert!(
+            refine_centroid(&pixels, width, height, &bg, Vec2::new(3.0, 32.0), 7, 4.0).is_none()
+        );
+        assert!(
+            refine_centroid(&pixels, width, height, &bg, Vec2::new(61.0, 32.0), 7, 4.0).is_none()
+        );
+        assert!(
+            refine_centroid(&pixels, width, height, &bg, Vec2::new(32.0, 3.0), 7, 4.0).is_none()
+        );
+        assert!(
+            refine_centroid(&pixels, width, height, &bg, Vec2::new(32.0, 61.0), 7, 4.0).is_none()
+        );
     }
 
     #[test]
@@ -228,7 +243,7 @@ mod tests {
         let pixels = make_uniform_background(width, height, 0.1);
         let bg = crate::testing::estimate_background(&pixels, BackgroundConfig::default());
 
-        let result = refine_centroid(&pixels, width, height, &bg, 32.0, 32.0, 7, 4.0);
+        let result = refine_centroid(&pixels, width, height, &bg, Vec2::splat(32.0), 7, 4.0);
         assert!(result.is_none());
     }
 
@@ -244,26 +259,33 @@ mod tests {
 
             let stamp_radius = ((fwhm * 1.75).ceil() as usize).clamp(4, 15);
 
-            let result =
-                refine_centroid(&pixels, width, height, &bg, 64.0, 64.0, stamp_radius, fwhm);
+            let result = refine_centroid(
+                &pixels,
+                width,
+                height,
+                &bg,
+                Vec2::splat(64.0),
+                stamp_radius,
+                fwhm,
+            );
 
             assert!(
                 result.is_some(),
                 "FWHM={} should produce valid result",
                 fwhm
             );
-            let (cx, cy) = result.unwrap();
+            let pos = result.unwrap();
             assert!(
-                (cx - 64.0).abs() < 1.0,
+                (pos.x - 64.0).abs() < 1.0,
                 "FWHM={}: cx={} should be reasonable",
                 fwhm,
-                cx
+                pos.x
             );
             assert!(
-                (cy - 64.0).abs() < 1.0,
+                (pos.y - 64.0).abs() < 1.0,
                 "FWHM={}: cy={} should be reasonable",
                 fwhm,
-                cy
+                pos.y
             );
         }
     }

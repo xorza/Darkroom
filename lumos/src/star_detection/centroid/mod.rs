@@ -24,6 +24,7 @@ pub use moffat_fit::{MoffatFitConfig, MoffatFitResult, fit_moffat_2d};
 pub use moffat_fit::{alpha_beta_to_fwhm, fwhm_beta_to_alpha};
 
 use arrayvec::ArrayVec;
+use glam::{DVec2, Vec2};
 
 use super::background::BackgroundMap;
 use super::candidate_detection::StarCandidate;
@@ -87,14 +88,13 @@ fn compute_stamp_radius(expected_fwhm: f32) -> usize {
 /// Check if position is within valid bounds for stamp extraction.
 #[inline]
 pub(crate) fn is_valid_stamp_position(
-    cx: f32,
-    cy: f32,
+    pos: Vec2,
     width: usize,
     height: usize,
     stamp_radius: usize,
 ) -> bool {
-    let icx = cx.round() as isize;
-    let icy = cy.round() as isize;
+    let icx = pos.x.round() as isize;
+    let icy = pos.y.round() as isize;
     icx >= stamp_radius as isize
         && icy >= stamp_radius as isize
         && icx < (width - stamp_radius) as isize
@@ -116,19 +116,18 @@ pub(crate) type StampData = (
 /// Uses stack-allocated ArrayVec to avoid heap allocations.
 pub(crate) fn extract_stamp(
     pixels: &Buffer2<f32>,
-    cx: f32,
-    cy: f32,
+    pos: Vec2,
     stamp_radius: usize,
 ) -> Option<StampData> {
     let width = pixels.width();
     let height = pixels.height();
 
-    if !is_valid_stamp_position(cx, cy, width, height, stamp_radius) {
+    if !is_valid_stamp_position(pos, width, height, stamp_radius) {
         return None;
     }
 
-    let icx = cx.round() as isize;
-    let icy = cy.round() as isize;
+    let icx = pos.x.round() as isize;
+    let icy = pos.y.round() as isize;
     let stamp_radius_i32 = stamp_radius as i32;
     let mut data_x = ArrayVec::new();
     let mut data_y = ArrayVec::new();
@@ -196,8 +195,7 @@ pub(crate) fn estimate_sigma_from_moments(
     data_x: &[f32],
     data_y: &[f32],
     data_z: &[f32],
-    cx: f32,
-    cy: f32,
+    pos: Vec2,
     background: f32,
 ) -> f32 {
     let mut sum_r2 = 0.0f32;
@@ -205,7 +203,7 @@ pub(crate) fn estimate_sigma_from_moments(
 
     for ((&x, &y), &z) in data_x.iter().zip(data_y.iter()).zip(data_z.iter()) {
         let w = (z - background).max(0.0);
-        let r2 = (x - cx).powi(2) + (y - cy).powi(2);
+        let r2 = (x - pos.x).powi(2) + (y - pos.y).powi(2);
         sum_r2 += w * r2;
         sum_w += w;
     }
@@ -227,8 +225,7 @@ pub(crate) fn estimate_sigma_from_moments(
 /// * `pixels` - Image data
 /// * `width` - Image width
 /// * `height` - Image height
-/// * `cx` - Star center x coordinate
-/// * `cy` - Star center y coordinate
+/// * `pos` - Star center position
 /// * `inner_radius` - Inner radius of annulus (excludes star)
 /// * `outer_radius` - Outer radius of annulus
 ///
@@ -238,13 +235,12 @@ fn compute_annulus_background(
     pixels: &[f32],
     width: usize,
     height: usize,
-    cx: f32,
-    cy: f32,
+    pos: Vec2,
     inner_radius: usize,
     outer_radius: usize,
 ) -> Option<(f32, f32)> {
-    let icx = cx.round() as isize;
-    let icy = cy.round() as isize;
+    let icx = pos.x.round() as isize;
+    let icy = pos.y.round() as isize;
     let inner_r2 = (inner_radius * inner_radius) as f32;
     let outer_r2 = (outer_radius * outer_radius) as f32;
 
@@ -309,36 +305,32 @@ pub fn compute_centroid(
     let stamp_radius = compute_stamp_radius(config.psf.expected_fwhm);
 
     // Initial position from peak
-    let mut cx = candidate.peak.x as f32;
-    let mut cy = candidate.peak.y as f32;
+    let mut pos = Vec2::new(candidate.peak.x as f32, candidate.peak.y as f32);
 
     // First pass: always use weighted moments for initial refinement
     // This gives a good starting point for fitting methods
     for _ in 0..MAX_ITERATIONS {
-        let (new_cx, new_cy) = refine_centroid(
+        let new_pos = refine_centroid(
             pixels,
             width,
             height,
             background,
-            cx,
-            cy,
+            pos,
             stamp_radius,
             config.psf.expected_fwhm,
         )?;
 
-        let dx = new_cx - cx;
-        let dy = new_cy - cy;
-        cx = new_cx;
-        cy = new_cy;
+        let delta = new_pos - pos;
+        pos = new_pos;
 
-        if dx * dx + dy * dy < CONVERGENCE_THRESHOLD_SQ {
+        if delta.length_squared() < CONVERGENCE_THRESHOLD_SQ {
             break;
         }
     }
 
     // Compute local background based on configured method
-    let icx = cx.round() as isize;
-    let icy = cy.round() as isize;
+    let icx = pos.x.round() as isize;
+    let icy = pos.y.round() as isize;
     let idx = icy as usize * width + icx as usize;
     let global_fallback = || (background.background[idx], background.noise[idx]);
 
@@ -347,7 +339,7 @@ pub fn compute_centroid(
         LocalBackgroundMethod::LocalAnnulus => {
             let inner_radius = stamp_radius;
             let outer_radius = (stamp_radius as f32 * 1.5).ceil() as usize;
-            compute_annulus_background(pixels, width, height, cx, cy, inner_radius, outer_radius)
+            compute_annulus_background(pixels, width, height, pos, inner_radius, outer_radius)
                 .unwrap_or_else(global_fallback)
         }
     };
@@ -356,12 +348,10 @@ pub fn compute_centroid(
     match config.centroid.method {
         CentroidMethod::GaussianFit => {
             let fit_config = GaussianFitConfig::default();
-            if let Some(result) =
-                fit_gaussian_2d(pixels, cx, cy, stamp_radius, local_bg, &fit_config)
-                    .filter(|r| r.converged)
+            if let Some(result) = fit_gaussian_2d(pixels, pos, stamp_radius, local_bg, &fit_config)
+                .filter(|r| r.converged)
             {
-                cx = result.pos.x as f32;
-                cy = result.pos.y as f32;
+                pos = result.pos;
             }
         }
         CentroidMethod::MoffatFit { beta } => {
@@ -370,17 +360,16 @@ pub fn compute_centroid(
                 fixed_beta: beta,
                 ..MoffatFitConfig::default()
             };
-            if let Some(result) = fit_moffat_2d(pixels, cx, cy, stamp_radius, local_bg, &fit_config)
+            if let Some(result) = fit_moffat_2d(pixels, pos, stamp_radius, local_bg, &fit_config)
                 .filter(|r| r.converged)
             {
-                cx = result.pos.x as f32;
-                cy = result.pos.y as f32;
+                pos = result.pos;
             }
         }
         CentroidMethod::WeightedMoments => {
             // Already computed above
         }
-    }
+    };
 
     // Compute quality metrics
     let (gain, read_noise) = config
@@ -388,14 +377,15 @@ pub fn compute_centroid(
         .as_ref()
         .map(|nm| (Some(nm.gain), Some(nm.read_noise)))
         .unwrap_or((None, None));
-    let metrics = compute_metrics(pixels, background, cx, cy, stamp_radius, gain, read_noise)?;
+
+    let metrics = compute_metrics(pixels, background, pos, stamp_radius, gain, read_noise)?;
 
     // Compute L.A.Cosmic Laplacian SNR for cosmic ray detection
     let laplacian_snr_value =
-        compute_laplacian_snr(pixels, cx, cy, stamp_radius, local_bg, local_noise);
+        compute_laplacian_snr(pixels, pos, stamp_radius, local_bg, local_noise);
 
     Some(Star {
-        pos: glam::DVec2::new(cx as f64, cy as f64),
+        pos: pos.as_dvec2(),
         flux: metrics.flux,
         fwhm: metrics.fwhm,
         eccentricity: metrics.eccentricity,
@@ -410,31 +400,28 @@ pub fn compute_centroid(
 
 /// Single iteration of centroid refinement.
 ///
-/// Returns (new_x, new_y) or None if position is invalid.
+/// Returns the new position or None if position is invalid.
 ///
 /// The Gaussian weighting sigma is adaptive based on expected FWHM:
 /// sigma ≈ FWHM / 2.355 × 0.8 (slightly tighter to reduce noise influence)
 ///
 /// Automatically dispatches to AVX2, SSE, NEON, or scalar based on
 /// runtime CPU feature detection.
-#[allow(clippy::too_many_arguments)]
 pub(crate) fn refine_centroid(
     pixels: &[f32],
     width: usize,
     height: usize,
     background: &BackgroundMap,
-    cx: f32,
-    cy: f32,
+    pos: Vec2,
     stamp_radius: usize,
     expected_fwhm: f32,
-) -> Option<(f32, f32)> {
+) -> Option<Vec2> {
     simd::refine_centroid(
         pixels,
         width,
         height,
         background,
-        cx,
-        cy,
+        pos,
         stamp_radius,
         expected_fwhm,
     )
@@ -461,12 +448,10 @@ pub(crate) struct StarMetrics {
 ///
 /// Otherwise, uses the simplified background-dominated formula:
 /// `SNR = flux / (σ_sky × sqrt(npix))`
-#[allow(clippy::too_many_arguments)]
 pub(crate) fn compute_metrics(
     pixels: &Buffer2<f32>,
     background: &BackgroundMap,
-    cx: f32,
-    cy: f32,
+    pos: Vec2,
     stamp_radius: usize,
     gain: Option<f32>,
     read_noise: Option<f32>,
@@ -474,12 +459,12 @@ pub(crate) fn compute_metrics(
     let width = pixels.width();
     let height = pixels.height();
 
-    if !is_valid_stamp_position(cx, cy, width, height, stamp_radius) {
+    if !is_valid_stamp_position(pos, width, height, stamp_radius) {
         return None;
     }
 
-    let icx = cx.round() as isize;
-    let icy = cy.round() as isize;
+    let icx = pos.x.round() as isize;
+    let icy = pos.y.round() as isize;
 
     // Collect background-subtracted values and positions
     let mut flux = 0.0f32;
@@ -525,8 +510,8 @@ pub(crate) fn compute_metrics(
             marginal_y[my_idx] += value;
 
             // Weighted second moments for FWHM and eccentricity
-            let fx = x as f32 - cx;
-            let fy = y as f32 - cy;
+            let fx = x as f32 - pos.x;
+            let fy = y as f32 - pos.y;
             sum_r2 += value * (fx * fx + fy * fy);
             sum_x2 += value * fx * fx;
             sum_y2 += value * fy * fy;

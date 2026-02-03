@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::math::{fwhm_to_sigma, sigma_to_fwhm};
+use glam::Vec2;
 
 fn make_gaussian_stamp(
     width: usize,
@@ -64,7 +65,7 @@ fn test_gaussian_fit_centered() {
     let pixels_buf = Buffer2::new(width, height, pixels);
 
     let config = GaussianFitConfig::default();
-    let result = fit_gaussian_2d(&pixels_buf, 10.0, 10.0, 8, true_bg, &config);
+    let result = fit_gaussian_2d(&pixels_buf, Vec2::splat(10.0), 8, true_bg, &config);
 
     assert!(result.is_some());
     let result = result.unwrap();
@@ -92,7 +93,7 @@ fn test_gaussian_fit_subpixel_offset() {
     let pixels_buf = Buffer2::new(width, height, pixels);
 
     let config = GaussianFitConfig::default();
-    let result = fit_gaussian_2d(&pixels_buf, 10.0, 11.0, 8, true_bg, &config);
+    let result = fit_gaussian_2d(&pixels_buf, Vec2::new(10.0, 11.0), 8, true_bg, &config);
 
     assert!(result.is_some());
     let result = result.unwrap();
@@ -116,7 +117,7 @@ fn test_gaussian_fit_asymmetric() {
     let pixels_buf = Buffer2::new(width, height, pixels);
 
     let config = GaussianFitConfig::default();
-    let result = fit_gaussian_2d(&pixels_buf, 10.0, 10.0, 8, bg, &config);
+    let result = fit_gaussian_2d(&pixels_buf, Vec2::splat(10.0), 8, bg, &config);
 
     assert!(result.is_some());
     let result = result.unwrap();
@@ -142,7 +143,7 @@ fn test_gaussian_fit_edge_position() {
     let pixels_buf = Buffer2::new(width, height, pixels);
 
     let config = GaussianFitConfig::default();
-    let result = fit_gaussian_2d(&pixels_buf, 2.0, 10.0, 8, 0.1, &config);
+    let result = fit_gaussian_2d(&pixels_buf, Vec2::new(2.0, 10.0), 8, 0.1, &config);
     assert!(result.is_none());
 }
 
@@ -167,7 +168,7 @@ fn test_gaussian_fit_high_snr() {
     let pixels_buf = Buffer2::new(width, height, pixels);
 
     let config = GaussianFitConfig::default();
-    let result = fit_gaussian_2d(&pixels_buf, 10.0, 10.0, 8, true_bg, &config);
+    let result = fit_gaussian_2d(&pixels_buf, Vec2::splat(10.0), 8, true_bg, &config);
 
     assert!(result.is_some());
     let result = result.unwrap();
@@ -192,7 +193,7 @@ fn test_gaussian_fit_low_amplitude() {
     let pixels_buf = Buffer2::new(width, height, pixels);
 
     let config = GaussianFitConfig::default();
-    let result = fit_gaussian_2d(&pixels_buf, 10.0, 10.0, 8, true_bg, &config);
+    let result = fit_gaussian_2d(&pixels_buf, Vec2::splat(10.0), 8, true_bg, &config);
 
     // Should still find something (amplitude is constrained to min 0.01)
     assert!(result.is_some());
@@ -214,7 +215,7 @@ fn test_gaussian_fit_large_sigma() {
     let pixels_buf = Buffer2::new(width, height, pixels);
 
     let config = GaussianFitConfig::default();
-    let result = fit_gaussian_2d(&pixels_buf, 15.0, 15.0, 12, true_bg, &config);
+    let result = fit_gaussian_2d(&pixels_buf, Vec2::splat(15.0), 12, true_bg, &config);
 
     assert!(result.is_some());
     let result = result.unwrap();
@@ -239,7 +240,7 @@ fn test_gaussian_fit_small_sigma() {
     let pixels_buf = Buffer2::new(width, height, pixels);
 
     let config = GaussianFitConfig::default();
-    let result = fit_gaussian_2d(&pixels_buf, 7.0, 7.0, 5, true_bg, &config);
+    let result = fit_gaussian_2d(&pixels_buf, Vec2::splat(7.0), 5, true_bg, &config);
 
     assert!(result.is_some());
     let result = result.unwrap();
@@ -271,7 +272,7 @@ fn test_gaussian_fit_with_noise() {
     let pixels_buf = Buffer2::new(width, height, pixels);
 
     let config = GaussianFitConfig::default();
-    let result = fit_gaussian_2d(&pixels_buf, 10.0, 10.0, 8, true_bg, &config);
+    let result = fit_gaussian_2d(&pixels_buf, Vec2::splat(10.0), 8, true_bg, &config);
 
     assert!(result.is_some());
     let result = result.unwrap();
@@ -299,8 +300,7 @@ fn test_gaussian_fit_weighted() {
     let config = GaussianFitConfig::default();
     let result = fit_gaussian_2d_weighted(
         &pixels_buf,
-        10.0,
-        11.0,
+        Vec2::new(10.0, 11.0),
         8,
         true_bg,
         noise,
@@ -325,7 +325,7 @@ fn test_gaussian_fit_stamp_too_small() {
     let config = GaussianFitConfig::default();
     // Center at 2,2 with radius 3 would go outside the 5x5 image
     // extract_stamp returns None when stamp doesn't fit
-    let result = fit_gaussian_2d(&pixels_buf, 2.0, 2.0, 3, 0.5, &config);
+    let result = fit_gaussian_2d(&pixels_buf, Vec2::splat(2.0), 3, 0.5, &config);
     assert!(result.is_none());
 }
 
@@ -345,7 +345,7 @@ fn test_gaussian_fit_zero_background() {
     let pixels_buf = Buffer2::new(width, height, pixels);
 
     let config = GaussianFitConfig::default();
-    let result = fit_gaussian_2d(&pixels_buf, 10.0, 10.0, 8, true_bg, &config);
+    let result = fit_gaussian_2d(&pixels_buf, Vec2::splat(10.0), 8, true_bg, &config);
 
     assert!(result.is_some());
     let result = result.unwrap();
@@ -370,7 +370,7 @@ fn test_gaussian_fit_high_background() {
     let pixels_buf = Buffer2::new(width, height, pixels);
 
     let config = GaussianFitConfig::default();
-    let result = fit_gaussian_2d(&pixels_buf, 10.0, 10.0, 8, true_bg, &config);
+    let result = fit_gaussian_2d(&pixels_buf, Vec2::splat(10.0), 8, true_bg, &config);
 
     assert!(result.is_some());
     let result = result.unwrap();
@@ -484,7 +484,7 @@ fn test_gaussian_fit_with_gaussian_noise() {
     let pixels_buf = Buffer2::new(width, height, pixels);
 
     let config = GaussianFitConfig::default();
-    let result = fit_gaussian_2d(&pixels_buf, 10.0, 10.0, 8, true_bg, &config);
+    let result = fit_gaussian_2d(&pixels_buf, Vec2::splat(10.0), 8, true_bg, &config);
 
     assert!(result.is_some());
     let result = result.unwrap();
@@ -521,7 +521,7 @@ fn test_gaussian_fit_high_noise_still_converges() {
     let pixels_buf = Buffer2::new(width, height, pixels);
 
     let config = GaussianFitConfig::default();
-    let result = fit_gaussian_2d(&pixels_buf, 10.0, 10.0, 8, true_bg, &config);
+    let result = fit_gaussian_2d(&pixels_buf, Vec2::splat(10.0), 8, true_bg, &config);
 
     // Should still converge even with high noise
     assert!(result.is_some());
@@ -556,7 +556,7 @@ fn test_gaussian_fit_low_snr() {
     let pixels_buf = Buffer2::new(width, height, pixels);
 
     let config = GaussianFitConfig::default();
-    let result = fit_gaussian_2d(&pixels_buf, 10.0, 10.0, 8, true_bg, &config);
+    let result = fit_gaussian_2d(&pixels_buf, Vec2::splat(10.0), 8, true_bg, &config);
 
     // Low SNR should still produce a result (may not be accurate)
     assert!(result.is_some());
@@ -587,7 +587,7 @@ fn test_gaussian_fit_wrong_background_estimate() {
 
     // Use wrong background estimate (20% error)
     let wrong_bg = true_bg * 1.2;
-    let result = fit_gaussian_2d(&pixels_buf, 10.0, 10.0, 8, wrong_bg, &config);
+    let result = fit_gaussian_2d(&pixels_buf, Vec2::splat(10.0), 8, wrong_bg, &config);
 
     assert!(result.is_some());
     let result = result.unwrap();
@@ -632,7 +632,7 @@ fn test_gaussian_fit_very_high_amplitude() {
     let pixels_buf = Buffer2::new(width, height, pixels);
 
     let config = GaussianFitConfig::default();
-    let result = fit_gaussian_2d(&pixels_buf, 10.0, 10.0, 8, true_bg, &config);
+    let result = fit_gaussian_2d(&pixels_buf, Vec2::splat(10.0), 8, true_bg, &config);
 
     assert!(result.is_some());
     let result = result.unwrap();
@@ -658,7 +658,7 @@ fn test_gaussian_fit_narrow_psf() {
     let pixels_buf = Buffer2::new(width, height, pixels);
 
     let config = GaussianFitConfig::default();
-    let result = fit_gaussian_2d(&pixels_buf, 10.0, 10.0, 8, true_bg, &config);
+    let result = fit_gaussian_2d(&pixels_buf, Vec2::splat(10.0), 8, true_bg, &config);
 
     assert!(result.is_some());
     let result = result.unwrap();
@@ -690,7 +690,7 @@ fn test_gaussian_fit_converges_within_max_iterations() {
         max_iterations: 10, // Low iteration limit
         ..Default::default()
     };
-    let result = fit_gaussian_2d(&pixels_buf, 10.0, 10.0, 8, true_bg, &config);
+    let result = fit_gaussian_2d(&pixels_buf, Vec2::splat(10.0), 8, true_bg, &config);
 
     assert!(result.is_some());
     let result = result.unwrap();
@@ -720,7 +720,7 @@ fn test_gaussian_fit_bad_initial_guess_still_converges() {
     };
 
     // Start from a position offset by 2 pixels
-    let result = fit_gaussian_2d(&pixels_buf, 8.0, 12.0, 8, true_bg, &config);
+    let result = fit_gaussian_2d(&pixels_buf, Vec2::new(8.0, 12.0), 8, true_bg, &config);
 
     assert!(result.is_some());
     let result = result.unwrap();
@@ -747,7 +747,7 @@ fn test_gaussian_fit_uniform_data_returns_result() {
     let pixels_buf = Buffer2::new(width, height, pixels);
 
     let config = GaussianFitConfig::default();
-    let result = fit_gaussian_2d(&pixels_buf, 10.0, 10.0, 8, uniform_value, &config);
+    let result = fit_gaussian_2d(&pixels_buf, Vec2::splat(10.0), 8, uniform_value, &config);
 
     // Should produce some result (may not converge well)
     assert!(result.is_some());
@@ -845,7 +845,7 @@ fn test_gaussian_fit_center_outside_stamp_rejected() {
 
     let config = GaussianFitConfig::default();
     // Give initial guess very far from true center - should still find it
-    let result = fit_gaussian_2d(&pixels_buf, 10.0, 10.0, 3, true_bg, &config);
+    let result = fit_gaussian_2d(&pixels_buf, Vec2::splat(10.0), 3, true_bg, &config);
 
     // Small stamp radius = 3, if result.pos.x as f32 moves more than 3 pixels from cx, it's rejected
     // With true center at 10, the fit should succeed
@@ -868,7 +868,7 @@ fn test_gaussian_fit_rms_residual_computed() {
     let pixels_buf = Buffer2::new(width, height, pixels);
 
     let config = GaussianFitConfig::default();
-    let result = fit_gaussian_2d(&pixels_buf, 10.0, 10.0, 8, true_bg, &config).unwrap();
+    let result = fit_gaussian_2d(&pixels_buf, Vec2::splat(10.0), 8, true_bg, &config).unwrap();
 
     // For perfect data, RMS residual should be very small
     assert!(
@@ -904,7 +904,7 @@ fn test_gaussian_fit_multiple_positions() {
         let pixels_buf = Buffer2::new(width, height, pixels);
 
         let config = GaussianFitConfig::default();
-        let result = fit_gaussian_2d(&pixels_buf, 10.0, 10.0, 8, true_bg, &config);
+        let result = fit_gaussian_2d(&pixels_buf, Vec2::splat(10.0), 8, true_bg, &config);
 
         assert!(
             result.is_some(),
@@ -1084,13 +1084,13 @@ fn test_gaussian_fit_weighted_improves_accuracy_with_noise() {
     let config = GaussianFitConfig::default();
 
     // Unweighted fit
-    let result_unweighted = fit_gaussian_2d(&pixels_buf, 10.0, 11.0, 8, true_bg, &config).unwrap();
+    let result_unweighted =
+        fit_gaussian_2d(&pixels_buf, Vec2::new(10.0, 11.0), 8, true_bg, &config).unwrap();
 
     // Weighted fit with proper noise model (use small read noise to avoid zero weights)
     let result_weighted = fit_gaussian_2d_weighted(
         &pixels_buf,
-        10.0,
-        11.0,
+        Vec2::new(10.0, 11.0),
         8,
         true_bg,
         noise_sigma,
@@ -1141,8 +1141,7 @@ fn test_gaussian_fit_weighted_gain_effects() {
     for gain in [0.5, 1.0, 2.0, 5.0] {
         let result = fit_gaussian_2d_weighted(
             &pixels_buf,
-            10.0,
-            10.0,
+            Vec2::splat(10.0),
             8,
             true_bg,
             noise,
@@ -1189,8 +1188,7 @@ fn test_gaussian_fit_weighted_read_noise_effects() {
     for read_noise in [0.0, 2.0, 5.0, 10.0, 20.0] {
         let result = fit_gaussian_2d_weighted(
             &pixels_buf,
-            10.0,
-            10.0,
+            Vec2::splat(10.0),
             8,
             true_bg,
             noise,
@@ -1236,8 +1234,7 @@ fn test_gaussian_fit_weighted_no_gain_no_read_noise() {
     // Test with None for gain and read_noise
     let result = fit_gaussian_2d_weighted(
         &pixels_buf,
-        10.0,
-        10.0,
+        Vec2::splat(10.0),
         8,
         true_bg,
         noise,
@@ -1273,7 +1270,7 @@ fn test_gaussian_fit_sigma_at_lower_bound() {
     let pixels_buf = Buffer2::new(width, height, pixels);
 
     let config = GaussianFitConfig::default();
-    let result = fit_gaussian_2d(&pixels_buf, 7.0, 7.0, 5, true_bg, &config);
+    let result = fit_gaussian_2d(&pixels_buf, Vec2::splat(7.0), 5, true_bg, &config);
 
     assert!(result.is_some());
     let result = result.unwrap();
@@ -1303,7 +1300,13 @@ fn test_gaussian_fit_sigma_at_upper_bound() {
     let pixels_buf = Buffer2::new(width, height, pixels);
 
     let config = GaussianFitConfig::default();
-    let result = fit_gaussian_2d(&pixels_buf, 15.0, 15.0, stamp_radius, true_bg, &config);
+    let result = fit_gaussian_2d(
+        &pixels_buf,
+        Vec2::splat(15.0),
+        stamp_radius,
+        true_bg,
+        &config,
+    );
 
     assert!(result.is_some());
     let result = result.unwrap();
@@ -1333,7 +1336,7 @@ fn test_gaussian_fit_extreme_amplitude_range() {
         let pixels_buf = Buffer2::new(width, height, pixels);
 
         let config = GaussianFitConfig::default();
-        let result = fit_gaussian_2d(&pixels_buf, 10.0, 10.0, 8, true_bg, &config);
+        let result = fit_gaussian_2d(&pixels_buf, Vec2::splat(10.0), 8, true_bg, &config);
 
         assert!(result.is_some(), "Failed for amplitude=10^{}", amp_exp);
         let result = result.unwrap();
@@ -1372,7 +1375,7 @@ fn test_gaussian_fit_high_sigma_low_amplitude() {
     let pixels_buf = Buffer2::new(width, height, pixels);
 
     let config = GaussianFitConfig::default();
-    let result = fit_gaussian_2d(&pixels_buf, 20.0, 20.0, 15, true_bg, &config);
+    let result = fit_gaussian_2d(&pixels_buf, Vec2::splat(20.0), 15, true_bg, &config);
 
     assert!(result.is_some());
     let result = result.unwrap();
@@ -1402,7 +1405,7 @@ fn test_gaussian_fit_residual_distribution() {
 
     let pixels_buf = Buffer2::new(width, height, pixels);
     let config = GaussianFitConfig::default();
-    let result = fit_gaussian_2d(&pixels_buf, 10.0, 10.0, 8, true_bg, &config);
+    let result = fit_gaussian_2d(&pixels_buf, Vec2::splat(10.0), 8, true_bg, &config);
 
     assert!(result.is_some());
     let result = result.unwrap();
