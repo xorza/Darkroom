@@ -323,6 +323,41 @@ impl MultiScaleConfig {
 // Registration pipeline configuration
 // =============================================================================
 
+/// SIP distortion correction configuration for the registration pipeline.
+///
+/// When enabled, a SIP polynomial is fit to the residuals after RANSAC
+/// to correct for optical distortion that a single homography cannot capture.
+#[derive(Debug, Clone)]
+pub struct SipCorrectionConfig {
+    /// Whether to enable SIP correction.
+    pub enabled: bool,
+    /// Polynomial order (2-5). Order 2 handles barrel/pincushion,
+    /// order 3 handles mustache distortion.
+    pub order: usize,
+}
+
+impl Default for SipCorrectionConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            order: 3,
+        }
+    }
+}
+
+impl SipCorrectionConfig {
+    /// Validate configuration.
+    pub fn validate(&self) {
+        if self.enabled {
+            assert!(
+                (2..=5).contains(&self.order),
+                "SIP order must be 2-5, got {}",
+                self.order
+            );
+        }
+    }
+}
+
 /// Registration configuration.
 #[derive(Debug, Clone)]
 pub struct RegistrationConfig {
@@ -357,6 +392,8 @@ pub struct RegistrationConfig {
     pub warp: WarpConfig,
     /// Multi-scale registration configuration (None = single-scale).
     pub multi_scale: Option<MultiScaleConfig>,
+    /// SIP distortion correction (post-RANSAC polynomial refinement).
+    pub sip: SipCorrectionConfig,
 }
 
 impl Default for RegistrationConfig {
@@ -373,6 +410,7 @@ impl Default for RegistrationConfig {
             phase_correlation: PhaseCorrelationConfig::default(),
             warp: WarpConfig::default(),
             multi_scale: None,
+            sip: SipCorrectionConfig::default(),
         }
     }
 }
@@ -409,6 +447,7 @@ impl RegistrationConfig {
         if let Some(ref ms) = self.multi_scale {
             ms.validate();
         }
+        self.sip.validate();
     }
 }
 

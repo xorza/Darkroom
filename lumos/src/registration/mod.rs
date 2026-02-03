@@ -77,7 +77,7 @@ mod tests;
 // Re-export all configuration types from the consolidated config module
 pub use config::{
     InterpolationMethod, MultiScaleConfig, PhaseCorrelationConfig, RansacConfig,
-    RegistrationConfig, SubpixelMethod, TriangleMatchConfig, WarpConfig,
+    RegistrationConfig, SipCorrectionConfig, SubpixelMethod, TriangleMatchConfig, WarpConfig,
 };
 
 // High-level pipeline API (primary entry point)
@@ -93,7 +93,8 @@ pub use triangle::StarMatch;
 // Distortion types
 pub use distortion::{
     DistortionMap, FieldCurvature, FieldCurvatureConfig, RadialDistortion, RadialDistortionConfig,
-    TangentialDistortion, TangentialDistortionConfig, ThinPlateSpline, TpsConfig,
+    SipConfig, SipPolynomial, TangentialDistortion, TangentialDistortionConfig, ThinPlateSpline,
+    TpsConfig,
 };
 
 // Interpolation (non-config types)

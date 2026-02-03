@@ -23,6 +23,7 @@ use crate::ImageDimensions;
 use crate::common::Buffer2;
 use crate::registration::{
     config::{InterpolationMethod, MultiScaleConfig, RegistrationConfig, WarpConfig},
+    distortion::{SipConfig, SipPolynomial},
     interpolation::warp_image,
     phase_correlation::PhaseCorrelator,
     ransac::RansacEstimator,
@@ -154,20 +155,54 @@ impl Registrator {
             .map(|&i| (matches[i].ref_idx, matches[i].target_idx))
             .collect();
 
-        // Compute residuals for inliers
+        // Step 3 (optional): SIP distortion correction on residuals
+        let sip_correction = if self.config.sip.enabled {
+            let inlier_ref: Vec<DVec2> = ransac_result
+                .inliers
+                .iter()
+                .map(|&i| ref_matched[i])
+                .collect();
+            let inlier_target: Vec<DVec2> = ransac_result
+                .inliers
+                .iter()
+                .map(|&i| target_matched[i])
+                .collect();
+
+            let sip_config = SipConfig {
+                order: self.config.sip.order,
+                reference_point: None, // Auto-compute centroid
+            };
+
+            SipPolynomial::fit_from_transform(
+                &inlier_ref,
+                &inlier_target,
+                &ransac_result.transform,
+                &sip_config,
+            )
+        } else {
+            None
+        };
+
+        // Compute residuals for inliers (with SIP correction if available)
         let residuals: Vec<f64> = ransac_result
             .inliers
             .iter()
             .map(|&i| {
                 let r = ref_matched[i];
                 let t = target_matched[i];
-                let p = ransac_result.transform.apply(r);
+                let corrected_r = match &sip_correction {
+                    Some(sip) => sip.correct(r),
+                    None => r,
+                };
+                let p = ransac_result.transform.apply(corrected_r);
                 (p - t).length()
             })
             .collect();
 
-        let result = RegistrationResult::new(ransac_result.transform, inlier_matches, residuals)
-            .with_elapsed(start.elapsed().as_secs_f64() * 1000.0);
+        let mut result =
+            RegistrationResult::new(ransac_result.transform, inlier_matches, residuals)
+                .with_elapsed(start.elapsed().as_secs_f64() * 1000.0);
+        result.sip_correction = sip_correction;
 
         // Check accuracy
         if result.rms_error > self.config.max_residual_pixels {

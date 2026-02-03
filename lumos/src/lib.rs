@@ -127,6 +127,9 @@ pub use registration::{
     // High-level API
     Registrator,
     ResidualStats,
+    SipConfig,
+    SipCorrectionConfig,
+    SipPolynomial,
     SolveError,
     StarMatch,
     TangentialDistortion,

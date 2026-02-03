@@ -42,7 +42,27 @@ r' = r × (1 + c₁r² + c₂r⁴)
 - `from_petzval_radius()` for creating config from physical parameters
 - `sag_at()` for computing defocus distance at any position
 
-### 4. Thin-Plate Spline (`mod.rs`)
+### 4. SIP Polynomial Distortion (`sip.rs`)
+**SIP (Simple Imaging Polynomial)** convention — the industry standard for FITS WCS distortion:
+```
+u' = u + Σ A_pq × u^p × v^q    (for 2 ≤ p+q ≤ order)
+v' = v + Σ B_pq × u^p × v^q    (for 2 ≤ p+q ≤ order)
+```
+
+- Used by Spitzer, HST, Astrometry.net, Siril, ASTAP
+- No linear terms (those are in the CD matrix / homography)
+- Order 2 (3 terms): Handles purely quadratic distortion
+- Order 3 (7 terms): Handles barrel/pincushion (the standard case)
+- Order 5 (18 terms): Handles mustache and higher-order distortion
+- Coordinate normalization for numerical stability (average distance → 1.0)
+- Cholesky decomposition for normal equations, LU fallback
+- Integrated into the registration pipeline via `SipCorrectionConfig`
+
+**Important**: Barrel distortion residuals `dx = k·u·r²` are **cubic** (order 3), not quadratic. Order 2 SIP cannot capture barrel/pincushion distortion — use order 3 or higher.
+
+**Pipeline integration**: When `RegistrationConfig.sip.enabled = true`, a SIP polynomial is fit to RANSAC inlier residuals after homography estimation. The correction is stored in `RegistrationResult.sip_correction` and applied when computing residuals.
+
+### 5. Thin-Plate Spline (`mod.rs`)
 **Non-parametric** smooth interpolation:
 ```
 f(x,y) = a₀ + a₁x + a₂y + Σᵢ wᵢ U(||(x,y) - (xᵢ,yᵢ)||)
@@ -87,7 +107,8 @@ distortion/
 ├── radial.rs           # RadialDistortion, RadialDistortionConfig
 ├── tangential.rs       # TangentialDistortion, TangentialDistortionConfig
 ├── field_curvature.rs  # FieldCurvature, FieldCurvatureConfig
-├── tests.rs            # Integration tests
+├── sip.rs              # SipPolynomial, SipConfig
+├── tests.rs            # Integration tests (TPS)
 └── NOTES-AI.md         # This file
 ```
 
@@ -96,6 +117,7 @@ distortion/
 - radial.rs: 20 tests
 - tangential.rs: 20 tests
 - field_curvature.rs: 24 tests
+- sip.rs: 20 tests (barrel, pincushion, quadratic, mustache, numerical edge cases)
 - tests.rs: Integration tests (TPS)
 
 ## Usage in Astrophotography
@@ -116,6 +138,7 @@ let (x3, y3) = field_curvature.correct(x2, y2);
 
 ## References
 
+- [SIP Convention for FITS Distortion](https://fits.gsfc.nasa.gov/registry/sip/SIP_distortion_v1_0.pdf) — Shupe et al. 2005
 - [Petzval Field Curvature - Wikipedia](https://en.wikipedia.org/wiki/Petzval_field_curvature)
 - [Brown-Conrady Distortion Model](https://en.wikipedia.org/wiki/Distortion_(optics))
 - [OpenCV Camera Calibration](https://docs.opencv.org/4.x/dc/dbb/tutorial_py_calibration.html)

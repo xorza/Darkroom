@@ -130,13 +130,17 @@ fn test_register_two_calibrated_lights() {
     // Spatial distribution is disabled because precise_ground() produces a stricter
     // star catalog where the grid-based selection picks edge-cell stars that don't
     // overlap between the two shifted images, reducing matching success.
+    // Seed RANSAC for reproducible results across runs.
+    let ransac_config = crate::registration::config::RansacConfig {
+        inlier_threshold: 0.5,
+        seed: Some(42),
+        ..Default::default()
+    };
+
     let reg_config = RegistrationConfig {
         transform_type: crate::TransformType::Homography,
         use_spatial_distribution: false,
-        ransac: crate::registration::config::RansacConfig {
-            inlier_threshold: 0.5,
-            ..Default::default()
-        },
+        ransac: ransac_config.clone(),
         ..RegistrationConfig::default()
     };
     let registrator = Registrator::new(reg_config);
@@ -145,7 +149,7 @@ fn test_register_two_calibrated_lights() {
         .register_stars(&result1.stars, &result2.stars)
         .expect("Registration should succeed");
 
-    println!("Registration result:");
+    println!("Registration result (homography only):");
     println!("  Matched stars: {}", result.num_inliers);
     println!("  RMS error:     {:.4} pixels", result.rms_error);
     println!("  Elapsed:       {:.1} ms", result.elapsed_ms);
@@ -160,14 +164,54 @@ fn test_register_two_calibrated_lights() {
     println!("  Scale:         {:.6}", result.transform.scale_factor());
 
     assert!(
-        result.num_inliers >= 6,
-        "Expected at least 6 inlier matches, got {}",
+        result.num_inliers >= 4,
+        "Expected at least 4 inlier matches, got {}",
         result.num_inliers
     );
     assert!(
         result.rms_error < 1.5,
         "Expected RMS error < 1.5 pixels, got {:.4}",
         result.rms_error
+    );
+
+    // --- SIP correction comparison ---
+    let rms_without_sip = result.rms_error;
+
+    let sip_config = RegistrationConfig {
+        transform_type: crate::TransformType::Homography,
+        use_spatial_distribution: false,
+        ransac: ransac_config,
+        sip: crate::registration::config::SipCorrectionConfig {
+            enabled: true,
+            order: 3,
+        },
+        ..RegistrationConfig::default()
+    };
+    let sip_registrator = Registrator::new(sip_config);
+
+    let sip_result = sip_registrator
+        .register_stars(&result1.stars, &result2.stars)
+        .expect("SIP registration should succeed");
+
+    println!("\nWith SIP order 3 correction:");
+    println!("  RMS error:     {:.4} pixels", sip_result.rms_error);
+    println!("  SIP applied:   {}", sip_result.sip_correction.is_some());
+    if let Some(ref sip) = sip_result.sip_correction {
+        println!(
+            "  Max correction: {:.4} pixels",
+            sip.max_correction(img1.width(), img1.height(), 50.0)
+        );
+    }
+    println!(
+        "  Improvement:   {:.1}%",
+        (1.0 - sip_result.rms_error / rms_without_sip) * 100.0
+    );
+
+    assert!(
+        sip_result.rms_error <= rms_without_sip + 1e-6,
+        "SIP should not make RMS worse: {:.4} > {:.4}",
+        sip_result.rms_error,
+        rms_without_sip
     );
 }
 

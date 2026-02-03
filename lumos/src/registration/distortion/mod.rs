@@ -122,6 +122,7 @@
 
 mod field_curvature;
 mod radial;
+mod sip;
 mod tangential;
 
 #[cfg(test)]
@@ -129,6 +130,7 @@ mod tests;
 
 pub use field_curvature::{FieldCurvature, FieldCurvatureConfig};
 pub use radial::{RadialDistortion, RadialDistortionConfig};
+pub use sip::{SipConfig, SipPolynomial};
 pub use tangential::{TangentialDistortion, TangentialDistortionConfig};
 
 use glam::DVec2;
