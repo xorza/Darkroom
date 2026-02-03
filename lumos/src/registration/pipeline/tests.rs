@@ -143,14 +143,17 @@ fn test_registration_insufficient_stars() {
 fn test_registrator_config() {
     let config = RegistrationConfig {
         transform_type: TransformType::Euclidean,
-        ransac_iterations: 2000,
-        ransac_threshold: 1.5,
+        ransac: crate::registration::ransac::RansacConfig {
+            max_iterations: 2000,
+            inlier_threshold: 1.5,
+            ..crate::registration::ransac::RansacConfig::default()
+        },
         ..Default::default()
     };
 
     let registrator = Registrator::new(config);
-    assert_eq!(registrator.config().ransac_iterations, 2000);
-    assert!((registrator.config().ransac_threshold - 1.5).abs() < 1e-10);
+    assert_eq!(registrator.config().ransac.max_iterations, 2000);
+    assert!((registrator.config().ransac.inlier_threshold - 1.5).abs() < 1e-10);
 }
 
 #[test]
@@ -647,17 +650,16 @@ fn test_multiscale_registration_basic() {
         min_stars_for_matching: 6,
         min_matched_stars: 4,
         max_residual_pixels: 5.0,
+        multi_scale: Some(MultiScaleConfig {
+            levels: 2,
+            scale_factor: 2.0,
+            min_dimension: 64,
+            use_phase_correlation: false,
+        }),
         ..Default::default()
     };
 
-    let multiscale_config = MultiScaleConfig {
-        levels: 2,
-        scale_factor: 2.0,
-        min_dimension: 64,
-        use_phase_correlation: false,
-    };
-
-    let registrator = MultiScaleRegistrator::new(config, multiscale_config);
+    let registrator = MultiScaleRegistrator::new(config);
     let result = registrator
         .register_stars(&ref_stars, &target_stars, 1000, 1000)
         .unwrap();
@@ -681,17 +683,16 @@ fn test_multiscale_registration_with_rotation() {
         min_stars_for_matching: 6,
         min_matched_stars: 4,
         max_residual_pixels: 5.0,
+        multi_scale: Some(MultiScaleConfig {
+            levels: 2,
+            scale_factor: 2.0,
+            min_dimension: 64,
+            use_phase_correlation: false,
+        }),
         ..Default::default()
     };
 
-    let multiscale_config = MultiScaleConfig {
-        levels: 2,
-        scale_factor: 2.0,
-        min_dimension: 64,
-        use_phase_correlation: false,
-    };
-
-    let registrator = MultiScaleRegistrator::new(config, multiscale_config);
+    let registrator = MultiScaleRegistrator::new(config);
     let result = registrator
         .register_stars(&ref_stars, &target_stars, 1000, 1000)
         .unwrap();

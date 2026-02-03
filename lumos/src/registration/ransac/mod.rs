@@ -17,6 +17,7 @@ use glam::DVec2;
 use nalgebra::{DMatrix, SVD};
 use rand::prelude::*;
 
+pub use crate::registration::config::RansacConfig;
 use crate::registration::transform::{Transform, TransformType};
 use crate::registration::triangle::StarMatch;
 
@@ -60,40 +61,6 @@ impl rand::RngCore for RngWrapper {
         match self {
             RngWrapper::Seeded(rng) => rng.fill_bytes(dest),
             RngWrapper::Thread(rng) => rand::RngCore::fill_bytes(rng, dest),
-        }
-    }
-}
-
-/// RANSAC configuration.
-#[derive(Debug, Clone)]
-pub struct RansacConfig {
-    /// Maximum iterations.
-    pub max_iterations: usize,
-    /// Inlier distance threshold in pixels.
-    pub inlier_threshold: f64,
-    /// Target confidence for early termination.
-    pub confidence: f64,
-    /// Minimum inlier ratio to accept model.
-    pub min_inlier_ratio: f64,
-    /// Random seed for reproducibility (None for random).
-    pub seed: Option<u64>,
-    /// Enable Local Optimization (LO-RANSAC).
-    /// When enabled, promising hypotheses are refined iteratively.
-    pub use_local_optimization: bool,
-    /// Maximum iterations for local optimization step.
-    pub lo_max_iterations: usize,
-}
-
-impl Default for RansacConfig {
-    fn default() -> Self {
-        Self {
-            max_iterations: 1000,
-            inlier_threshold: 2.0,
-            confidence: 0.999,
-            min_inlier_ratio: 0.5,
-            seed: None,
-            use_local_optimization: true,
-            lo_max_iterations: 10,
         }
     }
 }
@@ -544,7 +511,7 @@ impl RansacEstimator {
 ///
 /// This implementation uses a full sort O(n log n) rather than a partial sort
 /// or bounded heap O(n log k). This is acceptable because:
-/// - Pool size is limited by `max_stars_for_matching` (default 200)
+/// - Pool size is limited by `TriangleMatchConfig::max_stars` (default 200 in pipeline)
 /// - k is typically 2-4 (minimum points for transform estimation)
 /// - The sampling overhead is negligible compared to model fitting
 ///

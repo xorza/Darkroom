@@ -32,7 +32,6 @@
 //! // Configure registration
 //! let config = RegistrationConfig {
 //!     transform_type: TransformType::Similarity,
-//!     ransac_threshold: 2.0,
 //!     ..Default::default()
 //! };
 //!
@@ -61,6 +60,7 @@
 //! See `IMPLEMENTATION_PLAN.md` for detailed algorithm documentation.
 
 pub(crate) mod astrometry;
+pub(crate) mod config;
 pub(crate) mod distortion;
 pub(crate) mod interpolation;
 pub(crate) mod phase_correlation;
@@ -74,29 +74,38 @@ pub(crate) mod triangle;
 #[cfg(test)]
 mod tests;
 
-// Re-export main public API types
+// Re-export all configuration types from the consolidated config module
+pub use config::{
+    InterpolationMethod, MultiScaleConfig, PhaseCorrelationConfig, RansacConfig,
+    RegistrationConfig, SubpixelMethod, TriangleMatchConfig, WarpConfig,
+};
+
 // High-level pipeline API (primary entry point)
 pub use pipeline::{
-    MultiScaleConfig, MultiScaleRegistrator, RansacFailureReason, RegistrationConfig,
-    RegistrationError, RegistrationResult, Registrator, quick_register, quick_register_stars,
-    warp_to_reference_image,
+    MultiScaleRegistrator, RansacFailureReason, RegistrationError, RegistrationResult, Registrator,
+    quick_register, quick_register_stars, warp_to_reference_image,
 };
 
 // Core types needed by users
 pub use transform::{Transform, TransformType};
 pub use triangle::StarMatch;
 
-// Configuration types
+// Distortion types
 pub use distortion::{
     DistortionMap, FieldCurvature, FieldCurvatureConfig, RadialDistortion, RadialDistortionConfig,
     TangentialDistortion, TangentialDistortionConfig, ThinPlateSpline, TpsConfig,
 };
-pub use interpolation::{InterpolationMethod, WarpConfig, warp_image};
+
+// Interpolation (non-config types)
+pub use interpolation::warp_image;
+
+// Phase correlation (non-config types)
 pub use phase_correlation::{
-    FullPhaseCorrelator, FullPhaseResult, LogPolarCorrelator, LogPolarResult,
-    PhaseCorrelationConfig, PhaseCorrelator,
+    FullPhaseCorrelator, FullPhaseResult, LogPolarCorrelator, LogPolarResult, PhaseCorrelator,
 };
-pub use ransac::{RansacConfig, RansacEstimator, RansacResult};
+
+// RANSAC (non-config types)
+pub use ransac::{RansacEstimator, RansacResult};
 
 // Quality assessment
 pub use quality::{
@@ -104,8 +113,8 @@ pub use quality::{
     estimate_overlap,
 };
 
-// Triangle matching
-pub use triangle::{TriangleMatchConfig, match_triangles};
+// Triangle matching (non-config types)
+pub use triangle::match_triangles;
 
 // Astrometry (plate solving)
 pub use astrometry::{

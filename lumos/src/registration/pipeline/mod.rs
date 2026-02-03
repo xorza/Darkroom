@@ -12,10 +12,8 @@
 //! 5. **Refinement** - Optimize transformation using all inliers
 //! 6. **Warping** - Apply transformation to align target to reference
 
-mod config;
 mod result;
 
-pub use config::RegistrationConfig;
 pub use result::{RansacFailureReason, RegistrationError, RegistrationResult};
 
 use glam::DVec2;
@@ -24,12 +22,13 @@ use std::time::Instant;
 use crate::ImageDimensions;
 use crate::common::Buffer2;
 use crate::registration::{
-    interpolation::{InterpolationMethod, WarpConfig, warp_image},
-    phase_correlation::{PhaseCorrelationConfig, PhaseCorrelator},
-    ransac::{RansacConfig, RansacEstimator},
+    config::{InterpolationMethod, MultiScaleConfig, RegistrationConfig, WarpConfig},
+    interpolation::warp_image,
+    phase_correlation::PhaseCorrelator,
+    ransac::RansacEstimator,
     transform::Transform,
     transform::TransformType,
-    triangle::{TriangleMatchConfig, match_triangles},
+    triangle::match_triangles,
 };
 use crate::star_detection::Star;
 
@@ -115,44 +114,20 @@ impl Registrator {
         }
 
         // Select stars for matching - either spatially distributed or just brightest N
+        let max_stars = self.config.triangle.max_stars;
         let ref_stars = if self.config.use_spatial_distribution {
-            select_spatially_distributed(
-                ref_positions,
-                self.config.max_stars_for_matching,
-                self.config.spatial_grid_size,
-            )
+            select_spatially_distributed(ref_positions, max_stars, self.config.spatial_grid_size)
         } else {
-            ref_positions
-                .iter()
-                .take(self.config.max_stars_for_matching)
-                .copied()
-                .collect()
+            ref_positions.iter().take(max_stars).copied().collect()
         };
         let target_stars = if self.config.use_spatial_distribution {
-            select_spatially_distributed(
-                target_positions,
-                self.config.max_stars_for_matching,
-                self.config.spatial_grid_size,
-            )
+            select_spatially_distributed(target_positions, max_stars, self.config.spatial_grid_size)
         } else {
-            target_positions
-                .iter()
-                .take(self.config.max_stars_for_matching)
-                .copied()
-                .collect()
+            target_positions.iter().take(max_stars).copied().collect()
         };
 
         // Step 1: Triangle matching to find star correspondences
-        let triangle_config = TriangleMatchConfig {
-            max_stars: self.config.max_stars_for_matching,
-            ratio_tolerance: self.config.triangle_tolerance,
-            min_votes: 2,
-            hash_bins: 100,
-            check_orientation: true,
-            two_step_matching: false, // Standard single-pass matching
-        };
-
-        let matches = match_triangles(&ref_stars, &target_stars, &triangle_config);
+        let matches = match_triangles(&ref_stars, &target_stars, &self.config.triangle);
 
         if matches.len() < self.config.min_matched_stars {
             return Err(RegistrationError::NoMatchingPatterns);
@@ -163,22 +138,12 @@ impl Registrator {
         let target_matched: Vec<_> = matches.iter().map(|m| target_stars[m.target_idx]).collect();
 
         // Step 2: RANSAC to robustly estimate transformation
-        let ransac_config = RansacConfig {
-            max_iterations: self.config.ransac_iterations,
-            inlier_threshold: self.config.ransac_threshold,
-            confidence: self.config.ransac_confidence,
-            min_inlier_ratio: 0.3,
-            seed: None,
-            use_local_optimization: true,
-            lo_max_iterations: 10,
-        };
-
-        let ransac = RansacEstimator::new(ransac_config);
+        let ransac = RansacEstimator::new(self.config.ransac.clone());
         let ransac_result = ransac
             .estimate(&ref_matched, &target_matched, self.config.transform_type)
             .ok_or(RegistrationError::RansacFailed {
                 reason: RansacFailureReason::NoInliersFound,
-                iterations: self.config.ransac_iterations,
+                iterations: self.config.ransac.max_iterations,
                 best_inlier_count: 0,
             })?;
 
@@ -244,8 +209,7 @@ impl Registrator {
         }
 
         // Phase correlation for coarse alignment
-        let phase_config = PhaseCorrelationConfig::default();
-        let correlator = PhaseCorrelator::new(width, height, phase_config);
+        let correlator = PhaseCorrelator::new(width, height, self.config.phase_correlation.clone());
 
         let phase_result = correlator.correlate(ref_image, target_image);
 
@@ -394,9 +358,15 @@ pub fn quick_register(
 ) -> Result<Transform, RegistrationError> {
     let config = RegistrationConfig {
         transform_type: TransformType::Similarity,
-        ransac_iterations: 500,
-        max_stars_for_matching: 100,
         min_matched_stars: 4,
+        triangle: crate::registration::config::TriangleMatchConfig {
+            max_stars: 100,
+            ..crate::registration::config::TriangleMatchConfig::default()
+        },
+        ransac: crate::registration::config::RansacConfig {
+            max_iterations: 500,
+            ..crate::registration::config::RansacConfig::default()
+        },
         ..Default::default()
     };
 
@@ -441,40 +411,17 @@ pub fn quick_register_stars(
     target_stars: &[Star],
 ) -> Result<RegistrationResult, RegistrationError> {
     let config = RegistrationConfig {
-        transform_type: TransformType::Affine, // 6 DOF for handling rotation, scale, and shear
-        ransac_iterations: 1000,
-        ransac_threshold: 2.0,
-        max_stars_for_matching: 100,
+        transform_type: TransformType::Affine,
         min_matched_stars: 4,
         max_residual_pixels: 5.0,
+        triangle: crate::registration::config::TriangleMatchConfig {
+            max_stars: 100,
+            ..crate::registration::config::TriangleMatchConfig::default()
+        },
         ..Default::default()
     };
 
     Registrator::new(config).register_stars(ref_stars, target_stars)
-}
-
-/// Multi-scale registration configuration.
-#[derive(Debug, Clone)]
-pub struct MultiScaleConfig {
-    /// Number of pyramid levels (1 = no pyramid, just full resolution)
-    pub levels: usize,
-    /// Scale factor between levels (typically 2.0 for half-resolution each level)
-    pub scale_factor: f64,
-    /// Minimum image dimension at coarsest level
-    pub min_dimension: usize,
-    /// Whether to use phase correlation at coarse levels
-    pub use_phase_correlation: bool,
-}
-
-impl Default for MultiScaleConfig {
-    fn default() -> Self {
-        Self {
-            levels: 3,
-            scale_factor: 2.0,
-            min_dimension: 128,
-            use_phase_correlation: true,
-        }
-    }
 }
 
 /// Multi-scale image registration.
@@ -492,17 +439,23 @@ impl Default for MultiScaleConfig {
 #[derive(Debug)]
 pub struct MultiScaleRegistrator {
     config: RegistrationConfig,
-    multiscale_config: MultiScaleConfig,
 }
 
 impl MultiScaleRegistrator {
     /// Create a new multi-scale registrator.
-    pub fn new(config: RegistrationConfig, multiscale_config: MultiScaleConfig) -> Self {
+    ///
+    /// The `config.multi_scale` field must be `Some` with a valid `MultiScaleConfig`.
+    pub fn new(config: RegistrationConfig) -> Self {
+        assert!(
+            config.multi_scale.is_some(),
+            "MultiScaleRegistrator requires config.multi_scale to be Some"
+        );
         config.validate();
-        Self {
-            config,
-            multiscale_config,
-        }
+        Self { config }
+    }
+
+    fn multiscale_config(&self) -> &MultiScaleConfig {
+        self.config.multi_scale.as_ref().unwrap()
     }
 
     /// Register using pre-detected stars at multiple scales.
@@ -523,14 +476,15 @@ impl MultiScaleRegistrator {
         image_height: usize,
     ) -> Result<RegistrationResult, RegistrationError> {
         let start = Instant::now();
+        let ms = self.multiscale_config();
 
         // Calculate actual number of levels based on image size
         let min_dim = image_width.min(image_height);
-        let max_levels = ((min_dim as f64 / self.multiscale_config.min_dimension as f64).log2()
-            / self.multiscale_config.scale_factor.log2())
+        let max_levels = ((min_dim as f64 / ms.min_dimension as f64).log2()
+            / ms.scale_factor.log2())
         .floor() as usize
             + 1;
-        let num_levels = self.multiscale_config.levels.min(max_levels).max(1);
+        let num_levels = ms.levels.min(max_levels).max(1);
 
         if num_levels == 1 {
             // Single level - just do normal registration
@@ -543,7 +497,7 @@ impl MultiScaleRegistrator {
         let mut last_result: Option<RegistrationResult> = None;
 
         for level in (0..num_levels).rev() {
-            let scale = self.multiscale_config.scale_factor.powi(level as i32);
+            let scale = ms.scale_factor.powi(level as i32);
 
             // Scale star positions to this level
             let scaled_ref: Vec<DVec2> = ref_stars.iter().map(|p| *p / scale).collect();
@@ -561,13 +515,12 @@ impl MultiScaleRegistrator {
 
             // Use relaxed config for coarse levels, stricter for fine
             let level_config = if level > 0 {
-                RegistrationConfig {
-                    ransac_threshold: self.config.ransac_threshold * scale.sqrt(),
-                    triangle_tolerance: self.config.triangle_tolerance * 1.5,
-                    ransac_iterations: self.config.ransac_iterations / 2,
-                    max_residual_pixels: self.config.max_residual_pixels * scale,
-                    ..self.config.clone()
-                }
+                let mut c = self.config.clone();
+                c.ransac.inlier_threshold = self.config.ransac.inlier_threshold * scale.sqrt();
+                c.triangle.ratio_tolerance = self.config.triangle.ratio_tolerance * 1.5;
+                c.ransac.max_iterations = self.config.ransac.max_iterations / 2;
+                c.max_residual_pixels = self.config.max_residual_pixels * scale;
+                c
             } else {
                 self.config.clone()
             };
@@ -618,6 +571,7 @@ impl MultiScaleRegistrator {
         target_stars: &[DVec2],
     ) -> Result<RegistrationResult, RegistrationError> {
         let start = Instant::now();
+        let ms = self.multiscale_config();
 
         if ref_image.len() != width * height || target_image.len() != width * height {
             return Err(RegistrationError::DimensionMismatch);
@@ -625,40 +579,32 @@ impl MultiScaleRegistrator {
 
         // Calculate actual number of levels
         let min_dim = width.min(height);
-        let max_levels = ((min_dim as f64 / self.multiscale_config.min_dimension as f64).log2()
-            / self.multiscale_config.scale_factor.log2())
+        let max_levels = ((min_dim as f64 / ms.min_dimension as f64).log2()
+            / ms.scale_factor.log2())
         .floor() as usize
             + 1;
-        let num_levels = self.multiscale_config.levels.min(max_levels).max(1);
+        let num_levels = ms.levels.min(max_levels).max(1);
 
         let mut current_transform = Transform::identity();
 
         // Build image pyramid
-        let ref_pyramid = build_pyramid(
-            ref_image,
-            width,
-            height,
-            num_levels,
-            self.multiscale_config.scale_factor,
-        );
-        let target_pyramid = build_pyramid(
-            target_image,
-            width,
-            height,
-            num_levels,
-            self.multiscale_config.scale_factor,
-        );
+        let ref_pyramid = build_pyramid(ref_image, width, height, num_levels, ms.scale_factor);
+        let target_pyramid =
+            build_pyramid(target_image, width, height, num_levels, ms.scale_factor);
 
         // Process from coarse to fine
         for level in (0..num_levels).rev() {
-            let scale = self.multiscale_config.scale_factor.powi(level as i32);
+            let scale = ms.scale_factor.powi(level as i32);
             let (level_ref, level_width, level_height) = &ref_pyramid[level];
             let (level_target, _, _) = &target_pyramid[level];
 
             // At coarse levels, use phase correlation if enabled
-            if level > 0 && self.multiscale_config.use_phase_correlation {
-                let phase_config = PhaseCorrelationConfig::default();
-                let correlator = PhaseCorrelator::new(*level_width, *level_height, phase_config);
+            if level > 0 && ms.use_phase_correlation {
+                let correlator = PhaseCorrelator::new(
+                    *level_width,
+                    *level_height,
+                    self.config.phase_correlation.clone(),
+                );
 
                 if let Some(pr) = correlator.correlate(level_ref, level_target) {
                     // Scale translation to full resolution
@@ -679,13 +625,12 @@ impl MultiScaleRegistrator {
                 .collect();
 
             let level_config = if level > 0 {
-                RegistrationConfig {
-                    ransac_threshold: self.config.ransac_threshold * scale.sqrt(),
-                    triangle_tolerance: self.config.triangle_tolerance * 1.5,
-                    ransac_iterations: self.config.ransac_iterations / 2,
-                    max_residual_pixels: self.config.max_residual_pixels * scale,
-                    ..self.config.clone()
-                }
+                let mut c = self.config.clone();
+                c.ransac.inlier_threshold = self.config.ransac.inlier_threshold * scale.sqrt();
+                c.triangle.ratio_tolerance = self.config.triangle.ratio_tolerance * 1.5;
+                c.ransac.max_iterations = self.config.ransac.max_iterations / 2;
+                c.max_residual_pixels = self.config.max_residual_pixels * scale;
+                c
             } else {
                 self.config.clone()
             };

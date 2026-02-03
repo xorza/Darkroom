@@ -18,6 +18,7 @@ use std::sync::OnceLock;
 use rayon::prelude::*;
 
 use crate::common::Buffer2;
+pub use crate::registration::config::{InterpolationMethod, WarpConfig};
 use crate::registration::transform::Transform;
 
 /// Number of rows to process per parallel chunk.
@@ -28,70 +29,6 @@ const ROWS_PER_CHUNK: usize = 32;
 mod tests;
 
 pub mod simd;
-
-/// Interpolation method for image resampling.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum InterpolationMethod {
-    /// Nearest neighbor - fastest, lowest quality
-    Nearest,
-    /// Bilinear interpolation - fast, reasonable quality
-    Bilinear,
-    /// Bicubic interpolation - good quality
-    Bicubic,
-    /// Lanczos-2 (4x4 kernel) - high quality
-    Lanczos2,
-    /// Lanczos-3 (6x6 kernel) - highest quality, default
-    #[default]
-    Lanczos3,
-    /// Lanczos-4 (8x8 kernel) - extreme quality
-    Lanczos4,
-}
-
-impl InterpolationMethod {
-    /// Returns the kernel radius for this interpolation method.
-    #[inline]
-    pub fn kernel_radius(&self) -> usize {
-        match self {
-            InterpolationMethod::Nearest => 1,
-            InterpolationMethod::Bilinear => 1,
-            InterpolationMethod::Bicubic => 2,
-            InterpolationMethod::Lanczos2 => 2,
-            InterpolationMethod::Lanczos3 => 3,
-            InterpolationMethod::Lanczos4 => 4,
-        }
-    }
-}
-
-/// Configuration for image warping.
-#[derive(Debug, Clone)]
-pub struct WarpConfig {
-    /// Interpolation method to use
-    pub method: InterpolationMethod,
-    /// Value to use for pixels outside the image bounds
-    pub border_value: f32,
-    /// Whether to normalize Lanczos kernel weights (recommended)
-    pub normalize_kernel: bool,
-    /// Clamp output to the min/max of neighborhood pixels to reduce ringing.
-    ///
-    /// Lanczos interpolation can produce values outside the range of input pixels
-    /// (ringing artifacts) especially near sharp edges. Enabling this option clamps
-    /// the result to [min, max] of the sampled neighborhood, eliminating overshoot
-    /// and undershoot while preserving most of the sharpness benefit.
-    ///
-    /// This option only affects Lanczos interpolation methods.
-    pub clamp_output: bool,
-}
-
-impl Default for WarpConfig {
-    fn default() -> Self {
-        Self {
-            method: InterpolationMethod::Lanczos3,
-            border_value: 0.0,
-            normalize_kernel: true,
-            clamp_output: false,
-        }
-    }
-}
 
 /// Lanczos kernel value (direct computation).
 ///

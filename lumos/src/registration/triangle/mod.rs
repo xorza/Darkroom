@@ -34,6 +34,7 @@ mod tests;
 use glam::DVec2;
 use std::collections::HashMap;
 
+pub use crate::registration::config::TriangleMatchConfig;
 use crate::registration::spatial::{KdTree, form_triangles_from_neighbors};
 
 // =============================================================================
@@ -403,38 +404,6 @@ impl TriangleHashTable {
     #[cfg(test)]
     pub fn is_empty(&self) -> bool {
         self.len() == 0
-    }
-}
-
-/// Configuration for triangle matching.
-#[derive(Debug, Clone)]
-pub struct TriangleMatchConfig {
-    /// Maximum number of stars to use (brightest N).
-    pub max_stars: usize,
-    /// Tolerance for side ratio comparison.
-    pub ratio_tolerance: f64,
-    /// Minimum votes required to accept a match.
-    pub min_votes: usize,
-    /// Number of hash table bins per dimension.
-    pub hash_bins: usize,
-    /// Check orientation (set false to handle mirrored images).
-    pub check_orientation: bool,
-    /// Enable two-step matching (rough then fine).
-    /// Phase 1 uses relaxed tolerance (5x ratio_tolerance) for initial matches.
-    /// Phase 2 uses strict tolerance (ratio_tolerance) for refinement.
-    pub two_step_matching: bool,
-}
-
-impl Default for TriangleMatchConfig {
-    fn default() -> Self {
-        Self {
-            max_stars: 50,
-            ratio_tolerance: 0.01,
-            min_votes: 3,
-            hash_bins: 100,
-            check_orientation: true,
-            two_step_matching: false, // Disabled by default for backwards compatibility
-        }
     }
 }
 

@@ -13,46 +13,7 @@ use glam::DVec2;
 use rustfft::{Fft, FftPlanner, num_complex::Complex};
 use std::sync::Arc;
 
-/// Configuration for phase correlation.
-#[derive(Debug, Clone)]
-pub struct PhaseCorrelationConfig {
-    /// Apply Hann window to reduce edge effects.
-    pub use_windowing: bool,
-    /// Sub-pixel interpolation method.
-    pub subpixel_method: SubpixelMethod,
-    /// Minimum correlation peak value to accept.
-    pub min_peak_value: f32,
-    /// Maximum iterations for iterative refinement (0 = disabled).
-    pub max_iterations: usize,
-    /// Convergence threshold for iterative refinement (pixels).
-    pub convergence_threshold: f64,
-}
-
-impl Default for PhaseCorrelationConfig {
-    fn default() -> Self {
-        Self {
-            use_windowing: true,
-            subpixel_method: SubpixelMethod::Parabolic,
-            min_peak_value: 0.1,
-            max_iterations: 0, // Disabled by default for backwards compatibility
-            convergence_threshold: 0.01,
-        }
-    }
-}
-
-/// Sub-pixel interpolation method.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum SubpixelMethod {
-    /// No sub-pixel refinement.
-    None,
-    /// Parabolic fit (fast, ~0.1 pixel accuracy).
-    #[default]
-    Parabolic,
-    /// Gaussian fit (slower, ~0.05 pixel accuracy).
-    Gaussian,
-    /// Centroid (robust to noise).
-    Centroid,
-}
+pub use crate::registration::config::{PhaseCorrelationConfig, SubpixelMethod};
 
 /// Result of phase correlation.
 #[derive(Debug, Clone)]
