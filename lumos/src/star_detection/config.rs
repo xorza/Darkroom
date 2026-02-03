@@ -664,7 +664,7 @@ impl StarDetectionConfig {
         self.filtering.max_area = 200;
         self.filtering.min_snr = 15.0;
         self.filtering.max_eccentricity = 0.5;
-        self.filtering.max_roundness = 0.3;
+        self.filtering.max_roundness = 0.5;
         self.centroid.method = CentroidMethod::GaussianFit;
         self
     }
@@ -737,7 +737,7 @@ impl StarDetectionConfig {
         self.filtering.min_snr = 15.0;
         self.filtering.max_eccentricity = 0.5;
         self.filtering.max_sharpness = 0.7;
-        self.filtering.max_roundness = 0.3;
+        self.filtering.max_roundness = 0.5;
         self.filtering.max_fwhm_deviation = 4.0;
         self.filtering.duplicate_min_separation = 5.0;
         self.filtering.connectivity = Connectivity::Eight;
