@@ -176,8 +176,7 @@ mod tests {
     fn make_gaussian_star(
         width: usize,
         height: usize,
-        cx: f32,
-        cy: f32,
+        pos: Vec2,
         sigma: f32,
         amplitude: f32,
         background: f32,
@@ -185,8 +184,8 @@ mod tests {
         let mut pixels = vec![background; width * height];
         for y in 0..height {
             for x in 0..width {
-                let dx = x as f32 - cx;
-                let dy = y as f32 - cy;
+                let dx = x as f32 - pos.x;
+                let dy = y as f32 - pos.y;
                 let r2 = dx * dx + dy * dy;
                 let value = amplitude * (-r2 / (2.0 * sigma * sigma)).exp();
                 if value > 0.001 {
@@ -214,7 +213,7 @@ mod tests {
         run_if_sse41(|| {
             let width = 64;
             let height = 64;
-            let pixels = make_gaussian_star(width, height, 32.0, 32.0, 2.5, 0.8, 0.1);
+            let pixels = make_gaussian_star(width, height, Vec2::splat(32.0), 2.5, 0.8, 0.1);
             let bg = crate::testing::estimate_background(&pixels, BackgroundConfig::default());
 
             let scalar =
@@ -244,7 +243,7 @@ mod tests {
         run_if_sse41(|| {
             let width = 64;
             let height = 64;
-            let pixels = make_gaussian_star(width, height, 32.3, 32.7, 2.5, 0.8, 0.1);
+            let pixels = make_gaussian_star(width, height, Vec2::new(32.3, 32.7), 2.5, 0.8, 0.1);
             let bg = crate::testing::estimate_background(&pixels, BackgroundConfig::default());
 
             let scalar =
@@ -274,7 +273,7 @@ mod tests {
         run_if_sse41(|| {
             let width = 64;
             let height = 64;
-            let pixels = make_gaussian_star(width, height, 32.0, 32.0, 2.5, 0.8, 0.1);
+            let pixels = make_gaussian_star(width, height, Vec2::splat(32.0), 2.5, 0.8, 0.1);
             let bg = crate::testing::estimate_background(&pixels, BackgroundConfig::default());
 
             let result = unsafe {
@@ -304,7 +303,7 @@ mod tests {
         run_if_sse41(|| {
             let width = 128;
             let height = 128;
-            let pixels = make_gaussian_star(width, height, 64.3, 64.7, 4.0, 0.8, 0.1);
+            let pixels = make_gaussian_star(width, height, Vec2::new(64.3, 64.7), 4.0, 0.8, 0.1);
             let bg = crate::testing::estimate_background(&pixels, BackgroundConfig::default());
 
             // Test various stamp radii that exercise different remainder handling
@@ -372,10 +371,11 @@ mod tests {
             ];
 
             for (true_cx, true_cy) in positions {
-                let pixels = make_gaussian_star(width, height, true_cx, true_cy, 3.0, 0.8, 0.1);
+                let true_pos = Vec2::new(true_cx, true_cy);
+                let pixels = make_gaussian_star(width, height, true_pos, 3.0, 0.8, 0.1);
                 let bg = crate::testing::estimate_background(&pixels, BackgroundConfig::default());
 
-                let start_pos = Vec2::new(true_cx.round(), true_cy.round());
+                let start_pos = true_pos.round();
 
                 let scalar = refine_centroid_scalar(&pixels, width, height, &bg, start_pos, 7, 5.0);
                 let sse =

@@ -2,6 +2,8 @@
 //!
 //! Tests the background estimation with various synthetic backgrounds.
 
+use glam::Vec2;
+
 use crate::common::Buffer2;
 use crate::star_detection::background::{BackgroundConfig, BackgroundMap};
 use crate::star_detection::tests::common::output::save_grayscale;
@@ -268,9 +270,8 @@ fn test_background_nebula() {
         width,
         height,
         &NebulaConfig {
-            center_x: 0.5, // Center of image (fraction)
-            center_y: 0.5,
-            radius: 0.3, // 30% of diagonal
+            center: Vec2::splat(0.5), // Center of image (fraction)
+            radius: 0.3,              // 30% of diagonal
             amplitude: 0.3,
             softness: 2.0,
             aspect_ratio: 1.2,

@@ -7,6 +7,7 @@
 //! - Nebula-like structures
 //! - Amplifier glow (corner brightening)
 
+use glam::Vec2;
 use std::f32::consts::PI;
 
 /// Add uniform background to image.
@@ -119,10 +120,8 @@ pub fn add_amp_glow(
 /// Configuration for nebula-like background structure.
 #[derive(Debug, Clone)]
 pub struct NebulaConfig {
-    /// Center X position (fraction of image width)
-    pub center_x: f32,
-    /// Center Y position (fraction of image height)
-    pub center_y: f32,
+    /// Center position (fraction of image width/height, 0.0-1.0)
+    pub center: Vec2,
     /// Radius as fraction of image diagonal
     pub radius: f32,
     /// Peak brightness
@@ -138,8 +137,7 @@ pub struct NebulaConfig {
 impl Default for NebulaConfig {
     fn default() -> Self {
         Self {
-            center_x: 0.5,
-            center_y: 0.5,
+            center: Vec2::splat(0.5),
             radius: 0.3,
             amplitude: 0.2,
             softness: 2.0,
@@ -159,8 +157,8 @@ pub fn add_nebula_background(
     height: usize,
     config: &NebulaConfig,
 ) {
-    let cx = config.center_x * width as f32;
-    let cy = config.center_y * height as f32;
+    let cx = config.center.x * width as f32;
+    let cy = config.center.y * height as f32;
     let diag = ((width * width + height * height) as f32).sqrt();
     let radius = config.radius * diag;
     let radius_sq = radius * radius;
@@ -207,8 +205,10 @@ pub fn add_complex_nebula(
 
     for _ in 0..num_patches {
         let config = NebulaConfig {
-            center_x: 0.2 + next_f32(&mut rng) * 0.6,
-            center_y: 0.2 + next_f32(&mut rng) * 0.6,
+            center: Vec2::new(
+                0.2 + next_f32(&mut rng) * 0.6,
+                0.2 + next_f32(&mut rng) * 0.6,
+            ),
             radius: 0.1 + next_f32(&mut rng) * 0.2,
             amplitude: base_amplitude * (0.3 + next_f32(&mut rng) * 0.7),
             softness: 1.5 + next_f32(&mut rng) * 2.0,

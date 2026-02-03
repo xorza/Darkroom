@@ -1,5 +1,7 @@
 //! Challenging case tests - tests star detection under difficult conditions.
 
+use glam::Vec2;
+
 use crate::{AstroImage, ImageDimensions};
 
 use crate::star_detection::tests::common::output::{
@@ -453,9 +455,8 @@ fn test_nebula_background() {
         magnitude_range: (8.0, 13.0),
         background_level: 0.1,
         nebula: Some(NebulaConfig {
-            center_x: 0.5, // Center of image (fraction)
-            center_y: 0.5,
-            radius: 0.35, // 35% of diagonal
+            center: Vec2::splat(0.5), // Center of image (fraction)
+            radius: 0.35,             // 35% of diagonal
             amplitude: 0.35,
             softness: 2.0,
             aspect_ratio: 1.3,

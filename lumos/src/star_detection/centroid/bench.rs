@@ -22,8 +22,7 @@ use crate::testing::synthetic::stamps::benchmark_star_field;
 fn make_gaussian_star(
     width: usize,
     height: usize,
-    cx: f32,
-    cy: f32,
+    pos: Vec2,
     sigma: f32,
     amplitude: f32,
     background: f32,
@@ -31,8 +30,8 @@ fn make_gaussian_star(
     let mut pixels = vec![background; width * height];
     for y in 0..height {
         for x in 0..width {
-            let dx = x as f32 - cx;
-            let dy = y as f32 - cy;
+            let dx = x as f32 - pos.x;
+            let dy = y as f32 - pos.y;
             let r2 = dx * dx + dy * dy;
             let value = amplitude * (-r2 / (2.0 * sigma * sigma)).exp();
             if value > 0.001 {
@@ -52,7 +51,7 @@ fn bench_compute_centroid_single(b: ::bench::Bencher) {
     // Single star centroid computation with WeightedMoments
     let width = 64;
     let height = 64;
-    let pixels = make_gaussian_star(width, height, 32.3, 32.7, 2.5, 0.8, 0.1);
+    let pixels = make_gaussian_star(width, height, Vec2::new(32.3, 32.7), 2.5, 0.8, 0.1);
     let bg = crate::testing::estimate_background(&pixels, BackgroundConfig::default());
     let candidates = detect_stars_test(&pixels, None, &bg, &StarDetectionConfig::default());
     let candidate = candidates.first().expect("Should detect star");
@@ -79,7 +78,7 @@ fn bench_compute_centroid_gaussian_fit(b: ::bench::Bencher) {
     // Single star centroid with Gaussian fitting
     let width = 64;
     let height = 64;
-    let pixels = make_gaussian_star(width, height, 32.3, 32.7, 2.5, 0.8, 0.1);
+    let pixels = make_gaussian_star(width, height, Vec2::new(32.3, 32.7), 2.5, 0.8, 0.1);
     let bg = crate::testing::estimate_background(&pixels, BackgroundConfig::default());
     let candidates = detect_stars_test(&pixels, None, &bg, &StarDetectionConfig::default());
     let candidate = candidates.first().expect("Should detect star");
@@ -106,7 +105,7 @@ fn bench_compute_centroid_moffat_fit(b: ::bench::Bencher) {
     // Single star centroid with Moffat fitting
     let width = 64;
     let height = 64;
-    let pixels = make_gaussian_star(width, height, 32.3, 32.7, 2.5, 0.8, 0.1);
+    let pixels = make_gaussian_star(width, height, Vec2::new(32.3, 32.7), 2.5, 0.8, 0.1);
     let bg = crate::testing::estimate_background(&pixels, BackgroundConfig::default());
     let candidates = detect_stars_test(&pixels, None, &bg, &StarDetectionConfig::default());
     let candidate = candidates.first().expect("Should detect star");
@@ -133,7 +132,7 @@ fn bench_compute_centroid_local_annulus(b: ::bench::Bencher) {
     // Single star centroid with LocalAnnulus background
     let width = 128;
     let height = 128;
-    let pixels = make_gaussian_star(width, height, 64.0, 64.0, 2.5, 0.8, 0.1);
+    let pixels = make_gaussian_star(width, height, Vec2::splat(64.0), 2.5, 0.8, 0.1);
     let bg = crate::testing::estimate_background(&pixels, BackgroundConfig::default());
     let candidates = detect_stars_test(&pixels, None, &bg, &StarDetectionConfig::default());
     let candidate = candidates.first().expect("Should detect star");
@@ -245,7 +244,7 @@ fn bench_refine_centroid_single(b: ::bench::Bencher) {
     // Single refine_centroid call - isolates the exp() hot path
     let width = 64;
     let height = 64;
-    let pixels = make_gaussian_star(width, height, 32.3, 32.7, 2.5, 0.8, 0.1);
+    let pixels = make_gaussian_star(width, height, Vec2::new(32.3, 32.7), 2.5, 0.8, 0.1);
     let bg = crate::testing::estimate_background(&pixels, BackgroundConfig::default());
     let stamp_radius = 7; // typical for FWHM ~4
     let expected_fwhm = 4.0;
@@ -268,7 +267,7 @@ fn bench_refine_centroid_batch_1000(b: ::bench::Bencher) {
     // 1000 refine_centroid calls to amplify exp() cost
     let width = 64;
     let height = 64;
-    let pixels = make_gaussian_star(width, height, 32.3, 32.7, 2.5, 0.8, 0.1);
+    let pixels = make_gaussian_star(width, height, Vec2::new(32.3, 32.7), 2.5, 0.8, 0.1);
     let bg = crate::testing::estimate_background(&pixels, BackgroundConfig::default());
     let stamp_radius = 7;
     let expected_fwhm = 4.0;

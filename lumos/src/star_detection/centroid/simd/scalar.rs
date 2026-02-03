@@ -82,8 +82,7 @@ mod tests {
     fn make_gaussian_star(
         width: usize,
         height: usize,
-        cx: f32,
-        cy: f32,
+        pos: Vec2,
         sigma: f32,
         amplitude: f32,
         background: f32,
@@ -91,8 +90,8 @@ mod tests {
         let mut pixels = vec![background; width * height];
         for y in 0..height {
             for x in 0..width {
-                let dx = x as f32 - cx;
-                let dy = y as f32 - cy;
+                let dx = x as f32 - pos.x;
+                let dy = y as f32 - pos.y;
                 let r2 = dx * dx + dy * dy;
                 let value = amplitude * (-r2 / (2.0 * sigma * sigma)).exp();
                 if value > 0.001 {
@@ -111,7 +110,7 @@ mod tests {
     fn test_centered_star() {
         let width = 64;
         let height = 64;
-        let pixels = make_gaussian_star(width, height, 32.0, 32.0, 2.5, 0.8, 0.1);
+        let pixels = make_gaussian_star(width, height, Vec2::splat(32.0), 2.5, 0.8, 0.1);
         let bg = crate::testing::estimate_background(&pixels, BackgroundConfig::default());
 
         let result = refine_centroid_scalar(&pixels, width, height, &bg, Vec2::splat(32.0), 7, 4.0);
@@ -134,9 +133,8 @@ mod tests {
     fn test_offset_star() {
         let width = 64;
         let height = 64;
-        let true_cx = 32.3;
-        let true_cy = 32.7;
-        let pixels = make_gaussian_star(width, height, true_cx, true_cy, 2.5, 0.8, 0.1);
+        let true_pos = Vec2::new(32.3, 32.7);
+        let pixels = make_gaussian_star(width, height, true_pos, 2.5, 0.8, 0.1);
         let bg = crate::testing::estimate_background(&pixels, BackgroundConfig::default());
 
         let result = refine_centroid_scalar(&pixels, width, height, &bg, Vec2::splat(32.0), 7, 4.0);
@@ -146,13 +144,15 @@ mod tests {
         // Single iteration moves toward true center but may not fully converge
         assert!(
             (pos.x - 32.0).abs() < 0.5,
-            "cx={} should have moved toward {true_cx}",
-            pos.x
+            "cx={} should have moved toward {}",
+            pos.x,
+            true_pos.x
         );
         assert!(
             (pos.y - 32.0).abs() < 0.5,
-            "cy={} should have moved toward {true_cy}",
-            pos.y
+            "cy={} should have moved toward {}",
+            pos.y,
+            true_pos.y
         );
     }
 
@@ -160,7 +160,7 @@ mod tests {
     fn test_invalid_position_left_edge() {
         let width = 64;
         let height = 64;
-        let pixels = make_gaussian_star(width, height, 32.0, 32.0, 2.5, 0.8, 0.1);
+        let pixels = make_gaussian_star(width, height, Vec2::splat(32.0), 2.5, 0.8, 0.1);
         let bg = crate::testing::estimate_background(&pixels, BackgroundConfig::default());
 
         let result =
@@ -172,7 +172,7 @@ mod tests {
     fn test_invalid_position_right_edge() {
         let width = 64;
         let height = 64;
-        let pixels = make_gaussian_star(width, height, 32.0, 32.0, 2.5, 0.8, 0.1);
+        let pixels = make_gaussian_star(width, height, Vec2::splat(32.0), 2.5, 0.8, 0.1);
         let bg = crate::testing::estimate_background(&pixels, BackgroundConfig::default());
 
         let result =
@@ -184,7 +184,7 @@ mod tests {
     fn test_invalid_position_top_edge() {
         let width = 64;
         let height = 64;
-        let pixels = make_gaussian_star(width, height, 32.0, 32.0, 2.5, 0.8, 0.1);
+        let pixels = make_gaussian_star(width, height, Vec2::splat(32.0), 2.5, 0.8, 0.1);
         let bg = crate::testing::estimate_background(&pixels, BackgroundConfig::default());
 
         let result =
@@ -196,7 +196,7 @@ mod tests {
     fn test_invalid_position_bottom_edge() {
         let width = 64;
         let height = 64;
-        let pixels = make_gaussian_star(width, height, 32.0, 32.0, 2.5, 0.8, 0.1);
+        let pixels = make_gaussian_star(width, height, Vec2::splat(32.0), 2.5, 0.8, 0.1);
         let bg = crate::testing::estimate_background(&pixels, BackgroundConfig::default());
 
         let result =
@@ -219,7 +219,7 @@ mod tests {
     fn test_different_stamp_radii() {
         let width = 128;
         let height = 128;
-        let pixels = make_gaussian_star(width, height, 64.3, 64.7, 4.0, 0.8, 0.1);
+        let pixels = make_gaussian_star(width, height, Vec2::new(64.3, 64.7), 4.0, 0.8, 0.1);
         let bg = crate::testing::estimate_background(&pixels, BackgroundConfig::default());
 
         // Test with small stamp (9x9)
@@ -262,7 +262,7 @@ mod tests {
         let width = 64;
         let height = 64;
         // Star at (45, 45) but we start search at (32, 32) - too far
-        let pixels = make_gaussian_star(width, height, 45.0, 45.0, 2.5, 0.8, 0.1);
+        let pixels = make_gaussian_star(width, height, Vec2::splat(45.0), 2.5, 0.8, 0.1);
         let bg = crate::testing::estimate_background(&pixels, BackgroundConfig::default());
 
         // With stamp_radius=7, max_move = 15/4 = 3.75 pixels
@@ -299,7 +299,7 @@ mod tests {
     fn test_very_bright_star() {
         let width = 64;
         let height = 64;
-        let pixels = make_gaussian_star(width, height, 32.3, 32.7, 2.5, 10000.0, 0.1);
+        let pixels = make_gaussian_star(width, height, Vec2::new(32.3, 32.7), 2.5, 10000.0, 0.1);
         let bg = crate::testing::estimate_background(&pixels, BackgroundConfig::default());
 
         let result = refine_centroid_scalar(&pixels, width, height, &bg, Vec2::splat(32.0), 7, 4.0);
@@ -313,7 +313,7 @@ mod tests {
     fn test_very_faint_star() {
         let width = 64;
         let height = 64;
-        let pixels = make_gaussian_star(width, height, 32.3, 32.7, 2.5, 0.01, 0.1);
+        let pixels = make_gaussian_star(width, height, Vec2::new(32.3, 32.7), 2.5, 0.01, 0.1);
         let bg = crate::testing::estimate_background(&pixels, BackgroundConfig::default());
 
         // May or may not succeed - just checking it doesn't crash
@@ -324,7 +324,7 @@ mod tests {
     fn test_minimum_stamp_radius() {
         let width = 64;
         let height = 64;
-        let pixels = make_gaussian_star(width, height, 32.0, 32.0, 1.5, 0.8, 0.1);
+        let pixels = make_gaussian_star(width, height, Vec2::splat(32.0), 1.5, 0.8, 0.1);
         let bg = crate::testing::estimate_background(&pixels, BackgroundConfig::default());
 
         let result = refine_centroid_scalar(&pixels, width, height, &bg, Vec2::splat(32.0), 4, 2.0);
@@ -335,7 +335,7 @@ mod tests {
     fn test_maximum_stamp_radius() {
         let width = 128;
         let height = 128;
-        let pixels = make_gaussian_star(width, height, 64.0, 64.0, 5.0, 0.8, 0.1);
+        let pixels = make_gaussian_star(width, height, Vec2::splat(64.0), 5.0, 0.8, 0.1);
         let bg = crate::testing::estimate_background(&pixels, BackgroundConfig::default());
 
         let result =

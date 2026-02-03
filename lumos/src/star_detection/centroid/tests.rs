@@ -19,8 +19,7 @@ const TEST_EXPECTED_FWHM: f32 = 5.9;
 fn make_gaussian_star(
     width: usize,
     height: usize,
-    cx: f32,
-    cy: f32,
+    pos: Vec2,
     sigma: f32,
     amplitude: f32,
 ) -> Buffer2<f32> {
@@ -28,8 +27,8 @@ fn make_gaussian_star(
 
     for y in 0..height {
         for x in 0..width {
-            let dx = x as f32 - cx;
-            let dy = y as f32 - cy;
+            let dx = x as f32 - pos.x;
+            let dy = y as f32 - pos.y;
             let r2 = dx * dx + dy * dy;
             let value = amplitude * (-r2 / (2.0 * sigma * sigma)).exp();
             if value > 0.001 {
@@ -46,9 +45,8 @@ fn test_centroid_accuracy() {
     // Use larger image to minimize background estimation effects
     let width = 128;
     let height = 128;
-    let true_x = 64.3f32;
-    let true_y = 64.7f32;
-    let pixels = make_gaussian_star(width, height, true_x, true_y, 2.5, 0.8);
+    let true_pos = Vec2::new(64.3, 64.7);
+    let pixels = make_gaussian_star(width, height, true_pos, 2.5, 0.8);
 
     let bg = crate::testing::estimate_background(
         &pixels,
@@ -65,22 +63,22 @@ fn test_centroid_accuracy() {
     let star =
         compute_centroid(&pixels, &bg, &candidates[0], &config).expect("Should compute centroid");
 
-    let error_x = (star.pos.x - true_x as f64).abs();
-    let error_y = (star.pos.y - true_y as f64).abs();
+    let error_x = (star.pos.x - true_pos.x as f64).abs();
+    let error_y = (star.pos.y - true_pos.y as f64).abs();
 
     // Sub-pixel accuracy within 0.2 pixels is good for weighted centroid
     assert!(
         error_x < 0.2,
         "X centroid error {} too large (true={}, computed={})",
         error_x,
-        true_x,
+        true_pos.x,
         star.pos.x
     );
     assert!(
         error_y < 0.2,
         "Y centroid error {} too large (true={}, computed={})",
         error_y,
-        true_y,
+        true_pos.y,
         star.pos.y
     );
 }
@@ -92,7 +90,7 @@ fn test_fwhm_estimation() {
     let height = 128;
     let sigma = 3.0f32;
     let expected_fwhm = FWHM_TO_SIGMA * sigma;
-    let pixels = make_gaussian_star(width, height, 64.0, 64.0, sigma, 0.8);
+    let pixels = make_gaussian_star(width, height, Vec2::splat(64.0), sigma, 0.8);
 
     let bg = crate::testing::estimate_background(
         &pixels,
@@ -132,7 +130,7 @@ fn test_fwhm_estimation() {
 fn test_circular_star_eccentricity() {
     let width = 64;
     let height = 64;
-    let pixels = make_gaussian_star(width, height, 32.0, 32.0, 2.5, 0.8);
+    let pixels = make_gaussian_star(width, height, Vec2::splat(32.0), 2.5, 0.8);
 
     let bg = crate::testing::estimate_background(
         &pixels,
@@ -158,7 +156,7 @@ fn test_circular_star_eccentricity() {
 fn test_snr_positive() {
     let width = 64;
     let height = 64;
-    let pixels = make_gaussian_star(width, height, 32.0, 32.0, 2.5, 0.8);
+    let pixels = make_gaussian_star(width, height, Vec2::splat(32.0), 2.5, 0.8);
 
     let bg = crate::testing::estimate_background(
         &pixels,
@@ -346,9 +344,8 @@ fn make_uniform_background(
 fn test_refine_centroid_centered_star() {
     let width = 64;
     let height = 64;
-    let cx = 32.0f32;
-    let cy = 32.0f32;
-    let pixels = make_gaussian_star(width, height, cx, cy, 2.5, 0.8);
+    let pos = Vec2::splat(32.0);
+    let pixels = make_gaussian_star(width, height, pos, 2.5, 0.8);
     let bg = make_uniform_background(width, height, 0.1, 0.01);
 
     let result = refine_centroid(
@@ -356,7 +353,7 @@ fn test_refine_centroid_centered_star() {
         width,
         height,
         &bg,
-        Vec2::new(cx, cy),
+        pos,
         TEST_STAMP_RADIUS,
         TEST_EXPECTED_FWHM,
     );
@@ -364,17 +361,16 @@ fn test_refine_centroid_centered_star() {
     assert!(result.is_some());
     let new_pos = result.unwrap();
     // Should stay very close to original position
-    assert!((new_pos.x - cx).abs() < 0.5);
-    assert!((new_pos.y - cy).abs() < 0.5);
+    assert!((new_pos.x - pos.x).abs() < 0.5);
+    assert!((new_pos.y - pos.y).abs() < 0.5);
 }
 
 #[test]
 fn test_refine_centroid_offset_converges() {
     let width = 64;
     let height = 64;
-    let true_cx = 32.3f32;
-    let true_cy = 32.7f32;
-    let pixels = make_gaussian_star(width, height, true_cx, true_cy, 2.5, 0.8);
+    let true_pos = Vec2::new(32.3, 32.7);
+    let pixels = make_gaussian_star(width, height, true_pos, 2.5, 0.8);
     let bg = make_uniform_background(width, height, 0.1, 0.01);
 
     // Start with integer guess (peak pixel position)
@@ -393,8 +389,9 @@ fn test_refine_centroid_offset_converges() {
     assert!(result.is_some());
     let new_pos = result.unwrap();
     // Should move towards true center
-    let old_error = ((start_pos.x - true_cx).powi(2) + (start_pos.y - true_cy).powi(2)).sqrt();
-    let new_error = ((new_pos.x - true_cx).powi(2) + (new_pos.y - true_cy).powi(2)).sqrt();
+    let old_error =
+        ((start_pos.x - true_pos.x).powi(2) + (start_pos.y - true_pos.y).powi(2)).sqrt();
+    let new_error = ((new_pos.x - true_pos.x).powi(2) + (new_pos.y - true_pos.y).powi(2)).sqrt();
     assert!(
         new_error < old_error,
         "Refinement should reduce error: {} -> {}",
@@ -448,7 +445,7 @@ fn test_refine_centroid_rejects_large_movement() {
     let width = 64;
     let height = 64;
     // Create a star very far from initial position (outside the stamp entirely)
-    let pixels = make_gaussian_star(width, height, 50.0, 50.0, 2.5, 0.8);
+    let pixels = make_gaussian_star(width, height, Vec2::splat(50.0), 2.5, 0.8);
     let bg = make_uniform_background(width, height, 0.1, 0.01);
 
     // Start far from the actual star - the stamp won't contain the star,
@@ -472,9 +469,8 @@ fn test_refine_centroid_rejects_large_movement() {
 fn test_refine_centroid_iterative_convergence() {
     let width = 64;
     let height = 64;
-    let true_cx = 32.25f32;
-    let true_cy = 32.75f32;
-    let pixels = make_gaussian_star(width, height, true_cx, true_cy, 2.5, 0.8);
+    let true_pos = Vec2::new(32.25, 32.75);
+    let pixels = make_gaussian_star(width, height, true_pos, 2.5, 0.8);
     let bg = make_uniform_background(width, height, 0.1, 0.01);
 
     // Simulate multiple iterations like compute_centroid does
@@ -502,7 +498,7 @@ fn test_refine_centroid_iterative_convergence() {
     }
 
     // Should converge close to true position
-    let error = ((pos.x - true_cx).powi(2) + (pos.y - true_cy).powi(2)).sqrt();
+    let error = ((pos.x - true_pos.x).powi(2) + (pos.y - true_pos.y).powi(2)).sqrt();
     assert!(error < 0.2, "Failed to converge: error = {}", error);
 }
 
@@ -514,7 +510,7 @@ fn test_refine_centroid_iterative_convergence() {
 fn test_compute_metrics_valid_star() {
     let width = 64;
     let height = 64;
-    let pixels = make_gaussian_star(width, height, 32.0, 32.0, 2.5, 0.8);
+    let pixels = make_gaussian_star(width, height, Vec2::splat(32.0), 2.5, 0.8);
     let bg = make_uniform_background(width, height, 0.1, 0.01);
 
     let metrics = compute_metrics(
@@ -584,8 +580,8 @@ fn test_compute_metrics_fwhm_scales_with_sigma() {
     let sigma_small = 2.0f32;
     let sigma_large = 4.0f32;
 
-    let pixels_small = make_gaussian_star(width, height, 64.0, 64.0, sigma_small, 0.8);
-    let pixels_large = make_gaussian_star(width, height, 64.0, 64.0, sigma_large, 0.8);
+    let pixels_small = make_gaussian_star(width, height, Vec2::splat(64.0), sigma_small, 0.8);
+    let pixels_large = make_gaussian_star(width, height, Vec2::splat(64.0), sigma_large, 0.8);
     let bg = make_uniform_background(width, height, 0.1, 0.01);
 
     let metrics_small = compute_metrics(
@@ -621,8 +617,8 @@ fn test_compute_metrics_snr_scales_with_amplitude() {
     let width = 64;
     let height = 64;
 
-    let pixels_dim = make_gaussian_star(width, height, 32.0, 32.0, 2.5, 0.2);
-    let pixels_bright = make_gaussian_star(width, height, 32.0, 32.0, 2.5, 0.8);
+    let pixels_dim = make_gaussian_star(width, height, Vec2::splat(32.0), 2.5, 0.2);
+    let pixels_bright = make_gaussian_star(width, height, Vec2::splat(32.0), 2.5, 0.8);
     let bg = make_uniform_background(width, height, 0.1, 0.01);
 
     let metrics_dim = compute_metrics(
@@ -660,8 +656,7 @@ fn test_compute_metrics_snr_scales_with_amplitude() {
 fn make_elliptical_star(
     width: usize,
     height: usize,
-    cx: f32,
-    cy: f32,
+    pos: Vec2,
     sigma_x: f32,
     sigma_y: f32,
     amplitude: f32,
@@ -670,8 +665,8 @@ fn make_elliptical_star(
 
     for y in 0..height {
         for x in 0..width {
-            let dx = x as f32 - cx;
-            let dy = y as f32 - cy;
+            let dx = x as f32 - pos.x;
+            let dy = y as f32 - pos.y;
             let r2 = (dx * dx) / (sigma_x * sigma_x) + (dy * dy) / (sigma_y * sigma_y);
             let value = amplitude * (-r2 / 2.0).exp();
             if value > 0.001 {
@@ -688,7 +683,7 @@ fn test_elongated_star_high_eccentricity() {
     let width = 64;
     let height = 64;
     // Elongated star: sigma_x = 4, sigma_y = 1 (4:1 aspect ratio)
-    let pixels = make_elliptical_star(width, height, 32.0, 32.0, 4.0, 1.5, 0.8);
+    let pixels = make_elliptical_star(width, height, Vec2::splat(32.0), 4.0, 1.5, 0.8);
     let bg = make_uniform_background(width, height, 0.1, 0.01);
 
     let metrics = compute_metrics(
@@ -714,8 +709,8 @@ fn test_circular_vs_elongated_eccentricity() {
     let width = 64;
     let height = 64;
 
-    let circular = make_gaussian_star(width, height, 32.0, 32.0, 2.5, 0.8);
-    let elongated = make_elliptical_star(width, height, 32.0, 32.0, 4.0, 2.0, 0.8);
+    let circular = make_gaussian_star(width, height, Vec2::splat(32.0), 2.5, 0.8);
+    let elongated = make_elliptical_star(width, height, Vec2::splat(32.0), 4.0, 2.0, 0.8);
     let bg = make_uniform_background(width, height, 0.1, 0.01);
 
     let metrics_circular = compute_metrics(
@@ -753,11 +748,10 @@ fn test_circular_vs_elongated_eccentricity() {
 fn test_centroid_with_noisy_background() {
     let width = 64;
     let height = 64;
-    let true_cx = 32.0f32;
-    let true_cy = 32.0f32;
+    let true_pos = Vec2::splat(32.0);
 
     // Create star with added noise
-    let mut pixels = make_gaussian_star(width, height, true_cx, true_cy, 2.5, 0.8);
+    let mut pixels = make_gaussian_star(width, height, true_pos, 2.5, 0.8);
 
     // Add random-ish noise pattern (deterministic for reproducibility)
     for (i, pixel) in pixels.iter_mut().enumerate() {
@@ -772,7 +766,7 @@ fn test_centroid_with_noisy_background() {
         width,
         height,
         &bg,
-        Vec2::new(true_cx, true_cy),
+        true_pos,
         TEST_STAMP_RADIUS,
         TEST_EXPECTED_FWHM,
     );
@@ -781,11 +775,11 @@ fn test_centroid_with_noisy_background() {
     let new_pos = result.unwrap();
     // With noise, allow more tolerance
     assert!(
-        (new_pos.x - true_cx).abs() < 1.0,
+        (new_pos.x - true_pos.x).abs() < 1.0,
         "X error too large with noise"
     );
     assert!(
-        (new_pos.y - true_cy).abs() < 1.0,
+        (new_pos.y - true_pos.y).abs() < 1.0,
         "Y error too large with noise"
     );
 }
@@ -794,7 +788,7 @@ fn test_centroid_with_noisy_background() {
 fn test_snr_decreases_with_higher_noise() {
     let width = 64;
     let height = 64;
-    let pixels = make_gaussian_star(width, height, 32.0, 32.0, 2.5, 0.8);
+    let pixels = make_gaussian_star(width, height, Vec2::splat(32.0), 2.5, 0.8);
 
     let bg_low_noise = make_uniform_background(width, height, 0.1, 0.01);
     let bg_high_noise = make_uniform_background(width, height, 0.1, 0.1);
@@ -838,7 +832,7 @@ fn test_fwhm_formula_for_known_gaussian() {
     let sigma = 3.0f32;
     let expected_fwhm = FWHM_TO_SIGMA * sigma;
 
-    let pixels = make_gaussian_star(width, height, 64.0, 64.0, sigma, 0.8);
+    let pixels = make_gaussian_star(width, height, Vec2::splat(64.0), sigma, 0.8);
     let bg = make_uniform_background(width, height, 0.1, 0.001); // Very low noise
 
     let metrics = compute_metrics(
@@ -867,8 +861,8 @@ fn test_flux_proportional_to_amplitude() {
     let width = 64;
     let height = 64;
 
-    let pixels_amp1 = make_gaussian_star(width, height, 32.0, 32.0, 2.5, 0.4);
-    let pixels_amp2 = make_gaussian_star(width, height, 32.0, 32.0, 2.5, 0.8);
+    let pixels_amp1 = make_gaussian_star(width, height, Vec2::splat(32.0), 2.5, 0.4);
+    let pixels_amp2 = make_gaussian_star(width, height, Vec2::splat(32.0), 2.5, 0.8);
     let bg = make_uniform_background(width, height, 0.1, 0.01);
 
     let metrics1 = compute_metrics(
@@ -910,9 +904,9 @@ fn test_eccentricity_bounds() {
     let bg = make_uniform_background(width, height, 0.1, 0.01);
 
     // Test various star shapes
-    let circular = make_gaussian_star(width, height, 32.0, 32.0, 2.5, 0.8);
-    let elongated_x = make_elliptical_star(width, height, 32.0, 32.0, 5.0, 2.0, 0.8);
-    let elongated_y = make_elliptical_star(width, height, 32.0, 32.0, 2.0, 5.0, 0.8);
+    let circular = make_gaussian_star(width, height, Vec2::splat(32.0), 2.5, 0.8);
+    let elongated_x = make_elliptical_star(width, height, Vec2::splat(32.0), 5.0, 2.0, 0.8);
+    let elongated_y = make_elliptical_star(width, height, Vec2::splat(32.0), 2.0, 5.0, 0.8);
 
     for (name, pixels) in [
         ("circular", circular),
@@ -944,8 +938,8 @@ fn test_eccentricity_orientation_invariant() {
     let height = 64;
     let bg = make_uniform_background(width, height, 0.1, 0.01);
 
-    let elongated_x = make_elliptical_star(width, height, 32.0, 32.0, 4.0, 2.0, 0.8);
-    let elongated_y = make_elliptical_star(width, height, 32.0, 32.0, 2.0, 4.0, 0.8);
+    let elongated_x = make_elliptical_star(width, height, Vec2::splat(32.0), 4.0, 2.0, 0.8);
+    let elongated_y = make_elliptical_star(width, height, Vec2::splat(32.0), 2.0, 4.0, 0.8);
 
     let metrics_x = compute_metrics(
         &elongated_x,
@@ -983,7 +977,7 @@ fn test_snr_formula_consistency() {
     // Verify the formula behaves as expected
     let width = 64;
     let height = 64;
-    let pixels = make_gaussian_star(width, height, 32.0, 32.0, 2.5, 0.8);
+    let pixels = make_gaussian_star(width, height, Vec2::splat(32.0), 2.5, 0.8);
 
     let noise1 = 0.02f32;
     let noise2 = 0.04f32; // 2x noise
@@ -1067,8 +1061,8 @@ fn test_fwhm_independent_of_amplitude() {
     let height = 64;
     let sigma = 2.5f32;
 
-    let pixels_dim = make_gaussian_star(width, height, 32.0, 32.0, sigma, 0.3);
-    let pixels_bright = make_gaussian_star(width, height, 32.0, 32.0, sigma, 0.9);
+    let pixels_dim = make_gaussian_star(width, height, Vec2::splat(32.0), sigma, 0.3);
+    let pixels_bright = make_gaussian_star(width, height, Vec2::splat(32.0), sigma, 0.9);
     let bg = make_uniform_background(width, height, 0.1, 0.01);
 
     let metrics_dim = compute_metrics(
@@ -1108,9 +1102,9 @@ fn test_eccentricity_increases_with_elongation() {
     let bg = make_uniform_background(width, height, 0.1, 0.01);
 
     // Create stars with increasing elongation ratios
-    let ratio_1_1 = make_elliptical_star(width, height, 32.0, 32.0, 2.5, 2.5, 0.8); // circular
-    let ratio_2_1 = make_elliptical_star(width, height, 32.0, 32.0, 4.0, 2.0, 0.8);
-    let ratio_3_1 = make_elliptical_star(width, height, 32.0, 32.0, 6.0, 2.0, 0.8);
+    let ratio_1_1 = make_elliptical_star(width, height, Vec2::splat(32.0), 2.5, 2.5, 0.8); // circular
+    let ratio_2_1 = make_elliptical_star(width, height, Vec2::splat(32.0), 4.0, 2.0, 0.8);
+    let ratio_3_1 = make_elliptical_star(width, height, Vec2::splat(32.0), 6.0, 2.0, 0.8);
 
     let ecc_1 = compute_metrics(
         &ratio_1_1,
@@ -1270,7 +1264,7 @@ fn test_circular_star_roundness() {
     // A circular Gaussian star should have roundness near zero
     let width = 64;
     let height = 64;
-    let pixels = make_gaussian_star(width, height, 32.0, 32.0, 2.5, 0.8);
+    let pixels = make_gaussian_star(width, height, Vec2::splat(32.0), 2.5, 0.8);
 
     let bg = crate::testing::estimate_background(
         &pixels,
@@ -1409,7 +1403,7 @@ fn test_laplacian_snr_computed_for_star() {
     // Verify that laplacian_snr is computed for detected stars
     let width = 64;
     let height = 64;
-    let pixels = make_gaussian_star(width, height, 32.0, 32.0, 2.5, 0.8);
+    let pixels = make_gaussian_star(width, height, Vec2::splat(32.0), 2.5, 0.8);
     let bg = crate::testing::estimate_background(
         &pixels,
         BackgroundConfig {
@@ -1492,10 +1486,9 @@ fn test_weighted_centroid_precision_statistical() {
 
     for dx in 0..10 {
         for dy in 0..10 {
-            let true_cx = 64.0 + dx as f32 * 0.1;
-            let true_cy = 64.0 + dy as f32 * 0.1;
+            let true_pos = Vec2::new(64.0 + dx as f32 * 0.1, 64.0 + dy as f32 * 0.1);
 
-            let pixels = make_gaussian_star(width, height, true_cx, true_cy, sigma, 1.0);
+            let pixels = make_gaussian_star(width, height, true_pos, sigma, 1.0);
             let bg = crate::testing::estimate_background(
                 &pixels,
                 BackgroundConfig {
@@ -1517,8 +1510,8 @@ fn test_weighted_centroid_precision_statistical() {
             }
 
             if let Some(star) = compute_centroid(&pixels, &bg, &candidates[0], &config) {
-                let error = ((star.pos.x - true_cx as f64).powi(2)
-                    + (star.pos.y - true_cy as f64).powi(2))
+                let error = ((star.pos.x - true_pos.x as f64).powi(2)
+                    + (star.pos.y - true_pos.y as f64).powi(2))
                 .sqrt() as f32;
                 total_error += error;
                 max_error = max_error.max(error);
@@ -1680,7 +1673,7 @@ fn test_fwhm_estimation_accuracy() {
     // Test various sigma values
     for sigma in [1.5f32, 2.0, 2.5, 3.0, 3.5, 4.0] {
         let expected_fwhm = FWHM_TO_SIGMA * sigma;
-        let pixels = make_gaussian_star(width, height, 64.0, 64.0, sigma, 1.0);
+        let pixels = make_gaussian_star(width, height, Vec2::splat(64.0), sigma, 1.0);
 
         let metrics = compute_metrics(
             &pixels,
@@ -1720,7 +1713,14 @@ fn test_eccentricity_calculation_accuracy() {
     ];
 
     for (sigma_major, sigma_minor, expected_ecc) in test_cases {
-        let pixels = make_elliptical_star(width, height, 32.0, 32.0, sigma_major, sigma_minor, 0.8);
+        let pixels = make_elliptical_star(
+            width,
+            height,
+            Vec2::splat(32.0),
+            sigma_major,
+            sigma_minor,
+            0.8,
+        );
         let metrics = compute_metrics(
             &pixels,
             &bg,
@@ -1755,7 +1755,7 @@ fn test_snr_calculation_with_gain() {
     let gain = 2.0f32; // e-/ADU
     let read_noise = 5.0f32; // electrons
 
-    let pixels = make_gaussian_star(width, height, 32.0, 32.0, sigma, amplitude);
+    let pixels = make_gaussian_star(width, height, Vec2::splat(32.0), sigma, amplitude);
     let bg = make_uniform_background(width, height, 0.1, sky_noise);
 
     // Without gain (simplified formula)
@@ -1813,7 +1813,7 @@ fn test_sharpness_point_vs_extended() {
     let bg = make_uniform_background(width, height, 0.1, 0.01);
 
     // Compact star (small sigma) - high sharpness
-    let compact = make_gaussian_star(width, height, 32.0, 32.0, 1.5, 0.8);
+    let compact = make_gaussian_star(width, height, Vec2::splat(32.0), 1.5, 0.8);
     let metrics_compact = compute_metrics(
         &compact,
         &bg,
@@ -1825,7 +1825,7 @@ fn test_sharpness_point_vs_extended() {
     .unwrap();
 
     // Extended star (large sigma) - lower sharpness
-    let extended = make_gaussian_star(width, height, 32.0, 32.0, 4.0, 0.8);
+    let extended = make_gaussian_star(width, height, Vec2::splat(32.0), 4.0, 0.8);
     let metrics_extended = compute_metrics(
         &extended,
         &bg,
@@ -2036,7 +2036,7 @@ fn test_gaussian_fit_with_noise() {
 fn test_roundness1_circular_source() {
     let width = 64;
     let height = 64;
-    let pixels = make_gaussian_star(width, height, 32.0, 32.0, 2.5, 0.8);
+    let pixels = make_gaussian_star(width, height, Vec2::splat(32.0), 2.5, 0.8);
     let bg = make_uniform_background(width, height, 0.1, 0.01);
 
     let metrics = compute_metrics(
@@ -2062,7 +2062,7 @@ fn test_roundness1_x_elongated() {
     let width = 64;
     let height = 64;
     // sigma_x > sigma_y means more spread in x direction
-    let pixels = make_elliptical_star(width, height, 32.0, 32.0, 4.0, 2.0, 0.8);
+    let pixels = make_elliptical_star(width, height, Vec2::splat(32.0), 4.0, 2.0, 0.8);
     let bg = make_uniform_background(width, height, 0.1, 0.01);
 
     let metrics = compute_metrics(
@@ -2089,7 +2089,7 @@ fn test_roundness1_x_elongated() {
 fn test_roundness2_symmetric_source() {
     let width = 64;
     let height = 64;
-    let pixels = make_gaussian_star(width, height, 32.0, 32.0, 2.5, 0.8);
+    let pixels = make_gaussian_star(width, height, Vec2::splat(32.0), 2.5, 0.8);
     let bg = make_uniform_background(width, height, 0.1, 0.01);
 
     let metrics = compute_metrics(
@@ -2497,12 +2497,11 @@ fn test_fit_moffat_2d_weighted_variable_beta() {
 fn test_refine_centroid_adaptive_sigma_small_fwhm() {
     let width = 64;
     let height = 64;
-    let true_cx = 32.3f32;
-    let true_cy = 32.7f32;
+    let true_pos = Vec2::new(32.3, 32.7);
     let sigma = 1.5f32; // Small sigma
     let expected_fwhm = FWHM_TO_SIGMA * sigma;
 
-    let pixels = make_gaussian_star(width, height, true_cx, true_cy, sigma, 0.8);
+    let pixels = make_gaussian_star(width, height, true_pos, sigma, 0.8);
     let bg = make_uniform_background(width, height, 0.1, 0.01);
 
     // Use small expected FWHM
@@ -2520,7 +2519,7 @@ fn test_refine_centroid_adaptive_sigma_small_fwhm() {
     let new_pos = result.unwrap();
 
     // Should converge towards true position
-    let error = ((new_pos.x - true_cx).powi(2) + (new_pos.y - true_cy).powi(2)).sqrt();
+    let error = ((new_pos.x - true_pos.x).powi(2) + (new_pos.y - true_pos.y).powi(2)).sqrt();
     assert!(
         error < 0.5,
         "Centroid error {} too large for small FWHM",
@@ -2532,12 +2531,11 @@ fn test_refine_centroid_adaptive_sigma_small_fwhm() {
 fn test_refine_centroid_adaptive_sigma_large_fwhm() {
     let width = 64;
     let height = 64;
-    let true_cx = 32.3f32;
-    let true_cy = 32.7f32;
+    let true_pos = Vec2::new(32.3, 32.7);
     let sigma = 4.0f32; // Large sigma
     let expected_fwhm = FWHM_TO_SIGMA * sigma;
 
-    let pixels = make_gaussian_star(width, height, true_cx, true_cy, sigma, 0.8);
+    let pixels = make_gaussian_star(width, height, true_pos, sigma, 0.8);
     let bg = make_uniform_background(width, height, 0.1, 0.01);
 
     // Use large expected FWHM
@@ -2555,7 +2553,7 @@ fn test_refine_centroid_adaptive_sigma_large_fwhm() {
     let new_pos = result.unwrap();
 
     // Should converge towards true position
-    let error = ((new_pos.x - true_cx).powi(2) + (new_pos.y - true_cy).powi(2)).sqrt();
+    let error = ((new_pos.x - true_pos.x).powi(2) + (new_pos.y - true_pos.y).powi(2)).sqrt();
     assert!(
         error < 0.5,
         "Centroid error {} too large for large FWHM",
@@ -2736,7 +2734,7 @@ fn test_local_annulus_vs_global_map() {
     let height = 128;
 
     // Create star on uniform background
-    let pixels = make_gaussian_star(width, height, 64.0, 64.0, 2.5, 0.8);
+    let pixels = make_gaussian_star(width, height, Vec2::splat(64.0), 2.5, 0.8);
     let bg = crate::testing::estimate_background(
         &pixels,
         BackgroundConfig {
@@ -2791,9 +2789,8 @@ fn test_local_annulus_near_edge_fallback() {
     let height = 64;
 
     // Create star near edge where annulus might be partially outside
-    let cx = 20.0f32;
-    let cy = 32.0f32;
-    let pixels = make_gaussian_star(width, height, cx, cy, 2.0, 0.8);
+    let pos = Vec2::new(20.0, 32.0);
+    let pixels = make_gaussian_star(width, height, pos, 2.0, 0.8);
     let bg = crate::testing::estimate_background(
         &pixels,
         BackgroundConfig {
