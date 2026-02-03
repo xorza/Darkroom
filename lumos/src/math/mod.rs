@@ -14,6 +14,7 @@
 
 mod bbox;
 pub mod deviation;
+pub mod fast_exp;
 pub mod fast_pow;
 pub mod statistics;
 pub mod sum;

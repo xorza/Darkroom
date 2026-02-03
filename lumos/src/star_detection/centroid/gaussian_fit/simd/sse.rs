@@ -1,17 +1,12 @@
 //! SSE SIMD implementation for Gaussian profile fitting.
 //!
-//! Uses SSE to process 4 pixels in parallel. Falls back from AVX2 when not available.
+//! Uses vectorized exp() via fast polynomial approximation (Cephes-style),
+//! processing 4 pixels in parallel.
 
 #![allow(dead_code)]
 #![allow(unsafe_op_in_unsafe_fn)]
 
 use std::arch::x86_64::*;
-
-/// Compute exp(x) for 4 values using scalar exp (accurate).
-#[inline]
-fn compute_exp_4(x: &[f32; 4]) -> [f32; 4] {
-    [x[0].exp(), x[1].exp(), x[2].exp(), x[3].exp()]
-}
 
 /// Compute Gaussian Jacobian and residuals for 4 pixels at once.
 #[inline]
@@ -48,7 +43,7 @@ pub unsafe fn compute_jacobian_residuals_4(
     let vx0 = _mm_set1_ps(x0);
     let vy0 = _mm_set1_ps(y0);
 
-    // Compute dx, dy using SIMD (keep in registers for later use)
+    // Compute dx, dy using SIMD
     let vdx = _mm_sub_ps(vx, vx0);
     let vdy = _mm_sub_ps(vy, vy0);
 
@@ -56,25 +51,18 @@ pub unsafe fn compute_jacobian_residuals_4(
     let vdx2 = _mm_mul_ps(vdx, vdx);
     let vdy2 = _mm_mul_ps(vdy, vdy);
 
-    // Store only dx2/dy2 to compute exponent (dx/dy stay in registers)
-    let mut dx2_arr = [0.0f32; 4];
-    let mut dy2_arr = [0.0f32; 4];
-    _mm_storeu_ps(dx2_arr.as_mut_ptr(), vdx2);
-    _mm_storeu_ps(dy2_arr.as_mut_ptr(), vdy2);
+    // Compute exponent = -0.5 * (dx^2/sigma_x^2 + dy^2/sigma_y^2) entirely in SIMD
+    let vinv_sx2 = _mm_set1_ps(inv_sigma_x2);
+    let vinv_sy2 = _mm_set1_ps(inv_sigma_y2);
+    let vneg_half = _mm_set1_ps(-0.5);
+    let vexponent = _mm_mul_ps(
+        vneg_half,
+        _mm_add_ps(_mm_mul_ps(vdx2, vinv_sx2), _mm_mul_ps(vdy2, vinv_sy2)),
+    );
 
-    // Compute exponent = -0.5 * (dx^2/sigma_x^2 + dy^2/sigma_y^2)
-    let exponent_arr: [f32; 4] = [
-        -0.5 * (dx2_arr[0] * inv_sigma_x2 + dy2_arr[0] * inv_sigma_y2),
-        -0.5 * (dx2_arr[1] * inv_sigma_x2 + dy2_arr[1] * inv_sigma_y2),
-        -0.5 * (dx2_arr[2] * inv_sigma_x2 + dy2_arr[2] * inv_sigma_y2),
-        -0.5 * (dx2_arr[3] * inv_sigma_x2 + dy2_arr[3] * inv_sigma_y2),
-    ];
+    // Vectorized exp
+    let vexp = crate::math::fast_exp::sse::fast_exp_4_sse_m128(vexponent);
 
-    // Compute exp using accurate scalar exp
-    let exp_arr = compute_exp_4(&exponent_arr);
-
-    // Load results back into SIMD registers for remaining arithmetic
-    let vexp = _mm_loadu_ps(exp_arr.as_ptr());
     let vamp = _mm_set1_ps(amp);
     let vbg = _mm_set1_ps(bg);
 
@@ -153,23 +141,17 @@ pub unsafe fn compute_chi2_4(
     let vdx2 = _mm_mul_ps(vdx, vdx);
     let vdy2 = _mm_mul_ps(vdy, vdy);
 
-    // Store dx2, dy2 to compute exponent
-    let mut dx2_arr = [0.0f32; 4];
-    let mut dy2_arr = [0.0f32; 4];
-    _mm_storeu_ps(dx2_arr.as_mut_ptr(), vdx2);
-    _mm_storeu_ps(dy2_arr.as_mut_ptr(), vdy2);
+    // Compute exponent entirely in SIMD
+    let vinv_sx2 = _mm_set1_ps(inv_sigma_x2);
+    let vinv_sy2 = _mm_set1_ps(inv_sigma_y2);
+    let vneg_half = _mm_set1_ps(-0.5);
+    let vexponent = _mm_mul_ps(
+        vneg_half,
+        _mm_add_ps(_mm_mul_ps(vdx2, vinv_sx2), _mm_mul_ps(vdy2, vinv_sy2)),
+    );
 
-    // Compute exponent and exp with scalar
-    let exponent_arr: [f32; 4] = [
-        -0.5 * (dx2_arr[0] * inv_sigma_x2 + dy2_arr[0] * inv_sigma_y2),
-        -0.5 * (dx2_arr[1] * inv_sigma_x2 + dy2_arr[1] * inv_sigma_y2),
-        -0.5 * (dx2_arr[2] * inv_sigma_x2 + dy2_arr[2] * inv_sigma_y2),
-        -0.5 * (dx2_arr[3] * inv_sigma_x2 + dy2_arr[3] * inv_sigma_y2),
-    ];
-    let exp_arr = compute_exp_4(&exponent_arr);
-
-    // Continue with SIMD for model and residual computation
-    let vexp = _mm_loadu_ps(exp_arr.as_ptr());
+    // Vectorized exp
+    let vexp = crate::math::fast_exp::sse::fast_exp_4_sse_m128(vexponent);
     let vamp = _mm_set1_ps(amp);
     let vbg = _mm_set1_ps(bg);
 

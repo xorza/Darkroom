@@ -1,32 +1,16 @@
 //! AVX2 SIMD implementation for Gaussian profile fitting.
 //!
-//! Uses a hybrid approach: compute the expensive exp() calls with scalar code,
-//! then use SIMD for the remaining arithmetic (which is most of the work).
+//! Uses fully vectorized exp() via fast polynomial approximation (Cephes-style),
+//! keeping all computation in SIMD registers without scalar round-trips.
 
 #![allow(dead_code)]
 #![allow(unsafe_op_in_unsafe_fn)]
 
 use std::arch::x86_64::*;
 
-/// Compute exp(x) for 8 values using scalar exp (accurate).
-/// The exp call is the expensive part, but we need accuracy for L-M.
-#[inline]
-fn compute_exp_8(x: &[f32; 8]) -> [f32; 8] {
-    [
-        x[0].exp(),
-        x[1].exp(),
-        x[2].exp(),
-        x[3].exp(),
-        x[4].exp(),
-        x[5].exp(),
-        x[6].exp(),
-        x[7].exp(),
-    ]
-}
-
 /// Compute Gaussian Jacobian and residuals for 8 pixels at once.
 ///
-/// Uses scalar exp for accuracy, SIMD for all other arithmetic.
+/// Uses vectorized exp (Cephes polynomial in AVX2) for all 8 pixels simultaneously.
 #[inline]
 #[target_feature(enable = "avx2", enable = "fma")]
 #[allow(clippy::too_many_arguments)]
@@ -50,8 +34,8 @@ pub unsafe fn compute_jacobian_residuals_8(
     // Precompute all reciprocals to avoid repeated divisions
     let inv_sigma_x2 = 1.0 / sigma_x2;
     let inv_sigma_y2 = 1.0 / sigma_y2;
-    let inv_sigma_x3 = inv_sigma_x2 / sigma_x; // Reuse reciprocal
-    let inv_sigma_y3 = inv_sigma_y2 / sigma_y; // Reuse reciprocal
+    let inv_sigma_x3 = inv_sigma_x2 / sigma_x;
+    let inv_sigma_y3 = inv_sigma_y2 / sigma_y;
 
     // Load 8 pixel coordinates and values
     let vx = _mm256_loadu_ps(data_x.as_ptr().add(offset));
@@ -61,7 +45,7 @@ pub unsafe fn compute_jacobian_residuals_8(
     let vx0 = _mm256_set1_ps(x0);
     let vy0 = _mm256_set1_ps(y0);
 
-    // Compute dx, dy using SIMD (keep in registers for later use)
+    // Compute dx, dy using SIMD
     let vdx = _mm256_sub_ps(vx, vx0);
     let vdy = _mm256_sub_ps(vy, vy0);
 
@@ -69,29 +53,19 @@ pub unsafe fn compute_jacobian_residuals_8(
     let vdx2 = _mm256_mul_ps(vdx, vdx);
     let vdy2 = _mm256_mul_ps(vdy, vdy);
 
-    // Store only dx2/dy2 to compute exponent (dx/dy stay in registers)
-    let mut dx2_arr = [0.0f32; 8];
-    let mut dy2_arr = [0.0f32; 8];
-    _mm256_storeu_ps(dx2_arr.as_mut_ptr(), vdx2);
-    _mm256_storeu_ps(dy2_arr.as_mut_ptr(), vdy2);
+    // Compute exponent = -0.5 * (dx^2/sigma_x^2 + dy^2/sigma_y^2) entirely in SIMD
+    let vinv_sx2 = _mm256_set1_ps(inv_sigma_x2);
+    let vinv_sy2 = _mm256_set1_ps(inv_sigma_y2);
+    let vneg_half = _mm256_set1_ps(-0.5);
+    // exponent = -0.5 * (dx2 * inv_sx2 + dy2 * inv_sy2)
+    let vexponent = _mm256_mul_ps(
+        vneg_half,
+        _mm256_fmadd_ps(vdx2, vinv_sx2, _mm256_mul_ps(vdy2, vinv_sy2)),
+    );
 
-    // Compute exponent = -0.5 * (dx^2/sigma_x^2 + dy^2/sigma_y^2)
-    let exponent_arr: [f32; 8] = [
-        -0.5 * (dx2_arr[0] * inv_sigma_x2 + dy2_arr[0] * inv_sigma_y2),
-        -0.5 * (dx2_arr[1] * inv_sigma_x2 + dy2_arr[1] * inv_sigma_y2),
-        -0.5 * (dx2_arr[2] * inv_sigma_x2 + dy2_arr[2] * inv_sigma_y2),
-        -0.5 * (dx2_arr[3] * inv_sigma_x2 + dy2_arr[3] * inv_sigma_y2),
-        -0.5 * (dx2_arr[4] * inv_sigma_x2 + dy2_arr[4] * inv_sigma_y2),
-        -0.5 * (dx2_arr[5] * inv_sigma_x2 + dy2_arr[5] * inv_sigma_y2),
-        -0.5 * (dx2_arr[6] * inv_sigma_x2 + dy2_arr[6] * inv_sigma_y2),
-        -0.5 * (dx2_arr[7] * inv_sigma_x2 + dy2_arr[7] * inv_sigma_y2),
-    ];
+    // Vectorized exp — all 8 values computed in SIMD registers
+    let vexp = crate::math::fast_exp::avx2::fast_exp_8_avx2_m256(vexponent);
 
-    // Compute exp using accurate scalar exp
-    let exp_arr = compute_exp_8(&exponent_arr);
-
-    // Load results back into SIMD registers for remaining arithmetic
-    let vexp = _mm256_loadu_ps(exp_arr.as_ptr());
     let vamp = _mm256_set1_ps(amp);
     let vbg = _mm256_set1_ps(bg);
 
@@ -170,27 +144,18 @@ pub unsafe fn compute_chi2_8(
     let vdx2 = _mm256_mul_ps(vdx, vdx);
     let vdy2 = _mm256_mul_ps(vdy, vdy);
 
-    // Store dx2, dy2 to compute exponent
-    let mut dx2_arr = [0.0f32; 8];
-    let mut dy2_arr = [0.0f32; 8];
-    _mm256_storeu_ps(dx2_arr.as_mut_ptr(), vdx2);
-    _mm256_storeu_ps(dy2_arr.as_mut_ptr(), vdy2);
+    // Compute exponent entirely in SIMD
+    let vinv_sx2 = _mm256_set1_ps(inv_sigma_x2);
+    let vinv_sy2 = _mm256_set1_ps(inv_sigma_y2);
+    let vneg_half = _mm256_set1_ps(-0.5);
+    let vexponent = _mm256_mul_ps(
+        vneg_half,
+        _mm256_fmadd_ps(vdx2, vinv_sx2, _mm256_mul_ps(vdy2, vinv_sy2)),
+    );
 
-    // Compute exponent and exp with scalar
-    let exponent_arr: [f32; 8] = [
-        -0.5 * (dx2_arr[0] * inv_sigma_x2 + dy2_arr[0] * inv_sigma_y2),
-        -0.5 * (dx2_arr[1] * inv_sigma_x2 + dy2_arr[1] * inv_sigma_y2),
-        -0.5 * (dx2_arr[2] * inv_sigma_x2 + dy2_arr[2] * inv_sigma_y2),
-        -0.5 * (dx2_arr[3] * inv_sigma_x2 + dy2_arr[3] * inv_sigma_y2),
-        -0.5 * (dx2_arr[4] * inv_sigma_x2 + dy2_arr[4] * inv_sigma_y2),
-        -0.5 * (dx2_arr[5] * inv_sigma_x2 + dy2_arr[5] * inv_sigma_y2),
-        -0.5 * (dx2_arr[6] * inv_sigma_x2 + dy2_arr[6] * inv_sigma_y2),
-        -0.5 * (dx2_arr[7] * inv_sigma_x2 + dy2_arr[7] * inv_sigma_y2),
-    ];
-    let exp_arr = compute_exp_8(&exponent_arr);
+    // Vectorized exp
+    let vexp = crate::math::fast_exp::avx2::fast_exp_8_avx2_m256(vexponent);
 
-    // Continue with SIMD for model and residual computation
-    let vexp = _mm256_loadu_ps(exp_arr.as_ptr());
     let vamp = _mm256_set1_ps(amp);
     let vbg = _mm256_set1_ps(bg);
 
