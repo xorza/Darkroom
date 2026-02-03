@@ -37,10 +37,8 @@ use crate::stacking::weighted::RejectionMethod;
 /// as all positions in a sequence use the same unit.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ObjectPosition {
-    /// X coordinate in pixels (sub-pixel precision).
-    pub x: f64,
-    /// Y coordinate in pixels (sub-pixel precision).
-    pub y: f64,
+    /// Position in pixels (sub-pixel precision).
+    pub pos: DVec2,
     /// Timestamp in seconds since sequence start (or any consistent unit).
     /// Can also be MJD (Modified Julian Date) or Unix timestamp.
     pub timestamp: f64,
@@ -54,7 +52,15 @@ impl ObjectPosition {
     /// * `y` - Y coordinate in pixels
     /// * `timestamp` - Observation timestamp (seconds or MJD)
     pub fn new(x: f64, y: f64, timestamp: f64) -> Self {
-        Self { x, y, timestamp }
+        Self {
+            pos: DVec2::new(x, y),
+            timestamp,
+        }
+    }
+
+    /// Create a new object position from a DVec2.
+    pub fn from_pos(pos: DVec2, timestamp: f64) -> Self {
+        Self { pos, timestamp }
     }
 
     /// Create position from integer coordinates.
@@ -149,23 +155,19 @@ impl CometStackConfig {
 
     /// Compute the object's velocity in pixels per timestamp unit.
     ///
-    /// Returns (vx, vy) where:
+    /// Returns DVec2(vx, vy) where:
     /// - vx: velocity in x direction (pixels per time unit)
     /// - vy: velocity in y direction (pixels per time unit)
-    pub fn velocity(&self) -> (f64, f64) {
+    pub fn velocity(&self) -> DVec2 {
         let dt = self.pos_end.timestamp - self.pos_start.timestamp;
         debug_assert!(dt.abs() > f64::EPSILON, "Time delta must be non-zero");
 
-        let vx = (self.pos_end.x - self.pos_start.x) / dt;
-        let vy = (self.pos_end.y - self.pos_start.y) / dt;
-        (vx, vy)
+        (self.pos_end.pos - self.pos_start.pos) / dt
     }
 
     /// Compute the total displacement in pixels.
     pub fn total_displacement(&self) -> f64 {
-        let dx = self.pos_end.x - self.pos_start.x;
-        let dy = self.pos_end.y - self.pos_start.y;
-        (dx * dx + dy * dy).sqrt()
+        self.pos_start.pos.distance(self.pos_end.pos)
     }
 
     /// Compute a comet-aligned transform from a star-aligned transform.
@@ -197,8 +199,8 @@ impl CometStackConfig {
         frame_timestamp: f64,
         ref_timestamp: f64,
     ) -> Transform {
-        let (dx, dy) = compute_comet_offset(self, frame_timestamp, ref_timestamp);
-        let offset_transform = Transform::translation(DVec2::new(dx, dy));
+        let offset = compute_comet_offset(self, frame_timestamp, ref_timestamp);
+        let offset_transform = Transform::translation(offset);
 
         // offset_transform.compose(star_transform) means:
         // Apply star_transform first, then offset_transform
@@ -227,7 +229,7 @@ pub struct CometStackResult {
     pub height: usize,
 
     /// Computed object velocity (pixels per timestamp unit).
-    pub velocity: (f64, f64),
+    pub velocity: DVec2,
 
     /// Total object displacement during the sequence (pixels).
     pub displacement: f64,
@@ -255,7 +257,7 @@ impl CometStackResult {
 /// * `timestamp` - Timestamp to interpolate for
 ///
 /// # Returns
-/// Interpolated (x, y) position in pixels.
+/// Interpolated position in pixels.
 ///
 /// # Panics
 /// Panics if start and end timestamps are equal.
@@ -263,7 +265,7 @@ pub fn interpolate_position(
     pos_start: &ObjectPosition,
     pos_end: &ObjectPosition,
     timestamp: f64,
-) -> (f64, f64) {
+) -> DVec2 {
     let dt = pos_end.timestamp - pos_start.timestamp;
     assert!(
         dt.abs() > f64::EPSILON,
@@ -272,10 +274,7 @@ pub fn interpolate_position(
 
     let t_normalized = (timestamp - pos_start.timestamp) / dt;
 
-    let x = pos_start.x + t_normalized * (pos_end.x - pos_start.x);
-    let y = pos_start.y + t_normalized * (pos_end.y - pos_start.y);
-
-    (x, y)
+    pos_start.pos.lerp(pos_end.pos, t_normalized)
 }
 
 /// Compute the comet offset for a frame at a given timestamp.
@@ -289,18 +288,18 @@ pub fn interpolate_position(
 /// * `ref_timestamp` - Reference frame timestamp (typically first frame)
 ///
 /// # Returns
-/// (dx, dy) offset in pixels to add to the star-aligned transform.
+/// Offset in pixels to add to the star-aligned transform.
 pub fn compute_comet_offset(
     config: &CometStackConfig,
     timestamp: f64,
     ref_timestamp: f64,
-) -> (f64, f64) {
-    let (vx, vy) = config.velocity();
+) -> DVec2 {
+    let velocity = config.velocity();
     let dt = timestamp - ref_timestamp;
 
-    // The comet has moved by (vx*dt, vy*dt) relative to the reference frame.
+    // The comet has moved by velocity*dt relative to the reference frame.
     // To align ON the comet, we need to shift back by this amount.
-    (-vx * dt, -vy * dt)
+    -velocity * dt
 }
 
 /// Apply comet offset to a star-aligned transform.
@@ -521,16 +520,16 @@ mod tests {
     #[test]
     fn test_object_position_new() {
         let pos = ObjectPosition::new(100.5, 200.75, 1000.0);
-        assert!((pos.x - 100.5).abs() < f64::EPSILON);
-        assert!((pos.y - 200.75).abs() < f64::EPSILON);
+        assert!((pos.pos.x - 100.5).abs() < f64::EPSILON);
+        assert!((pos.pos.y - 200.75).abs() < f64::EPSILON);
         assert!((pos.timestamp - 1000.0).abs() < f64::EPSILON);
     }
 
     #[test]
     fn test_object_position_from_coords() {
         let pos = ObjectPosition::from_coords(100, 200, 1000.0);
-        assert!((pos.x - 100.0).abs() < f64::EPSILON);
-        assert!((pos.y - 200.0).abs() < f64::EPSILON);
+        assert!((pos.pos.x - 100.0).abs() < f64::EPSILON);
+        assert!((pos.pos.y - 200.0).abs() < f64::EPSILON);
     }
 
     // ========== CometStackConfig Tests ==========
@@ -559,10 +558,10 @@ mod tests {
         let pos_end = ObjectPosition::new(110.0, 105.0, 3600.0); // 1 hour
         let config = CometStackConfig::new(pos_start, pos_end);
 
-        let (vx, vy) = config.velocity();
+        let v = config.velocity();
         // 10 pixels / 3600 seconds = 0.00277... pixels/second
-        assert!((vx - 10.0 / 3600.0).abs() < 1e-10);
-        assert!((vy - 5.0 / 3600.0).abs() < 1e-10);
+        assert!((v.x - 10.0 / 3600.0).abs() < 1e-10);
+        assert!((v.y - 5.0 / 3600.0).abs() < 1e-10);
     }
 
     #[test]
@@ -596,9 +595,9 @@ mod tests {
         let pos_start = ObjectPosition::new(100.0, 200.0, 0.0);
         let pos_end = ObjectPosition::new(150.0, 250.0, 100.0);
 
-        let (x, y) = interpolate_position(&pos_start, &pos_end, 0.0);
-        assert!((x - 100.0).abs() < 1e-10);
-        assert!((y - 200.0).abs() < 1e-10);
+        let p = interpolate_position(&pos_start, &pos_end, 0.0);
+        assert!((p.x - 100.0).abs() < 1e-10);
+        assert!((p.y - 200.0).abs() < 1e-10);
     }
 
     #[test]
@@ -606,9 +605,9 @@ mod tests {
         let pos_start = ObjectPosition::new(100.0, 200.0, 0.0);
         let pos_end = ObjectPosition::new(150.0, 250.0, 100.0);
 
-        let (x, y) = interpolate_position(&pos_start, &pos_end, 100.0);
-        assert!((x - 150.0).abs() < 1e-10);
-        assert!((y - 250.0).abs() < 1e-10);
+        let p = interpolate_position(&pos_start, &pos_end, 100.0);
+        assert!((p.x - 150.0).abs() < 1e-10);
+        assert!((p.y - 250.0).abs() < 1e-10);
     }
 
     #[test]
@@ -616,9 +615,9 @@ mod tests {
         let pos_start = ObjectPosition::new(100.0, 200.0, 0.0);
         let pos_end = ObjectPosition::new(200.0, 300.0, 100.0);
 
-        let (x, y) = interpolate_position(&pos_start, &pos_end, 50.0);
-        assert!((x - 150.0).abs() < 1e-10);
-        assert!((y - 250.0).abs() < 1e-10);
+        let p = interpolate_position(&pos_start, &pos_end, 50.0);
+        assert!((p.x - 150.0).abs() < 1e-10);
+        assert!((p.y - 250.0).abs() < 1e-10);
     }
 
     #[test]
@@ -626,10 +625,10 @@ mod tests {
         let pos_start = ObjectPosition::new(100.0, 200.0, 100.0);
         let pos_end = ObjectPosition::new(200.0, 300.0, 200.0);
 
-        let (x, y) = interpolate_position(&pos_start, &pos_end, 50.0);
+        let p = interpolate_position(&pos_start, &pos_end, 50.0);
         // Extrapolate backwards: t=-0.5 normalized
-        assert!((x - 50.0).abs() < 1e-10);
-        assert!((y - 150.0).abs() < 1e-10);
+        assert!((p.x - 50.0).abs() < 1e-10);
+        assert!((p.y - 150.0).abs() < 1e-10);
     }
 
     #[test]
@@ -637,10 +636,10 @@ mod tests {
         let pos_start = ObjectPosition::new(100.0, 200.0, 0.0);
         let pos_end = ObjectPosition::new(200.0, 300.0, 100.0);
 
-        let (x, y) = interpolate_position(&pos_start, &pos_end, 150.0);
+        let p = interpolate_position(&pos_start, &pos_end, 150.0);
         // Extrapolate forwards: t=1.5 normalized
-        assert!((x - 250.0).abs() < 1e-10);
-        assert!((y - 350.0).abs() < 1e-10);
+        assert!((p.x - 250.0).abs() < 1e-10);
+        assert!((p.y - 350.0).abs() < 1e-10);
     }
 
     #[test]
@@ -659,9 +658,9 @@ mod tests {
         let pos_end = ObjectPosition::new(110.0, 220.0, 100.0);
         let config = CometStackConfig::new(pos_start, pos_end);
 
-        let (dx, dy) = compute_comet_offset(&config, 0.0, 0.0);
-        assert!((dx - 0.0).abs() < 1e-10);
-        assert!((dy - 0.0).abs() < 1e-10);
+        let offset = compute_comet_offset(&config, 0.0, 0.0);
+        assert!((offset.x - 0.0).abs() < 1e-10);
+        assert!((offset.y - 0.0).abs() < 1e-10);
     }
 
     #[test]
@@ -672,9 +671,9 @@ mod tests {
 
         // After 50 seconds, comet moved 5 pixels in x, 10 pixels in y
         // To align ON comet, we need to shift back
-        let (dx, dy) = compute_comet_offset(&config, 50.0, 0.0);
-        assert!((dx - (-5.0)).abs() < 1e-10);
-        assert!((dy - (-10.0)).abs() < 1e-10);
+        let offset = compute_comet_offset(&config, 50.0, 0.0);
+        assert!((offset.x - (-5.0)).abs() < 1e-10);
+        assert!((offset.y - (-10.0)).abs() < 1e-10);
     }
 
     #[test]
@@ -685,9 +684,9 @@ mod tests {
 
         // After 50 seconds, comet moved -5 pixels in x, -10 pixels in y
         // To align ON comet, we shift back by negative offset = positive
-        let (dx, dy) = compute_comet_offset(&config, 50.0, 0.0);
-        assert!((dx - 5.0).abs() < 1e-10);
-        assert!((dy - 10.0).abs() < 1e-10);
+        let offset = compute_comet_offset(&config, 50.0, 0.0);
+        assert!((offset.x - 5.0).abs() < 1e-10);
+        assert!((offset.y - 10.0).abs() < 1e-10);
     }
 
     // ========== CompositeMethod Tests ==========
@@ -707,7 +706,7 @@ mod tests {
             composite: Some(vec![0.0; 100]),
             width: 10,
             height: 10,
-            velocity: (0.1, 0.2),
+            velocity: DVec2::new(0.1, 0.2),
             displacement: 5.0,
         };
 
@@ -948,9 +947,8 @@ mod tests {
         assert!(result.composite.is_some());
         assert_eq!(result.composite.as_ref().unwrap().len(), 4);
 
-        let (vx, vy) = result.velocity;
-        assert!((vx - 0.1).abs() < 1e-10);
-        assert!((vy - 0.05).abs() < 1e-10);
+        assert!((result.velocity.x - 0.1).abs() < 1e-10);
+        assert!((result.velocity.y - 0.05).abs() < 1e-10);
     }
 
     #[test]
@@ -1285,35 +1283,35 @@ mod integration_tests {
         // Test at multiple timestamps
         let timestamps = [0.0, 25.0, 50.0, 75.0, 100.0];
         let expected_positions = [
-            (50.0, 60.0),
-            (55.0, 65.0),
-            (60.0, 70.0),
-            (65.0, 75.0),
-            (70.0, 80.0),
+            DVec2::new(50.0, 60.0),
+            DVec2::new(55.0, 65.0),
+            DVec2::new(60.0, 70.0),
+            DVec2::new(65.0, 75.0),
+            DVec2::new(70.0, 80.0),
         ];
 
         for (t, expected) in timestamps.iter().zip(expected_positions.iter()) {
-            let (x, y) = interpolate_position(&pos_start, &pos_end, *t);
+            let p = interpolate_position(&pos_start, &pos_end, *t);
             assert!(
-                (x - expected.0).abs() < 1e-10,
+                (p.x - expected.x).abs() < 1e-10,
                 "At t={}, expected x={}, got x={}",
                 t,
-                expected.0,
-                x
+                expected.x,
+                p.x
             );
             assert!(
-                (y - expected.1).abs() < 1e-10,
+                (p.y - expected.y).abs() < 1e-10,
                 "At t={}, expected y={}, got y={}",
                 t,
-                expected.1,
-                y
+                expected.y,
+                p.y
             );
         }
 
         // Verify velocity
-        let (vx, vy) = config.velocity();
-        assert!((vx - 0.2).abs() < 1e-10); // 20 pixels / 100 seconds
-        assert!((vy - 0.2).abs() < 1e-10);
+        let v = config.velocity();
+        assert!((v.x - 0.2).abs() < 1e-10); // 20 pixels / 100 seconds
+        assert!((v.y - 0.2).abs() < 1e-10);
     }
 
     #[test]
@@ -1334,26 +1332,26 @@ mod integration_tests {
                 config.comet_aligned_transform(&star_transform, frame_timestamp, ref_timestamp);
 
             // The comet's position at this frame
-            let (comet_x, comet_y) =
+            let comet_pos =
                 interpolate_position(&config.pos_start, &config.pos_end, frame_timestamp);
 
             // Apply comet transform to the comet position
-            let aligned = comet_transform.apply(DVec2::new(comet_x, comet_y));
+            let aligned = comet_transform.apply(comet_pos);
 
             // After applying the comet transform, the comet should map to its reference position
             // The reference position is pos_start (at ref_timestamp=0)
             assert!(
-                (aligned.x - pos_start.x).abs() < 1e-6,
+                (aligned.x - pos_start.pos.x).abs() < 1e-6,
                 "Frame {}: expected aligned_x={}, got {}",
                 frame_idx,
-                pos_start.x,
+                pos_start.pos.x,
                 aligned.x
             );
             assert!(
-                (aligned.y - pos_start.y).abs() < 1e-6,
+                (aligned.y - pos_start.pos.y).abs() < 1e-6,
                 "Frame {}: expected aligned_y={}, got {}",
                 frame_idx,
-                pos_start.y,
+                pos_start.pos.y,
                 aligned.y
             );
         }
@@ -1381,13 +1379,13 @@ mod integration_tests {
         let mut frames = Vec::new();
         for frame_idx in 0..num_frames {
             let timestamp = frame_idx as f64;
-            let (comet_x, comet_y) = interpolate_position(&pos_start, &pos_end, timestamp);
+            let comet_pos = interpolate_position(&pos_start, &pos_end, timestamp);
 
             let frame = generate_comet_frame(
                 width,
                 height,
                 &star_positions,
-                (comet_x as f32, comet_y as f32),
+                (comet_pos.x as f32, comet_pos.y as f32),
                 background,
                 noise_sigma,
                 42 + frame_idx as u64,
@@ -1439,8 +1437,8 @@ mod integration_tests {
         // (because it moved during the sequence)
         // Calculate comet spread in star stack - it should be larger
         // The comet center in star stack is somewhere in the middle of its motion
-        let comet_x_avg = ((pos_start.x + pos_end.x) / 2.0).round() as usize;
-        let comet_y_avg = ((pos_start.y + pos_end.y) / 2.0).round() as usize;
+        let comet_x_avg = ((pos_start.pos.x + pos_end.pos.x) / 2.0).round() as usize;
+        let comet_y_avg = ((pos_start.pos.y + pos_end.pos.y) / 2.0).round() as usize;
         let comet_spread_in_star_stack =
             measure_spread(&star_stack, width, comet_x_avg, comet_y_avg, 15);
 
@@ -1523,18 +1521,18 @@ mod integration_tests {
             let pos_end = ObjectPosition::new(end_x, end_y, duration);
             let config = CometStackConfig::new(pos_start, pos_end);
 
-            let (vx, vy) = config.velocity();
+            let v = config.velocity();
             assert!(
-                (vx - expected_vx).abs() < 1e-10,
+                (v.x - expected_vx).abs() < 1e-10,
                 "Expected vx={}, got vx={}",
                 expected_vx,
-                vx
+                v.x
             );
             assert!(
-                (vy - expected_vy).abs() < 1e-10,
+                (v.y - expected_vy).abs() < 1e-10,
                 "Expected vy={}, got vy={}",
                 expected_vy,
-                vy
+                v.y
             );
         }
     }
@@ -1585,9 +1583,8 @@ mod integration_tests {
         assert!(result.composite.is_some());
         assert_eq!(result.composite.as_ref().unwrap().len(), 256);
 
-        let (vx, vy) = result.velocity;
-        assert!((vx - 0.2).abs() < 1e-10);
-        assert!((vy - 0.3).abs() < 1e-10);
+        assert!((result.velocity.x - 0.2).abs() < 1e-10);
+        assert!((result.velocity.y - 0.3).abs() < 1e-10);
 
         // Displacement = sqrt(20^2 + 30^2) = sqrt(400 + 900) = sqrt(1300)
         let expected_displacement = (20.0f64 * 20.0 + 30.0 * 30.0).sqrt();
