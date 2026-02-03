@@ -127,8 +127,14 @@ fn test_register_two_calibrated_lights() {
     );
 
     // Register image 2 to image 1 (star detection -> transform, no warping)
-    let mut reg_config = RegistrationConfig::default();
-    reg_config.transform_type = crate::TransformType::Homography;
+    // Spatial distribution is disabled because precise_ground() produces a stricter
+    // star catalog where the grid-based selection picks edge-cell stars that don't
+    // overlap between the two shifted images, reducing matching success.
+    let reg_config = RegistrationConfig {
+        transform_type: crate::TransformType::Homography,
+        use_spatial_distribution: false,
+        ..RegistrationConfig::default()
+    };
     let registrator = Registrator::new(reg_config);
 
     let result = registrator
