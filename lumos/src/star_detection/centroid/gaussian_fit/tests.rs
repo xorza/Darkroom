@@ -945,7 +945,7 @@ fn test_compute_hessian_gradient_symmetry() {
     ];
     let residuals = vec![0.1f32, -0.05, 0.08, -0.03];
 
-    let (hessian, gradient) = compute_hessian_gradient_6(&jacobian, &residuals);
+    let (hessian, gradient) = unsafe { compute_hessian_gradient_6(&jacobian, &residuals) };
 
     // Hessian must be symmetric: H[i][j] == H[j][i]
     for (i, row) in hessian.iter().enumerate() {
@@ -976,7 +976,7 @@ fn test_compute_hessian_gradient_values() {
     let jacobian = vec![[1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0]];
     let residuals = vec![1.0f32];
 
-    let (hessian, gradient) = compute_hessian_gradient_6(&jacobian, &residuals);
+    let (hessian, gradient) = unsafe { compute_hessian_gradient_6(&jacobian, &residuals) };
 
     // Gradient should be J^T * r = [1, 2, 3, 4, 5, 6]
     for (i, &g) in gradient.iter().enumerate() {
@@ -1011,7 +1011,7 @@ fn test_compute_hessian_gradient_empty() {
     let jacobian: Vec<[f32; 6]> = vec![];
     let residuals: Vec<f32> = vec![];
 
-    let (hessian, gradient) = compute_hessian_gradient_6(&jacobian, &residuals);
+    let (hessian, gradient) = unsafe { compute_hessian_gradient_6(&jacobian, &residuals) };
 
     // Empty input should give zero hessian and gradient
     for &g in &gradient {
@@ -1035,7 +1035,7 @@ fn test_compute_hessian_gradient_positive_semidefinite() {
     ];
     let residuals = vec![0.1f32, -0.2, 0.15];
 
-    let (hessian, _) = compute_hessian_gradient_6(&jacobian, &residuals);
+    let (hessian, _) = unsafe { compute_hessian_gradient_6(&jacobian, &residuals) };
 
     // Test with several random vectors
     let test_vectors = [
@@ -1057,6 +1057,194 @@ fn test_compute_hessian_gradient_positive_semidefinite() {
             "Hessian not positive semi-definite: x^T H x = {}",
             result
         );
+    }
+}
+
+/// Test that the AVX2 SIMD path of compute_hessian_gradient_6 produces correct
+/// results. Uses 17 rows so 16 go through the 8-wide SIMD loop and 1 through
+/// the scalar tail. Cross-validates against a manual scalar reference.
+#[test]
+fn test_compute_hessian_gradient_avx2_path() {
+    // 17 rows: 2 full AVX2 batches of 8 + 1 scalar tail
+    let n = 17;
+    let mut jacobian = Vec::with_capacity(n);
+    let mut residuals = Vec::with_capacity(n);
+
+    for i in 0..n {
+        let base = (i as f32 + 1.0) * 0.1;
+        jacobian.push([
+            base,
+            base * 0.5,
+            base * 0.3,
+            base * 0.7,
+            base * 0.2,
+            base * 0.9,
+        ]);
+        residuals.push(0.05 - 0.01 * i as f32);
+    }
+
+    let (hessian, gradient) = unsafe { compute_hessian_gradient_6(&jacobian, &residuals) };
+
+    // Compute reference scalar result
+    let mut ref_hessian = [[0.0f32; 6]; 6];
+    let mut ref_gradient = [0.0f32; 6];
+    for (row, &r) in jacobian.iter().zip(residuals.iter()) {
+        for i in 0..6 {
+            ref_gradient[i] += row[i] * r;
+            for j in 0..6 {
+                ref_hessian[i][j] += row[i] * row[j];
+            }
+        }
+    }
+
+    // Verify gradient matches
+    for i in 0..6 {
+        assert!(
+            (gradient[i] - ref_gradient[i]).abs() < 1e-4,
+            "Gradient[{}]: got {}, expected {}",
+            i,
+            gradient[i],
+            ref_gradient[i]
+        );
+    }
+
+    // Verify hessian matches (including symmetry)
+    for i in 0..6 {
+        for j in 0..6 {
+            assert!(
+                (hessian[i][j] - ref_hessian[i][j]).abs() < 1e-4,
+                "Hessian[{}][{}]: got {}, expected {}",
+                i,
+                j,
+                hessian[i][j],
+                ref_hessian[i][j]
+            );
+            assert!(
+                (hessian[i][j] - hessian[j][i]).abs() < 1e-6,
+                "Hessian not symmetric at [{},{}]",
+                i,
+                j,
+            );
+        }
+    }
+}
+
+/// Test with exactly 8 rows (single full AVX2 batch, no scalar tail).
+#[test]
+fn test_compute_hessian_gradient_exactly_8_rows() {
+    let jacobian: Vec<[f32; 6]> = (0..8)
+        .map(|i| {
+            let v = (i + 1) as f32;
+            [v, v * 0.5, v * 0.3, v * 0.8, v * 0.1, v * 0.6]
+        })
+        .collect();
+    let residuals: Vec<f32> = (0..8).map(|i| 0.1 * (i as f32 - 3.5)).collect();
+
+    let (hessian, gradient) = unsafe { compute_hessian_gradient_6(&jacobian, &residuals) };
+
+    // Scalar reference
+    let mut ref_hessian = [[0.0f32; 6]; 6];
+    let mut ref_gradient = [0.0f32; 6];
+    for (row, &r) in jacobian.iter().zip(residuals.iter()) {
+        for i in 0..6 {
+            ref_gradient[i] += row[i] * r;
+            for j in 0..6 {
+                ref_hessian[i][j] += row[i] * row[j];
+            }
+        }
+    }
+
+    for i in 0..6 {
+        assert!(
+            (gradient[i] - ref_gradient[i]).abs() < 1e-4,
+            "Gradient[{}]: got {}, expected {}",
+            i,
+            gradient[i],
+            ref_gradient[i]
+        );
+        for j in 0..6 {
+            assert!(
+                (hessian[i][j] - ref_hessian[i][j]).abs() < 1e-4,
+                "Hessian[{}][{}]: got {}, expected {}",
+                i,
+                j,
+                hessian[i][j],
+                ref_hessian[i][j]
+            );
+        }
+    }
+}
+
+/// Test with a realistic stamp size (289 pixels = 17x17) to exercise the
+/// AVX2 path with many iterations and verify accumulated precision.
+#[test]
+fn test_compute_hessian_gradient_large_stamp() {
+    let n = 289;
+    let mut jacobian = Vec::with_capacity(n);
+    let mut residuals = Vec::with_capacity(n);
+
+    // Simulate a Gaussian-like Jacobian pattern
+    let sigma = 3.0f32;
+    for i in 0..n {
+        let x = (i % 17) as f32 - 8.0;
+        let y = (i / 17) as f32 - 8.0;
+        let r2 = x * x + y * y;
+        let exp_val = (-0.5 * r2 / (sigma * sigma)).exp();
+        jacobian.push([
+            exp_val * x / (sigma * sigma),             // dF/dx0
+            exp_val * y / (sigma * sigma),             // dF/dy0
+            exp_val,                                   // dF/dA
+            exp_val * x * x / (sigma * sigma * sigma), // dF/dsigma_x
+            exp_val * y * y / (sigma * sigma * sigma), // dF/dsigma_y
+            1.0,                                       // dF/dbg
+        ]);
+        residuals.push(0.01 * exp_val + 0.001 * (i as f32 % 7.0 - 3.0));
+    }
+
+    let (hessian, gradient) = unsafe { compute_hessian_gradient_6(&jacobian, &residuals) };
+
+    // Scalar reference
+    let mut ref_hessian = [[0.0f32; 6]; 6];
+    let mut ref_gradient = [0.0f32; 6];
+    for (row, &r) in jacobian.iter().zip(residuals.iter()) {
+        for i in 0..6 {
+            ref_gradient[i] += row[i] * r;
+            for j in 0..6 {
+                ref_hessian[i][j] += row[i] * row[j];
+            }
+        }
+    }
+
+    for i in 0..6 {
+        let rel_err = if ref_gradient[i].abs() > 1e-6 {
+            (gradient[i] - ref_gradient[i]).abs() / ref_gradient[i].abs()
+        } else {
+            (gradient[i] - ref_gradient[i]).abs()
+        };
+        assert!(
+            rel_err < 1e-3,
+            "Gradient[{}]: got {}, expected {}, rel_err={}",
+            i,
+            gradient[i],
+            ref_gradient[i],
+            rel_err
+        );
+        for j in 0..6 {
+            let rel_err = if ref_hessian[i][j].abs() > 1e-6 {
+                (hessian[i][j] - ref_hessian[i][j]).abs() / ref_hessian[i][j].abs()
+            } else {
+                (hessian[i][j] - ref_hessian[i][j]).abs()
+            };
+            assert!(
+                rel_err < 1e-3,
+                "Hessian[{}][{}]: got {}, expected {}, rel_err={}",
+                i,
+                j,
+                hessian[i][j],
+                ref_hessian[i][j],
+                rel_err
+            );
+        }
     }
 }
 

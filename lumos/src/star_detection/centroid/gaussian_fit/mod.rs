@@ -336,6 +336,232 @@ fn constrain_gaussian_params(params: &mut [f32; 6], stamp_radius: f32) {
     params[4] = params[4].clamp(0.5, stamp_radius); // Sigma_y
 }
 
+/// Compute Hessian (J^T J) and gradient (J^T r) for 6-parameter Gaussian model.
+///
+/// AVX2 implementation: processes 8 Jacobian rows at a time using gathered loads
+/// and FMA. Exploits symmetry — only computes 21 upper-triangle hessian elements.
+///
+/// # Safety
+/// Requires AVX2 + FMA. Called from `optimize_gaussian_avx2` which has the
+/// appropriate `#[target_feature]` attribute.
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2", enable = "fma")]
+#[allow(unsafe_op_in_unsafe_fn, clippy::needless_range_loop)]
+unsafe fn compute_hessian_gradient_6(
+    jacobian: &[[f32; 6]],
+    residuals: &[f32],
+) -> ([[f32; 6]; 6], [f32; 6]) {
+    use std::arch::x86_64::*;
+
+    let n = jacobian.len();
+    let simd_end = (n / 8) * 8;
+
+    // 21 upper-triangle hessian accumulators + 6 gradient accumulators
+    let mut h00 = _mm256_setzero_ps();
+    let mut h01 = _mm256_setzero_ps();
+    let mut h02 = _mm256_setzero_ps();
+    let mut h03 = _mm256_setzero_ps();
+    let mut h04 = _mm256_setzero_ps();
+    let mut h05 = _mm256_setzero_ps();
+    let mut h11 = _mm256_setzero_ps();
+    let mut h12 = _mm256_setzero_ps();
+    let mut h13 = _mm256_setzero_ps();
+    let mut h14 = _mm256_setzero_ps();
+    let mut h15 = _mm256_setzero_ps();
+    let mut h22 = _mm256_setzero_ps();
+    let mut h23 = _mm256_setzero_ps();
+    let mut h24 = _mm256_setzero_ps();
+    let mut h25 = _mm256_setzero_ps();
+    let mut h33 = _mm256_setzero_ps();
+    let mut h34 = _mm256_setzero_ps();
+    let mut h35 = _mm256_setzero_ps();
+    let mut h44 = _mm256_setzero_ps();
+    let mut h45 = _mm256_setzero_ps();
+    let mut h55 = _mm256_setzero_ps();
+
+    let mut g0 = _mm256_setzero_ps();
+    let mut g1 = _mm256_setzero_ps();
+    let mut g2 = _mm256_setzero_ps();
+    let mut g3 = _mm256_setzero_ps();
+    let mut g4 = _mm256_setzero_ps();
+    let mut g5 = _mm256_setzero_ps();
+
+    // Process 8 rows at a time
+    let jac_ptr = jacobian.as_ptr() as *const f32;
+    let res_ptr = residuals.as_ptr();
+
+    for base in (0..simd_end).step_by(8) {
+        let p = jac_ptr.add(base * 6);
+
+        // Load 8 rows of 6 columns each. Each row is contiguous [c0,c1,c2,c3,c4,c5].
+        // We need column vectors: all c0 values, all c1 values, etc.
+        // Manual set is faster than gather on most CPUs.
+        let c0 = _mm256_setr_ps(
+            *p.add(0),
+            *p.add(6),
+            *p.add(12),
+            *p.add(18),
+            *p.add(24),
+            *p.add(30),
+            *p.add(36),
+            *p.add(42),
+        );
+        let c1 = _mm256_setr_ps(
+            *p.add(1),
+            *p.add(7),
+            *p.add(13),
+            *p.add(19),
+            *p.add(25),
+            *p.add(31),
+            *p.add(37),
+            *p.add(43),
+        );
+        let c2 = _mm256_setr_ps(
+            *p.add(2),
+            *p.add(8),
+            *p.add(14),
+            *p.add(20),
+            *p.add(26),
+            *p.add(32),
+            *p.add(38),
+            *p.add(44),
+        );
+        let c3 = _mm256_setr_ps(
+            *p.add(3),
+            *p.add(9),
+            *p.add(15),
+            *p.add(21),
+            *p.add(27),
+            *p.add(33),
+            *p.add(39),
+            *p.add(45),
+        );
+        let c4 = _mm256_setr_ps(
+            *p.add(4),
+            *p.add(10),
+            *p.add(16),
+            *p.add(22),
+            *p.add(28),
+            *p.add(34),
+            *p.add(40),
+            *p.add(46),
+        );
+        let c5 = _mm256_setr_ps(
+            *p.add(5),
+            *p.add(11),
+            *p.add(17),
+            *p.add(23),
+            *p.add(29),
+            *p.add(35),
+            *p.add(41),
+            *p.add(47),
+        );
+
+        let r = _mm256_loadu_ps(res_ptr.add(base));
+
+        // Gradient: g[i] += c[i] * r
+        g0 = _mm256_fmadd_ps(c0, r, g0);
+        g1 = _mm256_fmadd_ps(c1, r, g1);
+        g2 = _mm256_fmadd_ps(c2, r, g2);
+        g3 = _mm256_fmadd_ps(c3, r, g3);
+        g4 = _mm256_fmadd_ps(c4, r, g4);
+        g5 = _mm256_fmadd_ps(c5, r, g5);
+
+        // Upper triangle of hessian: h[i][j] += c[i] * c[j]
+        h00 = _mm256_fmadd_ps(c0, c0, h00);
+        h01 = _mm256_fmadd_ps(c0, c1, h01);
+        h02 = _mm256_fmadd_ps(c0, c2, h02);
+        h03 = _mm256_fmadd_ps(c0, c3, h03);
+        h04 = _mm256_fmadd_ps(c0, c4, h04);
+        h05 = _mm256_fmadd_ps(c0, c5, h05);
+        h11 = _mm256_fmadd_ps(c1, c1, h11);
+        h12 = _mm256_fmadd_ps(c1, c2, h12);
+        h13 = _mm256_fmadd_ps(c1, c3, h13);
+        h14 = _mm256_fmadd_ps(c1, c4, h14);
+        h15 = _mm256_fmadd_ps(c1, c5, h15);
+        h22 = _mm256_fmadd_ps(c2, c2, h22);
+        h23 = _mm256_fmadd_ps(c2, c3, h23);
+        h24 = _mm256_fmadd_ps(c2, c4, h24);
+        h25 = _mm256_fmadd_ps(c2, c5, h25);
+        h33 = _mm256_fmadd_ps(c3, c3, h33);
+        h34 = _mm256_fmadd_ps(c3, c4, h34);
+        h35 = _mm256_fmadd_ps(c3, c5, h35);
+        h44 = _mm256_fmadd_ps(c4, c4, h44);
+        h45 = _mm256_fmadd_ps(c4, c5, h45);
+        h55 = _mm256_fmadd_ps(c5, c5, h55);
+    }
+
+    // Horizontal sum helper
+    #[inline]
+    #[target_feature(enable = "avx2")]
+    unsafe fn hsum(v: __m256) -> f32 {
+        // Sum 8 floats: high128 + low128, then hadd twice
+        let hi = _mm256_extractf128_ps(v, 1);
+        let lo = _mm256_castps256_ps128(v);
+        let sum128 = _mm_add_ps(lo, hi);
+        let shuf = _mm_movehdup_ps(sum128); // [1,1,3,3]
+        let sums = _mm_add_ps(sum128, shuf); // [0+1,_,2+3,_]
+        let shuf2 = _mm_movehl_ps(sums, sums); // [2+3,_,_,_]
+        let result = _mm_add_ss(sums, shuf2);
+        _mm_cvtss_f32(result)
+    }
+
+    // Reduce SIMD accumulators to scalars
+    let mut hessian = [[0.0f32; 6]; 6];
+    hessian[0][0] = hsum(h00);
+    hessian[0][1] = hsum(h01);
+    hessian[0][2] = hsum(h02);
+    hessian[0][3] = hsum(h03);
+    hessian[0][4] = hsum(h04);
+    hessian[0][5] = hsum(h05);
+    hessian[1][1] = hsum(h11);
+    hessian[1][2] = hsum(h12);
+    hessian[1][3] = hsum(h13);
+    hessian[1][4] = hsum(h14);
+    hessian[1][5] = hsum(h15);
+    hessian[2][2] = hsum(h22);
+    hessian[2][3] = hsum(h23);
+    hessian[2][4] = hsum(h24);
+    hessian[2][5] = hsum(h25);
+    hessian[3][3] = hsum(h33);
+    hessian[3][4] = hsum(h34);
+    hessian[3][5] = hsum(h35);
+    hessian[4][4] = hsum(h44);
+    hessian[4][5] = hsum(h45);
+    hessian[5][5] = hsum(h55);
+
+    let mut gradient = [0.0f32; 6];
+    gradient[0] = hsum(g0);
+    gradient[1] = hsum(g1);
+    gradient[2] = hsum(g2);
+    gradient[3] = hsum(g3);
+    gradient[4] = hsum(g4);
+    gradient[5] = hsum(g5);
+
+    // Scalar tail for remaining rows
+    for i in simd_end..n {
+        let row = &jacobian[i];
+        let r = residuals[i];
+        for col in 0..6 {
+            gradient[col] += row[col] * r;
+            for j in col..6 {
+                hessian[col][j] += row[col] * row[j];
+            }
+        }
+    }
+
+    // Mirror upper triangle to lower
+    for i in 1..6 {
+        for j in 0..i {
+            hessian[i][j] = hessian[j][i];
+        }
+    }
+
+    (hessian, gradient)
+}
+
+/// Scalar fallback for non-x86_64 platforms.
+#[cfg(not(target_arch = "x86_64"))]
 fn compute_hessian_gradient_6(
     jacobian: &[[f32; 6]],
     residuals: &[f32],
@@ -346,9 +572,16 @@ fn compute_hessian_gradient_6(
     for (row, &r) in jacobian.iter().zip(residuals.iter()) {
         for i in 0..6 {
             gradient[i] += row[i] * r;
-            for j in 0..6 {
+            for j in i..6 {
                 hessian[i][j] += row[i] * row[j];
             }
+        }
+    }
+
+    // Mirror upper triangle to lower
+    for i in 1..6 {
+        for j in 0..i {
+            hessian[i][j] = hessian[j][i];
         }
     }
 
