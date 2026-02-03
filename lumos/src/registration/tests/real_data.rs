@@ -133,6 +133,10 @@ fn test_register_two_calibrated_lights() {
     let reg_config = RegistrationConfig {
         transform_type: crate::TransformType::Homography,
         use_spatial_distribution: false,
+        ransac: crate::registration::config::RansacConfig {
+            inlier_threshold: 0.5,
+            ..Default::default()
+        },
         ..RegistrationConfig::default()
     };
     let registrator = Registrator::new(reg_config);
