@@ -51,12 +51,18 @@ const NO_NODE: u32 = u32::MAX;
 /// current_generation gives O(1) reset instead of O(n) clearing.
 #[derive(Debug)]
 struct PixelGrid {
-    /// Pixel values indexed by local coordinates. NO_PIXEL means no pixel at that position.
+    /// Pixel values indexed by local coordinates.
     values: Vec<f32>,
-    /// Generation when each cell was last visited. Cell is visited if generation[idx] == current_generation.
+    /// Generation when each cell's value was last set. Cell has a pixel if
+    /// values_generation[idx] == current_generation.
+    values_generation: Vec<u32>,
+    /// Generation when each cell was last visited. Cell is visited if
+    /// visited_generation[idx] == visited_generation_counter.
     visited_generation: Vec<u32>,
-    /// Current generation counter. Incremented on each reset.
+    /// Generation counter for values (incremented on each reset_with_pixels).
     current_generation: u32,
+    /// Separate generation counter for visited state (incremented on each new BFS).
+    visited_generation_counter: u32,
     /// Bounding box offset (min x coordinate).
     offset_x: usize,
     /// Bounding box offset (min y coordinate).
@@ -72,8 +78,10 @@ impl PixelGrid {
     fn empty() -> Self {
         Self {
             values: Vec::new(),
+            values_generation: Vec::new(),
             visited_generation: Vec::new(),
             current_generation: 0,
+            visited_generation_counter: 0,
             offset_x: 0,
             offset_y: 0,
             width: 0,
@@ -86,9 +94,8 @@ impl PixelGrid {
     /// The grid is sized to fit the bounding box of all pixels plus a 1-pixel
     /// border to simplify boundary checks in neighbor traversal.
     ///
-    /// Uses generation counter for visited array: instead of clearing O(n) cells,
-    /// we just increment the generation counter O(1). Cells are considered unvisited
-    /// if their stored generation != current_generation.
+    /// Uses generation counters for both values and visited arrays: instead of
+    /// clearing O(n) cells, we just increment generation counters O(1).
     fn reset_with_pixels(&mut self, pixels: &[Pixel]) {
         if pixels.is_empty() {
             self.width = 0;
@@ -96,9 +103,9 @@ impl PixelGrid {
             return;
         }
 
-        // Increment generation to invalidate all previous visited marks
-        // Wrapping handles overflow (very unlikely with u32, but safe)
+        // Increment generation to invalidate all previous values and visited marks
         self.current_generation = self.current_generation.wrapping_add(1);
+        self.visited_generation_counter = self.current_generation;
 
         // Find bounding box
         let mut min_x = usize::MAX;
@@ -113,19 +120,28 @@ impl PixelGrid {
             max_y = max_y.max(p.pos.y);
         }
 
-        // Add 1-pixel border on each side for safe neighbor access
-        let offset_x = min_x.saturating_sub(1);
-        let offset_y = min_y.saturating_sub(1);
-        let width = (max_x - offset_x) + 3; // +1 for inclusive, +2 for borders
-        let height = (max_y - offset_y) + 3;
+        // Guaranteed 1-pixel border on all sides for safe unchecked neighbor access.
+        // We always subtract 1 from min coords (using wrapping to handle 0 case).
+        // The grid is indexed by (pos - offset) so the border cells are at local
+        // coordinate 0 on each axis. These cells have no pixel value (generation
+        // check returns NO_PIXEL), so BFS never propagates into them.
+        let offset_x = min_x.wrapping_sub(1);
+        let offset_y = min_y.wrapping_sub(1);
+        // width = (max_x - offset_x) + 1 (inclusive) + 1 (right border)
+        // For the wrapping case (min_x=0), offset_x wraps to usize::MAX, and
+        // (max_x - usize::MAX) wraps to (max_x + 1), giving correct total with borders.
+        let width = max_x.wrapping_sub(offset_x) + 2;
+        let height = max_y.wrapping_sub(offset_y) + 2;
 
         let size = width * height;
 
-        // Resize and clear values vector
-        self.values.clear();
-        self.values.resize(size, NO_PIXEL);
-
-        // Resize visited_generation only if needed (no clearing required due to generation counter)
+        // Grow vectors if needed (never shrink — reuse allocations)
+        if self.values.len() < size {
+            self.values.resize(size, 0.0);
+        }
+        if self.values_generation.len() < size {
+            self.values_generation.resize(size, 0);
+        }
         if self.visited_generation.len() < size {
             self.visited_generation.resize(size, 0);
         }
@@ -135,15 +151,34 @@ impl PixelGrid {
         self.width = width;
         self.height = height;
 
-        // Populate grid with pixel values
+        // Populate grid with pixel values (generation-stamped)
+        let generation = self.current_generation;
         for p in pixels {
-            let idx = (p.pos.y - offset_y) * width + (p.pos.x - offset_x);
-            self.values[idx] = p.value;
+            let idx = p.pos.y.wrapping_sub(offset_y) * width + p.pos.x.wrapping_sub(offset_x);
+            // SAFETY: idx is within size because p.pos is within bounding box + border
+            unsafe {
+                *self.values.get_unchecked_mut(idx) = p.value;
+                *self.values_generation.get_unchecked_mut(idx) = generation;
+            }
+        }
+    }
+
+    /// Start a new BFS pass by incrementing the visited generation counter.
+    /// This invalidates all previous visited marks in O(1).
+    #[inline]
+    #[allow(dead_code)]
+    fn new_visit_pass(&mut self) {
+        self.visited_generation_counter = self.visited_generation_counter.wrapping_add(1);
+        // Ensure visited counter doesn't collide with a stale values_generation entry
+        // (extremely unlikely with u32, but for correctness)
+        if self.visited_generation_counter == 0 {
+            self.visited_generation_counter = 1;
         }
     }
 
     /// Check if position has been visited (generation counter comparison).
     #[inline]
+    #[allow(dead_code)]
     fn is_visited(&self, x: usize, y: usize) -> bool {
         if self.width == 0 {
             return true;
@@ -154,12 +189,13 @@ impl PixelGrid {
             return true; // Treat out-of-bounds as visited
         }
         let idx = ly * self.width + lx;
-        // SAFETY: bounds checked above, and visited_generation.len() >= size
-        unsafe { *self.visited_generation.get_unchecked(idx) == self.current_generation }
+        // SAFETY: bounds checked above
+        unsafe { *self.visited_generation.get_unchecked(idx) == self.visited_generation_counter }
     }
 
     /// Mark position as visited. Returns true if it was not already visited.
     #[inline]
+    #[allow(dead_code)]
     fn mark_visited(&mut self, x: usize, y: usize) -> bool {
         if self.width == 0 {
             return false;
@@ -170,15 +206,39 @@ impl PixelGrid {
             return false;
         }
         let idx = ly * self.width + lx;
-        // SAFETY: bounds checked above, and visited_generation.len() >= size
+        // SAFETY: bounds checked above
         unsafe {
             let gen_ptr = self.visited_generation.get_unchecked_mut(idx);
-            if *gen_ptr == self.current_generation {
+            if *gen_ptr == self.visited_generation_counter {
                 false // Already visited
             } else {
-                *gen_ptr = self.current_generation;
+                *gen_ptr = self.visited_generation_counter;
                 true // Newly visited
             }
+        }
+    }
+
+    /// Get pixel value at local index, or NO_PIXEL if not present in current generation.
+    #[inline]
+    #[allow(unsafe_op_in_unsafe_fn)]
+    unsafe fn get_value_unchecked(&self, idx: usize) -> f32 {
+        if *self.values_generation.get_unchecked(idx) == self.current_generation {
+            *self.values.get_unchecked(idx)
+        } else {
+            NO_PIXEL
+        }
+    }
+
+    /// Check visited and mark at local index. Returns true if newly visited.
+    #[inline]
+    #[allow(unsafe_op_in_unsafe_fn)]
+    unsafe fn try_mark_visited_unchecked(&mut self, idx: usize) -> bool {
+        let gen_ptr = self.visited_generation.get_unchecked_mut(idx);
+        if *gen_ptr == self.visited_generation_counter {
+            false
+        } else {
+            *gen_ptr = self.visited_generation_counter;
+            true
         }
     }
 }
@@ -297,8 +357,8 @@ struct TreeBuildBuffers {
     above_threshold: Vec<Pixel>,
     /// Pixels belonging to a parent that are above threshold.
     parent_pixels_above: Vec<Pixel>,
-    /// BFS queue for connected component finding.
-    bfs_queue: Vec<Pixel>,
+    /// BFS queue for connected component finding (flat grid indices).
+    bfs_queue: Vec<u32>,
     /// Temporary storage for regions.
     regions: Vec<Vec<Pixel>>,
     /// Grid for fast pixel lookup (replaces HashMap).
@@ -546,7 +606,7 @@ fn process_higher_level(
     min_separation: usize,
     parent_pixels_buf: &mut Vec<Pixel>,
     pixel_grid: &mut PixelGrid,
-    bfs_queue: &mut Vec<Pixel>,
+    bfs_queue: &mut Vec<u32>,
 ) {
     for region in regions {
         // Find the single parent node for this region
@@ -877,11 +937,12 @@ fn find_nearest_peak_index(pos: Vec2us, peaks: &[Pixel]) -> usize {
 /// Find connected regions using grid-based lookup.
 ///
 /// This is the optimized version that uses PixelGrid instead of HashMap/HashSet.
+/// BFS uses a flat-index queue (u32) to avoid coordinate conversions in the hot loop.
 fn find_connected_regions_grid(
     pixels: &[Pixel],
     regions: &mut Vec<Vec<Pixel>>,
     grid: &mut PixelGrid,
-    queue: &mut Vec<Pixel>,
+    idx_queue: &mut Vec<u32>,
 ) {
     regions.clear();
 
@@ -892,20 +953,38 @@ fn find_connected_regions_grid(
     // Rebuild grid with current pixels
     grid.reset_with_pixels(pixels);
 
+    let width = grid.width;
+    let offset_x = grid.offset_x;
+    let offset_y = grid.offset_y;
+
     for p in pixels {
-        if grid.is_visited(p.pos.x, p.pos.y) {
+        let lx = p.pos.x.wrapping_sub(offset_x);
+        let ly = p.pos.y.wrapping_sub(offset_y);
+        let start_idx = ly * width + lx;
+
+        // SAFETY: pixel is within grid bounds (placed during reset_with_pixels)
+        if unsafe { !grid.try_mark_visited_unchecked(start_idx) } {
             continue;
         }
 
-        // BFS to find connected component
+        // BFS to find connected component using flat index queue
         let mut region = Vec::new();
-        queue.clear();
-        queue.push(*p);
-        grid.mark_visited(p.pos.x, p.pos.y);
+        idx_queue.clear();
+        idx_queue.push(start_idx as u32);
 
-        while let Some(current) = queue.pop() {
-            region.push(current);
-            visit_neighbors_grid(current.pos, grid, queue);
+        while let Some(idx) = idx_queue.pop() {
+            let idx = idx as usize;
+            // SAFETY: idx was validated when pushed to queue
+            let value = unsafe { grid.get_value_unchecked(idx) };
+            let lx = idx % width;
+            let ly = idx / width;
+            region.push(Pixel {
+                pos: Vec2us::new(lx.wrapping_add(offset_x), ly.wrapping_add(offset_y)),
+                value,
+            });
+            // SAFETY: grid has guaranteed 1-pixel border (wrapping_sub in reset_with_pixels),
+            // so all 8 neighbors of any valid pixel are in-bounds.
+            unsafe { visit_neighbors_grid(idx, width, grid, idx_queue) };
         }
 
         regions.push(region);
@@ -917,7 +996,7 @@ fn find_connected_regions_grid_into<const N: usize>(
     pixels: &[Pixel],
     regions: &mut ArrayVec<Vec<Pixel>, N>,
     grid: &mut PixelGrid,
-    queue: &mut Vec<Pixel>,
+    idx_queue: &mut Vec<u32>,
 ) {
     regions.clear();
 
@@ -928,111 +1007,93 @@ fn find_connected_regions_grid_into<const N: usize>(
     // Rebuild grid with current pixels
     grid.reset_with_pixels(pixels);
 
+    let width = grid.width;
+    let offset_x = grid.offset_x;
+    let offset_y = grid.offset_y;
+
     for p in pixels {
         if regions.is_full() {
             break;
         }
 
-        if grid.is_visited(p.pos.x, p.pos.y) {
+        let lx = p.pos.x.wrapping_sub(offset_x);
+        let ly = p.pos.y.wrapping_sub(offset_y);
+        let start_idx = ly * width + lx;
+
+        // SAFETY: pixel is within grid bounds (placed during reset_with_pixels)
+        if unsafe { !grid.try_mark_visited_unchecked(start_idx) } {
             continue;
         }
 
         let mut region = Vec::new();
-        queue.clear();
-        queue.push(*p);
-        grid.mark_visited(p.pos.x, p.pos.y);
+        idx_queue.clear();
+        idx_queue.push(start_idx as u32);
 
-        while let Some(current) = queue.pop() {
-            region.push(current);
-            visit_neighbors_grid(current.pos, grid, queue);
+        while let Some(idx) = idx_queue.pop() {
+            let idx = idx as usize;
+            // SAFETY: idx was validated when pushed to queue
+            let value = unsafe { grid.get_value_unchecked(idx) };
+            let lx = idx % width;
+            let ly = idx / width;
+            region.push(Pixel {
+                pos: Vec2us::new(lx.wrapping_add(offset_x), ly.wrapping_add(offset_y)),
+                value,
+            });
+            // SAFETY: grid has guaranteed 1-pixel border
+            unsafe { visit_neighbors_grid(idx, width, grid, idx_queue) };
         }
 
         regions.push(region);
     }
 }
 
-/// Visit 8-connected neighbors using grid-based lookup.
+/// Visit 8-connected neighbors using grid-based lookup with flat indices.
 ///
-/// This is the hot path - optimized with unchecked indexing since the grid
-/// has a 1-pixel border ensuring all neighbor accesses are in-bounds.
+/// This is the hot path - fully unchecked since the grid always has a 1-pixel
+/// border (guaranteed by wrapping_sub in reset_with_pixels). Border cells have
+/// NO_PIXEL via generation check so they won't propagate BFS further.
+///
+/// # Safety
+/// `idx` must be a valid local index within the grid with at least 1 cell of
+/// padding on all sides.
 #[inline]
-fn visit_neighbors_grid(pos: Vec2us, grid: &mut PixelGrid, queue: &mut Vec<Pixel>) {
-    // Convert to local coordinates once
-    // The grid always has a 1-pixel border, so lx/ly are always >= 1 for valid pixels
-    let lx = pos.x - grid.offset_x;
-    let ly = pos.y - grid.offset_y;
-    let width = grid.width;
-
-    // SAFETY: The grid has a 1-pixel border on all sides (added in reset_with_pixels).
-    // Since `pos` came from a pixel in the grid, local coordinates lx, ly are >= 1
-    // (because offset_x = min_x - 1, so lx = pos.x - (min_x - 1) >= 1).
-    // Therefore all 8 neighbors (lx±1, ly±1) are guaranteed to be valid indices.
-    // The border positions contain NO_PIXEL so they won't be added to the queue.
-
-    // All 8 neighbors - unrolled for better performance
-    // Using wrapping arithmetic to avoid overflow checks, then bounds-checked indexing
-
-    // Top-left
-    try_visit_neighbor_local(lx.wrapping_sub(1), ly.wrapping_sub(1), width, grid, queue);
-    // Top
-    try_visit_neighbor_local(lx, ly.wrapping_sub(1), width, grid, queue);
-    // Top-right
-    try_visit_neighbor_local(lx + 1, ly.wrapping_sub(1), width, grid, queue);
-    // Left
-    try_visit_neighbor_local(lx.wrapping_sub(1), ly, width, grid, queue);
-    // Right
-    try_visit_neighbor_local(lx + 1, ly, width, grid, queue);
-    // Bottom-left
-    try_visit_neighbor_local(lx.wrapping_sub(1), ly + 1, width, grid, queue);
-    // Bottom
-    try_visit_neighbor_local(lx, ly + 1, width, grid, queue);
-    // Bottom-right
-    try_visit_neighbor_local(lx + 1, ly + 1, width, grid, queue);
-}
-
-/// Try to visit a neighbor at local grid coordinates.
-/// Performs bounds check then uses unchecked access for the actual operations.
-#[inline]
-fn try_visit_neighbor_local(
-    lx: usize,
-    ly: usize,
+#[allow(unsafe_op_in_unsafe_fn)]
+unsafe fn visit_neighbors_grid(
+    idx: usize,
     width: usize,
     grid: &mut PixelGrid,
-    queue: &mut Vec<Pixel>,
+    queue: &mut Vec<u32>,
 ) {
-    // Bounds check - wrapping_sub produces large values that fail this check
-    if lx >= grid.width || ly >= grid.height {
-        return;
-    }
+    // Pre-compute all 8 neighbor indices (guaranteed in-bounds by border)
+    let up = idx - width;
+    let down = idx + width;
 
-    let idx = ly * width + lx;
+    try_visit_idx(up - 1, grid, queue); // top-left
+    try_visit_idx(up, grid, queue); // top
+    try_visit_idx(up + 1, grid, queue); // top-right
+    try_visit_idx(idx - 1, grid, queue); // left
+    try_visit_idx(idx + 1, grid, queue); // right
+    try_visit_idx(down - 1, grid, queue); // bottom-left
+    try_visit_idx(down, grid, queue); // bottom
+    try_visit_idx(down + 1, grid, queue); // bottom-right
+}
 
-    // SAFETY: bounds checked above
-    let value = unsafe { *grid.values.get_unchecked(idx) };
-
-    // NO_PIXEL means no pixel at this position (border or gap)
+/// Try to visit a neighbor at a flat grid index. Fully unchecked.
+///
+/// # Safety
+/// `idx` must be a valid index within the grid arrays.
+#[inline]
+#[allow(unsafe_op_in_unsafe_fn)]
+unsafe fn try_visit_idx(idx: usize, grid: &mut PixelGrid, queue: &mut Vec<u32>) {
+    // Check if cell has a pixel in current generation
+    let value = grid.get_value_unchecked(idx);
     if value == NO_PIXEL {
         return;
     }
-
-    // Check and set visited using generation counter
-    // SAFETY: bounds checked above, and visited_generation.len() >= width * height
-    let gen_ptr = unsafe { grid.visited_generation.get_unchecked_mut(idx) };
-
-    if *gen_ptr == grid.current_generation {
-        return; // Already visited
+    // Check and mark visited
+    if grid.try_mark_visited_unchecked(idx) {
+        queue.push(idx as u32);
     }
-
-    *gen_ptr = grid.current_generation;
-
-    // Convert back to absolute coordinates
-    let abs_x = lx + grid.offset_x;
-    let abs_y = ly + grid.offset_y;
-
-    queue.push(Pixel {
-        pos: Vec2us::new(abs_x, abs_y),
-        value,
-    });
 }
 
 // ============================================================================

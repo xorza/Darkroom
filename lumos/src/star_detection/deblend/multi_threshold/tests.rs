@@ -1399,3 +1399,150 @@ fn test_visit_neighbors_grid_all_directions() {
     assert_eq!(regions.len(), 1, "All pixels should be in one region");
     assert_eq!(regions[0].len(), 9, "All 9 pixels should be found");
 }
+
+#[test]
+fn test_pixel_grid_values_generation_isolation() {
+    // Verify that generation-counter-based value storage correctly isolates
+    // values between successive reset_with_pixels calls. Stale values from
+    // a previous population must not be visible after reset.
+    let mut grid = PixelGrid::empty();
+
+    // First population: large grid with many pixels
+    let pixels1: Vec<Pixel> = (0..100)
+        .map(|i| Pixel {
+            pos: Vec2us::new(10 + i, 10),
+            value: 42.0,
+        })
+        .collect();
+    grid.reset_with_pixels(&pixels1);
+
+    // Second population: small grid with only 2 pixels
+    let pixels2 = vec![
+        Pixel {
+            pos: Vec2us::new(50, 10),
+            value: 1.0,
+        },
+        Pixel {
+            pos: Vec2us::new(51, 10),
+            value: 2.0,
+        },
+    ];
+    grid.reset_with_pixels(&pixels2);
+
+    // BFS should only find the 2 pixels from the second population,
+    // not the stale 100 pixels from the first.
+    let mut regions = Vec::new();
+    let mut queue = Vec::new();
+    find_connected_regions_grid(&pixels2, &mut regions, &mut grid, &mut queue);
+
+    assert_eq!(regions.len(), 1);
+    assert_eq!(
+        regions[0].len(),
+        2,
+        "Should find exactly 2 pixels, not stale values from previous population"
+    );
+}
+
+#[test]
+fn test_pixel_grid_repeated_resets_same_positions() {
+    // Verify correctness when the same positions are repopulated with
+    // different values across multiple resets.
+    let mut grid = PixelGrid::empty();
+    let mut regions = Vec::new();
+    let mut queue = Vec::new();
+
+    for round in 0..10 {
+        let pixels = vec![
+            Pixel {
+                pos: Vec2us::new(5, 5),
+                value: round as f32,
+            },
+            Pixel {
+                pos: Vec2us::new(6, 5),
+                value: round as f32 + 0.5,
+            },
+        ];
+
+        find_connected_regions_grid(&pixels, &mut regions, &mut grid, &mut queue);
+
+        assert_eq!(regions.len(), 1, "Round {}: should find 1 region", round);
+        assert_eq!(
+            regions[0].len(),
+            2,
+            "Round {}: should find exactly 2 pixels",
+            round
+        );
+
+        // Verify values match current round, not stale from previous
+        let mut values: Vec<f32> = regions[0].iter().map(|p| p.value).collect();
+        values.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        assert_eq!(values[0], round as f32, "Round {}: wrong value", round);
+        assert_eq!(
+            values[1],
+            round as f32 + 0.5,
+            "Round {}: wrong value",
+            round
+        );
+    }
+}
+
+#[test]
+fn test_connected_regions_pixels_at_coordinate_zero() {
+    // Regression test: pixels at coordinate (0, 0) caused segfault when
+    // the grid border was computed with saturating_sub instead of wrapping_sub.
+    // The border must always be guaranteed even at the image edge.
+    let pixels = vec![
+        Pixel {
+            pos: Vec2us::new(0, 0),
+            value: 1.0,
+        },
+        Pixel {
+            pos: Vec2us::new(1, 0),
+            value: 2.0,
+        },
+        Pixel {
+            pos: Vec2us::new(0, 1),
+            value: 3.0,
+        },
+    ];
+
+    let mut regions = Vec::new();
+    let mut grid = PixelGrid::empty();
+    let mut queue = Vec::new();
+
+    find_connected_regions_grid(&pixels, &mut regions, &mut grid, &mut queue);
+
+    assert_eq!(regions.len(), 1, "All 3 pixels should form one region");
+    assert_eq!(regions[0].len(), 3);
+
+    // Verify absolute coordinates are preserved correctly
+    let mut positions: Vec<(usize, usize)> =
+        regions[0].iter().map(|p| (p.pos.x, p.pos.y)).collect();
+    positions.sort();
+    assert_eq!(positions, vec![(0, 0), (0, 1), (1, 0)]);
+}
+
+#[test]
+fn test_connected_regions_two_groups_near_zero() {
+    // Two disconnected groups near coordinate 0
+    let pixels = vec![
+        Pixel {
+            pos: Vec2us::new(0, 0),
+            value: 1.0,
+        },
+        Pixel {
+            pos: Vec2us::new(5, 5),
+            value: 2.0,
+        },
+    ];
+
+    let mut regions = Vec::new();
+    let mut grid = PixelGrid::empty();
+    let mut queue = Vec::new();
+
+    find_connected_regions_grid(&pixels, &mut regions, &mut grid, &mut queue);
+
+    assert_eq!(regions.len(), 2, "Should find 2 separate regions");
+    assert_eq!(regions[0].len(), 1);
+    assert_eq!(regions[1].len(), 1);
+}
