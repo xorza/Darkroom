@@ -631,49 +631,90 @@ impl StarDetectionConfig {
     // Preset Constructors
     // =========================================================================
 
-    /// Create config for wide-field imaging (larger stars, relaxed filtering).
+    /// Create config for wide-field imaging (short focal length, large pixel scale).
+    ///
+    /// Wide-field setups produce larger stars (FWHM 5-8px) that may be slightly
+    /// elongated at field edges due to coma and field curvature. Uses relaxed
+    /// eccentricity filtering, auto FWHM estimation, and 8-connectivity for
+    /// undersampled PSFs that may not connect well with 4-connectivity.
     pub fn for_wide_field() -> Self {
         Self {
             psf: PsfConfig {
                 expected_fwhm: 6.0,
+                auto_estimate: true,
+                min_stars_for_estimation: 15,
                 ..Default::default()
             },
             filtering: FilteringConfig {
-                max_area: 1000,
+                min_area: 7,
+                max_area: 1500,
+                edge_margin: 20,
                 max_eccentricity: 0.7,
+                connectivity: Connectivity::Eight,
                 ..Default::default()
             },
             ..Default::default()
         }
     }
 
-    /// Create config for high-resolution imaging (smaller stars, stricter filtering).
+    /// Create config for high-resolution imaging (long focal length, small pixel scale).
+    ///
+    /// Well-sampled Nyquist PSFs (FWHM 2-4px) with symmetric profiles. Uses
+    /// Gaussian centroid fitting for maximum precision on well-sampled stars,
+    /// stricter eccentricity and roundness filtering, and higher SNR threshold
+    /// to build a clean, high-quality star catalog. Auto FWHM estimation
+    /// ensures the matched filter adapts to actual seeing conditions.
     pub fn for_high_resolution() -> Self {
         Self {
             psf: PsfConfig {
                 expected_fwhm: 2.5,
+                auto_estimate: true,
+                min_stars_for_estimation: 15,
                 ..Default::default()
             },
             filtering: FilteringConfig {
+                min_area: 3,
                 max_area: 200,
-                max_eccentricity: 0.5,
                 min_snr: 15.0,
+                max_eccentricity: 0.5,
+                max_roundness: 0.3,
+                ..Default::default()
+            },
+            centroid: CentroidConfig {
+                method: CentroidMethod::GaussianFit,
                 ..Default::default()
             },
             ..Default::default()
         }
     }
 
-    /// Create config for crowded fields (aggressive deblending).
+    /// Create config for crowded fields (globular clusters, dense star fields).
+    ///
+    /// Enables SExtractor-style multi-threshold deblending (32 sub-thresholds)
+    /// with low contrast threshold to separate close blends. Uses iterative
+    /// background refinement to re-estimate background after masking sources
+    /// (critical in crowded fields where sources bias the initial estimate).
+    /// 8-connectivity prevents artificial splitting of close pairs.
+    /// Lower min_prominence allows detecting secondary peaks in blends.
     pub fn for_crowded_field() -> Self {
         Self {
             deblend: DeblendConfig {
                 n_thresholds: 32,
                 min_separation: 2,
-                ..Default::default()
+                min_prominence: 0.15,
+                min_contrast: 0.005,
             },
             background: BackgroundConfig {
                 refinement: BackgroundRefinement::Iterative { iterations: 2 },
+                ..Default::default()
+            },
+            filtering: FilteringConfig {
+                duplicate_min_separation: 3.0,
+                connectivity: Connectivity::Eight,
+                ..Default::default()
+            },
+            psf: PsfConfig {
+                auto_estimate: true,
                 ..Default::default()
             },
             ..Default::default()
@@ -681,10 +722,28 @@ impl StarDetectionConfig {
     }
 
     /// Create config for nebulous fields (adaptive thresholding enabled).
+    ///
+    /// Images with bright nebulosity, H-II regions, or structured backgrounds
+    /// where a fixed detection threshold causes massive false positives in
+    /// bright regions. Uses adaptive per-pixel sigma thresholds that increase
+    /// in high-contrast nebular regions while maintaining sensitivity in clear
+    /// sky areas. Larger tile size (128px) averages over nebular structure for
+    /// more stable background estimation. Higher mask dilation prevents nebular
+    /// wings from contaminating tile statistics.
     pub fn for_nebulous_field() -> Self {
         Self {
             background: BackgroundConfig {
-                refinement: BackgroundRefinement::AdaptiveSigma(AdaptiveSigmaConfig::default()),
+                tile_size: 128,
+                mask_dilation: 5,
+                refinement: BackgroundRefinement::AdaptiveSigma(AdaptiveSigmaConfig {
+                    base_sigma: 4.0,
+                    max_sigma: 10.0,
+                    contrast_factor: 2.5,
+                }),
+                ..Default::default()
+            },
+            psf: PsfConfig {
+                auto_estimate: true,
                 ..Default::default()
             },
             ..Default::default()
@@ -693,10 +752,14 @@ impl StarDetectionConfig {
 
     /// Create config for maximum centroid precision in ground-based astrophotography.
     ///
-    /// Uses Moffat PSF fitting (matches atmospheric seeing wings better than Gaussian),
-    /// local annulus background subtraction, adaptive sigma for nebulosity handling,
-    /// auto FWHM estimation, and aggressive deblending. Filtering is strict to ensure
-    /// only well-measured stars are kept.
+    /// Optimized for sub-pixel astrometric accuracy. Uses Moffat PSF fitting
+    /// (beta=2.5, IRAF default) which models atmospheric seeing wings better
+    /// than Gaussian (Trujillo et al. 2001). Local annulus background subtraction
+    /// handles nebulosity near stars. Adaptive sigma thresholds suppress false
+    /// detections in variable backgrounds. Aggressive multi-threshold deblending
+    /// (SExtractor-style, 32 levels) resolves close pairs. Higher SNR threshold
+    /// (15σ) and strict shape filtering ensure only well-measured, isolated
+    /// stars enter the final catalog.
     pub fn for_precise_ground() -> Self {
         Self {
             background: BackgroundConfig {
@@ -712,20 +775,20 @@ impl StarDetectionConfig {
                 }),
             },
             filtering: FilteringConfig {
-                min_area: 5,
+                min_area: 7,
                 max_area: 2000,
                 edge_margin: 15,
-                min_snr: 10.0,
-                max_eccentricity: 0.6,
+                min_snr: 15.0,
+                max_eccentricity: 0.5,
                 max_sharpness: 0.7,
-                max_roundness: 0.5,
-                max_fwhm_deviation: 3.0,
+                max_roundness: 0.3,
+                max_fwhm_deviation: 4.0,
                 duplicate_min_separation: 5.0,
                 connectivity: Connectivity::Eight,
             },
             deblend: DeblendConfig {
                 min_separation: 2,
-                min_prominence: 0.2,
+                min_prominence: 0.15,
                 n_thresholds: 32,
                 min_contrast: 0.003,
             },
@@ -738,7 +801,7 @@ impl StarDetectionConfig {
                 axis_ratio: 1.0,
                 angle: 0.0,
                 auto_estimate: true,
-                min_stars_for_estimation: 20,
+                min_stars_for_estimation: 30,
                 estimation_sigma_factor: 2.5,
             },
             noise_model: None,
