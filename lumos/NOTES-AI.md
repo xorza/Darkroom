@@ -65,37 +65,53 @@ CFA Patterns: RGGB, BGGR, GRBG, GBRG
 
 | Module | Description |
 |--------|-------------|
-| `mod.rs` | `Star`, `StarDetectionConfig`, `find_stars()` |
-| `constants.rs` | Astronomical constants (FWHM_TO_SIGMA, MAD_TO_SIGMA, etc.) |
-| `background/` | Tile-based sigma-clipped background estimation |
-| `detection/` | Connected components with threshold detection |
-| `centroid/` | WeightedMoments, GaussianFit, MoffatFit algorithms |
-| `convolution/` | Gaussian kernel convolution (SIMD) |
-| `deblend/` | Multi-threshold star deblending |
-| `cosmic_ray/` | Laplacian-based cosmic ray detection |
-| `median_filter/` | 3x3 median filter for Bayer artifacts |
-| `gpu/` | GPU-accelerated threshold mask creation (see `gpu/NOTES-AI.md`) |
+| `mod.rs` | Re-exports public API (`Star`, `StarDetectionConfig`, `StarDetector`) |
+| `star.rs` | `Star` struct with quality metric methods |
+| `config.rs` | All configuration structs with validation |
+| `detector/` | `StarDetector` - main pipeline orchestrator |
+| `background/` | Tile-based sigma-clipped background estimation (SIMD) |
+| `candidate_detection/` | Threshold mask + connected component labeling |
+| `threshold_mask/` | Bit-packed threshold mask creation (SIMD) |
+| `mask_dilation/` | Separable morphological dilation |
+| `centroid/` | WeightedMoments, GaussianFit, MoffatFit algorithms (SIMD) |
+| `convolution/` | Separable + elliptical Gaussian convolution (SIMD) |
+| `deblend/` | Local maxima + SExtractor-style multi-threshold deblending |
+| `cosmic_ray/` | L.A.Cosmic Laplacian-based cosmic ray detection (SIMD) |
+| `median_filter/` | 3x3 median filter for Bayer artifacts (SIMD) |
+| `fwhm_estimation.rs` | Auto FWHM estimation from bright stars |
+| `buffer_pool.rs` | Buffer reuse pool for batch processing |
+| `defect_map.rs` | Sensor defect (hot/dead pixel) masking |
 
 ### Star Detection Key Types
 
 ```rust
-Star               // { x, y, flux, fwhm, eccentricity, snr, peak, sharpness }
-StarDetectionConfig // Detection parameters with validate() and builder pattern
-StarCandidate      // { centroid_x, centroid_y, area, bbox }
-BackgroundMap      // { background, noise } per-pixel estimates
-CentroidMethod     // WeightedMoments | GaussianFit | MoffatFit { beta }
+Star                  // { pos: DVec2, flux, fwhm, eccentricity, snr, peak, sharpness, roundness1, roundness2, laplacian_snr }
+StarDetector          // Main detector with buffer pool for batch processing
+StarDetectionResult   // { stars: Vec<Star>, diagnostics: StarDetectionDiagnostics }
+StarDetectionConfig   // Groups BackgroundConfig, PsfConfig, FilteringConfig, CentroidConfig, DeblendConfig
+StarCandidate         // { bbox, peak, peak_value, area }
+BackgroundMap         // { background, noise, adaptive_sigma } per-pixel estimates
+CentroidMethod        // WeightedMoments | GaussianFit | MoffatFit { beta }
+BackgroundRefinement  // None | Iterative { iterations } | AdaptiveSigma(config)
 LocalBackgroundMethod // GlobalMap | LocalAnnulus
+NoiseModel            // { gain, read_noise } for CCD noise equation
 ```
 
 ### Detection Pipeline
 
-1. Median filter - 3x3 removes Bayer artifacts
-2. Background estimation - Tile-based sigma-clipped median
-3. Star detection - Threshold + connected components
-4. Deblending - Multi-peak separation
-5. Centroid refinement - Configurable method
-6. Quality filtering - SNR, eccentricity, saturation, sharpness, FWHM
-7. Duplicate removal - Spatial deduplication
+1. Defect masking - Replace hot/dead pixels with local median (optional)
+2. Median filter - 3x3 removes Bayer artifacts (CFA sensors only)
+3. Background estimation - Tile-based sigma-clipped median + MAD, bilinear interpolation
+4. FWHM estimation - Auto-estimate from bright stars (optional)
+5. Matched filtering - Gaussian convolution matched to PSF (optional)
+6. Threshold mask - Bit-packed mask (pixel > background + sigma * noise)
+7. Mask dilation - Connect fragmented detections
+8. Connected component labeling - RLE-based with lock-free union-find
+9. Candidate extraction + deblending - Local maxima or multi-threshold
+10. Centroid refinement - WeightedMoments, GaussianFit, or MoffatFit
+11. Quality filtering - SNR, eccentricity, saturation, sharpness, roundness, Laplacian SNR
+12. FWHM outlier rejection - MAD-based
+13. Duplicate removal - Spatial hashing deduplication
 
 ## Registration Module (registration/)
 

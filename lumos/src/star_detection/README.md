@@ -4,369 +4,544 @@ This document explains how to use the star detection algorithm and describes the
 
 ## Overview
 
-The star detection module (`lumos::star_detection`) identifies stellar sources in astronomical images through a multi-stage pipeline that handles noise reduction, background estimation, source detection, sub-pixel centroiding, and quality filtering.
+The star detection module (`lumos::star_detection`) identifies stellar sources in astronomical images through a multi-stage pipeline that handles noise reduction, background estimation, matched filtering, source detection, deblending, sub-pixel centroiding, and quality filtering.
 
 ## Quick Start
 
 ### Basic Usage
 
 ```rust
-use lumos::star_detection::{detect_stars, DetectionConfig, DetectedStar};
+use lumos::star_detection::{StarDetector, StarDetectionConfig, Star};
 
-// Load your image data as a grayscale f32 slice
-let image: &[f32] = &image_data;
-let width = 1920;
-let height = 1080;
+// Create detector with default configuration
+let mut detector = StarDetector::new();
 
-// Use default configuration
-let config = DetectionConfig::default();
-
-// Detect stars
-let stars: Vec<DetectedStar> = detect_stars(image, width, height, &config);
+// Detect stars in an AstroImage
+let result = detector.detect(&image);
 
 // Each star contains:
-// - x, y: sub-pixel centroid position
-// - intensity: peak brightness
-// - background: local background level
+// - pos: DVec2 sub-pixel centroid position
+// - flux: total background-subtracted flux
+// - fwhm: full width at half maximum (pixels)
+// - eccentricity: shape metric (0=circular, 1=elongated)
 // - snr: signal-to-noise ratio
-// - fwhm: full width at half maximum (if computed)
-// - sharpness, roundness: morphological metrics
+// - peak: peak pixel value
+// - sharpness, roundness1, roundness2: morphological metrics
+// - laplacian_snr: L.A.Cosmic cosmic ray metric
+for star in &result.stars {
+    println!("Star at ({:.1}, {:.1}), SNR={:.1}, FWHM={:.2}",
+        star.pos.x, star.pos.y, star.snr, star.fwhm);
+}
+
+// Reuse detector for batch processing (buffer pool reuse)
+for image in images {
+    let result = detector.detect(&image);
+}
 ```
 
 ### Custom Configuration
 
 ```rust
-use lumos::star_detection::{DetectionConfig, BackgroundConfig, CentroidConfig};
-
-let config = DetectionConfig {
-    // Detection threshold in sigma above background
-    sigma_threshold: 5.0,
-    
-    // Minimum/maximum star size in pixels
-    min_star_radius: 2.0,
-    max_star_radius: 25.0,
-    
-    // Background estimation settings
-    background: BackgroundConfig {
-        mesh_size: 64,        // Grid cell size for background mesh
-        filter_size: 3,       // Median filter size for mesh smoothing
-        sigma_clip: 3.0,      // Sigma clipping for outlier rejection
-        iterations: 3,        // Number of sigma-clipping iterations
-    },
-    
-    // Centroiding settings
-    centroid: CentroidConfig {
-        method: CentroidMethod::Gaussian,  // or Barycenter, Quadratic
-        box_size: 7,                       // Fitting region size
-        max_iterations: 10,                // For iterative methods
-        tolerance: 0.01,                   // Convergence threshold
-    },
-    
-    // Quality filters
-    min_snr: 5.0,              // Minimum signal-to-noise ratio
-    min_sharpness: 0.3,        // Filter extended sources
-    max_sharpness: 0.9,        // Filter cosmic rays / hot pixels
-    min_roundness: -0.5,       // Filter elongated sources
-    max_roundness: 0.5,
-    
-    // Enable cosmic ray rejection
-    reject_cosmic_rays: true,
-    
-    // Saturation level (stars above this are flagged)
-    saturation_level: 65000.0,
+use lumos::star_detection::{
+    StarDetectionConfig, StarDetector,
+    BackgroundConfig, BackgroundRefinement,
+    PsfConfig, FilteringConfig, CentroidConfig,
+    CentroidMethod, DeblendConfig, NoiseModel,
 };
+
+let config = StarDetectionConfig {
+    background: BackgroundConfig {
+        sigma_threshold: 4.0,       // Detection sigma above background
+        tile_size: 64,              // Grid cell size for background mesh
+        sigma_clip_iterations: 5,   // Sigma-clipping iterations per tile
+        mask_dilation: 3,           // Object mask dilation radius
+        min_unmasked_fraction: 0.3, // Min unmasked pixels per tile
+        refinement: BackgroundRefinement::None, // or Iterative/AdaptiveSigma
+    },
+
+    psf: PsfConfig {
+        expected_fwhm: 4.0,         // Expected FWHM for matched filter
+        axis_ratio: 1.0,            // PSF ellipticity (1.0 = circular)
+        angle: 0.0,                 // PSF rotation angle (radians)
+        auto_estimate: false,       // Auto-estimate FWHM from bright stars
+        ..Default::default()
+    },
+
+    centroid: CentroidConfig {
+        method: CentroidMethod::WeightedMoments, // or GaussianFit, MoffatFit
+        ..Default::default()
+    },
+
+    filtering: FilteringConfig {
+        min_area: 5,                // Minimum connected pixels
+        max_area: 500,              // Maximum connected pixels
+        edge_margin: 10,            // Border exclusion zone
+        min_snr: 10.0,             // Minimum signal-to-noise ratio
+        max_eccentricity: 0.6,     // Filter elongated sources
+        max_sharpness: 0.7,        // Filter cosmic rays / hot pixels
+        max_roundness: 1.0,        // Filter asymmetric sources
+        max_fwhm_deviation: 3.0,   // FWHM outlier rejection (MAD units)
+        duplicate_min_separation: 8.0, // Deduplication distance
+        ..Default::default()
+    },
+
+    deblend: DeblendConfig {
+        min_separation: 3,          // Min peak separation for deblending
+        min_prominence: 0.3,        // Min peak prominence fraction
+        n_thresholds: 0,            // 0=local maxima, 32+=multi-threshold
+        min_contrast: 0.005,        // Min contrast for multi-threshold
+    },
+
+    // Optional camera noise model for accurate SNR
+    noise_model: Some(NoiseModel::new(1.5, 5.0)), // gain=1.5 e-/ADU, read_noise=5 e-
+    defect_map: None,
+};
+
+let mut detector = StarDetector::from_config(config);
+let result = detector.detect(&image);
+```
+
+### Preset Configurations
+
+```rust
+// Wide-field imaging (larger stars, relaxed filtering)
+let config = StarDetectionConfig::for_wide_field();
+
+// High-resolution imaging (smaller stars, stricter filtering)
+let config = StarDetectionConfig::for_high_resolution();
+
+// Crowded fields (aggressive deblending, iterative background)
+let config = StarDetectionConfig::for_crowded_field();
+
+// Nebulous fields (adaptive sigma thresholding)
+let config = StarDetectionConfig::for_nebulous_field();
 ```
 
 ## Pipeline Stages
 
-The detection pipeline consists of five main stages:
+The detection pipeline consists of these stages, orchestrated by `StarDetector::detect()`:
 
 ```
-Input Image
-    │
-    ▼
-┌──────────────────────┐
-│  1. Preprocessing    │  ── Cosmic ray rejection, median filtering
-└──────────────────────┘
-    │
-    ▼
-┌──────────────────────┐
-│  2. Background       │  ── Mesh-based background/noise estimation
-│     Estimation       │
-└──────────────────────┘
-    │
-    ▼
-┌──────────────────────┐
-│  3. Detection        │  ── Convolution + thresholding + peak finding
-└──────────────────────┘
-    │
-    ▼
-┌──────────────────────┐
-│  4. Centroiding      │  ── Sub-pixel position refinement
-└──────────────────────┘
-    │
-    ▼
-┌──────────────────────┐
-│  5. Filtering        │  ── Quality metrics, deblending, validation
-└──────────────────────┘
-    │
-    ▼
-Detected Stars
+Input AstroImage
+    |
+    v
++------------------------+
+|  0. Preprocessing      |  -- Defect masking, 3x3 median filter (CFA sensors)
++------------------------+
+    |
+    v
++------------------------+
+|  1. Background         |  -- Tile-based background/noise estimation
+|     Estimation         |     with optional iterative refinement
++------------------------+
+    |
+    v
++------------------------+
+|  2. FWHM Estimation    |  -- Auto-estimate FWHM from bright stars (optional)
++------------------------+
+    |
+    v
++------------------------+
+|  3. Matched Filtering  |  -- Gaussian convolution matched to PSF (optional)
++------------------------+
+    |
+    v
++------------------------+
+|  4. Threshold Mask     |  -- Bit-packed binary mask (pixel > bg + sigma * noise)
++------------------------+
+    |
+    v
++------------------------+
+|  5. Mask Dilation      |  -- Connect fragmented detections (1px radius)
++------------------------+
+    |
+    v
++------------------------+
+|  6. Connected          |  -- RLE-based labeling with lock-free union-find
+|     Component Labeling |
++------------------------+
+    |
+    v
++------------------------+
+|  7. Candidate          |  -- Extract regions, filter by area/edge,
+|     Extraction         |     deblend overlapping sources
++------------------------+
+    |
+    v
++------------------------+
+|  8. Centroiding        |  -- Sub-pixel position refinement + quality metrics
++------------------------+
+    |
+    v
++------------------------+
+|  9. Quality Filtering  |  -- SNR, eccentricity, sharpness, roundness,
+|     & Post-processing  |     FWHM outliers, deduplication
++------------------------+
+    |
+    v
+StarDetectionResult { stars, diagnostics }
 ```
 
 ## Module Architecture
 
+### `detector/` - Pipeline Orchestrator
+
+Contains `StarDetector`, the main entry point that coordinates all pipeline stages.
+
+**Key Types:**
+- `StarDetector` - Main detector with buffer pool for efficient batch processing
+- `StarDetectionResult` - Final output with stars and diagnostics
+- `StarDetectionDiagnostics` - Per-stage statistics for debugging and tuning
+
 ### `background/` - Background Estimation
 
-Estimates the sky background and noise level across the image using a mesh-based approach.
+Estimates the sky background and noise level using a tile-based approach with sigma-clipped statistics.
 
 **Algorithm:**
-1. Divide image into a grid of cells (mesh)
-2. For each cell, compute statistics (mean, median, sigma) with sigma-clipping
-3. Apply median filter to smooth the background mesh
-4. Interpolate (bilinear) to full image resolution
+1. Divide image into tiles (configurable size, default 64px)
+2. For each tile, compute sigma-clipped median and MAD (using up to 1024 samples)
+3. Apply 3x3 median filter to the tile grid (rejects outlier tiles)
+4. Bilinearly interpolate from tile centers to full image resolution
+
+**Refinement strategies (mutually exclusive):**
+- `Iterative`: Mask detected sources, re-estimate background excluding them. Best for crowded fields.
+- `AdaptiveSigma`: Per-pixel detection thresholds based on local contrast. Higher thresholds in nebulous regions reduce false positives.
+
+**Key Types:**
+- `BackgroundMap` - Holds per-pixel background, noise, and optional adaptive sigma buffers
+- `TileGrid` - Grid of per-tile statistics (median, sigma, adaptive_sigma)
+
+### `convolution/` - Matched Filter Convolution
+
+Convolves the background-subtracted image with a Gaussian kernel matched to the expected PSF.
+
+**Features:**
+- Separable convolution for circular PSFs: O(n*k) per pixel
+- Full 2D convolution for elliptical PSFs: O(n*k^2)
+- Kernel radius = 3*sigma (captures 99.7% of Gaussian energy)
+- Mirror boundary handling
+- SIMD-accelerated: AVX2+FMA, SSE4.1, NEON
 
 **Key Functions:**
-- `estimate_background()` - Main entry point
-- `compute_mesh_statistics()` - Per-cell statistics with sigma clipping
-- `interpolate_background()` - Bilinear mesh interpolation
+- `matched_filter()` - Background subtraction + convolution
+- `gaussian_convolve()` - Separable Gaussian convolution
+- `elliptical_gaussian_convolve()` - Full 2D elliptical convolution
+- `gaussian_kernel_1d()` - Kernel generation (normalized to sum=1)
 
-**Why mesh-based?** Direct per-pixel estimation is too slow. The mesh approach assumes background varies slowly across the image, which is valid for most astronomical images.
+### `threshold_mask/` - Threshold Mask Creation
 
-### `detection/` - Source Detection
+Creates a bit-packed binary mask where pixels exceed the detection threshold.
 
-Finds candidate star positions using matched-filter convolution and peak detection.
+**Features:**
+- Bit-packed storage: 1 bit per pixel in u64 words (8x memory savings)
+- Three variants: standard, pre-filtered, adaptive sigma
+- SIMD-accelerated: SSE4.1, NEON
+
+### `mask_dilation/` - Morphological Dilation
+
+Separable morphological dilation to connect fragmented detections.
+
+**Features:**
+- Horizontal + vertical separable passes
+- Word-level bit smearing for fast horizontal dilation
+- Parallel row/column processing
+
+### `candidate_detection/` - Source Detection
+
+Extracts star candidates from the threshold mask using connected component labeling.
 
 **Algorithm:**
-1. **Convolution**: Convolve background-subtracted image with a Gaussian kernel matching typical star PSF
-2. **Thresholding**: Identify pixels exceeding `sigma_threshold × local_noise`
-3. **Peak Finding**: Find local maxima using 8-connected neighborhood
-4. **Segmentation**: Group connected pixels into source regions
+1. Label connected components (4-connectivity default, 8-connectivity optional)
+2. Extract component bounding boxes, peaks, and areas
+3. Filter by min/max area and edge margin
+4. Deblend multi-peaked components
 
-**Key Functions:**
-- `detect_sources()` - Main detection pipeline
-- `convolve_gaussian()` - Matched filter convolution
-- `find_local_maxima()` - Peak detection with non-maximum suppression
-- `segment_sources()` - Connected component labeling
+**Key Types:**
+- `StarCandidate` - Pre-centroid detection with bbox, peak, area
+- `LabelMap` - Connected component labels (Buffer2<u32>)
 
-**SIMD Optimization:** The convolution and peak detection stages use SIMD (AVX2/SSE on x86_64, NEON on ARM) for significant speedup on large images.
+**Labeling Implementation:**
+- RLE-based scanning with word-level bit operations
+- Lock-free union-find with atomic operations for parallel merging
+- Block-based parallel labeling with boundary merging
+
+### `deblend/` - Source Deblending
+
+Separates overlapping stars that were merged during detection.
+
+**Two algorithms:**
+
+| Algorithm | Speed | Accuracy | Best For |
+|-----------|-------|----------|----------|
+| Local Maxima | Fast | Good for well-separated | Default (`n_thresholds=0`) |
+| Multi-Threshold | Slower | Better for crowded fields | `n_thresholds=32` |
+
+**Local Maxima Deblending:**
+1. Find 8-connected local maxima in each component
+2. Filter by prominence and separation
+3. Assign pixels to nearest peak via Voronoi partitioning
+4. Uses `ArrayVec<_, MAX_PEAKS=8>` (stack-allocated)
+
+**Multi-Threshold Deblending (SExtractor-style):**
+1. Apply N threshold levels between detection threshold and peak
+2. Build tree of sub-components at each level
+3. Split branches whose flux exceeds minimum contrast criterion
+4. Grid-based pixel lookup for fast neighbor access
 
 ### `centroid/` - Sub-pixel Centroiding
 
-Refines star positions to sub-pixel accuracy using various fitting methods.
+Refines star positions to sub-pixel accuracy and computes quality metrics.
 
 **Available Methods:**
 
 | Method | Accuracy | Speed | Best For |
 |--------|----------|-------|----------|
-| `Barycenter` | ~0.1 px | Fast | Quick estimates |
-| `Quadratic` | ~0.05 px | Fast | Well-sampled PSFs |
-| `Gaussian` | ~0.02 px | Medium | General use |
-| `Moffat` | ~0.01 px | Slow | Undersampled PSFs |
+| `WeightedMoments` | ~0.05 px | Fast | Default, general use |
+| `GaussianFit` | ~0.01 px | ~8x slower | Well-sampled PSFs |
+| `MoffatFit { beta }` | ~0.01 px | ~8x slower | Atmospheric seeing |
 
-**Gaussian Fitting Algorithm:**
-1. Extract star subimage (box_size × box_size)
-2. Fit 2D Gaussian: `I(x,y) = A × exp(-((x-x₀)²/2σₓ² + (y-y₀)²/2σᵧ²)) + B`
-3. Iterate until convergence (Levenberg-Marquardt)
-4. Return fitted centroid (x₀, y₀) and FWHM from σ
+**WeightedMoments Algorithm:**
+1. Extract stamp (radius = 1.75 * FWHM, clamped to [4, 15] pixels)
+2. Iterative weighted centroid with Gaussian weighting kernel
+3. Converge when delta < 0.001 pixels or 10 iterations max
+4. NEON SIMD implementation for ARM
 
-**Key Functions:**
-- `compute_centroid()` - Dispatch to selected method
-- `barycenter_centroid()` - Intensity-weighted center of mass
-- `quadratic_centroid()` - Parabolic interpolation of peak
-- `gaussian_centroid()` - 2D Gaussian fitting
-- `compute_fwhm()` - Full width at half maximum estimation
+**GaussianFit Algorithm:**
+1. Fit `f(x,y) = A * exp(-((x-x0)^2/2sig_x^2 + (y-y0)^2/2sig_y^2)) + B`
+2. 6 parameters: position, amplitude, sigma_x, sigma_y, background
+3. Levenberg-Marquardt optimization with analytical Jacobian
+4. SIMD-accelerated chi^2 and Jacobian: AVX2+FMA, SSE4.1, NEON
+5. Optional inverse-variance weighting with CCD noise model
 
-### `convolution/` - Image Convolution
+**MoffatFit Algorithm:**
+1. Fit `f(x,y) = A * (1 + ((x-x0)^2+(y-y0)^2)/alpha^2)^(-beta) + B`
+2. Beta controls wing falloff: 2.5 typical for ground-based, 4.5 for space
+3. Same L-M optimizer infrastructure as Gaussian
 
-Provides efficient convolution operations for the detection stage.
+**Quality Metrics (computed after centroiding):**
+- Flux: sum of background-subtracted pixels in stamp
+- FWHM: from second moments (sigma -> FWHM conversion)
+- Eccentricity: from covariance matrix eigenvalues
+- SNR: full CCD noise model when gain/read_noise available
+- Sharpness: peak / core_flux (cosmic ray discriminator)
+- Roundness1 (GROUND): (Hx - Hy) / (Hx + Hy) from marginal distributions
+- Roundness2 (SROUND): bilateral symmetry metric
+- Laplacian SNR: L.A.Cosmic metric per star
 
-**Features:**
-- Separable kernel optimization (2D = 1D horizontal × 1D vertical)
-- SIMD-accelerated inner loops
-- Edge handling (mirror, zero, extend)
+### `cosmic_ray/` - Cosmic Ray Detection
 
-**Key Functions:**
-- `convolve_2d()` - General 2D convolution
-- `convolve_separable()` - Optimized for separable kernels
-- `gaussian_kernel()` - Generate Gaussian kernels
+L.A.Cosmic-based cosmic ray identification (van Dokkum 2001, PASP 113, 1420).
 
-### `cosmic_ray/` - Cosmic Ray Rejection
+**Core principle:** Cosmic rays have sharper edges than astronomical sources (which are smoothed by the PSF). The Laplacian responds strongly to these sharp edges.
 
-Identifies and masks cosmic rays and hot pixels using the Laplacian edge detection method.
-
-**Algorithm (Laplacian/LA Cosmic):**
-1. Compute Laplacian (second derivative) of image
-2. Cosmic rays have sharp, high-contrast edges → large Laplacian values
-3. Compare Laplacian to local noise to find outliers
-4. Apply fine-structure test to avoid flagging star cores
-5. Grow mask to include wings of cosmic ray events
-
-**Key Functions:**
-- `detect_cosmic_rays()` - Main detection routine
-- `compute_laplacian()` - Edge detection kernel
-- `fine_structure_test()` - Distinguish CRs from stars
-
-**SIMD Optimization:** Laplacian computation uses SIMD for 2-3x speedup.
-
-### `deblend/` - Source Deblending
-
-Separates overlapping stars that were merged during initial detection.
-
-**Algorithm:**
-1. For each source region, find multiple local maxima
-2. If multiple peaks exist, use watershed segmentation to split
-3. Assign pixels to nearest peak based on intensity gradient
-4. Create separate source entries for each deblended component
+**Used in two ways:**
+1. **Per-star metric** (`compute_laplacian_snr()`): Computes Laplacian SNR at each star's position during centroiding. Stars with high values (>50) are flagged as cosmic rays. This is the primary CR rejection method in the pipeline.
+2. **Full-frame detection** (`detect_cosmic_rays()`): Standalone function for image-level CR detection and masking.
 
 **Key Functions:**
-- `deblend_sources()` - Main deblending routine
-- `find_saddle_points()` - Locate valleys between peaks
-- `watershed_segment()` - Split merged sources
+- `compute_laplacian()` - 3x3 discrete Laplacian with SIMD acceleration
+- `compute_laplacian_snr()` - Per-star Laplacian SNR metric
+- `compute_fine_structure()` - Small-scale structure (original - median3)
+- `detect_cosmic_rays()` - Full-frame L.A.Cosmic detection
 
 ### `median_filter/` - Median Filtering
 
-Provides robust noise reduction for preprocessing.
+3x3 median filter for removing Bayer pattern artifacts from CFA sensors.
 
 **Features:**
-- Variable kernel sizes (3×3, 5×5, 7×7)
-- Optimized histogram-based algorithm for larger kernels
-- Used in background mesh smoothing and cosmic ray rejection
+- Sorting-network-based median (optimal compare-swap sequences)
+- SIMD-accelerated: SSE4.1/AVX2, NEON
+- Parallel row processing via rayon
 
-**Key Functions:**
-- `median_filter_2d()` - 2D median filter
-- `running_median()` - 1D running median (O(log n) per pixel)
+### `fwhm_estimation.rs` - Auto FWHM Estimation
+
+Robust FWHM estimation from bright stars for the auto-FWHM feature.
+
+**Algorithm:**
+1. First-pass detection with higher sigma threshold (bright stars only)
+2. Filter: exclude saturated, elongated, cosmic ray candidates, invalid FWHM range
+3. Compute median FWHM with MAD-based outlier rejection (3x MAD threshold)
+4. Fall back to default if insufficient stars
+
+### `buffer_pool.rs` - Buffer Pool
+
+Pools `Buffer2<f32>`, `BitBuffer2`, and `Buffer2<u32>` for reuse across multiple `detect()` calls. Avoids repeated allocation when processing image sequences.
+
+### `defect_map.rs` - Sensor Defect Masking
+
+Masks hot pixels, dead pixels, and bad columns/rows by replacing them with the local median of non-defective neighbors. Applied before detection.
 
 ## Data Structures
 
-### `DetectedStar`
+### `Star`
 
 ```rust
-#[derive(Debug, Clone)]
-pub struct DetectedStar {
-    /// Sub-pixel X position (0-indexed from left)
-    pub x: f64,
-    /// Sub-pixel Y position (0-indexed from top)
-    pub y: f64,
-    /// Peak intensity (background-subtracted)
-    pub intensity: f32,
-    /// Local background level
-    pub background: f32,
-    /// Signal-to-noise ratio
-    pub snr: f32,
-    /// Full width at half maximum (pixels)
+#[derive(Debug, Clone, Copy)]
+pub struct Star {
+    /// Sub-pixel position (DVec2).
+    pub pos: DVec2,
+    /// Total background-subtracted flux.
+    pub flux: f32,
+    /// Full width at half maximum (pixels).
     pub fwhm: f32,
-    /// Sharpness metric (0-1, higher = more point-like)
+    /// Eccentricity (0=circular, 1=elongated).
+    pub eccentricity: f32,
+    /// Signal-to-noise ratio.
+    pub snr: f32,
+    /// Peak pixel value (for saturation detection).
+    pub peak: f32,
+    /// Sharpness (peak / flux_in_core). High = cosmic ray.
     pub sharpness: f32,
-    /// Roundness metric (-1 to 1, 0 = circular)
-    pub roundness: f32,
-    /// True if star appears saturated
-    pub saturated: bool,
+    /// DAOFIND GROUND roundness from marginal distributions.
+    pub roundness1: f32,
+    /// DAOFIND SROUND symmetry-based roundness.
+    pub roundness2: f32,
+    /// L.A.Cosmic Laplacian SNR metric.
+    pub laplacian_snr: f32,
 }
 ```
 
-### `DetectionConfig`
+### `StarDetectionConfig`
 
-Main configuration structure controlling all pipeline parameters. See the "Custom Configuration" example above.
+Main configuration grouping all sub-configs:
+- `BackgroundConfig` - Tile-based background estimation
+- `PsfConfig` - PSF shape and matched filtering
+- `FilteringConfig` - Quality filters and detection parameters
+- `DeblendConfig` - Source deblending
+- `CentroidConfig` - Sub-pixel centroid method
+- `NoiseModel` (optional) - Camera gain and read noise
+- `DefectMap` (optional) - Bad pixel masking
 
 ## Quality Metrics
 
 ### Signal-to-Noise Ratio (SNR)
 
+With noise model (gain, read_noise):
 ```
-SNR = (peak_intensity - background) / noise
+SNR = flux / sqrt(flux/gain + npix * (sigma_sky^2 + read_noise^2/gain^2))
 ```
 
-Where `noise` is the local RMS from background estimation. Stars with SNR below `min_snr` are rejected.
+Without noise model (background-dominated):
+```
+SNR = flux / (sigma_sky * sqrt(npix))
+```
 
 ### Sharpness
 
-Measures how point-like a source is compared to the PSF:
-
 ```
-sharpness = (peak - neighbors_mean) / peak
+sharpness = peak_value / core_flux  (3x3 core region)
 ```
 
-- Low sharpness → extended source (galaxy, nebula)
-- High sharpness → cosmic ray or hot pixel
-- Typical stars: 0.3 - 0.8
+- Low sharpness (0.2-0.5): real stars (flux spread across PSF)
+- High sharpness (>0.7): cosmic ray or hot pixel (flux concentrated)
 
-### Roundness
+### Roundness (DAOFIND-style)
 
-Measures ellipticity:
-
+**GROUND (roundness1):**
 ```
-roundness = (σx - σy) / (σx + σy)
+roundness1 = (Hx - Hy) / (Hx + Hy)
 ```
+Where Hx, Hy are peak heights of marginal x/y distributions.
 
-- 0 = perfectly circular
-- Positive = elongated horizontally
-- Negative = elongated vertically
-- Typical stars: -0.3 to 0.3
+**SROUND (roundness2):**
+RMS bilateral asymmetry of marginal distributions.
+- 0 = perfectly symmetric
+- Non-zero = asymmetric
+
+### Eccentricity
+
+From covariance matrix eigenvalues:
+```
+eccentricity = sqrt(1 - lambda2/lambda1)
+```
+- 0 = circular
+- >0.6 = noticeably elongated
 
 ## Performance Considerations
 
 ### SIMD Optimization
 
-The following operations are SIMD-accelerated:
-- Gaussian convolution (detection stage)
-- Laplacian computation (cosmic ray rejection)
-- Peak finding (detection stage)
+SIMD-accelerated operations (2-4x speedup on modern CPUs):
+- Background interpolation
+- Gaussian convolution (row, column, 2D)
+- Threshold mask creation
+- 3x3 median filter
+- Laplacian computation
+- Gaussian/Moffat profile fitting (chi^2 + Jacobian)
+- Centroid refinement (NEON)
 
-Typical speedup: 2-4x on modern CPUs.
+Dispatch priority: AVX2+FMA -> SSE4.1 -> NEON -> scalar.
 
 ### Memory Usage
 
 Background estimation allocates:
-- Background mesh: `(width/mesh_size) × (height/mesh_size) × 4 bytes`
-- Full background map: `width × height × 4 bytes`
+- Tile grid: `(width/tile_size) * (height/tile_size) * 12 bytes`
+- Full background map: `width * height * 4 bytes`
+- Full noise map: `width * height * 4 bytes`
 
-For a 20 megapixel image with mesh_size=64:
-- Mesh: ~20 KB
-- Full map: ~80 MB
+Buffer pool reuses allocations across multiple `detect()` calls.
 
 ### Recommended Settings by Use Case
 
 **Fast preview (live stacking):**
 ```rust
-DetectionConfig {
-    sigma_threshold: 8.0,
-    centroid: CentroidConfig {
-        method: CentroidMethod::Quadratic,
+StarDetectionConfig {
+    background: BackgroundConfig {
+        sigma_threshold: 8.0,
         ..Default::default()
     },
-    reject_cosmic_rays: false,
+    psf: PsfConfig {
+        expected_fwhm: 0.0,  // Disable matched filter
+        ..Default::default()
+    },
     ..Default::default()
 }
 ```
 
 **High accuracy (astrometry/photometry):**
 ```rust
-DetectionConfig {
-    sigma_threshold: 3.0,
-    centroid: CentroidConfig {
-        method: CentroidMethod::Gaussian,
-        max_iterations: 20,
-        tolerance: 0.001,
+StarDetectionConfig {
+    background: BackgroundConfig {
+        sigma_threshold: 3.0,
+        refinement: BackgroundRefinement::Iterative { iterations: 2 },
         ..Default::default()
     },
-    min_snr: 10.0,
-    reject_cosmic_rays: true,
+    centroid: CentroidConfig {
+        method: CentroidMethod::GaussianFit,
+        ..Default::default()
+    },
+    filtering: FilteringConfig {
+        min_snr: 15.0,
+        ..Default::default()
+    },
+    noise_model: Some(NoiseModel::new(1.5, 5.0)),
     ..Default::default()
 }
 ```
 
 **Crowded fields:**
 ```rust
-DetectionConfig {
+StarDetectionConfig::for_crowded_field()
+// Or manually:
+StarDetectionConfig {
     background: BackgroundConfig {
-        mesh_size: 32,  // Finer mesh for variable background
+        tile_size: 32,  // Finer mesh for variable background
+        refinement: BackgroundRefinement::Iterative { iterations: 2 },
         ..Default::default()
     },
-    min_star_radius: 1.5,
-    // Enable deblending (on by default)
+    deblend: DeblendConfig {
+        n_thresholds: 32,  // SExtractor-style multi-threshold
+        min_separation: 2,
+        ..Default::default()
+    },
     ..Default::default()
 }
+```
+
+**Nebulous backgrounds:**
+```rust
+StarDetectionConfig::for_nebulous_field()
+// Uses AdaptiveSigma refinement to raise thresholds in high-contrast regions
 ```
 
 ## Troubleshooting
@@ -374,49 +549,60 @@ DetectionConfig {
 ### Too few stars detected
 
 1. **Lower `sigma_threshold`** (try 3.0-4.0)
-2. **Check background estimation** - mesh_size may be too large for variable backgrounds
-3. **Verify image calibration** - uncalibrated images have higher noise
+2. **Check `expected_fwhm`** - if too different from actual seeing, matched filter hurts
+3. **Set `expected_fwhm: 0.0`** to disable matched filtering and detect without convolution
+4. **Enable `auto_estimate: true`** to let the pipeline estimate FWHM automatically
+5. **Lower `min_area`** (try 3)
+6. **Check background estimation** - tile_size may be too large for variable backgrounds
 
 ### Too many false detections
 
 1. **Raise `sigma_threshold`** (try 6.0-8.0)
-2. **Enable cosmic ray rejection** if not already on
-3. **Tighten sharpness/roundness filters**
-4. **Check for hot pixels** - may need dark frame subtraction
+2. **Lower `max_sharpness`** to reject more cosmic rays
+3. **Use `BackgroundRefinement::AdaptiveSigma`** for nebulous regions
+4. **Use `BackgroundRefinement::Iterative`** for crowded fields
+5. **Check for hot pixels** - use `DefectMap` or dark frame subtraction
 
 ### Poor centroid accuracy
 
-1. **Use Gaussian or Moffat centroiding** instead of Barycenter
-2. **Increase `box_size`** for undersampled images
-3. **Ensure stars aren't saturated** - saturated cores break centroiding
+1. **Use `CentroidMethod::GaussianFit`** instead of WeightedMoments
+2. **Use `CentroidMethod::MoffatFit { beta: 2.5 }`** for atmospheric seeing
+3. **Ensure `expected_fwhm` is close to actual** - affects stamp size
+4. **Ensure stars aren't saturated** - saturated cores break centroiding
 
 ### Slow performance
 
-1. **Increase `mesh_size`** for background estimation
-2. **Use simpler centroid method** (Quadratic or Barycenter)
-3. **Disable cosmic ray rejection** for pre-calibrated images
-4. **Reduce image size** if possible
+1. **Increase `tile_size`** for background estimation
+2. **Use `CentroidMethod::WeightedMoments`** (default, fastest)
+3. **Set `expected_fwhm: 0.0`** to skip matched filter convolution
+4. **Reuse `StarDetector`** across frames for buffer pool reuse
 
 ## Integration with Registration
 
 The star detection output feeds directly into the registration pipeline:
 
 ```rust
-use lumos::star_detection::{detect_stars, DetectionConfig};
-use lumos::registration::{register_images, RegistrationConfig};
+use lumos::star_detection::{StarDetector, StarDetectionConfig};
 
-// Detect stars in reference image
-let ref_stars = detect_stars(&ref_image, width, height, &det_config);
+let mut detector = StarDetector::new();
 
-// Detect stars in target image  
-let target_stars = detect_stars(&target_image, width, height, &det_config);
+// Detect stars in reference and target images
+let ref_result = detector.detect(&ref_image);
+let target_result = detector.detect(&target_image);
 
 // Convert to point format for registration
-let ref_points: Vec<(f64, f64)> = ref_stars.iter().map(|s| (s.x, s.y)).collect();
-let target_points: Vec<(f64, f64)> = target_stars.iter().map(|s| (s.x, s.y)).collect();
-
-// Register images using detected stars
-let transform = register_images(&ref_points, &target_points, &reg_config);
+let ref_points: Vec<(f64, f64)> = ref_result.stars.iter()
+    .map(|s| (s.pos.x, s.pos.y))
+    .collect();
+let target_points: Vec<(f64, f64)> = target_result.stars.iter()
+    .map(|s| (s.pos.x, s.pos.y))
+    .collect();
 ```
 
-See [REGISTRATION.md](../registration/REGISTRATION.md) for details on image registration.
+## Algorithm References
+
+- **Background estimation**: SExtractor (Bertin & Arnouts 1996, A&AS 117, 393)
+- **Matched filtering**: DAOFIND (Stetson 1987, PASP 99, 191)
+- **Cosmic ray rejection**: L.A.Cosmic (van Dokkum 2001, PASP 113, 1420)
+- **Multi-threshold deblending**: SExtractor DEBLEND algorithm
+- **Roundness metrics**: DAOFIND GROUND and SROUND (Stetson 1987)
