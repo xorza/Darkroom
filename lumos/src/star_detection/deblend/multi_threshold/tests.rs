@@ -791,8 +791,15 @@ fn test_pixel_grid_connected_regions() {
     let mut grid = PixelGrid::empty();
     let mut queue = Vec::new();
     let mut regions = Vec::new();
+    let mut region_pool = Vec::new();
 
-    find_connected_regions_grid(&pixels, &mut regions, &mut grid, &mut queue);
+    find_connected_regions_grid(
+        &pixels,
+        &mut regions,
+        &mut region_pool,
+        &mut grid,
+        &mut queue,
+    );
 
     // All 3 pixels should be in one connected region (they're adjacent)
     assert_eq!(regions.len(), 1);
@@ -900,7 +907,14 @@ fn test_pixel_grid_reuse() {
     // Test that the new pixels are properly stored via connected regions
     let mut queue = Vec::new();
     let mut regions = Vec::new();
-    find_connected_regions_grid(&pixels2, &mut regions, &mut grid, &mut queue);
+    let mut region_pool = Vec::new();
+    find_connected_regions_grid(
+        &pixels2,
+        &mut regions,
+        &mut region_pool,
+        &mut grid,
+        &mut queue,
+    );
 
     // Two separate pixels should form two regions (not adjacent)
     assert_eq!(regions.len(), 2);
@@ -923,8 +937,15 @@ fn test_pixel_grid_single_pixel() {
     // Verify value storage via connected regions
     let mut queue = Vec::new();
     let mut regions = Vec::new();
+    let mut region_pool = Vec::new();
     grid.reset_with_pixels(&pixels); // Reset to clear visited flags
-    find_connected_regions_grid(&pixels, &mut regions, &mut grid, &mut queue);
+    find_connected_regions_grid(
+        &pixels,
+        &mut regions,
+        &mut region_pool,
+        &mut grid,
+        &mut queue,
+    );
 
     assert_eq!(regions.len(), 1);
     assert_eq!(regions[0].len(), 1);
@@ -1183,10 +1204,17 @@ fn test_find_connected_regions_grid_single_region() {
     ];
 
     let mut regions = Vec::new();
+    let mut region_pool = Vec::new();
     let mut grid = PixelGrid::empty();
     let mut queue = Vec::new();
 
-    find_connected_regions_grid(&pixels, &mut regions, &mut grid, &mut queue);
+    find_connected_regions_grid(
+        &pixels,
+        &mut regions,
+        &mut region_pool,
+        &mut grid,
+        &mut queue,
+    );
 
     assert_eq!(regions.len(), 1, "Should find one connected region");
     assert_eq!(regions[0].len(), 4, "Region should contain all 4 pixels");
@@ -1217,10 +1245,17 @@ fn test_find_connected_regions_grid_two_regions() {
     ];
 
     let mut regions = Vec::new();
+    let mut region_pool = Vec::new();
     let mut grid = PixelGrid::empty();
     let mut queue = Vec::new();
 
-    find_connected_regions_grid(&pixels, &mut regions, &mut grid, &mut queue);
+    find_connected_regions_grid(
+        &pixels,
+        &mut regions,
+        &mut region_pool,
+        &mut grid,
+        &mut queue,
+    );
 
     assert_eq!(regions.len(), 2, "Should find two separate regions");
     assert_eq!(
@@ -1245,10 +1280,17 @@ fn test_find_connected_regions_grid_diagonal_connectivity() {
     ];
 
     let mut regions = Vec::new();
+    let mut region_pool = Vec::new();
     let mut grid = PixelGrid::empty();
     let mut queue = Vec::new();
 
-    find_connected_regions_grid(&pixels, &mut regions, &mut grid, &mut queue);
+    find_connected_regions_grid(
+        &pixels,
+        &mut regions,
+        &mut region_pool,
+        &mut grid,
+        &mut queue,
+    );
 
     assert_eq!(
         regions.len(),
@@ -1391,10 +1433,17 @@ fn test_visit_neighbors_grid_all_directions() {
     ];
 
     let mut regions = Vec::new();
+    let mut region_pool = Vec::new();
     let mut grid = PixelGrid::empty();
     let mut queue = Vec::new();
 
-    find_connected_regions_grid(&pixels, &mut regions, &mut grid, &mut queue);
+    find_connected_regions_grid(
+        &pixels,
+        &mut regions,
+        &mut region_pool,
+        &mut grid,
+        &mut queue,
+    );
 
     assert_eq!(regions.len(), 1, "All pixels should be in one region");
     assert_eq!(regions[0].len(), 9, "All 9 pixels should be found");
@@ -1432,8 +1481,15 @@ fn test_pixel_grid_values_generation_isolation() {
     // BFS should only find the 2 pixels from the second population,
     // not the stale 100 pixels from the first.
     let mut regions = Vec::new();
+    let mut region_pool = Vec::new();
     let mut queue = Vec::new();
-    find_connected_regions_grid(&pixels2, &mut regions, &mut grid, &mut queue);
+    find_connected_regions_grid(
+        &pixels2,
+        &mut regions,
+        &mut region_pool,
+        &mut grid,
+        &mut queue,
+    );
 
     assert_eq!(regions.len(), 1);
     assert_eq!(
@@ -1449,6 +1505,7 @@ fn test_pixel_grid_repeated_resets_same_positions() {
     // different values across multiple resets.
     let mut grid = PixelGrid::empty();
     let mut regions = Vec::new();
+    let mut region_pool = Vec::new();
     let mut queue = Vec::new();
 
     for round in 0..10 {
@@ -1463,7 +1520,13 @@ fn test_pixel_grid_repeated_resets_same_positions() {
             },
         ];
 
-        find_connected_regions_grid(&pixels, &mut regions, &mut grid, &mut queue);
+        find_connected_regions_grid(
+            &pixels,
+            &mut regions,
+            &mut region_pool,
+            &mut grid,
+            &mut queue,
+        );
 
         assert_eq!(regions.len(), 1, "Round {}: should find 1 region", round);
         assert_eq!(
@@ -1507,10 +1570,17 @@ fn test_connected_regions_pixels_at_coordinate_zero() {
     ];
 
     let mut regions = Vec::new();
+    let mut region_pool = Vec::new();
     let mut grid = PixelGrid::empty();
     let mut queue = Vec::new();
 
-    find_connected_regions_grid(&pixels, &mut regions, &mut grid, &mut queue);
+    find_connected_regions_grid(
+        &pixels,
+        &mut regions,
+        &mut region_pool,
+        &mut grid,
+        &mut queue,
+    );
 
     assert_eq!(regions.len(), 1, "All 3 pixels should form one region");
     assert_eq!(regions[0].len(), 3);
@@ -1537,10 +1607,17 @@ fn test_connected_regions_two_groups_near_zero() {
     ];
 
     let mut regions = Vec::new();
+    let mut region_pool = Vec::new();
     let mut grid = PixelGrid::empty();
     let mut queue = Vec::new();
 
-    find_connected_regions_grid(&pixels, &mut regions, &mut grid, &mut queue);
+    find_connected_regions_grid(
+        &pixels,
+        &mut regions,
+        &mut region_pool,
+        &mut grid,
+        &mut queue,
+    );
 
     assert_eq!(regions.len(), 2, "Should find 2 separate regions");
     assert_eq!(regions[0].len(), 1);

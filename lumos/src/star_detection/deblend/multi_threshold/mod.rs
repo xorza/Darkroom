@@ -33,9 +33,6 @@ const MAX_CHILDREN: usize = MAX_PEAKS;
 /// Sentinel value indicating no pixel value at grid position.
 const NO_PIXEL: f32 = f32::NEG_INFINITY;
 
-/// Sentinel value indicating no node assignment.
-const NO_NODE: u32 = u32::MAX;
-
 // ============================================================================
 // Types
 // ============================================================================
@@ -246,10 +243,15 @@ impl PixelGrid {
 /// Grid-based node assignment for tracking which tree node each pixel belongs to.
 ///
 /// Replaces HashMap<Vec2us, usize> with a flat array for O(1) lookup/update.
+/// Uses a generation counter to avoid O(n) clearing on each reset.
 #[derive(Debug)]
 struct NodeGrid {
-    /// Node index for each pixel position. NO_NODE means unassigned.
+    /// Node index for each pixel position.
     nodes: Vec<u32>,
+    /// Generation when each cell's node was last set.
+    nodes_generation: Vec<u32>,
+    /// Current generation counter.
+    current_generation: u32,
     /// Bounding box offset (min x coordinate).
     offset_x: usize,
     /// Bounding box offset (min y coordinate).
@@ -265,6 +267,8 @@ impl NodeGrid {
     fn empty() -> Self {
         Self {
             nodes: Vec::new(),
+            nodes_generation: Vec::new(),
+            current_generation: 0,
             offset_x: 0,
             offset_y: 0,
             width: 0,
@@ -273,11 +277,17 @@ impl NodeGrid {
     }
 
     /// Initialize the grid from component pixels, reusing allocation when possible.
+    /// Uses generation counter to avoid O(n) clearing.
     fn reset_with_pixels(&mut self, pixels: &[Pixel]) {
         if pixels.is_empty() {
             self.width = 0;
             self.height = 0;
             return;
+        }
+
+        self.current_generation = self.current_generation.wrapping_add(1);
+        if self.current_generation == 0 {
+            self.current_generation = 1;
         }
 
         // Find bounding box
@@ -299,8 +309,12 @@ impl NodeGrid {
         self.height = max_y - min_y + 1;
 
         let size = self.width * self.height;
-        self.nodes.clear();
-        self.nodes.resize(size, NO_NODE);
+        if self.nodes.len() < size {
+            self.nodes.resize(size, 0);
+        }
+        if self.nodes_generation.len() < size {
+            self.nodes_generation.resize(size, 0);
+        }
     }
 
     /// Get node index at position, or None if unassigned.
@@ -315,11 +329,10 @@ impl NodeGrid {
             return None;
         }
         let idx = ly * self.width + lx;
-        let node = self.nodes[idx];
-        if node == NO_NODE {
+        if self.nodes_generation[idx] != self.current_generation {
             None
         } else {
-            Some(node as usize)
+            Some(self.nodes[idx] as usize)
         }
     }
 
@@ -336,6 +349,7 @@ impl NodeGrid {
         }
         let idx = ly * self.width + lx;
         self.nodes[idx] = node_idx as u32;
+        self.nodes_generation[idx] = self.current_generation;
     }
 }
 
@@ -351,8 +365,13 @@ struct DeblendNode {
     children: SmallVec<[usize; MAX_CHILDREN]>,
 }
 
-/// Reusable buffers for tree building to avoid repeated allocations.
-struct TreeBuildBuffers {
+/// All reusable buffers for deblending, designed for cross-component reuse
+/// via thread-local storage. Avoids thousands of allocations per image.
+struct DeblendBuffers {
+    /// Collected component pixels.
+    component_pixels: Vec<Pixel>,
+    /// Node assignment grid.
+    pixel_to_node: NodeGrid,
     /// Pixels above current threshold.
     above_threshold: Vec<Pixel>,
     /// Pixels belonging to a parent that are above threshold.
@@ -361,18 +380,30 @@ struct TreeBuildBuffers {
     bfs_queue: Vec<u32>,
     /// Temporary storage for regions.
     regions: Vec<Vec<Pixel>>,
+    /// Pool of recycled region Vecs to avoid per-BFS allocation.
+    region_pool: Vec<Vec<Pixel>>,
     /// Grid for fast pixel lookup (replaces HashMap).
     pixel_grid: PixelGrid,
 }
 
-impl TreeBuildBuffers {
-    fn new(capacity: usize) -> Self {
+impl DeblendBuffers {
+    fn new() -> Self {
         Self {
-            above_threshold: Vec::with_capacity(capacity),
-            parent_pixels_above: Vec::with_capacity(capacity),
-            bfs_queue: Vec::with_capacity(capacity.min(1024)),
-            regions: Vec::with_capacity(MAX_PEAKS),
+            component_pixels: Vec::new(),
+            pixel_to_node: NodeGrid::empty(),
+            above_threshold: Vec::new(),
+            parent_pixels_above: Vec::new(),
+            bfs_queue: Vec::new(),
+            regions: Vec::new(),
+            region_pool: Vec::new(),
             pixel_grid: PixelGrid::empty(),
+        }
+    }
+
+    /// Drain all regions back into the pool.
+    fn recycle_regions(&mut self) {
+        for region in self.regions.drain(..) {
+            self.region_pool.push(region);
         }
     }
 }
@@ -383,23 +414,15 @@ impl TreeBuildBuffers {
 
 /// Multi-threshold deblending of a connected component.
 ///
-/// Uses `ComponentData` to read pixels on-demand from the image buffer,
-/// avoiding allocation of pixel vectors per component.
-///
-/// # Arguments
-/// * `data` - Component metadata (bounding box, label, area)
-/// * `pixels` - Full image pixel buffer
-/// * `labels` - Label map for the image
-/// * `config` - Deblending configuration
-///
-/// # Returns
-/// Vector of deblended objects, or single object if no deblending occurs.
+/// Creates per-call reusable buffers to avoid inner-loop allocations.
+/// Each buffer set is reused across threshold levels within a single component.
 pub fn deblend_multi_threshold(
     data: &ComponentData,
     pixels: &Buffer2<f32>,
     labels: &LabelMap,
     config: &DeblendConfig,
 ) -> SmallVec<[DeblendedCandidate; MAX_PEAKS]> {
+    let mut buffers = DeblendBuffers::new();
     debug_assert_eq!(
         (pixels.width(), pixels.height()),
         (labels.width(), labels.height()),
@@ -432,8 +455,6 @@ pub fn deblend_multi_threshold(
         .fold(f32::MAX, f32::min);
 
     // Early exit: Peak barely above threshold - no substructure possible
-    // A secondary peak must be at least min_contrast * primary, and above detection
-    // So primary must be at least 1/(1-min_contrast) above detection for meaningful deblending
     let min_ratio = 1.0 / (1.0 - config.min_contrast.min(0.99));
     if peak_value < detection_threshold * min_ratio {
         return smallvec::smallvec![create_single_object(data, pixels, labels)];
@@ -448,6 +469,7 @@ pub fn deblend_multi_threshold(
         peak_value,
         config.n_thresholds,
         config.min_separation,
+        &mut buffers,
     );
 
     // If tree has only one leaf (no branching), return single object
@@ -486,6 +508,7 @@ type DeblendTree = SmallVec<[DeblendNode; TREE_INLINE_CAP]>;
 ///
 /// Uses exponentially spaced thresholds for better resolution at faint levels.
 /// Implements early termination: stops if no splits occur for N consecutive levels.
+#[allow(clippy::too_many_arguments)]
 fn build_deblend_tree(
     data: &ComponentData,
     pixels: &Buffer2<f32>,
@@ -494,6 +517,7 @@ fn build_deblend_tree(
     high: f32,
     n_thresholds: usize,
     min_separation: usize,
+    buffers: &mut DeblendBuffers,
 ) -> DeblendTree {
     if data.area == 0 {
         return SmallVec::new();
@@ -505,14 +529,15 @@ fn build_deblend_tree(
     let mut tree: DeblendTree = SmallVec::new();
 
     // Collect component pixels once (multi-threshold needs repeated access)
-    let component_pixels: Vec<Pixel> = data.iter_pixels(pixels, labels).collect();
+    buffers.component_pixels.clear();
+    buffers
+        .component_pixels
+        .extend(data.iter_pixels(pixels, labels));
 
-    // Track which node each pixel belongs to at current level (grid-based for O(1) access)
-    let mut pixel_to_node = NodeGrid::empty();
-    pixel_to_node.reset_with_pixels(&component_pixels);
-
-    // Reusable buffers to avoid allocations per threshold level
-    let mut buffers = TreeBuildBuffers::new(component_pixels.len());
+    // Track which node each pixel belongs to at current level
+    buffers
+        .pixel_to_node
+        .reset_with_pixels(&buffers.component_pixels);
 
     // Early termination: track consecutive levels without splits
     let mut levels_without_splits = 0;
@@ -524,18 +549,25 @@ fn build_deblend_tree(
 
         // Filter pixels above threshold (reuse buffer)
         buffers.above_threshold.clear();
-        buffers
-            .above_threshold
-            .extend(component_pixels.iter().filter(|p| p.value >= threshold));
+        buffers.above_threshold.extend(
+            buffers
+                .component_pixels
+                .iter()
+                .filter(|p| p.value >= threshold),
+        );
 
         if buffers.above_threshold.is_empty() {
             continue;
         }
 
+        // Recycle previous regions before finding new ones
+        buffers.recycle_regions();
+
         // Find connected regions using grid-based lookup
         find_connected_regions_grid(
             &buffers.above_threshold,
             &mut buffers.regions,
+            &mut buffers.region_pool,
             &mut buffers.pixel_grid,
             &mut buffers.bfs_queue,
         );
@@ -543,16 +575,17 @@ fn build_deblend_tree(
         let tree_size_before = tree.len();
 
         if level == 0 {
-            process_root_level(&mut tree, &mut pixel_to_node, &buffers.regions);
+            process_root_level(&mut tree, &mut buffers.pixel_to_node, &buffers.regions);
         } else {
             process_higher_level(
                 &mut tree,
-                &mut pixel_to_node,
-                &component_pixels,
+                &mut buffers.pixel_to_node,
+                &buffers.component_pixels,
                 &buffers.regions,
                 threshold,
                 min_separation,
                 &mut buffers.parent_pixels_above,
+                &mut buffers.region_pool,
                 &mut buffers.pixel_grid,
                 &mut buffers.bfs_queue,
             );
@@ -568,6 +601,9 @@ fn build_deblend_tree(
             levels_without_splits = 0;
         }
     }
+
+    // Recycle any remaining regions
+    buffers.recycle_regions();
 
     tree
 }
@@ -605,6 +641,7 @@ fn process_higher_level(
     threshold: f32,
     min_separation: usize,
     parent_pixels_buf: &mut Vec<Pixel>,
+    region_pool: &mut Vec<Vec<Pixel>>,
     pixel_grid: &mut PixelGrid,
     bfs_queue: &mut Vec<u32>,
 ) {
@@ -644,6 +681,7 @@ fn process_higher_level(
             find_connected_regions_grid_into(
                 parent_pixels_buf,
                 &mut child_regions,
+                region_pool,
                 pixel_grid,
                 bfs_queue,
             );
@@ -941,10 +979,14 @@ fn find_nearest_peak_index(pos: Vec2us, peaks: &[Pixel]) -> usize {
 fn find_connected_regions_grid(
     pixels: &[Pixel],
     regions: &mut Vec<Vec<Pixel>>,
+    region_pool: &mut Vec<Vec<Pixel>>,
     grid: &mut PixelGrid,
     idx_queue: &mut Vec<u32>,
 ) {
-    regions.clear();
+    // Recycle existing regions back to pool before clearing
+    for region in regions.drain(..) {
+        region_pool.push(region);
+    }
 
     if pixels.is_empty() {
         return;
@@ -968,7 +1010,13 @@ fn find_connected_regions_grid(
         }
 
         // BFS to find connected component using flat index queue
-        let mut region = Vec::new();
+        let mut region = match region_pool.pop() {
+            Some(mut v) => {
+                v.clear();
+                v
+            }
+            None => Vec::new(),
+        };
         idx_queue.clear();
         idx_queue.push(start_idx as u32);
 
@@ -995,10 +1043,14 @@ fn find_connected_regions_grid(
 fn find_connected_regions_grid_into<const N: usize>(
     pixels: &[Pixel],
     regions: &mut ArrayVec<Vec<Pixel>, N>,
+    region_pool: &mut Vec<Vec<Pixel>>,
     grid: &mut PixelGrid,
     idx_queue: &mut Vec<u32>,
 ) {
-    regions.clear();
+    // Recycle existing regions back to pool before clearing
+    for region in regions.drain(..) {
+        region_pool.push(region);
+    }
 
     if pixels.is_empty() {
         return;
@@ -1025,7 +1077,13 @@ fn find_connected_regions_grid_into<const N: usize>(
             continue;
         }
 
-        let mut region = Vec::new();
+        let mut region = match region_pool.pop() {
+            Some(mut v) => {
+                v.clear();
+                v
+            }
+            None => Vec::new(),
+        };
         idx_queue.clear();
         idx_queue.push(start_idx as u32);
 
