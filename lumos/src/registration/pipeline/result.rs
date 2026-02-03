@@ -176,10 +176,11 @@ impl RegistrationResult {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use glam::DVec2;
 
     #[test]
     fn test_registration_result_new() {
-        let transform = Transform::translation(1.0, 2.0);
+        let transform = Transform::translation(DVec2::new(1.0, 2.0));
         let matches = vec![(0, 0), (1, 1), (2, 2)];
         let residuals = vec![0.1, 0.2, 0.15];
 

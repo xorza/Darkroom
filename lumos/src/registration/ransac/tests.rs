@@ -473,17 +473,16 @@ fn test_ransac_30_percent_outliers() {
 #[test]
 fn test_ransac_numerical_stability_large_coords() {
     // Points with large coordinates (typical for high-res images)
-    let ref_points: Vec<(f64, f64)> = (0..10)
+    let ref_points: Vec<DVec2> = (0..10)
         .map(|i| {
             let x = 2000.0 + (i % 5) as f64 * 100.0;
             let y = 1500.0 + (i / 5) as f64 * 100.0;
-            (x, y)
+            DVec2::new(x, y)
         })
         .collect();
 
-    let known = Transform::similarity(50.0, -30.0, PI / 16.0, 1.05);
-    let target_points: Vec<(f64, f64)> =
-        ref_points.iter().map(|&(x, y)| known.apply(x, y)).collect();
+    let known = Transform::similarity(DVec2::new(50.0, -30.0), PI / 16.0, 1.05);
+    let target_points: Vec<DVec2> = ref_points.iter().map(|&p| known.apply(p)).collect();
 
     let config = RansacConfig {
         seed: Some(42),
@@ -499,10 +498,10 @@ fn test_ransac_numerical_stability_large_coords() {
 
     // Check accuracy
     for i in 0..ref_points.len() {
-        let (rx, ry) = ref_points[i];
-        let (tx, ty) = target_points[i];
-        let (px, py) = result.transform.apply(rx, ry);
-        let error = ((px - tx).powi(2) + (py - ty).powi(2)).sqrt();
+        let r = ref_points[i];
+        let t = target_points[i];
+        let p = result.transform.apply(r);
+        let error = (p - t).length();
         assert!(
             error < 0.1,
             "Large coordinate error: {} at point {}",
@@ -515,14 +514,16 @@ fn test_ransac_numerical_stability_large_coords() {
 #[test]
 fn test_ransac_deterministic_with_seed() {
     let ref_points = vec![
-        (0.0, 0.0),
-        (10.0, 0.0),
-        (0.0, 10.0),
-        (10.0, 10.0),
-        (5.0, 5.0),
+        DVec2::new(0.0, 0.0),
+        DVec2::new(10.0, 0.0),
+        DVec2::new(0.0, 10.0),
+        DVec2::new(10.0, 10.0),
+        DVec2::new(5.0, 5.0),
     ];
-    let target_points: Vec<(f64, f64)> =
-        ref_points.iter().map(|(x, y)| (x + 5.0, y + 3.0)).collect();
+    let target_points: Vec<DVec2> = ref_points
+        .iter()
+        .map(|p| DVec2::new(p.x + 5.0, p.y + 3.0))
+        .collect();
 
     let config = RansacConfig {
         seed: Some(12345),
@@ -544,22 +545,21 @@ fn test_ransac_deterministic_with_seed() {
     assert_eq!(result1.inliers, result2.inliers);
     assert_eq!(result1.iterations, result2.iterations);
 
-    let (dx1, dy1) = result1.transform.translation_components();
-    let (dx2, dy2) = result2.transform.translation_components();
-    assert!(approx_eq(dx1, dx2, EPSILON));
-    assert!(approx_eq(dy1, dy2, EPSILON));
+    let t1 = result1.transform.translation_components();
+    let t2 = result2.transform.translation_components();
+    assert!(approx_eq(t1.x, t2.x, EPSILON));
+    assert!(approx_eq(t1.y, t2.y, EPSILON));
 }
 
 #[test]
 fn test_progressive_ransac_basic() {
     // Create a simple translation scenario with confidence scores
-    let ref_points: Vec<(f64, f64)> = (0..20)
-        .map(|i| ((i % 5) as f64 * 20.0, (i / 5) as f64 * 20.0))
+    let ref_points: Vec<DVec2> = (0..20)
+        .map(|i| DVec2::new((i % 5) as f64 * 20.0, (i / 5) as f64 * 20.0))
         .collect();
 
-    let dx = 15.0;
-    let dy = -8.0;
-    let target_points: Vec<(f64, f64)> = ref_points.iter().map(|(x, y)| (x + dx, y + dy)).collect();
+    let offset = DVec2::new(15.0, -8.0);
+    let target_points: Vec<DVec2> = ref_points.iter().map(|p| *p + offset).collect();
 
     // High confidence for all matches (perfect data)
     let confidences: Vec<f64> = vec![0.9; 20];
@@ -579,9 +579,9 @@ fn test_progressive_ransac_basic() {
         )
         .unwrap();
 
-    let (est_dx, est_dy) = result.transform.translation_components();
-    assert!(approx_eq(est_dx, dx, 0.1));
-    assert!(approx_eq(est_dy, dy, 0.1));
+    let est = result.transform.translation_components();
+    assert!(approx_eq(est.x, offset.x, 0.1));
+    assert!(approx_eq(est.y, offset.y, 0.1));
     assert_eq!(result.inliers.len(), 20);
 }
 
@@ -589,19 +589,17 @@ fn test_progressive_ransac_basic() {
 fn test_progressive_ransac_with_outliers() {
     // Create scenario where high-confidence matches are inliers
     // and low-confidence matches are outliers
-    let mut ref_points: Vec<(f64, f64)> = (0..15)
-        .map(|i| ((i % 5) as f64 * 20.0, (i / 5) as f64 * 20.0))
+    let mut ref_points: Vec<DVec2> = (0..15)
+        .map(|i| DVec2::new((i % 5) as f64 * 20.0, (i / 5) as f64 * 20.0))
         .collect();
 
-    let dx = 10.0;
-    let dy = 5.0;
-    let mut target_points: Vec<(f64, f64)> =
-        ref_points.iter().map(|(x, y)| (x + dx, y + dy)).collect();
+    let offset = DVec2::new(10.0, 5.0);
+    let mut target_points: Vec<DVec2> = ref_points.iter().map(|p| *p + offset).collect();
 
     // Add 5 outliers with low confidence
     for i in 0..5 {
-        ref_points.push((100.0 + i as f64 * 10.0, 100.0));
-        target_points.push((200.0 + i as f64 * 5.0, 50.0)); // Wrong correspondence
+        ref_points.push(DVec2::new(100.0 + i as f64 * 10.0, 100.0));
+        target_points.push(DVec2::new(200.0 + i as f64 * 5.0, 50.0)); // Wrong correspondence
     }
 
     // High confidence for inliers, low for outliers
@@ -624,9 +622,9 @@ fn test_progressive_ransac_with_outliers() {
         )
         .unwrap();
 
-    let (est_dx, est_dy) = result.transform.translation_components();
-    assert!(approx_eq(est_dx, dx, 0.5));
-    assert!(approx_eq(est_dy, dy, 0.5));
+    let est = result.transform.translation_components();
+    assert!(approx_eq(est.x, offset.x, 0.5));
+    assert!(approx_eq(est.y, offset.y, 0.5));
 
     // Should find mostly inliers (the first 15 points)
     assert!(result.inliers.len() >= 12);
@@ -636,15 +634,14 @@ fn test_progressive_ransac_with_outliers() {
 fn test_progressive_ransac_finds_solution_faster() {
     // Progressive RANSAC should find a good solution in fewer iterations
     // when high-confidence matches are correct
-    let ref_points: Vec<(f64, f64)> = (0..50)
-        .map(|i| ((i % 10) as f64 * 10.0, (i / 10) as f64 * 10.0))
+    let ref_points: Vec<DVec2> = (0..50)
+        .map(|i| DVec2::new((i % 10) as f64 * 10.0, (i / 10) as f64 * 10.0))
         .collect();
 
     let angle = PI / 12.0; // 15 degrees
     let scale = 1.2;
-    let known = Transform::similarity(5.0, -3.0, angle, scale);
-    let target_points: Vec<(f64, f64)> =
-        ref_points.iter().map(|&(x, y)| known.apply(x, y)).collect();
+    let known = Transform::similarity(DVec2::new(5.0, -3.0), angle, scale);
+    let target_points: Vec<DVec2> = ref_points.iter().map(|&p| known.apply(p)).collect();
 
     // Varying confidence (higher for more central points)
     let confidences: Vec<f64> = (0..50)
@@ -685,17 +682,16 @@ fn test_progressive_ransac_finds_solution_faster() {
 #[test]
 fn test_ransac_extreme_scale_1e6() {
     // Test with coordinates scaled by 1e6 (typical for high-res sensors)
-    let ref_points: Vec<(f64, f64)> = (0..20)
+    let ref_points: Vec<DVec2> = (0..20)
         .map(|i| {
             let x = (i % 5) as f64 * 1e6;
             let y = (i / 5) as f64 * 1e6;
-            (x, y)
+            DVec2::new(x, y)
         })
         .collect();
 
-    let known = Transform::translation(5000.0, -3000.0);
-    let target_points: Vec<(f64, f64)> =
-        ref_points.iter().map(|&(x, y)| known.apply(x, y)).collect();
+    let known = Transform::translation(DVec2::new(5000.0, -3000.0));
+    let target_points: Vec<DVec2> = ref_points.iter().map(|&p| known.apply(p)).collect();
 
     let config = RansacConfig {
         seed: Some(42),
@@ -708,25 +704,24 @@ fn test_ransac_extreme_scale_1e6() {
         .unwrap();
 
     assert_eq!(result.inliers.len(), 20);
-    let (dx, dy) = result.transform.translation_components();
-    assert!(approx_eq(dx, 5000.0, 1.0));
-    assert!(approx_eq(dy, -3000.0, 1.0));
+    let t = result.transform.translation_components();
+    assert!(approx_eq(t.x, 5000.0, 1.0));
+    assert!(approx_eq(t.y, -3000.0, 1.0));
 }
 
 #[test]
 fn test_ransac_small_coordinates() {
     // Test with small but reasonable coordinates
-    let ref_points: Vec<(f64, f64)> = (0..20)
+    let ref_points: Vec<DVec2> = (0..20)
         .map(|i| {
             let x = (i % 5) as f64 * 10.0;
             let y = (i / 5) as f64 * 10.0;
-            (x, y)
+            DVec2::new(x, y)
         })
         .collect();
 
-    let known = Transform::translation(0.5, -0.3);
-    let target_points: Vec<(f64, f64)> =
-        ref_points.iter().map(|&(x, y)| known.apply(x, y)).collect();
+    let known = Transform::translation(DVec2::new(0.5, -0.3));
+    let target_points: Vec<DVec2> = ref_points.iter().map(|&p| known.apply(p)).collect();
 
     let config = RansacConfig {
         seed: Some(42),
@@ -739,30 +734,29 @@ fn test_ransac_small_coordinates() {
         .unwrap();
 
     assert_eq!(result.inliers.len(), 20);
-    let (dx, dy) = result.transform.translation_components();
-    assert!(approx_eq(dx, 0.5, 0.01));
-    assert!(approx_eq(dy, -0.3, 0.01));
+    let t = result.transform.translation_components();
+    assert!(approx_eq(t.x, 0.5, 0.01));
+    assert!(approx_eq(t.y, -0.3, 0.01));
 }
 
 #[test]
 fn test_ransac_mixed_scale_coordinates() {
     // Test with points at very different scales (some near origin, some far)
     let ref_points = vec![
-        (0.0, 0.0),
-        (1.0, 0.0),
-        (0.0, 1.0),
-        (1000.0, 1000.0),
-        (1001.0, 1000.0),
-        (1000.0, 1001.0),
-        (5000.0, 0.0),
-        (0.0, 5000.0),
-        (2500.0, 2500.0),
-        (100.0, 100.0),
+        DVec2::new(0.0, 0.0),
+        DVec2::new(1.0, 0.0),
+        DVec2::new(0.0, 1.0),
+        DVec2::new(1000.0, 1000.0),
+        DVec2::new(1001.0, 1000.0),
+        DVec2::new(1000.0, 1001.0),
+        DVec2::new(5000.0, 0.0),
+        DVec2::new(0.0, 5000.0),
+        DVec2::new(2500.0, 2500.0),
+        DVec2::new(100.0, 100.0),
     ];
 
-    let known = Transform::translation(10.0, -5.0);
-    let target_points: Vec<(f64, f64)> =
-        ref_points.iter().map(|&(x, y)| known.apply(x, y)).collect();
+    let known = Transform::translation(DVec2::new(10.0, -5.0));
+    let target_points: Vec<DVec2> = ref_points.iter().map(|&p| known.apply(p)).collect();
 
     let config = RansacConfig {
         seed: Some(42),
@@ -775,29 +769,28 @@ fn test_ransac_mixed_scale_coordinates() {
         .unwrap();
 
     assert_eq!(result.inliers.len(), 10);
-    let (dx, dy) = result.transform.translation_components();
-    assert!(approx_eq(dx, 10.0, 0.1));
-    assert!(approx_eq(dy, -5.0, 0.1));
+    let t = result.transform.translation_components();
+    assert!(approx_eq(t.x, 10.0, 0.1));
+    assert!(approx_eq(t.y, -5.0, 0.1));
 }
 
 #[test]
 fn test_homography_near_affine() {
     // Homography with very small perspective components (nearly affine)
     let ref_points = vec![
-        (0.0, 0.0),
-        (100.0, 0.0),
-        (100.0, 100.0),
-        (0.0, 100.0),
-        (50.0, 50.0),
-        (25.0, 75.0),
-        (75.0, 25.0),
-        (33.0, 66.0),
+        DVec2::new(0.0, 0.0),
+        DVec2::new(100.0, 0.0),
+        DVec2::new(100.0, 100.0),
+        DVec2::new(0.0, 100.0),
+        DVec2::new(50.0, 50.0),
+        DVec2::new(25.0, 75.0),
+        DVec2::new(75.0, 25.0),
+        DVec2::new(33.0, 66.0),
     ];
 
     // Homography with tiny perspective components
     let known = Transform::homography([1.0, 0.1, 5.0, -0.05, 1.0, 3.0, 1e-8, 1e-8]);
-    let target_points: Vec<(f64, f64)> =
-        ref_points.iter().map(|&(x, y)| known.apply(x, y)).collect();
+    let target_points: Vec<DVec2> = ref_points.iter().map(|&p| known.apply(p)).collect();
 
     let config = RansacConfig {
         seed: Some(42),
@@ -814,10 +807,10 @@ fn test_homography_near_affine() {
 
     // Check transform accuracy
     for i in result.inliers.iter() {
-        let (rx, ry) = ref_points[*i];
-        let (tx, ty) = target_points[*i];
-        let (px, py) = result.transform.apply(rx, ry);
-        let error = ((px - tx).powi(2) + (py - ty).powi(2)).sqrt();
+        let r = ref_points[*i];
+        let t = target_points[*i];
+        let p = result.transform.apply(r);
+        let error = (p - t).length();
         assert!(error < 1.0, "High error {} at point {}", error, i);
     }
 }
@@ -825,18 +818,17 @@ fn test_homography_near_affine() {
 #[test]
 fn test_similarity_very_small_rotation() {
     // Very small rotation angle (< 0.1 degrees)
-    let ref_points: Vec<(f64, f64)> = (0..20)
+    let ref_points: Vec<DVec2> = (0..20)
         .map(|i| {
             let x = (i % 5) as f64 * 100.0;
             let y = (i / 5) as f64 * 100.0;
-            (x, y)
+            DVec2::new(x, y)
         })
         .collect();
 
     let tiny_angle = 0.001; // ~0.057 degrees
-    let known = Transform::similarity(5.0, 3.0, tiny_angle, 1.0);
-    let target_points: Vec<(f64, f64)> =
-        ref_points.iter().map(|&(x, y)| known.apply(x, y)).collect();
+    let known = Transform::similarity(DVec2::new(5.0, 3.0), tiny_angle, 1.0);
+    let target_points: Vec<DVec2> = ref_points.iter().map(|&p| known.apply(p)).collect();
 
     let config = RansacConfig {
         seed: Some(42),
@@ -861,18 +853,17 @@ fn test_similarity_very_small_rotation() {
 #[test]
 fn test_similarity_near_unity_scale() {
     // Scale very close to 1.0 (typical for dithered exposures)
-    let ref_points: Vec<(f64, f64)> = (0..20)
+    let ref_points: Vec<DVec2> = (0..20)
         .map(|i| {
             let x = 100.0 + (i % 5) as f64 * 100.0;
             let y = 100.0 + (i / 5) as f64 * 100.0;
-            (x, y)
+            DVec2::new(x, y)
         })
         .collect();
 
     let tiny_scale = 1.0001; // 0.01% scale difference
-    let known = Transform::similarity(2.0, -1.0, 0.0, tiny_scale);
-    let target_points: Vec<(f64, f64)> =
-        ref_points.iter().map(|&(x, y)| known.apply(x, y)).collect();
+    let known = Transform::similarity(DVec2::new(2.0, -1.0), 0.0, tiny_scale);
+    let target_points: Vec<DVec2> = ref_points.iter().map(|&p| known.apply(p)).collect();
 
     let config = RansacConfig {
         seed: Some(42),
@@ -896,18 +887,17 @@ fn test_similarity_near_unity_scale() {
 #[test]
 fn test_affine_with_shear() {
     // Affine transform with significant shear
-    let ref_points: Vec<(f64, f64)> = (0..20)
+    let ref_points: Vec<DVec2> = (0..20)
         .map(|i| {
             let x = (i % 5) as f64 * 50.0;
             let y = (i / 5) as f64 * 50.0;
-            (x, y)
+            DVec2::new(x, y)
         })
         .collect();
 
     // Shear: x' = x + 0.3*y, y' = y + 0.1*x
     let known = Transform::affine([1.0, 0.3, 10.0, 0.1, 1.0, -5.0]);
-    let target_points: Vec<(f64, f64)> =
-        ref_points.iter().map(|&(x, y)| known.apply(x, y)).collect();
+    let target_points: Vec<DVec2> = ref_points.iter().map(|&p| known.apply(p)).collect();
 
     let config = RansacConfig {
         seed: Some(42),
@@ -923,10 +913,10 @@ fn test_affine_with_shear() {
 
     // Check all points transform correctly
     for i in 0..ref_points.len() {
-        let (rx, ry) = ref_points[i];
-        let (tx, ty) = target_points[i];
-        let (px, py) = result.transform.apply(rx, ry);
-        let error = ((px - tx).powi(2) + (py - ty).powi(2)).sqrt();
+        let r = ref_points[i];
+        let t = target_points[i];
+        let p = result.transform.apply(r);
+        let error = (p - t).length();
         assert!(error < 0.1, "High error {} at point {}", error, i);
     }
 }
@@ -935,27 +925,26 @@ fn test_affine_with_shear() {
 fn test_normalize_points_extreme_values() {
     // Test normalization with extreme coordinate values
     let points = vec![
-        (1e10, 1e10),
-        (1e10 + 1.0, 1e10),
-        (1e10, 1e10 + 1.0),
-        (1e10 + 1.0, 1e10 + 1.0),
+        DVec2::new(1e10, 1e10),
+        DVec2::new(1e10 + 1.0, 1e10),
+        DVec2::new(1e10, 1e10 + 1.0),
+        DVec2::new(1e10 + 1.0, 1e10 + 1.0),
     ];
 
     let (normalized, transform) = normalize_points(&points);
 
     // Check centroid is at origin
-    let (cx, cy) = centroid(&normalized);
-    assert!(cx.abs() < 1e-10, "Centroid x not at origin: {}", cx);
-    assert!(cy.abs() < 1e-10, "Centroid y not at origin: {}", cy);
+    let c = centroid(&normalized);
+    assert!(c.x.abs() < 1e-10, "Centroid x not at origin: {}", c.x);
+    assert!(c.y.abs() < 1e-10, "Centroid y not at origin: {}", c.y);
 
     // Transform should be invertible (denormalization should recover original)
     let inv = transform.inverse();
     for (orig, norm) in points.iter().zip(normalized.iter()) {
-        let (rx, ry) = inv.apply(norm.0, norm.1);
-        let dx: f64 = rx - orig.0;
-        let dy: f64 = ry - orig.1;
-        assert!(dx.abs() < 1e-5, "X mismatch: {} vs {}", rx, orig.0);
-        assert!(dy.abs() < 1e-5, "Y mismatch: {} vs {}", ry, orig.1);
+        let r = inv.apply(*norm);
+        let d = r - *orig;
+        assert!(d.x.abs() < 1e-5, "X mismatch: {} vs {}", r.x, orig.x);
+        assert!(d.y.abs() < 1e-5, "Y mismatch: {} vs {}", r.y, orig.y);
     }
 }
 
@@ -968,21 +957,18 @@ fn test_normalize_points_extreme_values() {
 fn test_ransac_100_percent_inliers() {
     // Perfect correspondences - all points are inliers
     let ref_points = vec![
-        (0.0, 0.0),
-        (100.0, 0.0),
-        (0.0, 100.0),
-        (100.0, 100.0),
-        (50.0, 50.0),
-        (25.0, 75.0),
-        (75.0, 25.0),
-        (33.0, 66.0),
+        DVec2::new(0.0, 0.0),
+        DVec2::new(100.0, 0.0),
+        DVec2::new(0.0, 100.0),
+        DVec2::new(100.0, 100.0),
+        DVec2::new(50.0, 50.0),
+        DVec2::new(25.0, 75.0),
+        DVec2::new(75.0, 25.0),
+        DVec2::new(33.0, 66.0),
     ];
 
-    let transform = Transform::similarity(10.0, -5.0, 0.2, 1.1);
-    let target_points: Vec<(f64, f64)> = ref_points
-        .iter()
-        .map(|&(x, y)| transform.apply(x, y))
-        .collect();
+    let transform = Transform::similarity(DVec2::new(10.0, -5.0), 0.2, 1.1);
+    let target_points: Vec<DVec2> = ref_points.iter().map(|&p| transform.apply(p)).collect();
 
     let config = RansacConfig {
         max_iterations: 100,
@@ -1011,20 +997,20 @@ fn test_ransac_100_percent_inliers() {
 fn test_ransac_0_percent_inliers_pure_noise() {
     // Completely random points with no correspondence
     let ref_points = vec![
-        (10.0, 20.0),
-        (30.0, 40.0),
-        (50.0, 60.0),
-        (70.0, 80.0),
-        (90.0, 100.0),
+        DVec2::new(10.0, 20.0),
+        DVec2::new(30.0, 40.0),
+        DVec2::new(50.0, 60.0),
+        DVec2::new(70.0, 80.0),
+        DVec2::new(90.0, 100.0),
     ];
 
     // Target points are completely unrelated
     let target_points = vec![
-        (500.0, 600.0),
-        (700.0, 100.0),
-        (200.0, 900.0),
-        (800.0, 50.0),
-        (150.0, 350.0),
+        DVec2::new(500.0, 600.0),
+        DVec2::new(700.0, 100.0),
+        DVec2::new(200.0, 900.0),
+        DVec2::new(800.0, 50.0),
+        DVec2::new(150.0, 350.0),
     ];
 
     let config = RansacConfig {
@@ -1093,13 +1079,12 @@ fn test_adaptive_iteration_count() {
 #[test]
 fn test_ransac_early_termination() {
     // All perfect inliers - should terminate early
-    let ref_points: Vec<(f64, f64)> = (0..50).map(|i| (i as f64 * 10.0, i as f64 * 5.0)).collect();
-
-    let transform = Transform::translation(7.0, 3.0);
-    let target_points: Vec<(f64, f64)> = ref_points
-        .iter()
-        .map(|&(x, y)| transform.apply(x, y))
+    let ref_points: Vec<DVec2> = (0..50)
+        .map(|i| DVec2::new(i as f64 * 10.0, i as f64 * 5.0))
         .collect();
+
+    let transform = Transform::translation(DVec2::new(7.0, 3.0));
+    let target_points: Vec<DVec2> = ref_points.iter().map(|&p| transform.apply(p)).collect();
 
     let config = RansacConfig {
         max_iterations: 10000, // Very high, but should terminate early
@@ -1127,19 +1112,16 @@ fn test_ransac_early_termination() {
 fn test_homography_nearly_degenerate() {
     // Points that are nearly collinear but not quite
     let ref_points = vec![
-        (0.0, 0.0),
-        (100.0, 1.0),   // Nearly on x-axis
-        (200.0, -1.0),  // Nearly on x-axis
-        (300.0, 0.5),   // Nearly on x-axis
-        (0.0, 100.0),   // This one breaks collinearity
-        (100.0, 100.0), // This one breaks collinearity
+        DVec2::new(0.0, 0.0),
+        DVec2::new(100.0, 1.0),   // Nearly on x-axis
+        DVec2::new(200.0, -1.0),  // Nearly on x-axis
+        DVec2::new(300.0, 0.5),   // Nearly on x-axis
+        DVec2::new(0.0, 100.0),   // This one breaks collinearity
+        DVec2::new(100.0, 100.0), // This one breaks collinearity
     ];
 
-    let transform = Transform::translation(10.0, 10.0);
-    let target_points: Vec<(f64, f64)> = ref_points
-        .iter()
-        .map(|&(x, y)| transform.apply(x, y))
-        .collect();
+    let transform = Transform::translation(DVec2::new(10.0, 10.0));
+    let target_points: Vec<DVec2> = ref_points.iter().map(|&p| transform.apply(p)).collect();
 
     let config = RansacConfig {
         max_iterations: 500,
@@ -1165,18 +1147,17 @@ fn test_homography_nearly_degenerate() {
 #[test]
 fn test_progressive_ransac_uses_weights() {
     // Create points with varying confidence
-    let ref_points: Vec<(f64, f64)> = (0..20).map(|i| (i as f64 * 10.0, i as f64 * 5.0)).collect();
-
-    let transform = Transform::translation(5.0, 3.0);
-    let mut target_points: Vec<(f64, f64)> = ref_points
-        .iter()
-        .map(|&(x, y)| transform.apply(x, y))
+    let ref_points: Vec<DVec2> = (0..20)
+        .map(|i| DVec2::new(i as f64 * 10.0, i as f64 * 5.0))
         .collect();
+
+    let transform = Transform::translation(DVec2::new(5.0, 3.0));
+    let mut target_points: Vec<DVec2> = ref_points.iter().map(|&p| transform.apply(p)).collect();
 
     // Add noise to low-confidence points (first 5)
     for point in target_points.iter_mut().take(5) {
-        point.0 += 50.0;
-        point.1 += 50.0;
+        point.x += 50.0;
+        point.y += 50.0;
     }
 
     // High confidence for good points, low for outliers
@@ -1211,8 +1192,8 @@ fn test_progressive_ransac_uses_weights() {
 #[test]
 fn test_ransac_minimum_points() {
     // Exactly 2 points for translation (minimum required)
-    let ref_points = vec![(0.0, 0.0), (100.0, 0.0)];
-    let target_points = vec![(10.0, 10.0), (110.0, 10.0)];
+    let ref_points = vec![DVec2::new(0.0, 0.0), DVec2::new(100.0, 0.0)];
+    let target_points = vec![DVec2::new(10.0, 10.0), DVec2::new(110.0, 10.0)];
 
     let config = RansacConfig {
         max_iterations: 100,
@@ -1238,18 +1219,17 @@ fn test_estimate_with_matches_basic() {
     use crate::registration::triangle::StarMatch;
 
     // Create reference and target stars
-    let ref_stars: Vec<(f64, f64)> = vec![
-        (100.0, 100.0),
-        (200.0, 100.0),
-        (100.0, 200.0),
-        (200.0, 200.0),
-        (150.0, 150.0),
+    let ref_stars: Vec<DVec2> = vec![
+        DVec2::new(100.0, 100.0),
+        DVec2::new(200.0, 100.0),
+        DVec2::new(100.0, 200.0),
+        DVec2::new(200.0, 200.0),
+        DVec2::new(150.0, 150.0),
     ];
 
     // Apply known translation
-    let dx = 50.0;
-    let dy = -30.0;
-    let target_stars: Vec<(f64, f64)> = ref_stars.iter().map(|(x, y)| (x + dx, y + dy)).collect();
+    let offset = DVec2::new(50.0, -30.0);
+    let target_stars: Vec<DVec2> = ref_stars.iter().map(|p| *p + offset).collect();
 
     // Create matches with varying confidences
     let matches: Vec<StarMatch> = (0..ref_stars.len())
@@ -1278,18 +1258,18 @@ fn test_estimate_with_matches_basic() {
     let result = result.unwrap();
 
     // Should find the correct translation
-    let (est_dx, est_dy) = result.transform.translation_components();
+    let est = result.transform.translation_components();
     assert!(
-        (est_dx - dx).abs() < 1.0,
+        (est.x - offset.x).abs() < 1.0,
         "Expected dx={}, got {}",
-        dx,
-        est_dx
+        offset.x,
+        est.x
     );
     assert!(
-        (est_dy - dy).abs() < 1.0,
+        (est.y - offset.y).abs() < 1.0,
         "Expected dy={}, got {}",
-        dy,
-        est_dy
+        offset.y,
+        est.y
     );
 }
 
@@ -1298,8 +1278,8 @@ fn test_estimate_with_matches_empty() {
     use crate::registration::triangle::StarMatch;
 
     let matches: Vec<StarMatch> = vec![];
-    let ref_stars: Vec<(f64, f64)> = vec![];
-    let target_stars: Vec<(f64, f64)> = vec![];
+    let ref_stars: Vec<DVec2> = vec![];
+    let target_stars: Vec<DVec2> = vec![];
 
     let ransac = RansacEstimator::new(RansacConfig::default());
     let result = ransac.estimate_with_matches(
@@ -1317,21 +1297,19 @@ fn test_estimate_with_matches_uses_confidence() {
     use crate::registration::triangle::StarMatch;
 
     // Create points where one outlier has low confidence
-    let ref_stars: Vec<(f64, f64)> = vec![
-        (100.0, 100.0),
-        (200.0, 100.0),
-        (100.0, 200.0),
-        (200.0, 200.0),
-        (150.0, 150.0), // This one will be an outlier
+    let ref_stars: Vec<DVec2> = vec![
+        DVec2::new(100.0, 100.0),
+        DVec2::new(200.0, 100.0),
+        DVec2::new(100.0, 200.0),
+        DVec2::new(200.0, 200.0),
+        DVec2::new(150.0, 150.0), // This one will be an outlier
     ];
 
-    let dx = 50.0;
-    let dy = -30.0;
+    let offset = DVec2::new(50.0, -30.0);
 
     // Create target stars with one outlier
-    let mut target_stars: Vec<(f64, f64)> =
-        ref_stars.iter().map(|(x, y)| (x + dx, y + dy)).collect();
-    target_stars[4] = (1000.0, 1000.0); // Outlier
+    let mut target_stars: Vec<DVec2> = ref_stars.iter().map(|p| *p + offset).collect();
+    target_stars[4] = DVec2::new(1000.0, 1000.0); // Outlier
 
     // Create matches - give the outlier very low confidence
     let matches: Vec<StarMatch> = (0..ref_stars.len())
@@ -1367,17 +1345,17 @@ fn test_estimate_with_matches_uses_confidence() {
     );
 
     // Should still find the correct translation
-    let (est_dx, est_dy) = result.transform.translation_components();
+    let est = result.transform.translation_components();
     assert!(
-        (est_dx - dx).abs() < 1.0,
+        (est.x - offset.x).abs() < 1.0,
         "Expected dx={}, got {}",
-        dx,
-        est_dx
+        offset.x,
+        est.x
     );
     assert!(
-        (est_dy - dy).abs() < 1.0,
+        (est.y - offset.y).abs() < 1.0,
         "Expected dy={}, got {}",
-        dy,
-        est_dy
+        offset.y,
+        est.y
     );
 }

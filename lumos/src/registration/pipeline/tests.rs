@@ -815,16 +815,21 @@ fn add_centroid_noise(stars: &[(DVec2, f64)], noise_sigma: f64, seed: u64) -> Ve
 fn test_integration_dithered_exposures() {
     // Simulate a typical dithering pattern with small offsets
     let ref_stars = generate_realistic_star_field(100, 2048.0, 2048.0, 12345);
-    let ref_positions: Vec<(f64, f64)> = ref_stars.iter().map(|&(x, y, _)| (x, y)).collect();
+    let ref_positions: Vec<DVec2> = ref_stars.iter().map(|&(pos, _)| pos).collect();
 
     // Dithering offsets (typical 5-50 pixel offsets)
-    let dither_offsets = [(10.0, 15.0), (-20.0, 5.0), (8.0, -12.0), (-5.0, 25.0)];
+    let dither_offsets = [
+        DVec2::new(10.0, 15.0),
+        DVec2::new(-20.0, 5.0),
+        DVec2::new(8.0, -12.0),
+        DVec2::new(-5.0, 25.0),
+    ];
 
-    for (dx, dy) in dither_offsets {
-        let transform = Transform::translation(dx, dy);
-        let target_positions: Vec<(f64, f64)> = ref_positions
+    for offset in dither_offsets {
+        let transform = Transform::translation(offset);
+        let target_positions: Vec<DVec2> = ref_positions
             .iter()
-            .map(|&(x, y)| transform.apply(x, y))
+            .map(|&pos| transform.apply(pos))
             .collect();
 
         let result = register_star_positions(
@@ -834,28 +839,28 @@ fn test_integration_dithered_exposures() {
         )
         .expect("Dithered registration should succeed");
 
-        let (est_dx, est_dy) = result.transform.translation_components();
+        let est_offset = result.transform.translation_components();
         assert!(
-            (est_dx - dx).abs() < 0.5,
+            (est_offset.x - offset.x).abs() < 0.5,
             "Dither ({}, {}): expected dx={}, got {}",
-            dx,
-            dy,
-            dx,
-            est_dx
+            offset.x,
+            offset.y,
+            offset.x,
+            est_offset.x
         );
         assert!(
-            (est_dy - dy).abs() < 0.5,
+            (est_offset.y - offset.y).abs() < 0.5,
             "Dither ({}, {}): expected dy={}, got {}",
-            dx,
-            dy,
-            dy,
-            est_dy
+            offset.x,
+            offset.y,
+            offset.y,
+            est_offset.y
         );
         assert!(
             result.rms_error < 0.5,
             "Dither ({}, {}): RMS error too high: {}",
-            dx,
-            dy,
+            offset.x,
+            offset.y,
             result.rms_error
         );
     }
@@ -866,40 +871,40 @@ fn test_integration_dithered_exposures() {
 fn test_integration_mosaic_panels() {
     // Simulate mosaic panels with small rotations due to mount settling
     let ref_stars = generate_realistic_star_field(80, 4096.0, 4096.0, 54321);
-    let ref_positions: Vec<(f64, f64)> = ref_stars.iter().map(|&(x, y, _)| (x, y)).collect();
+    let ref_positions: Vec<DVec2> = ref_stars.iter().map(|&(pos, _)| pos).collect();
 
     // Typical mosaic panel offsets: large translation + small rotation
     let panel_transforms = [
-        (1000.0, 0.0, 0.002),    // Right panel, 0.1 degree rotation
-        (0.0, 1000.0, -0.001),   // Bottom panel, -0.06 degree rotation
-        (1000.0, 1000.0, 0.003), // Diagonal panel, 0.17 degree rotation
+        (DVec2::new(1000.0, 0.0), 0.002), // Right panel, 0.1 degree rotation
+        (DVec2::new(0.0, 1000.0), -0.001), // Bottom panel, -0.06 degree rotation
+        (DVec2::new(1000.0, 1000.0), 0.003), // Diagonal panel, 0.17 degree rotation
     ];
 
-    for (dx, dy, angle) in panel_transforms {
-        let transform = Transform::euclidean(dx, dy, angle);
-        let target_positions: Vec<(f64, f64)> = ref_positions
+    for (offset, angle) in panel_transforms {
+        let transform = Transform::euclidean(offset, angle);
+        let target_positions: Vec<DVec2> = ref_positions
             .iter()
-            .map(|&(x, y)| transform.apply(x, y))
+            .map(|&pos| transform.apply(pos))
             .collect();
 
         let result =
             register_star_positions(&ref_positions, &target_positions, TransformType::Euclidean)
                 .expect("Mosaic registration should succeed");
 
-        let (est_dx, est_dy) = result.transform.translation_components();
+        let est_offset = result.transform.translation_components();
         let est_angle = result.transform.rotation_angle();
 
         assert!(
-            (est_dx - dx).abs() < 2.0,
+            (est_offset.x - offset.x).abs() < 2.0,
             "Mosaic: expected dx={}, got {}",
-            dx,
-            est_dx
+            offset.x,
+            est_offset.x
         );
         assert!(
-            (est_dy - dy).abs() < 2.0,
+            (est_offset.y - offset.y).abs() < 2.0,
             "Mosaic: expected dy={}, got {}",
-            dy,
-            est_dy
+            offset.y,
+            est_offset.y
         );
         assert!(
             (est_angle - angle).abs() < 0.01,
@@ -915,11 +920,10 @@ fn test_integration_mosaic_panels() {
 fn test_integration_field_rotation() {
     // Simulate field rotation during long exposure (alt-az mount)
     let ref_stars = generate_realistic_star_field(60, 2048.0, 2048.0, 99999);
-    let ref_positions: Vec<(f64, f64)> = ref_stars.iter().map(|&(x, y, _)| (x, y)).collect();
+    let ref_positions: Vec<DVec2> = ref_stars.iter().map(|&(pos, _)| pos).collect();
 
     // Center of rotation (typically image center)
-    let cx = 1024.0;
-    let cy = 1024.0;
+    let center = DVec2::new(1024.0, 1024.0);
 
     // Field rotation angles (degrees converted to radians)
     let rotation_angles = [0.5, 1.0, 2.0, 5.0]; // degrees
@@ -928,14 +932,13 @@ fn test_integration_field_rotation() {
         let angle = angle_deg * std::f64::consts::PI / 180.0;
 
         // Apply rotation around image center
-        let target_positions: Vec<(f64, f64)> = ref_positions
+        let target_positions: Vec<DVec2> = ref_positions
             .iter()
-            .map(|&(x, y)| {
-                let dx = x - cx;
-                let dy = y - cy;
+            .map(|&pos| {
+                let d = pos - center;
                 let cos_a = angle.cos();
                 let sin_a = angle.sin();
-                (cx + dx * cos_a - dy * sin_a, cy + dx * sin_a + dy * cos_a)
+                center + DVec2::new(d.x * cos_a - d.y * sin_a, d.x * sin_a + d.y * cos_a)
             })
             .collect();
 
@@ -960,19 +963,19 @@ fn test_integration_atmospheric_refraction() {
     // Simulate differential atmospheric refraction (stars shift differently based on elevation)
     // This requires affine transform to model properly
     let ref_stars = generate_realistic_star_field(50, 2048.0, 2048.0, 11111);
-    let ref_positions: Vec<(f64, f64)> = ref_stars.iter().map(|&(x, y, _)| (x, y)).collect();
+    let ref_positions: Vec<DVec2> = ref_stars.iter().map(|&(pos, _)| pos).collect();
 
     // Simulate refraction: slight shear and scale in Y direction
     // (as if imaging through varying atmospheric density)
     let refraction_shear = 0.001; // Very small shear
     let refraction_scale_y = 1.002; // Slight Y stretch
 
-    let target_positions: Vec<(f64, f64)> = ref_positions
+    let target_positions: Vec<DVec2> = ref_positions
         .iter()
-        .map(|&(x, y)| {
-            let nx = x + y * refraction_shear;
-            let ny = y * refraction_scale_y;
-            (nx, ny)
+        .map(|&pos| {
+            let nx = pos.x + pos.y * refraction_shear;
+            let ny = pos.y * refraction_scale_y;
+            DVec2::new(nx, ny)
         })
         .collect();
 
@@ -981,10 +984,10 @@ fn test_integration_atmospheric_refraction() {
 
     // Check that we can model the transformation
     let mut total_error = 0.0;
-    for (i, &(rx, ry)) in ref_positions.iter().enumerate() {
-        let (tx, ty) = target_positions[i];
-        let (px, py) = result.transform.apply(rx, ry);
-        total_error += ((px - tx).powi(2) + (py - ty).powi(2)).sqrt();
+    for (i, &r) in ref_positions.iter().enumerate() {
+        let t = target_positions[i];
+        let p = result.transform.apply(r);
+        total_error += (p - t).length();
     }
     let mean_error = total_error / ref_positions.len() as f64;
 
@@ -1003,38 +1006,38 @@ fn test_integration_with_centroid_noise() {
 
     // Apply centroid noise to both reference and target
     let ref_noisy = add_centroid_noise(&ref_stars, 0.3, 33333);
-    let ref_positions: Vec<(f64, f64)> = ref_noisy.iter().map(|&(x, y, _)| (x, y)).collect();
+    let ref_positions: Vec<DVec2> = ref_noisy.iter().map(|&(pos, _)| pos).collect();
 
     // Apply transform to original stars, then add noise
-    let transform = Transform::similarity(50.0, -30.0, 0.02, 1.01);
-    let target_stars: Vec<(f64, f64, f64)> = ref_stars
+    let transform = Transform::similarity(DVec2::new(50.0, -30.0), 0.02, 1.01);
+    let target_stars: Vec<(DVec2, f64)> = ref_stars
         .iter()
-        .map(|&(x, y, b)| {
-            let (nx, ny) = transform.apply(x, y);
-            (nx, ny, b)
+        .map(|&(pos, b)| {
+            let npos = transform.apply(pos);
+            (npos, b)
         })
         .collect();
     let target_noisy = add_centroid_noise(&target_stars, 0.3, 44444);
-    let target_positions: Vec<(f64, f64)> = target_noisy.iter().map(|&(x, y, _)| (x, y)).collect();
+    let target_positions: Vec<DVec2> = target_noisy.iter().map(|&(pos, _)| pos).collect();
 
     let result =
         register_star_positions(&ref_positions, &target_positions, TransformType::Similarity)
             .expect("Noisy registration should succeed");
 
     // With noise, we expect slightly higher error but still reasonable
-    let (est_dx, est_dy) = result.transform.translation_components();
+    let est_offset = result.transform.translation_components();
     let est_scale = result.transform.scale_factor();
     let est_angle = result.transform.rotation_angle();
 
     assert!(
-        (est_dx - 50.0).abs() < 2.0,
+        (est_offset.x - 50.0).abs() < 2.0,
         "With noise: expected dx=50, got {}",
-        est_dx
+        est_offset.x
     );
     assert!(
-        (est_dy - (-30.0)).abs() < 2.0,
+        (est_offset.y - (-30.0)).abs() < 2.0,
         "With noise: expected dy=-30, got {}",
-        est_dy
+        est_offset.y
     );
     assert!(
         (est_scale - 1.01).abs() < 0.01,
@@ -1052,19 +1055,19 @@ fn test_integration_with_centroid_noise() {
 #[test]
 fn test_integration_partial_overlap() {
     let ref_stars = generate_realistic_star_field(100, 2048.0, 2048.0, 55555);
-    let ref_positions: Vec<(f64, f64)> = ref_stars.iter().map(|&(x, y, _)| (x, y)).collect();
+    let ref_positions: Vec<DVec2> = ref_stars.iter().map(|&(pos, _)| pos).collect();
 
     // Large translation causing ~50% overlap
-    let transform = Transform::translation(1000.0, 500.0);
+    let transform = Transform::translation(DVec2::new(1000.0, 500.0));
 
     // Target stars are transformed, but filter out those that would be outside frame
-    let target_positions: Vec<(f64, f64)> = ref_positions
+    let target_positions: Vec<DVec2> = ref_positions
         .iter()
-        .filter_map(|&(x, y)| {
-            let (nx, ny) = transform.apply(x, y);
+        .filter_map(|&pos| {
+            let npos = transform.apply(pos);
             // Simulate frame boundary - only keep stars visible in target frame
-            if (0.0..=2048.0).contains(&nx) && (0.0..=2048.0).contains(&ny) {
-                Some((nx, ny))
+            if (0.0..=2048.0).contains(&npos.x) && (0.0..=2048.0).contains(&npos.y) {
+                Some(npos)
             } else {
                 None
             }
@@ -1091,18 +1094,18 @@ fn test_integration_partial_overlap() {
     );
 
     let result = result.unwrap();
-    let (est_dx, est_dy) = result.transform.translation_components();
+    let est_offset = result.transform.translation_components();
 
     // Allow larger tolerance due to partial overlap challenges
     assert!(
-        (est_dx - 1000.0).abs() < 5.0,
+        (est_offset.x - 1000.0).abs() < 5.0,
         "Partial overlap: expected dx=1000, got {}",
-        est_dx
+        est_offset.x
     );
     assert!(
-        (est_dy - 500.0).abs() < 5.0,
+        (est_offset.y - 500.0).abs() < 5.0,
         "Partial overlap: expected dy=500, got {}",
-        est_dy
+        est_offset.y
     );
 }
 
@@ -1111,22 +1114,20 @@ fn test_integration_partial_overlap() {
 fn test_integration_different_plate_scales() {
     // Simulate images from different nights with slight optical differences
     let ref_stars = generate_realistic_star_field(80, 2048.0, 2048.0, 66666);
-    let ref_positions: Vec<(f64, f64)> = ref_stars.iter().map(|&(x, y, _)| (x, y)).collect();
+    let ref_positions: Vec<DVec2> = ref_stars.iter().map(|&(pos, _)| pos).collect();
 
     // Plate scale difference (e.g., different focus position or optical thermal expansion)
     let scale_factors = [0.995, 1.005, 0.99, 1.01];
 
     for scale in scale_factors {
-        let cx = 1024.0;
-        let cy = 1024.0;
+        let center = DVec2::new(1024.0, 1024.0);
 
         // Scale around image center
-        let target_positions: Vec<(f64, f64)> = ref_positions
+        let target_positions: Vec<DVec2> = ref_positions
             .iter()
-            .map(|&(x, y)| {
-                let dx = x - cx;
-                let dy = y - cy;
-                (cx + dx * scale, cy + dy * scale)
+            .map(|&pos| {
+                let d = pos - center;
+                center + d * scale
             })
             .collect();
 
@@ -1149,13 +1150,13 @@ fn test_integration_different_plate_scales() {
 #[test]
 fn test_integration_quality_metrics() {
     let ref_stars = generate_realistic_star_field(60, 2048.0, 2048.0, 77777);
-    let ref_positions: Vec<(f64, f64)> = ref_stars.iter().map(|&(x, y, _)| (x, y)).collect();
+    let ref_positions: Vec<DVec2> = ref_stars.iter().map(|&(pos, _)| pos).collect();
 
     // Apply known transform
-    let transform = Transform::similarity(100.0, -75.0, 0.05, 1.02);
-    let target_positions: Vec<(f64, f64)> = ref_positions
+    let transform = Transform::similarity(DVec2::new(100.0, -75.0), 0.05, 1.02);
+    let target_positions: Vec<DVec2> = ref_positions
         .iter()
-        .map(|&(x, y)| transform.apply(x, y))
+        .map(|&pos| transform.apply(pos))
         .collect();
 
     let result =
@@ -1186,18 +1187,18 @@ fn test_integration_quality_metrics() {
 fn test_integration_minimum_stars() {
     // Test with absolute minimum number of stars (just above threshold)
     let ref_positions = vec![
-        (100.0, 100.0),
-        (200.0, 100.0),
-        (150.0, 200.0),
-        (100.0, 200.0),
-        (200.0, 200.0),
-        (150.0, 150.0),
+        DVec2::new(100.0, 100.0),
+        DVec2::new(200.0, 100.0),
+        DVec2::new(150.0, 200.0),
+        DVec2::new(100.0, 200.0),
+        DVec2::new(200.0, 200.0),
+        DVec2::new(150.0, 150.0),
     ];
 
-    let transform = Transform::translation(10.0, 5.0);
-    let target_positions: Vec<(f64, f64)> = ref_positions
+    let transform = Transform::translation(DVec2::new(10.0, 5.0));
+    let target_positions: Vec<DVec2> = ref_positions
         .iter()
-        .map(|&(x, y)| transform.apply(x, y))
+        .map(|&pos| transform.apply(pos))
         .collect();
 
     let config = RegistrationConfig {
@@ -1211,15 +1212,15 @@ fn test_integration_minimum_stars() {
         .register_positions(&ref_positions, &target_positions)
         .expect("Minimum stars registration should succeed");
 
-    let (est_dx, est_dy) = result.transform.translation_components();
+    let est_offset = result.transform.translation_components();
     assert!(
-        (est_dx - 10.0).abs() < 1.0,
+        (est_offset.x - 10.0).abs() < 1.0,
         "Min stars: expected dx=10, got {}",
-        est_dx
+        est_offset.x
     );
     assert!(
-        (est_dy - 5.0).abs() < 1.0,
+        (est_offset.y - 5.0).abs() < 1.0,
         "Min stars: expected dy=5, got {}",
-        est_dy
+        est_offset.y
     );
 }

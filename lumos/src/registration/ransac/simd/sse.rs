@@ -250,7 +250,7 @@ mod tests {
         let mut score = 0usize;
 
         for (i, (r, t)) in ref_points.iter().zip(target_points.iter()).enumerate() {
-            let p = transform.apply_vec(*r);
+            let p = transform.apply(*r);
             let dist_sq = (p - *t).length_squared();
 
             if dist_sq < threshold_sq {
@@ -270,7 +270,7 @@ mod tests {
             return;
         }
 
-        let transform = Transform::translation(10.0, 5.0);
+        let transform = Transform::translation(DVec2::new(10.0, 5.0));
         let ref_points: Vec<DVec2> = (0..20)
             .map(|i| DVec2::new(i as f64 * 5.0, i as f64 * 3.0))
             .collect();
@@ -278,7 +278,7 @@ mod tests {
             .iter()
             .enumerate()
             .map(|(i, p)| {
-                let t = transform.apply_vec(*p);
+                let t = transform.apply(*p);
                 if i % 4 == 0 {
                     t + DVec2::new(100.0, 0.0) // outlier
                 } else {

@@ -17,10 +17,18 @@
 //! due to using different triangle subsets.
 
 use super::*;
+use glam::DVec2;
 
 #[test]
 fn test_triangle_from_positions() {
-    let tri = Triangle::from_positions([0, 1, 2], [(0.0, 0.0), (3.0, 0.0), (0.0, 4.0)]);
+    let tri = Triangle::from_positions(
+        [0, 1, 2],
+        [
+            DVec2::new(0.0, 0.0),
+            DVec2::new(3.0, 0.0),
+            DVec2::new(0.0, 4.0),
+        ],
+    );
 
     assert!(tri.is_some());
     let tri = tri.unwrap();
@@ -33,10 +41,26 @@ fn test_triangle_from_positions() {
 
 #[test]
 fn test_triangle_ratios_scale_invariant() {
-    let tri1 = Triangle::from_positions([0, 1, 2], [(0.0, 0.0), (3.0, 0.0), (0.0, 4.0)]).unwrap();
+    let tri1 = Triangle::from_positions(
+        [0, 1, 2],
+        [
+            DVec2::new(0.0, 0.0),
+            DVec2::new(3.0, 0.0),
+            DVec2::new(0.0, 4.0),
+        ],
+    )
+    .unwrap();
 
     // Same triangle, 10x larger
-    let tri2 = Triangle::from_positions([0, 1, 2], [(0.0, 0.0), (30.0, 0.0), (0.0, 40.0)]).unwrap();
+    let tri2 = Triangle::from_positions(
+        [0, 1, 2],
+        [
+            DVec2::new(0.0, 0.0),
+            DVec2::new(30.0, 0.0),
+            DVec2::new(0.0, 40.0),
+        ],
+    )
+    .unwrap();
 
     assert!((tri1.ratios.0 - tri2.ratios.0).abs() < 1e-10);
     assert!((tri1.ratios.1 - tri2.ratios.1).abs() < 1e-10);
@@ -44,47 +68,113 @@ fn test_triangle_ratios_scale_invariant() {
 
 #[test]
 fn test_triangle_similarity_check() {
-    let tri1 = Triangle::from_positions([0, 1, 2], [(0.0, 0.0), (3.0, 0.0), (0.0, 4.0)]).unwrap();
+    let tri1 = Triangle::from_positions(
+        [0, 1, 2],
+        [
+            DVec2::new(0.0, 0.0),
+            DVec2::new(3.0, 0.0),
+            DVec2::new(0.0, 4.0),
+        ],
+    )
+    .unwrap();
 
-    let tri2 =
-        Triangle::from_positions([0, 1, 2], [(10.0, 10.0), (40.0, 10.0), (10.0, 50.0)]).unwrap();
+    let tri2 = Triangle::from_positions(
+        [0, 1, 2],
+        [
+            DVec2::new(10.0, 10.0),
+            DVec2::new(40.0, 10.0),
+            DVec2::new(10.0, 50.0),
+        ],
+    )
+    .unwrap();
 
     assert!(tri1.is_similar(&tri2, 0.01));
 }
 
 #[test]
 fn test_triangle_not_similar() {
-    let tri1 = Triangle::from_positions([0, 1, 2], [(0.0, 0.0), (1.0, 0.0), (0.0, 1.0)]).unwrap();
+    let tri1 = Triangle::from_positions(
+        [0, 1, 2],
+        [
+            DVec2::new(0.0, 0.0),
+            DVec2::new(1.0, 0.0),
+            DVec2::new(0.0, 1.0),
+        ],
+    )
+    .unwrap();
 
     // Different shape
-    let tri2 = Triangle::from_positions([0, 1, 2], [(0.0, 0.0), (2.0, 0.0), (1.0, 0.1)]).unwrap();
+    let tri2 = Triangle::from_positions(
+        [0, 1, 2],
+        [
+            DVec2::new(0.0, 0.0),
+            DVec2::new(2.0, 0.0),
+            DVec2::new(1.0, 0.1),
+        ],
+    )
+    .unwrap();
 
     assert!(!tri1.is_similar(&tri2, 0.01));
 }
 
 #[test]
 fn test_triangle_orientation() {
-    let ccw = Triangle::from_positions([0, 1, 2], [(0.0, 0.0), (1.0, 0.0), (0.0, 1.0)]).unwrap();
+    let ccw = Triangle::from_positions(
+        [0, 1, 2],
+        [
+            DVec2::new(0.0, 0.0),
+            DVec2::new(1.0, 0.0),
+            DVec2::new(0.0, 1.0),
+        ],
+    )
+    .unwrap();
     assert_eq!(ccw.orientation, Orientation::CounterClockwise);
 
-    let cw = Triangle::from_positions([0, 1, 2], [(0.0, 0.0), (0.0, 1.0), (1.0, 0.0)]).unwrap();
+    let cw = Triangle::from_positions(
+        [0, 1, 2],
+        [
+            DVec2::new(0.0, 0.0),
+            DVec2::new(0.0, 1.0),
+            DVec2::new(1.0, 0.0),
+        ],
+    )
+    .unwrap();
     assert_eq!(cw.orientation, Orientation::Clockwise);
 }
 
 #[test]
 fn test_degenerate_triangle_detection() {
     // Collinear points
-    let tri = Triangle::from_positions([0, 1, 2], [(0.0, 0.0), (1.0, 1.0), (2.0, 2.0)]);
+    let tri = Triangle::from_positions(
+        [0, 1, 2],
+        [
+            DVec2::new(0.0, 0.0),
+            DVec2::new(1.0, 1.0),
+            DVec2::new(2.0, 2.0),
+        ],
+    );
     assert!(tri.is_none());
 
     // Duplicate point
-    let tri = Triangle::from_positions([0, 1, 2], [(0.0, 0.0), (0.0, 0.0), (1.0, 1.0)]);
+    let tri = Triangle::from_positions(
+        [0, 1, 2],
+        [
+            DVec2::new(0.0, 0.0),
+            DVec2::new(0.0, 0.0),
+            DVec2::new(1.0, 1.0),
+        ],
+    );
     assert!(tri.is_none());
 }
 
 #[test]
 fn test_hash_table_build() {
-    let positions = vec![(0.0, 0.0), (10.0, 0.0), (0.0, 10.0), (10.0, 10.0)];
+    let positions = vec![
+        DVec2::new(0.0, 0.0),
+        DVec2::new(10.0, 0.0),
+        DVec2::new(0.0, 10.0),
+        DVec2::new(10.0, 10.0),
+    ];
     let triangles = form_triangles(&positions, 10);
 
     assert_eq!(triangles.len(), 4); // C(4,3) = 4
@@ -95,7 +185,11 @@ fn test_hash_table_build() {
 
 #[test]
 fn test_hash_table_lookup() {
-    let positions = vec![(0.0, 0.0), (3.0, 0.0), (0.0, 4.0)];
+    let positions = vec![
+        DVec2::new(0.0, 0.0),
+        DVec2::new(3.0, 0.0),
+        DVec2::new(0.0, 4.0),
+    ];
     let triangles = form_triangles(&positions, 10);
     let table = TriangleHashTable::build(&triangles, 100);
 
@@ -113,11 +207,11 @@ fn test_hash_table_empty() {
 #[test]
 fn test_match_identical_star_lists() {
     let positions = vec![
-        (0.0, 0.0),
-        (10.0, 0.0),
-        (0.0, 10.0),
-        (10.0, 10.0),
-        (5.0, 5.0),
+        DVec2::new(0.0, 0.0),
+        DVec2::new(10.0, 0.0),
+        DVec2::new(0.0, 10.0),
+        DVec2::new(10.0, 10.0),
+        DVec2::new(5.0, 5.0),
     ];
 
     let matches = match_stars_triangles(&positions, &positions, &TriangleMatchConfig::default());
@@ -134,17 +228,17 @@ fn test_match_identical_star_lists() {
 #[test]
 fn test_match_translated_stars() {
     let ref_positions = vec![
-        (0.0, 0.0),
-        (10.0, 0.0),
-        (0.0, 10.0),
-        (10.0, 10.0),
-        (5.0, 5.0),
+        DVec2::new(0.0, 0.0),
+        DVec2::new(10.0, 0.0),
+        DVec2::new(0.0, 10.0),
+        DVec2::new(10.0, 10.0),
+        DVec2::new(5.0, 5.0),
     ];
 
     // Translate by (100, 50)
-    let target_positions: Vec<(f64, f64)> = ref_positions
+    let target_positions: Vec<DVec2> = ref_positions
         .iter()
-        .map(|(x, y)| (x + 100.0, y + 50.0))
+        .map(|p| *p + DVec2::new(100.0, 50.0))
         .collect();
 
     let matches = match_stars_triangles(
@@ -162,15 +256,18 @@ fn test_match_translated_stars() {
 #[test]
 fn test_match_rotated_stars() {
     let ref_positions = vec![
-        (0.0, 0.0),
-        (10.0, 0.0),
-        (0.0, 10.0),
-        (10.0, 10.0),
-        (5.0, 5.0),
+        DVec2::new(0.0, 0.0),
+        DVec2::new(10.0, 0.0),
+        DVec2::new(0.0, 10.0),
+        DVec2::new(10.0, 10.0),
+        DVec2::new(5.0, 5.0),
     ];
 
     // Rotate by 90 degrees around origin
-    let target_positions: Vec<(f64, f64)> = ref_positions.iter().map(|(x, y)| (-*y, *x)).collect();
+    let target_positions: Vec<DVec2> = ref_positions
+        .iter()
+        .map(|p| DVec2::new(-p.y, p.x))
+        .collect();
 
     let config = TriangleMatchConfig {
         check_orientation: false, // Rotation changes orientation
@@ -185,18 +282,15 @@ fn test_match_rotated_stars() {
 #[test]
 fn test_match_scaled_stars() {
     let ref_positions = vec![
-        (0.0, 0.0),
-        (10.0, 0.0),
-        (0.0, 10.0),
-        (10.0, 10.0),
-        (5.0, 5.0),
+        DVec2::new(0.0, 0.0),
+        DVec2::new(10.0, 0.0),
+        DVec2::new(0.0, 10.0),
+        DVec2::new(10.0, 10.0),
+        DVec2::new(5.0, 5.0),
     ];
 
     // Scale by 2x
-    let target_positions: Vec<(f64, f64)> = ref_positions
-        .iter()
-        .map(|(x, y)| (x * 2.0, y * 2.0))
-        .collect();
+    let target_positions: Vec<DVec2> = ref_positions.iter().map(|p| *p * 2.0).collect();
 
     let matches = match_stars_triangles(
         &ref_positions,
@@ -210,15 +304,20 @@ fn test_match_scaled_stars() {
 #[test]
 fn test_match_with_missing_stars() {
     let ref_positions = vec![
-        (0.0, 0.0),
-        (10.0, 0.0),
-        (0.0, 10.0),
-        (10.0, 10.0),
-        (5.0, 5.0),
+        DVec2::new(0.0, 0.0),
+        DVec2::new(10.0, 0.0),
+        DVec2::new(0.0, 10.0),
+        DVec2::new(10.0, 10.0),
+        DVec2::new(5.0, 5.0),
     ];
 
     // Only 4 stars in target (missing one)
-    let target_positions = vec![(0.0, 0.0), (10.0, 0.0), (0.0, 10.0), (10.0, 10.0)];
+    let target_positions = vec![
+        DVec2::new(0.0, 0.0),
+        DVec2::new(10.0, 0.0),
+        DVec2::new(0.0, 10.0),
+        DVec2::new(10.0, 10.0),
+    ];
 
     let matches = match_stars_triangles(
         &ref_positions,
@@ -232,16 +331,21 @@ fn test_match_with_missing_stars() {
 
 #[test]
 fn test_match_with_extra_stars() {
-    let ref_positions = vec![(0.0, 0.0), (10.0, 0.0), (0.0, 10.0), (10.0, 10.0)];
+    let ref_positions = vec![
+        DVec2::new(0.0, 0.0),
+        DVec2::new(10.0, 0.0),
+        DVec2::new(0.0, 10.0),
+        DVec2::new(10.0, 10.0),
+    ];
 
     // Target has extra stars
     let target_positions = vec![
-        (0.0, 0.0),
-        (10.0, 0.0),
-        (0.0, 10.0),
-        (10.0, 10.0),
-        (5.0, 5.0),
-        (15.0, 15.0),
+        DVec2::new(0.0, 0.0),
+        DVec2::new(10.0, 0.0),
+        DVec2::new(0.0, 10.0),
+        DVec2::new(10.0, 10.0),
+        DVec2::new(5.0, 5.0),
+        DVec2::new(15.0, 15.0),
     ];
 
     let matches = match_stars_triangles(
@@ -256,7 +360,7 @@ fn test_match_with_extra_stars() {
 
 #[test]
 fn test_too_few_stars() {
-    let positions = vec![(0.0, 0.0), (1.0, 0.0)];
+    let positions = vec![DVec2::new(0.0, 0.0), DVec2::new(1.0, 0.0)];
     let matches = match_stars_triangles(&positions, &positions, &TriangleMatchConfig::default());
     assert!(matches.is_empty());
 }

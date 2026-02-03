@@ -1,5 +1,6 @@
 use super::*;
 use crate::common::Buffer2;
+use glam::DVec2;
 
 const EPSILON: f32 = 1e-5;
 
@@ -320,7 +321,7 @@ fn test_warp_translation() {
     let input_buf = Buffer2::new(4, 4, input);
 
     // Translate by (1, 1)
-    let transform = Transform::translation(1.0, 1.0);
+    let transform = Transform::translation(DVec2::new(1.0, 1.0));
     let config = WarpConfig {
         method: InterpolationMethod::Bilinear,
         ..Default::default()
@@ -340,7 +341,7 @@ fn test_warp_scale() {
     let input_buf = Buffer2::new(2, 2, input);
 
     // Scale 2x
-    let transform = Transform::scale(2.0, 2.0);
+    let transform = Transform::scale(DVec2::new(2.0, 2.0));
     let config = WarpConfig {
         method: InterpolationMethod::Bilinear,
         ..Default::default()
@@ -390,7 +391,7 @@ fn test_warp_rotation() {
     let input_buf = Buffer2::new(8, 8, input);
 
     // Rotate 90 degrees around center
-    let transform = Transform::rotation_around(4.0, 4.0, std::f64::consts::FRAC_PI_2);
+    let transform = Transform::rotation_around(DVec2::new(4.0, 4.0), std::f64::consts::FRAC_PI_2);
     let config = WarpConfig {
         method: InterpolationMethod::Bilinear,
         ..Default::default()

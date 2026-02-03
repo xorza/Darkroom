@@ -69,13 +69,15 @@ fn test_wcs_roundtrip_comprehensive() {
 /// Test that quad hashing produces consistent results.
 #[test]
 fn test_quad_hash_consistency() {
+    use glam::DVec2;
+
     // Create a star pattern
     let positions = vec![
-        (100.0, 100.0),
-        (200.0, 100.0),
-        (150.0, 200.0),
-        (250.0, 150.0),
-        (50.0, 175.0),
+        DVec2::new(100.0, 100.0),
+        DVec2::new(200.0, 100.0),
+        DVec2::new(150.0, 200.0),
+        DVec2::new(250.0, 150.0),
+        DVec2::new(50.0, 175.0),
     ];
 
     let hasher = QuadHasher::new()
@@ -105,13 +107,15 @@ fn test_quad_hash_consistency() {
 /// Test quad matching with transformed pattern.
 #[test]
 fn test_quad_matching_with_transform() {
+    use glam::DVec2;
+
     // Original pattern
     let positions1 = vec![
-        (100.0, 100.0),
-        (200.0, 100.0),
-        (200.0, 200.0),
-        (100.0, 200.0),
-        (150.0, 150.0), // Center point
+        DVec2::new(100.0, 100.0),
+        DVec2::new(200.0, 100.0),
+        DVec2::new(200.0, 200.0),
+        DVec2::new(100.0, 200.0),
+        DVec2::new(150.0, 150.0), // Center point
     ];
 
     // Rotated and scaled pattern
@@ -121,10 +125,10 @@ fn test_quad_matching_with_transform() {
 
     let positions2: Vec<_> = positions1
         .iter()
-        .map(|(x, y)| {
-            let x2 = (x * cos_a - y * sin_a) * scale + 50.0;
-            let y2 = (x * sin_a + y * cos_a) * scale + 30.0;
-            (x2, y2)
+        .map(|p| {
+            let x2 = (p.x * cos_a - p.y * sin_a) * scale + 50.0;
+            let y2 = (p.x * sin_a + p.y * cos_a) * scale + 30.0;
+            DVec2::new(x2, y2)
         })
         .collect();
 
@@ -258,6 +262,8 @@ fn test_wcs_builder_with_cd() {
 /// Test solver error handling.
 #[test]
 fn test_solver_error_cases() {
+    use glam::{DVec2, UVec2};
+
     // Create solver with preloaded empty catalog
     let config = PlateSolverConfig {
         catalog: CatalogSource::preloaded(vec![]),
@@ -268,13 +274,13 @@ fn test_solver_error_cases() {
 
     // Should fail due to no catalog stars
     let stars = vec![
-        (100.0, 100.0),
-        (200.0, 200.0),
-        (300.0, 300.0),
-        (400.0, 400.0),
+        DVec2::new(100.0, 100.0),
+        DVec2::new(200.0, 200.0),
+        DVec2::new(300.0, 300.0),
+        DVec2::new(400.0, 400.0),
     ];
 
-    let result = solver.solve(&stars, (180.0, 45.0), 1.0, (1024, 1024));
+    let result = solver.solve(&stars, 180.0, 45.0, 1.0, UVec2::new(1024, 1024));
     assert!(
         matches!(
             result,

@@ -1,4 +1,5 @@
 use super::*;
+use glam::DVec2;
 
 #[test]
 fn test_quality_metrics_perfect() {
@@ -40,7 +41,7 @@ fn test_estimate_overlap_identity() {
 
 #[test]
 fn test_estimate_overlap_translation() {
-    let transform = Transform::translation(50.0, 0.0);
+    let transform = Transform::translation(DVec2::new(50.0, 0.0));
     let overlap = estimate_overlap(100, 100, &transform);
     // 50% horizontal shift -> ~50% overlap
     assert!((overlap - 0.5).abs() < 0.1);
@@ -48,7 +49,7 @@ fn test_estimate_overlap_translation() {
 
 #[test]
 fn test_estimate_overlap_no_overlap() {
-    let transform = Transform::translation(200.0, 0.0);
+    let transform = Transform::translation(DVec2::new(200.0, 0.0));
     let overlap = estimate_overlap(100, 100, &transform);
     assert!(overlap < 0.01);
 }
@@ -149,7 +150,7 @@ fn test_quadrant_consistency_truly_inconsistent() {
         }
     }
 
-    let transform = Transform::translation(5.0, 5.0);
+    let transform = Transform::translation(DVec2::new(5.0, 5.0));
     let consistency = check_quadrant_consistency(&ref_points, &target_points, &transform, 100, 100);
 
     // BR quadrant (index 3) should have much higher error
@@ -164,7 +165,7 @@ fn test_quadrant_consistency_truly_inconsistent() {
 #[test]
 fn test_estimate_overlap_complete_disjoint() {
     // Large translation way beyond image boundaries
-    let transform = Transform::translation(1000.0, 1000.0);
+    let transform = Transform::translation(DVec2::new(1000.0, 1000.0));
     let overlap = estimate_overlap(100, 100, &transform);
     assert!(
         overlap < 0.01,
@@ -188,7 +189,7 @@ fn test_estimate_overlap_perfect() {
 /// Test overlap with negative coordinate shift
 #[test]
 fn test_estimate_overlap_negative_coords() {
-    let transform = Transform::translation(-30.0, -30.0);
+    let transform = Transform::translation(DVec2::new(-30.0, -30.0));
     let overlap = estimate_overlap(100, 100, &transform);
     // 70% overlap in each dimension -> ~49% overlap area
     assert!(
@@ -203,7 +204,7 @@ fn test_estimate_overlap_negative_coords() {
 fn test_estimate_overlap_rotation() {
     // Small rotation around center - corners stay in bounds
     let angle = 0.1; // ~6 degrees
-    let transform = Transform::rotation_around(50.0, 50.0, angle);
+    let transform = Transform::rotation_around(DVec2::new(50.0, 50.0), angle);
     let overlap = estimate_overlap(100, 100, &transform);
 
     // Small rotation should have high overlap (corners stay mostly in bounds)
@@ -215,7 +216,7 @@ fn test_estimate_overlap_rotation() {
 
     // 90 degree rotation around center - all corners still inside
     let angle_90 = std::f64::consts::PI / 2.0;
-    let transform_90 = Transform::rotation_around(50.0, 50.0, angle_90);
+    let transform_90 = Transform::rotation_around(DVec2::new(50.0, 50.0), angle_90);
     let overlap_90 = estimate_overlap(100, 100, &transform_90);
     assert!(
         overlap_90 > 0.9,

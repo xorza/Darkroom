@@ -479,8 +479,8 @@ mod tests {
     fn create_synthetic_field() -> SyntheticField {
         // Create a synthetic star field
         // Field center at RA=180°, Dec=+45°, scale=1 arcsec/pixel
-        let center_ra = 180.0;
-        let center_dec = 45.0;
+        let center_ra: f64 = 180.0;
+        let center_dec: f64 = 45.0;
         let scale: f64 = 1.0; // arcsec/pixel
         let image_size = UVec2::new(1024, 1024);
 
