@@ -3,68 +3,14 @@
 //! Run with: `cargo test -p lumos --features real-data rho_opiuchi -- --ignored --nocapture`
 
 use crate::AstroImage;
-use crate::CentroidMethod;
 use crate::star_detection::StarDetector;
-use crate::star_detection::config::{
-    AdaptiveSigmaConfig, BackgroundConfig, BackgroundRefinement, CentroidConfig, Connectivity,
-    DeblendConfig, FilteringConfig, LocalBackgroundMethod, PsfConfig, StarDetectionConfig,
-};
+use crate::star_detection::config::StarDetectionConfig;
 use crate::testing::{calibration_dir, init_tracing};
 use common::test_utils::test_output_path;
 use glam::Vec2;
 use imaginarium::Color;
 use imaginarium::ColorFormat;
 use imaginarium::drawing::draw_circle;
-
-/// Config optimized for Rho Ophiuchi: nebulosity + dense star field (M4 cluster)
-fn rho_opiuchi_config() -> StarDetectionConfig {
-    StarDetectionConfig {
-        background: BackgroundConfig {
-            sigma_threshold: 3.0,
-            mask_dilation: 5,
-            min_unmasked_fraction: 0.2,
-            tile_size: 128,
-            sigma_clip_iterations: 3,
-            refinement: BackgroundRefinement::AdaptiveSigma(AdaptiveSigmaConfig {
-                base_sigma: 3.0,
-                max_sigma: 10.0,
-                contrast_factor: 3.0,
-            }),
-        },
-        filtering: FilteringConfig {
-            min_area: 3,
-            max_area: 2000,
-            edge_margin: 15,
-            min_snr: 5.0,
-            max_eccentricity: 0.7,
-            max_sharpness: 0.8,
-            max_roundness: 1.0,
-            max_fwhm_deviation: 4.0,
-            duplicate_min_separation: 5.0,
-            connectivity: Connectivity::Eight,
-        },
-        deblend: DeblendConfig {
-            min_separation: 2,
-            min_prominence: 0.2,
-            n_thresholds: 64,
-            min_contrast: 0.003,
-        },
-        centroid: CentroidConfig {
-            method: CentroidMethod::WeightedMoments,
-            local_background_method: LocalBackgroundMethod::LocalAnnulus,
-        },
-        psf: PsfConfig {
-            expected_fwhm: 3.0,
-            axis_ratio: 1.0,
-            angle: 0.0,
-            auto_estimate: true,
-            min_stars_for_estimation: 20,
-            estimation_sigma_factor: 2.5,
-        },
-        noise_model: None,
-        defect_map: None,
-    }
-}
 
 #[test]
 #[ignore] // Requires LUMOS_CALIBRATION_DIR
@@ -96,7 +42,7 @@ fn test_detect_rho_opiuchi() {
         astro_image.height()
     );
 
-    let mut detector = StarDetector::from_config(rho_opiuchi_config());
+    let mut detector = StarDetector::from_config(StarDetectionConfig::for_precise_ground());
 
     let start = std::time::Instant::now();
     let result = detector.detect(&astro_image);
@@ -192,7 +138,7 @@ fn quick_bench_detect_rho_opiuchi(b: bench::Bencher) {
         astro_image.height()
     );
 
-    let mut detector = StarDetector::from_config(rho_opiuchi_config());
+    let mut detector = StarDetector::from_config(StarDetectionConfig::for_precise_ground());
 
     b.bench(|| detector.detect(&astro_image));
 }

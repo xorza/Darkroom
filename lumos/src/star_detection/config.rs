@@ -687,6 +687,61 @@ impl StarDetectionConfig {
             ..Default::default()
         }
     }
+
+    /// Create config for maximum centroid precision in ground-based astrophotography.
+    ///
+    /// Uses Moffat PSF fitting (matches atmospheric seeing wings better than Gaussian),
+    /// local annulus background subtraction, adaptive sigma for nebulosity handling,
+    /// auto FWHM estimation, and aggressive deblending. Filtering is strict to ensure
+    /// only well-measured stars are kept.
+    pub fn for_precise_ground() -> Self {
+        Self {
+            background: BackgroundConfig {
+                sigma_threshold: 3.0,
+                mask_dilation: 5,
+                min_unmasked_fraction: 0.2,
+                tile_size: 128,
+                sigma_clip_iterations: 3,
+                refinement: BackgroundRefinement::AdaptiveSigma(AdaptiveSigmaConfig {
+                    base_sigma: 3.0,
+                    max_sigma: 10.0,
+                    contrast_factor: 3.0,
+                }),
+            },
+            filtering: FilteringConfig {
+                min_area: 5,
+                max_area: 2000,
+                edge_margin: 15,
+                min_snr: 10.0,
+                max_eccentricity: 0.6,
+                max_sharpness: 0.7,
+                max_roundness: 1.0,
+                max_fwhm_deviation: 3.0,
+                duplicate_min_separation: 5.0,
+                connectivity: Connectivity::Eight,
+            },
+            deblend: DeblendConfig {
+                min_separation: 2,
+                min_prominence: 0.2,
+                n_thresholds: 32,
+                min_contrast: 0.003,
+            },
+            centroid: CentroidConfig {
+                method: CentroidMethod::MoffatFit { beta: 2.5 },
+                local_background_method: LocalBackgroundMethod::LocalAnnulus,
+            },
+            psf: PsfConfig {
+                expected_fwhm: 3.0,
+                axis_ratio: 1.0,
+                angle: 0.0,
+                auto_estimate: true,
+                min_stars_for_estimation: 20,
+                estimation_sigma_factor: 2.5,
+            },
+            noise_model: None,
+            defect_map: None,
+        }
+    }
 }
 
 // ============================================================================
@@ -980,6 +1035,7 @@ mod tests {
         StarDetectionConfig::for_high_resolution().validate();
         StarDetectionConfig::for_crowded_field().validate();
         StarDetectionConfig::for_nebulous_field().validate();
+        StarDetectionConfig::for_precise_ground().validate();
     }
 
     #[test]

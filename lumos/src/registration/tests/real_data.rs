@@ -177,7 +177,7 @@ fn bench_star_detection_calibrated_light(b: ::bench::Bencher) {
     b.bench(|| black_box(detector.detect(black_box(&image))));
 }
 
-#[quick_bench(warmup_iters = 3, iters = 10)]
+#[quick_bench(warmup_iters = 3, iters = 30)]
 fn bench_register_stars(b: ::bench::Bencher) {
     let Some((img1, img2)) = load_two_calibrated_lights() else {
         eprintln!("No calibration data available, skipping benchmark");
