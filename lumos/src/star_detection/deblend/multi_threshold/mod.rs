@@ -160,61 +160,6 @@ impl PixelGrid {
         }
     }
 
-    /// Start a new BFS pass by incrementing the visited generation counter.
-    /// This invalidates all previous visited marks in O(1).
-    #[inline]
-    #[allow(dead_code)]
-    fn new_visit_pass(&mut self) {
-        self.visited_generation_counter = self.visited_generation_counter.wrapping_add(1);
-        // Ensure visited counter doesn't collide with a stale values_generation entry
-        // (extremely unlikely with u32, but for correctness)
-        if self.visited_generation_counter == 0 {
-            self.visited_generation_counter = 1;
-        }
-    }
-
-    /// Check if position has been visited (generation counter comparison).
-    #[inline]
-    #[allow(dead_code)]
-    fn is_visited(&self, x: usize, y: usize) -> bool {
-        if self.width == 0 {
-            return true;
-        }
-        let lx = x.wrapping_sub(self.offset_x);
-        let ly = y.wrapping_sub(self.offset_y);
-        if lx >= self.width || ly >= self.height {
-            return true; // Treat out-of-bounds as visited
-        }
-        let idx = ly * self.width + lx;
-        // SAFETY: bounds checked above
-        unsafe { *self.visited_generation.get_unchecked(idx) == self.visited_generation_counter }
-    }
-
-    /// Mark position as visited. Returns true if it was not already visited.
-    #[inline]
-    #[allow(dead_code)]
-    fn mark_visited(&mut self, x: usize, y: usize) -> bool {
-        if self.width == 0 {
-            return false;
-        }
-        let lx = x.wrapping_sub(self.offset_x);
-        let ly = y.wrapping_sub(self.offset_y);
-        if lx >= self.width || ly >= self.height {
-            return false;
-        }
-        let idx = ly * self.width + lx;
-        // SAFETY: bounds checked above
-        unsafe {
-            let gen_ptr = self.visited_generation.get_unchecked_mut(idx);
-            if *gen_ptr == self.visited_generation_counter {
-                false // Already visited
-            } else {
-                *gen_ptr = self.visited_generation_counter;
-                true // Newly visited
-            }
-        }
-    }
-
     /// Get pixel value at local index, or NO_PIXEL if not present in current generation.
     #[inline]
     #[allow(unsafe_op_in_unsafe_fn)]
@@ -779,6 +724,7 @@ const MAX_TREE_SIZE: usize = 128;
 /// Find significant branches (leaves) that pass the contrast criterion.
 ///
 /// Returns indices of nodes that should be treated as separate objects.
+/// Uses stack allocation for small trees, heap for larger ones.
 fn find_significant_branches(
     tree: &[DeblendNode],
     min_contrast: f32,
@@ -787,14 +733,24 @@ fn find_significant_branches(
         return SmallVec::new();
     }
 
-    // Find root nodes (nodes that are not children of any other node)
-    // Use stack-allocated array for small trees, heap for larger ones
+    // Stack-allocated for typical small trees, heap fallback for large ones
     if tree.len() > MAX_TREE_SIZE {
-        return find_significant_branches_heap(tree, min_contrast);
+        let is_child = vec![false; tree.len()];
+        return collect_roots_and_leaves(tree, min_contrast, is_child);
     }
 
     let mut is_child_storage = [false; MAX_TREE_SIZE];
     let is_child = &mut is_child_storage[..tree.len()];
+    collect_roots_and_leaves(tree, min_contrast, is_child)
+}
+
+/// Mark child flags, find roots, collect significant leaves with fallback.
+fn collect_roots_and_leaves(
+    tree: &[DeblendNode],
+    min_contrast: f32,
+    mut is_child: impl AsMut<[bool]>,
+) -> SmallVec<[usize; MAX_PEAKS]> {
+    let is_child = is_child.as_mut();
 
     for node in tree {
         for &child_idx in &node.children {
@@ -804,7 +760,6 @@ fn find_significant_branches(
 
     let mut leaves: SmallVec<[usize; MAX_PEAKS]> = SmallVec::new();
 
-    // Process each root
     for (i, &child) in is_child.iter().enumerate() {
         if !child {
             collect_significant_leaves(tree, i, min_contrast, &mut leaves);
@@ -812,39 +767,6 @@ fn find_significant_branches(
     }
 
     // If no leaves found (all contrast criteria failed), return roots
-    if leaves.is_empty() {
-        for (i, &child) in is_child.iter().enumerate() {
-            if !child {
-                leaves.push(i);
-            }
-        }
-    }
-
-    leaves
-}
-
-/// Heap-allocated fallback for unusually large trees (> MAX_TREE_SIZE nodes).
-#[cold]
-fn find_significant_branches_heap(
-    tree: &[DeblendNode],
-    min_contrast: f32,
-) -> SmallVec<[usize; MAX_PEAKS]> {
-    let mut is_child = vec![false; tree.len()];
-
-    for node in tree {
-        for &child_idx in &node.children {
-            is_child[child_idx] = true;
-        }
-    }
-
-    let mut leaves: SmallVec<[usize; MAX_PEAKS]> = SmallVec::new();
-
-    for (i, &child) in is_child.iter().enumerate() {
-        if !child {
-            collect_significant_leaves(tree, i, min_contrast, &mut leaves);
-        }
-    }
-
     if leaves.is_empty() {
         for (i, &child) in is_child.iter().enumerate() {
             if !child {
@@ -973,10 +895,9 @@ fn find_nearest_peak_index(pos: Vec2us, peaks: &[Pixel]) -> usize {
 // Connected Component Finding
 // ============================================================================
 
-/// Find connected regions using grid-based lookup.
+/// Find connected regions using grid-based BFS.
 ///
-/// This is the optimized version that uses PixelGrid instead of HashMap/HashSet.
-/// BFS uses a flat-index queue (u32) to avoid coordinate conversions in the hot loop.
+/// Uses PixelGrid for O(1) neighbor lookup with flat-index BFS queue.
 fn find_connected_regions_grid(
     pixels: &[Pixel],
     regions: &mut Vec<Vec<Pixel>>,
@@ -984,63 +905,22 @@ fn find_connected_regions_grid(
     grid: &mut PixelGrid,
     idx_queue: &mut Vec<u32>,
 ) {
-    // Recycle existing regions back to pool before clearing
     for region in regions.drain(..) {
         region_pool.push(region);
     }
-
     if pixels.is_empty() {
         return;
     }
-
-    // Rebuild grid with current pixels
     grid.reset_with_pixels(pixels);
 
-    let width = grid.width;
-    let offset_x = grid.offset_x;
-    let offset_y = grid.offset_y;
-
     for p in pixels {
-        let lx = p.pos.x.wrapping_sub(offset_x);
-        let ly = p.pos.y.wrapping_sub(offset_y);
-        let start_idx = ly * width + lx;
-
-        // SAFETY: pixel is within grid bounds (placed during reset_with_pixels)
-        if unsafe { !grid.try_mark_visited_unchecked(start_idx) } {
-            continue;
+        if let Some(region) = bfs_region(p, grid, idx_queue, region_pool) {
+            regions.push(region);
         }
-
-        // BFS to find connected component using flat index queue
-        let mut region = match region_pool.pop() {
-            Some(mut v) => {
-                v.clear();
-                v
-            }
-            None => Vec::new(),
-        };
-        idx_queue.clear();
-        idx_queue.push(start_idx as u32);
-
-        while let Some(idx) = idx_queue.pop() {
-            let idx = idx as usize;
-            // SAFETY: idx was validated when pushed to queue
-            let value = unsafe { grid.get_value_unchecked(idx) };
-            let lx = idx % width;
-            let ly = idx / width;
-            region.push(Pixel {
-                pos: Vec2us::new(lx.wrapping_add(offset_x), ly.wrapping_add(offset_y)),
-                value,
-            });
-            // SAFETY: grid has guaranteed 1-pixel border (wrapping_sub in reset_with_pixels),
-            // so all 8 neighbors of any valid pixel are in-bounds.
-            unsafe { visit_neighbors_grid(idx, width, grid, idx_queue) };
-        }
-
-        regions.push(region);
     }
 }
 
-/// Find connected regions into an ArrayVec (limited capacity) using grid-based lookup.
+/// Find connected regions into an ArrayVec (limited capacity).
 fn find_connected_regions_grid_into<const N: usize>(
     pixels: &[Pixel],
     regions: &mut ArrayVec<Vec<Pixel>, N>,
@@ -1048,62 +928,73 @@ fn find_connected_regions_grid_into<const N: usize>(
     grid: &mut PixelGrid,
     idx_queue: &mut Vec<u32>,
 ) {
-    // Recycle existing regions back to pool before clearing
     for region in regions.drain(..) {
         region_pool.push(region);
     }
-
     if pixels.is_empty() {
         return;
     }
-
-    // Rebuild grid with current pixels
     grid.reset_with_pixels(pixels);
-
-    let width = grid.width;
-    let offset_x = grid.offset_x;
-    let offset_y = grid.offset_y;
 
     for p in pixels {
         if regions.is_full() {
             break;
         }
-
-        let lx = p.pos.x.wrapping_sub(offset_x);
-        let ly = p.pos.y.wrapping_sub(offset_y);
-        let start_idx = ly * width + lx;
-
-        // SAFETY: pixel is within grid bounds (placed during reset_with_pixels)
-        if unsafe { !grid.try_mark_visited_unchecked(start_idx) } {
-            continue;
+        if let Some(region) = bfs_region(p, grid, idx_queue, region_pool) {
+            regions.push(region);
         }
-
-        let mut region = match region_pool.pop() {
-            Some(mut v) => {
-                v.clear();
-                v
-            }
-            None => Vec::new(),
-        };
-        idx_queue.clear();
-        idx_queue.push(start_idx as u32);
-
-        while let Some(idx) = idx_queue.pop() {
-            let idx = idx as usize;
-            // SAFETY: idx was validated when pushed to queue
-            let value = unsafe { grid.get_value_unchecked(idx) };
-            let lx = idx % width;
-            let ly = idx / width;
-            region.push(Pixel {
-                pos: Vec2us::new(lx.wrapping_add(offset_x), ly.wrapping_add(offset_y)),
-                value,
-            });
-            // SAFETY: grid has guaranteed 1-pixel border
-            unsafe { visit_neighbors_grid(idx, width, grid, idx_queue) };
-        }
-
-        regions.push(region);
     }
+}
+
+/// Run BFS from a seed pixel, returning the connected region or None if already visited.
+///
+/// Takes a recycled Vec from the pool when available.
+#[inline]
+fn bfs_region(
+    seed: &Pixel,
+    grid: &mut PixelGrid,
+    idx_queue: &mut Vec<u32>,
+    region_pool: &mut Vec<Vec<Pixel>>,
+) -> Option<Vec<Pixel>> {
+    let width = grid.width;
+    let offset_x = grid.offset_x;
+    let offset_y = grid.offset_y;
+
+    let lx = seed.pos.x.wrapping_sub(offset_x);
+    let ly = seed.pos.y.wrapping_sub(offset_y);
+    let start_idx = ly * width + lx;
+
+    // SAFETY: pixel is within grid bounds (placed during reset_with_pixels)
+    if unsafe { !grid.try_mark_visited_unchecked(start_idx) } {
+        return None;
+    }
+
+    let mut region = match region_pool.pop() {
+        Some(mut v) => {
+            v.clear();
+            v
+        }
+        None => Vec::new(),
+    };
+    idx_queue.clear();
+    idx_queue.push(start_idx as u32);
+
+    while let Some(idx) = idx_queue.pop() {
+        let idx = idx as usize;
+        // SAFETY: idx was validated when pushed to queue
+        let value = unsafe { grid.get_value_unchecked(idx) };
+        let lx = idx % width;
+        let ly = idx / width;
+        region.push(Pixel {
+            pos: Vec2us::new(lx.wrapping_add(offset_x), ly.wrapping_add(offset_y)),
+            value,
+        });
+        // SAFETY: grid has guaranteed 1-pixel border (wrapping_sub in reset_with_pixels),
+        // so all 8 neighbors of any valid pixel are in-bounds.
+        unsafe { visit_neighbors_grid(idx, width, grid, idx_queue) };
+    }
+
+    Some(region)
 }
 
 /// Visit 8-connected neighbors using grid-based lookup with flat indices.

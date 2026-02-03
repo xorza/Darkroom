@@ -733,52 +733,8 @@ fn test_zero_threshold_level() {
 }
 
 // ========================================================================
-// Unit tests for PixelGrid (bit-packed visited flags)
+// Unit tests for PixelGrid
 // ========================================================================
-
-#[test]
-fn test_pixel_grid_empty() {
-    let grid = PixelGrid::empty();
-    assert_eq!(grid.width, 0);
-    assert_eq!(grid.height, 0);
-    assert!(grid.is_visited(0, 0)); // Out of bounds treated as visited
-}
-
-#[test]
-fn test_pixel_grid_basic_operations() {
-    let pixels = vec![
-        Pixel {
-            pos: Vec2us::new(10, 10),
-            value: 1.0,
-        },
-        Pixel {
-            pos: Vec2us::new(11, 10),
-            value: 2.0,
-        },
-        Pixel {
-            pos: Vec2us::new(10, 11),
-            value: 3.0,
-        },
-    ];
-
-    let mut grid = PixelGrid::empty();
-    grid.reset_with_pixels(&pixels);
-
-    // Check grid dimensions are set correctly
-    assert!(grid.width > 0);
-    assert!(grid.height > 0);
-
-    // Check visited flags start as false for pixel positions
-    assert!(!grid.is_visited(10, 10));
-    assert!(!grid.is_visited(11, 10));
-    assert!(!grid.is_visited(10, 11));
-
-    // Mark visited and check
-    assert!(grid.mark_visited(10, 10)); // First mark returns true
-    assert!(!grid.mark_visited(10, 10)); // Second mark returns false
-    assert!(grid.is_visited(10, 10));
-    assert!(!grid.is_visited(11, 10)); // Other positions unaffected
-}
 
 #[test]
 fn test_pixel_grid_connected_regions() {
@@ -824,65 +780,11 @@ fn test_pixel_grid_connected_regions() {
 }
 
 #[test]
-fn test_pixel_grid_bit_packing() {
-    // Test that bit packing works correctly across word boundaries
-    // Create a grid wider than 64 pixels to span multiple u64 words
-    let mut pixels = Vec::new();
-    for x in 0..100 {
-        pixels.push(Pixel {
-            pos: Vec2us::new(x, 50),
-            value: x as f32,
-        });
-    }
-
-    let mut grid = PixelGrid::empty();
-    grid.reset_with_pixels(&pixels);
-
-    // Mark every other pixel as visited
-    for x in (0..100).step_by(2) {
-        assert!(grid.mark_visited(x, 50));
-    }
-
-    // Verify the pattern
-    for x in 0..100 {
-        if x % 2 == 0 {
-            assert!(grid.is_visited(x, 50), "Pixel at x={} should be visited", x);
-        } else {
-            assert!(
-                !grid.is_visited(x, 50),
-                "Pixel at x={} should not be visited",
-                x
-            );
-        }
-    }
-}
-
-#[test]
-fn test_pixel_grid_boundary_conditions() {
-    let pixels = vec![Pixel {
-        pos: Vec2us::new(5, 5),
-        value: 1.0,
-    }];
-
-    let mut grid = PixelGrid::empty();
-    grid.reset_with_pixels(&pixels);
-
-    // Out of bounds should be treated as visited (can't mark)
-    assert!(grid.is_visited(0, 0)); // Out of bounds treated as visited
-    assert!(grid.is_visited(100, 100));
-    assert!(!grid.mark_visited(0, 0)); // Can't mark out of bounds
-    assert!(!grid.mark_visited(100, 100));
-
-    // Boundary pixels (1-pixel border) should work
-    // With offset at min-1, the grid includes positions around the pixel
-    assert!(!grid.is_visited(4, 5)); // Within grid border
-    assert!(grid.mark_visited(4, 5));
-    assert!(grid.is_visited(4, 5));
-}
-
-#[test]
 fn test_pixel_grid_reuse() {
     let mut grid = PixelGrid::empty();
+    let mut queue = Vec::new();
+    let mut regions = Vec::new();
+    let mut region_pool = Vec::new();
 
     // First use
     let pixels1 = vec![
@@ -895,10 +797,16 @@ fn test_pixel_grid_reuse() {
             value: 2.0,
         },
     ];
-    grid.reset_with_pixels(&pixels1);
-    grid.mark_visited(10, 10);
+    find_connected_regions_grid(
+        &pixels1,
+        &mut regions,
+        &mut region_pool,
+        &mut grid,
+        &mut queue,
+    );
+    assert_eq!(regions.len(), 2);
 
-    // Reuse with different pixels - should reset visited flags
+    // Reuse with different pixels — grid state should be properly reset
     let pixels2 = vec![
         Pixel {
             pos: Vec2us::new(20, 20),
@@ -909,16 +817,6 @@ fn test_pixel_grid_reuse() {
             value: 4.0,
         },
     ];
-    grid.reset_with_pixels(&pixels2);
-
-    // New positions should not be visited (flags reset)
-    assert!(!grid.is_visited(20, 20));
-    assert!(!grid.is_visited(25, 25));
-
-    // Test that the new pixels are properly stored via connected regions
-    let mut queue = Vec::new();
-    let mut regions = Vec::new();
-    let mut region_pool = Vec::new();
     find_connected_regions_grid(
         &pixels2,
         &mut regions,
@@ -939,17 +837,10 @@ fn test_pixel_grid_single_pixel() {
     }];
 
     let mut grid = PixelGrid::empty();
-    grid.reset_with_pixels(&pixels);
-
-    assert!(!grid.is_visited(50, 50));
-    assert!(grid.mark_visited(50, 50));
-    assert!(grid.is_visited(50, 50));
-
-    // Verify value storage via connected regions
     let mut queue = Vec::new();
     let mut regions = Vec::new();
     let mut region_pool = Vec::new();
-    grid.reset_with_pixels(&pixels); // Reset to clear visited flags
+
     find_connected_regions_grid(
         &pixels,
         &mut regions,
@@ -961,94 +852,6 @@ fn test_pixel_grid_single_pixel() {
     assert_eq!(regions.len(), 1);
     assert_eq!(regions[0].len(), 1);
     assert_eq!(regions[0][0].value, 42.0);
-}
-
-#[test]
-fn test_pixel_grid_empty_pixels() {
-    let mut grid = PixelGrid::empty();
-    grid.reset_with_pixels(&[]);
-
-    assert_eq!(grid.width, 0);
-    assert_eq!(grid.height, 0);
-    assert!(grid.is_visited(0, 0)); // Empty grid treats all as visited
-}
-
-#[test]
-fn test_pixel_grid_generation_counter_multiple_resets() {
-    // Test that generation counter correctly resets visited flags across many resets
-    let pixels = vec![
-        Pixel {
-            pos: Vec2us::new(10, 10),
-            value: 1.0,
-        },
-        Pixel {
-            pos: Vec2us::new(11, 10),
-            value: 2.0,
-        },
-    ];
-
-    let mut grid = PixelGrid::empty();
-
-    // Perform many reset cycles to exercise the generation counter
-    for i in 0..100 {
-        grid.reset_with_pixels(&pixels);
-
-        // After reset, nothing should be visited
-        assert!(
-            !grid.is_visited(10, 10),
-            "Iteration {}: position should not be visited after reset",
-            i
-        );
-        assert!(!grid.is_visited(11, 10));
-
-        // Mark one position
-        assert!(grid.mark_visited(10, 10));
-        assert!(grid.is_visited(10, 10));
-        assert!(!grid.is_visited(11, 10));
-
-        // Mark again should return false (already visited)
-        assert!(!grid.mark_visited(10, 10));
-    }
-}
-
-#[test]
-fn test_pixel_grid_generation_counter_different_sizes() {
-    // Test generation counter with varying grid sizes (exercises resize logic)
-    let mut grid = PixelGrid::empty();
-
-    // Small grid
-    let small_pixels = vec![Pixel {
-        pos: Vec2us::new(5, 5),
-        value: 1.0,
-    }];
-    grid.reset_with_pixels(&small_pixels);
-    grid.mark_visited(5, 5);
-    assert!(grid.is_visited(5, 5));
-
-    // Larger grid - generation counter should reset visited status
-    let large_pixels: Vec<Pixel> = (0..50)
-        .map(|i| Pixel {
-            pos: Vec2us::new(i, i),
-            value: i as f32,
-        })
-        .collect();
-    grid.reset_with_pixels(&large_pixels);
-
-    // All positions should be unvisited after reset, even those that overlap
-    // with the previous smaller grid
-    assert!(!grid.is_visited(5, 5));
-    for i in 0..50 {
-        assert!(
-            !grid.is_visited(i, i),
-            "Position ({}, {}) should not be visited",
-            i,
-            i
-        );
-    }
-
-    // Back to smaller grid
-    grid.reset_with_pixels(&small_pixels);
-    assert!(!grid.is_visited(5, 5));
 }
 
 // ========================================================================
@@ -1633,4 +1436,130 @@ fn test_connected_regions_two_groups_near_zero() {
     assert_eq!(regions.len(), 2, "Should find 2 separate regions");
     assert_eq!(regions[0].len(), 1);
     assert_eq!(regions[1].len(), 1);
+}
+
+// ========================================================================
+// Tests for find_connected_regions_grid_into (ArrayVec capacity limit)
+// ========================================================================
+
+#[test]
+fn test_connected_regions_grid_into_basic() {
+    // Three separate regions, ArrayVec capacity 4 — all should fit
+    let pixels = vec![
+        Pixel {
+            pos: Vec2us::new(0, 0),
+            value: 1.0,
+        },
+        Pixel {
+            pos: Vec2us::new(10, 10),
+            value: 2.0,
+        },
+        Pixel {
+            pos: Vec2us::new(20, 20),
+            value: 3.0,
+        },
+    ];
+
+    let mut regions: ArrayVec<Vec<Pixel>, 4> = ArrayVec::new();
+    let mut region_pool = Vec::new();
+    let mut grid = PixelGrid::empty();
+    let mut queue = Vec::new();
+
+    find_connected_regions_grid_into(
+        &pixels,
+        &mut regions,
+        &mut region_pool,
+        &mut grid,
+        &mut queue,
+    );
+
+    assert_eq!(regions.len(), 3, "Should find all 3 separate regions");
+    for region in &regions {
+        assert_eq!(region.len(), 1);
+    }
+}
+
+#[test]
+fn test_connected_regions_grid_into_capacity_limit() {
+    // Five separate pixels but ArrayVec capacity of 2 — should stop at 2
+    let pixels = vec![
+        Pixel {
+            pos: Vec2us::new(0, 0),
+            value: 1.0,
+        },
+        Pixel {
+            pos: Vec2us::new(10, 0),
+            value: 2.0,
+        },
+        Pixel {
+            pos: Vec2us::new(20, 0),
+            value: 3.0,
+        },
+        Pixel {
+            pos: Vec2us::new(30, 0),
+            value: 4.0,
+        },
+        Pixel {
+            pos: Vec2us::new(40, 0),
+            value: 5.0,
+        },
+    ];
+
+    let mut regions: ArrayVec<Vec<Pixel>, 2> = ArrayVec::new();
+    let mut region_pool = Vec::new();
+    let mut grid = PixelGrid::empty();
+    let mut queue = Vec::new();
+
+    find_connected_regions_grid_into(
+        &pixels,
+        &mut regions,
+        &mut region_pool,
+        &mut grid,
+        &mut queue,
+    );
+
+    assert_eq!(regions.len(), 2, "Should stop at capacity limit");
+}
+
+#[test]
+fn test_connected_regions_grid_into_recycles_previous() {
+    // Verify that calling twice recycles the previous regions to pool
+    let pixels = vec![
+        Pixel {
+            pos: Vec2us::new(5, 5),
+            value: 1.0,
+        },
+        Pixel {
+            pos: Vec2us::new(15, 15),
+            value: 2.0,
+        },
+    ];
+
+    let mut regions: ArrayVec<Vec<Pixel>, 4> = ArrayVec::new();
+    let mut region_pool = Vec::new();
+    let mut grid = PixelGrid::empty();
+    let mut queue = Vec::new();
+
+    // First call
+    find_connected_regions_grid_into(
+        &pixels,
+        &mut regions,
+        &mut region_pool,
+        &mut grid,
+        &mut queue,
+    );
+    assert_eq!(regions.len(), 2);
+    assert!(region_pool.is_empty());
+
+    // Second call — previous regions should be recycled to pool then reused
+    find_connected_regions_grid_into(
+        &pixels,
+        &mut regions,
+        &mut region_pool,
+        &mut grid,
+        &mut queue,
+    );
+    assert_eq!(regions.len(), 2);
+    // Pool should be empty because the 2 recycled vecs were reused for the 2 new regions
+    assert!(region_pool.is_empty());
 }
