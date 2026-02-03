@@ -124,7 +124,7 @@ fn bench_gaussian_jacobian_small(b: bench::Bencher) {
     }
 }
 
-#[quick_bench(warmup_iters = 50, iters = 500)]
+#[quick_bench(warmup_iters = 500, iters = 5000)]
 fn bench_gaussian_jacobian_medium(b: bench::Bencher) {
     // Medium stamp: 25x25 = 625 pixels
     let (data_x, data_y, data_z) = generate_gaussian_data(625, 12.5, 12.5, 1.0, 3.0, 3.0, 0.1);
@@ -202,7 +202,7 @@ fn bench_gaussian_jacobian_medium(b: bench::Bencher) {
     }
 }
 
-#[quick_bench(warmup_iters = 20, iters = 200)]
+#[quick_bench(warmup_iters = 200, iters = 2000)]
 fn bench_gaussian_jacobian_large(b: bench::Bencher) {
     // Large stamp: 33x33 = 1089 pixels
     let (data_x, data_y, data_z) = generate_gaussian_data(1089, 16.5, 16.5, 1.0, 4.0, 4.0, 0.1);
