@@ -24,7 +24,9 @@
 //! let comet_transform = config.comet_aligned_transform(&star_transform, frame_timestamp, 0.0);
 //! ```
 
-use glam::DVec2;
+use glam::{DVec2, Vec2};
+
+use crate::math::Vec2us;
 
 use crate::registration::Transform;
 use crate::stacking::local_normalization::NormalizationMethod;
@@ -61,11 +63,6 @@ impl ObjectPosition {
     /// Create a new object position from a DVec2.
     pub fn from_pos(pos: DVec2, timestamp: f64) -> Self {
         Self { pos, timestamp }
-    }
-
-    /// Create position from integer coordinates.
-    pub fn from_coords(x: u32, y: u32, timestamp: f64) -> Self {
-        Self::new(f64::from(x), f64::from(y), timestamp)
     }
 }
 
@@ -523,13 +520,6 @@ mod tests {
         assert!((pos.pos.x - 100.5).abs() < f64::EPSILON);
         assert!((pos.pos.y - 200.75).abs() < f64::EPSILON);
         assert!((pos.timestamp - 1000.0).abs() < f64::EPSILON);
-    }
-
-    #[test]
-    fn test_object_position_from_coords() {
-        let pos = ObjectPosition::from_coords(100, 200, 1000.0);
-        assert!((pos.pos.x - 100.0).abs() < f64::EPSILON);
-        assert!((pos.pos.y - 200.0).abs() < f64::EPSILON);
     }
 
     // ========== CometStackConfig Tests ==========
@@ -1090,30 +1080,21 @@ mod integration_tests {
         (*seed >> 33) as f32 / (1u64 << 31) as f32
     }
 
-    /// Render a Gaussian point source at (cx, cy) with given sigma and amplitude.
-    fn render_gaussian(
-        pixels: &mut [f32],
-        width: usize,
-        cx: f32,
-        cy: f32,
-        sigma: f32,
-        amplitude: f32,
-    ) {
+    /// Render a Gaussian point source at the given position with given sigma and amplitude.
+    fn render_gaussian(pixels: &mut [f32], width: usize, pos: Vec2, sigma: f32, amplitude: f32) {
         let height = pixels.len() / width;
         let radius = (sigma * 4.0).ceil() as i32;
 
-        let cx_i = cx.round() as i32;
-        let cy_i = cy.round() as i32;
+        let pos_i = pos.round().as_ivec2();
 
         for dy in -radius..=radius {
             for dx in -radius..=radius {
-                let px = cx_i + dx;
-                let py = cy_i + dy;
+                let px = pos_i.x + dx;
+                let py = pos_i.y + dy;
 
                 if px >= 0 && px < width as i32 && py >= 0 && py < height as i32 {
-                    let dist_x = px as f32 - cx;
-                    let dist_y = py as f32 - cy;
-                    let dist_sq = dist_x * dist_x + dist_y * dist_y;
+                    let dist = Vec2::new(px as f32, py as f32) - pos;
+                    let dist_sq = dist.length_squared();
                     let value = amplitude * (-dist_sq / (2.0 * sigma * sigma)).exp();
                     pixels[py as usize * width + px as usize] += value;
                 }
@@ -1125,16 +1106,16 @@ mod integration_tests {
     ///
     /// # Arguments
     /// * `width`, `height` - Image dimensions
-    /// * `star_positions` - Static star positions (x, y)
-    /// * `comet_pos` - Comet position for this frame (x, y)
+    /// * `star_positions` - Static star positions
+    /// * `comet_pos` - Comet position for this frame
     /// * `background` - Background level
     /// * `noise_sigma` - Gaussian noise level
     /// * `seed` - Random seed for noise
     fn generate_comet_frame(
         width: usize,
         height: usize,
-        star_positions: &[(f32, f32)],
-        comet_pos: (f32, f32),
+        star_positions: &[Vec2],
+        comet_pos: Vec2,
         background: f32,
         noise_sigma: f32,
         seed: u64,
@@ -1146,19 +1127,12 @@ mod integration_tests {
         let comet_amplitude = 0.6;
 
         // Render stars
-        for &(x, y) in star_positions {
-            render_gaussian(&mut pixels, width, x, y, star_sigma, star_amplitude);
+        for &pos in star_positions {
+            render_gaussian(&mut pixels, width, pos, star_sigma, star_amplitude);
         }
 
         // Render comet
-        render_gaussian(
-            &mut pixels,
-            width,
-            comet_pos.0,
-            comet_pos.1,
-            comet_sigma,
-            comet_amplitude,
-        );
+        render_gaussian(&mut pixels, width, comet_pos, comet_sigma, comet_amplitude);
 
         // Add noise
         if noise_sigma > 0.0 {
@@ -1236,13 +1210,7 @@ mod integration_tests {
     }
 
     /// Measure the spread of a point source (variance of pixel positions weighted by brightness).
-    fn measure_spread(
-        pixels: &[f32],
-        width: usize,
-        center_x: usize,
-        center_y: usize,
-        radius: usize,
-    ) -> f32 {
+    fn measure_spread(pixels: &[f32], width: usize, center: Vec2us, radius: usize) -> f32 {
         let height = pixels.len() / width;
         let mut sum_dist_sq = 0.0f32;
         let mut sum_weight = 0.0f32;
@@ -1251,8 +1219,8 @@ mod integration_tests {
 
         for dy in -(radius as i32)..=(radius as i32) {
             for dx in -(radius as i32)..=(radius as i32) {
-                let px = center_x as i32 + dx;
-                let py = center_y as i32 + dy;
+                let px = center.x as i32 + dx;
+                let py = center.y as i32 + dy;
                 if px >= 0 && px < width as i32 && py >= 0 && py < height as i32 {
                     let val = pixels[py as usize * width + px as usize] - background;
                     if val > 0.0 {
@@ -1367,8 +1335,12 @@ mod integration_tests {
         let noise_sigma = 0.01;
 
         // Fixed star positions
-        let star_positions: Vec<(f32, f32)> =
-            vec![(30.0, 30.0), (90.0, 40.0), (50.0, 100.0), (110.0, 95.0)];
+        let star_positions: Vec<Vec2> = vec![
+            Vec2::new(30.0, 30.0),
+            Vec2::new(90.0, 40.0),
+            Vec2::new(50.0, 100.0),
+            Vec2::new(110.0, 95.0),
+        ];
 
         // Comet motion: moves from (40, 60) to (80, 70) over the sequence
         let pos_start = ObjectPosition::new(40.0, 60.0, 0.0);
@@ -1385,7 +1357,7 @@ mod integration_tests {
                 width,
                 height,
                 &star_positions,
-                (comet_pos.x as f32, comet_pos.y as f32),
+                comet_pos.as_vec2(),
                 background,
                 noise_sigma,
                 42 + frame_idx as u64,
@@ -1427,20 +1399,22 @@ mod integration_tests {
 
         // In star stack: stars should be sharp, comet should be spread out
         // Measure star spread at first star position
-        let star_spread_in_star_stack = measure_spread(&star_stack, width, 30, 30, 8);
+        let star_spread_in_star_stack = measure_spread(&star_stack, width, Vec2us::new(30, 30), 8);
 
         // In comet stack: comet should be relatively sharp
         // The comet's reference position is (40, 60)
-        let comet_spread_in_comet_stack = measure_spread(&comet_stack, width, 40, 60, 8);
+        let comet_spread_in_comet_stack =
+            measure_spread(&comet_stack, width, Vec2us::new(40, 60), 8);
 
         // The comet in star stack should be more spread out than in comet stack
         // (because it moved during the sequence)
         // Calculate comet spread in star stack - it should be larger
         // The comet center in star stack is somewhere in the middle of its motion
-        let comet_x_avg = ((pos_start.pos.x + pos_end.pos.x) / 2.0).round() as usize;
-        let comet_y_avg = ((pos_start.pos.y + pos_end.pos.y) / 2.0).round() as usize;
-        let comet_spread_in_star_stack =
-            measure_spread(&star_stack, width, comet_x_avg, comet_y_avg, 15);
+        let comet_avg = Vec2us::new(
+            ((pos_start.pos.x + pos_end.pos.x) / 2.0).round() as usize,
+            ((pos_start.pos.y + pos_end.pos.y) / 2.0).round() as usize,
+        );
+        let comet_spread_in_star_stack = measure_spread(&star_stack, width, comet_avg, 15);
 
         // Log values for debugging
         eprintln!("Star spread in star stack: {}", star_spread_in_star_stack);
@@ -1473,11 +1447,11 @@ mod integration_tests {
 
         // Create star stack with bright star at (20, 20)
         let mut star_stack = vec![0.1f32; width * height];
-        render_gaussian(&mut star_stack, width, 20.0, 20.0, 2.0, 0.8);
+        render_gaussian(&mut star_stack, width, Vec2::splat(20.0), 2.0, 0.8);
 
         // Create comet stack with bright comet at (45, 45)
         let mut comet_stack = vec![0.1f32; width * height];
-        render_gaussian(&mut comet_stack, width, 45.0, 45.0, 3.0, 0.7);
+        render_gaussian(&mut comet_stack, width, Vec2::splat(45.0), 3.0, 0.7);
 
         let composite =
             composite_stacks(&star_stack, &comet_stack, CompositeMethod::Lighten).unwrap();
@@ -1633,10 +1607,10 @@ mod integration_tests {
         let height = 32;
 
         let mut star_stack = vec![0.1f32; width * height];
-        render_gaussian(&mut star_stack, width, 10.0, 10.0, 2.0, 0.5);
+        render_gaussian(&mut star_stack, width, Vec2::splat(10.0), 2.0, 0.5);
 
         let mut comet_stack = vec![0.1f32; width * height];
-        render_gaussian(&mut comet_stack, width, 20.0, 20.0, 2.0, 0.6);
+        render_gaussian(&mut comet_stack, width, Vec2::splat(20.0), 2.0, 0.6);
 
         // Test Lighten
         let lighten = composite_stacks(&star_stack, &comet_stack, CompositeMethod::Lighten);
