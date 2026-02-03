@@ -8,19 +8,20 @@
 
 use std::arch::x86_64::*;
 
-/// Compute u^(-beta) for 8 values using scalar powf (accurate).
-/// The powf call is the expensive part, but we need accuracy for L-M.
+use super::fast_pow_neg_beta;
+
+/// Compute u^(neg_beta) for 8 values using fast specialized power function.
 #[inline]
 fn compute_pow_neg_beta_8(u: &[f32; 8], neg_beta: f32) -> [f32; 8] {
     [
-        u[0].powf(neg_beta),
-        u[1].powf(neg_beta),
-        u[2].powf(neg_beta),
-        u[3].powf(neg_beta),
-        u[4].powf(neg_beta),
-        u[5].powf(neg_beta),
-        u[6].powf(neg_beta),
-        u[7].powf(neg_beta),
+        fast_pow_neg_beta(u[0], neg_beta),
+        fast_pow_neg_beta(u[1], neg_beta),
+        fast_pow_neg_beta(u[2], neg_beta),
+        fast_pow_neg_beta(u[3], neg_beta),
+        fast_pow_neg_beta(u[4], neg_beta),
+        fast_pow_neg_beta(u[5], neg_beta),
+        fast_pow_neg_beta(u[6], neg_beta),
+        fast_pow_neg_beta(u[7], neg_beta),
     ]
 }
 
@@ -242,6 +243,7 @@ pub unsafe fn fill_jacobian_residuals_simd_fixed_beta(
     // Scalar fallback for remaining pixels
     let [x0, y0, amp, alpha, bg] = *params;
     let alpha2 = alpha * alpha;
+    let neg_beta = -beta;
 
     for i in simd_end..n {
         let x = data_x[i];
@@ -252,7 +254,7 @@ pub unsafe fn fill_jacobian_residuals_simd_fixed_beta(
         let dy = y - y0;
         let r2 = dx * dx + dy * dy;
         let u = 1.0 + r2 / alpha2;
-        let u_neg_beta = u.powf(-beta);
+        let u_neg_beta = fast_pow_neg_beta(u, neg_beta);
         let u_neg_beta_m1 = u_neg_beta / u;
         let model = amp * u_neg_beta + bg;
 
@@ -290,6 +292,7 @@ pub unsafe fn compute_chi2_simd_fixed_beta(
     // Scalar fallback for remaining pixels
     let [x0, y0, amp, alpha, bg] = *params;
     let alpha2 = alpha * alpha;
+    let neg_beta = -beta;
 
     for i in simd_end..n {
         let x = data_x[i];
@@ -300,7 +303,7 @@ pub unsafe fn compute_chi2_simd_fixed_beta(
         let dy = y - y0;
         let r2 = dx * dx + dy * dy;
         let u = 1.0 + r2 / alpha2;
-        let model = amp * u.powf(-beta) + bg;
+        let model = amp * fast_pow_neg_beta(u, neg_beta) + bg;
         let residual = z - model;
         chi2 += residual * residual;
     }

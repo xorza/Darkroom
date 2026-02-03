@@ -83,7 +83,8 @@ impl LMModel<5> for MoffatFixedBeta {
     fn evaluate(&self, x: f32, y: f32, params: &[f32; 5]) -> f32 {
         let [x0, y0, amp, alpha, bg] = *params;
         let r2 = (x - x0).powi(2) + (y - y0).powi(2);
-        amp * (1.0 + r2 / (alpha * alpha)).powf(-self.beta) + bg
+        let u = 1.0 + r2 / (alpha * alpha);
+        amp * simd::fast_pow_neg_beta(u, -self.beta) + bg
     }
 
     #[inline]
@@ -95,7 +96,7 @@ impl LMModel<5> for MoffatFixedBeta {
         let r2 = dx * dx + dy * dy;
         let u = 1.0 + r2 / alpha2;
         // Cache power computation: compute u^(-beta) once, derive u^(-beta-1) from it
-        let u_neg_beta = u.powf(-self.beta);
+        let u_neg_beta = simd::fast_pow_neg_beta(u, -self.beta);
         let u_neg_beta_m1 = u_neg_beta / u; // u^(-beta-1) = u^(-beta) / u
         let common = 2.0 * amp * self.beta / alpha2 * u_neg_beta_m1;
 

@@ -23,6 +23,8 @@ cfg_aarch64! {
 #[cfg(test)]
 mod tests;
 
+pub use crate::math::fast_pow::fast_pow_neg_beta;
+
 // ============================================================================
 // Scalar fallback implementation
 // ============================================================================
@@ -64,6 +66,7 @@ pub fn fill_jacobian_residuals_scalar(
 
     let [x0, y0, amp, alpha, bg] = *params;
     let alpha2 = alpha * alpha;
+    let neg_beta = -beta;
 
     for i in 0..n {
         let x = data_x[i];
@@ -74,7 +77,7 @@ pub fn fill_jacobian_residuals_scalar(
         let dy = y - y0;
         let r2 = dx * dx + dy * dy;
         let u = 1.0 + r2 / alpha2;
-        let u_neg_beta = u.powf(-beta);
+        let u_neg_beta = fast_pow_neg_beta(u, neg_beta);
         let u_neg_beta_m1 = u_neg_beta / u;
         let model = amp * u_neg_beta + bg;
 
@@ -113,7 +116,7 @@ pub fn compute_chi2_scalar(
         let dy = y - y0;
         let r2 = dx * dx + dy * dy;
         let u = 1.0 + r2 / alpha2;
-        let model = amp * u.powf(-beta) + bg;
+        let model = amp * fast_pow_neg_beta(u, -beta) + bg;
         let residual = z - model;
         chi2 += residual * residual;
     }

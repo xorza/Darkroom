@@ -14,6 +14,7 @@
 
 mod bbox;
 pub mod deviation;
+pub mod fast_pow;
 pub mod statistics;
 pub mod sum;
 mod vec2;
@@ -33,6 +34,7 @@ pub use vec2::Vec2us;
 
 // Re-export commonly used functions at top level for convenience
 pub use deviation::abs_deviation_inplace;
+pub use fast_pow::fast_pow_neg_beta;
 pub use statistics::{
     MAD_TO_SIGMA, mad_f32_with_scratch, mad_to_sigma, median_and_mad_f32_mut, median_f32_mut,
     sigma_clipped_median_mad, sigma_clipped_median_mad_arrayvec,
