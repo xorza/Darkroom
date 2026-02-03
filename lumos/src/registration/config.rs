@@ -234,7 +234,7 @@ pub struct TriangleMatchConfig {
 impl Default for TriangleMatchConfig {
     fn default() -> Self {
         Self {
-            max_stars: 50,
+            max_stars: 200,
             ratio_tolerance: 0.01,
             min_votes: 3,
             hash_bins: 100,
@@ -368,10 +368,7 @@ impl Default for RegistrationConfig {
             max_residual_pixels: 1.0,
             use_spatial_distribution: true,
             spatial_grid_size: 8,
-            triangle: TriangleMatchConfig {
-                max_stars: 200, // Override default of 50 for pipeline use
-                ..TriangleMatchConfig::default()
-            },
+            triangle: TriangleMatchConfig::default(),
             ransac: RansacConfig::default(),
             phase_correlation: PhaseCorrelationConfig::default(),
             warp: WarpConfig::default(),
