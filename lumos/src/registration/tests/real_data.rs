@@ -105,8 +105,8 @@ fn test_register_two_calibrated_lights() {
         img2.channels()
     );
 
-    // Detect stars in both images
-    let star_config = StarDetectionConfig::default();
+    // Detect stars with precise Moffat centroids
+    let star_config = StarDetectionConfig::for_precise_ground();
     let mut detector = StarDetector::from_config(star_config);
 
     let result1 = detector.detect(&img1);
@@ -154,8 +154,8 @@ fn test_register_two_calibrated_lights() {
         result.num_inliers
     );
     assert!(
-        result.rms_error < 2.0,
-        "Expected RMS error < 2.0 pixels, got {:.4}",
+        result.rms_error < 1.5,
+        "Expected RMS error < 1.5 pixels, got {:.4}",
         result.rms_error
     );
 }
