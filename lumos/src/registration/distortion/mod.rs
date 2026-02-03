@@ -131,6 +131,8 @@ pub use field_curvature::{FieldCurvature, FieldCurvatureConfig};
 pub use radial::{RadialDistortion, RadialDistortionConfig};
 pub use tangential::{TangentialDistortion, TangentialDistortionConfig};
 
+use glam::DVec2;
+
 /// Configuration for thin-plate spline fitting.
 #[derive(Debug, Clone)]
 pub struct TpsConfig {
@@ -155,7 +157,7 @@ impl Default for TpsConfig {
 #[derive(Debug, Clone)]
 pub struct ThinPlateSpline {
     /// Control points (source positions)
-    control_points: Vec<(f64, f64)>,
+    control_points: Vec<DVec2>,
     /// Weights for the radial basis functions (x-direction)
     weights_x: Vec<f64>,
     /// Weights for the radial basis functions (y-direction)
@@ -177,8 +179,8 @@ impl ThinPlateSpline {
     /// # Returns
     /// A fitted TPS model, or None if fitting fails (e.g., singular matrix)
     pub fn fit(
-        source_points: &[(f64, f64)],
-        target_points: &[(f64, f64)],
+        source_points: &[DVec2],
+        target_points: &[DVec2],
         config: TpsConfig,
     ) -> Option<Self> {
         let n = source_points.len();
@@ -209,7 +211,7 @@ impl ThinPlateSpline {
                 if i == j {
                     matrix[i][j] = config.regularization;
                 } else {
-                    let r = distance(source_points[i], source_points[j]);
+                    let r = source_points[i].distance(source_points[j]);
                     matrix[i][j] = tps_kernel(r);
                 }
             }
@@ -217,14 +219,14 @@ impl ThinPlateSpline {
 
         // Fill P matrix (upper-right n×3 block) and P^T (lower-left 3×n block)
         for i in 0..n {
-            let (x, y) = source_points[i];
+            let p = source_points[i];
             matrix[i][n] = 1.0;
-            matrix[i][n + 1] = x;
-            matrix[i][n + 2] = y;
+            matrix[i][n + 1] = p.x;
+            matrix[i][n + 2] = p.y;
 
             matrix[n][i] = 1.0;
-            matrix[n + 1][i] = x;
-            matrix[n + 2][i] = y;
+            matrix[n + 1][i] = p.x;
+            matrix[n + 2][i] = p.y;
         }
 
         // Lower-right 3×3 block is zeros (already initialized)
@@ -234,8 +236,8 @@ impl ThinPlateSpline {
         let mut rhs_y = vec![0.0; matrix_size];
 
         for i in 0..n {
-            rhs_x[i] = target_points[i].0;
-            rhs_y[i] = target_points[i].1;
+            rhs_x[i] = target_points[i].x;
+            rhs_y[i] = target_points[i].y;
         }
 
         // Solve the system using LU decomposition
@@ -261,25 +263,24 @@ impl ThinPlateSpline {
     /// Transform a point using the fitted TPS model.
     ///
     /// # Arguments
-    /// * `x` - Source x coordinate
-    /// * `y` - Source y coordinate
+    /// * `p` - Source point coordinates
     ///
     /// # Returns
-    /// Transformed (x, y) coordinates
-    pub fn transform(&self, x: f64, y: f64) -> (f64, f64) {
+    /// Transformed coordinates
+    pub fn transform(&self, p: DVec2) -> DVec2 {
         // Affine component
-        let mut tx = self.affine_x[0] + self.affine_x[1] * x + self.affine_x[2] * y;
-        let mut ty = self.affine_y[0] + self.affine_y[1] * x + self.affine_y[2] * y;
+        let mut tx = self.affine_x[0] + self.affine_x[1] * p.x + self.affine_x[2] * p.y;
+        let mut ty = self.affine_y[0] + self.affine_y[1] * p.x + self.affine_y[2] * p.y;
 
         // Radial basis function component
-        for (i, &(cx, cy)) in self.control_points.iter().enumerate() {
-            let r = distance((x, y), (cx, cy));
+        for (i, &cp) in self.control_points.iter().enumerate() {
+            let r = p.distance(cp);
             let u = tps_kernel(r);
             tx += self.weights_x[i] * u;
             ty += self.weights_y[i] * u;
         }
 
-        (tx, ty)
+        DVec2::new(tx, ty)
     }
 
     /// Transform multiple points efficiently.
@@ -289,8 +290,8 @@ impl ThinPlateSpline {
     ///
     /// # Returns
     /// Vector of transformed points
-    pub fn transform_points(&self, points: &[(f64, f64)]) -> Vec<(f64, f64)> {
-        points.iter().map(|&(x, y)| self.transform(x, y)).collect()
+    pub fn transform_points(&self, points: &[DVec2]) -> Vec<DVec2> {
+        points.iter().map(|&p| self.transform(p)).collect()
     }
 
     /// Compute the bending energy of the spline.
@@ -304,7 +305,7 @@ impl ThinPlateSpline {
         for i in 0..n {
             for j in 0..n {
                 if i != j {
-                    let r = distance(self.control_points[i], self.control_points[j]);
+                    let r = self.control_points[i].distance(self.control_points[j]);
                     let u = tps_kernel(r);
                     energy += self.weights_x[i] * self.weights_x[j] * u;
                     energy += self.weights_y[i] * self.weights_y[j] * u;
@@ -321,7 +322,7 @@ impl ThinPlateSpline {
     }
 
     /// Get the control points.
-    pub fn control_points(&self) -> &[(f64, f64)] {
+    pub fn control_points(&self) -> &[DVec2] {
         &self.control_points
     }
 
@@ -330,14 +331,11 @@ impl ThinPlateSpline {
     /// Returns the distance between the transformed source points
     /// and the original target points. With zero regularization,
     /// these should be very close to zero.
-    pub fn compute_residuals(&self, target_points: &[(f64, f64)]) -> Vec<f64> {
+    pub fn compute_residuals(&self, target_points: &[DVec2]) -> Vec<f64> {
         self.control_points
             .iter()
             .zip(target_points.iter())
-            .map(|(&(sx, sy), &(tx, ty))| {
-                let (px, py) = self.transform(sx, sy);
-                ((px - tx).powi(2) + (py - ty).powi(2)).sqrt()
-            })
+            .map(|(&src, &tgt)| self.transform(src).distance(tgt))
             .collect()
     }
 }
@@ -348,12 +346,6 @@ impl ThinPlateSpline {
 #[inline]
 fn tps_kernel(r: f64) -> f64 {
     if r < 1e-10 { 0.0 } else { r * r * r.ln() }
-}
-
-/// Euclidean distance between two points.
-#[inline]
-fn distance(p1: (f64, f64), p2: (f64, f64)) -> f64 {
-    ((p1.0 - p2.0).powi(2) + (p1.1 - p2.1).powi(2)).sqrt()
 }
 
 /// Solve a linear system Ax = b using LU decomposition with partial pivoting.
@@ -431,8 +423,8 @@ pub struct DistortionMap {
     pub height: usize,
     /// Grid spacing in pixels
     pub spacing: f64,
-    /// Distortion vectors (dx, dy) at each grid point
-    pub vectors: Vec<(f64, f64)>,
+    /// Distortion vectors at each grid point
+    pub vectors: Vec<DVec2>,
     /// Maximum distortion magnitude
     pub max_magnitude: f64,
     /// Mean distortion magnitude
@@ -462,15 +454,12 @@ impl DistortionMap {
 
         for gy in 0..grid_height {
             for gx in 0..grid_width {
-                let x = gx as f64 * grid_spacing;
-                let y = gy as f64 * grid_spacing;
+                let p = DVec2::new(gx as f64 * grid_spacing, gy as f64 * grid_spacing);
+                let t = tps.transform(p);
+                let d = t - p;
+                let magnitude = d.length();
 
-                let (tx, ty) = tps.transform(x, y);
-                let dx = tx - x;
-                let dy = ty - y;
-                let magnitude = (dx * dx + dy * dy).sqrt();
-
-                vectors.push((dx, dy));
+                vectors.push(d);
                 max_magnitude = max_magnitude.max(magnitude);
                 sum_magnitude += magnitude;
             }
@@ -489,7 +478,7 @@ impl DistortionMap {
     }
 
     /// Get the distortion vector at a grid position.
-    pub fn get(&self, gx: usize, gy: usize) -> Option<(f64, f64)> {
+    pub fn get(&self, gx: usize, gy: usize) -> Option<DVec2> {
         if gx < self.width && gy < self.height {
             Some(self.vectors[gy * self.width + gx])
         } else {
@@ -498,9 +487,9 @@ impl DistortionMap {
     }
 
     /// Interpolate the distortion at an arbitrary position.
-    pub fn interpolate(&self, x: f64, y: f64) -> (f64, f64) {
-        let gx = x / self.spacing;
-        let gy = y / self.spacing;
+    pub fn interpolate(&self, p: DVec2) -> DVec2 {
+        let gx = p.x / self.spacing;
+        let gy = p.y / self.spacing;
 
         let gx0 = gx.floor() as usize;
         let gy0 = gy.floor() as usize;
@@ -510,22 +499,15 @@ impl DistortionMap {
         let fx = gx - gx0 as f64;
         let fy = gy - gy0 as f64;
 
-        let v00 = self.get(gx0, gy0).unwrap_or((0.0, 0.0));
-        let v10 = self.get(gx1, gy0).unwrap_or((0.0, 0.0));
-        let v01 = self.get(gx0, gy1).unwrap_or((0.0, 0.0));
-        let v11 = self.get(gx1, gy1).unwrap_or((0.0, 0.0));
+        let v00 = self.get(gx0, gy0).unwrap_or(DVec2::ZERO);
+        let v10 = self.get(gx1, gy0).unwrap_or(DVec2::ZERO);
+        let v01 = self.get(gx0, gy1).unwrap_or(DVec2::ZERO);
+        let v11 = self.get(gx1, gy1).unwrap_or(DVec2::ZERO);
 
         // Bilinear interpolation
-        let dx = (1.0 - fx) * (1.0 - fy) * v00.0
-            + fx * (1.0 - fy) * v10.0
-            + (1.0 - fx) * fy * v01.0
-            + fx * fy * v11.0;
-
-        let dy = (1.0 - fx) * (1.0 - fy) * v00.1
-            + fx * (1.0 - fy) * v10.1
-            + (1.0 - fx) * fy * v01.1
-            + fx * fy * v11.1;
-
-        (dx, dy)
+        (1.0 - fx) * (1.0 - fy) * v00
+            + fx * (1.0 - fy) * v10
+            + (1.0 - fx) * fy * v01
+            + fx * fy * v11
     }
 }

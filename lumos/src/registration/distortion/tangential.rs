@@ -29,22 +29,25 @@
 //!
 //! ```ignore
 //! use lumos::registration::distortion::{TangentialDistortion, TangentialDistortionConfig};
+//! use glam::DVec2;
 //!
 //! // Create a model with known coefficients
 //! let model = TangentialDistortion::new(
 //!     TangentialDistortionConfig {
 //!         p1: 0.0001,  // Vertical decentering
 //!         p2: -0.00005, // Horizontal decentering
-//!         center: (1024.0, 768.0),  // Optical center
+//!         center: DVec2::new(1024.0, 768.0),  // Optical center
 //!     }
 //! );
 //!
 //! // Apply distortion (undistorted -> distorted)
-//! let (x_d, y_d) = model.distort(512.0, 384.0);
+//! let distorted = model.distort(DVec2::new(512.0, 384.0));
 //!
 //! // Remove distortion (distorted -> undistorted)
-//! let (x_u, y_u) = model.undistort(x_d, y_d);
+//! let undistorted = model.undistort(distorted);
 //! ```
+
+use glam::DVec2;
 
 /// Configuration for tangential distortion model.
 #[derive(Debug, Clone, Copy)]
@@ -56,7 +59,7 @@ pub struct TangentialDistortionConfig {
     /// Affects horizontal decentering - causes x-dependent shift in y.
     pub p2: f64,
     /// Optical center (principal point) in pixel coordinates.
-    pub center: (f64, f64),
+    pub center: DVec2,
 }
 
 impl Default for TangentialDistortionConfig {
@@ -64,7 +67,7 @@ impl Default for TangentialDistortionConfig {
         Self {
             p1: 0.0,
             p2: 0.0,
-            center: (0.0, 0.0),
+            center: DVec2::ZERO,
         }
     }
 }
@@ -77,7 +80,7 @@ impl TangentialDistortionConfig {
     /// * `p2` - Horizontal decentering coefficient
     /// * `center` - Optical center in pixel coordinates
     #[inline]
-    pub fn with_coefficients(p1: f64, p2: f64, center: (f64, f64)) -> Self {
+    pub fn with_coefficients(p1: f64, p2: f64, center: DVec2) -> Self {
         Self { p1, p2, center }
     }
 
@@ -87,7 +90,7 @@ impl TangentialDistortionConfig {
         Self {
             p1,
             p2,
-            center: (width as f64 / 2.0, height as f64 / 2.0),
+            center: DVec2::new(width as f64 / 2.0, height as f64 / 2.0),
         }
     }
 }
@@ -104,8 +107,7 @@ pub struct TangentialDistortion {
     /// Tangential distortion coefficient p₂ (horizontal decentering)
     p2: f64,
     /// Optical center (principal point)
-    center_x: f64,
-    center_y: f64,
+    center: DVec2,
 }
 
 impl TangentialDistortion {
@@ -115,8 +117,7 @@ impl TangentialDistortion {
         Self {
             p1: config.p1,
             p2: config.p2,
-            center_x: config.center.0,
-            center_y: config.center.1,
+            center: config.center,
         }
     }
 
@@ -126,8 +127,7 @@ impl TangentialDistortion {
         Self {
             p1: 0.0,
             p2: 0.0,
-            center_x: 0.0,
-            center_y: 0.0,
+            center: DVec2::ZERO,
         }
     }
 
@@ -139,8 +139,8 @@ impl TangentialDistortion {
 
     /// Get the optical center.
     #[inline]
-    pub fn center(&self) -> (f64, f64) {
-        (self.center_x, self.center_y)
+    pub fn center(&self) -> DVec2 {
+        self.center
     }
 
     /// Check if this is an identity (no distortion).
@@ -151,19 +151,19 @@ impl TangentialDistortion {
 
     /// Compute the tangential distortion displacement at a given point.
     ///
-    /// Returns (dx, dy) displacement caused by tangential distortion.
+    /// Returns displacement caused by tangential distortion.
     #[inline]
-    fn distortion_displacement(&self, x: f64, y: f64) -> (f64, f64) {
-        let r_squared = x * x + y * y;
-        let xy = x * y;
+    fn distortion_displacement(&self, p: DVec2) -> DVec2 {
+        let r_squared = p.length_squared();
+        let xy = p.x * p.y;
 
         // Brown-Conrady tangential distortion:
         // dx = 2*p1*x*y + p2*(r² + 2*x²)
         // dy = p1*(r² + 2*y²) + 2*p2*x*y
-        let dx = 2.0 * self.p1 * xy + self.p2 * (r_squared + 2.0 * x * x);
-        let dy = self.p1 * (r_squared + 2.0 * y * y) + 2.0 * self.p2 * xy;
+        let dx = 2.0 * self.p1 * xy + self.p2 * (r_squared + 2.0 * p.x * p.x);
+        let dy = self.p1 * (r_squared + 2.0 * p.y * p.y) + 2.0 * self.p2 * xy;
 
-        (dx, dy)
+        DVec2::new(dx, dy)
     }
 
     /// Apply distortion: undistorted coordinates -> distorted coordinates.
@@ -172,22 +172,15 @@ impl TangentialDistortion {
     /// compute where they appear in the distorted image.
     ///
     /// # Arguments
-    /// * `x` - Undistorted x coordinate (pixel)
-    /// * `y` - Undistorted y coordinate (pixel)
+    /// * `p` - Undistorted coordinates (pixel)
     ///
     /// # Returns
-    /// Distorted (x, y) coordinates
+    /// Distorted coordinates
     #[inline]
-    pub fn distort(&self, x: f64, y: f64) -> (f64, f64) {
-        let dx = x - self.center_x;
-        let dy = y - self.center_y;
-
-        let (disp_x, disp_y) = self.distortion_displacement(dx, dy);
-
-        let x_d = self.center_x + dx + disp_x;
-        let y_d = self.center_y + dy + disp_y;
-
-        (x_d, y_d)
+    pub fn distort(&self, p: DVec2) -> DVec2 {
+        let d = p - self.center;
+        let disp = self.distortion_displacement(d);
+        self.center + d + disp
     }
 
     /// Remove distortion: distorted coordinates -> undistorted coordinates.
@@ -198,35 +191,31 @@ impl TangentialDistortion {
     /// Uses Newton-Raphson iteration for accurate inversion.
     ///
     /// # Arguments
-    /// * `x` - Distorted x coordinate (pixel)
-    /// * `y` - Distorted y coordinate (pixel)
+    /// * `p` - Distorted coordinates (pixel)
     ///
     /// # Returns
-    /// Undistorted (x, y) coordinates
-    pub fn undistort(&self, x: f64, y: f64) -> (f64, f64) {
+    /// Undistorted coordinates
+    pub fn undistort(&self, p: DVec2) -> DVec2 {
         // Fast path for identity
         if self.is_identity() {
-            return (x, y);
+            return p;
         }
 
-        let dx_d = x - self.center_x;
-        let dy_d = y - self.center_y;
+        let d = p - self.center;
 
         // Newton-Raphson iteration to find (x_u, y_u) from (x_d, y_d)
         // We want to solve: (x_d, y_d) = (x_u, y_u) + distortion(x_u, y_u)
         // Start with initial guess (x_u, y_u) ≈ (x_d, y_d)
-        let mut x_u = dx_d;
-        let mut y_u = dy_d;
+        let mut u = d;
 
         for _ in 0..MAX_ITERATIONS {
-            let (disp_x, disp_y) = self.distortion_displacement(x_u, y_u);
+            let disp = self.distortion_displacement(u);
 
-            // Residual: f(x_u, y_u) = (x_u + disp_x - x_d, y_u + disp_y - y_d)
-            let fx = x_u + disp_x - dx_d;
-            let fy = y_u + disp_y - dy_d;
+            // Residual: f(u) = u + disp - d
+            let f = u + disp - d;
 
             // Check convergence
-            if fx.abs() < CONVERGENCE_THRESHOLD && fy.abs() < CONVERGENCE_THRESHOLD {
+            if f.x.abs() < CONVERGENCE_THRESHOLD && f.y.abs() < CONVERGENCE_THRESHOLD {
                 break;
             }
 
@@ -242,10 +231,10 @@ impl TangentialDistortion {
             // ∂disp_y/∂x = p1*(2*x) + 2*p2*y = 2*p1*x + 2*p2*y
             // ∂disp_y/∂y = p1*(2*y + 4*y) + 2*p2*x = 6*p1*y + 2*p2*x
 
-            let j11 = 1.0 + 2.0 * self.p1 * y_u + 6.0 * self.p2 * x_u;
-            let j12 = 2.0 * self.p1 * x_u + 2.0 * self.p2 * y_u;
-            let j21 = 2.0 * self.p1 * x_u + 2.0 * self.p2 * y_u;
-            let j22 = 1.0 + 6.0 * self.p1 * y_u + 2.0 * self.p2 * x_u;
+            let j11 = 1.0 + 2.0 * self.p1 * u.y + 6.0 * self.p2 * u.x;
+            let j12 = 2.0 * self.p1 * u.x + 2.0 * self.p2 * u.y;
+            let j21 = 2.0 * self.p1 * u.x + 2.0 * self.p2 * u.y;
+            let j22 = 1.0 + 6.0 * self.p1 * u.y + 2.0 * self.p2 * u.x;
 
             // Solve J * delta = -f using Cramer's rule
             let det = j11 * j22 - j12 * j21;
@@ -253,31 +242,32 @@ impl TangentialDistortion {
                 break; // Singular Jacobian
             }
 
-            let delta_x = (-fx * j22 + fy * j12) / det;
-            let delta_y = (-fy * j11 + fx * j21) / det;
+            let delta_x = (-f.x * j22 + f.y * j12) / det;
+            let delta_y = (-f.y * j11 + f.x * j21) / det;
 
             // Limit step size to prevent divergence
-            let max_step = (dx_d.abs() + dy_d.abs()).max(10.0) * 0.5;
-            let delta_x = delta_x.clamp(-max_step, max_step);
-            let delta_y = delta_y.clamp(-max_step, max_step);
+            let max_step = (d.x.abs() + d.y.abs()).max(10.0) * 0.5;
+            let delta = DVec2::new(
+                delta_x.clamp(-max_step, max_step),
+                delta_y.clamp(-max_step, max_step),
+            );
 
-            x_u += delta_x;
-            y_u += delta_y;
+            u += delta;
         }
 
-        (self.center_x + x_u, self.center_y + y_u)
+        self.center + u
     }
 
     /// Apply distortion to multiple points.
     #[inline]
-    pub fn distort_points(&self, points: &[(f64, f64)]) -> Vec<(f64, f64)> {
-        points.iter().map(|&(x, y)| self.distort(x, y)).collect()
+    pub fn distort_points(&self, points: &[DVec2]) -> Vec<DVec2> {
+        points.iter().map(|&p| self.distort(p)).collect()
     }
 
     /// Remove distortion from multiple points.
     #[inline]
-    pub fn undistort_points(&self, points: &[(f64, f64)]) -> Vec<(f64, f64)> {
-        points.iter().map(|&(x, y)| self.undistort(x, y)).collect()
+    pub fn undistort_points(&self, points: &[DVec2]) -> Vec<DVec2> {
+        points.iter().map(|&p| self.undistort(p)).collect()
     }
 
     /// Compute the maximum distortion magnitude across an image.
@@ -296,23 +286,21 @@ impl TangentialDistortion {
 
         // Sample corners and midpoints of edges
         let test_points = [
-            (0.0, 0.0),
-            (w, 0.0),
-            (0.0, h),
-            (w, h),
-            (w / 2.0, 0.0),
-            (w / 2.0, h),
-            (0.0, h / 2.0),
-            (w, h / 2.0),
+            DVec2::new(0.0, 0.0),
+            DVec2::new(w, 0.0),
+            DVec2::new(0.0, h),
+            DVec2::new(w, h),
+            DVec2::new(w / 2.0, 0.0),
+            DVec2::new(w / 2.0, h),
+            DVec2::new(0.0, h / 2.0),
+            DVec2::new(w, h / 2.0),
         ];
 
         test_points
             .iter()
-            .map(|&(x, y)| {
-                let (x_d, y_d) = self.distort(x, y);
-                let dx = x_d - x;
-                let dy = y_d - y;
-                (dx * dx + dy * dy).sqrt()
+            .map(|&p| {
+                let d = self.distort(p);
+                p.distance(d)
             })
             .fold(0.0f64, f64::max)
     }
@@ -330,9 +318,9 @@ impl TangentialDistortion {
     /// # Returns
     /// Estimated `TangentialDistortion` model, or None if fitting fails
     pub fn estimate(
-        undistorted: &[(f64, f64)],
-        distorted: &[(f64, f64)],
-        center: Option<(f64, f64)>,
+        undistorted: &[DVec2],
+        distorted: &[DVec2],
+        center: Option<DVec2>,
     ) -> Option<Self> {
         if undistorted.len() != distorted.len() {
             return None;
@@ -343,12 +331,9 @@ impl TangentialDistortion {
         }
 
         // Determine center
-        let (cx, cy) = center.unwrap_or_else(|| {
-            let sum: (f64, f64) = undistorted
-                .iter()
-                .fold((0.0, 0.0), |acc, &(x, y)| (acc.0 + x, acc.1 + y));
-            let n = undistorted.len() as f64;
-            (sum.0 / n, sum.1 / n)
+        let c = center.unwrap_or_else(|| {
+            let sum: DVec2 = undistorted.iter().copied().sum();
+            sum / undistorted.len() as f64
         });
 
         // Build the least-squares system
@@ -363,30 +348,25 @@ impl TangentialDistortion {
         let mut atb = [0.0; 2];
 
         for i in 0..n {
-            let (x_u, y_u) = undistorted[i];
-            let (x_d, y_d) = distorted[i];
+            let pu = undistorted[i] - c;
+            let pd = distorted[i] - c;
 
-            let x = x_u - cx;
-            let y = y_u - cy;
-            let dx_d = x_d - cx;
-            let dy_d = y_d - cy;
+            let r_squared = pu.length_squared();
+            let xy = pu.x * pu.y;
 
-            let r_squared = x * x + y * y;
-            let xy = x * y;
-
-            // First equation: dx_d - x = 2*p1*x*y + p2*(r² + 2*x²)
+            // First equation: pd.x - pu.x = 2*p1*x*y + p2*(r² + 2*x²)
             // Coefficient for p1: 2*x*y
             // Coefficient for p2: r² + 2*x²
             let a1_p1 = 2.0 * xy;
-            let a1_p2 = r_squared + 2.0 * x * x;
-            let b1 = dx_d - x;
+            let a1_p2 = r_squared + 2.0 * pu.x * pu.x;
+            let b1 = pd.x - pu.x;
 
-            // Second equation: dy_d - y = p1*(r² + 2*y²) + 2*p2*x*y
+            // Second equation: pd.y - pu.y = p1*(r² + 2*y²) + 2*p2*x*y
             // Coefficient for p1: r² + 2*y²
             // Coefficient for p2: 2*x*y
-            let a2_p1 = r_squared + 2.0 * y * y;
+            let a2_p1 = r_squared + 2.0 * pu.y * pu.y;
             let a2_p2 = 2.0 * xy;
-            let b2 = dy_d - y;
+            let b2 = pd.y - pu.y;
 
             // Accumulate A^T A and A^T b (both equations)
             ata[0][0] += a1_p1 * a1_p1 + a2_p1 * a2_p1;
@@ -407,12 +387,7 @@ impl TangentialDistortion {
         let p1 = (atb[0] * ata[1][1] - atb[1] * ata[0][1]) / det;
         let p2 = (ata[0][0] * atb[1] - ata[1][0] * atb[0]) / det;
 
-        Some(Self {
-            p1,
-            p2,
-            center_x: cx,
-            center_y: cy,
-        })
+        Some(Self { p1, p2, center: c })
     }
 
     /// Compute RMS residual error for a set of point correspondences.
@@ -423,7 +398,7 @@ impl TangentialDistortion {
     ///
     /// # Returns
     /// RMS error in pixels
-    pub fn rms_error(&self, undistorted: &[(f64, f64)], distorted: &[(f64, f64)]) -> f64 {
+    pub fn rms_error(&self, undistorted: &[DVec2], distorted: &[DVec2]) -> f64 {
         debug_assert_eq!(
             undistorted.len(),
             distorted.len(),
@@ -437,11 +412,9 @@ impl TangentialDistortion {
         let sum_sq: f64 = undistorted
             .iter()
             .zip(distorted.iter())
-            .map(|(&(x_u, y_u), &(x_d, y_d))| {
-                let (pred_x, pred_y) = self.distort(x_u, y_u);
-                let dx = pred_x - x_d;
-                let dy = pred_y - y_d;
-                dx * dx + dy * dy
+            .map(|(&pu, &pd)| {
+                let pred = self.distort(pu);
+                pred.distance_squared(pd)
             })
             .sum();
 
@@ -467,41 +440,40 @@ mod tests {
 
         assert!(model.is_identity());
 
-        let (x_d, y_d) = model.distort(100.0, 200.0);
-        assert!((x_d - 100.0).abs() < TOLERANCE);
-        assert!((y_d - 200.0).abs() < TOLERANCE);
+        let p = DVec2::new(100.0, 200.0);
+        let d = model.distort(p);
+        assert!((d.x - 100.0).abs() < TOLERANCE);
+        assert!((d.y - 200.0).abs() < TOLERANCE);
 
-        let (x_u, y_u) = model.undistort(100.0, 200.0);
-        assert!((x_u - 100.0).abs() < TOLERANCE);
-        assert!((y_u - 200.0).abs() < TOLERANCE);
+        let u = model.undistort(p);
+        assert!((u.x - 100.0).abs() < TOLERANCE);
+        assert!((u.y - 200.0).abs() < TOLERANCE);
     }
 
     #[test]
     fn test_tangential_distortion_formula() {
         // Test that the distortion formula matches Brown-Conrady model
-        let center = (500.0, 500.0);
+        let center = DVec2::new(500.0, 500.0);
         let p1 = 0.0001;
         let p2 = 0.00005;
         let model = TangentialDistortion::new(TangentialDistortionConfig { p1, p2, center });
 
         // Test at a point (100, 200) relative to center
-        let test_x = 600.0; // 100 from center
-        let test_y = 700.0; // 200 from center
+        let test_p = DVec2::new(600.0, 700.0); // 100, 200 from center
 
-        let x = test_x - center.0; // 100
-        let y = test_y - center.1; // 200
-        let r_squared = x * x + y * y; // 50000
-        let xy = x * y; // 20000
+        let rel = test_p - center; // (100, 200)
+        let r_squared = rel.length_squared(); // 50000
+        let xy = rel.x * rel.y; // 20000
 
         // Expected displacement by formula:
         // dx = 2*p1*x*y + p2*(r² + 2*x²) = 2*0.0001*20000 + 0.00005*(50000 + 20000) = 4.0 + 3.5 = 7.5
         // dy = p1*(r² + 2*y²) + 2*p2*x*y = 0.0001*(50000 + 80000) + 2*0.00005*20000 = 13.0 + 2.0 = 15.0
-        let expected_dx = 2.0 * p1 * xy + p2 * (r_squared + 2.0 * x * x);
-        let expected_dy = p1 * (r_squared + 2.0 * y * y) + 2.0 * p2 * xy;
+        let expected_dx = 2.0 * p1 * xy + p2 * (r_squared + 2.0 * rel.x * rel.x);
+        let expected_dy = p1 * (r_squared + 2.0 * rel.y * rel.y) + 2.0 * p2 * xy;
 
-        let (x_d, y_d) = model.distort(test_x, test_y);
-        let actual_dx = x_d - test_x;
-        let actual_dy = y_d - test_y;
+        let d = model.distort(test_p);
+        let actual_dx = d.x - test_p.x;
+        let actual_dy = d.y - test_p.y;
 
         assert!(
             (actual_dx - expected_dx).abs() < TOLERANCE,
@@ -522,62 +494,58 @@ mod tests {
         let model = TangentialDistortion::new(TangentialDistortionConfig {
             p1: 0.00005,
             p2: -0.00003,
-            center: (500.0, 400.0),
+            center: DVec2::new(500.0, 400.0),
         });
 
         let test_points = [
-            (100.0, 100.0),
-            (500.0, 400.0), // center - should be unchanged
-            (900.0, 700.0),
-            (250.0, 600.0),
-            (750.0, 200.0),
+            DVec2::new(100.0, 100.0),
+            DVec2::new(500.0, 400.0), // center - should be unchanged
+            DVec2::new(900.0, 700.0),
+            DVec2::new(250.0, 600.0),
+            DVec2::new(750.0, 200.0),
         ];
 
-        for &(x, y) in &test_points {
-            let (x_d, y_d) = model.distort(x, y);
-            let (x_u, y_u) = model.undistort(x_d, y_d);
+        for &p in &test_points {
+            let d = model.distort(p);
+            let u = model.undistort(d);
 
             assert!(
-                (x_u - x).abs() < 1e-6,
-                "Roundtrip failed for ({}, {}): got ({}, {})",
-                x,
-                y,
-                x_u,
-                y_u
+                (u.x - p.x).abs() < 1e-6,
+                "Roundtrip failed for {:?}: got {:?}",
+                p,
+                u
             );
             assert!(
-                (y_u - y).abs() < 1e-6,
-                "Roundtrip failed for ({}, {}): got ({}, {})",
-                x,
-                y,
-                x_u,
-                y_u
+                (u.y - p.y).abs() < 1e-6,
+                "Roundtrip failed for {:?}: got {:?}",
+                p,
+                u
             );
         }
     }
 
     #[test]
     fn test_center_point_unchanged() {
-        let center = (512.0, 384.0);
+        let center = DVec2::new(512.0, 384.0);
         let model = TangentialDistortion::new(TangentialDistortionConfig {
             p1: 0.001,
             p2: -0.0005,
             center,
         });
 
-        let (x_d, y_d) = model.distort(center.0, center.1);
-        assert!((x_d - center.0).abs() < TOLERANCE);
-        assert!((y_d - center.1).abs() < TOLERANCE);
+        let d = model.distort(center);
+        assert!((d.x - center.x).abs() < TOLERANCE);
+        assert!((d.y - center.y).abs() < TOLERANCE);
 
-        let (x_u, y_u) = model.undistort(center.0, center.1);
-        assert!((x_u - center.0).abs() < TOLERANCE);
-        assert!((y_u - center.1).abs() < TOLERANCE);
+        let u = model.undistort(center);
+        assert!((u.x - center.x).abs() < TOLERANCE);
+        assert!((u.y - center.y).abs() < TOLERANCE);
     }
 
     #[test]
     fn test_tangential_asymmetry() {
         // Tangential distortion should NOT be radially symmetric
-        let center = (500.0, 500.0);
+        let center = DVec2::new(500.0, 500.0);
         let model = TangentialDistortion::new(TangentialDistortionConfig {
             p1: 0.0001,
             p2: 0.0,
@@ -585,16 +553,16 @@ mod tests {
         });
 
         // Points on opposite sides of y-axis should have different distortions
-        let (x1_d, _y1_d) = model.distort(400.0, 600.0); // x=-100, y=100
-        let (x2_d, _y2_d) = model.distort(600.0, 600.0); // x=100, y=100
+        let d1 = model.distort(DVec2::new(400.0, 600.0)); // x=-100, y=100
+        let d2 = model.distort(DVec2::new(600.0, 600.0)); // x=100, y=100
 
         // For p1 only with same y, p2=0:
         // dx1 = 2*p1*(-100)*100 = -20*p1 = -0.002
         // dx2 = 2*p1*(100)*100 = 20*p1 = 0.002
         // These have opposite signs due to x dependency
 
-        let dx1 = x1_d - 400.0;
-        let dx2 = x2_d - 600.0;
+        let dx1 = d1.x - 400.0;
+        let dx2 = d2.x - 600.0;
 
         assert!(
             dx1 * dx2 < 0.0,
@@ -607,7 +575,7 @@ mod tests {
     #[test]
     fn test_p1_vertical_effect() {
         // p1 primarily affects vertical lines
-        let center = (500.0, 500.0);
+        let center = DVec2::new(500.0, 500.0);
         let model = TangentialDistortion::new(TangentialDistortionConfig {
             p1: 0.0001,
             p2: 0.0,
@@ -615,14 +583,14 @@ mod tests {
         });
 
         // Points along vertical line (same x, different y)
-        let (x1_d, _) = model.distort(600.0, 400.0);
-        let (x2_d, _) = model.distort(600.0, 600.0);
+        let d1 = model.distort(DVec2::new(600.0, 400.0));
+        let d2 = model.distort(DVec2::new(600.0, 600.0));
 
         // With p1 > 0 and x > center.x:
         // At y < center.y: xy < 0, dx < 0
         // At y > center.y: xy > 0, dx > 0
-        let dx1 = x1_d - 600.0;
-        let dx2 = x2_d - 600.0;
+        let dx1 = d1.x - 600.0;
+        let dx2 = d2.x - 600.0;
 
         assert!(
             dx1 < dx2,
@@ -635,7 +603,7 @@ mod tests {
     #[test]
     fn test_p2_horizontal_effect() {
         // p2 primarily affects horizontal lines
-        let center = (500.0, 500.0);
+        let center = DVec2::new(500.0, 500.0);
         let model = TangentialDistortion::new(TangentialDistortionConfig {
             p1: 0.0,
             p2: 0.0001,
@@ -643,14 +611,14 @@ mod tests {
         });
 
         // Points along horizontal line (same y, different x)
-        let (_, y1_d) = model.distort(400.0, 600.0);
-        let (_, y2_d) = model.distort(600.0, 600.0);
+        let d1 = model.distort(DVec2::new(400.0, 600.0));
+        let d2 = model.distort(DVec2::new(600.0, 600.0));
 
         // With p2 > 0 and y > center.y:
         // At x < center.x: xy < 0, dy term from 2*p2*xy < 0
         // At x > center.x: xy > 0, dy term from 2*p2*xy > 0
-        let dy1 = y1_d - 600.0;
-        let dy2 = y2_d - 600.0;
+        let dy1 = d1.y - 600.0;
+        let dy2 = d2.y - 600.0;
 
         assert!(
             dy1 < dy2,
@@ -662,13 +630,14 @@ mod tests {
 
     #[test]
     fn test_config_constructors() {
-        let config1 = TangentialDistortionConfig::with_coefficients(0.001, -0.0005, (100.0, 100.0));
+        let config1 =
+            TangentialDistortionConfig::with_coefficients(0.001, -0.0005, DVec2::new(100.0, 100.0));
         assert_eq!(config1.p1, 0.001);
         assert_eq!(config1.p2, -0.0005);
-        assert_eq!(config1.center, (100.0, 100.0));
+        assert_eq!(config1.center, DVec2::new(100.0, 100.0));
 
         let config2 = TangentialDistortionConfig::centered(1024, 768, 0.0002, -0.0001);
-        assert_eq!(config2.center, (512.0, 384.0));
+        assert_eq!(config2.center, DVec2::new(512.0, 384.0));
         assert_eq!(config2.p1, 0.0002);
         assert_eq!(config2.p2, -0.0001);
 
@@ -682,18 +651,22 @@ mod tests {
         let model = TangentialDistortion::new(TangentialDistortionConfig {
             p1: 0.0001,
             p2: -0.00005,
-            center: (500.0, 500.0),
+            center: DVec2::new(500.0, 500.0),
         });
-        let points = vec![(100.0, 100.0), (200.0, 200.0), (300.0, 300.0)];
+        let points = vec![
+            DVec2::new(100.0, 100.0),
+            DVec2::new(200.0, 200.0),
+            DVec2::new(300.0, 300.0),
+        ];
 
         let distorted = model.distort_points(&points);
 
         assert_eq!(distorted.len(), points.len());
 
-        for (i, &(x, y)) in points.iter().enumerate() {
-            let (x_d, y_d) = model.distort(x, y);
-            assert!((distorted[i].0 - x_d).abs() < TOLERANCE);
-            assert!((distorted[i].1 - y_d).abs() < TOLERANCE);
+        for (i, &p) in points.iter().enumerate() {
+            let d = model.distort(p);
+            assert!((distorted[i].x - d.x).abs() < TOLERANCE);
+            assert!((distorted[i].y - d.y).abs() < TOLERANCE);
         }
     }
 
@@ -702,18 +675,22 @@ mod tests {
         let model = TangentialDistortion::new(TangentialDistortionConfig {
             p1: 0.0001,
             p2: -0.00005,
-            center: (500.0, 500.0),
+            center: DVec2::new(500.0, 500.0),
         });
-        let points = vec![(100.0, 100.0), (200.0, 200.0), (300.0, 300.0)];
+        let points = vec![
+            DVec2::new(100.0, 100.0),
+            DVec2::new(200.0, 200.0),
+            DVec2::new(300.0, 300.0),
+        ];
 
         let undistorted = model.undistort_points(&points);
 
         assert_eq!(undistorted.len(), points.len());
 
-        for (i, &(x, y)) in points.iter().enumerate() {
-            let (x_u, y_u) = model.undistort(x, y);
-            assert!((undistorted[i].0 - x_u).abs() < TOLERANCE);
-            assert!((undistorted[i].1 - y_u).abs() < TOLERANCE);
+        for (i, &p) in points.iter().enumerate() {
+            let u = model.undistort(p);
+            assert!((undistorted[i].x - u.x).abs() < TOLERANCE);
+            assert!((undistorted[i].y - u.y).abs() < TOLERANCE);
         }
     }
 
@@ -722,7 +699,7 @@ mod tests {
         let model = TangentialDistortion::new(TangentialDistortionConfig {
             p1: 0.00005,
             p2: 0.00003,
-            center: (512.0, 512.0),
+            center: DVec2::new(512.0, 512.0),
         });
         let max = model.max_distortion(1024, 1024);
 
@@ -730,11 +707,16 @@ mod tests {
         assert!(max > 0.0, "Max distortion should be positive: {}", max);
 
         // Verify by checking corners
-        let corners = [(0.0, 0.0), (1024.0, 0.0), (0.0, 1024.0), (1024.0, 1024.0)];
+        let corners = [
+            DVec2::new(0.0, 0.0),
+            DVec2::new(1024.0, 0.0),
+            DVec2::new(0.0, 1024.0),
+            DVec2::new(1024.0, 1024.0),
+        ];
         let mut max_corner = 0.0f64;
-        for &(x, y) in &corners {
-            let (x_d, y_d) = model.distort(x, y);
-            let dist = ((x_d - x).powi(2) + (y_d - y).powi(2)).sqrt();
+        for &p in &corners {
+            let d = model.distort(p);
+            let dist = p.distance(d);
             max_corner = max_corner.max(dist);
         }
 
@@ -749,7 +731,7 @@ mod tests {
 
     #[test]
     fn test_estimate_tangential_distortion() {
-        let center = (500.0, 500.0);
+        let center = DVec2::new(500.0, 500.0);
         let p1_true = 0.00005;
         let p2_true = -0.00003;
         let model_true = TangentialDistortion::new(TangentialDistortionConfig {
@@ -764,10 +746,9 @@ mod tests {
 
         for y in (0..=1000).step_by(100) {
             for x in (0..=1000).step_by(100) {
-                let xu = x as f64;
-                let yu = y as f64;
-                undistorted.push((xu, yu));
-                distorted.push(model_true.distort(xu, yu));
+                let pu = DVec2::new(x as f64, y as f64);
+                undistorted.push(pu);
+                distorted.push(model_true.distort(pu));
             }
         }
 
@@ -797,15 +778,16 @@ mod tests {
         let model = TangentialDistortion::new(TangentialDistortionConfig {
             p1: 0.0001,
             p2: -0.00005,
-            center: (500.0, 500.0),
+            center: DVec2::new(500.0, 500.0),
         });
 
         // Perfect fit should have zero error
-        let undistorted = vec![(100.0, 100.0), (200.0, 200.0), (300.0, 300.0)];
-        let distorted: Vec<_> = undistorted
-            .iter()
-            .map(|&(x, y)| model.distort(x, y))
-            .collect();
+        let undistorted = vec![
+            DVec2::new(100.0, 100.0),
+            DVec2::new(200.0, 200.0),
+            DVec2::new(300.0, 300.0),
+        ];
+        let distorted: Vec<_> = undistorted.iter().map(|&p| model.distort(p)).collect();
 
         let rms = model.rms_error(&undistorted, &distorted);
         assert!(rms < TOLERANCE, "Perfect fit should have zero RMS: {}", rms);
@@ -816,7 +798,7 @@ mod tests {
         let config = TangentialDistortionConfig {
             p1: 0.001,
             p2: -0.0005,
-            center: (100.0, 100.0),
+            center: DVec2::new(100.0, 100.0),
         };
         let model = TangentialDistortion::new(config);
 
@@ -824,9 +806,8 @@ mod tests {
         assert_eq!(p1, 0.001);
         assert_eq!(p2, -0.0005);
 
-        let (cx, cy) = model.center();
-        assert_eq!(cx, 100.0);
-        assert_eq!(cy, 100.0);
+        let c = model.center();
+        assert_eq!(c, DVec2::new(100.0, 100.0));
     }
 
     #[test]
@@ -835,43 +816,47 @@ mod tests {
         let model = TangentialDistortion::new(TangentialDistortionConfig {
             p1: 0.0005,
             p2: -0.0003,
-            center: (500.0, 500.0),
+            center: DVec2::new(500.0, 500.0),
         });
 
         let test_points = [
-            (100.0, 100.0),
-            (300.0, 700.0),
-            (900.0, 900.0),
-            (700.0, 300.0),
+            DVec2::new(100.0, 100.0),
+            DVec2::new(300.0, 700.0),
+            DVec2::new(900.0, 900.0),
+            DVec2::new(700.0, 300.0),
         ];
 
-        for &(x, y) in &test_points {
-            let (x_d, y_d) = model.distort(x, y);
-            let (x_u, y_u) = model.undistort(x_d, y_d);
+        for &p in &test_points {
+            let d = model.distort(p);
+            let u = model.undistort(d);
 
             assert!(
-                (x_u - x).abs() < 0.01,
-                "Strong distortion roundtrip failed for ({}, {}): got ({}, {})",
-                x,
-                y,
-                x_u,
-                y_u
+                (u.x - p.x).abs() < 0.01,
+                "Strong distortion roundtrip failed for {:?}: got {:?}",
+                p,
+                u
             );
             assert!(
-                (y_u - y).abs() < 0.01,
-                "Strong distortion roundtrip failed for ({}, {}): got ({}, {})",
-                x,
-                y,
-                x_u,
-                y_u
+                (u.y - p.y).abs() < 0.01,
+                "Strong distortion roundtrip failed for {:?}: got {:?}",
+                p,
+                u
             );
         }
     }
 
     #[test]
     fn test_estimate_fails_with_insufficient_points() {
-        let undistorted = vec![(100.0, 100.0), (200.0, 200.0), (300.0, 300.0)];
-        let distorted = vec![(101.0, 101.0), (202.0, 202.0), (303.0, 303.0)];
+        let undistorted = vec![
+            DVec2::new(100.0, 100.0),
+            DVec2::new(200.0, 200.0),
+            DVec2::new(300.0, 300.0),
+        ];
+        let distorted = vec![
+            DVec2::new(101.0, 101.0),
+            DVec2::new(202.0, 202.0),
+            DVec2::new(303.0, 303.0),
+        ];
 
         // Not enough points for estimation (need 4)
         let result = TangentialDistortion::estimate(&undistorted, &distorted, None);
@@ -881,12 +866,12 @@ mod tests {
     #[test]
     fn test_estimate_fails_with_mismatched_lengths() {
         let undistorted = vec![
-            (100.0, 100.0),
-            (200.0, 200.0),
-            (300.0, 300.0),
-            (400.0, 400.0),
+            DVec2::new(100.0, 100.0),
+            DVec2::new(200.0, 200.0),
+            DVec2::new(300.0, 300.0),
+            DVec2::new(400.0, 400.0),
         ];
-        let distorted = vec![(101.0, 101.0)];
+        let distorted = vec![DVec2::new(101.0, 101.0)];
 
         let result = TangentialDistortion::estimate(&undistorted, &distorted, None);
         assert!(result.is_none(), "Should fail with mismatched lengths");
@@ -898,7 +883,7 @@ mod tests {
         // (commonly used together in camera calibration)
         use crate::registration::distortion::RadialDistortion;
 
-        let center = (500.0, 500.0);
+        let center = DVec2::new(500.0, 500.0);
 
         let radial = RadialDistortion::barrel(0.00001, center);
         let tangential = TangentialDistortion::new(TangentialDistortionConfig {
@@ -908,22 +893,21 @@ mod tests {
         });
 
         // Apply both distortions
-        let x = 300.0;
-        let y = 400.0;
+        let p = DVec2::new(300.0, 400.0);
 
         // Apply radial first, then tangential
-        let (x_r, y_r) = radial.distort(x, y);
-        let (x_rt, y_rt) = tangential.distort(x_r, y_r);
+        let r = radial.distort(p);
+        let rt = tangential.distort(r);
 
         // The combined distortion should be different from either alone
-        let (x_t, y_t) = tangential.distort(x, y);
+        let t = tangential.distort(p);
 
         assert!(
-            (x_rt - x_t).abs() > 0.01 || (y_rt - y_t).abs() > 0.01,
+            (rt.x - t.x).abs() > 0.01 || (rt.y - t.y).abs() > 0.01,
             "Combined distortion should differ from tangential alone"
         );
         assert!(
-            (x_rt - x_r).abs() > 0.01 || (y_rt - y_r).abs() > 0.01,
+            (rt.x - r.x).abs() > 0.01 || (rt.y - r.y).abs() > 0.01,
             "Combined distortion should differ from radial alone"
         );
     }
@@ -934,21 +918,22 @@ mod tests {
         let model = TangentialDistortion::new(TangentialDistortionConfig {
             p1: -0.0001,
             p2: -0.00005,
-            center: (500.0, 500.0),
+            center: DVec2::new(500.0, 500.0),
         });
 
         // Roundtrip should still work
-        let (x_d, y_d) = model.distort(300.0, 400.0);
-        let (x_u, y_u) = model.undistort(x_d, y_d);
+        let p = DVec2::new(300.0, 400.0);
+        let d = model.distort(p);
+        let u = model.undistort(d);
 
-        assert!((x_u - 300.0).abs() < 1e-6);
-        assert!((y_u - 400.0).abs() < 1e-6);
+        assert!((u.x - 300.0).abs() < 1e-6);
+        assert!((u.y - 400.0).abs() < 1e-6);
     }
 
     #[test]
     fn test_estimate_with_center_auto() {
         // Test estimation with automatic center detection
-        let center = (500.0, 500.0);
+        let center = DVec2::new(500.0, 500.0);
         let model_true = TangentialDistortion::new(TangentialDistortionConfig {
             p1: 0.00003,
             p2: -0.00002,
@@ -961,10 +946,9 @@ mod tests {
 
         for y in (100..=900).step_by(100) {
             for x in (100..=900).step_by(100) {
-                let xu = x as f64;
-                let yu = y as f64;
-                undistorted.push((xu, yu));
-                distorted.push(model_true.distort(xu, yu));
+                let pu = DVec2::new(x as f64, y as f64);
+                undistorted.push(pu);
+                distorted.push(model_true.distort(pu));
             }
         }
 

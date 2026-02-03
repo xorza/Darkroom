@@ -43,19 +43,20 @@
 //!
 //! ```ignore
 //! use lumos::registration::distortion::{FieldCurvature, FieldCurvatureConfig};
+//! use glam::DVec2;
 //!
 //! // Create a model with known curvature
 //! let model = FieldCurvature::new(FieldCurvatureConfig {
 //!     c1: 0.00001,  // Primary curvature
 //!     c2: 0.0,
-//!     center: (1024.0, 768.0),
+//!     center: DVec2::new(1024.0, 768.0),
 //! });
 //!
 //! // Apply curvature effect (ideal -> curved)
-//! let (x_c, y_c) = model.apply(512.0, 384.0);
+//! let curved = model.apply(DVec2::new(512.0, 384.0));
 //!
 //! // Remove curvature effect (curved -> ideal)
-//! let (x_f, y_f) = model.correct(x_c, y_c);
+//! let flat = model.correct(curved);
 //! ```
 //!
 //! # Relationship to Other Distortions
@@ -66,6 +67,8 @@
 //!
 //! In astrophotography, both effects manifest as radial coordinate shifts and are
 //! often corrected together. For best results, calibrate both models from star data.
+
+use glam::DVec2;
 
 /// Configuration for field curvature correction.
 #[derive(Debug, Clone, Copy)]
@@ -79,7 +82,7 @@ pub struct FieldCurvatureConfig {
     /// Higher-order correction for complex optical systems.
     pub c2: f64,
     /// Optical center (principal point) in pixel coordinates.
-    pub center: (f64, f64),
+    pub center: DVec2,
 }
 
 impl Default for FieldCurvatureConfig {
@@ -87,7 +90,7 @@ impl Default for FieldCurvatureConfig {
         Self {
             c1: 0.0,
             c2: 0.0,
-            center: (0.0, 0.0),
+            center: DVec2::ZERO,
         }
     }
 }
@@ -99,7 +102,7 @@ impl FieldCurvatureConfig {
     /// * `c1` - Primary curvature coefficient
     /// * `center` - Optical center in pixel coordinates
     #[inline]
-    pub fn simple(c1: f64, center: (f64, f64)) -> Self {
+    pub fn simple(c1: f64, center: DVec2) -> Self {
         Self {
             c1,
             c2: 0.0,
@@ -121,7 +124,7 @@ impl FieldCurvatureConfig {
     /// * `pixel_scale` - Pixels per unit length (e.g., microns per pixel)
     /// * `center` - Optical center in pixel coordinates
     #[inline]
-    pub fn from_petzval_radius(petzval_radius: f64, pixel_scale: f64, center: (f64, f64)) -> Self {
+    pub fn from_petzval_radius(petzval_radius: f64, pixel_scale: f64, center: DVec2) -> Self {
         debug_assert!(
             petzval_radius.abs() > f64::EPSILON,
             "Petzval radius must be non-zero"
@@ -141,13 +144,13 @@ impl FieldCurvatureConfig {
         Self {
             c1,
             c2: 0.0,
-            center: (width as f64 / 2.0, height as f64 / 2.0),
+            center: DVec2::new(width as f64 / 2.0, height as f64 / 2.0),
         }
     }
 
     /// Create a config with both curvature coefficients.
     #[inline]
-    pub fn with_coefficients(c1: f64, c2: f64, center: (f64, f64)) -> Self {
+    pub fn with_coefficients(c1: f64, c2: f64, center: DVec2) -> Self {
         Self { c1, c2, center }
     }
 }
@@ -162,10 +165,8 @@ pub struct FieldCurvature {
     c1: f64,
     /// Secondary curvature coefficient
     c2: f64,
-    /// Optical center x coordinate
-    center_x: f64,
-    /// Optical center y coordinate
-    center_y: f64,
+    /// Optical center
+    center: DVec2,
 }
 
 impl FieldCurvature {
@@ -175,8 +176,7 @@ impl FieldCurvature {
         Self {
             c1: config.c1,
             c2: config.c2,
-            center_x: config.center.0,
-            center_y: config.center.1,
+            center: config.center,
         }
     }
 
@@ -186,8 +186,7 @@ impl FieldCurvature {
         Self {
             c1: 0.0,
             c2: 0.0,
-            center_x: 0.0,
-            center_y: 0.0,
+            center: DVec2::ZERO,
         }
     }
 
@@ -199,8 +198,8 @@ impl FieldCurvature {
 
     /// Get the optical center.
     #[inline]
-    pub fn center(&self) -> (f64, f64) {
-        (self.center_x, self.center_y)
+    pub fn center(&self) -> DVec2 {
+        self.center
     }
 
     /// Check if this is an identity (no curvature).
@@ -236,23 +235,16 @@ impl FieldCurvature {
     /// as they would appear on a curved Petzval surface.
     ///
     /// # Arguments
-    /// * `x` - Ideal x coordinate (pixel)
-    /// * `y` - Ideal y coordinate (pixel)
+    /// * `p` - Ideal coordinates (pixel)
     ///
     /// # Returns
-    /// Curved (x, y) coordinates
+    /// Curved coordinates
     #[inline]
-    pub fn apply(&self, x: f64, y: f64) -> (f64, f64) {
-        let dx = x - self.center_x;
-        let dy = y - self.center_y;
-        let r_squared = dx * dx + dy * dy;
-
+    pub fn apply(&self, p: DVec2) -> DVec2 {
+        let d = p - self.center;
+        let r_squared = d.length_squared();
         let factor = self.scale_factor(r_squared);
-
-        let x_c = self.center_x + dx * factor;
-        let y_c = self.center_y + dy * factor;
-
-        (x_c, y_c)
+        self.center + d * factor
     }
 
     /// Correct field curvature: curved coordinates -> ideal (flat) coordinates.
@@ -263,24 +255,22 @@ impl FieldCurvature {
     /// Uses Newton-Raphson iteration for accurate inversion.
     ///
     /// # Arguments
-    /// * `x` - Curved x coordinate (pixel)
-    /// * `y` - Curved y coordinate (pixel)
+    /// * `p` - Curved coordinates (pixel)
     ///
     /// # Returns
-    /// Ideal (x, y) coordinates
-    pub fn correct(&self, x: f64, y: f64) -> (f64, f64) {
+    /// Ideal coordinates
+    pub fn correct(&self, p: DVec2) -> DVec2 {
         // Fast path for identity
         if self.is_identity() {
-            return (x, y);
+            return p;
         }
 
-        let dx_c = x - self.center_x;
-        let dy_c = y - self.center_y;
-        let r_c_squared = dx_c * dx_c + dy_c * dy_c;
+        let d_c = p - self.center;
+        let r_c_squared = d_c.length_squared();
 
         // Fast path for center point
         if r_c_squared < f64::EPSILON {
-            return (x, y);
+            return p;
         }
 
         // Newton-Raphson iteration to find r_f from r_c
@@ -331,22 +321,19 @@ impl FieldCurvature {
         // Compute ideal coordinates using the ratio
         let scale = if r_c > f64::EPSILON { r_f / r_c } else { 1.0 };
 
-        let x_f = self.center_x + dx_c * scale;
-        let y_f = self.center_y + dy_c * scale;
-
-        (x_f, y_f)
+        self.center + d_c * scale
     }
 
     /// Apply curvature to multiple points.
     #[inline]
-    pub fn apply_points(&self, points: &[(f64, f64)]) -> Vec<(f64, f64)> {
-        points.iter().map(|&(x, y)| self.apply(x, y)).collect()
+    pub fn apply_points(&self, points: &[DVec2]) -> Vec<DVec2> {
+        points.iter().map(|&p| self.apply(p)).collect()
     }
 
     /// Correct curvature for multiple points.
     #[inline]
-    pub fn correct_points(&self, points: &[(f64, f64)]) -> Vec<(f64, f64)> {
-        points.iter().map(|&(x, y)| self.correct(x, y)).collect()
+    pub fn correct_points(&self, points: &[DVec2]) -> Vec<DVec2> {
+        points.iter().map(|&p| self.correct(p)).collect()
     }
 
     /// Compute the maximum curvature effect across an image.
@@ -365,23 +352,21 @@ impl FieldCurvature {
 
         // Sample corners and midpoints of edges
         let test_points = [
-            (0.0, 0.0),
-            (w, 0.0),
-            (0.0, h),
-            (w, h),
-            (w / 2.0, 0.0),
-            (w / 2.0, h),
-            (0.0, h / 2.0),
-            (w, h / 2.0),
+            DVec2::new(0.0, 0.0),
+            DVec2::new(w, 0.0),
+            DVec2::new(0.0, h),
+            DVec2::new(w, h),
+            DVec2::new(w / 2.0, 0.0),
+            DVec2::new(w / 2.0, h),
+            DVec2::new(0.0, h / 2.0),
+            DVec2::new(w, h / 2.0),
         ];
 
         test_points
             .iter()
-            .map(|&(x, y)| {
-                let (x_c, y_c) = self.apply(x, y);
-                let dx = x_c - x;
-                let dy = y_c - y;
-                (dx * dx + dy * dy).sqrt()
+            .map(|&p| {
+                let c = self.apply(p);
+                p.distance(c)
             })
             .fold(0.0f64, f64::max)
     }
@@ -394,15 +379,13 @@ impl FieldCurvature {
     /// The sag is approximated as: z ≈ r² × c₁ / 2
     ///
     /// # Arguments
-    /// * `x` - x coordinate (pixel)
-    /// * `y` - y coordinate (pixel)
+    /// * `p` - Position (pixel)
     ///
     /// # Returns
     /// Sag (defocus) in arbitrary units proportional to pixel displacement
-    pub fn sag_at(&self, x: f64, y: f64) -> f64 {
-        let dx = x - self.center_x;
-        let dy = y - self.center_y;
-        let r_squared = dx * dx + dy * dy;
+    pub fn sag_at(&self, p: DVec2) -> f64 {
+        let d = p - self.center;
+        let r_squared = d.length_squared();
 
         // Sag ≈ r²×c₁/2 (first-order approximation)
         // For the full model including c2: sag ≈ r²×c₁/2 + r⁴×c₂/4
@@ -424,9 +407,9 @@ impl FieldCurvature {
     /// # Returns
     /// Estimated `FieldCurvature` model, or None if fitting fails
     pub fn estimate(
-        ideal: &[(f64, f64)],
-        curved: &[(f64, f64)],
-        center: Option<(f64, f64)>,
+        ideal: &[DVec2],
+        curved: &[DVec2],
+        center: Option<DVec2>,
         num_coefficients: usize,
     ) -> Option<Self> {
         if ideal.len() != curved.len() {
@@ -440,12 +423,9 @@ impl FieldCurvature {
         }
 
         // Determine center
-        let (cx, cy) = center.unwrap_or_else(|| {
-            let sum: (f64, f64) = ideal
-                .iter()
-                .fold((0.0, 0.0), |acc, &(x, y)| (acc.0 + x, acc.1 + y));
-            let n = ideal.len() as f64;
-            (sum.0 / n, sum.1 / n)
+        let c = center.unwrap_or_else(|| {
+            let sum: DVec2 = ideal.iter().copied().sum();
+            sum / ideal.len() as f64
         });
 
         // Build the least-squares system
@@ -458,16 +438,11 @@ impl FieldCurvature {
         let mut atb = vec![0.0; num_coefficients];
 
         for i in 0..n {
-            let (x_f, y_f) = ideal[i];
-            let (x_c, y_c) = curved[i];
+            let pf = ideal[i] - c;
+            let pc = curved[i] - c;
 
-            let dx_f = x_f - cx;
-            let dy_f = y_f - cy;
-            let dx_c = x_c - cx;
-            let dy_c = y_c - cy;
-
-            let r_f = (dx_f * dx_f + dy_f * dy_f).sqrt();
-            let r_c = (dx_c * dx_c + dy_c * dy_c).sqrt();
+            let r_f = pf.length();
+            let r_c = pc.length();
 
             if r_f < f64::EPSILON {
                 continue;
@@ -496,12 +471,7 @@ impl FieldCurvature {
         let c1 = solution.first().copied().unwrap_or(0.0);
         let c2 = solution.get(1).copied().unwrap_or(0.0);
 
-        Some(Self {
-            c1,
-            c2,
-            center_x: cx,
-            center_y: cy,
-        })
+        Some(Self { c1, c2, center: c })
     }
 
     /// Compute RMS residual error for a set of point correspondences.
@@ -512,7 +482,7 @@ impl FieldCurvature {
     ///
     /// # Returns
     /// RMS error in pixels
-    pub fn rms_error(&self, ideal: &[(f64, f64)], curved: &[(f64, f64)]) -> f64 {
+    pub fn rms_error(&self, ideal: &[DVec2], curved: &[DVec2]) -> f64 {
         debug_assert_eq!(
             ideal.len(),
             curved.len(),
@@ -526,11 +496,9 @@ impl FieldCurvature {
         let sum_sq: f64 = ideal
             .iter()
             .zip(curved.iter())
-            .map(|(&(x_f, y_f), &(x_c, y_c))| {
-                let (pred_x, pred_y) = self.apply(x_f, y_f);
-                let dx = pred_x - x_c;
-                let dy = pred_y - y_c;
-                dx * dx + dy * dy
+            .map(|(&pf, &pc)| {
+                let pred = self.apply(pf);
+                pred.distance_squared(pc)
             })
             .sum();
 
@@ -622,18 +590,19 @@ mod tests {
         assert!(!model.is_outward());
         assert!(!model.is_inward());
 
-        let (x_c, y_c) = model.apply(100.0, 200.0);
-        assert!((x_c - 100.0).abs() < TOLERANCE);
-        assert!((y_c - 200.0).abs() < TOLERANCE);
+        let p = DVec2::new(100.0, 200.0);
+        let c = model.apply(p);
+        assert!((c.x - 100.0).abs() < TOLERANCE);
+        assert!((c.y - 200.0).abs() < TOLERANCE);
 
-        let (x_f, y_f) = model.correct(100.0, 200.0);
-        assert!((x_f - 100.0).abs() < TOLERANCE);
-        assert!((y_f - 200.0).abs() < TOLERANCE);
+        let f = model.correct(p);
+        assert!((f.x - 100.0).abs() < TOLERANCE);
+        assert!((f.y - 200.0).abs() < TOLERANCE);
     }
 
     #[test]
     fn test_outward_curvature() {
-        let center = (512.0, 512.0);
+        let center = DVec2::new(512.0, 512.0);
         let model = FieldCurvature::new(FieldCurvatureConfig::simple(0.00001, center));
 
         assert!(model.is_outward());
@@ -641,10 +610,11 @@ mod tests {
         assert!(!model.is_identity());
 
         // Point at corner should be pushed outward
-        let (x_c, y_c) = model.apply(0.0, 0.0);
+        let p = DVec2::ZERO;
+        let c = model.apply(p);
 
-        let r_orig = ((0.0 - center.0).powi(2) + (0.0 - center.1).powi(2)).sqrt();
-        let r_curved = ((x_c - center.0).powi(2) + (y_c - center.1).powi(2)).sqrt();
+        let r_orig = p.distance(center);
+        let r_curved = c.distance(center);
 
         assert!(
             r_curved > r_orig,
@@ -656,7 +626,7 @@ mod tests {
 
     #[test]
     fn test_inward_curvature() {
-        let center = (512.0, 512.0);
+        let center = DVec2::new(512.0, 512.0);
         let model = FieldCurvature::new(FieldCurvatureConfig::simple(-0.000001, center));
 
         assert!(!model.is_outward());
@@ -664,10 +634,11 @@ mod tests {
         assert!(!model.is_identity());
 
         // Point at corner should be pulled inward
-        let (x_c, y_c) = model.apply(0.0, 0.0);
+        let p = DVec2::ZERO;
+        let c = model.apply(p);
 
-        let r_orig = ((0.0 - center.0).powi(2) + (0.0 - center.1).powi(2)).sqrt();
-        let r_curved = ((x_c - center.0).powi(2) + (y_c - center.1).powi(2)).sqrt();
+        let r_orig = p.distance(center);
+        let r_curved = c.distance(center);
 
         assert!(
             r_curved < r_orig,
@@ -682,57 +653,53 @@ mod tests {
         let model = FieldCurvature::new(FieldCurvatureConfig {
             c1: 1e-8,
             c2: -1e-16,
-            center: (500.0, 400.0),
+            center: DVec2::new(500.0, 400.0),
         });
 
         let test_points = [
-            (100.0, 100.0),
-            (500.0, 400.0), // center - should be unchanged
-            (900.0, 700.0),
-            (250.0, 600.0),
-            (750.0, 200.0),
+            DVec2::new(100.0, 100.0),
+            DVec2::new(500.0, 400.0), // center - should be unchanged
+            DVec2::new(900.0, 700.0),
+            DVec2::new(250.0, 600.0),
+            DVec2::new(750.0, 200.0),
         ];
 
-        for &(x, y) in &test_points {
-            let (x_c, y_c) = model.apply(x, y);
-            let (x_f, y_f) = model.correct(x_c, y_c);
+        for &p in &test_points {
+            let c = model.apply(p);
+            let f = model.correct(c);
 
             assert!(
-                (x_f - x).abs() < 1e-5,
-                "Roundtrip failed for ({}, {}): got ({}, {})",
-                x,
-                y,
-                x_f,
-                y_f
+                (f.x - p.x).abs() < 1e-5,
+                "Roundtrip failed for {:?}: got {:?}",
+                p,
+                f
             );
             assert!(
-                (y_f - y).abs() < 1e-5,
-                "Roundtrip failed for ({}, {}): got ({}, {})",
-                x,
-                y,
-                x_f,
-                y_f
+                (f.y - p.y).abs() < 1e-5,
+                "Roundtrip failed for {:?}: got {:?}",
+                p,
+                f
             );
         }
     }
 
     #[test]
     fn test_center_unchanged() {
-        let center = (512.0, 384.0);
+        let center = DVec2::new(512.0, 384.0);
         let model = FieldCurvature::new(FieldCurvatureConfig::simple(0.0001, center));
 
-        let (x_c, y_c) = model.apply(center.0, center.1);
-        assert!((x_c - center.0).abs() < TOLERANCE);
-        assert!((y_c - center.1).abs() < TOLERANCE);
+        let c = model.apply(center);
+        assert!((c.x - center.x).abs() < TOLERANCE);
+        assert!((c.y - center.y).abs() < TOLERANCE);
 
-        let (x_f, y_f) = model.correct(center.0, center.1);
-        assert!((x_f - center.0).abs() < TOLERANCE);
-        assert!((y_f - center.1).abs() < TOLERANCE);
+        let f = model.correct(center);
+        assert!((f.x - center.x).abs() < TOLERANCE);
+        assert!((f.y - center.y).abs() < TOLERANCE);
     }
 
     #[test]
     fn test_radial_symmetry() {
-        let center = (500.0, 500.0);
+        let center = DVec2::new(500.0, 500.0);
         let model = FieldCurvature::new(FieldCurvatureConfig::simple(0.00001, center));
 
         // Points equidistant from center should have same magnitude of effect
@@ -743,11 +710,10 @@ mod tests {
 
         for &angle in &angles {
             let rad = angle.to_radians();
-            let x = center.0 + r * rad.cos();
-            let y = center.1 + r * rad.sin();
+            let p = center + DVec2::new(r * rad.cos(), r * rad.sin());
 
-            let (x_c, y_c) = model.apply(x, y);
-            let effect = ((x_c - x).powi(2) + (y_c - y).powi(2)).sqrt();
+            let c = model.apply(p);
+            let effect = p.distance(c);
             effects.push(effect);
         }
 
@@ -766,17 +732,15 @@ mod tests {
 
     #[test]
     fn test_effect_increases_with_radius() {
-        let center = (500.0, 500.0);
+        let center = DVec2::new(500.0, 500.0);
         let model = FieldCurvature::new(FieldCurvatureConfig::simple(0.00001, center));
 
         let mut prev_effect = 0.0;
 
         for r in [100.0, 200.0, 300.0, 400.0, 500.0] {
-            let x = center.0 + r;
-            let y = center.1;
-
-            let (x_c, _) = model.apply(x, y);
-            let effect = (x_c - x).abs();
+            let p = DVec2::new(center.x + r, center.y);
+            let c = model.apply(p);
+            let effect = (c.x - p.x).abs();
 
             assert!(
                 effect > prev_effect,
@@ -791,15 +755,16 @@ mod tests {
 
     #[test]
     fn test_config_constructors() {
-        let config1 = FieldCurvatureConfig::simple(0.001, (100.0, 100.0));
+        let config1 = FieldCurvatureConfig::simple(0.001, DVec2::new(100.0, 100.0));
         assert_eq!(config1.c1, 0.001);
         assert_eq!(config1.c2, 0.0);
-        assert_eq!(config1.center, (100.0, 100.0));
+        assert_eq!(config1.center, DVec2::new(100.0, 100.0));
 
         let config2 = FieldCurvatureConfig::centered(1024, 768, 0.0005);
-        assert_eq!(config2.center, (512.0, 384.0));
+        assert_eq!(config2.center, DVec2::new(512.0, 384.0));
 
-        let config3 = FieldCurvatureConfig::with_coefficients(0.001, -0.0001, (200.0, 200.0));
+        let config3 =
+            FieldCurvatureConfig::with_coefficients(0.001, -0.0001, DVec2::new(200.0, 200.0));
         assert_eq!(config3.c1, 0.001);
         assert_eq!(config3.c2, -0.0001);
     }
@@ -807,7 +772,8 @@ mod tests {
     #[test]
     fn test_from_petzval_radius() {
         // Petzval radius of 1000mm, pixel scale of 0.01 (100 pixels per mm)
-        let config = FieldCurvatureConfig::from_petzval_radius(1000.0, 0.01, (500.0, 500.0));
+        let config =
+            FieldCurvatureConfig::from_petzval_radius(1000.0, 0.01, DVec2::new(500.0, 500.0));
 
         // c1 = 1 / (2 × 1000 × 0.01²) = 1 / (2 × 1000 × 0.0001) = 1 / 0.2 = 5.0
         let expected_c1 = 1.0 / (2.0 * 1000.0 * 0.01 * 0.01);
@@ -821,44 +787,62 @@ mod tests {
 
     #[test]
     fn test_apply_points_batch() {
-        let model = FieldCurvature::new(FieldCurvatureConfig::simple(0.00001, (500.0, 500.0)));
-        let points = vec![(100.0, 100.0), (200.0, 200.0), (300.0, 300.0)];
+        let model = FieldCurvature::new(FieldCurvatureConfig::simple(
+            0.00001,
+            DVec2::new(500.0, 500.0),
+        ));
+        let points = vec![
+            DVec2::new(100.0, 100.0),
+            DVec2::new(200.0, 200.0),
+            DVec2::new(300.0, 300.0),
+        ];
 
         let curved = model.apply_points(&points);
 
         assert_eq!(curved.len(), points.len());
 
-        for (i, &(x, y)) in points.iter().enumerate() {
-            let (x_c, y_c) = model.apply(x, y);
-            assert!((curved[i].0 - x_c).abs() < TOLERANCE);
-            assert!((curved[i].1 - y_c).abs() < TOLERANCE);
+        for (i, &p) in points.iter().enumerate() {
+            let c = model.apply(p);
+            assert!((curved[i].x - c.x).abs() < TOLERANCE);
+            assert!((curved[i].y - c.y).abs() < TOLERANCE);
         }
     }
 
     #[test]
     fn test_correct_points_batch() {
-        let model = FieldCurvature::new(FieldCurvatureConfig::simple(0.00001, (500.0, 500.0)));
-        let points = vec![(100.0, 100.0), (200.0, 200.0), (300.0, 300.0)];
+        let model = FieldCurvature::new(FieldCurvatureConfig::simple(
+            0.00001,
+            DVec2::new(500.0, 500.0),
+        ));
+        let points = vec![
+            DVec2::new(100.0, 100.0),
+            DVec2::new(200.0, 200.0),
+            DVec2::new(300.0, 300.0),
+        ];
 
         let corrected = model.correct_points(&points);
 
         assert_eq!(corrected.len(), points.len());
 
-        for (i, &(x, y)) in points.iter().enumerate() {
-            let (x_f, y_f) = model.correct(x, y);
-            assert!((corrected[i].0 - x_f).abs() < TOLERANCE);
-            assert!((corrected[i].1 - y_f).abs() < TOLERANCE);
+        for (i, &p) in points.iter().enumerate() {
+            let f = model.correct(p);
+            assert!((corrected[i].x - f.x).abs() < TOLERANCE);
+            assert!((corrected[i].y - f.y).abs() < TOLERANCE);
         }
     }
 
     #[test]
     fn test_max_effect() {
-        let model = FieldCurvature::new(FieldCurvatureConfig::simple(0.00001, (512.0, 512.0)));
+        let model = FieldCurvature::new(FieldCurvatureConfig::simple(
+            0.00001,
+            DVec2::new(512.0, 512.0),
+        ));
         let max = model.max_effect(1024, 1024);
 
         // Max effect should be at corners
-        let (x_c, y_c) = model.apply(0.0, 0.0);
-        let corner_effect = ((x_c - 0.0).powi(2) + (y_c - 0.0).powi(2)).sqrt();
+        let p = DVec2::ZERO;
+        let c = model.apply(p);
+        let corner_effect = p.distance(c);
 
         assert!(
             (max - corner_effect).abs() < 1e-6,
@@ -870,20 +854,19 @@ mod tests {
 
     #[test]
     fn test_sag_at() {
-        let center = (500.0, 500.0);
+        let center = DVec2::new(500.0, 500.0);
         let c1 = 0.00001;
         let model = FieldCurvature::new(FieldCurvatureConfig::simple(c1, center));
 
         // At center, sag should be zero
-        let sag_center = model.sag_at(center.0, center.1);
+        let sag_center = model.sag_at(center);
         assert!(sag_center.abs() < TOLERANCE);
 
         // At radius r, sag ≈ r² × c1 / 2
-        let test_x = 600.0;
-        let test_y = 500.0;
-        let r = test_x - center.0;
+        let test_p = DVec2::new(600.0, 500.0);
+        let r = test_p.x - center.x;
         let expected_sag = r * r * c1 / 2.0;
-        let actual_sag = model.sag_at(test_x, test_y);
+        let actual_sag = model.sag_at(test_p);
 
         assert!(
             (actual_sag - expected_sag).abs() < 1e-10,
@@ -895,7 +878,7 @@ mod tests {
 
     #[test]
     fn test_estimate_curvature() {
-        let center = (500.0, 500.0);
+        let center = DVec2::new(500.0, 500.0);
         let c1_true = 0.00001;
         let model_true = FieldCurvature::new(FieldCurvatureConfig::simple(c1_true, center));
 
@@ -905,10 +888,9 @@ mod tests {
 
         for y in (0..=1000).step_by(100) {
             for x in (0..=1000).step_by(100) {
-                let xf = x as f64;
-                let yf = y as f64;
-                ideal.push((xf, yf));
-                curved.push(model_true.apply(xf, yf));
+                let pf = DVec2::new(x as f64, y as f64);
+                ideal.push(pf);
+                curved.push(model_true.apply(pf));
             }
         }
 
@@ -929,7 +911,7 @@ mod tests {
 
     #[test]
     fn test_estimate_with_two_coefficients() {
-        let center = (500.0, 500.0);
+        let center = DVec2::new(500.0, 500.0);
         // Use more significant coefficients that are numerically distinguishable
         let model_true = FieldCurvature::new(FieldCurvatureConfig {
             c1: 0.000005,
@@ -943,10 +925,9 @@ mod tests {
 
         for y in (0..=1000).step_by(25) {
             for x in (0..=1000).step_by(25) {
-                let xf = x as f64;
-                let yf = y as f64;
-                ideal.push((xf, yf));
-                curved.push(model_true.apply(xf, yf));
+                let pf = DVec2::new(x as f64, y as f64);
+                ideal.push(pf);
+                curved.push(model_true.apply(pf));
             }
         }
 
@@ -970,11 +951,18 @@ mod tests {
 
     #[test]
     fn test_rms_error() {
-        let model = FieldCurvature::new(FieldCurvatureConfig::simple(0.00001, (500.0, 500.0)));
+        let model = FieldCurvature::new(FieldCurvatureConfig::simple(
+            0.00001,
+            DVec2::new(500.0, 500.0),
+        ));
 
         // Perfect fit should have zero error
-        let ideal = vec![(100.0, 100.0), (200.0, 200.0), (300.0, 300.0)];
-        let curved: Vec<_> = ideal.iter().map(|&(x, y)| model.apply(x, y)).collect();
+        let ideal = vec![
+            DVec2::new(100.0, 100.0),
+            DVec2::new(200.0, 200.0),
+            DVec2::new(300.0, 300.0),
+        ];
+        let curved: Vec<_> = ideal.iter().map(|&p| model.apply(p)).collect();
 
         let rms = model.rms_error(&ideal, &curved);
         assert!(rms < TOLERANCE, "Perfect fit should have zero RMS: {}", rms);
@@ -985,7 +973,7 @@ mod tests {
         let config = FieldCurvatureConfig {
             c1: 0.001,
             c2: -0.0001,
-            center: (100.0, 100.0),
+            center: DVec2::new(100.0, 100.0),
         };
         let model = FieldCurvature::new(config);
 
@@ -993,9 +981,8 @@ mod tests {
         assert_eq!(c1, 0.001);
         assert_eq!(c2, -0.0001);
 
-        let (cx, cy) = model.center();
-        assert_eq!(cx, 100.0);
-        assert_eq!(cy, 100.0);
+        let c = model.center();
+        assert_eq!(c, DVec2::new(100.0, 100.0));
     }
 
     #[test]
@@ -1004,38 +991,39 @@ mod tests {
         let model = FieldCurvature::new(FieldCurvatureConfig {
             c1: 0.000001,
             c2: 0.0,
-            center: (500.0, 500.0),
+            center: DVec2::new(500.0, 500.0),
         });
 
-        let test_points = [(0.0, 0.0), (100.0, 100.0), (900.0, 900.0), (1000.0, 1000.0)];
+        let test_points = [
+            DVec2::new(0.0, 0.0),
+            DVec2::new(100.0, 100.0),
+            DVec2::new(900.0, 900.0),
+            DVec2::new(1000.0, 1000.0),
+        ];
 
-        for &(x, y) in &test_points {
-            let (x_c, y_c) = model.apply(x, y);
-            let (x_f, y_f) = model.correct(x_c, y_c);
+        for &p in &test_points {
+            let c = model.apply(p);
+            let f = model.correct(c);
 
             assert!(
-                (x_f - x).abs() < 0.01,
-                "Strong curvature roundtrip failed for ({}, {}): got ({}, {})",
-                x,
-                y,
-                x_f,
-                y_f
+                (f.x - p.x).abs() < 0.01,
+                "Strong curvature roundtrip failed for {:?}: got {:?}",
+                p,
+                f
             );
             assert!(
-                (y_f - y).abs() < 0.01,
-                "Strong curvature roundtrip failed for ({}, {}): got ({}, {})",
-                x,
-                y,
-                x_f,
-                y_f
+                (f.y - p.y).abs() < 0.01,
+                "Strong curvature roundtrip failed for {:?}: got {:?}",
+                p,
+                f
             );
         }
     }
 
     #[test]
     fn test_estimate_fails_with_insufficient_points() {
-        let ideal = vec![(100.0, 100.0), (200.0, 200.0)];
-        let curved = vec![(101.0, 101.0), (202.0, 202.0)];
+        let ideal = vec![DVec2::new(100.0, 100.0), DVec2::new(200.0, 200.0)];
+        let curved = vec![DVec2::new(101.0, 101.0), DVec2::new(202.0, 202.0)];
 
         let result = FieldCurvature::estimate(&ideal, &curved, None, 1);
         assert!(result.is_none(), "Should fail with insufficient points");
@@ -1043,8 +1031,12 @@ mod tests {
 
     #[test]
     fn test_estimate_fails_with_mismatched_lengths() {
-        let ideal = vec![(100.0, 100.0), (200.0, 200.0), (300.0, 300.0)];
-        let curved = vec![(101.0, 101.0)];
+        let ideal = vec![
+            DVec2::new(100.0, 100.0),
+            DVec2::new(200.0, 200.0),
+            DVec2::new(300.0, 300.0),
+        ];
+        let curved = vec![DVec2::new(101.0, 101.0)];
 
         let result = FieldCurvature::estimate(&ideal, &curved, None, 1);
         assert!(result.is_none(), "Should fail with mismatched lengths");
@@ -1052,8 +1044,16 @@ mod tests {
 
     #[test]
     fn test_estimate_fails_with_invalid_num_coefficients() {
-        let ideal = vec![(100.0, 100.0), (200.0, 200.0), (300.0, 300.0)];
-        let curved = vec![(101.0, 101.0), (202.0, 202.0), (303.0, 303.0)];
+        let ideal = vec![
+            DVec2::new(100.0, 100.0),
+            DVec2::new(200.0, 200.0),
+            DVec2::new(300.0, 300.0),
+        ];
+        let curved = vec![
+            DVec2::new(101.0, 101.0),
+            DVec2::new(202.0, 202.0),
+            DVec2::new(303.0, 303.0),
+        ];
 
         let result = FieldCurvature::estimate(&ideal, &curved, None, 0);
         assert!(result.is_none(), "Should fail with 0 coefficients");
@@ -1067,28 +1067,27 @@ mod tests {
         // Test that field curvature can work alongside radial distortion
         use crate::registration::distortion::RadialDistortion;
 
-        let center = (500.0, 500.0);
+        let center = DVec2::new(500.0, 500.0);
 
         let radial = RadialDistortion::barrel(0.00001, center);
         let curvature = FieldCurvature::new(FieldCurvatureConfig::simple(0.000005, center));
 
         // Apply both effects
-        let x = 300.0;
-        let y = 400.0;
+        let p = DVec2::new(300.0, 400.0);
 
         // Apply radial first, then field curvature
-        let (x_r, y_r) = radial.distort(x, y);
-        let (x_rc, y_rc) = curvature.apply(x_r, y_r);
+        let r = radial.distort(p);
+        let rc = curvature.apply(r);
 
         // The combined effect should be different from either alone
-        let (x_c, y_c) = curvature.apply(x, y);
+        let c = curvature.apply(p);
 
         assert!(
-            (x_rc - x_c).abs() > 0.01 || (y_rc - y_c).abs() > 0.01,
+            (rc.x - c.x).abs() > 0.01 || (rc.y - c.y).abs() > 0.01,
             "Combined effect should differ from curvature alone"
         );
         assert!(
-            (x_rc - x_r).abs() > 0.01 || (y_rc - y_r).abs() > 0.01,
+            (rc.x - r.x).abs() > 0.01 || (rc.y - r.y).abs() > 0.01,
             "Combined effect should differ from radial alone"
         );
     }
@@ -1099,21 +1098,22 @@ mod tests {
         let model = FieldCurvature::new(FieldCurvatureConfig {
             c1: 0.00001,
             c2: -0.0000000001,
-            center: (500.0, 500.0),
+            center: DVec2::new(500.0, 500.0),
         });
 
         // Roundtrip should still work
-        let (x_c, y_c) = model.apply(300.0, 400.0);
-        let (x_f, y_f) = model.correct(x_c, y_c);
+        let p = DVec2::new(300.0, 400.0);
+        let c = model.apply(p);
+        let f = model.correct(c);
 
-        assert!((x_f - 300.0).abs() < 1e-6);
-        assert!((y_f - 400.0).abs() < 1e-6);
+        assert!((f.x - 300.0).abs() < 1e-6);
+        assert!((f.y - 400.0).abs() < 1e-6);
     }
 
     #[test]
     fn test_estimate_with_center_auto() {
         // Test estimation with automatic center detection
-        let center = (500.0, 500.0);
+        let center = DVec2::new(500.0, 500.0);
         let model_true = FieldCurvature::new(FieldCurvatureConfig::simple(0.000005, center));
 
         // Generate grid centered around the expected center
@@ -1122,10 +1122,9 @@ mod tests {
 
         for y in (100..=900).step_by(100) {
             for x in (100..=900).step_by(100) {
-                let xf = x as f64;
-                let yf = y as f64;
-                ideal.push((xf, yf));
-                curved.push(model_true.apply(xf, yf));
+                let pf = DVec2::new(x as f64, y as f64);
+                ideal.push(pf);
+                curved.push(model_true.apply(pf));
             }
         }
 
