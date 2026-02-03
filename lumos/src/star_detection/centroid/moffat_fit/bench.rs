@@ -43,7 +43,7 @@ fn generate_moffat_data(
 // Jacobian benchmarks - compare all implementations
 // ============================================================================
 
-#[quick_bench(warmup_iters = 100, iters = 1000)]
+#[quick_bench(warmup_iters = 1000, iters = 10000)]
 fn bench_moffat_jacobian_small(b: bench::Bencher) {
     // Small stamp: 17x17 = 289 pixels
     let (data_x, data_y, data_z) = generate_moffat_data(289, 8.5, 8.5, 1.0, 2.5, 2.5, 0.1);
@@ -126,7 +126,7 @@ fn bench_moffat_jacobian_small(b: bench::Bencher) {
     }
 }
 
-#[quick_bench(warmup_iters = 50, iters = 500)]
+#[quick_bench(warmup_iters = 500, iters = 5000)]
 fn bench_moffat_jacobian_medium(b: bench::Bencher) {
     // Medium stamp: 25x25 = 625 pixels
     let (data_x, data_y, data_z) = generate_moffat_data(625, 12.5, 12.5, 1.0, 3.0, 2.5, 0.1);
@@ -209,7 +209,7 @@ fn bench_moffat_jacobian_medium(b: bench::Bencher) {
     }
 }
 
-#[quick_bench(warmup_iters = 20, iters = 200)]
+#[quick_bench(warmup_iters = 200, iters = 2000)]
 fn bench_moffat_jacobian_large(b: bench::Bencher) {
     // Large stamp: 33x33 = 1089 pixels
     let (data_x, data_y, data_z) = generate_moffat_data(1089, 16.5, 16.5, 1.0, 4.0, 2.5, 0.1);
@@ -296,7 +296,7 @@ fn bench_moffat_jacobian_large(b: bench::Bencher) {
 // Chi² benchmarks - compare all implementations
 // ============================================================================
 
-#[quick_bench(warmup_iters = 100, iters = 1000)]
+#[quick_bench(warmup_iters = 1000, iters = 10000)]
 fn bench_moffat_chi2_small(b: bench::Bencher) {
     // Small stamp: 17x17 = 289 pixels
     let (data_x, data_y, data_z) = generate_moffat_data(289, 8.5, 8.5, 1.0, 2.5, 2.5, 0.1);
@@ -339,7 +339,7 @@ fn bench_moffat_chi2_small(b: bench::Bencher) {
     }
 }
 
-#[quick_bench(warmup_iters = 50, iters = 500)]
+#[quick_bench(warmup_iters = 500, iters = 5000)]
 fn bench_moffat_chi2_medium(b: bench::Bencher) {
     // Medium stamp: 25x25 = 625 pixels
     let (data_x, data_y, data_z) = generate_moffat_data(625, 12.5, 12.5, 1.0, 3.0, 2.5, 0.1);
@@ -382,7 +382,7 @@ fn bench_moffat_chi2_medium(b: bench::Bencher) {
     }
 }
 
-#[quick_bench(warmup_iters = 20, iters = 200)]
+#[quick_bench(warmup_iters = 200, iters = 2000)]
 fn bench_moffat_chi2_large(b: bench::Bencher) {
     // Large stamp: 33x33 = 1089 pixels
     let (data_x, data_y, data_z) = generate_moffat_data(1089, 16.5, 16.5, 1.0, 4.0, 2.5, 0.1);
@@ -429,7 +429,7 @@ fn bench_moffat_chi2_large(b: bench::Bencher) {
 // Batch processing benchmark - 1000 stars
 // ============================================================================
 
-#[quick_bench(warmup_iters = 5, iters = 30)]
+#[quick_bench(warmup_iters = 5, iters = 300)]
 fn bench_moffat_batch_1000_jacobian(b: bench::Bencher) {
     let n_stars = 1000;
     let stamp_size = 289; // 17x17
@@ -529,7 +529,7 @@ fn bench_moffat_batch_1000_jacobian(b: bench::Bencher) {
     }
 }
 
-#[quick_bench(warmup_iters = 5, iters = 30)]
+#[quick_bench(warmup_iters = 5, iters = 300)]
 fn bench_moffat_batch_1000_chi2(b: bench::Bencher) {
     let n_stars = 1000;
     let stamp_size = 289; // 17x17
@@ -573,6 +573,25 @@ fn bench_moffat_batch_1000_chi2(b: bench::Bencher) {
                     unsafe { simd::avx2::compute_chi2_simd_fixed_beta(x, y, z, &params, beta) };
             }
             black_box(total)
+        });
+
+        // Batch variant: entire loop inside target_feature boundary
+        // to avoid per-call VZEROUPPER overhead (~564ns per call)
+        #[target_feature(enable = "avx2", enable = "fma")]
+        unsafe fn batch_chi2_avx2(
+            stars: &[(Vec<f32>, Vec<f32>, Vec<f32>)],
+            params: &[f32; 5],
+            beta: f32,
+        ) -> f32 {
+            let mut total = 0.0f32;
+            for (x, y, z) in stars {
+                total += unsafe { simd::avx2::compute_chi2_simd_fixed_beta(x, y, z, params, beta) };
+            }
+            total
+        }
+
+        b.bench_labeled("avx2_batched", || {
+            black_box(unsafe { batch_chi2_avx2(&stars, &params, beta) })
         });
     }
 
