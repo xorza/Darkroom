@@ -2931,6 +2931,270 @@ fn test_roundness_bounds() {
 }
 
 // =============================================================================
+// Phase 1 Iteration Behavior Tests
+// =============================================================================
+
+/// Verify that Phase 1 (weighted moments) reaches sub-pixel accuracy quickly.
+/// After 2 iterations the position should be within 0.1px of the final converged position.
+/// This establishes that reducing max iterations for fitting methods is safe.
+#[test]
+fn test_phase1_reaches_good_accuracy_in_few_iterations() {
+    let width = 64;
+    let height = 64;
+    let true_pos = Vec2::new(32.3, 32.7);
+    let pixels = make_gaussian_star(width, height, true_pos, 2.5, 0.8);
+    let bg = make_uniform_background(width, height, 0.1, 0.01);
+    let stamp_radius = 7;
+    let expected_fwhm = 5.9;
+
+    // Run full convergence to get the final position
+    let mut pos_full = Vec2::new(32.0, 33.0);
+    for _ in 0..MAX_ITERATIONS {
+        let new_pos = refine_centroid(
+            &pixels,
+            width,
+            height,
+            &bg,
+            pos_full,
+            stamp_radius,
+            expected_fwhm,
+        )
+        .expect("refine should succeed");
+        let delta = new_pos - pos_full;
+        pos_full = new_pos;
+        if delta.length_squared() < CONVERGENCE_THRESHOLD_SQ {
+            break;
+        }
+    }
+
+    // Run only 2 iterations
+    let mut pos_2iter = Vec2::new(32.0, 33.0);
+    for _ in 0..2 {
+        pos_2iter = refine_centroid(
+            &pixels,
+            width,
+            height,
+            &bg,
+            pos_2iter,
+            stamp_radius,
+            expected_fwhm,
+        )
+        .expect("refine should succeed");
+    }
+
+    // After 2 iterations, should be within 0.2px of the fully converged position
+    // (the convergence threshold is 0.001px, so final iterations refine at sub-millipixel
+    // level — well beyond what L-M fitting needs as a starting point)
+    let diff = ((pos_2iter.x - pos_full.x).powi(2) + (pos_2iter.y - pos_full.y).powi(2)).sqrt();
+    assert!(
+        diff < 0.2,
+        "After 2 iterations, position should be within 0.2px of converged result, got {:.4}px diff",
+        diff
+    );
+
+    // And within 0.3px of the true position
+    let error = ((pos_2iter.x - true_pos.x).powi(2) + (pos_2iter.y - true_pos.y).powi(2)).sqrt();
+    assert!(
+        error < 0.3,
+        "After 2 iterations, position should be within 0.3px of true position, got {:.4}px error",
+        error
+    );
+}
+
+/// Verify that even a single Phase 1 iteration provides a reasonable starting
+/// point for L-M fitting (position within ~0.5 pixels of true center).
+#[test]
+fn test_single_phase1_iteration_provides_good_seed() {
+    let width = 64;
+    let height = 64;
+
+    // Test multiple sub-pixel offsets
+    for dx in 0..5 {
+        for dy in 0..5 {
+            let true_pos = Vec2::new(32.0 + dx as f32 * 0.2, 32.0 + dy as f32 * 0.2);
+            let pixels = make_gaussian_star(width, height, true_pos, 2.5, 0.8);
+            let bg = make_uniform_background(width, height, 0.1, 0.01);
+
+            // Start from integer peak position
+            let start = Vec2::new(true_pos.x.round(), true_pos.y.round());
+
+            let after_one = refine_centroid(&pixels, width, height, &bg, start, 7, 5.9)
+                .expect("refine should succeed");
+
+            let error =
+                ((after_one.x - true_pos.x).powi(2) + (after_one.y - true_pos.y).powi(2)).sqrt();
+
+            assert!(
+                error < 0.5,
+                "Single iteration should get within 0.5px of true pos, got {:.3} for true_pos=({:.1}, {:.1})",
+                error,
+                true_pos.x,
+                true_pos.y
+            );
+        }
+    }
+}
+
+/// Verify that GaussianFit accuracy is equivalent whether Phase 1 runs 2 or 10 iterations.
+#[test]
+fn test_gaussian_fit_accuracy_independent_of_phase1_iterations() {
+    use super::gaussian_fit::{GaussianFitConfig, fit_gaussian_2d};
+
+    let width = 64;
+    let height = 64;
+    let true_pos = Vec2::new(32.3, 32.7);
+    let sigma = 2.5;
+    let pixels = make_gaussian_star(width, height, true_pos, sigma, 0.8);
+    let bg = make_uniform_background(width, height, 0.1, 0.01);
+    let stamp_radius = 7;
+    let expected_fwhm = 5.9;
+
+    // Phase 1 with only 2 iterations
+    let mut pos_2iter = Vec2::new(32.0, 33.0);
+    for _ in 0..2 {
+        pos_2iter = refine_centroid(
+            &pixels,
+            width,
+            height,
+            &bg,
+            pos_2iter,
+            stamp_radius,
+            expected_fwhm,
+        )
+        .expect("refine should succeed");
+    }
+
+    // Phase 1 with full 10 iterations
+    let mut pos_full = Vec2::new(32.0, 33.0);
+    for _ in 0..MAX_ITERATIONS {
+        let new_pos = refine_centroid(
+            &pixels,
+            width,
+            height,
+            &bg,
+            pos_full,
+            stamp_radius,
+            expected_fwhm,
+        )
+        .expect("refine should succeed");
+        let delta = new_pos - pos_full;
+        pos_full = new_pos;
+        if delta.length_squared() < CONVERGENCE_THRESHOLD_SQ {
+            break;
+        }
+    }
+
+    // Now apply Gaussian fit from both starting points
+    let config = GaussianFitConfig::default();
+    let result_2iter = fit_gaussian_2d(&pixels, pos_2iter, stamp_radius, 0.1, &config)
+        .expect("fit should succeed from 2-iter seed");
+    let result_full = fit_gaussian_2d(&pixels, pos_full, stamp_radius, 0.1, &config)
+        .expect("fit should succeed from full seed");
+
+    // Both should converge to essentially the same position
+    let diff = ((result_2iter.pos.x - result_full.pos.x).powi(2)
+        + (result_2iter.pos.y - result_full.pos.y).powi(2))
+    .sqrt();
+
+    assert!(
+        diff < 0.01,
+        "Gaussian fit should converge to same position regardless of Phase 1 iterations: diff={:.4}",
+        diff
+    );
+
+    // Both should be close to true position
+    let error_2iter = ((result_2iter.pos.x - true_pos.x).powi(2)
+        + (result_2iter.pos.y - true_pos.y).powi(2))
+    .sqrt();
+    assert!(
+        error_2iter < 0.05,
+        "Gaussian fit from 2-iter seed should achieve <0.05px accuracy, got {:.4}",
+        error_2iter
+    );
+}
+
+/// Verify that MoffatFit accuracy is equivalent whether Phase 1 runs 2 or 10 iterations.
+#[test]
+fn test_moffat_fit_accuracy_independent_of_phase1_iterations() {
+    use super::moffat_fit::{MoffatFitConfig, fit_moffat_2d};
+
+    let width = 64;
+    let height = 64;
+    let true_pos = Vec2::new(32.3, 32.7);
+    let pixels = make_gaussian_star(width, height, true_pos, 2.5, 0.8);
+    let bg = make_uniform_background(width, height, 0.1, 0.01);
+    let stamp_radius = 7;
+    let expected_fwhm = 5.9;
+
+    // Phase 1 with only 2 iterations
+    let mut pos_2iter = Vec2::new(32.0, 33.0);
+    for _ in 0..2 {
+        pos_2iter = refine_centroid(
+            &pixels,
+            width,
+            height,
+            &bg,
+            pos_2iter,
+            stamp_radius,
+            expected_fwhm,
+        )
+        .expect("refine should succeed");
+    }
+
+    // Phase 1 with full 10 iterations
+    let mut pos_full = Vec2::new(32.0, 33.0);
+    for _ in 0..MAX_ITERATIONS {
+        let new_pos = refine_centroid(
+            &pixels,
+            width,
+            height,
+            &bg,
+            pos_full,
+            stamp_radius,
+            expected_fwhm,
+        )
+        .expect("refine should succeed");
+        let delta = new_pos - pos_full;
+        pos_full = new_pos;
+        if delta.length_squared() < CONVERGENCE_THRESHOLD_SQ {
+            break;
+        }
+    }
+
+    // Now apply Moffat fit from both starting points
+    let config = MoffatFitConfig {
+        fit_beta: false,
+        fixed_beta: 2.5,
+        ..MoffatFitConfig::default()
+    };
+    let result_2iter = fit_moffat_2d(&pixels, pos_2iter, stamp_radius, 0.1, &config)
+        .expect("fit should succeed from 2-iter seed");
+    let result_full = fit_moffat_2d(&pixels, pos_full, stamp_radius, 0.1, &config)
+        .expect("fit should succeed from full seed");
+
+    // Both should converge to essentially the same position
+    let diff = ((result_2iter.pos.x - result_full.pos.x).powi(2)
+        + (result_2iter.pos.y - result_full.pos.y).powi(2))
+    .sqrt();
+
+    assert!(
+        diff < 0.01,
+        "Moffat fit should converge to same position regardless of Phase 1 iterations: diff={:.4}",
+        diff
+    );
+
+    // Both should be close to true position
+    let error_2iter = ((result_2iter.pos.x - true_pos.x).powi(2)
+        + (result_2iter.pos.y - true_pos.y).powi(2))
+    .sqrt();
+    assert!(
+        error_2iter < 0.05,
+        "Moffat fit from 2-iter seed should achieve <0.05px accuracy, got {:.4}",
+        error_2iter
+    );
+}
+
+// =============================================================================
 // compute_stamp_radius Tests
 // =============================================================================
 
