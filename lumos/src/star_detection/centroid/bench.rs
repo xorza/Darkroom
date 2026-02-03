@@ -45,7 +45,7 @@ fn make_gaussian_star(
 // Single Star Centroid Benchmarks
 // =============================================================================
 
-#[quick_bench(warmup_iters = 5, iters = 100)]
+#[quick_bench(warmup_iters = 10, iters = 2000)]
 fn bench_compute_centroid_single(b: ::bench::Bencher) {
     // Single star centroid computation with WeightedMoments
     let width = 64;
@@ -72,7 +72,7 @@ fn bench_compute_centroid_single(b: ::bench::Bencher) {
     });
 }
 
-#[quick_bench(warmup_iters = 5, iters = 100)]
+#[quick_bench(warmup_iters = 10, iters = 2000)]
 fn bench_compute_centroid_gaussian_fit(b: ::bench::Bencher) {
     // Single star centroid with Gaussian fitting
     let width = 64;
@@ -99,7 +99,7 @@ fn bench_compute_centroid_gaussian_fit(b: ::bench::Bencher) {
     });
 }
 
-#[quick_bench(warmup_iters = 5, iters = 100)]
+#[quick_bench(warmup_iters = 10, iters = 2000)]
 fn bench_compute_centroid_moffat_fit(b: ::bench::Bencher) {
     // Single star centroid with Moffat fitting
     let width = 64;
@@ -126,7 +126,7 @@ fn bench_compute_centroid_moffat_fit(b: ::bench::Bencher) {
     });
 }
 
-#[quick_bench(warmup_iters = 5, iters = 100)]
+#[quick_bench(warmup_iters = 10, iters = 2000)]
 fn bench_compute_centroid_local_annulus(b: ::bench::Bencher) {
     // Single star centroid with LocalAnnulus background
     let width = 128;
@@ -157,7 +157,7 @@ fn bench_compute_centroid_local_annulus(b: ::bench::Bencher) {
 // Batch Processing Benchmarks
 // =============================================================================
 
-#[quick_bench(warmup_iters = 3, iters = 20)]
+#[quick_bench(warmup_iters = 5, iters = 200)]
 fn bench_compute_centroid_batch_100(b: ::bench::Bencher) {
     // 100 stars batch processing with WeightedMoments
     let pixels = benchmark_star_field(512, 512, 100, 0.1, 0.01, 42);
@@ -261,7 +261,7 @@ fn bench_refine_centroid_single(b: ::bench::Bencher) {
     });
 }
 
-#[quick_bench(warmup_iters = 5, iters = 100)]
+#[quick_bench(warmup_iters = 10, iters = 1000)]
 fn bench_refine_centroid_batch_1000(b: ::bench::Bencher) {
     // 1000 refine_centroid calls to amplify exp() cost
     let width = 64;
