@@ -65,7 +65,7 @@ let config = StarDetectionConfig::default()
     .with_adaptive_threshold();
 
 // Use preset for nebulous fields
-let config = StarDetectionConfig::for_nebulous_field();
+let config = StarDetectionConfig::default().nebulous_field();
 
 // Custom configuration
 let config = StarDetectionConfig::default()

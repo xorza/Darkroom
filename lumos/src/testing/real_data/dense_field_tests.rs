@@ -52,13 +52,8 @@ fn test_multi_threshold_on_dense_fields() {
         );
 
         // Multi-threshold config (enabled when n_thresholds > 0)
-        let config = StarDetectionConfig {
-            deblend: DeblendConfig {
-                n_thresholds: 32,
-                ..Default::default()
-            },
-            ..StarDetectionConfig::for_crowded_field()
-        };
+        let mut config = StarDetectionConfig::default().crowded_field();
+        config.deblend.n_thresholds = 32;
 
         let mut detector = StarDetector::from_config(config);
 
@@ -136,22 +131,12 @@ fn test_compare_local_maxima_vs_multi_threshold() {
     );
 
     // Local maxima (simple) - n_thresholds = 0
-    let config_local = StarDetectionConfig {
-        deblend: DeblendConfig {
-            n_thresholds: 0,
-            ..Default::default()
-        },
-        ..StarDetectionConfig::for_crowded_field()
-    };
+    let mut config_local = StarDetectionConfig::default().crowded_field();
+    config_local.deblend.n_thresholds = 0;
 
     // Multi-threshold - n_thresholds = 32
-    let config_multi = StarDetectionConfig {
-        deblend: DeblendConfig {
-            n_thresholds: 32,
-            ..Default::default()
-        },
-        ..StarDetectionConfig::for_crowded_field()
-    };
+    let mut config_multi = StarDetectionConfig::default().crowded_field();
+    config_multi.deblend.n_thresholds = 32;
 
     println!("\n--- Local Maxima Deblending ---");
     let mut detector_local = StarDetector::from_config(config_local);

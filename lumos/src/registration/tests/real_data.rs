@@ -106,7 +106,7 @@ fn test_register_two_calibrated_lights() {
     );
 
     // Detect stars with precise Moffat centroids
-    let star_config = StarDetectionConfig::for_precise_ground();
+    let star_config = StarDetectionConfig::default().precise_ground();
     let mut detector = StarDetector::from_config(star_config);
 
     let result1 = detector.detect(&img1);

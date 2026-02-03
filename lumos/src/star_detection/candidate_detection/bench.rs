@@ -163,7 +163,7 @@ fn bench_extract_candidates_6k_dense(b: ::bench::Bencher) {
         crate::star_detection::config::Connectivity::Four,
     );
 
-    let crowded_config = StarDetectionConfig::for_crowded_field();
+    let crowded_config = StarDetectionConfig::default().crowded_field();
     let config = &crowded_config.deblend;
     let max_area = crowded_config.filtering.max_area;
 
@@ -213,7 +213,7 @@ fn bench_detect_stars_6k_50000(b: ::bench::Bencher) {
     // 6K image with 50000 stars - full detect_stars pipeline
     let pixels = benchmark_star_field(6144, 6144, 50000, 0.1, 0.01, 42);
     let background = crate::testing::estimate_background(&pixels, BackgroundConfig::default());
-    let config = StarDetectionConfig::for_crowded_field();
+    let config = StarDetectionConfig::default().crowded_field();
     let mut pool = BufferPool::new(pixels.width(), pixels.height());
 
     b.bench(|| {

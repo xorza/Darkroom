@@ -628,67 +628,48 @@ impl StarDetectionConfig {
     }
 
     // =========================================================================
-    // Preset Constructors
+    // Chainable Preset Modifiers
     // =========================================================================
 
-    /// Create config for wide-field imaging (short focal length, large pixel scale).
+    /// Apply wide-field imaging settings (short focal length, large pixel scale).
     ///
     /// Wide-field setups produce larger stars (FWHM 5-8px) that may be slightly
     /// elongated at field edges due to coma and field curvature. Uses relaxed
     /// eccentricity filtering, auto FWHM estimation, and 8-connectivity for
     /// undersampled PSFs that may not connect well with 4-connectivity.
-    pub fn for_wide_field() -> Self {
-        Self {
-            psf: PsfConfig {
-                expected_fwhm: 6.0,
-                auto_estimate: true,
-                min_stars_for_estimation: 15,
-                ..Default::default()
-            },
-            filtering: FilteringConfig {
-                min_area: 7,
-                max_area: 1500,
-                edge_margin: 20,
-                max_eccentricity: 0.7,
-                connectivity: Connectivity::Eight,
-                ..Default::default()
-            },
-            ..Default::default()
-        }
+    pub fn wide_field(mut self) -> Self {
+        self.psf.expected_fwhm = 6.0;
+        self.psf.auto_estimate = true;
+        self.psf.min_stars_for_estimation = 15;
+        self.filtering.min_area = 7;
+        self.filtering.max_area = 1500;
+        self.filtering.edge_margin = 20;
+        self.filtering.max_eccentricity = 0.7;
+        self.filtering.connectivity = Connectivity::Eight;
+        self
     }
 
-    /// Create config for high-resolution imaging (long focal length, small pixel scale).
+    /// Apply high-resolution imaging settings (long focal length, small pixel scale).
     ///
     /// Well-sampled Nyquist PSFs (FWHM 2-4px) with symmetric profiles. Uses
     /// Gaussian centroid fitting for maximum precision on well-sampled stars,
     /// stricter eccentricity and roundness filtering, and higher SNR threshold
     /// to build a clean, high-quality star catalog. Auto FWHM estimation
     /// ensures the matched filter adapts to actual seeing conditions.
-    pub fn for_high_resolution() -> Self {
-        Self {
-            psf: PsfConfig {
-                expected_fwhm: 2.5,
-                auto_estimate: true,
-                min_stars_for_estimation: 15,
-                ..Default::default()
-            },
-            filtering: FilteringConfig {
-                min_area: 3,
-                max_area: 200,
-                min_snr: 15.0,
-                max_eccentricity: 0.5,
-                max_roundness: 0.3,
-                ..Default::default()
-            },
-            centroid: CentroidConfig {
-                method: CentroidMethod::GaussianFit,
-                ..Default::default()
-            },
-            ..Default::default()
-        }
+    pub fn high_resolution(mut self) -> Self {
+        self.psf.expected_fwhm = 2.5;
+        self.psf.auto_estimate = true;
+        self.psf.min_stars_for_estimation = 15;
+        self.filtering.min_area = 3;
+        self.filtering.max_area = 200;
+        self.filtering.min_snr = 15.0;
+        self.filtering.max_eccentricity = 0.5;
+        self.filtering.max_roundness = 0.3;
+        self.centroid.method = CentroidMethod::GaussianFit;
+        self
     }
 
-    /// Create config for crowded fields (globular clusters, dense star fields).
+    /// Apply crowded field settings (globular clusters, dense star fields).
     ///
     /// Enables SExtractor-style multi-threshold deblending (32 sub-thresholds)
     /// with low contrast threshold to separate close blends. Uses iterative
@@ -696,32 +677,19 @@ impl StarDetectionConfig {
     /// (critical in crowded fields where sources bias the initial estimate).
     /// 8-connectivity prevents artificial splitting of close pairs.
     /// Lower min_prominence allows detecting secondary peaks in blends.
-    pub fn for_crowded_field() -> Self {
-        Self {
-            deblend: DeblendConfig {
-                n_thresholds: 32,
-                min_separation: 2,
-                min_prominence: 0.15,
-                min_contrast: 0.005,
-            },
-            background: BackgroundConfig {
-                refinement: BackgroundRefinement::Iterative { iterations: 2 },
-                ..Default::default()
-            },
-            filtering: FilteringConfig {
-                duplicate_min_separation: 3.0,
-                connectivity: Connectivity::Eight,
-                ..Default::default()
-            },
-            psf: PsfConfig {
-                auto_estimate: true,
-                ..Default::default()
-            },
-            ..Default::default()
-        }
+    pub fn crowded_field(mut self) -> Self {
+        self.deblend.n_thresholds = 32;
+        self.deblend.min_separation = 2;
+        self.deblend.min_prominence = 0.15;
+        self.deblend.min_contrast = 0.005;
+        self.background.refinement = BackgroundRefinement::Iterative { iterations: 2 };
+        self.filtering.duplicate_min_separation = 3.0;
+        self.filtering.connectivity = Connectivity::Eight;
+        self.psf.auto_estimate = true;
+        self
     }
 
-    /// Create config for nebulous fields (adaptive thresholding enabled).
+    /// Apply nebulous field settings (adaptive thresholding enabled).
     ///
     /// Images with bright nebulosity, H-II regions, or structured backgrounds
     /// where a fixed detection threshold causes massive false positives in
@@ -730,27 +698,19 @@ impl StarDetectionConfig {
     /// sky areas. Larger tile size (128px) averages over nebular structure for
     /// more stable background estimation. Higher mask dilation prevents nebular
     /// wings from contaminating tile statistics.
-    pub fn for_nebulous_field() -> Self {
-        Self {
-            background: BackgroundConfig {
-                tile_size: 128,
-                mask_dilation: 5,
-                refinement: BackgroundRefinement::AdaptiveSigma(AdaptiveSigmaConfig {
-                    base_sigma: 4.0,
-                    max_sigma: 10.0,
-                    contrast_factor: 2.5,
-                }),
-                ..Default::default()
-            },
-            psf: PsfConfig {
-                auto_estimate: true,
-                ..Default::default()
-            },
-            ..Default::default()
-        }
+    pub fn nebulous_field(mut self) -> Self {
+        self.background.tile_size = 128;
+        self.background.mask_dilation = 5;
+        self.background.refinement = BackgroundRefinement::AdaptiveSigma(AdaptiveSigmaConfig {
+            base_sigma: 4.0,
+            max_sigma: 10.0,
+            contrast_factor: 2.5,
+        });
+        self.psf.auto_estimate = true;
+        self
     }
 
-    /// Create config for maximum centroid precision in ground-based astrophotography.
+    /// Apply maximum centroid precision settings for ground-based astrophotography.
     ///
     /// Optimized for sub-pixel astrometric accuracy. Uses Moffat PSF fitting
     /// (beta=2.5, IRAF default) which models atmospheric seeing wings better
@@ -760,53 +720,38 @@ impl StarDetectionConfig {
     /// (SExtractor-style, 32 levels) resolves close pairs. Higher SNR threshold
     /// (15σ) and strict shape filtering ensure only well-measured, isolated
     /// stars enter the final catalog.
-    pub fn for_precise_ground() -> Self {
-        Self {
-            background: BackgroundConfig {
-                sigma_threshold: 3.0,
-                mask_dilation: 5,
-                min_unmasked_fraction: 0.2,
-                tile_size: 128,
-                sigma_clip_iterations: 3,
-                refinement: BackgroundRefinement::AdaptiveSigma(AdaptiveSigmaConfig {
-                    base_sigma: 3.0,
-                    max_sigma: 10.0,
-                    contrast_factor: 3.0,
-                }),
-            },
-            filtering: FilteringConfig {
-                min_area: 7,
-                max_area: 2000,
-                edge_margin: 15,
-                min_snr: 15.0,
-                max_eccentricity: 0.5,
-                max_sharpness: 0.7,
-                max_roundness: 0.3,
-                max_fwhm_deviation: 4.0,
-                duplicate_min_separation: 5.0,
-                connectivity: Connectivity::Eight,
-            },
-            deblend: DeblendConfig {
-                min_separation: 2,
-                min_prominence: 0.15,
-                n_thresholds: 32,
-                min_contrast: 0.003,
-            },
-            centroid: CentroidConfig {
-                method: CentroidMethod::MoffatFit { beta: 2.5 },
-                local_background_method: LocalBackgroundMethod::LocalAnnulus,
-            },
-            psf: PsfConfig {
-                expected_fwhm: 3.0,
-                axis_ratio: 1.0,
-                angle: 0.0,
-                auto_estimate: true,
-                min_stars_for_estimation: 30,
-                estimation_sigma_factor: 2.5,
-            },
-            noise_model: None,
-            defect_map: None,
-        }
+    pub fn precise_ground(mut self) -> Self {
+        self.background.sigma_threshold = 3.0;
+        self.background.mask_dilation = 5;
+        self.background.min_unmasked_fraction = 0.2;
+        self.background.tile_size = 128;
+        self.background.sigma_clip_iterations = 3;
+        self.background.refinement = BackgroundRefinement::AdaptiveSigma(AdaptiveSigmaConfig {
+            base_sigma: 3.0,
+            max_sigma: 10.0,
+            contrast_factor: 3.0,
+        });
+        self.filtering.min_area = 7;
+        self.filtering.max_area = 2000;
+        self.filtering.edge_margin = 15;
+        self.filtering.min_snr = 15.0;
+        self.filtering.max_eccentricity = 0.5;
+        self.filtering.max_sharpness = 0.7;
+        self.filtering.max_roundness = 0.3;
+        self.filtering.max_fwhm_deviation = 4.0;
+        self.filtering.duplicate_min_separation = 5.0;
+        self.filtering.connectivity = Connectivity::Eight;
+        self.deblend.min_separation = 2;
+        self.deblend.min_prominence = 0.15;
+        self.deblend.n_thresholds = 32;
+        self.deblend.min_contrast = 0.003;
+        self.centroid.method = CentroidMethod::MoffatFit { beta: 2.5 };
+        self.centroid.local_background_method = LocalBackgroundMethod::LocalAnnulus;
+        self.psf.expected_fwhm = 3.0;
+        self.psf.auto_estimate = true;
+        self.psf.min_stars_for_estimation = 30;
+        self.psf.estimation_sigma_factor = 2.5;
+        self
     }
 }
 
@@ -1097,16 +1042,16 @@ mod tests {
 
     #[test]
     fn test_star_detection_config_presets() {
-        StarDetectionConfig::for_wide_field().validate();
-        StarDetectionConfig::for_high_resolution().validate();
-        StarDetectionConfig::for_crowded_field().validate();
-        StarDetectionConfig::for_nebulous_field().validate();
-        StarDetectionConfig::for_precise_ground().validate();
+        StarDetectionConfig::default().wide_field().validate();
+        StarDetectionConfig::default().high_resolution().validate();
+        StarDetectionConfig::default().crowded_field().validate();
+        StarDetectionConfig::default().nebulous_field().validate();
+        StarDetectionConfig::default().precise_ground().validate();
     }
 
     #[test]
-    fn test_star_detection_config_for_nebulous_field() {
-        let config = StarDetectionConfig::for_nebulous_field();
+    fn test_star_detection_config_nebulous_field() {
+        let config = StarDetectionConfig::default().nebulous_field();
         assert!(config.background.refinement.adaptive_sigma().is_some());
         config.validate();
     }
@@ -1198,5 +1143,54 @@ mod tests {
             ..Default::default()
         };
         config.validate(); // Should not panic with valid beta
+    }
+
+    #[test]
+    fn test_preset_chaining() {
+        // Chaining nebulous_field then crowded_field: crowded_field's refinement
+        // (Iterative) should override nebulous_field's (AdaptiveSigma),
+        // but nebulous_field's tile_size and mask_dilation should survive
+        // since crowded_field doesn't set them.
+        let config = StarDetectionConfig::default()
+            .nebulous_field()
+            .crowded_field();
+
+        // From nebulous_field (not overridden by crowded_field)
+        assert_eq!(config.background.tile_size, 128);
+        assert_eq!(config.background.mask_dilation, 5);
+
+        // From crowded_field (overrides nebulous_field's AdaptiveSigma)
+        assert!(matches!(
+            config.background.refinement,
+            BackgroundRefinement::Iterative { iterations: 2 }
+        ));
+        assert_eq!(config.deblend.n_thresholds, 32);
+        assert_eq!(config.deblend.min_separation, 2);
+        assert!((config.deblend.min_prominence - 0.15).abs() < 1e-6);
+        assert!((config.deblend.min_contrast - 0.005).abs() < 1e-6);
+        assert_eq!(config.filtering.connectivity, Connectivity::Eight);
+
+        config.validate();
+    }
+
+    #[test]
+    fn test_preset_chaining_reverse_order() {
+        // Reverse order: crowded_field then nebulous_field.
+        // nebulous_field's AdaptiveSigma should win over Iterative.
+        let config = StarDetectionConfig::default()
+            .crowded_field()
+            .nebulous_field();
+
+        // From crowded_field (not overridden by nebulous_field)
+        assert_eq!(config.deblend.n_thresholds, 32);
+        assert_eq!(config.deblend.min_separation, 2);
+        assert_eq!(config.filtering.connectivity, Connectivity::Eight);
+
+        // From nebulous_field (overrides crowded_field's Iterative)
+        assert_eq!(config.background.tile_size, 128);
+        assert_eq!(config.background.mask_dilation, 5);
+        assert!(config.background.refinement.adaptive_sigma().is_some());
+
+        config.validate();
     }
 }

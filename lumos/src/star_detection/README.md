@@ -105,16 +105,19 @@ let result = detector.detect(&image);
 
 ```rust
 // Wide-field imaging (larger stars, relaxed filtering)
-let config = StarDetectionConfig::for_wide_field();
+let config = StarDetectionConfig::default().wide_field();
 
 // High-resolution imaging (smaller stars, stricter filtering)
-let config = StarDetectionConfig::for_high_resolution();
+let config = StarDetectionConfig::default().high_resolution();
 
 // Crowded fields (aggressive deblending, iterative background)
-let config = StarDetectionConfig::for_crowded_field();
+let config = StarDetectionConfig::default().crowded_field();
 
 // Nebulous fields (adaptive sigma thresholding)
-let config = StarDetectionConfig::for_nebulous_field();
+let config = StarDetectionConfig::default().nebulous_field();
+
+// Chainable: combine presets (last writer wins for overlapping fields)
+let config = StarDetectionConfig::default().nebulous_field().crowded_field();
 ```
 
 ## Pipeline Stages
@@ -521,7 +524,7 @@ StarDetectionConfig {
 
 **Crowded fields:**
 ```rust
-StarDetectionConfig::for_crowded_field()
+StarDetectionConfig::default().crowded_field()
 // Or manually:
 StarDetectionConfig {
     background: BackgroundConfig {
@@ -540,7 +543,7 @@ StarDetectionConfig {
 
 **Nebulous backgrounds:**
 ```rust
-StarDetectionConfig::for_nebulous_field()
+StarDetectionConfig::default().nebulous_field()
 // Uses AdaptiveSigma refinement to raise thresholds in high-contrast regions
 ```
 
