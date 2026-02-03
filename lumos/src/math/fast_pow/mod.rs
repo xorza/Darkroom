@@ -4,9 +4,8 @@
 //! optimized for common half-integer exponents used in Moffat profile fitting.
 //!
 //! For common half-integer beta values (1.0, 1.5, 2.0, ..., 4.5), uses exact arithmetic
-//! (multiply + sqrt) instead of transcendentals. Falls back to `exp(neg_beta * ln(u))`
-//! for arbitrary values, which is still faster than `powf` because it skips NaN/sign/edge-case
-//! handling that doesn't apply when u > 1.
+//! (multiply + sqrt) instead of transcendentals — ~2x faster than `powf` with zero error.
+//! Falls back to `powf` for arbitrary beta values.
 
 #[cfg(test)]
 mod bench;
@@ -16,10 +15,8 @@ mod tests;
 /// Compute `u^(neg_beta)` efficiently where `neg_beta` is negative.
 ///
 /// For common half-integer beta values (1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5),
-/// uses exact arithmetic (multiply + sqrt) instead of transcendentals.
-/// Falls back to `exp(neg_beta * ln(u))` for arbitrary beta, which is still
-/// faster than `powf` because it skips NaN/sign/edge-case handling that doesn't
-/// apply here (u is always > 1.0 in the Moffat profile).
+/// uses exact arithmetic (multiply + sqrt) instead of transcendentals — ~2x faster
+/// than `powf` with zero error. Falls back to `powf` for arbitrary beta values.
 #[inline]
 pub fn fast_pow_neg_beta(u: f32, neg_beta: f32) -> f32 {
     // Match on common half-integer values of beta (neg_beta = -beta).
@@ -31,7 +28,7 @@ pub fn fast_pow_neg_beta(u: f32, neg_beta: f32) -> f32 {
 
     // Only use specialized path if beta is actually a half-integer (within f32 precision)
     if (twice_beta_f - twice_beta as f32).abs() > 0.01 {
-        return (neg_beta * u.ln()).exp();
+        return u.powf(neg_beta);
     }
 
     match twice_beta {
@@ -75,7 +72,7 @@ pub fn fast_pow_neg_beta(u: f32, neg_beta: f32) -> f32 {
             let sqrt_u = u.sqrt();
             1.0 / (u2 * u2 * sqrt_u)
         }
-        // Arbitrary beta: use exp(neg_beta * ln(u))
-        _ => (neg_beta * u.ln()).exp(),
+        // Arbitrary beta: fall back to powf
+        _ => u.powf(neg_beta),
     }
 }

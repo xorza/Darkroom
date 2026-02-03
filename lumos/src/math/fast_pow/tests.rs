@@ -40,9 +40,9 @@ fn test_arbitrary_beta_matches_powf() {
             let fast = fast_pow_neg_beta(u, neg_beta);
             let reference = reference_pow(u, neg_beta);
             let rel_error = (fast - reference).abs() / reference.abs().max(1e-30);
-            // exp·ln fallback has slightly lower precision than powf (~1e-6 typical)
+            // Fallback uses powf directly, so should match exactly (or near-exactly)
             assert!(
-                rel_error < 1e-5,
+                rel_error < 1e-6,
                 "beta={}, u={}: fast={:.10e}, ref={:.10e}, rel_error={:.2e}",
                 beta,
                 u,
@@ -105,6 +105,42 @@ fn test_result_is_positive() {
                 result
             );
         }
+    }
+}
+
+#[test]
+fn test_u_exactly_one() {
+    // u = 1.0 means pixel is at the center: u^(neg_beta) = 1.0 for any beta
+    for &beta in &[1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 2.7] {
+        let result = fast_pow_neg_beta(1.0, -beta);
+        assert!(
+            (result - 1.0).abs() < 1e-6,
+            "beta={}: u=1.0 should give 1.0 but got {}",
+            beta,
+            result
+        );
+    }
+}
+
+#[test]
+fn test_guard_rejects_non_half_integers() {
+    // Verify that non-half-integer beta values do NOT dispatch to the half-integer path.
+    // beta=1.3 was a known bug case: (-(-1.3) * 2.0).round() = 3 which matched beta=1.5.
+    // The guard should prevent this.
+    let u = 2.0;
+    for &beta in &[1.1, 1.3, 1.7, 2.1, 2.3, 2.7, 3.1, 3.3, 3.7, 4.1, 4.3] {
+        let neg_beta = -beta;
+        let fast = fast_pow_neg_beta(u, neg_beta);
+        let reference = reference_pow(u, neg_beta);
+        let rel_error = (fast - reference).abs() / reference.abs();
+        assert!(
+            rel_error < 1e-6,
+            "Guard failed for beta={}: fast={:.10e}, ref={:.10e}, rel_error={:.2e}",
+            beta,
+            fast,
+            reference,
+            rel_error
+        );
     }
 }
 
