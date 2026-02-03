@@ -307,6 +307,13 @@ unsafe fn optimize_gaussian_avx2(
                 converged = true;
                 break;
             }
+            // Early exit when only position accuracy matters
+            if delta[0].abs() < config.position_convergence_threshold
+                && delta[1].abs() < config.position_convergence_threshold
+            {
+                converged = true;
+                break;
+            }
         } else {
             let chi2_rel_diff = (new_chi2 - prev_chi2) / prev_chi2.max(1e-30);
             if chi2_rel_diff < 1e-6 {

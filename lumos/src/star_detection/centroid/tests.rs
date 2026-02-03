@@ -476,7 +476,7 @@ fn test_refine_centroid_iterative_convergence() {
     // Simulate multiple iterations like compute_centroid does
     let mut pos = Vec2::splat(32.0);
 
-    for iteration in 0..MAX_ITERATIONS {
+    for iteration in 0..MAX_MOMENTS_ITERATIONS {
         let result = refine_centroid(
             &pixels,
             width,
@@ -2949,7 +2949,7 @@ fn test_phase1_reaches_good_accuracy_in_few_iterations() {
 
     // Run full convergence to get the final position
     let mut pos_full = Vec2::new(32.0, 33.0);
-    for _ in 0..MAX_ITERATIONS {
+    for _ in 0..MAX_MOMENTS_ITERATIONS {
         let new_pos = refine_centroid(
             &pixels,
             width,
@@ -3066,7 +3066,7 @@ fn test_gaussian_fit_accuracy_independent_of_phase1_iterations() {
 
     // Phase 1 with full 10 iterations
     let mut pos_full = Vec2::new(32.0, 33.0);
-    for _ in 0..MAX_ITERATIONS {
+    for _ in 0..MAX_MOMENTS_ITERATIONS {
         let new_pos = refine_centroid(
             &pixels,
             width,
@@ -3143,7 +3143,7 @@ fn test_moffat_fit_accuracy_independent_of_phase1_iterations() {
 
     // Phase 1 with full 10 iterations
     let mut pos_full = Vec2::new(32.0, 33.0);
-    for _ in 0..MAX_ITERATIONS {
+    for _ in 0..MAX_MOMENTS_ITERATIONS {
         let new_pos = refine_centroid(
             &pixels,
             width,

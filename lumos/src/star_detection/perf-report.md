@@ -2,10 +2,10 @@
 
 **Benchmark:** `quick_bench_detect_rho_opiuchi` (`precise_ground()` + `GaussianFit` centroid)
 **Image:** rho-opiuchi.jpg, 8584x5874 pixels, grayscale
-**Runtime:** 478ms median (release, 10 iters)
+**Runtime:** 445ms median (release, 10 iters)
 **Samples:** 196,981 (perf record -F 3000, --call-graph dwarf, --no-inline)
 **Date:** 2026-02-03
-**Last updated:** 2026-02-03 (after convolution buffer pooling)
+**Last updated:** 2026-02-03 (after centroid optimizations 6+7)
 
 ## Top Functions (self time)
 
@@ -62,6 +62,28 @@ The separable Gaussian convolution in `gaussian_convolve()` allocated a fresh ~2
 - Full pipeline: 492ms → 478ms (**-2.8%**)
 - First `detect()` call: unchanged (pool allocates fresh buffer)
 - Subsequent calls: ~14ms savings (page faults eliminated for convolution temp)
+
+### Optimization 7: Early L-M termination on position convergence (462ms → 445ms, -3.8%)
+
+The L-M optimizer converges all 6 parameters (x0, y0, amplitude, sigma_x, sigma_y, background) to 1e-6 threshold. For centroid computation, only position (x0, y0) matters — continuing iterations to refine sigma/amplitude wastes cycles.
+
+**Fix:** Added `position_convergence_threshold` to `LMConfig`. When set, the optimizer terminates early once both position deltas are below the threshold (0.001px), even if other parameters are still changing. Applied to both the generic L-M optimizer and the SIMD-optimized Gaussian/Moffat paths.
+
+**Results:**
+- GaussianFit single: 8.356µs → 6.041µs (**-27.7%**)
+- MoffatFit single: 8.697µs → 8.677µs (unchanged — chi2 stagnation was already triggering early exit)
+- Full pipeline: 462ms → 445ms (**-3.8%**)
+
+### Optimization 6: Reduce Phase 1 iterations for fitting methods (478ms → 462ms, -2.5%)
+
+`compute_centroid` runs Phase 1 (iterative weighted moments, up to 10 iterations) before Phase 2 (L-M fitting). When fitting follows, Phase 1 only needs to provide a reasonable seed — the L-M optimizer refines position independently and converges to the same result regardless of Phase 1 precision (verified by tests).
+
+**Fix:** Reduced Phase 1 from 10 to 2 iterations when `CentroidMethod` is `GaussianFit` or `MoffatFit`. `WeightedMoments` mode still uses 10 iterations.
+
+**Results:**
+- GaussianFit single: 10.24µs → 8.356µs (**-18.4%**)
+- MoffatFit single: 13.586µs → 8.697µs (**-36.0%**)
+- Full pipeline: 478ms → 462ms (**-2.5%**)
 
 ### Optimization 4: Deblend allocation reduction (503ms → 495ms, -1.6%)
 
@@ -135,21 +157,13 @@ Two rounds of optimization to deblending:
 
 Threaded a `&mut Buffer2<f32>` temp buffer through the convolution call chain and acquired it from `BufferPool` in the detector. On repeated `detect()` calls, the buffer is reused — no page faults for the ~200MB separable convolution intermediate. See Optimization 5 in Change History.
 
-### 4. Reduce centroid refinement passes (potential: -3-5%)
+### ~~4. Reduce centroid refinement passes~~ — Done (-2.5%)
 
-`refine_centroid_avx2` (7.5%) runs iterative weighted moments. When Gaussian fitting follows, this is only needed as an initial guess.
+Reduced Phase 1 from 10 to 2 iterations when fitting follows. L-M converges to same result regardless. See Optimization 6 in Change History.
 
-**Options:**
-- Reduce to 1-2 iterations when Gaussian/Moffat fitting is the final method.
-- Use single-pass intensity-weighted mean as initial guess instead.
+### ~~5. Early L-M termination on position convergence~~ — Done (-3.8%)
 
-### 5. Early L-M termination on position convergence (potential: -2-3%)
-
-The Gaussian optimizer runs up to max_iterations. For centroid purposes, only position (x0, y0) convergence matters.
-
-**Options:**
-- Early exit when position delta < 0.001 pixels, regardless of sigma/amplitude convergence.
-- Skip Gaussian fitting entirely for low-SNR stars and use weighted moments.
+Added `position_convergence_threshold` to `LMConfig` for early exit when position is stable. See Optimization 7 in Change History.
 
 ### 6. Deblending remains the #1 stage (24%)
 
@@ -167,7 +181,6 @@ Despite two rounds of optimization, deblending is still the largest pipeline sta
 | ~~Deblend BFS optimization~~ | Low | **-3.9%** deblend, ~-1% pipeline | None | **Done** |
 | ~~Deblend allocation reduction~~ | Low | **-5.2%** deblend, -1.3% pipeline | None | **Done** |
 | ~~Pool convolution temp buffer~~ | Low | **-2.8%** (492→478ms) | None | **Done** |
-| Reduce centroid refinement iters | Low | -3-5% | None | Pending |
-| Early L-M termination on position | Medium | -2-3% | None | Pending |
-| **Cumulative done** | | **-25.2%** (639→478ms) | | |
-| **Remaining estimated** | | **-5-8%** | | |
+| ~~Reduce centroid Phase 1 iters~~ | Low | **-2.5%** (478→462ms) | None | **Done** |
+| ~~Early L-M position termination~~ | Low | **-3.8%** (462→445ms) | None | **Done** |
+| **Cumulative done** | | **-30.4%** (639→445ms) | | |

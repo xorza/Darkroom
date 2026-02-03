@@ -18,6 +18,12 @@ pub struct LMConfig {
     pub lambda_up: f32,
     /// Factor to decrease lambda on successful step.
     pub lambda_down: f32,
+    /// Early termination when position parameters (first 2) converge to this threshold.
+    /// The optimizer stops once both x0 and y0 deltas are below this value,
+    /// even if other parameters (amplitude, sigma, background) are still changing.
+    /// Default is 0 (disabled). Set to 0.001 for centroid-only use cases
+    /// where non-position parameters don't matter.
+    pub position_convergence_threshold: f32,
 }
 
 impl Default for LMConfig {
@@ -28,6 +34,7 @@ impl Default for LMConfig {
             initial_lambda: 0.001,
             lambda_up: 10.0,
             lambda_down: 0.1,
+            position_convergence_threshold: 0.0,
         }
     }
 }
@@ -114,6 +121,13 @@ pub fn optimize_5<M: LMModel<5>>(
                 converged = true;
                 break;
             }
+            // Early exit when only position accuracy matters
+            if delta[0].abs() < config.position_convergence_threshold
+                && delta[1].abs() < config.position_convergence_threshold
+            {
+                converged = true;
+                break;
+            }
         } else {
             lambda *= config.lambda_up;
             if lambda > 1e10 {
@@ -190,6 +204,13 @@ pub fn optimize_5_weighted<M: LMModel<5>>(
 
             let max_delta = delta.iter().copied().fold(0.0f32, |a, d| a.max(d.abs()));
             if max_delta < config.convergence_threshold {
+                converged = true;
+                break;
+            }
+            // Early exit when only position accuracy matters
+            if delta[0].abs() < config.position_convergence_threshold
+                && delta[1].abs() < config.position_convergence_threshold
+            {
                 converged = true;
                 break;
             }
@@ -270,6 +291,13 @@ pub fn optimize_6<M: LMModel<6>>(
                 converged = true;
                 break;
             }
+            // Early exit when only position accuracy matters
+            if delta[0].abs() < config.position_convergence_threshold
+                && delta[1].abs() < config.position_convergence_threshold
+            {
+                converged = true;
+                break;
+            }
         } else {
             lambda *= config.lambda_up;
             if lambda > 1e10 {
@@ -346,6 +374,13 @@ pub fn optimize_6_weighted<M: LMModel<6>>(
 
             let max_delta = delta.iter().copied().fold(0.0f32, |a, d| a.max(d.abs()));
             if max_delta < config.convergence_threshold {
+                converged = true;
+                break;
+            }
+            // Early exit when only position accuracy matters
+            if delta[0].abs() < config.position_convergence_threshold
+                && delta[1].abs() < config.position_convergence_threshold
+            {
                 converged = true;
                 break;
             }

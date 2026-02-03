@@ -71,8 +71,12 @@ const MAX_ANNULUS_PIXELS: usize = (2 * MAX_ANNULUS_OUTER_RADIUS + 1).pow(2); // 
 /// Iteration stops when the distance moved is less than this value.
 const CENTROID_CONVERGENCE_THRESHOLD: f32 = 0.001;
 
-/// Maximum centroid iterations before giving up.
-pub(crate) const MAX_ITERATIONS: usize = 10;
+/// Maximum weighted-moments iterations for standalone centroid (no fitting follows).
+pub(crate) const MAX_MOMENTS_ITERATIONS: usize = 10;
+
+/// Weighted-moments iterations when L-M fitting follows.
+/// Only needs to provide a rough seed — L-M refines position independently.
+const MOMENTS_ITERATIONS_BEFORE_FIT: usize = 2;
 
 /// Convergence threshold in pixels squared.
 pub(crate) const CONVERGENCE_THRESHOLD_SQ: f32 =
@@ -307,9 +311,17 @@ pub fn compute_centroid(
     // Initial position from peak
     let mut pos = Vec2::new(candidate.peak.x as f32, candidate.peak.y as f32);
 
-    // First pass: always use weighted moments for initial refinement
-    // This gives a good starting point for fitting methods
-    for _ in 0..MAX_ITERATIONS {
+    // First pass: weighted moments for initial refinement.
+    // When a fitting method follows, only 2 iterations are needed — the L-M
+    // optimizer refines position independently and converges to the same result
+    // regardless of Phase 1 precision (verified by tests).
+    let phase1_iters = match config.centroid.method {
+        CentroidMethod::WeightedMoments => MAX_MOMENTS_ITERATIONS,
+        CentroidMethod::GaussianFit | CentroidMethod::MoffatFit { .. } => {
+            MOMENTS_ITERATIONS_BEFORE_FIT
+        }
+    };
+    for _ in 0..phase1_iters {
         let new_pos = refine_centroid(
             pixels,
             width,
@@ -344,10 +356,15 @@ pub fn compute_centroid(
         }
     };
 
-    // Refine with profile fitting if requested
+    // Refine with profile fitting if requested.
+    // Position convergence threshold of 0.001px enables early L-M termination
+    // once the centroid is stable, skipping unnecessary refinement of amplitude/sigma.
     match config.centroid.method {
         CentroidMethod::GaussianFit => {
-            let fit_config = GaussianFitConfig::default();
+            let fit_config = GaussianFitConfig {
+                position_convergence_threshold: 0.001,
+                ..GaussianFitConfig::default()
+            };
             if let Some(result) = fit_gaussian_2d(pixels, pos, stamp_radius, local_bg, &fit_config)
                 .filter(|r| r.converged)
             {
@@ -358,7 +375,10 @@ pub fn compute_centroid(
             let fit_config = MoffatFitConfig {
                 fit_beta: false,
                 fixed_beta: beta,
-                ..MoffatFitConfig::default()
+                lm: lm_optimizer::LMConfig {
+                    position_convergence_threshold: 0.001,
+                    ..lm_optimizer::LMConfig::default()
+                },
             };
             if let Some(result) = fit_moffat_2d(pixels, pos, stamp_radius, local_bg, &fit_config)
                 .filter(|r| r.converged)
