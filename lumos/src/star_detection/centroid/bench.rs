@@ -30,9 +30,8 @@ fn make_gaussian_star(
     let mut pixels = vec![background; width * height];
     for y in 0..height {
         for x in 0..width {
-            let dx = x as f32 - pos.x;
-            let dy = y as f32 - pos.y;
-            let r2 = dx * dx + dy * dy;
+            let pixel_pos = Vec2::new(x as f32, y as f32);
+            let r2 = pixel_pos.distance_squared(pos);
             let value = amplitude * (-r2 / (2.0 * sigma * sigma)).exp();
             if value > 0.001 {
                 pixels[y * width + x] += value;
@@ -302,11 +301,12 @@ fn bench_gaussian_fit_single(b: ::bench::Bencher) {
     let cy = 10.7f32;
 
     let mut pixels = vec![background; width * height];
+    let center = Vec2::new(cx, cy);
     for y in 0..height {
         for x in 0..width {
-            let dx = x as f32 - cx;
-            let dy = y as f32 - cy;
-            pixels[y * width + x] += 1.0 * (-0.5 * (dx * dx + dy * dy) / (sigma * sigma)).exp();
+            let pixel_pos = Vec2::new(x as f32, y as f32);
+            let r2 = pixel_pos.distance_squared(center);
+            pixels[y * width + x] += 1.0 * (-0.5 * r2 / (sigma * sigma)).exp();
         }
     }
     let pixels = Buffer2::new(width, height, pixels);

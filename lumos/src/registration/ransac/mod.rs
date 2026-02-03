@@ -717,7 +717,7 @@ pub(crate) fn estimate_similarity(
         sxy += r.x * t.y;
         syx += r.y * t.x;
         syy += r.y * t.y;
-        ref_var += r.x * r.x + r.y * r.y;
+        ref_var += r.length_squared();
     }
 
     if ref_var < 1e-10 {

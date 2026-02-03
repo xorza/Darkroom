@@ -684,7 +684,7 @@ fn estimate_similarity_transform(
         sxy += t.x * r.y;
         syx += t.y * r.x;
         syy += t.y * r.y;
-        tar_norm_sq += t.x * t.x + t.y * t.y;
+        tar_norm_sq += t.length_squared();
     }
 
     if tar_norm_sq < 1e-10 {

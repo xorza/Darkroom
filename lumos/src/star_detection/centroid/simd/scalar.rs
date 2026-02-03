@@ -28,8 +28,7 @@ pub fn refine_centroid_scalar(
     let sigma = (expected_fwhm / FWHM_TO_SIGMA * 0.8).clamp(1.0, stamp_radius as f32 * 0.5);
     let two_sigma_sq = 2.0 * sigma * sigma;
 
-    let mut sum_x = 0.0f32;
-    let mut sum_y = 0.0f32;
+    let mut sum_pos = Vec2::ZERO;
     let mut sum_w = 0.0f32;
 
     let stamp_radius_i32 = stamp_radius as i32;
@@ -44,13 +43,11 @@ pub fn refine_centroid_scalar(
 
             // Gaussian weight based on distance from current centroid
             // Using fast_exp approximation (~4% max error) for performance
-            let fx = x as f32 - pos.x;
-            let fy = y as f32 - pos.y;
-            let dist_sq = fx * fx + fy * fy;
+            let pixel_pos = Vec2::new(x as f32, y as f32);
+            let dist_sq = (pixel_pos - pos).length_squared();
             let weight = value * fast_exp(-dist_sq / two_sigma_sq);
 
-            sum_x += x as f32 * weight;
-            sum_y += y as f32 * weight;
+            sum_pos += pixel_pos * weight;
             sum_w += weight;
         }
     }
@@ -59,7 +56,7 @@ pub fn refine_centroid_scalar(
         return None;
     }
 
-    let new_pos = Vec2::new(sum_x / sum_w, sum_y / sum_w);
+    let new_pos = sum_pos / sum_w;
 
     // Reject if centroid moved too far (likely bad detection)
     let stamp_size = 2 * stamp_radius + 1;
@@ -90,9 +87,8 @@ mod tests {
         let mut pixels = vec![background; width * height];
         for y in 0..height {
             for x in 0..width {
-                let dx = x as f32 - pos.x;
-                let dy = y as f32 - pos.y;
-                let r2 = dx * dx + dy * dy;
+                let pixel_pos = Vec2::new(x as f32, y as f32);
+                let r2 = pixel_pos.distance_squared(pos);
                 let value = amplitude * (-r2 / (2.0 * sigma * sigma)).exp();
                 if value > 0.001 {
                     pixels[y * width + x] += value;
@@ -281,9 +277,8 @@ mod tests {
         let mut pixels = vec![0.5f32; width * height];
         for y in 28..36 {
             for x in 28..36 {
-                let dx = x as f32 - 32.0;
-                let dy = y as f32 - 32.0;
-                let r2 = dx * dx + dy * dy;
+                let pixel_pos = Vec2::new(x as f32, y as f32);
+                let r2 = pixel_pos.distance_squared(Vec2::splat(32.0));
                 pixels[y * width + x] += 0.8 * (-r2 / 8.0).exp();
             }
         }

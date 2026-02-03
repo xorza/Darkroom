@@ -65,15 +65,13 @@ pub fn add_vignette_background(
     edge_level: f32,
     falloff: f32,
 ) {
-    let cx = width as f32 / 2.0;
-    let cy = height as f32 / 2.0;
-    let max_r = (cx * cx + cy * cy).sqrt();
+    let center = Vec2::new(width as f32 / 2.0, height as f32 / 2.0);
+    let max_r = center.length();
 
     for y in 0..height {
         for x in 0..width {
-            let dx = x as f32 - cx;
-            let dy = y as f32 - cy;
-            let r = (dx * dx + dy * dy).sqrt();
+            let pixel_pos = Vec2::new(x as f32, y as f32);
+            let r = pixel_pos.distance(center);
             let t = (r / max_r).powf(falloff);
             let level = center_level + (edge_level - center_level) * t;
             pixels[y * width + x] += level;
@@ -99,18 +97,17 @@ pub fn add_amp_glow(
     amplitude: f32,
     decay_scale: f32,
 ) {
-    let (glow_x, glow_y) = match corner {
-        0 => (0.0, 0.0),                                // Top-left
-        1 => (width as f32 - 1.0, 0.0),                 // Top-right
-        2 => (0.0, height as f32 - 1.0),                // Bottom-left
-        _ => (width as f32 - 1.0, height as f32 - 1.0), // Bottom-right
+    let glow_pos = match corner {
+        0 => Vec2::new(0.0, 0.0),                                // Top-left
+        1 => Vec2::new(width as f32 - 1.0, 0.0),                 // Top-right
+        2 => Vec2::new(0.0, height as f32 - 1.0),                // Bottom-left
+        _ => Vec2::new(width as f32 - 1.0, height as f32 - 1.0), // Bottom-right
     };
 
     for y in 0..height {
         for x in 0..width {
-            let dx = x as f32 - glow_x;
-            let dy = y as f32 - glow_y;
-            let dist = (dx * dx + dy * dy).sqrt();
+            let pixel_pos = Vec2::new(x as f32, y as f32);
+            let dist = pixel_pos.distance(glow_pos);
             let glow = amplitude * (-dist / decay_scale).exp();
             pixels[y * width + x] += glow;
         }

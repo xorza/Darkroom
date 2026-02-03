@@ -268,9 +268,11 @@ impl ThinPlateSpline {
     /// # Returns
     /// Transformed coordinates
     pub fn transform(&self, p: DVec2) -> DVec2 {
-        // Affine component
-        let mut tx = self.affine_x[0] + self.affine_x[1] * p.x + self.affine_x[2] * p.y;
-        let mut ty = self.affine_y[0] + self.affine_y[1] * p.x + self.affine_y[2] * p.y;
+        // Affine component using dot product for linear terms
+        let affine_coeffs_x = DVec2::new(self.affine_x[1], self.affine_x[2]);
+        let affine_coeffs_y = DVec2::new(self.affine_y[1], self.affine_y[2]);
+        let mut tx = self.affine_x[0] + affine_coeffs_x.dot(p);
+        let mut ty = self.affine_y[0] + affine_coeffs_y.dot(p);
 
         // Radial basis function component
         for (i, &cp) in self.control_points.iter().enumerate() {

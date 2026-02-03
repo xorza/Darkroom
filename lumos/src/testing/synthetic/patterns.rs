@@ -58,16 +58,16 @@ pub fn diagonal_gradient(width: usize, height: usize) -> Buffer2<f32> {
 
 /// Create a radial gradient from center to edges.
 pub fn radial_gradient(width: usize, height: usize, center: f32, edge: f32) -> Buffer2<f32> {
+    use glam::Vec2;
+
     let mut pixels = vec![0.0f32; width * height];
-    let cx = width as f32 / 2.0;
-    let cy = height as f32 / 2.0;
-    let max_r = (cx * cx + cy * cy).sqrt();
+    let c = Vec2::new(width as f32 / 2.0, height as f32 / 2.0);
+    let max_r = c.length();
 
     for y in 0..height {
         for x in 0..width {
-            let dx = x as f32 - cx;
-            let dy = y as f32 - cy;
-            let r = (dx * dx + dy * dy).sqrt();
+            let pixel_pos = Vec2::new(x as f32, y as f32);
+            let r = pixel_pos.distance(c);
             let t = if max_r > 0.0 { r / max_r } else { 0.0 };
             pixels[y * width + x] = center + t * (edge - center);
         }
