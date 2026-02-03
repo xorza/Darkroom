@@ -127,7 +127,8 @@ fn test_register_two_calibrated_lights() {
     );
 
     // Register image 2 to image 1 (star detection -> transform, no warping)
-    let reg_config = RegistrationConfig::default();
+    let mut reg_config = RegistrationConfig::default();
+    reg_config.transform_type = crate::TransformType::Homography;
     let registrator = Registrator::new(reg_config);
 
     let result = registrator
