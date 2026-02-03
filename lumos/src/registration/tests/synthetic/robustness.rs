@@ -12,6 +12,7 @@ use crate::testing::synthetic::{
     add_position_noise, add_spurious_stars, generate_random_positions, remove_random_stars,
     transform_stars, translate_stars, translate_with_overlap,
 };
+use glam::DVec2;
 
 // ============================================================================
 // Outlier Rejection Tests
@@ -42,19 +43,19 @@ fn test_outlier_rejection_spurious_stars() {
         .register_positions(&ref_stars, &target_with_spurious)
         .expect("Registration should succeed despite spurious stars");
 
-    let (recovered_dx, recovered_dy) = result.transform.translation_components();
+    let recovered = result.transform.translation_components();
 
     assert!(
-        (recovered_dx - dx).abs() < 1.0,
+        (recovered.x - dx).abs() < 1.0,
         "X translation error too large with spurious stars: expected {}, got {}",
         dx,
-        recovered_dx
+        recovered.x
     );
     assert!(
-        (recovered_dy - dy).abs() < 1.0,
+        (recovered.y - dy).abs() < 1.0,
         "Y translation error too large with spurious stars: expected {}, got {}",
         dy,
-        recovered_dy
+        recovered.y
     );
     assert!(
         result.rms_error < 2.0,
@@ -88,19 +89,19 @@ fn test_outlier_rejection_missing_stars() {
         .register_positions(&ref_stars, &target_with_missing)
         .expect("Registration should succeed despite missing stars");
 
-    let (recovered_dx, recovered_dy) = result.transform.translation_components();
+    let recovered = result.transform.translation_components();
 
     assert!(
-        (recovered_dx - dx).abs() < 1.0,
+        (recovered.x - dx).abs() < 1.0,
         "X translation error too large with missing stars: expected {}, got {}",
         dx,
-        recovered_dx
+        recovered.x
     );
     assert!(
-        (recovered_dy - dy).abs() < 1.0,
+        (recovered.y - dy).abs() < 1.0,
         "Y translation error too large with missing stars: expected {}, got {}",
         dy,
-        recovered_dy
+        recovered.y
     );
 }
 
@@ -130,19 +131,19 @@ fn test_outlier_rejection_combined() {
         .register_positions(&ref_stars, &target_modified)
         .expect("Registration should succeed despite combined outliers");
 
-    let (recovered_dx, recovered_dy) = result.transform.translation_components();
+    let recovered = result.transform.translation_components();
 
     assert!(
-        (recovered_dx - dx).abs() < 1.5,
+        (recovered.x - dx).abs() < 1.5,
         "X translation error too large with combined outliers: expected {}, got {}",
         dx,
-        recovered_dx
+        recovered.x
     );
     assert!(
-        (recovered_dy - dy).abs() < 1.5,
+        (recovered.y - dy).abs() < 1.5,
         "Y translation error too large with combined outliers: expected {}, got {}",
         dy,
-        recovered_dy
+        recovered.y
     );
 }
 
@@ -175,8 +176,8 @@ fn test_outlier_rejection_20_percent_spurious() {
     // Verify by applying transform
     let mut max_error = 0.0f64;
     for (ref_star, target_star) in ref_stars.iter().zip(target_stars.iter()) {
-        let (tx, ty) = result.transform.apply(ref_star.0, ref_star.1);
-        let error = ((tx - target_star.0).powi(2) + (ty - target_star.1).powi(2)).sqrt();
+        let t = result.transform.apply(*ref_star);
+        let error = t.distance(*target_star);
         max_error = max_error.max(error);
     }
 
@@ -203,9 +204,9 @@ fn test_partial_overlap_75_percent() {
     let target_stars = translate_with_overlap(&ref_stars, dx, dy, 2000.0, 2000.0, 50.0);
 
     // Filter reference stars to only those that would be in target frame
-    let ref_in_overlap: Vec<(f64, f64)> = ref_stars
+    let ref_in_overlap: Vec<DVec2> = ref_stars
         .iter()
-        .filter(|(x, _)| *x + dx >= 50.0 && *x + dx <= 1950.0)
+        .filter(|p| p.x + dx >= 50.0 && p.x + dx <= 1950.0)
         .copied()
         .collect();
 
@@ -228,19 +229,19 @@ fn test_partial_overlap_75_percent() {
         .register_positions(&ref_in_overlap, &target_stars)
         .expect("Registration should succeed with 75% overlap");
 
-    let (recovered_dx, recovered_dy) = result.transform.translation_components();
+    let recovered = result.transform.translation_components();
 
     assert!(
-        (recovered_dx - dx).abs() < 1.0,
+        (recovered.x - dx).abs() < 1.0,
         "X translation error with 75% overlap: expected {}, got {}",
         dx,
-        recovered_dx
+        recovered.x
     );
     assert!(
-        (recovered_dy - dy).abs() < 1.0,
+        (recovered.y - dy).abs() < 1.0,
         "Y translation error with 75% overlap: expected {}, got {}",
         dy,
-        recovered_dy
+        recovered.y
     );
 }
 
@@ -256,9 +257,9 @@ fn test_partial_overlap_50_percent() {
     let target_stars = translate_with_overlap(&ref_stars, dx, dy, 2000.0, 2000.0, 50.0);
 
     // Filter reference stars to only those that would be in target frame
-    let ref_in_overlap: Vec<(f64, f64)> = ref_stars
+    let ref_in_overlap: Vec<DVec2> = ref_stars
         .iter()
-        .filter(|(x, _)| *x + dx >= 50.0 && *x + dx <= 1950.0)
+        .filter(|p| p.x + dx >= 50.0 && p.x + dx <= 1950.0)
         .copied()
         .collect();
 
@@ -281,19 +282,19 @@ fn test_partial_overlap_50_percent() {
         .register_positions(&ref_in_overlap, &target_stars)
         .expect("Registration should succeed with 50% overlap");
 
-    let (recovered_dx, recovered_dy) = result.transform.translation_components();
+    let recovered = result.transform.translation_components();
 
     assert!(
-        (recovered_dx - dx).abs() < 1.0,
+        (recovered.x - dx).abs() < 1.0,
         "X translation error with 50% overlap: expected {}, got {}",
         dx,
-        recovered_dx
+        recovered.x
     );
     assert!(
-        (recovered_dy - dy).abs() < 1.0,
+        (recovered.y - dy).abs() < 1.0,
         "Y translation error with 50% overlap: expected {}, got {}",
         dy,
-        recovered_dy
+        recovered.y
     );
 }
 
@@ -307,10 +308,10 @@ fn test_partial_overlap_diagonal() {
 
     let target_stars = translate_with_overlap(&ref_stars, dx, dy, 2000.0, 2000.0, 50.0);
 
-    let ref_in_overlap: Vec<(f64, f64)> = ref_stars
+    let ref_in_overlap: Vec<DVec2> = ref_stars
         .iter()
-        .filter(|(x, y)| {
-            *x + dx >= 50.0 && *x + dx <= 1950.0 && *y + dy >= 50.0 && *y + dy <= 1950.0
+        .filter(|p| {
+            p.x + dx >= 50.0 && p.x + dx <= 1950.0 && p.y + dy >= 50.0 && p.y + dy <= 1950.0
         })
         .copied()
         .collect();
@@ -328,7 +329,9 @@ fn test_partial_overlap_diagonal() {
         .register_positions(&ref_in_overlap, &target_stars)
         .expect("Registration should succeed with diagonal overlap");
 
-    let (recovered_dx, recovered_dy) = result.transform.translation_components();
+    let recovered = result.transform.translation_components();
+    let recovered_dx = recovered.x;
+    let recovered_dy = recovered.y;
 
     assert!(
         (recovered_dx - dx).abs() < 1.0,
@@ -370,7 +373,9 @@ fn test_subpixel_translation_quarter_pixel() {
         .register_positions(&ref_stars, &target_stars)
         .expect("Registration should succeed");
 
-    let (recovered_dx, recovered_dy) = result.transform.translation_components();
+    let recovered = result.transform.translation_components();
+    let recovered_dx = recovered.x;
+    let recovered_dy = recovered.y;
 
     // Should recover subpixel translation within 0.1 pixel
     assert!(
@@ -410,7 +415,9 @@ fn test_subpixel_translation_half_pixel() {
         .register_positions(&ref_stars, &target_stars)
         .expect("Registration should succeed");
 
-    let (recovered_dx, recovered_dy) = result.transform.translation_components();
+    let recovered = result.transform.translation_components();
+    let recovered_dx = recovered.x;
+    let recovered_dy = recovered.y;
 
     assert!(
         (recovered_dx - dx).abs() < 0.1,
@@ -522,7 +529,9 @@ fn test_minimum_stars_translation() {
         .register_positions(&ref_stars, &target_stars)
         .expect("Registration should succeed with 6 stars");
 
-    let (recovered_dx, recovered_dy) = result.transform.translation_components();
+    let recovered = result.transform.translation_components();
+    let recovered_dx = recovered.x;
+    let recovered_dy = recovered.y;
 
     assert!(
         (recovered_dx - dx).abs() < 0.5,
@@ -566,8 +575,8 @@ fn test_minimum_stars_similarity() {
     // Verify transform accuracy
     let mut max_error = 0.0f64;
     for (ref_star, target_star) in ref_stars.iter().zip(target_stars.iter()) {
-        let (tx, ty) = result.transform.apply(ref_star.0, ref_star.1);
-        let error = ((tx - target_star.0).powi(2) + (ty - target_star.1).powi(2)).sqrt();
+        let t = result.transform.apply(*ref_star);
+        let error = t.distance(*target_star);
         max_error = max_error.max(error);
     }
 
@@ -662,38 +671,33 @@ fn test_stress_partial_overlap_with_noise() {
     let angle_rad = 0.5_f64.to_radians();
 
     // Apply transform and filter to overlap region
-    let target_stars: Vec<(f64, f64)> = ref_stars
+    let center = DVec2::new(1000.0, 1000.0);
+    let cos_a = angle_rad.cos();
+    let sin_a = angle_rad.sin();
+    let offset = DVec2::new(dx, dy);
+
+    let target_stars: Vec<DVec2> = ref_stars
         .iter()
-        .map(|(x, y)| {
+        .map(|p| {
             // Apply rotation around center
-            let cx = 1000.0;
-            let cy = 1000.0;
-            let rx = x - cx;
-            let ry = y - cy;
-            let cos_a = angle_rad.cos();
-            let sin_a = angle_rad.sin();
-            let new_x = cos_a * rx - sin_a * ry + cx + dx;
-            let new_y = sin_a * rx + cos_a * ry + cy + dy;
-            (new_x, new_y)
+            let r = *p - center;
+            let new_x = cos_a * r.x - sin_a * r.y + center.x + offset.x;
+            let new_y = sin_a * r.x + cos_a * r.y + center.y + offset.y;
+            DVec2::new(new_x, new_y)
         })
-        .filter(|(x, y)| *x >= 50.0 && *x <= 1950.0 && *y >= 50.0 && *y <= 1950.0)
+        .filter(|p| p.x >= 50.0 && p.x <= 1950.0 && p.y >= 50.0 && p.y <= 1950.0)
         .collect();
 
     // Add noise
     let target_noisy = add_position_noise(&target_stars, 0.5, 77776);
 
     // Filter reference to overlapping region (accounting for transform)
-    let ref_in_overlap: Vec<(f64, f64)> = ref_stars
+    let ref_in_overlap: Vec<DVec2> = ref_stars
         .iter()
-        .filter(|(x, y)| {
-            let cx = 1000.0;
-            let cy = 1000.0;
-            let rx = x - cx;
-            let ry = y - cy;
-            let cos_a = angle_rad.cos();
-            let sin_a = angle_rad.sin();
-            let new_x = cos_a * rx - sin_a * ry + cx + dx;
-            let new_y = sin_a * rx + cos_a * ry + cy + dy;
+        .filter(|p| {
+            let r = *p - center;
+            let new_x = cos_a * r.x - sin_a * r.y + center.x + offset.x;
+            let new_y = sin_a * r.x + cos_a * r.y + center.y + offset.y;
             (50.0..=1950.0).contains(&new_x) && (50.0..=1950.0).contains(&new_y)
         })
         .copied()
@@ -809,8 +813,8 @@ fn test_large_rotation_45_degrees() {
     // Validate transform accuracy
     let mut max_error = 0.0f64;
     for (ref_star, target_star) in ref_stars.iter().zip(target_stars.iter()) {
-        let (tx, ty) = result.transform.apply(ref_star.0, ref_star.1);
-        let error = ((tx - target_star.0).powi(2) + (ty - target_star.1).powi(2)).sqrt();
+        let t = result.transform.apply(*ref_star);
+        let error = t.distance(*target_star);
         max_error = max_error.max(error);
     }
 
@@ -861,8 +865,8 @@ fn test_large_rotation_90_degrees() {
 
     let mut max_error = 0.0f64;
     for (ref_star, target_star) in ref_stars.iter().zip(target_stars.iter()) {
-        let (tx, ty) = result.transform.apply(ref_star.0, ref_star.1);
-        let error = ((tx - target_star.0).powi(2) + (ty - target_star.1).powi(2)).sqrt();
+        let t = result.transform.apply(*ref_star);
+        let error = t.distance(*target_star);
         max_error = max_error.max(error);
     }
 
@@ -952,8 +956,8 @@ fn test_extreme_scale_2x() {
     // Validate transform accuracy
     let mut max_error = 0.0f64;
     for (ref_star, target_star) in ref_stars.iter().zip(target_stars.iter()) {
-        let (tx, ty) = result.transform.apply(ref_star.0, ref_star.1);
-        let error = ((tx - target_star.0).powi(2) + (ty - target_star.1).powi(2)).sqrt();
+        let t = result.transform.apply(*ref_star);
+        let error = t.distance(*target_star);
         max_error = max_error.max(error);
     }
 
@@ -1001,8 +1005,8 @@ fn test_extreme_scale_half() {
 
     let mut max_error = 0.0f64;
     for (ref_star, target_star) in ref_stars.iter().zip(target_stars.iter()) {
-        let (tx, ty) = result.transform.apply(ref_star.0, ref_star.1);
-        let error = ((tx - target_star.0).powi(2) + (ty - target_star.1).powi(2)).sqrt();
+        let t = result.transform.apply(*ref_star);
+        let error = t.distance(*target_star);
         max_error = max_error.max(error);
     }
 
@@ -1067,11 +1071,11 @@ fn test_extreme_scale_with_rotation() {
 // ============================================================================
 
 /// Apply an affine transform to star positions.
-fn apply_affine(stars: &[(f64, f64)], params: [f64; 6]) -> Vec<(f64, f64)> {
+fn apply_affine(stars: &[DVec2], params: [f64; 6]) -> Vec<DVec2> {
     let [a, b, tx, c, d, ty] = params;
     stars
         .iter()
-        .map(|(x, y)| (a * x + b * y + tx, c * x + d * y + ty))
+        .map(|p| DVec2::new(a * p.x + b * p.y + tx, c * p.x + d * p.y + ty))
         .collect()
 }
 
@@ -1110,8 +1114,8 @@ fn test_affine_with_outliers() {
     // Validate transform accuracy on original (non-spurious) stars
     let mut max_error = 0.0f64;
     for (ref_star, target_star) in ref_stars.iter().zip(target_stars.iter()) {
-        let (tx, ty) = result.transform.apply(ref_star.0, ref_star.1);
-        let error = ((tx - target_star.0).powi(2) + (ty - target_star.1).powi(2)).sqrt();
+        let t = result.transform.apply(*ref_star);
+        let error = t.distance(*target_star);
         max_error = max_error.max(error);
     }
 
@@ -1167,14 +1171,14 @@ fn test_affine_with_noise_and_missing() {
 // ============================================================================
 
 /// Apply a homography to star positions.
-fn apply_homography(stars: &[(f64, f64)], params: [f64; 8]) -> Vec<(f64, f64)> {
+fn apply_homography(stars: &[DVec2], params: [f64; 8]) -> Vec<DVec2> {
     stars
         .iter()
-        .map(|(x, y)| {
-            let w = params[6] * x + params[7] * y + 1.0;
-            let x_prime = (params[0] * x + params[1] * y + params[2]) / w;
-            let y_prime = (params[3] * x + params[4] * y + params[5]) / w;
-            (x_prime, y_prime)
+        .map(|p| {
+            let w = params[6] * p.x + params[7] * p.y + 1.0;
+            let x_prime = (params[0] * p.x + params[1] * p.y + params[2]) / w;
+            let y_prime = (params[3] * p.x + params[4] * p.y + params[5]) / w;
+            DVec2::new(x_prime, y_prime)
         })
         .collect()
 }
@@ -1216,8 +1220,8 @@ fn test_homography_with_outliers() {
     // Validate transform accuracy
     let mut max_error = 0.0f64;
     for (ref_star, target_star) in ref_stars.iter().zip(target_stars.iter()) {
-        let (tx, ty) = result.transform.apply(ref_star.0, ref_star.1);
-        let error = ((tx - target_star.0).powi(2) + (ty - target_star.1).powi(2)).sqrt();
+        let t = result.transform.apply(*ref_star);
+        let error = t.distance(*target_star);
         max_error = max_error.max(error);
     }
 
@@ -1241,9 +1245,9 @@ fn test_homography_with_noise_and_partial_overlap() {
     let target_stars = apply_homography(&ref_stars, homography_params);
 
     // Filter to overlap region
-    let target_in_bounds: Vec<(f64, f64)> = target_stars
+    let target_in_bounds: Vec<DVec2> = target_stars
         .iter()
-        .filter(|(x, y)| *x >= 50.0 && *x <= 1950.0 && *y >= 50.0 && *y <= 1950.0)
+        .filter(|p| p.x >= 50.0 && p.x <= 1950.0 && p.y >= 50.0 && p.y <= 1950.0)
         .copied()
         .collect();
 
@@ -1251,12 +1255,12 @@ fn test_homography_with_noise_and_partial_overlap() {
     let target_noisy = add_position_noise(&target_in_bounds, 0.3, 40004);
 
     // Filter reference to overlapping region
-    let ref_in_overlap: Vec<(f64, f64)> = ref_stars
+    let ref_in_overlap: Vec<DVec2> = ref_stars
         .iter()
-        .filter(|(x, y)| {
-            let w = h6 * x + h7 * y + 1.0;
-            let new_x = (x + dx) / w;
-            let new_y = *y / w;
+        .filter(|p| {
+            let w = h6 * p.x + h7 * p.y + 1.0;
+            let new_x = (p.x + dx) / w;
+            let new_y = p.y / w;
             (50.0..=1950.0).contains(&new_x) && (50.0..=1950.0).contains(&new_y)
         })
         .copied()

@@ -730,9 +730,9 @@ mod tests {
         let comet_transform = config.comet_aligned_transform(&star_transform, 0.0, 0.0);
 
         // Result should be identity (no offset needed)
-        let (tx, ty) = comet_transform.translation_components();
-        assert!((tx - 0.0).abs() < 1e-10);
-        assert!((ty - 0.0).abs() < 1e-10);
+        let t = comet_transform.translation_components();
+        assert!((t.x - 0.0).abs() < 1e-10);
+        assert!((t.y - 0.0).abs() < 1e-10);
     }
 
     #[test]
@@ -748,9 +748,9 @@ mod tests {
         // To align ON comet, we need offset (-5, -10)
         let comet_transform = config.comet_aligned_transform(&star_transform, 50.0, 0.0);
 
-        let (tx, ty) = comet_transform.translation_components();
-        assert!((tx - (-5.0)).abs() < 1e-10);
-        assert!((ty - (-10.0)).abs() < 1e-10);
+        let t = comet_transform.translation_components();
+        assert!((t.x - (-5.0)).abs() < 1e-10);
+        assert!((t.y - (-10.0)).abs() < 1e-10);
     }
 
     #[test]
@@ -766,9 +766,9 @@ mod tests {
         // Combined with star translation (10, 20), result should be (5, 10)
         let comet_transform = config.comet_aligned_transform(&star_transform, 50.0, 0.0);
 
-        let (tx, ty) = comet_transform.translation_components();
-        assert!((tx - 5.0).abs() < 1e-10);
-        assert!((ty - 10.0).abs() < 1e-10);
+        let t = comet_transform.translation_components();
+        assert!((t.x - 5.0).abs() < 1e-10);
+        assert!((t.y - 10.0).abs() < 1e-10);
     }
 
     #[test]
@@ -806,11 +806,11 @@ mod tests {
         let via_method = config.comet_aligned_transform(&star_transform, 50.0, 0.0);
         let via_function = apply_comet_offset_to_transform(&star_transform, &config, 50.0, 0.0);
 
-        let (tx1, ty1) = via_method.translation_components();
-        let (tx2, ty2) = via_function.translation_components();
+        let t1 = via_method.translation_components();
+        let t2 = via_function.translation_components();
 
-        assert!((tx1 - tx2).abs() < 1e-10);
-        assert!((ty1 - ty2).abs() < 1e-10);
+        assert!((t1.x - t2.x).abs() < 1e-10);
+        assert!((t1.y - t2.y).abs() < 1e-10);
     }
 
     #[test]
@@ -1185,11 +1185,11 @@ mod integration_tests {
             for x in 0..width {
                 // For each output pixel, find the corresponding input pixel
                 // apply_inverse maps destination -> source
-                let (src_x, src_y) = transform.apply_inverse(x as f64, y as f64);
+                let src_pos = transform.apply_inverse(DVec2::new(x as f64, y as f64));
 
                 // Nearest-neighbor sampling
-                let sx = src_x.round() as i32;
-                let sy = src_y.round() as i32;
+                let sx = src_pos.x.round() as i32;
+                let sy = src_pos.y.round() as i32;
 
                 if sx >= 0 && sx < width as i32 && sy >= 0 && sy < height as i32 {
                     dst[y * width + x] = src[sy as usize * width + sx as usize];
@@ -1338,23 +1338,23 @@ mod integration_tests {
                 interpolate_position(&config.pos_start, &config.pos_end, frame_timestamp);
 
             // Apply comet transform to the comet position
-            let (aligned_x, aligned_y) = comet_transform.apply(comet_x, comet_y);
+            let aligned = comet_transform.apply(DVec2::new(comet_x, comet_y));
 
             // After applying the comet transform, the comet should map to its reference position
             // The reference position is pos_start (at ref_timestamp=0)
             assert!(
-                (aligned_x - pos_start.x).abs() < 1e-6,
+                (aligned.x - pos_start.x).abs() < 1e-6,
                 "Frame {}: expected aligned_x={}, got {}",
                 frame_idx,
                 pos_start.x,
-                aligned_x
+                aligned.x
             );
             assert!(
-                (aligned_y - pos_start.y).abs() < 1e-6,
+                (aligned.y - pos_start.y).abs() < 1e-6,
                 "Frame {}: expected aligned_y={}, got {}",
                 frame_idx,
                 pos_start.y,
-                aligned_y
+                aligned.y
             );
         }
     }

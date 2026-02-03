@@ -5,6 +5,7 @@
 //! correctly recovers the applied transformation.
 
 use crate::{AstroImage, ImageDimensions};
+use glam::DVec2;
 
 use crate::common::Buffer2;
 use crate::registration::interpolation::{InterpolationMethod, WarpConfig, warp_image};
@@ -52,14 +53,14 @@ fn transform_image(
     angle_rad: f64,
     scale: f64,
 ) -> Vec<f32> {
-    let transform = Transform::similarity(dx, dy, angle_rad, scale);
+    let transform = Transform::similarity(DVec2::new(dx, dy), angle_rad, scale);
     let src_buf = Buffer2::new(width, height, src_pixels.to_vec());
     warp_image(&src_buf, width, height, &transform, &warp_config()).into_vec()
 }
 
 /// Apply a translation to an image.
 fn translate_image(src_pixels: &[f32], width: usize, height: usize, dx: f64, dy: f64) -> Vec<f32> {
-    let transform = Transform::translation(dx, dy);
+    let transform = Transform::translation(DVec2::new(dx, dy));
     let src_buf = Buffer2::new(width, height, src_pixels.to_vec());
     warp_image(&src_buf, width, height, &transform, &warp_config()).into_vec()
 }
@@ -104,16 +105,16 @@ fn test_image_registration_translation() {
         target_result.stars.len()
     );
 
-    // Convert detected stars to (x, y) tuples
-    let ref_stars: Vec<(f64, f64)> = ref_result
+    // Convert detected stars to DVec2
+    let ref_stars: Vec<DVec2> = ref_result
         .stars
         .iter()
-        .map(|s| (s.pos.x, s.pos.y))
+        .map(|s| DVec2::new(s.pos.x, s.pos.y))
         .collect();
-    let target_stars: Vec<(f64, f64)> = target_result
+    let target_stars: Vec<DVec2> = target_result
         .stars
         .iter()
-        .map(|s| (s.pos.x, s.pos.y))
+        .map(|s| DVec2::new(s.pos.x, s.pos.y))
         .collect();
 
     // Register the images
@@ -131,7 +132,9 @@ fn test_image_registration_translation() {
         .expect("Registration should succeed");
 
     // Verify the recovered translation
-    let (recovered_dx, recovered_dy) = result.transform.translation_components();
+    let recovered = result.transform.translation_components();
+    let recovered_dx = recovered.x;
+    let recovered_dy = recovered.y;
 
     let dx_error = (recovered_dx - dx).abs();
     let dy_error = (recovered_dy - dy).abs();
@@ -187,15 +190,15 @@ fn test_image_registration_rotation() {
     let ref_result = det.detect(&ref_image);
     let target_result = det.detect(&target_image);
 
-    let ref_stars: Vec<(f64, f64)> = ref_result
+    let ref_stars: Vec<DVec2> = ref_result
         .stars
         .iter()
-        .map(|s| (s.pos.x, s.pos.y))
+        .map(|s| DVec2::new(s.pos.x, s.pos.y))
         .collect();
-    let target_stars: Vec<(f64, f64)> = target_result
+    let target_stars: Vec<DVec2> = target_result
         .stars
         .iter()
-        .map(|s| (s.pos.x, s.pos.y))
+        .map(|s| DVec2::new(s.pos.x, s.pos.y))
         .collect();
 
     let reg_config = RegistrationConfig {
@@ -260,15 +263,15 @@ fn test_image_registration_similarity() {
     let ref_result = det.detect(&ref_image);
     let target_result = det.detect(&target_image);
 
-    let ref_stars: Vec<(f64, f64)> = ref_result
+    let ref_stars: Vec<DVec2> = ref_result
         .stars
         .iter()
-        .map(|s| (s.pos.x, s.pos.y))
+        .map(|s| DVec2::new(s.pos.x, s.pos.y))
         .collect();
-    let target_stars: Vec<(f64, f64)> = target_result
+    let target_stars: Vec<DVec2> = target_result
         .stars
         .iter()
-        .map(|s| (s.pos.x, s.pos.y))
+        .map(|s| DVec2::new(s.pos.x, s.pos.y))
         .collect();
 
     let reg_config = RegistrationConfig {
@@ -356,15 +359,15 @@ fn test_image_registration_with_noise() {
     let ref_result = det.detect(&ref_image);
     let target_result = det.detect(&target_image);
 
-    let ref_stars: Vec<(f64, f64)> = ref_result
+    let ref_stars: Vec<DVec2> = ref_result
         .stars
         .iter()
-        .map(|s| (s.pos.x, s.pos.y))
+        .map(|s| DVec2::new(s.pos.x, s.pos.y))
         .collect();
-    let target_stars: Vec<(f64, f64)> = target_result
+    let target_stars: Vec<DVec2> = target_result
         .stars
         .iter()
-        .map(|s| (s.pos.x, s.pos.y))
+        .map(|s| DVec2::new(s.pos.x, s.pos.y))
         .collect();
 
     let reg_config = RegistrationConfig {
@@ -380,7 +383,9 @@ fn test_image_registration_with_noise() {
         .register_positions(&ref_stars, &target_stars)
         .expect("Registration should succeed");
 
-    let (recovered_dx, recovered_dy) = result.transform.translation_components();
+    let recovered = result.transform.translation_components();
+    let recovered_dx = recovered.x;
+    let recovered_dy = recovered.y;
 
     // Allow more tolerance due to noise
     let dx_error = (recovered_dx - dx).abs();
@@ -434,15 +439,15 @@ fn test_image_registration_dense_field() {
         ref_result.stars.len()
     );
 
-    let ref_stars: Vec<(f64, f64)> = ref_result
+    let ref_stars: Vec<DVec2> = ref_result
         .stars
         .iter()
-        .map(|s| (s.pos.x, s.pos.y))
+        .map(|s| DVec2::new(s.pos.x, s.pos.y))
         .collect();
-    let target_stars: Vec<(f64, f64)> = target_result
+    let target_stars: Vec<DVec2> = target_result
         .stars
         .iter()
-        .map(|s| (s.pos.x, s.pos.y))
+        .map(|s| DVec2::new(s.pos.x, s.pos.y))
         .collect();
 
     let reg_config = RegistrationConfig {
@@ -500,15 +505,15 @@ fn test_image_registration_large_image() {
     let ref_result = det.detect(&ref_image);
     let target_result = det.detect(&target_image);
 
-    let ref_stars: Vec<(f64, f64)> = ref_result
+    let ref_stars: Vec<DVec2> = ref_result
         .stars
         .iter()
-        .map(|s| (s.pos.x, s.pos.y))
+        .map(|s| DVec2::new(s.pos.x, s.pos.y))
         .collect();
-    let target_stars: Vec<(f64, f64)> = target_result
+    let target_stars: Vec<DVec2> = target_result
         .stars
         .iter()
-        .map(|s| (s.pos.x, s.pos.y))
+        .map(|s| DVec2::new(s.pos.x, s.pos.y))
         .collect();
 
     let reg_config = RegistrationConfig {
@@ -524,7 +529,9 @@ fn test_image_registration_large_image() {
         .register_positions(&ref_stars, &target_stars)
         .expect("Registration should succeed");
 
-    let (recovered_dx, recovered_dy) = result.transform.translation_components();
+    let recovered = result.transform.translation_components();
+    let recovered_dx = recovered.x;
+    let recovered_dy = recovered.y;
 
     let dx_error = (recovered_dx - dx).abs();
     let dy_error = (recovered_dy - dy).abs();

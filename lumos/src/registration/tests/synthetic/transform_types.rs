@@ -12,6 +12,7 @@
 
 use crate::registration::{RegistrationConfig, Registrator, TransformType};
 use crate::testing::synthetic::{generate_random_positions, transform_stars, translate_stars};
+use glam::DVec2;
 
 #[test]
 fn test_registration_translation_only() {
@@ -38,24 +39,24 @@ fn test_registration_translation_only() {
         .expect("Registration should succeed");
 
     // Extract recovered translation
-    let (recovered_dx, recovered_dy) = result.transform.translation_components();
+    let recovered = result.transform.translation_components();
 
     // Validate translation (should be very close to original)
-    let dx_error = (recovered_dx - dx).abs();
-    let dy_error = (recovered_dy - dy).abs();
+    let dx_error = (recovered.x - dx).abs();
+    let dy_error = (recovered.y - dy).abs();
 
     assert!(
         dx_error < 0.1,
         "X translation error too large: expected {}, got {}, error {}",
         dx,
-        recovered_dx,
+        recovered.x,
         dx_error
     );
     assert!(
         dy_error < 0.1,
         "Y translation error too large: expected {}, got {}, error {}",
         dy,
-        recovered_dy,
+        recovered.y,
         dy_error
     );
 
@@ -108,10 +109,8 @@ fn test_registration_similarity_transform() {
     // and checking they match target stars
     let mut max_error = 0.0f64;
     for (ref_star, target_star) in ref_stars.iter().zip(target_stars.iter()) {
-        let (transformed_x, transformed_y) = result.transform.apply(ref_star.0, ref_star.1);
-        let error = ((transformed_x - target_star.0).powi(2)
-            + (transformed_y - target_star.1).powi(2))
-        .sqrt();
+        let transformed = result.transform.apply(*ref_star);
+        let error = transformed.distance(*target_star);
         max_error = max_error.max(error);
     }
 
@@ -166,12 +165,12 @@ fn test_registration_with_noise() {
         ((state >> 33) as f64 / (1u64 << 31) as f64) * 2.0 - 1.0 // -1 to 1
     };
 
-    let target_stars: Vec<(f64, f64)> = ref_stars
+    let target_stars: Vec<DVec2> = ref_stars
         .iter()
-        .map(|(x, y)| {
+        .map(|p| {
             let noise_x = next_random() * 0.5; // +/- 0.5 pixel noise
             let noise_y = next_random() * 0.5;
-            (x + dx + noise_x, y + dy + noise_y)
+            DVec2::new(p.x + dx + noise_x, p.y + dy + noise_y)
         })
         .collect();
 
@@ -190,24 +189,24 @@ fn test_registration_with_noise() {
         .expect("Registration should succeed");
 
     // Extract recovered translation
-    let (recovered_dx, recovered_dy) = result.transform.translation_components();
+    let recovered = result.transform.translation_components();
 
     // Validate translation (allow more error due to noise)
-    let dx_error = (recovered_dx - dx).abs();
-    let dy_error = (recovered_dy - dy).abs();
+    let dx_error = (recovered.x - dx).abs();
+    let dy_error = (recovered.y - dy).abs();
 
     assert!(
         dx_error < 1.0,
         "X translation error too large: expected {}, got {}, error {}",
         dx,
-        recovered_dx,
+        recovered.x,
         dx_error
     );
     assert!(
         dy_error < 1.0,
         "Y translation error too large: expected {}, got {}, error {}",
         dy,
-        recovered_dy,
+        recovered.y,
         dy_error
     );
 
@@ -243,10 +242,10 @@ fn test_registration_large_translation() {
         .register_positions(&ref_stars, &target_stars)
         .expect("Registration should succeed");
 
-    let (recovered_dx, recovered_dy) = result.transform.translation_components();
+    let recovered = result.transform.translation_components();
 
-    let dx_error = (recovered_dx - dx).abs();
-    let dy_error = (recovered_dy - dy).abs();
+    let dx_error = (recovered.x - dx).abs();
+    let dy_error = (recovered.y - dy).abs();
 
     assert!(
         dx_error < 0.1,
@@ -381,8 +380,8 @@ fn test_registration_euclidean_translation_and_rotation() {
     // Validate by applying transform to all reference stars
     let mut max_error = 0.0f64;
     for (ref_star, target_star) in ref_stars.iter().zip(target_stars.iter()) {
-        let (tx, ty) = result.transform.apply(ref_star.0, ref_star.1);
-        let error = ((tx - target_star.0).powi(2) + (ty - target_star.1).powi(2)).sqrt();
+        let t = result.transform.apply(*ref_star);
+        let error = t.distance(*target_star);
         max_error = max_error.max(error);
     }
 
@@ -410,11 +409,11 @@ fn test_registration_euclidean_translation_and_rotation() {
 /// Affine: [a, b, tx, c, d, ty] where the transform is:
 /// x' = a*x + b*y + tx
 /// y' = c*x + d*y + ty
-fn apply_affine(stars: &[(f64, f64)], params: [f64; 6]) -> Vec<(f64, f64)> {
+fn apply_affine(stars: &[DVec2], params: [f64; 6]) -> Vec<DVec2> {
     let [a, b, tx, c, d, ty] = params;
     stars
         .iter()
-        .map(|(x, y)| (a * x + b * y + tx, c * x + d * y + ty))
+        .map(|p| DVec2::new(a * p.x + b * p.y + tx, c * p.x + d * p.y + ty))
         .collect()
 }
 
@@ -450,8 +449,8 @@ fn test_registration_affine_differential_scale() {
     // Validate by applying transform
     let mut max_error = 0.0f64;
     for (ref_star, target_star) in ref_stars.iter().zip(target_stars.iter()) {
-        let (tx, ty) = result.transform.apply(ref_star.0, ref_star.1);
-        let error = ((tx - target_star.0).powi(2) + (ty - target_star.1).powi(2)).sqrt();
+        let t = result.transform.apply(*ref_star);
+        let error = t.distance(*target_star);
         max_error = max_error.max(error);
     }
 
@@ -500,8 +499,8 @@ fn test_registration_affine_with_shear() {
     // Validate transformation accuracy
     let mut max_error = 0.0f64;
     for (ref_star, target_star) in ref_stars.iter().zip(target_stars.iter()) {
-        let (tx, ty) = result.transform.apply(ref_star.0, ref_star.1);
-        let error = ((tx - target_star.0).powi(2) + (ty - target_star.1).powi(2)).sqrt();
+        let t = result.transform.apply(*ref_star);
+        let error = t.distance(*target_star);
         max_error = max_error.max(error);
     }
 
@@ -554,8 +553,8 @@ fn test_registration_affine_rotation_and_differential_scale() {
 
     let mut max_error = 0.0f64;
     for (ref_star, target_star) in ref_stars.iter().zip(target_stars.iter()) {
-        let (tx, ty) = result.transform.apply(ref_star.0, ref_star.1);
-        let error = ((tx - target_star.0).powi(2) + (ty - target_star.1).powi(2)).sqrt();
+        let t = result.transform.apply(*ref_star);
+        let error = t.distance(*target_star);
         max_error = max_error.max(error);
     }
 
@@ -580,14 +579,14 @@ fn test_registration_affine_rotation_and_differential_scale() {
 /// H = [h0, h1, h2, h3, h4, h5, h6, h7, 1.0]
 /// x' = (h0*x + h1*y + h2) / (h6*x + h7*y + 1)
 /// y' = (h3*x + h4*y + h5) / (h6*x + h7*y + 1)
-fn apply_homography(stars: &[(f64, f64)], params: [f64; 8]) -> Vec<(f64, f64)> {
+fn apply_homography(stars: &[DVec2], params: [f64; 8]) -> Vec<DVec2> {
     stars
         .iter()
-        .map(|(x, y)| {
-            let w = params[6] * x + params[7] * y + 1.0;
-            let x_prime = (params[0] * x + params[1] * y + params[2]) / w;
-            let y_prime = (params[3] * x + params[4] * y + params[5]) / w;
-            (x_prime, y_prime)
+        .map(|p| {
+            let w = params[6] * p.x + params[7] * p.y + 1.0;
+            let x_prime = (params[0] * p.x + params[1] * p.y + params[2]) / w;
+            let y_prime = (params[3] * p.x + params[4] * p.y + params[5]) / w;
+            DVec2::new(x_prime, y_prime)
         })
         .collect()
 }
@@ -625,8 +624,8 @@ fn test_registration_homography_mild_perspective() {
     // Validate transformation accuracy
     let mut max_error = 0.0f64;
     for (ref_star, target_star) in ref_stars.iter().zip(target_stars.iter()) {
-        let (tx, ty) = result.transform.apply(ref_star.0, ref_star.1);
-        let error = ((tx - target_star.0).powi(2) + (ty - target_star.1).powi(2)).sqrt();
+        let t = result.transform.apply(*ref_star);
+        let error = t.distance(*target_star);
         max_error = max_error.max(error);
     }
 
@@ -676,8 +675,8 @@ fn test_registration_homography_with_rotation() {
 
     let mut max_error = 0.0f64;
     for (ref_star, target_star) in ref_stars.iter().zip(target_stars.iter()) {
-        let (tx, ty) = result.transform.apply(ref_star.0, ref_star.1);
-        let error = ((tx - target_star.0).powi(2) + (ty - target_star.1).powi(2)).sqrt();
+        let t = result.transform.apply(*ref_star);
+        let error = t.distance(*target_star);
         max_error = max_error.max(error);
     }
 
@@ -789,8 +788,8 @@ fn test_affine_recovers_from_similarity_data() {
     // Validate by applying transform
     let mut max_error = 0.0f64;
     for (ref_star, target_star) in ref_stars.iter().zip(target_stars.iter()) {
-        let (tx, ty) = result.transform.apply(ref_star.0, ref_star.1);
-        let error = ((tx - target_star.0).powi(2) + (ty - target_star.1).powi(2)).sqrt();
+        let t = result.transform.apply(*ref_star);
+        let error = t.distance(*target_star);
         max_error = max_error.max(error);
     }
 

@@ -15,6 +15,7 @@ use crate::registration::transform::TransformType;
 use crate::star_detection::StarDetector;
 use crate::testing::synthetic::{self, StarFieldConfig, stamps};
 use crate::{AstroImage, ImageDimensions};
+use glam::DVec2;
 
 /// Compute mean squared error between two images.
 fn compute_mse(a: &[f32], b: &[f32]) -> f64 {
@@ -147,7 +148,7 @@ fn test_warp_translation_roundtrip() {
     let dy = -7.3;
 
     // Forward transform: moves image by (dx, dy)
-    let forward = Transform::translation(dx, dy);
+    let forward = Transform::translation(DVec2::new(dx, dy));
     // Inverse brings it back
     let inverse = forward.inverse();
 
@@ -213,7 +214,7 @@ fn test_warp_euclidean_roundtrip() {
     let dy = -3.0;
     let angle_rad = 2.0_f64.to_radians();
 
-    let forward = Transform::euclidean(dx, dy, angle_rad);
+    let forward = Transform::euclidean(DVec2::new(dx, dy), angle_rad);
     let inverse = forward.inverse();
 
     for method in representative_interpolation_methods() {
@@ -274,7 +275,7 @@ fn test_warp_similarity_roundtrip() {
     let angle_rad = 1.5_f64.to_radians();
     let scale = 1.02;
 
-    let forward = Transform::similarity(dx, dy, angle_rad, scale);
+    let forward = Transform::similarity(DVec2::new(dx, dy), angle_rad, scale);
     let inverse = forward.inverse();
 
     for method in representative_interpolation_methods() {
@@ -468,7 +469,7 @@ fn test_warp_with_detected_transform() {
     let dy = -8.0;
     let angle_rad = 0.8_f64.to_radians();
 
-    let true_transform = Transform::euclidean(dx, dy, angle_rad);
+    let true_transform = Transform::euclidean(DVec2::new(dx, dy), angle_rad);
 
     // Create target by warping reference
     let warp_config = WarpConfig {
@@ -506,16 +507,8 @@ fn test_warp_with_detected_transform() {
     let ref_result = det.detect(&ref_image);
     let target_result = det.detect(&target_image);
 
-    let ref_stars: Vec<(f64, f64)> = ref_result
-        .stars
-        .iter()
-        .map(|s| (s.pos.x, s.pos.y))
-        .collect();
-    let target_stars: Vec<(f64, f64)> = target_result
-        .stars
-        .iter()
-        .map(|s| (s.pos.x, s.pos.y))
-        .collect();
+    let ref_stars: Vec<DVec2> = ref_result.stars.iter().map(|s| s.pos).collect();
+    let target_stars: Vec<DVec2> = target_result.stars.iter().map(|s| s.pos).collect();
 
     // Register to find transform
     let reg_config = RegistrationConfig {
@@ -570,7 +563,7 @@ fn test_interpolation_quality_ordering() {
     let height = ref_buf.height();
 
     // Apply a transform that requires interpolation
-    let forward = Transform::similarity(3.7, -2.3, 1.0_f64.to_radians(), 1.01);
+    let forward = Transform::similarity(DVec2::new(3.7, -2.3), 1.0_f64.to_radians(), 1.01);
     let inverse = forward.inverse();
 
     let mut results: Vec<(InterpolationMethod, f64)> = Vec::new();
@@ -650,7 +643,7 @@ fn test_warp_to_reference_image_grayscale() {
         AstroImage::from_pixels(ImageDimensions::new(width, height, 1), ref_buf.into_vec());
 
     // Apply a translation
-    let transform = Transform::translation(5.0, -3.0);
+    let transform = Transform::translation(DVec2::new(5.0, -3.0));
 
     // Warp the image
     let warped_image =
@@ -683,7 +676,7 @@ fn test_warp_to_reference_image_rgb() {
     let rgb_image = AstroImage::from_pixels(ImageDimensions::new(width, height, 3), rgb_pixels);
 
     // Apply a transform
-    let transform = Transform::euclidean(3.0, -2.0, 1.0_f64.to_radians());
+    let transform = Transform::euclidean(DVec2::new(3.0, -2.0), 1.0_f64.to_radians());
 
     // Warp the RGB image
     let warped = warp_to_reference_image(&rgb_image, &transform, InterpolationMethod::Lanczos3);
@@ -721,7 +714,7 @@ fn test_warp_to_reference_image_preserves_metadata() {
         ..Default::default()
     };
 
-    let transform = Transform::translation(5.0, 5.0);
+    let transform = Transform::translation(DVec2::new(5.0, 5.0));
     let warped = warp_to_reference_image(&image, &transform, InterpolationMethod::Bilinear);
 
     // Verify metadata is preserved

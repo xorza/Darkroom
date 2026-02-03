@@ -367,7 +367,12 @@ fn test_too_few_stars() {
 
 #[test]
 fn test_all_collinear_stars() {
-    let positions = vec![(0.0, 0.0), (1.0, 0.0), (2.0, 0.0), (3.0, 0.0)];
+    let positions = vec![
+        DVec2::new(0.0, 0.0),
+        DVec2::new(1.0, 0.0),
+        DVec2::new(2.0, 0.0),
+        DVec2::new(3.0, 0.0),
+    ];
     let triangles = form_triangles(&positions, 10);
     assert!(triangles.is_empty());
 }
@@ -376,11 +381,11 @@ fn test_all_collinear_stars() {
 fn test_form_triangles_count() {
     // C(5,3) = 10 triangles from 5 points
     let positions = vec![
-        (0.0, 0.0),
-        (10.0, 0.0),
-        (0.0, 10.0),
-        (10.0, 10.0),
-        (5.0, 15.0),
+        DVec2::new(0.0, 0.0),
+        DVec2::new(10.0, 0.0),
+        DVec2::new(0.0, 10.0),
+        DVec2::new(10.0, 10.0),
+        DVec2::new(5.0, 15.0),
     ];
     let triangles = form_triangles(&positions, 10);
     assert_eq!(triangles.len(), 10);
@@ -388,8 +393,16 @@ fn test_form_triangles_count() {
 
 #[test]
 fn test_matches_to_point_pairs() {
-    let ref_pos = vec![(0.0, 0.0), (1.0, 1.0), (2.0, 2.0)];
-    let target_pos = vec![(10.0, 10.0), (11.0, 11.0), (12.0, 12.0)];
+    let ref_pos = vec![
+        DVec2::new(0.0, 0.0),
+        DVec2::new(1.0, 1.0),
+        DVec2::new(2.0, 2.0),
+    ];
+    let target_pos = vec![
+        DVec2::new(10.0, 10.0),
+        DVec2::new(11.0, 11.0),
+        DVec2::new(12.0, 12.0),
+    ];
 
     let matches = vec![
         StarMatch {
@@ -410,13 +423,21 @@ fn test_matches_to_point_pairs() {
 
     assert_eq!(ref_points.len(), 2);
     assert_eq!(target_points.len(), 2);
-    assert_eq!(ref_points[0], (0.0, 0.0));
-    assert_eq!(target_points[0], (10.0, 10.0));
+    assert_eq!(ref_points[0], DVec2::new(0.0, 0.0));
+    assert_eq!(target_points[0], DVec2::new(10.0, 10.0));
 }
 
 #[test]
 fn test_triangle_hash_key() {
-    let tri = Triangle::from_positions([0, 1, 2], [(0.0, 0.0), (3.0, 0.0), (0.0, 4.0)]).unwrap();
+    let tri = Triangle::from_positions(
+        [0, 1, 2],
+        [
+            DVec2::new(0.0, 0.0),
+            DVec2::new(3.0, 0.0),
+            DVec2::new(0.0, 4.0),
+        ],
+    )
+    .unwrap();
 
     let (bx, by) = tri.hash_key(100);
     assert!(bx < 100);
@@ -426,15 +447,18 @@ fn test_triangle_hash_key() {
 #[test]
 fn test_match_mirrored_image() {
     let ref_positions = vec![
-        (0.0, 0.0),
-        (10.0, 0.0),
-        (0.0, 10.0),
-        (10.0, 10.0),
-        (5.0, 5.0),
+        DVec2::new(0.0, 0.0),
+        DVec2::new(10.0, 0.0),
+        DVec2::new(0.0, 10.0),
+        DVec2::new(10.0, 10.0),
+        DVec2::new(5.0, 5.0),
     ];
 
     // Mirror horizontally
-    let target_positions: Vec<(f64, f64)> = ref_positions.iter().map(|(x, y)| (-*x, *y)).collect();
+    let target_positions: Vec<DVec2> = ref_positions
+        .iter()
+        .map(|p| DVec2::new(-p.x, p.y))
+        .collect();
 
     // With orientation check, mirrored triangles should be rejected
     let config_with_orientation = TriangleMatchConfig {
@@ -468,11 +492,11 @@ fn test_match_mirrored_image() {
 #[test]
 fn test_kdtree_match_identical_star_lists() {
     let positions = vec![
-        (0.0, 0.0),
-        (10.0, 0.0),
-        (0.0, 10.0),
-        (10.0, 10.0),
-        (5.0, 5.0),
+        DVec2::new(0.0, 0.0),
+        DVec2::new(10.0, 0.0),
+        DVec2::new(0.0, 10.0),
+        DVec2::new(10.0, 10.0),
+        DVec2::new(5.0, 5.0),
     ];
 
     let matches = match_triangles(&positions, &positions, &TriangleMatchConfig::default());
@@ -489,18 +513,16 @@ fn test_kdtree_match_identical_star_lists() {
 #[test]
 fn test_kdtree_match_translated_stars() {
     let ref_positions = vec![
-        (0.0, 0.0),
-        (10.0, 0.0),
-        (0.0, 10.0),
-        (10.0, 10.0),
-        (5.0, 5.0),
+        DVec2::new(0.0, 0.0),
+        DVec2::new(10.0, 0.0),
+        DVec2::new(0.0, 10.0),
+        DVec2::new(10.0, 10.0),
+        DVec2::new(5.0, 5.0),
     ];
 
     // Translate by (100, 50)
-    let target_positions: Vec<(f64, f64)> = ref_positions
-        .iter()
-        .map(|(x, y)| (x + 100.0, y + 50.0))
-        .collect();
+    let offset = DVec2::new(100.0, 50.0);
+    let target_positions: Vec<DVec2> = ref_positions.iter().map(|p| *p + offset).collect();
 
     let matches = match_triangles(
         &ref_positions,
@@ -517,18 +539,15 @@ fn test_kdtree_match_translated_stars() {
 #[test]
 fn test_kdtree_match_scaled_stars() {
     let ref_positions = vec![
-        (0.0, 0.0),
-        (10.0, 0.0),
-        (0.0, 10.0),
-        (10.0, 10.0),
-        (5.0, 5.0),
+        DVec2::new(0.0, 0.0),
+        DVec2::new(10.0, 0.0),
+        DVec2::new(0.0, 10.0),
+        DVec2::new(10.0, 10.0),
+        DVec2::new(5.0, 5.0),
     ];
 
     // Scale by 2x
-    let target_positions: Vec<(f64, f64)> = ref_positions
-        .iter()
-        .map(|(x, y)| (x * 2.0, y * 2.0))
-        .collect();
+    let target_positions: Vec<DVec2> = ref_positions.iter().map(|p| *p * 2.0).collect();
 
     let matches = match_triangles(
         &ref_positions,
@@ -542,11 +561,11 @@ fn test_kdtree_match_scaled_stars() {
 #[test]
 fn test_form_triangles_kdtree_basic() {
     let positions = vec![
-        (0.0, 0.0),
-        (10.0, 0.0),
-        (0.0, 10.0),
-        (10.0, 10.0),
-        (5.0, 5.0),
+        DVec2::new(0.0, 0.0),
+        DVec2::new(10.0, 0.0),
+        DVec2::new(0.0, 10.0),
+        DVec2::new(10.0, 10.0),
+        DVec2::new(5.0, 5.0),
     ];
 
     let triangles = form_triangles_kdtree(&positions, 4);
@@ -564,14 +583,14 @@ fn test_form_triangles_kdtree_basic() {
 
 #[test]
 fn test_form_triangles_kdtree_empty() {
-    let positions: Vec<(f64, f64)> = vec![];
+    let positions: Vec<DVec2> = vec![];
     let triangles = form_triangles_kdtree(&positions, 5);
     assert!(triangles.is_empty());
 }
 
 #[test]
 fn test_form_triangles_kdtree_too_few() {
-    let positions = vec![(0.0, 0.0), (1.0, 1.0)];
+    let positions = vec![DVec2::new(0.0, 0.0), DVec2::new(1.0, 1.0)];
     let triangles = form_triangles_kdtree(&positions, 5);
     assert!(triangles.is_empty());
 }
@@ -579,15 +598,18 @@ fn test_form_triangles_kdtree_too_few() {
 #[test]
 fn test_kdtree_match_rotated_stars() {
     let ref_positions = vec![
-        (0.0, 0.0),
-        (10.0, 0.0),
-        (0.0, 10.0),
-        (10.0, 10.0),
-        (5.0, 5.0),
+        DVec2::new(0.0, 0.0),
+        DVec2::new(10.0, 0.0),
+        DVec2::new(0.0, 10.0),
+        DVec2::new(10.0, 10.0),
+        DVec2::new(5.0, 5.0),
     ];
 
     // Rotate by 90 degrees around origin
-    let target_positions: Vec<(f64, f64)> = ref_positions.iter().map(|(x, y)| (-*y, *x)).collect();
+    let target_positions: Vec<DVec2> = ref_positions
+        .iter()
+        .map(|p| DVec2::new(-p.y, p.x))
+        .collect();
 
     let config = TriangleMatchConfig {
         check_orientation: false, // Rotation changes orientation
@@ -602,15 +624,20 @@ fn test_kdtree_match_rotated_stars() {
 #[test]
 fn test_kdtree_match_with_missing_stars() {
     let ref_positions = vec![
-        (0.0, 0.0),
-        (10.0, 0.0),
-        (0.0, 10.0),
-        (10.0, 10.0),
-        (5.0, 5.0),
+        DVec2::new(0.0, 0.0),
+        DVec2::new(10.0, 0.0),
+        DVec2::new(0.0, 10.0),
+        DVec2::new(10.0, 10.0),
+        DVec2::new(5.0, 5.0),
     ];
 
     // Only 4 stars in target (missing one)
-    let target_positions = vec![(0.0, 0.0), (10.0, 0.0), (0.0, 10.0), (10.0, 10.0)];
+    let target_positions = vec![
+        DVec2::new(0.0, 0.0),
+        DVec2::new(10.0, 0.0),
+        DVec2::new(0.0, 10.0),
+        DVec2::new(10.0, 10.0),
+    ];
 
     let matches = match_triangles(
         &ref_positions,
@@ -624,16 +651,21 @@ fn test_kdtree_match_with_missing_stars() {
 
 #[test]
 fn test_kdtree_match_with_extra_stars() {
-    let ref_positions = vec![(0.0, 0.0), (10.0, 0.0), (0.0, 10.0), (10.0, 10.0)];
+    let ref_positions = vec![
+        DVec2::new(0.0, 0.0),
+        DVec2::new(10.0, 0.0),
+        DVec2::new(0.0, 10.0),
+        DVec2::new(10.0, 10.0),
+    ];
 
     // Target has extra stars
     let target_positions = vec![
-        (0.0, 0.0),
-        (10.0, 0.0),
-        (0.0, 10.0),
-        (10.0, 10.0),
-        (5.0, 5.0),
-        (15.0, 15.0),
+        DVec2::new(0.0, 0.0),
+        DVec2::new(10.0, 0.0),
+        DVec2::new(0.0, 10.0),
+        DVec2::new(10.0, 10.0),
+        DVec2::new(5.0, 5.0),
+        DVec2::new(15.0, 15.0),
     ];
 
     let matches = match_triangles(
@@ -649,15 +681,18 @@ fn test_kdtree_match_with_extra_stars() {
 #[test]
 fn test_kdtree_match_mirrored_image() {
     let ref_positions = vec![
-        (0.0, 0.0),
-        (10.0, 0.0),
-        (0.0, 10.0),
-        (10.0, 10.0),
-        (5.0, 5.0),
+        DVec2::new(0.0, 0.0),
+        DVec2::new(10.0, 0.0),
+        DVec2::new(0.0, 10.0),
+        DVec2::new(10.0, 10.0),
+        DVec2::new(5.0, 5.0),
     ];
 
     // Mirror horizontally
-    let target_positions: Vec<(f64, f64)> = ref_positions.iter().map(|(x, y)| (-*x, *y)).collect();
+    let target_positions: Vec<DVec2> = ref_positions
+        .iter()
+        .map(|p| DVec2::new(-p.x, p.y))
+        .collect();
 
     // With orientation check, mirrored triangles should be rejected
     let config_with_orientation = TriangleMatchConfig {
@@ -691,23 +726,21 @@ fn test_kdtree_match_mirrored_image() {
 #[test]
 fn test_match_sparse_field_10_stars() {
     let ref_positions = vec![
-        (0.0, 0.0),
-        (50.0, 0.0),
-        (100.0, 0.0),
-        (0.0, 50.0),
-        (50.0, 50.0),
-        (100.0, 50.0),
-        (0.0, 100.0),
-        (50.0, 100.0),
-        (100.0, 100.0),
-        (50.0, 25.0),
+        DVec2::new(0.0, 0.0),
+        DVec2::new(50.0, 0.0),
+        DVec2::new(100.0, 0.0),
+        DVec2::new(0.0, 50.0),
+        DVec2::new(50.0, 50.0),
+        DVec2::new(100.0, 50.0),
+        DVec2::new(0.0, 100.0),
+        DVec2::new(50.0, 100.0),
+        DVec2::new(100.0, 100.0),
+        DVec2::new(50.0, 25.0),
     ];
 
     // Translate
-    let target_positions: Vec<(f64, f64)> = ref_positions
-        .iter()
-        .map(|(x, y)| (x + 10.0, y + 20.0))
-        .collect();
+    let offset = DVec2::new(10.0, 20.0);
+    let target_positions: Vec<DVec2> = ref_positions.iter().map(|p| *p + offset).collect();
 
     let config = TriangleMatchConfig {
         max_stars: 10,
@@ -730,20 +763,20 @@ fn test_match_sparse_field_10_stars() {
 fn test_match_with_40_percent_outliers() {
     // 6 real stars
     let ref_positions = vec![
-        (0.0, 0.0),
-        (10.0, 0.0),
-        (20.0, 0.0),
-        (0.0, 10.0),
-        (10.0, 10.0),
-        (20.0, 10.0),
+        DVec2::new(0.0, 0.0),
+        DVec2::new(10.0, 0.0),
+        DVec2::new(20.0, 0.0),
+        DVec2::new(0.0, 10.0),
+        DVec2::new(10.0, 10.0),
+        DVec2::new(20.0, 10.0),
     ];
 
     // Same 6 stars plus 4 random outliers (40% noise)
     let mut target_positions = ref_positions.clone();
-    target_positions.push((100.0, 100.0));
-    target_positions.push((150.0, 50.0));
-    target_positions.push((75.0, 125.0));
-    target_positions.push((200.0, 200.0));
+    target_positions.push(DVec2::new(100.0, 100.0));
+    target_positions.push(DVec2::new(150.0, 50.0));
+    target_positions.push(DVec2::new(75.0, 125.0));
+    target_positions.push(DVec2::new(200.0, 200.0));
 
     let config = TriangleMatchConfig {
         min_votes: 2,
@@ -776,18 +809,18 @@ fn test_match_with_40_percent_outliers() {
 fn test_vertex_correspondence_correctness() {
     // Create a distinctive asymmetric triangle pattern
     let ref_positions = vec![
-        (0.0, 0.0),   // A
-        (10.0, 0.0),  // B
-        (5.0, 20.0),  // C - tall isosceles
-        (15.0, 10.0), // D - offset point
+        DVec2::new(0.0, 0.0),   // A
+        DVec2::new(10.0, 0.0),  // B
+        DVec2::new(5.0, 20.0),  // C - tall isosceles
+        DVec2::new(15.0, 10.0), // D - offset point
     ];
 
     // Same positions, different order
     let target_positions = vec![
-        (0.0, 0.0),   // A
-        (10.0, 0.0),  // B
-        (5.0, 20.0),  // C
-        (15.0, 10.0), // D
+        DVec2::new(0.0, 0.0),   // A
+        DVec2::new(10.0, 0.0),  // B
+        DVec2::new(5.0, 20.0),  // C
+        DVec2::new(15.0, 10.0), // D
     ];
 
     let config = TriangleMatchConfig {
@@ -813,11 +846,11 @@ fn test_kdtree_scales_better_than_brute_force() {
     use std::time::Instant;
 
     // Generate 80 stars
-    let positions: Vec<(f64, f64)> = (0..80)
+    let positions: Vec<DVec2> = (0..80)
         .map(|i| {
             let x = (i % 10) as f64 * 15.0;
             let y = (i / 10) as f64 * 15.0;
-            (x, y)
+            DVec2::new(x, y)
         })
         .collect();
 
@@ -877,7 +910,7 @@ fn test_match_very_dense_field_500_stars() {
             let noise_y = ((i * 11 + j * 17) as f64 * 0.1).cos() * 3.0;
             let x = i as f64 * 40.0 + noise_x;
             let y = j as f64 * 50.0 + noise_y;
-            ref_positions.push((x, y));
+            ref_positions.push(DVec2::new(x, y));
         }
     }
 
@@ -889,12 +922,12 @@ fn test_match_very_dense_field_500_stars() {
     let cos_a = angle.cos();
     let sin_a = angle.sin();
 
-    let target_positions: Vec<(f64, f64)> = ref_positions
+    let target_positions: Vec<DVec2> = ref_positions
         .iter()
-        .map(|(x, y)| {
-            let nx = scale * (cos_a * x - sin_a * y) + 100.0;
-            let ny = scale * (sin_a * x + cos_a * y) + 50.0;
-            (nx, ny)
+        .map(|p| {
+            let nx = scale * (cos_a * p.x - sin_a * p.y) + 100.0;
+            let ny = scale * (sin_a * p.x + cos_a * p.y) + 50.0;
+            DVec2::new(nx, ny)
         })
         .collect();
 
@@ -938,28 +971,26 @@ fn test_match_clustered_stars() {
     for i in 0..10 {
         let angle = i as f64 * PI / 5.0;
         let r = 5.0 + (i as f64 * 0.5);
-        ref_positions.push((50.0 + r * angle.cos(), 50.0 + r * angle.sin()));
+        ref_positions.push(DVec2::new(50.0 + r * angle.cos(), 50.0 + r * angle.sin()));
     }
 
     // Cluster 2: center at (200, 50)
     for i in 0..10 {
         let angle = i as f64 * PI / 5.0;
         let r = 5.0 + (i as f64 * 0.5);
-        ref_positions.push((200.0 + r * angle.cos(), 50.0 + r * angle.sin()));
+        ref_positions.push(DVec2::new(200.0 + r * angle.cos(), 50.0 + r * angle.sin()));
     }
 
     // Cluster 3: center at (125, 150)
     for i in 0..10 {
         let angle = i as f64 * PI / 5.0;
         let r = 5.0 + (i as f64 * 0.5);
-        ref_positions.push((125.0 + r * angle.cos(), 150.0 + r * angle.sin()));
+        ref_positions.push(DVec2::new(125.0 + r * angle.cos(), 150.0 + r * angle.sin()));
     }
 
     // Apply translation
-    let target_positions: Vec<(f64, f64)> = ref_positions
-        .iter()
-        .map(|(x, y)| (x + 20.0, y + 15.0))
-        .collect();
+    let offset = DVec2::new(20.0, 15.0);
+    let target_positions: Vec<DVec2> = ref_positions.iter().map(|p| *p + offset).collect();
 
     let config = TriangleMatchConfig {
         min_votes: 2,
@@ -982,18 +1013,16 @@ fn test_match_brightness_weighted_selection() {
     // This test simulates what happens when max_stars limits star count
     // Brighter stars (lower indices) should be preferred
 
-    let ref_positions: Vec<(f64, f64)> = (0..50)
+    let ref_positions: Vec<DVec2> = (0..50)
         .map(|i| {
             let x = (i % 10) as f64 * 30.0;
             let y = (i / 10) as f64 * 30.0;
-            (x, y)
+            DVec2::new(x, y)
         })
         .collect();
 
-    let target_positions: Vec<(f64, f64)> = ref_positions
-        .iter()
-        .map(|(x, y)| (x + 10.0, y + 5.0))
-        .collect();
+    let offset = DVec2::new(10.0, 5.0);
+    let target_positions: Vec<DVec2> = ref_positions.iter().map(|p| *p + offset).collect();
 
     let config = TriangleMatchConfig {
         max_stars: 20, // Only use "brightest" 20 stars
@@ -1028,10 +1057,10 @@ fn test_match_brightness_weighted_selection() {
 fn test_triangle_very_flat() {
     // Nearly collinear points - should reject very flat triangles
     // Use even smaller offset to ensure rejection
-    let positions: [(f64, f64); 3] = [
-        (0.0, 0.0),
-        (100.0, 0.0),
-        (50.0, 1e-10), // Extremely small offset - nearly collinear
+    let positions: [DVec2; 3] = [
+        DVec2::new(0.0, 0.0),
+        DVec2::new(100.0, 0.0),
+        DVec2::new(50.0, 1e-10), // Extremely small offset - nearly collinear
     ];
 
     let tri = Triangle::from_positions([0, 1, 2], [positions[0], positions[1], positions[2]]);
@@ -1047,10 +1076,10 @@ fn test_triangle_very_flat() {
 #[test]
 fn test_triangle_near_collinear() {
     // Points that are almost but not quite collinear
-    let positions: [(f64, f64); 3] = [
-        (0.0, 0.0),
-        (100.0, 0.0),
-        (50.0, 1.0), // Small but valid offset
+    let positions: [DVec2; 3] = [
+        DVec2::new(0.0, 0.0),
+        DVec2::new(100.0, 0.0),
+        DVec2::new(50.0, 1.0), // Small but valid offset
     ];
 
     let tri = Triangle::from_positions([0, 1, 2], [positions[0], positions[1], positions[2]]);
@@ -1081,19 +1110,17 @@ fn test_triangle_near_collinear() {
 fn test_match_large_coordinates() {
     // Coordinates typical of high-resolution sensors (4K+)
     let base_offset = 5000.0;
-    let ref_positions: Vec<(f64, f64)> = (0..25)
+    let ref_positions: Vec<DVec2> = (0..25)
         .map(|i| {
             let x = base_offset + (i % 5) as f64 * 100.0;
             let y = base_offset + (i / 5) as f64 * 100.0;
-            (x, y)
+            DVec2::new(x, y)
         })
         .collect();
 
     // Apply small translation
-    let target_positions: Vec<(f64, f64)> = ref_positions
-        .iter()
-        .map(|(x, y)| (x + 10.0, y - 5.0))
-        .collect();
+    let offset = DVec2::new(10.0, -5.0);
+    let target_positions: Vec<DVec2> = ref_positions.iter().map(|p| *p + offset).collect();
 
     let config = TriangleMatchConfig::default();
     let matches = match_triangles(&ref_positions, &target_positions, &config);
@@ -1118,19 +1145,17 @@ fn test_match_large_coordinates() {
 #[test]
 fn test_match_small_coordinates() {
     // Small but non-trivial coordinates (scaled down star field)
-    let ref_positions: Vec<(f64, f64)> = (0..25)
+    let ref_positions: Vec<DVec2> = (0..25)
         .map(|i| {
             let x = (i % 5) as f64 * 10.0;
             let y = (i / 5) as f64 * 10.0;
-            (x, y)
+            DVec2::new(x, y)
         })
         .collect();
 
     // Apply translation
-    let target_positions: Vec<(f64, f64)> = ref_positions
-        .iter()
-        .map(|(x, y)| (x + 1.0, y - 0.5))
-        .collect();
+    let offset = DVec2::new(1.0, -0.5);
+    let target_positions: Vec<DVec2> = ref_positions.iter().map(|p| *p + offset).collect();
 
     let config = TriangleMatchConfig::default();
     let matches = match_triangles(&ref_positions, &target_positions, &config);
@@ -1146,12 +1171,28 @@ fn test_match_small_coordinates() {
 #[test]
 fn test_triangle_similarity_threshold_boundary() {
     // Create an equilateral triangle: sides all equal, ratios = (1.0, 1.0)
-    let tri1 = Triangle::from_positions([0, 1, 2], [(0.0, 0.0), (10.0, 0.0), (5.0, 8.66)]).unwrap();
+    let tri1 = Triangle::from_positions(
+        [0, 1, 2],
+        [
+            DVec2::new(0.0, 0.0),
+            DVec2::new(10.0, 0.0),
+            DVec2::new(5.0, 8.66),
+        ],
+    )
+    .unwrap();
 
     // Create a similar but slightly distorted triangle
     // Ratios are sides[0]/sides[2] and sides[1]/sides[2]
     // Distort to change ratios by ~0.05
-    let tri2 = Triangle::from_positions([0, 1, 2], [(0.0, 0.0), (10.0, 0.0), (4.5, 8.0)]).unwrap();
+    let tri2 = Triangle::from_positions(
+        [0, 1, 2],
+        [
+            DVec2::new(0.0, 0.0),
+            DVec2::new(10.0, 0.0),
+            DVec2::new(4.5, 8.0),
+        ],
+    )
+    .unwrap();
 
     // Print ratios for debugging
     let dr0 = (tri1.ratios.0 - tri2.ratios.0).abs();
@@ -1178,20 +1219,17 @@ fn test_triangle_similarity_threshold_boundary() {
 #[test]
 fn test_match_large_scale_difference() {
     // Reference stars at normal scale
-    let ref_positions: Vec<(f64, f64)> = (0..20)
+    let ref_positions: Vec<DVec2> = (0..20)
         .map(|i| {
             let x = (i % 5) as f64 * 50.0;
             let y = (i / 5) as f64 * 50.0;
-            (x, y)
+            DVec2::new(x, y)
         })
         .collect();
 
     // Target stars scaled by 2x (large scale difference)
     let scale = 2.0;
-    let target_positions: Vec<(f64, f64)> = ref_positions
-        .iter()
-        .map(|(x, y)| (x * scale, y * scale))
-        .collect();
+    let target_positions: Vec<DVec2> = ref_positions.iter().map(|p| *p * scale).collect();
 
     let config = TriangleMatchConfig::default();
     let matches = match_triangles(&ref_positions, &target_positions, &config);
@@ -1207,25 +1245,23 @@ fn test_match_large_scale_difference() {
 /// Test matching with 180 degree rotation
 #[test]
 fn test_match_180_degree_rotation() {
-    let ref_positions: Vec<(f64, f64)> = (0..16)
+    let ref_positions: Vec<DVec2> = (0..16)
         .map(|i| {
             let x = 100.0 + (i % 4) as f64 * 50.0;
             let y = 100.0 + (i / 4) as f64 * 50.0;
-            (x, y)
+            DVec2::new(x, y)
         })
         .collect();
 
     // Center of the pattern
-    let cx = 175.0;
-    let cy = 175.0;
+    let center = DVec2::new(175.0, 175.0);
 
     // 180 degree rotation around center
-    let target_positions: Vec<(f64, f64)> = ref_positions
+    let target_positions: Vec<DVec2> = ref_positions
         .iter()
-        .map(|(x, y)| {
-            let dx = x - cx;
-            let dy = y - cy;
-            (cx - dx, cy - dy) // 180 degree rotation
+        .map(|p| {
+            let d = *p - center;
+            center - d // 180 degree rotation
         })
         .collect();
 
@@ -1251,19 +1287,17 @@ fn test_match_180_degree_rotation() {
 /// Test two-step matching with translated stars
 #[test]
 fn test_two_step_matching_translated() {
-    let ref_positions: Vec<(f64, f64)> = (0..25)
+    let ref_positions: Vec<DVec2> = (0..25)
         .map(|i| {
             let x = 100.0 + (i % 5) as f64 * 40.0;
             let y = 100.0 + (i / 5) as f64 * 40.0;
-            (x, y)
+            DVec2::new(x, y)
         })
         .collect();
 
     // Simple translation
-    let target_positions: Vec<(f64, f64)> = ref_positions
-        .iter()
-        .map(|(x, y)| (x + 50.0, y + 30.0))
-        .collect();
+    let offset = DVec2::new(50.0, 30.0);
+    let target_positions: Vec<DVec2> = ref_positions.iter().map(|p| *p + offset).collect();
 
     // Standard matching
     let standard_config = TriangleMatchConfig {
@@ -1298,29 +1332,28 @@ fn test_two_step_matching_translated() {
 /// Test two-step matching with rotated and scaled stars
 #[test]
 fn test_two_step_matching_similarity_transform() {
-    let ref_positions: Vec<(f64, f64)> = (0..20)
+    let ref_positions: Vec<DVec2> = (0..20)
         .map(|i| {
             let x = 200.0 + (i % 5) as f64 * 50.0;
             let y = 200.0 + (i / 5) as f64 * 50.0;
-            (x, y)
+            DVec2::new(x, y)
         })
         .collect();
 
-    let cx = 300.0;
-    let cy = 275.0;
+    let center = DVec2::new(300.0, 275.0);
     let scale = 1.05;
     let rotation: f64 = 0.1; // ~6 degrees
     let cos_r = rotation.cos();
     let sin_r = rotation.sin();
+    let translate = DVec2::new(20.0, 15.0);
 
-    let target_positions: Vec<(f64, f64)> = ref_positions
+    let target_positions: Vec<DVec2> = ref_positions
         .iter()
-        .map(|(x, y)| {
-            let dx = x - cx;
-            let dy = y - cy;
-            let x_rot = (dx * cos_r - dy * sin_r) * scale + cx + 20.0;
-            let y_rot = (dx * sin_r + dy * cos_r) * scale + cy + 15.0;
-            (x_rot, y_rot)
+        .map(|p| {
+            let d = *p - center;
+            let x_rot = (d.x * cos_r - d.y * sin_r) * scale + center.x + translate.x;
+            let y_rot = (d.x * sin_r + d.y * cos_r) * scale + center.y + translate.y;
+            DVec2::new(x_rot, y_rot)
         })
         .collect();
 
@@ -1343,17 +1376,15 @@ fn test_two_step_matching_similarity_transform() {
 #[test]
 fn test_two_step_matching_fallback() {
     // Very sparse field - likely to have few initial matches
-    let ref_positions: Vec<(f64, f64)> = vec![
-        (100.0, 100.0),
-        (200.0, 150.0),
-        (150.0, 250.0),
-        (300.0, 200.0),
+    let ref_positions: Vec<DVec2> = vec![
+        DVec2::new(100.0, 100.0),
+        DVec2::new(200.0, 150.0),
+        DVec2::new(150.0, 250.0),
+        DVec2::new(300.0, 200.0),
     ];
 
-    let target_positions: Vec<(f64, f64)> = ref_positions
-        .iter()
-        .map(|(x, y)| (x + 10.0, y + 5.0))
-        .collect();
+    let offset = DVec2::new(10.0, 5.0);
+    let target_positions: Vec<DVec2> = ref_positions.iter().map(|p| *p + offset).collect();
 
     let config = TriangleMatchConfig {
         two_step_matching: true,

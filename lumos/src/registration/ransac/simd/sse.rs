@@ -305,7 +305,7 @@ mod tests {
             return;
         }
 
-        let transform = Transform::similarity(5.0, 10.0, 0.1, 1.1);
+        let transform = Transform::similarity(DVec2::new(5.0, 10.0), 0.1, 1.1);
         let ref_points: Vec<DVec2> = (0..15)
             .map(|i| DVec2::new(i as f64 * 7.0, i as f64 * 4.0))
             .collect();
@@ -313,7 +313,7 @@ mod tests {
             .iter()
             .enumerate()
             .map(|(i, p)| {
-                let t = transform.apply_vec(*p);
+                let t = transform.apply(*p);
                 if i % 3 == 0 {
                     t + DVec2::new(50.0, 50.0)
                 } else {

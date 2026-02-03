@@ -115,12 +115,12 @@ mod tests {
 
     fn create_test_transform() -> Transform {
         // Simple translation: shift by (10, 5)
-        Transform::translation(10.0, 5.0)
+        Transform::translation(DVec2::new(10.0, 5.0))
     }
 
     fn create_similarity_transform() -> Transform {
         // Rotation of 30 degrees, scale 1.5, translation (10, 20)
-        Transform::similarity(10.0, 20.0, std::f64::consts::PI / 6.0, 1.5)
+        Transform::similarity(DVec2::new(10.0, 20.0), std::f64::consts::PI / 6.0, 1.5)
     }
 
     #[test]
@@ -205,7 +205,7 @@ mod tests {
                 .iter()
                 .enumerate()
                 .map(|(i, p)| {
-                    let t = transform.apply_vec(*p);
+                    let t = transform.apply(*p);
                     // Add some noise/outliers
                     if i % 5 == 0 {
                         t + DVec2::new(100.0, 100.0) // outlier
