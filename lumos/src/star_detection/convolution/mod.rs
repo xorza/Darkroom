@@ -42,6 +42,7 @@ use common::parallel;
 /// * `angle` - PSF rotation angle in radians
 /// * `output` - Output buffer for convolved result
 /// * `subtraction_scratch` - Scratch buffer for background subtraction (reuse to avoid allocation)
+#[allow(clippy::too_many_arguments)]
 pub fn matched_filter(
     pixels: &Buffer2<f32>,
     background: &Buffer2<f32>,
@@ -50,6 +51,7 @@ pub fn matched_filter(
     angle: f32,
     output: &mut Buffer2<f32>,
     subtraction_scratch: &mut Buffer2<f32>,
+    temp: &mut Buffer2<f32>,
 ) {
     assert_eq!(pixels.width(), background.width());
     assert_eq!(pixels.height(), background.height());
@@ -74,7 +76,7 @@ pub fn matched_filter(
 
     // Convolve with elliptical Gaussian kernel
     let sigma = fwhm_to_sigma(fwhm);
-    elliptical_gaussian_convolve(subtraction_scratch, sigma, axis_ratio, angle, output);
+    elliptical_gaussian_convolve(subtraction_scratch, sigma, axis_ratio, angle, output, temp);
 }
 
 // ============================================================================
@@ -85,10 +87,17 @@ pub fn matched_filter(
 ///
 /// Uses separable convolution: first convolve rows, then columns.
 /// This is O(n×k) instead of O(n×k²) for a 2D convolution.
-pub(super) fn gaussian_convolve(pixels: &Buffer2<f32>, sigma: f32, output: &mut Buffer2<f32>) {
+pub(super) fn gaussian_convolve(
+    pixels: &Buffer2<f32>,
+    sigma: f32,
+    output: &mut Buffer2<f32>,
+    temp: &mut Buffer2<f32>,
+) {
     assert!(sigma > 0.0, "Sigma must be positive");
     assert_eq!(pixels.width(), output.width());
     assert_eq!(pixels.height(), output.height());
+    assert_eq!(pixels.width(), temp.width());
+    assert_eq!(pixels.height(), temp.height());
 
     let width = pixels.width();
     let height = pixels.height();
@@ -102,11 +111,10 @@ pub(super) fn gaussian_convolve(pixels: &Buffer2<f32>, sigma: f32, output: &mut 
     }
 
     // Step 1: Convolve rows (horizontal pass)
-    let mut temp = Buffer2::new_default(width, height);
-    convolve_rows_parallel(pixels, &mut temp, &kernel);
+    convolve_rows_parallel(pixels, temp, &kernel);
 
     // Step 2: Convolve columns (vertical pass)
-    convolve_cols_parallel(&temp, output, &kernel);
+    convolve_cols_parallel(temp, output, &kernel);
 }
 
 /// Apply elliptical Gaussian convolution to an image.
@@ -120,6 +128,7 @@ pub(super) fn elliptical_gaussian_convolve(
     axis_ratio: f32,
     angle: f32,
     output: &mut Buffer2<f32>,
+    temp: &mut Buffer2<f32>,
 ) {
     let width = pixels.width();
     let height = pixels.height();
@@ -128,7 +137,7 @@ pub(super) fn elliptical_gaussian_convolve(
 
     // For axis_ratio very close to 1.0, use faster separable convolution
     if (axis_ratio - 1.0).abs() < 0.01 {
-        gaussian_convolve(pixels, sigma, output);
+        gaussian_convolve(pixels, sigma, output, temp);
         return;
     }
 

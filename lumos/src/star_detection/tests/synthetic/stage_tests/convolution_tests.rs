@@ -80,7 +80,8 @@ fn test_gaussian_filter_sparse() {
     let sigma = fwhm_to_sigma(fwhm);
     let bg_subtracted_buf = Buffer2::new(width, height, bg_subtracted);
     let mut filtered = Buffer2::new_default(width, height);
-    gaussian_convolve(&bg_subtracted_buf, sigma, &mut filtered);
+    let mut temp = Buffer2::new_default(width, height);
+    gaussian_convolve(&bg_subtracted_buf, sigma, &mut filtered, &mut temp);
 
     // Normalize for display
     let filtered_display = normalize_for_display(filtered.pixels());
@@ -173,7 +174,8 @@ fn test_gaussian_filter_fwhm_range() {
         let sigma = fwhm_to_sigma(target_fwhm);
         let bg_subtracted_buf = Buffer2::new(width, height, bg_subtracted.clone());
         let mut filtered = Buffer2::new_default(width, height);
-        gaussian_convolve(&bg_subtracted_buf, sigma, &mut filtered);
+        let mut temp = Buffer2::new_default(width, height);
+        gaussian_convolve(&bg_subtracted_buf, sigma, &mut filtered, &mut temp);
         let filtered_display = normalize_for_display(filtered.pixels());
 
         save_grayscale(
@@ -250,7 +252,8 @@ fn test_gaussian_filter_noise() {
     let sigma = fwhm_to_sigma(fwhm);
     let bg_subtracted_buf = Buffer2::new(width, height, bg_subtracted);
     let mut filtered = Buffer2::new_default(width, height);
-    gaussian_convolve(&bg_subtracted_buf, sigma, &mut filtered);
+    let mut temp = Buffer2::new_default(width, height);
+    gaussian_convolve(&bg_subtracted_buf, sigma, &mut filtered, &mut temp);
     let filtered_display = normalize_for_display(filtered.pixels());
 
     save_grayscale(

@@ -211,6 +211,7 @@ impl StarDetector {
                 );
 
                 let mut convolution_scratch = pool.acquire_f32();
+                let mut convolution_temp = pool.acquire_f32();
                 matched_filter(
                     &grayscale_image,
                     &background.background,
@@ -219,7 +220,9 @@ impl StarDetector {
                     self.config.psf.angle,
                     &mut scratch,
                     &mut convolution_scratch,
+                    &mut convolution_temp,
                 );
+                pool.release_f32(convolution_temp);
                 pool.release_f32(convolution_scratch);
 
                 Some(&scratch)

@@ -87,7 +87,8 @@ fn test_gaussian_convolve_uniform_image() {
     let pixels = Buffer2::new(width, height, vec![0.5f32; width * height]);
 
     let mut result = Buffer2::new_default(width, height);
-    gaussian_convolve(&pixels, 2.0, &mut result);
+    let mut temp = Buffer2::new_default(width, height);
+    gaussian_convolve(&pixels, 2.0, &mut result, &mut temp);
 
     for v in result.iter() {
         assert!(
@@ -109,7 +110,8 @@ fn test_gaussian_convolve_preserves_total_flux() {
 
     let pixels = Buffer2::new(width, height, pixels);
     let mut result = Buffer2::new_default(width, height);
-    gaussian_convolve(&pixels, 2.0, &mut result);
+    let mut temp = Buffer2::new_default(width, height);
+    gaussian_convolve(&pixels, 2.0, &mut result, &mut temp);
 
     let input_sum: f32 = pixels.iter().sum();
     let output_sum: f32 = result.iter().sum();
@@ -136,7 +138,8 @@ fn test_gaussian_convolve_spreads_point_source() {
     let sigma = 2.0;
     let pixels = Buffer2::new(width, height, pixels);
     let mut result = Buffer2::new_default(width, height);
-    gaussian_convolve(&pixels, sigma, &mut result);
+    let mut temp = Buffer2::new_default(width, height);
+    gaussian_convolve(&pixels, sigma, &mut result, &mut temp);
 
     // Peak should be at center but reduced
     let peak = result[cy * width + cx];
@@ -161,7 +164,8 @@ fn test_gaussian_convolve_symmetry() {
 
     let pixels = Buffer2::new(width, height, pixels);
     let mut result = Buffer2::new_default(width, height);
-    gaussian_convolve(&pixels, 2.0, &mut result);
+    let mut temp = Buffer2::new_default(width, height);
+    gaussian_convolve(&pixels, 2.0, &mut result, &mut temp);
 
     // Check symmetry around center
     for dy in 1..8 {
@@ -188,8 +192,9 @@ fn test_gaussian_convolve_larger_sigma_more_spread() {
     let pixels = Buffer2::new(width, height, pixels);
     let mut result_small = Buffer2::new_default(width, height);
     let mut result_large = Buffer2::new_default(width, height);
-    gaussian_convolve(&pixels, 1.0, &mut result_small);
-    gaussian_convolve(&pixels, 3.0, &mut result_large);
+    let mut temp = Buffer2::new_default(width, height);
+    gaussian_convolve(&pixels, 1.0, &mut result_small, &mut temp);
+    gaussian_convolve(&pixels, 3.0, &mut result_large, &mut temp);
 
     // Larger sigma should result in lower peak
     let peak_small = result_small[32 * width + 32];
@@ -214,7 +219,8 @@ fn test_gaussian_convolve_edge_handling() {
 
     let pixels = Buffer2::new(width, height, pixels);
     let mut result = Buffer2::new_default(width, height);
-    gaussian_convolve(&pixels, 1.5, &mut result);
+    let mut temp = Buffer2::new_default(width, height);
+    gaussian_convolve(&pixels, 1.5, &mut result, &mut temp);
 
     // Should not have NaN or Inf
     for v in result.iter() {
@@ -234,7 +240,8 @@ fn test_gaussian_convolve_non_square_image() {
 
     let pixels = Buffer2::new(width, height, pixels);
     let mut result = Buffer2::new_default(width, height);
-    gaussian_convolve(&pixels, 2.0, &mut result);
+    let mut temp = Buffer2::new_default(width, height);
+    gaussian_convolve(&pixels, 2.0, &mut result, &mut temp);
 
     assert_eq!(result.len(), width * height);
 
@@ -251,7 +258,8 @@ fn test_gaussian_convolve_small_image() {
     let pixels = Buffer2::new(width, height, vec![1.0f32; width * height]);
 
     let mut result = Buffer2::new_default(width, height);
-    gaussian_convolve(&pixels, 2.0, &mut result);
+    let mut temp = Buffer2::new_default(width, height);
+    gaussian_convolve(&pixels, 2.0, &mut result, &mut temp);
 
     // Should still work and preserve value approximately
     for v in result.iter() {
@@ -273,6 +281,7 @@ fn test_matched_filter_subtracts_background() {
 
     let mut result = Buffer2::new_default(width, height);
     let mut scratch = Buffer2::new_default(width, height);
+    let mut temp = Buffer2::new_default(width, height);
     matched_filter(
         &pixels,
         &background,
@@ -281,6 +290,7 @@ fn test_matched_filter_subtracts_background() {
         0.0,
         &mut result,
         &mut scratch,
+        &mut temp,
     );
 
     // Result should be near zero
@@ -304,6 +314,7 @@ fn test_matched_filter_detects_star() {
     let pixels = Buffer2::new(width, height, pixels);
     let mut result = Buffer2::new_default(width, height);
     let mut scratch = Buffer2::new_default(width, height);
+    let mut temp = Buffer2::new_default(width, height);
     matched_filter(
         &pixels,
         &background,
@@ -312,6 +323,7 @@ fn test_matched_filter_detects_star() {
         0.0,
         &mut result,
         &mut scratch,
+        &mut temp,
     );
 
     // Peak should be positive and significant
@@ -354,6 +366,7 @@ fn test_matched_filter_boosts_snr() {
     let pixels = Buffer2::new(width, height, pixels);
     let mut result = Buffer2::new_default(width, height);
     let mut scratch = Buffer2::new_default(width, height);
+    let mut temp = Buffer2::new_default(width, height);
     matched_filter(
         &pixels,
         &background,
@@ -362,6 +375,7 @@ fn test_matched_filter_boosts_snr() {
         0.0,
         &mut result,
         &mut scratch,
+        &mut temp,
     );
 
     // Peak should be at star location
@@ -392,6 +406,7 @@ fn test_matched_filter_clips_negative() {
 
     let mut result = Buffer2::new_default(width, height);
     let mut scratch = Buffer2::new_default(width, height);
+    let mut temp = Buffer2::new_default(width, height);
     matched_filter(
         &pixels,
         &background,
@@ -400,6 +415,7 @@ fn test_matched_filter_clips_negative() {
         0.0,
         &mut result,
         &mut scratch,
+        &mut temp,
     );
 
     // Should be clipped to zero before convolution
@@ -428,7 +444,8 @@ fn test_separable_vs_direct_equivalence() {
     let pixels = Buffer2::new(width, height, pixels);
     let mut result_sep = Buffer2::new_default(width, height);
     let mut result_direct = Buffer2::new_default(width, height);
-    gaussian_convolve(&pixels, sigma, &mut result_sep);
+    let mut temp = Buffer2::new_default(width, height);
+    gaussian_convolve(&pixels, sigma, &mut result_sep, &mut temp);
     gaussian_convolve_2d_direct(&pixels, sigma, &mut result_direct);
 
     for (i, (&a, &b)) in result_sep.iter().zip(result_direct.iter()).enumerate() {
@@ -450,7 +467,8 @@ fn test_large_image_convolution() {
     let pixels = Buffer2::new(width, height, vec![0.5f32; width * height]);
 
     let mut result = Buffer2::new_default(width, height);
-    gaussian_convolve(&pixels, 3.0, &mut result);
+    let mut temp = Buffer2::new_default(width, height);
+    gaussian_convolve(&pixels, 3.0, &mut result, &mut temp);
 
     assert_eq!(result.len(), width * height);
     assert!(result[0].is_finite());
@@ -527,7 +545,8 @@ fn test_elliptical_convolve_uniform_image() {
     let pixels = Buffer2::new(width, height, vec![0.5f32; width * height]);
 
     let mut result = Buffer2::new_default(width, height);
-    elliptical_gaussian_convolve(&pixels, 2.0, 0.5, 0.5, &mut result);
+    let mut temp = Buffer2::new_default(width, height);
+    elliptical_gaussian_convolve(&pixels, 2.0, 0.5, 0.5, &mut result, &mut temp);
 
     for v in result.iter() {
         assert!(
@@ -546,7 +565,8 @@ fn test_elliptical_convolve_preserves_flux() {
 
     let pixels = Buffer2::new(width, height, pixels);
     let mut result = Buffer2::new_default(width, height);
-    elliptical_gaussian_convolve(&pixels, 2.0, 0.5, 0.3, &mut result);
+    let mut temp = Buffer2::new_default(width, height);
+    elliptical_gaussian_convolve(&pixels, 2.0, 0.5, 0.3, &mut result, &mut temp);
 
     let input_sum: f32 = pixels.iter().sum();
     let output_sum: f32 = result.iter().sum();
@@ -570,7 +590,8 @@ fn test_elliptical_convolve_spreads_point_source() {
 
     let pixels = Buffer2::new(width, height, pixels);
     let mut result = Buffer2::new_default(width, height);
-    elliptical_gaussian_convolve(&pixels, 2.0, 0.5, 0.0, &mut result);
+    let mut temp = Buffer2::new_default(width, height);
+    elliptical_gaussian_convolve(&pixels, 2.0, 0.5, 0.0, &mut result, &mut temp);
 
     // Peak should be reduced
     let peak = result[cy * width + cx];
@@ -595,9 +616,10 @@ fn test_elliptical_convolve_axis_ratio_1_matches_circular() {
     let pixels = Buffer2::new(width, height, pixels);
     let mut result_circular = Buffer2::new_default(width, height);
     let mut result_elliptical = Buffer2::new_default(width, height);
+    let mut temp = Buffer2::new_default(width, height);
 
-    gaussian_convolve(&pixels, sigma, &mut result_circular);
-    elliptical_gaussian_convolve(&pixels, sigma, 1.0, 0.0, &mut result_elliptical);
+    gaussian_convolve(&pixels, sigma, &mut result_circular, &mut temp);
+    elliptical_gaussian_convolve(&pixels, sigma, 1.0, 0.0, &mut result_elliptical, &mut temp);
 
     for (i, (&a, &b)) in result_circular
         .iter()
@@ -626,14 +648,16 @@ fn test_elliptical_convolve_rotation_invariance() {
     let pixels = Buffer2::new(width, height, pixels);
     let mut result_0 = Buffer2::new_default(width, height);
     let mut result_90 = Buffer2::new_default(width, height);
+    let mut temp = Buffer2::new_default(width, height);
 
-    elliptical_gaussian_convolve(&pixels, 2.0, 0.5, 0.0, &mut result_0);
+    elliptical_gaussian_convolve(&pixels, 2.0, 0.5, 0.0, &mut result_0, &mut temp);
     elliptical_gaussian_convolve(
         &pixels,
         2.0,
         0.5,
         std::f32::consts::FRAC_PI_2,
         &mut result_90,
+        &mut temp,
     );
 
     let sum_0: f32 = result_0.iter().sum();
@@ -675,7 +699,8 @@ fn test_elliptical_convolve_various_axis_ratios() {
 
     for axis_ratio in [0.2, 0.4, 0.6, 0.8, 1.0] {
         let mut result = Buffer2::new_default(width, height);
-        elliptical_gaussian_convolve(&pixels, 2.0, axis_ratio, 0.0, &mut result);
+        let mut temp = Buffer2::new_default(width, height);
+        elliptical_gaussian_convolve(&pixels, 2.0, axis_ratio, 0.0, &mut result, &mut temp);
 
         // Check finite values
         for v in result.iter() {
@@ -745,10 +770,11 @@ fn test_convolution_linearity() {
     let mut result_a = Buffer2::new_default(width, height);
     let mut result_b = Buffer2::new_default(width, height);
     let mut result_sum = Buffer2::new_default(width, height);
+    let mut temp = Buffer2::new_default(width, height);
 
-    gaussian_convolve(&pixels_a, sigma, &mut result_a);
-    gaussian_convolve(&pixels_b, sigma, &mut result_b);
-    gaussian_convolve(&pixels_sum, sigma, &mut result_sum);
+    gaussian_convolve(&pixels_a, sigma, &mut result_a, &mut temp);
+    gaussian_convolve(&pixels_b, sigma, &mut result_b, &mut temp);
+    gaussian_convolve(&pixels_sum, sigma, &mut result_sum, &mut temp);
 
     for i in 0..width * height {
         let combined = result_a[i] + result_b[i];
@@ -783,9 +809,10 @@ fn test_convolution_scaling() {
 
     let mut result = Buffer2::new_default(width, height);
     let mut result_scaled = Buffer2::new_default(width, height);
+    let mut temp = Buffer2::new_default(width, height);
 
-    gaussian_convolve(&pixels, sigma, &mut result);
-    gaussian_convolve(&pixels_scaled, sigma, &mut result_scaled);
+    gaussian_convolve(&pixels, sigma, &mut result, &mut temp);
+    gaussian_convolve(&pixels_scaled, sigma, &mut result_scaled, &mut temp);
 
     for i in 0..width * height {
         assert!(

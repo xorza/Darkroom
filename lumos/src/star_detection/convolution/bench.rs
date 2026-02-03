@@ -130,10 +130,16 @@ fn bench_row_vs_col_1k(b: ::bench::Bencher) {
 fn bench_gaussian_convolve_1k(b: ::bench::Bencher) {
     let pixels = benchmark_star_field(1024, 1024, 100, 0.1, 0.01, 42);
     let mut output = Buffer2::new_default(1024, 1024);
+    let mut temp = Buffer2::new_default(1024, 1024);
     let sigma = 2.0;
 
     b.bench(|| {
-        gaussian_convolve(black_box(&pixels), black_box(sigma), black_box(&mut output));
+        gaussian_convolve(
+            black_box(&pixels),
+            black_box(sigma),
+            black_box(&mut output),
+            black_box(&mut temp),
+        );
     });
 }
 
@@ -141,10 +147,16 @@ fn bench_gaussian_convolve_1k(b: ::bench::Bencher) {
 fn bench_gaussian_convolve_4k(b: ::bench::Bencher) {
     let pixels = benchmark_star_field(4096, 4096, 500, 0.1, 0.01, 42);
     let mut output = Buffer2::new_default(4096, 4096);
+    let mut temp = Buffer2::new_default(4096, 4096);
     let sigma = 2.0;
 
     b.bench(|| {
-        gaussian_convolve(black_box(&pixels), black_box(sigma), black_box(&mut output));
+        gaussian_convolve(
+            black_box(&pixels),
+            black_box(sigma),
+            black_box(&mut output),
+            black_box(&mut temp),
+        );
     });
 }
 
@@ -154,6 +166,7 @@ fn bench_gaussian_convolve_4k(b: ::bench::Bencher) {
 fn bench_elliptical_convolve_1k(b: ::bench::Bencher) {
     let pixels = benchmark_star_field(1024, 1024, 100, 0.1, 0.01, 42);
     let mut output = Buffer2::new_default(1024, 1024);
+    let mut temp = Buffer2::new_default(1024, 1024);
     let sigma = 2.0;
     let axis_ratio = 0.7;
     let angle = 0.5;
@@ -165,6 +178,7 @@ fn bench_elliptical_convolve_1k(b: ::bench::Bencher) {
             black_box(axis_ratio),
             black_box(angle),
             black_box(&mut output),
+            black_box(&mut temp),
         );
     });
 }
@@ -173,10 +187,16 @@ fn bench_elliptical_convolve_1k(b: ::bench::Bencher) {
 fn bench_elliptical_vs_circular_1k(b: ::bench::Bencher) {
     let pixels = benchmark_star_field(1024, 1024, 100, 0.1, 0.01, 42);
     let mut output = Buffer2::new_default(1024, 1024);
+    let mut temp = Buffer2::new_default(1024, 1024);
     let sigma = 2.0;
 
     b.bench_labeled("circular", || {
-        gaussian_convolve(black_box(&pixels), black_box(sigma), black_box(&mut output));
+        gaussian_convolve(
+            black_box(&pixels),
+            black_box(sigma),
+            black_box(&mut output),
+            black_box(&mut temp),
+        );
     });
 
     b.bench_labeled("elliptical_0.7", || {
@@ -186,6 +206,7 @@ fn bench_elliptical_vs_circular_1k(b: ::bench::Bencher) {
             black_box(0.7),
             black_box(0.5),
             black_box(&mut output),
+            black_box(&mut temp),
         );
     });
 }
@@ -198,6 +219,7 @@ fn bench_matched_filter_1k(b: ::bench::Bencher) {
     let background = Buffer2::new_filled(1024, 1024, 0.1);
     let mut output = Buffer2::new_default(1024, 1024);
     let mut scratch = Buffer2::new_default(1024, 1024);
+    let mut temp = Buffer2::new_default(1024, 1024);
     let fwhm = 4.0;
 
     b.bench_labeled("circular", || {
@@ -209,6 +231,7 @@ fn bench_matched_filter_1k(b: ::bench::Bencher) {
             black_box(0.0),
             black_box(&mut output),
             black_box(&mut scratch),
+            black_box(&mut temp),
         );
     });
 
@@ -221,6 +244,7 @@ fn bench_matched_filter_1k(b: ::bench::Bencher) {
             black_box(0.5),
             black_box(&mut output),
             black_box(&mut scratch),
+            black_box(&mut temp),
         );
     });
 }
@@ -231,6 +255,7 @@ fn bench_matched_filter_4k(b: ::bench::Bencher) {
     let background = Buffer2::new_filled(4096, 4096, 0.1);
     let mut output = Buffer2::new_default(4096, 4096);
     let mut scratch = Buffer2::new_default(4096, 4096);
+    let mut temp = Buffer2::new_default(4096, 4096);
     let fwhm = 4.0;
 
     b.bench(|| {
@@ -242,6 +267,7 @@ fn bench_matched_filter_4k(b: ::bench::Bencher) {
             black_box(0.0),
             black_box(&mut output),
             black_box(&mut scratch),
+            black_box(&mut temp),
         );
     });
 }
