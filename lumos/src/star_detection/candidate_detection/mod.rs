@@ -10,7 +10,8 @@ use super::background::BackgroundMap;
 use super::buffer_pool::BufferPool;
 use super::config::{DeblendConfig, StarDetectionConfig};
 use super::deblend::{
-    ComponentData, DeblendedCandidate, deblend_local_maxima, deblend_multi_threshold,
+    ComponentData, DeblendBuffers, DeblendedCandidate, deblend_local_maxima,
+    deblend_multi_threshold,
 };
 use super::mask_dilation::dilate_mask;
 use super::threshold_mask::{
@@ -180,34 +181,54 @@ pub(crate) fn extract_candidates(
     // Process each component in parallel, deblending into multiple candidates.
     // Skip components that are too large - they can't be stars and would be
     // expensive to process (e.g., deblending a million-pixel component).
-    let candidates: Vec<StarCandidate> = component_data
-        .into_par_iter()
-        .filter(|data| data.area > 0 && data.area <= max_area)
-        .flat_map_iter(|data| {
-            let map_to_candidate = |obj: DeblendedCandidate| StarCandidate {
-                bbox: obj.bbox,
-                peak: obj.peak,
-                peak_value: obj.peak_value,
-                area: obj.area,
-            };
+    let map_to_candidate = |obj: DeblendedCandidate| StarCandidate {
+        bbox: obj.bbox,
+        peak: obj.peak,
+        peak_value: obj.peak_value,
+        area: obj.area,
+    };
 
-            // Both deblend functions return stack-allocated collections (ArrayVec/SmallVec),
-            // so we can iterate directly without heap allocation.
-            if deblend_config.is_multi_threshold() {
-                rayon::iter::Either::Left(
-                    deblend_multi_threshold(&data, pixels, label_map, deblend_config)
-                        .into_iter()
-                        .map(map_to_candidate),
-                )
-            } else {
-                rayon::iter::Either::Right(
-                    deblend_local_maxima(&data, pixels, label_map, deblend_config)
-                        .into_iter()
-                        .map(map_to_candidate),
-                )
-            }
-        })
+    let filtered: Vec<_> = component_data
+        .into_iter()
+        .filter(|data| data.area > 0 && data.area <= max_area)
         .collect();
+
+    // For multi-threshold deblending, use fold/reduce so each rayon thread
+    // gets its own DeblendBuffers that is reused across all components on
+    // that thread (avoiding per-component allocation overhead).
+    let candidates: Vec<StarCandidate> = if deblend_config.is_multi_threshold() {
+        filtered
+            .into_par_iter()
+            .fold(
+                || (Vec::new(), DeblendBuffers::new()),
+                |(mut candidates, mut buffers), data| {
+                    for obj in deblend_multi_threshold(
+                        &data,
+                        pixels,
+                        label_map,
+                        deblend_config,
+                        &mut buffers,
+                    ) {
+                        candidates.push(map_to_candidate(obj));
+                    }
+                    (candidates, buffers)
+                },
+            )
+            .map(|(candidates, _)| candidates)
+            .reduce(Vec::new, |mut a, b| {
+                a.extend(b);
+                a
+            })
+    } else {
+        filtered
+            .into_par_iter()
+            .flat_map_iter(|data| {
+                deblend_local_maxima(&data, pixels, label_map, deblend_config)
+                    .into_iter()
+                    .map(map_to_candidate)
+            })
+            .collect()
+    };
 
     tracing::debug!(
         candidates = candidates.len(),

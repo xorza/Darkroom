@@ -5,7 +5,7 @@
 use ::bench::quick_bench;
 use std::hint::black_box;
 
-use super::deblend_multi_threshold;
+use super::{DeblendBuffers, deblend_multi_threshold};
 use crate::common::{BitBuffer2, Buffer2};
 use crate::math::{Aabb, Vec2us};
 use crate::star_detection::candidate_detection::{LabelMap, label_map_from_mask_with_connectivity};
@@ -76,6 +76,8 @@ fn bench_deblend_multi_threshold_6k_dense(b: ::bench::Bencher) {
         ..Default::default()
     };
 
+    let mut buffers = DeblendBuffers::new();
+
     b.bench(|| {
         for component in &reasonable_components {
             black_box(deblend_multi_threshold(
@@ -83,6 +85,7 @@ fn bench_deblend_multi_threshold_6k_dense(b: ::bench::Bencher) {
                 black_box(&pixels),
                 black_box(&labels),
                 black_box(&config),
+                &mut buffers,
             ));
         }
     });
@@ -107,6 +110,8 @@ fn bench_deblend_multi_threshold_6k_dense_fewer_levels(b: ::bench::Bencher) {
         ..Default::default()
     };
 
+    let mut buffers = DeblendBuffers::new();
+
     b.bench(|| {
         for component in &reasonable_components {
             black_box(deblend_multi_threshold(
@@ -114,6 +119,7 @@ fn bench_deblend_multi_threshold_6k_dense_fewer_levels(b: ::bench::Bencher) {
                 black_box(&pixels),
                 black_box(&labels),
                 black_box(&config),
+                &mut buffers,
             ));
         }
     });
@@ -134,6 +140,9 @@ fn bench_multi_threshold_4k_dense(b: ::bench::Bencher) {
         ..Default::default()
     };
 
+    // Reuse buffers across components (same as real pipeline via rayon fold)
+    let mut buffers = DeblendBuffers::new();
+
     b.bench(|| {
         for component in &reasonable_components {
             black_box(deblend_multi_threshold(
@@ -141,6 +150,7 @@ fn bench_multi_threshold_4k_dense(b: ::bench::Bencher) {
                 black_box(&pixels),
                 black_box(&labels),
                 black_box(&config),
+                &mut buffers,
             ));
         }
     });

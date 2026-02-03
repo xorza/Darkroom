@@ -23,7 +23,7 @@ mod tests;
 // Re-export config types used by submodules
 pub use super::config::DeblendConfig;
 pub use local_maxima::deblend_local_maxima;
-pub use multi_threshold::deblend_multi_threshold;
+pub(crate) use multi_threshold::{DeblendBuffers, deblend_multi_threshold};
 
 // ============================================================================
 // Constants

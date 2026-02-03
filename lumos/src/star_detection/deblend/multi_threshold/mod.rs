@@ -365,9 +365,10 @@ struct DeblendNode {
     children: SmallVec<[usize; MAX_CHILDREN]>,
 }
 
-/// All reusable buffers for deblending, designed for cross-component reuse
-/// via thread-local storage. Avoids thousands of allocations per image.
-struct DeblendBuffers {
+/// All reusable buffers for deblending. Create once per thread and pass to
+/// `deblend_multi_threshold` with pre-allocated buffers to avoid per-call allocations.
+#[derive(Debug)]
+pub(crate) struct DeblendBuffers {
     /// Collected component pixels.
     component_pixels: Vec<Pixel>,
     /// Node assignment grid.
@@ -387,7 +388,7 @@ struct DeblendBuffers {
 }
 
 impl DeblendBuffers {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             component_pixels: Vec::new(),
             pixel_to_node: NodeGrid::empty(),
@@ -412,17 +413,17 @@ impl DeblendBuffers {
 // Public API
 // ============================================================================
 
-/// Multi-threshold deblending of a connected component.
+/// Multi-threshold deblending with caller-provided reusable buffers.
 ///
-/// Creates per-call reusable buffers to avoid inner-loop allocations.
-/// Each buffer set is reused across threshold levels within a single component.
-pub fn deblend_multi_threshold(
+/// Buffers are reused across threshold levels within a single component, and
+/// can be reused across multiple components by the caller (e.g., one per rayon thread).
+pub(crate) fn deblend_multi_threshold(
     data: &ComponentData,
     pixels: &Buffer2<f32>,
     labels: &LabelMap,
     config: &DeblendConfig,
+    buffers: &mut DeblendBuffers,
 ) -> SmallVec<[DeblendedCandidate; MAX_PEAKS]> {
-    let mut buffers = DeblendBuffers::new();
     debug_assert_eq!(
         (pixels.width(), pixels.height()),
         (labels.width(), labels.height()),
@@ -469,7 +470,7 @@ pub fn deblend_multi_threshold(
         peak_value,
         config.n_thresholds,
         config.min_separation,
-        &mut buffers,
+        buffers,
     );
 
     // If tree has only one leaf (no branching), return single object
