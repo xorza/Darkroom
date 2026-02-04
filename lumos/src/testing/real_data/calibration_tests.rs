@@ -125,7 +125,7 @@ fn test_find_stars_on_light_frame() {
 #[ignore] // Requires LUMOS_CALIBRATION_DIR
 fn test_background_on_real_image() {
     use crate::common::Buffer2;
-    use crate::star_detection::BackgroundConfig;
+    use crate::star_detection::Config;
     use imaginarium::ColorFormat;
 
     init_tracing();
@@ -152,14 +152,12 @@ fn test_background_on_real_image() {
 
     println!("Loaded image: {}x{}", width, height);
 
-    use crate::star_detection::BackgroundMap;
-
     let pixels_buf = Buffer2::new(width, height, pixels.to_vec());
-    let config = BackgroundConfig {
+    let config = Config {
         tile_size: 64,
         ..Default::default()
     };
-    let bg = crate::testing::estimate_background(&pixels_buf, config.clone());
+    let bg = crate::testing::estimate_background(&pixels_buf, &config);
 
     let bg_img = to_gray_image(bg.background.pixels(), width, height);
     let path = common::test_utils::test_output_path("real_data/background_map.tiff");

@@ -19,6 +19,7 @@ use rayon::iter::ParallelIterator;
 
 use super::buffer_pool::BufferPool;
 use super::config::{BackgroundRefinement, Config};
+use super::image_stats::ImageStats;
 use tile_grid::TileGrid;
 
 /// Background map with per-pixel background and noise estimates.
@@ -103,6 +104,15 @@ impl BackgroundMap {
         pool.release_f32(self.noise);
         if let Some(adaptive) = self.adaptive_sigma {
             pool.release_f32(adaptive);
+        }
+    }
+
+    /// Convert into an [`ImageStats`], consuming the BackgroundMap.
+    pub fn into_image_stats(self) -> ImageStats {
+        ImageStats {
+            background: self.background,
+            noise: self.noise,
+            adaptive_sigma: self.adaptive_sigma,
         }
     }
 

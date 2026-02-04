@@ -6,9 +6,9 @@
 use super::label_map_from_raw;
 use super::*;
 use crate::common::{BitBuffer2, Buffer2};
-use crate::star_detection::background::BackgroundMap;
 use crate::star_detection::buffer_pool::BufferPool;
 use crate::star_detection::config::Config;
+use crate::star_detection::image_stats::ImageStats;
 use crate::testing::synthetic::background_map;
 
 /// Test utility: detect stars with automatic buffer pool management.
@@ -18,7 +18,7 @@ use crate::testing::synthetic::background_map;
 pub(crate) fn detect_stars_test(
     pixels: &Buffer2<f32>,
     filtered: Option<&Buffer2<f32>>,
-    background: &BackgroundMap,
+    background: &ImageStats,
     config: &Config,
 ) -> Vec<StarCandidate> {
     let mut pool = BufferPool::new(pixels.width(), pixels.height());

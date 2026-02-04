@@ -4,10 +4,10 @@
 
 use crate::common::Buffer2;
 use crate::math::{Aabb, Vec2us};
-use crate::star_detection::background::BackgroundMap;
 use crate::star_detection::candidate_detection::StarCandidate;
 use crate::star_detection::centroid::compute_centroid;
 use crate::star_detection::config::Config;
+use crate::star_detection::image_stats::ImageStats;
 use crate::star_detection::tests::common::output::{
     gray_to_rgb_image_stretched, save_grayscale, save_image,
 };

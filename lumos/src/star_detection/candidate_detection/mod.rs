@@ -6,13 +6,13 @@ mod labeling;
 #[cfg(test)]
 mod tests;
 
-use super::background::BackgroundMap;
 use super::buffer_pool::BufferPool;
 use super::config::Config;
 use super::deblend::{
     ComponentData, DeblendBuffers, DeblendedCandidate, deblend_local_maxima,
     deblend_multi_threshold,
 };
+use super::image_stats::ImageStats;
 use super::mask_dilation::dilate_mask;
 use super::threshold_mask::{
     create_adaptive_threshold_mask, create_threshold_mask, create_threshold_mask_filtered,
@@ -45,7 +45,7 @@ pub struct StarCandidate {
 pub fn detect_stars(
     pixels: &Buffer2<f32>,
     filtered: Option<&Buffer2<f32>>,
-    background: &BackgroundMap,
+    background: &ImageStats,
     config: &Config,
     pool: &mut BufferPool,
 ) -> Vec<StarCandidate> {

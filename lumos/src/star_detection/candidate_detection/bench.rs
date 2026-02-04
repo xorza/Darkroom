@@ -2,9 +2,9 @@
 
 use super::{detect_stars, extract_candidates, label_map_from_mask_with_connectivity};
 use crate::common::{BitBuffer2, Buffer2};
-use crate::star_detection::background::BackgroundMap;
 use crate::star_detection::buffer_pool::BufferPool;
 use crate::star_detection::config::Config;
+use crate::star_detection::image_stats::ImageStats;
 use crate::star_detection::mask_dilation::dilate_mask;
 use crate::star_detection::threshold_mask::create_threshold_mask;
 use crate::testing::init_tracing;

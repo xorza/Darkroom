@@ -2,13 +2,14 @@
 
 use crate::common::Buffer2;
 
+use super::buffer_pool::BufferPool;
+
 /// Per-pixel background and noise estimates for an image.
 ///
 /// Data-only struct containing the results of background estimation.
 /// Used by subsequent pipeline stages for thresholding, centroid computation,
 /// and SNR calculation.
 #[derive(Debug)]
-#[allow(dead_code)] // Will be used in stages/background.rs (Step 4)
 pub struct ImageStats {
     /// Per-pixel background values (sky level).
     pub background: Buffer2<f32>,
@@ -18,4 +19,15 @@ pub struct ImageStats {
     /// Higher in nebulous/high-contrast regions, lower in uniform sky.
     /// Only populated when adaptive thresholding is enabled.
     pub adaptive_sigma: Option<Buffer2<f32>>,
+}
+
+impl ImageStats {
+    /// Release buffers back to the pool.
+    pub fn release_to_pool(self, pool: &mut BufferPool) {
+        pool.release_f32(self.background);
+        pool.release_f32(self.noise);
+        if let Some(adaptive) = self.adaptive_sigma {
+            pool.release_f32(adaptive);
+        }
+    }
 }

@@ -15,13 +15,13 @@ mod tests;
 use crate::astro_image::AstroImage;
 use crate::common::Buffer2;
 
-use super::background::BackgroundMap;
 use super::buffer_pool::BufferPool;
 use super::candidate_detection::{self, detect_stars};
 use super::centroid::compute_centroid;
 use super::config::Config;
 use super::convolution::matched_filter;
 use super::fwhm_estimation;
+use super::image_stats::ImageStats;
 use super::stages;
 use super::star::Star;
 
@@ -137,8 +137,9 @@ impl StarDetector {
         let grayscale_image =
             stages::prepare::prepare(image, self.config.defect_map.as_ref(), pool);
 
-        // Step 1: Estimate background using pooled buffers
-        let background = self.estimate_background(&grayscale_image);
+        // Step 1: Estimate background and noise
+        let background =
+            stages::background::estimate_background(&grayscale_image, &self.config, pool);
 
         // Step 2: Determine effective FWHM (manual > auto-estimate > disabled)
         let effective_fwhm = self.determine_effective_fwhm(&grayscale_image, &background);
@@ -241,34 +242,11 @@ impl StarDetector {
         StarDetectionResult { stars, diagnostics }
     }
 
-    /// Estimate background from the image using pooled buffers.
-    fn estimate_background(&mut self, pixels: &Buffer2<f32>) -> BackgroundMap {
-        let iterations = self.config.refinement.iterations();
-
-        let pool = self.buffer_pool.as_mut().unwrap();
-        let mut background = BackgroundMap::from_pool(pool, &self.config);
-        background.estimate(pixels);
-
-        if iterations > 0 {
-            let pool = self.buffer_pool.as_mut().unwrap();
-            let mut scratch1 = pool.acquire_bit();
-            let mut scratch2 = pool.acquire_bit();
-
-            background.refine(pixels, &mut scratch1, &mut scratch2);
-
-            let pool = self.buffer_pool.as_mut().unwrap();
-            pool.release_bit(scratch1);
-            pool.release_bit(scratch2);
-        }
-
-        background
-    }
-
     /// Determine effective FWHM for matched filtering.
     fn determine_effective_fwhm(
         &mut self,
         pixels: &Buffer2<f32>,
-        background: &BackgroundMap,
+        background: &ImageStats,
     ) -> fwhm_estimation::EffectiveFwhm {
         if self.config.expected_fwhm > f32::EPSILON {
             return fwhm_estimation::EffectiveFwhm::Manual(self.config.expected_fwhm);
@@ -286,7 +264,7 @@ impl StarDetector {
     fn estimate_fwhm_from_bright_stars(
         &mut self,
         pixels: &Buffer2<f32>,
-        background: &BackgroundMap,
+        background: &ImageStats,
     ) -> fwhm_estimation::FwhmEstimate {
         let first_pass_config = Config {
             sigma_threshold: self.config.sigma_threshold * self.config.fwhm_estimation_sigma_factor,
@@ -323,7 +301,7 @@ impl StarDetector {
 fn compute_centroids(
     candidates: Vec<candidate_detection::StarCandidate>,
     pixels: &Buffer2<f32>,
-    background: &BackgroundMap,
+    background: &ImageStats,
     config: &Config,
 ) -> Vec<Star> {
     use rayon::prelude::*;

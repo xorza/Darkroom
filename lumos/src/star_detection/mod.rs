@@ -34,7 +34,7 @@ mod deblend;
 mod defect_map;
 mod detector;
 mod fwhm_estimation;
-mod image_stats;
+pub mod image_stats;
 mod mask_dilation;
 mod median_filter;
 mod region;

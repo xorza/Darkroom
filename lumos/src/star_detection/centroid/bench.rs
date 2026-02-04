@@ -11,9 +11,9 @@ use super::gaussian_fit::{GaussianFitConfig, fit_gaussian_2d};
 use super::moffat_fit::{MoffatFitConfig, fit_moffat_2d};
 use super::refine_centroid;
 use crate::common::Buffer2;
-use crate::star_detection::background::BackgroundMap;
 use crate::star_detection::candidate_detection::detect_stars_test;
 use crate::star_detection::config::{CentroidMethod, Config, LocalBackgroundMethod};
+use crate::star_detection::image_stats::ImageStats;
 use crate::testing::synthetic::stamps::benchmark_star_field;
 
 /// Create a synthetic Gaussian star for benchmarking.

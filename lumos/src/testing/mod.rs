@@ -11,14 +11,13 @@ use crate::AstroImage;
 use crate::common::{BitBuffer2, Buffer2};
 use crate::star_detection::Config;
 use crate::star_detection::background::BackgroundMap;
-
-// Buffer2 is used in fn signature, BitBuffer2 is used in estimate_background
+use crate::star_detection::image_stats::ImageStats;
 
 /// Convenience function to estimate background for tests.
 ///
-/// Creates a BackgroundMap with all necessary allocations. For production code,
-/// use `BackgroundMap::from_pool` + `estimate` + `refine` with buffer pooling.
-pub fn estimate_background(pixels: &Buffer2<f32>, config: &Config) -> BackgroundMap {
+/// Returns an `ImageStats` with background and noise estimates.
+/// For production code, use `stages::background::estimate_background` with buffer pooling.
+pub fn estimate_background(pixels: &Buffer2<f32>, config: &Config) -> ImageStats {
     let width = pixels.width();
     let height = pixels.height();
     let iterations = config.refinement.iterations();
@@ -32,7 +31,7 @@ pub fn estimate_background(pixels: &Buffer2<f32>, config: &Config) -> Background
         bg.refine(pixels, &mut mask, &mut scratch);
     }
 
-    bg
+    bg.into_image_stats()
 }
 
 /// Returns the calibration directory from LUMOS_CALIBRATION_DIR env var.

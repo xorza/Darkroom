@@ -20,7 +20,7 @@ mod bench;
 use common::cpu_features;
 use glam::Vec2;
 
-use crate::star_detection::background::BackgroundMap;
+use crate::star_detection::image_stats::ImageStats;
 
 pub use scalar::refine_centroid_scalar;
 
@@ -40,7 +40,7 @@ pub fn refine_centroid(
     pixels: &[f32],
     width: usize,
     height: usize,
-    background: &BackgroundMap,
+    background: &ImageStats,
     pos: Vec2,
     stamp_radius: usize,
     expected_fwhm: f32,

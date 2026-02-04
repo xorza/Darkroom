@@ -119,8 +119,8 @@ fn test_non_square_image() {
         },
     );
 
-    assert_eq!(bg.width(), width);
-    assert_eq!(bg.height(), height);
+    assert_eq!(bg.background.width(), width);
+    assert_eq!(bg.background.height(), height);
     assert!((bg.background[(0, 0)] - 0.4).abs() < 0.01);
     assert!((bg.background[(255, 63)] - 0.4).abs() < 0.01);
 }
