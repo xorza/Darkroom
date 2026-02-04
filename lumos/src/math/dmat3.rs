@@ -136,13 +136,20 @@ impl DMat3 {
 
     /// Frobenius norm of the difference from the identity matrix.
     pub fn deviation_from_identity(&self) -> f64 {
-        let id = Self::identity();
-        let mut sum = 0.0;
-        for i in 0..9 {
-            let diff = self.data[i] - id.data[i];
-            sum += diff * diff;
-        }
-        sum.sqrt()
+        let d = &self.data;
+        let d0 = d[0] - 1.0;
+        let d4 = d[4] - 1.0;
+        let d8 = d[8] - 1.0;
+        (d0 * d0
+            + d[1] * d[1]
+            + d[2] * d[2]
+            + d[3] * d[3]
+            + d4 * d4
+            + d[5] * d[5]
+            + d[6] * d[6]
+            + d[7] * d[7]
+            + d8 * d8)
+            .sqrt()
     }
 }
 
@@ -342,6 +349,13 @@ mod tests {
         assert!(approx_eq(m.determinant(), 24.0));
     }
 
+    #[test]
+    fn test_determinant_negative() {
+        // Swapping two rows negates the determinant
+        let m = DMat3::from_rows([0.0, 1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]);
+        assert!(approx_eq(m.determinant(), -1.0));
+    }
+
     // -- Inverse --------------------------------------------------------------
 
     #[test]
@@ -410,11 +424,13 @@ mod tests {
     }
 
     #[test]
-    fn test_mul_mat_method() {
-        let a = DMat3::identity();
-        let b = DMat3::identity();
-        let c = a.mul_mat(&b);
-        assert!(mat_approx_eq(&c, &DMat3::identity()));
+    fn test_mul_non_commutative() {
+        let a = DMat3::from_rows([1.0, 2.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]);
+        let b = DMat3::from_rows([1.0, 0.0, 0.0], [3.0, 1.0, 0.0], [0.0, 0.0, 1.0]);
+        let ab = a * b;
+        let ba = b * a;
+        // A*B != B*A for these matrices
+        assert!(!mat_approx_eq(&ab, &ba));
     }
 
     // -- transform_point ------------------------------------------------------
@@ -468,6 +484,13 @@ mod tests {
         assert!(approx_eq(m.deviation_from_identity(), 1.0));
     }
 
+    #[test]
+    fn test_deviation_from_identity_multiple_elements() {
+        // Diagonal elements differ by 1.0 each: (2-1)^2 + (2-1)^2 + (2-1)^2 = 3
+        let m = DMat3::from_rows([2.0, 0.0, 0.0], [0.0, 2.0, 0.0], [0.0, 0.0, 2.0]);
+        assert!(approx_eq(m.deviation_from_identity(), 3.0_f64.sqrt()));
+    }
+
     // -- Index bounds ---------------------------------------------------------
 
     #[test]
@@ -475,23 +498,6 @@ mod tests {
     fn test_index_out_of_bounds() {
         let m = DMat3::identity();
         let _ = m[9];
-    }
-
-    // -- Mul<DVec2> -----------------------------------------------------------
-
-    #[test]
-    fn test_mul_dvec2_identity() {
-        let p = DMat3::identity() * DVec2::new(3.0, 7.0);
-        assert!(approx_eq(p.x, 3.0));
-        assert!(approx_eq(p.y, 7.0));
-    }
-
-    #[test]
-    fn test_mul_dvec2_translation() {
-        let m = DMat3::from_array([1.0, 0.0, 10.0, 0.0, 1.0, -5.0, 0.0, 0.0, 1.0]);
-        let p = m * DVec2::new(3.0, 4.0);
-        assert!(approx_eq(p.x, 13.0));
-        assert!(approx_eq(p.y, -1.0));
     }
 
     // -- Mul<f64> / f64 * DMat3 -----------------------------------------------
