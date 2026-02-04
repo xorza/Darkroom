@@ -4,7 +4,7 @@
 
 ## Structure
 
-- `mod.rs` — `KdTree`, `BoundedMaxHeap`
+- `mod.rs` — `KdTree`, `Neighbor`, `BoundedMaxHeap`
 - `tests.rs` — Unit tests for all public and internal APIs
 
 ## Usage
@@ -19,7 +19,7 @@
 ## API
 
 - `KdTree::build(points) -> Option<Self>` — Iterative median-split construction, O(n log n).
-- `k_nearest(query, k) -> Vec<(usize, f64)>` — K-nearest neighbors, sorted by distance squared.
+- `k_nearest(query, k) -> Vec<Neighbor>` — K-nearest neighbors, sorted by distance squared. `Neighbor` has `index` and `dist_sq` fields.
 - `radius_indices_into(query, radius, &mut buf)` — All indices within radius, zero-allocation reuse.
 - `len()` — Number of points in the tree.
 - `get_point(idx)` — Get a point by its original index.

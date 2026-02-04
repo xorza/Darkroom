@@ -112,17 +112,17 @@ pub(crate) fn form_triangles_from_neighbors(tree: &KdTree, k: usize) -> Vec<[usi
         let neighbors = tree.k_nearest(point_i, k + 1); // +1 because point itself is included
 
         // Form triangles from pairs of neighbors
-        for (ni, &(j, _)) in neighbors.iter().enumerate() {
-            if j == i {
+        for (ni, n1) in neighbors.iter().enumerate() {
+            if n1.index == i {
                 continue;
             }
-            for &(m, _) in neighbors.iter().skip(ni + 1) {
-                if m == i {
+            for n2 in neighbors.iter().skip(ni + 1) {
+                if n2.index == i {
                     continue;
                 }
 
                 // Normalize triangle indices to avoid duplicates
-                let mut tri = [i, j, m];
+                let mut tri = [i, n1.index, n2.index];
                 tri.sort();
                 triangles.insert(tri);
             }

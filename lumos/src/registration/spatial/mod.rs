@@ -8,6 +8,21 @@ use glam::DVec2;
 #[cfg(test)]
 mod tests;
 
+/// A nearest-neighbor result: the original point index and squared distance to the query.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Neighbor {
+    pub index: usize,
+    pub dist_sq: f64,
+}
+
+/// A work item for iterative k-d tree construction: the range [start, end) and current depth.
+#[derive(Debug, Clone, Copy)]
+struct BuildRange {
+    start: usize,
+    end: usize,
+    depth: usize,
+}
+
 /// A 2D k-d tree for efficient spatial queries on star positions.
 ///
 /// Uses a flat array layout where the tree structure is implicit in the
@@ -46,21 +61,24 @@ impl KdTree {
         let mut indices: Vec<usize> = (0..points.len()).collect();
 
         // Iterative construction using an explicit work stack.
-        // Each work item is (start, end, depth) defining a range in `indices`.
-        let mut stack: Vec<(usize, usize, usize)> = Vec::new();
-        stack.push((0, indices.len(), 0));
+        let mut stack: Vec<BuildRange> = Vec::new();
+        stack.push(BuildRange {
+            start: 0,
+            end: indices.len(),
+            depth: 0,
+        });
 
-        while let Some((start, end, depth)) = stack.pop() {
-            let len = end - start;
+        while let Some(range) = stack.pop() {
+            let len = range.end - range.start;
             if len <= 1 {
                 continue;
             }
 
-            let split_dim = depth % 2;
+            let split_dim = range.depth % 2;
             let median = len / 2;
 
             // Partition around the median — O(n) per level instead of O(n log n) sort.
-            indices[start..end].select_nth_unstable_by(median, |&a, &b| {
+            indices[range.start..range.end].select_nth_unstable_by(median, |&a, &b| {
                 let va = if split_dim == 0 {
                     points_vec[a].x
                 } else {
@@ -74,13 +92,21 @@ impl KdTree {
                 va.partial_cmp(&vb).unwrap()
             });
 
-            let mid = start + median;
+            let mid = range.start + median;
             // Push right first so left is processed first (stack is LIFO)
-            if mid + 1 < end {
-                stack.push((mid + 1, end, depth + 1));
+            if mid + 1 < range.end {
+                stack.push(BuildRange {
+                    start: mid + 1,
+                    end: range.end,
+                    depth: range.depth + 1,
+                });
             }
-            if start < mid {
-                stack.push((start, mid, depth + 1));
+            if range.start < mid {
+                stack.push(BuildRange {
+                    start: range.start,
+                    end: mid,
+                    depth: range.depth + 1,
+                });
             }
         }
 
@@ -97,8 +123,8 @@ impl KdTree {
     /// * `k` - Number of neighbors to find
     ///
     /// # Returns
-    /// Vector of (index, distance_squared) pairs, sorted by distance
-    pub fn k_nearest(&self, query: DVec2, k: usize) -> Vec<(usize, f64)> {
+    /// Vector of `Neighbor` results sorted by distance
+    pub fn k_nearest(&self, query: DVec2, k: usize) -> Vec<Neighbor> {
         if self.indices.is_empty() || k == 0 {
             return Vec::new();
         }
@@ -106,8 +132,8 @@ impl KdTree {
         let mut heap = BoundedMaxHeap::new(k);
         self.k_nearest_range(0, self.indices.len(), 0, query, &mut heap);
 
-        let mut result: Vec<(usize, f64)> = heap.into_vec();
-        result.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+        let mut result: Vec<Neighbor> = heap.into_vec();
+        result.sort_by(|a, b| a.dist_sq.partial_cmp(&b.dist_sq).unwrap());
         result
     }
 
@@ -129,7 +155,10 @@ impl KdTree {
         let point = self.points[point_idx];
 
         let dist_sq = (query - point).length_squared();
-        heap.push(point_idx, dist_sq);
+        heap.push(Neighbor {
+            index: point_idx,
+            dist_sq,
+        });
 
         let split_dim = depth % 2;
         let query_val = if split_dim == 0 { query.x } else { query.y };
@@ -232,22 +261,26 @@ enum BoundedMaxHeap {
     Small {
         capacity: usize,
         len: usize,
-        items: [(usize, f64); SMALL_HEAP_CAPACITY],
+        items: [Neighbor; SMALL_HEAP_CAPACITY],
     },
     /// Heap-allocated variant for larger k values
     Large {
         capacity: usize,
-        items: Vec<(usize, f64)>,
+        items: Vec<Neighbor>,
     },
 }
 
 impl BoundedMaxHeap {
     fn new(capacity: usize) -> Self {
+        let zero = Neighbor {
+            index: 0,
+            dist_sq: 0.0,
+        };
         if capacity <= SMALL_HEAP_CAPACITY {
             BoundedMaxHeap::Small {
                 capacity,
                 len: 0,
-                items: [(0, 0.0); SMALL_HEAP_CAPACITY],
+                items: [zero; SMALL_HEAP_CAPACITY],
             }
         } else {
             BoundedMaxHeap::Large {
@@ -257,7 +290,7 @@ impl BoundedMaxHeap {
         }
     }
 
-    fn push(&mut self, idx: usize, dist_sq: f64) {
+    fn push(&mut self, neighbor: Neighbor) {
         match self {
             BoundedMaxHeap::Small {
                 capacity,
@@ -265,21 +298,21 @@ impl BoundedMaxHeap {
                 items,
             } => {
                 if *len < *capacity {
-                    items[*len] = (idx, dist_sq);
+                    items[*len] = neighbor;
                     *len += 1;
                     Self::sift_up_slice(&mut items[..*len], *len - 1);
-                } else if dist_sq < items[0].1 {
-                    items[0] = (idx, dist_sq);
+                } else if neighbor.dist_sq < items[0].dist_sq {
+                    items[0] = neighbor;
                     Self::sift_down_slice(&mut items[..*len], 0);
                 }
             }
             BoundedMaxHeap::Large { capacity, items } => {
                 if items.len() < *capacity {
-                    items.push((idx, dist_sq));
+                    items.push(neighbor);
                     let last_idx = items.len() - 1;
                     Self::sift_up_slice(items, last_idx);
-                } else if dist_sq < items[0].1 {
-                    items[0] = (idx, dist_sq);
+                } else if neighbor.dist_sq < items[0].dist_sq {
+                    items[0] = neighbor;
                     Self::sift_down_slice(items, 0);
                 }
             }
@@ -299,30 +332,30 @@ impl BoundedMaxHeap {
                 if *len == 0 {
                     f64::INFINITY
                 } else {
-                    items[0].1
+                    items[0].dist_sq
                 }
             }
             BoundedMaxHeap::Large { items, .. } => {
                 if items.is_empty() {
                     f64::INFINITY
                 } else {
-                    items[0].1
+                    items[0].dist_sq
                 }
             }
         }
     }
 
-    fn into_vec(self) -> Vec<(usize, f64)> {
+    fn into_vec(self) -> Vec<Neighbor> {
         match self {
             BoundedMaxHeap::Small { len, items, .. } => items[..len].to_vec(),
             BoundedMaxHeap::Large { items, .. } => items,
         }
     }
 
-    fn sift_up_slice(items: &mut [(usize, f64)], mut idx: usize) {
+    fn sift_up_slice(items: &mut [Neighbor], mut idx: usize) {
         while idx > 0 {
             let parent = (idx - 1) / 2;
-            if items[idx].1 > items[parent].1 {
+            if items[idx].dist_sq > items[parent].dist_sq {
                 items.swap(idx, parent);
                 idx = parent;
             } else {
@@ -331,17 +364,17 @@ impl BoundedMaxHeap {
         }
     }
 
-    fn sift_down_slice(items: &mut [(usize, f64)], mut idx: usize) {
+    fn sift_down_slice(items: &mut [Neighbor], mut idx: usize) {
         let len = items.len();
         loop {
             let left = 2 * idx + 1;
             let right = 2 * idx + 2;
             let mut largest = idx;
 
-            if left < len && items[left].1 > items[largest].1 {
+            if left < len && items[left].dist_sq > items[largest].dist_sq {
                 largest = left;
             }
-            if right < len && items[right].1 > items[largest].1 {
+            if right < len && items[right].dist_sq > items[largest].dist_sq {
                 largest = right;
             }
 

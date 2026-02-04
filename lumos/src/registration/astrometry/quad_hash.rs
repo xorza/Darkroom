@@ -152,13 +152,13 @@ impl QuadHasher {
             // Filter to get 3 other stars within max radius
             let mut other_indices: Vec<usize> = neighbors
                 .iter()
-                .filter_map(|&(idx, dist_sq)| {
-                    if idx == i {
+                .filter_map(|n| {
+                    if n.index == i {
                         return None;
                     }
-                    let dist = dist_sq.sqrt();
+                    let dist = n.dist_sq.sqrt();
                     if dist <= self.max_quad_radius {
-                        Some(idx)
+                        Some(n.index)
                     } else {
                         None
                     }

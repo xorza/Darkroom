@@ -450,13 +450,13 @@ fn recover_matches(
         let predicted = transform.apply(ref_pos);
         let nearest = target_tree.k_nearest(predicted, 1);
 
-        if let Some(&(target_idx, dist_sq)) = nearest.first()
-            && dist_sq <= threshold_sq
-            && !matched_target.contains(&target_idx)
-            && !newly_matched_targets.contains(&target_idx)
+        if let Some(nearest_neighbor) = nearest.first()
+            && nearest_neighbor.dist_sq <= threshold_sq
+            && !matched_target.contains(&nearest_neighbor.index)
+            && !newly_matched_targets.contains(&nearest_neighbor.index)
         {
-            all_matches.push((ref_idx, target_idx));
-            newly_matched_targets.insert(target_idx);
+            all_matches.push((ref_idx, nearest_neighbor.index));
+            newly_matched_targets.insert(nearest_neighbor.index);
         }
     }
 

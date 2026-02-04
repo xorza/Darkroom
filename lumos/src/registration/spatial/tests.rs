@@ -50,8 +50,8 @@ fn test_kdtree_k_nearest_basic() {
     let neighbors = tree.k_nearest(DVec2::new(0.5, 0.5), 3);
     assert_eq!(neighbors.len(), 3);
 
-    assert_eq!(neighbors[0].0, 4); // Center point itself
-    assert!(neighbors[0].1 < 0.001);
+    assert_eq!(neighbors[0].index, 4); // Center point itself
+    assert!(neighbors[0].dist_sq < 0.001);
 }
 
 #[test]
@@ -65,8 +65,8 @@ fn test_kdtree_k_nearest_finds_exact_point() {
 
     let neighbors = tree.k_nearest(DVec2::new(5.0, 5.0), 1);
     assert_eq!(neighbors.len(), 1);
-    assert_eq!(neighbors[0].0, 2);
-    assert!(neighbors[0].1 < 1e-10);
+    assert_eq!(neighbors[0].index, 2);
+    assert!(neighbors[0].dist_sq < 1e-10);
 }
 
 #[test]
@@ -83,15 +83,15 @@ fn test_kdtree_k_nearest_order() {
     let neighbors = tree.k_nearest(DVec2::new(0.0, 0.0), 3);
     assert_eq!(neighbors.len(), 3);
 
-    assert!(neighbors[0].1 <= neighbors[1].1);
-    assert!(neighbors[1].1 <= neighbors[2].1);
+    assert!(neighbors[0].dist_sq <= neighbors[1].dist_sq);
+    assert!(neighbors[1].dist_sq <= neighbors[2].dist_sq);
 
-    assert_eq!(neighbors[0].0, 0);
-    assert!(neighbors[0].1 < 1e-10);
-    assert_eq!(neighbors[1].0, 1);
-    assert!((neighbors[1].1 - 1.0).abs() < 1e-10);
-    assert_eq!(neighbors[2].0, 2);
-    assert!((neighbors[2].1 - 4.0).abs() < 1e-10);
+    assert_eq!(neighbors[0].index, 0);
+    assert!(neighbors[0].dist_sq < 1e-10);
+    assert_eq!(neighbors[1].index, 1);
+    assert!((neighbors[1].dist_sq - 1.0).abs() < 1e-10);
+    assert_eq!(neighbors[2].index, 2);
+    assert!((neighbors[2].dist_sq - 4.0).abs() < 1e-10);
 }
 
 #[test]
@@ -158,7 +158,7 @@ fn test_kdtree_with_large_coordinates() {
 
     let neighbors = tree.k_nearest(DVec2::new(1024.5, 768.3), 2);
     assert_eq!(neighbors.len(), 2);
-    assert_eq!(neighbors[0].0, 0);
+    assert_eq!(neighbors[0].index, 0);
 }
 
 #[test]
@@ -174,7 +174,7 @@ fn test_kdtree_with_collinear_points() {
 
     let neighbors = tree.k_nearest(DVec2::new(2.0, 2.0), 3);
     assert_eq!(neighbors.len(), 3);
-    assert_eq!(neighbors[0].0, 2);
+    assert_eq!(neighbors[0].index, 2);
 }
 
 #[test]
@@ -194,13 +194,13 @@ fn test_kdtree_with_clustered_points() {
     let tree = KdTree::build(&points).unwrap();
 
     let neighbors = tree.k_nearest(DVec2::new(0.0, 0.0), 5);
-    for (idx, _) in neighbors {
-        assert!(idx < 5, "Should only find points from cluster 1");
+    for n in neighbors {
+        assert!(n.index < 5, "Should only find points from cluster 1");
     }
 
     let neighbors = tree.k_nearest(DVec2::new(100.0, 100.0), 5);
-    for (idx, _) in neighbors {
-        assert!(idx >= 5, "Should only find points from cluster 2");
+    for n in neighbors {
+        assert!(n.index >= 5, "Should only find points from cluster 2");
     }
 }
 
@@ -223,9 +223,12 @@ fn test_kdtree_duplicate_points() {
     let neighbors = tree.k_nearest(DVec2::new(5.0, 5.0), 3);
     assert_eq!(neighbors.len(), 3);
 
-    for (idx, dist) in &neighbors {
-        if *idx < 3 {
-            assert!(*dist < 1e-10, "Duplicate point should have zero distance");
+    for n in &neighbors {
+        if n.index < 3 {
+            assert!(
+                n.dist_sq < 1e-10,
+                "Duplicate point should have zero distance"
+            );
         }
     }
 }
@@ -247,11 +250,11 @@ fn test_kdtree_many_points() {
     let neighbors = tree.k_nearest(DVec2::new(155.0, 155.0), 10);
     assert_eq!(neighbors.len(), 10);
 
-    for (_, dist) in &neighbors {
+    for n in &neighbors {
         assert!(
-            *dist < 1000.0,
+            n.dist_sq < 1000.0,
             "Neighbor too far: {} (squared distance)",
-            dist
+            n.dist_sq
         );
     }
 }
@@ -266,7 +269,7 @@ fn test_kdtree_horizontal_line() {
     let neighbors = tree.k_nearest(DVec2::new(45.0, 0.0), 3);
     assert_eq!(neighbors.len(), 3);
 
-    let indices: Vec<usize> = neighbors.iter().map(|(i, _)| *i).collect();
+    let indices: Vec<usize> = neighbors.iter().map(|n| n.index).collect();
     assert!(indices.contains(&4) || indices.contains(&5));
 }
 
@@ -280,7 +283,7 @@ fn test_kdtree_vertical_line() {
     let neighbors = tree.k_nearest(DVec2::new(0.0, 45.0), 3);
     assert_eq!(neighbors.len(), 3);
 
-    let indices: Vec<usize> = neighbors.iter().map(|(i, _)| *i).collect();
+    let indices: Vec<usize> = neighbors.iter().map(|n| n.index).collect();
     assert!(indices.contains(&4) || indices.contains(&5));
 }
 
@@ -294,9 +297,9 @@ fn test_kdtree_all_identical_points() {
     let neighbors = tree.k_nearest(DVec2::new(7.0, 7.0), 5);
     assert_eq!(neighbors.len(), 5);
 
-    for (_, dist) in &neighbors {
+    for n in &neighbors {
         assert!(
-            *dist < 1e-10,
+            n.dist_sq < 1e-10,
             "All points at same location should have zero distance"
         );
     }
@@ -354,8 +357,8 @@ fn test_kdtree_query_far_from_points() {
     let neighbors = tree.k_nearest(DVec2::new(1000.0, 1000.0), 2);
     assert_eq!(neighbors.len(), 2);
 
-    for (_, dist) in &neighbors {
-        assert!(*dist > 1_000_000.0, "Distance should be very large");
+    for n in &neighbors {
+        assert!(n.dist_sq > 1_000_000.0, "Distance should be very large");
     }
 }
 
@@ -373,7 +376,7 @@ fn test_kdtree_negative_coordinates() {
     let neighbors = tree.k_nearest(DVec2::new(-7.0, -7.0), 2);
     assert_eq!(neighbors.len(), 2);
 
-    let indices: Vec<usize> = neighbors.iter().map(|(i, _)| *i).collect();
+    let indices: Vec<usize> = neighbors.iter().map(|n| n.index).collect();
     assert!(indices.contains(&0) || indices.contains(&1));
 }
 
@@ -408,21 +411,42 @@ fn test_bounded_max_heap_small() {
 
     assert!(matches!(heap, BoundedMaxHeap::Small { .. }));
 
-    heap.push(0, 10.0);
-    heap.push(1, 5.0);
-    heap.push(2, 15.0);
-    heap.push(3, 3.0);
-    heap.push(4, 8.0);
+    heap.push(Neighbor {
+        index: 0,
+        dist_sq: 10.0,
+    });
+    heap.push(Neighbor {
+        index: 1,
+        dist_sq: 5.0,
+    });
+    heap.push(Neighbor {
+        index: 2,
+        dist_sq: 15.0,
+    });
+    heap.push(Neighbor {
+        index: 3,
+        dist_sq: 3.0,
+    });
+    heap.push(Neighbor {
+        index: 4,
+        dist_sq: 8.0,
+    });
 
     assert!(heap.is_full());
     assert!((heap.max_distance() - 15.0).abs() < 1e-10);
 
     // Push a smaller item - should replace the max
-    heap.push(5, 2.0);
+    heap.push(Neighbor {
+        index: 5,
+        dist_sq: 2.0,
+    });
     assert!((heap.max_distance() - 10.0).abs() < 1e-10);
 
     // Push a larger item - should be rejected
-    heap.push(6, 20.0);
+    heap.push(Neighbor {
+        index: 6,
+        dist_sq: 20.0,
+    });
     assert!((heap.max_distance() - 10.0).abs() < 1e-10);
 
     let result = heap.into_vec();
@@ -437,13 +461,19 @@ fn test_bounded_max_heap_large() {
     assert!(matches!(heap, BoundedMaxHeap::Large { .. }));
 
     for i in 0..capacity {
-        heap.push(i, (capacity - i) as f64);
+        heap.push(Neighbor {
+            index: i,
+            dist_sq: (capacity - i) as f64,
+        });
     }
 
     assert!(heap.is_full());
     assert!((heap.max_distance() - capacity as f64).abs() < 1e-10);
 
-    heap.push(100, 0.5);
+    heap.push(Neighbor {
+        index: 100,
+        dist_sq: 0.5,
+    });
     assert!((heap.max_distance() - (capacity - 1) as f64).abs() < 1e-10);
 
     let result = heap.into_vec();
@@ -472,7 +502,7 @@ fn test_kdtree_k_nearest_small_k() {
     assert_eq!(neighbors.len(), 10);
 
     for i in 1..neighbors.len() {
-        assert!(neighbors[i - 1].1 <= neighbors[i].1);
+        assert!(neighbors[i - 1].dist_sq <= neighbors[i].dist_sq);
     }
 }
 
@@ -490,7 +520,7 @@ fn test_kdtree_k_nearest_large_k() {
     assert_eq!(neighbors.len(), k);
 
     for i in 1..neighbors.len() {
-        assert!(neighbors[i - 1].1 <= neighbors[i].1);
+        assert!(neighbors[i - 1].dist_sq <= neighbors[i].dist_sq);
     }
 }
 
