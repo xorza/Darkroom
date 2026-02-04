@@ -13,15 +13,9 @@ mod tests;
 // =============================================================================
 
 use crate::astro_image::AstroImage;
-use crate::common::Buffer2;
 
 use super::buffer_pool::BufferPool;
-use super::candidate_detection::{self, detect_stars};
-
 use super::config::Config;
-use super::convolution::matched_filter;
-use super::fwhm_estimation;
-use super::image_stats::ImageStats;
 use super::stages;
 use super::star::Star;
 
@@ -165,8 +159,7 @@ impl StarDetector {
         tracing::debug!("Detected {} star candidates", regions.len());
 
         // Step 4: Compute precise centroids (parallel)
-        let mut stars =
-            stages::measure::measure(&regions, &grayscale_image, &background, &self.config);
+        let stars = stages::measure::measure(&regions, &grayscale_image, &background, &self.config);
         diagnostics.stars_after_centroid = stars.len();
 
         // Release image buffers back to pool
@@ -174,27 +167,27 @@ impl StarDetector {
         background.release_to_pool(pool);
         pool.release_f32(grayscale_image);
 
-        // Step 5: Apply quality filters
-        let filter_stats = apply_quality_filters(&mut stars, &self.config);
+        // Step 5: Apply quality filters, sort, and remove duplicates
+        let (stars, filter_stats) = stages::filter::filter(stars, &self.config);
         diagnostics.rejected_saturated = filter_stats.saturated;
         diagnostics.rejected_low_snr = filter_stats.low_snr;
         diagnostics.rejected_high_eccentricity = filter_stats.high_eccentricity;
         diagnostics.rejected_cosmic_rays = filter_stats.cosmic_rays;
         diagnostics.rejected_roundness = filter_stats.roundness;
+        diagnostics.rejected_fwhm_outliers = filter_stats.fwhm_outliers;
+        diagnostics.rejected_duplicates = filter_stats.duplicates;
 
-        // Step 6: Post-processing
-        sort_by_flux(&mut stars);
-
-        let removed = filter_fwhm_outliers(&mut stars, self.config.max_fwhm_deviation);
-        diagnostics.rejected_fwhm_outliers = removed;
-        if removed > 0 {
-            tracing::debug!("Removed {} stars with abnormally large FWHM", removed);
+        if filter_stats.fwhm_outliers > 0 {
+            tracing::debug!(
+                "Removed {} stars with abnormally large FWHM",
+                filter_stats.fwhm_outliers
+            );
         }
-
-        let removed = remove_duplicate_stars(&mut stars, self.config.duplicate_min_separation);
-        diagnostics.rejected_duplicates = removed;
-        if removed > 0 {
-            tracing::debug!("Removed {} duplicate star detections", removed);
+        if filter_stats.duplicates > 0 {
+            tracing::debug!(
+                "Removed {} duplicate star detections",
+                filter_stats.duplicates
+            );
         }
 
         // Step 7: Compute final statistics
@@ -210,194 +203,4 @@ impl StarDetector {
 
         StarDetectionResult { stars, diagnostics }
     }
-}
-
-// =============================================================================
-// Helper Functions
-// =============================================================================
-
-/// Apply quality filters to stars, returning rejection counts.
-fn apply_quality_filters(stars: &mut Vec<Star>, config: &Config) -> QualityFilterStats {
-    let mut stats = QualityFilterStats::default();
-
-    stars.retain(|star| {
-        if star.is_saturated() {
-            stats.saturated += 1;
-            false
-        } else if star.snr < config.min_snr {
-            stats.low_snr += 1;
-            false
-        } else if star.eccentricity > config.max_eccentricity {
-            stats.high_eccentricity += 1;
-            false
-        } else if star.is_cosmic_ray(config.max_sharpness) {
-            stats.cosmic_rays += 1;
-            false
-        } else if !star.is_round(config.max_roundness) {
-            stats.roundness += 1;
-            false
-        } else {
-            true
-        }
-    });
-
-    stats
-}
-
-#[derive(Debug, Default)]
-struct QualityFilterStats {
-    saturated: usize,
-    low_snr: usize,
-    high_eccentricity: usize,
-    cosmic_rays: usize,
-    roundness: usize,
-}
-
-/// Sort stars by flux (brightest first).
-fn sort_by_flux(stars: &mut [Star]) {
-    stars.sort_by(|a, b| {
-        b.flux
-            .partial_cmp(&a.flux)
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
-}
-
-/// Remove duplicate star detections that are too close together.
-pub(crate) fn remove_duplicate_stars(stars: &mut Vec<Star>, min_separation: f32) -> usize {
-    if stars.len() < 2 {
-        return 0;
-    }
-
-    if stars.len() < 100 {
-        return remove_duplicate_stars_simple(stars, min_separation);
-    }
-
-    let min_sep_sq = (min_separation * min_separation) as f64;
-
-    let mut min_x = f64::MAX;
-    let mut min_y = f64::MAX;
-    let mut max_x = f64::MIN;
-    let mut max_y = f64::MIN;
-    for star in stars.iter() {
-        min_x = min_x.min(star.pos.x);
-        min_y = min_y.min(star.pos.y);
-        max_x = max_x.max(star.pos.x);
-        max_y = max_y.max(star.pos.y);
-    }
-
-    let cell_size = min_separation as f64;
-    let grid_width = ((max_x - min_x) / cell_size).ceil() as usize + 1;
-    let grid_height = ((max_y - min_y) / cell_size).ceil() as usize + 1;
-
-    let mut grid: Vec<smallvec::SmallVec<[usize; 4]>> =
-        vec![smallvec::SmallVec::new(); grid_width * grid_height];
-
-    let mut kept = vec![true; stars.len()];
-
-    for i in 0..stars.len() {
-        let star = &stars[i];
-        let cell_x = ((star.pos.x - min_x) / cell_size) as usize;
-        let cell_y = ((star.pos.y - min_y) / cell_size) as usize;
-
-        let mut is_duplicate = false;
-        'outer: for dy in 0..3 {
-            let ny = cell_y.wrapping_add(dy).wrapping_sub(1);
-            if ny >= grid_height {
-                continue;
-            }
-            for dx in 0..3 {
-                let nx = cell_x.wrapping_add(dx).wrapping_sub(1);
-                if nx >= grid_width {
-                    continue;
-                }
-                let cell_idx = ny * grid_width + nx;
-                for &other_idx in &grid[cell_idx] {
-                    let other = &stars[other_idx];
-                    let ddx = star.pos.x - other.pos.x;
-                    let ddy = star.pos.y - other.pos.y;
-                    if ddx * ddx + ddy * ddy < min_sep_sq {
-                        is_duplicate = true;
-                        break 'outer;
-                    }
-                }
-            }
-        }
-
-        if is_duplicate {
-            kept[i] = false;
-        } else {
-            let cell_idx = cell_y * grid_width + cell_x;
-            grid[cell_idx].push(i);
-        }
-    }
-
-    let removed_count = kept.iter().filter(|&&k| !k).count();
-
-    let mut write_idx = 0;
-    for read_idx in 0..stars.len() {
-        if kept[read_idx] {
-            if write_idx != read_idx {
-                stars[write_idx] = stars[read_idx];
-            }
-            write_idx += 1;
-        }
-    }
-    stars.truncate(write_idx);
-
-    removed_count
-}
-
-/// Simple O(n²) duplicate removal for small star counts.
-fn remove_duplicate_stars_simple(stars: &mut Vec<Star>, min_separation: f32) -> usize {
-    let min_sep_sq = (min_separation * min_separation) as f64;
-    let mut kept = vec![true; stars.len()];
-
-    for i in 0..stars.len() {
-        if !kept[i] {
-            continue;
-        }
-        for j in (i + 1)..stars.len() {
-            if !kept[j] {
-                continue;
-            }
-            let dx = stars[i].pos.x - stars[j].pos.x;
-            let dy = stars[i].pos.y - stars[j].pos.y;
-            if dx * dx + dy * dy < min_sep_sq {
-                kept[j] = false;
-            }
-        }
-    }
-
-    let removed_count = kept.iter().filter(|&&k| !k).count();
-
-    let mut write_idx = 0;
-    for read_idx in 0..stars.len() {
-        if kept[read_idx] {
-            if write_idx != read_idx {
-                stars[write_idx] = stars[read_idx];
-            }
-            write_idx += 1;
-        }
-    }
-    stars.truncate(write_idx);
-
-    removed_count
-}
-
-/// Filter stars by FWHM using MAD-based outlier detection.
-pub(crate) fn filter_fwhm_outliers(stars: &mut Vec<Star>, max_deviation: f32) -> usize {
-    if max_deviation <= 0.0 || stars.len() < 5 {
-        return 0;
-    }
-
-    let reference_count = (stars.len() / 2).max(5).min(stars.len());
-    let mut fwhms: Vec<f32> = stars.iter().take(reference_count).map(|s| s.fwhm).collect();
-    let (median_fwhm, mad) = crate::math::median_and_mad_f32_mut(&mut fwhms);
-
-    let effective_mad = mad.max(median_fwhm * 0.1);
-    let max_fwhm = median_fwhm + max_deviation * effective_mad;
-
-    let before_count = stars.len();
-    stars.retain(|s| s.fwhm <= max_fwhm);
-    before_count - stars.len()
 }

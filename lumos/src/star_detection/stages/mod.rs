@@ -5,6 +5,7 @@
 
 pub mod background;
 pub mod detect;
+pub mod filter;
 pub mod fwhm;
 pub mod measure;
 pub mod prepare;

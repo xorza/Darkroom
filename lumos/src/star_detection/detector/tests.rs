@@ -2,8 +2,10 @@
 
 use glam::DVec2;
 
-use super::{filter_fwhm_outliers, remove_duplicate_stars};
 use crate::star_detection::Star;
+use crate::star_detection::stages::filter::{
+    filter_fwhm_outliers, remove_duplicate_stars, remove_duplicate_stars_simple,
+};
 
 // =============================================================================
 // Helper Functions
@@ -555,7 +557,7 @@ fn test_remove_duplicate_stars_spatial_hash_consistency() {
     // Run with simple algorithm (force by using small chunks)
     let mut stars_simple = base_stars;
     stars_simple.sort_by(|a, b| b.flux.partial_cmp(&a.flux).unwrap());
-    let removed_simple = super::remove_duplicate_stars_simple(&mut stars_simple, 10.0);
+    let removed_simple = remove_duplicate_stars_simple(&mut stars_simple, 10.0);
 
     // Results should match
     assert_eq!(

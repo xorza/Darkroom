@@ -110,7 +110,7 @@ fn bench_detect_1k_sparse(b: ::bench::Bencher) {
 #[quick_bench(warmup_iters = 5, iters = 20)]
 fn bench_remove_duplicate_stars_5000(b: ::bench::Bencher) {
     use crate::star_detection::Star;
-    use crate::star_detection::detector::remove_duplicate_stars;
+    use crate::star_detection::stages::filter::remove_duplicate_stars;
     use rand::prelude::*;
 
     // Generate 5000 stars in a 4K image area (similar to dense field)
@@ -141,7 +141,7 @@ fn bench_remove_duplicate_stars_5000(b: ::bench::Bencher) {
 #[quick_bench(warmup_iters = 5, iters = 20)]
 fn bench_remove_duplicate_stars_10000(b: ::bench::Bencher) {
     use crate::star_detection::Star;
-    use crate::star_detection::detector::remove_duplicate_stars;
+    use crate::star_detection::stages::filter::remove_duplicate_stars;
     use rand::prelude::*;
 
     // Generate 10000 stars - extreme case
