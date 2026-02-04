@@ -20,10 +20,11 @@ pub unsafe fn count_inliers_neon(
     target_points: &[DVec2],
     transform: &Transform,
     threshold_sq: f64,
-) -> (Vec<usize>, f64) {
+    inliers: &mut Vec<usize>,
+) -> f64 {
     unsafe {
         let len = ref_points.len();
-        let mut inliers = Vec::with_capacity(len);
+        inliers.clear();
         let mut total_score = 0.0f64;
 
         let t = transform.matrix.as_array();
@@ -115,7 +116,7 @@ pub unsafe fn count_inliers_neon(
             }
         }
 
-        (inliers, total_score)
+        total_score
     }
 }
 
@@ -128,8 +129,9 @@ mod tests {
         target_points: &[DVec2],
         transform: &Transform,
         threshold_sq: f64,
-    ) -> (Vec<usize>, f64) {
-        let mut inliers = Vec::new();
+        inliers: &mut Vec<usize>,
+    ) -> f64 {
+        inliers.clear();
         let mut score = 0.0f64;
 
         for (i, (r, t)) in ref_points.iter().zip(target_points.iter()).enumerate() {
@@ -142,7 +144,7 @@ mod tests {
             }
         }
 
-        (inliers, score)
+        score
     }
 
     #[test]
@@ -166,10 +168,24 @@ mod tests {
             .collect();
         let threshold_sq = 4.0; // threshold = 2.0
 
-        let (inliers_neon, score_neon) =
-            unsafe { count_inliers_neon(&ref_points, &target_points, &transform, threshold_sq) };
-        let (inliers_scalar, score_scalar) =
-            count_inliers_scalar(&ref_points, &target_points, &transform, threshold_sq);
+        let mut inliers_neon = Vec::new();
+        let mut inliers_scalar = Vec::new();
+        let score_neon = unsafe {
+            count_inliers_neon(
+                &ref_points,
+                &target_points,
+                &transform,
+                threshold_sq,
+                &mut inliers_neon,
+            )
+        };
+        let score_scalar = count_inliers_scalar(
+            &ref_points,
+            &target_points,
+            &transform,
+            threshold_sq,
+            &mut inliers_scalar,
+        );
 
         assert_eq!(inliers_neon, inliers_scalar, "Inliers mismatch");
         assert!((score_neon - score_scalar).abs() < 1e-6, "Score mismatch");

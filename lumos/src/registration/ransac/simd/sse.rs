@@ -20,10 +20,11 @@ pub unsafe fn count_inliers_avx2(
     target_points: &[DVec2],
     transform: &Transform,
     threshold_sq: f64,
-) -> (Vec<usize>, f64) {
+    inliers: &mut Vec<usize>,
+) -> f64 {
     unsafe {
         let len = ref_points.len();
-        let mut inliers = Vec::with_capacity(len);
+        inliers.clear();
         let mut total_score = 0.0f64;
 
         // Extract transform components for vectorized computation
@@ -121,7 +122,7 @@ pub unsafe fn count_inliers_avx2(
             }
         }
 
-        (inliers, total_score)
+        total_score
     }
 }
 
@@ -137,10 +138,11 @@ pub unsafe fn count_inliers_sse2(
     target_points: &[DVec2],
     transform: &Transform,
     threshold_sq: f64,
-) -> (Vec<usize>, f64) {
+    inliers: &mut Vec<usize>,
+) -> f64 {
     unsafe {
         let len = ref_points.len();
-        let mut inliers = Vec::with_capacity(len);
+        inliers.clear();
         let mut total_score = 0.0f64;
 
         let t = transform.matrix.as_array();
@@ -221,7 +223,7 @@ pub unsafe fn count_inliers_sse2(
             }
         }
 
-        (inliers, total_score)
+        total_score
     }
 }
 
@@ -236,8 +238,9 @@ mod tests {
         target_points: &[DVec2],
         transform: &Transform,
         threshold_sq: f64,
-    ) -> (Vec<usize>, f64) {
-        let mut inliers = Vec::new();
+        inliers: &mut Vec<usize>,
+    ) -> f64 {
+        inliers.clear();
         let mut score = 0.0f64;
 
         for (i, (r, t)) in ref_points.iter().zip(target_points.iter()).enumerate() {
@@ -250,7 +253,7 @@ mod tests {
             }
         }
 
-        (inliers, score)
+        score
     }
 
     #[test]
@@ -279,10 +282,24 @@ mod tests {
             .collect();
         let threshold_sq = 4.0; // threshold = 2.0
 
-        let (inliers_avx2, score_avx2) =
-            unsafe { count_inliers_avx2(&ref_points, &target_points, &transform, threshold_sq) };
-        let (inliers_scalar, score_scalar) =
-            count_inliers_scalar(&ref_points, &target_points, &transform, threshold_sq);
+        let mut inliers_avx2 = Vec::new();
+        let mut inliers_scalar = Vec::new();
+        let score_avx2 = unsafe {
+            count_inliers_avx2(
+                &ref_points,
+                &target_points,
+                &transform,
+                threshold_sq,
+                &mut inliers_avx2,
+            )
+        };
+        let score_scalar = count_inliers_scalar(
+            &ref_points,
+            &target_points,
+            &transform,
+            threshold_sq,
+            &mut inliers_scalar,
+        );
 
         assert_eq!(inliers_avx2, inliers_scalar, "Inliers mismatch");
         assert!((score_avx2 - score_scalar).abs() < 1e-6, "Score mismatch");
@@ -314,10 +331,24 @@ mod tests {
             .collect();
         let threshold_sq = 1.5 * 1.5; // threshold = 1.5
 
-        let (inliers_sse, score_sse) =
-            unsafe { count_inliers_sse2(&ref_points, &target_points, &transform, threshold_sq) };
-        let (inliers_scalar, score_scalar) =
-            count_inliers_scalar(&ref_points, &target_points, &transform, threshold_sq);
+        let mut inliers_sse = Vec::new();
+        let mut inliers_scalar = Vec::new();
+        let score_sse = unsafe {
+            count_inliers_sse2(
+                &ref_points,
+                &target_points,
+                &transform,
+                threshold_sq,
+                &mut inliers_sse,
+            )
+        };
+        let score_scalar = count_inliers_scalar(
+            &ref_points,
+            &target_points,
+            &transform,
+            threshold_sq,
+            &mut inliers_scalar,
+        );
 
         assert_eq!(inliers_sse, inliers_scalar, "Inliers mismatch");
         assert!((score_sse - score_scalar).abs() < 1e-6, "Score mismatch");

@@ -22,6 +22,9 @@ use crate::registration::transform::Transform;
 /// For each point pair, computes: dist² = (transform(ref) - target)²
 /// Inliers satisfy dist² < threshold². Score = sum(threshold² - dist²) for inliers.
 ///
+/// Reuses the provided `inliers` buffer to avoid allocation. The buffer is cleared
+/// before use and filled with inlier indices.
+///
 /// This function dispatches to the best available SIMD implementation at runtime.
 #[inline]
 pub(crate) fn count_inliers_simd(
@@ -29,23 +32,25 @@ pub(crate) fn count_inliers_simd(
     target_points: &[DVec2],
     transform: &Transform,
     threshold_sq: f64,
-) -> (Vec<usize>, f64) {
+    inliers: &mut Vec<usize>,
+) -> f64 {
     let len = ref_points.len();
+    inliers.clear();
 
     if len == 0 {
-        return (Vec::new(), 0.0);
+        return 0.0;
     }
 
     #[cfg(target_arch = "x86_64")]
     {
         if len >= 4 && cpu_features::has_avx2() {
             return unsafe {
-                sse::count_inliers_avx2(ref_points, target_points, transform, threshold_sq)
+                sse::count_inliers_avx2(ref_points, target_points, transform, threshold_sq, inliers)
             };
         }
         if len >= 2 && cpu_features::has_sse4_1() {
             return unsafe {
-                sse::count_inliers_sse2(ref_points, target_points, transform, threshold_sq)
+                sse::count_inliers_sse2(ref_points, target_points, transform, threshold_sq, inliers)
             };
         }
     }
@@ -54,13 +59,19 @@ pub(crate) fn count_inliers_simd(
     {
         if len >= 2 {
             return unsafe {
-                neon::count_inliers_neon(ref_points, target_points, transform, threshold_sq)
+                neon::count_inliers_neon(
+                    ref_points,
+                    target_points,
+                    transform,
+                    threshold_sq,
+                    inliers,
+                )
             };
         }
     }
 
     // Scalar fallback
-    count_inliers_scalar(ref_points, target_points, transform, threshold_sq)
+    count_inliers_scalar(ref_points, target_points, transform, threshold_sq, inliers)
 }
 
 /// Scalar implementation of inlier counting.
@@ -70,8 +81,9 @@ pub(crate) fn count_inliers_scalar(
     target_points: &[DVec2],
     transform: &Transform,
     threshold_sq: f64,
-) -> (Vec<usize>, f64) {
-    count_inliers_scalar_impl(ref_points, target_points, transform, threshold_sq)
+    inliers: &mut Vec<usize>,
+) -> f64 {
+    count_inliers_scalar_impl(ref_points, target_points, transform, threshold_sq, inliers)
 }
 
 #[cfg(not(test))]
@@ -80,8 +92,9 @@ fn count_inliers_scalar(
     target_points: &[DVec2],
     transform: &Transform,
     threshold_sq: f64,
-) -> (Vec<usize>, f64) {
-    count_inliers_scalar_impl(ref_points, target_points, transform, threshold_sq)
+    inliers: &mut Vec<usize>,
+) -> f64 {
+    count_inliers_scalar_impl(ref_points, target_points, transform, threshold_sq, inliers)
 }
 
 #[inline]
@@ -90,8 +103,9 @@ fn count_inliers_scalar_impl(
     target_points: &[DVec2],
     transform: &Transform,
     threshold_sq: f64,
-) -> (Vec<usize>, f64) {
-    let mut inliers = Vec::new();
+    inliers: &mut Vec<usize>,
+) -> f64 {
+    inliers.clear();
     let mut score = 0.0f64;
 
     for (i, (r, t)) in ref_points.iter().zip(target_points.iter()).enumerate() {
@@ -104,7 +118,7 @@ fn count_inliers_scalar_impl(
         }
     }
 
-    (inliers, score)
+    score
 }
 
 #[cfg(test)]
@@ -139,10 +153,22 @@ mod tests {
         let transform = create_test_transform();
         let threshold_sq = 1.0; // threshold = 1.0
 
-        let (inliers, score) =
-            count_inliers_simd(&ref_points, &target_points, &transform, threshold_sq);
-        let (inliers_scalar, score_scalar) =
-            count_inliers_scalar(&ref_points, &target_points, &transform, threshold_sq);
+        let mut inliers = Vec::new();
+        let mut inliers_scalar = Vec::new();
+        let score = count_inliers_simd(
+            &ref_points,
+            &target_points,
+            &transform,
+            threshold_sq,
+            &mut inliers,
+        );
+        let score_scalar = count_inliers_scalar(
+            &ref_points,
+            &target_points,
+            &transform,
+            threshold_sq,
+            &mut inliers_scalar,
+        );
 
         assert_eq!(inliers, inliers_scalar);
         assert!((score - score_scalar).abs() < 1e-10);
@@ -167,10 +193,22 @@ mod tests {
         let transform = create_test_transform();
         let threshold_sq = 4.0; // threshold = 2.0
 
-        let (inliers, _) =
-            count_inliers_simd(&ref_points, &target_points, &transform, threshold_sq);
-        let (inliers_scalar, _) =
-            count_inliers_scalar(&ref_points, &target_points, &transform, threshold_sq);
+        let mut inliers = Vec::new();
+        let mut inliers_scalar = Vec::new();
+        count_inliers_simd(
+            &ref_points,
+            &target_points,
+            &transform,
+            threshold_sq,
+            &mut inliers,
+        );
+        count_inliers_scalar(
+            &ref_points,
+            &target_points,
+            &transform,
+            threshold_sq,
+            &mut inliers_scalar,
+        );
 
         assert_eq!(inliers, inliers_scalar);
         assert_eq!(inliers.len(), 2); // Only indices 0 and 2
@@ -184,7 +222,8 @@ mod tests {
         let target_points: Vec<DVec2> = Vec::new();
         let transform = create_test_transform();
 
-        let (inliers, score) = count_inliers_simd(&ref_points, &target_points, &transform, 1.0);
+        let mut inliers = Vec::new();
+        let score = count_inliers_simd(&ref_points, &target_points, &transform, 1.0, &mut inliers);
         assert!(inliers.is_empty());
         assert!(score == 0.0);
     }
@@ -194,6 +233,8 @@ mod tests {
         let transform = create_similarity_transform();
         let threshold_sq = 4.0; // threshold = 2.0
 
+        let mut inliers_simd = Vec::new();
+        let mut inliers_scalar = Vec::new();
         for size in [1, 2, 3, 4, 5, 7, 8, 9, 15, 16, 17, 32, 64, 100] {
             let ref_points: Vec<DVec2> = (0..size)
                 .map(|i| DVec2::new(i as f64 * 10.0, i as f64 * 5.0))
@@ -214,10 +255,20 @@ mod tests {
                 })
                 .collect();
 
-            let (inliers_simd, score_simd) =
-                count_inliers_simd(&ref_points, &target_points, &transform, threshold_sq);
-            let (inliers_scalar, score_scalar) =
-                count_inliers_scalar(&ref_points, &target_points, &transform, threshold_sq);
+            let score_simd = count_inliers_simd(
+                &ref_points,
+                &target_points,
+                &transform,
+                threshold_sq,
+                &mut inliers_simd,
+            );
+            let score_scalar = count_inliers_scalar(
+                &ref_points,
+                &target_points,
+                &transform,
+                threshold_sq,
+                &mut inliers_scalar,
+            );
 
             assert_eq!(
                 inliers_simd, inliers_scalar,
@@ -240,10 +291,22 @@ mod tests {
         let transform = create_test_transform();
         let threshold_sq = 4.0; // threshold = 2.0
 
-        let (inliers, score) =
-            count_inliers_simd(&ref_points, &target_points, &transform, threshold_sq);
-        let (_, score_scalar) =
-            count_inliers_scalar(&ref_points, &target_points, &transform, threshold_sq);
+        let mut inliers = Vec::new();
+        let mut inliers_scalar = Vec::new();
+        let score = count_inliers_simd(
+            &ref_points,
+            &target_points,
+            &transform,
+            threshold_sq,
+            &mut inliers,
+        );
+        let score_scalar = count_inliers_scalar(
+            &ref_points,
+            &target_points,
+            &transform,
+            threshold_sq,
+            &mut inliers_scalar,
+        );
 
         assert_eq!(inliers.len(), 2);
         assert!((score - score_scalar).abs() < 1e-10);

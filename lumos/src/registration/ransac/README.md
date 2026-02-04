@@ -30,7 +30,7 @@ Internal:
 - `estimate_affine(ref, target)` — normal equations (3x3 solve via Cramer's rule)
 - `estimate_homography(ref, target)` — DLT with point normalization and SVD via nalgebra
 - `adaptive_iterations(inlier_ratio, sample_size, confidence)` — RANSAC iteration formula
-- `count_inliers(ref, target, transform, threshold)` — SIMD-dispatched inlier counting
+- `count_inliers(ref, target, transform, threshold, &mut inliers)` — SIMD-dispatched inlier counting (reuses buffer)
 
 ## Algorithm
 
@@ -113,7 +113,6 @@ Custom implementation chosen over Rust ecosystem crates (`arrsac`, `inlier`, `li
 ## Future Work
 
 - **MAGSAC++**: Threshold-free scoring via marginalization, if fixed-threshold MSAC proves limiting.
-- **LO inner-loop allocation**: Pre-allocate buffers for LO refinement (low priority, typical iteration count is 3–5).
 
 ## Declined
 

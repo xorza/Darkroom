@@ -154,6 +154,7 @@ impl RansacEstimator {
     /// 3. Repeat until convergence or max iterations
     ///
     /// This typically improves the inlier count by 5-15%.
+    #[allow(clippy::too_many_arguments)]
     fn local_optimization(
         &self,
         ref_points: &[DVec2],
@@ -162,14 +163,22 @@ impl RansacEstimator {
         initial_inliers: &[usize],
         transform_type: TransformType,
         threshold_sq: f64,
+        inlier_buf: &mut Vec<usize>,
+        point_buf_ref: &mut Vec<DVec2>,
+        point_buf_target: &mut Vec<DVec2>,
     ) -> (Transform, Vec<usize>, f64) {
         let min_samples = transform_type.min_points();
         let mut current_transform = *initial_transform;
         let mut current_inliers = initial_inliers.to_vec();
 
         // Compute initial score
-        let (_, initial_score) =
-            count_inliers(ref_points, target_points, &current_transform, threshold_sq);
+        let initial_score = count_inliers(
+            ref_points,
+            target_points,
+            &current_transform,
+            threshold_sq,
+            inlier_buf,
+        );
         let mut current_score = initial_score;
 
         for _ in 0..self.config.lo_max_iterations {
@@ -178,27 +187,36 @@ impl RansacEstimator {
             }
 
             // Re-estimate transform using all current inliers
-            let inlier_ref: Vec<DVec2> = current_inliers.iter().map(|&i| ref_points[i]).collect();
-            let inlier_target: Vec<DVec2> =
-                current_inliers.iter().map(|&i| target_points[i]).collect();
+            point_buf_ref.clear();
+            point_buf_target.clear();
+            for &i in &current_inliers {
+                point_buf_ref.push(ref_points[i]);
+                point_buf_target.push(target_points[i]);
+            }
 
-            let refined = match estimate_transform(&inlier_ref, &inlier_target, transform_type) {
+            let refined = match estimate_transform(point_buf_ref, point_buf_target, transform_type)
+            {
                 Some(t) => t,
                 None => break,
             };
 
             // Count inliers with refined transform
-            let (new_inliers, new_score) =
-                count_inliers(ref_points, target_points, &refined, threshold_sq);
+            let new_score = count_inliers(
+                ref_points,
+                target_points,
+                &refined,
+                threshold_sq,
+                inlier_buf,
+            );
 
             // Check for convergence (no improvement)
-            if new_inliers.len() <= current_inliers.len() && new_score <= current_score {
+            if inlier_buf.len() <= current_inliers.len() && new_score <= current_score {
                 break;
             }
 
             // Update if improved
             current_transform = refined;
-            current_inliers = new_inliers;
+            std::mem::swap(&mut current_inliers, inlier_buf);
             current_score = new_score;
         }
 
@@ -228,6 +246,10 @@ impl RansacEstimator {
         let mut sample_indices: Vec<usize> = Vec::with_capacity(min_samples);
         let mut sample_ref: Vec<DVec2> = Vec::with_capacity(min_samples);
         let mut sample_target: Vec<DVec2> = Vec::with_capacity(min_samples);
+        let mut inlier_buf: Vec<usize> = Vec::with_capacity(n);
+        let mut lo_inlier_buf: Vec<usize> = Vec::with_capacity(n);
+        let mut lo_point_buf_ref: Vec<DVec2> = Vec::with_capacity(n);
+        let mut lo_point_buf_target: Vec<DVec2> = Vec::with_capacity(n);
 
         let mut iterations = 0;
         let max_iter = self.config.max_iterations;
@@ -263,25 +285,33 @@ impl RansacEstimator {
             }
 
             // Count inliers
-            let (mut inliers, mut score) =
-                count_inliers(ref_points, target_points, &transform, threshold_sq);
+            let mut score = count_inliers(
+                ref_points,
+                target_points,
+                &transform,
+                threshold_sq,
+                &mut inlier_buf,
+            );
 
             let mut current_transform = transform;
 
             // Local Optimization: if this hypothesis looks promising, refine it
-            if self.config.use_local_optimization && inliers.len() >= min_samples {
+            if self.config.use_local_optimization && inlier_buf.len() >= min_samples {
                 let (lo_transform, lo_inliers, lo_score) = self.local_optimization(
                     ref_points,
                     target_points,
                     &current_transform,
-                    &inliers,
+                    &inlier_buf,
                     transform_type,
                     threshold_sq,
+                    &mut lo_inlier_buf,
+                    &mut lo_point_buf_ref,
+                    &mut lo_point_buf_target,
                 );
                 // Only accept LO result if it's still plausible
                 if self.is_plausible(&lo_transform) {
                     current_transform = lo_transform;
-                    inliers = lo_inliers;
+                    inlier_buf = lo_inliers;
                     score = lo_score;
                 }
             }
@@ -289,7 +319,7 @@ impl RansacEstimator {
             // Update best if improved
             if score > best_score {
                 best_score = score;
-                best_inliers = inliers;
+                std::mem::swap(&mut best_inliers, &mut inlier_buf);
                 best_transform = Some(current_transform);
 
                 // Adaptive iteration count based on inlier ratio
@@ -308,21 +338,30 @@ impl RansacEstimator {
         if let Some(transform) = best_transform
             && best_inliers.len() >= min_samples
         {
-            let inlier_ref: Vec<DVec2> = best_inliers.iter().map(|&i| ref_points[i]).collect();
-            let inlier_target: Vec<DVec2> =
-                best_inliers.iter().map(|&i| target_points[i]).collect();
+            lo_point_buf_ref.clear();
+            lo_point_buf_target.clear();
+            for &i in &best_inliers {
+                lo_point_buf_ref.push(ref_points[i]);
+                lo_point_buf_target.push(target_points[i]);
+            }
 
-            let refined = estimate_transform(&inlier_ref, &inlier_target, transform_type)
-                .unwrap_or(transform);
+            let refined =
+                estimate_transform(&lo_point_buf_ref, &lo_point_buf_target, transform_type)
+                    .unwrap_or(transform);
 
-            let (final_inliers, _) =
-                count_inliers(ref_points, target_points, &refined, threshold_sq);
+            count_inliers(
+                ref_points,
+                target_points,
+                &refined,
+                threshold_sq,
+                &mut inlier_buf,
+            );
 
-            let inlier_ratio = final_inliers.len() as f64 / n as f64;
+            let inlier_ratio = inlier_buf.len() as f64 / n as f64;
 
             return Some(RansacResult {
                 transform: refined,
-                inliers: final_inliers,
+                inliers: inlier_buf,
                 iterations,
                 inlier_ratio,
             });
@@ -572,8 +611,9 @@ fn count_inliers(
     target_points: &[DVec2],
     transform: &Transform,
     threshold_sq: f64,
-) -> (Vec<usize>, f64) {
-    simd::count_inliers_simd(ref_points, target_points, transform, threshold_sq)
+    inliers: &mut Vec<usize>,
+) -> f64 {
+    simd::count_inliers_simd(ref_points, target_points, transform, threshold_sq, inliers)
 }
 
 /// Compute adaptive iteration count for early termination.
