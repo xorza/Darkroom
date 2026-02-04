@@ -637,52 +637,6 @@ fn test_pipeline_affine_transform() {
     );
 }
 
-#[test]
-fn test_downsample_image() {
-    // Create a simple 4x4 image
-    let image = vec![
-        1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0,
-    ];
-
-    let downsampled = super::downsample_image(&image, 4, 4, 2, 2);
-
-    // Each 2x2 block should average to its center value
-    assert_eq!(downsampled.len(), 4);
-
-    // Top-left 2x2: (1+2+5+6)/4 = 3.5
-    assert!((downsampled[0] - 3.5).abs() < 0.01);
-    // Top-right 2x2: (3+4+7+8)/4 = 5.5
-    assert!((downsampled[1] - 5.5).abs() < 0.01);
-    // Bottom-left 2x2: (9+10+13+14)/4 = 11.5
-    assert!((downsampled[2] - 11.5).abs() < 0.01);
-    // Bottom-right 2x2: (11+12+15+16)/4 = 13.5
-    assert!((downsampled[3] - 13.5).abs() < 0.01);
-}
-
-#[test]
-fn test_build_pyramid() {
-    let image = vec![0.5f32; 256 * 256];
-    let pyramid = super::build_pyramid(&image, 256, 256, 3, 2.0);
-
-    assert_eq!(pyramid.len(), 3);
-    assert_eq!(pyramid[0].1, 256); // Level 0: full resolution
-    assert_eq!(pyramid[0].2, 256);
-    assert_eq!(pyramid[1].1, 128); // Level 1: half resolution
-    assert_eq!(pyramid[1].2, 128);
-    assert_eq!(pyramid[2].1, 64); // Level 2: quarter resolution
-    assert_eq!(pyramid[2].2, 64);
-}
-
-#[test]
-fn test_scale_transform() {
-    let transform = Transform::translation(DVec2::new(10.0, 20.0));
-    let scaled = super::scale_transform(&transform, 2.0);
-
-    let t = scaled.translation_components();
-    assert!((t.x - 20.0).abs() < 0.01);
-    assert!((t.y - 40.0).abs() < 0.01);
-}
-
 // ============================================================================
 // Integration Tests - Full Pipeline with Synthetic Astronomical Data
 // ============================================================================

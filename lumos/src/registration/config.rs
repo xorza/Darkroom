@@ -84,67 +84,6 @@ impl Default for WarpConfig {
 }
 
 // =============================================================================
-// Phase correlation configuration
-// =============================================================================
-
-/// Sub-pixel interpolation method.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum SubpixelMethod {
-    /// No sub-pixel refinement.
-    None,
-    /// Parabolic fit (fast, ~0.1 pixel accuracy).
-    Parabolic,
-    /// Gaussian fit (slower, ~0.05 pixel accuracy).
-    #[default]
-    Gaussian,
-    /// Centroid (robust to noise).
-    Centroid,
-}
-
-/// Configuration for phase correlation.
-#[derive(Debug, Clone)]
-pub struct PhaseCorrelationConfig {
-    /// Apply Hann window to reduce edge effects.
-    pub use_windowing: bool,
-    /// Sub-pixel interpolation method.
-    pub subpixel_method: SubpixelMethod,
-    /// Minimum correlation peak value to accept.
-    pub min_peak_value: f32,
-    /// Maximum iterations for iterative refinement (0 = disabled).
-    pub max_iterations: usize,
-    /// Convergence threshold for iterative refinement (pixels).
-    pub convergence_threshold: f64,
-}
-
-impl Default for PhaseCorrelationConfig {
-    fn default() -> Self {
-        Self {
-            use_windowing: true,
-            subpixel_method: SubpixelMethod::default(),
-            min_peak_value: 0.1,
-            max_iterations: 0, // Disabled by default for backwards compatibility
-            convergence_threshold: 0.01,
-        }
-    }
-}
-
-impl PhaseCorrelationConfig {
-    /// Validate configuration parameters.
-    pub fn validate(&self) {
-        assert!(
-            self.min_peak_value >= 0.0,
-            "min_peak_value must be non-negative, got {}",
-            self.min_peak_value
-        );
-        assert!(
-            self.convergence_threshold > 0.0,
-            "convergence_threshold must be positive, got {}",
-            self.convergence_threshold
-        );
-    }
-}
-
-// =============================================================================
 // RANSAC configuration
 // =============================================================================
 
@@ -325,55 +264,6 @@ impl TriangleMatchConfig {
 }
 
 // =============================================================================
-// Multi-scale configuration
-// =============================================================================
-
-/// Multi-scale registration configuration.
-#[derive(Debug, Clone)]
-pub struct MultiScaleConfig {
-    /// Number of pyramid levels (1 = no pyramid, just full resolution)
-    pub levels: usize,
-    /// Scale factor between levels (typically 2.0 for half-resolution each level)
-    pub scale_factor: f64,
-    /// Minimum image dimension at coarsest level
-    pub min_dimension: usize,
-    /// Whether to use phase correlation at coarse levels
-    pub use_phase_correlation: bool,
-}
-
-impl Default for MultiScaleConfig {
-    fn default() -> Self {
-        Self {
-            levels: 3,
-            scale_factor: 2.0,
-            min_dimension: 128,
-            use_phase_correlation: true,
-        }
-    }
-}
-
-impl MultiScaleConfig {
-    /// Validate configuration parameters.
-    pub fn validate(&self) {
-        assert!(
-            self.levels >= 1,
-            "MultiScale levels must be at least 1, got {}",
-            self.levels
-        );
-        assert!(
-            self.scale_factor > 1.0,
-            "MultiScale scale_factor must be > 1.0, got {}",
-            self.scale_factor
-        );
-        assert!(
-            self.min_dimension >= 2,
-            "MultiScale min_dimension must be at least 2, got {}",
-            self.min_dimension
-        );
-    }
-}
-
-// =============================================================================
 // Registration pipeline configuration
 // =============================================================================
 
@@ -456,8 +346,6 @@ pub struct RegistrationConfig {
     pub triangle: TriangleMatchConfig,
     /// RANSAC robust estimation configuration.
     pub ransac: RansacConfig,
-    /// Phase correlation configuration.
-    pub phase_correlation: PhaseCorrelationConfig,
     /// Image warping configuration.
     pub warp: WarpConfig,
     /// SIP distortion correction (post-RANSAC polynomial refinement).
@@ -475,7 +363,6 @@ impl Default for RegistrationConfig {
             spatial_grid_size: 8,
             triangle: TriangleMatchConfig::default(),
             ransac: RansacConfig::default(),
-            phase_correlation: PhaseCorrelationConfig::default(),
             warp: WarpConfig::default(),
             sip: SipCorrectionConfig::default(),
         }
@@ -509,7 +396,6 @@ impl RegistrationConfig {
         // Delegate to sub-config validation
         self.triangle.validate();
         self.ransac.validate();
-        self.phase_correlation.validate();
         self.warp.validate();
         self.sip.validate();
     }
@@ -574,50 +460,12 @@ mod tests {
     }
 
     #[test]
-    fn test_multiscale_config_default() {
-        let config = MultiScaleConfig::default();
-        assert_eq!(config.levels, 3);
-        assert!((config.scale_factor - 2.0).abs() < 1e-10);
-        assert_eq!(config.min_dimension, 128);
-        assert!(config.use_phase_correlation);
-        config.validate();
-    }
-
-    #[test]
-    #[should_panic(expected = "MultiScale scale_factor must be > 1.0")]
-    fn test_multiscale_config_invalid_scale() {
-        let config = MultiScaleConfig {
-            scale_factor: 0.5,
-            ..MultiScaleConfig::default()
-        };
-        config.validate();
-    }
-
-    #[test]
     fn test_warp_config_default() {
         let config = WarpConfig::default();
         assert_eq!(config.method, InterpolationMethod::Lanczos3);
         assert!((config.border_value - 0.0).abs() < 1e-10);
         assert!(config.normalize_kernel);
         assert!(!config.clamp_output);
-        config.validate();
-    }
-
-    #[test]
-    fn test_phase_correlation_config_default() {
-        let config = PhaseCorrelationConfig::default();
-        assert!(config.use_windowing);
-        assert_eq!(config.subpixel_method, SubpixelMethod::Gaussian);
-        config.validate();
-    }
-
-    #[test]
-    #[should_panic(expected = "min_peak_value must be non-negative")]
-    fn test_phase_correlation_config_invalid() {
-        let config = PhaseCorrelationConfig {
-            min_peak_value: -1.0,
-            ..PhaseCorrelationConfig::default()
-        };
         config.validate();
     }
 

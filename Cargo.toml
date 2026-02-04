@@ -87,7 +87,6 @@ bzip2 = { version = "*" }
 dirs = { version = "*" }
 tempfile = { version = "*" }
 rand_chacha = { version = "*" }
-rustfft = { version = "*" }
 nalgebra = { version = "*" }
 ureq = { version = "*" }
 
@@ -135,6 +134,4 @@ opt-level = 3
 [profile.dev.package.rav1e]
 opt-level = 3
 [profile.dev.package.nalgebra]
-opt-level = 3
-[profile.dev.package.rustfft]
 opt-level = 3

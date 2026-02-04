@@ -93,16 +93,8 @@ pub use registration::{
     DistortionMap,
     FieldCurvature,
     FieldCurvatureConfig,
-    FullPhaseCorrelator,
-    FullPhaseResult,
     // Interpolation
     InterpolationMethod,
-    LogPolarCorrelator,
-    LogPolarResult,
-    MultiScaleConfig,
-    PhaseCorrelationConfig,
-    // Phase correlation
-    PhaseCorrelator,
     PixelSkyMatch,
     PlateSolution,
     PlateSolver,

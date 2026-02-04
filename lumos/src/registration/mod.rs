@@ -63,7 +63,6 @@ pub(crate) mod astrometry;
 pub(crate) mod config;
 pub(crate) mod distortion;
 pub(crate) mod interpolation;
-pub(crate) mod phase_correlation;
 pub(crate) mod pipeline;
 pub(crate) mod quality;
 pub(crate) mod ransac;
@@ -76,8 +75,8 @@ mod tests;
 
 // Re-export all configuration types from the consolidated config module
 pub use config::{
-    InterpolationMethod, MultiScaleConfig, PhaseCorrelationConfig, RansacConfig,
-    RegistrationConfig, SipCorrectionConfig, SubpixelMethod, TriangleMatchConfig, WarpConfig,
+    InterpolationMethod, RansacConfig, RegistrationConfig, SipCorrectionConfig,
+    TriangleMatchConfig, WarpConfig,
 };
 
 // High-level pipeline API (primary entry point)
@@ -99,11 +98,6 @@ pub use distortion::{
 
 // Interpolation (non-config types)
 pub use interpolation::warp_image;
-
-// Phase correlation (non-config types)
-pub use phase_correlation::{
-    FullPhaseCorrelator, FullPhaseResult, LogPolarCorrelator, LogPolarResult, PhaseCorrelator,
-};
 
 // RANSAC (non-config types)
 pub use ransac::{RansacEstimator, RansacResult};

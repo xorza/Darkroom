@@ -45,8 +45,6 @@ pub enum RegistrationError {
     },
     /// Registration accuracy too low.
     AccuracyTooLow { rms_error: f64, max_allowed: f64 },
-    /// Images have incompatible dimensions.
-    DimensionMismatch,
     /// Star detection failed.
     StarDetection(String),
 }
@@ -84,9 +82,6 @@ impl std::fmt::Display for RegistrationError {
                     "Registration accuracy too low: {:.3} pixels (max: {:.3})",
                     rms_error, max_allowed
                 )
-            }
-            RegistrationError::DimensionMismatch => {
-                write!(f, "Images have incompatible dimensions")
             }
             RegistrationError::StarDetection(msg) => {
                 write!(f, "Star detection failed: {}", msg)
