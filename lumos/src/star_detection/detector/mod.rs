@@ -142,7 +142,8 @@ impl StarDetector {
             stages::background::estimate_background(&grayscale_image, &self.config, pool);
 
         // Step 2: Determine effective FWHM (manual > auto-estimate > disabled)
-        let effective_fwhm = self.determine_effective_fwhm(&grayscale_image, &background);
+        let effective_fwhm =
+            stages::fwhm::estimate_fwhm(&grayscale_image, &background, &self.config, pool);
 
         // Step 3: Detect star candidates (with optional matched filter)
         let candidates = {
@@ -240,56 +241,6 @@ impl StarDetector {
         }
 
         StarDetectionResult { stars, diagnostics }
-    }
-
-    /// Determine effective FWHM for matched filtering.
-    fn determine_effective_fwhm(
-        &mut self,
-        pixels: &Buffer2<f32>,
-        background: &ImageStats,
-    ) -> fwhm_estimation::EffectiveFwhm {
-        if self.config.expected_fwhm > f32::EPSILON {
-            return fwhm_estimation::EffectiveFwhm::Manual(self.config.expected_fwhm);
-        }
-
-        if self.config.auto_estimate_fwhm {
-            let estimate = self.estimate_fwhm_from_bright_stars(pixels, background);
-            return fwhm_estimation::EffectiveFwhm::Estimated(estimate);
-        }
-
-        fwhm_estimation::EffectiveFwhm::Disabled
-    }
-
-    /// Perform first-pass detection and estimate FWHM from bright stars.
-    fn estimate_fwhm_from_bright_stars(
-        &mut self,
-        pixels: &Buffer2<f32>,
-        background: &ImageStats,
-    ) -> fwhm_estimation::FwhmEstimate {
-        let first_pass_config = Config {
-            sigma_threshold: self.config.sigma_threshold * self.config.fwhm_estimation_sigma_factor,
-            expected_fwhm: 0.0,
-            min_area: 3,
-            min_snr: self.config.min_snr * 2.0,
-            ..self.config.clone()
-        };
-
-        let pool = self.buffer_pool.as_mut().unwrap();
-        let candidates = detect_stars(pixels, None, background, &first_pass_config, pool);
-        tracing::debug!(
-            "FWHM estimation: first pass detected {} bright star candidates",
-            candidates.len()
-        );
-
-        let stars = compute_centroids(candidates, pixels, background, &first_pass_config);
-
-        fwhm_estimation::estimate_fwhm(
-            &stars,
-            self.config.min_stars_for_fwhm,
-            4.0,
-            self.config.max_eccentricity,
-            self.config.max_sharpness,
-        )
     }
 }
 
