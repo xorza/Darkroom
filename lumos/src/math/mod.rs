@@ -19,7 +19,7 @@ pub mod fast_exp;
 pub mod fast_pow;
 pub mod statistics;
 pub mod sum;
-mod vec2;
+mod vec2us;
 
 // Keep scalar module at top level for backwards compatibility
 pub mod scalar {
@@ -33,7 +33,7 @@ pub mod scalar {
 
 pub use bbox::Aabb;
 pub use dmat3::DMat3;
-pub use vec2::Vec2us;
+pub use vec2us::Vec2us;
 
 // Re-export commonly used functions at top level for convenience
 pub use deviation::abs_deviation_inplace;
