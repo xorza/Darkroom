@@ -7,20 +7,6 @@ use super::*;
 use crate::common::BitBuffer2;
 use crate::star_detection::config::Connectivity;
 
-/// Create a label map from pre-computed labels (for testing).
-pub(crate) fn label_map_from_raw(labels: Buffer2<u32>, num_labels: usize) -> LabelMap {
-    LabelMap { labels, num_labels }
-}
-
-/// Create a label map from a mask with specified connectivity (allocates buffer).
-pub(crate) fn label_map_from_mask_with_connectivity(
-    mask: &BitBuffer2,
-    connectivity: Connectivity,
-) -> LabelMap {
-    let labels = Buffer2::new_filled(mask.width(), mask.height(), 0u32);
-    LabelMap::from_buffer(mask, connectivity, labels)
-}
-
 #[test]
 fn empty_mask() {
     let mask = BitBuffer2::from_slice(4, 4, &[false; 16]);

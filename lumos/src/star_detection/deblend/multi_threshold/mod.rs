@@ -14,7 +14,7 @@ use smallvec::SmallVec;
 use super::{ComponentData, DeblendedCandidate, MAX_PEAKS, Pixel};
 use crate::common::Buffer2;
 use crate::math::{Aabb, Vec2us};
-use crate::star_detection::candidate_detection::LabelMap;
+use crate::star_detection::labeling::LabelMap;
 
 #[cfg(test)]
 mod tests;

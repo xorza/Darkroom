@@ -25,7 +25,6 @@
 
 pub(crate) mod background;
 mod buffer_pool;
-pub(crate) mod candidate_detection;
 mod centroid;
 pub mod config;
 mod convolution;
@@ -33,8 +32,8 @@ mod cosmic_ray;
 mod deblend;
 mod defect_map;
 mod detector;
-mod fwhm_estimation;
 pub mod image_stats;
+pub(crate) mod labeling;
 mod mask_dilation;
 mod median_filter;
 mod region;
