@@ -92,26 +92,19 @@ The astroalign formulation spreads out the invariant space more uniformly. With 
 
 #### 4. RANSAC integration into the triangle module (or clarify pipeline boundary)
 
-**Current**: Triangle module does voting + greedy resolution + optional two-step refinement. Then the pipeline feeds results to a separate RANSAC module.
+**Current**: Triangle module does voting + greedy resolution. Then the pipeline feeds results to a separate RANSAC module.
 
 **Astroalign**: RANSAC is integral to the matching — each triangle match proposes a transform, immediately verified against other matches.
 
 **Tabur OPM**: Similar — each candidate is immediately tested, accepted if it maps most stars correctly.
 
-The current two-step approach (voting then RANSAC) is actually a reasonable design for a pipeline architecture where triangle matching and RANSAC are separate concerns. The two-step refinement in the triangle module partially fills the role that RANSAC plays in astroalign.
+The current approach (voting then RANSAC) is a reasonable design for a pipeline architecture where triangle matching and RANSAC are separate concerns.
 
-**Verdict**: Current architecture is fine. The two-step refinement + downstream RANSAC gives two layers of outlier rejection which is robust. No change needed.
+**Verdict**: Current architecture is fine. Downstream RANSAC handles outlier rejection and transform estimation. No change needed.
 
-#### 5. Remove two-step refinement (simplification)
+#### 5. ~~Remove two-step refinement (simplification)~~
 
-The two-step refinement in matching.rs is complex (~80 lines) and overlaps with the downstream RANSAC stage:
-- Phase 1: voting with normal tolerance
-- Phase 2: estimate transform from initial matches, re-vote with 0.5x tolerance and position-proximity bonus
-- Fallback: if refined count < initial count, keep initial
-
-Since the downstream RANSAC already handles outlier rejection and transform estimation, the two-step refinement is doing redundant work. The benefit is marginal: it may produce slightly better matches before RANSAC, but RANSAC is specifically designed to handle noisy initial matches.
-
-**Verdict**: Consider removing. Simplifies the triangle module significantly. Would need benchmarking on real data to confirm no regression. The two-step code can always be re-added if needed. At minimum, make it default-off if keeping it.
+**Done.** Two-step refinement removed. The downstream RANSAC handles outlier rejection, making the in-module refinement redundant.
 
 #### 6. Tabur-style ordered search (optimization)
 
@@ -146,7 +139,7 @@ Changed sparse `HashMap` value type from `usize` (8 bytes) to `u32` (4 bytes). C
 - **Sparse VoteMatrix u32 values** — `u32` instead of `usize` for sparse HashMap values.
 - **Eliminated `into_hashmap()` conversion** — `resolve_matches` takes `VoteMatrix` directly via `iter_nonzero()`.
 - **Added `#[derive(Debug)]` to VoteMatrix** — Per project coding rules.
-- **Fixed doc comments** — `two_step_matching` config comment now matches actual behavior.
+- **Removed two-step refinement** — Redundant with downstream RANSAC. Simplified matching to single-pass voting.
 
 ### Rejected
 
@@ -154,8 +147,7 @@ Changed sparse `HashMap` value type from `usize` (8 bytes) to `u32` (4 bytes). C
 
 ### Remaining suggestions
 
-1. **Consider removing two-step refinement** — Overlaps with downstream RANSAC. Benchmark first.
-2. **Tabur-style ordered search** — Process rare triangles first. Only matters for large point sets.
+1. **Tabur-style ordered search** — Process rare triangles first. Only matters for large point sets.
 
 ## References
 

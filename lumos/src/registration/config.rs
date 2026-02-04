@@ -215,11 +215,6 @@ pub struct TriangleMatchConfig {
     pub min_votes: usize,
     /// Check orientation (set false to handle mirrored images).
     pub check_orientation: bool,
-    /// Enable two-step matching with transform-guided refinement.
-    /// Phase 1 uses normal tolerance for initial matches.
-    /// Phase 2 estimates a transform, then re-votes with 0.5x tolerance
-    /// and position-proximity bonus for matches consistent with the transform.
-    pub two_step_matching: bool,
 }
 
 impl Default for TriangleMatchConfig {
@@ -229,7 +224,6 @@ impl Default for TriangleMatchConfig {
             ratio_tolerance: 0.01,
             min_votes: 3,
             check_orientation: true,
-            two_step_matching: true,
         }
     }
 }

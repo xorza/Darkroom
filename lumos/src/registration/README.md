@@ -399,7 +399,6 @@ registration/
 | `ratio_tolerance` | 0.01 | Side ratio matching tolerance (1%) |
 | `min_votes` | 3 | Minimum votes to accept a star match |
 | `check_orientation` | true | Reject mirrored triangle matches |
-| `two_step_matching` | true | Two-phase rough-then-fine matching |
 
 ### RansacConfig
 
@@ -446,9 +445,9 @@ registration/
 
 Prioritized by impact. Items marked with **[BUG]** are defects in existing code.
 
-### ~~1. [BUG] Two-Step Matching Not Wired Up in Production~~ (Fixed)
+### ~~1. [BUG] Two-Step Matching Not Wired Up in Production~~ (Removed)
 
-Fixed: `match_triangles()` now calls `two_step_refine_matches()` when `config.two_step_matching` is true, matching the brute-force path behavior.
+Two-step refinement removed entirely. The downstream RANSAC handles outlier rejection, making in-module refinement redundant.
 
 ### ~~2. Transform Plausibility Checks in RANSAC~~ (Fixed)
 
