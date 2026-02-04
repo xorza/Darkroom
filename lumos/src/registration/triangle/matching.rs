@@ -1,7 +1,7 @@
 use glam::DVec2;
 
 use crate::registration::config::TriangleMatchConfig;
-use crate::registration::spatial::{KdTree, form_triangles_from_neighbors};
+use crate::registration::spatial::KdTree;
 
 use super::geometry::Triangle;
 use super::voting::{PointMatch, build_invariant_tree, resolve_matches, vote_for_correspondences};
@@ -82,4 +82,52 @@ pub fn match_triangles(
         n_target,
     );
     resolve_matches(vote_matrix, n_ref, n_target, config.min_votes)
+}
+
+/// Form triangles using k-nearest neighbors from a k-d tree.
+///
+/// This is much more efficient than the brute-force O(n^3) approach,
+/// reducing complexity to approximately O(n * k^2) where k is the
+/// number of neighbors considered for each star.
+///
+/// # Arguments
+/// * `tree` - K-d tree of star positions
+/// * `k` - Number of nearest neighbors to consider for each star
+///
+/// # Returns
+/// Vector of triangle vertex indices [i, j, k] where i < j < k
+pub(crate) fn form_triangles_from_neighbors(tree: &KdTree, k: usize) -> Vec<[usize; 3]> {
+    use std::collections::HashSet;
+
+    let n = tree.len();
+    if n < 3 {
+        return Vec::new();
+    }
+
+    let k = k.min(n - 1);
+    let mut triangles = HashSet::new();
+
+    for i in 0..n {
+        let point_i = tree.get_point(i);
+        let neighbors = tree.k_nearest(point_i, k + 1); // +1 because point itself is included
+
+        // Form triangles from pairs of neighbors
+        for (ni, &(j, _)) in neighbors.iter().enumerate() {
+            if j == i {
+                continue;
+            }
+            for &(m, _) in neighbors.iter().skip(ni + 1) {
+                if m == i {
+                    continue;
+                }
+
+                // Normalize triangle indices to avoid duplicates
+                let mut tri = [i, j, m];
+                tri.sort();
+                triangles.insert(tri);
+            }
+        }
+    }
+
+    triangles.into_iter().collect()
 }

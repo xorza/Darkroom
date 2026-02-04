@@ -12,7 +12,6 @@
 //! 4. For each target triangle, find similar reference triangles by radius search
 //! 5. Vote for point correspondences based on shared vertices
 //! 6. Extract high-confidence matches from vote matrix
-//! 7. Optionally refine with transform-guided two-step matching
 
 mod geometry;
 mod matching;

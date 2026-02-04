@@ -10,32 +10,27 @@ mod tests;
 
 /// A 2D k-d tree for efficient spatial queries on star positions.
 ///
-/// This implementation is optimized for astronomical image registration where:
-/// - Points are 2D (x, y) coordinates
-/// - We need k-nearest-neighbor queries for triangle formation
-/// - The tree is built once and queried many times
+/// Uses a flat array layout where the tree structure is implicit in the
+/// permuted index array. Each level alternates split dimension (x, y).
+/// The median element of each range is the node; left/right children
+/// occupy the sub-ranges before/after the median.
+///
+/// This layout eliminates per-node child pointers, improves cache locality,
+/// and enables iterative construction.
 #[derive(Debug)]
 pub(crate) struct KdTree {
-    nodes: Vec<KdNode>,
+    /// Permuted point indices forming the implicit tree structure.
+    /// For a range [start, end), the node is at index `mid = (start + end) / 2`.
+    /// Left subtree is [start, mid), right subtree is [mid+1, end).
+    indices: Vec<usize>,
     points: Vec<DVec2>,
-}
-
-#[derive(Debug, Clone)]
-struct KdNode {
-    /// Index into the points array
-    point_idx: usize,
-    /// Left child index (None if leaf)
-    left: Option<usize>,
-    /// Right child index (None if leaf)
-    right: Option<usize>,
-    /// Split dimension (0 = x, 1 = y)
-    split_dim: usize,
 }
 
 impl KdTree {
     /// Build a k-d tree from a list of points.
     ///
-    /// The tree is built using the median-split strategy for balanced trees.
+    /// Uses iterative median-split construction with `select_nth_unstable`
+    /// for O(n log n) partitioning without full sorting.
     ///
     /// # Arguments
     /// * `points` - List of point coordinates
@@ -49,66 +44,50 @@ impl KdTree {
 
         let points_vec: Vec<DVec2> = points.to_vec();
         let mut indices: Vec<usize> = (0..points.len()).collect();
-        let mut nodes = Vec::with_capacity(points.len());
 
-        Self::build_recursive(&points_vec, &mut indices, 0, &mut nodes);
+        // Iterative construction using an explicit work stack.
+        // Each work item is (start, end, depth) defining a range in `indices`.
+        let mut stack: Vec<(usize, usize, usize)> = Vec::new();
+        stack.push((0, indices.len(), 0));
 
-        Some(Self {
-            nodes,
-            points: points_vec,
-        })
-    }
+        while let Some((start, end, depth)) = stack.pop() {
+            let len = end - start;
+            if len <= 1 {
+                continue;
+            }
 
-    /// Recursively build the tree.
-    fn build_recursive(
-        points: &[DVec2],
-        indices: &mut [usize],
-        depth: usize,
-        nodes: &mut Vec<KdNode>,
-    ) -> Option<usize> {
-        if indices.is_empty() {
-            return None;
+            let split_dim = depth % 2;
+            let median = len / 2;
+
+            // Partition around the median — O(n) per level instead of O(n log n) sort.
+            indices[start..end].select_nth_unstable_by(median, |&a, &b| {
+                let va = if split_dim == 0 {
+                    points_vec[a].x
+                } else {
+                    points_vec[a].y
+                };
+                let vb = if split_dim == 0 {
+                    points_vec[b].x
+                } else {
+                    points_vec[b].y
+                };
+                va.partial_cmp(&vb).unwrap()
+            });
+
+            let mid = start + median;
+            // Push right first so left is processed first (stack is LIFO)
+            if mid + 1 < end {
+                stack.push((mid + 1, end, depth + 1));
+            }
+            if start < mid {
+                stack.push((start, mid, depth + 1));
+            }
         }
 
-        let split_dim = depth % 2;
-
-        // Sort indices by the split dimension
-        indices.sort_by(|&a, &b| {
-            let va = if split_dim == 0 {
-                points[a].x
-            } else {
-                points[a].y
-            };
-            let vb = if split_dim == 0 {
-                points[b].x
-            } else {
-                points[b].y
-            };
-            va.partial_cmp(&vb).unwrap()
-        });
-
-        let median = indices.len() / 2;
-        let point_idx = indices[median];
-
-        let node_idx = nodes.len();
-        nodes.push(KdNode {
-            point_idx,
-            left: None,
-            right: None,
-            split_dim,
-        });
-
-        // Build left and right subtrees
-        let (left_indices, right_part) = indices.split_at_mut(median);
-        let right_indices = &mut right_part[1..]; // Skip the median
-
-        let left = Self::build_recursive(points, left_indices, depth + 1, nodes);
-        let right = Self::build_recursive(points, right_indices, depth + 1, nodes);
-
-        nodes[node_idx].left = left;
-        nodes[node_idx].right = right;
-
-        Some(node_idx)
+        Some(Self {
+            indices,
+            points: points_vec,
+        })
     }
 
     /// Find the k nearest neighbors to a query point.
@@ -120,72 +99,57 @@ impl KdTree {
     /// # Returns
     /// Vector of (index, distance_squared) pairs, sorted by distance
     pub fn k_nearest(&self, query: DVec2, k: usize) -> Vec<(usize, f64)> {
-        if self.nodes.is_empty() || k == 0 {
+        if self.indices.is_empty() || k == 0 {
             return Vec::new();
         }
 
         let mut heap = BoundedMaxHeap::new(k);
-        self.k_nearest_recursive(0, query, &mut heap);
+        self.k_nearest_range(0, self.indices.len(), 0, query, &mut heap);
 
         let mut result: Vec<(usize, f64)> = heap.into_vec();
         result.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
         result
     }
 
-    /// Recursive k-nearest neighbor search.
-    fn k_nearest_recursive(&self, node_idx: usize, query: DVec2, heap: &mut BoundedMaxHeap) {
-        let node = &self.nodes[node_idx];
-        let point = self.points[node.point_idx];
+    /// K-nearest neighbor search over a range of the implicit tree.
+    fn k_nearest_range(
+        &self,
+        start: usize,
+        end: usize,
+        depth: usize,
+        query: DVec2,
+        heap: &mut BoundedMaxHeap,
+    ) {
+        if start >= end {
+            return;
+        }
 
-        // Calculate distance to current point
+        let mid = start + (end - start) / 2;
+        let point_idx = self.indices[mid];
+        let point = self.points[point_idx];
+
         let dist_sq = (query - point).length_squared();
-        heap.push(node.point_idx, dist_sq);
+        heap.push(point_idx, dist_sq);
 
-        // Determine which subtree to search first
-        let split_dim = node.split_dim;
+        let split_dim = depth % 2;
         let query_val = if split_dim == 0 { query.x } else { query.y };
         let point_val = if split_dim == 0 { point.x } else { point.y };
         let diff = query_val - point_val;
 
-        let (first, second) = if diff < 0.0 {
-            (node.left, node.right)
+        // Search the nearer subtree first
+        let (first_start, first_end, second_start, second_end) = if diff < 0.0 {
+            (start, mid, mid + 1, end)
         } else {
-            (node.right, node.left)
+            (mid + 1, end, start, mid)
         };
 
-        // Search the nearer subtree first
-        if let Some(first_idx) = first {
-            self.k_nearest_recursive(first_idx, query, heap);
-        }
+        self.k_nearest_range(first_start, first_end, depth + 1, query, heap);
 
         // Only search the other subtree if it could contain closer points
         let diff_sq = diff * diff;
-        if let Some(second_idx) = second
-            && (!heap.is_full() || diff_sq < heap.max_distance())
-        {
-            self.k_nearest_recursive(second_idx, query, heap);
+        if !heap.is_full() || diff_sq < heap.max_distance() {
+            self.k_nearest_range(second_start, second_end, depth + 1, query, heap);
         }
-    }
-
-    /// Find all points within a given radius.
-    ///
-    /// # Arguments
-    /// * `query` - The query point
-    /// * `radius` - Search radius
-    ///
-    /// # Returns
-    /// Vector of (index, distance_squared) pairs for all points within radius
-    #[cfg(test)]
-    pub fn radius_search(&self, query: DVec2, radius: f64) -> Vec<(usize, f64)> {
-        if self.nodes.is_empty() {
-            return Vec::new();
-        }
-
-        let radius_sq = radius * radius;
-        let mut results = Vec::new();
-        self.radius_search_recursive(0, query, radius_sq, &mut results);
-        results.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
-        results
     }
 
     /// Find all point indices within a given radius, appending to a buffer.
@@ -194,96 +158,54 @@ impl KdTree {
     /// called repeatedly in a loop.
     pub fn radius_indices_into(&self, query: DVec2, radius: f64, indices: &mut Vec<usize>) {
         indices.clear();
-        if self.nodes.is_empty() {
+        if self.indices.is_empty() {
             return;
         }
         let radius_sq = radius * radius;
-        self.radius_indices_recursive(0, query, radius_sq, indices);
+        self.radius_indices_range(0, self.indices.len(), 0, query, radius_sq, indices);
     }
 
-    /// Recursive radius search collecting only indices.
-    fn radius_indices_recursive(
+    /// Radius search collecting only indices over a range of the implicit tree.
+    fn radius_indices_range(
         &self,
-        node_idx: usize,
+        start: usize,
+        end: usize,
+        depth: usize,
         query: DVec2,
         radius_sq: f64,
         results: &mut Vec<usize>,
     ) {
-        let node = &self.nodes[node_idx];
-        let point = self.points[node.point_idx];
+        if start >= end {
+            return;
+        }
+
+        let mid = start + (end - start) / 2;
+        let point_idx = self.indices[mid];
+        let point = self.points[point_idx];
 
         let dist_sq = (query - point).length_squared();
         if dist_sq <= radius_sq {
-            results.push(node.point_idx);
+            results.push(point_idx);
         }
 
-        let split_dim = node.split_dim;
+        let split_dim = depth % 2;
         let query_val = if split_dim == 0 { query.x } else { query.y };
         let point_val = if split_dim == 0 { point.x } else { point.y };
         let diff = query_val - point_val;
         let diff_sq = diff * diff;
 
-        if let Some(left_idx) = node.left
-            && (diff <= 0.0 || diff_sq <= radius_sq)
-        {
-            self.radius_indices_recursive(left_idx, query, radius_sq, results);
+        if diff <= 0.0 || diff_sq <= radius_sq {
+            self.radius_indices_range(start, mid, depth + 1, query, radius_sq, results);
         }
 
-        if let Some(right_idx) = node.right
-            && (diff >= 0.0 || diff_sq <= radius_sq)
-        {
-            self.radius_indices_recursive(right_idx, query, radius_sq, results);
-        }
-    }
-
-    /// Recursive radius search.
-    #[cfg(test)]
-    fn radius_search_recursive(
-        &self,
-        node_idx: usize,
-        query: DVec2,
-        radius_sq: f64,
-        results: &mut Vec<(usize, f64)>,
-    ) {
-        let node = &self.nodes[node_idx];
-        let point = self.points[node.point_idx];
-
-        // Check if current point is within radius
-        let dist_sq = (query - point).length_squared();
-        if dist_sq <= radius_sq {
-            results.push((node.point_idx, dist_sq));
-        }
-
-        // Determine which subtrees to search
-        let split_dim = node.split_dim;
-        let query_val = if split_dim == 0 { query.x } else { query.y };
-        let point_val = if split_dim == 0 { point.x } else { point.y };
-        let diff = query_val - point_val;
-        let diff_sq = diff * diff;
-
-        // Search subtrees that could contain points within radius
-        if let Some(left_idx) = node.left
-            && (diff <= 0.0 || diff_sq <= radius_sq)
-        {
-            self.radius_search_recursive(left_idx, query, radius_sq, results);
-        }
-
-        if let Some(right_idx) = node.right
-            && (diff >= 0.0 || diff_sq <= radius_sq)
-        {
-            self.radius_search_recursive(right_idx, query, radius_sq, results);
+        if diff >= 0.0 || diff_sq <= radius_sq {
+            self.radius_indices_range(mid + 1, end, depth + 1, query, radius_sq, results);
         }
     }
 
     /// Get the number of points in the tree.
     pub fn len(&self) -> usize {
         self.points.len()
-    }
-
-    /// Check if the tree is empty.
-    #[allow(dead_code)]
-    pub fn is_empty(&self) -> bool {
-        self.points.is_empty()
     }
 
     /// Get a point by index.
@@ -299,10 +221,10 @@ const SMALL_HEAP_CAPACITY: usize = 32;
 /// A bounded max-heap for k-nearest neighbor search.
 ///
 /// Keeps track of the k smallest distances seen so far.
-/// Uses stack allocation for small k (≤32), heap allocation for larger k.
+/// Uses stack allocation for small k (<=32), heap allocation for larger k.
 ///
 /// The large size difference between variants is intentional - the Small variant
-/// avoids heap allocation for the common case of k ≤ 32.
+/// avoids heap allocation for the common case of k <= 32.
 #[derive(Debug)]
 #[allow(clippy::large_enum_variant)]
 enum BoundedMaxHeap {
@@ -431,52 +353,4 @@ impl BoundedMaxHeap {
             }
         }
     }
-}
-
-/// Form triangles using k-nearest neighbors from a k-d tree.
-///
-/// This is much more efficient than the brute-force O(n³) approach,
-/// reducing complexity to approximately O(n * k²) where k is the
-/// number of neighbors considered for each star.
-///
-/// # Arguments
-/// * `tree` - K-d tree of star positions
-/// * `k` - Number of nearest neighbors to consider for each star
-///
-/// # Returns
-/// Vector of triangle vertex indices [i, j, k] where i < j < k
-pub(crate) fn form_triangles_from_neighbors(tree: &KdTree, k: usize) -> Vec<[usize; 3]> {
-    use std::collections::HashSet;
-
-    let n = tree.len();
-    if n < 3 {
-        return Vec::new();
-    }
-
-    let k = k.min(n - 1);
-    let mut triangles = HashSet::new();
-
-    for i in 0..n {
-        let point_i = tree.get_point(i);
-        let neighbors = tree.k_nearest(point_i, k + 1); // +1 because point itself is included
-
-        // Form triangles from pairs of neighbors
-        for (ni, &(j, _)) in neighbors.iter().enumerate() {
-            if j == i {
-                continue;
-            }
-            for &(m, _) in neighbors.iter().skip(ni + 1) {
-                if m == i {
-                    continue;
-                }
-
-                // Normalize triangle indices to avoid duplicates
-                let mut tri = [i, j, m];
-                tri.sort();
-                triangles.insert(tri);
-            }
-        }
-    }
-
-    triangles.into_iter().collect()
 }

@@ -4,8 +4,9 @@ use glam::DVec2;
 
 use super::TriangleMatchConfig;
 use super::geometry::{Orientation, Triangle};
-use super::matching::{form_triangles_kdtree, match_triangles};
+use super::matching::{form_triangles_from_neighbors, form_triangles_kdtree, match_triangles};
 use super::voting::{VoteMatrix, build_invariant_tree, resolve_matches, vote_for_correspondences};
+use crate::registration::spatial::KdTree;
 
 /// Build a dense VoteMatrix from (ref_idx, target_idx, votes) entries.
 fn vote_matrix_from_entries(
@@ -1511,4 +1512,112 @@ fn test_vote_for_correspondences_orientation_filtering() {
         total_without >= total_with,
         "Disabling orientation check should produce >= votes: with={total_with}, without={total_without}"
     );
+}
+
+// ============================================================================
+// form_triangles_from_neighbors tests
+// ============================================================================
+
+#[test]
+fn test_form_triangles_from_neighbors_basic() {
+    let points = vec![
+        DVec2::new(0.0, 0.0),
+        DVec2::new(1.0, 0.0),
+        DVec2::new(0.5, 0.866), // Equilateral triangle
+    ];
+    let tree = KdTree::build(&points).unwrap();
+
+    let triangles = form_triangles_from_neighbors(&tree, 3);
+
+    assert_eq!(triangles.len(), 1);
+    assert_eq!(triangles[0], [0, 1, 2]);
+}
+
+#[test]
+fn test_form_triangles_from_neighbors_square() {
+    let points = vec![
+        DVec2::new(0.0, 0.0),
+        DVec2::new(1.0, 0.0),
+        DVec2::new(1.0, 1.0),
+        DVec2::new(0.0, 1.0),
+    ];
+    let tree = KdTree::build(&points).unwrap();
+
+    let triangles = form_triangles_from_neighbors(&tree, 3);
+
+    assert!(triangles.len() >= 4);
+
+    for tri in &triangles {
+        assert!(tri[0] < tri[1] && tri[1] < tri[2]);
+        assert!(tri[2] < 4);
+    }
+}
+
+#[test]
+fn test_form_triangles_from_neighbors_too_few_points() {
+    let points = vec![DVec2::new(0.0, 0.0), DVec2::new(1.0, 0.0)];
+    let tree = KdTree::build(&points).unwrap();
+
+    let triangles = form_triangles_from_neighbors(&tree, 3);
+    assert!(triangles.is_empty());
+}
+
+#[test]
+fn test_form_triangles_from_neighbors_no_duplicates() {
+    let points = vec![
+        DVec2::new(0.0, 0.0),
+        DVec2::new(1.0, 0.0),
+        DVec2::new(2.0, 0.0),
+        DVec2::new(0.0, 1.0),
+        DVec2::new(1.0, 1.0),
+        DVec2::new(2.0, 1.0),
+    ];
+    let tree = KdTree::build(&points).unwrap();
+
+    let triangles = form_triangles_from_neighbors(&tree, 5);
+
+    let mut sorted = triangles.clone();
+    sorted.sort();
+    sorted.dedup();
+    assert_eq!(sorted.len(), triangles.len(), "Found duplicate triangles");
+}
+
+#[test]
+fn test_form_triangles_scaling_vs_brute_force() {
+    let points = vec![
+        DVec2::new(0.0, 0.0),
+        DVec2::new(1.0, 0.0),
+        DVec2::new(2.0, 0.0),
+        DVec2::new(0.0, 1.0),
+        DVec2::new(1.0, 1.0),
+        DVec2::new(2.0, 1.0),
+    ];
+
+    let n = points.len();
+    let brute_force_count = n * (n - 1) * (n - 2) / 6;
+
+    let tree = KdTree::build(&points).unwrap();
+
+    let triangles = form_triangles_from_neighbors(&tree, n - 1);
+    assert_eq!(triangles.len(), brute_force_count);
+}
+
+#[test]
+fn test_form_triangles_sparse_neighbors() {
+    let mut points = Vec::new();
+    for y in 0..5 {
+        for x in 0..5 {
+            points.push(DVec2::new(x as f64 * 100.0, y as f64 * 100.0));
+        }
+    }
+
+    let tree = KdTree::build(&points).unwrap();
+
+    let triangles = form_triangles_from_neighbors(&tree, 2);
+
+    assert!(!triangles.is_empty());
+
+    for tri in &triangles {
+        assert!(tri[0] < tri[1] && tri[1] < tri[2]);
+    }
 }
