@@ -60,12 +60,11 @@ mod convolution;
 mod cosmic_ray;
 mod deblend;
 mod defect_map;
-mod detector;
+pub(crate) mod detector;
 pub(crate) mod labeling;
 mod mask_dilation;
 mod median_filter;
 mod region;
-pub(crate) mod stages;
 mod star;
 pub(crate) mod threshold_mask;
 

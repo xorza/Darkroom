@@ -9,7 +9,7 @@ use std::path::PathBuf;
 
 use crate::AstroImage;
 use crate::common::Buffer2;
-use crate::star_detection::stages;
+use crate::star_detection::detector::stages;
 use crate::star_detection::{BackgroundEstimate, BufferPool, Config};
 
 /// Convenience function to estimate background for tests.

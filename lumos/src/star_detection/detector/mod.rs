@@ -3,6 +3,8 @@
 //! This module contains the main [`StarDetector`] struct and its associated
 //! types for detecting stars in astronomical images.
 
+pub(crate) mod stages;
+
 #[cfg(test)]
 mod bench;
 #[cfg(test)]
@@ -16,7 +18,6 @@ use crate::astro_image::AstroImage;
 
 use super::buffer_pool::BufferPool;
 use super::config::Config;
-use super::stages;
 use super::star::Star;
 
 /// Result of star detection with diagnostics.

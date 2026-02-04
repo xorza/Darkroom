@@ -2,10 +2,10 @@
 
 use glam::DVec2;
 
-use crate::star_detection::Star;
-use crate::star_detection::stages::filter::{
+use super::stages::filter::{
     filter_fwhm_outliers, remove_duplicate_stars, remove_duplicate_stars_simple,
 };
+use crate::star_detection::Star;
 
 // =============================================================================
 // Helper Functions
