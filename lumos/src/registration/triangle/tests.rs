@@ -1,20 +1,6 @@
 //! Tests for triangle matching module.
-//!
-//! # Test Strategy
-//!
-//! This file contains tests for both triangle matching implementations:
-//!
-//! - **Brute-force tests** (`match_stars_triangles`): Validate the core algorithm
-//!   correctness with O(n³) exhaustive triangle enumeration. These are the reference
-//!   implementation tests.
-//!
-//! - **K-d tree tests** (`match_triangles`): Validate the production
-//!   implementation that uses spatial indexing for O(n·k²) complexity. These tests
-//!   ensure the optimized path produces correct results.
-//!
-//! Both implementations should produce equivalent results for most test cases,
-//! though the kdtree version may find slightly different (but equally valid) matches
-//! due to using different triangle subsets.
+
+use std::collections::HashMap;
 
 use super::*;
 use glam::DVec2;
@@ -175,12 +161,12 @@ fn test_hash_table_build() {
         DVec2::new(0.0, 10.0),
         DVec2::new(10.0, 10.0),
     ];
-    let triangles = form_triangles(&positions, 10);
+    let triangles = form_triangles_kdtree(&positions, 4);
 
-    assert_eq!(triangles.len(), 4); // C(4,3) = 4
+    assert!(!triangles.is_empty());
 
     let table = TriangleHashTable::build(&triangles, 100);
-    assert_eq!(table.len(), 4);
+    assert_eq!(table.len(), triangles.len());
 }
 
 #[test]
@@ -190,7 +176,8 @@ fn test_hash_table_lookup() {
         DVec2::new(3.0, 0.0),
         DVec2::new(0.0, 4.0),
     ];
-    let triangles = form_triangles(&positions, 10);
+    let triangles = form_triangles_kdtree(&positions, 3);
+    assert!(!triangles.is_empty());
     let table = TriangleHashTable::build(&triangles, 100);
 
     // Same triangle should find itself
@@ -205,163 +192,9 @@ fn test_hash_table_empty() {
 }
 
 #[test]
-fn test_match_identical_star_lists() {
-    let positions = vec![
-        DVec2::new(0.0, 0.0),
-        DVec2::new(10.0, 0.0),
-        DVec2::new(0.0, 10.0),
-        DVec2::new(10.0, 10.0),
-        DVec2::new(5.0, 5.0),
-    ];
-
-    let matches = match_stars_triangles(&positions, &positions, &TriangleMatchConfig::default());
-
-    // Should match all stars
-    assert_eq!(matches.len(), 5);
-
-    // Each star should match itself
-    for m in &matches {
-        assert_eq!(m.ref_idx, m.target_idx);
-    }
-}
-
-#[test]
-fn test_match_translated_stars() {
-    let ref_positions = vec![
-        DVec2::new(0.0, 0.0),
-        DVec2::new(10.0, 0.0),
-        DVec2::new(0.0, 10.0),
-        DVec2::new(10.0, 10.0),
-        DVec2::new(5.0, 5.0),
-    ];
-
-    // Translate by (100, 50)
-    let target_positions: Vec<DVec2> = ref_positions
-        .iter()
-        .map(|p| *p + DVec2::new(100.0, 50.0))
-        .collect();
-
-    let matches = match_stars_triangles(
-        &ref_positions,
-        &target_positions,
-        &TriangleMatchConfig::default(),
-    );
-
-    assert_eq!(matches.len(), 5);
-    for m in &matches {
-        assert_eq!(m.ref_idx, m.target_idx);
-    }
-}
-
-#[test]
-fn test_match_rotated_stars() {
-    let ref_positions = vec![
-        DVec2::new(0.0, 0.0),
-        DVec2::new(10.0, 0.0),
-        DVec2::new(0.0, 10.0),
-        DVec2::new(10.0, 10.0),
-        DVec2::new(5.0, 5.0),
-    ];
-
-    // Rotate by 90 degrees around origin
-    let target_positions: Vec<DVec2> = ref_positions
-        .iter()
-        .map(|p| DVec2::new(-p.y, p.x))
-        .collect();
-
-    let config = TriangleMatchConfig {
-        check_orientation: false, // Rotation changes orientation
-        ..Default::default()
-    };
-
-    let matches = match_stars_triangles(&ref_positions, &target_positions, &config);
-
-    assert_eq!(matches.len(), 5);
-}
-
-#[test]
-fn test_match_scaled_stars() {
-    let ref_positions = vec![
-        DVec2::new(0.0, 0.0),
-        DVec2::new(10.0, 0.0),
-        DVec2::new(0.0, 10.0),
-        DVec2::new(10.0, 10.0),
-        DVec2::new(5.0, 5.0),
-    ];
-
-    // Scale by 2x
-    let target_positions: Vec<DVec2> = ref_positions.iter().map(|p| *p * 2.0).collect();
-
-    let matches = match_stars_triangles(
-        &ref_positions,
-        &target_positions,
-        &TriangleMatchConfig::default(),
-    );
-
-    assert_eq!(matches.len(), 5);
-}
-
-#[test]
-fn test_match_with_missing_stars() {
-    let ref_positions = vec![
-        DVec2::new(0.0, 0.0),
-        DVec2::new(10.0, 0.0),
-        DVec2::new(0.0, 10.0),
-        DVec2::new(10.0, 10.0),
-        DVec2::new(5.0, 5.0),
-    ];
-
-    // Only 4 stars in target (missing one)
-    let target_positions = vec![
-        DVec2::new(0.0, 0.0),
-        DVec2::new(10.0, 0.0),
-        DVec2::new(0.0, 10.0),
-        DVec2::new(10.0, 10.0),
-    ];
-
-    let matches = match_stars_triangles(
-        &ref_positions,
-        &target_positions,
-        &TriangleMatchConfig::default(),
-    );
-
-    // Should match the 4 common stars
-    assert!(matches.len() >= 4);
-}
-
-#[test]
-fn test_match_with_extra_stars() {
-    let ref_positions = vec![
-        DVec2::new(0.0, 0.0),
-        DVec2::new(10.0, 0.0),
-        DVec2::new(0.0, 10.0),
-        DVec2::new(10.0, 10.0),
-    ];
-
-    // Target has extra stars
-    let target_positions = vec![
-        DVec2::new(0.0, 0.0),
-        DVec2::new(10.0, 0.0),
-        DVec2::new(0.0, 10.0),
-        DVec2::new(10.0, 10.0),
-        DVec2::new(5.0, 5.0),
-        DVec2::new(15.0, 15.0),
-    ];
-
-    let matches = match_stars_triangles(
-        &ref_positions,
-        &target_positions,
-        &TriangleMatchConfig::default(),
-    );
-
-    // Should match all 4 reference stars
-    assert_eq!(matches.len(), 4);
-}
-
-#[test]
 fn test_too_few_stars() {
     let positions = vec![DVec2::new(0.0, 0.0), DVec2::new(1.0, 0.0)];
-    let matches = match_stars_triangles(&positions, &positions, &TriangleMatchConfig::default());
+    let matches = match_triangles(&positions, &positions, &TriangleMatchConfig::default());
     assert!(matches.is_empty());
 }
 
@@ -373,58 +206,8 @@ fn test_all_collinear_stars() {
         DVec2::new(2.0, 0.0),
         DVec2::new(3.0, 0.0),
     ];
-    let triangles = form_triangles(&positions, 10);
+    let triangles = form_triangles_kdtree(&positions, 4);
     assert!(triangles.is_empty());
-}
-
-#[test]
-fn test_form_triangles_count() {
-    // C(5,3) = 10 triangles from 5 points
-    let positions = vec![
-        DVec2::new(0.0, 0.0),
-        DVec2::new(10.0, 0.0),
-        DVec2::new(0.0, 10.0),
-        DVec2::new(10.0, 10.0),
-        DVec2::new(5.0, 15.0),
-    ];
-    let triangles = form_triangles(&positions, 10);
-    assert_eq!(triangles.len(), 10);
-}
-
-#[test]
-fn test_matches_to_point_pairs() {
-    let ref_pos = vec![
-        DVec2::new(0.0, 0.0),
-        DVec2::new(1.0, 1.0),
-        DVec2::new(2.0, 2.0),
-    ];
-    let target_pos = vec![
-        DVec2::new(10.0, 10.0),
-        DVec2::new(11.0, 11.0),
-        DVec2::new(12.0, 12.0),
-    ];
-
-    let matches = vec![
-        StarMatch {
-            ref_idx: 0,
-            target_idx: 0,
-            votes: 5,
-            confidence: 0.9,
-        },
-        StarMatch {
-            ref_idx: 2,
-            target_idx: 2,
-            votes: 3,
-            confidence: 0.8,
-        },
-    ];
-
-    let (ref_points, target_points) = matches_to_point_pairs(&matches, &ref_pos, &target_pos);
-
-    assert_eq!(ref_points.len(), 2);
-    assert_eq!(target_points.len(), 2);
-    assert_eq!(ref_points[0], DVec2::new(0.0, 0.0));
-    assert_eq!(target_points[0], DVec2::new(10.0, 10.0));
 }
 
 #[test]
@@ -443,51 +226,6 @@ fn test_triangle_hash_key() {
     assert!(bx < 100);
     assert!(by < 100);
 }
-
-#[test]
-fn test_match_mirrored_image() {
-    let ref_positions = vec![
-        DVec2::new(0.0, 0.0),
-        DVec2::new(10.0, 0.0),
-        DVec2::new(0.0, 10.0),
-        DVec2::new(10.0, 10.0),
-        DVec2::new(5.0, 5.0),
-    ];
-
-    // Mirror horizontally
-    let target_positions: Vec<DVec2> = ref_positions
-        .iter()
-        .map(|p| DVec2::new(-p.x, p.y))
-        .collect();
-
-    // With orientation check, mirrored triangles should be rejected
-    let config_with_orientation = TriangleMatchConfig {
-        check_orientation: true,
-        min_votes: 1, // Lower threshold for testing
-        ..Default::default()
-    };
-    let matches_with =
-        match_stars_triangles(&ref_positions, &target_positions, &config_with_orientation);
-
-    // Without orientation check, should match more
-    let config_no_orientation = TriangleMatchConfig {
-        check_orientation: false,
-        min_votes: 1,
-        ..Default::default()
-    };
-    let matches_without =
-        match_stars_triangles(&ref_positions, &target_positions, &config_no_orientation);
-
-    // With mirroring and orientation check, we should get fewer matches than without
-    assert!(
-        matches_without.len() >= matches_with.len(),
-        "Expected more matches without orientation check"
-    );
-}
-
-// ============================================================================
-// K-D Tree based matching tests
-// ============================================================================
 
 #[test]
 fn test_kdtree_match_identical_star_lists() {
@@ -743,12 +481,11 @@ fn test_match_sparse_field_10_stars() {
     let target_positions: Vec<DVec2> = ref_positions.iter().map(|p| *p + offset).collect();
 
     let config = TriangleMatchConfig {
-        max_stars: 10,
         min_votes: 2,
         ..Default::default()
     };
 
-    let matches = match_stars_triangles(&ref_positions, &target_positions, &config);
+    let matches = match_triangles(&ref_positions, &target_positions, &config);
 
     // Should match most stars
     assert!(
@@ -783,7 +520,7 @@ fn test_match_with_40_percent_outliers() {
         ..Default::default()
     };
 
-    let matches = match_stars_triangles(&ref_positions, &target_positions, &config);
+    let matches = match_triangles(&ref_positions, &target_positions, &config);
 
     // Should match the 6 real stars
     assert!(
@@ -828,7 +565,7 @@ fn test_vertex_correspondence_correctness() {
         ..Default::default()
     };
 
-    let matches = match_stars_triangles(&ref_positions, &target_positions, &config);
+    let matches = match_triangles(&ref_positions, &target_positions, &config);
 
     // Each match should be correct (same index)
     for m in &matches {
@@ -840,60 +577,8 @@ fn test_vertex_correspondence_correctness() {
     }
 }
 
-/// Test that k-d tree method is faster for large star counts
-#[test]
-fn test_kdtree_scales_better_than_brute_force() {
-    use std::time::Instant;
-
-    // Generate 80 stars
-    let positions: Vec<DVec2> = (0..80)
-        .map(|i| {
-            let x = (i % 10) as f64 * 15.0;
-            let y = (i / 10) as f64 * 15.0;
-            DVec2::new(x, y)
-        })
-        .collect();
-
-    let _config = TriangleMatchConfig {
-        max_stars: 80,
-        min_votes: 2,
-        ..Default::default()
-    };
-
-    // Time brute-force triangle formation
-    let start = Instant::now();
-    let brute_triangles = form_triangles(&positions, 80);
-    let brute_time = start.elapsed();
-
-    // Time k-d tree triangle formation
-    let start = Instant::now();
-    let kdtree_triangles = form_triangles_kdtree(&positions, 10);
-    let kdtree_time = start.elapsed();
-
-    // K-d tree should produce fewer triangles (by design)
-    assert!(
-        kdtree_triangles.len() < brute_triangles.len(),
-        "K-d tree produced {} triangles, brute force produced {}",
-        kdtree_triangles.len(),
-        brute_triangles.len()
-    );
-
-    // K-d tree should be faster for large inputs
-    // Note: This may not always hold for small inputs due to overhead
-    println!(
-        "Brute force: {} triangles in {:?}",
-        brute_triangles.len(),
-        brute_time
-    );
-    println!(
-        "K-d tree: {} triangles in {:?}",
-        kdtree_triangles.len(),
-        kdtree_time
-    );
-}
-
 // ============================================================================
-// Milestone F: Test Hardening - Additional stress tests
+// Stress tests
 // ============================================================================
 
 /// Test with very dense star field (500+ stars) - stress test for k-d tree
@@ -931,14 +616,16 @@ fn test_match_very_dense_field_500_stars() {
         })
         .collect();
 
+    // Simulate pipeline limiting to brightest 150 stars
+    let ref_limited: Vec<DVec2> = ref_positions.iter().take(150).copied().collect();
+    let target_limited: Vec<DVec2> = target_positions.iter().take(150).copied().collect();
+
     let config = TriangleMatchConfig {
-        max_stars: 150, // Use only brightest 150 stars
         min_votes: 3,
         ..Default::default()
     };
 
-    // K-d tree matching should handle this efficiently
-    let matches = match_triangles(&ref_positions, &target_positions, &config);
+    let matches = match_triangles(&ref_limited, &target_limited, &config);
 
     // Should find a substantial number of matches
     assert!(
@@ -1007,13 +694,10 @@ fn test_match_clustered_stars() {
     );
 }
 
-/// Test matching with non-uniform brightness distribution (simulating real star fields)
+/// Test matching with pre-limited star count (simulating pipeline's max_stars selection)
 #[test]
 fn test_match_brightness_weighted_selection() {
-    // This test simulates what happens when max_stars limits star count
-    // Brighter stars (lower indices) should be preferred
-
-    let ref_positions: Vec<DVec2> = (0..50)
+    let all_positions: Vec<DVec2> = (0..50)
         .map(|i| {
             let x = (i % 10) as f64 * 30.0;
             let y = (i / 10) as f64 * 30.0;
@@ -1021,25 +705,18 @@ fn test_match_brightness_weighted_selection() {
         })
         .collect();
 
+    // Simulate pipeline limiting to brightest 20 stars
+    let ref_positions: Vec<DVec2> = all_positions.iter().take(20).copied().collect();
+
     let offset = DVec2::new(10.0, 5.0);
     let target_positions: Vec<DVec2> = ref_positions.iter().map(|p| *p + offset).collect();
 
     let config = TriangleMatchConfig {
-        max_stars: 20, // Only use "brightest" 20 stars
         min_votes: 2,
         ..Default::default()
     };
 
-    let matches = match_stars_triangles(&ref_positions, &target_positions, &config);
-
-    // All matches should be from the first 20 stars
-    for m in &matches {
-        assert!(
-            m.ref_idx < 20,
-            "Match included star {} which exceeds max_stars limit",
-            m.ref_idx
-        );
-    }
+    let matches = match_triangles(&ref_positions, &target_positions, &config);
 
     assert!(
         matches.len() >= 10,
