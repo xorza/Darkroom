@@ -339,10 +339,6 @@ pub struct MultiScaleConfig {
     pub min_dimension: usize,
     /// Whether to use phase correlation at coarse levels
     pub use_phase_correlation: bool,
-    /// Full resolution image width (used to compute actual pyramid levels)
-    pub image_width: usize,
-    /// Full resolution image height (used to compute actual pyramid levels)
-    pub image_height: usize,
 }
 
 impl Default for MultiScaleConfig {
@@ -352,8 +348,6 @@ impl Default for MultiScaleConfig {
             scale_factor: 2.0,
             min_dimension: 128,
             use_phase_correlation: true,
-            image_width: 1024,
-            image_height: 1024,
         }
     }
 }
@@ -466,8 +460,6 @@ pub struct RegistrationConfig {
     pub phase_correlation: PhaseCorrelationConfig,
     /// Image warping configuration.
     pub warp: WarpConfig,
-    /// Multi-scale registration configuration (None = single-scale).
-    pub multi_scale: Option<MultiScaleConfig>,
     /// SIP distortion correction (post-RANSAC polynomial refinement).
     pub sip: SipCorrectionConfig,
 }
@@ -485,7 +477,6 @@ impl Default for RegistrationConfig {
             ransac: RansacConfig::default(),
             phase_correlation: PhaseCorrelationConfig::default(),
             warp: WarpConfig::default(),
-            multi_scale: None,
             sip: SipCorrectionConfig::default(),
         }
     }
@@ -520,9 +511,6 @@ impl RegistrationConfig {
         self.ransac.validate();
         self.phase_correlation.validate();
         self.warp.validate();
-        if let Some(ref ms) = self.multi_scale {
-            ms.validate();
-        }
         self.sip.validate();
     }
 }
@@ -601,15 +589,6 @@ mod tests {
         let config = MultiScaleConfig {
             scale_factor: 0.5,
             ..MultiScaleConfig::default()
-        };
-        config.validate();
-    }
-
-    #[test]
-    fn test_config_with_multiscale() {
-        let config = RegistrationConfig {
-            multi_scale: Some(MultiScaleConfig::default()),
-            ..Default::default()
         };
         config.validate();
     }

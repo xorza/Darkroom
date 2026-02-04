@@ -93,20 +93,6 @@ impl Registrator {
         ref_positions: &[DVec2],
         target_positions: &[DVec2],
     ) -> Result<RegistrationResult, RegistrationError> {
-        // Dispatch to multi-scale if configured
-        if self.config.multi_scale.is_some() {
-            return self.register_positions_multiscale(ref_positions, target_positions);
-        }
-
-        self.register_positions_single(ref_positions, target_positions)
-    }
-
-    /// Single-scale registration core.
-    fn register_positions_single(
-        &self,
-        ref_positions: &[DVec2],
-        target_positions: &[DVec2],
-    ) -> Result<RegistrationResult, RegistrationError> {
         let start = Instant::now();
 
         // Validate input
@@ -325,10 +311,8 @@ impl Registrator {
 
     /// Build a single-scale config for a pyramid level.
     /// Coarse levels get relaxed thresholds; level 0 gets the base config.
-    /// Always strips `multi_scale` to prevent recursion.
     fn level_config(&self, level: usize, scale: f64) -> RegistrationConfig {
         let mut c = self.config.clone();
-        c.multi_scale = None;
         if level > 0 {
             c.ransac.inlier_threshold = self.config.ransac.inlier_threshold * scale.sqrt();
             c.triangle.ratio_tolerance = self.config.triangle.ratio_tolerance * 1.5;
@@ -338,10 +322,9 @@ impl Registrator {
         c
     }
 
-    /// Compute the number of pyramid levels from the multi-scale config dimensions.
-    fn compute_num_levels(&self) -> usize {
-        let ms = self.config.multi_scale.as_ref().unwrap();
-        let min_dim = ms.image_width.min(ms.image_height);
+    /// Compute the number of pyramid levels.
+    fn compute_num_levels(ms: &MultiScaleConfig, width: usize, height: usize) -> usize {
+        let min_dim = width.min(height);
         let max_levels = ((min_dim as f64 / ms.min_dimension as f64).log2()
             / ms.scale_factor.log2())
         .floor() as usize
@@ -349,85 +332,33 @@ impl Registrator {
         ms.levels.min(max_levels).max(1)
     }
 
-    /// Multi-scale registration using star positions.
-    fn register_positions_multiscale(
-        &self,
-        ref_stars: &[DVec2],
-        target_stars: &[DVec2],
-    ) -> Result<RegistrationResult, RegistrationError> {
-        let start = Instant::now();
-        let ms = self.config.multi_scale.as_ref().unwrap();
-        let num_levels = self.compute_num_levels();
-
-        if num_levels == 1 {
-            return self.register_positions_single(ref_stars, target_stars);
-        }
-
-        let mut current_transform = Transform::identity();
-        let mut last_result: Option<RegistrationResult> = None;
-
-        for level in (0..num_levels).rev() {
-            let scale = ms.scale_factor.powi(level as i32);
-            let inv = current_transform.inverse();
-
-            let scaled_ref: Vec<DVec2> = ref_stars.iter().map(|p| *p / scale).collect();
-            let adjusted_target: Vec<DVec2> =
-                target_stars.iter().map(|p| inv.apply(*p) / scale).collect();
-
-            let registrator = Registrator::new(self.level_config(level, scale));
-            match registrator.register_positions(&scaled_ref, &adjusted_target) {
-                Ok(result) => {
-                    let level_transform = scale_transform(&result.transform, scale);
-                    current_transform = level_transform.compose(&current_transform);
-                    last_result = Some(result);
-                }
-                Err(e) => {
-                    if level > 0 {
-                        continue;
-                    } else {
-                        return Err(e);
-                    }
-                }
-            }
-        }
-
-        match last_result {
-            Some(mut result) => {
-                result.transform = current_transform;
-                result.elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
-                Ok(result)
-            }
-            None => Err(RegistrationError::NoMatchingPatterns),
-        }
-    }
-
     /// Register using images and stars at multiple scales.
     ///
     /// Uses phase correlation at coarse levels for initial alignment,
     /// then refines with star matching at finer levels.
-    ///
-    /// Requires `config.multi_scale` to be `Some`. Image dimensions are read
-    /// from `config.multi_scale.image_width` / `image_height`.
     pub fn register_with_images(
         &self,
         ref_image: &[f32],
         target_image: &[f32],
+        width: usize,
         ref_stars: &[DVec2],
         target_stars: &[DVec2],
+        ms: &MultiScaleConfig,
     ) -> Result<RegistrationResult, RegistrationError> {
         let start = Instant::now();
-        let ms = self.config.multi_scale.as_ref().unwrap();
-        let width = ms.image_width;
-        let height = ms.image_height;
+        assert!(
+            ref_image.len() == target_image.len() && ref_image.len().is_multiple_of(width),
+            "Image dimensions mismatch: ref={}, target={}, width={}",
+            ref_image.len(),
+            target_image.len(),
+            width
+        );
+        let height = ref_image.len() / width;
 
-        if ref_image.len() != width * height || target_image.len() != width * height {
-            return Err(RegistrationError::DimensionMismatch);
-        }
-
-        let num_levels = self.compute_num_levels();
+        let num_levels = Self::compute_num_levels(ms, width, height);
 
         if num_levels == 1 {
-            return self.register_positions_single(ref_stars, target_stars);
+            return self.register_positions(ref_stars, target_stars);
         }
 
         let mut current_transform = Transform::identity();
@@ -472,7 +403,7 @@ impl Registrator {
         let inv = current_transform.inverse();
         let adjusted_target: Vec<DVec2> = target_stars.iter().map(|p| inv.apply(*p)).collect();
 
-        let mut result = self.register_positions_single(ref_stars, &adjusted_target)?;
+        let mut result = self.register_positions(ref_stars, &adjusted_target)?;
 
         result.transform = result.transform.compose(&current_transform);
         result.elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
