@@ -357,13 +357,9 @@ fn collect_component_data(
 ///
 /// Creates a temporary buffer pool internally. For benchmarks, use
 /// `detect` directly with a pre-allocated pool.
-///
-/// The `filtered` parameter is ignored - matched filtering is controlled
-/// via config.expected_fwhm. This signature exists for backward compatibility.
 #[cfg(test)]
 pub(crate) fn detect_stars_test(
     pixels: &Buffer2<f32>,
-    _filtered: Option<&Buffer2<f32>>,
     background: &BackgroundEstimate,
     config: &Config,
 ) -> Vec<Region> {

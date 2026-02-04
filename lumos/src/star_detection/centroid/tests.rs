@@ -57,7 +57,7 @@ fn test_centroid_accuracy() {
         },
     );
     let config = Config::default();
-    let candidates = detect_stars_test(&pixels, None, &bg, &config);
+    let candidates = detect_stars_test(&pixels, &bg, &config);
 
     assert_eq!(candidates.len(), 1);
 
@@ -105,7 +105,7 @@ fn test_fwhm_estimation() {
         max_area: 1000,
         ..Default::default()
     };
-    let candidates = detect_stars_test(&pixels, None, &bg, &config);
+    let candidates = detect_stars_test(&pixels, &bg, &config);
 
     assert_eq!(candidates.len(), 1);
 
@@ -138,7 +138,7 @@ fn test_circular_star_eccentricity() {
         },
     );
     let config = Config::default();
-    let candidates = detect_stars_test(&pixels, None, &bg, &config);
+    let candidates = detect_stars_test(&pixels, &bg, &config);
 
     let star =
         measure_star(&pixels, &bg, &candidates[0], &config).expect("Should compute centroid");
@@ -164,7 +164,7 @@ fn test_snr_positive() {
         },
     );
     let config = Config::default();
-    let candidates = detect_stars_test(&pixels, None, &bg, &config);
+    let candidates = detect_stars_test(&pixels, &bg, &config);
 
     let star =
         measure_star(&pixels, &bg, &candidates[0], &config).expect("Should compute centroid");
@@ -1228,7 +1228,7 @@ fn test_measure_star_multiple_stars_independent() {
         edge_margin: 10,
         ..Default::default()
     };
-    let candidates = detect_stars_test(&pixels, None, &bg, &config);
+    let candidates = detect_stars_test(&pixels, &bg, &config);
 
     assert_eq!(candidates.len(), 2, "Should detect two stars");
 
@@ -1274,7 +1274,7 @@ fn test_circular_star_roundness() {
         },
     );
     let config = Config::default();
-    let candidates = detect_stars_test(&pixels, None, &bg, &config);
+    let candidates = detect_stars_test(&pixels, &bg, &config);
 
     assert_eq!(candidates.len(), 1);
 
@@ -1328,7 +1328,7 @@ fn test_elongated_x_star_roundness() {
         },
     );
     let config = Config::default();
-    let candidates = detect_stars_test(&pixels, None, &bg, &config);
+    let candidates = detect_stars_test(&pixels, &bg, &config);
 
     assert!(!candidates.is_empty());
 
@@ -1382,7 +1382,7 @@ fn test_asymmetric_star_roundness2() {
         },
     );
     let config = Config::default();
-    let candidates = detect_stars_test(&pixels, None, &bg, &config);
+    let candidates = detect_stars_test(&pixels, &bg, &config);
 
     assert!(!candidates.is_empty());
 
@@ -1412,7 +1412,7 @@ fn test_laplacian_snr_computed_for_star() {
         },
     );
     let config = Config::default();
-    let candidates = detect_stars_test(&pixels, None, &bg, &config);
+    let candidates = detect_stars_test(&pixels, &bg, &config);
 
     assert_eq!(candidates.len(), 1);
 
@@ -1498,7 +1498,7 @@ fn test_weighted_centroid_precision_statistical() {
                 centroid_method: CentroidMethod::WeightedMoments,
                 ..Default::default()
             };
-            let candidates = detect_stars_test(&pixels, None, &bg, &config);
+            let candidates = detect_stars_test(&pixels, &bg, &config);
 
             if candidates.is_empty() {
                 continue;
@@ -2705,7 +2705,7 @@ fn test_local_annulus_background_uniform() {
         local_background: LocalBackgroundMethod::LocalAnnulus,
         ..Default::default()
     };
-    let candidates = detect_stars_test(&pixels, None, &bg, &config);
+    let candidates = detect_stars_test(&pixels, &bg, &config);
 
     assert!(!candidates.is_empty(), "Should detect star");
 
@@ -2740,7 +2740,7 @@ fn test_local_annulus_vs_global_map() {
         local_background: LocalBackgroundMethod::GlobalMap,
         ..Default::default()
     };
-    let candidates = detect_stars_test(&pixels, None, &bg, &config_global);
+    let candidates = detect_stars_test(&pixels, &bg, &config_global);
     let star_global =
         measure_star(&pixels, &bg, &candidates[0], &config_global).expect("global centroid");
 
@@ -2790,7 +2790,7 @@ fn test_local_annulus_near_edge_fallback() {
         edge_margin: 15, // Allow detection near edge
         ..Default::default()
     };
-    let candidates = detect_stars_test(&pixels, None, &bg, &config);
+    let candidates = detect_stars_test(&pixels, &bg, &config);
 
     if !candidates.is_empty() {
         // Should still work (falls back to global if annulus doesn't have enough pixels)
