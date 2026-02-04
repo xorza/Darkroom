@@ -19,13 +19,12 @@ pub unsafe fn count_inliers_avx2(
     ref_points: &[DVec2],
     target_points: &[DVec2],
     transform: &Transform,
-    threshold: f64,
-) -> (Vec<usize>, usize) {
+    threshold_sq: f64,
+) -> (Vec<usize>, f64) {
     unsafe {
         let len = ref_points.len();
-        let threshold_sq = threshold * threshold;
         let mut inliers = Vec::with_capacity(len);
-        let mut total_score = 0usize;
+        let mut total_score = 0.0f64;
 
         // Extract transform components for vectorized computation
         // Transform: [a, b, c, d, e, f, g, h, 1] in row-major
@@ -43,7 +42,6 @@ pub unsafe fn count_inliers_avx2(
         let h = _mm256_set1_pd(t[7]);
         let one = _mm256_set1_pd(1.0);
         let thresh_sq_vec = _mm256_set1_pd(threshold_sq);
-        let score_scale = _mm256_set1_pd(1000.0);
 
         let chunks = len / 4;
 
@@ -94,19 +92,17 @@ pub unsafe fn count_inliers_avx2(
             let mask = _mm256_cmp_pd(dist_sq, thresh_sq_vec, _CMP_LT_OQ);
             let mask_bits = _mm256_movemask_pd(mask) as u8;
 
-            // Compute scores: (threshold_sq - dist_sq) * 1000
-            let score_contrib = _mm256_mul_pd(_mm256_sub_pd(thresh_sq_vec, dist_sq), score_scale);
+            // Compute scores: threshold_sq - dist_sq
+            let score_contrib = _mm256_sub_pd(thresh_sq_vec, dist_sq);
 
             // Extract results
-            let mut dist_sq_arr = [0.0f64; 4];
             let mut score_arr = [0.0f64; 4];
-            _mm256_storeu_pd(dist_sq_arr.as_mut_ptr(), dist_sq);
             _mm256_storeu_pd(score_arr.as_mut_ptr(), score_contrib);
 
             for i in 0..4 {
                 if (mask_bits & (1 << i)) != 0 {
                     inliers.push(base + i);
-                    total_score += score_arr[i] as usize;
+                    total_score += score_arr[i];
                 }
             }
         }
@@ -121,7 +117,7 @@ pub unsafe fn count_inliers_avx2(
 
             if dist_sq < threshold_sq {
                 inliers.push(i);
-                total_score += ((threshold_sq - dist_sq) * 1000.0) as usize;
+                total_score += threshold_sq - dist_sq;
             }
         }
 
@@ -140,13 +136,12 @@ pub unsafe fn count_inliers_sse2(
     ref_points: &[DVec2],
     target_points: &[DVec2],
     transform: &Transform,
-    threshold: f64,
-) -> (Vec<usize>, usize) {
+    threshold_sq: f64,
+) -> (Vec<usize>, f64) {
     unsafe {
         let len = ref_points.len();
-        let threshold_sq = threshold * threshold;
         let mut inliers = Vec::with_capacity(len);
-        let mut total_score = 0usize;
+        let mut total_score = 0.0f64;
 
         let t = transform.matrix.as_array();
 
@@ -160,7 +155,6 @@ pub unsafe fn count_inliers_sse2(
         let h = _mm_set1_pd(t[7]);
         let one = _mm_set1_pd(1.0);
         let thresh_sq_vec = _mm_set1_pd(threshold_sq);
-        let score_scale = _mm_set1_pd(1000.0);
 
         let chunks = len / 2;
 
@@ -198,19 +192,17 @@ pub unsafe fn count_inliers_sse2(
             let mask = _mm_cmplt_pd(dist_sq, thresh_sq_vec);
             let mask_bits = _mm_movemask_pd(mask) as u8;
 
-            // Compute scores
-            let score_contrib = _mm_mul_pd(_mm_sub_pd(thresh_sq_vec, dist_sq), score_scale);
+            // Compute scores: threshold_sq - dist_sq
+            let score_contrib = _mm_sub_pd(thresh_sq_vec, dist_sq);
 
             // Extract results
-            let mut dist_sq_arr = [0.0f64; 2];
             let mut score_arr = [0.0f64; 2];
-            _mm_storeu_pd(dist_sq_arr.as_mut_ptr(), dist_sq);
             _mm_storeu_pd(score_arr.as_mut_ptr(), score_contrib);
 
             for i in 0..2 {
                 if (mask_bits & (1 << i)) != 0 {
                     inliers.push(base + i);
-                    total_score += score_arr[i] as usize;
+                    total_score += score_arr[i];
                 }
             }
         }
@@ -225,7 +217,7 @@ pub unsafe fn count_inliers_sse2(
 
             if dist_sq < threshold_sq {
                 inliers.push(i);
-                total_score += ((threshold_sq - dist_sq) * 1000.0) as usize;
+                total_score += threshold_sq - dist_sq;
             }
         }
 
@@ -243,11 +235,10 @@ mod tests {
         ref_points: &[DVec2],
         target_points: &[DVec2],
         transform: &Transform,
-        threshold: f64,
-    ) -> (Vec<usize>, usize) {
-        let threshold_sq = threshold * threshold;
+        threshold_sq: f64,
+    ) -> (Vec<usize>, f64) {
         let mut inliers = Vec::new();
-        let mut score = 0usize;
+        let mut score = 0.0f64;
 
         for (i, (r, t)) in ref_points.iter().zip(target_points.iter()).enumerate() {
             let p = transform.apply(*r);
@@ -255,7 +246,7 @@ mod tests {
 
             if dist_sq < threshold_sq {
                 inliers.push(i);
-                score += ((threshold_sq - dist_sq) * 1000.0) as usize;
+                score += threshold_sq - dist_sq;
             }
         }
 
@@ -286,15 +277,15 @@ mod tests {
                 }
             })
             .collect();
-        let threshold = 2.0;
+        let threshold_sq = 4.0; // threshold = 2.0
 
         let (inliers_avx2, score_avx2) =
-            unsafe { count_inliers_avx2(&ref_points, &target_points, &transform, threshold) };
+            unsafe { count_inliers_avx2(&ref_points, &target_points, &transform, threshold_sq) };
         let (inliers_scalar, score_scalar) =
-            count_inliers_scalar(&ref_points, &target_points, &transform, threshold);
+            count_inliers_scalar(&ref_points, &target_points, &transform, threshold_sq);
 
         assert_eq!(inliers_avx2, inliers_scalar, "Inliers mismatch");
-        assert_eq!(score_avx2, score_scalar, "Score mismatch");
+        assert!((score_avx2 - score_scalar).abs() < 1e-6, "Score mismatch");
     }
 
     #[test]
@@ -321,14 +312,14 @@ mod tests {
                 }
             })
             .collect();
-        let threshold = 1.5;
+        let threshold_sq = 1.5 * 1.5; // threshold = 1.5
 
         let (inliers_sse, score_sse) =
-            unsafe { count_inliers_sse2(&ref_points, &target_points, &transform, threshold) };
+            unsafe { count_inliers_sse2(&ref_points, &target_points, &transform, threshold_sq) };
         let (inliers_scalar, score_scalar) =
-            count_inliers_scalar(&ref_points, &target_points, &transform, threshold);
+            count_inliers_scalar(&ref_points, &target_points, &transform, threshold_sq);
 
         assert_eq!(inliers_sse, inliers_scalar, "Inliers mismatch");
-        assert_eq!(score_sse, score_scalar, "Score mismatch");
+        assert!((score_sse - score_scalar).abs() < 1e-6, "Score mismatch");
     }
 }

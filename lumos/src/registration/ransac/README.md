@@ -4,11 +4,11 @@ Robust estimation of geometric transformations (translation, Euclidean, similari
 
 ## Structure
 
-- `mod.rs` — `RansacEstimator`, transform estimation functions, sampling utilities (~580 lines)
+- `mod.rs` — `RansacEstimator`, transform estimation functions, sampling utilities (~500 lines)
 - `simd/mod.rs` — Runtime SIMD dispatch and scalar fallback (~115 lines)
 - `simd/sse.rs` — AVX2 and SSE2 inlier counting (~230 lines)
 - `simd/neon.rs` — NEON inlier counting for aarch64 (~130 lines)
-- `tests.rs` — 47 tests covering all transform types, edge cases, plausibility, SIMD parity
+- `tests.rs` — 55 tests covering all transform types, edge cases, plausibility, SIMD parity, degeneracy
 
 ## Usage
 
@@ -37,21 +37,24 @@ Internal:
 ### Standard RANSAC (`estimate`)
 
 1. Random sample `min_points` correspondences (Floyd's algorithm)
-2. Estimate candidate transform
-3. Plausibility check (rotation/scale bounds) — reject before expensive inlier count
-4. Count inliers via SIMD (AVX2/SSE2/NEON with scalar fallback)
-5. If promising + LO enabled: iterative refinement on inlier set (LO-RANSAC)
-6. Update best model if score improved
-7. Adaptive early termination: `N = log(1-confidence) / log(1-w^n)`
-8. Final refinement: re-estimate with all inliers via least squares
+2. Degeneracy check — reject coincident/collinear samples
+3. Estimate candidate transform
+4. Plausibility check (rotation/scale bounds) — reject before expensive inlier count
+5. Count inliers via SIMD (AVX2/SSE2/NEON with scalar fallback)
+6. If promising + LO enabled: iterative refinement on inlier set (LO-RANSAC)
+7. Update best model if score improved
+8. Adaptive early termination: `N = log(1-confidence) / log(1-w^n)`
+9. Final refinement: re-estimate with all inliers via least squares
+
+Both `estimate` and `estimate_progressive` share a single `ransac_loop` implementation parameterized by sampling strategy.
 
 ### Scoring
 
-Truncated inverse-distance score (MSAC-like):
+MSAC scoring (truncated quadratic):
 ```
-score = sum((threshold² - dist²) * 1000) for all inliers
+score = sum(threshold² - dist²) for all inliers
 ```
-Points closer to the model contribute more. This is better than pure inlier counting (RANSAC) but uses a fixed threshold unlike MAGSAC++.
+Points closer to the model contribute more. Uses native `f64` precision throughout (no integer truncation). This is better than pure inlier counting (RANSAC) but uses a fixed threshold unlike MAGSAC++.
 
 ### Progressive RANSAC (`estimate_progressive`)
 
@@ -60,7 +63,7 @@ Points closer to the model contribute more. This is better than pure inlier coun
 - Phase 2 (33–66%): weighted sample from top 50%
 - Phase 3 (66–100%): uniform random (convergence guarantee)
 
-Uses Algorithm A-Res (reservoir sampling with weights) for weighted selection.
+Uses Algorithm A-Res (reservoir sampling with weights) with `select_nth_unstable` for O(n) selection.
 
 ### LO-RANSAC
 
@@ -99,14 +102,14 @@ When a new best model is found:
 | Technique | Reference | Status in Our Code |
 |-----------|-----------|-------------------|
 | **RANSAC** (Fischler & Bolles, 1981) | Basic random sampling + inlier counting | Implemented |
-| **MSAC** (Torr & Zisserman, 2000) | Truncated quadratic scoring | Partially implemented (we use inverse-distance scoring, similar spirit) |
+| **MSAC** (Torr & Zisserman, 2000) | Truncated quadratic scoring | Implemented (f64 precision, threshold² − dist² scoring) |
 | **LO-RANSAC** (Chum et al., 2003) | Local optimization of best hypothesis | Implemented (iterative LS refinement) |
 | **PROSAC** (Chum & Matas, 2005) | Progressive sampling from sorted correspondences | Partially implemented (3-phase pool, not true PROSAC) |
 | **LO+-RANSAC** (Lebeda et al., 2012) | Improved LO with shrinking threshold + inner RANSAC | Not implemented |
 | **MAGSAC++** (Barath & Matas, 2020) | Threshold-free scoring via marginalization | Not implemented |
 | **SPRT** (Chum & Matas, 2008) | Preemptive model verification | Not implemented |
 | **GC-RANSAC** (Barath & Matas, 2018) | Graph-cut based local optimization | Not implemented |
-| Degeneracy checks | SupeRANSAC (2025) | Not implemented |
+| Degeneracy checks | SupeRANSAC (2025) | Implemented (coincidence + collinearity) |
 | **Adaptive iteration** (standard) | `N = log(1-p)/log(1-w^n)` | Implemented |
 | **Plausibility constraints** | Domain-specific rejection | Implemented (rotation + scale bounds) |
 | **SIMD inlier counting** | Intel PCL optimization (AVX2/NEON) | Implemented |
@@ -132,19 +135,15 @@ Reasons to consider `inlier` crate:
 - If PROSAC's formal progressive sampling shows measurable speedup.
 - If the pipeline handles significantly noisier data (>50% outliers).
 
-## Suggested Improvements
+## Improvements Applied
 
-### 1. Use MSAC scoring consistently (minor, correctness)
+### 1. ~~Use MSAC scoring consistently~~ — DONE
 
-**Current**: Score uses `(threshold² - dist²) * 1000`, which is a truncated quadratic — essentially MSAC scoring. But the threshold comparison uses strict `<` instead of `<=`, and the scalar multiplier `1000.0` with `usize` truncation loses precision for near-threshold points.
+Switched all scoring from `(threshold² - dist²) * 1000` with `usize` truncation to native `f64` `threshold² - dist²` throughout the SIMD layer and RANSAC loop. Eliminates sub-pixel precision loss.
 
-**Suggested**: Use `f64` for scores internally to avoid truncation artifacts. The `* 1000` + `as usize` conversion loses sub-pixel discrimination. Recent research (RANSAC Scoring Functions, Dec 2025) confirms MSAC scoring is the strongest simple baseline — no need to change the formula, just fix the precision.
+### 2. ~~Add sample degeneracy check~~ — DONE
 
-### 2. Add sample degeneracy check (minor, robustness)
-
-**Current**: No check for degenerate samples. For similarity (2 points), if both sampled points are nearly identical, the transform estimation will produce garbage or return `None` from the `ref_var < 1e-10` check.
-
-**Suggested**: Before calling `estimate_transform`, check that sampled points are sufficiently spread. For 2-point similarity, check `dist(p1, p2) > min_distance`. For 3-point affine, check that points are not collinear. For 4-point homography, check no 3 are collinear. This avoids wasted iterations on degenerate samples.
+Added `is_sample_degenerate()` that rejects coincident points (< 1px apart) and collinear samples (3+ points). Called in `ransac_loop` before `estimate_transform`. 8 tests added.
 
 ### 3. True PROSAC instead of 3-phase heuristic (moderate, speed)
 
@@ -152,35 +151,25 @@ Reasons to consider `inlier` crate:
 
 **Suggested**: Implement true PROSAC (Chum & Matas, 2005): sort correspondences by confidence, progressively expand the sampling set one point at a time, drawing the newest point in each sample. This has a formal convergence guarantee and can be 10–100x faster than uniform RANSAC when the quality ordering is good (which it is for triangle matching confidences). Falls back to RANSAC naturally when ordering is uninformative.
 
-### 4. Remove code duplication between `estimate` and `estimate_progressive` (simplification)
+### 4. ~~Remove code duplication between `estimate` and `estimate_progressive`~~ — DONE
 
-**Current**: `estimate` and `estimate_progressive` are ~100 lines each with nearly identical logic (model estimation, plausibility check, inlier counting, LO, adaptive termination, final refinement). The only difference is sampling strategy.
+Extracted the shared RANSAC loop into `ransac_loop()` parameterized by a sampling closure. Both `estimate` and `estimate_progressive` now delegate to it, eliminating ~80 lines of duplication.
 
-**Suggested**: Extract the common RANSAC loop into a single function parameterized by a sampling strategy (uniform vs weighted/progressive). This eliminates ~80 lines of duplication and ensures bug fixes apply to both paths.
+### 5. ~~Simplify `refine_transform`~~ — DONE
 
-### 5. Simplify `refine_transform` (simplification)
+Removed the trivial wrapper. Call sites now use `estimate_transform` directly.
 
-**Current**: `refine_transform` is a trivial wrapper around `estimate_transform` — the function body is literally `estimate_transform(ref_points, target_points, transform_type)`. It adds no value.
+### 6. ~~Use `select_nth_unstable` for weighted sampling~~ — DONE
 
-**Suggested**: Remove `refine_transform` and call `estimate_transform` directly at the refinement sites. The name "refine" suggests something more sophisticated (iterative re-weighting, shrinking threshold) but it's just a re-estimation.
+Replaced `sort_by` with `select_nth_unstable_by` in `weighted_sample_into` for O(n) average-case selection.
 
-### 6. Use `select_nth_unstable` for weighted sampling (minor, perf)
+### 7. ~~Pre-compute threshold²~~ — DONE
 
-**Current**: `weighted_sample_into` does a full `O(n log n)` sort to find top-k keys. The comment acknowledges this and notes it's acceptable for n≤200.
+`threshold_sq` is now computed once in `ransac_loop` and passed to all `count_inliers` calls and the SIMD layer. SIMD functions accept `threshold_sq` directly instead of computing it internally.
 
-**Suggested**: Use `select_nth_unstable_by` for `O(n)` average-case selection of top-k. This is the same optimization applied to the k-d tree build. Not critical for n=200 but cleaner.
+### 8. ~~Pre-allocate buffers~~ — DONE (partial)
 
-### 7. Pre-compute threshold² (minor, clarity)
-
-**Current**: `threshold_sq = threshold * threshold` is computed in multiple places: `count_inliers_scalar_impl`, each SIMD function, and implicitly in the SIMD broadcast.
-
-**Suggested**: Compute `threshold_sq` once in `count_inliers_simd` and pass it to all implementations, or store it alongside `threshold` in config. Minor cleanup.
-
-### 8. Avoid `Vec` allocation in `local_optimization` inner loop (moderate, perf)
-
-**Current**: Each LO iteration allocates two `Vec<DVec2>` for inlier points (`inlier_ref`, `inlier_target`) and `count_inliers` allocates a `Vec<usize>` for the result.
-
-**Suggested**: Pre-allocate these buffers outside the LO loop and reuse them. For the inlier index vector, change `count_inliers` to accept a `&mut Vec<usize>` buffer (similar to `radius_indices_into` in the k-d tree). This eliminates ~10 allocations per LO cycle.
+Sample point buffers are pre-allocated and reused across iterations in `ransac_loop`. LO inner-loop allocations remain (would require changing `count_inliers` to buffer-based API — deferred as low-impact for typical LO iteration counts of 3–5).
 
 ## References
 

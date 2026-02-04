@@ -133,9 +133,96 @@ impl RansacEstimator {
 
         let mut rng = RngWrapper::new(self.config.seed);
 
+        self.ransac_loop(
+            ref_points,
+            target_points,
+            n,
+            min_samples,
+            transform_type,
+            |iteration, max_iter, sample_buf| {
+                let _ = (iteration, max_iter); // uniform sampling ignores iteration/phase
+                random_sample_into(&mut rng, n, min_samples, sample_buf);
+            },
+        )
+    }
+
+    /// Perform local optimization on a promising hypothesis.
+    ///
+    /// This implements the LO-RANSAC algorithm:
+    /// 1. Re-estimate transform using current inliers
+    /// 2. Find new inliers with the refined transform
+    /// 3. Repeat until convergence or max iterations
+    ///
+    /// This typically improves the inlier count by 5-15%.
+    fn local_optimization(
+        &self,
+        ref_points: &[DVec2],
+        target_points: &[DVec2],
+        initial_transform: &Transform,
+        initial_inliers: &[usize],
+        transform_type: TransformType,
+        threshold_sq: f64,
+    ) -> (Transform, Vec<usize>, f64) {
+        let min_samples = transform_type.min_points();
+        let mut current_transform = *initial_transform;
+        let mut current_inliers = initial_inliers.to_vec();
+
+        // Compute initial score
+        let (_, initial_score) =
+            count_inliers(ref_points, target_points, &current_transform, threshold_sq);
+        let mut current_score = initial_score;
+
+        for _ in 0..self.config.lo_max_iterations {
+            if current_inliers.len() < min_samples {
+                break;
+            }
+
+            // Re-estimate transform using all current inliers
+            let inlier_ref: Vec<DVec2> = current_inliers.iter().map(|&i| ref_points[i]).collect();
+            let inlier_target: Vec<DVec2> =
+                current_inliers.iter().map(|&i| target_points[i]).collect();
+
+            let refined = match estimate_transform(&inlier_ref, &inlier_target, transform_type) {
+                Some(t) => t,
+                None => break,
+            };
+
+            // Count inliers with refined transform
+            let (new_inliers, new_score) =
+                count_inliers(ref_points, target_points, &refined, threshold_sq);
+
+            // Check for convergence (no improvement)
+            if new_inliers.len() <= current_inliers.len() && new_score <= current_score {
+                break;
+            }
+
+            // Update if improved
+            current_transform = refined;
+            current_inliers = new_inliers;
+            current_score = new_score;
+        }
+
+        (current_transform, current_inliers, current_score)
+    }
+
+    /// Core RANSAC loop shared by `estimate` and `estimate_progressive`.
+    ///
+    /// The `sample_fn` closure fills `sample_indices` buffer each iteration.
+    /// It receives `(iteration, max_iterations, &mut sample_buf)`.
+    fn ransac_loop(
+        &self,
+        ref_points: &[DVec2],
+        target_points: &[DVec2],
+        n: usize,
+        min_samples: usize,
+        transform_type: TransformType,
+        mut sample_fn: impl FnMut(usize, usize, &mut Vec<usize>),
+    ) -> Option<RansacResult> {
+        let threshold_sq = self.config.inlier_threshold * self.config.inlier_threshold;
+
         let mut best_transform: Option<Transform> = None;
         let mut best_inliers: Vec<usize> = Vec::new();
-        let mut best_score = 0;
+        let mut best_score = 0.0f64;
 
         // Pre-allocate buffers to avoid per-iteration allocations
         let mut sample_indices: Vec<usize> = Vec::with_capacity(min_samples);
@@ -148,8 +235,8 @@ impl RansacEstimator {
         while iterations < max_iter {
             iterations += 1;
 
-            // Random sample into pre-allocated buffer
-            random_sample_into(&mut rng, n, min_samples, &mut sample_indices);
+            // Fill sample indices via the provided strategy
+            sample_fn(iterations, max_iter, &mut sample_indices);
 
             // Extract sample points (reusing buffers)
             sample_ref.clear();
@@ -157,6 +244,11 @@ impl RansacEstimator {
             for &i in &sample_indices {
                 sample_ref.push(ref_points[i]);
                 sample_target.push(target_points[i]);
+            }
+
+            // Skip degenerate samples (coincident/collinear points)
+            if is_sample_degenerate(&sample_ref) {
+                continue;
             }
 
             // Estimate transformation from sample
@@ -171,12 +263,8 @@ impl RansacEstimator {
             }
 
             // Count inliers
-            let (mut inliers, mut score) = count_inliers(
-                ref_points,
-                target_points,
-                &transform,
-                self.config.inlier_threshold,
-            );
+            let (mut inliers, mut score) =
+                count_inliers(ref_points, target_points, &transform, threshold_sq);
 
             let mut current_transform = transform;
 
@@ -188,6 +276,7 @@ impl RansacEstimator {
                     &current_transform,
                     &inliers,
                     transform_type,
+                    threshold_sq,
                 );
                 // Only accept LO result if it's still plausible
                 if self.is_plausible(&lo_transform) {
@@ -223,16 +312,11 @@ impl RansacEstimator {
             let inlier_target: Vec<DVec2> =
                 best_inliers.iter().map(|&i| target_points[i]).collect();
 
-            let refined =
-                refine_transform(&inlier_ref, &inlier_target, transform_type).unwrap_or(transform);
+            let refined = estimate_transform(&inlier_ref, &inlier_target, transform_type)
+                .unwrap_or(transform);
 
-            // Recount inliers with refined transform
-            let (final_inliers, _) = count_inliers(
-                ref_points,
-                target_points,
-                &refined,
-                self.config.inlier_threshold,
-            );
+            let (final_inliers, _) =
+                count_inliers(ref_points, target_points, &refined, threshold_sq);
 
             let inlier_ratio = final_inliers.len() as f64 / n as f64;
 
@@ -245,72 +329,6 @@ impl RansacEstimator {
         }
 
         None
-    }
-
-    /// Perform local optimization on a promising hypothesis.
-    ///
-    /// This implements the LO-RANSAC algorithm:
-    /// 1. Re-estimate transform using current inliers
-    /// 2. Find new inliers with the refined transform
-    /// 3. Repeat until convergence or max iterations
-    ///
-    /// This typically improves the inlier count by 5-15%.
-    fn local_optimization(
-        &self,
-        ref_points: &[DVec2],
-        target_points: &[DVec2],
-        initial_transform: &Transform,
-        initial_inliers: &[usize],
-        transform_type: TransformType,
-    ) -> (Transform, Vec<usize>, usize) {
-        let min_samples = transform_type.min_points();
-        let mut current_transform = *initial_transform;
-        let mut current_inliers = initial_inliers.to_vec();
-
-        // Compute initial score
-        let (_, initial_score) = count_inliers(
-            ref_points,
-            target_points,
-            &current_transform,
-            self.config.inlier_threshold,
-        );
-        let mut current_score = initial_score;
-
-        for _ in 0..self.config.lo_max_iterations {
-            if current_inliers.len() < min_samples {
-                break;
-            }
-
-            // Re-estimate transform using all current inliers
-            let inlier_ref: Vec<DVec2> = current_inliers.iter().map(|&i| ref_points[i]).collect();
-            let inlier_target: Vec<DVec2> =
-                current_inliers.iter().map(|&i| target_points[i]).collect();
-
-            let refined = match estimate_transform(&inlier_ref, &inlier_target, transform_type) {
-                Some(t) => t,
-                None => break,
-            };
-
-            // Count inliers with refined transform
-            let (new_inliers, new_score) = count_inliers(
-                ref_points,
-                target_points,
-                &refined,
-                self.config.inlier_threshold,
-            );
-
-            // Check for convergence (no improvement)
-            if new_inliers.len() <= current_inliers.len() && new_score <= current_score {
-                break;
-            }
-
-            // Update if improved
-            current_transform = refined;
-            current_inliers = new_inliers;
-            current_score = new_score;
-        }
-
-        (current_transform, current_inliers, current_score)
     }
 
     /// Estimate transformation using progressive/guided sampling.
@@ -351,153 +369,49 @@ impl RansacEstimator {
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
 
-        // Compute cumulative weights for weighted sampling
+        // Compute weights for weighted sampling
         // Higher confidence = higher probability of being sampled
         let weights: Vec<f64> = confidences
             .iter()
             .map(|&c| (c + 0.1).powi(2)) // Square to emphasize high-confidence matches
             .collect();
 
-        let mut best_transform: Option<Transform> = None;
-        let mut best_inliers: Vec<usize> = Vec::new();
-        let mut best_score = 0;
+        self.ransac_loop(
+            ref_points,
+            target_points,
+            n,
+            min_samples,
+            transform_type,
+            |iteration, max_iter, sample_buf| {
+                // Progressive sampling strategy (3-phase approach):
+                // Phase 1 (0-33%): Sample from top 25% high-confidence matches
+                // Phase 2 (33-66%): Sample from top 50% matches
+                // Phase 3 (66-100%): Uniform random sampling
+                let phase = iteration * 3 / max_iter;
+                let (pool_size, use_weighted) = match phase {
+                    0 => ((n / 4).max(min_samples), true), // Top 25%
+                    1 => ((n / 2).max(min_samples), true), // Top 50%
+                    _ => (n, false),                       // Full pool
+                };
 
-        // Pre-allocate buffers
-        let mut sample_indices: Vec<usize> = Vec::with_capacity(min_samples);
-        let mut sample_ref: Vec<DVec2> = Vec::with_capacity(min_samples);
-        let mut sample_target: Vec<DVec2> = Vec::with_capacity(min_samples);
-
-        let mut iterations = 0;
-        let max_iter = self.config.max_iterations;
-
-        // Progressive sampling strategy (3-phase approach):
-        // Phase 1 (0-33%): Sample from top 25% high-confidence matches
-        // Phase 2 (33-66%): Sample from top 50% matches
-        // Phase 3 (66-100%): Uniform random sampling
-        while iterations < max_iter {
-            iterations += 1;
-
-            // Simple 3-phase pool selection
-            let phase = iterations * 3 / max_iter;
-            let (pool_size, use_weighted) = match phase {
-                0 => ((n / 4).max(min_samples), true), // Top 25%
-                1 => ((n / 2).max(min_samples), true), // Top 50%
-                _ => (n, false),                       // Full pool
-            };
-
-            // Sample from the progressive pool
-            if use_weighted {
-                // Weighted sampling from top matches
-                let pool_weight: f64 = sorted_indices[..pool_size]
-                    .iter()
-                    .map(|&i| weights[i])
-                    .sum();
-                weighted_sample_into(
-                    &mut rng,
-                    &sorted_indices[..pool_size],
-                    &weights,
-                    min_samples,
-                    pool_weight,
-                    &mut sample_indices,
-                );
-            } else {
-                // Uniform random sampling (fall back to standard RANSAC behavior)
-                random_sample_into(&mut rng, n, min_samples, &mut sample_indices);
-            }
-
-            // Extract sample points
-            sample_ref.clear();
-            sample_target.clear();
-            for &i in &sample_indices {
-                sample_ref.push(ref_points[i]);
-                sample_target.push(target_points[i]);
-            }
-
-            // Estimate transformation from sample
-            let transform = match estimate_transform(&sample_ref, &sample_target, transform_type) {
-                Some(t) => t,
-                None => continue,
-            };
-
-            // Reject physically implausible hypotheses early (before expensive inlier counting)
-            if !self.is_plausible(&transform) {
-                continue;
-            }
-
-            // Count inliers
-            let (mut inliers, mut score) = count_inliers(
-                ref_points,
-                target_points,
-                &transform,
-                self.config.inlier_threshold,
-            );
-
-            let mut current_transform = transform;
-
-            // Local Optimization
-            if self.config.use_local_optimization && inliers.len() >= min_samples {
-                let (lo_transform, lo_inliers, lo_score) = self.local_optimization(
-                    ref_points,
-                    target_points,
-                    &current_transform,
-                    &inliers,
-                    transform_type,
-                );
-                // Only accept LO result if it's still plausible
-                if self.is_plausible(&lo_transform) {
-                    current_transform = lo_transform;
-                    inliers = lo_inliers;
-                    score = lo_score;
+                if use_weighted {
+                    let pool_weight: f64 = sorted_indices[..pool_size]
+                        .iter()
+                        .map(|&i| weights[i])
+                        .sum();
+                    weighted_sample_into(
+                        &mut rng,
+                        &sorted_indices[..pool_size],
+                        &weights,
+                        min_samples,
+                        pool_weight,
+                        sample_buf,
+                    );
+                } else {
+                    random_sample_into(&mut rng, n, min_samples, sample_buf);
                 }
-            }
-
-            // Update best if improved
-            if score > best_score {
-                best_score = score;
-                best_inliers = inliers;
-                best_transform = Some(current_transform);
-
-                // Adaptive early termination
-                let inlier_ratio = best_inliers.len() as f64 / n as f64;
-                if inlier_ratio >= self.config.min_inlier_ratio {
-                    let adaptive_max =
-                        adaptive_iterations(inlier_ratio, min_samples, self.config.confidence);
-                    if iterations >= adaptive_max {
-                        break;
-                    }
-                }
-            }
-        }
-
-        // Final refinement
-        if let Some(transform) = best_transform
-            && best_inliers.len() >= min_samples
-        {
-            let inlier_ref: Vec<DVec2> = best_inliers.iter().map(|&i| ref_points[i]).collect();
-            let inlier_target: Vec<DVec2> =
-                best_inliers.iter().map(|&i| target_points[i]).collect();
-
-            let refined =
-                refine_transform(&inlier_ref, &inlier_target, transform_type).unwrap_or(transform);
-
-            let (final_inliers, _) = count_inliers(
-                ref_points,
-                target_points,
-                &refined,
-                self.config.inlier_threshold,
-            );
-
-            let inlier_ratio = final_inliers.len() as f64 / n as f64;
-
-            return Some(RansacResult {
-                transform: refined,
-                inliers: final_inliers,
-                iterations,
-                inlier_ratio,
-            });
-        }
-
-        None
+            },
+        )
     }
 
     /// Estimate transformation from star matches using progressive sampling.
@@ -541,18 +455,8 @@ impl RansacEstimator {
 /// Weighted sampling of k unique indices from a pool.
 ///
 /// Samples indices with probability proportional to their weights using
-/// Algorithm A-Res (reservoir sampling with weights).
-///
-/// # Performance Note
-///
-/// This implementation uses a full sort O(n log n) rather than a partial sort
-/// or bounded heap O(n log k). This is acceptable because:
-/// - Pool size is limited by `TriangleMatchConfig::max_stars` (default 200 in pipeline)
-/// - k is typically 2-4 (minimum points for transform estimation)
-/// - The sampling overhead is negligible compared to model fitting
-///
-/// If profiling shows this is a bottleneck, consider using `select_nth_unstable`
-/// for O(n) average case, or a BoundedMaxHeap for O(n log k).
+/// Algorithm A-Res (reservoir sampling with weights). Uses `select_nth_unstable`
+/// for O(n) average-case partitioning instead of a full O(n log n) sort.
 fn weighted_sample_into<R: Rng>(
     rng: &mut R,
     pool: &[usize],
@@ -580,10 +484,12 @@ fn weighted_sample_into<R: Rng>(
         })
         .collect();
 
-    // Partial sort to get top k by key (descending)
-    items_with_keys.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    // Partition so the top k elements (by descending key) are in [0..k]
+    items_with_keys.select_nth_unstable_by(k - 1, |a, b| {
+        b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal)
+    });
 
-    for (idx, _) in items_with_keys.into_iter().take(k) {
+    for &(idx, _) in &items_with_keys[..k] {
         buffer.push(idx);
     }
 }
@@ -615,17 +521,59 @@ fn random_sample_into<R: Rng>(rng: &mut R, n: usize, k: usize, buffer: &mut Vec<
     }
 }
 
-/// Count inliers and compute score.
+/// Check if a sample of points is degenerate (too close together or collinear).
+///
+/// For 2 points: checks if they are nearly coincident.
+/// For 3+ points: checks if any pair is nearly coincident or if all points are collinear.
+fn is_sample_degenerate(points: &[DVec2]) -> bool {
+    const MIN_DIST_SQ: f64 = 1.0; // Minimum 1 pixel apart
+
+    let n = points.len();
+    if n < 2 {
+        return false;
+    }
+
+    // Check all pairs for near-coincidence
+    for i in 0..n {
+        for j in (i + 1)..n {
+            if (points[i] - points[j]).length_squared() < MIN_DIST_SQ {
+                return true;
+            }
+        }
+    }
+
+    // For 3+ points, check collinearity via cross product
+    if n >= 3 {
+        let v0 = points[1] - points[0];
+        let mut all_collinear = true;
+        for p in &points[2..] {
+            let v = *p - points[0];
+            let cross = v0.x * v.y - v0.y * v.x;
+            if cross.abs() > 1.0 {
+                all_collinear = false;
+                break;
+            }
+        }
+        if all_collinear {
+            return true;
+        }
+    }
+
+    false
+}
+
+/// Count inliers and compute MSAC score.
 ///
 /// Uses SIMD acceleration when available (AVX2/SSE on x86_64, NEON on aarch64).
+/// Score = sum(threshold² - dist²) for inliers, using f64 for full precision.
 #[inline]
 fn count_inliers(
     ref_points: &[DVec2],
     target_points: &[DVec2],
     transform: &Transform,
-    threshold: f64,
-) -> (Vec<usize>, usize) {
-    simd::count_inliers_simd(ref_points, target_points, transform, threshold)
+    threshold_sq: f64,
+) -> (Vec<usize>, f64) {
+    simd::count_inliers_simd(ref_points, target_points, transform, threshold_sq)
 }
 
 /// Compute adaptive iteration count for early termination.
@@ -989,13 +937,4 @@ pub(crate) fn centroid(points: &[DVec2]) -> DVec2 {
         sum += *p;
     }
     sum / points.len() as f64
-}
-
-/// Refine transformation using all inlier points.
-pub(crate) fn refine_transform(
-    ref_points: &[DVec2],
-    target_points: &[DVec2],
-    transform_type: TransformType,
-) -> Option<Transform> {
-    estimate_transform(ref_points, target_points, transform_type)
 }

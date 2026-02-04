@@ -1854,3 +1854,82 @@ fn test_plausibility_config_validation_scale_range() {
     });
     assert!(result.is_err(), "min > max scale should panic on validate");
 }
+
+// ── Degeneracy check tests ──────────────────────────────────────────
+
+#[test]
+fn test_degenerate_single_point() {
+    // Single point is never degenerate
+    assert!(!is_sample_degenerate(&[DVec2::new(1.0, 2.0)]));
+}
+
+#[test]
+fn test_degenerate_coincident_pair() {
+    // Two nearly-identical points are degenerate
+    let pts = vec![DVec2::new(5.0, 5.0), DVec2::new(5.0, 5.5)];
+    assert!(is_sample_degenerate(&pts));
+}
+
+#[test]
+fn test_non_degenerate_pair() {
+    // Two points far apart are fine
+    let pts = vec![DVec2::new(0.0, 0.0), DVec2::new(10.0, 0.0)];
+    assert!(!is_sample_degenerate(&pts));
+}
+
+#[test]
+fn test_degenerate_collinear_triple() {
+    // Three collinear points are degenerate even if well-spaced
+    let pts = vec![
+        DVec2::new(0.0, 0.0),
+        DVec2::new(10.0, 0.0),
+        DVec2::new(20.0, 0.0),
+    ];
+    assert!(is_sample_degenerate(&pts));
+}
+
+#[test]
+fn test_non_degenerate_triangle() {
+    // Three points forming a triangle are fine
+    let pts = vec![
+        DVec2::new(0.0, 0.0),
+        DVec2::new(10.0, 0.0),
+        DVec2::new(5.0, 10.0),
+    ];
+    assert!(!is_sample_degenerate(&pts));
+}
+
+#[test]
+fn test_degenerate_coincident_in_quad() {
+    // Four points where two are nearly coincident
+    let pts = vec![
+        DVec2::new(0.0, 0.0),
+        DVec2::new(10.0, 0.0),
+        DVec2::new(10.0, 10.0),
+        DVec2::new(0.1, 0.1), // too close to first
+    ];
+    assert!(is_sample_degenerate(&pts));
+}
+
+#[test]
+fn test_degenerate_collinear_quad() {
+    // Four collinear points
+    let pts = vec![
+        DVec2::new(0.0, 0.0),
+        DVec2::new(5.0, 0.0),
+        DVec2::new(10.0, 0.0),
+        DVec2::new(15.0, 0.0),
+    ];
+    assert!(is_sample_degenerate(&pts));
+}
+
+#[test]
+fn test_non_degenerate_quad() {
+    let pts = vec![
+        DVec2::new(0.0, 0.0),
+        DVec2::new(100.0, 0.0),
+        DVec2::new(100.0, 100.0),
+        DVec2::new(0.0, 100.0),
+    ];
+    assert!(!is_sample_degenerate(&pts));
+}
