@@ -61,6 +61,32 @@ fn test_estimate_similarity() {
 }
 
 #[test]
+fn test_estimate_euclidean() {
+    let ref_points = vec![
+        DVec2::new(0.0, 0.0),
+        DVec2::new(10.0, 0.0),
+        DVec2::new(0.0, 10.0),
+        DVec2::new(10.0, 10.0),
+    ];
+
+    let angle = PI / 12.0; // 15 degrees
+    let t = DVec2::new(5.0, -3.0);
+
+    let known = Transform::euclidean(t, angle);
+    let target_points: Vec<DVec2> = ref_points.iter().map(|&p| known.apply(p)).collect();
+
+    let estimated =
+        estimate_transform(&ref_points, &target_points, TransformType::Euclidean).unwrap();
+
+    assert!(approx_eq(estimated.rotation_angle(), angle, 0.01));
+    assert!(approx_eq(estimated.scale_factor(), 1.0, 0.01));
+
+    let est_t = estimated.translation_components();
+    assert!(approx_eq(est_t.x, t.x, 0.1));
+    assert!(approx_eq(est_t.y, t.y, 0.1));
+}
+
+#[test]
 fn test_estimate_affine() {
     let ref_points = vec![
         DVec2::new(0.0, 0.0),
