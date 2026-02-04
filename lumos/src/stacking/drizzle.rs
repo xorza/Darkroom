@@ -615,12 +615,12 @@ fn compute_square_overlap(
 /// Transform a point using the transformation matrix.
 ///
 /// The matrix is stored in row-major order:
-/// | a  b  c |   | data[0] data[1] data[2] |
-/// | d  e  f | = | data[3] data[4] data[5] |
-/// | g  h  1 |   | data[6] data[7] data[8] |
+/// | a  b  c |   | m[0] m[1] m[2] |
+/// | d  e  f | = | m[3] m[4] m[5] |
+/// | g  h  1 |   | m[6] m[7] m[8] |
 #[inline]
 fn transform_point(transform: &Transform, x: f32, y: f32) -> (f32, f32) {
-    let m = &transform.data;
+    let m = transform.matrix.as_array();
     let x64 = x as f64;
     let y64 = y as f64;
     let w = m[6] * x64 + m[7] * y64 + m[8];

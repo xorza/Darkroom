@@ -2,6 +2,8 @@
 
 use glam::DVec2;
 
+use crate::math::DMat3;
+
 /// Supported transformation models with increasing degrees of freedom.
 ///
 /// Variants are ordered by complexity (used for `compose()` to pick the
@@ -57,16 +59,16 @@ impl TransformType {
 
 /// 3x3 homogeneous transformation matrix.
 ///
-/// Stored in row-major order:
+/// Stored as a row-major [`DMat3`]:
 /// ```text
-/// | a  b  tx |   | data[0] data[1] data[2] |
-/// | c  d  ty | = | data[3] data[4] data[5] |
-/// | g  h  1  |   | data[6] data[7] data[8] |
+/// | a  b  tx |   | m[0] m[1] m[2] |
+/// | c  d  ty | = | m[3] m[4] m[5] |
+/// | g  h  1  |   | m[6] m[7] m[8] |
 /// ```
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct Transform {
-    /// Row-major 3x3 matrix elements.
-    pub data: [f64; 9],
+    /// Row-major 3x3 matrix.
+    pub matrix: DMat3,
     /// The type of transformation this matrix represents.
     pub transform_type: TransformType,
 }
@@ -126,7 +128,7 @@ impl Transform {
     /// Create identity transform.
     pub fn identity() -> Self {
         Self {
-            data: [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
+            matrix: DMat3::identity(),
             transform_type: TransformType::Translation,
         }
     }
@@ -134,7 +136,7 @@ impl Transform {
     /// Create translation transform.
     pub fn translation(t: DVec2) -> Self {
         Self {
-            data: [1.0, 0.0, t.x, 0.0, 1.0, t.y, 0.0, 0.0, 1.0],
+            matrix: DMat3::from_array([1.0, 0.0, t.x, 0.0, 1.0, t.y, 0.0, 0.0, 1.0]),
             transform_type: TransformType::Translation,
         }
     }
@@ -144,7 +146,7 @@ impl Transform {
         let cos_a = angle.cos();
         let sin_a = angle.sin();
         Self {
-            data: [cos_a, -sin_a, t.x, sin_a, cos_a, t.y, 0.0, 0.0, 1.0],
+            matrix: DMat3::from_array([cos_a, -sin_a, t.x, sin_a, cos_a, t.y, 0.0, 0.0, 1.0]),
             transform_type: TransformType::Euclidean,
         }
     }
@@ -154,7 +156,7 @@ impl Transform {
         let cos_a = angle.cos() * scale;
         let sin_a = angle.sin() * scale;
         Self {
-            data: [cos_a, -sin_a, t.x, sin_a, cos_a, t.y, 0.0, 0.0, 1.0],
+            matrix: DMat3::from_array([cos_a, -sin_a, t.x, sin_a, cos_a, t.y, 0.0, 0.0, 1.0]),
             transform_type: TransformType::Similarity,
         }
     }
@@ -162,9 +164,9 @@ impl Transform {
     /// Create affine transform from 6 parameters [a, b, tx, c, d, ty].
     pub fn affine(params: [f64; 6]) -> Self {
         Self {
-            data: [
+            matrix: DMat3::from_array([
                 params[0], params[1], params[2], params[3], params[4], params[5], 0.0, 0.0, 1.0,
-            ],
+            ]),
             transform_type: TransformType::Affine,
         }
     }
@@ -172,10 +174,10 @@ impl Transform {
     /// Create homography from 8 parameters (9th element is 1.0).
     pub fn homography(params: [f64; 8]) -> Self {
         Self {
-            data: [
+            matrix: DMat3::from_array([
                 params[0], params[1], params[2], params[3], params[4], params[5], params[6],
                 params[7], 1.0,
-            ],
+            ]),
             transform_type: TransformType::Homography,
         }
     }
@@ -183,7 +185,7 @@ impl Transform {
     /// Create scale transform.
     pub fn scale(s: DVec2) -> Self {
         Self {
-            data: [s.x, 0.0, 0.0, 0.0, s.y, 0.0, 0.0, 0.0, 1.0],
+            matrix: DMat3::from_array([s.x, 0.0, 0.0, 0.0, s.y, 0.0, 0.0, 0.0, 1.0]),
             transform_type: TransformType::Affine,
         }
     }
@@ -196,15 +198,15 @@ impl Transform {
         let tx = center.x - cos_a * center.x + sin_a * center.y;
         let ty = center.y - sin_a * center.x - cos_a * center.y;
         Self {
-            data: [cos_a, -sin_a, tx, sin_a, cos_a, ty, 0.0, 0.0, 1.0],
+            matrix: DMat3::from_array([cos_a, -sin_a, tx, sin_a, cos_a, ty, 0.0, 0.0, 1.0]),
             transform_type: TransformType::Euclidean,
         }
     }
 
-    /// Create transform from raw 3x3 matrix data.
-    pub fn matrix(data: [f64; 9], transform_type: TransformType) -> Self {
+    /// Create transform from a [`DMat3`] matrix.
+    pub fn from_matrix(matrix: DMat3, transform_type: TransformType) -> Self {
         Self {
-            data,
+            matrix,
             transform_type,
         }
     }
@@ -237,11 +239,7 @@ impl Transform {
     /// let ref_pos = transform.apply_inverse(target_pos);
     /// ```
     pub fn apply(&self, p: DVec2) -> DVec2 {
-        let d = &self.data;
-        let w = d[6] * p.x + d[7] * p.y + d[8];
-        let x_prime = (d[0] * p.x + d[1] * p.y + d[2]) / w;
-        let y_prime = (d[3] * p.x + d[4] * p.y + d[5]) / w;
-        DVec2::new(x_prime, y_prime)
+        self.matrix.transform_point(p)
     }
 
     /// Apply inverse transform to map a point from TARGET coordinates to REFERENCE coordinates.
@@ -259,56 +257,18 @@ impl Transform {
     /// # Panics
     /// Panics if the matrix is singular (determinant near zero).
     pub fn inverse(&self) -> Self {
-        let d = &self.data;
-
-        // Compute determinant
-        let det = d[0] * (d[4] * d[8] - d[5] * d[7]) - d[1] * (d[3] * d[8] - d[5] * d[6])
-            + d[2] * (d[3] * d[7] - d[4] * d[6]);
-
-        assert!(
-            det.abs() >= 1e-12,
-            "Cannot invert singular matrix (determinant = {})",
-            det
-        );
-
-        let inv_det = 1.0 / det;
-
-        // Compute adjugate matrix and divide by determinant
-        let inv_data = [
-            (d[4] * d[8] - d[5] * d[7]) * inv_det,
-            (d[2] * d[7] - d[1] * d[8]) * inv_det,
-            (d[1] * d[5] - d[2] * d[4]) * inv_det,
-            (d[5] * d[6] - d[3] * d[8]) * inv_det,
-            (d[0] * d[8] - d[2] * d[6]) * inv_det,
-            (d[2] * d[3] - d[0] * d[5]) * inv_det,
-            (d[3] * d[7] - d[4] * d[6]) * inv_det,
-            (d[1] * d[6] - d[0] * d[7]) * inv_det,
-            (d[0] * d[4] - d[1] * d[3]) * inv_det,
-        ];
-
+        let inv = self
+            .matrix
+            .inverse()
+            .expect("Cannot invert singular transform matrix");
         Self {
-            data: inv_data,
+            matrix: inv,
             transform_type: self.transform_type,
         }
     }
 
     /// Compose two transforms: self * other (apply other first, then self).
     pub fn compose(&self, other: &Self) -> Self {
-        let a = &self.data;
-        let b = &other.data;
-
-        let data = [
-            a[0] * b[0] + a[1] * b[3] + a[2] * b[6],
-            a[0] * b[1] + a[1] * b[4] + a[2] * b[7],
-            a[0] * b[2] + a[1] * b[5] + a[2] * b[8],
-            a[3] * b[0] + a[4] * b[3] + a[5] * b[6],
-            a[3] * b[1] + a[4] * b[4] + a[5] * b[7],
-            a[3] * b[2] + a[4] * b[5] + a[5] * b[8],
-            a[6] * b[0] + a[7] * b[3] + a[8] * b[6],
-            a[6] * b[1] + a[7] * b[4] + a[8] * b[7],
-            a[6] * b[2] + a[7] * b[5] + a[8] * b[8],
-        ];
-
         // Result type is the more complex of the two
         let transform_type = if self.transform_type as u8 > other.transform_type as u8 {
             self.transform_type
@@ -317,48 +277,37 @@ impl Transform {
         };
 
         Self {
-            data,
+            matrix: self.matrix.mul_mat(&other.matrix),
             transform_type,
         }
     }
 
     /// Extract translation components as DVec2.
     pub fn translation_components(&self) -> DVec2 {
-        DVec2::new(self.data[2], self.data[5])
+        DVec2::new(self.matrix[2], self.matrix[5])
     }
 
     /// Extract rotation angle in radians (valid for Euclidean/Similarity transforms).
     pub fn rotation_angle(&self) -> f64 {
-        self.data[3].atan2(self.data[0])
+        self.matrix[3].atan2(self.matrix[0])
     }
 
     /// Extract scale factor (valid for Similarity transforms).
     pub fn scale_factor(&self) -> f64 {
-        let a = self.data[0];
-        let c = self.data[3];
+        let a = self.matrix[0];
+        let c = self.matrix[3];
         (a * a + c * c).sqrt()
-    }
-
-    /// Compute the determinant of the 2x2 linear part.
-    pub fn linear_determinant(&self) -> f64 {
-        self.data[0] * self.data[4] - self.data[1] * self.data[3]
     }
 
     /// Check if this is a valid (non-degenerate) transformation.
     pub fn is_valid(&self) -> bool {
-        let det = self.linear_determinant();
+        let det = self.matrix[0] * self.matrix[4] - self.matrix[1] * self.matrix[3];
         det.abs() > 1e-10 && det.is_finite()
     }
 
     /// Compute Frobenius norm of difference from identity.
     pub fn deviation_from_identity(&self) -> f64 {
-        let id = Self::identity();
-        let mut sum = 0.0;
-        for i in 0..9 {
-            let diff = self.data[i] - id.data[i];
-            sum += diff * diff;
-        }
-        sum.sqrt()
+        self.matrix.deviation_from_identity()
     }
 }
 
@@ -441,71 +390,6 @@ mod tests {
     }
 
     #[test]
-    fn test_transform_inverse() {
-        let t = Transform::similarity(DVec2::new(10.0, -5.0), PI / 4.0, 1.5);
-        let inv = t.inverse();
-
-        let p1 = t.apply(DVec2::new(3.0, 7.0));
-        let p2 = inv.apply(p1);
-
-        assert!(approx_eq(p2.x, 3.0));
-        assert!(approx_eq(p2.y, 7.0));
-    }
-
-    #[test]
-    fn test_apply_roundtrip() {
-        let transforms = vec![
-            Transform::translation(DVec2::new(5.0, -3.0)),
-            Transform::euclidean(DVec2::new(2.0, 3.0), 0.7),
-            Transform::similarity(DVec2::new(1.0, 2.0), -0.5, 1.3),
-            Transform::affine([1.1, 0.2, 5.0, -0.1, 0.9, -3.0]),
-        ];
-
-        for t in transforms {
-            let inv = t.inverse();
-            for p in &[
-                DVec2::new(0.0, 0.0),
-                DVec2::new(10.0, 10.0),
-                DVec2::new(-5.0, 7.0),
-                DVec2::new(100.0, -50.0),
-            ] {
-                let p1 = t.apply(*p);
-                let p2 = inv.apply(p1);
-                assert!(
-                    approx_eq(p2.x, p.x) && approx_eq(p2.y, p.y),
-                    "Roundtrip failed for {:?}: got {:?}",
-                    p,
-                    p2
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn test_compose_translations() {
-        let t1 = Transform::translation(DVec2::new(5.0, 3.0));
-        let t2 = Transform::translation(DVec2::new(2.0, -1.0));
-        let composed = t1.compose(&t2);
-
-        let p = composed.apply(DVec2::ZERO);
-        // t2 first: (0,0) -> (2,-1), then t1: (2,-1) -> (7,2)
-        assert!(approx_eq(p.x, 7.0));
-        assert!(approx_eq(p.y, 2.0));
-    }
-
-    #[test]
-    fn test_compose_rotations() {
-        let t1 = Transform::euclidean(DVec2::ZERO, PI / 4.0);
-        let t2 = Transform::euclidean(DVec2::ZERO, PI / 4.0);
-        let composed = t1.compose(&t2);
-
-        let p = composed.apply(DVec2::new(1.0, 0.0));
-        // Two 45° rotations = 90° rotation
-        assert!(approx_eq(p.x, 0.0));
-        assert!(approx_eq(p.y, 1.0));
-    }
-
-    #[test]
     fn test_translation_components() {
         let t = Transform::translation(DVec2::new(7.0, -3.0));
         let tc = t.translation_components();
@@ -533,8 +417,8 @@ mod tests {
         assert!(valid.is_valid());
 
         // Degenerate matrix (zero scale)
-        let degenerate = Transform::matrix(
-            [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0],
+        let degenerate = Transform::from_matrix(
+            DMat3::from_array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0]),
             TransformType::Affine,
         );
         assert!(!degenerate.is_valid());

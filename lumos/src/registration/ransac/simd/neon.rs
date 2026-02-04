@@ -27,7 +27,7 @@ pub unsafe fn count_inliers_neon(
         let mut inliers = Vec::with_capacity(len);
         let mut total_score = 0usize;
 
-        let t = &transform.data;
+        let t = transform.matrix.as_array();
 
         let a = vdupq_n_f64(t[0]);
         let b = vdupq_n_f64(t[1]);

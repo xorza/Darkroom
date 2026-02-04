@@ -742,10 +742,10 @@ impl MultiScaleRegistrator {
 fn scale_transform(transform: &Transform, scale: f64) -> Transform {
     // For a transform T that works at scale s, the equivalent at scale 1 is:
     // Scale the translation by s, keep rotation/scale the same
-    let mut data = transform.data;
-    data[2] *= scale; // tx
-    data[5] *= scale; // ty
-    Transform::matrix(data, transform.transform_type)
+    let mut matrix = transform.matrix;
+    matrix[2] *= scale; // tx
+    matrix[5] *= scale; // ty
+    Transform::from_matrix(matrix, transform.transform_type)
 }
 
 /// Build an image pyramid by successive downsampling.
@@ -928,7 +928,7 @@ fn recover_matches(
 ) -> (Transform, Vec<(usize, usize)>) {
     let target_tree = match KdTree::build(target_stars) {
         Some(tree) => tree,
-        None => return (transform.clone(), inlier_matches.to_vec()),
+        None => return (*transform, inlier_matches.to_vec()),
     };
 
     let matched_ref: std::collections::HashSet<usize> =
@@ -959,7 +959,7 @@ fn recover_matches(
     }
 
     if all_matches.len() == inlier_matches.len() {
-        return (transform.clone(), all_matches);
+        return (*transform, all_matches);
     }
 
     let all_ref: Vec<DVec2> = all_matches.iter().map(|&(r, _)| ref_stars[r]).collect();
@@ -967,6 +967,6 @@ fn recover_matches(
 
     match estimate_transform(&all_ref, &all_target, transform_type) {
         Some(new_transform) => (new_transform, all_matches),
-        None => (transform.clone(), inlier_matches.to_vec()),
+        None => (*transform, inlier_matches.to_vec()),
     }
 }

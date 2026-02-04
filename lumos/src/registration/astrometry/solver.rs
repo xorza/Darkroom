@@ -443,7 +443,7 @@ impl PlateSolver {
         // We need to relate this to sky coordinates
 
         // Extract scale and rotation from transform
-        let m = &transform.data;
+        let m = transform.matrix.as_array();
         let scale_x = (m[0] * m[0] + m[3] * m[3]).sqrt();
         let scale_y = (m[1] * m[1] + m[4] * m[4]).sqrt();
         let avg_scale = (scale_x + scale_y) / 2.0;

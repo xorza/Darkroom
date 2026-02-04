@@ -14,6 +14,7 @@
 
 mod bbox;
 pub mod deviation;
+mod dmat3;
 pub mod fast_exp;
 pub mod fast_pow;
 pub mod statistics;
@@ -31,6 +32,7 @@ pub mod scalar {
 // =============================================================================
 
 pub use bbox::Aabb;
+pub use dmat3::DMat3;
 pub use vec2::Vec2us;
 
 // Re-export commonly used functions at top level for convenience

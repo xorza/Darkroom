@@ -31,7 +31,7 @@ pub unsafe fn count_inliers_avx2(
         // Transform: [a, b, c, d, e, f, g, h, 1] in row-major
         // x' = (a*x + b*y + c) / (g*x + h*y + 1)
         // y' = (d*x + e*y + f) / (g*x + h*y + 1)
-        let t = &transform.data;
+        let t = transform.matrix.as_array();
 
         let a = _mm256_set1_pd(t[0]);
         let b = _mm256_set1_pd(t[1]);
@@ -148,7 +148,7 @@ pub unsafe fn count_inliers_sse2(
         let mut inliers = Vec::with_capacity(len);
         let mut total_score = 0usize;
 
-        let t = &transform.data;
+        let t = transform.matrix.as_array();
 
         let a = _mm_set1_pd(t[0]);
         let b = _mm_set1_pd(t[1]);
