@@ -5,7 +5,7 @@
 use crate::common::Buffer2;
 use crate::math::{Aabb, Vec2us};
 use crate::star_detection::BackgroundEstimate;
-use crate::star_detection::centroid::compute_centroid;
+use crate::star_detection::centroid::measure_star;
 use crate::star_detection::config::Config;
 use crate::star_detection::region::Region;
 use crate::star_detection::tests::common::output::{
@@ -102,7 +102,7 @@ fn test_centroid_accuracy() {
             area: 50,
         };
 
-        let result = compute_centroid(&pixels_buf, &background, &candidate, &config);
+        let result = measure_star(&pixels_buf, &background, &candidate, &config);
 
         if let Some(star) = result {
             let error = ((star.pos.x as f32 - true_x).powi(2)
@@ -146,7 +146,7 @@ fn test_centroid_accuracy() {
             area: 50,
         };
 
-        let result = compute_centroid(&pixels_buf, &background, &candidate, &config);
+        let result = measure_star(&pixels_buf, &background, &candidate, &config);
 
         if let Some(star) = result {
             draw_cross(
@@ -269,7 +269,7 @@ fn test_centroid_snr() {
             area: 50,
         };
 
-        let result = compute_centroid(&pixels_buf, &background, &candidate, &config);
+        let result = measure_star(&pixels_buf, &background, &candidate, &config);
 
         if let Some(star) = result {
             let error = ((star.pos.x - *true_x as f64).powi(2)

@@ -6,7 +6,7 @@
 use crate::common::Buffer2;
 
 use super::super::background::BackgroundEstimate;
-use super::super::centroid::compute_centroid;
+use super::super::centroid::measure_star;
 use super::super::config::Config;
 use super::super::region::Region;
 use super::super::star::Star;
@@ -25,6 +25,6 @@ pub fn measure(
 
     regions
         .par_iter()
-        .filter_map(|region| compute_centroid(pixels, stats, region, config))
+        .filter_map(|region| measure_star(pixels, stats, region, config))
         .collect()
 }

@@ -8,7 +8,7 @@ use crate::math::{mad_f32_with_scratch, median_f32_mut};
 
 use super::super::background::BackgroundEstimate;
 use super::super::buffer_pool::BufferPool;
-use super::super::centroid::compute_centroid;
+use super::super::centroid::measure_star;
 use super::super::config::Config;
 use super::super::region::Region;
 use super::super::star::Star;
@@ -131,7 +131,7 @@ fn compute_centroids(
 
     regions
         .par_iter()
-        .filter_map(|region| compute_centroid(pixels, background, region, config))
+        .filter_map(|region| measure_star(pixels, background, region, config))
         .collect()
 }
 

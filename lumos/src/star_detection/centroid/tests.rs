@@ -62,7 +62,7 @@ fn test_centroid_accuracy() {
     assert_eq!(candidates.len(), 1);
 
     let star =
-        compute_centroid(&pixels, &bg, &candidates[0], &config).expect("Should compute centroid");
+        measure_star(&pixels, &bg, &candidates[0], &config).expect("Should compute centroid");
 
     let error_x = (star.pos.x - true_pos.x as f64).abs();
     let error_y = (star.pos.y - true_pos.y as f64).abs();
@@ -110,7 +110,7 @@ fn test_fwhm_estimation() {
     assert_eq!(candidates.len(), 1);
 
     let star =
-        compute_centroid(&pixels, &bg, &candidates[0], &config).expect("Should compute centroid");
+        measure_star(&pixels, &bg, &candidates[0], &config).expect("Should compute centroid");
 
     // FWHM estimation from weighted second moments has systematic bias due to
     // finite aperture and background noise - 40% tolerance is reasonable
@@ -141,7 +141,7 @@ fn test_circular_star_eccentricity() {
     let candidates = detect_stars_test(&pixels, None, &bg, &config);
 
     let star =
-        compute_centroid(&pixels, &bg, &candidates[0], &config).expect("Should compute centroid");
+        measure_star(&pixels, &bg, &candidates[0], &config).expect("Should compute centroid");
 
     assert!(
         star.eccentricity < 0.3,
@@ -167,7 +167,7 @@ fn test_snr_positive() {
     let candidates = detect_stars_test(&pixels, None, &bg, &config);
 
     let star =
-        compute_centroid(&pixels, &bg, &candidates[0], &config).expect("Should compute centroid");
+        measure_star(&pixels, &bg, &candidates[0], &config).expect("Should compute centroid");
 
     assert!(star.snr > 0.0, "SNR should be positive");
     assert!(star.flux > 0.0, "Flux should be positive");
@@ -476,7 +476,7 @@ fn test_refine_centroid_iterative_convergence() {
     let pixels = make_gaussian_star(width, height, true_pos, 2.5, 0.8);
     let bg = make_uniform_background(width, height, 0.1, 0.01);
 
-    // Simulate multiple iterations like compute_centroid does
+    // Simulate multiple iterations like measure_star does
     let mut pos = Vec2::splat(32.0);
 
     for iteration in 0..MAX_MOMENTS_ITERATIONS {
@@ -1150,11 +1150,11 @@ fn test_eccentricity_increases_with_elongation() {
 }
 
 // =============================================================================
-// compute_centroid Integration Tests
+// measure_star Integration Tests
 // =============================================================================
 
 #[test]
-fn test_compute_centroid_returns_none_for_edge_candidate() {
+fn test_measure_star_returns_none_for_edge_candidate() {
     let width = 64;
     let height = 64;
     let pixels = Buffer2::new_filled(width, height, 0.5f32);
@@ -1169,7 +1169,7 @@ fn test_compute_centroid_returns_none_for_edge_candidate() {
         area: 18,
     };
 
-    let result = compute_centroid(&pixels, &bg, &region, &config);
+    let result = measure_star(&pixels, &bg, &region, &config);
     assert!(
         result.is_none(),
         "Should reject candidate too close to edge"
@@ -1177,7 +1177,7 @@ fn test_compute_centroid_returns_none_for_edge_candidate() {
 }
 
 #[test]
-fn test_compute_centroid_multiple_stars_independent() {
+fn test_measure_star_multiple_stars_independent() {
     let width = 128;
     let height = 128;
 
@@ -1235,7 +1235,7 @@ fn test_compute_centroid_multiple_stars_independent() {
     // Compute centroids for both
     let stars: Vec<_> = candidates
         .iter()
-        .filter_map(|c| compute_centroid(&pixels, &bg, c, &config))
+        .filter_map(|c| measure_star(&pixels, &bg, c, &config))
         .collect();
 
     assert_eq!(stars.len(), 2, "Should compute centroids for both stars");
@@ -1279,7 +1279,7 @@ fn test_circular_star_roundness() {
     assert_eq!(candidates.len(), 1);
 
     let star =
-        compute_centroid(&pixels, &bg, &candidates[0], &config).expect("Should compute centroid");
+        measure_star(&pixels, &bg, &candidates[0], &config).expect("Should compute centroid");
 
     // Circular star should have roundness close to 0
     assert!(
@@ -1333,7 +1333,7 @@ fn test_elongated_x_star_roundness() {
     assert!(!candidates.is_empty());
 
     let star =
-        compute_centroid(&pixels, &bg, &candidates[0], &config).expect("Should compute centroid");
+        measure_star(&pixels, &bg, &candidates[0], &config).expect("Should compute centroid");
 
     // X-elongated star: more flux in x marginal -> higher Hx -> negative roundness1
     // (roundness1 = (Hx - Hy) / (Hx + Hy), but Hx is sum in y direction)
@@ -1387,7 +1387,7 @@ fn test_asymmetric_star_roundness2() {
     assert!(!candidates.is_empty());
 
     let star =
-        compute_centroid(&pixels, &bg, &candidates[0], &config).expect("Should compute centroid");
+        measure_star(&pixels, &bg, &candidates[0], &config).expect("Should compute centroid");
 
     // Asymmetric source should have higher roundness2 (symmetry metric)
     // The tail adds more flux to the right side
@@ -1417,7 +1417,7 @@ fn test_laplacian_snr_computed_for_star() {
     assert_eq!(candidates.len(), 1);
 
     let star =
-        compute_centroid(&pixels, &bg, &candidates[0], &config).expect("Should compute centroid");
+        measure_star(&pixels, &bg, &candidates[0], &config).expect("Should compute centroid");
 
     // Laplacian SNR should be computed (non-negative value)
     // The actual value depends on the noise estimate from background
@@ -1504,7 +1504,7 @@ fn test_weighted_centroid_precision_statistical() {
                 continue;
             }
 
-            if let Some(star) = compute_centroid(&pixels, &bg, &candidates[0], &config) {
+            if let Some(star) = measure_star(&pixels, &bg, &candidates[0], &config) {
                 let error = ((star.pos.x - true_pos.x as f64).powi(2)
                     + (star.pos.y - true_pos.y as f64).powi(2))
                 .sqrt() as f32;
@@ -2709,7 +2709,7 @@ fn test_local_annulus_background_uniform() {
 
     assert!(!candidates.is_empty(), "Should detect star");
 
-    let star = compute_centroid(&pixels, &bg, &candidates[0], &config);
+    let star = measure_star(&pixels, &bg, &candidates[0], &config);
     assert!(star.is_some(), "Should compute centroid with LocalAnnulus");
 
     let star = star.unwrap();
@@ -2742,7 +2742,7 @@ fn test_local_annulus_vs_global_map() {
     };
     let candidates = detect_stars_test(&pixels, None, &bg, &config_global);
     let star_global =
-        compute_centroid(&pixels, &bg, &candidates[0], &config_global).expect("global centroid");
+        measure_star(&pixels, &bg, &candidates[0], &config_global).expect("global centroid");
 
     // Detect with LocalAnnulus
     let config_annulus = Config {
@@ -2750,7 +2750,7 @@ fn test_local_annulus_vs_global_map() {
         ..Default::default()
     };
     let star_annulus =
-        compute_centroid(&pixels, &bg, &candidates[0], &config_annulus).expect("annulus centroid");
+        measure_star(&pixels, &bg, &candidates[0], &config_annulus).expect("annulus centroid");
 
     // Both should give similar position (within 0.5 pixels)
     let pos_diff = ((star_global.pos.x - star_annulus.pos.x).powi(2)
@@ -2794,7 +2794,7 @@ fn test_local_annulus_near_edge_fallback() {
 
     if !candidates.is_empty() {
         // Should still work (falls back to global if annulus doesn't have enough pixels)
-        let star = compute_centroid(&pixels, &bg, &candidates[0], &config);
+        let star = measure_star(&pixels, &bg, &candidates[0], &config);
         if let Some(s) = star {
             assert!(s.flux > 0.0, "Flux should be positive");
         }
