@@ -149,20 +149,35 @@ impl PhaseCorrelationConfig {
 // =============================================================================
 
 /// RANSAC configuration.
+///
+/// Defaults are calibrated against industry standards:
+/// - OpenCV `findHomography`: threshold=3.0, iterations=2000, confidence=0.995
+/// - Astroalign: pixel_tol=2.0
+/// - PixInsight StarAlignment: RANSAC tolerance=2.0, iterations=2000
+///
+/// Our defaults use threshold=2.0 (tighter than OpenCV for sub-pixel astronomy),
+/// iterations=2000 (matches OpenCV/PixInsight for reliability), and confidence=0.995
+/// (OpenCV default; avoids overly aggressive early termination that 0.999 can cause).
 #[derive(Debug, Clone)]
 pub struct RansacConfig {
     /// Maximum iterations.
     pub max_iterations: usize,
     /// Inlier distance threshold in pixels.
+    /// OpenCV default is 3.0, Astroalign uses 2.0. We use 2.0 for sub-pixel astronomy.
     pub inlier_threshold: f64,
     /// Target confidence for early termination.
+    /// OpenCV uses 0.995. Higher values (e.g. 0.999) can cause premature termination
+    /// when a spurious model is found early with few inliers.
     pub confidence: f64,
     /// Minimum inlier ratio to accept model.
+    /// Set to 0.3 to handle partial overlap and noisy match sets.
+    /// Astroalign uses 0.8 but operates on pre-filtered control points.
     pub min_inlier_ratio: f64,
     /// Random seed for reproducibility (None for random).
     pub seed: Option<u64>,
     /// Enable Local Optimization (LO-RANSAC).
     /// When enabled, promising hypotheses are refined iteratively.
+    /// Typically improves inlier count by 10-20% (Chum et al., 2003).
     pub use_local_optimization: bool,
     /// Maximum iterations for local optimization step.
     pub lo_max_iterations: usize,
@@ -171,10 +186,10 @@ pub struct RansacConfig {
 impl Default for RansacConfig {
     fn default() -> Self {
         Self {
-            max_iterations: 1000,
+            max_iterations: 2000,
             inlier_threshold: 2.0,
-            confidence: 0.999,
-            min_inlier_ratio: 0.5,
+            confidence: 0.995,
+            min_inlier_ratio: 0.3,
             seed: None,
             use_local_optimization: true,
             lo_max_iterations: 10,
@@ -213,15 +228,27 @@ impl RansacConfig {
 // =============================================================================
 
 /// Configuration for triangle matching.
+///
+/// Defaults are based on industry practice:
+/// - Siril uses brightest 20 stars with brute-force O(n^3) triangle formation.
+///   We use k-d tree based formation on 200 stars for O(n*k^2) scaling.
+/// - Astroalign uses 50 control points with 5 nearest neighbors per star
+///   and KDTree search radius 0.02 for invariant matching.
+/// - Our 1% ratio tolerance is stricter than Astroalign's 0.02 radius but
+///   we compensate with a larger star count (200 vs 50).
 #[derive(Debug, Clone)]
 pub struct TriangleMatchConfig {
     /// Maximum number of stars to use (brightest N).
+    /// Siril uses 20 (brute-force), Astroalign uses 50, we use 200 with k-d tree.
     pub max_stars: usize,
     /// Tolerance for side ratio comparison.
+    /// 1% tolerance provides good selectivity while allowing for centroid noise.
     pub ratio_tolerance: f64,
     /// Minimum votes required to accept a match.
+    /// A star pair must be confirmed by at least this many independent triangles.
     pub min_votes: usize,
     /// Number of hash table bins per dimension.
+    /// 100x100 gives 10,000 bins, providing fine-grained ratio discrimination.
     pub hash_bins: usize,
     /// Check orientation (set false to handle mirrored images).
     pub check_orientation: bool,
@@ -239,7 +266,7 @@ impl Default for TriangleMatchConfig {
             min_votes: 3,
             hash_bins: 100,
             check_orientation: true,
-            two_step_matching: false, // Disabled by default for backwards compatibility
+            two_step_matching: true,
         }
     }
 }
@@ -359,16 +386,31 @@ impl SipCorrectionConfig {
 }
 
 /// Registration configuration.
+///
+/// Defaults target reasonable precision and quality for typical astrophotography:
+/// - Homography transform (8 DOF) — Siril's default, handles wide-field perspective.
+///   Similarity is insufficient for wide-field lenses; Homography is robust for both
+///   narrow and wide fields.
+/// - 2.0 pixel max residual — matches Astroalign/PixInsight tolerance. 1.0 is too
+///   strict and rejects valid registrations with slight distortion.
+/// - Spatial distribution enabled — ensures star coverage across the field, critical
+///   for accurate distortion modeling on wide-field images.
 #[derive(Debug, Clone)]
 pub struct RegistrationConfig {
     /// Maximum transformation type to consider.
+    /// Default is Homography (8 DOF), which is Siril's default and the most robust
+    /// general-purpose choice. Use Similarity for narrow-field or well-corrected optics.
     pub transform_type: TransformType,
 
     /// Minimum stars required for matching.
     pub min_stars_for_matching: usize,
     /// Minimum matched star pairs required.
+    /// Siril uses 10, we use 8 as a balanced minimum that ensures statistical
+    /// robustness without being too strict for sparse fields.
     pub min_matched_stars: usize,
     /// Maximum acceptable RMS error in pixels.
+    /// Astroalign uses 2.0, PixInsight starts at 2.0. Our default of 2.0 avoids
+    /// rejecting valid registrations that have slight optical distortion.
     pub max_residual_pixels: f64,
 
     /// Use spatial distribution when selecting stars for matching.
@@ -399,10 +441,10 @@ pub struct RegistrationConfig {
 impl Default for RegistrationConfig {
     fn default() -> Self {
         Self {
-            transform_type: TransformType::Similarity,
+            transform_type: TransformType::Homography,
             min_stars_for_matching: 10,
-            min_matched_stars: 6,
-            max_residual_pixels: 1.0,
+            min_matched_stars: 8,
+            max_residual_pixels: 2.0,
             use_spatial_distribution: true,
             spatial_grid_size: 8,
             triangle: TriangleMatchConfig::default(),
@@ -458,9 +500,13 @@ mod tests {
     #[test]
     fn test_config_default_values() {
         let config = RegistrationConfig::default();
-        assert_eq!(config.transform_type, TransformType::Similarity);
-        assert_eq!(config.ransac.max_iterations, 1000);
+        assert_eq!(config.transform_type, TransformType::Homography);
+        assert_eq!(config.min_matched_stars, 8);
+        assert!((config.max_residual_pixels - 2.0).abs() < 1e-10);
+        assert_eq!(config.ransac.max_iterations, 2000);
         assert!((config.ransac.inlier_threshold - 2.0).abs() < 1e-10);
+        assert!((config.ransac.confidence - 0.995).abs() < 1e-10);
+        assert!((config.ransac.min_inlier_ratio - 0.3).abs() < 1e-10);
         assert_eq!(config.triangle.max_stars, 200);
     }
 
@@ -565,8 +611,11 @@ mod tests {
     #[test]
     fn test_ransac_config_default() {
         let config = RansacConfig::default();
-        assert_eq!(config.max_iterations, 1000);
+        assert_eq!(config.max_iterations, 2000);
         assert!((config.inlier_threshold - 2.0).abs() < 1e-10);
+        assert!((config.confidence - 0.995).abs() < 1e-10);
+        assert!((config.min_inlier_ratio - 0.3).abs() < 1e-10);
+        assert!(config.use_local_optimization);
         config.validate();
     }
 
