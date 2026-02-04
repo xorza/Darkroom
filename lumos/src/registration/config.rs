@@ -213,9 +213,6 @@ pub struct TriangleMatchConfig {
     /// Minimum votes required to accept a match.
     /// A star pair must be confirmed by at least this many independent triangles.
     pub min_votes: usize,
-    /// Number of hash table bins per dimension.
-    /// 100x100 gives 10,000 bins, providing fine-grained ratio discrimination.
-    pub hash_bins: usize,
     /// Check orientation (set false to handle mirrored images).
     pub check_orientation: bool,
     /// Enable two-step matching (rough then fine).
@@ -230,7 +227,6 @@ impl Default for TriangleMatchConfig {
             max_stars: 200,
             ratio_tolerance: 0.01,
             min_votes: 3,
-            hash_bins: 100,
             check_orientation: true,
             two_step_matching: true,
         }
@@ -254,11 +250,6 @@ impl TriangleMatchConfig {
             self.min_votes >= 1,
             "min_votes must be at least 1, got {}",
             self.min_votes
-        );
-        assert!(
-            self.hash_bins >= 1,
-            "hash_bins must be at least 1, got {}",
-            self.hash_bins
         );
     }
 }

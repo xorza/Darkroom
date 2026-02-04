@@ -97,13 +97,4 @@ impl Triangle {
         let dr1 = (self.ratios.1 - other.ratios.1).abs();
         dr0 < tolerance && dr1 < tolerance
     }
-
-    /// Compute hash key for geometric hashing.
-    /// Returns (bin_x, bin_y) where each is in [0, bins).
-    pub fn hash_key(&self, bins: usize) -> (usize, usize) {
-        // Ratios are in (0, 1], map to bins
-        let bin_x = ((self.ratios.0 * bins as f64) as usize).min(bins - 1);
-        let bin_y = ((self.ratios.1 * bins as f64) as usize).min(bins - 1);
-        (bin_x, bin_y)
-    }
 }

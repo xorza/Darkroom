@@ -1,9 +1,11 @@
 use std::collections::HashMap;
 
+use glam::DVec2;
+
 use crate::registration::config::TriangleMatchConfig;
+use crate::registration::spatial::KdTree;
 
 use super::geometry::Triangle;
-use super::hash_table::TriangleHashTable;
 
 /// Threshold for switching between dense and sparse vote matrix storage.
 ///
@@ -87,6 +89,18 @@ impl VoteMatrix {
     }
 }
 
+/// Build a k-d tree from reference triangle invariant ratios.
+///
+/// Each triangle's (ratio.0, ratio.1) pair is stored as a 2D point,
+/// enabling efficient radius queries in invariant space.
+pub(crate) fn build_invariant_tree(triangles: &[Triangle]) -> Option<KdTree> {
+    let invariants: Vec<DVec2> = triangles
+        .iter()
+        .map(|t| DVec2::new(t.ratios.0, t.ratios.1))
+        .collect();
+    KdTree::build(&invariants)
+}
+
 /// Vote for point correspondences based on matching triangles.
 ///
 /// For each pair of similar triangles, votes for vertex correspondences
@@ -97,7 +111,7 @@ impl VoteMatrix {
 pub(crate) fn vote_for_correspondences(
     target_triangles: &[Triangle],
     ref_triangles: &[Triangle],
-    hash_table: &TriangleHashTable,
+    invariant_tree: &KdTree,
     config: &TriangleMatchConfig,
     n_ref: usize,
     n_target: usize,
@@ -108,12 +122,13 @@ pub(crate) fn vote_for_correspondences(
     let mut candidates: Vec<usize> = Vec::new();
 
     for target_tri in target_triangles {
-        hash_table.find_candidates_into(target_tri, config.ratio_tolerance, &mut candidates);
+        let query = DVec2::new(target_tri.ratios.0, target_tri.ratios.1);
+        invariant_tree.radius_indices_into(query, config.ratio_tolerance, &mut candidates);
 
         for &ref_idx in &candidates {
             let ref_tri = &ref_triangles[ref_idx];
 
-            // Check similarity
+            // Check similarity (exact ratio check after spatial pre-filter)
             if !ref_tri.is_similar(target_tri, config.ratio_tolerance) {
                 continue;
             }

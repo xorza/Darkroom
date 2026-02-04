@@ -34,7 +34,7 @@ Star Positions (sorted by brightness)
 Triangle Formation (k-d tree neighbors)
   |
   v
-Geometric Hashing & Voting
+Invariant-Space KDTree Matching & Voting
   |
   v
 Greedy Match Resolution (one-to-one)
@@ -69,7 +69,7 @@ Siril uses triangle similarity matching on the brightest 20 stars, building N(N-
 
 Astroalign characterizes three-point asterisms using geometric hashes invariant to translation, rotation, and scaling. Triangle invariants are generated from 5 nearest neighbors via KDTree. A second KDTree matches source invariants against target invariants with radius search (r=0.1). RANSAC then estimates the affine transformation. Accepts transforms matching 80% of triangle matches or 10 stars minimum.
 
-**Key difference:** Astroalign uses a KDTree on the invariant feature space itself for matching, rather than a hash table. Our hash table approach has O(1) lookup per triangle vs O(log n) for tree queries, but the KDTree approach handles varying feature density more gracefully.
+**Key similarity:** Like Astroalign, we use a KDTree on the invariant feature space for matching triangle patterns. This handles varying feature density gracefully and avoids bin boundary artifacts that hash tables suffer from.
 
 #### PixInsight StarAlignment (Commercial)
 
@@ -91,11 +91,11 @@ Similar quad-based approach to Astrometry.net. Selects brightest stars, forms te
 
 #### Why Triangles Instead of Quads
 
-Triangles need fewer stars per pattern (3 vs 4), forming more patterns from sparse fields. Triangle ratio space is 2D (two independent ratios after normalization), making hash table construction straightforward. Quads offer higher discriminating power (5 independent ratios) but are primarily needed for blind plate solving against large catalogs, not for image-to-image registration where the star fields largely overlap.
+Triangles need fewer stars per pattern (3 vs 4), forming more patterns from sparse fields. Triangle ratio space is 2D (two independent ratios after normalization), making KDTree-based matching efficient. Quads offer higher discriminating power (5 independent ratios) but are primarily needed for blind plate solving against large catalogs, not for image-to-image registration where the star fields largely overlap.
 
-#### Why Geometric Hashing Instead of KDTree on Invariants
+#### Why KDTree on Invariants Instead of Hash Table
 
-Hash table lookup is O(1) per triangle, vs O(log n) for tree queries. For our typical workload (200 stars, ~2000 triangles), the hash table is faster. The downside is sensitivity to bin boundaries, which we mitigate with configurable tolerance and bin count.
+A KDTree on the 2D invariant space (side ratios) provides exact radius queries with no bin boundary artifacts. For our typical workload (~2000 triangles), O(log n) lookup is negligible. The KDTree approach is simpler (no bin count parameter to tune) and handles non-uniform invariant density naturally.
 
 #### Why PROSAC-style Progressive Sampling
 
@@ -337,7 +337,7 @@ registration/
 │   ├── mod.rs                Registrator, warp functions
 │   └── result.rs             RegistrationResult, RegistrationError
 ├── triangle/
-│   └── mod.rs                Geometric hashing, vote matrix, match resolution
+│   └── mod.rs                Invariant-space KDTree, vote matrix, match resolution
 ├── ransac/
 │   ├── mod.rs                RANSAC, LO-RANSAC, PROSAC, transform estimators
 │   └── simd/
@@ -398,7 +398,6 @@ registration/
 | `max_stars` | 200 | Use brightest N stars from each image |
 | `ratio_tolerance` | 0.01 | Side ratio matching tolerance (1%) |
 | `min_votes` | 3 | Minimum votes to accept a star match |
-| `hash_bins` | 100 | Hash table bins per dimension (100x100) |
 | `check_orientation` | true | Reject mirrored triangle matches |
 | `two_step_matching` | true | Two-phase rough-then-fine matching |
 

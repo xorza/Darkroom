@@ -4,8 +4,9 @@ use crate::registration::config::TriangleMatchConfig;
 use crate::registration::spatial::{KdTree, form_triangles_from_neighbors};
 
 use super::geometry::Triangle;
-use super::hash_table::TriangleHashTable;
-use super::voting::{PointMatch, VoteMatrix, resolve_matches, vote_for_correspondences};
+use super::voting::{
+    PointMatch, VoteMatrix, build_invariant_tree, resolve_matches, vote_for_correspondences,
+};
 
 /// Form triangles using k-d tree for efficient neighbor lookup.
 ///
@@ -67,14 +68,17 @@ pub fn match_triangles(
         return Vec::new();
     }
 
-    // Build hash table for reference triangles
-    let hash_table = TriangleHashTable::build(&ref_triangles, config.hash_bins);
+    // Build k-d tree on reference triangle invariants for fast lookup
+    let invariant_tree = match build_invariant_tree(&ref_triangles) {
+        Some(t) => t,
+        None => return Vec::new(),
+    };
 
     // Vote for point correspondences and resolve conflicts
     let vote_matrix = vote_for_correspondences(
         &target_triangles,
         &ref_triangles,
-        &hash_table,
+        &invariant_tree,
         config,
         n_ref,
         n_target,
@@ -93,7 +97,7 @@ pub fn match_triangles(
         &initial_matches,
         &ref_triangles,
         &target_triangles,
-        &hash_table,
+        &invariant_tree,
         config,
     )
 }
@@ -108,7 +112,7 @@ fn two_step_refine_matches(
     initial_matches: &[PointMatch],
     ref_triangles: &[Triangle],
     target_triangles: &[Triangle],
-    hash_table: &TriangleHashTable,
+    invariant_tree: &KdTree,
     config: &TriangleMatchConfig,
 ) -> Vec<PointMatch> {
     // Need at least 3 matches to estimate a transform
@@ -150,7 +154,8 @@ fn two_step_refine_matches(
     let position_threshold = compute_position_threshold(ref_positions);
 
     for target_tri in target_triangles {
-        hash_table.find_candidates_into(target_tri, strict_tolerance, &mut candidates);
+        let query = DVec2::new(target_tri.ratios.0, target_tri.ratios.1);
+        invariant_tree.radius_indices_into(query, strict_tolerance, &mut candidates);
 
         for &ref_idx in &candidates {
             let ref_tri = &ref_triangles[ref_idx];

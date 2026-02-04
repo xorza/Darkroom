@@ -188,6 +188,54 @@ impl KdTree {
         results
     }
 
+    /// Find all point indices within a given radius, appending to a buffer.
+    ///
+    /// The buffer is cleared before use. This avoids allocations when
+    /// called repeatedly in a loop.
+    pub fn radius_indices_into(&self, query: DVec2, radius: f64, indices: &mut Vec<usize>) {
+        indices.clear();
+        if self.nodes.is_empty() {
+            return;
+        }
+        let radius_sq = radius * radius;
+        self.radius_indices_recursive(0, query, radius_sq, indices);
+    }
+
+    /// Recursive radius search collecting only indices.
+    fn radius_indices_recursive(
+        &self,
+        node_idx: usize,
+        query: DVec2,
+        radius_sq: f64,
+        results: &mut Vec<usize>,
+    ) {
+        let node = &self.nodes[node_idx];
+        let point = self.points[node.point_idx];
+
+        let dist_sq = (query - point).length_squared();
+        if dist_sq <= radius_sq {
+            results.push(node.point_idx);
+        }
+
+        let split_dim = node.split_dim;
+        let query_val = if split_dim == 0 { query.x } else { query.y };
+        let point_val = if split_dim == 0 { point.x } else { point.y };
+        let diff = query_val - point_val;
+        let diff_sq = diff * diff;
+
+        if let Some(left_idx) = node.left
+            && (diff <= 0.0 || diff_sq <= radius_sq)
+        {
+            self.radius_indices_recursive(left_idx, query, radius_sq, results);
+        }
+
+        if let Some(right_idx) = node.right
+            && (diff >= 0.0 || diff_sq <= radius_sq)
+        {
+            self.radius_indices_recursive(right_idx, query, radius_sq, results);
+        }
+    }
+
     /// Recursive radius search.
     #[cfg(test)]
     fn radius_search_recursive(

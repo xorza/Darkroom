@@ -6,12 +6,13 @@ use glam::DVec2;
 
 use super::TriangleMatchConfig;
 use super::geometry::{Orientation, Triangle};
-use super::hash_table::TriangleHashTable;
 use super::matching::{
     compute_position_threshold, estimate_similarity_transform, form_triangles_kdtree,
     match_triangles,
 };
-use super::voting::{PointMatch, VoteMatrix, resolve_matches, vote_for_correspondences};
+use super::voting::{
+    PointMatch, VoteMatrix, build_invariant_tree, resolve_matches, vote_for_correspondences,
+};
 
 #[test]
 fn test_triangle_from_positions() {
@@ -161,7 +162,7 @@ fn test_degenerate_triangle_detection() {
 }
 
 #[test]
-fn test_hash_table_build() {
+fn test_invariant_tree_build() {
     let positions = vec![
         DVec2::new(0.0, 0.0),
         DVec2::new(10.0, 0.0),
@@ -172,12 +173,13 @@ fn test_hash_table_build() {
 
     assert!(!triangles.is_empty());
 
-    let table = TriangleHashTable::build(&triangles, 100);
-    assert_eq!(table.len(), triangles.len());
+    let tree = build_invariant_tree(&triangles);
+    assert!(tree.is_some());
+    assert_eq!(tree.unwrap().len(), triangles.len());
 }
 
 #[test]
-fn test_hash_table_lookup() {
+fn test_invariant_tree_lookup() {
     let positions = vec![
         DVec2::new(0.0, 0.0),
         DVec2::new(3.0, 0.0),
@@ -185,17 +187,19 @@ fn test_hash_table_lookup() {
     ];
     let triangles = form_triangles_kdtree(&positions, 3);
     assert!(!triangles.is_empty());
-    let table = TriangleHashTable::build(&triangles, 100);
+    let tree = build_invariant_tree(&triangles).unwrap();
 
-    // Same triangle should find itself
-    let candidates = table.find_candidates(&triangles[0], 0.01);
+    // Same triangle's invariants should find itself within small tolerance
+    let query = DVec2::new(triangles[0].ratios.0, triangles[0].ratios.1);
+    let mut candidates = Vec::new();
+    tree.radius_indices_into(query, 0.01, &mut candidates);
     assert!(candidates.contains(&0));
 }
 
 #[test]
-fn test_hash_table_empty() {
-    let table = TriangleHashTable::build(&[], 100);
-    assert!(table.is_empty());
+fn test_invariant_tree_empty() {
+    let tree = build_invariant_tree(&[]);
+    assert!(tree.is_none());
 }
 
 #[test]
@@ -215,23 +219,6 @@ fn test_all_collinear_stars() {
     ];
     let triangles = form_triangles_kdtree(&positions, 4);
     assert!(triangles.is_empty());
-}
-
-#[test]
-fn test_triangle_hash_key() {
-    let tri = Triangle::from_positions(
-        [0, 1, 2],
-        [
-            DVec2::new(0.0, 0.0),
-            DVec2::new(3.0, 0.0),
-            DVec2::new(0.0, 4.0),
-        ],
-    )
-    .unwrap();
-
-    let (bx, by) = tri.hash_key(100);
-    assert!(bx < 100);
-    assert!(by < 100);
 }
 
 #[test]
@@ -1468,86 +1455,12 @@ fn test_two_step_refinement_does_not_degrade() {
 }
 
 // ============================================================================
-// Hash key boundary tests
+// Invariant tree tests
 // ============================================================================
 
 #[test]
-fn test_hash_key_equilateral_triangle() {
-    // Equilateral triangle: all sides equal, ratios = (1.0, 1.0)
-    // ratio 1.0 * bins = bins, which would be out of bounds without clamping
-    let tri = Triangle::from_positions(
-        [0, 1, 2],
-        [
-            DVec2::new(0.0, 0.0),
-            DVec2::new(10.0, 0.0),
-            DVec2::new(5.0, 8.660254037844386),
-        ],
-    )
-    .unwrap();
-
-    assert!((tri.ratios.0 - 1.0).abs() < 0.01);
-    assert!((tri.ratios.1 - 1.0).abs() < 0.01);
-
-    // hash_key should clamp to bins-1, not overflow
-    for bins in [1, 2, 10, 100, 1000] {
-        let (bx, by) = tri.hash_key(bins);
-        assert!(bx < bins, "bx={bx} >= bins={bins}");
-        assert!(by < bins, "by={by} >= bins={bins}");
-    }
-}
-
-#[test]
-fn test_hash_key_extreme_ratios() {
-    // Very thin isosceles triangle: sides ~50.04, ~50.04, 100.0
-    // ratios ≈ (0.5, 0.5) — two nearly equal short sides relative to base
-    let tri = Triangle::from_positions(
-        [0, 1, 2],
-        [
-            DVec2::new(0.0, 0.0),
-            DVec2::new(100.0, 0.0),
-            DVec2::new(50.0, 2.0), // thin triangle
-        ],
-    )
-    .unwrap();
-
-    // Both ratios should be close to 0.5
-    assert!(
-        tri.ratios.0 > 0.0 && tri.ratios.0 <= 1.0,
-        "ratio.0 out of range: {}",
-        tri.ratios.0
-    );
-    assert!(
-        tri.ratios.1 > 0.0 && tri.ratios.1 <= 1.0,
-        "ratio.1 out of range: {}",
-        tri.ratios.1
-    );
-
-    let (bx, by) = tri.hash_key(100);
-    assert!(bx < 100);
-    assert!(by < 100);
-}
-
-#[test]
-fn test_hash_key_single_bin() {
-    // Edge case: bins = 1
-    let tri = Triangle::from_positions(
-        [0, 1, 2],
-        [
-            DVec2::new(0.0, 0.0),
-            DVec2::new(3.0, 0.0),
-            DVec2::new(0.0, 4.0),
-        ],
-    )
-    .unwrap();
-
-    let (bx, by) = tri.hash_key(1);
-    assert_eq!(bx, 0);
-    assert_eq!(by, 0);
-}
-
-#[test]
-fn test_hash_table_similar_triangles_same_bin() {
-    // Two similar triangles should land in the same or adjacent bins
+fn test_invariant_tree_finds_similar_triangles() {
+    // Two similar triangles (same shape, different scale) should be found by radius search
     let tri1 = Triangle::from_positions(
         [0, 1, 2],
         [
@@ -1560,7 +1473,7 @@ fn test_hash_table_similar_triangles_same_bin() {
 
     // Same shape, different scale
     let tri2 = Triangle::from_positions(
-        [0, 1, 2],
+        [3, 4, 5],
         [
             DVec2::new(0.0, 0.0),
             DVec2::new(30.0, 0.0),
@@ -1569,20 +1482,27 @@ fn test_hash_table_similar_triangles_same_bin() {
     )
     .unwrap();
 
-    let bins = 100;
-    let (bx1, by1) = tri1.hash_key(bins);
-    let (bx2, by2) = tri2.hash_key(bins);
+    // Ratios should be identical
+    assert!(
+        (tri1.ratios.0 - tri2.ratios.0).abs() < 1e-10,
+        "Same-shape triangles should have identical ratios"
+    );
 
-    assert_eq!(bx1, bx2, "Same-shape triangles should have same bin_x");
-    assert_eq!(by1, by2, "Same-shape triangles should have same bin_y");
+    let tree = build_invariant_tree(&[tri1.clone(), tri2]).unwrap();
+    let query = DVec2::new(tri1.ratios.0, tri1.ratios.1);
+    let mut candidates = Vec::new();
+    tree.radius_indices_into(query, 0.01, &mut candidates);
+
+    // Should find both triangles
+    assert_eq!(candidates.len(), 2, "Should find both similar triangles");
 }
 
 // ============================================================================
-// find_candidates_into boundary tests
+// Invariant tree radius search boundary tests
 // ============================================================================
 
 #[test]
-fn test_find_candidates_zero_tolerance() {
+fn test_invariant_search_zero_tolerance() {
     let positions = vec![
         DVec2::new(0.0, 0.0),
         DVec2::new(3.0, 0.0),
@@ -1591,10 +1511,12 @@ fn test_find_candidates_zero_tolerance() {
     let triangles = form_triangles_kdtree(&positions, 3);
     assert!(!triangles.is_empty());
 
-    let table = TriangleHashTable::build(&triangles, 100);
+    let tree = build_invariant_tree(&triangles).unwrap();
 
-    // Zero tolerance should still find exact matches (bin_tolerance is max(ceil(0), 1) = 1)
-    let candidates = table.find_candidates(&triangles[0], 0.0);
+    // Zero tolerance should still find exact match (distance = 0 <= 0)
+    let query = DVec2::new(triangles[0].ratios.0, triangles[0].ratios.1);
+    let mut candidates = Vec::new();
+    tree.radius_indices_into(query, 0.0, &mut candidates);
     assert!(
         candidates.contains(&0),
         "Zero tolerance should still find the triangle itself"
@@ -1602,7 +1524,7 @@ fn test_find_candidates_zero_tolerance() {
 }
 
 #[test]
-fn test_find_candidates_large_tolerance() {
+fn test_invariant_search_large_tolerance() {
     let positions = vec![
         DVec2::new(0.0, 0.0),
         DVec2::new(10.0, 0.0),
@@ -1613,10 +1535,12 @@ fn test_find_candidates_large_tolerance() {
     let triangles = form_triangles_kdtree(&positions, 4);
     assert!(!triangles.is_empty());
 
-    let table = TriangleHashTable::build(&triangles, 10);
+    let tree = build_invariant_tree(&triangles).unwrap();
 
-    // Tolerance = 1.0 covers the entire ratio space, should find all triangles
-    let candidates = table.find_candidates(&triangles[0], 1.0);
+    // Large tolerance covers the entire ratio space, should find all triangles
+    let query = DVec2::new(triangles[0].ratios.0, triangles[0].ratios.1);
+    let mut candidates = Vec::new();
+    tree.radius_indices_into(query, 2.0, &mut candidates);
     assert_eq!(
         candidates.len(),
         triangles.len(),
@@ -1625,7 +1549,7 @@ fn test_find_candidates_large_tolerance() {
 }
 
 #[test]
-fn test_find_candidates_into_clears_buffer() {
+fn test_invariant_search_clears_buffer() {
     let positions = vec![
         DVec2::new(0.0, 0.0),
         DVec2::new(10.0, 0.0),
@@ -1633,10 +1557,11 @@ fn test_find_candidates_into_clears_buffer() {
         DVec2::new(10.0, 10.0),
     ];
     let triangles = form_triangles_kdtree(&positions, 4);
-    let table = TriangleHashTable::build(&triangles, 100);
+    let tree = build_invariant_tree(&triangles).unwrap();
 
     let mut candidates = vec![999, 888, 777]; // Pre-filled garbage
-    table.find_candidates_into(&triangles[0], 0.01, &mut candidates);
+    let query = DVec2::new(triangles[0].ratios.0, triangles[0].ratios.1);
+    tree.radius_indices_into(query, 0.01, &mut candidates);
 
     // Should not contain the garbage values
     assert!(
@@ -1703,13 +1628,13 @@ fn test_vote_for_correspondences_identical_triangles() {
     let triangles = form_triangles_kdtree(&positions, 4);
     assert!(!triangles.is_empty());
 
-    let hash_table = TriangleHashTable::build(&triangles, 100);
+    let invariant_tree = build_invariant_tree(&triangles).unwrap();
 
     let config = TriangleMatchConfig::default();
     let votes = vote_for_correspondences(
         &triangles,
         &triangles,
-        &hash_table,
+        &invariant_tree,
         &config,
         positions.len(),
         positions.len(),
@@ -1759,7 +1684,7 @@ fn test_vote_for_correspondences_no_matching_triangles() {
     assert!(!tri_a.is_empty());
     assert!(!tri_b.is_empty());
 
-    let hash_table = TriangleHashTable::build(&tri_a, 100);
+    let invariant_tree = build_invariant_tree(&tri_a).unwrap();
 
     let config = TriangleMatchConfig {
         ratio_tolerance: 0.01, // Very tight
@@ -1769,7 +1694,7 @@ fn test_vote_for_correspondences_no_matching_triangles() {
     let votes = vote_for_correspondences(
         &tri_b,
         &tri_a,
-        &hash_table,
+        &invariant_tree,
         &config,
         positions_a.len(),
         positions_b.len(),
@@ -1798,7 +1723,7 @@ fn test_vote_for_correspondences_orientation_filtering() {
 
     let ref_triangles = form_triangles_kdtree(&positions, 4);
     let target_triangles = form_triangles_kdtree(&mirrored, 4);
-    let hash_table = TriangleHashTable::build(&ref_triangles, 100);
+    let invariant_tree = build_invariant_tree(&ref_triangles).unwrap();
 
     // With orientation check: should get fewer votes
     let config_with = TriangleMatchConfig {
@@ -1808,7 +1733,7 @@ fn test_vote_for_correspondences_orientation_filtering() {
     let votes_with = vote_for_correspondences(
         &target_triangles,
         &ref_triangles,
-        &hash_table,
+        &invariant_tree,
         &config_with,
         positions.len(),
         mirrored.len(),
@@ -1822,7 +1747,7 @@ fn test_vote_for_correspondences_orientation_filtering() {
     let votes_without = vote_for_correspondences(
         &target_triangles,
         &ref_triangles,
-        &hash_table,
+        &invariant_tree,
         &config_without,
         positions.len(),
         mirrored.len(),
