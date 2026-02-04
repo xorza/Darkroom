@@ -134,21 +134,24 @@ impl Registrator {
             return Err(RegistrationError::NoMatchingPatterns);
         }
 
-        // Extract matched point pairs
-        let ref_matched: Vec<_> = matches.iter().map(|m| ref_stars[m.ref_idx]).collect();
-        let target_matched: Vec<_> = matches.iter().map(|m| target_stars[m.target_idx]).collect();
-
-        // Step 2: RANSAC to robustly estimate transformation
+        // Step 2: RANSAC with progressive sampling using match confidences.
+        // estimate_with_matches uses triangle vote counts to bias sampling
+        // toward high-confidence matches, finding correct models faster.
         let ransac = RansacEstimator::new(self.config.ransac.clone());
         let ransac_result = ransac
-            .estimate(&ref_matched, &target_matched, self.config.transform_type)
+            .estimate_with_matches(
+                &matches,
+                &ref_stars,
+                &target_stars,
+                self.config.transform_type,
+            )
             .ok_or(RegistrationError::RansacFailed {
                 reason: RansacFailureReason::NoInliersFound,
                 iterations: self.config.ransac.max_iterations,
                 best_inlier_count: 0,
             })?;
 
-        // Get inlier matches
+        // Get inlier matches — ransac_result.inliers are indices into `matches`
         let inlier_matches: Vec<_> = ransac_result
             .inliers
             .iter()
@@ -160,12 +163,12 @@ impl Registrator {
             let inlier_ref: Vec<DVec2> = ransac_result
                 .inliers
                 .iter()
-                .map(|&i| ref_matched[i])
+                .map(|&i| ref_stars[matches[i].ref_idx])
                 .collect();
             let inlier_target: Vec<DVec2> = ransac_result
                 .inliers
                 .iter()
-                .map(|&i| target_matched[i])
+                .map(|&i| target_stars[matches[i].target_idx])
                 .collect();
 
             let sip_config = SipConfig {
@@ -188,8 +191,8 @@ impl Registrator {
             .inliers
             .iter()
             .map(|&i| {
-                let r = ref_matched[i];
-                let t = target_matched[i];
+                let r = ref_stars[matches[i].ref_idx];
+                let t = target_stars[matches[i].target_idx];
                 let corrected_r = match &sip_correction {
                     Some(sip) => sip.correct(r),
                     None => r,
