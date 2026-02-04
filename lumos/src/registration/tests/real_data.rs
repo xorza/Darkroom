@@ -191,7 +191,7 @@ fn test_register_two_calibrated_lights() {
         .collect();
 
     let sip_config = crate::registration::distortion::SipConfig {
-        order: 3,
+        order: 4,
         reference_point: None,
     };
 
@@ -211,7 +211,7 @@ fn test_register_two_calibrated_lights() {
 
         let improvement = (baseline_rms - sip_rms) / baseline_rms * 100.0;
 
-        println!("\nSIP correction (order 3) on same inliers:");
+        println!("\nSIP correction (order 4) on same inliers:");
         println!("  Baseline RMS:      {:.4} pixels", baseline_rms);
         println!("  With SIP RMS:      {:.4} pixels", sip_rms);
         println!("  Improvement:       {:.1}%", improvement);
