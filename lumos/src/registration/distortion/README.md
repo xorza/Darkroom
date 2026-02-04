@@ -20,6 +20,7 @@ v' = v + Σ B_pq × u^p × v^q    (for 2 ≤ p+q ≤ order)
 - Order 5 (18 terms): Handles mustache and higher-order distortion
 - Coordinate normalization for numerical stability (average distance -> 1.0)
 - Cholesky decomposition for normal equations, LU fallback
+- **Inverse polynomial (AP, BP)**: `compute_inverse(width, height)` grid-samples the forward correction and fits an inverse polynomial (order+1, capped at 5). Uses same Cholesky/LU solver. Methods: `inverse_correct`, `inverse_correction_at`, `inverse_correct_points`, `has_inverse`.
 
 **Important**: Barrel distortion residuals `dx = k*u*r^2` are **cubic** (order 3), not quadratic. Order 2 SIP cannot capture barrel/pincushion distortion -- use order 3 or higher.
 
@@ -43,7 +44,7 @@ distortion/
   mod.rs          Module declarations and re-exports only
   sip/
     mod.rs        SipPolynomial, SipConfig
-    tests.rs      SIP tests (20 tests)
+    tests.rs      SIP tests (30 tests)
   tps/
     mod.rs        ThinPlateSpline, TpsConfig, DistortionMap, tps_kernel
     tests.rs      TPS tests (22 tests)
@@ -52,7 +53,7 @@ distortion/
 
 ## Test Coverage
 
-- sip/tests.rs: 20 tests (barrel, pincushion, quadratic, mustache, numerical edge cases)
+- sip/tests.rs: 30 tests (barrel, pincushion, quadratic, mustache, numerical edge cases, inverse polynomial roundtrip)
 - tps/tests.rs: 22 tests (TPS integration tests)
 
 ## References

@@ -42,7 +42,7 @@ where U, V are the result of applying the inverse CD matrix to intermediate worl
 | **Solver** | QR decomposition | Scaled polynomial + affine | Cholesky, LU fallback |
 | **Normalization** | None (raw pixel offsets) | Scaled polynomial intermediate repr. | avg-distance normalization |
 | **Outlier rejection** | Per-star weights | Sigma-clipping (3 iterations) | None (relies on RANSAC upstream) |
-| **Inverse coefficients** | Grid sampling + least-squares | Grid sampling (100x100) | Not implemented |
+| **Inverse coefficients** | Grid sampling + least-squares | Grid sampling (100x100) | Grid sampling + least-squares |
 | **Reference point** | CRPIX (fixed) | Match centroid | Configurable (default: centroid) |
 | **Residual direction** | `target - transform(ref)` | Similar | `transform(ref) - target` (negated in fit) |
 
@@ -56,36 +56,23 @@ where U, V are the result of applying the inverse CD matrix to intermediate worl
 
 ### Gaps relative to the standard
 
-1. **No inverse polynomial (AP, BP)**: The standard defines inverse coefficients for sky-to-pixel transforms. This implementation only has the forward correction. Needed for: FITS header export, round-trip coordinate transforms, interoperability with other tools.
+1. **Reference point is centroid, not CRPIX**: The SIP standard mandates CRPIX as the polynomial origin. Using the centroid of input points works for internal correction but produces coefficients incompatible with FITS headers. Any future FITS export would need to re-fit with CRPIX as origin.
 
-2. **Reference point is centroid, not CRPIX**: The SIP standard mandates CRPIX as the polynomial origin. Using the centroid of input points works for internal correction but produces coefficients incompatible with FITS headers. Any future FITS export would need to re-fit with CRPIX as origin.
-
-3. **No FITS header I/O**: Cannot read A_pq/B_pq from FITS headers or write them. This limits interoperability with tools that consume SIP headers (DS9, SAOImage, astropy, etc.).
+2. **No FITS header I/O**: Cannot read A_pq/B_pq from FITS headers or write them. This limits interoperability with tools that consume SIP headers (DS9, SAOImage, astropy, etc.).
 
 ## Suggested improvements
 
-### 1. Inverse polynomial computation (AP, BP)
-
-Compute inverse coefficients by grid sampling, following astrometry.net's approach:
-
-1. Lay down a grid across the image (e.g., 10*(order+1) per side)
-2. Apply forward SIP to each grid point to get warped coordinates
-3. Fit inverse polynomial from warped coordinates back to original positions
-4. Validate round-trip error (forward then inverse) at random points
-
-This enables FITS header export and sky-to-pixel coordinate transforms.
-
-### 2. QR decomposition solver
+### 1. QR decomposition solver
 
 The normal equations approach squares the condition number of the design matrix. For order 5 with points near image edges, this can matter. Astrometry.net uses QR decomposition on the full design matrix. Given the small system sizes (max 18 unknowns), QR would be equally fast and more numerically robust.
 
 Alternatively, SVD would provide the same benefit and also expose the singular values, making it easy to detect rank deficiency.
 
-### 3. Outlier-aware fitting
+### 2. Outlier-aware fitting
 
 The current implementation assumes clean inlier sets (from RANSAC). Adding optional sigma-clipping (as LSST does with 3 iterations, configurable rejection threshold) would make the fit more robust to marginal inliers that RANSAC let through.
 
-### 4. Fit quality diagnostics
+### 3. Fit quality diagnostics
 
 Add a method to compute fit quality metrics after fitting:
 

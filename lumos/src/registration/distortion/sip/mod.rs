@@ -127,6 +127,14 @@ pub struct SipPolynomial {
     coeffs_u: Vec<f64>,
     /// Coefficients for the v-correction polynomial (B_pq) in normalized space.
     coeffs_v: Vec<f64>,
+    /// Inverse polynomial order (0 if not computed).
+    inv_order: usize,
+    /// Normalization scale for inverse polynomial (computed from corrected coordinates).
+    inv_norm_scale: f64,
+    /// Inverse u-correction coefficients (AP_pq). Empty if not computed.
+    inv_coeffs_u: Vec<f64>,
+    /// Inverse v-correction coefficients (BP_pq). Empty if not computed.
+    inv_coeffs_v: Vec<f64>,
 }
 
 impl SipPolynomial {
@@ -220,6 +228,10 @@ impl SipPolynomial {
             norm_scale,
             coeffs_u,
             coeffs_v,
+            inv_order: 0,
+            inv_norm_scale: 0.0,
+            inv_coeffs_u: Vec::new(),
+            inv_coeffs_v: Vec::new(),
         })
     }
 
@@ -328,6 +340,160 @@ impl SipPolynomial {
     /// Get the v-correction coefficients (B_pq).
     pub fn coeffs_v(&self) -> &[f64] {
         &self.coeffs_v
+    }
+
+    /// Compute the inverse polynomial by grid-sampling the forward correction.
+    ///
+    /// Lays a grid over `[0, width] × [0, height]`, applies the forward
+    /// correction to each grid point, then fits a polynomial from corrected
+    /// coordinates back to original coordinates. This follows the approach
+    /// used by astrometry.net and LSST.
+    ///
+    /// Returns the maximum round-trip error (pixels) over the grid:
+    /// `max |inverse_correct(correct(p)) - p|`.
+    pub fn compute_inverse(&mut self, width: usize, height: usize) -> f64 {
+        let inv_order = (self.order + 1).min(5);
+        let grid_side = 20 * (inv_order + 1);
+
+        // Generate grid and apply forward correction
+        let step_x = width as f64 / (grid_side - 1) as f64;
+        let step_y = height as f64 / (grid_side - 1) as f64;
+
+        let mut originals = Vec::with_capacity(grid_side * grid_side);
+        let mut corrected = Vec::with_capacity(grid_side * grid_side);
+
+        for iy in 0..grid_side {
+            for ix in 0..grid_side {
+                let p = DVec2::new(ix as f64 * step_x, iy as f64 * step_y);
+                let c = self.correct(p);
+                originals.push(p);
+                corrected.push(c);
+            }
+        }
+
+        let n = corrected.len();
+
+        // Compute normalization scale from corrected coordinates
+        let avg_dist = corrected
+            .iter()
+            .map(|p| (*p - self.reference_point).length())
+            .sum::<f64>()
+            / n as f64;
+        let inv_norm_scale = if avg_dist > 1e-10 { avg_dist } else { 1.0 };
+
+        let terms = term_exponents(inv_order);
+        let n_terms = num_terms(inv_order);
+
+        // Build normal equations: fit inverse polynomial from corrected → original
+        // The inverse correction delta is: original - corrected = inverse_correction_at(corrected)
+        let mut ata = vec![0.0; n_terms * n_terms];
+        let mut atb_u = vec![0.0; n_terms];
+        let mut atb_v = vec![0.0; n_terms];
+
+        for i in 0..n {
+            let u = (corrected[i].x - self.reference_point.x) / inv_norm_scale;
+            let v = (corrected[i].y - self.reference_point.y) / inv_norm_scale;
+
+            // Target: the correction delta in normalized space
+            let delta = originals[i] - corrected[i];
+            let target_u = delta.x / inv_norm_scale;
+            let target_v = delta.y / inv_norm_scale;
+
+            let basis: Vec<f64> = terms.iter().map(|&(p, q)| monomial(u, v, p, q)).collect();
+
+            for j in 0..n_terms {
+                for k in j..n_terms {
+                    let val = basis[j] * basis[k];
+                    ata[j * n_terms + k] += val;
+                    if k != j {
+                        ata[k * n_terms + j] += val;
+                    }
+                }
+                atb_u[j] += basis[j] * target_u;
+                atb_v[j] += basis[j] * target_v;
+            }
+        }
+
+        let inv_coeffs_u = solve_symmetric_positive(&ata, &atb_u, n_terms)
+            .expect("inverse SIP solve failed: singular normal equations on grid data");
+        let inv_coeffs_v = solve_symmetric_positive(&ata, &atb_v, n_terms)
+            .expect("inverse SIP solve failed: singular normal equations on grid data");
+
+        self.inv_order = inv_order;
+        self.inv_norm_scale = inv_norm_scale;
+        self.inv_coeffs_u = inv_coeffs_u;
+        self.inv_coeffs_v = inv_coeffs_v;
+
+        // Compute max round-trip error
+        let mut max_error = 0.0f64;
+        for i in 0..n {
+            let roundtrip = self.inverse_correct(corrected[i]);
+            let error = (roundtrip - originals[i]).length();
+            max_error = max_error.max(error);
+        }
+
+        max_error
+    }
+
+    /// Whether the inverse polynomial has been computed.
+    pub fn has_inverse(&self) -> bool {
+        !self.inv_coeffs_u.is_empty()
+    }
+
+    /// Apply the inverse SIP correction to a single point.
+    ///
+    /// Given a corrected coordinate, returns the original pixel coordinate.
+    /// Panics if `compute_inverse` has not been called.
+    pub fn inverse_correct(&self, p: DVec2) -> DVec2 {
+        p + self.inverse_correction_at(p)
+    }
+
+    /// Evaluate the inverse correction vector at a point.
+    ///
+    /// Returns the delta to add to a corrected coordinate to recover the
+    /// original pixel coordinate. Panics if `compute_inverse` has not been called.
+    pub fn inverse_correction_at(&self, p: DVec2) -> DVec2 {
+        assert!(
+            self.has_inverse(),
+            "inverse polynomial not computed; call compute_inverse first"
+        );
+
+        let u = (p.x - self.reference_point.x) / self.inv_norm_scale;
+        let v = (p.y - self.reference_point.y) / self.inv_norm_scale;
+
+        let terms = term_exponents(self.inv_order);
+
+        let mut du_norm = 0.0;
+        let mut dv_norm = 0.0;
+        for (i, &(exp_p, exp_q)) in terms.iter().enumerate() {
+            let basis = monomial(u, v, exp_p, exp_q);
+            du_norm += self.inv_coeffs_u[i] * basis;
+            dv_norm += self.inv_coeffs_v[i] * basis;
+        }
+
+        DVec2::new(du_norm * self.inv_norm_scale, dv_norm * self.inv_norm_scale)
+    }
+
+    /// Apply inverse SIP correction to multiple points (allocating).
+    ///
+    /// Panics if `compute_inverse` has not been called.
+    pub fn inverse_correct_points(&self, points: &[DVec2]) -> Vec<DVec2> {
+        points.iter().map(|&p| self.inverse_correct(p)).collect()
+    }
+
+    /// Get the inverse polynomial order.
+    pub fn inv_order(&self) -> usize {
+        self.inv_order
+    }
+
+    /// Get the inverse u-correction coefficients (AP_pq).
+    pub fn inv_coeffs_u(&self) -> &[f64] {
+        &self.inv_coeffs_u
+    }
+
+    /// Get the inverse v-correction coefficients (BP_pq).
+    pub fn inv_coeffs_v(&self) -> &[f64] {
+        &self.inv_coeffs_v
     }
 
     /// Get the maximum correction magnitude across a grid of points.

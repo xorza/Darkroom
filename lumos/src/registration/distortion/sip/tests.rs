@@ -511,3 +511,264 @@ fn test_solve_lu_fallback() {
     assert!((x[0] - 1.0).abs() < 1e-10);
     assert!((x[1] - 2.0).abs() < 1e-10);
 }
+
+// --- Inverse polynomial tests ---
+
+/// Helper: create a SipPolynomial with barrel distortion (cubic, order 3).
+fn make_barrel_sip(center: DVec2, k: f64) -> SipPolynomial {
+    let mut ref_points = Vec::new();
+    let mut residuals = Vec::new();
+    for y in (0..=1000).step_by(50) {
+        for x in (0..=1000).step_by(50) {
+            let p = DVec2::new(x as f64, y as f64);
+            ref_points.push(p);
+            let d = p - center;
+            residuals.push(d * k * d.length_squared());
+        }
+    }
+    let config = SipConfig {
+        order: 3,
+        reference_point: Some(center),
+    };
+    SipPolynomial::fit_residuals(&ref_points, &residuals, &config).unwrap()
+}
+
+#[test]
+fn test_inverse_roundtrip_barrel() {
+    let center = DVec2::new(500.0, 500.0);
+    let mut sip = make_barrel_sip(center, 1e-8);
+    let max_err = sip.compute_inverse(1000, 1000);
+    assert!(
+        max_err < 0.1,
+        "barrel roundtrip error {:.6} >= 0.1",
+        max_err
+    );
+
+    // Spot-check a few points
+    for &p in &[
+        DVec2::new(200.0, 300.0),
+        DVec2::new(800.0, 700.0),
+        DVec2::new(500.0, 500.0),
+    ] {
+        let corrected = sip.correct(p);
+        let roundtrip = sip.inverse_correct(corrected);
+        let err = (roundtrip - p).length();
+        assert!(err < 0.1, "roundtrip error {:.6} at {:?}", err, p);
+    }
+}
+
+#[test]
+fn test_inverse_roundtrip_pincushion() {
+    let center = DVec2::new(512.0, 384.0);
+    let mut ref_points = Vec::new();
+    let mut residuals = Vec::new();
+    let k = -5e-9;
+    for y in (0..=768).step_by(48) {
+        for x in (0..=1024).step_by(48) {
+            let p = DVec2::new(x as f64, y as f64);
+            ref_points.push(p);
+            let d = p - center;
+            residuals.push(d * k * d.length_squared());
+        }
+    }
+    let config = SipConfig {
+        order: 3,
+        reference_point: Some(center),
+    };
+    let mut sip = SipPolynomial::fit_residuals(&ref_points, &residuals, &config).unwrap();
+    let max_err = sip.compute_inverse(1024, 768);
+    assert!(
+        max_err < 0.1,
+        "pincushion roundtrip error {:.6} >= 0.1",
+        max_err
+    );
+}
+
+#[test]
+fn test_inverse_roundtrip_order2() {
+    let center = DVec2::new(500.0, 500.0);
+    let mut ref_points = Vec::new();
+    let mut residuals = Vec::new();
+    for y in (0..=1000).step_by(100) {
+        for x in (0..=1000).step_by(100) {
+            let p = DVec2::new(x as f64, y as f64);
+            ref_points.push(p);
+            let u = p.x - center.x;
+            let v = p.y - center.y;
+            residuals.push(DVec2::new(
+                1e-5 * u * u + 5e-6 * v * v,
+                3e-6 * u * u + 8e-6 * v * v,
+            ));
+        }
+    }
+    let config = SipConfig {
+        order: 2,
+        reference_point: Some(center),
+    };
+    let mut sip = SipPolynomial::fit_residuals(&ref_points, &residuals, &config).unwrap();
+    let max_err = sip.compute_inverse(1000, 1000);
+    assert!(
+        max_err < 0.1,
+        "order2 roundtrip error {:.6} >= 0.1",
+        max_err
+    );
+}
+
+#[test]
+fn test_inverse_roundtrip_mustache() {
+    // Mustache distortion: barrel (r²) + higher-order (r⁴) with opposite signs.
+    // Max correction ~2px at corners — realistic for wide-field imaging.
+    let center = DVec2::new(500.0, 500.0);
+    let k2 = 5e-9;
+    let k3 = -1e-14;
+    let mut ref_points = Vec::new();
+    let mut residuals = Vec::new();
+    for y in (0..=1000).step_by(50) {
+        for x in (0..=1000).step_by(50) {
+            let p = DVec2::new(x as f64, y as f64);
+            ref_points.push(p);
+            let d = p - center;
+            let r2 = d.length_squared();
+            residuals.push(d * (k2 * r2 + k3 * r2 * r2));
+        }
+    }
+    let config = SipConfig {
+        order: 5,
+        reference_point: Some(center),
+    };
+    let mut sip = SipPolynomial::fit_residuals(&ref_points, &residuals, &config).unwrap();
+    let max_err = sip.compute_inverse(1000, 1000);
+    assert!(
+        max_err < 0.5,
+        "mustache roundtrip error {:.6} >= 0.5",
+        max_err
+    );
+}
+
+#[test]
+fn test_inverse_zero_distortion() {
+    let center = DVec2::new(500.0, 500.0);
+    let mut ref_points = Vec::new();
+    let mut residuals = Vec::new();
+    for y in (0..=1000).step_by(100) {
+        for x in (0..=1000).step_by(100) {
+            ref_points.push(DVec2::new(x as f64, y as f64));
+            residuals.push(DVec2::ZERO);
+        }
+    }
+    let config = SipConfig {
+        order: 2,
+        reference_point: Some(center),
+    };
+    let mut sip = SipPolynomial::fit_residuals(&ref_points, &residuals, &config).unwrap();
+    let max_err = sip.compute_inverse(1000, 1000);
+    assert!(
+        max_err < 1e-10,
+        "zero distortion roundtrip error {:.6e}",
+        max_err
+    );
+}
+
+#[test]
+fn test_inverse_has_inverse() {
+    let center = DVec2::new(500.0, 500.0);
+    let mut sip = make_barrel_sip(center, 1e-8);
+    assert!(!sip.has_inverse());
+    sip.compute_inverse(1000, 1000);
+    assert!(sip.has_inverse());
+}
+
+#[test]
+#[should_panic(expected = "inverse polynomial not computed")]
+fn test_inverse_panics_without_compute() {
+    let center = DVec2::new(500.0, 500.0);
+    let sip = make_barrel_sip(center, 1e-8);
+    sip.inverse_correction_at(DVec2::new(100.0, 100.0));
+}
+
+#[test]
+fn test_inverse_accessors() {
+    let center = DVec2::new(500.0, 500.0);
+    let mut sip = make_barrel_sip(center, 1e-8);
+    sip.compute_inverse(1000, 1000);
+
+    // Forward order 3 → inverse order 4
+    assert_eq!(sip.inv_order(), 4);
+    assert_eq!(sip.inv_coeffs_u().len(), num_terms(4));
+    assert_eq!(sip.inv_coeffs_v().len(), num_terms(4));
+}
+
+#[test]
+fn test_inverse_all_orders() {
+    let center = DVec2::new(500.0, 500.0);
+    let k = 1e-8;
+
+    let mut ref_points = Vec::new();
+    let mut residuals = Vec::new();
+    for y in (0..=1000).step_by(50) {
+        for x in (0..=1000).step_by(50) {
+            let p = DVec2::new(x as f64, y as f64);
+            ref_points.push(p);
+            let d = p - center;
+            residuals.push(d * k * d.length_squared());
+        }
+    }
+
+    for order in 2..=5 {
+        let config = SipConfig {
+            order,
+            reference_point: Some(center),
+        };
+        let mut sip = SipPolynomial::fit_residuals(&ref_points, &residuals, &config).unwrap();
+        let max_err = sip.compute_inverse(1000, 1000);
+        let expected_inv_order = (order + 1).min(5);
+        assert_eq!(sip.inv_order(), expected_inv_order);
+        assert!(
+            max_err < 0.5,
+            "order {} roundtrip error {:.6} >= 0.5",
+            order,
+            max_err
+        );
+    }
+}
+
+#[test]
+fn test_inverse_asymmetric_image() {
+    let center = DVec2::new(960.0, 540.0);
+    let k = 5e-9;
+
+    let mut ref_points = Vec::new();
+    let mut residuals = Vec::new();
+    for y in (0..=1080).step_by(90) {
+        for x in (0..=1920).step_by(120) {
+            let p = DVec2::new(x as f64, y as f64);
+            ref_points.push(p);
+            let d = p - center;
+            residuals.push(d * k * d.length_squared());
+        }
+    }
+    let config = SipConfig {
+        order: 3,
+        reference_point: Some(center),
+    };
+    let mut sip = SipPolynomial::fit_residuals(&ref_points, &residuals, &config).unwrap();
+    let max_err = sip.compute_inverse(1920, 1080);
+    assert!(
+        max_err < 0.1,
+        "asymmetric image roundtrip error {:.6} >= 0.1",
+        max_err
+    );
+
+    // Spot-check corners
+    for &p in &[
+        DVec2::new(0.0, 0.0),
+        DVec2::new(1920.0, 0.0),
+        DVec2::new(0.0, 1080.0),
+        DVec2::new(1920.0, 1080.0),
+    ] {
+        let corrected = sip.correct(p);
+        let roundtrip = sip.inverse_correct(corrected);
+        let err = (roundtrip - p).length();
+        assert!(err < 0.1, "corner roundtrip error {:.6} at {:?}", err, p);
+    }
+}
