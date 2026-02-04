@@ -1225,3 +1225,274 @@ fn test_integration_minimum_stars() {
         est_offset.y
     );
 }
+
+// ============================================================================
+// select_spatially_distributed tests
+// ============================================================================
+
+#[test]
+fn test_spatial_selection_empty_input() {
+    let result = select_spatially_distributed(&[], 10, 4);
+    assert!(result.is_empty());
+}
+
+#[test]
+fn test_spatial_selection_zero_max_stars() {
+    let stars = vec![DVec2::new(100.0, 100.0)];
+    let result = select_spatially_distributed(&stars, 0, 4);
+    assert!(result.is_empty());
+}
+
+#[test]
+fn test_spatial_selection_single_star() {
+    let stars = vec![DVec2::new(50.0, 50.0)];
+    let result = select_spatially_distributed(&stars, 10, 4);
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0], stars[0]);
+}
+
+#[test]
+fn test_spatial_selection_respects_max_stars() {
+    let stars = generate_star_grid(10, 10, 10.0, DVec2::new(0.0, 0.0));
+    let max = 20;
+    let result = select_spatially_distributed(&stars, max, 4);
+    assert_eq!(result.len(), max);
+}
+
+#[test]
+fn test_spatial_selection_fewer_stars_than_max() {
+    let stars = vec![
+        DVec2::new(10.0, 10.0),
+        DVec2::new(90.0, 90.0),
+        DVec2::new(50.0, 50.0),
+    ];
+    let result = select_spatially_distributed(&stars, 100, 4);
+    assert_eq!(result.len(), 3);
+}
+
+#[test]
+fn test_spatial_selection_distributes_across_grid() {
+    // Place stars in 4 distinct quadrants (2x2 grid).
+    // Even though the top-left quadrant has 10 stars (listed first = "brightest"),
+    // the function should pick from all quadrants, not just the brightest cluster.
+    let mut stars = Vec::new();
+    // Top-left cluster: 10 stars
+    for i in 0..10 {
+        stars.push(DVec2::new(10.0 + i as f64, 10.0 + i as f64));
+    }
+    // Top-right: 3 stars
+    for i in 0..3 {
+        stars.push(DVec2::new(90.0 + i as f64, 10.0 + i as f64));
+    }
+    // Bottom-left: 3 stars
+    for i in 0..3 {
+        stars.push(DVec2::new(10.0 + i as f64, 90.0 + i as f64));
+    }
+    // Bottom-right: 3 stars
+    for i in 0..3 {
+        stars.push(DVec2::new(90.0 + i as f64, 90.0 + i as f64));
+    }
+
+    let result = select_spatially_distributed(&stars, 8, 2);
+    assert_eq!(result.len(), 8);
+
+    // Check that all 4 quadrants are represented
+    let mid_x = 50.0;
+    let mid_y = 50.0;
+    let top_left = result.iter().filter(|p| p.x < mid_x && p.y < mid_y).count();
+    let top_right = result
+        .iter()
+        .filter(|p| p.x >= mid_x && p.y < mid_y)
+        .count();
+    let bot_left = result
+        .iter()
+        .filter(|p| p.x < mid_x && p.y >= mid_y)
+        .count();
+    let bot_right = result
+        .iter()
+        .filter(|p| p.x >= mid_x && p.y >= mid_y)
+        .count();
+
+    assert!(top_left >= 1, "Top-left missing: {top_left}");
+    assert!(top_right >= 1, "Top-right missing: {top_right}");
+    assert!(bot_left >= 1, "Bottom-left missing: {bot_left}");
+    assert!(bot_right >= 1, "Bottom-right missing: {bot_right}");
+}
+
+#[test]
+fn test_spatial_selection_round_robin_fairness() {
+    // 4 quadrants with 2x2 grid, each quadrant has different number of stars.
+    // With max_stars=4 and grid_size=2, first round should take 1 from each cell.
+    let stars = vec![
+        // Cell (0,0) - top-left: 5 stars
+        DVec2::new(10.0, 10.0),
+        DVec2::new(15.0, 15.0),
+        DVec2::new(20.0, 20.0),
+        DVec2::new(25.0, 25.0),
+        DVec2::new(30.0, 30.0),
+        // Cell (1,0) - top-right: 1 star
+        DVec2::new(80.0, 10.0),
+        // Cell (0,1) - bottom-left: 1 star
+        DVec2::new(10.0, 80.0),
+        // Cell (1,1) - bottom-right: 1 star
+        DVec2::new(80.0, 80.0),
+    ];
+
+    let result = select_spatially_distributed(&stars, 4, 2);
+    assert_eq!(result.len(), 4);
+
+    // Each cell should contribute exactly 1 star
+    let mid = 50.0;
+    let tl = result.iter().filter(|p| p.x < mid && p.y < mid).count();
+    let tr = result.iter().filter(|p| p.x >= mid && p.y < mid).count();
+    let bl = result.iter().filter(|p| p.x < mid && p.y >= mid).count();
+    let br = result.iter().filter(|p| p.x >= mid && p.y >= mid).count();
+
+    assert_eq!(tl, 1, "Top-left should have 1 star, got {tl}");
+    assert_eq!(tr, 1, "Top-right should have 1 star, got {tr}");
+    assert_eq!(bl, 1, "Bottom-left should have 1 star, got {bl}");
+    assert_eq!(br, 1, "Bottom-right should have 1 star, got {br}");
+}
+
+#[test]
+fn test_spatial_selection_preserves_brightness_order_within_cell() {
+    // Stars in the same cell should be selected in input order (brightness order).
+    // One cell with 3 stars, another cell with 1.
+    let stars = vec![
+        DVec2::new(10.0, 10.0), // Cell 0: brightest
+        DVec2::new(15.0, 15.0), // Cell 0: second brightest
+        DVec2::new(20.0, 20.0), // Cell 0: third brightest
+        DVec2::new(90.0, 90.0), // Cell 3: only star
+    ];
+
+    let result = select_spatially_distributed(&stars, 4, 2);
+
+    // Round 0: picks (10,10) from cell 0 and (90,90) from cell 3
+    // Round 1: picks (15,15) from cell 0 (no more in cell 3)
+    // Round 2: picks (20,20) from cell 0
+    assert_eq!(result.len(), 4);
+    assert!(result.contains(&DVec2::new(10.0, 10.0)));
+    assert!(result.contains(&DVec2::new(15.0, 15.0)));
+    assert!(result.contains(&DVec2::new(20.0, 20.0)));
+    assert!(result.contains(&DVec2::new(90.0, 90.0)));
+}
+
+#[test]
+fn test_spatial_selection_all_stars_same_position() {
+    // All stars at the same point - should all go to one cell
+    let stars = vec![
+        DVec2::new(50.0, 50.0),
+        DVec2::new(50.0, 50.0),
+        DVec2::new(50.0, 50.0),
+    ];
+    let result = select_spatially_distributed(&stars, 2, 4);
+    assert_eq!(result.len(), 2);
+}
+
+#[test]
+fn test_spatial_selection_large_grid_sparse_stars() {
+    // Grid is much larger than the number of stars (many empty cells)
+    let stars = vec![
+        DVec2::new(0.0, 0.0),
+        DVec2::new(100.0, 100.0),
+        DVec2::new(200.0, 200.0),
+    ];
+    let result = select_spatially_distributed(&stars, 3, 16);
+    assert_eq!(result.len(), 3);
+}
+
+#[test]
+fn test_spatial_selection_grid_size_2() {
+    // Minimum valid grid size
+    let stars = generate_star_grid(4, 4, 50.0, DVec2::new(0.0, 0.0));
+    let result = select_spatially_distributed(&stars, 8, 2);
+    assert_eq!(result.len(), 8);
+}
+
+#[test]
+fn test_spatial_selection_improves_coverage_vs_brightness_only() {
+    // Create a scenario where brightness-only selection clusters badly.
+    // All "bright" stars (listed first) are in one corner.
+    let mut stars = Vec::new();
+    // 20 bright stars clustered in top-left
+    for i in 0..20 {
+        stars.push(DVec2::new(
+            10.0 + (i % 5) as f64 * 5.0,
+            10.0 + (i / 5) as f64 * 5.0,
+        ));
+    }
+    // 5 dim stars spread across the field
+    stars.push(DVec2::new(500.0, 10.0));
+    stars.push(DVec2::new(10.0, 500.0));
+    stars.push(DVec2::new(500.0, 500.0));
+    stars.push(DVec2::new(250.0, 250.0));
+    stars.push(DVec2::new(500.0, 250.0));
+
+    let n = 10;
+    let spatial = select_spatially_distributed(&stars, n, 4);
+    let brightness_only: Vec<DVec2> = stars.iter().take(n).copied().collect();
+
+    // Measure coverage: bounding box area of selected stars
+    let bbox_area = |pts: &[DVec2]| -> f64 {
+        let (min_x, max_x, min_y, max_y) = pts.iter().fold(
+            (f64::MAX, f64::MIN, f64::MAX, f64::MIN),
+            |(mnx, mxx, mny, mxy), p| (mnx.min(p.x), mxx.max(p.x), mny.min(p.y), mxy.max(p.y)),
+        );
+        (max_x - min_x) * (max_y - min_y)
+    };
+
+    let spatial_area = bbox_area(&spatial);
+    let brightness_area = bbox_area(&brightness_only);
+
+    assert!(
+        spatial_area > brightness_area * 5.0,
+        "Spatial selection should cover much more area: spatial={spatial_area}, brightness={brightness_area}"
+    );
+}
+
+#[test]
+fn test_spatial_selection_integration_with_pipeline() {
+    // Verify spatial selection works end-to-end in the registration pipeline.
+    // Create clustered stars where spatial distribution matters.
+    let mut ref_stars = Vec::new();
+    // Dense cluster (would dominate brightness-only selection)
+    for r in 0..8 {
+        for c in 0..8 {
+            ref_stars.push(DVec2::new(100.0 + c as f64 * 15.0, 100.0 + r as f64 * 15.0));
+        }
+    }
+    // Sparse stars spread across the field (important for transform accuracy)
+    ref_stars.push(DVec2::new(500.0, 50.0));
+    ref_stars.push(DVec2::new(50.0, 500.0));
+    ref_stars.push(DVec2::new(500.0, 500.0));
+    ref_stars.push(DVec2::new(300.0, 400.0));
+    ref_stars.push(DVec2::new(400.0, 300.0));
+    ref_stars.push(DVec2::new(450.0, 150.0));
+
+    let transform = Transform::similarity(DVec2::new(20.0, -10.0), 0.03, 1.01);
+    let target_stars = transform_stars(&ref_stars, &transform);
+
+    // Register with spatial distribution enabled (default)
+    let config = RegistrationConfig {
+        transform_type: TransformType::Similarity,
+        use_spatial_distribution: true,
+        spatial_grid_size: 4,
+        min_stars_for_matching: 6,
+        min_matched_stars: 4,
+        ..Default::default()
+    };
+    let result = Registrator::new(config)
+        .register_positions(&ref_stars, &target_stars)
+        .expect("Registration with spatial selection should succeed");
+
+    let est_scale = result.transform.scale_factor();
+    let est_angle = result.transform.rotation_angle();
+    assert!(
+        (est_scale - 1.01).abs() < 0.01,
+        "Expected scale=1.01, got {est_scale}"
+    );
+    assert!(
+        (est_angle - 0.03).abs() < 0.01,
+        "Expected angle=0.03, got {est_angle}"
+    );
+}
