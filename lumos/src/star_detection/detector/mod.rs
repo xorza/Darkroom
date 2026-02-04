@@ -147,24 +147,23 @@ impl StarDetector {
         }
 
         // Step 2: Determine effective FWHM (manual > auto-estimate > disabled)
-        let effective_fwhm =
+        let fwhm_result =
             stages::fwhm::estimate_fwhm(&grayscale_image, &background, &self.config, pool);
 
         // Step 3: Detect star candidate regions (with optional matched filter)
         let regions = stages::detect::detect(
             &grayscale_image,
             &background,
-            effective_fwhm.fwhm(),
+            fwhm_result.fwhm,
             &self.config,
             pool,
         );
 
-        let fwhm_estimate = effective_fwhm.estimate();
         let mut diagnostics = Diagnostics {
             candidates_after_filtering: regions.len(),
-            estimated_fwhm: fwhm_estimate.map_or(0.0, |e| e.fwhm),
-            fwhm_estimation_star_count: fwhm_estimate.map_or(0, |e| e.star_count),
-            fwhm_was_auto_estimated: fwhm_estimate.is_some_and(|e| e.is_estimated),
+            estimated_fwhm: fwhm_result.fwhm.unwrap_or(0.0),
+            fwhm_estimation_star_count: fwhm_result.stars_used,
+            fwhm_was_auto_estimated: fwhm_result.stars_used > 0,
             ..Default::default()
         };
         tracing::debug!("Detected {} star candidates", regions.len());

@@ -14,76 +14,44 @@ use super::super::super::deblend::Region;
 use super::super::super::star::Star;
 use super::detect::detect;
 
-/// Result of FWHM estimation.
+/// Result of FWHM estimation stage.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct FwhmEstimate {
-    /// Estimated FWHM in pixels.
-    pub fwhm: f32,
-    /// Number of stars used for estimation (after filtering).
-    pub star_count: usize,
-    /// Median Absolute Deviation of FWHM values.
-    #[allow(dead_code)]
-    pub mad: f32,
-    /// Whether estimation succeeded (true) or fell back to default (false).
-    pub is_estimated: bool,
-}
-
-/// Effective FWHM configuration for matched filtering.
-#[derive(Debug, Clone)]
-pub(crate) enum EffectiveFwhm {
-    /// No matched filtering (disabled).
-    Disabled,
-    /// Manual FWHM specified by user.
-    Manual(f32),
-    /// Auto-estimated FWHM with estimation details.
-    Estimated(FwhmEstimate),
-}
-
-impl EffectiveFwhm {
-    /// Get the FWHM value if matched filtering is enabled.
-    #[inline]
-    pub fn fwhm(&self) -> Option<f32> {
-        match self {
-            Self::Disabled => None,
-            Self::Manual(fwhm) => Some(*fwhm),
-            Self::Estimated(estimate) => Some(estimate.fwhm),
-        }
-    }
-
-    /// Get the estimation details if FWHM was auto-estimated.
-    #[inline]
-    pub fn estimate(&self) -> Option<&FwhmEstimate> {
-        match self {
-            Self::Estimated(estimate) => Some(estimate),
-            _ => None,
-        }
-    }
+pub(crate) struct FwhmResult {
+    /// FWHM value if matched filtering should be used, None if disabled.
+    pub fwhm: Option<f32>,
+    /// Number of stars used for auto-estimation (0 if manual or disabled).
+    pub stars_used: usize,
 }
 
 /// Determine the effective FWHM for matched filtering.
 ///
 /// Returns:
-/// - `EffectiveFwhm::Manual(fwhm)` if `config.expected_fwhm > 0`
-/// - `EffectiveFwhm::Estimated(estimate)` if auto-estimation is enabled
-/// - `EffectiveFwhm::Disabled` if matched filtering is disabled
+/// - `fwhm: Some(value)` if manual FWHM is set or auto-estimation succeeds
+/// - `fwhm: None` if matched filtering is disabled
+/// - `stars_used` is non-zero only when auto-estimation was performed
 pub(crate) fn estimate_fwhm(
     pixels: &Buffer2<f32>,
     stats: &BackgroundEstimate,
     config: &Config,
     pool: &mut BufferPool,
-) -> EffectiveFwhm {
+) -> FwhmResult {
     // Manual FWHM takes precedence
     if config.expected_fwhm > f32::EPSILON {
-        return EffectiveFwhm::Manual(config.expected_fwhm);
+        return FwhmResult {
+            fwhm: Some(config.expected_fwhm),
+            stars_used: 0,
+        };
     }
 
     // Auto-estimate if enabled
     if config.auto_estimate_fwhm {
-        let estimate = estimate_from_bright_stars(pixels, stats, config, pool);
-        return EffectiveFwhm::Estimated(estimate);
+        return estimate_from_bright_stars(pixels, stats, config, pool);
     }
 
-    EffectiveFwhm::Disabled
+    FwhmResult {
+        fwhm: None,
+        stars_used: 0,
+    }
 }
 
 /// Perform first-pass detection and estimate FWHM from bright stars.
@@ -92,7 +60,7 @@ fn estimate_from_bright_stars(
     stats: &BackgroundEstimate,
     config: &Config,
     pool: &mut BufferPool,
-) -> FwhmEstimate {
+) -> FwhmResult {
     // Use stricter thresholds for FWHM estimation
     let first_pass_config = Config {
         sigma_threshold: config.sigma_threshold * config.fwhm_estimation_sigma_factor,
@@ -151,7 +119,7 @@ fn estimate_fwhm_from_stars(
     default_fwhm: f32,
     max_eccentricity: f32,
     max_sharpness: f32,
-) -> FwhmEstimate {
+) -> FwhmResult {
     // Filter stars for quality and collect FWHM values
     let mut fwhms: Vec<f32> = stars
         .iter()
@@ -171,11 +139,9 @@ fn estimate_fwhm_from_stars(
             min_stars,
             default_fwhm
         );
-        return FwhmEstimate {
-            fwhm: default_fwhm,
-            star_count: fwhms.len(),
-            mad: 0.0,
-            is_estimated: false,
+        return FwhmResult {
+            fwhm: Some(default_fwhm),
+            stars_used: fwhms.len(),
         };
     }
 
@@ -197,11 +163,9 @@ fn estimate_fwhm_from_stars(
             "Too many outliers rejected ({count_before} -> {}), using pre-rejection median {median:.2}",
             fwhms.len(),
         );
-        return FwhmEstimate {
-            fwhm: median,
-            star_count: fwhms.len(),
-            mad,
-            is_estimated: true,
+        return FwhmResult {
+            fwhm: Some(median),
+            stars_used: fwhms.len(),
         };
     }
 
@@ -214,10 +178,8 @@ fn estimate_fwhm_from_stars(
         fwhms.len()
     );
 
-    FwhmEstimate {
-        fwhm: final_median,
-        star_count: fwhms.len(),
-        mad: final_mad,
-        is_estimated: true,
+    FwhmResult {
+        fwhm: Some(final_median),
+        stars_used: fwhms.len(),
     }
 }
