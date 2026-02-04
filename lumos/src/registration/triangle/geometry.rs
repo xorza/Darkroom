@@ -60,6 +60,13 @@ impl Triangle {
             return None;
         }
 
+        // Reject very elongated triangles (Groth 1986, R=10 threshold).
+        // Small perturbations in the shortest side cause large ratio changes,
+        // producing imprecise matches.
+        if longest / sides[0] > 10.0 {
+            return None;
+        }
+
         let ratios = (sides[0] / longest, sides[1] / longest);
 
         // Check for very flat triangles using Heron's formula for area

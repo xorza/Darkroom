@@ -766,6 +766,60 @@ fn test_triangle_near_collinear() {
     assert!((area - 50.0).abs() < 1.0, "Expected area ~50, got {}", area);
 }
 
+#[test]
+fn test_triangle_side_ratio_filter_rejects_elongated() {
+    // Very elongated triangle: sides ~1, ~100, ~100. Ratio = 100/1 = 100 > 10.
+    let tri = Triangle::from_positions(
+        [0, 1, 2],
+        [
+            DVec2::new(0.0, 0.0),
+            DVec2::new(100.0, 0.0),
+            DVec2::new(100.0, 1.0),
+        ],
+    );
+    assert!(tri.is_none(), "Should reject triangle with side ratio > 10");
+}
+
+#[test]
+fn test_triangle_side_ratio_filter_accepts_moderate() {
+    // Triangle with ratio just under 10: sides ~1, ~5, ~5. Ratio ~5.
+    let tri = Triangle::from_positions(
+        [0, 1, 2],
+        [
+            DVec2::new(0.0, 0.0),
+            DVec2::new(5.0, 0.0),
+            DVec2::new(5.0, 1.0),
+        ],
+    );
+    assert!(tri.is_some(), "Should accept triangle with side ratio < 10");
+}
+
+#[test]
+fn test_triangle_side_ratio_filter_boundary() {
+    // Triangle near the boundary: longest/shortest ≈ 10.
+    // sides: ~1, ~10, ~10. Ratio = ~10.05.
+    let tri_over = Triangle::from_positions(
+        [0, 1, 2],
+        [
+            DVec2::new(0.0, 0.0),
+            DVec2::new(10.0, 0.0),
+            DVec2::new(10.0, 1.0),
+        ],
+    );
+    assert!(tri_over.is_none(), "Should reject triangle at ratio ~10.05");
+
+    // Slightly wider: sides ~2, ~10, ~10. Ratio = ~5.1.
+    let tri_under = Triangle::from_positions(
+        [0, 1, 2],
+        [
+            DVec2::new(0.0, 0.0),
+            DVec2::new(10.0, 0.0),
+            DVec2::new(10.0, 2.0),
+        ],
+    );
+    assert!(tri_under.is_some(), "Should accept triangle at ratio ~5.1");
+}
+
 /// Test matching with large coordinate values
 #[test]
 fn test_match_large_coordinates() {
@@ -1131,6 +1185,29 @@ fn test_resolve_matches_confidence() {
     assert_eq!(matches.len(), 1);
     assert!(matches[0].confidence > 0.0);
     assert!(matches[0].confidence <= 1.0);
+}
+
+#[test]
+fn test_resolve_matches_confidence_relative() {
+    // Confidence should be relative to max votes in the set.
+    // Top match gets 1.0, others are proportional.
+    let mut votes = HashMap::new();
+    votes.insert((0, 0), 20);
+    votes.insert((1, 1), 10);
+    votes.insert((2, 2), 5);
+
+    let matches = resolve_matches(votes, 5, 5, 1);
+    assert_eq!(matches.len(), 3);
+
+    // Sorted by votes descending, so matches[0] has 20 votes
+    assert_eq!(matches[0].votes, 20);
+    assert!((matches[0].confidence - 1.0).abs() < 1e-10);
+
+    assert_eq!(matches[1].votes, 10);
+    assert!((matches[1].confidence - 0.5).abs() < 1e-10);
+
+    assert_eq!(matches[2].votes, 5);
+    assert!((matches[2].confidence - 0.25).abs() < 1e-10);
 }
 
 // ============================================================================

@@ -86,17 +86,9 @@ The astroalign formulation spreads out the invariant space more uniformly. With 
 
 **Verdict**: Worth considering now that we use k-d tree lookup. Would need benchmarking to confirm the spread improvement matters in practice.
 
-#### 3. Triangle deduplication
+#### 3. ~~Triangle deduplication~~ (ALREADY DONE)
 
-**Current**: No deduplication. The same triangle can appear multiple times if formed from different starting vertices during k-NN enumeration.
-
-**Astroalign**: Explicitly removes duplicate invariant tuples after triangle formation.
-
-Duplicate triangles inflate vote counts uniformly across all vertex pairs of that triangle, so they don't create false positives. However, they waste tree lookups and voting computation.
-
-**Implementation**: Sort triangle index triples (i,j,k) and deduplicate with a HashSet before computing invariants.
-
-**Verdict**: Worth doing. Reduces triangle count (and thus matching work) by estimated 2-3x based on k-NN overlap patterns. Simple to implement.
+`form_triangles_from_neighbors` in `spatial/mod.rs` already sorts index triples and deduplicates via `HashSet` before returning. No duplicate triangles reach the matching stage.
 
 #### 4. RANSAC integration into the triangle module (or clarify pipeline boundary)
 
@@ -131,57 +123,33 @@ Since the downstream RANSAC already handles outlier rejection and transform esti
 
 **Verdict**: Nice optimization for large point sets, but adds complexity. Current approach is fast enough for 200 stars. Low priority unless profiling shows voting is a bottleneck.
 
-#### 7. Groth's side-ratio filter
+#### 7. ~~Groth's side-ratio filter~~ (DONE)
 
-**Current**: No filter on triangle shape. All non-degenerate triangles are kept.
+Added `if longest / sides[0] > 10.0 { return None; }` in `Triangle::from_positions`. Rejects very elongated triangles where small perturbations in the shortest side cause large ratio changes (Groth 1986, R=10 threshold). Three tests cover rejection, acceptance, and boundary behavior.
 
-**Groth (1986)**: Rejects triangles with longest/shortest > 10 (very elongated). These produce imprecise matches because small perturbations in the shortest side cause large ratio changes.
+#### 8. ~~Confidence formula improvement~~ (DONE)
 
-**Siril**: Similar filtering of elongated triangles.
+Changed from theoretical maximum formula to `votes / max_votes_in_set`. The top match now gets confidence 1.0, and others are proportional. More meaningful for downstream consumers.
 
-**Current code**: Already rejects via `MIN_TRIANGLE_AREA_SQ` (Heron's formula), which catches some elongated triangles. But a direct ratio filter (e.g., s2/s0 > 10) would be more targeted.
+#### 9. ~~Sparse VoteMatrix: use u32 instead of usize for values~~ (DONE)
 
-**Implementation**: Add `if sides[2] / sides[0] > 10.0 { return None; }` in `Triangle::from_positions`.
-
-**Verdict**: Worth adding. Simple, improves match quality by excluding unstable triangles. Groth's R=10 threshold is well-established.
-
-#### 8. Confidence formula improvement
-
-**Current**: `confidence = votes / ((min(n_ref, n_target) - 2) * (min(n_ref, n_target) - 1) / 2)`. This is the theoretical maximum votes if a point appeared in every possible triangle pair.
-
-This formula doesn't account for the k-NN triangle formation limiting triangle count. The actual max votes per point is much lower than the formula suggests, so all confidences are very small.
-
-**Better formula**: Compute confidence relative to the maximum vote count in the current match set: `confidence = votes / max_votes_in_set`. This gives a relative ranking that's more meaningful.
-
-**Verdict**: Worth fixing. The current formula produces misleadingly small confidence values. A simple `votes / max_votes` would be more useful to downstream consumers.
-
-#### 9. Sparse VoteMatrix: use u32 instead of usize for values
-
-The sparse HashMap uses `usize` (8 bytes on 64-bit) for vote counts that never exceed ~1000. Using `u32` would halve the per-entry memory overhead in the HashMap.
-
-**Verdict**: Minor optimization. Low priority.
+Changed sparse `HashMap` value type from `usize` (8 bytes) to `u32` (4 bytes). Converted back to `usize` in `into_hashmap()` to keep the external API unchanged.
 
 ## Summary of Recommendations
 
 ### Done
 
 - **K-d tree for invariant lookup** — Replaced hash table with k-d tree on invariant space. Eliminated `hash_table.rs` and `hash_bins` parameter.
+- **Triangle deduplication** — Already implemented in `form_triangles_from_neighbors` via sorted index triples and `HashSet`.
+- **Groth's side-ratio filter** — Reject triangles with longest/shortest > 10 in `Triangle::from_positions`.
+- **Confidence formula fix** — `votes / max_votes_in_set` instead of theoretical maximum.
+- **Sparse VoteMatrix u32 values** — `u32` instead of `usize` for sparse HashMap values.
 
-### High priority (clear benefit, low risk)
+### Remaining suggestions
 
-1. **Triangle deduplication** — HashSet on sorted index triples. Reduces matching work 2-3x.
-2. **Groth's side-ratio filter** — Reject triangles with s2/s0 > 10. Simple, proven.
-3. **Confidence formula fix** — Use `votes / max_votes_in_set` instead of theoretical maximum.
-
-### Medium priority (meaningful simplification, needs benchmarking)
-
-4. **Consider removing two-step refinement** — Overlaps with downstream RANSAC. Benchmark first.
-5. **Astroalign invariant formulation** — Now viable with k-d tree lookup. Needs benchmarking to confirm spread improvement matters.
-
-### Low priority (nice-to-have)
-
-6. **Tabur-style ordered search** — Process rare triangles first. Only matters for large point sets.
-7. **Sparse VoteMatrix u32 values** — Minor memory savings.
+1. **Consider removing two-step refinement** — Overlaps with downstream RANSAC. Benchmark first.
+2. **Astroalign invariant formulation** — Now viable with k-d tree lookup. Needs benchmarking to confirm spread improvement matters.
+3. **Tabur-style ordered search** — Process rare triangles first. Only matters for large point sets.
 
 ## References
 

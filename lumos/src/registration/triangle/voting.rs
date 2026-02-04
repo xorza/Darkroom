@@ -34,8 +34,8 @@ pub struct PointMatch {
 pub(crate) enum VoteMatrix {
     /// Dense storage for small point counts: votes[ref_idx * n_target + target_idx]
     Dense { votes: Vec<u16>, n_target: usize },
-    /// Sparse storage for large point counts
-    Sparse(HashMap<(usize, usize), usize>),
+    /// Sparse storage for large point counts (u32 saves memory vs usize)
+    Sparse(HashMap<(usize, usize), u32>),
 }
 
 impl VoteMatrix {
@@ -66,7 +66,7 @@ impl VoteMatrix {
                 votes[idx] = new_val;
             }
             VoteMatrix::Sparse(map) => {
-                *map.entry((ref_idx, target_idx)).or_insert(0) += 1;
+                *map.entry((ref_idx, target_idx)).or_insert(0u32) += 1;
             }
         }
     }
@@ -84,7 +84,10 @@ impl VoteMatrix {
                 }
                 map
             }
-            VoteMatrix::Sparse(map) => map,
+            VoteMatrix::Sparse(map) => map
+                .into_iter()
+                .map(|(key, count)| (key, count as usize))
+                .collect(),
         }
     }
 }
@@ -189,13 +192,15 @@ pub(crate) fn resolve_matches(
         {
             used_ref[m.ref_idx] = true;
             used_target[m.target_idx] = true;
-
-            // Compute confidence based on votes
-            let max_possible_votes = (n_ref.min(n_target) - 2) * (n_ref.min(n_target) - 1) / 2;
-            let confidence = (m.votes as f64 / max_possible_votes.max(1) as f64).min(1.0);
-
-            resolved.push(PointMatch { confidence, ..m });
+            resolved.push(m);
         }
+    }
+
+    // Compute confidence relative to maximum vote count in the resolved set.
+    // This gives a meaningful relative ranking (1.0 = best match).
+    let max_votes = resolved.iter().map(|m| m.votes).max().unwrap_or(1);
+    for m in &mut resolved {
+        m.confidence = m.votes as f64 / max_votes as f64;
     }
 
     resolved
