@@ -1,27 +1,43 @@
 AI coding rules for Rust projects:
 
+## Error Handling
+
+- Use `Result<>` only for expected failures (network, I/O, external services, user input).
 - Avoid `Option<>` and `Result<>` for cases that cannot fail.
-- For required values, use `.unwrap()`. For non-obvious cases, add `.expect("...")` with a clear, specific message.
-- Prefer crashing on logic errors rather than silently swallowing them.
-- Use `Result<>` only for expected failures (e.g., network, I/O, external services, user input).
-- Always add `#[derive(Debug)]` to Rust structs.
-- After changing Rust code, run in this order before confirming output:
-    1. `cargo nextest run && cargo fmt && cargo check && cargo clippy --all-targets -- -D warnings`
-    2. Skip doc-tests.
-- After making code changes, verify that all new or modified functionality is covered by tests. Add tests for any untested code paths. This applies to all non-GUI code (algorithms, data structures, utilities, etc.). GUI code is exempt from this requirement.
-- Add asserts for function inputs and outputs where applicable so logic errors crash instead of being swallowed. Do not use asserts for user input or network failures.
+- For required values, use `.unwrap()`. For non-obvious cases, use `.expect("clear message")`.
+- Crash on logic errors. Do not silently swallow them.
+- Add asserts for function inputs and outputs to catch logic errors. Do not assert on user input or network failures.
+
+## Code Style
+
+- Always add `#[derive(Debug)]` to structs.
+- No backward compatibility. Remove old/deprecated code, rename freely, change APIs. Rewrite callers to use new APIs. No compatibility shims, re-exports, or wrappers.
+- Remove unused code. If kept intentionally, add a comment explaining why and silence linter warnings.
+- Keep public API clean and consistent.
+
+## Verification
+
+- After changing code, run before confirming:
+  ```
+  cargo nextest run && cargo fmt && cargo check && cargo clippy --all-targets -- -D warnings
+  ```
+  Skip doc-tests.
+- Add tests for all new or modified non-GUI code (algorithms, data structures, utilities).
+- Check test run times are reasonable. Research and fix slow tests.
 - Check online documentation for best practices and patterns.
-- `NOTES-AI.md` files are AI-generated and contain implementation details, structure, and functionality notes. They can be placed in any directory where context is needed (root, crates, modules, etc.). Avoid editing root `README.md` unless asked; instead, update the relevant `NOTES-AI.md` and keep it current. Store only current state, not change history.
-- Read `NOTES-AI.md` files for summarized project knowledge. Check for them in the current working directory and relevant subdirectories.
-- When a `NOTES-AI.md` file becomes too large (>300 lines or covers multiple distinct modules), split it into smaller files in corresponding subdirectories. Keep the parent file as a brief overview with references to child files.
-- Add `README.md` files to any folder that benefits from human-readable documentation (e.g., crates, examples, benchmarks, complex modules).
-- When running benchmarks, use `cargo test -p <crate> --release <bench_name> -- --ignored --nocapture` to run benchmark tests (e.g., `cargo test -p lumos --release bench_extract_candidates -- --ignored --nocapture`).
-- When running perf profiling use 3000 samples per second
-- Perf troubleshooting: If you see `addr2line: could not read first record` errors during `perf report` or `perf script`:
-  - Use `perf script --no-inline` to disable inline resolution (significant speedup, minor loss of detail)
-  - The error is caused by perf's slow external addr2line invocation on debug symbols
-- Use nextest for running tests and for measuring test execution time when asked.
-- For iterative changes and benchmarks, add readme files to corresponding folders explaining which optimizations were implemented and which were removed. When running benchmarks, always output results to a txt file in the bench directory and maintain a bench-analysis.md file with interpretations. Update it when re-running benchmarks.
-- Do not preserve backward compatibility. This library is in early stages of development. Remove old/deprecated code, rename freely, change APIs as needed. Rewrite any code that depends on changed APIs to use the new correct API. Never add compatibility shims, re-exports, or wrappers for old names.
-- Remove deprecated. Make sure public api is properly exposed and consistent. If code is unused but expected to be used later, add a comment explaining why it is kept and silence linter warnings if needed.
-- Check test run time make sure tests taking reasonable amount of time. If tests run too long, research and improve.
+
+## Documentation
+
+- Read `NOTES-AI.md` files for summarized project knowledge. Check current directory and relevant subdirectories.
+- `NOTES-AI.md` files are AI-generated notes on implementation details and structure. Place in any directory where context is needed. Store only current state, not change history. Split files >300 lines into subdirectory files with a brief parent overview.
+- Avoid editing root `README.md` unless asked; update `NOTES-AI.md` instead.
+- Add `README.md` to folders that benefit from human-readable docs (crates, examples, benchmarks, complex modules).
+
+## Benchmarks and Profiling
+
+- Run benchmarks: `cargo test -p <crate> --release <bench_name> -- --ignored --nocapture`
+- Save benchmark results to a txt file in the bench directory. Maintain a `bench-analysis.md` with interpretations. Update on re-runs.
+- Add readme files to benchmark folders explaining which optimizations were tried.
+- Use nextest for running tests and measuring execution time.
+- Perf profiling: use 3000 samples per second.
+- If `addr2line` errors appear in `perf report`/`perf script`, use `perf script --no-inline`.
