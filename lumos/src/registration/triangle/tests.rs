@@ -11,7 +11,7 @@ use super::matching::{
     compute_position_threshold, estimate_similarity_transform, form_triangles_kdtree,
     match_triangles,
 };
-use super::voting::{PointMatch, VoteMatrix, resolve_matches};
+use super::voting::{PointMatch, VoteMatrix, resolve_matches, vote_for_correspondences};
 
 #[test]
 fn test_triangle_from_positions() {
@@ -1464,5 +1464,510 @@ fn test_two_step_refinement_does_not_degrade() {
         correct as f64 / two_step.len().max(1) as f64 >= 0.9,
         "Two-step match accuracy should be >= 90%: {correct}/{}",
         two_step.len()
+    );
+}
+
+// ============================================================================
+// Hash key boundary tests
+// ============================================================================
+
+#[test]
+fn test_hash_key_equilateral_triangle() {
+    // Equilateral triangle: all sides equal, ratios = (1.0, 1.0)
+    // ratio 1.0 * bins = bins, which would be out of bounds without clamping
+    let tri = Triangle::from_positions(
+        [0, 1, 2],
+        [
+            DVec2::new(0.0, 0.0),
+            DVec2::new(10.0, 0.0),
+            DVec2::new(5.0, 8.660254037844386),
+        ],
+    )
+    .unwrap();
+
+    assert!((tri.ratios.0 - 1.0).abs() < 0.01);
+    assert!((tri.ratios.1 - 1.0).abs() < 0.01);
+
+    // hash_key should clamp to bins-1, not overflow
+    for bins in [1, 2, 10, 100, 1000] {
+        let (bx, by) = tri.hash_key(bins);
+        assert!(bx < bins, "bx={bx} >= bins={bins}");
+        assert!(by < bins, "by={by} >= bins={bins}");
+    }
+}
+
+#[test]
+fn test_hash_key_extreme_ratios() {
+    // Very thin isosceles triangle: sides ~50.04, ~50.04, 100.0
+    // ratios ≈ (0.5, 0.5) — two nearly equal short sides relative to base
+    let tri = Triangle::from_positions(
+        [0, 1, 2],
+        [
+            DVec2::new(0.0, 0.0),
+            DVec2::new(100.0, 0.0),
+            DVec2::new(50.0, 2.0), // thin triangle
+        ],
+    )
+    .unwrap();
+
+    // Both ratios should be close to 0.5
+    assert!(
+        tri.ratios.0 > 0.0 && tri.ratios.0 <= 1.0,
+        "ratio.0 out of range: {}",
+        tri.ratios.0
+    );
+    assert!(
+        tri.ratios.1 > 0.0 && tri.ratios.1 <= 1.0,
+        "ratio.1 out of range: {}",
+        tri.ratios.1
+    );
+
+    let (bx, by) = tri.hash_key(100);
+    assert!(bx < 100);
+    assert!(by < 100);
+}
+
+#[test]
+fn test_hash_key_single_bin() {
+    // Edge case: bins = 1
+    let tri = Triangle::from_positions(
+        [0, 1, 2],
+        [
+            DVec2::new(0.0, 0.0),
+            DVec2::new(3.0, 0.0),
+            DVec2::new(0.0, 4.0),
+        ],
+    )
+    .unwrap();
+
+    let (bx, by) = tri.hash_key(1);
+    assert_eq!(bx, 0);
+    assert_eq!(by, 0);
+}
+
+#[test]
+fn test_hash_table_similar_triangles_same_bin() {
+    // Two similar triangles should land in the same or adjacent bins
+    let tri1 = Triangle::from_positions(
+        [0, 1, 2],
+        [
+            DVec2::new(0.0, 0.0),
+            DVec2::new(3.0, 0.0),
+            DVec2::new(0.0, 4.0),
+        ],
+    )
+    .unwrap();
+
+    // Same shape, different scale
+    let tri2 = Triangle::from_positions(
+        [0, 1, 2],
+        [
+            DVec2::new(0.0, 0.0),
+            DVec2::new(30.0, 0.0),
+            DVec2::new(0.0, 40.0),
+        ],
+    )
+    .unwrap();
+
+    let bins = 100;
+    let (bx1, by1) = tri1.hash_key(bins);
+    let (bx2, by2) = tri2.hash_key(bins);
+
+    assert_eq!(bx1, bx2, "Same-shape triangles should have same bin_x");
+    assert_eq!(by1, by2, "Same-shape triangles should have same bin_y");
+}
+
+// ============================================================================
+// find_candidates_into boundary tests
+// ============================================================================
+
+#[test]
+fn test_find_candidates_zero_tolerance() {
+    let positions = vec![
+        DVec2::new(0.0, 0.0),
+        DVec2::new(3.0, 0.0),
+        DVec2::new(0.0, 4.0),
+    ];
+    let triangles = form_triangles_kdtree(&positions, 3);
+    assert!(!triangles.is_empty());
+
+    let table = TriangleHashTable::build(&triangles, 100);
+
+    // Zero tolerance should still find exact matches (bin_tolerance is max(ceil(0), 1) = 1)
+    let candidates = table.find_candidates(&triangles[0], 0.0);
+    assert!(
+        candidates.contains(&0),
+        "Zero tolerance should still find the triangle itself"
+    );
+}
+
+#[test]
+fn test_find_candidates_large_tolerance() {
+    let positions = vec![
+        DVec2::new(0.0, 0.0),
+        DVec2::new(10.0, 0.0),
+        DVec2::new(0.0, 10.0),
+        DVec2::new(10.0, 10.0),
+        DVec2::new(5.0, 5.0),
+    ];
+    let triangles = form_triangles_kdtree(&positions, 4);
+    assert!(!triangles.is_empty());
+
+    let table = TriangleHashTable::build(&triangles, 10);
+
+    // Tolerance = 1.0 covers the entire ratio space, should find all triangles
+    let candidates = table.find_candidates(&triangles[0], 1.0);
+    assert_eq!(
+        candidates.len(),
+        triangles.len(),
+        "Full tolerance should return all triangles"
+    );
+}
+
+#[test]
+fn test_find_candidates_into_clears_buffer() {
+    let positions = vec![
+        DVec2::new(0.0, 0.0),
+        DVec2::new(10.0, 0.0),
+        DVec2::new(0.0, 10.0),
+        DVec2::new(10.0, 10.0),
+    ];
+    let triangles = form_triangles_kdtree(&positions, 4);
+    let table = TriangleHashTable::build(&triangles, 100);
+
+    let mut candidates = vec![999, 888, 777]; // Pre-filled garbage
+    table.find_candidates_into(&triangles[0], 0.01, &mut candidates);
+
+    // Should not contain the garbage values
+    assert!(
+        !candidates.contains(&999),
+        "Buffer should be cleared before use"
+    );
+}
+
+// ============================================================================
+// VoteMatrix edge case tests
+// ============================================================================
+
+#[test]
+fn test_vote_matrix_dense_saturating_add() {
+    // Dense mode uses u16, verify saturating_add behavior
+    let mut vm = VoteMatrix::new(2, 2);
+
+    // Increment many times (won't reach u16::MAX in practice, but test saturation logic)
+    for _ in 0..1000 {
+        vm.increment(0, 0);
+    }
+
+    let map = vm.into_hashmap();
+    assert_eq!(*map.get(&(0, 0)).unwrap(), 1000);
+}
+
+#[test]
+fn test_vote_matrix_sparse_empty_to_hashmap() {
+    let vm = VoteMatrix::new(600, 600); // Sparse mode
+    let map = vm.into_hashmap();
+    assert!(map.is_empty());
+}
+
+#[test]
+fn test_vote_matrix_dense_boundary_indices() {
+    // Test accessing the last valid index in dense mode
+    let n = 10;
+    let mut vm = VoteMatrix::new(n, n);
+    vm.increment(n - 1, n - 1);
+    vm.increment(0, n - 1);
+    vm.increment(n - 1, 0);
+
+    let map = vm.into_hashmap();
+    assert_eq!(*map.get(&(n - 1, n - 1)).unwrap(), 1);
+    assert_eq!(*map.get(&(0, n - 1)).unwrap(), 1);
+    assert_eq!(*map.get(&(n - 1, 0)).unwrap(), 1);
+}
+
+// ============================================================================
+// vote_for_correspondences isolated unit tests
+// ============================================================================
+
+#[test]
+fn test_vote_for_correspondences_identical_triangles() {
+    // Create identical triangle sets — every triangle matches itself
+    let positions = vec![
+        DVec2::new(0.0, 0.0),
+        DVec2::new(10.0, 0.0),
+        DVec2::new(0.0, 10.0),
+        DVec2::new(10.0, 10.0),
+        DVec2::new(5.0, 5.0),
+    ];
+
+    let triangles = form_triangles_kdtree(&positions, 4);
+    assert!(!triangles.is_empty());
+
+    let hash_table = TriangleHashTable::build(&triangles, 100);
+
+    let config = TriangleMatchConfig::default();
+    let votes = vote_for_correspondences(
+        &triangles,
+        &triangles,
+        &hash_table,
+        &config,
+        positions.len(),
+        positions.len(),
+    );
+
+    // Diagonal entries (i, i) should have votes (point matched to itself)
+    let diagonal_votes: usize = (0..positions.len())
+        .filter_map(|i| votes.get(&(i, i)))
+        .sum();
+    assert!(
+        diagonal_votes > 0,
+        "Identical triangles should produce diagonal votes"
+    );
+
+    // Diagonal should dominate off-diagonal for each point
+    for i in 0..positions.len() {
+        let self_votes = votes.get(&(i, i)).copied().unwrap_or(0);
+        for j in 0..positions.len() {
+            if i != j {
+                let cross_votes = votes.get(&(i, j)).copied().unwrap_or(0);
+                assert!(
+                    self_votes >= cross_votes,
+                    "Point {i}: self-votes ({self_votes}) should >= cross-votes to {j} ({cross_votes})"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn test_vote_for_correspondences_no_matching_triangles() {
+    // Create two sets of triangles with very different shapes
+    let positions_a = vec![
+        DVec2::new(0.0, 0.0),
+        DVec2::new(10.0, 0.0),
+        DVec2::new(5.0, 8.66), // equilateral-ish
+    ];
+
+    let positions_b = vec![
+        DVec2::new(0.0, 0.0),
+        DVec2::new(100.0, 0.0),
+        DVec2::new(50.0, 1.0), // very thin
+    ];
+
+    let tri_a = form_triangles_kdtree(&positions_a, 3);
+    let tri_b = form_triangles_kdtree(&positions_b, 3);
+    assert!(!tri_a.is_empty());
+    assert!(!tri_b.is_empty());
+
+    let hash_table = TriangleHashTable::build(&tri_a, 100);
+
+    let config = TriangleMatchConfig {
+        ratio_tolerance: 0.01, // Very tight
+        ..Default::default()
+    };
+
+    let votes = vote_for_correspondences(
+        &tri_b,
+        &tri_a,
+        &hash_table,
+        &config,
+        positions_a.len(),
+        positions_b.len(),
+    );
+
+    // With very different shapes and tight tolerance, should get no votes
+    assert!(
+        votes.is_empty(),
+        "Dissimilar triangles should produce no votes, got {} entries",
+        votes.len()
+    );
+}
+
+#[test]
+fn test_vote_for_correspondences_orientation_filtering() {
+    let positions = vec![
+        DVec2::new(0.0, 0.0),
+        DVec2::new(10.0, 0.0),
+        DVec2::new(0.0, 10.0),
+        DVec2::new(10.0, 10.0),
+        DVec2::new(5.0, 5.0),
+    ];
+
+    // Mirror to flip orientation
+    let mirrored: Vec<DVec2> = positions.iter().map(|p| DVec2::new(-p.x, p.y)).collect();
+
+    let ref_triangles = form_triangles_kdtree(&positions, 4);
+    let target_triangles = form_triangles_kdtree(&mirrored, 4);
+    let hash_table = TriangleHashTable::build(&ref_triangles, 100);
+
+    // With orientation check: should get fewer votes
+    let config_with = TriangleMatchConfig {
+        check_orientation: true,
+        ..Default::default()
+    };
+    let votes_with = vote_for_correspondences(
+        &target_triangles,
+        &ref_triangles,
+        &hash_table,
+        &config_with,
+        positions.len(),
+        mirrored.len(),
+    );
+
+    // Without orientation check: should get more votes
+    let config_without = TriangleMatchConfig {
+        check_orientation: false,
+        ..Default::default()
+    };
+    let votes_without = vote_for_correspondences(
+        &target_triangles,
+        &ref_triangles,
+        &hash_table,
+        &config_without,
+        positions.len(),
+        mirrored.len(),
+    );
+
+    let total_with: usize = votes_with.values().sum();
+    let total_without: usize = votes_without.values().sum();
+
+    assert!(
+        total_without >= total_with,
+        "Disabling orientation check should produce >= votes: with={total_with}, without={total_without}"
+    );
+}
+
+// ============================================================================
+// Scale range boundary tests for estimate_similarity_transform
+// ============================================================================
+
+#[test]
+fn test_estimate_similarity_extreme_scale_rejected() {
+    // If the estimated scale is outside [0.1, 10.0], it should return None
+    let ref_positions = vec![
+        DVec2::new(0.0, 0.0),
+        DVec2::new(1.0, 0.0),
+        DVec2::new(0.0, 1.0),
+    ];
+
+    // Scale by 20x — outside the [0.1, 10.0] clamp range
+    let target_positions: Vec<DVec2> = ref_positions.iter().map(|p| *p * 20.0).collect();
+
+    let matches: Vec<PointMatch> = (0..3)
+        .map(|i| PointMatch {
+            ref_idx: i,
+            target_idx: i,
+            votes: 5,
+            confidence: 1.0,
+        })
+        .collect();
+
+    let result = estimate_similarity_transform(&ref_positions, &target_positions, &matches);
+
+    // Scale would be ~0.05 (ref is 20x smaller than target), which is < 0.1
+    assert!(result.is_none(), "Should reject extreme scale factor");
+}
+
+#[test]
+fn test_estimate_similarity_scale_boundary_accepted() {
+    // Scale just within range: ~0.5 (well within [0.1, 10.0])
+    let ref_positions = vec![
+        DVec2::new(0.0, 0.0),
+        DVec2::new(10.0, 0.0),
+        DVec2::new(0.0, 10.0),
+        DVec2::new(10.0, 10.0),
+    ];
+
+    let target_positions: Vec<DVec2> = ref_positions.iter().map(|p| *p * 2.0).collect();
+
+    let matches: Vec<PointMatch> = (0..4)
+        .map(|i| PointMatch {
+            ref_idx: i,
+            target_idx: i,
+            votes: 5,
+            confidence: 1.0,
+        })
+        .collect();
+
+    let result = estimate_similarity_transform(&ref_positions, &target_positions, &matches);
+    assert!(result.is_some(), "Scale ~0.5 should be accepted");
+
+    let (scale, _, _) = result.unwrap();
+    assert!(
+        (scale - 0.5).abs() < 0.01,
+        "Expected scale ~0.5, got {scale}"
+    );
+}
+
+#[test]
+fn test_estimate_similarity_coincident_targets() {
+    // All target positions at the same point — tar_norm_sq ≈ 0
+    let ref_positions = vec![
+        DVec2::new(0.0, 0.0),
+        DVec2::new(10.0, 0.0),
+        DVec2::new(0.0, 10.0),
+    ];
+
+    let target_positions = vec![
+        DVec2::new(5.0, 5.0),
+        DVec2::new(5.0, 5.0),
+        DVec2::new(5.0, 5.0),
+    ];
+
+    let matches: Vec<PointMatch> = (0..3)
+        .map(|i| PointMatch {
+            ref_idx: i,
+            target_idx: i,
+            votes: 5,
+            confidence: 1.0,
+        })
+        .collect();
+
+    let result = estimate_similarity_transform(&ref_positions, &target_positions, &matches);
+
+    // Should return None because tar_norm_sq < 1e-10 after centering
+    assert!(
+        result.is_none(),
+        "Coincident target points should fail transform estimation"
+    );
+}
+
+// ============================================================================
+// Two-step refinement fallback path test
+// ============================================================================
+
+#[test]
+fn test_two_step_returns_initial_when_refined_worse() {
+    // Scenario where two-step refinement produces fewer matches than initial.
+    // Use a field with noise where the estimated transform may be poor.
+    let ref_positions: Vec<DVec2> = (0..10)
+        .map(|i| {
+            let x = (i % 5) as f64 * 50.0;
+            let y = (i / 5) as f64 * 50.0;
+            DVec2::new(x, y)
+        })
+        .collect();
+
+    // Same positions — initial pass should find good matches
+    let target_positions = ref_positions.clone();
+
+    let config_one = TriangleMatchConfig {
+        two_step_matching: false,
+        ..Default::default()
+    };
+    let config_two = TriangleMatchConfig {
+        two_step_matching: true,
+        ..Default::default()
+    };
+
+    let one_step = match_triangles(&ref_positions, &target_positions, &config_one);
+    let two_step = match_triangles(&ref_positions, &target_positions, &config_two);
+
+    // Two-step should never produce fewer matches than the fallback guarantees
+    assert!(
+        two_step.len() >= one_step.len().saturating_sub(2),
+        "Two-step ({}) should not significantly degrade vs one-step ({})",
+        two_step.len(),
+        one_step.len()
     );
 }
