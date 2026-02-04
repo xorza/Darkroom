@@ -668,13 +668,14 @@ fn test_multiscale_registration_basic() {
             scale_factor: 2.0,
             min_dimension: 64,
             use_phase_correlation: false,
+            image_width: 1000,
+            image_height: 1000,
         }),
         ..Default::default()
     };
 
-    let registrator = Registrator::new(config);
-    let result = registrator
-        .register_multiscale(&ref_stars, &target_stars, 1000, 1000)
+    let result = Registrator::new(config)
+        .register_positions(&ref_stars, &target_stars)
         .unwrap();
 
     let t = result.transform.translation_components();
@@ -701,13 +702,14 @@ fn test_multiscale_registration_with_rotation() {
             scale_factor: 2.0,
             min_dimension: 64,
             use_phase_correlation: false,
+            image_width: 1000,
+            image_height: 1000,
         }),
         ..Default::default()
     };
 
-    let registrator = Registrator::new(config);
-    let result = registrator
-        .register_multiscale(&ref_stars, &target_stars, 1000, 1000)
+    let result = Registrator::new(config)
+        .register_positions(&ref_stars, &target_stars)
         .unwrap();
 
     // Check that the transform is close to the original

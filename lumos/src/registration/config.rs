@@ -339,6 +339,10 @@ pub struct MultiScaleConfig {
     pub min_dimension: usize,
     /// Whether to use phase correlation at coarse levels
     pub use_phase_correlation: bool,
+    /// Full resolution image width (used to compute actual pyramid levels)
+    pub image_width: usize,
+    /// Full resolution image height (used to compute actual pyramid levels)
+    pub image_height: usize,
 }
 
 impl Default for MultiScaleConfig {
@@ -348,6 +352,8 @@ impl Default for MultiScaleConfig {
             scale_factor: 2.0,
             min_dimension: 128,
             use_phase_correlation: true,
+            image_width: 1024,
+            image_height: 1024,
         }
     }
 }

@@ -99,6 +99,20 @@ impl Registrator {
         ref_positions: &[DVec2],
         target_positions: &[DVec2],
     ) -> Result<RegistrationResult, RegistrationError> {
+        // Dispatch to multi-scale if configured
+        if self.config.multi_scale.is_some() {
+            return self.register_positions_multiscale(ref_positions, target_positions);
+        }
+
+        self.register_positions_single(ref_positions, target_positions)
+    }
+
+    /// Single-scale registration core.
+    fn register_positions_single(
+        &self,
+        ref_positions: &[DVec2],
+        target_positions: &[DVec2],
+    ) -> Result<RegistrationResult, RegistrationError> {
         let start = Instant::now();
 
         // Validate input
@@ -324,24 +338,25 @@ impl Registrator {
         self.config.multi_scale.as_ref().unwrap()
     }
 
-    /// Build a relaxed config for coarse pyramid levels, or the base config for level 0.
+    /// Build a single-scale config for a pyramid level.
+    /// Coarse levels get relaxed thresholds; level 0 gets the base config.
+    /// Always strips `multi_scale` to prevent recursion.
     fn level_config(&self, level: usize, scale: f64) -> RegistrationConfig {
+        let mut c = self.config.clone();
+        c.multi_scale = None;
         if level > 0 {
-            let mut c = self.config.clone();
             c.ransac.inlier_threshold = self.config.ransac.inlier_threshold * scale.sqrt();
             c.triangle.ratio_tolerance = self.config.triangle.ratio_tolerance * 1.5;
             c.ransac.max_iterations = self.config.ransac.max_iterations / 2;
             c.max_residual_pixels = self.config.max_residual_pixels * scale;
-            c
-        } else {
-            self.config.clone()
         }
+        c
     }
 
-    /// Compute the number of pyramid levels for the given image dimensions.
-    fn compute_num_levels(&self, image_width: usize, image_height: usize) -> usize {
+    /// Compute the number of pyramid levels from the multi-scale config dimensions.
+    fn compute_num_levels(&self) -> usize {
         let ms = self.multiscale_config();
-        let min_dim = image_width.min(image_height);
+        let min_dim = ms.image_width.min(ms.image_height);
         let max_levels = ((min_dim as f64 / ms.min_dimension as f64).log2()
             / ms.scale_factor.log2())
         .floor() as usize
@@ -349,33 +364,18 @@ impl Registrator {
         ms.levels.min(max_levels).max(1)
     }
 
-    // -- Multi-scale public API -----------------------------------------------
-
-    /// Register using pre-detected stars at multiple scales.
-    ///
-    /// Uses a pyramid approach: register at coarse scale first, then refine
-    /// at finer scales using the coarse result as initial estimate.
-    ///
-    /// Requires `config.multi_scale` to be `Some`.
-    ///
-    /// # Arguments
-    /// * `ref_stars` - Reference star positions at full resolution
-    /// * `target_stars` - Target star positions at full resolution
-    /// * `image_width` - Full resolution image width
-    /// * `image_height` - Full resolution image height
-    pub fn register_multiscale(
+    /// Multi-scale registration using star positions.
+    fn register_positions_multiscale(
         &self,
         ref_stars: &[DVec2],
         target_stars: &[DVec2],
-        image_width: usize,
-        image_height: usize,
     ) -> Result<RegistrationResult, RegistrationError> {
         let start = Instant::now();
         let ms = self.multiscale_config();
-        let num_levels = self.compute_num_levels(image_width, image_height);
+        let num_levels = self.compute_num_levels();
 
         if num_levels == 1 {
-            return self.register_positions(ref_stars, target_stars);
+            return self.register_positions_single(ref_stars, target_stars);
         }
 
         let mut current_transform = Transform::identity();
@@ -421,27 +421,28 @@ impl Registrator {
     /// Uses phase correlation at coarse levels for initial alignment,
     /// then refines with star matching at finer levels.
     ///
-    /// Requires `config.multi_scale` to be `Some`.
-    pub fn register_multiscale_with_images(
+    /// Requires `config.multi_scale` to be `Some`. Image dimensions are read
+    /// from `config.multi_scale.image_width` / `image_height`.
+    pub fn register_with_images(
         &self,
         ref_image: &[f32],
         target_image: &[f32],
-        width: usize,
-        height: usize,
         ref_stars: &[DVec2],
         target_stars: &[DVec2],
     ) -> Result<RegistrationResult, RegistrationError> {
         let start = Instant::now();
         let ms = self.multiscale_config();
+        let width = ms.image_width;
+        let height = ms.image_height;
 
         if ref_image.len() != width * height || target_image.len() != width * height {
             return Err(RegistrationError::DimensionMismatch);
         }
 
-        let num_levels = self.compute_num_levels(width, height);
+        let num_levels = self.compute_num_levels();
 
         if num_levels == 1 {
-            return self.register_positions(ref_stars, target_stars);
+            return self.register_positions_single(ref_stars, target_stars);
         }
 
         let mut current_transform = Transform::identity();
@@ -486,7 +487,7 @@ impl Registrator {
         let inv = current_transform.inverse();
         let adjusted_target: Vec<DVec2> = target_stars.iter().map(|p| inv.apply(*p)).collect();
 
-        let mut result = self.register_positions(ref_stars, &adjusted_target)?;
+        let mut result = self.register_positions_single(ref_stars, &adjusted_target)?;
 
         result.transform = result.transform.compose(&current_transform);
         result.elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
