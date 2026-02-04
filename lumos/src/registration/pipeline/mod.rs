@@ -30,7 +30,7 @@ use crate::registration::{
     spatial::KdTree,
     transform::Transform,
     transform::TransformType,
-    triangle::match_triangles,
+    triangle::{StarMatch, match_triangles},
 };
 use crate::star_detection::Star;
 
@@ -135,17 +135,68 @@ impl Registrator {
             return Err(RegistrationError::NoMatchingPatterns);
         }
 
-        // Step 2: RANSAC with progressive sampling using match confidences.
-        // estimate_with_matches uses triangle vote counts to bias sampling
-        // toward high-confidence matches, finding correct models faster.
-        let ransac = RansacEstimator::new(self.config.ransac.clone());
-        let ransac_result = ransac
-            .estimate_with_matches(
-                &matches,
+        // Step 2: Estimate transform — Auto mode tries Similarity first, upgrades if needed
+        let result = if self.config.transform_type == TransformType::Auto {
+            // Auto: start with Similarity, upgrade to Homography if residuals are high
+            let sim_result = self.estimate_and_refine(
                 &ref_stars,
                 &target_stars,
+                &matches,
+                TransformType::Similarity,
+            );
+
+            const AUTO_UPGRADE_THRESHOLD: f64 = 0.5;
+
+            match sim_result {
+                Ok(result) if result.rms_error <= AUTO_UPGRADE_THRESHOLD => Ok(result),
+                _ => {
+                    // Similarity was insufficient or failed — try Homography
+                    self.estimate_and_refine(
+                        &ref_stars,
+                        &target_stars,
+                        &matches,
+                        TransformType::Homography,
+                    )
+                }
+            }
+        } else {
+            self.estimate_and_refine(
+                &ref_stars,
+                &target_stars,
+                &matches,
                 self.config.transform_type,
             )
+        }?;
+
+        let result = result.with_elapsed(start.elapsed().as_secs_f64() * 1000.0);
+
+        // Check accuracy
+        if result.rms_error > self.config.max_residual_pixels {
+            return Err(RegistrationError::AccuracyTooLow {
+                rms_error: result.rms_error,
+                max_allowed: self.config.max_residual_pixels,
+            });
+        }
+
+        Ok(result)
+    }
+
+    /// Run RANSAC, guided matching, optional SIP correction, and compute residuals.
+    ///
+    /// This is the core estimation pipeline used by `register_positions()`.
+    /// For `TransformType::Auto`, this is called once with Similarity and potentially
+    /// again with Homography if residuals are too high.
+    fn estimate_and_refine(
+        &self,
+        ref_stars: &[DVec2],
+        target_stars: &[DVec2],
+        matches: &[StarMatch],
+        transform_type: TransformType,
+    ) -> Result<RegistrationResult, RegistrationError> {
+        // RANSAC with progressive sampling using match confidences
+        let ransac = RansacEstimator::new(self.config.ransac.clone());
+        let ransac_result = ransac
+            .estimate_with_matches(matches, ref_stars, target_stars, transform_type)
             .ok_or(RegistrationError::RansacFailed {
                 reason: RansacFailureReason::NoInliersFound,
                 iterations: self.config.ransac.max_iterations,
@@ -159,17 +210,17 @@ impl Registrator {
             .map(|&i| (matches[i].ref_idx, matches[i].target_idx))
             .collect();
 
-        // Step 2b: Guided matching — recover additional matches missed by triangles
+        // Guided matching — recover additional matches missed by triangles
         let (transform, inlier_matches) = recover_matches(
-            &ref_stars,
-            &target_stars,
+            ref_stars,
+            target_stars,
             &ransac_result.transform,
             &inlier_matches,
             self.config.ransac.inlier_threshold,
-            self.config.transform_type,
+            transform_type,
         );
 
-        // Step 3 (optional): SIP distortion correction on residuals
+        // Optional SIP distortion correction on residuals
         let sip_correction = if self.config.sip.enabled {
             let inlier_ref: Vec<DVec2> =
                 inlier_matches.iter().map(|&(r, _)| ref_stars[r]).collect();
@@ -203,18 +254,8 @@ impl Registrator {
             })
             .collect();
 
-        let mut result = RegistrationResult::new(transform, inlier_matches, residuals)
-            .with_elapsed(start.elapsed().as_secs_f64() * 1000.0);
+        let mut result = RegistrationResult::new(transform, inlier_matches, residuals);
         result.sip_correction = sip_correction;
-
-        // Check accuracy
-        if result.rms_error > self.config.max_residual_pixels {
-            return Err(RegistrationError::AccuracyTooLow {
-                rms_error: result.rms_error,
-                max_allowed: self.config.max_residual_pixels,
-            });
-        }
-
         Ok(result)
     }
 

@@ -131,7 +131,7 @@ fn test_register_two_calibrated_lights() {
     // star catalog where the grid-based selection picks edge-cell stars that don't
     // overlap between the two shifted images, reducing matching success.
     let reg_config = RegistrationConfig {
-        transform_type: crate::TransformType::Homography,
+        transform_type: crate::TransformType::Auto,
         use_spatial_distribution: false,
         ransac: crate::registration::config::RansacConfig::default(),
         sip: crate::registration::config::SipCorrectionConfig {

@@ -3,6 +3,11 @@
 use glam::DVec2;
 
 /// Supported transformation models with increasing degrees of freedom.
+///
+/// Variants are ordered by complexity (used for `compose()` to pick the
+/// more complex type). `Auto` is a pipeline-level directive that resolves
+/// to a concrete type at runtime — it must not reach RANSAC or transform
+/// estimation directly.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum TransformType {
     /// Translation only (2 DOF: dx, dy)
@@ -16,6 +21,10 @@ pub enum TransformType {
     Affine,
     /// Projective/Homography (8 DOF: handles perspective)
     Homography,
+    /// Automatic model selection: starts with Similarity, upgrades to
+    /// Homography if residuals exceed the threshold. Resolved by the
+    /// pipeline before RANSAC estimation.
+    Auto,
 }
 
 impl TransformType {
@@ -27,6 +36,7 @@ impl TransformType {
             TransformType::Similarity => 2,
             TransformType::Affine => 3,
             TransformType::Homography => 4,
+            TransformType::Auto => TransformType::Similarity.min_points(),
         }
     }
 
@@ -38,6 +48,9 @@ impl TransformType {
             TransformType::Similarity => 4,
             TransformType::Affine => 6,
             TransformType::Homography => 8,
+            TransformType::Auto => {
+                panic!("Auto must be resolved to a concrete type before querying DOF")
+            }
         }
     }
 }
@@ -101,6 +114,9 @@ impl std::fmt::Display for Transform {
                     "Homography(dx={:.2}, dy={:.2}, rot={:.3}°, scale={:.4})",
                     t.x, t.y, rotation_deg, scale
                 )
+            }
+            TransformType::Auto => {
+                panic!("Auto should be resolved before creating a Transform")
             }
         }
     }

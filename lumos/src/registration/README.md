@@ -459,16 +459,9 @@ Fixed: `RansacConfig` now has `max_rotation: Option<f64>` (default 10°) and `sc
 
 Fixed: `recover_matches()` in `pipeline/mod.rs` projects each unmatched reference star through the RANSAC transform, finds the nearest unmatched target star within `inlier_threshold` using a k-d tree, and adds the pair. The transform is then re-estimated on all matches (original + recovered). Runs automatically between RANSAC and SIP correction.
 
-### 4. Iterative Model Refinement (Medium Priority)
+### ~~4. Iterative Model Refinement (Medium Priority)~~ FIXED
 
-The pipeline fits one transform type in one pass. PixInsight starts with Similarity (4 DOF), checks residuals, and upgrades to Homography (8 DOF) or TPS only if needed. Benefits:
-- Similarity has fewer parameters, so RANSAC converges faster and more reliably
-- If Similarity residuals are good enough (<0.5px), no need for higher-DOF model
-- If residuals are poor, upgrade to Homography using the Similarity inliers as initial guidance, avoiding the cold-start problem
-
-**What to add:** A `transform_type: Auto` mode that starts with Similarity, evaluates residuals, and upgrades if RMS exceeds a threshold.
-
-**Industry reference:** PixInsight StarAlignment uses progressive model complexity. Siril defaults to Homography but could benefit from this approach for robustness.
+Fixed: `TransformType::Auto` (now the default) starts with Similarity (4 DOF), computes RMS residuals, and upgrades to Homography (8 DOF) only if RMS exceeds 0.5 px. Implementation in `estimate_and_refine()` in `pipeline/mod.rs` reuses the same triangle matches for both attempts, avoiding redundant matching. This avoids overfitting with too many parameters when a simpler model suffices, while still handling perspective distortion when present.
 
 ### 5. Confidence Calculation Improvement (Low Priority)
 

@@ -1732,3 +1732,200 @@ fn test_guided_matching_with_similarity_transform() {
     assert!((est_scale - 1.02).abs() < 0.01);
     assert!((est_angle - 0.05).abs() < 0.01);
 }
+
+// ============================================================================
+// TransformType::Auto — Iterative Model Refinement Tests
+// ============================================================================
+
+#[test]
+fn test_auto_default_config() {
+    let config = RegistrationConfig::default();
+    assert_eq!(config.transform_type, TransformType::Auto);
+}
+
+#[test]
+fn test_auto_uses_similarity_for_simple_transform() {
+    // Pure translation + small rotation: Similarity should suffice (RMS << 0.5 px).
+    // Auto should NOT upgrade to Homography.
+    let ref_stars = generate_star_grid(6, 6, 80.0, DVec2::new(100.0, 100.0));
+    let known = Transform::similarity(DVec2::new(15.0, -10.0), 0.03, 1.01);
+    let target_stars = transform_stars(&ref_stars, &known);
+
+    let config = RegistrationConfig {
+        transform_type: TransformType::Auto,
+        min_stars_for_matching: 6,
+        min_matched_stars: 4,
+        max_residual_pixels: 2.0,
+        ..Default::default()
+    };
+
+    let result = Registrator::new(config)
+        .register_positions(&ref_stars, &target_stars)
+        .expect("Auto registration should succeed");
+
+    // Result should use Similarity (4 DOF), not Homography (8 DOF)
+    assert_eq!(
+        result.transform.transform_type,
+        TransformType::Similarity,
+        "Auto should use Similarity for simple transforms"
+    );
+
+    // Accuracy should be excellent
+    let est_scale = result.transform.scale_factor();
+    let est_angle = result.transform.rotation_angle();
+    assert!((est_scale - 1.01).abs() < 0.01);
+    assert!((est_angle - 0.03).abs() < 0.01);
+    assert!(result.rms_error < 0.5);
+}
+
+#[test]
+fn test_auto_upgrades_to_homography_for_perspective() {
+    // Apply a homography with significant perspective terms that Similarity cannot model.
+    // Auto should detect high residuals and upgrade to Homography.
+    let ref_stars = generate_star_grid(7, 7, 60.0, DVec2::new(100.0, 100.0));
+
+    // Homography with perspective terms that Similarity can't capture
+    let homography =
+        Transform::homography([1.01, 0.02, 15.0, -0.01, 0.99, -10.0, 0.00005, -0.00003]);
+    let target_stars = transform_stars(&ref_stars, &homography);
+
+    let config = RegistrationConfig {
+        transform_type: TransformType::Auto,
+        min_stars_for_matching: 6,
+        min_matched_stars: 4,
+        max_residual_pixels: 5.0,
+        ..Default::default()
+    };
+
+    let result = Registrator::new(config)
+        .register_positions(&ref_stars, &target_stars)
+        .expect("Auto registration should succeed");
+
+    // Result should have upgraded to Homography
+    assert_eq!(
+        result.transform.transform_type,
+        TransformType::Homography,
+        "Auto should upgrade to Homography for perspective transforms"
+    );
+
+    // Accuracy should be good with Homography
+    assert!(
+        result.rms_error < 1.0,
+        "Homography RMS should be low, got {}",
+        result.rms_error
+    );
+}
+
+#[test]
+fn test_auto_produces_accurate_results() {
+    // Verify Auto mode produces results comparable to explicitly choosing the right type.
+    let ref_stars = generate_star_grid(6, 6, 80.0, DVec2::new(100.0, 100.0));
+    let known = Transform::similarity(DVec2::new(20.0, -15.0), 0.05, 1.02);
+    let target_stars = transform_stars(&ref_stars, &known);
+
+    // Register with Auto
+    let auto_config = RegistrationConfig {
+        transform_type: TransformType::Auto,
+        min_stars_for_matching: 6,
+        min_matched_stars: 4,
+        max_residual_pixels: 2.0,
+        ..Default::default()
+    };
+    let auto_result = Registrator::new(auto_config)
+        .register_positions(&ref_stars, &target_stars)
+        .expect("Auto should succeed");
+
+    // Register with explicit Similarity
+    let sim_config = RegistrationConfig {
+        transform_type: TransformType::Similarity,
+        min_stars_for_matching: 6,
+        min_matched_stars: 4,
+        max_residual_pixels: 2.0,
+        ..Default::default()
+    };
+    let sim_result = Registrator::new(sim_config)
+        .register_positions(&ref_stars, &target_stars)
+        .expect("Similarity should succeed");
+
+    // Auto should produce comparable accuracy
+    assert!(
+        (auto_result.rms_error - sim_result.rms_error).abs() < 0.1,
+        "Auto RMS ({}) should be comparable to Similarity RMS ({})",
+        auto_result.rms_error,
+        sim_result.rms_error
+    );
+
+    // Both should recover the transform parameters
+    assert!((auto_result.transform.scale_factor() - 1.02).abs() < 0.01);
+    assert!((auto_result.transform.rotation_angle() - 0.05).abs() < 0.01);
+}
+
+#[test]
+fn test_auto_with_pure_translation() {
+    // Pure translation is the simplest case — Similarity should handle it trivially.
+    let ref_stars = generate_star_grid(5, 5, 100.0, DVec2::new(100.0, 100.0));
+    let offset = DVec2::new(30.0, -20.0);
+    let target_stars: Vec<DVec2> = ref_stars.iter().map(|p| *p + offset).collect();
+
+    let config = RegistrationConfig {
+        transform_type: TransformType::Auto,
+        min_stars_for_matching: 6,
+        min_matched_stars: 4,
+        max_residual_pixels: 2.0,
+        ..Default::default()
+    };
+
+    let result = Registrator::new(config)
+        .register_positions(&ref_stars, &target_stars)
+        .expect("Auto should succeed for translation");
+
+    assert_eq!(result.transform.transform_type, TransformType::Similarity);
+
+    let t = result.transform.translation_components();
+    assert!((t.x - offset.x).abs() < 1.0);
+    assert!((t.y - offset.y).abs() < 1.0);
+    assert!(result.rms_error < 0.5);
+}
+
+#[test]
+fn test_auto_with_noisy_positions() {
+    // With centroid noise, Similarity should still suffice when the underlying
+    // transform is simple. The noise shouldn't cause a false upgrade.
+    let ref_stars_clean = generate_realistic_star_field(80, 2048.0, 2048.0, 88888);
+    let ref_noisy = add_centroid_noise(&ref_stars_clean, 0.2, 11111);
+    let ref_positions: Vec<DVec2> = ref_noisy.iter().map(|&(pos, _)| pos).collect();
+
+    let known = Transform::similarity(DVec2::new(30.0, -20.0), 0.02, 1.005);
+    let target_clean: Vec<(DVec2, f64)> = ref_stars_clean
+        .iter()
+        .map(|&(pos, b)| (known.apply(pos), b))
+        .collect();
+    let target_noisy = add_centroid_noise(&target_clean, 0.2, 22222);
+    let target_positions: Vec<DVec2> = target_noisy.iter().map(|&(pos, _)| pos).collect();
+
+    let config = RegistrationConfig {
+        transform_type: TransformType::Auto,
+        min_stars_for_matching: 6,
+        min_matched_stars: 4,
+        max_residual_pixels: 5.0,
+        ..Default::default()
+    };
+
+    let result = Registrator::new(config)
+        .register_positions(&ref_positions, &target_positions)
+        .expect("Auto should succeed with noisy data");
+
+    // Should still recover reasonable parameters
+    let est_scale = result.transform.scale_factor();
+    let est_angle = result.transform.rotation_angle();
+    assert!(
+        (est_scale - 1.005).abs() < 0.01,
+        "Scale error with noise: expected 1.005, got {}",
+        est_scale
+    );
+    assert!(
+        (est_angle - 0.02).abs() < 0.02,
+        "Angle error with noise: expected 0.02, got {}",
+        est_angle
+    );
+}

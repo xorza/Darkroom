@@ -663,6 +663,9 @@ pub(crate) fn estimate_transform(
         TransformType::Similarity => estimate_similarity(ref_points, target_points),
         TransformType::Affine => estimate_affine(ref_points, target_points),
         TransformType::Homography => estimate_homography(ref_points, target_points),
+        TransformType::Auto => {
+            panic!("Auto must be resolved to a concrete type before calling estimate_transform")
+        }
     }
 }
 

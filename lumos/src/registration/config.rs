@@ -424,9 +424,10 @@ impl SipCorrectionConfig {
 ///   for accurate distortion modeling on wide-field images.
 #[derive(Debug, Clone)]
 pub struct RegistrationConfig {
-    /// Maximum transformation type to consider.
-    /// Default is Homography (8 DOF), which is Siril's default and the most robust
-    /// general-purpose choice. Use Similarity for narrow-field or well-corrected optics.
+    /// Transformation model to use.
+    /// Default is `Auto`, which starts with Similarity (4 DOF) and upgrades to
+    /// Homography (8 DOF) if residuals exceed 0.5 px. Use an explicit type to
+    /// force a specific model.
     pub transform_type: TransformType,
 
     /// Minimum stars required for matching.
@@ -468,7 +469,7 @@ pub struct RegistrationConfig {
 impl Default for RegistrationConfig {
     fn default() -> Self {
         Self {
-            transform_type: TransformType::Homography,
+            transform_type: TransformType::Auto,
             min_stars_for_matching: 10,
             min_matched_stars: 8,
             max_residual_pixels: 2.0,
@@ -527,7 +528,7 @@ mod tests {
     #[test]
     fn test_config_default_values() {
         let config = RegistrationConfig::default();
-        assert_eq!(config.transform_type, TransformType::Homography);
+        assert_eq!(config.transform_type, TransformType::Auto);
         assert_eq!(config.min_matched_stars, 8);
         assert!((config.max_residual_pixels - 2.0).abs() < 1e-10);
         assert_eq!(config.ransac.max_iterations, 2000);
