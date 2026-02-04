@@ -21,16 +21,16 @@ use super::star::Star;
 
 /// Result of star detection with diagnostics.
 #[derive(Debug, Clone)]
-pub struct StarDetectionResult {
+pub struct DetectionResult {
     /// Detected stars sorted by flux (brightest first).
     pub stars: Vec<Star>,
     /// Diagnostic information from the detection pipeline.
-    pub diagnostics: StarDetectionDiagnostics,
+    pub diagnostics: Diagnostics,
 }
 
 /// Diagnostic information from star detection.
 #[derive(Debug, Clone, Default)]
-pub struct StarDetectionDiagnostics {
+pub struct Diagnostics {
     /// Number of pixels above detection threshold.
     pub pixels_above_threshold: usize,
     /// Number of connected components found.
@@ -115,7 +115,7 @@ impl StarDetector {
     }
 
     /// Detect stars in a single image.
-    pub fn detect(&mut self, image: &AstroImage) -> StarDetectionResult {
+    pub fn detect(&mut self, image: &AstroImage) -> DetectionResult {
         self.config.validate();
 
         let width = image.width();
@@ -149,7 +149,7 @@ impl StarDetector {
         );
 
         let fwhm_estimate = effective_fwhm.estimate();
-        let mut diagnostics = StarDetectionDiagnostics {
+        let mut diagnostics = Diagnostics {
             candidates_after_filtering: regions.len(),
             estimated_fwhm: fwhm_estimate.map_or(0.0, |e| e.fwhm),
             fwhm_estimation_star_count: fwhm_estimate.map_or(0, |e| e.star_count),
@@ -201,6 +201,6 @@ impl StarDetector {
             diagnostics.median_snr = crate::math::median_f32_mut(&mut buf);
         }
 
-        StarDetectionResult { stars, diagnostics }
+        DetectionResult { stars, diagnostics }
     }
 }

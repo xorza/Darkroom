@@ -15,7 +15,7 @@ use crate::stacking::rejection::{
     WinsorizedClipConfig,
 };
 use crate::stacking::{CacheConfig, FrameType};
-use crate::star_detection::{Star, StarDetectionResult};
+use crate::star_detection::{DetectionResult, Star};
 
 /// Frame quality metrics used for computing weights.
 #[derive(Debug, Clone, Copy, Default)]
@@ -42,7 +42,7 @@ impl FrameQuality {
     /// - Star count: number of usable stars
     ///
     /// For noise, this needs the background map. If not available, it defaults to 0.01.
-    pub fn from_detection_result(result: &StarDetectionResult) -> Self {
+    pub fn from_detection_result(result: &DetectionResult) -> Self {
         Self::from_stars(&result.stars)
     }
 

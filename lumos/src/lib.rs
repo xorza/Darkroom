@@ -59,6 +59,9 @@ pub use star_detection::{
     Config as StarDetectionConfig,
     // Sensor defects
     DefectMap,
+    // Main API
+    DetectionResult as StarDetectionResult,
+    Diagnostics as StarDetectionDiagnostics,
     // Advanced: profile fitting
     GaussianFitConfig,
     GaussianFitResult,
@@ -66,10 +69,7 @@ pub use star_detection::{
     MoffatFitConfig,
     MoffatFitResult,
     NoiseModel,
-    // Main API
     Star,
-    StarDetectionDiagnostics,
-    StarDetectionResult,
     StarDetector,
     alpha_beta_to_fwhm,
     fit_gaussian_2d,

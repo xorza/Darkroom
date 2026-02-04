@@ -51,7 +51,7 @@ pub mod tests;
 
 // Main detector types
 pub use buffer_pool::BufferPool;
-pub use detector::{StarDetectionDiagnostics, StarDetectionResult, StarDetector};
+pub use detector::{DetectionResult, Diagnostics, StarDetector};
 
 // Configuration
 pub use config::CentroidMethod;
