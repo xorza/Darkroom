@@ -27,7 +27,7 @@ pub use crate::{
 };
 
 // Registration - convenience functions
-pub use crate::{quick_register, warp_to_reference_image};
+pub use crate::warp_to_reference_image;
 
 // Stacking - main API
 pub use crate::{

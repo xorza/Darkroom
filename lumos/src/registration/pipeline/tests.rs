@@ -344,13 +344,15 @@ fn test_warp_to_reference_image_end_to_end() {
 }
 
 #[test]
-fn test_quick_register() {
+fn test_default_registrator() {
     let ref_stars = generate_star_grid(4, 4, 150.0, DVec2::new(100.0, 100.0));
     let translation = Transform::translation(DVec2::new(10.0, -15.0));
     let target_stars = transform_stars(&ref_stars, &translation);
 
-    let transform = quick_register(&ref_stars, &target_stars).unwrap();
-    let t = transform.translation_components();
+    let result = Registrator::default()
+        .register_positions(&ref_stars, &target_stars)
+        .unwrap();
+    let t = result.transform.translation_components();
 
     assert!((t.x - 10.0).abs() < 1.0);
     assert!((t.y - (-15.0)).abs() < 1.0);

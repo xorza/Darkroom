@@ -38,15 +38,9 @@ use crate::star_detection::Star;
 mod tests;
 
 /// Image registrator that aligns target images to a reference.
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct Registrator {
     config: RegistrationConfig,
-}
-
-impl Default for Registrator {
-    fn default() -> Self {
-        Self::new(RegistrationConfig::default())
-    }
 }
 
 impl Registrator {
@@ -567,24 +561,6 @@ pub fn warp_to_reference_image(
     );
     result.metadata = target.metadata.clone();
     result
-}
-
-/// Quick registration with default settings. Returns only the transform.
-pub fn quick_register(
-    ref_stars: &[DVec2],
-    target_stars: &[DVec2],
-) -> Result<Transform, RegistrationError> {
-    let result = Registrator::default().register_positions(ref_stars, target_stars)?;
-    Ok(result.transform)
-}
-
-/// Quick registration from detected stars with default settings.
-/// Returns full result with quality metrics.
-pub fn quick_register_stars(
-    ref_stars: &[Star],
-    target_stars: &[Star],
-) -> Result<RegistrationResult, RegistrationError> {
-    Registrator::default().register_stars(ref_stars, target_stars)
 }
 
 /// Scale a transformation from one resolution to another.

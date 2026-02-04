@@ -82,8 +82,8 @@ pub use config::{
 
 // High-level pipeline API (primary entry point)
 pub use pipeline::{
-    RansacFailureReason, RegistrationError, RegistrationResult, Registrator, quick_register,
-    quick_register_stars, warp_to_reference_image,
+    RansacFailureReason, RegistrationError, RegistrationResult, Registrator,
+    warp_to_reference_image,
 };
 
 // Core types needed by users
