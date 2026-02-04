@@ -22,6 +22,25 @@ use super::super::super::threshold_mask::{
     create_adaptive_threshold_mask, create_threshold_mask, create_threshold_mask_filtered,
 };
 
+/// Result of detection stage with diagnostic statistics.
+#[derive(Debug)]
+pub(crate) struct DetectResult {
+    /// Detected regions after filtering.
+    pub regions: Vec<Region>,
+    /// Number of pixels above the detection threshold.
+    pub pixels_above_threshold: usize,
+    /// Number of connected components found.
+    pub connected_components: usize,
+    /// Number of components that were deblended into multiple regions.
+    pub deblended_components: usize,
+}
+
+/// Result of candidate extraction (internal).
+struct ExtractionResult {
+    regions: Vec<Region>,
+    deblended_components: usize,
+}
+
 /// Detect star candidate regions in the image.
 ///
 /// Applies matched filtering if FWHM is provided, then performs thresholding,
@@ -34,7 +53,7 @@ pub(crate) fn detect(
     fwhm: Option<f32>,
     config: &Config,
     pool: &mut BufferPool,
-) -> Vec<Region> {
+) -> DetectResult {
     let width = pixels.width();
     let height = pixels.height();
 
@@ -100,6 +119,9 @@ pub(crate) fn detect(
         );
     }
 
+    // Count pixels above threshold before dilation
+    let pixels_above_threshold = mask.count_ones();
+
     // Dilate mask to connect nearby pixels
     let mut dilated = pool.acquire_bit();
     dilated.fill(false);
@@ -109,15 +131,21 @@ pub(crate) fn detect(
     pool.release_bit(dilated);
 
     let label_map = LabelMap::from_pool(&mask, config.connectivity, pool);
+    let connected_components = label_map.num_labels();
 
     pool.release_bit(mask);
 
-    let regions = extract_and_filter_candidates(pixels, &label_map, config, width, height);
+    let extraction = extract_and_filter_candidates(pixels, &label_map, config, width, height);
 
     label_map.release_to_pool(pool);
     pool.release_f32(scratch);
 
-    regions
+    DetectResult {
+        regions: extraction.regions,
+        pixels_above_threshold,
+        connected_components,
+        deblended_components: extraction.deblended_components,
+    }
 }
 
 /// Extract candidates from label map and filter by size/edge constraints.
@@ -127,10 +155,10 @@ fn extract_and_filter_candidates(
     config: &Config,
     width: usize,
     height: usize,
-) -> Vec<Region> {
-    let mut candidates = extract_candidates(pixels, label_map, config);
+) -> ExtractionResult {
+    let mut result = extract_candidates(pixels, label_map, config);
 
-    candidates.retain(|c| {
+    result.regions.retain(|c| {
         c.area >= config.min_area
             && c.bbox.min.x >= config.edge_margin
             && c.bbox.min.y >= config.edge_margin
@@ -138,13 +166,20 @@ fn extract_and_filter_candidates(
             && c.bbox.max.y < height - config.edge_margin
     });
 
-    candidates
+    result
 }
 
 /// Extract candidate properties from labeled image with deblending.
-fn extract_candidates(pixels: &Buffer2<f32>, label_map: &LabelMap, config: &Config) -> Vec<Region> {
+fn extract_candidates(
+    pixels: &Buffer2<f32>,
+    label_map: &LabelMap,
+    config: &Config,
+) -> ExtractionResult {
     if label_map.num_labels() == 0 {
-        return Vec::new();
+        return ExtractionResult {
+            regions: Vec::new(),
+            deblended_components: 0,
+        };
     }
     let component_data = collect_component_data(label_map, pixels.width(), config.max_area);
     let total_components = component_data.len();
@@ -161,13 +196,17 @@ fn extract_candidates(pixels: &Buffer2<f32>, label_map: &LabelMap, config: &Conf
         .filter(|data| data.area > 0 && data.area <= config.max_area)
         .collect();
 
-    let candidates: Vec<Region> = if config.is_multi_threshold() {
-        filtered
+    let num_components = filtered.len();
+
+    // Track (regions, deblended_count) where deblended_count is number of
+    // components that produced more than one region
+    let result = if config.is_multi_threshold() {
+        let (regions, deblended_components) = filtered
             .into_par_iter()
             .fold(
-                || (Vec::new(), DeblendBuffers::new()),
-                |(mut candidates, mut buffers), data| {
-                    candidates.extend(deblend_multi_threshold(
+                || (Vec::new(), 0usize, DeblendBuffers::new()),
+                |(mut regions, mut deblended, mut buffers), data| {
+                    let deblend_result = deblend_multi_threshold(
                         &data,
                         pixels,
                         label_map,
@@ -175,17 +214,28 @@ fn extract_candidates(pixels: &Buffer2<f32>, label_map: &LabelMap, config: &Conf
                         config.deblend_min_separation,
                         config.deblend_min_contrast,
                         &mut buffers,
-                    ));
-                    (candidates, buffers)
+                    );
+                    if deblend_result.len() > 1 {
+                        deblended += 1;
+                    }
+                    regions.extend(deblend_result);
+                    (regions, deblended, buffers)
                 },
             )
-            .map(|(candidates, _)| candidates)
-            .reduce(Vec::new, |mut a, b| {
-                a.extend(b);
-                a
-            })
+            .map(|(regions, deblended, _)| (regions, deblended))
+            .reduce(
+                || (Vec::new(), 0),
+                |(mut a, da), (b, db)| {
+                    a.extend(b);
+                    (a, da + db)
+                },
+            );
+        ExtractionResult {
+            regions,
+            deblended_components,
+        }
     } else {
-        filtered
+        let regions: Vec<Region> = filtered
             .into_par_iter()
             .flat_map_iter(|data| {
                 deblend_local_maxima(
@@ -196,15 +246,22 @@ fn extract_candidates(pixels: &Buffer2<f32>, label_map: &LabelMap, config: &Conf
                     config.deblend_min_prominence,
                 )
             })
-            .collect()
+            .collect();
+        // For local_maxima, deblended = regions - components (if more regions than components)
+        let deblended_components = regions.len().saturating_sub(num_components);
+        ExtractionResult {
+            regions,
+            deblended_components,
+        }
     };
 
     tracing::debug!(
-        candidates = candidates.len(),
+        regions = result.regions.len(),
+        deblended = result.deblended_components,
         "Candidate extraction complete"
     );
 
-    candidates
+    result
 }
 
 /// Collect component metadata (bounding boxes and areas) from label map.
@@ -311,5 +368,5 @@ pub(crate) fn detect_stars_test(
     config: &Config,
 ) -> Vec<Region> {
     let mut pool = BufferPool::new(pixels.width(), pixels.height());
-    detect(pixels, background, None, config, &mut pool)
+    detect(pixels, background, None, config, &mut pool).regions
 }

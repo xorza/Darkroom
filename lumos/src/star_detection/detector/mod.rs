@@ -151,7 +151,7 @@ impl StarDetector {
             stages::fwhm::estimate_fwhm(&grayscale_image, &background, &self.config, pool);
 
         // Step 3: Detect star candidate regions (with optional matched filter)
-        let regions = stages::detect::detect(
+        let detect_result = stages::detect::detect(
             &grayscale_image,
             &background,
             fwhm_result.fwhm,
@@ -160,16 +160,24 @@ impl StarDetector {
         );
 
         let mut diagnostics = Diagnostics {
-            candidates_after_filtering: regions.len(),
+            pixels_above_threshold: detect_result.pixels_above_threshold,
+            connected_components: detect_result.connected_components,
+            candidates_after_filtering: detect_result.regions.len(),
+            deblended_components: detect_result.deblended_components,
             estimated_fwhm: fwhm_result.fwhm.unwrap_or(0.0),
             fwhm_estimation_star_count: fwhm_result.stars_used,
             fwhm_was_auto_estimated: fwhm_result.stars_used > 0,
             ..Default::default()
         };
-        tracing::debug!("Detected {} star candidates", regions.len());
+        tracing::debug!("Detected {} star candidates", detect_result.regions.len());
 
         // Step 4: Compute precise centroids (parallel)
-        let stars = stages::measure::measure(&regions, &grayscale_image, &background, &self.config);
+        let stars = stages::measure::measure(
+            &detect_result.regions,
+            &grayscale_image,
+            &background,
+            &self.config,
+        );
         diagnostics.stars_after_centroid = stars.len();
 
         // Release image buffers back to pool

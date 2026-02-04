@@ -71,7 +71,7 @@ fn estimate_from_bright_stars(
     };
 
     // Run detection without matched filter
-    let regions = detect(pixels, stats, None, &first_pass_config, pool);
+    let regions = detect(pixels, stats, None, &first_pass_config, pool).regions;
     tracing::debug!(
         "FWHM estimation: first pass detected {} bright star candidates",
         regions.len()
