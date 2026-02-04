@@ -11,7 +11,6 @@ use glam::DVec2;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum TransformType {
     /// Translation only (2 DOF: dx, dy)
-    #[default]
     Translation,
     /// Translation + Rotation (3 DOF: dx, dy, angle)
     Euclidean,
@@ -24,6 +23,7 @@ pub enum TransformType {
     /// Automatic model selection: starts with Similarity, upgrades to
     /// Homography if residuals exceed the threshold. Resolved by the
     /// pipeline before RANSAC estimation.
+    #[default]
     Auto,
 }
 
