@@ -327,16 +327,7 @@ impl Registrator {
         Ok(result)
     }
 
-    /// Get the current configuration.
-    pub fn config(&self) -> &RegistrationConfig {
-        &self.config
-    }
-
     // -- Multi-scale helpers --------------------------------------------------
-
-    fn multiscale_config(&self) -> &MultiScaleConfig {
-        self.config.multi_scale.as_ref().unwrap()
-    }
 
     /// Build a single-scale config for a pyramid level.
     /// Coarse levels get relaxed thresholds; level 0 gets the base config.
@@ -355,7 +346,7 @@ impl Registrator {
 
     /// Compute the number of pyramid levels from the multi-scale config dimensions.
     fn compute_num_levels(&self) -> usize {
-        let ms = self.multiscale_config();
+        let ms = self.config.multi_scale.as_ref().unwrap();
         let min_dim = ms.image_width.min(ms.image_height);
         let max_levels = ((min_dim as f64 / ms.min_dimension as f64).log2()
             / ms.scale_factor.log2())
@@ -371,7 +362,7 @@ impl Registrator {
         target_stars: &[DVec2],
     ) -> Result<RegistrationResult, RegistrationError> {
         let start = Instant::now();
-        let ms = self.multiscale_config();
+        let ms = self.config.multi_scale.as_ref().unwrap();
         let num_levels = self.compute_num_levels();
 
         if num_levels == 1 {
@@ -431,7 +422,7 @@ impl Registrator {
         target_stars: &[DVec2],
     ) -> Result<RegistrationResult, RegistrationError> {
         let start = Instant::now();
-        let ms = self.multiscale_config();
+        let ms = self.config.multi_scale.as_ref().unwrap();
         let width = ms.image_width;
         let height = ms.image_height;
 
@@ -578,106 +569,22 @@ pub fn warp_to_reference_image(
     result
 }
 
-/// Quick registration using default settings with position vectors.
-///
-/// Suitable for well-aligned images with good star coverage.
-/// Returns only the transformation matrix. For full registration result
-/// with quality metrics, use `quick_register_stars`.
-///
-/// # Arguments
-///
-/// * `ref_stars` - Reference star positions
-/// * `target_stars` - Target star positions
-///
-/// # Returns
-///
-/// The transformation matrix that maps reference to target coordinates.
-///
-/// # Example
-/// ```rust,ignore
-/// use glam::DVec2;
-/// use lumos::{quick_register, warp_to_reference_image, InterpolationMethod, AstroImage};
-///
-/// // Star positions detected from both images
-/// let ref_positions = vec![DVec2::new(100.0, 200.0), DVec2::new(300.0, 150.0), /* ... */];
-/// let target_positions = vec![DVec2::new(102.0, 198.0), DVec2::new(302.0, 148.0), /* ... */];
-///
-/// // Get the transformation matrix
-/// let transform = quick_register(&ref_positions, &target_positions)?;
-///
-/// // Warp target image to align with reference
-/// let aligned = warp_to_reference_image(&target_image, &transform, InterpolationMethod::Lanczos3);
-/// ```
+/// Quick registration with default settings. Returns only the transform.
 pub fn quick_register(
     ref_stars: &[DVec2],
     target_stars: &[DVec2],
 ) -> Result<Transform, RegistrationError> {
-    let config = RegistrationConfig {
-        transform_type: TransformType::Similarity,
-        min_matched_stars: 4,
-        triangle: crate::registration::config::TriangleMatchConfig {
-            max_stars: 100,
-            ..crate::registration::config::TriangleMatchConfig::default()
-        },
-        ransac: crate::registration::config::RansacConfig {
-            max_iterations: 500,
-            ..crate::registration::config::RansacConfig::default()
-        },
-        ..Default::default()
-    };
-
-    let result = Registrator::new(config).register_positions(ref_stars, target_stars)?;
+    let result = Registrator::default().register_positions(ref_stars, target_stars)?;
     Ok(result.transform)
 }
 
-/// Quick registration using detected stars with sensible defaults.
-///
-/// Convenience function for common registration scenarios. Uses:
-/// - Affine transformation (6 DOF: translation, rotation, scale, shear)
-/// - Standard RANSAC with 1000 iterations
-/// - 2-pixel inlier threshold
-/// - Up to 100 stars for matching
-///
-/// For more control over registration parameters, use `Registrator::new()` with
-/// a custom `RegistrationConfig`.
-///
-/// # Arguments
-///
-/// * `ref_stars` - Detected stars in the reference image (sorted by flux, brightest first)
-/// * `target_stars` - Detected stars in the target image (sorted by flux, brightest first)
-///
-/// # Returns
-///
-/// Full registration result including transformation, inlier matches, and quality metrics.
-///
-/// # Example
-///
-/// ```ignore
-/// use lumos::{find_stars, quick_register_stars, StarDetectionConfig};
-///
-/// let ref_stars = find_stars(&ref_image, &StarDetectionConfig::default())?;
-/// let target_stars = find_stars(&target_image, &StarDetectionConfig::default())?;
-///
-/// let result = quick_register_stars(&ref_stars.stars, &target_stars.stars)?;
-/// println!("RMS error: {:.3} pixels", result.rms_error);
-/// println!("Matched {} stars", result.num_inliers);
-/// ```
+/// Quick registration from detected stars with default settings.
+/// Returns full result with quality metrics.
 pub fn quick_register_stars(
     ref_stars: &[Star],
     target_stars: &[Star],
 ) -> Result<RegistrationResult, RegistrationError> {
-    let config = RegistrationConfig {
-        transform_type: TransformType::Affine,
-        min_matched_stars: 4,
-        max_residual_pixels: 5.0,
-        triangle: crate::registration::config::TriangleMatchConfig {
-            max_stars: 100,
-            ..crate::registration::config::TriangleMatchConfig::default()
-        },
-        ..Default::default()
-    };
-
-    Registrator::new(config).register_stars(ref_stars, target_stars)
+    Registrator::default().register_stars(ref_stars, target_stars)
 }
 
 /// Scale a transformation from one resolution to another.

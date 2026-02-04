@@ -140,23 +140,6 @@ fn test_registration_insufficient_stars() {
 }
 
 #[test]
-fn test_registrator_config() {
-    let config = RegistrationConfig {
-        transform_type: TransformType::Euclidean,
-        ransac: crate::registration::ransac::RansacConfig {
-            max_iterations: 2000,
-            inlier_threshold: 1.5,
-            ..crate::registration::ransac::RansacConfig::default()
-        },
-        ..Default::default()
-    };
-
-    let registrator = Registrator::new(config);
-    assert_eq!(registrator.config().ransac.max_iterations, 2000);
-    assert!((registrator.config().ransac.inlier_threshold - 1.5).abs() < 1e-10);
-}
-
-#[test]
 fn test_warp_to_reference_image() {
     // Create a simple test image with a bright pixel offset from center
     let width = 64;
