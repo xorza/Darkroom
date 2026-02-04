@@ -100,7 +100,6 @@ pub use registration::{
     LogPolarCorrelator,
     LogPolarResult,
     MultiScaleConfig,
-    MultiScaleRegistrator,
     PhaseCorrelationConfig,
     // Phase correlation
     PhaseCorrelator,

@@ -334,7 +334,7 @@ registration/
 ├── config.rs                 All configuration types
 ├── transform.rs              Transform matrix and TransformType
 ├── pipeline/
-│   ├── mod.rs                Registrator, MultiScaleRegistrator, warp functions
+│   ├── mod.rs                Registrator, warp functions
 │   └── result.rs             RegistrationResult, RegistrationError
 ├── triangle/
 │   └── mod.rs                Geometric hashing, vote matrix, match resolution

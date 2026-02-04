@@ -672,9 +672,9 @@ fn test_multiscale_registration_basic() {
         ..Default::default()
     };
 
-    let registrator = MultiScaleRegistrator::new(config);
+    let registrator = Registrator::new(config);
     let result = registrator
-        .register_stars(&ref_stars, &target_stars, 1000, 1000)
+        .register_multiscale(&ref_stars, &target_stars, 1000, 1000)
         .unwrap();
 
     let t = result.transform.translation_components();
@@ -705,9 +705,9 @@ fn test_multiscale_registration_with_rotation() {
         ..Default::default()
     };
 
-    let registrator = MultiScaleRegistrator::new(config);
+    let registrator = Registrator::new(config);
     let result = registrator
-        .register_stars(&ref_stars, &target_stars, 1000, 1000)
+        .register_multiscale(&ref_stars, &target_stars, 1000, 1000)
         .unwrap();
 
     // Check that the transform is close to the original

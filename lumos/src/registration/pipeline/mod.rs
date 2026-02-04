@@ -317,6 +317,182 @@ impl Registrator {
     pub fn config(&self) -> &RegistrationConfig {
         &self.config
     }
+
+    // -- Multi-scale helpers --------------------------------------------------
+
+    fn multiscale_config(&self) -> &MultiScaleConfig {
+        self.config.multi_scale.as_ref().unwrap()
+    }
+
+    /// Build a relaxed config for coarse pyramid levels, or the base config for level 0.
+    fn level_config(&self, level: usize, scale: f64) -> RegistrationConfig {
+        if level > 0 {
+            let mut c = self.config.clone();
+            c.ransac.inlier_threshold = self.config.ransac.inlier_threshold * scale.sqrt();
+            c.triangle.ratio_tolerance = self.config.triangle.ratio_tolerance * 1.5;
+            c.ransac.max_iterations = self.config.ransac.max_iterations / 2;
+            c.max_residual_pixels = self.config.max_residual_pixels * scale;
+            c
+        } else {
+            self.config.clone()
+        }
+    }
+
+    /// Compute the number of pyramid levels for the given image dimensions.
+    fn compute_num_levels(&self, image_width: usize, image_height: usize) -> usize {
+        let ms = self.multiscale_config();
+        let min_dim = image_width.min(image_height);
+        let max_levels = ((min_dim as f64 / ms.min_dimension as f64).log2()
+            / ms.scale_factor.log2())
+        .floor() as usize
+            + 1;
+        ms.levels.min(max_levels).max(1)
+    }
+
+    // -- Multi-scale public API -----------------------------------------------
+
+    /// Register using pre-detected stars at multiple scales.
+    ///
+    /// Uses a pyramid approach: register at coarse scale first, then refine
+    /// at finer scales using the coarse result as initial estimate.
+    ///
+    /// Requires `config.multi_scale` to be `Some`.
+    ///
+    /// # Arguments
+    /// * `ref_stars` - Reference star positions at full resolution
+    /// * `target_stars` - Target star positions at full resolution
+    /// * `image_width` - Full resolution image width
+    /// * `image_height` - Full resolution image height
+    pub fn register_multiscale(
+        &self,
+        ref_stars: &[DVec2],
+        target_stars: &[DVec2],
+        image_width: usize,
+        image_height: usize,
+    ) -> Result<RegistrationResult, RegistrationError> {
+        let start = Instant::now();
+        let ms = self.multiscale_config();
+        let num_levels = self.compute_num_levels(image_width, image_height);
+
+        if num_levels == 1 {
+            return self.register_positions(ref_stars, target_stars);
+        }
+
+        let mut current_transform = Transform::identity();
+        let mut last_result: Option<RegistrationResult> = None;
+
+        for level in (0..num_levels).rev() {
+            let scale = ms.scale_factor.powi(level as i32);
+            let inv = current_transform.inverse();
+
+            let scaled_ref: Vec<DVec2> = ref_stars.iter().map(|p| *p / scale).collect();
+            let adjusted_target: Vec<DVec2> =
+                target_stars.iter().map(|p| inv.apply(*p) / scale).collect();
+
+            let registrator = Registrator::new(self.level_config(level, scale));
+            match registrator.register_positions(&scaled_ref, &adjusted_target) {
+                Ok(result) => {
+                    let level_transform = scale_transform(&result.transform, scale);
+                    current_transform = level_transform.compose(&current_transform);
+                    last_result = Some(result);
+                }
+                Err(e) => {
+                    if level > 0 {
+                        continue;
+                    } else {
+                        return Err(e);
+                    }
+                }
+            }
+        }
+
+        match last_result {
+            Some(mut result) => {
+                result.transform = current_transform;
+                result.elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
+                Ok(result)
+            }
+            None => Err(RegistrationError::NoMatchingPatterns),
+        }
+    }
+
+    /// Register using images and stars at multiple scales.
+    ///
+    /// Uses phase correlation at coarse levels for initial alignment,
+    /// then refines with star matching at finer levels.
+    ///
+    /// Requires `config.multi_scale` to be `Some`.
+    pub fn register_multiscale_with_images(
+        &self,
+        ref_image: &[f32],
+        target_image: &[f32],
+        width: usize,
+        height: usize,
+        ref_stars: &[DVec2],
+        target_stars: &[DVec2],
+    ) -> Result<RegistrationResult, RegistrationError> {
+        let start = Instant::now();
+        let ms = self.multiscale_config();
+
+        if ref_image.len() != width * height || target_image.len() != width * height {
+            return Err(RegistrationError::DimensionMismatch);
+        }
+
+        let num_levels = self.compute_num_levels(width, height);
+
+        if num_levels == 1 {
+            return self.register_positions(ref_stars, target_stars);
+        }
+
+        let mut current_transform = Transform::identity();
+
+        let ref_pyramid = build_pyramid(ref_image, width, height, num_levels, ms.scale_factor);
+        let target_pyramid =
+            build_pyramid(target_image, width, height, num_levels, ms.scale_factor);
+
+        // Process from coarse to fine
+        for level in (0..num_levels).rev() {
+            let scale = ms.scale_factor.powi(level as i32);
+            let (level_ref, level_width, level_height) = &ref_pyramid[level];
+            let (level_target, _, _) = &target_pyramid[level];
+
+            // At coarse levels, use phase correlation if enabled
+            if level > 0 && ms.use_phase_correlation {
+                let correlator = PhaseCorrelator::new(
+                    *level_width,
+                    *level_height,
+                    self.config.phase_correlation.clone(),
+                );
+
+                if let Some(pr) = correlator.correlate(level_ref, level_target) {
+                    let phase_transform = Transform::translation(pr.translation * scale);
+                    current_transform = phase_transform.compose(&current_transform);
+                }
+            }
+
+            let inv = current_transform.inverse();
+            let scaled_ref: Vec<DVec2> = ref_stars.iter().map(|p| *p / scale).collect();
+            let adjusted_target: Vec<DVec2> =
+                target_stars.iter().map(|p| inv.apply(*p) / scale).collect();
+
+            let registrator = Registrator::new(self.level_config(level, scale));
+            if let Ok(result) = registrator.register_positions(&scaled_ref, &adjusted_target) {
+                let level_transform = scale_transform(&result.transform, scale);
+                current_transform = level_transform.compose(&current_transform);
+            }
+        }
+
+        // Final registration at full resolution with refined estimate
+        let inv = current_transform.inverse();
+        let adjusted_target: Vec<DVec2> = target_stars.iter().map(|p| inv.apply(*p)).collect();
+
+        let mut result = self.register_positions(ref_stars, &adjusted_target)?;
+
+        result.transform = result.transform.compose(&current_transform);
+        result.elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
+
+        Ok(result)
+    }
 }
 
 /// Warp target image to align with reference (raw pixel data, single channel).
@@ -503,241 +679,6 @@ pub fn quick_register_stars(
     Registrator::new(config).register_stars(ref_stars, target_stars)
 }
 
-/// Multi-scale image registration.
-///
-/// Uses a pyramid approach to speed up registration of large images:
-/// 1. Build an image pyramid by successive downsampling
-/// 2. Register at the coarsest level first
-/// 3. Use the coarse result as initial estimate for finer levels
-/// 4. Refine progressively until full resolution
-///
-/// This is particularly effective for:
-/// - Large images where full-resolution star matching is slow
-/// - Images with significant translation that could confuse matching
-/// - Reducing false matches by constraining search space at fine levels
-#[derive(Debug)]
-pub struct MultiScaleRegistrator {
-    config: RegistrationConfig,
-}
-
-impl MultiScaleRegistrator {
-    /// Create a new multi-scale registrator.
-    ///
-    /// The `config.multi_scale` field must be `Some` with a valid `MultiScaleConfig`.
-    pub fn new(config: RegistrationConfig) -> Self {
-        assert!(
-            config.multi_scale.is_some(),
-            "MultiScaleRegistrator requires config.multi_scale to be Some"
-        );
-        config.validate();
-        Self { config }
-    }
-
-    fn multiscale_config(&self) -> &MultiScaleConfig {
-        self.config.multi_scale.as_ref().unwrap()
-    }
-
-    /// Register using pre-detected stars at multiple scales.
-    ///
-    /// Stars should be detected at full resolution. They will be scaled
-    /// appropriately for each pyramid level.
-    ///
-    /// # Arguments
-    /// * `ref_stars` - Reference star positions at full resolution
-    /// * `target_stars` - Target star positions at full resolution
-    /// * `image_width` - Full resolution image width
-    /// * `image_height` - Full resolution image height
-    pub fn register_stars(
-        &self,
-        ref_stars: &[DVec2],
-        target_stars: &[DVec2],
-        image_width: usize,
-        image_height: usize,
-    ) -> Result<RegistrationResult, RegistrationError> {
-        let start = Instant::now();
-        let ms = self.multiscale_config();
-
-        // Calculate actual number of levels based on image size
-        let min_dim = image_width.min(image_height);
-        let max_levels = ((min_dim as f64 / ms.min_dimension as f64).log2()
-            / ms.scale_factor.log2())
-        .floor() as usize
-            + 1;
-        let num_levels = ms.levels.min(max_levels).max(1);
-
-        if num_levels == 1 {
-            // Single level - just do normal registration
-            return Registrator::new(self.config.clone())
-                .register_positions(ref_stars, target_stars);
-        }
-
-        // Start from coarsest level and work down
-        let mut current_transform = Transform::identity();
-        let mut last_result: Option<RegistrationResult> = None;
-
-        for level in (0..num_levels).rev() {
-            let scale = ms.scale_factor.powi(level as i32);
-
-            // Scale star positions to this level
-            let scaled_ref: Vec<DVec2> = ref_stars.iter().map(|p| *p / scale).collect();
-
-            // Apply current transform estimate to target stars, then scale
-            let adjusted_target: Vec<DVec2> = target_stars
-                .iter()
-                .map(|p| {
-                    // Apply inverse of current estimate to pre-align
-                    let inv = current_transform.inverse();
-                    let a = inv.apply(*p);
-                    a / scale
-                })
-                .collect();
-
-            // Use relaxed config for coarse levels, stricter for fine
-            let level_config = if level > 0 {
-                let mut c = self.config.clone();
-                c.ransac.inlier_threshold = self.config.ransac.inlier_threshold * scale.sqrt();
-                c.triangle.ratio_tolerance = self.config.triangle.ratio_tolerance * 1.5;
-                c.ransac.max_iterations = self.config.ransac.max_iterations / 2;
-                c.max_residual_pixels = self.config.max_residual_pixels * scale;
-                c
-            } else {
-                self.config.clone()
-            };
-
-            let registrator = Registrator::new(level_config);
-            match registrator.register_positions(&scaled_ref, &adjusted_target) {
-                Ok(result) => {
-                    // Scale the transform back to full resolution
-                    let level_transform = scale_transform(&result.transform, scale);
-
-                    // Compose with previous estimate
-                    current_transform = level_transform.compose(&current_transform);
-                    last_result = Some(result);
-                }
-                Err(e) => {
-                    // If coarse level fails, try next finer level
-                    if level > 0 {
-                        continue;
-                    } else {
-                        return Err(e);
-                    }
-                }
-            }
-        }
-
-        // Return the final result with updated transform
-        match last_result {
-            Some(mut result) => {
-                result.transform = current_transform;
-                result.elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
-                Ok(result)
-            }
-            None => Err(RegistrationError::NoMatchingPatterns),
-        }
-    }
-
-    /// Register using images and stars at multiple scales.
-    ///
-    /// Uses phase correlation at coarse levels for initial alignment,
-    /// then refines with star matching at finer levels.
-    pub fn register_with_images(
-        &self,
-        ref_image: &[f32],
-        target_image: &[f32],
-        width: usize,
-        height: usize,
-        ref_stars: &[DVec2],
-        target_stars: &[DVec2],
-    ) -> Result<RegistrationResult, RegistrationError> {
-        let start = Instant::now();
-        let ms = self.multiscale_config();
-
-        if ref_image.len() != width * height || target_image.len() != width * height {
-            return Err(RegistrationError::DimensionMismatch);
-        }
-
-        // Calculate actual number of levels
-        let min_dim = width.min(height);
-        let max_levels = ((min_dim as f64 / ms.min_dimension as f64).log2()
-            / ms.scale_factor.log2())
-        .floor() as usize
-            + 1;
-        let num_levels = ms.levels.min(max_levels).max(1);
-
-        let mut current_transform = Transform::identity();
-
-        // Build image pyramid
-        let ref_pyramid = build_pyramid(ref_image, width, height, num_levels, ms.scale_factor);
-        let target_pyramid =
-            build_pyramid(target_image, width, height, num_levels, ms.scale_factor);
-
-        // Process from coarse to fine
-        for level in (0..num_levels).rev() {
-            let scale = ms.scale_factor.powi(level as i32);
-            let (level_ref, level_width, level_height) = &ref_pyramid[level];
-            let (level_target, _, _) = &target_pyramid[level];
-
-            // At coarse levels, use phase correlation if enabled
-            if level > 0 && ms.use_phase_correlation {
-                let correlator = PhaseCorrelator::new(
-                    *level_width,
-                    *level_height,
-                    self.config.phase_correlation.clone(),
-                );
-
-                if let Some(pr) = correlator.correlate(level_ref, level_target) {
-                    // Scale translation to full resolution
-                    let phase_transform = Transform::translation(pr.translation * scale);
-                    current_transform = phase_transform.compose(&current_transform);
-                }
-            }
-
-            // Scale star positions and do star matching
-            let scaled_ref: Vec<DVec2> = ref_stars.iter().map(|p| *p / scale).collect();
-
-            let adjusted_target: Vec<DVec2> = target_stars
-                .iter()
-                .map(|p| {
-                    let inv = current_transform.inverse();
-                    inv.apply_inverse(*p) / scale
-                })
-                .collect();
-
-            let level_config = if level > 0 {
-                let mut c = self.config.clone();
-                c.ransac.inlier_threshold = self.config.ransac.inlier_threshold * scale.sqrt();
-                c.triangle.ratio_tolerance = self.config.triangle.ratio_tolerance * 1.5;
-                c.ransac.max_iterations = self.config.ransac.max_iterations / 2;
-                c.max_residual_pixels = self.config.max_residual_pixels * scale;
-                c
-            } else {
-                self.config.clone()
-            };
-
-            let registrator = Registrator::new(level_config);
-            if let Ok(result) = registrator.register_positions(&scaled_ref, &adjusted_target) {
-                let level_transform = scale_transform(&result.transform, scale);
-                current_transform = level_transform.compose(&current_transform);
-            }
-        }
-
-        // Final registration at full resolution with refined estimate
-        let adjusted_target: Vec<DVec2> = target_stars
-            .iter()
-            .map(|p| current_transform.inverse().apply_inverse(*p))
-            .collect();
-
-        let registrator = Registrator::new(self.config.clone());
-        let mut result = registrator.register_positions(ref_stars, &adjusted_target)?;
-
-        // Compose final transform
-        result.transform = result.transform.compose(&current_transform);
-        result.elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
-
-        Ok(result)
-    }
-}
-
 /// Scale a transformation from one resolution to another.
 fn scale_transform(transform: &Transform, scale: f64) -> Transform {
     // For a transform T that works at scale s, the equivalent at scale 1 is:
@@ -761,30 +702,17 @@ fn build_pyramid(
     // Level 0 is full resolution
     pyramid.push((image.to_vec(), width, height));
 
-    let mut current_width = width;
-    let mut current_height = height;
-    let mut current_image = image.to_vec();
-
-    for _ in 1..levels {
-        let new_width = (current_width as f64 / scale_factor).round() as usize;
-        let new_height = (current_height as f64 / scale_factor).round() as usize;
+    for i in 1..levels {
+        let (ref prev_data, prev_width, prev_height) = pyramid[i - 1];
+        let new_width = (prev_width as f64 / scale_factor).round() as usize;
+        let new_height = (prev_height as f64 / scale_factor).round() as usize;
 
         if new_width < 2 || new_height < 2 {
             break;
         }
 
-        let downsampled = downsample_image(
-            &current_image,
-            current_width,
-            current_height,
-            new_width,
-            new_height,
-        );
-
-        current_width = new_width;
-        current_height = new_height;
-        current_image = downsampled.clone();
-
+        let downsampled =
+            downsample_image(prev_data, prev_width, prev_height, new_width, new_height);
         pyramid.push((downsampled, new_width, new_height));
     }
 
@@ -967,6 +895,9 @@ fn recover_matches(
 
     match estimate_transform(&all_ref, &all_target, transform_type) {
         Some(new_transform) => (new_transform, all_matches),
-        None => (*transform, inlier_matches.to_vec()),
+        None => {
+            all_matches.truncate(inlier_matches.len());
+            (*transform, all_matches)
+        }
     }
 }
