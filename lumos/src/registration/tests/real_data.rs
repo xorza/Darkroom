@@ -148,7 +148,7 @@ fn test_register_two_calibrated_lights() {
 
     let baseline_rms = result.rms_error;
 
-    println!("Registration result (homography only):");
+    println!("Registration result:");
     println!("  Matched stars: {}", result.num_inliers);
     println!("  RMS error:     {:.4} pixels", baseline_rms);
     println!("  Elapsed:       {:.1} ms", result.elapsed_ms);
