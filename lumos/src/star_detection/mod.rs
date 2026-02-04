@@ -38,6 +38,7 @@ mod image_stats;
 mod mask_dilation;
 mod median_filter;
 mod region;
+pub(crate) mod stages;
 mod star;
 pub(crate) mod threshold_mask;
 

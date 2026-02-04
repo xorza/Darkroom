@@ -22,7 +22,7 @@ use super::centroid::compute_centroid;
 use super::config::Config;
 use super::convolution::matched_filter;
 use super::fwhm_estimation;
-use super::median_filter::median_filter_3x3;
+use super::stages;
 use super::star::Star;
 
 /// Result of star detection with diagnostics.
@@ -133,24 +133,9 @@ impl StarDetector {
             .get_or_insert_with(|| BufferPool::new(width, height));
         pool.reset(width, height);
 
-        // Acquire buffers from pool
-        let mut grayscale_image = pool.acquire_f32();
-        image.into_grayscale_buffer(&mut grayscale_image);
-        let mut scratch = pool.acquire_f32();
-
-        // Step 0a: Apply defect mask if provided
-        if let Some(defect_map) = self.config.defect_map.as_ref()
-            && !defect_map.is_empty()
-        {
-            defect_map.apply(&grayscale_image, &mut scratch);
-            std::mem::swap(&mut grayscale_image, &mut scratch);
-        }
-
-        // Step 0b: Apply 3x3 median filter for CFA sensors
-        if image.metadata.is_cfa {
-            median_filter_3x3(&grayscale_image, &mut scratch);
-            std::mem::swap(&mut grayscale_image, &mut scratch);
-        }
+        // Step 0: Image preparation (grayscale, defect correction, CFA filter)
+        let grayscale_image =
+            stages::prepare::prepare(image, self.config.defect_map.as_ref(), pool);
 
         // Step 1: Estimate background using pooled buffers
         let background = self.estimate_background(&grayscale_image);
@@ -161,6 +146,8 @@ impl StarDetector {
         // Step 3: Detect star candidates (with optional matched filter)
         let candidates = {
             let pool = self.buffer_pool.as_mut().unwrap();
+
+            let mut scratch = pool.acquire_f32();
 
             let filtered: Option<&Buffer2<f32>> = if let Some(fwhm) = effective_fwhm.fwhm() {
                 tracing::debug!(
