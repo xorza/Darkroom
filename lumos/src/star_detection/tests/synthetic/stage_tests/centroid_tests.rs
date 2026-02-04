@@ -4,10 +4,10 @@
 
 use crate::common::Buffer2;
 use crate::math::{Aabb, Vec2us};
-use crate::star_detection::candidate_detection::StarCandidate;
 use crate::star_detection::centroid::compute_centroid;
 use crate::star_detection::config::Config;
 use crate::star_detection::image_stats::ImageStats;
+use crate::star_detection::region::Region;
 use crate::star_detection::tests::common::output::{
     gray_to_rgb_image_stretched, save_grayscale, save_image,
 };
@@ -92,7 +92,7 @@ fn test_centroid_accuracy() {
         let peak_x = true_x.round() as usize;
         let peak_y = true_y.round() as usize;
 
-        let candidate = StarCandidate {
+        let candidate = Region {
             bbox: Aabb::new(
                 Vec2us::new(peak_x.saturating_sub(5), peak_y.saturating_sub(5)),
                 Vec2us::new((peak_x + 5).min(width - 1), (peak_y + 5).min(height - 1)),
@@ -136,7 +136,7 @@ fn test_centroid_accuracy() {
         let peak_x = true_x.round() as usize;
         let peak_y = true_y.round() as usize;
 
-        let candidate = StarCandidate {
+        let candidate = Region {
             bbox: Aabb::new(
                 Vec2us::new(peak_x.saturating_sub(5), peak_y.saturating_sub(5)),
                 Vec2us::new((peak_x + 5).min(width - 1), (peak_y + 5).min(height - 1)),
@@ -259,7 +259,7 @@ fn test_centroid_snr() {
 
         draw_circle(&mut img, Vec2::new(*true_x, *true_y), 6.0, blue, 1.0);
 
-        let candidate = StarCandidate {
+        let candidate = Region {
             bbox: Aabb::new(
                 Vec2us::new(peak_x.saturating_sub(5), peak_y.saturating_sub(5)),
                 Vec2us::new((peak_x + 5).min(width - 1), (peak_y + 5).min(height - 1)),

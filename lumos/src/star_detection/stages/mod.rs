@@ -4,5 +4,6 @@
 //! management contained within.
 
 pub mod background;
+pub mod detect;
 pub mod fwhm;
 pub mod prepare;

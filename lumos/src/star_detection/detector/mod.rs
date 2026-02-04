@@ -145,60 +145,27 @@ impl StarDetector {
         let effective_fwhm =
             stages::fwhm::estimate_fwhm(&grayscale_image, &background, &self.config, pool);
 
-        // Step 3: Detect star candidates (with optional matched filter)
-        let candidates = {
-            let pool = self.buffer_pool.as_mut().unwrap();
-
-            let mut scratch = pool.acquire_f32();
-
-            let filtered: Option<&Buffer2<f32>> = if let Some(fwhm) = effective_fwhm.fwhm() {
-                tracing::debug!(
-                    "Applying matched filter with FWHM={:.1}, axis_ratio={:.2}, angle={:.1}°",
-                    fwhm,
-                    self.config.psf_axis_ratio,
-                    self.config.psf_angle.to_degrees()
-                );
-
-                let mut convolution_scratch = pool.acquire_f32();
-                let mut convolution_temp = pool.acquire_f32();
-                matched_filter(
-                    &grayscale_image,
-                    &background.background,
-                    fwhm,
-                    self.config.psf_axis_ratio,
-                    self.config.psf_angle,
-                    &mut scratch,
-                    &mut convolution_scratch,
-                    &mut convolution_temp,
-                );
-                pool.release_f32(convolution_temp);
-                pool.release_f32(convolution_scratch);
-
-                Some(&scratch)
-            } else {
-                None
-            };
-
-            let candidates =
-                detect_stars(&grayscale_image, filtered, &background, &self.config, pool);
-
-            pool.release_f32(scratch);
-
-            candidates
-        };
+        // Step 3: Detect star candidate regions (with optional matched filter)
+        let regions = stages::detect::detect(
+            &grayscale_image,
+            &background,
+            effective_fwhm.fwhm(),
+            &self.config,
+            pool,
+        );
 
         let fwhm_estimate = effective_fwhm.estimate();
         let mut diagnostics = StarDetectionDiagnostics {
-            candidates_after_filtering: candidates.len(),
+            candidates_after_filtering: regions.len(),
             estimated_fwhm: fwhm_estimate.map_or(0.0, |e| e.fwhm),
             fwhm_estimation_star_count: fwhm_estimate.map_or(0, |e| e.star_count),
             fwhm_was_auto_estimated: fwhm_estimate.is_some_and(|e| e.is_estimated),
             ..Default::default()
         };
-        tracing::debug!("Detected {} star candidates", candidates.len());
+        tracing::debug!("Detected {} star candidates", regions.len());
 
         // Step 4: Compute precise centroids (parallel)
-        let mut stars = compute_centroids(candidates, &grayscale_image, &background, &self.config);
+        let mut stars = compute_centroids(regions, &grayscale_image, &background, &self.config);
         diagnostics.stars_after_centroid = stars.len();
 
         // Release image buffers back to pool
@@ -248,18 +215,18 @@ impl StarDetector {
 // Helper Functions
 // =============================================================================
 
-/// Compute centroids for star candidates in parallel.
+/// Compute centroids for detected regions in parallel.
 fn compute_centroids(
-    candidates: Vec<candidate_detection::StarCandidate>,
+    regions: Vec<super::region::Region>,
     pixels: &Buffer2<f32>,
     background: &ImageStats,
     config: &Config,
 ) -> Vec<Star> {
     use rayon::prelude::*;
 
-    candidates
+    regions
         .into_par_iter()
-        .filter_map(|candidate| compute_centroid(pixels, background, &candidate, config))
+        .filter_map(|region| compute_centroid(pixels, background, &region, config))
         .collect()
 }
 

@@ -26,10 +26,10 @@ pub use moffat_fit::{alpha_beta_to_fwhm, fwhm_beta_to_alpha};
 use arrayvec::ArrayVec;
 use glam::{DVec2, Vec2};
 
-use super::candidate_detection::StarCandidate;
 use super::config::Config;
 use super::cosmic_ray::compute_laplacian_snr;
 use super::image_stats::ImageStats;
+use super::region::Region;
 use super::{CentroidMethod, LocalBackgroundMethod, Star};
 use crate::common::Buffer2;
 use crate::math::FWHM_TO_SIGMA;
@@ -301,7 +301,7 @@ fn sigma_clipped_median_mad(values: &mut [f32], kappa: f32, iterations: usize) -
 pub fn compute_centroid(
     pixels: &Buffer2<f32>,
     background: &ImageStats,
-    candidate: &StarCandidate,
+    region: &Region,
     config: &Config,
 ) -> Option<Star> {
     let width = pixels.width();
@@ -310,7 +310,7 @@ pub fn compute_centroid(
     let stamp_radius = compute_stamp_radius(config.expected_fwhm);
 
     // Initial position from peak
-    let mut pos = Vec2::new(candidate.peak.x as f32, candidate.peak.y as f32);
+    let mut pos = Vec2::new(region.peak.x as f32, region.peak.y as f32);
 
     // First pass: weighted moments for initial refinement.
     // When a fitting method follows, only 2 iterations are needed — the L-M
@@ -409,7 +409,7 @@ pub fn compute_centroid(
         fwhm: metrics.fwhm,
         eccentricity: metrics.eccentricity,
         snr: metrics.snr,
-        peak: candidate.peak_value,
+        peak: region.peak_value,
         sharpness: metrics.sharpness,
         roundness1: metrics.roundness1,
         roundness2: metrics.roundness2,

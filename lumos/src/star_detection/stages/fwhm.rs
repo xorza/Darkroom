@@ -79,10 +79,19 @@ fn compute_centroids(
     background: &ImageStats,
     config: &Config,
 ) -> Vec<Star> {
+    use super::super::region::Region;
     use rayon::prelude::*;
 
     candidates
         .into_par_iter()
-        .filter_map(|candidate| compute_centroid(pixels, background, &candidate, config))
+        .filter_map(|c| {
+            let region = Region {
+                bbox: c.bbox,
+                peak: c.peak,
+                peak_value: c.peak_value,
+                area: c.area,
+            };
+            compute_centroid(pixels, background, &region, config)
+        })
         .collect()
 }
