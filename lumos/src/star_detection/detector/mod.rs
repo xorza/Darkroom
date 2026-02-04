@@ -17,7 +17,7 @@ use crate::common::Buffer2;
 
 use super::buffer_pool::BufferPool;
 use super::candidate_detection::{self, detect_stars};
-use super::centroid::compute_centroid;
+
 use super::config::Config;
 use super::convolution::matched_filter;
 use super::fwhm_estimation;
@@ -165,7 +165,8 @@ impl StarDetector {
         tracing::debug!("Detected {} star candidates", regions.len());
 
         // Step 4: Compute precise centroids (parallel)
-        let mut stars = compute_centroids(regions, &grayscale_image, &background, &self.config);
+        let mut stars =
+            stages::measure::measure(&regions, &grayscale_image, &background, &self.config);
         diagnostics.stars_after_centroid = stars.len();
 
         // Release image buffers back to pool
@@ -214,21 +215,6 @@ impl StarDetector {
 // =============================================================================
 // Helper Functions
 // =============================================================================
-
-/// Compute centroids for detected regions in parallel.
-fn compute_centroids(
-    regions: Vec<super::region::Region>,
-    pixels: &Buffer2<f32>,
-    background: &ImageStats,
-    config: &Config,
-) -> Vec<Star> {
-    use rayon::prelude::*;
-
-    regions
-        .into_par_iter()
-        .filter_map(|region| compute_centroid(pixels, background, &region, config))
-        .collect()
-}
 
 /// Apply quality filters to stars, returning rejection counts.
 fn apply_quality_filters(stars: &mut Vec<Star>, config: &Config) -> QualityFilterStats {
