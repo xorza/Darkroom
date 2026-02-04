@@ -7,8 +7,6 @@ pub(crate) mod stages;
 
 #[cfg(test)]
 mod bench;
-#[cfg(test)]
-mod tests;
 
 // =============================================================================
 // Imports

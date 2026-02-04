@@ -113,6 +113,7 @@ fn compute_centroids(
 /// 2. Compute median FWHM from filtered stars
 /// 3. Reject outliers using MAD-based threshold (keep within 3×MAD of median)
 /// 4. Recompute median from remaining stars
+#[allow(clippy::needless_pass_by_value)]
 fn estimate_fwhm_from_stars(
     stars: &[Star],
     min_stars: usize,
@@ -181,5 +182,176 @@ fn estimate_fwhm_from_stars(
     FwhmResult {
         fwhm: Some(final_median),
         stars_used: fwhms.len(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use glam::DVec2;
+
+    fn make_star(fwhm: f32, eccentricity: f32, sharpness: f32, peak: f32) -> Star {
+        Star {
+            pos: DVec2::new(10.0, 10.0),
+            flux: 100.0,
+            fwhm,
+            eccentricity,
+            snr: 50.0,
+            peak,
+            sharpness,
+            roundness1: 0.0,
+            roundness2: 0.0,
+            laplacian_snr: 0.0,
+        }
+    }
+
+    fn make_good_star(fwhm: f32) -> Star {
+        make_star(fwhm, 0.1, 0.3, 0.5)
+    }
+
+    // =========================================================================
+    // estimate_fwhm_from_stars tests
+    // =========================================================================
+
+    #[test]
+    fn test_fwhm_estimation_insufficient_stars() {
+        // Fewer than min_stars returns default FWHM
+        let stars: Vec<Star> = (0..4).map(|_| make_good_star(3.0)).collect();
+
+        let result = estimate_fwhm_from_stars(&stars, 5, 4.0, 0.8, 0.7);
+
+        assert!(result.fwhm.is_some());
+        assert!((result.fwhm.unwrap() - 4.0).abs() < 0.01); // Default FWHM
+        assert_eq!(result.stars_used, 4);
+    }
+
+    #[test]
+    fn test_fwhm_estimation_filters_saturated() {
+        // Saturated stars (peak > 0.95) are excluded
+        let mut stars: Vec<Star> = (0..10).map(|_| make_good_star(3.0)).collect();
+        stars[0] = make_star(10.0, 0.1, 0.3, 0.98); // Saturated with bad FWHM
+
+        let result = estimate_fwhm_from_stars(&stars, 5, 4.0, 0.8, 0.7);
+
+        // Should estimate ~3.0, not affected by saturated star's 10.0 FWHM
+        assert!(result.fwhm.is_some());
+        assert!((result.fwhm.unwrap() - 3.0).abs() < 0.5);
+    }
+
+    #[test]
+    fn test_fwhm_estimation_filters_high_eccentricity() {
+        // High eccentricity stars (> max_eccentricity) are excluded
+        let mut stars: Vec<Star> = (0..10).map(|_| make_good_star(3.0)).collect();
+        stars[0] = make_star(10.0, 0.9, 0.3, 0.5); // High eccentricity
+
+        let result = estimate_fwhm_from_stars(&stars, 5, 4.0, 0.8, 0.7);
+
+        assert!(result.fwhm.is_some());
+        assert!((result.fwhm.unwrap() - 3.0).abs() < 0.5);
+    }
+
+    #[test]
+    fn test_fwhm_estimation_filters_cosmic_rays() {
+        // High sharpness (cosmic rays) are excluded
+        let mut stars: Vec<Star> = (0..10).map(|_| make_good_star(3.0)).collect();
+        stars[0] = make_star(1.0, 0.1, 0.9, 0.5); // Cosmic ray (high sharpness)
+
+        let result = estimate_fwhm_from_stars(&stars, 5, 4.0, 0.8, 0.7);
+
+        assert!(result.fwhm.is_some());
+        assert!((result.fwhm.unwrap() - 3.0).abs() < 0.5);
+    }
+
+    #[test]
+    fn test_fwhm_estimation_filters_invalid_fwhm() {
+        // FWHM outside valid range (0.5..20.0) are excluded
+        let mut stars: Vec<Star> = (0..10).map(|_| make_good_star(3.0)).collect();
+        stars[0] = make_good_star(0.2); // Too small
+        stars[1] = make_good_star(25.0); // Too large
+
+        let result = estimate_fwhm_from_stars(&stars, 5, 4.0, 0.8, 0.7);
+
+        assert!(result.fwhm.is_some());
+        assert!((result.fwhm.unwrap() - 3.0).abs() < 0.5);
+    }
+
+    #[test]
+    fn test_fwhm_estimation_rejects_outliers() {
+        // Stars with FWHM far from median are rejected
+        let mut stars: Vec<Star> = (0..10).map(|_| make_good_star(3.0)).collect();
+        // Add some outliers (still valid FWHM range but far from median)
+        stars.push(make_good_star(12.0));
+        stars.push(make_good_star(15.0));
+
+        let result = estimate_fwhm_from_stars(&stars, 5, 4.0, 0.8, 0.7);
+
+        assert!(result.fwhm.is_some());
+        // Final estimate should be close to 3.0, outliers rejected
+        assert!((result.fwhm.unwrap() - 3.0).abs() < 0.5);
+    }
+
+    #[test]
+    fn test_fwhm_estimation_uniform_values() {
+        // All identical FWHM values
+        let stars: Vec<Star> = (0..10).map(|_| make_good_star(4.5)).collect();
+
+        let result = estimate_fwhm_from_stars(&stars, 5, 4.0, 0.8, 0.7);
+
+        assert!(result.fwhm.is_some());
+        assert!((result.fwhm.unwrap() - 4.5).abs() < 0.01);
+        assert_eq!(result.stars_used, 10);
+    }
+
+    #[test]
+    fn test_fwhm_estimation_varying_values() {
+        // FWHM values with some spread
+        let fwhms = [2.8, 3.0, 3.1, 3.2, 2.9, 3.3, 3.0, 3.1, 2.9, 3.0];
+        let stars: Vec<Star> = fwhms.iter().map(|&f| make_good_star(f)).collect();
+
+        let result = estimate_fwhm_from_stars(&stars, 5, 4.0, 0.8, 0.7);
+
+        assert!(result.fwhm.is_some());
+        // Median should be around 3.0
+        assert!((result.fwhm.unwrap() - 3.0).abs() < 0.2);
+    }
+
+    #[test]
+    fn test_fwhm_estimation_empty_after_filtering() {
+        // All stars filtered out → returns default with 0 stars
+        let stars: Vec<Star> = (0..10)
+            .map(|_| make_star(3.0, 0.1, 0.3, 0.98)) // All saturated
+            .collect();
+
+        let result = estimate_fwhm_from_stars(&stars, 5, 4.0, 0.8, 0.7);
+
+        assert!(result.fwhm.is_some());
+        assert!((result.fwhm.unwrap() - 4.0).abs() < 0.01); // Default
+        assert_eq!(result.stars_used, 0);
+    }
+
+    // =========================================================================
+    // FwhmResult tests
+    // =========================================================================
+
+    #[test]
+    fn test_fwhm_result_debug() {
+        let result = FwhmResult {
+            fwhm: Some(3.5),
+            stars_used: 42,
+        };
+        let debug_str = format!("{:?}", result);
+        assert!(debug_str.contains("3.5"));
+        assert!(debug_str.contains("42"));
+    }
+
+    #[test]
+    fn test_fwhm_result_clone() {
+        let result = FwhmResult {
+            fwhm: Some(3.5),
+            stars_used: 42,
+        };
+        let cloned = result;
+        assert_eq!(result.fwhm, cloned.fwhm);
+        assert_eq!(result.stars_used, cloned.stars_used);
     }
 }
