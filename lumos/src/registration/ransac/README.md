@@ -95,81 +95,26 @@ When a new best model is found:
 | `max_rotation` | 10° | Tracked mounts; set `None` for mosaics |
 | `scale_range` | (0.8, 1.2) | Same telescope; set `None` for mixed setups |
 
-## Comparison with Best Practices
+## Techniques
 
-### Literature Review
-
-| Technique | Reference | Status in Our Code |
-|-----------|-----------|-------------------|
+| Technique | Reference | Status |
+|-----------|-----------|--------|
 | **RANSAC** (Fischler & Bolles, 1981) | Basic random sampling + inlier counting | Implemented |
-| **MSAC** (Torr & Zisserman, 2000) | Truncated quadratic scoring | Implemented (f64 precision, threshold² − dist² scoring) |
+| **MSAC** (Torr & Zisserman, 2000) | Truncated quadratic scoring | Implemented (f64, threshold² − dist²) |
 | **LO-RANSAC** (Chum et al., 2003) | Local optimization of best hypothesis | Implemented (iterative LS refinement) |
-| **PROSAC** (Chum & Matas, 2005) | Progressive sampling from sorted correspondences | Partially implemented (3-phase pool, not true PROSAC) |
-| **LO+-RANSAC** (Lebeda et al., 2012) | Improved LO with shrinking threshold + inner RANSAC | Not implemented |
-| **MAGSAC++** (Barath & Matas, 2020) | Threshold-free scoring via marginalization | Not implemented |
-| **SPRT** (Chum & Matas, 2008) | Preemptive model verification | Not implemented |
-| **GC-RANSAC** (Barath & Matas, 2018) | Graph-cut based local optimization | Not implemented |
+| **PROSAC** (Chum & Matas, 2005) | Progressive sampling from sorted correspondences | Partial (3-phase pool, not true PROSAC) |
 | Degeneracy checks | SupeRANSAC (2025) | Implemented (coincidence + collinearity) |
 | **Adaptive iteration** (standard) | `N = log(1-p)/log(1-w^n)` | Implemented |
 | **Plausibility constraints** | Domain-specific rejection | Implemented (rotation + scale bounds) |
-| **SIMD inlier counting** | Intel PCL optimization (AVX2/NEON) | Implemented |
+| **SIMD inlier counting** | AVX2/SSE2/NEON with scalar fallback | Implemented |
 
-### Comparison with Rust Ecosystem
+Custom implementation chosen over Rust ecosystem crates (`arrsac`, `inlier`, `linear-ransac`) for astronomy-specific plausibility constraints, direct SIMD integration, and tight coupling with the triangle matching pipeline.
 
-| Crate | Features | Notes |
-|-------|----------|-------|
-| `sample-consensus` + `arrsac` (rust-cv) | Generic RANSAC traits, ARRSAC variant, SPRT | Trait-based abstractions; good for generic use |
-| `inlier` | RANSAC/MSAC/MAGSAC/ACRANSAC, PROSAC, local optimization, learned priors | Most comprehensive; large dependency |
-| `linear-ransac` | Line fitting with auto-threshold | Too specialized |
+## Future Work
 
-### Verdict: Keep Custom Implementation
-
-Reasons to keep:
-- **Astronomy-specific**: Plausibility constraints (rotation/scale bounds), progressive sampling from match confidences, integration with `PointMatch` and triangle matching pipeline.
-- **SIMD integration**: Direct AVX2/SSE2/NEON for inlier counting with the exact scoring function we need.
-- **Simplicity**: ~580 lines for the core, easy to modify for domain-specific needs.
-- **Sufficient for star matching**: With 200 stars and 2-point samples, standard RANSAC converges in <50 iterations for typical inlier ratios (>50%).
-
-Reasons to consider `inlier` crate:
-- If MAGSAC++ (threshold-free) scoring becomes important.
-- If PROSAC's formal progressive sampling shows measurable speedup.
-- If the pipeline handles significantly noisier data (>50% outliers).
-
-## Improvements Applied
-
-### 1. ~~Use MSAC scoring consistently~~ — DONE
-
-Switched all scoring from `(threshold² - dist²) * 1000` with `usize` truncation to native `f64` `threshold² - dist²` throughout the SIMD layer and RANSAC loop. Eliminates sub-pixel precision loss.
-
-### 2. ~~Add sample degeneracy check~~ — DONE
-
-Added `is_sample_degenerate()` that rejects coincident points (< 1px apart) and collinear samples (3+ points). Called in `ransac_loop` before `estimate_transform`. 8 tests added.
-
-### 3. True PROSAC instead of 3-phase heuristic (moderate, speed)
-
-**Current**: `estimate_progressive` uses a coarse 3-phase pool expansion (25% → 50% → 100%) with weighted reservoir sampling within each phase.
-
-**Suggested**: Implement true PROSAC (Chum & Matas, 2005): sort correspondences by confidence, progressively expand the sampling set one point at a time, drawing the newest point in each sample. This has a formal convergence guarantee and can be 10–100x faster than uniform RANSAC when the quality ordering is good (which it is for triangle matching confidences). Falls back to RANSAC naturally when ordering is uninformative.
-
-### 4. ~~Remove code duplication between `estimate` and `estimate_progressive`~~ — DONE
-
-Extracted the shared RANSAC loop into `ransac_loop()` parameterized by a sampling closure. Both `estimate` and `estimate_progressive` now delegate to it, eliminating ~80 lines of duplication.
-
-### 5. ~~Simplify `refine_transform`~~ — DONE
-
-Removed the trivial wrapper. Call sites now use `estimate_transform` directly.
-
-### 6. ~~Use `select_nth_unstable` for weighted sampling~~ — DONE
-
-Replaced `sort_by` with `select_nth_unstable_by` in `weighted_sample_into` for O(n) average-case selection.
-
-### 7. ~~Pre-compute threshold²~~ — DONE
-
-`threshold_sq` is now computed once in `ransac_loop` and passed to all `count_inliers` calls and the SIMD layer. SIMD functions accept `threshold_sq` directly instead of computing it internally.
-
-### 8. ~~Pre-allocate buffers~~ — DONE (partial)
-
-Sample point buffers are pre-allocated and reused across iterations in `ransac_loop`. LO inner-loop allocations remain (would require changing `count_inliers` to buffer-based API — deferred as low-impact for typical LO iteration counts of 3–5).
+- **True PROSAC**: Replace the 3-phase pool heuristic with formal PROSAC (Chum & Matas, 2005) — progressively expand the sampling set one point at a time, drawing the newest point in each sample. Can be 10–100x faster than uniform RANSAC when confidence ordering is good.
+- **MAGSAC++**: Threshold-free scoring via marginalization, if fixed-threshold MSAC proves limiting.
+- **LO inner-loop allocation**: Pre-allocate buffers for LO refinement (low priority, typical iteration count is 3–5).
 
 ## References
 
@@ -177,11 +122,6 @@ Sample point buffers are pre-allocated and reused across iterations in `ransac_l
 - [MSAC/MLESAC (Torr & Zisserman, 2000)](https://www.robots.ox.ac.uk/~vgg/publications/2000/Torr00/torr00.pdf)
 - [LO-RANSAC (Chum et al., 2003)](https://link.springer.com/chapter/10.1007/978-3-540-45243-0_31)
 - [PROSAC (Chum & Matas, 2005)](https://cmp.felk.cvut.cz/~matas/papers/chum-prosac-cvpr05.pdf)
-- [LO+-RANSAC (Lebeda et al., 2012)](https://cmp.felk.cvut.cz/software/LO-RANSAC/Lebeda-2012-Fixing_LORANSAC-BMVC.pdf)
 - [MAGSAC++ (Barath & Matas, 2020)](https://openaccess.thecvf.com/content_CVPR_2020/papers/Barath_MAGSAC_a_Fast_Reliable_and_Accurate_Robust_Estimator_CVPR_2020_paper.pdf)
-- [RANSAC Scoring Functions: Analysis and Reality Check (Dec 2025)](https://arxiv.org/html/2512.19850)
 - [SupeRANSAC (2025)](https://arxiv.org/html/2506.04803v1)
 - [OpenCV USAC Framework](https://docs.opencv.org/4.x/de/d3e/tutorial_usac.html)
-- [rust-cv/arrsac](https://github.com/rust-cv/arrsac)
-- [inlier crate](https://github.com/soraxas/inlier)
-- [sample-consensus crate](https://github.com/rust-cv/sample-consensus)
