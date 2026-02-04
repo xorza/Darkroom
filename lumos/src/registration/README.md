@@ -455,18 +455,9 @@ Fixed: `match_triangles()` now calls `two_step_refine_matches()` when `config.tw
 
 Fixed: `RansacConfig` now has `max_rotation: Option<f64>` (default 10°) and `scale_range: Option<(f64, f64)>` (default 0.8–1.2). Hypotheses exceeding these bounds are rejected before inlier counting in both `estimate()` and `estimate_progressive()`. LO-RANSAC refinements are also checked. Set to `None` to disable for mosaics or different focal lengths.
 
-### 3. Guided Matching / Post-RANSAC Match Recovery (High Priority)
+### ~~3. Guided Matching / Post-RANSAC Match Recovery~~ (Fixed)
 
-After RANSAC produces a good transform, the pipeline never searches for additional star pairs that triangle matching missed. This leaves significant matches on the table. PixInsight and Astroalign both do post-RANSAC guided matching.
-
-**What to add:** After RANSAC, for each unmatched reference star:
-1. Apply the estimated transform to predict its position in the target image
-2. Search for the closest target star within `inlier_threshold` pixels
-3. If found and not already matched, add the pair as a new inlier
-
-This typically increases the inlier count by 2-3x because triangle matching is conservative (requires multiple independent triangle votes), while transform-guided search only needs spatial proximity.
-
-**Location:** `pipeline/mod.rs`, after the RANSAC step and before SIP correction.
+Fixed: `recover_matches()` in `pipeline/mod.rs` projects each unmatched reference star through the RANSAC transform, finds the nearest unmatched target star within `inlier_threshold` using a k-d tree, and adds the pair. The transform is then re-estimated on all matches (original + recovered). Runs automatically between RANSAC and SIP correction.
 
 ### 4. Iterative Model Refinement (Medium Priority)
 

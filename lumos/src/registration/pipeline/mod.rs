@@ -26,7 +26,8 @@ use crate::registration::{
     distortion::{SipConfig, SipPolynomial},
     interpolation::warp_image,
     phase_correlation::PhaseCorrelator,
-    ransac::RansacEstimator,
+    ransac::{RansacEstimator, estimate_transform},
+    spatial::KdTree,
     transform::Transform,
     transform::TransformType,
     triangle::match_triangles,
@@ -158,17 +159,23 @@ impl Registrator {
             .map(|&i| (matches[i].ref_idx, matches[i].target_idx))
             .collect();
 
+        // Step 2b: Guided matching — recover additional matches missed by triangles
+        let (transform, inlier_matches) = recover_matches(
+            &ref_stars,
+            &target_stars,
+            &ransac_result.transform,
+            &inlier_matches,
+            self.config.ransac.inlier_threshold,
+            self.config.transform_type,
+        );
+
         // Step 3 (optional): SIP distortion correction on residuals
         let sip_correction = if self.config.sip.enabled {
-            let inlier_ref: Vec<DVec2> = ransac_result
-                .inliers
+            let inlier_ref: Vec<DVec2> =
+                inlier_matches.iter().map(|&(r, _)| ref_stars[r]).collect();
+            let inlier_target: Vec<DVec2> = inlier_matches
                 .iter()
-                .map(|&i| ref_stars[matches[i].ref_idx])
-                .collect();
-            let inlier_target: Vec<DVec2> = ransac_result
-                .inliers
-                .iter()
-                .map(|&i| target_stars[matches[i].target_idx])
+                .map(|&(_, t)| target_stars[t])
                 .collect();
 
             let sip_config = SipConfig {
@@ -176,35 +183,28 @@ impl Registrator {
                 reference_point: None, // Auto-compute centroid
             };
 
-            SipPolynomial::fit_from_transform(
-                &inlier_ref,
-                &inlier_target,
-                &ransac_result.transform,
-                &sip_config,
-            )
+            SipPolynomial::fit_from_transform(&inlier_ref, &inlier_target, &transform, &sip_config)
         } else {
             None
         };
 
         // Compute residuals for inliers (with SIP correction if available)
-        let residuals: Vec<f64> = ransac_result
-            .inliers
+        let residuals: Vec<f64> = inlier_matches
             .iter()
-            .map(|&i| {
-                let r = ref_stars[matches[i].ref_idx];
-                let t = target_stars[matches[i].target_idx];
+            .map(|&(r, t)| {
+                let ref_pos = ref_stars[r];
+                let target_pos = target_stars[t];
                 let corrected_r = match &sip_correction {
-                    Some(sip) => sip.correct(r),
-                    None => r,
+                    Some(sip) => sip.correct(ref_pos),
+                    None => ref_pos,
                 };
-                let p = ransac_result.transform.apply(corrected_r);
-                (p - t).length()
+                let p = transform.apply(corrected_r);
+                (p - target_pos).length()
             })
             .collect();
 
-        let mut result =
-            RegistrationResult::new(ransac_result.transform, inlier_matches, residuals)
-                .with_elapsed(start.elapsed().as_secs_f64() * 1000.0);
+        let mut result = RegistrationResult::new(transform, inlier_matches, residuals)
+            .with_elapsed(start.elapsed().as_secs_f64() * 1000.0);
         result.sip_correction = sip_correction;
 
         // Check accuracy
@@ -867,4 +867,65 @@ fn select_spatially_distributed(stars: &[DVec2], max_stars: usize, grid_size: us
     }
 
     selected
+}
+
+/// Guided matching: recover additional star matches missed by triangle matching.
+///
+/// After RANSAC finds a good transform, projects each unmatched reference star
+/// into target space and searches for the nearest unmatched target star within
+/// the inlier threshold. Then re-estimates the transform using all matches.
+///
+/// Returns the updated transform and combined matches (original + recovered).
+/// If no new matches are found or re-estimation fails, returns inputs unchanged.
+fn recover_matches(
+    ref_stars: &[DVec2],
+    target_stars: &[DVec2],
+    transform: &Transform,
+    inlier_matches: &[(usize, usize)],
+    inlier_threshold: f64,
+    transform_type: TransformType,
+) -> (Transform, Vec<(usize, usize)>) {
+    let target_tree = match KdTree::build(target_stars) {
+        Some(tree) => tree,
+        None => return (transform.clone(), inlier_matches.to_vec()),
+    };
+
+    let matched_ref: std::collections::HashSet<usize> =
+        inlier_matches.iter().map(|&(r, _)| r).collect();
+    let matched_target: std::collections::HashSet<usize> =
+        inlier_matches.iter().map(|&(_, t)| t).collect();
+
+    let threshold_sq = inlier_threshold * inlier_threshold;
+    let mut all_matches: Vec<(usize, usize)> = inlier_matches.to_vec();
+    let mut newly_matched_targets = std::collections::HashSet::new();
+
+    for (ref_idx, &ref_pos) in ref_stars.iter().enumerate() {
+        if matched_ref.contains(&ref_idx) {
+            continue;
+        }
+
+        let predicted = transform.apply(ref_pos);
+        let nearest = target_tree.k_nearest(predicted, 1);
+
+        if let Some(&(target_idx, dist_sq)) = nearest.first()
+            && dist_sq <= threshold_sq
+            && !matched_target.contains(&target_idx)
+            && !newly_matched_targets.contains(&target_idx)
+        {
+            all_matches.push((ref_idx, target_idx));
+            newly_matched_targets.insert(target_idx);
+        }
+    }
+
+    if all_matches.len() == inlier_matches.len() {
+        return (transform.clone(), all_matches);
+    }
+
+    let all_ref: Vec<DVec2> = all_matches.iter().map(|&(r, _)| ref_stars[r]).collect();
+    let all_target: Vec<DVec2> = all_matches.iter().map(|&(_, t)| target_stars[t]).collect();
+
+    match estimate_transform(&all_ref, &all_target, transform_type) {
+        Some(new_transform) => (new_transform, all_matches),
+        None => (transform.clone(), inlier_matches.to_vec()),
+    }
 }

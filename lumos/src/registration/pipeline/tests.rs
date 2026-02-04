@@ -1509,3 +1509,226 @@ fn test_spatial_selection_integration_with_pipeline() {
         "Expected angle=0.03, got {est_angle}"
     );
 }
+
+// ============================================================================
+// Guided Matching / Post-RANSAC Match Recovery Tests
+// ============================================================================
+
+#[test]
+fn test_recover_matches_basic() {
+    // Create 20 stars with a known translation
+    let ref_stars = generate_star_grid(4, 5, 100.0, DVec2::new(100.0, 100.0));
+    let offset = DVec2::new(30.0, -20.0);
+    let target_stars: Vec<DVec2> = ref_stars.iter().map(|p| *p + offset).collect();
+
+    let transform = Transform::translation(offset);
+
+    // Provide only half the matches as "RANSAC inliers"
+    let inlier_matches: Vec<(usize, usize)> = (0..10).map(|i| (i, i)).collect();
+
+    let (new_transform, all_matches) = super::recover_matches(
+        &ref_stars,
+        &target_stars,
+        &transform,
+        &inlier_matches,
+        2.0,
+        TransformType::Translation,
+    );
+
+    // Should recover all 20 matches
+    assert_eq!(
+        all_matches.len(),
+        20,
+        "Should recover all 20 matches, got {}",
+        all_matches.len()
+    );
+
+    // Transform should still be accurate
+    let t = new_transform.translation_components();
+    assert!((t.x - offset.x).abs() < 0.5);
+    assert!((t.y - offset.y).abs() < 0.5);
+}
+
+#[test]
+fn test_recover_matches_no_new_matches() {
+    // All stars are already matched — nothing to recover
+    let ref_stars = generate_star_grid(3, 3, 100.0, DVec2::new(100.0, 100.0));
+    let offset = DVec2::new(10.0, 5.0);
+    let target_stars: Vec<DVec2> = ref_stars.iter().map(|p| *p + offset).collect();
+
+    let transform = Transform::translation(offset);
+    let inlier_matches: Vec<(usize, usize)> = (0..9).map(|i| (i, i)).collect();
+
+    let (_, all_matches) = super::recover_matches(
+        &ref_stars,
+        &target_stars,
+        &transform,
+        &inlier_matches,
+        2.0,
+        TransformType::Translation,
+    );
+
+    assert_eq!(all_matches.len(), 9, "Should remain at 9 matches");
+}
+
+#[test]
+fn test_recover_matches_prevents_duplicate_target() {
+    // Two unmatched ref stars project close to the same target star.
+    // Only one should be matched.
+    let ref_stars = vec![
+        DVec2::new(100.0, 100.0), // already matched
+        DVec2::new(200.0, 200.0), // unmatched, projects near target[1]
+        DVec2::new(200.5, 200.5), // unmatched, also projects near target[1]
+    ];
+    let target_stars = vec![
+        DVec2::new(110.0, 105.0), // matched to ref[0]
+        DVec2::new(210.0, 205.0), // closest to both ref[1] and ref[2] projections
+    ];
+
+    let transform = Transform::translation(DVec2::new(10.0, 5.0));
+    let inlier_matches = vec![(0_usize, 0_usize)];
+
+    let (_, all_matches) = super::recover_matches(
+        &ref_stars,
+        &target_stars,
+        &transform,
+        &inlier_matches,
+        2.0,
+        TransformType::Translation,
+    );
+
+    // Should have original + at most 1 new match (not 2, because target[1] can only match once)
+    assert_eq!(
+        all_matches.len(),
+        2,
+        "Should have 2 matches (1 original + 1 recovered), got {}",
+        all_matches.len()
+    );
+
+    // Count how many matches point to target[1]
+    let target1_count = all_matches.iter().filter(|&&(_, t)| t == 1).count();
+    assert_eq!(
+        target1_count, 1,
+        "Target star 1 should be matched exactly once"
+    );
+}
+
+#[test]
+fn test_recover_matches_empty_target() {
+    let ref_stars = vec![DVec2::new(100.0, 100.0)];
+    let target_stars: Vec<DVec2> = vec![];
+    let transform = Transform::translation(DVec2::new(10.0, 5.0));
+
+    let (_, all_matches) = super::recover_matches(
+        &ref_stars,
+        &target_stars,
+        &transform,
+        &[],
+        2.0,
+        TransformType::Translation,
+    );
+
+    assert!(all_matches.is_empty());
+}
+
+#[test]
+fn test_recover_matches_respects_threshold() {
+    // Unmatched ref stars project far from any target star — should not match
+    let ref_stars = vec![
+        DVec2::new(100.0, 100.0), // matched
+        DVec2::new(500.0, 500.0), // unmatched, projects to (510, 505) — no target nearby
+    ];
+    let target_stars = vec![
+        DVec2::new(110.0, 105.0), // matched to ref[0]
+        DVec2::new(200.0, 200.0), // far from ref[1] projection
+    ];
+
+    let transform = Transform::translation(DVec2::new(10.0, 5.0));
+    let inlier_matches = vec![(0_usize, 0_usize)];
+
+    let (_, all_matches) = super::recover_matches(
+        &ref_stars,
+        &target_stars,
+        &transform,
+        &inlier_matches,
+        2.0, // tight threshold
+        TransformType::Translation,
+    );
+
+    // ref[1] projects to (510, 505), nearest target is (200, 200) — way beyond threshold
+    assert_eq!(
+        all_matches.len(),
+        1,
+        "Should not add out-of-threshold match"
+    );
+}
+
+#[test]
+fn test_guided_matching_integration() {
+    // Full pipeline test: verify guided matching increases inlier count
+    // compared to triangle matching alone.
+    // Use a large star field where triangle matching is conservative.
+    let ref_stars = generate_star_grid(8, 8, 60.0, DVec2::new(100.0, 100.0));
+    let offset = DVec2::new(25.0, -15.0);
+    let target_stars: Vec<DVec2> = ref_stars.iter().map(|p| *p + offset).collect();
+
+    let config = RegistrationConfig {
+        transform_type: TransformType::Translation,
+        min_stars_for_matching: 6,
+        min_matched_stars: 4,
+        max_residual_pixels: 2.0,
+        ..Default::default()
+    };
+
+    let result = Registrator::new(config)
+        .register_positions(&ref_stars, &target_stars)
+        .expect("Registration should succeed");
+
+    // With 64 stars and a pure translation, guided matching should recover
+    // significantly more than triangle matching alone (which is conservative).
+    // Triangle matching typically finds 30-50% of possible matches,
+    // guided recovery should push it much higher.
+    assert!(
+        result.num_inliers >= 40,
+        "Expected guided matching to recover many matches, got {}",
+        result.num_inliers
+    );
+
+    // Transform should be accurate
+    let t = result.transform.translation_components();
+    assert!((t.x - offset.x).abs() < 0.5);
+    assert!((t.y - offset.y).abs() < 0.5);
+    assert!(result.rms_error < 0.5);
+}
+
+#[test]
+fn test_guided_matching_with_similarity_transform() {
+    // Guided matching should also work with non-trivial transforms
+    let ref_stars = generate_star_grid(7, 7, 70.0, DVec2::new(100.0, 100.0));
+    let known = Transform::similarity(DVec2::new(15.0, -10.0), 0.05, 1.02);
+    let target_stars = transform_stars(&ref_stars, &known);
+
+    let config = RegistrationConfig {
+        transform_type: TransformType::Similarity,
+        min_stars_for_matching: 6,
+        min_matched_stars: 4,
+        max_residual_pixels: 2.0,
+        ..Default::default()
+    };
+
+    let result = Registrator::new(config)
+        .register_positions(&ref_stars, &target_stars)
+        .expect("Registration should succeed");
+
+    // Should recover many matches via guided matching
+    assert!(
+        result.num_inliers >= 30,
+        "Expected many inliers with guided matching, got {}",
+        result.num_inliers
+    );
+
+    let est_scale = result.transform.scale_factor();
+    let est_angle = result.transform.rotation_angle();
+    assert!((est_scale - 1.02).abs() < 0.01);
+    assert!((est_angle - 0.05).abs() < 0.01);
+}
