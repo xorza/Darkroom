@@ -11,7 +11,7 @@ The star detection module (`lumos::star_detection`) identifies stellar sources i
 ### Basic Usage
 
 ```rust
-use lumos::star_detection::{StarDetector, StarDetectionConfig, Star};
+use lumos::star_detection::{StarDetector, Config, Star};
 
 // Create detector with default configuration
 let mut detector = StarDetector::new();
@@ -43,58 +43,52 @@ for image in images {
 
 ```rust
 use lumos::star_detection::{
-    StarDetectionConfig, StarDetector,
-    BackgroundConfig, BackgroundRefinement,
-    PsfConfig, FilteringConfig, CentroidConfig,
-    CentroidMethod, DeblendConfig, NoiseModel,
+    Config, StarDetector, BackgroundRefinement,
+    CentroidMethod, NoiseModel,
 };
 
-let config = StarDetectionConfig {
-    background: BackgroundConfig {
-        sigma_threshold: 4.0,       // Detection sigma above background
-        tile_size: 64,              // Grid cell size for background mesh
-        sigma_clip_iterations: 5,   // Sigma-clipping iterations per tile
-        mask_dilation: 3,           // Object mask dilation radius
-        min_unmasked_fraction: 0.3, // Min unmasked pixels per tile
-        refinement: BackgroundRefinement::None, // or Iterative/AdaptiveSigma
-    },
+let config = Config {
+    // Background estimation
+    sigma_threshold: 4.0,           // Detection sigma above background
+    tile_size: 64,                  // Grid cell size for background mesh
+    sigma_clip_iterations: 5,       // Sigma-clipping iterations per tile
+    background_mask_dilation: 3,    // Object mask dilation radius
+    min_unmasked_fraction: 0.3,     // Min unmasked pixels per tile
+    refinement: BackgroundRefinement::None, // or Iterative/AdaptiveSigma
 
-    psf: PsfConfig {
-        expected_fwhm: 4.0,         // Expected FWHM for matched filter
-        axis_ratio: 1.0,            // PSF ellipticity (1.0 = circular)
-        angle: 0.0,                 // PSF rotation angle (radians)
-        auto_estimate: false,       // Auto-estimate FWHM from bright stars
-        ..Default::default()
-    },
+    // PSF and matched filtering
+    expected_fwhm: 4.0,             // Expected FWHM for matched filter (0 = disable)
+    psf_axis_ratio: 1.0,            // PSF ellipticity (1.0 = circular)
+    psf_angle: 0.0,                 // PSF rotation angle (radians)
+    auto_estimate_fwhm: false,      // Auto-estimate FWHM from bright stars
 
-    centroid: CentroidConfig {
-        method: CentroidMethod::WeightedMoments, // or GaussianFit, MoffatFit
-        ..Default::default()
-    },
+    // Detection parameters
+    min_area: 5,                    // Minimum connected pixels
+    max_area: 500,                  // Maximum connected pixels
+    edge_margin: 10,                // Border exclusion zone
 
-    filtering: FilteringConfig {
-        min_area: 5,                // Minimum connected pixels
-        max_area: 500,              // Maximum connected pixels
-        edge_margin: 10,            // Border exclusion zone
-        min_snr: 10.0,             // Minimum signal-to-noise ratio
-        max_eccentricity: 0.6,     // Filter elongated sources
-        max_sharpness: 0.7,        // Filter cosmic rays / hot pixels
-        max_roundness: 0.5,        // Filter asymmetric sources
-        max_fwhm_deviation: 3.0,   // FWHM outlier rejection (MAD units)
-        duplicate_min_separation: 8.0, // Deduplication distance
-        ..Default::default()
-    },
+    // Quality filtering
+    min_snr: 10.0,                  // Minimum signal-to-noise ratio
+    max_eccentricity: 0.6,          // Filter elongated sources
+    max_sharpness: 0.7,             // Filter cosmic rays / hot pixels
+    max_roundness: 0.5,             // Filter asymmetric sources
+    max_fwhm_deviation: 3.0,        // FWHM outlier rejection (MAD units)
+    duplicate_min_separation: 8.0,  // Deduplication distance
 
-    deblend: DeblendConfig {
-        min_separation: 3,          // Min peak separation for deblending
-        min_prominence: 0.3,        // Min peak prominence fraction
-        n_thresholds: 0,            // 0=local maxima, 32+=multi-threshold
-        min_contrast: 0.005,        // Min contrast for multi-threshold
-    },
+    // Centroiding
+    centroid_method: CentroidMethod::WeightedMoments, // or GaussianFit, MoffatFit
 
-    // Optional camera noise model for accurate SNR
+    // Deblending
+    deblend_min_separation: 3,      // Min peak separation for deblending
+    deblend_min_prominence: 0.3,    // Min peak prominence fraction
+    deblend_n_thresholds: 0,        // 0=local maxima, 32+=multi-threshold
+    deblend_min_contrast: 0.005,    // Min contrast for multi-threshold
+
+    // Optional noise model for accurate SNR
     noise_model: Some(NoiseModel::new(1.5, 5.0)), // gain=1.5 e-/ADU, read_noise=5 e-
     defect_map: None,
+
+    ..Default::default()
 };
 
 let mut detector = StarDetector::from_config(config);
@@ -105,84 +99,65 @@ let result = detector.detect(&image);
 
 ```rust
 // Wide-field imaging (larger stars, relaxed filtering)
-let config = StarDetectionConfig::default().wide_field();
+let config = Config::wide_field();
 
 // High-resolution imaging (smaller stars, stricter filtering)
-let config = StarDetectionConfig::default().high_resolution();
+let config = Config::high_resolution();
 
 // Crowded fields (aggressive deblending, iterative background)
-let config = StarDetectionConfig::default().crowded_field();
+let config = Config::crowded_field();
 
 // Nebulous fields (adaptive sigma thresholding)
-let config = StarDetectionConfig::default().nebulous_field();
+let config = Config::nebulous_field();
 
-// Chainable: combine presets (last writer wins for overlapping fields)
-let config = StarDetectionConfig::default().nebulous_field().crowded_field();
+// Precise ground-based (Moffat fitting)
+let config = Config::precise_ground();
 ```
 
 ## Pipeline Stages
 
-The detection pipeline consists of these stages, orchestrated by `StarDetector::detect()`:
+The detection pipeline consists of 6 stages, orchestrated by `StarDetector::detect()`:
 
 ```
 Input AstroImage
     |
     v
 +------------------------+
-|  0. Preprocessing      |  -- Defect masking, 3x3 median filter (CFA sensors)
+|  1. Prepare            |  -- Grayscale conversion, defect masking,
+|                        |     3x3 median filter (CFA sensors)
 +------------------------+
     |
     v
 +------------------------+
-|  1. Background         |  -- Tile-based background/noise estimation
-|     Estimation         |     with optional iterative refinement
+|  2. Background         |  -- Tile-based background/noise estimation
+|                        |     with optional iterative refinement
 +------------------------+
     |
     v
 +------------------------+
-|  2. FWHM Estimation    |  -- Auto-estimate FWHM from bright stars (optional)
+|  3. FWHM Estimation    |  -- Auto-estimate FWHM from bright stars (optional)
 +------------------------+
     |
     v
 +------------------------+
-|  3. Matched Filtering  |  -- Gaussian convolution matched to PSF (optional)
+|  4. Detect             |  -- Matched filter (optional), threshold mask,
+|                        |     connected component labeling, deblending,
+|                        |     region extraction and filtering
 +------------------------+
     |
     v
 +------------------------+
-|  4. Threshold Mask     |  -- Bit-packed binary mask (pixel > bg + sigma * noise)
+|  5. Measure            |  -- Sub-pixel centroiding + quality metrics
 +------------------------+
     |
     v
 +------------------------+
-|  5. Mask Dilation      |  -- Connect fragmented detections (1px radius)
+|  6. Filter             |  -- SNR, eccentricity, sharpness, roundness,
+|                        |     FWHM outliers, deduplication, sort by flux
 +------------------------+
     |
     v
-+------------------------+
-|  6. Connected          |  -- RLE-based labeling with lock-free union-find
-|     Component Labeling |
-+------------------------+
-    |
-    v
-+------------------------+
-|  7. Candidate          |  -- Extract regions, filter by area/edge,
-|     Extraction         |     deblend overlapping sources
-+------------------------+
-    |
-    v
-+------------------------+
-|  8. Centroiding        |  -- Sub-pixel position refinement + quality metrics
-+------------------------+
-    |
-    v
-+------------------------+
-|  9. Quality Filtering  |  -- SNR, eccentricity, sharpness, roundness,
-|     & Post-processing  |     FWHM outliers, deduplication
-+------------------------+
-    |
-    v
-StarDetectionResult { stars, diagnostics }
+DetectionResult { stars, diagnostics }
 ```
 
 ## Module Architecture
@@ -193,8 +168,16 @@ Contains `StarDetector`, the main entry point that coordinates all pipeline stag
 
 **Key Types:**
 - `StarDetector` - Main detector with buffer pool for efficient batch processing
-- `StarDetectionResult` - Final output with stars and diagnostics
-- `StarDetectionDiagnostics` - Per-stage statistics for debugging and tuning
+- `DetectionResult` - Final output with stars and diagnostics
+- `Diagnostics` - Per-stage statistics for debugging and tuning
+
+**Submodule `detector/stages/`:**
+- `prepare.rs` - Image preparation (grayscale, defects, CFA filter)
+- `background.rs` - Re-exports background estimation functions
+- `fwhm.rs` - FWHM auto-estimation from bright stars
+- `detect.rs` - Threshold mask, labeling, deblending, region extraction
+- `measure.rs` - Sub-pixel centroiding wrapper
+- `filter.rs` - Quality filtering, FWHM outliers, duplicate removal
 
 ### `background/` - Background Estimation
 
@@ -211,7 +194,7 @@ Estimates the sky background and noise level using a tile-based approach with si
 - `AdaptiveSigma`: Per-pixel detection thresholds based on local contrast. Higher thresholds in nebulous regions reduce false positives.
 
 **Key Types:**
-- `BackgroundMap` - Holds per-pixel background, noise, and optional adaptive sigma buffers
+- `BackgroundEstimate` - Holds per-pixel background, noise, and optional adaptive sigma buffers
 - `TileGrid` - Grid of per-tile statistics (median, sigma, adaptive_sigma)
 
 ### `convolution/` - Matched Filter Convolution
@@ -249,24 +232,17 @@ Separable morphological dilation to connect fragmented detections.
 - Word-level bit smearing for fast horizontal dilation
 - Parallel row/column processing
 
-### `candidate_detection/` - Source Detection
+### `labeling/` - Connected Component Labeling
 
-Extracts star candidates from the threshold mask using connected component labeling.
+Labels connected components in the threshold mask using efficient union-find.
 
 **Algorithm:**
-1. Label connected components (4-connectivity default, 8-connectivity optional)
-2. Extract component bounding boxes, peaks, and areas
-3. Filter by min/max area and edge margin
-4. Deblend multi-peaked components
-
-**Key Types:**
-- `StarCandidate` - Pre-centroid detection with bbox, peak, area
-- `LabelMap` - Connected component labels (Buffer2<u32>)
-
-**Labeling Implementation:**
 - RLE-based scanning with word-level bit operations
 - Lock-free union-find with atomic operations for parallel merging
 - Block-based parallel labeling with boundary merging
+
+**Key Types:**
+- `LabelMap` - Connected component labels (Buffer2<u32>)
 
 ### `deblend/` - Source Deblending
 
@@ -290,6 +266,9 @@ Separates overlapping stars that were merged during detection.
 2. Build tree of sub-components at each level
 3. Split branches whose flux exceeds minimum contrast criterion
 4. Grid-based pixel lookup for fast neighbor access
+
+**Key Types:**
+- `Region` - Detected region with bbox, peak position, peak value, area
 
 ### `centroid/` - Sub-pixel Centroiding
 
@@ -356,16 +335,6 @@ L.A.Cosmic-based cosmic ray identification (van Dokkum 2001, PASP 113, 1420).
 - SIMD-accelerated: SSE4.1/AVX2, NEON
 - Parallel row processing via rayon
 
-### `fwhm_estimation.rs` - Auto FWHM Estimation
-
-Robust FWHM estimation from bright stars for the auto-FWHM feature.
-
-**Algorithm:**
-1. First-pass detection with higher sigma threshold (bright stars only)
-2. Filter: exclude saturated, elongated, cosmic ray candidates, invalid FWHM range
-3. Compute median FWHM with MAD-based outlier rejection (3x MAD threshold)
-4. Fall back to default if insufficient stars
-
 ### `buffer_pool.rs` - Buffer Pool
 
 Pools `Buffer2<f32>`, `BitBuffer2`, and `Buffer2<u32>` for reuse across multiple `detect()` calls. Avoids repeated allocation when processing image sequences.
@@ -404,16 +373,57 @@ pub struct Star {
 }
 ```
 
-### `StarDetectionConfig`
+### `Config`
 
-Main configuration grouping all sub-configs:
-- `BackgroundConfig` - Tile-based background estimation
-- `PsfConfig` - PSF shape and matched filtering
-- `FilteringConfig` - Quality filters and detection parameters
-- `DeblendConfig` - Source deblending
-- `CentroidConfig` - Sub-pixel centroid method
-- `NoiseModel` (optional) - Camera gain and read noise
-- `DefectMap` (optional) - Bad pixel masking
+Flat configuration struct with all parameters grouped by function:
+
+```rust
+pub struct Config {
+    // Background estimation
+    pub sigma_threshold: f32,
+    pub tile_size: usize,
+    pub sigma_clip_iterations: usize,
+    pub background_mask_dilation: usize,
+    pub min_unmasked_fraction: f32,
+    pub refinement: BackgroundRefinement,
+
+    // PSF / matched filter
+    pub expected_fwhm: f32,
+    pub psf_axis_ratio: f32,
+    pub psf_angle: f32,
+    pub auto_estimate_fwhm: bool,
+    // ... FWHM estimation parameters
+
+    // Detection
+    pub connectivity: Connectivity,
+    pub min_area: usize,
+    pub max_area: usize,
+    pub edge_margin: usize,
+
+    // Deblending
+    pub deblend_min_separation: usize,
+    pub deblend_min_prominence: f32,
+    pub deblend_n_thresholds: usize,
+    pub deblend_min_contrast: f32,
+
+    // Centroiding
+    pub centroid_method: CentroidMethod,
+    pub local_background: LocalBackgroundMethod,
+    // ... centroid parameters
+
+    // Quality filtering
+    pub min_snr: f32,
+    pub max_eccentricity: f32,
+    pub max_sharpness: f32,
+    pub max_roundness: f32,
+    pub max_fwhm_deviation: f32,
+    pub duplicate_min_separation: f32,
+
+    // Optional
+    pub noise_model: Option<NoiseModel>,
+    pub defect_map: Option<DefectMap>,
+}
+```
 
 ## Quality Metrics
 
@@ -488,35 +498,20 @@ Buffer pool reuses allocations across multiple `detect()` calls.
 
 **Fast preview (live stacking):**
 ```rust
-StarDetectionConfig {
-    background: BackgroundConfig {
-        sigma_threshold: 8.0,
-        ..Default::default()
-    },
-    psf: PsfConfig {
-        expected_fwhm: 0.0,  // Disable matched filter
-        ..Default::default()
-    },
+Config {
+    sigma_threshold: 8.0,
+    expected_fwhm: 0.0,  // Disable matched filter
     ..Default::default()
 }
 ```
 
 **High accuracy (astrometry/photometry):**
 ```rust
-StarDetectionConfig {
-    background: BackgroundConfig {
-        sigma_threshold: 3.0,
-        refinement: BackgroundRefinement::Iterative { iterations: 2 },
-        ..Default::default()
-    },
-    centroid: CentroidConfig {
-        method: CentroidMethod::GaussianFit,
-        ..Default::default()
-    },
-    filtering: FilteringConfig {
-        min_snr: 15.0,
-        ..Default::default()
-    },
+Config {
+    sigma_threshold: 3.0,
+    refinement: BackgroundRefinement::Iterative { iterations: 2 },
+    centroid_method: CentroidMethod::GaussianFit,
+    min_snr: 15.0,
     noise_model: Some(NoiseModel::new(1.5, 5.0)),
     ..Default::default()
 }
@@ -524,26 +519,20 @@ StarDetectionConfig {
 
 **Crowded fields:**
 ```rust
-StarDetectionConfig::default().crowded_field()
+Config::crowded_field()
 // Or manually:
-StarDetectionConfig {
-    background: BackgroundConfig {
-        tile_size: 32,  // Finer mesh for variable background
-        refinement: BackgroundRefinement::Iterative { iterations: 2 },
-        ..Default::default()
-    },
-    deblend: DeblendConfig {
-        n_thresholds: 32,  // SExtractor-style multi-threshold
-        min_separation: 2,
-        ..Default::default()
-    },
+Config {
+    tile_size: 32,  // Finer mesh for variable background
+    refinement: BackgroundRefinement::Iterative { iterations: 2 },
+    deblend_n_thresholds: 32,  // SExtractor-style multi-threshold
+    deblend_min_separation: 2,
     ..Default::default()
 }
 ```
 
 **Nebulous backgrounds:**
 ```rust
-StarDetectionConfig::default().nebulous_field()
+Config::nebulous_field()
 // Uses AdaptiveSigma refinement to raise thresholds in high-contrast regions
 ```
 
@@ -554,7 +543,7 @@ StarDetectionConfig::default().nebulous_field()
 1. **Lower `sigma_threshold`** (try 3.0-4.0)
 2. **Check `expected_fwhm`** - if too different from actual seeing, matched filter hurts
 3. **Set `expected_fwhm: 0.0`** to disable matched filtering and detect without convolution
-4. **Enable `auto_estimate: true`** to let the pipeline estimate FWHM automatically
+4. **Enable `auto_estimate_fwhm: true`** to let the pipeline estimate FWHM automatically
 5. **Lower `min_area`** (try 3)
 6. **Check background estimation** - tile_size may be too large for variable backgrounds
 
@@ -585,7 +574,7 @@ StarDetectionConfig::default().nebulous_field()
 The star detection output feeds directly into the registration pipeline:
 
 ```rust
-use lumos::star_detection::{StarDetector, StarDetectionConfig};
+use lumos::star_detection::{StarDetector, Config};
 
 let mut detector = StarDetector::new();
 
