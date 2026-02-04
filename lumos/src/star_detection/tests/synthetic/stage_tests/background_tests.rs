@@ -5,7 +5,7 @@
 use glam::Vec2;
 
 use crate::common::Buffer2;
-use crate::star_detection::background::{BackgroundConfig, BackgroundMap};
+use crate::star_detection::config::Config;
 use crate::star_detection::tests::common::output::save_grayscale;
 use crate::testing::init_tracing;
 use crate::testing::synthetic::{
@@ -41,7 +41,7 @@ fn test_background_uniform() {
     // Estimate background
     let background = crate::testing::estimate_background(
         &pixels,
-        BackgroundConfig {
+        &Config {
             tile_size: TILE_SIZE,
             ..Default::default()
         },
@@ -123,7 +123,7 @@ fn test_background_gradient() {
     // Estimate background
     let background = crate::testing::estimate_background(
         &Buffer2::new(width, height, pixels.clone()),
-        BackgroundConfig {
+        &Config {
             tile_size: TILE_SIZE,
             ..Default::default()
         },
@@ -204,7 +204,7 @@ fn test_background_vignette() {
     // Estimate background
     let background = crate::testing::estimate_background(
         &Buffer2::new(width, height, pixels.clone()),
-        BackgroundConfig {
+        &Config {
             tile_size: TILE_SIZE,
             ..Default::default()
         },
@@ -297,7 +297,7 @@ fn test_background_nebula() {
     // Estimate background
     let background = crate::testing::estimate_background(
         &Buffer2::new(width, height, pixels.clone()),
-        BackgroundConfig {
+        &Config {
             tile_size: TILE_SIZE,
             ..Default::default()
         },

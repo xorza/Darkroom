@@ -6,7 +6,7 @@ use crate::star_detection::tests::common::output::{
     DetectionMetrics, check_pass, compute_detection_metrics, save_comparison, save_grayscale,
     save_metrics, standard_criteria,
 };
-use crate::star_detection::{FilteringConfig, PsfConfig, StarDetectionConfig, StarDetector};
+use crate::star_detection::{StarDetector, config::Config};
 use crate::testing::init_tracing;
 use crate::testing::synthetic::{
     StarFieldConfig, dense_field_config, generate_star_field, sparse_field_config,
@@ -17,7 +17,7 @@ use common::test_utils::test_output_path;
 fn run_pipeline_test(
     name: &str,
     field_config: &StarFieldConfig,
-    detection_config: &StarDetectionConfig,
+    detection_config: &Config,
 ) -> DetectionMetrics {
     let (pixels, ground_truth) = generate_star_field(field_config);
     let pixels_vec = pixels.into_vec();
@@ -80,12 +80,9 @@ fn test_pipeline_sparse_field() {
 
     let field_config = sparse_field_config();
     // Synthetic images: disable CFA filter, disable matched filter for accurate FWHM
-    let detection_config = StarDetectionConfig {
-        psf: PsfConfig {
-            expected_fwhm: 0.0, // Disable matched filter to get accurate FWHM measurement
-            ..Default::default()
-        },
-        ..StarDetectionConfig::default()
+    let detection_config = Config {
+        expected_fwhm: 0.0,
+        ..Config::default()
     };
 
     let metrics = run_pipeline_test("sparse_field", &field_config, &detection_config);
@@ -108,12 +105,9 @@ fn test_pipeline_dense_field() {
 
     let field_config = dense_field_config();
     // Synthetic images: disable CFA filter, disable matched filter for accurate FWHM
-    let detection_config = StarDetectionConfig {
-        psf: PsfConfig {
-            expected_fwhm: 0.0,
-            ..Default::default()
-        },
-        ..StarDetectionConfig::default()
+    let detection_config = Config {
+        expected_fwhm: 0.0,
+        ..Config::default()
     };
 
     let metrics = run_pipeline_test("dense_field", &field_config, &detection_config);
@@ -150,12 +144,9 @@ fn test_pipeline_moffat_profile() {
         ..Default::default()
     };
     // Synthetic images: disable CFA filter, disable matched filter for accurate FWHM
-    let detection_config = StarDetectionConfig {
-        psf: PsfConfig {
-            expected_fwhm: 0.0,
-            ..Default::default()
-        },
-        ..StarDetectionConfig::default()
+    let detection_config = Config {
+        expected_fwhm: 0.0,
+        ..Config::default()
     };
 
     let metrics = run_pipeline_test("moffat_profile", &field_config, &detection_config);
@@ -195,12 +186,9 @@ fn test_pipeline_fwhm_range() {
         ..Default::default()
     };
     // Synthetic images: disable CFA filter, disable matched filter for accurate FWHM
-    let detection_config = StarDetectionConfig {
-        psf: PsfConfig {
-            expected_fwhm: 0.0,
-            ..Default::default()
-        },
-        ..StarDetectionConfig::default()
+    let detection_config = Config {
+        expected_fwhm: 0.0,
+        ..Config::default()
     };
 
     let metrics = run_pipeline_test("fwhm_range", &field_config, &detection_config);
@@ -242,16 +230,10 @@ fn test_pipeline_dynamic_range() {
 
     // Synthetic images: disable CFA filter, disable matched filter
     // Lower SNR threshold to catch faint stars
-    let detection_config = StarDetectionConfig {
-        psf: PsfConfig {
-            expected_fwhm: 0.0,
-            ..Default::default()
-        },
-        filtering: FilteringConfig {
-            min_snr: 5.0,
-            ..Default::default()
-        },
-        ..StarDetectionConfig::default()
+    let detection_config = Config {
+        expected_fwhm: 0.0,
+        min_snr: 5.0,
+        ..Config::default()
     };
 
     let metrics = run_pipeline_test("dynamic_range", &field_config, &detection_config);
@@ -286,12 +268,9 @@ fn test_pipeline_low_noise() {
         ..Default::default()
     };
     // Synthetic images: disable CFA filter, disable matched filter for accurate FWHM
-    let detection_config = StarDetectionConfig {
-        psf: PsfConfig {
-            expected_fwhm: 0.0,
-            ..Default::default()
-        },
-        ..StarDetectionConfig::default()
+    let detection_config = Config {
+        expected_fwhm: 0.0,
+        ..Config::default()
     };
 
     let metrics = run_pipeline_test("low_noise", &field_config, &detection_config);

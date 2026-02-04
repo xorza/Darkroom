@@ -6,9 +6,9 @@
 use super::label_map_from_raw;
 use super::*;
 use crate::common::{BitBuffer2, Buffer2};
-use crate::star_detection::background::{BackgroundConfig, BackgroundMap};
+use crate::star_detection::background::BackgroundMap;
 use crate::star_detection::buffer_pool::BufferPool;
-use crate::star_detection::config::FilteringConfig;
+use crate::star_detection::config::Config;
 use crate::testing::synthetic::background_map;
 
 /// Test utility: detect stars with automatic buffer pool management.
@@ -19,22 +19,21 @@ pub(crate) fn detect_stars_test(
     pixels: &Buffer2<f32>,
     filtered: Option<&Buffer2<f32>>,
     background: &BackgroundMap,
-    config: &StarDetectionConfig,
+    config: &Config,
 ) -> Vec<StarCandidate> {
     let mut pool = BufferPool::new(pixels.width(), pixels.height());
     detect_stars(pixels, filtered, background, config, &mut pool)
 }
 
-/// Default deblend config for tests
-const TEST_DEBLEND_CONFIG: DeblendConfig = DeblendConfig {
-    min_separation: 3,
-    min_prominence: 0.3,
-    n_thresholds: 0,
-    min_contrast: 0.005,
-};
-
 /// Default max_area for tests - large enough to not filter anything in small test images
 const TEST_MAX_AREA: usize = 10000;
+
+fn test_config() -> Config {
+    Config {
+        max_area: TEST_MAX_AREA,
+        ..Default::default()
+    }
+}
 
 fn make_test_image_with_star(
     width: usize,
@@ -75,12 +74,12 @@ mod detect_stars_tests {
 
         let bg = crate::testing::estimate_background(
             &pixels,
-            BackgroundConfig {
+            &Config {
                 tile_size: 32,
                 ..Default::default()
             },
         );
-        let config = StarDetectionConfig::default();
+        let config = Config::default();
         let candidates = detect_stars_test(&pixels, None, &bg, &config);
 
         assert_eq!(candidates.len(), 1, "Should detect exactly one star");
@@ -119,16 +118,13 @@ mod detect_stars_tests {
         let pixels_buf = Buffer2::new(width, height, pixels);
         let bg = crate::testing::estimate_background(
             &pixels_buf,
-            BackgroundConfig {
+            &Config {
                 tile_size: 32,
                 ..Default::default()
             },
         );
-        let config = StarDetectionConfig {
-            filtering: FilteringConfig {
-                edge_margin: 5,
-                ..Default::default()
-            },
+        let config = Config {
+            edge_margin: 5,
             ..Default::default()
         };
         let candidates = detect_stars_test(&pixels_buf, None, &bg, &config);
@@ -145,16 +141,13 @@ mod detect_stars_tests {
 
         let bg = crate::testing::estimate_background(
             &pixels,
-            BackgroundConfig {
+            &Config {
                 tile_size: 32,
                 ..Default::default()
             },
         );
-        let config = StarDetectionConfig {
-            filtering: FilteringConfig {
-                edge_margin: 10,
-                ..Default::default()
-            },
+        let config = Config {
+            edge_margin: 10,
             ..Default::default()
         };
         let candidates = detect_stars_test(&pixels, None, &bg, &config);
@@ -175,16 +168,13 @@ mod detect_stars_tests {
         let pixels_buf = Buffer2::new(width, height, pixels);
         let bg = crate::testing::estimate_background(
             &pixels_buf,
-            BackgroundConfig {
+            &Config {
                 tile_size: 32,
                 ..Default::default()
             },
         );
-        let config = StarDetectionConfig {
-            filtering: FilteringConfig {
-                min_area: 26, // Must be > 25 to reject dilated single pixel (radius 2 = 5x5 = 25)
-                ..Default::default()
-            },
+        let config = Config {
+            min_area: 26, // Must be > 25 to reject dilated single pixel (radius 2 = 5x5 = 25)
             ..Default::default()
         };
         let candidates = detect_stars_test(&pixels_buf, None, &bg, &config);
@@ -201,12 +191,12 @@ mod detect_stars_tests {
         let pixels_buf = Buffer2::new(width, height, pixels);
         let bg = crate::testing::estimate_background(
             &pixels_buf,
-            BackgroundConfig {
+            &Config {
                 tile_size: 32,
                 ..Default::default()
             },
         );
-        let config = StarDetectionConfig::default();
+        let config = Config::default();
         let candidates = detect_stars_test(&pixels_buf, None, &bg, &config);
 
         assert!(candidates.is_empty(), "Uniform image should have no stars");
@@ -225,8 +215,7 @@ mod extract_candidates_tests {
         let pixels = Buffer2::new(3, 3, vec![0.5; 9]);
         let label_map = label_map_from_raw(Buffer2::new(3, 3, vec![0u32; 9]), 0);
 
-        let candidates =
-            extract_candidates(&pixels, &label_map, &TEST_DEBLEND_CONFIG, TEST_MAX_AREA);
+        let candidates = extract_candidates(&pixels, &label_map, &test_config());
 
         assert!(candidates.is_empty());
     }
@@ -256,8 +245,7 @@ mod extract_candidates_tests {
             1,
         );
 
-        let candidates =
-            extract_candidates(&pixels, &label_map, &TEST_DEBLEND_CONFIG, TEST_MAX_AREA);
+        let candidates = extract_candidates(&pixels, &label_map, &test_config());
 
         assert_eq!(candidates.len(), 1);
         let c = &candidates[0];
@@ -296,8 +284,7 @@ mod extract_candidates_tests {
             2,
         );
 
-        let candidates =
-            extract_candidates(&pixels, &label_map, &TEST_DEBLEND_CONFIG, TEST_MAX_AREA);
+        let candidates = extract_candidates(&pixels, &label_map, &test_config());
 
         assert_eq!(candidates.len(), 2);
 
@@ -332,8 +319,7 @@ mod extract_candidates_tests {
 
         let pixels = Buffer2::new(5, 5, pixels_data);
         let label_map = label_map_from_raw(Buffer2::new(5, 5, labels_data), 1);
-        let candidates =
-            extract_candidates(&pixels, &label_map, &TEST_DEBLEND_CONFIG, TEST_MAX_AREA);
+        let candidates = extract_candidates(&pixels, &label_map, &test_config());
 
         assert_eq!(candidates.len(), 1);
         let c = &candidates[0];
@@ -353,8 +339,7 @@ mod extract_candidates_tests {
         // 3x2 component covering full image
         let label_map = label_map_from_raw(Buffer2::new(3, 2, vec![1u32; 6]), 1);
 
-        let candidates =
-            extract_candidates(&pixels, &label_map, &TEST_DEBLEND_CONFIG, TEST_MAX_AREA);
+        let candidates = extract_candidates(&pixels, &label_map, &test_config());
 
         assert_eq!(candidates.len(), 1);
         let c = &candidates[0];
@@ -380,12 +365,26 @@ mod extract_candidates_tests {
         let label_map = label_map_from_raw(Buffer2::new(10, 10, labels_data), 2);
 
         // With max_area=10, the large component should be skipped
-        let candidates = extract_candidates(&pixels, &label_map, &TEST_DEBLEND_CONFIG, 10);
+        let candidates = extract_candidates(
+            &pixels,
+            &label_map,
+            &Config {
+                max_area: 10,
+                ..Default::default()
+            },
+        );
         assert_eq!(candidates.len(), 1, "Only small component should be found");
         assert_eq!(candidates[0].area, 5);
 
         // With max_area=100, both should be found
-        let candidates = extract_candidates(&pixels, &label_map, &TEST_DEBLEND_CONFIG, 100);
+        let candidates = extract_candidates(
+            &pixels,
+            &label_map,
+            &Config {
+                max_area: 100,
+                ..Default::default()
+            },
+        );
         assert_eq!(candidates.len(), 2, "Both components should be found");
     }
 
@@ -414,8 +413,7 @@ mod extract_candidates_tests {
             1,
         );
 
-        let candidates =
-            extract_candidates(&pixels, &label_map, &TEST_DEBLEND_CONFIG, TEST_MAX_AREA);
+        let candidates = extract_candidates(&pixels, &label_map, &test_config());
 
         assert_eq!(candidates.len(), 1);
         let c = &candidates[0];
@@ -450,8 +448,7 @@ mod extract_candidates_tests {
             1,
         );
 
-        let candidates =
-            extract_candidates(&pixels, &label_map, &TEST_DEBLEND_CONFIG, TEST_MAX_AREA);
+        let candidates = extract_candidates(&pixels, &label_map, &test_config());
 
         assert_eq!(candidates.len(), 1);
         let c = &candidates[0];
@@ -487,8 +484,7 @@ mod extract_candidates_tests {
             1,
         );
 
-        let candidates =
-            extract_candidates(&pixels, &label_map, &TEST_DEBLEND_CONFIG, TEST_MAX_AREA);
+        let candidates = extract_candidates(&pixels, &label_map, &test_config());
 
         assert_eq!(candidates.len(), 1);
         let c = &candidates[0];
@@ -529,8 +525,7 @@ mod extract_candidates_tests {
             1,
         );
 
-        let candidates =
-            extract_candidates(&pixels, &label_map, &TEST_DEBLEND_CONFIG, TEST_MAX_AREA);
+        let candidates = extract_candidates(&pixels, &label_map, &test_config());
 
         assert_eq!(candidates.len(), 1);
         let c = &candidates[0];
@@ -570,8 +565,7 @@ mod extract_candidates_tests {
             ),
             3,
         );
-        let candidates =
-            extract_candidates(&pixels, &label_map, &TEST_DEBLEND_CONFIG, TEST_MAX_AREA);
+        let candidates = extract_candidates(&pixels, &label_map, &test_config());
 
         // Only non-empty components are returned (labels 1 and 3)
         assert_eq!(candidates.len(), 2);
@@ -589,8 +583,7 @@ mod extract_candidates_tests {
         let pixels = Buffer2::new(3, 3, (0..9).map(|i| 0.1 + i as f32 * 0.1).collect());
         let label_map = label_map_from_raw(Buffer2::new(3, 3, vec![1u32; 9]), 1);
 
-        let candidates =
-            extract_candidates(&pixels, &label_map, &TEST_DEBLEND_CONFIG, TEST_MAX_AREA);
+        let candidates = extract_candidates(&pixels, &label_map, &test_config());
 
         assert_eq!(candidates.len(), 1);
         let c = &candidates[0];
@@ -630,8 +623,7 @@ mod extract_candidates_tests {
             1,
         );
 
-        let candidates =
-            extract_candidates(&pixels, &label_map, &TEST_DEBLEND_CONFIG, TEST_MAX_AREA);
+        let candidates = extract_candidates(&pixels, &label_map, &test_config());
 
         assert_eq!(candidates.len(), 1);
         let c = &candidates[0];
@@ -655,8 +647,7 @@ mod extract_candidates_tests {
 
         let pixels = Buffer2::new(10, 10, pixels_data);
         let label_map = label_map_from_raw(Buffer2::new(10, 10, labels_data), 10);
-        let candidates =
-            extract_candidates(&pixels, &label_map, &TEST_DEBLEND_CONFIG, TEST_MAX_AREA);
+        let candidates = extract_candidates(&pixels, &label_map, &test_config());
 
         assert_eq!(candidates.len(), 10);
         for (i, c) in candidates.iter().enumerate() {
@@ -689,8 +680,7 @@ mod extract_candidates_tests {
             2,
         );
 
-        let candidates =
-            extract_candidates(&pixels, &label_map, &TEST_DEBLEND_CONFIG, TEST_MAX_AREA);
+        let candidates = extract_candidates(&pixels, &label_map, &test_config());
 
         assert_eq!(candidates.len(), 2);
 
@@ -751,8 +741,7 @@ mod integration_tests {
             crate::star_detection::config::Connectivity::Four,
         );
         let pixels = Buffer2::new(10, 10, pixels);
-        let candidates =
-            extract_candidates(&pixels, &label_map, &TEST_DEBLEND_CONFIG, TEST_MAX_AREA);
+        let candidates = extract_candidates(&pixels, &label_map, &test_config());
 
         assert_eq!(label_map.num_labels(), 2);
         assert_eq!(candidates.len(), 2);
@@ -865,8 +854,7 @@ mod deblend_tests {
 
         let pixels = Buffer2::new(width, height, pixels);
         let label_map = label_map_from_raw(Buffer2::new(width, height, labels_data), 1);
-        let candidates =
-            extract_candidates(&pixels, &label_map, &TEST_DEBLEND_CONFIG, TEST_MAX_AREA);
+        let candidates = extract_candidates(&pixels, &label_map, &test_config());
 
         // Should deblend into 2 candidates
         assert_eq!(
@@ -942,8 +930,7 @@ mod deblend_tests {
 
         let pixels = Buffer2::new(width, height, pixels);
         let label_map = label_map_from_raw(Buffer2::new(width, height, labels_data), 1);
-        let candidates =
-            extract_candidates(&pixels, &label_map, &TEST_DEBLEND_CONFIG, TEST_MAX_AREA);
+        let candidates = extract_candidates(&pixels, &label_map, &test_config());
 
         // Should NOT deblend - only one candidate because peaks are too close
         assert_eq!(
@@ -989,8 +976,7 @@ mod deblend_tests {
 
         let pixels = Buffer2::new(width, height, pixels);
         let label_map = label_map_from_raw(Buffer2::new(width, height, labels_data), 1);
-        let candidates =
-            extract_candidates(&pixels, &label_map, &TEST_DEBLEND_CONFIG, TEST_MAX_AREA);
+        let candidates = extract_candidates(&pixels, &label_map, &test_config());
 
         // Should NOT deblend - secondary peak is not prominent enough
         assert_eq!(
@@ -1048,16 +1034,17 @@ mod deblend_tests {
             }
 
             // Use multi-threshold deblending config
-            let mt_config = DeblendConfig {
-                min_separation: 3,
-                min_prominence: 0.3,
-                n_thresholds: 32,
-                min_contrast: 0.005,
+            let mt_config = Config {
+                deblend_min_separation: 3,
+                deblend_min_prominence: 0.3,
+                deblend_n_thresholds: 32,
+                deblend_min_contrast: 0.005,
+                ..Default::default()
             };
 
             let pixels = Buffer2::new(width, height, pixels);
             let label_map = label_map_from_raw(Buffer2::new(width, height, labels_data), 1);
-            let candidates = extract_candidates(&pixels, &label_map, &mt_config, TEST_MAX_AREA);
+            let candidates = extract_candidates(&pixels, &label_map, &mt_config);
 
             // Should deblend into 2 candidates
             assert_eq!(
@@ -1123,25 +1110,26 @@ mod deblend_tests {
             }
 
             // Simple deblending (n_thresholds = 0)
-            let simple_config = DeblendConfig {
-                min_separation: 3,
-                min_prominence: 0.3,
-                n_thresholds: 0,
-                min_contrast: 0.005,
+            let simple_config = Config {
+                deblend_min_separation: 3,
+                deblend_min_prominence: 0.3,
+                deblend_n_thresholds: 0,
+                deblend_min_contrast: 0.005,
+                ..Default::default()
             };
             let pixels = Buffer2::new(width, height, pixels);
             let label_map = label_map_from_raw(Buffer2::new(width, height, labels_data), 1);
-            let simple_candidates =
-                extract_candidates(&pixels, &label_map, &simple_config, TEST_MAX_AREA);
+            let simple_candidates = extract_candidates(&pixels, &label_map, &simple_config);
 
             // Multi-threshold deblending (n_thresholds > 0)
-            let mt_config = DeblendConfig {
-                min_separation: 3,
-                min_prominence: 0.3,
-                n_thresholds: 32,
-                min_contrast: 0.005,
+            let mt_config = Config {
+                deblend_min_separation: 3,
+                deblend_min_prominence: 0.3,
+                deblend_n_thresholds: 32,
+                deblend_min_contrast: 0.005,
+                ..Default::default()
             };
-            let mt_candidates = extract_candidates(&pixels, &label_map, &mt_config, TEST_MAX_AREA);
+            let mt_candidates = extract_candidates(&pixels, &label_map, &mt_config);
 
             // Both should find 2 stars
             assert_eq!(
@@ -1213,16 +1201,17 @@ mod deblend_tests {
             }
 
             // Multi-threshold with min_contrast = 1.0 (disabled)
-            let config = DeblendConfig {
-                min_separation: 3,
-                min_prominence: 0.3,
-                n_thresholds: 32,
-                min_contrast: 1.0, // Disabled
+            let config = Config {
+                deblend_min_separation: 3,
+                deblend_min_prominence: 0.3,
+                deblend_n_thresholds: 32,
+                deblend_min_contrast: 1.0,
+                ..Default::default()
             };
 
             let pixels = Buffer2::new(width, height, pixels);
             let label_map = label_map_from_raw(Buffer2::new(width, height, labels_data), 1);
-            let candidates = extract_candidates(&pixels, &label_map, &config, TEST_MAX_AREA);
+            let candidates = extract_candidates(&pixels, &label_map, &config);
 
             // Should return single candidate (deblending disabled)
             assert_eq!(
@@ -1282,12 +1271,12 @@ mod filtered_image_tests {
 
         let bg = crate::testing::estimate_background(
             &pixels,
-            BackgroundConfig {
+            &Config {
                 tile_size: 32,
                 ..Default::default()
             },
         );
-        let config = StarDetectionConfig::default();
+        let config = Config::default();
 
         // Detection with filtered image
         let candidates = detect_stars_test(&pixels, Some(&filtered), &bg, &config);
@@ -1331,12 +1320,12 @@ mod filtered_image_tests {
 
         let bg = crate::testing::estimate_background(
             &pixels,
-            BackgroundConfig {
+            &Config {
                 tile_size: 32,
                 ..Default::default()
             },
         );
-        let config = StarDetectionConfig::default();
+        let config = Config::default();
 
         // Without filtered image
         let candidates_unfiltered = detect_stars_test(&pixels, None, &bg, &config);
@@ -1420,7 +1409,7 @@ mod sigma_threshold_tests {
 
         let pixels = Buffer2::new(width, height, pixels);
         let bg = background_map::uniform(width, height, background_level, noise_level);
-        let config = StarDetectionConfig::default();
+        let config = Config::default();
 
         let candidates = detect_stars_test(&pixels, None, &bg, &config);
 
@@ -1468,31 +1457,22 @@ mod sigma_threshold_tests {
         let bg = background_map::uniform(width, height, background_level, noise_level);
 
         // High threshold (6-sigma) - should detect only the brightest
-        let config_high = StarDetectionConfig {
-            background: BackgroundConfig {
-                sigma_threshold: 6.0,
-                ..Default::default()
-            },
+        let config_high = Config {
+            sigma_threshold: 6.0,
             ..Default::default()
         };
         let candidates_high = detect_stars_test(&pixels, None, &bg, &config_high);
 
         // Medium threshold (4-sigma) - should detect 2 stars
-        let config_med = StarDetectionConfig {
-            background: BackgroundConfig {
-                sigma_threshold: 4.0,
-                ..Default::default()
-            },
+        let config_med = Config {
+            sigma_threshold: 4.0,
             ..Default::default()
         };
         let candidates_med = detect_stars_test(&pixels, None, &bg, &config_med);
 
         // Low threshold (2-sigma) - should detect all 3
-        let config_low = StarDetectionConfig {
-            background: BackgroundConfig {
-                sigma_threshold: 2.0,
-                ..Default::default()
-            },
+        let config_low = Config {
+            sigma_threshold: 2.0,
             ..Default::default()
         };
         let candidates_low = detect_stars_test(&pixels, None, &bg, &config_low);
@@ -1598,12 +1578,12 @@ mod dilation_tests {
         let pixels = Buffer2::new(width, height, pixels);
         let bg = crate::testing::estimate_background(
             &pixels,
-            BackgroundConfig {
+            &Config {
                 tile_size: 16,
                 ..Default::default()
             },
         );
-        let config = StarDetectionConfig::default();
+        let config = Config::default();
 
         let candidates = detect_stars_test(&pixels, None, &bg, &config);
 
@@ -1630,12 +1610,12 @@ mod regression_tests {
         let pixels = benchmark_star_field(256, 256, 100, 0.1, 0.01, 42);
         let bg = crate::testing::estimate_background(
             &pixels,
-            BackgroundConfig {
+            &Config {
                 tile_size: 32,
                 ..Default::default()
             },
         );
-        let config = StarDetectionConfig::default();
+        let config = Config::default();
 
         let candidates = detect_stars_test(&pixels, None, &bg, &config);
 
@@ -1660,16 +1640,13 @@ mod regression_tests {
         let pixels = benchmark_star_field(256, 256, 50, 0.1, 0.01, 42);
         let bg = crate::testing::estimate_background(
             &pixels,
-            BackgroundConfig {
+            &Config {
                 tile_size: 32,
                 ..Default::default()
             },
         );
-        let config = StarDetectionConfig {
-            filtering: FilteringConfig {
-                edge_margin: 5,
-                ..Default::default()
-            },
+        let config = Config {
+            edge_margin: 5,
             ..Default::default()
         };
 
@@ -1705,12 +1682,12 @@ mod regression_tests {
         let pixels = benchmark_star_field(400, 300, 50, 0.1, 0.01, 12345);
         let bg = crate::testing::estimate_background(
             &pixels,
-            BackgroundConfig {
+            &Config {
                 tile_size: 32,
                 ..Default::default()
             },
         );
-        let config = StarDetectionConfig::default();
+        let config = Config::default();
 
         // Run detection multiple times - should give identical results
         let candidates1 = detect_stars_test(&pixels, None, &bg, &config);
@@ -1743,7 +1720,7 @@ mod regression_tests {
         let pixels = benchmark_star_field(400, 300, 100, 0.1, 0.01, 42);
         let bg = crate::testing::estimate_background(
             &pixels,
-            BackgroundConfig {
+            &Config {
                 tile_size: 32,
                 ..Default::default()
             },
@@ -1835,7 +1812,7 @@ mod quick_benches {
         let pixels = stamps::benchmark_star_field(1024, 1024, 100, 0.1, 0.01, 12345);
         let filtered = stamps::benchmark_star_field(1024, 1024, 100, 0.0, 0.01, 12345);
         let background = background_map::uniform(1024, 1024, 0.1, 0.01);
-        let config = StarDetectionConfig::default();
+        let config = Config::default();
 
         b.bench(|| detect_stars_test(&pixels, Some(&filtered), &background, &config));
     }
@@ -1845,7 +1822,7 @@ mod quick_benches {
         let pixels = stamps::benchmark_star_field(6144, 6144, 3000, 0.1, 0.01, 12345);
         let filtered = stamps::benchmark_star_field(6144, 6144, 3000, 0.0, 0.01, 12345);
         let background = background_map::uniform(6144, 6144, 0.1, 0.01);
-        let config = StarDetectionConfig::default();
+        let config = Config::default();
 
         b.bench(|| detect_stars_test(&pixels, Some(&filtered), &background, &config));
     }

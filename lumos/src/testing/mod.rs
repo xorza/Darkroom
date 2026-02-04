@@ -9,7 +9,8 @@ use std::path::PathBuf;
 
 use crate::AstroImage;
 use crate::common::{BitBuffer2, Buffer2};
-use crate::star_detection::background::{BackgroundConfig, BackgroundMap};
+use crate::star_detection::Config;
+use crate::star_detection::background::BackgroundMap;
 
 // Buffer2 is used in fn signature, BitBuffer2 is used in estimate_background
 
@@ -17,7 +18,7 @@ use crate::star_detection::background::{BackgroundConfig, BackgroundMap};
 ///
 /// Creates a BackgroundMap with all necessary allocations. For production code,
 /// use `BackgroundMap::from_pool` + `estimate` + `refine` with buffer pooling.
-pub fn estimate_background(pixels: &Buffer2<f32>, config: BackgroundConfig) -> BackgroundMap {
+pub fn estimate_background(pixels: &Buffer2<f32>, config: &Config) -> BackgroundMap {
     let width = pixels.width();
     let height = pixels.height();
     let iterations = config.refinement.iterations();

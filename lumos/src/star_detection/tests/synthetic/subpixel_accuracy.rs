@@ -7,7 +7,7 @@ use super::{SyntheticFieldConfig, SyntheticStar, generate_star_field};
 use crate::{AstroImage, ImageDimensions};
 
 use crate::star_detection::tests::common::save_image;
-use crate::star_detection::{Star, StarDetectionConfig, StarDetector};
+use crate::star_detection::{Star, StarDetector, config::Config};
 use glam::Vec2;
 use imaginarium::Color;
 use imaginarium::drawing::{draw_circle, draw_cross};
@@ -109,7 +109,7 @@ fn test_subpixel_shift_detection() {
     let pixels2 = generate_star_field(&config, &shifted_stars);
 
     // Run star detection on both images
-    let detection_config = StarDetectionConfig::default();
+    let detection_config = Config::default();
 
     let image1 = AstroImage::from_pixels(
         ImageDimensions::new(config.width, config.height, 1),
@@ -235,7 +235,7 @@ fn test_subpixel_accuracy_sweep() {
         })
         .collect();
 
-    let detection_config = StarDetectionConfig::default();
+    let detection_config = Config::default();
 
     // Test various sub-pixel shifts
     let test_shifts = [

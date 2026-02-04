@@ -11,7 +11,7 @@
 
 use arrayvec::ArrayVec;
 
-use super::{ComponentData, DeblendConfig, DeblendedCandidate, MAX_PEAKS, Pixel};
+use super::{ComponentData, DeblendedCandidate, MAX_PEAKS, Pixel};
 use crate::common::Buffer2;
 use crate::math::Aabb;
 use crate::star_detection::candidate_detection::LabelMap;
@@ -53,7 +53,8 @@ pub fn deblend_local_maxima(
     data: &ComponentData,
     pixels: &Buffer2<f32>,
     labels: &LabelMap,
-    config: &DeblendConfig,
+    min_separation: usize,
+    min_prominence: f32,
 ) -> ArrayVec<DeblendedCandidate, MAX_PEAKS> {
     debug_assert_eq!(
         (pixels.width(), pixels.height()),
@@ -61,7 +62,7 @@ pub fn deblend_local_maxima(
         "pixels and labels must have same dimensions"
     );
 
-    let peaks = find_local_maxima(data, pixels, labels, config);
+    let peaks = find_local_maxima(data, pixels, labels, min_separation, min_prominence);
 
     if peaks.len() <= 1 {
         // Single peak - create one candidate
@@ -94,7 +95,8 @@ pub fn find_local_maxima(
     data: &ComponentData,
     pixels: &Buffer2<f32>,
     labels: &LabelMap,
-    config: &DeblendConfig,
+    min_separation: usize,
+    min_prominence: f32,
 ) -> ArrayVec<Pixel, MAX_PEAKS> {
     debug_assert_eq!(
         (pixels.width(), pixels.height()),
@@ -106,8 +108,8 @@ pub fn find_local_maxima(
 
     // Find global max using find_peak (single iteration)
     let global_peak = data.find_peak(pixels, labels);
-    let min_peak_value = global_peak.value * config.min_prominence;
-    let min_sep_sq = config.min_separation * config.min_separation;
+    let min_peak_value = global_peak.value * min_prominence;
+    let min_sep_sq = min_separation * min_separation;
 
     for pixel in data.iter_pixels(pixels, labels) {
         if pixel.value < min_peak_value {

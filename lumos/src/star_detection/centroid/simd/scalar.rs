@@ -72,7 +72,7 @@ pub fn refine_centroid_scalar(
 mod tests {
     use super::*;
     use crate::common::Buffer2;
-    use crate::star_detection::background::BackgroundConfig;
+    use crate::star_detection::config::Config;
     use glam::Vec2;
 
     /// Create a synthetic Gaussian star for testing.
@@ -107,7 +107,7 @@ mod tests {
         let width = 64;
         let height = 64;
         let pixels = make_gaussian_star(width, height, Vec2::splat(32.0), 2.5, 0.8, 0.1);
-        let bg = crate::testing::estimate_background(&pixels, BackgroundConfig::default());
+        let bg = crate::testing::estimate_background(&pixels, &Config::default());
 
         let result = refine_centroid_scalar(&pixels, width, height, &bg, Vec2::splat(32.0), 7, 4.0);
 
@@ -131,7 +131,7 @@ mod tests {
         let height = 64;
         let true_pos = Vec2::new(32.3, 32.7);
         let pixels = make_gaussian_star(width, height, true_pos, 2.5, 0.8, 0.1);
-        let bg = crate::testing::estimate_background(&pixels, BackgroundConfig::default());
+        let bg = crate::testing::estimate_background(&pixels, &Config::default());
 
         let result = refine_centroid_scalar(&pixels, width, height, &bg, Vec2::splat(32.0), 7, 4.0);
 
@@ -157,7 +157,7 @@ mod tests {
         let width = 64;
         let height = 64;
         let pixels = make_gaussian_star(width, height, Vec2::splat(32.0), 2.5, 0.8, 0.1);
-        let bg = crate::testing::estimate_background(&pixels, BackgroundConfig::default());
+        let bg = crate::testing::estimate_background(&pixels, &Config::default());
 
         let result =
             refine_centroid_scalar(&pixels, width, height, &bg, Vec2::new(3.0, 32.0), 7, 4.0);
@@ -169,7 +169,7 @@ mod tests {
         let width = 64;
         let height = 64;
         let pixels = make_gaussian_star(width, height, Vec2::splat(32.0), 2.5, 0.8, 0.1);
-        let bg = crate::testing::estimate_background(&pixels, BackgroundConfig::default());
+        let bg = crate::testing::estimate_background(&pixels, &Config::default());
 
         let result =
             refine_centroid_scalar(&pixels, width, height, &bg, Vec2::new(61.0, 32.0), 7, 4.0);
@@ -181,7 +181,7 @@ mod tests {
         let width = 64;
         let height = 64;
         let pixels = make_gaussian_star(width, height, Vec2::splat(32.0), 2.5, 0.8, 0.1);
-        let bg = crate::testing::estimate_background(&pixels, BackgroundConfig::default());
+        let bg = crate::testing::estimate_background(&pixels, &Config::default());
 
         let result =
             refine_centroid_scalar(&pixels, width, height, &bg, Vec2::new(32.0, 3.0), 7, 4.0);
@@ -193,7 +193,7 @@ mod tests {
         let width = 64;
         let height = 64;
         let pixels = make_gaussian_star(width, height, Vec2::splat(32.0), 2.5, 0.8, 0.1);
-        let bg = crate::testing::estimate_background(&pixels, BackgroundConfig::default());
+        let bg = crate::testing::estimate_background(&pixels, &Config::default());
 
         let result =
             refine_centroid_scalar(&pixels, width, height, &bg, Vec2::new(32.0, 61.0), 7, 4.0);
@@ -205,7 +205,7 @@ mod tests {
         let width = 64;
         let height = 64;
         let pixels = make_uniform_background(width, height, 0.1);
-        let bg = crate::testing::estimate_background(&pixels, BackgroundConfig::default());
+        let bg = crate::testing::estimate_background(&pixels, &Config::default());
 
         let result = refine_centroid_scalar(&pixels, width, height, &bg, Vec2::splat(32.0), 7, 4.0);
         assert!(result.is_none(), "Should return None for zero signal");
@@ -216,7 +216,7 @@ mod tests {
         let width = 128;
         let height = 128;
         let pixels = make_gaussian_star(width, height, Vec2::new(64.3, 64.7), 4.0, 0.8, 0.1);
-        let bg = crate::testing::estimate_background(&pixels, BackgroundConfig::default());
+        let bg = crate::testing::estimate_background(&pixels, &Config::default());
 
         // Test with small stamp (9x9)
         let result_small =
@@ -259,7 +259,7 @@ mod tests {
         let height = 64;
         // Star at (45, 45) but we start search at (32, 32) - too far
         let pixels = make_gaussian_star(width, height, Vec2::splat(45.0), 2.5, 0.8, 0.1);
-        let bg = crate::testing::estimate_background(&pixels, BackgroundConfig::default());
+        let bg = crate::testing::estimate_background(&pixels, &Config::default());
 
         // With stamp_radius=7, max_move = 15/4 = 3.75 pixels
         let result = refine_centroid_scalar(&pixels, width, height, &bg, Vec2::splat(32.0), 7, 4.0);
@@ -283,7 +283,7 @@ mod tests {
             }
         }
         let pixels = Buffer2::new(width, height, pixels);
-        let bg = crate::testing::estimate_background(&pixels, BackgroundConfig::default());
+        let bg = crate::testing::estimate_background(&pixels, &Config::default());
 
         // Should still work - negative values clamped to 0
         let result = refine_centroid_scalar(&pixels, width, height, &bg, Vec2::splat(32.0), 7, 4.0);
@@ -295,7 +295,7 @@ mod tests {
         let width = 64;
         let height = 64;
         let pixels = make_gaussian_star(width, height, Vec2::new(32.3, 32.7), 2.5, 10000.0, 0.1);
-        let bg = crate::testing::estimate_background(&pixels, BackgroundConfig::default());
+        let bg = crate::testing::estimate_background(&pixels, &Config::default());
 
         let result = refine_centroid_scalar(&pixels, width, height, &bg, Vec2::splat(32.0), 7, 4.0);
         assert!(result.is_some());
@@ -309,7 +309,7 @@ mod tests {
         let width = 64;
         let height = 64;
         let pixels = make_gaussian_star(width, height, Vec2::new(32.3, 32.7), 2.5, 0.01, 0.1);
-        let bg = crate::testing::estimate_background(&pixels, BackgroundConfig::default());
+        let bg = crate::testing::estimate_background(&pixels, &Config::default());
 
         // May or may not succeed - just checking it doesn't crash
         let _ = refine_centroid_scalar(&pixels, width, height, &bg, Vec2::splat(32.0), 7, 4.0);
@@ -320,7 +320,7 @@ mod tests {
         let width = 64;
         let height = 64;
         let pixels = make_gaussian_star(width, height, Vec2::splat(32.0), 1.5, 0.8, 0.1);
-        let bg = crate::testing::estimate_background(&pixels, BackgroundConfig::default());
+        let bg = crate::testing::estimate_background(&pixels, &Config::default());
 
         let result = refine_centroid_scalar(&pixels, width, height, &bg, Vec2::splat(32.0), 4, 2.0);
         assert!(result.is_some());
@@ -331,7 +331,7 @@ mod tests {
         let width = 128;
         let height = 128;
         let pixels = make_gaussian_star(width, height, Vec2::splat(64.0), 5.0, 0.8, 0.1);
-        let bg = crate::testing::estimate_background(&pixels, BackgroundConfig::default());
+        let bg = crate::testing::estimate_background(&pixels, &Config::default());
 
         let result =
             refine_centroid_scalar(&pixels, width, height, &bg, Vec2::splat(64.0), 15, 10.0);

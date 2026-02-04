@@ -8,7 +8,7 @@ use crate::star_detection::tests::common::output::{
     PassCriteria, check_pass, compute_detection_metrics, crowded_criteria, faint_star_criteria,
     save_comparison, save_grayscale, save_metrics,
 };
-use crate::star_detection::{BackgroundConfig, FilteringConfig, StarDetectionConfig, StarDetector};
+use crate::star_detection::{StarDetector, config::Config};
 use crate::testing::init_tracing;
 use crate::testing::synthetic::{
     CrowdingType, ElongationType, NebulaConfig, StarFieldConfig, crowded_cluster_config,
@@ -20,7 +20,7 @@ use common::test_utils::test_output_path;
 fn run_challenging_test(
     name: &str,
     field_config: &StarFieldConfig,
-    detection_config: &StarDetectionConfig,
+    detection_config: &Config,
     criteria: &PassCriteria,
 ) -> bool {
     let (pixels, ground_truth) = generate_star_field(field_config);
@@ -102,7 +102,7 @@ fn test_crowded_cluster() {
     init_tracing();
 
     let field_config = crowded_cluster_config();
-    let detection_config = StarDetectionConfig::default();
+    let detection_config = Config::default();
 
     let passed = run_challenging_test(
         "crowded_cluster",
@@ -134,7 +134,7 @@ fn test_very_dense() {
         crowding: CrowdingType::Uniform,
         ..Default::default()
     };
-    let detection_config = StarDetectionConfig::default();
+    let detection_config = Config::default();
 
     // Very relaxed criteria
     let criteria = PassCriteria {
@@ -164,7 +164,7 @@ fn test_gradient_density() {
         crowding: CrowdingType::Gradient,
         ..Default::default()
     };
-    let detection_config = StarDetectionConfig::default();
+    let detection_config = Config::default();
 
     run_challenging_test(
         "gradient_density",
@@ -185,7 +185,7 @@ fn test_uniform_tracking_error() {
     init_tracing();
 
     let field_config = elliptical_stars_config();
-    let detection_config = StarDetectionConfig::default();
+    let detection_config = Config::default();
 
     // Relaxed for elliptical
     let criteria = PassCriteria {
@@ -221,7 +221,7 @@ fn test_varying_tracking_error() {
         eccentricity_range: (0.2, 0.5),
         ..Default::default()
     };
-    let detection_config = StarDetectionConfig::default();
+    let detection_config = Config::default();
 
     let criteria = PassCriteria {
         min_detection_rate: 0.95,
@@ -255,7 +255,7 @@ fn test_field_rotation() {
         elongation: ElongationType::FieldRotation,
         ..Default::default()
     };
-    let detection_config = StarDetectionConfig::default();
+    let detection_config = Config::default();
 
     let criteria = PassCriteria {
         min_detection_rate: 0.90,
@@ -293,7 +293,7 @@ fn test_cosmic_rays() {
         cosmic_ray_count: 25, // Many cosmic rays
         ..Default::default()
     };
-    let detection_config = StarDetectionConfig::default();
+    let detection_config = Config::default();
 
     // Cosmic rays may cause false positives
     let criteria = PassCriteria {
@@ -324,7 +324,7 @@ fn test_bayer_pattern() {
         bayer_strength: 0.08,
         ..Default::default()
     };
-    let detection_config = StarDetectionConfig::default();
+    let detection_config = Config::default();
 
     let criteria = PassCriteria {
         min_detection_rate: 0.95,
@@ -354,7 +354,7 @@ fn test_saturated_stars() {
         saturation_level: 0.95,
         ..Default::default()
     };
-    let detection_config = StarDetectionConfig::default();
+    let detection_config = Config::default();
 
     let criteria = PassCriteria {
         min_detection_rate: 0.95,
@@ -391,7 +391,7 @@ fn test_gradient_background() {
         noise_sigma: 0.02,
         ..Default::default()
     };
-    let detection_config = StarDetectionConfig::default();
+    let detection_config = Config::default();
 
     let criteria = PassCriteria {
         min_detection_rate: 0.95,
@@ -424,7 +424,7 @@ fn test_vignette_background() {
         noise_sigma: 0.02,
         ..Default::default()
     };
-    let detection_config = StarDetectionConfig::default();
+    let detection_config = Config::default();
 
     let criteria = PassCriteria {
         min_detection_rate: 0.95,
@@ -465,7 +465,7 @@ fn test_nebula_background() {
         noise_sigma: 0.02,
         ..Default::default()
     };
-    let detection_config = StarDetectionConfig::default();
+    let detection_config = Config::default();
 
     // Nebula is challenging due to variable background
     let criteria = PassCriteria {
@@ -504,7 +504,7 @@ fn test_edge_stars() {
         edge_margin: 5, // Very small margin - stars near edges
         ..Default::default()
     };
-    let detection_config = StarDetectionConfig::default();
+    let detection_config = Config::default();
 
     // Edge stars may be partially detected
     let criteria = PassCriteria {
@@ -526,15 +526,9 @@ fn test_faint_in_noise() {
     let field_config = faint_stars_config();
 
     // Use lower SNR threshold for faint stars
-    let detection_config = StarDetectionConfig {
-        filtering: FilteringConfig {
-            min_snr: 3.0,
-            ..Default::default()
-        },
-        background: BackgroundConfig {
-            sigma_threshold: 2.5,
-            ..Default::default()
-        },
+    let detection_config = Config {
+        min_snr: 3.0,
+        sigma_threshold: 2.5,
         ..Default::default()
     };
 
@@ -564,15 +558,9 @@ fn test_very_low_snr() {
         ..Default::default()
     };
 
-    let detection_config = StarDetectionConfig {
-        filtering: FilteringConfig {
-            min_snr: 2.5,
-            ..Default::default()
-        },
-        background: BackgroundConfig {
-            sigma_threshold: 2.0,
-            ..Default::default()
-        },
+    let detection_config = Config {
+        min_snr: 2.5,
+        sigma_threshold: 2.0,
         ..Default::default()
     };
 
@@ -614,7 +602,7 @@ fn test_combined_challenges() {
         ..Default::default()
     };
 
-    let detection_config = StarDetectionConfig::default();
+    let detection_config = Config::default();
 
     // Relaxed for combined challenges
     let criteria = PassCriteria {

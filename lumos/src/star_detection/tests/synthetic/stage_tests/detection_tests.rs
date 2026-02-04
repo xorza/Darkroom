@@ -5,10 +5,10 @@
 use crate::math::Vec2us;
 use crate::star_detection::background::BackgroundMap;
 use crate::star_detection::candidate_detection::detect_stars_test;
+use crate::star_detection::config::Config;
 use crate::star_detection::tests::common::output::{
     gray_to_rgb_image_stretched, save_grayscale, save_image,
 };
-use crate::star_detection::{BackgroundConfig, FilteringConfig, StarDetectionConfig};
 use crate::testing::init_tracing;
 use crate::testing::synthetic::{StarFieldConfig, generate_star_field, sparse_field_config};
 use common::test_utils::test_output_path;
@@ -64,14 +64,14 @@ fn test_detection_sparse() {
     // Estimate background
     let background = crate::testing::estimate_background(
         &pixels,
-        BackgroundConfig {
+        &Config {
             tile_size: TILE_SIZE,
             ..Default::default()
         },
     );
 
     // Detect candidates
-    let det_config = StarDetectionConfig::default();
+    let det_config = Config::default();
     let candidates = detect_stars_test(&pixels, None, &background, &det_config);
 
     println!("Ground truth: {} stars", ground_truth.len());
@@ -154,7 +154,7 @@ fn test_detection_thresholds() {
     // Estimate background
     let background = crate::testing::estimate_background(
         &pixels,
-        BackgroundConfig {
+        &Config {
             tile_size: TILE_SIZE,
             ..Default::default()
         },
@@ -162,11 +162,8 @@ fn test_detection_thresholds() {
 
     // Test different thresholds
     for sigma in [2.0, 3.0, 5.0, 10.0] {
-        let det_config = StarDetectionConfig {
-            background: BackgroundConfig {
-                sigma_threshold: sigma,
-                ..Default::default()
-            },
+        let det_config = Config {
+            sigma_threshold: sigma,
             ..Default::default()
         };
         let candidates = detect_stars_test(&pixels, None, &background, &det_config);
@@ -256,7 +253,7 @@ fn test_detection_area_filter() {
     // Estimate background
     let background = crate::testing::estimate_background(
         &pixels,
-        BackgroundConfig {
+        &Config {
             tile_size: TILE_SIZE,
             ..Default::default()
         },
@@ -268,12 +265,9 @@ fn test_detection_area_filter() {
         (5, 500, "default"),
         (9, 200, "strict"),
     ] {
-        let det_config = StarDetectionConfig {
-            filtering: FilteringConfig {
-                min_area,
-                max_area,
-                ..Default::default()
-            },
+        let det_config = Config {
+            min_area,
+            max_area,
             ..Default::default()
         };
         let candidates = detect_stars_test(&pixels, None, &background, &det_config);

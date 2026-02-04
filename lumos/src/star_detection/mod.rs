@@ -27,15 +27,17 @@ pub(crate) mod background;
 mod buffer_pool;
 pub(crate) mod candidate_detection;
 mod centroid;
-mod config;
+pub mod config;
 mod convolution;
 mod cosmic_ray;
 mod deblend;
 mod defect_map;
 mod detector;
 mod fwhm_estimation;
+mod image_stats;
 mod mask_dilation;
 mod median_filter;
+mod region;
 mod star;
 pub(crate) mod threshold_mask;
 
@@ -51,29 +53,24 @@ pub use buffer_pool::BufferPool;
 pub use detector::{StarDetectionDiagnostics, StarDetectionResult, StarDetector};
 
 // Configuration
-#[allow(unused_imports)] // Re-exported for public API
-pub use config::CentroidConfig;
 pub use config::CentroidMethod;
-#[allow(unused_imports)] // Re-exported for public API
+pub use config::Config;
 pub use config::Connectivity;
-#[allow(unused_imports)] // Re-exported for public API
-pub use config::DeblendConfig;
-#[allow(unused_imports)] // Re-exported for public API
-pub use config::FilteringConfig;
-#[allow(unused_imports)] // Re-exported for public API
+pub use config::LocalBackgroundMethod;
 pub use config::NoiseModel;
-#[allow(unused_imports)] // Re-exported for public API
-pub use config::PsfConfig;
-pub use config::StarDetectionConfig;
+pub use config::{AdaptiveSigmaConfig, BackgroundRefinement};
 pub use defect_map::DefectMap;
 pub use star::Star;
 
-// Background estimation
-pub use background::{BackgroundConfig, BackgroundMap};
+// Background estimation (kept during migration, will become ImageStats)
+pub use background::BackgroundMap;
+
+// Pipeline data structures
+pub use image_stats::ImageStats;
+pub use region::Region;
 
 // Centroid methods
 pub use centroid::{GaussianFitConfig, GaussianFitResult, fit_gaussian_2d};
 pub use centroid::{
     MoffatFitConfig, MoffatFitResult, alpha_beta_to_fwhm, fit_moffat_2d, fwhm_beta_to_alpha,
 };
-pub use config::LocalBackgroundMethod;

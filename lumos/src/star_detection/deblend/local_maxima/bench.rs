@@ -10,7 +10,6 @@ use crate::common::{BitBuffer2, Buffer2};
 use crate::math::{Aabb, Vec2us};
 use crate::star_detection::candidate_detection::{LabelMap, label_map_from_mask_with_connectivity};
 use crate::star_detection::config::Connectivity;
-use crate::star_detection::config::DeblendConfig;
 use crate::star_detection::deblend::ComponentData;
 use crate::testing::synthetic::generate_globular_cluster;
 
@@ -64,7 +63,6 @@ fn create_components_from_pixels(
 fn bench_find_local_maxima_6k_dense(b: ::bench::Bencher) {
     let pixels = generate_globular_cluster(6144, 6144, 50000, 42);
     let (labels, components) = create_components_from_pixels(&pixels, 0.05);
-    let config = DeblendConfig::default();
 
     // Find the 100 largest components for benchmarking
     let mut sorted_components = components.clone();
@@ -77,7 +75,8 @@ fn bench_find_local_maxima_6k_dense(b: ::bench::Bencher) {
                 black_box(component),
                 black_box(&pixels),
                 black_box(&labels),
-                black_box(&config),
+                black_box(3),
+                black_box(0.3),
             ));
         }
     });
@@ -87,7 +86,6 @@ fn bench_find_local_maxima_6k_dense(b: ::bench::Bencher) {
 fn bench_deblend_local_maxima_6k_dense(b: ::bench::Bencher) {
     let pixels = generate_globular_cluster(6144, 6144, 50000, 42);
     let (labels, components) = create_components_from_pixels(&pixels, 0.05);
-    let config = DeblendConfig::default();
 
     b.bench(|| {
         for component in &components {
@@ -95,7 +93,8 @@ fn bench_deblend_local_maxima_6k_dense(b: ::bench::Bencher) {
                 black_box(component),
                 black_box(&pixels),
                 black_box(&labels),
-                black_box(&config),
+                black_box(3),
+                black_box(0.3),
             ));
         }
     });
@@ -106,11 +105,6 @@ fn bench_deblend_local_maxima_6k_dense_tight_separation(b: ::bench::Bencher) {
     let pixels = generate_globular_cluster(6144, 6144, 50000, 42);
     let (labels, components) = create_components_from_pixels(&pixels, 0.05);
     // Crowded field config: tighter separation, lower prominence threshold
-    let config = DeblendConfig {
-        min_separation: 2,
-        min_prominence: 0.2,
-        ..Default::default()
-    };
 
     println!("Number of components: {}", components.len());
 
@@ -120,7 +114,8 @@ fn bench_deblend_local_maxima_6k_dense_tight_separation(b: ::bench::Bencher) {
                 black_box(component),
                 black_box(&pixels),
                 black_box(&labels),
-                black_box(&config),
+                black_box(3),
+                black_box(0.3),
             ));
         }
     });
@@ -130,7 +125,6 @@ fn bench_deblend_local_maxima_6k_dense_tight_separation(b: ::bench::Bencher) {
 fn bench_local_maxima_4k_dense(b: ::bench::Bencher) {
     let pixels = generate_globular_cluster(4096, 4096, 20000, 42);
     let (labels, components) = create_components_from_pixels(&pixels, 0.05);
-    let config = DeblendConfig::default();
 
     b.bench(|| {
         for component in &components {
@@ -138,7 +132,8 @@ fn bench_local_maxima_4k_dense(b: ::bench::Bencher) {
                 black_box(component),
                 black_box(&pixels),
                 black_box(&labels),
-                black_box(&config),
+                black_box(3),
+                black_box(0.3),
             ));
         }
     });

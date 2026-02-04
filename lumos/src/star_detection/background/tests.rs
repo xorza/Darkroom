@@ -3,7 +3,7 @@
 use super::*;
 use crate::common::Buffer2;
 use crate::star_detection::background::BackgroundMap;
-use crate::star_detection::config::{AdaptiveSigmaConfig, BackgroundRefinement};
+use crate::star_detection::config::{AdaptiveSigmaConfig, BackgroundRefinement, Config};
 
 #[test]
 fn test_uniform_background() {
@@ -13,7 +13,7 @@ fn test_uniform_background() {
 
     let bg = crate::testing::estimate_background(
         &pixels,
-        BackgroundConfig {
+        &Config {
             tile_size: 32,
             ..Default::default()
         },
@@ -47,7 +47,7 @@ fn test_gradient_background() {
 
     let bg = crate::testing::estimate_background(
         &pixels,
-        BackgroundConfig {
+        &Config {
             tile_size: 32,
             ..Default::default()
         },
@@ -72,7 +72,7 @@ fn test_background_with_stars() {
     let pixels = Buffer2::new(width, height, data);
     let bg = crate::testing::estimate_background(
         &pixels,
-        BackgroundConfig {
+        &Config {
             tile_size: 32,
             ..Default::default()
         },
@@ -95,7 +95,7 @@ fn test_noise_estimation() {
 
     let bg = crate::testing::estimate_background(
         &pixels,
-        BackgroundConfig {
+        &Config {
             tile_size: 32,
             ..Default::default()
         },
@@ -113,7 +113,7 @@ fn test_non_square_image() {
 
     let bg = crate::testing::estimate_background(
         &pixels,
-        BackgroundConfig {
+        &Config {
             tile_size: 32,
             ..Default::default()
         },
@@ -139,7 +139,7 @@ fn test_sigma_clipping_rejects_outliers() {
     let pixels = Buffer2::new(width, height, data);
     let bg = crate::testing::estimate_background(
         &pixels,
-        BackgroundConfig {
+        &Config {
             tile_size: 32,
             ..Default::default()
         },
@@ -169,7 +169,7 @@ fn test_interpolation_produces_valid_values() {
 
     let bg = crate::testing::estimate_background(
         &pixels,
-        BackgroundConfig {
+        &Config {
             tile_size: 16,
             ..Default::default()
         },
@@ -199,7 +199,7 @@ fn test_large_image() {
 
     let bg = crate::testing::estimate_background(
         &pixels,
-        BackgroundConfig {
+        &Config {
             tile_size: 64,
             ..Default::default()
         },
@@ -221,7 +221,7 @@ fn test_different_tile_sizes() {
         let pixels = Buffer2::new(width, height, data.clone());
         let bg = crate::testing::estimate_background(
             &pixels,
-            BackgroundConfig {
+            &Config {
                 tile_size,
                 ..Default::default()
             },
@@ -240,7 +240,7 @@ fn test_tile_size_too_small() {
     let pixels = Buffer2::new(64, 64, vec![0.5; 64 * 64]);
     crate::testing::estimate_background(
         &pixels,
-        BackgroundConfig {
+        &Config {
             tile_size: 8,
             ..Default::default()
         },
@@ -253,7 +253,7 @@ fn test_tile_size_too_large() {
     let pixels = Buffer2::new(64, 64, vec![0.5; 64 * 64]);
     crate::testing::estimate_background(
         &pixels,
-        BackgroundConfig {
+        &Config {
             tile_size: 512,
             ..Default::default()
         },
@@ -266,7 +266,7 @@ fn test_image_too_small() {
     let pixels = Buffer2::new(32, 32, vec![0.5; 32 * 32]);
     crate::testing::estimate_background(
         &pixels,
-        BackgroundConfig {
+        &Config {
             tile_size: 64,
             ..Default::default()
         },
@@ -285,7 +285,7 @@ fn test_single_tile_image() {
 
     let bg = crate::testing::estimate_background(
         &pixels,
-        BackgroundConfig {
+        &Config {
             tile_size: 32,
             ..Default::default()
         },
@@ -322,7 +322,7 @@ fn test_noise_estimation_with_actual_noise() {
     let pixels = Buffer2::new(width, height, data);
     let bg = crate::testing::estimate_background(
         &pixels,
-        BackgroundConfig {
+        &Config {
             tile_size: 32,
             ..Default::default()
         },
@@ -355,7 +355,7 @@ fn test_interpolation_smooth_at_tile_boundaries() {
     let pixels = Buffer2::new(width, height, data);
     let bg = crate::testing::estimate_background(
         &pixels,
-        BackgroundConfig {
+        &Config {
             tile_size: 32,
             ..Default::default()
         },
@@ -400,11 +400,11 @@ fn test_iterative_background_uniform() {
     let height = 128;
     let pixels = Buffer2::new(width, height, vec![0.5; width * height]);
 
-    let config = BackgroundConfig {
+    let config = Config {
         tile_size: 32,
         ..Default::default()
     };
-    let bg = crate::testing::estimate_background(&pixels, config.clone());
+    let bg = crate::testing::estimate_background(&pixels, &config);
 
     // All background values should be close to 0.5
     for y in (0..height).step_by(10) {
@@ -449,22 +449,24 @@ fn test_iterative_background_with_bright_stars() {
     // Non-iterative estimate
     let bg_simple = crate::testing::estimate_background(
         &pixels,
-        BackgroundConfig {
+        &Config {
             tile_size: 32,
             ..Default::default()
         },
     );
 
     // Iterative estimate (should be better at excluding stars)
-    let config = BackgroundConfig {
+    let config = Config {
         sigma_threshold: 3.0,
         refinement: BackgroundRefinement::Iterative { iterations: 2 },
-        mask_dilation: 5,
+        bg_mask_dilation: 5,
         min_unmasked_fraction: 0.3,
         tile_size: 32,
         sigma_clip_iterations: 2,
+
+        ..Default::default()
     };
-    let bg_iterative = crate::testing::estimate_background(&pixels, config.clone());
+    let bg_iterative = crate::testing::estimate_background(&pixels, &config);
 
     // Check background at a point away from stars
     let test_x = 16;
@@ -508,11 +510,11 @@ fn test_iterative_background_preserves_gradient() {
     }
 
     let pixels = Buffer2::new(width, height, data);
-    let config = BackgroundConfig {
+    let config = Config {
         tile_size: 16,
         ..Default::default()
     };
-    let bg = crate::testing::estimate_background(&pixels, config.clone());
+    let bg = crate::testing::estimate_background(&pixels, &config);
 
     // Gradient should be preserved
     let corner_00 = bg.background[(0, 0)];
@@ -545,15 +547,17 @@ fn test_iterative_background_no_dilation() {
     }
 
     let pixels = Buffer2::new(width, height, data);
-    let config = BackgroundConfig {
+    let config = Config {
         sigma_threshold: 3.0,
         refinement: BackgroundRefinement::Iterative { iterations: 1 },
-        mask_dilation: 0, // No dilation
+        bg_mask_dilation: 0, // No dilation
         min_unmasked_fraction: 0.3,
         tile_size: 32,
         sigma_clip_iterations: 2,
+
+        ..Default::default()
     };
-    let bg = crate::testing::estimate_background(&pixels, config.clone());
+    let bg = crate::testing::estimate_background(&pixels, &config);
 
     // Background away from star should be close to 0.2
     let val = bg.background[(16, 16)];
@@ -566,11 +570,11 @@ fn test_iterative_background_no_dilation() {
 
 #[test]
 fn test_iterative_background_config_default() {
-    let config = BackgroundConfig::default();
+    let config = Config::default();
 
     assert!((config.sigma_threshold - 4.0).abs() < 1e-6);
     assert!(matches!(config.refinement, BackgroundRefinement::None));
-    assert_eq!(config.mask_dilation, 3);
+    assert_eq!(config.bg_mask_dilation, 3);
     assert!((config.min_unmasked_fraction - 0.3).abs() < 1e-6);
 }
 
@@ -581,12 +585,12 @@ fn test_iterative_background_no_refinement() {
     let height = 64;
     let pixels = Buffer2::new(width, height, vec![0.3; width * height]);
 
-    let config = BackgroundConfig {
+    let config = Config {
         refinement: BackgroundRefinement::None,
         tile_size: 32,
         ..Default::default()
     };
-    let bg = crate::testing::estimate_background(&pixels, config.clone());
+    let bg = crate::testing::estimate_background(&pixels, &config);
 
     let val = bg.background[(32, 32)];
     assert!(
@@ -899,7 +903,7 @@ fn test_adaptive_sigma_uniform_background() {
 
     let bg = crate::testing::estimate_background(
         &pixels,
-        BackgroundConfig {
+        &Config {
             tile_size: 32,
             refinement: BackgroundRefinement::AdaptiveSigma(AdaptiveSigmaConfig {
                 base_sigma: 3.0,
@@ -948,7 +952,7 @@ fn test_adaptive_sigma_values_in_valid_range() {
 
     let bg = crate::testing::estimate_background(
         &pixels,
-        BackgroundConfig {
+        &Config {
             tile_size: 32,
             refinement: BackgroundRefinement::AdaptiveSigma(AdaptiveSigmaConfig {
                 base_sigma: 3.0,
@@ -991,7 +995,7 @@ fn test_adaptive_sigma_respects_max() {
 
     let bg = crate::testing::estimate_background(
         &pixels,
-        BackgroundConfig {
+        &Config {
             tile_size: 32,
             refinement: BackgroundRefinement::AdaptiveSigma(AdaptiveSigmaConfig {
                 base_sigma: 3.0,
@@ -1034,7 +1038,7 @@ fn test_adaptive_sigma_dimensions_match() {
 
     let bg = crate::testing::estimate_background(
         &pixels,
-        BackgroundConfig {
+        &Config {
             tile_size: 32,
             refinement: BackgroundRefinement::AdaptiveSigma(AdaptiveSigmaConfig::default()),
             ..Default::default()
@@ -1057,7 +1061,7 @@ fn test_adaptive_sigma_accessible() {
 
     let bg = crate::testing::estimate_background(
         &pixels,
-        BackgroundConfig {
+        &Config {
             tile_size: 32,
             refinement: BackgroundRefinement::AdaptiveSigma(AdaptiveSigmaConfig::default()),
             ..Default::default()
@@ -1078,7 +1082,7 @@ fn test_regular_background_has_no_adaptive_sigma() {
 
     let bg = crate::testing::estimate_background(
         &pixels,
-        BackgroundConfig {
+        &Config {
             tile_size: 32,
             refinement: BackgroundRefinement::None,
             ..Default::default()
@@ -1099,7 +1103,7 @@ fn test_iterative_refinement_has_no_adaptive_sigma() {
     let mut bg = BackgroundMap::new_uninit(
         width,
         height,
-        BackgroundConfig {
+        &Config {
             refinement: BackgroundRefinement::Iterative { iterations: 1 },
             ..Default::default()
         },
@@ -1123,7 +1127,7 @@ fn test_adaptive_sigma_refinement_has_adaptive_sigma() {
     let mut bg = BackgroundMap::new_uninit(
         width,
         height,
-        BackgroundConfig {
+        &Config {
             refinement: BackgroundRefinement::AdaptiveSigma(AdaptiveSigmaConfig::default()),
             ..Default::default()
         },

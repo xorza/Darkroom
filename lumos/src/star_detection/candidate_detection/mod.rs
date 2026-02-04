@@ -8,7 +8,7 @@ mod tests;
 
 use super::background::BackgroundMap;
 use super::buffer_pool::BufferPool;
-use super::config::{DeblendConfig, StarDetectionConfig};
+use super::config::Config;
 use super::deblend::{
     ComponentData, DeblendBuffers, DeblendedCandidate, deblend_local_maxima,
     deblend_multi_threshold,
@@ -46,7 +46,7 @@ pub fn detect_stars(
     pixels: &Buffer2<f32>,
     filtered: Option<&Buffer2<f32>>,
     background: &BackgroundMap,
-    config: &StarDetectionConfig,
+    config: &Config,
     pool: &mut BufferPool,
 ) -> Vec<StarCandidate> {
     let width = pixels.width();
@@ -72,46 +72,36 @@ pub fn detect_stars(
     } else if let Some(filtered) = filtered {
         debug_assert_eq!(width, filtered.width());
         debug_assert_eq!(height, filtered.height());
-        // Filtered image is background-subtracted, threshold = sigma * noise
-        // Note: Adaptive thresholding with filtered images is not yet supported
-        // because the matched filter changes the noise characteristics.
         create_threshold_mask_filtered(
             filtered,
             &background.noise,
-            config.background.sigma_threshold,
+            config.sigma_threshold,
             &mut mask,
         );
     } else {
-        // No filtering, threshold = background + sigma * noise
         create_threshold_mask(
             pixels,
             &background.background,
             &background.noise,
-            config.background.sigma_threshold,
+            config.sigma_threshold,
             &mut mask,
         );
     }
 
-    // Dilate mask to connect nearby pixels that may be separated due to
-    // Bayer pattern artifacts or noise. Use radius 1 (3x3 structuring element)
-    // to minimize merging of close stars while still connecting fragmented detections.
+    // Dilate mask to connect nearby pixels
     let mut dilated = pool.acquire_bit();
     dilated.fill(false);
     dilate_mask(&mask, 1, &mut dilated);
     std::mem::swap(&mut mask, &mut dilated);
 
-    // Return dilated buffer to pool (now contains pre-dilation mask)
     pool.release_bit(dilated);
 
-    // Find connected components using pooled buffer
-    let label_map = LabelMap::from_pool(&mask, config.filtering.connectivity, pool);
+    let label_map = LabelMap::from_pool(&mask, config.connectivity, pool);
 
-    // Return mask buffer to pool
     pool.release_bit(mask);
 
     let candidates = extract_and_filter_candidates(pixels, &label_map, config);
 
-    // Return label buffer to pool
     label_map.release_to_pool(pool);
 
     candidates
@@ -121,66 +111,45 @@ pub fn detect_stars(
 fn extract_and_filter_candidates(
     pixels: &Buffer2<f32>,
     label_map: &LabelMap,
-    config: &StarDetectionConfig,
+    config: &Config,
 ) -> Vec<StarCandidate> {
     let width = pixels.width();
     let height = pixels.height();
 
-    // Extract candidate properties with deblending (always use original pixels for peak values)
-    let mut candidates = extract_candidates(
-        pixels,
-        label_map,
-        &config.deblend,
-        config.filtering.max_area,
-    );
+    let mut candidates = extract_candidates(pixels, label_map, config);
 
-    // Filter candidates
     candidates.retain(|c| {
-        // Size filter
-        c.area >= config.filtering.min_area
-            // Edge filter
-            && c.bbox.min.x >= config.filtering.edge_margin
-            && c.bbox.min.y >= config.filtering.edge_margin
-            && c.bbox.max.x < width - config.filtering.edge_margin
-            && c.bbox.max.y < height - config.filtering.edge_margin
+        c.area >= config.min_area
+            && c.bbox.min.x >= config.edge_margin
+            && c.bbox.min.y >= config.edge_margin
+            && c.bbox.max.x < width - config.edge_margin
+            && c.bbox.max.y < height - config.edge_margin
     });
 
     candidates
 }
 
 /// Extract candidate properties from labeled image with deblending.
-///
-/// For components with multiple local maxima (star pairs), this function
-/// splits them into separate candidates based on peak positions.
-/// Supports both simple local-maxima deblending and multi-threshold deblending.
-///
-/// Components larger than `max_area` are skipped early to avoid
-/// expensive processing of pathologically large regions (e.g., when the entire
-/// image is erroneously detected as one component due to bad thresholding).
 pub(crate) fn extract_candidates(
     pixels: &Buffer2<f32>,
     label_map: &LabelMap,
-    deblend_config: &DeblendConfig,
-    max_area: usize,
+    config: &Config,
 ) -> Vec<StarCandidate> {
     use rayon::prelude::*;
 
     if label_map.num_labels() == 0 {
         return Vec::new();
     }
-    let component_data = collect_component_data(label_map, pixels.width(), max_area);
+    let component_data = collect_component_data(label_map, pixels.width(), config.max_area);
     let total_components = component_data.len();
 
     tracing::debug!(
         total_components,
-        max_area,
-        multi_threshold = deblend_config.is_multi_threshold(),
+        max_area = config.max_area,
+        multi_threshold = config.is_multi_threshold(),
         "Processing components for candidate extraction"
     );
 
-    // Process each component in parallel, deblending into multiple candidates.
-    // Skip components that are too large - they can't be stars and would be
-    // expensive to process (e.g., deblending a million-pixel component).
     let map_to_candidate = |obj: DeblendedCandidate| StarCandidate {
         bbox: obj.bbox,
         peak: obj.peak,
@@ -190,13 +159,10 @@ pub(crate) fn extract_candidates(
 
     let filtered: Vec<_> = component_data
         .into_iter()
-        .filter(|data| data.area > 0 && data.area <= max_area)
+        .filter(|data| data.area > 0 && data.area <= config.max_area)
         .collect();
 
-    // For multi-threshold deblending, use fold/reduce so each rayon thread
-    // gets its own DeblendBuffers that is reused across all components on
-    // that thread (avoiding per-component allocation overhead).
-    let candidates: Vec<StarCandidate> = if deblend_config.is_multi_threshold() {
+    let candidates: Vec<StarCandidate> = if config.is_multi_threshold() {
         filtered
             .into_par_iter()
             .fold(
@@ -206,7 +172,9 @@ pub(crate) fn extract_candidates(
                         &data,
                         pixels,
                         label_map,
-                        deblend_config,
+                        config.deblend_n_thresholds,
+                        config.deblend_min_separation,
+                        config.deblend_min_contrast,
                         &mut buffers,
                     ) {
                         candidates.push(map_to_candidate(obj));
@@ -223,9 +191,15 @@ pub(crate) fn extract_candidates(
         filtered
             .into_par_iter()
             .flat_map_iter(|data| {
-                deblend_local_maxima(&data, pixels, label_map, deblend_config)
-                    .into_iter()
-                    .map(map_to_candidate)
+                deblend_local_maxima(
+                    &data,
+                    pixels,
+                    label_map,
+                    config.deblend_min_separation,
+                    config.deblend_min_prominence,
+                )
+                .into_iter()
+                .map(map_to_candidate)
             })
             .collect()
     };
@@ -251,7 +225,6 @@ fn collect_component_data(
     let num_labels = label_map.num_labels();
     let labels = label_map.labels();
 
-    // Shared result protected by mutex - only locked once per thread at the end
     let result = Mutex::new(vec![
         ComponentData {
             bbox: Aabb::empty(),
@@ -261,8 +234,6 @@ fn collect_component_data(
         num_labels
     ]);
 
-    // Thread-local state: (component_data, touched_labels)
-    // Track which labels were touched to avoid resetting/iterating all labels
     parallel::par_iter_auto(label_map.height()).for_each_init(
         || {
             (
@@ -274,11 +245,10 @@ fn collect_component_data(
                     };
                     num_labels
                 ],
-                Vec::<usize>::with_capacity(1024), // touched label indices
+                Vec::<usize>::with_capacity(1024),
             )
         },
         |(local_data, touched), (_, start_row, end_row)| {
-            // Reset only touched labels from previous chunk
             for &idx in touched.iter() {
                 local_data[idx] = ComponentData {
                     bbox: Aabb::empty(),
@@ -288,7 +258,6 @@ fn collect_component_data(
             }
             touched.clear();
 
-            // Collect component data for this chunk
             for y in start_row..end_row {
                 let row_start = y * width;
                 for x in 0..width {
@@ -299,7 +268,6 @@ fn collect_component_data(
                     let idx = (label - 1) as usize;
                     let data = &mut local_data[idx];
                     if data.area == 0 {
-                        // First time seeing this label in this chunk
                         touched.push(idx);
                     }
                     data.bbox.include(Vec2us::new(x, y));
@@ -308,7 +276,6 @@ fn collect_component_data(
                 }
             }
 
-            // Merge only touched labels into shared result
             let mut result = result.lock();
             for &idx in touched.iter() {
                 let partial_comp = &local_data[idx];
@@ -322,7 +289,6 @@ fn collect_component_data(
 
     let mut component_data = result.into_inner();
 
-    // Mark oversized components (set area to max_area + 1 so they're filtered later)
     for data in &mut component_data {
         if data.area > max_area {
             data.area = max_area + 1;

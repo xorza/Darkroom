@@ -7,7 +7,7 @@ use crate::{AstroImage, ImageDimensions};
 use crate::star_detection::tests::common::output::{
     gray_to_rgb_image_stretched, save_grayscale, save_image,
 };
-use crate::star_detection::{PsfConfig, StarDetectionConfig, StarDetector};
+use crate::star_detection::{StarDetector, config::Config};
 use crate::testing::init_tracing;
 use crate::testing::synthetic::{StarFieldConfig, add_cosmic_rays, generate_star_field};
 use common::test_utils::test_output_path;
@@ -52,11 +52,8 @@ fn test_cosmic_ray_rejection() {
     );
 
     // Run detection - disable CFA filter and matched filter for synthetic images
-    let detection_config = StarDetectionConfig {
-        psf: PsfConfig {
-            expected_fwhm: 0.0,
-            ..Default::default()
-        },
+    let detection_config = Config {
+        expected_fwhm: 0.0,
         ..Default::default()
     };
 
@@ -195,11 +192,8 @@ fn test_laplacian_snr_visualization() {
     );
 
     // Run detection - disable CFA filter and matched filter for synthetic images
-    let detection_config = StarDetectionConfig {
-        psf: PsfConfig {
-            expected_fwhm: 0.0,
-            ..Default::default()
-        },
+    let detection_config = Config {
+        expected_fwhm: 0.0,
         ..Default::default()
     };
 

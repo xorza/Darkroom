@@ -15,7 +15,6 @@ use super::{ComponentData, DeblendedCandidate, MAX_PEAKS, Pixel};
 use crate::common::Buffer2;
 use crate::math::{Aabb, Vec2us};
 use crate::star_detection::candidate_detection::LabelMap;
-use crate::star_detection::config::DeblendConfig;
 
 #[cfg(test)]
 mod tests;
@@ -366,7 +365,9 @@ pub(crate) fn deblend_multi_threshold(
     data: &ComponentData,
     pixels: &Buffer2<f32>,
     labels: &LabelMap,
-    config: &DeblendConfig,
+    n_thresholds: usize,
+    min_separation: usize,
+    min_contrast: f32,
     buffers: &mut DeblendBuffers,
 ) -> SmallVec<[DeblendedCandidate; MAX_PEAKS]> {
     debug_assert_eq!(
@@ -381,13 +382,13 @@ pub(crate) fn deblend_multi_threshold(
     }
 
     // If min_contrast >= 1.0, deblending is effectively disabled
-    if config.min_contrast >= 1.0 {
+    if min_contrast >= 1.0 {
         return smallvec::smallvec![create_single_object(data, pixels, labels)];
     }
 
     // Early exit: Component too small to contain multiple separable stars
     // Need at least 2 * min_separation^2 pixels for two stars to be separable
-    let min_area_for_deblend = config.min_separation * config.min_separation * 2;
+    let min_area_for_deblend = min_separation * min_separation * 2;
     if data.area < min_area_for_deblend {
         return smallvec::smallvec![create_single_object(data, pixels, labels)];
     }
@@ -401,7 +402,7 @@ pub(crate) fn deblend_multi_threshold(
         .fold(f32::MAX, f32::min);
 
     // Early exit: Peak barely above threshold - no substructure possible
-    let min_ratio = 1.0 / (1.0 - config.min_contrast.min(0.99));
+    let min_ratio = 1.0 / (1.0 - min_contrast.min(0.99));
     if peak_value < detection_threshold * min_ratio {
         return smallvec::smallvec![create_single_object(data, pixels, labels)];
     }
@@ -413,8 +414,8 @@ pub(crate) fn deblend_multi_threshold(
         labels,
         detection_threshold,
         peak_value,
-        config.n_thresholds,
-        config.min_separation,
+        n_thresholds,
+        min_separation,
         buffers,
     );
 
@@ -424,7 +425,7 @@ pub(crate) fn deblend_multi_threshold(
     }
 
     // Find leaf nodes (objects) using contrast criterion
-    let leaves = find_significant_branches(&tree, config.min_contrast);
+    let leaves = find_significant_branches(&tree, min_contrast);
 
     if leaves.len() <= 1 {
         return smallvec::smallvec![create_single_object(data, pixels, labels)];

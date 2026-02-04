@@ -75,8 +75,8 @@ fn main() {
 
     // Detect stars
     println!("\n--- Star Detection ---");
-    let mut config = StarDetectionConfig::default().wide_field();
-    config.filtering.min_snr = 10.0;
+    let mut config = StarDetectionConfig::wide_field();
+    config.min_snr = 10.0;
     let mut detector = StarDetector::from_config(config);
     let detection_result = detector.detect(&image);
     println!("Stars detected: {}", detection_result.stars.len());

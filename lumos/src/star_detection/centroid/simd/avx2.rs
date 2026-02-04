@@ -180,8 +180,8 @@ unsafe fn horizontal_sum_256(v: __m256) -> f32 {
 mod tests {
     use super::*;
     use crate::common::Buffer2;
-    use crate::star_detection::background::BackgroundConfig;
     use crate::star_detection::centroid::simd::{refine_centroid_scalar, refine_centroid_sse};
+    use crate::star_detection::config::Config;
     use common::cpu_features;
     use glam::Vec2;
 
@@ -226,7 +226,7 @@ mod tests {
             let width = 64;
             let height = 64;
             let pixels = make_gaussian_star(width, height, Vec2::splat(32.0), 2.5, 0.8, 0.1);
-            let bg = crate::testing::estimate_background(&pixels, BackgroundConfig::default());
+            let bg = crate::testing::estimate_background(&pixels, &Config::default());
 
             let scalar =
                 refine_centroid_scalar(&pixels, width, height, &bg, Vec2::splat(32.0), 7, 4.0)
@@ -257,7 +257,7 @@ mod tests {
             let width = 64;
             let height = 64;
             let pixels = make_gaussian_star(width, height, Vec2::new(32.3, 32.7), 2.5, 0.8, 0.1);
-            let bg = crate::testing::estimate_background(&pixels, BackgroundConfig::default());
+            let bg = crate::testing::estimate_background(&pixels, &Config::default());
 
             let scalar =
                 refine_centroid_scalar(&pixels, width, height, &bg, Vec2::splat(32.0), 7, 4.0)
@@ -288,7 +288,7 @@ mod tests {
             let width = 64;
             let height = 64;
             let pixels = make_gaussian_star(width, height, Vec2::splat(32.0), 2.5, 0.8, 0.1);
-            let bg = crate::testing::estimate_background(&pixels, BackgroundConfig::default());
+            let bg = crate::testing::estimate_background(&pixels, &Config::default());
 
             let result = unsafe {
                 refine_centroid_avx2(&pixels, width, height, &bg, Vec2::new(3.0, 32.0), 7, 4.0)
@@ -303,7 +303,7 @@ mod tests {
             let width = 64;
             let height = 64;
             let pixels = make_uniform_background(width, height, 0.1);
-            let bg = crate::testing::estimate_background(&pixels, BackgroundConfig::default());
+            let bg = crate::testing::estimate_background(&pixels, &Config::default());
 
             let result = unsafe {
                 refine_centroid_avx2(&pixels, width, height, &bg, Vec2::splat(32.0), 7, 4.0)
@@ -318,7 +318,7 @@ mod tests {
             let width = 128;
             let height = 128;
             let pixels = make_gaussian_star(width, height, Vec2::new(64.3, 64.7), 4.0, 0.8, 0.1);
-            let bg = crate::testing::estimate_background(&pixels, BackgroundConfig::default());
+            let bg = crate::testing::estimate_background(&pixels, &Config::default());
 
             // Test various stamp radii (AVX2 processes 8 at a time)
             for stamp_radius in [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15] {
@@ -387,7 +387,7 @@ mod tests {
             for (true_cx, true_cy) in positions {
                 let true_pos = Vec2::new(true_cx, true_cy);
                 let pixels = make_gaussian_star(width, height, true_pos, 3.0, 0.8, 0.1);
-                let bg = crate::testing::estimate_background(&pixels, BackgroundConfig::default());
+                let bg = crate::testing::estimate_background(&pixels, &Config::default());
 
                 let start_pos = true_pos.round();
 
@@ -428,7 +428,7 @@ mod tests {
             let width = 64;
             let height = 64;
             let pixels = make_gaussian_star(width, height, Vec2::new(32.3, 32.7), 2.5, 0.8, 0.1);
-            let bg = crate::testing::estimate_background(&pixels, BackgroundConfig::default());
+            let bg = crate::testing::estimate_background(&pixels, &Config::default());
 
             let sse = unsafe {
                 refine_centroid_sse(&pixels, width, height, &bg, Vec2::splat(32.0), 7, 4.0).unwrap()

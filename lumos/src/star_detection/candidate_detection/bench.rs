@@ -2,9 +2,9 @@
 
 use super::{detect_stars, extract_candidates, label_map_from_mask_with_connectivity};
 use crate::common::{BitBuffer2, Buffer2};
-use crate::star_detection::background::{BackgroundConfig, BackgroundMap};
+use crate::star_detection::background::BackgroundMap;
 use crate::star_detection::buffer_pool::BufferPool;
-use crate::star_detection::config::{DeblendConfig, FilteringConfig, StarDetectionConfig};
+use crate::star_detection::config::Config;
 use crate::star_detection::mask_dilation::dilate_mask;
 use crate::star_detection::threshold_mask::create_threshold_mask;
 use crate::testing::init_tracing;
@@ -19,7 +19,7 @@ fn create_detection_mask(pixels: &Buffer2<f32>, sigma_threshold: f32) -> BitBuff
     let height = pixels.height();
 
     // Create background map (same as real pipeline)
-    let background = crate::testing::estimate_background(pixels, BackgroundConfig::default());
+    let background = crate::testing::estimate_background(pixels, &Config::default());
 
     // Create threshold mask
     let mut mask = BitBuffer2::new_filled(width, height, false);
@@ -47,15 +47,13 @@ fn bench_extract_candidates_1k_sparse(b: ::bench::Bencher) {
         &mask,
         crate::star_detection::config::Connectivity::Four,
     );
-    let config = DeblendConfig::default();
-    let max_area = FilteringConfig::default().max_area;
+    let config = Config::default();
 
     b.bench(|| {
         black_box(extract_candidates(
             black_box(&pixels),
             black_box(&label_map),
             black_box(&config),
-            max_area,
         ))
     });
 }
@@ -69,15 +67,13 @@ fn bench_extract_candidates_1k_dense(b: ::bench::Bencher) {
         &mask,
         crate::star_detection::config::Connectivity::Four,
     );
-    let config = DeblendConfig::default();
-    let max_area = FilteringConfig::default().max_area;
+    let config = Config::default();
 
     b.bench(|| {
         black_box(extract_candidates(
             black_box(&pixels),
             black_box(&label_map),
             black_box(&config),
-            max_area,
         ))
     });
 }
@@ -91,15 +87,13 @@ fn bench_extract_candidates_4k_sparse(b: ::bench::Bencher) {
         &mask,
         crate::star_detection::config::Connectivity::Four,
     );
-    let config = DeblendConfig::default();
-    let max_area = FilteringConfig::default().max_area;
+    let config = Config::default();
 
     b.bench(|| {
         black_box(extract_candidates(
             black_box(&pixels),
             black_box(&label_map),
             black_box(&config),
-            max_area,
         ))
     });
 }
@@ -113,15 +107,13 @@ fn bench_extract_candidates_4k_dense(b: ::bench::Bencher) {
         &mask,
         crate::star_detection::config::Connectivity::Four,
     );
-    let config = DeblendConfig::default();
-    let max_area = FilteringConfig::default().max_area;
+    let config = Config::default();
 
     b.bench(|| {
         black_box(extract_candidates(
             black_box(&pixels),
             black_box(&label_map),
             black_box(&config),
-            max_area,
         ))
     });
 }
@@ -135,18 +127,16 @@ fn bench_extract_candidates_4k_dense_multithreshold(b: ::bench::Bencher) {
         &mask,
         crate::star_detection::config::Connectivity::Four,
     );
-    let config = DeblendConfig {
-        n_thresholds: 32,
+    let config = Config {
+        deblend_n_thresholds: 32,
         ..Default::default()
     };
-    let max_area = FilteringConfig::default().max_area;
 
     b.bench(|| {
         black_box(extract_candidates(
             black_box(&pixels),
             black_box(&label_map),
             black_box(&config),
-            max_area,
         ))
     });
 }
@@ -163,16 +153,13 @@ fn bench_extract_candidates_6k_dense(b: ::bench::Bencher) {
         crate::star_detection::config::Connectivity::Four,
     );
 
-    let crowded_config = StarDetectionConfig::default().crowded_field();
-    let config = &crowded_config.deblend;
-    let max_area = crowded_config.filtering.max_area;
+    let config = Config::crowded_field();
 
     b.bench(|| {
         black_box(extract_candidates(
             black_box(&pixels),
             black_box(&label_map),
-            black_box(config),
-            max_area,
+            black_box(&config),
         ))
     });
 }
@@ -190,18 +177,16 @@ fn bench_extract_candidates_6k_globular_cluster_multithreshold(b: ::bench::Bench
         &mask,
         crate::star_detection::config::Connectivity::Four,
     );
-    let config = DeblendConfig {
-        n_thresholds: 32,
+    let config = Config {
+        deblend_n_thresholds: 32,
         ..Default::default()
     };
-    let max_area = 5000;
 
     b.bench(|| {
         black_box(extract_candidates(
             black_box(&pixels),
             black_box(&label_map),
             black_box(&config),
-            max_area,
         ))
     });
 }
@@ -212,8 +197,8 @@ fn bench_detect_stars_6k_50000(b: ::bench::Bencher) {
 
     // 6K image with 50000 stars - full detect_stars pipeline
     let pixels = benchmark_star_field(6144, 6144, 50000, 0.1, 0.01, 42);
-    let background = crate::testing::estimate_background(&pixels, BackgroundConfig::default());
-    let config = StarDetectionConfig::default().crowded_field();
+    let background = crate::testing::estimate_background(&pixels, &Config::default());
+    let config = Config::crowded_field();
     let mut pool = BufferPool::new(pixels.width(), pixels.height());
 
     b.bench(|| {

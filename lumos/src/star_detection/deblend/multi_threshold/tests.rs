@@ -8,10 +8,20 @@ fn deblend_multi_threshold_test(
     data: &ComponentData,
     pixels: &Buffer2<f32>,
     labels: &LabelMap,
-    config: &DeblendConfig,
+    n_thresholds: usize,
+    min_separation: usize,
+    min_contrast: f32,
 ) -> SmallVec<[DeblendedCandidate; MAX_PEAKS]> {
     let mut buffers = DeblendBuffers::new();
-    deblend_multi_threshold(data, pixels, labels, config, &mut buffers)
+    deblend_multi_threshold(
+        data,
+        pixels,
+        labels,
+        n_thresholds,
+        min_separation,
+        min_contrast,
+        &mut buffers,
+    )
 }
 
 /// Create a test image with Gaussian stars and return pixels, labels, and component data.
@@ -63,9 +73,7 @@ fn make_test_component(
 #[test]
 fn test_single_star_no_deblending() {
     let (pixels, labels, data) = make_test_component(100, 100, &[(50, 50, 1.0, 3.0)]);
-    let config = DeblendConfig::default();
-
-    let result = deblend_multi_threshold_test(&data, &pixels, &labels, &config);
+    let result = deblend_multi_threshold_test(&data, &pixels, &labels, 32, 3, 0.005);
 
     assert_eq!(result.len(), 1, "Single star should produce one object");
     assert!((result[0].peak.x as i32 - 50).abs() <= 1);
@@ -77,14 +85,7 @@ fn test_two_separated_stars_deblend() {
     let (pixels, labels, data) =
         make_test_component(100, 100, &[(30, 50, 1.0, 2.5), (70, 50, 0.8, 2.5)]);
 
-    let config = DeblendConfig {
-        n_thresholds: 32,
-        min_contrast: 0.005,
-        min_separation: 3,
-        ..Default::default()
-    };
-
-    let result = deblend_multi_threshold_test(&data, &pixels, &labels, &config);
+    let result = deblend_multi_threshold_test(&data, &pixels, &labels, 32, 3, 0.005);
 
     assert_eq!(
         result.len(),
@@ -110,14 +111,7 @@ fn test_faint_secondary_below_contrast() {
     let (pixels, labels, data) =
         make_test_component(100, 100, &[(30, 50, 1.0, 2.5), (70, 50, 0.001, 2.5)]);
 
-    let config = DeblendConfig {
-        n_thresholds: 32,
-        min_contrast: 0.01,
-        min_separation: 3,
-        ..Default::default()
-    };
-
-    let result = deblend_multi_threshold_test(&data, &pixels, &labels, &config);
+    let result = deblend_multi_threshold_test(&data, &pixels, &labels, 32, 3, 0.01);
 
     assert_eq!(
         result.len(),
@@ -158,14 +152,7 @@ fn test_close_peaks_merge() {
     let (pixels, labels, data) =
         make_test_component(100, 100, &[(48, 50, 1.0, 2.0), (52, 50, 0.9, 2.0)]);
 
-    let config = DeblendConfig {
-        n_thresholds: 32,
-        min_contrast: 0.005,
-        min_separation: 5,
-        ..Default::default()
-    };
-
-    let result = deblend_multi_threshold_test(&data, &pixels, &labels, &config);
+    let result = deblend_multi_threshold_test(&data, &pixels, &labels, 32, 5, 0.005);
 
     assert_eq!(result.len(), 1, "Close peaks should not be deblended");
 }
@@ -180,9 +167,7 @@ fn test_empty_component() {
         label: 1,
         area: 0,
     };
-    let config = DeblendConfig::default();
-
-    let result = deblend_multi_threshold_test(&data, &pixels, &labels, &config);
+    let result = deblend_multi_threshold_test(&data, &pixels, &labels, 32, 3, 0.005);
 
     assert!(result.is_empty());
 }
@@ -192,14 +177,7 @@ fn test_deblend_disabled_with_high_contrast() {
     let (pixels, labels, data) =
         make_test_component(100, 100, &[(30, 50, 1.0, 2.5), (70, 50, 0.8, 2.5)]);
 
-    let config = DeblendConfig {
-        n_thresholds: 32,
-        min_contrast: 1.0,
-        min_separation: 3,
-        ..Default::default()
-    };
-
-    let result = deblend_multi_threshold_test(&data, &pixels, &labels, &config);
+    let result = deblend_multi_threshold_test(&data, &pixels, &labels, 32, 3, 1.0);
 
     assert_eq!(
         result.len(),
@@ -216,14 +194,7 @@ fn test_three_stars_deblend() {
         &[(30, 50, 1.0, 2.5), (75, 50, 0.9, 2.5), (120, 50, 0.8, 2.5)],
     );
 
-    let config = DeblendConfig {
-        n_thresholds: 32,
-        min_contrast: 0.005,
-        min_separation: 3,
-        ..Default::default()
-    };
-
-    let result = deblend_multi_threshold_test(&data, &pixels, &labels, &config);
+    let result = deblend_multi_threshold_test(&data, &pixels, &labels, 32, 3, 0.005);
 
     assert_eq!(
         result.len(),
@@ -246,14 +217,7 @@ fn test_hierarchical_deblend() {
         &[(30, 50, 1.0, 2.5), (100, 50, 0.8, 2.5), (115, 50, 0.7, 2.5)],
     );
 
-    let config = DeblendConfig {
-        n_thresholds: 32,
-        min_contrast: 0.1,
-        min_separation: 3,
-        ..Default::default()
-    };
-
-    let result = deblend_multi_threshold_test(&data, &pixels, &labels, &config);
+    let result = deblend_multi_threshold_test(&data, &pixels, &labels, 32, 3, 0.1);
 
     assert!(
         result.len() >= 2,
@@ -266,14 +230,7 @@ fn test_equal_brightness_stars() {
     let (pixels, labels, data) =
         make_test_component(100, 100, &[(30, 50, 1.0, 2.5), (70, 50, 1.0, 2.5)]);
 
-    let config = DeblendConfig {
-        n_thresholds: 32,
-        min_contrast: 0.005,
-        min_separation: 3,
-        ..Default::default()
-    };
-
-    let result = deblend_multi_threshold_test(&data, &pixels, &labels, &config);
+    let result = deblend_multi_threshold_test(&data, &pixels, &labels, 32, 3, 0.005);
 
     assert_eq!(
         result.len(),
@@ -294,21 +251,9 @@ fn test_contrast_at_boundary() {
     let (pixels, labels, data) =
         make_test_component(100, 100, &[(30, 50, 1.0, 2.5), (70, 50, 0.1, 2.5)]);
 
-    let config_pass = DeblendConfig {
-        n_thresholds: 32,
-        min_contrast: 0.09,
-        min_separation: 3,
-        ..Default::default()
-    };
-    let result_pass = deblend_multi_threshold_test(&data, &pixels, &labels, &config_pass);
+    let result_pass = deblend_multi_threshold_test(&data, &pixels, &labels, 32, 3, 0.09);
 
-    let config_fail = DeblendConfig {
-        n_thresholds: 32,
-        min_contrast: 0.15,
-        min_separation: 3,
-        ..Default::default()
-    };
-    let result_fail = deblend_multi_threshold_test(&data, &pixels, &labels, &config_fail);
+    let result_fail = deblend_multi_threshold_test(&data, &pixels, &labels, 32, 3, 0.15);
 
     assert!(
         result_pass.len() >= result_fail.len(),
@@ -321,14 +266,7 @@ fn test_pixel_assignment_conservation() {
     let (pixels, labels, data) =
         make_test_component(100, 100, &[(30, 50, 1.0, 2.5), (70, 50, 0.8, 2.5)]);
 
-    let config = DeblendConfig {
-        n_thresholds: 32,
-        min_contrast: 0.005,
-        min_separation: 3,
-        ..Default::default()
-    };
-
-    let result = deblend_multi_threshold_test(&data, &pixels, &labels, &config);
+    let result = deblend_multi_threshold_test(&data, &pixels, &labels, 32, 3, 0.005);
 
     let total_area: usize = result.iter().map(|o| o.area).sum();
     assert_eq!(
@@ -342,14 +280,7 @@ fn test_vertical_star_pair() {
     let (pixels, labels, data) =
         make_test_component(100, 100, &[(50, 30, 1.0, 2.5), (50, 70, 0.8, 2.5)]);
 
-    let config = DeblendConfig {
-        n_thresholds: 32,
-        min_contrast: 0.005,
-        min_separation: 3,
-        ..Default::default()
-    };
-
-    let result = deblend_multi_threshold_test(&data, &pixels, &labels, &config);
+    let result = deblend_multi_threshold_test(&data, &pixels, &labels, 32, 3, 0.005);
 
     assert_eq!(result.len(), 2, "Vertically separated stars should deblend");
 
@@ -364,14 +295,7 @@ fn test_diagonal_star_pair() {
     let (pixels, labels, data) =
         make_test_component(100, 100, &[(30, 30, 1.0, 2.5), (70, 70, 0.8, 2.5)]);
 
-    let config = DeblendConfig {
-        n_thresholds: 32,
-        min_contrast: 0.005,
-        min_separation: 3,
-        ..Default::default()
-    };
-
-    let result = deblend_multi_threshold_test(&data, &pixels, &labels, &config);
+    let result = deblend_multi_threshold_test(&data, &pixels, &labels, 32, 3, 0.005);
 
     assert_eq!(result.len(), 2, "Diagonally separated stars should deblend");
 }
@@ -380,23 +304,8 @@ fn test_diagonal_star_pair() {
 fn test_n_thresholds_effect() {
     let (pixels, labels, data) =
         make_test_component(100, 100, &[(35, 50, 1.0, 2.5), (65, 50, 0.9, 2.5)]);
-
-    let config_few = DeblendConfig {
-        n_thresholds: 4,
-        min_contrast: 0.005,
-        min_separation: 3,
-        ..Default::default()
-    };
-
-    let config_many = DeblendConfig {
-        n_thresholds: 64,
-        min_contrast: 0.005,
-        min_separation: 3,
-        ..Default::default()
-    };
-
-    let result_few = deblend_multi_threshold_test(&data, &pixels, &labels, &config_few);
-    let result_many = deblend_multi_threshold_test(&data, &pixels, &labels, &config_many);
+    let result_few = deblend_multi_threshold_test(&data, &pixels, &labels, 4, 3, 0.005);
+    let result_many = deblend_multi_threshold_test(&data, &pixels, &labels, 64, 3, 0.005);
 
     assert!(
         result_many.len() >= result_few.len(),
@@ -419,8 +328,7 @@ fn test_single_pixel_component() {
         area: 1,
     };
 
-    let config = DeblendConfig::default();
-    let result = deblend_multi_threshold_test(&data, &pixels, &labels, &config);
+    let result = deblend_multi_threshold_test(&data, &pixels, &labels, 32, 3, 0.005);
 
     assert_eq!(result.len(), 1, "Single pixel should produce one object");
     assert_eq!(result[0].area, 1);
@@ -454,14 +362,7 @@ fn test_flat_profile_no_deblend() {
         area,
     };
 
-    let config = DeblendConfig {
-        n_thresholds: 32,
-        min_contrast: 0.005,
-        min_separation: 3,
-        ..Default::default()
-    };
-
-    let result = deblend_multi_threshold_test(&data, &pixels, &labels, &config);
+    let result = deblend_multi_threshold_test(&data, &pixels, &labels, 32, 3, 0.005);
 
     assert_eq!(
         result.len(),
@@ -483,14 +384,7 @@ fn test_many_stars_max_peaks_limit() {
 
     let (pixels, labels, data) = make_test_component(180, 100, &stars);
 
-    let config = DeblendConfig {
-        n_thresholds: 32,
-        min_contrast: 0.005,
-        min_separation: 3,
-        ..Default::default()
-    };
-
-    let result = deblend_multi_threshold_test(&data, &pixels, &labels, &config);
+    let result = deblend_multi_threshold_test(&data, &pixels, &labels, 32, 3, 0.005);
 
     // Should not exceed MAX_PEAKS
     assert!(
@@ -521,14 +415,7 @@ fn test_large_tree_over_64_nodes() {
 
     let (pixels, labels, data) = make_test_component(150, 150, &stars);
 
-    let config = DeblendConfig {
-        n_thresholds: 64, // More thresholds = more potential nodes
-        min_contrast: 0.005,
-        min_separation: 3,
-        ..Default::default()
-    };
-
-    let result = deblend_multi_threshold_test(&data, &pixels, &labels, &config);
+    let result = deblend_multi_threshold_test(&data, &pixels, &labels, 64, 3, 0.005);
 
     // Should find multiple objects
     assert!(result.len() >= 2, "Should find multiple objects");
@@ -554,14 +441,7 @@ fn test_very_large_tree_heap_fallback() {
 
     let (pixels, labels, data) = make_test_component(150, 150, &stars);
 
-    let config = DeblendConfig {
-        n_thresholds: 128, // Very high threshold count to create many nodes
-        min_contrast: 0.001,
-        min_separation: 2,
-        ..Default::default()
-    };
-
-    let result = deblend_multi_threshold_test(&data, &pixels, &labels, &config);
+    let result = deblend_multi_threshold_test(&data, &pixels, &labels, 128, 2, 0.001);
 
     // Should find multiple objects (exact count depends on merging)
     assert!(!result.is_empty(), "Should find at least one object");
@@ -577,16 +457,9 @@ fn test_buffer_reuse_consistency() {
     let (pixels, labels, data) =
         make_test_component(100, 100, &[(30, 50, 1.0, 2.5), (70, 50, 0.8, 2.5)]);
 
-    let config = DeblendConfig {
-        n_thresholds: 32,
-        min_contrast: 0.005,
-        min_separation: 3,
-        ..Default::default()
-    };
-
-    let result1 = deblend_multi_threshold_test(&data, &pixels, &labels, &config);
-    let result2 = deblend_multi_threshold_test(&data, &pixels, &labels, &config);
-    let result3 = deblend_multi_threshold_test(&data, &pixels, &labels, &config);
+    let result1 = deblend_multi_threshold_test(&data, &pixels, &labels, 32, 3, 0.005);
+    let result2 = deblend_multi_threshold_test(&data, &pixels, &labels, 32, 3, 0.005);
+    let result3 = deblend_multi_threshold_test(&data, &pixels, &labels, 32, 3, 0.005);
 
     // All runs should produce identical results
     assert_eq!(result1.len(), result2.len());
@@ -613,14 +486,7 @@ fn test_connected_regions_complex_shape() {
         ],
     );
 
-    let config = DeblendConfig {
-        n_thresholds: 32,
-        min_contrast: 0.005,
-        min_separation: 3,
-        ..Default::default()
-    };
-
-    let result = deblend_multi_threshold_test(&data, &pixels, &labels, &config);
+    let result = deblend_multi_threshold_test(&data, &pixels, &labels, 32, 3, 0.005);
 
     // Should find both peaks
     assert_eq!(result.len(), 2, "Should find both peaks");
@@ -645,14 +511,7 @@ fn test_bbox_contains_all_peaks() {
         &[(30, 30, 1.0, 2.5), (75, 50, 0.9, 2.5), (120, 70, 0.8, 2.5)],
     );
 
-    let config = DeblendConfig {
-        n_thresholds: 32,
-        min_contrast: 0.005,
-        min_separation: 3,
-        ..Default::default()
-    };
-
-    let result = deblend_multi_threshold_test(&data, &pixels, &labels, &config);
+    let result = deblend_multi_threshold_test(&data, &pixels, &labels, 32, 3, 0.005);
 
     for candidate in &result {
         assert!(
@@ -670,14 +529,7 @@ fn test_peak_values_match_image() {
     let (pixels, labels, data) =
         make_test_component(100, 100, &[(30, 50, 1.0, 2.5), (70, 50, 0.8, 2.5)]);
 
-    let config = DeblendConfig {
-        n_thresholds: 32,
-        min_contrast: 0.005,
-        min_separation: 3,
-        ..Default::default()
-    };
-
-    let result = deblend_multi_threshold_test(&data, &pixels, &labels, &config);
+    let result = deblend_multi_threshold_test(&data, &pixels, &labels, 32, 3, 0.005);
 
     for candidate in &result {
         let actual_value = pixels[(candidate.peak.x, candidate.peak.y)];
@@ -696,14 +548,7 @@ fn test_single_threshold_level() {
     let (pixels, labels, data) =
         make_test_component(100, 100, &[(30, 50, 1.0, 2.5), (70, 50, 0.8, 2.5)]);
 
-    let config = DeblendConfig {
-        n_thresholds: 1,
-        min_contrast: 0.005,
-        min_separation: 3,
-        ..Default::default()
-    };
-
-    let result = deblend_multi_threshold_test(&data, &pixels, &labels, &config);
+    let result = deblend_multi_threshold_test(&data, &pixels, &labels, 1, 3, 0.005);
 
     // Should still produce valid output
     assert!(!result.is_empty(), "Should produce at least one object");
@@ -718,14 +563,7 @@ fn test_zero_threshold_level() {
     // Test with n_thresholds = 0 (edge case - should still work)
     let (pixels, labels, data) = make_test_component(100, 100, &[(50, 50, 1.0, 2.5)]);
 
-    let config = DeblendConfig {
-        n_thresholds: 0,
-        min_contrast: 0.005,
-        min_separation: 3,
-        ..Default::default()
-    };
-
-    let result = deblend_multi_threshold_test(&data, &pixels, &labels, &config);
+    let result = deblend_multi_threshold_test(&data, &pixels, &labels, 0, 3, 0.005);
 
     // Should produce single object
     assert_eq!(result.len(), 1, "Should produce one object");

@@ -2,11 +2,12 @@
 //!
 //! Provides utilities to create BackgroundMap instances for benchmarks and tests.
 
-use crate::star_detection::background::{BackgroundConfig, BackgroundMap};
+use crate::star_detection::Config;
+use crate::star_detection::background::BackgroundMap;
 
 /// Create a uniform BackgroundMap with constant background and noise values.
 pub fn uniform(width: usize, height: usize, background: f32, noise: f32) -> BackgroundMap {
-    let mut bg = BackgroundMap::new_uninit(width, height, BackgroundConfig::default());
+    let mut bg = BackgroundMap::new_uninit(width, height, &Config::default());
     bg.background.fill(background);
     bg.noise.fill(noise);
     bg
@@ -20,7 +21,7 @@ pub fn horizontal_gradient(
     bg_right: f32,
     noise: f32,
 ) -> BackgroundMap {
-    let mut bg = BackgroundMap::new_uninit(width, height, BackgroundConfig::default());
+    let mut bg = BackgroundMap::new_uninit(width, height, &Config::default());
     for y in 0..height {
         for x in 0..width {
             let t = if width > 1 {
@@ -43,7 +44,7 @@ pub fn vertical_gradient(
     bg_bottom: f32,
     noise: f32,
 ) -> BackgroundMap {
-    let mut bg = BackgroundMap::new_uninit(width, height, BackgroundConfig::default());
+    let mut bg = BackgroundMap::new_uninit(width, height, &Config::default());
     for y in 0..height {
         let t = if height > 1 {
             y as f32 / (height - 1) as f32
@@ -67,7 +68,7 @@ pub fn vignette(
     bg_edge: f32,
     noise: f32,
 ) -> BackgroundMap {
-    let mut bg = BackgroundMap::new_uninit(width, height, BackgroundConfig::default());
+    let mut bg = BackgroundMap::new_uninit(width, height, &Config::default());
     let cx = width as f32 / 2.0;
     let cy = height as f32 / 2.0;
     let max_r = (cx * cx + cy * cy).sqrt();

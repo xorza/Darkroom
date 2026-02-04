@@ -3,7 +3,7 @@
 //! Run with: `cargo test -p lumos --features real-data rho_opiuchi -- --ignored --nocapture`
 
 use crate::star_detection::StarDetector;
-use crate::star_detection::config::StarDetectionConfig;
+use crate::star_detection::config::Config;
 use crate::testing::{calibration_dir, init_tracing};
 use crate::{AstroImage, CentroidMethod};
 use common::test_utils::test_output_path;
@@ -42,7 +42,7 @@ fn test_detect_rho_opiuchi() {
         astro_image.height()
     );
 
-    let mut detector = StarDetector::from_config(StarDetectionConfig::default().precise_ground());
+    let mut detector = StarDetector::from_config(Config::precise_ground());
 
     let start = std::time::Instant::now();
     let result = detector.detect(&astro_image);
@@ -137,8 +137,8 @@ fn quick_bench_detect_rho_opiuchi(b: bench::Bencher) {
         astro_image.width(),
         astro_image.height()
     );
-    let mut config = StarDetectionConfig::default().precise_ground();
-    config.centroid.method = CentroidMethod::MoffatFit { beta: 2.5 };
+    let mut config = Config::precise_ground();
+    config.centroid_method = CentroidMethod::MoffatFit { beta: 2.5 };
     let mut detector = StarDetector::from_config(config);
 
     b.bench(|| detector.detect(&astro_image));

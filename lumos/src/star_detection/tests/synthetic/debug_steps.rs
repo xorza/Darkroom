@@ -7,7 +7,7 @@ use crate::{AstroImage, ImageDimensions};
 
 use crate::star_detection::background::BackgroundMap;
 use crate::star_detection::mask_dilation::dilate_mask;
-use crate::star_detection::{StarDetectionConfig, StarDetector};
+use crate::star_detection::{StarDetector, config::Config};
 use crate::testing::init_tracing;
 use glam::Vec2;
 use image::GrayImage;
@@ -100,10 +100,9 @@ fn test_debug_synthetic_steps() {
     input_img.save(&path).unwrap();
     println!("Saved: {:?}", path);
 
-    let detection_config = StarDetectionConfig::default();
+    let detection_config = Config::default();
     let grayscale_buf = Buffer2::new(width, height, grayscale.clone());
-    let background =
-        crate::testing::estimate_background(&grayscale_buf, detection_config.background.clone());
+    let background = crate::testing::estimate_background(&grayscale_buf, &detection_config);
 
     println!(
         "Background stats: min={:.4}, max={:.4}",
@@ -160,7 +159,7 @@ fn test_debug_synthetic_steps() {
         height,
         background.background.pixels(),
         background.noise.pixels(),
-        detection_config.background.sigma_threshold,
+        detection_config.sigma_threshold,
     );
     let mask_count = mask.iter().filter(|&&b| b).count();
     println!(

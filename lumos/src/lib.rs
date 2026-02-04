@@ -51,15 +51,14 @@ pub use calibration_masters::CalibrationMasters;
 // ============================================================================
 
 pub use star_detection::{
-    BackgroundConfig,
     // Advanced: background estimation
     BackgroundMap,
     // Centroid methods
     CentroidMethod,
+    // Configuration
+    Config as StarDetectionConfig,
     // Sensor defects
     DefectMap,
-    // Sub-configs
-    FilteringConfig,
     // Advanced: profile fitting
     GaussianFitConfig,
     GaussianFitResult,
@@ -67,10 +66,8 @@ pub use star_detection::{
     MoffatFitConfig,
     MoffatFitResult,
     NoiseModel,
-    PsfConfig,
     // Main API
     Star,
-    StarDetectionConfig,
     StarDetectionDiagnostics,
     StarDetectionResult,
     StarDetector,

@@ -5,17 +5,26 @@ use super::*;
 use crate::common::Buffer2;
 use crate::math::Vec2us;
 use crate::star_detection::candidate_detection::{LabelMap, label_map_from_raw};
-use crate::star_detection::config::DeblendConfig;
 
 /// Convenience wrapper for tests — creates fresh buffers per call.
 fn deblend_multi_threshold_test(
     data: &ComponentData,
     pixels: &Buffer2<f32>,
     labels: &LabelMap,
-    config: &DeblendConfig,
+    n_thresholds: usize,
+    min_separation: usize,
+    min_contrast: f32,
 ) -> smallvec::SmallVec<[DeblendedCandidate; MAX_PEAKS]> {
     let mut buffers = DeblendBuffers::new();
-    deblend_multi_threshold(data, pixels, labels, config, &mut buffers)
+    deblend_multi_threshold(
+        data,
+        pixels,
+        labels,
+        n_thresholds,
+        min_separation,
+        min_contrast,
+        &mut buffers,
+    )
 }
 
 /// Create a test image with Gaussian stars and return pixels, labels, and component data.
@@ -69,13 +78,11 @@ fn test_local_vs_multi_threshold_single_star() {
     // Both algorithms should produce same result for single star
     let (pixels, labels, data) = make_test_component(100, 100, &[(50, 50, 1.0, 3.0)]);
 
-    // Local maxima deblending
-    let local_config = DeblendConfig::default();
-    let local_result = deblend_local_maxima(&data, &pixels, &labels, &local_config);
+    // Local maxima deblending (default: min_separation=3, min_prominence=0.3)
+    let local_result = deblend_local_maxima(&data, &pixels, &labels, 3, 0.3);
 
-    // Multi-threshold deblending
-    let mt_config = DeblendConfig::default();
-    let mt_result = deblend_multi_threshold_test(&data, &pixels, &labels, &mt_config);
+    // Multi-threshold deblending (default: n_thresholds=32, min_separation=3, min_contrast=0.005)
+    let mt_result = deblend_multi_threshold_test(&data, &pixels, &labels, 32, 3, 0.005);
 
     assert_eq!(local_result.len(), 1);
     assert_eq!(mt_result.len(), 1);
@@ -92,38 +99,11 @@ fn test_local_vs_multi_threshold_two_stars() {
         make_test_component(100, 100, &[(30, 50, 1.0, 2.5), (70, 50, 0.8, 2.5)]);
 
     // Local maxima deblending
-    let local_config = DeblendConfig {
-        min_separation: 3,
-        min_prominence: 0.3,
-        ..Default::default()
-    };
-    let local_result = deblend_local_maxima(&data, &pixels, &labels, &local_config);
+    let local_result = deblend_local_maxima(&data, &pixels, &labels, 3, 0.3);
 
     // Multi-threshold deblending
-    let mt_config = DeblendConfig {
-        n_thresholds: 32,
-        min_contrast: 0.005,
-        min_separation: 3,
-        ..Default::default()
-    };
-    let mt_result = deblend_multi_threshold_test(&data, &pixels, &labels, &mt_config);
+    let mt_result = deblend_multi_threshold_test(&data, &pixels, &labels, 32, 3, 0.005);
 
     assert_eq!(local_result.len(), 2, "Local maxima should find 2 stars");
     assert_eq!(mt_result.len(), 2, "Multi-threshold should find 2 stars");
-}
-
-#[test]
-fn test_deblend_config_conversion() {
-    let config = DeblendConfig {
-        min_separation: 5,
-        min_prominence: 0.5,
-        n_thresholds: 64,
-        min_contrast: 0.01,
-    };
-
-    assert_eq!(config.min_separation, 5);
-    assert!((config.min_prominence - 0.5).abs() < 1e-6);
-    assert!(config.is_multi_threshold());
-    assert_eq!(config.n_thresholds, 64);
-    assert!((config.min_contrast - 0.01).abs() < 1e-6);
 }

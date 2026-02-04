@@ -450,7 +450,7 @@ fn test_warp_with_detected_transform() {
     use crate::AstroImage;
 
     use crate::registration::{RegistrationConfig, Registrator};
-    use crate::star_detection::{BackgroundConfig, StarDetectionConfig};
+    use crate::star_detection::Config;
 
     let config = StarFieldConfig {
         width: 256,
@@ -481,19 +481,10 @@ fn test_warp_with_detected_transform() {
     let target_pixels = warp_image(&ref_pixels, width, height, &true_transform, &warp_config);
 
     // Detect stars in both images
-    let mut det = StarDetector::from_config(StarDetectionConfig {
-        psf: crate::star_detection::PsfConfig {
-            expected_fwhm: 0.0,
-            ..Default::default()
-        },
-        filtering: crate::star_detection::FilteringConfig {
-            min_snr: 5.0,
-            ..Default::default()
-        },
-        background: BackgroundConfig {
-            sigma_threshold: 3.0,
-            ..Default::default()
-        },
+    let mut det = StarDetector::from_config(Config {
+        expected_fwhm: 0.0,
+        min_snr: 5.0,
+        sigma_threshold: 3.0,
         ..Default::default()
     });
 

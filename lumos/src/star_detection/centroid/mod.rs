@@ -28,8 +28,9 @@ use glam::{DVec2, Vec2};
 
 use super::background::BackgroundMap;
 use super::candidate_detection::StarCandidate;
+use super::config::Config;
 use super::cosmic_ray::compute_laplacian_snr;
-use super::{CentroidMethod, LocalBackgroundMethod, Star, StarDetectionConfig};
+use super::{CentroidMethod, LocalBackgroundMethod, Star};
 use crate::common::Buffer2;
 use crate::math::FWHM_TO_SIGMA;
 
@@ -301,12 +302,12 @@ pub fn compute_centroid(
     pixels: &Buffer2<f32>,
     background: &BackgroundMap,
     candidate: &StarCandidate,
-    config: &StarDetectionConfig,
+    config: &Config,
 ) -> Option<Star> {
     let width = pixels.width();
     let height = pixels.height();
     // Compute adaptive stamp radius based on expected FWHM
-    let stamp_radius = compute_stamp_radius(config.psf.expected_fwhm);
+    let stamp_radius = compute_stamp_radius(config.expected_fwhm);
 
     // Initial position from peak
     let mut pos = Vec2::new(candidate.peak.x as f32, candidate.peak.y as f32);
@@ -315,7 +316,7 @@ pub fn compute_centroid(
     // When a fitting method follows, only 2 iterations are needed — the L-M
     // optimizer refines position independently and converges to the same result
     // regardless of Phase 1 precision (verified by tests).
-    let phase1_iters = match config.centroid.method {
+    let phase1_iters = match config.centroid_method {
         CentroidMethod::WeightedMoments => MAX_MOMENTS_ITERATIONS,
         CentroidMethod::GaussianFit | CentroidMethod::MoffatFit { .. } => {
             MOMENTS_ITERATIONS_BEFORE_FIT
@@ -329,7 +330,7 @@ pub fn compute_centroid(
             background,
             pos,
             stamp_radius,
-            config.psf.expected_fwhm,
+            config.expected_fwhm,
         )?;
 
         let delta = new_pos - pos;
@@ -346,7 +347,7 @@ pub fn compute_centroid(
     let idx = icy as usize * width + icx as usize;
     let global_fallback = || (background.background[idx], background.noise[idx]);
 
-    let (local_bg, local_noise) = match config.centroid.local_background_method {
+    let (local_bg, local_noise) = match config.local_background {
         LocalBackgroundMethod::GlobalMap => global_fallback(),
         LocalBackgroundMethod::LocalAnnulus => {
             let inner_radius = stamp_radius;
@@ -357,9 +358,7 @@ pub fn compute_centroid(
     };
 
     // Refine with profile fitting if requested.
-    // Position convergence threshold of 0.001px enables early L-M termination
-    // once the centroid is stable, skipping unnecessary refinement of amplitude/sigma.
-    match config.centroid.method {
+    match config.centroid_method {
         CentroidMethod::GaussianFit => {
             let fit_config = GaussianFitConfig {
                 position_convergence_threshold: 0.001,

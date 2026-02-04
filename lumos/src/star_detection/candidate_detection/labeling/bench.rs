@@ -1,7 +1,7 @@
 //! Benchmarks for connected component labeling.
 
 use crate::common::{BitBuffer2, Buffer2};
-use crate::star_detection::background::BackgroundConfig;
+use crate::star_detection::config::Config;
 use crate::star_detection::config::Connectivity;
 use crate::star_detection::mask_dilation::dilate_mask;
 use crate::star_detection::threshold_mask::create_threshold_mask;
@@ -16,7 +16,7 @@ fn create_detection_mask(pixels: &Buffer2<f32>, sigma_threshold: f32) -> BitBuff
     let height = pixels.height();
 
     // Create background map (same as real pipeline)
-    let background = crate::testing::estimate_background(pixels, BackgroundConfig::default());
+    let background = crate::testing::estimate_background(pixels, &Config::default());
 
     // Create threshold mask
     let mut mask = BitBuffer2::new_filled(width, height, false);

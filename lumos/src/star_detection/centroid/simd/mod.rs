@@ -108,7 +108,7 @@ pub fn refine_centroid(
 mod tests {
     use super::*;
     use crate::common::Buffer2;
-    use crate::star_detection::background::BackgroundConfig;
+    use crate::star_detection::config::Config;
     use glam::Vec2;
 
     fn make_gaussian_star(
@@ -143,7 +143,7 @@ mod tests {
         let width = 64;
         let height = 64;
         let pixels = make_gaussian_star(width, height, Vec2::splat(32.0), 2.5, 0.8, 0.1);
-        let bg = crate::testing::estimate_background(&pixels, BackgroundConfig::default());
+        let bg = crate::testing::estimate_background(&pixels, &Config::default());
 
         let result = refine_centroid(&pixels, width, height, &bg, Vec2::splat(32.0), 7, 4.0);
 
@@ -167,7 +167,7 @@ mod tests {
         let height = 64;
         let true_pos = Vec2::new(32.3, 32.7);
         let pixels = make_gaussian_star(width, height, true_pos, 2.5, 0.8, 0.1);
-        let bg = crate::testing::estimate_background(&pixels, BackgroundConfig::default());
+        let bg = crate::testing::estimate_background(&pixels, &Config::default());
 
         let result = refine_centroid(&pixels, width, height, &bg, Vec2::splat(32.0), 7, 4.0);
 
@@ -193,7 +193,7 @@ mod tests {
         let width = 64;
         let height = 64;
         let pixels = make_gaussian_star(width, height, Vec2::new(32.3, 32.7), 2.5, 0.8, 0.1);
-        let bg = crate::testing::estimate_background(&pixels, BackgroundConfig::default());
+        let bg = crate::testing::estimate_background(&pixels, &Config::default());
 
         let scalar =
             refine_centroid_scalar(&pixels, width, height, &bg, Vec2::splat(32.0), 7, 4.0).unwrap();
@@ -220,7 +220,7 @@ mod tests {
         let width = 64;
         let height = 64;
         let pixels = make_gaussian_star(width, height, Vec2::splat(32.0), 2.5, 0.8, 0.1);
-        let bg = crate::testing::estimate_background(&pixels, BackgroundConfig::default());
+        let bg = crate::testing::estimate_background(&pixels, &Config::default());
 
         assert!(
             refine_centroid(&pixels, width, height, &bg, Vec2::new(3.0, 32.0), 7, 4.0).is_none()
@@ -241,7 +241,7 @@ mod tests {
         let width = 64;
         let height = 64;
         let pixels = make_uniform_background(width, height, 0.1);
-        let bg = crate::testing::estimate_background(&pixels, BackgroundConfig::default());
+        let bg = crate::testing::estimate_background(&pixels, &Config::default());
 
         let result = refine_centroid(&pixels, width, height, &bg, Vec2::splat(32.0), 7, 4.0);
         assert!(result.is_none());
@@ -255,7 +255,7 @@ mod tests {
         for fwhm in [2.0, 4.0, 6.0, 8.0, 10.0] {
             let sigma = fwhm / 2.355;
             let pixels = make_gaussian_star(width, height, Vec2::new(64.3, 64.7), sigma, 0.8, 0.1);
-            let bg = crate::testing::estimate_background(&pixels, BackgroundConfig::default());
+            let bg = crate::testing::estimate_background(&pixels, &Config::default());
 
             let stamp_radius = ((fwhm * 1.75).ceil() as usize).clamp(4, 15);
 

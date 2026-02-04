@@ -9,7 +9,7 @@ use std::hint::black_box;
 
 use super::scalar::refine_centroid_scalar;
 use crate::common::Buffer2;
-use crate::star_detection::background::BackgroundConfig;
+use crate::star_detection::config::Config;
 
 #[cfg(target_arch = "x86_64")]
 use super::avx2::refine_centroid_avx2;
@@ -50,7 +50,7 @@ fn bench_simd_centroid_comparison(b: ::bench::Bencher) {
     let width = 64;
     let height = 64;
     let pixels = make_gaussian_star(width, height, Vec2::new(32.3, 32.7), 2.5, 0.8, 0.1);
-    let bg = crate::testing::estimate_background(&pixels, BackgroundConfig::default());
+    let bg = crate::testing::estimate_background(&pixels, &Config::default());
     let stamp_radius = 7; // typical for FWHM ~4
     let expected_fwhm = 4.0;
 
@@ -132,7 +132,7 @@ fn bench_simd_centroid_batch_1000(b: ::bench::Bencher) {
     let width = 64;
     let height = 64;
     let pixels = make_gaussian_star(width, height, Vec2::new(32.3, 32.7), 2.5, 0.8, 0.1);
-    let bg = crate::testing::estimate_background(&pixels, BackgroundConfig::default());
+    let bg = crate::testing::estimate_background(&pixels, &Config::default());
     let stamp_radius = 7;
     let expected_fwhm = 4.0;
 
@@ -222,7 +222,7 @@ fn bench_simd_centroid_stamp_sizes(b: ::bench::Bencher) {
     let width = 128;
     let height = 128;
     let pixels = make_gaussian_star(width, height, Vec2::new(64.3, 64.7), 4.0, 0.8, 0.1);
-    let bg = crate::testing::estimate_background(&pixels, BackgroundConfig::default());
+    let bg = crate::testing::estimate_background(&pixels, &Config::default());
 
     // Small stamp (9x9) - remainder handling matters more
     let stamp_radius_small = 4;

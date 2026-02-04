@@ -4,7 +4,7 @@
 
 use crate::common::Buffer2;
 use crate::math::fwhm_to_sigma;
-use crate::star_detection::background::{BackgroundConfig, BackgroundMap};
+use crate::star_detection::config::Config;
 use crate::star_detection::convolution::gaussian_convolve;
 use crate::star_detection::tests::common::output::save_grayscale;
 use crate::testing::init_tracing;
@@ -57,7 +57,7 @@ fn test_gaussian_filter_sparse() {
     // Estimate and subtract background
     let background = crate::testing::estimate_background(
         &pixels,
-        BackgroundConfig {
+        &Config {
             tile_size: TILE_SIZE,
             ..Default::default()
         },
@@ -157,7 +157,7 @@ fn test_gaussian_filter_fwhm_range() {
     // Background subtraction
     let background = crate::testing::estimate_background(
         &pixels,
-        BackgroundConfig {
+        &Config {
             tile_size: TILE_SIZE,
             ..Default::default()
         },
@@ -229,7 +229,7 @@ fn test_gaussian_filter_noise() {
     // Background subtraction
     let background = crate::testing::estimate_background(
         &pixels,
-        BackgroundConfig {
+        &Config {
             tile_size: TILE_SIZE,
             ..Default::default()
         },

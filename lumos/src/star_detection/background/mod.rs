@@ -18,16 +18,20 @@ use common::parallel;
 use rayon::iter::ParallelIterator;
 
 use super::buffer_pool::BufferPool;
+use super::config::{BackgroundRefinement, Config};
 use tile_grid::TileGrid;
-
-// Re-export BackgroundConfig from config module
-pub use super::config::BackgroundConfig;
 
 /// Background map with per-pixel background and noise estimates.
 #[derive(Debug)]
 pub struct BackgroundMap {
-    /// Configuration used for background estimation.
-    config: BackgroundConfig,
+    // Stored config fields needed by estimate/refine
+    tile_size: usize,
+    sigma_clip_iterations: usize,
+    refinement: BackgroundRefinement,
+    sigma_threshold: f32,
+    bg_mask_dilation: usize,
+    min_unmasked_fraction: f32,
+
     /// Tile grid for intermediate statistics (reused across estimates).
     tile_grid: TileGrid,
     /// Per-pixel background values.
@@ -45,18 +49,21 @@ impl BackgroundMap {
     ///
     /// Buffers are allocated but not filled with meaningful values.
     /// Use `estimate` to populate them.
-    ///
-    /// Note: `adaptive_sigma` is only allocated when using `BackgroundRefinement::AdaptiveSigma`.
-    /// Iterative refinement produces accurate backgrounds that don't need adaptive thresholding.
-    ///
-    /// # Panics
-    /// Panics if config validation fails.
-    pub fn new_uninit(width: usize, height: usize, config: BackgroundConfig) -> Self {
-        config.validate();
+    pub fn new_uninit(width: usize, height: usize, config: &Config) -> Self {
+        assert!(
+            (16..=256).contains(&config.tile_size),
+            "tile_size must be between 16 and 256, got {}",
+            config.tile_size
+        );
         let has_adaptive = config.refinement.adaptive_sigma().is_some();
         Self {
+            tile_size: config.tile_size,
+            sigma_clip_iterations: config.sigma_clip_iterations,
+            refinement: config.refinement,
+            sigma_threshold: config.sigma_threshold,
+            bg_mask_dilation: config.bg_mask_dilation,
+            min_unmasked_fraction: config.min_unmasked_fraction,
             tile_grid: TileGrid::new_uninit(width, height, config.tile_size),
-            config,
             background: Buffer2::new_default(width, height),
             noise: Buffer2::new_default(width, height),
             adaptive_sigma: if has_adaptive {
@@ -68,20 +75,18 @@ impl BackgroundMap {
     }
 
     /// Create a BackgroundMap by acquiring buffers from a pool.
-    ///
-    /// Note: `adaptive_sigma` is only allocated when using `BackgroundRefinement::AdaptiveSigma`.
-    /// Iterative refinement produces accurate backgrounds that don't need adaptive thresholding.
-    ///
-    /// # Panics
-    /// Panics if config validation fails.
-    pub fn from_pool(pool: &mut BufferPool, config: BackgroundConfig) -> Self {
-        config.validate();
+    pub fn from_pool(pool: &mut BufferPool, config: &Config) -> Self {
         let has_adaptive = config.refinement.adaptive_sigma().is_some();
         let width = pool.width();
         let height = pool.height();
         Self {
+            tile_size: config.tile_size,
+            sigma_clip_iterations: config.sigma_clip_iterations,
+            refinement: config.refinement,
+            sigma_threshold: config.sigma_threshold,
+            bg_mask_dilation: config.bg_mask_dilation,
+            min_unmasked_fraction: config.min_unmasked_fraction,
             tile_grid: TileGrid::new_uninit(width, height, config.tile_size),
-            config,
             background: pool.acquire_f32(),
             noise: pool.acquire_f32(),
             adaptive_sigma: if has_adaptive {
@@ -90,11 +95,6 @@ impl BackgroundMap {
                 None
             },
         }
-    }
-
-    /// Get reference to the configuration.
-    pub fn config(&self) -> &BackgroundConfig {
-        &self.config
     }
 
     /// Release this BackgroundMap's buffers back to the pool.
@@ -131,20 +131,15 @@ impl BackgroundMap {
         debug_assert_eq!(self.background.width(), pixels.width());
         debug_assert_eq!(self.background.height(), pixels.height());
         assert!(
-            pixels.width() >= self.config.tile_size && pixels.height() >= self.config.tile_size,
+            pixels.width() >= self.tile_size && pixels.height() >= self.tile_size,
             "Image must be at least tile_size x tile_size"
         );
 
         // Only compute adaptive sigma stats if we have the buffer allocated
-        let adaptive_config = self.config.refinement.adaptive_sigma();
+        let adaptive_config = self.refinement.adaptive_sigma();
 
-        self.tile_grid.compute(
-            pixels,
-            None,
-            0,
-            self.config.sigma_clip_iterations,
-            adaptive_config,
-        );
+        self.tile_grid
+            .compute(pixels, None, 0, self.sigma_clip_iterations, adaptive_config);
 
         interpolate_from_grid(
             &self.tile_grid,
@@ -158,9 +153,6 @@ impl BackgroundMap {
     ///
     /// Call this after `estimate` when using `BackgroundRefinement::Iterative`.
     /// Requires pre-allocated bit buffers for mask and scratch space.
-    ///
-    /// Note: This method is only called when using iterative refinement,
-    /// which is mutually exclusive with adaptive sigma thresholding.
     pub fn refine(
         &mut self,
         pixels: &Buffer2<f32>,
@@ -172,22 +164,22 @@ impl BackgroundMap {
             "adaptive_sigma should not be allocated when using iterative refinement"
         );
 
-        let iterations = self.config.refinement.iterations();
+        let iterations = self.refinement.iterations();
         debug_assert!(
             iterations > 0,
             "refine() called but no iterations configured"
         );
 
-        let max_tile_pixels = self.config.tile_size * self.config.tile_size;
-        let min_pixels = (max_tile_pixels as f32 * self.config.min_unmasked_fraction) as usize;
+        let max_tile_pixels = self.tile_size * self.tile_size;
+        let min_pixels = (max_tile_pixels as f32 * self.min_unmasked_fraction) as usize;
 
         let mask = scratch1;
         for _iter in 0..iterations {
             create_object_mask(
                 pixels,
                 self,
-                self.config.sigma_threshold,
-                self.config.mask_dilation,
+                self.sigma_threshold,
+                self.bg_mask_dilation,
                 mask,
                 scratch2,
             );
@@ -196,7 +188,7 @@ impl BackgroundMap {
                 pixels,
                 Some(mask),
                 min_pixels,
-                self.config.sigma_clip_iterations,
+                self.sigma_clip_iterations,
                 None, // No adaptive thresholding during refinement
             );
 

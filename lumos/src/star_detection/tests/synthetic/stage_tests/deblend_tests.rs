@@ -3,12 +3,12 @@
 //! Tests the star deblending logic for overlapping/blended stars.
 
 use crate::common::Buffer2;
-use crate::star_detection::background::{BackgroundConfig, BackgroundMap};
+use crate::star_detection::background::BackgroundMap;
 use crate::star_detection::candidate_detection::detect_stars_test;
+use crate::star_detection::config::Config;
 use crate::star_detection::tests::common::output::{
     gray_to_rgb_image_stretched, save_grayscale, save_image,
 };
-use crate::star_detection::{DeblendConfig, PsfConfig, StarDetectionConfig};
 use crate::testing::init_tracing;
 use crate::testing::synthetic::{fwhm_to_sigma, render_gaussian_star};
 use common::test_utils::test_output_path;
@@ -66,22 +66,16 @@ fn test_deblend_star_pair() {
     let pixels_buf = Buffer2::new(width, height, pixels.clone());
     let background = crate::testing::estimate_background(
         &pixels_buf,
-        BackgroundConfig {
+        &Config {
             tile_size: TILE_SIZE,
             ..Default::default()
         },
     );
 
     // Run detection with deblending enabled
-    let config = StarDetectionConfig {
-        psf: PsfConfig {
-            expected_fwhm: fwhm,
-            ..Default::default()
-        },
-        deblend: DeblendConfig {
-            n_thresholds: 32,
-            ..Default::default()
-        },
+    let config = Config {
+        expected_fwhm: fwhm,
+        deblend_n_thresholds: 32,
         ..Default::default()
     };
 
@@ -180,22 +174,16 @@ fn test_deblend_chain() {
     let pixels_buf = Buffer2::new(width, height, pixels.clone());
     let background = crate::testing::estimate_background(
         &pixels_buf,
-        BackgroundConfig {
+        &Config {
             tile_size: TILE_SIZE,
             ..Default::default()
         },
     );
 
     // Run detection with deblending enabled
-    let config = StarDetectionConfig {
-        psf: PsfConfig {
-            expected_fwhm: fwhm,
-            ..Default::default()
-        },
-        deblend: DeblendConfig {
-            n_thresholds: 32,
-            ..Default::default()
-        },
+    let config = Config {
+        expected_fwhm: fwhm,
+        deblend_n_thresholds: 32,
         ..Default::default()
     };
 
@@ -295,23 +283,17 @@ fn test_deblend_unequal_pair() {
     let pixels_buf = Buffer2::new(width, height, pixels.clone());
     let background = crate::testing::estimate_background(
         &pixels_buf,
-        BackgroundConfig {
+        &Config {
             tile_size: TILE_SIZE,
             ..Default::default()
         },
     );
 
     // Run detection with deblending enabled
-    let config = StarDetectionConfig {
-        psf: PsfConfig {
-            expected_fwhm: fwhm,
-            ..Default::default()
-        },
-        deblend: DeblendConfig {
-            n_thresholds: 32,
-            min_contrast: 0.005, // Lower contrast to catch faint companion
-            ..Default::default()
-        },
+    let config = Config {
+        expected_fwhm: fwhm,
+        deblend_n_thresholds: 32,
+        deblend_min_contrast: 0.005, // Lower contrast to catch faint companion
         ..Default::default()
     };
 

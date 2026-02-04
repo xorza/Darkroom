@@ -4,13 +4,13 @@
 
 use crate::common::Buffer2;
 use crate::math::{Aabb, Vec2us};
-use crate::star_detection::background::{BackgroundConfig, BackgroundMap};
+use crate::star_detection::background::BackgroundMap;
 use crate::star_detection::candidate_detection::StarCandidate;
 use crate::star_detection::centroid::compute_centroid;
+use crate::star_detection::config::Config;
 use crate::star_detection::tests::common::output::{
     gray_to_rgb_image_stretched, save_grayscale, save_image,
 };
-use crate::star_detection::{PsfConfig, StarDetectionConfig};
 use crate::testing::init_tracing;
 use crate::testing::synthetic::{fwhm_to_sigma, render_gaussian_star};
 use common::test_utils::test_output_path;
@@ -74,7 +74,7 @@ fn test_centroid_accuracy() {
     let pixels_buf = Buffer2::new(width, height, pixels.clone());
     let background = crate::testing::estimate_background(
         &pixels_buf,
-        BackgroundConfig {
+        &Config {
             tile_size: TILE_SIZE,
             ..Default::default()
         },
@@ -82,11 +82,8 @@ fn test_centroid_accuracy() {
 
     // Test centroid computation for each star
     let mut errors = Vec::new();
-    let config = StarDetectionConfig {
-        psf: PsfConfig {
-            expected_fwhm: fwhm,
-            ..Default::default()
-        },
+    let config = Config {
+        expected_fwhm: fwhm,
         ..Default::default()
     };
 
@@ -236,7 +233,7 @@ fn test_centroid_snr() {
     let pixels_buf = Buffer2::new(width, height, pixels.clone());
     let background = crate::testing::estimate_background(
         &pixels_buf,
-        BackgroundConfig {
+        &Config {
             tile_size: TILE_SIZE,
             ..Default::default()
         },
@@ -248,11 +245,8 @@ fn test_centroid_snr() {
     let blue = Color::rgb(0.3, 0.3, 1.0);
     let green = Color::GREEN;
 
-    let config = StarDetectionConfig {
-        psf: PsfConfig {
-            expected_fwhm: fwhm,
-            ..Default::default()
-        },
+    let config = Config {
+        expected_fwhm: fwhm,
         ..Default::default()
     };
 

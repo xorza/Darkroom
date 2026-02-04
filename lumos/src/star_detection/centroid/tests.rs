@@ -6,9 +6,9 @@ use super::*;
 use crate::common::Buffer2;
 use crate::math::FWHM_TO_SIGMA;
 use crate::math::{Aabb, Vec2us};
-use crate::star_detection::background::{BackgroundConfig, BackgroundMap};
+use crate::star_detection::background::BackgroundMap;
 use crate::star_detection::candidate_detection::{StarCandidate, detect_stars_test};
-use crate::star_detection::{CentroidConfig, FilteringConfig};
+use crate::star_detection::config::Config;
 
 /// Default stamp radius for tests (matching expected FWHM of ~4 pixels).
 const TEST_STAMP_RADIUS: usize = 7;
@@ -50,12 +50,12 @@ fn test_centroid_accuracy() {
 
     let bg = crate::testing::estimate_background(
         &pixels,
-        BackgroundConfig {
+        &Config {
             tile_size: 32,
             ..Default::default()
         },
     );
-    let config = StarDetectionConfig::default();
+    let config = Config::default();
     let candidates = detect_stars_test(&pixels, None, &bg, &config);
 
     assert_eq!(candidates.len(), 1);
@@ -94,18 +94,15 @@ fn test_fwhm_estimation() {
 
     let bg = crate::testing::estimate_background(
         &pixels,
-        BackgroundConfig {
+        &Config {
             tile_size: 32,
             ..Default::default()
         },
     );
     // Use higher max_area because dilation (radius=2) expands the star region
-    let config = StarDetectionConfig {
-        filtering: FilteringConfig {
-            max_area: 1000,
-            ..Default::default()
-        },
-        ..StarDetectionConfig::default()
+    let config = Config {
+        max_area: 1000,
+        ..Default::default()
     };
     let candidates = detect_stars_test(&pixels, None, &bg, &config);
 
@@ -134,12 +131,12 @@ fn test_circular_star_eccentricity() {
 
     let bg = crate::testing::estimate_background(
         &pixels,
-        BackgroundConfig {
+        &Config {
             tile_size: 32,
             ..Default::default()
         },
     );
-    let config = StarDetectionConfig::default();
+    let config = Config::default();
     let candidates = detect_stars_test(&pixels, None, &bg, &config);
 
     let star =
@@ -160,12 +157,12 @@ fn test_snr_positive() {
 
     let bg = crate::testing::estimate_background(
         &pixels,
-        BackgroundConfig {
+        &Config {
             tile_size: 32,
             ..Default::default()
         },
     );
-    let config = StarDetectionConfig::default();
+    let config = Config::default();
     let candidates = detect_stars_test(&pixels, None, &bg, &config);
 
     let star =
@@ -334,7 +331,7 @@ fn make_uniform_background(
     bg_value: f32,
     noise: f32,
 ) -> BackgroundMap {
-    let mut bg = BackgroundMap::new_uninit(width, height, BackgroundConfig::default());
+    let mut bg = BackgroundMap::new_uninit(width, height, &Config::default());
     bg.background.fill(bg_value);
     bg.noise.fill(noise);
     bg
@@ -1156,7 +1153,7 @@ fn test_compute_centroid_returns_none_for_edge_candidate() {
     let height = 64;
     let pixels = Buffer2::new_filled(width, height, 0.5f32);
     let bg = make_uniform_background(width, height, 0.1, 0.01);
-    let config = StarDetectionConfig::default();
+    let config = Config::default();
 
     // Create candidate near edge
     let candidate = StarCandidate {
@@ -1216,17 +1213,14 @@ fn test_compute_centroid_multiple_stars_independent() {
     let pixels = Buffer2::new(width, height, pixels);
     let bg = crate::testing::estimate_background(
         &pixels,
-        BackgroundConfig {
+        &Config {
             tile_size: 32,
             ..Default::default()
         },
     );
-    let config = StarDetectionConfig {
-        filtering: FilteringConfig {
-            edge_margin: 10,
-            ..Default::default()
-        },
-        ..StarDetectionConfig::default()
+    let config = Config {
+        edge_margin: 10,
+        ..Default::default()
     };
     let candidates = detect_stars_test(&pixels, None, &bg, &config);
 
@@ -1268,12 +1262,12 @@ fn test_circular_star_roundness() {
 
     let bg = crate::testing::estimate_background(
         &pixels,
-        BackgroundConfig {
+        &Config {
             tile_size: 32,
             ..Default::default()
         },
     );
-    let config = StarDetectionConfig::default();
+    let config = Config::default();
     let candidates = detect_stars_test(&pixels, None, &bg, &config);
 
     assert_eq!(candidates.len(), 1);
@@ -1322,12 +1316,12 @@ fn test_elongated_x_star_roundness() {
     let pixels = Buffer2::new(width, height, pixels);
     let bg = crate::testing::estimate_background(
         &pixels,
-        BackgroundConfig {
+        &Config {
             tile_size: 32,
             ..Default::default()
         },
     );
-    let config = StarDetectionConfig::default();
+    let config = Config::default();
     let candidates = detect_stars_test(&pixels, None, &bg, &config);
 
     assert!(!candidates.is_empty());
@@ -1376,12 +1370,12 @@ fn test_asymmetric_star_roundness2() {
     let pixels = Buffer2::new(width, height, pixels);
     let bg = crate::testing::estimate_background(
         &pixels,
-        BackgroundConfig {
+        &Config {
             tile_size: 32,
             ..Default::default()
         },
     );
-    let config = StarDetectionConfig::default();
+    let config = Config::default();
     let candidates = detect_stars_test(&pixels, None, &bg, &config);
 
     assert!(!candidates.is_empty());
@@ -1406,12 +1400,12 @@ fn test_laplacian_snr_computed_for_star() {
     let pixels = make_gaussian_star(width, height, Vec2::splat(32.0), 2.5, 0.8);
     let bg = crate::testing::estimate_background(
         &pixels,
-        BackgroundConfig {
+        &Config {
             tile_size: 32,
             ..Default::default()
         },
     );
-    let config = StarDetectionConfig::default();
+    let config = Config::default();
     let candidates = detect_stars_test(&pixels, None, &bg, &config);
 
     assert_eq!(candidates.len(), 1);
@@ -1473,8 +1467,6 @@ fn test_star_is_round() {
 /// by testing many random sub-pixel offsets.
 #[test]
 fn test_weighted_centroid_precision_statistical() {
-    use crate::star_detection::CentroidMethod;
-
     let width = 128;
     let height = 128;
     let sigma = 2.5f32;
@@ -1491,16 +1483,13 @@ fn test_weighted_centroid_precision_statistical() {
             let pixels = make_gaussian_star(width, height, true_pos, sigma, 1.0);
             let bg = crate::testing::estimate_background(
                 &pixels,
-                BackgroundConfig {
+                &Config {
                     tile_size: 32,
                     ..Default::default()
                 },
             );
-            let config = StarDetectionConfig {
-                centroid: CentroidConfig {
-                    method: CentroidMethod::WeightedMoments,
-                    ..Default::default()
-                },
+            let config = Config {
+                centroid_method: CentroidMethod::WeightedMoments,
                 ..Default::default()
             };
             let candidates = detect_stars_test(&pixels, None, &bg, &config);
@@ -2701,16 +2690,13 @@ fn test_local_annulus_background_uniform() {
 
     let bg = crate::testing::estimate_background(
         &pixels,
-        BackgroundConfig {
+        &Config {
             tile_size: 32,
             ..Default::default()
         },
     );
-    let config = StarDetectionConfig {
-        centroid: CentroidConfig {
-            local_background_method: LocalBackgroundMethod::LocalAnnulus,
-            ..Default::default()
-        },
+    let config = Config {
+        local_background: LocalBackgroundMethod::LocalAnnulus,
         ..Default::default()
     };
     let candidates = detect_stars_test(&pixels, None, &bg, &config);
@@ -2737,18 +2723,15 @@ fn test_local_annulus_vs_global_map() {
     let pixels = make_gaussian_star(width, height, Vec2::splat(64.0), 2.5, 0.8);
     let bg = crate::testing::estimate_background(
         &pixels,
-        BackgroundConfig {
+        &Config {
             tile_size: 32,
             ..Default::default()
         },
     );
 
     // Detect with GlobalMap
-    let config_global = StarDetectionConfig {
-        centroid: CentroidConfig {
-            local_background_method: LocalBackgroundMethod::GlobalMap,
-            ..Default::default()
-        },
+    let config_global = Config {
+        local_background: LocalBackgroundMethod::GlobalMap,
         ..Default::default()
     };
     let candidates = detect_stars_test(&pixels, None, &bg, &config_global);
@@ -2756,11 +2739,8 @@ fn test_local_annulus_vs_global_map() {
         compute_centroid(&pixels, &bg, &candidates[0], &config_global).expect("global centroid");
 
     // Detect with LocalAnnulus
-    let config_annulus = StarDetectionConfig {
-        centroid: CentroidConfig {
-            local_background_method: LocalBackgroundMethod::LocalAnnulus,
-            ..Default::default()
-        },
+    let config_annulus = Config {
+        local_background: LocalBackgroundMethod::LocalAnnulus,
         ..Default::default()
     };
     let star_annulus =
@@ -2793,21 +2773,15 @@ fn test_local_annulus_near_edge_fallback() {
     let pixels = make_gaussian_star(width, height, pos, 2.0, 0.8);
     let bg = crate::testing::estimate_background(
         &pixels,
-        BackgroundConfig {
+        &Config {
             tile_size: 32,
             ..Default::default()
         },
     );
 
-    let config = StarDetectionConfig {
-        centroid: CentroidConfig {
-            local_background_method: LocalBackgroundMethod::LocalAnnulus,
-            ..Default::default()
-        },
-        filtering: FilteringConfig {
-            edge_margin: 15, // Allow detection near edge
-            ..Default::default()
-        },
+    let config = Config {
+        local_background: LocalBackgroundMethod::LocalAnnulus,
+        edge_margin: 15, // Allow detection near edge
         ..Default::default()
     };
     let candidates = detect_stars_test(&pixels, None, &bg, &config);

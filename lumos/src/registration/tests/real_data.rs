@@ -12,7 +12,7 @@ use ::bench::quick_bench;
 use crate::AstroImage;
 use crate::registration::config::RegistrationConfig;
 use crate::registration::pipeline::Registrator;
-use crate::star_detection::{StarDetectionConfig, StarDetector};
+use crate::star_detection::{StarDetector, config::Config};
 use crate::testing::calibration_dir;
 
 const IMAGE_EXTENSIONS: &[&str] = &["tiff", "tif", "fit", "fits", "png"];
@@ -106,7 +106,7 @@ fn test_register_two_calibrated_lights() {
     );
 
     // Detect stars with precise Moffat centroids
-    let star_config = StarDetectionConfig::default().precise_ground();
+    let star_config = Config::precise_ground();
     let mut detector = StarDetector::from_config(star_config);
 
     let result1 = detector.detect(&img1);
@@ -253,7 +253,7 @@ fn bench_star_detection_calibrated_light(b: ::bench::Bencher) {
         return;
     };
 
-    let config = StarDetectionConfig::default();
+    let config = Config::default();
     let mut detector = StarDetector::from_config(config);
 
     b.bench(|| black_box(detector.detect(black_box(&image))));
@@ -267,7 +267,7 @@ fn bench_register_stars(b: ::bench::Bencher) {
     };
 
     // Pre-detect stars (not part of the benchmark)
-    let star_config = StarDetectionConfig::default();
+    let star_config = Config::default();
     let mut detector = StarDetector::from_config(star_config);
     let result1 = detector.detect(&img1);
     let result2 = detector.detect(&img2);

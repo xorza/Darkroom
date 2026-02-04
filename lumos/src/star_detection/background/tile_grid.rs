@@ -288,7 +288,7 @@ fn compute_tile_stats(
     // Compute adaptive sigma based on local contrast
     let adaptive_sigma = match adaptive_config {
         Some(config) => compute_adaptive_sigma(values, median, sigma, config),
-        None => config::BackgroundConfig::default().sigma_threshold,
+        None => config::Config::default().sigma_threshold,
     };
 
     TileStats {
