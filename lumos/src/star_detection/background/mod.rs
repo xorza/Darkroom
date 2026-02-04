@@ -7,198 +7,133 @@
 
 #[cfg(test)]
 mod bench;
+mod estimate;
+mod simd;
 #[cfg(test)]
 mod tests;
-
-mod simd;
 mod tile_grid;
+
+pub use estimate::BackgroundEstimate;
 
 use crate::common::{BitBuffer2, Buffer2};
 use common::parallel;
 use rayon::iter::ParallelIterator;
 
 use super::buffer_pool::BufferPool;
-use super::config::{BackgroundRefinement, Config};
-use super::image_stats::ImageStats;
+use super::config::{AdaptiveSigmaConfig, Config};
 use tile_grid::TileGrid;
 
-/// Background map with per-pixel background and noise estimates.
-#[derive(Debug)]
-pub struct BackgroundMap {
-    // Stored config fields needed by estimate/refine
-    tile_size: usize,
-    sigma_clip_iterations: usize,
-    refinement: BackgroundRefinement,
-    sigma_threshold: f32,
-    bg_mask_dilation: usize,
-    min_unmasked_fraction: f32,
+/// Estimate background and noise for the image.
+///
+/// Performs tiled sigma-clipped statistics with bilinear interpolation.
+/// All buffer management is contained within this function.
+pub(crate) fn estimate_background(
+    pixels: &Buffer2<f32>,
+    config: &Config,
+    pool: &mut BufferPool,
+) -> BackgroundEstimate {
+    let width = pixels.width();
+    let height = pixels.height();
 
-    /// Tile grid for intermediate statistics (reused across estimates).
-    tile_grid: TileGrid,
-    /// Per-pixel background values.
-    pub background: Buffer2<f32>,
-    /// Per-pixel noise (sigma) estimates.
-    pub noise: Buffer2<f32>,
-    /// Per-pixel adaptive detection threshold in sigma units.
-    /// Higher in nebulous/high-contrast regions, lower in uniform sky.
-    /// Only populated when adaptive thresholding is enabled.
-    pub adaptive_sigma: Option<Buffer2<f32>>,
+    assert!(
+        width >= config.tile_size && height >= config.tile_size,
+        "Image must be at least tile_size x tile_size"
+    );
+
+    let has_adaptive = config.refinement.adaptive_sigma().is_some();
+    let adaptive_config = config.refinement.adaptive_sigma();
+
+    // Acquire buffers from pool
+    let mut background = pool.acquire_f32();
+    let mut noise = pool.acquire_f32();
+    let mut adaptive_sigma = if has_adaptive {
+        Some(pool.acquire_f32())
+    } else {
+        None
+    };
+
+    // Create tile grid and compute statistics
+    let mut tile_grid = TileGrid::new_uninit(width, height, config.tile_size);
+    tile_grid.compute(
+        pixels,
+        None,
+        0,
+        config.sigma_clip_iterations,
+        adaptive_config,
+    );
+
+    // Interpolate from tile grid to per-pixel values
+    interpolate_from_grid(
+        &tile_grid,
+        &mut background,
+        &mut noise,
+        adaptive_sigma.as_mut(),
+    );
+
+    BackgroundEstimate {
+        background,
+        noise,
+        adaptive_sigma,
+    }
 }
 
-impl BackgroundMap {
-    /// Create an uninitialized BackgroundMap with given dimensions.
-    ///
-    /// Buffers are allocated but not filled with meaningful values.
-    /// Use `estimate` to populate them.
-    #[allow(dead_code)] // Used by tests and benchmarks
-    pub(crate) fn new_uninit(width: usize, height: usize, config: &Config) -> Self {
-        assert!(
-            (16..=256).contains(&config.tile_size),
-            "tile_size must be between 16 and 256, got {}",
-            config.tile_size
-        );
-        let has_adaptive = config.refinement.adaptive_sigma().is_some();
-        Self {
-            tile_size: config.tile_size,
-            sigma_clip_iterations: config.sigma_clip_iterations,
-            refinement: config.refinement,
-            sigma_threshold: config.sigma_threshold,
-            bg_mask_dilation: config.bg_mask_dilation,
-            min_unmasked_fraction: config.min_unmasked_fraction,
-            tile_grid: TileGrid::new_uninit(width, height, config.tile_size),
-            background: Buffer2::new_default(width, height),
-            noise: Buffer2::new_default(width, height),
-            adaptive_sigma: if has_adaptive {
-                Some(Buffer2::new_default(width, height))
-            } else {
-                None
-            },
-        }
+/// Refine background estimate using iterative object masking.
+///
+/// Call this after initial estimation when using `BackgroundRefinement::Iterative`.
+pub(crate) fn refine_background(
+    pixels: &Buffer2<f32>,
+    estimate: &mut BackgroundEstimate,
+    config: &Config,
+    pool: &mut BufferPool,
+) {
+    debug_assert!(
+        estimate.adaptive_sigma.is_none(),
+        "adaptive_sigma should not be allocated when using iterative refinement"
+    );
+
+    let iterations = config.refinement.iterations();
+    if iterations == 0 {
+        return;
     }
 
-    /// Create a BackgroundMap by acquiring buffers from a pool.
-    pub(crate) fn from_pool(pool: &mut BufferPool, config: &Config) -> Self {
-        let has_adaptive = config.refinement.adaptive_sigma().is_some();
-        let width = pool.width();
-        let height = pool.height();
-        Self {
-            tile_size: config.tile_size,
-            sigma_clip_iterations: config.sigma_clip_iterations,
-            refinement: config.refinement,
-            sigma_threshold: config.sigma_threshold,
-            bg_mask_dilation: config.bg_mask_dilation,
-            min_unmasked_fraction: config.min_unmasked_fraction,
-            tile_grid: TileGrid::new_uninit(width, height, config.tile_size),
-            background: pool.acquire_f32(),
-            noise: pool.acquire_f32(),
-            adaptive_sigma: if has_adaptive {
-                Some(pool.acquire_f32())
-            } else {
-                None
-            },
-        }
-    }
+    let width = pixels.width();
+    let height = pixels.height();
+    let max_tile_pixels = config.tile_size * config.tile_size;
+    let min_pixels = (max_tile_pixels as f32 * config.min_unmasked_fraction) as usize;
 
-    /// Convert into an [`ImageStats`], consuming the BackgroundMap.
-    pub(crate) fn into_image_stats(self) -> ImageStats {
-        ImageStats {
-            background: self.background,
-            noise: self.noise,
-            adaptive_sigma: self.adaptive_sigma,
-        }
-    }
+    let mut tile_grid = TileGrid::new_uninit(width, height, config.tile_size);
+    let mut mask = pool.acquire_bit();
+    let mut scratch = pool.acquire_bit();
 
-    /// Get image width.
-    #[inline]
-    #[allow(dead_code)]
-    pub(crate) fn width(&self) -> usize {
-        self.background.width()
-    }
-
-    /// Get image height.
-    #[inline]
-    #[allow(dead_code)]
-    pub(crate) fn height(&self) -> usize {
-        self.background.height()
-    }
-
-    /// Estimate background into this pre-allocated BackgroundMap.
-    ///
-    /// This variant reuses the existing buffers, avoiding allocation overhead.
-    /// Use with `new_uninit` for buffer pooling scenarios.
-    ///
-    /// For iterative refinement, call `refine` after this method.
-    ///
-    /// # Panics
-    /// Panics if the buffer dimensions don't match the image dimensions.
-    pub(crate) fn estimate(&mut self, pixels: &Buffer2<f32>) {
-        debug_assert_eq!(self.background.width(), pixels.width());
-        debug_assert_eq!(self.background.height(), pixels.height());
-        assert!(
-            pixels.width() >= self.tile_size && pixels.height() >= self.tile_size,
-            "Image must be at least tile_size x tile_size"
+    for _iter in 0..iterations {
+        create_object_mask(
+            pixels,
+            &estimate.background,
+            &estimate.noise,
+            config.sigma_threshold,
+            config.bg_mask_dilation,
+            &mut mask,
+            &mut scratch,
         );
 
-        // Only compute adaptive sigma stats if we have the buffer allocated
-        let adaptive_config = self.refinement.adaptive_sigma();
-
-        self.tile_grid
-            .compute(pixels, None, 0, self.sigma_clip_iterations, adaptive_config);
+        tile_grid.compute(
+            pixels,
+            Some(&mask),
+            min_pixels,
+            config.sigma_clip_iterations,
+            None, // No adaptive thresholding during refinement
+        );
 
         interpolate_from_grid(
-            &self.tile_grid,
-            &mut self.background,
-            &mut self.noise,
-            self.adaptive_sigma.as_mut(),
+            &tile_grid,
+            &mut estimate.background,
+            &mut estimate.noise,
+            None,
         );
     }
 
-    /// Refine background estimate using iterative object masking.
-    ///
-    /// Call this after `estimate` when using `BackgroundRefinement::Iterative`.
-    /// Requires pre-allocated bit buffers for mask and scratch space.
-    pub(crate) fn refine(
-        &mut self,
-        pixels: &Buffer2<f32>,
-        scratch1: &mut BitBuffer2,
-        scratch2: &mut BitBuffer2,
-    ) {
-        debug_assert!(
-            self.adaptive_sigma.is_none(),
-            "adaptive_sigma should not be allocated when using iterative refinement"
-        );
-
-        let iterations = self.refinement.iterations();
-        debug_assert!(
-            iterations > 0,
-            "refine() called but no iterations configured"
-        );
-
-        let max_tile_pixels = self.tile_size * self.tile_size;
-        let min_pixels = (max_tile_pixels as f32 * self.min_unmasked_fraction) as usize;
-
-        let mask = scratch1;
-        for _iter in 0..iterations {
-            create_object_mask(
-                pixels,
-                self,
-                self.sigma_threshold,
-                self.bg_mask_dilation,
-                mask,
-                scratch2,
-            );
-
-            self.tile_grid.compute(
-                pixels,
-                Some(mask),
-                min_pixels,
-                self.sigma_clip_iterations,
-                None, // No adaptive thresholding during refinement
-            );
-
-            interpolate_from_grid(&self.tile_grid, &mut self.background, &mut self.noise, None);
-        }
-    }
+    pool.release_bit(scratch);
+    pool.release_bit(mask);
 }
 
 /// Interpolate background map from tile grid into output buffers.
@@ -243,7 +178,8 @@ fn interpolate_from_grid(
 /// `output` is used as the mask buffer. `scratch` is used for dilation if needed.
 fn create_object_mask(
     pixels: &Buffer2<f32>,
-    background: &BackgroundMap,
+    background: &Buffer2<f32>,
+    noise: &Buffer2<f32>,
     detection_sigma: f32,
     dilation_radius: usize,
     output: &mut BitBuffer2,
@@ -252,8 +188,8 @@ fn create_object_mask(
     // Create threshold mask using packed SIMD-optimized implementation
     super::threshold_mask::create_threshold_mask(
         pixels,
-        &background.background,
-        &background.noise,
+        background,
+        noise,
         detection_sigma,
         output,
     );
@@ -388,4 +324,24 @@ fn interpolate_row(
             break;
         }
     }
+}
+
+// =============================================================================
+// Test helpers
+// =============================================================================
+
+/// Test utility: estimate background with automatic buffer pool management.
+#[cfg(test)]
+pub(crate) fn estimate_background_test(
+    pixels: &Buffer2<f32>,
+    config: &Config,
+) -> BackgroundEstimate {
+    let mut pool = BufferPool::new(pixels.width(), pixels.height());
+    let mut estimate = estimate_background(pixels, config, &mut pool);
+
+    if config.refinement.iterations() > 0 {
+        refine_background(pixels, &mut estimate, config, &mut pool);
+    }
+
+    estimate
 }

@@ -54,6 +54,8 @@ pub use calibration_masters::CalibrationMasters;
 pub use star_detection::{
     // Configuration
     AdaptiveSigmaConfig,
+    // Pipeline data structures
+    BackgroundEstimate,
     BackgroundRefinement,
     // Centroid methods
     CentroidMethod,
@@ -67,8 +69,6 @@ pub use star_detection::{
     // Advanced: profile fitting
     GaussianFitConfig,
     GaussianFitResult,
-    // Pipeline data structures
-    ImageStats,
     LocalBackgroundMethod,
     MoffatFitConfig,
     MoffatFitResult,

@@ -6,10 +6,10 @@
 use crate::common::Buffer2;
 use crate::math::{mad_f32_with_scratch, median_f32_mut};
 
+use super::super::background::BackgroundEstimate;
 use super::super::buffer_pool::BufferPool;
 use super::super::centroid::compute_centroid;
 use super::super::config::Config;
-use super::super::image_stats::ImageStats;
 use super::super::region::Region;
 use super::super::star::Star;
 use super::detect::detect;
@@ -68,7 +68,7 @@ impl EffectiveFwhm {
 /// - `EffectiveFwhm::Disabled` if matched filtering is disabled
 pub fn estimate_fwhm(
     pixels: &Buffer2<f32>,
-    stats: &ImageStats,
+    stats: &BackgroundEstimate,
     config: &Config,
     pool: &mut BufferPool,
 ) -> EffectiveFwhm {
@@ -89,7 +89,7 @@ pub fn estimate_fwhm(
 /// Perform first-pass detection and estimate FWHM from bright stars.
 fn estimate_from_bright_stars(
     pixels: &Buffer2<f32>,
-    stats: &ImageStats,
+    stats: &BackgroundEstimate,
     config: &Config,
     pool: &mut BufferPool,
 ) -> FwhmEstimate {
@@ -124,7 +124,7 @@ fn estimate_from_bright_stars(
 fn compute_centroids(
     regions: &[Region],
     pixels: &Buffer2<f32>,
-    background: &ImageStats,
+    background: &BackgroundEstimate,
     config: &Config,
 ) -> Vec<Star> {
     use rayon::prelude::*;

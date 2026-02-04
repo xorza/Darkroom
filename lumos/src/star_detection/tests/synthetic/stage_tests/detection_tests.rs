@@ -3,8 +3,8 @@
 //! Tests the peak detection and thresholding logic.
 
 use crate::math::Vec2us;
+use crate::star_detection::BackgroundEstimate;
 use crate::star_detection::config::Config;
-use crate::star_detection::image_stats::ImageStats;
 use crate::star_detection::stages::detect::detect_stars_test;
 use crate::star_detection::tests::common::output::{
     gray_to_rgb_image_stretched, save_grayscale, save_image,

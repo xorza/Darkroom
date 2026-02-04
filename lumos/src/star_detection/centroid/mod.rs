@@ -26,9 +26,9 @@ pub use moffat_fit::{alpha_beta_to_fwhm, fwhm_beta_to_alpha};
 use arrayvec::ArrayVec;
 use glam::{DVec2, Vec2};
 
+use super::background::BackgroundEstimate;
 use super::config::Config;
 use super::cosmic_ray::compute_laplacian_snr;
-use super::image_stats::ImageStats;
 use super::region::Region;
 use super::{CentroidMethod, LocalBackgroundMethod, Star};
 use crate::common::Buffer2;
@@ -300,7 +300,7 @@ fn sigma_clipped_median_mad(values: &mut [f32], kappa: f32, iterations: usize) -
 /// - `MoffatFit`: 2D Moffat fitting (~0.01 pixel accuracy, best for atmospheric seeing)
 pub fn compute_centroid(
     pixels: &Buffer2<f32>,
-    background: &ImageStats,
+    background: &BackgroundEstimate,
     region: &Region,
     config: &Config,
 ) -> Option<Star> {
@@ -430,7 +430,7 @@ pub(crate) fn refine_centroid(
     pixels: &[f32],
     width: usize,
     height: usize,
-    background: &ImageStats,
+    background: &BackgroundEstimate,
     pos: Vec2,
     stamp_radius: usize,
     expected_fwhm: f32,
@@ -469,7 +469,7 @@ pub(crate) struct StarMetrics {
 /// `SNR = flux / (σ_sky × sqrt(npix))`
 pub(crate) fn compute_metrics(
     pixels: &Buffer2<f32>,
-    background: &ImageStats,
+    background: &BackgroundEstimate,
     pos: Vec2,
     stamp_radius: usize,
     gain: Option<f32>,

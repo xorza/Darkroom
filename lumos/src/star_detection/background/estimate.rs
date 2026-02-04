@@ -2,7 +2,7 @@
 
 use crate::common::Buffer2;
 
-use super::buffer_pool::BufferPool;
+use super::super::buffer_pool::BufferPool;
 
 /// Per-pixel background and noise estimates for an image.
 ///
@@ -10,7 +10,7 @@ use super::buffer_pool::BufferPool;
 /// Used by subsequent pipeline stages for thresholding, centroid computation,
 /// and SNR calculation.
 #[derive(Debug)]
-pub struct ImageStats {
+pub struct BackgroundEstimate {
     /// Per-pixel background values (sky level).
     pub background: Buffer2<f32>,
     /// Per-pixel noise (sigma) estimates.
@@ -21,7 +21,7 @@ pub struct ImageStats {
     pub adaptive_sigma: Option<Buffer2<f32>>,
 }
 
-impl ImageStats {
+impl BackgroundEstimate {
     /// Release buffers back to the pool.
     pub fn release_to_pool(self, pool: &mut BufferPool) {
         pool.release_f32(self.background);

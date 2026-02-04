@@ -6,8 +6,8 @@ use std::arch::x86_64::*;
 use glam::Vec2;
 
 use crate::math::{FWHM_TO_SIGMA, fast_exp};
+use crate::star_detection::background::BackgroundEstimate;
 use crate::star_detection::centroid::is_valid_stamp_position;
-use crate::star_detection::image_stats::ImageStats;
 
 /// SSE4.1 SIMD implementation of centroid refinement.
 ///
@@ -22,7 +22,7 @@ pub unsafe fn refine_centroid_sse(
     pixels: &[f32],
     width: usize,
     height: usize,
-    background: &ImageStats,
+    background: &BackgroundEstimate,
     pos: Vec2,
     stamp_radius: usize,
     expected_fwhm: f32,

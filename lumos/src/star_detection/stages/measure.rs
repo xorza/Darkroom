@@ -5,9 +5,9 @@
 
 use crate::common::Buffer2;
 
+use super::super::background::BackgroundEstimate;
 use super::super::centroid::compute_centroid;
 use super::super::config::Config;
-use super::super::image_stats::ImageStats;
 use super::super::region::Region;
 use super::super::star::Star;
 
@@ -18,7 +18,7 @@ use super::super::star::Star;
 pub fn measure(
     regions: &[Region],
     pixels: &Buffer2<f32>,
-    stats: &ImageStats,
+    stats: &BackgroundEstimate,
     config: &Config,
 ) -> Vec<Star> {
     use rayon::prelude::*;

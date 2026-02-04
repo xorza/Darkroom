@@ -4,9 +4,9 @@
 use bench::quick_bench;
 use std::hint::black_box;
 
+use super::estimate_background_test;
 use super::tile_grid::TileGrid;
 use crate::common::BitBuffer2;
-use crate::star_detection::background::BackgroundMap;
 use crate::star_detection::config::Config;
 use crate::testing::synthetic::{generate_globular_cluster, stamps};
 
@@ -22,9 +22,8 @@ fn bench_background_estimate_6k(b: ::bench::Bencher) {
         ..Default::default()
     };
 
-    let mut bg = BackgroundMap::new_uninit(width, height, &config);
     b.bench(|| {
-        bg.estimate(&pixels);
+        let bg = estimate_background_test(&pixels, &config);
         black_box(&bg);
     });
 }

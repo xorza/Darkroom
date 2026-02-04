@@ -6,8 +6,8 @@ use super::*;
 use crate::common::Buffer2;
 use crate::math::FWHM_TO_SIGMA;
 use crate::math::{Aabb, Vec2us};
+use crate::star_detection::BackgroundEstimate;
 use crate::star_detection::config::Config;
-use crate::star_detection::image_stats::ImageStats;
 use crate::star_detection::region::Region;
 use crate::star_detection::stages::detect::detect_stars_test;
 
@@ -326,12 +326,17 @@ fn test_valid_stamp_position_small_image() {
 // refine_centroid Tests
 // =============================================================================
 
-fn make_uniform_background(width: usize, height: usize, bg_value: f32, noise: f32) -> ImageStats {
+fn make_uniform_background(
+    width: usize,
+    height: usize,
+    bg_value: f32,
+    noise: f32,
+) -> BackgroundEstimate {
     let mut bg_buf = Buffer2::new_default(width, height);
     let mut noise_buf = Buffer2::new_default(width, height);
     bg_buf.fill(bg_value);
     noise_buf.fill(noise);
-    ImageStats {
+    BackgroundEstimate {
         background: bg_buf,
         noise: noise_buf,
         adaptive_sigma: None,

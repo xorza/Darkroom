@@ -8,6 +8,7 @@ use rayon::prelude::*;
 use crate::common::Buffer2;
 use crate::math::{Aabb, Vec2us};
 
+use super::super::background::BackgroundEstimate;
 use super::super::buffer_pool::BufferPool;
 use super::super::config::Config;
 use super::super::convolution::matched_filter;
@@ -15,7 +16,6 @@ use super::super::deblend::{
     ComponentData, DeblendBuffers, DeblendedCandidate, deblend_local_maxima,
     deblend_multi_threshold,
 };
-use super::super::image_stats::ImageStats;
 use super::super::labeling::LabelMap;
 use super::super::mask_dilation::dilate_mask;
 use super::super::region::Region;
@@ -31,7 +31,7 @@ use super::super::threshold_mask::{
 /// All buffer management is contained within this function.
 pub fn detect(
     pixels: &Buffer2<f32>,
-    stats: &ImageStats,
+    stats: &BackgroundEstimate,
     fwhm: Option<f32>,
     config: &Config,
     pool: &mut BufferPool,
@@ -319,7 +319,7 @@ fn collect_component_data(
 pub(crate) fn detect_stars_test(
     pixels: &Buffer2<f32>,
     _filtered: Option<&Buffer2<f32>>,
-    background: &ImageStats,
+    background: &BackgroundEstimate,
     config: &Config,
 ) -> Vec<Region> {
     let mut pool = BufferPool::new(pixels.width(), pixels.height());

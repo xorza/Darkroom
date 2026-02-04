@@ -2,7 +2,6 @@
 
 use super::*;
 use crate::common::Buffer2;
-use crate::star_detection::background::BackgroundMap;
 use crate::star_detection::config::{AdaptiveSigmaConfig, BackgroundRefinement, Config};
 
 #[test]
@@ -1085,7 +1084,7 @@ fn test_regular_background_has_no_adaptive_sigma() {
         },
     );
 
-    // Regular BackgroundMap should not have adaptive_sigma
+    // Regular background estimation should not have adaptive_sigma
     assert!(bg.adaptive_sigma.is_none());
 }
 
@@ -1096,15 +1095,13 @@ fn test_iterative_refinement_has_no_adaptive_sigma() {
     let height = 64;
     let pixels = Buffer2::new(width, height, vec![0.5; width * height]);
 
-    let mut bg = BackgroundMap::new_uninit(
-        width,
-        height,
+    let bg = estimate_background_test(
+        &pixels,
         &Config {
             refinement: BackgroundRefinement::Iterative { iterations: 1 },
             ..Default::default()
         },
     );
-    bg.estimate(&pixels);
 
     // adaptive_sigma should be None because using iterative refinement
     assert!(
@@ -1120,15 +1117,13 @@ fn test_adaptive_sigma_refinement_has_adaptive_sigma() {
     let height = 64;
     let pixels = Buffer2::new(width, height, vec![0.5; width * height]);
 
-    let mut bg = BackgroundMap::new_uninit(
-        width,
-        height,
+    let bg = estimate_background_test(
+        &pixels,
         &Config {
             refinement: BackgroundRefinement::AdaptiveSigma(AdaptiveSigmaConfig::default()),
             ..Default::default()
         },
     );
-    bg.estimate(&pixels);
 
     // adaptive_sigma should be Some because using AdaptiveSigma refinement
     assert!(

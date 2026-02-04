@@ -1,31 +1,31 @@
-//! ImageStats generation for testing.
+//! BackgroundEstimate generation for testing.
 //!
-//! Provides utilities to create ImageStats instances for benchmarks and tests.
+//! Provides utilities to create BackgroundEstimate instances for benchmarks and tests.
 
 use crate::common::Buffer2;
-use crate::star_detection::image_stats::ImageStats;
+use crate::star_detection::BackgroundEstimate;
 
-/// Create a uniform ImageStats with constant background and noise values.
-pub fn uniform(width: usize, height: usize, background: f32, noise: f32) -> ImageStats {
+/// Create a uniform BackgroundEstimate with constant background and noise values.
+pub fn uniform(width: usize, height: usize, background: f32, noise: f32) -> BackgroundEstimate {
     let mut bg_buf = Buffer2::new_default(width, height);
     let mut noise_buf = Buffer2::new_default(width, height);
     bg_buf.fill(background);
     noise_buf.fill(noise);
-    ImageStats {
+    BackgroundEstimate {
         background: bg_buf,
         noise: noise_buf,
         adaptive_sigma: None,
     }
 }
 
-/// Create an ImageStats with a horizontal gradient in the background.
+/// Create an BackgroundEstimate with a horizontal gradient in the background.
 pub fn horizontal_gradient(
     width: usize,
     height: usize,
     bg_left: f32,
     bg_right: f32,
     noise: f32,
-) -> ImageStats {
+) -> BackgroundEstimate {
     let mut bg_buf = Buffer2::new_default(width, height);
     let mut noise_buf = Buffer2::new_default(width, height);
     for y in 0..height {
@@ -39,21 +39,21 @@ pub fn horizontal_gradient(
         }
     }
     noise_buf.fill(noise);
-    ImageStats {
+    BackgroundEstimate {
         background: bg_buf,
         noise: noise_buf,
         adaptive_sigma: None,
     }
 }
 
-/// Create an ImageStats with a vertical gradient in the background.
+/// Create an BackgroundEstimate with a vertical gradient in the background.
 pub fn vertical_gradient(
     width: usize,
     height: usize,
     bg_top: f32,
     bg_bottom: f32,
     noise: f32,
-) -> ImageStats {
+) -> BackgroundEstimate {
     let mut bg_buf = Buffer2::new_default(width, height);
     let mut noise_buf = Buffer2::new_default(width, height);
     for y in 0..height {
@@ -68,21 +68,21 @@ pub fn vertical_gradient(
         }
     }
     noise_buf.fill(noise);
-    ImageStats {
+    BackgroundEstimate {
         background: bg_buf,
         noise: noise_buf,
         adaptive_sigma: None,
     }
 }
 
-/// Create an ImageStats with radial vignette in the background.
+/// Create an BackgroundEstimate with radial vignette in the background.
 pub fn vignette(
     width: usize,
     height: usize,
     bg_center: f32,
     bg_edge: f32,
     noise: f32,
-) -> ImageStats {
+) -> BackgroundEstimate {
     let mut bg_buf = Buffer2::new_default(width, height);
     let mut noise_buf = Buffer2::new_default(width, height);
     let cx = width as f32 / 2.0;
@@ -99,7 +99,7 @@ pub fn vignette(
         }
     }
     noise_buf.fill(noise);
-    ImageStats {
+    BackgroundEstimate {
         background: bg_buf,
         noise: noise_buf,
         adaptive_sigma: None,

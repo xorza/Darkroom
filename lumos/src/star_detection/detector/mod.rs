@@ -132,8 +132,18 @@ impl StarDetector {
             stages::prepare::prepare(image, self.config.defect_map.as_ref(), pool);
 
         // Step 1: Estimate background and noise
-        let background =
+        let mut background =
             stages::background::estimate_background(&grayscale_image, &self.config, pool);
+
+        // Step 1b: Refine background if iterative refinement is enabled
+        if self.config.refinement.iterations() > 0 {
+            stages::background::refine_background(
+                &grayscale_image,
+                &mut background,
+                &self.config,
+                pool,
+            );
+        }
 
         // Step 2: Determine effective FWHM (manual > auto-estimate > disabled)
         let effective_fwhm =

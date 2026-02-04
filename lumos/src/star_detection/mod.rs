@@ -61,7 +61,6 @@ mod cosmic_ray;
 mod deblend;
 mod defect_map;
 mod detector;
-pub mod image_stats;
 pub(crate) mod labeling;
 mod mask_dilation;
 mod median_filter;
@@ -92,7 +91,7 @@ pub use defect_map::DefectMap;
 pub use star::Star;
 
 // Pipeline data structures
-pub use image_stats::ImageStats;
+pub use background::BackgroundEstimate;
 pub use region::Region;
 
 // Centroid methods

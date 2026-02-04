@@ -10,13 +10,13 @@ use std::path::PathBuf;
 use crate::AstroImage;
 use crate::common::Buffer2;
 use crate::star_detection::stages;
-use crate::star_detection::{BufferPool, Config, ImageStats};
+use crate::star_detection::{BackgroundEstimate, BufferPool, Config};
 
 /// Convenience function to estimate background for tests.
 ///
-/// Returns an `ImageStats` with background and noise estimates.
+/// Returns a `BackgroundEstimate` with background and noise estimates.
 /// Creates a temporary buffer pool internally.
-pub fn estimate_background(pixels: &Buffer2<f32>, config: &Config) -> ImageStats {
+pub fn estimate_background(pixels: &Buffer2<f32>, config: &Config) -> BackgroundEstimate {
     let mut pool = BufferPool::new(pixels.width(), pixels.height());
     stages::background::estimate_background(pixels, config, &mut pool)
 }
