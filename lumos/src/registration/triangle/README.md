@@ -45,7 +45,7 @@
 | Max points | 200 | 50 | 20 | ~50 |
 | Triangle formation | k-NN (k=5..20, adaptive) | k-NN (k=4, fixed) | All O(n^3) | Brightest NSET |
 | Triangle invariant | (s0/s2, s1/s2) | (s2/s1, s1/s0) | (s0/s2, s1/s2) | (ratio, cosine) |
-| Invariant lookup | Hash table (100x100 bins) | k-d tree on invariant space | Brute-force | Sorted search |
+| Invariant lookup | k-d tree on invariant space | k-d tree on invariant space | Brute-force | Sorted search |
 | Matching strategy | Voting + greedy resolution | RANSAC on triangle matches | Triangle + RANSAC | Optimistic early-accept |
 | Refinement | Two-step transform-guided | RANSAC re-fit with all inliers | RANSAC outlier rejection | Immediate verification |
 | Orientation check | Yes (configurable) | No (uses affine) | No | No |
@@ -62,7 +62,7 @@
 
 3. **Dense/sparse vote matrix** — Automatic switch at 250K entries balances memory vs performance. Practical optimization not found in reference implementations.
 
-4. **Hash table approach** — O(1) lookup per triangle vs astroalign's k-d tree O(log n). For the typical workload (200 stars, ~2000 triangles), hash table is faster.
+4. **K-d tree on invariant space** — Same approach as astroalign, with exact radius queries and no bin boundary artifacts. Uses existing KdTree infrastructure with buffer-based `radius_indices_into` for zero-allocation candidate lookup in the voting loop.
 
 5. **Two-step refinement** — Transform-guided re-voting with position proximity boost. More sophisticated than single-pass voting.
 
@@ -70,23 +70,9 @@
 
 ### Suggested Improvements
 
-#### 1. Replace hash table with k-d tree on invariant space (simplification)
+#### 1. ~~Replace hash table with k-d tree on invariant space~~ (DONE)
 
-**Current**: 2D hash table with `bins x bins` grid. Requires tolerance-based neighbor search scanning adjacent bins.
-
-**Alternative**: k-d tree on 2D invariant space (like astroalign).
-
-**Pros**:
-- Eliminates bin boundary artifacts (hash table can miss matches at bin edges despite tolerance search).
-- Cleaner code: removes hash_table.rs entirely, uses existing KdTree infrastructure.
-- Natural nearest-neighbor queries with exact distance thresholds.
-- No `hash_bins` parameter to tune.
-
-**Cons**:
-- O(log n) per lookup vs O(1) for hash table.
-- For 2000 triangles, difference is negligible (~11 comparisons vs 1 + bin scan).
-
-**Verdict**: Consider. Simplifies code and removes a parameter. Performance difference is negligible for typical workloads. The hash table's tolerance-based bin scanning already approximates k-d tree behavior anyway.
+Replaced the 2D hash table with a k-d tree on invariant space. Removed `hash_table.rs` entirely, removed `hash_bins` config parameter. Uses existing `KdTree` infrastructure with a new `radius_indices_into` method for buffer-based candidate lookup. Eliminates bin boundary artifacts and simplifies the codebase.
 
 #### 2. Use astroalign's invariant formulation: (L2/L1, L1/L0) instead of (L0/L2, L1/L2)
 
@@ -96,9 +82,9 @@
 
 The astroalign formulation spreads out the invariant space more uniformly. With (s0/s2, s1/s2), both values are squeezed into (0,1], and many different triangles cluster near (1,1) (near-equilateral). The astroalign formulation spreads these out since L2/L1 and L1/L0 can range from 1 to large values.
 
-**However**: The current formulation is the same as Valdes (1995), the canonical reference. Astroalign's formulation makes sense for k-d tree matching (unbounded range works fine) but is awkward for hash table indexing (unbounded range needs clamping or log-scaling). If staying with hash tables, current formulation is better. If switching to k-d tree, consider astroalign's.
+**However**: The current formulation is the same as Valdes (1995), the canonical reference. With the k-d tree switch, the unbounded range of astroalign's formulation is no longer a problem (k-d trees handle arbitrary ranges). The potential benefit is better spread in invariant space, reducing clustering near (1,1) for near-equilateral triangles.
 
-**Verdict**: Keep current if using hash table. Reconsider if switching to k-d tree.
+**Verdict**: Worth considering now that we use k-d tree lookup. Would need benchmarking to confirm the spread improvement matters in practice.
 
 #### 3. Triangle deduplication
 
@@ -106,7 +92,7 @@ The astroalign formulation spreads out the invariant space more uniformly. With 
 
 **Astroalign**: Explicitly removes duplicate invariant tuples after triangle formation.
 
-Duplicate triangles inflate vote counts uniformly across all vertex pairs of that triangle, so they don't create false positives. However, they waste hash lookups and voting computation.
+Duplicate triangles inflate vote counts uniformly across all vertex pairs of that triangle, so they don't create false positives. However, they waste tree lookups and voting computation.
 
 **Implementation**: Sort triangle index triples (i,j,k) and deduplicate with a HashSet before computing invariants.
 
@@ -177,6 +163,10 @@ The sparse HashMap uses `usize` (8 bytes on 64-bit) for vote counts that never e
 
 ## Summary of Recommendations
 
+### Done
+
+- **K-d tree for invariant lookup** — Replaced hash table with k-d tree on invariant space. Eliminated `hash_table.rs` and `hash_bins` parameter.
+
 ### High priority (clear benefit, low risk)
 
 1. **Triangle deduplication** — HashSet on sorted index triples. Reduces matching work 2-3x.
@@ -186,13 +176,12 @@ The sparse HashMap uses `usize` (8 bytes on 64-bit) for vote counts that never e
 ### Medium priority (meaningful simplification, needs benchmarking)
 
 4. **Consider removing two-step refinement** — Overlaps with downstream RANSAC. Benchmark first.
-5. **Consider k-d tree for invariant lookup** — Eliminates hash_table.rs and hash_bins parameter. Simpler, no bin boundary artifacts.
+5. **Astroalign invariant formulation** — Now viable with k-d tree lookup. Needs benchmarking to confirm spread improvement matters.
 
 ### Low priority (nice-to-have)
 
 6. **Tabur-style ordered search** — Process rare triangles first. Only matters for large point sets.
-7. **Astroalign invariant formulation** — Only relevant if switching to k-d tree lookup.
-8. **Sparse VoteMatrix u32 values** — Minor memory savings.
+7. **Sparse VoteMatrix u32 values** — Minor memory savings.
 
 ## References
 
