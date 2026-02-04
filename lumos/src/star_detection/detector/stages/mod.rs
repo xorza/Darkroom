@@ -3,9 +3,9 @@
 //! Each stage is a pure function that transforms data, with all buffer
 //! management contained within.
 
-pub mod background;
-pub mod detect;
-pub mod filter;
-pub mod fwhm;
-pub mod measure;
-pub mod prepare;
+pub(crate) mod background;
+pub(crate) mod detect;
+pub(crate) mod filter;
+pub(crate) mod fwhm;
+pub(crate) mod measure;
+pub(crate) mod prepare;

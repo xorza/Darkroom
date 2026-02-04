@@ -7,7 +7,7 @@ use crate::star_detection::star::Star;
 
 /// Statistics from quality filtering (for diagnostics).
 #[derive(Debug, Default)]
-pub struct QualityFilterStats {
+pub(crate) struct QualityFilterStats {
     pub saturated: usize,
     pub low_snr: usize,
     pub high_eccentricity: usize,
@@ -21,7 +21,7 @@ pub struct QualityFilterStats {
 ///
 /// Returns the filtered stars and rejection statistics. Stars are returned
 /// sorted by flux (brightest first).
-pub fn filter(mut stars: Vec<Star>, config: &Config) -> (Vec<Star>, QualityFilterStats) {
+pub(crate) fn filter(mut stars: Vec<Star>, config: &Config) -> (Vec<Star>, QualityFilterStats) {
     let mut stats = QualityFilterStats::default();
 
     // Apply quality filters
@@ -68,7 +68,7 @@ fn sort_by_flux(stars: &mut [Star]) {
 }
 
 /// Filter stars by FWHM using MAD-based outlier detection.
-pub fn filter_fwhm_outliers(stars: &mut Vec<Star>, max_deviation: f32) -> usize {
+pub(crate) fn filter_fwhm_outliers(stars: &mut Vec<Star>, max_deviation: f32) -> usize {
     if max_deviation <= 0.0 || stars.len() < 5 {
         return 0;
     }
@@ -86,7 +86,7 @@ pub fn filter_fwhm_outliers(stars: &mut Vec<Star>, max_deviation: f32) -> usize 
 }
 
 /// Remove duplicate star detections that are too close together.
-pub fn remove_duplicate_stars(stars: &mut Vec<Star>, min_separation: f32) -> usize {
+pub(crate) fn remove_duplicate_stars(stars: &mut Vec<Star>, min_separation: f32) -> usize {
     if stars.len() < 2 {
         return 0;
     }
@@ -171,7 +171,7 @@ pub fn remove_duplicate_stars(stars: &mut Vec<Star>, min_separation: f32) -> usi
 }
 
 /// Simple O(n²) duplicate removal for small star counts.
-pub fn remove_duplicate_stars_simple(stars: &mut Vec<Star>, min_separation: f32) -> usize {
+pub(crate) fn remove_duplicate_stars_simple(stars: &mut Vec<Star>, min_separation: f32) -> usize {
     let min_sep_sq = (min_separation * min_separation) as f64;
     let mut kept = vec![true; stars.len()];
 

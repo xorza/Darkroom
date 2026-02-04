@@ -16,7 +16,7 @@ use super::detect::detect;
 
 /// Result of FWHM estimation.
 #[derive(Debug, Clone, Copy)]
-pub struct FwhmEstimate {
+pub(crate) struct FwhmEstimate {
     /// Estimated FWHM in pixels.
     pub fwhm: f32,
     /// Number of stars used for estimation (after filtering).
@@ -30,7 +30,7 @@ pub struct FwhmEstimate {
 
 /// Effective FWHM configuration for matched filtering.
 #[derive(Debug, Clone)]
-pub enum EffectiveFwhm {
+pub(crate) enum EffectiveFwhm {
     /// No matched filtering (disabled).
     Disabled,
     /// Manual FWHM specified by user.
@@ -66,7 +66,7 @@ impl EffectiveFwhm {
 /// - `EffectiveFwhm::Manual(fwhm)` if `config.expected_fwhm > 0`
 /// - `EffectiveFwhm::Estimated(estimate)` if auto-estimation is enabled
 /// - `EffectiveFwhm::Disabled` if matched filtering is disabled
-pub fn estimate_fwhm(
+pub(crate) fn estimate_fwhm(
     pixels: &Buffer2<f32>,
     stats: &BackgroundEstimate,
     config: &Config,

@@ -15,7 +15,7 @@ use crate::star_detection::median_filter::median_filter_3x3;
 ///   3. 3×3 median filter to suppress Bayer/X-Trans artifacts (if CFA).
 ///
 /// The returned buffer is acquired from `pool`; the caller owns it.
-pub fn prepare(
+pub(crate) fn prepare(
     image: &AstroImage,
     defects: Option<&DefectMap>,
     pool: &mut BufferPool,

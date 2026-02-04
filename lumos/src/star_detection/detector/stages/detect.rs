@@ -28,7 +28,7 @@ use super::super::super::threshold_mask::{
 /// connected component labeling, and deblending to extract candidate regions.
 ///
 /// All buffer management is contained within this function.
-pub fn detect(
+pub(crate) fn detect(
     pixels: &Buffer2<f32>,
     stats: &BackgroundEstimate,
     fwhm: Option<f32>,

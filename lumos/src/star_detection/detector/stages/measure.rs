@@ -15,7 +15,7 @@ use super::super::super::star::Star;
 ///
 /// Computes sub-pixel positions, flux, FWHM, and quality metrics for each
 /// region in parallel using rayon.
-pub fn measure(
+pub(crate) fn measure(
     regions: &[Region],
     pixels: &Buffer2<f32>,
     stats: &BackgroundEstimate,
