@@ -75,7 +75,7 @@ impl WarpConfig {
 impl Default for WarpConfig {
     fn default() -> Self {
         Self {
-            method: InterpolationMethod::Lanczos3,
+            method: InterpolationMethod::default(),
             border_value: 0.0,
             normalize_kernel: true,
             clamp_output: false,
@@ -93,9 +93,9 @@ pub enum SubpixelMethod {
     /// No sub-pixel refinement.
     None,
     /// Parabolic fit (fast, ~0.1 pixel accuracy).
-    #[default]
     Parabolic,
     /// Gaussian fit (slower, ~0.05 pixel accuracy).
+    #[default]
     Gaussian,
     /// Centroid (robust to noise).
     Centroid,
@@ -120,7 +120,7 @@ impl Default for PhaseCorrelationConfig {
     fn default() -> Self {
         Self {
             use_windowing: true,
-            subpixel_method: SubpixelMethod::Parabolic,
+            subpixel_method: SubpixelMethod::default(),
             min_peak_value: 0.1,
             max_iterations: 0, // Disabled by default for backwards compatibility
             convergence_threshold: 0.01,
@@ -621,7 +621,7 @@ mod tests {
     fn test_phase_correlation_config_default() {
         let config = PhaseCorrelationConfig::default();
         assert!(config.use_windowing);
-        assert_eq!(config.subpixel_method, SubpixelMethod::Parabolic);
+        assert_eq!(config.subpixel_method, SubpixelMethod::Gaussian);
         config.validate();
     }
 
