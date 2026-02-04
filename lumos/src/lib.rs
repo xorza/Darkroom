@@ -9,14 +9,15 @@
 //! # Quick Start
 //!
 //! ```rust,ignore
-//! use lumos::prelude::*;
+//! use lumos::{AstroImage, StarDetectionConfig, StarDetector};
 //!
 //! // Load an astronomical image
 //! let image = AstroImage::from_file("light_001.fits")?;
 //!
 //! // Detect stars
 //! let config = StarDetectionConfig::default();
-//! let result = find_stars(&image, &config);
+//! let mut detector = StarDetector::from_config(config);
+//! let result = detector.detect(&image);
 //!
 //! println!("Found {} stars", result.stars.len());
 //! ```
@@ -51,8 +52,6 @@ pub use calibration_masters::CalibrationMasters;
 // ============================================================================
 
 pub use star_detection::{
-    // Advanced: background estimation
-    BackgroundMap,
     // Centroid methods
     CentroidMethod,
     // Configuration
@@ -65,6 +64,8 @@ pub use star_detection::{
     // Advanced: profile fitting
     GaussianFitConfig,
     GaussianFitResult,
+    // Pipeline data structures
+    ImageStats,
     LocalBackgroundMethod,
     MoffatFitConfig,
     MoffatFitResult,

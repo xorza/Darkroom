@@ -6,7 +6,7 @@
 //! Run with: `cargo test -p lumos --features real-data dense_field -- --ignored --nocapture`
 
 use crate::AstroImage;
-use crate::star_detection::{DeblendConfig, StarDetectionConfig, StarDetector};
+use crate::star_detection::{Config, StarDetector};
 use crate::testing::{calibration_dir, init_tracing};
 use imaginarium::ColorFormat;
 
@@ -52,8 +52,8 @@ fn test_multi_threshold_on_dense_fields() {
         );
 
         // Multi-threshold config (enabled when n_thresholds > 0)
-        let mut config = StarDetectionConfig::default().crowded_field();
-        config.deblend.n_thresholds = 32;
+        let mut config = Config::crowded_field();
+        config.deblend_n_thresholds = 32;
 
         let mut detector = StarDetector::from_config(config);
 
@@ -131,12 +131,12 @@ fn test_compare_local_maxima_vs_multi_threshold() {
     );
 
     // Local maxima (simple) - n_thresholds = 0
-    let mut config_local = StarDetectionConfig::default().crowded_field();
-    config_local.deblend.n_thresholds = 0;
+    let mut config_local = Config::crowded_field();
+    config_local.deblend_n_thresholds = 0;
 
     // Multi-threshold - n_thresholds = 32
-    let mut config_multi = StarDetectionConfig::default().crowded_field();
-    config_multi.deblend.n_thresholds = 32;
+    let mut config_multi = Config::crowded_field();
+    config_multi.deblend_n_thresholds = 32;
 
     println!("\n--- Local Maxima Deblending ---");
     let mut detector_local = StarDetector::from_config(config_local);

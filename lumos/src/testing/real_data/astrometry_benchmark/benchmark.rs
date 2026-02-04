@@ -9,7 +9,7 @@ use crate::{AstroImage, ImageDimensions};
 use crate::star_detection::tests::common::output::{
     DetectionMetrics, compute_detection_metrics, save_comparison, save_grayscale, save_metrics,
 };
-use crate::star_detection::{Star, StarDetectionConfig, StarDetector};
+use crate::star_detection::{Config, Star, StarDetector};
 use crate::testing::synthetic::GroundTruthStar;
 use anyhow::Result;
 use std::path::{Path, PathBuf};
@@ -184,7 +184,7 @@ impl AstrometryBenchmark {
     pub fn run_rectangle(
         &self,
         rect: &RectangleInfo,
-        config: &StarDetectionConfig,
+        config: &Config,
     ) -> Result<AstrometryBenchmarkResult> {
         // Load astrometry.net stars as ground truth
         let astrometry_stars = self.cache.load_axy_result(rect)?;
@@ -227,7 +227,7 @@ impl AstrometryBenchmark {
     }
 
     /// Run benchmark on all solved rectangles.
-    pub fn run_all(&self, config: &StarDetectionConfig) -> Vec<AstrometryBenchmarkResult> {
+    pub fn run_all(&self, config: &Config) -> Vec<AstrometryBenchmarkResult> {
         let solved = self.cache.solved_rectangles();
 
         if solved.is_empty() {
@@ -444,7 +444,7 @@ mod tests {
         benchmark.solve_rectangles_local(&rectangles).unwrap();
 
         // Run benchmark
-        let config = StarDetectionConfig::default();
+        let config = Config::default();
         let results = benchmark.run_all(&config);
 
         AstrometryBenchmark::print_summary(&results);
@@ -476,7 +476,7 @@ mod tests {
             return;
         }
 
-        let config = StarDetectionConfig::default();
+        let config = Config::default();
         let results = benchmark.run_all(&config);
 
         AstrometryBenchmark::print_summary(&results);

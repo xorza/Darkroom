@@ -237,27 +237,23 @@ fn test_different_tile_sizes() {
 #[test]
 #[should_panic(expected = "tile_size must be between 16 and 256")]
 fn test_tile_size_too_small() {
-    let pixels = Buffer2::new(64, 64, vec![0.5; 64 * 64]);
-    crate::testing::estimate_background(
-        &pixels,
-        &Config {
-            tile_size: 8,
-            ..Default::default()
-        },
-    );
+    // Validation happens in Config::validate(), called by StarDetector::detect()
+    let config = Config {
+        tile_size: 8,
+        ..Default::default()
+    };
+    config.validate();
 }
 
 #[test]
 #[should_panic(expected = "tile_size must be between 16 and 256")]
 fn test_tile_size_too_large() {
-    let pixels = Buffer2::new(64, 64, vec![0.5; 64 * 64]);
-    crate::testing::estimate_background(
-        &pixels,
-        &Config {
-            tile_size: 512,
-            ..Default::default()
-        },
-    );
+    // Validation happens in Config::validate(), called by StarDetector::detect()
+    let config = Config {
+        tile_size: 512,
+        ..Default::default()
+    };
+    config.validate();
 }
 
 #[test]

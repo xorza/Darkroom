@@ -46,11 +46,11 @@
 //!
 //! ```rust,ignore
 //! use lumos::star_detection::survey_benchmark::{SurveyBenchmark, sparse_field};
-//! use lumos::star_detection::StarDetectionConfig;
+//! use lumos::star_detection::Config;
 //!
 //! let benchmark = SurveyBenchmark::new()?;
 //! let field = sparse_field();
-//! let config = StarDetectionConfig::default();
+//! let config = Config::default();
 //!
 //! let result = benchmark.run_field(&field, &config)?;
 //! result.print_summary();
@@ -91,7 +91,7 @@ pub use wcs::{SkyBounds, WCS};
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::star_detection::{BackgroundConfig, StarDetectionConfig};
+    use crate::star_detection::Config;
     use crate::testing::init_tracing;
 
     #[test]
@@ -102,19 +102,10 @@ mod tests {
         let benchmark = SurveyBenchmark::new().expect("Failed to create benchmark");
         let field = sparse_field();
 
-        let config = StarDetectionConfig {
-            psf: crate::star_detection::PsfConfig {
-                expected_fwhm: field.expected_fwhm_pixels(0.396),
-                ..Default::default()
-            },
-            filtering: crate::star_detection::FilteringConfig {
-                min_snr: 20.0, // Only detect brighter stars
-                ..Default::default()
-            },
-            background: BackgroundConfig {
-                sigma_threshold: 5.0, // Higher threshold to match catalog bright stars
-                ..Default::default()
-            },
+        let config = Config {
+            expected_fwhm: field.expected_fwhm_pixels(0.396),
+            min_snr: 20.0,        // Only detect brighter stars
+            sigma_threshold: 5.0, // Higher threshold to match catalog bright stars
             ..Default::default()
         };
 
@@ -149,15 +140,9 @@ mod tests {
         for field in fields::sdss_fields() {
             println!("Testing field: {} - {}", field.name, field.description);
 
-            let config = StarDetectionConfig {
-                psf: crate::star_detection::PsfConfig {
-                    expected_fwhm: field.expected_fwhm_pixels(0.396),
-                    ..Default::default()
-                },
-                background: BackgroundConfig {
-                    sigma_threshold: 3.0,
-                    ..Default::default()
-                },
+            let config = Config {
+                expected_fwhm: field.expected_fwhm_pixels(0.396),
+                sigma_threshold: 3.0,
                 ..Default::default()
             };
 

@@ -10,7 +10,7 @@ use crate::astro_image::AstroImage;
 use crate::star_detection::tests::common::output::{
     DetectionMetrics, compute_detection_metrics, save_comparison, save_grayscale, save_metrics,
 };
-use crate::star_detection::{BackgroundConfig, Star, StarDetectionConfig, StarDetector};
+use crate::star_detection::{Config, Star, StarDetector};
 use crate::testing::synthetic::GroundTruthStar;
 use anyhow::{Context, Result};
 use std::io::Write;
@@ -246,11 +246,7 @@ impl SurveyBenchmark {
     }
 
     /// Run benchmark on a single test field.
-    pub fn run_field(
-        &self,
-        field: &TestField,
-        config: &StarDetectionConfig,
-    ) -> Result<BenchmarkResult> {
+    pub fn run_field(&self, field: &TestField, config: &Config) -> Result<BenchmarkResult> {
         tracing::info!("Running benchmark on field: {}", field.name);
 
         // Step 1: Download image
@@ -330,7 +326,7 @@ impl SurveyBenchmark {
 
     /// Run benchmark on all test fields.
     #[allow(dead_code)]
-    pub fn run_all(&self, config: &StarDetectionConfig) -> Vec<Result<BenchmarkResult>> {
+    pub fn run_all(&self, config: &Config) -> Vec<Result<BenchmarkResult>> {
         super::fields::all_test_fields()
             .iter()
             .map(|field| self.run_field(field, config))
@@ -667,11 +663,8 @@ mod tests {
         let benchmark = SurveyBenchmark::new().unwrap();
         let field = super::super::fields::sparse_field();
 
-        let config = StarDetectionConfig {
-            psf: crate::star_detection::PsfConfig {
-                expected_fwhm: field.expected_fwhm_pixels(0.396), // SDSS plate scale
-                ..Default::default()
-            },
+        let config = Config {
+            expected_fwhm: field.expected_fwhm_pixels(0.396), // SDSS plate scale
             ..Default::default()
         };
 
@@ -722,15 +715,9 @@ mod tests {
         for field in super::super::fields::sdss_fields().into_iter().take(3) {
             println!("Testing field: {}", field.name);
 
-            let config = StarDetectionConfig {
-                psf: crate::star_detection::PsfConfig {
-                    expected_fwhm: field.expected_fwhm_pixels(0.396),
-                    ..Default::default()
-                },
-                background: BackgroundConfig {
-                    sigma_threshold: 3.0,
-                    ..Default::default()
-                },
+            let config = Config {
+                expected_fwhm: field.expected_fwhm_pixels(0.396),
+                sigma_threshold: 3.0,
                 ..Default::default()
             };
 
@@ -795,15 +782,9 @@ mod tests {
         println!("------|-----------|-----------|--------------|------");
 
         for sigma in [2.0, 3.0, 4.0, 5.0, 7.0, 10.0] {
-            let config = StarDetectionConfig {
-                psf: crate::star_detection::PsfConfig {
-                    expected_fwhm: field.expected_fwhm_pixels(0.396),
-                    ..Default::default()
-                },
-                background: BackgroundConfig {
-                    sigma_threshold: sigma,
-                    ..Default::default()
-                },
+            let config = Config {
+                expected_fwhm: field.expected_fwhm_pixels(0.396),
+                sigma_threshold: sigma,
                 ..Default::default()
             };
 
@@ -1013,16 +994,13 @@ mod tests {
         let ground_truth_with_mag =
             catalog_to_ground_truth_with_mag(&catalog_stars, &wcs, width, height, &field);
 
-        let config = StarDetectionConfig {
-            psf: crate::star_detection::PsfConfig {
-                expected_fwhm: field.expected_fwhm_pixels(0.396),
-                ..Default::default()
-            },
+        let config = Config {
+            expected_fwhm: field.expected_fwhm_pixels(0.396),
             ..Default::default()
         };
         let mut detector = StarDetector::from_config(config.clone());
         let result = detector.detect(&image);
-        let match_radius = config.psf.expected_fwhm * 2.0;
+        let match_radius = config.expected_fwhm * 2.0;
 
         println!("\n=== Bright Catalog Stars (mag < 18) ===");
         println!("Match radius: {:.1} pixels", match_radius);

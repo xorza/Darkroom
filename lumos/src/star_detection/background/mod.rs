@@ -50,7 +50,8 @@ impl BackgroundMap {
     ///
     /// Buffers are allocated but not filled with meaningful values.
     /// Use `estimate` to populate them.
-    pub fn new_uninit(width: usize, height: usize, config: &Config) -> Self {
+    #[allow(dead_code)] // Used by tests and benchmarks
+    pub(crate) fn new_uninit(width: usize, height: usize, config: &Config) -> Self {
         assert!(
             (16..=256).contains(&config.tile_size),
             "tile_size must be between 16 and 256, got {}",
@@ -76,7 +77,7 @@ impl BackgroundMap {
     }
 
     /// Create a BackgroundMap by acquiring buffers from a pool.
-    pub fn from_pool(pool: &mut BufferPool, config: &Config) -> Self {
+    pub(crate) fn from_pool(pool: &mut BufferPool, config: &Config) -> Self {
         let has_adaptive = config.refinement.adaptive_sigma().is_some();
         let width = pool.width();
         let height = pool.height();
@@ -98,17 +99,8 @@ impl BackgroundMap {
         }
     }
 
-    /// Release this BackgroundMap's buffers back to the pool.
-    pub fn release_to_pool(self, pool: &mut BufferPool) {
-        pool.release_f32(self.background);
-        pool.release_f32(self.noise);
-        if let Some(adaptive) = self.adaptive_sigma {
-            pool.release_f32(adaptive);
-        }
-    }
-
     /// Convert into an [`ImageStats`], consuming the BackgroundMap.
-    pub fn into_image_stats(self) -> ImageStats {
+    pub(crate) fn into_image_stats(self) -> ImageStats {
         ImageStats {
             background: self.background,
             noise: self.noise,
@@ -118,13 +110,15 @@ impl BackgroundMap {
 
     /// Get image width.
     #[inline]
-    pub fn width(&self) -> usize {
+    #[allow(dead_code)]
+    pub(crate) fn width(&self) -> usize {
         self.background.width()
     }
 
     /// Get image height.
     #[inline]
-    pub fn height(&self) -> usize {
+    #[allow(dead_code)]
+    pub(crate) fn height(&self) -> usize {
         self.background.height()
     }
 
@@ -137,7 +131,7 @@ impl BackgroundMap {
     ///
     /// # Panics
     /// Panics if the buffer dimensions don't match the image dimensions.
-    pub fn estimate(&mut self, pixels: &Buffer2<f32>) {
+    pub(crate) fn estimate(&mut self, pixels: &Buffer2<f32>) {
         debug_assert_eq!(self.background.width(), pixels.width());
         debug_assert_eq!(self.background.height(), pixels.height());
         assert!(
@@ -163,7 +157,7 @@ impl BackgroundMap {
     ///
     /// Call this after `estimate` when using `BackgroundRefinement::Iterative`.
     /// Requires pre-allocated bit buffers for mask and scratch space.
-    pub fn refine(
+    pub(crate) fn refine(
         &mut self,
         pixels: &Buffer2<f32>,
         scratch1: &mut BitBuffer2,

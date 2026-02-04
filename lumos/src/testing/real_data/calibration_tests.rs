@@ -26,7 +26,7 @@ use crate::testing::{calibration_dir, calibration_image_paths, init_tracing};
 #[test]
 #[ignore] // Requires LUMOS_CALIBRATION_DIR
 fn test_find_stars_on_light_frame() {
-    use crate::star_detection::{StarDetectionConfig, StarDetector};
+    use crate::star_detection::{Config, StarDetector};
 
     init_tracing();
 
@@ -59,7 +59,7 @@ fn test_find_stars_on_light_frame() {
 
     let (width, height) = (image.width(), image.height());
 
-    let config = StarDetectionConfig::default();
+    let config = Config::default();
     let start = std::time::Instant::now();
     let mut detector = StarDetector::from_config(config);
     let result = detector.detect(&image);

@@ -3,21 +3,50 @@
 //! This module detects stars in astronomical images and computes sub-pixel
 //! accurate centroids for use in image alignment and stacking.
 //!
-//! # Algorithm Overview
+//! # Pipeline Overview
 //!
-//! 1. **Background estimation**: Divide image into tiles, compute sigma-clipped
-//!    median per tile, then bilinearly interpolate to create a smooth background map.
+//! The detection pipeline consists of 6 stages:
 //!
-//! 2. **Star detection**: Threshold pixels above background + k×σ, then use
-//!    connected component labeling to group pixels into candidate stars.
+//! 1. **Prepare**: Convert to grayscale, apply defect map correction, median
+//!    filter for CFA images.
 //!
-//! 3. **Filtering**: Reject candidates that are too small, too large, elongated,
-//!    near edges, or saturated.
+//! 2. **Background**: Estimate per-pixel background and noise using tiled
+//!    sigma-clipped statistics with bilinear interpolation. Optional iterative
+//!    refinement or adaptive thresholding for nebulous fields.
 //!
-//! 4. **Sub-pixel centroid**: Compute precise centroid using iterative weighted
-//!    centroid algorithm (achieves ~0.05 pixel accuracy).
+//! 3. **FWHM Estimation**: Optionally auto-estimate PSF FWHM from bright stars
+//!    for matched filtering.
 //!
-//! 5. **Quality metrics**: Compute FWHM, SNR, and eccentricity for each star.
+//! 4. **Detect**: Threshold pixels above background + k×σ, connected component
+//!    labeling, deblending (local maxima or multi-threshold), and region
+//!    filtering (size, edge margin).
+//!
+//! 5. **Measure**: Compute sub-pixel centroids using weighted moments or
+//!    Gaussian/Moffat profile fitting, plus quality metrics (flux, FWHM,
+//!    eccentricity, SNR, sharpness, roundness).
+//!
+//! 6. **Filter**: Apply quality thresholds (SNR, eccentricity, sharpness,
+//!    roundness), remove FWHM outliers and duplicates, sort by flux.
+//!
+//! # Example
+//!
+//! ```rust,ignore
+//! use lumos::star_detection::{Config, StarDetector};
+//!
+//! // Use a preset configuration
+//! let config = Config::wide_field();
+//!
+//! // Or customize from defaults
+//! let mut config = Config::default();
+//! config.min_snr = 15.0;
+//! config.sigma_threshold = 3.0;
+//!
+//! // Detect stars
+//! let mut detector = StarDetector::from_config(config);
+//! let result = detector.detect(&image);
+//!
+//! println!("Found {} stars", result.stars.len());
+//! ```
 
 // =============================================================================
 // Submodules
@@ -61,9 +90,6 @@ pub use config::NoiseModel;
 pub use config::{AdaptiveSigmaConfig, BackgroundRefinement};
 pub use defect_map::DefectMap;
 pub use star::Star;
-
-// Background estimation (kept during migration, will become ImageStats)
-pub use background::BackgroundMap;
 
 // Pipeline data structures
 pub use image_stats::ImageStats;

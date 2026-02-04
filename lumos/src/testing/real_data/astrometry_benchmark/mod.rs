@@ -25,7 +25,7 @@
 //!
 //! ```rust,ignore
 //! use lumos::star_detection::astrometry_benchmark::AstrometryBenchmark;
-//! use lumos::star_detection::StarDetectionConfig;
+//! use lumos::star_detection::Config;
 //! use lumos::testing::calibration_dir;
 //!
 //! let mut benchmark = AstrometryBenchmark::new()?;
@@ -37,7 +37,7 @@
 //! benchmark.solve_rectangles_local(&rectangles)?;
 //!
 //! // Run our detector and compare
-//! let config = StarDetectionConfig::default();
+//! let config = Config::default();
 //! let results = benchmark.run_all(&config);
 //! AstrometryBenchmark::print_summary(&results);
 //! ```

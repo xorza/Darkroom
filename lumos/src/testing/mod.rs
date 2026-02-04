@@ -8,30 +8,17 @@ pub mod synthetic;
 use std::path::PathBuf;
 
 use crate::AstroImage;
-use crate::common::{BitBuffer2, Buffer2};
-use crate::star_detection::Config;
-use crate::star_detection::background::BackgroundMap;
-use crate::star_detection::image_stats::ImageStats;
+use crate::common::Buffer2;
+use crate::star_detection::stages;
+use crate::star_detection::{BufferPool, Config, ImageStats};
 
 /// Convenience function to estimate background for tests.
 ///
 /// Returns an `ImageStats` with background and noise estimates.
-/// For production code, use `stages::background::estimate_background` with buffer pooling.
+/// Creates a temporary buffer pool internally.
 pub fn estimate_background(pixels: &Buffer2<f32>, config: &Config) -> ImageStats {
-    let width = pixels.width();
-    let height = pixels.height();
-    let iterations = config.refinement.iterations();
-
-    let mut bg = BackgroundMap::new_uninit(width, height, config);
-    bg.estimate(pixels);
-
-    if iterations > 0 {
-        let mut mask = BitBuffer2::new_filled(width, height, false);
-        let mut scratch = BitBuffer2::new_filled(width, height, false);
-        bg.refine(pixels, &mut mask, &mut scratch);
-    }
-
-    bg.into_image_stats()
+    let mut pool = BufferPool::new(pixels.width(), pixels.height());
+    stages::background::estimate_background(pixels, config, &mut pool)
 }
 
 /// Returns the calibration directory from LUMOS_CALIBRATION_DIR env var.
