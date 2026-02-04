@@ -11,7 +11,7 @@ use arrayvec::ArrayVec;
 
 use smallvec::SmallVec;
 
-use super::{ComponentData, DeblendedCandidate, MAX_PEAKS, Pixel};
+use super::{ComponentData, MAX_PEAKS, Pixel, Region};
 use crate::common::Buffer2;
 use crate::math::{Aabb, Vec2us};
 use crate::star_detection::labeling::LabelMap;
@@ -369,7 +369,7 @@ pub(crate) fn deblend_multi_threshold(
     min_separation: usize,
     min_contrast: f32,
     buffers: &mut DeblendBuffers,
-) -> SmallVec<[DeblendedCandidate; MAX_PEAKS]> {
+) -> SmallVec<[Region; MAX_PEAKS]> {
     debug_assert_eq!(
         (pixels.width(), pixels.height()),
         (labels.width(), labels.height()),
@@ -835,7 +835,7 @@ fn assign_pixels_to_objects(
     labels: &LabelMap,
     tree: &[DeblendNode],
     leaf_indices: &[usize],
-) -> SmallVec<[DeblendedCandidate; MAX_PEAKS]> {
+) -> SmallVec<[Region; MAX_PEAKS]> {
     if leaf_indices.is_empty() {
         return smallvec::smallvec![create_single_object(data, pixels, labels)];
     }
@@ -848,9 +848,9 @@ fn assign_pixels_to_objects(
         .collect();
 
     // Initialize objects (stack allocated)
-    let mut objects: SmallVec<[DeblendedCandidate; MAX_PEAKS]> = peaks
+    let mut objects: SmallVec<[Region; MAX_PEAKS]> = peaks
         .iter()
-        .map(|p| DeblendedCandidate {
+        .map(|p| Region {
             bbox: Aabb::empty(),
             peak: p.pos,
             peak_value: p.value,
@@ -1070,14 +1070,10 @@ fn find_region_peak(region: &[Pixel]) -> Pixel {
 
 /// Create a single object from all pixels (no deblending).
 #[inline]
-fn create_single_object(
-    data: &ComponentData,
-    pixels: &Buffer2<f32>,
-    labels: &LabelMap,
-) -> DeblendedCandidate {
+fn create_single_object(data: &ComponentData, pixels: &Buffer2<f32>, labels: &LabelMap) -> Region {
     let peak = data.find_peak(pixels, labels);
 
-    DeblendedCandidate {
+    Region {
         bbox: data.bbox,
         peak: peak.pos,
         peak_value: peak.value,

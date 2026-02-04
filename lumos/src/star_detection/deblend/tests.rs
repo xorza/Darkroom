@@ -14,7 +14,7 @@ fn deblend_multi_threshold_test(
     n_thresholds: usize,
     min_separation: usize,
     min_contrast: f32,
-) -> smallvec::SmallVec<[DeblendedCandidate; MAX_PEAKS]> {
+) -> smallvec::SmallVec<[Region; MAX_PEAKS]> {
     let mut buffers = DeblendBuffers::new();
     deblend_multi_threshold(
         data,

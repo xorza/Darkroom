@@ -11,7 +11,7 @@
 
 use arrayvec::ArrayVec;
 
-use super::{ComponentData, DeblendedCandidate, MAX_PEAKS, Pixel};
+use super::{ComponentData, MAX_PEAKS, Pixel, Region};
 use crate::common::Buffer2;
 use crate::math::Aabb;
 use crate::star_detection::labeling::LabelMap;
@@ -55,7 +55,7 @@ pub fn deblend_local_maxima(
     labels: &LabelMap,
     min_separation: usize,
     min_prominence: f32,
-) -> ArrayVec<DeblendedCandidate, MAX_PEAKS> {
+) -> ArrayVec<Region, MAX_PEAKS> {
     debug_assert_eq!(
         (pixels.width(), pixels.height()),
         (labels.width(), labels.height()),
@@ -73,7 +73,7 @@ pub fn deblend_local_maxima(
         };
 
         let mut result = ArrayVec::new();
-        result.push(DeblendedCandidate {
+        result.push(Region {
             bbox: data.bbox,
             peak: peak.pos,
             peak_value: peak.value,
@@ -142,14 +142,14 @@ pub fn deblend_by_nearest_peak(
     pixels: &Buffer2<f32>,
     labels: &LabelMap,
     peaks: &[Pixel],
-) -> ArrayVec<DeblendedCandidate, MAX_PEAKS> {
+) -> ArrayVec<Region, MAX_PEAKS> {
     debug_assert_eq!(
         (pixels.width(), pixels.height()),
         (labels.width(), labels.height()),
         "pixels and labels must have same dimensions"
     );
 
-    let mut result: ArrayVec<DeblendedCandidate, MAX_PEAKS> = ArrayVec::new();
+    let mut result: ArrayVec<Region, MAX_PEAKS> = ArrayVec::new();
 
     if peaks.is_empty() {
         return result;
@@ -169,7 +169,7 @@ pub fn deblend_by_nearest_peak(
     // Build candidates
     for (peak, pd) in peaks.iter().take(num_peaks).zip(peak_data.iter()) {
         if pd.area > 0 {
-            result.push(DeblendedCandidate {
+            result.push(Region {
                 bbox: pd.bbox,
                 peak: peak.pos,
                 peak_value: peak.value,

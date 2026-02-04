@@ -13,8 +13,7 @@ use super::super::buffer_pool::BufferPool;
 use super::super::config::Config;
 use super::super::convolution::matched_filter;
 use super::super::deblend::{
-    ComponentData, DeblendBuffers, DeblendedCandidate, deblend_local_maxima,
-    deblend_multi_threshold,
+    ComponentData, DeblendBuffers, deblend_local_maxima, deblend_multi_threshold,
 };
 use super::super::labeling::LabelMap;
 use super::super::mask_dilation::dilate_mask;
@@ -157,13 +156,6 @@ fn extract_candidates(pixels: &Buffer2<f32>, label_map: &LabelMap, config: &Conf
         "Processing components for candidate extraction"
     );
 
-    let map_to_region = |obj: DeblendedCandidate| Region {
-        bbox: obj.bbox,
-        peak: obj.peak,
-        peak_value: obj.peak_value,
-        area: obj.area,
-    };
-
     let filtered: Vec<_> = component_data
         .into_iter()
         .filter(|data| data.area > 0 && data.area <= config.max_area)
@@ -175,7 +167,7 @@ fn extract_candidates(pixels: &Buffer2<f32>, label_map: &LabelMap, config: &Conf
             .fold(
                 || (Vec::new(), DeblendBuffers::new()),
                 |(mut candidates, mut buffers), data| {
-                    for obj in deblend_multi_threshold(
+                    candidates.extend(deblend_multi_threshold(
                         &data,
                         pixels,
                         label_map,
@@ -183,9 +175,7 @@ fn extract_candidates(pixels: &Buffer2<f32>, label_map: &LabelMap, config: &Conf
                         config.deblend_min_separation,
                         config.deblend_min_contrast,
                         &mut buffers,
-                    ) {
-                        candidates.push(map_to_region(obj));
-                    }
+                    ));
                     (candidates, buffers)
                 },
             )
@@ -205,8 +195,6 @@ fn extract_candidates(pixels: &Buffer2<f32>, label_map: &LabelMap, config: &Conf
                     config.deblend_min_separation,
                     config.deblend_min_prominence,
                 )
-                .into_iter()
-                .map(map_to_region)
             })
             .collect()
     };

@@ -81,7 +81,7 @@ From astronomical surveys:
 
 1. **Pixel assignment**: Uses nearest-peak instead of Gaussian probability
 2. **Peak merging**: Peaks closer than `min_separation` are merged (SExtractor doesn't have this)
-3. **SmallVec optimization**: Returns `SmallVec<[DeblendedCandidate; MAX_PEAKS]>` for stack allocation
+3. **SmallVec optimization**: Returns `SmallVec<[Region; MAX_PEAKS]>` for stack allocation
 
 ### Performance Considerations
 
@@ -113,7 +113,7 @@ This optimization provides ~65% speedup in benchmarks while maintaining detectio
 
 - `multi_threshold.rs` - Main algorithm implementation
 - `local_maxima.rs` - Faster alternative for well-separated stars
-- `mod.rs` - Module exports and shared types (`ComponentData`, `Pixel`, `DeblendedCandidate`)
+- `mod.rs` - Module exports and shared types (`ComponentData`, `Pixel`)
 
 ## Testing
 

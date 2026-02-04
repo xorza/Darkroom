@@ -13,6 +13,7 @@
 use crate::common::Buffer2;
 use crate::math::{Aabb, Vec2us};
 use crate::star_detection::labeling::LabelMap;
+use crate::star_detection::region::Region;
 
 pub mod local_maxima;
 pub mod multi_threshold;
@@ -40,15 +41,6 @@ pub const MAX_PEAKS: usize = 8;
 pub struct Pixel {
     pub pos: Vec2us,
     pub value: f32,
-}
-
-/// Result of deblending a single connected component.
-#[derive(Debug, Clone)]
-pub struct DeblendedCandidate {
-    pub bbox: Aabb,
-    pub peak: Vec2us,
-    pub peak_value: f32,
-    pub area: usize,
 }
 
 /// Data for a connected component (allocation-free).
