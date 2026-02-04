@@ -5,18 +5,18 @@ use crate::registration::spatial::{KdTree, form_triangles_from_neighbors};
 
 use super::geometry::Triangle;
 use super::hash_table::TriangleHashTable;
-use super::voting::{StarMatch, VoteMatrix, resolve_matches, vote_for_correspondences};
+use super::voting::{PointMatch, VoteMatrix, resolve_matches, vote_for_correspondences};
 
 /// Form triangles using k-d tree for efficient neighbor lookup.
 ///
 /// Uses k-nearest neighbors to form triangles in O(n * k²) complexity.
 ///
 /// # Arguments
-/// * `positions` - Star positions
-/// * `k_neighbors` - Number of nearest neighbors to consider for each star
+/// * `positions` - Point positions
+/// * `k_neighbors` - Number of nearest neighbors to consider per point
 ///
 /// # Returns
-/// Vector of triangles formed from neighboring stars
+/// Vector of triangles formed from neighboring points
 pub fn form_triangles_kdtree(positions: &[DVec2], k_neighbors: usize) -> Vec<Triangle> {
     let tree = match KdTree::build(positions) {
         Some(t) => t,
@@ -33,23 +33,23 @@ pub fn form_triangles_kdtree(positions: &[DVec2], k_neighbors: usize) -> Vec<Tri
         .collect()
 }
 
-/// Match stars between reference and target images using triangle pattern matching.
+/// Match points between reference and target sets using triangle pattern matching.
 ///
 /// Uses a k-d tree for efficient triangle formation, making it suitable for
-/// large star counts (>100 stars).
+/// large point counts (>100 points).
 ///
 /// # Arguments
-/// * `ref_positions` - Reference image star positions
-/// * `target_positions` - Target image star positions
+/// * `ref_positions` - Reference point positions
+/// * `target_positions` - Target point positions
 /// * `config` - Triangle matching configuration
 ///
 /// # Returns
-/// Vector of matched star pairs with confidence scores
+/// Vector of matched point pairs with confidence scores
 pub fn match_triangles(
     ref_positions: &[DVec2],
     target_positions: &[DVec2],
     config: &TriangleMatchConfig,
-) -> Vec<StarMatch> {
+) -> Vec<PointMatch> {
     let n_ref = ref_positions.len();
     let n_target = target_positions.len();
 
@@ -57,7 +57,7 @@ pub fn match_triangles(
         return Vec::new();
     }
 
-    // k_neighbors scales with star count but is capped for efficiency
+    // k_neighbors scales with point count but is capped for efficiency
     let k_neighbors = (n_ref.min(n_target) / 3).clamp(5, 20);
 
     let ref_triangles = form_triangles_kdtree(ref_positions, k_neighbors);
@@ -70,7 +70,7 @@ pub fn match_triangles(
     // Build hash table for reference triangles
     let hash_table = TriangleHashTable::build(&ref_triangles, config.hash_bins);
 
-    // Vote for star correspondences and resolve conflicts
+    // Vote for point correspondences and resolve conflicts
     let vote_matrix = vote_for_correspondences(
         &target_triangles,
         &ref_triangles,
@@ -105,12 +105,12 @@ pub fn match_triangles(
 fn two_step_refine_matches(
     ref_positions: &[DVec2],
     target_positions: &[DVec2],
-    initial_matches: &[StarMatch],
+    initial_matches: &[PointMatch],
     ref_triangles: &[Triangle],
     target_triangles: &[Triangle],
     hash_table: &TriangleHashTable,
     config: &TriangleMatchConfig,
-) -> Vec<StarMatch> {
+) -> Vec<PointMatch> {
     // Need at least 3 matches to estimate a transform
     if initial_matches.len() < 3 {
         return initial_matches.to_vec();
@@ -166,23 +166,23 @@ fn two_step_refine_matches(
 
             // Vote with position-weighted bonus
             for i in 0..3 {
-                let ref_star = ref_tri.star_indices[i];
-                let target_star = target_tri.star_indices[i];
+                let ref_pt = ref_tri.indices[i];
+                let target_pt = target_tri.indices[i];
 
                 // Check if transformed target position is close to reference position
-                if ref_star < ref_positions.len() && target_star < transformed_target.len() {
-                    let ref_pos = ref_positions[ref_star];
-                    let tar_pos = transformed_target[target_star];
+                if ref_pt < ref_positions.len() && target_pt < transformed_target.len() {
+                    let ref_pos = ref_positions[ref_pt];
+                    let tar_pos = transformed_target[target_pt];
                     let dist_sq = (ref_pos - tar_pos).length_squared();
 
                     // Only vote if positions are reasonably close
                     if dist_sq < position_threshold * position_threshold {
                         // Extra vote for position consistency
-                        vote_matrix.increment(ref_star, target_star);
-                        vote_matrix.increment(ref_star, target_star);
+                        vote_matrix.increment(ref_pt, target_pt);
+                        vote_matrix.increment(ref_pt, target_pt);
                     } else {
                         // Single vote for triangle match only
-                        vote_matrix.increment(ref_star, target_star);
+                        vote_matrix.increment(ref_pt, target_pt);
                     }
                 }
             }
@@ -210,7 +210,7 @@ fn two_step_refine_matches(
 pub(crate) fn estimate_similarity_transform(
     ref_positions: &[DVec2],
     target_positions: &[DVec2],
-    matches: &[StarMatch],
+    matches: &[PointMatch],
 ) -> Option<(f64, f64, DVec2)> {
     if matches.len() < 2 {
         return None;
@@ -287,7 +287,7 @@ pub(crate) fn estimate_similarity_transform(
     Some((scale, rotation, translation))
 }
 
-/// Compute a reasonable position threshold based on star field density.
+/// Compute a reasonable position threshold based on point field density.
 pub(crate) fn compute_position_threshold(positions: &[DVec2]) -> f64 {
     if positions.len() < 2 {
         return 100.0; // Default large threshold

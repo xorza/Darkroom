@@ -136,7 +136,7 @@ TransformMatrix         // 3x3 homogeneous matrix with apply(), inverse(), compo
 TransformType           // Translation | Euclidean | Similarity | Affine | Homography
 RegistrationConfig      // Builder pattern with validation
 RegistrationResult      // { transform, matched_stars, residuals, rms_error, quality_score }
-StarMatch               // { ref_idx, target_idx, votes, confidence }
+PointMatch              // { ref_idx, target_idx, votes, confidence }
 KdTree                  // 2D k-d tree for k-NN and radius queries
 ThinPlateSpline         // Smooth non-rigid transformation
 DistortionMap           // Grid-based distortion visualization

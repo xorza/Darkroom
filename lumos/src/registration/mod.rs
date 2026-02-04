@@ -87,7 +87,7 @@ pub use pipeline::{
 
 // Core types needed by users
 pub use transform::{Transform, TransformType};
-pub use triangle::StarMatch;
+pub use triangle::PointMatch;
 
 // Distortion types
 pub use distortion::{

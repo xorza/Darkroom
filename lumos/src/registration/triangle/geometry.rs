@@ -14,14 +14,11 @@ pub(crate) enum Orientation {
     CounterClockwise,
 }
 
-/// A triangle formed from three stars.
+/// A triangle formed from three points.
 #[derive(Debug, Clone)]
 pub(crate) struct Triangle {
-    /// Indices of the three stars in the original list.
-    pub star_indices: [usize; 3],
-    /// Side lengths sorted: sides[0] <= sides[1] <= sides[2].
-    #[allow(dead_code)]
-    pub sides: [f64; 3],
+    /// Indices of the three points in the original list.
+    pub indices: [usize; 3],
     /// Invariant ratios: (sides[0]/sides[2], sides[1]/sides[2]).
     pub ratios: (f64, f64),
     /// Orientation of the triangle.
@@ -29,7 +26,7 @@ pub(crate) struct Triangle {
 }
 
 impl Triangle {
-    /// Create a triangle from three star positions.
+    /// Create a triangle from three positions.
     ///
     /// Returns None if the triangle is degenerate (collinear points).
     pub fn from_positions(indices: [usize; 3], positions: [DVec2; 3]) -> Option<Self> {
@@ -88,8 +85,7 @@ impl Triangle {
         };
 
         Some(Self {
-            star_indices: indices,
-            sides,
+            indices,
             ratios,
             orientation,
         })

@@ -19,7 +19,7 @@ use rand::prelude::*;
 
 pub use crate::registration::config::RansacConfig;
 use crate::registration::transform::{Transform, TransformType};
-use crate::registration::triangle::StarMatch;
+use crate::registration::triangle::PointMatch;
 
 // Wrapper for seeded vs non-seeded RNG
 enum RngWrapper {
@@ -502,7 +502,7 @@ impl RansacEstimator {
 
     /// Estimate transformation from star matches using progressive sampling.
     ///
-    /// This is the recommended method when you have `StarMatch` objects from
+    /// This is the recommended method when you have `PointMatch` objects from
     /// triangle matching, as it uses the match confidences to guide RANSAC
     /// sampling, typically finding good solutions faster.
     ///
@@ -516,7 +516,7 @@ impl RansacEstimator {
     /// Best transformation found, or None if estimation failed.
     pub fn estimate_with_matches(
         &self,
-        matches: &[StarMatch],
+        matches: &[PointMatch],
         ref_stars: &[DVec2],
         target_stars: &[DVec2],
         transform_type: TransformType,

@@ -29,7 +29,7 @@ use crate::registration::{
     spatial::KdTree,
     transform::Transform,
     transform::TransformType,
-    triangle::{StarMatch, match_triangles},
+    triangle::{PointMatch, match_triangles},
 };
 use crate::star_detection::Star;
 
@@ -183,7 +183,7 @@ impl Registrator {
         &self,
         ref_stars: &[DVec2],
         target_stars: &[DVec2],
-        matches: &[StarMatch],
+        matches: &[PointMatch],
         transform_type: TransformType,
     ) -> Result<RegistrationResult, RegistrationError> {
         // RANSAC with progressive sampling using match confidences

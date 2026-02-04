@@ -1223,12 +1223,12 @@ fn test_ransac_minimum_points() {
 }
 
 // ============================================================================
-// StarMatch-based estimation tests
+// PointMatch-based estimation tests
 // ============================================================================
 
 #[test]
 fn test_estimate_with_matches_basic() {
-    use crate::registration::triangle::StarMatch;
+    use crate::registration::triangle::PointMatch;
 
     // Create reference and target stars
     let ref_stars: Vec<DVec2> = vec![
@@ -1244,8 +1244,8 @@ fn test_estimate_with_matches_basic() {
     let target_stars: Vec<DVec2> = ref_stars.iter().map(|p| *p + offset).collect();
 
     // Create matches with varying confidences
-    let matches: Vec<StarMatch> = (0..ref_stars.len())
-        .map(|i| StarMatch {
+    let matches: Vec<PointMatch> = (0..ref_stars.len())
+        .map(|i| PointMatch {
             ref_idx: i,
             target_idx: i,
             votes: 10 - i,                      // Higher votes for lower indices
@@ -1287,9 +1287,9 @@ fn test_estimate_with_matches_basic() {
 
 #[test]
 fn test_estimate_with_matches_empty() {
-    use crate::registration::triangle::StarMatch;
+    use crate::registration::triangle::PointMatch;
 
-    let matches: Vec<StarMatch> = vec![];
+    let matches: Vec<PointMatch> = vec![];
     let ref_stars: Vec<DVec2> = vec![];
     let target_stars: Vec<DVec2> = vec![];
 
@@ -1306,7 +1306,7 @@ fn test_estimate_with_matches_empty() {
 
 #[test]
 fn test_estimate_with_matches_uses_confidence() {
-    use crate::registration::triangle::StarMatch;
+    use crate::registration::triangle::PointMatch;
 
     // Create points where one outlier has low confidence
     let ref_stars: Vec<DVec2> = vec![
@@ -1324,8 +1324,8 @@ fn test_estimate_with_matches_uses_confidence() {
     target_stars[4] = DVec2::new(1000.0, 1000.0); // Outlier
 
     // Create matches - give the outlier very low confidence
-    let matches: Vec<StarMatch> = (0..ref_stars.len())
-        .map(|i| StarMatch {
+    let matches: Vec<PointMatch> = (0..ref_stars.len())
+        .map(|i| PointMatch {
             ref_idx: i,
             target_idx: i,
             votes: if i == 4 { 1 } else { 10 },

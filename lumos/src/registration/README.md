@@ -157,7 +157,7 @@ When enabled, Phase 1 uses relaxed tolerance (5x `ratio_tolerance`) to find init
 
 2. **`estimate_progressive(ref, target, confidences, type)`** - PROSAC-style 3-phase sampling using confidence scores. Biases early iterations toward high-confidence matches.
 
-3. **`estimate_with_matches(matches, ref_stars, target_stars, type)`** - Extracts positions and confidences from `StarMatch` objects, then calls `estimate_progressive`. **This is what the main registration pipeline uses.**
+3. **`estimate_with_matches(matches, ref_stars, target_stars, type)`** - Extracts positions and confidences from `PointMatch` objects, then calls `estimate_progressive`. **This is what the main registration pipeline uses.**
 
 ### RANSAC Loop
 

@@ -2,8 +2,16 @@
 
 use std::collections::HashMap;
 
-use super::*;
 use glam::DVec2;
+
+use super::TriangleMatchConfig;
+use super::geometry::{Orientation, Triangle};
+use super::hash_table::TriangleHashTable;
+use super::matching::{
+    compute_position_threshold, estimate_similarity_transform, form_triangles_kdtree,
+    match_triangles,
+};
+use super::voting::{PointMatch, VoteMatrix, resolve_matches};
 
 #[test]
 fn test_triangle_from_positions() {
@@ -19,10 +27,9 @@ fn test_triangle_from_positions() {
     assert!(tri.is_some());
     let tri = tri.unwrap();
 
-    // 3-4-5 right triangle
-    assert!((tri.sides[0] - 3.0).abs() < 1e-10);
-    assert!((tri.sides[1] - 4.0).abs() < 1e-10);
-    assert!((tri.sides[2] - 5.0).abs() < 1e-10);
+    // 3-4-5 right triangle: ratios = (3/5, 4/5)
+    assert!((tri.ratios.0 - 0.6).abs() < 1e-10);
+    assert!((tri.ratios.1 - 0.8).abs() < 1e-10);
 }
 
 #[test]
@@ -311,11 +318,10 @@ fn test_form_triangles_kdtree_basic() {
     // Should form at least some triangles
     assert!(!triangles.is_empty());
 
-    // All triangles should be valid (non-degenerate)
+    // All triangles should have valid ratios
     for tri in &triangles {
-        assert!(tri.sides[0] > 0.0);
-        assert!(tri.sides[1] > 0.0);
-        assert!(tri.sides[2] > 0.0);
+        assert!(tri.ratios.0 > 0.0 && tri.ratios.0 <= 1.0);
+        assert!(tri.ratios.1 > 0.0 && tri.ratios.1 <= 1.0);
     }
 }
 
@@ -764,22 +770,13 @@ fn test_triangle_near_collinear() {
     // This should form a valid (though thin) triangle
     assert!(tri.is_some(), "Should accept thin but valid triangle");
 
-    // Check area is computed reasonably
-    let tri = tri.unwrap();
-    // Area should be approximately 50 (base=100, height=1, area=50)
-    let expected_area = 50.0;
-    // Heron's formula: s = (a+b+c)/2, area = sqrt(s*(s-a)*(s-b)*(s-c))
-    let a = tri.sides[0];
-    let b = tri.sides[1];
-    let c = tri.sides[2];
-    let s = (a + b + c) / 2.0;
-    let area = (s * (s - a) * (s - b) * (s - c)).sqrt();
-    assert!(
-        (area - expected_area).abs() < 1.0,
-        "Expected area ~{}, got {}",
-        expected_area,
-        area
-    );
+    // Verify area is reasonable: base=100, height=1, area=50
+    let _tri = tri.unwrap();
+    let area = 0.5
+        * ((positions[1] - positions[0]).x * (positions[2] - positions[0]).y
+            - (positions[1] - positions[0]).y * (positions[2] - positions[0]).x)
+            .abs();
+    assert!((area - 50.0).abs() < 1.0, "Expected area ~50, got {}", area);
 }
 
 /// Test matching with large coordinate values
@@ -1162,8 +1159,8 @@ fn test_estimate_similarity_identity() {
         DVec2::new(10.0, 10.0),
     ];
 
-    let matches: Vec<StarMatch> = (0..4)
-        .map(|i| StarMatch {
+    let matches: Vec<PointMatch> = (0..4)
+        .map(|i| PointMatch {
             ref_idx: i,
             target_idx: i,
             votes: 5,
@@ -1198,8 +1195,8 @@ fn test_estimate_similarity_translation_only() {
     let offset = DVec2::new(50.0, 30.0);
     let target_positions: Vec<DVec2> = ref_positions.iter().map(|p| *p + offset).collect();
 
-    let matches: Vec<StarMatch> = (0..4)
-        .map(|i| StarMatch {
+    let matches: Vec<PointMatch> = (0..4)
+        .map(|i| PointMatch {
             ref_idx: i,
             target_idx: i,
             votes: 5,
@@ -1244,8 +1241,8 @@ fn test_estimate_similarity_with_rotation_and_scale() {
         })
         .collect();
 
-    let matches: Vec<StarMatch> = (0..5)
-        .map(|i| StarMatch {
+    let matches: Vec<PointMatch> = (0..5)
+        .map(|i| PointMatch {
             ref_idx: i,
             target_idx: i,
             votes: 5,
@@ -1272,7 +1269,7 @@ fn test_estimate_similarity_with_rotation_and_scale() {
 #[test]
 fn test_estimate_similarity_too_few_matches() {
     let positions = vec![DVec2::new(0.0, 0.0)];
-    let matches = vec![StarMatch {
+    let matches = vec![PointMatch {
         ref_idx: 0,
         target_idx: 0,
         votes: 5,

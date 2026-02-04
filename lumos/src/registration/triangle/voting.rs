@@ -15,13 +15,13 @@ use super::hash_table::TriangleHashTable;
 /// - Sparse: Only stores non-zero votes, but each entry costs ~40 bytes
 ///   (key: 16 bytes + value: 8 bytes + HashMap overhead)
 ///
-/// Dense is faster for small star counts due to direct indexing (O(1) vs hash lookup).
-/// For 500x500 stars (250K entries), dense is still preferred. Beyond that, sparse wins.
+/// Dense is faster for small point counts due to direct indexing (O(1) vs hash lookup).
+/// For 500x500 points (250K entries), dense is still preferred. Beyond that, sparse wins.
 const DENSE_VOTE_THRESHOLD: usize = 250_000;
 
-/// A matched star pair between reference and target.
+/// A matched point pair between reference and target.
 #[derive(Debug, Clone, Copy)]
-pub struct StarMatch {
+pub struct PointMatch {
     pub ref_idx: usize,
     pub target_idx: usize,
     pub votes: usize,
@@ -30,9 +30,9 @@ pub struct StarMatch {
 
 /// Vote matrix storage - either dense (Vec) or sparse (HashMap).
 pub(crate) enum VoteMatrix {
-    /// Dense storage for small star counts: votes[ref_idx * n_target + target_idx]
+    /// Dense storage for small point counts: votes[ref_idx * n_target + target_idx]
     Dense { votes: Vec<u16>, n_target: usize },
-    /// Sparse storage for large star counts
+    /// Sparse storage for large point counts
     Sparse(HashMap<(usize, usize), usize>),
 }
 
@@ -57,7 +57,7 @@ impl VoteMatrix {
                 let new_val = votes[idx].saturating_add(1);
                 debug_assert!(
                     new_val < u16::MAX,
-                    "Vote overflow: too many matching triangles for star pair ({}, {})",
+                    "Vote overflow: too many matching triangles for point pair ({}, {})",
                     ref_idx,
                     target_idx
                 );
@@ -87,12 +87,12 @@ impl VoteMatrix {
     }
 }
 
-/// Vote for star correspondences based on matching triangles.
+/// Vote for point correspondences based on matching triangles.
 ///
 /// For each pair of similar triangles, votes for vertex correspondences
 /// based on the sorted side lengths (vertices correspond by position in sorted order).
 ///
-/// Uses dense matrix for small star counts (faster due to direct indexing),
+/// Uses dense matrix for small point counts (faster due to direct indexing),
 /// sparse HashMap for large counts (memory efficient).
 pub(crate) fn vote_for_correspondences(
     target_triangles: &[Triangle],
@@ -126,9 +126,9 @@ pub(crate) fn vote_for_correspondences(
             // Vote for all three vertex correspondences
             // Since sides are sorted by length, vertices should correspond in order
             for i in 0..3 {
-                let ref_star = ref_tri.star_indices[i];
-                let target_star = target_tri.star_indices[i];
-                vote_matrix.increment(ref_star, target_star);
+                let ref_pt = ref_tri.indices[i];
+                let target_pt = target_tri.indices[i];
+                vote_matrix.increment(ref_pt, target_pt);
             }
         }
     }
@@ -136,21 +136,21 @@ pub(crate) fn vote_for_correspondences(
     vote_matrix.into_hashmap()
 }
 
-/// Resolve vote matrix into final star matches using greedy conflict resolution.
+/// Resolve vote matrix into final matches using greedy conflict resolution.
 ///
 /// Filters matches by minimum votes, sorts by vote count, and greedily assigns
-/// matches ensuring each reference and target star is used at most once.
+/// matches ensuring each reference and target point is used at most once.
 pub(crate) fn resolve_matches(
     vote_matrix: HashMap<(usize, usize), usize>,
     n_ref: usize,
     n_target: usize,
     min_votes: usize,
-) -> Vec<StarMatch> {
+) -> Vec<PointMatch> {
     // Filter by minimum votes and collect matches
-    let mut matches: Vec<StarMatch> = vote_matrix
+    let mut matches: Vec<PointMatch> = vote_matrix
         .into_iter()
         .filter(|&(_, votes)| votes >= min_votes)
-        .map(|((ref_idx, target_idx), votes)| StarMatch {
+        .map(|((ref_idx, target_idx), votes)| PointMatch {
             ref_idx,
             target_idx,
             votes,
@@ -179,7 +179,7 @@ pub(crate) fn resolve_matches(
             let max_possible_votes = (n_ref.min(n_target) - 2) * (n_ref.min(n_target) - 1) / 2;
             let confidence = (m.votes as f64 / max_possible_votes.max(1) as f64).min(1.0);
 
-            resolved.push(StarMatch { confidence, ..m });
+            resolved.push(PointMatch { confidence, ..m });
         }
     }
 
