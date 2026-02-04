@@ -112,9 +112,12 @@ Custom implementation chosen over Rust ecosystem crates (`arrsac`, `inlier`, `li
 
 ## Future Work
 
-- **True PROSAC**: Replace the 3-phase pool heuristic with formal PROSAC (Chum & Matas, 2005) — progressively expand the sampling set one point at a time, drawing the newest point in each sample. Can be 10–100x faster than uniform RANSAC when confidence ordering is good.
 - **MAGSAC++**: Threshold-free scoring via marginalization, if fixed-threshold MSAC proves limiting.
 - **LO inner-loop allocation**: Pre-allocate buffers for LO refinement (low priority, typical iteration count is 3–5).
+
+## Declined
+
+- **True PROSAC** (Chum & Matas, 2005): PROSAC's 10–100x speedup applies to high-outlier-rate scenarios with large minimal sample sizes (e.g. m=7 fundamental matrix, thousands of SIFT matches at 20% inliers). For star registration with ~200 points, m=2 (similarity), and >50% inliers after triangle matching, standard RANSAC converges in ~18 iterations — the loop takes microseconds regardless of sampling strategy. The current 3-phase heuristic is sufficient.
 
 ## References
 
