@@ -17,7 +17,7 @@ Production-grade astronomical image alignment: star matching, robust transformat
 11. [Module Structure](#module-structure)
 12. [Configuration Reference](#configuration-reference)
 13. [Performance](#performance)
-14. [Known Limitations and Future Work](#known-limitations-and-future-work)
+14. [Pending Improvements](#pending-improvements)
 15. [References](#references)
 
 ---
@@ -384,10 +384,10 @@ registration/
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `transform_type` | Similarity | Maximum transformation complexity |
+| `transform_type` | Homography | Maximum transformation complexity |
 | `min_stars_for_matching` | 10 | Minimum stars required to attempt registration |
-| `min_matched_stars` | 6 | Minimum matches after triangle matching |
-| `max_residual_pixels` | 1.0 | Maximum acceptable RMS error |
+| `min_matched_stars` | 8 | Minimum matches after triangle matching |
+| `max_residual_pixels` | 2.0 | Maximum acceptable RMS error |
 | `use_spatial_distribution` | true | Grid-based star selection for field coverage |
 | `spatial_grid_size` | 8 | NxN grid for spatial distribution |
 
@@ -400,16 +400,16 @@ registration/
 | `min_votes` | 3 | Minimum votes to accept a star match |
 | `hash_bins` | 100 | Hash table bins per dimension (100x100) |
 | `check_orientation` | true | Reject mirrored triangle matches |
-| `two_step_matching` | false | Two-phase rough-then-fine matching |
+| `two_step_matching` | true | Two-phase rough-then-fine matching |
 
 ### RansacConfig
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `max_iterations` | 1000 | Maximum RANSAC iterations |
+| `max_iterations` | 2000 | Maximum RANSAC iterations |
 | `inlier_threshold` | 2.0 | Distance threshold (pixels) for inlier classification |
-| `confidence` | 0.999 | Target confidence for adaptive termination |
-| `min_inlier_ratio` | 0.5 | Minimum inlier fraction to accept model |
+| `confidence` | 0.995 | Target confidence for adaptive termination |
+| `min_inlier_ratio` | 0.3 | Minimum inlier fraction to accept model |
 | `seed` | None | Random seed for deterministic behavior |
 | `use_local_optimization` | true | Enable LO-RANSAC refinement |
 | `lo_max_iterations` | 10 | Maximum local optimization iterations |
@@ -430,7 +430,7 @@ registration/
 | Stage | Time | Complexity |
 |-------|------|-----------|
 | Triangle formation + matching | ~5-15 ms | O(n * k^2) |
-| RANSAC (1000 iterations) | ~10-40 ms | O(iter * n) |
+| RANSAC (2000 iterations) | ~20-80 ms | O(iter * n) |
 | Lanczos3 warp | ~200-500 ms | O(W * H * kernel^2) |
 | Phase correlation | ~10 ms | O(N^2 * log N) |
 
@@ -443,25 +443,78 @@ registration/
 
 ---
 
-## Known Limitations and Future Work
+## Pending Improvements
 
-### Current Limitations
+Prioritized by impact. Items marked with **[BUG]** are defects in existing code.
 
-1. **No transform plausibility checks in RANSAC.** RANSAC can converge on a spurious model with few inliers (e.g., 4-point perfect fit with wild rotation/scale) if it doesn't find the correct model early. Adding constraints on maximum rotation and scale range would reject physically implausible hypotheses before they can become the best model.
+### 1. [BUG] Two-Step Matching Not Wired Up in Production (High Priority)
 
-2. **Single-model assumption.** The pipeline fits one global transformation. Images with severe field-dependent distortion may benefit from local models (tile-based registration or thin-plate splines applied during warping, as PixInsight does).
+`two_step_matching` is enabled by default (`true`), but the production code path `match_triangles()` in `triangle/mod.rs` never calls `two_step_refine_matches()`. Only the brute-force `match_stars_triangles()` (test/bench only) uses it. The k-d tree production path returns after `resolve_matches()` without any refinement phase.
 
-3. **No iterative model refinement.** PixInsight's approach of starting with a rigid model and progressively adding flexibility (projective -> TPS) is more robust for challenging data. Our pipeline fits the target model in one pass.
+**Fix:** Call `two_step_refine_matches()` from `match_triangles()` when `config.two_step_matching` is true, same as the brute-force path does.
 
-4. **Star detection is external.** Registration quality depends heavily on star detection quality (centroid accuracy, false positive rate). The module assumes stars are pre-detected and sorted by brightness.
+**Location:** `triangle/mod.rs`, `match_triangles()` function (line ~740).
 
-### Potential Improvements
+### 2. Transform Plausibility Checks in RANSAC (High Priority)
 
-- **Transform sanity checks**: reject RANSAC hypotheses with rotation > threshold or scale outside [min, max] range
-- **Iterative registration**: start with Similarity, then upgrade to Affine/Homography if residuals are high
-- **MAGSAC++**: sigma-consensus scoring instead of hard inlier threshold, eliminating the need to tune `inlier_threshold`
-- **Graph-Cut RANSAC**: spatially coherent inlier segmentation for better outlier rejection
-- **Guided matching**: after initial registration, search for additional star pairs using the estimated transform to predict positions
+RANSAC can converge on a spurious model with few inliers (e.g., 4-point perfect fit with 162-degree rotation and 0.4x scale) if it doesn't find the correct model early. This was the root cause of the stochastic 4-vs-40 matched stars problem. Industry tools reject physically implausible hypotheses before they can become the best model.
+
+**What to add:** After `estimate_transform()` in the RANSAC loop, reject hypotheses where:
+- Rotation exceeds a configurable threshold (e.g., 10 degrees for tracked mounts)
+- Scale is outside a configurable range (e.g., 0.8-1.2 for same-telescope images)
+
+**Configurable because:** Some use cases (mosaics, different focal lengths) legitimately have large rotation or scale differences. Defaults should target same-telescope stacking.
+
+**Industry reference:** PixInsight rejects transforms with unreasonable parameters. Siril checks scale consistency.
+
+**Location:** `ransac/mod.rs`, inside the main RANSAC loop after `estimate_transform()`.
+
+### 3. Guided Matching / Post-RANSAC Match Recovery (High Priority)
+
+After RANSAC produces a good transform, the pipeline never searches for additional star pairs that triangle matching missed. This leaves significant matches on the table. PixInsight and Astroalign both do post-RANSAC guided matching.
+
+**What to add:** After RANSAC, for each unmatched reference star:
+1. Apply the estimated transform to predict its position in the target image
+2. Search for the closest target star within `inlier_threshold` pixels
+3. If found and not already matched, add the pair as a new inlier
+
+This typically increases the inlier count by 2-3x because triangle matching is conservative (requires multiple independent triangle votes), while transform-guided search only needs spatial proximity.
+
+**Location:** `pipeline/mod.rs`, after the RANSAC step and before SIP correction.
+
+### 4. Iterative Model Refinement (Medium Priority)
+
+The pipeline fits one transform type in one pass. PixInsight starts with Similarity (4 DOF), checks residuals, and upgrades to Homography (8 DOF) or TPS only if needed. Benefits:
+- Similarity has fewer parameters, so RANSAC converges faster and more reliably
+- If Similarity residuals are good enough (<0.5px), no need for higher-DOF model
+- If residuals are poor, upgrade to Homography using the Similarity inliers as initial guidance, avoiding the cold-start problem
+
+**What to add:** A `transform_type: Auto` mode that starts with Similarity, evaluates residuals, and upgrades if RMS exceeds a threshold.
+
+**Industry reference:** PixInsight StarAlignment uses progressive model complexity. Siril defaults to Homography but could benefit from this approach for robustness.
+
+### 5. Confidence Calculation Improvement (Low Priority)
+
+In `resolve_matches()` (`triangle/mod.rs:214`), the confidence formula uses `max_possible_votes = (n-2)*(n-1)/2` which is a loose theoretical upper bound that makes all confidences very small. A more useful confidence metric would be:
+- Relative to the maximum observed votes in the current match set
+- Or based on the vote distribution (z-score: how many standard deviations above mean)
+
+This matters because `estimate_with_matches()` uses confidence scores to guide progressive RANSAC sampling. Better confidence values lead to faster convergence.
+
+### 6. MAGSAC++ Scoring (Low Priority, Research)
+
+Currently RANSAC uses a hard inlier threshold with weighted scoring: `score += (threshold^2 - dist^2) * 1000`. MAGSAC++ uses sigma-consensus: it marginalizes over a range of possible thresholds, automatically adapting to the noise level without requiring manual tuning of `inlier_threshold`.
+
+**Trade-off:** More complex implementation, but eliminates one of the most sensitive parameters. Worth investigating if users report threshold sensitivity across different optical setups.
+
+**Reference:** Barath, D., et al. (2020). "MAGSAC++, a fast, reliable and accurate robust estimator." CVPR 2020.
+
+### Current Limitations (Not Planned)
+
+These are known limitations that are acceptable for the current scope:
+
+- **Single-model assumption.** The pipeline fits one global transformation. Images with severe field-dependent distortion may benefit from local models (tile-based registration or TPS warping, as PixInsight does). SIP correction partially addresses this.
+- **Star detection is external.** Registration quality depends on star detection quality (centroid accuracy, false positive rate). The module assumes stars are pre-detected and sorted by brightness.
 
 ---
 

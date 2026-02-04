@@ -22,5 +22,6 @@ AI coding rules for Rust projects:
   - The error is caused by perf's slow external addr2line invocation on debug symbols
 - Use nextest for running tests and for measuring test execution time when asked.
 - For iterative changes and benchmarks, add readme files to corresponding folders explaining which optimizations were implemented and which were removed. When running benchmarks, always output results to a txt file in the bench directory and maintain a bench-analysis.md file with interpretations. Update it when re-running benchmarks.
+- Do not preserve backward compatibility. This library is in early stages of development. Remove old/deprecated code, rename freely, change APIs as needed. Rewrite any code that depends on changed APIs to use the new correct API. Never add compatibility shims, re-exports, or wrappers for old names.
 - Remove deprecated. Make sure public api is properly exposed and consistent. If code is unused but expected to be used later, add a comment explaining why it is kept and silence linter warnings if needed.
 - Check test run time make sure tests taking reasonable amount of time. If tests run too long, research and improve.
