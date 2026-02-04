@@ -7,6 +7,7 @@
 //! - Minimum star counts
 //! - Combined disturbances (stress tests)
 
+use crate::registration::ransac::RansacConfig;
 use crate::registration::{RegistrationConfig, Registrator, TransformType};
 use crate::testing::synthetic::{
     add_position_noise, add_spurious_stars, generate_random_positions, remove_random_stars,
@@ -791,6 +792,11 @@ fn test_large_rotation_45_degrees() {
         min_stars_for_matching: 6,
         min_matched_stars: 4,
         max_residual_pixels: 3.0,
+        ransac: RansacConfig {
+            max_rotation: None,
+            scale_range: None,
+            ..Default::default()
+        },
         ..Default::default()
     };
 
@@ -844,6 +850,11 @@ fn test_large_rotation_90_degrees() {
         min_stars_for_matching: 6,
         min_matched_stars: 4,
         max_residual_pixels: 3.0,
+        ransac: RansacConfig {
+            max_rotation: None,
+            scale_range: None,
+            ..Default::default()
+        },
         ..Default::default()
     };
 
@@ -894,6 +905,11 @@ fn test_large_rotation_negative_45_degrees() {
         min_stars_for_matching: 6,
         min_matched_stars: 4,
         max_residual_pixels: 3.0,
+        ransac: RansacConfig {
+            max_rotation: None,
+            scale_range: None,
+            ..Default::default()
+        },
         ..Default::default()
     };
 
@@ -934,6 +950,11 @@ fn test_extreme_scale_2x() {
         min_stars_for_matching: 6,
         min_matched_stars: 4,
         max_residual_pixels: 5.0, // Allow more residual for large scale
+        ransac: RansacConfig {
+            max_rotation: None,
+            scale_range: None,
+            ..Default::default()
+        },
         ..Default::default()
     };
 
@@ -984,6 +1005,11 @@ fn test_extreme_scale_half() {
         min_stars_for_matching: 6,
         min_matched_stars: 4,
         max_residual_pixels: 5.0,
+        ransac: RansacConfig {
+            max_rotation: None,
+            scale_range: None,
+            ..Default::default()
+        },
         ..Default::default()
     };
 
@@ -1037,6 +1063,11 @@ fn test_extreme_scale_with_rotation() {
         min_stars_for_matching: 6,
         min_matched_stars: 4,
         max_residual_pixels: 5.0,
+        ransac: RansacConfig {
+            max_rotation: None,
+            scale_range: None,
+            ..Default::default()
+        },
         ..Default::default()
     };
 

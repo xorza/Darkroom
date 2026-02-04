@@ -89,6 +89,26 @@ impl RansacEstimator {
         Self { config }
     }
 
+    /// Check whether a transform hypothesis is physically plausible.
+    ///
+    /// Rejects hypotheses where rotation or scale fall outside configured bounds.
+    /// Returns `true` if the transform is plausible (or checks are disabled).
+    fn is_plausible(&self, transform: &Transform) -> bool {
+        if let Some(max_rotation) = self.config.max_rotation {
+            let angle = transform.rotation_angle().abs();
+            if angle > max_rotation {
+                return false;
+            }
+        }
+        if let Some((min_scale, max_scale)) = self.config.scale_range {
+            let scale = transform.scale_factor();
+            if scale < min_scale || scale > max_scale {
+                return false;
+            }
+        }
+        true
+    }
+
     /// Estimate transformation from matched point pairs.
     ///
     /// # Arguments
@@ -145,6 +165,11 @@ impl RansacEstimator {
                 None => continue,
             };
 
+            // Reject physically implausible hypotheses early (before expensive inlier counting)
+            if !self.is_plausible(&transform) {
+                continue;
+            }
+
             // Count inliers
             let (mut inliers, mut score) = count_inliers(
                 ref_points,
@@ -164,9 +189,12 @@ impl RansacEstimator {
                     &inliers,
                     transform_type,
                 );
-                current_transform = lo_transform;
-                inliers = lo_inliers;
-                score = lo_score;
+                // Only accept LO result if it's still plausible
+                if self.is_plausible(&lo_transform) {
+                    current_transform = lo_transform;
+                    inliers = lo_inliers;
+                    score = lo_score;
+                }
             }
 
             // Update best if improved
@@ -391,6 +419,11 @@ impl RansacEstimator {
                 None => continue,
             };
 
+            // Reject physically implausible hypotheses early (before expensive inlier counting)
+            if !self.is_plausible(&transform) {
+                continue;
+            }
+
             // Count inliers
             let (mut inliers, mut score) = count_inliers(
                 ref_points,
@@ -410,9 +443,12 @@ impl RansacEstimator {
                     &inliers,
                     transform_type,
                 );
-                current_transform = lo_transform;
-                inliers = lo_inliers;
-                score = lo_score;
+                // Only accept LO result if it's still plausible
+                if self.is_plausible(&lo_transform) {
+                    current_transform = lo_transform;
+                    inliers = lo_inliers;
+                    score = lo_score;
+                }
             }
 
             // Update best if improved

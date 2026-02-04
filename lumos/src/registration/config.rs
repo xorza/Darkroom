@@ -181,6 +181,16 @@ pub struct RansacConfig {
     pub use_local_optimization: bool,
     /// Maximum iterations for local optimization step.
     pub lo_max_iterations: usize,
+    /// Maximum allowed rotation in radians. Hypotheses with rotation exceeding
+    /// this threshold are rejected as implausible. Set to `None` to disable.
+    /// Default: 10 degrees (~0.175 rad), suitable for tracked mounts.
+    /// Mosaics or untracked mounts may need higher values or `None`.
+    pub max_rotation: Option<f64>,
+    /// Allowed scale range (min, max). Hypotheses with scale outside this range
+    /// are rejected as implausible. Set to `None` to disable.
+    /// Default: (0.8, 1.2), suitable for same-telescope stacking.
+    /// Different focal lengths or binning modes may need wider ranges or `None`.
+    pub scale_range: Option<(f64, f64)>,
 }
 
 impl Default for RansacConfig {
@@ -193,6 +203,8 @@ impl Default for RansacConfig {
             seed: None,
             use_local_optimization: true,
             lo_max_iterations: 10,
+            max_rotation: Some(10.0_f64.to_radians()),
+            scale_range: Some((0.8, 1.2)),
         }
     }
 }
@@ -220,6 +232,21 @@ impl RansacConfig {
             "RANSAC min_inlier_ratio must be in (0, 1], got {}",
             self.min_inlier_ratio
         );
+        if let Some(max_rot) = self.max_rotation {
+            assert!(
+                max_rot > 0.0,
+                "RANSAC max_rotation must be positive, got {}",
+                max_rot
+            );
+        }
+        if let Some((min_scale, max_scale)) = self.scale_range {
+            assert!(
+                min_scale > 0.0 && max_scale > min_scale,
+                "RANSAC scale_range must have 0 < min < max, got ({}, {})",
+                min_scale,
+                max_scale
+            );
+        }
     }
 }
 

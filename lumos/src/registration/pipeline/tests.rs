@@ -393,8 +393,21 @@ fn test_registration_large_rotation() {
     let rotation = Transform::rotation_around(DVec2::new(300.0, 300.0), PI / 6.0);
     let target_stars = transform_stars(&ref_stars, &rotation);
 
-    let result =
-        register_star_positions(&ref_stars, &target_stars, TransformType::Euclidean).unwrap();
+    let config = RegistrationConfig {
+        transform_type: TransformType::Euclidean,
+        min_stars_for_matching: 6,
+        min_matched_stars: 4,
+        max_residual_pixels: 2.0,
+        ransac: crate::registration::ransac::RansacConfig {
+            max_rotation: None,
+            scale_range: None,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let result = Registrator::new(config)
+        .register_positions(&ref_stars, &target_stars)
+        .unwrap();
 
     let angle = result.transform.rotation_angle();
     assert!(

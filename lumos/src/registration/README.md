@@ -451,19 +451,9 @@ Prioritized by impact. Items marked with **[BUG]** are defects in existing code.
 
 Fixed: `match_triangles()` now calls `two_step_refine_matches()` when `config.two_step_matching` is true, matching the brute-force path behavior.
 
-### 2. Transform Plausibility Checks in RANSAC (High Priority)
+### ~~2. Transform Plausibility Checks in RANSAC~~ (Fixed)
 
-RANSAC can converge on a spurious model with few inliers (e.g., 4-point perfect fit with 162-degree rotation and 0.4x scale) if it doesn't find the correct model early. This was the root cause of the stochastic 4-vs-40 matched stars problem. Industry tools reject physically implausible hypotheses before they can become the best model.
-
-**What to add:** After `estimate_transform()` in the RANSAC loop, reject hypotheses where:
-- Rotation exceeds a configurable threshold (e.g., 10 degrees for tracked mounts)
-- Scale is outside a configurable range (e.g., 0.8-1.2 for same-telescope images)
-
-**Configurable because:** Some use cases (mosaics, different focal lengths) legitimately have large rotation or scale differences. Defaults should target same-telescope stacking.
-
-**Industry reference:** PixInsight rejects transforms with unreasonable parameters. Siril checks scale consistency.
-
-**Location:** `ransac/mod.rs`, inside the main RANSAC loop after `estimate_transform()`.
+Fixed: `RansacConfig` now has `max_rotation: Option<f64>` (default 10°) and `scale_range: Option<(f64, f64)>` (default 0.8–1.2). Hypotheses exceeding these bounds are rejected before inlier counting in both `estimate()` and `estimate_progressive()`. LO-RANSAC refinements are also checked. Set to `None` to disable for mosaics or different focal lengths.
 
 ### 3. Guided Matching / Post-RANSAC Match Recovery (High Priority)
 

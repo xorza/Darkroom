@@ -167,6 +167,8 @@ fn test_ransac_perfect_similarity() {
 
     let config = RansacConfig {
         seed: Some(42),
+        max_rotation: None,
+        scale_range: None,
         ..Default::default()
     };
     let estimator = RansacEstimator::new(config);
@@ -356,6 +358,8 @@ fn test_lo_ransac_improves_inlier_count() {
         use_local_optimization: true,
         lo_max_iterations: 5,
         inlier_threshold: 1.0,
+        max_rotation: None,
+        scale_range: None,
         ..Default::default()
     };
     let estimator_with = RansacEstimator::new(config_with_lo);
@@ -368,6 +372,8 @@ fn test_lo_ransac_improves_inlier_count() {
         seed: Some(123),
         use_local_optimization: false,
         inlier_threshold: 1.0,
+        max_rotation: None,
+        scale_range: None,
         ..Default::default()
     };
     let estimator_without = RansacEstimator::new(config_without_lo);
@@ -486,6 +492,8 @@ fn test_ransac_numerical_stability_large_coords() {
 
     let config = RansacConfig {
         seed: Some(42),
+        max_rotation: None,
+        scale_range: None,
         ..Default::default()
     };
     let estimator = RansacEstimator::new(config);
@@ -656,6 +664,8 @@ fn test_progressive_ransac_finds_solution_faster() {
     let config = RansacConfig {
         seed: Some(999),
         max_iterations: 200,
+        max_rotation: None,
+        scale_range: None,
         ..Default::default()
     };
     let estimator = RansacEstimator::new(config);
@@ -973,6 +983,8 @@ fn test_ransac_100_percent_inliers() {
     let config = RansacConfig {
         max_iterations: 100,
         inlier_threshold: 1.0,
+        max_rotation: None,
+        scale_range: None,
         ..Default::default()
     };
     let estimator = RansacEstimator::new(config);
@@ -1358,4 +1370,487 @@ fn test_estimate_with_matches_uses_confidence() {
         offset.y,
         est.y
     );
+}
+
+// ============================================================================
+// Plausibility Check Tests
+// ============================================================================
+
+#[test]
+fn test_plausibility_rejects_large_rotation() {
+    // Create a similarity transform with 30° rotation.
+    // Default plausibility limits rotation to ~10°, so RANSAC should fail.
+    let ref_points: Vec<DVec2> = (0..20)
+        .map(|i| DVec2::new((i % 5) as f64 * 50.0, (i / 5) as f64 * 50.0))
+        .collect();
+
+    let known = Transform::similarity(DVec2::new(5.0, -3.0), 30.0_f64.to_radians(), 1.0);
+    let target_points: Vec<DVec2> = ref_points.iter().map(|&p| known.apply(p)).collect();
+
+    let config = RansacConfig {
+        seed: Some(42),
+        max_rotation: Some(10.0_f64.to_radians()),
+        scale_range: None,
+        ..Default::default()
+    };
+    let estimator = RansacEstimator::new(config);
+    let result = estimator.estimate(&ref_points, &target_points, TransformType::Similarity);
+
+    // Should fail because all hypotheses have ~30° rotation, exceeding the 10° limit
+    assert!(
+        result.is_none(),
+        "Should reject transforms with rotation exceeding max_rotation"
+    );
+}
+
+#[test]
+fn test_plausibility_rejects_large_scale() {
+    // Create a similarity transform with 2x scale.
+    // Default plausibility limits scale to (0.8, 1.2).
+    let ref_points: Vec<DVec2> = (0..20)
+        .map(|i| DVec2::new((i % 5) as f64 * 50.0, (i / 5) as f64 * 50.0))
+        .collect();
+
+    let known = Transform::similarity(DVec2::new(5.0, -3.0), 0.0, 2.0);
+    let target_points: Vec<DVec2> = ref_points.iter().map(|&p| known.apply(p)).collect();
+
+    let config = RansacConfig {
+        seed: Some(42),
+        max_rotation: None,
+        scale_range: Some((0.8, 1.2)),
+        ..Default::default()
+    };
+    let estimator = RansacEstimator::new(config);
+    let result = estimator.estimate(&ref_points, &target_points, TransformType::Similarity);
+
+    assert!(
+        result.is_none(),
+        "Should reject transforms with scale outside scale_range"
+    );
+}
+
+#[test]
+fn test_plausibility_rejects_small_scale() {
+    // Scale of 0.5 should be rejected by (0.8, 1.2) range
+    let ref_points: Vec<DVec2> = (0..20)
+        .map(|i| DVec2::new((i % 5) as f64 * 50.0, (i / 5) as f64 * 50.0))
+        .collect();
+
+    let known = Transform::similarity(DVec2::new(0.0, 0.0), 0.0, 0.5);
+    let target_points: Vec<DVec2> = ref_points.iter().map(|&p| known.apply(p)).collect();
+
+    let config = RansacConfig {
+        seed: Some(42),
+        max_rotation: None,
+        scale_range: Some((0.8, 1.2)),
+        ..Default::default()
+    };
+    let estimator = RansacEstimator::new(config);
+    let result = estimator.estimate(&ref_points, &target_points, TransformType::Similarity);
+
+    assert!(
+        result.is_none(),
+        "Should reject transforms with scale below scale_range minimum"
+    );
+}
+
+#[test]
+fn test_plausibility_accepts_within_bounds() {
+    // 5° rotation and 1.1 scale should pass default-like bounds
+    let ref_points: Vec<DVec2> = (0..20)
+        .map(|i| DVec2::new((i % 5) as f64 * 50.0, (i / 5) as f64 * 50.0))
+        .collect();
+
+    let angle = 5.0_f64.to_radians();
+    let scale = 1.1;
+    let known = Transform::similarity(DVec2::new(5.0, -3.0), angle, scale);
+    let target_points: Vec<DVec2> = ref_points.iter().map(|&p| known.apply(p)).collect();
+
+    let config = RansacConfig {
+        seed: Some(42),
+        max_rotation: Some(10.0_f64.to_radians()),
+        scale_range: Some((0.8, 1.2)),
+        ..Default::default()
+    };
+    let estimator = RansacEstimator::new(config);
+    let result = estimator.estimate(&ref_points, &target_points, TransformType::Similarity);
+
+    assert!(result.is_some(), "Should accept transforms within bounds");
+    let result = result.unwrap();
+    assert!(approx_eq(result.transform.rotation_angle(), angle, 0.02));
+    assert!(approx_eq(result.transform.scale_factor(), scale, 0.02));
+}
+
+#[test]
+fn test_plausibility_disabled_accepts_everything() {
+    // With both checks disabled (None), any transform should be accepted
+    let ref_points: Vec<DVec2> = (0..20)
+        .map(|i| DVec2::new((i % 5) as f64 * 50.0, (i / 5) as f64 * 50.0))
+        .collect();
+
+    let known = Transform::similarity(DVec2::new(5.0, -3.0), PI / 4.0, 2.0);
+    let target_points: Vec<DVec2> = ref_points.iter().map(|&p| known.apply(p)).collect();
+
+    let config = RansacConfig {
+        seed: Some(42),
+        max_rotation: None,
+        scale_range: None,
+        ..Default::default()
+    };
+    let estimator = RansacEstimator::new(config);
+    let result = estimator.estimate(&ref_points, &target_points, TransformType::Similarity);
+
+    assert!(
+        result.is_some(),
+        "Should accept any transform when plausibility checks are disabled"
+    );
+    let result = result.unwrap();
+    assert_eq!(result.inliers.len(), 20);
+}
+
+#[test]
+fn test_plausibility_rotation_boundary() {
+    // Test at exactly the rotation boundary: 9.9° should pass, 10.1° should fail
+    let ref_points: Vec<DVec2> = (0..20)
+        .map(|i| DVec2::new((i % 5) as f64 * 50.0, (i / 5) as f64 * 50.0))
+        .collect();
+
+    let max_rotation = 10.0_f64.to_radians();
+
+    // 9.9° - should pass
+    let angle_pass = 9.9_f64.to_radians();
+    let known = Transform::similarity(DVec2::new(5.0, -3.0), angle_pass, 1.0);
+    let target_points: Vec<DVec2> = ref_points.iter().map(|&p| known.apply(p)).collect();
+
+    let config = RansacConfig {
+        seed: Some(42),
+        max_rotation: Some(max_rotation),
+        scale_range: None,
+        ..Default::default()
+    };
+    let estimator = RansacEstimator::new(config);
+    let result = estimator.estimate(&ref_points, &target_points, TransformType::Similarity);
+    assert!(result.is_some(), "9.9° rotation should pass 10° limit");
+
+    // 10.5° - should fail
+    let angle_fail = 10.5_f64.to_radians();
+    let known = Transform::similarity(DVec2::new(5.0, -3.0), angle_fail, 1.0);
+    let target_points: Vec<DVec2> = ref_points.iter().map(|&p| known.apply(p)).collect();
+
+    let config = RansacConfig {
+        seed: Some(42),
+        max_rotation: Some(max_rotation),
+        scale_range: None,
+        ..Default::default()
+    };
+    let estimator = RansacEstimator::new(config);
+    let result = estimator.estimate(&ref_points, &target_points, TransformType::Similarity);
+    assert!(result.is_none(), "10.5° rotation should fail 10° limit");
+}
+
+#[test]
+fn test_plausibility_negative_rotation() {
+    // Negative rotation should also be checked (absolute value)
+    let ref_points: Vec<DVec2> = (0..20)
+        .map(|i| DVec2::new((i % 5) as f64 * 50.0, (i / 5) as f64 * 50.0))
+        .collect();
+
+    let known = Transform::similarity(DVec2::new(5.0, -3.0), -30.0_f64.to_radians(), 1.0);
+    let target_points: Vec<DVec2> = ref_points.iter().map(|&p| known.apply(p)).collect();
+
+    let config = RansacConfig {
+        seed: Some(42),
+        max_rotation: Some(10.0_f64.to_radians()),
+        scale_range: None,
+        ..Default::default()
+    };
+    let estimator = RansacEstimator::new(config);
+    let result = estimator.estimate(&ref_points, &target_points, TransformType::Similarity);
+
+    assert!(
+        result.is_none(),
+        "Should reject negative rotation exceeding max_rotation"
+    );
+}
+
+#[test]
+fn test_plausibility_scale_boundary() {
+    // Test at scale boundaries
+    let ref_points: Vec<DVec2> = (0..20)
+        .map(|i| DVec2::new((i % 5) as f64 * 50.0, (i / 5) as f64 * 50.0))
+        .collect();
+
+    // 1.15 scale - should pass (0.8, 1.2) range
+    let known = Transform::similarity(DVec2::new(0.0, 0.0), 0.0, 1.15);
+    let target_points: Vec<DVec2> = ref_points.iter().map(|&p| known.apply(p)).collect();
+
+    let config = RansacConfig {
+        seed: Some(42),
+        max_rotation: None,
+        scale_range: Some((0.8, 1.2)),
+        ..Default::default()
+    };
+    let estimator = RansacEstimator::new(config);
+    let result = estimator.estimate(&ref_points, &target_points, TransformType::Similarity);
+    assert!(result.is_some(), "1.15 scale should pass (0.8, 1.2) range");
+
+    // 1.25 scale - should fail (0.8, 1.2) range
+    let known = Transform::similarity(DVec2::new(0.0, 0.0), 0.0, 1.25);
+    let target_points: Vec<DVec2> = ref_points.iter().map(|&p| known.apply(p)).collect();
+
+    let config = RansacConfig {
+        seed: Some(42),
+        max_rotation: None,
+        scale_range: Some((0.8, 1.2)),
+        ..Default::default()
+    };
+    let estimator = RansacEstimator::new(config);
+    let result = estimator.estimate(&ref_points, &target_points, TransformType::Similarity);
+    assert!(result.is_none(), "1.25 scale should fail (0.8, 1.2) range");
+}
+
+#[test]
+fn test_plausibility_translation_unaffected() {
+    // Pure translation should always pass plausibility checks
+    // (rotation ~ 0, scale ~ 1)
+    let ref_points: Vec<DVec2> = (0..20)
+        .map(|i| DVec2::new((i % 5) as f64 * 50.0, (i / 5) as f64 * 50.0))
+        .collect();
+
+    let target_points: Vec<DVec2> = ref_points
+        .iter()
+        .map(|p| *p + DVec2::new(100.0, -50.0))
+        .collect();
+
+    let config = RansacConfig {
+        seed: Some(42),
+        max_rotation: Some(1.0_f64.to_radians()), // Very tight rotation limit
+        scale_range: Some((0.99, 1.01)),          // Very tight scale range
+        ..Default::default()
+    };
+    let estimator = RansacEstimator::new(config);
+    let result = estimator.estimate(&ref_points, &target_points, TransformType::Translation);
+
+    assert!(
+        result.is_some(),
+        "Pure translation should always pass plausibility checks"
+    );
+    assert_eq!(result.unwrap().inliers.len(), 20);
+}
+
+#[test]
+fn test_plausibility_progressive_ransac_rejects() {
+    // Progressive RANSAC should also respect plausibility checks
+    let ref_points: Vec<DVec2> = (0..20)
+        .map(|i| DVec2::new((i % 5) as f64 * 50.0, (i / 5) as f64 * 50.0))
+        .collect();
+
+    let known = Transform::similarity(DVec2::new(5.0, -3.0), 30.0_f64.to_radians(), 1.0);
+    let target_points: Vec<DVec2> = ref_points.iter().map(|&p| known.apply(p)).collect();
+    let confidences: Vec<f64> = vec![0.9; 20];
+
+    let config = RansacConfig {
+        seed: Some(42),
+        max_rotation: Some(10.0_f64.to_radians()),
+        scale_range: None,
+        ..Default::default()
+    };
+    let estimator = RansacEstimator::new(config);
+    let result = estimator.estimate_progressive(
+        &ref_points,
+        &target_points,
+        &confidences,
+        TransformType::Similarity,
+    );
+
+    assert!(
+        result.is_none(),
+        "Progressive RANSAC should also reject implausible transforms"
+    );
+}
+
+#[test]
+fn test_plausibility_progressive_ransac_accepts() {
+    // Progressive RANSAC should accept plausible transforms
+    let ref_points: Vec<DVec2> = (0..20)
+        .map(|i| DVec2::new((i % 5) as f64 * 50.0, (i / 5) as f64 * 50.0))
+        .collect();
+
+    let angle = 5.0_f64.to_radians();
+    let scale = 1.05;
+    let known = Transform::similarity(DVec2::new(5.0, -3.0), angle, scale);
+    let target_points: Vec<DVec2> = ref_points.iter().map(|&p| known.apply(p)).collect();
+    let confidences: Vec<f64> = vec![0.9; 20];
+
+    let config = RansacConfig {
+        seed: Some(42),
+        max_rotation: Some(10.0_f64.to_radians()),
+        scale_range: Some((0.8, 1.2)),
+        ..Default::default()
+    };
+    let estimator = RansacEstimator::new(config);
+    let result = estimator.estimate_progressive(
+        &ref_points,
+        &target_points,
+        &confidences,
+        TransformType::Similarity,
+    );
+
+    assert!(
+        result.is_some(),
+        "Progressive RANSAC should accept plausible transforms"
+    );
+    let result = result.unwrap();
+    assert_eq!(result.inliers.len(), 20);
+}
+
+#[test]
+fn test_plausibility_combined_rotation_and_scale() {
+    // Both rotation and scale checks active simultaneously
+    let ref_points: Vec<DVec2> = (0..20)
+        .map(|i| DVec2::new((i % 5) as f64 * 50.0, (i / 5) as f64 * 50.0))
+        .collect();
+
+    // Rotation OK (5°) but scale too large (1.5) - should fail
+    let known = Transform::similarity(DVec2::new(5.0, -3.0), 5.0_f64.to_radians(), 1.5);
+    let target_points: Vec<DVec2> = ref_points.iter().map(|&p| known.apply(p)).collect();
+
+    let config = RansacConfig {
+        seed: Some(42),
+        max_rotation: Some(10.0_f64.to_radians()),
+        scale_range: Some((0.8, 1.2)),
+        ..Default::default()
+    };
+    let estimator = RansacEstimator::new(config);
+    let result = estimator.estimate(&ref_points, &target_points, TransformType::Similarity);
+
+    assert!(
+        result.is_none(),
+        "Should fail when scale is out of range even if rotation is OK"
+    );
+
+    // Scale OK (1.1) but rotation too large (20°) - should fail
+    let known = Transform::similarity(DVec2::new(5.0, -3.0), 20.0_f64.to_radians(), 1.1);
+    let target_points: Vec<DVec2> = ref_points.iter().map(|&p| known.apply(p)).collect();
+
+    let config = RansacConfig {
+        seed: Some(42),
+        max_rotation: Some(10.0_f64.to_radians()),
+        scale_range: Some((0.8, 1.2)),
+        ..Default::default()
+    };
+    let estimator = RansacEstimator::new(config);
+    let result = estimator.estimate(&ref_points, &target_points, TransformType::Similarity);
+
+    assert!(
+        result.is_none(),
+        "Should fail when rotation is out of range even if scale is OK"
+    );
+
+    // Both within range - should pass
+    let known = Transform::similarity(DVec2::new(5.0, -3.0), 5.0_f64.to_radians(), 1.1);
+    let target_points: Vec<DVec2> = ref_points.iter().map(|&p| known.apply(p)).collect();
+
+    let config = RansacConfig {
+        seed: Some(42),
+        max_rotation: Some(10.0_f64.to_radians()),
+        scale_range: Some((0.8, 1.2)),
+        ..Default::default()
+    };
+    let estimator = RansacEstimator::new(config);
+    let result = estimator.estimate(&ref_points, &target_points, TransformType::Similarity);
+
+    assert!(
+        result.is_some(),
+        "Should pass when both rotation and scale are within bounds"
+    );
+}
+
+#[test]
+fn test_plausibility_with_outliers_filters_bad_hypotheses() {
+    // Mix of inlier and outlier correspondences.
+    // Without plausibility, RANSAC might occasionally pick outlier pairs
+    // that produce wild transforms. With plausibility enabled, those
+    // hypotheses get filtered before expensive inlier counting.
+    let ref_points: Vec<DVec2> = (0..15)
+        .map(|i| DVec2::new((i % 5) as f64 * 50.0, (i / 5) as f64 * 50.0))
+        .collect();
+
+    // Small translation (within plausibility bounds)
+    let offset = DVec2::new(10.0, -5.0);
+    let mut target_points: Vec<DVec2> = ref_points.iter().map(|p| *p + offset).collect();
+
+    // Add outliers that would produce implausible transforms if sampled
+    let mut ref_with_outliers = ref_points.clone();
+    ref_with_outliers.push(DVec2::new(100.0, 100.0));
+    ref_with_outliers.push(DVec2::new(200.0, 50.0));
+    target_points.push(DVec2::new(500.0, -300.0)); // Would create huge rotation if paired
+    target_points.push(DVec2::new(-100.0, 800.0));
+
+    let config = RansacConfig {
+        seed: Some(42),
+        max_rotation: Some(5.0_f64.to_radians()),
+        scale_range: Some((0.9, 1.1)),
+        inlier_threshold: 2.0,
+        ..Default::default()
+    };
+    let estimator = RansacEstimator::new(config);
+    let result = estimator.estimate(
+        &ref_with_outliers,
+        &target_points,
+        TransformType::Translation,
+    );
+
+    assert!(
+        result.is_some(),
+        "Should find the correct translation despite outliers"
+    );
+    let result = result.unwrap();
+    assert!(
+        result.inliers.len() >= 13,
+        "Should find most of the 15 inliers, got {}",
+        result.inliers.len()
+    );
+}
+
+#[test]
+fn test_plausibility_config_validation_max_rotation() {
+    // max_rotation must be positive
+    let result = std::panic::catch_unwind(|| {
+        let config = RansacConfig {
+            max_rotation: Some(-1.0),
+            ..Default::default()
+        };
+        config.validate();
+    });
+    assert!(
+        result.is_err(),
+        "Negative max_rotation should panic on validate"
+    );
+}
+
+#[test]
+fn test_plausibility_config_validation_scale_range() {
+    // scale_range min must be positive
+    let result = std::panic::catch_unwind(|| {
+        let config = RansacConfig {
+            scale_range: Some((-0.5, 1.5)),
+            ..Default::default()
+        };
+        config.validate();
+    });
+    assert!(
+        result.is_err(),
+        "Negative min scale should panic on validate"
+    );
+
+    // scale_range min must be less than max
+    let result = std::panic::catch_unwind(|| {
+        let config = RansacConfig {
+            scale_range: Some((1.5, 0.5)),
+            ..Default::default()
+        };
+        config.validate();
+    });
+    assert!(result.is_err(), "min > max scale should panic on validate");
 }
