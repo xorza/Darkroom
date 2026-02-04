@@ -43,6 +43,7 @@
 //! let corrected = sip.correct(DVec2::new(100.0, 200.0));
 //! ```
 
+use arrayvec::ArrayVec;
 use glam::DVec2;
 
 /// Configuration for SIP polynomial fitting.
@@ -77,6 +78,13 @@ impl SipConfig {
     }
 }
 
+/// Maximum number of polynomial terms (order 5): (5+1)(5+2)/2 - 3 = 18.
+const MAX_TERMS: usize = 18;
+/// Maximum size of the A^T*A matrix (flattened).
+const MAX_ATA: usize = MAX_TERMS * MAX_TERMS;
+/// Maximum size of the LU augmented matrix: MAX_TERMS * (MAX_TERMS + 1).
+const MAX_AUG: usize = MAX_TERMS * (MAX_TERMS + 1);
+
 /// Number of polynomial terms for a given order (excluding linear and constant).
 /// Terms satisfy: 2 ≤ p+q ≤ order, p ≥ 0, q ≥ 0
 fn num_terms(order: usize) -> usize {
@@ -87,8 +95,8 @@ fn num_terms(order: usize) -> usize {
 
 /// Generate the list of (p, q) exponent pairs for a given order.
 /// Only includes terms where 2 ≤ p+q ≤ order.
-fn term_exponents(order: usize) -> Vec<(usize, usize)> {
-    let mut terms = Vec::with_capacity(num_terms(order));
+fn term_exponents(order: usize) -> ArrayVec<(usize, usize), MAX_TERMS> {
+    let mut terms = ArrayVec::new();
     for total in 2..=order {
         for p in (0..=total).rev() {
             let q = total - p;
@@ -103,6 +111,81 @@ fn term_exponents(order: usize) -> Vec<(usize, usize)> {
 #[inline]
 fn monomial(u: f64, v: f64, p: usize, q: usize) -> f64 {
     u.powi(p as i32) * v.powi(q as i32)
+}
+
+/// Evaluate a polynomial correction at a normalized point.
+///
+/// Shared by forward and inverse correction evaluation.
+fn evaluate_correction(
+    p: DVec2,
+    reference_point: DVec2,
+    norm_scale: f64,
+    terms: &[(usize, usize)],
+    coeffs_u: &[f64],
+    coeffs_v: &[f64],
+) -> DVec2 {
+    let u = (p.x - reference_point.x) / norm_scale;
+    let v = (p.y - reference_point.y) / norm_scale;
+
+    let mut du_norm = 0.0;
+    let mut dv_norm = 0.0;
+    for (i, &(exp_p, exp_q)) in terms.iter().enumerate() {
+        let basis = monomial(u, v, exp_p, exp_q);
+        du_norm += coeffs_u[i] * basis;
+        dv_norm += coeffs_v[i] * basis;
+    }
+
+    DVec2::new(du_norm * norm_scale, dv_norm * norm_scale)
+}
+
+/// Build normal equations A^T*A and A^T*b from point/target pairs.
+///
+/// Points are normalized relative to `ref_pt` by `norm_scale`. Targets
+/// are already in normalized space (divided by norm_scale by the caller).
+/// Returns `(ata, atb_u, atb_v)` using stack-allocated arrays.
+fn build_normal_equations(
+    points: &[DVec2],
+    targets_u: &[f64],
+    targets_v: &[f64],
+    ref_pt: DVec2,
+    norm_scale: f64,
+    terms: &[(usize, usize)],
+) -> ([f64; MAX_ATA], [f64; MAX_TERMS], [f64; MAX_TERMS]) {
+    let n_terms = terms.len();
+    let mut ata = [0.0; MAX_ATA];
+    let mut atb_u = [0.0; MAX_TERMS];
+    let mut atb_v = [0.0; MAX_TERMS];
+    let mut basis = [0.0; MAX_TERMS];
+
+    for (i, point) in points.iter().enumerate() {
+        let u = (point.x - ref_pt.x) / norm_scale;
+        let v = (point.y - ref_pt.y) / norm_scale;
+
+        for (j, &(p, q)) in terms.iter().enumerate() {
+            basis[j] = monomial(u, v, p, q);
+        }
+
+        for j in 0..n_terms {
+            for k in j..n_terms {
+                let val = basis[j] * basis[k];
+                ata[j * n_terms + k] += val;
+                if k != j {
+                    ata[k * n_terms + j] += val;
+                }
+            }
+            atb_u[j] += basis[j] * targets_u[i];
+            atb_v[j] += basis[j] * targets_v[i];
+        }
+    }
+
+    (ata, atb_u, atb_v)
+}
+
+/// Compute average distance from a set of points to a reference point.
+fn avg_distance(points: &[DVec2], ref_pt: DVec2) -> f64 {
+    let sum: f64 = points.iter().map(|p| (*p - ref_pt).length()).sum();
+    let avg = sum / points.len() as f64;
+    if avg > 1e-10 { avg } else { 1.0 }
 }
 
 /// SIP polynomial distortion correction.
@@ -120,21 +203,23 @@ pub struct SipPolynomial {
     /// Reference point (coordinates are relative to this).
     reference_point: DVec2,
     /// Normalization scale: normalized = (pixel - ref_pt) / norm_scale.
-    /// Chosen so that the average distance from ref_pt is ~1.0 in normalized space.
     norm_scale: f64,
+    /// Precomputed (p, q) exponent pairs for this order.
+    terms: ArrayVec<(usize, usize), MAX_TERMS>,
     /// Coefficients for the u-correction polynomial (A_pq) in normalized space.
-    /// The output correction is also in normalized space and must be scaled back.
-    coeffs_u: Vec<f64>,
+    coeffs_u: ArrayVec<f64, MAX_TERMS>,
     /// Coefficients for the v-correction polynomial (B_pq) in normalized space.
-    coeffs_v: Vec<f64>,
+    coeffs_v: ArrayVec<f64, MAX_TERMS>,
     /// Inverse polynomial order (0 if not computed).
     inv_order: usize,
     /// Normalization scale for inverse polynomial (computed from corrected coordinates).
     inv_norm_scale: f64,
+    /// Precomputed (p, q) exponent pairs for inverse order. Empty if not computed.
+    inv_terms: ArrayVec<(usize, usize), MAX_TERMS>,
     /// Inverse u-correction coefficients (AP_pq). Empty if not computed.
-    inv_coeffs_u: Vec<f64>,
+    inv_coeffs_u: ArrayVec<f64, MAX_TERMS>,
     /// Inverse v-correction coefficients (BP_pq). Empty if not computed.
-    inv_coeffs_v: Vec<f64>,
+    inv_coeffs_v: ArrayVec<f64, MAX_TERMS>,
 }
 
 impl SipPolynomial {
@@ -164,14 +249,12 @@ impl SipPolynomial {
             "ref_points and residuals must have the same length"
         );
 
-        let n_terms = num_terms(config.order);
+        let terms = term_exponents(config.order);
 
         // Need at least as many points as terms
-        if n < n_terms {
+        if n < terms.len() {
             return None;
         }
-
-        let terms = term_exponents(config.order);
 
         // Compute reference point
         let ref_pt = config.reference_point.unwrap_or_else(|| {
@@ -179,46 +262,17 @@ impl SipPolynomial {
             sum / n as f64
         });
 
-        // Compute normalization scale: average distance from reference point.
-        // This keeps the polynomial basis values near O(1) for numerical stability.
-        let avg_dist = ref_points
-            .iter()
-            .map(|p| (*p - ref_pt).length())
-            .sum::<f64>()
-            / n as f64;
-        let norm_scale = if avg_dist > 1e-10 { avg_dist } else { 1.0 };
+        let norm_scale = avg_distance(ref_points, ref_pt);
 
-        // Build the normal equations A^T*A * x = A^T*b in normalized coordinates.
-        // We normalize both the input coordinates and the residuals by norm_scale.
-        let mut ata = vec![0.0; n_terms * n_terms];
-        let mut atb_u = vec![0.0; n_terms];
-        let mut atb_v = vec![0.0; n_terms];
+        // Prepare normalized targets (negated residuals)
+        let targets_u: Vec<f64> = residuals.iter().map(|r| -r.x / norm_scale).collect();
+        let targets_v: Vec<f64> = residuals.iter().map(|r| -r.y / norm_scale).collect();
 
-        for i in 0..n {
-            let u = (ref_points[i].x - ref_pt.x) / norm_scale;
-            let v = (ref_points[i].y - ref_pt.y) / norm_scale;
+        let (ata, atb_u, atb_v) = build_normal_equations(
+            ref_points, &targets_u, &targets_v, ref_pt, norm_scale, &terms,
+        );
 
-            // Residuals are also normalized so coefficients stay well-conditioned
-            let res_u = -residuals[i].x / norm_scale;
-            let res_v = -residuals[i].y / norm_scale;
-
-            let basis: Vec<f64> = terms.iter().map(|&(p, q)| monomial(u, v, p, q)).collect();
-
-            for j in 0..n_terms {
-                for k in j..n_terms {
-                    let val = basis[j] * basis[k];
-                    ata[j * n_terms + k] += val;
-                    if k != j {
-                        ata[k * n_terms + j] += val;
-                    }
-                }
-
-                atb_u[j] += basis[j] * res_u;
-                atb_v[j] += basis[j] * res_v;
-            }
-        }
-
-        // Solve A^T*A * x = A^T*b using Cholesky decomposition
+        let n_terms = terms.len();
         let coeffs_u = solve_symmetric_positive(&ata, &atb_u, n_terms)?;
         let coeffs_v = solve_symmetric_positive(&ata, &atb_v, n_terms)?;
 
@@ -226,24 +280,20 @@ impl SipPolynomial {
             order: config.order,
             reference_point: ref_pt,
             norm_scale,
+            terms,
             coeffs_u,
             coeffs_v,
             inv_order: 0,
             inv_norm_scale: 0.0,
-            inv_coeffs_u: Vec::new(),
-            inv_coeffs_v: Vec::new(),
+            inv_terms: ArrayVec::new(),
+            inv_coeffs_u: ArrayVec::new(),
+            inv_coeffs_v: ArrayVec::new(),
         })
     }
 
     /// Fit SIP polynomial directly from matched point pairs and a transform.
     ///
     /// Convenience method that computes residuals internally.
-    ///
-    /// # Arguments
-    /// * `ref_points` - Reference positions
-    /// * `target_points` - Target positions
-    /// * `transform` - The linear transform (homography) mapping ref → target
-    /// * `config` - SIP configuration
     pub fn fit_from_transform(
         ref_points: &[DVec2],
         target_points: &[DVec2],
@@ -266,10 +316,6 @@ impl SipPolynomial {
     }
 
     /// Apply the SIP correction to a point.
-    ///
-    /// Returns the corrected coordinates: `p + (du, dv)` where `(du, dv)`
-    /// is the polynomial correction evaluated in normalized coordinates,
-    /// then scaled back to pixel space.
     pub fn correct(&self, p: DVec2) -> DVec2 {
         p + self.correction_at(p)
     }
@@ -280,26 +326,15 @@ impl SipPolynomial {
     }
 
     /// Evaluate just the correction vector (du, dv) at a point in pixel space.
-    ///
-    /// Internally normalizes coordinates, evaluates the polynomial, and
-    /// scales the result back to pixel space.
     pub fn correction_at(&self, p: DVec2) -> DVec2 {
-        // Normalize to the same space used during fitting
-        let u = (p.x - self.reference_point.x) / self.norm_scale;
-        let v = (p.y - self.reference_point.y) / self.norm_scale;
-
-        let terms = term_exponents(self.order);
-
-        let mut du_norm = 0.0;
-        let mut dv_norm = 0.0;
-        for (i, &(exp_p, exp_q)) in terms.iter().enumerate() {
-            let basis = monomial(u, v, exp_p, exp_q);
-            du_norm += self.coeffs_u[i] * basis;
-            dv_norm += self.coeffs_v[i] * basis;
-        }
-
-        // Scale correction back to pixel space
-        DVec2::new(du_norm * self.norm_scale, dv_norm * self.norm_scale)
+        evaluate_correction(
+            p,
+            self.reference_point,
+            self.norm_scale,
+            &self.terms,
+            &self.coeffs_u,
+            &self.coeffs_v,
+        )
     }
 
     /// Compute residuals after applying SIP correction.
@@ -371,49 +406,31 @@ impl SipPolynomial {
             }
         }
 
-        let n = corrected.len();
+        let inv_norm_scale = avg_distance(&corrected, self.reference_point);
+        let inv_terms = term_exponents(inv_order);
 
-        // Compute normalization scale from corrected coordinates
-        let avg_dist = corrected
+        // Prepare normalized targets: delta = (original - corrected) / inv_norm_scale
+        let targets_u: Vec<f64> = originals
             .iter()
-            .map(|p| (*p - self.reference_point).length())
-            .sum::<f64>()
-            / n as f64;
-        let inv_norm_scale = if avg_dist > 1e-10 { avg_dist } else { 1.0 };
+            .zip(corrected.iter())
+            .map(|(o, c)| (o.x - c.x) / inv_norm_scale)
+            .collect();
+        let targets_v: Vec<f64> = originals
+            .iter()
+            .zip(corrected.iter())
+            .map(|(o, c)| (o.y - c.y) / inv_norm_scale)
+            .collect();
 
-        let terms = term_exponents(inv_order);
-        let n_terms = num_terms(inv_order);
+        let (ata, atb_u, atb_v) = build_normal_equations(
+            &corrected,
+            &targets_u,
+            &targets_v,
+            self.reference_point,
+            inv_norm_scale,
+            &inv_terms,
+        );
 
-        // Build normal equations: fit inverse polynomial from corrected → original
-        // The inverse correction delta is: original - corrected = inverse_correction_at(corrected)
-        let mut ata = vec![0.0; n_terms * n_terms];
-        let mut atb_u = vec![0.0; n_terms];
-        let mut atb_v = vec![0.0; n_terms];
-
-        for i in 0..n {
-            let u = (corrected[i].x - self.reference_point.x) / inv_norm_scale;
-            let v = (corrected[i].y - self.reference_point.y) / inv_norm_scale;
-
-            // Target: the correction delta in normalized space
-            let delta = originals[i] - corrected[i];
-            let target_u = delta.x / inv_norm_scale;
-            let target_v = delta.y / inv_norm_scale;
-
-            let basis: Vec<f64> = terms.iter().map(|&(p, q)| monomial(u, v, p, q)).collect();
-
-            for j in 0..n_terms {
-                for k in j..n_terms {
-                    let val = basis[j] * basis[k];
-                    ata[j * n_terms + k] += val;
-                    if k != j {
-                        ata[k * n_terms + j] += val;
-                    }
-                }
-                atb_u[j] += basis[j] * target_u;
-                atb_v[j] += basis[j] * target_v;
-            }
-        }
-
+        let n_terms = inv_terms.len();
         let inv_coeffs_u = solve_symmetric_positive(&ata, &atb_u, n_terms)
             .expect("inverse SIP solve failed: singular normal equations on grid data");
         let inv_coeffs_v = solve_symmetric_positive(&ata, &atb_v, n_terms)
@@ -421,18 +438,16 @@ impl SipPolynomial {
 
         self.inv_order = inv_order;
         self.inv_norm_scale = inv_norm_scale;
+        self.inv_terms = inv_terms;
         self.inv_coeffs_u = inv_coeffs_u;
         self.inv_coeffs_v = inv_coeffs_v;
 
         // Compute max round-trip error
-        let mut max_error = 0.0f64;
-        for i in 0..n {
-            let roundtrip = self.inverse_correct(corrected[i]);
-            let error = (roundtrip - originals[i]).length();
-            max_error = max_error.max(error);
-        }
-
-        max_error
+        corrected
+            .iter()
+            .zip(originals.iter())
+            .map(|(&c, &o)| (self.inverse_correct(c) - o).length())
+            .fold(0.0f64, f64::max)
     }
 
     /// Whether the inverse polynomial has been computed.
@@ -457,21 +472,14 @@ impl SipPolynomial {
             self.has_inverse(),
             "inverse polynomial not computed; call compute_inverse first"
         );
-
-        let u = (p.x - self.reference_point.x) / self.inv_norm_scale;
-        let v = (p.y - self.reference_point.y) / self.inv_norm_scale;
-
-        let terms = term_exponents(self.inv_order);
-
-        let mut du_norm = 0.0;
-        let mut dv_norm = 0.0;
-        for (i, &(exp_p, exp_q)) in terms.iter().enumerate() {
-            let basis = monomial(u, v, exp_p, exp_q);
-            du_norm += self.inv_coeffs_u[i] * basis;
-            dv_norm += self.inv_coeffs_v[i] * basis;
-        }
-
-        DVec2::new(du_norm * self.inv_norm_scale, dv_norm * self.inv_norm_scale)
+        evaluate_correction(
+            p,
+            self.reference_point,
+            self.inv_norm_scale,
+            &self.inv_terms,
+            &self.inv_coeffs_u,
+            &self.inv_coeffs_v,
+        )
     }
 
     /// Apply inverse SIP correction to multiple points (allocating).
@@ -497,8 +505,6 @@ impl SipPolynomial {
     }
 
     /// Get the maximum correction magnitude across a grid of points.
-    ///
-    /// Useful for assessing the magnitude of the distortion correction.
     pub fn max_correction(&self, width: usize, height: usize, grid_spacing: f64) -> f64 {
         let mut max_mag = 0.0f64;
         let mut y = 0.0;
@@ -517,14 +523,11 @@ impl SipPolynomial {
 
 /// Solve a symmetric positive definite system Ax = b using Cholesky decomposition.
 ///
-/// `a` is stored as a flat row-major n×n matrix.
+/// `a` is stored as a flat row-major n×n matrix. All storage is stack-allocated.
 #[allow(clippy::needless_range_loop)]
-fn solve_symmetric_positive(a: &[f64], b: &[f64], n: usize) -> Option<Vec<f64>> {
-    debug_assert_eq!(a.len(), n * n);
-    debug_assert_eq!(b.len(), n);
-
+fn solve_symmetric_positive(a: &[f64], b: &[f64], n: usize) -> Option<ArrayVec<f64, MAX_TERMS>> {
     // Cholesky decomposition: A = L * L^T
-    let mut l = vec![0.0; n * n];
+    let mut l = [0.0; MAX_ATA];
 
     for i in 0..n {
         for j in 0..=i {
@@ -547,7 +550,7 @@ fn solve_symmetric_positive(a: &[f64], b: &[f64], n: usize) -> Option<Vec<f64>> 
     }
 
     // Forward substitution: L * y = b
-    let mut y = vec![0.0; n];
+    let mut y = [0.0; MAX_TERMS];
     for i in 0..n {
         let mut sum = 0.0;
         for j in 0..i {
@@ -557,7 +560,7 @@ fn solve_symmetric_positive(a: &[f64], b: &[f64], n: usize) -> Option<Vec<f64>> 
     }
 
     // Back substitution: L^T * x = y
-    let mut x = vec![0.0; n];
+    let mut x = [0.0; MAX_TERMS];
     for i in (0..n).rev() {
         let mut sum = 0.0;
         for j in (i + 1)..n {
@@ -566,14 +569,14 @@ fn solve_symmetric_positive(a: &[f64], b: &[f64], n: usize) -> Option<Vec<f64>> 
         x[i] = (y[i] - sum) / l[i * n + i];
     }
 
-    Some(x)
+    Some(ArrayVec::try_from(&x[..n]).unwrap())
 }
 
 /// Fallback LU decomposition solver with partial pivoting.
 #[allow(clippy::needless_range_loop)]
-fn solve_lu(a: &[f64], b: &[f64], n: usize) -> Option<Vec<f64>> {
+fn solve_lu(a: &[f64], b: &[f64], n: usize) -> Option<ArrayVec<f64, MAX_TERMS>> {
     // Create augmented matrix
-    let mut aug = vec![0.0; n * (n + 1)];
+    let mut aug = [0.0; MAX_AUG];
     for i in 0..n {
         for j in 0..n {
             aug[i * (n + 1) + j] = a[i * n + j];
@@ -617,7 +620,7 @@ fn solve_lu(a: &[f64], b: &[f64], n: usize) -> Option<Vec<f64>> {
     }
 
     // Back substitution
-    let mut x = vec![0.0; n];
+    let mut x = [0.0; MAX_TERMS];
     for i in (0..n).rev() {
         x[i] = aug[i * (n + 1) + n];
         for j in (i + 1)..n {
@@ -626,7 +629,7 @@ fn solve_lu(a: &[f64], b: &[f64], n: usize) -> Option<Vec<f64>> {
         x[i] /= aug[i * (n + 1) + i];
     }
 
-    Some(x)
+    Some(ArrayVec::try_from(&x[..n]).unwrap())
 }
 
 #[cfg(test)]

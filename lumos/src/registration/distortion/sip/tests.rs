@@ -733,6 +733,29 @@ fn test_inverse_all_orders() {
 }
 
 #[test]
+fn test_inverse_correct_points_batch() {
+    let center = DVec2::new(500.0, 500.0);
+    let mut sip = make_barrel_sip(center, 1e-8);
+    sip.compute_inverse(1000, 1000);
+
+    let corrected = vec![
+        sip.correct(DVec2::new(100.0, 100.0)),
+        sip.correct(DVec2::new(500.0, 500.0)),
+        sip.correct(DVec2::new(900.0, 900.0)),
+    ];
+
+    let batch = sip.inverse_correct_points(&corrected);
+    for (i, &c) in corrected.iter().enumerate() {
+        let single = sip.inverse_correct(c);
+        assert!(
+            (batch[i] - single).length() < 1e-10,
+            "Inverse batch vs single mismatch at point {}",
+            i
+        );
+    }
+}
+
+#[test]
 fn test_inverse_asymmetric_image() {
     let center = DVec2::new(960.0, 540.0);
     let k = 5e-9;
