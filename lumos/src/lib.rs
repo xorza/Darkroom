@@ -91,8 +91,6 @@ pub use registration::{
     CatalogStar,
     // Distortion correction
     DistortionMap,
-    FieldCurvature,
-    FieldCurvatureConfig,
     // Interpolation
     InterpolationMethod,
     PixelSkyMatch,
@@ -105,8 +103,6 @@ pub use registration::{
     QuadrantConsistency,
     // Quality assessment
     QualityMetrics,
-    RadialDistortion,
-    RadialDistortionConfig,
     // RANSAC
     RansacConfig,
     RansacEstimator,
@@ -123,8 +119,6 @@ pub use registration::{
     SipCorrectionConfig,
     SipPolynomial,
     SolveError,
-    TangentialDistortion,
-    TangentialDistortionConfig,
     ThinPlateSpline,
     TpsConfig,
     Transform,

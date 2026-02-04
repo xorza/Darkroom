@@ -90,11 +90,7 @@ pub use transform::{Transform, TransformType};
 pub use triangle::PointMatch;
 
 // Distortion types
-pub use distortion::{
-    DistortionMap, FieldCurvature, FieldCurvatureConfig, RadialDistortion, RadialDistortionConfig,
-    SipConfig, SipPolynomial, TangentialDistortion, TangentialDistortionConfig, ThinPlateSpline,
-    TpsConfig,
-};
+pub use distortion::{DistortionMap, SipConfig, SipPolynomial, ThinPlateSpline, TpsConfig};
 
 // Interpolation (non-config types)
 pub use interpolation::warp_image;

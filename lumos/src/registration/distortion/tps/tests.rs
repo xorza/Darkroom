@@ -360,6 +360,8 @@ fn test_tps_transform_points() {
 /// Test TPS kernel function.
 #[test]
 fn test_tps_kernel() {
+    use super::tps_kernel;
+
     // U(0) should be 0
     assert_eq!(tps_kernel(0.0), 0.0);
     assert_eq!(tps_kernel(1e-15), 0.0);
