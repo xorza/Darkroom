@@ -64,7 +64,6 @@ pub(crate) mod detector;
 pub(crate) mod labeling;
 mod mask_dilation;
 mod median_filter;
-mod region;
 mod star;
 pub(crate) mod threshold_mask;
 
@@ -91,7 +90,7 @@ pub use star::Star;
 
 // Pipeline data structures
 pub use background::BackgroundEstimate;
-pub use region::Region;
+pub use deblend::Region;
 
 // Centroid methods
 pub use centroid::{GaussianFitConfig, GaussianFitResult, fit_gaussian_2d};

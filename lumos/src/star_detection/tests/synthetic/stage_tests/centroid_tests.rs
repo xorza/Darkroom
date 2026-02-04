@@ -7,7 +7,7 @@ use crate::math::{Aabb, Vec2us};
 use crate::star_detection::BackgroundEstimate;
 use crate::star_detection::centroid::measure_star;
 use crate::star_detection::config::Config;
-use crate::star_detection::region::Region;
+use crate::star_detection::deblend::Region;
 use crate::star_detection::tests::common::output::{
     gray_to_rgb_image_stretched, save_grayscale, save_image,
 };

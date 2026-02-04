@@ -29,7 +29,7 @@ use glam::{DVec2, Vec2};
 use super::background::BackgroundEstimate;
 use super::config::Config;
 use super::cosmic_ray::compute_laplacian_snr;
-use super::region::Region;
+use super::deblend::Region;
 use super::{CentroidMethod, LocalBackgroundMethod, Star};
 use crate::common::Buffer2;
 use crate::math::FWHM_TO_SIGMA;

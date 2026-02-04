@@ -12,12 +12,12 @@ use super::super::super::background::BackgroundEstimate;
 use super::super::super::buffer_pool::BufferPool;
 use super::super::super::config::Config;
 use super::super::super::convolution::matched_filter;
+use super::super::super::deblend::Region;
 use super::super::super::deblend::{
     ComponentData, DeblendBuffers, deblend_local_maxima, deblend_multi_threshold,
 };
 use super::super::super::labeling::LabelMap;
 use super::super::super::mask_dilation::dilate_mask;
-use super::super::super::region::Region;
 use super::super::super::threshold_mask::{
     create_adaptive_threshold_mask, create_threshold_mask, create_threshold_mask_filtered,
 };

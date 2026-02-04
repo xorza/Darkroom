@@ -13,16 +13,17 @@
 use crate::common::Buffer2;
 use crate::math::{Aabb, Vec2us};
 use crate::star_detection::labeling::LabelMap;
-use crate::star_detection::region::Region;
 
 pub mod local_maxima;
 pub mod multi_threshold;
+mod region;
 
 #[cfg(test)]
 mod tests;
 
 pub use local_maxima::deblend_local_maxima;
 pub(crate) use multi_threshold::{DeblendBuffers, deblend_multi_threshold};
+pub use region::Region;
 
 // ============================================================================
 // Constants

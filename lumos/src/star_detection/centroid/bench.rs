@@ -13,8 +13,8 @@ use super::refine_centroid;
 use crate::common::Buffer2;
 use crate::star_detection::BackgroundEstimate;
 use crate::star_detection::config::{CentroidMethod, Config, LocalBackgroundMethod};
+use crate::star_detection::deblend::Region;
 use crate::star_detection::detector::stages::detect::detect_stars_test;
-use crate::star_detection::region::Region;
 use crate::testing::synthetic::stamps::benchmark_star_field;
 
 /// Create a synthetic Gaussian star for benchmarking.

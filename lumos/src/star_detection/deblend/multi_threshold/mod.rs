@@ -11,7 +11,8 @@ use arrayvec::ArrayVec;
 
 use smallvec::SmallVec;
 
-use super::{ComponentData, MAX_PEAKS, Pixel, Region};
+use super::region::Region;
+use super::{ComponentData, MAX_PEAKS, Pixel};
 use crate::common::Buffer2;
 use crate::math::{Aabb, Vec2us};
 use crate::star_detection::labeling::LabelMap;
