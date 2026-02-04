@@ -78,7 +78,7 @@ pub mod tests;
 // =============================================================================
 
 // Main detector types
-pub use buffer_pool::BufferPool;
+pub(crate) use buffer_pool::BufferPool;
 pub use detector::{DetectionResult, Diagnostics, StarDetector};
 
 // Configuration

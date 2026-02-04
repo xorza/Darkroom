@@ -10,13 +10,11 @@ use crate::math::{Aabb, Vec2us};
 #[derive(Debug)]
 pub struct Region {
     /// Bounding box of the region.
-    #[allow(dead_code)] // Used by candidate_detection, will be used in measure stage
     pub bbox: Aabb,
     /// Peak pixel coordinates within the region.
     pub peak: Vec2us,
     /// Peak pixel value.
     pub peak_value: f32,
     /// Number of pixels in the region.
-    #[allow(dead_code)] // Used by candidate_detection, will be used in measure stage
     pub area: usize,
 }

@@ -52,10 +52,13 @@ pub use calibration_masters::CalibrationMasters;
 // ============================================================================
 
 pub use star_detection::{
+    // Configuration
+    AdaptiveSigmaConfig,
+    BackgroundRefinement,
     // Centroid methods
     CentroidMethod,
-    // Configuration
     Config as StarDetectionConfig,
+    Connectivity,
     // Sensor defects
     DefectMap,
     // Main API
