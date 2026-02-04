@@ -447,13 +447,9 @@ registration/
 
 Prioritized by impact. Items marked with **[BUG]** are defects in existing code.
 
-### 1. [BUG] Two-Step Matching Not Wired Up in Production (High Priority)
+### ~~1. [BUG] Two-Step Matching Not Wired Up in Production~~ (Fixed)
 
-`two_step_matching` is enabled by default (`true`), but the production code path `match_triangles()` in `triangle/mod.rs` never calls `two_step_refine_matches()`. Only the brute-force `match_stars_triangles()` (test/bench only) uses it. The k-d tree production path returns after `resolve_matches()` without any refinement phase.
-
-**Fix:** Call `two_step_refine_matches()` from `match_triangles()` when `config.two_step_matching` is true, same as the brute-force path does.
-
-**Location:** `triangle/mod.rs`, `match_triangles()` function (line ~740).
+Fixed: `match_triangles()` now calls `two_step_refine_matches()` when `config.two_step_matching` is true, matching the brute-force path behavior.
 
 ### 2. Transform Plausibility Checks in RANSAC (High Priority)
 

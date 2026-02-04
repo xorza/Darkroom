@@ -1398,3 +1398,397 @@ fn test_two_step_matching_fallback() {
     // At least should not crash; may or may not find matches depending on tolerance
     assert!(matches.len() <= ref_positions.len());
 }
+
+// ============================================================================
+// resolve_matches tests
+// ============================================================================
+
+#[test]
+fn test_resolve_matches_one_to_one() {
+    let mut votes = HashMap::new();
+    votes.insert((0, 0), 10);
+    votes.insert((1, 1), 8);
+    votes.insert((2, 2), 6);
+
+    let matches = resolve_matches(votes, 3, 3, 1);
+    assert_eq!(matches.len(), 3);
+
+    // Highest votes should come first
+    assert_eq!(matches[0].ref_idx, 0);
+    assert_eq!(matches[0].votes, 10);
+}
+
+#[test]
+fn test_resolve_matches_conflict_resolution() {
+    // Two candidates for the same target star: ref 0 and ref 1 both want target 0
+    let mut votes = HashMap::new();
+    votes.insert((0, 0), 10); // ref 0 -> target 0, high votes
+    votes.insert((1, 0), 5); // ref 1 -> target 0, lower votes
+    votes.insert((1, 1), 3); // ref 1 -> target 1, even lower
+
+    let matches = resolve_matches(votes, 3, 3, 1);
+
+    // ref 0 -> target 0 wins (10 votes)
+    // ref 1 -> target 0 is blocked, so ref 1 doesn't get target 0
+    // ref 1 -> target 1 is still available (3 votes)
+    assert_eq!(matches.len(), 2);
+
+    let m0 = matches.iter().find(|m| m.ref_idx == 0).unwrap();
+    assert_eq!(m0.target_idx, 0);
+    assert_eq!(m0.votes, 10);
+
+    let m1 = matches.iter().find(|m| m.ref_idx == 1).unwrap();
+    assert_eq!(m1.target_idx, 1);
+    assert_eq!(m1.votes, 3);
+}
+
+#[test]
+fn test_resolve_matches_min_votes_filter() {
+    let mut votes = HashMap::new();
+    votes.insert((0, 0), 10);
+    votes.insert((1, 1), 2);
+    votes.insert((2, 2), 1); // Below min_votes=3
+
+    let matches = resolve_matches(votes, 3, 3, 3);
+    assert_eq!(matches.len(), 1);
+    assert_eq!(matches[0].ref_idx, 0);
+}
+
+#[test]
+fn test_resolve_matches_empty() {
+    let votes = HashMap::new();
+    let matches = resolve_matches(votes, 5, 5, 1);
+    assert!(matches.is_empty());
+}
+
+#[test]
+fn test_resolve_matches_confidence() {
+    let mut votes = HashMap::new();
+    votes.insert((0, 0), 10);
+
+    let matches = resolve_matches(votes, 5, 5, 1);
+    assert_eq!(matches.len(), 1);
+    assert!(matches[0].confidence > 0.0);
+    assert!(matches[0].confidence <= 1.0);
+}
+
+// ============================================================================
+// estimate_similarity_transform tests
+// ============================================================================
+
+#[test]
+fn test_estimate_similarity_identity() {
+    let positions = vec![
+        DVec2::new(0.0, 0.0),
+        DVec2::new(10.0, 0.0),
+        DVec2::new(0.0, 10.0),
+        DVec2::new(10.0, 10.0),
+    ];
+
+    let matches: Vec<StarMatch> = (0..4)
+        .map(|i| StarMatch {
+            ref_idx: i,
+            target_idx: i,
+            votes: 5,
+            confidence: 1.0,
+        })
+        .collect();
+
+    let result = estimate_similarity_transform(&positions, &positions, &matches);
+    assert!(result.is_some());
+
+    let (scale, rotation, translation) = result.unwrap();
+    assert!(
+        (scale - 1.0).abs() < 0.01,
+        "Expected scale=1.0, got {scale}"
+    );
+    assert!(rotation.abs() < 0.01, "Expected rotation=0, got {rotation}");
+    assert!(
+        translation.length() < 0.5,
+        "Expected near-zero translation, got {translation}"
+    );
+}
+
+#[test]
+fn test_estimate_similarity_translation_only() {
+    let ref_positions = vec![
+        DVec2::new(0.0, 0.0),
+        DVec2::new(10.0, 0.0),
+        DVec2::new(0.0, 10.0),
+        DVec2::new(10.0, 10.0),
+    ];
+
+    let offset = DVec2::new(50.0, 30.0);
+    let target_positions: Vec<DVec2> = ref_positions.iter().map(|p| *p + offset).collect();
+
+    let matches: Vec<StarMatch> = (0..4)
+        .map(|i| StarMatch {
+            ref_idx: i,
+            target_idx: i,
+            votes: 5,
+            confidence: 1.0,
+        })
+        .collect();
+
+    let result = estimate_similarity_transform(&ref_positions, &target_positions, &matches);
+    assert!(result.is_some());
+
+    let (scale, rotation, _translation) = result.unwrap();
+    assert!(
+        (scale - 1.0).abs() < 0.01,
+        "Expected scale=1.0, got {scale}"
+    );
+    assert!(rotation.abs() < 0.01, "Expected rotation=0, got {rotation}");
+}
+
+#[test]
+fn test_estimate_similarity_with_rotation_and_scale() {
+    let ref_positions = vec![
+        DVec2::new(100.0, 100.0),
+        DVec2::new(200.0, 100.0),
+        DVec2::new(100.0, 200.0),
+        DVec2::new(200.0, 200.0),
+        DVec2::new(150.0, 150.0),
+    ];
+
+    let angle: f64 = 0.1; // ~5.7 degrees
+    let scale: f64 = 1.05;
+    let cos_r = angle.cos();
+    let sin_r = angle.sin();
+    let translate = DVec2::new(20.0, -10.0);
+
+    let target_positions: Vec<DVec2> = ref_positions
+        .iter()
+        .map(|p| {
+            DVec2::new(
+                (p.x * cos_r - p.y * sin_r) / scale - translate.x / scale,
+                (p.x * sin_r + p.y * cos_r) / scale - translate.y / scale,
+            )
+        })
+        .collect();
+
+    let matches: Vec<StarMatch> = (0..5)
+        .map(|i| StarMatch {
+            ref_idx: i,
+            target_idx: i,
+            votes: 5,
+            confidence: 1.0,
+        })
+        .collect();
+
+    let result = estimate_similarity_transform(&ref_positions, &target_positions, &matches);
+    assert!(result.is_some(), "Transform estimation should succeed");
+
+    let (est_scale, est_rotation, _) = result.unwrap();
+    // We don't check exact values since the transform is inverted;
+    // just verify reasonable outputs
+    assert!(
+        est_scale > 0.5 && est_scale < 2.0,
+        "Scale should be reasonable, got {est_scale}"
+    );
+    assert!(
+        est_rotation.abs() < 1.0,
+        "Rotation should be small, got {est_rotation}"
+    );
+}
+
+#[test]
+fn test_estimate_similarity_too_few_matches() {
+    let positions = vec![DVec2::new(0.0, 0.0)];
+    let matches = vec![StarMatch {
+        ref_idx: 0,
+        target_idx: 0,
+        votes: 5,
+        confidence: 1.0,
+    }];
+
+    let result = estimate_similarity_transform(&positions, &positions, &matches);
+    assert!(result.is_none());
+}
+
+// ============================================================================
+// compute_position_threshold tests
+// ============================================================================
+
+#[test]
+fn test_position_threshold_uniform_grid() {
+    let positions: Vec<DVec2> = (0..25)
+        .map(|i| DVec2::new((i % 5) as f64 * 50.0, (i / 5) as f64 * 50.0))
+        .collect();
+
+    let threshold = compute_position_threshold(&positions);
+
+    // Nearest-neighbor distance is 50.0, threshold should be ~150 (3x)
+    assert!(
+        threshold > 100.0 && threshold < 200.0,
+        "Expected threshold ~150 for grid spacing 50, got {threshold}"
+    );
+}
+
+#[test]
+fn test_position_threshold_single_star() {
+    let positions = vec![DVec2::new(100.0, 100.0)];
+    let threshold = compute_position_threshold(&positions);
+    assert_eq!(threshold, 100.0); // Default fallback
+}
+
+#[test]
+fn test_position_threshold_empty() {
+    let positions: Vec<DVec2> = vec![];
+    let threshold = compute_position_threshold(&positions);
+    assert_eq!(threshold, 100.0); // Default fallback
+}
+
+#[test]
+fn test_position_threshold_dense_cluster() {
+    // Very dense cluster: nn distance ~1.0
+    let positions: Vec<DVec2> = (0..25)
+        .map(|i| DVec2::new((i % 5) as f64 * 1.0, (i / 5) as f64 * 1.0))
+        .collect();
+
+    let threshold = compute_position_threshold(&positions);
+
+    // Minimum threshold is 5.0 per the implementation
+    assert!(
+        threshold >= 5.0,
+        "Threshold should be at least 5.0, got {threshold}"
+    );
+}
+
+// ============================================================================
+// VoteMatrix tests
+// ============================================================================
+
+#[test]
+fn test_vote_matrix_dense_mode() {
+    // Small enough for dense mode
+    let mut vm = VoteMatrix::new(10, 10);
+    assert!(matches!(vm, VoteMatrix::Dense { .. }));
+
+    vm.increment(0, 0);
+    vm.increment(0, 0);
+    vm.increment(5, 7);
+
+    let map = vm.into_hashmap();
+    assert_eq!(*map.get(&(0, 0)).unwrap(), 2);
+    assert_eq!(*map.get(&(5, 7)).unwrap(), 1);
+    assert_eq!(map.len(), 2);
+}
+
+#[test]
+fn test_vote_matrix_sparse_mode() {
+    // Large enough to trigger sparse mode (>250_000 entries)
+    let mut vm = VoteMatrix::new(600, 600);
+    assert!(matches!(vm, VoteMatrix::Sparse(_)));
+
+    vm.increment(0, 0);
+    vm.increment(0, 0);
+    vm.increment(100, 200);
+
+    let map = vm.into_hashmap();
+    assert_eq!(*map.get(&(0, 0)).unwrap(), 2);
+    assert_eq!(*map.get(&(100, 200)).unwrap(), 1);
+    assert_eq!(map.len(), 2);
+}
+
+#[test]
+fn test_vote_matrix_dense_empty_to_hashmap() {
+    let vm = VoteMatrix::new(5, 5);
+    let map = vm.into_hashmap();
+    assert!(map.is_empty());
+}
+
+// ============================================================================
+// match_triangles with two_step_matching disabled
+// ============================================================================
+
+#[test]
+fn test_kdtree_match_two_step_disabled() {
+    let ref_positions: Vec<DVec2> = (0..25)
+        .map(|i| DVec2::new((i % 5) as f64 * 40.0 + 100.0, (i / 5) as f64 * 40.0 + 100.0))
+        .collect();
+
+    let offset = DVec2::new(30.0, -20.0);
+    let target_positions: Vec<DVec2> = ref_positions.iter().map(|p| *p + offset).collect();
+
+    let config = TriangleMatchConfig {
+        two_step_matching: false,
+        ..Default::default()
+    };
+
+    let matches = match_triangles(&ref_positions, &target_positions, &config);
+
+    assert!(
+        matches.len() >= 15,
+        "Single-step kdtree matching should find matches: {}",
+        matches.len()
+    );
+
+    for m in &matches {
+        assert_eq!(m.ref_idx, m.target_idx);
+    }
+}
+
+// ============================================================================
+// Two-step refinement benefit test
+// ============================================================================
+
+#[test]
+fn test_two_step_refinement_does_not_degrade() {
+    // Use a scenario with rotation + scale where two-step refinement
+    // should maintain or improve match count.
+    let ref_positions: Vec<DVec2> = (0..36)
+        .map(|i| {
+            let x = 200.0 + (i % 6) as f64 * 40.0;
+            let y = 200.0 + (i / 6) as f64 * 40.0;
+            DVec2::new(x, y)
+        })
+        .collect();
+
+    let center = DVec2::new(300.0, 300.0);
+    let angle: f64 = 0.08;
+    let scale: f64 = 1.03;
+    let cos_r = angle.cos();
+    let sin_r = angle.sin();
+
+    let target_positions: Vec<DVec2> = ref_positions
+        .iter()
+        .map(|p| {
+            let d = *p - center;
+            let x = (d.x * cos_r - d.y * sin_r) * scale + center.x + 15.0;
+            let y = (d.x * sin_r + d.y * cos_r) * scale + center.y - 10.0;
+            DVec2::new(x, y)
+        })
+        .collect();
+
+    let config_one_step = TriangleMatchConfig {
+        two_step_matching: false,
+        ..Default::default()
+    };
+    let one_step = match_triangles(&ref_positions, &target_positions, &config_one_step);
+
+    let config_two_step = TriangleMatchConfig {
+        two_step_matching: true,
+        ..Default::default()
+    };
+    let two_step = match_triangles(&ref_positions, &target_positions, &config_two_step);
+
+    // Two-step should not significantly degrade results
+    assert!(
+        two_step.len() >= one_step.len().saturating_sub(3),
+        "Two-step ({}) should not significantly degrade vs one-step ({})",
+        two_step.len(),
+        one_step.len()
+    );
+
+    // Verify correctness of two-step matches
+    let correct = two_step
+        .iter()
+        .filter(|m| m.ref_idx == m.target_idx)
+        .count();
+    assert!(
+        correct as f64 / two_step.len().max(1) as f64 >= 0.9,
+        "Two-step match accuracy should be >= 90%: {correct}/{}",
+        two_step.len()
+    );
+}

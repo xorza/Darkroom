@@ -839,5 +839,21 @@ pub fn match_triangles(
         n_ref,
         n_target,
     );
-    resolve_matches(vote_matrix, n_ref, n_target, config.min_votes)
+    let initial_matches = resolve_matches(vote_matrix, n_ref, n_target, config.min_votes);
+
+    // If two-step matching is disabled or not enough matches, return initial matches
+    if !config.two_step_matching || initial_matches.len() < 3 {
+        return initial_matches;
+    }
+
+    // Phase 2: Transform-guided refinement
+    two_step_refine_matches(
+        &ref_pos,
+        &target_pos,
+        &initial_matches,
+        &ref_triangles,
+        &target_triangles,
+        &hash_table,
+        config,
+    )
 }
