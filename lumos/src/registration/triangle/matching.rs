@@ -194,12 +194,7 @@ fn two_step_refine_matches(
         }
     }
 
-    let refined_matches = resolve_matches(
-        vote_matrix.into_hashmap(),
-        n_ref,
-        n_target,
-        config.min_votes,
-    );
+    let refined_matches = resolve_matches(vote_matrix, n_ref, n_target, config.min_votes);
 
     // Return refined matches if they're better, otherwise keep initial
     if refined_matches.len() >= initial_matches.len() {

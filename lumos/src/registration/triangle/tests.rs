@@ -1,7 +1,5 @@
 //! Tests for triangle matching module.
 
-use std::collections::HashMap;
-
 use glam::DVec2;
 
 use super::TriangleMatchConfig;
@@ -13,6 +11,21 @@ use super::matching::{
 use super::voting::{
     PointMatch, VoteMatrix, build_invariant_tree, resolve_matches, vote_for_correspondences,
 };
+
+/// Build a dense VoteMatrix from (ref_idx, target_idx, votes) entries.
+fn vote_matrix_from_entries(
+    n_ref: usize,
+    n_target: usize,
+    entries: &[(usize, usize, usize)],
+) -> VoteMatrix {
+    let mut vm = VoteMatrix::new(n_ref, n_target);
+    for &(r, t, count) in entries {
+        for _ in 0..count {
+            vm.increment(r, t);
+        }
+    }
+    vm
+}
 
 #[test]
 fn test_triangle_from_positions() {
@@ -882,6 +895,53 @@ fn test_match_small_coordinates() {
     );
 }
 
+/// Test matching with sub-pixel noise on target positions.
+/// Real star centroids have jitter from photon noise and centroid estimation.
+#[test]
+fn test_match_with_subpixel_noise() {
+    // Use irregular positions to avoid ambiguous matches on a regular grid
+    let ref_positions: Vec<DVec2> = (0..25)
+        .map(|i| {
+            let base_x = (i % 5) as f64 * 80.0 + 100.0;
+            let base_y = (i / 5) as f64 * 80.0 + 100.0;
+            // Add deterministic position jitter to break grid symmetry
+            let jitter_x = ((i * 13 + 7) as f64 * 0.37).sin() * 15.0;
+            let jitter_y = ((i * 17 + 3) as f64 * 0.53).cos() * 15.0;
+            DVec2::new(base_x + jitter_x, base_y + jitter_y)
+        })
+        .collect();
+
+    // Add sub-pixel noise (±0.3 pixels)
+    let target_positions: Vec<DVec2> = ref_positions
+        .iter()
+        .enumerate()
+        .map(|(i, p)| {
+            let noise_x = ((i * 7 + 3) as f64 * 0.73).sin() * 0.3;
+            let noise_y = ((i * 11 + 5) as f64 * 0.91).cos() * 0.3;
+            DVec2::new(p.x + noise_x, p.y + noise_y)
+        })
+        .collect();
+
+    let config = TriangleMatchConfig::default();
+    let matches = match_triangles(&ref_positions, &target_positions, &config);
+
+    assert!(
+        matches.len() >= 15,
+        "Noisy matching found only {} matches",
+        matches.len()
+    );
+
+    // Most matches should still be correct despite sub-pixel noise
+    let correct = matches.iter().filter(|m| m.ref_idx == m.target_idx).count();
+    let accuracy = correct as f64 / matches.len() as f64;
+    assert!(
+        accuracy >= 0.8,
+        "Noisy match accuracy too low: {:.0}% ({correct}/{})",
+        accuracy * 100.0,
+        matches.len()
+    );
+}
+
 /// Test triangle similarity with very similar but different triangles
 #[test]
 fn test_triangle_similarity_threshold_boundary() {
@@ -1120,12 +1180,9 @@ fn test_two_step_matching_fallback() {
 
 #[test]
 fn test_resolve_matches_one_to_one() {
-    let mut votes = HashMap::new();
-    votes.insert((0, 0), 10);
-    votes.insert((1, 1), 8);
-    votes.insert((2, 2), 6);
+    let vm = vote_matrix_from_entries(3, 3, &[(0, 0, 10), (1, 1, 8), (2, 2, 6)]);
 
-    let matches = resolve_matches(votes, 3, 3, 1);
+    let matches = resolve_matches(vm, 3, 3, 1);
     assert_eq!(matches.len(), 3);
 
     // Highest votes should come first
@@ -1136,12 +1193,9 @@ fn test_resolve_matches_one_to_one() {
 #[test]
 fn test_resolve_matches_conflict_resolution() {
     // Two candidates for the same target star: ref 0 and ref 1 both want target 0
-    let mut votes = HashMap::new();
-    votes.insert((0, 0), 10); // ref 0 -> target 0, high votes
-    votes.insert((1, 0), 5); // ref 1 -> target 0, lower votes
-    votes.insert((1, 1), 3); // ref 1 -> target 1, even lower
+    let vm = vote_matrix_from_entries(3, 3, &[(0, 0, 10), (1, 0, 5), (1, 1, 3)]);
 
-    let matches = resolve_matches(votes, 3, 3, 1);
+    let matches = resolve_matches(vm, 3, 3, 1);
 
     // ref 0 -> target 0 wins (10 votes)
     // ref 1 -> target 0 is blocked, so ref 1 doesn't get target 0
@@ -1159,29 +1213,25 @@ fn test_resolve_matches_conflict_resolution() {
 
 #[test]
 fn test_resolve_matches_min_votes_filter() {
-    let mut votes = HashMap::new();
-    votes.insert((0, 0), 10);
-    votes.insert((1, 1), 2);
-    votes.insert((2, 2), 1); // Below min_votes=3
+    let vm = vote_matrix_from_entries(3, 3, &[(0, 0, 10), (1, 1, 2), (2, 2, 1)]);
 
-    let matches = resolve_matches(votes, 3, 3, 3);
+    let matches = resolve_matches(vm, 3, 3, 3);
     assert_eq!(matches.len(), 1);
     assert_eq!(matches[0].ref_idx, 0);
 }
 
 #[test]
 fn test_resolve_matches_empty() {
-    let votes = HashMap::new();
-    let matches = resolve_matches(votes, 5, 5, 1);
+    let vm = VoteMatrix::new(5, 5);
+    let matches = resolve_matches(vm, 5, 5, 1);
     assert!(matches.is_empty());
 }
 
 #[test]
 fn test_resolve_matches_confidence() {
-    let mut votes = HashMap::new();
-    votes.insert((0, 0), 10);
+    let vm = vote_matrix_from_entries(5, 5, &[(0, 0, 10)]);
 
-    let matches = resolve_matches(votes, 5, 5, 1);
+    let matches = resolve_matches(vm, 5, 5, 1);
     assert_eq!(matches.len(), 1);
     assert!(matches[0].confidence > 0.0);
     assert!(matches[0].confidence <= 1.0);
@@ -1191,12 +1241,9 @@ fn test_resolve_matches_confidence() {
 fn test_resolve_matches_confidence_relative() {
     // Confidence should be relative to max votes in the set.
     // Top match gets 1.0, others are proportional.
-    let mut votes = HashMap::new();
-    votes.insert((0, 0), 20);
-    votes.insert((1, 1), 10);
-    votes.insert((2, 2), 5);
+    let vm = vote_matrix_from_entries(5, 5, &[(0, 0, 20), (1, 1, 10), (2, 2, 5)]);
 
-    let matches = resolve_matches(votes, 5, 5, 1);
+    let matches = resolve_matches(vm, 5, 5, 1);
     assert_eq!(matches.len(), 3);
 
     // Sorted by votes descending, so matches[0] has 20 votes
@@ -1393,6 +1440,20 @@ fn test_position_threshold_dense_cluster() {
     );
 }
 
+#[test]
+fn test_position_threshold_identical_positions() {
+    // All points at the same location — nn distance is 0.
+    let positions = vec![DVec2::new(5.0, 5.0); 10];
+
+    let threshold = compute_position_threshold(&positions);
+
+    // Minimum threshold is 5.0 per the implementation
+    assert!(
+        threshold >= 5.0,
+        "Threshold should be at least 5.0 for coincident points, got {threshold}"
+    );
+}
+
 // ============================================================================
 // VoteMatrix tests
 // ============================================================================
@@ -1407,10 +1468,11 @@ fn test_vote_matrix_dense_mode() {
     vm.increment(0, 0);
     vm.increment(5, 7);
 
-    let map = vm.into_hashmap();
-    assert_eq!(*map.get(&(0, 0)).unwrap(), 2);
-    assert_eq!(*map.get(&(5, 7)).unwrap(), 1);
-    assert_eq!(map.len(), 2);
+    let entries = vm.iter_nonzero();
+    let get = |r, t| entries.iter().find(|e| e.0 == r && e.1 == t).map(|e| e.2);
+    assert_eq!(get(0, 0), Some(2));
+    assert_eq!(get(5, 7), Some(1));
+    assert_eq!(entries.len(), 2);
 }
 
 #[test]
@@ -1423,17 +1485,36 @@ fn test_vote_matrix_sparse_mode() {
     vm.increment(0, 0);
     vm.increment(100, 200);
 
-    let map = vm.into_hashmap();
-    assert_eq!(*map.get(&(0, 0)).unwrap(), 2);
-    assert_eq!(*map.get(&(100, 200)).unwrap(), 1);
-    assert_eq!(map.len(), 2);
+    let entries = vm.iter_nonzero();
+    let get = |r, t| entries.iter().find(|e| e.0 == r && e.1 == t).map(|e| e.2);
+    assert_eq!(get(0, 0), Some(2));
+    assert_eq!(get(100, 200), Some(1));
+    assert_eq!(entries.len(), 2);
 }
 
 #[test]
-fn test_vote_matrix_dense_empty_to_hashmap() {
+fn test_vote_matrix_dense_empty() {
     let vm = VoteMatrix::new(5, 5);
-    let map = vm.into_hashmap();
-    assert!(map.is_empty());
+    assert!(vm.iter_nonzero().is_empty());
+}
+
+#[test]
+fn test_vote_matrix_threshold_boundary() {
+    // Threshold is size < 250,000 → dense, size >= 250,000 → sparse.
+
+    // Just below threshold: 499*500 = 249,500 < 250,000 → dense
+    let vm_below = VoteMatrix::new(499, 500);
+    assert!(
+        matches!(vm_below, VoteMatrix::Dense { .. }),
+        "499x500 (249.5K) should be dense"
+    );
+
+    // Exactly at threshold: 500*500 = 250,000 — not < 250,000 → sparse
+    let vm_at = VoteMatrix::new(500, 500);
+    assert!(
+        matches!(vm_at, VoteMatrix::Sparse(_)),
+        "500x500 (250K) should be sparse"
+    );
 }
 
 // ============================================================================
@@ -1661,15 +1742,15 @@ fn test_vote_matrix_dense_saturating_add() {
         vm.increment(0, 0);
     }
 
-    let map = vm.into_hashmap();
-    assert_eq!(*map.get(&(0, 0)).unwrap(), 1000);
+    let entries = vm.iter_nonzero();
+    let votes = entries.iter().find(|e| e.0 == 0 && e.1 == 0).unwrap().2;
+    assert_eq!(votes, 1000);
 }
 
 #[test]
-fn test_vote_matrix_sparse_empty_to_hashmap() {
+fn test_vote_matrix_sparse_empty() {
     let vm = VoteMatrix::new(600, 600); // Sparse mode
-    let map = vm.into_hashmap();
-    assert!(map.is_empty());
+    assert!(vm.iter_nonzero().is_empty());
 }
 
 #[test]
@@ -1681,10 +1762,11 @@ fn test_vote_matrix_dense_boundary_indices() {
     vm.increment(0, n - 1);
     vm.increment(n - 1, 0);
 
-    let map = vm.into_hashmap();
-    assert_eq!(*map.get(&(n - 1, n - 1)).unwrap(), 1);
-    assert_eq!(*map.get(&(0, n - 1)).unwrap(), 1);
-    assert_eq!(*map.get(&(n - 1, 0)).unwrap(), 1);
+    let entries = vm.iter_nonzero();
+    let get = |r, t| entries.iter().find(|e| e.0 == r && e.1 == t).map(|e| e.2);
+    assert_eq!(get(n - 1, n - 1), Some(1));
+    assert_eq!(get(0, n - 1), Some(1));
+    assert_eq!(get(n - 1, 0), Some(1));
 }
 
 // ============================================================================
@@ -1708,7 +1790,7 @@ fn test_vote_for_correspondences_identical_triangles() {
     let invariant_tree = build_invariant_tree(&triangles).unwrap();
 
     let config = TriangleMatchConfig::default();
-    let votes = vote_for_correspondences(
+    let vm = vote_for_correspondences(
         &triangles,
         &triangles,
         &invariant_tree,
@@ -1716,6 +1798,13 @@ fn test_vote_for_correspondences_identical_triangles() {
         positions.len(),
         positions.len(),
     );
+
+    // Collect into map for inspection
+    let votes: std::collections::HashMap<(usize, usize), usize> = vm
+        .iter_nonzero()
+        .into_iter()
+        .map(|(r, t, v)| ((r, t), v))
+        .collect();
 
     // Diagonal entries (i, i) should have votes (point matched to itself)
     let diagonal_votes: usize = (0..positions.len())
@@ -1768,7 +1857,7 @@ fn test_vote_for_correspondences_no_matching_triangles() {
         ..Default::default()
     };
 
-    let votes = vote_for_correspondences(
+    let vm = vote_for_correspondences(
         &tri_b,
         &tri_a,
         &invariant_tree,
@@ -1778,10 +1867,11 @@ fn test_vote_for_correspondences_no_matching_triangles() {
     );
 
     // With very different shapes and tight tolerance, should get no votes
+    let entries = vm.iter_nonzero();
     assert!(
-        votes.is_empty(),
+        entries.is_empty(),
         "Dissimilar triangles should produce no votes, got {} entries",
-        votes.len()
+        entries.len()
     );
 }
 
@@ -1807,7 +1897,7 @@ fn test_vote_for_correspondences_orientation_filtering() {
         check_orientation: true,
         ..Default::default()
     };
-    let votes_with = vote_for_correspondences(
+    let vm_with = vote_for_correspondences(
         &target_triangles,
         &ref_triangles,
         &invariant_tree,
@@ -1821,7 +1911,7 @@ fn test_vote_for_correspondences_orientation_filtering() {
         check_orientation: false,
         ..Default::default()
     };
-    let votes_without = vote_for_correspondences(
+    let vm_without = vote_for_correspondences(
         &target_triangles,
         &ref_triangles,
         &invariant_tree,
@@ -1830,8 +1920,8 @@ fn test_vote_for_correspondences_orientation_filtering() {
         mirrored.len(),
     );
 
-    let total_with: usize = votes_with.values().sum();
-    let total_without: usize = votes_without.values().sum();
+    let total_with: usize = vm_with.iter_nonzero().iter().map(|&(_, _, v)| v).sum();
+    let total_without: usize = vm_without.iter_nonzero().iter().map(|&(_, _, v)| v).sum();
 
     assert!(
         total_without >= total_with,

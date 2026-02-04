@@ -82,9 +82,9 @@ Replaced the 2D hash table with a k-d tree on invariant space. Removed `hash_tab
 
 The astroalign formulation spreads out the invariant space more uniformly. With (s0/s2, s1/s2), both values are squeezed into (0,1], and many different triangles cluster near (1,1) (near-equilateral). The astroalign formulation spreads these out since L2/L1 and L1/L0 can range from 1 to large values.
 
-**However**: The current formulation is the same as Valdes (1995), the canonical reference. With the k-d tree switch, the unbounded range of astroalign's formulation is no longer a problem (k-d trees handle arbitrary ranges). The potential benefit is better spread in invariant space, reducing clustering near (1,1) for near-equilateral triangles.
+**However**: The current formulation is the same as Valdes (1995), the canonical reference. Both formulations cluster near-equilateral triangles at (1,1), so the claimed spread improvement is minimal. More importantly, a fixed tolerance in (0,1] space gives uniform relative precision, while in [1,inf) space a fixed tolerance is relatively tighter near 1.0 and looser for elongated triangles — arguably worse.
 
-**Verdict**: Worth considering now that we use k-d tree lookup. Would need benchmarking to confirm the spread improvement matters in practice.
+**Verdict**: Rejected. Current Valdes formulation works well with fixed-tolerance radius queries. No practical benefit from switching.
 
 #### 3. ~~Triangle deduplication~~ (ALREADY DONE)
 
@@ -133,7 +133,7 @@ Changed from theoretical maximum formula to `votes / max_votes_in_set`. The top 
 
 #### 9. ~~Sparse VoteMatrix: use u32 instead of usize for values~~ (DONE)
 
-Changed sparse `HashMap` value type from `usize` (8 bytes) to `u32` (4 bytes). Converted back to `usize` in `into_hashmap()` to keep the external API unchanged.
+Changed sparse `HashMap` value type from `usize` (8 bytes) to `u32` (4 bytes). Converted to `usize` in `iter_nonzero()`. Also eliminated the `into_hashmap()` conversion entirely — `resolve_matches` now takes `VoteMatrix` directly and iterates via `iter_nonzero()`.
 
 ## Summary of Recommendations
 
@@ -144,12 +144,18 @@ Changed sparse `HashMap` value type from `usize` (8 bytes) to `u32` (4 bytes). C
 - **Groth's side-ratio filter** — Reject triangles with longest/shortest > 10 in `Triangle::from_positions`.
 - **Confidence formula fix** — `votes / max_votes_in_set` instead of theoretical maximum.
 - **Sparse VoteMatrix u32 values** — `u32` instead of `usize` for sparse HashMap values.
+- **Eliminated `into_hashmap()` conversion** — `resolve_matches` takes `VoteMatrix` directly via `iter_nonzero()`.
+- **Added `#[derive(Debug)]` to VoteMatrix** — Per project coding rules.
+- **Fixed doc comments** — `two_step_matching` config comment now matches actual behavior.
+
+### Rejected
+
+- **Astroalign invariant formulation** — No practical benefit over Valdes (1995). Both cluster at (1,1); fixed tolerance works better in bounded (0,1] space.
 
 ### Remaining suggestions
 
 1. **Consider removing two-step refinement** — Overlaps with downstream RANSAC. Benchmark first.
-2. **Astroalign invariant formulation** — Now viable with k-d tree lookup. Needs benchmarking to confirm spread improvement matters.
-3. **Tabur-style ordered search** — Process rare triangles first. Only matters for large point sets.
+2. **Tabur-style ordered search** — Process rare triangles first. Only matters for large point sets.
 
 ## References
 

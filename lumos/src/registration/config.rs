@@ -215,9 +215,10 @@ pub struct TriangleMatchConfig {
     pub min_votes: usize,
     /// Check orientation (set false to handle mirrored images).
     pub check_orientation: bool,
-    /// Enable two-step matching (rough then fine).
-    /// Phase 1 uses relaxed tolerance (5x ratio_tolerance) for initial matches.
-    /// Phase 2 uses strict tolerance (ratio_tolerance) for refinement.
+    /// Enable two-step matching with transform-guided refinement.
+    /// Phase 1 uses normal tolerance for initial matches.
+    /// Phase 2 estimates a transform, then re-votes with 0.5x tolerance
+    /// and position-proximity bonus for matches consistent with the transform.
     pub two_step_matching: bool,
 }
 

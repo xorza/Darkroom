@@ -31,6 +31,7 @@ pub struct PointMatch {
 }
 
 /// Vote matrix storage - either dense (Vec) or sparse (HashMap).
+#[derive(Debug)]
 pub(crate) enum VoteMatrix {
     /// Dense storage for small point counts: votes[ref_idx * n_target + target_idx]
     Dense { votes: Vec<u16>, n_target: usize },
@@ -71,22 +72,18 @@ impl VoteMatrix {
         }
     }
 
-    pub fn into_hashmap(self) -> HashMap<(usize, usize), usize> {
+    /// Iterate over all non-zero entries as `(ref_idx, target_idx, votes)`.
+    pub fn iter_nonzero(&self) -> Vec<(usize, usize, usize)> {
         match self {
-            VoteMatrix::Dense { votes, n_target } => {
-                let mut map = HashMap::new();
-                for (idx, &count) in votes.iter().enumerate() {
-                    if count > 0 {
-                        let ref_idx = idx / n_target;
-                        let target_idx = idx % n_target;
-                        map.insert((ref_idx, target_idx), count as usize);
-                    }
-                }
-                map
-            }
+            VoteMatrix::Dense { votes, n_target } => votes
+                .iter()
+                .enumerate()
+                .filter(|(_, count)| **count > 0)
+                .map(|(idx, &count)| (idx / n_target, idx % n_target, count as usize))
+                .collect(),
             VoteMatrix::Sparse(map) => map
-                .into_iter()
-                .map(|(key, count)| (key, count as usize))
+                .iter()
+                .map(|(&(r, t), &count)| (r, t, count as usize))
                 .collect(),
         }
     }
@@ -118,7 +115,7 @@ pub(crate) fn vote_for_correspondences(
     config: &TriangleMatchConfig,
     n_ref: usize,
     n_target: usize,
-) -> HashMap<(usize, usize), usize> {
+) -> VoteMatrix {
     let mut vote_matrix = VoteMatrix::new(n_ref, n_target);
 
     // Pre-allocate candidate buffer to avoid per-triangle allocations
@@ -131,7 +128,9 @@ pub(crate) fn vote_for_correspondences(
         for &ref_idx in &candidates {
             let ref_tri = &ref_triangles[ref_idx];
 
-            // Check similarity (exact ratio check after spatial pre-filter)
+            // The k-d tree radius search uses L2 distance as a fast pre-filter.
+            // is_similar uses L-infinity (per-axis max), which is stricter within
+            // the unit square, so this filters candidates the tree returned.
             if !ref_tri.is_similar(target_tri, config.ratio_tolerance) {
                 continue;
             }
@@ -151,7 +150,7 @@ pub(crate) fn vote_for_correspondences(
         }
     }
 
-    vote_matrix.into_hashmap()
+    vote_matrix
 }
 
 /// Resolve vote matrix into final matches using greedy conflict resolution.
@@ -159,16 +158,17 @@ pub(crate) fn vote_for_correspondences(
 /// Filters matches by minimum votes, sorts by vote count, and greedily assigns
 /// matches ensuring each reference and target point is used at most once.
 pub(crate) fn resolve_matches(
-    vote_matrix: HashMap<(usize, usize), usize>,
+    vote_matrix: VoteMatrix,
     n_ref: usize,
     n_target: usize,
     min_votes: usize,
 ) -> Vec<PointMatch> {
     // Filter by minimum votes and collect matches
     let mut matches: Vec<PointMatch> = vote_matrix
+        .iter_nonzero()
         .into_iter()
-        .filter(|&(_, votes)| votes >= min_votes)
-        .map(|((ref_idx, target_idx), votes)| PointMatch {
+        .filter(|&(_, _, votes)| votes >= min_votes)
+        .map(|(ref_idx, target_idx, votes)| PointMatch {
             ref_idx,
             target_idx,
             votes,
