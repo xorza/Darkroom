@@ -104,8 +104,18 @@ fn test_fast_exp_scalar_negative_range() {
 #[cfg(target_arch = "x86_64")]
 mod avx2_tests {
     use super::*;
-    use crate::math::fast_exp::fast_exp_8_avx2;
+    use crate::math::fast_exp::avx2::fast_exp_8_avx2_m256;
     use common::cpu_features;
+    use std::arch::x86_64::*;
+
+    #[inline]
+    unsafe fn fast_exp_8_avx2(x: &[f32; 8]) -> [f32; 8] {
+        let vx = _mm256_loadu_ps(x.as_ptr());
+        let result = fast_exp_8_avx2_m256(vx);
+        let mut out = [0.0f32; 8];
+        _mm256_storeu_ps(out.as_mut_ptr(), result);
+        out
+    }
 
     #[test]
     fn test_fast_exp_8_accuracy() {
@@ -224,9 +234,18 @@ mod avx2_tests {
 #[cfg(target_arch = "x86_64")]
 mod sse_tests {
     use super::*;
-    use crate::math::fast_exp::fast_exp_4_sse;
     use crate::math::fast_exp::sse::fast_exp_4_sse_m128;
     use common::cpu_features;
+    use std::arch::x86_64::*;
+
+    #[inline]
+    unsafe fn fast_exp_4_sse(x: &[f32; 4]) -> [f32; 4] {
+        let vx = _mm_loadu_ps(x.as_ptr());
+        let result = fast_exp_4_sse_m128(vx);
+        let mut out = [0.0f32; 4];
+        _mm_storeu_ps(out.as_mut_ptr(), result);
+        out
+    }
 
     #[test]
     fn test_fast_exp_4_accuracy() {
@@ -338,35 +357,6 @@ mod sse_tests {
     }
 
     #[test]
-    fn test_fast_exp_4_m128_matches_array() {
-        if !cpu_features::has_sse4_1() {
-            println!("SSE4.1 not available, skipping");
-            return;
-        }
-
-        use std::arch::x86_64::*;
-
-        let batch = [-12.5f32, -3.7, -0.01, 15.0];
-        let array_result = unsafe { fast_exp_4_sse(&batch) };
-
-        let m128_result = unsafe {
-            let vx = _mm_loadu_ps(batch.as_ptr());
-            let vr = fast_exp_4_sse_m128(vx);
-            let mut out = [0.0f32; 4];
-            _mm_storeu_ps(out.as_mut_ptr(), vr);
-            out
-        };
-
-        for i in 0..4 {
-            assert_eq!(
-                array_result[i], m128_result[i],
-                "m128 vs array mismatch at x={}: m128={}, array={}",
-                batch[i], m128_result[i], array_result[i]
-            );
-        }
-    }
-
-    #[test]
     fn test_fast_exp_4_monotonicity() {
         if !cpu_features::has_sse4_1() {
             println!("SSE4.1 not available, skipping");
@@ -402,38 +392,26 @@ mod sse_tests {
 mod cross_impl_tests {
     use super::*;
     use crate::math::fast_exp::avx2::fast_exp_8_avx2_m256;
-    use crate::math::fast_exp::fast_exp_4_sse;
-    use crate::math::fast_exp::fast_exp_8_avx2;
     use crate::math::fast_exp::sse::fast_exp_4_sse_m128;
     use common::cpu_features;
+    use std::arch::x86_64::*;
 
-    #[test]
-    fn test_avx2_m256_matches_array() {
-        if !cpu_features::has_avx2_fma() {
-            println!("AVX2 not available, skipping");
-            return;
-        }
+    #[inline]
+    unsafe fn fast_exp_8_avx2(x: &[f32; 8]) -> [f32; 8] {
+        let vx = _mm256_loadu_ps(x.as_ptr());
+        let result = fast_exp_8_avx2_m256(vx);
+        let mut out = [0.0f32; 8];
+        _mm256_storeu_ps(out.as_mut_ptr(), result);
+        out
+    }
 
-        use std::arch::x86_64::*;
-
-        let batch = [-20.0f32, -10.0, -5.0, -1.0, 0.0, 3.0, 10.0, 18.0];
-        let array_result = unsafe { fast_exp_8_avx2(&batch) };
-
-        let m256_result = unsafe {
-            let vx = _mm256_loadu_ps(batch.as_ptr());
-            let vr = fast_exp_8_avx2_m256(vx);
-            let mut out = [0.0f32; 8];
-            _mm256_storeu_ps(out.as_mut_ptr(), vr);
-            out
-        };
-
-        for i in 0..8 {
-            assert_eq!(
-                array_result[i], m256_result[i],
-                "m256 vs array mismatch at x={}: m256={}, array={}",
-                batch[i], m256_result[i], array_result[i]
-            );
-        }
+    #[inline]
+    unsafe fn fast_exp_4_sse(x: &[f32; 4]) -> [f32; 4] {
+        let vx = _mm_loadu_ps(x.as_ptr());
+        let result = fast_exp_4_sse_m128(vx);
+        let mut out = [0.0f32; 4];
+        _mm_storeu_ps(out.as_mut_ptr(), result);
+        out
     }
 
     #[test]
