@@ -228,6 +228,18 @@ fn test_register_two_calibrated_lights() {
         "Expected RMS error < 1.5 pixels, got {:.4}",
         result.rms_error
     );
+
+    // Warp img2 to align with img1 and measure time
+    let warp_start = std::time::Instant::now();
+    let warped = crate::registration::warp(img2, &result.transform, &reg_config);
+    let warp_elapsed = warp_start.elapsed();
+
+    println!(
+        "\nWarp result: {}x{} image warped in {:.1} ms",
+        warped.width(),
+        warped.height(),
+        warp_elapsed.as_secs_f64() * 1000.0
+    );
 }
 
 // ============================================================================
