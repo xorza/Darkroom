@@ -107,6 +107,31 @@ This is based on Chum and Matas (2005) "Matching with PROSAC" which demonstrated
 
 Standard RANSAC assumes that a model estimated from an outlier-free minimal sample is consistent with all inliers. This rarely holds in practice due to noise. LO-RANSAC (Chum, Matas, Kittler 2003) adds a local optimization step: when a promising hypothesis is found, iteratively re-estimate the model using all current inliers. This typically improves inlier count by 10-20% and speeds up convergence by 2-3x because better models enable earlier adaptive termination.
 
+### Implementation Comparison Summary
+
+| Aspect | This Implementation | Astroalign | Siril | LSST |
+|--------|---------------------|-----------|-------|------|
+| Triangle formation | K-NN adaptive (k=5-20) | K-NN fixed (k=4) | Brute-force O(n³) | K-NN |
+| Max stars | 200 | 50 | 20 | variable |
+| Invariant lookup | K-d tree | K-d tree | Hash table | K-d tree |
+| Tolerance | 1% | ~5% | configurable | 1% |
+| Orientation check | Yes | No | No | Yes |
+| RANSAC scoring | MSAC (weighted) | Inlier count | OpenCV | MSAC |
+| Local optimization | LO-RANSAC | No | No | Yes |
+| Progressive sampling | 3-phase PROSAC-style | No | No | Yes |
+| SIMD acceleration | AVX2/SSE/NEON | No | No | Yes |
+| Distortion correction | SIP polynomial | None | SIP | SIP + TPS |
+
+**Strengths vs. alternatives:**
+- More scalable than Siril (O(n·k²) vs O(n³) triangle formation)
+- Handles larger star sets than Astroalign (200 vs 50 stars)
+- LO-RANSAC and PROSAC-style sampling (not in Astroalign or Siril)
+- SIMD-accelerated inlier counting and interpolation
+
+**Gaps vs. alternatives:**
+- No automatic threshold adaptation (MAGSAC++), unlike OpenCV USAC
+- SIP reference point not FITS-compatible (uses centroid, not CRPIX)
+
 ---
 
 ## Triangle Matching
@@ -430,25 +455,90 @@ registration/
 
 ## Pending Improvements
 
-Prioritized by impact. Items marked with **[BUG]** are defects in existing code.
+Prioritized by impact.
 
-### ~~1. [BUG] Two-Step Matching Not Wired Up in Production~~ (Removed)
+### High Priority
 
-Two-step refinement removed entirely. The downstream RANSAC handles outlier rejection, making in-module refinement redundant.
+#### 1. MAGSAC++ Threshold-Free Scoring
 
-### ~~2. Transform Plausibility Checks in RANSAC~~ (Fixed)
+**Problem:** The fixed `inlier_threshold` (default 2.0px) requires manual tuning for different seeing conditions. A threshold optimal for 1.3px FWHM fails for 2-3px FWHM.
 
-Fixed: `RansacParams` now has `max_rotation: Option<f64>` (default 10°) and `scale_range: Option<(f64, f64)>` (default 0.8–1.2). Hypotheses exceeding these bounds are rejected before inlier counting. LO-RANSAC refinements are also checked. Set to `None` to disable for mosaics or different focal lengths.
+**Solution:** Implement MAGSAC++ (Barath & Matas 2020) as an optional scoring method. MAGSAC++ marginalizes likelihood over a range of noise scales, automatically adapting to the data without requiring threshold tuning.
 
-### ~~3. Guided Matching / Post-RANSAC Match Recovery~~ (Fixed)
+```rust
+pub enum ScoringMethod {
+    MSAC { threshold: f64 },           // Current default
+    MAGSAC { max_scale: f64 },         // Threshold-free
+}
+```
 
-Fixed: `recover_matches()` in `pipeline/mod.rs` projects each unmatched reference star through the RANSAC transform, finds the nearest unmatched target star within `inlier_threshold` using a k-d tree, and adds the pair. The transform is then re-estimated on all matches (original + recovered). Runs automatically between RANSAC and SIP correction.
+**Effort:** ~200-300 lines. **Benefit:** Eliminates the most sensitive parameter; robust across varying seeing conditions.
 
-### ~~4. Iterative Model Refinement (Medium Priority)~~ FIXED
+**Reference:** Barath, D., et al. (2020). "MAGSAC++, a fast, reliable and accurate robust estimator." CVPR 2020.
 
-Fixed: `TransformType::Auto` (now the default) starts with Similarity (4 DOF), computes RMS residuals, and upgrades to Homography (8 DOF) only if RMS exceeds 0.5 px. Implementation in `estimate_and_refine()` in `pipeline/mod.rs` reuses the same triangle matches for both attempts, avoiding redundant matching. This avoids overfitting with too many parameters when a simpler model suffices, while still handling perspective distortion when present.
+#### 2. SIP Reference Point (CRPIX Support)
 
-### 5. Confidence Calculation Improvement (Low Priority)
+**Problem:** SIP polynomial fitting uses the centroid of input points as reference, not CRPIX (image center). This makes coefficients incompatible with FITS headers and tools like DS9, SAOImage, and astropy WCS.
+
+**Solution:** Add configurable reference point to `SipConfig`:
+
+```rust
+pub struct SipConfig {
+    pub order: usize,
+    pub reference_point: Option<DVec2>,  // None = centroid, Some(crpix) = image center
+}
+```
+
+**Effort:** ~15 lines. **Benefit:** FITS interoperability.
+
+**Reference:** Shupe, D., et al. (2005). "The SIP Convention for Representing Distortion in FITS Image Headers."
+
+### Medium Priority
+
+#### 3. FWHM-Aware Threshold Selection
+
+**Problem:** Optimal `inlier_threshold` depends on star FWHM/seeing, but users must manually adjust it.
+
+**Solution:** Auto-scale threshold based on detected star FWHM:
+
+```rust
+pub fn from_fwhm(fwhm_pixels: f64) -> Self {
+    let threshold = (fwhm_pixels * 1.5).max(1.5);  // 1.5-2.0 × FWHM
+    Self {
+        inlier_threshold: threshold,
+        ..Self::default()
+    }
+}
+```
+
+**Effort:** ~20 lines in `register_positions()`. **Benefit:** 10-20% improvement in varying seeing conditions without manual tuning.
+
+#### 4. SIP Fit Quality Diagnostics
+
+**Problem:** No way to diagnose when SIP polynomial order is too high (overfitting) or too low (underfitting).
+
+**Solution:** Add fit quality metrics:
+
+```rust
+pub struct SipFitQuality {
+    pub rms_residual: f64,
+    pub max_residual: f64,
+    pub condition_number: f64,
+    pub effective_rank: usize,
+}
+```
+
+**Effort:** ~30 lines. **Benefit:** Better debugging when distortion correction fails.
+
+#### 5. Sigma-Clipping in SIP Fitting
+
+**Problem:** SIP fitting trusts RANSAC inlier set completely. Marginal inliers can degrade polynomial fit.
+
+**Solution:** Optional sigma-clipping within SIP fitting (LSST approach): 3 iterations, 3-sigma rejection.
+
+**Effort:** ~50 lines. **Benefit:** Marginal robustness improvement for outlier-contaminated inlier sets.
+
+#### 6. Confidence Calculation Improvement
 
 In `resolve_matches()` (`triangle/mod.rs:214`), the confidence formula uses `max_possible_votes = (n-2)*(n-1)/2` which is a loose theoretical upper bound that makes all confidences very small. A more useful confidence metric would be:
 - Relative to the maximum observed votes in the current match set
@@ -456,13 +546,32 @@ In `resolve_matches()` (`triangle/mod.rs:214`), the confidence formula uses `max
 
 This matters because `estimate()` uses confidence scores to guide progressive RANSAC sampling. Better confidence values lead to faster convergence.
 
-### 6. MAGSAC++ Scoring (Low Priority, Research)
+### Low Priority
 
-Currently RANSAC uses a hard inlier threshold with weighted scoring: `score += (threshold^2 - dist^2) * 1000`. MAGSAC++ uses sigma-consensus: it marginalizes over a range of possible thresholds, automatically adapting to the noise level without requiring manual tuning of `inlier_threshold`.
+#### 7. FITS Header I/O for SIP Coefficients
 
-**Trade-off:** More complex implementation, but eliminates one of the most sensitive parameters. Worth investigating if users report threshold sensitivity across different optical setups.
+Read/write A_pq/B_pq keywords from FITS headers. Not a blocker for registration (which is pre-WCS), but useful for interoperability with other tools.
 
-**Reference:** Barath, D., et al. (2020). "MAGSAC++, a fast, reliable and accurate robust estimator." CVPR 2020.
+**Effort:** ~100 lines.
+
+#### 8. Weighted Least Squares in Transform Refinement
+
+Use match confidence (vote counts) as weights in final least-squares refinement. Marginal improvement (1-2% better residuals).
+
+**Effort:** ~20 lines.
+
+#### 9. Tabur-Style Ordered Triangle Search
+
+Process triangles by rarity in invariant space (outliers first) for early termination. Only matters for large point sets (500+ stars); current approach is fast enough for typical use (200 stars).
+
+**Effort:** ~30 lines. **Benefit:** 5-10% speedup for 500+ stars.
+
+### Completed (Historical)
+
+- ~~Two-Step Matching~~ — Removed. RANSAC handles outlier rejection.
+- ~~Transform Plausibility Checks~~ — Fixed. `max_rotation` and `scale_range` parameters added.
+- ~~Guided Matching / Post-RANSAC Match Recovery~~ — Fixed. `recover_matches()` implemented.
+- ~~Iterative Model Refinement~~ — Fixed. `TransformType::Auto` upgrades Similarity to Homography if needed.
 
 ### Current Limitations (Not Planned)
 
@@ -470,6 +579,14 @@ These are known limitations that are acceptable for the current scope:
 
 - **Single-model assumption.** The pipeline fits one global transformation. Images with severe field-dependent distortion may benefit from local models (tile-based registration or TPS warping, as PixInsight does). SIP correction partially addresses this.
 - **Star detection is external.** Registration quality depends on star detection quality (centroid accuracy, false positive rate). The module assumes stars are pre-detected and sorted by brightness.
+
+### Not Needed
+
+These techniques were evaluated and found unnecessary for this use case:
+
+- **True PROSAC** — Not needed. Star registration has >50% inliers after triangle matching; standard RANSAC converges in ~18 iterations. Current 3-phase heuristic is sufficient.
+- **Quad matching** — For blind plate solving against large catalogs only. Triangles are sufficient for image-to-image registration.
+- **Feature-based matching (SIFT/ORB)** — Star centroids are already optimal point features for astronomical images.
 
 ---
 
