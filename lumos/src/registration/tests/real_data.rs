@@ -133,7 +133,7 @@ fn test_register_two_calibrated_lights() {
     let reg_config = RegistrationConfig {
         transform_type: crate::TransformType::Auto,
         sip_enabled: false,
-        sip_order: 3,
+        use_spatial_grid: false, // Disabled - see comment above
         ..RegistrationConfig::default()
     };
     let registrator = Registrator::new(reg_config.clone());
