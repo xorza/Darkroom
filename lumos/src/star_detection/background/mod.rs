@@ -19,7 +19,7 @@ use crate::common::{BitBuffer2, Buffer2};
 use rayon::prelude::*;
 
 use super::buffer_pool::BufferPool;
-use super::config::{AdaptiveSigmaConfig, Config};
+use super::config::Config;
 use tile_grid::TileGrid;
 
 /// Estimate background and noise for the image.
@@ -39,41 +39,18 @@ pub(crate) fn estimate_background(
         "Image must be at least tile_size x tile_size"
     );
 
-    let has_adaptive = config.refinement.adaptive_sigma().is_some();
-    let adaptive_config = config.refinement.adaptive_sigma();
-
     // Acquire buffers from pool
     let mut background = pool.acquire_f32();
     let mut noise = pool.acquire_f32();
-    let mut adaptive_sigma = if has_adaptive {
-        Some(pool.acquire_f32())
-    } else {
-        None
-    };
 
     // Create tile grid and compute statistics
     let mut tile_grid = TileGrid::new_uninit(width, height, config.tile_size);
-    tile_grid.compute(
-        pixels,
-        None,
-        0,
-        config.sigma_clip_iterations,
-        adaptive_config,
-    );
+    tile_grid.compute(pixels, None, 0, config.sigma_clip_iterations);
 
     // Interpolate from tile grid to per-pixel values
-    interpolate_from_grid(
-        &tile_grid,
-        &mut background,
-        &mut noise,
-        adaptive_sigma.as_mut(),
-    );
+    interpolate_from_grid(&tile_grid, &mut background, &mut noise);
 
-    BackgroundEstimate {
-        background,
-        noise,
-        adaptive_sigma,
-    }
+    BackgroundEstimate { background, noise }
 }
 
 /// Refine background estimate using iterative object masking.
@@ -85,11 +62,6 @@ pub(crate) fn refine_background(
     config: &Config,
     pool: &mut BufferPool,
 ) {
-    debug_assert!(
-        estimate.adaptive_sigma.is_none(),
-        "adaptive_sigma should not be allocated when using iterative refinement"
-    );
-
     let iterations = config.refinement.iterations();
     if iterations == 0 {
         return;
@@ -120,15 +92,9 @@ pub(crate) fn refine_background(
             Some(&mask),
             min_pixels,
             config.sigma_clip_iterations,
-            None, // No adaptive thresholding during refinement
         );
 
-        interpolate_from_grid(
-            &tile_grid,
-            &mut estimate.background,
-            &mut estimate.noise,
-            None,
-        );
+        interpolate_from_grid(&tile_grid, &mut estimate.background, &mut estimate.noise);
     }
 
     pool.release_bit(scratch);
@@ -136,36 +102,17 @@ pub(crate) fn refine_background(
 }
 
 /// Interpolate background map from tile grid into output buffers.
-///
-/// If `adaptive_sigma` is Some, also interpolates the adaptive_sigma channel.
-fn interpolate_from_grid(
-    grid: &TileGrid,
-    background: &mut Buffer2<f32>,
-    noise: &mut Buffer2<f32>,
-    adaptive_sigma: Option<&mut Buffer2<f32>>,
-) {
+fn interpolate_from_grid(grid: &TileGrid, background: &mut Buffer2<f32>, noise: &mut Buffer2<f32>) {
     let width = background.width();
 
-    if let Some(adaptive) = adaptive_sigma {
-        background
-            .pixels_mut()
-            .par_chunks_mut(width)
-            .zip(noise.pixels_mut().par_chunks_mut(width))
-            .zip(adaptive.pixels_mut().par_chunks_mut(width))
-            .enumerate()
-            .for_each(|(y, ((bg_row, noise_row), adaptive_row))| {
-                interpolate_row(bg_row, noise_row, Some(adaptive_row), y, grid);
-            });
-    } else {
-        background
-            .pixels_mut()
-            .par_chunks_mut(width)
-            .zip(noise.pixels_mut().par_chunks_mut(width))
-            .enumerate()
-            .for_each(|(y, (bg_row, noise_row))| {
-                interpolate_row(bg_row, noise_row, None, y, grid);
-            });
-    }
+    background
+        .pixels_mut()
+        .par_chunks_mut(width)
+        .zip(noise.pixels_mut().par_chunks_mut(width))
+        .enumerate()
+        .for_each(|(y, (bg_row, noise_row))| {
+            interpolate_row(bg_row, noise_row, y, grid);
+        });
 }
 
 /// Create a mask of pixels that are likely objects (above threshold).
@@ -201,15 +148,7 @@ fn create_object_mask(
 /// Instead of computing tile indices per-pixel, we process the row in segments
 /// where each segment has constant tile corners. This amortizes tile lookups
 /// and Y-weight calculations across many pixels.
-///
-/// If `adaptive_row` is Some, also interpolates the adaptive_sigma channel.
-fn interpolate_row(
-    bg_row: &mut [f32],
-    noise_row: &mut [f32],
-    adaptive_row: Option<&mut [f32]>,
-    y: usize,
-    grid: &TileGrid,
-) {
+fn interpolate_row(bg_row: &mut [f32], noise_row: &mut [f32], y: usize, grid: &TileGrid) {
     let fy = y as f32;
     let width = bg_row.len();
 
@@ -282,36 +221,6 @@ fn interpolate_row(
             // Constant fill (single tile column)
             bg_segment.fill(left_bg);
             noise_segment.fill(left_noise);
-        }
-
-        // Interpolate adaptive sigma if requested
-        if let Some(ref adaptive_row) = adaptive_row {
-            let left_adaptive = wy_inv * t00.adaptive_sigma + wy * t01.adaptive_sigma;
-            let right_adaptive = wy_inv * t10.adaptive_sigma + wy * t11.adaptive_sigma;
-
-            // Get mutable reference to adaptive segment
-            // SAFETY: We have exclusive access via the Option<&mut [f32]>
-            let adaptive_segment = unsafe {
-                std::slice::from_raw_parts_mut(
-                    adaptive_row.as_ptr().add(x) as *mut f32,
-                    segment_end - x,
-                )
-            };
-
-            if tx1 != tx0 {
-                let inv_dx = 1.0 / (center_x1 - center_x0);
-                let wx_start = (x as f32 - center_x0) * inv_dx;
-                let wx_step = inv_dx;
-
-                // Simple scalar interpolation for adaptive sigma (less performance critical)
-                let delta = right_adaptive - left_adaptive;
-                for (i, val) in adaptive_segment.iter_mut().enumerate() {
-                    let wx = (wx_start + i as f32 * wx_step).clamp(0.0, 1.0);
-                    *val = left_adaptive + wx * delta;
-                }
-            } else {
-                adaptive_segment.fill(left_adaptive);
-            }
         }
 
         x = segment_end;

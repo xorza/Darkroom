@@ -5,12 +5,9 @@
 //! - Edge cases: Boundary conditions, special values, tiny images
 //! - SIMD validation: Remainder handling, alignment, SIMD vs scalar consistency
 //! - Filtered threshold tests: Background-subtracted image thresholding
-//! - Adaptive threshold tests: Per-pixel sigma thresholding
 //! - Multi-row tests: 2D image patterns and row boundary handling
 
-use super::{
-    create_adaptive_threshold_mask, create_threshold_mask, create_threshold_mask_filtered,
-};
+use super::{create_threshold_mask, create_threshold_mask_filtered};
 use crate::common::{BitBuffer2, Buffer2};
 
 // ============================================================================
@@ -49,24 +46,6 @@ fn create_threshold_mask_filtered_test(
     mask
 }
 
-/// Helper to create adaptive threshold mask for tests
-fn create_adaptive_threshold_mask_test(
-    pixels: &[f32],
-    bg: &[f32],
-    noise: &[f32],
-    adaptive_sigma: &[f32],
-    width: usize,
-    height: usize,
-) -> BitBuffer2 {
-    let pixels = Buffer2::new(width, height, pixels.to_vec());
-    let bg = Buffer2::new(width, height, bg.to_vec());
-    let noise = Buffer2::new(width, height, noise.to_vec());
-    let adaptive_sigma = Buffer2::new(width, height, adaptive_sigma.to_vec());
-    let mut mask = BitBuffer2::new_filled(width, height, false);
-    create_adaptive_threshold_mask(&pixels, &bg, &noise, &adaptive_sigma, &mut mask);
-    mask
-}
-
 /// Reference scalar implementation for testing SIMD correctness
 fn scalar_threshold(pixels: &[f32], bg: &[f32], noise: &[f32], sigma: f32) -> Vec<bool> {
     pixels
@@ -87,25 +66,6 @@ fn scalar_threshold_filtered(pixels: &[f32], noise: &[f32], sigma: f32) -> Vec<b
         .zip(noise.iter())
         .map(|(&px, &n)| {
             let threshold = sigma * n.max(1e-6);
-            px > threshold
-        })
-        .collect()
-}
-
-/// Reference scalar implementation for adaptive threshold
-fn scalar_threshold_adaptive(
-    pixels: &[f32],
-    bg: &[f32],
-    noise: &[f32],
-    adaptive_sigma: &[f32],
-) -> Vec<bool> {
-    pixels
-        .iter()
-        .zip(bg.iter())
-        .zip(noise.iter())
-        .zip(adaptive_sigma.iter())
-        .map(|(((&px, &b), &n), &s)| {
-            let threshold = b + s * n.max(1e-6);
             px > threshold
         })
         .collect()
@@ -527,175 +487,6 @@ fn test_negative_noise_clamped() {
 }
 
 // ============================================================================
-// Adaptive threshold tests
-// ============================================================================
-
-#[test]
-fn test_adaptive_threshold_uniform_sigma() {
-    // With uniform adaptive_sigma, should behave like create_threshold_mask
-    let width = 10;
-    let height = 1;
-    let pixels = vec![100.0f32; width * height];
-    let bg = vec![50.0f32; width * height];
-    let noise = vec![10.0f32; width * height];
-    let adaptive_sigma = vec![3.0f32; width * height]; // uniform sigma = 3.0
-
-    // threshold = 50 + 3 * 10 = 80, pixels = 100 > 80
-    let mask =
-        create_adaptive_threshold_mask_test(&pixels, &bg, &noise, &adaptive_sigma, width, height);
-    assert!(mask.iter().all(|v| v));
-}
-
-#[test]
-fn test_adaptive_threshold_variable_sigma() {
-    // Different sigma values per pixel
-    let pixels = vec![1.5f32; 4];
-    let bg = vec![1.0f32; 4];
-    let noise = vec![0.1f32; 4];
-    // sigma values: 3.0, 5.0, 6.0, 2.0
-    let adaptive_sigma = vec![3.0f32, 5.0, 6.0, 2.0];
-
-    // thresholds: 1.0 + 3.0*0.1 = 1.3, 1.0 + 5.0*0.1 = 1.5, 1.0 + 6.0*0.1 = 1.6, 1.0 + 2.0*0.1 = 1.2
-    // pixel 0: 1.5 > 1.3 -> true
-    // pixel 1: 1.5 <= 1.5 -> false (not strictly greater)
-    // pixel 2: 1.5 <= 1.6 -> false
-    // pixel 3: 1.5 > 1.2 -> true
-    let mask = create_adaptive_threshold_mask_test(&pixels, &bg, &noise, &adaptive_sigma, 2, 2);
-
-    assert!(mask.get(0));
-    assert!(!mask.get(1));
-    assert!(!mask.get(2));
-    assert!(mask.get(3));
-}
-
-#[test]
-fn test_adaptive_threshold_high_sigma_suppresses_detection() {
-    // High sigma in nebulous regions should suppress detections
-    let pixels = vec![2.0f32; 4];
-    let bg = vec![1.0f32; 4];
-    let noise = vec![0.1f32; 4];
-    // Low sigma (uniform sky) vs high sigma (nebula)
-    let adaptive_sigma = vec![3.0f32, 3.0, 15.0, 15.0];
-
-    // thresholds: 1.3, 1.3, 2.5, 2.5
-    // pixels 0,1: 2.0 > 1.3 -> true (uniform sky, detected)
-    // pixels 2,3: 2.0 <= 2.5 -> false (nebula, suppressed)
-    let mask = create_adaptive_threshold_mask_test(&pixels, &bg, &noise, &adaptive_sigma, 2, 2);
-
-    assert!(mask.get(0));
-    assert!(mask.get(1));
-    assert!(!mask.get(2));
-    assert!(!mask.get(3));
-}
-
-#[test]
-fn test_adaptive_threshold_matches_fixed_when_uniform() {
-    // Adaptive mask with uniform sigma should match fixed threshold mask
-    let width = 100;
-    let height = 100;
-    let size = width * height;
-
-    let mut pixels = vec![0.0f32; size];
-    let mut bg = vec![1.0f32; size];
-    let mut noise = vec![0.1f32; size];
-
-    for i in 0..size {
-        pixels[i] = ((i * 17) % 100) as f32 / 50.0;
-        bg[i] = 1.0 + ((i * 7) % 10) as f32 / 100.0;
-        noise[i] = 0.05 + ((i * 3) % 10) as f32 / 100.0;
-    }
-
-    let sigma = 3.0;
-    let adaptive_sigma = vec![sigma; size];
-
-    // Create both masks
-    let fixed_mask = create_threshold_mask_test(&pixels, &bg, &noise, sigma, width, height);
-    let adaptive_mask =
-        create_adaptive_threshold_mask_test(&pixels, &bg, &noise, &adaptive_sigma, width, height);
-
-    // They should be identical
-    for i in 0..size {
-        assert_eq!(
-            fixed_mask.get(i),
-            adaptive_mask.get(i),
-            "Mismatch at index {}: fixed={}, adaptive={}",
-            i,
-            fixed_mask.get(i),
-            adaptive_mask.get(i)
-        );
-    }
-}
-
-#[test]
-fn test_adaptive_threshold_various_lengths() {
-    // Test edge cases for SIMD remainder handling with adaptive threshold
-    for len in [1, 3, 4, 5, 15, 16, 17, 31, 32, 33, 63, 64, 65, 100] {
-        let width = len;
-        let height = 1;
-        let pixels = vec![100.0f32; width * height];
-        let bg = vec![50.0f32; width * height];
-        let noise = vec![10.0f32; width * height];
-        let adaptive_sigma = vec![3.0f32; width * height];
-
-        let mask = create_adaptive_threshold_mask_test(
-            &pixels,
-            &bg,
-            &noise,
-            &adaptive_sigma,
-            width,
-            height,
-        );
-        assert!(mask.iter().all(|v| v), "failed for len={}", len);
-    }
-}
-
-#[test]
-fn test_adaptive_threshold_remainder_handling() {
-    // Test that remainder handling works correctly for all possible remainder sizes
-    for remainder in 0..64 {
-        let size = 128 + remainder;
-        // Alternating high/low sigma to create pattern
-        let pixels = vec![1.5f32; size];
-        let bg = vec![1.0f32; size];
-        let noise = vec![0.1f32; size];
-        // Even indices: low sigma (detected), odd indices: high sigma (not detected)
-        let adaptive_sigma: Vec<f32> = (0..size)
-            .map(|i| if i % 2 == 0 { 3.0 } else { 10.0 })
-            .collect();
-
-        // thresholds: even = 1.3 (1.5 > 1.3 -> true), odd = 2.0 (1.5 < 2.0 -> false)
-        let mask =
-            create_adaptive_threshold_mask_test(&pixels, &bg, &noise, &adaptive_sigma, size, 1);
-
-        for i in 0..size {
-            let expected = i % 2 == 0;
-            assert_eq!(
-                mask.get(i),
-                expected,
-                "Index {} should be {} for size {}",
-                i,
-                expected,
-                size
-            );
-        }
-    }
-}
-
-#[test]
-fn test_adaptive_threshold_zero_noise() {
-    let pixels = vec![1.1f32, 0.9];
-    let bg = vec![1.0f32; 2];
-    let noise = vec![0.0f32; 2]; // Zero noise
-    let adaptive_sigma = vec![3.0f32; 2];
-
-    // With noise.max(1e-6), threshold ≈ 1.0 + 3.0 * 1e-6 ≈ 1.000003
-    let mask = create_adaptive_threshold_mask_test(&pixels, &bg, &noise, &adaptive_sigma, 2, 1);
-
-    assert!(mask.get(0)); // 1.1 > 1.000003
-    assert!(!mask.get(1)); // 0.9 <= 1.000003
-}
-
-// ============================================================================
 // SIMD vs Scalar consistency tests
 // ============================================================================
 
@@ -787,50 +578,6 @@ fn test_filtered_matches_scalar() {
             scalar_val,
             mask.get(i),
             "Filtered mismatch at index {}: scalar={}, packed={}",
-            i,
-            scalar_val,
-            mask.get(i)
-        );
-    }
-}
-
-#[test]
-fn test_adaptive_matches_scalar() {
-    let width = 100;
-    let height = 100;
-    let size = width * height;
-
-    let mut pixels_data = vec![0.0f32; size];
-    let mut bg_data = vec![1.0f32; size];
-    let mut noise_data = vec![0.1f32; size];
-    let mut sigma_data = vec![3.0f32; size];
-
-    for i in 0..size {
-        pixels_data[i] = ((i * 17) % 100) as f32 / 50.0;
-        bg_data[i] = 1.0 + ((i * 7) % 10) as f32 / 100.0;
-        noise_data[i] = 0.05 + ((i * 3) % 10) as f32 / 100.0;
-        sigma_data[i] = 2.0 + ((i * 11) % 50) as f32 / 10.0; // Varies 2.0-7.0
-    }
-
-    // Compute with scalar reference
-    let scalar_mask = scalar_threshold_adaptive(&pixels_data, &bg_data, &noise_data, &sigma_data);
-
-    // Compute with packed BitBuffer2
-    let mask = create_adaptive_threshold_mask_test(
-        &pixels_data,
-        &bg_data,
-        &noise_data,
-        &sigma_data,
-        width,
-        height,
-    );
-
-    // Compare results
-    for (i, &scalar_val) in scalar_mask.iter().enumerate() {
-        assert_eq!(
-            scalar_val,
-            mask.get(i),
-            "Adaptive mismatch at index {}: scalar={}, packed={}",
             i,
             scalar_val,
             mask.get(i)

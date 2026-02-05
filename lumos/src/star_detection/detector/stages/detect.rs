@@ -18,9 +18,7 @@ use super::super::super::deblend::{
 };
 use super::super::super::labeling::LabelMap;
 use super::super::super::mask_dilation::dilate_mask;
-use super::super::super::threshold_mask::{
-    create_adaptive_threshold_mask, create_threshold_mask, create_threshold_mask_filtered,
-};
+use super::super::super::threshold_mask::{create_threshold_mask, create_threshold_mask_filtered};
 
 /// Result of detection stage with diagnostic statistics.
 #[derive(Debug)]
@@ -92,20 +90,7 @@ pub(crate) fn detect(
     let mut mask = pool.acquire_bit();
     mask.fill(false);
 
-    // Check if we have adaptive sigma available
-    let use_adaptive = stats.adaptive_sigma.is_some() && filtered.is_none();
-
-    if use_adaptive {
-        // Use per-pixel adaptive sigma thresholds
-        let adaptive_sigma = stats.adaptive_sigma.as_ref().unwrap();
-        create_adaptive_threshold_mask(
-            pixels,
-            &stats.background,
-            &stats.noise,
-            adaptive_sigma,
-            &mut mask,
-        );
-    } else if let Some(filtered) = filtered {
+    if let Some(filtered) = filtered {
         debug_assert_eq!(width, filtered.width());
         debug_assert_eq!(height, filtered.height());
         create_threshold_mask_filtered(filtered, &stats.noise, config.sigma_threshold, &mut mask);

@@ -79,12 +79,12 @@ pub(crate) use buffer_pool::BufferPool;
 pub use detector::{DetectionResult, Diagnostics, StarDetector};
 
 // Configuration
+pub use config::BackgroundRefinement;
 pub use config::CentroidMethod;
 pub use config::Config;
 pub use config::Connectivity;
 pub use config::LocalBackgroundMethod;
 pub use config::NoiseModel;
-pub use config::{AdaptiveSigmaConfig, BackgroundRefinement};
 pub use defect_map::DefectMap;
 pub use star::Star;
 

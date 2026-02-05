@@ -14,7 +14,6 @@ pub fn uniform(width: usize, height: usize, background: f32, noise: f32) -> Back
     BackgroundEstimate {
         background: bg_buf,
         noise: noise_buf,
-        adaptive_sigma: None,
     }
 }
 
@@ -42,7 +41,6 @@ pub fn horizontal_gradient(
     BackgroundEstimate {
         background: bg_buf,
         noise: noise_buf,
-        adaptive_sigma: None,
     }
 }
 
@@ -71,7 +69,6 @@ pub fn vertical_gradient(
     BackgroundEstimate {
         background: bg_buf,
         noise: noise_buf,
-        adaptive_sigma: None,
     }
 }
 
@@ -102,7 +99,6 @@ pub fn vignette(
     BackgroundEstimate {
         background: bg_buf,
         noise: noise_buf,
-        adaptive_sigma: None,
     }
 }
 

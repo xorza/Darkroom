@@ -114,95 +114,10 @@ impl NoiseModel {
 }
 
 // ============================================================================
-// Adaptive Sigma Configuration
-// ============================================================================
-
-/// Configuration for adaptive sigma threshold computation.
-///
-/// Adaptive thresholding adjusts the detection sigma based on local image
-/// characteristics. In high-contrast regions (nebulosity, gradients), the
-/// sigma is increased to reduce false positives. In uniform sky regions,
-/// the base sigma is used for maximum sensitivity.
-#[derive(Debug, Clone, Copy)]
-pub struct AdaptiveSigmaConfig {
-    /// Base sigma threshold used in low-contrast (uniform sky) regions.
-    pub base_sigma: f32,
-    /// Maximum sigma threshold used in high-contrast (nebulous) regions.
-    pub max_sigma: f32,
-    /// Contrast sensitivity factor (higher = more sensitive to contrast).
-    /// Controls how quickly sigma increases with local contrast.
-    pub contrast_factor: f32,
-}
-
-impl Default for AdaptiveSigmaConfig {
-    fn default() -> Self {
-        Self {
-            base_sigma: 4.0,
-            max_sigma: 8.0,
-            contrast_factor: 2.0,
-        }
-    }
-}
-
-impl AdaptiveSigmaConfig {
-    /// Validate the configuration.
-    pub fn validate(&self) {
-        assert!(
-            self.base_sigma > 0.0,
-            "base_sigma must be positive, got {}",
-            self.base_sigma
-        );
-        assert!(
-            self.max_sigma >= self.base_sigma,
-            "max_sigma ({}) must be >= base_sigma ({})",
-            self.max_sigma,
-            self.base_sigma
-        );
-        assert!(
-            self.contrast_factor > 0.0,
-            "contrast_factor must be positive, got {}",
-            self.contrast_factor
-        );
-    }
-
-    /// Create a conservative config (higher thresholds, fewer false positives).
-    pub fn conservative() -> Self {
-        Self {
-            base_sigma: 4.0,
-            max_sigma: 8.0,
-            contrast_factor: 3.0,
-        }
-    }
-
-    /// Create an aggressive config (lower thresholds, more detections).
-    pub fn aggressive() -> Self {
-        Self {
-            base_sigma: 3.0,
-            max_sigma: 5.0,
-            contrast_factor: 1.5,
-        }
-    }
-}
-
-// ============================================================================
 // Background Refinement
 // ============================================================================
 
 /// Strategy for refining background estimation.
-///
-/// Background estimation can be improved using one of two mutually exclusive
-/// strategies:
-///
-/// - **Iterative refinement**: Mask detected sources and re-estimate background.
-///   Best for crowded fields where initial estimate is biased by sources.
-///
-/// - **Adaptive sigma**: Use per-pixel detection thresholds based on local contrast.
-///   Best for images with nebulosity or structured backgrounds where a fixed
-///   threshold causes false detections.
-///
-/// These strategies are mutually exclusive because iterative refinement already
-/// produces an accurate background that doesn't need adaptive thresholding, and
-/// computing adaptive sigma during refinement iterations would be wasted work.
 #[derive(Debug, Clone, Copy, Default)]
 pub enum BackgroundRefinement {
     /// No refinement - use single-pass background estimation.
@@ -217,11 +132,6 @@ pub enum BackgroundRefinement {
         /// Number of refinement iterations. Usually 1-2 is sufficient.
         iterations: usize,
     },
-
-    /// Adaptive per-pixel sigma thresholds based on local contrast.
-    /// Higher thresholds in nebulous regions reduce false positives.
-    /// Only used with single-pass estimation (no iterative refinement).
-    AdaptiveSigma(AdaptiveSigmaConfig),
 }
 
 impl BackgroundRefinement {
@@ -240,25 +150,14 @@ impl BackgroundRefinement {
                     "iterations must be > 0 for Iterative refinement"
                 );
             }
-            Self::AdaptiveSigma(config) => {
-                config.validate();
-            }
         }
     }
 
-    /// Returns the number of iterations (0 for None and AdaptiveSigma).
+    /// Returns the number of iterations (0 for None).
     pub fn iterations(&self) -> usize {
         match self {
             Self::Iterative { iterations } => *iterations,
-            _ => 0,
-        }
-    }
-
-    /// Returns the adaptive sigma config if using that strategy.
-    pub fn adaptive_sigma(&self) -> Option<AdaptiveSigmaConfig> {
-        match self {
-            Self::AdaptiveSigma(config) => Some(*config),
-            _ => None,
+            Self::None => 0,
         }
     }
 }
@@ -616,25 +515,6 @@ impl Config {
         }
     }
 
-    /// Nebulous field settings (adaptive thresholding enabled).
-    ///
-    /// Images with bright nebulosity, H-II regions, or structured backgrounds
-    /// where a fixed detection threshold causes massive false positives in
-    /// bright regions. Uses adaptive per-pixel sigma thresholds.
-    pub fn nebulous_field() -> Self {
-        Self {
-            tile_size: 128,
-            bg_mask_dilation: 5,
-            refinement: BackgroundRefinement::AdaptiveSigma(AdaptiveSigmaConfig {
-                base_sigma: 4.0,
-                max_sigma: 10.0,
-                contrast_factor: 2.5,
-            }),
-            auto_estimate_fwhm: true,
-            ..Self::default()
-        }
-    }
-
     /// Maximum centroid precision settings for ground-based astrophotography.
     ///
     /// Optimized for sub-pixel astrometric accuracy. Uses Moffat PSF fitting
@@ -648,11 +528,7 @@ impl Config {
             min_unmasked_fraction: 0.2,
             tile_size: 128,
             sigma_clip_iterations: 3,
-            refinement: BackgroundRefinement::AdaptiveSigma(AdaptiveSigmaConfig {
-                base_sigma: 3.0,
-                max_sigma: 10.0,
-                contrast_factor: 3.0,
-            }),
+            refinement: BackgroundRefinement::Iterative { iterations: 3 },
 
             // Region filtering
             min_area: 7,
@@ -728,66 +604,6 @@ mod tests {
     }
 
     // -------------------------------------------------------------------------
-    // AdaptiveSigmaConfig tests
-    // -------------------------------------------------------------------------
-
-    #[test]
-    fn test_adaptive_sigma_config_default() {
-        let config = AdaptiveSigmaConfig::default();
-        assert!((config.base_sigma - 4.0).abs() < 1e-6);
-        assert!((config.max_sigma - 8.0).abs() < 1e-6);
-        assert!((config.contrast_factor - 2.0).abs() < 1e-6);
-        config.validate();
-    }
-
-    #[test]
-    fn test_adaptive_sigma_config_conservative() {
-        let config = AdaptiveSigmaConfig::conservative();
-        assert!((config.base_sigma - 4.0).abs() < 1e-6);
-        assert!((config.max_sigma - 8.0).abs() < 1e-6);
-        config.validate();
-    }
-
-    #[test]
-    fn test_adaptive_sigma_config_aggressive() {
-        let config = AdaptiveSigmaConfig::aggressive();
-        assert!((config.base_sigma - 3.0).abs() < 1e-6);
-        assert!((config.max_sigma - 5.0).abs() < 1e-6);
-        config.validate();
-    }
-
-    #[test]
-    #[should_panic(expected = "base_sigma must be positive")]
-    fn test_adaptive_sigma_config_invalid_base_sigma() {
-        AdaptiveSigmaConfig {
-            base_sigma: 0.0,
-            ..Default::default()
-        }
-        .validate();
-    }
-
-    #[test]
-    #[should_panic(expected = "max_sigma")]
-    fn test_adaptive_sigma_config_max_less_than_base() {
-        AdaptiveSigmaConfig {
-            base_sigma: 5.0,
-            max_sigma: 3.0,
-            ..Default::default()
-        }
-        .validate();
-    }
-
-    #[test]
-    #[should_panic(expected = "contrast_factor must be positive")]
-    fn test_adaptive_sigma_config_invalid_contrast_factor() {
-        AdaptiveSigmaConfig {
-            contrast_factor: 0.0,
-            ..Default::default()
-        }
-        .validate();
-    }
-
-    // -------------------------------------------------------------------------
     // CentroidMethod tests
     // -------------------------------------------------------------------------
 
@@ -817,7 +633,6 @@ mod tests {
     #[test]
     fn test_config_default() {
         let config = Config::default();
-        assert!(config.refinement.adaptive_sigma().is_none());
         assert!(config.noise_model.is_none());
         assert!(config.defect_map.is_none());
         config.validate();
@@ -828,15 +643,7 @@ mod tests {
         Config::wide_field().validate();
         Config::high_resolution().validate();
         Config::crowded_field().validate();
-        Config::nebulous_field().validate();
         Config::precise_ground().validate();
-    }
-
-    #[test]
-    fn test_config_nebulous_field() {
-        let config = Config::nebulous_field();
-        assert!(config.refinement.adaptive_sigma().is_some());
-        config.validate();
     }
 
     #[test]
@@ -846,7 +653,6 @@ mod tests {
             min_snr: 15.0,
             edge_margin: 20,
             noise_model: Some(NoiseModel::new(1.5, 5.0)),
-            refinement: BackgroundRefinement::AdaptiveSigma(AdaptiveSigmaConfig::default()),
             ..Default::default()
         };
 
@@ -854,34 +660,6 @@ mod tests {
         assert!((config.min_snr - 15.0).abs() < 1e-6);
         assert_eq!(config.edge_margin, 20);
         assert!(config.noise_model.is_some());
-        assert!(config.refinement.adaptive_sigma().is_some());
-        config.validate();
-    }
-
-    #[test]
-    fn test_config_with_adaptive_sigma() {
-        let config = Config {
-            refinement: BackgroundRefinement::AdaptiveSigma(AdaptiveSigmaConfig::default()),
-            ..Default::default()
-        };
-        assert!(config.refinement.adaptive_sigma().is_some());
-        config.validate();
-    }
-
-    #[test]
-    fn test_config_with_custom_adaptive_sigma() {
-        let custom = AdaptiveSigmaConfig {
-            base_sigma: 2.5,
-            max_sigma: 7.0,
-            contrast_factor: 1.0,
-        };
-        let config = Config {
-            refinement: BackgroundRefinement::AdaptiveSigma(custom),
-            ..Default::default()
-        };
-        let adaptive = config.refinement.adaptive_sigma().unwrap();
-        assert!((adaptive.base_sigma - 2.5).abs() < 1e-6);
-        assert!((adaptive.max_sigma - 7.0).abs() < 1e-6);
         config.validate();
     }
 
@@ -1027,7 +805,6 @@ mod tests {
             CentroidMethod::MoffatFit { beta } if (beta - 2.5).abs() < 1e-6
         ));
         assert_eq!(config.local_background, LocalBackgroundMethod::LocalAnnulus);
-        assert!(config.refinement.adaptive_sigma().is_some());
         assert_eq!(config.deblend_n_thresholds, 32);
         assert!((config.min_snr - 15.0).abs() < 1e-6);
     }

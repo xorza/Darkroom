@@ -36,7 +36,7 @@ fn bench_tile_grid_6k_globular(b: ::bench::Bencher) {
     let mut grid = TileGrid::new_uninit(pixels.width(), pixels.height(), 64);
 
     b.bench(|| {
-        grid.compute(&pixels, None, 0, BENCH_SIGMA_CLIP_ITERATIONS, None);
+        grid.compute(&pixels, None, 0, BENCH_SIGMA_CLIP_ITERATIONS);
         black_box(&grid);
     });
 }
@@ -66,7 +66,7 @@ fn bench_tile_grid_6k_with_mask(b: ::bench::Bencher) {
     let mut grid = TileGrid::new_uninit(width, height, 64);
 
     b.bench(|| {
-        grid.compute(&pixels, Some(&mask), 100, BENCH_SIGMA_CLIP_ITERATIONS, None);
+        grid.compute(&pixels, Some(&mask), 100, BENCH_SIGMA_CLIP_ITERATIONS);
         black_box(&grid);
     });
 }

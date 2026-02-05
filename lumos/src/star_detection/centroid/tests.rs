@@ -339,7 +339,6 @@ fn make_uniform_background(
     BackgroundEstimate {
         background: bg_buf,
         noise: noise_buf,
-        adaptive_sigma: None,
     }
 }
 

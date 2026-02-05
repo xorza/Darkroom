@@ -3,7 +3,6 @@
 use crate::common::{BitBuffer2, Buffer2};
 use crate::math::median_f32_mut;
 use crate::math::sigma_clipped_median_mad;
-use crate::star_detection::config::{self, AdaptiveSigmaConfig};
 use rayon::prelude::*;
 
 // ============================================================================
@@ -22,9 +21,6 @@ const MAX_TILE_SAMPLES: usize = 1024;
 pub(crate) struct TileStats {
     pub median: f32,
     pub sigma: f32,
-    /// Adaptive detection threshold in sigma units.
-    /// Computed based on local contrast - higher in nebulous regions.
-    pub adaptive_sigma: f32,
 }
 
 /// Tile grid with precomputed centers for interpolation.
@@ -63,18 +59,11 @@ impl TileGrid {
         mask: Option<&BitBuffer2>,
         min_pixels: usize,
         sigma_clip_iterations: usize,
-        adaptive_config: Option<AdaptiveSigmaConfig>,
     ) {
         debug_assert_eq!(pixels.width(), self.width);
         debug_assert_eq!(pixels.height(), self.height);
 
-        self.fill_tile_stats(
-            pixels,
-            mask,
-            min_pixels,
-            sigma_clip_iterations,
-            adaptive_config,
-        );
+        self.fill_tile_stats(pixels, mask, min_pixels, sigma_clip_iterations);
         self.apply_median_filter();
     }
 
@@ -143,7 +132,6 @@ impl TileGrid {
         mask: Option<&BitBuffer2>,
         min_pixels: usize,
         sigma_clip_iterations: usize,
-        adaptive_config: Option<AdaptiveSigmaConfig>,
     ) {
         let tiles_x = self.tiles_x();
         let tile_size = self.tile_size;
@@ -180,7 +168,6 @@ impl TileGrid {
                         y_end,
                         min_pixels,
                         sigma_clip_iterations,
-                        adaptive_config,
                         values,
                         deviations,
                     );
@@ -208,7 +195,6 @@ impl TileGrid {
 
                 let mut medians = [0.0f32; 9];
                 let mut sigmas = [0.0f32; 9];
-                let mut adaptive_sigmas = [0.0f32; 9];
                 let mut count = 0;
 
                 for dy in -1i32..=1 {
@@ -220,7 +206,6 @@ impl TileGrid {
                             let neighbor = src[ny as usize * tiles_x + nx as usize];
                             medians[count] = neighbor.median;
                             sigmas[count] = neighbor.sigma;
-                            adaptive_sigmas[count] = neighbor.adaptive_sigma;
                             count += 1;
                         }
                     }
@@ -228,7 +213,6 @@ impl TileGrid {
 
                 out.median = median_f32_mut(&mut medians[..count]);
                 out.sigma = median_f32_mut(&mut sigmas[..count]);
-                out.adaptive_sigma = median_f32_mut(&mut adaptive_sigmas[..count]);
             });
 
         std::mem::swap(&mut self.stats, &mut dst);
@@ -250,7 +234,6 @@ fn compute_tile_stats(
     y_end: usize,
     min_pixels: usize,
     sigma_clip_iterations: usize,
-    adaptive_config: Option<AdaptiveSigmaConfig>,
     values: &mut Vec<f32>,
     deviations: &mut Vec<f32>,
 ) -> TileStats {
@@ -285,49 +268,7 @@ fn compute_tile_stats(
 
     let (median, sigma) = sigma_clipped_median_mad(values, deviations, 3.0, sigma_clip_iterations);
 
-    // Compute adaptive sigma based on local contrast
-    let adaptive_sigma = match adaptive_config {
-        Some(config) => compute_adaptive_sigma(values, median, sigma, config),
-        None => config::Config::default().sigma_threshold,
-    };
-
-    TileStats {
-        median,
-        sigma,
-        adaptive_sigma,
-    }
-}
-
-/// Compute adaptive detection sigma based on local tile contrast.
-///
-/// Uses the interquartile range (IQR) normalized by noise as a robust
-/// contrast measure. High contrast regions (nebulosity, gradients) get
-/// higher sigma thresholds to reduce false positives.
-fn compute_adaptive_sigma(
-    values: &[f32],
-    median: f32,
-    sigma: f32,
-    config: AdaptiveSigmaConfig,
-) -> f32 {
-    if values.len() < 4 || sigma < 1e-6 {
-        return config.base_sigma;
-    }
-
-    // Compute robust contrast metric using coefficient of variation (CV)
-    // CV = sigma / |median| measures relative variability
-    // For sky background, CV is typically very low (<0.01)
-    // For nebulous regions, CV is higher (0.05-0.2+)
-    let cv = sigma / median.abs().max(1e-6);
-
-    // Scale contrast to [0, 1] range
-    // cv of 0.1 = moderate nebulosity
-    // cv of 0.2+ = strong nebulosity
-    let contrast_normalized = (cv * config.contrast_factor * 10.0).min(1.0);
-
-    // Interpolate between base_sigma and max_sigma based on contrast
-    let adaptive = config.base_sigma + contrast_normalized * (config.max_sigma - config.base_sigma);
-
-    adaptive.clamp(config.base_sigma, config.max_sigma)
+    TileStats { median, sigma }
 }
 
 /// Collect all pixels from a tile region.
@@ -469,7 +410,7 @@ mod tests {
     /// Create a TileGrid with default test parameters (no mask, default sigma clip iterations)
     fn make_grid(pixels: &Buffer2<f32>, tile_size: usize) -> TileGrid {
         let mut grid = TileGrid::new_uninit(pixels.width(), pixels.height(), tile_size);
-        grid.compute(pixels, None, 0, TEST_SIGMA_CLIP_ITERATIONS, None);
+        grid.compute(pixels, None, 0, TEST_SIGMA_CLIP_ITERATIONS);
         grid
     }
 
@@ -481,13 +422,7 @@ mod tests {
         min_pixels: usize,
     ) -> TileGrid {
         let mut grid = TileGrid::new_uninit(pixels.width(), pixels.height(), tile_size);
-        grid.compute(
-            pixels,
-            Some(mask),
-            min_pixels,
-            TEST_SIGMA_CLIP_ITERATIONS,
-            None,
-        );
+        grid.compute(pixels, Some(mask), min_pixels, TEST_SIGMA_CLIP_ITERATIONS);
         grid
     }
 
@@ -690,7 +625,7 @@ mod tests {
         let grid_none = make_grid(&pixels, 32);
 
         let mut grid_empty = TileGrid::new_uninit(64, 64, 32);
-        grid_empty.compute(&pixels, None, 0, TEST_SIGMA_CLIP_ITERATIONS, None);
+        grid_empty.compute(&pixels, None, 0, TEST_SIGMA_CLIP_ITERATIONS);
 
         for ty in 0..grid_none.tiles_y() {
             for tx in 0..grid_none.tiles_x() {

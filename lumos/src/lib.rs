@@ -54,8 +54,6 @@ pub use calibration_masters::CalibrationMasters;
 // ============================================================================
 
 pub use star_detection::{
-    // Configuration
-    AdaptiveSigmaConfig,
     // Pipeline data structures
     BackgroundEstimate,
     BackgroundRefinement,
