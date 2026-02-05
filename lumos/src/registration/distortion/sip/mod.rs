@@ -29,9 +29,27 @@
 use arrayvec::ArrayVec;
 use glam::DVec2;
 
-// ---------------------------------------------------------------------------
-// Configuration
-// ---------------------------------------------------------------------------
+use crate::registration::transform::Transform;
+
+#[cfg(test)]
+mod tests;
+
+// ============================================================================
+// Constants
+// ============================================================================
+
+/// Maximum number of polynomial terms (order 5): (5+1)(5+2)/2 - 3 = 18.
+const MAX_TERMS: usize = 18;
+
+/// Maximum size of the A^T*A matrix (flattened).
+const MAX_ATA: usize = MAX_TERMS * MAX_TERMS;
+
+/// Maximum size of the LU augmented matrix: MAX_TERMS * (MAX_TERMS + 1).
+const MAX_AUG: usize = MAX_TERMS * (MAX_TERMS + 1);
+
+// ============================================================================
+// SipConfig
+// ============================================================================
 
 /// Configuration for SIP polynomial fitting.
 #[derive(Debug, Clone)]
@@ -39,6 +57,7 @@ pub struct SipConfig {
     /// Polynomial order (2-5). Order 2 handles barrel/pincushion,
     /// order 3 handles mustache distortion.
     pub order: usize,
+
     /// Reference point for the polynomial (typically image center).
     /// Coordinates are relative to this point before polynomial evaluation.
     /// If None, the centroid of the input points is used.
@@ -64,211 +83,9 @@ impl SipConfig {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Constants and polynomial helpers
-// ---------------------------------------------------------------------------
-
-/// Maximum number of polynomial terms (order 5): (5+1)(5+2)/2 - 3 = 18.
-const MAX_TERMS: usize = 18;
-/// Maximum size of the A^T*A matrix (flattened).
-const MAX_ATA: usize = MAX_TERMS * MAX_TERMS;
-/// Maximum size of the LU augmented matrix: MAX_TERMS * (MAX_TERMS + 1).
-const MAX_AUG: usize = MAX_TERMS * (MAX_TERMS + 1);
-
-/// Generate the list of (p, q) exponent pairs for a given order.
-/// Only includes terms where 2 ≤ p+q ≤ order.
-fn term_exponents(order: usize) -> ArrayVec<(usize, usize), MAX_TERMS> {
-    let mut terms = ArrayVec::new();
-    for total in 2..=order {
-        for p in (0..=total).rev() {
-            let q = total - p;
-            terms.push((p, q));
-        }
-    }
-    terms
-}
-
-/// Evaluate a monomial u^p * v^q.
-#[inline]
-fn monomial(u: f64, v: f64, p: usize, q: usize) -> f64 {
-    u.powi(p as i32) * v.powi(q as i32)
-}
-
-/// Evaluate a polynomial correction at a normalized point.
-fn evaluate_correction(
-    p: DVec2,
-    reference_point: DVec2,
-    norm_scale: f64,
-    terms: &[(usize, usize)],
-    coeffs_u: &[f64],
-    coeffs_v: &[f64],
-) -> DVec2 {
-    let u = (p.x - reference_point.x) / norm_scale;
-    let v = (p.y - reference_point.y) / norm_scale;
-
-    let mut du_norm = 0.0;
-    let mut dv_norm = 0.0;
-    for (i, &(exp_p, exp_q)) in terms.iter().enumerate() {
-        let basis = monomial(u, v, exp_p, exp_q);
-        du_norm += coeffs_u[i] * basis;
-        dv_norm += coeffs_v[i] * basis;
-    }
-
-    DVec2::new(du_norm * norm_scale, dv_norm * norm_scale)
-}
-
-/// Compute average distance from a set of points to a reference point.
-fn avg_distance(points: &[DVec2], ref_pt: DVec2) -> f64 {
-    let sum: f64 = points.iter().map(|p| (*p - ref_pt).length()).sum();
-    let avg = sum / points.len() as f64;
-    if avg > 1e-10 { avg } else { 1.0 }
-}
-
-// ---------------------------------------------------------------------------
-// Normal equations and solvers
-// ---------------------------------------------------------------------------
-
-/// Build normal equations A^T*A and A^T*b from point/target pairs.
-fn build_normal_equations(
-    points: &[DVec2],
-    targets_u: &[f64],
-    targets_v: &[f64],
-    ref_pt: DVec2,
-    norm_scale: f64,
-    terms: &[(usize, usize)],
-) -> ([f64; MAX_ATA], [f64; MAX_TERMS], [f64; MAX_TERMS]) {
-    let n_terms = terms.len();
-    let mut ata = [0.0; MAX_ATA];
-    let mut atb_u = [0.0; MAX_TERMS];
-    let mut atb_v = [0.0; MAX_TERMS];
-    let mut basis = [0.0; MAX_TERMS];
-
-    for (i, point) in points.iter().enumerate() {
-        let u = (point.x - ref_pt.x) / norm_scale;
-        let v = (point.y - ref_pt.y) / norm_scale;
-
-        for (j, &(p, q)) in terms.iter().enumerate() {
-            basis[j] = monomial(u, v, p, q);
-        }
-
-        for j in 0..n_terms {
-            for k in j..n_terms {
-                let val = basis[j] * basis[k];
-                ata[j * n_terms + k] += val;
-                if k != j {
-                    ata[k * n_terms + j] += val;
-                }
-            }
-            atb_u[j] += basis[j] * targets_u[i];
-            atb_v[j] += basis[j] * targets_v[i];
-        }
-    }
-
-    (ata, atb_u, atb_v)
-}
-
-/// Solve a symmetric positive definite system Ax = b using Cholesky decomposition.
-#[allow(clippy::needless_range_loop)]
-fn solve_symmetric_positive(a: &[f64], b: &[f64], n: usize) -> Option<ArrayVec<f64, MAX_TERMS>> {
-    let mut l = [0.0; MAX_ATA];
-
-    for i in 0..n {
-        for j in 0..=i {
-            let mut sum = 0.0;
-            for k in 0..j {
-                sum += l[i * n + k] * l[j * n + k];
-            }
-
-            if i == j {
-                let diag = a[i * n + i] - sum;
-                if diag <= 0.0 {
-                    return solve_lu(a, b, n);
-                }
-                l[i * n + j] = diag.sqrt();
-            } else {
-                l[i * n + j] = (a[i * n + j] - sum) / l[j * n + j];
-            }
-        }
-    }
-
-    let mut y = [0.0; MAX_TERMS];
-    for i in 0..n {
-        let mut sum = 0.0;
-        for j in 0..i {
-            sum += l[i * n + j] * y[j];
-        }
-        y[i] = (b[i] - sum) / l[i * n + i];
-    }
-
-    let mut x = [0.0; MAX_TERMS];
-    for i in (0..n).rev() {
-        let mut sum = 0.0;
-        for j in (i + 1)..n {
-            sum += l[j * n + i] * x[j];
-        }
-        x[i] = (y[i] - sum) / l[i * n + i];
-    }
-
-    Some(ArrayVec::try_from(&x[..n]).unwrap())
-}
-
-/// Fallback LU decomposition solver with partial pivoting.
-#[allow(clippy::needless_range_loop)]
-fn solve_lu(a: &[f64], b: &[f64], n: usize) -> Option<ArrayVec<f64, MAX_TERMS>> {
-    let mut aug = [0.0; MAX_AUG];
-    for i in 0..n {
-        for j in 0..n {
-            aug[i * (n + 1) + j] = a[i * n + j];
-        }
-        aug[i * (n + 1) + n] = b[i];
-    }
-
-    for col in 0..n {
-        let mut max_row = col;
-        let mut max_val = aug[col * (n + 1) + col].abs();
-        for row in (col + 1)..n {
-            let val = aug[row * (n + 1) + col].abs();
-            if val > max_val {
-                max_val = val;
-                max_row = row;
-            }
-        }
-
-        if max_val < 1e-12 {
-            return None;
-        }
-
-        if max_row != col {
-            for j in 0..=n {
-                let idx_a = col * (n + 1) + j;
-                let idx_b = max_row * (n + 1) + j;
-                aug.swap(idx_a, idx_b);
-            }
-        }
-
-        for row in (col + 1)..n {
-            let factor = aug[row * (n + 1) + col] / aug[col * (n + 1) + col];
-            for j in col..=n {
-                aug[row * (n + 1) + j] -= factor * aug[col * (n + 1) + j];
-            }
-        }
-    }
-
-    let mut x = [0.0; MAX_TERMS];
-    for i in (0..n).rev() {
-        x[i] = aug[i * (n + 1) + n];
-        for j in (i + 1)..n {
-            x[i] -= aug[i * (n + 1) + j] * x[j];
-        }
-        x[i] /= aug[i * (n + 1) + i];
-    }
-
-    Some(ArrayVec::try_from(&x[..n]).unwrap())
-}
-
-// ---------------------------------------------------------------------------
+// ============================================================================
 // SipPolynomial
-// ---------------------------------------------------------------------------
+// ============================================================================
 
 /// SIP polynomial distortion correction.
 ///
@@ -297,11 +114,10 @@ impl SipPolynomial {
     pub fn fit_from_transform(
         ref_points: &[DVec2],
         target_points: &[DVec2],
-        transform: &crate::registration::transform::Transform,
+        transform: &Transform,
         config: &SipConfig,
     ) -> Option<Self> {
         config.validate();
-
         assert_eq!(
             ref_points.len(),
             target_points.len(),
@@ -318,10 +134,9 @@ impl SipPolynomial {
             let sum: DVec2 = ref_points.iter().sum();
             sum / n as f64
         });
-
         let norm_scale = avg_distance(ref_points, ref_pt);
 
-        // Compute residuals: transform(ref) - target
+        // Compute residuals: transform(ref) - target (normalized)
         let targets_u: Vec<f64> = ref_points
             .iter()
             .zip(target_points.iter())
@@ -338,8 +153,8 @@ impl SipPolynomial {
         );
 
         let n_terms = terms.len();
-        let coeffs_u = solve_symmetric_positive(&ata, &atb_u, n_terms)?;
-        let coeffs_v = solve_symmetric_positive(&ata, &atb_v, n_terms)?;
+        let coeffs_u = solve_cholesky(&ata, &atb_u, n_terms)?;
+        let coeffs_v = solve_cholesky(&ata, &atb_v, n_terms)?;
 
         Some(Self {
             reference_point: ref_pt,
@@ -352,15 +167,7 @@ impl SipPolynomial {
 
     /// Apply the SIP correction to a point.
     pub fn correct(&self, p: DVec2) -> DVec2 {
-        let correction = evaluate_correction(
-            p,
-            self.reference_point,
-            self.norm_scale,
-            &self.terms,
-            &self.coeffs_u,
-            &self.coeffs_v,
-        );
-        p + correction
+        p + self.correction_at(p)
     }
 
     /// Compute residuals after applying SIP correction.
@@ -370,7 +177,7 @@ impl SipPolynomial {
         &self,
         ref_points: &[DVec2],
         target_points: &[DVec2],
-        transform: &crate::registration::transform::Transform,
+        transform: &Transform,
     ) -> Vec<f64> {
         ref_points
             .iter()
@@ -390,15 +197,7 @@ impl SipPolynomial {
         while y <= height as f64 {
             let mut x = 0.0;
             while x <= width as f64 {
-                let p = DVec2::new(x, y);
-                let correction = evaluate_correction(
-                    p,
-                    self.reference_point,
-                    self.norm_scale,
-                    &self.terms,
-                    &self.coeffs_u,
-                    &self.coeffs_v,
-                );
+                let correction = self.correction_at(DVec2::new(x, y));
                 max_mag = max_mag.max(correction.length());
                 x += grid_spacing;
             }
@@ -406,7 +205,205 @@ impl SipPolynomial {
         }
         max_mag
     }
+
+    /// Compute the correction vector at a point (without applying it).
+    fn correction_at(&self, p: DVec2) -> DVec2 {
+        let u = (p.x - self.reference_point.x) / self.norm_scale;
+        let v = (p.y - self.reference_point.y) / self.norm_scale;
+
+        let mut du = 0.0;
+        let mut dv = 0.0;
+        for (i, &(exp_p, exp_q)) in self.terms.iter().enumerate() {
+            let basis = monomial(u, v, exp_p, exp_q);
+            du += self.coeffs_u[i] * basis;
+            dv += self.coeffs_v[i] * basis;
+        }
+
+        DVec2::new(du * self.norm_scale, dv * self.norm_scale)
+    }
 }
 
-#[cfg(test)]
-mod tests;
+// ============================================================================
+// Polynomial helpers
+// ============================================================================
+
+/// Generate the list of (p, q) exponent pairs for a given order.
+/// Only includes terms where 2 ≤ p+q ≤ order.
+fn term_exponents(order: usize) -> ArrayVec<(usize, usize), MAX_TERMS> {
+    let mut terms = ArrayVec::new();
+    for total in 2..=order {
+        for p in (0..=total).rev() {
+            let q = total - p;
+            terms.push((p, q));
+        }
+    }
+    terms
+}
+
+/// Evaluate a monomial u^p * v^q.
+#[inline]
+fn monomial(u: f64, v: f64, p: usize, q: usize) -> f64 {
+    u.powi(p as i32) * v.powi(q as i32)
+}
+
+/// Compute average distance from a set of points to a reference point.
+fn avg_distance(points: &[DVec2], ref_pt: DVec2) -> f64 {
+    let sum: f64 = points.iter().map(|p| (*p - ref_pt).length()).sum();
+    let avg = sum / points.len() as f64;
+    if avg > 1e-10 { avg } else { 1.0 }
+}
+
+// ============================================================================
+// Linear algebra: normal equations and solvers
+// ============================================================================
+
+/// Build normal equations A^T*A and A^T*b from point/target pairs.
+fn build_normal_equations(
+    points: &[DVec2],
+    targets_u: &[f64],
+    targets_v: &[f64],
+    ref_pt: DVec2,
+    norm_scale: f64,
+    terms: &[(usize, usize)],
+) -> ([f64; MAX_ATA], [f64; MAX_TERMS], [f64; MAX_TERMS]) {
+    let n_terms = terms.len();
+    let mut ata = [0.0; MAX_ATA];
+    let mut atb_u = [0.0; MAX_TERMS];
+    let mut atb_v = [0.0; MAX_TERMS];
+    let mut basis = [0.0; MAX_TERMS];
+
+    for (i, point) in points.iter().enumerate() {
+        let u = (point.x - ref_pt.x) / norm_scale;
+        let v = (point.y - ref_pt.y) / norm_scale;
+
+        // Compute basis functions for this point
+        for (j, &(p, q)) in terms.iter().enumerate() {
+            basis[j] = monomial(u, v, p, q);
+        }
+
+        // Accumulate A^T*A and A^T*b
+        for j in 0..n_terms {
+            for k in j..n_terms {
+                let val = basis[j] * basis[k];
+                ata[j * n_terms + k] += val;
+                if k != j {
+                    ata[k * n_terms + j] += val;
+                }
+            }
+            atb_u[j] += basis[j] * targets_u[i];
+            atb_v[j] += basis[j] * targets_v[i];
+        }
+    }
+
+    (ata, atb_u, atb_v)
+}
+
+/// Solve a symmetric positive definite system Ax = b using Cholesky decomposition.
+/// Falls back to LU decomposition if the matrix is not positive definite.
+#[allow(clippy::needless_range_loop)]
+fn solve_cholesky(a: &[f64], b: &[f64], n: usize) -> Option<ArrayVec<f64, MAX_TERMS>> {
+    let mut l = [0.0; MAX_ATA];
+
+    // Cholesky factorization: A = L * L^T
+    for i in 0..n {
+        for j in 0..=i {
+            let mut sum = 0.0;
+            for k in 0..j {
+                sum += l[i * n + k] * l[j * n + k];
+            }
+
+            if i == j {
+                let diag = a[i * n + i] - sum;
+                if diag <= 0.0 {
+                    // Not positive definite, fall back to LU
+                    return solve_lu(a, b, n);
+                }
+                l[i * n + j] = diag.sqrt();
+            } else {
+                l[i * n + j] = (a[i * n + j] - sum) / l[j * n + j];
+            }
+        }
+    }
+
+    // Forward substitution: L * y = b
+    let mut y = [0.0; MAX_TERMS];
+    for i in 0..n {
+        let mut sum = 0.0;
+        for j in 0..i {
+            sum += l[i * n + j] * y[j];
+        }
+        y[i] = (b[i] - sum) / l[i * n + i];
+    }
+
+    // Back substitution: L^T * x = y
+    let mut x = [0.0; MAX_TERMS];
+    for i in (0..n).rev() {
+        let mut sum = 0.0;
+        for j in (i + 1)..n {
+            sum += l[j * n + i] * x[j];
+        }
+        x[i] = (y[i] - sum) / l[i * n + i];
+    }
+
+    Some(ArrayVec::try_from(&x[..n]).unwrap())
+}
+
+/// LU decomposition solver with partial pivoting (fallback for non-positive-definite matrices).
+#[allow(clippy::needless_range_loop)]
+fn solve_lu(a: &[f64], b: &[f64], n: usize) -> Option<ArrayVec<f64, MAX_TERMS>> {
+    // Build augmented matrix [A | b]
+    let mut aug = [0.0; MAX_AUG];
+    for i in 0..n {
+        for j in 0..n {
+            aug[i * (n + 1) + j] = a[i * n + j];
+        }
+        aug[i * (n + 1) + n] = b[i];
+    }
+
+    // Gaussian elimination with partial pivoting
+    for col in 0..n {
+        // Find pivot
+        let mut max_row = col;
+        let mut max_val = aug[col * (n + 1) + col].abs();
+        for row in (col + 1)..n {
+            let val = aug[row * (n + 1) + col].abs();
+            if val > max_val {
+                max_val = val;
+                max_row = row;
+            }
+        }
+
+        if max_val < 1e-12 {
+            return None; // Singular matrix
+        }
+
+        // Swap rows if needed
+        if max_row != col {
+            for j in 0..=n {
+                let idx_a = col * (n + 1) + j;
+                let idx_b = max_row * (n + 1) + j;
+                aug.swap(idx_a, idx_b);
+            }
+        }
+
+        // Eliminate below
+        for row in (col + 1)..n {
+            let factor = aug[row * (n + 1) + col] / aug[col * (n + 1) + col];
+            for j in col..=n {
+                aug[row * (n + 1) + j] -= factor * aug[col * (n + 1) + j];
+            }
+        }
+    }
+
+    // Back substitution
+    let mut x = [0.0; MAX_TERMS];
+    for i in (0..n).rev() {
+        x[i] = aug[i * (n + 1) + n];
+        for j in (i + 1)..n {
+            x[i] -= aug[i * (n + 1) + j] * x[j];
+        }
+        x[i] /= aug[i * (n + 1) + i];
+    }
+
+    Some(ArrayVec::try_from(&x[..n]).unwrap())
+}
