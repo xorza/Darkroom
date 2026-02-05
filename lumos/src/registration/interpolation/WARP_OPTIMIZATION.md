@@ -82,20 +82,14 @@ Replace LUT with fast polynomial approximation of the Lanczos kernel:
 - Trade accuracy for speed (acceptable for most use cases)
 - Use Chebyshev or minimax polynomial fit
 
-### 2. Reduce Border Checking (Low-Medium Impact)
+### ~~2. Row-Level Border Checking + Batch Transform~~ (TRIED 2025-02-05 - DISCARDED)
 
-**Current:** Bounds checking for every sample (36 checks per pixel for Lanczos3)
-**Proposed:**
-- Pre-compute interior region where no bounds checks needed
-- Use fast path for interior, slow path only for edges
-- Could save 10-20% by eliminating branches in hot loop
+Attempted combining:
+- Batch transform computation (row start + delta instead of per-pixel matrix multiply)
+- Row-level interior detection (unchecked access for interior rows)
 
-### 3. Batch Transform Computation (Low Impact)
-
-**Current:** `inverse.apply()` called per pixel
-**Proposed:** 
-- For affine transforms, compute row start + delta per pixel
-- Reduce matrix multiply overhead
+**Result:** No measurable impact. Benchmark results were within noise (~24ms before and after).
+Code complexity not justified for marginal gains. Discarded.
 
 ### 4. Consider Bilinear for Non-Critical Cases
 
@@ -110,8 +104,8 @@ Bilinear is 9x faster (25ms vs 2.9ms for 2k). For preview/interactive use, consi
 | ✅ LUT optimization | Done | -20-30% |
 | ❌ Separable filter | Not applicable (arbitrary transform) | N/A |
 | ❌ SIMD (AVX2) | Re-tested 2025-02-05, confirmed no benefit | 0% |
+| ❌ Row-level interior + batch transform | Tried 2025-02-05, no measurable impact | 0% |
 | ⏳ Polynomial approx | Next candidate | Est. 1.5-2x |
-| ⏳ Border check fast path | Possible | Est. 10-20% |
 
 **Current performance is likely near-optimal for Lanczos with arbitrary transforms.**
 
