@@ -25,23 +25,6 @@
 //! | 3     | 7             | + mustache distortion |
 //! | 4     | 12            | + higher-order |
 //! | 5     | 18            | Full SIP (HST-level) |
-//!
-//! # Usage
-//!
-//! ```ignore
-//! use glam::DVec2;
-//! use lumos::registration::distortion::{SipPolynomial, SipConfig};
-//!
-//! // After RANSAC finds homography + inliers, collect residual vectors
-//! let ref_points: Vec<DVec2> = /* inlier reference positions */;
-//! let residuals: Vec<DVec2> = /* transform(ref) - target for each inlier */;
-//!
-//! let config = SipConfig { order: 3, ..Default::default() };
-//! let sip = SipPolynomial::fit_residuals(&ref_points, &residuals, &config).unwrap();
-//!
-//! // Apply correction to a point before the homography
-//! let corrected = sip.correct(DVec2::new(100.0, 200.0));
-//! ```
 
 use arrayvec::ArrayVec;
 use glam::DVec2;
@@ -72,8 +55,7 @@ impl Default for SipConfig {
 }
 
 impl SipConfig {
-    /// Validate configuration.
-    pub fn validate(&self) {
+    fn validate(&self) {
         assert!(
             (2..=5).contains(&self.order),
             "SIP order must be 2-5, got {}",
@@ -93,12 +75,6 @@ const MAX_ATA: usize = MAX_TERMS * MAX_TERMS;
 /// Maximum size of the LU augmented matrix: MAX_TERMS * (MAX_TERMS + 1).
 const MAX_AUG: usize = MAX_TERMS * (MAX_TERMS + 1);
 
-/// Number of polynomial terms for a given order (excluding linear and constant).
-/// Terms satisfy: 2 ≤ p+q ≤ order, p ≥ 0, q ≥ 0
-fn num_terms(order: usize) -> usize {
-    (order + 1) * (order + 2) / 2 - 3
-}
-
 /// Generate the list of (p, q) exponent pairs for a given order.
 /// Only includes terms where 2 ≤ p+q ≤ order.
 fn term_exponents(order: usize) -> ArrayVec<(usize, usize), MAX_TERMS> {
@@ -109,7 +85,6 @@ fn term_exponents(order: usize) -> ArrayVec<(usize, usize), MAX_TERMS> {
             terms.push((p, q));
         }
     }
-    debug_assert_eq!(terms.len(), num_terms(order));
     terms
 }
 
@@ -120,8 +95,6 @@ fn monomial(u: f64, v: f64, p: usize, q: usize) -> f64 {
 }
 
 /// Evaluate a polynomial correction at a normalized point.
-///
-/// Shared by forward and inverse correction evaluation.
 fn evaluate_correction(
     p: DVec2,
     reference_point: DVec2,
@@ -156,9 +129,6 @@ fn avg_distance(points: &[DVec2], ref_pt: DVec2) -> f64 {
 // ---------------------------------------------------------------------------
 
 /// Build normal equations A^T*A and A^T*b from point/target pairs.
-///
-/// Points are normalized relative to `ref_pt` by `norm_scale`. Targets
-/// are already in normalized space (divided by norm_scale by the caller).
 fn build_normal_equations(
     points: &[DVec2],
     targets_u: &[f64],
@@ -198,8 +168,6 @@ fn build_normal_equations(
 }
 
 /// Solve a symmetric positive definite system Ax = b using Cholesky decomposition.
-///
-/// `a` is stored as a flat row-major n×n matrix. All storage is stack-allocated.
 #[allow(clippy::needless_range_loop)]
 fn solve_symmetric_positive(a: &[f64], b: &[f64], n: usize) -> Option<ArrayVec<f64, MAX_TERMS>> {
     let mut l = [0.0; MAX_ATA];
@@ -312,42 +280,35 @@ fn solve_lu(a: &[f64], b: &[f64], n: usize) -> Option<ArrayVec<f64, MAX_TERMS>> 
 /// stability. The coefficients are stored in normalized space.
 #[derive(Debug, Clone)]
 pub struct SipPolynomial {
-    order: usize,
     reference_point: DVec2,
     norm_scale: f64,
     terms: ArrayVec<(usize, usize), MAX_TERMS>,
     coeffs_u: ArrayVec<f64, MAX_TERMS>,
     coeffs_v: ArrayVec<f64, MAX_TERMS>,
-    inv_order: usize,
-    inv_norm_scale: f64,
-    inv_terms: ArrayVec<(usize, usize), MAX_TERMS>,
-    inv_coeffs_u: ArrayVec<f64, MAX_TERMS>,
-    inv_coeffs_v: ArrayVec<f64, MAX_TERMS>,
 }
 
 impl SipPolynomial {
-    // -- Construction -------------------------------------------------------
-
-    /// Fit SIP polynomial to residual vectors after a linear transform.
+    /// Fit SIP polynomial directly from matched point pairs and a transform.
     ///
-    /// Given matched inlier positions in the reference frame and their
-    /// residual errors after applying a homography, fits a polynomial
-    /// correction to minimize those residuals.
+    /// Given matched inlier positions and a homography, fits a polynomial
+    /// correction to minimize residual errors.
     ///
     /// Returns `None` if the system is underdetermined or singular.
-    pub fn fit_residuals(
+    pub fn fit_from_transform(
         ref_points: &[DVec2],
-        residuals: &[DVec2],
+        target_points: &[DVec2],
+        transform: &crate::registration::transform::Transform,
         config: &SipConfig,
     ) -> Option<Self> {
         config.validate();
-        let n = ref_points.len();
+
         assert_eq!(
-            n,
-            residuals.len(),
-            "ref_points and residuals must have the same length"
+            ref_points.len(),
+            target_points.len(),
+            "ref_points and target_points must have the same length"
         );
 
+        let n = ref_points.len();
         let terms = term_exponents(config.order);
         if n < terms.len() {
             return None;
@@ -360,8 +321,17 @@ impl SipPolynomial {
 
         let norm_scale = avg_distance(ref_points, ref_pt);
 
-        let targets_u: Vec<f64> = residuals.iter().map(|r| -r.x / norm_scale).collect();
-        let targets_v: Vec<f64> = residuals.iter().map(|r| -r.y / norm_scale).collect();
+        // Compute residuals: transform(ref) - target
+        let targets_u: Vec<f64> = ref_points
+            .iter()
+            .zip(target_points.iter())
+            .map(|(&r, &t)| -(transform.apply(r).x - t.x) / norm_scale)
+            .collect();
+        let targets_v: Vec<f64> = ref_points
+            .iter()
+            .zip(target_points.iter())
+            .map(|(&r, &t)| -(transform.apply(r).y - t.y) / norm_scale)
+            .collect();
 
         let (ata, atb_u, atb_v) = build_normal_equations(
             ref_points, &targets_u, &targets_v, ref_pt, norm_scale, &terms,
@@ -372,66 +342,25 @@ impl SipPolynomial {
         let coeffs_v = solve_symmetric_positive(&ata, &atb_v, n_terms)?;
 
         Some(Self {
-            order: config.order,
             reference_point: ref_pt,
             norm_scale,
             terms,
             coeffs_u,
             coeffs_v,
-            inv_order: 0,
-            inv_norm_scale: 0.0,
-            inv_terms: ArrayVec::new(),
-            inv_coeffs_u: ArrayVec::new(),
-            inv_coeffs_v: ArrayVec::new(),
         })
     }
 
-    /// Fit SIP polynomial directly from matched point pairs and a transform.
-    ///
-    /// Convenience method that computes residuals internally.
-    pub fn fit_from_transform(
-        ref_points: &[DVec2],
-        target_points: &[DVec2],
-        transform: &crate::registration::transform::Transform,
-        config: &SipConfig,
-    ) -> Option<Self> {
-        assert_eq!(
-            ref_points.len(),
-            target_points.len(),
-            "ref_points and target_points must have the same length"
-        );
-
-        let residuals: Vec<DVec2> = ref_points
-            .iter()
-            .zip(target_points.iter())
-            .map(|(&r, &t)| transform.apply(r) - t)
-            .collect();
-
-        Self::fit_residuals(ref_points, &residuals, config)
-    }
-
-    // -- Forward correction -------------------------------------------------
-
     /// Apply the SIP correction to a point.
     pub fn correct(&self, p: DVec2) -> DVec2 {
-        p + self.correction_at(p)
-    }
-
-    /// Apply the SIP correction to multiple points.
-    pub fn correct_points(&self, points: &[DVec2]) -> Vec<DVec2> {
-        points.iter().map(|&p| self.correct(p)).collect()
-    }
-
-    /// Evaluate just the correction vector (du, dv) at a point in pixel space.
-    pub fn correction_at(&self, p: DVec2) -> DVec2 {
-        evaluate_correction(
+        let correction = evaluate_correction(
             p,
             self.reference_point,
             self.norm_scale,
             &self.terms,
             &self.coeffs_u,
             &self.coeffs_v,
-        )
+        );
+        p + correction
     }
 
     /// Compute residuals after applying SIP correction.
@@ -461,153 +390,21 @@ impl SipPolynomial {
         while y <= height as f64 {
             let mut x = 0.0;
             while x <= width as f64 {
-                let c = self.correction_at(DVec2::new(x, y));
-                max_mag = max_mag.max(c.length());
+                let p = DVec2::new(x, y);
+                let correction = evaluate_correction(
+                    p,
+                    self.reference_point,
+                    self.norm_scale,
+                    &self.terms,
+                    &self.coeffs_u,
+                    &self.coeffs_v,
+                );
+                max_mag = max_mag.max(correction.length());
                 x += grid_spacing;
             }
             y += grid_spacing;
         }
         max_mag
-    }
-
-    // -- Inverse polynomial -------------------------------------------------
-
-    /// Compute the inverse polynomial by grid-sampling the forward correction.
-    ///
-    /// Lays a grid over `[0, width] × [0, height]`, applies the forward
-    /// correction to each grid point, then fits a polynomial from corrected
-    /// coordinates back to original coordinates. This follows the approach
-    /// used by astrometry.net and LSST.
-    ///
-    /// Returns the maximum round-trip error (pixels) over the grid:
-    /// `max |inverse_correct(correct(p)) - p|`.
-    pub fn compute_inverse(&mut self, width: usize, height: usize) -> f64 {
-        let inv_order = (self.order + 1).min(5);
-        let grid_side = 20 * (inv_order + 1);
-
-        let step_x = width as f64 / (grid_side - 1) as f64;
-        let step_y = height as f64 / (grid_side - 1) as f64;
-
-        let mut originals = Vec::with_capacity(grid_side * grid_side);
-        let mut corrected = Vec::with_capacity(grid_side * grid_side);
-
-        for iy in 0..grid_side {
-            for ix in 0..grid_side {
-                let p = DVec2::new(ix as f64 * step_x, iy as f64 * step_y);
-                let c = self.correct(p);
-                originals.push(p);
-                corrected.push(c);
-            }
-        }
-
-        let inv_norm_scale = avg_distance(&corrected, self.reference_point);
-        let inv_terms = term_exponents(inv_order);
-
-        let targets_u: Vec<f64> = originals
-            .iter()
-            .zip(corrected.iter())
-            .map(|(o, c)| (o.x - c.x) / inv_norm_scale)
-            .collect();
-        let targets_v: Vec<f64> = originals
-            .iter()
-            .zip(corrected.iter())
-            .map(|(o, c)| (o.y - c.y) / inv_norm_scale)
-            .collect();
-
-        let (ata, atb_u, atb_v) = build_normal_equations(
-            &corrected,
-            &targets_u,
-            &targets_v,
-            self.reference_point,
-            inv_norm_scale,
-            &inv_terms,
-        );
-
-        let n_terms = inv_terms.len();
-        let inv_coeffs_u = solve_symmetric_positive(&ata, &atb_u, n_terms)
-            .expect("inverse SIP solve failed: singular normal equations on grid data");
-        let inv_coeffs_v = solve_symmetric_positive(&ata, &atb_v, n_terms)
-            .expect("inverse SIP solve failed: singular normal equations on grid data");
-
-        self.inv_order = inv_order;
-        self.inv_norm_scale = inv_norm_scale;
-        self.inv_terms = inv_terms;
-        self.inv_coeffs_u = inv_coeffs_u;
-        self.inv_coeffs_v = inv_coeffs_v;
-
-        corrected
-            .iter()
-            .zip(originals.iter())
-            .map(|(&c, &o)| (self.inverse_correct(c) - o).length())
-            .fold(0.0f64, f64::max)
-    }
-
-    /// Whether the inverse polynomial has been computed.
-    pub fn has_inverse(&self) -> bool {
-        !self.inv_coeffs_u.is_empty()
-    }
-
-    /// Apply the inverse SIP correction to a single point.
-    ///
-    /// Given a corrected coordinate, returns the original pixel coordinate.
-    /// Panics if `compute_inverse` has not been called.
-    pub fn inverse_correct(&self, p: DVec2) -> DVec2 {
-        p + self.inverse_correction_at(p)
-    }
-
-    /// Evaluate the inverse correction vector at a point.
-    ///
-    /// Panics if `compute_inverse` has not been called.
-    pub fn inverse_correction_at(&self, p: DVec2) -> DVec2 {
-        assert!(
-            self.has_inverse(),
-            "inverse polynomial not computed; call compute_inverse first"
-        );
-        evaluate_correction(
-            p,
-            self.reference_point,
-            self.inv_norm_scale,
-            &self.inv_terms,
-            &self.inv_coeffs_u,
-            &self.inv_coeffs_v,
-        )
-    }
-
-    /// Apply inverse SIP correction to multiple points.
-    ///
-    /// Panics if `compute_inverse` has not been called.
-    pub fn inverse_correct_points(&self, points: &[DVec2]) -> Vec<DVec2> {
-        points.iter().map(|&p| self.inverse_correct(p)).collect()
-    }
-
-    // -- Accessors ----------------------------------------------------------
-
-    pub fn order(&self) -> usize {
-        self.order
-    }
-
-    pub fn reference_point(&self) -> DVec2 {
-        self.reference_point
-    }
-
-    pub fn coeffs_u(&self) -> &[f64] {
-        &self.coeffs_u
-    }
-
-    pub fn coeffs_v(&self) -> &[f64] {
-        &self.coeffs_v
-    }
-
-    pub fn inv_order(&self) -> usize {
-        self.inv_order
-    }
-
-    pub fn inv_coeffs_u(&self) -> &[f64] {
-        &self.inv_coeffs_u
-    }
-
-    pub fn inv_coeffs_v(&self) -> &[f64] {
-        &self.inv_coeffs_v
     }
 }
 
