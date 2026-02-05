@@ -288,7 +288,7 @@ impl SurveyBenchmark {
         tracing::info!("Detected {} stars in {} ms", result.stars.len(), runtime_ms);
 
         // Step 6: Compute metrics
-        let match_radius = config.psf.expected_fwhm * 2.0; // 2 FWHM matching radius
+        let match_radius = config.expected_fwhm * 2.0; // 2 FWHM matching radius
         let metrics = compute_detection_metrics(&ground_truth, &result.stars, match_radius);
 
         // Step 7: Compute magnitude-binned statistics
@@ -529,14 +529,14 @@ fn compute_magnitude_bins(
             }
         } else {
             // Fallback: manual matching for this bin
-            let match_radius_sq = match_radius * match_radius;
+            let match_radius_sq = (match_radius * match_radius) as f64;
             for (_, (gt, _)) in &stars_in_bin {
                 for det in detected {
-                    let dx = det.pos.x - gt.x;
-                    let dy = det.pos.y - gt.y;
+                    let dx = det.pos.x - gt.pos.x;
+                    let dy = det.pos.y - gt.pos.y;
                     if dx * dx + dy * dy < match_radius_sq {
                         detected_count += 1;
-                        centroid_errors.push((dx * dx + dy * dy).sqrt());
+                        centroid_errors.push((dx * dx + dy * dy).sqrt() as f32);
                         break;
                     }
                 }
@@ -590,8 +590,8 @@ fn compute_astrometric_residuals(
         let gt = &ground_truth[ti];
         let det = &detected[di];
 
-        let dx = det.pos.x - gt.x;
-        let dy = det.pos.y - gt.y;
+        let dx = (det.pos.x - gt.pos.x) as f32;
+        let dy = (det.pos.y - gt.pos.y) as f32;
 
         dx_values.push(dx);
         dy_values.push(dy);
@@ -1012,11 +1012,11 @@ mod tests {
 
         for (gt, mag) in bright_stars.iter().take(10) {
             // Find nearest detected star
-            let mut nearest_dist = f32::MAX;
+            let mut nearest_dist = f64::MAX;
             let mut nearest_det: Option<&Star> = None;
             for det in &result.stars {
-                let dx = det.pos.x - gt.x;
-                let dy = det.pos.y - gt.y;
+                let dx = det.pos.x - gt.pos.x;
+                let dy = det.pos.y - gt.pos.y;
                 let dist = (dx * dx + dy * dy).sqrt();
                 if dist < nearest_dist {
                     nearest_dist = dist;
@@ -1024,10 +1024,13 @@ mod tests {
                 }
             }
 
-            print!("Catalog: ({:7.1}, {:7.1}) mag={:.1}", gt.x, gt.y, mag);
+            print!(
+                "Catalog: ({:7.1}, {:7.1}) mag={:.1}",
+                gt.pos.x, gt.pos.y, mag
+            );
 
             if let Some(det) = nearest_det {
-                let matched = nearest_dist < match_radius;
+                let matched = nearest_dist < match_radius as f64;
                 println!(
                     " -> nearest: ({:7.1}, {:7.1}) dist={:5.1}px {}",
                     det.pos.x,
@@ -1040,8 +1043,8 @@ mod tests {
             }
 
             // Check pixel value at catalog position
-            let px = gt.x as usize;
-            let py = gt.y as usize;
+            let px = gt.pos.x as usize;
+            let py = gt.pos.y as usize;
             if px < width && py < height {
                 let idx = py * width + px;
                 println!(
@@ -1056,17 +1059,17 @@ mod tests {
         println!("Total detections: {}", result.stars.len());
 
         // Compute systematic offset
-        let mut dx_sum = 0.0f32;
-        let mut dy_sum = 0.0f32;
+        let mut dx_sum = 0.0f64;
+        let mut dy_sum = 0.0f64;
         let mut count = 0;
 
         for (gt, _) in &bright_stars {
-            let mut nearest_dist = f32::MAX;
-            let mut nearest_dx = 0.0f32;
-            let mut nearest_dy = 0.0f32;
+            let mut nearest_dist = f64::MAX;
+            let mut nearest_dx = 0.0f64;
+            let mut nearest_dy = 0.0f64;
             for det in &result.stars {
-                let dx = det.pos.x - gt.x;
-                let dy = det.pos.y - gt.y;
+                let dx = det.pos.x - gt.pos.x;
+                let dy = det.pos.y - gt.pos.y;
                 let dist = (dx * dx + dy * dy).sqrt();
                 if dist < nearest_dist {
                     nearest_dist = dist;
@@ -1085,8 +1088,8 @@ mod tests {
             println!(
                 "\nSystematic offset (mean of {} stars): dX = {:.1}, dY = {:.1}",
                 count,
-                dx_sum / count as f32,
-                dy_sum / count as f32
+                dx_sum / count as f64,
+                dy_sum / count as f64
             );
         }
     }

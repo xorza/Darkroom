@@ -203,7 +203,7 @@ impl AstrometryBenchmark {
         let runtime_ms = start.elapsed().as_millis() as u64;
 
         // Compute metrics
-        let match_radius = config.psf.expected_fwhm.max(4.0) * 2.0;
+        let match_radius = config.expected_fwhm.max(4.0) * 2.0;
         let metrics = compute_detection_metrics(&ground_truth, &result.stars, match_radius);
 
         // Save output images

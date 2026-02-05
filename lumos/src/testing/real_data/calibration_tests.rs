@@ -90,11 +90,11 @@ fn test_find_stars_on_light_frame() {
 
     for star in &stars {
         assert!(
-            star.pos.x >= 0.0 && star.pos.x < width as f32,
+            star.pos.x >= 0.0 && star.pos.x < width as f64,
             "Star X out of bounds"
         );
         assert!(
-            star.pos.y >= 0.0 && star.pos.y < height as f32,
+            star.pos.y >= 0.0 && star.pos.y < height as f64,
             "Star Y out of bounds"
         );
         assert!(star.flux > 0.0, "Star flux should be positive");
