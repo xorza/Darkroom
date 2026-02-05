@@ -231,7 +231,8 @@ fn test_register_two_calibrated_lights() {
 
     // Warp img2 to align with img1 and measure time
     let warp_start = std::time::Instant::now();
-    let warped = crate::registration::warp(img2, &result.transform, &reg_config);
+    let mut warped = img2.clone();
+    crate::registration::warp(&img2, &mut warped, &result.transform, &reg_config);
     let warp_elapsed = warp_start.elapsed();
 
     println!(

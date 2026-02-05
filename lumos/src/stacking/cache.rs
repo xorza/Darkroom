@@ -708,7 +708,7 @@ mod tests {
         // Verify each channel file contains the correct data
         for (c, cached_channel) in cached_frame.channels.iter().enumerate() {
             let read_channel: &[f32] = bytemuck::cast_slice(&cached_channel.mmap[..]);
-            let expected_channel = image.channel(c);
+            let expected_channel = image.channel(c).pixels();
             assert_eq!(read_channel, expected_channel);
         }
 

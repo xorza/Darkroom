@@ -7,7 +7,7 @@ mod sensor;
 pub use hot_pixels::HotPixelMap;
 
 use anyhow::Result;
-use arrayvec::ArrayVec;
+
 use imaginarium::{ChannelCount, ColorFormat, Image, ImageDesc};
 use std::path::Path;
 
@@ -132,10 +132,10 @@ pub struct AstroImageMetadata {
 /// by providing contiguous memory access per channel.
 #[derive(Debug, Clone)]
 pub enum PixelData {
-    /// Grayscale image (1 channel) - single Vec of width*height pixels
-    L(Vec<f32>),
-    /// RGB image (3 channels) - each Vec is width*height pixels
-    Rgb([Vec<f32>; 3]),
+    /// Grayscale image (1 channel) - single Buffer2 of width*height pixels
+    L(Buffer2<f32>),
+    /// RGB image (3 channels) - each Buffer2 is width*height pixels
+    Rgb([Buffer2<f32>; 3]),
 }
 
 /// Represents an astronomical image loaded from a FITS file.
@@ -271,18 +271,24 @@ impl AstroImage {
             pixels.len()
         );
 
+        let width = dimensions.width;
+        let height = dimensions.height;
         let pixel_data = if dimensions.is_grayscale() {
-            PixelData::L(pixels)
+            PixelData::L(Buffer2::new(width, height, pixels))
         } else {
             // Convert interleaved RGB to planar using parallel processing
-            let pixel_count = dimensions.width * dimensions.height;
+            let pixel_count = width * height;
             let mut r = vec![0.0f32; pixel_count];
             let mut g = vec![0.0f32; pixel_count];
             let mut b = vec![0.0f32; pixel_count];
 
             deinterleave_rgb(&pixels, &mut r, &mut g, &mut b);
 
-            PixelData::Rgb([r, g, b])
+            PixelData::Rgb([
+                Buffer2::new(width, height, r),
+                Buffer2::new(width, height, g),
+                Buffer2::new(width, height, b),
+            ])
         };
 
         AstroImage {
@@ -321,14 +327,24 @@ impl AstroImage {
             );
         }
 
+        let width = dimensions.width;
+        let height = dimensions.height;
         let pixel_data = if dimensions.is_grayscale() {
-            PixelData::L(channels.into_iter().next().unwrap())
+            PixelData::L(Buffer2::new(
+                width,
+                height,
+                channels.into_iter().next().unwrap(),
+            ))
         } else {
             let mut iter = channels.into_iter();
             let r = iter.next().unwrap();
             let g = iter.next().unwrap();
             let b = iter.next().unwrap();
-            PixelData::Rgb([r, g, b])
+            PixelData::Rgb([
+                Buffer2::new(width, height, r),
+                Buffer2::new(width, height, g),
+                Buffer2::new(width, height, b),
+            ])
         };
 
         AstroImage {
@@ -368,14 +384,14 @@ impl AstroImage {
         matches!(self.pixels, PixelData::Rgb(_))
     }
 
-    /// Get a single channel's pixel data as a slice.
+    /// Get a single channel as a Buffer2 reference.
     ///
     /// For grayscale images, channel 0 is the only valid channel.
     /// For RGB images, channels 0, 1, 2 correspond to R, G, B.
     ///
     /// # Panics
     /// Panics if channel index is out of bounds.
-    pub fn channel(&self, c: usize) -> &[f32] {
+    pub fn channel(&self, c: usize) -> &Buffer2<f32> {
         match &self.pixels {
             PixelData::L(data) => {
                 assert!(c == 0, "Grayscale image only has channel 0, got {}", c);
@@ -388,11 +404,11 @@ impl AstroImage {
         }
     }
 
-    /// Get a single channel's pixel data as a mutable slice.
+    /// Get a single channel as a mutable Buffer2 reference.
     ///
     /// # Panics
     /// Panics if channel index is out of bounds.
-    pub fn channel_mut(&mut self, c: usize) -> &mut [f32] {
+    pub fn channel_mut(&mut self, c: usize) -> &mut Buffer2<f32> {
         match &mut self.pixels {
             PixelData::L(data) => {
                 assert!(c == 0, "Grayscale image only has channel 0, got {}", c);
@@ -570,9 +586,7 @@ impl AstroImage {
     /// modifying or taking ownership of the original image.
     pub fn to_grayscale_buffer(&self) -> Buffer2<f32> {
         match &self.pixels {
-            PixelData::L(data) => {
-                Buffer2::new(self.dimensions.width, self.dimensions.height, data.clone())
-            }
+            PixelData::L(data) => data.clone(),
             PixelData::Rgb([r, g, b]) => {
                 let pixel_count = self.dimensions.width * self.dimensions.height;
                 let mut gray = vec![0.0f32; pixel_count];
@@ -621,10 +635,12 @@ impl AstroImage {
             _ => unreachable!(),
         }
 
+        let width = self.dimensions.width;
+        let height = self.dimensions.height;
         AstroImage {
             metadata: self.metadata,
-            dimensions: ImageDimensions::new(self.dimensions.width, self.dimensions.height, 1),
-            pixels: PixelData::L(gray),
+            dimensions: ImageDimensions::new(width, height, 1),
+            pixels: PixelData::L(Buffer2::new(width, height, gray)),
         }
     }
 
@@ -687,7 +703,7 @@ impl AstroImage {
     pub fn into_interleaved_pixels(self) -> Vec<f32> {
         let pixel_count = self.dimensions.width * self.dimensions.height;
         match self.pixels {
-            PixelData::L(data) => data,
+            PixelData::L(data) => data.into_vec(),
             PixelData::Rgb([r, g, b]) => {
                 let mut interleaved = vec![0.0f32; pixel_count * 3];
                 interleave_rgb(&r, &g, &b, &mut interleaved);
@@ -703,87 +719,6 @@ impl AstroImage {
     pub fn into_pixels(self) -> PixelData {
         self.pixels
     }
-
-    /// Deconstruct the image into channel buffers.
-    ///
-    /// Returns metadata, dimensions, and an ArrayVec containing 1 buffer for grayscale
-    /// or 3 buffers for RGB. This is useful for operations that need to process channels
-    /// independently while reusing the buffer memory.
-    pub fn into_channel_buffers(
-        self,
-    ) -> (
-        AstroImageMetadata,
-        ImageDimensions,
-        ArrayVec<Buffer2<f32>, 3>,
-    ) {
-        let width = self.dimensions.width;
-        let height = self.dimensions.height;
-        let mut buffers = ArrayVec::new();
-
-        match self.pixels {
-            PixelData::L(data) => {
-                buffers.push(Buffer2::new(width, height, data));
-            }
-            PixelData::Rgb([r, g, b]) => {
-                buffers.push(Buffer2::new(width, height, r));
-                buffers.push(Buffer2::new(width, height, g));
-                buffers.push(Buffer2::new(width, height, b));
-            }
-        }
-
-        (self.metadata, self.dimensions, buffers)
-    }
-
-    /// Reconstruct an AstroImage from channel buffers.
-    ///
-    /// Takes ownership of the buffer data to avoid copies.
-    /// For grayscale, expects 1 buffer. For RGB, expects 3 buffers.
-    ///
-    /// # Panics
-    /// Panics if buffer count doesn't match dimensions or buffer sizes are wrong.
-    pub fn from_channel_buffers(
-        metadata: AstroImageMetadata,
-        dimensions: ImageDimensions,
-        buffers: ArrayVec<Buffer2<f32>, 3>,
-    ) -> Self {
-        let expected_pixels = dimensions.width * dimensions.height;
-
-        assert_eq!(
-            buffers.len(),
-            dimensions.channels,
-            "Buffer count {} doesn't match channel count {}",
-            buffers.len(),
-            dimensions.channels
-        );
-
-        for (i, buf) in buffers.iter().enumerate() {
-            assert_eq!(
-                buf.len(),
-                expected_pixels,
-                "Buffer {} has {} pixels, expected {}",
-                i,
-                buf.len(),
-                expected_pixels
-            );
-        }
-
-        let pixels = if dimensions.is_grayscale() {
-            let mut iter = buffers.into_iter();
-            PixelData::L(iter.next().unwrap().into_vec())
-        } else {
-            let mut iter = buffers.into_iter();
-            let r = iter.next().unwrap().into_vec();
-            let g = iter.next().unwrap().into_vec();
-            let b = iter.next().unwrap().into_vec();
-            PixelData::Rgb([r, g, b])
-        };
-
-        AstroImage {
-            metadata,
-            dimensions,
-            pixels,
-        }
-    }
 }
 
 impl From<AstroImage> for Image {
@@ -792,7 +727,7 @@ impl From<AstroImage> for Image {
         let height = astro.dimensions.height;
 
         let (color_format, interleaved) = match astro.pixels {
-            PixelData::L(data) => (ColorFormat::L_F32, data),
+            PixelData::L(data) => (ColorFormat::L_F32, data.into_vec()),
             PixelData::Rgb([r, g, b]) => {
                 let pixel_count = width * height;
                 let mut interleaved = vec![0.0f32; pixel_count * 3];
@@ -848,7 +783,7 @@ impl From<Image> for AstroImage {
                     row.copy_from_slice(src_row);
                 });
             }
-            PixelData::L(data)
+            PixelData::L(Buffer2::new(width, height, data))
         } else {
             let pixel_count = width * height;
             let mut r = vec![0.0f32; pixel_count];
@@ -876,7 +811,11 @@ impl From<Image> for AstroImage {
                         }
                     });
             }
-            PixelData::Rgb([r, g, b])
+            PixelData::Rgb([
+                Buffer2::new(width, height, r),
+                Buffer2::new(width, height, g),
+                Buffer2::new(width, height, b),
+            ])
         };
 
         let dimensions = ImageDimensions::new(
@@ -1019,7 +958,7 @@ mod tests {
         assert_eq!(astro.channels(), 1);
 
         // Verify pixel values
-        assert_eq!(astro.channel(0), &pixels[..]);
+        assert_eq!(astro.channel(0).pixels(), &pixels[..]);
     }
 
     #[test]
@@ -1100,7 +1039,7 @@ mod tests {
 
         masters.calibrate(&mut light);
 
-        assert_eq!(light.channel(0), &[95.0, 195.0, 145.0, 245.0]);
+        assert_eq!(light.channel(0).pixels(), &[95.0, 195.0, 145.0, 245.0]);
     }
 
     #[test]
@@ -1124,7 +1063,7 @@ mod tests {
 
         masters.calibrate(&mut light);
 
-        assert_eq!(light.channel(0), &[90.0, 180.0, 135.0, 225.0]);
+        assert_eq!(light.channel(0).pixels(), &[90.0, 180.0, 135.0, 225.0]);
     }
 
     #[test]
@@ -1606,7 +1545,7 @@ mod tests {
         let result = gray.into_grayscale();
 
         assert!(result.is_grayscale());
-        assert_eq!(result.channel(0), &[1.0, 2.0, 3.0, 4.0]);
+        assert_eq!(result.channel(0).pixels(), &[1.0, 2.0, 3.0, 4.0]);
     }
 
     #[test]
@@ -1615,7 +1554,7 @@ mod tests {
         let image = AstroImage::from_planar_channels(ImageDimensions::new(2, 2, 1), channels);
 
         assert!(image.is_grayscale());
-        assert_eq!(image.channel(0), &[1.0, 2.0, 3.0, 4.0]);
+        assert_eq!(image.channel(0).pixels(), &[1.0, 2.0, 3.0, 4.0]);
     }
 
     #[test]
@@ -1626,9 +1565,9 @@ mod tests {
         let image = AstroImage::from_planar_channels(ImageDimensions::new(2, 1, 3), vec![r, g, b]);
 
         assert!(image.is_rgb());
-        assert_eq!(image.channel(0), &[1.0, 2.0]); // R
-        assert_eq!(image.channel(1), &[3.0, 4.0]); // G
-        assert_eq!(image.channel(2), &[5.0, 6.0]); // B
+        assert_eq!(image.channel(0).pixels(), &[1.0, 2.0]); // R
+        assert_eq!(image.channel(1).pixels(), &[3.0, 4.0]); // G
+        assert_eq!(image.channel(2).pixels(), &[5.0, 6.0]); // B
     }
 
     #[test]
@@ -1639,7 +1578,7 @@ mod tests {
         image.channel_mut(0)[0] = 10.0;
         image.channel_mut(0)[3] = 40.0;
 
-        assert_eq!(image.channel(0), &[10.0, 2.0, 3.0, 40.0]);
+        assert_eq!(image.channel(0).pixels(), &[10.0, 2.0, 3.0, 40.0]);
     }
 
     #[test]
@@ -1717,9 +1656,9 @@ mod tests {
             }
         });
 
-        assert_eq!(image.channel(0), &[-9.0, -36.0]); // R: 1-10, 4-40
-        assert_eq!(image.channel(1), &[-18.0, -45.0]); // G: 2-20, 5-50
-        assert_eq!(image.channel(2), &[-27.0, -54.0]); // B: 3-30, 6-60
+        assert_eq!(image.channel(0).pixels(), &[-9.0, -36.0]); // R: 1-10, 4-40
+        assert_eq!(image.channel(1).pixels(), &[-18.0, -45.0]); // G: 2-20, 5-50
+        assert_eq!(image.channel(2).pixels(), &[-27.0, -54.0]); // B: 3-30, 6-60
     }
 
     #[test]
