@@ -34,7 +34,7 @@ fn test_outlier_rejection_spurious_stars() {
         transform_type: TransformType::Translation,
         min_stars: 6,
         min_matches: 4,
-        inlier_threshold: 3.0,
+        max_sigma: 1.0,
         ..Default::default()
     };
 
@@ -78,7 +78,7 @@ fn test_outlier_rejection_missing_stars() {
         transform_type: TransformType::Translation,
         min_stars: 6,
         min_matches: 4,
-        inlier_threshold: 3.0,
+        max_sigma: 1.0,
         ..Default::default()
     };
 
@@ -118,7 +118,7 @@ fn test_outlier_rejection_combined() {
         transform_type: TransformType::Translation,
         min_stars: 6,
         min_matches: 4,
-        inlier_threshold: 3.0,
+        max_sigma: 1.0,
         ..Default::default()
     };
 
@@ -158,7 +158,7 @@ fn test_outlier_rejection_20_percent_spurious() {
         transform_type: TransformType::Euclidean,
         min_stars: 6,
         min_matches: 4,
-        inlier_threshold: 3.0,
+        max_sigma: 1.0,
         ..Default::default()
     };
 
@@ -212,7 +212,7 @@ fn test_partial_overlap_75_percent() {
         transform_type: TransformType::Translation,
         min_stars: 6,
         min_matches: 4,
-        inlier_threshold: 3.0,
+        max_sigma: 1.0,
         ..Default::default()
     };
 
@@ -263,7 +263,7 @@ fn test_partial_overlap_50_percent() {
         transform_type: TransformType::Translation,
         min_stars: 6,
         min_matches: 4,
-        inlier_threshold: 3.0,
+        max_sigma: 1.0,
         ..Default::default()
     };
 
@@ -308,7 +308,7 @@ fn test_partial_overlap_diagonal() {
         transform_type: TransformType::Translation,
         min_stars: 6,
         min_matches: 4,
-        inlier_threshold: 3.0,
+        max_sigma: 1.0,
         ..Default::default()
     };
 
@@ -350,7 +350,7 @@ fn test_subpixel_translation_quarter_pixel() {
         transform_type: TransformType::Translation,
         min_stars: 6,
         min_matches: 4,
-        inlier_threshold: 1.0,
+        max_sigma: 0.33,
         ..Default::default()
     };
 
@@ -390,7 +390,7 @@ fn test_subpixel_translation_half_pixel() {
         transform_type: TransformType::Translation,
         min_stars: 6,
         min_matches: 4,
-        inlier_threshold: 1.0,
+        max_sigma: 0.33,
         ..Default::default()
     };
 
@@ -428,7 +428,7 @@ fn test_subpixel_rotation() {
         transform_type: TransformType::Euclidean,
         min_stars: 6,
         min_matches: 4,
-        inlier_threshold: 1.0,
+        max_sigma: 0.33,
         ..Default::default()
     };
 
@@ -460,7 +460,7 @@ fn test_subpixel_scale() {
         transform_type: TransformType::Similarity,
         min_stars: 6,
         min_matches: 4,
-        inlier_threshold: 1.0,
+        max_sigma: 0.33,
         ..Default::default()
     };
 
@@ -498,7 +498,7 @@ fn test_minimum_stars_translation() {
         transform_type: TransformType::Translation,
         min_stars: 4,
         min_matches: 3,
-        inlier_threshold: 2.0,
+        max_sigma: 0.67,
         ..Default::default()
     };
 
@@ -539,7 +539,7 @@ fn test_minimum_stars_similarity() {
         transform_type: TransformType::Similarity,
         min_stars: 4,
         min_matches: 3,
-        inlier_threshold: 2.0,
+        max_sigma: 0.67,
         ..Default::default()
     };
 
@@ -607,7 +607,7 @@ fn test_stress_transform_noise_outliers() {
         transform_type: TransformType::Euclidean,
         min_stars: 6,
         min_matches: 4,
-        inlier_threshold: 3.0,
+        max_sigma: 1.0,
         ..Default::default()
     };
 
@@ -678,7 +678,7 @@ fn test_stress_partial_overlap_with_noise() {
         transform_type: TransformType::Euclidean,
         min_stars: 6,
         min_matches: 4,
-        inlier_threshold: 3.0,
+        max_sigma: 1.0,
         ..Default::default()
     };
 
@@ -710,7 +710,7 @@ fn test_stress_dense_field_large_transform() {
         transform_type: TransformType::Similarity,
         min_stars: 10,
         min_matches: 8,
-        inlier_threshold: 3.0,
+        max_sigma: 1.0,
         ..Default::default()
     };
 
@@ -757,7 +757,7 @@ fn test_large_rotation_45_degrees() {
         transform_type: TransformType::Euclidean,
         min_stars: 6,
         min_matches: 4,
-        inlier_threshold: 3.0,
+        max_sigma: 1.0,
         max_rotation: None,
         scale_range: None,
         ..Default::default()
@@ -810,7 +810,7 @@ fn test_large_rotation_90_degrees() {
         transform_type: TransformType::Euclidean,
         min_stars: 6,
         min_matches: 4,
-        inlier_threshold: 3.0,
+        max_sigma: 1.0,
         max_rotation: None,
         scale_range: None,
         ..Default::default()
@@ -860,7 +860,7 @@ fn test_large_rotation_negative_45_degrees() {
         transform_type: TransformType::Euclidean,
         min_stars: 6,
         min_matches: 4,
-        inlier_threshold: 3.0,
+        max_sigma: 1.0,
         max_rotation: None,
         scale_range: None,
         ..Default::default()
@@ -900,7 +900,7 @@ fn test_extreme_scale_2x() {
         transform_type: TransformType::Similarity,
         min_stars: 6,
         min_matches: 4,
-        inlier_threshold: 5.0, // Allow more residual for large scale
+        max_sigma: 1.67, // Allow more residual for large scale
         max_rotation: None,
         scale_range: None,
         ..Default::default()
@@ -950,7 +950,7 @@ fn test_extreme_scale_half() {
         transform_type: TransformType::Similarity,
         min_stars: 6,
         min_matches: 4,
-        inlier_threshold: 5.0,
+        max_sigma: 1.67,
         max_rotation: None,
         scale_range: None,
         ..Default::default()
@@ -1003,7 +1003,7 @@ fn test_extreme_scale_with_rotation() {
         transform_type: TransformType::Similarity,
         min_stars: 6,
         min_matches: 4,
-        inlier_threshold: 5.0,
+        max_sigma: 1.67,
         max_rotation: None,
         scale_range: None,
         ..Default::default()
@@ -1067,7 +1067,7 @@ fn test_affine_with_outliers() {
         transform_type: TransformType::Affine,
         min_stars: 6,
         min_matches: 4,
-        inlier_threshold: 5.0,
+        max_sigma: 1.67,
         ..Default::default()
     };
 
@@ -1114,7 +1114,7 @@ fn test_affine_with_noise_and_missing() {
         transform_type: TransformType::Affine,
         min_stars: 6,
         min_matches: 4,
-        inlier_threshold: 5.0,
+        max_sigma: 1.67,
         ..Default::default()
     };
 
@@ -1169,7 +1169,7 @@ fn test_homography_with_outliers() {
         transform_type: TransformType::Homography,
         min_stars: 8,
         min_matches: 6,
-        inlier_threshold: 5.0,
+        max_sigma: 1.67,
         ..Default::default()
     };
 
@@ -1231,7 +1231,7 @@ fn test_homography_with_noise_and_partial_overlap() {
         transform_type: TransformType::Homography,
         min_stars: 8,
         min_matches: 6,
-        inlier_threshold: 5.0,
+        max_sigma: 1.67,
         ..Default::default()
     };
 

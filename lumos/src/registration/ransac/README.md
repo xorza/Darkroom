@@ -82,7 +82,7 @@ When a new best model is found:
 | Parameter | Default | Rationale |
 |-----------|---------|-----------|
 | `max_iterations` | 2000 | Matches OpenCV/PixInsight |
-| `inlier_threshold` | 2.0 px | Tighter than OpenCV (3.0); matches Astroalign for sub-pixel |
+| `max_sigma` | 1.0 px | MAGSAC++ noise scale (~3px effective threshold) |
 | `confidence` | 0.995 | OpenCV default; avoids premature termination |
 | `min_inlier_ratio` | 0.3 | Handles partial overlap / noisy matches |
 | `use_local_optimization` | true | LO-RANSAC (Chum et al., 2003) |

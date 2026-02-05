@@ -51,7 +51,7 @@ impl InterpolationMethod {
 ///
 /// // Custom config
 /// let config = Config {
-///     inlier_threshold: 3.0,
+///     max_sigma: 1.0, // ~3px effective threshold
 ///     ..Config::default()
 /// };
 /// let result = register(&ref_stars, &target_stars, &config)?;
@@ -83,8 +83,10 @@ pub struct Config {
     // == RANSAC ==
     /// RANSAC iterations. Default: 2000.
     pub ransac_iterations: usize,
-    /// Inlier distance threshold in pixels. Default: 2.0.
-    pub inlier_threshold: f64,
+    /// Maximum noise scale (σ_max) in pixels for MAGSAC++ scoring.
+    /// Points with residuals > ~3·max_sigma are treated as outliers.
+    /// Default: 1.0 (~3px effective threshold).
+    pub max_sigma: f64,
     /// Target confidence for early termination. Default: 0.995.
     pub confidence: f64,
     /// Minimum inlier ratio. Default: 0.3.
@@ -137,7 +139,7 @@ impl Default for Config {
 
             // RANSAC
             ransac_iterations: 2000,
-            inlier_threshold: 2.0,
+            max_sigma: 1.0, // ~3px effective threshold
             confidence: 0.995,
             min_inlier_ratio: 0.3,
             seed: None,
@@ -248,9 +250,9 @@ impl Config {
             self.ransac_iterations
         );
         assert!(
-            self.inlier_threshold > 0.0,
-            "inlier_threshold must be positive, got {}",
-            self.inlier_threshold
+            self.max_sigma > 0.0,
+            "max_sigma must be positive, got {}",
+            self.max_sigma
         );
         assert!(
             (0.0..=1.0).contains(&self.confidence),
@@ -311,7 +313,7 @@ mod tests {
         assert_eq!(config.min_votes, 3);
         assert!(config.check_orientation);
         assert_eq!(config.ransac_iterations, 2000);
-        assert!((config.inlier_threshold - 2.0).abs() < 1e-10);
+        assert!((config.max_sigma - 1.0).abs() < 1e-10);
         assert!((config.confidence - 0.995).abs() < 1e-10);
         assert!((config.min_inlier_ratio - 0.3).abs() < 1e-10);
         assert!(config.seed.is_none());
@@ -373,12 +375,12 @@ mod tests {
     fn test_config_custom() {
         let config = Config {
             transform_type: TransformType::Similarity,
-            inlier_threshold: 3.0,
+            max_sigma: 1.5,
             ransac_iterations: 1000,
             ..Config::default()
         };
         assert_eq!(config.transform_type, TransformType::Similarity);
-        assert!((config.inlier_threshold - 3.0).abs() < 1e-10);
+        assert!((config.max_sigma - 1.5).abs() < 1e-10);
         assert_eq!(config.ransac_iterations, 1000);
         config.validate();
     }
@@ -404,10 +406,10 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "inlier_threshold must be positive")]
+    #[should_panic(expected = "max_sigma must be positive")]
     fn test_config_invalid_threshold() {
         let config = Config {
-            inlier_threshold: 0.0,
+            max_sigma: 0.0,
             ..Config::default()
         };
         config.validate();

@@ -116,7 +116,7 @@ Standard RANSAC assumes that a model estimated from an outlier-free minimal samp
 | Invariant lookup | K-d tree | K-d tree | Hash table | K-d tree |
 | Tolerance | 1% | ~5% | configurable | 1% |
 | Orientation check | Yes | No | No | Yes |
-| RANSAC scoring | MSAC (weighted) | Inlier count | OpenCV | MSAC |
+| RANSAC scoring | MAGSAC++ | Inlier count | OpenCV | MSAC |
 | Local optimization | LO-RANSAC | No | No | Yes |
 | Progressive sampling | 3-phase PROSAC-style | No | No | Yes |
 | SIMD acceleration | AVX2/SSE/NEON | No | No | Yes |
@@ -129,7 +129,6 @@ Standard RANSAC assumes that a model estimated from an outlier-free minimal samp
 - SIMD-accelerated inlier counting and interpolation
 
 **Gaps vs. alternatives:**
-- No automatic threshold adaptation (MAGSAC++), unlike OpenCV USAC
 - SIP reference point not FITS-compatible (uses centroid, not CRPIX)
 
 ---
@@ -417,7 +416,7 @@ registration/
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `max_iterations` | 2000 | Maximum RANSAC iterations |
-| `inlier_threshold` | 2.0 | Distance threshold (pixels) for inlier classification |
+| `max_sigma` | 1.0 | Maximum noise scale for MAGSAC++ scoring (~3px effective threshold) |
 | `confidence` | 0.995 | Target confidence for adaptive termination |
 | `min_inlier_ratio` | 0.3 | Minimum inlier fraction to accept model |
 | `seed` | None | Random seed for deterministic behavior |
@@ -461,15 +460,9 @@ Prioritized by impact.
 
 #### 1. MAGSAC++ Threshold-Free Scoring
 
-**Problem:** The fixed `inlier_threshold` (default 2.0px) requires manual tuning for different seeing conditions. A threshold optimal for 1.3px FWHM fails for 2-3px FWHM.
+~~**Problem:** The fixed `inlier_threshold` (default 2.0px) requires manual tuning for different seeing conditions. A threshold optimal for 1.3px FWHM fails for 2-3px FWHM.~~
 
-**Solution:** Replace MSAC scoring with MAGSAC++ (Barath & Matas 2020). MAGSAC++ marginalizes likelihood over a range of noise scales, automatically adapting to the data without requiring threshold tuning.
-
-The `inlier_threshold` parameter becomes `max_sigma` (maximum noise scale). Existing code using `inlier_threshold: 2.0` would use `max_sigma: 2.0 / 3.0 ≈ 0.7` (since the effective threshold is ~3σ).
-
-**Effort:** ~200-300 lines. **Benefit:** Eliminates threshold sensitivity; robust across varying seeing conditions.
-
-**Design document:** See [`ransac/MAGSAC_DESIGN.md`](ransac/MAGSAC_DESIGN.md) for detailed implementation plan.
+**IMPLEMENTED:** MAGSAC++ scoring replaces MSAC. The `max_sigma` parameter controls the noise scale for marginalization. The effective threshold is approximately `3.03 * max_sigma` (based on the 99% χ² quantile for 2 degrees of freedom).
 
 **Reference:** Barath, D., et al. (2020). "MAGSAC++, a fast, reliable and accurate robust estimator." CVPR 2020.
 
@@ -492,17 +485,17 @@ pub struct SipConfig {
 
 ### Medium Priority
 
-#### 3. FWHM-Aware Threshold Selection
+#### 3. FWHM-Aware Sigma Selection
 
-**Problem:** Optimal `inlier_threshold` depends on star FWHM/seeing, but users must manually adjust it.
+**Problem:** Optimal `max_sigma` depends on star FWHM/seeing, but users must manually adjust it.
 
-**Solution:** Auto-scale threshold based on detected star FWHM:
+**Solution:** Auto-scale max_sigma based on detected star FWHM:
 
 ```rust
 pub fn from_fwhm(fwhm_pixels: f64) -> Self {
-    let threshold = (fwhm_pixels * 1.5).max(1.5);  // 1.5-2.0 × FWHM
+    let max_sigma = (fwhm_pixels * 0.5).max(0.5);  // ~0.5 × FWHM
     Self {
-        inlier_threshold: threshold,
+        max_sigma,
         ..Self::default()
     }
 }

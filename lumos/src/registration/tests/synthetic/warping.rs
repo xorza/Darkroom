@@ -462,7 +462,7 @@ fn test_warp_with_detected_transform() {
         transform_type: TransformType::Euclidean,
         min_stars: 6,
         min_matches: 4,
-        inlier_threshold: 3.0,
+        max_sigma: 1.0,
         ..Default::default()
     };
 

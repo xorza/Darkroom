@@ -276,7 +276,7 @@ fn test_ransac_with_outliers() {
 
     let config = RansacParams {
         seed: Some(42),
-        inlier_threshold: 1.0,
+        max_sigma: 0.33,
         ..Default::default()
     };
     let estimator = RansacEstimator::new(config);
@@ -409,7 +409,7 @@ fn test_ransac_homography() {
 
     let config = RansacParams {
         seed: Some(42),
-        inlier_threshold: 1.0,
+        max_sigma: 0.33,
         ..Default::default()
     };
     let estimator = RansacEstimator::new(config);
@@ -450,7 +450,7 @@ fn test_lo_ransac_improves_inlier_count() {
         seed: Some(123),
         use_local_optimization: true,
         lo_max_iterations: 5,
-        inlier_threshold: 1.0,
+        max_sigma: 0.33,
         max_rotation: None,
         scale_range: None,
         ..Default::default()
@@ -469,7 +469,7 @@ fn test_lo_ransac_improves_inlier_count() {
     let config_without_lo = RansacParams {
         seed: Some(123),
         use_local_optimization: false,
-        inlier_threshold: 1.0,
+        max_sigma: 0.33,
         max_rotation: None,
         scale_range: None,
         ..Default::default()
@@ -565,7 +565,7 @@ fn test_ransac_30_percent_outliers() {
 
     let config = RansacParams {
         seed: Some(42),
-        inlier_threshold: 1.0,
+        max_sigma: 0.33,
         use_local_optimization: true,
         ..Default::default()
     };
@@ -833,7 +833,7 @@ fn test_ransac_extreme_scale_1e6() {
 
     let config = RansacParams {
         seed: Some(42),
-        inlier_threshold: 100.0, // Scaled threshold
+        max_sigma: 33.0, // Scaled threshold
         ..Default::default()
     };
     let estimator = RansacEstimator::new(config);
@@ -868,7 +868,7 @@ fn test_ransac_small_coordinates() {
 
     let config = RansacParams {
         seed: Some(42),
-        inlier_threshold: 0.1,
+        max_sigma: 0.033,
         ..Default::default()
     };
     let estimator = RansacEstimator::new(config);
@@ -908,7 +908,7 @@ fn test_ransac_mixed_scale_coordinates() {
 
     let config = RansacParams {
         seed: Some(42),
-        inlier_threshold: 0.5,
+        max_sigma: 0.17,
         ..Default::default()
     };
     let estimator = RansacEstimator::new(config);
@@ -947,7 +947,7 @@ fn test_homography_near_affine() {
 
     let config = RansacParams {
         seed: Some(42),
-        inlier_threshold: 0.5,
+        max_sigma: 0.17,
         ..Default::default()
     };
     let estimator = RansacEstimator::new(config);
@@ -990,7 +990,7 @@ fn test_similarity_very_small_rotation() {
 
     let config = RansacParams {
         seed: Some(42),
-        inlier_threshold: 0.5,
+        max_sigma: 0.17,
         ..Default::default()
     };
     let estimator = RansacEstimator::new(config);
@@ -1030,7 +1030,7 @@ fn test_similarity_near_unity_scale() {
 
     let config = RansacParams {
         seed: Some(42),
-        inlier_threshold: 0.5,
+        max_sigma: 0.17,
         ..Default::default()
     };
     let estimator = RansacEstimator::new(config);
@@ -1069,7 +1069,7 @@ fn test_affine_with_shear() {
 
     let config = RansacParams {
         seed: Some(42),
-        inlier_threshold: 0.5,
+        max_sigma: 0.17,
         ..Default::default()
     };
     let estimator = RansacEstimator::new(config);
@@ -1145,7 +1145,7 @@ fn test_ransac_100_percent_inliers() {
 
     let config = RansacParams {
         max_iterations: 100,
-        inlier_threshold: 1.0,
+        max_sigma: 0.33,
         max_rotation: None,
         scale_range: None,
         ..Default::default()
@@ -1195,7 +1195,7 @@ fn test_ransac_0_percent_inliers_pure_noise() {
 
     let config = RansacParams {
         max_iterations: 100,
-        inlier_threshold: 1.0,
+        max_sigma: 0.33,
         min_inlier_ratio: 0.8, // Require 80% inliers
         ..Default::default()
     };
@@ -1273,7 +1273,7 @@ fn test_ransac_early_termination() {
 
     let config = RansacParams {
         max_iterations: 10000, // Very high, but should terminate early
-        inlier_threshold: 1.0,
+        max_sigma: 0.33,
         confidence: 0.999,
         ..Default::default()
     };
@@ -1315,7 +1315,7 @@ fn test_homography_nearly_degenerate() {
 
     let config = RansacParams {
         max_iterations: 500,
-        inlier_threshold: 2.0,
+        max_sigma: 0.67,
         ..Default::default()
     };
     let estimator = RansacEstimator::new(config);
@@ -1360,7 +1360,7 @@ fn test_progressive_ransac_uses_weights() {
 
     let config = RansacParams {
         max_iterations: 200,
-        inlier_threshold: 2.0,
+        max_sigma: 0.67,
         ..Default::default()
     };
     let estimator = RansacEstimator::new(config);
@@ -1392,7 +1392,7 @@ fn test_ransac_minimum_points() {
 
     let config = RansacParams {
         max_iterations: 100,
-        inlier_threshold: 1.0,
+        max_sigma: 0.33,
         min_inlier_ratio: 0.5, // Allow 50% inliers (1 of 2)
         ..Default::default()
     };
@@ -1523,7 +1523,7 @@ fn test_estimate_uses_confidence() {
 
     let config = RansacParams {
         seed: Some(42),
-        inlier_threshold: 5.0,
+        max_sigma: 1.67,
         ..Default::default()
     };
 
@@ -2049,7 +2049,7 @@ fn test_plausibility_with_outliers_filters_bad_hypotheses() {
         seed: Some(42),
         max_rotation: Some(5.0_f64.to_radians()),
         scale_range: Some((0.9, 1.1)),
-        inlier_threshold: 2.0,
+        max_sigma: 0.67,
         ..Default::default()
     };
     let estimator = RansacEstimator::new(config);

@@ -1,22 +1,29 @@
 //! RANSAC (Random Sample Consensus) for robust transformation estimation.
 //!
-//! This module implements RANSAC to robustly estimate transformations in the
-//! presence of outliers. It works by:
+//! This module implements RANSAC with MAGSAC++ scoring to robustly estimate
+//! transformations in the presence of outliers. MAGSAC++ (Barath & Matas 2020)
+//! eliminates the need for manual threshold tuning by marginalizing over a
+//! range of noise scales.
+//!
+//! The algorithm works by:
 //! 1. Randomly sampling minimal point sets
 //! 2. Computing candidate transformations
-//! 3. Counting inliers (points within threshold)
+//! 3. Scoring with MAGSAC++ (continuous likelihood, not binary inlier/outlier)
 //! 4. Keeping the best model
 //! 5. Refining with least squares on inliers
 
 #[cfg(test)]
 mod tests;
 
+mod magsac;
 mod transforms;
 
 pub(crate) use transforms::{
     adaptive_iterations, centroid, estimate_affine, estimate_homography, estimate_similarity,
     estimate_transform, normalize_points,
 };
+
+use magsac::MagsacScorer;
 
 use glam::DVec2;
 use rand::prelude::*;
@@ -28,7 +35,16 @@ use crate::registration::triangle::PointMatch;
 #[derive(Debug, Clone)]
 pub struct RansacParams {
     pub max_iterations: usize,
-    pub inlier_threshold: f64,
+    /// Maximum noise scale (σ_max) in pixels for MAGSAC++ scoring.
+    ///
+    /// Points with residuals greater than ~3·max_sigma are treated as outliers.
+    /// The effective threshold is approximately `3.03 * max_sigma` (based on
+    /// the 99% χ² quantile for 2 degrees of freedom).
+    ///
+    /// Default: 1.0 pixel (~3px effective threshold).
+    ///
+    /// Migration from old `inlier_threshold`: use `max_sigma = inlier_threshold / 3.0`
+    pub max_sigma: f64,
     pub confidence: f64,
     pub min_inlier_ratio: f64,
     pub seed: Option<u64>,
@@ -42,7 +58,7 @@ impl Default for RansacParams {
     fn default() -> Self {
         Self {
             max_iterations: 2000,
-            inlier_threshold: 2.0,
+            max_sigma: 1.0, // ~3px effective threshold
             confidence: 0.999,
             min_inlier_ratio: 0.3,
             seed: None,
@@ -159,7 +175,7 @@ impl RansacEstimator {
         target_points: &[DVec2],
         initial_transform: &Transform,
         initial_inliers: &[usize],
-        threshold_sq: f64,
+        scorer: &MagsacScorer,
         inlier_buf: &mut Vec<usize>,
         point_buf_ref: &mut Vec<DVec2>,
         point_buf_target: &mut Vec<DVec2>,
@@ -170,11 +186,11 @@ impl RansacEstimator {
         let mut current_inliers = initial_inliers.to_vec();
 
         // Compute initial score
-        let initial_score = count_inliers(
+        let initial_score = score_hypothesis(
             ref_points,
             target_points,
             &current_transform,
-            threshold_sq,
+            scorer,
             inlier_buf,
         );
         let mut current_score = initial_score;
@@ -198,14 +214,9 @@ impl RansacEstimator {
                 None => break,
             };
 
-            // Count inliers with refined transform
-            let new_score = count_inliers(
-                ref_points,
-                target_points,
-                &refined,
-                threshold_sq,
-                inlier_buf,
-            );
+            // Score with refined transform
+            let new_score =
+                score_hypothesis(ref_points, target_points, &refined, scorer, inlier_buf);
 
             // Check for convergence (no improvement)
             if inlier_buf.len() <= current_inliers.len() && new_score <= current_score {
@@ -221,7 +232,7 @@ impl RansacEstimator {
         (current_transform, current_inliers, current_score)
     }
 
-    /// Core RANSAC loop.
+    /// Core RANSAC loop with MAGSAC++ scoring.
     ///
     /// The `sample_fn` closure fills `sample_indices` buffer each iteration.
     /// It receives `(iteration, max_iterations, &mut sample_buf)`.
@@ -234,11 +245,12 @@ impl RansacEstimator {
         transform_type: TransformType,
         mut sample_fn: impl FnMut(usize, usize, &mut Vec<usize>),
     ) -> Option<RansacResult> {
-        let threshold_sq = self.params.inlier_threshold * self.params.inlier_threshold;
+        // Initialize MAGSAC++ scorer
+        let scorer = MagsacScorer::new(self.params.max_sigma);
 
         let mut best_transform: Option<Transform> = None;
         let mut best_inliers: Vec<usize> = Vec::new();
-        let mut best_score = 0.0f64;
+        let mut best_score = f64::NEG_INFINITY;
 
         // Pre-allocate buffers to avoid per-iteration allocations
         let mut sample_indices: Vec<usize> = Vec::with_capacity(min_samples);
@@ -277,17 +289,17 @@ impl RansacEstimator {
                 None => continue,
             };
 
-            // Reject physically implausible hypotheses early (before expensive inlier counting)
+            // Reject physically implausible hypotheses early (before expensive scoring)
             if !self.is_plausible(&transform) {
                 continue;
             }
 
-            // Count inliers
-            let mut score = count_inliers(
+            // Score with MAGSAC++
+            let mut score = score_hypothesis(
                 ref_points,
                 target_points,
                 &transform,
-                threshold_sq,
+                &scorer,
                 &mut inlier_buf,
             );
 
@@ -300,7 +312,7 @@ impl RansacEstimator {
                     target_points,
                     &current_transform,
                     &inlier_buf,
-                    threshold_sq,
+                    &scorer,
                     &mut lo_inlier_buf,
                     &mut lo_point_buf_ref,
                     &mut lo_point_buf_target,
@@ -346,11 +358,11 @@ impl RansacEstimator {
                 estimate_transform(&lo_point_buf_ref, &lo_point_buf_target, transform_type)
                     .unwrap_or(transform);
 
-            count_inliers(
+            score_hypothesis(
                 ref_points,
                 target_points,
                 &refined,
-                threshold_sq,
+                &scorer,
                 &mut inlier_buf,
             );
 
@@ -571,29 +583,31 @@ fn is_sample_degenerate(points: &[DVec2]) -> bool {
     false
 }
 
-/// Count inliers and compute MSAC score.
+/// Score a hypothesis using MAGSAC++ scoring.
 ///
-/// Score = sum(threshold² - dist²) for inliers, using f64 for full precision.
+/// Returns negative total loss (higher score = better model).
+/// Also populates the inliers buffer with indices of points within threshold.
 #[inline]
-fn count_inliers(
+fn score_hypothesis(
     ref_points: &[DVec2],
     target_points: &[DVec2],
     transform: &Transform,
-    threshold_sq: f64,
+    scorer: &MagsacScorer,
     inliers: &mut Vec<usize>,
 ) -> f64 {
     inliers.clear();
-    let mut score = 0.0f64;
+    let mut total_loss = 0.0f64;
 
     for (i, (r, t)) in ref_points.iter().zip(target_points.iter()).enumerate() {
         let p = transform.apply(*r);
         let dist_sq = (p - *t).length_squared();
 
-        if dist_sq < threshold_sq {
+        total_loss += scorer.loss(dist_sq);
+        if scorer.is_inlier(dist_sq) {
             inliers.push(i);
-            score += threshold_sq - dist_sq;
         }
     }
 
-    score
+    // Negate so higher score = better model
+    -total_loss
 }

@@ -408,7 +408,7 @@ fn register_all_lights(
         transform_type: TransformType::Homography, // Can model distortions that similarity cannot
         max_stars: MAX_STARS_FOR_REGISTRATION,
         min_matches: 20,         // Require more matched stars
-        inlier_threshold: 1.0,   // Stricter residual limit
+        max_sigma: 0.33,         // Stricter residual limit (~1px effective)
         ratio_tolerance: 0.005,  // Tighter triangle matching
         ransac_iterations: 5000, // More iterations for better model
         confidence: 0.9999,      // Higher confidence

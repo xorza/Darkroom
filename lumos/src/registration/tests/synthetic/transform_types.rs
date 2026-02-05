@@ -29,7 +29,7 @@ fn test_registration_translation_only() {
         transform_type: TransformType::Translation,
         min_stars: 6,
         min_matches: 4,
-        inlier_threshold: 2.0,
+        max_sigma: 0.67,
         ..Default::default()
     };
 
@@ -94,7 +94,7 @@ fn test_registration_similarity_transform() {
         transform_type: TransformType::Similarity,
         min_stars: 6,
         min_matches: 4,
-        inlier_threshold: 3.0,
+        max_sigma: 1.0,
         ..Default::default()
     };
 
@@ -175,7 +175,7 @@ fn test_registration_with_noise() {
         transform_type: TransformType::Translation,
         min_stars: 6,
         min_matches: 4,
-        inlier_threshold: 3.0, // Allow more residual due to noise
+        max_sigma: 1.0, // Allow more residual due to noise
         ..Default::default()
     };
 
@@ -227,7 +227,7 @@ fn test_registration_large_translation() {
         transform_type: TransformType::Translation,
         min_stars: 6,
         min_matches: 4,
-        inlier_threshold: 2.0,
+        max_sigma: 0.67,
         ..Default::default()
     };
 
@@ -302,7 +302,7 @@ fn test_registration_euclidean_rotation_only() {
         transform_type: TransformType::Euclidean,
         min_stars: 6,
         min_matches: 4,
-        inlier_threshold: 2.0,
+        max_sigma: 0.67,
         ..Default::default()
     };
 
@@ -354,7 +354,7 @@ fn test_registration_euclidean_translation_and_rotation() {
         transform_type: TransformType::Euclidean,
         min_stars: 6,
         min_matches: 4,
-        inlier_threshold: 2.0,
+        max_sigma: 0.67,
         ..Default::default()
     };
 
@@ -421,7 +421,7 @@ fn test_registration_affine_differential_scale() {
         transform_type: TransformType::Affine,
         min_stars: 6,
         min_matches: 4,
-        inlier_threshold: 3.0,
+        max_sigma: 1.0,
         ..Default::default()
     };
 
@@ -469,7 +469,7 @@ fn test_registration_affine_with_shear() {
         transform_type: TransformType::Affine,
         min_stars: 6,
         min_matches: 4,
-        inlier_threshold: 3.0,
+        max_sigma: 1.0,
         ..Default::default()
     };
 
@@ -522,7 +522,7 @@ fn test_registration_affine_rotation_and_differential_scale() {
         transform_type: TransformType::Affine,
         min_stars: 6,
         min_matches: 4,
-        inlier_threshold: 3.0,
+        max_sigma: 1.0,
         ..Default::default()
     };
 
@@ -590,7 +590,7 @@ fn test_registration_homography_mild_perspective() {
         transform_type: TransformType::Homography,
         min_stars: 8,
         min_matches: 6,
-        inlier_threshold: 3.0,
+        max_sigma: 1.0,
         ..Default::default()
     };
 
@@ -640,7 +640,7 @@ fn test_registration_homography_with_rotation() {
         transform_type: TransformType::Homography,
         min_stars: 8,
         min_matches: 6,
-        inlier_threshold: 3.0,
+        max_sigma: 1.0,
         ..Default::default()
     };
 
@@ -706,7 +706,7 @@ fn test_similarity_recovers_from_euclidean_data() {
         transform_type: TransformType::Similarity,
         min_stars: 6,
         min_matches: 4,
-        inlier_threshold: 2.0,
+        max_sigma: 0.67,
         ..Default::default()
     };
 
@@ -750,7 +750,7 @@ fn test_affine_recovers_from_similarity_data() {
         transform_type: TransformType::Affine,
         min_stars: 6,
         min_matches: 4,
-        inlier_threshold: 2.0,
+        max_sigma: 0.67,
         ..Default::default()
     };
 

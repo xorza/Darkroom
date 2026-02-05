@@ -94,7 +94,7 @@ use triangle::{PointMatch, TriangleParams, match_triangles};
 /// // With custom config
 /// let config = Config {
 ///     transform_type: TransformType::Similarity,
-///     inlier_threshold: 3.0,
+///     max_sigma: 1.0, // ~3px effective threshold
 ///     ..Config::default()
 /// };
 /// let result = register(&ref_stars, &target_stars, &config)?;
@@ -257,7 +257,7 @@ fn estimate_and_refine(
 ) -> Result<RegistrationResult, RegistrationError> {
     let ransac_params = RansacParams {
         max_iterations: config.ransac_iterations,
-        inlier_threshold: config.inlier_threshold,
+        max_sigma: config.max_sigma,
         confidence: config.confidence,
         min_inlier_ratio: config.min_inlier_ratio,
         seed: config.seed,
@@ -282,12 +282,14 @@ fn estimate_and_refine(
         .map(|&i| (matches[i].ref_idx, matches[i].target_idx))
         .collect();
 
+    // Effective threshold for match recovery: ~3 * max_sigma (χ² quantile)
+    let effective_threshold = config.max_sigma * 3.03;
     let (transform, inlier_matches) = recover_matches(
         ref_stars,
         target_stars,
         &ransac_result.transform,
         &inlier_matches,
-        config.inlier_threshold,
+        effective_threshold,
         transform_type,
     );
 
