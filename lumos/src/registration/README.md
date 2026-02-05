@@ -468,9 +468,9 @@ Prioritized by impact.
 
 #### 2. SIP Reference Point (CRPIX Support)
 
-**Problem:** SIP polynomial fitting uses the centroid of input points as reference, not CRPIX (image center). This makes coefficients incompatible with FITS headers and tools like DS9, SAOImage, and astropy WCS.
+~~**Problem:** SIP polynomial fitting uses the centroid of input points as reference, not CRPIX (image center). This makes coefficients incompatible with FITS headers and tools like DS9, SAOImage, and astropy WCS.~~
 
-**Solution:** Add configurable reference point to `SipConfig`:
+**IMPLEMENTED:** `SipConfig::reference_point` allows specifying the polynomial reference point. Use `Some(crpix)` for FITS-compatible coefficients (image center), or `None` to use the centroid of input points (default).
 
 ```rust
 pub struct SipConfig {
@@ -478,8 +478,6 @@ pub struct SipConfig {
     pub reference_point: Option<DVec2>,  // None = centroid, Some(crpix) = image center
 }
 ```
-
-**Effort:** ~15 lines. **Benefit:** FITS interoperability.
 
 **Reference:** Shupe, D., et al. (2005). "The SIP Convention for Representing Distortion in FITS Image Headers."
 

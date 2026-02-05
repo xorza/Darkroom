@@ -245,3 +245,114 @@ fn test_all_orders() {
         assert!(sip.is_some(), "SIP order {} should fit successfully", order);
     }
 }
+
+#[test]
+fn test_reference_point_none_uses_centroid() {
+    // When reference_point is None, the centroid of input points should be used
+    let mut ref_points = Vec::new();
+    let mut target_points = Vec::new();
+
+    // Create a grid centered around (500, 500)
+    for y in (200..=800).step_by(100) {
+        for x in (200..=800).step_by(100) {
+            let p = DVec2::new(x as f64, y as f64);
+            ref_points.push(p);
+            // Add small radial distortion from center
+            let center = DVec2::new(500.0, 500.0);
+            let d = p - center;
+            let k = 1e-7;
+            target_points.push(p + d * k * d.length_squared());
+        }
+    }
+
+    let transform = Transform::identity();
+
+    // Fit with None reference point (should use centroid)
+    let config_none = SipConfig {
+        order: 3,
+        reference_point: None,
+    };
+    let sip_none =
+        SipPolynomial::fit_from_transform(&ref_points, &target_points, &transform, &config_none)
+            .unwrap();
+
+    // Verify correction works well (centroid ≈ center of grid ≈ 500,500)
+    let residuals = sip_none.compute_corrected_residuals(&ref_points, &target_points, &transform);
+    let rms: f64 = (residuals.iter().map(|r| r * r).sum::<f64>() / residuals.len() as f64).sqrt();
+    assert!(
+        rms < 0.1,
+        "RMS with centroid reference should be small: {:.6}",
+        rms
+    );
+}
+
+#[test]
+fn test_reference_point_crpix_vs_centroid() {
+    // FITS CRPIX is typically image center, which may differ from point centroid.
+    // When distortion is radial from image center, using CRPIX produces better fits
+    // than using the centroid of clustered points.
+    let image_center = DVec2::new(512.0, 384.0); // Typical image center
+    let k = 1e-7;
+
+    let mut ref_points = Vec::new();
+    let mut target_points = Vec::new();
+
+    // Create points clustered in one quadrant (centroid ≠ image center)
+    for y in (100..=350).step_by(50) {
+        for x in (100..=450).step_by(50) {
+            let p = DVec2::new(x as f64, y as f64);
+            ref_points.push(p);
+            let d = p - image_center;
+            target_points.push(p + d * k * d.length_squared());
+        }
+    }
+
+    let transform = Transform::identity();
+
+    // Fit with CRPIX (image center) - the correct reference for this distortion
+    let config_crpix = SipConfig {
+        order: 3,
+        reference_point: Some(image_center),
+    };
+    let sip_crpix =
+        SipPolynomial::fit_from_transform(&ref_points, &target_points, &transform, &config_crpix)
+            .unwrap();
+
+    // Fit with centroid - wrong reference point for this distortion pattern
+    let config_centroid = SipConfig {
+        order: 3,
+        reference_point: None,
+    };
+    let sip_centroid = SipPolynomial::fit_from_transform(
+        &ref_points,
+        &target_points,
+        &transform,
+        &config_centroid,
+    )
+    .unwrap();
+
+    let residuals_crpix =
+        sip_crpix.compute_corrected_residuals(&ref_points, &target_points, &transform);
+    let residuals_centroid =
+        sip_centroid.compute_corrected_residuals(&ref_points, &target_points, &transform);
+
+    let rms_crpix: f64 =
+        (residuals_crpix.iter().map(|r| r * r).sum::<f64>() / residuals_crpix.len() as f64).sqrt();
+    let rms_centroid: f64 = (residuals_centroid.iter().map(|r| r * r).sum::<f64>()
+        / residuals_centroid.len() as f64)
+        .sqrt();
+
+    // CRPIX (correct reference) should produce much better fit
+    assert!(
+        rms_crpix < 0.1,
+        "CRPIX reference RMS should be small: {:.6}",
+        rms_crpix
+    );
+
+    // Using wrong reference point produces worse fit - this is expected!
+    // This demonstrates why CRPIX support matters for FITS interoperability
+    assert!(
+        rms_crpix < rms_centroid,
+        "CRPIX should fit better than centroid when distortion is radial from image center"
+    );
+}
