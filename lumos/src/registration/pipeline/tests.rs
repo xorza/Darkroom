@@ -210,9 +210,6 @@ fn test_warp_to_reference_image_roundtrip() {
         height,
         &transform,
         InterpolationMethod::Lanczos3,
-        0.0,
-        true,
-        false,
     );
 
     let target_image = AstroImage::from_pixels(

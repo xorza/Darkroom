@@ -203,55 +203,19 @@ fn test_nearest_interpolation() {
 
     // Center of pixels
     assert!(
-        (interpolate_pixel(
-            &data_buf,
-            0.4,
-            0.4,
-            InterpolationMethod::Nearest,
-            0.0,
-            true,
-            false
-        ) - 0.0)
-            .abs()
+        (interpolate_pixel(&data_buf, 0.4, 0.4, InterpolationMethod::Nearest) - 0.0).abs()
             < EPSILON
     );
     assert!(
-        (interpolate_pixel(
-            &data_buf,
-            1.4,
-            0.4,
-            InterpolationMethod::Nearest,
-            0.0,
-            true,
-            false
-        ) - 1.0)
-            .abs()
+        (interpolate_pixel(&data_buf, 1.4, 0.4, InterpolationMethod::Nearest) - 1.0).abs()
             < EPSILON
     );
     assert!(
-        (interpolate_pixel(
-            &data_buf,
-            0.4,
-            1.4,
-            InterpolationMethod::Nearest,
-            0.0,
-            true,
-            false
-        ) - 2.0)
-            .abs()
+        (interpolate_pixel(&data_buf, 0.4, 1.4, InterpolationMethod::Nearest) - 2.0).abs()
             < EPSILON
     );
     assert!(
-        (interpolate_pixel(
-            &data_buf,
-            1.4,
-            1.4,
-            InterpolationMethod::Nearest,
-            0.0,
-            true,
-            false
-        ) - 3.0)
-            .abs()
+        (interpolate_pixel(&data_buf, 1.4, 1.4, InterpolationMethod::Nearest) - 3.0).abs()
             < EPSILON
     );
 }
@@ -263,42 +227,16 @@ fn test_bilinear_center() {
 
     // At pixel centers
     assert!(
-        (interpolate_pixel(
-            &data_buf,
-            0.0,
-            0.0,
-            InterpolationMethod::Bilinear,
-            0.0,
-            true,
-            false
-        ) - 0.0)
-            .abs()
+        (interpolate_pixel(&data_buf, 0.0, 0.0, InterpolationMethod::Bilinear) - 0.0).abs()
             < EPSILON
     );
     assert!(
-        (interpolate_pixel(
-            &data_buf,
-            1.0,
-            0.0,
-            InterpolationMethod::Bilinear,
-            0.0,
-            true,
-            false
-        ) - 2.0)
-            .abs()
+        (interpolate_pixel(&data_buf, 1.0, 0.0, InterpolationMethod::Bilinear) - 2.0).abs()
             < EPSILON
     );
 
     // Between pixels - should interpolate
-    let center = interpolate_pixel(
-        &data_buf,
-        0.5,
-        0.5,
-        InterpolationMethod::Bilinear,
-        0.0,
-        true,
-        false,
-    );
+    let center = interpolate_pixel(&data_buf, 0.5, 0.5, InterpolationMethod::Bilinear);
     assert!((center - 2.0).abs() < EPSILON); // Average of all 4
 }
 
@@ -309,16 +247,7 @@ fn test_bilinear_edge() {
 
     // Uniform image should give same value everywhere
     assert!(
-        (interpolate_pixel(
-            &data_buf,
-            0.3,
-            0.7,
-            InterpolationMethod::Bilinear,
-            0.0,
-            true,
-            false
-        ) - 1.0)
-            .abs()
+        (interpolate_pixel(&data_buf, 0.3, 0.7, InterpolationMethod::Bilinear) - 1.0).abs()
             < EPSILON
     );
 }
@@ -330,30 +259,10 @@ fn test_bicubic_pixel_centers() {
     let data_buf = Buffer2::new(4, 4, data);
 
     assert!(
-        (interpolate_pixel(
-            &data_buf,
-            1.0,
-            1.0,
-            InterpolationMethod::Bicubic,
-            0.0,
-            true,
-            false
-        ) - 5.0)
-            .abs()
-            < 0.01
+        (interpolate_pixel(&data_buf, 1.0, 1.0, InterpolationMethod::Bicubic) - 5.0).abs() < 0.01
     );
     assert!(
-        (interpolate_pixel(
-            &data_buf,
-            2.0,
-            2.0,
-            InterpolationMethod::Bicubic,
-            0.0,
-            true,
-            false
-        ) - 10.0)
-            .abs()
-            < 0.01
+        (interpolate_pixel(&data_buf, 2.0, 2.0, InterpolationMethod::Bicubic) - 10.0).abs() < 0.01
     );
 }
 
@@ -364,30 +273,10 @@ fn test_lanczos_pixel_centers() {
     let data_buf = Buffer2::new(8, 8, data);
 
     assert!(
-        (interpolate_pixel(
-            &data_buf,
-            3.0,
-            3.0,
-            InterpolationMethod::Lanczos3,
-            0.0,
-            true,
-            false
-        ) - 27.0)
-            .abs()
-            < 0.1
+        (interpolate_pixel(&data_buf, 3.0, 3.0, InterpolationMethod::Lanczos3) - 27.0).abs() < 0.1
     );
     assert!(
-        (interpolate_pixel(
-            &data_buf,
-            4.0,
-            4.0,
-            InterpolationMethod::Lanczos3,
-            0.0,
-            true,
-            false
-        ) - 36.0)
-            .abs()
-            < 0.1
+        (interpolate_pixel(&data_buf, 4.0, 4.0, InterpolationMethod::Lanczos3) - 36.0).abs() < 0.1
     );
 }
 
@@ -398,31 +287,13 @@ fn test_border_handling() {
 
     // Inside - should interpolate to 1.0 since all pixels are 1.0
     assert!(
-        (interpolate_pixel(
-            &data_buf,
-            0.5,
-            0.5,
-            InterpolationMethod::Bilinear,
-            0.0,
-            true,
-            false
-        ) - 1.0)
-            .abs()
+        (interpolate_pixel(&data_buf, 0.5, 0.5, InterpolationMethod::Bilinear) - 1.0).abs()
             < EPSILON
     );
 
-    // Fully outside - should return border value
+    // Fully outside - should return border value (0.0)
     assert!(
-        (interpolate_pixel(
-            &data_buf,
-            -2.0,
-            0.0,
-            InterpolationMethod::Bilinear,
-            0.0,
-            true,
-            false
-        ) - 0.0)
-            .abs()
+        (interpolate_pixel(&data_buf, -2.0, 0.0, InterpolationMethod::Bilinear) - 0.0).abs()
             < EPSILON
     );
 }
@@ -433,16 +304,7 @@ fn test_warp_identity() {
     let input_buf = Buffer2::new(4, 4, input.clone());
     let transform = Transform::identity();
 
-    let output = warp_image(
-        &input_buf,
-        4,
-        4,
-        &transform,
-        InterpolationMethod::Bilinear,
-        0.0,
-        true,
-        false,
-    );
+    let output = warp_image(&input_buf, 4, 4, &transform, InterpolationMethod::Bilinear);
 
     // Identity transform should preserve the image at pixel centers
     for (i, (&inp, &out)) in input.iter().zip(output.iter()).enumerate() {
@@ -466,16 +328,7 @@ fn test_warp_translation() {
     // Translate by (1, 1)
     let transform = Transform::translation(DVec2::new(1.0, 1.0));
 
-    let output = warp_image(
-        &input_buf,
-        4,
-        4,
-        &transform,
-        InterpolationMethod::Bilinear,
-        0.0,
-        true,
-        false,
-    );
+    let output = warp_image(&input_buf, 4, 4, &transform, InterpolationMethod::Bilinear);
 
     // The bright pixel should move to (2, 2)
     assert!(output[10] > 0.5, "Expected bright pixel at (2,2)");
@@ -491,16 +344,7 @@ fn test_warp_scale() {
     // Scale 2x
     let transform = Transform::scale(DVec2::new(2.0, 2.0));
 
-    let output = warp_image(
-        &input_buf,
-        4,
-        4,
-        &transform,
-        InterpolationMethod::Bilinear,
-        0.0,
-        true,
-        false,
-    );
+    let output = warp_image(&input_buf, 4, 4, &transform, InterpolationMethod::Bilinear);
 
     assert_eq!(output.len(), 16);
     // Top-left corner should still be ~1.0
@@ -524,24 +368,8 @@ fn test_lanczos_preserves_dc() {
     let input_buf = Buffer2::new(8, 8, input);
 
     // Sample at various sub-pixel positions
-    let val1 = interpolate_pixel(
-        &input_buf,
-        3.3,
-        4.7,
-        InterpolationMethod::Lanczos3,
-        0.0,
-        true,
-        false,
-    );
-    let val2 = interpolate_pixel(
-        &input_buf,
-        2.1,
-        5.9,
-        InterpolationMethod::Lanczos3,
-        0.0,
-        true,
-        false,
-    );
+    let val1 = interpolate_pixel(&input_buf, 3.3, 4.7, InterpolationMethod::Lanczos3);
+    let val2 = interpolate_pixel(&input_buf, 2.1, 5.9, InterpolationMethod::Lanczos3);
 
     assert!((val1 - 0.5).abs() < 0.01);
     assert!((val2 - 0.5).abs() < 0.01);
@@ -557,16 +385,7 @@ fn test_warp_rotation() {
     // Rotate 90 degrees around center
     let transform = Transform::rotation_around(DVec2::new(4.0, 4.0), std::f64::consts::FRAC_PI_2);
 
-    let output = warp_image(
-        &input_buf,
-        8,
-        8,
-        &transform,
-        InterpolationMethod::Bilinear,
-        0.0,
-        true,
-        false,
-    );
+    let output = warp_image(&input_buf, 8, 8, &transform, InterpolationMethod::Bilinear);
 
     // After 90 degree rotation, top-left should move
     // The bright pixel should be somewhere else
@@ -583,33 +402,9 @@ fn test_bicubic_smooth_gradient() {
     let input_buf = Buffer2::new(4, 4, input);
 
     // Sample between pixels
-    let v1 = interpolate_pixel(
-        &input_buf,
-        0.5,
-        1.0,
-        InterpolationMethod::Bicubic,
-        0.0,
-        true,
-        false,
-    );
-    let v2 = interpolate_pixel(
-        &input_buf,
-        1.5,
-        1.0,
-        InterpolationMethod::Bicubic,
-        0.0,
-        true,
-        false,
-    );
-    let v3 = interpolate_pixel(
-        &input_buf,
-        2.5,
-        1.0,
-        InterpolationMethod::Bicubic,
-        0.0,
-        true,
-        false,
-    );
+    let v1 = interpolate_pixel(&input_buf, 0.5, 1.0, InterpolationMethod::Bicubic);
+    let v2 = interpolate_pixel(&input_buf, 1.5, 1.0, InterpolationMethod::Bicubic);
+    let v3 = interpolate_pixel(&input_buf, 2.5, 1.0, InterpolationMethod::Bicubic);
 
     // Should be monotonically increasing in a gradient
     assert!(v1 < v2);
@@ -621,112 +416,11 @@ fn test_lanczos2_vs_lanczos3() {
     let input: Vec<f32> = (0..64).map(|i| (i as f32).sin()).collect();
     let input_buf = Buffer2::new(8, 8, input);
 
-    let v2 = interpolate_pixel(
-        &input_buf,
-        3.5,
-        4.5,
-        InterpolationMethod::Lanczos2,
-        0.0,
-        true,
-        false,
-    );
-    let v3 = interpolate_pixel(
-        &input_buf,
-        3.5,
-        4.5,
-        InterpolationMethod::Lanczos3,
-        0.0,
-        true,
-        false,
-    );
+    let v2 = interpolate_pixel(&input_buf, 3.5, 4.5, InterpolationMethod::Lanczos2);
+    let v3 = interpolate_pixel(&input_buf, 3.5, 4.5, InterpolationMethod::Lanczos3);
 
     // Both should give reasonable values (not wildly different)
     assert!((v2 - v3).abs() < 0.5);
-}
-
-#[test]
-fn test_lanczos_clamping_prevents_overshoot() {
-    // Create image with sharp edge (step function)
-    // This is the classic case where Lanczos produces ringing artifacts
-    let mut input = vec![0.0f32; 64];
-    for y in 0..8 {
-        for x in 4..8 {
-            input[y * 8 + x] = 1.0;
-        }
-    }
-    let input_buf = Buffer2::new(8, 8, input);
-
-    // Sample near the sharp edge - Lanczos can overshoot here
-    let val_no_clamp = interpolate_pixel(
-        &input_buf,
-        3.7,
-        4.0,
-        InterpolationMethod::Lanczos3,
-        0.0,
-        true,
-        false,
-    );
-    let val_clamp = interpolate_pixel(
-        &input_buf,
-        3.7,
-        4.0,
-        InterpolationMethod::Lanczos3,
-        0.0,
-        true,
-        true,
-    );
-
-    // Clamped value must be within [0, 1] range
-    assert!(
-        (0.0..=1.0).contains(&val_clamp),
-        "Clamped value {} should be in [0, 1]",
-        val_clamp
-    );
-
-    // Without clamping, Lanczos often produces slight overshoot/undershoot near edges
-    // The clamped value should be different if there was overshoot
-    // (Note: they may be equal if no overshoot occurred at this position)
-    println!(
-        "No clamp: {}, Clamp: {} (difference: {})",
-        val_no_clamp,
-        val_clamp,
-        (val_no_clamp - val_clamp).abs()
-    );
-}
-
-#[test]
-fn test_lanczos_clamping_preserves_smooth_regions() {
-    // In smooth regions, clamping should have minimal effect
-    let input: Vec<f32> = (0..64).map(|i| (i as f32) / 64.0).collect();
-    let input_buf = Buffer2::new(8, 8, input);
-
-    // Sample in smooth gradient region
-    let val_no_clamp = interpolate_pixel(
-        &input_buf,
-        3.5,
-        4.5,
-        InterpolationMethod::Lanczos3,
-        0.0,
-        true,
-        false,
-    );
-    let val_clamp = interpolate_pixel(
-        &input_buf,
-        3.5,
-        4.5,
-        InterpolationMethod::Lanczos3,
-        0.0,
-        true,
-        true,
-    );
-
-    // In smooth regions, clamping should have minimal effect
-    assert!(
-        (val_no_clamp - val_clamp).abs() < 0.01,
-        "Clamping changed smooth region: {} vs {}",
-        val_no_clamp,
-        val_clamp
-    );
 }
 
 // ============================================================================
@@ -755,7 +449,7 @@ fn test_interpolation_gradient_preservation() {
         let samples: Vec<f32> = (0..10)
             .map(|i| {
                 let x = 10.0 + i as f32 * 0.5;
-                interpolate_pixel(&input_buf, x, 32.0, *method, 0.0, true, false)
+                interpolate_pixel(&input_buf, x, 32.0, *method)
             })
             .collect();
 
@@ -799,24 +493,8 @@ fn test_bicubic_vs_lanczos_quality() {
             let y = iy as f32 + 0.7;
 
             let expected = (x / 10.0).sin() * (y / 10.0).cos();
-            let bicubic_val = interpolate_pixel(
-                &input_buf,
-                x,
-                y,
-                InterpolationMethod::Bicubic,
-                0.0,
-                true,
-                false,
-            );
-            let lanczos_val = interpolate_pixel(
-                &input_buf,
-                x,
-                y,
-                InterpolationMethod::Lanczos3,
-                0.0,
-                true,
-                false,
-            );
+            let bicubic_val = interpolate_pixel(&input_buf, x, y, InterpolationMethod::Bicubic);
+            let lanczos_val = interpolate_pixel(&input_buf, x, y, InterpolationMethod::Lanczos3);
 
             bicubic_error_sum += (bicubic_val - expected).abs();
             lanczos_error_sum += (lanczos_val - expected).abs();
@@ -861,8 +539,7 @@ fn test_all_methods_exact_at_pixel_centers() {
         for y in 2..height - 2 {
             for x in 2..width - 2 {
                 let expected = input[y * width + x];
-                let sampled =
-                    interpolate_pixel(&input_buf, x as f32, y as f32, *method, 0.0, true, false);
+                let sampled = interpolate_pixel(&input_buf, x as f32, y as f32, *method);
 
                 // Should be exact (or very close for Lanczos due to kernel shape)
                 let tolerance = if matches!(method, InterpolationMethod::Nearest) {
@@ -905,15 +582,7 @@ fn test_interpolation_extreme_subpixel() {
     ];
 
     for &(x, y) in &extreme_positions {
-        let val = interpolate_pixel(
-            &input_buf,
-            x,
-            y,
-            InterpolationMethod::Lanczos3,
-            0.0,
-            true,
-            false,
-        );
+        let val = interpolate_pixel(&input_buf, x, y, InterpolationMethod::Lanczos3);
 
         // Should not produce NaN or infinity
         assert!(

@@ -31,7 +31,6 @@ use glam::DVec2;
 /// * `output_row` - Output buffer for this row
 /// * `output_y` - Y coordinate of this row
 /// * `inverse` - Inverse transform (output -> input)
-/// * `border_value` - Value for out-of-bounds pixels
 #[inline]
 pub(crate) fn warp_row_bilinear_simd(
     input: &[f32],
@@ -40,7 +39,6 @@ pub(crate) fn warp_row_bilinear_simd(
     output_row: &mut [f32],
     output_y: usize,
     inverse: &Transform,
-    border_value: f32,
 ) {
     #[cfg(target_arch = "x86_64")]
     {
@@ -54,7 +52,6 @@ pub(crate) fn warp_row_bilinear_simd(
                     output_row,
                     output_y,
                     inverse,
-                    border_value,
                 );
             }
             return;
@@ -68,7 +65,6 @@ pub(crate) fn warp_row_bilinear_simd(
                     output_row,
                     output_y,
                     inverse,
-                    border_value,
                 );
             }
             return;
@@ -83,7 +79,6 @@ pub(crate) fn warp_row_bilinear_simd(
         output_row,
         output_y,
         inverse,
-        border_value,
     );
 }
 
@@ -95,21 +90,13 @@ pub(crate) fn warp_row_bilinear_scalar(
     output_row: &mut [f32],
     output_y: usize,
     inverse: &Transform,
-    border_value: f32,
 ) {
     let y = output_y as f64;
 
     for (x, out_pixel) in output_row.iter_mut().enumerate() {
         let src = inverse.apply(DVec2::new(x as f64, y));
 
-        *out_pixel = bilinear_sample(
-            input,
-            input_width,
-            input_height,
-            src.x as f32,
-            src.y as f32,
-            border_value,
-        );
+        *out_pixel = bilinear_sample(input, input_width, input_height, src.x as f32, src.y as f32);
     }
 }
 
@@ -117,14 +104,7 @@ pub(crate) fn warp_row_bilinear_scalar(
 ///
 /// This is the SIMD-compatible implementation using f32 coordinates for fast warping.
 #[inline]
-pub(crate) fn bilinear_sample(
-    input: &[f32],
-    width: usize,
-    height: usize,
-    x: f32,
-    y: f32,
-    border: f32,
-) -> f32 {
+pub(crate) fn bilinear_sample(input: &[f32], width: usize, height: usize, x: f32, y: f32) -> f32 {
     let x0 = x.floor() as i32;
     let y0 = y.floor() as i32;
     let x1 = x0 + 1;
@@ -133,10 +113,10 @@ pub(crate) fn bilinear_sample(
     let fx = x - x0 as f32;
     let fy = y - y0 as f32;
 
-    let p00 = sample_pixel(input, width, height, x0, y0, border);
-    let p10 = sample_pixel(input, width, height, x1, y0, border);
-    let p01 = sample_pixel(input, width, height, x0, y1, border);
-    let p11 = sample_pixel(input, width, height, x1, y1, border);
+    let p00 = sample_pixel(input, width, height, x0, y0);
+    let p10 = sample_pixel(input, width, height, x1, y0);
+    let p01 = sample_pixel(input, width, height, x0, y1);
+    let p11 = sample_pixel(input, width, height, x1, y1);
 
     let top = p00 + fx * (p10 - p00);
     let bottom = p01 + fx * (p11 - p01);
@@ -146,9 +126,9 @@ pub(crate) fn bilinear_sample(
 
 /// Sample a pixel with bounds checking.
 #[inline]
-fn sample_pixel(data: &[f32], width: usize, height: usize, x: i32, y: i32, border: f32) -> f32 {
+fn sample_pixel(data: &[f32], width: usize, height: usize, x: i32, y: i32) -> f32 {
     if x < 0 || y < 0 || x >= width as i32 || y >= height as i32 {
-        border
+        0.0
     } else {
         data[y as usize * width + x as usize]
     }
@@ -169,12 +149,8 @@ fn sample_pixel(data: &[f32], width: usize, height: usize, x: i32, y: i32, borde
 /// * `output_row` - Output buffer for this row
 /// * `output_y` - Y coordinate of this row
 /// * `inverse` - Inverse transform (output -> input)
-/// * `border_value` - Value for out-of-bounds pixels
-/// * `normalize` - Whether to normalize kernel weights
-/// * `clamp` - Whether to clamp output to neighborhood min/max
 #[cfg(test)]
 #[inline]
-#[allow(clippy::too_many_arguments)]
 pub fn warp_row_lanczos3(
     input: &[f32],
     input_width: usize,
@@ -182,9 +158,6 @@ pub fn warp_row_lanczos3(
     output_row: &mut [f32],
     output_y: usize,
     inverse: &Transform,
-    border_value: f32,
-    normalize: bool,
-    clamp: bool,
 ) {
     warp_row_lanczos3_scalar(
         input,
@@ -193,15 +166,11 @@ pub fn warp_row_lanczos3(
         output_row,
         output_y,
         inverse,
-        border_value,
-        normalize,
-        clamp,
     );
 }
 
 /// Scalar implementation of row warping with Lanczos3 interpolation.
 #[cfg(test)]
-#[allow(clippy::too_many_arguments)]
 pub fn warp_row_lanczos3_scalar(
     input: &[f32],
     input_width: usize,
@@ -209,9 +178,6 @@ pub fn warp_row_lanczos3_scalar(
     output_row: &mut [f32],
     output_y: usize,
     inverse: &Transform,
-    border_value: f32,
-    normalize: bool,
-    clamp: bool,
 ) {
     let y = output_y as f64;
     const A: usize = 3; // Lanczos3 kernel radius
@@ -240,48 +206,34 @@ pub fn warp_row_lanczos3_scalar(
             *w = lanczos_kernel(dy, A as f32);
         }
 
-        // Normalize weights if requested
-        if normalize {
-            let wx_sum: f32 = wx.iter().sum();
-            let wy_sum: f32 = wy.iter().sum();
-            if wx_sum.abs() > 1e-10 {
-                wx.iter_mut().for_each(|w| *w /= wx_sum);
-            }
-            if wy_sum.abs() > 1e-10 {
-                wy.iter_mut().for_each(|w| *w /= wy_sum);
-            }
+        // Normalize weights to preserve brightness
+        let wx_sum: f32 = wx.iter().sum();
+        let wy_sum: f32 = wy.iter().sum();
+        if wx_sum.abs() > 1e-10 {
+            wx.iter_mut().for_each(|w| *w /= wx_sum);
+        }
+        if wy_sum.abs() > 1e-10 {
+            wy.iter_mut().for_each(|w| *w /= wy_sum);
         }
 
         // Compute weighted sum
         let mut sum = 0.0f32;
-        let mut min_val = f32::MAX;
-        let mut max_val = f32::MIN;
 
         for (j, &wyj) in wy.iter().enumerate() {
             let py = y0 - 2 + j as i32;
             for (i, &wxi) in wx.iter().enumerate() {
                 let px = x0 - 2 + i as i32;
-                let pixel = sample_pixel(input, input_width, input_height, px, py, border_value);
+                let pixel = sample_pixel(input, input_width, input_height, px, py);
                 sum += pixel * wxi * wyj;
-
-                if clamp {
-                    min_val = min_val.min(pixel);
-                    max_val = max_val.max(pixel);
-                }
             }
         }
 
-        *out_pixel = if clamp && min_val <= max_val {
-            sum.clamp(min_val, max_val)
-        } else {
-            sum
-        };
+        *out_pixel = sum;
     }
 }
 
 /// Warp an entire image using Lanczos3 interpolation.
 #[cfg(test)]
-#[allow(clippy::too_many_arguments)]
 pub fn warp_image_lanczos3(
     input: &[f32],
     input_width: usize,
@@ -289,11 +241,8 @@ pub fn warp_image_lanczos3(
     output_width: usize,
     output_height: usize,
     transform: &Transform,
-    border_value: f32,
-    normalize: bool,
-    clamp: bool,
 ) -> Vec<f32> {
-    let mut output = vec![border_value; output_width * output_height];
+    let mut output = vec![0.0; output_width * output_height];
     let inverse = transform.inverse();
 
     for y in 0..output_height {
@@ -306,9 +255,6 @@ pub fn warp_image_lanczos3(
             &mut output[row_start..row_end],
             y,
             &inverse,
-            border_value,
-            normalize,
-            clamp,
         );
     }
 
@@ -330,15 +276,7 @@ mod tests {
         let mut output_row = vec![0.0f32; width];
         let y = 50;
 
-        warp_row_bilinear_simd(
-            input.pixels(),
-            width,
-            height,
-            &mut output_row,
-            y,
-            &identity,
-            0.0,
-        );
+        warp_row_bilinear_simd(input.pixels(), width, height, &mut output_row, y, &identity);
 
         // With identity transform, output should match input
         for x in 1..width - 1 {
@@ -366,15 +304,7 @@ mod tests {
         let mut output_row = vec![0.0f32; width];
         let y = 50;
 
-        warp_row_bilinear_simd(
-            input.pixels(),
-            width,
-            height,
-            &mut output_row,
-            y,
-            &inverse,
-            -1.0,
-        );
+        warp_row_bilinear_simd(input.pixels(), width, height, &mut output_row, y, &inverse);
 
         // Check that pixels are shifted
         for (x, &output_val) in output_row.iter().enumerate().skip(10).take(width - 20) {
@@ -421,7 +351,6 @@ mod tests {
                     &mut output_simd,
                     y,
                     &inverse,
-                    -1.0,
                 );
 
                 warp_row_bilinear_scalar(
@@ -431,7 +360,6 @@ mod tests {
                     &mut output_scalar,
                     y,
                     &inverse,
-                    -1.0,
                 );
 
                 for x in 0..width {
@@ -471,8 +399,8 @@ mod tests {
             let mut output_scalar = vec![0.0f32; width];
             let y = height / 2;
 
-            warp_row_bilinear_simd(&input, width, height, &mut output_simd, y, &identity, 0.0);
-            warp_row_bilinear_scalar(&input, width, height, &mut output_scalar, y, &identity, 0.0);
+            warp_row_bilinear_simd(&input, width, height, &mut output_simd, y, &identity);
+            warp_row_bilinear_scalar(&input, width, height, &mut output_scalar, y, &identity);
 
             for x in 0..width {
                 assert!(
@@ -497,17 +425,7 @@ mod tests {
         let mut output_row = vec![0.0f32; width];
         let y = 50;
 
-        warp_row_lanczos3(
-            input.pixels(),
-            width,
-            height,
-            &mut output_row,
-            y,
-            &identity,
-            0.0,
-            true,
-            false,
-        );
+        warp_row_lanczos3(input.pixels(), width, height, &mut output_row, y, &identity);
 
         // With identity transform, output should match input (within Lanczos ringing tolerance)
         for x in 3..width - 3 {
@@ -541,17 +459,7 @@ mod tests {
             let mut output = vec![0.0f32; width];
             let y = height / 2;
 
-            warp_row_lanczos3(
-                &input,
-                width,
-                height,
-                &mut output,
-                y,
-                &inverse,
-                0.0,
-                true,
-                false,
-            );
+            warp_row_lanczos3(&input, width, height, &mut output, y, &inverse);
 
             // Just verify no panics and output is reasonable
             for (x, &val) in output
@@ -579,17 +487,7 @@ mod tests {
 
         let transform = Transform::identity();
 
-        let output = warp_image_lanczos3(
-            input.pixels(),
-            width,
-            height,
-            width,
-            height,
-            &transform,
-            0.0,
-            true,
-            false,
-        );
+        let output = warp_image_lanczos3(input.pixels(), width, height, width, height, &transform);
 
         assert_eq!(output.len(), width * height);
 

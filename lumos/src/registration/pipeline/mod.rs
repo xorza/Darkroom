@@ -237,7 +237,7 @@ pub fn warp_to_reference_image(
             let channel_data = target.channel(c);
             let channel = Buffer2::new(width, height, channel_data.to_vec());
             let inverse = transform.inverse();
-            warp_image(&channel, width, height, &inverse, method, 0.0, true, false)
+            warp_image(&channel, width, height, &inverse, method)
         })
         .collect();
 

@@ -43,9 +43,6 @@ fn transform_image(
         height,
         &transform,
         InterpolationMethod::Bilinear,
-        0.0,
-        true,
-        false,
     )
     .into_vec()
 }
@@ -60,9 +57,6 @@ fn translate_image(src_pixels: &[f32], width: usize, height: usize, dx: f64, dy:
         height,
         &transform,
         InterpolationMethod::Bilinear,
-        0.0,
-        true,
-        false,
     )
     .into_vec()
 }

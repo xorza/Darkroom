@@ -23,7 +23,6 @@ pub unsafe fn warp_row_bilinear_avx2(
     output_row: &mut [f32],
     output_y: usize,
     inverse: &Transform,
-    border_value: f32,
 ) {
     unsafe {
         let output_width = output_row.len();
@@ -117,14 +116,10 @@ pub unsafe fn warp_row_bilinear_avx2(
                 let ix1 = x1_arr[i] as i32;
                 let iy1 = y1_arr[i] as i32;
 
-                p00[i] =
-                    sample_pixel_scalar(input, input_width, input_height, ix0, iy0, border_value);
-                p10[i] =
-                    sample_pixel_scalar(input, input_width, input_height, ix1, iy0, border_value);
-                p01[i] =
-                    sample_pixel_scalar(input, input_width, input_height, ix0, iy1, border_value);
-                p11[i] =
-                    sample_pixel_scalar(input, input_width, input_height, ix1, iy1, border_value);
+                p00[i] = sample_pixel_scalar(input, input_width, input_height, ix0, iy0);
+                p10[i] = sample_pixel_scalar(input, input_width, input_height, ix1, iy0);
+                p01[i] = sample_pixel_scalar(input, input_width, input_height, ix0, iy1);
+                p11[i] = sample_pixel_scalar(input, input_width, input_height, ix1, iy1);
             }
 
             let p00_vec = _mm256_loadu_ps(p00.as_ptr());
@@ -154,7 +149,6 @@ pub unsafe fn warp_row_bilinear_avx2(
                 input_height,
                 src.x as f32,
                 src.y as f32,
-                border_value,
             );
         }
     }
@@ -175,7 +169,6 @@ pub unsafe fn warp_row_bilinear_sse(
     output_row: &mut [f32],
     output_y: usize,
     inverse: &Transform,
-    border_value: f32,
 ) {
     unsafe {
         let output_width = output_row.len();
@@ -255,14 +248,10 @@ pub unsafe fn warp_row_bilinear_sse(
                 let ix1 = ix0 + 1;
                 let iy1 = iy0 + 1;
 
-                p00[i] =
-                    sample_pixel_scalar(input, input_width, input_height, ix0, iy0, border_value);
-                p10[i] =
-                    sample_pixel_scalar(input, input_width, input_height, ix1, iy0, border_value);
-                p01[i] =
-                    sample_pixel_scalar(input, input_width, input_height, ix0, iy1, border_value);
-                p11[i] =
-                    sample_pixel_scalar(input, input_width, input_height, ix1, iy1, border_value);
+                p00[i] = sample_pixel_scalar(input, input_width, input_height, ix0, iy0);
+                p10[i] = sample_pixel_scalar(input, input_width, input_height, ix1, iy0);
+                p01[i] = sample_pixel_scalar(input, input_width, input_height, ix0, iy1);
+                p11[i] = sample_pixel_scalar(input, input_width, input_height, ix1, iy1);
             }
 
             let p00_vec = _mm_loadu_ps(p00.as_ptr());
@@ -289,7 +278,6 @@ pub unsafe fn warp_row_bilinear_sse(
                 input_height,
                 src.x as f32,
                 src.y as f32,
-                border_value,
             );
         }
     }
@@ -297,16 +285,9 @@ pub unsafe fn warp_row_bilinear_sse(
 
 /// Scalar pixel sampling with bounds checking.
 #[inline]
-fn sample_pixel_scalar(
-    data: &[f32],
-    width: usize,
-    height: usize,
-    x: i32,
-    y: i32,
-    border: f32,
-) -> f32 {
+fn sample_pixel_scalar(data: &[f32], width: usize, height: usize, x: i32, y: i32) -> f32 {
     if x < 0 || y < 0 || x >= width as i32 || y >= height as i32 {
-        border
+        0.0
     } else {
         data[y as usize * width + x as usize]
     }
@@ -338,15 +319,7 @@ mod tests {
         let y = 30;
 
         unsafe {
-            warp_row_bilinear_avx2(
-                input.pixels(),
-                width,
-                height,
-                &mut output_avx2,
-                y,
-                &inverse,
-                -1.0,
-            );
+            warp_row_bilinear_avx2(input.pixels(), width, height, &mut output_avx2, y, &inverse);
         }
 
         super::super::warp_row_bilinear_scalar(
@@ -356,7 +329,6 @@ mod tests {
             &mut output_scalar,
             y,
             &inverse,
-            -1.0,
         );
 
         for x in 0..width {
@@ -389,15 +361,7 @@ mod tests {
         let y = 25;
 
         unsafe {
-            warp_row_bilinear_sse(
-                input.pixels(),
-                width,
-                height,
-                &mut output_sse,
-                y,
-                &inverse,
-                0.0,
-            );
+            warp_row_bilinear_sse(input.pixels(), width, height, &mut output_sse, y, &inverse);
         }
 
         super::super::warp_row_bilinear_scalar(
@@ -407,7 +371,6 @@ mod tests {
             &mut output_scalar,
             y,
             &inverse,
-            0.0,
         );
 
         for x in 0..width {

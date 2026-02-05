@@ -269,18 +269,7 @@ fn interpolate_bicubic(
 }
 
 /// Lanczos interpolation.
-#[allow(clippy::too_many_arguments)]
-fn interpolate_lanczos(
-    data: &[f32],
-    width: usize,
-    height: usize,
-    x: f32,
-    y: f32,
-    border: f32,
-    a: usize,
-    normalize: bool,
-    clamp: bool,
-) -> f32 {
+fn interpolate_lanczos(data: &[f32], width: usize, height: usize, x: f32, y: f32, a: usize) -> f32 {
     let x0 = x.floor() as i32;
     let y0 = y.floor() as i32;
     let fx = x - x0 as f32;
@@ -303,100 +292,43 @@ fn interpolate_lanczos(
         *w = lanczos_kernel(dy, a_f32);
     }
 
-    // Normalize weights if requested
-    if normalize {
-        let wx_sum: f32 = wx.iter().sum();
-        let wy_sum: f32 = wy.iter().sum();
-        if wx_sum.abs() > 1e-10 {
-            wx.iter_mut().for_each(|w| *w /= wx_sum);
-        }
-        if wy_sum.abs() > 1e-10 {
-            wy.iter_mut().for_each(|w| *w /= wy_sum);
-        }
+    // Normalize weights to preserve brightness
+    let wx_sum: f32 = wx.iter().sum();
+    let wy_sum: f32 = wy.iter().sum();
+    if wx_sum.abs() > 1e-10 {
+        wx.iter_mut().for_each(|w| *w /= wx_sum);
+    }
+    if wy_sum.abs() > 1e-10 {
+        wy.iter_mut().for_each(|w| *w /= wy_sum);
     }
 
-    // Compute weighted sum, tracking min/max for clamping
+    // Compute weighted sum
     let mut sum = 0.0;
-    let mut min_val = f32::MAX;
-    let mut max_val = f32::MIN;
 
     for (j, &wyj) in wy.iter().enumerate() {
         let py = y0 - a_i32 + 1 + j as i32;
         for (i, &wxi) in wx.iter().enumerate() {
             let px = x0 - a_i32 + 1 + i as i32;
-            let pixel = sample_pixel(data, width, height, px, py, border);
+            let pixel = sample_pixel(data, width, height, px, py, 0.0);
             sum += pixel * wxi * wyj;
-
-            if clamp {
-                min_val = min_val.min(pixel);
-                max_val = max_val.max(pixel);
-            }
         }
     }
 
-    if clamp && min_val <= max_val {
-        sum.clamp(min_val, max_val)
-    } else {
-        sum
-    }
+    sum
 }
 
 /// Interpolate a single pixel at sub-pixel coordinates.
 #[cfg(test)]
-pub fn interpolate_pixel(
-    data: &Buffer2<f32>,
-    x: f32,
-    y: f32,
-    method: InterpolationMethod,
-    border_value: f32,
-    normalize_kernel: bool,
-    clamp_output: bool,
-) -> f32 {
+pub fn interpolate_pixel(data: &Buffer2<f32>, x: f32, y: f32, method: InterpolationMethod) -> f32 {
     let width = data.width();
     let height = data.height();
     match method {
-        InterpolationMethod::Nearest => {
-            interpolate_nearest(data, width, height, x, y, border_value)
-        }
-        InterpolationMethod::Bilinear => {
-            interpolate_bilinear(data, width, height, x, y, border_value)
-        }
-        InterpolationMethod::Bicubic => {
-            interpolate_bicubic(data, width, height, x, y, border_value)
-        }
-        InterpolationMethod::Lanczos2 => interpolate_lanczos(
-            data,
-            width,
-            height,
-            x,
-            y,
-            border_value,
-            2,
-            normalize_kernel,
-            clamp_output,
-        ),
-        InterpolationMethod::Lanczos3 => interpolate_lanczos(
-            data,
-            width,
-            height,
-            x,
-            y,
-            border_value,
-            3,
-            normalize_kernel,
-            clamp_output,
-        ),
-        InterpolationMethod::Lanczos4 => interpolate_lanczos(
-            data,
-            width,
-            height,
-            x,
-            y,
-            border_value,
-            4,
-            normalize_kernel,
-            clamp_output,
-        ),
+        InterpolationMethod::Nearest => interpolate_nearest(data, width, height, x, y, 0.0),
+        InterpolationMethod::Bilinear => interpolate_bilinear(data, width, height, x, y, 0.0),
+        InterpolationMethod::Bicubic => interpolate_bicubic(data, width, height, x, y, 0.0),
+        InterpolationMethod::Lanczos2 => interpolate_lanczos(data, width, height, x, y, 2),
+        InterpolationMethod::Lanczos3 => interpolate_lanczos(data, width, height, x, y, 3),
+        InterpolationMethod::Lanczos4 => interpolate_lanczos(data, width, height, x, y, 4),
     }
 }
 
@@ -417,28 +349,21 @@ pub fn interpolate_pixel(
 /// * `output_height` - Height of output image
 /// * `transform` - Transformation from input to output coordinates
 /// * `method` - Interpolation method
-/// * `border_value` - Value for out-of-bounds pixels
-/// * `normalize_kernel` - Whether to normalize Lanczos kernel
-/// * `clamp_output` - Whether to clamp output to reduce ringing
 ///
 /// # Returns
 ///
 /// Output image data
-#[allow(clippy::too_many_arguments)]
 pub fn warp_image(
     input: &Buffer2<f32>,
     output_width: usize,
     output_height: usize,
     transform: &Transform,
     method: InterpolationMethod,
-    border_value: f32,
-    normalize_kernel: bool,
-    clamp_output: bool,
 ) -> Buffer2<f32> {
     let input_width = input.width();
     let input_height = input.height();
 
-    let mut output = vec![border_value; output_width * output_height];
+    let mut output = vec![0.0; output_width * output_height];
 
     // Compute inverse transform to map output -> input
     let inverse = transform.inverse();
@@ -463,7 +388,6 @@ pub fn warp_image(
                         &mut chunk[row_start..row_end],
                         y,
                         &inverse,
-                        border_value,
                     );
                 }
             });
@@ -492,9 +416,6 @@ pub fn warp_image(
                         src.x as f32,
                         src.y as f32,
                         method,
-                        border_value,
-                        normalize_kernel,
-                        clamp_output,
                     );
                 }
             }
@@ -504,7 +425,6 @@ pub fn warp_image(
 }
 
 /// Internal interpolate_pixel that takes raw slice parameters for use in tight loops.
-#[allow(clippy::too_many_arguments)]
 #[inline]
 fn interpolate_pixel_internal(
     data: &[f32],
@@ -513,52 +433,13 @@ fn interpolate_pixel_internal(
     x: f32,
     y: f32,
     method: InterpolationMethod,
-    border_value: f32,
-    normalize_kernel: bool,
-    clamp_output: bool,
 ) -> f32 {
     match method {
-        InterpolationMethod::Nearest => {
-            interpolate_nearest(data, width, height, x, y, border_value)
-        }
-        InterpolationMethod::Bilinear => {
-            interpolate_bilinear(data, width, height, x, y, border_value)
-        }
-        InterpolationMethod::Bicubic => {
-            interpolate_bicubic(data, width, height, x, y, border_value)
-        }
-        InterpolationMethod::Lanczos2 => interpolate_lanczos(
-            data,
-            width,
-            height,
-            x,
-            y,
-            border_value,
-            2,
-            normalize_kernel,
-            clamp_output,
-        ),
-        InterpolationMethod::Lanczos3 => interpolate_lanczos(
-            data,
-            width,
-            height,
-            x,
-            y,
-            border_value,
-            3,
-            normalize_kernel,
-            clamp_output,
-        ),
-        InterpolationMethod::Lanczos4 => interpolate_lanczos(
-            data,
-            width,
-            height,
-            x,
-            y,
-            border_value,
-            4,
-            normalize_kernel,
-            clamp_output,
-        ),
+        InterpolationMethod::Nearest => interpolate_nearest(data, width, height, x, y, 0.0),
+        InterpolationMethod::Bilinear => interpolate_bilinear(data, width, height, x, y, 0.0),
+        InterpolationMethod::Bicubic => interpolate_bicubic(data, width, height, x, y, 0.0),
+        InterpolationMethod::Lanczos2 => interpolate_lanczos(data, width, height, x, y, 2),
+        InterpolationMethod::Lanczos3 => interpolate_lanczos(data, width, height, x, y, 3),
+        InterpolationMethod::Lanczos4 => interpolate_lanczos(data, width, height, x, y, 4),
     }
 }
