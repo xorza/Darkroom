@@ -114,10 +114,12 @@ pub fn optimize<const N: usize, M: LMModel<N>>(
         if new_chi2 < prev_chi2 {
             params = new_params;
             lambda *= config.lambda_down;
+
+            let chi2_rel_change = (prev_chi2 - new_chi2) / prev_chi2.max(1e-30);
             prev_chi2 = new_chi2;
 
             let max_delta = delta.iter().copied().fold(0.0f64, |a, d| a.max(d.abs()));
-            if max_delta < config.convergence_threshold {
+            if max_delta < config.convergence_threshold || chi2_rel_change < 1e-10 {
                 converged = true;
                 break;
             }
@@ -129,6 +131,12 @@ pub fn optimize<const N: usize, M: LMModel<N>>(
                 break;
             }
         } else {
+            let chi2_rel_diff = (new_chi2 - prev_chi2) / prev_chi2.max(1e-30);
+            if chi2_rel_diff < 1e-10 {
+                converged = true;
+                break;
+            }
+
             lambda *= config.lambda_up;
             if lambda > 1e10 {
                 break;
@@ -142,19 +150,6 @@ pub fn optimize<const N: usize, M: LMModel<N>>(
         converged,
         iterations,
     }
-}
-
-/// Run L-M optimization for 6-parameter model.
-#[inline]
-pub fn optimize_6<M: LMModel<6>>(
-    model: &M,
-    data_x: &[f64],
-    data_y: &[f64],
-    data_z: &[f64],
-    initial_params: [f64; 6],
-    config: &LMConfig,
-) -> LMResult<6> {
-    optimize(model, data_x, data_y, data_z, initial_params, config)
 }
 
 fn compute_chi2<const N: usize, M: LMModel<N>>(

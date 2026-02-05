@@ -15,8 +15,7 @@ mod bench;
 #[cfg(test)]
 mod tests;
 
-use super::linear_solver::solve;
-use super::lm_optimizer::{LMConfig, LMModel, LMResult, compute_hessian_gradient, optimize_6};
+use super::lm_optimizer::{LMConfig, LMModel, LMResult, optimize};
 use super::{estimate_sigma_from_moments, extract_stamp};
 use crate::common::Buffer2;
 use crate::math::FWHM_TO_SIGMA;
@@ -66,8 +65,53 @@ pub struct MoffatFitResult {
     pub iterations: usize,
 }
 
+/// Moffat model with fixed beta (5 parameters).
+/// Parameters: [x0, y0, amplitude, alpha, background]
+#[derive(Debug)]
+pub(crate) struct MoffatFixedBeta {
+    pub stamp_radius: f64,
+    pub beta: f64,
+}
+
+impl LMModel<5> for MoffatFixedBeta {
+    #[inline]
+    fn evaluate(&self, x: f64, y: f64, params: &[f64; 5]) -> f64 {
+        let [x0, y0, amp, alpha, bg] = *params;
+        let r2 = (x - x0).powi(2) + (y - y0).powi(2);
+        amp * (1.0 + r2 / (alpha * alpha)).powf(-self.beta) + bg
+    }
+
+    #[inline]
+    fn jacobian_row(&self, x: f64, y: f64, params: &[f64; 5]) -> [f64; 5] {
+        let [x0, y0, amp, alpha, _bg] = *params;
+        let alpha2 = alpha * alpha;
+        let dx = x - x0;
+        let dy = y - y0;
+        let r2 = dx * dx + dy * dy;
+        let u = 1.0 + r2 / alpha2;
+        let u_neg_beta = u.powf(-self.beta);
+        let u_neg_beta_m1 = u_neg_beta / u;
+        let common = 2.0 * amp * self.beta / alpha2 * u_neg_beta_m1;
+
+        [
+            common * dx,         // df/dx0
+            common * dy,         // df/dy0
+            u_neg_beta,          // df/damp
+            common * r2 / alpha, // df/dalpha
+            1.0,                 // df/dbg
+        ]
+    }
+
+    #[inline]
+    fn constrain(&self, params: &mut [f64; 5]) {
+        params[2] = params[2].max(0.01); // Amplitude > 0
+        params[3] = params[3].clamp(0.5, self.stamp_radius); // Alpha
+    }
+}
+
 /// Moffat model with variable beta (6 parameters).
 /// Parameters: [x0, y0, amplitude, alpha, beta, background]
+#[derive(Debug)]
 pub(crate) struct MoffatVariableBeta {
     pub stamp_radius: f64,
 }
@@ -193,15 +237,12 @@ fn fit_with_fixed_beta(
         background as f64,
     ];
 
-    let result = optimize_moffat_fixed_beta(
-        data_x,
-        data_y,
-        data_z,
-        initial_params,
-        config.fixed_beta as f64,
-        stamp_radius as f64,
-        &config.lm,
-    );
+    let model = MoffatFixedBeta {
+        stamp_radius: stamp_radius as f64,
+        beta: config.fixed_beta as f64,
+    };
+
+    let result = optimize(&model, data_x, data_y, data_z, initial_params, &config.lm);
 
     let [x0, y0, amplitude, alpha, bg] = result.params;
     let result_pos = Vec2::new(x0 as f32, y0 as f32);
@@ -251,7 +292,7 @@ fn fit_with_variable_beta(
         stamp_radius: stamp_radius as f64,
     };
 
-    let result = optimize_6(&model, data_x, data_y, data_z, initial_params, &config.lm);
+    let result = optimize(&model, data_x, data_y, data_z, initial_params, &config.lm);
 
     let [x0, y0, amplitude, alpha, beta, bg] = result.params;
     let result_pos = Vec2::new(x0 as f32, y0 as f32);
@@ -298,178 +339,4 @@ pub fn alpha_beta_to_fwhm(alpha: f32, beta: f32) -> f32 {
 #[inline]
 pub fn fwhm_beta_to_alpha(fwhm: f32, beta: f32) -> f32 {
     fwhm / (2.0 * (2.0f32.powf(1.0 / beta) - 1.0).sqrt())
-}
-
-// ============================================================================
-// Fixed-beta Moffat model evaluation and Jacobian (5 parameters)
-// ============================================================================
-
-/// Compute Jacobian rows and residuals for fixed-beta Moffat model.
-fn fill_jacobian_residuals_fixed_beta(
-    data_x: &[f64],
-    data_y: &[f64],
-    data_z: &[f64],
-    params: &[f64; 5],
-    beta: f64,
-    jacobian: &mut Vec<[f64; 5]>,
-    residuals: &mut Vec<f64>,
-) {
-    let n = data_x.len();
-    jacobian.clear();
-    residuals.clear();
-    jacobian.reserve(n);
-    residuals.reserve(n);
-
-    let [x0, y0, amp, alpha, bg] = *params;
-    let alpha2 = alpha * alpha;
-    let neg_beta = -beta;
-
-    for i in 0..n {
-        let x = data_x[i];
-        let y = data_y[i];
-        let z = data_z[i];
-
-        let dx = x - x0;
-        let dy = y - y0;
-        let r2 = dx * dx + dy * dy;
-        let u = 1.0 + r2 / alpha2;
-        let u_neg_beta = u.powf(neg_beta);
-        let u_neg_beta_m1 = u_neg_beta / u;
-        let model = amp * u_neg_beta + bg;
-
-        residuals.push(z - model);
-
-        let common = 2.0 * amp * beta / alpha2 * u_neg_beta_m1;
-        jacobian.push([
-            common * dx,
-            common * dy,
-            u_neg_beta,
-            common * r2 / alpha,
-            1.0,
-        ]);
-    }
-}
-
-/// Compute chi² for fixed-beta Moffat model.
-fn compute_chi2_fixed_beta(
-    data_x: &[f64],
-    data_y: &[f64],
-    data_z: &[f64],
-    params: &[f64; 5],
-    beta: f64,
-) -> f64 {
-    let [x0, y0, amp, alpha, bg] = *params;
-    let alpha2 = alpha * alpha;
-    let mut chi2 = 0.0f64;
-
-    for i in 0..data_x.len() {
-        let dx = data_x[i] - x0;
-        let dy = data_y[i] - y0;
-        let r2 = dx * dx + dy * dy;
-        let u = 1.0 + r2 / alpha2;
-        let model = amp * u.powf(-beta) + bg;
-        let residual = data_z[i] - model;
-        chi2 += residual * residual;
-    }
-
-    chi2
-}
-
-// ============================================================================
-// L-M optimizer for fixed-beta Moffat
-// ============================================================================
-
-/// L-M optimizer for Moffat with fixed beta using f64 arithmetic.
-fn optimize_moffat_fixed_beta(
-    data_x: &[f64],
-    data_y: &[f64],
-    data_z: &[f64],
-    initial_params: [f64; 5],
-    beta: f64,
-    stamp_radius: f64,
-    config: &LMConfig,
-) -> LMResult<5> {
-    let mut params = initial_params;
-    let mut lambda = config.initial_lambda;
-    let mut prev_chi2 = compute_chi2_fixed_beta(data_x, data_y, data_z, &params, beta);
-    let mut converged = false;
-    let mut iterations = 0;
-
-    let n = data_x.len();
-    let mut jacobian = Vec::with_capacity(n);
-    let mut residuals = Vec::with_capacity(n);
-
-    for iter in 0..config.max_iterations {
-        iterations = iter + 1;
-
-        fill_jacobian_residuals_fixed_beta(
-            data_x,
-            data_y,
-            data_z,
-            &params,
-            beta,
-            &mut jacobian,
-            &mut residuals,
-        );
-
-        let (hessian, gradient) = compute_hessian_gradient(&jacobian, &residuals);
-
-        let mut damped_hessian = hessian;
-        for (i, row) in damped_hessian.iter_mut().enumerate() {
-            row[i] *= 1.0 + lambda;
-        }
-
-        let Some(delta) = solve(&damped_hessian, &gradient) else {
-            break;
-        };
-
-        let mut new_params = params;
-        for (p, d) in new_params.iter_mut().zip(delta.iter()) {
-            *p += d;
-        }
-        // Apply constraints
-        new_params[2] = new_params[2].max(0.01); // Amplitude > 0
-        new_params[3] = new_params[3].clamp(0.5, stamp_radius); // Alpha
-
-        let new_chi2 = compute_chi2_fixed_beta(data_x, data_y, data_z, &new_params, beta);
-
-        if new_chi2 < prev_chi2 {
-            params = new_params;
-            lambda *= config.lambda_down;
-
-            let chi2_rel_change = (prev_chi2 - new_chi2) / prev_chi2.max(1e-30);
-            prev_chi2 = new_chi2;
-
-            let max_delta = delta.iter().copied().fold(0.0f64, |a, d| a.max(d.abs()));
-            if max_delta < config.convergence_threshold || chi2_rel_change < 1e-10 {
-                converged = true;
-                break;
-            }
-            // Early exit when only position accuracy matters
-            if delta[0].abs() < config.position_convergence_threshold
-                && delta[1].abs() < config.position_convergence_threshold
-            {
-                converged = true;
-                break;
-            }
-        } else {
-            let chi2_rel_diff = (new_chi2 - prev_chi2) / prev_chi2.max(1e-30);
-            if chi2_rel_diff < 1e-10 {
-                converged = true;
-                break;
-            }
-
-            lambda *= config.lambda_up;
-            if lambda > 1e10 {
-                break;
-            }
-        }
-    }
-
-    LMResult {
-        params,
-        chi2: prev_chi2,
-        converged,
-        iterations,
-    }
 }

@@ -11,8 +11,7 @@ mod bench;
 #[cfg(test)]
 mod tests;
 
-use super::linear_solver::solve;
-use super::lm_optimizer::{LMConfig, LMResult, compute_hessian_gradient};
+use super::lm_optimizer::{LMConfig, LMModel, LMResult, optimize};
 use super::{estimate_sigma_from_moments, extract_stamp};
 use crate::common::Buffer2;
 use glam::Vec2;
@@ -37,6 +36,52 @@ pub struct GaussianFitResult {
     pub converged: bool,
     /// Number of iterations used.
     pub iterations: usize,
+}
+
+/// 2D Gaussian model for L-M optimization (6 parameters).
+/// Parameters: [x0, y0, amplitude, sigma_x, sigma_y, background]
+#[derive(Debug)]
+pub(crate) struct Gaussian2D {
+    pub stamp_radius: f64,
+}
+
+impl LMModel<6> for Gaussian2D {
+    #[inline]
+    fn evaluate(&self, x: f64, y: f64, params: &[f64; 6]) -> f64 {
+        let [x0, y0, amp, sigma_x, sigma_y, bg] = *params;
+        let dx = x - x0;
+        let dy = y - y0;
+        let exponent = -0.5 * (dx * dx / (sigma_x * sigma_x) + dy * dy / (sigma_y * sigma_y));
+        amp * exponent.exp() + bg
+    }
+
+    #[inline]
+    fn jacobian_row(&self, x: f64, y: f64, params: &[f64; 6]) -> [f64; 6] {
+        let [x0, y0, amp, sigma_x, sigma_y, _bg] = *params;
+        let sigma_x2 = sigma_x * sigma_x;
+        let sigma_y2 = sigma_y * sigma_y;
+        let dx = x - x0;
+        let dy = y - y0;
+        let exponent = -0.5 * (dx * dx / sigma_x2 + dy * dy / sigma_y2);
+        let exp_val = exponent.exp();
+        let amp_exp = amp * exp_val;
+
+        [
+            amp_exp * dx / sigma_x2,                  // df/dx0
+            amp_exp * dy / sigma_y2,                  // df/dy0
+            exp_val,                                  // df/damp
+            amp_exp * dx * dx / (sigma_x2 * sigma_x), // df/dsigma_x
+            amp_exp * dy * dy / (sigma_y2 * sigma_y), // df/dsigma_y
+            1.0,                                      // df/dbg
+        ]
+    }
+
+    #[inline]
+    fn constrain(&self, params: &mut [f64; 6]) {
+        params[2] = params[2].max(0.01); // Amplitude > 0
+        params[3] = params[3].clamp(0.5, self.stamp_radius); // Sigma_x
+        params[4] = params[4].clamp(0.5, self.stamp_radius); // Sigma_y
+    }
 }
 
 /// Fit a 2D Gaussian to a star stamp.
@@ -77,14 +122,11 @@ pub fn fit_gaussian_2d(
         background as f64,
     ];
 
-    let result = optimize_gaussian(
-        &data_x,
-        &data_y,
-        &data_z,
-        initial_params,
-        stamp_radius as f64,
-        config,
-    );
+    let model = Gaussian2D {
+        stamp_radius: stamp_radius as f64,
+    };
+
+    let result = optimize(&model, &data_x, &data_y, &data_z, initial_params, config);
 
     validate_result(&result, pos, stamp_radius, n)
 }
@@ -123,171 +165,4 @@ fn validate_result(
         converged: result.converged,
         iterations: result.iterations,
     })
-}
-
-// ============================================================================
-// Gaussian model evaluation and Jacobian
-// ============================================================================
-
-/// Compute Jacobian rows and residuals for 2D Gaussian model.
-fn fill_jacobian_residuals(
-    data_x: &[f64],
-    data_y: &[f64],
-    data_z: &[f64],
-    params: &[f64; 6],
-    jacobian: &mut Vec<[f64; 6]>,
-    residuals: &mut Vec<f64>,
-) {
-    let n = data_x.len();
-    jacobian.clear();
-    residuals.clear();
-    jacobian.reserve(n);
-    residuals.reserve(n);
-
-    let [x0, y0, amp, sigma_x, sigma_y, bg] = *params;
-    let sigma_x2 = sigma_x * sigma_x;
-    let sigma_y2 = sigma_y * sigma_y;
-
-    for i in 0..n {
-        let x = data_x[i];
-        let y = data_y[i];
-        let z = data_z[i];
-
-        let dx = x - x0;
-        let dy = y - y0;
-        let dx2 = dx * dx;
-        let dy2 = dy * dy;
-        let exponent = -0.5 * (dx2 / sigma_x2 + dy2 / sigma_y2);
-        let exp_val = exponent.exp();
-        let amp_exp = amp * exp_val;
-        let model = amp_exp + bg;
-
-        residuals.push(z - model);
-
-        jacobian.push([
-            amp_exp * dx / sigma_x2,              // df/dx0
-            amp_exp * dy / sigma_y2,              // df/dy0
-            exp_val,                              // df/damp
-            amp_exp * dx2 / (sigma_x2 * sigma_x), // df/dsigma_x
-            amp_exp * dy2 / (sigma_y2 * sigma_y), // df/dsigma_y
-            1.0,                                  // df/dbg
-        ]);
-    }
-}
-
-/// Compute chi² for 2D Gaussian model.
-fn compute_chi2(data_x: &[f64], data_y: &[f64], data_z: &[f64], params: &[f64; 6]) -> f64 {
-    let [x0, y0, amp, sigma_x, sigma_y, bg] = *params;
-    let sigma_x2 = sigma_x * sigma_x;
-    let sigma_y2 = sigma_y * sigma_y;
-    let mut chi2 = 0.0f64;
-
-    for i in 0..data_x.len() {
-        let dx = data_x[i] - x0;
-        let dy = data_y[i] - y0;
-        let exponent = -0.5 * (dx * dx / sigma_x2 + dy * dy / sigma_y2);
-        let model = amp * exponent.exp() + bg;
-        let residual = data_z[i] - model;
-        chi2 += residual * residual;
-    }
-
-    chi2
-}
-
-// ============================================================================
-// L-M optimizer for Gaussian fitting
-// ============================================================================
-
-/// L-M optimizer for Gaussian fitting using f64 arithmetic.
-fn optimize_gaussian(
-    data_x: &[f64],
-    data_y: &[f64],
-    data_z: &[f64],
-    initial_params: [f64; 6],
-    stamp_radius: f64,
-    config: &LMConfig,
-) -> LMResult<6> {
-    let mut params = initial_params;
-    let mut lambda = config.initial_lambda;
-    let mut prev_chi2 = compute_chi2(data_x, data_y, data_z, &params);
-    let mut converged = false;
-    let mut iterations = 0;
-
-    let n = data_x.len();
-    let mut jacobian = Vec::with_capacity(n);
-    let mut residuals = Vec::with_capacity(n);
-
-    for iter in 0..config.max_iterations {
-        iterations = iter + 1;
-
-        fill_jacobian_residuals(
-            data_x,
-            data_y,
-            data_z,
-            &params,
-            &mut jacobian,
-            &mut residuals,
-        );
-
-        let (hessian, gradient) = compute_hessian_gradient(&jacobian, &residuals);
-
-        let mut damped_hessian = hessian;
-        for (i, row) in damped_hessian.iter_mut().enumerate() {
-            row[i] *= 1.0 + lambda;
-        }
-
-        let Some(delta) = solve(&damped_hessian, &gradient) else {
-            break;
-        };
-
-        let mut new_params = params;
-        for (p, d) in new_params.iter_mut().zip(delta.iter()) {
-            *p += d;
-        }
-        // Apply constraints
-        new_params[2] = new_params[2].max(0.01); // Amplitude > 0
-        new_params[3] = new_params[3].clamp(0.5, stamp_radius); // Sigma_x
-        new_params[4] = new_params[4].clamp(0.5, stamp_radius); // Sigma_y
-
-        let new_chi2 = compute_chi2(data_x, data_y, data_z, &new_params);
-
-        if new_chi2 < prev_chi2 {
-            params = new_params;
-            lambda *= config.lambda_down;
-
-            let chi2_rel_change = (prev_chi2 - new_chi2) / prev_chi2.max(1e-30);
-            prev_chi2 = new_chi2;
-
-            let max_delta = delta.iter().copied().fold(0.0f64, |a, d| a.max(d.abs()));
-            if max_delta < config.convergence_threshold || chi2_rel_change < 1e-10 {
-                converged = true;
-                break;
-            }
-            // Early exit when only position accuracy matters
-            if delta[0].abs() < config.position_convergence_threshold
-                && delta[1].abs() < config.position_convergence_threshold
-            {
-                converged = true;
-                break;
-            }
-        } else {
-            let chi2_rel_diff = (new_chi2 - prev_chi2) / prev_chi2.max(1e-30);
-            if chi2_rel_diff < 1e-10 {
-                converged = true;
-                break;
-            }
-
-            lambda *= config.lambda_up;
-            if lambda > 1e10 {
-                break;
-            }
-        }
-    }
-
-    LMResult {
-        params,
-        chi2: prev_chi2,
-        converged,
-        iterations,
-    }
 }
