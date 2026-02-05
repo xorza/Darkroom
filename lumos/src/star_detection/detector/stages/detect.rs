@@ -181,7 +181,7 @@ fn extract_candidates(
             deblended_components: 0,
         };
     }
-    let component_data = collect_component_data(label_map, pixels.width(), config.max_area);
+    let component_data = collect_component_data(label_map, config.max_area);
     let total_components = component_data.len();
 
     tracing::debug!(
@@ -265,20 +265,17 @@ fn extract_candidates(
 }
 
 /// Collect component metadata (bounding boxes and areas) from label map.
-fn collect_component_data(
-    label_map: &LabelMap,
-    width: usize,
-    max_area: usize,
-) -> Vec<ComponentData> {
+fn collect_component_data(label_map: &LabelMap, max_area: usize) -> Vec<ComponentData> {
     use parking_lot::Mutex;
     use rayon::prelude::*;
 
     let num_labels = label_map.num_labels();
     let labels = label_map.labels();
+    let width = label_map.width();
     let height = label_map.height();
 
     // Calculate optimal number of jobs for parallel processing
-    let num_jobs = (rayon::current_num_threads() * 2).min(height).max(1);
+    let num_jobs = (rayon::current_num_threads()).min(height).max(1);
     let rows_per_job = (height / num_jobs).max(1);
 
     let result = Mutex::new(vec![
