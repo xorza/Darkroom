@@ -2,8 +2,31 @@
 
 use super::*;
 use crate::math::{fwhm_to_sigma, sigma_to_fwhm};
-use crate::star_detection::centroid::lm_optimizer::compute_hessian_gradient;
 use glam::Vec2;
+
+/// Scalar reference for computing J^T J (hessian) and J^T r (gradient).
+#[allow(clippy::needless_range_loop)]
+fn compute_hessian_gradient<const N: usize>(
+    jacobian: &[[f64; N]],
+    residuals: &[f64],
+) -> ([[f64; N]; N], [f64; N]) {
+    let mut hessian = [[0.0f64; N]; N];
+    let mut gradient = [0.0f64; N];
+    for (row, &r) in jacobian.iter().zip(residuals.iter()) {
+        for i in 0..N {
+            gradient[i] += row[i] * r;
+            for j in i..N {
+                hessian[i][j] += row[i] * row[j];
+            }
+        }
+    }
+    for i in 1..N {
+        for j in 0..i {
+            hessian[i][j] = hessian[j][i];
+        }
+    }
+    (hessian, gradient)
+}
 
 fn make_gaussian_stamp(
     width: usize,

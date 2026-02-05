@@ -67,30 +67,43 @@ pub trait LMModel<const N: usize> {
     /// Apply parameter constraints after an update.
     fn constrain(&self, params: &mut [f64; N]);
 
-    /// Batch fill jacobian rows and residuals, returning chi².
+    /// Build normal equations (J^T J, J^T r) and chi² in a single pass.
+    /// Fuses model evaluation, Jacobian computation, and Hessian/gradient
+    /// accumulation to avoid storing intermediate jacobian/residuals arrays.
     /// Default implementation calls `evaluate_and_jacobian` per pixel.
     /// Override with SIMD to process multiple pixels at once.
-    fn batch_fill_jacobian_residuals(
+    #[allow(clippy::needless_range_loop)]
+    fn batch_build_normal_equations(
         &self,
         data_x: &[f64],
         data_y: &[f64],
         data_z: &[f64],
         params: &[f64; N],
-        jacobian: &mut Vec<[f64; N]>,
-        residuals: &mut Vec<f64>,
-    ) -> f64 {
-        jacobian.clear();
-        residuals.clear();
-
+    ) -> ([[f64; N]; N], [f64; N], f64) {
+        let mut hessian = [[0.0f64; N]; N];
+        let mut gradient = [0.0f64; N];
         let mut chi2 = 0.0f64;
+
         for ((&x, &y), &z) in data_x.iter().zip(data_y.iter()).zip(data_z.iter()) {
-            let (model_val, jac_row) = self.evaluate_and_jacobian(x, y, params);
-            let residual = z - model_val;
-            chi2 += residual * residual;
-            jacobian.push(jac_row);
-            residuals.push(residual);
+            let (model_val, row) = self.evaluate_and_jacobian(x, y, params);
+            let r = z - model_val;
+            chi2 += r * r;
+            for i in 0..N {
+                gradient[i] += row[i] * r;
+                for j in i..N {
+                    hessian[i][j] += row[i] * row[j];
+                }
+            }
         }
-        chi2
+
+        // Mirror upper triangle to lower
+        for i in 1..N {
+            for j in 0..i {
+                hessian[i][j] = hessian[j][i];
+            }
+        }
+
+        (hessian, gradient, chi2)
     }
 
     /// Batch compute chi² (sum of squared residuals).
@@ -130,33 +143,18 @@ pub fn optimize<const N: usize, M: LMModel<N>>(
     let mut converged = false;
     let mut iterations = 0;
 
-    // Pre-allocate buffers once, reuse across iterations
-    let n = data_x.len();
-    let mut jacobian = Vec::with_capacity(n);
-    let mut residuals = Vec::with_capacity(n);
-
     for iter in 0..config.max_iterations {
         iterations = iter + 1;
 
-        // Build Jacobian and residuals using fused evaluate+jacobian.
-        // Also compute chi² from residuals (avoids redundant model evaluation).
-        let current_chi2 = model.batch_fill_jacobian_residuals(
-            data_x,
-            data_y,
-            data_z,
-            &params,
-            &mut jacobian,
-            &mut residuals,
-        );
+        // Build normal equations (J^T J, J^T r) and chi² in a single fused pass.
+        // Avoids storing intermediate jacobian/residuals arrays.
+        let (hessian, gradient, current_chi2) =
+            model.batch_build_normal_equations(data_x, data_y, data_z, &params);
 
-        // On first iteration, use the more accurate chi² from fill_jacobian_residuals
-        // (same params, just computed differently). On subsequent iterations,
-        // prev_chi2 was set from compute_chi2 on new_params which is authoritative.
+        // On first iteration, use chi² from the fused pass (same params).
         if iter == 0 {
             prev_chi2 = current_chi2;
         }
-
-        let (hessian, gradient) = compute_hessian_gradient(&jacobian, &residuals);
 
         let mut damped_hessian = hessian;
         for (i, row) in damped_hessian.iter_mut().enumerate() {
@@ -214,34 +212,4 @@ pub fn optimize<const N: usize, M: LMModel<N>>(
         converged,
         iterations,
     }
-}
-
-/// Compute Hessian (J^T J) and gradient (J^T r) for N-parameter model.
-/// Exploits symmetry: only computes upper triangle, then mirrors.
-#[allow(clippy::needless_range_loop)]
-pub fn compute_hessian_gradient<const N: usize>(
-    jacobian: &[[f64; N]],
-    residuals: &[f64],
-) -> ([[f64; N]; N], [f64; N]) {
-    let mut hessian = [[0.0f64; N]; N];
-    let mut gradient = [0.0f64; N];
-
-    for (row, &r) in jacobian.iter().zip(residuals.iter()) {
-        for i in 0..N {
-            gradient[i] += row[i] * r;
-            // Only compute upper triangle (j >= i)
-            for j in i..N {
-                hessian[i][j] += row[i] * row[j];
-            }
-        }
-    }
-
-    // Mirror upper triangle to lower
-    for i in 1..N {
-        for j in 0..i {
-            hessian[i][j] = hessian[j][i];
-        }
-    }
-
-    (hessian, gradient)
 }

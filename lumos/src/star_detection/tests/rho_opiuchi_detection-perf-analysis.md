@@ -125,6 +125,26 @@ single expensive function to a more balanced distribution across pipeline stages
 |--------|-------------|-----|-----|-------------|
 | Median | 726ms | 523ms | **435ms** | **-40.1%** |
 
+### v5c: Fused Normal Equations (eliminates compute_hessian_gradient)
+
+5. **Fused `batch_build_normal_equations`** — replaced two-pass approach
+   (fill jacobian/residuals arrays → compute J^T J and J^T r) with a single
+   fused pass that accumulates hessian[5][5], gradient[5], and chi² directly:
+   - Eliminates intermediate `Vec<[f64; 5]>` jacobian and `Vec<f64>` residuals allocations
+   - Eliminates second pass over data in `compute_hessian_gradient`
+   - AVX2 version uses 21 `__m256d` accumulators (15 upper-triangle hessian +
+     5 gradient + 1 chi²) — fits in 32 YMM registers
+   - Exploits j4=1.0 (background derivative) to use `_mm256_add_pd` instead of
+     `_mm256_fmadd_pd` for hessian column 4 and gradient[4]
+
+#### Microbenchmark Results
+
+| Benchmark | v5b | v5c | Change |
+|-----------|-----|-----|--------|
+| fixed_beta_small (17x17) | 12.883us | 6.791us | **-47.3%** |
+| fixed_beta_medium (25x25) | 26.229us | 12.862us | **-51.0%** |
+| moffat_fit_single (21x21) | 12.541us | 6.808us | **-45.7%** |
+
 ---
 
 ## Remaining Optimization Opportunities
@@ -132,8 +152,6 @@ single expensive function to a more balanced distribution across pipeline stages
 ### Medium Impact
 - **Better initial parameter estimates** — reduce L-M iterations via linear
   least-squares seed for amplitude/background
-- **SIMD vectorize `compute_hessian_gradient`** — J^T J accumulation is 5.5%
-  of CPU within `optimize`, could benefit from SIMD outer product accumulation
 
 ### Low Impact
 - **SIMD for `MoffatVariableBeta`** — would need SIMD `ln`/`exp` approximation,

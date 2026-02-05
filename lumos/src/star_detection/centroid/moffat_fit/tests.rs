@@ -917,8 +917,32 @@ fn make_stamp_data(size: usize, params: &[f64; 5], beta: f64) -> (Vec<f64>, Vec<
     (data_x, data_y, data_z)
 }
 
+/// Scalar reference for computing J^T J (hessian) and J^T r (gradient).
+#[allow(clippy::needless_range_loop)]
+fn compute_hessian_gradient<const N: usize>(
+    jacobian: &[[f64; N]],
+    residuals: &[f64],
+) -> ([[f64; N]; N], [f64; N]) {
+    let mut hessian = [[0.0f64; N]; N];
+    let mut gradient = [0.0f64; N];
+    for (row, &r) in jacobian.iter().zip(residuals.iter()) {
+        for i in 0..N {
+            gradient[i] += row[i] * r;
+            for j in i..N {
+                hessian[i][j] += row[i] * row[j];
+            }
+        }
+    }
+    for i in 1..N {
+        for j in 0..i {
+            hessian[i][j] = hessian[j][i];
+        }
+    }
+    (hessian, gradient)
+}
+
 #[test]
-fn test_batch_fill_jacobian_residuals_matches_scalar() {
+fn test_batch_build_normal_equations_matches_scalar() {
     use super::super::lm_optimizer::LMModel;
 
     let beta = 2.5;
@@ -928,7 +952,7 @@ fn test_batch_fill_jacobian_residuals_matches_scalar() {
     let model = MoffatFixedBeta::new(8.0, beta);
     let (data_x, data_y, data_z) = make_stamp_data(13, &true_params, beta);
 
-    // Scalar path
+    // Scalar reference: build jacobian/residuals then compute hessian/gradient
     let mut jac_scalar = Vec::new();
     let mut res_scalar = Vec::new();
     let mut chi2_scalar = 0.0f64;
@@ -939,42 +963,36 @@ fn test_batch_fill_jacobian_residuals_matches_scalar() {
         jac_scalar.push(jac_row);
         res_scalar.push(residual);
     }
+    let (hessian_scalar, gradient_scalar) = compute_hessian_gradient(&jac_scalar, &res_scalar);
 
     // Batch path (uses SIMD on x86_64 with AVX2)
-    let mut jac_batch = Vec::new();
-    let mut res_batch = Vec::new();
-    let chi2_batch = model.batch_fill_jacobian_residuals(
-        &data_x,
-        &data_y,
-        &data_z,
-        &params,
-        &mut jac_batch,
-        &mut res_batch,
-    );
+    let (hessian_batch, gradient_batch, chi2_batch) =
+        model.batch_build_normal_equations(&data_x, &data_y, &data_z, &params);
 
-    assert_eq!(jac_scalar.len(), jac_batch.len());
-    assert_eq!(res_scalar.len(), res_batch.len());
-
-    // Chi² should match (use absolute + relative tolerance for FMA rounding)
+    // Chi² should match
     assert!(
         approx_eq(chi2_scalar, chi2_batch),
         "chi2 mismatch: scalar={chi2_scalar}, batch={chi2_batch}"
     );
 
-    // Each residual and jacobian row should match
-    for i in 0..res_scalar.len() {
+    // Gradient should match
+    for i in 0..5 {
         assert!(
-            approx_eq(res_scalar[i], res_batch[i]),
-            "residual[{i}] mismatch: scalar={}, batch={}",
-            res_scalar[i],
-            res_batch[i]
+            approx_eq(gradient_scalar[i], gradient_batch[i]),
+            "gradient[{i}] mismatch: scalar={}, batch={}",
+            gradient_scalar[i],
+            gradient_batch[i]
         );
+    }
+
+    // Hessian should match (full matrix including mirrored lower triangle)
+    for i in 0..5 {
         for j in 0..5 {
             assert!(
-                approx_eq(jac_scalar[i][j], jac_batch[i][j]),
-                "jacobian[{i}][{j}] mismatch: scalar={}, batch={}",
-                jac_scalar[i][j],
-                jac_batch[i][j]
+                approx_eq(hessian_scalar[i][j], hessian_batch[i][j]),
+                "hessian[{i}][{j}] mismatch: scalar={}, batch={}",
+                hessian_scalar[i][j],
+                hessian_batch[i][j]
             );
         }
     }
@@ -1013,7 +1031,7 @@ fn test_batch_compute_chi2_matches_scalar() {
 }
 
 #[test]
-fn test_batch_methods_various_stamp_sizes() {
+fn test_batch_build_normal_equations_various_stamp_sizes() {
     use super::super::lm_optimizer::LMModel;
 
     let beta = 2.5;
@@ -1025,9 +1043,8 @@ fn test_batch_methods_various_stamp_sizes() {
     // Test sizes that exercise: exact multiple of 4, remainder 1, 2, 3
     for size in [3, 4, 5, 7, 9, 11, 13, 15, 17] {
         let (data_x, data_y, data_z) = make_stamp_data(size, &true_params, beta);
-        let n = data_x.len();
 
-        // Scalar
+        // Scalar reference
         let mut jac_scalar = Vec::new();
         let mut res_scalar = Vec::new();
         let mut chi2_scalar = 0.0f64;
@@ -1038,40 +1055,38 @@ fn test_batch_methods_various_stamp_sizes() {
             jac_scalar.push(jac_row);
             res_scalar.push(residual);
         }
+        let (hessian_scalar, gradient_scalar) = compute_hessian_gradient(&jac_scalar, &res_scalar);
 
         // Batch
-        let mut jac_batch = Vec::new();
-        let mut res_batch = Vec::new();
-        let chi2_batch = model.batch_fill_jacobian_residuals(
-            &data_x,
-            &data_y,
-            &data_z,
-            &params,
-            &mut jac_batch,
-            &mut res_batch,
-        );
-
-        assert_eq!(n, jac_batch.len(), "size={size}: jacobian length mismatch");
-        assert_eq!(n, res_batch.len(), "size={size}: residuals length mismatch");
+        let (hessian_batch, gradient_batch, chi2_batch) =
+            model.batch_build_normal_equations(&data_x, &data_y, &data_z, &params);
 
         assert!(
             approx_eq(chi2_scalar, chi2_batch),
             "size={size}: chi2 mismatch: scalar={chi2_scalar}, batch={chi2_batch}"
         );
 
-        for i in 0..n {
+        for i in 0..5 {
             assert!(
-                approx_eq(res_scalar[i], res_batch[i]),
-                "size={size}: residual[{i}] mismatch: scalar={}, batch={}",
-                res_scalar[i],
-                res_batch[i]
+                approx_eq(gradient_scalar[i], gradient_batch[i]),
+                "size={size}: gradient[{i}] mismatch: scalar={}, batch={}",
+                gradient_scalar[i],
+                gradient_batch[i]
             );
+            for j in 0..5 {
+                assert!(
+                    approx_eq(hessian_scalar[i][j], hessian_batch[i][j]),
+                    "size={size}: hessian[{i}][{j}] mismatch: scalar={}, batch={}",
+                    hessian_scalar[i][j],
+                    hessian_batch[i][j]
+                );
+            }
         }
     }
 }
 
 #[test]
-fn test_batch_methods_all_pow_strategies() {
+fn test_batch_build_normal_equations_all_pow_strategies() {
     use super::super::lm_optimizer::LMModel;
 
     let true_params = [6.5, 6.5, 800.0, 2.0, 80.0];
@@ -1083,7 +1098,7 @@ fn test_batch_methods_all_pow_strategies() {
         let model = MoffatFixedBeta::new(8.0, beta);
         let (data_x, data_y, data_z) = make_stamp_data(13, &true_params, beta);
 
-        // Scalar
+        // Scalar reference
         let mut jac_scalar = Vec::new();
         let mut res_scalar = Vec::new();
         let mut chi2_scalar = 0.0f64;
@@ -1094,37 +1109,30 @@ fn test_batch_methods_all_pow_strategies() {
             jac_scalar.push(jac_row);
             res_scalar.push(residual);
         }
+        let (hessian_scalar, gradient_scalar) = compute_hessian_gradient(&jac_scalar, &res_scalar);
 
         // Batch
-        let mut jac_batch = Vec::new();
-        let mut res_batch = Vec::new();
-        let chi2_batch = model.batch_fill_jacobian_residuals(
-            &data_x,
-            &data_y,
-            &data_z,
-            &params,
-            &mut jac_batch,
-            &mut res_batch,
-        );
+        let (hessian_batch, gradient_batch, chi2_batch) =
+            model.batch_build_normal_equations(&data_x, &data_y, &data_z, &params);
 
         assert!(
             approx_eq(chi2_scalar, chi2_batch),
             "beta={beta}: chi2 mismatch: scalar={chi2_scalar}, batch={chi2_batch}"
         );
 
-        for i in 0..res_scalar.len() {
+        for i in 0..5 {
             assert!(
-                approx_eq(res_scalar[i], res_batch[i]),
-                "beta={beta}: residual[{i}] mismatch: scalar={}, batch={}",
-                res_scalar[i],
-                res_batch[i]
+                approx_eq(gradient_scalar[i], gradient_batch[i]),
+                "beta={beta}: gradient[{i}] mismatch: scalar={}, batch={}",
+                gradient_scalar[i],
+                gradient_batch[i]
             );
             for j in 0..5 {
                 assert!(
-                    approx_eq(jac_scalar[i][j], jac_batch[i][j]),
-                    "beta={beta}: jacobian[{i}][{j}] mismatch: scalar={}, batch={}",
-                    jac_scalar[i][j],
-                    jac_batch[i][j]
+                    approx_eq(hessian_scalar[i][j], hessian_batch[i][j]),
+                    "beta={beta}: hessian[{i}][{j}] mismatch: scalar={}, batch={}",
+                    hessian_scalar[i][j],
+                    hessian_batch[i][j]
                 );
             }
         }

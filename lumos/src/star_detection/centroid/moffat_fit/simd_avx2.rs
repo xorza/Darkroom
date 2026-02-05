@@ -69,26 +69,25 @@ unsafe fn simd_fast_pow_neg(u: __m256d, strategy: PowStrategy) -> __m256d {
     }
 }
 
-/// Batch fill jacobian rows and residuals using AVX2+FMA.
+/// Batch build normal equations (J^T J, J^T r, chi²) using AVX2+FMA.
+/// Fuses model evaluation, Jacobian, and Hessian/gradient accumulation
+/// to avoid storing intermediate jacobian/residuals arrays.
+///
+/// For N=5 (MoffatFixedBeta), accumulates 15 upper-triangle hessian elements,
+/// 5 gradient elements, and chi² directly in AVX2 registers.
 ///
 /// # Safety
 /// Caller must ensure AVX2 and FMA are available on the current CPU.
+#[allow(clippy::needless_range_loop)]
 #[target_feature(enable = "avx2,fma")]
-pub(super) unsafe fn batch_fill_jacobian_residuals_avx2(
+pub(super) unsafe fn batch_build_normal_equations_avx2(
     model: &MoffatFixedBeta,
     data_x: &[f64],
     data_y: &[f64],
     data_z: &[f64],
     params: &[f64; 5],
-    jacobian: &mut Vec<[f64; 5]>,
-    residuals: &mut Vec<f64>,
-) -> f64 {
+) -> ([[f64; 5]; 5], [f64; 5], f64) {
     let n = data_x.len();
-    jacobian.clear();
-    residuals.clear();
-    jacobian.reserve(n);
-    residuals.reserve(n);
-
     let [x0, y0, amp, alpha, bg] = *params;
     let alpha2 = alpha * alpha;
 
@@ -102,8 +101,30 @@ pub(super) unsafe fn batch_fill_jacobian_residuals_avx2(
         let v_one = _mm256_set1_pd(1.0);
         let v_common_factor = _mm256_set1_pd(2.0 * amp * model.beta / alpha2);
         let v_inv_alpha = _mm256_set1_pd(1.0 / alpha);
+        let zero = _mm256_setzero_pd();
 
-        let mut v_chi2 = _mm256_setzero_pd();
+        // Accumulators: 15 upper-triangle hessian + 5 gradient + 1 chi²
+        let mut v_chi2 = zero;
+        let mut v_g0 = zero;
+        let mut v_g1 = zero;
+        let mut v_g2 = zero;
+        let mut v_g3 = zero;
+        let mut v_g4 = zero;
+        let mut v_h00 = zero;
+        let mut v_h01 = zero;
+        let mut v_h02 = zero;
+        let mut v_h03 = zero;
+        let mut v_h04 = zero;
+        let mut v_h11 = zero;
+        let mut v_h12 = zero;
+        let mut v_h13 = zero;
+        let mut v_h14 = zero;
+        let mut v_h22 = zero;
+        let mut v_h23 = zero;
+        let mut v_h24 = zero;
+        let mut v_h33 = zero;
+        let mut v_h34 = zero;
+        let mut v_h44 = zero;
 
         let chunks = n / 4;
 
@@ -113,6 +134,7 @@ pub(super) unsafe fn batch_fill_jacobian_residuals_avx2(
             let vy = _mm256_loadu_pd(data_y.as_ptr().add(base));
             let vz = _mm256_loadu_pd(data_z.as_ptr().add(base));
 
+            // Model evaluation + Jacobian (same as before)
             let dx = _mm256_sub_pd(vx, v_x0);
             let dy = _mm256_sub_pd(vy, v_y0);
             let r2 = _mm256_fmadd_pd(dx, dx, _mm256_mul_pd(dy, dy));
@@ -120,47 +142,103 @@ pub(super) unsafe fn batch_fill_jacobian_residuals_avx2(
             let u_neg_beta = simd_fast_pow_neg(u, model.pow_strategy);
             let model_val = _mm256_fmadd_pd(v_amp, u_neg_beta, v_bg);
             let residual = _mm256_sub_pd(vz, model_val);
+
+            // Chi²
             v_chi2 = _mm256_fmadd_pd(residual, residual, v_chi2);
 
+            // Jacobian rows: j0=common*dx, j1=common*dy, j2=u_neg_beta, j3=common*r2/alpha, j4=1
             let u_neg_beta_m1 = _mm256_div_pd(u_neg_beta, u);
             let common = _mm256_mul_pd(v_common_factor, u_neg_beta_m1);
             let j0 = _mm256_mul_pd(common, dx);
             let j1 = _mm256_mul_pd(common, dy);
             let j2 = u_neg_beta;
             let j3 = _mm256_mul_pd(_mm256_mul_pd(common, r2), v_inv_alpha);
+            // j4 = 1.0 (implicit)
 
-            let mut res_arr = [0.0f64; 4];
-            let mut j0_arr = [0.0f64; 4];
-            let mut j1_arr = [0.0f64; 4];
-            let mut j2_arr = [0.0f64; 4];
-            let mut j3_arr = [0.0f64; 4];
-            _mm256_storeu_pd(res_arr.as_mut_ptr(), residual);
-            _mm256_storeu_pd(j0_arr.as_mut_ptr(), j0);
-            _mm256_storeu_pd(j1_arr.as_mut_ptr(), j1);
-            _mm256_storeu_pd(j2_arr.as_mut_ptr(), j2);
-            _mm256_storeu_pd(j3_arr.as_mut_ptr(), j3);
+            // Gradient: g[i] += j[i] * residual
+            v_g0 = _mm256_fmadd_pd(j0, residual, v_g0);
+            v_g1 = _mm256_fmadd_pd(j1, residual, v_g1);
+            v_g2 = _mm256_fmadd_pd(j2, residual, v_g2);
+            v_g3 = _mm256_fmadd_pd(j3, residual, v_g3);
+            v_g4 = _mm256_add_pd(v_g4, residual); // j4=1, so g4 += residual
 
-            for i in 0..4 {
-                residuals.push(res_arr[i]);
-                jacobian.push([j0_arr[i], j1_arr[i], j2_arr[i], j3_arr[i], 1.0]);
-            }
+            // Hessian upper triangle: h[i][j] += j[i] * j[j]
+            // Row 0: h00, h01, h02, h03, h04
+            v_h00 = _mm256_fmadd_pd(j0, j0, v_h00);
+            v_h01 = _mm256_fmadd_pd(j0, j1, v_h01);
+            v_h02 = _mm256_fmadd_pd(j0, j2, v_h02);
+            v_h03 = _mm256_fmadd_pd(j0, j3, v_h03);
+            v_h04 = _mm256_add_pd(v_h04, j0); // j4=1, so h04 += j0
+
+            // Row 1: h11, h12, h13, h14
+            v_h11 = _mm256_fmadd_pd(j1, j1, v_h11);
+            v_h12 = _mm256_fmadd_pd(j1, j2, v_h12);
+            v_h13 = _mm256_fmadd_pd(j1, j3, v_h13);
+            v_h14 = _mm256_add_pd(v_h14, j1); // j4=1
+
+            // Row 2: h22, h23, h24
+            v_h22 = _mm256_fmadd_pd(j2, j2, v_h22);
+            v_h23 = _mm256_fmadd_pd(j2, j3, v_h23);
+            v_h24 = _mm256_add_pd(v_h24, j2); // j4=1
+
+            // Row 3: h33, h34
+            v_h33 = _mm256_fmadd_pd(j3, j3, v_h33);
+            v_h34 = _mm256_add_pd(v_h34, j3); // j4=1
+
+            // Row 4: h44 = sum of j4*j4 = count of pixels (added after loop)
+            v_h44 = _mm256_add_pd(v_h44, v_one); // j4=1, so h44 += 1
         }
 
-        let mut chi2_arr = [0.0f64; 4];
-        _mm256_storeu_pd(chi2_arr.as_mut_ptr(), v_chi2);
-        let mut chi2 = chi2_arr[0] + chi2_arr[1] + chi2_arr[2] + chi2_arr[3];
+        // Horizontal sum helper
+        #[inline(always)]
+        #[allow(unsafe_op_in_unsafe_fn)]
+        unsafe fn hsum(v: __m256d) -> f64 {
+            let mut arr = [0.0f64; 4];
+            _mm256_storeu_pd(arr.as_mut_ptr(), v);
+            arr[0] + arr[1] + arr[2] + arr[3]
+        }
+
+        let mut chi2 = hsum(v_chi2);
+        let mut gradient = [hsum(v_g0), hsum(v_g1), hsum(v_g2), hsum(v_g3), hsum(v_g4)];
+        let mut hessian = [[0.0f64; 5]; 5];
+        hessian[0][0] = hsum(v_h00);
+        hessian[0][1] = hsum(v_h01);
+        hessian[0][2] = hsum(v_h02);
+        hessian[0][3] = hsum(v_h03);
+        hessian[0][4] = hsum(v_h04);
+        hessian[1][1] = hsum(v_h11);
+        hessian[1][2] = hsum(v_h12);
+        hessian[1][3] = hsum(v_h13);
+        hessian[1][4] = hsum(v_h14);
+        hessian[2][2] = hsum(v_h22);
+        hessian[2][3] = hsum(v_h23);
+        hessian[2][4] = hsum(v_h24);
+        hessian[3][3] = hsum(v_h33);
+        hessian[3][4] = hsum(v_h34);
+        hessian[4][4] = hsum(v_h44);
 
         // Scalar tail
         let tail_start = chunks * 4;
         for i in tail_start..n {
-            let (model_val, jac_row) = model.evaluate_and_jacobian(data_x[i], data_y[i], params);
-            let residual = data_z[i] - model_val;
-            chi2 += residual * residual;
-            jacobian.push(jac_row);
-            residuals.push(residual);
+            let (model_val, row) = model.evaluate_and_jacobian(data_x[i], data_y[i], params);
+            let r = data_z[i] - model_val;
+            chi2 += r * r;
+            for k in 0..5 {
+                gradient[k] += row[k] * r;
+                for j in k..5 {
+                    hessian[k][j] += row[k] * row[j];
+                }
+            }
         }
 
-        chi2
+        // Mirror upper triangle to lower
+        for i in 1..5 {
+            for j in 0..i {
+                hessian[i][j] = hessian[j][i];
+            }
+        }
+
+        (hessian, gradient, chi2)
     }
 }
 

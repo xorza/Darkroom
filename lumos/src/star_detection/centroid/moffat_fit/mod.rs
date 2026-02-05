@@ -217,36 +217,42 @@ impl LMModel<5> for MoffatFixedBeta {
         params[3] = params[3].clamp(0.5, self.stamp_radius); // Alpha
     }
 
-    fn batch_fill_jacobian_residuals(
+    #[allow(clippy::needless_range_loop)]
+    fn batch_build_normal_equations(
         &self,
         data_x: &[f64],
         data_y: &[f64],
         data_z: &[f64],
         params: &[f64; 5],
-        jacobian: &mut Vec<[f64; 5]>,
-        residuals: &mut Vec<f64>,
-    ) -> f64 {
+    ) -> ([[f64; 5]; 5], [f64; 5], f64) {
         #[cfg(target_arch = "x86_64")]
         if common::cpu_features::has_avx2_fma() {
             // SAFETY: AVX2+FMA availability checked above
             return unsafe {
-                simd_avx2::batch_fill_jacobian_residuals_avx2(
-                    self, data_x, data_y, data_z, params, jacobian, residuals,
-                )
+                simd_avx2::batch_build_normal_equations_avx2(self, data_x, data_y, data_z, params)
             };
         }
         // Scalar fallback
-        jacobian.clear();
-        residuals.clear();
+        let mut hessian = [[0.0f64; 5]; 5];
+        let mut gradient = [0.0f64; 5];
         let mut chi2 = 0.0f64;
         for ((&x, &y), &z) in data_x.iter().zip(data_y.iter()).zip(data_z.iter()) {
-            let (model_val, jac_row) = self.evaluate_and_jacobian(x, y, params);
-            let residual = z - model_val;
-            chi2 += residual * residual;
-            jacobian.push(jac_row);
-            residuals.push(residual);
+            let (model_val, row) = self.evaluate_and_jacobian(x, y, params);
+            let r = z - model_val;
+            chi2 += r * r;
+            for i in 0..5 {
+                gradient[i] += row[i] * r;
+                for j in i..5 {
+                    hessian[i][j] += row[i] * row[j];
+                }
+            }
         }
-        chi2
+        for i in 1..5 {
+            for j in 0..i {
+                hessian[i][j] = hessian[j][i];
+            }
+        }
+        (hessian, gradient, chi2)
     }
 
     fn batch_compute_chi2(
