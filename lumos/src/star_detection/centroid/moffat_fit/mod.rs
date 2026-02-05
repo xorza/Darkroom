@@ -15,6 +15,9 @@ mod bench;
 #[cfg(test)]
 mod tests;
 
+#[cfg(target_arch = "x86_64")]
+mod simd_avx2;
+
 use super::lm_optimizer::{LMConfig, LMModel, LMResult, optimize};
 use super::{estimate_sigma_from_moments, extract_stamp};
 use crate::common::Buffer2;
@@ -212,6 +215,64 @@ impl LMModel<5> for MoffatFixedBeta {
     fn constrain(&self, params: &mut [f64; 5]) {
         params[2] = params[2].max(0.01); // Amplitude > 0
         params[3] = params[3].clamp(0.5, self.stamp_radius); // Alpha
+    }
+
+    fn batch_fill_jacobian_residuals(
+        &self,
+        data_x: &[f64],
+        data_y: &[f64],
+        data_z: &[f64],
+        params: &[f64; 5],
+        jacobian: &mut Vec<[f64; 5]>,
+        residuals: &mut Vec<f64>,
+    ) -> f64 {
+        #[cfg(target_arch = "x86_64")]
+        if common::cpu_features::has_avx2_fma() {
+            // SAFETY: AVX2+FMA availability checked above
+            return unsafe {
+                simd_avx2::batch_fill_jacobian_residuals_avx2(
+                    self, data_x, data_y, data_z, params, jacobian, residuals,
+                )
+            };
+        }
+        // Scalar fallback
+        jacobian.clear();
+        residuals.clear();
+        let mut chi2 = 0.0f64;
+        for ((&x, &y), &z) in data_x.iter().zip(data_y.iter()).zip(data_z.iter()) {
+            let (model_val, jac_row) = self.evaluate_and_jacobian(x, y, params);
+            let residual = z - model_val;
+            chi2 += residual * residual;
+            jacobian.push(jac_row);
+            residuals.push(residual);
+        }
+        chi2
+    }
+
+    fn batch_compute_chi2(
+        &self,
+        data_x: &[f64],
+        data_y: &[f64],
+        data_z: &[f64],
+        params: &[f64; 5],
+    ) -> f64 {
+        #[cfg(target_arch = "x86_64")]
+        if common::cpu_features::has_avx2_fma() {
+            // SAFETY: AVX2+FMA availability checked above
+            return unsafe {
+                simd_avx2::batch_compute_chi2_avx2(self, data_x, data_y, data_z, params)
+            };
+        }
+        // Scalar fallback
+        data_x
+            .iter()
+            .zip(data_y.iter())
+            .zip(data_z.iter())
+            .map(|((&x, &y), &z)| {
+                let residual = z - self.evaluate(x, y, params);
+                residual * residual
+            })
+            .sum()
     }
 }
 

@@ -878,3 +878,255 @@ fn test_moffat_variable_beta_evaluate_and_jacobian_consistency() {
         }
     }
 }
+
+// ============================================================================
+// SIMD batch method correctness tests
+// ============================================================================
+
+/// Approximate equality with combined absolute + relative tolerance.
+/// Handles near-zero values where relative tolerance alone would be too tight.
+fn approx_eq(a: f64, b: f64) -> bool {
+    let abs_diff = (a - b).abs();
+    // Absolute tolerance for values near zero
+    if abs_diff < 1e-14 {
+        return true;
+    }
+    // Relative tolerance for larger values
+    let max_abs = a.abs().max(b.abs());
+    abs_diff / max_abs < 1e-10
+}
+
+/// Build stamp data arrays (x, y, z) for a Moffat profile at given params.
+fn make_stamp_data(size: usize, params: &[f64; 5], beta: f64) -> (Vec<f64>, Vec<f64>, Vec<f64>) {
+    let [x0, y0, amp, alpha, bg] = *params;
+    let alpha2 = alpha * alpha;
+    let mut data_x = Vec::with_capacity(size * size);
+    let mut data_y = Vec::with_capacity(size * size);
+    let mut data_z = Vec::with_capacity(size * size);
+    for iy in 0..size {
+        for ix in 0..size {
+            let x = ix as f64;
+            let y = iy as f64;
+            let r2 = (x - x0).powi(2) + (y - y0).powi(2);
+            let z = amp * (1.0 + r2 / alpha2).powf(-beta) + bg;
+            data_x.push(x);
+            data_y.push(y);
+            data_z.push(z);
+        }
+    }
+    (data_x, data_y, data_z)
+}
+
+#[test]
+fn test_batch_fill_jacobian_residuals_matches_scalar() {
+    use super::super::lm_optimizer::LMModel;
+
+    let beta = 2.5;
+    let true_params = [6.3, 6.7, 1000.0, 2.5, 100.0];
+    // Use offset params so residuals are non-trivial
+    let params = [6.5, 6.5, 980.0, 2.6, 102.0];
+    let model = MoffatFixedBeta::new(8.0, beta);
+    let (data_x, data_y, data_z) = make_stamp_data(13, &true_params, beta);
+
+    // Scalar path
+    let mut jac_scalar = Vec::new();
+    let mut res_scalar = Vec::new();
+    let mut chi2_scalar = 0.0f64;
+    for ((&x, &y), &z) in data_x.iter().zip(data_y.iter()).zip(data_z.iter()) {
+        let (model_val, jac_row) = model.evaluate_and_jacobian(x, y, &params);
+        let residual = z - model_val;
+        chi2_scalar += residual * residual;
+        jac_scalar.push(jac_row);
+        res_scalar.push(residual);
+    }
+
+    // Batch path (uses SIMD on x86_64 with AVX2)
+    let mut jac_batch = Vec::new();
+    let mut res_batch = Vec::new();
+    let chi2_batch = model.batch_fill_jacobian_residuals(
+        &data_x,
+        &data_y,
+        &data_z,
+        &params,
+        &mut jac_batch,
+        &mut res_batch,
+    );
+
+    assert_eq!(jac_scalar.len(), jac_batch.len());
+    assert_eq!(res_scalar.len(), res_batch.len());
+
+    // Chi² should match (use absolute + relative tolerance for FMA rounding)
+    assert!(
+        approx_eq(chi2_scalar, chi2_batch),
+        "chi2 mismatch: scalar={chi2_scalar}, batch={chi2_batch}"
+    );
+
+    // Each residual and jacobian row should match
+    for i in 0..res_scalar.len() {
+        assert!(
+            approx_eq(res_scalar[i], res_batch[i]),
+            "residual[{i}] mismatch: scalar={}, batch={}",
+            res_scalar[i],
+            res_batch[i]
+        );
+        for j in 0..5 {
+            assert!(
+                approx_eq(jac_scalar[i][j], jac_batch[i][j]),
+                "jacobian[{i}][{j}] mismatch: scalar={}, batch={}",
+                jac_scalar[i][j],
+                jac_batch[i][j]
+            );
+        }
+    }
+}
+
+#[test]
+fn test_batch_compute_chi2_matches_scalar() {
+    use super::super::lm_optimizer::LMModel;
+
+    let beta = 2.5;
+    let model = MoffatFixedBeta::new(8.0, beta);
+    // Use slightly off params so residuals are non-zero
+    let true_params = [6.3, 6.7, 1000.0, 2.5, 100.0];
+    let test_params = [6.5, 6.5, 980.0, 2.6, 102.0];
+    let (data_x, data_y, data_z) = make_stamp_data(13, &true_params, beta);
+
+    // Scalar chi²
+    let chi2_scalar: f64 = data_x
+        .iter()
+        .zip(data_y.iter())
+        .zip(data_z.iter())
+        .map(|((&x, &y), &z)| {
+            let r = z - model.evaluate(x, y, &test_params);
+            r * r
+        })
+        .sum();
+
+    // Batch chi² (uses SIMD on x86_64 with AVX2)
+    let chi2_batch = model.batch_compute_chi2(&data_x, &data_y, &data_z, &test_params);
+
+    assert!(
+        approx_eq(chi2_scalar, chi2_batch),
+        "chi2 mismatch: scalar={chi2_scalar}, batch={chi2_batch}, diff={}",
+        (chi2_scalar - chi2_batch).abs()
+    );
+}
+
+#[test]
+fn test_batch_methods_various_stamp_sizes() {
+    use super::super::lm_optimizer::LMModel;
+
+    let beta = 2.5;
+    let model = MoffatFixedBeta::new(10.0, beta);
+    let true_params = [5.0, 5.0, 500.0, 2.0, 50.0];
+    // Offset params for non-trivial residuals
+    let params = [5.2, 4.8, 490.0, 2.1, 51.0];
+
+    // Test sizes that exercise: exact multiple of 4, remainder 1, 2, 3
+    for size in [3, 4, 5, 7, 9, 11, 13, 15, 17] {
+        let (data_x, data_y, data_z) = make_stamp_data(size, &true_params, beta);
+        let n = data_x.len();
+
+        // Scalar
+        let mut jac_scalar = Vec::new();
+        let mut res_scalar = Vec::new();
+        let mut chi2_scalar = 0.0f64;
+        for ((&x, &y), &z) in data_x.iter().zip(data_y.iter()).zip(data_z.iter()) {
+            let (model_val, jac_row) = model.evaluate_and_jacobian(x, y, &params);
+            let residual = z - model_val;
+            chi2_scalar += residual * residual;
+            jac_scalar.push(jac_row);
+            res_scalar.push(residual);
+        }
+
+        // Batch
+        let mut jac_batch = Vec::new();
+        let mut res_batch = Vec::new();
+        let chi2_batch = model.batch_fill_jacobian_residuals(
+            &data_x,
+            &data_y,
+            &data_z,
+            &params,
+            &mut jac_batch,
+            &mut res_batch,
+        );
+
+        assert_eq!(n, jac_batch.len(), "size={size}: jacobian length mismatch");
+        assert_eq!(n, res_batch.len(), "size={size}: residuals length mismatch");
+
+        assert!(
+            approx_eq(chi2_scalar, chi2_batch),
+            "size={size}: chi2 mismatch: scalar={chi2_scalar}, batch={chi2_batch}"
+        );
+
+        for i in 0..n {
+            assert!(
+                approx_eq(res_scalar[i], res_batch[i]),
+                "size={size}: residual[{i}] mismatch: scalar={}, batch={}",
+                res_scalar[i],
+                res_batch[i]
+            );
+        }
+    }
+}
+
+#[test]
+fn test_batch_methods_all_pow_strategies() {
+    use super::super::lm_optimizer::LMModel;
+
+    let true_params = [6.5, 6.5, 800.0, 2.0, 80.0];
+    // Offset params for non-trivial residuals
+    let params = [6.7, 6.3, 790.0, 2.1, 82.0];
+
+    // HalfInt: 2.5, 3.5; Int: 2.0, 3.0; General: 2.3
+    for beta in [2.0, 2.3, 2.5, 3.0, 3.5] {
+        let model = MoffatFixedBeta::new(8.0, beta);
+        let (data_x, data_y, data_z) = make_stamp_data(13, &true_params, beta);
+
+        // Scalar
+        let mut jac_scalar = Vec::new();
+        let mut res_scalar = Vec::new();
+        let mut chi2_scalar = 0.0f64;
+        for ((&x, &y), &z) in data_x.iter().zip(data_y.iter()).zip(data_z.iter()) {
+            let (model_val, jac_row) = model.evaluate_and_jacobian(x, y, &params);
+            let residual = z - model_val;
+            chi2_scalar += residual * residual;
+            jac_scalar.push(jac_row);
+            res_scalar.push(residual);
+        }
+
+        // Batch
+        let mut jac_batch = Vec::new();
+        let mut res_batch = Vec::new();
+        let chi2_batch = model.batch_fill_jacobian_residuals(
+            &data_x,
+            &data_y,
+            &data_z,
+            &params,
+            &mut jac_batch,
+            &mut res_batch,
+        );
+
+        assert!(
+            approx_eq(chi2_scalar, chi2_batch),
+            "beta={beta}: chi2 mismatch: scalar={chi2_scalar}, batch={chi2_batch}"
+        );
+
+        for i in 0..res_scalar.len() {
+            assert!(
+                approx_eq(res_scalar[i], res_batch[i]),
+                "beta={beta}: residual[{i}] mismatch: scalar={}, batch={}",
+                res_scalar[i],
+                res_batch[i]
+            );
+            for j in 0..5 {
+                assert!(
+                    approx_eq(jac_scalar[i][j], jac_batch[i][j]),
+                    "beta={beta}: jacobian[{i}][{j}] mismatch: scalar={}, batch={}",
+                    jac_scalar[i][j],
+                    jac_batch[i][j]
+                );
+            }
+        }
+    }
+}

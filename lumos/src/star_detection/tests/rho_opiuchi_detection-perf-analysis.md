@@ -186,14 +186,43 @@ All three high-impact optimizations were implemented:
 | v3 | WeightedMoments | 408ms | visit_neighbors (14%) |
 | v4 | WeightedMoments + SIMD | 393ms | visit_neighbors (14%) |
 | v5 | MoffatFit f64 (pre-opt) | 726ms | lm_optimizer (55%) |
-| **v5a** | **MoffatFit f64 (optimized)** | **523ms** | **TBD (re-profile)** |
+| v5a | MoffatFit f64 (optimized) | 523ms | TBD (re-profile) |
+| **v5b** | **MoffatFit f64 + AVX2 SIMD** | **~420ms** (est.) | **TBD (re-profile)** |
 
 v5/v5a use a fundamentally more expensive centroid method (L-M Moffat fitting
 with f64 precision) than v4 (WeightedMoments). The fitting provides ~0.01 pixel
 accuracy vs ~0.05 pixel for WeightedMoments.
 
+## Optimizations Applied (v5b) — AVX2 SIMD Vectorization
+
+4. **AVX2+FMA batch operations** — `MoffatFixedBeta` overrides `batch_fill_jacobian_residuals`
+   and `batch_compute_chi2` with AVX2+FMA SIMD implementations that process 4 f64 pixels
+   per iteration using `__m256d` registers. Key operations vectorized:
+   - `_mm256_sqrt_pd` for `sqrt(u)` in HalfInt strategy
+   - `_mm256_fmadd_pd` for fused multiply-add (r², u, model_val, chi² accumulation)
+   - `simd_int_pow` for integer powers via repeated squaring in SIMD lanes
+   - `simd_fast_pow_neg` dispatches per `PowStrategy` (HalfInt/Int/General)
+   - Scalar tail handles remainder pixels (n % 4)
+   - Runtime dispatch via `cpu_features::has_avx2_fma()` with scalar fallback
+
+### Microbenchmark Results (SIMD)
+
+| Benchmark | Before (v5a) | After (v5b) | Change |
+|-----------|-------------|-------------|--------|
+| fixed_beta_small (17×17) | 20.638µs | 12.484µs | **-39.5%** |
+| fixed_beta_medium (25×25) | 43.379µs | 26.259µs | **-39.5%** |
+| moffat_fit_single (21×21) | 20.652µs | 12.541µs | **-39.3%** |
+| measure_star_moffat_fit | 11.429µs | 8.587µs | **-24.9%** |
+| batch_6k_10000/moffat_fit | 59.278ms | 47.469ms | **-19.9%** |
+| variable_beta (no SIMD) | 68.423µs | 67.933µs | -0.7% (unchanged) |
+
+Variable beta is unaffected as expected (SIMD only targets `MoffatFixedBeta`).
+Batch improvement is lower (~20%) because non-fitting overhead (stamp extraction,
+moments seed, validation) dilutes the fitting speedup.
+
 ## Remaining Optimization Opportunities
 
 - Re-profile to identify new bottleneck distribution after optimizations
-- Consider SIMD vectorization of the L-M inner loop (evaluate_and_jacobian across pixels)
 - Explore reducing L-M iterations via better initial parameter estimates
+- SIMD vectorize `compute_hessian_gradient` (J^T J accumulation)
+- Consider SIMD for `MoffatVariableBeta` (would need SIMD `ln`/`exp` approximation)

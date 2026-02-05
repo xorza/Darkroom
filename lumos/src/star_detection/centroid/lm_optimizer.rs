@@ -66,6 +66,53 @@ pub trait LMModel<const N: usize> {
 
     /// Apply parameter constraints after an update.
     fn constrain(&self, params: &mut [f64; N]);
+
+    /// Batch fill jacobian rows and residuals, returning chi².
+    /// Default implementation calls `evaluate_and_jacobian` per pixel.
+    /// Override with SIMD to process multiple pixels at once.
+    fn batch_fill_jacobian_residuals(
+        &self,
+        data_x: &[f64],
+        data_y: &[f64],
+        data_z: &[f64],
+        params: &[f64; N],
+        jacobian: &mut Vec<[f64; N]>,
+        residuals: &mut Vec<f64>,
+    ) -> f64 {
+        jacobian.clear();
+        residuals.clear();
+
+        let mut chi2 = 0.0f64;
+        for ((&x, &y), &z) in data_x.iter().zip(data_y.iter()).zip(data_z.iter()) {
+            let (model_val, jac_row) = self.evaluate_and_jacobian(x, y, params);
+            let residual = z - model_val;
+            chi2 += residual * residual;
+            jacobian.push(jac_row);
+            residuals.push(residual);
+        }
+        chi2
+    }
+
+    /// Batch compute chi² (sum of squared residuals).
+    /// Default implementation calls `evaluate` per pixel.
+    /// Override with SIMD to process multiple pixels at once.
+    fn batch_compute_chi2(
+        &self,
+        data_x: &[f64],
+        data_y: &[f64],
+        data_z: &[f64],
+        params: &[f64; N],
+    ) -> f64 {
+        data_x
+            .iter()
+            .zip(data_y.iter())
+            .zip(data_z.iter())
+            .map(|((&x, &y), &z)| {
+                let residual = z - self.evaluate(x, y, params);
+                residual * residual
+            })
+            .sum()
+    }
 }
 
 /// Run L-M optimization for N-parameter model (generic implementation).
@@ -79,7 +126,7 @@ pub fn optimize<const N: usize, M: LMModel<N>>(
 ) -> LMResult<N> {
     let mut params = initial_params;
     let mut lambda = config.initial_lambda;
-    let mut prev_chi2 = compute_chi2(model, data_x, data_y, data_z, &params);
+    let mut prev_chi2 = model.batch_compute_chi2(data_x, data_y, data_z, &params);
     let mut converged = false;
     let mut iterations = 0;
 
@@ -93,8 +140,7 @@ pub fn optimize<const N: usize, M: LMModel<N>>(
 
         // Build Jacobian and residuals using fused evaluate+jacobian.
         // Also compute chi² from residuals (avoids redundant model evaluation).
-        let current_chi2 = fill_jacobian_residuals(
-            model,
+        let current_chi2 = model.batch_fill_jacobian_residuals(
             data_x,
             data_y,
             data_z,
@@ -127,7 +173,7 @@ pub fn optimize<const N: usize, M: LMModel<N>>(
         }
         model.constrain(&mut new_params);
 
-        let new_chi2 = compute_chi2(model, data_x, data_y, data_z, &new_params);
+        let new_chi2 = model.batch_compute_chi2(data_x, data_y, data_z, &new_params);
 
         if new_chi2 < prev_chi2 {
             params = new_params;
@@ -168,49 +214,6 @@ pub fn optimize<const N: usize, M: LMModel<N>>(
         converged,
         iterations,
     }
-}
-
-fn compute_chi2<const N: usize, M: LMModel<N>>(
-    model: &M,
-    data_x: &[f64],
-    data_y: &[f64],
-    data_z: &[f64],
-    params: &[f64; N],
-) -> f64 {
-    data_x
-        .iter()
-        .zip(data_y.iter())
-        .zip(data_z.iter())
-        .map(|((&x, &y), &z)| {
-            let residual = z - model.evaluate(x, y, params);
-            residual * residual
-        })
-        .sum()
-}
-
-/// Fill jacobian and residuals buffers using fused evaluate+jacobian.
-/// Returns chi² computed from the residuals (avoids a separate compute_chi2 call).
-fn fill_jacobian_residuals<const N: usize, M: LMModel<N>>(
-    model: &M,
-    data_x: &[f64],
-    data_y: &[f64],
-    data_z: &[f64],
-    params: &[f64; N],
-    jacobian: &mut Vec<[f64; N]>,
-    residuals: &mut Vec<f64>,
-) -> f64 {
-    jacobian.clear();
-    residuals.clear();
-
-    let mut chi2 = 0.0f64;
-    for ((&x, &y), &z) in data_x.iter().zip(data_y.iter()).zip(data_z.iter()) {
-        let (model_val, jac_row) = model.evaluate_and_jacobian(x, y, params);
-        let residual = z - model_val;
-        chi2 += residual * residual;
-        jacobian.push(jac_row);
-        residuals.push(residual);
-    }
-    chi2
 }
 
 /// Compute Hessian (J^T J) and gradient (J^T r) for N-parameter model.
