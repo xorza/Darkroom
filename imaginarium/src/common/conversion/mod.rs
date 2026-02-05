@@ -6,7 +6,6 @@ mod bench;
 #[cfg(test)]
 mod tests;
 
-use common::parallel;
 use rayon::prelude::*;
 
 use crate::common::error::Result;
@@ -41,31 +40,25 @@ pub fn convert_image(from: &Image, to: &mut Image) -> Result<()> {
 
     // Try to get SIMD row converter
     if let Some(simd_convert_row) = get_simd_row_converter(from_fmt, to_fmt) {
-        // Use SIMD path with parallel row processing (aligned to row stride)
-        parallel::par_chunks_auto_aligned(to_bytes, to_stride).for_each(|(start_row, chunk)| {
-            let num_rows = chunk.len() / to_stride;
-
-            for local_row in 0..num_rows {
-                let y = start_row + local_row;
+        // Use SIMD path with parallel row processing
+        to_bytes
+            .par_chunks_mut(to_stride)
+            .enumerate()
+            .for_each(|(y, to_row)| {
                 let from_row = &from_bytes[y * from_stride..];
-                let to_row = &mut chunk[local_row * to_stride..][..to_stride];
                 simd_convert_row(from_row, to_row, width);
-            }
-        });
+            });
     } else {
-        // Fall back to scalar path with parallel row processing (aligned to row stride)
+        // Fall back to scalar path with parallel row processing
         let info = ConversionInfo::new(from_fmt, to_fmt);
 
-        parallel::par_chunks_auto_aligned(to_bytes, to_stride).for_each(|(start_row, chunk)| {
-            let num_rows = chunk.len() / to_stride;
-
-            for local_row in 0..num_rows {
-                let y = start_row + local_row;
+        to_bytes
+            .par_chunks_mut(to_stride)
+            .enumerate()
+            .for_each(|(y, to_row)| {
                 let from_row = &from_bytes[y * from_stride..];
-                let to_row = &mut chunk[local_row * to_stride..][..to_stride];
                 dispatch_convert_row_scalar(from_row, to_row, width, &info);
-            }
-        });
+            });
     }
 
     Ok(())

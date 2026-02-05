@@ -420,9 +420,7 @@ impl AstroImage {
     /// Calculate mean pixel value across all channels.
     pub fn mean(&self) -> f32 {
         fn parallel_sum(values: &[f32]) -> f32 {
-            common::parallel::par_iter_auto(values.len())
-                .map(|(_, start, end)| crate::math::sum_f32(&values[start..end]))
-                .sum()
+            values.par_chunks(8192).map(crate::math::sum_f32).sum()
         }
 
         match &self.pixels {
@@ -572,19 +570,12 @@ impl From<Image> for AstroImage {
             } else {
                 let row_bytes = width * std::mem::size_of::<f32>();
                 let stride = desc.stride;
-                common::parallel::par_chunks_auto_aligned(&mut data, width).for_each(
-                    |(start_row, chunk)| {
-                        let rows_in_chunk = chunk.len() / width;
-                        for row_offset in 0..rows_in_chunk {
-                            let y = start_row + row_offset;
-                            let src_offset = y * stride;
-                            let src_row: &[f32] =
-                                bytemuck::cast_slice(&bytes[src_offset..src_offset + row_bytes]);
-                            let dst_start = row_offset * width;
-                            chunk[dst_start..dst_start + width].copy_from_slice(src_row);
-                        }
-                    },
-                );
+                data.par_chunks_mut(width).enumerate().for_each(|(y, row)| {
+                    let src_offset = y * stride;
+                    let src_row: &[f32] =
+                        bytemuck::cast_slice(&bytes[src_offset..src_offset + row_bytes]);
+                    row.copy_from_slice(src_row);
+                });
             }
             PixelData::L(Buffer2::new(width, height, data))
         } else if desc.is_packed() {
@@ -599,26 +590,20 @@ impl From<Image> for AstroImage {
             let mut r: Buffer2<f32> = Buffer2::new_default(width, height);
             let mut g: Buffer2<f32> = Buffer2::new_default(width, height);
             let mut b: Buffer2<f32> = Buffer2::new_default(width, height);
-            common::parallel::par_chunks_auto_aligned_zip3(
-                r.pixels_mut(),
-                g.pixels_mut(),
-                b.pixels_mut(),
-                width,
-            )
-            .for_each(|(start_row, (r_row, g_row, b_row))| {
-                let rows_in_chunk = r_row.len() / width;
-                for row_offset in 0..rows_in_chunk {
-                    let y = start_row + row_offset;
+            r.pixels_mut()
+                .par_chunks_mut(width)
+                .zip(g.pixels_mut().par_chunks_mut(width))
+                .zip(b.pixels_mut().par_chunks_mut(width))
+                .enumerate()
+                .for_each(|(y, ((r_row, g_row), b_row))| {
                     let row_start = y * stride_f32;
-                    let dst_start = row_offset * width;
                     for x in 0..width {
                         let src_idx = row_start + x * 3;
-                        r_row[dst_start + x] = pixels[src_idx];
-                        g_row[dst_start + x] = pixels[src_idx + 1];
-                        b_row[dst_start + x] = pixels[src_idx + 2];
+                        r_row[x] = pixels[src_idx];
+                        g_row[x] = pixels[src_idx + 1];
+                        b_row[x] = pixels[src_idx + 2];
                     }
-                }
-            });
+                });
             PixelData::Rgb([r, g, b])
         };
 
@@ -646,21 +631,20 @@ impl From<Image> for AstroImage {
 
 /// Deinterleave RGB data (RGBRGB...) into separate R, G, B planes.
 fn deinterleave_rgb(interleaved: &[f32], r: &mut [f32], g: &mut [f32], b: &mut [f32]) {
-    use common::parallel::par_chunks_auto_aligned_zip3;
-
     debug_assert_eq!(interleaved.len(), r.len() * 3);
     debug_assert_eq!(r.len(), g.len());
     debug_assert_eq!(g.len(), b.len());
 
-    // width=1 since we're treating it as a flat buffer
-    par_chunks_auto_aligned_zip3(r, g, b, 1).for_each(|(start, (r_chunk, g_chunk, b_chunk))| {
-        for i in 0..r_chunk.len() {
-            let src_idx = (start + i) * 3;
-            r_chunk[i] = interleaved[src_idx];
-            g_chunk[i] = interleaved[src_idx + 1];
-            b_chunk[i] = interleaved[src_idx + 2];
-        }
-    });
+    r.par_iter_mut()
+        .zip(g.par_iter_mut())
+        .zip(b.par_iter_mut())
+        .enumerate()
+        .for_each(|(i, ((r_val, g_val), b_val))| {
+            let src_idx = i * 3;
+            *r_val = interleaved[src_idx];
+            *g_val = interleaved[src_idx + 1];
+            *b_val = interleaved[src_idx + 2];
+        });
 }
 
 /// Interleave separate R, G, B planes into RGB data (RGBRGB...).
@@ -669,18 +653,14 @@ fn interleave_rgb(r: &[f32], g: &[f32], b: &[f32], interleaved: &mut [f32]) {
     debug_assert_eq!(r.len(), g.len());
     debug_assert_eq!(g.len(), b.len());
 
-    common::parallel::par_chunks_auto(interleaved).for_each(|(start_idx, chunk)| {
-        for (j, val) in chunk.iter_mut().enumerate() {
-            let i = start_idx + j;
-            let pixel_idx = i / 3;
-            let channel = i % 3;
-            *val = match channel {
-                0 => r[pixel_idx],
-                1 => g[pixel_idx],
-                _ => b[pixel_idx],
-            };
-        }
-    });
+    interleaved
+        .par_chunks_mut(3)
+        .enumerate()
+        .for_each(|(i, rgb)| {
+            rgb[0] = r[i];
+            rgb[1] = g[i];
+            rgb[2] = b[i];
+        });
 }
 
 /// Convert RGB planes to luminance using Rec. 709 weights.
@@ -693,11 +673,8 @@ fn rgb_to_luminance(r: &[f32], g: &[f32], b: &[f32], gray: &mut [f32]) {
     const G_WEIGHT: f32 = 0.7152;
     const B_WEIGHT: f32 = 0.0722;
 
-    common::parallel::par_chunks_auto(gray).for_each(|(start_idx, chunk)| {
-        for (j, val) in chunk.iter_mut().enumerate() {
-            let i = start_idx + j;
-            *val = R_WEIGHT * r[i] + G_WEIGHT * g[i] + B_WEIGHT * b[i];
-        }
+    gray.par_iter_mut().enumerate().for_each(|(i, val)| {
+        *val = R_WEIGHT * r[i] + G_WEIGHT * g[i] + B_WEIGHT * b[i];
     });
 }
 
@@ -713,12 +690,12 @@ fn rgb_to_luminance_inplace(r: &mut Buffer2<f32>, g: &Buffer2<f32>, b: &Buffer2<
     let g_slice = g.pixels();
     let b_slice = b.pixels();
 
-    common::parallel::par_chunks_auto(r.pixels_mut()).for_each(|(start_idx, chunk)| {
-        for (j, val) in chunk.iter_mut().enumerate() {
-            let i = start_idx + j;
+    r.pixels_mut()
+        .par_iter_mut()
+        .enumerate()
+        .for_each(|(i, val)| {
             *val = R_WEIGHT * *val + G_WEIGHT * g_slice[i] + B_WEIGHT * b_slice[i];
-        }
-    });
+        });
 }
 
 // ============================================================================

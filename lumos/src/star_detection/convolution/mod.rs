@@ -19,7 +19,6 @@ use rayon::prelude::*;
 
 use crate::common::Buffer2;
 use crate::math::fwhm_to_sigma;
-use common::parallel;
 
 // ============================================================================
 // Public API
@@ -65,14 +64,14 @@ pub fn matched_filter(
     );
 
     // Subtract background first (parallel) - reuse scratch buffer to avoid allocation
-    let pixels_data = pixels.pixels();
-    let bg_data = background.pixels();
-    parallel::par_chunks_auto(subtraction_scratch.pixels_mut()).for_each(|(offset, chunk)| {
-        for (i, out) in chunk.iter_mut().enumerate() {
-            let idx = offset + i;
-            *out = (pixels_data[idx] - bg_data[idx]).max(0.0);
-        }
-    });
+    subtraction_scratch
+        .pixels_mut()
+        .par_iter_mut()
+        .zip(pixels.pixels().par_iter())
+        .zip(background.pixels().par_iter())
+        .for_each(|((out, &px), &bg)| {
+            *out = (px - bg).max(0.0);
+        });
 
     // Convolve with elliptical Gaussian kernel
     let sigma = fwhm_to_sigma(fwhm);
@@ -145,28 +144,22 @@ pub(super) fn elliptical_gaussian_convolve(
     let radius = ksize / 2;
 
     // Parallel SIMD 2D convolution - process rows in parallel
-    parallel::par_chunks_auto_aligned(output.pixels_mut(), width).for_each(
-        |(y_start, out_chunk)| {
-            let rows_in_chunk = out_chunk.len() / width;
-
-            for local_y in 0..rows_in_chunk {
-                let y = y_start + local_y;
-                let out_row = &mut out_chunk[local_y * width..(local_y + 1) * width];
-
-                // Use SIMD for this row
-                simd::convolve_2d_row(
-                    pixels.pixels(),
-                    out_row,
-                    width,
-                    height,
-                    y,
-                    &kernel,
-                    ksize,
-                    radius,
-                );
-            }
-        },
-    );
+    output
+        .pixels_mut()
+        .par_chunks_mut(width)
+        .enumerate()
+        .for_each(|(y, out_row)| {
+            simd::convolve_2d_row(
+                pixels.pixels(),
+                out_row,
+                width,
+                height,
+                y,
+                &kernel,
+                ksize,
+                radius,
+            );
+        });
 }
 
 /// Compute 1D Gaussian kernel (normalized to sum to 1.0).
@@ -208,18 +201,14 @@ pub(super) fn convolve_rows_parallel(
     let width = input.width();
     let radius = kernel.len() / 2;
 
-    parallel::par_chunks_auto_aligned(output.pixels_mut(), width).for_each(
-        |(y_start, out_chunk)| {
-            let rows_in_chunk = out_chunk.len() / width;
-
-            for local_y in 0..rows_in_chunk {
-                let y = y_start + local_y;
-                let in_row = &input[y * width..(y + 1) * width];
-                let out_row = &mut out_chunk[local_y * width..(local_y + 1) * width];
-                simd::convolve_row(in_row, out_row, kernel, radius);
-            }
-        },
-    );
+    output
+        .pixels_mut()
+        .par_chunks_mut(width)
+        .enumerate()
+        .for_each(|(y, out_row)| {
+            let in_row = &input[y * width..(y + 1) * width];
+            simd::convolve_row(in_row, out_row, kernel, radius);
+        });
 }
 
 /// Convolve all columns in parallel using direct SIMD.
@@ -262,34 +251,29 @@ fn gaussian_convolve_2d_direct(pixels: &Buffer2<f32>, sigma: f32, output: &mut B
         }
     }
 
-    parallel::par_chunks_auto_aligned(output.pixels_mut(), width).for_each(
-        |(y_start, out_chunk)| {
-            let rows_in_chunk = out_chunk.len() / width;
+    output
+        .pixels_mut()
+        .par_chunks_mut(width)
+        .enumerate()
+        .for_each(|(y, out_row)| {
+            for (x, out_pixel) in out_row.iter_mut().enumerate() {
+                let mut sum = 0.0f32;
 
-            for local_y in 0..rows_in_chunk {
-                let y = y_start + local_y;
-                let out_row = &mut out_chunk[local_y * width..(local_y + 1) * width];
+                for ky in 0..ksize {
+                    for kx in 0..ksize {
+                        let sx = x as isize + kx as isize - radius as isize;
+                        let sy = y as isize + ky as isize - radius as isize;
 
-                for (x, out_pixel) in out_row.iter_mut().enumerate() {
-                    let mut sum = 0.0f32;
+                        let sx = mirror_index(sx, width);
+                        let sy = mirror_index(sy, height);
 
-                    for ky in 0..ksize {
-                        for kx in 0..ksize {
-                            let sx = x as isize + kx as isize - radius as isize;
-                            let sy = y as isize + ky as isize - radius as isize;
-
-                            let sx = mirror_index(sx, width);
-                            let sy = mirror_index(sy, height);
-
-                            sum += pixels[sy * width + sx] * kernel_2d[ky * ksize + kx];
-                        }
+                        sum += pixels[sy * width + sx] * kernel_2d[ky * ksize + kx];
                     }
-
-                    *out_pixel = sum;
                 }
+
+                *out_pixel = sum;
             }
-        },
-    );
+        });
 }
 
 /// Compute 2D elliptical Gaussian kernel (normalized to sum to 1.0).

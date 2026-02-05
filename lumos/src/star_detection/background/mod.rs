@@ -16,8 +16,7 @@ mod tile_grid;
 pub use estimate::BackgroundEstimate;
 
 use crate::common::{BitBuffer2, Buffer2};
-use common::parallel;
-use rayon::iter::ParallelIterator;
+use rayon::prelude::*;
 
 use super::buffer_pool::BufferPool;
 use super::config::{AdaptiveSigmaConfig, Config};
@@ -146,31 +145,27 @@ fn interpolate_from_grid(
     adaptive_sigma: Option<&mut Buffer2<f32>>,
 ) {
     let width = background.width();
-    let height = background.height();
 
-    // Process in parallel chunks
-    let bg_ptr = background.pixels_mut().as_mut_ptr() as usize;
-    let noise_ptr = noise.pixels_mut().as_mut_ptr() as usize;
-    let adaptive_ptr = adaptive_sigma.map(|b| b.pixels_mut().as_mut_ptr() as usize);
-
-    parallel::par_iter_auto(height).for_each(|(_, start_row, end_row)| {
-        for y in start_row..end_row {
-            let row_offset = y * width;
-
-            // SAFETY: Each row is processed by only one thread
-            let bg_row = unsafe {
-                std::slice::from_raw_parts_mut((bg_ptr as *mut f32).add(row_offset), width)
-            };
-            let noise_row = unsafe {
-                std::slice::from_raw_parts_mut((noise_ptr as *mut f32).add(row_offset), width)
-            };
-            let adaptive_row = adaptive_ptr.map(|ptr| unsafe {
-                std::slice::from_raw_parts_mut((ptr as *mut f32).add(row_offset), width)
+    if let Some(adaptive) = adaptive_sigma {
+        background
+            .pixels_mut()
+            .par_chunks_mut(width)
+            .zip(noise.pixels_mut().par_chunks_mut(width))
+            .zip(adaptive.pixels_mut().par_chunks_mut(width))
+            .enumerate()
+            .for_each(|(y, ((bg_row, noise_row), adaptive_row))| {
+                interpolate_row(bg_row, noise_row, Some(adaptive_row), y, grid);
             });
-
-            interpolate_row(bg_row, noise_row, adaptive_row, y, grid);
-        }
-    });
+    } else {
+        background
+            .pixels_mut()
+            .par_chunks_mut(width)
+            .zip(noise.pixels_mut().par_chunks_mut(width))
+            .enumerate()
+            .for_each(|(y, (bg_row, noise_row))| {
+                interpolate_row(bg_row, noise_row, None, y, grid);
+            });
+    }
 }
 
 /// Create a mask of pixels that are likely objects (above threshold).

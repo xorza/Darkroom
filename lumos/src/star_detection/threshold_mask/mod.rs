@@ -7,6 +7,8 @@
 //! Uses bit-packed storage (`BitBuffer2`) for memory efficiency - each pixel
 //! uses 1 bit instead of 1 byte, reducing memory usage by 8x.
 
+use rayon::prelude::*;
+
 #[cfg(target_arch = "aarch64")]
 mod neon;
 #[cfg(target_arch = "x86_64")]
@@ -19,8 +21,7 @@ mod bench;
 mod tests;
 
 use crate::common::{BitBuffer2, Buffer2};
-use common::parallel;
-use rayon::iter::ParallelIterator;
+use rayon::prelude::*;
 
 #[cfg(target_arch = "x86_64")]
 use common::cpu_features;
@@ -370,21 +371,12 @@ pub fn create_threshold_mask(
     debug_assert_eq!(height, noise.height());
 
     let words_per_row = mask.words_per_row();
-    let num_words = mask.num_words();
 
-    // SAFETY: We partition rows into disjoint chunks, each thread writes only to its chunk
-    // Store pointer as usize to satisfy Send+Sync bounds
-    let words_ptr = mask.words().as_ptr() as usize;
-
-    parallel::par_iter_auto(height).for_each(|(_, start_row, end_row)| {
-        // SAFETY: Each chunk writes to disjoint rows
-        let words = unsafe { std::slice::from_raw_parts_mut(words_ptr as *mut u64, num_words) };
-
-        for y in start_row..end_row {
+    mask.words_mut()
+        .par_chunks_mut(words_per_row)
+        .enumerate()
+        .for_each(|(y, row_words)| {
             let row_pixel_start = y * width;
-            let row_word_start = y * words_per_row;
-            let row_words = &mut words[row_word_start..row_word_start + words_per_row];
-
             process_words(
                 pixels,
                 bg,
@@ -394,8 +386,7 @@ pub fn create_threshold_mask(
                 row_pixel_start,
                 row_pixel_start + width,
             );
-        }
-    });
+        });
 }
 
 /// Create binary mask using per-pixel adaptive sigma thresholds.
@@ -427,20 +418,12 @@ pub fn create_adaptive_threshold_mask(
     debug_assert_eq!(height, adaptive_sigma.height());
 
     let words_per_row = mask.words_per_row();
-    let num_words = mask.num_words();
 
-    // SAFETY: We partition rows into disjoint chunks, each thread writes only to its chunk
-    let words_ptr = mask.words().as_ptr() as usize;
-
-    parallel::par_iter_auto(height).for_each(|(_, start_row, end_row)| {
-        // SAFETY: Each chunk writes to disjoint rows
-        let words = unsafe { std::slice::from_raw_parts_mut(words_ptr as *mut u64, num_words) };
-
-        for y in start_row..end_row {
+    mask.words_mut()
+        .par_chunks_mut(words_per_row)
+        .enumerate()
+        .for_each(|(y, row_words)| {
             let row_pixel_start = y * width;
-            let row_word_start = y * words_per_row;
-            let row_words = &mut words[row_word_start..row_word_start + words_per_row];
-
             process_words_adaptive(
                 pixels,
                 bg,
@@ -450,8 +433,7 @@ pub fn create_adaptive_threshold_mask(
                 row_pixel_start,
                 row_pixel_start + width,
             );
-        }
-    });
+        });
 }
 
 /// Create binary mask from a filtered (background-subtracted) image.
@@ -475,21 +457,12 @@ pub fn create_threshold_mask_filtered(
     debug_assert_eq!(height, noise.height());
 
     let words_per_row = mask.words_per_row();
-    let num_words = mask.num_words();
 
-    // SAFETY: We partition rows into disjoint chunks, each thread writes only to its chunk
-    // Store pointer as usize to satisfy Send+Sync bounds
-    let words_ptr = mask.words().as_ptr() as usize;
-
-    parallel::par_iter_auto(height).for_each(|(_, start_row, end_row)| {
-        // SAFETY: Each chunk writes to disjoint rows
-        let words = unsafe { std::slice::from_raw_parts_mut(words_ptr as *mut u64, num_words) };
-
-        for y in start_row..end_row {
+    mask.words_mut()
+        .par_chunks_mut(words_per_row)
+        .enumerate()
+        .for_each(|(y, row_words)| {
             let row_pixel_start = y * width;
-            let row_word_start = y * words_per_row;
-            let row_words = &mut words[row_word_start..row_word_start + words_per_row];
-
             process_words_filtered(
                 filtered,
                 noise,
@@ -498,6 +471,5 @@ pub fn create_threshold_mask_filtered(
                 row_pixel_start,
                 row_pixel_start + width,
             );
-        }
-    });
+        });
 }

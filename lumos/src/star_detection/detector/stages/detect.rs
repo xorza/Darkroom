@@ -270,11 +270,12 @@ fn collect_component_data(
     width: usize,
     max_area: usize,
 ) -> Vec<ComponentData> {
-    use common::parallel;
     use parking_lot::Mutex;
+    use rayon::prelude::*;
 
     let num_labels = label_map.num_labels();
     let labels = label_map.labels();
+    let height = label_map.height();
 
     let result = Mutex::new(vec![
         ComponentData {
@@ -285,7 +286,7 @@ fn collect_component_data(
         num_labels
     ]);
 
-    parallel::par_iter_auto(label_map.height()).for_each_init(
+    (0..height).into_par_iter().for_each_init(
         || {
             (
                 vec![
@@ -299,7 +300,7 @@ fn collect_component_data(
                 Vec::<usize>::with_capacity(1024),
             )
         },
-        |(local_data, touched), (_, start_row, end_row)| {
+        |(local_data, touched), y| {
             for &idx in touched.iter() {
                 local_data[idx] = ComponentData {
                     bbox: Aabb::empty(),
@@ -309,22 +310,20 @@ fn collect_component_data(
             }
             touched.clear();
 
-            for y in start_row..end_row {
-                let row_start = y * width;
-                for x in 0..width {
-                    let label = labels[row_start + x];
-                    if label == 0 {
-                        continue;
-                    }
-                    let idx = (label - 1) as usize;
-                    let data = &mut local_data[idx];
-                    if data.area == 0 {
-                        touched.push(idx);
-                    }
-                    data.bbox.include(Vec2us::new(x, y));
-                    data.label = label;
-                    data.area += 1;
+            let row_start = y * width;
+            for x in 0..width {
+                let label = labels[row_start + x];
+                if label == 0 {
+                    continue;
                 }
+                let idx = (label - 1) as usize;
+                let data = &mut local_data[idx];
+                if data.area == 0 {
+                    touched.push(idx);
+                }
+                data.bbox.include(Vec2us::new(x, y));
+                data.label = label;
+                data.area += 1;
             }
 
             let mut result = result.lock();
