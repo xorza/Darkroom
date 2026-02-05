@@ -416,8 +416,6 @@ fn register_all_lights(
         ..Default::default()
     };
 
-    let registrator = lumos::Registrator::new(reg_config.clone());
-
     let mut registered_paths = Vec::new();
     let mut failed_registrations = 0;
 
@@ -453,7 +451,7 @@ fn register_all_lights(
         };
 
         // Register target to reference
-        match registrator.register_stars(ref_stars, stars) {
+        match lumos::register(ref_stars, stars, &reg_config) {
             Ok(result) => {
                 tracing::info!(
                     file = %filename,

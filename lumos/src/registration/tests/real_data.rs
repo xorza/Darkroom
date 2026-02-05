@@ -11,7 +11,6 @@ use ::bench::quick_bench;
 
 use crate::AstroImage;
 use crate::registration::config::Config as RegistrationConfig;
-use crate::registration::pipeline::Registrator;
 use crate::star_detection::{StarDetector, config::Config};
 use crate::testing::calibration_dir;
 
@@ -132,10 +131,8 @@ fn test_register_two_calibrated_lights() {
         sip_enabled: false,
         ..RegistrationConfig::default()
     };
-    let registrator = Registrator::new(reg_config.clone());
 
-    let result = registrator
-        .register_stars(&result1.stars, &result2.stars)
+    let result = crate::registration::register(&result1.stars, &result2.stars, &reg_config)
         .expect("Registration should succeed");
 
     let baseline_rms = result.rms_error;
@@ -266,7 +263,10 @@ fn bench_register_stars(b: ::bench::Bencher) {
     let reg_config = RegistrationConfig::default();
 
     b.bench(|| {
-        let registrator = Registrator::new(reg_config.clone());
-        black_box(registrator.register_stars(black_box(&result1.stars), black_box(&result2.stars)))
+        black_box(crate::registration::register(
+            black_box(&result1.stars),
+            black_box(&result2.stars),
+            &reg_config,
+        ))
     });
 }

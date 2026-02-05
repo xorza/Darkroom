@@ -3,8 +3,8 @@
 //! This example demonstrates simple two-image alignment:
 //! 1. Load reference and target images
 //! 2. Detect stars in both
-//! 3. Align with `Registrator::default().register_stars()`
-//! 4. Warp target to reference with `warp_to_reference_image()`
+//! 3. Align with `register(&ref_stars, &target_stars, &Config::default())`
+//! 4. Warp target to reference with `warp()`
 //! 5. Save the aligned result
 //!
 //! # Usage
@@ -16,7 +16,7 @@
 use std::env;
 use std::path::Path;
 
-use lumos::{AstroImage, InterpolationMethod, RegistrationConfig, Registrator, StarDetector, warp};
+use lumos::{AstroImage, InterpolationMethod, RegistrationConfig, StarDetector, register, warp};
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -66,9 +66,12 @@ fn main() {
 
     // Align target to reference
     println!("\nAligning images...");
-    let result = Registrator::default()
-        .register_stars(&ref_result.stars, &target_result.stars)
-        .expect("Registration failed");
+    let result = register(
+        &ref_result.stars,
+        &target_result.stars,
+        &RegistrationConfig::default(),
+    )
+    .expect("Registration failed");
 
     println!("  Matched {} stars", result.num_inliers);
     println!("  RMS error: {:.3} pixels", result.rms_error);

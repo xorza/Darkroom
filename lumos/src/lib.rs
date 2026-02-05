@@ -86,7 +86,7 @@ pub use star_detection::{
 // ============================================================================
 
 pub use registration::{
-    // Configuration (flat struct)
+    // Configuration
     Config as RegistrationConfig,
     InterpolationMethod,
     // Results and errors
@@ -94,8 +94,6 @@ pub use registration::{
     RegistrationError,
     RegistrationResult,
     // Core types
-    Registrator,
-    // Distortion (for manual SIP access)
     SipPolynomial,
     Transform,
     TransformType,

@@ -193,12 +193,9 @@ fn validate_registration(
 ///
 /// # Example
 /// ```rust,ignore
-/// use lumos::registration::{Registrator, RegistrationConfig, estimate_overlap};
+/// use lumos::registration::{Config, register, estimate_overlap};
 ///
-/// let config = RegistrationConfig::default();
-/// let registrator = Registrator::new(config);
-/// let result = registrator.register_stars(&ref_stars, &target_stars)?;
-///
+/// let result = register(&ref_stars, &target_stars, &Config::default())?;
 /// let overlap = estimate_overlap(width, height, &result.transform);
 /// println!("Image overlap: {:.1}%", overlap * 100.0);
 /// ```
@@ -345,10 +342,9 @@ fn percentile(sorted: &[f64], p: f64) -> f64 {
 ///
 /// # Example
 /// ```rust,ignore
-/// use lumos::registration::{Registrator, check_quadrant_consistency};
+/// use lumos::registration::{Config, register, check_quadrant_consistency};
 ///
-/// let result = registrator.register_stars(&ref_stars, &target_stars)?;
-///
+/// let result = register(&ref_stars, &target_stars, &Config::default())?;
 /// let consistency = check_quadrant_consistency(
 ///     &ref_points, &target_points, &result.transform, width, height
 /// );
