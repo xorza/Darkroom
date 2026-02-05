@@ -110,11 +110,13 @@ mod avx2_tests {
 
     #[inline]
     unsafe fn fast_exp_8_avx2(x: &[f32; 8]) -> [f32; 8] {
-        let vx = _mm256_loadu_ps(x.as_ptr());
-        let result = fast_exp_8_avx2_m256(vx);
-        let mut out = [0.0f32; 8];
-        _mm256_storeu_ps(out.as_mut_ptr(), result);
-        out
+        unsafe {
+            let vx = _mm256_loadu_ps(x.as_ptr());
+            let result = fast_exp_8_avx2_m256(vx);
+            let mut out = [0.0f32; 8];
+            _mm256_storeu_ps(out.as_mut_ptr(), result);
+            out
+        }
     }
 
     #[test]
@@ -240,11 +242,13 @@ mod sse_tests {
 
     #[inline]
     unsafe fn fast_exp_4_sse(x: &[f32; 4]) -> [f32; 4] {
-        let vx = _mm_loadu_ps(x.as_ptr());
-        let result = fast_exp_4_sse_m128(vx);
-        let mut out = [0.0f32; 4];
-        _mm_storeu_ps(out.as_mut_ptr(), result);
-        out
+        unsafe {
+            let vx = _mm_loadu_ps(x.as_ptr());
+            let result = fast_exp_4_sse_m128(vx);
+            let mut out = [0.0f32; 4];
+            _mm_storeu_ps(out.as_mut_ptr(), result);
+            out
+        }
     }
 
     #[test]
@@ -398,20 +402,24 @@ mod cross_impl_tests {
 
     #[inline]
     unsafe fn fast_exp_8_avx2(x: &[f32; 8]) -> [f32; 8] {
-        let vx = _mm256_loadu_ps(x.as_ptr());
-        let result = fast_exp_8_avx2_m256(vx);
-        let mut out = [0.0f32; 8];
-        _mm256_storeu_ps(out.as_mut_ptr(), result);
-        out
+        unsafe {
+            let vx = _mm256_loadu_ps(x.as_ptr());
+            let result = fast_exp_8_avx2_m256(vx);
+            let mut out = [0.0f32; 8];
+            _mm256_storeu_ps(out.as_mut_ptr(), result);
+            out
+        }
     }
 
     #[inline]
     unsafe fn fast_exp_4_sse(x: &[f32; 4]) -> [f32; 4] {
-        let vx = _mm_loadu_ps(x.as_ptr());
-        let result = fast_exp_4_sse_m128(vx);
-        let mut out = [0.0f32; 4];
-        _mm_storeu_ps(out.as_mut_ptr(), result);
-        out
+        unsafe {
+            let vx = _mm_loadu_ps(x.as_ptr());
+            let result = fast_exp_4_sse_m128(vx);
+            let mut out = [0.0f32; 4];
+            _mm_storeu_ps(out.as_mut_ptr(), result);
+            out
+        }
     }
 
     #[test]

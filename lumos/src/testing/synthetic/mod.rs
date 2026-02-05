@@ -36,7 +36,6 @@
 //! - [`stamps`] - Small star stamps for centroid/profile fitting tests
 //! - [`background_map`] - BackgroundMap generation for detection tests
 
-
 pub mod artifacts;
 pub mod background_map;
 pub mod backgrounds;

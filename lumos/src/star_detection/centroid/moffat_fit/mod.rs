@@ -10,7 +10,6 @@
 //! This achieves similar centroid accuracy to Gaussian fitting (~0.01 pixel)
 //! but provides more accurate flux and FWHM estimates for stellar sources.
 
-
 #[cfg(test)]
 mod bench;
 pub(crate) mod simd;
@@ -18,13 +17,11 @@ pub(crate) mod simd;
 mod tests;
 
 use super::linear_solver::solve_5x5;
-use super::lm_optimizer::{
-    LMConfig, LMModel, optimize_5, optimize_5_weighted, optimize_6, optimize_6_weighted,
-};
-use super::{compute_pixel_weights, estimate_sigma_from_moments, extract_stamp};
+use super::lm_optimizer::{LMConfig, LMModel, optimize_5, optimize_6};
+use super::{estimate_sigma_from_moments, extract_stamp};
 use crate::common::Buffer2;
 use crate::math::FWHM_TO_SIGMA;
-use glam::{DVec2, Vec2};
+use glam::Vec2;
 
 /// Configuration for Moffat profile fitting.
 #[derive(Debug, Clone)]
@@ -215,71 +212,6 @@ pub fn fit_moffat_2d(
     }
 }
 
-/// Fit a 2D Moffat profile to a star stamp with inverse-variance weighting.
-///
-/// Uses weighted Levenberg-Marquardt optimization for optimal estimation
-/// when noise characteristics are known.
-#[allow(clippy::too_many_arguments)]
-pub fn fit_moffat_2d_weighted(
-    pixels: &Buffer2<f32>,
-    pos: Vec2,
-    stamp_radius: usize,
-    background: f32,
-    noise: f32,
-    gain: Option<f32>,
-    read_noise: Option<f32>,
-    config: &MoffatFitConfig,
-) -> Option<MoffatFitResult> {
-    let (data_x, data_y, data_z, peak_value) = extract_stamp(pixels, pos, stamp_radius)?;
-
-    let n = data_x.len();
-    let n_params = if config.fit_beta { 6 } else { 5 };
-    if n < n_params + 1 {
-        return None;
-    }
-
-    // Compute inverse-variance weights
-    let weights = compute_pixel_weights(&data_z, background, noise, gain, read_noise);
-
-    let initial_amplitude = (peak_value - background).max(0.01);
-
-    // Estimate sigma from moments, then convert to alpha
-    let sigma_est = estimate_sigma_from_moments(&data_x, &data_y, &data_z, pos, background);
-    let fwhm_est = sigma_est * FWHM_TO_SIGMA;
-    let initial_alpha =
-        fwhm_beta_to_alpha(fwhm_est, config.fixed_beta).clamp(0.5, stamp_radius as f32);
-
-    if config.fit_beta {
-        fit_with_variable_beta_weighted(
-            &data_x,
-            &data_y,
-            &data_z,
-            &weights,
-            pos,
-            initial_amplitude,
-            initial_alpha,
-            background,
-            stamp_radius,
-            n,
-            config,
-        )
-    } else {
-        fit_with_fixed_beta_weighted(
-            &data_x,
-            &data_y,
-            &data_z,
-            &weights,
-            pos,
-            initial_amplitude,
-            initial_alpha,
-            background,
-            stamp_radius,
-            n,
-            config,
-        )
-    }
-}
-
 #[allow(clippy::too_many_arguments)]
 fn fit_with_fixed_beta(
     data_x: &[f32],
@@ -355,118 +287,6 @@ fn fit_with_variable_beta(
     };
 
     let result = optimize_6(&model, data_x, data_y, data_z, initial_params, &config.lm);
-
-    let [x0, y0, amplitude, alpha, beta, bg] = result.params;
-    let result_pos = Vec2::new(x0, y0);
-
-    if !validate_position(result_pos, pos, alpha, stamp_radius) {
-        return None;
-    }
-
-    let rms = (result.chi2 / n as f32).sqrt();
-    let fwhm = alpha_beta_to_fwhm(alpha, beta);
-
-    Some(MoffatFitResult {
-        pos: result_pos,
-        amplitude,
-        alpha,
-        beta,
-        background: bg,
-        fwhm,
-        rms_residual: rms,
-        converged: result.converged,
-        iterations: result.iterations,
-    })
-}
-
-#[allow(clippy::too_many_arguments)]
-fn fit_with_fixed_beta_weighted(
-    data_x: &[f32],
-    data_y: &[f32],
-    data_z: &[f32],
-    weights: &[f32],
-    pos: Vec2,
-    initial_amplitude: f32,
-    initial_alpha: f32,
-    background: f32,
-    stamp_radius: usize,
-    n: usize,
-    config: &MoffatFitConfig,
-) -> Option<MoffatFitResult> {
-    let initial_params = [pos.x, pos.y, initial_amplitude, initial_alpha, background];
-    let model = MoffatFixedBeta {
-        beta: config.fixed_beta,
-        stamp_radius: stamp_radius as f32,
-    };
-
-    let result = optimize_5_weighted(
-        &model,
-        data_x,
-        data_y,
-        data_z,
-        weights,
-        initial_params,
-        &config.lm,
-    );
-
-    let [x0, y0, amplitude, alpha, bg] = result.params;
-    let result_pos = Vec2::new(x0, y0);
-
-    if !validate_position(result_pos, pos, alpha, stamp_radius) {
-        return None;
-    }
-
-    let rms = (result.chi2 / n as f32).sqrt();
-    let fwhm = alpha_beta_to_fwhm(alpha, config.fixed_beta);
-
-    Some(MoffatFitResult {
-        pos: result_pos,
-        amplitude,
-        alpha,
-        beta: config.fixed_beta,
-        background: bg,
-        fwhm,
-        rms_residual: rms,
-        converged: result.converged,
-        iterations: result.iterations,
-    })
-}
-
-#[allow(clippy::too_many_arguments)]
-fn fit_with_variable_beta_weighted(
-    data_x: &[f32],
-    data_y: &[f32],
-    data_z: &[f32],
-    weights: &[f32],
-    pos: Vec2,
-    initial_amplitude: f32,
-    initial_alpha: f32,
-    background: f32,
-    stamp_radius: usize,
-    n: usize,
-    config: &MoffatFitConfig,
-) -> Option<MoffatFitResult> {
-    let initial_params = [
-        pos.x,
-        pos.y,
-        initial_amplitude,
-        initial_alpha,
-        config.fixed_beta,
-        background,
-    ];
-    let model = MoffatVariableBeta {
-        stamp_radius: stamp_radius as f32,
-    };
-
-    let result = optimize_6_weighted(
-        &model,
-        data_x,
-        data_y,
-        data_z,
-        weights,
-        initial_params,
-        &config.lm,
-    );
 
     let [x0, y0, amplitude, alpha, beta, bg] = result.params;
     let result_pos = Vec2::new(x0, y0);

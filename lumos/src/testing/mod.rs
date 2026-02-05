@@ -1,6 +1,5 @@
 //! Testing utilities for lumos.
 
-
 pub mod real_data;
 pub mod synthetic;
 

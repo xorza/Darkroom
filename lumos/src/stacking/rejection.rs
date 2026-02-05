@@ -7,7 +7,6 @@
 //! - Percentile clipping
 //! - Generalized Extreme Studentized Deviate (GESD)
 
-
 use crate::math;
 
 /// Configuration for sigma clipping.
@@ -112,11 +111,6 @@ impl LinearFitClipConfig {
             max_iterations,
         }
     }
-
-    /// Create symmetric config with same threshold for low and high.
-    pub fn symmetric(sigma: f32, max_iterations: u32) -> Self {
-        Self::new(sigma, sigma, max_iterations)
-    }
 }
 
 /// Configuration for percentile clipping.
@@ -158,11 +152,6 @@ impl PercentileClipConfig {
             low_percentile,
             high_percentile,
         }
-    }
-
-    /// Create symmetric config clipping same percentage from both ends.
-    pub fn symmetric(percentile: f32) -> Self {
-        Self::new(percentile, percentile)
     }
 }
 
@@ -214,8 +203,6 @@ pub struct RejectionResult {
     pub value: f32,
     /// Number of values remaining after rejection.
     pub remaining_count: usize,
-    /// Number of values rejected.
-    pub rejected_count: usize,
 }
 
 /// Sigma-clipped mean: iteratively remove outliers beyond sigma threshold.
@@ -230,13 +217,10 @@ pub struct RejectionResult {
 pub fn sigma_clipped_mean(values: &mut [f32], config: &SigmaClipConfig) -> RejectionResult {
     debug_assert!(!values.is_empty());
 
-    let original_len = values.len();
-
     if values.len() <= 2 {
         return RejectionResult {
             value: math::mean_f32(values),
             remaining_count: values.len(),
-            rejected_count: 0,
         };
     }
 
@@ -278,7 +262,6 @@ pub fn sigma_clipped_mean(values: &mut [f32], config: &SigmaClipConfig) -> Rejec
     RejectionResult {
         value: math::mean_f32(&values[..len]),
         remaining_count: len,
-        rejected_count: original_len - len,
     }
 }
 
@@ -298,13 +281,11 @@ pub fn winsorized_sigma_clipped_mean(
         return RejectionResult {
             value: math::mean_f32(values),
             remaining_count: values.len(),
-            rejected_count: 0,
         };
     }
 
     // Work with a copy for iterative winsorization
     let mut working = values.to_vec();
-    let mut total_winsorized = 0usize;
 
     for _ in 0..config.max_iterations {
         // Compute median and std dev
@@ -334,13 +315,11 @@ pub fn winsorized_sigma_clipped_mean(
         if winsorized_this_iter == 0 {
             break;
         }
-        total_winsorized += winsorized_this_iter;
     }
 
     RejectionResult {
         value: math::mean_f32(&working),
         remaining_count: values.len(),
-        rejected_count: total_winsorized,
     }
 }
 
@@ -357,13 +336,10 @@ pub fn linear_fit_clipped_mean(
 ) -> RejectionResult {
     debug_assert!(!values.is_empty());
 
-    let original_len = values.len();
-
     if values.len() <= 3 {
         return RejectionResult {
             value: math::mean_f32(values),
             remaining_count: values.len(),
-            rejected_count: 0,
         };
     }
 
@@ -444,7 +420,6 @@ pub fn linear_fit_clipped_mean(
     RejectionResult {
         value: math::mean_f32(&values[..len]),
         remaining_count: len,
-        rejected_count: original_len - len,
     }
 }
 
@@ -465,7 +440,6 @@ pub fn percentile_clipped_mean(
         return RejectionResult {
             value: math::mean_f32(values),
             remaining_count: values.len(),
-            rejected_count: 0,
         };
     }
 
@@ -493,7 +467,6 @@ pub fn percentile_clipped_mean(
     RejectionResult {
         value: math::mean_f32(remaining),
         remaining_count,
-        rejected_count: original_len - remaining_count,
     }
 }
 
@@ -518,7 +491,6 @@ pub fn gesd_mean(values: &mut [f32], config: &GesdConfig) -> RejectionResult {
         return RejectionResult {
             value: math::mean_f32(values),
             remaining_count: values.len(),
-            rejected_count: 0,
         };
     }
 
@@ -526,7 +498,6 @@ pub fn gesd_mean(values: &mut [f32], config: &GesdConfig) -> RejectionResult {
         .max_outliers_for_size(original_len)
         .min(original_len - 3);
     let mut len = original_len;
-    let mut outlier_count = 0;
 
     for i in 0..max_outliers {
         if len <= 3 {
@@ -574,7 +545,6 @@ pub fn gesd_mean(values: &mut [f32], config: &GesdConfig) -> RejectionResult {
             // Remove by swapping with last element
             values.swap(max_idx, len - 1);
             len -= 1;
-            outlier_count += 1;
         } else {
             // No more outliers found
             break;
@@ -584,7 +554,6 @@ pub fn gesd_mean(values: &mut [f32], config: &GesdConfig) -> RejectionResult {
     RejectionResult {
         value: math::mean_f32(&values[..len]),
         remaining_count: len,
-        rejected_count: outlier_count,
     }
 }
 
@@ -658,13 +627,6 @@ mod tests {
         assert!((config.sigma_high - 3.0).abs() < f32::EPSILON);
     }
 
-    #[test]
-    fn test_linear_fit_config_symmetric() {
-        let config = LinearFitClipConfig::symmetric(2.0, 5);
-        assert!((config.sigma_low - 2.0).abs() < f32::EPSILON);
-        assert!((config.sigma_high - 2.0).abs() < f32::EPSILON);
-    }
-
     // ========== PercentileClipConfig Tests ==========
 
     #[test]
@@ -672,13 +634,6 @@ mod tests {
         let config = PercentileClipConfig::default();
         assert!((config.low_percentile - 10.0).abs() < f32::EPSILON);
         assert!((config.high_percentile - 10.0).abs() < f32::EPSILON);
-    }
-
-    #[test]
-    fn test_percentile_config_symmetric() {
-        let config = PercentileClipConfig::symmetric(15.0);
-        assert!((config.low_percentile - 15.0).abs() < f32::EPSILON);
-        assert!((config.high_percentile - 15.0).abs() < f32::EPSILON);
     }
 
     #[test]
@@ -713,7 +668,7 @@ mod tests {
         let config = SigmaClipConfig::new(2.0, 3);
         let result = sigma_clipped_mean(&mut values, &config);
         assert!(result.value < 10.0, "Expected outlier to be clipped");
-        assert!(result.rejected_count > 0);
+        assert!(result.remaining_count < 6);
     }
 
     #[test]
@@ -721,7 +676,6 @@ mod tests {
         let mut values = vec![1.0, 1.1, 1.2, 0.9, 1.0];
         let config = SigmaClipConfig::new(3.0, 3);
         let result = sigma_clipped_mean(&mut values, &config);
-        assert_eq!(result.rejected_count, 0);
         assert_eq!(result.remaining_count, 5);
     }
 
@@ -742,27 +696,27 @@ mod tests {
         let config = LinearFitClipConfig::default();
         let result = linear_fit_clipped_mean(&mut values, &config);
         assert!((result.value - 5.0).abs() < 0.01);
-        assert_eq!(result.rejected_count, 0);
+        assert_eq!(result.remaining_count, 5);
     }
 
     #[test]
     fn test_linear_fit_clipped_mean_linear_trend() {
         // Linear trend with one outlier
         let mut values = vec![1.0, 2.0, 3.0, 4.0, 100.0, 6.0];
-        let config = LinearFitClipConfig::symmetric(2.0, 3);
+        let config = LinearFitClipConfig::new(2.0, 2.0, 3);
         let result = linear_fit_clipped_mean(&mut values, &config);
         // Should reject the 100.0 outlier
-        assert!(result.rejected_count >= 1);
+        assert!(result.remaining_count < 6);
         assert!(result.value < 20.0);
     }
 
     #[test]
     fn test_percentile_clipped_mean() {
         let mut values = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0];
-        let config = PercentileClipConfig::symmetric(20.0);
+        let config = PercentileClipConfig::new(20.0, 20.0);
         let result = percentile_clipped_mean(&mut values, &config);
         // Should clip 2 from each end (20% of 10)
-        assert_eq!(result.rejected_count, 4);
+        assert_eq!(result.remaining_count, 6);
         // Mean of [3, 4, 5, 6, 7, 8] = 5.5
         assert!((result.value - 5.5).abs() < 0.01);
     }
@@ -773,7 +727,7 @@ mod tests {
         let config = GesdConfig::new(0.05, Some(3));
         let result = gesd_mean(&mut values, &config);
         // Should detect and remove the 100.0 outlier
-        assert!(result.rejected_count >= 1);
+        assert!(result.remaining_count < 8);
         assert!(result.value < 10.0);
     }
 
@@ -783,7 +737,7 @@ mod tests {
         let config = GesdConfig::new(0.05, Some(3));
         let result = gesd_mean(&mut values, &config);
         // Clean data should have few or no rejections
-        assert!(result.rejected_count <= 1);
+        assert!(result.remaining_count >= 7);
     }
 
     #[test]

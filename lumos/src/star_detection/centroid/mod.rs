@@ -155,43 +155,6 @@ pub(crate) fn extract_stamp(
     Some((data_x, data_y, data_z, peak_value))
 }
 
-/// Compute inverse-variance weights for each pixel based on CCD noise model.
-///
-/// For each pixel: variance = signal/gain + noise² + read_noise²/gain²
-/// Weight = 1/variance
-///
-/// If gain is None, uses simplified model: variance = noise² + signal (approx Poisson)
-/// Uses stack-allocated ArrayVec to avoid heap allocations.
-pub(crate) fn compute_pixel_weights(
-    data_z: &[f32],
-    background: f32,
-    noise: f32,
-    gain: Option<f32>,
-    read_noise: Option<f32>,
-) -> ArrayVec<f32, MAX_STAMP_PIXELS> {
-    data_z
-        .iter()
-        .map(|&z| {
-            let signal = (z - background).max(0.0);
-            let variance = match (gain, read_noise) {
-                (Some(g), Some(rn)) if g > f32::EPSILON => {
-                    // Full CCD noise model
-                    signal / g + noise * noise + (rn * rn) / (g * g)
-                }
-                (Some(g), None) if g > f32::EPSILON => {
-                    // Shot noise + sky noise
-                    signal / g + noise * noise
-                }
-                _ => {
-                    // Approximate: sky noise + Poisson-like term
-                    noise * noise + signal.max(1.0) * 0.01
-                }
-            };
-            1.0 / variance.max(0.01)
-        })
-        .collect()
-}
-
 /// Estimate sigma from weighted second moments of the stamp data.
 ///
 /// For a Gaussian: E[r²] = 2σ², so σ = sqrt(E[r²]/2)

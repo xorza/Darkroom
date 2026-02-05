@@ -591,6 +591,10 @@ let target_points: Vec<(f64, f64)> = target_result.stars.iter()
     .collect();
 ```
 
+## Future Improvements
+
+**Weighted Least Squares Fitting**: The Gaussian and Moffat profile fitting currently uses unweighted least squares. Implementing inverse-variance weighted fitting would improve centroid accuracy by down-weighting noisy pixels. This requires per-pixel noise estimates derived from a CCD noise model: variance = signal/gain + sky_noise^2 + read_noise^2/gain^2. The necessary parameters (gain, read noise) are typically available in FITS headers (GAIN, RDNOISE keywords). With proper noise model integration, weighted fitting could achieve ~10-20% improvement in centroid precision for faint stars.
+
 ## Algorithm References
 
 - **Background estimation**: SExtractor (Bertin & Arnouts 1996, A&AS 117, 393)

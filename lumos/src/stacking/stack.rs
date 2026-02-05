@@ -188,7 +188,6 @@ fn apply_rejection(values: &mut [f32], rejection: &Rejection) -> RejectionResult
         Rejection::None => RejectionResult {
             value: math::mean_f32(values),
             remaining_count: values.len(),
-            rejected_count: 0,
         },
 
         Rejection::SigmaClip { sigma, iterations } => {
@@ -247,7 +246,6 @@ fn apply_rejection_weighted(
             RejectionResult {
                 value,
                 remaining_count: values.len(),
-                rejected_count: 0,
             }
         }
 
@@ -390,7 +388,7 @@ mod tests {
         let mut values = vec![1.0, 2.0, 3.0, 4.0, 5.0];
         let result = apply_rejection(&mut values, &Rejection::None);
         assert!((result.value - 3.0).abs() < f32::EPSILON);
-        assert_eq!(result.rejected_count, 0);
+        assert_eq!(result.remaining_count, 5);
     }
 
     #[test]
@@ -404,7 +402,7 @@ mod tests {
             },
         );
         assert!(result.value < 10.0, "Outlier should be clipped");
-        assert!(result.rejected_count > 0);
+        assert!(result.remaining_count < 6);
     }
 
     #[test]

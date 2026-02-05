@@ -5,7 +5,6 @@
 //!
 //! This achieves ~0.01 pixel centroid accuracy compared to ~0.05 for weighted centroid.
 
-
 #[cfg(test)]
 mod bench;
 pub(crate) mod simd;
@@ -13,10 +12,10 @@ pub(crate) mod simd;
 mod tests;
 
 use super::linear_solver::solve_6x6;
-use super::lm_optimizer::{LMConfig, LMModel, LMResult, optimize_6, optimize_6_weighted};
-use super::{compute_pixel_weights, estimate_sigma_from_moments, extract_stamp};
+use super::lm_optimizer::{LMConfig, LMModel, LMResult, optimize_6};
+use super::{estimate_sigma_from_moments, extract_stamp};
 use crate::common::Buffer2;
-use glam::{DVec2, Vec2};
+use glam::Vec2;
 
 /// Configuration for Gaussian fitting.
 pub type GaussianFitConfig = LMConfig;
@@ -125,59 +124,6 @@ pub fn fit_gaussian_2d(
         &data_z,
         initial_params,
         stamp_radius as f32,
-        config,
-    );
-
-    validate_result(&result, pos, stamp_radius, n)
-}
-
-/// Fit a 2D Gaussian to a star stamp with inverse-variance weighting.
-///
-/// Uses weighted Levenberg-Marquardt optimization for optimal estimation
-/// when noise characteristics are known.
-#[allow(clippy::too_many_arguments)]
-pub fn fit_gaussian_2d_weighted(
-    pixels: &Buffer2<f32>,
-    pos: Vec2,
-    stamp_radius: usize,
-    background: f32,
-    noise: f32,
-    gain: Option<f32>,
-    read_noise: Option<f32>,
-    config: &GaussianFitConfig,
-) -> Option<GaussianFitResult> {
-    let (data_x, data_y, data_z, peak_value) = extract_stamp(pixels, pos, stamp_radius)?;
-
-    let n = data_x.len();
-    if n < 7 {
-        return None;
-    }
-
-    // Compute inverse-variance weights
-    let weights = compute_pixel_weights(&data_z, background, noise, gain, read_noise);
-
-    // Estimate sigma from moments for better initial guess
-    let sigma_est = estimate_sigma_from_moments(&data_x, &data_y, &data_z, pos, background);
-
-    let initial_params = [
-        pos.x,
-        pos.y,
-        (peak_value - background).max(0.01),
-        sigma_est,
-        sigma_est,
-        background,
-    ];
-
-    let model = Gaussian2D {
-        stamp_radius: stamp_radius as f32,
-    };
-    let result = optimize_6_weighted(
-        &model,
-        &data_x,
-        &data_y,
-        &data_z,
-        &weights,
-        initial_params,
         config,
     );
 
