@@ -7,7 +7,7 @@ mod tests;
 
 /// Multiplier for number of chunks relative to CPU threads.
 /// Using 3x threads provides good load balancing when some chunks finish faster.
-const CHUNKS_PER_THREAD: usize = 3;
+const CHUNKS_PER_THREAD: usize = 2;
 
 /// Compute the optimal number of parallel jobs.
 #[inline]

@@ -6,8 +6,7 @@
 use std::f32::consts::PI;
 use std::sync::OnceLock;
 
-use common::parallel::par_chunks_auto_aligned;
-use rayon::iter::ParallelIterator;
+use rayon::prelude::*;
 
 use crate::common::Buffer2;
 use crate::registration::config::InterpolationMethod;
@@ -229,11 +228,6 @@ fn interpolate(data: &Buffer2<f32>, x: f32, y: f32, method: InterpolationMethod)
     }
 }
 
-#[cfg(test)]
-pub fn interpolate_pixel(data: &Buffer2<f32>, x: f32, y: f32, method: InterpolationMethod) -> f32 {
-    interpolate(data, x, y, method)
-}
-
 /// Warp an image using a transformation matrix.
 ///
 /// Applies the inverse transform to map output coordinates to input coordinates,
@@ -251,13 +245,11 @@ pub fn warp_image(
 
     let inverse = transform.inverse();
 
-    par_chunks_auto_aligned(output.pixels_mut(), width).for_each(|(start_y, chunk)| {
-        let num_rows = chunk.len() / width;
-
-        for row_in_chunk in 0..num_rows {
-            let y = start_y + row_in_chunk;
-            let row = &mut chunk[row_in_chunk * width..(row_in_chunk + 1) * width];
-
+    output
+        .pixels_mut()
+        .par_chunks_mut(width)
+        .enumerate()
+        .for_each(|(y, row)| {
             if method == InterpolationMethod::Bilinear {
                 simd::warp_row_bilinear_simd(input, width, height, row, y, &inverse);
             } else {
@@ -266,6 +258,5 @@ pub fn warp_image(
                     *pixel = interpolate(input, src.x as f32, src.y as f32, method);
                 }
             }
-        }
-    });
+        });
 }
