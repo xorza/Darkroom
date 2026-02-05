@@ -1,6 +1,5 @@
 //! Sum and accumulation operations with SIMD acceleration.
 
-
 pub mod scalar;
 
 #[cfg(target_arch = "aarch64")]
@@ -56,18 +55,6 @@ pub fn sum_squared_diff(values: &[f32], mean: f32) -> f32 {
 pub fn mean_f32(values: &[f32]) -> f32 {
     debug_assert!(!values.is_empty());
     sum_f32(values) / values.len() as f32
-}
-
-/// Accumulate src into dst (dst[i] += src[i]).
-#[inline]
-pub fn accumulate(dst: &mut [f32], src: &[f32]) {
-    scalar::accumulate(dst, src)
-}
-
-/// Scale values in-place (data[i] *= scale).
-#[inline]
-pub fn scale(data: &mut [f32], scale_val: f32) {
-    scalar::scale(data, scale_val)
 }
 
 #[cfg(test)]

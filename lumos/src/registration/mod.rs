@@ -38,7 +38,6 @@
 pub(crate) mod config;
 pub(crate) mod distortion;
 pub(crate) mod interpolation;
-pub(crate) mod quality;
 pub(crate) mod ransac;
 mod result;
 pub(crate) mod spatial;

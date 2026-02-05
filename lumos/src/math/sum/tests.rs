@@ -96,59 +96,6 @@ fn test_mean_f32_single() {
 }
 
 // ---------------------------------------------------------------------------
-// accumulate tests
-// ---------------------------------------------------------------------------
-
-#[test]
-fn test_accumulate() {
-    let mut dst: Vec<f32> = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
-    let src: Vec<f32> = vec![0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5];
-    accumulate(&mut dst, &src);
-    assert_eq!(dst, vec![1.5, 2.5, 3.5, 4.5, 5.5, 6.5, 7.5, 8.5]);
-}
-
-#[test]
-fn test_accumulate_remainder() {
-    let mut dst: Vec<f32> = vec![1.0, 2.0, 3.0, 4.0, 5.0];
-    let src: Vec<f32> = vec![0.5, 0.5, 0.5, 0.5, 0.5];
-    accumulate(&mut dst, &src);
-    assert_eq!(dst, vec![1.5, 2.5, 3.5, 4.5, 5.5]);
-}
-
-#[test]
-fn test_accumulate_small() {
-    let mut dst: Vec<f32> = vec![1.0, 2.0];
-    let src: Vec<f32> = vec![0.5, 0.5];
-    accumulate(&mut dst, &src);
-    assert_eq!(dst, vec![1.5, 2.5]);
-}
-
-// ---------------------------------------------------------------------------
-// scale tests
-// ---------------------------------------------------------------------------
-
-#[test]
-fn test_scale() {
-    let mut data: Vec<f32> = vec![2.0, 4.0, 6.0, 8.0, 10.0, 12.0, 14.0, 16.0];
-    scale(&mut data, 0.5);
-    assert_eq!(data, vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]);
-}
-
-#[test]
-fn test_scale_remainder() {
-    let mut data: Vec<f32> = vec![2.0, 4.0, 6.0, 8.0, 10.0];
-    scale(&mut data, 0.5);
-    assert_eq!(data, vec![1.0, 2.0, 3.0, 4.0, 5.0]);
-}
-
-#[test]
-fn test_scale_small() {
-    let mut data: Vec<f32> = vec![2.0, 4.0];
-    scale(&mut data, 0.5);
-    assert_eq!(data, vec![1.0, 2.0]);
-}
-
-// ---------------------------------------------------------------------------
 // SIMD vs scalar consistency tests
 // ---------------------------------------------------------------------------
 
@@ -177,33 +124,6 @@ fn test_simd_vs_scalar_sum_squared_diff() {
         scalar_result,
         simd_result
     );
-}
-
-#[test]
-fn test_simd_vs_scalar_accumulate() {
-    let mut dst_scalar: Vec<f32> = (0..1000).map(|x| x as f32).collect();
-    let mut dst_simd: Vec<f32> = dst_scalar.clone();
-    let src: Vec<f32> = (0..1000).map(|x| x as f32 * 0.1).collect();
-
-    scalar::accumulate(&mut dst_scalar, &src);
-    accumulate(&mut dst_simd, &src);
-
-    for (s, d) in dst_scalar.iter().zip(dst_simd.iter()) {
-        assert!((s - d).abs() < 1e-4, "scalar={}, simd={}", s, d);
-    }
-}
-
-#[test]
-fn test_simd_vs_scalar_scale() {
-    let mut data_scalar: Vec<f32> = (0..1000).map(|x| x as f32).collect();
-    let mut data_simd: Vec<f32> = data_scalar.clone();
-
-    scalar::scale(&mut data_scalar, 0.123);
-    scale(&mut data_simd, 0.123);
-
-    for (s, d) in data_scalar.iter().zip(data_simd.iter()) {
-        assert!((s - d).abs() < 1e-4, "scalar={}, simd={}", s, d);
-    }
 }
 
 // ---------------------------------------------------------------------------

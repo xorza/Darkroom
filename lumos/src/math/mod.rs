@@ -42,7 +42,7 @@ pub use statistics::{
     MAD_TO_SIGMA, mad_f32_with_scratch, mad_to_sigma, median_and_mad_f32_mut, median_f32_mut,
     sigma_clipped_median_mad, sigma_clipped_median_mad_arrayvec,
 };
-pub use sum::{accumulate, mean_f32, scale, sum_f32, sum_squared_diff};
+pub use sum::{mean_f32, sum_f32, sum_squared_diff};
 
 // =============================================================================
 // Constants
