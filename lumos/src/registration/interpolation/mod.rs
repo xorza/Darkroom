@@ -6,7 +6,8 @@
 use std::f32::consts::PI;
 use std::sync::OnceLock;
 
-use rayon::prelude::*;
+use common::parallel::par_chunks_auto_aligned;
+use rayon::iter::ParallelIterator;
 
 use crate::common::Buffer2;
 use crate::registration::config::InterpolationMethod;
@@ -18,8 +19,6 @@ mod bench;
 mod tests;
 
 pub mod simd;
-
-const ROWS_PER_CHUNK: usize = 32;
 
 // Lanczos LUT: 4096 samples/unit gives ~0.00024 precision.
 // Lanczos3 LUT: 4096 * 3 * 4 bytes = 48KB (fits in L1 cache).
@@ -252,26 +251,21 @@ pub fn warp_image(
 
     let inverse = transform.inverse();
 
-    output
-        .pixels_mut()
-        .par_chunks_mut(width * ROWS_PER_CHUNK)
-        .enumerate()
-        .for_each(|(chunk_idx, chunk)| {
-            let start_y = chunk_idx * ROWS_PER_CHUNK;
-            let num_rows = chunk.len() / width;
+    par_chunks_auto_aligned(output.pixels_mut(), width).for_each(|(start_y, chunk)| {
+        let num_rows = chunk.len() / width;
 
-            for row_in_chunk in 0..num_rows {
-                let y = start_y + row_in_chunk;
-                let row = &mut chunk[row_in_chunk * width..(row_in_chunk + 1) * width];
+        for row_in_chunk in 0..num_rows {
+            let y = start_y + row_in_chunk;
+            let row = &mut chunk[row_in_chunk * width..(row_in_chunk + 1) * width];
 
-                if method == InterpolationMethod::Bilinear {
-                    simd::warp_row_bilinear_simd(input, width, height, row, y, &inverse);
-                } else {
-                    for (x, pixel) in row.iter_mut().enumerate() {
-                        let src = inverse.apply(glam::DVec2::new(x as f64, y as f64));
-                        *pixel = interpolate(input, src.x as f32, src.y as f32, method);
-                    }
+            if method == InterpolationMethod::Bilinear {
+                simd::warp_row_bilinear_simd(input, width, height, row, y, &inverse);
+            } else {
+                for (x, pixel) in row.iter_mut().enumerate() {
+                    let src = inverse.apply(glam::DVec2::new(x as f64, y as f64));
+                    *pixel = interpolate(input, src.x as f32, src.y as f32, method);
                 }
             }
-        });
+        }
+    });
 }
