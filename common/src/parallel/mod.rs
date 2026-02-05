@@ -102,3 +102,26 @@ pub fn par_chunks_auto_aligned_zip2<'a, A: Send, B: Send>(
         .enumerate()
         .map(move |(idx, chunks)| (idx * chunk_rows, chunks))
 }
+
+/// Split three mutable slices into parallel chunks aligned to row boundaries.
+/// Returns an iterator yielding `(chunk_start_row, (chunk_a, chunk_b, chunk_c))` pairs.
+///
+/// All slices must have equal length.
+#[allow(clippy::type_complexity)]
+pub fn par_chunks_auto_aligned_zip3<'a, A: Send, B: Send, C: Send>(
+    a: &'a mut [A],
+    b: &'a mut [B],
+    c: &'a mut [C],
+    width: usize,
+) -> impl IndexedParallelIterator<Item = (usize, (&'a mut [A], &'a mut [B], &'a mut [C]))> {
+    assert_eq!(a.len(), b.len(), "Zipped slices must have equal length");
+    assert_eq!(b.len(), c.len(), "Zipped slices must have equal length");
+    let height = a.len() / width;
+    let chunk_rows = auto_chunk_size(height);
+    let chunk_size = width * chunk_rows;
+    a.par_chunks_mut(chunk_size)
+        .zip(b.par_chunks_mut(chunk_size))
+        .zip(c.par_chunks_mut(chunk_size))
+        .enumerate()
+        .map(move |(idx, ((a, b), c))| (idx * chunk_rows, (a, b, c)))
+}
