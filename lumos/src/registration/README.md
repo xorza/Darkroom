@@ -463,16 +463,13 @@ Prioritized by impact.
 
 **Problem:** The fixed `inlier_threshold` (default 2.0px) requires manual tuning for different seeing conditions. A threshold optimal for 1.3px FWHM fails for 2-3px FWHM.
 
-**Solution:** Implement MAGSAC++ (Barath & Matas 2020) as an optional scoring method. MAGSAC++ marginalizes likelihood over a range of noise scales, automatically adapting to the data without requiring threshold tuning.
+**Solution:** Replace MSAC scoring with MAGSAC++ (Barath & Matas 2020). MAGSAC++ marginalizes likelihood over a range of noise scales, automatically adapting to the data without requiring threshold tuning.
 
-```rust
-pub enum ScoringMethod {
-    MSAC { threshold: f64 },           // Current default
-    MAGSAC { max_scale: f64 },         // Threshold-free
-}
-```
+The `inlier_threshold` parameter becomes `max_sigma` (maximum noise scale). Existing code using `inlier_threshold: 2.0` would use `max_sigma: 2.0 / 3.0 ≈ 0.7` (since the effective threshold is ~3σ).
 
-**Effort:** ~200-300 lines. **Benefit:** Eliminates the most sensitive parameter; robust across varying seeing conditions.
+**Effort:** ~200-300 lines. **Benefit:** Eliminates threshold sensitivity; robust across varying seeing conditions.
+
+**Design document:** See [`ransac/MAGSAC_DESIGN.md`](ransac/MAGSAC_DESIGN.md) for detailed implementation plan.
 
 **Reference:** Barath, D., et al. (2020). "MAGSAC++, a fast, reliable and accurate robust estimator." CVPR 2020.
 
