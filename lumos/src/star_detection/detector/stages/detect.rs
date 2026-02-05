@@ -277,6 +277,10 @@ fn collect_component_data(
     let labels = label_map.labels();
     let height = label_map.height();
 
+    // Calculate optimal number of jobs for parallel processing
+    let num_jobs = (rayon::current_num_threads() * 2).min(height).max(1);
+    let rows_per_job = (height / num_jobs).max(1);
+
     let result = Mutex::new(vec![
         ComponentData {
             bbox: Aabb::empty(),
@@ -286,7 +290,7 @@ fn collect_component_data(
         num_labels
     ]);
 
-    (0..height).into_par_iter().for_each_init(
+    (0..num_jobs).into_par_iter().for_each_init(
         || {
             (
                 vec![
@@ -300,7 +304,14 @@ fn collect_component_data(
                 Vec::<usize>::with_capacity(1024),
             )
         },
-        |(local_data, touched), y| {
+        |(local_data, touched), job_idx| {
+            let start_row = job_idx * rows_per_job;
+            let end_row = if job_idx == num_jobs - 1 {
+                height
+            } else {
+                ((job_idx + 1) * rows_per_job).min(height)
+            };
+
             for &idx in touched.iter() {
                 local_data[idx] = ComponentData {
                     bbox: Aabb::empty(),
@@ -310,20 +321,22 @@ fn collect_component_data(
             }
             touched.clear();
 
-            let row_start = y * width;
-            for x in 0..width {
-                let label = labels[row_start + x];
-                if label == 0 {
-                    continue;
+            for y in start_row..end_row {
+                let row_start = y * width;
+                for x in 0..width {
+                    let label = labels[row_start + x];
+                    if label == 0 {
+                        continue;
+                    }
+                    let idx = (label - 1) as usize;
+                    let data = &mut local_data[idx];
+                    if data.area == 0 {
+                        touched.push(idx);
+                    }
+                    data.bbox.include(Vec2us::new(x, y));
+                    data.label = label;
+                    data.area += 1;
                 }
-                let idx = (label - 1) as usize;
-                let data = &mut local_data[idx];
-                if data.area == 0 {
-                    touched.push(idx);
-                }
-                data.bbox.include(Vec2us::new(x, y));
-                data.label = label;
-                data.area += 1;
             }
 
             let mut result = result.lock();
