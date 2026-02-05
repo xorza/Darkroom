@@ -70,7 +70,8 @@ const MAX_ANNULUS_PIXELS: usize = (2 * MAX_ANNULUS_OUTER_RADIUS + 1).pow(2); // 
 /// Centroid convergence threshold in pixels.
 ///
 /// Iteration stops when the distance moved is less than this value.
-const CENTROID_CONVERGENCE_THRESHOLD: f32 = 0.001;
+/// Set to 0.0001 (0.1 millipixel) for sub-pixel astrometric precision.
+const CENTROID_CONVERGENCE_THRESHOLD: f32 = 0.0001;
 
 /// Maximum weighted-moments iterations for standalone centroid (no fitting follows).
 pub(crate) const MAX_MOMENTS_ITERATIONS: usize = 10;
@@ -330,7 +331,7 @@ pub fn measure_star(
     match config.centroid_method {
         CentroidMethod::GaussianFit => {
             let fit_config = GaussianFitConfig {
-                position_convergence_threshold: 0.001,
+                position_convergence_threshold: CENTROID_CONVERGENCE_THRESHOLD,
                 ..GaussianFitConfig::default()
             };
             if let Some(result) = fit_gaussian_2d(pixels, pos, stamp_radius, local_bg, &fit_config)
@@ -344,7 +345,7 @@ pub fn measure_star(
                 fit_beta: false,
                 fixed_beta: beta,
                 lm: lm_optimizer::LMConfig {
-                    position_convergence_threshold: 0.001,
+                    position_convergence_threshold: CENTROID_CONVERGENCE_THRESHOLD,
                     ..lm_optimizer::LMConfig::default()
                 },
             };

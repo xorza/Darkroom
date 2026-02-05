@@ -107,10 +107,7 @@ let config = Config::high_resolution();
 // Crowded fields (aggressive deblending, iterative background)
 let config = Config::crowded_field();
 
-// Nebulous fields (adaptive sigma thresholding)
-let config = Config::nebulous_field();
-
-// Precise ground-based (Moffat fitting)
+// Precise ground-based (Moffat fitting, iterative background)
 let config = Config::precise_ground();
 ```
 
@@ -189,13 +186,13 @@ Estimates the sky background and noise level using a tile-based approach with si
 3. Apply 3x3 median filter to the tile grid (rejects outlier tiles)
 4. Bilinearly interpolate from tile centers to full image resolution
 
-**Refinement strategies (mutually exclusive):**
-- `Iterative`: Mask detected sources, re-estimate background excluding them. Best for crowded fields.
-- `AdaptiveSigma`: Per-pixel detection thresholds based on local contrast. Higher thresholds in nebulous regions reduce false positives.
+**Refinement strategies:**
+- `None`: Single-pass background estimation. Fast, suitable for uniform backgrounds.
+- `Iterative`: Mask detected sources, re-estimate background excluding them. Best for crowded fields and variable backgrounds.
 
 **Key Types:**
-- `BackgroundEstimate` - Holds per-pixel background, noise, and optional adaptive sigma buffers
-- `TileGrid` - Grid of per-tile statistics (median, sigma, adaptive_sigma)
+- `BackgroundEstimate` - Holds per-pixel background and noise buffers
+- `TileGrid` - Grid of per-tile statistics (median, sigma)
 
 ### `convolution/` - Matched Filter Convolution
 
@@ -220,7 +217,7 @@ Creates a bit-packed binary mask where pixels exceed the detection threshold.
 
 **Features:**
 - Bit-packed storage: 1 bit per pixel in u64 words (8x memory savings)
-- Three variants: standard, pre-filtered, adaptive sigma
+- Two variants: standard (with background) and pre-filtered (background already subtracted)
 - SIMD-accelerated: SSE4.1, NEON
 
 ### `mask_dilation/` - Morphological Dilation
@@ -530,12 +527,6 @@ Config {
 }
 ```
 
-**Nebulous backgrounds:**
-```rust
-Config::nebulous_field()
-// Uses AdaptiveSigma refinement to raise thresholds in high-contrast regions
-```
-
 ## Troubleshooting
 
 ### Too few stars detected
@@ -551,9 +542,8 @@ Config::nebulous_field()
 
 1. **Raise `sigma_threshold`** (try 6.0-8.0)
 2. **Lower `max_sharpness`** to reject more cosmic rays
-3. **Use `BackgroundRefinement::AdaptiveSigma`** for nebulous regions
-4. **Use `BackgroundRefinement::Iterative`** for crowded fields
-5. **Check for hot pixels** - use `DefectMap` or dark frame subtraction
+3. **Use `BackgroundRefinement::Iterative`** for crowded fields
+4. **Check for hot pixels** - use `DefectMap` or dark frame subtraction
 
 ### Poor centroid accuracy
 
@@ -593,7 +583,23 @@ let target_points: Vec<(f64, f64)> = target_result.stars.iter()
 
 ## Future Improvements
 
+### Priority 2: Medium-term Enhancements
+
 **Weighted Least Squares Fitting**: The Gaussian and Moffat profile fitting currently uses unweighted least squares. Implementing inverse-variance weighted fitting would improve centroid accuracy by down-weighting noisy pixels. This requires per-pixel noise estimates derived from a CCD noise model: variance = signal/gain + sky_noise^2 + read_noise^2/gain^2. The necessary parameters (gain, read noise) are typically available in FITS headers (GAIN, RDNOISE keywords). With proper noise model integration, weighted fitting could achieve ~10-20% improvement in centroid precision for faint stars.
+
+**Sigma-clipping in Tile Statistics**: Currently using fixed iteration count (default 5). Consider convergence-based termination when MAD changes by less than 1% between iterations, which would be more robust for varying backgrounds.
+
+**Goodness-of-fit Metrics**: Add chi-squared or reduced chi-squared output from Levenberg-Marquardt fitting. This enables quality-based star filtering and helps identify poorly-fit sources (blends, extended objects, cosmic rays).
+
+### Priority 3: Long-term Enhancements
+
+**PSF Spatial Variation**: The current matched filter uses a single PSF across the entire image. Real optical systems exhibit field-dependent PSF variation. Implementing zone-based or polynomial PSF models would improve detection uniformity across wide fields.
+
+**Uncertainty Propagation**: Propagate per-pixel noise through the entire pipeline (background subtraction, convolution, centroiding) to provide formal uncertainties on all output parameters. This is valuable for downstream astrometric and photometric analysis.
+
+**PSF Quality Flag**: Add a flag indicating whether the fitted PSF matches the expected model well. High residuals could indicate blended sources, galaxies, or artifacts.
+
+**Variable Kernel Size**: The matched filter currently uses a fixed kernel radius (3*sigma). For wide-field images with spatially varying seeing, adaptive kernel sizing based on local PSF estimates could improve detection efficiency.
 
 ## Algorithm References
 

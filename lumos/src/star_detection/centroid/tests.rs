@@ -2924,3 +2924,231 @@ fn test_compute_stamp_radius_various_fwhm() {
         );
     }
 }
+
+// =============================================================================
+// Pre-fit Moments Iterations Verification
+// =============================================================================
+
+/// Verifies that using only 2 pre-fit moments iterations produces equivalent
+/// centroid results compared to using 10 iterations before Gaussian/Moffat fitting.
+///
+/// This test validates the design decision in MOMENTS_ITERATIONS_BEFORE_FIT:
+/// the L-M optimizer refines position independently and converges to the same
+/// result regardless of Phase 1 precision.
+#[test]
+fn test_prefit_moments_iterations_sufficient() {
+    use super::gaussian_fit::{GaussianFitConfig, fit_gaussian_2d};
+    use super::{CONVERGENCE_THRESHOLD_SQ, refine_centroid};
+
+    let width = 64;
+    let height = 64;
+
+    // Test with various sub-pixel positions and FWHM values
+    let test_cases = [
+        (Vec2::new(32.3, 32.7), 2.5f32), // Typical star, FWHM ~5.9
+        (Vec2::new(32.8, 32.2), 3.5f32), // Larger PSF, FWHM ~8.2
+        (Vec2::new(32.1, 32.9), 1.8f32), // Smaller PSF, FWHM ~4.2
+    ];
+
+    for (true_pos, sigma) in test_cases {
+        let pixels = make_gaussian_star(width, height, true_pos, sigma, 0.8);
+        let bg = make_uniform_background(width, height, 0.1, 0.01);
+        let expected_fwhm = sigma / FWHM_TO_SIGMA;
+        let stamp_radius = 7;
+
+        // Start from peak position (slightly off from true position)
+        let peak_pos = Vec2::new(true_pos.x.round(), true_pos.y.round());
+
+        // Run with 2 iterations (current MOMENTS_ITERATIONS_BEFORE_FIT)
+        let mut pos_2iter = peak_pos;
+        for _ in 0..2 {
+            if let Some(new_pos) = refine_centroid(
+                &pixels,
+                width,
+                height,
+                &bg,
+                pos_2iter,
+                stamp_radius,
+                expected_fwhm,
+            ) {
+                let delta = new_pos - pos_2iter;
+                pos_2iter = new_pos;
+                if delta.length_squared() < CONVERGENCE_THRESHOLD_SQ {
+                    break;
+                }
+            }
+        }
+
+        // Run with 10 iterations (fully converged moments)
+        let mut pos_10iter = peak_pos;
+        for _ in 0..10 {
+            if let Some(new_pos) = refine_centroid(
+                &pixels,
+                width,
+                height,
+                &bg,
+                pos_10iter,
+                stamp_radius,
+                expected_fwhm,
+            ) {
+                let delta = new_pos - pos_10iter;
+                pos_10iter = new_pos;
+                if delta.length_squared() < CONVERGENCE_THRESHOLD_SQ {
+                    break;
+                }
+            }
+        }
+
+        // Now apply Gaussian fitting to both starting points
+        let local_bg = 0.1;
+        let fit_config = GaussianFitConfig {
+            position_convergence_threshold: 0.0001,
+            ..GaussianFitConfig::default()
+        };
+
+        let result_from_2iter =
+            fit_gaussian_2d(&pixels, pos_2iter, stamp_radius, local_bg, &fit_config);
+        let result_from_10iter =
+            fit_gaussian_2d(&pixels, pos_10iter, stamp_radius, local_bg, &fit_config);
+
+        // Both should converge
+        assert!(
+            result_from_2iter.is_some(),
+            "Gaussian fit from 2-iter moments failed for sigma={}",
+            sigma
+        );
+        assert!(
+            result_from_10iter.is_some(),
+            "Gaussian fit from 10-iter moments failed for sigma={}",
+            sigma
+        );
+
+        let pos_final_2iter = result_from_2iter.unwrap().pos;
+        let pos_final_10iter = result_from_10iter.unwrap().pos;
+
+        // Final positions should be nearly identical (< 0.01 pixels)
+        let diff = (pos_final_2iter - pos_final_10iter).length();
+        assert!(
+            diff < 0.01,
+            "Position difference {:.6} pixels exceeds 0.01 for sigma={}: \
+             2-iter={:?}, 10-iter={:?}",
+            diff,
+            sigma,
+            pos_final_2iter,
+            pos_final_10iter
+        );
+
+        // Both should be accurate to within 0.05 pixels of true position
+        let error_2iter = (pos_final_2iter - true_pos).length();
+        let error_10iter = (pos_final_10iter - true_pos).length();
+        assert!(
+            error_2iter < 0.05,
+            "2-iter centroid error {:.4} exceeds 0.05 for sigma={}",
+            error_2iter,
+            sigma
+        );
+        assert!(
+            error_10iter < 0.05,
+            "10-iter centroid error {:.4} exceeds 0.05 for sigma={}",
+            error_10iter,
+            sigma
+        );
+    }
+}
+
+/// Same test but for Moffat fitting to ensure both PSF models benefit
+/// from the 2-iteration pre-fit optimization.
+#[test]
+fn test_prefit_moments_iterations_sufficient_moffat() {
+    use super::moffat_fit::{MoffatFitConfig, fit_moffat_2d};
+    use super::{CONVERGENCE_THRESHOLD_SQ, lm_optimizer, refine_centroid};
+
+    let width = 64;
+    let height = 64;
+    let true_pos = Vec2::new(32.4, 32.6);
+    let sigma = 2.5f32;
+
+    let pixels = make_gaussian_star(width, height, true_pos, sigma, 0.8);
+    let bg = make_uniform_background(width, height, 0.1, 0.01);
+    let expected_fwhm = sigma / FWHM_TO_SIGMA;
+    let stamp_radius = 7;
+
+    let peak_pos = Vec2::new(true_pos.x.round(), true_pos.y.round());
+
+    // Run with 2 iterations
+    let mut pos_2iter = peak_pos;
+    for _ in 0..2 {
+        if let Some(new_pos) = refine_centroid(
+            &pixels,
+            width,
+            height,
+            &bg,
+            pos_2iter,
+            stamp_radius,
+            expected_fwhm,
+        ) {
+            let delta = new_pos - pos_2iter;
+            pos_2iter = new_pos;
+            if delta.length_squared() < CONVERGENCE_THRESHOLD_SQ {
+                break;
+            }
+        }
+    }
+
+    // Run with 10 iterations
+    let mut pos_10iter = peak_pos;
+    for _ in 0..10 {
+        if let Some(new_pos) = refine_centroid(
+            &pixels,
+            width,
+            height,
+            &bg,
+            pos_10iter,
+            stamp_radius,
+            expected_fwhm,
+        ) {
+            let delta = new_pos - pos_10iter;
+            pos_10iter = new_pos;
+            if delta.length_squared() < CONVERGENCE_THRESHOLD_SQ {
+                break;
+            }
+        }
+    }
+
+    // Apply Moffat fitting to both
+    let local_bg = 0.1;
+    let fit_config = MoffatFitConfig {
+        fit_beta: false,
+        fixed_beta: 2.5,
+        lm: lm_optimizer::LMConfig {
+            position_convergence_threshold: 0.0001,
+            ..lm_optimizer::LMConfig::default()
+        },
+    };
+
+    let result_from_2iter = fit_moffat_2d(&pixels, pos_2iter, stamp_radius, local_bg, &fit_config);
+    let result_from_10iter =
+        fit_moffat_2d(&pixels, pos_10iter, stamp_radius, local_bg, &fit_config);
+
+    assert!(
+        result_from_2iter.is_some(),
+        "Moffat fit from 2-iter moments failed"
+    );
+    assert!(
+        result_from_10iter.is_some(),
+        "Moffat fit from 10-iter moments failed"
+    );
+
+    let pos_final_2iter = result_from_2iter.unwrap().pos;
+    let pos_final_10iter = result_from_10iter.unwrap().pos;
+
+    // Final positions should be nearly identical
+    let diff = (pos_final_2iter - pos_final_10iter).length();
+    assert!(
+        diff < 0.01,
+        "Moffat position difference {:.6} pixels exceeds 0.01: 2-iter={:?}, 10-iter={:?}",
+        diff,
+        pos_final_2iter,
+        pos_final_10iter
+    );
+}

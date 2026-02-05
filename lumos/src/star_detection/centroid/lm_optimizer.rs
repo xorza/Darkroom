@@ -21,8 +21,8 @@ pub struct LMConfig {
     /// Early termination when position parameters (first 2) converge to this threshold.
     /// The optimizer stops once both x0 and y0 deltas are below this value,
     /// even if other parameters (amplitude, sigma, background) are still changing.
-    /// Default is 0 (disabled). Set to 0.001 for centroid-only use cases
-    /// where non-position parameters don't matter.
+    /// Default is 0 (disabled). Set to 0.0001 for sub-pixel astrometric precision
+    /// in centroid-only use cases where non-position parameters don't matter.
     pub position_convergence_threshold: f32,
 }
 
