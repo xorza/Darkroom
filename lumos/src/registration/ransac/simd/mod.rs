@@ -15,6 +15,9 @@ pub mod sse;
 #[cfg(target_arch = "aarch64")]
 pub mod neon;
 
+#[cfg(test)]
+mod bench;
+
 use crate::registration::transform::Transform;
 
 /// Count inliers and compute MSAC score using SIMD acceleration.
@@ -48,7 +51,7 @@ pub(crate) fn count_inliers_simd(
                 sse::count_inliers_avx2(ref_points, target_points, transform, threshold_sq, inliers)
             };
         }
-        if len >= 2 && cpu_features::has_sse4_1() {
+        if len >= 2 && cpu_features::has_sse2() {
             return unsafe {
                 sse::count_inliers_sse2(ref_points, target_points, transform, threshold_sq, inliers)
             };
