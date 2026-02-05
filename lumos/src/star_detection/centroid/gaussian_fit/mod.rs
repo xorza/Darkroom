@@ -3,16 +3,16 @@
 //! Implements Levenberg-Marquardt optimization to fit a 2D Gaussian model:
 //! f(x,y) = A × exp(-((x-x₀)²/2σ_x² + (y-y₀)²/2σ_y²)) + B
 //!
-//! This achieves ~0.01 pixel centroid accuracy compared to ~0.05 for weighted centroid.
+//! Uses f64 throughout the fitting pipeline for numerical stability,
+//! achieving ~0.01 pixel centroid accuracy.
 
 #[cfg(test)]
 mod bench;
-pub(crate) mod simd;
 #[cfg(test)]
 mod tests;
 
 use super::linear_solver::solve;
-use super::lm_optimizer::{LMConfig, LMResult};
+use super::lm_optimizer::{LMConfig, LMResult, compute_hessian_gradient};
 use super::{estimate_sigma_from_moments, extract_stamp};
 use crate::common::Buffer2;
 use glam::Vec2;
@@ -43,6 +43,7 @@ pub struct GaussianFitResult {
 ///
 /// Uses Levenberg-Marquardt optimization to find the best-fit Gaussian
 /// parameters, achieving ~0.01 pixel centroid accuracy.
+/// All fitting is done in f64 for numerical stability.
 pub fn fit_gaussian_2d(
     pixels: &Buffer2<f32>,
     pos: Vec2,
@@ -50,32 +51,38 @@ pub fn fit_gaussian_2d(
     background: f32,
     config: &GaussianFitConfig,
 ) -> Option<GaussianFitResult> {
-    let (data_x, data_y, data_z, peak_value) = extract_stamp(pixels, pos, stamp_radius)?;
+    let (data_x_f32, data_y_f32, data_z_f32, peak_value) =
+        extract_stamp(pixels, pos, stamp_radius)?;
 
-    let n = data_x.len();
+    let n = data_x_f32.len();
     if n < 7 {
         return None;
     }
 
-    // Estimate sigma from moments for better initial guess
-    let sigma_est = estimate_sigma_from_moments(&data_x, &data_y, &data_z, pos, background);
+    // Convert stamp data to f64 for fitting
+    let data_x: Vec<f64> = data_x_f32.iter().map(|&v| v as f64).collect();
+    let data_y: Vec<f64> = data_y_f32.iter().map(|&v| v as f64).collect();
+    let data_z: Vec<f64> = data_z_f32.iter().map(|&v| v as f64).collect();
 
-    let initial_params = [
-        pos.x,
-        pos.y,
-        (peak_value - background).max(0.01),
-        sigma_est,
-        sigma_est,
-        background,
+    // Estimate sigma from moments for better initial guess
+    let sigma_est =
+        estimate_sigma_from_moments(&data_x_f32, &data_y_f32, &data_z_f32, pos, background);
+
+    let initial_params: [f64; 6] = [
+        pos.x as f64,
+        pos.y as f64,
+        (peak_value - background).max(0.01) as f64,
+        sigma_est as f64,
+        sigma_est as f64,
+        background as f64,
     ];
 
-    // Use SIMD-optimized optimizer
-    let result = optimize_gaussian_simd(
+    let result = optimize_gaussian(
         &data_x,
         &data_y,
         &data_z,
         initial_params,
-        stamp_radius as f32,
+        stamp_radius as f64,
         config,
     );
 
@@ -91,7 +98,7 @@ fn validate_result(
     let [x0, y0, amplitude, sigma_x, sigma_y, bg] = result.params;
 
     // Check if center is within stamp
-    let result_pos = Vec2::new(x0, y0);
+    let result_pos = Vec2::new(x0 as f32, y0 as f32);
     if (result_pos - pos).abs().max_element() > stamp_radius as f32 {
         return None;
     }
@@ -99,40 +106,110 @@ fn validate_result(
     // Check for reasonable sigma values
     if sigma_x < 0.5
         || sigma_y < 0.5
-        || sigma_x > stamp_radius as f32 * 2.0
-        || sigma_y > stamp_radius as f32 * 2.0
+        || sigma_x > stamp_radius as f64 * 2.0
+        || sigma_y > stamp_radius as f64 * 2.0
     {
         return None;
     }
 
-    let rms = (result.chi2 / n as f32).sqrt();
+    let rms = (result.chi2 / n as f64).sqrt() as f32;
 
     Some(GaussianFitResult {
-        pos: Vec2::new(x0, y0),
-        amplitude,
-        sigma: Vec2::new(sigma_x, sigma_y),
-        background: bg,
+        pos: Vec2::new(x0 as f32, y0 as f32),
+        amplitude: amplitude as f32,
+        sigma: Vec2::new(sigma_x as f32, sigma_y as f32),
+        background: bg as f32,
         rms_residual: rms,
         converged: result.converged,
         iterations: result.iterations,
     })
 }
 
-/// SIMD-optimized L-M optimizer for Gaussian fitting.
-///
-/// Uses SIMD for Jacobian/residual/chi² computation while reusing the
-/// shared optimization infrastructure from `lm_optimizer`.
-pub(crate) fn optimize_gaussian_simd(
-    data_x: &[f32],
-    data_y: &[f32],
-    data_z: &[f32],
-    initial_params: [f32; 6],
-    stamp_radius: f32,
+// ============================================================================
+// Gaussian model evaluation and Jacobian
+// ============================================================================
+
+/// Compute Jacobian rows and residuals for 2D Gaussian model.
+fn fill_jacobian_residuals(
+    data_x: &[f64],
+    data_y: &[f64],
+    data_z: &[f64],
+    params: &[f64; 6],
+    jacobian: &mut Vec<[f64; 6]>,
+    residuals: &mut Vec<f64>,
+) {
+    let n = data_x.len();
+    jacobian.clear();
+    residuals.clear();
+    jacobian.reserve(n);
+    residuals.reserve(n);
+
+    let [x0, y0, amp, sigma_x, sigma_y, bg] = *params;
+    let sigma_x2 = sigma_x * sigma_x;
+    let sigma_y2 = sigma_y * sigma_y;
+
+    for i in 0..n {
+        let x = data_x[i];
+        let y = data_y[i];
+        let z = data_z[i];
+
+        let dx = x - x0;
+        let dy = y - y0;
+        let dx2 = dx * dx;
+        let dy2 = dy * dy;
+        let exponent = -0.5 * (dx2 / sigma_x2 + dy2 / sigma_y2);
+        let exp_val = exponent.exp();
+        let amp_exp = amp * exp_val;
+        let model = amp_exp + bg;
+
+        residuals.push(z - model);
+
+        jacobian.push([
+            amp_exp * dx / sigma_x2,              // df/dx0
+            amp_exp * dy / sigma_y2,              // df/dy0
+            exp_val,                              // df/damp
+            amp_exp * dx2 / (sigma_x2 * sigma_x), // df/dsigma_x
+            amp_exp * dy2 / (sigma_y2 * sigma_y), // df/dsigma_y
+            1.0,                                  // df/dbg
+        ]);
+    }
+}
+
+/// Compute chi² for 2D Gaussian model.
+fn compute_chi2(data_x: &[f64], data_y: &[f64], data_z: &[f64], params: &[f64; 6]) -> f64 {
+    let [x0, y0, amp, sigma_x, sigma_y, bg] = *params;
+    let sigma_x2 = sigma_x * sigma_x;
+    let sigma_y2 = sigma_y * sigma_y;
+    let mut chi2 = 0.0f64;
+
+    for i in 0..data_x.len() {
+        let dx = data_x[i] - x0;
+        let dy = data_y[i] - y0;
+        let exponent = -0.5 * (dx * dx / sigma_x2 + dy * dy / sigma_y2);
+        let model = amp * exponent.exp() + bg;
+        let residual = data_z[i] - model;
+        chi2 += residual * residual;
+    }
+
+    chi2
+}
+
+// ============================================================================
+// L-M optimizer for Gaussian fitting
+// ============================================================================
+
+/// L-M optimizer for Gaussian fitting using f64 arithmetic.
+fn optimize_gaussian(
+    data_x: &[f64],
+    data_y: &[f64],
+    data_z: &[f64],
+    initial_params: [f64; 6],
+    stamp_radius: f64,
     config: &LMConfig,
 ) -> LMResult<6> {
     let mut params = initial_params;
     let mut lambda = config.initial_lambda;
-    let mut prev_chi2 = simd::compute_chi2_simd(data_x, data_y, data_z, &params);
+    let mut prev_chi2 = compute_chi2(data_x, data_y, data_z, &params);
     let mut converged = false;
     let mut iterations = 0;
 
@@ -143,8 +220,7 @@ pub(crate) fn optimize_gaussian_simd(
     for iter in 0..config.max_iterations {
         iterations = iter + 1;
 
-        // SIMD-accelerated Jacobian/residual computation
-        simd::fill_jacobian_residuals_simd(
+        fill_jacobian_residuals(
             data_x,
             data_y,
             data_z,
@@ -153,15 +229,13 @@ pub(crate) fn optimize_gaussian_simd(
             &mut residuals,
         );
 
-        // AVX2-optimized hessian/gradient computation for 6-parameter model
-        let (hessian, gradient) = compute_hessian_gradient_6(&jacobian, &residuals);
+        let (hessian, gradient) = compute_hessian_gradient(&jacobian, &residuals);
 
         let mut damped_hessian = hessian;
         for (i, row) in damped_hessian.iter_mut().enumerate() {
             row[i] *= 1.0 + lambda;
         }
 
-        // Use shared linear solver
         let Some(delta) = solve(&damped_hessian, &gradient) else {
             break;
         };
@@ -170,13 +244,12 @@ pub(crate) fn optimize_gaussian_simd(
         for (p, d) in new_params.iter_mut().zip(delta.iter()) {
             *p += d;
         }
-        // Apply constraints inline (same as Gaussian2D::constrain)
+        // Apply constraints
         new_params[2] = new_params[2].max(0.01); // Amplitude > 0
         new_params[3] = new_params[3].clamp(0.5, stamp_radius); // Sigma_x
         new_params[4] = new_params[4].clamp(0.5, stamp_radius); // Sigma_y
 
-        // SIMD-accelerated chi² computation
-        let new_chi2 = simd::compute_chi2_simd(data_x, data_y, data_z, &new_params);
+        let new_chi2 = compute_chi2(data_x, data_y, data_z, &new_params);
 
         if new_chi2 < prev_chi2 {
             params = new_params;
@@ -185,8 +258,8 @@ pub(crate) fn optimize_gaussian_simd(
             let chi2_rel_change = (prev_chi2 - new_chi2) / prev_chi2.max(1e-30);
             prev_chi2 = new_chi2;
 
-            let max_delta = delta.iter().copied().fold(0.0f32, |a, d| a.max(d.abs()));
-            if max_delta < config.convergence_threshold || chi2_rel_change < 1e-6 {
+            let max_delta = delta.iter().copied().fold(0.0f64, |a, d| a.max(d.abs()));
+            if max_delta < config.convergence_threshold || chi2_rel_change < 1e-10 {
                 converged = true;
                 break;
             }
@@ -199,7 +272,7 @@ pub(crate) fn optimize_gaussian_simd(
             }
         } else {
             let chi2_rel_diff = (new_chi2 - prev_chi2) / prev_chi2.max(1e-30);
-            if chi2_rel_diff < 1e-6 {
+            if chi2_rel_diff < 1e-10 {
                 converged = true;
                 break;
             }
@@ -217,270 +290,4 @@ pub(crate) fn optimize_gaussian_simd(
         converged,
         iterations,
     }
-}
-
-/// Compute Hessian (J^T J) and gradient (J^T r) for 6-parameter Gaussian model.
-///
-/// Dispatches to AVX2 implementation on x86_64 with AVX2+FMA support,
-/// falls back to scalar implementation otherwise.
-#[inline]
-fn compute_hessian_gradient_6(
-    jacobian: &[[f32; 6]],
-    residuals: &[f32],
-) -> ([[f32; 6]; 6], [f32; 6]) {
-    #[cfg(target_arch = "x86_64")]
-    if common::cpu_features::has_avx2_fma() {
-        return unsafe { compute_hessian_gradient_6_avx2(jacobian, residuals) };
-    }
-
-    compute_hessian_gradient_6_scalar(jacobian, residuals)
-}
-
-/// AVX2 implementation: processes 8 Jacobian rows at a time using gathered loads
-/// and FMA. Exploits symmetry — only computes 21 upper-triangle hessian elements.
-///
-/// # Safety
-/// Requires AVX2 + FMA.
-#[cfg(target_arch = "x86_64")]
-#[target_feature(enable = "avx2", enable = "fma")]
-#[allow(unsafe_op_in_unsafe_fn, clippy::needless_range_loop)]
-unsafe fn compute_hessian_gradient_6_avx2(
-    jacobian: &[[f32; 6]],
-    residuals: &[f32],
-) -> ([[f32; 6]; 6], [f32; 6]) {
-    use std::arch::x86_64::*;
-
-    let n = jacobian.len();
-    let simd_end = (n / 8) * 8;
-
-    // 21 upper-triangle hessian accumulators + 6 gradient accumulators
-    let mut h00 = _mm256_setzero_ps();
-    let mut h01 = _mm256_setzero_ps();
-    let mut h02 = _mm256_setzero_ps();
-    let mut h03 = _mm256_setzero_ps();
-    let mut h04 = _mm256_setzero_ps();
-    let mut h05 = _mm256_setzero_ps();
-    let mut h11 = _mm256_setzero_ps();
-    let mut h12 = _mm256_setzero_ps();
-    let mut h13 = _mm256_setzero_ps();
-    let mut h14 = _mm256_setzero_ps();
-    let mut h15 = _mm256_setzero_ps();
-    let mut h22 = _mm256_setzero_ps();
-    let mut h23 = _mm256_setzero_ps();
-    let mut h24 = _mm256_setzero_ps();
-    let mut h25 = _mm256_setzero_ps();
-    let mut h33 = _mm256_setzero_ps();
-    let mut h34 = _mm256_setzero_ps();
-    let mut h35 = _mm256_setzero_ps();
-    let mut h44 = _mm256_setzero_ps();
-    let mut h45 = _mm256_setzero_ps();
-    let mut h55 = _mm256_setzero_ps();
-
-    let mut g0 = _mm256_setzero_ps();
-    let mut g1 = _mm256_setzero_ps();
-    let mut g2 = _mm256_setzero_ps();
-    let mut g3 = _mm256_setzero_ps();
-    let mut g4 = _mm256_setzero_ps();
-    let mut g5 = _mm256_setzero_ps();
-
-    // Process 8 rows at a time
-    let jac_ptr = jacobian.as_ptr() as *const f32;
-    let res_ptr = residuals.as_ptr();
-
-    for base in (0..simd_end).step_by(8) {
-        let p = jac_ptr.add(base * 6);
-
-        // Load 8 rows of 6 columns each. Each row is contiguous [c0,c1,c2,c3,c4,c5].
-        // We need column vectors: all c0 values, all c1 values, etc.
-        // Manual set is faster than gather on most CPUs.
-        let c0 = _mm256_setr_ps(
-            *p.add(0),
-            *p.add(6),
-            *p.add(12),
-            *p.add(18),
-            *p.add(24),
-            *p.add(30),
-            *p.add(36),
-            *p.add(42),
-        );
-        let c1 = _mm256_setr_ps(
-            *p.add(1),
-            *p.add(7),
-            *p.add(13),
-            *p.add(19),
-            *p.add(25),
-            *p.add(31),
-            *p.add(37),
-            *p.add(43),
-        );
-        let c2 = _mm256_setr_ps(
-            *p.add(2),
-            *p.add(8),
-            *p.add(14),
-            *p.add(20),
-            *p.add(26),
-            *p.add(32),
-            *p.add(38),
-            *p.add(44),
-        );
-        let c3 = _mm256_setr_ps(
-            *p.add(3),
-            *p.add(9),
-            *p.add(15),
-            *p.add(21),
-            *p.add(27),
-            *p.add(33),
-            *p.add(39),
-            *p.add(45),
-        );
-        let c4 = _mm256_setr_ps(
-            *p.add(4),
-            *p.add(10),
-            *p.add(16),
-            *p.add(22),
-            *p.add(28),
-            *p.add(34),
-            *p.add(40),
-            *p.add(46),
-        );
-        let c5 = _mm256_setr_ps(
-            *p.add(5),
-            *p.add(11),
-            *p.add(17),
-            *p.add(23),
-            *p.add(29),
-            *p.add(35),
-            *p.add(41),
-            *p.add(47),
-        );
-
-        let r = _mm256_loadu_ps(res_ptr.add(base));
-
-        // Gradient: g[i] += c[i] * r
-        g0 = _mm256_fmadd_ps(c0, r, g0);
-        g1 = _mm256_fmadd_ps(c1, r, g1);
-        g2 = _mm256_fmadd_ps(c2, r, g2);
-        g3 = _mm256_fmadd_ps(c3, r, g3);
-        g4 = _mm256_fmadd_ps(c4, r, g4);
-        g5 = _mm256_fmadd_ps(c5, r, g5);
-
-        // Upper triangle of hessian: h[i][j] += c[i] * c[j]
-        h00 = _mm256_fmadd_ps(c0, c0, h00);
-        h01 = _mm256_fmadd_ps(c0, c1, h01);
-        h02 = _mm256_fmadd_ps(c0, c2, h02);
-        h03 = _mm256_fmadd_ps(c0, c3, h03);
-        h04 = _mm256_fmadd_ps(c0, c4, h04);
-        h05 = _mm256_fmadd_ps(c0, c5, h05);
-        h11 = _mm256_fmadd_ps(c1, c1, h11);
-        h12 = _mm256_fmadd_ps(c1, c2, h12);
-        h13 = _mm256_fmadd_ps(c1, c3, h13);
-        h14 = _mm256_fmadd_ps(c1, c4, h14);
-        h15 = _mm256_fmadd_ps(c1, c5, h15);
-        h22 = _mm256_fmadd_ps(c2, c2, h22);
-        h23 = _mm256_fmadd_ps(c2, c3, h23);
-        h24 = _mm256_fmadd_ps(c2, c4, h24);
-        h25 = _mm256_fmadd_ps(c2, c5, h25);
-        h33 = _mm256_fmadd_ps(c3, c3, h33);
-        h34 = _mm256_fmadd_ps(c3, c4, h34);
-        h35 = _mm256_fmadd_ps(c3, c5, h35);
-        h44 = _mm256_fmadd_ps(c4, c4, h44);
-        h45 = _mm256_fmadd_ps(c4, c5, h45);
-        h55 = _mm256_fmadd_ps(c5, c5, h55);
-    }
-
-    // Horizontal sum helper
-    #[inline]
-    #[target_feature(enable = "avx2")]
-    unsafe fn hsum(v: __m256) -> f32 {
-        // Sum 8 floats: high128 + low128, then hadd twice
-        let hi = _mm256_extractf128_ps(v, 1);
-        let lo = _mm256_castps256_ps128(v);
-        let sum128 = _mm_add_ps(lo, hi);
-        let shuf = _mm_movehdup_ps(sum128); // [1,1,3,3]
-        let sums = _mm_add_ps(sum128, shuf); // [0+1,_,2+3,_]
-        let shuf2 = _mm_movehl_ps(sums, sums); // [2+3,_,_,_]
-        let result = _mm_add_ss(sums, shuf2);
-        _mm_cvtss_f32(result)
-    }
-
-    // Reduce SIMD accumulators to scalars
-    let mut hessian = [[0.0f32; 6]; 6];
-    hessian[0][0] = hsum(h00);
-    hessian[0][1] = hsum(h01);
-    hessian[0][2] = hsum(h02);
-    hessian[0][3] = hsum(h03);
-    hessian[0][4] = hsum(h04);
-    hessian[0][5] = hsum(h05);
-    hessian[1][1] = hsum(h11);
-    hessian[1][2] = hsum(h12);
-    hessian[1][3] = hsum(h13);
-    hessian[1][4] = hsum(h14);
-    hessian[1][5] = hsum(h15);
-    hessian[2][2] = hsum(h22);
-    hessian[2][3] = hsum(h23);
-    hessian[2][4] = hsum(h24);
-    hessian[2][5] = hsum(h25);
-    hessian[3][3] = hsum(h33);
-    hessian[3][4] = hsum(h34);
-    hessian[3][5] = hsum(h35);
-    hessian[4][4] = hsum(h44);
-    hessian[4][5] = hsum(h45);
-    hessian[5][5] = hsum(h55);
-
-    let mut gradient = [0.0f32; 6];
-    gradient[0] = hsum(g0);
-    gradient[1] = hsum(g1);
-    gradient[2] = hsum(g2);
-    gradient[3] = hsum(g3);
-    gradient[4] = hsum(g4);
-    gradient[5] = hsum(g5);
-
-    // Scalar tail for remaining rows
-    for i in simd_end..n {
-        let row = &jacobian[i];
-        let r = residuals[i];
-        for col in 0..6 {
-            gradient[col] += row[col] * r;
-            for j in col..6 {
-                hessian[col][j] += row[col] * row[j];
-            }
-        }
-    }
-
-    // Mirror upper triangle to lower
-    for i in 1..6 {
-        for j in 0..i {
-            hessian[i][j] = hessian[j][i];
-        }
-    }
-
-    (hessian, gradient)
-}
-
-/// Scalar fallback for non-AVX2 platforms.
-#[allow(clippy::needless_range_loop)]
-fn compute_hessian_gradient_6_scalar(
-    jacobian: &[[f32; 6]],
-    residuals: &[f32],
-) -> ([[f32; 6]; 6], [f32; 6]) {
-    let mut hessian = [[0.0f32; 6]; 6];
-    let mut gradient = [0.0f32; 6];
-
-    for (row, &r) in jacobian.iter().zip(residuals.iter()) {
-        for i in 0..6 {
-            gradient[i] += row[i] * r;
-            for j in i..6 {
-                hessian[i][j] += row[i] * row[j];
-            }
-        }
-    }
-
-    // Mirror upper triangle to lower
-    for i in 1..6 {
-        for j in 0..i {
-            hessian[i][j] = hessian[j][i];
-        }
-    }
-
-    (hessian, gradient)
 }

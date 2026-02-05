@@ -2514,8 +2514,8 @@ fn test_local_annulus_near_edge_fallback() {
 #[test]
 fn test_roundness_zero_flux() {
     // When all marginal values are zero, roundness should be 0
-    let marginal_x = vec![0.0f32; 11];
-    let marginal_y = vec![0.0f32; 11];
+    let marginal_x = vec![0.0f64; 11];
+    let marginal_y = vec![0.0f64; 11];
 
     let (r1, r2) = super::compute_roundness(&marginal_x, &marginal_y);
 
@@ -2526,8 +2526,8 @@ fn test_roundness_zero_flux() {
 #[test]
 fn test_roundness_uniform_marginals() {
     // Uniform marginals should give roundness1 = 0 (Hx = Hy)
-    let marginal_x = vec![1.0f32; 11];
-    let marginal_y = vec![1.0f32; 11];
+    let marginal_x = vec![1.0f64; 11];
+    let marginal_y = vec![1.0f64; 11];
 
     let (r1, _) = super::compute_roundness(&marginal_x, &marginal_y);
 
@@ -2540,9 +2540,9 @@ fn test_roundness_uniform_marginals() {
 #[test]
 fn test_roundness_asymmetric_x() {
     // Create asymmetric x marginal (more flux on right)
-    let mut marginal_x = vec![0.1f32; 11];
+    let mut marginal_x = vec![0.1f64; 11];
     marginal_x[8] = 1.0; // Extra flux on right side
-    let marginal_y = vec![0.5f32; 11]; // Symmetric
+    let marginal_y = vec![0.5f64; 11]; // Symmetric
 
     let (_, r2) = super::compute_roundness(&marginal_x, &marginal_y);
 
@@ -2555,8 +2555,8 @@ fn test_roundness_asymmetric_x() {
 #[test]
 fn test_roundness_x_vs_y_elongation() {
     // X-elongated: higher peak in y marginal (more compact in y)
-    let mut marginal_x = vec![0.1f32; 11];
-    let mut marginal_y = vec![0.1f32; 11];
+    let mut marginal_x = vec![0.1f64; 11];
+    let mut marginal_y = vec![0.1f64; 11];
 
     // Y marginal has higher peak (star is more compact in y, elongated in x)
     marginal_y[5] = 2.0;
@@ -2575,8 +2575,8 @@ fn test_roundness_x_vs_y_elongation() {
 #[test]
 fn test_roundness_y_vs_x_elongation() {
     // Y-elongated: higher peak in x marginal (more compact in x)
-    let mut marginal_x = vec![0.1f32; 11];
-    let mut marginal_y = vec![0.1f32; 11];
+    let mut marginal_x = vec![0.1f64; 11];
+    let mut marginal_y = vec![0.1f64; 11];
 
     // X marginal has higher peak (star is more compact in x, elongated in y)
     marginal_x[5] = 2.0;
@@ -2596,9 +2596,9 @@ fn test_roundness_y_vs_x_elongation() {
 fn test_roundness_bounds() {
     // Test that roundness values are always within bounds
     let test_cases = [
-        (vec![1.0f32; 11], vec![0.001f32; 11]), // Very different peaks
-        (vec![0.001f32; 11], vec![1.0f32; 11]), // Opposite
-        (vec![1.0f32; 11], vec![1.0f32; 11]),   // Equal
+        (vec![1.0f64; 11], vec![0.001f64; 11]), // Very different peaks
+        (vec![0.001f64; 11], vec![1.0f64; 11]), // Opposite
+        (vec![1.0f64; 11], vec![1.0f64; 11]),   // Equal
     ];
 
     for (marginal_x, marginal_y) in test_cases {
@@ -3911,120 +3911,4 @@ fn test_moffat_fit_bad_initial_guess() {
         "Moffat fit should recover from bad guess, error = {}",
         error
     );
-}
-
-// =============================================================================
-// SIMD Correctness Tests
-// =============================================================================
-
-/// Test that SIMD dispatch matches scalar implementation.
-#[test]
-fn test_simd_centroid_matches_scalar() {
-    use super::simd::{refine_centroid, refine_centroid_scalar};
-
-    let width = 64;
-    let height = 64;
-    let true_pos = Vec2::new(32.3, 32.7);
-    let fwhm = 6.0f32;
-    let sigma = fwhm / 2.355;
-
-    let pixels = make_gaussian_star(width, height, true_pos, sigma, 0.8);
-    let bg = make_uniform_background(width, height, 0.1, 0.01);
-
-    let start_pos = Vec2::splat(32.0);
-    let stamp_radius = TEST_STAMP_RADIUS;
-
-    // Run scalar version
-    let scalar_result =
-        refine_centroid_scalar(&pixels, width, height, &bg, start_pos, stamp_radius, fwhm);
-
-    // Run SIMD dispatch version
-    let simd_result = refine_centroid(&pixels, width, height, &bg, start_pos, stamp_radius, fwhm);
-
-    // Both should return Some
-    assert!(scalar_result.is_some(), "Scalar should return Some");
-    assert!(simd_result.is_some(), "SIMD should return Some");
-
-    let scalar_pos = scalar_result.unwrap();
-    let simd_pos = simd_result.unwrap();
-
-    // Results should match within floating-point tolerance
-    let diff = (scalar_pos - simd_pos).length();
-    assert!(
-        diff < 0.01,
-        "SIMD result differs from scalar: scalar={:?}, simd={:?}, diff={}",
-        scalar_pos,
-        simd_pos,
-        diff
-    );
-}
-
-/// Test SIMD centroid with various stamp sizes (tests tail handling).
-#[test]
-fn test_simd_centroid_various_stamp_sizes() {
-    use super::simd::{refine_centroid, refine_centroid_scalar};
-
-    let width = 64;
-    let height = 64;
-    let true_pos = Vec2::splat(32.0);
-    let fwhm = 6.0f32;
-    let sigma = fwhm / 2.355;
-
-    let pixels = make_gaussian_star(width, height, true_pos, sigma, 0.8);
-    let bg = make_uniform_background(width, height, 0.1, 0.01);
-
-    // Test various stamp radii (produces different array sizes for SIMD tail handling)
-    for stamp_radius in [4, 5, 6, 7, 8, 9, 10] {
-        let scalar_result =
-            refine_centroid_scalar(&pixels, width, height, &bg, true_pos, stamp_radius, fwhm);
-
-        let simd_result =
-            refine_centroid(&pixels, width, height, &bg, true_pos, stamp_radius, fwhm);
-
-        if let (Some(scalar_pos), Some(simd_pos)) = (scalar_result, simd_result) {
-            let diff = (scalar_pos - simd_pos).length();
-            assert!(
-                diff < 0.01,
-                "SIMD differs from scalar for stamp_radius={}: diff={}",
-                stamp_radius,
-                diff
-            );
-        }
-    }
-}
-
-/// Test SIMD centroid at multiple positions across the image.
-#[test]
-fn test_simd_centroid_multiple_positions() {
-    use super::simd::{refine_centroid, refine_centroid_scalar};
-
-    let width = 128;
-    let height = 128;
-    let fwhm = 6.0f32;
-    let sigma = fwhm / 2.355;
-    let stamp_radius = 7;
-
-    // Test at various positions
-    for (px, py) in [(32.3, 32.7), (64.0, 64.0), (50.5, 70.2), (80.1, 40.9)] {
-        let true_pos = Vec2::new(px, py);
-        let pixels = make_gaussian_star(width, height, true_pos, sigma, 0.8);
-        let bg = make_uniform_background(width, height, 0.1, 0.01);
-
-        let scalar_result =
-            refine_centroid_scalar(&pixels, width, height, &bg, true_pos, stamp_radius, fwhm);
-
-        let simd_result =
-            refine_centroid(&pixels, width, height, &bg, true_pos, stamp_radius, fwhm);
-
-        if let (Some(scalar_pos), Some(simd_pos)) = (scalar_result, simd_result) {
-            let diff = (scalar_pos - simd_pos).length();
-            assert!(
-                diff < 0.01,
-                "SIMD differs from scalar at ({}, {}): diff={}",
-                px,
-                py,
-                diff
-            );
-        }
-    }
 }

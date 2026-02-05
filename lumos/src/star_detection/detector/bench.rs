@@ -63,7 +63,6 @@ fn bench_detect_6k_globular_cluster(b: ::bench::Bencher) {
         duplicate_min_separation: 8.0,
         // Other
         noise_model: None,
-        defect_map: None,
     };
 
     let mut detector = StarDetector::from_config(config);

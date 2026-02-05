@@ -126,9 +126,8 @@ impl StarDetector {
             .get_or_insert_with(|| BufferPool::new(width, height));
         pool.reset(width, height);
 
-        // Step 0: Image preparation (grayscale, defect correction, CFA filter)
-        let grayscale_image =
-            stages::prepare::prepare(image, self.config.defect_map.as_ref(), pool);
+        // Step 0: Image preparation (grayscale, CFA filter)
+        let grayscale_image = stages::prepare::prepare(image, pool);
 
         // Step 1: Estimate background and noise
         let mut background =

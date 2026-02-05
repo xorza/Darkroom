@@ -1,45 +1,30 @@
-//! Image preparation stage: grayscale conversion, defect correction, CFA filter.
+//! Image preparation stage: grayscale conversion and CFA filter.
 
 use crate::AstroImage;
 use crate::common::Buffer2;
 use crate::star_detection::buffer_pool::BufferPool;
-use crate::star_detection::defect_map::DefectMap;
 use crate::star_detection::median_filter::median_filter_3x3;
 
-/// Convert an input image to a grayscale f32 buffer, applying defect
-/// correction and CFA median filtering as needed.
+/// Convert an input image to a grayscale f32 buffer, applying CFA median
+/// filtering if needed.
 ///
 /// Steps:
 ///   1. RGB → luminance (or copy for grayscale).
-///   2. Replace defective pixels with local medians (if defect map provided).
-///   3. 3×3 median filter to suppress Bayer/X-Trans artifacts (if CFA).
+///   2. 3×3 median filter to suppress Bayer/X-Trans artifacts (if CFA).
 ///
 /// The returned buffer is acquired from `pool`; the caller owns it.
-pub(crate) fn prepare(
-    image: &AstroImage,
-    defects: Option<&DefectMap>,
-    pool: &mut BufferPool,
-) -> Buffer2<f32> {
+pub(crate) fn prepare(image: &AstroImage, pool: &mut BufferPool) -> Buffer2<f32> {
     let mut pixels = pool.acquire_f32();
     image.into_grayscale_buffer(&mut pixels);
 
-    let mut scratch = pool.acquire_f32();
-
-    // Defect correction
-    if let Some(defect_map) = defects
-        && !defect_map.is_empty()
-    {
-        defect_map.apply(&pixels, &mut scratch);
-        std::mem::swap(&mut pixels, &mut scratch);
-    }
-
     // CFA median filter
     if image.metadata.is_cfa {
+        let mut scratch = pool.acquire_f32();
         median_filter_3x3(&pixels, &mut scratch);
         std::mem::swap(&mut pixels, &mut scratch);
+        pool.release_f32(scratch);
     }
 
-    pool.release_f32(scratch);
     pixels
 }
 
@@ -55,7 +40,7 @@ mod tests {
         let image = AstroImage::from_pixels(dim, data);
 
         let mut pool = BufferPool::new(64, 64);
-        let result = prepare(&image, None, &mut pool);
+        let result = prepare(&image, &mut pool);
 
         assert_eq!(result.width(), 64);
         assert_eq!(result.height(), 64);
@@ -76,7 +61,7 @@ mod tests {
         let image = AstroImage::from_pixels(dim, data);
 
         let mut pool = BufferPool::new(width, height);
-        let result = prepare(&image, None, &mut pool);
+        let result = prepare(&image, &mut pool);
 
         // Star pixel should be preserved (no CFA, no defects)
         assert!((result[(32, 32)] - 0.9).abs() < 1e-6);

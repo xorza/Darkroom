@@ -5,12 +5,13 @@
 //!
 //! Also provides 2D Gaussian and Moffat profile fitting for higher precision
 //! centroid computation (~0.01 pixel accuracy).
+//!
+//! All fitting and accumulation operations use f64 for numerical stability.
 
 pub mod gaussian_fit;
 mod linear_solver;
 mod lm_optimizer;
 pub mod moffat_fit;
-mod simd;
 
 #[cfg(test)]
 mod bench;
@@ -214,19 +215,21 @@ pub(crate) fn estimate_sigma_from_moments(
     pos: Vec2,
     background: f32,
 ) -> f32 {
-    let mut sum_r2 = 0.0f32;
-    let mut sum_w = 0.0f32;
+    let mut sum_r2 = 0.0f64;
+    let mut sum_w = 0.0f64;
 
     for ((&x, &y), &z) in data_x.iter().zip(data_y.iter()).zip(data_z.iter()) {
-        let w = (z - background).max(0.0);
-        let r2 = (x - pos.x).powi(2) + (y - pos.y).powi(2);
+        let w = (z - background).max(0.0) as f64;
+        let dx = x as f64 - pos.x as f64;
+        let dy = y as f64 - pos.y as f64;
+        let r2 = dx * dx + dy * dy;
         sum_r2 += w * r2;
         sum_w += w;
     }
 
-    if sum_w > f32::EPSILON {
+    if sum_w > f64::EPSILON {
         // For Gaussian: E[r²] = 2σ², so σ = sqrt(E[r²]/2)
-        (sum_r2 / sum_w / 2.0).sqrt().clamp(0.5, 10.0)
+        ((sum_r2 / sum_w / 2.0).sqrt()).clamp(0.5, 10.0) as f32
     } else {
         2.0 // fallback
     }
@@ -378,7 +381,7 @@ pub fn measure_star(
     match config.centroid_method {
         CentroidMethod::GaussianFit => {
             let fit_config = GaussianFitConfig {
-                position_convergence_threshold: CENTROID_CONVERGENCE_THRESHOLD,
+                position_convergence_threshold: CENTROID_CONVERGENCE_THRESHOLD as f64,
                 ..GaussianFitConfig::default()
             };
             if let Some(result) = fit_gaussian_2d(pixels, pos, stamp_radius, local_bg, &fit_config)
@@ -392,7 +395,7 @@ pub fn measure_star(
                 fit_beta: false,
                 fixed_beta: beta,
                 lm: lm_optimizer::LMConfig {
-                    position_convergence_threshold: CENTROID_CONVERGENCE_THRESHOLD,
+                    position_convergence_threshold: CENTROID_CONVERGENCE_THRESHOLD as f64,
                     ..lm_optimizer::LMConfig::default()
                 },
             };
@@ -435,15 +438,10 @@ pub fn measure_star(
     })
 }
 
-/// Single iteration of centroid refinement.
+/// Single iteration of centroid refinement using Gaussian-weighted moments.
 ///
 /// Returns the new position or None if position is invalid.
-///
-/// The Gaussian weighting sigma is adaptive based on expected FWHM:
-/// sigma ≈ FWHM / 2.355 × 0.8 (slightly tighter to reduce noise influence)
-///
-/// Automatically dispatches to AVX2, SSE, NEON, or scalar based on
-/// runtime CPU feature detection.
+/// Uses f64 accumulators for numerical stability.
 pub(crate) fn refine_centroid(
     pixels: &[f32],
     width: usize,
@@ -453,15 +451,63 @@ pub(crate) fn refine_centroid(
     stamp_radius: usize,
     expected_fwhm: f32,
 ) -> Option<Vec2> {
-    simd::refine_centroid(
-        pixels,
-        width,
-        height,
-        background,
-        pos,
-        stamp_radius,
-        expected_fwhm,
-    )
+    if !is_valid_stamp_position(pos, width, height, stamp_radius) {
+        return None;
+    }
+
+    let icx = pos.x.round() as isize;
+    let icy = pos.y.round() as isize;
+
+    // Adaptive sigma based on expected FWHM
+    // sigma ≈ FWHM / FWHM_TO_SIGMA, use 0.8× for tighter weighting to reduce noise
+    let sigma = (expected_fwhm / FWHM_TO_SIGMA * 0.8).clamp(1.0, stamp_radius as f32 * 0.5);
+    let two_sigma_sq = 2.0 * (sigma as f64) * (sigma as f64);
+
+    let mut sum_x = 0.0f64;
+    let mut sum_y = 0.0f64;
+    let mut sum_w = 0.0f64;
+
+    let pos_x = pos.x as f64;
+    let pos_y = pos.y as f64;
+
+    let stamp_radius_i32 = stamp_radius as i32;
+    for dy in -stamp_radius_i32..=stamp_radius_i32 {
+        for dx in -stamp_radius_i32..=stamp_radius_i32 {
+            let x = (icx + dx as isize) as usize;
+            let y = (icy + dy as isize) as usize;
+            let idx = y * width + x;
+
+            // Background-subtracted value
+            let value = (pixels[idx] - background.background[idx]).max(0.0) as f64;
+
+            // Gaussian weight based on distance from current centroid
+            let px = x as f64;
+            let py = y as f64;
+            let dist_sq = (px - pos_x) * (px - pos_x) + (py - pos_y) * (py - pos_y);
+            let weight = value * (-dist_sq / two_sigma_sq).exp();
+
+            sum_x += px * weight;
+            sum_y += py * weight;
+            sum_w += weight;
+        }
+    }
+
+    if sum_w < f64::EPSILON {
+        return None;
+    }
+
+    let new_x = (sum_x / sum_w) as f32;
+    let new_y = (sum_y / sum_w) as f32;
+    let new_pos = Vec2::new(new_x, new_y);
+
+    // Reject if centroid moved too far (likely bad detection)
+    let stamp_size = 2 * stamp_radius + 1;
+    let max_move = stamp_size as f32 / 4.0;
+    if (new_pos - pos).abs().max_element() > max_move {
+        return None;
+    }
+
+    Some(new_pos)
 }
 
 /// Quality metrics for a star.
@@ -479,6 +525,8 @@ pub(crate) struct StarMetrics {
 }
 
 /// Compute quality metrics for a star at the given position.
+///
+/// Uses f64 accumulators for numerical stability.
 ///
 /// If `gain` and `read_noise` are provided, uses the full CCD noise equation:
 /// `SNR = flux / sqrt(flux/gain + npix × (σ_sky² + σ_read²/gain²))`
@@ -503,23 +551,22 @@ pub(crate) fn compute_metrics(
     let icx = pos.x.round() as isize;
     let icy = pos.y.round() as isize;
 
-    // Collect background-subtracted values and positions
-    let mut flux = 0.0f32;
-    let mut core_flux = 0.0f32; // Flux in 3x3 core for sharpness calculation
-    let mut sum_r2 = 0.0f32;
-    let mut sum_x2 = 0.0f32;
-    let mut sum_y2 = 0.0f32;
-    let mut sum_xy = 0.0f32;
-    let mut noise_sum = 0.0f32;
+    // Collect background-subtracted values and positions (f64 accumulators)
+    let mut flux = 0.0f64;
+    let mut core_flux = 0.0f64;
+    let mut sum_r2 = 0.0f64;
+    let mut sum_x2 = 0.0f64;
+    let mut sum_y2 = 0.0f64;
+    let mut sum_xy = 0.0f64;
+    let mut noise_sum = 0.0f64;
     let mut noise_count = 0usize;
-    let mut peak_value = 0.0f32;
+    let mut peak_value = 0.0f64;
 
     // For roundness calculation: marginal sums
-    // Use fixed-size arrays to avoid allocation (max stamp_radius is 15, so max size is 31)
     let stamp_size = 2 * stamp_radius + 1;
     const MAX_STAMP_SIZE: usize = 2 * MAX_STAMP_RADIUS + 1; // 31
-    let mut marginal_x = [0.0f32; MAX_STAMP_SIZE];
-    let mut marginal_y = [0.0f32; MAX_STAMP_SIZE];
+    let mut marginal_x = [0.0f64; MAX_STAMP_SIZE];
+    let mut marginal_y = [0.0f64; MAX_STAMP_SIZE];
 
     let stamp_radius_i32 = stamp_radius as i32;
     let outer_ring_threshold = (stamp_radius_i32 - 2) * (stamp_radius_i32 - 2);
@@ -530,7 +577,7 @@ pub(crate) fn compute_metrics(
             let idx = y * width + x;
 
             let bg = background.background[idx];
-            let value = (pixels[idx] - bg).max(0.0);
+            let value = (pixels[idx] - bg).max(0.0) as f64;
 
             flux += value;
             peak_value = peak_value.max(value);
@@ -547,8 +594,8 @@ pub(crate) fn compute_metrics(
             marginal_y[my_idx] += value;
 
             // Weighted second moments for FWHM and eccentricity
-            let fx = x as f32 - pos.x;
-            let fy = y as f32 - pos.y;
+            let fx = x as f64 - pos.x as f64;
+            let fy = y as f64 - pos.y as f64;
             sum_r2 += value * (fx * fx + fy * fy);
             sum_x2 += value * fx * fx;
             sum_y2 += value * fy * fy;
@@ -557,25 +604,21 @@ pub(crate) fn compute_metrics(
             // Collect noise from background region (outer ring)
             let r2 = dx * dx + dy * dy;
             if r2 > outer_ring_threshold {
-                noise_sum += background.noise[idx];
+                noise_sum += background.noise[idx] as f64;
                 noise_count += 1;
             }
         }
     }
 
-    if flux < f32::EPSILON {
+    if flux < f64::EPSILON {
         return None;
     }
 
     // FWHM from second moment (assuming Gaussian PSF)
-    // For 2D Gaussian: E[r^2] = E[x^2 + y^2] = 2*sigma^2
-    // So sigma^2 = sum(r^2 * I) / sum(I) / 2
-    // FWHM = 2.355 * sigma
     let sigma_sq = sum_r2 / flux / 2.0;
-    let fwhm = crate::math::sigma_to_fwhm(sigma_sq.sqrt());
+    let fwhm = crate::math::sigma_to_fwhm(sigma_sq.sqrt() as f32);
 
     // Eccentricity from covariance matrix
-    // eigenvalues of [[sum_x2, sum_xy], [sum_xy, sum_y2]] / flux
     let cxx = sum_x2 / flux;
     let cyy = sum_y2 / flux;
     let cxy = sum_xy / flux;
@@ -586,30 +629,29 @@ pub(crate) fn compute_metrics(
     let lambda1 = (trace + discriminant.sqrt()) / 2.0;
     let lambda2 = (trace - discriminant.sqrt()) / 2.0;
 
-    let eccentricity = if lambda1 > f32::EPSILON {
-        (1.0 - lambda2 / lambda1).sqrt().clamp(0.0, 1.0)
+    let eccentricity = if lambda1 > f64::EPSILON {
+        (1.0 - lambda2 / lambda1).sqrt().clamp(0.0, 1.0) as f32
     } else {
         0.0
     };
 
     // Compute SNR using appropriate noise model
     let avg_noise = if noise_count > 0 {
-        noise_sum / noise_count as f32
+        (noise_sum / noise_count as f64) as f32
     } else {
         background.noise[icy as usize * width + icx as usize]
     };
 
     let npix = (2 * stamp_radius + 1).pow(2) as f32;
+    let flux_f32 = flux as f32;
 
-    let snr = compute_snr(flux, avg_noise, npix, gain, read_noise);
+    let snr = compute_snr(flux_f32, avg_noise, npix, gain, read_noise);
 
     // Sharpness = peak / core_flux
-    // Cosmic rays: most flux in single pixel -> sharpness ~= 1/9 to 1.0
-    // Real stars: flux spread across PSF -> sharpness ~= 0.2-0.5
-    let sharpness = if core_flux > f32::EPSILON {
-        (peak_value / core_flux).clamp(0.0, 1.0)
+    let sharpness = if core_flux > f64::EPSILON {
+        (peak_value / core_flux).clamp(0.0, 1.0) as f32
     } else {
-        1.0 // No core flux means very sharp (likely artifact)
+        1.0
     };
 
     // Compute roundness metrics (DAOFIND style)
@@ -617,7 +659,7 @@ pub(crate) fn compute_metrics(
         compute_roundness(&marginal_x[..stamp_size], &marginal_y[..stamp_size]);
 
     Some(StarMetrics {
-        flux,
+        flux: flux_f32,
         fwhm,
         eccentricity,
         snr,
@@ -632,10 +674,10 @@ pub(crate) fn compute_metrics(
 /// Returns (GROUND, SROUND):
 /// - GROUND: (Hx - Hy) / (Hx + Hy) where Hx, Hy are heights of marginal distributions
 /// - SROUND: Symmetry-based roundness measuring bilateral asymmetry
-fn compute_roundness(marginal_x: &[f32], marginal_y: &[f32]) -> (f32, f32) {
+fn compute_roundness(marginal_x: &[f64], marginal_y: &[f64]) -> (f32, f32) {
     // GROUND: Compare peak heights of marginal distributions
-    let hx = marginal_x.iter().copied().fold(0.0f32, f32::max);
-    let hy = marginal_y.iter().copied().fold(0.0f32, f32::max);
+    let hx = marginal_x.iter().copied().fold(0.0f64, f64::max);
+    let hy = marginal_y.iter().copied().fold(0.0f64, f64::max);
     let roundness1 = safe_ratio(hx - hy, hx + hy);
 
     // SROUND: Symmetry-based roundness using marginal distributions
@@ -651,21 +693,24 @@ fn compute_roundness(marginal_x: &[f32], marginal_y: &[f32]) -> (f32, f32) {
     // SROUND is the RMS asymmetry
     let roundness2 = asym_x.hypot(asym_y);
 
-    (roundness1.clamp(-1.0, 1.0), roundness2.clamp(0.0, 1.0))
+    (
+        (roundness1 as f32).clamp(-1.0, 1.0),
+        (roundness2 as f32).clamp(0.0, 1.0),
+    )
 }
 
 /// Compute sums of left and right halves of a slice (excluding center).
 #[inline]
-fn split_sums(slice: &[f32], center: usize) -> (f32, f32) {
-    let left: f32 = slice[..center].iter().sum();
-    let right: f32 = slice[center + 1..].iter().sum();
+fn split_sums(slice: &[f64], center: usize) -> (f64, f64) {
+    let left: f64 = slice[..center].iter().sum();
+    let right: f64 = slice[center + 1..].iter().sum();
     (left, right)
 }
 
 /// Safe division returning 0.0 when denominator is near zero.
 #[inline]
-fn safe_ratio(numerator: f32, denominator: f32) -> f32 {
-    if denominator > f32::EPSILON {
+fn safe_ratio(numerator: f64, denominator: f64) -> f64 {
+    if denominator > f64::EPSILON {
         numerator / denominator
     } else {
         0.0

@@ -58,7 +58,6 @@ mod centroid;
 pub mod config;
 mod convolution;
 mod deblend;
-mod defect_map;
 pub(crate) mod detector;
 pub(crate) mod labeling;
 mod mask_dilation;
@@ -84,7 +83,6 @@ pub use config::Config;
 pub use config::Connectivity;
 pub use config::LocalBackgroundMethod;
 pub use config::NoiseModel;
-pub use defect_map::DefectMap;
 pub use star::Star;
 
 // Pipeline data structures

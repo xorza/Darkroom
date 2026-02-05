@@ -61,8 +61,6 @@ pub use star_detection::{
     CentroidMethod,
     Config as StarDetectionConfig,
     Connectivity,
-    // Sensor defects
-    DefectMap,
     // Main API
     DetectionResult as StarDetectionResult,
     Diagnostics as StarDetectionDiagnostics,

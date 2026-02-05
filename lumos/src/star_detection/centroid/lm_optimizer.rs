@@ -1,7 +1,7 @@
 //! Levenberg-Marquardt optimizer for profile fitting.
 //!
 //! Generic implementation that can be used for both Gaussian and Moffat fitting.
-//! Optimized to reuse buffers across iterations to minimize allocations.
+//! Uses f64 throughout for numerical stability.
 
 use super::linear_solver::solve;
 
@@ -11,26 +11,26 @@ pub struct LMConfig {
     /// Maximum iterations.
     pub max_iterations: usize,
     /// Convergence threshold for parameter changes.
-    pub convergence_threshold: f32,
+    pub convergence_threshold: f64,
     /// Initial damping parameter.
-    pub initial_lambda: f32,
+    pub initial_lambda: f64,
     /// Factor to increase lambda on failed step.
-    pub lambda_up: f32,
+    pub lambda_up: f64,
     /// Factor to decrease lambda on successful step.
-    pub lambda_down: f32,
+    pub lambda_down: f64,
     /// Early termination when position parameters (first 2) converge to this threshold.
     /// The optimizer stops once both x0 and y0 deltas are below this value,
     /// even if other parameters (amplitude, sigma, background) are still changing.
     /// Default is 0 (disabled). Set to 0.0001 for sub-pixel astrometric precision
     /// in centroid-only use cases where non-position parameters don't matter.
-    pub position_convergence_threshold: f32,
+    pub position_convergence_threshold: f64,
 }
 
 impl Default for LMConfig {
     fn default() -> Self {
         Self {
             max_iterations: 50,
-            convergence_threshold: 1e-6,
+            convergence_threshold: 1e-8,
             initial_lambda: 0.001,
             lambda_up: 10.0,
             lambda_down: 0.1,
@@ -42,8 +42,8 @@ impl Default for LMConfig {
 /// Result of L-M optimization.
 #[derive(Debug, Clone, Copy)]
 pub struct LMResult<const N: usize> {
-    pub params: [f32; N],
-    pub chi2: f32,
+    pub params: [f64; N],
+    pub chi2: f64,
     pub converged: bool,
     pub iterations: usize,
 }
@@ -51,22 +51,22 @@ pub struct LMResult<const N: usize> {
 /// Trait for models that can be fit with L-M optimization.
 pub trait LMModel<const N: usize> {
     /// Evaluate the model at a point.
-    fn evaluate(&self, x: f32, y: f32, params: &[f32; N]) -> f32;
+    fn evaluate(&self, x: f64, y: f64, params: &[f64; N]) -> f64;
 
     /// Compute partial derivatives at a point.
-    fn jacobian_row(&self, x: f32, y: f32, params: &[f32; N]) -> [f32; N];
+    fn jacobian_row(&self, x: f64, y: f64, params: &[f64; N]) -> [f64; N];
 
     /// Apply parameter constraints after an update.
-    fn constrain(&self, params: &mut [f32; N]);
+    fn constrain(&self, params: &mut [f64; N]);
 }
 
 /// Run L-M optimization for N-parameter model (generic implementation).
 pub fn optimize<const N: usize, M: LMModel<N>>(
     model: &M,
-    data_x: &[f32],
-    data_y: &[f32],
-    data_z: &[f32],
-    initial_params: [f32; N],
+    data_x: &[f64],
+    data_y: &[f64],
+    data_z: &[f64],
+    initial_params: [f64; N],
     config: &LMConfig,
 ) -> LMResult<N> {
     let mut params = initial_params;
@@ -116,7 +116,7 @@ pub fn optimize<const N: usize, M: LMModel<N>>(
             lambda *= config.lambda_down;
             prev_chi2 = new_chi2;
 
-            let max_delta = delta.iter().copied().fold(0.0f32, |a, d| a.max(d.abs()));
+            let max_delta = delta.iter().copied().fold(0.0f64, |a, d| a.max(d.abs()));
             if max_delta < config.convergence_threshold {
                 converged = true;
                 break;
@@ -148,10 +148,10 @@ pub fn optimize<const N: usize, M: LMModel<N>>(
 #[inline]
 pub fn optimize_6<M: LMModel<6>>(
     model: &M,
-    data_x: &[f32],
-    data_y: &[f32],
-    data_z: &[f32],
-    initial_params: [f32; 6],
+    data_x: &[f64],
+    data_y: &[f64],
+    data_z: &[f64],
+    initial_params: [f64; 6],
     config: &LMConfig,
 ) -> LMResult<6> {
     optimize(model, data_x, data_y, data_z, initial_params, config)
@@ -159,11 +159,11 @@ pub fn optimize_6<M: LMModel<6>>(
 
 fn compute_chi2<const N: usize, M: LMModel<N>>(
     model: &M,
-    data_x: &[f32],
-    data_y: &[f32],
-    data_z: &[f32],
-    params: &[f32; N],
-) -> f32 {
+    data_x: &[f64],
+    data_y: &[f64],
+    data_z: &[f64],
+    params: &[f64; N],
+) -> f64 {
     data_x
         .iter()
         .zip(data_y.iter())
@@ -178,12 +178,12 @@ fn compute_chi2<const N: usize, M: LMModel<N>>(
 /// Fill jacobian and residuals buffers, reusing existing allocations.
 fn fill_jacobian_residuals<const N: usize, M: LMModel<N>>(
     model: &M,
-    data_x: &[f32],
-    data_y: &[f32],
-    data_z: &[f32],
-    params: &[f32; N],
-    jacobian: &mut Vec<[f32; N]>,
-    residuals: &mut Vec<f32>,
+    data_x: &[f64],
+    data_y: &[f64],
+    data_z: &[f64],
+    params: &[f64; N],
+    jacobian: &mut Vec<[f64; N]>,
+    residuals: &mut Vec<f64>,
 ) {
     jacobian.clear();
     residuals.clear();
@@ -198,11 +198,11 @@ fn fill_jacobian_residuals<const N: usize, M: LMModel<N>>(
 /// Exploits symmetry: only computes upper triangle, then mirrors.
 #[allow(clippy::needless_range_loop)]
 pub fn compute_hessian_gradient<const N: usize>(
-    jacobian: &[[f32; N]],
-    residuals: &[f32],
-) -> ([[f32; N]; N], [f32; N]) {
-    let mut hessian = [[0.0f32; N]; N];
-    let mut gradient = [0.0f32; N];
+    jacobian: &[[f64; N]],
+    residuals: &[f64],
+) -> ([[f64; N]; N], [f64; N]) {
+    let mut hessian = [[0.0f64; N]; N];
+    let mut gradient = [0.0f64; N];
 
     for (row, &r) in jacobian.iter().zip(residuals.iter()) {
         for i in 0..N {

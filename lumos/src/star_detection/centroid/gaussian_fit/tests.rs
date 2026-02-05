@@ -785,12 +785,12 @@ fn test_gaussian_fit_multiple_positions() {
 fn test_compute_hessian_gradient_symmetry() {
     // Create test jacobian and residuals
     let jacobian = vec![
-        [1.0f32, 0.5, 0.3, 0.2, 0.1, 0.05],
+        [1.0f64, 0.5, 0.3, 0.2, 0.1, 0.05],
         [0.8, 0.6, 0.4, 0.25, 0.15, 0.08],
         [0.6, 0.7, 0.5, 0.3, 0.2, 0.1],
         [0.4, 0.4, 0.35, 0.22, 0.18, 0.07],
     ];
-    let residuals = vec![0.1f32, -0.05, 0.08, -0.03];
+    let residuals = vec![0.1f64, -0.05, 0.08, -0.03];
 
     let (hessian, gradient) = compute_hessian_gradient(&jacobian, &residuals);
 
@@ -820,14 +820,14 @@ fn test_compute_hessian_gradient_symmetry() {
 #[test]
 fn test_compute_hessian_gradient_values() {
     // Simple case: single jacobian row
-    let jacobian = vec![[1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0]];
-    let residuals = vec![1.0f32];
+    let jacobian = vec![[1.0f64, 2.0, 3.0, 4.0, 5.0, 6.0]];
+    let residuals = vec![1.0f64];
 
     let (hessian, gradient) = compute_hessian_gradient(&jacobian, &residuals);
 
     // Gradient should be J^T * r = [1, 2, 3, 4, 5, 6]
     for (i, &g) in gradient.iter().enumerate() {
-        let expected = (i + 1) as f32;
+        let expected = (i + 1) as f64;
         assert!(
             (g - expected).abs() < 1e-6,
             "Gradient[{}] = {}, expected {}",
@@ -840,7 +840,7 @@ fn test_compute_hessian_gradient_values() {
     // Hessian should be J^T * J = outer product
     for (i, row) in hessian.iter().enumerate() {
         for (j, &h) in row.iter().enumerate() {
-            let expected = ((i + 1) * (j + 1)) as f32;
+            let expected = ((i + 1) * (j + 1)) as f64;
             assert!(
                 (h - expected).abs() < 1e-6,
                 "Hessian[{}][{}] = {}, expected {}",
@@ -855,8 +855,8 @@ fn test_compute_hessian_gradient_values() {
 
 #[test]
 fn test_compute_hessian_gradient_empty() {
-    let jacobian: Vec<[f32; 6]> = vec![];
-    let residuals: Vec<f32> = vec![];
+    let jacobian: Vec<[f64; 6]> = vec![];
+    let residuals: Vec<f64> = vec![];
 
     let (hessian, gradient) = compute_hessian_gradient(&jacobian, &residuals);
 
@@ -876,24 +876,24 @@ fn test_compute_hessian_gradient_positive_semidefinite() {
     // For any Jacobian, J^T * J should be positive semi-definite
     // This means x^T * H * x >= 0 for all x
     let jacobian = vec![
-        [0.5f32, 0.3, 0.8, 0.2, 0.6, 0.4],
+        [0.5f64, 0.3, 0.8, 0.2, 0.6, 0.4],
         [0.7, 0.4, 0.2, 0.5, 0.3, 0.1],
         [0.3, 0.6, 0.5, 0.4, 0.2, 0.3],
     ];
-    let residuals = vec![0.1f32, -0.2, 0.15];
+    let residuals = vec![0.1f64, -0.2, 0.15];
 
     let (hessian, _) = compute_hessian_gradient(&jacobian, &residuals);
 
     // Test with several random vectors
     let test_vectors = [
-        [1.0f32, 0.0, 0.0, 0.0, 0.0, 0.0],
+        [1.0f64, 0.0, 0.0, 0.0, 0.0, 0.0],
         [0.0, 1.0, 0.0, 0.0, 0.0, 0.0],
         [1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
         [0.5, -0.3, 0.7, -0.2, 0.4, -0.1],
     ];
 
     for x in &test_vectors {
-        let mut result = 0.0f32;
+        let mut result = 0.0f64;
         for (i, row) in hessian.iter().enumerate() {
             for (j, &h) in row.iter().enumerate() {
                 result += x[i] * h * x[j];
@@ -908,16 +908,14 @@ fn test_compute_hessian_gradient_positive_semidefinite() {
 }
 
 /// Test that compute_hessian_gradient produces correct results with many rows.
-/// Uses 17 rows to test with both SIMD batches and scalar tail handling.
 #[test]
-fn test_compute_hessian_gradient_avx2_path() {
-    // 17 rows: 2 full AVX2 batches of 8 + 1 scalar tail
+fn test_compute_hessian_gradient_many_rows() {
     let n = 17;
     let mut jacobian = Vec::with_capacity(n);
     let mut residuals = Vec::with_capacity(n);
 
     for i in 0..n {
-        let base = (i as f32 + 1.0) * 0.1;
+        let base = (i as f64 + 1.0) * 0.1;
         jacobian.push([
             base,
             base * 0.5,
@@ -926,14 +924,14 @@ fn test_compute_hessian_gradient_avx2_path() {
             base * 0.2,
             base * 0.9,
         ]);
-        residuals.push(0.05 - 0.01 * i as f32);
+        residuals.push(0.05 - 0.01 * i as f64);
     }
 
     let (hessian, gradient) = compute_hessian_gradient(&jacobian, &residuals);
 
-    // Compute reference scalar result
-    let mut ref_hessian = [[0.0f32; 6]; 6];
-    let mut ref_gradient = [0.0f32; 6];
+    // Compute reference result
+    let mut ref_hessian = [[0.0f64; 6]; 6];
+    let mut ref_gradient = [0.0f64; 6];
     for (row, &r) in jacobian.iter().zip(residuals.iter()) {
         for i in 0..6 {
             ref_gradient[i] += row[i] * r;
@@ -975,22 +973,22 @@ fn test_compute_hessian_gradient_avx2_path() {
     }
 }
 
-/// Test with exactly 8 rows (single full AVX2 batch, no scalar tail).
+/// Test with exactly 8 rows.
 #[test]
 fn test_compute_hessian_gradient_exactly_8_rows() {
-    let jacobian: Vec<[f32; 6]> = (0..8)
+    let jacobian: Vec<[f64; 6]> = (0..8)
         .map(|i| {
-            let v = (i + 1) as f32;
+            let v = (i + 1) as f64;
             [v, v * 0.5, v * 0.3, v * 0.8, v * 0.1, v * 0.6]
         })
         .collect();
-    let residuals: Vec<f32> = (0..8).map(|i| 0.1 * (i as f32 - 3.5)).collect();
+    let residuals: Vec<f64> = (0..8).map(|i| 0.1 * (i as f64 - 3.5)).collect();
 
     let (hessian, gradient) = compute_hessian_gradient(&jacobian, &residuals);
 
-    // Scalar reference
-    let mut ref_hessian = [[0.0f32; 6]; 6];
-    let mut ref_gradient = [0.0f32; 6];
+    // Reference
+    let mut ref_hessian = [[0.0f64; 6]; 6];
+    let mut ref_gradient = [0.0f64; 6];
     for (row, &r) in jacobian.iter().zip(residuals.iter()) {
         for i in 0..6 {
             ref_gradient[i] += row[i] * r;
@@ -1021,8 +1019,7 @@ fn test_compute_hessian_gradient_exactly_8_rows() {
     }
 }
 
-/// Test with a realistic stamp size (289 pixels = 17x17) to exercise the
-/// AVX2 path with many iterations and verify accumulated precision.
+/// Test with a realistic stamp size (289 pixels = 17x17) to verify accumulated precision.
 #[test]
 fn test_compute_hessian_gradient_large_stamp() {
     let n = 289;
@@ -1030,10 +1027,10 @@ fn test_compute_hessian_gradient_large_stamp() {
     let mut residuals = Vec::with_capacity(n);
 
     // Simulate a Gaussian-like Jacobian pattern
-    let sigma = 3.0f32;
+    let sigma = 3.0f64;
     for i in 0..n {
-        let x = (i % 17) as f32 - 8.0;
-        let y = (i / 17) as f32 - 8.0;
+        let x = (i % 17) as f64 - 8.0;
+        let y = (i / 17) as f64 - 8.0;
         let r2 = x * x + y * y;
         let exp_val = (-0.5 * r2 / (sigma * sigma)).exp();
         jacobian.push([
@@ -1044,14 +1041,14 @@ fn test_compute_hessian_gradient_large_stamp() {
             exp_val * y * y / (sigma * sigma * sigma), // dF/dsigma_y
             1.0,                                       // dF/dbg
         ]);
-        residuals.push(0.01 * exp_val + 0.001 * (i as f32 % 7.0 - 3.0));
+        residuals.push(0.01 * exp_val + 0.001 * (i as f64 % 7.0 - 3.0));
     }
 
     let (hessian, gradient) = compute_hessian_gradient(&jacobian, &residuals);
 
-    // Scalar reference
-    let mut ref_hessian = [[0.0f32; 6]; 6];
-    let mut ref_gradient = [0.0f32; 6];
+    // Reference
+    let mut ref_hessian = [[0.0f64; 6]; 6];
+    let mut ref_gradient = [0.0f64; 6];
     for (row, &r) in jacobian.iter().zip(residuals.iter()) {
         for i in 0..6 {
             ref_gradient[i] += row[i] * r;
@@ -1264,333 +1261,4 @@ fn test_gaussian_fit_residual_distribution() {
         result.rms_residual,
         noise_sigma
     );
-}
-
-// =============================================================================
-// Tests for compute_hessian_gradient_6 (AVX2/scalar dispatcher)
-// =============================================================================
-
-use super::{compute_hessian_gradient_6, compute_hessian_gradient_6_scalar};
-
-#[test]
-fn test_hessian_gradient_6_symmetry() {
-    // Hessian (J^T J) must be symmetric
-    let jacobian: Vec<[f32; 6]> = vec![
-        [1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
-        [0.5, 1.5, 2.5, 3.5, 4.5, 5.5],
-        [0.1, 0.2, 0.3, 0.4, 0.5, 0.6],
-        [1.1, 2.2, 3.3, 4.4, 5.5, 6.6],
-    ];
-    let residuals = vec![0.1, 0.2, 0.3, 0.4];
-
-    let (hessian, _gradient) = compute_hessian_gradient_6(&jacobian, &residuals);
-
-    for i in 0..6 {
-        for j in 0..6 {
-            assert!(
-                (hessian[i][j] - hessian[j][i]).abs() < 1e-6,
-                "Hessian not symmetric at ({}, {}): {} vs {}",
-                i,
-                j,
-                hessian[i][j],
-                hessian[j][i]
-            );
-        }
-    }
-}
-
-#[test]
-fn test_hessian_gradient_6_correctness() {
-    // Verify against manually computed values
-    let jacobian: Vec<[f32; 6]> = vec![
-        [1.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-        [0.0, 1.0, 0.0, 0.0, 0.0, 0.0],
-        [0.0, 0.0, 1.0, 0.0, 0.0, 0.0],
-    ];
-    let residuals = vec![1.0, 2.0, 3.0];
-
-    let (hessian, gradient) = compute_hessian_gradient_6(&jacobian, &residuals);
-
-    // With identity-like jacobian rows, hessian should be diagonal
-    assert!((hessian[0][0] - 1.0).abs() < 1e-6);
-    assert!((hessian[1][1] - 1.0).abs() < 1e-6);
-    assert!((hessian[2][2] - 1.0).abs() < 1e-6);
-    assert!((hessian[0][1]).abs() < 1e-6);
-
-    // Gradient = J^T * r
-    assert!((gradient[0] - 1.0).abs() < 1e-6);
-    assert!((gradient[1] - 2.0).abs() < 1e-6);
-    assert!((gradient[2] - 3.0).abs() < 1e-6);
-}
-
-#[test]
-fn test_hessian_gradient_6_matches_scalar() {
-    // Dispatcher result should match scalar implementation
-    let jacobian: Vec<[f32; 6]> = (0..25)
-        .map(|i| {
-            [
-                (i as f32 * 0.1).sin(),
-                (i as f32 * 0.2).cos(),
-                (i as f32 * 0.3).sin(),
-                (i as f32 * 0.4).cos(),
-                (i as f32 * 0.5).sin(),
-                (i as f32 * 0.6).cos(),
-            ]
-        })
-        .collect();
-    let residuals: Vec<f32> = (0..25).map(|i| (i as f32 * 0.7).sin()).collect();
-
-    let (h_dispatch, g_dispatch) = compute_hessian_gradient_6(&jacobian, &residuals);
-    let (h_scalar, g_scalar) = compute_hessian_gradient_6_scalar(&jacobian, &residuals);
-
-    for i in 0..6 {
-        assert!(
-            (g_dispatch[i] - g_scalar[i]).abs() < 1e-4,
-            "Gradient mismatch at {}: {} vs {}",
-            i,
-            g_dispatch[i],
-            g_scalar[i]
-        );
-        for j in 0..6 {
-            assert!(
-                (h_dispatch[i][j] - h_scalar[i][j]).abs() < 1e-4,
-                "Hessian mismatch at ({}, {}): {} vs {}",
-                i,
-                j,
-                h_dispatch[i][j],
-                h_scalar[i][j]
-            );
-        }
-    }
-}
-
-#[test]
-fn test_hessian_gradient_6_exactly_8_rows() {
-    // Test exactly 8 rows (single AVX2 batch, no scalar tail)
-    let jacobian: Vec<[f32; 6]> = (0..8)
-        .map(|i| {
-            [
-                i as f32,
-                (i * 2) as f32,
-                (i * 3) as f32,
-                (i * 4) as f32,
-                (i * 5) as f32,
-                (i * 6) as f32,
-            ]
-        })
-        .collect();
-    let residuals: Vec<f32> = (0..8).map(|i| i as f32 * 0.1).collect();
-
-    let (h_dispatch, g_dispatch) = compute_hessian_gradient_6(&jacobian, &residuals);
-    let (h_scalar, g_scalar) = compute_hessian_gradient_6_scalar(&jacobian, &residuals);
-
-    for i in 0..6 {
-        assert!(
-            (g_dispatch[i] - g_scalar[i]).abs() < 1e-4,
-            "8-row gradient mismatch at {}: {} vs {}",
-            i,
-            g_dispatch[i],
-            g_scalar[i]
-        );
-        for j in 0..6 {
-            assert!(
-                (h_dispatch[i][j] - h_scalar[i][j]).abs() < 1e-4,
-                "8-row hessian mismatch at ({}, {}): {} vs {}",
-                i,
-                j,
-                h_dispatch[i][j],
-                h_scalar[i][j]
-            );
-        }
-    }
-}
-
-#[test]
-fn test_hessian_gradient_6_with_scalar_tail() {
-    // Test 17 rows (2 AVX2 batches + 1 scalar tail)
-    let jacobian: Vec<[f32; 6]> = (0..17)
-        .map(|i| {
-            [
-                (i as f32 * 0.11).sin(),
-                (i as f32 * 0.22).cos(),
-                (i as f32 * 0.33).sin(),
-                (i as f32 * 0.44).cos(),
-                (i as f32 * 0.55).sin(),
-                (i as f32 * 0.66).cos(),
-            ]
-        })
-        .collect();
-    let residuals: Vec<f32> = (0..17).map(|i| (i as f32 * 0.77).sin()).collect();
-
-    let (h_dispatch, g_dispatch) = compute_hessian_gradient_6(&jacobian, &residuals);
-    let (h_scalar, g_scalar) = compute_hessian_gradient_6_scalar(&jacobian, &residuals);
-
-    for i in 0..6 {
-        assert!(
-            (g_dispatch[i] - g_scalar[i]).abs() < 1e-4,
-            "17-row gradient mismatch at {}: {} vs {}",
-            i,
-            g_dispatch[i],
-            g_scalar[i]
-        );
-        for j in 0..6 {
-            assert!(
-                (h_dispatch[i][j] - h_scalar[i][j]).abs() < 1e-4,
-                "17-row hessian mismatch at ({}, {}): {} vs {}",
-                i,
-                j,
-                h_dispatch[i][j],
-                h_scalar[i][j]
-            );
-        }
-    }
-}
-
-#[test]
-fn test_hessian_gradient_6_large_stamp() {
-    // Test 289 rows (17x17 stamp, typical for FWHM ~6)
-    let jacobian: Vec<[f32; 6]> = (0..289)
-        .map(|i| {
-            [
-                (i as f32 * 0.01).sin(),
-                (i as f32 * 0.02).cos(),
-                (i as f32 * 0.03).sin(),
-                (i as f32 * 0.04).cos(),
-                (i as f32 * 0.05).sin(),
-                (i as f32 * 0.06).cos(),
-            ]
-        })
-        .collect();
-    let residuals: Vec<f32> = (0..289).map(|i| (i as f32 * 0.07).sin()).collect();
-
-    let (h_dispatch, g_dispatch) = compute_hessian_gradient_6(&jacobian, &residuals);
-    let (h_scalar, g_scalar) = compute_hessian_gradient_6_scalar(&jacobian, &residuals);
-
-    for i in 0..6 {
-        assert!(
-            (g_dispatch[i] - g_scalar[i]).abs() < 1e-3,
-            "289-row gradient mismatch at {}: {} vs {}",
-            i,
-            g_dispatch[i],
-            g_scalar[i]
-        );
-        for j in 0..6 {
-            assert!(
-                (h_dispatch[i][j] - h_scalar[i][j]).abs() < 1e-3,
-                "289-row hessian mismatch at ({}, {}): {} vs {}",
-                i,
-                j,
-                h_dispatch[i][j],
-                h_scalar[i][j]
-            );
-        }
-    }
-}
-
-#[cfg(target_arch = "x86_64")]
-#[test]
-fn test_hessian_gradient_6_avx2_path() {
-    use common::cpu_features;
-
-    if !cpu_features::has_avx2_fma() {
-        eprintln!("Skipping AVX2 test: CPU does not support AVX2+FMA");
-        return;
-    }
-
-    // Test that AVX2 path is taken and produces correct results
-    let jacobian: Vec<[f32; 6]> = (0..100)
-        .map(|i| {
-            [
-                (i as f32 * 0.1).sin(),
-                (i as f32 * 0.2).cos(),
-                (i as f32 * 0.3).sin(),
-                (i as f32 * 0.4).cos(),
-                (i as f32 * 0.5).sin(),
-                (i as f32 * 0.6).cos(),
-            ]
-        })
-        .collect();
-    let residuals: Vec<f32> = (0..100).map(|i| (i as f32 * 0.7).sin()).collect();
-
-    // Call dispatcher (should use AVX2)
-    let (h_dispatch, g_dispatch) = compute_hessian_gradient_6(&jacobian, &residuals);
-
-    // Call scalar directly
-    let (h_scalar, g_scalar) = compute_hessian_gradient_6_scalar(&jacobian, &residuals);
-
-    // Results should match closely
-    for i in 0..6 {
-        assert!(
-            (g_dispatch[i] - g_scalar[i]).abs() < 1e-3,
-            "AVX2 path gradient mismatch at {}: {} vs {}",
-            i,
-            g_dispatch[i],
-            g_scalar[i]
-        );
-        for j in 0..6 {
-            assert!(
-                (h_dispatch[i][j] - h_scalar[i][j]).abs() < 1e-3,
-                "AVX2 path hessian mismatch at ({}, {}): {} vs {}",
-                i,
-                j,
-                h_dispatch[i][j],
-                h_scalar[i][j]
-            );
-        }
-    }
-}
-
-#[test]
-fn test_hessian_gradient_6_positive_semidefinite() {
-    // J^T J should be positive semi-definite (all eigenvalues >= 0)
-    // We test by checking that diagonal elements are non-negative
-    // and the matrix produces non-negative quadratic form for random vectors
-    let jacobian: Vec<[f32; 6]> = (0..50)
-        .map(|i| {
-            [
-                (i as f32 * 0.11).sin(),
-                (i as f32 * 0.22).cos(),
-                (i as f32 * 0.33).sin(),
-                (i as f32 * 0.44).cos(),
-                (i as f32 * 0.55).sin(),
-                (i as f32 * 0.66).cos(),
-            ]
-        })
-        .collect();
-    let residuals: Vec<f32> = (0..50).map(|i| (i as f32 * 0.77).sin()).collect();
-
-    let (hessian, _gradient) = compute_hessian_gradient_6(&jacobian, &residuals);
-
-    // All diagonal elements should be non-negative
-    for i in 0..6 {
-        assert!(
-            hessian[i][i] >= -1e-6,
-            "Diagonal element {} is negative: {}",
-            i,
-            hessian[i][i]
-        );
-    }
-
-    // Test quadratic form x^T H x >= 0 for a few vectors
-    let test_vectors = [
-        [1.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-        [0.0, 1.0, 0.0, 0.0, 0.0, 0.0],
-        [1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
-        [0.5, -0.3, 0.7, -0.2, 0.1, 0.4],
-    ];
-
-    for x in &test_vectors {
-        let mut quad_form = 0.0f32;
-        for i in 0..6 {
-            for j in 0..6 {
-                quad_form += x[i] * hessian[i][j] * x[j];
-            }
-        }
-        assert!(
-            quad_form >= -1e-5,
-            "Quadratic form is negative: {} for vector {:?}",
-            quad_form,
-            x
-        );
-    }
 }

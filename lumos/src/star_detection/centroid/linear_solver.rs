@@ -2,6 +2,7 @@
 //!
 //! Provides Gaussian elimination with partial pivoting for small dense
 //! linear systems used in Levenberg-Marquardt optimization.
+//! Uses f64 for numerical stability in the solve path.
 
 /// Solve NxN linear system using Gaussian elimination with partial pivoting.
 ///
@@ -11,7 +12,7 @@
 /// Works for small fixed-size systems (N <= 6).
 #[inline]
 #[allow(clippy::needless_range_loop)]
-pub fn solve<const N: usize>(a: &[[f32; N]; N], b: &[f32; N]) -> Option<[f32; N]> {
+pub fn solve<const N: usize>(a: &[[f64; N]; N], b: &[f64; N]) -> Option<[f64; N]> {
     let mut matrix = *a;
     let mut rhs = *b;
 
@@ -28,7 +29,7 @@ pub fn solve<const N: usize>(a: &[[f32; N]; N], b: &[f32; N]) -> Option<[f32; N]
             }
         }
 
-        if max_val < 1e-10 {
+        if max_val < 1e-15 {
             return None; // Singular matrix
         }
 
@@ -53,7 +54,7 @@ pub fn solve<const N: usize>(a: &[[f32; N]; N], b: &[f32; N]) -> Option<[f32; N]
     }
 
     // Back substitution
-    let mut x = [0.0f32; N];
+    let mut x = [0.0f64; N];
     for i in (0..N).rev() {
         let mut sum = rhs[i];
         for j in (i + 1)..N {
@@ -82,7 +83,7 @@ mod tests {
 
         let x = solve(&a, &b).unwrap();
         for i in 0..5 {
-            assert!((x[i] - b[i]).abs() < 1e-6);
+            assert!((x[i] - b[i]).abs() < 1e-12);
         }
     }
 
@@ -98,11 +99,11 @@ mod tests {
         let b = [2.0, 6.0, 12.0, 20.0, 30.0];
 
         let x = solve(&a, &b).unwrap();
-        assert!((x[0] - 1.0).abs() < 1e-6);
-        assert!((x[1] - 2.0).abs() < 1e-6);
-        assert!((x[2] - 3.0).abs() < 1e-6);
-        assert!((x[3] - 4.0).abs() < 1e-6);
-        assert!((x[4] - 5.0).abs() < 1e-6);
+        assert!((x[0] - 1.0).abs() < 1e-12);
+        assert!((x[1] - 2.0).abs() < 1e-12);
+        assert!((x[2] - 3.0).abs() < 1e-12);
+        assert!((x[3] - 4.0).abs() < 1e-12);
+        assert!((x[4] - 5.0).abs() < 1e-12);
     }
 
     #[test]
@@ -126,7 +127,7 @@ mod tests {
 
         let x = solve(&a, &b).unwrap();
         for i in 0..6 {
-            assert!((x[i] - b[i]).abs() < 1e-6);
+            assert!((x[i] - b[i]).abs() < 1e-12);
         }
     }
 
@@ -143,12 +144,12 @@ mod tests {
         let b = [2.0, 6.0, 12.0, 20.0, 30.0, 42.0];
 
         let x = solve(&a, &b).unwrap();
-        assert!((x[0] - 1.0).abs() < 1e-6);
-        assert!((x[1] - 2.0).abs() < 1e-6);
-        assert!((x[2] - 3.0).abs() < 1e-6);
-        assert!((x[3] - 4.0).abs() < 1e-6);
-        assert!((x[4] - 5.0).abs() < 1e-6);
-        assert!((x[5] - 6.0).abs() < 1e-6);
+        assert!((x[0] - 1.0).abs() < 1e-12);
+        assert!((x[1] - 2.0).abs() < 1e-12);
+        assert!((x[2] - 3.0).abs() < 1e-12);
+        assert!((x[3] - 4.0).abs() < 1e-12);
+        assert!((x[4] - 5.0).abs() < 1e-12);
+        assert!((x[5] - 6.0).abs() < 1e-12);
     }
 
     #[test]
@@ -171,8 +172,8 @@ mod tests {
         let b = [2.0, 1.0, 3.0, 4.0, 5.0, 6.0];
 
         let x = solve(&a, &b).unwrap();
-        assert!((x[0] - 1.0).abs() < 1e-6);
-        assert!((x[1] - 2.0).abs() < 1e-6);
+        assert!((x[0] - 1.0).abs() < 1e-12);
+        assert!((x[1] - 2.0).abs() < 1e-12);
     }
 
     #[test]
@@ -186,10 +187,8 @@ mod tests {
             [0.3, 0.4, 0.6, 0.7, 4.0, 0.5],
             [0.1, 0.2, 0.3, 0.4, 0.5, 3.0],
         ];
-        // Expected solution x = [1, 2, 3, 4, 5, 6]
-        // Compute b = A * x
-        let expected_x = [1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0];
-        let mut b = [0.0f32; 6];
+        let expected_x = [1.0f64, 2.0, 3.0, 4.0, 5.0, 6.0];
+        let mut b = [0.0f64; 6];
         for i in 0..6 {
             for j in 0..6 {
                 b[i] += a[i][j] * expected_x[j];
@@ -199,7 +198,7 @@ mod tests {
         let x = solve(&a, &b).unwrap();
         for i in 0..6 {
             assert!(
-                (x[i] - expected_x[i]).abs() < 1e-4,
+                (x[i] - expected_x[i]).abs() < 1e-10,
                 "x[{}] = {}, expected {}",
                 i,
                 x[i],
@@ -225,12 +224,12 @@ mod tests {
 
         // Verify: compute A*x and compare to b
         for i in 0..6 {
-            let mut ax_i = 0.0f32;
+            let mut ax_i = 0.0f64;
             for j in 0..6 {
                 ax_i += a[i][j] * x[j];
             }
             assert!(
-                (ax_i - b[i]).abs() < 1e-5,
+                (ax_i - b[i]).abs() < 1e-10,
                 "Ax[{}] = {}, expected b[{}] = {}",
                 i,
                 ax_i,
@@ -250,8 +249,8 @@ mod tests {
             [0.5, 0.8, 0.9, 4.0, 0.5],
             [0.2, 0.3, 0.4, 0.5, 3.0],
         ];
-        let expected_x = [1.0f32, 2.0, 3.0, 4.0, 5.0];
-        let mut b = [0.0f32; 5];
+        let expected_x = [1.0f64, 2.0, 3.0, 4.0, 5.0];
+        let mut b = [0.0f64; 5];
         for i in 0..5 {
             for j in 0..5 {
                 b[i] += a[i][j] * expected_x[j];
@@ -261,7 +260,7 @@ mod tests {
         let x = solve(&a, &b).unwrap();
         for i in 0..5 {
             assert!(
-                (x[i] - expected_x[i]).abs() < 1e-4,
+                (x[i] - expected_x[i]).abs() < 1e-10,
                 "x[{}] = {}, expected {}",
                 i,
                 x[i],

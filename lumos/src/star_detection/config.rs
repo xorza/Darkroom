@@ -4,8 +4,6 @@
 //! the star detection pipeline. All parameters are grouped by comments into
 //! logical sections.
 
-use super::defect_map::DefectMap;
-
 // ============================================================================
 // Enums
 // ============================================================================
@@ -260,10 +258,6 @@ pub struct Config {
     // -- Noise model --
     /// Optional camera noise model for accurate SNR calculation.
     pub noise_model: Option<NoiseModel>,
-
-    // -- Defect map --
-    /// Optional defect map for masking bad pixels.
-    pub defect_map: Option<DefectMap>,
 }
 
 impl Default for Config {
@@ -313,9 +307,6 @@ impl Default for Config {
 
             // Noise model
             noise_model: None,
-
-            // Defect map
-            defect_map: None,
         }
     }
 }
@@ -634,7 +625,6 @@ mod tests {
     fn test_config_default() {
         let config = Config::default();
         assert!(config.noise_model.is_none());
-        assert!(config.defect_map.is_none());
         config.validate();
     }
 
