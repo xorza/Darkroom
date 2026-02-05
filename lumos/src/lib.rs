@@ -113,7 +113,6 @@ pub use stacking::{
     // Configuration
     CacheConfig,
     CombineMethod,
-    FrameQuality,
     FrameType,
     Normalization,
     // Progress reporting

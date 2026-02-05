@@ -6,7 +6,6 @@
 // Allow dead_code until external callers adopt the new API
 
 use crate::stacking::CacheConfig;
-use crate::stacking::weighted::FrameQuality;
 
 /// Method for combining pixel values across frames.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -255,15 +254,6 @@ impl StackConfig {
         Self {
             method: CombineMethod::WeightedMean,
             weights,
-            ..Default::default()
-        }
-    }
-
-    /// Preset: weighted mean from quality metrics.
-    pub fn weighted_from_quality(qualities: &[FrameQuality]) -> Self {
-        Self {
-            method: CombineMethod::WeightedMean,
-            weights: qualities.iter().map(|q| q.compute_weight()).collect(),
             ..Default::default()
         }
     }

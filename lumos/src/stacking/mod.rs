@@ -3,13 +3,9 @@ mod cache_config;
 mod config;
 mod error;
 mod local_normalization;
-mod mean;
-mod median;
 pub mod progress;
 pub mod rejection;
-mod sigma_clipped;
 mod stack;
-mod weighted;
 
 use strum_macros::Display;
 
@@ -20,7 +16,6 @@ pub use stack::{stack, stack_with_progress};
 pub use cache_config::CacheConfig;
 pub use error::Error;
 pub use progress::{ProgressCallback, StackingProgress, StackingStage};
-pub use weighted::FrameQuality;
 
 // Re-export rejection types for advanced users
 pub use rejection::{
