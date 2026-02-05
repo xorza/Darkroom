@@ -50,110 +50,58 @@ The `interpolate_lanczos_impl` function dominates execution time due to:
 3. **36 multiply-accumulates** - 6x6 kernel window for each output pixel
 4. **Non-SIMD scalar code** - All operations are scalar despite being highly parallelizable
 
-## Optimization Strategies
+## Remaining Optimization Strategies
 
-### 1. Separable Filter (High Impact - Estimated 2-3x speedup)
+### ~~Separable Filter~~ (NOT APPLICABLE)
 
-**Current:** 2D convolution computes all 36 (6x6) samples per pixel  
-**Proposed:** Two-pass 1D filtering (horizontal then vertical)
+The separable filter optimization only works for **pure scaling/resampling** where source coordinates form a regular grid. The current `warp_image` applies arbitrary geometric transforms (rotation, skew, translation), meaning each output pixel maps to a unique arbitrary location via `inverse.apply()`. **This cannot be separated into horizontal/vertical passes.**
 
-The Lanczos kernel is **separable** - it can be applied as two sequential 1D passes:
+### ~~SIMD Vectorization~~ (ALREADY TRIED - MINIMAL BENEFIT)
 
-```
-Output = Vertical_Pass(Horizontal_Pass(Input))
-```
+From `simd/mod.rs`:
+> "Lanczos3: Scalar only (SIMD provides <5% improvement due to memory-bound LUT lookups)"
 
-This reduces operations from O(n²) to O(2n) per pixel:
-- Lanczos3: 36 → 12 multiplications per pixel
-- Lanczos4: 64 → 16 multiplications per pixel
+SIMD for Lanczos was implemented and removed. The bottleneck is memory-bound LUT lookups (12 per pixel for Lanczos3), not compute. SIMD gather instructions have high latency and don't help.
 
-**Implementation:**
-1. Allocate temporary buffer for horizontal pass results
-2. Apply 1D Lanczos horizontally to all rows
-3. Apply 1D Lanczos vertically to the intermediate buffer
+### 1. Polynomial Approximation (Medium Impact - Estimated 1.5-2x)
 
-**References:**
-- [Intel AVX Lanczos Implementation](https://www.intel.com/content/www/us/en/developer/articles/technical/the-intel-avx-realization-of-lanczos-interpolation-in-intel-ipp-2d-resize-transform.html) - Uses separable approach with horizontal/vertical phases
+Replace LUT with fast polynomial approximation of the Lanczos kernel:
+- **No memory access** - purely compute-bound, can benefit from SIMD
+- Trade accuracy for speed (acceptable for most use cases)
+- Use Chebyshev or minimax polynomial fit
 
-### 2. SIMD Vectorization (High Impact - Estimated 4-8x speedup for inner loops)
+### 2. Reduce Border Checking (Low-Medium Impact)
 
-**Current:** Scalar operations  
-**Proposed:** AVX2/SSE4.1 for x86_64, NEON for aarch64
-
-Key SIMD opportunities:
-- **Weight computation:** Compute 4-8 LUT lookups in parallel
-- **Multiply-accumulate:** Use `_mm256_fmadd_ps` for fused multiply-add
-- **Horizontal sum:** Use `_mm256_hadd_ps` for coefficient sum
-
-Example for weight computation (8 weights at once with AVX2):
-```rust
-// Load 8 dx values
-let dx = _mm256_set_ps(dx7, dx6, dx5, dx4, dx3, dx2, dx1, dx0);
-// Compute indices into LUT
-let idx = _mm256_cvttps_epi32(_mm256_mul_ps(abs_dx, resolution));
-// Gather from LUT
-let weights = _mm256_i32gather_ps(lut_ptr, idx, 4);
-```
-
-**References:**
-- [AVIR Library](https://github.com/avaneev/avir) - Fast SIMD Lanczos resizer achieving 245ms for 17.9 Mpixel → 2.5 Mpixel resize
-
-### 3. Process Multiple Pixels Per Iteration (Medium Impact)
-
-**Current:** One output pixel per inner loop iteration  
-**Proposed:** Process 4-8 adjacent output pixels together
-
-For adjacent output pixels:
-- Transform coordinates are sequential (can use SIMD)
-- Can batch LUT lookups
-- Can reuse some source pixel reads (overlapping windows)
-
-### 4. Optimize LUT Access (Medium Impact)
-
-**Current:** Linear interpolation between LUT entries  
-**Proposed:** Options:
-
-a. **Direct LUT (no interpolation):** Increase LUT resolution to 4096+ entries, use direct indexing
-   - Trades memory for fewer operations
-   - LUT size for Lanczos3: 4096 * 3 * 4 bytes = 48KB (fits in L1 cache)
-
-b. **Polynomial approximation:** Replace LUT with fast polynomial (sinc approximation)
-   - Avoids memory access entirely
-   - Can be vectorized easily
-
-### 5. Cache-Friendly Access Pattern (Low-Medium Impact)
-
-**Current:** Random access based on transform  
-**Proposed:** 
-- Process output in cache-line-sized tiles
-- Prefetch source data for next tile
-- Consider memory layout of intermediate buffer for separable filter
-
-### 6. Reduce Branching (Low Impact)
-
-**Current:** Bounds checking per sample  
+**Current:** Bounds checking for every sample (36 checks per pixel for Lanczos3)
 **Proposed:**
-- Pre-compute valid region, use fast path for interior pixels
-- Use saturating arithmetic instead of conditional border handling
+- Pre-compute interior region where no bounds checks needed
+- Use fast path for interior, slow path only for edges
+- Could save 10-20% by eliminating branches in hot loop
 
-## Recommended Implementation Order
+### 3. Batch Transform Computation (Low Impact)
 
-1. **Separable filter** - Largest algorithmic improvement, reduces operations by ~3x
-2. **SIMD for 1D horizontal pass** - After separable, horizontal pass is perfectly vectorizable
-3. **SIMD for 1D vertical pass** - Also vectorizable, benefits from sequential memory access
-4. **Increase LUT resolution + direct lookup** - Removes linear interpolation overhead
+**Current:** `inverse.apply()` called per pixel
+**Proposed:** 
+- For affine transforms, compute row start + delta per pixel
+- Reduce matrix multiply overhead
 
-## Expected Results
+### 4. Consider Bilinear for Non-Critical Cases
 
-| Optimization | Estimated Speedup | Cumulative |
-|-------------|------------------|------------|
-| Baseline | 1.0x | 600ms |
-| Separable filter | 2-3x | 200-300ms |
-| SIMD horizontal | 2-4x | 75-150ms |
-| SIMD vertical | 1.5-2x | 50-100ms |
-| LUT optimization | 1.2-1.5x | 35-80ms |
+Bilinear is 9x faster (25ms vs 2.9ms for 2k). For preview/interactive use, consider:
+- Bilinear for interactive preview
+- Lanczos only for final output
 
-**Target:** Sub-100ms for full RGB image warp
+## Summary
+
+| Optimization | Status | Impact |
+|-------------|--------|--------|
+| ✅ LUT optimization | Done | -20-30% |
+| ❌ Separable filter | Not applicable (arbitrary transform) | N/A |
+| ❌ SIMD | Already tried, <5% improvement | N/A |
+| ⏳ Polynomial approx | Next candidate | Est. 1.5-2x |
+| ⏳ Border check fast path | Possible | Est. 10-20% |
+
+**Current performance is likely near-optimal for Lanczos with arbitrary transforms.**
 
 ## Code References
 
