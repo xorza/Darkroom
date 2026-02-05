@@ -44,7 +44,7 @@ fn make_gaussian_star(
 // Single Star Centroid Benchmarks
 // =============================================================================
 
-#[quick_bench(warmup_iters = 10, iters = 2000)]
+#[quick_bench(warmup_iters = 100, iters = 10000)]
 fn bench_measure_star_single(b: ::bench::Bencher) {
     // Single star centroid computation with WeightedMoments
     let width = 64;
@@ -68,7 +68,7 @@ fn bench_measure_star_single(b: ::bench::Bencher) {
     });
 }
 
-#[quick_bench(warmup_iters = 10, iters = 2000)]
+#[quick_bench(warmup_iters = 100, iters = 10000)]
 fn bench_measure_star_gaussian_fit(b: ::bench::Bencher) {
     // Single star centroid with Gaussian fitting
     let width = 64;
@@ -92,7 +92,7 @@ fn bench_measure_star_gaussian_fit(b: ::bench::Bencher) {
     });
 }
 
-#[quick_bench(warmup_iters = 10, iters = 2000)]
+#[quick_bench(warmup_iters = 100, iters = 10000)]
 fn bench_measure_star_moffat_fit(b: ::bench::Bencher) {
     // Single star centroid with Moffat fitting
     let width = 64;
@@ -116,7 +116,7 @@ fn bench_measure_star_moffat_fit(b: ::bench::Bencher) {
     });
 }
 
-#[quick_bench(warmup_iters = 10, iters = 2000)]
+#[quick_bench(warmup_iters = 100, iters = 10000)]
 fn bench_measure_star_local_annulus(b: ::bench::Bencher) {
     // Single star centroid with LocalAnnulus background
     let width = 128;
@@ -268,7 +268,7 @@ fn bench_refine_centroid_batch_1000(b: ::bench::Bencher) {
 // Low-Level Fitting Benchmarks
 // =============================================================================
 
-#[quick_bench(warmup_iters = 10, iters = 2000)]
+#[quick_bench(warmup_iters = 100, iters = 10000)]
 fn bench_gaussian_fit_single(b: ::bench::Bencher) {
     // Single Gaussian fit (L-M optimization only)
     let width = 21;
@@ -301,7 +301,7 @@ fn bench_gaussian_fit_single(b: ::bench::Bencher) {
     });
 }
 
-#[quick_bench(warmup_iters = 10, iters = 2000)]
+#[quick_bench(warmup_iters = 100, iters = 10000)]
 fn bench_moffat_fit_single(b: ::bench::Bencher) {
     // Single Moffat fit (L-M optimization only)
     let width = 21;
@@ -337,7 +337,7 @@ fn bench_moffat_fit_single(b: ::bench::Bencher) {
     });
 }
 
-#[quick_bench(warmup_iters = 10, iters = 2000)]
+#[quick_bench(warmup_iters = 100, iters = 10000)]
 fn bench_moffat_fit_variable_beta(b: ::bench::Bencher) {
     // Single Moffat fit with variable beta (6-parameter fit)
     let width = 21;

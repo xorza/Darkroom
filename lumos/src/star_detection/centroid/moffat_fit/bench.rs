@@ -26,7 +26,7 @@ fn make_moffat_stamp(width: usize, height: usize, cx: f32, cy: f32) -> Buffer2<f
     Buffer2::new(width, height, pixels)
 }
 
-#[quick_bench(warmup_iters = 10, iters = 2000)]
+#[quick_bench(warmup_iters = 100, iters = 10000)]
 fn bench_moffat_fit_fixed_beta_small(b: bench::Bencher) {
     // 17x17 stamp
     let pixels = make_moffat_stamp(17, 17, 8.3, 8.7);
@@ -47,7 +47,7 @@ fn bench_moffat_fit_fixed_beta_small(b: bench::Bencher) {
     });
 }
 
-#[quick_bench(warmup_iters = 10, iters = 2000)]
+#[quick_bench(warmup_iters = 100, iters = 10000)]
 fn bench_moffat_fit_fixed_beta_medium(b: bench::Bencher) {
     // 25x25 stamp
     let pixels = make_moffat_stamp(25, 25, 12.3, 12.7);
@@ -68,7 +68,7 @@ fn bench_moffat_fit_fixed_beta_medium(b: bench::Bencher) {
     });
 }
 
-#[quick_bench(warmup_iters = 10, iters = 2000)]
+#[quick_bench(warmup_iters = 100, iters = 10000)]
 fn bench_moffat_fit_variable_beta(b: bench::Bencher) {
     // 21x21 stamp with variable beta
     let pixels = make_moffat_stamp(21, 21, 10.3, 10.7);
