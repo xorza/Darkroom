@@ -26,6 +26,8 @@ use crate::registration::transform::Transform;
 const ROWS_PER_CHUNK: usize = 32;
 
 #[cfg(test)]
+mod bench;
+#[cfg(test)]
 mod tests;
 
 pub mod simd;
@@ -57,9 +59,9 @@ fn lanczos_kernel_direct(x: f32, a: f32) -> f32 {
 // ============================================================================
 
 /// Number of sub-pixel samples per unit interval in the LUT.
-/// Higher values = more precision, more memory.
-/// 1024 gives ~0.001 precision which is far beyond typical image precision.
-const LANCZOS_LUT_RESOLUTION: usize = 1024;
+/// 4096 gives ~0.00024 precision - sufficient for direct lookup without interpolation.
+/// LUT size for Lanczos3: 4096 * 3 * 4 bytes = 48KB (fits in L1 cache).
+const LANCZOS_LUT_RESOLUTION: usize = 4096;
 
 /// Pre-computed Lanczos kernel lookup table.
 ///
@@ -90,30 +92,21 @@ impl LanczosLut {
         Self { values, a }
     }
 
-    /// Look up the kernel value for a given x using linear interpolation.
+    /// Look up the kernel value for a given x using direct table access.
+    /// With 4096 samples per unit, rounding error is negligible.
     #[inline]
     fn lookup(&self, x: f32) -> f32 {
         let abs_x = x.abs();
         let a_f32 = self.a as f32;
 
-        // Fast path: outside kernel support
         if abs_x >= a_f32 {
             return 0.0;
         }
 
-        // Convert to LUT index (floating point for interpolation)
-        let idx_f = abs_x * LANCZOS_LUT_RESOLUTION as f32;
-        let idx0 = idx_f as usize;
-
-        // Linear interpolation between adjacent LUT entries
-        let idx1 = (idx0 + 1).min(self.values.len() - 1);
-        let frac = idx_f - idx0 as f32;
-
-        // Safety: idx0 and idx1 are bounded by construction
-        let v0 = self.values[idx0];
-        let v1 = self.values[idx1];
-
-        v0 + frac * (v1 - v0)
+        // Direct index with rounding (faster than interpolation)
+        let idx = (abs_x * LANCZOS_LUT_RESOLUTION as f32 + 0.5) as usize;
+        // Safety: idx is bounded by a_f32 * RESOLUTION which is < values.len()
+        unsafe { *self.values.get_unchecked(idx) }
     }
 }
 

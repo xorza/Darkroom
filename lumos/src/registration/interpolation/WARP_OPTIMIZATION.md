@@ -1,5 +1,36 @@
 # Warp Optimization Analysis
 
+## Current Benchmarks (After LUT Optimization)
+
+| Benchmark | Before | After | Improvement |
+|-----------|--------|-------|-------------|
+| `bench_warp_lanczos3_1k` | 8.2ms | 6.3ms | **-23%** |
+| `bench_warp_lanczos3_2k` | 31.8ms | 25.0ms | **-21%** |
+| `bench_warp_lanczos3_4k` | 123ms | 104ms | **-15%** |
+| `bench_warp_bilinear_2k` | 2.8ms | 2.9ms | (baseline) |
+| `bench_interpolate_lanczos3_single` | 70µs | 49µs | **-30%** |
+| `bench_lut_lookup` | 4.5µs | 2.8µs | **-38%** |
+
+**Lanczos3 vs Bilinear ratio:** ~9x slower (25ms vs 2.9ms for 2k)
+
+## Optimizations Applied
+
+### 1. LUT Resolution Increase + Direct Lookup (2025-02-05)
+- Increased LUT resolution from 1024 to 4096 entries
+- Removed linear interpolation, using direct indexing with rounding
+- Result: 20-30% faster across all Lanczos benchmarks
+
+## Baseline Benchmarks (Before Optimizations)
+
+| Benchmark | Time | Notes |
+|-----------|------|-------|
+| `bench_warp_lanczos3_1k` | 8.2ms | 1024x1024, single channel |
+| `bench_warp_lanczos3_2k` | 31.8ms | 2048x2048, single channel |
+| `bench_warp_lanczos3_4k` | 123ms | 4096x4096, single channel |
+| `bench_warp_bilinear_2k` | 2.8ms | 2048x2048, SIMD-accelerated |
+| `bench_interpolate_lanczos3_single` | 70µs | 1000 pixel interpolations |
+| `bench_lut_lookup` | 4.5µs | 1000 LUT lookups |
+
 ## Current Performance Profile
 
 From perf profiling of `bench_warp` (Lanczos3, ~6000x4000 RGB image):
@@ -8,7 +39,7 @@ From perf profiling of `bench_warp` (Lanczos3, ~6000x4000 RGB image):
 |----------|--------|-------------|
 | `interpolate_lanczos` | 85.09% | Main hotspot - Lanczos kernel evaluation |
 
-**Current time:** ~600ms per warp (3 channels)
+**Current time:** ~600ms per warp (3 channels, ~6000x4000)
 
 ## Bottleneck Analysis
 
