@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::star_detection::centroid::lm_optimizer::LMConfig;
+use crate::star_detection::centroid::test_utils::{add_noise, approx_eq, compute_hessian_gradient};
 use glam::Vec2;
 
 #[allow(clippy::too_many_arguments)]
@@ -146,21 +147,6 @@ fn test_moffat_fit_edge_position() {
 // ============================================================================
 // Noise and difficult data tests
 // ============================================================================
-
-/// Add Gaussian noise to pixel values using a simple LCG PRNG.
-fn add_noise(pixels: &mut [f32], noise_sigma: f32, seed: u64) {
-    let mut state = seed;
-    for pixel in pixels.iter_mut() {
-        // Box-Muller transform with LCG
-        state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
-        let u1 = (state as f32) / (u64::MAX as f32);
-        state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
-        let u2 = (state as f32) / (u64::MAX as f32);
-
-        let z = (-2.0 * u1.max(1e-10).ln()).sqrt() * (2.0 * std::f32::consts::PI * u2).cos();
-        *pixel += z * noise_sigma;
-    }
-}
 
 #[test]
 fn test_moffat_fit_with_gaussian_noise() {
@@ -883,19 +869,6 @@ fn test_moffat_variable_beta_evaluate_and_jacobian_consistency() {
 // SIMD batch method correctness tests
 // ============================================================================
 
-/// Approximate equality with combined absolute + relative tolerance.
-/// Handles near-zero values where relative tolerance alone would be too tight.
-fn approx_eq(a: f64, b: f64) -> bool {
-    let abs_diff = (a - b).abs();
-    // Absolute tolerance for values near zero
-    if abs_diff < 1e-14 {
-        return true;
-    }
-    // Relative tolerance for larger values
-    let max_abs = a.abs().max(b.abs());
-    abs_diff / max_abs < 1e-10
-}
-
 /// Build stamp data arrays (x, y, z) for a Moffat profile at given params.
 fn make_stamp_data(size: usize, params: &[f64; 5], beta: f64) -> (Vec<f64>, Vec<f64>, Vec<f64>) {
     let [x0, y0, amp, alpha, bg] = *params;
@@ -915,30 +888,6 @@ fn make_stamp_data(size: usize, params: &[f64; 5], beta: f64) -> (Vec<f64>, Vec<
         }
     }
     (data_x, data_y, data_z)
-}
-
-/// Scalar reference for computing J^T J (hessian) and J^T r (gradient).
-#[allow(clippy::needless_range_loop)]
-fn compute_hessian_gradient<const N: usize>(
-    jacobian: &[[f64; N]],
-    residuals: &[f64],
-) -> ([[f64; N]; N], [f64; N]) {
-    let mut hessian = [[0.0f64; N]; N];
-    let mut gradient = [0.0f64; N];
-    for (row, &r) in jacobian.iter().zip(residuals.iter()) {
-        for i in 0..N {
-            gradient[i] += row[i] * r;
-            for j in i..N {
-                hessian[i][j] += row[i] * row[j];
-            }
-        }
-    }
-    for i in 1..N {
-        for j in 0..i {
-            hessian[i][j] = hessian[j][i];
-        }
-    }
-    (hessian, gradient)
 }
 
 #[test]

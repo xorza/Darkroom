@@ -2,31 +2,8 @@
 
 use super::*;
 use crate::math::{fwhm_to_sigma, sigma_to_fwhm};
+use crate::star_detection::centroid::test_utils::{add_noise, approx_eq, compute_hessian_gradient};
 use glam::Vec2;
-
-/// Scalar reference for computing J^T J (hessian) and J^T r (gradient).
-#[allow(clippy::needless_range_loop)]
-fn compute_hessian_gradient<const N: usize>(
-    jacobian: &[[f64; N]],
-    residuals: &[f64],
-) -> ([[f64; N]; N], [f64; N]) {
-    let mut hessian = [[0.0f64; N]; N];
-    let mut gradient = [0.0f64; N];
-    for (row, &r) in jacobian.iter().zip(residuals.iter()) {
-        for i in 0..N {
-            gradient[i] += row[i] * r;
-            for j in i..N {
-                hessian[i][j] += row[i] * row[j];
-            }
-        }
-    }
-    for i in 1..N {
-        for j in 0..i {
-            hessian[i][j] = hessian[j][i];
-        }
-    }
-    (hessian, gradient)
-}
 
 fn make_gaussian_stamp(
     width: usize,
@@ -382,21 +359,6 @@ fn test_fwhm_accuracy() {
 // ============================================================================
 // Noise and difficult data tests
 // ============================================================================
-
-/// Add Gaussian noise to pixel values using a simple LCG PRNG.
-fn add_noise(pixels: &mut [f32], noise_sigma: f32, seed: u64) {
-    let mut state = seed;
-    for pixel in pixels.iter_mut() {
-        // Box-Muller transform with LCG
-        state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
-        let u1 = (state as f32) / (u64::MAX as f32);
-        state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
-        let u2 = (state as f32) / (u64::MAX as f32);
-
-        let z = (-2.0 * u1.max(1e-10).ln()).sqrt() * (2.0 * std::f32::consts::PI * u2).cos();
-        *pixel += z * noise_sigma;
-    }
-}
 
 #[test]
 fn test_gaussian_fit_with_gaussian_noise() {
@@ -1284,6 +1246,174 @@ fn test_gaussian_fit_residual_distribution() {
         result.rms_residual,
         noise_sigma
     );
+}
+
+// ============================================================================
+// SIMD-vs-scalar batch validation tests
+// ============================================================================
+
+/// Build stamp data arrays (x, y, z) for a Gaussian profile at given params.
+fn make_gaussian_stamp_data(size: usize, params: &[f64; 6]) -> (Vec<f64>, Vec<f64>, Vec<f64>) {
+    let [x0, y0, amp, sigma_x, sigma_y, bg] = *params;
+    let sigma_x2 = sigma_x * sigma_x;
+    let sigma_y2 = sigma_y * sigma_y;
+    let mut data_x = Vec::with_capacity(size * size);
+    let mut data_y = Vec::with_capacity(size * size);
+    let mut data_z = Vec::with_capacity(size * size);
+    for iy in 0..size {
+        for ix in 0..size {
+            let x = ix as f64;
+            let y = iy as f64;
+            let dx = x - x0;
+            let dy = y - y0;
+            let z = amp * (-0.5 * (dx * dx / sigma_x2 + dy * dy / sigma_y2)).exp() + bg;
+            data_x.push(x);
+            data_y.push(y);
+            data_z.push(z);
+        }
+    }
+    (data_x, data_y, data_z)
+}
+
+#[test]
+fn test_batch_build_normal_equations_matches_scalar() {
+    use super::super::lm_optimizer::LMModel;
+
+    let true_params = [6.3, 6.7, 1000.0, 2.5, 3.0, 100.0];
+    // Use offset params so residuals are non-trivial
+    let params = [6.5, 6.5, 980.0, 2.6, 2.9, 102.0];
+    let model = Gaussian2D { stamp_radius: 8.0 };
+    let (data_x, data_y, data_z) = make_gaussian_stamp_data(13, &true_params);
+
+    // Scalar reference: build jacobian/residuals then compute hessian/gradient
+    let mut jac_scalar = Vec::new();
+    let mut res_scalar = Vec::new();
+    let mut chi2_scalar = 0.0f64;
+    for ((&x, &y), &z) in data_x.iter().zip(data_y.iter()).zip(data_z.iter()) {
+        let (model_val, jac_row) = model.evaluate_and_jacobian(x, y, &params);
+        let residual = z - model_val;
+        chi2_scalar += residual * residual;
+        jac_scalar.push(jac_row);
+        res_scalar.push(residual);
+    }
+    let (hessian_scalar, gradient_scalar) = compute_hessian_gradient(&jac_scalar, &res_scalar);
+
+    // Batch path (uses SIMD on x86_64 with AVX2)
+    let (hessian_batch, gradient_batch, chi2_batch) =
+        model.batch_build_normal_equations(&data_x, &data_y, &data_z, &params);
+
+    // Chi² should match
+    assert!(
+        approx_eq(chi2_scalar, chi2_batch),
+        "chi2 mismatch: scalar={chi2_scalar}, batch={chi2_batch}"
+    );
+
+    // Gradient should match
+    for i in 0..6 {
+        assert!(
+            approx_eq(gradient_scalar[i], gradient_batch[i]),
+            "gradient[{i}] mismatch: scalar={}, batch={}",
+            gradient_scalar[i],
+            gradient_batch[i]
+        );
+    }
+
+    // Hessian should match (full matrix including mirrored lower triangle)
+    for i in 0..6 {
+        for j in 0..6 {
+            assert!(
+                approx_eq(hessian_scalar[i][j], hessian_batch[i][j]),
+                "hessian[{i}][{j}] mismatch: scalar={}, batch={}",
+                hessian_scalar[i][j],
+                hessian_batch[i][j]
+            );
+        }
+    }
+}
+
+#[test]
+fn test_batch_compute_chi2_matches_scalar() {
+    use super::super::lm_optimizer::LMModel;
+
+    let model = Gaussian2D { stamp_radius: 8.0 };
+    // Use slightly off params so residuals are non-zero
+    let true_params = [6.3, 6.7, 1000.0, 2.5, 3.0, 100.0];
+    let test_params = [6.5, 6.5, 980.0, 2.6, 2.9, 102.0];
+    let (data_x, data_y, data_z) = make_gaussian_stamp_data(13, &true_params);
+
+    // Scalar chi²
+    let chi2_scalar: f64 = data_x
+        .iter()
+        .zip(data_y.iter())
+        .zip(data_z.iter())
+        .map(|((&x, &y), &z)| {
+            let r = z - model.evaluate(x, y, &test_params);
+            r * r
+        })
+        .sum();
+
+    // Batch chi² (uses SIMD on x86_64 with AVX2)
+    let chi2_batch = model.batch_compute_chi2(&data_x, &data_y, &data_z, &test_params);
+
+    assert!(
+        approx_eq(chi2_scalar, chi2_batch),
+        "chi2 mismatch: scalar={chi2_scalar}, batch={chi2_batch}, diff={}",
+        (chi2_scalar - chi2_batch).abs()
+    );
+}
+
+#[test]
+fn test_batch_build_normal_equations_various_stamp_sizes() {
+    use super::super::lm_optimizer::LMModel;
+
+    let model = Gaussian2D { stamp_radius: 10.0 };
+    let true_params = [5.0, 5.0, 500.0, 2.0, 2.5, 50.0];
+    // Offset params for non-trivial residuals
+    let params = [5.2, 4.8, 490.0, 2.1, 2.4, 51.0];
+
+    // Test sizes that exercise: exact multiple of 4, remainder 1, 2, 3
+    for size in [3, 4, 5, 7, 9, 11, 13, 15, 17] {
+        let (data_x, data_y, data_z) = make_gaussian_stamp_data(size, &true_params);
+
+        // Scalar reference
+        let mut jac_scalar = Vec::new();
+        let mut res_scalar = Vec::new();
+        let mut chi2_scalar = 0.0f64;
+        for ((&x, &y), &z) in data_x.iter().zip(data_y.iter()).zip(data_z.iter()) {
+            let (model_val, jac_row) = model.evaluate_and_jacobian(x, y, &params);
+            let residual = z - model_val;
+            chi2_scalar += residual * residual;
+            jac_scalar.push(jac_row);
+            res_scalar.push(residual);
+        }
+        let (hessian_scalar, gradient_scalar) = compute_hessian_gradient(&jac_scalar, &res_scalar);
+
+        // Batch
+        let (hessian_batch, gradient_batch, chi2_batch) =
+            model.batch_build_normal_equations(&data_x, &data_y, &data_z, &params);
+
+        assert!(
+            approx_eq(chi2_scalar, chi2_batch),
+            "size={size}: chi2 mismatch: scalar={chi2_scalar}, batch={chi2_batch}"
+        );
+
+        for i in 0..6 {
+            assert!(
+                approx_eq(gradient_scalar[i], gradient_batch[i]),
+                "size={size}: gradient[{i}] mismatch: scalar={}, batch={}",
+                gradient_scalar[i],
+                gradient_batch[i]
+            );
+            for j in 0..6 {
+                assert!(
+                    approx_eq(hessian_scalar[i][j], hessian_batch[i][j]),
+                    "size={size}: hessian[{i}][{j}] mismatch: scalar={}, batch={}",
+                    hessian_scalar[i][j],
+                    hessian_batch[i][j]
+                );
+            }
+        }
+    }
 }
 
 // ============================================================================

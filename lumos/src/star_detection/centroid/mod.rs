@@ -16,6 +16,8 @@ pub mod moffat_fit;
 #[cfg(test)]
 mod bench;
 #[cfg(test)]
+pub(crate) mod test_utils;
+#[cfg(test)]
 mod tests;
 
 // Re-export fitting functions and types for convenience
