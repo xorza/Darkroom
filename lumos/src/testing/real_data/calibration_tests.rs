@@ -214,13 +214,13 @@ fn to_gray_image(pixels: &[f32], width: usize, height: usize) -> image::GrayImag
 mod stacking_tests {
     use super::*;
     use crate::stacking::{
-        FrameType, ImageStack, MedianConfig, ProgressCallback, SigmaClippedConfig, StackingMethod,
+        CacheConfig, FrameType, ProgressCallback, StackConfig, stack_with_progress,
     };
 
     fn test_stack_from_env(
         subdir: &str,
         frame_type: FrameType,
-        method: StackingMethod,
+        config: StackConfig,
         output_name: &str,
     ) {
         init_tracing();
@@ -242,10 +242,10 @@ mod stacking_tests {
             "Stacking {} {}s with {:?} method...",
             paths.len(),
             subdir.to_lowercase(),
-            method
+            config.method
         );
-        let stack = ImageStack::new(frame_type, method, paths.clone());
-        let master = stack.process(ProgressCallback::default()).unwrap();
+        let master =
+            stack_with_progress(&paths, frame_type, config, ProgressCallback::default()).unwrap();
 
         let first = AstroImage::from_file(&paths[0]).unwrap();
         println!(
@@ -273,7 +273,7 @@ mod stacking_tests {
         test_stack_from_env(
             "Darks",
             FrameType::Dark,
-            StackingMethod::Mean,
+            StackConfig::mean(),
             "master_dark_mean.tiff",
         );
     }
@@ -284,7 +284,7 @@ mod stacking_tests {
         test_stack_from_env(
             "Darks",
             FrameType::Dark,
-            StackingMethod::default(),
+            StackConfig::median(),
             "master_dark_median.tiff",
         );
     }
@@ -295,7 +295,7 @@ mod stacking_tests {
         test_stack_from_env(
             "Darks",
             FrameType::Dark,
-            StackingMethod::SigmaClippedMean(SigmaClippedConfig::default()),
+            StackConfig::sigma_clipped(2.5),
             "master_dark_sigma_clipped.tiff",
         );
     }
@@ -315,10 +315,13 @@ mod stacking_tests {
             return;
         }
 
-        let config = MedianConfig {
-            available_memory: Some(1),
-            cache_dir: std::env::temp_dir().join("lumos_limited_ram_test"),
-            ..Default::default()
+        let config = StackConfig {
+            cache: CacheConfig {
+                available_memory: Some(1),
+                cache_dir: std::env::temp_dir().join("lumos_limited_ram_test"),
+                ..Default::default()
+            },
+            ..StackConfig::median()
         };
 
         println!(
@@ -326,12 +329,9 @@ mod stacking_tests {
             paths.len()
         );
 
-        let stack = ImageStack::new(
-            FrameType::Dark,
-            StackingMethod::Median(config.clone()),
-            paths.clone(),
-        );
-        let master = stack.process(ProgressCallback::default()).unwrap();
+        let master =
+            stack_with_progress(&paths, FrameType::Dark, config, ProgressCallback::default())
+                .unwrap();
 
         let first = AstroImage::from_file(&paths[0]).unwrap();
         assert_eq!(master.dimensions(), first.dimensions());

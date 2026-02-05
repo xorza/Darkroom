@@ -7,8 +7,8 @@ use anyhow::Result;
 use rayon::prelude::*;
 
 use crate::astro_image::HotPixelMap;
-use crate::stacking::ProgressCallback;
-use crate::{AstroImage, FrameType, ImageStack, StackingMethod};
+use crate::stacking::{ProgressCallback, StackConfig, stack_with_progress};
+use crate::{AstroImage, FrameType};
 
 /// Default sigma threshold for hot pixel detection.
 const DEFAULT_HOT_PIXEL_SIGMA: f32 = 5.0;
@@ -24,8 +24,8 @@ pub struct CalibrationMasters {
     pub master_bias: Option<AstroImage>,
     /// Hot pixel map derived from master dark
     pub hot_pixel_map: Option<HotPixelMap>,
-    /// Stacking method used to create the masters
-    pub method: StackingMethod,
+    /// Stacking configuration used to create the masters
+    pub config: StackConfig,
 }
 
 impl CalibrationMasters {
@@ -126,17 +126,18 @@ impl CalibrationMasters {
     }
 
     /// Generate the filename for a master frame.
-    fn master_filename(frame_type: FrameType, method: &StackingMethod) -> String {
-        format!("master_{}_{}.tiff", frame_type, method)
+    fn master_filename(frame_type: FrameType, config: &StackConfig) -> String {
+        let method_name = match config.method {
+            crate::stacking::CombineMethod::Mean => "mean",
+            crate::stacking::CombineMethod::Median => "median",
+            crate::stacking::CombineMethod::WeightedMean => "weighted",
+        };
+        format!("master_{}_{}.tiff", frame_type, method_name)
     }
 
     /// Generate the full path for a master frame in a directory.
-    fn master_path<P: AsRef<Path>>(
-        dir: P,
-        frame_type: FrameType,
-        method: &StackingMethod,
-    ) -> PathBuf {
-        dir.as_ref().join(Self::master_filename(frame_type, method))
+    fn master_path<P: AsRef<Path>>(dir: P, frame_type: FrameType, config: &StackConfig) -> PathBuf {
+        dir.as_ref().join(Self::master_filename(frame_type, config))
     }
 
     /// Load existing master frames from a directory.
@@ -145,25 +146,23 @@ impl CalibrationMasters {
     /// Returns None for any masters that don't exist.
     /// Automatically generates hot pixel map from master dark if available.
     ///
-    /// This is the preferred method. [`load_from_directory`](Self::load_from_directory) is deprecated.
-    ///
     /// # Example
     /// ```rust,ignore
-    /// use lumos::{CalibrationMasters, StackingMethod};
+    /// use lumos::{CalibrationMasters, StackConfig};
     ///
     /// // Load pre-created master frames
-    /// let masters = CalibrationMasters::load("./calibration", StackingMethod::Median)?;
+    /// let masters = CalibrationMasters::load("./calibration", StackConfig::default())?;
     ///
     /// // Apply calibration to a light frame
     /// let mut light = AstroImage::from_file("light_001.fits")?;
     /// masters.calibrate(&mut light);
     /// ```
-    pub fn load<P: AsRef<Path>>(dir: P, method: StackingMethod) -> Result<Self> {
+    pub fn load<P: AsRef<Path>>(dir: P, config: StackConfig) -> Result<Self> {
         let dir = dir.as_ref();
 
-        let master_dark = Self::load_master(dir, FrameType::Dark, &method);
-        let master_flat = Self::load_master(dir, FrameType::Flat, &method);
-        let master_bias = Self::load_master(dir, FrameType::Bias, &method);
+        let master_dark = Self::load_master(dir, FrameType::Dark, &config);
+        let master_flat = Self::load_master(dir, FrameType::Flat, &config);
+        let master_bias = Self::load_master(dir, FrameType::Bias, &config);
 
         // Generate hot pixel map from master dark
         let hot_pixel_map = master_dark
@@ -175,7 +174,7 @@ impl CalibrationMasters {
             master_flat,
             master_bias,
             hot_pixel_map,
-            method,
+            config,
         })
     }
 
@@ -198,16 +197,14 @@ impl CalibrationMasters {
     ///
     /// Missing subdirectories are skipped (the corresponding master will be None).
     ///
-    /// This is the preferred method. [`from_directory`](Self::from_directory) is deprecated.
-    ///
     /// # Example
     /// ```rust,ignore
-    /// use lumos::{CalibrationMasters, StackingMethod, stacking::ProgressCallback};
+    /// use lumos::{CalibrationMasters, StackConfig, stacking::ProgressCallback};
     ///
     /// // Create masters from raw calibration frames
     /// let masters = CalibrationMasters::create(
     ///     "./calibration",
-    ///     StackingMethod::SigmaClippedMean(Default::default()),
+    ///     StackConfig::sigma_clipped(2.5),
     ///     ProgressCallback::default(),
     /// )?;
     ///
@@ -223,7 +220,7 @@ impl CalibrationMasters {
     /// ```
     pub fn create<P: AsRef<Path>>(
         dir: P,
-        method: StackingMethod,
+        config: StackConfig,
         progress: ProgressCallback,
     ) -> Result<Self> {
         let dir = dir.as_ref();
@@ -235,12 +232,12 @@ impl CalibrationMasters {
         assert!(dir.is_dir(), "Path is not a directory: {:?}", dir);
 
         // Try to load existing masters first, then create from raw frames if not found
-        let master_dark = Self::load_master(dir, FrameType::Dark, &method)
-            .or_else(|| Self::create_master(dir, "Darks", FrameType::Dark, &method, &progress));
-        let master_flat = Self::load_master(dir, FrameType::Flat, &method)
-            .or_else(|| Self::create_master(dir, "Flats", FrameType::Flat, &method, &progress));
-        let master_bias = Self::load_master(dir, FrameType::Bias, &method)
-            .or_else(|| Self::create_master(dir, "Bias", FrameType::Bias, &method, &progress));
+        let master_dark = Self::load_master(dir, FrameType::Dark, &config)
+            .or_else(|| Self::create_master(dir, "Darks", FrameType::Dark, &config, &progress));
+        let master_flat = Self::load_master(dir, FrameType::Flat, &config)
+            .or_else(|| Self::create_master(dir, "Flats", FrameType::Flat, &config, &progress));
+        let master_bias = Self::load_master(dir, FrameType::Bias, &config)
+            .or_else(|| Self::create_master(dir, "Bias", FrameType::Bias, &config, &progress));
 
         // Generate hot pixel map from master dark
         let hot_pixel_map = master_dark
@@ -252,7 +249,7 @@ impl CalibrationMasters {
             master_flat,
             master_bias,
             hot_pixel_map,
-            method,
+            config,
         })
     }
 
@@ -267,29 +264,25 @@ impl CalibrationMasters {
         fs::create_dir_all(dir)?;
 
         if let Some(ref dark) = self.master_dark {
-            let path = Self::master_path(dir, FrameType::Dark, &self.method);
+            let path = Self::master_path(dir, FrameType::Dark, &self.config);
             Self::save_as_tiff(dark.clone(), &path)?;
         }
 
         if let Some(ref flat) = self.master_flat {
-            let path = Self::master_path(dir, FrameType::Flat, &self.method);
+            let path = Self::master_path(dir, FrameType::Flat, &self.config);
             Self::save_as_tiff(flat.clone(), &path)?;
         }
 
         if let Some(ref bias) = self.master_bias {
-            let path = Self::master_path(dir, FrameType::Bias, &self.method);
+            let path = Self::master_path(dir, FrameType::Bias, &self.config);
             Self::save_as_tiff(bias.clone(), &path)?;
         }
 
         Ok(())
     }
 
-    fn load_master(
-        dir: &Path,
-        frame_type: FrameType,
-        method: &StackingMethod,
-    ) -> Option<AstroImage> {
-        let path = Self::master_path(dir, frame_type, method);
+    fn load_master(dir: &Path, frame_type: FrameType, config: &StackConfig) -> Option<AstroImage> {
+        let path = Self::master_path(dir, frame_type, config);
 
         if !path.exists() {
             return None;
@@ -303,7 +296,7 @@ impl CalibrationMasters {
         base_dir: &Path,
         subdir: &str,
         frame_type: FrameType,
-        method: &StackingMethod,
+        config: &StackConfig,
         progress: &ProgressCallback,
     ) -> Option<AstroImage> {
         let dir = base_dir.join(subdir);
@@ -316,8 +309,7 @@ impl CalibrationMasters {
             return None;
         }
 
-        let stack = ImageStack::new(frame_type, method.clone(), paths);
-        match stack.process(progress.clone()) {
+        match stack_with_progress(&paths, frame_type, config.clone(), progress.clone()) {
             Ok(image) => Some(image),
             Err(e) => {
                 tracing::error!("Failed to stack {:?} frames: {}", frame_type, e);
@@ -348,7 +340,7 @@ mod tests {
 
         let masters = CalibrationMasters::create(
             &cal_dir,
-            StackingMethod::default(),
+            StackConfig::default(),
             ProgressCallback::default(),
         )
         .unwrap();
@@ -366,25 +358,25 @@ mod tests {
         masters.save_to_directory(&output_dir).unwrap();
 
         // Verify files were created
-        let method = StackingMethod::default();
+        let config = StackConfig::default();
         if masters.master_dark.is_some() {
             assert!(
-                CalibrationMasters::master_path(&output_dir, FrameType::Dark, &method).exists()
+                CalibrationMasters::master_path(&output_dir, FrameType::Dark, &config).exists()
             );
         }
         if masters.master_flat.is_some() {
             assert!(
-                CalibrationMasters::master_path(&output_dir, FrameType::Flat, &method).exists()
+                CalibrationMasters::master_path(&output_dir, FrameType::Flat, &config).exists()
             );
         }
         if masters.master_bias.is_some() {
             assert!(
-                CalibrationMasters::master_path(&output_dir, FrameType::Bias, &method).exists()
+                CalibrationMasters::master_path(&output_dir, FrameType::Bias, &config).exists()
             );
         }
 
         // Test loading saved masters
-        let loaded = CalibrationMasters::load(&output_dir, StackingMethod::default()).unwrap();
+        let loaded = CalibrationMasters::load(&output_dir, StackConfig::default()).unwrap();
         assert_eq!(masters.master_dark.is_some(), loaded.master_dark.is_some());
         assert_eq!(masters.master_flat.is_some(), loaded.master_flat.is_some());
         assert_eq!(masters.master_bias.is_some(), loaded.master_bias.is_some());
@@ -399,8 +391,8 @@ mod tests {
             return;
         };
 
-        let method = StackingMethod::default();
-        let masters = CalibrationMasters::load(&masters_dir, method).unwrap();
+        let config = StackConfig::default();
+        let masters = CalibrationMasters::load(&masters_dir, config).unwrap();
 
         // Print what was found
         println!(

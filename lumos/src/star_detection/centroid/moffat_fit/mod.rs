@@ -10,7 +10,6 @@
 //! This achieves similar centroid accuracy to Gaussian fitting (~0.01 pixel)
 //! but provides more accurate flux and FWHM estimates for stellar sources.
 
-#![allow(dead_code)]
 
 #[cfg(test)]
 mod bench;

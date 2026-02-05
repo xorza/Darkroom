@@ -2,7 +2,6 @@
 //!
 //! Uses NEON to process 4 pixels in parallel.
 
-#![allow(dead_code)]
 #![allow(unsafe_op_in_unsafe_fn)]
 
 use std::arch::aarch64::*;

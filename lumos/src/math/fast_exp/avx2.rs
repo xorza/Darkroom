@@ -1,7 +1,6 @@
 //! AVX2 vectorized exp(x) for 8 f32 values.
 
 #![allow(unsafe_op_in_unsafe_fn)]
-#![allow(dead_code)]
 
 use std::arch::x86_64::*;
 

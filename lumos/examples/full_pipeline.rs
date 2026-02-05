@@ -54,9 +54,9 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use lumos::{
-    AstroImage, CalibrationMasters, FrameType, ImageStack, InterpolationMethod, MedianConfig,
-    ProgressCallback, RegistrationConfig, SigmaClippedConfig, StackingMethod, StackingProgress,
-    StackingStage, Star, StarDetectionConfig, StarDetector, TransformType,
+    AstroImage, CalibrationMasters, FrameType, ProgressCallback, RegistrationConfig, StackConfig,
+    StackingProgress, StackingStage, Star, StarDetectionConfig, StarDetector, TransformType,
+    stack_with_progress,
 };
 use tracing_subscriber::EnvFilter;
 
@@ -148,11 +148,10 @@ fn main() {
 fn create_calibration_masters(calibration_dir: &Path, output_dir: &Path) -> CalibrationMasters {
     let start = Instant::now();
 
-    let config = MedianConfig::default();
-    let method = StackingMethod::Median(config);
+    let config = StackConfig::median();
 
     // First, try to load existing masters from the output directory
-    if let Ok(masters) = CalibrationMasters::load(output_dir, method.clone())
+    if let Ok(masters) = CalibrationMasters::load(output_dir, config.clone())
         && (masters.master_dark.is_some()
             || masters.master_flat.is_some()
             || masters.master_bias.is_some())
@@ -168,7 +167,7 @@ fn create_calibration_masters(calibration_dir: &Path, output_dir: &Path) -> Cali
     let progress = create_progress_callback();
     tracing::info!("Creating calibration masters from raw frames...");
 
-    let masters = CalibrationMasters::create(calibration_dir, method, progress)
+    let masters = CalibrationMasters::create(calibration_dir, config, progress)
         .expect("Failed to create calibration masters");
 
     let elapsed = start.elapsed();
@@ -514,19 +513,18 @@ fn stack_registered_lights(registered_paths: &[PathBuf], output_dir: &Path) {
     let start = Instant::now();
 
     // Use sigma-clipped mean for best outlier rejection (cosmic rays, satellites, etc.)
-    let stacking_config = SigmaClippedConfig::default();
-    let method = StackingMethod::SigmaClippedMean(stacking_config);
+    let config = StackConfig::sigma_clipped(2.5);
 
     tracing::info!(
         image_count = registered_paths.len(),
-        method = %method,
+        method = ?config.method,
+        rejection = ?config.rejection,
         "Starting final stack"
     );
 
-    let stack = ImageStack::new(FrameType::Light, method, registered_paths.to_vec());
     let progress = create_progress_callback();
 
-    match stack.process(progress) {
+    match stack_with_progress(registered_paths, FrameType::Light, config, progress) {
         Ok(stacked) => {
             let output_path = output_dir.join("stacked_result.tiff");
 

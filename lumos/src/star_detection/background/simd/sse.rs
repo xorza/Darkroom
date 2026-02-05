@@ -1,7 +1,6 @@
 //! SSE4.1 and AVX2 implementations of background statistics functions.
 
 #![allow(clippy::needless_range_loop)]
-#![allow(dead_code)]
 
 #[cfg(target_arch = "x86_64")]
 use std::arch::x86_64::*;

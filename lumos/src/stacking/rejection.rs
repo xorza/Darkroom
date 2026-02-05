@@ -7,6 +7,7 @@
 //! - Percentile clipping
 //! - Generalized Extreme Studentized Deviate (GESD)
 
+
 use crate::math;
 
 /// Configuration for sigma clipping.

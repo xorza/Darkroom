@@ -3,6 +3,7 @@
 //! Automatically chooses between in-memory and disk-based processing
 //! based on available system memory.
 
+
 use std::path::Path;
 
 use crate::astro_image::AstroImage;

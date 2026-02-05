@@ -868,7 +868,7 @@ mod tests {
 
     #[test]
     fn test_calibrate_bias_subtraction() {
-        use crate::{CalibrationMasters, StackingMethod};
+        use crate::{CalibrationMasters, StackConfig};
 
         let mut light = AstroImage::from_pixels(
             ImageDimensions::new(2, 2, 1),
@@ -881,7 +881,7 @@ mod tests {
             master_flat: None,
             master_bias: Some(bias),
             hot_pixel_map: None,
-            method: StackingMethod::default(),
+            config: StackConfig::default(),
         };
 
         masters.calibrate(&mut light);
@@ -890,7 +890,7 @@ mod tests {
 
     #[test]
     fn test_calibrate_dark_subtraction() {
-        use crate::{CalibrationMasters, StackingMethod};
+        use crate::{CalibrationMasters, StackConfig};
 
         let mut light = AstroImage::from_pixels(
             ImageDimensions::new(2, 2, 1),
@@ -904,7 +904,7 @@ mod tests {
             master_flat: None,
             master_bias: None,
             hot_pixel_map: None,
-            method: StackingMethod::default(),
+            config: StackConfig::default(),
         };
 
         masters.calibrate(&mut light);
@@ -913,7 +913,7 @@ mod tests {
 
     #[test]
     fn test_calibrate_flat_correction() {
-        use crate::{CalibrationMasters, StackingMethod};
+        use crate::{CalibrationMasters, StackConfig};
 
         let mut light = AstroImage::from_pixels(
             ImageDimensions::new(2, 2, 1),
@@ -926,7 +926,7 @@ mod tests {
             master_flat: Some(flat),
             master_bias: None,
             hot_pixel_map: None,
-            method: StackingMethod::default(),
+            config: StackConfig::default(),
         };
 
         masters.calibrate(&mut light);
@@ -939,7 +939,7 @@ mod tests {
 
     #[test]
     fn test_calibrate_full() {
-        use crate::{CalibrationMasters, StackingMethod};
+        use crate::{CalibrationMasters, StackConfig};
 
         let mut light = AstroImage::from_pixels(
             ImageDimensions::new(2, 2, 1),
@@ -955,7 +955,7 @@ mod tests {
             master_flat: Some(flat),
             master_bias: Some(bias),
             hot_pixel_map: None,
-            method: StackingMethod::default(),
+            config: StackConfig::default(),
         };
 
         masters.calibrate(&mut light);
@@ -1077,7 +1077,7 @@ mod tests {
     #[cfg_attr(not(feature = "real-data"), ignore)]
     fn test_calibrate_light_from_env() {
         use crate::testing::{calibration_dir, calibration_masters_dir, init_tracing};
-        use crate::{CalibrationMasters, StackingMethod};
+        use crate::{CalibrationMasters, StackConfig};
 
         init_tracing();
 
@@ -1118,7 +1118,7 @@ mod tests {
         };
 
         let start = std::time::Instant::now();
-        let masters = CalibrationMasters::load(&masters_dir, StackingMethod::default()).unwrap();
+        let masters = CalibrationMasters::load(&masters_dir, StackConfig::default()).unwrap();
         println!("  Load masters: {:?}", start.elapsed());
 
         println!(
@@ -1183,7 +1183,7 @@ mod tests {
 
     #[test]
     fn test_calibrate_rgb_with_rgb_masters() {
-        use crate::{CalibrationMasters, StackingMethod};
+        use crate::{CalibrationMasters, StackConfig};
 
         let mut light = AstroImage::from_pixels(
             ImageDimensions::new(2, 2, 3),
@@ -1199,7 +1199,7 @@ mod tests {
             master_flat: None,
             master_bias: Some(bias),
             hot_pixel_map: None,
-            method: StackingMethod::default(),
+            config: StackConfig::default(),
         };
 
         masters.calibrate(&mut light);
@@ -1213,7 +1213,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "don't match")]
     fn test_calibrate_rgb_with_grayscale_bias_panics() {
-        use crate::{CalibrationMasters, StackingMethod};
+        use crate::{CalibrationMasters, StackConfig};
 
         let mut light = AstroImage::from_pixels(ImageDimensions::new(2, 2, 3), vec![100.0; 12]);
         let bias = AstroImage::from_pixels(ImageDimensions::new(2, 2, 1), vec![5.0; 4]);
@@ -1223,7 +1223,7 @@ mod tests {
             master_flat: None,
             master_bias: Some(bias),
             hot_pixel_map: None,
-            method: StackingMethod::default(),
+            config: StackConfig::default(),
         };
 
         masters.calibrate(&mut light);
@@ -1232,7 +1232,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "don't match")]
     fn test_calibrate_grayscale_with_rgb_dark_panics() {
-        use crate::{CalibrationMasters, StackingMethod};
+        use crate::{CalibrationMasters, StackConfig};
 
         let mut light = AstroImage::from_pixels(ImageDimensions::new(2, 2, 1), vec![100.0; 4]);
         let dark = AstroImage::from_pixels(ImageDimensions::new(2, 2, 3), vec![10.0; 12]);
@@ -1242,7 +1242,7 @@ mod tests {
             master_flat: None,
             master_bias: None,
             hot_pixel_map: None,
-            method: StackingMethod::default(),
+            config: StackConfig::default(),
         };
 
         masters.calibrate(&mut light);

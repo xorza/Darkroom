@@ -112,17 +112,19 @@ pub use registration::{
 pub use stacking::{
     // Configuration
     CacheConfig,
+    CombineMethod,
+    FrameQuality,
     FrameType,
-    // Main API
-    ImageStack,
-    MedianConfig,
+    Normalization,
     // Progress reporting
     ProgressCallback,
-    SigmaClipConfig,
-    SigmaClippedConfig,
-    StackingMethod,
+    Rejection,
+    StackConfig,
     StackingProgress,
     StackingStage,
+    // Main API
+    stack,
+    stack_with_progress,
 };
 
 // ============================================================================

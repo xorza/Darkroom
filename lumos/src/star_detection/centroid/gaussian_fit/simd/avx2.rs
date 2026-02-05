@@ -3,7 +3,6 @@
 //! Uses fully vectorized exp() via fast polynomial approximation (Cephes-style),
 //! keeping all computation in SIMD registers without scalar round-trips.
 
-#![allow(dead_code)]
 #![allow(unsafe_op_in_unsafe_fn)]
 
 use std::arch::x86_64::*;

@@ -2,7 +2,6 @@
 //!
 //! Uses SSE to process 4 pixels in parallel. Falls back from AVX2 when not available.
 
-#![allow(dead_code)]
 #![allow(unsafe_op_in_unsafe_fn)]
 
 use std::arch::x86_64::*;

@@ -22,7 +22,6 @@
 //! - HST DrizzlePac Handbook (2025)
 
 // Allow dead code for now - this is a new module with public API
-#![allow(dead_code)]
 
 use std::path::Path;
 

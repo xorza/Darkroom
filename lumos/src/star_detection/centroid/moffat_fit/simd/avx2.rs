@@ -3,7 +3,6 @@
 //! Uses a hybrid approach: compute the expensive powf() calls with scalar code,
 //! then use SIMD for the remaining arithmetic (which is most of the work).
 
-#![allow(dead_code)]
 #![allow(unsafe_op_in_unsafe_fn)]
 
 use std::arch::x86_64::*;

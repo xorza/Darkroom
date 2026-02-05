@@ -30,8 +30,8 @@ pub use crate::{register, register_positions, warp};
 
 // Stacking - main API
 pub use crate::{
-    CacheConfig, FrameType, ImageStack, MedianConfig, ProgressCallback, SigmaClipConfig,
-    SigmaClippedConfig, StackingMethod, StackingProgress, StackingStage,
+    CacheConfig, CombineMethod, FrameQuality, FrameType, Normalization, ProgressCallback,
+    Rejection, StackConfig, StackingProgress, StackingStage, stack, stack_with_progress,
 };
 
 // Gradient removal

@@ -5,7 +5,6 @@
 //!
 //! This achieves ~0.01 pixel centroid accuracy compared to ~0.05 for weighted centroid.
 
-#![allow(dead_code)]
 
 #[cfg(test)]
 mod bench;
