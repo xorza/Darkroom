@@ -206,42 +206,48 @@ impl AstroImage {
     }
 
     /// Create from planar channel data ([R, G, B] or single channel).
-    pub fn from_planar_channels(dimensions: ImageDimensions, channels: Vec<Vec<f32>>) -> Self {
+    pub fn from_planar_channels(
+        dimensions: ImageDimensions,
+        channels: impl IntoIterator<Item = Vec<f32>>,
+    ) -> Self {
         let expected_pixels_per_channel = dimensions.width * dimensions.height;
-
-        assert_eq!(
-            channels.len(),
-            dimensions.channels,
-            "Channel count mismatch: expected {}, got {}",
-            dimensions.channels,
-            channels.len()
-        );
-
-        for (i, channel) in channels.iter().enumerate() {
-            assert_eq!(
-                channel.len(),
-                expected_pixels_per_channel,
-                "Channel {} pixel count mismatch: expected {}, got {}",
-                i,
-                expected_pixels_per_channel,
-                channel.len()
-            );
-        }
-
         let width = dimensions.width;
         let height = dimensions.height;
+
+        let mut iter = channels.into_iter();
         let pixel_data = if dimensions.is_grayscale() {
-            PixelData::L(Buffer2::new(
-                width,
-                height,
-                channels.into_iter().next().unwrap(),
-            ))
+            let ch = iter.next().expect("Expected 1 channel for grayscale");
+            assert_eq!(
+                ch.len(),
+                expected_pixels_per_channel,
+                "Channel 0 pixel count mismatch"
+            );
+            assert!(iter.next().is_none(), "Too many channels for grayscale");
+            PixelData::L(Buffer2::new(width, height, ch))
         } else {
-            let mut iter = channels.into_iter();
+            let r = iter.next().expect("Expected 3 channels for RGB");
+            let g = iter.next().expect("Expected 3 channels for RGB");
+            let b = iter.next().expect("Expected 3 channels for RGB");
+            assert_eq!(
+                r.len(),
+                expected_pixels_per_channel,
+                "R channel pixel count mismatch"
+            );
+            assert_eq!(
+                g.len(),
+                expected_pixels_per_channel,
+                "G channel pixel count mismatch"
+            );
+            assert_eq!(
+                b.len(),
+                expected_pixels_per_channel,
+                "B channel pixel count mismatch"
+            );
+            assert!(iter.next().is_none(), "Too many channels for RGB");
             PixelData::Rgb([
-                Buffer2::new(width, height, iter.next().unwrap()),
-                Buffer2::new(width, height, iter.next().unwrap()),
-                Buffer2::new(width, height, iter.next().unwrap()),
+                Buffer2::new(width, height, r),
+                Buffer2::new(width, height, g),
+                Buffer2::new(width, height, b),
             ])
         };
 
