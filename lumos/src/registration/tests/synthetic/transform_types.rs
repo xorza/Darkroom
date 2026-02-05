@@ -29,11 +29,10 @@ fn test_registration_translation_only() {
         transform_type: TransformType::Translation,
         min_stars: 6,
         min_matches: 4,
-        max_sigma: 0.67,
         ..Default::default()
     };
 
-    let result = register_positions(&ref_stars, &target_stars, &config)
+    let result = register_positions(&ref_stars, &target_stars, 0.67, &config)
         .expect("Registration should succeed");
 
     // Extract recovered translation
@@ -94,11 +93,10 @@ fn test_registration_similarity_transform() {
         transform_type: TransformType::Similarity,
         min_stars: 6,
         min_matches: 4,
-        max_sigma: 1.0,
         ..Default::default()
     };
 
-    let result = register_positions(&ref_stars, &target_stars, &config)
+    let result = register_positions(&ref_stars, &target_stars, 1.0, &config)
         .expect("Registration should succeed");
 
     // Validate by applying the recovered transform to reference stars
@@ -175,11 +173,11 @@ fn test_registration_with_noise() {
         transform_type: TransformType::Translation,
         min_stars: 6,
         min_matches: 4,
-        max_sigma: 1.0, // Allow more residual due to noise
         ..Default::default()
     };
 
-    let result = register_positions(&ref_stars, &target_stars, &config)
+    // Allow more residual due to noise
+    let result = register_positions(&ref_stars, &target_stars, 1.0, &config)
         .expect("Registration should succeed");
 
     // Extract recovered translation
@@ -227,11 +225,10 @@ fn test_registration_large_translation() {
         transform_type: TransformType::Translation,
         min_stars: 6,
         min_matches: 4,
-        max_sigma: 0.67,
         ..Default::default()
     };
 
-    let result = register_positions(&ref_stars, &target_stars, &config)
+    let result = register_positions(&ref_stars, &target_stars, 0.67, &config)
         .expect("Registration should succeed");
 
     let recovered = result.transform.translation_components();
@@ -263,7 +260,7 @@ fn test_registration_transform_display() {
         ..Default::default()
     };
 
-    let result = register_positions(&ref_stars, &target_stars, &config)
+    let result = register_positions(&ref_stars, &target_stars, 1.0, &config)
         .expect("Registration should succeed");
 
     // Test that Display works
@@ -302,11 +299,10 @@ fn test_registration_euclidean_rotation_only() {
         transform_type: TransformType::Euclidean,
         min_stars: 6,
         min_matches: 4,
-        max_sigma: 0.67,
         ..Default::default()
     };
 
-    let result = register_positions(&ref_stars, &target_stars, &config)
+    let result = register_positions(&ref_stars, &target_stars, 0.67, &config)
         .expect("Registration should succeed");
 
     assert_eq!(result.transform.transform_type, TransformType::Euclidean);
@@ -354,11 +350,10 @@ fn test_registration_euclidean_translation_and_rotation() {
         transform_type: TransformType::Euclidean,
         min_stars: 6,
         min_matches: 4,
-        max_sigma: 0.67,
         ..Default::default()
     };
 
-    let result = register_positions(&ref_stars, &target_stars, &config)
+    let result = register_positions(&ref_stars, &target_stars, 0.67, &config)
         .expect("Registration should succeed");
 
     assert_eq!(result.transform.transform_type, TransformType::Euclidean);
@@ -421,11 +416,10 @@ fn test_registration_affine_differential_scale() {
         transform_type: TransformType::Affine,
         min_stars: 6,
         min_matches: 4,
-        max_sigma: 1.0,
         ..Default::default()
     };
 
-    let result = register_positions(&ref_stars, &target_stars, &config)
+    let result = register_positions(&ref_stars, &target_stars, 1.0, &config)
         .expect("Registration should succeed");
 
     assert_eq!(result.transform.transform_type, TransformType::Affine);
@@ -469,11 +463,10 @@ fn test_registration_affine_with_shear() {
         transform_type: TransformType::Affine,
         min_stars: 6,
         min_matches: 4,
-        max_sigma: 1.0,
         ..Default::default()
     };
 
-    let result = register_positions(&ref_stars, &target_stars, &config)
+    let result = register_positions(&ref_stars, &target_stars, 1.0, &config)
         .expect("Registration should succeed");
 
     assert_eq!(result.transform.transform_type, TransformType::Affine);
@@ -522,11 +515,10 @@ fn test_registration_affine_rotation_and_differential_scale() {
         transform_type: TransformType::Affine,
         min_stars: 6,
         min_matches: 4,
-        max_sigma: 1.0,
         ..Default::default()
     };
 
-    let result = register_positions(&ref_stars, &target_stars, &config)
+    let result = register_positions(&ref_stars, &target_stars, 1.0, &config)
         .expect("Registration should succeed");
 
     assert_eq!(result.transform.transform_type, TransformType::Affine);
@@ -590,11 +582,10 @@ fn test_registration_homography_mild_perspective() {
         transform_type: TransformType::Homography,
         min_stars: 8,
         min_matches: 6,
-        max_sigma: 1.0,
         ..Default::default()
     };
 
-    let result = register_positions(&ref_stars, &target_stars, &config)
+    let result = register_positions(&ref_stars, &target_stars, 1.0, &config)
         .expect("Registration should succeed");
 
     assert_eq!(result.transform.transform_type, TransformType::Homography);
@@ -640,11 +631,10 @@ fn test_registration_homography_with_rotation() {
         transform_type: TransformType::Homography,
         min_stars: 8,
         min_matches: 6,
-        max_sigma: 1.0,
         ..Default::default()
     };
 
-    let result = register_positions(&ref_stars, &target_stars, &config)
+    let result = register_positions(&ref_stars, &target_stars, 1.0, &config)
         .expect("Registration should succeed");
 
     assert_eq!(result.transform.transform_type, TransformType::Homography);
@@ -706,11 +696,10 @@ fn test_similarity_recovers_from_euclidean_data() {
         transform_type: TransformType::Similarity,
         min_stars: 6,
         min_matches: 4,
-        max_sigma: 0.67,
         ..Default::default()
     };
 
-    let result = register_positions(&ref_stars, &target_stars, &config)
+    let result = register_positions(&ref_stars, &target_stars, 0.67, &config)
         .expect("Registration should succeed");
 
     // Scale should be recovered as ~1.0
@@ -750,11 +739,10 @@ fn test_affine_recovers_from_similarity_data() {
         transform_type: TransformType::Affine,
         min_stars: 6,
         min_matches: 4,
-        max_sigma: 0.67,
         ..Default::default()
     };
 
-    let result = register_positions(&ref_stars, &target_stars, &config)
+    let result = register_positions(&ref_stars, &target_stars, 0.67, &config)
         .expect("Registration should succeed");
 
     // Validate by applying transform

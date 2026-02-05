@@ -404,11 +404,11 @@ fn register_all_lights(
     let ref_image = AstroImage::from_file(ref_path).expect("Failed to load reference image");
 
     // Configure registration for high accuracy
+    // Note: max_sigma is auto-derived from star FWHM in register()
     let reg_config = RegistrationConfig {
         transform_type: TransformType::Homography, // Can model distortions that similarity cannot
         max_stars: MAX_STARS_FOR_REGISTRATION,
         min_matches: 20,         // Require more matched stars
-        max_sigma: 0.33,         // Stricter residual limit (~1px effective)
         ratio_tolerance: 0.005,  // Tighter triangle matching
         ransac_iterations: 5000, // More iterations for better model
         confidence: 0.9999,      // Higher confidence

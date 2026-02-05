@@ -462,11 +462,10 @@ fn test_warp_with_detected_transform() {
         transform_type: TransformType::Euclidean,
         min_stars: 6,
         min_matches: 4,
-        max_sigma: 1.0,
         ..Default::default()
     };
 
-    let result = register_positions(&ref_stars, &target_stars, &reg_config)
+    let result = register_positions(&ref_stars, &target_stars, 1.0, &reg_config)
         .expect("Registration should succeed");
 
     // Use warp to align target back to reference frame

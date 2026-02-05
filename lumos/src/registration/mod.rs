@@ -83,18 +83,20 @@ use triangle::{PointMatch, TriangleParams, match_triangles};
 ///
 /// Stars should be sorted by brightness (flux) in descending order for best results.
 ///
+/// The RANSAC `max_sigma` parameter is automatically derived from the median FWHM
+/// of the input stars, providing optimal noise tolerance for the seeing conditions.
+///
 /// # Example
 ///
 /// ```ignore
 /// use lumos::registration::{register, Config, TransformType};
 ///
-/// // With defaults
+/// // With defaults (max_sigma auto-derived from star FWHM)
 /// let result = register(&ref_stars, &target_stars, &Config::default())?;
 ///
 /// // With custom config
 /// let config = Config {
 ///     transform_type: TransformType::Similarity,
-///     max_sigma: 1.0, // ~3px effective threshold
 ///     ..Config::default()
 /// };
 /// let result = register(&ref_stars, &target_stars, &config)?;
@@ -107,20 +109,45 @@ pub fn register(
     target_stars: &[Star],
     config: &Config,
 ) -> Result<RegistrationResult, RegistrationError> {
+    // Derive max_sigma from median FWHM for optimal noise tolerance
+    let median_fwhm = median_fwhm(ref_stars, target_stars);
+    let max_sigma = (median_fwhm * 0.5).max(0.5);
+
     let ref_positions: Vec<DVec2> = ref_stars.iter().map(|s| s.pos).collect();
     let target_positions: Vec<DVec2> = target_stars.iter().map(|s| s.pos).collect();
-    register_positions(&ref_positions, &target_positions, config)
+
+    register_positions(&ref_positions, &target_positions, max_sigma, config)
+}
+
+/// Compute the median FWHM from two sets of stars.
+fn median_fwhm(ref_stars: &[Star], target_stars: &[Star]) -> f64 {
+    let mut fwhms: Vec<f32> = ref_stars
+        .iter()
+        .chain(target_stars.iter())
+        .map(|s| s.fwhm)
+        .collect();
+
+    fwhms.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    fwhms[fwhms.len() / 2] as f64
 }
 
 /// Register using raw position vectors instead of Star structs.
 ///
 /// Useful when you have pre-extracted positions or for testing.
 /// Positions should be sorted by brightness (brightest first) for best results.
+///
+/// # Parameters
+/// * `max_sigma` - RANSAC inlier threshold in sigma units. Effective threshold is ~3 * max_sigma pixels.
 pub fn register_positions(
     ref_positions: &[DVec2],
     target_positions: &[DVec2],
+    max_sigma: f64,
     config: &Config,
 ) -> Result<RegistrationResult, RegistrationError> {
+    assert!(
+        max_sigma > 0.0,
+        "max_sigma must be positive, got {max_sigma}"
+    );
     config.validate();
     let start = Instant::now();
 
@@ -169,6 +196,7 @@ pub fn register_positions(
             &target_stars,
             &matches,
             TransformType::Similarity,
+            max_sigma,
             config,
         );
 
@@ -181,6 +209,7 @@ pub fn register_positions(
                 &target_stars,
                 &matches,
                 TransformType::Homography,
+                max_sigma,
                 config,
             ),
         }
@@ -190,6 +219,7 @@ pub fn register_positions(
             &target_stars,
             &matches,
             config.transform_type,
+            max_sigma,
             config,
         )
     }?;
@@ -253,11 +283,12 @@ fn estimate_and_refine(
     target_stars: &[DVec2],
     matches: &[PointMatch],
     transform_type: TransformType,
+    max_sigma: f64,
     config: &Config,
 ) -> Result<RegistrationResult, RegistrationError> {
     let ransac_params = RansacParams {
         max_iterations: config.ransac_iterations,
-        max_sigma: config.max_sigma,
+        max_sigma,
         confidence: config.confidence,
         min_inlier_ratio: config.min_inlier_ratio,
         seed: config.seed,
@@ -283,7 +314,7 @@ fn estimate_and_refine(
         .collect();
 
     // Effective threshold for match recovery: ~3 * max_sigma (χ² quantile)
-    let effective_threshold = config.max_sigma * 3.03;
+    let effective_threshold = max_sigma * 3.03;
     let (transform, inlier_matches) = recover_matches(
         ref_stars,
         target_stars,
@@ -388,3 +419,71 @@ pub(crate) fn recover_matches(
 // === Internal Re-exports (for submodules) ===
 
 pub(crate) use ransac::RansacResult;
+
+#[cfg(test)]
+mod fwhm_tests {
+    use super::*;
+
+    fn make_star(fwhm: f32) -> Star {
+        Star {
+            pos: DVec2::ZERO,
+            flux: 1000.0,
+            fwhm,
+            eccentricity: 0.0,
+            snr: 100.0,
+            peak: 1.0,
+            sharpness: 0.5,
+            roundness1: 0.0,
+            roundness2: 0.0,
+            laplacian_snr: 50.0,
+        }
+    }
+
+    #[test]
+    fn test_median_fwhm_basic() {
+        let ref_stars = vec![make_star(2.0), make_star(3.0), make_star(4.0)];
+        let target_stars = vec![make_star(2.5), make_star(3.5)];
+        // Combined: [2.0, 2.5, 3.0, 3.5, 4.0] -> median = 3.0
+        let median = median_fwhm(&ref_stars, &target_stars);
+        assert!((median - 3.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_median_fwhm_single_set() {
+        let ref_stars = vec![make_star(1.5), make_star(2.5), make_star(3.5)];
+        let target_stars = vec![];
+        // Combined: [1.5, 2.5, 3.5] -> median = 2.5
+        let median = median_fwhm(&ref_stars, &target_stars);
+        assert!((median - 2.5).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_max_sigma_from_fwhm() {
+        // FWHM = 3.0 -> max_sigma = 3.0 * 0.5 = 1.5
+        let fwhm: f64 = 3.0;
+        let max_sigma = (fwhm * 0.5).max(0.5);
+        assert!((max_sigma - 1.5).abs() < 0.01);
+
+        // FWHM = 0.8 -> max_sigma = max(0.4, 0.5) = 0.5 (floor)
+        let fwhm: f64 = 0.8;
+        let max_sigma = (fwhm * 0.5).max(0.5);
+        assert!((max_sigma - 0.5).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_max_sigma_typical_seeing() {
+        // Typical ground seeing: FWHM = 2.0-4.0 pixels
+        // FWHM = 2.0 -> max_sigma = 1.0 (~3px effective threshold)
+        // FWHM = 4.0 -> max_sigma = 2.0 (~6px effective threshold)
+        let ref_stars = vec![make_star(2.0), make_star(2.5), make_star(3.0)];
+        let target_stars = vec![make_star(2.2), make_star(2.8)];
+
+        let median = median_fwhm(&ref_stars, &target_stars);
+        let max_sigma = (median * 0.5).max(0.5);
+
+        // Median of [2.0, 2.2, 2.5, 2.8, 3.0] = 2.5
+        // max_sigma = 2.5 * 0.5 = 1.25
+        assert!((median - 2.5).abs() < 0.01);
+        assert!((max_sigma - 1.25).abs() < 0.01);
+    }
+}

@@ -485,21 +485,11 @@ pub struct SipConfig {
 
 #### 3. FWHM-Aware Sigma Selection
 
-**Problem:** Optimal `max_sigma` depends on star FWHM/seeing, but users must manually adjust it.
+~~**Problem:** Optimal `max_sigma` depends on star FWHM/seeing, but users must manually adjust it.~~
 
-**Solution:** Auto-scale max_sigma based on detected star FWHM:
+**IMPLEMENTED:** The `register()` function automatically derives `max_sigma` from the median FWHM of input stars. Formula: `max_sigma = median_fwhm * 0.5` (floor at 0.5px). This provides optimal noise tolerance for the seeing conditions without manual tuning.
 
-```rust
-pub fn from_fwhm(fwhm_pixels: f64) -> Self {
-    let max_sigma = (fwhm_pixels * 0.5).max(0.5);  // ~0.5 × FWHM
-    Self {
-        max_sigma,
-        ..Self::default()
-    }
-}
-```
-
-**Effort:** ~20 lines in `register_positions()`. **Benefit:** 10-20% improvement in varying seeing conditions without manual tuning.
+For `register_positions()`, the `max_sigma` parameter must be provided explicitly since it only receives positions without FWHM data.
 
 #### 4. SIP Fit Quality Diagnostics
 
