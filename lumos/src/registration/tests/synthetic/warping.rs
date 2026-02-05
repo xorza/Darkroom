@@ -478,13 +478,13 @@ fn test_warp_with_detected_transform() {
         interpolation: InterpolationMethod::Lanczos3,
         ..Default::default()
     };
-    let aligned = warp(&target_astro, &result.transform, &warp_config);
+    let target_astro = warp(target_astro, &result.transform, &warp_config);
 
     // Compare aligned image to reference
     let margin = 40;
     let (central_ref, central_aligned) = extract_central_region(
         ref_pixels.pixels(),
-        aligned.channel(0),
+        target_astro.channel(0),
         width,
         height,
         margin,
@@ -589,12 +589,12 @@ fn test_warp_grayscale() {
         interpolation: InterpolationMethod::Lanczos3,
         ..Default::default()
     };
-    let warped_image = warp(&ref_image, &transform, &warp_config);
+    let warped = warp(ref_image, &transform, &warp_config);
 
     // Verify dimensions and basic properties
-    assert_eq!(warped_image.width(), width);
-    assert_eq!(warped_image.height(), height);
-    assert_eq!(warped_image.channels(), 1);
+    assert_eq!(warped.width(), width);
+    assert_eq!(warped.height(), height);
+    assert_eq!(warped.channels(), 1);
 }
 
 #[test]
@@ -627,7 +627,7 @@ fn test_warp_rgb() {
         interpolation: InterpolationMethod::Lanczos3,
         ..Default::default()
     };
-    let warped = warp(&rgb_image, &transform, &warp_config);
+    let warped = warp(rgb_image, &transform, &warp_config);
 
     // Verify dimensions preserved
     assert_eq!(warped.width(), width);
@@ -668,7 +668,7 @@ fn test_warp_preserves_metadata() {
         interpolation: InterpolationMethod::Bilinear,
         ..Default::default()
     };
-    let warped = warp(&image, &transform, &warp_config);
+    let warped = warp(image, &transform, &warp_config);
 
     // Verify metadata is preserved
     assert_eq!(warped.metadata.object, Some("M42".to_string()));

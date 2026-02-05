@@ -12,8 +12,8 @@
 //! let result = register(&ref_stars, &target_stars, &Config::default())?;
 //! println!("Matched {} stars, RMS = {:.2}px", result.num_inliers, result.rms_error);
 //!
-//! // Warp target image to align with reference
-//! let aligned = warp(&target_image, &result.transform, &Config::default());
+//! // Warp target image in place to align with reference
+//! let aligned = warp(target_image, &result.transform, &Config::default());
 //! ```
 //!
 //! # Transformation Models
@@ -208,9 +208,9 @@ pub fn register_positions(
     Ok(result)
 }
 
-/// Warp an image to align with the reference frame.
+/// Warp an image to align with the reference frame, returning a new image.
 ///
-/// Takes a target image and applies the inverse transformation so it aligns
+/// Applies the inverse transformation so the image aligns
 /// pixel-for-pixel with the reference image.
 ///
 /// # Example
@@ -219,37 +219,26 @@ pub fn register_positions(
 /// use lumos::registration::{register, warp, Config};
 ///
 /// let result = register(&ref_stars, &target_stars, &Config::default())?;
-/// let aligned = warp(&target_image, &result.transform, &Config::default());
+/// let aligned = warp(target_image, &result.transform, &Config::default());
 /// ```
-pub fn warp(image: &AstroImage, transform: &Transform, config: &Config) -> AstroImage {
-    let width = image.width();
-    let height = image.height();
-    let channels = image.channels();
+pub fn warp(image: AstroImage, transform: &Transform, config: &Config) -> AstroImage {
     let method = config.interpolation;
     let inverse = transform.inverse();
 
-    let warped_channels: Vec<Buffer2<f32>> = (0..channels)
-        .into_par_iter()
-        .map(|c| {
-            let channel_data = image.channel(c);
-            let channel = Buffer2::new(width, height, channel_data.to_vec());
-            let mut output = Buffer2::new(width, height, vec![0.0; width * height]);
-            warp_image(&channel, &mut output, &inverse, method);
+    let (metadata, dimensions, buffers) = image.into_channel_buffers();
+    let pixel_count = dimensions.width * dimensions.height;
+
+    let warped_buffers = buffers
+        .into_iter()
+        .map(|input| {
+            let mut output =
+                Buffer2::new(dimensions.width, dimensions.height, vec![0.0; pixel_count]);
+            warp_image(&input, &mut output, &inverse, method);
             output
         })
         .collect();
 
-    let mut warped_pixels = vec![0.0f32; width * height * channels];
-    for (c, channel_data) in warped_channels.iter().enumerate() {
-        for (i, &val) in channel_data.iter().enumerate() {
-            warped_pixels[i * channels + c] = val;
-        }
-    }
-
-    let mut result =
-        AstroImage::from_pixels(ImageDimensions::new(width, height, channels), warped_pixels);
-    result.metadata = image.metadata.clone();
-    result
+    AstroImage::from_channel_buffers(metadata, dimensions, warped_buffers)
 }
 
 // === Internal Functions ===

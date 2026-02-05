@@ -83,7 +83,7 @@ fn main() {
         interpolation: InterpolationMethod::Lanczos3,
         ..Default::default()
     };
-    let aligned = warp(&target_image, &result.transform, &warp_config);
+    let aligned = warp(target_image, &result.transform, &warp_config);
 
     // Save result
     println!("Saving aligned image to: {}", output_path.display());

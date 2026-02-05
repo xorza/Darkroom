@@ -7,6 +7,7 @@ mod sensor;
 pub use hot_pixels::HotPixelMap;
 
 use anyhow::Result;
+use arrayvec::ArrayVec;
 use imaginarium::{ChannelCount, ColorFormat, Image, ImageDesc};
 use std::path::Path;
 
@@ -701,6 +702,87 @@ impl AstroImage {
     /// without any conversion.
     pub fn into_pixels(self) -> PixelData {
         self.pixels
+    }
+
+    /// Deconstruct the image into channel buffers.
+    ///
+    /// Returns metadata, dimensions, and an ArrayVec containing 1 buffer for grayscale
+    /// or 3 buffers for RGB. This is useful for operations that need to process channels
+    /// independently while reusing the buffer memory.
+    pub fn into_channel_buffers(
+        self,
+    ) -> (
+        AstroImageMetadata,
+        ImageDimensions,
+        ArrayVec<Buffer2<f32>, 3>,
+    ) {
+        let width = self.dimensions.width;
+        let height = self.dimensions.height;
+        let mut buffers = ArrayVec::new();
+
+        match self.pixels {
+            PixelData::L(data) => {
+                buffers.push(Buffer2::new(width, height, data));
+            }
+            PixelData::Rgb([r, g, b]) => {
+                buffers.push(Buffer2::new(width, height, r));
+                buffers.push(Buffer2::new(width, height, g));
+                buffers.push(Buffer2::new(width, height, b));
+            }
+        }
+
+        (self.metadata, self.dimensions, buffers)
+    }
+
+    /// Reconstruct an AstroImage from channel buffers.
+    ///
+    /// Takes ownership of the buffer data to avoid copies.
+    /// For grayscale, expects 1 buffer. For RGB, expects 3 buffers.
+    ///
+    /// # Panics
+    /// Panics if buffer count doesn't match dimensions or buffer sizes are wrong.
+    pub fn from_channel_buffers(
+        metadata: AstroImageMetadata,
+        dimensions: ImageDimensions,
+        buffers: ArrayVec<Buffer2<f32>, 3>,
+    ) -> Self {
+        let expected_pixels = dimensions.width * dimensions.height;
+
+        assert_eq!(
+            buffers.len(),
+            dimensions.channels,
+            "Buffer count {} doesn't match channel count {}",
+            buffers.len(),
+            dimensions.channels
+        );
+
+        for (i, buf) in buffers.iter().enumerate() {
+            assert_eq!(
+                buf.len(),
+                expected_pixels,
+                "Buffer {} has {} pixels, expected {}",
+                i,
+                buf.len(),
+                expected_pixels
+            );
+        }
+
+        let pixels = if dimensions.is_grayscale() {
+            let mut iter = buffers.into_iter();
+            PixelData::L(iter.next().unwrap().into_vec())
+        } else {
+            let mut iter = buffers.into_iter();
+            let r = iter.next().unwrap().into_vec();
+            let g = iter.next().unwrap().into_vec();
+            let b = iter.next().unwrap().into_vec();
+            PixelData::Rgb([r, g, b])
+        };
+
+        AstroImage {
+            metadata,
+            dimensions,
+            pixels,
+        }
     }
 }
 

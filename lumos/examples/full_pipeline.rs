@@ -464,7 +464,7 @@ fn register_all_lights(
                 tracing::info!("Transform: {}", result.transform);
 
                 // Warp the image to align with reference
-                let warped = lumos::warp(&target_image, &result.transform, &reg_config);
+                let warped = lumos::warp(target_image, &result.transform, &reg_config);
 
                 // Save registered image
                 let img: imaginarium::Image = warped.into();
