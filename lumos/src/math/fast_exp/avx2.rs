@@ -8,20 +8,6 @@ use super::{
     EXP_C1, EXP_C2, EXP_C3, EXP_C4, EXP_C5, EXP_C6, EXP_HI, EXP_LO, LN2_HI, LN2_LO, LOG2E,
 };
 
-/// Compute exp(x) for 8 f32 values using AVX2+FMA.
-///
-/// Maximum relative error < 2 ULP (~2.4e-7).
-/// Processes all 8 values entirely in SIMD registers.
-#[inline]
-#[target_feature(enable = "avx2", enable = "fma")]
-pub unsafe fn fast_exp_8_avx2(x: &[f32; 8]) -> [f32; 8] {
-    let vx = _mm256_loadu_ps(x.as_ptr());
-    let result = fast_exp_8_avx2_m256(vx);
-    let mut out = [0.0f32; 8];
-    _mm256_storeu_ps(out.as_mut_ptr(), result);
-    out
-}
-
 /// Compute exp(x) for an __m256 register using AVX2+FMA.
 #[inline]
 #[target_feature(enable = "avx2", enable = "fma")]

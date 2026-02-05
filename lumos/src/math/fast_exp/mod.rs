@@ -19,9 +19,6 @@ use common::{cfg_aarch64, cfg_x86_64};
 cfg_x86_64! {
     pub(crate) mod avx2;
     pub(crate) mod sse;
-
-    pub use avx2::fast_exp_8_avx2;
-    pub use sse::fast_exp_4_sse;
 }
 
 cfg_aarch64! {

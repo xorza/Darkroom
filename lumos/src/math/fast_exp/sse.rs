@@ -8,20 +8,6 @@ use super::{
     EXP_C1, EXP_C2, EXP_C3, EXP_C4, EXP_C5, EXP_C6, EXP_HI, EXP_LO, LN2_HI, LN2_LO, LOG2E,
 };
 
-/// Compute exp(x) for 4 f32 values using SSE4.1.
-///
-/// Maximum relative error < 2 ULP (~2.4e-7).
-/// Processes all 4 values entirely in SIMD registers.
-#[inline]
-#[target_feature(enable = "sse4.1")]
-pub unsafe fn fast_exp_4_sse(x: &[f32; 4]) -> [f32; 4] {
-    let vx = _mm_loadu_ps(x.as_ptr());
-    let result = fast_exp_4_sse_m128(vx);
-    let mut out = [0.0f32; 4];
-    _mm_storeu_ps(out.as_mut_ptr(), result);
-    out
-}
-
 /// Compute exp(x) for an __m128 register using SSE4.1.
 #[inline]
 #[target_feature(enable = "sse4.1")]
