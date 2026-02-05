@@ -28,9 +28,6 @@ Production-grade astronomical image alignment: star matching, robust transformat
 Star Positions (sorted by brightness)
   |
   v
-[Spatial Distribution Selection] -- optional, grid-based star picking
-  |
-  v
 Triangle Formation (k-d tree neighbors)
   |
   v
@@ -109,10 +106,6 @@ This is based on Chum and Matas (2005) "Matching with PROSAC" which demonstrated
 #### Why LO-RANSAC
 
 Standard RANSAC assumes that a model estimated from an outlier-free minimal sample is consistent with all inliers. This rarely holds in practice due to noise. LO-RANSAC (Chum, Matas, Kittler 2003) adds a local optimization step: when a promising hypothesis is found, iteratively re-estimate the model using all current inliers. This typically improves inlier count by 10-20% and speeds up convergence by 2-3x because better models enable earlier adaptive termination.
-
-#### Why Spatial Distribution Selection
-
-Taking the brightest N stars can cluster them in one image region (e.g., a bright nebula or galaxy core). For wide-field images with distortion, edge stars are critical for accurate modeling. Our grid-based selection divides the image into cells and picks the brightest star from each cell in round-robin fashion, ensuring coverage across the field. This is similar to what PixInsight calls "uniform distribution" and what the academic literature calls "optimal spatial distribution of tie points."
 
 ---
 
@@ -384,8 +377,6 @@ registration/
 | `min_stars_for_matching` | 10 | Minimum stars required to attempt registration |
 | `min_matched_stars` | 8 | Minimum matches after triangle matching |
 | `max_residual_pixels` | 2.0 | Maximum acceptable RMS error |
-| `use_spatial_distribution` | true | Grid-based star selection for field coverage |
-| `spatial_grid_size` | 8 | NxN grid for spatial distribution |
 
 ### TriangleMatchConfig
 

@@ -73,33 +73,17 @@ impl Registrator {
             });
         }
 
-        // Select stars for matching
-        let ref_stars = if self.config.use_spatial_grid {
-            select_spatially_distributed(
-                ref_positions,
-                self.config.max_stars,
-                self.config.spatial_grid_size,
-            )
-        } else {
-            ref_positions
-                .iter()
-                .take(self.config.max_stars)
-                .copied()
-                .collect()
-        };
-        let target_stars = if self.config.use_spatial_grid {
-            select_spatially_distributed(
-                target_positions,
-                self.config.max_stars,
-                self.config.spatial_grid_size,
-            )
-        } else {
-            target_positions
-                .iter()
-                .take(self.config.max_stars)
-                .copied()
-                .collect()
-        };
+        // Select stars for matching (take brightest N)
+        let ref_stars: Vec<DVec2> = ref_positions
+            .iter()
+            .take(self.config.max_stars)
+            .copied()
+            .collect();
+        let target_stars: Vec<DVec2> = target_positions
+            .iter()
+            .take(self.config.max_stars)
+            .copied()
+            .collect();
 
         // Triangle matching
         let triangle_params = TriangleParams {
@@ -270,63 +254,6 @@ pub fn warp_to_reference_image(
     );
     result.metadata = target.metadata.clone();
     result
-}
-
-fn select_spatially_distributed(stars: &[DVec2], max_stars: usize, grid_size: usize) -> Vec<DVec2> {
-    if stars.is_empty() || max_stars == 0 {
-        return Vec::new();
-    }
-
-    let (min_x, max_x, min_y, max_y) = stars.iter().fold(
-        (f64::MAX, f64::MIN, f64::MAX, f64::MIN),
-        |(min_x, max_x, min_y, max_y), p| {
-            (
-                min_x.min(p.x),
-                max_x.max(p.x),
-                min_y.min(p.y),
-                max_y.max(p.y),
-            )
-        },
-    );
-
-    let margin = 1.0;
-    let width = (max_x - min_x + 2.0 * margin).max(1.0);
-    let height = (max_y - min_y + 2.0 * margin).max(1.0);
-    let origin_x = min_x - margin;
-    let origin_y = min_y - margin;
-
-    let cell_width = width / grid_size as f64;
-    let cell_height = height / grid_size as f64;
-
-    let num_cells = grid_size * grid_size;
-    let mut cells: Vec<Vec<DVec2>> = vec![Vec::new(); num_cells];
-
-    for &p in stars {
-        let cx = ((p.x - origin_x) / cell_width) as usize;
-        let cy = ((p.y - origin_y) / cell_height) as usize;
-        let cx = cx.min(grid_size - 1);
-        let cy = cy.min(grid_size - 1);
-        cells[cy * grid_size + cx].push(p);
-    }
-
-    let mut selected = Vec::with_capacity(max_stars);
-    let mut round = 0;
-
-    while selected.len() < max_stars {
-        let mut added_any = false;
-        for cell in &cells {
-            if round < cell.len() && selected.len() < max_stars {
-                selected.push(cell[round]);
-                added_any = true;
-            }
-        }
-        if !added_any {
-            break;
-        }
-        round += 1;
-    }
-
-    selected
 }
 
 fn recover_matches(

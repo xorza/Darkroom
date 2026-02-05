@@ -80,12 +80,6 @@ pub struct Config {
     /// Check orientation (false allows mirrored images). Default: true.
     pub check_orientation: bool,
 
-    // == Spatial distribution ==
-    /// Use spatial grid for star selection. Default: true.
-    pub use_spatial_grid: bool,
-    /// Grid size (NxN cells). Default: 8.
-    pub spatial_grid_size: usize,
-
     // == RANSAC ==
     /// RANSAC iterations. Default: 2000.
     pub ransac_iterations: usize,
@@ -140,10 +134,6 @@ impl Default for Config {
             ratio_tolerance: 0.01,
             min_votes: 3,
             check_orientation: true,
-
-            // Spatial distribution
-            use_spatial_grid: true,
-            spatial_grid_size: 8,
 
             // RANSAC
             ransac_iterations: 2000,
@@ -211,7 +201,6 @@ impl Config {
         Self {
             max_rotation: None,
             scale_range: Some((0.5, 2.0)),
-            use_spatial_grid: true,
             ..Self::default()
         }
     }
@@ -250,13 +239,6 @@ impl Config {
             self.min_votes >= 1,
             "min_votes must be at least 1, got {}",
             self.min_votes
-        );
-
-        // Spatial distribution
-        assert!(
-            self.spatial_grid_size >= 2,
-            "spatial_grid_size must be at least 2, got {}",
-            self.spatial_grid_size
         );
 
         // RANSAC
@@ -328,8 +310,6 @@ mod tests {
         assert!((config.ratio_tolerance - 0.01).abs() < 1e-10);
         assert_eq!(config.min_votes, 3);
         assert!(config.check_orientation);
-        assert!(config.use_spatial_grid);
-        assert_eq!(config.spatial_grid_size, 8);
         assert_eq!(config.ransac_iterations, 2000);
         assert!((config.inlier_threshold - 2.0).abs() < 1e-10);
         assert!((config.confidence - 0.995).abs() < 1e-10);
@@ -386,7 +366,6 @@ mod tests {
         let config = Config::mosaic();
         assert!(config.max_rotation.is_none());
         assert_eq!(config.scale_range, Some((0.5, 2.0)));
-        assert!(config.use_spatial_grid);
         config.validate();
     }
 
