@@ -11,6 +11,9 @@ mod bench;
 #[cfg(test)]
 mod tests;
 
+#[cfg(target_arch = "x86_64")]
+mod simd_avx2;
+
 use super::lm_optimizer::{LMConfig, LMModel, LMResult, optimize};
 use super::{estimate_sigma_from_moments, extract_stamp};
 use crate::common::Buffer2;
@@ -106,6 +109,68 @@ impl LMModel<6> for Gaussian2D {
         params[2] = params[2].max(0.01); // Amplitude > 0
         params[3] = params[3].clamp(0.5, self.stamp_radius); // Sigma_x
         params[4] = params[4].clamp(0.5, self.stamp_radius); // Sigma_y
+    }
+
+    #[allow(clippy::needless_range_loop)]
+    fn batch_build_normal_equations(
+        &self,
+        data_x: &[f64],
+        data_y: &[f64],
+        data_z: &[f64],
+        params: &[f64; 6],
+    ) -> ([[f64; 6]; 6], [f64; 6], f64) {
+        #[cfg(target_arch = "x86_64")]
+        if common::cpu_features::has_avx2_fma() {
+            return unsafe {
+                simd_avx2::batch_build_normal_equations_avx2(self, data_x, data_y, data_z, params)
+            };
+        }
+        // Scalar fallback
+        let mut hessian = [[0.0f64; 6]; 6];
+        let mut gradient = [0.0f64; 6];
+        let mut chi2 = 0.0f64;
+        for ((&x, &y), &z) in data_x.iter().zip(data_y.iter()).zip(data_z.iter()) {
+            let (model_val, row) = self.evaluate_and_jacobian(x, y, params);
+            let r = z - model_val;
+            chi2 += r * r;
+            for i in 0..6 {
+                gradient[i] += row[i] * r;
+                for j in i..6 {
+                    hessian[i][j] += row[i] * row[j];
+                }
+            }
+        }
+        for i in 1..6 {
+            for j in 0..i {
+                hessian[i][j] = hessian[j][i];
+            }
+        }
+        (hessian, gradient, chi2)
+    }
+
+    fn batch_compute_chi2(
+        &self,
+        data_x: &[f64],
+        data_y: &[f64],
+        data_z: &[f64],
+        params: &[f64; 6],
+    ) -> f64 {
+        #[cfg(target_arch = "x86_64")]
+        if common::cpu_features::has_avx2_fma() {
+            return unsafe {
+                simd_avx2::batch_compute_chi2_avx2(self, data_x, data_y, data_z, params)
+            };
+        }
+        // Scalar fallback
+        data_x
+            .iter()
+            .zip(data_y.iter())
+            .zip(data_z.iter())
+            .map(|((&x, &y), &z)| {
+                let residual = z - self.evaluate(x, y, params);
+                residual * residual
+            })
+            .sum()
     }
 }
 

@@ -27,7 +27,7 @@ fn make_gaussian_stamp(width: usize, height: usize, cx: f32, cy: f32) -> Buffer2
     Buffer2::new(width, height, pixels)
 }
 
-#[quick_bench(warmup_iters = 10, iters = 2000)]
+#[quick_bench(warmup_iters = 100, iters = 10000)]
 fn bench_gaussian_fit_small(b: bench::Bencher) {
     // 17x17 stamp
     let pixels = make_gaussian_stamp(17, 17, 8.3, 8.7);
@@ -44,7 +44,7 @@ fn bench_gaussian_fit_small(b: bench::Bencher) {
     });
 }
 
-#[quick_bench(warmup_iters = 10, iters = 2000)]
+#[quick_bench(warmup_iters = 100, iters = 10000)]
 fn bench_gaussian_fit_medium(b: bench::Bencher) {
     // 25x25 stamp
     let pixels = make_gaussian_stamp(25, 25, 12.3, 12.7);
@@ -61,7 +61,7 @@ fn bench_gaussian_fit_medium(b: bench::Bencher) {
     });
 }
 
-#[quick_bench(warmup_iters = 10, iters = 2000)]
+#[quick_bench(warmup_iters = 100, iters = 10000)]
 fn bench_gaussian_fit_large(b: bench::Bencher) {
     // 31x31 stamp
     let pixels = make_gaussian_stamp(31, 31, 15.3, 15.7);

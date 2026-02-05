@@ -73,7 +73,7 @@ CFA Patterns: RGGB, BGGR, GRBG, GBRG
 | `candidate_detection/` | Threshold mask + connected component labeling |
 | `threshold_mask/` | Bit-packed threshold mask creation (SIMD) |
 | `mask_dilation/` | Separable morphological dilation |
-| `centroid/` | WeightedMoments, GaussianFit, MoffatFit algorithms (SIMD) |
+| `centroid/` | WeightedMoments, GaussianFit (AVX2 SIMD), MoffatFit (AVX2 SIMD) |
 | `convolution/` | Separable + elliptical Gaussian convolution (SIMD) |
 | `deblend/` | Local maxima + SExtractor-style multi-threshold deblending |
 | `cosmic_ray/` | L.A.Cosmic Laplacian-based cosmic ray detection (SIMD) |
