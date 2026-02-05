@@ -700,3 +700,181 @@ fn test_fwhm_decreases_with_beta() {
     assert!(fwhm_high_beta < fwhm_mid_beta);
     assert!(fwhm_mid_beta < fwhm_low_beta);
 }
+
+// ============================================================================
+// PowStrategy and fast_pow_neg tests
+// ============================================================================
+
+#[test]
+fn test_select_pow_strategy_integers() {
+    for beta in [1.0, 2.0, 3.0, 4.0, 5.0] {
+        let strategy = select_pow_strategy(beta);
+        assert!(
+            matches!(strategy, PowStrategy::Int { .. }),
+            "beta={beta} should select Int strategy, got {strategy:?}"
+        );
+    }
+}
+
+#[test]
+fn test_select_pow_strategy_half_integers() {
+    for beta in [1.5, 2.5, 3.5, 4.5, 5.5] {
+        let strategy = select_pow_strategy(beta);
+        assert!(
+            matches!(strategy, PowStrategy::HalfInt { .. }),
+            "beta={beta} should select HalfInt strategy, got {strategy:?}"
+        );
+    }
+}
+
+#[test]
+fn test_select_pow_strategy_general() {
+    for beta in [2.3, 3.7, 1.1, std::f64::consts::PI] {
+        let strategy = select_pow_strategy(beta);
+        assert!(
+            matches!(strategy, PowStrategy::General { .. }),
+            "beta={beta} should select General strategy, got {strategy:?}"
+        );
+    }
+}
+
+#[test]
+fn test_fast_pow_neg_accuracy_half_integers() {
+    let u_values = [1.01, 1.1, 1.5, 2.0, 5.0, 10.0, 100.0];
+    let betas = [1.5, 2.5, 3.5, 4.5, 5.5];
+
+    for &beta in &betas {
+        let strategy = select_pow_strategy(beta);
+        for &u in &u_values {
+            let fast = fast_pow_neg(u, strategy);
+            let reference = u.powf(-beta);
+            let rel_err = ((fast - reference) / reference).abs();
+            assert!(
+                rel_err < 1e-14,
+                "fast_pow_neg(u={u}, beta={beta}) = {fast}, expected {reference}, rel_err={rel_err}"
+            );
+        }
+    }
+}
+
+#[test]
+fn test_fast_pow_neg_accuracy_integers() {
+    let u_values = [1.01, 1.1, 2.0, 5.0, 10.0];
+    let betas = [1.0, 2.0, 3.0, 4.0, 5.0];
+
+    for &beta in &betas {
+        let strategy = select_pow_strategy(beta);
+        for &u in &u_values {
+            let fast = fast_pow_neg(u, strategy);
+            let reference = u.powf(-beta);
+            let rel_err = ((fast - reference) / reference).abs();
+            assert!(
+                rel_err < 1e-14,
+                "fast_pow_neg(u={u}, beta={beta}) = {fast}, expected {reference}, rel_err={rel_err}"
+            );
+        }
+    }
+}
+
+#[test]
+fn test_fast_pow_neg_general_fallback() {
+    let beta = 2.3;
+    let strategy = select_pow_strategy(beta);
+    let u = 3.0;
+    let fast = fast_pow_neg(u, strategy);
+    let reference = u.powf(-beta);
+    assert!(
+        (fast - reference).abs() < 1e-15,
+        "General fallback should be identical to powf"
+    );
+}
+
+#[test]
+fn test_int_pow_correctness() {
+    let u = 2.5;
+    assert!((int_pow(u, 0) - 1.0).abs() < 1e-15);
+    assert!((int_pow(u, 1) - u).abs() < 1e-15);
+    assert!((int_pow(u, 2) - u * u).abs() < 1e-15);
+    assert!((int_pow(u, 3) - u * u * u).abs() < 1e-14);
+    assert!((int_pow(u, 4) - u.powi(4)).abs() < 1e-13);
+    assert!((int_pow(u, 5) - u.powi(5)).abs() < 1e-12);
+    assert!((int_pow(u, 6) - u.powi(6)).abs() < 1e-11);
+    assert!((int_pow(u, 10) - u.powi(10)).abs() < 1e-6);
+}
+
+// ============================================================================
+// evaluate_and_jacobian fused method tests
+// ============================================================================
+
+#[test]
+fn test_moffat_fixed_beta_evaluate_and_jacobian_consistency() {
+    let params_list: &[[f64; 5]] = &[
+        [10.0, 10.0, 1000.0, 2.0, 100.0],
+        [5.5, 7.3, 500.0, 3.0, 50.0],
+        [0.0, 0.0, 1.0, 1.0, 0.0],
+    ];
+    let points = [(8.0, 9.0), (10.0, 10.0), (12.0, 11.0), (5.0, 7.0)];
+
+    for beta in [2.0, 2.5, 3.0, 3.5, 4.5] {
+        let model = MoffatFixedBeta::new(15.0, beta);
+        for params in params_list {
+            for &(x, y) in &points {
+                let eval = model.evaluate(x, y, params);
+                let jac = model.jacobian_row(x, y, params);
+                let (fused_eval, fused_jac) = model.evaluate_and_jacobian(x, y, params);
+
+                assert!(
+                    (eval - fused_eval).abs() < 1e-15,
+                    "evaluate mismatch: beta={beta}, eval={eval}, fused={fused_eval}"
+                );
+                for i in 0..5 {
+                    assert!(
+                        (jac[i] - fused_jac[i]).abs() < 1e-14,
+                        "jacobian[{i}] mismatch: beta={beta}, jac={}, fused={}",
+                        jac[i],
+                        fused_jac[i]
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn test_moffat_variable_beta_evaluate_and_jacobian_consistency() {
+    let model = MoffatVariableBeta { stamp_radius: 15.0 };
+    let params_list: &[[f64; 6]] = &[
+        [10.0, 10.0, 1000.0, 2.0, 2.5, 100.0],
+        [5.5, 7.3, 500.0, 3.0, 3.5, 50.0],
+        [0.0, 0.0, 1.0, 1.0, 4.0, 0.0],
+    ];
+    let points = [(8.0, 9.0), (10.0, 10.0), (12.0, 11.0)];
+
+    for params in params_list {
+        for &(x, y) in &points {
+            // Note: evaluate uses u.powf(-beta), while evaluate_and_jacobian uses
+            // (-beta * ln(u)).exp(). These are mathematically equivalent but differ
+            // by ~1e-14 in floating point. Use relative tolerance.
+            let eval = model.evaluate(x, y, params);
+            let jac = model.jacobian_row(x, y, params);
+            let (fused_eval, fused_jac) = model.evaluate_and_jacobian(x, y, params);
+
+            let eval_tol = eval.abs().max(1e-15) * 1e-12;
+            assert!(
+                (eval - fused_eval).abs() < eval_tol,
+                "evaluate mismatch: eval={eval}, fused={fused_eval}, diff={}",
+                (eval - fused_eval).abs()
+            );
+            for i in 0..6 {
+                let jac_tol = jac[i].abs().max(1e-15) * 1e-12;
+                assert!(
+                    (jac[i] - fused_jac[i]).abs() < jac_tol,
+                    "jacobian[{i}] mismatch: jac={}, fused={}, diff={}",
+                    jac[i],
+                    fused_jac[i],
+                    (jac[i] - fused_jac[i]).abs()
+                );
+            }
+        }
+    }
+}

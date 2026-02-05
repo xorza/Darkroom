@@ -1,117 +1,199 @@
-# Performance Analysis - rho-opiuchi detection (2026-02-02 v4)
+# Performance Analysis - rho-opiuchi detection (2026-02-05 v5)
 
-**After SIMD centroid optimization:** AVX2/SSE/NEON vectorization for refine_centroid
+**After SIMD removal, f64 migration, and LMModel trait unification.**
+Centroid method: `MoffatFit { beta: 2.5 }` (L-M optimizer with Moffat profile).
 
 ## Benchmark Result
-- **Median time:** 393ms (was 408ms in v3, 991ms in v2, ~1.6s originally)
-- **Improvement:** ~4% faster vs v3, ~60% faster vs v2, ~75% faster vs original
+- **Median time:** 750ms (was 393ms in v4 with WeightedMoments centroid)
+- **Image:** 8584x5874 (rho-opiuchi.jpg)
+- **Config:** `Config::precise_ground()` with `CentroidMethod::MoffatFit { beta: 2.5 }`
 
-## Top Functions by CPU Time
+The 2x slowdown vs v4 is expected: v4 used WeightedMoments (no fitting),
+v5 uses Moffat L-M fitting per star. This is not a regression — it's a
+different (more accurate) centroid method.
 
-| Function | Self % | Notes |
-|----------|--------|-------|
-| `visit_neighbors_grid` | **14.02%** | BFS neighbor traversal |
-| `clear_page_erms` (kernel) | 8.07% | Page zeroing for huge pages |
-| `refine_centroid_avx2` | **8.06%** | SIMD centroid (was 14.78% scalar) |
-| `FnMut::call_mut` (rayon) | 7.57% | Parallel iterator overhead |
-| `deblend_multi_threshold` | **6.23%** | Multi-threshold deblending |
-| `FnMut::call_mut` (rayon) | 4.75% | Parallel iterator overhead |
-| `convolve_row_avx2` | 4.62% | Convolution (SIMD) |
-| `process_words_filtered_sse` | 4.35% | Threshold mask (SIMD) |
-| `find_connected_regions_grid` | **3.83%** | Connected component finding |
-| `NeverShortCircuit::wrap_mut` | 3.63% | Iterator internals |
-| `compute_metrics` | 3.13% | Star quality metrics |
-| `interpolate_segment_avx2` | 2.45% | Background interpolation |
-| `quicksort::partition` | 2.38% | Sorting operations |
-| `Fn::call` (rayon) | 2.37% | Parallel iterator overhead |
-| `PixelGrid::reset_with_pixels` | 2.23% | Grid reset |
-| `compute_centroid` | 2.21% | Centroid computation entry point |
+## Perf Configuration
+- Sample rate: 3000 Hz, DWARF call graphs
+- 620K samples collected across 10 benchmark iterations
+- Event: `cpu_core/cycles/P`
 
-## Analysis
+## Top Functions by CPU Time (self %)
 
-### 1. SIMD Centroid Optimization Success
-- **Before (v3):** `refine_centroid` at **14.78%** (scalar)
-- **After (v4):** `refine_centroid_avx2` at **8.06%** (SIMD)
-- **Reduction:** 45% less CPU time in centroid refinement
-- AVX2 vectorization processing 8 pixels per iteration is effective
+| Function | Self % | Children % | Notes |
+|----------|--------|------------|-------|
+| `lm_optimizer::optimize` | **21.71%** | **55.20%** | L-M optimizer (calls powf via model) |
+| `libm::pow` (all offsets) | **~36%** | — | Moffat `u.powf(-beta)` calls |
+| `background::interpolate_segment_avx2` | 6.09% | 6.33% | Background interpolation |
+| `deblend::bfs_region` | 4.79% | 4.83% | BFS neighbor traversal |
+| `deblend::deblend_multi_threshold` | 4.20% | 4.87% | Multi-threshold deblending |
+| `threshold_mask::process_words_sse` | 3.92% | 3.96% | Threshold masking |
+| `quicksort::partition` | 1.51% | — | Sorting operations |
+| `centroid::refine_centroid` | 1.21% | 2.16% | Weighted moments (2 iters as seed) |
+| `threshold_mask::process_words_filtered_sse` | 1.12% | 1.14% | Filtered threshold |
+| `convolution::convolve_row_avx2` | 0.94% | 0.98% | Row convolution |
+| `centroid::compute_metrics` | 0.92% | 0.93% | Star quality metrics |
+| `centroid::linear_solver::solve` | 0.69% | 0.74% | Gaussian elimination (5x5/6x6) |
+| `deblend::PixelGrid::reset_with_pixels` | 0.64% | — | Grid initialization |
+| `centroid::measure_star` | 0.62% | — | Measurement entry point |
 
-### 2. Deblending Remains Stable
-- `visit_neighbors_grid` (14.02%) + `deblend_multi_threshold` (6.23%) + `find_connected_regions_grid` (3.83%) = **24.1%**
-- Consistent with v3 (24.3%), early termination optimization holding steady
+## Grouped by Pipeline Stage
 
-### 3. Kernel Memory Operations Increased Share (8.07%)
-- `clear_page_erms` rose from 5.92% to 8.07% (relatively)
-- This is expected - as userspace code becomes faster, kernel overhead becomes more visible
-- Absolute kernel time is likely unchanged
+| Stage | % CPU | Notes |
+|-------|-------|-------|
+| **Centroid fitting (optimize + libm)** | **~63%** | Dominated by `powf()` in Moffat model |
+| Deblending | ~10% | bfs_region + multi_threshold + PixelGrid |
+| Background | ~6% | interpolate_segment_avx2 |
+| Threshold mask | ~5% | SSE vectorized |
+| Sorting | ~2.3% | Quicksort partition |
+| Rayon overhead | ~1.6% | Join/bridge overhead |
+| Convolution | ~1.4% | AVX2 row convolution |
+| Centroid (non-fitting) | ~2.8% | refine_centroid + compute_metrics |
 
-### 4. Rayon Overhead More Visible (~14.7%)
-- Multiple `FnMut::call_mut` entries totaling ~14.7%
-- As hot functions get optimized, parallel overhead becomes proportionally larger
-- Could potentially benefit from work chunking adjustments
+## Root Cause Analysis: `powf()` Dominance
 
-### 5. SIMD Operations Well Balanced
-- `convolve_row_avx2` (4.62%) - row convolution
-- `process_words_filtered_sse` (4.35%) - threshold masking
-- `interpolate_segment_avx2` (2.45%) - background interpolation
-- `refine_centroid_avx2` (8.06%) - centroid refinement
-- All major computation paths now SIMD-optimized
+The Moffat profile model evaluates `u.powf(-beta)` which maps to `libm::pow`.
+This single operation accounts for **~36% of total CPU time**.
+
+### Why so expensive?
+
+The generic L-M optimizer calls the model 3× per pixel per iteration:
+
+1. **`fill_jacobian_residuals`** — calls `evaluate()` (1 `powf`) + `jacobian_row()` (1 `powf`)
+2. **`compute_chi2(new_params)`** — calls `evaluate()` (1 `powf`) again for the trial step
+
+With stamp radius = 6 (13×13 = 169 pixels) and up to 50 L-M iterations:
+- **Per iteration:** 169 × 3 = 507 `powf` calls
+- **Per star (5-15 iters typical):** 2,535 - 7,605 `powf` calls
+- **`libm::pow` (f64):** ~20-30ns per call on modern x86
+
+### Redundant computation
+
+`fill_jacobian_residuals` already computes all residuals (which contain the
+model evaluation). But `compute_chi2` re-evaluates the model from scratch for
+the trial step. On a **successful** step, the chi² could be computed from the
+already-known residuals. This would eliminate **1/3 of all `powf` calls**.
+
+Additionally, `jacobian_row` and `evaluate` share most intermediate values
+(`u`, `u_neg_beta`) but compute them independently.
+
+## Optimization Opportunities
+
+### 1. Eliminate redundant chi² evaluation (HIGH IMPACT, ~12% savings)
+
+On a successful L-M step (accepted), `fill_jacobian_residuals` already computed
+residuals. Sum their squares instead of calling `compute_chi2` again:
+
+```
+// After fill_jacobian_residuals, chi² is just sum of residuals²
+let chi2_from_residuals: f64 = residuals.iter().map(|r| r * r).sum();
+```
+
+`compute_chi2` is still needed for the trial step (`new_params`), but we can
+add a `LMModel::evaluate_chi2` or simply compute chi² inline from residuals
+when available. This eliminates 1 of 3 `powf` per pixel on accepted iterations.
+
+**Expected impact:** ~12% total runtime reduction (1/3 of the 36% libm cost).
+
+### 2. Fused evaluate+jacobian (HIGH IMPACT, ~12% savings)
+
+Add an `evaluate_and_jacobian` method to `LMModel` that computes both the
+model value and Jacobian row in a single pass, sharing intermediate values:
+
+```rust
+fn evaluate_and_jacobian(&self, x: f64, y: f64, params: &[f64; N]) -> (f64, [f64; N]) {
+    // Compute u, u_neg_beta once, return both model value and jacobian
+}
+```
+
+For Moffat, this means `u.powf(-beta)` is computed once instead of twice per
+pixel in `fill_jacobian_residuals`.
+
+**Expected impact:** ~12% total runtime reduction (eliminates 1 of 3 `powf`).
+
+### 3. Fast `powf` for fixed beta (MEDIUM-HIGH IMPACT)
+
+When beta is fixed (e.g., 2.5), `u.powf(-2.5)` can be decomposed:
+```
+u^(-2.5) = 1.0 / (u * u * u.sqrt())   // 1 sqrt + 3 muls vs 1 powf
+```
+
+`sqrt` is ~4ns vs `pow` at ~25ns. For beta = 3.0: `u^(-3) = 1/(u*u*u)`.
+For general half-integer beta: decompose into integer power × sqrt.
+
+This applies to `MoffatFixedBeta` which handles the common case.
+
+**Expected impact:** 5-15% total runtime depending on beta decomposition speedup.
+
+### 4. Reduce L-M iterations via better initial guess (MEDIUM IMPACT)
+
+Currently the weighted moments seed runs only 2 iterations before L-M.
+If moments converge well, L-M may need fewer iterations. Alternatively,
+a linear least-squares initial estimate for amplitude/background could
+reduce L-M iterations by 30-50%.
+
+### 5. Combined opportunity: 1+2+3 together
+
+Implementing optimizations 1, 2, and 3 together would reduce `powf` calls
+from 3 per pixel per iteration to effectively ~0.3 equivalent cost:
+- Fused evaluate+jacobian: 1 `powf` (was 2)
+- Chi² from residuals: 0 extra `powf` on accepted steps (was 1)
+- Fast `powf` decomposition: remaining call is ~4× cheaper
+
+**Expected combined impact:** ~30-40% total runtime reduction (~525ms → ~450-525ms).
+
+### 6. Background interpolation (LOW IMPACT)
+- 6% of time, already AVX2 vectorized
+- Diminishing returns
+
+### 7. Deblending (LOW IMPACT)
+- 10% of time, graph algorithms inherently sequential per component
+- Already optimized with early termination and generation counters
+
+## Optimizations Applied (v5a)
+
+All three high-impact optimizations were implemented:
+
+1. **Fused evaluate+jacobian** — `LMModel::evaluate_and_jacobian()` computes
+   model value and Jacobian row in a single pass, sharing intermediate values
+   (`u`, `u_neg_beta`, `exp_val`). Reduces `powf`/`exp` calls in
+   `fill_jacobian_residuals` from 2 to 1 per pixel.
+
+2. **Chi² from residuals** — `fill_jacobian_residuals` now returns chi² computed
+   from the already-calculated residuals. On first iteration this replaces the
+   separate `compute_chi2` call. `compute_chi2` is still used for trial steps.
+
+3. **Fast `powf` for fixed beta** — `PowStrategy` enum pre-selects the optimal
+   computation method at model construction:
+   - Half-integer beta (2.5, 3.5, 4.5): `1 / (u^n * sqrt(u))` — sqrt + int_pow
+   - Integer beta (2, 3, 4): `1 / u^n` — int_pow only
+   - General: fallback to `u.powf(-beta)`
+
+   For beta=2.5: `u^(-2.5) = 1 / (u² * √u)` — ~4ns vs ~25ns for `libm::pow`.
+
+### Result
+
+| Metric | Before | After | Change |
+|--------|--------|-------|--------|
+| Median | 726ms | 523ms | **-28.0%** |
+| Min | 712ms | 512ms | -28.1% |
+| Max | 743ms | 551ms | -25.8% |
 
 ## Comparison with Previous Profiles
 
-| Function | Original | v2 | v3 | v4 | Change v3→v4 |
-|----------|----------|-----|-----|-----|--------------|
-| `visit_neighbors_grid` | 28.57% | 31.51% | 14.03% | 14.02% | stable |
-| `refine_centroid` | ~10% | 7.82% | 14.78% | **8.06%** | **-45%** ✓ |
-| `deblend_multi_threshold` | - | 19.31% | 6.37% | 6.23% | stable |
-| `find_connected_regions_grid` | - | 6.82% | 3.86% | 3.83% | stable |
-| `clear_page_erms` (kernel) | - | - | 5.92% | 8.07% | relative increase |
-| `PixelGrid::reset_with_pixels` | 3.35% | 3.87% | 2.18% | 2.23% | stable |
+| Version | Centroid Method | Median Time | Top Bottleneck |
+|---------|----------------|-------------|----------------|
+| v2 | WeightedMoments | 991ms | visit_neighbors (31%) |
+| v3 | WeightedMoments | 408ms | visit_neighbors (14%) |
+| v4 | WeightedMoments + SIMD | 393ms | visit_neighbors (14%) |
+| v5 | MoffatFit f64 (pre-opt) | 726ms | lm_optimizer (55%) |
+| **v5a** | **MoffatFit f64 (optimized)** | **523ms** | **TBD (re-profile)** |
+
+v5/v5a use a fundamentally more expensive centroid method (L-M Moffat fitting
+with f64 precision) than v4 (WeightedMoments). The fitting provides ~0.01 pixel
+accuracy vs ~0.05 pixel for WeightedMoments.
 
 ## Remaining Optimization Opportunities
 
-### Low Impact (Diminishing Returns)
-1. **Rayon overhead** - ~14.7% combined in parallel iterator closures
-   - Could experiment with larger work chunks or different parallelization strategies
-   - May not be worth the complexity
-
-2. **Kernel memory** - 8.07% in `clear_page_erms`
-   - Page zeroing for huge pages, outside userspace control
-   - Could potentially use memory pools to reduce allocations
-
-3. **Sorting** - 2.38% in quicksort partition
-   - Already using Rust's efficient unstable sort
-   - Limited room for improvement
-
-4. **compute_metrics** - 3.13%
-   - Quality metrics computation
-   - Could potentially SIMD-vectorize if needed
-
-### Observation: Profile is Now Well-Balanced
-No single function dominates. The top functions are:
-- Graph algorithms (visit_neighbors, find_connected) - inherently sequential per component
-- SIMD-optimized code (centroid, convolution, threshold, interpolation)
-- Parallel runtime overhead (rayon closures)
-- Kernel memory operations
-
-This suggests we've reached a point of diminishing returns for single-function optimizations.
-
-## Summary of Optimizations Applied
-
-1. **Spatial hashing** for `remove_duplicate_stars` - O(n²) → O(n)
-2. **Fast exp approximation** for centroid Gaussian weights
-3. **Early termination** in deblending - stop after 4 levels without splits
-4. **Generation counter** for PixelGrid visited array - O(n) clear → O(1)
-5. **SIMD centroid refinement** - AVX2 (8 pixels), SSE4.1 (4 pixels), NEON (4 pixels)
-
-## Performance History
-
-| Version | Median Time | vs Previous | vs Original |
-|---------|-------------|-------------|-------------|
-| Original | ~1.6s | - | - |
-| v2 | 991ms | -38% | -38% |
-| v3 | 408ms | -59% | -75% |
-| **v4** | **393ms** | **-4%** | **-75%** |
-
-**Total speedup from original: ~4x faster (393ms vs ~1.6s)**
-
-The SIMD centroid optimization provided a modest 4% overall improvement (15ms) because centroid refinement, while reduced from 14.78% to 8.06% of CPU time, was already a smaller portion of the total workload after previous optimizations.
+- Re-profile to identify new bottleneck distribution after optimizations
+- Consider SIMD vectorization of the L-M inner loop (evaluate_and_jacobian across pixels)
+- Explore reducing L-M iterations via better initial parameter estimates

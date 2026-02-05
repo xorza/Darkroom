@@ -1262,3 +1262,42 @@ fn test_gaussian_fit_residual_distribution() {
         noise_sigma
     );
 }
+
+// ============================================================================
+// evaluate_and_jacobian fused method test
+// ============================================================================
+
+#[test]
+fn test_gaussian_evaluate_and_jacobian_consistency() {
+    use crate::star_detection::centroid::gaussian_fit::Gaussian2D;
+    use crate::star_detection::centroid::lm_optimizer::LMModel;
+
+    let model = Gaussian2D { stamp_radius: 15.0 };
+    let params_list: &[[f64; 6]] = &[
+        [10.0, 10.0, 1000.0, 2.0, 2.0, 100.0],
+        [5.5, 7.3, 500.0, 1.5, 3.0, 50.0],
+        [0.0, 0.0, 1.0, 1.0, 1.0, 0.0],
+    ];
+    let points = [(8.0, 9.0), (10.0, 10.0), (12.0, 11.0), (5.0, 7.0)];
+
+    for params in params_list {
+        for &(x, y) in &points {
+            let eval = model.evaluate(x, y, params);
+            let jac = model.jacobian_row(x, y, params);
+            let (fused_eval, fused_jac) = model.evaluate_and_jacobian(x, y, params);
+
+            assert!(
+                (eval - fused_eval).abs() < 1e-15,
+                "evaluate mismatch: eval={eval}, fused={fused_eval}"
+            );
+            for i in 0..6 {
+                assert!(
+                    (jac[i] - fused_jac[i]).abs() < 1e-14,
+                    "jacobian[{i}] mismatch: jac={}, fused={}",
+                    jac[i],
+                    fused_jac[i]
+                );
+            }
+        }
+    }
+}

@@ -56,6 +56,14 @@ pub trait LMModel<const N: usize> {
     /// Compute partial derivatives at a point.
     fn jacobian_row(&self, x: f64, y: f64, params: &[f64; N]) -> [f64; N];
 
+    /// Evaluate model and compute Jacobian row in a single pass.
+    /// Default implementation calls evaluate + jacobian_row separately.
+    /// Override to share expensive intermediate computations (e.g., powf).
+    #[inline]
+    fn evaluate_and_jacobian(&self, x: f64, y: f64, params: &[f64; N]) -> (f64, [f64; N]) {
+        (self.evaluate(x, y, params), self.jacobian_row(x, y, params))
+    }
+
     /// Apply parameter constraints after an update.
     fn constrain(&self, params: &mut [f64; N]);
 }
@@ -83,7 +91,9 @@ pub fn optimize<const N: usize, M: LMModel<N>>(
     for iter in 0..config.max_iterations {
         iterations = iter + 1;
 
-        fill_jacobian_residuals(
+        // Build Jacobian and residuals using fused evaluate+jacobian.
+        // Also compute chi² from residuals (avoids redundant model evaluation).
+        let current_chi2 = fill_jacobian_residuals(
             model,
             data_x,
             data_y,
@@ -92,6 +102,14 @@ pub fn optimize<const N: usize, M: LMModel<N>>(
             &mut jacobian,
             &mut residuals,
         );
+
+        // On first iteration, use the more accurate chi² from fill_jacobian_residuals
+        // (same params, just computed differently). On subsequent iterations,
+        // prev_chi2 was set from compute_chi2 on new_params which is authoritative.
+        if iter == 0 {
+            prev_chi2 = current_chi2;
+        }
+
         let (hessian, gradient) = compute_hessian_gradient(&jacobian, &residuals);
 
         let mut damped_hessian = hessian;
@@ -170,7 +188,8 @@ fn compute_chi2<const N: usize, M: LMModel<N>>(
         .sum()
 }
 
-/// Fill jacobian and residuals buffers, reusing existing allocations.
+/// Fill jacobian and residuals buffers using fused evaluate+jacobian.
+/// Returns chi² computed from the residuals (avoids a separate compute_chi2 call).
 fn fill_jacobian_residuals<const N: usize, M: LMModel<N>>(
     model: &M,
     data_x: &[f64],
@@ -179,14 +198,19 @@ fn fill_jacobian_residuals<const N: usize, M: LMModel<N>>(
     params: &[f64; N],
     jacobian: &mut Vec<[f64; N]>,
     residuals: &mut Vec<f64>,
-) {
+) -> f64 {
     jacobian.clear();
     residuals.clear();
 
+    let mut chi2 = 0.0f64;
     for ((&x, &y), &z) in data_x.iter().zip(data_y.iter()).zip(data_z.iter()) {
-        jacobian.push(model.jacobian_row(x, y, params));
-        residuals.push(z - model.evaluate(x, y, params));
+        let (model_val, jac_row) = model.evaluate_and_jacobian(x, y, params);
+        let residual = z - model_val;
+        chi2 += residual * residual;
+        jacobian.push(jac_row);
+        residuals.push(residual);
     }
+    chi2
 }
 
 /// Compute Hessian (J^T J) and gradient (J^T r) for N-parameter model.

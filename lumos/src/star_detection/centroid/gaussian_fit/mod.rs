@@ -77,6 +77,31 @@ impl LMModel<6> for Gaussian2D {
     }
 
     #[inline]
+    fn evaluate_and_jacobian(&self, x: f64, y: f64, params: &[f64; 6]) -> (f64, [f64; 6]) {
+        let [x0, y0, amp, sigma_x, sigma_y, bg] = *params;
+        let sigma_x2 = sigma_x * sigma_x;
+        let sigma_y2 = sigma_y * sigma_y;
+        let dx = x - x0;
+        let dy = y - y0;
+        let exponent = -0.5 * (dx * dx / sigma_x2 + dy * dy / sigma_y2);
+        let exp_val = exponent.exp();
+        let amp_exp = amp * exp_val;
+        let model_val = amp_exp + bg;
+
+        (
+            model_val,
+            [
+                amp_exp * dx / sigma_x2,                  // df/dx0
+                amp_exp * dy / sigma_y2,                  // df/dy0
+                exp_val,                                  // df/damp
+                amp_exp * dx * dx / (sigma_x2 * sigma_x), // df/dsigma_x
+                amp_exp * dy * dy / (sigma_y2 * sigma_y), // df/dsigma_y
+                1.0,                                      // df/dbg
+            ],
+        )
+    }
+
+    #[inline]
     fn constrain(&self, params: &mut [f64; 6]) {
         params[2] = params[2].max(0.01); // Amplitude > 0
         params[3] = params[3].clamp(0.5, self.stamp_radius); // Sigma_x

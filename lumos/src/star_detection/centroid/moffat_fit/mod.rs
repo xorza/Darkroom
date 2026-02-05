@@ -65,12 +65,92 @@ pub struct MoffatFitResult {
     pub iterations: usize,
 }
 
+/// Strategy for computing `u^(-beta)` efficiently.
+/// Pre-computed at model construction to avoid per-pixel branching.
+#[derive(Debug, Clone, Copy)]
+enum PowStrategy {
+    /// beta is a half-integer (n + 0.5): use `1 / (u^n * sqrt(u))`
+    HalfInt { int_part: u32 },
+    /// beta is an integer: use `1 / u^n`
+    Int { n: u32 },
+    /// General case: use `u.powf(-beta)`
+    General { neg_beta: f64 },
+}
+
+/// Compute u^(-beta) using the pre-selected strategy.
+#[inline]
+fn fast_pow_neg(u: f64, strategy: PowStrategy) -> f64 {
+    match strategy {
+        PowStrategy::HalfInt { int_part } => {
+            // u^(-(n+0.5)) = 1 / (u^n * sqrt(u))
+            let u_n = int_pow(u, int_part);
+            1.0 / (u_n * u.sqrt())
+        }
+        PowStrategy::Int { n } => 1.0 / int_pow(u, n),
+        PowStrategy::General { neg_beta } => u.powf(neg_beta),
+    }
+}
+
+/// Compute u^n for small integer n using repeated squaring.
+#[inline]
+fn int_pow(u: f64, n: u32) -> f64 {
+    match n {
+        0 => 1.0,
+        1 => u,
+        2 => u * u,
+        3 => u * u * u,
+        4 => {
+            let u2 = u * u;
+            u2 * u2
+        }
+        5 => {
+            let u2 = u * u;
+            u2 * u2 * u
+        }
+        _ => u.powi(n as i32),
+    }
+}
+
+/// Select optimal strategy for computing u^(-beta).
+fn select_pow_strategy(beta: f64) -> PowStrategy {
+    let rounded = (beta * 2.0).round();
+    let is_half_int = (beta * 2.0 - rounded).abs() < 1e-10;
+
+    if is_half_int {
+        let doubled = rounded as i64;
+        if doubled % 2 == 0 {
+            // Integer beta
+            PowStrategy::Int {
+                n: (doubled / 2) as u32,
+            }
+        } else {
+            // Half-integer beta (n + 0.5)
+            PowStrategy::HalfInt {
+                int_part: (doubled / 2) as u32,
+            }
+        }
+    } else {
+        PowStrategy::General { neg_beta: -beta }
+    }
+}
+
 /// Moffat model with fixed beta (5 parameters).
 /// Parameters: [x0, y0, amplitude, alpha, background]
 #[derive(Debug)]
 pub(crate) struct MoffatFixedBeta {
     pub stamp_radius: f64,
     pub beta: f64,
+    pow_strategy: PowStrategy,
+}
+
+impl MoffatFixedBeta {
+    pub fn new(stamp_radius: f64, beta: f64) -> Self {
+        Self {
+            stamp_radius,
+            beta,
+            pow_strategy: select_pow_strategy(beta),
+        }
+    }
 }
 
 impl LMModel<5> for MoffatFixedBeta {
@@ -78,7 +158,8 @@ impl LMModel<5> for MoffatFixedBeta {
     fn evaluate(&self, x: f64, y: f64, params: &[f64; 5]) -> f64 {
         let [x0, y0, amp, alpha, bg] = *params;
         let r2 = (x - x0).powi(2) + (y - y0).powi(2);
-        amp * (1.0 + r2 / (alpha * alpha)).powf(-self.beta) + bg
+        let u = 1.0 + r2 / (alpha * alpha);
+        amp * fast_pow_neg(u, self.pow_strategy) + bg
     }
 
     #[inline]
@@ -89,7 +170,7 @@ impl LMModel<5> for MoffatFixedBeta {
         let dy = y - y0;
         let r2 = dx * dx + dy * dy;
         let u = 1.0 + r2 / alpha2;
-        let u_neg_beta = u.powf(-self.beta);
+        let u_neg_beta = fast_pow_neg(u, self.pow_strategy);
         let u_neg_beta_m1 = u_neg_beta / u;
         let common = 2.0 * amp * self.beta / alpha2 * u_neg_beta_m1;
 
@@ -100,6 +181,31 @@ impl LMModel<5> for MoffatFixedBeta {
             common * r2 / alpha, // df/dalpha
             1.0,                 // df/dbg
         ]
+    }
+
+    #[inline]
+    fn evaluate_and_jacobian(&self, x: f64, y: f64, params: &[f64; 5]) -> (f64, [f64; 5]) {
+        let [x0, y0, amp, alpha, bg] = *params;
+        let alpha2 = alpha * alpha;
+        let dx = x - x0;
+        let dy = y - y0;
+        let r2 = dx * dx + dy * dy;
+        let u = 1.0 + r2 / alpha2;
+        let u_neg_beta = fast_pow_neg(u, self.pow_strategy);
+        let model_val = amp * u_neg_beta + bg;
+        let u_neg_beta_m1 = u_neg_beta / u;
+        let common = 2.0 * amp * self.beta / alpha2 * u_neg_beta_m1;
+
+        (
+            model_val,
+            [
+                common * dx,         // df/dx0
+                common * dy,         // df/dy0
+                u_neg_beta,          // df/damp
+                common * r2 / alpha, // df/dalpha
+                1.0,                 // df/dbg
+            ],
+        )
     }
 
     #[inline]
@@ -145,6 +251,33 @@ impl LMModel<6> for MoffatVariableBeta {
             -amp * ln_u * u_neg_beta, // df/dbeta
             1.0,                      // df/dbg
         ]
+    }
+
+    #[inline]
+    fn evaluate_and_jacobian(&self, x: f64, y: f64, params: &[f64; 6]) -> (f64, [f64; 6]) {
+        let [x0, y0, amp, alpha, beta, bg] = *params;
+        let alpha2 = alpha * alpha;
+        let dx = x - x0;
+        let dy = y - y0;
+        let r2 = dx * dx + dy * dy;
+        let u = 1.0 + r2 / alpha2;
+        let ln_u = u.ln();
+        let u_neg_beta = (-beta * ln_u).exp();
+        let model_val = amp * u_neg_beta + bg;
+        let u_neg_beta_m1 = u_neg_beta / u;
+        let common = 2.0 * amp * beta / alpha2 * u_neg_beta_m1;
+
+        (
+            model_val,
+            [
+                common * dx,              // df/dx0
+                common * dy,              // df/dy0
+                u_neg_beta,               // df/damp
+                common * r2 / alpha,      // df/dalpha
+                -amp * ln_u * u_neg_beta, // df/dbeta
+                1.0,                      // df/dbg
+            ],
+        )
     }
 
     #[inline]
@@ -237,10 +370,7 @@ fn fit_with_fixed_beta(
         background as f64,
     ];
 
-    let model = MoffatFixedBeta {
-        stamp_radius: stamp_radius as f64,
-        beta: config.fixed_beta as f64,
-    };
+    let model = MoffatFixedBeta::new(stamp_radius as f64, config.fixed_beta as f64);
 
     let result = optimize(&model, data_x, data_y, data_z, initial_params, &config.lm);
 
