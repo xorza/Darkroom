@@ -164,3 +164,222 @@ unsafe fn horizontal_sum_neon(v: float32x4_t) -> f32 {
     // vaddvq_f32 is the NEON horizontal add instruction
     vaddvq_f32(v)
 }
+
+#[cfg(test)]
+#[cfg(target_arch = "aarch64")]
+mod tests {
+    use super::*;
+    use crate::common::Buffer2;
+    use crate::star_detection::centroid::simd::refine_centroid_scalar;
+    use crate::star_detection::config::Config;
+    use glam::Vec2;
+
+    fn make_gaussian_star(
+        width: usize,
+        height: usize,
+        pos: Vec2,
+        sigma: f32,
+        amplitude: f32,
+        background: f32,
+    ) -> Buffer2<f32> {
+        let mut pixels = vec![background; width * height];
+        for y in 0..height {
+            for x in 0..width {
+                let dx = x as f32 - pos.x;
+                let dy = y as f32 - pos.y;
+                let r2 = dx * dx + dy * dy;
+                let value = amplitude * (-r2 / (2.0 * sigma * sigma)).exp();
+                if value > 0.001 {
+                    pixels[y * width + x] += value;
+                }
+            }
+        }
+        Buffer2::new(width, height, pixels)
+    }
+
+    fn make_uniform_background(width: usize, height: usize, value: f32) -> Buffer2<f32> {
+        Buffer2::new(width, height, vec![value; width * height])
+    }
+
+    #[test]
+    fn test_matches_scalar_centered() {
+        let width = 64;
+        let height = 64;
+        let pixels = make_gaussian_star(width, height, Vec2::splat(32.0), 2.5, 0.8, 0.1);
+        let bg = crate::testing::estimate_background(&pixels, &Config::default());
+
+        let scalar =
+            refine_centroid_scalar(&pixels, width, height, &bg, Vec2::splat(32.0), 7, 4.0).unwrap();
+        let neon = unsafe {
+            refine_centroid_neon(&pixels, width, height, &bg, Vec2::splat(32.0), 7, 4.0).unwrap()
+        };
+
+        assert!(
+            (scalar.x - neon.x).abs() < 0.01,
+            "NEON cx={} should match scalar cx={}",
+            neon.x,
+            scalar.x
+        );
+        assert!(
+            (scalar.y - neon.y).abs() < 0.01,
+            "NEON cy={} should match scalar cy={}",
+            neon.y,
+            scalar.y
+        );
+    }
+
+    #[test]
+    fn test_matches_scalar_offset() {
+        let width = 64;
+        let height = 64;
+        let pixels = make_gaussian_star(width, height, Vec2::new(32.3, 32.7), 2.5, 0.8, 0.1);
+        let bg = crate::testing::estimate_background(&pixels, &Config::default());
+
+        let scalar =
+            refine_centroid_scalar(&pixels, width, height, &bg, Vec2::splat(32.0), 7, 4.0).unwrap();
+        let neon = unsafe {
+            refine_centroid_neon(&pixels, width, height, &bg, Vec2::splat(32.0), 7, 4.0).unwrap()
+        };
+
+        assert!(
+            (scalar.x - neon.x).abs() < 0.01,
+            "NEON cx={} should match scalar cx={}",
+            neon.x,
+            scalar.x
+        );
+        assert!(
+            (scalar.y - neon.y).abs() < 0.01,
+            "NEON cy={} should match scalar cy={}",
+            neon.y,
+            scalar.y
+        );
+    }
+
+    #[test]
+    fn test_invalid_position() {
+        let width = 64;
+        let height = 64;
+        let pixels = make_gaussian_star(width, height, Vec2::splat(32.0), 2.5, 0.8, 0.1);
+        let bg = crate::testing::estimate_background(&pixels, &Config::default());
+
+        let result = unsafe {
+            refine_centroid_neon(&pixels, width, height, &bg, Vec2::new(3.0, 32.0), 7, 4.0)
+        };
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_zero_signal() {
+        let width = 64;
+        let height = 64;
+        let pixels = make_uniform_background(width, height, 0.1);
+        let bg = crate::testing::estimate_background(&pixels, &Config::default());
+
+        let result =
+            unsafe { refine_centroid_neon(&pixels, width, height, &bg, Vec2::splat(32.0), 7, 4.0) };
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_different_stamp_sizes() {
+        let width = 128;
+        let height = 128;
+        let pixels = make_gaussian_star(width, height, Vec2::new(64.3, 64.7), 4.0, 0.8, 0.1);
+        let bg = crate::testing::estimate_background(&pixels, &Config::default());
+
+        // Test various stamp radii that exercise different remainder handling
+        // NEON processes 4 pixels at a time
+        for stamp_radius in [4, 5, 6, 7, 8, 9, 10] {
+            let scalar = refine_centroid_scalar(
+                &pixels,
+                width,
+                height,
+                &bg,
+                Vec2::splat(64.0),
+                stamp_radius,
+                6.0,
+            );
+            let neon = unsafe {
+                refine_centroid_neon(
+                    &pixels,
+                    width,
+                    height,
+                    &bg,
+                    Vec2::splat(64.0),
+                    stamp_radius,
+                    6.0,
+                )
+            };
+
+            match (scalar, neon) {
+                (Some(s), Some(n)) => {
+                    assert!(
+                        (s.x - n.x).abs() < 0.01,
+                        "stamp_radius={}: NEON cx={} should match scalar cx={}",
+                        stamp_radius,
+                        n.x,
+                        s.x
+                    );
+                    assert!(
+                        (s.y - n.y).abs() < 0.01,
+                        "stamp_radius={}: NEON cy={} should match scalar cy={}",
+                        stamp_radius,
+                        n.y,
+                        s.y
+                    );
+                }
+                (None, None) => {}
+                _ => panic!(
+                    "stamp_radius={}: scalar and NEON should have same Some/None",
+                    stamp_radius
+                ),
+            }
+        }
+    }
+
+    #[test]
+    fn test_consistency_multiple_positions() {
+        let width = 128;
+        let height = 128;
+
+        let positions = [
+            (40.1, 40.2),
+            (64.5, 64.5),
+            (80.7, 80.3),
+            (50.0, 70.0),
+            (70.0, 50.0),
+        ];
+
+        for (true_cx, true_cy) in positions {
+            let true_pos = Vec2::new(true_cx, true_cy);
+            let pixels = make_gaussian_star(width, height, true_pos, 3.0, 0.8, 0.1);
+            let bg = crate::testing::estimate_background(&pixels, &Config::default());
+
+            let start_pos = true_pos.round();
+
+            let scalar = refine_centroid_scalar(&pixels, width, height, &bg, start_pos, 7, 5.0);
+            let neon =
+                unsafe { refine_centroid_neon(&pixels, width, height, &bg, start_pos, 7, 5.0) };
+
+            let s = scalar.unwrap();
+            let n = neon.unwrap();
+
+            assert!(
+                (s.x - n.x).abs() < 0.01,
+                "pos=({}, {}): NEON cx={} should match scalar cx={}",
+                true_cx,
+                true_cy,
+                n.x,
+                s.x
+            );
+            assert!(
+                (s.y - n.y).abs() < 0.01,
+                "pos=({}, {}): NEON cy={} should match scalar cy={}",
+                true_cx,
+                true_cy,
+                n.y,
+                s.y
+            );
+        }
+    }
+}

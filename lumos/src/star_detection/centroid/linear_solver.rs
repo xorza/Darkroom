@@ -11,7 +11,7 @@
 /// Works for small fixed-size systems (N <= 6).
 #[inline]
 #[allow(clippy::needless_range_loop)]
-fn solve_generic<const N: usize>(a: &[[f32; N]; N], b: &[f32; N]) -> Option<[f32; N]> {
+pub fn solve<const N: usize>(a: &[[f32; N]; N], b: &[f32; N]) -> Option<[f32; N]> {
     let mut matrix = *a;
     let mut rhs = *b;
 
@@ -65,18 +65,6 @@ fn solve_generic<const N: usize>(a: &[[f32; N]; N], b: &[f32; N]) -> Option<[f32
     Some(x)
 }
 
-/// Solve 5x5 linear system.
-#[inline]
-pub fn solve_5x5(a: &[[f32; 5]; 5], b: &[f32; 5]) -> Option<[f32; 5]> {
-    solve_generic(a, b)
-}
-
-/// Solve 6x6 linear system.
-#[inline]
-pub fn solve_6x6(a: &[[f32; 6]; 6], b: &[f32; 6]) -> Option<[f32; 6]> {
-    solve_generic(a, b)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -92,7 +80,7 @@ mod tests {
         ];
         let b = [1.0, 2.0, 3.0, 4.0, 5.0];
 
-        let x = solve_5x5(&a, &b).unwrap();
+        let x = solve(&a, &b).unwrap();
         for i in 0..5 {
             assert!((x[i] - b[i]).abs() < 1e-6);
         }
@@ -109,7 +97,7 @@ mod tests {
         ];
         let b = [2.0, 6.0, 12.0, 20.0, 30.0];
 
-        let x = solve_5x5(&a, &b).unwrap();
+        let x = solve(&a, &b).unwrap();
         assert!((x[0] - 1.0).abs() < 1e-6);
         assert!((x[1] - 2.0).abs() < 1e-6);
         assert!((x[2] - 3.0).abs() < 1e-6);
@@ -121,7 +109,7 @@ mod tests {
     fn test_solve_5x5_singular_returns_none() {
         let a = [[0.0; 5]; 5];
         let b = [1.0, 2.0, 3.0, 4.0, 5.0];
-        assert!(solve_5x5(&a, &b).is_none());
+        assert!(solve(&a, &b).is_none());
     }
 
     #[test]
@@ -136,7 +124,7 @@ mod tests {
         ];
         let b = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
 
-        let x = solve_6x6(&a, &b).unwrap();
+        let x = solve(&a, &b).unwrap();
         for i in 0..6 {
             assert!((x[i] - b[i]).abs() < 1e-6);
         }
@@ -154,7 +142,7 @@ mod tests {
         ];
         let b = [2.0, 6.0, 12.0, 20.0, 30.0, 42.0];
 
-        let x = solve_6x6(&a, &b).unwrap();
+        let x = solve(&a, &b).unwrap();
         assert!((x[0] - 1.0).abs() < 1e-6);
         assert!((x[1] - 2.0).abs() < 1e-6);
         assert!((x[2] - 3.0).abs() < 1e-6);
@@ -167,7 +155,7 @@ mod tests {
     fn test_solve_6x6_singular_returns_none() {
         let a = [[0.0; 6]; 6];
         let b = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
-        assert!(solve_6x6(&a, &b).is_none());
+        assert!(solve(&a, &b).is_none());
     }
 
     #[test]
@@ -182,7 +170,7 @@ mod tests {
         ];
         let b = [2.0, 1.0, 3.0, 4.0, 5.0, 6.0];
 
-        let x = solve_6x6(&a, &b).unwrap();
+        let x = solve(&a, &b).unwrap();
         assert!((x[0] - 1.0).abs() < 1e-6);
         assert!((x[1] - 2.0).abs() < 1e-6);
     }
@@ -208,7 +196,7 @@ mod tests {
             }
         }
 
-        let x = solve_6x6(&a, &b).unwrap();
+        let x = solve(&a, &b).unwrap();
         for i in 0..6 {
             assert!(
                 (x[i] - expected_x[i]).abs() < 1e-4,
@@ -233,7 +221,7 @@ mod tests {
         ];
         let b = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
 
-        let x = solve_6x6(&a, &b).unwrap();
+        let x = solve(&a, &b).unwrap();
 
         // Verify: compute A*x and compare to b
         for i in 0..6 {
@@ -270,7 +258,7 @@ mod tests {
             }
         }
 
-        let x = solve_5x5(&a, &b).unwrap();
+        let x = solve(&a, &b).unwrap();
         for i in 0..5 {
             assert!(
                 (x[i] - expected_x[i]).abs() < 1e-4,

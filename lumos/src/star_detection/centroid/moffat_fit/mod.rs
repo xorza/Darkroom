@@ -16,8 +16,8 @@ pub(crate) mod simd;
 #[cfg(test)]
 mod tests;
 
-use super::linear_solver::solve_5x5;
-use super::lm_optimizer::{LMConfig, LMModel, optimize_5, optimize_6};
+use super::linear_solver::solve;
+use super::lm_optimizer::{LMConfig, LMModel, LMResult, compute_hessian_gradient, optimize_6};
 use super::{estimate_sigma_from_moments, extract_stamp};
 use crate::common::Buffer2;
 use crate::math::FWHM_TO_SIGMA;
@@ -65,51 +65,6 @@ pub struct MoffatFitResult {
     pub converged: bool,
     /// Number of iterations used.
     pub iterations: usize,
-}
-
-/// Moffat model with fixed beta (5 parameters).
-/// Parameters: [x0, y0, amplitude, alpha, background]
-pub(crate) struct MoffatFixedBeta {
-    pub beta: f32,
-    pub stamp_radius: f32,
-}
-
-impl LMModel<5> for MoffatFixedBeta {
-    #[inline]
-    fn evaluate(&self, x: f32, y: f32, params: &[f32; 5]) -> f32 {
-        let [x0, y0, amp, alpha, bg] = *params;
-        let r2 = (x - x0).powi(2) + (y - y0).powi(2);
-        let u = 1.0 + r2 / (alpha * alpha);
-        amp * simd::fast_pow_neg_beta(u, -self.beta) + bg
-    }
-
-    #[inline]
-    fn jacobian_row(&self, x: f32, y: f32, params: &[f32; 5]) -> [f32; 5] {
-        let [x0, y0, amp, alpha, _bg] = *params;
-        let alpha2 = alpha * alpha;
-        let dx = x - x0;
-        let dy = y - y0;
-        let r2 = dx * dx + dy * dy;
-        let u = 1.0 + r2 / alpha2;
-        // Cache power computation: compute u^(-beta) once, derive u^(-beta-1) from it
-        let u_neg_beta = simd::fast_pow_neg_beta(u, -self.beta);
-        let u_neg_beta_m1 = u_neg_beta / u; // u^(-beta-1) = u^(-beta) / u
-        let common = 2.0 * amp * self.beta / alpha2 * u_neg_beta_m1;
-
-        [
-            common * dx,         // df/dx0
-            common * dy,         // df/dy0
-            u_neg_beta,          // df/damp
-            common * r2 / alpha, // df/dalpha
-            1.0,                 // df/dbg
-        ]
-    }
-
-    #[inline]
-    fn constrain(&self, params: &mut [f32; 5]) {
-        params[2] = params[2].max(0.01); // Amplitude > 0
-        params[3] = params[3].clamp(0.5, self.stamp_radius); // Alpha
-    }
 }
 
 /// Moffat model with variable beta (6 parameters).
@@ -337,43 +292,9 @@ pub fn fwhm_beta_to_alpha(fwhm: f32, beta: f32) -> f32 {
 
 /// SIMD-optimized L-M optimizer for Moffat with fixed beta.
 ///
-/// Uses AVX2 SIMD when available for faster Jacobian/residual computation.
-/// Falls back to scalar code when AVX2 is not available.
+/// Uses SIMD for Jacobian/residual/chi² computation while reusing the
+/// shared optimization infrastructure from `lm_optimizer`.
 pub(crate) fn optimize_moffat_fixed_beta_simd(
-    data_x: &[f32],
-    data_y: &[f32],
-    data_z: &[f32],
-    initial_params: [f32; 5],
-    beta: f32,
-    stamp_radius: f32,
-    config: &LMConfig,
-) -> super::lm_optimizer::LMResult<5> {
-    #[cfg(target_arch = "x86_64")]
-    if common::cpu_features::has_avx2_fma() {
-        // SAFETY: We checked that AVX2 is available
-        return unsafe {
-            optimize_moffat_fixed_beta_avx2(
-                data_x,
-                data_y,
-                data_z,
-                initial_params,
-                beta,
-                stamp_radius,
-                config,
-            )
-        };
-    }
-
-    // Fallback to generic optimizer
-    let model = MoffatFixedBeta { beta, stamp_radius };
-    optimize_5(&model, data_x, data_y, data_z, initial_params, config)
-}
-
-/// AVX2-accelerated L-M optimization for Moffat with fixed beta.
-#[cfg(target_arch = "x86_64")]
-#[target_feature(enable = "avx2", enable = "fma")]
-#[allow(unsafe_op_in_unsafe_fn)]
-unsafe fn optimize_moffat_fixed_beta_avx2(
     data_x: &[f32],
     data_y: &[f32],
     data_z: &[f32],
@@ -396,7 +317,7 @@ unsafe fn optimize_moffat_fixed_beta_avx2(
     for iter in 0..config.max_iterations {
         iterations = iter + 1;
 
-        // Use SIMD to fill Jacobian and residuals
+        // SIMD-accelerated Jacobian/residual computation
         simd::fill_jacobian_residuals_simd_fixed_beta(
             data_x,
             data_y,
@@ -407,14 +328,16 @@ unsafe fn optimize_moffat_fixed_beta_avx2(
             &mut residuals,
         );
 
-        let (hessian, gradient) = compute_hessian_gradient_5(&jacobian, &residuals);
+        // Use shared hessian/gradient computation
+        let (hessian, gradient) = compute_hessian_gradient(&jacobian, &residuals);
 
         let mut damped_hessian = hessian;
         for (i, row) in damped_hessian.iter_mut().enumerate() {
             row[i] *= 1.0 + lambda;
         }
 
-        let Some(delta) = solve_5x5(&damped_hessian, &gradient) else {
+        // Use shared linear solver
+        let Some(delta) = solve(&damped_hessian, &gradient) else {
             break;
         };
 
@@ -422,8 +345,11 @@ unsafe fn optimize_moffat_fixed_beta_avx2(
         for (p, d) in new_params.iter_mut().zip(delta.iter()) {
             *p += d;
         }
-        constrain_moffat_params(&mut new_params, stamp_radius);
+        // Apply constraints inline (same as MoffatFixedBeta::constrain)
+        new_params[2] = new_params[2].max(0.01); // Amplitude > 0
+        new_params[3] = new_params[3].clamp(0.5, stamp_radius); // Alpha
 
+        // SIMD-accelerated chi² computation
         let new_chi2 =
             simd::compute_chi2_simd_fixed_beta(data_x, data_y, data_z, &new_params, beta);
 
@@ -469,31 +395,4 @@ unsafe fn optimize_moffat_fixed_beta_avx2(
         converged,
         iterations,
     }
-}
-
-/// Apply Moffat parameter constraints.
-#[inline]
-fn constrain_moffat_params(params: &mut [f32; 5], stamp_radius: f32) {
-    params[2] = params[2].max(0.01); // Amplitude > 0
-    params[3] = params[3].clamp(0.5, stamp_radius); // Alpha
-}
-
-/// Compute Hessian (J^T J) and gradient (J^T r) for 5-parameter model.
-fn compute_hessian_gradient_5(
-    jacobian: &[[f32; 5]],
-    residuals: &[f32],
-) -> ([[f32; 5]; 5], [f32; 5]) {
-    let mut hessian = [[0.0f32; 5]; 5];
-    let mut gradient = [0.0f32; 5];
-
-    for (row, &r) in jacobian.iter().zip(residuals.iter()) {
-        for i in 0..5 {
-            gradient[i] += row[i] * r;
-            for j in 0..5 {
-                hessian[i][j] += row[i] * row[j];
-            }
-        }
-    }
-
-    (hessian, gradient)
 }

@@ -11,8 +11,8 @@ pub(crate) mod simd;
 #[cfg(test)]
 mod tests;
 
-use super::linear_solver::solve_6x6;
-use super::lm_optimizer::{LMConfig, LMModel, LMResult, optimize_6};
+use super::linear_solver::solve;
+use super::lm_optimizer::{LMConfig, LMResult};
 use super::{estimate_sigma_from_moments, extract_stamp};
 use crate::common::Buffer2;
 use glam::Vec2;
@@ -37,54 +37,6 @@ pub struct GaussianFitResult {
     pub converged: bool,
     /// Number of iterations used.
     pub iterations: usize,
-}
-
-/// 2D Gaussian model for L-M fitting.
-/// Parameters: [x0, y0, amplitude, sigma_x, sigma_y, background]
-pub(crate) struct Gaussian2D {
-    pub stamp_radius: f32,
-}
-
-impl LMModel<6> for Gaussian2D {
-    #[inline]
-    fn evaluate(&self, x: f32, y: f32, params: &[f32; 6]) -> f32 {
-        let [x0, y0, amp, sigma_x, sigma_y, bg] = *params;
-        let dx = x - x0;
-        let dy = y - y0;
-        let exponent = -0.5 * (dx * dx / (sigma_x * sigma_x) + dy * dy / (sigma_y * sigma_y));
-        amp * exponent.exp() + bg
-    }
-
-    #[inline]
-    fn jacobian_row(&self, x: f32, y: f32, params: &[f32; 6]) -> [f32; 6] {
-        let [x0, y0, amp, sigma_x, sigma_y, _bg] = *params;
-        let sigma_x2 = sigma_x * sigma_x;
-        let sigma_y2 = sigma_y * sigma_y;
-
-        let dx = x - x0;
-        let dy = y - y0;
-        let dx2 = dx * dx;
-        let dy2 = dy * dy;
-        let exponent = -0.5 * (dx2 / sigma_x2 + dy2 / sigma_y2);
-        let exp_val = exponent.exp();
-        let amp_exp = amp * exp_val;
-
-        [
-            amp_exp * dx / sigma_x2,              // df/dx0
-            amp_exp * dy / sigma_y2,              // df/dy0
-            exp_val,                              // df/damp
-            amp_exp * dx2 / (sigma_x2 * sigma_x), // df/dsigma_x
-            amp_exp * dy2 / (sigma_y2 * sigma_y), // df/dsigma_y
-            1.0,                                  // df/dbg
-        ]
-    }
-
-    #[inline]
-    fn constrain(&self, params: &mut [f32; 6]) {
-        params[2] = params[2].max(0.01); // Amplitude > 0
-        params[3] = params[3].clamp(0.5, self.stamp_radius); // Sigma_x
-        params[4] = params[4].clamp(0.5, self.stamp_radius); // Sigma_y
-    }
 }
 
 /// Fit a 2D Gaussian to a star stamp.
@@ -167,31 +119,10 @@ fn validate_result(
 }
 
 /// SIMD-optimized L-M optimizer for Gaussian fitting.
+///
+/// Uses SIMD for Jacobian/residual/chi² computation while reusing the
+/// shared optimization infrastructure from `lm_optimizer`.
 pub(crate) fn optimize_gaussian_simd(
-    data_x: &[f32],
-    data_y: &[f32],
-    data_z: &[f32],
-    initial_params: [f32; 6],
-    stamp_radius: f32,
-    config: &LMConfig,
-) -> LMResult<6> {
-    #[cfg(target_arch = "x86_64")]
-    if common::cpu_features::has_avx2_fma() {
-        return unsafe {
-            optimize_gaussian_avx2(data_x, data_y, data_z, initial_params, stamp_radius, config)
-        };
-    }
-
-    // Fallback to generic optimizer
-    let model = Gaussian2D { stamp_radius };
-    optimize_6(&model, data_x, data_y, data_z, initial_params, config)
-}
-
-/// AVX2-accelerated L-M optimization for Gaussian fitting.
-#[cfg(target_arch = "x86_64")]
-#[target_feature(enable = "avx2", enable = "fma")]
-#[allow(unsafe_op_in_unsafe_fn)]
-unsafe fn optimize_gaussian_avx2(
     data_x: &[f32],
     data_y: &[f32],
     data_z: &[f32],
@@ -212,6 +143,7 @@ unsafe fn optimize_gaussian_avx2(
     for iter in 0..config.max_iterations {
         iterations = iter + 1;
 
+        // SIMD-accelerated Jacobian/residual computation
         simd::fill_jacobian_residuals_simd(
             data_x,
             data_y,
@@ -221,6 +153,7 @@ unsafe fn optimize_gaussian_avx2(
             &mut residuals,
         );
 
+        // AVX2-optimized hessian/gradient computation for 6-parameter model
         let (hessian, gradient) = compute_hessian_gradient_6(&jacobian, &residuals);
 
         let mut damped_hessian = hessian;
@@ -228,7 +161,8 @@ unsafe fn optimize_gaussian_avx2(
             row[i] *= 1.0 + lambda;
         }
 
-        let Some(delta) = solve_6x6(&damped_hessian, &gradient) else {
+        // Use shared linear solver
+        let Some(delta) = solve(&damped_hessian, &gradient) else {
             break;
         };
 
@@ -236,8 +170,12 @@ unsafe fn optimize_gaussian_avx2(
         for (p, d) in new_params.iter_mut().zip(delta.iter()) {
             *p += d;
         }
-        constrain_gaussian_params(&mut new_params, stamp_radius);
+        // Apply constraints inline (same as Gaussian2D::constrain)
+        new_params[2] = new_params[2].max(0.01); // Amplitude > 0
+        new_params[3] = new_params[3].clamp(0.5, stamp_radius); // Sigma_x
+        new_params[4] = new_params[4].clamp(0.5, stamp_radius); // Sigma_y
 
+        // SIMD-accelerated chi² computation
         let new_chi2 = simd::compute_chi2_simd(data_x, data_y, data_z, &new_params);
 
         if new_chi2 < prev_chi2 {
@@ -281,25 +219,32 @@ unsafe fn optimize_gaussian_avx2(
     }
 }
 
-#[inline]
-fn constrain_gaussian_params(params: &mut [f32; 6], stamp_radius: f32) {
-    params[2] = params[2].max(0.01); // Amplitude > 0
-    params[3] = params[3].clamp(0.5, stamp_radius); // Sigma_x
-    params[4] = params[4].clamp(0.5, stamp_radius); // Sigma_y
-}
-
 /// Compute Hessian (J^T J) and gradient (J^T r) for 6-parameter Gaussian model.
 ///
+/// Dispatches to AVX2 implementation on x86_64 with AVX2+FMA support,
+/// falls back to scalar implementation otherwise.
+#[inline]
+fn compute_hessian_gradient_6(
+    jacobian: &[[f32; 6]],
+    residuals: &[f32],
+) -> ([[f32; 6]; 6], [f32; 6]) {
+    #[cfg(target_arch = "x86_64")]
+    if common::cpu_features::has_avx2_fma() {
+        return unsafe { compute_hessian_gradient_6_avx2(jacobian, residuals) };
+    }
+
+    compute_hessian_gradient_6_scalar(jacobian, residuals)
+}
+
 /// AVX2 implementation: processes 8 Jacobian rows at a time using gathered loads
 /// and FMA. Exploits symmetry — only computes 21 upper-triangle hessian elements.
 ///
 /// # Safety
-/// Requires AVX2 + FMA. Called from `optimize_gaussian_avx2` which has the
-/// appropriate `#[target_feature]` attribute.
+/// Requires AVX2 + FMA.
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2", enable = "fma")]
 #[allow(unsafe_op_in_unsafe_fn, clippy::needless_range_loop)]
-unsafe fn compute_hessian_gradient_6(
+unsafe fn compute_hessian_gradient_6_avx2(
     jacobian: &[[f32; 6]],
     residuals: &[f32],
 ) -> ([[f32; 6]; 6], [f32; 6]) {
@@ -512,9 +457,9 @@ unsafe fn compute_hessian_gradient_6(
     (hessian, gradient)
 }
 
-/// Scalar fallback for non-x86_64 platforms.
-#[cfg(not(target_arch = "x86_64"))]
-fn compute_hessian_gradient_6(
+/// Scalar fallback for non-AVX2 platforms.
+#[allow(clippy::needless_range_loop)]
+fn compute_hessian_gradient_6_scalar(
     jacobian: &[[f32; 6]],
     residuals: &[f32],
 ) -> ([[f32; 6]; 6], [f32; 6]) {
