@@ -29,8 +29,8 @@ use std::path::Path;
 use crate::ImageDimensions;
 use crate::astro_image::AstroImage;
 use crate::registration::transform::Transform;
-use crate::stacking::error::Error;
-use crate::stacking::progress::{ProgressCallback, StackingStage, report_progress};
+use crate::stacking::progress::report_progress;
+use crate::stacking::{Error, ProgressCallback, StackingStage};
 
 /// Drizzle kernel type for distributing flux.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]

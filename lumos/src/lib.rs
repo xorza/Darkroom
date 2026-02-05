@@ -25,6 +25,8 @@
 mod astro_image;
 mod calibration_masters;
 pub(crate) mod common;
+pub mod drizzle;
+pub mod gradient_removal;
 pub(crate) mod math;
 pub(crate) mod registration;
 pub(crate) mod stacking;
@@ -110,14 +112,7 @@ pub use registration::{
 pub use stacking::{
     // Configuration
     CacheConfig,
-    // Correction method for gradient removal
-    CorrectionMethod,
     FrameType,
-    // Gradient removal
-    GradientModel,
-    GradientRemovalConfig,
-    GradientRemovalError,
-    GradientRemovalResult,
     // Main API
     ImageStack,
     MedianConfig,
@@ -128,7 +123,19 @@ pub use stacking::{
     StackingMethod,
     StackingProgress,
     StackingStage,
-    remove_gradient,
-    remove_gradient_image,
-    remove_gradient_simple,
+};
+
+// ============================================================================
+// Drizzle
+// ============================================================================
+
+pub use drizzle::{DrizzleAccumulator, DrizzleConfig, DrizzleKernel, DrizzleResult, drizzle_stack};
+
+// ============================================================================
+// Gradient Removal
+// ============================================================================
+
+pub use gradient_removal::{
+    CorrectionMethod, GradientModel, GradientRemovalConfig, GradientRemovalError,
+    GradientRemovalResult, remove_gradient, remove_gradient_image, remove_gradient_simple,
 };

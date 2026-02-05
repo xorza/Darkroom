@@ -1,6 +1,6 @@
 # Stacking Module
 
-Image stacking algorithms for astrophotography, including mean, median, sigma-clipped, weighted mean, drizzle super-resolution, and pixel rejection methods.
+Image stacking algorithms for astrophotography, including mean, median, sigma-clipped, weighted mean, and pixel rejection methods.
 
 ## Module Structure
 
@@ -15,9 +15,7 @@ Image stacking algorithms for astrophotography, including mean, median, sigma-cl
 | `sigma_clipped/` | Sigma-clipped mean via mmap |
 | `weighted/` | Weighted mean with quality-based frame weights |
 | `rejection.rs` | Pixel rejection algorithms |
-| `drizzle.rs` | Drizzle super-resolution stacking |
 | `local_normalization.rs` | Local normalization (tile-based, PixInsight-style) |
-| `gradient_removal.rs` | Post-stack gradient removal (polynomial/RBF) |
 
 ## Key Types
 
@@ -29,8 +27,6 @@ CacheConfig        // { cache_dir, keep_cache, available_memory }
 WeightedConfig     // { weights, rejection, cache }
 FrameQuality       // { snr, fwhm, eccentricity, noise, star_count }
 RejectionMethod    // None | SigmaClip | WinsorizedSigmaClip | LinearFitClip | PercentileClip | Gesd
-DrizzleConfig      // { scale, pixfrac, kernel, min_coverage, fill_value }
-DrizzleKernel      // Square | Point | Gaussian | Lanczos
 NormalizationMethod // None | Global | Local(LocalNormalizationConfig)
 LocalNormalizationConfig // { tile_size, clip_sigma, clip_iterations }
 ```
@@ -94,34 +90,6 @@ let stack = ImageStack::new(
 );
 ```
 
-### Drizzle Super-Resolution
-
-```rust
-use lumos::stacking::{DrizzleConfig, DrizzleKernel, drizzle_stack};
-
-let config = DrizzleConfig::x2()  // 2x output resolution
-    .with_pixfrac(0.8)            // pixel fraction
-    .with_kernel(DrizzleKernel::Square);
-
-let result = drizzle_stack(&paths, &transforms, None, &config, progress)?;
-// result.image is 2x the input resolution
-// result.coverage shows data coverage per pixel
-```
-
-### Gradient Removal
-
-```rust
-use lumos::stacking::{GradientRemovalConfig, remove_gradient};
-
-// Polynomial gradient removal (degree 1-4)
-let config = GradientRemovalConfig::polynomial(2); // quadratic
-let result = remove_gradient(&pixels, width, height, &config)?;
-
-// RBF for complex gradients
-let config = GradientRemovalConfig::rbf(0.5);
-let result = remove_gradient(&pixels, width, height, &config)?;
-```
-
 ---
 
 ## Industry Best Practices
@@ -150,16 +118,6 @@ let result = remove_gradient(&pixels, width, height, &config)?;
 | Dark | Sigma Clipping | 3.0 | Remove cosmic rays |
 | Flat | Sigma Clipping or Median | 2.5-3.0 | Remove dust shadows |
 | Light | SigmaClip/Winsorized/LinearFit | 2.5-3.0 | Choose based on frame count |
-
-### Drizzle Parameters
-
-| Parameter | Recommendation | Notes |
-|-----------|----------------|-------|
-| Scale 1.5x | Conservative | Good for 3-point dithers |
-| Scale 2.0x | Standard | Requires good dithering (default) |
-| Scale 3.0x+ | Aggressive | Requires excellent dithering |
-| pixfrac 0.7-0.8 | Recommended | Balance of resolution and noise |
-| pixfrac 0.4-0.6 | Aggressive | Needs excellent data |
 
 ---
 
@@ -191,33 +149,6 @@ map.apply(&mut target_pixels);
 
 ---
 
-## Gradient Removal
-
-Post-stack gradient removal for sky gradients caused by light pollution, moon glow, or vignetting.
-
-### Algorithm
-
-1. **Sample Placement**: Generate grid avoiding stars (uses brightness threshold)
-2. **Model Fitting**:
-   - Polynomial (degree 1-4): Fast, good for simple gradients
-   - RBF (thin-plate spline): Better for complex, non-uniform gradients
-3. **Correction**:
-   - Subtract: For additive gradients (light pollution)
-   - Divide: For multiplicative effects (vignetting)
-
-### When to Use Each Method
-
-| Method | Best For |
-|--------|----------|
-| Polynomial(1) | Simple linear gradients |
-| Polynomial(2) | Parabolic gradients (default) |
-| Polynomial(3-4) | Complex gradients (risk of overcorrection) |
-| RBF | Non-uniform, rotating gradients |
-| Subtract | Light pollution, moon glow |
-| Divide | Vignetting |
-
----
-
 ## Future Improvements
 
 ### High Priority
@@ -228,13 +159,12 @@ Post-stack gradient removal for sky gradients caused by light pollution, moon gl
 
 ### Medium Priority
 
-4. **CFA-Aware Drizzle**: Raw sensor data support
-5. **Robust Scale Estimators**: Sn/Qn estimators for non-Gaussian data
-6. **Stacking Presets**: Pre-configured settings for common scenarios
+4. **Robust Scale Estimators**: Sn/Qn estimators for non-Gaussian data
+5. **Stacking Presets**: Pre-configured settings for common scenarios
 
 ### Advanced
 
-7. **Per-Pixel Noise Weighting**: Weight = 1/variance per pixel
-8. **GPU Acceleration**: Compute shader for sigma clipping
-9. **Live Stacking**: Real-time preview during capture
-10. **Multi-Session Integration**: Cross-session normalization and weighting
+6. **Per-Pixel Noise Weighting**: Weight = 1/variance per pixel
+7. **GPU Acceleration**: Compute shader for sigma clipping
+8. **Live Stacking**: Real-time preview during capture
+9. **Multi-Session Integration**: Cross-session normalization and weighting

@@ -1,12 +1,10 @@
 mod cache;
 mod cache_config;
-mod drizzle;
 mod error;
-mod gradient_removal;
 mod local_normalization;
 mod mean;
 mod median;
-mod progress;
+pub mod progress;
 pub mod rejection;
 mod sigma_clipped;
 mod weighted;
@@ -16,9 +14,6 @@ use std::path::PathBuf;
 use strum_macros::Display;
 
 pub use cache_config::CacheConfig;
-// Re-export drizzle types for public API
-#[allow(unused_imports)]
-pub use drizzle::{DrizzleAccumulator, DrizzleConfig, DrizzleKernel, DrizzleResult, drizzle_stack};
 pub use error::Error;
 pub use median::MedianConfig;
 pub use progress::{ProgressCallback, StackingProgress, StackingStage};
@@ -35,13 +30,6 @@ pub use weighted::{FrameQuality, RejectionMethod, WeightedConfig};
 #[allow(unused_imports)]
 pub use local_normalization::{
     LocalNormalizationConfig, LocalNormalizationMap, NormalizationMethod, TileNormalizationStats,
-};
-
-// Re-export gradient removal types for public API
-#[allow(unused_imports)]
-pub use gradient_removal::{
-    CorrectionMethod, GradientModel, GradientRemovalConfig, GradientRemovalError,
-    GradientRemovalResult, remove_gradient, remove_gradient_image, remove_gradient_simple,
 };
 
 use crate::AstroImage;
