@@ -132,31 +132,6 @@ impl MagsacScorer {
         self.max_sigma_sq / 2.0 * gamma_x + residual_sq / 4.0 * one_minus_gamma
     }
 
-    /// Compute MAGSAC++ weight for weighted least squares refinement.
-    ///
-    /// Higher weight = more confidence in being an inlier.
-    /// Returns a value in [0, 1].
-    ///
-    /// Currently unused but available for future weighted LO-RANSAC.
-    #[inline]
-    #[allow(dead_code)]
-    pub fn weight(&self, residual_sq: f64) -> f64 {
-        if residual_sq > self.threshold_sq {
-            return 0.0;
-        }
-
-        if residual_sq < 1e-10 {
-            return 1.0;
-        }
-
-        let x = residual_sq / (2.0 * self.max_sigma_sq);
-        let gamma_x = self.gamma_lut.lookup(x);
-
-        // Weight ∝ (1 - γ(1,x)) / x, normalized to [0, 1]
-        let one_minus_gamma = 1.0 - gamma_x;
-        (one_minus_gamma / x.max(1e-6)).min(1.0)
-    }
-
     /// Check if a point should be considered an inlier for counting purposes.
     #[inline]
     pub fn is_inlier(&self, residual_sq: f64) -> bool {
@@ -242,18 +217,6 @@ mod tests {
         // Loss at outlier should be outlier_loss = σ²_max/2 = 0.5
         let outlier_r_sq = scorer.threshold_sq() * 2.0;
         assert!((scorer.loss(outlier_r_sq) - 0.5).abs() < 1e-10);
-    }
-
-    #[test]
-    fn test_scorer_weight_boundaries() {
-        let scorer = MagsacScorer::new(1.0);
-
-        // Weight at r=0 should be 1.0
-        assert!((scorer.weight(0.0) - 1.0).abs() < 1e-10);
-
-        // Weight at outlier should be 0.0
-        let outlier_r_sq = scorer.threshold_sq() * 2.0;
-        assert!((scorer.weight(outlier_r_sq) - 0.0).abs() < 1e-10);
     }
 
     #[test]

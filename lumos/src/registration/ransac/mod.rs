@@ -70,7 +70,8 @@ impl Default for RansacParams {
     }
 }
 
-// Wrapper for seeded vs non-seeded RNG
+// Wrapper for seeded vs non-seeded RNG.
+// ChaCha8Rng is 304 bytes; Box avoids large enum variant size difference.
 enum RngWrapper {
     Seeded(Box<rand_chacha::ChaCha8Rng>),
     Thread(rand::rngs::ThreadRng),
@@ -453,16 +454,11 @@ impl RansacEstimator {
                 };
 
                 if use_weighted {
-                    let pool_weight: f64 = sorted_indices[..pool_size]
-                        .iter()
-                        .map(|&i| weights[i])
-                        .sum();
                     weighted_sample_into(
                         &mut rng,
                         &sorted_indices[..pool_size],
                         &weights,
                         min_samples,
-                        pool_weight,
                         sample_buf,
                     );
                 } else {
@@ -483,7 +479,6 @@ fn weighted_sample_into<R: Rng>(
     pool: &[usize],
     weights: &[f64],
     k: usize,
-    _total_weight: f64,
     buffer: &mut Vec<usize>,
 ) {
     buffer.clear();
@@ -517,29 +512,18 @@ fn weighted_sample_into<R: Rng>(
 
 /// Randomly sample k unique indices from 0..n into pre-allocated buffer.
 ///
-/// The buffer is cleared and filled with k random unique indices.
+/// Uses partial Fisher-Yates shuffle: O(k) time, O(n) space.
 fn random_sample_into<R: Rng>(rng: &mut R, n: usize, k: usize, buffer: &mut Vec<usize>) {
     debug_assert!(k <= n, "Cannot sample {} indices from {}", k, n);
     buffer.clear();
+    buffer.extend(0..n);
 
-    // For small k relative to n, use reservoir-like sampling
-    // For k close to n, shuffle would be better but we typically have k << n
-    if k <= n / 2 {
-        // Floyd's algorithm for sampling without replacement
-        for j in (n - k)..n {
-            let t = rng.random_range(0..=j);
-            if buffer.contains(&t) {
-                buffer.push(j);
-            } else {
-                buffer.push(t);
-            }
-        }
-    } else {
-        // Fall back to shuffle for large k
-        buffer.extend(0..n);
-        buffer.shuffle(rng);
-        buffer.truncate(k);
+    // Partial Fisher-Yates: shuffle only first k elements
+    for i in 0..k {
+        let j = rng.random_range(i..n);
+        buffer.swap(i, j);
     }
+    buffer.truncate(k);
 }
 
 /// Check if a sample of points is degenerate (too close together or collinear).
