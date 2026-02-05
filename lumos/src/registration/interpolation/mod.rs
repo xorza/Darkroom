@@ -172,39 +172,25 @@ pub(crate) fn bicubic_kernel(x: f32) -> f32 {
 
 /// Sample a pixel with bounds checking.
 #[inline]
-fn sample_pixel(data: &[f32], width: usize, height: usize, x: i32, y: i32, border: f32) -> f32 {
-    if x < 0 || y < 0 || x >= width as i32 || y >= height as i32 {
+fn sample_pixel(data: &Buffer2<f32>, x: i32, y: i32, border: f32) -> f32 {
+    if x < 0 || y < 0 || x >= data.width() as i32 || y >= data.height() as i32 {
         border
     } else {
-        data[y as usize * width + x as usize]
+        data[y as usize * data.width() + x as usize]
     }
 }
 
 /// Nearest neighbor interpolation.
 #[inline]
-fn interpolate_nearest(
-    data: &[f32],
-    width: usize,
-    height: usize,
-    x: f32,
-    y: f32,
-    border: f32,
-) -> f32 {
+fn interpolate_nearest(data: &Buffer2<f32>, x: f32, y: f32, border: f32) -> f32 {
     let ix = x.round() as i32;
     let iy = y.round() as i32;
-    sample_pixel(data, width, height, ix, iy, border)
+    sample_pixel(data, ix, iy, border)
 }
 
 /// Bilinear interpolation.
 #[inline]
-fn interpolate_bilinear(
-    data: &[f32],
-    width: usize,
-    height: usize,
-    x: f32,
-    y: f32,
-    border: f32,
-) -> f32 {
+fn interpolate_bilinear(data: &Buffer2<f32>, x: f32, y: f32, border: f32) -> f32 {
     let x0 = x.floor() as i32;
     let y0 = y.floor() as i32;
     let x1 = x0 + 1;
@@ -213,10 +199,10 @@ fn interpolate_bilinear(
     let fx = x - x0 as f32;
     let fy = y - y0 as f32;
 
-    let p00 = sample_pixel(data, width, height, x0, y0, border);
-    let p10 = sample_pixel(data, width, height, x1, y0, border);
-    let p01 = sample_pixel(data, width, height, x0, y1, border);
-    let p11 = sample_pixel(data, width, height, x1, y1, border);
+    let p00 = sample_pixel(data, x0, y0, border);
+    let p10 = sample_pixel(data, x1, y0, border);
+    let p01 = sample_pixel(data, x0, y1, border);
+    let p11 = sample_pixel(data, x1, y1, border);
 
     let top = p00 + fx * (p10 - p00);
     let bottom = p01 + fx * (p11 - p01);
@@ -225,20 +211,12 @@ fn interpolate_bilinear(
 }
 
 /// Bicubic interpolation.
-fn interpolate_bicubic(
-    data: &[f32],
-    width: usize,
-    height: usize,
-    x: f32,
-    y: f32,
-    border: f32,
-) -> f32 {
+fn interpolate_bicubic(data: &Buffer2<f32>, x: f32, y: f32, border: f32) -> f32 {
     let x0 = x.floor() as i32;
     let y0 = y.floor() as i32;
     let fx = x - x0 as f32;
     let fy = y - y0 as f32;
 
-    // Compute x weights
     let wx = [
         bicubic_kernel(fx + 1.0),
         bicubic_kernel(fx),
@@ -246,7 +224,6 @@ fn interpolate_bicubic(
         bicubic_kernel(fx - 2.0),
     ];
 
-    // Compute y weights
     let wy = [
         bicubic_kernel(fy + 1.0),
         bicubic_kernel(fy),
@@ -260,16 +237,26 @@ fn interpolate_bicubic(
         let py = y0 - 1 + j as i32;
         for (i, &wxi) in wx.iter().enumerate() {
             let px = x0 - 1 + i as i32;
-            let pixel = sample_pixel(data, width, height, px, py, border);
-            sum += pixel * wxi * wyj;
+            sum += sample_pixel(data, px, py, border) * wxi * wyj;
         }
     }
 
     sum
 }
 
-/// Lanczos interpolation.
-fn interpolate_lanczos(data: &[f32], width: usize, height: usize, x: f32, y: f32, a: usize) -> f32 {
+/// Lanczos interpolation with stack-allocated weights (no heap allocation).
+#[inline]
+fn interpolate_lanczos(data: &Buffer2<f32>, x: f32, y: f32, a: usize) -> f32 {
+    match a {
+        2 => interpolate_lanczos_impl::<2, 4>(data, x, y),
+        3 => interpolate_lanczos_impl::<3, 6>(data, x, y),
+        4 => interpolate_lanczos_impl::<4, 8>(data, x, y),
+        _ => interpolate_lanczos_generic(data, x, y, a),
+    }
+}
+
+/// Generic Lanczos for unsupported kernel sizes (rare).
+fn interpolate_lanczos_generic(data: &Buffer2<f32>, x: f32, y: f32, a: usize) -> f32 {
     let x0 = x.floor() as i32;
     let y0 = y.floor() as i32;
     let fx = x - x0 as f32;
@@ -278,21 +265,16 @@ fn interpolate_lanczos(data: &[f32], width: usize, height: usize, x: f32, y: f32
     let a_i32 = a as i32;
     let a_f32 = a as f32;
 
-    // Pre-compute x weights
     let mut wx = vec![0.0f32; 2 * a];
-    for (i, w) in wx.iter_mut().enumerate() {
-        let dx = fx - (i as i32 - a_i32 + 1) as f32;
-        *w = lanczos_kernel(dx, a_f32);
-    }
-
-    // Pre-compute y weights
     let mut wy = vec![0.0f32; 2 * a];
+
+    for (i, w) in wx.iter_mut().enumerate() {
+        *w = lanczos_kernel(fx - (i as i32 - a_i32 + 1) as f32, a_f32);
+    }
     for (j, w) in wy.iter_mut().enumerate() {
-        let dy = fy - (j as i32 - a_i32 + 1) as f32;
-        *w = lanczos_kernel(dy, a_f32);
+        *w = lanczos_kernel(fy - (j as i32 - a_i32 + 1) as f32, a_f32);
     }
 
-    // Normalize weights to preserve brightness
     let wx_sum: f32 = wx.iter().sum();
     let wy_sum: f32 = wy.iter().sum();
     if wx_sum.abs() > 1e-10 {
@@ -302,15 +284,71 @@ fn interpolate_lanczos(data: &[f32], width: usize, height: usize, x: f32, y: f32
         wy.iter_mut().for_each(|w| *w /= wy_sum);
     }
 
-    // Compute weighted sum
     let mut sum = 0.0;
-
     for (j, &wyj) in wy.iter().enumerate() {
         let py = y0 - a_i32 + 1 + j as i32;
         for (i, &wxi) in wx.iter().enumerate() {
             let px = x0 - a_i32 + 1 + i as i32;
-            let pixel = sample_pixel(data, width, height, px, py, 0.0);
-            sum += pixel * wxi * wyj;
+            sum += sample_pixel(data, px, py, 0.0) * wxi * wyj;
+        }
+    }
+    sum
+}
+
+/// Optimized Lanczos with compile-time kernel size (stack-allocated weights).
+#[inline]
+fn interpolate_lanczos_impl<const A: usize, const SIZE: usize>(
+    data: &Buffer2<f32>,
+    x: f32,
+    y: f32,
+) -> f32 {
+    let x0 = x.floor() as i32;
+    let y0 = y.floor() as i32;
+    let fx = x - x0 as f32;
+    let fy = y - y0 as f32;
+
+    let a_i32 = A as i32;
+    let lut = get_lanczos_lut(A);
+
+    let mut wx = [0.0f32; SIZE];
+    let mut wy = [0.0f32; SIZE];
+
+    let mut wx_sum = 0.0f32;
+    let mut wy_sum = 0.0f32;
+
+    for (i, w) in wx.iter_mut().enumerate() {
+        let dx = fx - (i as i32 - a_i32 + 1) as f32;
+        *w = lut.lookup(dx);
+        wx_sum += *w;
+    }
+
+    for (j, w) in wy.iter_mut().enumerate() {
+        let dy = fy - (j as i32 - a_i32 + 1) as f32;
+        *w = lut.lookup(dy);
+        wy_sum += *w;
+    }
+
+    let inv_wx = if wx_sum.abs() > 1e-10 {
+        1.0 / wx_sum
+    } else {
+        1.0
+    };
+    let inv_wy = if wy_sum.abs() > 1e-10 {
+        1.0 / wy_sum
+    } else {
+        1.0
+    };
+
+    let mut sum = 0.0f32;
+
+    for (j, &wyj) in wy.iter().enumerate() {
+        let py = y0 - a_i32 + 1 + j as i32;
+        let wyj = wyj * inv_wy;
+
+        for (i, &wxi) in wx.iter().enumerate() {
+            let px = x0 - a_i32 + 1 + i as i32;
+            let wxi = wxi * inv_wx;
+            sum += sample_pixel(data, px, py, 0.0) * wxi * wyj;
         }
     }
 
@@ -320,15 +358,13 @@ fn interpolate_lanczos(data: &[f32], width: usize, height: usize, x: f32, y: f32
 /// Interpolate a single pixel at sub-pixel coordinates.
 #[cfg(test)]
 pub fn interpolate_pixel(data: &Buffer2<f32>, x: f32, y: f32, method: InterpolationMethod) -> f32 {
-    let width = data.width();
-    let height = data.height();
     match method {
-        InterpolationMethod::Nearest => interpolate_nearest(data, width, height, x, y, 0.0),
-        InterpolationMethod::Bilinear => interpolate_bilinear(data, width, height, x, y, 0.0),
-        InterpolationMethod::Bicubic => interpolate_bicubic(data, width, height, x, y, 0.0),
-        InterpolationMethod::Lanczos2 => interpolate_lanczos(data, width, height, x, y, 2),
-        InterpolationMethod::Lanczos3 => interpolate_lanczos(data, width, height, x, y, 3),
-        InterpolationMethod::Lanczos4 => interpolate_lanczos(data, width, height, x, y, 4),
+        InterpolationMethod::Nearest => interpolate_nearest(data, x, y, 0.0),
+        InterpolationMethod::Bilinear => interpolate_bilinear(data, x, y, 0.0),
+        InterpolationMethod::Bicubic => interpolate_bicubic(data, x, y, 0.0),
+        InterpolationMethod::Lanczos2 => interpolate_lanczos(data, x, y, 2),
+        InterpolationMethod::Lanczos3 => interpolate_lanczos(data, x, y, 3),
+        InterpolationMethod::Lanczos4 => interpolate_lanczos(data, x, y, 4),
     }
 }
 
@@ -354,10 +390,9 @@ pub fn warp_image(
     debug_assert_eq!(width, output.width());
     debug_assert_eq!(height, output.height());
 
-    // Compute inverse transform to map output -> input
     let inverse = transform.inverse();
 
-    // Use SIMD-accelerated path for bilinear interpolation (parallel by row chunks)
+    // Use SIMD-accelerated path for bilinear interpolation
     if method == InterpolationMethod::Bilinear {
         output
             .pixels_mut()
@@ -396,39 +431,27 @@ pub fn warp_image(
             for row_in_chunk in 0..num_rows {
                 let y = start_y + row_in_chunk;
                 for x in 0..width {
-                    // Transform output coordinates to input coordinates
                     let src = inverse.apply(glam::DVec2::new(x as f64, y as f64));
-
-                    // Interpolate input at source coordinates
-                    chunk[row_in_chunk * width + x] = interpolate_pixel_internal(
-                        input,
-                        width,
-                        height,
-                        src.x as f32,
-                        src.y as f32,
-                        method,
-                    );
+                    chunk[row_in_chunk * width + x] =
+                        interpolate_pixel_internal(input, src.x as f32, src.y as f32, method);
                 }
             }
         });
 }
 
-/// Internal interpolate_pixel that takes raw slice parameters for use in tight loops.
 #[inline]
 fn interpolate_pixel_internal(
-    data: &[f32],
-    width: usize,
-    height: usize,
+    data: &Buffer2<f32>,
     x: f32,
     y: f32,
     method: InterpolationMethod,
 ) -> f32 {
     match method {
-        InterpolationMethod::Nearest => interpolate_nearest(data, width, height, x, y, 0.0),
-        InterpolationMethod::Bilinear => interpolate_bilinear(data, width, height, x, y, 0.0),
-        InterpolationMethod::Bicubic => interpolate_bicubic(data, width, height, x, y, 0.0),
-        InterpolationMethod::Lanczos2 => interpolate_lanczos(data, width, height, x, y, 2),
-        InterpolationMethod::Lanczos3 => interpolate_lanczos(data, width, height, x, y, 3),
-        InterpolationMethod::Lanczos4 => interpolate_lanczos(data, width, height, x, y, 4),
+        InterpolationMethod::Nearest => interpolate_nearest(data, x, y, 0.0),
+        InterpolationMethod::Bilinear => interpolate_bilinear(data, x, y, 0.0),
+        InterpolationMethod::Bicubic => interpolate_bicubic(data, x, y, 0.0),
+        InterpolationMethod::Lanczos2 => interpolate_lanczos(data, x, y, 2),
+        InterpolationMethod::Lanczos3 => interpolate_lanczos(data, x, y, 3),
+        InterpolationMethod::Lanczos4 => interpolate_lanczos(data, x, y, 4),
     }
 }

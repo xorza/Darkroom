@@ -283,3 +283,32 @@ fn bench_register_stars(b: ::bench::Bencher) {
         ))
     });
 }
+
+#[quick_bench(warmup_iters = 1, iters = 5)]
+fn bench_warp(b: ::bench::Bencher) {
+    let Some((img1, img2)) = load_two_calibrated_lights() else {
+        eprintln!("No calibration data available, skipping benchmark");
+        return;
+    };
+
+    // Pre-detect stars and register (not part of the benchmark)
+    let star_config = Config::default();
+    let mut detector = StarDetector::from_config(star_config);
+    let result1 = detector.detect(&img1);
+    let result2 = detector.detect(&img2);
+
+    let reg_config = RegistrationConfig::default();
+    let registration = crate::registration::register(&result1.stars, &result2.stars, &reg_config)
+        .expect("Registration should succeed");
+
+    let mut warped = img2.clone();
+
+    b.bench(|| {
+        crate::registration::warp(
+            black_box(&img2),
+            black_box(&mut warped),
+            black_box(&registration.transform),
+            black_box(&reg_config),
+        )
+    });
+}
