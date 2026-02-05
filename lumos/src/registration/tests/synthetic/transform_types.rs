@@ -10,7 +10,7 @@
 //! - Affine (6 DOF: handles differential scaling and shear)
 //! - Homography (8 DOF: handles perspective)
 
-use crate::registration::{RegistrationConfig, Registrator, TransformType};
+use crate::registration::{Config, TransformType, register_positions};
 use crate::testing::synthetic::{generate_random_positions, transform_stars, translate_stars};
 use glam::DVec2;
 
@@ -25,17 +25,15 @@ fn test_registration_translation_only() {
     let target_stars = translate_stars(&ref_stars, dx, dy);
 
     // Configure registration for translation only
-    let config = RegistrationConfig {
+    let config = Config {
         transform_type: TransformType::Translation,
-        min_stars_for_matching: 6,
-        min_matched_stars: 4,
-        max_residual_pixels: 2.0,
+        min_stars: 6,
+        min_matches: 4,
+        inlier_threshold: 2.0,
         ..Default::default()
     };
 
-    let registrator = Registrator::new(config);
-    let result = registrator
-        .register_positions(&ref_stars, &target_stars)
+    let result = register_positions(&ref_stars, &target_stars, &config)
         .expect("Registration should succeed");
 
     // Extract recovered translation
@@ -92,17 +90,15 @@ fn test_registration_similarity_transform() {
     let target_stars = transform_stars(&ref_stars, dx, dy, angle_rad, scale, center_x, center_y);
 
     // Configure registration with scale
-    let config = RegistrationConfig {
+    let config = Config {
         transform_type: TransformType::Similarity,
-        min_stars_for_matching: 6,
-        min_matched_stars: 4,
-        max_residual_pixels: 3.0,
+        min_stars: 6,
+        min_matches: 4,
+        inlier_threshold: 3.0,
         ..Default::default()
     };
 
-    let registrator = Registrator::new(config);
-    let result = registrator
-        .register_positions(&ref_stars, &target_stars)
+    let result = register_positions(&ref_stars, &target_stars, &config)
         .expect("Registration should succeed");
 
     // Validate by applying the recovered transform to reference stars
@@ -175,17 +171,15 @@ fn test_registration_with_noise() {
         .collect();
 
     // Configure registration
-    let config = RegistrationConfig {
+    let config = Config {
         transform_type: TransformType::Translation,
-        min_stars_for_matching: 6,
-        min_matched_stars: 4,
-        max_residual_pixels: 3.0, // Allow more residual due to noise
+        min_stars: 6,
+        min_matches: 4,
+        inlier_threshold: 3.0, // Allow more residual due to noise
         ..Default::default()
     };
 
-    let registrator = Registrator::new(config);
-    let result = registrator
-        .register_positions(&ref_stars, &target_stars)
+    let result = register_positions(&ref_stars, &target_stars, &config)
         .expect("Registration should succeed");
 
     // Extract recovered translation
@@ -229,17 +223,15 @@ fn test_registration_large_translation() {
     let target_stars = translate_stars(&ref_stars, dx, dy);
 
     // Configure registration
-    let config = RegistrationConfig {
+    let config = Config {
         transform_type: TransformType::Translation,
-        min_stars_for_matching: 6,
-        min_matched_stars: 4,
-        max_residual_pixels: 2.0,
+        min_stars: 6,
+        min_matches: 4,
+        inlier_threshold: 2.0,
         ..Default::default()
     };
 
-    let registrator = Registrator::new(config);
-    let result = registrator
-        .register_positions(&ref_stars, &target_stars)
+    let result = register_positions(&ref_stars, &target_stars, &config)
         .expect("Registration should succeed");
 
     let recovered = result.transform.translation_components();
@@ -264,16 +256,14 @@ fn test_registration_transform_display() {
     let ref_stars = generate_random_positions(50, 1000.0, 1000.0, 12345);
     let target_stars = translate_stars(&ref_stars, 10.0, -5.0);
 
-    let config = RegistrationConfig {
+    let config = Config {
         transform_type: TransformType::Similarity,
-        min_stars_for_matching: 6,
-        min_matched_stars: 4,
+        min_stars: 6,
+        min_matches: 4,
         ..Default::default()
     };
 
-    let registrator = Registrator::new(config);
-    let result = registrator
-        .register_positions(&ref_stars, &target_stars)
+    let result = register_positions(&ref_stars, &target_stars, &config)
         .expect("Registration should succeed");
 
     // Test that Display works
@@ -308,17 +298,15 @@ fn test_registration_euclidean_rotation_only() {
     // transform_stars with scale=1.0 and dx=dy=0 gives pure rotation
     let target_stars = transform_stars(&ref_stars, 0.0, 0.0, angle_rad, 1.0, center_x, center_y);
 
-    let config = RegistrationConfig {
+    let config = Config {
         transform_type: TransformType::Euclidean,
-        min_stars_for_matching: 6,
-        min_matched_stars: 4,
-        max_residual_pixels: 2.0,
+        min_stars: 6,
+        min_matches: 4,
+        inlier_threshold: 2.0,
         ..Default::default()
     };
 
-    let registrator = Registrator::new(config);
-    let result = registrator
-        .register_positions(&ref_stars, &target_stars)
+    let result = register_positions(&ref_stars, &target_stars, &config)
         .expect("Registration should succeed");
 
     assert_eq!(result.transform.transform_type, TransformType::Euclidean);
@@ -362,17 +350,15 @@ fn test_registration_euclidean_translation_and_rotation() {
 
     let target_stars = transform_stars(&ref_stars, dx, dy, angle_rad, 1.0, center_x, center_y);
 
-    let config = RegistrationConfig {
+    let config = Config {
         transform_type: TransformType::Euclidean,
-        min_stars_for_matching: 6,
-        min_matched_stars: 4,
-        max_residual_pixels: 2.0,
+        min_stars: 6,
+        min_matches: 4,
+        inlier_threshold: 2.0,
         ..Default::default()
     };
 
-    let registrator = Registrator::new(config);
-    let result = registrator
-        .register_positions(&ref_stars, &target_stars)
+    let result = register_positions(&ref_stars, &target_stars, &config)
         .expect("Registration should succeed");
 
     assert_eq!(result.transform.transform_type, TransformType::Euclidean);
@@ -431,17 +417,15 @@ fn test_registration_affine_differential_scale() {
     let affine_params = [scale_x, 0.0, dx, 0.0, scale_y, dy];
     let target_stars = apply_affine(&ref_stars, affine_params);
 
-    let config = RegistrationConfig {
+    let config = Config {
         transform_type: TransformType::Affine,
-        min_stars_for_matching: 6,
-        min_matched_stars: 4,
-        max_residual_pixels: 3.0,
+        min_stars: 6,
+        min_matches: 4,
+        inlier_threshold: 3.0,
         ..Default::default()
     };
 
-    let registrator = Registrator::new(config);
-    let result = registrator
-        .register_positions(&ref_stars, &target_stars)
+    let result = register_positions(&ref_stars, &target_stars, &config)
         .expect("Registration should succeed");
 
     assert_eq!(result.transform.transform_type, TransformType::Affine);
@@ -481,17 +465,15 @@ fn test_registration_affine_with_shear() {
     let affine_params = [1.0, shear, dx, 0.0, 1.0, dy];
     let target_stars = apply_affine(&ref_stars, affine_params);
 
-    let config = RegistrationConfig {
+    let config = Config {
         transform_type: TransformType::Affine,
-        min_stars_for_matching: 6,
-        min_matched_stars: 4,
-        max_residual_pixels: 3.0,
+        min_stars: 6,
+        min_matches: 4,
+        inlier_threshold: 3.0,
         ..Default::default()
     };
 
-    let registrator = Registrator::new(config);
-    let result = registrator
-        .register_positions(&ref_stars, &target_stars)
+    let result = register_positions(&ref_stars, &target_stars, &config)
         .expect("Registration should succeed");
 
     assert_eq!(result.transform.transform_type, TransformType::Affine);
@@ -536,17 +518,15 @@ fn test_registration_affine_rotation_and_differential_scale() {
     ];
     let target_stars = apply_affine(&ref_stars, affine_params);
 
-    let config = RegistrationConfig {
+    let config = Config {
         transform_type: TransformType::Affine,
-        min_stars_for_matching: 6,
-        min_matched_stars: 4,
-        max_residual_pixels: 3.0,
+        min_stars: 6,
+        min_matches: 4,
+        inlier_threshold: 3.0,
         ..Default::default()
     };
 
-    let registrator = Registrator::new(config);
-    let result = registrator
-        .register_positions(&ref_stars, &target_stars)
+    let result = register_positions(&ref_stars, &target_stars, &config)
         .expect("Registration should succeed");
 
     assert_eq!(result.transform.transform_type, TransformType::Affine);
@@ -606,17 +586,15 @@ fn test_registration_homography_mild_perspective() {
     let homography_params = [1.0, 0.0, dx, 0.0, 1.0, dy, h6, h7];
     let target_stars = apply_homography(&ref_stars, homography_params);
 
-    let config = RegistrationConfig {
+    let config = Config {
         transform_type: TransformType::Homography,
-        min_stars_for_matching: 8,
-        min_matched_stars: 6,
-        max_residual_pixels: 3.0,
+        min_stars: 8,
+        min_matches: 6,
+        inlier_threshold: 3.0,
         ..Default::default()
     };
 
-    let registrator = Registrator::new(config);
-    let result = registrator
-        .register_positions(&ref_stars, &target_stars)
+    let result = register_positions(&ref_stars, &target_stars, &config)
         .expect("Registration should succeed");
 
     assert_eq!(result.transform.transform_type, TransformType::Homography);
@@ -658,17 +636,15 @@ fn test_registration_homography_with_rotation() {
     let homography_params = [cos_a, -sin_a, dx, sin_a, cos_a, dy, h6, h7];
     let target_stars = apply_homography(&ref_stars, homography_params);
 
-    let config = RegistrationConfig {
+    let config = Config {
         transform_type: TransformType::Homography,
-        min_stars_for_matching: 8,
-        min_matched_stars: 6,
-        max_residual_pixels: 3.0,
+        min_stars: 8,
+        min_matches: 6,
+        inlier_threshold: 3.0,
         ..Default::default()
     };
 
-    let registrator = Registrator::new(config);
-    let result = registrator
-        .register_positions(&ref_stars, &target_stars)
+    let result = register_positions(&ref_stars, &target_stars, &config)
         .expect("Registration should succeed");
 
     assert_eq!(result.transform.transform_type, TransformType::Homography);
@@ -726,17 +702,15 @@ fn test_similarity_recovers_from_euclidean_data() {
     let target_stars = transform_stars(&ref_stars, dx, dy, angle_rad, 1.0, center_x, center_y);
 
     // Use Similarity estimator
-    let config = RegistrationConfig {
+    let config = Config {
         transform_type: TransformType::Similarity,
-        min_stars_for_matching: 6,
-        min_matched_stars: 4,
-        max_residual_pixels: 2.0,
+        min_stars: 6,
+        min_matches: 4,
+        inlier_threshold: 2.0,
         ..Default::default()
     };
 
-    let registrator = Registrator::new(config);
-    let result = registrator
-        .register_positions(&ref_stars, &target_stars)
+    let result = register_positions(&ref_stars, &target_stars, &config)
         .expect("Registration should succeed");
 
     // Scale should be recovered as ~1.0
@@ -772,17 +746,15 @@ fn test_affine_recovers_from_similarity_data() {
 
     let target_stars = transform_stars(&ref_stars, dx, dy, angle_rad, scale, center_x, center_y);
 
-    let config = RegistrationConfig {
+    let config = Config {
         transform_type: TransformType::Affine,
-        min_stars_for_matching: 6,
-        min_matched_stars: 4,
-        max_residual_pixels: 2.0,
+        min_stars: 6,
+        min_matches: 4,
+        inlier_threshold: 2.0,
         ..Default::default()
     };
 
-    let registrator = Registrator::new(config);
-    let result = registrator
-        .register_positions(&ref_stars, &target_stars)
+    let result = register_positions(&ref_stars, &target_stars, &config)
         .expect("Registration should succeed");
 
     // Validate by applying transform

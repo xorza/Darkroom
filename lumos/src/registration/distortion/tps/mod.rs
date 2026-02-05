@@ -1,3 +1,6 @@
+// WIP: TPS distortion modeling is not yet integrated into the public API.
+#![allow(dead_code)]
+
 //! Thin-Plate Spline (TPS) distortion modeling.
 //!
 //! Smooth RBF interpolation that minimizes "bending energy":

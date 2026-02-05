@@ -55,8 +55,8 @@ use std::time::Instant;
 
 use lumos::{
     AstroImage, CalibrationMasters, FrameType, ImageStack, InterpolationMethod, MedianConfig,
-    ProgressCallback, RegistrationConfig, Registrator, SigmaClippedConfig, StackingMethod,
-    StackingProgress, StackingStage, Star, StarDetectionConfig, StarDetector, TransformType,
+    ProgressCallback, RegistrationConfig, SigmaClippedConfig, StackingMethod, StackingProgress,
+    StackingStage, Star, StarDetectionConfig, StarDetector, TransformType,
 };
 use tracing_subscriber::EnvFilter;
 
@@ -407,23 +407,16 @@ fn register_all_lights(
     // Configure registration for high accuracy
     let reg_config = RegistrationConfig {
         transform_type: TransformType::Homography, // Can model distortions that similarity cannot
-        min_matched_stars: 20,                     // Require more matched stars
-        max_residual_pixels: 1.0,                  // Stricter residual limit
-        triangle: lumos::TriangleMatchConfig {
-            max_stars: MAX_STARS_FOR_REGISTRATION,
-            ratio_tolerance: 0.005, // Tighter triangle matching
-            ..lumos::TriangleMatchConfig::default()
-        },
-        ransac: lumos::RansacConfig {
-            max_iterations: 5000,  // More iterations for better model
-            inlier_threshold: 1.0, // Tighter threshold = stricter inlier selection
-            confidence: 0.9999,    // Higher confidence
-            ..lumos::RansacConfig::default()
-        },
+        max_stars: MAX_STARS_FOR_REGISTRATION,
+        min_matches: 20,         // Require more matched stars
+        inlier_threshold: 1.0,   // Stricter residual limit
+        ratio_tolerance: 0.005,  // Tighter triangle matching
+        ransac_iterations: 5000, // More iterations for better model
+        confidence: 0.9999,      // Higher confidence
         ..Default::default()
     };
 
-    let registrator = Registrator::new(reg_config);
+    let registrator = lumos::Registrator::new(reg_config.clone());
 
     let mut registered_paths = Vec::new();
     let mut failed_registrations = 0;
@@ -473,11 +466,7 @@ fn register_all_lights(
                 tracing::info!("Transform: {}", result.transform);
 
                 // Warp the image to align with reference
-                let warped = lumos::warp_to_reference_image(
-                    &target_image,
-                    &result.transform,
-                    InterpolationMethod::Lanczos3,
-                );
+                let warped = lumos::warp(&target_image, &result.transform, &reg_config);
 
                 // Save registered image
                 let img: imaginarium::Image = warped.into();

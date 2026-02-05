@@ -86,54 +86,24 @@ pub use star_detection::{
 // ============================================================================
 
 pub use registration::{
-    // Astrometry (plate solving)
-    CatalogError,
-    CatalogSource,
-    CatalogStar,
-    // Distortion correction
-    DistortionMap,
-    // Interpolation
+    // Configuration (flat struct)
+    Config as RegistrationConfig,
     InterpolationMethod,
-    PixelSkyMatch,
-    PlateSolution,
-    PlateSolver,
-    PlateSolverConfig,
-    PointMatch,
-    QuadHash,
-    QuadHasher,
-    QuadrantConsistency,
-    // Quality assessment
-    QualityMetrics,
-    // RANSAC
-    RansacConfig,
-    RansacEstimator,
+    // Results and errors
     RansacFailureReason,
-    RansacResult,
-    // Core types
-    RegistrationConfig,
     RegistrationError,
     RegistrationResult,
-    // High-level API
+    // Core types
     Registrator,
-    ResidualStats,
-    SipConfig,
-    SipCorrectionConfig,
+    // Distortion (for manual SIP access)
     SipPolynomial,
-    SolveError,
-    ThinPlateSpline,
-    TpsConfig,
     Transform,
     TransformType,
-    // Triangle matching
-    TriangleMatchConfig,
-    WarpConfig,
-    Wcs,
-    WcsBuilder,
-    check_quadrant_consistency,
-    estimate_overlap,
-    match_triangles,
-    warp_image,
-    warp_to_reference_image,
+    // Top-level functions
+    compute_transform,
+    register,
+    register_positions,
+    warp,
 };
 
 // ============================================================================

@@ -10,7 +10,7 @@ use std::path::PathBuf;
 use ::bench::quick_bench;
 
 use crate::AstroImage;
-use crate::registration::config::RegistrationConfig;
+use crate::registration::config::Config as RegistrationConfig;
 use crate::registration::pipeline::Registrator;
 use crate::star_detection::{StarDetector, config::Config};
 use crate::testing::calibration_dir;
@@ -132,12 +132,8 @@ fn test_register_two_calibrated_lights() {
     // overlap between the two shifted images, reducing matching success.
     let reg_config = RegistrationConfig {
         transform_type: crate::TransformType::Auto,
-        use_spatial_distribution: false,
-        ransac: crate::registration::config::RansacConfig::default(),
-        sip: crate::registration::config::SipCorrectionConfig {
-            enabled: false,
-            order: 3,
-        },
+        sip_enabled: false,
+        sip_order: 3,
         ..RegistrationConfig::default()
     };
     let registrator = Registrator::new(reg_config.clone());
@@ -165,7 +161,7 @@ fn test_register_two_calibrated_lights() {
     // Now fit SIP on the SAME inliers from the SAME RANSAC run for fair comparison.
     // Reconstruct inlier positions from match indices. With spatial_distribution=false
     // and max_stars large enough, indices map directly into the input star arrays.
-    let max_stars = reg_config.triangle.max_stars;
+    let max_stars = reg_config.max_stars;
     let ref_positions: Vec<glam::DVec2> = result1
         .stars
         .iter()

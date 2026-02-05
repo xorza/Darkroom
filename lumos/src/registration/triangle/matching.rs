@@ -1,8 +1,8 @@
 use glam::DVec2;
 
-use crate::registration::config::TriangleMatchConfig;
 use crate::registration::spatial::KdTree;
 
+use super::TriangleParams;
 use super::geometry::Triangle;
 use super::voting::{PointMatch, build_invariant_tree, resolve_matches, vote_for_correspondences};
 
@@ -40,14 +40,14 @@ pub fn form_triangles_kdtree(positions: &[DVec2], k_neighbors: usize) -> Vec<Tri
 /// # Arguments
 /// * `ref_positions` - Reference point positions
 /// * `target_positions` - Target point positions
-/// * `config` - Triangle matching configuration
+/// * `params` - Triangle matching parameters
 ///
 /// # Returns
 /// Vector of matched point pairs with confidence scores
 pub fn match_triangles(
     ref_positions: &[DVec2],
     target_positions: &[DVec2],
-    config: &TriangleMatchConfig,
+    params: &TriangleParams,
 ) -> Vec<PointMatch> {
     let n_ref = ref_positions.len();
     let n_target = target_positions.len();
@@ -77,11 +77,11 @@ pub fn match_triangles(
         &target_triangles,
         &ref_triangles,
         &invariant_tree,
-        config,
+        params,
         n_ref,
         n_target,
     );
-    resolve_matches(vote_matrix, n_ref, n_target, config.min_votes)
+    resolve_matches(vote_matrix, n_ref, n_target, params.min_votes)
 }
 
 /// Form triangles using k-nearest neighbors from a k-d tree.

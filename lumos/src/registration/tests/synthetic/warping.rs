@@ -8,10 +8,11 @@
 //! - All InterpolationMethod variants (Nearest, Bilinear, Bicubic, Lanczos2/3/4)
 
 use crate::common::Buffer2;
-use crate::registration::interpolation::{InterpolationMethod, WarpConfig, warp_image};
-use crate::registration::pipeline::warp_to_reference_image;
+use crate::registration::config::InterpolationMethod;
+use crate::registration::interpolation::warp_image;
 use crate::registration::transform::Transform;
 use crate::registration::transform::TransformType;
+use crate::registration::warp;
 use crate::star_detection::StarDetector;
 use crate::testing::synthetic::{self, StarFieldConfig, stamps};
 use crate::{AstroImage, ImageDimensions};
@@ -96,17 +97,10 @@ fn test_warp_identity_all_methods() {
     let identity = Transform::identity();
 
     for method in all_interpolation_methods() {
-        let config = WarpConfig {
-            method,
-            border_value: 0.0,
-            normalize_kernel: true,
-            clamp_output: false,
-        };
+        let warped = warp_image(&ref_buf, width, height, &identity, method, 0.0, true, false);
 
-        let warped = warp_image(&ref_buf, width, height, &identity, &config);
-
-        let psnr = compute_psnr(ref_buf.pixels(), &warped, 1.0);
-        let ncc = compute_ncc(ref_buf.pixels(), &warped);
+        let psnr = compute_psnr(ref_buf.pixels(), warped.pixels(), 1.0);
+        let ncc = compute_ncc(ref_buf.pixels(), warped.pixels());
 
         // Identity transform should produce nearly identical output
         // (Nearest should be exact, others very close)
@@ -153,22 +147,14 @@ fn test_warp_translation_roundtrip() {
     let inverse = forward.inverse();
 
     for method in representative_interpolation_methods() {
-        let config = WarpConfig {
-            method,
-            border_value: 0.0,
-            normalize_kernel: true,
-            clamp_output: false,
-        };
-
         // Warp forward, then inverse
-        let warped = warp_image(&ref_buf, width, height, &forward, &config);
-        let warped_buf = Buffer2::new(width, height, warped.into_vec());
-        let restored = warp_image(&warped_buf, width, height, &inverse, &config);
+        let warped = warp_image(&ref_buf, width, height, &forward, method, 0.0, true, false);
+        let restored = warp_image(&warped, width, height, &inverse, method, 0.0, true, false);
 
         // Compare central region (avoid border artifacts)
         let margin = 20;
         let (central_ref, central_restored) =
-            extract_central_region(ref_buf.pixels(), &restored, width, height, margin);
+            extract_central_region(ref_buf.pixels(), restored.pixels(), width, height, margin);
 
         let psnr = compute_psnr(&central_ref, &central_restored, 1.0);
         let ncc = compute_ncc(&central_ref, &central_restored);
@@ -218,20 +204,12 @@ fn test_warp_euclidean_roundtrip() {
     let inverse = forward.inverse();
 
     for method in representative_interpolation_methods() {
-        let config = WarpConfig {
-            method,
-            border_value: 0.0,
-            normalize_kernel: true,
-            clamp_output: false,
-        };
-
-        let warped = warp_image(&ref_buf, width, height, &forward, &config);
-        let warped_buf = Buffer2::new(width, height, warped.into_vec());
-        let restored = warp_image(&warped_buf, width, height, &inverse, &config);
+        let warped = warp_image(&ref_buf, width, height, &forward, method, 0.0, true, false);
+        let restored = warp_image(&warped, width, height, &inverse, method, 0.0, true, false);
 
         let margin = 30;
         let (central_ref, central_restored) =
-            extract_central_region(ref_buf.pixels(), &restored, width, height, margin);
+            extract_central_region(ref_buf.pixels(), restored.pixels(), width, height, margin);
 
         let psnr = compute_psnr(&central_ref, &central_restored, 1.0);
         let ncc = compute_ncc(&central_ref, &central_restored);
@@ -279,20 +257,12 @@ fn test_warp_similarity_roundtrip() {
     let inverse = forward.inverse();
 
     for method in representative_interpolation_methods() {
-        let config = WarpConfig {
-            method,
-            border_value: 0.0,
-            normalize_kernel: true,
-            clamp_output: false,
-        };
-
-        let warped = warp_image(&ref_buf, width, height, &forward, &config);
-        let warped_buf = Buffer2::new(width, height, warped.into_vec());
-        let restored = warp_image(&warped_buf, width, height, &inverse, &config);
+        let warped = warp_image(&ref_buf, width, height, &forward, method, 0.0, true, false);
+        let restored = warp_image(&warped, width, height, &inverse, method, 0.0, true, false);
 
         let margin = 40;
         let (central_ref, central_restored) =
-            extract_central_region(ref_buf.pixels(), &restored, width, height, margin);
+            extract_central_region(ref_buf.pixels(), restored.pixels(), width, height, margin);
 
         let psnr = compute_psnr(&central_ref, &central_restored, 1.0);
         let ncc = compute_ncc(&central_ref, &central_restored);
@@ -348,20 +318,12 @@ fn test_warp_affine_roundtrip() {
     assert_eq!(forward.transform_type, TransformType::Affine);
 
     for method in representative_interpolation_methods() {
-        let config = WarpConfig {
-            method,
-            border_value: 0.0,
-            normalize_kernel: true,
-            clamp_output: false,
-        };
-
-        let warped = warp_image(&ref_buf, width, height, &forward, &config);
-        let warped_buf = Buffer2::new(width, height, warped.into_vec());
-        let restored = warp_image(&warped_buf, width, height, &inverse, &config);
+        let warped = warp_image(&ref_buf, width, height, &forward, method, 0.0, true, false);
+        let restored = warp_image(&warped, width, height, &inverse, method, 0.0, true, false);
 
         let margin = 40;
         let (central_ref, central_restored) =
-            extract_central_region(ref_buf.pixels(), &restored, width, height, margin);
+            extract_central_region(ref_buf.pixels(), restored.pixels(), width, height, margin);
 
         let psnr = compute_psnr(&central_ref, &central_restored, 1.0);
         let ncc = compute_ncc(&central_ref, &central_restored);
@@ -406,20 +368,12 @@ fn test_warp_homography_roundtrip() {
     assert_eq!(forward.transform_type, TransformType::Homography);
 
     for method in representative_interpolation_methods() {
-        let config = WarpConfig {
-            method,
-            border_value: 0.0,
-            normalize_kernel: true,
-            clamp_output: false,
-        };
-
-        let warped = warp_image(&ref_buf, width, height, &forward, &config);
-        let warped_buf = Buffer2::new(width, height, warped.into_vec());
-        let restored = warp_image(&warped_buf, width, height, &inverse, &config);
+        let warped = warp_image(&ref_buf, width, height, &forward, method, 0.0, true, false);
+        let restored = warp_image(&warped, width, height, &inverse, method, 0.0, true, false);
 
         let margin = 50;
         let (central_ref, central_restored) =
-            extract_central_region(ref_buf.pixels(), &restored, width, height, margin);
+            extract_central_region(ref_buf.pixels(), restored.pixels(), width, height, margin);
 
         let psnr = compute_psnr(&central_ref, &central_restored, 1.0);
         let ncc = compute_ncc(&central_ref, &central_restored);
@@ -449,8 +403,8 @@ fn test_warp_homography_roundtrip() {
 fn test_warp_with_detected_transform() {
     use crate::AstroImage;
 
-    use crate::registration::{RegistrationConfig, Registrator};
-    use crate::star_detection::Config;
+    use crate::registration::{Config as RegConfig, register_positions};
+    use crate::star_detection::Config as StarConfig;
 
     let config = StarFieldConfig {
         width: 256,
@@ -472,16 +426,19 @@ fn test_warp_with_detected_transform() {
     let true_transform = Transform::euclidean(DVec2::new(dx, dy), angle_rad);
 
     // Create target by warping reference
-    let warp_config = WarpConfig {
-        method: InterpolationMethod::Lanczos3,
-        border_value: 0.0,
-        normalize_kernel: true,
-        clamp_output: false,
-    };
-    let target_pixels = warp_image(&ref_pixels, width, height, &true_transform, &warp_config);
+    let target_pixels = warp_image(
+        &ref_pixels,
+        width,
+        height,
+        &true_transform,
+        InterpolationMethod::Lanczos3,
+        0.0,
+        true,
+        false,
+    );
 
     // Detect stars in both images
-    let mut det = StarDetector::from_config(Config {
+    let mut det = StarDetector::from_config(StarConfig {
         expected_fwhm: 0.0,
         min_snr: 5.0,
         sigma_threshold: 3.0,
@@ -502,29 +459,27 @@ fn test_warp_with_detected_transform() {
     let target_stars: Vec<DVec2> = target_result.stars.iter().map(|s| s.pos).collect();
 
     // Register to find transform
-    let reg_config = RegistrationConfig {
+    let reg_config = RegConfig {
         transform_type: TransformType::Euclidean,
-        min_stars_for_matching: 6,
-        min_matched_stars: 4,
-        max_residual_pixels: 3.0,
+        min_stars: 6,
+        min_matches: 4,
+        inlier_threshold: 3.0,
         ..Default::default()
     };
 
-    let registrator = Registrator::new(reg_config);
-    let result = registrator
-        .register_positions(&ref_stars, &target_stars)
+    let result = register_positions(&ref_stars, &target_stars, &reg_config)
         .expect("Registration should succeed");
 
-    // Use warp_to_reference_image to align target back to reference frame
+    // Use warp to align target back to reference frame
     let target_astro = AstroImage::from_pixels(
         ImageDimensions::new(width, height, 1),
         target_pixels.into_vec(),
     );
-    let aligned = warp_to_reference_image(
-        &target_astro,
-        &result.transform,
-        InterpolationMethod::Lanczos3,
-    );
+    let warp_config = RegConfig {
+        interpolation: InterpolationMethod::Lanczos3,
+        ..Default::default()
+    };
+    let aligned = warp(&target_astro, &result.transform, &warp_config);
 
     // Compare aligned image to reference
     let margin = 40;
@@ -560,20 +515,12 @@ fn test_interpolation_quality_ordering() {
     let mut results: Vec<(InterpolationMethod, f64)> = Vec::new();
 
     for method in all_interpolation_methods() {
-        let config = WarpConfig {
-            method,
-            border_value: 0.0,
-            normalize_kernel: true,
-            clamp_output: false,
-        };
-
-        let warped = warp_image(&ref_buf, width, height, &forward, &config);
-        let warped_buf = Buffer2::new(width, height, warped.into_vec());
-        let restored = warp_image(&warped_buf, width, height, &inverse, &config);
+        let warped = warp_image(&ref_buf, width, height, &forward, method, 0.0, true, false);
+        let restored = warp_image(&warped, width, height, &inverse, method, 0.0, true, false);
 
         let margin = 50;
         let (central_ref, central_restored) =
-            extract_central_region(ref_buf.pixels(), &restored, width, height, margin);
+            extract_central_region(ref_buf.pixels(), restored.pixels(), width, height, margin);
 
         let psnr = compute_psnr(&central_ref, &central_restored, 1.0);
         results.push((method, psnr));
@@ -626,7 +573,9 @@ fn test_interpolation_quality_ordering() {
 // ============================================================================
 
 #[test]
-fn test_warp_to_reference_image_grayscale() {
+fn test_warp_grayscale() {
+    use crate::registration::Config as RegConfig;
+
     let (ref_buf, _) = stamps::star_field(256, 256, 30, 2.5, 0.05, 88888);
     let width = ref_buf.width();
     let height = ref_buf.height();
@@ -637,8 +586,11 @@ fn test_warp_to_reference_image_grayscale() {
     let transform = Transform::translation(DVec2::new(5.0, -3.0));
 
     // Warp the image
-    let warped_image =
-        warp_to_reference_image(&ref_image, &transform, InterpolationMethod::Lanczos3);
+    let warp_config = RegConfig {
+        interpolation: InterpolationMethod::Lanczos3,
+        ..Default::default()
+    };
+    let warped_image = warp(&ref_image, &transform, &warp_config);
 
     // Verify dimensions and basic properties
     assert_eq!(warped_image.width(), width);
@@ -647,7 +599,9 @@ fn test_warp_to_reference_image_grayscale() {
 }
 
 #[test]
-fn test_warp_to_reference_image_rgb() {
+fn test_warp_rgb() {
+    use crate::registration::Config as RegConfig;
+
     let (gray_buf, _) = stamps::star_field(256, 256, 30, 2.5, 0.05, 99999);
     let width = gray_buf.width();
     let height = gray_buf.height();
@@ -670,7 +624,11 @@ fn test_warp_to_reference_image_rgb() {
     let transform = Transform::euclidean(DVec2::new(3.0, -2.0), 1.0_f64.to_radians());
 
     // Warp the RGB image
-    let warped = warp_to_reference_image(&rgb_image, &transform, InterpolationMethod::Lanczos3);
+    let warp_config = RegConfig {
+        interpolation: InterpolationMethod::Lanczos3,
+        ..Default::default()
+    };
+    let warped = warp(&rgb_image, &transform, &warp_config);
 
     // Verify dimensions preserved
     assert_eq!(warped.width(), width);
@@ -689,8 +647,9 @@ fn test_warp_to_reference_image_rgb() {
 }
 
 #[test]
-fn test_warp_to_reference_image_preserves_metadata() {
+fn test_warp_preserves_metadata() {
     use crate::astro_image::AstroImageMetadata;
+    use crate::registration::Config as RegConfig;
 
     let (pixels, _) = stamps::star_field(256, 256, 30, 2.5, 0.05, 11111);
     let width = pixels.width();
@@ -706,7 +665,11 @@ fn test_warp_to_reference_image_preserves_metadata() {
     };
 
     let transform = Transform::translation(DVec2::new(5.0, 5.0));
-    let warped = warp_to_reference_image(&image, &transform, InterpolationMethod::Bilinear);
+    let warp_config = RegConfig {
+        interpolation: InterpolationMethod::Bilinear,
+        ..Default::default()
+    };
+    let warped = warp(&image, &transform, &warp_config);
 
     // Verify metadata is preserved
     assert_eq!(warped.metadata.object, Some("M42".to_string()));

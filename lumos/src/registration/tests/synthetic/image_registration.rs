@@ -8,30 +8,21 @@ use crate::{AstroImage, ImageDimensions};
 use glam::DVec2;
 
 use crate::common::Buffer2;
-use crate::registration::interpolation::{InterpolationMethod, WarpConfig, warp_image};
+use crate::registration::config::InterpolationMethod;
+use crate::registration::interpolation::warp_image;
 use crate::registration::transform::Transform;
-use crate::registration::{RegistrationConfig, Registrator, TransformType};
-use crate::star_detection::{StarDetector, config::Config};
+use crate::registration::{Config, TransformType, register_positions};
+use crate::star_detection::{StarDetector, config::Config as DetConfig};
 use crate::testing::synthetic::{self, StarFieldConfig};
 
 /// Default star detector for synthetic images.
 fn detector() -> StarDetector {
-    StarDetector::from_config(Config {
+    StarDetector::from_config(DetConfig {
         expected_fwhm: 0.0, // Disable matched filter for synthetic images
         min_snr: 5.0,
         sigma_threshold: 3.0,
         ..Default::default()
     })
-}
-
-/// Default warp config for tests - bilinear for speed.
-fn warp_config() -> WarpConfig {
-    WarpConfig {
-        method: InterpolationMethod::Bilinear,
-        border_value: 0.0,
-        normalize_kernel: true,
-        clamp_output: false,
-    }
 }
 
 /// Apply a similarity transform to an image.
@@ -46,14 +37,34 @@ fn transform_image(
 ) -> Vec<f32> {
     let transform = Transform::similarity(DVec2::new(dx, dy), angle_rad, scale);
     let src_buf = Buffer2::new(width, height, src_pixels.to_vec());
-    warp_image(&src_buf, width, height, &transform, &warp_config()).into_vec()
+    warp_image(
+        &src_buf,
+        width,
+        height,
+        &transform,
+        InterpolationMethod::Bilinear,
+        0.0,
+        true,
+        false,
+    )
+    .into_vec()
 }
 
 /// Apply a translation to an image.
 fn translate_image(src_pixels: &[f32], width: usize, height: usize, dx: f64, dy: f64) -> Vec<f32> {
     let transform = Transform::translation(DVec2::new(dx, dy));
     let src_buf = Buffer2::new(width, height, src_pixels.to_vec());
-    warp_image(&src_buf, width, height, &transform, &warp_config()).into_vec()
+    warp_image(
+        &src_buf,
+        width,
+        height,
+        &transform,
+        InterpolationMethod::Bilinear,
+        0.0,
+        true,
+        false,
+    )
+    .into_vec()
 }
 
 #[test]
@@ -109,17 +120,15 @@ fn test_image_registration_translation() {
         .collect();
 
     // Register the images
-    let reg_config = RegistrationConfig {
+    let reg_config = Config {
         transform_type: TransformType::Translation,
-        min_stars_for_matching: 6,
-        min_matched_stars: 4,
-        max_residual_pixels: 3.0,
+        min_stars: 6,
+        min_matches: 4,
+        max_rms_error: 3.0,
         ..Default::default()
     };
 
-    let registrator = Registrator::new(reg_config);
-    let result = registrator
-        .register_positions(&ref_stars, &target_stars)
+    let result = register_positions(&ref_stars, &target_stars, &reg_config)
         .expect("Registration should succeed");
 
     // Verify the recovered translation
@@ -192,17 +201,15 @@ fn test_image_registration_rotation() {
         .map(|s| DVec2::new(s.pos.x, s.pos.y))
         .collect();
 
-    let reg_config = RegistrationConfig {
+    let reg_config = Config {
         transform_type: TransformType::Euclidean,
-        min_stars_for_matching: 6,
-        min_matched_stars: 4,
-        max_residual_pixels: 3.0,
+        min_stars: 6,
+        min_matches: 4,
+        max_rms_error: 3.0,
         ..Default::default()
     };
 
-    let registrator = Registrator::new(reg_config);
-    let result = registrator
-        .register_positions(&ref_stars, &target_stars)
+    let result = register_positions(&ref_stars, &target_stars, &reg_config)
         .expect("Registration should succeed");
 
     // Verify rotation recovery
@@ -265,17 +272,15 @@ fn test_image_registration_similarity() {
         .map(|s| DVec2::new(s.pos.x, s.pos.y))
         .collect();
 
-    let reg_config = RegistrationConfig {
+    let reg_config = Config {
         transform_type: TransformType::Similarity,
-        min_stars_for_matching: 6,
-        min_matched_stars: 4,
-        max_residual_pixels: 3.0,
+        min_stars: 6,
+        min_matches: 4,
+        max_rms_error: 3.0,
         ..Default::default()
     };
 
-    let registrator = Registrator::new(reg_config);
-    let result = registrator
-        .register_positions(&ref_stars, &target_stars)
+    let result = register_positions(&ref_stars, &target_stars, &reg_config)
         .expect("Registration should succeed");
 
     // Verify scale and rotation recovery
@@ -331,7 +336,7 @@ fn test_image_registration_with_noise() {
     let target_image =
         AstroImage::from_pixels(ImageDimensions::new(width, height, 1), target_pixels);
 
-    let mut det = StarDetector::from_config(Config {
+    let mut det = StarDetector::from_config(DetConfig {
         expected_fwhm: 0.0,
         min_snr: 8.0,
         sigma_threshold: 4.0,
@@ -352,17 +357,15 @@ fn test_image_registration_with_noise() {
         .map(|s| DVec2::new(s.pos.x, s.pos.y))
         .collect();
 
-    let reg_config = RegistrationConfig {
+    let reg_config = Config {
         transform_type: TransformType::Translation,
-        min_stars_for_matching: 6,
-        min_matched_stars: 4,
-        max_residual_pixels: 5.0, // Allow more error due to noise
+        min_stars: 6,
+        min_matches: 4,
+        max_rms_error: 5.0, // Allow more error due to noise
         ..Default::default()
     };
 
-    let registrator = Registrator::new(reg_config);
-    let result = registrator
-        .register_positions(&ref_stars, &target_stars)
+    let result = register_positions(&ref_stars, &target_stars, &reg_config)
         .expect("Registration should succeed");
 
     let recovered = result.transform.translation_components();
@@ -432,17 +435,15 @@ fn test_image_registration_dense_field() {
         .map(|s| DVec2::new(s.pos.x, s.pos.y))
         .collect();
 
-    let reg_config = RegistrationConfig {
+    let reg_config = Config {
         transform_type: TransformType::Euclidean,
-        min_stars_for_matching: 10,
-        min_matched_stars: 8,
-        max_residual_pixels: 3.0,
+        min_stars: 10,
+        min_matches: 8,
+        max_rms_error: 3.0,
         ..Default::default()
     };
 
-    let registrator = Registrator::new(reg_config);
-    let result = registrator
-        .register_positions(&ref_stars, &target_stars)
+    let result = register_positions(&ref_stars, &target_stars, &reg_config)
         .expect("Registration should succeed");
 
     // Should have many matched stars in a dense field
@@ -498,17 +499,15 @@ fn test_image_registration_large_image() {
         .map(|s| DVec2::new(s.pos.x, s.pos.y))
         .collect();
 
-    let reg_config = RegistrationConfig {
+    let reg_config = Config {
         transform_type: TransformType::Translation,
-        min_stars_for_matching: 6,
-        min_matched_stars: 4,
-        max_residual_pixels: 3.0,
+        min_stars: 6,
+        min_matches: 4,
+        max_rms_error: 3.0,
         ..Default::default()
     };
 
-    let registrator = Registrator::new(reg_config);
-    let result = registrator
-        .register_positions(&ref_stars, &target_stars)
+    let result = register_positions(&ref_stars, &target_stars, &reg_config)
         .expect("Registration should succeed");
 
     let recovered = result.transform.translation_components();

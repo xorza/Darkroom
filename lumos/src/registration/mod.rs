@@ -1,16 +1,22 @@
 //! Image registration module for astronomical image alignment.
 //!
-//! This module provides state-of-the-art image registration algorithms optimized
-//! for astrophotography, including:
+//! This module provides star-based image registration using triangle matching
+//! and RANSAC for robust transformation estimation.
 //!
-//! - **Triangle matching**: Robust star pattern matching (Siril/Astroalign approach)
-//! - **Phase correlation**: FFT-based coarse alignment for large offsets
-//! - **RANSAC**: Robust transformation estimation with outlier rejection
-//! - **Lanczos interpolation**: High-quality sub-pixel image resampling
+//! # Quick Start
+//!
+//! ```ignore
+//! use lumos::registration::{register, warp, Config};
+//!
+//! // Register stars from two images
+//! let result = register(&ref_stars, &target_stars, &Config::default())?;
+//! println!("Matched {} stars, RMS = {:.2}px", result.num_inliers, result.rms_error);
+//!
+//! // Warp target image to align with reference
+//! let aligned = warp(&target_image, &result.transform, &Config::default());
+//! ```
 //!
 //! # Transformation Models
-//!
-//! Supported transformation types with increasing degrees of freedom:
 //!
 //! | Type | DOF | Description |
 //! |------|-----|-------------|
@@ -19,47 +25,16 @@
 //! | Similarity | 4 | Translation + rotation + uniform scale |
 //! | Affine | 6 | Handles shear and differential scaling |
 //! | Homography | 8 | Full perspective transformation |
+//! | Auto | - | Starts with Similarity, upgrades to Homography if needed |
 //!
-//! # Example
+//! # Configuration Presets
 //!
-//! ```ignore
-//! use lumos::registration::{Registrator, RegistrationConfig, TransformType};
-//!
-//! // Prepare star positions (x, y) from both images
-//! let ref_stars = vec![(100.0, 100.0), (200.0, 150.0), /* ... */];
-//! let target_stars = vec![(110.0, 105.0), (210.0, 155.0), /* ... */];
-//!
-//! // Configure registration
-//! let config = RegistrationConfig {
-//!     transform_type: TransformType::Similarity,
-//!     ..Default::default()
-//! };
-//!
-//! // Run registration
-//! let registrator = Registrator::new(config);
-//! let result = registrator.register_stars(&ref_stars, &target_stars)?;
-//!
-//! println!("RMS error: {:.3} pixels", result.rms_error);
-//! println!("Matched {} stars", result.num_inliers);
-//!
-//! // Apply transformation to align target image
-//! let aligned = warp_to_reference_image(&target_image, &result.transform, InterpolationMethod::Lanczos3);
-//! ```
-//!
-//! # Algorithm Overview
-//!
-//! The registration pipeline consists of:
-//!
-//! 1. **Star Detection**: Uses existing `star_detection` module
-//! 2. **Coarse Alignment** (optional): Phase correlation for large offsets
-//! 3. **Triangle Matching**: Geometric hashing for star pattern matching
-//! 4. **RANSAC**: Robust transformation estimation
-//! 5. **Refinement**: Least-squares optimization on inliers
-//! 6. **Warping**: High-quality image resampling
-//!
-//! See `IMPLEMENTATION_PLAN.md` for detailed algorithm documentation.
+//! - [`Config::default()`] — Balanced settings for most astrophotography
+//! - [`Config::fast()`] — Fewer iterations, bilinear interpolation
+//! - [`Config::precise()`] — More iterations, SIP distortion correction
+//! - [`Config::wide_field()`] — Homography + SIP for wide-field lenses
+//! - [`Config::mosaic()`] — Allows larger rotations and scale differences
 
-pub(crate) mod astrometry;
 pub(crate) mod config;
 pub(crate) mod distortion;
 pub(crate) mod interpolation;
@@ -73,42 +48,129 @@ pub(crate) mod triangle;
 #[cfg(test)]
 mod tests;
 
-// Re-export all configuration types from the consolidated config module
-pub use config::{
-    InterpolationMethod, RansacConfig, RegistrationConfig, SipCorrectionConfig,
-    TriangleMatchConfig, WarpConfig,
-};
+// === Primary Public API ===
 
-// High-level pipeline API (primary entry point)
-pub use pipeline::{
-    RansacFailureReason, RegistrationError, RegistrationResult, Registrator,
-    warp_to_reference_image,
-};
+// Configuration
+pub use config::{Config, InterpolationMethod};
 
-// Core types needed by users
+// Core types
 pub use transform::{Transform, TransformType};
-pub use triangle::PointMatch;
 
-// Distortion types
-pub use distortion::{DistortionMap, SipConfig, SipPolynomial, ThinPlateSpline, TpsConfig};
+// Results and errors
+pub use pipeline::{RansacFailureReason, RegistrationError, RegistrationResult, Registrator};
 
-// Interpolation (non-config types)
-pub use interpolation::warp_image;
+// Distortion (for users who need manual SIP access)
+pub use distortion::SipPolynomial;
 
-// RANSAC (non-config types)
-pub use ransac::{RansacEstimator, RansacResult};
+// === Top-Level Functions ===
 
-// Quality assessment
-pub use quality::{
+use crate::AstroImage;
+use crate::star_detection::Star;
+use glam::DVec2;
+
+/// Register two sets of star positions.
+///
+/// This is the main entry point for image registration. It finds the geometric
+/// transformation that maps reference star positions to target star positions.
+///
+/// Stars should be sorted by brightness (flux) in descending order for best results.
+///
+/// # Example
+///
+/// ```ignore
+/// use lumos::registration::{register, Config, TransformType};
+///
+/// // With defaults
+/// let result = register(&ref_stars, &target_stars, &Config::default())?;
+///
+/// // With custom config
+/// let config = Config {
+///     transform_type: TransformType::Similarity,
+///     inlier_threshold: 3.0,
+///     ..Config::default()
+/// };
+/// let result = register(&ref_stars, &target_stars, &config)?;
+///
+/// println!("Matched {} stars", result.num_inliers);
+/// println!("RMS error: {:.2} pixels", result.rms_error);
+/// ```
+pub fn register(
+    ref_stars: &[Star],
+    target_stars: &[Star],
+    config: &Config,
+) -> Result<RegistrationResult, RegistrationError> {
+    let registrator = Registrator::new(config.clone());
+    registrator.register_stars(ref_stars, target_stars)
+}
+
+/// Register using raw position vectors instead of Star structs.
+///
+/// Useful when you have pre-extracted positions or for testing.
+/// Positions should be sorted by brightness (brightest first) for best results.
+pub fn register_positions(
+    ref_positions: &[DVec2],
+    target_positions: &[DVec2],
+    config: &Config,
+) -> Result<RegistrationResult, RegistrationError> {
+    let registrator = Registrator::new(config.clone());
+    registrator.register_positions(ref_positions, target_positions)
+}
+
+/// Warp an image to align with the reference frame.
+///
+/// Takes a target image and applies the inverse transformation so it aligns
+/// pixel-for-pixel with the reference image.
+///
+/// # Example
+///
+/// ```ignore
+/// use lumos::registration::{register, warp, Config};
+///
+/// let result = register(&ref_stars, &target_stars, &Config::default())?;
+/// let aligned = warp(&target_image, &result.transform, &Config::default());
+/// ```
+pub fn warp(image: &AstroImage, transform: &Transform, config: &Config) -> AstroImage {
+    pipeline::warp_to_reference_image(image, transform, config.interpolation)
+}
+
+/// Compute transformation from known point correspondences.
+///
+/// Use when you have manually matched points (e.g., from user marking)
+/// and don't need the full registration pipeline with triangle matching.
+///
+/// Returns `None` if the transformation cannot be estimated (e.g., degenerate points).
+///
+/// # Example
+///
+/// ```ignore
+/// use lumos::registration::{compute_transform, TransformType};
+/// use glam::DVec2;
+///
+/// let ref_points = vec![DVec2::new(100.0, 100.0), DVec2::new(200.0, 150.0)];
+/// let target_points = vec![DVec2::new(110.0, 105.0), DVec2::new(210.0, 155.0)];
+///
+/// if let Some(transform) = compute_transform(&ref_points, &target_points, TransformType::Similarity) {
+///     println!("Translation: {:?}", transform.translation_components());
+/// }
+/// ```
+pub fn compute_transform(
+    ref_points: &[DVec2],
+    target_points: &[DVec2],
+    transform_type: TransformType,
+) -> Option<Transform> {
+    ransac::estimate_transform(ref_points, target_points, transform_type)
+}
+
+// === Internal Re-exports (for submodules) ===
+
+// These are pub(crate) so internal code can use them without
+// going through the full path, but they're not part of the public API.
+
+pub(crate) use distortion::{DistortionMap, SipConfig, ThinPlateSpline, TpsConfig};
+pub(crate) use interpolation::warp_image;
+pub(crate) use quality::{
     QuadrantConsistency, QualityMetrics, ResidualStats, check_quadrant_consistency,
     estimate_overlap,
 };
-
-// Triangle matching (non-config types)
-pub use triangle::match_triangles;
-
-// Astrometry (plate solving)
-pub use astrometry::{
-    CatalogError, CatalogSource, CatalogStar, PixelSkyMatch, PlateSolution, PlateSolver,
-    PlateSolverConfig, QuadHash, QuadHasher, SolveError, Wcs, WcsBuilder,
-};
+pub(crate) use ransac::{RansacEstimator, RansacResult};
+pub(crate) use triangle::{PointMatch, match_triangles};

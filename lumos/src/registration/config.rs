@@ -1,13 +1,6 @@
-//! Configuration types for the registration module.
-//!
-//! All configuration structs and related enums for the registration pipeline
-//! are consolidated here. Individual submodules re-export the types they need.
+//! Configuration for the registration module.
 
 use crate::registration::transform::TransformType;
-
-// =============================================================================
-// Interpolation configuration
-// =============================================================================
 
 /// Interpolation method for image resampling.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -42,40 +35,136 @@ impl InterpolationMethod {
     }
 }
 
-/// Configuration for image warping.
+/// Configuration for image registration.
+///
+/// All parameters have sensible defaults calibrated against industry standards
+/// (OpenCV, Astroalign, PixInsight). Most users only need to set `transform_type`
+/// if they want a specific model.
+///
+/// # Example
+///
+/// ```ignore
+/// use lumos::registration::{Config, register};
+///
+/// // Use defaults
+/// let result = register(&ref_stars, &target_stars, &Config::default())?;
+///
+/// // Custom config
+/// let config = Config {
+///     inlier_threshold: 3.0,
+///     ..Config::default()
+/// };
+/// let result = register(&ref_stars, &target_stars, &config)?;
+///
+/// // Use a preset
+/// let result = register(&ref_stars, &target_stars, &Config::wide_field())?;
+/// ```
 #[derive(Debug, Clone)]
-pub struct WarpConfig {
-    /// Interpolation method to use
-    pub method: InterpolationMethod,
-    /// Value to use for pixels outside the image bounds
+pub struct Config {
+    // == Transform model ==
+    /// Transformation model: Translation, Euclidean, Similarity, Affine, Homography, Auto.
+    /// Default: Auto (starts with Similarity, upgrades to Homography if needed).
+    pub transform_type: TransformType,
+
+    // == Star matching ==
+    /// Maximum stars to use for matching (brightest N). Default: 200.
+    pub max_stars: usize,
+    /// Minimum stars required in each image. Default: 10.
+    pub min_stars: usize,
+    /// Minimum matched star pairs to accept. Default: 8.
+    pub min_matches: usize,
+    /// Triangle ratio tolerance (0.01 = 1%). Default: 0.01.
+    pub ratio_tolerance: f64,
+    /// Minimum confirming triangles per match. Default: 3.
+    pub min_votes: usize,
+    /// Check orientation (false allows mirrored images). Default: true.
+    pub check_orientation: bool,
+
+    // == Spatial distribution ==
+    /// Use spatial grid for star selection. Default: true.
+    pub use_spatial_grid: bool,
+    /// Grid size (NxN cells). Default: 8.
+    pub spatial_grid_size: usize,
+
+    // == RANSAC ==
+    /// RANSAC iterations. Default: 2000.
+    pub ransac_iterations: usize,
+    /// Inlier distance threshold in pixels. Default: 2.0.
+    pub inlier_threshold: f64,
+    /// Target confidence for early termination. Default: 0.995.
+    pub confidence: f64,
+    /// Minimum inlier ratio. Default: 0.3.
+    pub min_inlier_ratio: f64,
+    /// Random seed for reproducibility (None = random). Default: None.
+    pub seed: Option<u64>,
+    /// Enable LO-RANSAC refinement. Default: true.
+    pub local_optimization: bool,
+    /// LO-RANSAC iterations. Default: 10.
+    pub lo_iterations: usize,
+    /// Maximum rotation in radians (None = unlimited). Default: Some(0.175).
+    pub max_rotation: Option<f64>,
+    /// Scale range (min, max). Default: Some((0.8, 1.2)).
+    pub scale_range: Option<(f64, f64)>,
+
+    // == Quality ==
+    /// Maximum acceptable RMS error in pixels. Default: 2.0.
+    pub max_rms_error: f64,
+
+    // == Distortion correction ==
+    /// Enable SIP polynomial distortion correction. Default: false.
+    pub sip_enabled: bool,
+    /// SIP polynomial order (2-5). Default: 3.
+    pub sip_order: usize,
+
+    // == Image warping ==
+    /// Interpolation method for warping. Default: Lanczos3.
+    pub interpolation: InterpolationMethod,
+    /// Border value for out-of-bounds pixels. Default: 0.0.
     pub border_value: f32,
-    /// Whether to normalize Lanczos kernel weights (recommended)
+    /// Normalize Lanczos kernel weights. Default: true.
     pub normalize_kernel: bool,
-    /// Clamp output to the min/max of neighborhood pixels to reduce ringing.
-    ///
-    /// Lanczos interpolation can produce values outside the range of input pixels
-    /// (ringing artifacts) especially near sharp edges. Enabling this option clamps
-    /// the result to [min, max] of the sampled neighborhood, eliminating overshoot
-    /// and undershoot while preserving most of the sharpness benefit.
-    ///
-    /// This option only affects Lanczos interpolation methods.
+    /// Clamp output to reduce Lanczos ringing. Default: false.
     pub clamp_output: bool,
 }
 
-impl WarpConfig {
-    /// Validate configuration parameters.
-    pub fn validate(&self) {
-        // border_value can be any f32, no constraint needed
-        // normalize_kernel and clamp_output are booleans, always valid
-        // method is an enum, always valid
-        // No invalid states for WarpConfig - all field combinations are valid
-    }
-}
-
-impl Default for WarpConfig {
+impl Default for Config {
     fn default() -> Self {
         Self {
-            method: InterpolationMethod::default(),
+            // Transform
+            transform_type: TransformType::Auto,
+
+            // Star matching
+            max_stars: 200,
+            min_stars: 10,
+            min_matches: 8,
+            ratio_tolerance: 0.01,
+            min_votes: 3,
+            check_orientation: true,
+
+            // Spatial distribution
+            use_spatial_grid: true,
+            spatial_grid_size: 8,
+
+            // RANSAC
+            ransac_iterations: 2000,
+            inlier_threshold: 2.0,
+            confidence: 0.995,
+            min_inlier_ratio: 0.3,
+            seed: None,
+            local_optimization: true,
+            lo_iterations: 10,
+            max_rotation: Some(10.0_f64.to_radians()),
+            scale_range: Some((0.8, 1.2)),
+
+            // Quality
+            max_rms_error: 2.0,
+
+            // Distortion
+            sip_enabled: false,
+            sip_order: 3,
+
+            // Warping
+            interpolation: InterpolationMethod::default(),
             border_value: 0.0,
             normalize_kernel: true,
             clamp_output: false,
@@ -83,158 +172,74 @@ impl Default for WarpConfig {
     }
 }
 
-// =============================================================================
-// RANSAC configuration
-// =============================================================================
-
-/// RANSAC configuration.
-///
-/// Defaults are calibrated against industry standards:
-/// - OpenCV `findHomography`: threshold=3.0, iterations=2000, confidence=0.995
-/// - Astroalign: pixel_tol=2.0
-/// - PixInsight StarAlignment: RANSAC tolerance=2.0, iterations=2000
-///
-/// Our defaults use threshold=2.0 (tighter than OpenCV for sub-pixel astronomy),
-/// iterations=2000 (matches OpenCV/PixInsight for reliability), and confidence=0.995
-/// (OpenCV default; avoids overly aggressive early termination that 0.999 can cause).
-#[derive(Debug, Clone)]
-pub struct RansacConfig {
-    /// Maximum iterations.
-    pub max_iterations: usize,
-    /// Inlier distance threshold in pixels.
-    /// OpenCV default is 3.0, Astroalign uses 2.0. We use 2.0 for sub-pixel astronomy.
-    pub inlier_threshold: f64,
-    /// Target confidence for early termination.
-    /// OpenCV uses 0.995. Higher values (e.g. 0.999) can cause premature termination
-    /// when a spurious model is found early with few inliers.
-    pub confidence: f64,
-    /// Minimum inlier ratio to accept model.
-    /// Set to 0.3 to handle partial overlap and noisy match sets.
-    /// Astroalign uses 0.8 but operates on pre-filtered control points.
-    pub min_inlier_ratio: f64,
-    /// Random seed for reproducibility (None for random).
-    pub seed: Option<u64>,
-    /// Enable Local Optimization (LO-RANSAC).
-    /// When enabled, promising hypotheses are refined iteratively.
-    /// Typically improves inlier count by 10-20% (Chum et al., 2003).
-    pub use_local_optimization: bool,
-    /// Maximum iterations for local optimization step.
-    pub lo_max_iterations: usize,
-    /// Maximum allowed rotation in radians. Hypotheses with rotation exceeding
-    /// this threshold are rejected as implausible. Set to `None` to disable.
-    /// Default: 10 degrees (~0.175 rad), suitable for tracked mounts.
-    /// Mosaics or untracked mounts may need higher values or `None`.
-    pub max_rotation: Option<f64>,
-    /// Allowed scale range (min, max). Hypotheses with scale outside this range
-    /// are rejected as implausible. Set to `None` to disable.
-    /// Default: (0.8, 1.2), suitable for same-telescope stacking.
-    /// Different focal lengths or binning modes may need wider ranges or `None`.
-    pub scale_range: Option<(f64, f64)>,
-}
-
-impl Default for RansacConfig {
-    fn default() -> Self {
+impl Config {
+    /// Fast configuration: fewer iterations, lower quality, faster.
+    pub fn fast() -> Self {
         Self {
-            max_iterations: 2000,
-            inlier_threshold: 2.0,
-            confidence: 0.995,
-            min_inlier_ratio: 0.3,
-            seed: None,
-            use_local_optimization: true,
-            lo_max_iterations: 10,
-            max_rotation: Some(10.0_f64.to_radians()),
-            scale_range: Some((0.8, 1.2)),
+            ransac_iterations: 500,
+            max_stars: 100,
+            local_optimization: false,
+            interpolation: InterpolationMethod::Bilinear,
+            ..Self::default()
         }
     }
-}
 
-impl RansacConfig {
-    /// Validate configuration parameters.
-    pub fn validate(&self) {
-        assert!(
-            self.max_iterations > 0,
-            "RANSAC max_iterations must be positive, got {}",
-            self.max_iterations
-        );
-        assert!(
-            self.inlier_threshold > 0.0,
-            "RANSAC inlier_threshold must be positive, got {}",
-            self.inlier_threshold
-        );
-        assert!(
-            (0.0..=1.0).contains(&self.confidence),
-            "RANSAC confidence must be in [0, 1], got {}",
-            self.confidence
-        );
-        assert!(
-            self.min_inlier_ratio > 0.0 && self.min_inlier_ratio <= 1.0,
-            "RANSAC min_inlier_ratio must be in (0, 1], got {}",
-            self.min_inlier_ratio
-        );
-        if let Some(max_rot) = self.max_rotation {
-            assert!(
-                max_rot > 0.0,
-                "RANSAC max_rotation must be positive, got {}",
-                max_rot
-            );
-        }
-        if let Some((min_scale, max_scale)) = self.scale_range {
-            assert!(
-                min_scale > 0.0 && max_scale > min_scale,
-                "RANSAC scale_range must have 0 < min < max, got ({}, {})",
-                min_scale,
-                max_scale
-            );
-        }
-    }
-}
-
-// =============================================================================
-// Triangle matching configuration
-// =============================================================================
-
-/// Configuration for triangle matching.
-///
-/// Defaults are based on industry practice:
-/// - Siril uses brightest 20 stars with brute-force O(n^3) triangle formation.
-///   We use k-d tree based formation on 200 stars for O(n*k^2) scaling.
-/// - Astroalign uses 50 control points with 5 nearest neighbors per star
-///   and KDTree search radius 0.02 for invariant matching.
-/// - Our 1% ratio tolerance is stricter than Astroalign's 0.02 radius but
-///   we compensate with a larger star count (200 vs 50).
-#[derive(Debug, Clone)]
-pub struct TriangleMatchConfig {
-    /// Maximum number of stars to use (brightest N).
-    /// Siril uses 20 (brute-force), Astroalign uses 50, we use 200 with k-d tree.
-    pub max_stars: usize,
-    /// Tolerance for side ratio comparison.
-    /// 1% tolerance provides good selectivity while allowing for centroid noise.
-    pub ratio_tolerance: f64,
-    /// Minimum votes required to accept a match.
-    /// A star pair must be confirmed by at least this many independent triangles.
-    pub min_votes: usize,
-    /// Check orientation (set false to handle mirrored images).
-    pub check_orientation: bool,
-}
-
-impl Default for TriangleMatchConfig {
-    fn default() -> Self {
+    /// Precise configuration: more iterations, SIP correction enabled.
+    pub fn precise() -> Self {
         Self {
-            max_stars: 200,
-            ratio_tolerance: 0.01,
-            min_votes: 3,
-            check_orientation: true,
+            ransac_iterations: 5000,
+            confidence: 0.999,
+            sip_enabled: true,
+            max_rms_error: 1.0,
+            ..Self::default()
         }
     }
-}
 
-impl TriangleMatchConfig {
-    /// Validate configuration parameters.
+    /// Wide-field configuration: handles lens distortion.
+    pub fn wide_field() -> Self {
+        Self {
+            transform_type: TransformType::Homography,
+            sip_enabled: true,
+            max_rotation: None,
+            scale_range: None,
+            ..Self::default()
+        }
+    }
+
+    /// Mosaic configuration: allows larger offsets and rotations.
+    pub fn mosaic() -> Self {
+        Self {
+            max_rotation: None,
+            scale_range: Some((0.5, 2.0)),
+            use_spatial_grid: true,
+            ..Self::default()
+        }
+    }
+
+    /// Validate all configuration parameters.
     pub fn validate(&self) {
+        // Star matching
         assert!(
             self.max_stars >= 3,
             "max_stars must be >= 3 for triangle matching, got {}",
             self.max_stars
+        );
+        assert!(
+            self.min_stars >= 3,
+            "min_stars must be >= 3 for triangle matching, got {}",
+            self.min_stars
+        );
+        assert!(
+            self.max_stars >= self.min_stars,
+            "max_stars ({}) must be >= min_stars ({})",
+            self.max_stars,
+            self.min_stars
+        );
+        assert!(
+            self.min_matches >= self.transform_type.min_points(),
+            "min_matches ({}) must be >= transform minimum points ({})",
+            self.min_matches,
+            self.transform_type.min_points()
         );
         assert!(
             self.ratio_tolerance > 0.0 && self.ratio_tolerance < 1.0,
@@ -246,144 +251,66 @@ impl TriangleMatchConfig {
             "min_votes must be at least 1, got {}",
             self.min_votes
         );
-    }
-}
 
-// =============================================================================
-// Registration pipeline configuration
-// =============================================================================
-
-/// SIP distortion correction configuration for the registration pipeline.
-///
-/// When enabled, a SIP polynomial is fit to the residuals after RANSAC
-/// to correct for optical distortion that a single homography cannot capture.
-#[derive(Debug, Clone)]
-pub struct SipCorrectionConfig {
-    /// Whether to enable SIP correction.
-    pub enabled: bool,
-    /// Polynomial order (2-5). Order 2 handles barrel/pincushion,
-    /// order 3 handles mustache distortion.
-    pub order: usize,
-}
-
-impl Default for SipCorrectionConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            order: 3,
-        }
-    }
-}
-
-impl SipCorrectionConfig {
-    /// Validate configuration.
-    pub fn validate(&self) {
-        if self.enabled {
-            assert!(
-                (2..=5).contains(&self.order),
-                "SIP order must be 2-5, got {}",
-                self.order
-            );
-        }
-    }
-}
-
-/// Registration configuration.
-///
-/// Defaults target reasonable precision and quality for typical astrophotography:
-/// - Homography transform (8 DOF) — Siril's default, handles wide-field perspective.
-///   Similarity is insufficient for wide-field lenses; Homography is robust for both
-///   narrow and wide fields.
-/// - 2.0 pixel max residual — matches Astroalign/PixInsight tolerance. 1.0 is too
-///   strict and rejects valid registrations with slight distortion.
-/// - Spatial distribution enabled — ensures star coverage across the field, critical
-///   for accurate distortion modeling on wide-field images.
-#[derive(Debug, Clone)]
-pub struct RegistrationConfig {
-    /// Transformation model to use.
-    /// Default is `Auto`, which starts with Similarity (4 DOF) and upgrades to
-    /// Homography (8 DOF) if residuals exceed 0.5 px. Use an explicit type to
-    /// force a specific model.
-    pub transform_type: TransformType,
-
-    /// Minimum stars required for matching.
-    pub min_stars_for_matching: usize,
-    /// Minimum matched star pairs required.
-    /// Siril uses 10, we use 8 as a balanced minimum that ensures statistical
-    /// robustness without being too strict for sparse fields.
-    pub min_matched_stars: usize,
-    /// Maximum acceptable RMS error in pixels.
-    /// Astroalign uses 2.0, PixInsight starts at 2.0. Our default of 2.0 avoids
-    /// rejecting valid registrations that have slight optical distortion.
-    pub max_residual_pixels: f64,
-
-    /// Use spatial distribution when selecting stars for matching.
-    /// When enabled, stars are selected from a grid across the image to ensure
-    /// coverage of all regions, rather than just taking the brightest N stars
-    /// which may cluster in one area. This improves registration accuracy for
-    /// images with lens distortion.
-    pub use_spatial_distribution: bool,
-
-    /// Grid size for spatial distribution (NxN cells).
-    /// Only used when `use_spatial_distribution` is true.
-    pub spatial_grid_size: usize,
-
-    /// Triangle matching configuration.
-    pub triangle: TriangleMatchConfig,
-    /// RANSAC robust estimation configuration.
-    pub ransac: RansacConfig,
-    /// Image warping configuration.
-    pub warp: WarpConfig,
-    /// SIP distortion correction (post-RANSAC polynomial refinement).
-    pub sip: SipCorrectionConfig,
-}
-
-impl Default for RegistrationConfig {
-    fn default() -> Self {
-        Self {
-            transform_type: TransformType::Auto,
-            min_stars_for_matching: 10,
-            min_matched_stars: 8,
-            max_residual_pixels: 2.0,
-            use_spatial_distribution: true,
-            spatial_grid_size: 8,
-            triangle: TriangleMatchConfig::default(),
-            ransac: RansacConfig::default(),
-            warp: WarpConfig::default(),
-            sip: SipCorrectionConfig::default(),
-        }
-    }
-}
-
-impl RegistrationConfig {
-    /// Validate configuration parameters.
-    pub fn validate(&self) {
-        assert!(
-            self.min_stars_for_matching >= 3,
-            "Need at least 3 stars for triangle matching"
-        );
-        assert!(
-            self.triangle.max_stars >= self.min_stars_for_matching,
-            "triangle.max_stars must be >= min_stars_for_matching"
-        );
-        assert!(
-            self.min_matched_stars >= self.transform_type.min_points(),
-            "min_matched_stars must be >= transform minimum points"
-        );
-        assert!(
-            self.max_residual_pixels > 0.0,
-            "max_residual must be positive"
-        );
+        // Spatial distribution
         assert!(
             self.spatial_grid_size >= 2,
-            "spatial_grid_size must be at least 2"
+            "spatial_grid_size must be at least 2, got {}",
+            self.spatial_grid_size
         );
 
-        // Delegate to sub-config validation
-        self.triangle.validate();
-        self.ransac.validate();
-        self.warp.validate();
-        self.sip.validate();
+        // RANSAC
+        assert!(
+            self.ransac_iterations > 0,
+            "ransac_iterations must be positive, got {}",
+            self.ransac_iterations
+        );
+        assert!(
+            self.inlier_threshold > 0.0,
+            "inlier_threshold must be positive, got {}",
+            self.inlier_threshold
+        );
+        assert!(
+            (0.0..=1.0).contains(&self.confidence),
+            "confidence must be in [0, 1], got {}",
+            self.confidence
+        );
+        assert!(
+            self.min_inlier_ratio > 0.0 && self.min_inlier_ratio <= 1.0,
+            "min_inlier_ratio must be in (0, 1], got {}",
+            self.min_inlier_ratio
+        );
+        if let Some(max_rot) = self.max_rotation {
+            assert!(
+                max_rot > 0.0,
+                "max_rotation must be positive, got {}",
+                max_rot
+            );
+        }
+        if let Some((min_scale, max_scale)) = self.scale_range {
+            assert!(
+                min_scale > 0.0 && max_scale > min_scale,
+                "scale_range must have 0 < min < max, got ({}, {})",
+                min_scale,
+                max_scale
+            );
+        }
+
+        // Quality
+        assert!(
+            self.max_rms_error > 0.0,
+            "max_rms_error must be positive, got {}",
+            self.max_rms_error
+        );
+
+        // Distortion
+        if self.sip_enabled {
+            assert!(
+                (2..=5).contains(&self.sip_order),
+                "sip_order must be 2-5, got {}",
+                self.sip_order
+            );
+        }
     }
 }
 
@@ -393,93 +320,116 @@ mod tests {
 
     #[test]
     fn test_config_default_values() {
-        let config = RegistrationConfig::default();
+        let config = Config::default();
         assert_eq!(config.transform_type, TransformType::Auto);
-        assert_eq!(config.min_matched_stars, 8);
-        assert!((config.max_residual_pixels - 2.0).abs() < 1e-10);
-        assert_eq!(config.ransac.max_iterations, 2000);
-        assert!((config.ransac.inlier_threshold - 2.0).abs() < 1e-10);
-        assert!((config.ransac.confidence - 0.995).abs() < 1e-10);
-        assert!((config.ransac.min_inlier_ratio - 0.3).abs() < 1e-10);
-        assert_eq!(config.triangle.max_stars, 200);
-    }
-
-    #[test]
-    fn test_config_struct_init() {
-        let config = RegistrationConfig {
-            transform_type: TransformType::Euclidean,
-            ransac: RansacConfig {
-                max_iterations: 500,
-                inlier_threshold: 3.0,
-                ..RansacConfig::default()
-            },
-            triangle: TriangleMatchConfig {
-                max_stars: 100,
-                ..TriangleMatchConfig::default()
-            },
-            ..Default::default()
-        };
-
-        assert_eq!(config.transform_type, TransformType::Euclidean);
-        assert_eq!(config.ransac.max_iterations, 500);
-        assert!((config.ransac.inlier_threshold - 3.0).abs() < 1e-10);
-        assert_eq!(config.triangle.max_stars, 100);
+        assert_eq!(config.max_stars, 200);
+        assert_eq!(config.min_stars, 10);
+        assert_eq!(config.min_matches, 8);
+        assert!((config.ratio_tolerance - 0.01).abs() < 1e-10);
+        assert_eq!(config.min_votes, 3);
+        assert!(config.check_orientation);
+        assert!(config.use_spatial_grid);
+        assert_eq!(config.spatial_grid_size, 8);
+        assert_eq!(config.ransac_iterations, 2000);
+        assert!((config.inlier_threshold - 2.0).abs() < 1e-10);
+        assert!((config.confidence - 0.995).abs() < 1e-10);
+        assert!((config.min_inlier_ratio - 0.3).abs() < 1e-10);
+        assert!(config.seed.is_none());
+        assert!(config.local_optimization);
+        assert_eq!(config.lo_iterations, 10);
+        assert!((config.max_rms_error - 2.0).abs() < 1e-10);
+        assert!(!config.sip_enabled);
+        assert_eq!(config.sip_order, 3);
+        assert_eq!(config.interpolation, InterpolationMethod::Lanczos3);
+        assert!((config.border_value - 0.0).abs() < 1e-10);
+        assert!(config.normalize_kernel);
+        assert!(!config.clamp_output);
     }
 
     #[test]
     fn test_config_validation() {
-        let config = RegistrationConfig::default();
+        Config::default().validate();
+    }
+
+    #[test]
+    fn test_config_fast_preset() {
+        let config = Config::fast();
+        assert_eq!(config.ransac_iterations, 500);
+        assert_eq!(config.max_stars, 100);
+        assert!(!config.local_optimization);
+        assert_eq!(config.interpolation, InterpolationMethod::Bilinear);
         config.validate();
     }
 
     #[test]
-    #[should_panic(expected = "RANSAC max_iterations must be positive")]
-    fn test_config_invalid_iterations() {
-        let config = RegistrationConfig {
-            ransac: RansacConfig {
-                max_iterations: 0,
-                ..RansacConfig::default()
-            },
-            ..Default::default()
+    fn test_config_precise_preset() {
+        let config = Config::precise();
+        assert_eq!(config.ransac_iterations, 5000);
+        assert!((config.confidence - 0.999).abs() < 1e-10);
+        assert!(config.sip_enabled);
+        assert!((config.max_rms_error - 1.0).abs() < 1e-10);
+        config.validate();
+    }
+
+    #[test]
+    fn test_config_wide_field_preset() {
+        let config = Config::wide_field();
+        assert_eq!(config.transform_type, TransformType::Homography);
+        assert!(config.sip_enabled);
+        assert!(config.max_rotation.is_none());
+        assert!(config.scale_range.is_none());
+        config.validate();
+    }
+
+    #[test]
+    fn test_config_mosaic_preset() {
+        let config = Config::mosaic();
+        assert!(config.max_rotation.is_none());
+        assert_eq!(config.scale_range, Some((0.5, 2.0)));
+        assert!(config.use_spatial_grid);
+        config.validate();
+    }
+
+    #[test]
+    fn test_config_custom() {
+        let config = Config {
+            transform_type: TransformType::Similarity,
+            inlier_threshold: 3.0,
+            ransac_iterations: 1000,
+            ..Config::default()
         };
+        assert_eq!(config.transform_type, TransformType::Similarity);
+        assert!((config.inlier_threshold - 3.0).abs() < 1e-10);
+        assert_eq!(config.ransac_iterations, 1000);
         config.validate();
     }
 
     #[test]
-    fn test_warp_config_default() {
-        let config = WarpConfig::default();
-        assert_eq!(config.method, InterpolationMethod::Lanczos3);
-        assert!((config.border_value - 0.0).abs() < 1e-10);
-        assert!(config.normalize_kernel);
-        assert!(!config.clamp_output);
-        config.validate();
-    }
-
-    #[test]
-    fn test_ransac_config_default() {
-        let config = RansacConfig::default();
-        assert_eq!(config.max_iterations, 2000);
-        assert!((config.inlier_threshold - 2.0).abs() < 1e-10);
-        assert!((config.confidence - 0.995).abs() < 1e-10);
-        assert!((config.min_inlier_ratio - 0.3).abs() < 1e-10);
-        assert!(config.use_local_optimization);
-        config.validate();
-    }
-
-    #[test]
-    fn test_triangle_config_default() {
-        let config = TriangleMatchConfig::default();
-        assert_eq!(config.max_stars, 200);
-        assert!((config.ratio_tolerance - 0.01).abs() < 1e-10);
+    #[should_panic(expected = "ransac_iterations must be positive")]
+    fn test_config_invalid_iterations() {
+        let config = Config {
+            ransac_iterations: 0,
+            ..Config::default()
+        };
         config.validate();
     }
 
     #[test]
     #[should_panic(expected = "max_stars must be >= 3")]
-    fn test_triangle_config_invalid() {
-        let config = TriangleMatchConfig {
+    fn test_config_invalid_max_stars() {
+        let config = Config {
             max_stars: 2,
-            ..TriangleMatchConfig::default()
+            ..Config::default()
+        };
+        config.validate();
+    }
+
+    #[test]
+    #[should_panic(expected = "inlier_threshold must be positive")]
+    fn test_config_invalid_threshold() {
+        let config = Config {
+            inlier_threshold: 0.0,
+            ..Config::default()
         };
         config.validate();
     }

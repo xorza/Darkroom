@@ -16,7 +16,7 @@
 use std::env;
 use std::path::Path;
 
-use lumos::{AstroImage, InterpolationMethod, Registrator, StarDetector, warp_to_reference_image};
+use lumos::{AstroImage, InterpolationMethod, RegistrationConfig, Registrator, StarDetector, warp};
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -76,11 +76,11 @@ fn main() {
 
     // Warp target to align with reference
     println!("\nWarping target image...");
-    let aligned = warp_to_reference_image(
-        &target_image,
-        &result.transform,
-        InterpolationMethod::Lanczos3,
-    );
+    let warp_config = RegistrationConfig {
+        interpolation: InterpolationMethod::Lanczos3,
+        ..Default::default()
+    };
+    let aligned = warp(&target_image, &result.transform, &warp_config);
 
     // Save result
     println!("Saving aligned image to: {}", output_path.display());

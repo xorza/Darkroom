@@ -22,9 +22,38 @@ pub(crate) use transforms::{
 use glam::DVec2;
 use rand::prelude::*;
 
-pub use crate::registration::config::RansacConfig;
 use crate::registration::transform::{Transform, TransformType};
 use crate::registration::triangle::PointMatch;
+
+/// RANSAC parameters extracted from Config.
+#[derive(Debug, Clone)]
+pub struct RansacParams {
+    pub max_iterations: usize,
+    pub inlier_threshold: f64,
+    pub confidence: f64,
+    pub min_inlier_ratio: f64,
+    pub seed: Option<u64>,
+    pub use_local_optimization: bool,
+    pub lo_max_iterations: usize,
+    pub max_rotation: Option<f64>,
+    pub scale_range: Option<(f64, f64)>,
+}
+
+impl Default for RansacParams {
+    fn default() -> Self {
+        Self {
+            max_iterations: 2000,
+            inlier_threshold: 2.0,
+            confidence: 0.999,
+            min_inlier_ratio: 0.3,
+            seed: None,
+            use_local_optimization: true,
+            lo_max_iterations: 10,
+            max_rotation: None,
+            scale_range: None,
+        }
+    }
+}
 
 // Wrapper for seeded vs non-seeded RNG
 enum RngWrapper {
@@ -77,21 +106,23 @@ pub struct RansacResult {
     pub transform: Transform,
     /// Indices of inlier matches.
     pub inliers: Vec<usize>,
-    /// Number of iterations performed.
+    /// Number of iterations performed. Used for diagnostics and testing.
+    #[allow(dead_code)]
     pub iterations: usize,
-    /// Final inlier ratio.
+    /// Final inlier ratio. Used for diagnostics and testing.
+    #[allow(dead_code)]
     pub inlier_ratio: f64,
 }
 
 /// RANSAC estimator for robust transformation fitting.
 pub struct RansacEstimator {
-    config: RansacConfig,
+    params: RansacParams,
 }
 
 impl RansacEstimator {
     /// Create a new RANSAC estimator.
-    pub fn new(config: RansacConfig) -> Self {
-        Self { config }
+    pub fn new(params: RansacParams) -> Self {
+        Self { params }
     }
 
     /// Check whether a transform hypothesis is physically plausible.
@@ -99,13 +130,13 @@ impl RansacEstimator {
     /// Rejects hypotheses where rotation or scale fall outside configured bounds.
     /// Returns `true` if the transform is plausible (or checks are disabled).
     fn is_plausible(&self, transform: &Transform) -> bool {
-        if let Some(max_rotation) = self.config.max_rotation {
+        if let Some(max_rotation) = self.params.max_rotation {
             let angle = transform.rotation_angle().abs();
             if angle > max_rotation {
                 return false;
             }
         }
-        if let Some((min_scale, max_scale)) = self.config.scale_range {
+        if let Some((min_scale, max_scale)) = self.params.scale_range {
             let scale = transform.scale_factor();
             if scale < min_scale || scale > max_scale {
                 return false;
@@ -123,6 +154,7 @@ impl RansacEstimator {
     ///
     /// # Returns
     /// Best transformation found, or None if estimation failed.
+    #[allow(dead_code)] // Used in tests
     pub fn estimate(
         &self,
         ref_points: &[DVec2],
@@ -136,7 +168,7 @@ impl RansacEstimator {
             return None;
         }
 
-        let mut rng = RngWrapper::new(self.config.seed);
+        let mut rng = RngWrapper::new(self.params.seed);
 
         self.ransac_loop(
             ref_points,
@@ -186,7 +218,7 @@ impl RansacEstimator {
         );
         let mut current_score = initial_score;
 
-        for _ in 0..self.config.lo_max_iterations {
+        for _ in 0..self.params.lo_max_iterations {
             if current_inliers.len() < min_samples {
                 break;
             }
@@ -241,7 +273,7 @@ impl RansacEstimator {
         transform_type: TransformType,
         mut sample_fn: impl FnMut(usize, usize, &mut Vec<usize>),
     ) -> Option<RansacResult> {
-        let threshold_sq = self.config.inlier_threshold * self.config.inlier_threshold;
+        let threshold_sq = self.params.inlier_threshold * self.params.inlier_threshold;
 
         let mut best_transform: Option<Transform> = None;
         let mut best_inliers: Vec<usize> = Vec::new();
@@ -257,7 +289,7 @@ impl RansacEstimator {
         let mut lo_point_buf_target: Vec<DVec2> = Vec::with_capacity(n);
 
         let mut iterations = 0;
-        let max_iter = self.config.max_iterations;
+        let max_iter = self.params.max_iterations;
 
         while iterations < max_iter {
             iterations += 1;
@@ -301,7 +333,7 @@ impl RansacEstimator {
             let mut current_transform = transform;
 
             // Local Optimization: if this hypothesis looks promising, refine it
-            if self.config.use_local_optimization && inlier_buf.len() >= min_samples {
+            if self.params.use_local_optimization && inlier_buf.len() >= min_samples {
                 let (lo_transform, lo_inliers, lo_score) = self.local_optimization(
                     ref_points,
                     target_points,
@@ -328,9 +360,9 @@ impl RansacEstimator {
 
                 // Adaptive iteration count based on inlier ratio
                 let inlier_ratio = best_inliers.len() as f64 / n as f64;
-                if inlier_ratio >= self.config.min_inlier_ratio {
+                if inlier_ratio >= self.params.min_inlier_ratio {
                     let adaptive_max =
-                        adaptive_iterations(inlier_ratio, min_samples, self.config.confidence);
+                        adaptive_iterations(inlier_ratio, min_samples, self.params.confidence);
                     if iterations >= adaptive_max {
                         break;
                     }
@@ -402,7 +434,7 @@ impl RansacEstimator {
             return None;
         }
 
-        let mut rng = RngWrapper::new(self.config.seed);
+        let mut rng = RngWrapper::new(self.params.seed);
 
         // Build sorted index by confidence (descending)
         let mut sorted_indices: Vec<usize> = (0..n).collect();

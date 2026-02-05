@@ -31,9 +31,6 @@ sysinfo = { workspace = true }
 rand = { workspace = true }
 rand_chacha = { workspace = true }
 nalgebra = { workspace = true }
-wgpu = { workspace = true }
-ureq = { workspace = true }
-bumpalo = { workspace = true }
 arrayvec = { workspace = true }
 smallvec = { workspace = true }
 hashbrown = { workspace = true }

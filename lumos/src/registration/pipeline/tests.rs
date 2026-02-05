@@ -12,14 +12,14 @@ fn register_star_positions(
     target_positions: &[DVec2],
     transform_type: TransformType,
 ) -> Result<RegistrationResult, RegistrationError> {
-    let config = RegistrationConfig {
+    let config = Config {
         transform_type,
-        min_stars_for_matching: 6,
-        min_matched_stars: 4,
-        max_residual_pixels: 2.0,
+        min_stars: 6,
+        min_matches: 4,
+        inlier_threshold: 2.0,
         ..Default::default()
     };
-    Registrator::new(config).register_positions(ref_positions, target_positions)
+    crate::registration::register_positions(ref_positions, target_positions, &config)
 }
 
 fn generate_star_grid(rows: usize, cols: usize, spacing: f64, offset: DVec2) -> Vec<DVec2> {
@@ -209,12 +209,10 @@ fn test_warp_to_reference_image_roundtrip() {
         width,
         height,
         &transform,
-        &crate::registration::interpolation::WarpConfig {
-            method: InterpolationMethod::Lanczos3,
-            border_value: 0.0,
-            normalize_kernel: true,
-            clamp_output: false,
-        },
+        InterpolationMethod::Lanczos3,
+        0.0,
+        true,
+        false,
     );
 
     let target_image = AstroImage::from_pixels(
@@ -378,21 +376,17 @@ fn test_registration_large_rotation() {
     let rotation = Transform::rotation_around(DVec2::new(300.0, 300.0), PI / 6.0);
     let target_stars = transform_stars(&ref_stars, &rotation);
 
-    let config = RegistrationConfig {
+    let config = Config {
         transform_type: TransformType::Euclidean,
-        min_stars_for_matching: 6,
-        min_matched_stars: 4,
-        max_residual_pixels: 2.0,
-        ransac: crate::registration::ransac::RansacConfig {
-            max_rotation: None,
-            scale_range: None,
-            ..Default::default()
-        },
+        min_stars: 6,
+        min_matches: 4,
+        inlier_threshold: 2.0,
+        max_rotation: None,
+        scale_range: None,
         ..Default::default()
     };
-    let result = Registrator::new(config)
-        .register_positions(&ref_stars, &target_stars)
-        .unwrap();
+    let result =
+        crate::registration::register_positions(&ref_stars, &target_stars, &config).unwrap();
 
     let angle = result.transform.rotation_angle();
     assert!(
@@ -1086,16 +1080,15 @@ fn test_integration_minimum_stars() {
         .map(|&pos| transform.apply(pos))
         .collect();
 
-    let config = RegistrationConfig {
-        min_stars_for_matching: 4,
-        min_matched_stars: 4,
+    let config = Config {
+        min_stars: 4,
+        min_matches: 4,
         ..Default::default()
     };
 
-    let registrator = Registrator::new(config);
-    let result = registrator
-        .register_positions(&ref_positions, &target_positions)
-        .expect("Minimum stars registration should succeed");
+    let result =
+        crate::registration::register_positions(&ref_positions, &target_positions, &config)
+            .expect("Minimum stars registration should succeed");
 
     let est_offset = result.transform.translation_components();
     assert!(
@@ -1357,16 +1350,15 @@ fn test_spatial_selection_integration_with_pipeline() {
     let target_stars = transform_stars(&ref_stars, &transform);
 
     // Register with spatial distribution enabled (default)
-    let config = RegistrationConfig {
+    let config = Config {
         transform_type: TransformType::Similarity,
-        use_spatial_distribution: true,
+        use_spatial_grid: true,
         spatial_grid_size: 4,
-        min_stars_for_matching: 6,
-        min_matched_stars: 4,
+        min_stars: 6,
+        min_matches: 4,
         ..Default::default()
     };
-    let result = Registrator::new(config)
-        .register_positions(&ref_stars, &target_stars)
+    let result = crate::registration::register_positions(&ref_stars, &target_stars, &config)
         .expect("Registration with spatial selection should succeed");
 
     let est_scale = result.transform.scale_factor();
@@ -1543,16 +1535,15 @@ fn test_guided_matching_integration() {
     let offset = DVec2::new(25.0, -15.0);
     let target_stars: Vec<DVec2> = ref_stars.iter().map(|p| *p + offset).collect();
 
-    let config = RegistrationConfig {
+    let config = Config {
         transform_type: TransformType::Translation,
-        min_stars_for_matching: 6,
-        min_matched_stars: 4,
-        max_residual_pixels: 2.0,
+        min_stars: 6,
+        min_matches: 4,
+        inlier_threshold: 2.0,
         ..Default::default()
     };
 
-    let result = Registrator::new(config)
-        .register_positions(&ref_stars, &target_stars)
+    let result = crate::registration::register_positions(&ref_stars, &target_stars, &config)
         .expect("Registration should succeed");
 
     // With 64 stars and a pure translation, guided matching should recover
@@ -1579,16 +1570,15 @@ fn test_guided_matching_with_similarity_transform() {
     let known = Transform::similarity(DVec2::new(15.0, -10.0), 0.05, 1.02);
     let target_stars = transform_stars(&ref_stars, &known);
 
-    let config = RegistrationConfig {
+    let config = Config {
         transform_type: TransformType::Similarity,
-        min_stars_for_matching: 6,
-        min_matched_stars: 4,
-        max_residual_pixels: 2.0,
+        min_stars: 6,
+        min_matches: 4,
+        inlier_threshold: 2.0,
         ..Default::default()
     };
 
-    let result = Registrator::new(config)
-        .register_positions(&ref_stars, &target_stars)
+    let result = crate::registration::register_positions(&ref_stars, &target_stars, &config)
         .expect("Registration should succeed");
 
     // Should recover many matches via guided matching
@@ -1610,7 +1600,7 @@ fn test_guided_matching_with_similarity_transform() {
 
 #[test]
 fn test_auto_default_config() {
-    let config = RegistrationConfig::default();
+    let config = Config::default();
     assert_eq!(config.transform_type, TransformType::Auto);
 }
 
@@ -1622,16 +1612,15 @@ fn test_auto_uses_similarity_for_simple_transform() {
     let known = Transform::similarity(DVec2::new(15.0, -10.0), 0.03, 1.01);
     let target_stars = transform_stars(&ref_stars, &known);
 
-    let config = RegistrationConfig {
+    let config = Config {
         transform_type: TransformType::Auto,
-        min_stars_for_matching: 6,
-        min_matched_stars: 4,
-        max_residual_pixels: 2.0,
+        min_stars: 6,
+        min_matches: 4,
+        inlier_threshold: 2.0,
         ..Default::default()
     };
 
-    let result = Registrator::new(config)
-        .register_positions(&ref_stars, &target_stars)
+    let result = crate::registration::register_positions(&ref_stars, &target_stars, &config)
         .expect("Auto registration should succeed");
 
     // Result should use Similarity (4 DOF), not Homography (8 DOF)
@@ -1660,16 +1649,15 @@ fn test_auto_upgrades_to_homography_for_perspective() {
         Transform::homography([1.01, 0.02, 15.0, -0.01, 0.99, -10.0, 0.00005, -0.00003]);
     let target_stars = transform_stars(&ref_stars, &homography);
 
-    let config = RegistrationConfig {
+    let config = Config {
         transform_type: TransformType::Auto,
-        min_stars_for_matching: 6,
-        min_matched_stars: 4,
-        max_residual_pixels: 5.0,
+        min_stars: 6,
+        min_matches: 4,
+        inlier_threshold: 5.0,
         ..Default::default()
     };
 
-    let result = Registrator::new(config)
-        .register_positions(&ref_stars, &target_stars)
+    let result = crate::registration::register_positions(&ref_stars, &target_stars, &config)
         .expect("Auto registration should succeed");
 
     // Result should have upgraded to Homography
@@ -1695,28 +1683,28 @@ fn test_auto_produces_accurate_results() {
     let target_stars = transform_stars(&ref_stars, &known);
 
     // Register with Auto
-    let auto_config = RegistrationConfig {
+    let auto_config = Config {
         transform_type: TransformType::Auto,
-        min_stars_for_matching: 6,
-        min_matched_stars: 4,
-        max_residual_pixels: 2.0,
+        min_stars: 6,
+        min_matches: 4,
+        inlier_threshold: 2.0,
         ..Default::default()
     };
-    let auto_result = Registrator::new(auto_config)
-        .register_positions(&ref_stars, &target_stars)
-        .expect("Auto should succeed");
+    let auto_result =
+        crate::registration::register_positions(&ref_stars, &target_stars, &auto_config)
+            .expect("Auto should succeed");
 
     // Register with explicit Similarity
-    let sim_config = RegistrationConfig {
+    let sim_config = Config {
         transform_type: TransformType::Similarity,
-        min_stars_for_matching: 6,
-        min_matched_stars: 4,
-        max_residual_pixels: 2.0,
+        min_stars: 6,
+        min_matches: 4,
+        inlier_threshold: 2.0,
         ..Default::default()
     };
-    let sim_result = Registrator::new(sim_config)
-        .register_positions(&ref_stars, &target_stars)
-        .expect("Similarity should succeed");
+    let sim_result =
+        crate::registration::register_positions(&ref_stars, &target_stars, &sim_config)
+            .expect("Similarity should succeed");
 
     // Auto should produce comparable accuracy
     assert!(
@@ -1738,16 +1726,15 @@ fn test_auto_with_pure_translation() {
     let offset = DVec2::new(30.0, -20.0);
     let target_stars: Vec<DVec2> = ref_stars.iter().map(|p| *p + offset).collect();
 
-    let config = RegistrationConfig {
+    let config = Config {
         transform_type: TransformType::Auto,
-        min_stars_for_matching: 6,
-        min_matched_stars: 4,
-        max_residual_pixels: 2.0,
+        min_stars: 6,
+        min_matches: 4,
+        inlier_threshold: 2.0,
         ..Default::default()
     };
 
-    let result = Registrator::new(config)
-        .register_positions(&ref_stars, &target_stars)
+    let result = crate::registration::register_positions(&ref_stars, &target_stars, &config)
         .expect("Auto should succeed for translation");
 
     assert_eq!(result.transform.transform_type, TransformType::Similarity);
@@ -1774,17 +1761,17 @@ fn test_auto_with_noisy_positions() {
     let target_noisy = add_centroid_noise(&target_clean, 0.2, 22222);
     let target_positions: Vec<DVec2> = target_noisy.iter().map(|&(pos, _)| pos).collect();
 
-    let config = RegistrationConfig {
+    let config = Config {
         transform_type: TransformType::Auto,
-        min_stars_for_matching: 6,
-        min_matched_stars: 4,
-        max_residual_pixels: 5.0,
+        min_stars: 6,
+        min_matches: 4,
+        inlier_threshold: 5.0,
         ..Default::default()
     };
 
-    let result = Registrator::new(config)
-        .register_positions(&ref_positions, &target_positions)
-        .expect("Auto should succeed with noisy data");
+    let result =
+        crate::registration::register_positions(&ref_positions, &target_positions, &config)
+            .expect("Auto should succeed with noisy data");
 
     // Should still recover reasonable parameters
     let est_scale = result.transform.scale_factor();

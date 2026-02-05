@@ -21,12 +21,12 @@ pub use crate::{
 
 // Registration - main API
 pub use crate::{
-    InterpolationMethod, RegistrationConfig, RegistrationError, RegistrationResult, Registrator,
-    Transform, TransformType, WarpConfig,
+    InterpolationMethod, RegistrationConfig, RegistrationError, RegistrationResult, Transform,
+    TransformType,
 };
 
 // Registration - convenience functions
-pub use crate::warp_to_reference_image;
+pub use crate::{compute_transform, register, register_positions, warp};
 
 // Stacking - main API
 pub use crate::{

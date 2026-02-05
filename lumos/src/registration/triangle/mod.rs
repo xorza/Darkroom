@@ -22,4 +22,20 @@ mod voting;
 pub use matching::{form_triangles_kdtree, match_triangles};
 pub use voting::PointMatch;
 
-pub use crate::registration::config::TriangleMatchConfig;
+/// Triangle matching parameters extracted from Config.
+#[derive(Debug, Clone)]
+pub struct TriangleParams {
+    pub ratio_tolerance: f64,
+    pub min_votes: usize,
+    pub check_orientation: bool,
+}
+
+impl Default for TriangleParams {
+    fn default() -> Self {
+        Self {
+            ratio_tolerance: 0.01,
+            min_votes: 3,
+            check_orientation: true,
+        }
+    }
+}

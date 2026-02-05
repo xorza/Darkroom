@@ -1,3 +1,6 @@
+// WIP: Quality metrics are not yet integrated into the public API.
+#![allow(dead_code)]
+
 //! Registration quality metrics and validation.
 //!
 //! Provides tools for assessing alignment quality, detecting misregistrations,

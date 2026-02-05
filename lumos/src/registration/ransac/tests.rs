@@ -159,7 +159,7 @@ fn test_ransac_perfect_translation() {
         .map(|p| *p + DVec2::new(15.0, -7.0))
         .collect();
 
-    let config = RansacConfig {
+    let config = RansacParams {
         seed: Some(42),
         ..Default::default()
     };
@@ -191,7 +191,7 @@ fn test_ransac_perfect_similarity() {
     let known = Transform::similarity(DVec2::new(5.0, -3.0), PI / 4.0, 1.2);
     let target_points: Vec<DVec2> = ref_points.iter().map(|&p| known.apply(p)).collect();
 
-    let config = RansacConfig {
+    let config = RansacParams {
         seed: Some(42),
         max_rotation: None,
         scale_range: None,
@@ -227,7 +227,7 @@ fn test_ransac_with_outliers() {
     target_points[8] = DVec2::new(500.0, 500.0);
     target_points[9] = DVec2::new(600.0, 600.0);
 
-    let config = RansacConfig {
+    let config = RansacParams {
         seed: Some(42),
         inlier_threshold: 1.0,
         ..Default::default()
@@ -249,7 +249,7 @@ fn test_ransac_insufficient_points() {
     let ref_points = vec![DVec2::new(0.0, 0.0)];
     let target_points = vec![DVec2::new(1.0, 1.0)];
 
-    let estimator = RansacEstimator::new(RansacConfig::default());
+    let estimator = RansacEstimator::new(RansacParams::default());
     let result = estimator.estimate(&ref_points, &target_points, TransformType::Similarity);
 
     assert!(result.is_none());
@@ -316,7 +316,7 @@ fn test_ransac_affine() {
     let known = Transform::affine([1.1, 0.2, 10.0, -0.1, 0.95, 5.0]);
     let target_points: Vec<DVec2> = ref_points.iter().map(|&p| known.apply(p)).collect();
 
-    let config = RansacConfig {
+    let config = RansacParams {
         seed: Some(42),
         ..Default::default()
     };
@@ -345,7 +345,7 @@ fn test_ransac_homography() {
     let known = Transform::homography([1.0, 0.1, 5.0, -0.05, 1.0, 3.0, 0.0001, 0.00005]);
     let target_points: Vec<DVec2> = ref_points.iter().map(|&p| known.apply(p)).collect();
 
-    let config = RansacConfig {
+    let config = RansacParams {
         seed: Some(42),
         inlier_threshold: 1.0,
         ..Default::default()
@@ -379,7 +379,7 @@ fn test_lo_ransac_improves_inlier_count() {
     target_points[10].y -= 0.3;
 
     // Test with LO-RANSAC enabled
-    let config_with_lo = RansacConfig {
+    let config_with_lo = RansacParams {
         seed: Some(123),
         use_local_optimization: true,
         lo_max_iterations: 5,
@@ -394,7 +394,7 @@ fn test_lo_ransac_improves_inlier_count() {
         .unwrap();
 
     // Test with LO-RANSAC disabled
-    let config_without_lo = RansacConfig {
+    let config_without_lo = RansacParams {
         seed: Some(123),
         use_local_optimization: false,
         inlier_threshold: 1.0,
@@ -432,7 +432,7 @@ fn test_lo_ransac_converges() {
     let known = Transform::translation(DVec2::new(5.0, 3.0));
     let target_points: Vec<DVec2> = ref_points.iter().map(|&p| known.apply(p)).collect();
 
-    let config = RansacConfig {
+    let config = RansacParams {
         seed: Some(42),
         use_local_optimization: true,
         lo_max_iterations: 10,
@@ -481,7 +481,7 @@ fn test_ransac_30_percent_outliers() {
     target_points[12] = DVec2::new(700.0, 700.0);
     target_points[13] = DVec2::new(800.0, 400.0);
 
-    let config = RansacConfig {
+    let config = RansacParams {
         seed: Some(42),
         inlier_threshold: 1.0,
         use_local_optimization: true,
@@ -516,7 +516,7 @@ fn test_ransac_numerical_stability_large_coords() {
     let known = Transform::similarity(DVec2::new(50.0, -30.0), PI / 16.0, 1.05);
     let target_points: Vec<DVec2> = ref_points.iter().map(|&p| known.apply(p)).collect();
 
-    let config = RansacConfig {
+    let config = RansacParams {
         seed: Some(42),
         max_rotation: None,
         scale_range: None,
@@ -559,7 +559,7 @@ fn test_ransac_deterministic_with_seed() {
         .map(|p| DVec2::new(p.x + 5.0, p.y + 3.0))
         .collect();
 
-    let config = RansacConfig {
+    let config = RansacParams {
         seed: Some(12345),
         ..Default::default()
     };
@@ -598,7 +598,7 @@ fn test_progressive_ransac_basic() {
     // High confidence for all matches (perfect data)
     let confidences: Vec<f64> = vec![0.9; 20];
 
-    let config = RansacConfig {
+    let config = RansacParams {
         seed: Some(42),
         ..Default::default()
     };
@@ -640,7 +640,7 @@ fn test_progressive_ransac_with_outliers() {
     let mut confidences: Vec<f64> = vec![0.9; 15];
     confidences.extend(vec![0.1; 5]);
 
-    let config = RansacConfig {
+    let config = RansacParams {
         seed: Some(123),
         max_iterations: 500,
         ..Default::default()
@@ -687,7 +687,7 @@ fn test_progressive_ransac_finds_solution_faster() {
         })
         .collect();
 
-    let config = RansacConfig {
+    let config = RansacParams {
         seed: Some(999),
         max_iterations: 200,
         max_rotation: None,
@@ -729,7 +729,7 @@ fn test_ransac_extreme_scale_1e6() {
     let known = Transform::translation(DVec2::new(5000.0, -3000.0));
     let target_points: Vec<DVec2> = ref_points.iter().map(|&p| known.apply(p)).collect();
 
-    let config = RansacConfig {
+    let config = RansacParams {
         seed: Some(42),
         inlier_threshold: 100.0, // Scaled threshold
         ..Default::default()
@@ -759,7 +759,7 @@ fn test_ransac_small_coordinates() {
     let known = Transform::translation(DVec2::new(0.5, -0.3));
     let target_points: Vec<DVec2> = ref_points.iter().map(|&p| known.apply(p)).collect();
 
-    let config = RansacConfig {
+    let config = RansacParams {
         seed: Some(42),
         inlier_threshold: 0.1,
         ..Default::default()
@@ -794,7 +794,7 @@ fn test_ransac_mixed_scale_coordinates() {
     let known = Transform::translation(DVec2::new(10.0, -5.0));
     let target_points: Vec<DVec2> = ref_points.iter().map(|&p| known.apply(p)).collect();
 
-    let config = RansacConfig {
+    let config = RansacParams {
         seed: Some(42),
         inlier_threshold: 0.5,
         ..Default::default()
@@ -828,7 +828,7 @@ fn test_homography_near_affine() {
     let known = Transform::homography([1.0, 0.1, 5.0, -0.05, 1.0, 3.0, 1e-8, 1e-8]);
     let target_points: Vec<DVec2> = ref_points.iter().map(|&p| known.apply(p)).collect();
 
-    let config = RansacConfig {
+    let config = RansacParams {
         seed: Some(42),
         inlier_threshold: 0.5,
         ..Default::default()
@@ -866,7 +866,7 @@ fn test_similarity_very_small_rotation() {
     let known = Transform::similarity(DVec2::new(5.0, 3.0), tiny_angle, 1.0);
     let target_points: Vec<DVec2> = ref_points.iter().map(|&p| known.apply(p)).collect();
 
-    let config = RansacConfig {
+    let config = RansacParams {
         seed: Some(42),
         inlier_threshold: 0.5,
         ..Default::default()
@@ -901,7 +901,7 @@ fn test_similarity_near_unity_scale() {
     let known = Transform::similarity(DVec2::new(2.0, -1.0), 0.0, tiny_scale);
     let target_points: Vec<DVec2> = ref_points.iter().map(|&p| known.apply(p)).collect();
 
-    let config = RansacConfig {
+    let config = RansacParams {
         seed: Some(42),
         inlier_threshold: 0.5,
         ..Default::default()
@@ -935,7 +935,7 @@ fn test_affine_with_shear() {
     let known = Transform::affine([1.0, 0.3, 10.0, 0.1, 1.0, -5.0]);
     let target_points: Vec<DVec2> = ref_points.iter().map(|&p| known.apply(p)).collect();
 
-    let config = RansacConfig {
+    let config = RansacParams {
         seed: Some(42),
         inlier_threshold: 0.5,
         ..Default::default()
@@ -1006,7 +1006,7 @@ fn test_ransac_100_percent_inliers() {
     let transform = Transform::similarity(DVec2::new(10.0, -5.0), 0.2, 1.1);
     let target_points: Vec<DVec2> = ref_points.iter().map(|&p| transform.apply(p)).collect();
 
-    let config = RansacConfig {
+    let config = RansacParams {
         max_iterations: 100,
         inlier_threshold: 1.0,
         max_rotation: None,
@@ -1051,7 +1051,7 @@ fn test_ransac_0_percent_inliers_pure_noise() {
         DVec2::new(150.0, 350.0),
     ];
 
-    let config = RansacConfig {
+    let config = RansacParams {
         max_iterations: 100,
         inlier_threshold: 1.0,
         min_inlier_ratio: 0.8, // Require 80% inliers
@@ -1076,7 +1076,7 @@ fn test_ransac_0_percent_inliers_pure_noise() {
 /// Test adaptive iteration count verification
 #[test]
 fn test_adaptive_iteration_count() {
-    let config = RansacConfig {
+    let config = RansacParams {
         max_iterations: 10000,
         confidence: 0.999,
         ..Default::default()
@@ -1124,7 +1124,7 @@ fn test_ransac_early_termination() {
     let transform = Transform::translation(DVec2::new(7.0, 3.0));
     let target_points: Vec<DVec2> = ref_points.iter().map(|&p| transform.apply(p)).collect();
 
-    let config = RansacConfig {
+    let config = RansacParams {
         max_iterations: 10000, // Very high, but should terminate early
         inlier_threshold: 1.0,
         confidence: 0.999,
@@ -1161,7 +1161,7 @@ fn test_homography_nearly_degenerate() {
     let transform = Transform::translation(DVec2::new(10.0, 10.0));
     let target_points: Vec<DVec2> = ref_points.iter().map(|&p| transform.apply(p)).collect();
 
-    let config = RansacConfig {
+    let config = RansacParams {
         max_iterations: 500,
         inlier_threshold: 2.0,
         ..Default::default()
@@ -1201,7 +1201,7 @@ fn test_progressive_ransac_uses_weights() {
     // High confidence for good points, low for outliers
     let confidences: Vec<f64> = (0..20).map(|i| if i < 5 { 0.1 } else { 0.9 }).collect();
 
-    let config = RansacConfig {
+    let config = RansacParams {
         max_iterations: 200,
         inlier_threshold: 2.0,
         ..Default::default()
@@ -1233,7 +1233,7 @@ fn test_ransac_minimum_points() {
     let ref_points = vec![DVec2::new(0.0, 0.0), DVec2::new(100.0, 0.0)];
     let target_points = vec![DVec2::new(10.0, 10.0), DVec2::new(110.0, 10.0)];
 
-    let config = RansacConfig {
+    let config = RansacParams {
         max_iterations: 100,
         inlier_threshold: 1.0,
         min_inlier_ratio: 0.5, // Allow 50% inliers (1 of 2)
@@ -1279,7 +1279,7 @@ fn test_estimate_with_matches_basic() {
         })
         .collect();
 
-    let config = RansacConfig {
+    let config = RansacParams {
         seed: Some(42),
         ..Default::default()
     };
@@ -1319,7 +1319,7 @@ fn test_estimate_with_matches_empty() {
     let ref_stars: Vec<DVec2> = vec![];
     let target_stars: Vec<DVec2> = vec![];
 
-    let ransac = RansacEstimator::new(RansacConfig::default());
+    let ransac = RansacEstimator::new(RansacParams::default());
     let result = ransac.estimate_with_matches(
         &matches,
         &ref_stars,
@@ -1359,7 +1359,7 @@ fn test_estimate_with_matches_uses_confidence() {
         })
         .collect();
 
-    let config = RansacConfig {
+    let config = RansacParams {
         seed: Some(42),
         inlier_threshold: 5.0,
         ..Default::default()
@@ -1413,7 +1413,7 @@ fn test_plausibility_rejects_large_rotation() {
     let known = Transform::similarity(DVec2::new(5.0, -3.0), 30.0_f64.to_radians(), 1.0);
     let target_points: Vec<DVec2> = ref_points.iter().map(|&p| known.apply(p)).collect();
 
-    let config = RansacConfig {
+    let config = RansacParams {
         seed: Some(42),
         max_rotation: Some(10.0_f64.to_radians()),
         scale_range: None,
@@ -1440,7 +1440,7 @@ fn test_plausibility_rejects_large_scale() {
     let known = Transform::similarity(DVec2::new(5.0, -3.0), 0.0, 2.0);
     let target_points: Vec<DVec2> = ref_points.iter().map(|&p| known.apply(p)).collect();
 
-    let config = RansacConfig {
+    let config = RansacParams {
         seed: Some(42),
         max_rotation: None,
         scale_range: Some((0.8, 1.2)),
@@ -1465,7 +1465,7 @@ fn test_plausibility_rejects_small_scale() {
     let known = Transform::similarity(DVec2::new(0.0, 0.0), 0.0, 0.5);
     let target_points: Vec<DVec2> = ref_points.iter().map(|&p| known.apply(p)).collect();
 
-    let config = RansacConfig {
+    let config = RansacParams {
         seed: Some(42),
         max_rotation: None,
         scale_range: Some((0.8, 1.2)),
@@ -1492,7 +1492,7 @@ fn test_plausibility_accepts_within_bounds() {
     let known = Transform::similarity(DVec2::new(5.0, -3.0), angle, scale);
     let target_points: Vec<DVec2> = ref_points.iter().map(|&p| known.apply(p)).collect();
 
-    let config = RansacConfig {
+    let config = RansacParams {
         seed: Some(42),
         max_rotation: Some(10.0_f64.to_radians()),
         scale_range: Some((0.8, 1.2)),
@@ -1517,7 +1517,7 @@ fn test_plausibility_disabled_accepts_everything() {
     let known = Transform::similarity(DVec2::new(5.0, -3.0), PI / 4.0, 2.0);
     let target_points: Vec<DVec2> = ref_points.iter().map(|&p| known.apply(p)).collect();
 
-    let config = RansacConfig {
+    let config = RansacParams {
         seed: Some(42),
         max_rotation: None,
         scale_range: None,
@@ -1548,7 +1548,7 @@ fn test_plausibility_rotation_boundary() {
     let known = Transform::similarity(DVec2::new(5.0, -3.0), angle_pass, 1.0);
     let target_points: Vec<DVec2> = ref_points.iter().map(|&p| known.apply(p)).collect();
 
-    let config = RansacConfig {
+    let config = RansacParams {
         seed: Some(42),
         max_rotation: Some(max_rotation),
         scale_range: None,
@@ -1563,7 +1563,7 @@ fn test_plausibility_rotation_boundary() {
     let known = Transform::similarity(DVec2::new(5.0, -3.0), angle_fail, 1.0);
     let target_points: Vec<DVec2> = ref_points.iter().map(|&p| known.apply(p)).collect();
 
-    let config = RansacConfig {
+    let config = RansacParams {
         seed: Some(42),
         max_rotation: Some(max_rotation),
         scale_range: None,
@@ -1584,7 +1584,7 @@ fn test_plausibility_negative_rotation() {
     let known = Transform::similarity(DVec2::new(5.0, -3.0), -30.0_f64.to_radians(), 1.0);
     let target_points: Vec<DVec2> = ref_points.iter().map(|&p| known.apply(p)).collect();
 
-    let config = RansacConfig {
+    let config = RansacParams {
         seed: Some(42),
         max_rotation: Some(10.0_f64.to_radians()),
         scale_range: None,
@@ -1610,7 +1610,7 @@ fn test_plausibility_scale_boundary() {
     let known = Transform::similarity(DVec2::new(0.0, 0.0), 0.0, 1.15);
     let target_points: Vec<DVec2> = ref_points.iter().map(|&p| known.apply(p)).collect();
 
-    let config = RansacConfig {
+    let config = RansacParams {
         seed: Some(42),
         max_rotation: None,
         scale_range: Some((0.8, 1.2)),
@@ -1624,7 +1624,7 @@ fn test_plausibility_scale_boundary() {
     let known = Transform::similarity(DVec2::new(0.0, 0.0), 0.0, 1.25);
     let target_points: Vec<DVec2> = ref_points.iter().map(|&p| known.apply(p)).collect();
 
-    let config = RansacConfig {
+    let config = RansacParams {
         seed: Some(42),
         max_rotation: None,
         scale_range: Some((0.8, 1.2)),
@@ -1648,7 +1648,7 @@ fn test_plausibility_translation_unaffected() {
         .map(|p| *p + DVec2::new(100.0, -50.0))
         .collect();
 
-    let config = RansacConfig {
+    let config = RansacParams {
         seed: Some(42),
         max_rotation: Some(1.0_f64.to_radians()), // Very tight rotation limit
         scale_range: Some((0.99, 1.01)),          // Very tight scale range
@@ -1675,7 +1675,7 @@ fn test_plausibility_progressive_ransac_rejects() {
     let target_points: Vec<DVec2> = ref_points.iter().map(|&p| known.apply(p)).collect();
     let confidences: Vec<f64> = vec![0.9; 20];
 
-    let config = RansacConfig {
+    let config = RansacParams {
         seed: Some(42),
         max_rotation: Some(10.0_f64.to_radians()),
         scale_range: None,
@@ -1708,7 +1708,7 @@ fn test_plausibility_progressive_ransac_accepts() {
     let target_points: Vec<DVec2> = ref_points.iter().map(|&p| known.apply(p)).collect();
     let confidences: Vec<f64> = vec![0.9; 20];
 
-    let config = RansacConfig {
+    let config = RansacParams {
         seed: Some(42),
         max_rotation: Some(10.0_f64.to_radians()),
         scale_range: Some((0.8, 1.2)),
@@ -1741,7 +1741,7 @@ fn test_plausibility_combined_rotation_and_scale() {
     let known = Transform::similarity(DVec2::new(5.0, -3.0), 5.0_f64.to_radians(), 1.5);
     let target_points: Vec<DVec2> = ref_points.iter().map(|&p| known.apply(p)).collect();
 
-    let config = RansacConfig {
+    let config = RansacParams {
         seed: Some(42),
         max_rotation: Some(10.0_f64.to_radians()),
         scale_range: Some((0.8, 1.2)),
@@ -1759,7 +1759,7 @@ fn test_plausibility_combined_rotation_and_scale() {
     let known = Transform::similarity(DVec2::new(5.0, -3.0), 20.0_f64.to_radians(), 1.1);
     let target_points: Vec<DVec2> = ref_points.iter().map(|&p| known.apply(p)).collect();
 
-    let config = RansacConfig {
+    let config = RansacParams {
         seed: Some(42),
         max_rotation: Some(10.0_f64.to_radians()),
         scale_range: Some((0.8, 1.2)),
@@ -1777,7 +1777,7 @@ fn test_plausibility_combined_rotation_and_scale() {
     let known = Transform::similarity(DVec2::new(5.0, -3.0), 5.0_f64.to_radians(), 1.1);
     let target_points: Vec<DVec2> = ref_points.iter().map(|&p| known.apply(p)).collect();
 
-    let config = RansacConfig {
+    let config = RansacParams {
         seed: Some(42),
         max_rotation: Some(10.0_f64.to_radians()),
         scale_range: Some((0.8, 1.2)),
@@ -1813,7 +1813,7 @@ fn test_plausibility_with_outliers_filters_bad_hypotheses() {
     target_points.push(DVec2::new(500.0, -300.0)); // Would create huge rotation if paired
     target_points.push(DVec2::new(-100.0, 800.0));
 
-    let config = RansacConfig {
+    let config = RansacParams {
         seed: Some(42),
         max_rotation: Some(5.0_f64.to_radians()),
         scale_range: Some((0.9, 1.1)),
@@ -1837,48 +1837,6 @@ fn test_plausibility_with_outliers_filters_bad_hypotheses() {
         "Should find most of the 15 inliers, got {}",
         result.inliers.len()
     );
-}
-
-#[test]
-fn test_plausibility_config_validation_max_rotation() {
-    // max_rotation must be positive
-    let result = std::panic::catch_unwind(|| {
-        let config = RansacConfig {
-            max_rotation: Some(-1.0),
-            ..Default::default()
-        };
-        config.validate();
-    });
-    assert!(
-        result.is_err(),
-        "Negative max_rotation should panic on validate"
-    );
-}
-
-#[test]
-fn test_plausibility_config_validation_scale_range() {
-    // scale_range min must be positive
-    let result = std::panic::catch_unwind(|| {
-        let config = RansacConfig {
-            scale_range: Some((-0.5, 1.5)),
-            ..Default::default()
-        };
-        config.validate();
-    });
-    assert!(
-        result.is_err(),
-        "Negative min scale should panic on validate"
-    );
-
-    // scale_range min must be less than max
-    let result = std::panic::catch_unwind(|| {
-        let config = RansacConfig {
-            scale_range: Some((1.5, 0.5)),
-            ..Default::default()
-        };
-        config.validate();
-    });
-    assert!(result.is_err(), "min > max scale should panic on validate");
 }
 
 // ── Degeneracy check tests ──────────────────────────────────────────

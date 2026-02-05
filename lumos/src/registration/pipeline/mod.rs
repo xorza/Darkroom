@@ -1,16 +1,7 @@
 //! Full image registration pipeline.
 //!
-//! This module provides the high-level API for registering astronomical images,
-//! combining all the submodules into a complete workflow.
-//!
-//! # Pipeline Stages
-//!
-//! 1. **Star Detection** - Extract star positions from both images
-//! 2. **Coarse Alignment** (optional) - Use phase correlation for initial estimate
-//! 3. **Triangle Matching** - Find star correspondences using geometric hashing
-//! 4. **RANSAC** - Robustly estimate transformation with outlier rejection
-//! 5. **Refinement** - Optimize transformation using all inliers
-//! 6. **Warping** - Apply transformation to align target to reference
+//! This module provides the internal orchestration for registering astronomical images,
+//! combining triangle matching, RANSAC, and image warping.
 
 mod result;
 
@@ -22,14 +13,12 @@ use std::time::Instant;
 use crate::ImageDimensions;
 use crate::common::Buffer2;
 use crate::registration::{
-    config::{InterpolationMethod, RegistrationConfig, WarpConfig},
+    Config, InterpolationMethod, Transform, TransformType,
     distortion::{SipConfig, SipPolynomial},
     interpolation::warp_image,
-    ransac::{RansacEstimator, estimate_transform},
+    ransac::{RansacEstimator, RansacParams, estimate_transform},
     spatial::KdTree,
-    transform::Transform,
-    transform::TransformType,
-    triangle::{PointMatch, match_triangles},
+    triangle::{PointMatch, TriangleParams, match_triangles},
 };
 use crate::star_detection::Star;
 
@@ -39,54 +28,30 @@ mod tests;
 /// Image registrator that aligns target images to a reference.
 #[derive(Debug, Default)]
 pub struct Registrator {
-    config: RegistrationConfig,
+    config: Config,
 }
 
 impl Registrator {
     /// Create a new registrator with the given configuration.
-    pub fn new(config: RegistrationConfig) -> Self {
+    pub fn new(config: Config) -> Self {
         config.validate();
         Self { config }
     }
 
     /// Register target to reference using pre-detected stars.
     ///
-    /// This is the main entry point when stars have been detected.
     /// Stars should be sorted by brightness (flux) in descending order.
-    ///
-    /// # Arguments
-    ///
-    /// * `ref_stars` - Detected stars in the reference image (sorted by flux, brightest first)
-    /// * `target_stars` - Detected stars in the target image (sorted by flux, brightest first)
-    ///
-    /// # Returns
-    ///
-    /// Registration result containing the transformation and quality metrics.
     pub fn register_stars(
         &self,
         ref_stars: &[Star],
         target_stars: &[Star],
     ) -> Result<RegistrationResult, RegistrationError> {
-        // Convert to DVec2 and delegate to position-based method
         let ref_positions: Vec<DVec2> = ref_stars.iter().map(|s| s.pos).collect();
         let target_positions: Vec<DVec2> = target_stars.iter().map(|s| s.pos).collect();
-
         self.register_positions(&ref_positions, &target_positions)
     }
 
     /// Register target to reference using star positions as DVec2.
-    ///
-    /// This is useful when you have pre-extracted positions or for testing.
-    /// Positions should be sorted by brightness (brightest first) for best results.
-    ///
-    /// # Arguments
-    ///
-    /// * `ref_positions` - Star positions in the reference image
-    /// * `target_positions` - Star positions in the target image
-    ///
-    /// # Returns
-    ///
-    /// Registration result containing the transformation and quality metrics.
     pub fn register_positions(
         &self,
         ref_positions: &[DVec2],
@@ -95,42 +60,61 @@ impl Registrator {
         let start = Instant::now();
 
         // Validate input
-        if ref_positions.len() < self.config.min_stars_for_matching {
+        if ref_positions.len() < self.config.min_stars {
             return Err(RegistrationError::InsufficientStars {
                 found: ref_positions.len(),
-                required: self.config.min_stars_for_matching,
+                required: self.config.min_stars,
             });
         }
-        if target_positions.len() < self.config.min_stars_for_matching {
+        if target_positions.len() < self.config.min_stars {
             return Err(RegistrationError::InsufficientStars {
                 found: target_positions.len(),
-                required: self.config.min_stars_for_matching,
+                required: self.config.min_stars,
             });
         }
 
-        // Select stars for matching - either spatially distributed or just brightest N
-        let max_stars = self.config.triangle.max_stars;
-        let ref_stars = if self.config.use_spatial_distribution {
-            select_spatially_distributed(ref_positions, max_stars, self.config.spatial_grid_size)
+        // Select stars for matching
+        let ref_stars = if self.config.use_spatial_grid {
+            select_spatially_distributed(
+                ref_positions,
+                self.config.max_stars,
+                self.config.spatial_grid_size,
+            )
         } else {
-            ref_positions.iter().take(max_stars).copied().collect()
+            ref_positions
+                .iter()
+                .take(self.config.max_stars)
+                .copied()
+                .collect()
         };
-        let target_stars = if self.config.use_spatial_distribution {
-            select_spatially_distributed(target_positions, max_stars, self.config.spatial_grid_size)
+        let target_stars = if self.config.use_spatial_grid {
+            select_spatially_distributed(
+                target_positions,
+                self.config.max_stars,
+                self.config.spatial_grid_size,
+            )
         } else {
-            target_positions.iter().take(max_stars).copied().collect()
+            target_positions
+                .iter()
+                .take(self.config.max_stars)
+                .copied()
+                .collect()
         };
 
-        // Step 1: Triangle matching to find star correspondences
-        let matches = match_triangles(&ref_stars, &target_stars, &self.config.triangle);
+        // Triangle matching
+        let triangle_params = TriangleParams {
+            ratio_tolerance: self.config.ratio_tolerance,
+            min_votes: self.config.min_votes,
+            check_orientation: self.config.check_orientation,
+        };
+        let matches = match_triangles(&ref_stars, &target_stars, &triangle_params);
 
-        if matches.len() < self.config.min_matched_stars {
+        if matches.len() < self.config.min_matches {
             return Err(RegistrationError::NoMatchingPatterns);
         }
 
-        // Step 2: Estimate transform — Auto mode tries Similarity first, upgrades if needed
+        // RANSAC estimation
         let result = if self.config.transform_type == TransformType::Auto {
-            // Auto: start with Similarity, upgrade to Homography if residuals are high
             let sim_result = self.estimate_and_refine(
                 &ref_stars,
                 &target_stars,
@@ -142,15 +126,12 @@ impl Registrator {
 
             match sim_result {
                 Ok(result) if result.rms_error <= AUTO_UPGRADE_THRESHOLD => Ok(result),
-                _ => {
-                    // Similarity was insufficient or failed — try Homography
-                    self.estimate_and_refine(
-                        &ref_stars,
-                        &target_stars,
-                        &matches,
-                        TransformType::Homography,
-                    )
-                }
+                _ => self.estimate_and_refine(
+                    &ref_stars,
+                    &target_stars,
+                    &matches,
+                    TransformType::Homography,
+                ),
             }
         } else {
             self.estimate_and_refine(
@@ -163,22 +144,16 @@ impl Registrator {
 
         let result = result.with_elapsed(start.elapsed().as_secs_f64() * 1000.0);
 
-        // Check accuracy
-        if result.rms_error > self.config.max_residual_pixels {
+        if result.rms_error > self.config.max_rms_error {
             return Err(RegistrationError::AccuracyTooLow {
                 rms_error: result.rms_error,
-                max_allowed: self.config.max_residual_pixels,
+                max_allowed: self.config.max_rms_error,
             });
         }
 
         Ok(result)
     }
 
-    /// Run RANSAC, guided matching, optional SIP correction, and compute residuals.
-    ///
-    /// This is the core estimation pipeline used by `register_positions()`.
-    /// For `TransformType::Auto`, this is called once with Similarity and potentially
-    /// again with Homography if residuals are too high.
     fn estimate_and_refine(
         &self,
         ref_stars: &[DVec2],
@@ -186,35 +161,43 @@ impl Registrator {
         matches: &[PointMatch],
         transform_type: TransformType,
     ) -> Result<RegistrationResult, RegistrationError> {
-        // RANSAC with progressive sampling using match confidences
-        let ransac = RansacEstimator::new(self.config.ransac.clone());
+        let ransac_params = RansacParams {
+            max_iterations: self.config.ransac_iterations,
+            inlier_threshold: self.config.inlier_threshold,
+            confidence: self.config.confidence,
+            min_inlier_ratio: self.config.min_inlier_ratio,
+            seed: self.config.seed,
+            use_local_optimization: self.config.local_optimization,
+            lo_max_iterations: self.config.lo_iterations,
+            max_rotation: self.config.max_rotation,
+            scale_range: self.config.scale_range,
+        };
+
+        let ransac = RansacEstimator::new(ransac_params);
         let ransac_result = ransac
             .estimate_with_matches(matches, ref_stars, target_stars, transform_type)
             .ok_or(RegistrationError::RansacFailed {
                 reason: RansacFailureReason::NoInliersFound,
-                iterations: self.config.ransac.max_iterations,
+                iterations: self.config.ransac_iterations,
                 best_inlier_count: 0,
             })?;
 
-        // Get inlier matches — ransac_result.inliers are indices into `matches`
         let inlier_matches: Vec<_> = ransac_result
             .inliers
             .iter()
             .map(|&i| (matches[i].ref_idx, matches[i].target_idx))
             .collect();
 
-        // Guided matching — recover additional matches missed by triangles
         let (transform, inlier_matches) = recover_matches(
             ref_stars,
             target_stars,
             &ransac_result.transform,
             &inlier_matches,
-            self.config.ransac.inlier_threshold,
+            self.config.inlier_threshold,
             transform_type,
         );
 
-        // Optional SIP distortion correction on residuals
-        let sip_correction = if self.config.sip.enabled {
+        let sip_correction = if self.config.sip_enabled {
             let inlier_ref: Vec<DVec2> =
                 inlier_matches.iter().map(|&(r, _)| ref_stars[r]).collect();
             let inlier_target: Vec<DVec2> = inlier_matches
@@ -223,8 +206,8 @@ impl Registrator {
                 .collect();
 
             let sip_config = SipConfig {
-                order: self.config.sip.order,
-                reference_point: None, // Auto-compute centroid
+                order: self.config.sip_order,
+                reference_point: None,
             };
 
             SipPolynomial::fit_from_transform(&inlier_ref, &inlier_target, &transform, &sip_config)
@@ -232,7 +215,6 @@ impl Registrator {
             None
         };
 
-        // Compute residuals for inliers (with SIP correction if available)
         let residuals: Vec<f64> = inlier_matches
             .iter()
             .map(|&(r, t)| {
@@ -253,51 +235,7 @@ impl Registrator {
     }
 }
 
-/// Warp target image to align with reference (raw pixel data, single channel).
-///
-/// Internal helper used by [`warp_to_reference_image`].
-fn warp_to_reference(
-    target_image: &Buffer2<f32>,
-    transform: &Transform,
-    method: InterpolationMethod,
-) -> Buffer2<f32> {
-    let config = WarpConfig {
-        method,
-        border_value: 0.0,
-        normalize_kernel: true,
-        clamp_output: false,
-    };
-
-    // The transform maps reference→target coordinates.
-    // warp_image expects input→output transform (target→reference here),
-    // then inverts it internally to get output→input for sampling.
-    // So we pass the inverse (target→reference), which gets inverted back
-    // to reference→target, giving us the correct sampling direction.
-    let inverse = transform.inverse();
-
-    warp_image(
-        target_image,
-        target_image.width(),
-        target_image.height(),
-        &inverse,
-        &config,
-    )
-}
-
 /// Warp an AstroImage to align with reference.
-///
-/// Handles both single-channel (grayscale) and multi-channel (RGB) images.
-/// For multi-channel images, each channel is warped independently in parallel.
-///
-/// # Arguments
-///
-/// * `target` - Target image to warp
-/// * `transform` - Transformation from reference to target coordinates (as returned by `register_stars`)
-/// * `method` - Interpolation method
-///
-/// # Returns
-///
-/// Warped image aligned to reference frame.
 pub fn warp_to_reference_image(
     target: &crate::AstroImage,
     transform: &Transform,
@@ -309,17 +247,16 @@ pub fn warp_to_reference_image(
     let height = target.height();
     let channels = target.channels();
 
-    // Warp each channel in parallel using planar access
     let warped_channels: Vec<Buffer2<f32>> = (0..channels)
         .into_par_iter()
         .map(|c| {
             let channel_data = target.channel(c);
             let channel = Buffer2::new(width, height, channel_data.to_vec());
-            warp_to_reference(&channel, transform, method)
+            let inverse = transform.inverse();
+            warp_image(&channel, width, height, &inverse, method, 0.0, true, false)
         })
         .collect();
 
-    // Interleave channels back together for AstroImage constructor
     let mut warped_pixels = vec![0.0f32; width * height * channels];
     for (c, channel_data) in warped_channels.iter().enumerate() {
         for (i, &val) in channel_data.iter().enumerate() {
@@ -335,27 +272,11 @@ pub fn warp_to_reference_image(
     result
 }
 
-/// Select stars with good spatial distribution across the image.
-///
-/// Instead of just taking the brightest N stars (which may cluster in one region),
-/// this function divides the image into a grid and selects the brightest stars
-/// from each cell in round-robin fashion, ensuring coverage across the entire field.
-///
-/// # Arguments
-///
-/// * `stars` - Star positions, assumed sorted by brightness (brightest first)
-/// * `max_stars` - Maximum number of stars to select
-/// * `grid_size` - Number of grid cells in each dimension (grid_size × grid_size)
-///
-/// # Returns
-///
-/// Selected star positions with good spatial coverage.
 fn select_spatially_distributed(stars: &[DVec2], max_stars: usize, grid_size: usize) -> Vec<DVec2> {
     if stars.is_empty() || max_stars == 0 {
         return Vec::new();
     }
 
-    // Find bounding box of all stars
     let (min_x, max_x, min_y, max_y) = stars.iter().fold(
         (f64::MAX, f64::MIN, f64::MAX, f64::MIN),
         |(min_x, max_x, min_y, max_y), p| {
@@ -368,7 +289,6 @@ fn select_spatially_distributed(stars: &[DVec2], max_stars: usize, grid_size: us
         },
     );
 
-    // Add small margin to avoid edge issues
     let margin = 1.0;
     let width = (max_x - min_x + 2.0 * margin).max(1.0);
     let height = (max_y - min_y + 2.0 * margin).max(1.0);
@@ -378,7 +298,6 @@ fn select_spatially_distributed(stars: &[DVec2], max_stars: usize, grid_size: us
     let cell_width = width / grid_size as f64;
     let cell_height = height / grid_size as f64;
 
-    // Group stars by grid cell
     let num_cells = grid_size * grid_size;
     let mut cells: Vec<Vec<DVec2>> = vec![Vec::new(); num_cells];
 
@@ -390,8 +309,6 @@ fn select_spatially_distributed(stars: &[DVec2], max_stars: usize, grid_size: us
         cells[cy * grid_size + cx].push(p);
     }
 
-    // Round-robin selection: take one star from each non-empty cell in turn
-    // Stars in each cell are already in brightness order (from input sorting)
     let mut selected = Vec::with_capacity(max_stars);
     let mut round = 0;
 
@@ -404,7 +321,7 @@ fn select_spatially_distributed(stars: &[DVec2], max_stars: usize, grid_size: us
             }
         }
         if !added_any {
-            break; // No more stars available
+            break;
         }
         round += 1;
     }
@@ -412,14 +329,6 @@ fn select_spatially_distributed(stars: &[DVec2], max_stars: usize, grid_size: us
     selected
 }
 
-/// Guided matching: recover additional star matches missed by triangle matching.
-///
-/// After RANSAC finds a good transform, projects each unmatched reference star
-/// into target space and searches for the nearest unmatched target star within
-/// the inlier threshold. Then re-estimates the transform using all matches.
-///
-/// Returns the updated transform and combined matches (original + recovered).
-/// If no new matches are found or re-estimation fails, returns inputs unchanged.
 fn recover_matches(
     ref_stars: &[DVec2],
     target_stars: &[DVec2],
