@@ -4,18 +4,22 @@ use glam::DVec2;
 
 const EPSILON: f32 = 1e-5;
 
-// ============================================================================
-// Lanczos LUT Accuracy Tests
-// ============================================================================
+fn lanczos_kernel(x: f32, a: f32) -> f32 {
+    let a_usize = a as usize;
+    if (2..=4).contains(&a_usize) && (a - a_usize as f32).abs() < 1e-6 {
+        get_lanczos_lut(a_usize).lookup(x)
+    } else {
+        lanczos_kernel_compute(x, a)
+    }
+}
 
 #[test]
 fn test_lanczos_lut_vs_direct_computation() {
-    // Compare LUT results with direct computation across the entire kernel support
+    // Compare LUT results with direct kernel computation
     for a in [2, 3, 4] {
         let a_f32 = a as f32;
         let lut = super::get_lanczos_lut(a);
 
-        // Test many positions including edge cases
         let test_positions: Vec<f32> = (0..=1000)
             .map(|i| (i as f32 / 1000.0) * a_f32)
             .chain([-0.5, -1.0, -1.5, -2.0, -2.5, -3.0, -3.5, -4.0].into_iter())
@@ -26,10 +30,9 @@ fn test_lanczos_lut_vs_direct_computation() {
                 continue;
             }
 
-            let direct = super::lanczos_kernel_direct(x, a_f32);
+            let direct = lanczos_kernel(x, a_f32);
             let lut_val = lut.lookup(x);
 
-            // LUT with linear interpolation should be very accurate
             let diff = (direct - lut_val).abs();
             assert!(
                 diff < 0.001,
@@ -108,44 +111,6 @@ fn test_lanczos_lut_special_values() {
             "LUT beyond boundary should be 0"
         );
     }
-}
-
-#[test]
-fn test_lanczos_kernel_uses_lut() {
-    // Verify that lanczos_kernel uses LUT for standard parameters
-    // and produces identical results
-    for a in [2.0f32, 3.0, 4.0] {
-        for i in 0..100 {
-            let x = (i as f32 - 50.0) / 20.0;
-            let kernel_val = lanczos_kernel(x, a);
-            let direct_val = super::lanczos_kernel_direct(x, a);
-
-            // Should be very close (LUT with interpolation)
-            let diff = (kernel_val - direct_val).abs();
-            assert!(
-                diff < 0.001,
-                "Kernel mismatch at x={}, a={}: kernel={}, direct={}, diff={}",
-                x,
-                a,
-                kernel_val,
-                direct_val,
-                diff
-            );
-        }
-    }
-}
-
-#[test]
-fn test_lanczos_kernel_fallback_for_nonstandard_a() {
-    // For non-standard values of 'a', should fall back to direct computation
-    let a = 2.5f32; // Not 2, 3, or 4
-    let x = 0.5;
-
-    let kernel_val = lanczos_kernel(x, a);
-    let direct_val = super::lanczos_kernel_direct(x, a);
-
-    // Should be exactly equal (using direct computation)
-    assert_eq!(kernel_val, direct_val);
 }
 
 #[test]

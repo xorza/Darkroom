@@ -14,6 +14,7 @@ AI coding rules for Rust projects:
 - No backward compatibility. Remove old/deprecated code, rename freely, change APIs. Rewrite callers to use new APIs. No compatibility shims, re-exports, or wrappers.
 - Remove unused code. If kept intentionally, add a comment explaining why and silence linter warnings.
 - Keep public API clean and consistent.
+- Never use `#[cfg(test)]` on functions in production code. If tests need convenience helpers, define them in the test module itself.
 
 ## Verification
 

@@ -17,7 +17,7 @@ use common::cpu_features;
 pub mod sse;
 
 #[cfg(test)]
-use crate::registration::interpolation::lanczos_kernel;
+use crate::registration::interpolation::get_lanczos_lut;
 use crate::registration::transform::Transform;
 use glam::DVec2;
 
@@ -158,18 +158,20 @@ pub fn warp_row_lanczos3_scalar(
         let fx = sx - x0 as f32;
         let fy = sy - y0 as f32;
 
+        let lut = get_lanczos_lut(A);
+
         // Pre-compute x weights (6 values for Lanczos3)
         let mut wx = [0.0f32; 6];
         for (i, w) in wx.iter_mut().enumerate() {
             let dx = fx - (i as i32 - 2) as f32;
-            *w = lanczos_kernel(dx, A as f32);
+            *w = lut.lookup(dx);
         }
 
         // Pre-compute y weights
         let mut wy = [0.0f32; 6];
         for (j, w) in wy.iter_mut().enumerate() {
             let dy = fy - (j as i32 - 2) as f32;
-            *w = lanczos_kernel(dy, A as f32);
+            *w = lut.lookup(dy);
         }
 
         // Normalize weights to preserve brightness
