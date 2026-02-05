@@ -57,7 +57,6 @@ mod buffer_pool;
 mod centroid;
 pub mod config;
 mod convolution;
-mod cosmic_ray;
 mod deblend;
 mod defect_map;
 pub(crate) mod detector;

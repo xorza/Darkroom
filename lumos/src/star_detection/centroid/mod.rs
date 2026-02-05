@@ -28,7 +28,6 @@ use glam::{DVec2, Vec2};
 
 use super::background::BackgroundEstimate;
 use super::config::Config;
-use super::cosmic_ray::compute_laplacian_snr;
 use super::deblend::Region;
 use super::{CentroidMethod, LocalBackgroundMethod, Star};
 use crate::common::Buffer2;
@@ -83,6 +82,54 @@ const MOMENTS_ITERATIONS_BEFORE_FIT: usize = 2;
 /// Convergence threshold in pixels squared.
 pub(crate) const CONVERGENCE_THRESHOLD_SQ: f32 =
     CENTROID_CONVERGENCE_THRESHOLD * CENTROID_CONVERGENCE_THRESHOLD;
+
+// =============================================================================
+// Laplacian SNR for Cosmic Ray Detection
+// =============================================================================
+
+/// Compute L.A.Cosmic-style Laplacian SNR for a single star candidate.
+///
+/// Cosmic rays have very sharp edges compared to astronomical sources
+/// (which are smoothed by the PSF). The Laplacian (second derivative)
+/// responds strongly to these sharp edges.
+///
+/// High values (>5) indicate cosmic ray-like sharp edges.
+///
+/// Reference: van Dokkum 2001, PASP 113, 1420
+fn compute_laplacian_snr(
+    pixels: &Buffer2<f32>,
+    pos: Vec2us,
+    stamp_radius: usize,
+    background: f32,
+    noise: f32,
+) -> f32 {
+    let width = pixels.width();
+    let height = pixels.height();
+
+    // Check bounds
+    if pos.x < stamp_radius
+        || pos.y < stamp_radius
+        || pos.x + stamp_radius >= width
+        || pos.y + stamp_radius >= height
+    {
+        return 0.0;
+    }
+
+    // Compute Laplacian at center (peak of star)
+    let idx = pos.to_index(width);
+    let center = pixels[idx] - background;
+
+    let left = pixels[idx - 1] - background;
+    let right = pixels[idx + 1] - background;
+    let up = pixels[idx - width] - background;
+    let down = pixels[idx + width] - background;
+
+    // Laplacian at peak (negative for peaks)
+    let laplacian = left + right + up + down - 4.0 * center;
+
+    // Return normalized magnitude
+    (-laplacian).max(0.0) / noise.max(1e-10)
+}
 
 /// Compute stamp radius from expected FWHM.
 #[inline]
