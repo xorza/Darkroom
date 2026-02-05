@@ -151,13 +151,9 @@ When enabled, Phase 1 uses relaxed tolerance (5x `ratio_tolerance`) to find init
 
 ## RANSAC Estimation
 
-### Three Entry Points
+### Entry Point
 
-1. **`estimate(ref, target, type)`** - Uniform random sampling. Used when no confidence scores are available (e.g., astrometry solver with raw point pairs).
-
-2. **`estimate_progressive(ref, target, confidences, type)`** - PROSAC-style 3-phase sampling using confidence scores. Biases early iterations toward high-confidence matches.
-
-3. **`estimate_with_matches(matches, ref_stars, target_stars, type)`** - Extracts positions and confidences from `PointMatch` objects, then calls `estimate_progressive`. **This is what the main registration pipeline uses.**
+**`estimate(matches, ref_stars, target_stars, type)`** - Takes `PointMatch` objects from triangle matching, extracts positions and confidence scores, and uses PROSAC-style 3-phase progressive sampling. High-confidence matches are sampled more often in early iterations for faster convergence.
 
 ### RANSAC Loop
 
@@ -451,7 +447,7 @@ Two-step refinement removed entirely. The downstream RANSAC handles outlier reje
 
 ### ~~2. Transform Plausibility Checks in RANSAC~~ (Fixed)
 
-Fixed: `RansacConfig` now has `max_rotation: Option<f64>` (default 10°) and `scale_range: Option<(f64, f64)>` (default 0.8–1.2). Hypotheses exceeding these bounds are rejected before inlier counting in both `estimate()` and `estimate_progressive()`. LO-RANSAC refinements are also checked. Set to `None` to disable for mosaics or different focal lengths.
+Fixed: `RansacParams` now has `max_rotation: Option<f64>` (default 10°) and `scale_range: Option<(f64, f64)>` (default 0.8–1.2). Hypotheses exceeding these bounds are rejected before inlier counting. LO-RANSAC refinements are also checked. Set to `None` to disable for mosaics or different focal lengths.
 
 ### ~~3. Guided Matching / Post-RANSAC Match Recovery~~ (Fixed)
 
@@ -467,7 +463,7 @@ In `resolve_matches()` (`triangle/mod.rs:214`), the confidence formula uses `max
 - Relative to the maximum observed votes in the current match set
 - Or based on the vote distribution (z-score: how many standard deviations above mean)
 
-This matters because `estimate_with_matches()` uses confidence scores to guide progressive RANSAC sampling. Better confidence values lead to faster convergence.
+This matters because `estimate()` uses confidence scores to guide progressive RANSAC sampling. Better confidence values lead to faster convergence.
 
 ### 6. MAGSAC++ Scoring (Low Priority, Research)
 

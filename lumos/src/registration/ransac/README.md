@@ -12,17 +12,12 @@ Robust estimation of geometric transformations (translation, Euclidean, similari
 
 ## Usage
 
-Called from two places:
-
-1. **Pipeline** (`pipeline/mod.rs`) — `estimate_with_matches()` after triangle matching, using `PointMatch` confidences for progressive sampling. Also calls `estimate_transform()` directly during unmatched-star recovery.
-2. **Astrometry solver** (`astrometry/solver.rs`) — `estimate()` for plate solving with quad-hash matches.
+Called from the pipeline (`pipeline/mod.rs`) via `estimate()` after triangle matching, using `PointMatch` confidences for progressive sampling. Also calls `estimate_transform()` directly during unmatched-star recovery.
 
 ## API
 
-- `RansacEstimator::new(config) -> Self`
-- `estimate(ref_points, target_points, transform_type) -> Option<RansacResult>`
-- `estimate_progressive(ref_points, target_points, confidences, transform_type) -> Option<RansacResult>`
-- `estimate_with_matches(matches, ref_stars, target_stars, transform_type) -> Option<RansacResult>`
+- `RansacEstimator::new(params) -> Self`
+- `estimate(matches, ref_stars, target_stars, transform_type) -> Option<RansacResult>`
 
 Internal:
 - `estimate_transform(ref, target, type) -> Option<Transform>` — dispatch to specific estimator
@@ -34,19 +29,19 @@ Internal:
 
 ## Algorithm
 
-### Standard RANSAC (`estimate`)
+### RANSAC with Progressive Sampling (`estimate`)
 
-1. Random sample `min_points` correspondences (Floyd's algorithm)
-2. Degeneracy check — reject coincident/collinear samples
-3. Estimate candidate transform
-4. Plausibility check (rotation/scale bounds) — reject before expensive inlier count
-5. Count inliers via SIMD (AVX2/SSE2/NEON with scalar fallback)
-6. If promising + LO enabled: iterative refinement on inlier set (LO-RANSAC)
-7. Update best model if score improved
-8. Adaptive early termination: `N = log(1-confidence) / log(1-w^n)`
-9. Final refinement: re-estimate with all inliers via least squares
-
-Both `estimate` and `estimate_progressive` share a single `ransac_loop` implementation parameterized by sampling strategy.
+1. Extract point pairs and confidences from `PointMatch` objects
+2. Build sorted index by confidence for progressive sampling
+3. Sample using 3-phase strategy (see below)
+4. Degeneracy check — reject coincident/collinear samples
+5. Estimate candidate transform
+6. Plausibility check (rotation/scale bounds) — reject before expensive inlier count
+7. Count inliers via SIMD (AVX2/SSE2/NEON with scalar fallback)
+8. If promising + LO enabled: iterative refinement on inlier set (LO-RANSAC)
+9. Update best model if score improved
+10. Adaptive early termination: `N = log(1-confidence) / log(1-w^n)`
+11. Final refinement: re-estimate with all inliers via least squares
 
 ### Scoring
 
@@ -56,7 +51,7 @@ score = sum(threshold² - dist²) for all inliers
 ```
 Points closer to the model contribute more. Uses native `f64` precision throughout (no integer truncation). This is better than pure inlier counting (RANSAC) but uses a fixed threshold unlike MAGSAC++.
 
-### Progressive RANSAC (`estimate_progressive`)
+### Progressive Sampling Strategy
 
 3-phase sampling guided by match confidence:
 - Phase 1 (0–33% iters): weighted sample from top 25% by confidence

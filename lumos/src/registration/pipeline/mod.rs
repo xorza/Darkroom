@@ -175,7 +175,7 @@ impl Registrator {
 
         let ransac = RansacEstimator::new(ransac_params);
         let ransac_result = ransac
-            .estimate_with_matches(matches, ref_stars, target_stars, transform_type)
+            .estimate(matches, ref_stars, target_stars, transform_type)
             .ok_or(RegistrationError::RansacFailed {
                 reason: RansacFailureReason::NoInliersFound,
                 iterations: self.config.ransac_iterations,

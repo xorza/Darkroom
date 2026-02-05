@@ -1,14 +1,51 @@
 //! Tests for RANSAC module.
 
 use super::*;
+use crate::registration::triangle::PointMatch;
 use glam::DVec2;
 use std::f64::consts::PI;
 
 const EPSILON: f64 = 1e-6;
 
-// todo approx_eq for dvec2
 fn approx_eq(a: f64, b: f64, eps: f64) -> bool {
     (a - b).abs() < eps
+}
+
+/// Create PointMatch objects from paired point arrays with uniform confidence.
+fn make_matches(n: usize) -> Vec<PointMatch> {
+    (0..n)
+        .map(|i| PointMatch {
+            ref_idx: i,
+            target_idx: i,
+            votes: 1,
+            confidence: 1.0,
+        })
+        .collect()
+}
+
+/// Create PointMatch objects with custom confidences.
+fn make_matches_with_confidence(confidences: &[f64]) -> Vec<PointMatch> {
+    confidences
+        .iter()
+        .enumerate()
+        .map(|(i, &c)| PointMatch {
+            ref_idx: i,
+            target_idx: i,
+            votes: 1,
+            confidence: c,
+        })
+        .collect()
+}
+
+/// Helper to call estimate with uniform confidences from raw point arrays.
+fn estimate_uniform(
+    estimator: &RansacEstimator,
+    ref_points: &[DVec2],
+    target_points: &[DVec2],
+    transform_type: TransformType,
+) -> Option<RansacResult> {
+    let matches = make_matches(ref_points.len());
+    estimator.estimate(&matches, ref_points, target_points, transform_type)
 }
 
 #[test]
@@ -164,7 +201,12 @@ fn test_ransac_perfect_translation() {
         ..Default::default()
     };
     let estimator = RansacEstimator::new(config);
-    let result = estimator.estimate(&ref_points, &target_points, TransformType::Translation);
+    let result = estimate_uniform(
+        &estimator,
+        &ref_points,
+        &target_points,
+        TransformType::Translation,
+    );
 
     assert!(result.is_some());
     let result = result.unwrap();
@@ -198,7 +240,12 @@ fn test_ransac_perfect_similarity() {
         ..Default::default()
     };
     let estimator = RansacEstimator::new(config);
-    let result = estimator.estimate(&ref_points, &target_points, TransformType::Similarity);
+    let result = estimate_uniform(
+        &estimator,
+        &ref_points,
+        &target_points,
+        TransformType::Similarity,
+    );
 
     assert!(result.is_some());
     let result = result.unwrap();
@@ -233,7 +280,12 @@ fn test_ransac_with_outliers() {
         ..Default::default()
     };
     let estimator = RansacEstimator::new(config);
-    let result = estimator.estimate(&ref_points, &target_points, TransformType::Translation);
+    let result = estimate_uniform(
+        &estimator,
+        &ref_points,
+        &target_points,
+        TransformType::Translation,
+    );
 
     assert!(result.is_some());
     let result = result.unwrap();
@@ -250,7 +302,12 @@ fn test_ransac_insufficient_points() {
     let target_points = vec![DVec2::new(1.0, 1.0)];
 
     let estimator = RansacEstimator::new(RansacParams::default());
-    let result = estimator.estimate(&ref_points, &target_points, TransformType::Similarity);
+    let result = estimate_uniform(
+        &estimator,
+        &ref_points,
+        &target_points,
+        TransformType::Similarity,
+    );
 
     assert!(result.is_none());
 }
@@ -321,7 +378,12 @@ fn test_ransac_affine() {
         ..Default::default()
     };
     let estimator = RansacEstimator::new(config);
-    let result = estimator.estimate(&ref_points, &target_points, TransformType::Affine);
+    let result = estimate_uniform(
+        &estimator,
+        &ref_points,
+        &target_points,
+        TransformType::Affine,
+    );
 
     assert!(result.is_some());
     let result = result.unwrap();
@@ -351,7 +413,12 @@ fn test_ransac_homography() {
         ..Default::default()
     };
     let estimator = RansacEstimator::new(config);
-    let result = estimator.estimate(&ref_points, &target_points, TransformType::Homography);
+    let result = estimate_uniform(
+        &estimator,
+        &ref_points,
+        &target_points,
+        TransformType::Homography,
+    );
 
     assert!(result.is_some());
 }
@@ -390,7 +457,12 @@ fn test_lo_ransac_improves_inlier_count() {
     };
     let estimator_with = RansacEstimator::new(config_with_lo);
     let result_with = estimator_with
-        .estimate(&ref_points, &target_points, TransformType::Similarity)
+        .estimate(
+            &make_matches(ref_points.len()),
+            &ref_points,
+            &target_points,
+            TransformType::Similarity,
+        )
         .unwrap();
 
     // Test with LO-RANSAC disabled
@@ -404,7 +476,12 @@ fn test_lo_ransac_improves_inlier_count() {
     };
     let estimator_without = RansacEstimator::new(config_without_lo);
     let result_without = estimator_without
-        .estimate(&ref_points, &target_points, TransformType::Similarity)
+        .estimate(
+            &make_matches(ref_points.len()),
+            &ref_points,
+            &target_points,
+            TransformType::Similarity,
+        )
         .unwrap();
 
     // LO-RANSAC should find at least as many inliers
@@ -440,7 +517,12 @@ fn test_lo_ransac_converges() {
     };
     let estimator = RansacEstimator::new(config);
     let result = estimator
-        .estimate(&ref_points, &target_points, TransformType::Translation)
+        .estimate(
+            &make_matches(ref_points.len()),
+            &ref_points,
+            &target_points,
+            TransformType::Translation,
+        )
         .unwrap();
 
     // All points should be inliers
@@ -489,7 +571,12 @@ fn test_ransac_30_percent_outliers() {
     };
     let estimator = RansacEstimator::new(config);
     let result = estimator
-        .estimate(&ref_points, &target_points, TransformType::Translation)
+        .estimate(
+            &make_matches(ref_points.len()),
+            &ref_points,
+            &target_points,
+            TransformType::Translation,
+        )
         .unwrap();
 
     // Should find 10 inliers
@@ -524,7 +611,12 @@ fn test_ransac_numerical_stability_large_coords() {
     };
     let estimator = RansacEstimator::new(config);
     let result = estimator
-        .estimate(&ref_points, &target_points, TransformType::Similarity)
+        .estimate(
+            &make_matches(ref_points.len()),
+            &ref_points,
+            &target_points,
+            TransformType::Similarity,
+        )
         .unwrap();
 
     // Should find all points as inliers
@@ -567,12 +659,22 @@ fn test_ransac_deterministic_with_seed() {
     // Run twice with same seed
     let estimator1 = RansacEstimator::new(config.clone());
     let result1 = estimator1
-        .estimate(&ref_points, &target_points, TransformType::Translation)
+        .estimate(
+            &make_matches(ref_points.len()),
+            &ref_points,
+            &target_points,
+            TransformType::Translation,
+        )
         .unwrap();
 
     let estimator2 = RansacEstimator::new(config);
     let result2 = estimator2
-        .estimate(&ref_points, &target_points, TransformType::Translation)
+        .estimate(
+            &make_matches(ref_points.len()),
+            &ref_points,
+            &target_points,
+            TransformType::Translation,
+        )
         .unwrap();
 
     // Should get identical results
@@ -605,10 +707,10 @@ fn test_progressive_ransac_basic() {
     let estimator = RansacEstimator::new(config);
 
     let result = estimator
-        .estimate_progressive(
+        .estimate(
+            &make_matches_with_confidence(&confidences),
             &ref_points,
             &target_points,
-            &confidences,
             TransformType::Translation,
         )
         .unwrap();
@@ -648,10 +750,10 @@ fn test_progressive_ransac_with_outliers() {
     let estimator = RansacEstimator::new(config);
 
     let result = estimator
-        .estimate_progressive(
+        .estimate(
+            &make_matches_with_confidence(&confidences),
             &ref_points,
             &target_points,
-            &confidences,
             TransformType::Translation,
         )
         .unwrap();
@@ -697,10 +799,10 @@ fn test_progressive_ransac_finds_solution_faster() {
     let estimator = RansacEstimator::new(config);
 
     let result = estimator
-        .estimate_progressive(
+        .estimate(
+            &make_matches_with_confidence(&confidences),
             &ref_points,
             &target_points,
-            &confidences,
             TransformType::Similarity,
         )
         .unwrap();
@@ -736,7 +838,12 @@ fn test_ransac_extreme_scale_1e6() {
     };
     let estimator = RansacEstimator::new(config);
     let result = estimator
-        .estimate(&ref_points, &target_points, TransformType::Translation)
+        .estimate(
+            &make_matches(ref_points.len()),
+            &ref_points,
+            &target_points,
+            TransformType::Translation,
+        )
         .unwrap();
 
     assert_eq!(result.inliers.len(), 20);
@@ -766,7 +873,12 @@ fn test_ransac_small_coordinates() {
     };
     let estimator = RansacEstimator::new(config);
     let result = estimator
-        .estimate(&ref_points, &target_points, TransformType::Translation)
+        .estimate(
+            &make_matches(ref_points.len()),
+            &ref_points,
+            &target_points,
+            TransformType::Translation,
+        )
         .unwrap();
 
     assert_eq!(result.inliers.len(), 20);
@@ -801,7 +913,12 @@ fn test_ransac_mixed_scale_coordinates() {
     };
     let estimator = RansacEstimator::new(config);
     let result = estimator
-        .estimate(&ref_points, &target_points, TransformType::Translation)
+        .estimate(
+            &make_matches(ref_points.len()),
+            &ref_points,
+            &target_points,
+            TransformType::Translation,
+        )
         .unwrap();
 
     assert_eq!(result.inliers.len(), 10);
@@ -835,7 +952,12 @@ fn test_homography_near_affine() {
     };
     let estimator = RansacEstimator::new(config);
     let result = estimator
-        .estimate(&ref_points, &target_points, TransformType::Homography)
+        .estimate(
+            &make_matches(ref_points.len()),
+            &ref_points,
+            &target_points,
+            TransformType::Homography,
+        )
         .unwrap();
 
     // Should still find all points as inliers
@@ -873,7 +995,12 @@ fn test_similarity_very_small_rotation() {
     };
     let estimator = RansacEstimator::new(config);
     let result = estimator
-        .estimate(&ref_points, &target_points, TransformType::Similarity)
+        .estimate(
+            &make_matches(ref_points.len()),
+            &ref_points,
+            &target_points,
+            TransformType::Similarity,
+        )
         .unwrap();
 
     assert_eq!(result.inliers.len(), 20);
@@ -908,7 +1035,12 @@ fn test_similarity_near_unity_scale() {
     };
     let estimator = RansacEstimator::new(config);
     let result = estimator
-        .estimate(&ref_points, &target_points, TransformType::Similarity)
+        .estimate(
+            &make_matches(ref_points.len()),
+            &ref_points,
+            &target_points,
+            TransformType::Similarity,
+        )
         .unwrap();
 
     assert_eq!(result.inliers.len(), 20);
@@ -942,7 +1074,12 @@ fn test_affine_with_shear() {
     };
     let estimator = RansacEstimator::new(config);
     let result = estimator
-        .estimate(&ref_points, &target_points, TransformType::Affine)
+        .estimate(
+            &make_matches(ref_points.len()),
+            &ref_points,
+            &target_points,
+            TransformType::Affine,
+        )
         .unwrap();
 
     assert_eq!(result.inliers.len(), 20);
@@ -1015,7 +1152,12 @@ fn test_ransac_100_percent_inliers() {
     };
     let estimator = RansacEstimator::new(config);
 
-    let result = estimator.estimate(&ref_points, &target_points, TransformType::Similarity);
+    let result = estimate_uniform(
+        &estimator,
+        &ref_points,
+        &target_points,
+        TransformType::Similarity,
+    );
 
     assert!(result.is_some(), "Should succeed with 100% inliers");
     let result = result.unwrap();
@@ -1059,7 +1201,12 @@ fn test_ransac_0_percent_inliers_pure_noise() {
     };
     let estimator = RansacEstimator::new(config);
 
-    let result = estimator.estimate(&ref_points, &target_points, TransformType::Similarity);
+    let result = estimate_uniform(
+        &estimator,
+        &ref_points,
+        &target_points,
+        TransformType::Similarity,
+    );
 
     // Should either return None or return a result with very few inliers
     if let Some(result) = result {
@@ -1132,7 +1279,12 @@ fn test_ransac_early_termination() {
     };
     let estimator = RansacEstimator::new(config);
 
-    let result = estimator.estimate(&ref_points, &target_points, TransformType::Translation);
+    let result = estimate_uniform(
+        &estimator,
+        &ref_points,
+        &target_points,
+        TransformType::Translation,
+    );
 
     assert!(result.is_some(), "Should find solution");
     let result = result.unwrap();
@@ -1170,7 +1322,12 @@ fn test_homography_nearly_degenerate() {
 
     // This may or may not succeed depending on which points are sampled
     // Key is it doesn't panic
-    let result = estimator.estimate(&ref_points, &target_points, TransformType::Homography);
+    let result = estimate_uniform(
+        &estimator,
+        &ref_points,
+        &target_points,
+        TransformType::Homography,
+    );
 
     // If it succeeds, check the transform is reasonable
     if let Some(result) = result {
@@ -1208,10 +1365,10 @@ fn test_progressive_ransac_uses_weights() {
     };
     let estimator = RansacEstimator::new(config);
 
-    let result = estimator.estimate_progressive(
+    let result = estimator.estimate(
+        &make_matches_with_confidence(&confidences),
         &ref_points,
         &target_points,
-        &confidences,
         TransformType::Translation,
     );
 
@@ -1241,7 +1398,12 @@ fn test_ransac_minimum_points() {
     };
     let estimator = RansacEstimator::new(config);
 
-    let result = estimator.estimate(&ref_points, &target_points, TransformType::Translation);
+    let result = estimate_uniform(
+        &estimator,
+        &ref_points,
+        &target_points,
+        TransformType::Translation,
+    );
 
     assert!(result.is_some(), "Should work with minimum 2 points");
     let result = result.unwrap();
@@ -1253,7 +1415,7 @@ fn test_ransac_minimum_points() {
 // ============================================================================
 
 #[test]
-fn test_estimate_with_matches_basic() {
+fn test_estimate_basic() {
     use crate::registration::triangle::PointMatch;
 
     // Create reference and target stars
@@ -1285,14 +1447,14 @@ fn test_estimate_with_matches_basic() {
     };
 
     let ransac = RansacEstimator::new(config);
-    let result = ransac.estimate_with_matches(
+    let result = ransac.estimate(
         &matches,
         &ref_stars,
         &target_stars,
         TransformType::Translation,
     );
 
-    assert!(result.is_some(), "estimate_with_matches should succeed");
+    assert!(result.is_some(), "estimate should succeed");
     let result = result.unwrap();
 
     // Should find the correct translation
@@ -1312,7 +1474,7 @@ fn test_estimate_with_matches_basic() {
 }
 
 #[test]
-fn test_estimate_with_matches_empty() {
+fn test_estimate_empty() {
     use crate::registration::triangle::PointMatch;
 
     let matches: Vec<PointMatch> = vec![];
@@ -1320,7 +1482,7 @@ fn test_estimate_with_matches_empty() {
     let target_stars: Vec<DVec2> = vec![];
 
     let ransac = RansacEstimator::new(RansacParams::default());
-    let result = ransac.estimate_with_matches(
+    let result = ransac.estimate(
         &matches,
         &ref_stars,
         &target_stars,
@@ -1331,7 +1493,7 @@ fn test_estimate_with_matches_empty() {
 }
 
 #[test]
-fn test_estimate_with_matches_uses_confidence() {
+fn test_estimate_uses_confidence() {
     use crate::registration::triangle::PointMatch;
 
     // Create points where one outlier has low confidence
@@ -1366,7 +1528,7 @@ fn test_estimate_with_matches_uses_confidence() {
     };
 
     let ransac = RansacEstimator::new(config);
-    let result = ransac.estimate_with_matches(
+    let result = ransac.estimate(
         &matches,
         &ref_stars,
         &target_stars,
@@ -1420,7 +1582,12 @@ fn test_plausibility_rejects_large_rotation() {
         ..Default::default()
     };
     let estimator = RansacEstimator::new(config);
-    let result = estimator.estimate(&ref_points, &target_points, TransformType::Similarity);
+    let result = estimate_uniform(
+        &estimator,
+        &ref_points,
+        &target_points,
+        TransformType::Similarity,
+    );
 
     // Should fail because all hypotheses have ~30° rotation, exceeding the 10° limit
     assert!(
@@ -1447,7 +1614,12 @@ fn test_plausibility_rejects_large_scale() {
         ..Default::default()
     };
     let estimator = RansacEstimator::new(config);
-    let result = estimator.estimate(&ref_points, &target_points, TransformType::Similarity);
+    let result = estimate_uniform(
+        &estimator,
+        &ref_points,
+        &target_points,
+        TransformType::Similarity,
+    );
 
     assert!(
         result.is_none(),
@@ -1472,7 +1644,12 @@ fn test_plausibility_rejects_small_scale() {
         ..Default::default()
     };
     let estimator = RansacEstimator::new(config);
-    let result = estimator.estimate(&ref_points, &target_points, TransformType::Similarity);
+    let result = estimate_uniform(
+        &estimator,
+        &ref_points,
+        &target_points,
+        TransformType::Similarity,
+    );
 
     assert!(
         result.is_none(),
@@ -1499,7 +1676,12 @@ fn test_plausibility_accepts_within_bounds() {
         ..Default::default()
     };
     let estimator = RansacEstimator::new(config);
-    let result = estimator.estimate(&ref_points, &target_points, TransformType::Similarity);
+    let result = estimate_uniform(
+        &estimator,
+        &ref_points,
+        &target_points,
+        TransformType::Similarity,
+    );
 
     assert!(result.is_some(), "Should accept transforms within bounds");
     let result = result.unwrap();
@@ -1524,7 +1706,12 @@ fn test_plausibility_disabled_accepts_everything() {
         ..Default::default()
     };
     let estimator = RansacEstimator::new(config);
-    let result = estimator.estimate(&ref_points, &target_points, TransformType::Similarity);
+    let result = estimate_uniform(
+        &estimator,
+        &ref_points,
+        &target_points,
+        TransformType::Similarity,
+    );
 
     assert!(
         result.is_some(),
@@ -1555,7 +1742,12 @@ fn test_plausibility_rotation_boundary() {
         ..Default::default()
     };
     let estimator = RansacEstimator::new(config);
-    let result = estimator.estimate(&ref_points, &target_points, TransformType::Similarity);
+    let result = estimate_uniform(
+        &estimator,
+        &ref_points,
+        &target_points,
+        TransformType::Similarity,
+    );
     assert!(result.is_some(), "9.9° rotation should pass 10° limit");
 
     // 10.5° - should fail
@@ -1570,7 +1762,12 @@ fn test_plausibility_rotation_boundary() {
         ..Default::default()
     };
     let estimator = RansacEstimator::new(config);
-    let result = estimator.estimate(&ref_points, &target_points, TransformType::Similarity);
+    let result = estimate_uniform(
+        &estimator,
+        &ref_points,
+        &target_points,
+        TransformType::Similarity,
+    );
     assert!(result.is_none(), "10.5° rotation should fail 10° limit");
 }
 
@@ -1591,7 +1788,12 @@ fn test_plausibility_negative_rotation() {
         ..Default::default()
     };
     let estimator = RansacEstimator::new(config);
-    let result = estimator.estimate(&ref_points, &target_points, TransformType::Similarity);
+    let result = estimate_uniform(
+        &estimator,
+        &ref_points,
+        &target_points,
+        TransformType::Similarity,
+    );
 
     assert!(
         result.is_none(),
@@ -1617,7 +1819,12 @@ fn test_plausibility_scale_boundary() {
         ..Default::default()
     };
     let estimator = RansacEstimator::new(config);
-    let result = estimator.estimate(&ref_points, &target_points, TransformType::Similarity);
+    let result = estimate_uniform(
+        &estimator,
+        &ref_points,
+        &target_points,
+        TransformType::Similarity,
+    );
     assert!(result.is_some(), "1.15 scale should pass (0.8, 1.2) range");
 
     // 1.25 scale - should fail (0.8, 1.2) range
@@ -1631,7 +1838,12 @@ fn test_plausibility_scale_boundary() {
         ..Default::default()
     };
     let estimator = RansacEstimator::new(config);
-    let result = estimator.estimate(&ref_points, &target_points, TransformType::Similarity);
+    let result = estimate_uniform(
+        &estimator,
+        &ref_points,
+        &target_points,
+        TransformType::Similarity,
+    );
     assert!(result.is_none(), "1.25 scale should fail (0.8, 1.2) range");
 }
 
@@ -1655,7 +1867,12 @@ fn test_plausibility_translation_unaffected() {
         ..Default::default()
     };
     let estimator = RansacEstimator::new(config);
-    let result = estimator.estimate(&ref_points, &target_points, TransformType::Translation);
+    let result = estimate_uniform(
+        &estimator,
+        &ref_points,
+        &target_points,
+        TransformType::Translation,
+    );
 
     assert!(
         result.is_some(),
@@ -1682,10 +1899,10 @@ fn test_plausibility_progressive_ransac_rejects() {
         ..Default::default()
     };
     let estimator = RansacEstimator::new(config);
-    let result = estimator.estimate_progressive(
+    let result = estimator.estimate(
+        &make_matches_with_confidence(&confidences),
         &ref_points,
         &target_points,
-        &confidences,
         TransformType::Similarity,
     );
 
@@ -1715,10 +1932,10 @@ fn test_plausibility_progressive_ransac_accepts() {
         ..Default::default()
     };
     let estimator = RansacEstimator::new(config);
-    let result = estimator.estimate_progressive(
+    let result = estimator.estimate(
+        &make_matches_with_confidence(&confidences),
         &ref_points,
         &target_points,
-        &confidences,
         TransformType::Similarity,
     );
 
@@ -1748,7 +1965,12 @@ fn test_plausibility_combined_rotation_and_scale() {
         ..Default::default()
     };
     let estimator = RansacEstimator::new(config);
-    let result = estimator.estimate(&ref_points, &target_points, TransformType::Similarity);
+    let result = estimate_uniform(
+        &estimator,
+        &ref_points,
+        &target_points,
+        TransformType::Similarity,
+    );
 
     assert!(
         result.is_none(),
@@ -1766,7 +1988,12 @@ fn test_plausibility_combined_rotation_and_scale() {
         ..Default::default()
     };
     let estimator = RansacEstimator::new(config);
-    let result = estimator.estimate(&ref_points, &target_points, TransformType::Similarity);
+    let result = estimate_uniform(
+        &estimator,
+        &ref_points,
+        &target_points,
+        TransformType::Similarity,
+    );
 
     assert!(
         result.is_none(),
@@ -1784,7 +2011,12 @@ fn test_plausibility_combined_rotation_and_scale() {
         ..Default::default()
     };
     let estimator = RansacEstimator::new(config);
-    let result = estimator.estimate(&ref_points, &target_points, TransformType::Similarity);
+    let result = estimate_uniform(
+        &estimator,
+        &ref_points,
+        &target_points,
+        TransformType::Similarity,
+    );
 
     assert!(
         result.is_some(),
@@ -1821,7 +2053,8 @@ fn test_plausibility_with_outliers_filters_bad_hypotheses() {
         ..Default::default()
     };
     let estimator = RansacEstimator::new(config);
-    let result = estimator.estimate(
+    let result = estimate_uniform(
+        &estimator,
         &ref_with_outliers,
         &target_points,
         TransformType::Translation,

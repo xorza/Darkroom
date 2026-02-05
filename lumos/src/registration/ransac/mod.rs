@@ -145,44 +145,6 @@ impl RansacEstimator {
         true
     }
 
-    /// Estimate transformation from matched point pairs.
-    ///
-    /// # Arguments
-    /// * `ref_points` - Reference (source) point positions
-    /// * `target_points` - Target (destination) point positions
-    /// * `transform_type` - Type of transformation to estimate
-    ///
-    /// # Returns
-    /// Best transformation found, or None if estimation failed.
-    #[allow(dead_code)] // Used in tests
-    pub fn estimate(
-        &self,
-        ref_points: &[DVec2],
-        target_points: &[DVec2],
-        transform_type: TransformType,
-    ) -> Option<RansacResult> {
-        let n = ref_points.len();
-        let min_samples = transform_type.min_points();
-
-        if n < min_samples {
-            return None;
-        }
-
-        let mut rng = RngWrapper::new(self.params.seed);
-
-        self.ransac_loop(
-            ref_points,
-            target_points,
-            n,
-            min_samples,
-            transform_type,
-            |iteration, max_iter, sample_buf| {
-                let _ = (iteration, max_iter); // uniform sampling ignores iteration/phase
-                random_sample_into(&mut rng, n, min_samples, sample_buf);
-            },
-        )
-    }
-
     /// Perform local optimization on a promising hypothesis.
     ///
     /// This implements the LO-RANSAC algorithm:
@@ -260,7 +222,7 @@ impl RansacEstimator {
         (current_transform, current_inliers, current_score)
     }
 
-    /// Core RANSAC loop shared by `estimate` and `estimate_progressive`.
+    /// Core RANSAC loop.
     ///
     /// The `sample_fn` closure fills `sample_indices` buffer each iteration.
     /// It receives `(iteration, max_iterations, &mut sample_buf)`.
@@ -406,31 +368,41 @@ impl RansacEstimator {
         None
     }
 
-    /// Estimate transformation using progressive/guided sampling.
+    /// Estimate transformation from star matches.
     ///
-    /// This variant uses match confidence scores to guide hypothesis sampling,
-    /// preferentially sampling from high-confidence matches early in the process.
-    /// This typically finds good solutions faster than uniform random sampling.
+    /// Uses match confidence scores to guide hypothesis sampling via 3-phase
+    /// progressive sampling: early iterations preferentially sample high-confidence
+    /// matches, converging faster than uniform random sampling.
     ///
     /// # Arguments
-    /// * `ref_points` - Reference (source) point positions
-    /// * `target_points` - Target (destination) point positions
-    /// * `confidences` - Confidence scores for each point pair (0.0 - 1.0)
+    /// * `matches` - Star matches with confidence scores from triangle matching
+    /// * `ref_stars` - Reference star positions
+    /// * `target_stars` - Target star positions
     /// * `transform_type` - Type of transformation to estimate
     ///
     /// # Returns
     /// Best transformation found, or None if estimation failed.
-    pub fn estimate_progressive(
+    pub fn estimate(
         &self,
-        ref_points: &[DVec2],
-        target_points: &[DVec2],
-        confidences: &[f64],
+        matches: &[PointMatch],
+        ref_stars: &[DVec2],
+        target_stars: &[DVec2],
         transform_type: TransformType,
     ) -> Option<RansacResult> {
+        if matches.is_empty() {
+            return None;
+        }
+
+        // Extract point pairs and confidences from matches
+        let ref_points: Vec<DVec2> = matches.iter().map(|m| ref_stars[m.ref_idx]).collect();
+        let target_points: Vec<DVec2> =
+            matches.iter().map(|m| target_stars[m.target_idx]).collect();
+        let confidences: Vec<f64> = matches.iter().map(|m| m.confidence).collect();
+
         let n = ref_points.len();
         let min_samples = transform_type.min_points();
 
-        if n < min_samples || confidences.len() != n {
+        if n < min_samples {
             return None;
         }
 
@@ -452,8 +424,8 @@ impl RansacEstimator {
             .collect();
 
         self.ransac_loop(
-            ref_points,
-            target_points,
+            &ref_points,
+            &target_points,
             n,
             min_samples,
             transform_type,
@@ -487,43 +459,6 @@ impl RansacEstimator {
                 }
             },
         )
-    }
-
-    /// Estimate transformation from star matches using progressive sampling.
-    ///
-    /// This is the recommended method when you have `PointMatch` objects from
-    /// triangle matching, as it uses the match confidences to guide RANSAC
-    /// sampling, typically finding good solutions faster.
-    ///
-    /// # Arguments
-    /// * `matches` - Star matches with confidence scores
-    /// * `ref_stars` - Reference star positions (x, y)
-    /// * `target_stars` - Target star positions (x, y)
-    /// * `transform_type` - Type of transformation to estimate
-    ///
-    /// # Returns
-    /// Best transformation found, or None if estimation failed.
-    pub fn estimate_with_matches(
-        &self,
-        matches: &[PointMatch],
-        ref_stars: &[DVec2],
-        target_stars: &[DVec2],
-        transform_type: TransformType,
-    ) -> Option<RansacResult> {
-        if matches.is_empty() {
-            return None;
-        }
-
-        // Extract point pairs and confidences from matches
-        let ref_points: Vec<DVec2> = matches.iter().map(|m| ref_stars[m.ref_idx]).collect();
-
-        let target_points: Vec<DVec2> =
-            matches.iter().map(|m| target_stars[m.target_idx]).collect();
-
-        let confidences: Vec<f64> = matches.iter().map(|m| m.confidence).collect();
-
-        // Use progressive sampling with the confidences
-        self.estimate_progressive(&ref_points, &target_points, &confidences, transform_type)
     }
 }
 
