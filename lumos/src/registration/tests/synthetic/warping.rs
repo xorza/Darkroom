@@ -411,7 +411,7 @@ fn test_warp_homography_roundtrip() {
 fn test_warp_with_detected_transform() {
     use crate::AstroImage;
 
-    use crate::registration::{Config as RegConfig, register_positions};
+    use crate::registration::{Config as RegConfig, register};
     use crate::star_detection::Config as StarConfig;
 
     let config = StarFieldConfig {
@@ -454,10 +454,7 @@ fn test_warp_with_detected_transform() {
     let ref_result = det.detect(&ref_image);
     let target_result = det.detect(&target_image);
 
-    let ref_stars: Vec<DVec2> = ref_result.stars.iter().map(|s| s.pos).collect();
-    let target_stars: Vec<DVec2> = target_result.stars.iter().map(|s| s.pos).collect();
-
-    // Register to find transform
+    // Register to find transform using detected stars directly
     let reg_config = RegConfig {
         transform_type: TransformType::Euclidean,
         min_stars: 6,
@@ -465,7 +462,7 @@ fn test_warp_with_detected_transform() {
         ..Default::default()
     };
 
-    let result = register_positions(&ref_stars, &target_stars, 1.0, &reg_config)
+    let result = register(&ref_result.stars, &target_result.stars, &reg_config)
         .expect("Registration should succeed");
 
     // Use warp to align target back to reference frame

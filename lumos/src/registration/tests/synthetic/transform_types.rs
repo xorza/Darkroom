@@ -10,19 +10,30 @@
 //! - Affine (6 DOF: handles differential scaling and shear)
 //! - Homography (8 DOF: handles perspective)
 
-use crate::registration::{Config, TransformType, register_positions};
-use crate::testing::synthetic::{generate_random_positions, transform_stars, translate_stars};
+use crate::registration::{Config, TransformType, register};
+use crate::star_detection::Star;
+use crate::testing::synthetic::{
+    generate_random_stars, positions_to_stars, transform_star_list, translate_star_list,
+};
 use glam::DVec2;
+
+// FWHM values that control max_sigma in registration:
+// max_sigma = fwhm * 0.5, floor at 0.5
+// FWHM 2.0 -> max_sigma 1.0
+// FWHM 1.34 -> max_sigma 0.67
+// FWHM 0.66 -> max_sigma 0.5 (floor)
+const FWHM_TIGHT: f32 = 1.34; // max_sigma ~0.67
+const FWHM_NORMAL: f32 = 2.0; // max_sigma ~1.0
 
 #[test]
 fn test_registration_translation_only() {
     // Generate reference star field
-    let ref_stars = generate_random_positions(50, 1000.0, 1000.0, 12345);
+    let ref_stars = generate_random_stars(50, 1000.0, 1000.0, 12345, FWHM_TIGHT);
 
     // Apply known translation
     let dx = 25.5;
     let dy = -15.3;
-    let target_stars = translate_stars(&ref_stars, dx, dy);
+    let target_stars = translate_star_list(&ref_stars, dx, dy);
 
     // Configure registration for translation only
     let config = Config {
@@ -32,8 +43,7 @@ fn test_registration_translation_only() {
         ..Default::default()
     };
 
-    let result = register_positions(&ref_stars, &target_stars, 0.67, &config)
-        .expect("Registration should succeed");
+    let result = register(&ref_stars, &target_stars, &config).expect("Registration should succeed");
 
     // Extract recovered translation
     let recovered = result.transform.translation_components();
@@ -75,7 +85,7 @@ fn test_registration_translation_only() {
 #[test]
 fn test_registration_similarity_transform() {
     // Generate reference star field
-    let ref_stars = generate_random_positions(80, 2000.0, 2000.0, 54321);
+    let ref_stars = generate_random_stars(80, 2000.0, 2000.0, 54321, FWHM_NORMAL);
 
     // Apply known similarity transform (translation + rotation + scale)
     let dx = 30.0;
@@ -86,7 +96,8 @@ fn test_registration_similarity_transform() {
     let center_x = 1000.0;
     let center_y = 1000.0;
 
-    let target_stars = transform_stars(&ref_stars, dx, dy, angle_rad, scale, center_x, center_y);
+    let target_stars =
+        transform_star_list(&ref_stars, dx, dy, angle_rad, scale, center_x, center_y);
 
     // Configure registration with scale
     let config = Config {
@@ -96,15 +107,14 @@ fn test_registration_similarity_transform() {
         ..Default::default()
     };
 
-    let result = register_positions(&ref_stars, &target_stars, 1.0, &config)
-        .expect("Registration should succeed");
+    let result = register(&ref_stars, &target_stars, &config).expect("Registration should succeed");
 
     // Validate by applying the recovered transform to reference stars
     // and checking they match target stars
     let mut max_error = 0.0f64;
     for (ref_star, target_star) in ref_stars.iter().zip(target_stars.iter()) {
-        let transformed = result.transform.apply(*ref_star);
-        let error = transformed.distance(*target_star);
+        let transformed = result.transform.apply(ref_star.pos);
+        let error = transformed.distance(target_star.pos);
         max_error = max_error.max(error);
     }
 
@@ -147,7 +157,7 @@ fn test_registration_similarity_transform() {
 #[test]
 fn test_registration_with_noise() {
     // Generate reference star field
-    let ref_stars = generate_random_positions(100, 1500.0, 1500.0, 99999);
+    let ref_stars = generate_random_stars(100, 1500.0, 1500.0, 99999, FWHM_NORMAL);
 
     // Apply translation with some noise in star positions
     let dx = 50.0;
@@ -159,12 +169,15 @@ fn test_registration_with_noise() {
         ((state >> 33) as f64 / (1u64 << 31) as f64) * 2.0 - 1.0 // -1 to 1
     };
 
-    let target_stars: Vec<DVec2> = ref_stars
+    let target_stars: Vec<Star> = ref_stars
         .iter()
-        .map(|p| {
+        .map(|s| {
             let noise_x = next_random() * 0.5; // +/- 0.5 pixel noise
             let noise_y = next_random() * 0.5;
-            DVec2::new(p.x + dx + noise_x, p.y + dy + noise_y)
+            Star {
+                pos: DVec2::new(s.pos.x + dx + noise_x, s.pos.y + dy + noise_y),
+                ..*s
+            }
         })
         .collect();
 
@@ -176,9 +189,8 @@ fn test_registration_with_noise() {
         ..Default::default()
     };
 
-    // Allow more residual due to noise
-    let result = register_positions(&ref_stars, &target_stars, 1.0, &config)
-        .expect("Registration should succeed");
+    // Allow more residual due to noise (FWHM_NORMAL -> max_sigma ~1.0)
+    let result = register(&ref_stars, &target_stars, &config).expect("Registration should succeed");
 
     // Extract recovered translation
     let recovered = result.transform.translation_components();
@@ -213,12 +225,12 @@ fn test_registration_with_noise() {
 #[test]
 fn test_registration_large_translation() {
     // Generate reference star field
-    let ref_stars = generate_random_positions(60, 2000.0, 2000.0, 77777);
+    let ref_stars = generate_random_stars(60, 2000.0, 2000.0, 77777, FWHM_TIGHT);
 
     // Apply large translation (simulating significant pointing offset)
     let dx = 200.0;
     let dy = -150.0;
-    let target_stars = translate_stars(&ref_stars, dx, dy);
+    let target_stars = translate_star_list(&ref_stars, dx, dy);
 
     // Configure registration
     let config = Config {
@@ -228,8 +240,7 @@ fn test_registration_large_translation() {
         ..Default::default()
     };
 
-    let result = register_positions(&ref_stars, &target_stars, 0.67, &config)
-        .expect("Registration should succeed");
+    let result = register(&ref_stars, &target_stars, &config).expect("Registration should succeed");
 
     let recovered = result.transform.translation_components();
 
@@ -250,8 +261,8 @@ fn test_registration_large_translation() {
 
 #[test]
 fn test_registration_transform_display() {
-    let ref_stars = generate_random_positions(50, 1000.0, 1000.0, 12345);
-    let target_stars = translate_stars(&ref_stars, 10.0, -5.0);
+    let ref_stars = generate_random_stars(50, 1000.0, 1000.0, 12345, FWHM_NORMAL);
+    let target_stars = translate_star_list(&ref_stars, 10.0, -5.0);
 
     let config = Config {
         transform_type: TransformType::Similarity,
@@ -260,8 +271,7 @@ fn test_registration_transform_display() {
         ..Default::default()
     };
 
-    let result = register_positions(&ref_stars, &target_stars, 1.0, &config)
-        .expect("Registration should succeed");
+    let result = register(&ref_stars, &target_stars, &config).expect("Registration should succeed");
 
     // Test that Display works
     let display_str = format!("{}", result.transform);
@@ -284,7 +294,7 @@ fn test_registration_transform_display() {
 #[test]
 fn test_registration_euclidean_rotation_only() {
     // Generate reference star field
-    let ref_stars = generate_random_positions(80, 2000.0, 2000.0, 11111);
+    let ref_stars = generate_random_stars(80, 2000.0, 2000.0, 11111, FWHM_TIGHT);
 
     // Apply pure rotation around image center (no translation, no scale)
     let angle_deg: f64 = 1.5;
@@ -292,8 +302,9 @@ fn test_registration_euclidean_rotation_only() {
     let center_x = 1000.0;
     let center_y = 1000.0;
 
-    // transform_stars with scale=1.0 and dx=dy=0 gives pure rotation
-    let target_stars = transform_stars(&ref_stars, 0.0, 0.0, angle_rad, 1.0, center_x, center_y);
+    // transform_star_list with scale=1.0 and dx=dy=0 gives pure rotation
+    let target_stars =
+        transform_star_list(&ref_stars, 0.0, 0.0, angle_rad, 1.0, center_x, center_y);
 
     let config = Config {
         transform_type: TransformType::Euclidean,
@@ -302,8 +313,7 @@ fn test_registration_euclidean_rotation_only() {
         ..Default::default()
     };
 
-    let result = register_positions(&ref_stars, &target_stars, 0.67, &config)
-        .expect("Registration should succeed");
+    let result = register(&ref_stars, &target_stars, &config).expect("Registration should succeed");
 
     assert_eq!(result.transform.transform_type, TransformType::Euclidean);
 
@@ -335,7 +345,7 @@ fn test_registration_euclidean_rotation_only() {
 
 #[test]
 fn test_registration_euclidean_translation_and_rotation() {
-    let ref_stars = generate_random_positions(70, 1500.0, 1500.0, 22222);
+    let ref_stars = generate_random_stars(70, 1500.0, 1500.0, 22222, FWHM_TIGHT);
 
     let dx = 45.0;
     let dy = -30.0;
@@ -344,7 +354,7 @@ fn test_registration_euclidean_translation_and_rotation() {
     let center_x = 750.0;
     let center_y = 750.0;
 
-    let target_stars = transform_stars(&ref_stars, dx, dy, angle_rad, 1.0, center_x, center_y);
+    let target_stars = transform_star_list(&ref_stars, dx, dy, angle_rad, 1.0, center_x, center_y);
 
     let config = Config {
         transform_type: TransformType::Euclidean,
@@ -353,16 +363,15 @@ fn test_registration_euclidean_translation_and_rotation() {
         ..Default::default()
     };
 
-    let result = register_positions(&ref_stars, &target_stars, 0.67, &config)
-        .expect("Registration should succeed");
+    let result = register(&ref_stars, &target_stars, &config).expect("Registration should succeed");
 
     assert_eq!(result.transform.transform_type, TransformType::Euclidean);
 
     // Validate by applying transform to all reference stars
     let mut max_error = 0.0f64;
     for (ref_star, target_star) in ref_stars.iter().zip(target_stars.iter()) {
-        let t = result.transform.apply(*ref_star);
-        let error = t.distance(*target_star);
+        let t = result.transform.apply(ref_star.pos);
+        let error = t.distance(target_star.pos);
         max_error = max_error.max(error);
     }
 
@@ -390,18 +399,24 @@ fn test_registration_euclidean_translation_and_rotation() {
 /// Affine: [a, b, tx, c, d, ty] where the transform is:
 /// x' = a*x + b*y + tx
 /// y' = c*x + d*y + ty
-fn apply_affine(stars: &[DVec2], params: [f64; 6]) -> Vec<DVec2> {
+fn apply_affine(stars: &[Star], params: [f64; 6]) -> Vec<Star> {
     let [a, b, tx, c, d, ty] = params;
     stars
         .iter()
-        .map(|p| DVec2::new(a * p.x + b * p.y + tx, c * p.x + d * p.y + ty))
+        .map(|s| Star {
+            pos: DVec2::new(
+                a * s.pos.x + b * s.pos.y + tx,
+                c * s.pos.x + d * s.pos.y + ty,
+            ),
+            ..*s
+        })
         .collect()
 }
 
 #[test]
 fn test_registration_affine_differential_scale() {
     // Test affine with different X and Y scales (anisotropic scaling)
-    let ref_stars = generate_random_positions(100, 2000.0, 2000.0, 33333);
+    let ref_stars = generate_random_stars(100, 2000.0, 2000.0, 33333, FWHM_NORMAL);
 
     // Affine with different X/Y scales: scale_x=1.003, scale_y=0.998
     let scale_x = 1.003;
@@ -419,16 +434,15 @@ fn test_registration_affine_differential_scale() {
         ..Default::default()
     };
 
-    let result = register_positions(&ref_stars, &target_stars, 1.0, &config)
-        .expect("Registration should succeed");
+    let result = register(&ref_stars, &target_stars, &config).expect("Registration should succeed");
 
     assert_eq!(result.transform.transform_type, TransformType::Affine);
 
     // Validate by applying transform
     let mut max_error = 0.0f64;
     for (ref_star, target_star) in ref_stars.iter().zip(target_stars.iter()) {
-        let t = result.transform.apply(*ref_star);
-        let error = t.distance(*target_star);
+        let t = result.transform.apply(ref_star.pos);
+        let error = t.distance(target_star.pos);
         max_error = max_error.max(error);
     }
 
@@ -448,7 +462,7 @@ fn test_registration_affine_differential_scale() {
 #[test]
 fn test_registration_affine_with_shear() {
     // Test affine with shear component
-    let ref_stars = generate_random_positions(100, 2000.0, 2000.0, 44444);
+    let ref_stars = generate_random_stars(100, 2000.0, 2000.0, 44444, FWHM_NORMAL);
 
     // Affine with small shear: shear_x = 0.002
     let shear = 0.002;
@@ -466,16 +480,15 @@ fn test_registration_affine_with_shear() {
         ..Default::default()
     };
 
-    let result = register_positions(&ref_stars, &target_stars, 1.0, &config)
-        .expect("Registration should succeed");
+    let result = register(&ref_stars, &target_stars, &config).expect("Registration should succeed");
 
     assert_eq!(result.transform.transform_type, TransformType::Affine);
 
     // Validate transformation accuracy
     let mut max_error = 0.0f64;
     for (ref_star, target_star) in ref_stars.iter().zip(target_stars.iter()) {
-        let t = result.transform.apply(*ref_star);
-        let error = t.distance(*target_star);
+        let t = result.transform.apply(ref_star.pos);
+        let error = t.distance(target_star.pos);
         max_error = max_error.max(error);
     }
 
@@ -489,7 +502,7 @@ fn test_registration_affine_with_shear() {
 #[test]
 fn test_registration_affine_rotation_and_differential_scale() {
     // Combined rotation with differential scaling
-    let ref_stars = generate_random_positions(100, 2000.0, 2000.0, 55555);
+    let ref_stars = generate_random_stars(100, 2000.0, 2000.0, 55555, FWHM_NORMAL);
 
     let angle_rad = 0.3_f64.to_radians();
     let scale_x = 1.002;
@@ -518,15 +531,14 @@ fn test_registration_affine_rotation_and_differential_scale() {
         ..Default::default()
     };
 
-    let result = register_positions(&ref_stars, &target_stars, 1.0, &config)
-        .expect("Registration should succeed");
+    let result = register(&ref_stars, &target_stars, &config).expect("Registration should succeed");
 
     assert_eq!(result.transform.transform_type, TransformType::Affine);
 
     let mut max_error = 0.0f64;
     for (ref_star, target_star) in ref_stars.iter().zip(target_stars.iter()) {
-        let t = result.transform.apply(*ref_star);
-        let error = t.distance(*target_star);
+        let t = result.transform.apply(ref_star.pos);
+        let error = t.distance(target_star.pos);
         max_error = max_error.max(error);
     }
 
@@ -551,14 +563,17 @@ fn test_registration_affine_rotation_and_differential_scale() {
 /// H = [h0, h1, h2, h3, h4, h5, h6, h7, 1.0]
 /// x' = (h0*x + h1*y + h2) / (h6*x + h7*y + 1)
 /// y' = (h3*x + h4*y + h5) / (h6*x + h7*y + 1)
-fn apply_homography(stars: &[DVec2], params: [f64; 8]) -> Vec<DVec2> {
+fn apply_homography(stars: &[Star], params: [f64; 8]) -> Vec<Star> {
     stars
         .iter()
-        .map(|p| {
-            let w = params[6] * p.x + params[7] * p.y + 1.0;
-            let x_prime = (params[0] * p.x + params[1] * p.y + params[2]) / w;
-            let y_prime = (params[3] * p.x + params[4] * p.y + params[5]) / w;
-            DVec2::new(x_prime, y_prime)
+        .map(|s| {
+            let w = params[6] * s.pos.x + params[7] * s.pos.y + 1.0;
+            let x_prime = (params[0] * s.pos.x + params[1] * s.pos.y + params[2]) / w;
+            let y_prime = (params[3] * s.pos.x + params[4] * s.pos.y + params[5]) / w;
+            Star {
+                pos: DVec2::new(x_prime, y_prime),
+                ..*s
+            }
         })
         .collect()
 }
@@ -566,7 +581,7 @@ fn apply_homography(stars: &[DVec2], params: [f64; 8]) -> Vec<DVec2> {
 #[test]
 fn test_registration_homography_mild_perspective() {
     // Test homography with mild perspective distortion
-    let ref_stars = generate_random_positions(120, 2000.0, 2000.0, 66666);
+    let ref_stars = generate_random_stars(120, 2000.0, 2000.0, 66666, FWHM_NORMAL);
 
     // Mild perspective: small h6, h7 values
     // Start with identity-like homography and add small perspective
@@ -585,16 +600,15 @@ fn test_registration_homography_mild_perspective() {
         ..Default::default()
     };
 
-    let result = register_positions(&ref_stars, &target_stars, 1.0, &config)
-        .expect("Registration should succeed");
+    let result = register(&ref_stars, &target_stars, &config).expect("Registration should succeed");
 
     assert_eq!(result.transform.transform_type, TransformType::Homography);
 
     // Validate transformation accuracy
     let mut max_error = 0.0f64;
     for (ref_star, target_star) in ref_stars.iter().zip(target_stars.iter()) {
-        let t = result.transform.apply(*ref_star);
-        let error = t.distance(*target_star);
+        let t = result.transform.apply(ref_star.pos);
+        let error = t.distance(target_star.pos);
         max_error = max_error.max(error);
     }
 
@@ -614,7 +628,7 @@ fn test_registration_homography_mild_perspective() {
 #[test]
 fn test_registration_homography_with_rotation() {
     // Homography combining rotation and perspective
-    let ref_stars = generate_random_positions(120, 2000.0, 2000.0, 77778);
+    let ref_stars = generate_random_stars(120, 2000.0, 2000.0, 77778, FWHM_NORMAL);
 
     let angle_rad = 0.5_f64.to_radians();
     let cos_a = angle_rad.cos();
@@ -634,15 +648,14 @@ fn test_registration_homography_with_rotation() {
         ..Default::default()
     };
 
-    let result = register_positions(&ref_stars, &target_stars, 1.0, &config)
-        .expect("Registration should succeed");
+    let result = register(&ref_stars, &target_stars, &config).expect("Registration should succeed");
 
     assert_eq!(result.transform.transform_type, TransformType::Homography);
 
     let mut max_error = 0.0f64;
     for (ref_star, target_star) in ref_stars.iter().zip(target_stars.iter()) {
-        let t = result.transform.apply(*ref_star);
-        let error = t.distance(*target_star);
+        let t = result.transform.apply(ref_star.pos);
+        let error = t.distance(target_star.pos);
         max_error = max_error.max(error);
     }
 
@@ -680,7 +693,7 @@ fn test_transform_type_degrees_of_freedom() {
 fn test_similarity_recovers_from_euclidean_data() {
     // When data only has rotation (no scale), Similarity should still work
     // and recover scale ≈ 1.0
-    let ref_stars = generate_random_positions(60, 1500.0, 1500.0, 88888);
+    let ref_stars = generate_random_stars(60, 1500.0, 1500.0, 88888, FWHM_TIGHT);
 
     let angle_rad = 0.6_f64.to_radians();
     let dx = 20.0;
@@ -689,7 +702,7 @@ fn test_similarity_recovers_from_euclidean_data() {
     let center_y = 750.0;
 
     // Apply Euclidean transform (scale = 1.0)
-    let target_stars = transform_stars(&ref_stars, dx, dy, angle_rad, 1.0, center_x, center_y);
+    let target_stars = transform_star_list(&ref_stars, dx, dy, angle_rad, 1.0, center_x, center_y);
 
     // Use Similarity estimator
     let config = Config {
@@ -699,8 +712,7 @@ fn test_similarity_recovers_from_euclidean_data() {
         ..Default::default()
     };
 
-    let result = register_positions(&ref_stars, &target_stars, 0.67, &config)
-        .expect("Registration should succeed");
+    let result = register(&ref_stars, &target_stars, &config).expect("Registration should succeed");
 
     // Scale should be recovered as ~1.0
     let recovered_scale = result.transform.scale_factor();
@@ -724,7 +736,7 @@ fn test_similarity_recovers_from_euclidean_data() {
 #[test]
 fn test_affine_recovers_from_similarity_data() {
     // When data only has similarity transform, Affine should recover it correctly
-    let ref_stars = generate_random_positions(80, 2000.0, 2000.0, 99999);
+    let ref_stars = generate_random_stars(80, 2000.0, 2000.0, 99999, FWHM_TIGHT);
 
     let angle_rad = 0.4_f64.to_radians();
     let scale = 1.005;
@@ -733,7 +745,8 @@ fn test_affine_recovers_from_similarity_data() {
     let center_x = 1000.0;
     let center_y = 1000.0;
 
-    let target_stars = transform_stars(&ref_stars, dx, dy, angle_rad, scale, center_x, center_y);
+    let target_stars =
+        transform_star_list(&ref_stars, dx, dy, angle_rad, scale, center_x, center_y);
 
     let config = Config {
         transform_type: TransformType::Affine,
@@ -742,14 +755,13 @@ fn test_affine_recovers_from_similarity_data() {
         ..Default::default()
     };
 
-    let result = register_positions(&ref_stars, &target_stars, 0.67, &config)
-        .expect("Registration should succeed");
+    let result = register(&ref_stars, &target_stars, &config).expect("Registration should succeed");
 
     // Validate by applying transform
     let mut max_error = 0.0f64;
     for (ref_star, target_star) in ref_stars.iter().zip(target_stars.iter()) {
-        let t = result.transform.apply(*ref_star);
-        let error = t.distance(*target_star);
+        let t = result.transform.apply(ref_star.pos);
+        let error = t.distance(target_star.pos);
         max_error = max_error.max(error);
     }
 

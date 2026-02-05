@@ -489,8 +489,6 @@ pub struct SipConfig {
 
 **IMPLEMENTED:** The `register()` function automatically derives `max_sigma` from the median FWHM of input stars. Formula: `max_sigma = median_fwhm * 0.5` (floor at 0.5px). This provides optimal noise tolerance for the seeing conditions without manual tuning.
 
-For `register_positions()`, the `max_sigma` parameter must be provided explicitly since it only receives positions without FWHM data.
-
 #### 4. SIP Fit Quality Diagnostics
 
 **Problem:** No way to diagnose when SIP polynomial order is too high (overfitting) or too low (underfitting).

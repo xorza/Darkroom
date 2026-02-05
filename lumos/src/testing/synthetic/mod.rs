@@ -59,8 +59,11 @@ pub use star_field::{
 };
 pub use star_profiles::{fwhm_to_sigma, render_gaussian_star};
 pub use transforms::{
-    add_position_noise, add_spurious_stars, filter_to_bounds, generate_random_positions,
-    remove_random_stars, transform_stars, translate_stars, translate_with_overlap,
+    add_position_noise, add_spurious_star_list, add_spurious_stars, add_star_noise,
+    filter_stars_to_bounds, filter_to_bounds, generate_random_positions, generate_random_stars,
+    positions_to_stars, remove_random_star_list, remove_random_stars, transform_star_list,
+    transform_stars, translate_star_list, translate_stars, translate_stars_with_overlap,
+    translate_with_overlap,
 };
 
 // ============================================================================

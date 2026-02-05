@@ -11,7 +11,7 @@ use crate::common::Buffer2;
 use crate::registration::config::InterpolationMethod;
 use crate::registration::interpolation::warp_image;
 use crate::registration::transform::Transform;
-use crate::registration::{Config, TransformType, register_positions};
+use crate::registration::{Config, TransformType, register};
 use crate::star_detection::{StarDetector, config::Config as DetConfig};
 use crate::testing::synthetic::{self, StarFieldConfig};
 
@@ -101,19 +101,7 @@ fn test_image_registration_translation() {
         target_result.stars.len()
     );
 
-    // Convert detected stars to DVec2
-    let ref_stars: Vec<DVec2> = ref_result
-        .stars
-        .iter()
-        .map(|s| DVec2::new(s.pos.x, s.pos.y))
-        .collect();
-    let target_stars: Vec<DVec2> = target_result
-        .stars
-        .iter()
-        .map(|s| DVec2::new(s.pos.x, s.pos.y))
-        .collect();
-
-    // Register the images
+    // Register the images using detected stars directly
     let reg_config = Config {
         transform_type: TransformType::Translation,
         min_stars: 6,
@@ -122,7 +110,7 @@ fn test_image_registration_translation() {
         ..Default::default()
     };
 
-    let result = register_positions(&ref_stars, &target_stars, 1.0, &reg_config)
+    let result = register(&ref_result.stars, &target_result.stars, &reg_config)
         .expect("Registration should succeed");
 
     // Verify the recovered translation
@@ -184,17 +172,6 @@ fn test_image_registration_rotation() {
     let ref_result = det.detect(&ref_image);
     let target_result = det.detect(&target_image);
 
-    let ref_stars: Vec<DVec2> = ref_result
-        .stars
-        .iter()
-        .map(|s| DVec2::new(s.pos.x, s.pos.y))
-        .collect();
-    let target_stars: Vec<DVec2> = target_result
-        .stars
-        .iter()
-        .map(|s| DVec2::new(s.pos.x, s.pos.y))
-        .collect();
-
     let reg_config = Config {
         transform_type: TransformType::Euclidean,
         min_stars: 6,
@@ -203,7 +180,7 @@ fn test_image_registration_rotation() {
         ..Default::default()
     };
 
-    let result = register_positions(&ref_stars, &target_stars, 1.0, &reg_config)
+    let result = register(&ref_result.stars, &target_result.stars, &reg_config)
         .expect("Registration should succeed");
 
     // Verify rotation recovery
@@ -255,17 +232,6 @@ fn test_image_registration_similarity() {
     let ref_result = det.detect(&ref_image);
     let target_result = det.detect(&target_image);
 
-    let ref_stars: Vec<DVec2> = ref_result
-        .stars
-        .iter()
-        .map(|s| DVec2::new(s.pos.x, s.pos.y))
-        .collect();
-    let target_stars: Vec<DVec2> = target_result
-        .stars
-        .iter()
-        .map(|s| DVec2::new(s.pos.x, s.pos.y))
-        .collect();
-
     let reg_config = Config {
         transform_type: TransformType::Similarity,
         min_stars: 6,
@@ -274,7 +240,7 @@ fn test_image_registration_similarity() {
         ..Default::default()
     };
 
-    let result = register_positions(&ref_stars, &target_stars, 1.0, &reg_config)
+    let result = register(&ref_result.stars, &target_result.stars, &reg_config)
         .expect("Registration should succeed");
 
     // Verify scale and rotation recovery
@@ -340,17 +306,6 @@ fn test_image_registration_with_noise() {
     let ref_result = det.detect(&ref_image);
     let target_result = det.detect(&target_image);
 
-    let ref_stars: Vec<DVec2> = ref_result
-        .stars
-        .iter()
-        .map(|s| DVec2::new(s.pos.x, s.pos.y))
-        .collect();
-    let target_stars: Vec<DVec2> = target_result
-        .stars
-        .iter()
-        .map(|s| DVec2::new(s.pos.x, s.pos.y))
-        .collect();
-
     let reg_config = Config {
         transform_type: TransformType::Translation,
         min_stars: 6,
@@ -359,7 +314,7 @@ fn test_image_registration_with_noise() {
         ..Default::default()
     };
 
-    let result = register_positions(&ref_stars, &target_stars, 1.0, &reg_config)
+    let result = register(&ref_result.stars, &target_result.stars, &reg_config)
         .expect("Registration should succeed");
 
     let recovered = result.transform.translation_components();
@@ -418,17 +373,6 @@ fn test_image_registration_dense_field() {
         ref_result.stars.len()
     );
 
-    let ref_stars: Vec<DVec2> = ref_result
-        .stars
-        .iter()
-        .map(|s| DVec2::new(s.pos.x, s.pos.y))
-        .collect();
-    let target_stars: Vec<DVec2> = target_result
-        .stars
-        .iter()
-        .map(|s| DVec2::new(s.pos.x, s.pos.y))
-        .collect();
-
     let reg_config = Config {
         transform_type: TransformType::Euclidean,
         min_stars: 10,
@@ -437,7 +381,7 @@ fn test_image_registration_dense_field() {
         ..Default::default()
     };
 
-    let result = register_positions(&ref_stars, &target_stars, 1.0, &reg_config)
+    let result = register(&ref_result.stars, &target_result.stars, &reg_config)
         .expect("Registration should succeed");
 
     // Should have many matched stars in a dense field
@@ -482,17 +426,6 @@ fn test_image_registration_large_image() {
     let ref_result = det.detect(&ref_image);
     let target_result = det.detect(&target_image);
 
-    let ref_stars: Vec<DVec2> = ref_result
-        .stars
-        .iter()
-        .map(|s| DVec2::new(s.pos.x, s.pos.y))
-        .collect();
-    let target_stars: Vec<DVec2> = target_result
-        .stars
-        .iter()
-        .map(|s| DVec2::new(s.pos.x, s.pos.y))
-        .collect();
-
     let reg_config = Config {
         transform_type: TransformType::Translation,
         min_stars: 6,
@@ -501,7 +434,7 @@ fn test_image_registration_large_image() {
         ..Default::default()
     };
 
-    let result = register_positions(&ref_stars, &target_stars, 1.0, &reg_config)
+    let result = register(&ref_result.stars, &target_result.stars, &reg_config)
         .expect("Registration should succeed");
 
     let recovered = result.transform.translation_components();

@@ -99,7 +99,6 @@ pub use registration::{
     TransformType,
     // Top-level functions
     register,
-    register_positions,
     warp,
 };
 

@@ -109,72 +109,37 @@ pub fn register(
     target_stars: &[Star],
     config: &Config,
 ) -> Result<RegistrationResult, RegistrationError> {
-    // Derive max_sigma from median FWHM for optimal noise tolerance
-    let median_fwhm = median_fwhm(ref_stars, target_stars);
-    let max_sigma = (median_fwhm * 0.5).max(0.5);
-
-    let ref_positions: Vec<DVec2> = ref_stars.iter().map(|s| s.pos).collect();
-    let target_positions: Vec<DVec2> = target_stars.iter().map(|s| s.pos).collect();
-
-    register_positions(&ref_positions, &target_positions, max_sigma, config)
-}
-
-/// Compute the median FWHM from two sets of stars.
-fn median_fwhm(ref_stars: &[Star], target_stars: &[Star]) -> f64 {
-    let mut fwhms: Vec<f32> = ref_stars
-        .iter()
-        .chain(target_stars.iter())
-        .map(|s| s.fwhm)
-        .collect();
-
-    fwhms.sort_by(|a, b| a.partial_cmp(b).unwrap());
-    fwhms[fwhms.len() / 2] as f64
-}
-
-/// Register using raw position vectors instead of Star structs.
-///
-/// Useful when you have pre-extracted positions or for testing.
-/// Positions should be sorted by brightness (brightest first) for best results.
-///
-/// # Parameters
-/// * `max_sigma` - RANSAC inlier threshold in sigma units. Effective threshold is ~3 * max_sigma pixels.
-pub fn register_positions(
-    ref_positions: &[DVec2],
-    target_positions: &[DVec2],
-    max_sigma: f64,
-    config: &Config,
-) -> Result<RegistrationResult, RegistrationError> {
-    assert!(
-        max_sigma > 0.0,
-        "max_sigma must be positive, got {max_sigma}"
-    );
     config.validate();
     let start = Instant::now();
 
     // Validate input
-    if ref_positions.len() < config.min_stars {
+    if ref_stars.len() < config.min_stars {
         return Err(RegistrationError::InsufficientStars {
-            found: ref_positions.len(),
+            found: ref_stars.len(),
             required: config.min_stars,
         });
     }
-    if target_positions.len() < config.min_stars {
+    if target_stars.len() < config.min_stars {
         return Err(RegistrationError::InsufficientStars {
-            found: target_positions.len(),
+            found: target_stars.len(),
             required: config.min_stars,
         });
     }
 
+    // Derive max_sigma from median FWHM for optimal noise tolerance
+    let median_fwhm = median_fwhm(ref_stars, target_stars);
+    let max_sigma = (median_fwhm * 0.5).max(0.5);
+
     // Select stars for matching (take brightest N)
-    let ref_stars: Vec<DVec2> = ref_positions
+    let ref_positions: Vec<DVec2> = ref_stars
         .iter()
         .take(config.max_stars)
-        .copied()
+        .map(|s| s.pos)
         .collect();
-    let target_stars: Vec<DVec2> = target_positions
+    let target_positions: Vec<DVec2> = target_stars
         .iter()
         .take(config.max_stars)
-        .copied()
+        .map(|s| s.pos)
         .collect();
 
     // Triangle matching
@@ -183,7 +148,7 @@ pub fn register_positions(
         min_votes: config.min_votes,
         check_orientation: config.check_orientation,
     };
-    let matches = match_triangles(&ref_stars, &target_stars, &triangle_params);
+    let matches = match_triangles(&ref_positions, &target_positions, &triangle_params);
 
     if matches.len() < config.min_matches {
         return Err(RegistrationError::NoMatchingPatterns);
@@ -192,8 +157,8 @@ pub fn register_positions(
     // RANSAC estimation
     let result = if config.transform_type == TransformType::Auto {
         let sim_result = estimate_and_refine(
-            &ref_stars,
-            &target_stars,
+            &ref_positions,
+            &target_positions,
             &matches,
             TransformType::Similarity,
             max_sigma,
@@ -205,8 +170,8 @@ pub fn register_positions(
         match sim_result {
             Ok(result) if result.rms_error <= AUTO_UPGRADE_THRESHOLD => Ok(result),
             _ => estimate_and_refine(
-                &ref_stars,
-                &target_stars,
+                &ref_positions,
+                &target_positions,
                 &matches,
                 TransformType::Homography,
                 max_sigma,
@@ -215,8 +180,8 @@ pub fn register_positions(
         }
     } else {
         estimate_and_refine(
-            &ref_stars,
-            &target_stars,
+            &ref_positions,
+            &target_positions,
             &matches,
             config.transform_type,
             max_sigma,
@@ -234,6 +199,18 @@ pub fn register_positions(
     }
 
     Ok(result)
+}
+
+/// Compute the median FWHM from two sets of stars.
+fn median_fwhm(ref_stars: &[Star], target_stars: &[Star]) -> f64 {
+    let mut fwhms: Vec<f32> = ref_stars
+        .iter()
+        .chain(target_stars.iter())
+        .map(|s| s.fwhm)
+        .collect();
+
+    fwhms.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    fwhms[fwhms.len() / 2] as f64
 }
 
 /// Warp an image to align with the reference frame, writing the result into an output image.
