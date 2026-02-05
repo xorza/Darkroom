@@ -342,28 +342,17 @@ pub fn interpolate_pixel(data: &Buffer2<f32>, x: f32, y: f32, method: Interpolat
 /// - AVX2/SSE4.1 on x86_64
 /// - NEON on aarch64
 ///
-/// # Arguments
-///
-/// * `input` - Input image data
-/// * `output_width` - Width of output image
-/// * `output_height` - Height of output image
-/// * `transform` - Transformation from input to output coordinates
-/// * `method` - Interpolation method
-///
-/// # Returns
-///
-/// Output image data
+/// Input and output must have the same dimensions.
 pub fn warp_image(
     input: &Buffer2<f32>,
-    output_width: usize,
-    output_height: usize,
+    output: &mut Buffer2<f32>,
     transform: &Transform,
     method: InterpolationMethod,
-) -> Buffer2<f32> {
-    let input_width = input.width();
-    let input_height = input.height();
-
-    let mut output = vec![0.0; output_width * output_height];
+) {
+    let width = input.width();
+    let height = input.height();
+    debug_assert_eq!(width, output.width());
+    debug_assert_eq!(height, output.height());
 
     // Compute inverse transform to map output -> input
     let inverse = transform.inverse();
@@ -371,48 +360,50 @@ pub fn warp_image(
     // Use SIMD-accelerated path for bilinear interpolation (parallel by row chunks)
     if method == InterpolationMethod::Bilinear {
         output
-            .par_chunks_mut(output_width * ROWS_PER_CHUNK)
+            .pixels_mut()
+            .par_chunks_mut(width * ROWS_PER_CHUNK)
             .enumerate()
-            .for_each(|(chunk_idx, chunk)| {
+            .for_each(|(chunk_idx, chunk): (usize, &mut [f32])| {
                 let start_y = chunk_idx * ROWS_PER_CHUNK;
-                let num_rows = chunk.len() / output_width;
+                let num_rows = chunk.len() / width;
 
                 for row_in_chunk in 0..num_rows {
                     let y = start_y + row_in_chunk;
-                    let row_start = row_in_chunk * output_width;
-                    let row_end = row_start + output_width;
+                    let row_start = row_in_chunk * width;
+                    let row_end = row_start + width;
                     simd::warp_row_bilinear_simd(
                         input,
-                        input_width,
-                        input_height,
+                        width,
+                        height,
                         &mut chunk[row_start..row_end],
                         y,
                         &inverse,
                     );
                 }
             });
-        return Buffer2::new(output_width, output_height, output);
+        return;
     }
 
     // Parallel path for other interpolation methods (Lanczos, Bicubic, etc.)
     output
-        .par_chunks_mut(output_width * ROWS_PER_CHUNK)
+        .pixels_mut()
+        .par_chunks_mut(width * ROWS_PER_CHUNK)
         .enumerate()
-        .for_each(|(chunk_idx, chunk)| {
+        .for_each(|(chunk_idx, chunk): (usize, &mut [f32])| {
             let start_y = chunk_idx * ROWS_PER_CHUNK;
-            let num_rows = chunk.len() / output_width;
+            let num_rows = chunk.len() / width;
 
             for row_in_chunk in 0..num_rows {
                 let y = start_y + row_in_chunk;
-                for x in 0..output_width {
+                for x in 0..width {
                     // Transform output coordinates to input coordinates
                     let src = inverse.apply(glam::DVec2::new(x as f64, y as f64));
 
                     // Interpolate input at source coordinates
-                    chunk[row_in_chunk * output_width + x] = interpolate_pixel_internal(
+                    chunk[row_in_chunk * width + x] = interpolate_pixel_internal(
                         input,
-                        input_width,
-                        input_height,
+                        width,
+                        height,
                         src.x as f32,
                         src.y as f32,
                         method,
@@ -420,8 +411,6 @@ pub fn warp_image(
                 }
             }
         });
-
-    Buffer2::new(output_width, output_height, output)
 }
 
 /// Internal interpolate_pixel that takes raw slice parameters for use in tight loops.

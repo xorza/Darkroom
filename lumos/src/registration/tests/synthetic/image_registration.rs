@@ -37,28 +37,28 @@ fn transform_image(
 ) -> Vec<f32> {
     let transform = Transform::similarity(DVec2::new(dx, dy), angle_rad, scale);
     let src_buf = Buffer2::new(width, height, src_pixels.to_vec());
+    let mut output = Buffer2::new(width, height, vec![0.0; width * height]);
     warp_image(
         &src_buf,
-        width,
-        height,
+        &mut output,
         &transform,
         InterpolationMethod::Bilinear,
-    )
-    .into_vec()
+    );
+    output.into_vec()
 }
 
 /// Apply a translation to an image.
 fn translate_image(src_pixels: &[f32], width: usize, height: usize, dx: f64, dy: f64) -> Vec<f32> {
     let transform = Transform::translation(DVec2::new(dx, dy));
     let src_buf = Buffer2::new(width, height, src_pixels.to_vec());
+    let mut output = Buffer2::new(width, height, vec![0.0; width * height]);
     warp_image(
         &src_buf,
-        width,
-        height,
+        &mut output,
         &transform,
         InterpolationMethod::Bilinear,
-    )
-    .into_vec()
+    );
+    output.into_vec()
 }
 
 #[test]

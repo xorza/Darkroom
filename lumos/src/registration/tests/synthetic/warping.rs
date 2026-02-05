@@ -18,6 +18,17 @@ use crate::testing::synthetic::{self, StarFieldConfig, stamps};
 use crate::{AstroImage, ImageDimensions};
 use glam::DVec2;
 
+/// Helper to warp and return a new buffer (for test convenience).
+fn do_warp(
+    input: &Buffer2<f32>,
+    transform: &Transform,
+    method: InterpolationMethod,
+) -> Buffer2<f32> {
+    let mut output = Buffer2::new(input.width(), input.height(), vec![0.0; input.len()]);
+    warp_image(input, &mut output, transform, method);
+    output
+}
+
 /// Compute mean squared error between two images.
 fn compute_mse(a: &[f32], b: &[f32]) -> f64 {
     assert_eq!(a.len(), b.len());
@@ -91,13 +102,10 @@ fn representative_interpolation_methods() -> Vec<InterpolationMethod> {
 #[test]
 fn test_warp_identity_all_methods() {
     let (ref_buf, _) = stamps::star_field(256, 256, 30, 2.5, 0.05, 12345);
-    let width = ref_buf.width();
-    let height = ref_buf.height();
-
     let identity = Transform::identity();
 
     for method in all_interpolation_methods() {
-        let warped = warp_image(&ref_buf, width, height, &identity, method);
+        let warped = do_warp(&ref_buf, &identity, method);
 
         let psnr = compute_psnr(ref_buf.pixels(), warped.pixels(), 1.0);
         let ncc = compute_ncc(ref_buf.pixels(), warped.pixels());
@@ -148,8 +156,8 @@ fn test_warp_translation_roundtrip() {
 
     for method in representative_interpolation_methods() {
         // Warp forward, then inverse
-        let warped = warp_image(&ref_buf, width, height, &forward, method);
-        let restored = warp_image(&warped, width, height, &inverse, method);
+        let warped = do_warp(&ref_buf, &forward, method);
+        let restored = do_warp(&warped, &inverse, method);
 
         // Compare central region (avoid border artifacts)
         let margin = 20;
@@ -204,8 +212,8 @@ fn test_warp_euclidean_roundtrip() {
     let inverse = forward.inverse();
 
     for method in representative_interpolation_methods() {
-        let warped = warp_image(&ref_buf, width, height, &forward, method);
-        let restored = warp_image(&warped, width, height, &inverse, method);
+        let warped = do_warp(&ref_buf, &forward, method);
+        let restored = do_warp(&warped, &inverse, method);
 
         let margin = 30;
         let (central_ref, central_restored) =
@@ -257,8 +265,8 @@ fn test_warp_similarity_roundtrip() {
     let inverse = forward.inverse();
 
     for method in representative_interpolation_methods() {
-        let warped = warp_image(&ref_buf, width, height, &forward, method);
-        let restored = warp_image(&warped, width, height, &inverse, method);
+        let warped = do_warp(&ref_buf, &forward, method);
+        let restored = do_warp(&warped, &inverse, method);
 
         let margin = 40;
         let (central_ref, central_restored) =
@@ -318,8 +326,8 @@ fn test_warp_affine_roundtrip() {
     assert_eq!(forward.transform_type, TransformType::Affine);
 
     for method in representative_interpolation_methods() {
-        let warped = warp_image(&ref_buf, width, height, &forward, method);
-        let restored = warp_image(&warped, width, height, &inverse, method);
+        let warped = do_warp(&ref_buf, &forward, method);
+        let restored = do_warp(&warped, &inverse, method);
 
         let margin = 40;
         let (central_ref, central_restored) =
@@ -368,8 +376,8 @@ fn test_warp_homography_roundtrip() {
     assert_eq!(forward.transform_type, TransformType::Homography);
 
     for method in representative_interpolation_methods() {
-        let warped = warp_image(&ref_buf, width, height, &forward, method);
-        let restored = warp_image(&warped, width, height, &inverse, method);
+        let warped = do_warp(&ref_buf, &forward, method);
+        let restored = do_warp(&warped, &inverse, method);
 
         let margin = 50;
         let (central_ref, central_restored) =
@@ -426,13 +434,7 @@ fn test_warp_with_detected_transform() {
     let true_transform = Transform::euclidean(DVec2::new(dx, dy), angle_rad);
 
     // Create target by warping reference
-    let target_pixels = warp_image(
-        &ref_pixels,
-        width,
-        height,
-        &true_transform,
-        InterpolationMethod::Lanczos3,
-    );
+    let target_pixels = do_warp(&ref_pixels, &true_transform, InterpolationMethod::Lanczos3);
 
     // Detect stars in both images
     let mut det = StarDetector::from_config(StarConfig {
@@ -512,8 +514,8 @@ fn test_interpolation_quality_ordering() {
     let mut results: Vec<(InterpolationMethod, f64)> = Vec::new();
 
     for method in all_interpolation_methods() {
-        let warped = warp_image(&ref_buf, width, height, &forward, method);
-        let restored = warp_image(&warped, width, height, &inverse, method);
+        let warped = do_warp(&ref_buf, &forward, method);
+        let restored = do_warp(&warped, &inverse, method);
 
         let margin = 50;
         let (central_ref, central_restored) =

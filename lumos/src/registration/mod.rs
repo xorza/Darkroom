@@ -222,26 +222,20 @@ pub fn register_positions(
 /// let aligned = warp(&target_image, &result.transform, &Config::default());
 /// ```
 pub fn warp(image: &AstroImage, transform: &Transform, config: &Config) -> AstroImage {
-    warp_to_reference_image(image, transform, config.interpolation)
-}
-
-/// Warp an AstroImage to align with reference.
-pub fn warp_to_reference_image(
-    target: &AstroImage,
-    transform: &Transform,
-    method: InterpolationMethod,
-) -> AstroImage {
-    let width = target.width();
-    let height = target.height();
-    let channels = target.channels();
+    let width = image.width();
+    let height = image.height();
+    let channels = image.channels();
+    let method = config.interpolation;
+    let inverse = transform.inverse();
 
     let warped_channels: Vec<Buffer2<f32>> = (0..channels)
         .into_par_iter()
         .map(|c| {
-            let channel_data = target.channel(c);
+            let channel_data = image.channel(c);
             let channel = Buffer2::new(width, height, channel_data.to_vec());
-            let inverse = transform.inverse();
-            warp_image(&channel, width, height, &inverse, method)
+            let mut output = Buffer2::new(width, height, vec![0.0; width * height]);
+            warp_image(&channel, &mut output, &inverse, method);
+            output
         })
         .collect();
 
@@ -254,7 +248,7 @@ pub fn warp_to_reference_image(
 
     let mut result =
         AstroImage::from_pixels(ImageDimensions::new(width, height, channels), warped_pixels);
-    result.metadata = target.metadata.clone();
+    result.metadata = image.metadata.clone();
     result
 }
 
