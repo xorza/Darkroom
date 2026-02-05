@@ -133,44 +133,12 @@ pub fn warp(image: &AstroImage, transform: &Transform, config: &Config) -> Astro
     pipeline::warp_to_reference_image(image, transform, config.interpolation)
 }
 
-/// Compute transformation from known point correspondences.
-///
-/// Use when you have manually matched points (e.g., from user marking)
-/// and don't need the full registration pipeline with triangle matching.
-///
-/// Returns `None` if the transformation cannot be estimated (e.g., degenerate points).
-///
-/// # Example
-///
-/// ```ignore
-/// use lumos::registration::{compute_transform, TransformType};
-/// use glam::DVec2;
-///
-/// let ref_points = vec![DVec2::new(100.0, 100.0), DVec2::new(200.0, 150.0)];
-/// let target_points = vec![DVec2::new(110.0, 105.0), DVec2::new(210.0, 155.0)];
-///
-/// if let Some(transform) = compute_transform(&ref_points, &target_points, TransformType::Similarity) {
-///     println!("Translation: {:?}", transform.translation_components());
-/// }
-/// ```
-pub fn compute_transform(
-    ref_points: &[DVec2],
-    target_points: &[DVec2],
-    transform_type: TransformType,
-) -> Option<Transform> {
-    ransac::estimate_transform(ref_points, target_points, transform_type)
-}
-
 // === Internal Re-exports (for submodules) ===
 
 // These are pub(crate) so internal code can use them without
 // going through the full path, but they're not part of the public API.
 
-pub(crate) use distortion::{DistortionMap, SipConfig, ThinPlateSpline, TpsConfig};
+pub(crate) use distortion::SipConfig;
 pub(crate) use interpolation::warp_image;
-pub(crate) use quality::{
-    QuadrantConsistency, QualityMetrics, ResidualStats, check_quadrant_consistency,
-    estimate_overlap,
-};
 pub(crate) use ransac::{RansacEstimator, RansacResult};
 pub(crate) use triangle::{PointMatch, match_triangles};

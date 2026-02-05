@@ -100,7 +100,6 @@ pub use registration::{
     Transform,
     TransformType,
     // Top-level functions
-    compute_transform,
     register,
     register_positions,
     warp,

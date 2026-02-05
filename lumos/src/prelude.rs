@@ -26,7 +26,7 @@ pub use crate::{
 };
 
 // Registration - convenience functions
-pub use crate::{compute_transform, register, register_positions, warp};
+pub use crate::{register, register_positions, warp};
 
 // Stacking - main API
 pub use crate::{
