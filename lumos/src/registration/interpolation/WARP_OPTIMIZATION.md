@@ -56,12 +56,24 @@ The `interpolate_lanczos_impl` function dominates execution time due to:
 
 The separable filter optimization only works for **pure scaling/resampling** where source coordinates form a regular grid. The current `warp_image` applies arbitrary geometric transforms (rotation, skew, translation), meaning each output pixel maps to a unique arbitrary location via `inverse.apply()`. **This cannot be separated into horizontal/vertical passes.**
 
-### ~~SIMD Vectorization~~ (ALREADY TRIED - MINIMAL BENEFIT)
+### ~~SIMD Vectorization~~ (TRIED AGAIN 2025-02-05 - CONFIRMED NO BENEFIT)
 
-From `simd/mod.rs`:
-> "Lanczos3: Scalar only (SIMD provides <5% improvement due to memory-bound LUT lookups)"
+AVX2 implementation was re-attempted with:
+- Vectorized coordinate transform computation
+- AVX2 multiply-accumulate for 6x6 kernel
+- 8 pixels processed per iteration
 
-SIMD for Lanczos was implemented and removed. The bottleneck is memory-bound LUT lookups (12 per pixel for Lanczos3), not compute. SIMD gather instructions have high latency and don't help.
+**Result:** ~24.5ms vs ~24.5ms scalar baseline - **no measurable improvement**.
+
+**Root cause:** The bottleneck is **memory-bound**, not compute-bound:
+- 36 random memory accesses per output pixel (6x6 kernel window)
+- Each access potentially misses cache due to arbitrary transform coordinates
+- SIMD gather instructions have high latency (~20 cycles vs ~4 for arithmetic)
+
+**Research findings from Intel IPP and AVIR:**
+- Intel IPP achieves 1.5x speedup, but only for **scaling** (separable filter)
+- AVIR uses 2-pass horizontal/vertical - not applicable to arbitrary transforms
+- All fast implementations rely on separable filtering which requires regular grid
 
 ### 1. Polynomial Approximation (Medium Impact - Estimated 1.5-2x)
 
@@ -97,11 +109,19 @@ Bilinear is 9x faster (25ms vs 2.9ms for 2k). For preview/interactive use, consi
 |-------------|--------|--------|
 | ✅ LUT optimization | Done | -20-30% |
 | ❌ Separable filter | Not applicable (arbitrary transform) | N/A |
-| ❌ SIMD | Already tried, <5% improvement | N/A |
+| ❌ SIMD (AVX2) | Re-tested 2025-02-05, confirmed no benefit | 0% |
 | ⏳ Polynomial approx | Next candidate | Est. 1.5-2x |
 | ⏳ Border check fast path | Possible | Est. 10-20% |
 
 **Current performance is likely near-optimal for Lanczos with arbitrary transforms.**
+
+The fundamental limitation is that arbitrary geometric transforms prevent:
+1. **Separable filtering** - requires regular grid coordinates
+2. **Effective SIMD** - random memory access patterns dominate
+
+For further speedup, consider:
+- Use bilinear for interactive preview (9x faster)
+- Use Lanczos only for final stacking output
 
 ## Code References
 

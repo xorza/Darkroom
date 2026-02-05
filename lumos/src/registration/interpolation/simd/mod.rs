@@ -7,7 +7,8 @@
 //! # Supported Interpolation Methods
 //!
 //! - **Bilinear**: SIMD-accelerated on x86_64 (8 pixels/cycle on AVX2)
-//! - **Lanczos3**: Scalar only (SIMD provides <5% improvement due to memory-bound LUT lookups)
+//! - **Lanczos3**: Scalar only - AVX2 tested but provides no benefit due to memory-bound
+//!   random access patterns from arbitrary geometric transforms
 
 #[cfg(target_arch = "x86_64")]
 use common::cpu_features;
@@ -134,41 +135,6 @@ fn sample_pixel(data: &[f32], width: usize, height: usize, x: i32, y: i32) -> f3
     }
 }
 
-/// Warp a row of pixels using Lanczos3 interpolation.
-///
-/// Lanczos3 uses a 6x6 kernel for high-quality resampling.
-///
-/// Note: SIMD acceleration was removed as it provided <5% improvement.
-/// The bottleneck is the memory-bound LUT lookups for the kernel weights
-/// (12 scalar lanczos_kernel calls per pixel).
-///
-/// # Arguments
-/// * `input` - Input image data (row-major)
-/// * `input_width` - Width of input image
-/// * `input_height` - Height of input image
-/// * `output_row` - Output buffer for this row
-/// * `output_y` - Y coordinate of this row
-/// * `inverse` - Inverse transform (output -> input)
-#[cfg(test)]
-#[inline]
-pub fn warp_row_lanczos3(
-    input: &[f32],
-    input_width: usize,
-    input_height: usize,
-    output_row: &mut [f32],
-    output_y: usize,
-    inverse: &Transform,
-) {
-    warp_row_lanczos3_scalar(
-        input,
-        input_width,
-        input_height,
-        output_row,
-        output_y,
-        inverse,
-    );
-}
-
 /// Scalar implementation of row warping with Lanczos3 interpolation.
 #[cfg(test)]
 pub fn warp_row_lanczos3_scalar(
@@ -248,7 +214,7 @@ pub fn warp_image_lanczos3(
     for y in 0..output_height {
         let row_start = y * output_width;
         let row_end = row_start + output_width;
-        warp_row_lanczos3(
+        warp_row_lanczos3_scalar(
             input,
             input_width,
             input_height,
@@ -425,7 +391,7 @@ mod tests {
         let mut output_row = vec![0.0f32; width];
         let y = 50;
 
-        warp_row_lanczos3(input.pixels(), width, height, &mut output_row, y, &identity);
+        warp_row_lanczos3_scalar(input.pixels(), width, height, &mut output_row, y, &identity);
 
         // With identity transform, output should match input (within Lanczos ringing tolerance)
         for x in 3..width - 3 {
@@ -459,7 +425,7 @@ mod tests {
             let mut output = vec![0.0f32; width];
             let y = height / 2;
 
-            warp_row_lanczos3(&input, width, height, &mut output, y, &inverse);
+            warp_row_lanczos3_scalar(&input, width, height, &mut output, y, &inverse);
 
             // Just verify no panics and output is reasonable
             for (x, &val) in output
