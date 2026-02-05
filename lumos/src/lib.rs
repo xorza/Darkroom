@@ -110,10 +110,6 @@ pub use registration::{
 pub use stacking::{
     // Configuration
     CacheConfig,
-    // Comet/asteroid stacking
-    CometStackConfig,
-    CometStackResult,
-    CompositeMethod,
     // Correction method for gradient removal
     CorrectionMethod,
     FrameType,
@@ -132,11 +128,6 @@ pub use stacking::{
     StackingMethod,
     StackingProgress,
     StackingStage,
-    apply_comet_offset_to_transform,
-    composite_stacks,
-    compute_comet_offset,
-    create_comet_stack_result,
-    interpolate_position,
     remove_gradient,
     remove_gradient_image,
     remove_gradient_simple,

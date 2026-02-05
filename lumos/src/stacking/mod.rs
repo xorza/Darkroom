@@ -1,6 +1,5 @@
 mod cache;
 mod cache_config;
-pub mod comet;
 mod drizzle;
 mod error;
 mod gradient_removal;
@@ -37,13 +36,7 @@ pub use weighted::{FrameQuality, RejectionMethod, WeightedConfig};
 pub use local_normalization::{
     LocalNormalizationConfig, LocalNormalizationMap, NormalizationMethod, TileNormalizationStats,
 };
-// Re-export comet stacking types for public API
-#[allow(unused_imports)]
-pub use comet::{
-    CometStackConfig, CometStackResult, CompositeMethod, ObjectPosition,
-    apply_comet_offset_to_transform, composite_stacks, compute_comet_offset,
-    create_comet_stack_result, interpolate_position,
-};
+
 // Re-export gradient removal types for public API
 #[allow(unused_imports)]
 pub use gradient_removal::{
