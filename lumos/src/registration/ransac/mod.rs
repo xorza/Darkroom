@@ -11,7 +11,6 @@
 #[cfg(test)]
 mod tests;
 
-pub mod simd;
 mod transforms;
 
 pub(crate) use transforms::{
@@ -574,7 +573,6 @@ fn is_sample_degenerate(points: &[DVec2]) -> bool {
 
 /// Count inliers and compute MSAC score.
 ///
-/// Uses SIMD acceleration when available (AVX2/SSE on x86_64, NEON on aarch64).
 /// Score = sum(threshold² - dist²) for inliers, using f64 for full precision.
 #[inline]
 fn count_inliers(
@@ -584,5 +582,18 @@ fn count_inliers(
     threshold_sq: f64,
     inliers: &mut Vec<usize>,
 ) -> f64 {
-    simd::count_inliers_simd(ref_points, target_points, transform, threshold_sq, inliers)
+    inliers.clear();
+    let mut score = 0.0f64;
+
+    for (i, (r, t)) in ref_points.iter().zip(target_points.iter()).enumerate() {
+        let p = transform.apply(*r);
+        let dist_sq = (p - *t).length_squared();
+
+        if dist_sq < threshold_sq {
+            inliers.push(i);
+            score += threshold_sq - dist_sq;
+        }
+    }
+
+    score
 }
