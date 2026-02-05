@@ -7,7 +7,7 @@
 //! Reference: van Dokkum 2001, PASP 113, 1420
 
 use crate::common::Buffer2;
-use glam::Vec2;
+use crate::math::Vec2us;
 
 /// Compute L.A.Cosmic-style Laplacian SNR for a single star candidate.
 ///
@@ -16,7 +16,7 @@ use glam::Vec2;
 ///
 /// # Arguments
 /// * `pixels` - Image pixel data
-/// * `pos` - Star center position
+/// * `pos` - Star center position (pixel coordinates)
 /// * `stamp_radius` - Radius of analysis stamp
 /// * `background` - Background level at star position
 /// * `noise` - Noise level at star position
@@ -25,24 +25,25 @@ use glam::Vec2;
 /// Laplacian SNR value. Higher = more cosmic ray-like.
 pub fn compute_laplacian_snr(
     pixels: &Buffer2<f32>,
-    pos: Vec2,
+    pos: Vec2us,
     stamp_radius: usize,
     background: f32,
     noise: f32,
 ) -> f32 {
     let width = pixels.width();
     let height = pixels.height();
-    let icx = pos.x.round() as isize;
-    let icy = pos.y.round() as isize;
 
     // Check bounds
-    let r = stamp_radius as isize;
-    if icx < r || icy < r || icx + r >= width as isize || icy + r >= height as isize {
+    if pos.x < stamp_radius
+        || pos.y < stamp_radius
+        || pos.x + stamp_radius >= width
+        || pos.y + stamp_radius >= height
+    {
         return 0.0;
     }
 
     // Compute Laplacian at center (peak of star)
-    let idx = icy as usize * width + icx as usize;
+    let idx = pos.to_index(width);
     let center = pixels[idx] - background;
 
     let left = pixels[idx - 1] - background;
@@ -68,7 +69,7 @@ mod tests {
         pixels_data[3 * 7 + 3] = 1.0;
         let pixels = Buffer2::new(7, 7, pixels_data);
 
-        let snr = compute_laplacian_snr(&pixels, Vec2::new(3.0, 3.0), 2, 0.1, 0.01);
+        let snr = compute_laplacian_snr(&pixels, Vec2us::new(3, 3), 2, 0.1, 0.01);
 
         assert!(
             snr > 50.0,
@@ -98,14 +99,15 @@ mod tests {
         }
         let pixels = Buffer2::new(size, size, pixels_data);
 
-        let gaussian_snr = compute_laplacian_snr(&pixels, Vec2::splat(center as f32), 3, 0.1, 0.01);
+        let gaussian_snr =
+            compute_laplacian_snr(&pixels, Vec2us::new(center, center), 3, 0.1, 0.01);
 
         // Compare to a cosmic ray (single sharp pixel)
         let mut cr_pixels_data = vec![0.1f32; size * size];
         cr_pixels_data[center * size + center] = 0.9;
         let cr_pixels = Buffer2::new(size, size, cr_pixels_data);
 
-        let cr_snr = compute_laplacian_snr(&cr_pixels, Vec2::splat(center as f32), 3, 0.1, 0.01);
+        let cr_snr = compute_laplacian_snr(&cr_pixels, Vec2us::new(center, center), 3, 0.1, 0.01);
 
         // Cosmic ray should have significantly higher Laplacian SNR than Gaussian star
         assert!(

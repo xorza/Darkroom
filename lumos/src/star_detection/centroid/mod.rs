@@ -32,7 +32,7 @@ use super::cosmic_ray::compute_laplacian_snr;
 use super::deblend::Region;
 use super::{CentroidMethod, LocalBackgroundMethod, Star};
 use crate::common::Buffer2;
-use crate::math::FWHM_TO_SIGMA;
+use crate::math::{FWHM_TO_SIGMA, Vec2us};
 
 // =============================================================================
 // Stamp and Centroid Constants
@@ -370,8 +370,9 @@ pub fn measure_star(
     let metrics = compute_metrics(pixels, background, pos, stamp_radius, gain, read_noise)?;
 
     // Compute L.A.Cosmic Laplacian SNR for cosmic ray detection
+    let pos_int = Vec2us::new(pos.x.round() as usize, pos.y.round() as usize);
     let laplacian_snr_value =
-        compute_laplacian_snr(pixels, pos, stamp_radius, local_bg, local_noise);
+        compute_laplacian_snr(pixels, pos_int, stamp_radius, local_bg, local_noise);
 
     Some(Star {
         pos: pos.as_dvec2(),
