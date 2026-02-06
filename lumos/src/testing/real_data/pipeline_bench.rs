@@ -5,8 +5,8 @@ use std::time::Instant;
 use crate::testing::{calibration_dir, calibration_image_paths, init_tracing};
 use crate::{
     AstroImage, CalibrationMasters, FrameType, Normalization, ProgressCallback, RegistrationConfig,
-    StackConfig, StarDetectionConfig, StarDetector, TransformType, register, stack_with_progress,
-    warp,
+    StackConfig, Star, StarDetectionConfig, StarDetector, TransformType, register,
+    stack_with_progress, warp,
 };
 
 #[test]
@@ -57,14 +57,11 @@ fn bench_full_pipeline() {
     assert!(!light_paths.is_empty(), "No light frames found");
     println!("  Loading and calibrating {} lights...", light_paths.len());
 
-    let mut calibrated: Vec<AstroImage> = light_paths
-        .iter()
-        .map(|p| {
-            let mut img = AstroImage::from_file(p).unwrap();
-            masters.calibrate(&mut img);
-            img
-        })
-        .collect();
+    let mut calibrated: Vec<AstroImage> = common::parallel::par_map_limited(&light_paths, 3, |p| {
+        let mut img = AstroImage::from_file(p).unwrap();
+        masters.calibrate(&mut img);
+        img
+    });
 
     println!("  Elapsed: {:?}", step_start.elapsed());
 
@@ -79,23 +76,13 @@ fn bench_full_pipeline() {
         min_snr: 10.0,
         ..Default::default()
     };
-    let mut detector = StarDetector::from_config(det_config);
-
-    let all_stars: Vec<_> = calibrated
-        .iter()
-        .enumerate()
-        .map(|(i, img)| {
-            let result = detector.detect(img);
-            println!(
-                "  Frame {}: {} stars, median FWHM={:.2}, median SNR={:.1}",
-                i,
-                result.stars.len(),
-                result.diagnostics.median_fwhm,
-                result.diagnostics.median_snr,
-            );
-            result.stars
-        })
-        .collect();
+    let all_stars: Vec<_> = common::parallel::par_map_limited(&calibrated, 3, |img| {
+        let mut det = StarDetector::from_config(det_config.clone());
+        det.detect(img).stars
+    });
+    for (i, stars) in all_stars.iter().enumerate() {
+        println!("  Frame {}: {} stars", i, stars.len());
+    }
 
     println!("  Elapsed: {:?}", step_start.elapsed());
 
@@ -118,26 +105,28 @@ fn bench_full_pipeline() {
 
     let ref_stars = &all_stars[0];
 
-    for (i, (img, stars)) in calibrated
-        .iter_mut()
-        .zip(all_stars.iter())
-        .enumerate()
-        .skip(1)
-    {
-        match register(ref_stars, stars, &reg_config) {
-            Ok(result) => {
-                println!(
-                    "  Frame {}: {} inliers, RMS={:.3}px, {:.1}ms",
-                    i, result.num_inliers, result.rms_error, result.elapsed_ms,
-                );
-                let mut warped = img.clone();
-                warp(img, &mut warped, &result.transform, &reg_config);
-                *img = warped;
-            }
-            Err(e) => {
-                panic!("Registration failed for frame {}: {}", i, e);
-            }
-        }
+    // Pair up frames to register (skip reference frame 0)
+    let to_register: Vec<(&AstroImage, &[Star])> = calibrated[1..]
+        .iter()
+        .zip(all_stars[1..].iter())
+        .map(|(img, stars)| (img, stars.as_slice()))
+        .collect();
+
+    let warped_frames = common::parallel::par_map_limited(&to_register, 3, |(img, stars)| {
+        let result = register(ref_stars, stars, &reg_config)
+            .unwrap_or_else(|e| panic!("Registration failed: {e}"));
+        println!(
+            "  {} inliers, RMS={:.3}px, {:.1}ms",
+            result.num_inliers, result.rms_error, result.elapsed_ms,
+        );
+        let mut warped = (*img).clone();
+        warp(img, &mut warped, &result.transform, &reg_config);
+        warped
+    });
+
+    // Replace frames 1..N with warped versions
+    for (dst, warped) in calibrated[1..].iter_mut().zip(warped_frames) {
+        *dst = warped;
     }
 
     println!("  Elapsed: {:?}", step_start.elapsed());
@@ -150,16 +139,13 @@ fn bench_full_pipeline() {
 
     // Save calibrated+registered images to temp dir for stacking API
     let tmp_dir = tempfile::tempdir().unwrap();
-    let registered_paths: Vec<_> = calibrated
-        .iter()
-        .enumerate()
-        .map(|(i, img)| {
-            let path = tmp_dir.path().join(format!("registered_{:04}.tiff", i));
-            let imag: imaginarium::Image = img.clone().into();
-            imag.save_file(&path).unwrap();
-            path
-        })
-        .collect();
+    let indexed: Vec<(usize, &AstroImage)> = calibrated.iter().enumerate().collect();
+    let registered_paths: Vec<_> = common::parallel::par_map_limited(&indexed, 3, |&(i, img)| {
+        let path = tmp_dir.path().join(format!("registered_{:04}.tiff", i));
+        let imag: imaginarium::Image = img.clone().into();
+        imag.save_file(&path).unwrap();
+        path
+    });
 
     let stack_config = StackConfig {
         normalization: Normalization::Global,
