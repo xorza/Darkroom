@@ -87,12 +87,15 @@ impl ColorInterpLookup {
         for (row, row_strategies) in strategies.iter_mut().enumerate() {
             for (col, col_strategies) in row_strategies.iter_mut().enumerate() {
                 for (tc_idx, &target_color) in [0u8, 2u8].iter().enumerate() {
-                    let mut found_pairs: Vec<ColorInterpStrategy> = Vec::new();
-                    let mut found_singles: Vec<ColorInterpStrategy> = Vec::new();
+                    // At most 2 pairs and 4 singles possible — use fixed arrays
+                    let mut found_pairs = [ColorInterpStrategy::None; 2];
+                    let mut n_pairs = 0usize;
+                    let mut found_singles = [ColorInterpStrategy::None; 4];
+                    let mut n_singles = 0usize;
 
                     // Check pairs first
                     for &((dy_a, dx_a), (dy_b, dx_b)) in &pairs {
-                        // Use wrapping add with +6 to handle negative offsets in modular arithmetic
+                        // +6 handles negative offsets in modular arithmetic
                         let nr_a = (row as i32 + dy_a + 6) as usize;
                         let nc_a = (col as i32 + dx_a + 6) as usize;
                         let nr_b = (row as i32 + dy_b + 6) as usize;
@@ -101,12 +104,13 @@ impl ColorInterpLookup {
                         if pattern.color_at(nr_a, nc_a) == target_color
                             && pattern.color_at(nr_b, nc_b) == target_color
                         {
-                            found_pairs.push(ColorInterpStrategy::Pair {
+                            found_pairs[n_pairs] = ColorInterpStrategy::Pair {
                                 dy_a,
                                 dx_a,
                                 dy_b,
                                 dx_b,
-                            });
+                            };
+                            n_pairs += 1;
                         }
                     }
 
@@ -115,22 +119,23 @@ impl ColorInterpLookup {
                         let nr = (row as i32 + dy + 6) as usize;
                         let nc = (col as i32 + dx + 6) as usize;
                         if pattern.color_at(nr, nc) == target_color {
-                            found_singles.push(ColorInterpStrategy::Single { dy, dx });
+                            found_singles[n_singles] = ColorInterpStrategy::Single { dy, dx };
+                            n_singles += 1;
                         }
                     }
 
                     let entry = &mut col_strategies[tc_idx];
-                    if found_pairs.len() >= 2 {
+                    if n_pairs >= 2 {
                         entry.primary = found_pairs[0];
                         entry.secondary = found_pairs[1];
-                    } else if found_pairs.len() == 1 {
+                    } else if n_pairs == 1 {
                         entry.primary = found_pairs[0];
-                        if let Some(&s) = found_singles.first() {
-                            entry.secondary = s;
+                        if n_singles > 0 {
+                            entry.secondary = found_singles[0];
                         }
-                    } else if let Some(&s) = found_singles.first() {
-                        entry.primary = s;
-                        if found_singles.len() >= 2 {
+                    } else if n_singles > 0 {
+                        entry.primary = found_singles[0];
+                        if n_singles >= 2 {
                             entry.secondary = found_singles[1];
                         }
                     }
@@ -998,5 +1003,368 @@ mod tests {
         assert_eq!(y, 0.0);
         assert_eq!(pb, 0.0);
         assert_eq!(pr, 0.0);
+    }
+
+    // ── SAT (Summed Area Table) tests ────────────────────────────
+
+    #[test]
+    fn test_sat_uniform_ones() {
+        // 4×3 grid of all 1s
+        let data = vec![1u8; 4 * 3];
+        let sat = build_summed_area_table(&data, 4, 3);
+
+        // Full image sum = 12
+        assert_eq!(sat_query(&sat, 5, 0, 0, 2, 3), 12);
+        // Single pixel (0,0) = 1
+        assert_eq!(sat_query(&sat, 5, 0, 0, 0, 0), 1);
+        // First row sum = 4
+        assert_eq!(sat_query(&sat, 5, 0, 0, 0, 3), 4);
+        // First column sum = 3
+        assert_eq!(sat_query(&sat, 5, 0, 0, 2, 0), 3);
+        // 2×2 top-left corner = 4
+        assert_eq!(sat_query(&sat, 5, 0, 0, 1, 1), 4);
+        // 2×2 bottom-right corner = 4
+        assert_eq!(sat_query(&sat, 5, 1, 2, 2, 3), 4);
+    }
+
+    #[test]
+    fn test_sat_sequential_values() {
+        // 3×3 grid: [1,2,3; 4,5,6; 7,8,9]
+        let data = vec![1, 2, 3, 4, 5, 6, 7, 8, 9];
+        let sat = build_summed_area_table(&data, 3, 3);
+
+        // Full sum = 45
+        assert_eq!(sat_query(&sat, 4, 0, 0, 2, 2), 45);
+        // Center pixel only = 5
+        assert_eq!(sat_query(&sat, 4, 1, 1, 1, 1), 5);
+        // Middle row = 4+5+6 = 15
+        assert_eq!(sat_query(&sat, 4, 1, 0, 1, 2), 15);
+        // Bottom-right 2×2 = 5+6+8+9 = 28
+        assert_eq!(sat_query(&sat, 4, 1, 1, 2, 2), 28);
+    }
+
+    #[test]
+    fn test_sat_single_pixel() {
+        let data = vec![42u8];
+        let sat = build_summed_area_table(&data, 1, 1);
+        assert_eq!(sat_query(&sat, 2, 0, 0, 0, 0), 42);
+    }
+
+    #[test]
+    fn test_sat_single_row() {
+        let data = vec![1, 2, 3, 4, 5];
+        let sat = build_summed_area_table(&data, 5, 1);
+        // Full row = 15
+        assert_eq!(sat_query(&sat, 6, 0, 0, 0, 4), 15);
+        // Middle 3 elements = 2+3+4 = 9
+        assert_eq!(sat_query(&sat, 6, 0, 1, 0, 3), 9);
+    }
+
+    #[test]
+    fn test_sat_single_column() {
+        let data = vec![1, 2, 3, 4, 5];
+        let sat = build_summed_area_table(&data, 1, 5);
+        // Full column = 15
+        assert_eq!(sat_query(&sat, 2, 0, 0, 4, 0), 15);
+        // Middle 3 = 2+3+4 = 9
+        assert_eq!(sat_query(&sat, 2, 1, 0, 3, 0), 9);
+    }
+
+    #[test]
+    fn test_sat_zeros() {
+        let data = vec![0u8; 4 * 4];
+        let sat = build_summed_area_table(&data, 4, 4);
+        assert_eq!(sat_query(&sat, 5, 0, 0, 3, 3), 0);
+    }
+
+    // ── Homogeneity border tests ─────────────────────────────────
+
+    #[test]
+    fn test_homogeneity_border_pixels_are_zero() {
+        let w = 12;
+        let h = 12;
+        let pixels = w * h;
+
+        let drv = vec![1.0f32; NDIR * pixels];
+        let mut homo = vec![0xFFu8; NDIR * pixels]; // fill with garbage to detect missing writes
+        compute_homogeneity(&drv, w, h, &mut homo);
+
+        for d in 0..NDIR {
+            // Top and bottom rows should be 0
+            for x in 0..w {
+                assert_eq!(homo[d * pixels + x], 0, "dir={d} top row x={x}");
+                assert_eq!(
+                    homo[d * pixels + (h - 1) * w + x],
+                    0,
+                    "dir={d} bottom row x={x}"
+                );
+            }
+            // First and last columns should be 0
+            for y in 0..h {
+                assert_eq!(homo[d * pixels + y * w], 0, "dir={d} left col y={y}");
+                assert_eq!(
+                    homo[d * pixels + y * w + (w - 1)],
+                    0,
+                    "dir={d} right col y={y}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_homogeneity_one_dominant_direction() {
+        let w = 12;
+        let h = 12;
+        let pixels = w * h;
+
+        // Direction 0 has very low derivatives, others have high
+        let mut drv = vec![100.0f32; NDIR * pixels];
+        drv[..pixels].fill(0.1); // dir 0
+        let mut homo = vec![0u8; NDIR * pixels];
+        compute_homogeneity(&drv, w, h, &mut homo);
+
+        // Interior pixels: dir 0 should have high homogeneity, others low
+        for y in 2..h - 2 {
+            for x in 2..w - 2 {
+                let idx = y * w + x;
+                let h0 = homo[idx];
+                let h1 = homo[pixels + idx];
+                assert!(
+                    h0 > h1,
+                    "At ({y},{x}): dir0 homo={h0} should be > dir1 homo={h1}"
+                );
+            }
+        }
+    }
+
+    // ── ColorInterpLookup tests ──────────────────────────────────
+
+    #[test]
+    fn test_color_interp_lookup_coverage() {
+        let pattern = test_pattern();
+        let lookup = ColorInterpLookup::new(&pattern);
+
+        let mut has_pair = 0;
+        let mut has_single = 0;
+        let mut has_none = 0;
+
+        // Verify all 36×2 entries are valid (Pair, Single, or None) and count coverage
+        for row in 0..6 {
+            for col in 0..6 {
+                for tc_idx in 0..2 {
+                    let entry = lookup.get(row, col, tc_idx);
+                    match entry.primary {
+                        ColorInterpStrategy::Pair { .. } => has_pair += 1,
+                        ColorInterpStrategy::Single { .. } => has_single += 1,
+                        ColorInterpStrategy::None => has_none += 1,
+                    }
+                }
+            }
+        }
+
+        // X-Trans has good color coverage — most positions should have pairs or singles.
+        // Some positions may have None (no neighbor of that color at distance ±1).
+        assert!(
+            has_pair + has_single > has_none,
+            "Too many None entries: pair={has_pair} single={has_single} none={has_none}"
+        );
+        // At least some pairs should exist
+        assert!(has_pair > 0, "No pair strategies found");
+    }
+
+    #[test]
+    fn test_color_interp_lookup_pair_symmetry() {
+        let pattern = test_pattern();
+        let lookup = ColorInterpLookup::new(&pattern);
+
+        // For Pair strategies, the two neighbors should be in opposing directions
+        for row in 0..6 {
+            for col in 0..6 {
+                for tc_idx in 0..2 {
+                    let entry = lookup.get(row, col, tc_idx);
+                    if let ColorInterpStrategy::Pair {
+                        dy_a,
+                        dx_a,
+                        dy_b,
+                        dx_b,
+                    } = entry.primary
+                    {
+                        // Opposing means dy_a = -dy_b and dx_a = -dx_b
+                        assert_eq!(
+                            dy_a, -dy_b,
+                            "Pair at ({row},{col},tc={tc_idx}) dy not opposing"
+                        );
+                        assert_eq!(
+                            dx_a, -dx_b,
+                            "Pair at ({row},{col},tc={tc_idx}) dx not opposing"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    // ── Interpolate missing color: interior vs border consistency ─
+
+    #[test]
+    fn test_interpolate_interior_matches_border_path() {
+        // For interior pixels, the fast (unchecked) and slow (checked) paths
+        // should produce identical results.
+        let raw_w = 24;
+        let raw_h = 24;
+        let w = 12;
+        let h = 12;
+        // Gradient data to exercise actual interpolation
+        let data: Vec<f32> = (0..raw_w * raw_h)
+            .map(|i| (i as f32) / (raw_w * raw_h) as f32)
+            .collect();
+        let xtrans = make_xtrans(&data, raw_w, raw_h, w, h, 6, 6);
+        let color_lookup = ColorInterpLookup::new(&xtrans.pattern);
+
+        let pixels = w * h;
+        let mut green_dir = vec![0.0f32; NDIR * pixels];
+        let hex = HexLookup::new(&xtrans.pattern);
+        let mut gmin = vec![0.0f32; pixels];
+        let mut gmax = vec![1.0f32; pixels];
+        compute_green_minmax(&xtrans, &hex, &mut gmin, &mut gmax);
+        interpolate_green(&xtrans, &hex, &gmin, &gmax, &mut green_dir);
+
+        // Test interior pixels (y in 1..h-1, x in 1..w-1) with both paths
+        for d in 0..NDIR {
+            let green_base = d * pixels;
+            for y in 1..h - 1 {
+                for x in 1..w - 1 {
+                    for tc_idx in 0..2 {
+                        let fast = interpolate_missing_color_fast(
+                            &xtrans,
+                            &green_dir,
+                            &color_lookup,
+                            green_base,
+                            y,
+                            x,
+                            tc_idx,
+                            true, // interior
+                        );
+                        let slow = interpolate_missing_color_fast(
+                            &xtrans,
+                            &green_dir,
+                            &color_lookup,
+                            green_base,
+                            y,
+                            x,
+                            tc_idx,
+                            false, // border path
+                        );
+                        assert!(
+                            (fast - slow).abs() < 1e-6,
+                            "Mismatch at d={d} y={y} x={x} tc={tc_idx}: fast={fast} slow={slow}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_interpolate_border_pixels_dont_panic() {
+        // Border pixels with bounds checking should not panic
+        let raw_w = 14;
+        let raw_h = 14;
+        let w = 6;
+        let h = 6;
+        let data: Vec<f32> = (0..raw_w * raw_h)
+            .map(|i| (i as f32) / (raw_w * raw_h) as f32)
+            .collect();
+        let xtrans = make_xtrans(&data, raw_w, raw_h, w, h, 4, 4);
+        let color_lookup = ColorInterpLookup::new(&xtrans.pattern);
+
+        let pixels = w * h;
+        let green_dir = vec![0.5f32; NDIR * pixels];
+
+        // Test all edge pixels with border (slow) path
+        for d in 0..NDIR {
+            let green_base = d * pixels;
+            for y in 0..h {
+                for x in 0..w {
+                    for tc_idx in 0..2 {
+                        let val = interpolate_missing_color_fast(
+                            &xtrans,
+                            &green_dir,
+                            &color_lookup,
+                            green_base,
+                            y,
+                            x,
+                            tc_idx,
+                            false,
+                        );
+                        assert!(val.is_finite(), "NaN at d={d} y={y} x={x} tc={tc_idx}");
+                        assert!(val >= 0.0, "Negative at d={d} y={y} x={x} tc={tc_idx}");
+                    }
+                }
+            }
+        }
+    }
+
+    // ── Blend final tests ────────────────────────────────────────
+
+    #[test]
+    fn test_blend_uniform_homo_produces_average() {
+        let w = 6;
+        let h = 6;
+        let pixels = w * h;
+
+        // Each direction has a different uniform color
+        let mut rgb_dir = vec![0.0f32; NDIR * pixels * 3];
+        for d in 0..NDIR {
+            let val = (d + 1) as f32 * 0.2; // 0.2, 0.4, 0.6, 0.8
+            for i in 0..pixels * 3 {
+                rgb_dir[d * pixels * 3 + i] = val;
+            }
+        }
+        // Uniform homogeneity → all directions qualify
+        let homo = vec![9u8; NDIR * pixels];
+
+        let output_buf = vec![0.0f32; NDIR * pixels]; // reusable buffer
+        let rgb = blend_final_from_rgb(&rgb_dir, &homo, w, h, output_buf);
+
+        assert_eq!(rgb.len(), pixels * 3);
+        // Average of 0.2, 0.4, 0.6, 0.8 = 0.5
+        for (i, &v) in rgb.iter().enumerate() {
+            assert!((v - 0.5).abs() < 1e-5, "Pixel {i}: expected 0.5, got {v}");
+        }
+    }
+
+    #[test]
+    fn test_blend_one_dominant_direction() {
+        let w = 8;
+        let h = 8;
+        let pixels = w * h;
+
+        // Dir 0 has RGB = (1,0,0), others have (0,1,0)
+        let mut rgb_dir = vec![0.0f32; NDIR * pixels * 3];
+        for p in 0..pixels {
+            // Dir 0: red
+            rgb_dir[p * 3] = 1.0;
+            // Dirs 1-3: green
+            for d in 1..NDIR {
+                rgb_dir[d * pixels * 3 + p * 3 + 1] = 1.0;
+            }
+        }
+        // Dir 0 has highest homogeneity (9), others have 0
+        let mut homo = vec![0u8; NDIR * pixels];
+        homo[..pixels].fill(9);
+
+        let output_buf = vec![0.0f32; NDIR * pixels];
+        let rgb = blend_final_from_rgb(&rgb_dir, &homo, w, h, output_buf);
+
+        // Only dir 0 should be selected → output should be red
+        for p in 0..pixels {
+            assert!(
+                (rgb[p * 3] - 1.0).abs() < 1e-5,
+                "R at pixel {p}: expected 1.0"
+            );
+            assert!(rgb[p * 3 + 1].abs() < 1e-5, "G at pixel {p}: expected 0.0");
+            assert!(rgb[p * 3 + 2].abs() < 1e-5, "B at pixel {p}: expected 0.0");
+        }
     }
 }
