@@ -93,27 +93,15 @@ The registration module is the strongest part of the crate. It implements:
 
 **Recommendation:** Implement RCD (Ratio Corrected Demosaicing) — it's specifically noted as excellent for "round edges like stars" while preserving detail comparable to AMaZE. Alternatively, use libraw's built-in AHD/VNG when quality > speed.
 
-### 2. Normalization: Only Global, No Additive+Scaling (Wrong)
+### ~~2. Normalization: Only Global, No Additive+Scaling~~ (PARTIALLY RESOLVED)
 
-**Current:** Single `Global` normalization mode that computes per-frame `(gain, offset)` from median and MAD:
-```
-gain = ref_MAD / frame_MAD
-offset = ref_median - frame_median * gain
-```
+**Implemented:** `Multiplicative` normalization mode added (`gain = ref_median / frame_median`, no offset). Best for flat frames where exposure varies (sky flats, shutter speed inconsistencies).
 
-**Problem:** This is additive-with-scaling normalization. The implementation is fine, but:
-- There is no **pure multiplicative** mode (needed for flat stacking)
-- There is no **pure additive** mode (simplest, good for lights with same exposure)
-- There is no choice at all — it's Global or None
+**Available modes now:** `None`, `Global` (additive+scaling for lights), `Multiplicative` (for flats).
 
-**Industry standard (Siril):**
-- **Additive:** shift location only (for uniform exposures)
-- **Additive+Scaling:** shift location + match scale (current Global mode)
-- **Multiplicative:** scale by ratio of locations (for flats)
-- Uses IKSS estimators (Iterative Kurtosis-based Sigma-clipping) for more robust location/scale estimates
-- 6×MAD clipping before computing estimators
+**Pure additive mode skipped:** Siril offers it but recommends additive+scaling for lights in all cases. Not practically useful — `Global` already covers the light frame use case.
 
-**Recommendation:** Add `Multiplicative` and `Additive` normalization modes. Consider implementing IKSS estimators (or at least documenting why median+MAD is preferred).
+**Remaining:** IKSS estimators could improve robustness over median+MAD, but this is a separate enhancement (see recommendations).
 
 ### 3. Hot Pixel Correction: Per-Channel Independent (Suboptimal)
 
@@ -302,7 +290,7 @@ The calibration code uses `image.apply_from_channel(bias, |_c, dst, src| { ... }
 ## Prioritized Recommendations
 
 ### High Impact, Low Effort
-1. **Add multiplicative/additive normalization modes** — straightforward config change
+1. ~~**Add multiplicative/additive normalization modes**~~ — RESOLVED: Multiplicative added; pure additive not needed
 2. **Remove per-pixel weight copy** in weighted stacking — single line fix
 3. **Wire up or remove TPS dead code** — code hygiene
 

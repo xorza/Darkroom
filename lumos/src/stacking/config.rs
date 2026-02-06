@@ -137,8 +137,12 @@ pub enum Normalization {
     /// No normalization.
     #[default]
     None,
-    /// Match global median and scale across frames.
+    /// Match global median and scale across frames (additive + scaling).
+    /// Best for light frames.
     Global,
+    /// Scale by ratio of medians (no additive offset).
+    /// Best for flat frames where exposure varies.
+    Multiplicative,
 }
 
 /// Unified configuration for image stacking operations.

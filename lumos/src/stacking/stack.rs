@@ -133,6 +133,7 @@ pub fn stack_with_progress<P: AsRef<Path> + Sync>(
     let norm_params = match config.normalization {
         Normalization::None => None,
         Normalization::Global => Some(compute_global_norm_params(&cache)),
+        Normalization::Multiplicative => Some(compute_multiplicative_norm_params(&cache)),
     };
 
     // Dispatch based on method and rejection (normalization applied transparently)
@@ -180,6 +181,43 @@ fn compute_global_norm_params(cache: &ImageCache) -> Vec<(f32, f32)> {
         frame_count,
         channels,
         "Computed global normalization (reference frame 0)"
+    );
+
+    params
+}
+
+/// Compute per-frame normalization parameters for multiplicative normalization.
+///
+/// Uses frame 0 as the reference. For each frame/channel, computes `(gain, offset)`
+/// where `gain = ref_median / frame_median` and `offset = 0.0`.
+///
+/// Best for flat frames where exposure varies (e.g., sky flats at sunset).
+fn compute_multiplicative_norm_params(cache: &ImageCache) -> Vec<(f32, f32)> {
+    let stats = cache.compute_channel_stats();
+    let channels = cache.dimensions().channels;
+    let frame_count = cache.frame_count();
+    let mut params = vec![(1.0f32, 0.0f32); frame_count * channels];
+
+    for channel in 0..channels {
+        let (ref_median, _) = stats[channel]; // frame 0
+
+        for frame_idx in 0..frame_count {
+            let (frame_median, _) = stats[frame_idx * channels + channel];
+
+            let gain = if frame_median > f32::EPSILON {
+                ref_median / frame_median
+            } else {
+                1.0
+            };
+
+            params[frame_idx * channels + channel] = (gain, 0.0);
+        }
+    }
+
+    tracing::info!(
+        frame_count,
+        channels,
+        "Computed multiplicative normalization (reference frame 0)"
     );
 
     params
@@ -825,5 +863,149 @@ mod tests {
             "Unnormalized should be ~150, got {}",
             unnorm_pixel
         );
+    }
+
+    // ========== Multiplicative Normalization Tests ==========
+
+    #[test]
+    fn test_multiplicative_norm_identity_for_identical_frames() {
+        let dims = ImageDimensions::new(4, 4, 1);
+        let images = vec![
+            AstroImage::from_pixels(dims, vec![5.0; 16]),
+            AstroImage::from_pixels(dims, vec![5.0; 16]),
+            AstroImage::from_pixels(dims, vec![5.0; 16]),
+        ];
+        let cache = cache_from_images(images);
+        let params = compute_multiplicative_norm_params(&cache);
+
+        assert_eq!(params.len(), 3);
+        for (gain, offset) in &params {
+            assert!(
+                (*gain - 1.0).abs() < 1e-5,
+                "Gain should be ~1.0, got {}",
+                gain
+            );
+            assert!(offset.abs() < 1e-5, "Offset should be 0.0, got {}", offset);
+        }
+    }
+
+    #[test]
+    fn test_multiplicative_norm_scales_by_median_ratio() {
+        // Simulate flat frames: frame 0 median ~100, frame 1 median ~200
+        let dims = ImageDimensions::new(4, 4, 1);
+        let frame0: Vec<f32> = vec![100.0; 16];
+        let frame1: Vec<f32> = vec![200.0; 16];
+
+        let images = vec![
+            AstroImage::from_pixels(dims, frame0),
+            AstroImage::from_pixels(dims, frame1),
+        ];
+        let cache = cache_from_images(images);
+        let params = compute_multiplicative_norm_params(&cache);
+
+        // Frame 0: reference -> gain=1, offset=0
+        let (g0, o0) = params[0];
+        assert!((g0 - 1.0).abs() < 1e-5);
+        assert!(o0.abs() < 1e-5);
+
+        // Frame 1: gain = 100/200 = 0.5, offset = 0
+        let (g1, o1) = params[1];
+        assert!((g1 - 0.5).abs() < 1e-5, "Gain should be 0.5, got {}", g1);
+        assert!(o1.abs() < 1e-5, "Offset should be 0.0, got {}", o1);
+    }
+
+    #[test]
+    fn test_multiplicative_norm_no_offset() {
+        // Multiplicative should only scale, never shift.
+        // Frame with different median should be scaled but not shifted.
+        let dims = ImageDimensions::new(10, 10, 1);
+        let frame0: Vec<f32> = (0..100).map(|i| 90.0 + (i as f32) * 0.2).collect();
+        let frame1: Vec<f32> = (0..100).map(|i| 180.0 + (i as f32) * 0.4).collect();
+
+        let images = vec![
+            AstroImage::from_pixels(dims, frame0),
+            AstroImage::from_pixels(dims, frame1),
+        ];
+        let cache = cache_from_images(images);
+        let params = compute_multiplicative_norm_params(&cache);
+
+        // All offsets must be exactly 0
+        for &(_, offset) in &params {
+            assert!(
+                offset.abs() < f32::EPSILON,
+                "Multiplicative offset must be 0, got {}",
+                offset
+            );
+        }
+    }
+
+    #[test]
+    fn test_multiplicative_stacking_normalizes_flat_levels() {
+        // Two flat frames with different exposure levels.
+        // After multiplicative normalization, stacked result should match reference level.
+        let dims = ImageDimensions::new(4, 4, 1);
+        let frame0: Vec<f32> = vec![100.0; 16];
+        let frame1: Vec<f32> = vec![200.0; 16];
+
+        let images = vec![
+            AstroImage::from_pixels(dims, frame0),
+            AstroImage::from_pixels(dims, frame1),
+        ];
+        let cache = cache_from_images(images);
+        let norm_params = compute_multiplicative_norm_params(&cache);
+
+        let result = cache.process_chunked(Some(&norm_params), |values: &mut [f32]| {
+            math::mean_f32(values)
+        });
+
+        // Both frames scaled to reference level (100.0), mean should be 100.0
+        for &pixel in result.channel(0) {
+            assert!(
+                (pixel - 100.0).abs() < 1.0,
+                "Multiplicative stacked flat should be ~100, got {}",
+                pixel
+            );
+        }
+    }
+
+    #[test]
+    fn test_multiplicative_rgb() {
+        // RGB flat frames with per-channel exposure differences
+        let dims = ImageDimensions::new(4, 4, 3);
+        let pixels0: Vec<f32> = (0..16).flat_map(|_| vec![100.0, 200.0, 300.0]).collect();
+        let pixels1: Vec<f32> = (0..16).flat_map(|_| vec![150.0, 100.0, 600.0]).collect();
+
+        let images = vec![
+            AstroImage::from_pixels(dims, pixels0),
+            AstroImage::from_pixels(dims, pixels1),
+        ];
+        let cache = cache_from_images(images);
+        let norm_params = compute_multiplicative_norm_params(&cache);
+
+        let result = cache.process_chunked(Some(&norm_params), |values: &mut [f32]| {
+            math::mean_f32(values)
+        });
+
+        for &pixel in result.channel(0) {
+            assert!(
+                (pixel - 100.0).abs() < 1.0,
+                "R should be ~100, got {}",
+                pixel
+            );
+        }
+        for &pixel in result.channel(1) {
+            assert!(
+                (pixel - 200.0).abs() < 1.0,
+                "G should be ~200, got {}",
+                pixel
+            );
+        }
+        for &pixel in result.channel(2) {
+            assert!(
+                (pixel - 300.0).abs() < 1.0,
+                "B should be ~300, got {}",
+                pixel
+            );
+        }
     }
 }
