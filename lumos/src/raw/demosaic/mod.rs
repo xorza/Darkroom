@@ -9,4 +9,4 @@
 mod bayer;
 pub(crate) mod xtrans;
 
-pub use bayer::{BayerImage, CfaPattern, demosaic_bilinear};
+pub use bayer::{BayerImage, CfaPattern, demosaic_bayer};

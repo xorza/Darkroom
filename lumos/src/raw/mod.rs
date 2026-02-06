@@ -18,7 +18,7 @@ use rayon::prelude::*;
 use crate::astro_image::sensor::{SensorType, detect_sensor_type};
 use crate::astro_image::{AstroImage, AstroImageMetadata, BitPix, ImageDimensions};
 use demosaic::xtrans::process_xtrans;
-use demosaic::{BayerImage, CfaPattern, demosaic_bilinear};
+use demosaic::{BayerImage, CfaPattern, demosaic_bayer};
 
 use normalize::normalize_u16_to_f32_parallel;
 
@@ -384,7 +384,7 @@ fn process_bayer_fast(
     );
 
     let demosaic_start = Instant::now();
-    let rgb_pixels = demosaic_bilinear(&bayer);
+    let rgb_pixels = demosaic_bayer(&bayer);
     let demosaic_elapsed = demosaic_start.elapsed();
 
     tracing::info!(

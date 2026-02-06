@@ -11,9 +11,8 @@ raw/
 └── demosaic/
     ├── mod.rs           # Re-exports bayer and xtrans
     ├── bayer/
-    │   ├── mod.rs       # Dispatcher + SIMD row functions (SSE3/NEON)
-    │   ├── scalar.rs    # Scalar bilinear interpolation functions
-    │   └── tests.rs     # 25 tests covering all CFA patterns and code paths
+    │   ├── mod.rs       # CfaPattern, BayerImage types + demosaic_bayer() stub
+    │   └── tests.rs     # CFA pattern and BayerImage validation tests
     └── xtrans/
         ├── mod.rs              # XTransPattern, XTransImage, process_xtrans()
         ├── hex_lookup.rs       # Hexagonal neighbor tables for Markesteijn
@@ -33,7 +32,7 @@ raw/
 | Sensor Type | Normalization | Demosaic | Output |
 |------------|---------------|----------|--------|
 | Monochrome | `normalize_u16_to_f32_parallel()` + crop | None | 1-channel grayscale |
-| Bayer | `normalize_u16_to_f32_parallel()` (SIMD) | `demosaic_bilinear()` (SIMD+rayon) | 3-channel RGB |
+| Bayer | `normalize_u16_to_f32_parallel()` (SIMD) | **TODO: DCB** | 3-channel RGB |
 | X-Trans | `normalize_u16_to_f32_parallel()` (SIMD) | Markesteijn 1-pass (rayon) | 3-channel RGB |
 | Unknown | libraw `dcraw_process` | libraw built-in | 3-channel RGB |
 
@@ -45,12 +44,6 @@ raw/
 - **NEON** (aarch64): `vmovl_u16` + `vcvtq_f32_u32`
 - 4 elements per iteration, rayon parallel chunks of 16K
 - Used by Monochrome, Bayer, and X-Trans paths
-
-### Bayer Demosaic (`bayer/`)
-- **SSE3** / **NEON**: Load 9 neighbors (center + 4 cardinal + 4 diagonal), compute 4 interpolations in SIMD, assign via shared `assign_simd_pixels` helper
-- Row-based rayon parallelism with per-row SIMD
-- Shared `demosaic_pixel_scalar` helper for border/tail pixels and scalar fallback
-- Scalar fallback for non-SIMD architectures
 
 ### X-Trans Demosaic (`xtrans/`)
 - Precomputed `ColorInterpLookup` (fixed-size arrays, no heap alloc) for neighbor pattern
@@ -78,7 +71,7 @@ All large buffers use `alloc_uninit_vec` to skip kernel page zeroing (`clear_pag
 
 ## Test Coverage
 
-**Total: 89 tests** across all submodules.
+**Total: 67 tests** across all submodules.
 
 | Area | Tests | Notes |
 |------|-------|-------|
@@ -87,9 +80,7 @@ All large buffers use `alloc_uninit_vec` to skip kernel page zeroing (`clear_pag
 | LibrawGuard RAII | 2 | Cleanup + null safety |
 | Normalization | 5 | Small/large array, below-black clamping, monochrome crop, fallback formulas |
 | CFA pattern | 6 | All 4 patterns, `red_in_row`, `pattern_2x2` |
-| BayerImage validation | 5 | Zero dims, wrong length, margin overflow |
-| Bayer demosaic | 18 | All patterns, uniform, gradient, corners, edges, channel preservation, NaN, SIMD-vs-scalar, parallel-vs-scalar |
-| Scalar interpolation | 2 | Horizontal/vertical edge cases |
+| BayerImage validation | 6 | Zero dims, wrong length, margin overflow, valid construction |
 | X-Trans pattern | 3 | color_at, wrapping, invalid value panic |
 | X-Trans image | 3 | Valid, zero width, wrong data length |
 | process_xtrans | 4 | Output size, normalization, black clamp, full range |
