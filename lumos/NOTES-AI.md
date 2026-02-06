@@ -57,9 +57,30 @@ Bayer and X-Trans demosaicing with SIMD acceleration.
 | `bayer/scalar.rs` | Scalar bilinear demosaicing |
 | `bayer/simd_sse3.rs` | x86_64 SSE3 SIMD |
 | `bayer/simd_neon.rs` | ARM aarch64 NEON SIMD |
-| `xtrans/` | X-Trans (Fujifilm) demosaicing |
+| `xtrans/mod.rs` | X-Trans entry point, `XTransPattern`, `XTransImage` |
+| `xtrans/markesteijn.rs` | Markesteijn 1-pass orchestrator, buffer management |
+| `xtrans/markesteijn_steps.rs` | Algorithm steps: green interp, R/B, homogeneity, blend |
+| `xtrans/hex_lookup.rs` | Pre-computed hexagonal neighbor lookup tables |
 
 CFA Patterns: RGGB, BGGR, GRBG, GBRG
+
+### X-Trans Markesteijn 1-Pass Algorithm
+
+Custom implementation of the Markesteijn demosaic for Fujifilm X-Trans 6x6 CFA sensors:
+
+1. **Green min/max** — Bound green interpolation using hexagonal neighbors
+2. **Green interpolation (4 directions)** — Weighted hexagonal with clamping
+3. **R/B interpolation** — Green-guided color difference along lowest-gradient direction
+4. **YPbPr derivatives** — Spatial Laplacian in perceptual color space
+5. **Homogeneity maps** — Count consistent pixels per direction in 3x3 window
+6. **Final blend** — Sum homogeneity in 5x5 window, average best directions
+
+**Performance** (6032x4028 X-Trans, AMD CPU):
+- Our Markesteijn: ~480ms demosaic, ~1.3s total load
+- libraw Markesteijn 1-pass: ~1750ms demosaic, ~2.6s total load (single-threaded)
+- Quality: MAE < 0.001 vs libraw reference (after linear regression normalization)
+
+**Parallelization**: Row-parallel via rayon `par_chunks_mut` for all steps. Steps 3+4 flatten (direction x row) pairs for maximum core utilization.
 
 ## Star Detection Module (star_detection/)
 

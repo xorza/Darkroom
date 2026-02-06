@@ -6,24 +6,16 @@
 //! The X-Trans pattern has ~55% green, ~22.5% red, and ~22.5% blue pixels arranged
 //! so that every row and column contains all three colors.
 //!
-//! # SIMD Support
-//! - x86_64: SSE4.1 acceleration when available
-//! - aarch64: NEON acceleration when available
-//! - Fallback: Scalar implementation on all platforms
+//! Uses the Markesteijn 1-pass algorithm: directional interpolation in 4 directions
+//! with homogeneity-based selection for high-quality output.
 
-#[cfg(test)]
-mod integration_tests;
-mod scalar;
-
-#[cfg(target_arch = "x86_64")]
-mod simd_sse4;
-
-#[cfg(target_arch = "aarch64")]
-mod simd_neon;
+mod hex_lookup;
+mod markesteijn;
+mod markesteijn_steps;
 
 use std::time::Instant;
 
-pub use scalar::demosaic_xtrans_bilinear;
+pub use markesteijn::demosaic_xtrans_markesteijn;
 
 /// Process X-Trans sensor raw data and demosaic to RGB.
 ///
@@ -74,11 +66,11 @@ pub fn process_xtrans(
     );
 
     let demosaic_start = Instant::now();
-    let rgb_pixels = demosaic_xtrans_bilinear(&xtrans);
+    let rgb_pixels = demosaic_xtrans_markesteijn(&xtrans);
     let demosaic_elapsed = demosaic_start.elapsed();
 
     tracing::info!(
-        "X-Trans demosaicing {}x{} took {:.2}ms",
+        "X-Trans Markesteijn demosaicing {}x{} took {:.2}ms",
         width,
         height,
         demosaic_elapsed.as_secs_f64() * 1000.0
