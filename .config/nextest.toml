@@ -35,3 +35,12 @@ threads-required = 1
 [[profile.ci.overrides]]
 filter = "package(imaginarium) & test(/gpu/)"
 threads-required = 1
+
+# Real-data stacking tests process large RAW files and need more time
+[[profile.default.overrides]]
+filter = "package(lumos) & test(/stacking::tests::real_data/)"
+slow-timeout = { period = "120s", terminate-after = 5 }
+
+[[profile.ci.overrides]]
+filter = "package(lumos) & test(/stacking::tests::real_data/)"
+slow-timeout = { period = "120s", terminate-after = 5 }
