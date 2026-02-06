@@ -309,18 +309,17 @@ impl ImageCache {
 
     /// Process images in horizontal chunks, applying a combine function to each pixel.
     ///
-    /// This is the core processing loop shared by median and sigma-clipped stacking.
-    /// Each thread gets its own buffer to avoid per-pixel allocation.
-    /// The combine function receives a mutable slice to allow in-place operations.
+    /// Optional `norm_params` apply per-frame affine normalization before combining.
+    /// Indexed as `[frame * channels + channel]` with `(gain, offset)` pairs:
+    /// `normalized = raw * gain + offset`.
     ///
-    /// For in-memory storage, processes the entire image in one pass.
-    /// For disk-backed storage, chunk size is computed adaptively based on available memory.
-    /// Processing is done per-channel for efficient planar storage access.
-    pub fn process_chunked<F>(&self, combine: F) -> AstroImage
+    /// Processing is done per-channel, parallelized per-row with rayon.
+    pub fn process_chunked<F>(&self, norm_params: Option<&[(f32, f32)]>, combine: F) -> AstroImage
     where
         F: Fn(&mut [f32]) -> f32 + Sync,
     {
-        self.process_chunks_internal(|output_slice, chunks, frame_count, width| {
+        let channels = self.dimensions.channels;
+        self.process_chunks_internal(|output_slice, chunks, frame_count, width, channel| {
             output_slice.par_chunks_mut(width).enumerate().for_each(
                 |(row_in_chunk, row_output)| {
                     let mut values = vec![0.0f32; frame_count];
@@ -328,8 +327,15 @@ impl ImageCache {
 
                     for (pixel_in_row, out) in row_output.iter_mut().enumerate() {
                         let pixel_idx = row_offset + pixel_in_row;
-                        for (frame_idx, chunk) in chunks.iter().enumerate() {
-                            values[frame_idx] = chunk[pixel_idx];
+                        if let Some(norms) = norm_params {
+                            for (frame_idx, chunk) in chunks.iter().enumerate() {
+                                let (gain, offset) = norms[frame_idx * channels + channel];
+                                values[frame_idx] = chunk[pixel_idx] * gain + offset;
+                            }
+                        } else {
+                            for (frame_idx, chunk) in chunks.iter().enumerate() {
+                                values[frame_idx] = chunk[pixel_idx];
+                            }
                         }
                         *out = combine(&mut values);
                     }
@@ -340,21 +346,25 @@ impl ImageCache {
 
     /// Process images in horizontal chunks with per-frame weights.
     ///
-    /// Similar to `process_chunked`, but the combine function also receives weights.
-    /// Used for weighted mean stacking with optional rejection.
-    /// Processing is done per-channel for efficient planar storage access.
-    pub fn process_chunked_weighted<F>(&self, weights: &[f32], combine: F) -> AstroImage
+    /// Optional `norm_params` apply per-frame affine normalization before combining.
+    pub fn process_chunked_weighted<F>(
+        &self,
+        weights: &[f32],
+        norm_params: Option<&[(f32, f32)]>,
+        combine: F,
+    ) -> AstroImage
     where
         F: Fn(&mut [f32], &[f32]) -> f32 + Sync,
     {
         let frame_count = self.frame_count();
+        let channels = self.dimensions.channels;
         assert_eq!(
             weights.len(),
             frame_count,
             "Weight count must match frame count"
         );
 
-        self.process_chunks_internal(|output_slice, chunks, frame_count, width| {
+        self.process_chunks_internal(|output_slice, chunks, frame_count, width, channel| {
             output_slice.par_chunks_mut(width).enumerate().for_each(
                 |(row_in_chunk, row_output)| {
                     let mut values = vec![0.0f32; frame_count];
@@ -363,10 +373,16 @@ impl ImageCache {
 
                     for (pixel_in_row, out) in row_output.iter_mut().enumerate() {
                         let pixel_idx = row_offset + pixel_in_row;
-                        for (frame_idx, chunk) in chunks.iter().enumerate() {
-                            values[frame_idx] = chunk[pixel_idx];
+                        if let Some(norms) = norm_params {
+                            for (frame_idx, chunk) in chunks.iter().enumerate() {
+                                let (gain, offset) = norms[frame_idx * channels + channel];
+                                values[frame_idx] = chunk[pixel_idx] * gain + offset;
+                            }
+                        } else {
+                            for (frame_idx, chunk) in chunks.iter().enumerate() {
+                                values[frame_idx] = chunk[pixel_idx];
+                            }
                         }
-                        // Reset weights for each pixel (rejection may modify them)
                         local_weights.copy_from_slice(weights);
                         *out = combine(&mut values, &local_weights);
                     }
@@ -375,156 +391,9 @@ impl ImageCache {
         })
     }
 
-    /// Process images with per-frame normalization applied before combining.
-    ///
-    /// `norm_params` is indexed as `[frame * channels + channel]` and contains
-    /// `(gain, offset)` pairs such that `normalized = raw * gain + offset`.
-    pub fn process_chunked_normalized<F>(
-        &self,
-        norm_params: &[(f32, f32)],
-        combine: F,
-    ) -> AstroImage
-    where
-        F: Fn(&mut [f32]) -> f32 + Sync,
-    {
-        let channels = self.dimensions.channels;
-        self.process_chunks_internal_with_channel(
-            |output_slice, chunks, frame_count, width, channel| {
-                output_slice.par_chunks_mut(width).enumerate().for_each(
-                    |(row_in_chunk, row_output)| {
-                        let mut values = vec![0.0f32; frame_count];
-                        let row_offset = row_in_chunk * width;
-
-                        for (pixel_in_row, out) in row_output.iter_mut().enumerate() {
-                            let pixel_idx = row_offset + pixel_in_row;
-                            for (frame_idx, chunk) in chunks.iter().enumerate() {
-                                let (gain, offset) = norm_params[frame_idx * channels + channel];
-                                values[frame_idx] = chunk[pixel_idx] * gain + offset;
-                            }
-                            *out = combine(&mut values);
-                        }
-                    },
-                );
-            },
-        )
-    }
-
-    /// Process images with per-frame normalization and per-frame weights.
-    pub fn process_chunked_weighted_normalized<F>(
-        &self,
-        weights: &[f32],
-        norm_params: &[(f32, f32)],
-        combine: F,
-    ) -> AstroImage
-    where
-        F: Fn(&mut [f32], &[f32]) -> f32 + Sync,
-    {
-        let frame_count = self.frame_count();
-        let channels = self.dimensions.channels;
-        assert_eq!(
-            weights.len(),
-            frame_count,
-            "Weight count must match frame count"
-        );
-
-        self.process_chunks_internal_with_channel(
-            |output_slice, chunks, frame_count, width, channel| {
-                output_slice.par_chunks_mut(width).enumerate().for_each(
-                    |(row_in_chunk, row_output)| {
-                        let mut values = vec![0.0f32; frame_count];
-                        let mut local_weights = weights.to_vec();
-                        let row_offset = row_in_chunk * width;
-
-                        for (pixel_in_row, out) in row_output.iter_mut().enumerate() {
-                            let pixel_idx = row_offset + pixel_in_row;
-                            for (frame_idx, chunk) in chunks.iter().enumerate() {
-                                let (gain, offset) = norm_params[frame_idx * channels + channel];
-                                values[frame_idx] = chunk[pixel_idx] * gain + offset;
-                            }
-                            local_weights.copy_from_slice(weights);
-                            *out = combine(&mut values, &local_weights);
-                        }
-                    },
-                );
-            },
-        )
-    }
-
     /// Internal chunk processing - handles chunking logic, calls processor for each chunk.
+    /// The closure receives `(output_slice, chunks, frame_count, width, channel)`.
     fn process_chunks_internal<F>(&self, mut process_chunk: F) -> AstroImage
-    where
-        F: FnMut(&mut [f32], &[&[f32]], usize, usize),
-    {
-        let dims = self.dimensions;
-        let frame_count = self.frame_count();
-        let width = dims.width;
-        let height = dims.height;
-        let channels = dims.channels;
-        let pixels_per_channel = width * height;
-        let available_memory = self.config.get_available_memory();
-
-        // For in-memory, process entire channel; for disk, use adaptive chunking
-        let chunk_rows = match &self.storage {
-            Storage::InMemory(_) => height,
-            Storage::DiskBacked { .. } => compute_optimal_chunk_rows_with_memory(
-                width,
-                1, // Processing one channel at a time
-                frame_count,
-                available_memory,
-            ),
-        };
-
-        // Allocate output channels
-        let mut output_channels: Vec<Vec<f32>> = (0..channels)
-            .map(|_| vec![0.0f32; pixels_per_channel])
-            .collect();
-
-        let num_chunks = height.div_ceil(chunk_rows);
-        let total_work = num_chunks * channels;
-
-        // Reusable buffer for frame chunk references (avoids allocation per chunk)
-        let mut chunks: Vec<&[f32]> = Vec::with_capacity(frame_count);
-
-        report_progress(&self.progress, 0, total_work, StackingStage::Processing);
-
-        // Process each channel independently
-        for (channel, output_channel) in output_channels.iter_mut().enumerate() {
-            for chunk_idx in 0..num_chunks {
-                let start_row = chunk_idx * chunk_rows;
-                let end_row = (start_row + chunk_rows).min(height);
-                let rows_in_chunk = end_row - start_row;
-                let pixels_in_chunk = rows_in_chunk * width;
-
-                // Reuse chunk buffer
-                chunks.clear();
-                chunks.extend((0..frame_count).map(|frame_idx| {
-                    self.read_channel_chunk(frame_idx, channel, start_row, end_row)
-                }));
-
-                let output_slice = &mut output_channel[start_row * width..][..pixels_in_chunk];
-
-                process_chunk(output_slice, &chunks, frame_count, width);
-
-                report_progress(
-                    &self.progress,
-                    channel * num_chunks + chunk_idx + 1,
-                    total_work,
-                    StackingStage::Processing,
-                );
-            }
-        }
-
-        // Build result from planar channels
-        let mut result = AstroImage::from_planar_channels(dims, output_channels);
-        result.metadata = self.metadata.clone();
-        result
-    }
-
-    /// Internal chunk processing with channel index passed to the processor.
-    ///
-    /// Same as `process_chunks_internal` but the closure receives the current channel index,
-    /// enabling per-channel normalization parameters.
-    fn process_chunks_internal_with_channel<F>(&self, mut process_chunk: F) -> AstroImage
     where
         F: FnMut(&mut [f32], &[&[f32]], usize, usize, usize),
     {
@@ -991,7 +860,7 @@ mod tests {
         };
 
         // Median of [1, 3, 2] = 2
-        let result = cache.process_chunked(|values| {
+        let result = cache.process_chunked(None, |values| {
             values.sort_by(|a, b| a.partial_cmp(b).unwrap());
             values[values.len() / 2]
         });
@@ -1027,8 +896,9 @@ mod tests {
         };
 
         // Mean: R=(1+5)/2=3, G=(2+6)/2=4, B=(3+7)/2=5
-        let result =
-            cache.process_chunked(|values| values.iter().sum::<f32>() / values.len() as f32);
+        let result = cache.process_chunked(None, |values| {
+            values.iter().sum::<f32>() / values.len() as f32
+        });
 
         assert_eq!(result.channels(), 3);
         for &pixel in result.channel(0) {
@@ -1060,7 +930,7 @@ mod tests {
 
         // Weighted mean with weights [1, 3]: (10*1 + 20*3) / (1+3) = 70/4 = 17.5
         let weights = vec![1.0, 3.0];
-        let result = cache.process_chunked_weighted(&weights, |values, w| {
+        let result = cache.process_chunked_weighted(&weights, None, |values, w| {
             let sum: f32 = values.iter().zip(w.iter()).map(|(v, wt)| v * wt).sum();
             let weight_sum: f32 = w.iter().sum();
             sum / weight_sum

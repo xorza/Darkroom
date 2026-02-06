@@ -3,8 +3,6 @@
 //! This module provides a single `StackConfig` type that encapsulates all stacking
 //! parameters: combination method, pixel rejection, normalization, and memory settings.
 
-// Allow dead_code until external callers adopt the new API
-
 use crate::stacking::CacheConfig;
 
 /// Method for combining pixel values across frames.

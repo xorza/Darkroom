@@ -406,11 +406,15 @@ pub fn winsorize(values: &[f32], config: &WinsorizedClipConfig) -> Vec<f32> {
         return working;
     }
 
-    let mut scratch = Vec::with_capacity(values.len());
+    let mut median_buf = Vec::with_capacity(values.len());
+    let mut mad_scratch = Vec::with_capacity(values.len());
 
     for _ in 0..config.max_iterations {
-        let center = math::median_f32_mut(&mut working.clone());
-        let mad = mad_f32_with_scratch(&working, center, &mut scratch);
+        // Copy into scratch buffer for median (which sorts in-place)
+        median_buf.clear();
+        median_buf.extend_from_slice(&working);
+        let center = math::median_f32_mut(&mut median_buf);
+        let mad = mad_f32_with_scratch(&working, center, &mut mad_scratch);
         let sigma = mad_to_sigma(mad);
 
         if sigma < f32::EPSILON {

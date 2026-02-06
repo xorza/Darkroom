@@ -3,8 +3,6 @@
 //! Provides `stack()` and `stack_with_progress()` functions as the main API
 //! for image stacking operations.
 
-// Allow dead_code until external callers adopt the new API
-
 use std::path::Path;
 
 use crate::AstroImage;
@@ -137,11 +135,8 @@ pub fn stack_with_progress<P: AsRef<Path> + Sync>(
         Normalization::Global => Some(compute_global_norm_params(&cache)),
     };
 
-    // Dispatch based on method, rejection, and normalization
-    let result = match norm_params {
-        Some(ref params) => dispatch_normalized(&cache, &config, paths.len(), params),
-        None => dispatch_unnormalized(&cache, &config, paths.len()),
-    };
+    // Dispatch based on method and rejection (normalization applied transparently)
+    let result = dispatch_stacking(&cache, &config, paths.len(), norm_params.as_deref());
 
     // Cleanup cache if not keeping
     if !config.cache.keep_cache {
@@ -190,68 +185,26 @@ fn compute_global_norm_params(cache: &ImageCache) -> Vec<(f32, f32)> {
     params
 }
 
-/// Dispatch stacking without normalization (original path).
-fn dispatch_unnormalized(
+/// Dispatch stacking based on method and rejection.
+/// Normalization is applied transparently via `norm_params`.
+fn dispatch_stacking(
     cache: &ImageCache,
     config: &StackConfig,
     frame_count: usize,
+    norm_params: Option<&[(f32, f32)]>,
 ) -> AstroImage {
     match (config.method, &config.rejection) {
         (CombineMethod::Mean, Rejection::None) => {
-            cache.process_chunked(|values: &mut [f32]| math::mean_f32(values))
+            cache.process_chunked(norm_params, |values: &mut [f32]| math::mean_f32(values))
         }
-
-        (CombineMethod::Median, Rejection::None) => cache.process_chunked(math::median_f32_mut),
-
-        (CombineMethod::Median, rejection) => {
-            let rejection = *rejection;
-            cache.process_chunked(move |values: &mut [f32]| {
-                apply_rejection(values, &rejection);
-                math::median_f32_mut(values)
-            })
-        }
-
-        (CombineMethod::Mean, rejection) => {
-            let rejection = *rejection;
-            cache.process_chunked(move |values: &mut [f32]| {
-                let result = apply_rejection(values, &rejection);
-                if result.remaining_count > 0 {
-                    math::mean_f32(&values[..result.remaining_count])
-                } else {
-                    result.value
-                }
-            })
-        }
-
-        (CombineMethod::WeightedMean, rejection) => {
-            let weights = config.normalized_weights(frame_count);
-            let rejection = *rejection;
-            cache.process_chunked_weighted(&weights, move |values: &mut [f32], w: &[f32]| {
-                let result = apply_rejection_weighted(values, w, &rejection);
-                result.value
-            })
-        }
-    }
-}
-
-/// Dispatch stacking with per-frame normalization applied.
-fn dispatch_normalized(
-    cache: &ImageCache,
-    config: &StackConfig,
-    frame_count: usize,
-    norm_params: &[(f32, f32)],
-) -> AstroImage {
-    match (config.method, &config.rejection) {
-        (CombineMethod::Mean, Rejection::None) => cache
-            .process_chunked_normalized(norm_params, |values: &mut [f32]| math::mean_f32(values)),
 
         (CombineMethod::Median, Rejection::None) => {
-            cache.process_chunked_normalized(norm_params, math::median_f32_mut)
+            cache.process_chunked(norm_params, math::median_f32_mut)
         }
 
         (CombineMethod::Median, rejection) => {
             let rejection = *rejection;
-            cache.process_chunked_normalized(norm_params, move |values: &mut [f32]| {
+            cache.process_chunked(norm_params, move |values: &mut [f32]| {
                 apply_rejection(values, &rejection);
                 math::median_f32_mut(values)
             })
@@ -259,7 +212,7 @@ fn dispatch_normalized(
 
         (CombineMethod::Mean, rejection) => {
             let rejection = *rejection;
-            cache.process_chunked_normalized(norm_params, move |values: &mut [f32]| {
+            cache.process_chunked(norm_params, move |values: &mut [f32]| {
                 let result = apply_rejection(values, &rejection);
                 if result.remaining_count > 0 {
                     math::mean_f32(&values[..result.remaining_count])
@@ -272,7 +225,7 @@ fn dispatch_normalized(
         (CombineMethod::WeightedMean, rejection) => {
             let weights = config.normalized_weights(frame_count);
             let rejection = *rejection;
-            cache.process_chunked_weighted_normalized(
+            cache.process_chunked_weighted(
                 &weights,
                 norm_params,
                 move |values: &mut [f32], w: &[f32]| {
@@ -760,8 +713,9 @@ mod tests {
         let norm_params = compute_global_norm_params(&cache);
 
         // With normalization: all pixels should be close to base_value
-        let result = cache
-            .process_chunked_normalized(&norm_params, |values: &mut [f32]| math::mean_f32(values));
+        let result = cache.process_chunked(Some(&norm_params), |values: &mut [f32]| {
+            math::mean_f32(values)
+        });
         for &pixel in result.channel(0) {
             assert!(
                 (pixel - base_value).abs() < 1.0,
@@ -777,7 +731,8 @@ mod tests {
             AstroImage::from_pixels(dims, frame1),
         ];
         let cache_raw = cache_from_images(images_raw);
-        let result_raw = cache_raw.process_chunked(|values: &mut [f32]| math::mean_f32(values));
+        let result_raw =
+            cache_raw.process_chunked(None, |values: &mut [f32]| math::mean_f32(values));
         for &pixel in result_raw.channel(0) {
             assert!(
                 (pixel - (base_value + offset / 2.0)).abs() < 1.0,
@@ -804,8 +759,9 @@ mod tests {
         let cache = cache_from_images(images);
         let norm_params = compute_global_norm_params(&cache);
 
-        let result = cache
-            .process_chunked_normalized(&norm_params, |values: &mut [f32]| math::mean_f32(values));
+        let result = cache.process_chunked(Some(&norm_params), |values: &mut [f32]| {
+            math::mean_f32(values)
+        });
 
         // After normalization to frame 0's reference, each channel should be
         // close to the reference frame's values
@@ -834,7 +790,7 @@ mod tests {
 
     #[test]
     fn test_dispatch_normalized_vs_unnormalized() {
-        // Verify dispatch_normalized actually applies normalization
+        // Verify dispatch_stacking applies normalization when params present
         let dims = ImageDimensions::new(4, 4, 1);
         let frame0: Vec<f32> = vec![100.0; 16];
         let frame1: Vec<f32> = vec![200.0; 16];
@@ -852,8 +808,8 @@ mod tests {
             ..Default::default()
         };
 
-        let result_norm = dispatch_normalized(&cache, &config, 2, &norm_params);
-        let result_unnorm = dispatch_unnormalized(&cache, &config, 2);
+        let result_norm = dispatch_stacking(&cache, &config, 2, Some(&norm_params));
+        let result_unnorm = dispatch_stacking(&cache, &config, 2, None);
 
         // Normalized: should be ~100 (reference frame level)
         // Unnormalized: should be ~150 (average of 100 and 200)
