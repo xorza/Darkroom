@@ -2,7 +2,6 @@ mod cache;
 mod cache_config;
 mod config;
 mod error;
-mod local_normalization;
 pub mod progress;
 pub mod rejection;
 mod stack;
@@ -21,12 +20,6 @@ pub use progress::{ProgressCallback, StackingProgress, StackingStage};
 pub use rejection::{
     AsymmetricSigmaClipConfig, GesdConfig, LinearFitClipConfig, PercentileClipConfig,
     RejectionResult, SigmaClipConfig, WinsorizedClipConfig,
-};
-
-// Re-export normalization types for advanced users
-#[allow(unused_imports)]
-pub use local_normalization::{
-    LocalNormalizationConfig, LocalNormalizationMap, NormalizationMethod, TileNormalizationStats,
 };
 
 /// Type of calibration frame being stacked.

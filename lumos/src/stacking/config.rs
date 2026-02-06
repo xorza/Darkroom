@@ -139,30 +139,8 @@ pub enum Normalization {
     /// No normalization.
     #[default]
     None,
-    /// Match global median and scale.
+    /// Match global median and scale across frames.
     Global,
-    /// Tile-based local normalization (PixInsight-style).
-    Local {
-        /// Tile size in pixels (default: 128).
-        tile_size: usize,
-    },
-}
-
-impl Normalization {
-    /// Create local normalization with default tile size.
-    pub fn local() -> Self {
-        Self::Local { tile_size: 128 }
-    }
-
-    /// Create local normalization with fine tiles (64px).
-    pub fn local_fine() -> Self {
-        Self::Local { tile_size: 64 }
-    }
-
-    /// Create local normalization with coarse tiles (256px).
-    pub fn local_coarse() -> Self {
-        Self::Local { tile_size: 256 }
-    }
 }
 
 /// Unified configuration for image stacking operations.
@@ -186,7 +164,7 @@ impl Normalization {
 ///         sigma_high: 3.0,
 ///         iterations: 5,
 ///     },
-///     normalization: Normalization::Local { tile_size: 128 },
+///     normalization: Normalization::Global,
 ///     ..Default::default()
 /// };
 /// let result = stack(&paths, FrameType::Light, config)?;
@@ -349,10 +327,6 @@ impl StackConfig {
             }
         }
 
-        if let Normalization::Local { tile_size } = self.normalization {
-            assert!(tile_size > 0, "Tile size must be positive");
-        }
-
         if self.method == CombineMethod::WeightedMean && !self.weights.is_empty() {
             assert!(
                 self.weights.iter().all(|&w| w >= 0.0),
@@ -421,14 +395,14 @@ mod tests {
                 sigma_high: 3.0,
                 iterations: 5,
             },
-            normalization: Normalization::Local { tile_size: 64 },
+            normalization: Normalization::Global,
             ..Default::default()
         };
         assert!(matches!(
             config.rejection,
             Rejection::SigmaClipAsymmetric { .. }
         ));
-        assert!(matches!(config.normalization, Normalization::Local { .. }));
+        assert_eq!(config.normalization, Normalization::Global);
     }
 
     #[test]
@@ -507,21 +481,5 @@ mod tests {
         let r = Rejection::gesd();
         assert!(matches!(r, Rejection::Gesd { alpha, max_outliers: None }
             if (alpha - 0.05).abs() < f32::EPSILON));
-    }
-
-    #[test]
-    fn test_normalization_constructors() {
-        assert!(matches!(
-            Normalization::local(),
-            Normalization::Local { tile_size: 128 }
-        ));
-        assert!(matches!(
-            Normalization::local_fine(),
-            Normalization::Local { tile_size: 64 }
-        ));
-        assert!(matches!(
-            Normalization::local_coarse(),
-            Normalization::Local { tile_size: 256 }
-        ));
     }
 }

@@ -7,27 +7,24 @@ Image stacking for astrophotography with pixel rejection, frame weighting, norma
 | File | Description |
 |------|-------------|
 | `mod.rs` | Public API exports, `FrameType` enum |
-| `config.rs` | Unified `StackConfig`, `CombineMethod`, `Rejection`, `Normalization` |
-| `stack.rs` | `stack()` and `stack_with_progress()` entry points |
-| `rejection.rs` | Pixel rejection algorithms (sigma clip, winsorized, linear fit, percentile, GESD) |
-| `local_normalization.rs` | Tile-based local normalization (PixInsight-style) |
-| `cache.rs` | `ImageCache` with memory-mapped binary cache |
-| `cache_config.rs` | `CacheConfig` with adaptive chunk sizing (75% memory budget) |
+| `config.rs` | `StackConfig`, `CombineMethod`, `Rejection`, `Normalization` |
+| `stack.rs` | `stack()` / `stack_with_progress()` entry points, dispatch, normalization |
+| `rejection.rs` | Pixel rejection algorithms |
+| `cache.rs` | `ImageCache` — in-memory or disk-backed (mmap) storage |
+| `cache_config.rs` | `CacheConfig` — adaptive chunk sizing (75% memory budget) |
 | `progress.rs` | `ProgressCallback`, `StackingStage` |
-| `error.rs` | `Error` enum for stacking operations |
+| `error.rs` | `Error` enum |
 
 ## Public API
 
 ```rust
-// Entry points
 stack(paths, frame_type, config) -> Result<AstroImage, Error>
 stack_with_progress(paths, frame_type, config, progress) -> Result<AstroImage, Error>
 
-// Configuration
 StackConfig        // { method, rejection, weights, normalization, cache }
 CombineMethod      // Mean | Median | WeightedMean
 Rejection          // None | SigmaClip | SigmaClipAsymmetric | Winsorized | LinearFit | Percentile | Gesd
-Normalization      // None | Global | Local { tile_size }
+Normalization      // None | Global
 FrameType          // Dark | Flat | Bias | Light
 CacheConfig        // { cache_dir, keep_cache, available_memory }
 ```
@@ -52,14 +49,14 @@ let result = stack(&paths, FrameType::Light, StackConfig::gesd())?;
 // Weighted stacking
 let result = stack(&paths, FrameType::Light, StackConfig::weighted(vec![1.0, 0.8, 1.2]))?;
 
-// Custom configuration with struct update syntax
+// Global normalization + custom rejection
 let config = StackConfig {
     rejection: Rejection::SigmaClipAsymmetric {
         sigma_low: 4.0,
         sigma_high: 3.0,
         iterations: 5,
     },
-    normalization: Normalization::Local { tile_size: 128 },
+    normalization: Normalization::Global,
     ..Default::default()
 };
 let result = stack(&paths, FrameType::Light, config)?;
@@ -67,8 +64,8 @@ let result = stack(&paths, FrameType::Light, config)?;
 
 ## Rejection Algorithms
 
-| Algorithm | Enum Variant | Best For | Min Frames |
-|-----------|-------------|----------|------------|
+| Algorithm | Variant | Best For | Min Frames |
+|-----------|---------|----------|------------|
 | Sigma Clipping | `SigmaClip` | General use | 10+ |
 | Asymmetric Sigma | `SigmaClipAsymmetric` | Bright outliers (satellites) | 10+ |
 | Winsorized Sigma | `Winsorized` | Small stacks, data preservation | 5+ |
@@ -76,45 +73,55 @@ let result = stack(&paths, FrameType::Light, config)?;
 | Percentile Clipping | `Percentile` | Very small stacks | 3+ |
 | GESD | `Gesd` | Large stacks, rigorous detection | 50+ |
 
-### Sigma Threshold Guidelines
+### Sigma Thresholds
 
-- **2.0-2.5**: Aggressive (removes satellites, airplane trails)
+- **2.0-2.5**: Aggressive — removes satellites, airplane trails
 - **2.5-3.0**: Standard (recommended default)
-- **3.0-4.0**: Conservative (preserves more data, less false rejection)
-- Never below 2.0 (causes excessive false rejection)
+- **3.0-4.0**: Conservative — preserves more data
+- Never below 2.0 — causes excessive false rejection
 
 ### Calibration Frame Recommendations
 
-| Frame Type | Method | Rejection | Notes |
-|------------|--------|-----------|-------|
-| Bias | `StackConfig::mean()` | None | No outliers expected |
-| Dark | `StackConfig::sigma_clipped(3.0)` | SigmaClip | Remove cosmic rays |
-| Flat | `StackConfig::sigma_clipped(2.5)` | SigmaClip | Remove dust artifacts |
-| Light | `StackConfig::default()` | SigmaClip(2.5) | General purpose |
+| Frame Type | Preset | Notes |
+|------------|--------|-------|
+| Bias | `StackConfig::mean()` | No outliers expected |
+| Dark | `StackConfig::sigma_clipped(3.0)` | Remove cosmic rays |
+| Flat | `StackConfig::sigma_clipped(2.5)` | Remove dust artifacts |
+| Light | `StackConfig::default()` | General purpose |
 
-## Local Normalization
+## Global Normalization
 
-Tile-based correction for vignetting, sky gradients, and session-to-session brightness variations (PixInsight-style). Fully implemented but not yet integrated into the stacking pipeline.
+When `Normalization::Global` is set, each frame is affine-transformed before combining to match the reference frame (frame 0):
 
-### Algorithm
+```
+normalized = pixel * gain + offset
+gain   = ref_MAD / frame_MAD
+offset = ref_median - frame_median * gain
+```
 
-1. Divide image into tiles (default 128x128)
-2. Compute sigma-clipped median and MAD per tile
-3. Compare target tiles to reference tiles
-4. Compute per-tile offset and scale factors
-5. Bilinear interpolation between tile centers
-6. Apply: `corrected = (pixel - target_median) * scale + ref_median`
+Per-frame, per-channel median and MAD (robust scale) are computed from the full frame data. This corrects brightness and contrast differences between frames from different sessions, changing sky conditions, or sensor temperature drift.
+
+## Key Design Decisions
+
+- **MAD for scale estimation**: All sigma clipping (symmetric, asymmetric, winsorized) uses MAD (Median Absolute Deviation) instead of stddev. MAD is robust to the outliers being rejected — stddev is inflated by them, leading to under-rejection. Matches Siril and PixInsight behavior.
+- **Asymmetric sigma clipping**: Separate algorithm from linear fit clipping. Uses median as center with independent low/high thresholds. Default: sigma_low=4.0, sigma_high=3.0 (PixInsight convention).
+- **Weighted rejection**: Percentile clipping sorts (value, weight) pairs together. Winsorized applies winsorization first, then weighted mean. Other rejection methods reject from unweighted statistics, then apply weighted mean to survivors.
+- **No local normalization**: Tile-based PixInsight-style local normalization was evaluated and removed — niche benefit for most workflows, significant complexity.
+- **No auto frame weighting**: Evaluated and removed — marginal benefit vs. manual weights or equal weighting with good rejection.
 
 ## Architecture
 
-### Memory Management
+### Storage
 
-Images are decoded and cached to disk as binary f32 files via memory-mapped I/O. The `CacheConfig` controls adaptive chunk sizing: uses 75% of available RAM, with a minimum of 64 rows per chunk. This enables stacking large datasets (100+ frames of 50MP images) without exceeding memory limits.
+`ImageCache` auto-selects storage mode based on available memory:
+- **In-memory**: When all frames fit in 75% of RAM. Stores `AstroImage` directly.
+- **Disk-backed**: Writes per-channel binary f32 files, accessed via memory-mapped I/O. Enables stacking 100+ frames of 50MP images.
 
 ### Processing Pipeline
 
-1. **Load**: Decode images, write to disk cache (parallelized)
-2. **Process**: Read pixel columns across all frames via mmap, apply rejection + combine per-pixel
-3. **Cleanup**: Remove cache files (unless `keep_cache = true`)
+1. **Load**: Decode images, cache to disk or memory (parallelized via rayon)
+2. **Normalize** (optional): Compute per-frame median/MAD, derive affine parameters
+3. **Process**: For each pixel position across all frames — apply normalization, reject outliers, combine
+4. **Cleanup**: Remove cache files (unless `keep_cache = true`)
 
-Rejection and combination operate on pixel stacks: for each output pixel position, the module collects the value from all input frames, applies the configured rejection to remove outliers, then combines the remaining values.
+Processing is chunked by rows and parallelized per-row with rayon. Each channel is processed independently for efficient planar data access.
