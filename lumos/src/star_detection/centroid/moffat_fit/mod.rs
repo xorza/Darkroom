@@ -47,6 +47,7 @@ impl Default for MoffatFitConfig {
 
 /// Result of 2D Moffat profile fitting.
 #[derive(Debug, Clone, Copy)]
+#[allow(dead_code)] // Fields used by tests; struct is the natural fitting output
 pub struct MoffatFitResult {
     /// Position of profile center (sub-pixel).
     pub pos: Vec2,

@@ -87,10 +87,4 @@ pub use star::Star;
 
 // Pipeline data structures
 pub use background::BackgroundEstimate;
-pub use deblend::Region;
-
-// Centroid methods
-pub use centroid::{GaussianFitConfig, GaussianFitResult, fit_gaussian_2d};
-pub use centroid::{
-    MoffatFitConfig, MoffatFitResult, alpha_beta_to_fwhm, fit_moffat_2d, fwhm_beta_to_alpha,
-};
+pub(crate) use deblend::Region;

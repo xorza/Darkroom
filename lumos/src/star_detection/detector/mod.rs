@@ -126,14 +126,14 @@ impl StarDetector {
             .get_or_insert_with(|| BufferPool::new(width, height));
         pool.reset(width, height);
 
-        // Step 0: Image preparation (grayscale, CFA filter)
+        // Step 1: Image preparation (grayscale, CFA filter)
         let grayscale_image = stages::prepare::prepare(image, pool);
 
-        // Step 1: Estimate background and noise
+        // Step 2: Estimate background and noise
         let mut background =
             stages::background::estimate_background(&grayscale_image, &self.config, pool);
 
-        // Step 1b: Refine background if iterative refinement is enabled
+        // Step 2b: Refine background if iterative refinement is enabled
         if self.config.refinement.iterations() > 0 {
             stages::background::refine_background(
                 &grayscale_image,
@@ -143,11 +143,11 @@ impl StarDetector {
             );
         }
 
-        // Step 2: Determine effective FWHM (manual > auto-estimate > disabled)
+        // Step 3: Determine effective FWHM (manual > auto-estimate > disabled)
         let fwhm_result =
             stages::fwhm::estimate_fwhm(&grayscale_image, &background, &self.config, pool);
 
-        // Step 3: Detect star candidate regions (with optional matched filter)
+        // Step 4: Detect star candidate regions (with optional matched filter)
         let detect_result = stages::detect::detect(
             &grayscale_image,
             &background,
@@ -168,7 +168,7 @@ impl StarDetector {
         };
         tracing::debug!("Detected {} star candidates", detect_result.regions.len());
 
-        // Step 4: Compute precise centroids (parallel)
+        // Step 5: Compute precise centroids (parallel)
         let stars = stages::measure::measure(
             &detect_result.regions,
             &grayscale_image,
@@ -182,7 +182,7 @@ impl StarDetector {
         background.release_to_pool(pool);
         pool.release_f32(grayscale_image);
 
-        // Step 5: Apply quality filters, sort, and remove duplicates
+        // Step 6: Apply quality filters, sort, and remove duplicates
         let (stars, filter_stats) = stages::filter::filter(stars, &self.config);
         diagnostics.rejected_saturated = filter_stats.saturated;
         diagnostics.rejected_low_snr = filter_stats.low_snr;
@@ -205,7 +205,7 @@ impl StarDetector {
             );
         }
 
-        // Step 7: Compute final statistics
+        // Compute final statistics
         diagnostics.final_star_count = stars.len();
         if !stars.is_empty() {
             let mut buf: Vec<f32> = stars.iter().map(|s| s.fwhm).collect();

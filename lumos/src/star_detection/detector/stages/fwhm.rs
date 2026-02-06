@@ -6,13 +6,13 @@
 use crate::common::Buffer2;
 use crate::math::{mad_f32_with_scratch, median_f32_mut};
 
-use super::super::super::background::BackgroundEstimate;
-use super::super::super::buffer_pool::BufferPool;
-use super::super::super::centroid::measure_star;
-use super::super::super::config::Config;
-use super::super::super::deblend::Region;
-use super::super::super::star::Star;
 use super::detect::detect;
+use crate::star_detection::background::BackgroundEstimate;
+use crate::star_detection::buffer_pool::BufferPool;
+use crate::star_detection::centroid::measure_star;
+use crate::star_detection::config::Config;
+use crate::star_detection::deblend::Region;
+use crate::star_detection::star::Star;
 
 /// Result of FWHM estimation stage.
 #[derive(Debug, Clone, Copy)]

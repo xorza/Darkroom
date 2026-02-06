@@ -52,7 +52,7 @@ let config = Config {
     sigma_threshold: 4.0,           // Detection sigma above background
     tile_size: 64,                  // Grid cell size for background mesh
     sigma_clip_iterations: 5,       // Sigma-clipping iterations per tile
-    background_mask_dilation: 3,    // Object mask dilation radius
+    bg_mask_dilation: 3,            // Object mask dilation radius
     min_unmasked_fraction: 0.3,     // Min unmasked pixels per tile
     refinement: BackgroundRefinement::None, // or Iterative/AdaptiveSigma
 
@@ -86,7 +86,6 @@ let config = Config {
 
     // Optional noise model for accurate SNR
     noise_model: Some(NoiseModel::new(1.5, 5.0)), // gain=1.5 e-/ADU, read_noise=5 e-
-    defect_map: None,
 
     ..Default::default()
 };
@@ -120,7 +119,7 @@ Input AstroImage
     |
     v
 +------------------------+
-|  1. Prepare            |  -- Grayscale conversion, defect masking,
+|  1. Prepare            |  -- Grayscale conversion,
 |                        |     3x3 median filter (CFA sensors)
 +------------------------+
     |
@@ -169,7 +168,7 @@ Contains `StarDetector`, the main entry point that coordinates all pipeline stag
 - `Diagnostics` - Per-stage statistics for debugging and tuning
 
 **Submodule `detector/stages/`:**
-- `prepare.rs` - Image preparation (grayscale, defects, CFA filter)
+- `prepare.rs` - Image preparation (grayscale, CFA filter)
 - `background.rs` - Re-exports background estimation functions
 - `fwhm.rs` - FWHM auto-estimation from bright stars
 - `detect.rs` - Threshold mask, labeling, deblending, region extraction
@@ -307,21 +306,13 @@ Refines star positions to sub-pixel accuracy and computes quality metrics.
 - Roundness2 (SROUND): bilateral symmetry metric
 - Laplacian SNR: L.A.Cosmic metric per star
 
-### `cosmic_ray/` - Cosmic Ray Detection
+### Cosmic Ray Detection
 
 L.A.Cosmic-based cosmic ray identification (van Dokkum 2001, PASP 113, 1420).
 
+Implemented as `compute_laplacian_snr()` in `centroid/mod.rs`. Computes the discrete Laplacian at each star's peak position during centroiding. Stars with high Laplacian SNR (>50) are flagged as cosmic rays and rejected during the filter stage.
+
 **Core principle:** Cosmic rays have sharper edges than astronomical sources (which are smoothed by the PSF). The Laplacian responds strongly to these sharp edges.
-
-**Used in two ways:**
-1. **Per-star metric** (`compute_laplacian_snr()`): Computes Laplacian SNR at each star's position during centroiding. Stars with high values (>50) are flagged as cosmic rays. This is the primary CR rejection method in the pipeline.
-2. **Full-frame detection** (`detect_cosmic_rays()`): Standalone function for image-level CR detection and masking.
-
-**Key Functions:**
-- `compute_laplacian()` - 3x3 discrete Laplacian with SIMD acceleration
-- `compute_laplacian_snr()` - Per-star Laplacian SNR metric
-- `compute_fine_structure()` - Small-scale structure (original - median3)
-- `detect_cosmic_rays()` - Full-frame L.A.Cosmic detection
 
 ### `median_filter/` - Median Filtering
 
@@ -335,10 +326,6 @@ L.A.Cosmic-based cosmic ray identification (van Dokkum 2001, PASP 113, 1420).
 ### `buffer_pool.rs` - Buffer Pool
 
 Pools `Buffer2<f32>`, `BitBuffer2`, and `Buffer2<u32>` for reuse across multiple `detect()` calls. Avoids repeated allocation when processing image sequences.
-
-### `defect_map.rs` - Sensor Defect Masking
-
-Masks hot pixels, dead pixels, and bad columns/rows by replacing them with the local median of non-defective neighbors. Applied before detection.
 
 ## Data Structures
 
@@ -380,7 +367,7 @@ pub struct Config {
     pub sigma_threshold: f32,
     pub tile_size: usize,
     pub sigma_clip_iterations: usize,
-    pub background_mask_dilation: usize,
+    pub bg_mask_dilation: usize,
     pub min_unmasked_fraction: f32,
     pub refinement: BackgroundRefinement,
 
@@ -418,7 +405,6 @@ pub struct Config {
 
     // Optional
     pub noise_model: Option<NoiseModel>,
-    pub defect_map: Option<DefectMap>,
 }
 ```
 
@@ -543,7 +529,7 @@ Config {
 1. **Raise `sigma_threshold`** (try 6.0-8.0)
 2. **Lower `max_sharpness`** to reject more cosmic rays
 3. **Use `BackgroundRefinement::Iterative`** for crowded fields
-4. **Check for hot pixels** - use `DefectMap` or dark frame subtraction
+4. **Check for hot pixels** - use dark frame subtraction
 
 ### Poor centroid accuracy
 

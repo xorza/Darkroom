@@ -5,11 +5,11 @@
 
 use crate::common::Buffer2;
 
-use super::super::super::background::BackgroundEstimate;
-use super::super::super::centroid::measure_star;
-use super::super::super::config::Config;
-use super::super::super::deblend::Region;
-use super::super::super::star::Star;
+use crate::star_detection::background::BackgroundEstimate;
+use crate::star_detection::centroid::measure_star;
+use crate::star_detection::config::Config;
+use crate::star_detection::deblend::Region;
+use crate::star_detection::star::Star;
 
 /// Measure precise centroids and properties for detected regions.
 ///

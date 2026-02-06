@@ -24,6 +24,7 @@ pub type GaussianFitConfig = LMConfig;
 
 /// Result of 2D Gaussian fitting.
 #[derive(Debug, Clone, Copy)]
+#[allow(dead_code)] // Fields used by tests; struct is the natural fitting output
 pub struct GaussianFitResult {
     /// Position of Gaussian center (sub-pixel).
     pub pos: Vec2,

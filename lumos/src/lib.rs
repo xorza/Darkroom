@@ -57,26 +57,17 @@ pub use star_detection::{
     // Pipeline data structures
     BackgroundEstimate,
     BackgroundRefinement,
-    // Centroid methods
+    // Configuration
     CentroidMethod,
     Config as StarDetectionConfig,
     Connectivity,
     // Main API
     DetectionResult as StarDetectionResult,
     Diagnostics as StarDetectionDiagnostics,
-    // Advanced: profile fitting
-    GaussianFitConfig,
-    GaussianFitResult,
     LocalBackgroundMethod,
-    MoffatFitConfig,
-    MoffatFitResult,
     NoiseModel,
     Star,
     StarDetector,
-    alpha_beta_to_fwhm,
-    fit_gaussian_2d,
-    fit_moffat_2d,
-    fwhm_beta_to_alpha,
 };
 
 // ============================================================================

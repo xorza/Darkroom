@@ -8,17 +8,19 @@ use rayon::prelude::*;
 use crate::common::Buffer2;
 use crate::math::{Aabb, Vec2us};
 
-use super::super::super::background::BackgroundEstimate;
-use super::super::super::buffer_pool::BufferPool;
-use super::super::super::config::Config;
-use super::super::super::convolution::matched_filter;
-use super::super::super::deblend::Region;
-use super::super::super::deblend::{
+use crate::star_detection::background::BackgroundEstimate;
+use crate::star_detection::buffer_pool::BufferPool;
+use crate::star_detection::config::Config;
+use crate::star_detection::convolution::matched_filter;
+use crate::star_detection::deblend::Region;
+use crate::star_detection::deblend::{
     ComponentData, DeblendBuffers, deblend_local_maxima, deblend_multi_threshold,
 };
-use super::super::super::labeling::LabelMap;
-use super::super::super::mask_dilation::dilate_mask;
-use super::super::super::threshold_mask::{create_threshold_mask, create_threshold_mask_filtered};
+use crate::star_detection::labeling::LabelMap;
+use crate::star_detection::mask_dilation::dilate_mask;
+use crate::star_detection::threshold_mask::{
+    create_threshold_mask, create_threshold_mask_filtered,
+};
 
 /// Result of detection stage with diagnostic statistics.
 #[derive(Debug)]
