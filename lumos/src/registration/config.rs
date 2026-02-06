@@ -119,7 +119,7 @@ impl Default for Config {
             transform_type: TransformType::Auto,
 
             // Star matching
-            max_stars: 500,
+            max_stars: 200,
             min_stars: 10,
             min_matches: 8,
             ratio_tolerance: 0.01,
@@ -289,7 +289,7 @@ mod tests {
     fn test_config_default_values() {
         let config = Config::default();
         assert_eq!(config.transform_type, TransformType::Auto);
-        assert_eq!(config.max_stars, 500);
+        assert_eq!(config.max_stars, 200);
         assert_eq!(config.min_stars, 10);
         assert_eq!(config.min_matches, 8);
         assert!((config.ratio_tolerance - 0.01).abs() < 1e-10);
