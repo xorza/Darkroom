@@ -1,8 +1,7 @@
 pub(crate) mod demosaic;
 mod fits;
 pub(crate) mod hot_pixels;
-pub(crate) mod libraw;
-mod sensor;
+pub(crate) mod sensor;
 
 pub use hot_pixels::HotPixelMap;
 
@@ -159,7 +158,7 @@ impl AstroImage {
 
         match ext.as_str() {
             "fit" | "fits" => fits::load_fits(path),
-            "raf" | "cr2" | "cr3" | "nef" | "arw" | "dng" => libraw::load_raw(path),
+            "raf" | "cr2" | "cr3" | "nef" | "arw" | "dng" => crate::raw::load_raw(path),
             "tiff" | "tif" | "png" | "jpg" | "jpeg" => {
                 let image = Image::read_file(path)?;
                 Ok(image.into())

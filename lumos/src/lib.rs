@@ -28,6 +28,7 @@ pub(crate) mod common;
 pub mod drizzle;
 pub mod gradient_removal;
 pub(crate) mod math;
+pub(crate) mod raw;
 pub(crate) mod registration;
 pub(crate) mod stacking;
 pub(crate) mod star_detection;

@@ -1,6 +1,6 @@
 # lumos - Implementation Notes (AI)
 
-> **Last Updated**: 2026-01-27
+> **Last Updated**: 2026-02-06
 
 Astrophotography image processing library for loading, calibrating, and stacking astronomical images.
 
@@ -8,7 +8,8 @@ Astrophotography image processing library for loading, calibrating, and stacking
 
 | Module | Description |
 |--------|-------------|
-| `astro_image/mod.rs` | `AstroImage` for loading FITS and RAW camera files |
+| `astro_image/mod.rs` | `AstroImage` type, file loading dispatch, image operations |
+| `raw/` | RAW file loading via libraw (RAF, CR2, CR3, NEF, ARW, DNG) |
 | `stacking/mod.rs` | Image stacking algorithms (see `stacking/NOTES-AI.md`) |
 | `calibration_masters.rs` | Master dark/flat/bias frame management |
 | `math.rs` | SIMD-accelerated math utilities (ARM NEON, x86 SSE4) |
@@ -234,9 +235,14 @@ warp_multichannel_parallel(image, w, h, channels, transform, method) -> Vec<f32>
 
 Platforms: ARM NEON (aarch64), x86 SSE4, scalar fallback
 
-## RAW File Loading
+## RAW File Loading (`raw/`)
 
-Priority: rawloader (pure Rust) → libraw (C library fallback)
+| File | Description |
+|------|-------------|
+| `raw/mod.rs` | `load_raw()`, RAII guards, sensor dispatch (mono/Bayer/X-Trans/fallback) |
+| `raw/normalize.rs` | SIMD u16-to-f32 normalization (SSE4.1, SSE2, NEON, scalar) |
+| `raw/tests.rs` | Unit tests for loading, guards, normalization |
+| `raw/benches.rs` | Benchmarks, libraw quality comparison |
 
 Supported: RAF, CR2, CR3, NEF, ARW, DNG
 
