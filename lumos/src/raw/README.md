@@ -32,7 +32,7 @@ raw/
 
 | Sensor Type | Normalization | Demosaic | Output |
 |------------|---------------|----------|--------|
-| Monochrome | Inline parallel (rayon) | None | 1-channel grayscale |
+| Monochrome | `normalize_u16_to_f32_parallel()` + crop | None | 1-channel grayscale |
 | Bayer | `normalize_u16_to_f32_parallel()` (SIMD) | `demosaic_bilinear()` (SIMD+rayon) | 3-channel RGB |
 | X-Trans | `normalize_u16_to_f32_parallel()` (SIMD) | Markesteijn 1-pass (rayon) | 3-channel RGB |
 | Unknown | libraw `dcraw_process` | libraw built-in | 3-channel RGB |
@@ -44,7 +44,7 @@ raw/
 - **SSE2** (fallback): `_mm_unpacklo_epi16` with zero register
 - **NEON** (aarch64): `vmovl_u16` + `vcvtq_f32_u32`
 - 4 elements per iteration, rayon parallel chunks of 16K
-- Used by both Bayer and X-Trans paths
+- Used by Monochrome, Bayer, and X-Trans paths
 
 ### Bayer Demosaic (`bayer/`)
 - **SSE3** / **NEON**: Load 9 neighbors (center + 4 cardinal + 4 diagonal), compute 4 interpolations in SIMD, assign via shared `assign_simd_pixels` helper
@@ -53,21 +53,39 @@ raw/
 - Scalar fallback for non-SIMD architectures
 
 ### X-Trans Demosaic (`xtrans/`)
-- Precomputed `ColorInterpLookup` for neighbor pattern (avoids per-pixel pattern search)
-- Uninitialized buffer allocation for intermediate arrays (avoids kernel page zeroing)
+- Precomputed `ColorInterpLookup` (fixed-size arrays, no heap alloc) for neighbor pattern
+- Interior fast path for `interpolate_missing_color_fast` (skips bounds checks for ~99% of pixels)
+- Summed area tables (SAT) for O(1) 5x5 window queries in blend step
+- Uninitialized buffer allocation (`alloc_uninit_vec`) for all large intermediate arrays
+- Buffer reuse: `gmin` reinterpreted as `homo`, `drv` reused as blend output
 - Rayon parallelism via row-based and `(direction, row)` flattening
 - `UnsafeSendPtr` wrapper for Edition 2024 closure captures
 
+## Memory Optimization (X-Trans 6032x4028)
+
+Peak ~2.3GB for high-quality 4-direction interpolation. Buffer lifecycle:
+
+| Buffer | Size | Lifetime | Notes |
+|--------|------|----------|-------|
+| `green_dir` | 384 MB | Steps 2-3 | Freed after RGB computed |
+| `rgb_dir` | 1,152 MB | Steps 3-6 | Largest; holds 4-dir RGB |
+| `gmin`/`gmax` | 96 MB each | Steps 1-2 | `gmin` reused as `homo` |
+| `drv` | 384 MB | Steps 3-6 | Reused as blend output buffer |
+| `homo` | 96 MB | Steps 5-6 | Reinterpreted from `gmin` memory |
+| SAT tables | 96 MB | Step 6 only | 4 summed area tables, uninit alloc |
+
+All large buffers use `alloc_uninit_vec` to skip kernel page zeroing (`clear_page_erms`).
+
 ## Test Coverage
 
-**Total: 75+ tests** across all submodules.
+**Total: 89 tests** across all submodules.
 
 | Area | Tests | Notes |
 |------|-------|-------|
 | `load_raw` error paths | 3 | Invalid path, invalid data, empty file |
 | `load_raw` real data | 2 | Behind `real-data` feature flag |
 | LibrawGuard RAII | 2 | Cleanup + null safety |
-| Normalization | 5 | Small array, large array, below-black clamping, monochrome crop pattern, fallback normalization formulas |
+| Normalization | 5 | Small/large array, below-black clamping, monochrome crop, fallback formulas |
 | CFA pattern | 6 | All 4 patterns, `red_in_row`, `pattern_2x2` |
 | BayerImage validation | 5 | Zero dims, wrong length, margin overflow |
 | Bayer demosaic | 18 | All patterns, uniform, gradient, corners, edges, channel preservation, NaN, SIMD-vs-scalar, parallel-vs-scalar |
@@ -77,7 +95,12 @@ raw/
 | process_xtrans | 4 | Output size, normalization, black clamp, full range |
 | Hex lookup | 5 | Construction, offset range, sgrow, green neighbors, mod3 wrapping |
 | Markesteijn | 5 | Output size, uniform, no-NaN, all-zeros, green preservation |
-| Markesteijn steps | 5 | Green minmax, green interp, homogeneity, YPbPr |
+| Markesteijn steps | 7 | Green minmax (2), green interp, homogeneity, YPbPr (2), green clamping |
+| SAT (summed area table) | 6 | Uniform, sequential, single pixel/row/column, zeros |
+| Homogeneity | 2 | Border pixels zero, dominant direction scoring |
+| ColorInterpLookup | 2 | Coverage of all positions, pair symmetry |
+| Interpolation paths | 2 | Interior-vs-border consistency, border no-panic |
+| Blend | 2 | Uniform homo averaging, dominant direction selection |
 
 ## Benchmarks
 
@@ -88,7 +111,7 @@ Run with `LUMOS_CALIBRATION_DIR=<path> cargo test -p lumos --release <bench_name
 - `bench_markesteijn_quality_vs_libraw` - Quality comparison using linear regression per channel (removes WB/scale differences)
 
 ### Reference Numbers (X-Trans 6032x4028)
-- Our Markesteijn 1-pass: ~1273ms best (vs libraw ~2500ms)
-- Quality vs libraw 1-pass: MAE ~0.000521, correlation ~0.96
-
-
+- Our Markesteijn 1-pass: ~1238ms total / ~425ms demosaic (vs libraw ~2500ms total)
+- Quality vs libraw 1-pass: MAE ~0.0005, avg correlation ~0.91 (R=0.89, G=0.96, B=0.88)
+- Quality vs libraw 3-pass: MAE ~0.0005 (libraw 1-pass vs 3-pass baseline: MAE ~0.0003)
+- Speedup vs libraw 1-pass: 2.1x
