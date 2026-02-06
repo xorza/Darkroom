@@ -23,6 +23,10 @@ pub use rejection::{
 };
 
 /// Type of calibration frame being stacked.
+///
+/// Used for logging and error messages. Does not affect stacking algorithm
+/// behavior — stacking method, rejection, and normalization are controlled
+/// by [`StackConfig`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Display)]
 #[strum(serialize_all = "lowercase")]
 pub enum FrameType {

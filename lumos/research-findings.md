@@ -216,23 +216,21 @@ Weights don't change between pixels — this copy is unnecessary. The rejection 
 
 ## What's Strange or Unnecessary
 
-### 1. Generation Counters Everywhere
+### 1. ~~Generation Counters Everywhere~~ (REVIEWED — Correct as-is)
 
-`PixelGrid`, `NodeGrid`, `TileGrid` all use generation-counter-based reset instead of `memset`. This avoids O(n) clearing but adds wrapping arithmetic complexity and requires `u32` counters per cell.
-
-**Assessment:** Premature optimization for the grid sizes used (64×64 tiles = 4K cells). A simple `vec.fill(0)` would be simpler, equally fast, and easier to reason about.
+`PixelGrid` and `NodeGrid` in `deblend/multi_threshold/` use generation-counter-based reset. The original assessment ("premature optimization for 64×64 tiles") was incorrect — these grids are **not** the background `TileGrid`. They're sized to star candidate bounding boxes and reused across thousands of components via `DeblendBuffers`. The generation counter avoids clearing the entire (potentially large) reused buffer on every call, and `PixelGrid` has a separate visited counter bumped per BFS call. This is a well-chosen optimization for the hot path.
 
 ### 2. ~~Separate `deviation/` and `sum/` Math Modules for Trivial Operations~~ (RESOLVED)
 
 **Fixed:** The `deviation/` module was deleted. `abs_deviation_inplace` was inlined as a private function in `statistics/mod.rs` — the only place it was used. The `sum/` module is kept as-is since it has real SIMD implementations (AVX2/SSE/NEON).
 
-### 3. Approximate vs Exact Median in Sigma Clipping
+### 3. ~~Approximate vs Exact Median in Sigma Clipping~~ (RESOLVED — Documented)
 
-`sigma_clipped_median_mad()` uses `median_f32_approx()` (upper-middle for even-length arrays) instead of exact median. The comment says "sufficient for iterative sigma clipping." This is technically correct (the bias cancels over iterations), but the inconsistency between `median_f32_mut()` (exact) and the internal sigma-clipping path (approximate) could confuse maintainers.
+`sigma_clipped_median_mad()` uses `median_f32_approx()` (upper-middle for even-length) during iterations, then `median_f32_mut()` (exact) for the final result. The doc comment now explains the design: the bias is at most half the gap between the two middle values, negligible for the hundreds-to-thousands of pixels per tile. This is an intentional performance tradeoff, not an inconsistency.
 
-### 4. `FrameType` Used for Stacking Method Selection but Not Behavior
+### 4. ~~`FrameType` Used for Stacking Method Selection but Not Behavior~~ (RESOLVED — Documented)
 
-`FrameType` enum (Dark, Flat, Bias, Light) is passed to stacking but only affects normalization (flats/darks skip normalization). The rest of the stacking behavior (rejection, combining) is identical regardless of frame type. This is fine architecturally but the type carries less semantic weight than its name implies.
+`FrameType` is used for logging and error messages only. Doc comment now explicitly states it does not affect stacking behavior — that's controlled by `StackConfig`.
 
 ### 5. `apply_from_channel` API in Calibration
 

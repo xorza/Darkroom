@@ -44,10 +44,13 @@ pub fn median_f32_mut(data: &mut [f32]) -> f32 {
     }
 }
 
-/// Fast approximate median.
+/// Fast approximate median (single `select_nth_unstable` call).
 ///
-/// For even-length arrays, returns the upper-middle element
-/// instead of averaging — sufficient for iterative sigma clipping.
+/// For even-length arrays, returns the upper-middle element instead of averaging
+/// the two middle elements. This avoids a second partial sort. The bias is at most
+/// half the gap between the two middle values, which is negligible for the large
+/// arrays used in sigma clipping (hundreds to thousands of pixels per tile).
+/// The final result after all clipping iterations uses [`median_f32_mut`] (exact).
 #[inline]
 fn median_f32_approx(data: &mut [f32]) -> f32 {
     debug_assert!(!data.is_empty());
