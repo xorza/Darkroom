@@ -174,15 +174,9 @@ offset = ref_median - frame_median * gain
 
 Since the crate already computes these quality metrics during star detection, implementing auto-weighting would be straightforward.
 
-### 3. Lanczos Warping: No SIMD for Lanczos Kernel
+### ~~3. Lanczos Warping: No SIMD for Lanczos Kernel~~ (RESOLVED — Correct as-is)
 
-**Current:** SIMD only for bilinear interpolation. Lanczos3 uses scalar code.
-
-**Industry reference:** Intel IPP documents AVX Lanczos interpolation achieving 1.5x speedup over SSE. The main difficulty is the scatter/gather pattern (random memory access), which limits vectorization.
-
-**Assessment:** The code correctly identifies that bilinear SIMD is practical while Lanczos is memory-bound. However, the Lanczos *kernel evaluation* (not the memory access) could still benefit from SIMD — Intel's IPP achieves meaningful speedups.
-
-**Impact:** Lanczos warping is 24% of pipeline time. Even a 1.5x kernel speedup would save ~4% total.
+AVX2 was tested for Lanczos and provides no benefit. The bottleneck is memory-bound random 2D pixel access (36-64 gathers per output pixel), not kernel compute. This is explicitly documented in the SIMD module header. Bilinear is SIMD-optimized (AVX2, 8 pixels/cycle); Lanczos stays scalar intentionally. The real optimization path would be cache locality (tile-based warping), not SIMD.
 
 ### 4. Background Estimation: No Iterative Source Masking by Default
 
@@ -318,7 +312,7 @@ The calibration code uses `image.apply_from_channel(bias, |_c, dst, src| { ... }
 6. **Integrate drizzle into stacking pipeline** — module partially exists
 
 ### Medium Impact, Medium Effort
-7. **Add SIMD Lanczos kernel** — 4% total pipeline speedup (24% of warping × ~15% kernel speedup)
+7. ~~**Add SIMD Lanczos kernel**~~ — RESOLVED: already evaluated, memory-bound not compute-bound
 8. **Iterative background by default** — better for nebulous fields
 9. **IKSS estimators for normalization** — more robust than median+MAD
 
