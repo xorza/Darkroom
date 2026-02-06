@@ -243,6 +243,102 @@ fn test_register_two_calibrated_lights() {
     );
 }
 
+/// Load all calibrated light frames and their file paths.
+/// Returns None if `LUMOS_CALIBRATION_DIR` is not set or has fewer than 2 lights.
+fn load_all_calibrated_lights() -> Option<(Vec<AstroImage>, Vec<PathBuf>)> {
+    let cal_dir = calibration_dir()?;
+    let lights_dir = cal_dir.join("calibrated_lights");
+    if !lights_dir.exists() {
+        eprintln!("calibrated_lights directory not found, skipping");
+        return None;
+    }
+
+    let files = list_image_files(&lights_dir);
+    if files.len() < 2 {
+        eprintln!(
+            "Need at least 2 calibrated lights, found {}, skipping",
+            files.len()
+        );
+        return None;
+    }
+
+    let images: Vec<AstroImage> = files
+        .iter()
+        .map(|p| AstroImage::from_file(p).expect("Failed to load light frame"))
+        .collect();
+    Some((images, files))
+}
+
+#[quick_bench(warmup_iters = 0, iters = 1)]
+fn bench_register_and_warp_all(b: ::bench::Bencher) {
+    let Some((images, paths)) = load_all_calibrated_lights() else {
+        eprintln!("No calibration data available, skipping benchmark");
+        return;
+    };
+
+    let cal_dir = calibration_dir().unwrap();
+    let output_dir = cal_dir.join("registered_lights");
+    std::fs::create_dir_all(&output_dir).expect("Failed to create registered_lights directory");
+
+    println!("Loaded {} calibrated lights", images.len());
+
+    b.bench(|| {
+        let star_config = Config::precise_ground();
+        let mut detector = StarDetector::from_config(star_config);
+
+        // Detect stars in all frames
+        let detections: Vec<_> = images.iter().map(|img| detector.detect(img)).collect();
+
+        let reg_config = RegistrationConfig::default();
+        let ref_stars = &detections[0].stars;
+
+        println!(
+            "Reference: {:?} ({} stars)",
+            paths[0].file_name().unwrap(),
+            ref_stars.len()
+        );
+
+        // Save reference frame as-is
+        let ref_output = output_dir.join(paths[0].file_name().unwrap());
+        images[0]
+            .save(&ref_output)
+            .expect("Failed to save reference frame");
+
+        // Register and warp each subsequent frame
+        for i in 1..images.len() {
+            let name = paths[i].file_name().unwrap();
+            let target_stars = &detections[i].stars;
+
+            let result = match crate::registration::register(ref_stars, target_stars, &reg_config) {
+                Ok(r) => r,
+                Err(e) => {
+                    println!("  {:?}: FAILED ({:?}), skipping", name, e);
+                    continue;
+                }
+            };
+
+            println!(
+                "  {:?}: {} inliers, RMS {:.4} px, {:.1} ms",
+                name, result.num_inliers, result.rms_error, result.elapsed_ms,
+            );
+
+            let mut warped = images[i].clone();
+            crate::registration::warp(&images[i], &mut warped, &result.transform, &reg_config);
+
+            let output_path = output_dir.join(name);
+            warped
+                .save(&output_path)
+                .expect("Failed to save warped frame");
+        }
+
+        println!(
+            "Saved {} registered frames to {:?}",
+            images.len(),
+            output_dir
+        );
+    });
+}
+
 // ============================================================================
 // Benchmarks
 // ============================================================================
