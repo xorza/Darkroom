@@ -4,25 +4,17 @@
 //!
 //! - [`sum`]: Sum, accumulate, and scale operations
 //! - [`statistics`]: Median, MAD, and sigma-clipped statistics
-//! - [`deviation`]: Absolute deviation computation
 
 // =============================================================================
 // Submodules
 // =============================================================================
 
 mod bbox;
-pub mod deviation;
 mod dmat3;
 
 pub mod statistics;
 pub mod sum;
 mod vec2us;
-
-// Keep scalar module at top level for backwards compatibility
-pub mod scalar {
-    pub use super::deviation::scalar::*;
-    pub use super::sum::scalar::*;
-}
 
 // =============================================================================
 // Re-exports
@@ -33,7 +25,6 @@ pub use dmat3::DMat3;
 pub use vec2us::Vec2us;
 
 // Re-export commonly used functions at top level for convenience
-pub use deviation::abs_deviation_inplace;
 pub use statistics::{
     MAD_TO_SIGMA, mad_f32_with_scratch, mad_to_sigma, median_and_mad_f32_mut, median_f32_mut,
     sigma_clipped_median_mad, sigma_clipped_median_mad_arrayvec,

@@ -222,14 +222,9 @@ Weights don't change between pixels — this copy is unnecessary. The rejection 
 
 **Assessment:** Premature optimization for the grid sizes used (64×64 tiles = 4K cells). A simple `vec.fill(0)` would be simpler, equally fast, and easier to reason about.
 
-### 2. Separate `deviation/` and `sum/` Math Modules for Trivial Operations
+### 2. ~~Separate `deviation/` and `sum/` Math Modules for Trivial Operations~~ (RESOLVED)
 
-- `deviation/scalar.rs`: 4 lines (`(*v - median).abs()`)
-- `sum/scalar.rs`: 6 lines (`.iter().sum()`)
-
-These are wrapped in module hierarchies with SIMD dispatch, but the SIMD versions don't exist (deviation) or are simple enough that the compiler auto-vectorizes them (sum). The module structure adds navigation overhead for trivial operations.
-
-**Note:** The sum module does have actual SIMD implementations (AVX2/SSE/NEON) which are meaningful. The deviation module is scalar-only with a placeholder SIMD dispatch that goes nowhere.
+**Fixed:** The `deviation/` module was deleted. `abs_deviation_inplace` was inlined as a private function in `statistics/mod.rs` — the only place it was used. The `sum/` module is kept as-is since it has real SIMD implementations (AVX2/SSE/NEON).
 
 ### 3. Approximate vs Exact Median in Sigma Clipping
 

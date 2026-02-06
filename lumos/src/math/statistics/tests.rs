@@ -238,6 +238,38 @@ fn test_sigma_clipped_all_same_then_one_different() {
 }
 
 // ---------------------------------------------------------------------------
+// abs_deviation_inplace tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_abs_deviation_inplace_basic() {
+    let mut values = [1.0f32, 2.0, 3.0, 4.0, 5.0];
+    abs_deviation_inplace(&mut values, 3.0);
+    assert_eq!(values, [2.0, 1.0, 0.0, 1.0, 2.0]);
+}
+
+#[test]
+fn test_abs_deviation_inplace_negative() {
+    let mut values = [-4.0f32, -2.0, 0.0, 2.0, 4.0];
+    abs_deviation_inplace(&mut values, 0.0);
+    assert_eq!(values, [4.0, 2.0, 0.0, 2.0, 4.0]);
+}
+
+#[test]
+fn test_abs_deviation_inplace_single() {
+    let mut values = [5.0f32];
+    abs_deviation_inplace(&mut values, 3.0);
+    assert_eq!(values, [2.0]);
+}
+
+#[test]
+fn test_abs_deviation_inplace_empty() {
+    let mut values: [f32; 0] = [];
+    abs_deviation_inplace(&mut values, 0.0);
+    assert!(values.is_empty());
+}
+
+// ---------------------------------------------------------------------------
 // MAD to sigma conversion tests
 // ---------------------------------------------------------------------------
 

@@ -1,6 +1,14 @@
 //! Statistical functions: median, MAD, sigma-clipped statistics.
 
-use super::deviation::abs_deviation_inplace;
+/// Compute absolute deviations from median in-place.
+///
+/// Replaces each value with |value - median|.
+#[inline]
+fn abs_deviation_inplace(values: &mut [f32], median: f32) {
+    for v in values.iter_mut() {
+        *v = (*v - median).abs();
+    }
+}
 
 /// MAD (Median Absolute Deviation) to standard deviation conversion factor.
 ///
