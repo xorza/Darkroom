@@ -11,10 +11,8 @@ raw/
 └── demosaic/
     ├── mod.rs           # Re-exports bayer and xtrans
     ├── bayer/
-    │   ├── mod.rs       # Dispatcher: parallel/SIMD/scalar paths
+    │   ├── mod.rs       # Dispatcher + SIMD row functions (SSE3/NEON)
     │   ├── scalar.rs    # Scalar bilinear interpolation functions
-    │   ├── simd_sse3.rs # SSE3 full-image demosaic (non-parallel path)
-    │   ├── simd_neon.rs # NEON full-image demosaic (non-parallel path)
     │   └── tests.rs     # 25 tests covering all CFA patterns and code paths
     └── xtrans/
         ├── mod.rs              # XTransPattern, XTransImage, process_xtrans()
@@ -36,7 +34,7 @@ raw/
 |------------|---------------|----------|--------|
 | Monochrome | Inline parallel (rayon) | None | 1-channel grayscale |
 | Bayer | `normalize_u16_to_f32_parallel()` (SIMD) | `demosaic_bilinear()` (SIMD+rayon) | 3-channel RGB |
-| X-Trans | Scalar single-threaded | Markesteijn 1-pass (rayon) | 3-channel RGB |
+| X-Trans | `normalize_u16_to_f32_parallel()` (SIMD) | Markesteijn 1-pass (rayon) | 3-channel RGB |
 | Unknown | libraw `dcraw_process` | libraw built-in | 3-channel RGB |
 
 ## SIMD Strategy
@@ -46,15 +44,17 @@ raw/
 - **SSE2** (fallback): `_mm_unpacklo_epi16` with zero register
 - **NEON** (aarch64): `vmovl_u16` + `vcvtq_f32_u32`
 - 4 elements per iteration, rayon parallel chunks of 16K
+- Used by both Bayer and X-Trans paths
 
 ### Bayer Demosaic (`bayer/`)
-- **SSE3** / **NEON**: Load 9 neighbors (center + 4 cardinal + 4 diagonal), compute 4 interpolations in SIMD, scatter to RGB per-pixel
-- **Parallel path** (images >= 128x128): Row-based rayon with per-row SIMD
-- **Non-parallel path** (small images): Single-threaded full-image SIMD
-- Scalar fallback for border pixels and non-SIMD architectures
+- **SSE3** / **NEON**: Load 9 neighbors (center + 4 cardinal + 4 diagonal), compute 4 interpolations in SIMD, assign via shared `assign_simd_pixels` helper
+- Row-based rayon parallelism with per-row SIMD
+- Shared `demosaic_pixel_scalar` helper for border/tail pixels and scalar fallback
+- Scalar fallback for non-SIMD architectures
 
 ### X-Trans Demosaic (`xtrans/`)
-- No SIMD in normalization or demosaic kernel
+- Precomputed `ColorInterpLookup` for neighbor pattern (avoids per-pixel pattern search)
+- Uninitialized buffer allocation for intermediate arrays (avoids kernel page zeroing)
 - Rayon parallelism via row-based and `(direction, row)` flattening
 - `UnsafeSendPtr` wrapper for Edition 2024 closure captures
 
@@ -83,88 +83,28 @@ raw/
 
 Run with `LUMOS_CALIBRATION_DIR=<path> cargo test -p lumos --release <bench_name> -- --ignored --nocapture`:
 
-- `bench_load_raw` - End-to-end loading time (file read + unpack + normalize + demosaic)
+- `raw_load` - End-to-end loading time (file read + unpack + normalize + demosaic)
 - `bench_load_raw_libraw_demosaic` - libraw's built-in demosaic at different quality levels
 - `bench_markesteijn_quality_vs_libraw` - Quality comparison using linear regression per channel (removes WB/scale differences)
 
 ### Reference Numbers (X-Trans 6032x4028)
-- Our Markesteijn 1-pass: ~480ms (vs libraw 1750ms single-threaded)
-- Quality vs libraw 1-pass: MAE < 0.001, correlation ~0.96
+- Our Markesteijn 1-pass: ~1273ms best (vs libraw ~2500ms)
+- Quality vs libraw 1-pass: MAE ~0.000521, correlation ~0.96
 
-## Current Issues
+## Remaining Issues
 
-### 1. X-Trans normalization is scalar and single-threaded
-
-**File**: `demosaic/xtrans/mod.rs:62-65`
-
-X-Trans uses a scalar `.iter().map()` for u16-to-f32 normalization while Bayer uses `normalize_u16_to_f32_parallel()` (rayon + SIMD). For a 24MP X-Trans sensor, this is a missed optimization. Also uses `/range` instead of `*inv_range` (extra division per pixel).
-
-**Fix**: Call `normalize_u16_to_f32_parallel()` from `normalize.rs`, same as Bayer path.
-
-### 2. Bayer SIMD code duplication (4 copies)
-
-The Bayer SIMD inner loop exists in 4 places:
-- `bayer/mod.rs` lines 360-460 - parallel SSE3 row function
-- `bayer/mod.rs` lines 485-580 - parallel NEON row function
-- `bayer/simd_sse3.rs` - standalone SSE3 (non-parallel)
-- `bayer/simd_neon.rs` - standalone NEON (non-parallel)
-
-All four have identical logic: load 9 neighbors, compute h/v/cross/diag, extract to scalar, match on color pattern. The standalone files are only used for images < 128x128.
-
-**Fix**: Either (a) extract the per-row SIMD into a shared function called by both paths, or (b) always use the parallel path since rayon handles small workloads with minimal overhead.
-
-### 3. `std::mem::transmute` in standalone SIMD files
-
-`simd_sse3.rs` and `simd_neon.rs` use `std::mem::transmute` to extract SIMD lanes:
-```rust
-let center_arr: [f32; 4] = std::mem::transmute(center);
-```
-The parallel row functions in `mod.rs` use the safer `_mm_storeu_ps` / `vst1q_f32`.
-
-**Fix**: Replace `transmute` with `_mm_storeu_ps` / `vst1q_f32` for consistency and safety.
-
-### 4. Missing `checked_mul` in `process_bayer_fast`
+### 1. Missing `checked_mul` in `process_bayer_fast`
 
 **File**: `mod.rs:359`
 
 `process_monochrome` and X-Trans use `checked_mul().expect(...)` for pixel count, but `process_bayer_fast` uses bare `raw_width * raw_height`. Inconsistent defensive coding.
 
-**Fix**: Add `checked_mul` for consistency.
-
-### 5. Monochrome normalization uses `/range` instead of `*inv_range`
+### 2. Monochrome normalization uses `/range` instead of `*inv_range`
 
 **File**: `mod.rs:325`
 
 `process_monochrome` computes `((val as f32) - black).max(0.0) / range` per pixel. The Bayer path pre-computes `inv_range = 1.0 / range` and multiplies. Division is ~5x slower than multiplication.
 
-**Fix**: Pre-compute `inv_range` and multiply, or better yet, call `normalize_u16_to_f32_parallel()` for the raw data and then extract the active region.
+### 3. No unit tests for `process_monochrome` or `process_unknown_libraw_fallback`
 
-## Proposed Improvements
-
-### Priority 1: Quick Wins (< 1 hour each)
-
-1. **Use `normalize_u16_to_f32_parallel()` for X-Trans** - Reuse existing SIMD normalization. Estimated improvement: significant for file loading phase on X-Trans bodies (Fujifilm X-T5, X-H2, etc).
-
-2. **Add `checked_mul` in `process_bayer_fast`** - One-line consistency fix.
-
-3. **Replace `transmute` with store intrinsics** in `simd_sse3.rs` and `simd_neon.rs`.
-
-4. **Use `*inv_range` in monochrome path** - Trivial perf improvement.
-
-### Priority 2: Structural Cleanup (2-4 hours)
-
-5. **Eliminate standalone SIMD files** (`simd_sse3.rs`, `simd_neon.rs`) - The non-parallel path for images < 128x128 can simply use the parallel path (rayon will run single-threaded for tiny workloads). Or extract per-row SIMD into shared functions. This removes ~400 lines of duplicated code and the associated maintenance burden.
-
-### Priority 3: Performance Optimization (1-2 days)
-
-6. **Monochrome: use `normalize_u16_to_f32_parallel` then crop** - Instead of interleaving normalization with crop, normalize the full raw buffer with SIMD, then extract the active region. Simpler code, better vectorization.
-
-7. **X-Trans Markesteijn: SIMD for step 3+4 (RGB + derivatives)** - The R/B interpolation and YPbPr derivative computation are the most expensive steps. SIMD could accelerate the inner loops.
-
-### Priority 4: Test Coverage Gaps
-
-8. **Add test for `process_monochrome`** - Currently no unit test. Create a synthetic monochrome raw buffer and verify normalization + crop.
-
-9. **Add test for `process_unknown_libraw_fallback`** - At minimum, test the 16-bit and 8-bit normalization branches.
-
-10. **Add Bayer test combining non-trivial margins with non-RGGB patterns** - Current tests exercise margins and all CFA patterns separately, but not together.
+These code paths have no synthetic unit tests. Only tested indirectly via real raw files (behind feature flag).

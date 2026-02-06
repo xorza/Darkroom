@@ -2,61 +2,6 @@
 
 use super::BayerImage;
 
-/// Scalar implementation of bilinear demosaicing.
-pub(crate) fn demosaic_bilinear_scalar(bayer: &BayerImage) -> Vec<f32> {
-    let mut rgb = vec![0.0f32; bayer.width * bayer.height * 3];
-
-    // Pre-compute pattern lookup for this CFA
-    let pattern = bayer.cfa.pattern_2x2();
-
-    for y in 0..bayer.height {
-        // Map to raw coordinates
-        let raw_y = y + bayer.top_margin;
-        let red_in_row = bayer.cfa.red_in_row(raw_y);
-        let row_pattern_idx = (raw_y & 1) << 1;
-
-        for x in 0..bayer.width {
-            let raw_x = x + bayer.left_margin;
-
-            // Use pre-computed pattern instead of function call
-            let color = pattern[row_pattern_idx | (raw_x & 1)];
-            let rgb_idx = (y * bayer.width + x) * 3;
-
-            // Get the value at this pixel in raw coordinates
-            let val = bayer.data[raw_y * bayer.raw_width + raw_x];
-
-            match color {
-                0 => {
-                    // Red pixel - interpolate G and B
-                    rgb[rgb_idx] = val;
-                    rgb[rgb_idx + 1] = interpolate_cross(bayer, raw_x, raw_y);
-                    rgb[rgb_idx + 2] = interpolate_diagonal(bayer, raw_x, raw_y);
-                }
-                1 => {
-                    // Green pixel - interpolate R and B
-                    if red_in_row {
-                        rgb[rgb_idx] = interpolate_horizontal(bayer, raw_x, raw_y);
-                        rgb[rgb_idx + 2] = interpolate_vertical(bayer, raw_x, raw_y);
-                    } else {
-                        rgb[rgb_idx] = interpolate_vertical(bayer, raw_x, raw_y);
-                        rgb[rgb_idx + 2] = interpolate_horizontal(bayer, raw_x, raw_y);
-                    }
-                    rgb[rgb_idx + 1] = val;
-                }
-                2 => {
-                    // Blue pixel - interpolate R and G
-                    rgb[rgb_idx] = interpolate_diagonal(bayer, raw_x, raw_y);
-                    rgb[rgb_idx + 1] = interpolate_cross(bayer, raw_x, raw_y);
-                    rgb[rgb_idx + 2] = val;
-                }
-                _ => unreachable!(),
-            }
-        }
-    }
-
-    rgb
-}
-
 /// Interpolate from horizontal neighbors.
 #[inline(always)]
 pub(crate) fn interpolate_horizontal(bayer: &BayerImage, x: usize, y: usize) -> f32 {

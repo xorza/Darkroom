@@ -49,15 +49,15 @@ See `stacking/NOTES-AI.md` for detailed documentation.
 | `stacking/gradient_removal.rs` | Post-stack gradient removal (polynomial/RBF) |
 | `stacking/gpu/` | GPU-accelerated sigma clipping and batch pipeline |
 
-## Demosaic Module (astro_image/demosaic/)
+## Demosaic Module (raw/demosaic/)
 
 Bayer and X-Trans demosaicing with SIMD acceleration.
 
 | Module | Description |
 |--------|-------------|
-| `bayer/scalar.rs` | Scalar bilinear demosaicing |
-| `bayer/simd_sse3.rs` | x86_64 SSE3 SIMD |
-| `bayer/simd_neon.rs` | ARM aarch64 NEON SIMD |
+| `bayer/mod.rs` | Dispatcher + SSE3/NEON SIMD row functions, shared helpers |
+| `bayer/scalar.rs` | Scalar bilinear interpolation functions |
+| `bayer/tests.rs` | 25 tests covering all CFA patterns and SIMD-vs-scalar consistency |
 | `xtrans/mod.rs` | X-Trans entry point, `XTransPattern`, `XTransImage` |
 | `xtrans/markesteijn.rs` | Markesteijn 1-pass orchestrator, buffer management |
 | `xtrans/markesteijn_steps.rs` | Algorithm steps: green interp, R/B, homogeneity, blend |
@@ -65,21 +65,33 @@ Bayer and X-Trans demosaicing with SIMD acceleration.
 
 CFA Patterns: RGGB, BGGR, GRBG, GBRG
 
+### Bayer Demosaic Architecture
+
+- Single consolidated entry point `demosaic_bilinear()` with runtime SIMD detection
+- Row-based rayon parallelism with per-row SIMD (SSE3/NEON)
+- Shared helpers: `demosaic_pixel_scalar()` for border/tail, `assign_simd_pixels()` for SIMD lane extraction
+- Scalar fallback for non-SIMD architectures or small images
+
 ### X-Trans Markesteijn 1-Pass Algorithm
 
 Custom implementation of the Markesteijn demosaic for Fujifilm X-Trans 6x6 CFA sensors:
 
 1. **Green min/max** — Bound green interpolation using hexagonal neighbors
 2. **Green interpolation (4 directions)** — Weighted hexagonal with clamping
-3. **R/B interpolation** — Green-guided color difference along lowest-gradient direction
+3. **R/B interpolation** — Green-guided color difference via precomputed `ColorInterpLookup`
 4. **YPbPr derivatives** — Spatial Laplacian in perceptual color space
 5. **Homogeneity maps** — Count consistent pixels per direction in 3x3 window
 6. **Final blend** — Sum homogeneity in 5x5 window, average best directions
 
+**Optimizations**:
+- Precomputed `ColorInterpLookup` avoids per-pixel pattern search in R/B interpolation
+- Uninitialized buffer allocation via `alloc_uninit_vec` avoids kernel page zeroing
+- SIMD normalization via `normalize_u16_to_f32_parallel`
+
 **Performance** (6032x4028 X-Trans, AMD CPU):
-- Our Markesteijn: ~480ms demosaic, ~1.3s total load
-- libraw Markesteijn 1-pass: ~1750ms demosaic, ~2.6s total load (single-threaded)
-- Quality: MAE < 0.001 vs libraw reference (after linear regression normalization)
+- Our Markesteijn: ~450ms demosaic, ~1.27s total load
+- libraw: ~2.5s total load
+- Quality: MAE ~0.000521 vs libraw reference (after linear regression normalization)
 
 **Parallelization**: Row-parallel via rayon `par_chunks_mut` for all steps. Steps 3+4 flatten (direction x row) pairs for maximum core utilization.
 

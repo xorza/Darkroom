@@ -2,6 +2,51 @@
 
 use super::{BayerImage, CfaPattern, demosaic_bilinear, scalar};
 
+/// Scalar-only reference implementation for verifying SIMD correctness.
+fn demosaic_bilinear_scalar(bayer: &BayerImage) -> Vec<f32> {
+    let mut rgb = vec![0.0f32; bayer.width * bayer.height * 3];
+    let pattern = bayer.cfa.pattern_2x2();
+
+    for y in 0..bayer.height {
+        let raw_y = y + bayer.top_margin;
+        let red_in_row = bayer.cfa.red_in_row(raw_y);
+        let row_pattern_idx = (raw_y & 1) << 1;
+
+        for x in 0..bayer.width {
+            let raw_x = x + bayer.left_margin;
+            let color = pattern[row_pattern_idx | (raw_x & 1)];
+            let rgb_idx = (y * bayer.width + x) * 3;
+            let val = bayer.data[raw_y * bayer.raw_width + raw_x];
+
+            match color {
+                0 => {
+                    rgb[rgb_idx] = val;
+                    rgb[rgb_idx + 1] = scalar::interpolate_cross(bayer, raw_x, raw_y);
+                    rgb[rgb_idx + 2] = scalar::interpolate_diagonal(bayer, raw_x, raw_y);
+                }
+                1 => {
+                    if red_in_row {
+                        rgb[rgb_idx] = scalar::interpolate_horizontal(bayer, raw_x, raw_y);
+                        rgb[rgb_idx + 2] = scalar::interpolate_vertical(bayer, raw_x, raw_y);
+                    } else {
+                        rgb[rgb_idx] = scalar::interpolate_vertical(bayer, raw_x, raw_y);
+                        rgb[rgb_idx + 2] = scalar::interpolate_horizontal(bayer, raw_x, raw_y);
+                    }
+                    rgb[rgb_idx + 1] = val;
+                }
+                2 => {
+                    rgb[rgb_idx] = scalar::interpolate_diagonal(bayer, raw_x, raw_y);
+                    rgb[rgb_idx + 1] = scalar::interpolate_cross(bayer, raw_x, raw_y);
+                    rgb[rgb_idx + 2] = val;
+                }
+                _ => unreachable!(),
+            }
+        }
+    }
+
+    rgb
+}
+
 // Test CFA patterns
 #[test]
 fn test_cfa_rggb_pattern() {
@@ -245,7 +290,7 @@ fn test_demosaic_simd_vs_scalar_consistency() {
     let bayer = BayerImage::with_margins(&data, 10, 10, 10, 10, 0, 0, CfaPattern::Rggb);
 
     let rgb_main = demosaic_bilinear(&bayer);
-    let rgb_scalar = scalar::demosaic_bilinear_scalar(&bayer);
+    let rgb_scalar = demosaic_bilinear_scalar(&bayer);
 
     assert_eq!(rgb_main.len(), rgb_scalar.len());
     for (i, (&a, &b)) in rgb_main.iter().zip(rgb_scalar.iter()).enumerate() {
@@ -298,7 +343,7 @@ fn test_demosaic_all_cfa_large() {
         let bayer = BayerImage::with_margins(&data, size, size, size, size, 0, 0, cfa);
 
         let rgb_main = demosaic_bilinear(&bayer);
-        let rgb_scalar = scalar::demosaic_bilinear_scalar(&bayer);
+        let rgb_scalar = demosaic_bilinear_scalar(&bayer);
 
         for (i, (&a, &b)) in rgb_main.iter().zip(rgb_scalar.iter()).enumerate() {
             assert!(
@@ -330,7 +375,7 @@ fn test_demosaic_parallel_vs_scalar() {
         let bayer = BayerImage::with_margins(&data, size, size, size, size, 0, 0, cfa);
 
         let rgb_parallel = demosaic_bilinear(&bayer);
-        let rgb_scalar = scalar::demosaic_bilinear_scalar(&bayer);
+        let rgb_scalar = demosaic_bilinear_scalar(&bayer);
 
         assert_eq!(rgb_parallel.len(), rgb_scalar.len());
         for (i, (&a, &b)) in rgb_parallel.iter().zip(rgb_scalar.iter()).enumerate() {

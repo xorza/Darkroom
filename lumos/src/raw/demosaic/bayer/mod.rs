@@ -11,19 +11,10 @@
 
 pub(crate) mod scalar;
 
-#[cfg(target_arch = "x86_64")]
-pub(crate) mod simd_sse3;
-
-#[cfg(target_arch = "aarch64")]
-pub(crate) mod simd_neon;
-
 #[cfg(test)]
 mod tests;
 
 use rayon::prelude::*;
-
-/// Minimum image size to use parallel processing (avoids overhead for small images).
-const MIN_PARALLEL_SIZE: usize = 128;
 
 /// Bayer CFA (Color Filter Array) pattern.
 /// Represents the 2x2 pattern of color filters on the sensor.
@@ -174,55 +165,24 @@ impl<'a> BayerImage<'a> {
     }
 }
 
-/// Simple bilinear demosaicing of Bayer CFA data to RGB.
+/// Bilinear demosaicing of Bayer CFA data to RGB.
 ///
 /// Takes a Bayer pattern image and produces an RGB image using bilinear interpolation.
 /// The output has 3 channels (RGB) interleaved: [R0, G0, B0, R1, G1, B1, ...].
 ///
 /// Uses SIMD acceleration on x86_64 (SSE3) and aarch64 (NEON) when available,
 /// with automatic fallback to scalar implementation.
-///
-/// # Optimizations
-/// - Uses rayon for parallel row/tile processing on large images
-/// - Tile-based processing for better cache locality
-/// - Vectorized CFA pattern lookup
-#[cfg(target_arch = "x86_64")]
 pub fn demosaic_bilinear(bayer: &BayerImage) -> Vec<f32> {
-    let use_parallel = bayer.width >= MIN_PARALLEL_SIZE && bayer.height >= MIN_PARALLEL_SIZE;
+    #[cfg(target_arch = "x86_64")]
     let use_simd = common::cpu_features::has_sse3() && bayer.width >= 8 && bayer.height >= 4;
 
-    if use_parallel {
-        demosaic_parallel(bayer, use_simd)
-    } else if use_simd {
-        unsafe { simd_sse3::demosaic_bilinear_sse3(bayer) }
-    } else {
-        scalar::demosaic_bilinear_scalar(bayer)
-    }
-}
-
-#[cfg(target_arch = "aarch64")]
-pub fn demosaic_bilinear(bayer: &BayerImage) -> Vec<f32> {
-    let use_parallel = bayer.width >= MIN_PARALLEL_SIZE && bayer.height >= MIN_PARALLEL_SIZE;
+    #[cfg(target_arch = "aarch64")]
     let use_simd = bayer.width >= 8 && bayer.height >= 4;
 
-    if use_parallel {
-        demosaic_parallel(bayer, use_simd)
-    } else if use_simd {
-        unsafe { simd_neon::demosaic_bilinear_neon(bayer) }
-    } else {
-        scalar::demosaic_bilinear_scalar(bayer)
-    }
-}
+    #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+    let use_simd = false;
 
-#[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
-pub fn demosaic_bilinear(bayer: &BayerImage) -> Vec<f32> {
-    let use_parallel = bayer.width >= MIN_PARALLEL_SIZE && bayer.height >= MIN_PARALLEL_SIZE;
-
-    if use_parallel {
-        demosaic_parallel(bayer, false)
-    } else {
-        scalar::demosaic_bilinear_scalar(bayer)
-    }
+    demosaic_parallel(bayer, use_simd)
 }
 
 /// Parallel row-based demosaicing.
@@ -254,6 +214,88 @@ fn demosaic_parallel(bayer: &BayerImage, use_simd: bool) -> Vec<f32> {
     rgb
 }
 
+/// Assign 4 pixels from SIMD interpolation arrays into the RGB output buffer.
+/// Used by both SSE3 and NEON paths after computing interpolations in parallel.
+#[allow(clippy::too_many_arguments)]
+#[inline(always)]
+fn assign_simd_pixels(
+    row_rgb: &mut [f32],
+    x: usize,
+    raw_x: usize,
+    pattern: &[usize; 4],
+    row_pattern_idx: usize,
+    red_in_row: bool,
+    center: &[f32; 4],
+    h: &[f32; 4],
+    v: &[f32; 4],
+    cross: &[f32; 4],
+    diag: &[f32; 4],
+) {
+    for i in 0..4 {
+        let rgb_idx = (x + i) * 3;
+        let color = pattern[row_pattern_idx | ((raw_x + i) & 1)];
+        match color {
+            0 => {
+                row_rgb[rgb_idx] = center[i];
+                row_rgb[rgb_idx + 1] = cross[i];
+                row_rgb[rgb_idx + 2] = diag[i];
+            }
+            1 => {
+                if red_in_row {
+                    row_rgb[rgb_idx] = h[i];
+                    row_rgb[rgb_idx + 2] = v[i];
+                } else {
+                    row_rgb[rgb_idx] = v[i];
+                    row_rgb[rgb_idx + 2] = h[i];
+                }
+                row_rgb[rgb_idx + 1] = center[i];
+            }
+            2 => {
+                row_rgb[rgb_idx] = diag[i];
+                row_rgb[rgb_idx + 1] = cross[i];
+                row_rgb[rgb_idx + 2] = center[i];
+            }
+            _ => unreachable!(),
+        }
+    }
+}
+
+/// Demosaic a single pixel at (raw_x, raw_y) using scalar interpolation.
+#[inline(always)]
+fn demosaic_pixel_scalar(
+    bayer: &BayerImage,
+    out: &mut [f32],
+    color: usize,
+    red_in_row: bool,
+    raw_x: usize,
+    raw_y: usize,
+) {
+    let val = bayer.data[raw_y * bayer.raw_width + raw_x];
+    match color {
+        0 => {
+            out[0] = val;
+            out[1] = scalar::interpolate_cross(bayer, raw_x, raw_y);
+            out[2] = scalar::interpolate_diagonal(bayer, raw_x, raw_y);
+        }
+        1 => {
+            if red_in_row {
+                out[0] = scalar::interpolate_horizontal(bayer, raw_x, raw_y);
+                out[2] = scalar::interpolate_vertical(bayer, raw_x, raw_y);
+            } else {
+                out[0] = scalar::interpolate_vertical(bayer, raw_x, raw_y);
+                out[2] = scalar::interpolate_horizontal(bayer, raw_x, raw_y);
+            }
+            out[1] = val;
+        }
+        2 => {
+            out[0] = scalar::interpolate_diagonal(bayer, raw_x, raw_y);
+            out[1] = scalar::interpolate_cross(bayer, raw_x, raw_y);
+            out[2] = val;
+        }
+        _ => unreachable!(),
+    }
+}
+
 /// Process a single row with scalar code.
 #[inline]
 fn process_row_scalar(bayer: &BayerImage, row_rgb: &mut [f32], y: usize) {
@@ -264,38 +306,15 @@ fn process_row_scalar(bayer: &BayerImage, row_rgb: &mut [f32], y: usize) {
 
     for x in 0..bayer.width {
         let raw_x = x + bayer.left_margin;
-        let rgb_idx = x * 3;
-
-        // Compute color from pre-computed pattern
         let color = pattern[row_pattern_idx | (raw_x & 1)];
-        let val = bayer.data[raw_y * bayer.raw_width + raw_x];
-
-        match color {
-            0 => {
-                // Red pixel
-                row_rgb[rgb_idx] = val;
-                row_rgb[rgb_idx + 1] = scalar::interpolate_cross(bayer, raw_x, raw_y);
-                row_rgb[rgb_idx + 2] = scalar::interpolate_diagonal(bayer, raw_x, raw_y);
-            }
-            1 => {
-                // Green pixel
-                if red_in_row {
-                    row_rgb[rgb_idx] = scalar::interpolate_horizontal(bayer, raw_x, raw_y);
-                    row_rgb[rgb_idx + 2] = scalar::interpolate_vertical(bayer, raw_x, raw_y);
-                } else {
-                    row_rgb[rgb_idx] = scalar::interpolate_vertical(bayer, raw_x, raw_y);
-                    row_rgb[rgb_idx + 2] = scalar::interpolate_horizontal(bayer, raw_x, raw_y);
-                }
-                row_rgb[rgb_idx + 1] = val;
-            }
-            2 => {
-                // Blue pixel
-                row_rgb[rgb_idx] = scalar::interpolate_diagonal(bayer, raw_x, raw_y);
-                row_rgb[rgb_idx + 1] = scalar::interpolate_cross(bayer, raw_x, raw_y);
-                row_rgb[rgb_idx + 2] = val;
-            }
-            _ => unreachable!(),
-        }
+        demosaic_pixel_scalar(
+            bayer,
+            &mut row_rgb[x * 3..],
+            color,
+            red_in_row,
+            raw_x,
+            raw_y,
+        );
     }
 }
 
@@ -328,37 +347,19 @@ unsafe fn process_row_simd_sse3(bayer: &BayerImage, row_rgb: &mut [f32], y: usiz
         let row_current = raw_y * bayer.raw_width;
         let row_below = (raw_y + 1) * bayer.raw_width;
 
-        // Process left border pixel(s) with scalar
+        // Process left border pixel with scalar
         let left_border = 1.min(bayer.width);
         for x in 0..left_border {
             let raw_x = x + bayer.left_margin;
-            let rgb_idx = x * 3;
             let color = pattern[row_pattern_idx | (raw_x & 1)];
-            let val = bayer.data[raw_y * bayer.raw_width + raw_x];
-
-            match color {
-                0 => {
-                    row_rgb[rgb_idx] = val;
-                    row_rgb[rgb_idx + 1] = scalar::interpolate_cross(bayer, raw_x, raw_y);
-                    row_rgb[rgb_idx + 2] = scalar::interpolate_diagonal(bayer, raw_x, raw_y);
-                }
-                1 => {
-                    if red_in_row {
-                        row_rgb[rgb_idx] = scalar::interpolate_horizontal(bayer, raw_x, raw_y);
-                        row_rgb[rgb_idx + 2] = scalar::interpolate_vertical(bayer, raw_x, raw_y);
-                    } else {
-                        row_rgb[rgb_idx] = scalar::interpolate_vertical(bayer, raw_x, raw_y);
-                        row_rgb[rgb_idx + 2] = scalar::interpolate_horizontal(bayer, raw_x, raw_y);
-                    }
-                    row_rgb[rgb_idx + 1] = val;
-                }
-                2 => {
-                    row_rgb[rgb_idx] = scalar::interpolate_diagonal(bayer, raw_x, raw_y);
-                    row_rgb[rgb_idx + 1] = scalar::interpolate_cross(bayer, raw_x, raw_y);
-                    row_rgb[rgb_idx + 2] = val;
-                }
-                _ => unreachable!(),
-            }
+            demosaic_pixel_scalar(
+                bayer,
+                &mut row_rgb[x * 3..],
+                color,
+                red_in_row,
+                raw_x,
+                raw_y,
+            );
         }
 
         // Process interior with SIMD (4 pixels at a time)
@@ -412,38 +413,20 @@ unsafe fn process_row_simd_sse3(bayer: &BayerImage, row_rgb: &mut [f32], y: usiz
             _mm_storeu_ps(cross_arr.as_mut_ptr(), cross_interp);
             _mm_storeu_ps(diag_arr.as_mut_ptr(), diag_interp);
 
-            // Assign based on pattern (unrolled for efficiency)
-            // The pattern repeats every 2 pixels, so we handle 2 pairs
-            for i in 0..4 {
-                let px = x + i;
-                let raw_px = raw_x + i;
-                let rgb_idx = px * 3;
-                let color = pattern[row_pattern_idx | (raw_px & 1)];
-
-                match color {
-                    0 => {
-                        row_rgb[rgb_idx] = center_arr[i];
-                        row_rgb[rgb_idx + 1] = cross_arr[i];
-                        row_rgb[rgb_idx + 2] = diag_arr[i];
-                    }
-                    1 => {
-                        if red_in_row {
-                            row_rgb[rgb_idx] = h_arr[i];
-                            row_rgb[rgb_idx + 2] = v_arr[i];
-                        } else {
-                            row_rgb[rgb_idx] = v_arr[i];
-                            row_rgb[rgb_idx + 2] = h_arr[i];
-                        }
-                        row_rgb[rgb_idx + 1] = center_arr[i];
-                    }
-                    2 => {
-                        row_rgb[rgb_idx] = diag_arr[i];
-                        row_rgb[rgb_idx + 1] = cross_arr[i];
-                        row_rgb[rgb_idx + 2] = center_arr[i];
-                    }
-                    _ => unreachable!(),
-                }
-            }
+            // Assign from SIMD arrays based on CFA pattern
+            assign_simd_pixels(
+                row_rgb,
+                x,
+                raw_x,
+                &pattern,
+                row_pattern_idx,
+                red_in_row,
+                &center_arr,
+                &h_arr,
+                &v_arr,
+                &cross_arr,
+                &diag_arr,
+            );
 
             x += 4;
         }
@@ -451,33 +434,15 @@ unsafe fn process_row_simd_sse3(bayer: &BayerImage, row_rgb: &mut [f32], y: usiz
         // Process remaining pixels with scalar
         while x < bayer.width {
             let raw_x = x + bayer.left_margin;
-            let rgb_idx = x * 3;
             let color = pattern[row_pattern_idx | (raw_x & 1)];
-            let val = bayer.data[raw_y * bayer.raw_width + raw_x];
-
-            match color {
-                0 => {
-                    row_rgb[rgb_idx] = val;
-                    row_rgb[rgb_idx + 1] = scalar::interpolate_cross(bayer, raw_x, raw_y);
-                    row_rgb[rgb_idx + 2] = scalar::interpolate_diagonal(bayer, raw_x, raw_y);
-                }
-                1 => {
-                    if red_in_row {
-                        row_rgb[rgb_idx] = scalar::interpolate_horizontal(bayer, raw_x, raw_y);
-                        row_rgb[rgb_idx + 2] = scalar::interpolate_vertical(bayer, raw_x, raw_y);
-                    } else {
-                        row_rgb[rgb_idx] = scalar::interpolate_vertical(bayer, raw_x, raw_y);
-                        row_rgb[rgb_idx + 2] = scalar::interpolate_horizontal(bayer, raw_x, raw_y);
-                    }
-                    row_rgb[rgb_idx + 1] = val;
-                }
-                2 => {
-                    row_rgb[rgb_idx] = scalar::interpolate_diagonal(bayer, raw_x, raw_y);
-                    row_rgb[rgb_idx + 1] = scalar::interpolate_cross(bayer, raw_x, raw_y);
-                    row_rgb[rgb_idx + 2] = val;
-                }
-                _ => unreachable!(),
-            }
+            demosaic_pixel_scalar(
+                bayer,
+                &mut row_rgb[x * 3..],
+                color,
+                red_in_row,
+                raw_x,
+                raw_y,
+            );
             x += 1;
         }
     }
@@ -511,40 +476,22 @@ unsafe fn process_row_simd_neon(bayer: &BayerImage, row_rgb: &mut [f32], y: usiz
         let row_current = raw_y * bayer.raw_width;
         let row_below = (raw_y + 1) * bayer.raw_width;
 
-        // Process left border pixel(s) with scalar
+        // Process left border pixel with scalar
         let left_border = 1.min(bayer.width);
         for x in 0..left_border {
             let raw_x = x + bayer.left_margin;
-            let rgb_idx = x * 3;
             let color = pattern[row_pattern_idx | (raw_x & 1)];
-            let val = bayer.data[raw_y * bayer.raw_width + raw_x];
-
-            match color {
-                0 => {
-                    row_rgb[rgb_idx] = val;
-                    row_rgb[rgb_idx + 1] = scalar::interpolate_cross(bayer, raw_x, raw_y);
-                    row_rgb[rgb_idx + 2] = scalar::interpolate_diagonal(bayer, raw_x, raw_y);
-                }
-                1 => {
-                    if red_in_row {
-                        row_rgb[rgb_idx] = scalar::interpolate_horizontal(bayer, raw_x, raw_y);
-                        row_rgb[rgb_idx + 2] = scalar::interpolate_vertical(bayer, raw_x, raw_y);
-                    } else {
-                        row_rgb[rgb_idx] = scalar::interpolate_vertical(bayer, raw_x, raw_y);
-                        row_rgb[rgb_idx + 2] = scalar::interpolate_horizontal(bayer, raw_x, raw_y);
-                    }
-                    row_rgb[rgb_idx + 1] = val;
-                }
-                2 => {
-                    row_rgb[rgb_idx] = scalar::interpolate_diagonal(bayer, raw_x, raw_y);
-                    row_rgb[rgb_idx + 1] = scalar::interpolate_cross(bayer, raw_x, raw_y);
-                    row_rgb[rgb_idx + 2] = val;
-                }
-                _ => unreachable!(),
-            }
+            demosaic_pixel_scalar(
+                bayer,
+                &mut row_rgb[x * 3..],
+                color,
+                red_in_row,
+                raw_x,
+                raw_y,
+            );
         }
 
-        // Process interior with SIMD
+        // Process interior with SIMD (4 pixels at a time)
         let mut x = left_border;
         let simd_end = if bayer.width > 1 {
             bayer.width - 1
@@ -595,36 +542,19 @@ unsafe fn process_row_simd_neon(bayer: &BayerImage, row_rgb: &mut [f32], y: usiz
             vst1q_f32(cross_arr.as_mut_ptr(), cross_interp);
             vst1q_f32(diag_arr.as_mut_ptr(), diag_interp);
 
-            for i in 0..4 {
-                let px = x + i;
-                let raw_px = raw_x + i;
-                let rgb_idx = px * 3;
-                let color = pattern[row_pattern_idx | (raw_px & 1)];
-
-                match color {
-                    0 => {
-                        row_rgb[rgb_idx] = center_arr[i];
-                        row_rgb[rgb_idx + 1] = cross_arr[i];
-                        row_rgb[rgb_idx + 2] = diag_arr[i];
-                    }
-                    1 => {
-                        if red_in_row {
-                            row_rgb[rgb_idx] = h_arr[i];
-                            row_rgb[rgb_idx + 2] = v_arr[i];
-                        } else {
-                            row_rgb[rgb_idx] = v_arr[i];
-                            row_rgb[rgb_idx + 2] = h_arr[i];
-                        }
-                        row_rgb[rgb_idx + 1] = center_arr[i];
-                    }
-                    2 => {
-                        row_rgb[rgb_idx] = diag_arr[i];
-                        row_rgb[rgb_idx + 1] = cross_arr[i];
-                        row_rgb[rgb_idx + 2] = center_arr[i];
-                    }
-                    _ => unreachable!(),
-                }
-            }
+            assign_simd_pixels(
+                row_rgb,
+                x,
+                raw_x,
+                &pattern,
+                row_pattern_idx,
+                red_in_row,
+                &center_arr,
+                &h_arr,
+                &v_arr,
+                &cross_arr,
+                &diag_arr,
+            );
 
             x += 4;
         }
@@ -632,34 +562,15 @@ unsafe fn process_row_simd_neon(bayer: &BayerImage, row_rgb: &mut [f32], y: usiz
         // Process remaining pixels with scalar
         while x < bayer.width {
             let raw_x = x + bayer.left_margin;
-            let rgb_idx = x * 3;
             let color = pattern[row_pattern_idx | (raw_x & 1)];
-            let val = bayer.data[raw_y * bayer.raw_width + raw_x];
-
-            match color {
-                0 => {
-                    row_rgb[rgb_idx] = val;
-                    row_rgb[rgb_idx + 1] = scalar::interpolate_cross(bayer, raw_x, raw_y);
-                    row_rgb[rgb_idx + 2] = scalar::interpolate_diagonal(bayer, raw_x, raw_y);
-                }
-                1 => {
-                    if red_in_row {
-                        row_rgb[rgb_idx] = scalar::interpolate_horizontal(bayer, raw_x, raw_y);
-                        row_rgb[rgb_idx + 2] = scalar::interpolate_vertical(bayer, raw_x, raw_y);
-                    } else {
-                        row_rgb[rgb_idx] = scalar::interpolate_vertical(bayer, raw_x, raw_y);
-                        row_rgb[rgb_idx + 2] = scalar::interpolate_horizontal(bayer, raw_x, raw_y);
-                    }
-                    row_rgb[rgb_idx + 1] = val;
-                }
-                2 => {
-                    row_rgb[rgb_idx] = scalar::interpolate_diagonal(bayer, raw_x, raw_y);
-                    row_rgb[rgb_idx + 1] = scalar::interpolate_cross(bayer, raw_x, raw_y);
-                    row_rgb[rgb_idx + 2] = val;
-                }
-                _ => unreachable!(),
-            }
-
+            demosaic_pixel_scalar(
+                bayer,
+                &mut row_rgb[x * 3..],
+                color,
+                red_in_row,
+                raw_x,
+                raw_y,
+            );
             x += 1;
         }
     }

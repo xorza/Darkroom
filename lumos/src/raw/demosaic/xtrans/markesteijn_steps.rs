@@ -435,75 +435,32 @@ fn compute_rgb_row(
     out: &mut [f32], // length = width * 3
 ) {
     let width = xtrans.width;
-    let height = xtrans.height;
     let raw_width = xtrans.raw_width;
+    let green_base = dir * pixels;
+
+    let interp = |x: usize, target_color_idx: usize| -> f32 {
+        interpolate_missing_color_fast(
+            xtrans,
+            green_dir,
+            color_lookup,
+            green_base,
+            y,
+            x,
+            target_color_idx,
+        )
+    };
 
     for x in 0..width {
         let raw_y = y + xtrans.top_margin;
         let raw_x = x + xtrans.left_margin;
-        let idx = y * width + x;
         let color = xtrans.pattern.color_at(raw_y, raw_x);
         let raw_val = xtrans.data[raw_y * raw_width + raw_x];
-        let green = green_dir[dir * pixels + idx];
+        let green = green_dir[green_base + y * width + x];
 
         let (r, g, b) = match color {
-            0 => {
-                let blue = interpolate_missing_color_fast(
-                    xtrans,
-                    green_dir,
-                    color_lookup,
-                    dir,
-                    pixels,
-                    width,
-                    height,
-                    y,
-                    x,
-                    1, // blue = index 1
-                );
-                (raw_val, green, blue)
-            }
-            1 => {
-                let red = interpolate_missing_color_fast(
-                    xtrans,
-                    green_dir,
-                    color_lookup,
-                    dir,
-                    pixels,
-                    width,
-                    height,
-                    y,
-                    x,
-                    0, // red = index 0
-                );
-                let blue = interpolate_missing_color_fast(
-                    xtrans,
-                    green_dir,
-                    color_lookup,
-                    dir,
-                    pixels,
-                    width,
-                    height,
-                    y,
-                    x,
-                    1, // blue = index 1
-                );
-                (red, raw_val, blue)
-            }
-            2 => {
-                let red = interpolate_missing_color_fast(
-                    xtrans,
-                    green_dir,
-                    color_lookup,
-                    dir,
-                    pixels,
-                    width,
-                    height,
-                    y,
-                    x,
-                    0, // red = index 0
-                );
-                (red, green, raw_val)
-            }
+            0 => (raw_val, green, interp(x, 1)),
+            1 => (interp(x, 0), raw_val, interp(x, 1)),
+            2 => (interp(x, 0), green, raw_val),
             _ => unreachable!(),
         };
 
@@ -518,159 +475,103 @@ fn compute_rgb_row(
 /// Uses green-guided color difference method with precomputed neighbor positions.
 /// When two opposing pairs are available, picks the one with smaller green gradient.
 #[inline]
-#[allow(clippy::too_many_arguments)]
 fn interpolate_missing_color_fast(
     xtrans: &XTransImage,
     green_dir: &[f32],
     color_lookup: &ColorInterpLookup,
-    dir: usize,
-    pixels: usize,
-    width: usize,
-    height: usize,
+    green_base: usize,
     y: usize,
     x: usize,
     target_color_idx: usize, // 0=red, 1=blue
 ) -> f32 {
+    let width = xtrans.width;
+    let height = xtrans.height;
     let raw_width = xtrans.raw_width;
     let raw_y = y + xtrans.top_margin;
     let raw_x = x + xtrans.left_margin;
-    let green_base = dir * pixels;
     let green_center = green_dir[green_base + y * width + x];
 
     let entry = color_lookup.get(raw_y, raw_x, target_color_idx);
 
-    // Try primary strategy
-    let primary_result = eval_strategy(
-        xtrans,
-        green_dir,
-        &entry.primary,
-        raw_y,
-        raw_x,
-        raw_width,
-        green_base,
-        green_center,
-        width,
-        height,
-        xtrans.top_margin,
-        xtrans.left_margin,
-    );
+    let eval = |strategy: &ColorInterpStrategy| -> Option<(f32, f32)> {
+        match *strategy {
+            ColorInterpStrategy::Pair {
+                dy_a,
+                dx_a,
+                dy_b,
+                dx_b,
+            } => {
+                let ay = raw_y as i32 + dy_a;
+                let ax = raw_x as i32 + dx_a;
+                let by = raw_y as i32 + dy_b;
+                let bx = raw_x as i32 + dx_b;
 
-    // Try secondary strategy
-    let secondary_result = eval_strategy(
-        xtrans,
-        green_dir,
-        &entry.secondary,
-        raw_y,
-        raw_x,
-        raw_width,
-        green_base,
-        green_center,
-        width,
-        height,
-        xtrans.top_margin,
-        xtrans.left_margin,
-    );
+                if ay < 0
+                    || ax < 0
+                    || by < 0
+                    || bx < 0
+                    || ay as usize >= xtrans.raw_height
+                    || ax as usize >= raw_width
+                    || by as usize >= xtrans.raw_height
+                    || bx as usize >= raw_width
+                {
+                    return None;
+                }
 
-    // Pick the one with smaller gradient (better quality), or whichever is available
-    let val = match (primary_result, secondary_result) {
-        (Some((val_p, grad_p)), Some((val_s, grad_s))) => {
-            if grad_s < grad_p {
-                val_s
+                let oy_a = (ay as usize).wrapping_sub(xtrans.top_margin);
+                let ox_a = (ax as usize).wrapping_sub(xtrans.left_margin);
+                let oy_b = (by as usize).wrapping_sub(xtrans.top_margin);
+                let ox_b = (bx as usize).wrapping_sub(xtrans.left_margin);
+
+                if oy_a >= height || ox_a >= width || oy_b >= height || ox_b >= width {
+                    return None;
+                }
+
+                let ga = green_dir[green_base + oy_a * width + ox_a];
+                let gb = green_dir[green_base + oy_b * width + ox_b];
+                let grad = (green_center - ga).abs() + (green_center - gb).abs();
+
+                let raw_a = xtrans.data[ay as usize * raw_width + ax as usize];
+                let raw_b = xtrans.data[by as usize * raw_width + bx as usize];
+
+                Some((green_center + 0.5 * ((raw_a - ga) + (raw_b - gb)), grad))
+            }
+            ColorInterpStrategy::Single { dy, dx } => {
+                let ny = raw_y as i32 + dy;
+                let nx = raw_x as i32 + dx;
+
+                if ny < 0 || nx < 0 || ny as usize >= xtrans.raw_height || nx as usize >= raw_width
+                {
+                    return None;
+                }
+
+                let oy = (ny as usize).wrapping_sub(xtrans.top_margin);
+                let ox = (nx as usize).wrapping_sub(xtrans.left_margin);
+                if oy >= height || ox >= width {
+                    return None;
+                }
+
+                let g_n = green_dir[green_base + oy * width + ox];
+                let raw_n = xtrans.data[ny as usize * raw_width + nx as usize];
+                Some((green_center + (raw_n - g_n), f32::MAX))
+            }
+            ColorInterpStrategy::None => None,
+        }
+    };
+
+    let val = match (eval(&entry.primary), eval(&entry.secondary)) {
+        (Some((vp, gp)), Some((vs, gs))) => {
+            if gs < gp {
+                vs
             } else {
-                val_p
+                vp
             }
         }
-        (Some((val, _)), None) => val,
-        (None, Some((val, _))) => val,
-        (None, None) => green_center, // Fallback: no neighbor found
+        (Some((v, _)), None) | (None, Some((v, _))) => v,
+        (None, None) => green_center,
     };
 
     val.max(0.0)
-}
-
-/// Evaluate one interpolation strategy, returning (interpolated_value, gradient) if valid.
-#[inline]
-#[allow(clippy::too_many_arguments)]
-fn eval_strategy(
-    xtrans: &XTransImage,
-    green_dir: &[f32],
-    strategy: &ColorInterpStrategy,
-    raw_y: usize,
-    raw_x: usize,
-    raw_width: usize,
-    green_base: usize,
-    green_center: f32,
-    width: usize,
-    height: usize,
-    top_margin: usize,
-    left_margin: usize,
-) -> Option<(f32, f32)> {
-    match *strategy {
-        ColorInterpStrategy::Pair {
-            dy_a,
-            dx_a,
-            dy_b,
-            dx_b,
-        } => {
-            let ay = raw_y as i32 + dy_a;
-            let ax = raw_x as i32 + dx_a;
-            let by = raw_y as i32 + dy_b;
-            let bx = raw_x as i32 + dx_b;
-
-            // Bounds check on raw coordinates
-            if ay < 0
-                || ax < 0
-                || ay as usize >= xtrans.raw_height
-                || ax as usize >= raw_width
-                || by < 0
-                || bx < 0
-                || by as usize >= xtrans.raw_height
-                || bx as usize >= raw_width
-            {
-                return None;
-            }
-
-            // Convert to output coordinates
-            let oy_a = (ay as usize).wrapping_sub(top_margin);
-            let ox_a = (ax as usize).wrapping_sub(left_margin);
-            let oy_b = (by as usize).wrapping_sub(top_margin);
-            let ox_b = (bx as usize).wrapping_sub(left_margin);
-
-            if oy_a >= height || ox_a >= width || oy_b >= height || ox_b >= width {
-                return None;
-            }
-
-            let ga = green_dir[green_base + oy_a * width + ox_a];
-            let gb = green_dir[green_base + oy_b * width + ox_b];
-            let grad = (green_center - ga).abs() + (green_center - gb).abs();
-
-            let raw_a = xtrans.data[ay as usize * raw_width + ax as usize];
-            let raw_b = xtrans.data[by as usize * raw_width + bx as usize];
-
-            let interpolated = green_center + 0.5 * ((raw_a - ga) + (raw_b - gb));
-            Some((interpolated, grad))
-        }
-        ColorInterpStrategy::Single { dy, dx } => {
-            let ny = raw_y as i32 + dy;
-            let nx = raw_x as i32 + dx;
-
-            if ny < 0 || nx < 0 || ny as usize >= xtrans.raw_height || nx as usize >= raw_width {
-                return None;
-            }
-
-            let oy = (ny as usize).wrapping_sub(top_margin);
-            let ox = (nx as usize).wrapping_sub(left_margin);
-            if oy >= height || ox >= width {
-                return None;
-            }
-
-            let g_n = green_dir[green_base + oy * width + ox];
-            let raw_n = xtrans.data[ny as usize * raw_width + nx as usize];
-            let interpolated = green_center + (raw_n - g_n);
-            Some((interpolated, f32::MAX)) // Worst gradient so pairs always win
-        }
-        ColorInterpStrategy::None => None,
-    }
 }
 
 // ───────────────────────────────────────────────────────────────
