@@ -5,21 +5,20 @@ use bench::quick_bench;
 use super::*;
 
 #[quick_bench(warmup_iters = 2, iters = 10)]
-fn raw_load(_b: bench::Bencher) {
+fn raw_load(b: bench::Bencher) {
     use crate::testing::calibration_image_paths;
 
     crate::testing::init_tracing();
 
-    let Some(paths) = calibration_image_paths("Lights") else {
-        eprintln!("No Lights found, trying Flats");
-        let Some(paths) = calibration_image_paths("Flats") else {
-            eprintln!("No calibration images found, skipping");
-            return;
-        };
-        run_load_bench(&paths);
+    let paths = calibration_image_paths("Lights").or_else(|| calibration_image_paths("Flats"));
+    let Some(paths) = paths else {
+        eprintln!("No calibration images found, skipping");
         return;
     };
-    run_load_bench(&paths);
+    let path = paths[0].clone();
+    println!("Benchmarking load_raw on: {}", path.display());
+
+    b.bench(|| load_raw(&path).unwrap());
 }
 
 /// Benchmark libraw's built-in demosaic at different quality levels.
@@ -291,39 +290,4 @@ fn compare_channels(
         scale,
         offset,
     }
-}
-
-fn run_load_bench(paths: &[std::path::PathBuf]) {
-    let path = &paths[0];
-    println!("Benchmarking load_raw on: {}", path.display());
-
-    // Warmup
-    let _ = load_raw(path).unwrap();
-
-    let iterations = 5;
-    let mut times = Vec::with_capacity(iterations);
-
-    for i in 0..iterations {
-        let start = Instant::now();
-        let image = load_raw(path).unwrap();
-        let elapsed = start.elapsed();
-        times.push(elapsed);
-        println!(
-            "  Run {}: {:.1}ms  ({}x{}x{})",
-            i + 1,
-            elapsed.as_secs_f64() * 1000.0,
-            image.dimensions().width,
-            image.dimensions().height,
-            image.dimensions().channels,
-        );
-    }
-
-    let avg_ms = times.iter().map(|t| t.as_secs_f64()).sum::<f64>() / iterations as f64 * 1000.0;
-    let min_ms = times
-        .iter()
-        .map(|t| t.as_secs_f64())
-        .fold(f64::MAX, f64::min)
-        * 1000.0;
-    println!("\n  Average: {:.1}ms", avg_ms);
-    println!("  Best:    {:.1}ms", min_ms);
 }
