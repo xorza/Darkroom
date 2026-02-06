@@ -15,6 +15,8 @@ mod markesteijn_steps;
 
 use std::time::Instant;
 
+use crate::raw::normalize::normalize_u16_to_f32_parallel;
+
 pub use markesteijn::demosaic_xtrans_markesteijn;
 
 /// Process X-Trans sensor raw data and demosaic to RGB.
@@ -48,11 +50,9 @@ pub fn process_xtrans(
 ) -> (Vec<f32>, usize) {
     let pattern = XTransPattern::new(xtrans_pattern);
 
-    // Normalize to 0.0-1.0 range
-    let normalized_data: Vec<f32> = raw_data
-        .iter()
-        .map(|&v| ((v as f32) - black).max(0.0) / range)
-        .collect();
+    // Normalize to 0.0-1.0 range using parallel SIMD processing
+    let inv_range = 1.0 / range;
+    let normalized_data = normalize_u16_to_f32_parallel(raw_data, black, inv_range);
 
     let xtrans = XTransImage::with_margins(
         &normalized_data,

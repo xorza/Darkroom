@@ -4,7 +4,7 @@ use super::*;
 
 #[test]
 #[ignore]
-fn bench_load_raw() {
+fn quick_bench() {
     use crate::testing::calibration_image_paths;
 
     crate::testing::init_tracing();

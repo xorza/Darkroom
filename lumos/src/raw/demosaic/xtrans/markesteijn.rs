@@ -39,16 +39,38 @@ struct MarkesteijnBuffers {
     homo: Vec<u8>,
 }
 
+/// Allocate a Vec of given length without zeroing.
+///
+/// SAFETY: Caller must ensure every element is written before it's read.
+/// This avoids expensive kernel page zeroing (clear_page_erms) for large buffers.
+#[allow(clippy::uninit_vec)]
+unsafe fn alloc_uninit_vec<T>(len: usize) -> Vec<T> {
+    let mut v = Vec::with_capacity(len);
+    // SAFETY: Caller guarantees all elements will be written before reading.
+    unsafe { v.set_len(len) };
+    v
+}
+
 impl MarkesteijnBuffers {
     fn new(width: usize, height: usize) -> Self {
         let pixels = width * height;
-        Self {
-            green_dir: vec![0.0; NDIR * pixels],
-            gmin: vec![0.0; pixels],
-            gmax: vec![0.0; pixels],
-            rgb_dir: vec![0.0; NDIR * pixels * 3],
-            drv: vec![0.0; NDIR * pixels],
-            homo: vec![0; NDIR * pixels],
+
+        // SAFETY: All buffers below are fully written by parallel passes before being read:
+        // - green_dir: written entirely by interpolate_green (Step 2)
+        // - gmin/gmax: written entirely by compute_green_minmax (Step 1)
+        // - rgb_dir: written entirely by compute_rgb_and_derivatives Pass 1 (Step 3+4)
+        // - drv: written entirely by compute_rgb_and_derivatives Pass 2 (Step 3+4)
+        unsafe {
+            Self {
+                green_dir: alloc_uninit_vec(NDIR * pixels),
+                gmin: alloc_uninit_vec(pixels),
+                gmax: alloc_uninit_vec(pixels),
+                rgb_dir: alloc_uninit_vec(NDIR * pixels * 3),
+                drv: alloc_uninit_vec(NDIR * pixels),
+                // homo needs zeroing because compute_homogeneity starts with homo.fill(0)
+                // and only writes interior pixels, leaving borders at 0
+                homo: vec![0; NDIR * pixels],
+            }
         }
     }
 }

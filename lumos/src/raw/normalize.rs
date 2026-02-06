@@ -2,7 +2,7 @@ use rayon::prelude::*;
 
 /// Normalize u16 raw data to f32 in [0.0, 1.0] range using parallel SIMD processing.
 /// Formula: ((value - black).max(0) * inv_range)
-pub(super) fn normalize_u16_to_f32_parallel(data: &[u16], black: f32, inv_range: f32) -> Vec<f32> {
+pub(crate) fn normalize_u16_to_f32_parallel(data: &[u16], black: f32, inv_range: f32) -> Vec<f32> {
     const CHUNK_SIZE: usize = 16384; // Process 64KB chunks (16K * 4 bytes)
 
     let mut result = vec![0.0f32; data.len()];
