@@ -166,15 +166,9 @@ Since the crate already computes these quality metrics during star detection, im
 
 AVX2 was tested for Lanczos and provides no benefit. The bottleneck is memory-bound random 2D pixel access (36-64 gathers per output pixel), not kernel compute. This is explicitly documented in the SIMD module header. Bilinear is SIMD-optimized (AVX2, 8 pixels/cycle); Lanczos stays scalar intentionally. The real optimization path would be cache locality (tile-based warping), not SIMD.
 
-### 4. Background Estimation: No Iterative Source Masking by Default
+### ~~4. Background Estimation: No Iterative Source Masking by Default~~ (REJECTED — Correct as-is)
 
-**Current:** Iterative refinement (detect sources → mask → re-estimate) exists but is only enabled in the `crowded_field()` preset.
-
-**Industry standard (SExtractor):**
-- Always performs at least one iteration of source masking
-- Uses κσ-clipping + mode estimation: `Mode ≈ 2.5×Median - 1.5×Mean`
-
-For typical deep-sky images with nebulosity, the default single-pass background estimation can be biased by extended emission.
+Iterative refinement is already implemented and available via `crowded_field()` (2 iterations) and `precise_ground()` (3 iterations) presets. The default single-pass is appropriate: sparse fields don't benefit from iteration (sigma clipping handles the few star pixels), and nebulosity isn't helped by source masking (it's below the detection threshold). SExtractor always iterates because it needs photometric accuracy; for star detection thresholds in a stacking pipeline, single-pass is sufficient.
 
 ### 5. TPS (Thin Plate Spline) Distortion: Implemented but Dead Code
 
@@ -299,7 +293,7 @@ The calibration code uses `image.apply_from_channel(bias, |_c, dst, src| { ... }
 
 ### Medium Impact, Medium Effort
 7. ~~**Add SIMD Lanczos kernel**~~ — RESOLVED: already evaluated, memory-bound not compute-bound
-8. **Iterative background by default** — better for nebulous fields
+8. ~~**Iterative background by default**~~ — REJECTED: current design correct, iteration available via presets
 9. **IKSS estimators for normalization** — more robust than median+MAD
 
 ### Low Priority
