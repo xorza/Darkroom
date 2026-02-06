@@ -74,7 +74,19 @@ fn get_available_memory() -> u64 {
 
     let mut sys = System::new();
     sys.refresh_memory();
-    sys.available_memory()
+    let available = sys.available_memory();
+
+    // sysinfo on macOS computes available_memory as:
+    //   (free + inactive + purgeable - compressor_pages) * page_size
+    // When compressor pages exceed the sum (common under memory pressure),
+    // saturating_sub clamps to 0. Fall back to total - used in that case.
+    if available == 0 {
+        let total = sys.total_memory();
+        let used = sys.used_memory();
+        total.saturating_sub(used)
+    } else {
+        available
+    }
 }
 
 /// Compute optimal chunk rows given available memory and image parameters.
