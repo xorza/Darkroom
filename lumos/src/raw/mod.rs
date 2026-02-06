@@ -1,3 +1,4 @@
+pub(crate) mod demosaic;
 mod normalize;
 
 #[cfg(test)]
@@ -14,10 +15,10 @@ use std::time::Instant;
 
 use rayon::prelude::*;
 
-use crate::astro_image::demosaic::xtrans::process_xtrans;
-use crate::astro_image::demosaic::{BayerImage, CfaPattern, demosaic_bilinear};
 use crate::astro_image::sensor::{SensorType, detect_sensor_type};
 use crate::astro_image::{AstroImage, AstroImageMetadata, BitPix, ImageDimensions};
+use demosaic::xtrans::process_xtrans;
+use demosaic::{BayerImage, CfaPattern, demosaic_bilinear};
 
 use normalize::normalize_u16_to_f32_parallel;
 

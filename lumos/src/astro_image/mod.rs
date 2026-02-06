@@ -1,4 +1,3 @@
-pub(crate) mod demosaic;
 mod fits;
 pub(crate) mod hot_pixels;
 pub(crate) mod sensor;
