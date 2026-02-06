@@ -29,7 +29,7 @@
 
 use rayon::prelude::*;
 
-use super::{AstroImage, ImageDimensions};
+use crate::astro_image::{AstroImage, ImageDimensions};
 
 /// Per-channel hot pixel indices - stores only the indices of hot pixels (sparse).
 ///

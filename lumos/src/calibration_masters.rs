@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 use rayon::prelude::*;
 
-use crate::astro_image::HotPixelMap;
+use crate::stacking::hot_pixels::HotPixelMap;
 use crate::stacking::{ProgressCallback, StackConfig, stack_with_progress};
 use crate::{AstroImage, FrameType};
 

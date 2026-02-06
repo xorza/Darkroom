@@ -42,7 +42,8 @@ pub mod prelude;
 // Core image types
 // ============================================================================
 
-pub use astro_image::{AstroImage, AstroImageMetadata, BitPix, HotPixelMap, ImageDimensions};
+pub use astro_image::{AstroImage, AstroImageMetadata, BitPix, ImageDimensions};
+pub use stacking::hot_pixels::HotPixelMap;
 
 // ============================================================================
 // Calibration

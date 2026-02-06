@@ -2,6 +2,7 @@ mod cache;
 mod cache_config;
 mod config;
 mod error;
+pub(crate) mod hot_pixels;
 pub mod progress;
 pub mod rejection;
 mod stack;

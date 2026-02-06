@@ -1,8 +1,5 @@
 mod fits;
-pub(crate) mod hot_pixels;
 pub(crate) mod sensor;
-
-pub use hot_pixels::HotPixelMap;
 
 use anyhow::Result;
 use rayon::prelude::*;
