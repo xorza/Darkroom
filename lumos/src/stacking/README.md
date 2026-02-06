@@ -1,170 +1,120 @@
 # Stacking Module
 
-Image stacking algorithms for astrophotography, including mean, median, sigma-clipped, weighted mean, and pixel rejection methods.
+Image stacking for astrophotography with pixel rejection, frame weighting, normalization, and memory-mapped caching.
 
 ## Module Structure
 
-| Module | Description |
-|--------|-------------|
-| `mod.rs` | `StackingMethod`, `FrameType`, `ImageStack` orchestrator |
-| `error.rs` | `Error` enum for stacking operations |
+| File | Description |
+|------|-------------|
+| `mod.rs` | Public API exports, `FrameType` enum |
+| `config.rs` | Unified `StackConfig`, `CombineMethod`, `Rejection`, `Normalization` |
+| `stack.rs` | `stack()` and `stack_with_progress()` entry points |
+| `rejection.rs` | Pixel rejection algorithms (sigma clip, winsorized, linear fit, percentile, GESD) |
+| `local_normalization.rs` | Tile-based local normalization (PixInsight-style) |
 | `cache.rs` | `ImageCache` with memory-mapped binary cache |
-| `cache_config.rs` | `CacheConfig` with adaptive chunk sizing |
-| `mean/` | Mean stacking |
-| `median/` | Median stacking via mmap |
-| `sigma_clipped/` | Sigma-clipped mean via mmap |
-| `weighted/` | Weighted mean with quality-based frame weights |
-| `rejection.rs` | Pixel rejection algorithms |
-| `local_normalization.rs` | Local normalization (tile-based, PixInsight-style) |
+| `cache_config.rs` | `CacheConfig` with adaptive chunk sizing (75% memory budget) |
+| `progress.rs` | `ProgressCallback`, `StackingStage` |
+| `error.rs` | `Error` enum for stacking operations |
 
-## Key Types
+## Public API
 
 ```rust
-StackingMethod     // Mean | Median | SigmaClippedMean | WeightedMean
+// Entry points
+stack(paths, frame_type, config) -> Result<AstroImage, Error>
+stack_with_progress(paths, frame_type, config, progress) -> Result<AstroImage, Error>
+
+// Configuration
+StackConfig        // { method, rejection, weights, normalization, cache }
+CombineMethod      // Mean | Median | WeightedMean
+Rejection          // None | SigmaClip | SigmaClipAsymmetric | Winsorized | LinearFit | Percentile | Gesd
+Normalization      // None | Global | Local { tile_size }
 FrameType          // Dark | Flat | Bias | Light
-ImageStack         // Main stacking orchestrator
 CacheConfig        // { cache_dir, keep_cache, available_memory }
-WeightedConfig     // { weights, rejection, cache }
-FrameQuality       // { snr, fwhm, eccentricity, noise, star_count }
-RejectionMethod    // None | SigmaClip | WinsorizedSigmaClip | LinearFitClip | PercentileClip | Gesd
-NormalizationMethod // None | Global | Local(LocalNormalizationConfig)
-LocalNormalizationConfig // { tile_size, clip_sigma, clip_iterations }
 ```
 
-## Rejection Methods
-
-| Method | Best For | Description |
-|--------|----------|-------------|
-| SigmaClip | General use | Iterative kappa-sigma clipping |
-| WinsorizedSigmaClip | Preserving data | Replace outliers with boundary values |
-| LinearFitClip | Sky gradients | Fits line to pixel stack, rejects deviants |
-| PercentileClip | Small stacks | Simple low/high percentile rejection |
-| GESD | Large stacks (>50) | Generalized Extreme Studentized Deviate Test |
-
----
-
-## Usage Examples
-
-### Basic Stacking
+## Usage
 
 ```rust
-use lumos::stacking::{ImageStack, FrameType, StackingMethod, ProgressCallback};
+use lumos::stacking::{stack, StackConfig, FrameType, Rejection, Normalization};
 
-// Mean stacking (fastest, no outlier rejection)
-let stack = ImageStack::new(FrameType::Dark, StackingMethod::Mean, &paths);
-let result = stack.process(ProgressCallback::default())?;
+// Default: sigma-clipped mean (sigma=2.5, 3 iterations)
+let result = stack(&paths, FrameType::Light, StackConfig::default())?;
 
-// Median stacking (default, good outlier rejection)
-let stack = ImageStack::new(FrameType::Light, StackingMethod::default(), &paths);
-let result = stack.process(ProgressCallback::default())?;
+// Presets
+let result = stack(&paths, FrameType::Light, StackConfig::median())?;
+let result = stack(&paths, FrameType::Light, StackConfig::sigma_clipped(2.0))?;
+let result = stack(&paths, FrameType::Bias, StackConfig::mean())?;
+let result = stack(&paths, FrameType::Light, StackConfig::winsorized(3.0))?;
+let result = stack(&paths, FrameType::Light, StackConfig::linear_fit(2.5))?;
+let result = stack(&paths, FrameType::Light, StackConfig::percentile(15.0))?;
+let result = stack(&paths, FrameType::Light, StackConfig::gesd())?;
 
-// Sigma-clipped mean
-let config = SigmaClippedConfig::default(); // sigma=2.5, iterations=3
-let stack = ImageStack::new(
-    FrameType::Light,
-    StackingMethod::SigmaClippedMean(config),
-    &paths,
-);
-let result = stack.process(ProgressCallback::default())?;
+// Weighted stacking
+let result = stack(&paths, FrameType::Light, StackConfig::weighted(vec![1.0, 0.8, 1.2]))?;
+
+// Custom configuration with struct update syntax
+let config = StackConfig {
+    rejection: Rejection::SigmaClipAsymmetric {
+        sigma_low: 4.0,
+        sigma_high: 3.0,
+        iterations: 5,
+    },
+    normalization: Normalization::Local { tile_size: 128 },
+    ..Default::default()
+};
+let result = stack(&paths, FrameType::Light, config)?;
 ```
 
-### Weighted Stacking with Quality Metrics
+## Rejection Algorithms
 
-```rust
-use lumos::stacking::{WeightedConfig, FrameQuality, RejectionMethod};
-
-// Compute quality from star detection results
-let qualities: Vec<FrameQuality> = detection_results
-    .iter()
-    .map(FrameQuality::from_detection_result)
-    .collect();
-
-// Create weighted config
-let config = WeightedConfig::from_quality(&qualities)
-    .with_rejection(RejectionMethod::SigmaClip(SigmaClipConfig::default()));
-
-let stack = ImageStack::new(
-    FrameType::Light,
-    StackingMethod::WeightedMean(config),
-    &paths,
-);
-```
-
----
-
-## Industry Best Practices
-
-### Rejection Algorithm Selection by Stack Size
-
-| Frame Count | Recommended Method | Rationale |
-|-------------|-------------------|-----------|
-| 3-9 | Percentile Clipping | Simple, robust with limited data |
-| 10-15 | Winsorized Sigma Clip | Preserves data, more robust than basic sigma |
-| 15-25 | Sigma Clipping (κ=2.5-3.0) | Good balance, enough data for statistics |
-| 25-50 | Linear Fit Clipping | Handles sky gradients, more accurate |
-| 50+ | GESD | Rigorous statistical test, best with large data |
+| Algorithm | Enum Variant | Best For | Min Frames |
+|-----------|-------------|----------|------------|
+| Sigma Clipping | `SigmaClip` | General use | 10+ |
+| Asymmetric Sigma | `SigmaClipAsymmetric` | Bright outliers (satellites) | 10+ |
+| Winsorized Sigma | `Winsorized` | Small stacks, data preservation | 5+ |
+| Linear Fit | `LinearFit` | Sky gradients, temporal trends | 15+ |
+| Percentile Clipping | `Percentile` | Very small stacks | 3+ |
+| GESD | `Gesd` | Large stacks, rigorous detection | 50+ |
 
 ### Sigma Threshold Guidelines
 
-- **κ=2.0-2.5**: Aggressive (satellite trails, airplane lights)
-- **κ=2.5-3.0**: Standard (recommended default)
-- **κ=3.0-4.0**: Conservative (preserves more data)
+- **2.0-2.5**: Aggressive (removes satellites, airplane trails)
+- **2.5-3.0**: Standard (recommended default)
+- **3.0-4.0**: Conservative (preserves more data, less false rejection)
+- Never below 2.0 (causes excessive false rejection)
 
 ### Calibration Frame Recommendations
 
-| Frame Type | Recommended Method | Sigma | Notes |
-|------------|-------------------|-------|-------|
-| Bias | Mean | - | No outliers in bias frames |
-| Dark | Sigma Clipping | 3.0 | Remove cosmic rays |
-| Flat | Sigma Clipping or Median | 2.5-3.0 | Remove dust shadows |
-| Light | SigmaClip/Winsorized/LinearFit | 2.5-3.0 | Choose based on frame count |
-
----
+| Frame Type | Method | Rejection | Notes |
+|------------|--------|-----------|-------|
+| Bias | `StackConfig::mean()` | None | No outliers expected |
+| Dark | `StackConfig::sigma_clipped(3.0)` | SigmaClip | Remove cosmic rays |
+| Flat | `StackConfig::sigma_clipped(2.5)` | SigmaClip | Remove dust artifacts |
+| Light | `StackConfig::default()` | SigmaClip(2.5) | General purpose |
 
 ## Local Normalization
 
-Corrects illumination differences across frames by matching brightness locally rather than globally. Handles vignetting, sky gradients, and session-to-session brightness variations.
+Tile-based correction for vignetting, sky gradients, and session-to-session brightness variations (PixInsight-style). Fully implemented but not yet integrated into the stacking pipeline.
 
 ### Algorithm
 
-1. Divide image into tiles (default: 128×128 pixels)
-2. Compute sigma-clipped median and MAD for each tile
-3. Compare target frame tiles to reference frame tiles
-4. Compute per-tile offset and scale correction factors
-5. Bilinearly interpolate between tile centers
-6. Apply: `pixel_corrected = (pixel - target_median) * scale + ref_median`
+1. Divide image into tiles (default 128x128)
+2. Compute sigma-clipped median and MAD per tile
+3. Compare target tiles to reference tiles
+4. Compute per-tile offset and scale factors
+5. Bilinear interpolation between tile centers
+6. Apply: `corrected = (pixel - target_median) * scale + ref_median`
 
-### Usage
+## Architecture
 
-```rust
-use lumos::stacking::{LocalNormalizationConfig, compute_normalization_map};
+### Memory Management
 
-let config = LocalNormalizationConfig::default();  // 128px tiles
-// Or: LocalNormalizationConfig::fine()   // 64px tiles for steep gradients
-// Or: LocalNormalizationConfig::coarse() // 256px tiles for stability
+Images are decoded and cached to disk as binary f32 files via memory-mapped I/O. The `CacheConfig` controls adaptive chunk sizing: uses 75% of available RAM, with a minimum of 64 rows per chunk. This enables stacking large datasets (100+ frames of 50MP images) without exceeding memory limits.
 
-let map = compute_normalization_map(&reference, &target, &config);
-map.apply(&mut target_pixels);
-```
+### Processing Pipeline
 
----
+1. **Load**: Decode images, write to disk cache (parallelized)
+2. **Process**: Read pixel columns across all frames via mmap, apply rejection + combine per-pixel
+3. **Cleanup**: Remove cache files (unless `keep_cache = true`)
 
-## Future Improvements
-
-### High Priority
-
-1. **Adaptive Rejection Selection**: Auto-select method based on frame count
-2. **Asymmetric Sigma Clipping**: Separate thresholds for high/low outliers
-3. **SIMD-Optimized Rejection**: Vectorize inner loops for 2-4x speedup
-
-### Medium Priority
-
-4. **Robust Scale Estimators**: Sn/Qn estimators for non-Gaussian data
-5. **Stacking Presets**: Pre-configured settings for common scenarios
-
-### Advanced
-
-6. **Per-Pixel Noise Weighting**: Weight = 1/variance per pixel
-7. **GPU Acceleration**: Compute shader for sigma clipping
-8. **Live Stacking**: Real-time preview during capture
-9. **Multi-Session Integration**: Cross-session normalization and weighting
+Rejection and combination operate on pixel stacks: for each output pixel position, the module collects the value from all input frames, applies the configured rejection to remove outliers, then combines the remaining values.
