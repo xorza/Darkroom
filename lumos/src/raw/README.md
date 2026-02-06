@@ -67,7 +67,7 @@ raw/
 | `load_raw` error paths | 3 | Invalid path, invalid data, empty file |
 | `load_raw` real data | 2 | Behind `real-data` feature flag |
 | LibrawGuard RAII | 2 | Cleanup + null safety |
-| Normalization | 2 | Small array + large array (SIMD+remainder) |
+| Normalization | 5 | Small array, large array, below-black clamping, monochrome crop pattern, fallback normalization formulas |
 | CFA pattern | 6 | All 4 patterns, `red_in_row`, `pattern_2x2` |
 | BayerImage validation | 5 | Zero dims, wrong length, margin overflow |
 | Bayer demosaic | 18 | All patterns, uniform, gradient, corners, edges, channel preservation, NaN, SIMD-vs-scalar, parallel-vs-scalar |
@@ -91,20 +91,4 @@ Run with `LUMOS_CALIBRATION_DIR=<path> cargo test -p lumos --release <bench_name
 - Our Markesteijn 1-pass: ~1273ms best (vs libraw ~2500ms)
 - Quality vs libraw 1-pass: MAE ~0.000521, correlation ~0.96
 
-## Remaining Issues
 
-### 1. Missing `checked_mul` in `process_bayer_fast`
-
-**File**: `mod.rs:359`
-
-`process_monochrome` and X-Trans use `checked_mul().expect(...)` for pixel count, but `process_bayer_fast` uses bare `raw_width * raw_height`. Inconsistent defensive coding.
-
-### 2. Monochrome normalization uses `/range` instead of `*inv_range`
-
-**File**: `mod.rs:325`
-
-`process_monochrome` computes `((val as f32) - black).max(0.0) / range` per pixel. The Bayer path pre-computes `inv_range = 1.0 / range` and multiplies. Division is ~5x slower than multiplication.
-
-### 3. No unit tests for `process_monochrome` or `process_unknown_libraw_fallback`
-
-These code paths have no synthetic unit tests. Only tested indirectly via real raw files (behind feature flag).

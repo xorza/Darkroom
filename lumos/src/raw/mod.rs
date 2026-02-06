@@ -303,7 +303,6 @@ fn process_monochrome(
         anyhow::bail!("libraw: raw_image is null");
     }
 
-    // Use checked arithmetic to prevent overflow on extremely large images
     let pixel_count = raw_width
         .checked_mul(raw_height)
         .expect("libraw: raw dimensions overflow");
@@ -311,7 +310,11 @@ fn process_monochrome(
     // SAFETY: raw_image_ptr is valid (checked above), and we've validated dimensions.
     let raw_data = unsafe { slice::from_raw_parts(raw_image_ptr, pixel_count) };
 
-    // Extract the active area and normalize using parallel map
+    // Normalize full raw buffer using SIMD parallel normalization
+    let inv_range = 1.0 / range;
+    let normalized = normalize_u16_to_f32_parallel(raw_data, black, inv_range);
+
+    // Extract the active area
     let output_size = width * height;
     let mut mono_pixels = vec![0.0f32; output_size];
     mono_pixels
@@ -319,17 +322,8 @@ fn process_monochrome(
         .enumerate()
         .for_each(|(y, row)| {
             let src_y = top_margin + y;
-            for (x, val) in row.iter_mut().enumerate() {
-                let src_x = left_margin + x;
-                let idx = src_y * raw_width + src_x;
-                debug_assert!(
-                    idx < pixel_count,
-                    "Index out of bounds: {} >= {}",
-                    idx,
-                    pixel_count
-                );
-                *val = ((raw_data[idx] as f32) - black).max(0.0) / range;
-            }
+            let src_start = src_y * raw_width + left_margin;
+            row.copy_from_slice(&normalized[src_start..src_start + width]);
         });
 
     Ok((mono_pixels, 1))
@@ -355,7 +349,10 @@ fn process_bayer_fast(
         anyhow::bail!("libraw: raw_image is null");
     }
 
-    let pixel_count = raw_width * raw_height;
+    let pixel_count = raw_width
+        .checked_mul(raw_height)
+        .expect("libraw: raw dimensions overflow");
+
     // SAFETY: raw_image_ptr is valid (checked above), and we've validated dimensions.
     let raw_data = unsafe { slice::from_raw_parts(raw_image_ptr, pixel_count) };
 

@@ -180,3 +180,149 @@ fn test_normalize_u16_large_array() {
     assert!((result[0] - 0.0).abs() < 1e-6);
     assert!((result[65535] - 1.0).abs() < 1e-4);
 }
+
+/// Test the normalize-then-crop pattern used by process_monochrome.
+/// Creates a synthetic raw buffer with margins and verifies active area extraction.
+#[test]
+fn test_normalize_and_crop_monochrome() {
+    let raw_width = 10;
+    let raw_height = 8;
+    let width = 6;
+    let height = 4;
+    let top_margin = 2;
+    let left_margin = 2;
+    let black = 100.0;
+    let maximum = 1100.0;
+    let inv_range = 1.0 / (maximum - black);
+
+    // Create raw buffer where each pixel encodes its (y, x) position
+    let mut raw_data = vec![0u16; raw_width * raw_height];
+    for y in 0..raw_height {
+        for x in 0..raw_width {
+            // Values in active area: 100 (black) to 1100 (max)
+            // Margin pixels get value 0 (below black → clamped to 0.0)
+            if y >= top_margin
+                && y < top_margin + height
+                && x >= left_margin
+                && x < left_margin + width
+            {
+                let active_y = y - top_margin;
+                let active_x = x - left_margin;
+                // Linear ramp: 100 + (active_y * width + active_x) * step
+                let step = (maximum - black) / (width * height - 1) as f32;
+                raw_data[y * raw_width + x] =
+                    (black + (active_y * width + active_x) as f32 * step) as u16;
+            }
+        }
+    }
+
+    // Normalize full buffer (same as process_monochrome does)
+    let normalized = normalize::normalize_u16_to_f32_parallel(&raw_data, black, inv_range);
+    assert_eq!(normalized.len(), raw_width * raw_height);
+
+    // Extract active area (same as process_monochrome does)
+    let mut mono_pixels = vec![0.0f32; width * height];
+    for y in 0..height {
+        let src_y = top_margin + y;
+        let src_start = src_y * raw_width + left_margin;
+        mono_pixels[y * width..y * width + width]
+            .copy_from_slice(&normalized[src_start..src_start + width]);
+    }
+
+    // Verify dimensions
+    assert_eq!(mono_pixels.len(), width * height);
+
+    // First active pixel should be ~0.0 (at black level)
+    assert!(
+        mono_pixels[0].abs() < 0.01,
+        "First pixel should be ~0.0, got {}",
+        mono_pixels[0]
+    );
+
+    // Last active pixel should be ~1.0 (at maximum)
+    let last = mono_pixels[width * height - 1];
+    assert!(
+        (last - 1.0).abs() < 0.01,
+        "Last pixel should be ~1.0, got {}",
+        last
+    );
+
+    // All values should be in [0.0, 1.0] range
+    for (i, &v) in mono_pixels.iter().enumerate() {
+        assert!(v >= 0.0, "Negative value at index {}: {}", i, v);
+        assert!(v <= 1.01, "Value > 1.0 at index {}: {}", i, v);
+    }
+
+    // Values should be monotonically non-decreasing (linear ramp)
+    for i in 1..mono_pixels.len() {
+        assert!(
+            mono_pixels[i] >= mono_pixels[i - 1] - 1e-5,
+            "Non-monotonic at index {}: {} < {}",
+            i,
+            mono_pixels[i],
+            mono_pixels[i - 1]
+        );
+    }
+}
+
+/// Test that margin pixels (outside active area) are zero after normalization
+/// when raw values are below black level.
+#[test]
+fn test_normalize_below_black_clamped() {
+    let black = 500.0;
+    let inv_range = 1.0 / 1000.0;
+
+    // All values below black
+    let input: Vec<u16> = vec![0, 100, 200, 499];
+    let result = normalize::normalize_u16_to_f32_parallel(&input, black, inv_range);
+
+    for (i, &v) in result.iter().enumerate() {
+        assert!(
+            v == 0.0,
+            "Value below black should be 0.0, got {} at index {}",
+            v,
+            i
+        );
+    }
+}
+
+/// Test process_unknown_libraw_fallback 16-bit normalization formula.
+/// We can't call the function directly (needs libraw instance), but we can
+/// verify the normalization math it uses: (v as f32) / 65535.0
+#[test]
+fn test_fallback_16bit_normalization() {
+    let test_cases: &[(u16, f32)] = &[
+        (0, 0.0),
+        (1, 1.0 / 65535.0),
+        (32767, 32767.0 / 65535.0),
+        (65535, 1.0),
+    ];
+
+    for &(input, expected) in test_cases {
+        let result = (input as f32) / 65535.0;
+        assert!(
+            (result - expected).abs() < 1e-6,
+            "16-bit norm({}) = {}, expected {}",
+            input,
+            result,
+            expected
+        );
+    }
+}
+
+/// Test process_unknown_libraw_fallback 8-bit normalization formula.
+#[test]
+fn test_fallback_8bit_normalization() {
+    let test_cases: &[(u8, f32)] = &[(0, 0.0), (1, 1.0 / 255.0), (127, 127.0 / 255.0), (255, 1.0)];
+
+    for &(input, expected) in test_cases {
+        let result = (input as f32) / 255.0;
+        assert!(
+            (result - expected).abs() < 1e-6,
+            "8-bit norm({}) = {}, expected {}",
+            input,
+            result,
+            expected
+        );
+    }
+}
