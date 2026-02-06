@@ -588,12 +588,7 @@ pub(super) fn compute_homogeneity(drv: &[f32], width: usize, height: usize, homo
 
     // Sub-pass 1: compute min derivative across directions and threshold
     // SAFETY: Every element is written by the parallel pass below before being read in sub-pass 2.
-    #[allow(clippy::uninit_vec)]
-    let mut threshold = unsafe {
-        let mut v = Vec::<f32>::with_capacity(pixels);
-        v.set_len(pixels);
-        v
-    };
+    let mut threshold = unsafe { crate::raw::alloc_uninit_vec::<f32>(pixels) };
     threshold
         .par_chunks_mut(width)
         .enumerate()
@@ -647,16 +642,24 @@ pub(super) fn compute_homogeneity(drv: &[f32], width: usize, height: usize, homo
 
 /// Final blending: sum homogeneity in 5×5 window, select best directions,
 /// average pre-computed RGB from qualifying directions.
+///
+/// `output_buf` is a reusable buffer that will be truncated/resized to `pixels * 3`.
+/// Pass a no-longer-needed buffer (e.g. `drv`) to avoid a fresh allocation.
 pub(super) fn blend_final_from_rgb(
     rgb_dir: &[f32],
     homo: &[u8],
     width: usize,
     height: usize,
+    mut output_buf: Vec<f32>,
 ) -> Vec<f32> {
     let pixels = width * height;
     let row_stride = width * 3;
+    let needed = pixels * 3;
 
-    let mut rgb = vec![0.0f32; pixels * 3];
+    // Reuse the provided buffer — truncate to needed size (no allocation).
+    // Every element is overwritten by the parallel pass below.
+    output_buf.truncate(needed);
+    let mut rgb = output_buf;
 
     rgb.par_chunks_mut(row_stride)
         .enumerate()

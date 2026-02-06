@@ -22,6 +22,17 @@ use demosaic::{BayerImage, CfaPattern, demosaic_bilinear};
 
 use normalize::normalize_u16_to_f32_parallel;
 
+/// Allocate a Vec of given length without zeroing.
+///
+/// SAFETY: Caller must ensure every element is written before it's read.
+/// This avoids expensive kernel page zeroing (clear_page_erms) for large buffers.
+#[allow(clippy::uninit_vec)]
+pub(crate) unsafe fn alloc_uninit_vec<T>(len: usize) -> Vec<T> {
+    let mut v = Vec::with_capacity(len);
+    unsafe { v.set_len(len) };
+    v
+}
+
 /// RAII guard for libraw_data_t to ensure proper cleanup.
 struct LibrawGuard(*mut sys::libraw_data_t);
 
@@ -316,7 +327,8 @@ fn process_monochrome(
 
     // Extract the active area
     let output_size = width * height;
-    let mut mono_pixels = vec![0.0f32; output_size];
+    // SAFETY: Every element is written by the parallel copy_from_slice pass below.
+    let mut mono_pixels = unsafe { alloc_uninit_vec::<f32>(output_size) };
     mono_pixels
         .par_chunks_mut(width)
         .enumerate()

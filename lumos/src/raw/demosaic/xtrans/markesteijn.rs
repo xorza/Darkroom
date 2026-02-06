@@ -39,18 +39,6 @@ struct MarkesteijnBuffers {
     homo: Vec<u8>,
 }
 
-/// Allocate a Vec of given length without zeroing.
-///
-/// SAFETY: Caller must ensure every element is written before it's read.
-/// This avoids expensive kernel page zeroing (clear_page_erms) for large buffers.
-#[allow(clippy::uninit_vec)]
-unsafe fn alloc_uninit_vec<T>(len: usize) -> Vec<T> {
-    let mut v = Vec::with_capacity(len);
-    // SAFETY: Caller guarantees all elements will be written before reading.
-    unsafe { v.set_len(len) };
-    v
-}
-
 impl MarkesteijnBuffers {
     fn new(width: usize, height: usize) -> Self {
         let pixels = width * height;
@@ -62,17 +50,31 @@ impl MarkesteijnBuffers {
         // - drv: written entirely by compute_rgb_and_derivatives Pass 2 (Step 3+4)
         unsafe {
             Self {
-                green_dir: alloc_uninit_vec(NDIR * pixels),
-                gmin: alloc_uninit_vec(pixels),
-                gmax: alloc_uninit_vec(pixels),
-                rgb_dir: alloc_uninit_vec(NDIR * pixels * 3),
-                drv: alloc_uninit_vec(NDIR * pixels),
-                // homo needs zeroing because compute_homogeneity starts with homo.fill(0)
-                // and only writes interior pixels, leaving borders at 0
-                homo: vec![0; NDIR * pixels],
+                green_dir: crate::raw::alloc_uninit_vec(NDIR * pixels),
+                gmin: crate::raw::alloc_uninit_vec(pixels),
+                gmax: crate::raw::alloc_uninit_vec(pixels),
+                rgb_dir: crate::raw::alloc_uninit_vec(NDIR * pixels * 3),
+                drv: crate::raw::alloc_uninit_vec(NDIR * pixels),
+                // homo is allocated later by reusing gmin's memory (same byte size)
+                homo: Vec::new(),
             }
         }
     }
+}
+
+/// Reinterpret a `Vec<f32>` as a `Vec<u8>` with 4× the element count.
+/// Reuses the same heap allocation (no alloc/dealloc). Contents are uninitialized.
+fn reinterpret_f32_as_u8(mut v: Vec<f32>) -> Vec<u8> {
+    let f32_cap = v.capacity();
+    let u8_len = f32_cap * 4; // 1 f32 = 4 u8
+
+    let ptr = v.as_mut_ptr() as *mut u8;
+    std::mem::forget(v);
+
+    // SAFETY: f32 and u8 have compatible alignment (u8 alignment=1 is less restrictive).
+    // The pointer came from a valid Vec<f32> allocation. Length and capacity are scaled by 4.
+    // Caller must write all elements before reading (compute_homogeneity does homo.fill(0)).
+    unsafe { Vec::from_raw_parts(ptr, u8_len, u8_len) }
 }
 
 /// Demosaic an X-Trans image using Markesteijn 1-pass algorithm.
@@ -106,9 +108,10 @@ pub fn demosaic_xtrans_markesteijn(xtrans: &XTransImage) -> Vec<f32> {
         t.elapsed().as_secs_f64() * 1000.0
     );
 
-    // Free gmin/gmax — no longer needed
-    drop(bufs.gmin);
-    drop(bufs.gmax);
+    // Reclaim gmin memory for homo buffer (same byte size: pixels*4 bytes = NDIR*pixels u8).
+    // gmax is simply freed.
+    bufs.homo = reinterpret_f32_as_u8(std::mem::take(&mut bufs.gmin));
+    bufs.gmax = Vec::new();
 
     // Step 3+4: Compute per-direction RGB + YPbPr derivatives
     let t = Instant::now();
@@ -124,7 +127,7 @@ pub fn demosaic_xtrans_markesteijn(xtrans: &XTransImage) -> Vec<f32> {
     );
 
     // Free green_dir — no longer needed (rgb_dir has full RGB)
-    drop(bufs.green_dir);
+    bufs.green_dir = Vec::new();
 
     // Step 5: Build homogeneity maps from derivatives
     let t = Instant::now();
@@ -134,12 +137,16 @@ pub fn demosaic_xtrans_markesteijn(xtrans: &XTransImage) -> Vec<f32> {
         t.elapsed().as_secs_f64() * 1000.0
     );
 
-    // Free drv — no longer needed
-    drop(bufs.drv);
-
     // Step 6: Final blend using homogeneity scores + pre-computed RGB
+    // Reuse drv buffer for output (drv has 4×pixels f32, output needs 3×pixels f32)
     let t = Instant::now();
-    let rgb = markesteijn_steps::blend_final_from_rgb(&bufs.rgb_dir, &bufs.homo, width, height);
+    let rgb = markesteijn_steps::blend_final_from_rgb(
+        &bufs.rgb_dir,
+        &bufs.homo,
+        width,
+        height,
+        std::mem::take(&mut bufs.drv),
+    );
     tracing::debug!(
         "  Step 6 (blend): {:.1}ms",
         t.elapsed().as_secs_f64() * 1000.0

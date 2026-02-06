@@ -5,7 +5,8 @@ use rayon::prelude::*;
 pub(crate) fn normalize_u16_to_f32_parallel(data: &[u16], black: f32, inv_range: f32) -> Vec<f32> {
     const CHUNK_SIZE: usize = 16384; // Process 64KB chunks (16K * 4 bytes)
 
-    let mut result = vec![0.0f32; data.len()];
+    // SAFETY: Every element is written by the parallel SIMD pass below before being read.
+    let mut result = unsafe { super::alloc_uninit_vec::<f32>(data.len()) };
 
     result
         .par_chunks_mut(CHUNK_SIZE)
