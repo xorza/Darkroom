@@ -14,8 +14,9 @@ pub fn mad_to_sigma(mad: f32) -> f32 {
     mad * MAD_TO_SIGMA
 }
 
-/// Calculate the median of f32 values in-place using quickselect (O(n) average).
-/// Mutates the input buffer (partial sort).
+/// Calculate the median of f32 values in-place.
+///
+/// Mutates the input buffer (partial sort via quickselect).
 #[inline]
 pub fn median_f32_mut(data: &mut [f32]) -> f32 {
     debug_assert!(!data.is_empty());
@@ -24,28 +25,25 @@ pub fn median_f32_mut(data: &mut [f32]) -> f32 {
     let mid = len / 2;
 
     if len & 1 == 1 {
-        // Odd length: single middle element
         let (_, median, _) = data.select_nth_unstable_by(mid, |a, b| a.partial_cmp(b).unwrap());
         *median
     } else {
-        // Even length: average of two middle elements
-        // First find the right median (element at mid)
         let (left_part, right_median, _) =
             data.select_nth_unstable_by(mid, |a, b| a.partial_cmp(b).unwrap());
         let right = *right_median;
-        // Left median is max of left partition (all elements < right_median)
         let left = left_part.iter().copied().reduce(f32::max).unwrap();
         (left + right) * 0.5
     }
 }
 
-/// Fast approximate median using single quickselect partition.
-/// For even-length arrays, returns the upper-middle element instead of averaging.
-/// This is sufficient for iterative algorithms like sigma clipping where
-/// exactness is not critical.
+/// Fast approximate median.
+///
+/// For even-length arrays, returns the upper-middle element
+/// instead of averaging — sufficient for iterative sigma clipping.
 #[inline]
 fn median_f32_approx(data: &mut [f32]) -> f32 {
     debug_assert!(!data.is_empty());
+
     let mid = data.len() / 2;
     let (_, median, _) = data.select_nth_unstable_by(mid, |a, b| a.partial_cmp(b).unwrap());
     *median

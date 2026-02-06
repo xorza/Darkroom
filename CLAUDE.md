@@ -34,6 +34,12 @@ AI coding rules for Rust projects:
 - Avoid editing root `README.md` unless asked; update `NOTES-AI.md` instead.
 - Add `README.md` to folders that benefit from human-readable docs (crates, examples, benchmarks, complex modules).
 
+## Optimization Workflow
+
+- Before optimizing, always run or create a relevant benchmark and save the baseline results.
+- After optimizing, run the same benchmark again and compare against the baseline to verify the optimization actually improved performance.
+- If the optimization is a regression or no improvement, revert it.
+
 ## Benchmarks and Profiling
 
 - Run benchmarks: `cargo test -p <crate> --release <bench_name> -- --ignored --nocapture`
