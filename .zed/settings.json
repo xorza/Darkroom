@@ -3,7 +3,8 @@
         "rust-analyzer": {
             "initialization_options": {
                 "runnables": {
-                    "extraArgs": ["--release -- --nocapture --ignored"]
+                    "extraArgs": ["--release"],
+                    "extraTestBinaryArgs": ["--nocapture"]
                 }
             }
         }
