@@ -243,7 +243,8 @@ fn dispatch_stacking(
         (CombineMethod::Median, rejection) => {
             let rejection = *rejection;
             cache.process_chunked(norm_params, move |values: &mut [f32]| {
-                apply_rejection(values, &rejection);
+                let mut indices: Vec<usize> = (0..values.len()).collect();
+                apply_rejection(values, &mut indices, &rejection);
                 math::median_f32_mut(values)
             })
         }
@@ -251,7 +252,8 @@ fn dispatch_stacking(
         (CombineMethod::Mean, rejection) => {
             let rejection = *rejection;
             cache.process_chunked(norm_params, move |values: &mut [f32]| {
-                let result = apply_rejection(values, &rejection);
+                let mut indices: Vec<usize> = (0..values.len()).collect();
+                let result = apply_rejection(values, &mut indices, &rejection);
                 if result.remaining_count > 0 {
                     math::mean_f32(&values[..result.remaining_count])
                 } else {
@@ -276,7 +278,11 @@ fn dispatch_stacking(
 }
 
 /// Apply rejection algorithm to values.
-fn apply_rejection(values: &mut [f32], rejection: &Rejection) -> RejectionResult {
+fn apply_rejection(
+    values: &mut [f32],
+    indices: &mut [usize],
+    rejection: &Rejection,
+) -> RejectionResult {
     match rejection {
         Rejection::None => RejectionResult {
             value: math::mean_f32(values),
@@ -285,7 +291,7 @@ fn apply_rejection(values: &mut [f32], rejection: &Rejection) -> RejectionResult
 
         Rejection::SigmaClip { sigma, iterations } => {
             let config = RejectionSigmaClipConfig::new(*sigma, *iterations);
-            rejection::sigma_clipped_mean(values, &config)
+            rejection::sigma_clipped_mean(values, indices, &config)
         }
 
         Rejection::SigmaClipAsymmetric {
@@ -294,7 +300,7 @@ fn apply_rejection(values: &mut [f32], rejection: &Rejection) -> RejectionResult
             iterations,
         } => {
             let config = AsymmetricSigmaClipConfig::new(*sigma_low, *sigma_high, *iterations);
-            rejection::sigma_clipped_mean_asymmetric(values, &config)
+            rejection::sigma_clipped_mean_asymmetric(values, indices, &config)
         }
 
         Rejection::Winsorized { sigma, iterations } => {
@@ -308,7 +314,7 @@ fn apply_rejection(values: &mut [f32], rejection: &Rejection) -> RejectionResult
             iterations,
         } => {
             let config = LinearFitClipConfig::new(*sigma_low, *sigma_high, *iterations);
-            rejection::linear_fit_clipped_mean(values, &config)
+            rejection::linear_fit_clipped_mean(values, indices, &config)
         }
 
         Rejection::Percentile { low, high } => {
@@ -321,12 +327,15 @@ fn apply_rejection(values: &mut [f32], rejection: &Rejection) -> RejectionResult
             max_outliers,
         } => {
             let config = GesdConfig::new(*alpha, *max_outliers);
-            rejection::gesd_mean(values, &config)
+            rejection::gesd_mean(values, indices, &config)
         }
     }
 }
 
 /// Apply rejection algorithm with weights.
+///
+/// Uses index tracking to maintain correct value-weight alignment after rejection
+/// functions partition/reorder the values array.
 fn apply_rejection_weighted(
     values: &mut [f32],
     weights: &[f32],
@@ -343,11 +352,13 @@ fn apply_rejection_weighted(
 
         Rejection::SigmaClip { sigma, iterations } => {
             let config = RejectionSigmaClipConfig::new(*sigma, *iterations);
-            let result = rejection::sigma_clipped_mean(values, &config);
+            let mut indices: Vec<usize> = (0..values.len()).collect();
+            let result = rejection::sigma_clipped_mean(values, &mut indices, &config);
             if result.remaining_count > 0 {
-                let value = weighted_mean(
+                let value = weighted_mean_indexed(
                     &values[..result.remaining_count],
-                    &weights[..result.remaining_count],
+                    weights,
+                    &indices[..result.remaining_count],
                 );
                 RejectionResult { value, ..result }
             } else {
@@ -361,11 +372,13 @@ fn apply_rejection_weighted(
             iterations,
         } => {
             let config = AsymmetricSigmaClipConfig::new(*sigma_low, *sigma_high, *iterations);
-            let result = rejection::sigma_clipped_mean_asymmetric(values, &config);
+            let mut indices: Vec<usize> = (0..values.len()).collect();
+            let result = rejection::sigma_clipped_mean_asymmetric(values, &mut indices, &config);
             if result.remaining_count > 0 {
-                let value = weighted_mean(
+                let value = weighted_mean_indexed(
                     &values[..result.remaining_count],
-                    &weights[..result.remaining_count],
+                    weights,
+                    &indices[..result.remaining_count],
                 );
                 RejectionResult { value, ..result }
             } else {
@@ -391,11 +404,13 @@ fn apply_rejection_weighted(
             iterations,
         } => {
             let config = LinearFitClipConfig::new(*sigma_low, *sigma_high, *iterations);
-            let result = rejection::linear_fit_clipped_mean(values, &config);
+            let mut indices: Vec<usize> = (0..values.len()).collect();
+            let result = rejection::linear_fit_clipped_mean(values, &mut indices, &config);
             if result.remaining_count > 0 {
-                let value = weighted_mean(
+                let value = weighted_mean_indexed(
                     &values[..result.remaining_count],
-                    &weights[..result.remaining_count],
+                    weights,
+                    &indices[..result.remaining_count],
                 );
                 RejectionResult { value, ..result }
             } else {
@@ -437,11 +452,13 @@ fn apply_rejection_weighted(
             max_outliers,
         } => {
             let config = GesdConfig::new(*alpha, *max_outliers);
-            let result = rejection::gesd_mean(values, &config);
+            let mut indices: Vec<usize> = (0..values.len()).collect();
+            let result = rejection::gesd_mean(values, &mut indices, &config);
             if result.remaining_count > 0 {
-                let value = weighted_mean(
+                let value = weighted_mean_indexed(
                     &values[..result.remaining_count],
-                    &weights[..result.remaining_count],
+                    weights,
+                    &indices[..result.remaining_count],
                 );
                 RejectionResult { value, ..result }
             } else {
@@ -490,6 +507,31 @@ fn weighted_mean(values: &[f32], weights: &[f32]) -> f32 {
     }
 }
 
+/// Compute weighted mean using index mapping.
+///
+/// `indices[i]` maps `values[i]` to `weights[indices[i]]`, maintaining correct
+/// alignment after rejection functions have reordered the values array.
+fn weighted_mean_indexed(values: &[f32], weights: &[f32], indices: &[usize]) -> f32 {
+    if values.is_empty() {
+        return 0.0;
+    }
+
+    let mut sum = 0.0f32;
+    let mut weight_sum = 0.0f32;
+
+    for (i, &v) in values.iter().enumerate() {
+        let w = weights[indices[i]];
+        sum += v * w;
+        weight_sum += w;
+    }
+
+    if weight_sum > f32::EPSILON {
+        sum / weight_sum
+    } else {
+        values.iter().sum::<f32>() / values.len() as f32
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -527,10 +569,15 @@ mod tests {
         let _ = stack(&paths, FrameType::Light, config);
     }
 
+    fn make_indices(len: usize) -> Vec<usize> {
+        (0..len).collect()
+    }
+
     #[test]
     fn test_apply_rejection_none() {
         let mut values = vec![1.0, 2.0, 3.0, 4.0, 5.0];
-        let result = apply_rejection(&mut values, &Rejection::None);
+        let mut indices = make_indices(values.len());
+        let result = apply_rejection(&mut values, &mut indices, &Rejection::None);
         assert!((result.value - 3.0).abs() < f32::EPSILON);
         assert_eq!(result.remaining_count, 5);
     }
@@ -538,8 +585,10 @@ mod tests {
     #[test]
     fn test_apply_rejection_sigma_clip() {
         let mut values = vec![1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 100.0];
+        let mut indices = make_indices(values.len());
         let result = apply_rejection(
             &mut values,
+            &mut indices,
             &Rejection::SigmaClip {
                 sigma: 2.0,
                 iterations: 3,
@@ -651,6 +700,135 @@ mod tests {
             result.value < 2.5,
             "Should be pulled toward 1.0, got {}",
             result.value
+        );
+    }
+
+    // ========== Weight-Value Alignment Tests ==========
+    //
+    // These tests verify that rejection + weighted mean correctly pairs
+    // surviving values with their original frame weights, not just the
+    // first N weights. With the old buggy code (pre-index-tracking),
+    // these tests would fail.
+
+    #[test]
+    fn test_weighted_sigma_clip_weight_alignment() {
+        // Frame 0: value=2.0,   weight=10.0 (high quality, should dominate)
+        // Frame 1: value=100.0, weight=0.1  (outlier, low weight)
+        // Frame 2: value=3.0,   weight=0.1
+        // Frame 3: value=2.5,   weight=0.1
+        // Frame 4: value=2.2,   weight=0.1
+        // Frame 5: value=1.8,   weight=0.1
+        // Frame 6: value=2.8,   weight=0.1
+        // Frame 7: value=2.3,   weight=0.1
+        //
+        // After rejecting frame 1 (outlier), the weighted mean should be
+        // strongly pulled toward frame 0 (weight 10.0).
+        let mut values = vec![2.0, 100.0, 3.0, 2.5, 2.2, 1.8, 2.8, 2.3];
+        let weights = vec![10.0, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1];
+
+        let result = apply_rejection_weighted(
+            &mut values,
+            &weights,
+            &Rejection::SigmaClip {
+                sigma: 2.0,
+                iterations: 3,
+            },
+        );
+
+        // Frame 1 should be rejected
+        assert!(result.remaining_count < 8);
+        // With correct alignment, frame 0 (weight=10.0, value=2.0) dominates.
+        // Other frames (1.8-3.0, weight=0.1 each) pull slightly away from 2.0.
+        // Weighted mean: (2.0*10 + sum_others*0.1) / (10 + 6*0.1) ≈ 1.84
+        assert!(
+            (result.value - 2.0).abs() < 0.25,
+            "Weighted mean should be ~2.0 (dominated by frame 0, weight=10.0), got {}",
+            result.value
+        );
+    }
+
+    #[test]
+    fn test_weighted_linear_fit_weight_alignment() {
+        // Linear trend with outlier at frame 4, heavy weight on frame 0
+        let mut values = vec![1.0, 2.0, 3.0, 4.0, 100.0, 6.0];
+        let weights = vec![10.0, 0.1, 0.1, 0.1, 0.1, 0.1];
+
+        let result = apply_rejection_weighted(
+            &mut values,
+            &weights,
+            &Rejection::LinearFit {
+                sigma_low: 2.0,
+                sigma_high: 2.0,
+                iterations: 3,
+            },
+        );
+
+        // Outlier rejected, frame 0 (weight=10.0, value=1.0) dominates
+        assert!(result.remaining_count < 6);
+        assert!(
+            result.value < 2.0,
+            "Weighted mean should be pulled toward frame 0 (value=1.0, weight=10.0), got {}",
+            result.value
+        );
+    }
+
+    #[test]
+    fn test_weighted_gesd_weight_alignment() {
+        // Frame 7 is outlier, frame 0 has heavy weight
+        let mut values = vec![1.0, 1.1, 0.9, 1.0, 1.2, 0.8, 1.0, 100.0];
+        let weights = vec![10.0, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1];
+
+        let result = apply_rejection_weighted(
+            &mut values,
+            &weights,
+            &Rejection::Gesd {
+                alpha: 0.05,
+                max_outliers: Some(3),
+            },
+        );
+
+        // Outlier rejected, frame 0 (weight=10.0, value=1.0) dominates
+        assert!(result.remaining_count < 8);
+        assert!(
+            (result.value - 1.0).abs() < 0.05,
+            "Weighted mean should be ~1.0 (dominated by frame 0, weight=10.0), got {}",
+            result.value
+        );
+    }
+
+    #[test]
+    fn test_weighted_rejection_uniform_weights_unchanged() {
+        // With uniform weights, index tracking shouldn't change results
+        let values = vec![1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 100.0];
+        let uniform_weights = vec![1.0; 8];
+
+        let result = apply_rejection_weighted(
+            &mut values.clone(),
+            &uniform_weights,
+            &Rejection::SigmaClip {
+                sigma: 2.0,
+                iterations: 3,
+            },
+        );
+
+        // Should match non-weighted rejection
+        let mut values2 = values;
+        let mut indices = make_indices(values2.len());
+        let result2 = apply_rejection(
+            &mut values2,
+            &mut indices,
+            &Rejection::SigmaClip {
+                sigma: 2.0,
+                iterations: 3,
+            },
+        );
+
+        assert_eq!(result.remaining_count, result2.remaining_count);
+        assert!(
+            (result.value - result2.value).abs() < 1e-5,
+            "Uniform weighted should match non-weighted: {} vs {}",
+            result.value,
+            result2.value
         );
     }
 

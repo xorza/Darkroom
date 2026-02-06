@@ -186,13 +186,11 @@ The `distortion/tps/` module is fully implemented but marked `#![allow(dead_code
 
 **SExtractor:** Uses `Mode ≈ 2.5×Median - 1.5×Mean` when the distribution is not too skewed (|mean - median| < 0.3×stddev). This is more robust for backgrounds contaminated by faint unresolved sources.
 
-### 7. Per-Pixel Weight Copy in Weighted Stacking
+### ~~7. Per-Pixel Weight Copy in Weighted Stacking~~ (RESOLVED — Was Hiding a Bug)
 
-In `stack.rs`, weights are copied per-pixel:
-```rust
-local_weights.copy_from_slice(weights); // Every pixel!
-```
-Weights don't change between pixels — this copy is unnecessary. The rejection functions modify values but not weights.
+The original assessment was wrong: the per-pixel copy wasn't just unnecessary, it was masking a deeper bug. Rejection functions (sigma clip, GESD, linear fit) partition `values` in-place, destroying the frame→value index mapping. But the weighted path then used `weights[0..remaining]` — pairing surviving values with the wrong frames' weights.
+
+**Fixed:** Rejection functions now accept an `indices: &mut [usize]` parameter that is co-partitioned alongside values. After rejection, `indices[..remaining]` maps surviving values back to their original frame weights via `weighted_mean_indexed()`. The per-pixel `local_weights` copy was removed. Tests verify correct weight-value alignment with non-uniform weights.
 
 ---
 
@@ -291,7 +289,7 @@ The calibration code uses `image.apply_from_channel(bias, |_c, dst, src| { ... }
 
 ### High Impact, Low Effort
 1. ~~**Add multiplicative/additive normalization modes**~~ — RESOLVED: Multiplicative added; pure additive not needed
-2. **Remove per-pixel weight copy** in weighted stacking — single line fix
+2. ~~**Remove per-pixel weight copy**~~ — RESOLVED: was masking a weight-value alignment bug, now fixed with index tracking
 3. **Wire up or remove TPS dead code** — code hygiene
 
 ### High Impact, Medium Effort

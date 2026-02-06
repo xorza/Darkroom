@@ -368,7 +368,6 @@ impl ImageCache {
             output_slice.par_chunks_mut(width).enumerate().for_each(
                 |(row_in_chunk, row_output)| {
                     let mut values = vec![0.0f32; frame_count];
-                    let mut local_weights = weights.to_vec();
                     let row_offset = row_in_chunk * width;
 
                     for (pixel_in_row, out) in row_output.iter_mut().enumerate() {
@@ -383,8 +382,7 @@ impl ImageCache {
                                 values[frame_idx] = chunk[pixel_idx];
                             }
                         }
-                        local_weights.copy_from_slice(weights);
-                        *out = combine(&mut values, &local_weights);
+                        *out = combine(&mut values, weights);
                     }
                 },
             );

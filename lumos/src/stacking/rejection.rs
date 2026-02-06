@@ -251,9 +251,16 @@ pub struct RejectionResult {
 /// 3. Clip values beyond sigma threshold from median
 /// 4. Return mean of remaining values
 ///
-/// Modifies the input slice in place.
-pub fn sigma_clipped_mean(values: &mut [f32], config: &SigmaClipConfig) -> RejectionResult {
+/// Modifies `values` and `indices` in place. After return, `values[..remaining_count]`
+/// contains surviving values and `indices[..remaining_count]` contains their original
+/// frame indices. `indices` must be initialized by the caller (typically `[0, 1, ..., N-1]`).
+pub fn sigma_clipped_mean(
+    values: &mut [f32],
+    indices: &mut [usize],
+    config: &SigmaClipConfig,
+) -> RejectionResult {
     debug_assert!(!values.is_empty());
+    debug_assert_eq!(values.len(), indices.len());
 
     if values.len() <= 2 {
         return RejectionResult {
@@ -284,11 +291,12 @@ pub fn sigma_clipped_mean(values: &mut [f32], config: &SigmaClipConfig) -> Rejec
 
         let threshold = config.sigma * sigma;
 
-        // Partition: move kept values to front
+        // Partition: move kept values and indices to front
         let mut write_idx = 0;
         for read_idx in 0..len {
             if (values[read_idx] - center).abs() <= threshold {
                 values[write_idx] = values[read_idx];
+                indices[write_idx] = indices[read_idx];
                 write_idx += 1;
             }
         }
@@ -314,12 +322,14 @@ pub fn sigma_clipped_mean(values: &mut [f32], config: &SigmaClipConfig) -> Rejec
 /// 4. Clip high outliers beyond sigma_high * stddev above median
 /// 5. Return mean of remaining values
 ///
-/// Modifies the input slice in place.
+/// Modifies `values` and `indices` in place. See [`sigma_clipped_mean`] for index semantics.
 pub fn sigma_clipped_mean_asymmetric(
     values: &mut [f32],
+    indices: &mut [usize],
     config: &AsymmetricSigmaClipConfig,
 ) -> RejectionResult {
     debug_assert!(!values.is_empty());
+    debug_assert_eq!(values.len(), indices.len());
 
     if values.len() <= 2 {
         return RejectionResult {
@@ -349,7 +359,7 @@ pub fn sigma_clipped_mean_asymmetric(
         let low_threshold = config.sigma_low * sigma;
         let high_threshold = config.sigma_high * sigma;
 
-        // Partition: move kept values to front
+        // Partition: move kept values and indices to front
         let mut write_idx = 0;
         for read_idx in 0..len {
             let diff = values[read_idx] - center;
@@ -360,6 +370,7 @@ pub fn sigma_clipped_mean_asymmetric(
             };
             if keep {
                 values[write_idx] = values[read_idx];
+                indices[write_idx] = indices[read_idx];
                 write_idx += 1;
             }
         }
@@ -449,12 +460,14 @@ pub fn winsorize(values: &[f32], config: &WinsorizedClipConfig) -> Vec<f32> {
 /// pixel values may have a linear relationship with some reference.
 /// Here we use the pixel index as the reference (assumes temporal ordering).
 ///
-/// Modifies the input slice in place.
+/// Modifies `values` and `indices` in place. See [`sigma_clipped_mean`] for index semantics.
 pub fn linear_fit_clipped_mean(
     values: &mut [f32],
+    indices: &mut [usize],
     config: &LinearFitClipConfig,
 ) -> RejectionResult {
     debug_assert!(!values.is_empty());
+    debug_assert_eq!(values.len(), indices.len());
 
     if values.len() <= 3 {
         return RejectionResult {
@@ -464,8 +477,6 @@ pub fn linear_fit_clipped_mean(
     }
 
     let mut len = values.len();
-    // Track which original indices are still active
-    let mut indices: Vec<usize> = (0..len).collect();
 
     for _ in 0..config.max_iterations {
         if len <= 3 {
@@ -601,9 +612,14 @@ pub fn percentile_clipped_mean(
 /// 3. If R_i > critical, mark as outlier and repeat
 /// 4. Return mean of non-outliers
 ///
-/// Modifies the input slice in place.
-pub fn gesd_mean(values: &mut [f32], config: &GesdConfig) -> RejectionResult {
+/// Modifies `values` and `indices` in place. See [`sigma_clipped_mean`] for index semantics.
+pub fn gesd_mean(
+    values: &mut [f32],
+    indices: &mut [usize],
+    config: &GesdConfig,
+) -> RejectionResult {
     debug_assert!(!values.is_empty());
+    debug_assert_eq!(values.len(), indices.len());
 
     let original_len = values.len();
 
@@ -664,6 +680,7 @@ pub fn gesd_mean(values: &mut [f32], config: &GesdConfig) -> RejectionResult {
         if r_i > critical {
             // Remove by swapping with last element
             values.swap(max_idx, len - 1);
+            indices.swap(max_idx, len - 1);
             len -= 1;
         } else {
             // No more outliers found
@@ -782,12 +799,18 @@ mod tests {
 
     // ========== Algorithm Tests ==========
 
+    /// Helper: create identity indices for a given length.
+    fn make_indices(len: usize) -> Vec<usize> {
+        (0..len).collect()
+    }
+
     #[test]
     fn test_sigma_clipped_mean_removes_outlier() {
         // Use data with spread (non-zero MAD) plus a clear outlier
         let mut values = vec![1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 100.0];
+        let mut indices = make_indices(values.len());
         let config = SigmaClipConfig::new(2.0, 3);
-        let result = sigma_clipped_mean(&mut values, &config);
+        let result = sigma_clipped_mean(&mut values, &mut indices, &config);
         assert!(
             result.value < 10.0,
             "Expected outlier to be clipped, got {}",
@@ -799,8 +822,9 @@ mod tests {
     #[test]
     fn test_sigma_clipped_mean_no_outliers() {
         let mut values = vec![1.0, 1.1, 1.2, 0.9, 1.0];
+        let mut indices = make_indices(values.len());
         let config = SigmaClipConfig::new(3.0, 3);
-        let result = sigma_clipped_mean(&mut values, &config);
+        let result = sigma_clipped_mean(&mut values, &mut indices, &config);
         assert_eq!(result.remaining_count, 5);
     }
 
@@ -822,8 +846,9 @@ mod tests {
     #[test]
     fn test_linear_fit_clipped_mean_constant_data() {
         let mut values = vec![5.0, 5.0, 5.0, 5.0, 5.0];
+        let mut indices = make_indices(values.len());
         let config = LinearFitClipConfig::default();
-        let result = linear_fit_clipped_mean(&mut values, &config);
+        let result = linear_fit_clipped_mean(&mut values, &mut indices, &config);
         assert!((result.value - 5.0).abs() < 0.01);
         assert_eq!(result.remaining_count, 5);
     }
@@ -832,8 +857,9 @@ mod tests {
     fn test_linear_fit_clipped_mean_linear_trend() {
         // Linear trend with one outlier
         let mut values = vec![1.0, 2.0, 3.0, 4.0, 100.0, 6.0];
+        let mut indices = make_indices(values.len());
         let config = LinearFitClipConfig::new(2.0, 2.0, 3);
-        let result = linear_fit_clipped_mean(&mut values, &config);
+        let result = linear_fit_clipped_mean(&mut values, &mut indices, &config);
         // Should reject the 100.0 outlier
         assert!(result.remaining_count < 6);
         assert!(result.value < 20.0);
@@ -853,8 +879,9 @@ mod tests {
     #[test]
     fn test_gesd_mean_removes_outliers() {
         let mut values = vec![1.0, 1.1, 0.9, 1.0, 1.2, 0.8, 1.0, 100.0];
+        let mut indices = make_indices(values.len());
         let config = GesdConfig::new(0.05, Some(3));
-        let result = gesd_mean(&mut values, &config);
+        let result = gesd_mean(&mut values, &mut indices, &config);
         // Should detect and remove the 100.0 outlier
         assert!(result.remaining_count < 8);
         assert!(result.value < 10.0);
@@ -863,8 +890,9 @@ mod tests {
     #[test]
     fn test_gesd_mean_no_outliers() {
         let mut values = vec![1.0, 1.1, 0.9, 1.0, 1.2, 0.8, 1.0, 1.1];
+        let mut indices = make_indices(values.len());
         let config = GesdConfig::new(0.05, Some(3));
-        let result = gesd_mean(&mut values, &config);
+        let result = gesd_mean(&mut values, &mut indices, &config);
         // Clean data should have few or no rejections
         assert!(result.remaining_count >= 7);
     }
@@ -888,15 +916,22 @@ mod tests {
         // All algorithms should handle small samples gracefully
         let values = vec![1.0, 2.0];
 
-        let sigma_result = sigma_clipped_mean(&mut values.clone(), &SigmaClipConfig::default());
+        let sigma_result = sigma_clipped_mean(
+            &mut values.clone(),
+            &mut make_indices(values.len()),
+            &SigmaClipConfig::default(),
+        );
         assert_eq!(sigma_result.remaining_count, 2);
 
         let winsorized_result =
             winsorized_sigma_clipped_mean(&values, &WinsorizedClipConfig::default());
         assert_eq!(winsorized_result.remaining_count, 2);
 
-        let linear_result =
-            linear_fit_clipped_mean(&mut values.clone(), &LinearFitClipConfig::default());
+        let linear_result = linear_fit_clipped_mean(
+            &mut values.clone(),
+            &mut make_indices(values.len()),
+            &LinearFitClipConfig::default(),
+        );
         assert_eq!(linear_result.remaining_count, 2);
 
         let percentile_result =
@@ -905,11 +940,16 @@ mod tests {
 
         let asymmetric_result = sigma_clipped_mean_asymmetric(
             &mut values.clone(),
+            &mut make_indices(values.len()),
             &AsymmetricSigmaClipConfig::default(),
         );
         assert_eq!(asymmetric_result.remaining_count, 2);
 
-        let gesd_result = gesd_mean(&mut values.clone(), &GesdConfig::default());
+        let gesd_result = gesd_mean(
+            &mut values.clone(),
+            &mut make_indices(values.len()),
+            &GesdConfig::default(),
+        );
         assert_eq!(gesd_result.remaining_count, 2);
     }
 
@@ -949,8 +989,9 @@ mod tests {
     fn test_asymmetric_sigma_clip_removes_high_outlier() {
         // Use data with spread (non-zero MAD) plus a high outlier
         let mut values = vec![1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 100.0];
+        let mut indices = make_indices(values.len());
         let config = AsymmetricSigmaClipConfig::new(4.0, 2.0, 3);
-        let result = sigma_clipped_mean_asymmetric(&mut values, &config);
+        let result = sigma_clipped_mean_asymmetric(&mut values, &mut indices, &config);
         assert!(
             result.value < 10.0,
             "High outlier should be clipped, got {}",
@@ -965,8 +1006,9 @@ mod tests {
         // Use very conservative sigma_low (10.0) and aggressive sigma_high (2.0).
         // The high outlier should be rejected, but the low outlier should be kept.
         let mut values = vec![-5.0, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 50.0];
+        let mut indices = make_indices(values.len());
         let config = AsymmetricSigmaClipConfig::new(10.0, 2.0, 5);
-        let result = sigma_clipped_mean_asymmetric(&mut values, &config);
+        let result = sigma_clipped_mean_asymmetric(&mut values, &mut indices, &config);
 
         // The high outlier (50.0) should be removed
         // The low outlier (-5.0) should be kept due to high sigma_low
@@ -986,8 +1028,9 @@ mod tests {
     #[test]
     fn test_asymmetric_sigma_clip_no_outliers() {
         let mut values = vec![1.0, 1.1, 1.2, 0.9, 1.0];
+        let mut indices = make_indices(values.len());
         let config = AsymmetricSigmaClipConfig::new(3.0, 3.0, 3);
-        let result = sigma_clipped_mean_asymmetric(&mut values, &config);
+        let result = sigma_clipped_mean_asymmetric(&mut values, &mut indices, &config);
         assert_eq!(result.remaining_count, 5);
     }
 
@@ -997,9 +1040,14 @@ mod tests {
         let values = vec![1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 100.0];
         let sigma = 2.5;
 
-        let sym_result = sigma_clipped_mean(&mut values.clone(), &SigmaClipConfig::new(sigma, 3));
+        let sym_result = sigma_clipped_mean(
+            &mut values.clone(),
+            &mut make_indices(values.len()),
+            &SigmaClipConfig::new(sigma, 3),
+        );
         let asym_result = sigma_clipped_mean_asymmetric(
             &mut values.clone(),
+            &mut make_indices(values.len()),
             &AsymmetricSigmaClipConfig::new(sigma, sigma, 3),
         );
 
@@ -1021,10 +1069,14 @@ mod tests {
 
         let asym_result = sigma_clipped_mean_asymmetric(
             &mut values.clone(),
+            &mut make_indices(values.len()),
             &AsymmetricSigmaClipConfig::new(1.0, 1.0, 3),
         );
-        let linear_result =
-            linear_fit_clipped_mean(&mut values.clone(), &LinearFitClipConfig::new(1.0, 1.0, 3));
+        let linear_result = linear_fit_clipped_mean(
+            &mut values.clone(),
+            &mut make_indices(values.len()),
+            &LinearFitClipConfig::new(1.0, 1.0, 3),
+        );
 
         // Linear fit follows the trend perfectly, so no rejections
         assert_eq!(
@@ -1039,5 +1091,85 @@ mod tests {
             asym_result.remaining_count < 10,
             "Asymmetric clip from median should reject points far from center"
         );
+    }
+
+    // ========== Index Tracking Tests ==========
+
+    #[test]
+    fn test_sigma_clipped_indices_track_survivors() {
+        // Frame 0=1.0, Frame 1=1.5, ..., Frame 7=100.0 (outlier)
+        let mut values = vec![1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 100.0];
+        let mut indices = make_indices(values.len());
+        let config = SigmaClipConfig::new(2.0, 3);
+        let result = sigma_clipped_mean(&mut values, &mut indices, &config);
+
+        // Outlier (frame 7) should be rejected
+        let surviving = &indices[..result.remaining_count];
+        assert!(
+            !surviving.contains(&7),
+            "Frame 7 (outlier) should not survive, survivors: {:?}",
+            surviving
+        );
+        // All surviving indices should be valid frame indices
+        for &idx in surviving {
+            assert!(idx < 8, "Invalid surviving index: {}", idx);
+        }
+    }
+
+    #[test]
+    fn test_gesd_indices_track_survivors() {
+        // Frame 7 = outlier
+        let mut values = vec![1.0, 1.1, 0.9, 1.0, 1.2, 0.8, 1.0, 100.0];
+        let mut indices = make_indices(values.len());
+        let config = GesdConfig::new(0.05, Some(3));
+        let result = gesd_mean(&mut values, &mut indices, &config);
+
+        let surviving = &indices[..result.remaining_count];
+        assert!(
+            !surviving.contains(&7),
+            "Frame 7 (outlier) should not survive, survivors: {:?}",
+            surviving
+        );
+        for &idx in surviving {
+            assert!(idx < 8, "Invalid surviving index: {}", idx);
+        }
+    }
+
+    #[test]
+    fn test_linear_fit_indices_track_survivors() {
+        // Linear trend with outlier at frame 4
+        let mut values = vec![1.0, 2.0, 3.0, 4.0, 100.0, 6.0];
+        let mut indices = make_indices(values.len());
+        let config = LinearFitClipConfig::new(2.0, 2.0, 3);
+        let result = linear_fit_clipped_mean(&mut values, &mut indices, &config);
+
+        let surviving = &indices[..result.remaining_count];
+        assert!(
+            !surviving.contains(&4),
+            "Frame 4 (outlier) should not survive, survivors: {:?}",
+            surviving
+        );
+        for &idx in surviving {
+            assert!(idx < 6, "Invalid surviving index: {}", idx);
+        }
+    }
+
+    #[test]
+    fn test_no_rejection_preserves_all_indices() {
+        let mut values = vec![1.0, 1.1, 1.2, 0.9, 1.0];
+        let mut indices = make_indices(values.len());
+        let config = SigmaClipConfig::new(3.0, 3);
+        let result = sigma_clipped_mean(&mut values, &mut indices, &config);
+
+        assert_eq!(result.remaining_count, 5);
+        // All original indices should be present
+        let surviving = &indices[..result.remaining_count];
+        for i in 0..5 {
+            assert!(
+                surviving.contains(&i),
+                "Index {} should survive when no rejection occurs",
+                i
+            );
+        }
     }
 }
