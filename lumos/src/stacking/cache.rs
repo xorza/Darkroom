@@ -16,6 +16,7 @@ use std::io::{self, BufWriter, Write};
 use std::mem::size_of;
 use std::path::{Path, PathBuf};
 
+use common::parallel::try_par_map_limited;
 use memmap2::Mmap;
 use rayon::prelude::*;
 
@@ -167,40 +168,33 @@ impl ImageCache {
     ) -> Result<Storage, Error> {
         report_progress(progress, 1, paths.len(), StackingStage::Loading);
 
-        // Load remaining images in parallel
-        let remaining_results: Result<Vec<(usize, AstroImage)>, Error> = paths[1..]
-            .par_iter()
+        // Load remaining images in parallel, at most 3 at a time to cap memory/IO pressure
+        let indexed_paths: Vec<(usize, &P)> = paths[1..]
+            .iter()
             .enumerate()
-            .map(|(i, path)| {
-                let actual_index = i + 1;
-                let path_ref = path.as_ref();
-                let image = AstroImage::from_file(path_ref).map_err(|e| Error::ImageLoad {
-                    path: path_ref.to_path_buf(),
-                    source: io::Error::other(e.to_string()),
-                })?;
-
-                if image.dimensions() != dimensions {
-                    return Err(Error::DimensionMismatch {
-                        frame_type,
-                        index: actual_index,
-                        expected: dimensions,
-                        actual: image.dimensions(),
-                    });
-                }
-
-                Ok((actual_index, image))
-            })
+            .map(|(i, p)| (i + 1, p))
             .collect();
-
-        let mut remaining = remaining_results?;
-
-        // Sort by index to maintain order
-        remaining.sort_by_key(|(i, _)| *i);
+        let remaining = try_par_map_limited(&indexed_paths, 3, |&(idx, ref path)| {
+            let path_ref = path.as_ref();
+            let image = AstroImage::from_file(path_ref).map_err(|e| Error::ImageLoad {
+                path: path_ref.to_path_buf(),
+                source: io::Error::other(e.to_string()),
+            })?;
+            if image.dimensions() != dimensions {
+                return Err(Error::DimensionMismatch {
+                    frame_type,
+                    index: idx,
+                    expected: dimensions,
+                    actual: image.dimensions(),
+                });
+            }
+            Ok(image)
+        })?;
 
         // Build final vector of AstroImages
         let mut images = Vec::with_capacity(paths.len());
         images.push(first_image);
-        images.extend(remaining.into_iter().map(|(_, img)| img));
+        images.extend(remaining);
 
         report_progress(progress, paths.len(), paths.len(), StackingStage::Loading);
 
@@ -232,36 +226,30 @@ impl ImageCache {
             cache_image_channels(cache_dir, &base_filename, &first_image, dimensions)?;
         report_progress(progress, 1, paths.len(), StackingStage::Loading);
 
-        // Process remaining images in parallel
+        // Process remaining images in parallel, at most 3 at a time to cap memory/IO pressure
         // Each frame writes to unique files (based on path hash), so no contention
-        let remaining_results: Result<Vec<(usize, CachedFrame)>, Error> = paths[1..]
-            .par_iter()
+        let indexed_paths: Vec<(usize, &P)> = paths[1..]
+            .iter()
             .enumerate()
-            .map(|(i, path)| {
-                let actual_index = i + 1;
-                let path_ref = path.as_ref();
-                let base_filename = cache_filename_for_path(path_ref);
-
-                let cached_frame = load_and_cache_frame(
-                    cache_dir,
-                    &base_filename,
-                    path_ref,
-                    dimensions,
-                    frame_type,
-                    actual_index,
-                )?;
-
-                Ok((actual_index, cached_frame))
-            })
+            .map(|(i, p)| (i + 1, p))
             .collect();
-
-        let mut remaining = remaining_results?;
-        remaining.sort_by_key(|(i, _)| *i);
+        let remaining = try_par_map_limited(&indexed_paths, 3, |&(idx, ref path)| {
+            let path_ref = path.as_ref();
+            let base_filename = cache_filename_for_path(path_ref);
+            load_and_cache_frame(
+                cache_dir,
+                &base_filename,
+                path_ref,
+                dimensions,
+                frame_type,
+                idx,
+            )
+        })?;
 
         // Build final frames vector
         let mut cached_frames = Vec::with_capacity(paths.len());
         cached_frames.push(first_cached);
-        cached_frames.extend(remaining.into_iter().map(|(_, frame)| frame));
+        cached_frames.extend(remaining);
 
         report_progress(progress, paths.len(), paths.len(), StackingStage::Loading);
 
