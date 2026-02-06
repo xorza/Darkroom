@@ -7,7 +7,7 @@
 //! - Percentile clipping
 //! - Generalized Extreme Studentized Deviate (GESD)
 
-use crate::math;
+use crate::math::{self, mad_f32_with_scratch, mad_to_sigma};
 
 /// Configuration for sigma clipping.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -35,6 +35,44 @@ impl SigmaClipConfig {
         assert!(max_iterations > 0, "Max iterations must be at least 1");
         Self {
             sigma,
+            max_iterations,
+        }
+    }
+}
+
+/// Configuration for asymmetric sigma clipping.
+///
+/// Like standard sigma clipping but with separate thresholds for low and high outliers.
+/// Useful when bright outliers (satellites, cosmic rays) need aggressive rejection
+/// while faint outliers should be treated conservatively.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct AsymmetricSigmaClipConfig {
+    /// Sigma threshold for low outliers (below median).
+    pub sigma_low: f32,
+    /// Sigma threshold for high outliers (above median).
+    pub sigma_high: f32,
+    /// Maximum number of iterations for iterative clipping.
+    pub max_iterations: u32,
+}
+
+impl Default for AsymmetricSigmaClipConfig {
+    fn default() -> Self {
+        Self {
+            sigma_low: 4.0,
+            sigma_high: 3.0,
+            max_iterations: 3,
+        }
+    }
+}
+
+impl AsymmetricSigmaClipConfig {
+    pub fn new(sigma_low: f32, sigma_high: f32, max_iterations: u32) -> Self {
+        assert!(sigma_low > 0.0, "Sigma low must be positive");
+        assert!(sigma_high > 0.0, "Sigma high must be positive");
+        assert!(max_iterations > 0, "Max iterations must be at least 1");
+        Self {
+            sigma_low,
+            sigma_high,
             max_iterations,
         }
     }
@@ -225,6 +263,7 @@ pub fn sigma_clipped_mean(values: &mut [f32], config: &SigmaClipConfig) -> Rejec
     }
 
     let mut len = values.len();
+    let mut scratch = Vec::with_capacity(len);
 
     for _ in 0..config.max_iterations {
         if len <= 2 {
@@ -235,19 +274,91 @@ pub fn sigma_clipped_mean(values: &mut [f32], config: &SigmaClipConfig) -> Rejec
 
         // Use median as center - robust to outliers
         let center = math::median_f32_mut(active);
-        let variance = math::sum_squared_diff(active, center) / len as f32;
-        let std_dev = variance.sqrt();
+        // Use MAD-based scale estimate (robust to outliers, unlike stddev)
+        let mad = mad_f32_with_scratch(&values[..len], center, &mut scratch);
+        let sigma = mad_to_sigma(mad);
 
-        if std_dev < f32::EPSILON {
+        if sigma < f32::EPSILON {
             break;
         }
 
-        let threshold = config.sigma * std_dev;
+        let threshold = config.sigma * sigma;
 
         // Partition: move kept values to front
         let mut write_idx = 0;
         for read_idx in 0..len {
             if (values[read_idx] - center).abs() <= threshold {
+                values[write_idx] = values[read_idx];
+                write_idx += 1;
+            }
+        }
+
+        if write_idx == len {
+            break;
+        }
+        len = write_idx;
+    }
+
+    RejectionResult {
+        value: math::mean_f32(&values[..len]),
+        remaining_count: len,
+    }
+}
+
+/// Asymmetric sigma-clipped mean: separate thresholds for low and high outliers.
+///
+/// Algorithm:
+/// 1. Use median as center (robust to outliers)
+/// 2. Compute std dev from median
+/// 3. Clip low outliers beyond sigma_low * stddev below median
+/// 4. Clip high outliers beyond sigma_high * stddev above median
+/// 5. Return mean of remaining values
+///
+/// Modifies the input slice in place.
+pub fn sigma_clipped_mean_asymmetric(
+    values: &mut [f32],
+    config: &AsymmetricSigmaClipConfig,
+) -> RejectionResult {
+    debug_assert!(!values.is_empty());
+
+    if values.len() <= 2 {
+        return RejectionResult {
+            value: math::mean_f32(values),
+            remaining_count: values.len(),
+        };
+    }
+
+    let mut len = values.len();
+    let mut scratch = Vec::with_capacity(len);
+
+    for _ in 0..config.max_iterations {
+        if len <= 2 {
+            break;
+        }
+
+        let active = &mut values[..len];
+
+        let center = math::median_f32_mut(active);
+        let mad = mad_f32_with_scratch(&values[..len], center, &mut scratch);
+        let sigma = mad_to_sigma(mad);
+
+        if sigma < f32::EPSILON {
+            break;
+        }
+
+        let low_threshold = config.sigma_low * sigma;
+        let high_threshold = config.sigma_high * sigma;
+
+        // Partition: move kept values to front
+        let mut write_idx = 0;
+        for read_idx in 0..len {
+            let diff = values[read_idx] - center;
+            let keep = if diff < 0.0 {
+                diff.abs() <= low_threshold
+            } else {
+                diff <= high_threshold
+            };
+            if keep {
                 values[write_idx] = values[read_idx];
                 write_idx += 1;
             }
@@ -275,52 +386,57 @@ pub fn winsorized_sigma_clipped_mean(
     values: &[f32],
     config: &WinsorizedClipConfig,
 ) -> RejectionResult {
-    debug_assert!(!values.is_empty());
-
-    if values.len() <= 2 {
-        return RejectionResult {
-            value: math::mean_f32(values),
-            remaining_count: values.len(),
-        };
-    }
-
-    // Work with a copy for iterative winsorization
-    let mut working = values.to_vec();
-
-    for _ in 0..config.max_iterations {
-        // Compute median and std dev
-        let center = math::median_f32_mut(&mut working.clone());
-        let variance = math::sum_squared_diff(&working, center) / working.len() as f32;
-        let std_dev = variance.sqrt();
-
-        if std_dev < f32::EPSILON {
-            break;
-        }
-
-        let low_bound = center - config.sigma * std_dev;
-        let high_bound = center + config.sigma * std_dev;
-
-        // Replace outliers with boundary values
-        let mut winsorized_this_iter = 0;
-        for v in &mut working {
-            if *v < low_bound {
-                *v = low_bound;
-                winsorized_this_iter += 1;
-            } else if *v > high_bound {
-                *v = high_bound;
-                winsorized_this_iter += 1;
-            }
-        }
-
-        if winsorized_this_iter == 0 {
-            break;
-        }
-    }
-
+    let working = winsorize(values, config);
     RejectionResult {
         value: math::mean_f32(&working),
         remaining_count: values.len(),
     }
+}
+
+/// Apply winsorization: replace outliers with boundary values, return modified copy.
+///
+/// Iteratively computes median and std dev, then clamps values to
+/// `[median - sigma*stddev, median + sigma*stddev]`.
+pub fn winsorize(values: &[f32], config: &WinsorizedClipConfig) -> Vec<f32> {
+    debug_assert!(!values.is_empty());
+
+    let mut working = values.to_vec();
+
+    if values.len() <= 2 {
+        return working;
+    }
+
+    let mut scratch = Vec::with_capacity(values.len());
+
+    for _ in 0..config.max_iterations {
+        let center = math::median_f32_mut(&mut working.clone());
+        let mad = mad_f32_with_scratch(&working, center, &mut scratch);
+        let sigma = mad_to_sigma(mad);
+
+        if sigma < f32::EPSILON {
+            break;
+        }
+
+        let low_bound = center - config.sigma * sigma;
+        let high_bound = center + config.sigma * sigma;
+
+        let mut changed = false;
+        for v in &mut working {
+            if *v < low_bound {
+                *v = low_bound;
+                changed = true;
+            } else if *v > high_bound {
+                *v = high_bound;
+                changed = true;
+            }
+        }
+
+        if !changed {
+            break;
+        }
+    }
+
+    working
 }
 
 /// Linear fit clipping: reject pixels based on deviation from linear fit.
@@ -664,11 +780,16 @@ mod tests {
 
     #[test]
     fn test_sigma_clipped_mean_removes_outlier() {
-        let mut values = vec![1.0, 2.0, 2.0, 2.0, 2.0, 100.0];
+        // Use data with spread (non-zero MAD) plus a clear outlier
+        let mut values = vec![1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 100.0];
         let config = SigmaClipConfig::new(2.0, 3);
         let result = sigma_clipped_mean(&mut values, &config);
-        assert!(result.value < 10.0, "Expected outlier to be clipped");
-        assert!(result.remaining_count < 6);
+        assert!(
+            result.value < 10.0,
+            "Expected outlier to be clipped, got {}",
+            result.value
+        );
+        assert!(result.remaining_count < 8);
     }
 
     #[test]
@@ -681,13 +802,17 @@ mod tests {
 
     #[test]
     fn test_winsorized_sigma_clipped_mean() {
-        let values = vec![1.0, 2.0, 2.0, 2.0, 2.0, 100.0];
+        let values = vec![1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 100.0];
         let config = WinsorizedClipConfig::new(2.0, 3);
         let result = winsorized_sigma_clipped_mean(&values, &config);
         // Winsorized should have lower mean than with full outlier
-        assert!(result.value < 20.0);
+        assert!(
+            result.value < 20.0,
+            "Outlier should be winsorized, got {}",
+            result.value
+        );
         // All values retained (just modified)
-        assert_eq!(result.remaining_count, 6);
+        assert_eq!(result.remaining_count, 8);
     }
 
     #[test]
@@ -774,7 +899,141 @@ mod tests {
             percentile_clipped_mean(&mut values.clone(), &PercentileClipConfig::default());
         assert!(percentile_result.remaining_count >= 1);
 
+        let asymmetric_result = sigma_clipped_mean_asymmetric(
+            &mut values.clone(),
+            &AsymmetricSigmaClipConfig::default(),
+        );
+        assert_eq!(asymmetric_result.remaining_count, 2);
+
         let gesd_result = gesd_mean(&mut values.clone(), &GesdConfig::default());
         assert_eq!(gesd_result.remaining_count, 2);
+    }
+
+    // ========== AsymmetricSigmaClipConfig Tests ==========
+
+    #[test]
+    fn test_asymmetric_sigma_clip_config_default() {
+        let config = AsymmetricSigmaClipConfig::default();
+        assert!((config.sigma_low - 4.0).abs() < f32::EPSILON);
+        assert!((config.sigma_high - 3.0).abs() < f32::EPSILON);
+        assert_eq!(config.max_iterations, 3);
+    }
+
+    #[test]
+    fn test_asymmetric_sigma_clip_config_new() {
+        let config = AsymmetricSigmaClipConfig::new(2.0, 3.0, 5);
+        assert!((config.sigma_low - 2.0).abs() < f32::EPSILON);
+        assert!((config.sigma_high - 3.0).abs() < f32::EPSILON);
+        assert_eq!(config.max_iterations, 5);
+    }
+
+    #[test]
+    #[should_panic(expected = "Sigma low must be positive")]
+    fn test_asymmetric_sigma_clip_config_zero_sigma_low() {
+        AsymmetricSigmaClipConfig::new(0.0, 3.0, 3);
+    }
+
+    #[test]
+    #[should_panic(expected = "Sigma high must be positive")]
+    fn test_asymmetric_sigma_clip_config_zero_sigma_high() {
+        AsymmetricSigmaClipConfig::new(3.0, 0.0, 3);
+    }
+
+    // ========== Asymmetric Sigma Clip Algorithm Tests ==========
+
+    #[test]
+    fn test_asymmetric_sigma_clip_removes_high_outlier() {
+        // Use data with spread (non-zero MAD) plus a high outlier
+        let mut values = vec![1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 100.0];
+        let config = AsymmetricSigmaClipConfig::new(4.0, 2.0, 3);
+        let result = sigma_clipped_mean_asymmetric(&mut values, &config);
+        assert!(
+            result.value < 10.0,
+            "High outlier should be clipped, got {}",
+            result.value
+        );
+        assert!(result.remaining_count < 8);
+    }
+
+    #[test]
+    fn test_asymmetric_sigma_clip_keeps_low_with_high_threshold() {
+        // Data with spread, plus both a low and high outlier.
+        // Use very conservative sigma_low (10.0) and aggressive sigma_high (2.0).
+        // The high outlier should be rejected, but the low outlier should be kept.
+        let mut values = vec![-5.0, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 50.0];
+        let config = AsymmetricSigmaClipConfig::new(10.0, 2.0, 5);
+        let result = sigma_clipped_mean_asymmetric(&mut values, &config);
+
+        // The high outlier (50.0) should be removed
+        // The low outlier (-5.0) should be kept due to high sigma_low
+        assert!(
+            result.remaining_count >= 9,
+            "Low outlier should be kept, remaining={}",
+            result.remaining_count
+        );
+        // Mean pulled down by -5.0 compared to median ~2.5
+        assert!(
+            result.value < 2.5,
+            "Mean should be < 2.5 due to kept low outlier, got {}",
+            result.value
+        );
+    }
+
+    #[test]
+    fn test_asymmetric_sigma_clip_no_outliers() {
+        let mut values = vec![1.0, 1.1, 1.2, 0.9, 1.0];
+        let config = AsymmetricSigmaClipConfig::new(3.0, 3.0, 3);
+        let result = sigma_clipped_mean_asymmetric(&mut values, &config);
+        assert_eq!(result.remaining_count, 5);
+    }
+
+    #[test]
+    fn test_asymmetric_vs_symmetric_sigma_clip() {
+        // With equal thresholds, asymmetric should give the same result as symmetric
+        let values = vec![1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 100.0];
+        let sigma = 2.5;
+
+        let sym_result = sigma_clipped_mean(&mut values.clone(), &SigmaClipConfig::new(sigma, 3));
+        let asym_result = sigma_clipped_mean_asymmetric(
+            &mut values.clone(),
+            &AsymmetricSigmaClipConfig::new(sigma, sigma, 3),
+        );
+
+        assert_eq!(sym_result.remaining_count, asym_result.remaining_count);
+        assert!(
+            (sym_result.value - asym_result.value).abs() < 1e-6,
+            "Symmetric and asymmetric with equal thresholds should match: {} vs {}",
+            sym_result.value,
+            asym_result.value,
+        );
+    }
+
+    #[test]
+    fn test_asymmetric_clip_differs_from_linear_fit() {
+        // Linear trend data: linear fit uses a fitted line as center,
+        // asymmetric sigma uses the median as center.
+        // For data with a clear trend, they give different results.
+        let values = vec![1.0, 3.0, 5.0, 7.0, 9.0, 11.0, 13.0, 15.0, 17.0, 19.0];
+
+        let asym_result = sigma_clipped_mean_asymmetric(
+            &mut values.clone(),
+            &AsymmetricSigmaClipConfig::new(1.0, 1.0, 3),
+        );
+        let linear_result =
+            linear_fit_clipped_mean(&mut values.clone(), &LinearFitClipConfig::new(1.0, 1.0, 3));
+
+        // Linear fit follows the trend perfectly, so no rejections
+        assert_eq!(
+            linear_result.remaining_count, 10,
+            "Linear fit should keep all points on a perfect line"
+        );
+
+        // Asymmetric sigma clips from median (10.0), so values far from
+        // median get rejected with tight sigma=1.0
+        // MAD=2.0, sigma_est=2.965, threshold=2.965 -> keep [7.035, 12.965]
+        assert!(
+            asym_result.remaining_count < 10,
+            "Asymmetric clip from median should reject points far from center"
+        );
     }
 }

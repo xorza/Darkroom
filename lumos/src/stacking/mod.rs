@@ -19,8 +19,8 @@ pub use progress::{ProgressCallback, StackingProgress, StackingStage};
 
 // Re-export rejection types for advanced users
 pub use rejection::{
-    GesdConfig, LinearFitClipConfig, PercentileClipConfig, RejectionResult, SigmaClipConfig,
-    WinsorizedClipConfig,
+    AsymmetricSigmaClipConfig, GesdConfig, LinearFitClipConfig, PercentileClipConfig,
+    RejectionResult, SigmaClipConfig, WinsorizedClipConfig,
 };
 
 // Re-export normalization types for advanced users
