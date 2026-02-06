@@ -37,7 +37,10 @@ pub enum FrameType {
 }
 
 #[cfg(test)]
-mod tests {
+mod tests;
+
+#[cfg(test)]
+mod unit_tests {
     use super::*;
 
     #[test]
