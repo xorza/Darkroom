@@ -435,20 +435,16 @@ fn compute_rgb_row(
     out: &mut [f32], // length = width * 3
 ) {
     let width = xtrans.width;
+    let height = xtrans.height;
     let raw_width = xtrans.raw_width;
     let green_base = dir * pixels;
 
-    let interp = |x: usize, target_color_idx: usize| -> f32 {
-        interpolate_missing_color_fast(
-            xtrans,
-            green_dir,
-            color_lookup,
-            green_base,
-            y,
-            x,
-            target_color_idx,
-        )
-    };
+    // Interior pixels can skip bounds checks in interpolation.
+    // A pixel at (y, x) is interior if all ±1 neighbors are within both
+    // the active area [0..height, 0..width] and the raw area [0..raw_height, 0..raw_width].
+    // Since top_margin >= 1 and left_margin >= 1 for X-Trans, the raw bounds are satisfied
+    // whenever the active area bounds are satisfied.
+    let y_interior = y >= 1 && y + 1 < height;
 
     for x in 0..width {
         let raw_y = y + xtrans.top_margin;
@@ -457,10 +453,25 @@ fn compute_rgb_row(
         let raw_val = xtrans.data[raw_y * raw_width + raw_x];
         let green = green_dir[green_base + y * width + x];
 
+        let interior = y_interior && x >= 1 && x + 1 < width;
+
+        let interp = |target_color_idx: usize| -> f32 {
+            interpolate_missing_color_fast(
+                xtrans,
+                green_dir,
+                color_lookup,
+                green_base,
+                y,
+                x,
+                target_color_idx,
+                interior,
+            )
+        };
+
         let (r, g, b) = match color {
-            0 => (raw_val, green, interp(x, 1)),
-            1 => (interp(x, 0), raw_val, interp(x, 1)),
-            2 => (interp(x, 0), green, raw_val),
+            0 => (raw_val, green, interp(1)),
+            1 => (interp(0), raw_val, interp(1)),
+            2 => (interp(0), green, raw_val),
             _ => unreachable!(),
         };
 
@@ -474,7 +485,11 @@ fn compute_rgb_row(
 ///
 /// Uses green-guided color difference method with precomputed neighbor positions.
 /// When two opposing pairs are available, picks the one with smaller green gradient.
-#[inline]
+///
+/// `interior` hint: when true, skips all bounds checks (caller guarantees all neighbors
+/// are within bounds). This eliminates the main overhead for ~99% of pixels.
+#[allow(clippy::too_many_arguments)]
+#[inline(always)]
 fn interpolate_missing_color_fast(
     xtrans: &XTransImage,
     green_dir: &[f32],
@@ -483,15 +498,75 @@ fn interpolate_missing_color_fast(
     y: usize,
     x: usize,
     target_color_idx: usize, // 0=red, 1=blue
+    interior: bool,
 ) -> f32 {
     let width = xtrans.width;
-    let height = xtrans.height;
     let raw_width = xtrans.raw_width;
     let raw_y = y + xtrans.top_margin;
     let raw_x = x + xtrans.left_margin;
     let green_center = green_dir[green_base + y * width + x];
 
     let entry = color_lookup.get(raw_y, raw_x, target_color_idx);
+
+    if interior {
+        // Fast path: no bounds checks needed. All neighbors at distance ±1 are valid
+        // because we're at least 1 pixel from any edge in both raw and active coordinates.
+        let eval_unchecked = |strategy: &ColorInterpStrategy| -> Option<(f32, f32)> {
+            match *strategy {
+                ColorInterpStrategy::Pair {
+                    dy_a,
+                    dx_a,
+                    dy_b,
+                    dx_b,
+                } => {
+                    let oy_a = (y as i32 + dy_a) as usize;
+                    let ox_a = (x as i32 + dx_a) as usize;
+                    let oy_b = (y as i32 + dy_b) as usize;
+                    let ox_b = (x as i32 + dx_b) as usize;
+
+                    let ga = green_dir[green_base + oy_a * width + ox_a];
+                    let gb = green_dir[green_base + oy_b * width + ox_b];
+                    let grad = (green_center - ga).abs() + (green_center - gb).abs();
+
+                    let raw_a = xtrans.data[(raw_y as i32 + dy_a) as usize * raw_width
+                        + (raw_x as i32 + dx_a) as usize];
+                    let raw_b = xtrans.data[(raw_y as i32 + dy_b) as usize * raw_width
+                        + (raw_x as i32 + dx_b) as usize];
+
+                    Some((green_center + 0.5 * ((raw_a - ga) + (raw_b - gb)), grad))
+                }
+                ColorInterpStrategy::Single { dy, dx } => {
+                    let oy = (y as i32 + dy) as usize;
+                    let ox = (x as i32 + dx) as usize;
+
+                    let g_n = green_dir[green_base + oy * width + ox];
+                    let raw_n = xtrans.data
+                        [(raw_y as i32 + dy) as usize * raw_width + (raw_x as i32 + dx) as usize];
+                    Some((green_center + (raw_n - g_n), f32::MAX))
+                }
+                ColorInterpStrategy::None => None,
+            }
+        };
+
+        let val = match (
+            eval_unchecked(&entry.primary),
+            eval_unchecked(&entry.secondary),
+        ) {
+            (Some((vp, gp)), Some((vs, gs))) => {
+                if gs < gp {
+                    vs
+                } else {
+                    vp
+                }
+            }
+            (Some((v, _)), None) | (None, Some((v, _))) => v,
+            (None, None) => green_center,
+        };
+        return val.max(0.0);
+    }
+
+    // Slow path: full bounds checking for border pixels.
+    let height = xtrans.height;
 
     let eval = |strategy: &ColorInterpStrategy| -> Option<(f32, f32)> {
         match *strategy {
@@ -605,7 +680,7 @@ pub(super) fn compute_homogeneity(drv: &[f32], width: usize, height: usize, homo
 
     // Sub-pass 2: count pixels in 3×3 window where drv ≤ threshold
     // Parallelize across all (direction, row) pairs for full core utilization.
-    homo.fill(0);
+    // Every element is written (border pixels get 0), avoiding a costly fill(0) of the full buffer.
     homo.par_chunks_mut(width)
         .enumerate()
         .for_each(|(flat_idx, homo_row)| {
@@ -613,7 +688,14 @@ pub(super) fn compute_homogeneity(drv: &[f32], width: usize, height: usize, homo
             let y = flat_idx % height;
 
             if y == 0 || y >= height - 1 {
-                return; // Skip border rows
+                homo_row.fill(0);
+                return;
+            }
+
+            // First and last columns are border pixels
+            homo_row[0] = 0;
+            if width > 1 {
+                homo_row[width - 1] = 0;
             }
 
             for (x, homo_val) in homo_row
@@ -640,8 +722,48 @@ pub(super) fn compute_homogeneity(drv: &[f32], width: usize, height: usize, homo
 // Step 6: Final blend
 // ───────────────────────────────────────────────────────────────
 
+/// Build a summed area table (SAT) from a u8 slice.
+///
+/// For an input `data` of size `height × width`, produces `(height+1) × (width+1)` u32 values
+/// where `sat[(y+1)*(width+1) + (x+1)]` = sum of data[0..=y][0..=x].
+/// Row 0 and column 0 of the SAT are zero (sentinel row/col for boundary handling).
+fn build_summed_area_table(data: &[u8], width: usize, height: usize) -> Vec<u32> {
+    let sat_w = width + 1;
+    let sat_h = height + 1;
+    // SAFETY: Every element is written below — sentinel row/col are zeroed explicitly,
+    // and interior elements are computed from the row above + running row sum.
+    let mut sat = unsafe { crate::raw::alloc_uninit_vec::<u32>(sat_w * sat_h) };
+
+    // Zero the sentinel row (y=0)
+    sat[..sat_w].fill(0);
+
+    for y in 0..height {
+        // Zero the sentinel column (x=0)
+        sat[(y + 1) * sat_w] = 0;
+        let mut row_sum = 0u32;
+        for x in 0..width {
+            row_sum += data[y * width + x] as u32;
+            sat[(y + 1) * sat_w + (x + 1)] = row_sum + sat[y * sat_w + (x + 1)];
+        }
+    }
+
+    sat
+}
+
+/// Query a rectangular sum from a summed area table.
+/// Computes sum of data[y0..=y1][x0..=x1] in O(1).
+#[inline(always)]
+fn sat_query(sat: &[u32], sat_w: usize, y0: usize, x0: usize, y1: usize, x1: usize) -> u32 {
+    // SAT is offset by +1 in both dimensions, so (y1+1, x1+1) maps to bottom-right inclusive.
+    sat[(y1 + 1) * sat_w + (x1 + 1)] + sat[y0 * sat_w + x0]
+        - sat[y0 * sat_w + (x1 + 1)]
+        - sat[(y1 + 1) * sat_w + x0]
+}
+
 /// Final blending: sum homogeneity in 5×5 window, select best directions,
 /// average pre-computed RGB from qualifying directions.
+///
+/// Uses summed area tables for O(1) per-pixel window queries instead of O(25).
 ///
 /// `output_buf` is a reusable buffer that will be truncated/resized to `pixels * 3`.
 /// Pass a no-longer-needed buffer (e.g. `drv`) to avoid a fresh allocation.
@@ -656,6 +778,13 @@ pub(super) fn blend_final_from_rgb(
     let row_stride = width * 3;
     let needed = pixels * 3;
 
+    // Build summed area tables for each direction's homogeneity map.
+    // This converts the per-pixel 5×5 window sum from O(25) to O(1).
+    let sats: Vec<Vec<u32>> = (0..NDIR)
+        .map(|d| build_summed_area_table(&homo[d * pixels..(d + 1) * pixels], width, height))
+        .collect();
+    let sat_w = width + 1;
+
     // Reuse the provided buffer — truncate to needed size (no allocation).
     // Every element is overwritten by the parallel pass below.
     output_buf.truncate(needed);
@@ -664,15 +793,17 @@ pub(super) fn blend_final_from_rgb(
     rgb.par_chunks_mut(row_stride)
         .enumerate()
         .for_each(|(y, rgb_row)| {
+            let y0 = y.saturating_sub(2);
+            let y1 = (y + 2).min(height - 1);
+
             for x in 0..width {
-                // Sum homogeneity in 5×5 window for each direction
+                let x0 = x.saturating_sub(2);
+                let x1 = (x + 2).min(width - 1);
+
+                // Query 5×5 homogeneity sum for each direction via SAT — O(1) per direction
                 let mut hm = [0u32; NDIR];
                 for d in 0..NDIR {
-                    for vy in y.saturating_sub(2)..=(y + 2).min(height - 1) {
-                        for vx in x.saturating_sub(2)..=(x + 2).min(width - 1) {
-                            hm[d] += homo[d * pixels + vy * width + vx] as u32;
-                        }
-                    }
+                    hm[d] = sat_query(&sats[d], sat_w, y0, x0, y1, x1);
                 }
 
                 // Find max homogeneity score
