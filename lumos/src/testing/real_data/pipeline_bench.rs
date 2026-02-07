@@ -47,6 +47,13 @@ fn bench_full_pipeline() {
     }
     println!("  Elapsed: {:?}", step_start.elapsed());
 
+    // Save masters
+    let masters_dir = cal_dir.join("calibration_masters");
+    masters
+        .save_to_directory(&masters_dir)
+        .expect("Failed to save masters");
+    println!("  Saved masters to {}", masters_dir.display());
+
     // =========================================================================
     // Step 2: Calibrate light frames
     // =========================================================================
@@ -57,13 +64,28 @@ fn bench_full_pipeline() {
     assert!(!light_paths.is_empty(), "No light frames found");
     println!("  Loading and calibrating {} lights...", light_paths.len());
 
-    let mut calibrated: Vec<AstroImage> = common::parallel::par_map_limited(&light_paths, 3, |p| {
+    let calibrated: Vec<AstroImage> = common::parallel::par_map_limited(&light_paths, 3, |p| {
         let mut img = AstroImage::from_file(p).unwrap();
         masters.calibrate(&mut img);
         img
     });
 
     println!("  Elapsed: {:?}", step_start.elapsed());
+
+    // Save calibrated lights
+    let calibrated_dir = cal_dir.join("calibrated_lights");
+    std::fs::create_dir_all(&calibrated_dir).expect("Failed to create calibrated_lights dir");
+    for (path, img) in light_paths.iter().zip(calibrated.iter()) {
+        let filename = path.file_stem().unwrap().to_string_lossy();
+        let out_path = calibrated_dir.join(format!("{}_calibrated.tiff", filename));
+        img.save(&out_path)
+            .expect("Failed to save calibrated light");
+    }
+    println!(
+        "  Saved {} calibrated lights to {}",
+        calibrated.len(),
+        calibrated_dir.display()
+    );
 
     // =========================================================================
     // Step 3: Detect stars
@@ -112,24 +134,41 @@ fn bench_full_pipeline() {
         .map(|(img, stars)| (img, stars.as_slice()))
         .collect();
 
-    let warped_frames = common::parallel::par_map_limited(&to_register, 3, |(img, stars)| {
-        let result = register(ref_stars, stars, &reg_config)
-            .unwrap_or_else(|e| panic!("Registration failed: {e}"));
-        println!(
-            "  {} inliers, RMS={:.3}px, {:.1}ms",
-            result.num_inliers, result.rms_error, result.elapsed_ms,
-        );
-        let mut warped = (*img).clone();
-        warp(img, &mut warped, &result.transform, &reg_config);
-        warped
-    });
-
-    // Replace frames 1..N with warped versions
-    for (dst, warped) in calibrated[1..].iter_mut().zip(warped_frames) {
-        *dst = warped;
-    }
+    let warped_frames: Vec<AstroImage> =
+        common::parallel::par_map_limited(&to_register, 3, |(img, stars)| {
+            let result = register(ref_stars, stars, &reg_config)
+                .unwrap_or_else(|e| panic!("Registration failed: {e}"));
+            println!(
+                "  {} inliers, RMS={:.3}px, {:.1}ms",
+                result.num_inliers, result.rms_error, result.elapsed_ms,
+            );
+            let mut warped = (*img).clone();
+            warp(img, &mut warped, &result.transform, &reg_config);
+            warped
+        });
 
     println!("  Elapsed: {:?}", step_start.elapsed());
+
+    // Build registered set: reference (unwarped) + warped frames
+    let mut registered: Vec<&AstroImage> = Vec::with_capacity(calibrated.len());
+    registered.push(&calibrated[0]);
+    for warped in &warped_frames {
+        registered.push(warped);
+    }
+
+    // Save registered lights
+    let registered_dir = cal_dir.join("registered_lights");
+    std::fs::create_dir_all(&registered_dir).expect("Failed to create registered_lights dir");
+    for (i, img) in registered.iter().enumerate() {
+        let out_path = registered_dir.join(format!("registered_{:04}.tiff", i));
+        img.save(&out_path)
+            .expect("Failed to save registered light");
+    }
+    println!(
+        "  Saved {} registered lights to {}",
+        registered.len(),
+        registered_dir.display()
+    );
 
     // =========================================================================
     // Step 5: Stack registered lights
@@ -137,15 +176,9 @@ fn bench_full_pipeline() {
     println!("\n--- Step 5: Stacking registered lights ---");
     let step_start = Instant::now();
 
-    // Save calibrated+registered images to temp dir for stacking API
-    let tmp_dir = tempfile::tempdir().unwrap();
-    let indexed: Vec<(usize, &AstroImage)> = calibrated.iter().enumerate().collect();
-    let registered_paths: Vec<_> = common::parallel::par_map_limited(&indexed, 3, |&(i, img)| {
-        let path = tmp_dir.path().join(format!("registered_{:04}.tiff", i));
-        let imag: imaginarium::Image = img.clone().into();
-        imag.save_file(&path).unwrap();
-        path
-    });
+    let registered_paths: Vec<_> = (0..registered.len())
+        .map(|i| registered_dir.join(format!("registered_{:04}.tiff", i)))
+        .collect();
 
     let stack_config = StackConfig {
         normalization: Normalization::Global,
@@ -168,11 +201,11 @@ fn bench_full_pipeline() {
     );
     println!("  Elapsed: {:?}", step_start.elapsed());
 
-    // Save result
-    let output_path = common::test_utils::test_output_path("real_data/pipeline_result.tiff");
+    // Save stacked result
+    let output_path = cal_dir.join("stacked_light.tiff");
     let img: imaginarium::Image = stacked.into();
     img.save_file(&output_path).unwrap();
-    println!("\n  Saved: {}", output_path.display());
+    println!("  Saved: {}", output_path.display());
 
     println!("\n=== Total pipeline time: {:?} ===", total_start.elapsed());
 }
