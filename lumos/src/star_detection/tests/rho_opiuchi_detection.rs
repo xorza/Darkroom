@@ -138,7 +138,7 @@ fn quick_bench_detect_rho_opiuchi(b: bench::Bencher) {
         astro_image.height()
     );
     let mut config = Config::precise_ground();
-    config.centroid_method = CentroidMethod::GaussianFit;
+    config.centroid_method = CentroidMethod::MoffatFit { beta: 2.5 };
     let mut detector = StarDetector::from_config(config);
 
     b.bench(|| detector.detect(&astro_image));

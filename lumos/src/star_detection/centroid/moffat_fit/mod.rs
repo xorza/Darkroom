@@ -18,6 +18,9 @@ mod tests;
 #[cfg(target_arch = "x86_64")]
 mod simd_avx2;
 
+#[cfg(target_arch = "aarch64")]
+mod simd_neon;
+
 use super::lm_optimizer::{LMConfig, LMModel, LMResult, optimize};
 use super::{estimate_sigma_from_moments, extract_stamp};
 use crate::common::Buffer2;
@@ -233,7 +236,14 @@ impl LMModel<5> for MoffatFixedBeta {
                 simd_avx2::batch_build_normal_equations_avx2(self, data_x, data_y, data_z, params)
             };
         }
+        #[cfg(target_arch = "aarch64")]
+        {
+            return unsafe {
+                simd_neon::batch_build_normal_equations_neon(self, data_x, data_y, data_z, params)
+            };
+        }
         // Scalar fallback
+        #[allow(unreachable_code)]
         let mut hessian = [[0.0f64; 5]; 5];
         let mut gradient = [0.0f64; 5];
         let mut chi2 = 0.0f64;
@@ -270,7 +280,14 @@ impl LMModel<5> for MoffatFixedBeta {
                 simd_avx2::batch_compute_chi2_avx2(self, data_x, data_y, data_z, params)
             };
         }
+        #[cfg(target_arch = "aarch64")]
+        {
+            return unsafe {
+                simd_neon::batch_compute_chi2_neon(self, data_x, data_y, data_z, params)
+            };
+        }
         // Scalar fallback
+        #[allow(unreachable_code)]
         data_x
             .iter()
             .zip(data_y.iter())
