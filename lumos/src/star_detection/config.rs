@@ -545,9 +545,6 @@ impl Config {
 
             // Star quality filtering
             min_snr: 15.0,
-            max_eccentricity: 0.5,
-            max_sharpness: 0.7,
-            max_roundness: 0.3,
             max_fwhm_deviation: 4.0,
             duplicate_min_separation: 5.0,
 

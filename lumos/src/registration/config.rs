@@ -201,8 +201,6 @@ impl Config {
             confidence: 0.9999,
             sip_enabled: true,
             max_rms_error: 1.0,
-            max_rotation: None,
-            scale_range: None,
             ..Self::default()
         }
     }
@@ -377,8 +375,9 @@ mod tests {
         assert!((config.confidence - 0.9999).abs() < 1e-10);
         assert!(config.sip_enabled);
         assert!((config.max_rms_error - 1.0).abs() < 1e-10);
-        assert!(config.max_rotation.is_none());
-        assert!(config.scale_range.is_none());
+        // Inherits default rotation/scale constraints for RANSAC stability
+        assert!(config.max_rotation.is_some());
+        assert!(config.scale_range.is_some());
         config.validate();
     }
 
