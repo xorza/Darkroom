@@ -36,8 +36,8 @@ impl CalibrationMasters {
     /// 3. Divide by normalized master flat (corrects vignetting and dust)
     /// 4. Correct hot pixels (replace with median of neighbors)
     ///
-    /// The master dark is always bias-subtracted: both `create()` and `load()`
-    /// automatically subtract master bias from master dark when both are present.
+    /// The master dark is bias-subtracted during `create()` (for freshly stacked darks).
+    /// Saved masters loaded via `load()` are already processed — no additional subtraction.
     /// This prevents double-subtraction of the bias signal.
     ///
     /// # Panics
@@ -130,8 +130,8 @@ impl CalibrationMasters {
     /// Looks for files named master_dark_<method>.tiff, master_flat_<method>.tiff, etc.
     /// Returns None for any masters that don't exist.
     ///
-    /// If both master bias and master dark are present, subtracts bias from the dark
-    /// to prevent double-subtraction during calibration.
+    /// Saved masters are already fully processed (bias already subtracted from dark),
+    /// so no additional bias subtraction is applied on load.
     /// Automatically generates hot pixel map from master dark if available.
     ///
     /// # Example
@@ -148,16 +148,14 @@ impl CalibrationMasters {
     pub fn load<P: AsRef<Path>>(dir: P, config: StackConfig) -> Result<Self> {
         let dir = dir.as_ref();
 
-        let mut master_dark = Self::load_master(dir, FrameType::Dark, &config);
+        let master_dark = Self::load_master(dir, FrameType::Dark, &config);
         let master_flat = Self::load_master(dir, FrameType::Flat, &config);
         let master_bias = Self::load_master(dir, FrameType::Bias, &config);
 
-        // Subtract bias from dark to prevent double-subtraction during calibration
-        if let (Some(dark), Some(bias)) = (&mut master_dark, &master_bias) {
-            subtract_bias_from_dark(dark, bias);
-        }
+        // No bias subtraction here — saved masters are already fully processed.
+        // Bias was subtracted from dark during create() before saving.
 
-        // Generate hot pixel map from bias-subtracted master dark
+        // Generate hot pixel map from master dark
         let hot_pixel_map = master_dark
             .as_ref()
             .map(|dark| HotPixelMap::from_master_dark(dark, DEFAULT_HOT_PIXEL_SIGMA));
@@ -224,16 +222,23 @@ impl CalibrationMasters {
         );
         assert!(dir.is_dir(), "Path is not a directory: {:?}", dir);
 
-        // Create bias first — it's needed to debias the master dark.
+        // Create bias first — it's needed to debias freshly stacked darks.
         let master_bias = Self::load_master(dir, FrameType::Bias, &config)
             .or_else(|| Self::create_master(dir, "Bias", FrameType::Bias, &config, &progress));
 
-        // Create dark, then subtract bias to prevent double-subtraction during calibration.
-        let mut master_dark = Self::load_master(dir, FrameType::Dark, &config)
-            .or_else(|| Self::create_master(dir, "Darks", FrameType::Dark, &config, &progress));
-        if let (Some(dark), Some(bias)) = (&mut master_dark, &master_bias) {
-            subtract_bias_from_dark(dark, bias);
-        }
+        // Try loading a saved master dark (already bias-subtracted).
+        // If not found, stack from raw frames and subtract bias.
+        let master_dark = match Self::load_master(dir, FrameType::Dark, &config) {
+            Some(dark) => Some(dark),
+            None => Self::create_master(dir, "Darks", FrameType::Dark, &config, &progress).map(
+                |mut dark| {
+                    if let Some(bias) = &master_bias {
+                        subtract_bias_from_dark(&mut dark, bias);
+                    }
+                    dark
+                },
+            ),
+        };
 
         let master_flat = Self::load_master(dir, FrameType::Flat, &config)
             .or_else(|| Self::create_master(dir, "Flats", FrameType::Flat, &config, &progress));
