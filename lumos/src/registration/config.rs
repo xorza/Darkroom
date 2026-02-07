@@ -186,6 +186,27 @@ impl Config {
         }
     }
 
+    /// Precise wide-field configuration: high accuracy with lens distortion handling.
+    ///
+    /// Combines `precise()` (more iterations, SIP, tight RMS) with `wide_field()`
+    /// (Homography, unlimited rotation/scale). Uses more stars and tighter matching
+    /// for best results on wide-field ground-based astrophotography.
+    pub fn precise_wide_field() -> Self {
+        Self {
+            transform_type: TransformType::Homography,
+            max_stars: 500,
+            min_matches: 20,
+            ratio_tolerance: 0.005,
+            ransac_iterations: 5000,
+            confidence: 0.9999,
+            sip_enabled: true,
+            max_rms_error: 1.0,
+            max_rotation: None,
+            scale_range: None,
+            ..Self::default()
+        }
+    }
+
     /// Mosaic configuration: allows larger offsets and rotations.
     pub fn mosaic() -> Self {
         Self {
@@ -340,6 +361,22 @@ mod tests {
         let config = Config::wide_field();
         assert_eq!(config.transform_type, TransformType::Homography);
         assert!(config.sip_enabled);
+        assert!(config.max_rotation.is_none());
+        assert!(config.scale_range.is_none());
+        config.validate();
+    }
+
+    #[test]
+    fn test_config_precise_wide_field_preset() {
+        let config = Config::precise_wide_field();
+        assert_eq!(config.transform_type, TransformType::Homography);
+        assert_eq!(config.max_stars, 500);
+        assert_eq!(config.min_matches, 20);
+        assert!((config.ratio_tolerance - 0.005).abs() < 1e-10);
+        assert_eq!(config.ransac_iterations, 5000);
+        assert!((config.confidence - 0.9999).abs() < 1e-10);
+        assert!(config.sip_enabled);
+        assert!((config.max_rms_error - 1.0).abs() < 1e-10);
         assert!(config.max_rotation.is_none());
         assert!(config.scale_range.is_none());
         config.validate();

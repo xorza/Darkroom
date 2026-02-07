@@ -5,8 +5,7 @@ use std::time::Instant;
 use crate::testing::{calibration_dir, calibration_image_paths, init_tracing};
 use crate::{
     AstroImage, CalibrationMasters, FrameType, Normalization, ProgressCallback, RegistrationConfig,
-    StackConfig, Star, StarDetectionConfig, StarDetector, TransformType, register,
-    stack_with_progress, warp,
+    StackConfig, Star, StarDetectionConfig, StarDetector, register, stack_with_progress, warp,
 };
 
 #[test]
@@ -93,11 +92,7 @@ fn bench_full_pipeline() {
     println!("\n--- Step 3: Detecting stars ---");
     let step_start = Instant::now();
 
-    let det_config = StarDetectionConfig {
-        edge_margin: 20,
-        min_snr: 10.0,
-        ..Default::default()
-    };
+    let det_config = StarDetectionConfig::precise_ground();
     let all_stars: Vec<_> = common::parallel::par_map_limited(&calibrated, 3, |img| {
         let mut det = StarDetector::from_config(det_config.clone());
         det.detect(img).stars
@@ -114,16 +109,7 @@ fn bench_full_pipeline() {
     println!("\n--- Step 4: Registering lights (best precision) ---");
     let step_start = Instant::now();
 
-    let reg_config = RegistrationConfig {
-        transform_type: TransformType::Homography,
-        max_stars: 500,
-        min_matches: 20,
-        ratio_tolerance: 0.005,
-        ransac_iterations: 5000,
-        confidence: 0.9999,
-        sip_enabled: true,
-        ..Default::default()
-    };
+    let reg_config = RegistrationConfig::precise_wide_field();
 
     let ref_stars = &all_stars[0];
 
