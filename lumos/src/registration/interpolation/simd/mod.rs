@@ -16,7 +16,6 @@ use common::cpu_features;
 #[cfg(target_arch = "x86_64")]
 pub mod sse;
 
-#[cfg(test)]
 use crate::registration::interpolation::get_lanczos_lut;
 use crate::registration::transform::Transform;
 use glam::DVec2;
@@ -132,6 +131,144 @@ fn sample_pixel(data: &[f32], width: usize, height: usize, x: i32, y: i32) -> f3
         0.0
     } else {
         data[y as usize * width + x as usize]
+    }
+}
+
+/// Optimized Lanczos3 row warping with incremental coordinate stepping.
+///
+/// Key optimizations over per-pixel `interpolate_lanczos_impl`:
+/// 1. Incremental source coordinate stepping (avoid per-pixel matrix multiply)
+/// 2. Fast-path for interior pixels (skip bounds checks, use direct row pointers)
+/// 3. Row pointer caching (compute `y * width` once per kernel row, not 6 times)
+pub(crate) fn warp_row_lanczos3_fast(
+    input: &[f32],
+    input_width: usize,
+    input_height: usize,
+    output_row: &mut [f32],
+    output_y: usize,
+    inverse: &Transform,
+) {
+    let lut = get_lanczos_lut(3);
+    let iw = input_width as i32;
+    let ih = input_height as i32;
+
+    // Row-major DMat3: m[0..9] = [a, b, tx, c, d, ty, g, h, 1]
+    // transform_point: x' = (m[0]*x + m[1]*y + m[2]) / w, y' = (m[3]*x + m[4]*y + m[5]) / w
+    // For affine transforms (m[6]==0, m[7]==0, m[8]==1), stepping x by 1 adds (m[0], m[3]).
+    let m = inverse.matrix.as_array();
+    let is_affine = m[6].abs() < 1e-12 && m[7].abs() < 1e-12;
+
+    // Compute source coords for first pixel in this row
+    let src0 = inverse.apply(DVec2::new(0.0, output_y as f64));
+    let mut src_x = src0.x;
+    let mut src_y = src0.y;
+    let dx_step = m[0];
+    let dy_step = m[3];
+
+    for (x_idx, out_pixel) in output_row.iter_mut().enumerate() {
+        // For perspective transforms, recompute exact coords each pixel
+        if !is_affine {
+            let src = inverse.apply(DVec2::new(x_idx as f64, output_y as f64));
+            src_x = src.x;
+            src_y = src.y;
+        }
+
+        let sx = src_x as f32;
+        let sy = src_y as f32;
+
+        let x0 = sx.floor() as i32;
+        let y0 = sy.floor() as i32;
+        let fx = sx - x0 as f32;
+        let fy = sy - y0 as f32;
+
+        // Kernel origin: (x0 - 2, y0 - 2)
+        let kx0 = x0 - 2;
+        let ky0 = y0 - 2;
+
+        // Compute x weights (6 values)
+        let wx = [
+            lut.lookup(fx + 2.0),
+            lut.lookup(fx + 1.0),
+            lut.lookup(fx),
+            lut.lookup(fx - 1.0),
+            lut.lookup(fx - 2.0),
+            lut.lookup(fx - 3.0),
+        ];
+
+        // Compute y weights (6 values)
+        let wy = [
+            lut.lookup(fy + 2.0),
+            lut.lookup(fy + 1.0),
+            lut.lookup(fy),
+            lut.lookup(fy - 1.0),
+            lut.lookup(fy - 2.0),
+            lut.lookup(fy - 3.0),
+        ];
+
+        // Normalize weights
+        let wx_sum: f32 = wx[0] + wx[1] + wx[2] + wx[3] + wx[4] + wx[5];
+        let wy_sum: f32 = wy[0] + wy[1] + wy[2] + wy[3] + wy[4] + wy[5];
+        let inv_wx = if wx_sum.abs() > 1e-10 {
+            1.0 / wx_sum
+        } else {
+            1.0
+        };
+        let inv_wy = if wy_sum.abs() > 1e-10 {
+            1.0 / wy_sum
+        } else {
+            1.0
+        };
+
+        // Normalized x weights
+        let nwx = [
+            wx[0] * inv_wx,
+            wx[1] * inv_wx,
+            wx[2] * inv_wx,
+            wx[3] * inv_wx,
+            wx[4] * inv_wx,
+            wx[5] * inv_wx,
+        ];
+
+        // Check if entire 6x6 kernel is within bounds
+        let sum = if kx0 >= 0 && ky0 >= 0 && kx0 + 5 < iw && ky0 + 5 < ih {
+            // Fast path: all pixels in bounds, direct indexing
+            let kx = kx0 as usize;
+            let ky = ky0 as usize;
+            let w = input_width;
+
+            let mut sum = 0.0f32;
+            for (j, &wyj_raw) in wy.iter().enumerate() {
+                let row_off = (ky + j) * w + kx;
+                let wyj = wyj_raw * inv_wy;
+                sum += wyj
+                    * (unsafe { *input.get_unchecked(row_off) } * nwx[0]
+                        + unsafe { *input.get_unchecked(row_off + 1) } * nwx[1]
+                        + unsafe { *input.get_unchecked(row_off + 2) } * nwx[2]
+                        + unsafe { *input.get_unchecked(row_off + 3) } * nwx[3]
+                        + unsafe { *input.get_unchecked(row_off + 4) } * nwx[4]
+                        + unsafe { *input.get_unchecked(row_off + 5) } * nwx[5]);
+            }
+            sum
+        } else {
+            // Slow path: bounds-checked sampling for border pixels
+            let mut sum = 0.0f32;
+            for (j, &wyj_raw) in wy.iter().enumerate() {
+                let py = ky0 + j as i32;
+                let wyj = wyj_raw * inv_wy;
+                for (i, &wxi) in nwx.iter().enumerate() {
+                    let px = kx0 + i as i32;
+                    sum += sample_pixel(input, input_width, input_height, px, py) * wxi * wyj;
+                }
+            }
+            sum
+        };
+
+        *out_pixel = sum;
+
+        if is_affine {
+            src_x += dx_step;
+            src_y += dy_step;
+        }
     }
 }
 
@@ -442,6 +579,87 @@ mod tests {
                     width,
                     x,
                     val
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_warp_row_lanczos3_fast_matches_scalar() {
+        let width = 128;
+        let height = 128;
+        let input = patterns::diagonal_gradient(width, height);
+
+        let transforms = vec![
+            Transform::identity(),
+            Transform::translation(DVec2::new(2.5, 1.7)),
+            Transform::similarity(DVec2::new(3.0, 2.0), 0.1, 1.05),
+        ];
+
+        for transform in transforms {
+            let inverse = transform.inverse();
+
+            for y in [0, 50, height - 1] {
+                let mut output_fast = vec![0.0f32; width];
+                let mut output_scalar = vec![0.0f32; width];
+
+                warp_row_lanczos3_fast(
+                    input.pixels(),
+                    width,
+                    height,
+                    &mut output_fast,
+                    y,
+                    &inverse,
+                );
+                warp_row_lanczos3_scalar(
+                    input.pixels(),
+                    width,
+                    height,
+                    &mut output_scalar,
+                    y,
+                    &inverse,
+                );
+
+                for x in 0..width {
+                    assert!(
+                        (output_fast[x] - output_scalar[x]).abs() < 1e-4,
+                        "Row {y}, x={x}: fast {} vs scalar {}",
+                        output_fast[x],
+                        output_scalar[x]
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_warp_row_lanczos3_fast_various_sizes() {
+        let height = 64;
+        let input_base = patterns::diagonal_gradient(256, height);
+
+        for width in [1, 2, 3, 7, 8, 16, 33, 64, 100] {
+            let input: Vec<f32> = input_base
+                .pixels()
+                .iter()
+                .take(width * height)
+                .copied()
+                .collect();
+            let transform = Transform::translation(DVec2::new(1.5, 0.5));
+            let inverse = transform.inverse();
+
+            let mut output_fast = vec![0.0f32; width];
+            let mut output_scalar = vec![0.0f32; width];
+            let y = height / 2;
+
+            warp_row_lanczos3_fast(&input, width, height, &mut output_fast, y, &inverse);
+            warp_row_lanczos3_scalar(&input, width, height, &mut output_scalar, y, &inverse);
+
+            for x in 0..width {
+                assert!(
+                    (output_fast[x] - output_scalar[x]).abs() < 1e-4,
+                    "Width {width}, x={x}: fast {} vs scalar {}",
+                    output_fast[x],
+                    output_scalar[x]
                 );
             }
         }

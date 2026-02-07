@@ -38,7 +38,7 @@ fn lanczos_kernel_compute(x: f32, a: f32) -> f32 {
 }
 
 #[derive(Debug)]
-struct LanczosLut {
+pub(super) struct LanczosLut {
     values: Vec<f32>,
     a: usize,
 }
@@ -57,7 +57,7 @@ impl LanczosLut {
     }
 
     #[inline]
-    fn lookup(&self, x: f32) -> f32 {
+    pub(super) fn lookup(&self, x: f32) -> f32 {
         let abs_x = x.abs();
         if abs_x >= self.a as f32 {
             return 0.0;
@@ -72,7 +72,7 @@ static LANCZOS3_LUT: OnceLock<LanczosLut> = OnceLock::new();
 static LANCZOS4_LUT: OnceLock<LanczosLut> = OnceLock::new();
 
 #[inline]
-fn get_lanczos_lut(a: usize) -> &'static LanczosLut {
+pub(super) fn get_lanczos_lut(a: usize) -> &'static LanczosLut {
     match a {
         2 => LANCZOS2_LUT.get_or_init(|| LanczosLut::new(2)),
         3 => LANCZOS3_LUT.get_or_init(|| LanczosLut::new(3)),
@@ -252,6 +252,8 @@ pub fn warp_image(
         .for_each(|(y, row)| {
             if method == InterpolationMethod::Bilinear {
                 simd::warp_row_bilinear_simd(input, width, height, row, y, &inverse);
+            } else if method == InterpolationMethod::Lanczos3 {
+                simd::warp_row_lanczos3_fast(input.pixels(), width, height, row, y, &inverse);
             } else {
                 for (x, pixel) in row.iter_mut().enumerate() {
                     let src = inverse.apply(glam::DVec2::new(x as f64, y as f64));

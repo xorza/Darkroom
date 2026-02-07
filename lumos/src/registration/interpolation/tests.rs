@@ -567,3 +567,142 @@ fn test_interpolation_extreme_subpixel() {
         );
     }
 }
+
+// =========================================================================
+// warp_image with Lanczos3 (exercises the fast dispatch path)
+// =========================================================================
+
+#[test]
+fn test_warp_image_lanczos3_identity() {
+    let width = 32;
+    let height = 32;
+    let input: Vec<f32> = (0..width * height).map(|i| (i as f32) / 1024.0).collect();
+    let input_buf = Buffer2::new(width, height, input);
+    let transform = Transform::identity();
+
+    let mut output = Buffer2::new(width, height, vec![0.0; width * height]);
+    warp_image(
+        &input_buf,
+        &mut output,
+        &transform,
+        InterpolationMethod::Lanczos3,
+    );
+
+    // Interior pixels should match input closely
+    for y in 4..height - 4 {
+        for x in 4..width - 4 {
+            let expected = input_buf[(x, y)];
+            let actual = output[(x, y)];
+            assert!(
+                (actual - expected).abs() < 0.02,
+                "Identity mismatch at ({x}, {y}): {actual} vs {expected}",
+            );
+        }
+    }
+}
+
+#[test]
+fn test_warp_image_lanczos3_translation() {
+    let width = 64;
+    let height = 64;
+    let input: Vec<f32> = (0..width * height).map(|i| (i as f32) / 4096.0).collect();
+    let input_buf = Buffer2::new(width, height, input);
+    let transform = Transform::translation(DVec2::new(5.0, 3.0));
+
+    let mut output = Buffer2::new(width, height, vec![0.0; width * height]);
+    warp_image(
+        &input_buf,
+        &mut output,
+        &transform,
+        InterpolationMethod::Lanczos3,
+    );
+
+    // Check shifted pixels match
+    for y in 8..height - 8 {
+        for x in 10..width - 10 {
+            let expected = input_buf[(x - 5, y - 3)];
+            let actual = output[(x, y)];
+            assert!(
+                (actual - expected).abs() < 0.02,
+                "Translation mismatch at ({x}, {y}): {actual} vs {expected}",
+            );
+        }
+    }
+}
+
+#[test]
+fn test_warp_image_lanczos3_rotation() {
+    let width = 64;
+    let height = 64;
+    let input: Vec<f32> = (0..width * height)
+        .map(|i| {
+            let x = (i % width) as f32;
+            let y = (i / width) as f32;
+            ((x * 0.1).sin() * (y * 0.1).cos() + 1.0) * 0.5
+        })
+        .collect();
+    let input_buf = Buffer2::new(width, height, input);
+
+    let center = DVec2::new(width as f64 / 2.0, height as f64 / 2.0);
+    let transform = Transform::similarity(center, 0.05, 1.0); // small rotation
+
+    let mut output = Buffer2::new(width, height, vec![0.0; width * height]);
+    warp_image(
+        &input_buf,
+        &mut output,
+        &transform,
+        InterpolationMethod::Lanczos3,
+    );
+
+    // All interior pixels should be finite and in reasonable range
+    // Lanczos ringing can cause slight overshoot beyond [0,1]
+    for y in 6..height - 6 {
+        for x in 6..width - 6 {
+            let val = output[(x, y)];
+            assert!(val.is_finite(), "NaN at ({x}, {y})");
+            assert!(
+                (-0.2..=1.2).contains(&val),
+                "Out of range at ({x}, {y}): {val}",
+            );
+        }
+    }
+}
+
+#[test]
+fn test_warp_image_lanczos3_matches_per_pixel() {
+    // Verify warp_image Lanczos3 path matches per-pixel interpolate() calls
+    let width = 32;
+    let height = 32;
+    let input: Vec<f32> = (0..width * height)
+        .map(|i| ((i as f32 * 0.037).sin() + 1.0) * 0.5)
+        .collect();
+    let input_buf = Buffer2::new(width, height, input);
+    let transform = Transform::similarity(DVec2::new(16.0, 16.0), 0.03, 1.02);
+    let inverse = transform.inverse();
+
+    let mut output = Buffer2::new(width, height, vec![0.0; width * height]);
+    warp_image(
+        &input_buf,
+        &mut output,
+        &transform,
+        InterpolationMethod::Lanczos3,
+    );
+
+    // Compare against per-pixel interpolate() which uses the original scalar path
+    for y in 0..height {
+        for x in 0..width {
+            let src = inverse.apply(DVec2::new(x as f64, y as f64));
+            let expected = interpolate(
+                &input_buf,
+                src.x as f32,
+                src.y as f32,
+                InterpolationMethod::Lanczos3,
+            );
+            let actual = output[(x, y)];
+            assert!(
+                (actual - expected).abs() < 1e-4,
+                "Mismatch at ({x}, {y}): warp_image={actual} vs interpolate={expected}",
+            );
+        }
+    }
+}
