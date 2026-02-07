@@ -158,6 +158,14 @@ pub fn load_raw(path: &Path) -> Result<AstroImage> {
         sensor_type
     );
 
+    // Extract ISO before the match — all branches need it, and X-Trans
+    // consumes guard/buf so it must be read first.
+    let iso = extract_iso(inner);
+
+    // Wrap in Option so X-Trans can take ownership to drop before demosaicing.
+    let mut guard = Some(guard);
+    let mut buf = Some(buf);
+
     // Process based on sensor type
     // Returns (pixels, width, height, num_channels, is_cfa) - dimensions may differ for libraw fallback
     let (pixels, out_width, out_height, num_channels, is_cfa) = match sensor_type {
@@ -205,87 +213,20 @@ pub fn load_raw(path: &Path) -> Result<AstroImage> {
                 "X-Trans sensor detected (filters=0x{:08x}), using X-Trans demosaic",
                 filters
             );
-            // SAFETY: inner is valid and unpack succeeded.
-            let raw_image_ptr = unsafe { (*inner).rawdata.raw_image };
-            if raw_image_ptr.is_null() {
-                anyhow::bail!("libraw: raw_image is null");
-            }
-
-            let pixel_count = raw_width
-                .checked_mul(raw_height)
-                .expect("libraw: raw dimensions overflow");
-
-            // SAFETY: raw_image_ptr is valid (checked above), and we've validated dimensions.
-            let raw_data = unsafe { slice::from_raw_parts(raw_image_ptr, pixel_count) };
-
-            // Get X-Trans pattern from libraw
-            // SAFETY: inner is valid and xtrans is populated for X-Trans sensors
-            let xtrans_raw = unsafe { (*inner).idata.xtrans };
-
-            // Convert libraw's pattern to u8 (type varies by platform)
-            let mut xtrans_pattern = [[0u8; 6]; 6];
-            for (i, row) in xtrans_raw.iter().enumerate() {
-                for (j, &val) in row.iter().enumerate() {
-                    #[allow(clippy::unnecessary_cast)]
-                    {
-                        xtrans_pattern[i][j] = val as u8;
-                    }
-                }
-            }
-
-            // Copy raw u16 data into our own Vec so we can drop libraw before demosaicing.
-            // This costs P×2 bytes (~47 MB) instead of P×4 bytes (~93 MB) for normalized f32.
-            let raw_u16: Vec<u16> = raw_data.to_vec();
-            let inv_range = 1.0 / range;
-
-            // Extract metadata before dropping guard
-            let iso_speed = unsafe { (*inner).other.iso_speed };
-            let iso = if iso_speed > 0.0 {
-                Some(iso_speed.round() as u32)
-            } else {
-                None
-            };
-
-            // Drop libraw guard and file buffer before demosaicing to reduce peak memory
-            drop(guard);
-            drop(buf);
-
-            let (pixels, channels) = process_xtrans(
-                &raw_u16,
+            let (pixels, channels) = process_xtrans_fast(
+                inner,
+                guard.take().unwrap(),
+                buf.take().unwrap(),
                 raw_width,
                 raw_height,
                 width,
                 height,
                 top_margin,
                 left_margin,
-                xtrans_pattern,
                 black,
-                inv_range,
-            );
-
-            let dimensions = ImageDimensions::new(width, height, channels);
-            assert!(
-                pixels.len() == dimensions.pixel_count(),
-                "Pixel count mismatch: expected {}, got {}",
-                dimensions.pixel_count(),
-                pixels.len()
-            );
-
-            let metadata = AstroImageMetadata {
-                object: None,
-                instrument: None,
-                telescope: None,
-                date_obs: None,
-                exposure_time: None,
-                iso,
-                bitpix: BitPix::Int16,
-                header_dimensions: vec![height, width, channels],
-                is_cfa: true,
-            };
-
-            let mut astro = AstroImage::from_pixels(dimensions, pixels);
-            astro.metadata = metadata;
-            return Ok(astro);
+                range,
+            )?;
+            (pixels, width, height, channels, true)
         }
         SensorType::Unknown => {
             tracing::info!(
@@ -297,20 +238,11 @@ pub fn load_raw(path: &Path) -> Result<AstroImage> {
         }
     };
 
-    // Extract additional metadata before dropping guard
-    // SAFETY: inner is valid
-    let iso_speed = unsafe { (*inner).other.iso_speed };
-    let iso = if iso_speed > 0.0 {
-        Some(iso_speed.round() as u32)
-    } else {
-        None
-    };
-
-    // Guard can be dropped now - we've extracted all needed data
+    // Drop libraw and file buffer (no-op if X-Trans already consumed them)
     drop(guard);
+    drop(buf);
 
     let dimensions = ImageDimensions::new(out_width, out_height, num_channels);
-
     assert!(
         pixels.len() == dimensions.pixel_count(),
         "Pixel count mismatch: expected {}, got {}",
@@ -435,6 +367,88 @@ fn process_bayer_fast(
     );
 
     Ok((rgb_pixels, 3))
+}
+
+/// Extract ISO from libraw metadata.
+fn extract_iso(inner: *mut sys::libraw_data_t) -> Option<u32> {
+    // SAFETY: inner is valid after unpack.
+    let iso_speed = unsafe { (*inner).other.iso_speed };
+    if iso_speed > 0.0 {
+        Some(iso_speed.round() as u32)
+    } else {
+        None
+    }
+}
+
+/// Process X-Trans sensor data using our Markesteijn demosaic.
+///
+/// Takes ownership of `guard` and `buf` to drop them before the expensive
+/// demosaicing step, reducing peak memory by ~77 MB.
+#[allow(clippy::too_many_arguments)]
+fn process_xtrans_fast(
+    inner: *mut sys::libraw_data_t,
+    guard: LibrawGuard,
+    buf: Vec<u8>,
+    raw_width: usize,
+    raw_height: usize,
+    width: usize,
+    height: usize,
+    top_margin: usize,
+    left_margin: usize,
+    black: f32,
+    range: f32,
+) -> Result<(Vec<f32>, usize)> {
+    // SAFETY: inner is valid and unpack succeeded.
+    let raw_image_ptr = unsafe { (*inner).rawdata.raw_image };
+    if raw_image_ptr.is_null() {
+        anyhow::bail!("libraw: raw_image is null");
+    }
+
+    let pixel_count = raw_width
+        .checked_mul(raw_height)
+        .expect("libraw: raw dimensions overflow");
+
+    // SAFETY: raw_image_ptr is valid (checked above), and we've validated dimensions.
+    let raw_data = unsafe { slice::from_raw_parts(raw_image_ptr, pixel_count) };
+
+    // Get X-Trans 6×6 pattern from libraw
+    // SAFETY: inner is valid and xtrans is populated for X-Trans sensors
+    let xtrans_raw = unsafe { (*inner).idata.xtrans };
+
+    // Convert libraw's pattern to u8 (type varies by platform)
+    let mut xtrans_pattern = [[0u8; 6]; 6];
+    for (i, row) in xtrans_raw.iter().enumerate() {
+        for (j, &val) in row.iter().enumerate() {
+            #[allow(clippy::unnecessary_cast)]
+            {
+                xtrans_pattern[i][j] = val as u8;
+            }
+        }
+    }
+
+    // Copy raw u16 data so we can drop libraw before demosaicing.
+    // P×2 bytes (~47 MB) instead of P×4 bytes (~93 MB) for normalized f32.
+    let raw_u16: Vec<u16> = raw_data.to_vec();
+    let inv_range = 1.0 / range;
+
+    // Drop libraw and file buffer to reduce peak memory during demosaicing
+    drop(guard);
+    drop(buf);
+
+    let (pixels, channels) = process_xtrans(
+        &raw_u16,
+        raw_width,
+        raw_height,
+        width,
+        height,
+        top_margin,
+        left_margin,
+        xtrans_pattern,
+        black,
+        inv_range,
+    );
+
+    Ok((pixels, channels))
 }
 
 /// Process unknown CFA pattern using libraw's built-in demosaic.
