@@ -4,7 +4,7 @@ use bench::quick_bench;
 
 use super::*;
 
-#[quick_bench(warmup_iters = 2, iters = 10)]
+#[quick_bench(warmup_iters = 1, iters = 5)]
 fn raw_load(b: bench::Bencher) {
     use crate::testing::calibration_image_paths;
 
