@@ -340,28 +340,20 @@ pub(super) fn interpolate_green(
 // Step 3+4: Fused R/B interpolation + YPbPr + derivatives
 // ───────────────────────────────────────────────────────────────
 
-/// Compute per-direction RGB + YPbPr derivatives.
+/// Compute per-direction RGB from green estimates.
 ///
-/// Stores full RGB per direction in `rgb_dir` for reuse in blend step.
-/// Computes YPbPr from RGB, then spatial Laplacian derivatives.
+/// For each direction and pixel, fills in the missing R/B channels using
+/// green-guided color difference interpolation. Green pixels use the raw value.
 ///
-/// Both passes are row-parallel across all (direction, row) pairs.
-pub(super) fn compute_rgb_and_derivatives(
-    xtrans: &XTransImage,
-    green_dir: &[f32],
-    rgb_dir: &mut [f32],
-    drv: &mut [f32],
-) {
-    let width = xtrans.width;
+/// Layout: rgb_dir[dir * pixels * 3 + y * width * 3 + x * 3 + {R,G,B}]
+pub(super) fn compute_rgb(xtrans: &XTransImage, green_dir: &[f32], rgb_dir: &mut [f32]) {
     let height = xtrans.height;
-    let pixels = width * height;
-    let row_stride = width * 3;
+    let pixels = xtrans.width * height;
+    let row_stride = xtrans.width * 3;
 
     // Precompute color neighbor lookup to avoid per-pixel pattern searches
     let color_lookup = ColorInterpLookup::new(&xtrans.pattern);
 
-    // Pass 1: Compute per-direction RGB in parallel across all (dir, row) pairs.
-    // Layout: rgb_dir[dir * pixels * 3 + y * width * 3 + x * 3 + {R,G,B}]
     rgb_dir
         .par_chunks_mut(row_stride)
         .enumerate()
@@ -370,9 +362,19 @@ pub(super) fn compute_rgb_and_derivatives(
             let y = flat_idx % height;
             compute_rgb_row(xtrans, green_dir, &color_lookup, d, pixels, y, rgb_row);
         });
+}
 
-    // Pass 2: Compute YPbPr derivatives — fully row-parallel across (dir, row).
-    // YPbPr is computed on-the-fly from stored RGB, no separate buffer needed.
+/// Compute YPbPr spatial derivatives from per-direction RGB.
+///
+/// For each direction, computes a Laplacian in that direction's offset,
+/// storing the squared derivative magnitude per pixel.
+///
+/// `drv` may alias the same memory as a previously-used `green_dir` — the caller
+/// ensures green_dir is fully consumed before this function overwrites it.
+pub(super) fn compute_derivatives(rgb_dir: &[f32], drv: &mut [f32], width: usize, height: usize) {
+    let pixels = width * height;
+    let row_stride = width * 3;
+
     drv.par_chunks_mut(width)
         .enumerate()
         .for_each(|(flat_idx, drv_row)| {
@@ -663,12 +665,16 @@ fn interpolate_missing_color_fast(
 /// Two sub-passes:
 /// 1. Find minimum derivative across all 4 directions at each pixel → threshold = 8 × min
 /// 2. In a 3×3 window, count how many pixels have drv ≤ threshold
-pub(super) fn compute_homogeneity(drv: &[f32], width: usize, height: usize, homo: &mut [u8]) {
+pub(super) fn compute_homogeneity(
+    drv: &[f32],
+    width: usize,
+    height: usize,
+    homo: &mut [u8],
+    threshold: &mut [f32],
+) {
     let pixels = width * height;
 
     // Sub-pass 1: compute min derivative across directions and threshold
-    // SAFETY: Every element is written by the parallel pass below before being read in sub-pass 2.
-    let mut threshold = unsafe { crate::raw::alloc_uninit_vec::<f32>(pixels) };
     threshold
         .par_chunks_mut(width)
         .enumerate()
@@ -770,18 +776,17 @@ fn sat_query(sat: &[u32], sat_w: usize, y0: usize, x0: usize, y1: usize, x1: usi
 ///
 /// Uses summed area tables for O(1) per-pixel window queries instead of O(25).
 ///
-/// `output_buf` is a reusable buffer that will be truncated/resized to `pixels * 3`.
-/// Pass a no-longer-needed buffer (e.g. `drv`) to avoid a fresh allocation.
+/// `output` is a preallocated slice of length `pixels * 3` where the final RGB is written.
 pub(super) fn blend_final_from_rgb(
     rgb_dir: &[f32],
     homo: &[u8],
     width: usize,
     height: usize,
-    mut output_buf: Vec<f32>,
-) -> Vec<f32> {
+    output: &mut [f32],
+) {
     let pixels = width * height;
     let row_stride = width * 3;
-    let needed = pixels * 3;
+    assert_eq!(output.len(), pixels * 3);
 
     // Build summed area tables for each direction's homogeneity map.
     // This converts the per-pixel 5×5 window sum from O(25) to O(1).
@@ -790,12 +795,8 @@ pub(super) fn blend_final_from_rgb(
         .collect();
     let sat_w = width + 1;
 
-    // Reuse the provided buffer — truncate to needed size (no allocation).
-    // Every element is overwritten by the parallel pass below.
-    output_buf.truncate(needed);
-    let mut rgb = output_buf;
-
-    rgb.par_chunks_mut(row_stride)
+    output
+        .par_chunks_mut(row_stride)
         .enumerate()
         .for_each(|(y, rgb_row)| {
             let y0 = y.saturating_sub(2);
@@ -839,8 +840,6 @@ pub(super) fn blend_final_from_rgb(
                 }
             }
         });
-
-    rgb
 }
 
 #[cfg(test)]
@@ -963,7 +962,8 @@ mod tests {
         // Uniform derivatives → all directions equally good
         let drv = vec![1.0f32; NDIR * pixels];
         let mut homo = vec![0u8; NDIR * pixels];
-        compute_homogeneity(&drv, w, h, &mut homo);
+        let mut threshold = vec![0.0f32; pixels];
+        compute_homogeneity(&drv, w, h, &mut homo, &mut threshold);
 
         // Interior pixels should have equal homogeneity across all directions
         for y in 2..h - 2 {
@@ -1087,7 +1087,8 @@ mod tests {
 
         let drv = vec![1.0f32; NDIR * pixels];
         let mut homo = vec![0xFFu8; NDIR * pixels]; // fill with garbage to detect missing writes
-        compute_homogeneity(&drv, w, h, &mut homo);
+        let mut threshold = vec![0.0f32; pixels];
+        compute_homogeneity(&drv, w, h, &mut homo, &mut threshold);
 
         for d in 0..NDIR {
             // Top and bottom rows should be 0
@@ -1121,7 +1122,8 @@ mod tests {
         let mut drv = vec![100.0f32; NDIR * pixels];
         drv[..pixels].fill(0.1); // dir 0
         let mut homo = vec![0u8; NDIR * pixels];
-        compute_homogeneity(&drv, w, h, &mut homo);
+        let mut threshold = vec![0.0f32; pixels];
+        compute_homogeneity(&drv, w, h, &mut homo, &mut threshold);
 
         // Interior pixels: dir 0 should have high homogeneity, others low
         for y in 2..h - 2 {
@@ -1324,12 +1326,11 @@ mod tests {
         // Uniform homogeneity → all directions qualify
         let homo = vec![9u8; NDIR * pixels];
 
-        let output_buf = vec![0.0f32; NDIR * pixels]; // reusable buffer
-        let rgb = blend_final_from_rgb(&rgb_dir, &homo, w, h, output_buf);
+        let mut output = vec![0.0f32; pixels * 3];
+        blend_final_from_rgb(&rgb_dir, &homo, w, h, &mut output);
 
-        assert_eq!(rgb.len(), pixels * 3);
         // Average of 0.2, 0.4, 0.6, 0.8 = 0.5
-        for (i, &v) in rgb.iter().enumerate() {
+        for (i, &v) in output.iter().enumerate() {
             assert!((v - 0.5).abs() < 1e-5, "Pixel {i}: expected 0.5, got {v}");
         }
     }
@@ -1354,17 +1355,23 @@ mod tests {
         let mut homo = vec![0u8; NDIR * pixels];
         homo[..pixels].fill(9);
 
-        let output_buf = vec![0.0f32; NDIR * pixels];
-        let rgb = blend_final_from_rgb(&rgb_dir, &homo, w, h, output_buf);
+        let mut output = vec![0.0f32; pixels * 3];
+        blend_final_from_rgb(&rgb_dir, &homo, w, h, &mut output);
 
         // Only dir 0 should be selected → output should be red
         for p in 0..pixels {
             assert!(
-                (rgb[p * 3] - 1.0).abs() < 1e-5,
+                (output[p * 3] - 1.0).abs() < 1e-5,
                 "R at pixel {p}: expected 1.0"
             );
-            assert!(rgb[p * 3 + 1].abs() < 1e-5, "G at pixel {p}: expected 0.0");
-            assert!(rgb[p * 3 + 2].abs() < 1e-5, "B at pixel {p}: expected 0.0");
+            assert!(
+                output[p * 3 + 1].abs() < 1e-5,
+                "G at pixel {p}: expected 0.0"
+            );
+            assert!(
+                output[p * 3 + 2].abs() < 1e-5,
+                "B at pixel {p}: expected 0.0"
+            );
         }
     }
 }

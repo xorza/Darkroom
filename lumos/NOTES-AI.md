@@ -59,8 +59,8 @@ Bayer and X-Trans demosaicing with SIMD acceleration.
 | `bayer/scalar.rs` | Scalar bilinear interpolation functions |
 | `bayer/tests.rs` | 25 tests covering all CFA patterns and SIMD-vs-scalar consistency |
 | `xtrans/mod.rs` | X-Trans entry point, `XTransPattern`, `XTransImage` |
-| `xtrans/markesteijn.rs` | Markesteijn 1-pass orchestrator, buffer management |
-| `xtrans/markesteijn_steps.rs` | Algorithm steps: green interp, R/B, homogeneity, blend |
+| `xtrans/markesteijn.rs` | Markesteijn 1-pass orchestrator, `DemosaicArena` preallocation |
+| `xtrans/markesteijn_steps.rs` | Algorithm steps: green interp, R/B, derivatives, homogeneity, blend |
 | `xtrans/hex_lookup.rs` | Pre-computed hexagonal neighbor lookup tables |
 
 CFA Patterns: RGGB, BGGR, GRBG, GBRG
@@ -82,6 +82,14 @@ Custom implementation of the Markesteijn demosaic for Fujifilm X-Trans 6x6 CFA s
 4. **YPbPr derivatives** — Spatial Laplacian in perceptual color space
 5. **Homogeneity maps** — Count consistent pixels per direction in 3x3 window
 6. **Final blend** — Sum homogeneity in 5x5 window, average best directions
+
+**Memory**:
+- Single preallocated arena (`DemosaicArena`): 18P f32 (P = width × height)
+- Layout: `[rgb_dir 12P | green_dir/drv 4P | gmin/homo P | gmax/threshold P]`
+- Region B shared: green_dir (Steps 1–3) then drv (Steps 3–6)
+- Region C: gmin reinterpreted as homo u8 after Step 2
+- Region D: gmax reused as threshold in Step 5
+- libraw guard + file buffer dropped before demosaicing starts
 
 **Optimizations**:
 - Precomputed `ColorInterpLookup` avoids per-pixel pattern search in R/B interpolation

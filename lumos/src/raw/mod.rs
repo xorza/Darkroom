@@ -233,19 +233,56 @@ pub fn load_raw(path: &Path) -> Result<AstroImage> {
                 }
             }
 
+            // Normalize while raw_data (borrowed from libraw) is still alive
+            let inv_range = 1.0 / range;
+            let normalized_data = normalize_u16_to_f32_parallel(raw_data, black, inv_range);
+
+            // Extract metadata before dropping guard
+            let iso_speed = unsafe { (*inner).other.iso_speed };
+            let iso = if iso_speed > 0.0 {
+                Some(iso_speed.round() as u32)
+            } else {
+                None
+            };
+
+            // Drop libraw guard and file buffer before demosaicing to reduce peak memory
+            drop(guard);
+            drop(buf);
+
             let (pixels, channels) = process_xtrans(
-                raw_data,
+                normalized_data,
                 raw_width,
                 raw_height,
                 width,
                 height,
                 top_margin,
                 left_margin,
-                black,
-                range,
                 xtrans_pattern,
             );
-            (pixels, width, height, channels, true)
+
+            let dimensions = ImageDimensions::new(width, height, channels);
+            assert!(
+                pixels.len() == dimensions.pixel_count(),
+                "Pixel count mismatch: expected {}, got {}",
+                dimensions.pixel_count(),
+                pixels.len()
+            );
+
+            let metadata = AstroImageMetadata {
+                object: None,
+                instrument: None,
+                telescope: None,
+                date_obs: None,
+                exposure_time: None,
+                iso,
+                bitpix: BitPix::Int16,
+                header_dimensions: vec![height, width, channels],
+                is_cfa: true,
+            };
+
+            let mut astro = AstroImage::from_pixels(dimensions, pixels);
+            astro.metadata = metadata;
+            return Ok(astro);
         }
         SensorType::Unknown => {
             tracing::info!(

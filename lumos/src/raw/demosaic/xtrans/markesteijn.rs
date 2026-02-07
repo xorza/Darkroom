@@ -12,6 +12,21 @@
 //! 5. Blends the best directions into the final RGB output
 //!
 //! Performance: targets <500ms for 6032×4028 (vs libraw's 1750ms single-threaded).
+//!
+//! ## Memory layout
+//!
+//! All working memory is preallocated in a single contiguous arena (`DemosaicArena`)
+//! so the peak is explicit and visible. Buffers with non-overlapping lifetimes share
+//! the same memory region:
+//!
+//! ```text
+//! [ ---- Region A: rgb_dir (12P) ---- | Region B: green_dir/drv (4P) | C: gmin/homo (P) | D: gmax/threshold (P) ]
+//! Total: 18P f32 elements, where P = width × height
+//! ```
+//!
+//! Region B is used as `green_dir` in Steps 1–3, then overwritten as `drv` in Steps 3–6.
+//! Region C is used as `gmin` in Steps 1–2, then reinterpreted as `homo` (u8) in Steps 5–6.
+//! Region D is used as `gmax` in Steps 1–2, then reused as `threshold` in Step 5.
 
 use super::XTransImage;
 use super::hex_lookup::HexLookup;
@@ -20,61 +35,33 @@ use super::markesteijn_steps;
 /// Number of interpolation directions (4 for 1-pass: H, V, D1, D2).
 pub(super) const NDIR: usize = 4;
 
-/// Working buffers for Markesteijn demosaicing.
-/// Allocated once, buffers are dropped when no longer needed between steps.
+/// Preallocated arena for all Markesteijn demosaic working memory.
+///
+/// Single contiguous allocation with regions that are reused across steps.
+/// See module-level docs for the full layout and lifetime diagram.
 #[derive(Debug)]
-struct MarkesteijnBuffers {
-    /// Per-direction interpolated green. Layout: green_dir[dir * pixels + y * width + x]
-    green_dir: Vec<f32>,
-    /// Green min bounds for clamping. Layout: gmin[y * width + x]
-    gmin: Vec<f32>,
-    /// Green max bounds for clamping. Layout: gmax[y * width + x]
-    gmax: Vec<f32>,
-    /// Per-direction RGB. Layout: rgb_dir[dir * pixels * 3 + y * width * 3 + x * 3 + c]
-    /// Computed once in step 3+4, reused in step 6 (avoids expensive R/B recomputation).
-    rgb_dir: Vec<f32>,
-    /// Per-direction derivative. Layout: drv[dir * pixels + y * width + x]
-    drv: Vec<f32>,
-    /// Per-direction homogeneity count (0-9, fits u8). Layout: homo[dir * pixels + y * width + x]
-    homo: Vec<u8>,
+struct DemosaicArena {
+    storage: Vec<f32>,
 }
 
-impl MarkesteijnBuffers {
+impl DemosaicArena {
     fn new(width: usize, height: usize) -> Self {
         let pixels = width * height;
+        let total = 18 * pixels; // 12P + 4P + P + P
 
-        // SAFETY: All buffers below are fully written by parallel passes before being read:
-        // - green_dir: written entirely by interpolate_green (Step 2)
-        // - gmin/gmax: written entirely by compute_green_minmax (Step 1)
-        // - rgb_dir: written entirely by compute_rgb_and_derivatives Pass 1 (Step 3+4)
-        // - drv: written entirely by compute_rgb_and_derivatives Pass 2 (Step 3+4)
-        unsafe {
-            Self {
-                green_dir: crate::raw::alloc_uninit_vec(NDIR * pixels),
-                gmin: crate::raw::alloc_uninit_vec(pixels),
-                gmax: crate::raw::alloc_uninit_vec(pixels),
-                rgb_dir: crate::raw::alloc_uninit_vec(NDIR * pixels * 3),
-                drv: crate::raw::alloc_uninit_vec(NDIR * pixels),
-                // homo is allocated later by reusing gmin's memory (same byte size)
-                homo: Vec::new(),
-            }
-        }
+        // SAFETY: Every element in every region is fully written by parallel passes
+        // before being read. See per-step comments in demosaic_xtrans_markesteijn().
+        let storage = unsafe { crate::raw::alloc_uninit_vec::<f32>(total) };
+
+        tracing::debug!(
+            "Demosaic arena: {:.1} MB ({} × {} × 18 × 4 bytes)",
+            (total * 4) as f64 / (1024.0 * 1024.0),
+            width,
+            height,
+        );
+
+        Self { storage }
     }
-}
-
-/// Reinterpret a `Vec<f32>` as a `Vec<u8>` with 4× the element count.
-/// Reuses the same heap allocation (no alloc/dealloc). Contents are uninitialized.
-fn reinterpret_f32_as_u8(mut v: Vec<f32>) -> Vec<u8> {
-    let f32_cap = v.capacity();
-    let u8_len = f32_cap * 4; // 1 f32 = 4 u8
-
-    let ptr = v.as_mut_ptr() as *mut u8;
-    std::mem::forget(v);
-
-    // SAFETY: f32 and u8 have compatible alignment (u8 alignment=1 is less restrictive).
-    // The pointer came from a valid Vec<f32> allocation. Length and capacity are scaled by 4.
-    // Caller must write all elements before reading (compute_homogeneity does homo.fill(0)).
-    unsafe { Vec::from_raw_parts(ptr, u8_len, u8_len) }
 }
 
 /// Demosaic an X-Trans image using Markesteijn 1-pass algorithm.
@@ -85,74 +72,103 @@ pub fn demosaic_xtrans_markesteijn(xtrans: &XTransImage) -> Vec<f32> {
 
     let width = xtrans.width;
     let height = xtrans.height;
+    let pixels = width * height;
 
     // Build hex neighbor lookup tables
     let hex = HexLookup::new(&xtrans.pattern);
 
-    // Allocate working buffers
-    let mut bufs = MarkesteijnBuffers::new(width, height);
+    // Allocate all working memory in one shot
+    let mut arena = DemosaicArena::new(width, height);
 
     // Step 1: Compute green min/max bounds for non-green pixels
+    // Writes: Region C (gmin), Region D (gmax)
     let t = Instant::now();
-    markesteijn_steps::compute_green_minmax(xtrans, &hex, &mut bufs.gmin, &mut bufs.gmax);
+    {
+        let (before_d, region_d) = arena.storage.split_at_mut(17 * pixels);
+        let region_c = &mut before_d[16 * pixels..];
+        markesteijn_steps::compute_green_minmax(xtrans, &hex, region_c, region_d);
+    }
     tracing::debug!(
         "  Step 1 (green min/max): {:.1}ms",
         t.elapsed().as_secs_f64() * 1000.0
     );
 
     // Step 2: Interpolate green in 4 directions
+    // Reads: Region C (gmin), Region D (gmax). Writes: Region B (green_dir).
     let t = Instant::now();
-    markesteijn_steps::interpolate_green(xtrans, &hex, &bufs.gmin, &bufs.gmax, &mut bufs.green_dir);
+    {
+        let (ab, cd) = arena.storage.split_at_mut(16 * pixels);
+        let region_b = &mut ab[12 * pixels..16 * pixels];
+        let (region_c, region_d) = cd.split_at(pixels);
+        markesteijn_steps::interpolate_green(xtrans, &hex, region_c, region_d, region_b);
+    }
     tracing::debug!(
         "  Step 2 (green interp): {:.1}ms",
         t.elapsed().as_secs_f64() * 1000.0
     );
 
-    // Reclaim gmin memory for homo buffer (same byte size: pixels*4 bytes = NDIR*pixels u8).
-    // gmax is simply freed.
-    bufs.homo = reinterpret_f32_as_u8(std::mem::take(&mut bufs.gmin));
-    bufs.gmax = Vec::new();
-
-    // Step 3+4: Compute per-direction RGB + YPbPr derivatives
+    // Step 3: Compute per-direction RGB from green_dir
+    // Reads: Region B (as green_dir). Writes: Region A (rgb_dir).
+    // After this pass, Region B's green_dir data is dead.
     let t = Instant::now();
-    markesteijn_steps::compute_rgb_and_derivatives(
-        xtrans,
-        &bufs.green_dir,
-        &mut bufs.rgb_dir,
-        &mut bufs.drv,
-    );
+    {
+        let (region_a, rest) = arena.storage.split_at_mut(12 * pixels);
+        let region_b = &rest[..4 * pixels];
+        markesteijn_steps::compute_rgb(xtrans, region_b, region_a);
+    }
+
+    // Step 4: Compute YPbPr derivatives from rgb_dir
+    // Reads: Region A (rgb_dir). Writes: Region B (now drv, overwriting dead green_dir).
+    {
+        let (region_a, rest) = arena.storage.split_at_mut(12 * pixels);
+        let region_b = &mut rest[..4 * pixels];
+        markesteijn_steps::compute_derivatives(region_a, region_b, width, height);
+    }
     tracing::debug!(
         "  Step 3+4 (RGB+deriv): {:.1}ms",
         t.elapsed().as_secs_f64() * 1000.0
     );
 
-    // Free green_dir — no longer needed (rgb_dir has full RGB)
-    bufs.green_dir = Vec::new();
-
     // Step 5: Build homogeneity maps from derivatives
+    // Reads: Region B (drv). Writes: Region C (homo via u8 reinterpret), Region D (threshold).
+    // Split storage to get non-overlapping borrows of regions B, C (as u8), and D.
     let t = Instant::now();
-    markesteijn_steps::compute_homogeneity(&bufs.drv, width, height, &mut bufs.homo);
+    {
+        let (before_d, region_d) = arena.storage.split_at_mut(17 * pixels);
+        let (before_c, region_c) = before_d.split_at_mut(16 * pixels);
+        let drv = &before_c[12 * pixels..];
+        // SAFETY: Region C (f32 at [16P..17P]) reinterpreted as u8 for homo.
+        // gmin data is dead after Step 2. f32 alignment (4) satisfies u8 alignment (1).
+        let homo =
+            unsafe { std::slice::from_raw_parts_mut(region_c.as_mut_ptr() as *mut u8, pixels * 4) };
+        markesteijn_steps::compute_homogeneity(drv, width, height, homo, region_d);
+    }
     tracing::debug!(
         "  Step 5 (homogeneity): {:.1}ms",
         t.elapsed().as_secs_f64() * 1000.0
     );
 
     // Step 6: Final blend using homogeneity scores + pre-computed RGB
-    // Reuse drv buffer for output (drv has 4×pixels f32, output needs 3×pixels f32)
+    // Reads: Region A (rgb_dir), Region C (homo via SATs).
+    // Writes: Region B[..3P] (output RGB, overwriting first 3P of drv).
     let t = Instant::now();
-    let rgb = markesteijn_steps::blend_final_from_rgb(
-        &bufs.rgb_dir,
-        &bufs.homo,
-        width,
-        height,
-        std::mem::take(&mut bufs.drv),
-    );
+    {
+        let (region_a, rest) = arena.storage.split_at_mut(12 * pixels);
+        let (region_b, region_cd) = rest.split_at_mut(4 * pixels);
+        let homo = unsafe {
+            let ptr = region_cd.as_ptr() as *const u8;
+            std::slice::from_raw_parts(ptr, pixels * 4)
+        };
+        let output = &mut region_b[..3 * pixels];
+        markesteijn_steps::blend_final_from_rgb(region_a, homo, width, height, output);
+    }
     tracing::debug!(
         "  Step 6 (blend): {:.1}ms",
         t.elapsed().as_secs_f64() * 1000.0
     );
 
-    rgb
+    // Copy output from Region B into owned Vec
+    arena.storage[12 * pixels..12 * pixels + 3 * pixels].to_vec()
 }
 
 #[cfg(test)]

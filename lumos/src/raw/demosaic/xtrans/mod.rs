@@ -15,44 +15,27 @@ mod markesteijn_steps;
 
 use std::time::Instant;
 
-use crate::raw::normalize::normalize_u16_to_f32_parallel;
-
 pub use markesteijn::demosaic_xtrans_markesteijn;
 
-/// Process X-Trans sensor raw data and demosaic to RGB.
+/// Process X-Trans sensor data and demosaic to RGB.
 ///
-/// # Arguments
-/// * `raw_data` - Raw sensor data (u16 values)
-/// * `raw_width` - Width of the raw data buffer
-/// * `raw_height` - Height of the raw data buffer
-/// * `width` - Width of the active/output image area
-/// * `height` - Height of the active/output image area
-/// * `top_margin` - Top margin (offset from raw to active area)
-/// * `left_margin` - Left margin (offset from raw to active area)
-/// * `black` - Black level for normalization
-/// * `range` - Range (maximum - black) for normalization
-/// * `xtrans_pattern` - The 6x6 X-Trans CFA pattern from libraw
+/// Takes already-normalized f32 data (0.0–1.0 range). The caller normalizes and drops
+/// the libraw guard before calling this, so demosaicing doesn't hold raw file memory.
 ///
 /// # Returns
 /// Tuple of (RGB pixels, number of channels which is always 3)
 #[allow(clippy::too_many_arguments)]
 pub fn process_xtrans(
-    raw_data: &[u16],
+    normalized_data: Vec<f32>,
     raw_width: usize,
     raw_height: usize,
     width: usize,
     height: usize,
     top_margin: usize,
     left_margin: usize,
-    black: f32,
-    range: f32,
     xtrans_pattern: [[u8; 6]; 6],
 ) -> (Vec<f32>, usize) {
     let pattern = XTransPattern::new(xtrans_pattern);
-
-    // Normalize to 0.0-1.0 range using parallel SIMD processing
-    let inv_range = 1.0 / range;
-    let normalized_data = normalize_u16_to_f32_parallel(raw_data, black, inv_range);
 
     let xtrans = XTransImage::with_margins(
         &normalized_data,
@@ -290,22 +273,16 @@ mod tests {
         XTransImage::with_margins(&data, 6, 6, 6, 6, 0, 0, pattern);
     }
 
+    fn normalize_test_data(raw_data: &[u16], black: f32, range: f32) -> Vec<f32> {
+        crate::raw::normalize::normalize_u16_to_f32_parallel(raw_data, black, 1.0 / range)
+    }
+
     #[test]
     fn test_process_xtrans_output_size() {
         // 12x12 raw data, 6x6 active area
         let raw_data: Vec<u16> = vec![1000; 12 * 12];
-        let (rgb, channels) = process_xtrans(
-            &raw_data,
-            12,
-            12,
-            6,
-            6,
-            3,
-            3,
-            0.0,
-            4096.0,
-            test_pattern_array(),
-        );
+        let normalized = normalize_test_data(&raw_data, 0.0, 4096.0);
+        let (rgb, channels) = process_xtrans(normalized, 12, 12, 6, 6, 3, 3, test_pattern_array());
 
         assert_eq!(channels, 3);
         assert_eq!(rgb.len(), 6 * 6 * 3); // width * height * channels
@@ -322,19 +299,9 @@ mod tests {
         // Should normalize to 0.5
         let mid_value = (black + range / 2.0) as u16;
         let raw_data: Vec<u16> = vec![mid_value; 12 * 12];
+        let normalized = normalize_test_data(&raw_data, black, range);
 
-        let (rgb, _) = process_xtrans(
-            &raw_data,
-            12,
-            12,
-            6,
-            6,
-            3,
-            3,
-            black,
-            range,
-            test_pattern_array(),
-        );
+        let (rgb, _) = process_xtrans(normalized, 12, 12, 6, 6, 3, 3, test_pattern_array());
 
         // All output values should be around 0.5 (interpolated from 0.5 neighbors)
         for &val in &rgb {
@@ -350,19 +317,9 @@ mod tests {
 
         // All values below black level
         let raw_data: Vec<u16> = vec![100; 12 * 12];
+        let normalized = normalize_test_data(&raw_data, black, range);
 
-        let (rgb, _) = process_xtrans(
-            &raw_data,
-            12,
-            12,
-            6,
-            6,
-            3,
-            3,
-            black,
-            range,
-            test_pattern_array(),
-        );
+        let (rgb, _) = process_xtrans(normalized, 12, 12, 6, 6, 3, 3, test_pattern_array());
 
         // All output values should be 0 (clamped)
         for &val in &rgb {
@@ -377,19 +334,9 @@ mod tests {
         let range = 65535.0;
 
         let raw_data: Vec<u16> = vec![65535; 12 * 12];
+        let normalized = normalize_test_data(&raw_data, black, range);
 
-        let (rgb, _) = process_xtrans(
-            &raw_data,
-            12,
-            12,
-            6,
-            6,
-            3,
-            3,
-            black,
-            range,
-            test_pattern_array(),
-        );
+        let (rgb, _) = process_xtrans(normalized, 12, 12, 6, 6, 3, 3, test_pattern_array());
 
         // All output values should be 1.0
         for &val in &rgb {
