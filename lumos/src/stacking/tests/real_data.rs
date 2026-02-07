@@ -5,82 +5,84 @@ use crate::stacking::{
 use crate::testing::{calibration_dir, calibration_image_paths, init_tracing};
 
 #[test]
-#[ignore] // Requires LUMOS_CALIBRATION_DIR
-fn test_create_master_dark_and_flat() {
+#[ignore] // Requires LUMOS_CALIBRATION_DIR with Bias/, Darks/, Flats/ subdirectories
+fn test_create_calibration_masters() {
     init_tracing();
 
     let Some(cal_dir) = calibration_dir() else {
         return;
     };
 
-    let masters_dir = cal_dir.join("calibration_masters");
-    std::fs::create_dir_all(&masters_dir).expect("Failed to create calibration_masters dir");
+    // Report which subdirectories are available
+    for subdir in ["Bias", "Darks", "Flats"] {
+        let path = cal_dir.join(subdir);
+        if path.exists() {
+            let count = common::file_utils::astro_image_files(&path).len();
+            println!("{subdir}: {count} frames");
+        } else {
+            println!("{subdir}: not found (skipping)");
+        }
+    }
 
-    // Stack darks
-    let Some(dark_paths) = calibration_image_paths("Darks") else {
-        eprintln!("No Darks directory found, skipping");
-        return;
-    };
-    assert!(!dark_paths.is_empty(), "No dark frames found");
-
-    println!("Stacking {} dark frames...", dark_paths.len());
     let config = StackConfig::sigma_clipped(3.0);
-    let master_dark = stack_with_progress(
-        &dark_paths,
-        FrameType::Dark,
-        config,
-        ProgressCallback::default(),
-    )
-    .expect("Failed to stack darks");
+    let masters = CalibrationMasters::create(&cal_dir, config, ProgressCallback::default())
+        .expect("Failed to create calibration masters");
 
     println!(
-        "Master dark: {}x{}x{}",
-        master_dark.width(),
-        master_dark.height(),
-        master_dark.channels()
+        "Created masters: bias={}, dark={}, flat={}, hot_pixels={}",
+        masters.master_bias.is_some(),
+        masters.master_dark.is_some(),
+        masters.master_flat.is_some(),
+        masters.hot_pixel_map.is_some(),
     );
 
-    let first_dark = crate::AstroImage::from_file(&dark_paths[0]).unwrap();
-    assert_eq!(master_dark.dimensions(), first_dark.dimensions());
-
-    let dark_path = masters_dir.join("master_dark_mean.tiff");
-    let img: imaginarium::Image = master_dark.into();
-    img.save_file(&dark_path)
-        .expect("Failed to save master dark");
-    println!("Saved master dark: {}", dark_path.display());
-
-    // Stack flats
-    let Some(flat_paths) = calibration_image_paths("Flats") else {
-        eprintln!("No Flats directory found, skipping flats");
-        return;
-    };
-    assert!(!flat_paths.is_empty(), "No flat frames found");
-
-    println!("Stacking {} flat frames...", flat_paths.len());
-    let config = StackConfig::sigma_clipped(2.5);
-    let master_flat = stack_with_progress(
-        &flat_paths,
-        FrameType::Flat,
-        config,
-        ProgressCallback::default(),
-    )
-    .expect("Failed to stack flats");
-
-    println!(
-        "Master flat: {}x{}x{}",
-        master_flat.width(),
-        master_flat.height(),
-        master_flat.channels()
+    // At least one master should be created
+    assert!(
+        masters.master_bias.is_some()
+            || masters.master_dark.is_some()
+            || masters.master_flat.is_some(),
+        "No calibration frames found in any subdirectory"
     );
 
-    let first_flat = crate::AstroImage::from_file(&flat_paths[0]).unwrap();
-    assert_eq!(master_flat.dimensions(), first_flat.dimensions());
+    if let Some(ref bias) = masters.master_bias {
+        println!(
+            "Master bias: {}x{}x{}",
+            bias.width(),
+            bias.height(),
+            bias.channels()
+        );
+    }
+    if let Some(ref dark) = masters.master_dark {
+        println!(
+            "Master dark: {}x{}x{} (bias-subtracted: {})",
+            dark.width(),
+            dark.height(),
+            dark.channels(),
+            masters.master_bias.is_some()
+        );
+    }
+    if let Some(ref flat) = masters.master_flat {
+        println!(
+            "Master flat: {}x{}x{}",
+            flat.width(),
+            flat.height(),
+            flat.channels()
+        );
+    }
+    if let Some(ref hp) = masters.hot_pixel_map {
+        println!(
+            "Hot pixel map: {} pixels ({:.3}%)",
+            hp.count,
+            hp.percentage()
+        );
+    }
 
-    let flat_path = masters_dir.join("master_flat_mean.tiff");
-    let img: imaginarium::Image = master_flat.into();
-    img.save_file(&flat_path)
-        .expect("Failed to save master flat");
-    println!("Saved master flat: {}", flat_path.display());
+    // Save masters for use by other tests
+    let masters_dir = cal_dir.join("calibration_masters");
+    masters
+        .save_to_directory(&masters_dir)
+        .expect("Failed to save masters");
+    println!("Saved masters to {}", masters_dir.display());
 }
 
 #[test]
@@ -96,7 +98,7 @@ fn test_calibrate_lights() {
     let masters_dir = cal_dir.join("calibration_masters");
     assert!(
         masters_dir.exists(),
-        "calibration_masters directory not found — run test_create_master_dark_and_flat first"
+        "calibration_masters directory not found — run test_create_calibration_masters first"
     );
 
     let config = StackConfig::sigma_clipped(3.0);

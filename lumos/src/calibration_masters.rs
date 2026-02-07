@@ -4,7 +4,6 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
-use rayon::prelude::*;
 
 use crate::stacking::hot_pixels::HotPixelMap;
 use crate::stacking::{ProgressCallback, StackConfig, stack_with_progress};
@@ -33,19 +32,17 @@ impl CalibrationMasters {
     ///
     /// Applies the standard calibration formula:
     /// 1. Subtract master bias (removes readout noise)
-    /// 2. Subtract master dark (removes thermal noise)
+    /// 2. Subtract master dark (removes thermal noise, already bias-subtracted)
     /// 3. Divide by normalized master flat (corrects vignetting and dust)
     /// 4. Correct hot pixels (replace with median of neighbors)
     ///
-    /// Note: If using a dark frame that was NOT bias-subtracted, skip the separate
-    /// bias subtraction as the dark already includes the bias signal.
+    /// The master dark is always bias-subtracted: both `create()` and `load()`
+    /// automatically subtract master bias from master dark when both are present.
+    /// This prevents double-subtraction of the bias signal.
     ///
     /// # Panics
     /// Panics if the provided master frames have different dimensions than the image.
     pub fn calibrate(&self, image: &mut AstroImage) {
-        // Chunk size for parallel processing (16KB of f32s to avoid false sharing)
-        const CHUNK_SIZE: usize = 4096;
-
         // Subtract master bias (removes readout noise)
         if let Some(ref bias) = self.master_bias {
             assert!(
@@ -55,13 +52,9 @@ impl CalibrationMasters {
                 image.dimensions()
             );
             image.apply_from_channel(bias, |_c, dst, src| {
-                dst.par_chunks_mut(CHUNK_SIZE)
-                    .zip(src.par_chunks(CHUNK_SIZE))
-                    .for_each(|(d_chunk, s_chunk)| {
-                        for (d, s) in d_chunk.iter_mut().zip(s_chunk.iter()) {
-                            *d -= s;
-                        }
-                    });
+                for (d, s) in dst.iter_mut().zip(src.iter()) {
+                    *d -= s;
+                }
             });
         }
 
@@ -74,13 +67,9 @@ impl CalibrationMasters {
                 image.dimensions()
             );
             image.apply_from_channel(dark, |_c, dst, src| {
-                dst.par_chunks_mut(CHUNK_SIZE)
-                    .zip(src.par_chunks(CHUNK_SIZE))
-                    .for_each(|(d_chunk, s_chunk)| {
-                        for (d, s) in d_chunk.iter_mut().zip(s_chunk.iter()) {
-                            *d -= s;
-                        }
-                    });
+                for (d, s) in dst.iter_mut().zip(src.iter()) {
+                    *d -= s;
+                }
             });
         }
 
@@ -100,16 +89,12 @@ impl CalibrationMasters {
             let inv_flat_mean = 1.0 / flat_mean;
 
             image.apply_from_channel(flat, |_c, dst, src| {
-                dst.par_chunks_mut(CHUNK_SIZE)
-                    .zip(src.par_chunks(CHUNK_SIZE))
-                    .for_each(|(d_chunk, s_chunk)| {
-                        for (d, s) in d_chunk.iter_mut().zip(s_chunk.iter()) {
-                            let normalized_flat = s * inv_flat_mean;
-                            if normalized_flat > f32::EPSILON {
-                                *d /= normalized_flat;
-                            }
-                        }
-                    });
+                for (d, s) in dst.iter_mut().zip(src.iter()) {
+                    let normalized_flat = s * inv_flat_mean;
+                    if normalized_flat > f32::EPSILON {
+                        *d /= normalized_flat;
+                    }
+                }
             });
         }
 
@@ -144,6 +129,9 @@ impl CalibrationMasters {
     ///
     /// Looks for files named master_dark_<method>.tiff, master_flat_<method>.tiff, etc.
     /// Returns None for any masters that don't exist.
+    ///
+    /// If both master bias and master dark are present, subtracts bias from the dark
+    /// to prevent double-subtraction during calibration.
     /// Automatically generates hot pixel map from master dark if available.
     ///
     /// # Example
@@ -160,11 +148,16 @@ impl CalibrationMasters {
     pub fn load<P: AsRef<Path>>(dir: P, config: StackConfig) -> Result<Self> {
         let dir = dir.as_ref();
 
-        let master_dark = Self::load_master(dir, FrameType::Dark, &config);
+        let mut master_dark = Self::load_master(dir, FrameType::Dark, &config);
         let master_flat = Self::load_master(dir, FrameType::Flat, &config);
         let master_bias = Self::load_master(dir, FrameType::Bias, &config);
 
-        // Generate hot pixel map from master dark
+        // Subtract bias from dark to prevent double-subtraction during calibration
+        if let (Some(dark), Some(bias)) = (&mut master_dark, &master_bias) {
+            subtract_bias_from_dark(dark, bias);
+        }
+
+        // Generate hot pixel map from bias-subtracted master dark
         let hot_pixel_map = master_dark
             .as_ref()
             .map(|dark| HotPixelMap::from_master_dark(dark, DEFAULT_HOT_PIXEL_SIGMA));
@@ -231,15 +224,21 @@ impl CalibrationMasters {
         );
         assert!(dir.is_dir(), "Path is not a directory: {:?}", dir);
 
-        // Try to load existing masters first, then create from raw frames if not found
-        let master_dark = Self::load_master(dir, FrameType::Dark, &config)
-            .or_else(|| Self::create_master(dir, "Darks", FrameType::Dark, &config, &progress));
-        let master_flat = Self::load_master(dir, FrameType::Flat, &config)
-            .or_else(|| Self::create_master(dir, "Flats", FrameType::Flat, &config, &progress));
+        // Create bias first — it's needed to debias the master dark.
         let master_bias = Self::load_master(dir, FrameType::Bias, &config)
             .or_else(|| Self::create_master(dir, "Bias", FrameType::Bias, &config, &progress));
 
-        // Generate hot pixel map from master dark
+        // Create dark, then subtract bias to prevent double-subtraction during calibration.
+        let mut master_dark = Self::load_master(dir, FrameType::Dark, &config)
+            .or_else(|| Self::create_master(dir, "Darks", FrameType::Dark, &config, &progress));
+        if let (Some(dark), Some(bias)) = (&mut master_dark, &master_bias) {
+            subtract_bias_from_dark(dark, bias);
+        }
+
+        let master_flat = Self::load_master(dir, FrameType::Flat, &config)
+            .or_else(|| Self::create_master(dir, "Flats", FrameType::Flat, &config, &progress));
+
+        // Generate hot pixel map from bias-subtracted master dark
         let hot_pixel_map = master_dark
             .as_ref()
             .map(|dark| HotPixelMap::from_master_dark(dark, DEFAULT_HOT_PIXEL_SIGMA));
@@ -325,9 +324,120 @@ impl CalibrationMasters {
     }
 }
 
+/// Subtract master bias from master dark in place.
+///
+/// Since stacking is a linear operation, subtracting bias after stacking is
+/// mathematically equivalent to subtracting from each raw frame before stacking:
+/// `mean(dark_i - bias) = mean(dark_i) - bias`.
+///
+/// # Panics
+/// Panics if bias and dark have different dimensions.
+fn subtract_bias_from_dark(dark: &mut AstroImage, bias: &AstroImage) {
+    assert!(
+        dark.dimensions() == bias.dimensions(),
+        "Bias dimensions {:?} don't match dark dimensions {:?}",
+        bias.dimensions(),
+        dark.dimensions()
+    );
+    tracing::info!("Subtracting master bias from master dark to prevent double-subtraction");
+    dark.apply_from_channel(bias, |_c, dst, src| {
+        for (d, s) in dst.iter_mut().zip(src.iter()) {
+            *d -= s;
+        }
+    });
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ImageDimensions;
+
+    /// Helper to create a grayscale AstroImage filled with a constant value.
+    fn constant_image(width: usize, height: usize, value: f32) -> AstroImage {
+        let dims = ImageDimensions::new(width, height, 1);
+        AstroImage::from_pixels(dims, vec![value; width * height])
+    }
+
+    #[test]
+    fn test_subtract_bias_from_dark() {
+        let mut dark = constant_image(4, 4, 100.0);
+        let bias = constant_image(4, 4, 10.0);
+
+        subtract_bias_from_dark(&mut dark, &bias);
+
+        // Every pixel should be dark - bias = 90.0
+        for y in 0..4 {
+            for x in 0..4 {
+                let val = dark.get_pixel_gray(x, y);
+                assert!(
+                    (val - 90.0).abs() < 1e-6,
+                    "Expected 90.0 at ({x},{y}), got {val}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_calibrate_no_double_bias_subtraction() {
+        // Simulate: raw=1000, bias=100, dark_raw=500 (includes bias)
+        // After subtract_bias_from_dark: dark=400
+        // Calibration: (1000 - 100 - 400) = 500 (correct thermal-free signal)
+        // Without fix: (1000 - 100 - 500) = 400 (bias subtracted twice — WRONG)
+        let mut light = constant_image(4, 4, 1000.0);
+        let bias = constant_image(4, 4, 100.0);
+
+        let mut dark = constant_image(4, 4, 500.0); // raw dark includes bias
+        subtract_bias_from_dark(&mut dark, &bias); // now dark = 400
+
+        let masters = CalibrationMasters {
+            master_dark: Some(dark),
+            master_flat: None,
+            master_bias: Some(bias),
+            hot_pixel_map: None,
+            config: StackConfig::default(),
+        };
+
+        masters.calibrate(&mut light);
+
+        // Expected: 1000 - 100 (bias) - 400 (debiased dark) = 500
+        for y in 0..4 {
+            for x in 0..4 {
+                let val = light.get_pixel_gray(x, y);
+                assert!(
+                    (val - 500.0).abs() < 1e-4,
+                    "Expected 500.0 at ({x},{y}), got {val}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_calibrate_dark_only_no_bias() {
+        // When no bias is provided, dark is used as-is (includes bias component).
+        // Calibration: 1000 - 500 = 500
+        let mut light = constant_image(4, 4, 1000.0);
+        let dark = constant_image(4, 4, 500.0);
+
+        let masters = CalibrationMasters {
+            master_dark: Some(dark),
+            master_flat: None,
+            master_bias: None,
+            hot_pixel_map: None,
+            config: StackConfig::default(),
+        };
+
+        masters.calibrate(&mut light);
+
+        for y in 0..4 {
+            for x in 0..4 {
+                let val = light.get_pixel_gray(x, y);
+                assert!(
+                    (val - 500.0).abs() < 1e-4,
+                    "Expected 500.0 at ({x},{y}), got {val}"
+                );
+            }
+        }
+    }
 
     #[test]
     #[cfg_attr(not(feature = "real-data"), ignore)]

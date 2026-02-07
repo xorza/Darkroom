@@ -115,23 +115,9 @@ The registration module is the strongest part of the crate. It implements:
 
 **Current behavior is acceptable** because the code operates on master darks (which are stacked raw data), and the correction uses median of neighbors. But ideally, correction should happen before demosaicing for maximum effectiveness.
 
-### 4. Calibration Order: Missing Bias-from-Dark Subtraction
+### ~~4. Calibration Order: Missing Bias-from-Dark Subtraction~~ (RESOLVED)
 
-**Current pipeline:**
-```
-1. Subtract master bias
-2. Subtract master dark  
-3. Divide by normalized flat
-4. Correct hot pixels
-```
-
-**Problem:** If master darks were NOT bias-subtracted during creation, step 1 + step 2 double-subtracts the bias signal. The code has a comment acknowledging this but doesn't enforce it.
-
-**Industry standard:** Either:
-- Stack darks with bias subtraction → master dark is bias-free → subtract bias then dark from lights
-- Stack darks WITHOUT bias subtraction → master dark includes bias → only subtract dark from lights (skip separate bias)
-
-**Recommendation:** Document the expected workflow more prominently. Or better: subtract bias from darks during master creation if bias frames are available.
+Both `CalibrationMasters::create()` and `CalibrationMasters::load()` now automatically subtract master bias from master dark when both are present. This prevents double-subtraction of the bias signal during calibration. Bias is created/loaded first to ensure it's available before dark processing. The subtraction is done after stacking (mathematically equivalent to per-frame subtraction since stacking is linear).
 
 ---
 
