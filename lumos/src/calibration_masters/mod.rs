@@ -7,6 +7,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
+use rayon::prelude::*;
 
 use crate::stacking::hot_pixels::HotPixelMap;
 use crate::stacking::{ProgressCallback, StackConfig, stack_with_progress};
@@ -64,11 +65,7 @@ impl CalibrationMasters {
                 dark.dimensions(),
                 image.dimensions()
             );
-            image.apply_from_channel(dark, |_c, dst, src| {
-                for (d, s) in dst.iter_mut().zip(src.iter()) {
-                    *d -= s;
-                }
-            });
+            *image -= dark;
         } else if let Some(ref bias) = self.master_bias {
             // No dark available — subtract bias only (removes readout noise)
             assert!(
@@ -77,11 +74,7 @@ impl CalibrationMasters {
                 bias.dimensions(),
                 image.dimensions()
             );
-            image.apply_from_channel(bias, |_c, dst, src| {
-                for (d, s) in dst.iter_mut().zip(src.iter()) {
-                    *d -= s;
-                }
-            });
+            *image -= bias;
         }
 
         // Divide by normalized master flat (corrects vignetting).
@@ -115,31 +108,47 @@ impl CalibrationMasters {
             );
             let inv_flat_mean = 1.0 / flat_mean;
 
+            let w = image.dimensions().width;
             match &self.master_bias {
                 Some(bias) => {
                     // Divide by (flat - bias) / mean(flat - bias)
                     for c in 0..image.channels() {
-                        let flat_ch = flat.channel(c);
-                        let bias_ch = bias.channel(c);
-                        let img_ch = image.channel_mut(c);
-                        for i in 0..img_ch.len() {
-                            let corrected_flat = (flat_ch[i] - bias_ch[i]) * inv_flat_mean;
-                            if corrected_flat > f32::EPSILON {
-                                img_ch[i] /= corrected_flat;
-                            }
-                        }
+                        let flat_ch = flat.channel(c).pixels();
+                        let bias_ch = bias.channel(c).pixels();
+                        let img_ch = image.channel_mut(c).pixels_mut();
+                        img_ch
+                            .par_chunks_mut(w)
+                            .enumerate()
+                            .for_each(|(row, img_row)| {
+                                let off = row * w;
+                                let flat_row = &flat_ch[off..off + w];
+                                let bias_row = &bias_ch[off..off + w];
+                                for i in 0..w {
+                                    let corrected = (flat_row[i] - bias_row[i]) * inv_flat_mean;
+                                    if corrected > f32::EPSILON {
+                                        img_row[i] /= corrected;
+                                    }
+                                }
+                            });
                     }
                 }
                 None => {
                     // No bias — divide by flat / mean(flat)
-                    image.apply_from_channel(flat, |_c, dst, src| {
-                        for (d, s) in dst.iter_mut().zip(src.iter()) {
-                            let normalized_flat = s * inv_flat_mean;
-                            if normalized_flat > f32::EPSILON {
-                                *d /= normalized_flat;
-                            }
-                        }
-                    });
+                    for c in 0..image.channels() {
+                        let flat_ch = flat.channel(c).pixels();
+                        let img_ch = image.channel_mut(c).pixels_mut();
+                        img_ch
+                            .par_chunks_mut(w)
+                            .zip(flat_ch.par_chunks(w))
+                            .for_each(|(img_row, flat_row)| {
+                                for (d, s) in img_row.iter_mut().zip(flat_row.iter()) {
+                                    let normalized_flat = s * inv_flat_mean;
+                                    if normalized_flat > f32::EPSILON {
+                                        *d /= normalized_flat;
+                                    }
+                                }
+                            });
+                    }
                 }
             }
         }

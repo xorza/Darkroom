@@ -5,6 +5,7 @@ use anyhow::Result;
 use rayon::prelude::*;
 
 use imaginarium::{ChannelCount, ColorFormat, Image, ImageDesc};
+use std::ops::SubAssign;
 use std::path::Path;
 
 use crate::common::Buffer2;
@@ -130,7 +131,7 @@ pub(crate) enum PixelData {
 pub struct AstroImage {
     pub metadata: AstroImageMetadata,
     dimensions: ImageDimensions,
-    pixels: PixelData,
+    pub(crate) pixels: PixelData,
 }
 
 impl AstroImage {
@@ -369,46 +370,6 @@ impl AstroImage {
     }
 
     // ------------------------------------------------------------------------
-    // Per-channel operations
-    // ------------------------------------------------------------------------
-
-    /// Apply function to each channel with corresponding source channel.
-    pub fn apply_from_channel<F>(&mut self, source: &AstroImage, f: F)
-    where
-        F: Fn(usize, &mut [f32], &[f32]) + Sync + Send,
-    {
-        assert_eq!(self.channels(), source.channels(), "Channel count mismatch");
-
-        match (&mut self.pixels, &source.pixels) {
-            (PixelData::L(dst), PixelData::L(src)) => f(0, dst, src),
-            (PixelData::Rgb(dst_channels), PixelData::Rgb(src_channels)) => {
-                dst_channels
-                    .par_iter_mut()
-                    .zip(src_channels.par_iter())
-                    .enumerate()
-                    .for_each(|(c, (dst, src))| f(c, dst, src));
-            }
-            _ => unreachable!("Channel count mismatch checked above"),
-        }
-    }
-
-    /// Apply function to each channel in parallel.
-    pub fn apply_per_channel_mut<F>(&mut self, f: F)
-    where
-        F: Fn(usize, &mut [f32]) + Sync + Send,
-    {
-        match &mut self.pixels {
-            PixelData::L(data) => f(0, data),
-            PixelData::Rgb(channels) => {
-                channels
-                    .par_iter_mut()
-                    .enumerate()
-                    .for_each(|(c, data)| f(c, data));
-            }
-        }
-    }
-
-    // ------------------------------------------------------------------------
     // Statistics
     // ------------------------------------------------------------------------
 
@@ -488,6 +449,28 @@ impl AstroImage {
                 interleave_rgb(&r, &g, &b, &mut interleaved);
                 interleaved
             }
+        }
+    }
+}
+
+// ============================================================================
+// Arithmetic operators
+// ============================================================================
+
+impl SubAssign<&AstroImage> for AstroImage {
+    fn sub_assign(&mut self, rhs: &AstroImage) {
+        assert_eq!(self.dimensions, rhs.dimensions, "Image dimensions mismatch");
+        let w = self.dimensions.width;
+        for c in 0..self.channels() {
+            let dst = self.channel_mut(c).pixels_mut();
+            let src = rhs.channel(c).pixels();
+            dst.par_chunks_mut(w)
+                .zip(src.par_chunks(w))
+                .for_each(|(d_row, s_row)| {
+                    for (d, s) in d_row.iter_mut().zip(s_row.iter()) {
+                        *d -= s;
+                    }
+                });
         }
     }
 }

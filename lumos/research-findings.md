@@ -192,9 +192,9 @@ The original assessment was wrong: the per-pixel copy wasn't just unnecessary, i
 
 `FrameType` is used for logging and error messages only. Doc comment now explicitly states it does not affect stacking behavior — that's controlled by `StackConfig`.
 
-### 5. `apply_from_channel` API in Calibration
+### ~~5. `apply_from_channel` API in Calibration~~ (RESOLVED)
 
-The calibration code uses `image.apply_from_channel(bias, |_c, dst, src| { ... })` with 4096-element chunks and rayon parallelism. For simple subtraction/division, this per-channel callback pattern adds overhead. A fused `image -= &bias` operator would be cleaner and likely auto-vectorize better.
+The generic `apply_from_channel` callback method has been removed. Calibration now uses `*image -= &dark` / `*image -= &bias` via `SubAssign<&AstroImage>`, and the flat division paths use direct channel loops. Cleaner and more readable.
 
 ---
 

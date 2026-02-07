@@ -29,7 +29,7 @@
 
 use rayon::prelude::*;
 
-use crate::astro_image::{AstroImage, ImageDimensions};
+use crate::astro_image::{AstroImage, ImageDimensions, PixelData};
 
 /// Per-channel hot pixel indices - stores only the indices of hot pixels (sparse).
 ///
@@ -182,7 +182,6 @@ impl HotPixelMap {
         let width = image.width();
         let height = image.height();
 
-        // Helper to correct a single channel.
         let correct_channel = |hot_indices: &[usize], channel_data: &mut [f32]| {
             for &pixel_idx in hot_indices {
                 let x = pixel_idx % width;
@@ -192,16 +191,19 @@ impl HotPixelMap {
             }
         };
 
-        match &self.mask {
-            HotPixelMask::L(indices) => {
-                correct_channel(indices, image.channel_mut(0));
+        match (&self.mask, &mut image.pixels) {
+            (HotPixelMask::L(indices), PixelData::L(data)) => {
+                correct_channel(indices, data);
             }
-            HotPixelMask::Rgb(channel_indices) => {
-                // Process channels in parallel using apply_per_channel_mut
-                image.apply_per_channel_mut(|c, channel_data| {
-                    correct_channel(&channel_indices[c], channel_data);
-                });
+            (HotPixelMask::Rgb(channel_indices), PixelData::Rgb(channels)) => {
+                channels
+                    .par_iter_mut()
+                    .zip(channel_indices.par_iter())
+                    .for_each(|(data, indices)| {
+                        correct_channel(indices, data);
+                    });
             }
+            _ => unreachable!("Mask/pixel channel mismatch checked by dimensions assert"),
         }
     }
 }

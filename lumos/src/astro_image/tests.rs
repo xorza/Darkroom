@@ -438,7 +438,7 @@ fn test_into_interleaved_pixels_rgb() {
 }
 
 #[test]
-fn test_apply_from_channel() {
+fn test_sub_assign() {
     let mut image = AstroImage::from_pixels(
         ImageDimensions::new(2, 1, 3),
         vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
@@ -448,11 +448,7 @@ fn test_apply_from_channel() {
         vec![10.0, 20.0, 30.0, 40.0, 50.0, 60.0],
     );
 
-    image.apply_from_channel(&source, |_c, dst, src| {
-        for (d, s) in dst.iter_mut().zip(src.iter()) {
-            *d -= s;
-        }
-    });
+    image -= &source;
 
     assert_eq!(image.channel(0).pixels(), &[-9.0, -36.0]);
     assert_eq!(image.channel(1).pixels(), &[-18.0, -45.0]);
