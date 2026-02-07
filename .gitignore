@@ -1,10 +1,12 @@
 **/.DS_Store
 **/._.DS_Store
-/.claude/settings.local.json
+**/.directory
 
 **/.idea/
 **/target/
 **/bench-results/
+
+/.claude/settings.local.json
 
 /test_output/
 /log/
