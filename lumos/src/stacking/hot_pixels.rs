@@ -77,15 +77,9 @@ impl HotPixelMap {
         // Compute per-channel thresholds
         let channel_stats = compute_all_channel_stats(master_dark, sigma_threshold);
 
-        tracing::debug!(
-            "Hot pixel detection per-channel stats ({}x{}x{}):",
-            master_dark.width(),
-            master_dark.height(),
-            channels
-        );
         for (c, stats) in channel_stats.iter().enumerate() {
-            tracing::debug!(
-                "  Channel {}: median={:.6}, MAD={:.6}, sigma={:.6}, threshold={:.6}",
+            tracing::info!(
+                "Hot pixel ch{}: median={:.6}, MAD={:.6}, sigma={:.6}, threshold={:.6}",
                 c,
                 stats.median,
                 stats.mad,
@@ -271,9 +265,11 @@ fn compute_all_channel_stats(image: &AstroImage, sigma_threshold: f32) -> Vec<Ch
             const MAD_TO_SIGMA: f32 = 1.4826;
             let computed_sigma = mad * MAD_TO_SIGMA;
 
-            // Apply minimum sigma floor: stacked master darks have compressed noise,
-            // so use at least 1% of median to avoid overly tight thresholds
-            let sigma = computed_sigma.max(median * 0.01);
+            // Stacked master darks have very low noise (MAD → tiny sigma), making
+            // the threshold extremely tight and flagging normal dark current variation
+            // as "hot". Use a minimum sigma of 10% of median to ensure the threshold
+            // only catches genuinely defective pixels (stuck/leaky), not normal variation.
+            let sigma = computed_sigma.max(median * 0.1);
             let threshold = median + sigma_threshold * sigma;
 
             ChannelStats {

@@ -936,13 +936,22 @@ mod tests {
     fn test_calibrate_full() {
         use crate::{CalibrationMasters, StackConfig};
 
+        // light = signal + bias + thermal
+        // dark_raw = bias + thermal (stored raw, not bias-subtracted)
+        // bias = readout noise offset
+        // When dark exists, calibrate() subtracts only dark (which already includes bias).
+        // Result: (light - dark) / normalized_flat = signal / normalized_flat
+        //
+        // Pixel 0: signal=100, bias=5, thermal=10 → light=115, dark=15
+        //   (115 - 15) / (0.8/1.0) = 100 / 0.8 = 125.0
         let mut light = AstroImage::from_pixels(
             ImageDimensions::new(2, 2, 1),
             vec![115.0, 225.0, 170.0, 280.0],
         );
         let bias = AstroImage::from_pixels(ImageDimensions::new(2, 2, 1), vec![5.0, 5.0, 5.0, 5.0]);
+        // dark_raw = bias + thermal per pixel: 5+10=15, 5+20=25, 5+15=20, 5+25=30
         let dark =
-            AstroImage::from_pixels(ImageDimensions::new(2, 2, 1), vec![10.0, 20.0, 15.0, 25.0]);
+            AstroImage::from_pixels(ImageDimensions::new(2, 2, 1), vec![15.0, 25.0, 20.0, 30.0]);
         let flat = AstroImage::from_pixels(ImageDimensions::new(2, 2, 1), vec![0.8, 1.0, 1.2, 1.0]);
 
         let masters = CalibrationMasters {

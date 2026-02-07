@@ -31,35 +31,22 @@ impl CalibrationMasters {
     /// Calibrate a light frame in place using these calibration masters.
     ///
     /// Applies the standard calibration formula:
-    /// 1. Subtract master bias (removes readout noise)
-    /// 2. Subtract master dark (removes thermal noise, already bias-subtracted)
-    /// 3. Divide by normalized master flat (corrects vignetting and dust)
-    /// 4. Correct hot pixels (replace with median of neighbors)
+    /// 1. Subtract master dark (removes bias + thermal noise in one step)
+    ///    OR subtract master bias only (if no dark available)
+    /// 2. Divide by normalized master flat (corrects vignetting and dust)
+    /// 3. Correct hot pixels (replace with median of neighbors)
     ///
-    /// The master dark is bias-subtracted during `create()` (for freshly stacked darks).
-    /// Saved masters loaded via `load()` are already processed — no additional subtraction.
-    /// This prevents double-subtraction of the bias signal.
+    /// The master dark is stored raw (not bias-subtracted), so it contains both
+    /// bias and thermal signal: `dark = bias + thermal`. Subtracting it from the
+    /// light removes both: `light - dark = signal`. No separate bias subtraction
+    /// is needed when a dark is available.
     ///
     /// # Panics
     /// Panics if the provided master frames have different dimensions than the image.
     pub fn calibrate(&self, image: &mut AstroImage) {
-        // Subtract master bias (removes readout noise)
-        if let Some(ref bias) = self.master_bias {
-            assert!(
-                bias.dimensions() == image.dimensions(),
-                "Bias frame dimensions {:?} don't match light frame {:?}",
-                bias.dimensions(),
-                image.dimensions()
-            );
-            image.apply_from_channel(bias, |_c, dst, src| {
-                for (d, s) in dst.iter_mut().zip(src.iter()) {
-                    *d -= s;
-                }
-            });
-        }
-
-        // Subtract master dark (removes thermal noise)
         if let Some(ref dark) = self.master_dark {
+            // Dark contains bias + thermal. Subtracting it removes both at once:
+            // light_raw - dark_raw = (signal + bias + thermal) - (bias + thermal) = signal
             assert!(
                 dark.dimensions() == image.dimensions(),
                 "Dark frame dimensions {:?} don't match light frame {:?}",
@@ -67,6 +54,19 @@ impl CalibrationMasters {
                 image.dimensions()
             );
             image.apply_from_channel(dark, |_c, dst, src| {
+                for (d, s) in dst.iter_mut().zip(src.iter()) {
+                    *d -= s;
+                }
+            });
+        } else if let Some(ref bias) = self.master_bias {
+            // No dark available — subtract bias only (removes readout noise)
+            assert!(
+                bias.dimensions() == image.dimensions(),
+                "Bias frame dimensions {:?} don't match light frame {:?}",
+                bias.dimensions(),
+                image.dimensions()
+            );
+            image.apply_from_channel(bias, |_c, dst, src| {
                 for (d, s) in dst.iter_mut().zip(src.iter()) {
                     *d -= s;
                 }
@@ -130,8 +130,8 @@ impl CalibrationMasters {
     /// Looks for files named master_dark_<method>.tiff, master_flat_<method>.tiff, etc.
     /// Returns None for any masters that don't exist.
     ///
-    /// Saved masters are already fully processed (bias already subtracted from dark),
-    /// so no additional bias subtraction is applied on load.
+    /// Master dark is stored raw (not bias-subtracted). Bias subtraction happens
+    /// at calibration time in `calibrate()`.
     /// Automatically generates hot pixel map from master dark if available.
     ///
     /// # Example
@@ -152,10 +152,7 @@ impl CalibrationMasters {
         let master_flat = Self::load_master(dir, FrameType::Flat, &config);
         let master_bias = Self::load_master(dir, FrameType::Bias, &config);
 
-        // No bias subtraction here — saved masters are already fully processed.
-        // Bias was subtracted from dark during create() before saving.
-
-        // Generate hot pixel map from master dark
+        // Generate hot pixel map from raw master dark (before any bias subtraction)
         let hot_pixel_map = master_dark
             .as_ref()
             .map(|dark| HotPixelMap::from_master_dark(dark, DEFAULT_HOT_PIXEL_SIGMA));
@@ -222,28 +219,19 @@ impl CalibrationMasters {
         );
         assert!(dir.is_dir(), "Path is not a directory: {:?}", dir);
 
-        // Create bias first — it's needed to debias freshly stacked darks.
         let master_bias = Self::load_master(dir, FrameType::Bias, &config)
             .or_else(|| Self::create_master(dir, "Bias", FrameType::Bias, &config, &progress));
 
-        // Try loading a saved master dark (already bias-subtracted).
-        // If not found, stack from raw frames and subtract bias.
-        let master_dark = match Self::load_master(dir, FrameType::Dark, &config) {
-            Some(dark) => Some(dark),
-            None => Self::create_master(dir, "Darks", FrameType::Dark, &config, &progress).map(
-                |mut dark| {
-                    if let Some(bias) = &master_bias {
-                        subtract_bias_from_dark(&mut dark, bias);
-                    }
-                    dark
-                },
-            ),
-        };
+        // Master dark is stored raw (not bias-subtracted). It contains bias + thermal.
+        // calibrate() subtracts the raw dark from lights, removing both bias and thermal
+        // in one step: light - dark = signal.
+        let master_dark = Self::load_master(dir, FrameType::Dark, &config)
+            .or_else(|| Self::create_master(dir, "Darks", FrameType::Dark, &config, &progress));
 
         let master_flat = Self::load_master(dir, FrameType::Flat, &config)
             .or_else(|| Self::create_master(dir, "Flats", FrameType::Flat, &config, &progress));
 
-        // Generate hot pixel map from bias-subtracted master dark
+        // Generate hot pixel map from raw master dark (full signal range, no near-zero issues)
         let hot_pixel_map = master_dark
             .as_ref()
             .map(|dark| HotPixelMap::from_master_dark(dark, DEFAULT_HOT_PIXEL_SIGMA));
@@ -329,29 +317,6 @@ impl CalibrationMasters {
     }
 }
 
-/// Subtract master bias from master dark in place.
-///
-/// Since stacking is a linear operation, subtracting bias after stacking is
-/// mathematically equivalent to subtracting from each raw frame before stacking:
-/// `mean(dark_i - bias) = mean(dark_i) - bias`.
-///
-/// # Panics
-/// Panics if bias and dark have different dimensions.
-fn subtract_bias_from_dark(dark: &mut AstroImage, bias: &AstroImage) {
-    assert!(
-        dark.dimensions() == bias.dimensions(),
-        "Bias dimensions {:?} don't match dark dimensions {:?}",
-        bias.dimensions(),
-        dark.dimensions()
-    );
-    tracing::info!("Subtracting master bias from master dark to prevent double-subtraction");
-    dark.apply_from_channel(bias, |_c, dst, src| {
-        for (d, s) in dst.iter_mut().zip(src.iter()) {
-            *d -= s;
-        }
-    });
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -364,35 +329,14 @@ mod tests {
     }
 
     #[test]
-    fn test_subtract_bias_from_dark() {
-        let mut dark = constant_image(4, 4, 100.0);
-        let bias = constant_image(4, 4, 10.0);
-
-        subtract_bias_from_dark(&mut dark, &bias);
-
-        // Every pixel should be dark - bias = 90.0
-        for y in 0..4 {
-            for x in 0..4 {
-                let val = dark.get_pixel_gray(x, y);
-                assert!(
-                    (val - 90.0).abs() < 1e-6,
-                    "Expected 90.0 at ({x},{y}), got {val}"
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn test_calibrate_no_double_bias_subtraction() {
-        // Simulate: raw=1000, bias=100, dark_raw=500 (includes bias)
-        // After subtract_bias_from_dark: dark=400
-        // Calibration: (1000 - 100 - 400) = 500 (correct thermal-free signal)
-        // Without fix: (1000 - 100 - 500) = 400 (bias subtracted twice — WRONG)
+    fn test_calibrate_with_raw_dark_and_bias() {
+        // Dark is stored raw (bias + thermal). Subtracting it from light removes both.
+        // light=1000, dark_raw=500 (bias=100, thermal=400)
+        // Calibration: 1000 - 500 = 500 (correct signal)
+        // Bias is present but ignored when dark exists (dark already contains bias).
         let mut light = constant_image(4, 4, 1000.0);
+        let dark = constant_image(4, 4, 500.0); // raw dark = bias + thermal
         let bias = constant_image(4, 4, 100.0);
-
-        let mut dark = constant_image(4, 4, 500.0); // raw dark includes bias
-        subtract_bias_from_dark(&mut dark, &bias); // now dark = 400
 
         let masters = CalibrationMasters {
             master_dark: Some(dark),
@@ -404,7 +348,7 @@ mod tests {
 
         masters.calibrate(&mut light);
 
-        // Expected: 1000 - 100 (bias) - 400 (debiased dark) = 500
+        // Expected: 1000 - 500 = 500
         for y in 0..4 {
             for x in 0..4 {
                 let val = light.get_pixel_gray(x, y);
@@ -417,9 +361,37 @@ mod tests {
     }
 
     #[test]
+    fn test_calibrate_bias_only_no_dark() {
+        // When no dark is available, bias is subtracted alone.
+        // light=1000, bias=100 → 900
+        let mut light = constant_image(4, 4, 1000.0);
+        let bias = constant_image(4, 4, 100.0);
+
+        let masters = CalibrationMasters {
+            master_dark: None,
+            master_flat: None,
+            master_bias: Some(bias),
+            hot_pixel_map: None,
+            config: StackConfig::default(),
+        };
+
+        masters.calibrate(&mut light);
+
+        for y in 0..4 {
+            for x in 0..4 {
+                let val = light.get_pixel_gray(x, y);
+                assert!(
+                    (val - 900.0).abs() < 1e-4,
+                    "Expected 900.0 at ({x},{y}), got {val}"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn test_calibrate_dark_only_no_bias() {
-        // When no bias is provided, dark is used as-is (includes bias component).
-        // Calibration: 1000 - 500 = 500
+        // Dark without bias works the same — dark is always raw.
+        // light=1000, dark=500 → 500
         let mut light = constant_image(4, 4, 1000.0);
         let dark = constant_image(4, 4, 500.0);
 
