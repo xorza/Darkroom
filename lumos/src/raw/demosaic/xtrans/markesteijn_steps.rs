@@ -1137,6 +1137,33 @@ mod tests {
     }
 
     #[test]
+    fn test_ypbpr_conversion_primary_colors() {
+        // Pure red (1,0,0): Y=0.2627, Pb=-0.2627*0.56433, Pr=0.7373*0.67815
+        let (y, pb, pr) = rgb_to_ypbpr(1.0, 0.0, 0.0);
+        assert!((y - 0.2627).abs() < 1e-6, "Red Y={y}");
+        assert!((pb - (-0.2627 * 0.56433)).abs() < 1e-6, "Red Pb={pb}");
+        assert!((pr - (0.7373 * 0.67815)).abs() < 1e-4, "Red Pr={pr}");
+
+        // Pure green (0,1,0): Y=0.6780, Pb=-0.6780*0.56433, Pr=-0.6780*0.67815
+        let (y, pb, pr) = rgb_to_ypbpr(0.0, 1.0, 0.0);
+        assert!((y - 0.6780).abs() < 1e-6, "Green Y={y}");
+        assert!((pb - (-0.6780 * 0.56433)).abs() < 1e-6, "Green Pb={pb}");
+        assert!((pr - (-0.6780 * 0.67815)).abs() < 1e-4, "Green Pr={pr}");
+
+        // Pure blue (0,0,1): Y=0.0593, Pb=0.9407*0.56433, Pr=-0.0593*0.67815
+        let (y, pb, pr) = rgb_to_ypbpr(0.0, 0.0, 1.0);
+        assert!((y - 0.0593).abs() < 1e-6, "Blue Y={y}");
+        assert!((pb - (0.9407 * 0.56433)).abs() < 1e-4, "Blue Pb={pb}");
+        assert!((pr - (-0.0593 * 0.67815)).abs() < 1e-4, "Blue Pr={pr}");
+
+        // Mid-gray (0.5, 0.5, 0.5): Y=0.5, Pb=0, Pr=0
+        let (y, pb, pr) = rgb_to_ypbpr(0.5, 0.5, 0.5);
+        assert!((y - 0.5).abs() < 1e-6, "Gray Y={y}");
+        assert!(pb.abs() < 1e-6, "Gray Pb={pb}");
+        assert!(pr.abs() < 1e-6, "Gray Pr={pr}");
+    }
+
+    #[test]
     fn test_ypbpr_conversion_black() {
         // Black (0,0,0) → Y=0, Pb=0, Pr=0
         let y: f32 = 0.2627 * 0.0 + 0.6780 * 0.0 + 0.0593 * 0.0;
@@ -1145,6 +1172,100 @@ mod tests {
         assert_eq!(y, 0.0);
         assert_eq!(pb, 0.0);
         assert_eq!(pr, 0.0);
+    }
+
+    // ── Derivatives tests ─────────────────────────────────────────
+
+    #[test]
+    fn test_derivatives_uniform_input_near_zero() {
+        // Uniform input → all RGB values the same → YPbPr Laplacian ≈ 0 everywhere.
+        let raw_w = 24;
+        let raw_h = 24;
+        let w = 12;
+        let h = 12;
+        let pixels = w * h;
+        let data = vec![to_u16(0.5); raw_w * raw_h];
+        let xtrans = make_xtrans(&data, raw_w, raw_h, w, h, 6, 6);
+        let hex = HexLookup::new(&xtrans.pattern);
+
+        let mut gmin = vec![0.0f32; pixels];
+        let mut gmax = vec![1.0f32; pixels];
+        compute_green_minmax(&xtrans, &hex, &mut gmin, &mut gmax);
+
+        let mut green_dir = vec![0.0f32; NDIR * pixels];
+        interpolate_green(&xtrans, &hex, &gmin, &gmax, &mut green_dir);
+
+        let mut drv = vec![f32::NAN; NDIR * pixels];
+        compute_derivatives(&xtrans, &green_dir, &mut drv);
+
+        // Interior pixels should have near-zero derivatives for uniform input
+        for d in 0..NDIR {
+            for y in 2..h - 2 {
+                for x in 2..w - 2 {
+                    let val = drv[d * pixels + y * w + x];
+                    assert!(val.is_finite(), "NaN derivative at d={d} y={y} x={x}");
+                    assert!(
+                        val < 0.01,
+                        "Expected near-zero derivative at d={d} y={y} x={x}, got {val}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_derivatives_checkerboard_nonzero() {
+        // Checkerboard input has sharp edges → non-zero Laplacian (derivatives).
+        let raw_w = 24;
+        let raw_h = 24;
+        let w = 12;
+        let h = 12;
+        let pixels = w * h;
+        let data: Vec<u16> = (0..raw_w * raw_h)
+            .map(|i| {
+                let y = i / raw_w;
+                let x = i % raw_w;
+                if (x + y) % 2 == 0 {
+                    to_u16(0.8)
+                } else {
+                    to_u16(0.2)
+                }
+            })
+            .collect();
+        let xtrans = make_xtrans(&data, raw_w, raw_h, w, h, 6, 6);
+        let hex = HexLookup::new(&xtrans.pattern);
+
+        let mut gmin = vec![0.0f32; pixels];
+        let mut gmax = vec![1.0f32; pixels];
+        compute_green_minmax(&xtrans, &hex, &mut gmin, &mut gmax);
+
+        let mut green_dir = vec![0.0f32; NDIR * pixels];
+        interpolate_green(&xtrans, &hex, &gmin, &gmax, &mut green_dir);
+
+        let mut drv = vec![0.0f32; NDIR * pixels];
+        compute_derivatives(&xtrans, &green_dir, &mut drv);
+
+        // All derivatives should be finite and non-negative (squared values)
+        for (i, &val) in drv.iter().enumerate() {
+            assert!(val.is_finite(), "NaN derivative at index {i}");
+            assert!(val >= 0.0, "Negative derivative at index {i}: {val}");
+        }
+
+        // Checkerboard has high-frequency content → some derivatives must be non-zero
+        let mut nonzero_count = 0;
+        for d in 0..NDIR {
+            for y in 2..h - 2 {
+                for x in 2..w - 2 {
+                    if drv[d * pixels + y * w + x] > 1e-6 {
+                        nonzero_count += 1;
+                    }
+                }
+            }
+        }
+        assert!(
+            nonzero_count > 0,
+            "Expected some non-zero derivatives for checkerboard input"
+        );
     }
 
     // ── SAT (Summed Area Table) tests ────────────────────────────
