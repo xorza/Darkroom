@@ -39,9 +39,5 @@ parking_lot = { workspace = true }
 [dev-dependencies]
 bench = { workspace = true }
 image = { workspace = true }
-reqwest = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-bzip2 = { workspace = true }
-dirs = { workspace = true }
-tempfile = { workspace = true }
