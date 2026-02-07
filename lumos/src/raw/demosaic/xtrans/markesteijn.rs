@@ -180,8 +180,14 @@ mod tests {
         ])
     }
 
+    const TEST_INV_RANGE: f32 = 1.0 / 65535.0;
+
+    fn to_u16(val: f32) -> u16 {
+        (val * 65535.0).round() as u16
+    }
+
     fn make_xtrans(
-        data: &[f32],
+        data: &[u16],
         raw_w: usize,
         raw_h: usize,
         w: usize,
@@ -189,17 +195,27 @@ mod tests {
         top: usize,
         left: usize,
     ) -> XTransImage<'_> {
-        XTransImage::with_margins(data, raw_w, raw_h, w, h, top, left, test_pattern())
+        XTransImage::with_margins(
+            data,
+            raw_w,
+            raw_h,
+            w,
+            h,
+            top,
+            left,
+            test_pattern(),
+            0.0,
+            TEST_INV_RANGE,
+        )
     }
 
     #[test]
     fn test_markesteijn_output_size() {
-        // 24x24 raw, 12x12 active area (needs BORDER=7 margin on each side)
         let raw_w = 24;
         let raw_h = 24;
         let w = 12;
         let h = 12;
-        let data = vec![0.5f32; raw_w * raw_h];
+        let data = vec![to_u16(0.5); raw_w * raw_h];
         let xtrans = make_xtrans(&data, raw_w, raw_h, w, h, 6, 6);
 
         let rgb = demosaic_xtrans_markesteijn(&xtrans);
@@ -212,7 +228,7 @@ mod tests {
         let raw_h = 30;
         let w = 18;
         let h = 18;
-        let data = vec![0.5f32; raw_w * raw_h];
+        let data = vec![to_u16(0.5); raw_w * raw_h];
         let xtrans = make_xtrans(&data, raw_w, raw_h, w, h, 6, 6);
 
         let rgb = demosaic_xtrans_markesteijn(&xtrans);
@@ -234,9 +250,8 @@ mod tests {
         let raw_h = 30;
         let w = 18;
         let h = 18;
-        // Use varied data to exercise all code paths
-        let data: Vec<f32> = (0..raw_w * raw_h)
-            .map(|i| i as f32 / (raw_w * raw_h) as f32)
+        let data: Vec<u16> = (0..raw_w * raw_h)
+            .map(|i| to_u16(i as f32 / (raw_w * raw_h) as f32))
             .collect();
         let xtrans = make_xtrans(&data, raw_w, raw_h, w, h, 6, 6);
 
@@ -253,7 +268,7 @@ mod tests {
         let raw_h = 24;
         let w = 12;
         let h = 12;
-        let data = vec![0.0f32; raw_w * raw_h];
+        let data = vec![0u16; raw_w * raw_h];
         let xtrans = make_xtrans(&data, raw_w, raw_h, w, h, 6, 6);
 
         let rgb = demosaic_xtrans_markesteijn(&xtrans);
@@ -270,14 +285,24 @@ mod tests {
         let h = 18;
         let top = 6;
         let left = 6;
-        let data = vec![0.5f32; raw_w * raw_h];
+        let data = vec![to_u16(0.5); raw_w * raw_h];
         let pattern = test_pattern();
-        let xtrans =
-            XTransImage::with_margins(&data, raw_w, raw_h, w, h, top, left, pattern.clone());
+        let xtrans = XTransImage::with_margins(
+            &data,
+            raw_w,
+            raw_h,
+            w,
+            h,
+            top,
+            left,
+            pattern.clone(),
+            0.0,
+            TEST_INV_RANGE,
+        );
 
         let rgb = demosaic_xtrans_markesteijn(&xtrans);
 
-        // At green pixel positions, the green channel should be the raw value
+        // At green pixel positions, the green channel should be approximately the raw value
         for y in 0..h {
             for x in 0..w {
                 let raw_y = y + top;
@@ -285,8 +310,8 @@ mod tests {
                 if pattern.color_at(raw_y, raw_x) == 1 {
                     let g = rgb[(y * w + x) * 3 + 1];
                     assert!(
-                        (g - 0.5).abs() < 1e-6,
-                        "Green at ({},{}) = {} (expected 0.5)",
+                        (g - 0.5).abs() < 0.001,
+                        "Green at ({},{}) = {} (expected ~0.5)",
                         y,
                         x,
                         g

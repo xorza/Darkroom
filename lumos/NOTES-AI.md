@@ -90,12 +90,16 @@ Custom implementation of the Markesteijn demosaic for Fujifilm X-Trans 6x6 CFA s
 - Region C: gmin reinterpreted as homo u8 after Step 2
 - Region D: gmax reused as threshold in Step 4
 - RGB never materialized — recomputed on-the-fly in Steps 3 and 5 via `compute_rgb_pixel`
+- On-the-fly normalization: `XTransImage` stores raw `&[u16]` data, normalizes per-read via `read_normalized()`
+- Sequential SATs: blend step builds one SAT at a time (~1P), stores scores in `hm_buf: Vec<[u32; 4]>` (~4P)
+- Raw u16 data copied to `Vec<u16>` (P×2 = ~47 MB) instead of `Vec<f32>` (P×4 = ~93 MB)
 - libraw guard + file buffer dropped before demosaicing starts
 
 **Optimizations**:
 - Precomputed `ColorInterpLookup` avoids per-pixel pattern search in R/B interpolation
 - Uninitialized buffer allocation via `alloc_uninit_vec` avoids kernel page zeroing
-- SIMD normalization via `normalize_u16_to_f32_parallel`
+- On-the-fly u16→f32 normalization eliminates ~93 MB pre-normalized buffer
+- Sequential SAT construction reduces peak blend memory from ~4P to ~1P + hm_buf
 
 **Performance** (6032x4028 X-Trans, AMD CPU):
 - Our Markesteijn: ~450ms demosaic, ~1.27s total load

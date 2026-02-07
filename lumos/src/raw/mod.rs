@@ -233,9 +233,10 @@ pub fn load_raw(path: &Path) -> Result<AstroImage> {
                 }
             }
 
-            // Normalize while raw_data (borrowed from libraw) is still alive
+            // Copy raw u16 data into our own Vec so we can drop libraw before demosaicing.
+            // This costs P×2 bytes (~47 MB) instead of P×4 bytes (~93 MB) for normalized f32.
+            let raw_u16: Vec<u16> = raw_data.to_vec();
             let inv_range = 1.0 / range;
-            let normalized_data = normalize_u16_to_f32_parallel(raw_data, black, inv_range);
 
             // Extract metadata before dropping guard
             let iso_speed = unsafe { (*inner).other.iso_speed };
@@ -250,7 +251,7 @@ pub fn load_raw(path: &Path) -> Result<AstroImage> {
             drop(buf);
 
             let (pixels, channels) = process_xtrans(
-                normalized_data,
+                &raw_u16,
                 raw_width,
                 raw_height,
                 width,
@@ -258,6 +259,8 @@ pub fn load_raw(path: &Path) -> Result<AstroImage> {
                 top_margin,
                 left_margin,
                 xtrans_pattern,
+                black,
+                inv_range,
             );
 
             let dimensions = ImageDimensions::new(width, height, channels);

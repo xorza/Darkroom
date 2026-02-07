@@ -182,7 +182,7 @@ pub(super) fn compute_green_minmax(
                 let color = xtrans.pattern.color_at(raw_y, raw_x);
 
                 if color == 1 {
-                    let val = xtrans.data[raw_y * xtrans.raw_width + raw_x];
+                    let val = xtrans.read_normalized(raw_y, raw_x);
                     gmin_row[x] = val;
                     gmax_row[x] = val;
                 } else {
@@ -199,7 +199,7 @@ pub(super) fn compute_green_minmax(
                             && (ny as usize) < xtrans.raw_height
                             && (nx as usize) < xtrans.raw_width
                         {
-                            let g = xtrans.data[ny as usize * xtrans.raw_width + nx as usize];
+                            let g = xtrans.read_normalized(ny as usize, nx as usize);
                             min_g = min_g.min(g);
                             max_g = max_g.max(g);
                         }
@@ -265,14 +265,14 @@ pub(super) fn interpolate_green(
             let color = xtrans.pattern.color_at(raw_y, raw_x);
 
             if color == 1 {
-                let val = xtrans.data[raw_y * raw_width + raw_x];
+                let val = xtrans.read_normalized(raw_y, raw_x);
                 for ptr in &dir_ptrs {
                     // SAFETY: row_off + x is unique per (y, x), no data race
                     unsafe { *ptr.add(row_off + x) = val };
                 }
             } else {
                 let hex_offsets = hex.get(raw_y, raw_x);
-                let raw_val = xtrans.data[raw_y * raw_width + raw_x];
+                let raw_val = xtrans.read_normalized(raw_y, raw_x);
                 let lo = gmin[row_off + x];
                 let hi = gmax[row_off + x];
 
@@ -284,7 +284,7 @@ pub(super) fn interpolate_green(
                         && (ny as usize) < xtrans.raw_height
                         && (nx as usize) < raw_width
                     {
-                        xtrans.data[ny as usize * raw_width + nx as usize]
+                        xtrans.read_normalized(ny as usize, nx as usize)
                     } else {
                         raw_val
                     }
@@ -433,11 +433,10 @@ fn compute_rgb_pixel(
     interior: bool,
 ) -> (f32, f32, f32) {
     let width = xtrans.width;
-    let raw_width = xtrans.raw_width;
     let raw_y = y + xtrans.top_margin;
     let raw_x = x + xtrans.left_margin;
     let color = xtrans.pattern.color_at(raw_y, raw_x);
-    let raw_val = xtrans.data[raw_y * raw_width + raw_x];
+    let raw_val = xtrans.read_normalized(raw_y, raw_x);
     let green = green_dir[green_base + y * width + x];
 
     let interp = |target_color_idx: usize| -> f32 {
@@ -508,10 +507,14 @@ fn interpolate_missing_color_fast(
                     let gb = green_dir[green_base + oy_b * width + ox_b];
                     let grad = (green_center - ga).abs() + (green_center - gb).abs();
 
-                    let raw_a = xtrans.data[(raw_y as i32 + dy_a) as usize * raw_width
-                        + (raw_x as i32 + dx_a) as usize];
-                    let raw_b = xtrans.data[(raw_y as i32 + dy_b) as usize * raw_width
-                        + (raw_x as i32 + dx_b) as usize];
+                    let raw_a = xtrans.read_normalized(
+                        (raw_y as i32 + dy_a) as usize,
+                        (raw_x as i32 + dx_a) as usize,
+                    );
+                    let raw_b = xtrans.read_normalized(
+                        (raw_y as i32 + dy_b) as usize,
+                        (raw_x as i32 + dx_b) as usize,
+                    );
 
                     Some((green_center + 0.5 * ((raw_a - ga) + (raw_b - gb)), grad))
                 }
@@ -520,8 +523,10 @@ fn interpolate_missing_color_fast(
                     let ox = (x as i32 + dx) as usize;
 
                     let g_n = green_dir[green_base + oy * width + ox];
-                    let raw_n = xtrans.data
-                        [(raw_y as i32 + dy) as usize * raw_width + (raw_x as i32 + dx) as usize];
+                    let raw_n = xtrans.read_normalized(
+                        (raw_y as i32 + dy) as usize,
+                        (raw_x as i32 + dx) as usize,
+                    );
                     Some((green_center + (raw_n - g_n), f32::MAX))
                 }
                 ColorInterpStrategy::None => None,
@@ -586,8 +591,8 @@ fn interpolate_missing_color_fast(
                 let gb = green_dir[green_base + oy_b * width + ox_b];
                 let grad = (green_center - ga).abs() + (green_center - gb).abs();
 
-                let raw_a = xtrans.data[ay as usize * raw_width + ax as usize];
-                let raw_b = xtrans.data[by as usize * raw_width + bx as usize];
+                let raw_a = xtrans.read_normalized(ay as usize, ax as usize);
+                let raw_b = xtrans.read_normalized(by as usize, bx as usize);
 
                 Some((green_center + 0.5 * ((raw_a - ga) + (raw_b - gb)), grad))
             }
@@ -607,7 +612,7 @@ fn interpolate_missing_color_fast(
                 }
 
                 let g_n = green_dir[green_base + oy * width + ox];
-                let raw_n = xtrans.data[ny as usize * raw_width + nx as usize];
+                let raw_n = xtrans.read_normalized(ny as usize, nx as usize);
                 Some((green_center + (raw_n - g_n), f32::MAX))
             }
             ColorInterpStrategy::None => None,
@@ -748,9 +753,8 @@ fn sat_query(sat: &[u32], sat_w: usize, y0: usize, x0: usize, y1: usize, x1: usi
 /// recompute RGB on-the-fly for qualifying directions and average.
 ///
 /// Uses summed area tables for O(1) per-pixel window queries instead of O(25).
-/// RGB is recomputed per winning direction using `compute_rgb_pixel` rather than
-/// reading from a materialized 12P buffer, trading ~10-20 FLOPs per winning
-/// direction for a ~1.1 GB memory reduction.
+/// SATs are built one direction at a time to reduce peak memory from ~4P to ~1P.
+/// Per-pixel scores are stored in a temporary `hm_buf` between passes.
 ///
 /// `output` is a preallocated slice of length `pixels * 3` where the final RGB is written.
 pub(super) fn blend_final(
@@ -766,30 +770,37 @@ pub(super) fn blend_final(
     assert_eq!(output.len(), pixels * 3);
 
     let color_lookup = ColorInterpLookup::new(&xtrans.pattern);
-
-    // Build summed area tables for each direction's homogeneity map.
-    let sats: Vec<Vec<u32>> = (0..NDIR)
-        .map(|d| build_summed_area_table(&homo[d * pixels..(d + 1) * pixels], width, height))
-        .collect();
     let sat_w = width + 1;
 
+    // Pass 1: Build one SAT at a time, query all pixels, store scores.
+    // This keeps only one SAT (~1P) alive at a time instead of all 4 (~4P).
+    // SAFETY: Every element is written by the loop below before being read.
+    let mut hm_buf: Vec<[u32; NDIR]> = unsafe { crate::raw::alloc_uninit_vec(pixels) };
+
+    for d in 0..NDIR {
+        let sat = build_summed_area_table(&homo[d * pixels..(d + 1) * pixels], width, height);
+
+        for y in 0..height {
+            let y0 = y.saturating_sub(2);
+            let y1 = (y + 2).min(height - 1);
+            for x in 0..width {
+                let x0 = x.saturating_sub(2);
+                let x1 = (x + 2).min(width - 1);
+                hm_buf[y * width + x][d] = sat_query(&sat, sat_w, y0, x0, y1, x1);
+            }
+        }
+        // SAT dropped here — ~1P freed before next iteration
+    }
+
+    // Pass 2: Parallel blend using stored scores + on-the-fly RGB recomputation.
     output
         .par_chunks_mut(row_stride)
         .enumerate()
         .for_each(|(y, rgb_row)| {
-            let y0 = y.saturating_sub(2);
-            let y1 = (y + 2).min(height - 1);
             let y_interior = y >= 1 && y + 1 < height;
 
             for x in 0..width {
-                let x0 = x.saturating_sub(2);
-                let x1 = (x + 2).min(width - 1);
-
-                // Query 5×5 homogeneity sum for each direction via SAT
-                let mut hm = [0u32; NDIR];
-                for d in 0..NDIR {
-                    hm[d] = sat_query(&sats[d], sat_w, y0, x0, y1, x1);
-                }
+                let hm = &hm_buf[y * width + x];
 
                 // Find max homogeneity score
                 let max_hm = *hm.iter().max().unwrap();
@@ -848,8 +859,10 @@ mod tests {
         ])
     }
 
+    const TEST_INV_RANGE: f32 = 1.0 / 65535.0;
+
     fn make_xtrans(
-        data: &[f32],
+        data: &[u16],
         raw_w: usize,
         raw_h: usize,
         w: usize,
@@ -857,7 +870,23 @@ mod tests {
         top: usize,
         left: usize,
     ) -> XTransImage<'_> {
-        XTransImage::with_margins(data, raw_w, raw_h, w, h, top, left, test_pattern())
+        XTransImage::with_margins(
+            data,
+            raw_w,
+            raw_h,
+            w,
+            h,
+            top,
+            left,
+            test_pattern(),
+            0.0,
+            TEST_INV_RANGE,
+        )
+    }
+
+    /// Convert a float in [0.0, 1.0] to u16 for test data.
+    fn to_u16(val: f32) -> u16 {
+        (val * 65535.0).round() as u16
     }
 
     #[test]
@@ -866,7 +895,7 @@ mod tests {
         let raw_h = 24;
         let w = 12;
         let h = 12;
-        let data = vec![0.5f32; raw_w * raw_h];
+        let data = vec![to_u16(0.5); raw_w * raw_h];
         let xtrans = make_xtrans(&data, raw_w, raw_h, w, h, 6, 6);
         let hex = HexLookup::new(&xtrans.pattern);
 
@@ -874,10 +903,10 @@ mod tests {
         let mut gmax = vec![0.0f32; w * h];
         compute_green_minmax(&xtrans, &hex, &mut gmin, &mut gmax);
 
-        // Uniform 0.5 input → gmin=gmax=0.5 everywhere
+        // Uniform 0.5 input → gmin=gmax≈0.5 everywhere (u16 quantization: ±1e-5)
         for i in 0..w * h {
-            assert!((gmin[i] - 0.5).abs() < 1e-6, "gmin[{}] = {}", i, gmin[i]);
-            assert!((gmax[i] - 0.5).abs() < 1e-6, "gmax[{}] = {}", i, gmax[i]);
+            assert!((gmin[i] - 0.5).abs() < 1e-4, "gmin[{}] = {}", i, gmin[i]);
+            assert!((gmax[i] - 0.5).abs() < 1e-4, "gmax[{}] = {}", i, gmax[i]);
         }
     }
 
@@ -888,8 +917,8 @@ mod tests {
         let w = 12;
         let h = 12;
         // Create gradient data
-        let data: Vec<f32> = (0..raw_w * raw_h)
-            .map(|i| (i as f32) / (raw_w * raw_h) as f32)
+        let data: Vec<u16> = (0..raw_w * raw_h)
+            .map(|i| to_u16((i as f32) / (raw_w * raw_h) as f32))
             .collect();
         let xtrans = make_xtrans(&data, raw_w, raw_h, w, h, 6, 6);
         let hex = HexLookup::new(&xtrans.pattern);
@@ -916,7 +945,7 @@ mod tests {
         let raw_h = 24;
         let w = 12;
         let h = 12;
-        let data = vec![0.5f32; raw_w * raw_h];
+        let data = vec![to_u16(0.5); raw_w * raw_h];
         let xtrans = make_xtrans(&data, raw_w, raw_h, w, h, 6, 6);
         let hex = HexLookup::new(&xtrans.pattern);
 
@@ -1206,8 +1235,8 @@ mod tests {
         let w = 12;
         let h = 12;
         // Gradient data to exercise actual interpolation
-        let data: Vec<f32> = (0..raw_w * raw_h)
-            .map(|i| (i as f32) / (raw_w * raw_h) as f32)
+        let data: Vec<u16> = (0..raw_w * raw_h)
+            .map(|i| to_u16((i as f32) / (raw_w * raw_h) as f32))
             .collect();
         let xtrans = make_xtrans(&data, raw_w, raw_h, w, h, 6, 6);
         let color_lookup = ColorInterpLookup::new(&xtrans.pattern);
@@ -1263,8 +1292,8 @@ mod tests {
         let raw_h = 14;
         let w = 6;
         let h = 6;
-        let data: Vec<f32> = (0..raw_w * raw_h)
-            .map(|i| (i as f32) / (raw_w * raw_h) as f32)
+        let data: Vec<u16> = (0..raw_w * raw_h)
+            .map(|i| to_u16((i as f32) / (raw_w * raw_h) as f32))
             .collect();
         let xtrans = make_xtrans(&data, raw_w, raw_h, w, h, 4, 4);
         let color_lookup = ColorInterpLookup::new(&xtrans.pattern);
@@ -1306,7 +1335,7 @@ mod tests {
         let w = 12;
         let h = 12;
         let pixels = w * h;
-        let data = vec![0.5f32; raw_w * raw_h];
+        let data = vec![to_u16(0.5); raw_w * raw_h];
         let xtrans = make_xtrans(&data, raw_w, raw_h, w, h, 6, 6);
         let hex = HexLookup::new(&xtrans.pattern);
 
@@ -1337,7 +1366,7 @@ mod tests {
         let w = 18;
         let h = 18;
         let pixels = w * h;
-        let data = vec![0.5f32; raw_w * raw_h];
+        let data = vec![to_u16(0.5); raw_w * raw_h];
         let xtrans = make_xtrans(&data, raw_w, raw_h, w, h, 6, 6);
         let hex = HexLookup::new(&xtrans.pattern);
 

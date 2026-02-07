@@ -19,14 +19,14 @@ pub use markesteijn::demosaic_xtrans_markesteijn;
 
 /// Process X-Trans sensor data and demosaic to RGB.
 ///
-/// Takes already-normalized f32 data (0.0–1.0 range). The caller normalizes and drops
-/// the libraw guard before calling this, so demosaicing doesn't hold raw file memory.
+/// Takes raw u16 sensor data and normalization parameters. Normalization happens
+/// on-the-fly during demosaicing, avoiding a separate P×4 byte f32 buffer.
 ///
 /// # Returns
 /// Tuple of (RGB pixels, number of channels which is always 3)
 #[allow(clippy::too_many_arguments)]
 pub fn process_xtrans(
-    normalized_data: Vec<f32>,
+    raw_data: &[u16],
     raw_width: usize,
     raw_height: usize,
     width: usize,
@@ -34,11 +34,13 @@ pub fn process_xtrans(
     top_margin: usize,
     left_margin: usize,
     xtrans_pattern: [[u8; 6]; 6],
+    black: f32,
+    inv_range: f32,
 ) -> (Vec<f32>, usize) {
     let pattern = XTransPattern::new(xtrans_pattern);
 
     let xtrans = XTransImage::with_margins(
-        &normalized_data,
+        raw_data,
         raw_width,
         raw_height,
         width,
@@ -46,6 +48,8 @@ pub fn process_xtrans(
         top_margin,
         left_margin,
         pattern,
+        black,
+        inv_range,
     );
 
     let demosaic_start = Instant::now();
@@ -97,10 +101,13 @@ impl XTransPattern {
 }
 
 /// Raw X-Trans image data with metadata needed for demosaicing.
+///
+/// Stores raw u16 sensor data and normalizes on-the-fly when reading pixels,
+/// avoiding a separate P×4 byte normalized f32 buffer.
 #[derive(Debug)]
 pub(crate) struct XTransImage<'a> {
-    /// Raw pixel data (normalized to 0.0-1.0)
-    pub(crate) data: &'a [f32],
+    /// Raw pixel data (u16 sensor values)
+    pub(crate) data: &'a [u16],
     /// Width of the raw data buffer
     pub(crate) raw_width: usize,
     /// Height of the raw data buffer
@@ -115,10 +122,14 @@ pub(crate) struct XTransImage<'a> {
     pub(crate) left_margin: usize,
     /// X-Trans CFA pattern
     pub(crate) pattern: XTransPattern,
+    /// Black level for normalization
+    black: f32,
+    /// 1.0 / (maximum - black) for normalization
+    inv_range: f32,
 }
 
 impl<'a> XTransImage<'a> {
-    /// Create an XTransImage with margins.
+    /// Create an XTransImage with margins and normalization parameters.
     ///
     /// # Panics
     /// Panics if:
@@ -128,7 +139,7 @@ impl<'a> XTransImage<'a> {
     /// - `width == 0` or `height == 0`
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn with_margins(
-        data: &'a [f32],
+        data: &'a [u16],
         raw_width: usize,
         raw_height: usize,
         width: usize,
@@ -136,6 +147,8 @@ impl<'a> XTransImage<'a> {
         top_margin: usize,
         left_margin: usize,
         pattern: XTransPattern,
+        black: f32,
+        inv_range: f32,
     ) -> Self {
         assert!(
             width > 0 && height > 0,
@@ -172,13 +185,6 @@ impl<'a> XTransImage<'a> {
             raw_width
         );
 
-        // Debug-only check for corrupted data (NaN/Infinity)
-        // This catches upstream bugs without impacting release performance
-        debug_assert!(
-            data.iter().all(|v| v.is_finite()),
-            "XTransImage data contains NaN or Infinity values - indicates corrupted raw data"
-        );
-
         Self {
             data,
             raw_width,
@@ -188,7 +194,17 @@ impl<'a> XTransImage<'a> {
             top_margin,
             left_margin,
             pattern,
+            black,
+            inv_range,
         }
+    }
+
+    /// Read a raw pixel and normalize to 0.0-1.0 range.
+    /// Formula: ((value - black).max(0) * inv_range)
+    #[inline(always)]
+    pub(crate) fn read_normalized(&self, raw_y: usize, raw_x: usize) -> f32 {
+        let val = self.data[raw_y * self.raw_width + raw_x] as f32;
+        (val - self.black).max(0.0) * self.inv_range
     }
 }
 
@@ -248,9 +264,9 @@ mod tests {
 
     #[test]
     fn test_xtrans_image_valid() {
-        let data = vec![0.5f32; 36];
+        let data = vec![32768u16; 36];
         let pattern = test_pattern();
-        let img = XTransImage::with_margins(&data, 6, 6, 4, 4, 1, 1, pattern);
+        let img = XTransImage::with_margins(&data, 6, 6, 4, 4, 1, 1, pattern, 0.0, 1.0 / 65535.0);
         assert_eq!(img.raw_width, 6);
         assert_eq!(img.raw_height, 6);
         assert_eq!(img.width, 4);
@@ -260,50 +276,63 @@ mod tests {
     #[test]
     #[should_panic(expected = "Output dimensions must be non-zero")]
     fn test_xtrans_image_zero_width() {
-        let data = vec![0.5f32; 36];
+        let data = vec![32768u16; 36];
         let pattern = test_pattern();
-        XTransImage::with_margins(&data, 6, 6, 0, 4, 0, 0, pattern);
+        XTransImage::with_margins(&data, 6, 6, 0, 4, 0, 0, pattern, 0.0, 1.0 / 65535.0);
     }
 
     #[test]
     #[should_panic(expected = "Data length")]
     fn test_xtrans_image_wrong_data_length() {
-        let data = vec![0.5f32; 30]; // Should be 36
+        let data = vec![32768u16; 30]; // Should be 36
         let pattern = test_pattern();
-        XTransImage::with_margins(&data, 6, 6, 6, 6, 0, 0, pattern);
-    }
-
-    fn normalize_test_data(raw_data: &[u16], black: f32, range: f32) -> Vec<f32> {
-        crate::raw::normalize::normalize_u16_to_f32_parallel(raw_data, black, 1.0 / range)
+        XTransImage::with_margins(&data, 6, 6, 6, 6, 0, 0, pattern, 0.0, 1.0 / 65535.0);
     }
 
     #[test]
     fn test_process_xtrans_output_size() {
-        // 12x12 raw data, 6x6 active area
         let raw_data: Vec<u16> = vec![1000; 12 * 12];
-        let normalized = normalize_test_data(&raw_data, 0.0, 4096.0);
-        let (rgb, channels) = process_xtrans(normalized, 12, 12, 6, 6, 3, 3, test_pattern_array());
+        let (rgb, channels) = process_xtrans(
+            &raw_data,
+            12,
+            12,
+            6,
+            6,
+            3,
+            3,
+            test_pattern_array(),
+            0.0,
+            1.0 / 4096.0,
+        );
 
         assert_eq!(channels, 3);
-        assert_eq!(rgb.len(), 6 * 6 * 3); // width * height * channels
+        assert_eq!(rgb.len(), 6 * 6 * 3);
     }
 
     #[test]
     fn test_process_xtrans_normalization() {
-        // Test that black level subtraction and range normalization work
         let black = 256.0;
         let maximum = 4096.0;
         let range = maximum - black;
+        let inv_range = 1.0 / range;
 
-        // Create data where all values equal black + range/2 = 2176
-        // Should normalize to 0.5
+        // All values equal black + range/2 = 2176 → normalizes to 0.5
         let mid_value = (black + range / 2.0) as u16;
         let raw_data: Vec<u16> = vec![mid_value; 12 * 12];
-        let normalized = normalize_test_data(&raw_data, black, range);
 
-        let (rgb, _) = process_xtrans(normalized, 12, 12, 6, 6, 3, 3, test_pattern_array());
+        let (rgb, _) = process_xtrans(
+            &raw_data,
+            12,
+            12,
+            6,
+            6,
+            3,
+            3,
+            test_pattern_array(),
+            black,
+            inv_range,
+        );
 
-        // All output values should be around 0.5 (interpolated from 0.5 neighbors)
         for &val in &rgb {
             assert!((val - 0.5).abs() < 0.01, "Expected ~0.5, got {}", val);
         }
@@ -311,17 +340,26 @@ mod tests {
 
     #[test]
     fn test_process_xtrans_clamps_below_black() {
-        // Values below black level should be clamped to 0
         let black = 256.0;
         let range = 4096.0 - black;
+        let inv_range = 1.0 / range;
 
         // All values below black level
         let raw_data: Vec<u16> = vec![100; 12 * 12];
-        let normalized = normalize_test_data(&raw_data, black, range);
 
-        let (rgb, _) = process_xtrans(normalized, 12, 12, 6, 6, 3, 3, test_pattern_array());
+        let (rgb, _) = process_xtrans(
+            &raw_data,
+            12,
+            12,
+            6,
+            6,
+            3,
+            3,
+            test_pattern_array(),
+            black,
+            inv_range,
+        );
 
-        // All output values should be 0 (clamped)
         for &val in &rgb {
             assert_eq!(val, 0.0, "Expected 0.0 for values below black level");
         }
@@ -329,16 +367,24 @@ mod tests {
 
     #[test]
     fn test_process_xtrans_full_range() {
-        // Test that maximum value normalizes to 1.0
         let black = 0.0;
-        let range = 65535.0;
+        let inv_range = 1.0 / 65535.0;
 
         let raw_data: Vec<u16> = vec![65535; 12 * 12];
-        let normalized = normalize_test_data(&raw_data, black, range);
 
-        let (rgb, _) = process_xtrans(normalized, 12, 12, 6, 6, 3, 3, test_pattern_array());
+        let (rgb, _) = process_xtrans(
+            &raw_data,
+            12,
+            12,
+            6,
+            6,
+            3,
+            3,
+            test_pattern_array(),
+            black,
+            inv_range,
+        );
 
-        // All output values should be 1.0
         for &val in &rgb {
             assert!((val - 1.0).abs() < 0.001, "Expected 1.0, got {}", val);
         }
