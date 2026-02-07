@@ -1,16 +1,17 @@
 [
-    {
-        "label": "cargo test --release",
-        "command": "cargo",
-        "args": [
-            "test",
-            "-p",
-            "$ZED_CUSTOM_RUST_PACKAGE",
-            "--release",
-            "$ZED_SYMBOL",
-            "--",
-            "--nocapture"
-        ],
-        "tags": ["rust-test"]
-    }
+  {
+    "label": "cargo test --release",
+    "command": "cargo",
+    "args": [
+      "test",
+      "-p",
+      "$ZED_CUSTOM_RUST_PACKAGE",
+      "--release",
+      "$ZED_SYMBOL",
+      "--",
+      "--ignored",
+      "--nocapture",
+    ],
+    "tags": ["rust-test"],
+  },
 ]
