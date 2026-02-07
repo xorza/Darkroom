@@ -78,17 +78,18 @@ Custom implementation of the Markesteijn demosaic for Fujifilm X-Trans 6x6 CFA s
 
 1. **Green min/max** — Bound green interpolation using hexagonal neighbors
 2. **Green interpolation (4 directions)** — Weighted hexagonal with clamping
-3. **R/B interpolation** — Green-guided color difference via precomputed `ColorInterpLookup`
-4. **YPbPr derivatives** — Spatial Laplacian in perceptual color space
-5. **Homogeneity maps** — Count consistent pixels per direction in 3x3 window
-6. **Final blend** — Sum homogeneity in 5x5 window, average best directions
+3. **YPbPr derivatives** — Spatial Laplacian (RGB recomputed on-the-fly from green_dir)
+4. **Homogeneity maps** — Count consistent pixels per direction in 3x3 window
+5. **Final blend** — Sum homogeneity in 5x5 window, recompute RGB for best directions, average
 
 **Memory**:
-- Single preallocated arena (`DemosaicArena`): 18P f32 (P = width × height)
-- Layout: `[rgb_dir 12P | green_dir/drv 4P | gmin/homo P | gmax/threshold P]`
-- Region B shared: green_dir (Steps 1–3) then drv (Steps 3–6)
+- Single preallocated arena (`DemosaicArena`): 10P f32 (P = width × height)
+- Layout: `[green_dir 4P | drv/output 4P | gmin/homo P | gmax/threshold P]`
+- Region A: green_dir (written Step 2, read through Step 5)
+- Region B: drv (Steps 3–4), then output (3P) written in Step 5
 - Region C: gmin reinterpreted as homo u8 after Step 2
-- Region D: gmax reused as threshold in Step 5
+- Region D: gmax reused as threshold in Step 4
+- RGB never materialized — recomputed on-the-fly in Steps 3 and 5 via `compute_rgb_pixel`
 - libraw guard + file buffer dropped before demosaicing starts
 
 **Optimizations**:
