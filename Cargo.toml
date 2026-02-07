@@ -45,7 +45,6 @@ anyhow = { version = "*" }
 thiserror = { version = "*" }
 bytemuck = { version = "*", features = ["derive", "extern_crate_alloc"] }
 pollster = { version = "*" }
-num-traits = { version = "*" }
 glam = { version = "*", features = ["serde"] }
 strum = { version = "*" }
 strum_macros = { version = "*" }
@@ -59,12 +58,9 @@ dotenv = { version = "*" }
 rayon = { version = "*" }
 toml = { version = "*" }
 hashbrown = { version = "*", features = ["serde"] }
-bytes = { version = "*" }
-lazy_static = { version = "*" }
 mlua = { version = "*", features = ["serialize", "send", "anyhow", "async", "lua54", "vendored"] }
 syn = { version = "*", features = ["full"] }
 quote = { version = "*" }
-proc-macro2 = { version = "*" }
 memmap2 = { version = "*" }
 tiff = { version = "*" }
 image = { version = "*" }

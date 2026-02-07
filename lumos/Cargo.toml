@@ -33,11 +33,8 @@ rand_chacha = { workspace = true }
 nalgebra = { workspace = true }
 arrayvec = { workspace = true }
 smallvec = { workspace = true }
-hashbrown = { workspace = true }
 parking_lot = { workspace = true }
 
 [dev-dependencies]
 bench = { workspace = true }
 image = { workspace = true }
-serde = { workspace = true }
-serde_json = { workspace = true }

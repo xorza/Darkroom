@@ -7,8 +7,6 @@ description = "A graph library for Scenarium"
 [dependencies]
 common = { workspace = true }
 serde = { workspace = true }
-serde_yml = { workspace = true }
-serde_json = { workspace = true }
 uuid = { workspace = true }
 anyhow = { workspace = true }
 thiserror = { workspace = true }
@@ -18,9 +16,7 @@ rand = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 hashbrown = { workspace = true }
-pollster = { workspace = true }
 mlua = { workspace = true }
-glam = { workspace = true }
 async-trait = { workspace = true }
 
 [dev-dependencies]
