@@ -350,61 +350,185 @@ pub(super) fn compute_derivatives(xtrans: &XTransImage, green_dir: &[f32], drv: 
     let height = xtrans.height;
     let pixels = width * height;
     let color_lookup = ColorInterpLookup::new(&xtrans.pattern);
+    let drv_ptr = UnsafeSendPtr(drv.as_mut_ptr());
 
-    drv.par_chunks_mut(width)
-        .enumerate()
-        .for_each(|(flat_idx, drv_row)| {
-            let d = flat_idx / height;
-            let y = flat_idx % height;
-            let (dir_dy, dir_dx) = DIR_OFFSETS[d];
-            let green_base = d * pixels;
-            let y_interior = y >= 1 && y + 1 < height;
+    // Split each direction's rows into chunks for parallelism, and within each
+    // chunk process rows sequentially with a sliding 3-row YPbPr cache.
+    // This gives both multi-core utilization AND 3x reduction in
+    // compute_rgb_pixel calls (each row computed once, reused as neighbor).
+    // At chunk boundaries, one row is recomputed (negligible overhead).
+    let chunk_size = 64;
+    let chunks_per_dir = height.div_ceil(chunk_size);
+    let total_chunks = NDIR * chunks_per_dir;
 
-            for (x, drv_val) in drv_row.iter_mut().enumerate() {
-                let interior = y_interior && x >= 1 && x + 1 < width;
-                let (rc, gc, bc) =
-                    compute_rgb_pixel(xtrans, green_dir, &color_lookup, green_base, y, x, interior);
-                let (yc, pbc, prc) = rgb_to_ypbpr(rc, gc, bc);
+    (0..total_chunks).into_par_iter().for_each(|chunk_idx| {
+        let d = chunk_idx / chunks_per_dir;
+        let chunk_i = chunk_idx % chunks_per_dir;
+        let y_start = chunk_i * chunk_size;
+        let y_end = (y_start + chunk_size).min(height);
 
-                let fy = (y as i32 + dir_dy) as usize;
-                let fx = (x as i32 + dir_dx) as usize;
-                let (yf, pbf, prf) = if fy < height && fx < width {
-                    let fi = fy >= 1 && fy + 1 < height && fx >= 1 && fx + 1 < width;
-                    let (rf, gf, bf) =
-                        compute_rgb_pixel(xtrans, green_dir, &color_lookup, green_base, fy, fx, fi);
-                    rgb_to_ypbpr(rf, gf, bf)
-                } else {
-                    (yc, pbc, prc)
-                };
+        let (dir_dy, dir_dx) = DIR_OFFSETS[d];
+        let green_base = d * pixels;
+        let drv_base = d * pixels;
 
-                let by = y as i32 - dir_dy;
-                let bx = x as i32 - dir_dx;
-                let (yb, pbb, prb) =
-                    if by >= 0 && bx >= 0 && (by as usize) < height && (bx as usize) < width {
-                        let byu = by as usize;
-                        let bxu = bx as usize;
-                        let bi = byu >= 1 && byu + 1 < height && bxu >= 1 && bxu + 1 < width;
-                        let (rb, gb, bb) = compute_rgb_pixel(
-                            xtrans,
-                            green_dir,
-                            &color_lookup,
-                            green_base,
-                            byu,
-                            bxu,
-                            bi,
-                        );
-                        rgb_to_ypbpr(rb, gb, bb)
+        if dir_dy == 0 {
+            // Direction 0: horizontal (0, +1). Forward/backward are in the same row.
+            let mut row_buf = vec![(0.0f32, 0.0f32, 0.0f32); width];
+            for y in y_start..y_end {
+                compute_ypbpr_row(
+                    xtrans,
+                    green_dir,
+                    &color_lookup,
+                    green_base,
+                    y,
+                    width,
+                    height,
+                    &mut row_buf,
+                );
+
+                let drv_off = drv_base + y * width;
+                for x in 0..width {
+                    let (yc, pbc, prc) = row_buf[x];
+
+                    let (yf, pbf, prf) = if x + 1 < width {
+                        row_buf[x + 1]
                     } else {
                         (yc, pbc, prc)
                     };
 
-                let dy = 2.0 * yc - yf - yb;
-                let dpb = 2.0 * pbc - pbf - pbb;
-                let dpr = 2.0 * prc - prf - prb;
+                    let (yb, pbb, prb) = if x > 0 {
+                        row_buf[x - 1]
+                    } else {
+                        (yc, pbc, prc)
+                    };
 
-                *drv_val = dy * dy + dpb * dpb + dpr * dpr;
+                    let dy = 2.0 * yc - yf - yb;
+                    let dpb = 2.0 * pbc - pbf - pbb;
+                    let dpr = 2.0 * prc - prf - prb;
+
+                    // SAFETY: Each (d, chunk) pair writes to unique rows in drv.
+                    unsafe {
+                        *drv_ptr.get().add(drv_off + x) = dy * dy + dpb * dpb + dpr * dpr;
+                    }
+                }
             }
-        });
+        } else {
+            // Directions 1,2,3 (dir_dy=1): sliding 3-row cache.
+            // rows[0] = prev (y-1), rows[1] = center (y), rows[2] = next (y+1)
+            let mut rows = [
+                vec![(0.0f32, 0.0f32, 0.0f32); width],
+                vec![(0.0f32, 0.0f32, 0.0f32); width],
+                vec![(0.0f32, 0.0f32, 0.0f32); width],
+            ];
+
+            // Seed the sliding window for this chunk
+            if y_start > 0 {
+                compute_ypbpr_row(
+                    xtrans,
+                    green_dir,
+                    &color_lookup,
+                    green_base,
+                    y_start - 1,
+                    width,
+                    height,
+                    &mut rows[0],
+                );
+            }
+            compute_ypbpr_row(
+                xtrans,
+                green_dir,
+                &color_lookup,
+                green_base,
+                y_start,
+                width,
+                height,
+                &mut rows[1],
+            );
+            if y_start + 1 < height {
+                compute_ypbpr_row(
+                    xtrans,
+                    green_dir,
+                    &color_lookup,
+                    green_base,
+                    y_start + 1,
+                    width,
+                    height,
+                    &mut rows[2],
+                );
+            }
+
+            for y in y_start..y_end {
+                let has_prev = y > 0;
+                let has_next = y + 1 < height;
+
+                let drv_off = drv_base + y * width;
+                for x in 0..width {
+                    let (yc, pbc, prc) = rows[1][x];
+
+                    let fx = x as i32 + dir_dx;
+                    let (yf, pbf, prf) = if has_next && fx >= 0 && (fx as usize) < width {
+                        rows[2][fx as usize]
+                    } else {
+                        (yc, pbc, prc)
+                    };
+
+                    let bx = x as i32 - dir_dx;
+                    let (yb, pbb, prb) = if has_prev && bx >= 0 && (bx as usize) < width {
+                        rows[0][bx as usize]
+                    } else {
+                        (yc, pbc, prc)
+                    };
+
+                    let dy = 2.0 * yc - yf - yb;
+                    let dpb = 2.0 * pbc - pbf - pbb;
+                    let dpr = 2.0 * prc - prf - prb;
+
+                    unsafe {
+                        *drv_ptr.get().add(drv_off + x) = dy * dy + dpb * dpb + dpr * dpr;
+                    }
+                }
+
+                // Slide window: prev <- center <- next, compute new next row
+                let [ref mut r0, ref mut r1, ref mut r2] = rows;
+                std::mem::swap(r0, r1);
+                std::mem::swap(r1, r2);
+                if y + 2 < height {
+                    compute_ypbpr_row(
+                        xtrans,
+                        green_dir,
+                        &color_lookup,
+                        green_base,
+                        y + 2,
+                        width,
+                        height,
+                        r2,
+                    );
+                }
+            }
+        }
+    });
+}
+
+/// Pre-compute YPbPr values for an entire row, storing results in `out`.
+#[allow(clippy::too_many_arguments)]
+#[inline(always)]
+fn compute_ypbpr_row(
+    xtrans: &XTransImage,
+    green_dir: &[f32],
+    color_lookup: &ColorInterpLookup,
+    green_base: usize,
+    y: usize,
+    width: usize,
+    height: usize,
+    out: &mut [(f32, f32, f32)],
+) {
+    let y_interior = y >= 1 && y + 1 < height;
+    for (x, val) in out.iter_mut().enumerate() {
+        let interior = y_interior && x >= 1 && x + 1 < width;
+        let (r, g, b) =
+            compute_rgb_pixel(xtrans, green_dir, color_lookup, green_base, y, x, interior);
+        *val = rgb_to_ypbpr(r, g, b);
+    }
 }
 
 /// Convert RGB to YPbPr.

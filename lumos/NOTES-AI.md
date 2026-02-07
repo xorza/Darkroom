@@ -102,11 +102,11 @@ Custom implementation of the Markesteijn demosaic for Fujifilm X-Trans 6x6 CFA s
 - Sequential SAT construction reduces peak blend memory from ~4P to ~1P + hm_buf
 
 **Performance** (6032x4028 X-Trans, AMD CPU):
-- Our Markesteijn: ~450ms demosaic, ~1.27s total load
+- Our Markesteijn: ~620ms demosaic, ~1.49s total load
 - libraw: ~2.5s total load
 - Quality: MAE ~0.000521 vs libraw reference (after linear regression normalization)
 
-**Parallelization**: Row-parallel via rayon `par_chunks_mut` for all steps. Steps 3+4 flatten (direction x row) pairs for maximum core utilization.
+**Parallelization**: Row-parallel via rayon `par_chunks_mut` for all steps. Step 3 uses chunked direction×row parallelism with sliding 3-row YPbPr cache (64-row chunks, ~252 tasks). Steps 3+4 previously used (direction × row) flattening.
 
 ## Star Detection Module (star_detection/)
 
