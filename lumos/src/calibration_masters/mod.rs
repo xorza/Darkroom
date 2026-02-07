@@ -34,15 +34,23 @@ impl CalibrationMasters {
     /// Calibrate a light frame in place using these calibration masters.
     ///
     /// Applies the standard calibration formula:
+    /// ```text
+    /// calibrated = (Light - Dark) / normalize(Flat - Bias)
+    /// ```
+    ///
     /// 1. Subtract master dark (removes bias + thermal noise in one step)
     ///    OR subtract master bias only (if no dark available)
-    /// 2. Divide by normalized master flat (corrects vignetting and dust)
+    /// 2. Divide by bias-corrected normalized flat: `(F - O) / mean(F - O)`
     /// 3. Correct hot pixels (replace with median of neighbors)
     ///
     /// The master dark is stored raw (not bias-subtracted), so it contains both
     /// bias and thermal signal: `dark = bias + thermal`. Subtracting it from the
     /// light removes both: `light - dark = signal`. No separate bias subtraction
     /// is needed when a dark is available.
+    ///
+    /// Bias is subtracted from the flat before normalization to ensure perfect
+    /// vignetting cancellation. Without this, the bias offset in the flat prevents
+    /// the vignetting term from canceling cleanly.
     ///
     /// # Panics
     /// Panics if the provided master frames have different dimensions than the image.
@@ -76,7 +84,10 @@ impl CalibrationMasters {
             });
         }
 
-        // Divide by normalized master flat (corrects vignetting)
+        // Divide by normalized master flat (corrects vignetting).
+        // Bias must be subtracted from flat before normalization:
+        //   (F - O) / mean(F - O)
+        // Without this, the bias offset prevents perfect vignetting cancellation.
         if let Some(ref flat) = self.master_flat {
             assert!(
                 flat.dimensions() == image.dimensions(),
@@ -84,21 +95,53 @@ impl CalibrationMasters {
                 flat.dimensions(),
                 image.dimensions()
             );
-            let flat_mean = flat.mean();
+
+            // Compute mean of (flat - bias) for normalization
+            let flat_mean = if let Some(ref bias) = self.master_bias {
+                assert!(
+                    bias.dimensions() == flat.dimensions(),
+                    "Bias dimensions {:?} don't match flat dimensions {:?}",
+                    bias.dimensions(),
+                    flat.dimensions()
+                );
+                // mean(F - O) = mean(F) - mean(O)
+                flat.mean() - bias.mean()
+            } else {
+                flat.mean()
+            };
             assert!(
                 flat_mean > f32::EPSILON,
-                "Flat frame mean is zero or negative"
+                "Flat frame mean is zero or negative after bias subtraction"
             );
             let inv_flat_mean = 1.0 / flat_mean;
 
-            image.apply_from_channel(flat, |_c, dst, src| {
-                for (d, s) in dst.iter_mut().zip(src.iter()) {
-                    let normalized_flat = s * inv_flat_mean;
-                    if normalized_flat > f32::EPSILON {
-                        *d /= normalized_flat;
+            match &self.master_bias {
+                Some(bias) => {
+                    // Divide by (flat - bias) / mean(flat - bias)
+                    for c in 0..image.channels() {
+                        let flat_ch = flat.channel(c);
+                        let bias_ch = bias.channel(c);
+                        let img_ch = image.channel_mut(c);
+                        for i in 0..img_ch.len() {
+                            let corrected_flat = (flat_ch[i] - bias_ch[i]) * inv_flat_mean;
+                            if corrected_flat > f32::EPSILON {
+                                img_ch[i] /= corrected_flat;
+                            }
+                        }
                     }
                 }
-            });
+                None => {
+                    // No bias — divide by flat / mean(flat)
+                    image.apply_from_channel(flat, |_c, dst, src| {
+                        for (d, s) in dst.iter_mut().zip(src.iter()) {
+                            let normalized_flat = s * inv_flat_mean;
+                            if normalized_flat > f32::EPSILON {
+                                *d /= normalized_flat;
+                            }
+                        }
+                    });
+                }
+            }
         }
 
         // Correct hot pixels (replace with median of neighbors)

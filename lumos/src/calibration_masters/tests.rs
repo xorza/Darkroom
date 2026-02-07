@@ -1,4 +1,5 @@
 use crate::stacking::{ProgressCallback, StackConfig};
+use crate::testing::{calibration_dir, calibration_masters_dir, init_tracing};
 use crate::{AstroImage, CalibrationMasters, FrameType, ImageDimensions};
 
 /// Helper to create a grayscale AstroImage filled with a constant value.
@@ -98,8 +99,6 @@ fn test_calibrate_dark_only_no_bias() {
 #[test]
 #[cfg_attr(not(feature = "real-data"), ignore)]
 fn test_calibration_masters_from_env() {
-    use crate::testing::calibration_dir;
-
     let Some(cal_dir) = calibration_dir() else {
         return;
     };
@@ -145,8 +144,6 @@ fn test_calibration_masters_from_env() {
 #[test]
 #[cfg_attr(not(feature = "real-data"), ignore)]
 fn test_load_masters_from_calibration_masters_subdir() {
-    use crate::testing::calibration_masters_dir;
-
     let Some(masters_dir) = calibration_masters_dir() else {
         return;
     };
@@ -205,4 +202,282 @@ fn test_load_masters_from_calibration_masters_subdir() {
         assert!(bias.width() > 0);
         assert!(bias.height() > 0);
     }
+}
+
+#[test]
+fn test_calibrate_bias_subtraction() {
+    let mut light = AstroImage::from_pixels(
+        ImageDimensions::new(2, 2, 1),
+        vec![100.0, 200.0, 150.0, 250.0],
+    );
+    let bias = AstroImage::from_pixels(ImageDimensions::new(2, 2, 1), vec![5.0, 5.0, 5.0, 5.0]);
+
+    let masters = CalibrationMasters {
+        master_dark: None,
+        master_flat: None,
+        master_bias: Some(bias),
+        hot_pixel_map: None,
+        config: StackConfig::default(),
+    };
+
+    masters.calibrate(&mut light);
+    assert_eq!(light.channel(0).pixels(), &[95.0, 195.0, 145.0, 245.0]);
+}
+
+#[test]
+fn test_calibrate_dark_subtraction() {
+    let mut light = AstroImage::from_pixels(
+        ImageDimensions::new(2, 2, 1),
+        vec![100.0, 200.0, 150.0, 250.0],
+    );
+    let dark = AstroImage::from_pixels(ImageDimensions::new(2, 2, 1), vec![10.0, 20.0, 15.0, 25.0]);
+
+    let masters = CalibrationMasters {
+        master_dark: Some(dark),
+        master_flat: None,
+        master_bias: None,
+        hot_pixel_map: None,
+        config: StackConfig::default(),
+    };
+
+    masters.calibrate(&mut light);
+    assert_eq!(light.channel(0).pixels(), &[90.0, 180.0, 135.0, 225.0]);
+}
+
+#[test]
+fn test_calibrate_flat_correction() {
+    let mut light = AstroImage::from_pixels(
+        ImageDimensions::new(2, 2, 1),
+        vec![100.0, 200.0, 150.0, 250.0],
+    );
+    let flat = AstroImage::from_pixels(ImageDimensions::new(2, 2, 1), vec![0.8, 1.0, 1.2, 1.0]);
+
+    let masters = CalibrationMasters {
+        master_dark: None,
+        master_flat: Some(flat),
+        master_bias: None,
+        hot_pixel_map: None,
+        config: StackConfig::default(),
+    };
+
+    masters.calibrate(&mut light);
+
+    assert!((light.channel(0)[0] - 125.0).abs() < 0.01);
+    assert!((light.channel(0)[1] - 200.0).abs() < 0.01);
+    assert!((light.channel(0)[2] - 125.0).abs() < 0.01);
+    assert!((light.channel(0)[3] - 250.0).abs() < 0.01);
+}
+
+#[test]
+fn test_calibrate_full() {
+    // Realistic calibration scenario:
+    //   bias = 100 (readout offset)
+    //   thermal = 20 (dark current)
+    //   signal per pixel = [500, 1000, 700, 1200]
+    //   vignetting per pixel = [0.8, 1.0, 1.2, 1.0]
+    //
+    // Raw frames:
+    //   light = signal * vignetting + bias + thermal
+    //   dark = bias + thermal = 120
+    //   flat = K * vignetting + bias (K=1000 for flat illumination level)
+    //   bias = 100
+    //
+    // Calibration formula: (L - D) / ((F - O) / mean(F - O))
+    //   L - D = signal * vignetting
+    //   F - O = K * vignetting = [800, 1000, 1200, 1000]
+    //   mean(F - O) = 1000
+    //   normalized flat = [0.8, 1.0, 1.2, 1.0]
+    //   result = signal * vignetting / (K * vignetting / mean(K * vignetting))
+    //          = signal * mean(K * vignetting) / K = signal
+    let light_vals: Vec<f32> = [500.0, 1000.0, 700.0, 1200.0]
+        .iter()
+        .zip([0.8, 1.0, 1.2, 1.0].iter())
+        .map(|(s, v)| s * v + 120.0) // signal*vignetting + bias + thermal
+        .collect();
+    let mut light = AstroImage::from_pixels(ImageDimensions::new(2, 2, 1), light_vals);
+
+    let bias = AstroImage::from_pixels(ImageDimensions::new(2, 2, 1), vec![100.0; 4]);
+    let dark = AstroImage::from_pixels(ImageDimensions::new(2, 2, 1), vec![120.0; 4]);
+    // flat = K * vignetting + bias = 1000 * [0.8, 1.0, 1.2, 1.0] + 100
+    let flat = AstroImage::from_pixels(
+        ImageDimensions::new(2, 2, 1),
+        vec![900.0, 1100.0, 1300.0, 1100.0],
+    );
+
+    let masters = CalibrationMasters {
+        master_dark: Some(dark),
+        master_flat: Some(flat),
+        master_bias: Some(bias),
+        hot_pixel_map: None,
+        config: StackConfig::default(),
+    };
+
+    masters.calibrate(&mut light);
+
+    // Result should be pure signal (vignetting perfectly cancelled)
+    assert!(
+        (light.channel(0)[0] - 500.0).abs() < 0.1,
+        "got {}",
+        light.channel(0)[0]
+    );
+    assert!(
+        (light.channel(0)[1] - 1000.0).abs() < 0.1,
+        "got {}",
+        light.channel(0)[1]
+    );
+    assert!(
+        (light.channel(0)[2] - 700.0).abs() < 0.1,
+        "got {}",
+        light.channel(0)[2]
+    );
+    assert!(
+        (light.channel(0)[3] - 1200.0).abs() < 0.1,
+        "got {}",
+        light.channel(0)[3]
+    );
+}
+
+#[test]
+fn test_calibrate_rgb_with_rgb_masters() {
+    let mut light = AstroImage::from_pixels(
+        ImageDimensions::new(2, 2, 3),
+        vec![
+            100.0, 100.0, 100.0, 200.0, 200.0, 200.0, 150.0, 150.0, 150.0, 250.0, 250.0, 250.0,
+        ],
+    );
+
+    let bias = AstroImage::from_pixels(ImageDimensions::new(2, 2, 3), vec![5.0; 12]);
+
+    let masters = CalibrationMasters {
+        master_dark: None,
+        master_flat: None,
+        master_bias: Some(bias),
+        hot_pixel_map: None,
+        config: StackConfig::default(),
+    };
+
+    masters.calibrate(&mut light);
+
+    assert_eq!(light.channel(0)[0], 95.0);
+    assert_eq!(light.channel(1)[0], 95.0);
+    assert_eq!(light.channel(2)[0], 95.0);
+    assert_eq!(light.channel(0)[1], 195.0);
+}
+
+#[test]
+#[should_panic(expected = "don't match")]
+fn test_calibrate_rgb_with_grayscale_bias_panics() {
+    let mut light = AstroImage::from_pixels(ImageDimensions::new(2, 2, 3), vec![100.0; 12]);
+    let bias = AstroImage::from_pixels(ImageDimensions::new(2, 2, 1), vec![5.0; 4]);
+
+    let masters = CalibrationMasters {
+        master_dark: None,
+        master_flat: None,
+        master_bias: Some(bias),
+        hot_pixel_map: None,
+        config: StackConfig::default(),
+    };
+
+    masters.calibrate(&mut light);
+}
+
+#[test]
+#[should_panic(expected = "don't match")]
+fn test_calibrate_grayscale_with_rgb_dark_panics() {
+    let mut light = AstroImage::from_pixels(ImageDimensions::new(2, 2, 1), vec![100.0; 4]);
+    let dark = AstroImage::from_pixels(ImageDimensions::new(2, 2, 3), vec![10.0; 12]);
+
+    let masters = CalibrationMasters {
+        master_dark: Some(dark),
+        master_flat: None,
+        master_bias: None,
+        hot_pixel_map: None,
+        config: StackConfig::default(),
+    };
+
+    masters.calibrate(&mut light);
+}
+
+#[test]
+#[cfg_attr(not(feature = "real-data"), ignore)]
+fn test_calibrate_light_from_env() {
+    init_tracing();
+
+    let Some(cal_dir) = calibration_dir() else {
+        eprintln!("LUMOS_CALIBRATION_DIR not set, skipping test");
+        return;
+    };
+
+    let lights_dir = cal_dir.join("Lights");
+    if !lights_dir.exists() {
+        eprintln!("Lights directory not found, skipping test");
+        return;
+    }
+
+    let files = common::file_utils::astro_image_files(&lights_dir);
+    let Some(first_file) = files.first() else {
+        eprintln!("No image files in Lights, skipping test");
+        return;
+    };
+
+    let start = std::time::Instant::now();
+    println!("Loading light frame: {:?}", first_file);
+    let mut light = AstroImage::from_file(first_file).expect("Failed to load light frame");
+    println!("  Load light: {:?}", start.elapsed());
+
+    let original_dimensions = light.dimensions();
+
+    println!(
+        "Loaded light frame: {}x{}x{}",
+        light.width(),
+        light.height(),
+        light.channels()
+    );
+
+    let Some(masters_dir) = calibration_masters_dir() else {
+        eprintln!("calibration_masters directory not found, skipping test");
+        return;
+    };
+
+    let start = std::time::Instant::now();
+    let masters = CalibrationMasters::load(&masters_dir, StackConfig::default()).unwrap();
+    println!("  Load masters: {:?}", start.elapsed());
+
+    println!(
+        "Loaded masters: dark={}, flat={}, bias={}",
+        masters.master_dark.is_some(),
+        masters.master_flat.is_some(),
+        masters.master_bias.is_some()
+    );
+
+    if let Some(ref hot_map) = masters.hot_pixel_map {
+        println!(
+            "  Hot pixels: {} ({:.4}%)",
+            hot_map.count,
+            hot_map.percentage()
+        );
+    }
+
+    let start = std::time::Instant::now();
+    masters.calibrate(&mut light);
+    println!("  Calibrate: {:?}", start.elapsed());
+
+    println!(
+        "Calibrated frame: {}x{}x{}",
+        light.width(),
+        light.height(),
+        light.channels()
+    );
+    println!("Mean: {}", light.mean());
+
+    assert_eq!(light.dimensions(), original_dimensions);
+
+    let start = std::time::Instant::now();
+    let output_path = common::test_utils::test_output_path("calibrated_light.tiff");
+    let img: imaginarium::Image = light.into();
+    img.save_file(&output_path).unwrap();
+    println!("  Save: {:?}", start.elapsed());
+
+    println!("Saved calibrated image to: {:?}", output_path);
+    assert!(output_path.exists());
 }
