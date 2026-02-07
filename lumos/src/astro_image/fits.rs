@@ -44,12 +44,7 @@ pub fn load_fits(path: &Path) -> Result<AstroImage> {
         .read_image(&mut fptr)
         .context("Failed to read image data")?;
 
-    assert!(
-        pixels.len() == img_dims.pixel_count(),
-        "Pixel count mismatch: expected {}, got {}",
-        img_dims.pixel_count(),
-        pixels.len()
-    );
+    assert_eq!(pixels.len(), img_dims.pixel_count(), "Pixel count mismatch");
 
     // Read metadata
     // FITS files don't indicate CFA status - assume false (processed data)
@@ -61,7 +56,7 @@ pub fn load_fits(path: &Path) -> Result<AstroImage> {
         exposure_time: read_key_optional(&hdu, &mut fptr, "EXPTIME"),
         iso: None, // FITS typically doesn't store ISO
         bitpix,
-        header_dimensions: dimensions.clone(),
+        header_dimensions: dimensions,
         is_cfa: false,
     };
 

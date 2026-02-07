@@ -15,7 +15,7 @@ use crate::star_detection::median_filter::median_filter_3x3;
 /// The returned buffer is acquired from `pool`; the caller owns it.
 pub(crate) fn prepare(image: &AstroImage, pool: &mut BufferPool) -> Buffer2<f32> {
     let mut pixels = pool.acquire_f32();
-    image.into_grayscale_buffer(&mut pixels);
+    image.write_grayscale_buffer(&mut pixels);
 
     // CFA median filter
     if image.metadata.is_cfa {

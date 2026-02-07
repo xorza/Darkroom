@@ -34,7 +34,7 @@ impl BitPix {
             64 => BitPix::Int64,
             -32 => BitPix::Float32,
             -64 => BitPix::Float64,
-            _ => BitPix::UInt8,
+            _ => panic!("Unknown FITS BITPIX value: {value}"),
         }
     }
 
@@ -116,7 +116,7 @@ pub struct AstroImageMetadata {
 
 /// Pixel data storage - planar format for efficient per-channel operations.
 #[derive(Debug, Clone)]
-pub enum PixelData {
+pub(crate) enum PixelData {
     L(Buffer2<f32>),
     Rgb([Buffer2<f32>; 3]),
 }
@@ -435,20 +435,8 @@ impl AstroImage {
     // Grayscale conversion
     // ------------------------------------------------------------------------
 
-    /// Compute grayscale as a new buffer (Rec. 709 luminance).
-    pub fn to_grayscale_buffer(&self) -> Buffer2<f32> {
-        match &self.pixels {
-            PixelData::L(data) => data.clone(),
-            PixelData::Rgb([r, g, b]) => {
-                let mut gray = vec![0.0f32; r.len()];
-                rgb_to_luminance(r, g, b, &mut gray);
-                Buffer2::new(self.dimensions.width, self.dimensions.height, gray)
-            }
-        }
-    }
-
-    /// Convert to grayscale into an existing buffer.
-    pub fn into_grayscale_buffer(&self, output: &mut Buffer2<f32>) {
+    /// Write grayscale data into an existing buffer (Rec. 709 luminance).
+    pub fn write_grayscale_buffer(&self, output: &mut Buffer2<f32>) {
         debug_assert_eq!(output.width(), self.dimensions.width);
         debug_assert_eq!(output.height(), self.dimensions.height);
 
@@ -491,11 +479,6 @@ impl AstroImage {
         Ok(())
     }
 
-    /// Convert to imaginarium::Image.
-    pub fn into_image(self) -> Image {
-        self.into()
-    }
-
     /// Consume and return interleaved pixels (RGBRGBRGB...).
     pub fn into_interleaved_pixels(self) -> Vec<f32> {
         match self.pixels {
@@ -506,11 +489,6 @@ impl AstroImage {
                 interleaved
             }
         }
-    }
-
-    /// Consume and return planar pixel data.
-    pub fn into_pixels(self) -> PixelData {
-        self.pixels
     }
 }
 
