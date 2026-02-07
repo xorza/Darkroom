@@ -160,11 +160,9 @@ Iterative refinement is already implemented and available via `crowded_field()` 
 
 The `distortion/tps/` module is fully implemented but marked `#![allow(dead_code)]` and not wired into the public API. Either integrate it or remove it.
 
-### 6. No Kappa-Sigma Mode Estimation
+### ~~6. No Kappa-Sigma Mode Estimation~~ (REJECTED — Not useful)
 
-**Current:** Background estimation uses median as location estimator.
-
-**SExtractor:** Uses `Mode ≈ 2.5×Median - 1.5×Mean` when the distribution is not too skewed (|mean - median| < 0.3×stddev). This is more robust for backgrounds contaminated by faint unresolved sources.
+The `Mode ≈ 2.5×Median - 1.5×Mean` formula (SExtractor) is a historical artifact. The coefficient is scene-dependent (SExtractor uses 2.5, DES needed 3.5), it's 30% noisier than sigma-clipped mean, SExtractor itself falls back to median when the formula disagrees by >30%, and it fails at low photon counts and in very crowded fields. Modern tools (PixInsight, Siril) use surface fitting instead. Our sigma-clipped median with iterative source masking presets is the recommended modern approach.
 
 ### ~~7. Per-Pixel Weight Copy in Weighted Stacking~~ (RESOLVED — Was Hiding a Bug)
 
@@ -280,12 +278,12 @@ The generic `apply_from_channel` callback method has been removed. Calibration n
 ### Medium Impact, Medium Effort
 7. ~~**Add SIMD Lanczos kernel**~~ — RESOLVED: already evaluated, memory-bound not compute-bound
 8. ~~**Iterative background by default**~~ — REJECTED: current design correct, iteration available via presets
-9. **IKSS estimators for normalization** — more robust than median+MAD
+9. ~~**IKSS estimators for normalization**~~ — more robust than median+MAD (low priority)
+10. ~~**Mode estimation in background**~~ — REJECTED: historical artifact, sigma-clipped median is better
 
 ### Low Priority
-10. **Simplify generation counters** — replace with memset for small grids
-11. **Flatten deviation/sum module hierarchy** — code navigation improvement
-12. **Mode estimation in background** — marginal improvement for most use cases
+11. **Simplify generation counters** — replace with memset for small grids
+12. **Flatten deviation/sum module hierarchy** — code navigation improvement
 
 ---
 
