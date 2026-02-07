@@ -1,14 +1,8 @@
-//! SIMD-accelerated interpolation utilities.
+//! Optimized row-warping implementations.
 //!
-//! This module provides runtime dispatch to the best available SIMD implementation:
-//! - AVX2/SSE4.1 on x86_64
-//! - Scalar fallback on aarch64 (NEON removed - benchmarks showed scalar is faster)
-//!
-//! # Supported Interpolation Methods
-//!
-//! - **Bilinear**: SIMD-accelerated on x86_64 (8 pixels/cycle on AVX2)
-//! - **Lanczos3**: Scalar only - AVX2 tested but provides no benefit due to memory-bound
-//!   random access patterns from arbitrary geometric transforms
+//! Runtime dispatch to the best available implementation:
+//! - **Bilinear**: AVX2/SSE4.1 on x86_64, scalar with incremental stepping elsewhere
+//! - **Lanczos3**: Scalar with incremental stepping, fast-path interior bounds skipping
 
 #[cfg(target_arch = "x86_64")]
 use common::cpu_features;
@@ -20,19 +14,11 @@ use crate::registration::interpolation::get_lanczos_lut;
 use crate::registration::transform::Transform;
 use glam::DVec2;
 
-/// Warp a row of pixels using SIMD-accelerated bilinear interpolation.
+/// Warp a row of pixels using bilinear interpolation.
 ///
-/// Uses AVX2/SSE4.1 on x86_64, scalar on other platforms.
-///
-/// # Arguments
-/// * `input` - Input image data (row-major)
-/// * `input_width` - Width of input image
-/// * `input_height` - Height of input image
-/// * `output_row` - Output buffer for this row
-/// * `output_y` - Y coordinate of this row
-/// * `inverse` - Inverse transform (output -> input)
+/// Uses AVX2/SSE4.1 on x86_64, scalar with incremental stepping elsewhere.
 #[inline]
-pub(crate) fn warp_row_bilinear_simd(
+pub(crate) fn warp_row_bilinear(
     input: &[f32],
     input_width: usize,
     input_height: usize,
@@ -83,6 +69,9 @@ pub(crate) fn warp_row_bilinear_simd(
 }
 
 /// Scalar implementation of row warping with bilinear interpolation.
+///
+/// Uses incremental coordinate stepping for affine transforms to avoid
+/// per-pixel matrix multiply.
 pub(crate) fn warp_row_bilinear_scalar(
     input: &[f32],
     input_width: usize,
@@ -91,47 +80,49 @@ pub(crate) fn warp_row_bilinear_scalar(
     output_y: usize,
     inverse: &Transform,
 ) {
-    let y = output_y as f64;
+    let m = inverse.matrix.as_array();
+    let is_affine = m[6].abs() < 1e-12 && m[7].abs() < 1e-12;
 
-    for (x, out_pixel) in output_row.iter_mut().enumerate() {
-        let src = inverse.apply(DVec2::new(x as f64, y));
+    let src0 = inverse.apply(DVec2::new(0.0, output_y as f64));
+    let mut src_x = src0.x;
+    let mut src_y = src0.y;
+    let dx_step = m[0];
+    let dy_step = m[3];
 
-        *out_pixel = bilinear_sample(input, input_width, input_height, src.x as f32, src.y as f32);
+    for (x_idx, out_pixel) in output_row.iter_mut().enumerate() {
+        if !is_affine {
+            let src = inverse.apply(DVec2::new(x_idx as f64, output_y as f64));
+            src_x = src.x;
+            src_y = src.y;
+        }
+
+        *out_pixel = bilinear_sample(input, input_width, input_height, src_x as f32, src_y as f32);
+
+        if is_affine {
+            src_x += dx_step;
+            src_y += dy_step;
+        }
     }
 }
 
+use super::sample_pixel;
+
 /// Bilinear sampling at a single point (f32 coordinates).
-///
-/// This is the SIMD-compatible implementation using f32 coordinates for fast warping.
 #[inline]
 pub(crate) fn bilinear_sample(input: &[f32], width: usize, height: usize, x: f32, y: f32) -> f32 {
     let x0 = x.floor() as i32;
     let y0 = y.floor() as i32;
-    let x1 = x0 + 1;
-    let y1 = y0 + 1;
-
     let fx = x - x0 as f32;
     let fy = y - y0 as f32;
 
     let p00 = sample_pixel(input, width, height, x0, y0);
-    let p10 = sample_pixel(input, width, height, x1, y0);
-    let p01 = sample_pixel(input, width, height, x0, y1);
-    let p11 = sample_pixel(input, width, height, x1, y1);
+    let p10 = sample_pixel(input, width, height, x0 + 1, y0);
+    let p01 = sample_pixel(input, width, height, x0, y0 + 1);
+    let p11 = sample_pixel(input, width, height, x0 + 1, y0 + 1);
 
     let top = p00 + fx * (p10 - p00);
     let bottom = p01 + fx * (p11 - p01);
-
     top + fy * (bottom - top)
-}
-
-/// Sample a pixel with bounds checking.
-#[inline]
-fn sample_pixel(data: &[f32], width: usize, height: usize, x: i32, y: i32) -> f32 {
-    if x < 0 || y < 0 || x >= width as i32 || y >= height as i32 {
-        0.0
-    } else {
-        data[y as usize * width + x as usize]
-    }
 }
 
 /// Optimized Lanczos3 row warping with incremental coordinate stepping.
@@ -140,7 +131,7 @@ fn sample_pixel(data: &[f32], width: usize, height: usize, x: i32, y: i32) -> f3
 /// 1. Incremental source coordinate stepping (avoid per-pixel matrix multiply)
 /// 2. Fast-path for interior pixels (skip bounds checks, use direct row pointers)
 /// 3. Row pointer caching (compute `y * width` once per kernel row, not 6 times)
-pub(crate) fn warp_row_lanczos3_fast(
+pub(crate) fn warp_row_lanczos3(
     input: &[f32],
     input_width: usize,
     input_height: usize,
@@ -337,35 +328,6 @@ pub fn warp_row_lanczos3_scalar(
     }
 }
 
-/// Warp an entire image using Lanczos3 interpolation.
-#[cfg(test)]
-pub fn warp_image_lanczos3(
-    input: &[f32],
-    input_width: usize,
-    input_height: usize,
-    output_width: usize,
-    output_height: usize,
-    transform: &Transform,
-) -> Vec<f32> {
-    let mut output = vec![0.0; output_width * output_height];
-    let inverse = transform.inverse();
-
-    for y in 0..output_height {
-        let row_start = y * output_width;
-        let row_end = row_start + output_width;
-        warp_row_lanczos3_scalar(
-            input,
-            input_width,
-            input_height,
-            &mut output[row_start..row_end],
-            y,
-            &inverse,
-        );
-    }
-
-    output
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -381,7 +343,7 @@ mod tests {
         let mut output_row = vec![0.0f32; width];
         let y = 50;
 
-        warp_row_bilinear_simd(input.pixels(), width, height, &mut output_row, y, &identity);
+        warp_row_bilinear(input.pixels(), width, height, &mut output_row, y, &identity);
 
         // With identity transform, output should match input
         for x in 1..width - 1 {
@@ -409,7 +371,7 @@ mod tests {
         let mut output_row = vec![0.0f32; width];
         let y = 50;
 
-        warp_row_bilinear_simd(input.pixels(), width, height, &mut output_row, y, &inverse);
+        warp_row_bilinear(input.pixels(), width, height, &mut output_row, y, &inverse);
 
         // Check that pixels are shifted
         for (x, &output_val) in output_row.iter().enumerate().skip(10).take(width - 20) {
@@ -449,14 +411,7 @@ mod tests {
                 let mut output_simd = vec![0.0f32; width];
                 let mut output_scalar = vec![0.0f32; width];
 
-                warp_row_bilinear_simd(
-                    input.pixels(),
-                    width,
-                    height,
-                    &mut output_simd,
-                    y,
-                    &inverse,
-                );
+                warp_row_bilinear(input.pixels(), width, height, &mut output_simd, y, &inverse);
 
                 warp_row_bilinear_scalar(
                     input.pixels(),
@@ -504,7 +459,7 @@ mod tests {
             let mut output_scalar = vec![0.0f32; width];
             let y = height / 2;
 
-            warp_row_bilinear_simd(&input, width, height, &mut output_simd, y, &identity);
+            warp_row_bilinear(&input, width, height, &mut output_simd, y, &identity);
             warp_row_bilinear_scalar(&input, width, height, &mut output_scalar, y, &identity);
 
             for x in 0..width {
@@ -521,7 +476,7 @@ mod tests {
     }
 
     #[test]
-    fn test_warp_row_lanczos3_identity() {
+    fn test_warp_row_lanczos3_scalar_identity() {
         let width = 100;
         let height = 100;
         let input = patterns::diagonal_gradient(width, height);
@@ -546,7 +501,7 @@ mod tests {
     }
 
     #[test]
-    fn test_warp_row_lanczos3_various_sizes() {
+    fn test_warp_row_lanczos3_scalar_various_sizes() {
         let height = 64;
         let input_base = patterns::diagonal_gradient(256, height);
 
@@ -585,7 +540,7 @@ mod tests {
     }
 
     #[test]
-    fn test_warp_row_lanczos3_fast_matches_scalar() {
+    fn test_warp_row_lanczos3_matches_scalar() {
         let width = 128;
         let height = 128;
         let input = patterns::diagonal_gradient(width, height);
@@ -603,14 +558,7 @@ mod tests {
                 let mut output_fast = vec![0.0f32; width];
                 let mut output_scalar = vec![0.0f32; width];
 
-                warp_row_lanczos3_fast(
-                    input.pixels(),
-                    width,
-                    height,
-                    &mut output_fast,
-                    y,
-                    &inverse,
-                );
+                warp_row_lanczos3(input.pixels(), width, height, &mut output_fast, y, &inverse);
                 warp_row_lanczos3_scalar(
                     input.pixels(),
                     width,
@@ -633,7 +581,7 @@ mod tests {
     }
 
     #[test]
-    fn test_warp_row_lanczos3_fast_various_sizes() {
+    fn test_warp_row_lanczos3_various_sizes() {
         let height = 64;
         let input_base = patterns::diagonal_gradient(256, height);
 
@@ -651,7 +599,7 @@ mod tests {
             let mut output_scalar = vec![0.0f32; width];
             let y = height / 2;
 
-            warp_row_lanczos3_fast(&input, width, height, &mut output_fast, y, &inverse);
+            warp_row_lanczos3(&input, width, height, &mut output_fast, y, &inverse);
             warp_row_lanczos3_scalar(&input, width, height, &mut output_scalar, y, &inverse);
 
             for x in 0..width {
@@ -660,35 +608,6 @@ mod tests {
                     "Width {width}, x={x}: fast {} vs scalar {}",
                     output_fast[x],
                     output_scalar[x]
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn test_warp_image_lanczos3() {
-        let width = 64;
-        let height = 64;
-        let input = patterns::diagonal_gradient(width, height);
-
-        let transform = Transform::identity();
-
-        let output = warp_image_lanczos3(input.pixels(), width, height, width, height, &transform);
-
-        assert_eq!(output.len(), width * height);
-
-        // Check interior pixels match input (within Lanczos tolerance)
-        for y in 5..height - 5 {
-            for x in 5..width - 5 {
-                let expected = input[(x, y)];
-                let actual = output[y * width + x];
-                assert!(
-                    (actual - expected).abs() < 0.02,
-                    "({}, {}): {} vs {}",
-                    x,
-                    y,
-                    actual,
-                    expected
                 );
             }
         }

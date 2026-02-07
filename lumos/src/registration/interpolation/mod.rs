@@ -1,7 +1,8 @@
 //! Image interpolation for sub-pixel resampling.
 //!
 //! Provides Lanczos, bicubic, bilinear, and nearest-neighbor interpolation.
-//! Bilinear uses SIMD acceleration (AVX2/SSE4.1 on x86_64, NEON on aarch64).
+//! Bilinear and Lanczos3 have optimized row-warping paths (AVX2/SSE4.1 on x86_64,
+//! scalar with incremental stepping on aarch64).
 
 use std::f32::consts::PI;
 use std::sync::OnceLock;
@@ -17,7 +18,7 @@ mod bench;
 #[cfg(test)]
 mod tests;
 
-pub mod simd;
+pub mod warp;
 
 // Lanczos LUT: 4096 samples/unit gives ~0.00024 precision.
 // Lanczos3 LUT: 4096 * 3 * 4 bytes = 48KB (fits in L1 cache).
@@ -95,18 +96,25 @@ pub(crate) fn bicubic_kernel(x: f32) -> f32 {
     }
 }
 
+/// Sample a pixel with bounds checking. Returns 0.0 for out-of-bounds coordinates.
 #[inline]
-fn sample_pixel(data: &Buffer2<f32>, x: i32, y: i32) -> f32 {
-    if x < 0 || y < 0 || x >= data.width() as i32 || y >= data.height() as i32 {
+pub(super) fn sample_pixel(data: &[f32], width: usize, height: usize, x: i32, y: i32) -> f32 {
+    if x < 0 || y < 0 || x >= width as i32 || y >= height as i32 {
         0.0
     } else {
-        data[y as usize * data.width() + x as usize]
+        data[y as usize * width + x as usize]
     }
 }
 
 #[inline]
 fn interpolate_nearest(data: &Buffer2<f32>, x: f32, y: f32) -> f32 {
-    sample_pixel(data, x.round() as i32, y.round() as i32)
+    sample_pixel(
+        data.pixels(),
+        data.width(),
+        data.height(),
+        x.round() as i32,
+        y.round() as i32,
+    )
 }
 
 #[inline]
@@ -116,10 +124,11 @@ fn interpolate_bilinear(data: &Buffer2<f32>, x: f32, y: f32) -> f32 {
     let fx = x - x0 as f32;
     let fy = y - y0 as f32;
 
-    let p00 = sample_pixel(data, x0, y0);
-    let p10 = sample_pixel(data, x0 + 1, y0);
-    let p01 = sample_pixel(data, x0, y0 + 1);
-    let p11 = sample_pixel(data, x0 + 1, y0 + 1);
+    let (pixels, w, h) = (data.pixels(), data.width(), data.height());
+    let p00 = sample_pixel(pixels, w, h, x0, y0);
+    let p10 = sample_pixel(pixels, w, h, x0 + 1, y0);
+    let p01 = sample_pixel(pixels, w, h, x0, y0 + 1);
+    let p11 = sample_pixel(pixels, w, h, x0 + 1, y0 + 1);
 
     let top = p00 + fx * (p10 - p00);
     let bottom = p01 + fx * (p11 - p01);
@@ -145,12 +154,13 @@ fn interpolate_bicubic(data: &Buffer2<f32>, x: f32, y: f32) -> f32 {
         bicubic_kernel(fy - 2.0),
     ];
 
+    let (pixels, w, h) = (data.pixels(), data.width(), data.height());
     let mut sum = 0.0;
     for (j, &wyj) in wy.iter().enumerate() {
         let py = y0 - 1 + j as i32;
         for (i, &wxi) in wx.iter().enumerate() {
             let px = x0 - 1 + i as i32;
-            sum += sample_pixel(data, px, py) * wxi * wyj;
+            sum += sample_pixel(pixels, w, h, px, py) * wxi * wyj;
         }
     }
     sum
@@ -204,13 +214,14 @@ fn interpolate_lanczos_impl<const A: usize, const SIZE: usize>(
         1.0
     };
 
+    let (pixels, w, h) = (data.pixels(), data.width(), data.height());
     let mut sum = 0.0f32;
     for (j, &wyj) in wy.iter().enumerate() {
         let py = y0 - a_i32 + 1 + j as i32;
         let wyj = wyj * inv_wy;
         for (i, &wxi) in wx.iter().enumerate() {
             let px = x0 - a_i32 + 1 + i as i32;
-            sum += sample_pixel(data, px, py) * wxi * inv_wx * wyj;
+            sum += sample_pixel(pixels, w, h, px, py) * wxi * inv_wx * wyj;
         }
     }
     sum
@@ -231,7 +242,8 @@ fn interpolate(data: &Buffer2<f32>, x: f32, y: f32, method: InterpolationMethod)
 /// Warp an image using a transformation matrix.
 ///
 /// Applies the inverse transform to map output coordinates to input coordinates,
-/// then interpolates. Parallelized with rayon. Bilinear uses SIMD when available.
+/// then interpolates. Parallelized with rayon. Bilinear and Lanczos3 use
+/// optimized row-warping paths.
 pub fn warp_image(
     input: &Buffer2<f32>,
     output: &mut Buffer2<f32>,
@@ -251,9 +263,9 @@ pub fn warp_image(
         .enumerate()
         .for_each(|(y, row)| {
             if method == InterpolationMethod::Bilinear {
-                simd::warp_row_bilinear_simd(input, width, height, row, y, &inverse);
+                warp::warp_row_bilinear(input.pixels(), width, height, row, y, &inverse);
             } else if method == InterpolationMethod::Lanczos3 {
-                simd::warp_row_lanczos3_fast(input.pixels(), width, height, row, y, &inverse);
+                warp::warp_row_lanczos3(input.pixels(), width, height, row, y, &inverse);
             } else {
                 for (x, pixel) in row.iter_mut().enumerate() {
                     let src = inverse.apply(glam::DVec2::new(x as f64, y as f64));

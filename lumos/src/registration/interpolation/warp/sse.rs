@@ -116,10 +116,10 @@ pub unsafe fn warp_row_bilinear_avx2(
                 let ix1 = x1_arr[i] as i32;
                 let iy1 = y1_arr[i] as i32;
 
-                p00[i] = sample_pixel_scalar(input, input_width, input_height, ix0, iy0);
-                p10[i] = sample_pixel_scalar(input, input_width, input_height, ix1, iy0);
-                p01[i] = sample_pixel_scalar(input, input_width, input_height, ix0, iy1);
-                p11[i] = sample_pixel_scalar(input, input_width, input_height, ix1, iy1);
+                p00[i] = sample_pixel(input, input_width, input_height, ix0, iy0);
+                p10[i] = sample_pixel(input, input_width, input_height, ix1, iy0);
+                p01[i] = sample_pixel(input, input_width, input_height, ix0, iy1);
+                p11[i] = sample_pixel(input, input_width, input_height, ix1, iy1);
             }
 
             let p00_vec = _mm256_loadu_ps(p00.as_ptr());
@@ -248,10 +248,10 @@ pub unsafe fn warp_row_bilinear_sse(
                 let ix1 = ix0 + 1;
                 let iy1 = iy0 + 1;
 
-                p00[i] = sample_pixel_scalar(input, input_width, input_height, ix0, iy0);
-                p10[i] = sample_pixel_scalar(input, input_width, input_height, ix1, iy0);
-                p01[i] = sample_pixel_scalar(input, input_width, input_height, ix0, iy1);
-                p11[i] = sample_pixel_scalar(input, input_width, input_height, ix1, iy1);
+                p00[i] = sample_pixel(input, input_width, input_height, ix0, iy0);
+                p10[i] = sample_pixel(input, input_width, input_height, ix1, iy0);
+                p01[i] = sample_pixel(input, input_width, input_height, ix0, iy1);
+                p11[i] = sample_pixel(input, input_width, input_height, ix1, iy1);
             }
 
             let p00_vec = _mm_loadu_ps(p00.as_ptr());
@@ -283,15 +283,7 @@ pub unsafe fn warp_row_bilinear_sse(
     }
 }
 
-/// Scalar pixel sampling with bounds checking.
-#[inline]
-fn sample_pixel_scalar(data: &[f32], width: usize, height: usize, x: i32, y: i32) -> f32 {
-    if x < 0 || y < 0 || x >= width as i32 || y >= height as i32 {
-        0.0
-    } else {
-        data[y as usize * width + x as usize]
-    }
-}
+use super::super::sample_pixel;
 
 #[cfg(test)]
 mod tests {
