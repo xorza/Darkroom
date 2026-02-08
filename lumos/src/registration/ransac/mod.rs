@@ -89,29 +89,29 @@ impl RngWrapper {
     }
 }
 
-impl rand::RngCore for RngWrapper {
-    fn next_u32(&mut self) -> u32 {
-        use rand_chacha::rand_core::Rng;
-        match self {
+impl rand::TryRng for RngWrapper {
+    type Error = core::convert::Infallible;
+
+    fn try_next_u32(&mut self) -> Result<u32, Self::Error> {
+        Ok(match self {
             RngWrapper::Seeded(rng) => rng.next_u32(),
-            RngWrapper::Thread(rng) => rand::RngCore::next_u32(rng),
-        }
+            RngWrapper::Thread(rng) => rng.next_u32(),
+        })
     }
 
-    fn next_u64(&mut self) -> u64 {
-        use rand_chacha::rand_core::Rng;
-        match self {
+    fn try_next_u64(&mut self) -> Result<u64, Self::Error> {
+        Ok(match self {
             RngWrapper::Seeded(rng) => rng.next_u64(),
-            RngWrapper::Thread(rng) => rand::RngCore::next_u64(rng),
-        }
+            RngWrapper::Thread(rng) => rng.next_u64(),
+        })
     }
 
-    fn fill_bytes(&mut self, dest: &mut [u8]) {
-        use rand_chacha::rand_core::Rng;
+    fn try_fill_bytes(&mut self, dest: &mut [u8]) -> Result<(), Self::Error> {
         match self {
             RngWrapper::Seeded(rng) => rng.fill_bytes(dest),
-            RngWrapper::Thread(rng) => rand::RngCore::fill_bytes(rng, dest),
+            RngWrapper::Thread(rng) => rng.fill_bytes(dest),
         }
+        Ok(())
     }
 }
 

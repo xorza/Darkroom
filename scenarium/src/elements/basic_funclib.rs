@@ -1,5 +1,5 @@
 use common::Shared;
-use rand::{Rng, SeedableRng};
+use rand::{RngExt, SeedableRng};
 use strum::IntoEnumIterator;
 use strum_macros::{Display, EnumIter};
 use tracing::info;
@@ -259,7 +259,8 @@ impl Default for BasicFuncLib {
                 assert_eq!(inputs.len(), 2);
                 assert_eq!(outputs.len(), 1);
 
-                let rng = cache.get_or_default_with(rand::rngs::StdRng::from_os_rng);
+                let rng =
+                    cache.get_or_default_with(|| rand::rngs::StdRng::from_rng(&mut rand::rng()));
 
                 let min: f64 = inputs[0].value.as_f64().unwrap();
                 let max: f64 = inputs[1].value.as_f64().unwrap();
