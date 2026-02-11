@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 pub mod common;
 pub mod context;
 pub mod data;

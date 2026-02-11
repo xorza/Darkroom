@@ -173,7 +173,7 @@ impl LuaInvoker {
         let mut function_info = Func {
             id: FuncId::from_str(&id_str)?,
             name,
-            category: "".to_string(),
+            category: String::new(),
             description: None,
             behavior: FuncBehavior::Impure,
             terminal: false,

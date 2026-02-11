@@ -442,7 +442,7 @@ impl Default for BasicFuncLib {
             required_contexts: vec![],
             lambda: async_lambda!(move |_, _, _, inputs, _, outputs| {
                 assert_eq!(inputs.len(), 2);
-                assert_eq!(outputs.len(), 1);
+                assert_eq!(outputs.len(), 2);
 
                 let a: f64 = inputs[0].value.as_f64().unwrap();
                 let b: f64 = inputs[1].value.as_f64().unwrap();

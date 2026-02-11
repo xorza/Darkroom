@@ -232,58 +232,6 @@ impl std::fmt::Debug for DynamicValue {
     }
 }
 
-impl StaticValue {
-    pub fn as_float(&self) -> f64 {
-        match self {
-            StaticValue::Float(value) => *value,
-            _ => {
-                panic!("Value is not a float")
-            }
-        }
-    }
-
-    pub fn as_int(&self) -> i64 {
-        match self {
-            StaticValue::Int(value) => *value,
-            _ => {
-                panic!("Value is not an int")
-            }
-        }
-    }
-
-    pub fn as_bool(&self) -> bool {
-        match self {
-            StaticValue::Bool(value) => *value,
-            _ => {
-                panic!("Value is not a bool")
-            }
-        }
-    }
-
-    pub fn as_string(&self) -> &str {
-        match self {
-            StaticValue::String(value) => value,
-            _ => {
-                panic!("Value is not a string")
-            }
-        }
-    }
-
-    pub fn as_enum(&self) -> &str {
-        match self {
-            StaticValue::Enum { variant_name, .. } => variant_name,
-            _ => panic!("Value is not an enum"),
-        }
-    }
-
-    pub fn as_fs_path(&self) -> &str {
-        match self {
-            StaticValue::FsPath(value) => value,
-            _ => panic!("Value is not a path"),
-        }
-    }
-}
-
 impl DynamicValue {
     pub fn from_custom<T: CustomValue + 'static>(value: T) -> Self {
         let DataType::Custom(type_def) = &value.data_type() else {
@@ -458,8 +406,8 @@ impl From<&DataType> for StaticValue {
             DataType::Float => StaticValue::Float(0.0),
             DataType::Int => StaticValue::Int(0),
             DataType::Bool => StaticValue::Bool(false),
-            DataType::String => StaticValue::String("".to_string()),
-            DataType::FsPath(_) => StaticValue::FsPath("".to_string()),
+            DataType::String => StaticValue::String(String::new()),
+            DataType::FsPath(_) => StaticValue::FsPath(String::new()),
             DataType::Enum(enum_def) => StaticValue::Enum {
                 type_id: enum_def.type_id,
                 variant_name: enum_def.variants[0].clone(),
