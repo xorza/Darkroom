@@ -162,8 +162,7 @@ impl NodeUi {
             render_port_labels(gui, layout);
         }
 
-        // Process node removals (const_bind_frame is dropped here)
-        drop(const_bind_frame);
+        const_bind_frame.finish();
         for node_id in self.node_ids_to_remove.drain(..) {
             let action = ctx.view_graph.removal_action(&node_id);
             ctx.view_graph.remove_node(&node_id);

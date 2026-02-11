@@ -172,8 +172,9 @@ impl<'a> ConstBindFrame<'a> {
     }
 }
 
-impl Drop for ConstBindFrame<'_> {
-    fn drop(&mut self) {
+impl ConstBindFrame<'_> {
+    /// Commits the hovered_link state back to ConstBindUi.
+    pub fn finish(mut self) {
         *self.prev_hovered_connection = self.currently_hovered_connection.take();
     }
 }

@@ -77,8 +77,9 @@ impl NewNodeUi {
         }
 
         // Capture interaction for the background
-        gui.ui.interact(
-            gui.rect,
+        let rect = gui.rect;
+        gui.ui().interact(
+            rect,
             Id::new("temp background for new node ui"),
             Sense::all(),
         );
