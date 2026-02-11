@@ -115,11 +115,13 @@ impl GraphUi {
         gui.new_child(UiBuilder::new().id_salt("graph_ui").max_rect(rect), |gui| {
             gui.ui().set_clip_rect(rect);
 
-            let mut ctx = GraphContext::new(
-                &app_data.func_lib,
-                &mut app_data.view_graph,
-                app_data.execution_stats.as_ref(),
-            );
+            let mut ctx = GraphContext {
+                func_lib: &app_data.func_lib,
+                view_graph: &mut app_data.view_graph,
+                execution_stats: app_data.execution_stats.as_ref(),
+                autorun: app_data.autorun,
+                argument_values_cache: &mut app_data.argument_values_cache,
+            };
 
             let (background_response, pointer_pos) = self.setup_background_interaction(gui, rect);
 
@@ -155,17 +157,10 @@ impl GraphUi {
             // Phase 2: Overlays (buttons, details panel, new-node popup)
             gui.set_scale(1.0);
 
-            let mut overlay_hovered = self
-                .render_buttons(gui, &mut ctx, app_data.autorun)
-                .hovered();
+            let mut overlay_hovered = self.render_buttons(gui, &mut ctx).hovered();
             overlay_hovered |= self
                 .node_details_ui
-                .show(
-                    gui,
-                    &mut ctx,
-                    &mut self.ui_interaction,
-                    &mut app_data.argument_values_cache,
-                )
+                .show(gui, &mut ctx, &mut self.ui_interaction)
                 .hovered();
             overlay_hovered |=
                 self.handle_new_node_popup(gui, &mut ctx, pointer_pos, &background_response, arena);
@@ -477,12 +472,8 @@ impl GraphUi {
         }
     }
 
-    fn render_buttons(
-        &mut self,
-        gui: &mut Gui<'_>,
-        ctx: &mut GraphContext,
-        mut autorun: bool,
-    ) -> Response {
+    fn render_buttons(&mut self, gui: &mut Gui<'_>, ctx: &mut GraphContext) -> Response {
+        let mut autorun = ctx.autorun;
         let rect = gui.rect;
         let mut fit_all = false;
         let mut view_selected = false;

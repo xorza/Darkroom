@@ -13,7 +13,6 @@ use crate::gui::Gui;
 use crate::gui::graph_ctx::GraphContext;
 use crate::gui::graph_ui_interaction::GraphUiInteraction;
 use crate::gui::node_ui::NodeExecutionInfo;
-use crate::model::ArgumentValuesCache;
 use crate::model::argument_values_cache::{CachedTexture, NodeCache};
 use crate::model::graph_ui_action::GraphUiAction;
 
@@ -29,7 +28,6 @@ impl NodeDetailsUi {
         gui: &mut Gui<'_>,
         ctx: &mut GraphContext<'_>,
         interaction: &mut GraphUiInteraction,
-        argument_values_cache: &mut ArgumentValuesCache,
     ) -> Response {
         let panel_rect = self.compute_panel_rect(gui);
         let popup_id = gui.ui().make_persistent_id("node_details_panel");
@@ -49,13 +47,7 @@ impl NodeDetailsUi {
                     .sense(Sense::all())
                     .show(gui, |gui| {
                         ScrollArea::vertical().id(scroll_id).show(gui, |gui| {
-                            self.show_content(
-                                gui,
-                                ctx,
-                                node_id,
-                                interaction,
-                                argument_values_cache,
-                            );
+                            self.show_content(gui, ctx, node_id, interaction);
                         });
                     })
             })
@@ -78,7 +70,6 @@ impl NodeDetailsUi {
         ctx: &mut GraphContext<'_>,
         node_id: NodeId,
         interaction: &mut GraphUiInteraction,
-        argument_values_cache: &mut ArgumentValuesCache,
     ) {
         self.show_name_editor(gui, ctx, node_id, interaction);
 
@@ -86,7 +77,7 @@ impl NodeDetailsUi {
             show_execution_info(gui, ctx, node_id, stats);
         }
 
-        let Some(node_cache) = argument_values_cache.get_mut(&node_id) else {
+        let Some(node_cache) = ctx.argument_values_cache.get_mut(&node_id) else {
             interaction.request_argument_values = Some(node_id);
             return;
         };
