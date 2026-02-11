@@ -3,6 +3,7 @@ use std::rc::Rc;
 use eframe::egui;
 use egui::{Color32, FontFamily, FontId, Shadow, Stroke, Vec2};
 
+use crate::common::UiEquals;
 use crate::gui::connection_ui::PortKind;
 use crate::gui::style_settings::StyleSettings;
 
@@ -18,7 +19,7 @@ pub fn brighten(color: Color32, amount: f32) -> Color32 {
 #[derive(Debug, Clone)]
 pub struct Style {
     style_settings: Rc<StyleSettings>,
-    scale: f32,
+    pub(crate) scale: f32,
 
     pub heading_font: FontId,
     pub body_font: FontId,
@@ -322,6 +323,9 @@ impl Style {
     }
 
     pub fn set_scale(&mut self, scale: f32) {
+        if self.scale.ui_equals(scale) {
+            return;
+        }
         *self = Self::new(Rc::clone(&self.style_settings), scale);
     }
 

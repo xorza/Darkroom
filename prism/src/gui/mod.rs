@@ -71,12 +71,12 @@ impl<'a> Gui<'a> {
         assert!(scale.is_finite(), "gui scale must be finite");
         assert!(scale > 0.0, "gui scale must be greater than 0");
 
-        if self.scale.ui_equals(scale) {
-            self.scale = scale;
+        self.scale = scale;
+
+        if self.style.scale.ui_equals(scale) {
             return;
         }
 
-        self.scale = scale;
         Rc::make_mut(&mut self.style).set_scale(scale);
     }
 

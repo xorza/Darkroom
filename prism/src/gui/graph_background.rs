@@ -41,44 +41,18 @@ impl GraphBackgroundRenderer {
     }
 
     fn wrap_scale_multiplier(view_scale: f32, min: f32, max: f32) -> f32 {
-        assert!(view_scale.is_finite());
-        assert!(view_scale > common::EPSILON);
-        assert!(min.is_finite());
-        assert!(max.is_finite());
-        assert!(min > common::EPSILON);
-        assert!(max > min);
+        assert!(view_scale.is_finite() && view_scale > common::EPSILON);
+        assert!(min.is_finite() && min > common::EPSILON);
+        assert!(max.is_finite() && max > min);
 
         let ratio_min = (min as f64) / (view_scale as f64);
         let ratio_max = (max as f64) / (view_scale as f64);
-        assert!(ratio_min.is_finite(), "min/view_scale must be finite");
-        assert!(ratio_max.is_finite(), "max/view_scale must be finite");
 
-        let k_low = ratio_min.log2().ceil();
-        let k_high = ratio_max.log2().floor();
-        assert!(k_low.is_finite(), "k_low must be finite");
-        assert!(k_high.is_finite(), "k_high must be finite");
+        let k_low = ratio_min.log2().ceil() as i32;
+        let k_high = ratio_max.log2().floor() as i32;
+        let k = 0_i32.clamp(k_low, k_high);
 
-        assert!(
-            k_low <= k_high,
-            "no power-of-two multiplier can satisfy bounds; view_scale={view_scale} min={min} max={max} k_low={k_low} k_high={k_high}"
-        );
-
-        let k_low_i32 = k_low as i32;
-        let k_high_i32 = k_high as i32;
-        let k = 0_i32.clamp(k_low_i32, k_high_i32);
-        assert!(
-            (-64..=64).contains(&k),
-            "scale normalization must converge within 64 steps; view_scale={view_scale} min={min} max={max} k={k} k_low={k_low_i32} k_high={k_high_i32}"
-        );
-        let multiplier = 2.0_f32.powi(k);
-        let normalized = view_scale * multiplier;
-
-        assert!(
-            normalized >= min && normalized <= max,
-            "scale normalization must converge; view_scale={view_scale} min={min} max={max} normalized={normalized} k={k}"
-        );
-
-        multiplier
+        2.0_f32.powi(k)
     }
 
     fn rebuild_texture(&mut self, gui: &mut Gui<'_>, _ctx: &GraphContext<'_>) {
@@ -159,5 +133,41 @@ impl GraphBackgroundRenderer {
 
         gui.painter()
             .add(Shape::mesh(Arc::clone(self.quad_mesh.as_ref().unwrap())));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn wrap_scale_multiplier_identity_at_scale_1() {
+        let m = GraphBackgroundRenderer::wrap_scale_multiplier(1.0, 0.5, 3.0);
+        assert_eq!(m, 1.0);
+    }
+
+    #[test]
+    fn wrap_scale_multiplier_result_in_bounds() {
+        let min = 0.5;
+        let max = 3.0;
+        for &scale in &[0.2, 0.25, 0.5, 0.75, 1.0, 1.5, 2.0, 3.0, 4.0] {
+            let m = GraphBackgroundRenderer::wrap_scale_multiplier(scale, min, max);
+            let normalized = scale * m;
+            assert!(
+                normalized >= min && normalized <= max,
+                "scale={scale} m={m} normalized={normalized}"
+            );
+        }
+    }
+
+    #[test]
+    fn wrap_scale_multiplier_is_power_of_two() {
+        for &scale in &[0.2, 0.5, 1.0, 2.0, 4.0] {
+            let m = GraphBackgroundRenderer::wrap_scale_multiplier(scale, 0.5, 3.0);
+            assert!(
+                m.log2().fract().abs() < f32::EPSILON,
+                "m={m} not power of 2"
+            );
+        }
     }
 }

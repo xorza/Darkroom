@@ -130,7 +130,7 @@ impl NodeUi {
 
         for view_node_idx in 0..ctx.view_graph.view_nodes.len() {
             let node_id = ctx.view_graph.view_nodes[view_node_idx].id;
-            let layout = handle_node_drag(gui, ctx, graph_layout, interaction, &node_id);
+            let layout = Self::handle_node_drag(gui, ctx, graph_layout, interaction, &node_id);
 
             let node = ctx.view_graph.graph.by_id_mut(&node_id).unwrap();
             let func = ctx.func_lib.by_id(&node.func_id).unwrap();
@@ -171,66 +171,62 @@ impl NodeUi {
 
         port_cmd
     }
-}
 
-// ============================================================================
-// Node dragging
-// ============================================================================
+    fn handle_node_drag<'a>(
+        gui: &mut Gui<'_>,
+        ctx: &mut GraphContext<'_>,
+        graph_layout: &'a mut GraphLayout,
+        interaction: &mut GraphUiInteraction,
+        node_id: &NodeId,
+    ) -> &'a NodeLayout {
+        let layout = graph_layout.node_layouts.by_key_mut(node_id).unwrap();
 
-fn handle_node_drag<'a>(
-    gui: &mut Gui<'_>,
-    ctx: &mut GraphContext<'_>,
-    graph_layout: &'a mut GraphLayout,
-    interaction: &mut GraphUiInteraction,
-    node_id: &NodeId,
-) -> &'a NodeLayout {
-    let layout = graph_layout.node_layouts.by_key_mut(node_id).unwrap();
+        let body_id = gui.ui().make_persistent_id(NodeIds::body(*node_id));
+        let response = gui.ui().interact(
+            layout.body_rect,
+            body_id,
+            Sense::click() | Sense::hover() | Sense::drag(),
+        );
 
-    let body_id = gui.ui().make_persistent_id(NodeIds::body(*node_id));
-    let response = gui.ui().interact(
-        layout.body_rect,
-        body_id,
-        Sense::click() | Sense::hover() | Sense::drag(),
-    );
+        let dragged = response.dragged_by(PointerButton::Middle)
+            || response.dragged_by(PointerButton::Primary);
 
-    let dragged =
-        response.dragged_by(PointerButton::Middle) || response.dragged_by(PointerButton::Primary);
-
-    // Handle selection
-    if (dragged || response.clicked()) && ctx.view_graph.selected_node_id != Some(*node_id) {
-        let before = ctx.view_graph.selected_node_id;
-        ctx.view_graph.selected_node_id = Some(*node_id);
-        interaction.add_action(GraphUiAction::NodeSelected {
-            before,
-            after: Some(*node_id),
-        });
-    }
-
-    // Handle drag with DragState
-    let drag_id = gui.ui().make_persistent_id(NodeIds::drag_start(*node_id));
-    let drag_state = DragState::<Pos2>::new(drag_id);
-    let current_pos = ctx.view_graph.view_nodes.by_key(node_id).unwrap().pos;
-
-    match drag_state.update(gui.ui(), &response, current_pos) {
-        DragResult::Started | DragResult::Dragging => {
-            if dragged {
-                ctx.view_graph.view_nodes.by_key_mut(node_id).unwrap().pos +=
-                    response.drag_delta() / gui.scale();
-                layout.update(ctx, gui, graph_layout.origin);
-            }
-        }
-        DragResult::Stopped { start_value } => {
-            let end_pos = ctx.view_graph.view_nodes.by_key(node_id).unwrap().pos;
-            interaction.add_action(GraphUiAction::NodeMoved {
-                node_id: *node_id,
-                before: start_value,
-                after: end_pos,
+        // Handle selection
+        if (dragged || response.clicked()) && ctx.view_graph.selected_node_id != Some(*node_id) {
+            let before = ctx.view_graph.selected_node_id;
+            ctx.view_graph.selected_node_id = Some(*node_id);
+            interaction.add_action(GraphUiAction::NodeSelected {
+                before,
+                after: Some(*node_id),
             });
         }
-        DragResult::Idle => {}
-    }
 
-    layout
+        // Handle drag with DragState
+        let drag_id = gui.ui().make_persistent_id(NodeIds::drag_start(*node_id));
+        let drag_state = DragState::<Pos2>::new(drag_id);
+        let current_pos = ctx.view_graph.view_nodes.by_key(node_id).unwrap().pos;
+
+        match drag_state.update(gui.ui(), &response, current_pos) {
+            DragResult::Started | DragResult::Dragging => {
+                if dragged {
+                    ctx.view_graph.view_nodes.by_key_mut(node_id).unwrap().pos +=
+                        response.drag_delta() / gui.scale();
+                    layout.update(ctx, gui, graph_layout.origin);
+                }
+            }
+            DragResult::Stopped { start_value } => {
+                let end_pos = ctx.view_graph.view_nodes.by_key(node_id).unwrap().pos;
+                interaction.add_action(GraphUiAction::NodeMoved {
+                    node_id: *node_id,
+                    before: start_value,
+                    after: end_pos,
+                });
+            }
+            DragResult::Idle => {}
+        }
+
+        layout
+    }
 }
 
 // ============================================================================
