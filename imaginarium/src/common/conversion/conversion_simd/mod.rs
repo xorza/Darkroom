@@ -31,10 +31,7 @@ cfg_aarch64! {
 #[cfg(test)]
 mod tests;
 
-// Rec. 709 luminance weights scaled to fixed-point (shift by 16)
-const LUMA_R: u32 = 13933;
-const LUMA_G: u32 = 46871;
-const LUMA_B: u32 = 4732;
+use super::{LUMA_B, LUMA_G, LUMA_R};
 
 /// Row conversion function type
 pub(crate) type RowConvertFn = fn(src: &[u8], dst: &mut [u8], width: usize);
@@ -203,11 +200,7 @@ fn convert_rgba_u8_to_rgb_u8_row(src: &[u8], dst: &mut [u8], width: usize) {
 fn convert_rgb_u8_to_rgba_u8_row(src: &[u8], dst: &mut [u8], width: usize) {
     cfg_x86_64! {
         unsafe fn impl_x86_64(src: &[u8], dst: &mut [u8], width: usize) {
-            if cpu_features::has_avx2() {
-                avx::convert_rgb_to_rgba_row_avx2(src, dst, width);
-            } else {
-                sse::convert_rgb_to_rgba_row_ssse3(src, dst, width);
-            }
+            sse::convert_rgb_to_rgba_row_ssse3(src, dst, width);
         }
     }
     cfg_aarch64! {
@@ -229,11 +222,7 @@ fn convert_rgb_u8_to_rgba_u8_row(src: &[u8], dst: &mut [u8], width: usize) {
 fn convert_rgba_u8_to_l_u8_row(src: &[u8], dst: &mut [u8], width: usize) {
     cfg_x86_64! {
         unsafe fn impl_x86_64(src: &[u8], dst: &mut [u8], width: usize) {
-            if cpu_features::has_avx2() {
-                avx::convert_rgba_to_l_row_avx2(src, dst, width);
-            } else {
-                sse::convert_rgba_to_l_row_ssse3(src, dst, width);
-            }
+            sse::convert_rgba_to_l_row_ssse3(src, dst, width);
         }
     }
     cfg_aarch64! {
@@ -255,11 +244,7 @@ fn convert_rgba_u8_to_l_u8_row(src: &[u8], dst: &mut [u8], width: usize) {
 fn convert_rgb_u8_to_l_u8_row(src: &[u8], dst: &mut [u8], width: usize) {
     cfg_x86_64! {
         unsafe fn impl_x86_64(src: &[u8], dst: &mut [u8], width: usize) {
-            if cpu_features::has_avx2() {
-                avx::convert_rgb_to_l_row_avx2(src, dst, width);
-            } else {
-                sse::convert_rgb_to_l_row_ssse3(src, dst, width);
-            }
+            sse::convert_rgb_to_l_row_ssse3(src, dst, width);
         }
     }
     cfg_aarch64! {
@@ -281,11 +266,7 @@ fn convert_rgb_u8_to_l_u8_row(src: &[u8], dst: &mut [u8], width: usize) {
 fn convert_l_u8_to_rgba_u8_row(src: &[u8], dst: &mut [u8], width: usize) {
     cfg_x86_64! {
         unsafe fn impl_x86_64(src: &[u8], dst: &mut [u8], width: usize) {
-            if cpu_features::has_avx2() {
-                avx::convert_l_to_rgba_row_avx2(src, dst, width);
-            } else {
-                sse::convert_l_to_rgba_row_ssse3(src, dst, width);
-            }
+            sse::convert_l_to_rgba_row_ssse3(src, dst, width);
         }
     }
     cfg_aarch64! {
@@ -307,11 +288,7 @@ fn convert_l_u8_to_rgba_u8_row(src: &[u8], dst: &mut [u8], width: usize) {
 fn convert_l_u8_to_rgb_u8_row(src: &[u8], dst: &mut [u8], width: usize) {
     cfg_x86_64! {
         unsafe fn impl_x86_64(src: &[u8], dst: &mut [u8], width: usize) {
-            if cpu_features::has_avx2() {
-                avx::convert_l_to_rgb_row_avx2(src, dst, width);
-            } else {
-                sse::convert_l_to_rgb_row_ssse3(src, dst, width);
-            }
+            sse::convert_l_to_rgb_row_ssse3(src, dst, width);
         }
     }
     cfg_aarch64! {
@@ -333,11 +310,7 @@ fn convert_l_u8_to_rgb_u8_row(src: &[u8], dst: &mut [u8], width: usize) {
 fn convert_la_u8_to_rgba_u8_row(src: &[u8], dst: &mut [u8], width: usize) {
     cfg_x86_64! {
         unsafe fn impl_x86_64(src: &[u8], dst: &mut [u8], width: usize) {
-            if cpu_features::has_avx2() {
-                avx::convert_la_to_rgba_row_avx2(src, dst, width);
-            } else {
-                sse::convert_la_to_rgba_row_ssse3(src, dst, width);
-            }
+            sse::convert_la_to_rgba_row_ssse3(src, dst, width);
         }
     }
     cfg_aarch64! {
@@ -359,11 +332,7 @@ fn convert_la_u8_to_rgba_u8_row(src: &[u8], dst: &mut [u8], width: usize) {
 fn convert_rgba_u8_to_la_u8_row(src: &[u8], dst: &mut [u8], width: usize) {
     cfg_x86_64! {
         unsafe fn impl_x86_64(src: &[u8], dst: &mut [u8], width: usize) {
-            if cpu_features::has_avx2() {
-                avx::convert_rgba_to_la_row_avx2(src, dst, width);
-            } else {
-                sse::convert_rgba_to_la_row_ssse3(src, dst, width);
-            }
+            sse::convert_rgba_to_la_row_ssse3(src, dst, width);
         }
     }
     cfg_aarch64! {

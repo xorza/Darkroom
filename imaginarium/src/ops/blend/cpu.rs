@@ -8,8 +8,32 @@ use crate::prelude::*;
 
 /// Applies blending of two images using CPU.
 pub(super) fn apply(params: &Blend, src: &Image, dst: &Image, output: &mut Image) {
-    assert_eq!(src.desc(), dst.desc(), "src/dst desc mismatch");
-    assert_eq!(src.desc(), output.desc(), "src/output desc mismatch");
+    assert_eq!(src.desc().width, dst.desc().width, "src/dst width mismatch");
+    assert_eq!(
+        src.desc().height,
+        dst.desc().height,
+        "src/dst height mismatch"
+    );
+    assert_eq!(
+        src.desc().color_format,
+        dst.desc().color_format,
+        "src/dst format mismatch"
+    );
+    assert_eq!(
+        src.desc().width,
+        output.desc().width,
+        "src/output width mismatch"
+    );
+    assert_eq!(
+        src.desc().height,
+        output.desc().height,
+        "src/output height mismatch"
+    );
+    assert_eq!(
+        src.desc().color_format,
+        output.desc().color_format,
+        "src/output format mismatch"
+    );
 
     let channel_size = src.desc().color_format.channel_size;
     let channel_type = src.desc().color_format.channel_type;

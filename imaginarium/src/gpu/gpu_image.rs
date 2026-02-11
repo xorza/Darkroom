@@ -110,9 +110,19 @@ impl GpuImage {
         ctx.queue().submit(std::iter::once(encoder.finish()));
 
         let buffer_slice = staging_buffer.slice(..);
-        buffer_slice.map_async(wgpu::MapMode::Read, |_| {});
+        let slot = Slot::<std::result::Result<(), BufferAsyncError>>::default();
+        buffer_slice.map_async(wgpu::MapMode::Read, {
+            let slot = slot.clone();
+            move |result| {
+                slot.send(result);
+            }
+        });
 
         ctx.wait();
+
+        slot.take()
+            .expect("map_async callback not invoked after device.poll")
+            .map_err(|err| Error::Gpu(err.to_string()))?;
 
         let data = buffer_slice.get_mapped_range();
         let bytes = data.to_vec();

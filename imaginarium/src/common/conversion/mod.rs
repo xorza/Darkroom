@@ -1,6 +1,15 @@
 pub(crate) mod conversion_scalar;
 pub(crate) mod conversion_simd;
 
+// Rec. 709 (sRGB) luminance weights scaled to fixed-point for integer math
+// R: 0.2126 * 65536 = 13933
+// G: 0.7152 * 65536 = 46871
+// B: 0.0722 * 65536 = 4732
+// Total: 65536 (allows shift by 16 instead of divide)
+pub(crate) const LUMA_R: u32 = 13933;
+pub(crate) const LUMA_G: u32 = 46871;
+pub(crate) const LUMA_B: u32 = 4732;
+
 #[cfg(test)]
 mod bench;
 #[cfg(test)]

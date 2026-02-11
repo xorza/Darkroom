@@ -1,11 +1,10 @@
 //! AVX2 specific tests for x86_64
 //!
-//! These tests verify the AVX2 implementations and compare against SSE results
-//! to ensure consistency between different SIMD paths.
+//! These tests verify the genuine AVX2 implementations (wider registers)
+//! and compare against SSE results to ensure consistency.
 
 use super::{
-    TEST_WIDTHS, create_test_row_f32, create_test_row_u8, create_test_row_u16, expected_luminance,
-    within_tolerance,
+    TEST_WIDTHS, create_test_row_f32, create_test_row_u8, create_test_row_u16, within_tolerance,
 };
 use crate::common::conversion::conversion_simd::{avx, sse};
 use common::cpu_features;
@@ -17,7 +16,7 @@ use common::cpu_features;
 #[test]
 fn test_avx_rgba_to_rgb_various_widths() {
     if !cpu_features::has_avx2() {
-        return; // Skip if AVX2 not available
+        return;
     }
 
     for &width in &TEST_WIDTHS {
@@ -28,7 +27,6 @@ fn test_avx_rgba_to_rgb_various_widths() {
             avx::convert_rgba_to_rgb_row_avx2(&src, &mut dst, width);
         }
 
-        // Verify each pixel
         for x in 0..width {
             assert_eq!(
                 dst[x * 3],
@@ -76,232 +74,6 @@ fn test_avx_rgba_to_rgb_matches_sse() {
             "AVX2 and SSSE3 results differ at width={}",
             width
         );
-    }
-}
-
-// =============================================================================
-// AVX2 RGB -> RGBA tests (falls back to SSSE3)
-// =============================================================================
-
-#[test]
-fn test_avx_rgb_to_rgba_various_widths() {
-    if !cpu_features::has_avx2() {
-        return;
-    }
-
-    for &width in &TEST_WIDTHS {
-        let src = create_test_row_u8(width, 3);
-        let mut dst = vec![0u8; width * 4];
-
-        unsafe {
-            avx::convert_rgb_to_rgba_row_avx2(&src, &mut dst, width);
-        }
-
-        for x in 0..width {
-            assert_eq!(
-                dst[x * 4],
-                src[x * 3],
-                "R mismatch at x={} width={}",
-                x,
-                width
-            );
-            assert_eq!(
-                dst[x * 4 + 1],
-                src[x * 3 + 1],
-                "G mismatch at x={} width={}",
-                x,
-                width
-            );
-            assert_eq!(
-                dst[x * 4 + 2],
-                src[x * 3 + 2],
-                "B mismatch at x={} width={}",
-                x,
-                width
-            );
-            assert_eq!(dst[x * 4 + 3], 255, "Alpha should be 255 at x={}", x);
-        }
-    }
-}
-
-// =============================================================================
-// AVX2 Luminance tests (fall back to SSSE3)
-// =============================================================================
-
-#[test]
-fn test_avx_rgba_to_l_various_widths() {
-    if !cpu_features::has_avx2() {
-        return;
-    }
-
-    for &width in &TEST_WIDTHS {
-        let src = create_test_row_u8(width, 4);
-        let mut dst = vec![0u8; width];
-
-        unsafe {
-            avx::convert_rgba_to_l_row_avx2(&src, &mut dst, width);
-        }
-
-        for x in 0..width {
-            let r = src[x * 4];
-            let g = src[x * 4 + 1];
-            let b = src[x * 4 + 2];
-            let expected = expected_luminance(r, g, b);
-
-            assert!(
-                within_tolerance(dst[x], expected, 1),
-                "Luminance mismatch at x={} width={}: expected {}, got {}",
-                x,
-                width,
-                expected,
-                dst[x]
-            );
-        }
-    }
-}
-
-#[test]
-fn test_avx_rgb_to_l_various_widths() {
-    if !cpu_features::has_avx2() {
-        return;
-    }
-
-    for &width in &TEST_WIDTHS {
-        let src = create_test_row_u8(width, 3);
-        let mut dst = vec![0u8; width];
-
-        unsafe {
-            avx::convert_rgb_to_l_row_avx2(&src, &mut dst, width);
-        }
-
-        for x in 0..width {
-            let r = src[x * 3];
-            let g = src[x * 3 + 1];
-            let b = src[x * 3 + 2];
-            let expected = expected_luminance(r, g, b);
-
-            assert!(
-                within_tolerance(dst[x], expected, 1),
-                "Luminance mismatch at x={} width={}: expected {}, got {}",
-                x,
-                width,
-                expected,
-                dst[x]
-            );
-        }
-    }
-}
-
-// =============================================================================
-// AVX2 L -> RGB/RGBA expansion tests
-// =============================================================================
-
-#[test]
-fn test_avx_l_to_rgba_various_widths() {
-    if !cpu_features::has_avx2() {
-        return;
-    }
-
-    for &width in &TEST_WIDTHS {
-        let src: Vec<u8> = (0..width).map(|i| (i % 256) as u8).collect();
-        let mut dst = vec![0u8; width * 4];
-
-        unsafe {
-            avx::convert_l_to_rgba_row_avx2(&src, &mut dst, width);
-        }
-
-        for x in 0..width {
-            let l = src[x];
-            assert_eq!(dst[x * 4], l, "R should equal L at x={}", x);
-            assert_eq!(dst[x * 4 + 1], l, "G should equal L at x={}", x);
-            assert_eq!(dst[x * 4 + 2], l, "B should equal L at x={}", x);
-            assert_eq!(dst[x * 4 + 3], 255, "Alpha should be 255 at x={}", x);
-        }
-    }
-}
-
-#[test]
-fn test_avx_l_to_rgb_various_widths() {
-    if !cpu_features::has_avx2() {
-        return;
-    }
-
-    for &width in &TEST_WIDTHS {
-        let src: Vec<u8> = (0..width).map(|i| (i % 256) as u8).collect();
-        let mut dst = vec![0u8; width * 3];
-
-        unsafe {
-            avx::convert_l_to_rgb_row_avx2(&src, &mut dst, width);
-        }
-
-        for x in 0..width {
-            let l = src[x];
-            assert_eq!(dst[x * 3], l, "R should equal L at x={}", x);
-            assert_eq!(dst[x * 3 + 1], l, "G should equal L at x={}", x);
-            assert_eq!(dst[x * 3 + 2], l, "B should equal L at x={}", x);
-        }
-    }
-}
-
-// =============================================================================
-// AVX2 LA <-> RGBA tests
-// =============================================================================
-
-#[test]
-fn test_avx_la_to_rgba_various_widths() {
-    if !cpu_features::has_avx2() {
-        return;
-    }
-
-    for &width in &TEST_WIDTHS {
-        let src = create_test_row_u8(width, 2);
-        let mut dst = vec![0u8; width * 4];
-
-        unsafe {
-            avx::convert_la_to_rgba_row_avx2(&src, &mut dst, width);
-        }
-
-        for x in 0..width {
-            let l = src[x * 2];
-            let a = src[x * 2 + 1];
-            assert_eq!(dst[x * 4], l, "R should equal L at x={}", x);
-            assert_eq!(dst[x * 4 + 1], l, "G should equal L at x={}", x);
-            assert_eq!(dst[x * 4 + 2], l, "B should equal L at x={}", x);
-            assert_eq!(dst[x * 4 + 3], a, "Alpha should be preserved at x={}", x);
-        }
-    }
-}
-
-#[test]
-fn test_avx_rgba_to_la_various_widths() {
-    if !cpu_features::has_avx2() {
-        return;
-    }
-
-    for &width in &TEST_WIDTHS {
-        let src = create_test_row_u8(width, 4);
-        let mut dst = vec![0u8; width * 2];
-
-        unsafe {
-            avx::convert_rgba_to_la_row_avx2(&src, &mut dst, width);
-        }
-
-        for x in 0..width {
-            let r = src[x * 4];
-            let g = src[x * 4 + 1];
-            let b = src[x * 4 + 2];
-            let a = src[x * 4 + 3];
-            let expected_l = expected_luminance(r, g, b);
-
-            assert!(
-                within_tolerance(dst[x * 2], expected_l, 1),
-                "L mismatch at x={}: expected {}, got {}",
-                x,
-                expected_l,
-                dst[x * 2]
-            );
-            assert_eq!(dst[x * 2 + 1], a, "Alpha should be preserved at x={}", x);
-        }
     }
 }
 

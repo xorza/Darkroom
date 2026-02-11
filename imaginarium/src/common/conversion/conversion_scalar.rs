@@ -114,14 +114,7 @@ impl_convert_float_to_int!(f32, u16);
 // Implement RgbToLuminance
 // =============================================================================
 
-// Rec. 709 (sRGB) luminance weights scaled to fixed-point for integer math
-// R: 0.2126 * 65536 = 13933
-// G: 0.7152 * 65536 = 46871
-// B: 0.0722 * 65536 = 4732
-// Total: 65536 (allows shift by 16 instead of divide)
-const LUMA_R: u32 = 13933;
-const LUMA_G: u32 = 46871;
-const LUMA_B: u32 = 4732;
+use super::{LUMA_B, LUMA_G, LUMA_R};
 
 impl RgbToLuminance for u8 {
     #[inline]

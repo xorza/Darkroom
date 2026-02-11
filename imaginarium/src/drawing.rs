@@ -3,8 +3,26 @@
 //! Provides functions to draw shapes like circles, crosses, lines, and dots on images.
 //! Works with f32 images (L_F32 or RGB_F32).
 
+use crate::common::color_format::{ChannelSize, ChannelType};
 use crate::{Color, Image};
 use glam::Vec2;
+
+/// Validates that the image uses an f32 format suitable for drawing.
+fn assert_f32_image(image: &Image) {
+    let fmt = image.desc().color_format;
+    assert_eq!(
+        fmt.channel_size,
+        ChannelSize::_32bit,
+        "Drawing requires f32 image, got {:?}",
+        fmt
+    );
+    assert_eq!(
+        fmt.channel_type,
+        ChannelType::Float,
+        "Drawing requires float image, got {:?}",
+        fmt
+    );
+}
 
 /// Draw a hollow circle on an image.
 ///
@@ -15,6 +33,7 @@ use glam::Vec2;
 /// * `color` - Color (for grayscale images, uses luminance)
 /// * `thickness` - Line thickness in pixels
 pub fn draw_circle(image: &mut Image, center: Vec2, radius: f32, color: Color, thickness: f32) {
+    assert_f32_image(image);
     let cx = center.x;
     let cy = center.y;
     let desc = *image.desc();
@@ -59,6 +78,7 @@ pub fn draw_circle(image: &mut Image, center: Vec2, radius: f32, color: Color, t
 /// * `radius` - Circle radius in pixels
 /// * `color` - Color (for grayscale images, uses luminance)
 pub fn draw_dot(image: &mut Image, center: Vec2, radius: f32, color: Color) {
+    assert_f32_image(image);
     let cx = center.x;
     let cy = center.y;
     let desc = *image.desc();
@@ -100,6 +120,7 @@ pub fn draw_dot(image: &mut Image, center: Vec2, radius: f32, color: Color) {
 /// * `color` - Color (for grayscale images, uses luminance)
 /// * `thickness` - Line thickness in pixels
 pub fn draw_cross(image: &mut Image, center: Vec2, arm_length: f32, color: Color, thickness: f32) {
+    assert_f32_image(image);
     let cx = center.x;
     let cy = center.y;
     // Horizontal arm
@@ -129,6 +150,7 @@ pub fn draw_cross(image: &mut Image, center: Vec2, arm_length: f32, color: Color
 /// * `color` - Color (for grayscale images, uses luminance)
 /// * `thickness` - Line thickness in pixels
 pub fn draw_line(image: &mut Image, start: Vec2, end: Vec2, color: Color, thickness: f32) {
+    assert_f32_image(image);
     let x1 = start.x;
     let y1 = start.y;
     let x2 = end.x;
@@ -204,6 +226,7 @@ pub fn draw_line(image: &mut Image, start: Vec2, end: Vec2, color: Color, thickn
 /// * `color` - Color (for grayscale images, uses luminance)
 /// * `thickness` - Line thickness in pixels
 pub fn draw_rect(image: &mut Image, top_left: Vec2, size: Vec2, color: Color, thickness: f32) {
+    assert_f32_image(image);
     let x = top_left.x;
     let y = top_left.y;
     let x2 = x + size.x;
@@ -222,16 +245,26 @@ pub fn draw_rect(image: &mut Image, top_left: Vec2, size: Vec2, color: Color, th
 /// Helper to draw a single pixel with the given color.
 #[inline]
 fn draw_pixel(pixels: &mut [f32], idx: usize, channels: usize, color: Color) {
-    if channels == 1 {
-        // Grayscale: use luminance
-        pixels[idx] = color.luminance();
-    } else if channels >= 3 {
-        pixels[idx] = color.r;
-        pixels[idx + 1] = color.g;
-        pixels[idx + 2] = color.b;
-        if channels == 4 {
+    match channels {
+        1 => {
+            pixels[idx] = color.luminance();
+        }
+        2 => {
+            pixels[idx] = color.luminance();
+            pixels[idx + 1] = color.a;
+        }
+        3 => {
+            pixels[idx] = color.r;
+            pixels[idx + 1] = color.g;
+            pixels[idx + 2] = color.b;
+        }
+        4 => {
+            pixels[idx] = color.r;
+            pixels[idx + 1] = color.g;
+            pixels[idx + 2] = color.b;
             pixels[idx + 3] = color.a;
         }
+        _ => unreachable!("invalid channel count: {}", channels),
     }
 }
 
