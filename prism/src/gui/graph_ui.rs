@@ -130,33 +130,31 @@ impl GraphUi {
             }
 
             // Phase 1: Graph content (layout, background, connections, nodes)
-            gui.set_scale(ctx.view_graph.scale);
+            gui.with_scale(ctx.view_graph.scale, |gui| {
+                self.graph_layout.update(gui, &ctx);
+                self.dots_background.render(gui, &ctx);
+                self.render_connections(gui, &mut ctx);
 
-            self.graph_layout.update(gui, &ctx);
-            self.dots_background.render(gui, &ctx);
-            self.render_connections(gui, &mut ctx);
-
-            let port_interact_cmd = self.node_ui.render_nodes(
-                gui,
-                &mut ctx,
-                &mut self.graph_layout,
-                &mut self.ui_interaction,
-                self.interaction.breaker(),
-            );
-
-            if let Some(pointer_pos) = pointer_pos {
-                self.process_connections(
+                let port_interact_cmd = self.node_ui.render_nodes(
                     gui,
                     &mut ctx,
-                    &background_response,
-                    pointer_pos,
-                    port_interact_cmd,
+                    &mut self.graph_layout,
+                    &mut self.ui_interaction,
+                    self.interaction.breaker(),
                 );
-            }
+
+                if let Some(pointer_pos) = pointer_pos {
+                    self.process_connections(
+                        gui,
+                        &mut ctx,
+                        &background_response,
+                        pointer_pos,
+                        port_interact_cmd,
+                    );
+                }
+            });
 
             // Phase 2: Overlays (buttons, details panel, new-node popup)
-            gui.set_scale(1.0);
-
             let mut overlay_hovered = self.render_buttons(gui, &mut ctx).hovered();
             overlay_hovered |= self
                 .node_details_ui
@@ -566,7 +564,6 @@ impl GraphUi {
         // Apply view actions
         if reset_view {
             ctx.view_graph.scale = 1.0;
-            gui.set_scale(ctx.view_graph.scale);
             ctx.view_graph.pan = Vec2::ZERO;
         }
         if view_selected {
@@ -842,7 +839,7 @@ fn apply_event_connection(
     }))
 }
 
-fn view_selected_node(gui: &mut Gui<'_>, ctx: &mut GraphContext<'_>, graph_layout: &GraphLayout) {
+fn view_selected_node(gui: &Gui<'_>, ctx: &mut GraphContext<'_>, graph_layout: &GraphLayout) {
     let Some(selected_id) = ctx.view_graph.selected_node_id else {
         return;
     };
@@ -859,14 +856,12 @@ fn view_selected_node(gui: &mut Gui<'_>, ctx: &mut GraphContext<'_>, graph_layou
     );
 
     ctx.view_graph.scale = 1.0;
-    gui.set_scale(ctx.view_graph.scale);
     ctx.view_graph.pan = gui.rect.center() - gui.rect.min - center.to_vec2();
 }
 
-fn fit_all_nodes(gui: &mut Gui<'_>, ctx: &mut GraphContext<'_>, graph_layout: &GraphLayout) {
+fn fit_all_nodes(gui: &Gui<'_>, ctx: &mut GraphContext<'_>, graph_layout: &GraphLayout) {
     if ctx.view_graph.view_nodes.is_empty() {
         ctx.view_graph.scale = 1.0;
-        gui.set_scale(ctx.view_graph.scale);
         ctx.view_graph.pan = egui::Vec2::ZERO;
         return;
     }
@@ -895,7 +890,6 @@ fn fit_all_nodes(gui: &mut Gui<'_>, ctx: &mut GraphContext<'_>, graph_layout: &G
 
     let target_zoom = zoom_x.min(zoom_y).clamp(MIN_ZOOM, MAX_ZOOM);
     ctx.view_graph.scale = target_zoom;
-    gui.set_scale(ctx.view_graph.scale);
 
     let bounds_center = bounds.center().to_vec2();
     ctx.view_graph.pan = gui.rect.center() - gui.rect.min - bounds_center * ctx.view_graph.scale;

@@ -132,4 +132,13 @@ impl<'a> Gui<'a> {
         let mut gui = Gui::new_with_scale(&mut child_ui, &style, self.scale);
         add_contents(&mut gui)
     }
+
+    /// Runs a closure with a temporarily changed scale, restoring the original scale afterward.
+    pub fn with_scale<R>(&mut self, scale: f32, f: impl FnOnce(&mut Gui<'_>) -> R) -> R {
+        let prev_scale = self.scale;
+        self.set_scale(scale);
+        let result = f(self);
+        self.set_scale(prev_scale);
+        result
+    }
 }
