@@ -275,10 +275,10 @@ fn needs_quoting(s: &str) -> bool {
         | "OFF" => return true,
         _ => {}
     }
-    if looks_like_number(s) {
+    if matches!(bytes[0], b'-' | b'?' | b'.') {
         return true;
     }
-    if matches!(bytes[0], b'-' | b'?' | b'.') {
+    if looks_like_number(s) {
         return true;
     }
     for &b in bytes {
@@ -837,7 +837,7 @@ fn parse_scalar(s: &str) -> YamlValue {
                 return YamlValue::Uint(v);
             }
             if let Ok(v) = s.parse::<f64>()
-                && (s.contains('.') || s.contains('e') || s.contains('E'))
+                && s.bytes().any(|b| b == b'.' || b == b'e' || b == b'E')
             {
                 return YamlValue::Float(v);
             }
