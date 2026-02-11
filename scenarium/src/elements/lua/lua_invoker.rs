@@ -2,7 +2,7 @@ use anyhow::Error;
 use common::Shared;
 use common::output_stream::OutputStream;
 use hashbrown::HashMap;
-use std::fmt::Debug;
+use std::fmt::{Debug, Write};
 use std::mem::take;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -66,10 +66,10 @@ impl LuaInvoker {
 
                         match arg {
                             mlua::Value::Nil => output.push_str("Nil"),
-                            mlua::Value::Boolean(v) => output.push_str(&v.to_string()),
+                            mlua::Value::Boolean(v) => write!(output, "{v}").unwrap(),
                             mlua::Value::LightUserData(_) => output.push_str("LightUserData"),
-                            mlua::Value::Integer(v) => output.push_str(&v.to_string()),
-                            mlua::Value::Number(v) => output.push_str(&v.to_string()),
+                            mlua::Value::Integer(v) => write!(output, "{v}").unwrap(),
+                            mlua::Value::Number(v) => write!(output, "{v}").unwrap(),
                             mlua::Value::String(v) => output.push_str(
                                 v.to_str().expect("Lua string is not valid UTF-8").as_ref(),
                             ),
@@ -77,7 +77,7 @@ impl LuaInvoker {
                             mlua::Value::Function(_) => output.push_str("Function"),
                             mlua::Value::Thread(_) => output.push_str("Thread"),
                             mlua::Value::UserData(_) => output.push_str("UserData"),
-                            mlua::Value::Error(err) => output.push_str(&err.to_string()),
+                            mlua::Value::Error(err) => write!(output, "{err}").unwrap(),
                             _ => panic!("not supported"),
                         }
                     }
@@ -212,21 +212,15 @@ impl LuaInvoker {
         let outputs: mlua::Table = table.get("outputs")?;
         let output_count = outputs.len()?;
         for i in 1..=output_count {
-            let output: mlua::Table = outputs
-                .get(i)
-                .unwrap_or_else(|_| panic!("Missing output entry {} in Lua table", i));
-            let name: String = output
-                .get(1)
-                .unwrap_or_else(|_| panic!("Missing output name for entry {} in Lua table", i));
-            let data_type_name: String = output
-                .get(2)
-                .unwrap_or_else(|_| panic!("Missing output type for entry {} in Lua table", i));
-            let data_type = data_type_name.parse::<DataType>().unwrap_or_else(|_| {
-                panic!(
-                    "Invalid data type name \"{}\" for output {} on function {}",
+            let output: mlua::Table = outputs.get(i)?;
+            let name: String = output.get(1)?;
+            let data_type_name: String = output.get(2)?;
+            let data_type = data_type_name.parse::<DataType>().map_err(|_| {
+                Error::msg(format!(
+                    "Error parsing DataType \"{}\" for output {} on function {}",
                     data_type_name, i, function_info.name
-                )
-            });
+                ))
+            })?;
 
             function_info
                 .outputs

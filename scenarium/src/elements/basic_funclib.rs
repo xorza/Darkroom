@@ -217,7 +217,7 @@ impl Default for BasicFuncLib {
                 assert_eq!(outputs.len(), 1);
 
                 let value: f64 = inputs[0].value.as_f64().unwrap();
-                let result = format!("{}", value);
+                let result = value.to_string();
 
                 outputs[0] = DynamicValue::String(result);
                 Ok(())

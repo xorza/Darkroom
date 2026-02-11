@@ -51,13 +51,9 @@ impl ContextType {
 
         ContextType {
             ctx_id,
-            description: "".into(),
+            description: String::new(),
             ctor,
         }
-    }
-
-    pub fn id(&self) -> &CtxId {
-        &self.ctx_id
     }
 }
 
@@ -101,7 +97,7 @@ mod tests {
             Arc::new(|| Box::new(TestCtx::default()) as Box<dyn Any + Send>);
         let ctx_type = ContextType {
             ctx_id: "5f7dca60-37c4-4f3a-81c5-0d3d9a30c1f8".into(),
-            description: "".into(),
+            description: String::new(),
             ctor,
         };
 
