@@ -221,24 +221,25 @@ impl AppData {
         let mut update_if_dirty = self.autorun;
         let mut msgs: Vec<WorkerMessage> = Vec::default();
 
-        match interaction.run_cmd {
-            RunCommand::None => {}
-            RunCommand::StartAutorun => {
-                assert!(!self.autorun);
+        if let Some(run_cmd) = interaction.run_cmd {
+            match run_cmd {
+                RunCommand::StartAutorun => {
+                    assert!(!self.autorun);
 
-                msgs.push(WorkerMessage::StartEventLoop);
-                update_if_dirty = true;
-                self.autorun = true;
-            }
-            RunCommand::StopAutorun => {
-                assert!(self.autorun);
+                    msgs.push(WorkerMessage::StartEventLoop);
+                    update_if_dirty = true;
+                    self.autorun = true;
+                }
+                RunCommand::StopAutorun => {
+                    assert!(self.autorun);
 
-                msgs.push(WorkerMessage::StopEventLoop);
-                self.autorun = false;
-            }
-            RunCommand::RunOnce => {
-                msgs.push(WorkerMessage::ExecuteTerminals);
-                update_if_dirty = true;
+                    msgs.push(WorkerMessage::StopEventLoop);
+                    self.autorun = false;
+                }
+                RunCommand::RunOnce => {
+                    msgs.push(WorkerMessage::ExecuteTerminals);
+                    update_if_dirty = true;
+                }
             }
         }
 

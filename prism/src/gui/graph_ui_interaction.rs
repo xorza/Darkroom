@@ -2,10 +2,8 @@ use scenarium::graph::NodeId;
 
 use crate::{gui::graph_ui::Error, model::graph_ui_action::GraphUiAction};
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RunCommand {
-    #[default]
-    None,
     StartAutorun,
     StopAutorun,
     RunOnce,
@@ -16,7 +14,7 @@ pub(crate) struct GraphUiInteraction {
     coalesced_actions: Vec<GraphUiAction>,
     immediate_actions: Vec<GraphUiAction>,
     pub errors: Vec<Error>,
-    pub run_cmd: RunCommand,
+    pub run_cmd: Option<RunCommand>,
     pub request_argument_values: Option<NodeId>,
 
     pending_action: Option<GraphUiAction>,
@@ -27,7 +25,7 @@ impl GraphUiInteraction {
         self.coalesced_actions.clear();
         self.immediate_actions.clear();
         self.errors.clear();
-        self.run_cmd = RunCommand::None;
+        self.run_cmd = None;
         self.request_argument_values = None;
     }
 

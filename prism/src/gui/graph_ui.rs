@@ -542,7 +542,7 @@ impl GraphUi {
                     gui.horizontal(|gui| {
                         let response = Button::default().text("run").show(gui);
                         if response.clicked() {
-                            self.ui_interaction.run_cmd = RunCommand::RunOnce;
+                            self.ui_interaction.run_cmd = Some(RunCommand::RunOnce);
                         }
 
                         let response = Button::default()
@@ -551,11 +551,11 @@ impl GraphUi {
                             .show(gui);
 
                         if response.clicked() {
-                            self.ui_interaction.run_cmd = if autorun {
+                            self.ui_interaction.run_cmd = Some(if autorun {
                                 RunCommand::StartAutorun
                             } else {
                                 RunCommand::StopAutorun
-                            };
+                            });
                         }
                     });
                 })
