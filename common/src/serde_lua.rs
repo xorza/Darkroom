@@ -159,6 +159,11 @@ fn write_lua_string<W: Write>(value: &str, out: &mut W) -> std::io::Result<()> {
     out.write_all(b"\"")
 }
 
+const LUA_KEYWORDS: &[&str] = &[
+    "and", "break", "do", "else", "elseif", "end", "false", "for", "function", "goto", "if", "in",
+    "local", "nil", "not", "or", "repeat", "return", "then", "true", "until", "while",
+];
+
 fn is_lua_identifier(value: &str) -> bool {
     let bytes = value.as_bytes();
     if bytes.is_empty() {
@@ -167,9 +172,13 @@ fn is_lua_identifier(value: &str) -> bool {
     if !matches!(bytes[0], b'a'..=b'z' | b'A'..=b'Z' | b'_') {
         return false;
     }
-    bytes[1..]
+    if !bytes[1..]
         .iter()
         .all(|b| matches!(b, b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_'))
+    {
+        return false;
+    }
+    !LUA_KEYWORDS.contains(&value)
 }
 
 const INDENT_BUF: &[u8; 64] = b"                                                                ";
@@ -357,6 +366,19 @@ mod tests {
         assert!(!is_lua_identifier("has-dash"));
         assert!(!is_lua_identifier("1start"));
         assert!(!is_lua_identifier("with.dot"));
+
+        // Lua keywords must not be bare identifiers
+        assert!(!is_lua_identifier("true"));
+        assert!(!is_lua_identifier("false"));
+        assert!(!is_lua_identifier("nil"));
+        assert!(!is_lua_identifier("return"));
+        assert!(!is_lua_identifier("end"));
+        assert!(!is_lua_identifier("function"));
+        assert!(!is_lua_identifier("local"));
+        assert!(!is_lua_identifier("if"));
+        assert!(!is_lua_identifier("and"));
+        assert!(!is_lua_identifier("or"));
+        assert!(!is_lua_identifier("not"));
     }
 
     #[test]
@@ -442,5 +464,141 @@ mod tests {
                 label: "x".to_string(),
             },
         ]);
+    }
+
+    #[test]
+    fn error_invalid_lua() {
+        let result = from_str::<i32>("return {{{invalid");
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), SerdeLuaError::LuaEval(_)));
+    }
+
+    #[test]
+    fn error_invalid_utf8() {
+        let bytes: &[u8] = &[0xFF, 0xFE, 0x80];
+        let result = from_slice::<i32>(bytes);
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), SerdeLuaError::Utf8(_)));
+    }
+
+    #[test]
+    fn float_output() {
+        // Negative float
+        roundtrip(&-1.234f64);
+        // Zero
+        roundtrip(&0.0f64);
+        // Large float
+        roundtrip(&1e18f64);
+        // Small float
+        roundtrip(&1e-10f64);
+    }
+
+    #[test]
+    fn output_format_structure() {
+        let lua = to_string(&42i32).unwrap();
+        assert!(lua.starts_with("return "), "should start with 'return '");
+        assert!(lua.ends_with('\n'), "should end with newline");
+        assert_eq!(lua, "return 42\n");
+    }
+
+    #[test]
+    fn output_format_nested_indentation() {
+        let lua = to_string(&vec![vec![1i32]]).unwrap();
+        // Outer array items at 2 spaces, inner array items at 4 spaces
+        assert!(lua.contains("  {\n    1,\n  },"));
+    }
+
+    #[test]
+    fn del_char_escaped() {
+        let mut buf = Vec::new();
+        write_lua_string("before\x7Fafter", &mut buf).unwrap();
+        let output = String::from_utf8(buf).unwrap();
+        assert!(output.contains("\\u{7f}"));
+        // Roundtrip through Lua
+        roundtrip(&"before\x7Fafter".to_string());
+    }
+
+    #[test]
+    fn four_byte_unicode() {
+        // Emoji (4-byte UTF-8)
+        roundtrip(&"\u{1F600}".to_string());
+
+        let mut buf = Vec::new();
+        write_lua_string("\u{1F600}", &mut buf).unwrap();
+        let output = String::from_utf8(buf).unwrap();
+        assert!(output.contains("\\u{1f600}"));
+    }
+
+    #[test]
+    fn mixed_escapes_in_one_string() {
+        let s = "line1\nline2\ttab\"quote\\back\x07bell\u{00e9}accent".to_string();
+        roundtrip(&s);
+
+        let mut buf = Vec::new();
+        write_lua_string(&s, &mut buf).unwrap();
+        let output = String::from_utf8(buf).unwrap();
+        assert!(output.contains("\\n"));
+        assert!(output.contains("\\t"));
+        assert!(output.contains("\\\""));
+        assert!(output.contains("\\\\"));
+        assert!(output.contains("\\u{7}"));
+        assert!(output.contains("\\u{e9}"));
+    }
+
+    #[test]
+    fn deep_nesting_indentation() {
+        // 35 levels deep — exceeds INDENT_BUF (64 bytes = 32 indent levels)
+        // Build nested vecs manually via JSON
+        let mut val = serde_json::Value::Number(serde_json::Number::from(1));
+        for _ in 0..35 {
+            val = serde_json::Value::Array(vec![val]);
+        }
+
+        #[derive(Debug, Serialize, Deserialize, PartialEq)]
+        struct Wrapper {
+            data: serde_json::Value,
+        }
+        let w = Wrapper { data: val };
+        roundtrip(&w);
+    }
+
+    #[test]
+    fn numeric_string_keys() {
+        use std::collections::BTreeMap;
+        let mut map = BTreeMap::new();
+        map.insert("42".to_string(), "num".to_string());
+        map.insert("true".to_string(), "bool-like".to_string());
+        roundtrip(&map);
+
+        // Verify they use bracket syntax, not bare identifiers
+        let lua = to_string(&map).unwrap();
+        assert!(lua.contains("[\"42\"]"));
+        assert!(lua.contains("[\"true\"]"));
+    }
+
+    #[test]
+    fn plain_ascii_string_no_escapes() {
+        let mut buf = Vec::new();
+        write_lua_string("hello world 123", &mut buf).unwrap();
+        assert_eq!(String::from_utf8(buf).unwrap(), "\"hello world 123\"");
+    }
+
+    #[test]
+    fn empty_string_output() {
+        let mut buf = Vec::new();
+        write_lua_string("", &mut buf).unwrap();
+        assert_eq!(String::from_utf8(buf).unwrap(), "\"\"");
+    }
+
+    #[test]
+    fn single_element_array_output() {
+        let lua = to_string(&vec![99i32]).unwrap();
+        assert_eq!(lua, "return {\n  99,\n}\n");
+    }
+
+    #[test]
+    fn bool_output_exact() {
+        assert_eq!(to_string(&true).unwrap(), "return true\n");
+        assert_eq!(to_string(&false).unwrap(), "return false\n");
     }
 }
