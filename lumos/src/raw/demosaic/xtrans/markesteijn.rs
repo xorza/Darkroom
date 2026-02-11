@@ -77,8 +77,9 @@ pub fn demosaic_xtrans_markesteijn(xtrans: &XTransImage) -> Vec<f32> {
     let height = xtrans.height;
     let pixels = width * height;
 
-    // Build hex neighbor lookup tables
+    // Build lookup tables
     let hex = HexLookup::new(&xtrans.pattern);
+    let color_lookup = markesteijn_steps::ColorInterpLookup::new(&xtrans.pattern);
 
     // Allocate all working memory in one shot
     let mut arena = DemosaicArena::new(width, height);
@@ -116,7 +117,7 @@ pub fn demosaic_xtrans_markesteijn(xtrans: &XTransImage) -> Vec<f32> {
     {
         let (region_a, rest) = arena.storage.split_at_mut(4 * pixels);
         let region_b = &mut rest[..4 * pixels];
-        markesteijn_steps::compute_derivatives(xtrans, region_a, region_b);
+        markesteijn_steps::compute_derivatives(xtrans, region_a, &color_lookup, region_b);
     }
     tracing::debug!(
         "  Step 3 (derivatives): {:.1}ms",
@@ -153,7 +154,15 @@ pub fn demosaic_xtrans_markesteijn(xtrans: &XTransImage) -> Vec<f32> {
             std::slice::from_raw_parts(ptr, pixels * 4)
         };
         let output = &mut region_b[..3 * pixels];
-        markesteijn_steps::blend_final(xtrans, region_a, homo, width, height, output);
+        markesteijn_steps::blend_final(
+            xtrans,
+            region_a,
+            &color_lookup,
+            homo,
+            width,
+            height,
+            output,
+        );
     }
     tracing::debug!(
         "  Step 5 (blend): {:.1}ms",

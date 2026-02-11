@@ -56,7 +56,7 @@ enum ColorInterpStrategy {
 /// Precomputed interpolation strategies for all 36 X-Trans positions × 2 target colors.
 /// Indexed as [row%6][col%6][target_color_index] where target_color_index: 0=red, 1=blue.
 #[derive(Debug)]
-struct ColorInterpLookup {
+pub(super) struct ColorInterpLookup {
     /// For each position, the best strategies for interpolating red and blue.
     /// [row%6][col%6][0=red, 1=blue] = array of up to 2 strategies (H pair, V pair)
     /// sorted by expected quality (pairs first, then singles).
@@ -73,7 +73,7 @@ struct InterpEntry {
 }
 
 impl ColorInterpLookup {
-    fn new(pattern: &super::XTransPattern) -> Self {
+    pub(super) fn new(pattern: &super::XTransPattern) -> Self {
         let mut strategies = [[[InterpEntry {
             primary: ColorInterpStrategy::None,
             secondary: ColorInterpStrategy::None,
@@ -345,11 +345,15 @@ pub(super) fn interpolate_green(
 /// For each direction, computes a Laplacian in that direction's offset,
 /// storing the squared derivative magnitude per pixel. RGB is computed
 /// per-pixel using `compute_rgb_pixel` instead of reading from a materialized buffer.
-pub(super) fn compute_derivatives(xtrans: &XTransImage, green_dir: &[f32], drv: &mut [f32]) {
+pub(super) fn compute_derivatives(
+    xtrans: &XTransImage,
+    green_dir: &[f32],
+    color_lookup: &ColorInterpLookup,
+    drv: &mut [f32],
+) {
     let width = xtrans.width;
     let height = xtrans.height;
     let pixels = width * height;
-    let color_lookup = ColorInterpLookup::new(&xtrans.pattern);
     let drv_ptr = UnsafeSendPtr(drv.as_mut_ptr());
 
     // Split each direction's rows into chunks for parallelism, and within each
@@ -361,152 +365,157 @@ pub(super) fn compute_derivatives(xtrans: &XTransImage, green_dir: &[f32], drv: 
     let chunks_per_dir = height.div_ceil(chunk_size);
     let total_chunks = NDIR * chunks_per_dir;
 
-    (0..total_chunks).into_par_iter().for_each(|chunk_idx| {
-        let d = chunk_idx / chunks_per_dir;
-        let chunk_i = chunk_idx % chunks_per_dir;
-        let y_start = chunk_i * chunk_size;
-        let y_end = (y_start + chunk_size).min(height);
-
-        let (dir_dy, dir_dx) = DIR_OFFSETS[d];
-        let green_base = d * pixels;
-        let drv_base = d * pixels;
-
-        if dir_dy == 0 {
-            // Direction 0: horizontal (0, +1). Forward/backward are in the same row.
-            let mut row_buf = vec![(0.0f32, 0.0f32, 0.0f32); width];
-            for y in y_start..y_end {
-                compute_ypbpr_row(
-                    xtrans,
-                    green_dir,
-                    &color_lookup,
-                    green_base,
-                    y,
-                    width,
-                    height,
-                    &mut row_buf,
-                );
-
-                let drv_off = drv_base + y * width;
-                for x in 0..width {
-                    let (yc, pbc, prc) = row_buf[x];
-
-                    let (yf, pbf, prf) = if x + 1 < width {
-                        row_buf[x + 1]
-                    } else {
-                        (yc, pbc, prc)
-                    };
-
-                    let (yb, pbb, prb) = if x > 0 {
-                        row_buf[x - 1]
-                    } else {
-                        (yc, pbc, prc)
-                    };
-
-                    let dy = 2.0 * yc - yf - yb;
-                    let dpb = 2.0 * pbc - pbf - pbb;
-                    let dpr = 2.0 * prc - prf - prb;
-
-                    // SAFETY: Each (d, chunk) pair writes to unique rows in drv.
-                    unsafe {
-                        *drv_ptr.get().add(drv_off + x) = dy * dy + dpb * dpb + dpr * dpr;
-                    }
-                }
-            }
-        } else {
-            // Directions 1,2,3 (dir_dy=1): sliding 3-row cache.
-            // rows[0] = prev (y-1), rows[1] = center (y), rows[2] = next (y+1)
-            let mut rows = [
+    (0..total_chunks).into_par_iter().for_each_init(
+        || {
+            // Allocate 3 row buffers once per rayon thread, reused across chunks.
+            [
                 vec![(0.0f32, 0.0f32, 0.0f32); width],
                 vec![(0.0f32, 0.0f32, 0.0f32); width],
                 vec![(0.0f32, 0.0f32, 0.0f32); width],
-            ];
+            ]
+        },
+        |rows, chunk_idx| {
+            let d = chunk_idx / chunks_per_dir;
+            let chunk_i = chunk_idx % chunks_per_dir;
+            let y_start = chunk_i * chunk_size;
+            let y_end = (y_start + chunk_size).min(height);
 
-            // Seed the sliding window for this chunk
-            if y_start > 0 {
-                compute_ypbpr_row(
-                    xtrans,
-                    green_dir,
-                    &color_lookup,
-                    green_base,
-                    y_start - 1,
-                    width,
-                    height,
-                    &mut rows[0],
-                );
-            }
-            compute_ypbpr_row(
-                xtrans,
-                green_dir,
-                &color_lookup,
-                green_base,
-                y_start,
-                width,
-                height,
-                &mut rows[1],
-            );
-            if y_start + 1 < height {
-                compute_ypbpr_row(
-                    xtrans,
-                    green_dir,
-                    &color_lookup,
-                    green_base,
-                    y_start + 1,
-                    width,
-                    height,
-                    &mut rows[2],
-                );
-            }
+            let (dir_dy, dir_dx) = DIR_OFFSETS[d];
+            let green_base = d * pixels;
+            let drv_base = d * pixels;
 
-            for y in y_start..y_end {
-                let has_prev = y > 0;
-                let has_next = y + 1 < height;
-
-                let drv_off = drv_base + y * width;
-                for x in 0..width {
-                    let (yc, pbc, prc) = rows[1][x];
-
-                    let fx = x as i32 + dir_dx;
-                    let (yf, pbf, prf) = if has_next && fx >= 0 && (fx as usize) < width {
-                        rows[2][fx as usize]
-                    } else {
-                        (yc, pbc, prc)
-                    };
-
-                    let bx = x as i32 - dir_dx;
-                    let (yb, pbb, prb) = if has_prev && bx >= 0 && (bx as usize) < width {
-                        rows[0][bx as usize]
-                    } else {
-                        (yc, pbc, prc)
-                    };
-
-                    let dy = 2.0 * yc - yf - yb;
-                    let dpb = 2.0 * pbc - pbf - pbb;
-                    let dpr = 2.0 * prc - prf - prb;
-
-                    unsafe {
-                        *drv_ptr.get().add(drv_off + x) = dy * dy + dpb * dpb + dpr * dpr;
-                    }
-                }
-
-                // Slide window: prev <- center <- next, compute new next row
-                let [ref mut r0, ref mut r1, ref mut r2] = rows;
-                std::mem::swap(r0, r1);
-                std::mem::swap(r1, r2);
-                if y + 2 < height {
+            if dir_dy == 0 {
+                // Direction 0: horizontal (0, +1). Forward/backward are in the same row.
+                // Reuse rows[0] as the single row buffer.
+                for y in y_start..y_end {
                     compute_ypbpr_row(
                         xtrans,
                         green_dir,
-                        &color_lookup,
+                        color_lookup,
                         green_base,
-                        y + 2,
+                        y,
                         width,
                         height,
-                        r2,
+                        &mut rows[0],
+                    );
+
+                    let drv_off = drv_base + y * width;
+                    for x in 0..width {
+                        let (yc, pbc, prc) = rows[0][x];
+
+                        let (yf, pbf, prf) = if x + 1 < width {
+                            rows[0][x + 1]
+                        } else {
+                            (yc, pbc, prc)
+                        };
+
+                        let (yb, pbb, prb) = if x > 0 {
+                            rows[0][x - 1]
+                        } else {
+                            (yc, pbc, prc)
+                        };
+
+                        let dy = 2.0 * yc - yf - yb;
+                        let dpb = 2.0 * pbc - pbf - pbb;
+                        let dpr = 2.0 * prc - prf - prb;
+
+                        // SAFETY: Each (d, chunk) pair writes to unique rows in drv.
+                        unsafe {
+                            *drv_ptr.get().add(drv_off + x) = dy * dy + dpb * dpb + dpr * dpr;
+                        }
+                    }
+                }
+            } else {
+                // Directions 1,2,3 (dir_dy=1): sliding 3-row cache.
+                // rows[0] = prev (y-1), rows[1] = center (y), rows[2] = next (y+1)
+
+                // Seed the sliding window for this chunk
+                if y_start > 0 {
+                    compute_ypbpr_row(
+                        xtrans,
+                        green_dir,
+                        color_lookup,
+                        green_base,
+                        y_start - 1,
+                        width,
+                        height,
+                        &mut rows[0],
                     );
                 }
+                compute_ypbpr_row(
+                    xtrans,
+                    green_dir,
+                    color_lookup,
+                    green_base,
+                    y_start,
+                    width,
+                    height,
+                    &mut rows[1],
+                );
+                if y_start + 1 < height {
+                    compute_ypbpr_row(
+                        xtrans,
+                        green_dir,
+                        color_lookup,
+                        green_base,
+                        y_start + 1,
+                        width,
+                        height,
+                        &mut rows[2],
+                    );
+                }
+
+                for y in y_start..y_end {
+                    let has_prev = y > 0;
+                    let has_next = y + 1 < height;
+
+                    let drv_off = drv_base + y * width;
+                    for x in 0..width {
+                        let (yc, pbc, prc) = rows[1][x];
+
+                        let fx = x as i32 + dir_dx;
+                        let (yf, pbf, prf) = if has_next && fx >= 0 && (fx as usize) < width {
+                            rows[2][fx as usize]
+                        } else {
+                            (yc, pbc, prc)
+                        };
+
+                        let bx = x as i32 - dir_dx;
+                        let (yb, pbb, prb) = if has_prev && bx >= 0 && (bx as usize) < width {
+                            rows[0][bx as usize]
+                        } else {
+                            (yc, pbc, prc)
+                        };
+
+                        let dy = 2.0 * yc - yf - yb;
+                        let dpb = 2.0 * pbc - pbf - pbb;
+                        let dpr = 2.0 * prc - prf - prb;
+
+                        unsafe {
+                            *drv_ptr.get().add(drv_off + x) = dy * dy + dpb * dpb + dpr * dpr;
+                        }
+                    }
+
+                    // Slide window: prev <- center <- next, compute new next row
+                    let [r0, r1, r2] = rows;
+                    std::mem::swap(r0, r1);
+                    std::mem::swap(r1, r2);
+                    if y + 2 < height {
+                        compute_ypbpr_row(
+                            xtrans,
+                            green_dir,
+                            color_lookup,
+                            green_base,
+                            y + 2,
+                            width,
+                            height,
+                            r2,
+                        );
+                    }
+                }
             }
-        }
-    });
+        },
+    );
 }
 
 /// Pre-compute YPbPr values for an entire row, storing results in `out`.
@@ -840,12 +849,15 @@ pub(super) fn compute_homogeneity(
 /// For an input `data` of size `height × width`, produces `(height+1) × (width+1)` u32 values
 /// where `sat[(y+1)*(width+1) + (x+1)]` = sum of data[0..=y][0..=x].
 /// Row 0 and column 0 of the SAT are zero (sentinel row/col for boundary handling).
-fn build_summed_area_table(data: &[u8], width: usize, height: usize) -> Vec<u32> {
+fn build_summed_area_table(data: &[u8], width: usize, height: usize, sat: &mut Vec<u32>) {
     let sat_w = width + 1;
     let sat_h = height + 1;
-    // SAFETY: Every element is written below — sentinel row/col are zeroed explicitly,
-    // and interior elements are computed from the row above + running row sum.
-    let mut sat = unsafe { crate::raw::alloc_uninit_vec::<u32>(sat_w * sat_h) };
+    let needed = sat_w * sat_h;
+
+    // Reuse existing allocation if large enough; otherwise grow once.
+    if sat.len() < needed {
+        sat.resize(needed, 0);
+    }
 
     // Zero the sentinel row (y=0)
     sat[..sat_w].fill(0);
@@ -859,8 +871,6 @@ fn build_summed_area_table(data: &[u8], width: usize, height: usize) -> Vec<u32>
             sat[(y + 1) * sat_w + (x + 1)] = row_sum + sat[y * sat_w + (x + 1)];
         }
     }
-
-    sat
 }
 
 /// Query a rectangular sum from a summed area table.
@@ -884,6 +894,7 @@ fn sat_query(sat: &[u32], sat_w: usize, y0: usize, x0: usize, y1: usize, x1: usi
 pub(super) fn blend_final(
     xtrans: &XTransImage,
     green_dir: &[f32],
+    color_lookup: &ColorInterpLookup,
     homo: &[u8],
     width: usize,
     height: usize,
@@ -893,16 +904,17 @@ pub(super) fn blend_final(
     let row_stride = width * 3;
     assert_eq!(output.len(), pixels * 3);
 
-    let color_lookup = ColorInterpLookup::new(&xtrans.pattern);
     let sat_w = width + 1;
 
     // Pass 1: Build one SAT at a time, query all pixels, store scores.
     // This keeps only one SAT (~1P) alive at a time instead of all 4 (~4P).
-    // SAFETY: Every element is written by the loop below before being read.
+    // The SAT buffer is reused across all 4 directions (allocated once, ~1P u32).
+    // SAFETY: Every element of hm_buf is written by the loop below before being read.
     let mut hm_buf: Vec<[u32; NDIR]> = unsafe { crate::raw::alloc_uninit_vec(pixels) };
+    let mut sat = Vec::new();
 
     for d in 0..NDIR {
-        let sat = build_summed_area_table(&homo[d * pixels..(d + 1) * pixels], width, height);
+        build_summed_area_table(&homo[d * pixels..(d + 1) * pixels], width, height, &mut sat);
 
         for y in 0..height {
             let y0 = y.saturating_sub(2);
@@ -913,7 +925,6 @@ pub(super) fn blend_final(
                 hm_buf[y * width + x][d] = sat_query(&sat, sat_w, y0, x0, y1, x1);
             }
         }
-        // SAT dropped here — ~1P freed before next iteration
     }
 
     // Pass 2: Parallel blend using stored scores + on-the-fly RGB recomputation.
@@ -943,7 +954,7 @@ pub(super) fn blend_final(
                         let (r, g, b) = compute_rgb_pixel(
                             xtrans,
                             green_dir,
-                            &color_lookup,
+                            color_lookup,
                             green_base,
                             y,
                             x,
@@ -1199,8 +1210,9 @@ mod tests {
         let mut green_dir = vec![0.0f32; NDIR * pixels];
         interpolate_green(&xtrans, &hex, &gmin, &gmax, &mut green_dir);
 
+        let color_lookup = ColorInterpLookup::new(&xtrans.pattern);
         let mut drv = vec![f32::NAN; NDIR * pixels];
-        compute_derivatives(&xtrans, &green_dir, &mut drv);
+        compute_derivatives(&xtrans, &green_dir, &color_lookup, &mut drv);
 
         // Interior pixels should have near-zero derivatives for uniform input
         for d in 0..NDIR {
@@ -1246,8 +1258,9 @@ mod tests {
         let mut green_dir = vec![0.0f32; NDIR * pixels];
         interpolate_green(&xtrans, &hex, &gmin, &gmax, &mut green_dir);
 
+        let color_lookup = ColorInterpLookup::new(&xtrans.pattern);
         let mut drv = vec![0.0f32; NDIR * pixels];
-        compute_derivatives(&xtrans, &green_dir, &mut drv);
+        compute_derivatives(&xtrans, &green_dir, &color_lookup, &mut drv);
 
         // All derivatives should be finite and non-negative (squared values)
         for (i, &val) in drv.iter().enumerate() {
@@ -1278,7 +1291,8 @@ mod tests {
     fn test_sat_uniform_ones() {
         // 4×3 grid of all 1s
         let data = vec![1u8; 4 * 3];
-        let sat = build_summed_area_table(&data, 4, 3);
+        let mut sat = Vec::new();
+        build_summed_area_table(&data, 4, 3, &mut sat);
 
         // Full image sum = 12
         assert_eq!(sat_query(&sat, 5, 0, 0, 2, 3), 12);
@@ -1298,7 +1312,8 @@ mod tests {
     fn test_sat_sequential_values() {
         // 3×3 grid: [1,2,3; 4,5,6; 7,8,9]
         let data = vec![1, 2, 3, 4, 5, 6, 7, 8, 9];
-        let sat = build_summed_area_table(&data, 3, 3);
+        let mut sat = Vec::new();
+        build_summed_area_table(&data, 3, 3, &mut sat);
 
         // Full sum = 45
         assert_eq!(sat_query(&sat, 4, 0, 0, 2, 2), 45);
@@ -1313,14 +1328,16 @@ mod tests {
     #[test]
     fn test_sat_single_pixel() {
         let data = vec![42u8];
-        let sat = build_summed_area_table(&data, 1, 1);
+        let mut sat = Vec::new();
+        build_summed_area_table(&data, 1, 1, &mut sat);
         assert_eq!(sat_query(&sat, 2, 0, 0, 0, 0), 42);
     }
 
     #[test]
     fn test_sat_single_row() {
         let data = vec![1, 2, 3, 4, 5];
-        let sat = build_summed_area_table(&data, 5, 1);
+        let mut sat = Vec::new();
+        build_summed_area_table(&data, 5, 1, &mut sat);
         // Full row = 15
         assert_eq!(sat_query(&sat, 6, 0, 0, 0, 4), 15);
         // Middle 3 elements = 2+3+4 = 9
@@ -1330,7 +1347,8 @@ mod tests {
     #[test]
     fn test_sat_single_column() {
         let data = vec![1, 2, 3, 4, 5];
-        let sat = build_summed_area_table(&data, 1, 5);
+        let mut sat = Vec::new();
+        build_summed_area_table(&data, 1, 5, &mut sat);
         // Full column = 15
         assert_eq!(sat_query(&sat, 2, 0, 0, 4, 0), 15);
         // Middle 3 = 2+3+4 = 9
@@ -1340,7 +1358,8 @@ mod tests {
     #[test]
     fn test_sat_zeros() {
         let data = vec![0u8; 4 * 4];
-        let sat = build_summed_area_table(&data, 4, 4);
+        let mut sat = Vec::new();
+        build_summed_area_table(&data, 4, 4, &mut sat);
         assert_eq!(sat_query(&sat, 5, 0, 0, 3, 3), 0);
     }
 
@@ -1596,10 +1615,11 @@ mod tests {
         interpolate_green(&xtrans, &hex, &gmin, &gmax, &mut green_dir);
 
         // Uniform homogeneity → all directions qualify
+        let color_lookup = ColorInterpLookup::new(&xtrans.pattern);
         let homo = vec![9u8; NDIR * pixels];
 
         let mut output = vec![0.0f32; pixels * 3];
-        blend_final(&xtrans, &green_dir, &homo, w, h, &mut output);
+        blend_final(&xtrans, &green_dir, &color_lookup, &homo, w, h, &mut output);
 
         // Uniform 0.5 input → output should be approximately 0.5 for all channels
         for (i, &v) in output.iter().enumerate() {
@@ -1627,16 +1647,33 @@ mod tests {
         interpolate_green(&xtrans, &hex, &gmin, &gmax, &mut green_dir);
 
         // Dir 0 has highest homogeneity (9), others have 0
+        let color_lookup = ColorInterpLookup::new(&xtrans.pattern);
         let mut homo = vec![0u8; NDIR * pixels];
         homo[..pixels].fill(9);
 
         let mut output_one = vec![0.0f32; pixels * 3];
-        blend_final(&xtrans, &green_dir, &homo, w, h, &mut output_one);
+        blend_final(
+            &xtrans,
+            &green_dir,
+            &color_lookup,
+            &homo,
+            w,
+            h,
+            &mut output_one,
+        );
 
         // All directions equally good
         let homo_all = vec![9u8; NDIR * pixels];
         let mut output_all = vec![0.0f32; pixels * 3];
-        blend_final(&xtrans, &green_dir, &homo_all, w, h, &mut output_all);
+        blend_final(
+            &xtrans,
+            &green_dir,
+            &color_lookup,
+            &homo_all,
+            w,
+            h,
+            &mut output_all,
+        );
 
         // With uniform input, both should give similar results
         for i in 0..output_one.len() {

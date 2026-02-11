@@ -105,20 +105,6 @@ pub fn load_lena_rgba_f32_895x551() -> Image {
         .clone()
 }
 
-/// Loads a small lena test image as RGBA_F32 format (61x38).
-/// The image is cached and cloned on each call to avoid repeated file I/O.
-pub fn load_lena_rgba_f32_61x38() -> Image {
-    static LENA_SMALL_F32: OnceLock<Image> = OnceLock::new();
-    LENA_SMALL_F32
-        .get_or_init(|| {
-            Image::read_file(test_resource("lena_61x38.tiff"))
-                .unwrap()
-                .convert(ColorFormat::RGBA_F32)
-                .unwrap()
-        })
-        .clone()
-}
-
 /// Creates a test image filled with a constant f32 value.
 pub fn create_test_image_f32(
     format: ColorFormat,

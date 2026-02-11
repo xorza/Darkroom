@@ -4,21 +4,8 @@ use wgpu::util::DeviceExt;
 use super::pipeline::GpuTransformPipeline;
 use super::{FilterMode, Transform};
 use crate::gpu::GpuImage;
+use crate::ops::gpu_format::*;
 use crate::prelude::*;
-
-// Format types matching shader constants
-const FORMAT_L_U8: u32 = 0;
-const FORMAT_LA_U8: u32 = 1;
-const FORMAT_RGB_U8: u32 = 2;
-const FORMAT_RGBA_U8: u32 = 3;
-const FORMAT_L_F32: u32 = 4;
-const FORMAT_LA_F32: u32 = 5;
-const FORMAT_RGB_F32: u32 = 6;
-const FORMAT_RGBA_F32: u32 = 7;
-const FORMAT_L_U16: u32 = 8;
-const FORMAT_LA_U16: u32 = 9;
-const FORMAT_RGB_U16: u32 = 10;
-const FORMAT_RGBA_U16: u32 = 11;
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
@@ -42,28 +29,6 @@ struct Params {
     format_type: u32,
 }
 
-fn get_format_type(format: ColorFormat) -> u32 {
-    match (
-        format.channel_count,
-        format.channel_size,
-        format.channel_type,
-    ) {
-        (ChannelCount::L, ChannelSize::_8bit, ChannelType::UInt) => FORMAT_L_U8,
-        (ChannelCount::LA, ChannelSize::_8bit, ChannelType::UInt) => FORMAT_LA_U8,
-        (ChannelCount::Rgb, ChannelSize::_8bit, ChannelType::UInt) => FORMAT_RGB_U8,
-        (ChannelCount::Rgba, ChannelSize::_8bit, ChannelType::UInt) => FORMAT_RGBA_U8,
-        (ChannelCount::L, ChannelSize::_32bit, ChannelType::Float) => FORMAT_L_F32,
-        (ChannelCount::LA, ChannelSize::_32bit, ChannelType::Float) => FORMAT_LA_F32,
-        (ChannelCount::Rgb, ChannelSize::_32bit, ChannelType::Float) => FORMAT_RGB_F32,
-        (ChannelCount::Rgba, ChannelSize::_32bit, ChannelType::Float) => FORMAT_RGBA_F32,
-        (ChannelCount::L, ChannelSize::_16bit, ChannelType::UInt) => FORMAT_L_U16,
-        (ChannelCount::LA, ChannelSize::_16bit, ChannelType::UInt) => FORMAT_LA_U16,
-        (ChannelCount::Rgb, ChannelSize::_16bit, ChannelType::UInt) => FORMAT_RGB_U16,
-        (ChannelCount::Rgba, ChannelSize::_16bit, ChannelType::UInt) => FORMAT_RGBA_U16,
-        _ => panic!("Unsupported format for Transform: {}", format),
-    }
-}
-
 /// Applies transformation to the input image using GPU.
 ///
 /// The output image dimensions determine the size of the result.
@@ -85,7 +50,8 @@ pub(super) fn apply(
         "Input and output must have same color format"
     );
 
-    let format_type = get_format_type(input_desc.color_format);
+    let format_type =
+        get_format_type(input_desc.color_format).expect("Unsupported format for Transform");
 
     // For formats that use OR-based writing (non-word-aligned),
     // we need to clear the output buffer first to avoid garbage data

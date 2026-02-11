@@ -1,6 +1,7 @@
 mod backend_selection;
 mod blend;
 mod contrast_brightness;
+pub(crate) mod gpu_format;
 pub(crate) mod transform;
 
 pub use backend_selection::{Backend, select_backend};
