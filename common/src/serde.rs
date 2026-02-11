@@ -6,6 +6,7 @@ use serde::de::DeserializeOwned;
 use crate::file_format::SerdeFormat;
 use crate::normalize_string::NormalizeString;
 use crate::serde_lua;
+use crate::serde_yaml;
 
 pub fn is_false(value: &bool) -> bool {
     !*value
@@ -29,6 +30,9 @@ pub fn serialize_into<T: Serialize, W: Write>(
     temp_buffer.clear();
 
     match format {
+        SerdeFormat::Yaml => {
+            serde_yaml::to_writer(writer, &value).unwrap();
+        }
         SerdeFormat::Json => {
             serde_json::to_writer_pretty(writer, &value).unwrap();
         }
@@ -78,6 +82,7 @@ pub fn deserialize_from<T: DeserializeOwned, R: Read>(
     temp_buffer.clear();
 
     match format {
+        SerdeFormat::Yaml => Ok(serde_yaml::from_reader(reader)?),
         SerdeFormat::Json => Ok(serde_json::from_reader(reader)?),
         SerdeFormat::Lua => Ok(serde_lua::from_reader(reader)?),
         SerdeFormat::Toml => {
