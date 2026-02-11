@@ -239,8 +239,8 @@ value     = 'null'
           | map
           | variant
 
-array     = '[' (value (',' value)* ','?)? ']'
-map       = '{' (pair (',' pair)* ','?)? '}'
+array     = '[' (value ','?)* ']'
+map       = '{' (pair ','?)* '}'
 pair      = key ':' value
 key       = IDENT | STRING
 

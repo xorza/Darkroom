@@ -5,7 +5,7 @@ use super::value::ScnValue;
 // Tokenizer
 // ===========================================================================
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, PartialEq)]
 enum Token {
     LBrace,
     RBrace,

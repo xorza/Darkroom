@@ -1,3 +1,4 @@
+use super::value::ScnValue;
 use super::*;
 use serde::{Deserialize, Serialize};
 
@@ -804,4 +805,342 @@ fn deeply_nested() {
         };
     }
     roundtrip(&val);
+}
+
+// ===========================================================================
+// Spec coverage: reject yes/no/on/off as boolean aliases
+// ===========================================================================
+
+#[test]
+fn reject_yaml_boolean_aliases() {
+    // Spec says: "Only these two keywords [true/false]. No yes/no/on/off."
+    // These should parse as variant identifiers, not booleans.
+    // Deserializing as bool must fail.
+    assert!(from_str::<bool>("yes").is_err());
+    assert!(from_str::<bool>("no").is_err());
+    assert!(from_str::<bool>("on").is_err());
+    assert!(from_str::<bool>("off").is_err());
+
+    // They parse as identifiers (variants), not as booleans
+    let val = super::parse::parse("yes").unwrap();
+    assert!(matches!(val, ScnValue::Variant(tag, None) if tag == "yes"));
+}
+
+// ===========================================================================
+// Spec coverage: mixed-type arrays
+// ===========================================================================
+
+#[test]
+fn mixed_type_array_parse() {
+    // Spec example: ["mixed", 42, true, null]
+    let val = super::parse::parse(r#"["mixed", 42, true, null]"#).unwrap();
+    match val {
+        ScnValue::Array(items) => {
+            assert_eq!(items.len(), 4);
+            assert_eq!(items[0], ScnValue::String("mixed".to_string()));
+            assert_eq!(items[1], ScnValue::Int(42));
+            assert_eq!(items[2], ScnValue::Bool(true));
+            assert_eq!(items[3], ScnValue::Null);
+        }
+        other => panic!("expected array, got: {other:?}"),
+    }
+}
+
+// ===========================================================================
+// Spec coverage: variant with string payload
+// ===========================================================================
+
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
+enum StringPayload {
+    Const(String),
+}
+
+#[test]
+fn variant_with_string_payload() {
+    // Spec example: Const "hello"
+    roundtrip(&StringPayload::Const("hello".to_string()));
+
+    // Verify the serialized format
+    let scn = to_string(&StringPayload::Const("hello".to_string())).unwrap();
+    assert_eq!(scn, "Const \"hello\"\n");
+}
+
+// ===========================================================================
+// Spec coverage: greedy parsing ambiguity
+// ===========================================================================
+
+#[test]
+fn greedy_variant_parsing() {
+    // Spec says: [None Const 10] parses as single nested variant
+    let val = super::parse::parse("[None Const 10]").unwrap();
+    let ScnValue::Array(items) = val else {
+        panic!("expected array");
+    };
+    assert_eq!(items.len(), 1);
+    // None consumed Const as payload, Const consumed 10 as payload
+    let ScnValue::Variant(ref outer, Some(ref inner)) = items[0] else {
+        panic!("expected variant, got: {:?}", items[0]);
+    };
+    assert_eq!(outer, "None");
+    let ScnValue::Variant(ref tag, Some(ref payload)) = **inner else {
+        panic!("expected inner variant, got: {inner:?}");
+    };
+    assert_eq!(tag, "Const");
+    assert_eq!(**payload, ScnValue::Int(10));
+
+    // With commas: [None, Const 10] → two separate variants
+    let val = super::parse::parse("[None, Const 10]").unwrap();
+    match val {
+        ScnValue::Array(items) => {
+            assert_eq!(items.len(), 2);
+            assert!(matches!(&items[0], ScnValue::Variant(tag, None) if tag == "None"));
+            assert!(matches!(&items[1], ScnValue::Variant(tag, Some(payload))
+                if tag == "Const" && **payload == ScnValue::Int(10)));
+        }
+        other => panic!("expected array, got: {other:?}"),
+    }
+}
+
+// ===========================================================================
+// Spec coverage: integer vs float distinction
+// ===========================================================================
+
+#[test]
+fn integer_vs_float_distinction() {
+    // Spec: "Integer vs float is distinguished by the presence of . or e/E"
+    let val = super::parse::parse("42").unwrap();
+    assert!(matches!(val, ScnValue::Int(42)));
+
+    let val = super::parse::parse("42.0").unwrap();
+    assert!(matches!(val, ScnValue::Float(f) if f == 42.0));
+
+    let val = super::parse::parse("42e0").unwrap();
+    assert!(matches!(val, ScnValue::Float(f) if f == 42.0));
+
+    let val = super::parse::parse("-7").unwrap();
+    assert!(matches!(val, ScnValue::Int(-7)));
+
+    let val = super::parse::parse("-7.0").unwrap();
+    assert!(matches!(val, ScnValue::Float(f) if f == -7.0));
+}
+
+// ===========================================================================
+// Spec coverage: triple-quoted with actual indent stripping
+// ===========================================================================
+
+#[test]
+fn triple_quoted_indent_stripping() {
+    // Closing """ indentation determines strip level
+    let scn = "\"\"\"\n    line1\n    line2\n  \"\"\"";
+    let v: String = from_str(scn).unwrap();
+    // Closing """ has 2 spaces indent, so 2 spaces stripped from each line
+    assert_eq!(v, "  line1\n  line2");
+
+    // Closing """ at column 0: strips 0 spaces
+    let scn = "\"\"\"\n  line1\n  line2\n\"\"\"";
+    let v: String = from_str(scn).unwrap();
+    assert_eq!(v, "  line1\n  line2");
+
+    // Closing """ at same indent as content: strips all leading
+    let scn = "\"\"\"\n  line1\n  line2\n  \"\"\"";
+    let v: String = from_str(scn).unwrap();
+    assert_eq!(v, "line1\nline2");
+}
+
+// ===========================================================================
+// Spec coverage: comment at start of document
+// ===========================================================================
+
+#[test]
+fn comment_at_start_of_document() {
+    let scn = "// This is a leading comment\n42";
+    let v: i32 = from_str(scn).unwrap();
+    assert_eq!(v, 42);
+
+    // Multiple leading comments
+    let scn = "// comment 1\n// comment 2\n\"hello\"";
+    let v: String = from_str(scn).unwrap();
+    assert_eq!(v, "hello");
+}
+
+// ===========================================================================
+// Spec coverage: underscore-prefixed identifiers as variants
+// ===========================================================================
+
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
+enum WithUnderscore {
+    _Private,
+    __Internal(i32),
+}
+
+#[test]
+fn underscore_prefixed_variant() {
+    // Spec IDENT: [a-zA-Z_][a-zA-Z0-9_]*
+    roundtrip(&WithUnderscore::_Private);
+    roundtrip(&WithUnderscore::__Internal(42));
+
+    // Verify it parses from text
+    let val = super::parse::parse("_Private").unwrap();
+    assert!(matches!(val, ScnValue::Variant(tag, None) if tag == "_Private"));
+
+    let val = super::parse::parse("__Internal 42").unwrap();
+    assert!(
+        matches!(&val, ScnValue::Variant(tag, Some(payload)) if tag == "__Internal" && **payload == ScnValue::Int(42))
+    );
+}
+
+// ===========================================================================
+// Spec coverage: tab and CR as whitespace
+// ===========================================================================
+
+#[test]
+fn tab_and_cr_as_whitespace() {
+    // Spec: "Spaces, tabs, newlines, and carriage returns are whitespace"
+    // Tabs between tokens
+    let v: i32 = from_str("\t42\t").unwrap();
+    assert_eq!(v, 42);
+
+    // Tab-separated struct fields
+    let scn = "{\tname:\t\"test\"\tvalue:\t42\tflag:\ttrue\t}";
+    let s: Simple = from_str(scn).unwrap();
+    assert_eq!(s.name, "test");
+    assert_eq!(s.value, 42);
+    assert!(s.flag);
+
+    // CR+LF line endings
+    let scn = "{\r\n  name: \"test\"\r\n  value: 42\r\n  flag: true\r\n}";
+    let s: Simple = from_str(scn).unwrap();
+    assert_eq!(s.name, "test");
+    assert_eq!(s.value, 42);
+    assert!(s.flag);
+}
+
+// ===========================================================================
+// Spec coverage: full example (complex structure from spec)
+// ===========================================================================
+
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
+enum StaticValue {
+    Int(i32),
+    Float(f64),
+    Str(String),
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
+enum PortBinding {
+    None,
+    Bind { target_id: String, port_idx: u32 },
+    Const(StaticValue),
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
+enum Behavior {
+    Once,
+    Always,
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
+struct Port {
+    name: String,
+    binding: PortBinding,
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
+struct Event {
+    name: String,
+    subscribers: Vec<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
+struct Node {
+    id: String,
+    func_id: String,
+    name: String,
+    behavior: Behavior,
+    inputs: Vec<Port>,
+    events: Vec<Event>,
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
+struct Graph {
+    nodes: Vec<Node>,
+}
+
+#[test]
+fn full_spec_example() {
+    // Based on the SPEC.md full example
+    let graph = Graph {
+        nodes: vec![Node {
+            id: "579ae1d6-10a3-4906-8948-135cb7d7508b".to_string(),
+            func_id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890".to_string(),
+            name: "mult".to_string(),
+            behavior: Behavior::Once,
+            inputs: vec![
+                Port {
+                    name: "a".to_string(),
+                    binding: PortBinding::Bind {
+                        target_id: "999c4d37-e0eb-4856-be3f-ad2090c84d8c".to_string(),
+                        port_idx: 0,
+                    },
+                },
+                Port {
+                    name: "b".to_string(),
+                    binding: PortBinding::Const(StaticValue::Int(-7)),
+                },
+                Port {
+                    name: "c".to_string(),
+                    binding: PortBinding::None,
+                },
+            ],
+            events: vec![Event {
+                name: "on_complete".to_string(),
+                subscribers: vec!["b88ab7e2-17b7-46cb-bc8e-b428bb45141e".to_string()],
+            }],
+        }],
+    };
+
+    // Roundtrip the complex structure
+    roundtrip(&graph);
+
+    // Also verify it can be parsed from hand-written SCN text
+    let scn = r#"
+// Scenarium graph
+{
+  nodes: [
+    {
+      id: "579ae1d6-10a3-4906-8948-135cb7d7508b",
+      func_id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+      name: "mult",
+      behavior: Once,
+      inputs: [
+        {
+          name: "a",
+          binding: Bind {
+            target_id: "999c4d37-e0eb-4856-be3f-ad2090c84d8c",
+            port_idx: 0,
+          },
+        },
+        {
+          name: "b",
+          binding: Const Int -7,
+        },
+        {
+          name: "c",
+          binding: None,
+        },
+      ],
+      events: [
+        {
+          name: "on_complete",
+          subscribers: [
+            "b88ab7e2-17b7-46cb-bc8e-b428bb45141e",
+          ],
+        },
+      ],
+    },
+  ],
+}
+"#;
+    let parsed: Graph = from_str(scn).unwrap();
+    assert_eq!(parsed, graph);
 }
