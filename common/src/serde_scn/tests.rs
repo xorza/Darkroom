@@ -455,6 +455,18 @@ fn error_trailing_garbage() {
     assert!(result.is_err());
 }
 
+#[test]
+fn error_leading_zeros() {
+    let result = from_str::<i32>("007");
+    assert!(result.is_err());
+    let result = from_str::<i32>("-007");
+    assert!(result.is_err());
+    // 0 itself is fine
+    assert_eq!(from_str::<i32>("0").unwrap(), 0);
+    // 0.5 is fine
+    assert_eq!(from_str::<f64>("0.5").unwrap(), 0.5);
+}
+
 // ===========================================================================
 // Trailing commas
 // ===========================================================================

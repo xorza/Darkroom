@@ -190,18 +190,8 @@ fn emit_variant<W: Write>(
     }
     w.write_all(tag.as_bytes())?;
     if let Some(inner) = payload {
-        match inner.as_ref() {
-            ScnValue::Map(_) => {
-                // Struct variant: Tag { ... }
-                w.write_all(b" ")?;
-                emit_value(w, inner, indent, false)?;
-            }
-            _ => {
-                // Newtype variant: Tag value
-                w.write_all(b" ")?;
-                emit_value(w, inner, indent, false)?;
-            }
-        }
+        w.write_all(b" ")?;
+        emit_value(w, inner, indent, false)?;
     }
     Ok(())
 }

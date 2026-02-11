@@ -43,7 +43,7 @@ Only these two keywords. No `yes`/`no`/`on`/`off`.
 
 ## Numbers
 
-**Integers:** Optional `-` followed by digits. No leading zeros except `0` itself.
+**Integers:** Optional `-` followed by digits. No leading zeros (except `0` itself).
 
 ```
 0
@@ -63,6 +63,8 @@ Only these two keywords. No `yes`/`no`/`on`/`off`.
 ```
 
 Integer vs float is distinguished by the presence of `.` or `e`/`E`.
+
+**Special values:** NaN and Infinity are not representable. They serialize as `null`.
 
 ## Strings
 
@@ -99,15 +101,15 @@ Triple-quoted strings. No escape processing. Leading whitespace on each line is 
 
 ## Arrays
 
-Comma-separated or newline-separated values between `[` and `]`. Trailing commas allowed.
+Comma-separated values between `[` and `]`. Trailing commas allowed. Newlines are whitespace and do not act as separators.
 
 ```
 [1, 2, 3]
 
 [
-  "alice"
-  "bob"
-  "charlie"
+  "alice",
+  "bob",
+  "charlie",
 ]
 
 ["mixed", 42, true, null]
@@ -115,9 +117,11 @@ Comma-separated or newline-separated values between `[` and `]`. Trailing commas
 []
 ```
 
+**Note:** Commas between items are required when variant values are present, because the parser greedily consumes following tokens as variant payloads. Simple values (numbers, strings, booleans, null) can be separated by whitespace alone, but commas are always recommended for clarity.
+
 ## Maps
 
-Key-value pairs between `{` and `}`. Keys followed by `:` then value. Pairs separated by commas or newlines. Trailing commas allowed.
+Key-value pairs between `{` and `}`. Keys followed by `:` then value. Pairs separated by commas. Trailing commas allowed.
 
 **Keys** are either:
 - Bare identifiers: `[a-zA-Z_][a-zA-Z0-9_]*` (cannot be `true`, `false`, `null`)
@@ -127,9 +131,9 @@ Key-value pairs between `{` and `}`. Keys followed by `:` then value. Pairs sepa
 { name: "Alice", age: 30 }
 
 {
-  name: "Alice"
-  age: 30
-  active: true
+  name: "Alice",
+  age: 30,
+  active: true,
 }
 
 {}
@@ -137,10 +141,10 @@ Key-value pairs between `{` and `}`. Keys followed by `:` then value. Pairs sepa
 
 ## Variants (Tagged Unions)
 
-Three forms matching Rust enum serialization:
+Variants are bare identifiers that represent Rust enum values. Three forms:
 
 ### Unit Variant
-A bare identifier (uppercase start distinguishes from keys in context).
+A bare identifier with no payload. Terminated by a comma, closing bracket, or end of input.
 
 ```
 None
@@ -148,10 +152,8 @@ AsFunction
 Red
 ```
 
-Serialized by serde as a string. During deserialization, serde's enum visitor receives the identifier as the variant name.
-
 ### Newtype Variant
-Tag followed by a single value.
+Identifier followed by a single value.
 
 ```
 Const 42
@@ -160,18 +162,32 @@ Some [1, 2, 3]
 ```
 
 ### Struct Variant
-Tag followed by a map body `{ ... }`.
+Identifier followed by a map body `{ ... }`.
 
 ```
 Bind {
-  target_id: "579ae1d6-10a3-4906-8948-135cb7d7508b"
-  port_idx: 0
+  target_id: "579ae1d6-10a3-4906-8948-135cb7d7508b",
+  port_idx: 0,
 }
+```
 
-Enum {
-  type_id: "abc-123"
-  variant_name: "Red"
-}
+### Greedy Parsing
+
+The parser is greedy: after reading an identifier, if the next token can start a value (`{`, `[`, `"`, number, `true`, `false`, `null`, or another identifier), it is consumed as the variant's payload. This means consecutive variants without commas are ambiguous:
+
+```
+// AMBIGUOUS — don't do this:
+[None Const 10]     // parses as [Variant("None", Variant("Const", 10))]
+
+// CORRECT — use commas:
+[None, Const 10]    // parses as [Variant("None"), Variant("Const", 10)]
+```
+
+Nested variants work naturally through greedy parsing:
+
+```
+// Outer::Inner(Binding::None) serializes as:
+Inner None          // Variant("Inner", Variant("None"))
 ```
 
 ### How Variants Map to Serde
@@ -184,7 +200,7 @@ Serde serializes Rust enums as:
 SCN represents these more naturally:
 - Unit variant → bare identifier `None`
 - Newtype variant → `Const 42`
-- Struct variant → `Bind { target_id: "..." port_idx: 0 }`
+- Struct variant → `Bind { target_id: "...", port_idx: 0 }`
 
 In the SCN value model, variants are stored as `Variant(tag, Option<Value>)` and map to serde's enum serialization protocol.
 
@@ -195,25 +211,22 @@ Line comments start with `//` and extend to end of line.
 ```
 {
   // This is a comment
-  name: "Alice"  // inline comment
-  age: 30
+  name: "Alice",  // inline comment
+  age: 30,
 }
 ```
 
 ## Separators
 
-Items in arrays and maps can be separated by:
-- Commas: `[1, 2, 3]`
-- Newlines: items on separate lines
-- Both: `[1,\n2,\n3,\n]`
+Items in arrays and key-value pairs in maps are separated by commas. Trailing commas are always allowed. Whitespace (including newlines) separates tokens but does not serve as an item separator.
 
-Trailing commas are always allowed.
+For simple values (no variants), omitting commas between items works in practice because the parser can unambiguously determine where each value ends. However, commas are always recommended and the canonical output always includes them.
 
 ## Whitespace
 
 Spaces, tabs, newlines, and carriage returns are whitespace. Whitespace is not significant for structure (brackets define nesting). Whitespace separates tokens.
 
-## Grammar (LL(1))
+## Grammar
 
 ```
 document  = value EOF
@@ -226,18 +239,15 @@ value     = 'null'
           | map
           | variant
 
-array     = '[' (value (sep value)*)? ']'
-map       = '{' (pair (sep pair)*)? '}'
+array     = '[' (value (',' value)* ','?)? ']'
+map       = '{' (pair (',' pair)* ','?)? '}'
 pair      = key ':' value
 key       = IDENT | STRING
 
-variant   = IDENT value?       // only when IDENT is not a keyword
-
-sep       = ',' | NEWLINE      // at least one required between items
-                               // (trailing comma OK)
+variant   = IDENT value?       // greedy: consumes next value if present
 
 IDENT     = [a-zA-Z_][a-zA-Z0-9_]*   // excluding 'true', 'false', 'null'
-NUMBER    = '-'? [0-9]+ ('.' [0-9]+)? ([eE] [+-]? [0-9]+)?
+NUMBER    = '-'? ('0' | [1-9][0-9]*) ('.' [0-9]+)? ([eE] [+-]? [0-9]+)?
 STRING    = '"' (escape | [^"\\])* '"'
           | '"""' raw_content '"""'
 ```
@@ -251,7 +261,7 @@ The first token determines the production:
 - digit or `-` → number
 - `true`/`false` → boolean
 - `null` → null
-- identifier → variant (look ahead: if next token starts a value, it's newtype/struct variant; otherwise unit variant)
+- identifier → variant (greedy: if next token starts a value, consume it as payload; otherwise unit variant)
 
 ## Full Example
 
@@ -260,36 +270,37 @@ The first token determines the production:
 {
   nodes: [
     {
-      id: "579ae1d6-10a3-4906-8948-135cb7d7508b"
-      func_id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
-      name: "mult"
-      behavior: Once
+      id: "579ae1d6-10a3-4906-8948-135cb7d7508b",
+      func_id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+      name: "mult",
+      behavior: Once,
       inputs: [
         {
-          name: "a"
+          name: "a",
           binding: Bind {
-            target_id: "999c4d37-e0eb-4856-be3f-ad2090c84d8c"
-            port_idx: 0
-          }
-        }
+            target_id: "999c4d37-e0eb-4856-be3f-ad2090c84d8c",
+            port_idx: 0,
+          },
+        },
         {
-          name: "b"
-          binding: Const Int -7
-        }
+          name: "b",
+          // Const wraps a StaticValue::Int — nested variants via greedy parsing
+          binding: Const Int -7,
+        },
         {
-          name: "c"
-          binding: None
-        }
-      ]
+          name: "c",
+          binding: None,
+        },
+      ],
       events: [
         {
-          name: "on_complete"
+          name: "on_complete",
           subscribers: [
-            "b88ab7e2-17b7-46cb-bc8e-b428bb45141e"
-          ]
-        }
-      ]
-    }
-  ]
+            "b88ab7e2-17b7-46cb-bc8e-b428bb45141e",
+          ],
+        },
+      ],
+    },
+  ],
 }
 ```

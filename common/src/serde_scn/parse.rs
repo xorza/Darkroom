@@ -175,26 +175,24 @@ impl<'a> Lexer<'a> {
                     }
                 }
                 _ => {
-                    // UTF-8: this byte is part of a codepoint
-                    // Rewind one byte and decode the char from the full input
-                    self.pos -= 1;
                     if b < 0x80 {
-                        // plain ASCII
-                        self.col -= 1;
+                        // Plain ASCII — already advanced
+                        result.push(b as char);
                     } else {
+                        // Multi-byte UTF-8: rewind and decode the full codepoint
+                        self.pos -= 1;
                         self.col -= 1;
+                        let s = std::str::from_utf8(&self.input[self.pos..])
+                            .map_err(|_| self.error("invalid UTF-8 in string"))?;
+                        let ch = s
+                            .chars()
+                            .next()
+                            .ok_or_else(|| self.error("unexpected end of string"))?;
+                        for _ in 0..ch.len_utf8() {
+                            self.advance();
+                        }
+                        result.push(ch);
                     }
-                    let s = std::str::from_utf8(&self.input[self.pos..])
-                        .map_err(|_| self.error("invalid UTF-8 in string"))?;
-                    let ch = s
-                        .chars()
-                        .next()
-                        .ok_or_else(|| self.error("unexpected end of string"))?;
-                    let ch_len = ch.len_utf8();
-                    for _ in 0..ch_len {
-                        self.advance();
-                    }
-                    result.push(ch);
                 }
             }
         }
@@ -285,7 +283,17 @@ impl<'a> Lexer<'a> {
             return Err(self.error("expected digit after '-'"));
         }
 
-        // Integer part
+        // Reject leading zeros (except 0 itself, 0.x, 0eN)
+        let first_digit = self.input[self.pos];
+        self.advance();
+        if first_digit == b'0'
+            && self.pos < self.input.len()
+            && self.input[self.pos].is_ascii_digit()
+        {
+            return Err(self.error("leading zeros are not allowed"));
+        }
+
+        // Remaining integer digits
         while self.pos < self.input.len() && self.input[self.pos].is_ascii_digit() {
             self.advance();
         }
