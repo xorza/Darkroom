@@ -50,8 +50,7 @@ fn emit_float<W: Write>(w: &mut W, f: f64, indent: usize, at_start: bool) -> Res
     if f.is_nan() {
         w.write_all(b"null")?;
     } else if f.is_infinite() {
-        // Represent infinities as very large/small numbers. SCN doesn't have inf literals.
-        // Use null to avoid data corruption.
+        // SCN doesn't have inf literals — emit null to avoid data corruption.
         w.write_all(b"null")?;
     } else {
         // Ensure float always has a decimal point so it parses back as float

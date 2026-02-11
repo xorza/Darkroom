@@ -453,16 +453,12 @@ impl<'a> Parser<'a> {
         let mut items = Vec::new();
 
         loop {
-            // Skip commas between/before items
-            while matches!(self.peek()?, Token::Comma) {
-                self.next()?;
-            }
             if matches!(self.peek()?, Token::RBracket) {
                 self.next()?;
                 return Ok(ScnValue::Array(items));
             }
             items.push(self.parse_value()?);
-            // Optional comma after item
+            // Optional comma after item (separator or trailing)
             if matches!(self.peek()?, Token::Comma) {
                 self.next()?;
             }
@@ -474,10 +470,6 @@ impl<'a> Parser<'a> {
         let mut entries = Vec::new();
 
         loop {
-            // Skip commas
-            while matches!(self.peek()?, Token::Comma) {
-                self.next()?;
-            }
             if matches!(self.peek()?, Token::RBrace) {
                 self.next()?;
                 return Ok(ScnValue::Map(entries));
@@ -488,6 +480,7 @@ impl<'a> Parser<'a> {
             let value = self.parse_value()?;
             entries.push((key, value));
 
+            // Optional comma after entry (separator or trailing)
             if matches!(self.peek()?, Token::Comma) {
                 self.next()?;
             }

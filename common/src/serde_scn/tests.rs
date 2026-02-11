@@ -613,3 +613,195 @@ fn nested_variants() {
         label: "x".to_string(),
     }));
 }
+
+// ===========================================================================
+// NaN and Infinity (lossy — serialized as null)
+// ===========================================================================
+
+#[test]
+fn nan_serializes_as_null() {
+    let scn = to_string(&f64::NAN).unwrap();
+    assert_eq!(scn, "null\n");
+    // Deserializes back as Option::None since null can't represent a float
+    let v: Option<f64> = from_str(&scn).unwrap();
+    assert_eq!(v, None);
+}
+
+#[test]
+fn infinity_serializes_as_null() {
+    let scn = to_string(&f64::INFINITY).unwrap();
+    assert_eq!(scn, "null\n");
+    let scn = to_string(&f64::NEG_INFINITY).unwrap();
+    assert_eq!(scn, "null\n");
+}
+
+// ===========================================================================
+// Empty and whitespace-only input
+// ===========================================================================
+
+#[test]
+fn error_empty_input() {
+    let result = from_str::<i32>("");
+    assert!(result.is_err());
+}
+
+#[test]
+fn error_whitespace_only_input() {
+    let result = from_str::<i32>("   \n\n  ");
+    assert!(result.is_err());
+}
+
+#[test]
+fn error_comment_only_input() {
+    let result = from_str::<i32>("// just a comment\n");
+    assert!(result.is_err());
+}
+
+// ===========================================================================
+// Unicode escape roundtrip
+// ===========================================================================
+
+#[test]
+fn unicode_escape_roundtrip() {
+    // Emoji roundtrips through normal UTF-8 (not escaped)
+    roundtrip(&"\u{1f600}".to_string());
+    // Control chars use \u{hex} escape
+    let scn = to_string(&"\x07".to_string()).unwrap();
+    assert!(scn.contains("\\u{7}"));
+    let v: String = from_str(&scn).unwrap();
+    assert_eq!(v, "\x07");
+}
+
+#[test]
+fn unicode_escape_parse() {
+    let scn = r#""\u{1f600}""#;
+    let v: String = from_str(scn).unwrap();
+    assert_eq!(v, "\u{1f600}");
+}
+
+// ===========================================================================
+// Triple-quoted string edge cases
+// ===========================================================================
+
+#[test]
+fn triple_quoted_empty() {
+    let scn = "\"\"\"\"\"\"";
+    let v: String = from_str(scn).unwrap();
+    assert_eq!(v, "");
+}
+
+#[test]
+fn triple_quoted_single_line() {
+    let scn = "\"\"\"\nhello\n\"\"\"";
+    let v: String = from_str(scn).unwrap();
+    assert_eq!(v, "hello");
+}
+
+#[test]
+fn triple_quoted_preserves_internal_blank_lines() {
+    let scn = "\"\"\"\na\n\nb\n\"\"\"";
+    let v: String = from_str(scn).unwrap();
+    assert_eq!(v, "a\n\nb");
+}
+
+// ===========================================================================
+// Error: unterminated triple-quoted string
+// ===========================================================================
+
+#[test]
+fn error_unterminated_triple_quoted() {
+    let result = from_str::<String>("\"\"\"hello");
+    assert!(result.is_err());
+    let err = result.unwrap_err().to_string();
+    assert!(err.contains("unterminated"), "error was: {err}");
+}
+
+// ===========================================================================
+// Error: unknown escape sequence
+// ===========================================================================
+
+#[test]
+fn error_unknown_escape() {
+    let result = from_str::<String>(r#""\q""#);
+    assert!(result.is_err());
+    let err = result.unwrap_err().to_string();
+    assert!(err.contains("unknown escape"), "error was: {err}");
+}
+
+// ===========================================================================
+// Parse error positions
+// ===========================================================================
+
+#[test]
+fn error_position_accuracy() {
+    let input = "{\n  name: \"ok\"\n  value: }\n}";
+    let result = from_str::<Simple>(input);
+    assert!(result.is_err());
+    let err = result.unwrap_err();
+    match err {
+        ScnError::Parse { line, .. } => {
+            assert_eq!(line, 3, "error should be on line 3");
+        }
+        other => panic!("expected Parse error, got: {other}"),
+    }
+}
+
+// ===========================================================================
+// Variant with array payload
+// ===========================================================================
+
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
+enum WithArray {
+    Items(Vec<i32>),
+}
+
+#[test]
+fn variant_with_array_payload() {
+    roundtrip(&WithArray::Items(vec![1, 2, 3]));
+    roundtrip(&WithArray::Items(vec![]));
+}
+
+// ===========================================================================
+// Multiple consecutive commas rejected
+// ===========================================================================
+
+#[test]
+fn error_multiple_consecutive_commas_array() {
+    let result = from_str::<Vec<i32>>("[1,,2]");
+    assert!(
+        result.is_err(),
+        "multiple consecutive commas should be rejected"
+    );
+}
+
+#[test]
+fn error_multiple_consecutive_commas_map() {
+    let result = from_str::<Simple>(r#"{ name: "x",, value: 1, flag: true }"#);
+    assert!(
+        result.is_err(),
+        "multiple consecutive commas should be rejected"
+    );
+}
+
+// ===========================================================================
+// Deeply nested structures
+// ===========================================================================
+
+#[test]
+fn deeply_nested() {
+    let mut val = Complex {
+        id: 0,
+        name: "leaf".to_string(),
+        bindings: vec![],
+        nested: None,
+    };
+    for i in 1..=20 {
+        val = Complex {
+            id: i,
+            name: format!("level_{i}"),
+            bindings: vec![Binding::Const(i as i32)],
+            nested: Some(Box::new(val)),
+        };
+    }
+    roundtrip(&val);
+}
