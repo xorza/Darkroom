@@ -38,6 +38,14 @@ const MIN_ZOOM: f32 = 0.2;
 const MAX_ZOOM: f32 = 4.0;
 const WHEEL_ZOOM_SPEED: f32 = 0.08;
 
+#[derive(Debug)]
+struct ButtonResult {
+    response: Response,
+    fit_all: bool,
+    view_selected: bool,
+    reset_view: bool,
+}
+
 // ============================================================================
 // Types
 // ============================================================================
@@ -155,7 +163,19 @@ impl GraphUi {
             });
 
             // Phase 2: Overlays (buttons, details panel, new-node popup)
-            let mut overlay_hovered = self.render_buttons(gui, &mut ctx).hovered();
+            let buttons = self.render_buttons(gui, ctx.autorun);
+            if buttons.reset_view {
+                ctx.view_graph.scale = 1.0;
+                ctx.view_graph.pan = Vec2::ZERO;
+            }
+            if buttons.view_selected {
+                view_selected_node(gui, &mut ctx, &self.graph_layout);
+            }
+            if buttons.fit_all {
+                fit_all_nodes(gui, &mut ctx, &self.graph_layout);
+            }
+
+            let mut overlay_hovered = buttons.response.hovered();
             overlay_hovered |= self
                 .node_details_ui
                 .show(gui, &mut ctx, &mut self.ui_interaction)
@@ -474,8 +494,8 @@ impl GraphUi {
         }
     }
 
-    fn render_buttons(&mut self, gui: &mut Gui<'_>, ctx: &mut GraphContext) -> Response {
-        let mut autorun = ctx.autorun;
+    fn render_buttons(&mut self, gui: &mut Gui<'_>, autorun: bool) -> ButtonResult {
+        let mut autorun = autorun;
         let rect = gui.rect;
         let mut fit_all = false;
         let mut view_selected = false;
@@ -561,19 +581,12 @@ impl GraphUi {
         })
         .inner;
 
-        // Apply view actions
-        if reset_view {
-            ctx.view_graph.scale = 1.0;
-            ctx.view_graph.pan = Vec2::ZERO;
+        ButtonResult {
+            response,
+            fit_all,
+            view_selected,
+            reset_view,
         }
-        if view_selected {
-            view_selected_node(gui, ctx, &self.graph_layout);
-        }
-        if fit_all {
-            fit_all_nodes(gui, ctx, &self.graph_layout);
-        }
-
-        response
     }
 
     // ------------------------------------------------------------------------
