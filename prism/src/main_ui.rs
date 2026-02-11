@@ -152,7 +152,7 @@ impl MainUi {
                 .render(&mut Gui::new(ui, &style), app_data, &self.arena)
         });
 
-        app_data.handle_interaction();
+        app_data.handle_interaction(self.graph_ui.ui_interaction());
         self.arena.reset();
     }
 
@@ -171,7 +171,7 @@ impl MainUi {
             input.key_pressed(egui::Key::Z) && input.modifiers.command && input.modifiers.shift
         });
         if undo_pressed {
-            app_data.undo();
+            app_data.undo(self.graph_ui.ui_interaction());
         } else if redo_pressed {
             app_data.redo();
         }
@@ -207,13 +207,14 @@ impl MainUi {
         });
 
         if toggle_autorun_pressed {
+            let interaction = self.graph_ui.ui_interaction();
             if app_data.autorun {
-                app_data.interaction.run_cmd = RunCommand::StopAutorun;
+                interaction.run_cmd = RunCommand::StopAutorun;
             } else {
-                app_data.interaction.run_cmd = RunCommand::StartAutorun;
+                interaction.run_cmd = RunCommand::StartAutorun;
             }
         } else if run_once_pressed {
-            app_data.interaction.run_cmd = RunCommand::RunOnce;
+            self.graph_ui.ui_interaction().run_cmd = RunCommand::RunOnce;
         }
     }
 

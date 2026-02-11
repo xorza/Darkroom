@@ -12,7 +12,7 @@ use crate::common::positioned_ui::PositionedUi;
 use crate::model::EventSubscriberChange;
 use crate::model::graph_ui_action::GraphUiAction;
 use scenarium::graph::NodeId;
-use scenarium::prelude::{Binding, ExecutionStats, PortAddress};
+use scenarium::prelude::{Binding, PortAddress};
 
 use crate::common::UiEquals;
 
@@ -86,17 +86,28 @@ pub struct GraphUi {
     dots_background: GraphBackgroundRenderer,
     new_node_ui: NewNodeUi,
     node_details_ui: NodeDetailsUi,
+    ui_interaction: GraphUiInteraction,
 }
 
 impl GraphUi {
+    pub fn ui_interaction(&mut self) -> &mut GraphUiInteraction {
+        &mut self.ui_interaction
+    }
+
+    fn cancel_interaction(&mut self) {
+        self.interaction.reset_to_idle();
+        self.connections.stop_drag();
+    }
+
     // ------------------------------------------------------------------------
     // Main render entry point
     // ------------------------------------------------------------------------
 
     pub fn render(&mut self, gui: &mut Gui<'_>, app_data: &mut AppData, arena: &Bump) {
+        self.ui_interaction.clear();
+
         if self.should_cancel_interaction(gui) {
-            self.interaction.reset_to_idle();
-            self.connections.stop_drag();
+            self.cancel_interaction();
         }
 
         let rect = self.draw_background_frame(gui);
@@ -113,25 +124,21 @@ impl GraphUi {
             let (background_response, pointer_pos) = self.setup_background_interaction(gui, rect);
 
             if background_response.clicked() {
-                self.handle_background_click(&mut ctx, &mut app_data.interaction);
+                self.handle_background_click(&mut ctx);
             }
 
+            // Phase 1: Graph content (layout, background, connections, nodes)
             gui.set_scale(ctx.view_graph.scale);
 
             self.graph_layout.update(gui, &ctx);
             self.dots_background.render(gui, &ctx);
-            self.render_connections(
-                gui,
-                &mut ctx,
-                app_data.execution_stats.as_ref(),
-                &mut app_data.interaction,
-            );
+            self.render_connections(gui, &mut ctx);
 
             let port_interact_cmd = self.node_ui.render_nodes(
                 gui,
                 &mut ctx,
                 &mut self.graph_layout,
-                &mut app_data.interaction,
+                &mut self.ui_interaction,
                 self.interaction.breaker(),
             );
 
@@ -142,41 +149,30 @@ impl GraphUi {
                     &background_response,
                     pointer_pos,
                     port_interact_cmd,
-                    &mut app_data.interaction,
                 );
             }
 
+            // Phase 2: Overlays (buttons, details panel, new-node popup)
             gui.set_scale(1.0);
+
             let mut overlay_hovered = self
-                .render_buttons(gui, &mut ctx, &mut app_data.interaction, app_data.autorun)
+                .render_buttons(gui, &mut ctx, app_data.autorun)
                 .hovered();
             overlay_hovered |= self
                 .node_details_ui
                 .show(
                     gui,
                     &mut ctx,
-                    &mut app_data.interaction,
+                    &mut self.ui_interaction,
                     &mut app_data.argument_values_cache,
                 )
                 .hovered();
+            overlay_hovered |=
+                self.handle_new_node_popup(gui, &mut ctx, pointer_pos, &background_response, arena);
 
-            overlay_hovered |= self.handle_new_node_popup(
-                gui,
-                &mut ctx,
-                pointer_pos,
-                &mut app_data.interaction,
-                &background_response,
-                arena,
-            );
-
+            // Phase 3: Zoom and pan (only when no overlay is hovered)
             if !overlay_hovered && (self.interaction.is_idle() || self.interaction.is_panning()) {
-                self.update_zoom_and_pan(
-                    gui,
-                    &mut ctx,
-                    &background_response,
-                    pointer_pos,
-                    &mut app_data.interaction,
-                );
+                self.update_zoom_and_pan(gui, &mut ctx, &background_response, pointer_pos);
             }
         });
     }
@@ -246,18 +242,13 @@ impl GraphUi {
         (response, pointer_pos)
     }
 
-    fn handle_background_click(
-        &mut self,
-        ctx: &mut GraphContext<'_>,
-        ui_interaction: &mut GraphUiInteraction,
-    ) {
-        self.interaction.reset_to_idle();
-        self.connections.stop_drag();
+    fn handle_background_click(&mut self, ctx: &mut GraphContext<'_>) {
+        self.cancel_interaction();
 
         if ctx.view_graph.selected_node_id.is_some() {
             let before = ctx.view_graph.selected_node_id;
             ctx.view_graph.selected_node_id = None;
-            ui_interaction.add_action(GraphUiAction::NodeSelected {
+            self.ui_interaction.add_action(GraphUiAction::NodeSelected {
                 before,
                 after: None,
             });
@@ -268,7 +259,6 @@ impl GraphUi {
     // Connection processing
     // ------------------------------------------------------------------------
 
-    #[allow(clippy::too_many_arguments)]
     fn process_connections(
         &mut self,
         gui: &mut Gui<'_>,
@@ -276,7 +266,6 @@ impl GraphUi {
         background_response: &Response,
         pointer_pos: Pos2,
         port_interact_cmd: PortInteractCommand,
-        interaction: &mut GraphUiInteraction,
     ) {
         let primary_down = matches!(
             Self::get_primary_button_state(gui),
@@ -284,7 +273,7 @@ impl GraphUi {
         );
 
         match self.interaction.mode() {
-            InteractionMode::PanningGraph => return,
+            InteractionMode::PanningGraph => {}
             InteractionMode::Idle => {
                 let pointer_on_background =
                     background_response.hovered() && !self.connections.any_hovered();
@@ -294,24 +283,24 @@ impl GraphUi {
                     pointer_on_background,
                     port_interact_cmd,
                 );
-                return;
             }
-            InteractionMode::BreakingConnections | InteractionMode::DraggingNewConnection => {
-                let id = gui.ui.make_persistent_id("temp overlay background");
-                let rect = gui.rect;
-                gui.ui().interact(rect, id, Sense::all());
-            }
-        };
-
-        match self.interaction.mode() {
-            InteractionMode::PanningGraph | InteractionMode::Idle => unreachable!(),
             InteractionMode::BreakingConnections => {
-                self.handle_breaking_connections(ctx, interaction, pointer_pos, primary_down);
+                Self::capture_overlay(gui);
+                self.handle_breaking_connections(ctx, pointer_pos, primary_down);
             }
             InteractionMode::DraggingNewConnection => {
-                self.handle_dragging_connection(ctx, interaction, pointer_pos, port_interact_cmd);
+                Self::capture_overlay(gui);
+                self.handle_dragging_connection(ctx, pointer_pos, port_interact_cmd);
             }
         }
+    }
+
+    /// Captures all input over the graph area to prevent background interaction
+    /// while breaking connections or dragging a new connection.
+    fn capture_overlay(gui: &mut Gui<'_>) {
+        let id = gui.ui().make_persistent_id("temp overlay background");
+        let rect = gui.rect;
+        gui.ui().interact(rect, id, Sense::all());
     }
 
     fn handle_idle_state(
@@ -336,7 +325,6 @@ impl GraphUi {
     fn handle_breaking_connections(
         &mut self,
         ctx: &mut GraphContext<'_>,
-        ui_interaction: &mut GraphUiInteraction,
         pointer_pos: Pos2,
         primary_down: bool,
     ) {
@@ -345,17 +333,12 @@ impl GraphUi {
             return;
         }
 
-        self.apply_broken_connections(ctx, ui_interaction);
-        self.remove_nodes_hit_by_breaker(ctx, ui_interaction);
-        self.interaction.reset_to_idle();
-        self.connections.stop_drag();
+        self.apply_broken_connections(ctx);
+        self.remove_nodes_hit_by_breaker(ctx);
+        self.cancel_interaction();
     }
 
-    fn apply_broken_connections(
-        &self,
-        ctx: &mut GraphContext<'_>,
-        interaction: &mut GraphUiInteraction,
-    ) {
+    fn apply_broken_connections(&mut self, ctx: &mut GraphContext<'_>) {
         let iter = self
             .connections
             .broke_iter()
@@ -378,7 +361,7 @@ impl GraphUi {
                     let before = input.binding.clone();
                     input.binding = Binding::None;
 
-                    interaction.add_action(GraphUiAction::InputChanged {
+                    self.ui_interaction.add_action(GraphUiAction::InputChanged {
                         node_id: input_node_id,
                         input_idx,
                         before,
@@ -400,42 +383,37 @@ impl GraphUi {
 
                     if event.subscribers.contains(&trigger_node_id) {
                         event.subscribers.retain(|sub| *sub != trigger_node_id);
-                        interaction.add_action(GraphUiAction::EventConnectionChanged {
-                            event_node_id,
-                            event_idx,
-                            subscriber: trigger_node_id,
-                            change: EventSubscriberChange::Removed,
-                        });
+                        self.ui_interaction
+                            .add_action(GraphUiAction::EventConnectionChanged {
+                                event_node_id,
+                                event_idx,
+                                subscriber: trigger_node_id,
+                                change: EventSubscriberChange::Removed,
+                            });
                     }
                 }
             }
         }
     }
 
-    fn remove_nodes_hit_by_breaker(
-        &self,
-        ctx: &mut GraphContext<'_>,
-        interaction: &mut GraphUiInteraction,
-    ) {
+    fn remove_nodes_hit_by_breaker(&mut self, ctx: &mut GraphContext<'_>) {
         for node_id in self.node_ui.node_ids_hit_breaker.iter() {
             let action = ctx.view_graph.removal_action(node_id);
             ctx.view_graph.remove_node(node_id);
-            interaction.add_action(action);
+            self.ui_interaction.add_action(action);
         }
     }
 
     fn handle_dragging_connection(
         &mut self,
         ctx: &mut GraphContext<'_>,
-        ui_interaction: &mut GraphUiInteraction,
         pointer_pos: Pos2,
         port_interact_cmd: PortInteractCommand,
     ) {
         match self.connections.update_drag(pointer_pos, port_interact_cmd) {
             ConnectionDragUpdate::InProgress => {}
             ConnectionDragUpdate::Finished => {
-                self.interaction.reset_to_idle();
-                self.connections.stop_drag();
+                self.cancel_interaction();
             }
             ConnectionDragUpdate::FinishedWithEmptyOutput { input_port } => {
                 assert_eq!(input_port.kind, PortKind::Input);
@@ -449,17 +427,15 @@ impl GraphUi {
                 input_port,
                 output_port,
             } => {
-                self.apply_connection(ctx, ui_interaction, input_port, output_port);
-                self.interaction.reset_to_idle();
-                self.connections.stop_drag();
+                self.apply_connection(ctx, input_port, output_port);
+                self.cancel_interaction();
             }
         }
     }
 
     fn apply_connection(
-        &self,
+        &mut self,
         ctx: &mut GraphContext<'_>,
-        interaction: &mut GraphUiInteraction,
         input_port: PortRef,
         output_port: PortRef,
     ) {
@@ -468,15 +444,15 @@ impl GraphUi {
         match output_port.kind {
             PortKind::Output => {
                 match apply_data_connection(ctx.view_graph, input_port, output_port) {
-                    Ok(action) => interaction.add_action(action),
-                    Err(err) => interaction.add_error(err),
+                    Ok(action) => self.ui_interaction.add_action(action),
+                    Err(err) => self.ui_interaction.add_error(err),
                 }
             }
             PortKind::Event => {
                 match apply_event_connection(ctx.view_graph, input_port, output_port) {
-                    Ok(Some(action)) => interaction.add_action(action),
+                    Ok(Some(action)) => self.ui_interaction.add_action(action),
                     Ok(None) => {}
-                    Err(err) => interaction.add_error(err),
+                    Err(err) => self.ui_interaction.add_error(err),
                 }
             }
             _ => unreachable!(),
@@ -487,19 +463,12 @@ impl GraphUi {
     // Rendering
     // ------------------------------------------------------------------------
 
-    fn render_connections(
-        &mut self,
-        gui: &mut Gui<'_>,
-        ctx: &mut GraphContext<'_>,
-        execution_stats: Option<&ExecutionStats>,
-        ui_interaction: &mut GraphUiInteraction,
-    ) {
+    fn render_connections(&mut self, gui: &mut Gui<'_>, ctx: &mut GraphContext<'_>) {
         self.connections.render(
             gui,
             ctx,
             &self.graph_layout,
-            execution_stats,
-            ui_interaction,
+            &mut self.ui_interaction,
             self.interaction.breaker(),
         );
 
@@ -512,7 +481,6 @@ impl GraphUi {
         &mut self,
         gui: &mut Gui<'_>,
         ctx: &mut GraphContext,
-        interaction: &mut GraphUiInteraction,
         mut autorun: bool,
     ) -> Response {
         let rect = gui.rect;
@@ -579,7 +547,7 @@ impl GraphUi {
                     gui.horizontal(|gui| {
                         let response = Button::default().text("run").show(gui);
                         if response.clicked() {
-                            interaction.run_cmd = RunCommand::RunOnce;
+                            self.ui_interaction.run_cmd = RunCommand::RunOnce;
                         }
 
                         let response = Button::default()
@@ -588,7 +556,7 @@ impl GraphUi {
                             .show(gui);
 
                         if response.clicked() {
-                            interaction.run_cmd = if autorun {
+                            self.ui_interaction.run_cmd = if autorun {
                                 RunCommand::StartAutorun
                             } else {
                                 RunCommand::StopAutorun
@@ -625,7 +593,6 @@ impl GraphUi {
         gui: &mut Gui<'_>,
         ctx: &mut GraphContext<'_>,
         pointer_pos: Option<Pos2>,
-        interaction: &mut GraphUiInteraction,
         background_response: &Response,
         arena: &Bump,
     ) -> bool {
@@ -638,10 +605,9 @@ impl GraphUi {
         let was_open = self.new_node_ui.is_open();
 
         if let Some(selection) = self.new_node_ui.show(gui, ctx.func_lib, arena) {
-            self.handle_new_node_selection(gui, ctx, interaction, selection);
+            self.handle_new_node_selection(gui, ctx, selection);
         } else if was_open && !self.new_node_ui.is_open() {
-            self.interaction.reset_to_idle();
-            self.connections.stop_drag();
+            self.cancel_interaction();
         }
 
         self.new_node_ui.is_open()
@@ -651,7 +617,6 @@ impl GraphUi {
         &mut self,
         gui: &Gui<'_>,
         ctx: &mut GraphContext<'_>,
-        interaction: &mut GraphUiInteraction,
         selection: NewNodeSelection,
     ) {
         match selection {
@@ -663,24 +628,19 @@ impl GraphUi {
                 let (node, view_node) = ctx.view_graph.add_node_from_func(func);
                 view_node.pos = graph_pos.to_pos2();
 
-                interaction.add_action(GraphUiAction::NodeAdded {
+                self.ui_interaction.add_action(GraphUiAction::NodeAdded {
                     view_node: view_node.clone(),
                     node: node.clone(),
                 });
             }
             NewNodeSelection::ConstBind => {
-                self.create_const_binding(ctx, interaction);
-                self.interaction.reset_to_idle();
-                self.connections.stop_drag();
+                self.create_const_binding(ctx);
+                self.cancel_interaction();
             }
         }
     }
 
-    fn create_const_binding(
-        &self,
-        ctx: &mut GraphContext<'_>,
-        interaction: &mut GraphUiInteraction,
-    ) {
+    fn create_const_binding(&mut self, ctx: &mut GraphContext<'_>) {
         let Some(connection_drag) = self.connections.temp_connection.as_ref() else {
             return;
         };
@@ -703,7 +663,7 @@ impl GraphUi {
             .into();
         let after = input.binding.clone();
 
-        interaction.add_action(GraphUiAction::InputChanged {
+        self.ui_interaction.add_action(GraphUiAction::InputChanged {
             node_id: input_port.node_id,
             input_idx: input_port.port_idx,
             before,
@@ -721,7 +681,6 @@ impl GraphUi {
         ctx: &mut GraphContext<'_>,
         background_response: &Response,
         pointer_pos: Option<Pos2>,
-        interaction: &mut GraphUiInteraction,
     ) {
         let prev_scale = ctx.view_graph.scale;
         let prev_pan = ctx.view_graph.pan;
@@ -733,12 +692,13 @@ impl GraphUi {
         self.handle_pan_state(ctx, background_response);
 
         if !prev_scale.ui_equals(ctx.view_graph.scale) || !prev_pan.ui_equals(ctx.view_graph.pan) {
-            interaction.add_action(GraphUiAction::ZoomPanChanged {
-                before_pan: prev_pan,
-                before_scale: prev_scale,
-                after_pan: ctx.view_graph.pan,
-                after_scale: ctx.view_graph.scale,
-            });
+            self.ui_interaction
+                .add_action(GraphUiAction::ZoomPanChanged {
+                    before_pan: prev_pan,
+                    before_scale: prev_scale,
+                    after_pan: ctx.view_graph.pan,
+                    after_scale: ctx.view_graph.scale,
+                });
         }
     }
 
@@ -774,8 +734,7 @@ impl GraphUi {
             }
             InteractionMode::PanningGraph => {
                 if background_response.drag_stopped_by(PointerButton::Middle) {
-                    self.interaction.reset_to_idle();
-                    self.connections.stop_drag();
+                    self.cancel_interaction();
                 }
                 if background_response.dragged_by(PointerButton::Middle) {
                     ctx.view_graph.pan += background_response.drag_delta();

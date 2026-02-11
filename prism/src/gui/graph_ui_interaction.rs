@@ -13,8 +13,8 @@ pub enum RunCommand {
 
 #[derive(Debug, Default)]
 pub(crate) struct GraphUiInteraction {
-    actions1: Vec<GraphUiAction>,
-    actions2: Vec<GraphUiAction>,
+    coalesced_actions: Vec<GraphUiAction>,
+    immediate_actions: Vec<GraphUiAction>,
     pub errors: Vec<Error>,
     pub run_cmd: RunCommand,
     pub request_argument_values: Option<NodeId>,
@@ -24,8 +24,8 @@ pub(crate) struct GraphUiInteraction {
 
 impl GraphUiInteraction {
     pub fn clear(&mut self) {
-        self.actions1.clear();
-        self.actions2.clear();
+        self.coalesced_actions.clear();
+        self.immediate_actions.clear();
         self.errors.clear();
         self.run_cmd = RunCommand::None;
         self.request_argument_values = None;
@@ -33,8 +33,8 @@ impl GraphUiInteraction {
 
     pub fn action_stacks(&self) -> impl Iterator<Item = &'_ [GraphUiAction]> {
         [
-            (!self.actions1.is_empty()).then_some(self.actions1.as_slice()),
-            (!self.actions2.is_empty()).then_some(self.actions2.as_slice()),
+            (!self.coalesced_actions.is_empty()).then_some(self.coalesced_actions.as_slice()),
+            (!self.immediate_actions.is_empty()).then_some(self.immediate_actions.as_slice()),
         ]
         .into_iter()
         .flatten()
@@ -43,7 +43,7 @@ impl GraphUiInteraction {
     pub fn add_action(&mut self, action: GraphUiAction) {
         if action.immediate() {
             self.flush();
-            self.actions2.push(action);
+            self.immediate_actions.push(action);
         } else {
             self.add_pending_action(action);
         }
@@ -64,7 +64,7 @@ impl GraphUiInteraction {
         let pending = self.pending_action.take().unwrap();
         assert!(!pending.immediate());
         if std::mem::discriminant(&pending) != std::mem::discriminant(&action) {
-            self.actions1.push(pending);
+            self.coalesced_actions.push(pending);
             self.pending_action = Some(action);
             return;
         }
@@ -108,7 +108,7 @@ impl GraphUiInteraction {
                 });
             }
             _ => {
-                self.actions1.push(pending);
+                self.coalesced_actions.push(pending);
                 self.pending_action = Some(action);
             }
         }
@@ -116,7 +116,7 @@ impl GraphUiInteraction {
 
     pub fn flush(&mut self) {
         if let Some(pending) = self.pending_action.take() {
-            self.actions1.push(pending);
+            self.coalesced_actions.push(pending);
         }
     }
 }

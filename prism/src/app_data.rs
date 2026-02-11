@@ -33,7 +33,6 @@ const UNDO_MAX_STEPS: usize = 256;
 pub struct AppData {
     pub func_lib: FuncLib,
     pub view_graph: ViewGraph,
-    pub interaction: GraphUiInteraction,
     pub execution_stats: Option<ExecutionStats>,
     pub argument_values_cache: ArgumentValuesCache,
 
@@ -73,7 +72,6 @@ impl AppData {
         let mut result = Self {
             func_lib,
             view_graph: ViewGraph::default(),
-            interaction: GraphUiInteraction::default(),
             execution_stats: None,
             argument_values_cache: ArgumentValuesCache::default(),
             config,
@@ -188,9 +186,9 @@ impl AppData {
         }
     }
 
-    pub fn undo(&mut self) {
-        self.interaction.flush();
-        self.handle_actions();
+    pub fn undo(&mut self, interaction: &mut GraphUiInteraction) {
+        interaction.flush();
+        self.handle_actions(interaction);
 
         let mut affects_computation = false;
         let undid = self.undo_stack.undo(&mut self.view_graph, &mut |action| {
@@ -213,17 +211,17 @@ impl AppData {
         }
     }
 
-    pub fn handle_interaction(&mut self) {
-        while let Some(err) = self.interaction.errors.pop() {
+    pub fn handle_interaction(&mut self, interaction: &mut GraphUiInteraction) {
+        while let Some(err) = interaction.errors.pop() {
             self.add_status(format!("Error: {err}"));
         }
 
-        self.graph_dirty |= self.handle_actions();
+        self.graph_dirty |= self.handle_actions(interaction);
 
         let mut update_if_dirty = self.autorun;
         let mut msgs: Vec<WorkerMessage> = Vec::default();
 
-        match self.interaction.run_cmd {
+        match interaction.run_cmd {
             RunCommand::None => {}
             RunCommand::StartAutorun => {
                 assert!(!self.autorun);
@@ -253,7 +251,7 @@ impl AppData {
         }
 
         // Handle argument values request (only if not already pending)
-        if let Some(node_id) = self.interaction.request_argument_values
+        if let Some(node_id) = interaction.request_argument_values
             && self.argument_values_cache.mark_pending(node_id)
         {
             msgs.push(WorkerMessage::RequestArgumentValues {
@@ -273,8 +271,6 @@ impl AppData {
         if !msgs.is_empty() {
             self.worker.send_many(msgs);
         }
-
-        self.interaction.clear();
     }
 
     pub fn exit(&mut self) {
@@ -331,10 +327,10 @@ impl AppData {
         self.argument_values_cache.clear();
     }
 
-    fn handle_actions(&mut self) -> bool {
+    fn handle_actions(&mut self, interaction: &mut GraphUiInteraction) -> bool {
         let mut graph_updated = false;
 
-        for actions in self.interaction.action_stacks() {
+        for actions in interaction.action_stacks() {
             self.undo_stack.clear_redo();
             self.undo_stack.push_current(&self.view_graph, actions);
 

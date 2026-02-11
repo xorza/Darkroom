@@ -131,10 +131,10 @@ impl ConnectionUi {
         gui: &mut Gui<'_>,
         ctx: &mut GraphContext,
         graph_layout: &GraphLayout,
-        execution_stats: Option<&ExecutionStats>,
         ui_interaction: &mut GraphUiInteraction,
         breaker: Option<&ConnectionBreaker>,
     ) {
+        let execution_stats = ctx.execution_stats;
         let mut curves = self.curves.compact_insert_start();
         let mut highlights = self.highlight_curves.compact_insert_start();
 

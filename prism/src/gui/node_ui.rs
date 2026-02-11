@@ -54,7 +54,7 @@ impl PortInteractCommand {
 }
 
 #[derive(Debug)]
-enum NodeExecutionInfo<'a> {
+pub(crate) enum NodeExecutionInfo<'a> {
     Errored(&'a NodeError),
     MissingInputs,
     Executed(&'a ExecutedNodeStats),
@@ -63,7 +63,7 @@ enum NodeExecutionInfo<'a> {
 }
 
 impl<'a> NodeExecutionInfo<'a> {
-    fn from_stats(stats: Option<&'a ExecutionStats>, node_id: NodeId) -> Self {
+    pub(crate) fn from_stats(stats: Option<&'a ExecutionStats>, node_id: NodeId) -> Self {
         let Some(stats) = stats else {
             return Self::None;
         };

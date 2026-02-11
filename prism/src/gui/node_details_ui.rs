@@ -12,6 +12,7 @@ use crate::common::scroll_area::ScrollArea;
 use crate::gui::Gui;
 use crate::gui::graph_ctx::GraphContext;
 use crate::gui::graph_ui_interaction::GraphUiInteraction;
+use crate::gui::node_ui::NodeExecutionInfo;
 use crate::model::ArgumentValuesCache;
 use crate::model::argument_values_cache::{CachedTexture, NodeCache};
 use crate::model::graph_ui_action::GraphUiAction;
@@ -146,71 +147,35 @@ fn show_execution_info(
     add_section_separator(gui);
     gui.ui().label("Execution:");
 
-    let status = get_execution_status(ctx, node_id, stats);
-    match status {
-        ExecutionStatus::Error { func_name, error } => {
+    let info = NodeExecutionInfo::from_stats(Some(stats), node_id);
+    match info {
+        NodeExecutionInfo::Errored(node_error) => {
+            let func_name = match &node_error.error {
+                scenarium::execution_graph::Error::Invoke { func_id, .. } => {
+                    ctx.func_lib.by_id(func_id).unwrap().name.clone()
+                }
+                scenarium::execution_graph::Error::CycleDetected { .. } => "cycle".to_string(),
+            };
             gui.ui().colored_label(
                 Color32::from_rgb(255, 100, 100),
-                format!("  {func_name}: {error}"),
+                format!("  {func_name}: {}", node_error.error),
             );
         }
-        ExecutionStatus::Cached => {
+        NodeExecutionInfo::Cached => {
             gui.ui().label("  Status: cached");
         }
-        ExecutionStatus::MissingInputs => {
+        NodeExecutionInfo::MissingInputs => {
             gui.ui()
                 .colored_label(Color32::from_rgb(255, 180, 70), "  Status: missing inputs");
         }
-        ExecutionStatus::Executed { elapsed_ms } => {
+        NodeExecutionInfo::Executed(executed) => {
+            let elapsed_ms = executed.elapsed_secs * 1000.0;
             gui.ui().label(format!("  Time: {elapsed_ms:.2} ms"));
         }
-        ExecutionStatus::NotExecuted => {
+        NodeExecutionInfo::None => {
             gui.ui().label("  Status: not executed");
         }
     }
-}
-
-enum ExecutionStatus {
-    Error { func_name: String, error: String },
-    Cached,
-    MissingInputs,
-    Executed { elapsed_ms: f64 },
-    NotExecuted,
-}
-
-fn get_execution_status(
-    ctx: &GraphContext<'_>,
-    node_id: NodeId,
-    stats: &ExecutionStats,
-) -> ExecutionStatus {
-    if let Some(node_error) = stats.node_errors.iter().find(|e| e.node_id == node_id) {
-        let func_name = match &node_error.error {
-            scenarium::execution_graph::Error::Invoke { func_id, .. } => {
-                ctx.func_lib.by_id(func_id).unwrap().name.clone()
-            }
-            scenarium::execution_graph::Error::CycleDetected { .. } => "cycle".to_string(),
-        };
-        return ExecutionStatus::Error {
-            func_name,
-            error: node_error.error.to_string(),
-        };
-    }
-
-    if stats.cached_nodes.contains(&node_id) {
-        return ExecutionStatus::Cached;
-    }
-
-    if stats.missing_inputs.iter().any(|p| p.target_id == node_id) {
-        return ExecutionStatus::MissingInputs;
-    }
-
-    if let Some(executed) = stats.executed_nodes.iter().find(|e| e.node_id == node_id) {
-        return ExecutionStatus::Executed {
-            elapsed_ms: executed.elapsed_secs * 1000.0,
-        };
-    }
-
-    ExecutionStatus::NotExecuted
 }
 
 // === Image Previews ===
