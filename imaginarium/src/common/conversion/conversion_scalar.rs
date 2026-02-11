@@ -283,6 +283,16 @@ pub(crate) struct ConversionInfo {
 
 impl ConversionInfo {
     pub fn new(from_fmt: ColorFormat, to_fmt: ColorFormat) -> Self {
+        fn validate_size_type(size: ChannelSize, typ: ChannelType) {
+            match (size, typ) {
+                (ChannelSize::_8bit | ChannelSize::_16bit, ChannelType::UInt) => {}
+                (ChannelSize::_32bit, ChannelType::Float) => {}
+                _ => unreachable!("unsupported format: {:?} {:?}", size, typ),
+            }
+        }
+        validate_size_type(from_fmt.channel_size, from_fmt.channel_type);
+        validate_size_type(to_fmt.channel_size, to_fmt.channel_type);
+
         Self {
             from_channels: from_fmt.channel_count.channel_count() as usize,
             to_channels: to_fmt.channel_count.channel_count() as usize,

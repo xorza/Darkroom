@@ -125,40 +125,30 @@ impl ImageBuffer {
 
     /// Internal helper to ensure storage is GPU.
     fn ensure_gpu(&self, ctx: &ProcessingContext) -> Result<()> {
-        if !self.is_gpu() {
+        let mut storage = self.storage.borrow_mut();
+        if !matches!(*storage, Some(Storage::Gpu(_))) {
             let gpu_ctx = ctx.gpu().ok_or(Error::NoGpuContext)?;
-            let old = self.storage.borrow_mut().take();
-            match old {
-                Some(Storage::Cpu(img)) => {
-                    let gpu_img = GpuImage::from_image(gpu_ctx, &img);
-                    *self.storage.borrow_mut() = Some(Storage::Gpu(gpu_img));
-                }
+            *storage = Some(match storage.take() {
+                Some(Storage::Cpu(img)) => Storage::Gpu(GpuImage::from_image(gpu_ctx, &img)),
                 Some(Storage::Gpu(_)) => unreachable!(),
-                None => {
-                    let gpu_img = GpuImage::new_empty(gpu_ctx, self.desc);
-                    *self.storage.borrow_mut() = Some(Storage::Gpu(gpu_img));
-                }
-            }
+                None => Storage::Gpu(GpuImage::new_empty(gpu_ctx, self.desc)),
+            });
         }
         Ok(())
     }
 
     /// Internal helper to ensure storage is CPU.
     fn ensure_cpu(&self, ctx: &ProcessingContext) -> Result<()> {
-        if !self.is_cpu() {
-            let old = self.storage.borrow_mut().take();
-            match old {
+        let mut storage = self.storage.borrow_mut();
+        if !matches!(*storage, Some(Storage::Cpu(_))) {
+            *storage = Some(match storage.take() {
                 Some(Storage::Gpu(gpu_img)) => {
                     let gpu_ctx = ctx.gpu().expect("GPU image exists but no GPU context");
-                    let cpu_img = gpu_img.to_image(gpu_ctx)?;
-                    *self.storage.borrow_mut() = Some(Storage::Cpu(cpu_img));
+                    Storage::Cpu(gpu_img.to_image(gpu_ctx)?)
                 }
                 Some(Storage::Cpu(_)) => unreachable!(),
-                None => {
-                    let image = Image::new_black(self.desc)?;
-                    *self.storage.borrow_mut() = Some(Storage::Cpu(image));
-                }
-            }
+                None => Storage::Cpu(Image::new_black(self.desc)?),
+            });
         }
         Ok(())
     }

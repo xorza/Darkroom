@@ -56,14 +56,6 @@ fn row_max_diff(row1: &[u8], row2: &[u8], size: ChannelSize, typ: ChannelType) -
                 .map(|(a, b)| (*a as i32 - *b as i32).unsigned_abs() as f64 / u16::MAX as f64)
                 .fold(0.0, f64::max)
         }
-        (ChannelSize::_32bit, ChannelType::UInt) => {
-            let v1: &[u32] = bytemuck::cast_slice(row1);
-            let v2: &[u32] = bytemuck::cast_slice(row2);
-            v1.iter()
-                .zip(v2.iter())
-                .map(|(a, b)| (*a as i64 - *b as i64).unsigned_abs() as f64 / u32::MAX as f64)
-                .fold(0.0, f64::max)
-        }
         (ChannelSize::_32bit, ChannelType::Float) => {
             let v1: &[f32] = bytemuck::cast_slice(row1);
             let v2: &[f32] = bytemuck::cast_slice(row2);
@@ -72,9 +64,7 @@ fn row_max_diff(row1: &[u8], row2: &[u8], size: ChannelSize, typ: ChannelType) -
                 .map(|(a, b)| (a - b).abs() as f64)
                 .fold(0.0, f64::max)
         }
-        (ChannelSize::_8bit, ChannelType::Float) | (ChannelSize::_16bit, ChannelType::Float) => {
-            unreachable!("8-bit and 16-bit float are not valid formats")
-        }
+        _ => unreachable!("unsupported format: {:?} {:?}", size, typ),
     }
 }
 
