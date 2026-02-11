@@ -70,8 +70,9 @@ impl MainUi {
     fn save_as(&mut self, app_data: &mut AppData) {
         let file = rfd::FileDialog::new()
             .add_filter("Lua", &["lua"])
+            .add_filter("Scn", &["scn"])
             .add_filter("JSON", &["json"])
-            .add_filter("Scn compressed binary", &["scn"])
+            .add_filter("Lz4 compressed Lua", &["lz4"])
             .save_file();
 
         if let Some(path) = file {
@@ -81,10 +82,11 @@ impl MainUi {
 
     pub fn load(&mut self, app_data: &mut AppData) {
         let file = rfd::FileDialog::new()
-            .add_filter("All supported", &["lua", "json", "scn"])
+            .add_filter("All supported", &["lua", "json", "scn", "lz4"])
             .add_filter("Lua", &["lua"])
+            .add_filter("Scn", &["scn"])
             .add_filter("JSON", &["json"])
-            .add_filter("Scn compressed binary", &["scn"])
+            .add_filter("Lz4 compressed Lua", &["lz4"])
             .pick_file();
 
         if let Some(path) = file {

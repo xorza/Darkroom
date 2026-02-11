@@ -44,7 +44,7 @@ pub fn serialize_into<T: Serialize, W: Write>(
             let s = toml::to_string(&value).unwrap().normalize();
             writer.write_all(s.as_bytes()).unwrap();
         }
-        SerdeFormat::Scn => {
+        SerdeFormat::Lz4 => {
             serde_lua::to_writer(temp_buffer, &value).unwrap();
 
             let uncompressed_size = temp_buffer.len();
@@ -92,7 +92,7 @@ pub fn deserialize_from<T: DeserializeOwned, R: Read>(
             reader.read_to_end(temp_buffer)?;
             Ok(bitcode::deserialize(temp_buffer.as_slice())?)
         }
-        SerdeFormat::Scn => {
+        SerdeFormat::Lz4 => {
             reader.read_to_end(temp_buffer)?;
 
             let uncompressed_size =

@@ -22,7 +22,7 @@ pub enum SerdeFormat {
     Lua,
     Bitcode,
     Toml,
-    Scn,
+    Lz4,
     ScnText,
 }
 
@@ -32,7 +32,7 @@ impl SerdeFormat {
             Self::Json,
             Self::Lua,
             Self::Bitcode,
-            Self::Scn,
+            Self::Lz4,
             Self::ScnText,
         ]
     }
@@ -46,11 +46,11 @@ impl SerdeFormat {
             Ok(Self::Lua)
         } else if ext.eq_ignore_ascii_case("bin") {
             Ok(Self::Bitcode)
-        } else if ext.eq_ignore_ascii_case("scn") {
-            Ok(Self::Scn)
+        } else if ext.eq_ignore_ascii_case("lz4") {
+            Ok(Self::Lz4)
         } else if ext.eq_ignore_ascii_case("toml") {
             Ok(Self::Toml)
-        } else if ext.eq_ignore_ascii_case("scnt") {
+        } else if ext.eq_ignore_ascii_case("scn") {
             Ok(Self::ScnText)
         } else {
             Err(FileExtensionError::UnsupportedFileExtension(
