@@ -98,27 +98,23 @@ fn emit_value<W: Write>(w: &mut W, value: &YamlValue, indent: usize, at_start: b
             write!(w, "{u}")?;
             Ok(())
         }
-        YamlValue::Float(f) => {
-            if f.is_nan() {
-                emit_scalar(w, ".nan", indent, at_start)
-            } else if f.is_infinite() {
-                emit_scalar(
-                    w,
-                    if f.is_sign_positive() {
-                        ".inf"
-                    } else {
-                        "-.inf"
-                    },
-                    indent,
-                    at_start,
-                )
+        YamlValue::Float(f) if f.is_nan() => emit_scalar(w, ".nan", indent, at_start),
+        YamlValue::Float(f) if f.is_infinite() => emit_scalar(
+            w,
+            if f.is_sign_positive() {
+                ".inf"
             } else {
-                if at_start {
-                    write_indent(w, indent)?;
-                }
-                write!(w, "{f}")?;
-                Ok(())
+                "-.inf"
+            },
+            indent,
+            at_start,
+        ),
+        YamlValue::Float(f) => {
+            if at_start {
+                write_indent(w, indent)?;
             }
+            write!(w, "{f}")?;
+            Ok(())
         }
         YamlValue::String(s) => emit_string(w, s, indent, at_start),
         YamlValue::Seq(items) => emit_seq(w, items, indent, at_start),
@@ -140,20 +136,23 @@ fn emit_string<W: Write>(w: &mut W, s: &str, indent: usize, at_start: bool) -> R
     }
     if needs_quoting(s) {
         w.write_all(b"\"")?;
-        for ch in s.chars() {
-            match ch {
-                '\\' => w.write_all(b"\\\\")?,
-                '"' => w.write_all(b"\\\"")?,
-                '\n' => w.write_all(b"\\n")?,
-                '\r' => w.write_all(b"\\r")?,
-                '\t' => w.write_all(b"\\t")?,
-                '\0' => w.write_all(b"\\0")?,
-                ch => {
-                    let mut buf = [0u8; 4];
-                    w.write_all(ch.encode_utf8(&mut buf).as_bytes())?;
-                }
-            }
+        let bytes = s.as_bytes();
+        let mut start = 0;
+        for (i, &b) in bytes.iter().enumerate() {
+            let esc: &[u8] = match b {
+                b'\\' => b"\\\\",
+                b'"' => b"\\\"",
+                b'\n' => b"\\n",
+                b'\r' => b"\\r",
+                b'\t' => b"\\t",
+                b'\0' => b"\\0",
+                _ => continue,
+            };
+            w.write_all(&bytes[start..i])?;
+            w.write_all(esc)?;
+            start = i + 1;
         }
+        w.write_all(&bytes[start..])?;
         w.write_all(b"\"")?;
     } else {
         w.write_all(s.as_bytes())?;
@@ -253,14 +252,11 @@ fn is_compound(v: &YamlValue) -> bool {
 const INDENT_BUF: &[u8; 64] = b"                                                                ";
 
 fn write_indent<W: Write>(w: &mut W, indent: usize) -> Result<()> {
-    let bytes = indent * 2;
-    if bytes <= INDENT_BUF.len() {
-        w.write_all(&INDENT_BUF[..bytes])?;
-    } else {
-        w.write_all(INDENT_BUF)?;
-        for _ in 0..bytes - INDENT_BUF.len() {
-            w.write_all(b" ")?;
-        }
+    let mut bytes = indent * 2;
+    while bytes > 0 {
+        let n = bytes.min(INDENT_BUF.len());
+        w.write_all(&INDENT_BUF[..n])?;
+        bytes -= n;
     }
     Ok(())
 }
@@ -755,11 +751,7 @@ fn parse_map(lines: &[Line<'_>], start: usize, base_indent: usize) -> Result<(Ya
         };
 
         let raw_key = &line.content[..colon_pos];
-        let key = if raw_key.starts_with('"') || raw_key.starts_with('\'') {
-            YamlValue::String(unquote_scalar(raw_key))
-        } else {
-            parse_scalar(raw_key)
-        };
+        let key = parse_scalar(raw_key);
         let after_colon = line.content[colon_pos + 1..].trim_start();
 
         if after_colon.is_empty() {
@@ -771,12 +763,6 @@ fn parse_map(lines: &[Line<'_>], start: usize, base_indent: usize) -> Result<(Ya
             } else {
                 entries.push((key, YamlValue::Null));
             }
-        } else if after_colon == "[]" {
-            entries.push((key, YamlValue::Seq(Vec::new())));
-            pos += 1;
-        } else if after_colon == "{}" {
-            entries.push((key, YamlValue::Map(Vec::new())));
-            pos += 1;
         } else {
             entries.push((key, parse_scalar(after_colon)));
             pos += 1;
@@ -883,17 +869,6 @@ fn unescape_quoted(s: &str) -> String {
         }
     }
     out
-}
-
-fn unquote_scalar(s: &str) -> String {
-    let s = s.trim();
-    if s.starts_with('"') && s.ends_with('"') && s.len() >= 2 {
-        unescape_quoted(&s[1..s.len() - 1])
-    } else if s.starts_with('\'') && s.ends_with('\'') && s.len() >= 2 {
-        s[1..s.len() - 1].to_string()
-    } else {
-        s.to_string()
-    }
 }
 
 // ===========================================================================
@@ -1766,5 +1741,196 @@ mod tests {
         let yaml = to_string(&map).unwrap();
         let deserialized: HashMap<u32, String> = from_str(&yaml).unwrap();
         assert_eq!(map, deserialized);
+    }
+
+    #[test]
+    fn top_level_sequence() {
+        roundtrip(&vec![1i32, 2, 3]);
+        roundtrip(&vec!["hello".to_string(), "world".to_string()]);
+        roundtrip(&vec![Simple {
+            name: "a".to_string(),
+            value: 1,
+            flag: true,
+        }]);
+    }
+
+    #[test]
+    fn nested_sequences() {
+        roundtrip(&vec![vec![1i32, 2], vec![3, 4]]);
+        roundtrip(&vec![vec![vec![1i32]]]);
+        roundtrip(&vec![Vec::<i32>::new(), vec![1]]);
+    }
+
+    #[test]
+    fn map_null_value() {
+        #[derive(Debug, Serialize, Deserialize, PartialEq)]
+        struct NullField {
+            present: i32,
+            #[serde(default)]
+            absent: Option<String>,
+        }
+        // Parse YAML where a key has no value (implies null)
+        let yaml = "present: 42\nabsent:\n";
+        let v: NullField = from_str(yaml).unwrap();
+        assert_eq!(v.present, 42);
+        assert_eq!(v.absent, None);
+    }
+
+    #[test]
+    fn sequence_with_block_items() {
+        // Bare dash followed by indented block
+        let yaml = "-\n  name: alice\n  value: 1\n  flag: true\n-\n  name: bob\n  value: 2\n  flag: false\n";
+        let v: Vec<Simple> = from_str(yaml).unwrap();
+        assert_eq!(v.len(), 2);
+        assert_eq!(v[0].name, "alice");
+        assert_eq!(v[1].name, "bob");
+    }
+
+    #[test]
+    fn char_roundtrip() {
+        roundtrip(&'a');
+        roundtrip(&'Z');
+        roundtrip(&'0');
+    }
+
+    #[test]
+    fn f32_roundtrip() {
+        roundtrip(&1.5f32);
+        roundtrip(&-0.25f32);
+        roundtrip(&0.0f32);
+    }
+
+    #[test]
+    fn small_int_types() {
+        roundtrip(&42u8);
+        roundtrip(&-7i8);
+        roundtrip(&1000u16);
+        roundtrip(&-1000i16);
+    }
+
+    #[test]
+    fn map_with_bool_keys() {
+        use std::collections::HashMap;
+        let mut map = HashMap::new();
+        map.insert(true, "yes_val".to_string());
+        map.insert(false, "no_val".to_string());
+        let yaml = to_string(&map).unwrap();
+        let deserialized: HashMap<bool, String> = from_str(&yaml).unwrap();
+        assert_eq!(map, deserialized);
+    }
+
+    #[test]
+    fn tilde_null() {
+        let yaml = "~\n";
+        let v: Option<i32> = from_str(yaml).unwrap();
+        assert_eq!(v, None);
+    }
+
+    #[test]
+    fn special_float_case_variants() {
+        // Parser should handle multiple case forms
+        assert!(matches!(parse_scalar(".NaN"), YamlValue::Float(f) if f.is_nan()));
+        assert!(matches!(parse_scalar(".NAN"), YamlValue::Float(f) if f.is_nan()));
+        assert_eq!(parse_scalar(".Inf"), YamlValue::Float(f64::INFINITY));
+        assert_eq!(parse_scalar(".INF"), YamlValue::Float(f64::INFINITY));
+        assert_eq!(parse_scalar("-.Inf"), YamlValue::Float(f64::NEG_INFINITY));
+        assert_eq!(parse_scalar("-.INF"), YamlValue::Float(f64::NEG_INFINITY));
+    }
+
+    #[test]
+    fn string_with_backslash_roundtrip() {
+        roundtrip(&"path\\to\\file".to_string());
+        roundtrip(&"escape\\nnotanewline".to_string());
+    }
+
+    #[test]
+    fn string_with_quote_roundtrip() {
+        roundtrip(&"say \"hello\"".to_string());
+        roundtrip(&"it's".to_string());
+    }
+
+    #[test]
+    fn btreemap_ordered() {
+        use std::collections::BTreeMap;
+        let mut map = BTreeMap::new();
+        map.insert("alpha".to_string(), 1i32);
+        map.insert("beta".to_string(), 2);
+        map.insert("gamma".to_string(), 3);
+        roundtrip(&map);
+    }
+
+    #[derive(Debug, Serialize, Deserialize, PartialEq)]
+    struct Pair(i32, String);
+
+    #[test]
+    fn tuple_struct() {
+        roundtrip(&Pair(42, "hello".to_string()));
+    }
+
+    #[test]
+    fn serde_rename() {
+        #[derive(Debug, Serialize, Deserialize, PartialEq)]
+        struct Renamed {
+            #[serde(rename = "full_name")]
+            name: String,
+            #[serde(rename = "age_years")]
+            age: u32,
+        }
+        roundtrip(&Renamed {
+            name: "Alice".to_string(),
+            age: 30,
+        });
+    }
+
+    #[test]
+    fn map_with_complex_values() {
+        use std::collections::BTreeMap;
+        let mut map = BTreeMap::new();
+        map.insert("items".to_string(), vec![1i32, 2, 3]);
+        map.insert("empty".to_string(), vec![]);
+        roundtrip(&map);
+    }
+
+    #[test]
+    fn all_none_options() {
+        #[derive(Debug, Serialize, Deserialize, PartialEq)]
+        struct AllOpt {
+            #[serde(default)]
+            a: Option<i32>,
+            #[serde(default)]
+            b: Option<String>,
+            #[serde(default)]
+            c: Option<bool>,
+        }
+        roundtrip(&AllOpt {
+            a: None,
+            b: None,
+            c: None,
+        });
+    }
+
+    #[test]
+    fn unit_struct() {
+        #[derive(Debug, Serialize, Deserialize, PartialEq)]
+        struct Marker;
+        // Unit struct serializes as null
+        let yaml = to_string(&Marker).unwrap();
+        assert!(yaml.trim() == "null");
+    }
+
+    #[test]
+    fn enum_in_map_value() {
+        use std::collections::BTreeMap;
+        let mut map = BTreeMap::new();
+        map.insert("a".to_string(), Binding::None);
+        map.insert("b".to_string(), Binding::Const(5));
+        map.insert(
+            "c".to_string(),
+            Binding::Named {
+                id: 1,
+                label: "x".to_string(),
+            },
+        );
+        roundtrip(&map);
     }
 }
