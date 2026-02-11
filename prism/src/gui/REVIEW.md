@@ -1,287 +1,216 @@
-# GUI Module Review: Data Flow, API & Simplification Suggestions
+# GUI Module Review (Round 2)
 
-## Current Architecture Summary
+Post-cleanup review after implementing suggestions 1-3, 5, 7, 9-12 from the first review.
 
-### Call Chain
-```
-MainUi::render()
-  -> GraphUi::render(&mut Gui, &mut AppData, &Bump)
-       -> GraphContext constructed from AppData fields
-       -> GraphLayout::update()
-       -> GraphBackgroundRenderer::render()
-       -> ConnectionUi::render()
-       -> NodeUi::render_nodes()       -> returns PortInteractCommand
-       -> process_connections()         -> uses PortInteractCommand
-       -> render_buttons()             -> overlay at scale=1.0
-       -> NodeDetailsUi::show()        -> overlay at scale=1.0
-       -> handle_new_node_popup()      -> overlay
-       -> update_zoom_and_pan()
-  <- returns to MainUi
-  -> AppData::handle_interaction()     -> drains GraphUiInteraction
-```
+## Current State
 
-### Data Flow
-```
-AppData (owned state)
-  |
-  v
-GraphContext (borrowed view: func_lib + view_graph + execution_stats)
-  |
-  +---> GraphLayout (computed screen positions, per-frame)
-  +---> ConnectionUi (connection curves cache + temp drag)
-  +---> NodeUi (renders nodes, returns PortInteractCommand)
-  +---> ConstBindUi (const value editors, RAII frame pattern)
-  |
-  v
-GraphUiInteraction (collected actions + errors + run_cmd)
-  |
-  v
-AppData::handle_interaction() (drains actions -> undo stack -> worker)
-```
+The architecture is clean. `GraphUi::render()` has clear 3-phase structure with scoped scaling. `GraphContext` is the sole data conduit. `GraphUiInteraction` lives on `GraphUi` where it belongs. Breaker results are collected in one pass. Action coalescing is explicit with named stacks.
 
 ---
 
-## Issues & Suggestions
+## Remaining Suggestions
 
-### 1. GraphUiInteraction lives on AppData but is a GUI-internal concern
+### 1. ConnectionUi::render() mixes rendering with mutation
 
-**Problem:** `GraphUiInteraction` is a field on `AppData` (`app_data.interaction`), but it is purely a frame-local communication channel between GUI subsystems and the post-render action handler. It gets `clear()`-ed every frame in `handle_interaction()`. Having it on `AppData` means every GUI method receives `&mut GraphUiInteraction` as a separate parameter alongside `&mut GraphContext`, creating wide function signatures and passing it through 4-5 levels of call depth.
+**Problem:** `ConnectionUi::render()` (~110 lines) does three things in one loop:
+1. Renders bezier curves (visual)
+2. Detects breaker intersections (state mutation on `curve.broke`)
+3. Applies double-click deletion (graph mutation via `input.binding = Binding::None`)
 
-**Suggestion:** Move `GraphUiInteraction` to be a field on `GraphUi` instead (or return it from `GraphUi::render()`). The render method would return the collected interaction, and `MainUi` would pass it to `AppData::handle_interaction()`. This eliminates one parameter from nearly every internal GUI function and makes ownership clearer.
+The double-click deletion directly mutates `node.inputs` and pushes actions to `ui_interaction` from inside the render pass. This means the render method has side effects on the graph model — a connection can disappear mid-render while other connections are still being drawn.
+
+**Suggestion:** Collect double-click deletions into a `Vec` during the render loop and apply them afterward (similar to how `node_ids_to_remove` works in `NodeUi`). This separates "what to draw" from "what to change".
 
 ```rust
-// Before (current):
-fn render(&mut self, gui: &mut Gui, app_data: &mut AppData, arena: &Bump) {
-    // ... uses app_data.interaction everywhere
+// During render loop:
+if response.double_clicked_by(PointerButton::Primary) {
+    deletions.push((node_id, input_idx, input.binding.clone()));
 }
 
-// After:
-fn render(&mut self, gui: &mut Gui, app_data: &mut AppData, arena: &Bump) -> GraphUiInteraction {
-    let mut interaction = GraphUiInteraction::default();
-    // ... uses local interaction
-    interaction
+// After render loop:
+for (node_id, input_idx, before) in deletions {
+    // apply mutation + push action
 }
 ```
 
-This also removes the `MainUi::handle_run_shortcuts` writing directly to `app_data.interaction.run_cmd` -- shortcuts could return a `RunCommand` instead.
+**Impact:** Medium — cleaner separation of rendering and mutation  
+**Effort:** Low
 
 ---
 
-### 2. GraphContext wraps 3 fields but adds little value
+### 2. `NodeUi::render_nodes()` passes too many &mut params through the call chain
 
-**Problem:** `GraphContext` is a 23-line struct that bundles `&FuncLib`, `&mut ViewGraph`, and `Option<&ExecutionStats>`. All three already live on `AppData`. The struct is constructed at the top of `render()` from `AppData` fields, then `execution_stats` is also accessed directly from `AppData` in several places (e.g. `render_connections` takes `app_data.execution_stats.as_ref()` separately). This partial wrapping creates inconsistency -- sometimes data comes from `ctx`, sometimes from `app_data`.
+**Problem:** `render_nodes()` takes 5 parameters (`gui`, `ctx`, `graph_layout`, `interaction`, `breaker`), then passes subsets of these to `handle_node_drag()` (4 params), `const_bind_frame.render()` (6 params), `render_cache_btn()` (3 params), etc. Most of these functions need the same 3-4 things.
 
-**Suggestion:** Either:
-- **(a) Remove `GraphContext`** and pass `AppData` (or a subset) directly. The GUI already takes `&mut AppData`, so the context struct adds an indirection layer without meaningful encapsulation.
-- **(b) Make `GraphContext` the sole data conduit** -- put `execution_stats` inside it properly and stop accessing `app_data.execution_stats` separately. Also consider putting `interaction: &mut GraphUiInteraction` in it to reduce parameter count further.
+**Suggestion:** Bundle the rendering context into a short-lived struct:
 
-Option (b) would look like:
 ```rust
-struct GraphContext<'a> {
-    func_lib: &'a FuncLib,
-    view_graph: &'a mut ViewGraph,
-    execution_stats: Option<&'a ExecutionStats>,
+struct NodeRenderCtx<'a> {
+    gui: &'a mut Gui<'a>,
+    ctx: &'a mut GraphContext<'a>,
+    graph_layout: &'a mut GraphLayout,
     interaction: &'a mut GraphUiInteraction,
+    breaker: Option<&'a ConnectionBreaker>,
 }
 ```
 
-This eliminates passing `interaction` as a separate param everywhere.
+This reduces all the 4-6 param signatures to a single `&mut NodeRenderCtx`. The struct is constructed at the start of `render_nodes()` and dropped at the end.
+
+**Impact:** Medium — reduces noise in function signatures  
+**Effort:** Medium (borrow checker may resist bundling `&mut` references)
 
 ---
 
-### 3. Connection breaking + node deletion is tangled across GraphUi, ConnectionUi, NodeUi, and ConstBindUi
+### 3. PortInteractCommand priority values are magic numbers
 
-**Problem:** When the user draws a breaker line, the "broke" state is computed independently in three places:
-1. `ConnectionUi::render()` -- sets `curve.broke` on data/event connections
-2. `ConstBindUi` (via `ConstBindFrame::render_const_input`) -- sets `curve.broke` on const bindings
-3. `NodeUi::render_nodes()` / `render_body()` -- checks `breaker.intersects_rect(layout.body_rect)` for node deletion
+**Problem:** `PortInteractCommand::priority()` returns magic values `0, 5, 8, 10, 15` without explanation. The `prefer()` method picks the higher-priority command but doesn't document why these specific values exist or what invariants they encode.
 
-Then `apply_broken_connections()` chains `connections.broke_iter()` and `node_ui.const_bind_ui.broke_iter()`, and `remove_nodes_hit_by_breaker()` reads `node_ui.node_ids_hit_breaker`.
-
-**Suggestion:** Consolidate breaking logic into a single pass. After rendering, have one method that collects all "broke" items (connections + const bindings + nodes) and applies them together. This could be a method on a new `BreakerResult` struct, or simply a function that takes the three iterators. The key simplification is making the "what did the breaker hit?" question answerable in one place rather than three.
-
----
-
-### 4. PortInteractCommand priority-merge pattern is fragile
-
-**Problem:** `PortInteractCommand` uses a `priority()` + `prefer()` pattern where every port rendering call returns a command, and they're merged by priority across all ports of all nodes. This works but is non-obvious -- the priority values (0, 5, 8, 10, 15) are magic numbers, and the semantics depend on rendering order.
-
-**Suggestion:** Replace with an explicit "first match wins" or accumulator pattern. Since egui guarantees only one widget is interacted with at a time, at most one port will return a non-`None` command per frame. A simpler pattern:
+**Suggestion:** Add named constants and a comment explaining the priority order:
 
 ```rust
-// Instead of merging by priority across all ports:
-let cmd = port_cmd.prefer(new_cmd);
-
-// Use early-return or Option:
-if result.is_none() { result = check_port_interaction(...); }
-```
-
-Or keep the current pattern but document why the priorities exist and add a `const` for each level.
-
----
-
-### 5. Dual action stacks (`actions1` / `actions2`) are confusing
-
-**Problem:** `GraphUiInteraction` has `actions1` (coalesced, deferred) and `actions2` (immediate). The caller iterates both via `action_stacks()`. The names `actions1` and `actions2` don't convey their purpose.
-
-**Suggestion:** Rename to `coalesced_actions` and `immediate_actions`. Or simplify further: since `immediate()` actions are never coalesced, just use a single `Vec<GraphUiAction>` and flush the pending coalesced action before pushing immediate ones (which is already done). The two-stack pattern exists only so they form separate undo groups, but this could be made explicit:
-
-```rust
-struct GraphUiInteraction {
-    action_groups: Vec<Vec<GraphUiAction>>,  // each inner vec = one undo group
-    pending_coalesced: Option<GraphUiAction>,
-    // ...
+impl PortInteractCommand {
+    // Click > DragStop > DragStart > Hover > None
+    // Higher priority wins when multiple ports report commands in the same frame.
+    const PRIORITY_NONE: u8 = 0;
+    const PRIORITY_HOVER: u8 = 5;
+    const PRIORITY_DRAG_START: u8 = 8;
+    const PRIORITY_DRAG_STOP: u8 = 10;
+    const PRIORITY_CLICK: u8 = 15;
 }
 ```
 
----
-
-### 6. Scale ping-pong between GraphUi::render levels
-
-**Problem:** In `GraphUi::render()`, scale is set multiple times:
-1. `gui.set_scale(ctx.view_graph.scale)` -- for graph-space rendering
-2. `gui.set_scale(1.0)` -- for overlay buttons and panels
-3. The overlay code runs at scale=1.0 while graph code runs at graph scale
-
-This means the scale changes mid-render, and any code reading `gui.scale()` gets different values depending on when it's called. The `Style` is rebuilt via `Rc::make_mut` on every scale change.
-
-**Suggestion:** Avoid mutating scale on the shared `Gui`. Instead:
-- Render graph content in a child `Gui` with the graph scale applied
-- Render overlays in the parent `Gui` at scale=1.0
-- This makes it impossible for overlay code to accidentally use graph scale
-
-```rust
-// Graph-space rendering in a scaled child:
-gui.new_child_with_scale(ctx.view_graph.scale, |scaled_gui| {
-    self.graph_layout.update(scaled_gui, &ctx);
-    // ...
-});
-
-// Overlays at scale=1.0 (no scale change needed):
-self.render_buttons(gui, ...);
-```
+**Impact:** Low — readability  
+**Effort:** Low
 
 ---
 
-### 7. NodeDetailsUi duplicates execution status logic from NodeUi
+### 4. ConstBindFrame relies on Drop for side effects
 
-**Problem:** Both `NodeUi` (via `NodeExecutionInfo`) and `NodeDetailsUi` (via `ExecutionStatus` / `get_execution_status`) independently look up execution stats for a node by scanning `stats.node_errors`, `stats.missing_inputs`, `stats.executed_nodes`, `stats.cached_nodes`. These are two separate enums with the same cases doing the same linear scans.
+**Problem:** `ConstBindFrame` uses `Drop` to commit the `currently_hovered_connection` state back to `ConstBindUi.hovered_link`. This is the only side effect in the `Drop` impl. It works correctly but is non-obvious — a reader won't expect `drop(const_bind_frame)` to update hover state.
 
-**Suggestion:** Unify into a single `NodeExecutionInfo` (or similar) that both can use. The lookup can be a method on `ExecutionStats` or a free function in a shared location:
-
-```rust
-// In scenarium or a shared module:
-impl ExecutionStats {
-    fn node_status(&self, node_id: NodeId) -> NodeExecutionStatus { ... }
-}
-```
-
----
-
-### 8. ConstBindUi RAII frame pattern is clever but hard to follow
-
-**Problem:** `ConstBindUi::start()` returns a `ConstBindFrame` that holds `CompactInsert` (from `compact_insert_start()`) and tracks hovered state. The `Drop` impl on `ConstBindFrame` updates the parent's `hovered_link`. This works but is non-obvious -- the frame *must* be dropped at the right time, and the `Drop` impl has side effects that affect next-frame rendering.
-
-**Suggestion:** Make it explicit with a `finish()` method instead of relying on `Drop`:
+**Suggestion:** Replace with an explicit `finish()` method that consumes `self`:
 
 ```rust
-let mut frame = self.const_bind_ui.start();
-// ... render const bindings ...
-frame.finish(); // explicitly commits hovered state
-```
-
-This is more readable and doesn't depend on drop ordering. The `CompactInsert` already uses this pattern (it's consumed by `drop`), so at minimum add a comment explaining the RAII contract.
-
----
-
-### 9. `process_connections` has convoluted control flow
-
-**Problem:** `process_connections()` matches on interaction mode twice with an early-return pattern and an intermediate `gui.interact()` call between them:
-
-```rust
-match self.interaction.mode() {
-    PanningGraph => return,
-    Idle => { ...; return; }
-    Breaking | Dragging => {
-        gui.ui.interact(rect, id, Sense::all());  // capture overlay
-    }
-};
-match self.interaction.mode() {
-    PanningGraph | Idle => unreachable!(),
-    Breaking => { ... }
-    Dragging => { ... }
-}
-```
-
-The double-match exists solely to insert an overlay interaction between the two passes.
-
-**Suggestion:** Restructure as a single match with the overlay capture inside each relevant arm:
-
-```rust
-match self.interaction.mode() {
-    PanningGraph => return,
-    Idle => { self.handle_idle_state(...); }
-    BreakingConnections => {
-        capture_overlay(gui);
-        self.handle_breaking_connections(...);
-    }
-    DraggingNewConnection => {
-        capture_overlay(gui);
-        self.handle_dragging_connection(...);
+impl<'a> ConstBindFrame<'a> {
+    fn finish(self) {
+        *self.prev_hovered_connection = self.currently_hovered_connection;
+        std::mem::forget(self); // skip Drop
     }
 }
 ```
 
----
-
-### 10. `handle_new_node_popup` mixes popup lifecycle with connection state cleanup
-
-**Problem:** When the new-node popup closes without a selection, `handle_new_node_popup` calls `self.interaction.reset_to_idle()` and `self.connections.stop_drag()`. This couples popup UI with connection drag state cleanup. Similar cleanup happens in `handle_background_click`, `handle_breaking_connections`, `handle_dragging_connection`, and `should_cancel_interaction` -- the same two-line pattern (`reset_to_idle` + `stop_drag`) appears 6+ times.
-
-**Suggestion:** Create a single `cancel_interaction()` method on `GraphUi`:
+Or simpler: just add a comment at the `drop(const_bind_frame)` call site explaining the RAII contract:
 
 ```rust
-fn cancel_interaction(&mut self) {
-    self.interaction.reset_to_idle();
-    self.connections.stop_drag();
+// Commits hovered_link state back to ConstBindUi on drop
+drop(const_bind_frame);
+```
+
+**Impact:** Low — readability  
+**Effort:** Low
+
+---
+
+### 5. `render_buttons()` mixes view-action logic with button rendering
+
+**Problem:** `render_buttons()` renders two button groups (top: view controls, bottom: execution controls), then applies view actions (`reset_view`, `view_selected`, `fit_all`) at the end. The view-action application calls free functions (`view_selected_node`, `fit_all_nodes`) that mutate `ctx.view_graph`. This mixes "render buttons" with "apply navigation commands".
+
+**Suggestion:** Have `render_buttons()` return a small struct describing what was clicked, and apply the view actions in the caller:
+
+```rust
+struct ButtonResult {
+    response: Response,
+    fit_all: bool,
+    view_selected: bool,
+    reset_view: bool,
 }
 ```
 
-This is already partially done in `should_cancel_interaction` but only for Escape/right-click. Unify all call sites.
+Then in `render()`:
+```rust
+let buttons = self.render_buttons(gui, &mut ctx);
+if buttons.reset_view { ... }
+if buttons.view_selected { view_selected_node(gui, &mut ctx, ...) }
+// etc.
+```
+
+This makes `render_buttons` purely about rendering and the caller responsible for applying effects.
+
+**Impact:** Low-Medium — cleaner separation  
+**Effort:** Low
 
 ---
 
-### 11. Autorun state flows through GraphUiInteraction unnecessarily
+### 6. `new_node_ui.rs` accesses `gui.ui` directly
 
-**Problem:** `autorun` is a field on `AppData`. The GUI reads it from `app_data.autorun`, and when the button is clicked, it sets `app_data.interaction.run_cmd = RunCommand::StartAutorun/StopAutorun`. Then `handle_interaction()` reads `run_cmd` and sends worker messages. The autorun toggle takes a round-trip through the interaction system for no reason -- it's not undoable and doesn't need coalescing.
+**Problem:** In `NewNodeUi::show()`, there's a direct access to `gui.ui` (the private field) instead of going through `gui.ui()`:
+
+```rust
+gui.ui.interact(
+    gui.rect,
+    Id::new("temp background for new node ui"),
+    Sense::all(),
+);
+```
+
+This bypasses the `Gui` wrapper's public API. The `ui` field is not `pub` (it's only accessible within the module due to Rust's struct field visibility within the same crate), suggesting this was not intentional.
+
+**Suggestion:** Change to `gui.ui().interact(...)`. If there's a borrow issue with `gui.rect`, extract it to a local first (same pattern used in `capture_overlay`).
+
+**Impact:** Low — consistency  
+**Effort:** Low
+
+---
+
+### 7. `LogUi` accesses `gui.ui` directly, bypasses Gui wrapper entirely
+
+**Problem:** `LogUi::render()` uses `gui.ui` (the raw field) exclusively via `frame.show(gui.ui, ...)`. It never calls `gui.ui()` or uses any `Gui` methods. The entire render method works directly on the underlying egui `Ui`.
 
 **Suggestion:** Either:
-- Have `render_buttons` return a `RunCommand` directly (or set it on a return struct), skipping the interaction channel
-- Or accept it as-is since `RunCommand` is already minimal. But if `GraphUiInteraction` moves to `GraphUi` (suggestion 1), this becomes a natural part of the return value.
+- **(a)** Have `LogUi::render()` take `&mut Ui` and `&Style` directly instead of `&mut Gui`, making explicit that it doesn't use the Gui wrapper.
+- **(b)** Refactor to use `gui.ui()` properly and use Gui helpers where applicable.
+
+Option (a) is simpler and more honest about the actual dependency.
+
+**Impact:** Low — API clarity  
+**Effort:** Low
 
 ---
 
-### 12. `GraphUi::render` does too many things
+### 8. `handle_node_drag` is a long free function that could be a method
 
-**Problem:** `GraphUi::render` is the 948-line orchestrator that handles: cancellation, background frame, child UI creation, context construction, background interaction, layout, dots, connections, nodes, connection processing, scale switching, overlay buttons, node details panel, new node popup, zoom/pan. This makes the render flow hard to trace.
+**Problem:** `handle_node_drag()` (50 lines) is a free function taking 5 parameters. It handles selection, drag state, position updates, and layout refresh. It's the most complex free function in `node_ui.rs` and is only called from `render_nodes()`.
 
-**Suggestion:** Group into named phases:
+**Suggestion:** Make it a method on `NodeUi` (or on a `NodeRenderCtx` if suggestion 2 is adopted). This would let it access `self` state directly and reduce the parameter count.
 
-```rust
-fn render(&mut self, gui: &mut Gui, app_data: &mut AppData, arena: &Bump) {
-    self.handle_cancellation(gui);
-    let rect = self.draw_background_frame(gui);
+Alternatively, split it into two parts: `handle_selection()` and `handle_drag()`, since these are independent concerns that happen to share the same `response`.
 
-    gui.new_child(..., |gui| {
-        let mut ctx = ...;
-        self.render_graph_content(gui, &mut ctx, app_data);
-        self.render_overlays(gui, &mut ctx, app_data, arena);
-        self.handle_input(gui, &mut ctx, app_data);
-    });
-}
-```
+**Impact:** Low — readability  
+**Effort:** Low
 
-Where `render_graph_content` covers layout + background + connections + nodes, `render_overlays` covers buttons + details + popup, and `handle_input` covers zoom/pan/connection processing.
+---
+
+### 9. GraphBackgroundRenderer has excessive assertions for scale normalization
+
+**Problem:** `wrap_scale_multiplier()` has 10 assertions for what is a simple "find nearest power-of-2 multiplier" operation. While correctness-focused, this is excessive for a pure math function with bounded inputs (scale is clamped to `0.2..4.0` by the zoom logic).
+
+**Suggestion:** Keep the pre-condition asserts (finite, positive) but remove the intermediate ones (`k_low.is_finite`, `k_low <= k_high`, `contains(&k)`) since they can't fail if the inputs are valid. Add a unit test instead that covers the edge cases.
+
+**Impact:** Low — readability  
+**Effort:** Low
+
+---
+
+### 10. Style is fully rebuilt on every scale change
+
+**Problem:** `Style::set_scale()` calls `Style::new()` which reconstructs the entire `Style` struct (all fonts, colors, shadows, sub-styles). Most fields don't depend on scale — colors, corner radius ratios, etc. are scale-independent. Only ~15 of ~50 fields actually change with scale.
+
+**Suggestion:** Split `Style` into `StyleBase` (scale-independent) and `ScaledStyle` (scale-dependent). `set_scale()` would only rebuild `ScaledStyle`. Or simpler: cache the last-used scale and skip rebuild if unchanged (which `Gui::set_scale` already checks via `ui_equals`, but `with_scale` calls `set_scale` twice per frame — once to set graph scale, once to restore).
+
+This is a micro-optimization and only matters if profiling shows it as a hotspot. The `Rc::make_mut` pattern means the clone only happens when the `Rc` is shared, which is every frame due to child Gui construction.
+
+**Impact:** Low (potential perf, no correctness issue)  
+**Effort:** Medium
 
 ---
 
@@ -289,15 +218,13 @@ Where `render_graph_content` covers layout + background + connections + nodes, `
 
 | # | Suggestion | Impact | Effort |
 |---|-----------|--------|--------|
-| 1 | Move `GraphUiInteraction` out of `AppData` | High - simplifies all signatures | Medium |
-| 10 | Unify `cancel_interaction()` pattern | Medium - removes duplication | Low |
-| 2 | Fix `GraphContext` to be sole data conduit | Medium - removes inconsistency | Low |
-| 9 | Simplify `process_connections` control flow | Medium - readability | Low |
-| 12 | Split `GraphUi::render` into phases | Medium - readability | Medium |
-| 5 | Rename/simplify dual action stacks | Low-Med - readability | Low |
-| 7 | Unify execution status lookup | Low-Med - removes duplication | Low |
-| 3 | Consolidate breaker logic | Medium - removes scatter | Medium |
-| 6 | Avoid scale ping-pong | Medium - correctness | Medium |
-| 4 | Simplify PortInteractCommand merging | Low - readability | Low |
-| 8 | Make ConstBindFrame explicit | Low - readability | Low |
-| 11 | Simplify autorun flow | Low | Low |
+| 1 | Separate double-click deletion from render pass | Medium | Low |
+| 5 | Return button results instead of applying inline | Low-Med | Low |
+| 2 | Bundle NodeUi render params into context struct | Medium | Medium |
+| 3 | Named constants for port priority values | Low | Low |
+| 4 | Make ConstBindFrame Drop explicit | Low | Low |
+| 6 | Fix `gui.ui` direct access in new_node_ui | Low | Low |
+| 7 | LogUi should take `&mut Ui` instead of `&mut Gui` | Low | Low |
+| 8 | Make handle_node_drag a method or split it | Low | Low |
+| 9 | Reduce assertions in wrap_scale_multiplier | Low | Low |
+| 10 | Avoid full Style rebuild on scale change | Low | Medium |

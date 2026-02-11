@@ -144,14 +144,15 @@ impl ConnectionUi {
         let execution_stats = ctx.execution_stats;
         let mut curves = self.curves.compact_insert_start();
         let mut highlights = self.highlight_curves.compact_insert_start();
+        let mut deletions: Vec<ConnectionKey> = Vec::new();
 
         for node_view in &ctx.view_graph.view_nodes {
             let node_id = node_view.id;
-            let node = ctx.view_graph.graph.by_id_mut(&node_id).unwrap();
+            let node = ctx.view_graph.graph.by_id(&node_id).unwrap();
             let node_layout = graph_layout.node_layout(&node_id);
 
             // Render data connections
-            for (input_idx, input) in node.inputs.iter_mut().enumerate() {
+            for (input_idx, input) in node.inputs.iter().enumerate() {
                 let Binding::Bind(binding) = &input.binding else {
                     continue;
                 };
@@ -189,25 +190,17 @@ impl ConnectionUi {
                     curve.hovered = response.hovered();
 
                     if response.double_clicked_by(PointerButton::Primary) {
-                        let before = input.binding.clone();
-                        input.binding = Binding::None;
-                        ui_interaction.add_action(GraphUiAction::InputChanged {
-                            node_id,
-                            input_idx,
-                            before,
-                            after: Binding::None,
-                        });
+                        deletions.push(key);
                         curve.hovered = false;
                     }
                 }
             }
 
             // Render event connections
-            for (event_idx, event) in node.events.iter_mut().enumerate() {
+            for (event_idx, event) in node.events.iter().enumerate() {
                 let event_pos = node_layout.event_center(event_idx);
 
-                for subscriber_idx in (0..event.subscribers.len()).rev() {
-                    let trigger_node_id = event.subscribers[subscriber_idx];
+                for &trigger_node_id in &event.subscribers {
                     let trigger_layout = graph_layout.node_layout(&trigger_node_id);
                     let trigger_pos = trigger_layout.trigger_center();
 
@@ -241,13 +234,7 @@ impl ConnectionUi {
                         curve.hovered = response.hovered();
 
                         if response.double_clicked_by(PointerButton::Primary) {
-                            let subscriber = event.subscribers.remove(subscriber_idx);
-                            ui_interaction.add_action(GraphUiAction::EventConnectionChanged {
-                                event_node_id: node_id,
-                                event_idx,
-                                subscriber,
-                                change: EventSubscriberChange::Removed,
-                            });
+                            deletions.push(key);
                             curve.hovered = false;
                         }
                     }
@@ -257,6 +244,8 @@ impl ConnectionUi {
 
         drop(curves);
         drop(highlights);
+
+        apply_connection_deletions(deletions, ctx, ui_interaction);
 
         self.render_temp_connection(gui, graph_layout);
     }
@@ -342,6 +331,50 @@ impl ConnectionUi {
 }
 
 // === Helpers ===
+
+fn apply_connection_deletions(
+    deletions: Vec<ConnectionKey>,
+    ctx: &mut GraphContext,
+    ui_interaction: &mut GraphUiInteraction,
+) {
+    for key in deletions {
+        match key {
+            ConnectionKey::Input {
+                input_node_id,
+                input_idx,
+            } => {
+                let node = ctx.view_graph.graph.by_id_mut(&input_node_id).unwrap();
+                let before = node.inputs[input_idx].binding.clone();
+                node.inputs[input_idx].binding = Binding::None;
+                ui_interaction.add_action(GraphUiAction::InputChanged {
+                    node_id: input_node_id,
+                    input_idx,
+                    before,
+                    after: Binding::None,
+                });
+            }
+            ConnectionKey::Event {
+                event_node_id,
+                event_idx,
+                trigger_node_id,
+            } => {
+                let node = ctx.view_graph.graph.by_id_mut(&event_node_id).unwrap();
+                let pos = node.events[event_idx]
+                    .subscribers
+                    .iter()
+                    .position(|&id| id == trigger_node_id)
+                    .expect("subscriber not found for double-click deletion");
+                node.events[event_idx].subscribers.remove(pos);
+                ui_interaction.add_action(GraphUiAction::EventConnectionChanged {
+                    event_node_id,
+                    event_idx,
+                    subscriber: trigger_node_id,
+                    change: EventSubscriberChange::Removed,
+                });
+            }
+        }
+    }
+}
 
 fn order_ports(port_a: PortRef, port_b: PortRef) -> (PortRef, PortRef) {
     match (port_a.kind, port_b.kind) {
