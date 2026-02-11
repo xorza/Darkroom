@@ -25,7 +25,9 @@ pub fn files_with_extensions(dir: &Path, extensions: &[&str]) -> Vec<PathBuf> {
                 return false;
             }
             let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("");
-            extensions.contains(&ext.to_lowercase().as_str())
+            extensions
+                .iter()
+                .any(|&expected| ext.eq_ignore_ascii_case(expected))
         })
         .map(|e| e.path())
         .collect()

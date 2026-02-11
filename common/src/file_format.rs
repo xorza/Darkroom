@@ -32,20 +32,24 @@ impl SerdeFormat {
     }
 
     pub fn from_file_name(file_name: &str) -> FileFormatResult<Self> {
-        let extension = get_file_extension(file_name)
-            .map(|ext| ext.to_ascii_lowercase())
-            .ok_or(FileExtensionError::MissingFileExtension)?;
+        let ext = get_file_extension(file_name).ok_or(FileExtensionError::MissingFileExtension)?;
 
-        match extension.as_str() {
-            "yaml" | "yml" => Ok(Self::Yaml),
-            "json" => Ok(Self::Json),
-            "lua" => Ok(Self::Lua),
-            "bin" => Ok(Self::Bitcode),
-            "scn" => Ok(Self::Scn),
-            "toml" => Ok(Self::Toml),
-            _ => Err(FileExtensionError::UnsupportedFileExtension(
+        if ext.eq_ignore_ascii_case("yaml") || ext.eq_ignore_ascii_case("yml") {
+            Ok(Self::Yaml)
+        } else if ext.eq_ignore_ascii_case("json") {
+            Ok(Self::Json)
+        } else if ext.eq_ignore_ascii_case("lua") {
+            Ok(Self::Lua)
+        } else if ext.eq_ignore_ascii_case("bin") {
+            Ok(Self::Bitcode)
+        } else if ext.eq_ignore_ascii_case("scn") {
+            Ok(Self::Scn)
+        } else if ext.eq_ignore_ascii_case("toml") {
+            Ok(Self::Toml)
+        } else {
+            Err(FileExtensionError::UnsupportedFileExtension(
                 file_name.to_string(),
-            )),
+            ))
         }
     }
 }

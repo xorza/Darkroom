@@ -1,3 +1,3 @@
-pub fn is_debug() -> bool {
+pub const fn is_debug() -> bool {
     cfg!(debug_assertions)
 }
