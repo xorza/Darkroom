@@ -22,32 +22,12 @@ where
     V: KeyIndexKey<K> + Eq,
 {
     fn eq(&self, other: &Self) -> bool {
-        assert_eq!(
-            self.items.len(),
-            self.idx_by_key.len(),
-            "KeyIndexVec must keep items and index map in sync"
-        );
-        assert_eq!(
-            other.items.len(),
-            other.idx_by_key.len(),
-            "KeyIndexVec must keep items and index map in sync"
-        );
         if self.items.len() != other.items.len() {
             return false;
         }
-
-        for item in &self.items {
-            let key = item.key();
-            let other_item = other.by_key(key);
-            if other_item.is_none() {
-                return false;
-            }
-            if item != other_item.unwrap() {
-                return false;
-            }
-        }
-
-        true
+        self.items
+            .iter()
+            .all(|item| other.by_key(item.key()) == Some(item))
     }
 }
 
@@ -156,12 +136,12 @@ where
     }
 
     pub fn len(&self) -> usize {
-        assert_eq!(self.items.len(), self.idx_by_key.len());
+        debug_assert_eq!(self.items.len(), self.idx_by_key.len());
         self.items.len()
     }
 
     pub fn is_empty(&self) -> bool {
-        assert_eq!(self.items.len(), self.idx_by_key.len());
+        debug_assert_eq!(self.items.len(), self.idx_by_key.len());
         self.items.is_empty()
     }
 

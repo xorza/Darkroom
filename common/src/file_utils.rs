@@ -33,10 +33,6 @@ pub fn files_with_extensions(dir: &Path, extensions: &[&str]) -> Vec<PathBuf> {
 
 /// Returns paths to all RAW and FITS image files in the given directory.
 pub fn astro_image_files(dir: &Path) -> Vec<PathBuf> {
-    let extensions: Vec<&str> = RAW_EXTENSIONS
-        .iter()
-        .chain(FITS_EXTENSIONS.iter())
-        .copied()
-        .collect();
-    files_with_extensions(dir, &extensions)
+    const EXTENSIONS: &[&str] = &["raf", "cr2", "cr3", "nef", "arw", "dng", "fit", "fits"];
+    files_with_extensions(dir, EXTENSIONS)
 }

@@ -121,22 +121,48 @@ fn write_lua_object<W: Write>(
 
 fn write_lua_string<W: Write>(value: &str, out: &mut W) {
     out.write_all(b"\"").unwrap();
-    for ch in value.chars() {
-        match ch {
-            '\\' => out.write_all(b"\\\\").unwrap(),
-            '"' => out.write_all(b"\\\"").unwrap(),
-            '\n' => out.write_all(b"\\n").unwrap(),
-            '\r' => out.write_all(b"\\r").unwrap(),
-            '\t' => out.write_all(b"\\t").unwrap(),
-            ch if ch.is_ascii_graphic() || ch == ' ' => {
-                let mut buf = [0u8; 4];
-                out.write_all(ch.encode_utf8(&mut buf).as_bytes()).unwrap();
-            }
-            ch => {
-                write!(out, "\\u{{{:x}}}", ch as u32).unwrap();
-            }
+    let bytes = value.as_bytes();
+    let mut start = 0;
+    let mut i = 0;
+    while i < bytes.len() {
+        let b = bytes[i];
+        // ASCII escapes
+        let esc: Option<&[u8]> = match b {
+            b'\\' => Some(b"\\\\"),
+            b'"' => Some(b"\\\""),
+            b'\n' => Some(b"\\n"),
+            b'\r' => Some(b"\\r"),
+            b'\t' => Some(b"\\t"),
+            _ => None,
+        };
+        if let Some(esc) = esc {
+            out.write_all(&bytes[start..i]).unwrap();
+            out.write_all(esc).unwrap();
+            i += 1;
+            start = i;
+            continue;
         }
+        // Non-printable ASCII (control chars except already handled above)
+        if b < 0x20 || b == 0x7F {
+            out.write_all(&bytes[start..i]).unwrap();
+            write!(out, "\\u{{{:x}}}", b).unwrap();
+            i += 1;
+            start = i;
+            continue;
+        }
+        // Non-ASCII: unicode-escape the full codepoint
+        if b > 0x7F {
+            let ch = value[i..].chars().next().unwrap();
+            let ch_len = ch.len_utf8();
+            out.write_all(&bytes[start..i]).unwrap();
+            write!(out, "\\u{{{:x}}}", ch as u32).unwrap();
+            i += ch_len;
+            start = i;
+            continue;
+        }
+        i += 1;
     }
+    out.write_all(&bytes[start..]).unwrap();
     out.write_all(b"\"").unwrap();
 }
 
@@ -159,8 +185,13 @@ fn is_lua_identifier_continue(ch: char) -> bool {
     ch == '_' || ch.is_ascii_alphanumeric()
 }
 
+const INDENT_BUF: &[u8; 64] = b"                                                                ";
+
 fn push_indent<W: Write>(indent: usize, out: &mut W) {
-    for _ in 0..indent {
-        out.write_all(b"  ").unwrap();
+    let mut bytes = indent * 2;
+    while bytes > 0 {
+        let n = bytes.min(INDENT_BUF.len());
+        out.write_all(&INDENT_BUF[..n]).unwrap();
+        bytes -= n;
     }
 }
