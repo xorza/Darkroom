@@ -43,74 +43,77 @@ pub fn to_string<T: Serialize>(value: &T) -> SerdeLuaResult<String> {
 
 pub fn to_writer<W: Write, T: Serialize>(writer: &mut W, value: &T) -> SerdeLuaResult<()> {
     let json_value = serde_json::to_value(value)?;
-    writer.write_all(b"return ").unwrap();
-    write_lua_value(&json_value, 0, writer);
-    writer.write_all(b"\n").unwrap();
+    writer.write_all(b"return ")?;
+    write_lua_value(&json_value, 0, writer)?;
+    writer.write_all(b"\n")?;
     Ok(())
 }
 
-fn write_lua_value<W: Write>(value: &serde_json::Value, indent: usize, out: &mut W) {
+fn write_lua_value<W: Write>(
+    value: &serde_json::Value,
+    indent: usize,
+    out: &mut W,
+) -> std::io::Result<()> {
     match value {
-        serde_json::Value::Null => out.write_all(b"nil").unwrap(),
-        serde_json::Value::Bool(value) => {
-            out.write_all(if *value { b"true" } else { b"false" })
-                .unwrap();
-        }
-        serde_json::Value::Number(value) => write!(out, "{}", value).unwrap(),
+        serde_json::Value::Null => out.write_all(b"nil"),
+        serde_json::Value::Bool(value) => out.write_all(if *value { b"true" } else { b"false" }),
+        serde_json::Value::Number(value) => write!(out, "{}", value),
         serde_json::Value::String(value) => write_lua_string(value, out),
         serde_json::Value::Array(values) => write_lua_array(values, indent, out),
         serde_json::Value::Object(values) => write_lua_object(values, indent, out),
     }
 }
 
-fn write_lua_array<W: Write>(values: &[serde_json::Value], indent: usize, out: &mut W) {
+fn write_lua_array<W: Write>(
+    values: &[serde_json::Value],
+    indent: usize,
+    out: &mut W,
+) -> std::io::Result<()> {
     if values.is_empty() {
-        out.write_all(b"{}").unwrap();
-        return;
+        return out.write_all(b"{}");
     }
 
-    out.write_all(b"{\n").unwrap();
+    out.write_all(b"{\n")?;
     let next_indent = indent + 1;
     for value in values {
-        push_indent(next_indent, out);
-        write_lua_value(value, next_indent, out);
-        out.write_all(b",\n").unwrap();
+        push_indent(next_indent, out)?;
+        write_lua_value(value, next_indent, out)?;
+        out.write_all(b",\n")?;
     }
-    push_indent(indent, out);
-    out.write_all(b"}").unwrap();
+    push_indent(indent, out)?;
+    out.write_all(b"}")
 }
 
 fn write_lua_object<W: Write>(
     values: &serde_json::Map<String, serde_json::Value>,
     indent: usize,
     out: &mut W,
-) {
+) -> std::io::Result<()> {
     if values.is_empty() {
-        out.write_all(b"{}").unwrap();
-        return;
+        return out.write_all(b"{}");
     }
 
-    out.write_all(b"{\n").unwrap();
+    out.write_all(b"{\n")?;
     let next_indent = indent + 1;
     for (key, value) in values {
-        push_indent(next_indent, out);
+        push_indent(next_indent, out)?;
         if is_lua_identifier(key) {
-            out.write_all(key.as_bytes()).unwrap();
+            out.write_all(key.as_bytes())?;
         } else {
-            out.write_all(b"[").unwrap();
-            write_lua_string(key, out);
-            out.write_all(b"]").unwrap();
+            out.write_all(b"[")?;
+            write_lua_string(key, out)?;
+            out.write_all(b"]")?;
         }
-        out.write_all(b" = ").unwrap();
-        write_lua_value(value, next_indent, out);
-        out.write_all(b",\n").unwrap();
+        out.write_all(b" = ")?;
+        write_lua_value(value, next_indent, out)?;
+        out.write_all(b",\n")?;
     }
-    push_indent(indent, out);
-    out.write_all(b"}").unwrap();
+    push_indent(indent, out)?;
+    out.write_all(b"}")
 }
 
-fn write_lua_string<W: Write>(value: &str, out: &mut W) {
-    out.write_all(b"\"").unwrap();
+fn write_lua_string<W: Write>(value: &str, out: &mut W) -> std::io::Result<()> {
+    out.write_all(b"\"")?;
     let bytes = value.as_bytes();
     let mut start = 0;
     let mut i = 0;
@@ -126,16 +129,16 @@ fn write_lua_string<W: Write>(value: &str, out: &mut W) {
             _ => None,
         };
         if let Some(esc) = esc {
-            out.write_all(&bytes[start..i]).unwrap();
-            out.write_all(esc).unwrap();
+            out.write_all(&bytes[start..i])?;
+            out.write_all(esc)?;
             i += 1;
             start = i;
             continue;
         }
         // Non-printable ASCII (control chars except already handled above)
         if b < 0x20 || b == 0x7F {
-            out.write_all(&bytes[start..i]).unwrap();
-            write!(out, "\\u{{{:x}}}", b).unwrap();
+            out.write_all(&bytes[start..i])?;
+            write!(out, "\\u{{{:x}}}", b)?;
             i += 1;
             start = i;
             continue;
@@ -144,16 +147,16 @@ fn write_lua_string<W: Write>(value: &str, out: &mut W) {
         if b > 0x7F {
             let ch = value[i..].chars().next().unwrap();
             let ch_len = ch.len_utf8();
-            out.write_all(&bytes[start..i]).unwrap();
-            write!(out, "\\u{{{:x}}}", ch as u32).unwrap();
+            out.write_all(&bytes[start..i])?;
+            write!(out, "\\u{{{:x}}}", ch as u32)?;
             i += ch_len;
             start = i;
             continue;
         }
         i += 1;
     }
-    out.write_all(&bytes[start..]).unwrap();
-    out.write_all(b"\"").unwrap();
+    out.write_all(&bytes[start..])?;
+    out.write_all(b"\"")
 }
 
 fn is_lua_identifier(value: &str) -> bool {
@@ -171,13 +174,14 @@ fn is_lua_identifier(value: &str) -> bool {
 
 const INDENT_BUF: &[u8; 64] = b"                                                                ";
 
-fn push_indent<W: Write>(indent: usize, out: &mut W) {
+fn push_indent<W: Write>(indent: usize, out: &mut W) -> std::io::Result<()> {
     let mut bytes = indent * 2;
     while bytes > 0 {
         let n = bytes.min(INDENT_BUF.len());
-        out.write_all(&INDENT_BUF[..n]).unwrap();
+        out.write_all(&INDENT_BUF[..n])?;
         bytes -= n;
     }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -358,26 +362,26 @@ mod tests {
     #[test]
     fn string_escaping_output() {
         let mut buf = Vec::new();
-        write_lua_string("hello\nworld", &mut buf);
+        write_lua_string("hello\nworld", &mut buf).unwrap();
         assert_eq!(String::from_utf8(buf).unwrap(), r#""hello\nworld""#);
 
         let mut buf = Vec::new();
-        write_lua_string("tab\there", &mut buf);
+        write_lua_string("tab\there", &mut buf).unwrap();
         assert_eq!(String::from_utf8(buf).unwrap(), r#""tab\there""#);
 
         let mut buf = Vec::new();
-        write_lua_string(r#"quote"end"#, &mut buf);
+        write_lua_string(r#"quote"end"#, &mut buf).unwrap();
         assert_eq!(String::from_utf8(buf).unwrap(), r#""quote\"end""#);
 
         let mut buf = Vec::new();
-        write_lua_string("back\\slash", &mut buf);
+        write_lua_string("back\\slash", &mut buf).unwrap();
         assert_eq!(String::from_utf8(buf).unwrap(), r#""back\\slash""#);
     }
 
     #[test]
     fn unicode_escaped_in_lua() {
         let mut buf = Vec::new();
-        write_lua_string("hello 世界", &mut buf);
+        write_lua_string("hello 世界", &mut buf).unwrap();
         let output = String::from_utf8(buf).unwrap();
         // Non-ASCII should be unicode-escaped
         assert!(output.contains("\\u{"));
@@ -391,7 +395,7 @@ mod tests {
     #[test]
     fn control_chars_escaped() {
         let mut buf = Vec::new();
-        write_lua_string("bell\x07here", &mut buf);
+        write_lua_string("bell\x07here", &mut buf).unwrap();
         let output = String::from_utf8(buf).unwrap();
         assert!(output.contains("\\u{7}"));
     }
