@@ -19,7 +19,6 @@ pub mod ready_state;
 pub mod serde;
 pub mod serde_lua;
 pub mod serde_scn;
-pub mod serde_yaml;
 pub mod shared;
 pub mod shared_fn;
 pub mod slot;

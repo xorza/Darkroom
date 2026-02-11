@@ -52,8 +52,8 @@ The `id_type!` macro generates strongly-typed UUID wrappers with Debug, Clone, C
 
 ### Serialization
 - `common::serialize` returns `Vec<u8>`; `deserialize` accepts bytes
-- Text formats (YAML/JSON) are UTF-8 bytes
-- Binary format uses bincode
+- Text formats (JSON/Lua/TOML/ScnText) are UTF-8 bytes
+- Binary formats: Bitcode, Scn (LZ4-compressed Lua)
 
 ## Dependencies Overview
 

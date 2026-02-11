@@ -10,7 +10,7 @@ Shared utilities used across the workspace.
 | `shared.rs` | Thread-safe `Shared<T>` wrapper around `Arc<Mutex<T>>` |
 | `lambda.rs` | Async lambda patterns for callback support |
 | `macros.rs` | ID type generation macros (`id_type!`), async lambda macros |
-| `serde.rs` | Generic serialization (YAML, JSON, binary via bincode) |
+| `serde.rs` | Generic serialization (JSON, Lua, Bitcode, TOML, SCN, ScnText) |
 | `serde_lua.rs` | Lua-specific serialization support |
 | `file_format.rs` | Format detection and selection |
 | `pause_gate.rs` | Synchronization primitive for pausing/resuming async operations |
@@ -25,7 +25,7 @@ Shared<T>          // Arc<Mutex<T>> wrapper with lock() returning MutexGuard
 Slot<T>            // Wait-friendly value passing between async boundaries
 PauseGate          // Synchronization for pausing/resuming async operations
 ReadyState         // Readiness synchronization using tokio barriers
-FileFormat         // Yaml | Json | Binary - format selection and auto-detection
+SerdeFormat        // Json | Lua | Bitcode | Toml | Scn | ScnText - format selection and auto-detection
 ```
 
 ## ID Generation
@@ -38,9 +38,9 @@ The `id_type!` macro generates strongly-typed UUID wrappers:
 ## Serialization
 
 - `serialize()` returns `Vec<u8>`; `deserialize()` accepts bytes
-- Text formats (YAML/JSON) are UTF-8 bytes
-- Binary format uses bincode
-- `FileFormat` enum for format selection and auto-detection by extension
+- Text formats (JSON/Lua/TOML/ScnText) are UTF-8 bytes
+- Binary formats: Bitcode, Scn (LZ4-compressed Lua)
+- `SerdeFormat` enum for format selection and auto-detection by extension
 
 ## Dependencies
 
