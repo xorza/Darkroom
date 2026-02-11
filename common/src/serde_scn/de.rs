@@ -33,10 +33,10 @@ impl<'de> de::Deserializer<'de> for ScnValue {
             }
             ScnValue::Variant(tag, None) => visitor.visit_string(tag),
             ScnValue::Variant(tag, Some(payload)) => {
-                // For deserialize_any, fall back to single-key map representation
-                let mut de = MapDeserializer {
-                    iter: vec![(tag, *payload)].into_iter(),
-                    current_value: None,
+                // For deserialize_any, fall back to single-key map representation.
+                let mut de = SingleEntryMapDeserializer {
+                    entry: Some((tag, *payload)),
+                    value: None,
                 };
                 visitor.visit_map(&mut de)
             }
@@ -291,6 +291,37 @@ impl<'de> de::MapAccess<'de> for MapDeserializer {
     fn next_value_seed<V: de::DeserializeSeed<'de>>(&mut self, seed: V) -> Result<V::Value> {
         let value = self
             .current_value
+            .take()
+            .expect("next_value_seed called before next_key_seed");
+        seed.deserialize(value)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Single-entry map deserializer (avoids Vec allocation for variant → map fallback)
+// ---------------------------------------------------------------------------
+
+struct SingleEntryMapDeserializer {
+    entry: Option<(String, ScnValue)>,
+    value: Option<ScnValue>,
+}
+
+impl<'de> de::MapAccess<'de> for SingleEntryMapDeserializer {
+    type Error = ScnError;
+
+    fn next_key_seed<K: de::DeserializeSeed<'de>>(&mut self, seed: K) -> Result<Option<K::Value>> {
+        match self.entry.take() {
+            Some((key, value)) => {
+                self.value = Some(value);
+                seed.deserialize(ScnValue::String(key)).map(Some)
+            }
+            None => Ok(None),
+        }
+    }
+
+    fn next_value_seed<V: de::DeserializeSeed<'de>>(&mut self, seed: V) -> Result<V::Value> {
+        let value = self
+            .value
             .take()
             .expect("next_value_seed called before next_key_seed");
         seed.deserialize(value)

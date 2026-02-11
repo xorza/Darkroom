@@ -143,6 +143,37 @@ impl<'a> Lexer<'a> {
             return self.read_triple_quoted_string();
         }
 
+        // Fast path: scan for closing quote without escapes or non-ASCII.
+        // This avoids per-char String::push for the common case.
+        let scan_start = self.pos;
+        loop {
+            if self.pos >= self.input.len() {
+                // Unterminated — fall through to slow path for proper error
+                break;
+            }
+            let b = self.input[self.pos];
+            if b == b'"' {
+                // Found closing quote — return slice directly
+                let s = std::str::from_utf8(&self.input[scan_start..self.pos])
+                    .map_err(|_| self.error("invalid UTF-8 in string"))?;
+                let result = s.to_string();
+                self.col += self.pos - scan_start + 1; // +1 for closing "
+                self.pos += 1; // skip closing "
+                return Ok(Token::String(result));
+            }
+            if b == b'\\' || !(0x20..0x80).contains(&b) {
+                // Needs slow path for escapes, non-ASCII, or control chars
+                break;
+            }
+            self.pos += 1;
+        }
+
+        // Rewind and use slow path (handles escapes, non-ASCII, errors)
+        self.pos = scan_start;
+        self.read_string_slow()
+    }
+
+    fn read_string_slow(&mut self) -> Result<Token> {
         let mut result = String::new();
         loop {
             if self.pos >= self.input.len() {
@@ -176,7 +207,6 @@ impl<'a> Lexer<'a> {
                 }
                 _ => {
                     if b < 0x80 {
-                        // Plain ASCII — already advanced
                         result.push(b as char);
                     } else {
                         // Multi-byte UTF-8: rewind and decode the full codepoint
@@ -408,8 +438,9 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_value(&mut self) -> Result<ScnValue> {
-        let tok = self.peek()?.clone();
-        match tok {
+        // Peek to determine production, but only consume via next() to avoid cloning
+        // heap-allocated String/Ident tokens.
+        match self.peek()? {
             Token::Null => {
                 self.next()?;
                 Ok(ScnValue::Null)
@@ -422,29 +453,27 @@ impl<'a> Parser<'a> {
                 self.next()?;
                 Ok(ScnValue::Bool(false))
             }
-            Token::Int(i) => {
-                self.next()?;
-                Ok(ScnValue::Int(i))
-            }
-            Token::Uint(u) => {
-                self.next()?;
-                Ok(ScnValue::Uint(u))
-            }
-            Token::Float(f) => {
-                self.next()?;
-                Ok(ScnValue::Float(f))
-            }
-            Token::String(s) => {
-                self.next()?;
-                Ok(ScnValue::String(s))
+            Token::Int(_)
+            | Token::Uint(_)
+            | Token::Float(_)
+            | Token::String(_)
+            | Token::Ident(_) => {
+                let tok = self.next()?;
+                match tok {
+                    Token::Int(i) => Ok(ScnValue::Int(i)),
+                    Token::Uint(u) => Ok(ScnValue::Uint(u)),
+                    Token::Float(f) => Ok(ScnValue::Float(f)),
+                    Token::String(s) => Ok(ScnValue::String(s)),
+                    Token::Ident(tag) => self.parse_variant(tag),
+                    _ => unreachable!(),
+                }
             }
             Token::LBrace => self.parse_map(),
             Token::LBracket => self.parse_array(),
-            Token::Ident(tag) => {
-                self.next()?; // consume the ident
-                self.parse_variant(tag)
+            _ => {
+                let tok = self.next()?;
+                Err(self.lexer.error(format!("unexpected token: {tok:?}")))
             }
-            other => Err(self.lexer.error(format!("unexpected token: {other:?}"))),
         }
     }
 

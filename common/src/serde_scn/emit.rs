@@ -47,18 +47,20 @@ fn emit_float<W: Write>(w: &mut W, f: f64, indent: usize, at_start: bool) -> Res
     if at_start {
         write_indent(w, indent)?;
     }
-    if f.is_nan() {
-        w.write_all(b"null")?;
-    } else if f.is_infinite() {
-        // SCN doesn't have inf literals — emit null to avoid data corruption.
+    if !f.is_finite() {
+        // SCN doesn't have NaN/Infinity literals — emit null.
         w.write_all(b"null")?;
     } else {
-        // Ensure float always has a decimal point so it parses back as float
-        let s = format!("{f}");
-        if s.contains('.') || s.contains('e') || s.contains('E') {
-            w.write_all(s.as_bytes())?;
-        } else {
-            write!(w, "{s}.0")?;
+        // Ensure float always has a decimal point so it parses back as float.
+        // Use a stack buffer to avoid heap allocation from format!().
+        let mut buf = [0u8; 32];
+        let mut cursor = std::io::Cursor::new(&mut buf[..]);
+        write!(cursor, "{f}").unwrap();
+        let len = cursor.position() as usize;
+        let s = &buf[..len];
+        w.write_all(s)?;
+        if !s.contains(&b'.') && !s.contains(&b'e') && !s.contains(&b'E') {
+            w.write_all(b".0")?;
         }
     }
     Ok(())
