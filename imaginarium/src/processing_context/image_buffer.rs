@@ -202,7 +202,7 @@ impl ImageBuffer {
     pub fn as_gpu(self) -> Option<GpuImage> {
         match self.storage.into_inner() {
             Some(Storage::Gpu(img)) => Some(img),
-            _ => unreachable!(),
+            _ => None,
         }
     }
 }

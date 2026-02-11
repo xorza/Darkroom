@@ -229,6 +229,9 @@ fn draw_pixel(pixels: &mut [f32], idx: usize, channels: usize, color: Color) {
         pixels[idx] = color.r;
         pixels[idx + 1] = color.g;
         pixels[idx + 2] = color.b;
+        if channels == 4 {
+            pixels[idx + 3] = color.a;
+        }
     }
 }
 

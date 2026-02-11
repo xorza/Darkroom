@@ -961,6 +961,10 @@ pub(super) fn blend_final(
                     rgb_row[x * 3] = (avg_r * inv).max(0.0);
                     rgb_row[x * 3 + 1] = (avg_g * inv).max(0.0);
                     rgb_row[x * 3 + 2] = (avg_b * inv).max(0.0);
+                } else {
+                    rgb_row[x * 3] = 0.0;
+                    rgb_row[x * 3 + 1] = 0.0;
+                    rgb_row[x * 3 + 2] = 0.0;
                 }
             }
         });

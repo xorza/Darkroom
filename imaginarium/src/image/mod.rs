@@ -48,7 +48,7 @@ impl Image {
         &self.bytes
     }
 
-    /// Convert to owned bytes (zero-copy due to 8-byte alignment).
+    /// Convert to owned bytes (zero-copy due to 16-byte alignment).
     pub fn into_bytes(self) -> Vec<u8> {
         let (ptr, _align, len, capacity) = self.bytes.into_raw_parts();
         // Safety: AVec guarantees the pointer is valid and properly aligned.
