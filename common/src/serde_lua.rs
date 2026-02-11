@@ -53,11 +53,8 @@ fn write_lua_value<W: Write>(value: &serde_json::Value, indent: usize, out: &mut
     match value {
         serde_json::Value::Null => out.write_all(b"nil").unwrap(),
         serde_json::Value::Bool(value) => {
-            if *value {
-                out.write_all(b"true").unwrap();
-            } else {
-                out.write_all(b"false").unwrap();
-            }
+            out.write_all(if *value { b"true" } else { b"false" })
+                .unwrap();
         }
         serde_json::Value::Number(value) => write!(out, "{}", value).unwrap(),
         serde_json::Value::String(value) => write_lua_string(value, out),
@@ -74,13 +71,10 @@ fn write_lua_array<W: Write>(values: &[serde_json::Value], indent: usize, out: &
 
     out.write_all(b"{\n").unwrap();
     let next_indent = indent + 1;
-    for (index, value) in values.iter().enumerate() {
+    for value in values {
         push_indent(next_indent, out);
         write_lua_value(value, next_indent, out);
-        if index + 1 != values.len() {
-            out.write_all(b",").unwrap();
-        }
-        out.write_all(b"\n").unwrap();
+        out.write_all(b",\n").unwrap();
     }
     push_indent(indent, out);
     out.write_all(b"}").unwrap();
@@ -98,8 +92,7 @@ fn write_lua_object<W: Write>(
 
     out.write_all(b"{\n").unwrap();
     let next_indent = indent + 1;
-    let len = values.len();
-    for (index, (key, value)) in values.iter().enumerate() {
+    for (key, value) in values {
         push_indent(next_indent, out);
         if is_lua_identifier(key) {
             out.write_all(key.as_bytes()).unwrap();
@@ -110,10 +103,7 @@ fn write_lua_object<W: Write>(
         }
         out.write_all(b" = ").unwrap();
         write_lua_value(value, next_indent, out);
-        if index + 1 != len {
-            out.write_all(b",").unwrap();
-        }
-        out.write_all(b"\n").unwrap();
+        out.write_all(b",\n").unwrap();
     }
     push_indent(indent, out);
     out.write_all(b"}").unwrap();
@@ -167,22 +157,16 @@ fn write_lua_string<W: Write>(value: &str, out: &mut W) {
 }
 
 fn is_lua_identifier(value: &str) -> bool {
-    let mut chars = value.chars();
-    let Some(first) = chars.next() else {
-        return false;
-    };
-    if !is_lua_identifier_start(first) {
+    let bytes = value.as_bytes();
+    if bytes.is_empty() {
         return false;
     }
-    chars.all(is_lua_identifier_continue)
-}
-
-fn is_lua_identifier_start(ch: char) -> bool {
-    ch == '_' || ch.is_ascii_alphabetic()
-}
-
-fn is_lua_identifier_continue(ch: char) -> bool {
-    ch == '_' || ch.is_ascii_alphanumeric()
+    if !matches!(bytes[0], b'a'..=b'z' | b'A'..=b'Z' | b'_') {
+        return false;
+    }
+    bytes[1..]
+        .iter()
+        .all(|b| matches!(b, b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_'))
 }
 
 const INDENT_BUF: &[u8; 64] = b"                                                                ";
