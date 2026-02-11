@@ -18,7 +18,7 @@ use crate::common::UiEquals;
 
 use crate::common::button::Button;
 
-use crate::gui::connection_ui::{ConnectionDragUpdate, ConnectionUi};
+use crate::gui::connection_ui::{BrokeItem, ConnectionDragUpdate, ConnectionUi};
 use crate::gui::connection_ui::{ConnectionKey, PortKind};
 use crate::gui::graph_background::GraphBackgroundRenderer;
 use crate::gui::graph_layout::{GraphLayout, PortRef};
@@ -328,24 +328,31 @@ impl GraphUi {
             return;
         }
 
-        self.apply_broken_connections(ctx);
-        self.remove_nodes_hit_by_breaker(ctx);
+        self.apply_breaker_results(ctx);
         self.cancel_interaction();
     }
 
-    fn apply_broken_connections(&mut self, ctx: &mut GraphContext<'_>) {
-        let iter = self
+    /// Collects all items hit by the breaker (connections, const bindings, nodes)
+    /// and applies the corresponding removals in one pass.
+    fn apply_breaker_results(&mut self, ctx: &mut GraphContext<'_>) {
+        let items: Vec<BrokeItem> = self
             .connections
             .broke_iter()
             .chain(self.node_ui.const_bind_ui.broke_iter())
-            .cloned();
+            .map(|key| BrokeItem::Connection(*key))
+            .chain(
+                self.node_ui
+                    .broke_node_iter()
+                    .map(|id| BrokeItem::Node(*id)),
+            )
+            .collect();
 
-        for connection in iter {
-            match connection {
-                ConnectionKey::Input {
+        for item in items {
+            match item {
+                BrokeItem::Connection(ConnectionKey::Input {
                     input_node_id,
                     input_idx,
-                } => {
+                }) => {
                     let node = ctx
                         .view_graph
                         .graph
@@ -363,11 +370,11 @@ impl GraphUi {
                         after: Binding::None,
                     });
                 }
-                ConnectionKey::Event {
+                BrokeItem::Connection(ConnectionKey::Event {
                     event_node_id,
                     event_idx,
                     trigger_node_id,
-                } => {
+                }) => {
                     let node = ctx
                         .view_graph
                         .graph
@@ -387,15 +394,12 @@ impl GraphUi {
                             });
                     }
                 }
+                BrokeItem::Node(node_id) => {
+                    let action = ctx.view_graph.removal_action(&node_id);
+                    ctx.view_graph.remove_node(&node_id);
+                    self.ui_interaction.add_action(action);
+                }
             }
-        }
-    }
-
-    fn remove_nodes_hit_by_breaker(&mut self, ctx: &mut GraphContext<'_>) {
-        for node_id in self.node_ui.node_ids_hit_breaker.iter() {
-            let action = ctx.view_graph.removal_action(node_id);
-            ctx.view_graph.remove_node(node_id);
-            self.ui_interaction.add_action(action);
         }
     }
 

@@ -105,11 +105,15 @@ impl<'a> NodeExecutionInfo<'a> {
 #[derive(Debug, Default)]
 pub(crate) struct NodeUi {
     node_ids_to_remove: Vec<NodeId>,
-    pub(crate) node_ids_hit_breaker: Vec<NodeId>,
+    node_ids_hit_breaker: Vec<NodeId>,
     pub(crate) const_bind_ui: ConstBindUi,
 }
 
 impl NodeUi {
+    pub(crate) fn broke_node_iter(&self) -> impl Iterator<Item = &NodeId> {
+        self.node_ids_hit_breaker.iter()
+    }
+
     pub fn render_nodes(
         &mut self,
         gui: &mut Gui<'_>,

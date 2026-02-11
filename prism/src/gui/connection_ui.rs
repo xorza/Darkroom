@@ -29,6 +29,13 @@ pub(crate) enum ConnectionKey {
     },
 }
 
+/// A single item broken by the connection breaker tool.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum BrokeItem {
+    Connection(ConnectionKey),
+    Node(NodeId),
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum PortKind {
     Input,
