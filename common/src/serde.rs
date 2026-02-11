@@ -6,6 +6,7 @@ use serde::de::DeserializeOwned;
 use crate::file_format::SerdeFormat;
 use crate::normalize_string::NormalizeString;
 use crate::serde_lua;
+use crate::serde_scn;
 use crate::serde_yaml;
 
 pub fn is_false(value: &bool) -> bool {
@@ -62,6 +63,9 @@ pub fn serialize_into<T: Serialize, W: Write>(
             let compressed_len = lz4_flex::compress_into(input, output).unwrap();
             writer.write_all(&output[..compressed_len]).unwrap();
         }
+        SerdeFormat::ScnText => {
+            serde_scn::to_writer(writer, &value).unwrap();
+        }
     }
 }
 
@@ -116,5 +120,6 @@ pub fn deserialize_from<T: DeserializeOwned, R: Read>(
 
             Ok(serde_lua::from_slice(decompressed_part)?)
         }
+        SerdeFormat::ScnText => Ok(serde_scn::from_reader(reader)?),
     }
 }

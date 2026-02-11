@@ -24,11 +24,19 @@ pub enum SerdeFormat {
     Bitcode,
     Toml,
     Scn,
+    ScnText,
 }
 
 impl SerdeFormat {
-    pub fn all_formats_for_testing() -> [Self; 5] {
-        [Self::Yaml, Self::Json, Self::Lua, Self::Bitcode, Self::Scn]
+    pub fn all_formats_for_testing() -> [Self; 6] {
+        [
+            Self::Yaml,
+            Self::Json,
+            Self::Lua,
+            Self::Bitcode,
+            Self::Scn,
+            Self::ScnText,
+        ]
     }
 
     pub fn from_file_name(file_name: &str) -> FileFormatResult<Self> {
@@ -46,6 +54,8 @@ impl SerdeFormat {
             Ok(Self::Scn)
         } else if ext.eq_ignore_ascii_case("toml") {
             Ok(Self::Toml)
+        } else if ext.eq_ignore_ascii_case("scnt") {
+            Ok(Self::ScnText)
         } else {
             Err(FileExtensionError::UnsupportedFileExtension(
                 file_name.to_string(),
