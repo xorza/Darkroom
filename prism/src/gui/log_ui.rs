@@ -50,7 +50,7 @@ impl LogUi {
                             ui.take_available_width();
                             ui.vertical(|ui| {
                                 let spacer = (max_height
-                                    - (status.line_count() - 1) as f32 * line_height)
+                                    - status.line_count().saturating_sub(1) as f32 * line_height)
                                     .max(0.0);
                                 ui.add_space(spacer);
                                 ui.label(status);
