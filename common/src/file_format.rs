@@ -18,7 +18,6 @@ pub fn get_file_extension(filename: &str) -> Option<&str> {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SerdeFormat {
-    Yaml,
     Json,
     Lua,
     Bitcode,
@@ -27,8 +26,8 @@ pub enum SerdeFormat {
 }
 
 impl SerdeFormat {
-    pub fn all_formats_for_testing() -> [Self; 5] {
-        [Self::Yaml, Self::Json, Self::Lua, Self::Bitcode, Self::Scn]
+    pub fn all_formats_for_testing() -> [Self; 4] {
+        [Self::Json, Self::Lua, Self::Bitcode, Self::Scn]
     }
 
     pub fn from_file_name(file_name: &str) -> FileFormatResult<Self> {
@@ -37,7 +36,6 @@ impl SerdeFormat {
             .ok_or(FileExtensionError::MissingFileExtension)?;
 
         match extension.as_str() {
-            "yaml" | "yml" => Ok(Self::Yaml),
             "json" => Ok(Self::Json),
             "lua" => Ok(Self::Lua),
             "bin" => Ok(Self::Bitcode),

@@ -26,7 +26,6 @@ pub mod slot;
 pub mod string_ext;
 pub mod test_utils;
 pub mod toggle;
-pub mod yaml_format;
 
 pub use bit_buffer2::BitBuffer2;
 pub use bool_ext::BoolExt;

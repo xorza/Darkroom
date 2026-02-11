@@ -8,7 +8,6 @@ aligned-vec = { workspace = true }
 anyhow = { workspace = true }
 rayon = { workspace = true }
 tokio = { workspace = true }
-serde_yml = { workspace = true }
 thiserror = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
