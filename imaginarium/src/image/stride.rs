@@ -30,23 +30,24 @@ pub(crate) fn add_stride_padding(
     }
 }
 
-/// Strips stride padding from image bytes, returning tightly packed pixel data.
-pub(crate) fn strip_stride_padding(
-    src: AVec<u8, ConstAlign<ALIGNMENT>>,
+/// Strips stride padding from a byte slice, returning tightly packed pixel data.
+/// Returns None if already packed (stride == row_bytes).
+pub(crate) fn strip_stride_padding_from_slice(
+    src: &[u8],
     width: usize,
     height: usize,
     stride: usize,
     bpp: u8,
-) -> AVec<u8, ConstAlign<ALIGNMENT>> {
+) -> Option<AVec<u8, ConstAlign<ALIGNMENT>>> {
     let row_bytes = width * bpp as usize;
 
     if row_bytes == stride {
-        src
+        None
     } else {
         let mut packed = AVec::with_capacity(ALIGNMENT, row_bytes * height);
         for y in 0..height {
             packed.extend_from_slice(&src[y * stride..y * stride + row_bytes]);
         }
-        packed
+        Some(packed)
     }
 }

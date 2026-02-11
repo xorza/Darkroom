@@ -628,8 +628,8 @@ pub(super) unsafe fn convert_u16_to_f32_row_sse2(src: &[u16], dst: &mut [f32]) {
     }
 }
 
-#[target_feature(enable = "sse2")]
-pub(super) unsafe fn convert_f32_to_u16_row_sse2(src: &[f32], dst: &mut [u16]) {
+#[target_feature(enable = "sse4.1")]
+pub(super) unsafe fn convert_f32_to_u16_row_sse41(src: &[f32], dst: &mut [u16]) {
     use std::arch::x86_64::*;
 
     let len = src.len();
@@ -653,8 +653,8 @@ pub(super) unsafe fn convert_f32_to_u16_row_sse2(src: &[f32], dst: &mut [u16]) {
         let i0 = _mm_cvtps_epi32(scaled0);
         let i1 = _mm_cvtps_epi32(scaled1);
 
-        // Pack with signed saturation (values are clamped to [0, 65535] so this is safe)
-        let words = _mm_packs_epi32(i0, i1);
+        // Pack with unsigned saturation (SSE4.1) — values are in [0, 65535]
+        let words = _mm_packus_epi32(i0, i1);
         _mm_storeu_si128(dst.as_mut_ptr().add(dst_offset) as *mut __m128i, words);
     }
 

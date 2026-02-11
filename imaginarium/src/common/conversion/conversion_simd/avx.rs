@@ -369,6 +369,6 @@ pub(super) unsafe fn convert_f32_to_u16_row_avx2(src: &[f32], dst: &mut [u16]) {
     }
 
     if remainder > 0 {
-        sse::convert_f32_to_u16_row_sse2(&src[simd_width * 16..], &mut dst[simd_width * 16..]);
+        sse::convert_f32_to_u16_row_sse41(&src[simd_width * 16..], &mut dst[simd_width * 16..]);
     }
 }

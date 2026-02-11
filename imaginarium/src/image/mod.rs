@@ -15,7 +15,7 @@ pub const SUPPORTED_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg", "tiff", "tif"]
 use crate::common::conversion::convert_image;
 use crate::common::{ColorFormat, Error, Result};
 
-use stride::{add_stride_padding, align_stride, strip_stride_padding};
+use stride::{add_stride_padding, align_stride, strip_stride_padding_from_slice};
 
 /// 16-byte alignment for image data to enable SIMD operations and zero-copy casting to f32/f64.
 const ALIGNMENT: usize = 16;
@@ -117,17 +117,32 @@ impl Image {
             .ok_or_else(|| Error::InvalidExtension("missing extension".to_string()))?
             .to_ascii_lowercase();
 
-        // Strip stride padding if present (all formats expect tightly packed pixels)
-        let image = if self.desc.is_packed() {
-            std::borrow::Cow::Borrowed(self)
+        // Strip stride padding if present (all formats expect tightly packed pixels).
+        // Only allocates a packed copy when stride != row_bytes (avoids full image clone).
+        let packed_image;
+        let image = if let Some(packed_bytes) = strip_stride_padding_from_slice(
+            self.bytes(),
+            self.desc.width,
+            self.desc.height,
+            self.desc.stride,
+            self.desc.color_format.byte_count(),
+        ) {
+            packed_image = Image {
+                desc: ImageDesc {
+                    stride: self.desc.row_bytes(),
+                    ..self.desc
+                },
+                bytes: packed_bytes,
+            };
+            &packed_image
         } else {
-            std::borrow::Cow::Owned(self.clone().packed())
+            self
         };
 
         match extension.as_str() {
-            "png" => io::save_png(&image, filename)?,
-            "jpeg" | "jpg" => io::save_jpg(&image, filename)?,
-            "tiff" | "tif" => io::save_tiff(&image, filename)?,
+            "png" => io::save_png(image, filename)?,
+            "jpeg" | "jpg" => io::save_jpg(image, filename)?,
+            "tiff" | "tif" => io::save_tiff(image, filename)?,
 
             _ => return Err(Error::InvalidExtension(extension)),
         };
@@ -166,13 +181,14 @@ impl Image {
             return self;
         }
         let desc = *self.desc();
-        let bytes = strip_stride_padding(
-            self.into_aligned_bytes(),
+        let bytes = strip_stride_padding_from_slice(
+            self.bytes(),
             desc.width,
             desc.height,
             desc.stride,
             desc.color_format.byte_count(),
-        );
+        )
+        .expect("is_packed check above guarantees stride != row_bytes");
 
         Image {
             desc: ImageDesc {

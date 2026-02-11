@@ -526,21 +526,17 @@ fn test_sse_u16_to_f32_various_widths() {
 
 #[test]
 fn test_sse_f32_to_u16_various_widths() {
-    if !cpu_features::get().sse2 {
+    if !cpu_features::get().sse4_1 {
         return;
     }
 
-    // Note: The SSE2 implementation uses _mm_packs_epi32 which performs signed
-    // saturation at 32767. This means values above ~0.5 will be clamped.
-    // We test with values in the safe range (0.0 to 0.49) to verify correctness.
+    // Test full [0.0, 1.0] range including values above 0.5 (u16 > 32767)
     for &width in &TEST_WIDTHS {
-        let src: Vec<f32> = (0..width)
-            .map(|i| (i as f32 / width as f32) * 0.49)
-            .collect();
+        let src: Vec<f32> = (0..width).map(|i| i as f32 / width as f32).collect();
         let mut dst = vec![0u16; width];
 
         unsafe {
-            sse::convert_f32_to_u16_row_sse2(&src, &mut dst);
+            sse::convert_f32_to_u16_row_sse41(&src, &mut dst);
         }
 
         for i in 0..width {

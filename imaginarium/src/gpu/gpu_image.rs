@@ -42,11 +42,21 @@ pub struct GpuImage {
 impl GpuImage {
     /// Creates a new GPU image from CPU image data.
     pub fn from_image(ctx: &Gpu, image: &Image) -> Self {
-        let (bytes, desc): (Cow<[u8]>, ImageDesc) = if image.desc().is_aligned() {
-            (Cow::Borrowed(image.bytes()), *image.desc())
+        let desc = image.desc().with_aligned_stride();
+        let bytes: Cow<[u8]> = if image.desc().stride == desc.stride {
+            // Already aligned — zero-copy borrow
+            Cow::Borrowed(image.bytes())
         } else {
-            let strided = image.clone().with_stride();
-            (Cow::Owned(strided.bytes().to_vec()), *strided.desc())
+            // Need to re-stride: copy pixel rows with new aligned stride (no full image clone)
+            let src = image.bytes();
+            let src_stride = image.desc().stride;
+            let row_bytes = image.desc().row_bytes();
+            let mut buf = vec![0u8; desc.size_in_bytes()];
+            for y in 0..desc.height {
+                buf[y * desc.stride..y * desc.stride + row_bytes]
+                    .copy_from_slice(&src[y * src_stride..y * src_stride + row_bytes]);
+            }
+            Cow::Owned(buf)
         };
 
         let buffer = ctx

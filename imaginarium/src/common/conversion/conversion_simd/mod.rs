@@ -641,8 +641,12 @@ fn convert_f32_to_u16_row(src: &[f32], dst: &mut [u16]) {
         unsafe fn impl_x86_64(src: &[f32], dst: &mut [u16]) {
             if cpu_features::has_avx2() {
                 avx::convert_f32_to_u16_row_avx2(src, dst);
+            } else if cpu_features::has_sse4_1() {
+                sse::convert_f32_to_u16_row_sse41(src, dst);
             } else {
-                sse::convert_f32_to_u16_row_sse2(src, dst);
+                for (s, d) in src.iter().zip(dst.iter_mut()) {
+                    *d = (*s * 65535.0).clamp(0.0, 65535.0) as u16;
+                }
             }
         }
     }

@@ -60,14 +60,6 @@ pub(super) fn apply(
         FORMAT_L_U8 | FORMAT_LA_U8 | FORMAT_RGB_U8 | FORMAT_L_U16 | FORMAT_LA_U16 | FORMAT_RGB_U16
     );
 
-    if needs_clear {
-        queue.write_buffer(
-            output.write_buffer().buffer(),
-            0,
-            &vec![0u8; output_desc.size_in_bytes()],
-        );
-    }
-
     // Compute inverse transform for backward mapping
     let inv = params.transform.inverse();
 
@@ -123,6 +115,12 @@ pub(super) fn apply(
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("transform_encoder"),
     });
+
+    // For formats that use OR-based writing (non-word-aligned),
+    // clear the output buffer GPU-side to avoid garbage data
+    if needs_clear {
+        encoder.clear_buffer(output.write_buffer().buffer(), 0, None);
+    }
 
     {
         let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
