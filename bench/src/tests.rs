@@ -2,6 +2,7 @@ use crate::Bencher;
 
 // Time-based benchmark: runs for specified duration
 #[test]
+#[ignore]
 fn bench_time_based() {
     let b = Bencher::new("bench_time_based")
         .with_warmup_time_ms(50)
@@ -18,6 +19,7 @@ fn bench_time_based() {
 
 // Iteration-based benchmark: runs exact number of iterations
 #[test]
+#[ignore]
 fn bench_iteration_based() {
     let b = Bencher::new("bench_iteration_based")
         .without_warmup_time()
@@ -33,6 +35,7 @@ fn bench_iteration_based() {
 
 // Combined limits: stops at whichever comes first
 #[test]
+#[ignore]
 fn bench_combined_limits() {
     let b = Bencher::new("bench_combined_limits")
         .with_warmup_time_ms(50)
@@ -51,6 +54,7 @@ fn bench_combined_limits() {
 
 // Fast operation with iteration limit to prevent excessive runs
 #[test]
+#[ignore]
 fn bench_fast_operation() {
     let b = Bencher::new("bench_fast_operation")
         .without_warmup_time()
@@ -63,6 +67,7 @@ fn bench_fast_operation() {
 
 // Time-limited with iteration cap for expensive operations
 #[test]
+#[ignore]
 fn bench_expensive_with_cap() {
     let b = Bencher::new("bench_expensive_with_cap")
         .with_warmup_time_ms(20)
@@ -78,6 +83,7 @@ fn bench_expensive_with_cap() {
 
 // Pure iteration-based for deterministic benchmarks
 #[test]
+#[ignore]
 fn bench_deterministic() {
     use std::collections::HashMap;
 

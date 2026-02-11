@@ -50,6 +50,13 @@ impl Parse for QuickBenchArgs {
             } else if ident == "ignore" {
                 let lit: syn::LitBool = input.parse()?;
                 ignore = lit.value();
+            } else {
+                return Err(syn::Error::new_spanned(
+                    &ident,
+                    format!(
+                        "unknown quick_bench attribute: `{ident}` (expected: warmup_time_ms, bench_time_ms, warmup_iters, iters, ignore)"
+                    ),
+                ));
             }
 
             if input.peek(Token![,]) {

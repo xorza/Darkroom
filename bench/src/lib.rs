@@ -12,7 +12,7 @@
 use std::fs::{OpenOptions, create_dir_all, read_to_string};
 use std::hint::black_box;
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use named_lock::NamedLock;
@@ -249,7 +249,7 @@ impl Bencher {
         let median = times.get(times.len() / 2).copied().unwrap_or_default();
 
         let result = BenchResult {
-            name: self.name.clone(),
+            name: self.name,
             iterations: times.len(),
             total,
             mean,
@@ -266,7 +266,7 @@ impl Bencher {
             if let Err(e) = create_dir_all(&bench_dir) {
                 eprintln!("Failed to create bench-results directory: {e}");
             } else {
-                let file_path = bench_dir.join(format!("{}.txt", self.name));
+                let file_path = bench_dir.join(format!("{}.txt", result.name));
 
                 // Read previous result for comparison (using median for stability)
                 let comparison = if let Some(prev_median) = Self::read_previous_median(&file_path) {
@@ -314,7 +314,7 @@ impl Bencher {
                     Ok(mut file) => {
                         let mut content = format!(
                             "name: {}\nmean: {:?}\nmin: {:?}\nmax: {:?}\nmedian: {:?}\niterations: {}\n",
-                            self.name,
+                            result.name,
                             result.mean,
                             result.min,
                             result.max,
@@ -337,7 +337,7 @@ impl Bencher {
     }
 
     /// Read the previous median from a benchmark file.
-    fn read_previous_median(file_path: &PathBuf) -> Option<Duration> {
+    fn read_previous_median(file_path: &Path) -> Option<Duration> {
         let content = read_to_string(file_path).ok()?;
 
         // Find the "median:" line and parse its value
