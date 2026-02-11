@@ -37,7 +37,7 @@ fitsio = { git = "https://github.com/simonrw/rust-fitsio", features = ["fitsio-s
 
 libraw-rs-sys = { version = "*" }
 
-serde = { version = "*", features = ["derive"] }
+serde = { version = "*", features = ["derive", "rc"] }
 serde_json = { version = "*" }
 uuid = { version = "*", features = ["v4", "serde"] }
 anyhow = { version = "*" }

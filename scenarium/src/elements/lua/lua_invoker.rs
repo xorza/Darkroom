@@ -376,6 +376,7 @@ impl LuaInvoker {
         Ok(())
     }
 
+    #[allow(dead_code)] // used in tests
     pub(crate) async fn use_output_stream(&mut self, output_stream: &OutputStream) {
         self.output_stream
             .lock()
@@ -383,6 +384,7 @@ impl LuaInvoker {
             .replace(output_stream.clone());
     }
 
+    #[allow(dead_code)] // used in tests
     pub(crate) fn func_lib(&self) -> &FuncLib {
         &self.func_lib
     }

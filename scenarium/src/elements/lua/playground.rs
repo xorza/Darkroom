@@ -1,35 +1,33 @@
-use common::Shared;
-use mlua::FromLuaMulti;
-
-#[derive(Debug, Clone)]
-struct LuaCtx {
-    inner: Shared<mlua::Lua>,
-}
-
-impl Default for LuaCtx {
-    fn default() -> Self {
-        LuaCtx {
-            inner: Shared::new(mlua::Lua::new()),
-        }
-    }
-}
-
-impl LuaCtx {
-    async fn load(&self, script: &str) -> Result<(), mlua::Error> {
-        let lua = self.inner.lock().await;
-        lua.load(script).exec()
-    }
-
-    async fn call<R: FromLuaMulti>(&self, func: &str) -> Result<R, mlua::Error> {
-        let lua = self.inner.lock().await;
-        let func: mlua::Function = lua.globals().get(func)?;
-        func.call(())
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use common::Shared;
+    use mlua::FromLuaMulti;
+
+    #[derive(Debug, Clone)]
+    struct LuaCtx {
+        inner: Shared<mlua::Lua>,
+    }
+
+    impl Default for LuaCtx {
+        fn default() -> Self {
+            LuaCtx {
+                inner: Shared::new(mlua::Lua::new()),
+            }
+        }
+    }
+
+    impl LuaCtx {
+        async fn load(&self, script: &str) -> Result<(), mlua::Error> {
+            let lua = self.inner.lock().await;
+            lua.load(script).exec()
+        }
+
+        async fn call<R: FromLuaMulti>(&self, func: &str) -> Result<R, mlua::Error> {
+            let lua = self.inner.lock().await;
+            let func: mlua::Function = lua.globals().get(func)?;
+            func.call(())
+        }
+    }
 
     #[test]
     fn test_lua() {
