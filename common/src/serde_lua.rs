@@ -179,3 +179,264 @@ fn push_indent<W: Write>(indent: usize, out: &mut W) {
         bytes -= n;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde::{Deserialize, Serialize};
+
+    fn roundtrip<T: Serialize + DeserializeOwned + PartialEq + std::fmt::Debug>(value: &T) {
+        let lua = to_string(value).unwrap();
+        let deserialized: T = from_str(&lua).unwrap();
+        assert_eq!(*value, deserialized, "roundtrip failed for lua:\n{lua}");
+    }
+
+    #[test]
+    fn primitives() {
+        roundtrip(&true);
+        roundtrip(&false);
+        roundtrip(&42i32);
+        roundtrip(&-7i64);
+        roundtrip(&1.5f64);
+        roundtrip(&0u64);
+    }
+
+    #[test]
+    fn null_and_option() {
+        roundtrip(&None::<i32>);
+        roundtrip(&Some(42i32));
+        roundtrip(&Some("hello".to_string()));
+    }
+
+    #[test]
+    fn strings() {
+        roundtrip(&"hello world".to_string());
+        roundtrip(&"".to_string());
+        roundtrip(&"line\nnewline".to_string());
+        roundtrip(&"tab\there".to_string());
+        roundtrip(&"quote\"end".to_string());
+        roundtrip(&"back\\slash".to_string());
+        roundtrip(&"carriage\rreturn".to_string());
+    }
+
+    #[test]
+    fn sequences() {
+        roundtrip(&vec![1i32, 2, 3]);
+        roundtrip(&Vec::<i32>::new());
+        roundtrip(&vec!["a".to_string(), "b".to_string()]);
+        roundtrip(&vec![vec![1i32, 2], vec![3, 4]]);
+    }
+
+    #[derive(Debug, Serialize, Deserialize, PartialEq)]
+    struct Simple {
+        name: String,
+        value: i32,
+        flag: bool,
+    }
+
+    #[test]
+    fn simple_struct() {
+        roundtrip(&Simple {
+            name: "test".to_string(),
+            value: 42,
+            flag: true,
+        });
+    }
+
+    #[derive(Debug, Serialize, Deserialize, PartialEq)]
+    struct Nested {
+        inner: Simple,
+        count: u64,
+    }
+
+    #[test]
+    fn nested_struct() {
+        roundtrip(&Nested {
+            inner: Simple {
+                name: "inner".to_string(),
+                value: -1,
+                flag: false,
+            },
+            count: 100,
+        });
+    }
+
+    #[test]
+    fn vec_of_structs() {
+        roundtrip(&vec![
+            Simple {
+                name: "a".to_string(),
+                value: 1,
+                flag: true,
+            },
+            Simple {
+                name: "b".to_string(),
+                value: 2,
+                flag: false,
+            },
+        ]);
+    }
+
+    #[derive(Debug, Serialize, Deserialize, PartialEq)]
+    struct WithOptional {
+        required: String,
+        optional: Option<i32>,
+    }
+
+    #[test]
+    fn struct_with_option() {
+        roundtrip(&WithOptional {
+            required: "hello".to_string(),
+            optional: Some(5),
+        });
+        roundtrip(&WithOptional {
+            required: "hello".to_string(),
+            optional: None,
+        });
+    }
+
+    #[test]
+    fn hashmap() {
+        use std::collections::BTreeMap;
+        let mut map = BTreeMap::new();
+        map.insert("key1".to_string(), 1i32);
+        map.insert("key2".to_string(), 2);
+        roundtrip(&map);
+    }
+
+    #[test]
+    fn non_identifier_keys() {
+        use std::collections::BTreeMap;
+        let mut map = BTreeMap::new();
+        map.insert("has space".to_string(), 1i32);
+        map.insert("has-dash".to_string(), 2);
+        map.insert("123start".to_string(), 3);
+        map.insert("".to_string(), 4);
+        roundtrip(&map);
+    }
+
+    #[test]
+    fn to_writer_from_reader() {
+        let original = Simple {
+            name: "test".to_string(),
+            value: 99,
+            flag: false,
+        };
+        let mut buf = Vec::new();
+        to_writer(&mut buf, &original).unwrap();
+        let deserialized: Simple = from_reader(&mut buf.as_slice()).unwrap();
+        assert_eq!(original, deserialized);
+    }
+
+    #[test]
+    fn from_slice_works() {
+        let lua = b"return {name = \"test\", value = 42, flag = true}\n";
+        let s: Simple = from_slice(lua).unwrap();
+        assert_eq!(s.name, "test");
+        assert_eq!(s.value, 42);
+        assert!(s.flag);
+    }
+
+    #[test]
+    fn is_lua_identifier_cases() {
+        assert!(is_lua_identifier("hello"));
+        assert!(is_lua_identifier("_private"));
+        assert!(is_lua_identifier("camelCase"));
+        assert!(is_lua_identifier("with_underscore"));
+        assert!(is_lua_identifier("x1"));
+        assert!(is_lua_identifier("_"));
+        assert!(is_lua_identifier("A"));
+
+        assert!(!is_lua_identifier(""));
+        assert!(!is_lua_identifier("123"));
+        assert!(!is_lua_identifier("has space"));
+        assert!(!is_lua_identifier("has-dash"));
+        assert!(!is_lua_identifier("1start"));
+        assert!(!is_lua_identifier("with.dot"));
+    }
+
+    #[test]
+    fn string_escaping_output() {
+        let mut buf = Vec::new();
+        write_lua_string("hello\nworld", &mut buf);
+        assert_eq!(String::from_utf8(buf).unwrap(), r#""hello\nworld""#);
+
+        let mut buf = Vec::new();
+        write_lua_string("tab\there", &mut buf);
+        assert_eq!(String::from_utf8(buf).unwrap(), r#""tab\there""#);
+
+        let mut buf = Vec::new();
+        write_lua_string(r#"quote"end"#, &mut buf);
+        assert_eq!(String::from_utf8(buf).unwrap(), r#""quote\"end""#);
+
+        let mut buf = Vec::new();
+        write_lua_string("back\\slash", &mut buf);
+        assert_eq!(String::from_utf8(buf).unwrap(), r#""back\\slash""#);
+    }
+
+    #[test]
+    fn unicode_escaped_in_lua() {
+        let mut buf = Vec::new();
+        write_lua_string("hello 世界", &mut buf);
+        let output = String::from_utf8(buf).unwrap();
+        // Non-ASCII should be unicode-escaped
+        assert!(output.contains("\\u{"));
+        assert!(output.starts_with('"'));
+        assert!(output.ends_with('"'));
+
+        // But it should roundtrip through Lua
+        roundtrip(&"hello 世界".to_string());
+    }
+
+    #[test]
+    fn control_chars_escaped() {
+        let mut buf = Vec::new();
+        write_lua_string("bell\x07here", &mut buf);
+        let output = String::from_utf8(buf).unwrap();
+        assert!(output.contains("\\u{7}"));
+    }
+
+    #[test]
+    fn empty_collections_output() {
+        let lua = to_string(&Vec::<i32>::new()).unwrap();
+        assert!(lua.contains("{}"));
+
+        let lua = to_string(&std::collections::BTreeMap::<String, i32>::new()).unwrap();
+        assert!(lua.contains("{}"));
+    }
+
+    #[test]
+    fn null_output() {
+        let lua = to_string(&None::<i32>).unwrap();
+        assert!(lua.contains("nil"));
+    }
+
+    #[derive(Debug, Serialize, Deserialize, PartialEq)]
+    enum Binding {
+        None,
+        Const(i32),
+        Named { id: u32, label: String },
+    }
+
+    #[test]
+    fn enum_variants() {
+        roundtrip(&Binding::None);
+        roundtrip(&Binding::Const(42));
+        roundtrip(&Binding::Named {
+            id: 7,
+            label: "test".to_string(),
+        });
+    }
+
+    #[test]
+    fn vec_of_enums() {
+        roundtrip(&vec![
+            Binding::None,
+            Binding::Const(10),
+            Binding::Named {
+                id: 1,
+                label: "x".to_string(),
+            },
+        ]);
+    }
+}
