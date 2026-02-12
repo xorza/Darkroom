@@ -1,76 +1,87 @@
-# stack.rs Review vs Industry Best Practices
+# Stacking Module Review
 
-Review of `stack.rs` against [Siril](https://siril.readthedocs.io/en/latest/preprocessing/stacking.html), [PixInsight](https://chaoticnebula.com/pixinsight-image-integration/), and [Clark Vision](https://clarkvision.com/articles/image-stacking-methods/).
+Review of `lumos/src/stacking/` against [Siril](https://siril.readthedocs.io/en/latest/preprocessing/stacking.html), [PixInsight ImageIntegration](https://chaoticnebula.com/pixinsight-image-integration/), and [Clark Vision](https://clarkvision.com/articles/image-stacking-methods/).
 
 ## What's Solid
 
 - **Rejection algorithm coverage**: sigma clip (symmetric + asymmetric), winsorized, linear fit, percentile, GESD — matches Siril's full set
+- **Compile-time safety**: `CombineMethod::Mean(Rejection)` vs `CombineMethod::Median` — invalid combinations (Median + Rejection) are unrepresentable
 - **Global normalization** using median + MAD is the standard approach (Siril calls this "Additive with scaling")
 - **Multiplicative normalization** for flats is correct (gain only, no offset)
-- **Weighted mean with index tracking** after rejection is correctly implemented — unified path through `weighted_mean_indexed` for all rejection variants that reorder values
+- **Weighted mean with index tracking** after rejection — unified path through `weighted_mean_indexed` for all rejection variants that reorder values
 - **ScratchBuffers** pre-allocated per rayon thread — no per-pixel allocation
-- **Test coverage** is thorough, especially the weight-alignment tests
+- **Adaptive storage**: auto-switches in-memory vs disk-backed (mmap) based on available RAM (75% threshold)
+- **Generic design**: `StackableImage` trait allows multiple image types
+- **Test coverage** is thorough (~90+ tests): weight-alignment, algorithm correctness, edge cases, normalization modes
 
 ## Resolved
 
-### Per-pixel allocation (was #1)
-Fixed — `ScratchBuffers` (indices, floats_a, floats_b) are pre-allocated once per rayon thread via `process_chunked`'s `for_each_init` and reused across all pixels.
+1. ~~Per-pixel allocation~~ — `ScratchBuffers` pre-allocated per rayon thread
+2. ~~`apply_rejection` misleading return~~ — removed; `combine_mean` is the single entry point
+3. ~~Median + Rejection non-standard~~ — moved `Rejection` into `CombineMethod::Mean(Rejection)`, compile-time safe
+4. ~~HotPixelMap in wrong module~~ — moved to `calibration_masters/`
+5. ~~Pairs buffer allocation~~ — replaced with insertion sort + index co-array
 
-### `apply_rejection` misleading return (was #5)
-Fixed — `apply_rejection` removed. `combine_mean` is only called from the `Mean` path; the `Median` path calls `median_f32_mut` directly.
+## Improvements
 
-### Median + Rejection non-standard (was #1 remaining)
-Fixed — `Rejection` moved into `CombineMethod::Mean(Rejection)`. `CombineMethod::Median` carries no rejection — invalid combination is unrepresentable at compile time.
+### 1. IKSS normalization estimators (quality)
 
-## Remaining Improvements
+Current global normalization uses median + MAD for location and scale estimation. Both Siril and PixInsight default to **IKSS** (Iterative Kappa-Sigma Sigma-clipping) estimators:
 
-### 1. IKSS-style robust normalization estimators (quality)
-
-Current global normalization uses median + MAD for location and scale estimation. Siril defaults to **IKSS** (Iterative Kappa-Sigma Sigma-clipping) estimators:
-
-1. Clip pixels > 6*MAD from median
+1. Clip pixels > k*MAD from median
 2. Recompute location/scale on clipped data using BWMV (biweight midvariance)
 
-This is more robust against bright stars and nebulae skewing the statistics. The current median+MAD approach works well for most cases but can be biased by large bright objects in the field.
+More robust against bright stars and nebulae skewing the statistics. The current median+MAD approach works well for most cases but can be biased by large bright objects.
 
-**Effort**: Medium
+Siril note: "By default, Siril uses IKSS estimators of location and scale to compute normalisation, but for long sequences, you can opt in for faster estimators based on median and median absolute deviation."
 
-### 2. Missing: MAD clipping rejection
+**Impact**: Quality (more robust normalization) | **Effort**: Medium
 
-Siril offers **MAD Clipping** as a separate rejection method — uses MAD instead of standard deviation, making it more robust for noisy data (especially infrared). Minor gap since winsorized sigma clip covers similar ground.
+### 2. MAD clipping rejection
 
-**Effort**: Low
+Siril offers **MAD Clipping** as a separate rejection method — uses MAD instead of standard deviation in the clipping criterion, making it more robust for noisy data (especially infrared). Minor gap since winsorized sigma clip covers similar ground.
 
-### 3. Missing weighting schemes
+**Impact**: Feature completeness | **Effort**: Low
+
+### 3. Auto weighting schemes
 
 Current weights are raw user-provided values. Professional tools compute weights automatically from:
 - **FWHM** (focus quality)
 - **Background noise** level
-- **Star count**
+- **Star count** / roundness
 - **SNR** estimates
 
-More of a feature gap than a code issue.
+PixInsight weights by noise estimates by default. Siril supports FWHM, roundness, noise, and star count weighting.
 
-**Effort**: High
+**Impact**: Feature (user convenience) | **Effort**: High
 
-### 4. Missing: Sum stacking method
+### 4. Sum stacking method
 
-Siril supports **sum stacking** (simple addition without averaging) for planetary/8-bit data. Niche but trivial to add.
+Siril supports **sum stacking** (simple addition without averaging) for planetary/8-bit data. Niche but trivial to add as a `CombineMethod::Sum` variant.
 
-**Effort**: Trivial
+**Impact**: Feature completeness | **Effort**: Trivial
+
+### 5. Reference frame selection
+
+Current implementation always uses frame 0 as the normalization reference. Siril and PixInsight select the reference frame based on quality metrics (lowest noise, best FWHM). This matters when frame 0 happens to be a poor frame — the normalization target would be suboptimal.
+
+**Impact**: Quality | **Effort**: Low (once auto weighting metrics exist)
 
 ## Priority
 
-| Item | Impact | Effort |
-|------|--------|--------|
-| IKSS estimators | Quality (more robust normalization) | Medium |
-| MAD clipping | Feature completeness | Low |
-| Auto weighting schemes | Feature (user convenience) | High |
-| Sum stacking | Feature completeness | Trivial |
+| Item | Impact | Effort | Depends on |
+|------|--------|--------|------------|
+| IKSS estimators | Quality | Medium | — |
+| MAD clipping | Completeness | Low | — |
+| Sum stacking | Completeness | Trivial | — |
+| Reference frame selection | Quality | Low | #3 (auto weighting) |
+| Auto weighting schemes | Feature | High | — |
 
 ## Sources
 
 - [Siril 1.5.0 Stacking Documentation](https://siril.readthedocs.io/en/latest/preprocessing/stacking.html)
+- [Siril 1.0 Rejection Algorithms](https://free-astro.org/siril_doc-en/co/Average_Stacking_With_Rejection__1.html)
+- [Siril Normalization Algorithms](https://free-astro.org/siril_doc-en/co/Average_Stacking_With_Rejection__2.html)
 - [PixInsight Image Integration](https://chaoticnebula.com/pixinsight-image-integration/)
+- [PixInsight ESD Rejection](https://www.adamblockstudios.com/articles/extreme-studentized-deviate-pixel-rejection-esd)
 - [Clark Vision: Image Stacking Methods Compared](https://clarkvision.com/articles/image-stacking-methods/)
-- [Siril Statistics (IKSS)](https://free-astro.org/index.php?title=Siril:Statistics)
