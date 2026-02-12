@@ -145,20 +145,11 @@ pub fn stack_with_progress<P: AsRef<Path> + Sync>(
     // Create image cache
     let cache = ImageCache::<AstroImage>::from_paths(paths, &config.cache, frame_type, progress)?;
 
-    // Compute normalization parameters if requested
-    let norm_params = match config.normalization {
-        Normalization::None => None,
-        Normalization::Global => Some(compute_global_norm_params(&cache)),
-        Normalization::Multiplicative => Some(compute_multiplicative_norm_params(&cache)),
-    };
+    // Run stacking pipeline (normalization + combining)
+    let pixel_data = run_stacking(&cache, &config, paths.len());
 
-    // Dispatch based on method and rejection (normalization applied transparently)
-    let pixel_data = dispatch_stacking(&cache, &config, paths.len(), norm_params.as_deref());
-
-    // Cleanup cache if not keeping
-    if !config.cache.keep_cache {
-        cache.cleanup();
-    }
+    // Cleanup cache
+    cache.cleanup();
 
     Ok(AstroImage {
         metadata: cache.metadata().clone(),
@@ -247,10 +238,34 @@ pub(crate) fn compute_multiplicative_norm_params(
     params
 }
 
+/// Compute normalization parameters based on the normalization mode.
+fn compute_norm_params(
+    cache: &ImageCache<impl StackableImage>,
+    normalization: Normalization,
+) -> Option<Vec<NormParams>> {
+    match normalization {
+        Normalization::None => None,
+        Normalization::Global => Some(compute_global_norm_params(cache)),
+        Normalization::Multiplicative => Some(compute_multiplicative_norm_params(cache)),
+    }
+}
+
+/// Run the full stacking pipeline: compute normalization and dispatch combining.
+///
+/// Generic over any `StackableImage` type.
+pub(crate) fn run_stacking(
+    cache: &ImageCache<impl StackableImage>,
+    config: &StackConfig,
+    frame_count: usize,
+) -> crate::astro_image::PixelData {
+    let norm_params = compute_norm_params(cache, config.normalization);
+    dispatch_stacking(cache, config, frame_count, norm_params.as_deref())
+}
+
 /// Stacking dispatch that works with any `StackableImage` type.
 ///
 /// Returns `PixelData` with the combined result.
-pub(crate) fn dispatch_stacking(
+fn dispatch_stacking(
     cache: &ImageCache<impl StackableImage>,
     config: &StackConfig,
     frame_count: usize,

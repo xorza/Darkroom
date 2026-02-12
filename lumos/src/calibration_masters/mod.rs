@@ -14,7 +14,7 @@ use crate::stacking::cache::ImageCache;
 use crate::stacking::config::{Normalization, StackConfig};
 use crate::stacking::hot_pixels::HotPixelMap;
 use crate::stacking::progress::ProgressCallback;
-use crate::stacking::stack::{compute_multiplicative_norm_params, dispatch_stacking};
+use crate::stacking::stack::run_stacking;
 
 /// Default sigma threshold for hot pixel detection.
 const DEFAULT_HOT_PIXEL_SIGMA: f32 = 5.0;
@@ -75,13 +75,7 @@ fn stack_cfa_frames(
     )
     .map_err(|e| anyhow::anyhow!("{e}"))?;
 
-    let norm_params = match config.normalization {
-        Normalization::None => None,
-        Normalization::Multiplicative => Some(compute_multiplicative_norm_params(&cache)),
-        Normalization::Global => Some(crate::stacking::stack::compute_global_norm_params(&cache)),
-    };
-
-    let pixel_data = dispatch_stacking(&cache, &config, paths.len(), norm_params.as_deref());
+    let pixel_data = run_stacking(&cache, &config, paths.len());
 
     Ok(Some(CfaImage {
         data: pixel_data.into_l(),
