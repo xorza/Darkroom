@@ -1,5 +1,10 @@
 {
+  "env": {
+    "RUST_BACKTRACE": "1",
+    "CARGO_TERM_COLOR": "always"
+  },
   "permissions": {
+    "defaultMode": "acceptEdits",
     "allow": [
       "mcp__acp__Edit",
       "mcp__acp__Write",
@@ -13,7 +18,8 @@
       "Bash(cargo clippy:*)",
       "Bash(cargo fmt:*)",
       "Bash(cargo check:*)"
-    ]
+    ],
+    "deny": ["Read(./.env)", "Read(./.env.*)"]
   },
   "sandbox": {
     "enabled": true,
