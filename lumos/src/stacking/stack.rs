@@ -227,12 +227,10 @@ fn dispatch_stacking(
     config: &StackConfig,
     norm_params: Option<&[NormParams]>,
 ) -> crate::astro_image::PixelData {
-    let rejection = config.rejection;
-
     match config.method {
         CombineMethod::Median => {
             cache.process_chunked(None, norm_params, move |values, _, scratch| {
-                let remaining = rejection.reject(values, scratch);
+                let remaining = config.rejection.reject(values, scratch);
                 math::median_f32_mut(&mut values[..remaining])
             })
         }
@@ -248,7 +246,7 @@ fn dispatch_stacking(
                 weights.as_deref(),
                 norm_params,
                 move |values, w, scratch| {
-                    return combine_mean(values, w, scratch, &rejection).value;
+                    return combine_mean(values, w, scratch, &config.rejection).value;
                 },
             )
         }
