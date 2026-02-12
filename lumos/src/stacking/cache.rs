@@ -39,6 +39,11 @@ pub(crate) trait StackableImage: Send + Sync + std::fmt::Debug + Sized {
     fn channel(&self, c: usize) -> &[f32];
     fn metadata(&self) -> &AstroImageMetadata;
     fn load(path: &Path) -> Result<Self, Error>;
+
+    /// In-memory size of this image's pixel data in bytes.
+    fn size_in_bytes(&self) -> usize {
+        self.dimensions().pixel_count() * size_of::<f32>()
+    }
 }
 
 /// Generate a cache filename from the hash of the source path.
@@ -96,17 +101,16 @@ impl<I: StackableImage> ImageCache<I> {
     /// Check if images would fit in memory given available memory.
     ///
     /// Returns true if total image size fits within usable memory (75% of available).
-    ///
-    /// Uses checked arithmetic to handle pathologically large datasets gracefully.
-    fn fits_in_memory(pixel_count: usize, frame_count: usize, available_memory: u64) -> bool {
-        let Some(bytes_per_image) = pixel_count.checked_mul(size_of::<f32>()) else {
-            return false; // Overflow means definitely doesn't fit
-        };
-        let Some(total_bytes_needed) = bytes_per_image.checked_mul(frame_count) else {
-            return false; // Overflow means definitely doesn't fit
+    fn fits_in_memory(
+        bytes_per_image: usize,
+        frame_count: usize,
+        available_memory: u64,
+    ) -> bool {
+        let Some(total_bytes) = bytes_per_image.checked_mul(frame_count) else {
+            return false;
         };
         let usable_memory = available_memory * MEMORY_PERCENT / 100;
-        (total_bytes_needed as u64) <= usable_memory
+        (total_bytes as u64) <= usable_memory
     }
 
     /// Create cache from image paths.
@@ -136,7 +140,7 @@ impl<I: StackableImage> ImageCache<I> {
         // Check available memory (from config or system)
         let available_memory = config.get_available_memory();
         let use_in_memory =
-            Self::fits_in_memory(dimensions.pixel_count(), paths.len(), available_memory);
+            Self::fits_in_memory(first_image.size_in_bytes(), paths.len(), available_memory);
 
         tracing::info!(
             frame_count = paths.len(),
@@ -699,30 +703,30 @@ mod tests {
     fn test_fits_in_memory() {
         // Test basic fit: 10 images of 1000x1000x3 = 120MB, 1GB available (750MB usable)
         assert!(ImageCache::<AstroImage>::fits_in_memory(
-            1000 * 1000 * 3,
+            1000 * 1000 * 3 * 4,
             10,
             1024 * 1024 * 1024
         ));
 
         // Test doesn't fit: 100 images of 6000x4000x3 = 28.8GB, 16GB available (12GB usable)
         assert!(!ImageCache::<AstroImage>::fits_in_memory(
-            6000 * 4000 * 3,
+            6000 * 4000 * 3 * 4,
             100,
             16 * 1024 * 1024 * 1024
         ));
 
         // Test boundary: exactly at 75% threshold
-        let pixel_count = 1000 * 1000;
+        let bytes_per_image = 1000 * 1000 * 4;
         let frame_count = 10;
-        let bytes_needed = (pixel_count * frame_count * 4) as u64;
+        let bytes_needed = (bytes_per_image * frame_count) as u64;
         let available_at_boundary = (bytes_needed * 100).div_ceil(75);
         assert!(ImageCache::<AstroImage>::fits_in_memory(
-            pixel_count,
+            bytes_per_image,
             frame_count,
             available_at_boundary
         ));
         assert!(!ImageCache::<AstroImage>::fits_in_memory(
-            pixel_count,
+            bytes_per_image,
             frame_count,
             available_at_boundary - 2
         ));
@@ -730,12 +734,12 @@ mod tests {
         // Test grayscale vs RGB with same memory
         let available = 4 * 1024 * 1024 * 1024u64; // 4GB (3GB usable)
         assert!(ImageCache::<AstroImage>::fits_in_memory(
-            6000 * 4000,
+            6000 * 4000 * 4,
             20,
             available
         )); // Grayscale: 1.92GB
         assert!(!ImageCache::<AstroImage>::fits_in_memory(
-            6000 * 4000 * 3,
+            6000 * 4000 * 3 * 4,
             20,
             available
         )); // RGB: 5.76GB
