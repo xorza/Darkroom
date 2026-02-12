@@ -191,6 +191,24 @@ impl PercentileClipConfig {
             high_percentile,
         }
     }
+
+    /// Compute the surviving index range for a sorted array of length `n`.
+    ///
+    /// Returns the half-open range of elements to keep after clipping
+    /// the lowest `low_percentile`% and highest `high_percentile`%.
+    /// Guarantees at least one element survives.
+    pub fn surviving_range(&self, n: usize) -> std::ops::Range<usize> {
+        let low_count = ((self.low_percentile / 100.0) * n as f32).floor() as usize;
+        let high_count = ((self.high_percentile / 100.0) * n as f32).floor() as usize;
+        let start = low_count;
+        let end = n.saturating_sub(high_count);
+        if start >= end {
+            let mid = n / 2;
+            mid..mid + 1
+        } else {
+            start..end
+        }
+    }
 }
 
 /// Configuration for Generalized Extreme Studentized Deviate (GESD) test.
@@ -546,32 +564,16 @@ impl PercentileClipConfig {
             return values.len();
         }
 
-        let n = values.len();
-
-        // Sort for percentile computation
         values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
-        // Calculate indices to keep
-        let low_count = ((self.low_percentile / 100.0) * n as f32).floor() as usize;
-        let high_count = ((self.high_percentile / 100.0) * n as f32).floor() as usize;
+        let range = self.surviving_range(values.len());
+        let count = range.len();
 
-        let start = low_count;
-        let end = n.saturating_sub(high_count);
-
-        // Ensure we have at least one value
-        let (start, end) = if start >= end {
-            let mid = n / 2;
-            (mid, mid + 1)
-        } else {
-            (start, end)
-        };
-
-        // Move survivors to front
-        if start > 0 {
-            values.copy_within(start..end, 0);
+        if range.start > 0 {
+            values.copy_within(range, 0);
         }
 
-        end - start
+        count
     }
 
     /// Percentile clipped mean: reject outliers then compute mean of survivors.
