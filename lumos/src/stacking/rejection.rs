@@ -393,17 +393,6 @@ pub fn sigma_clipped_mean_asymmetric(
 /// with the clipping boundary value. More robust for small sample sizes.
 ///
 /// Does NOT modify the input slice.
-pub fn winsorized_sigma_clipped_mean(
-    values: &[f32],
-    config: &WinsorizedClipConfig,
-) -> RejectionResult {
-    let working = winsorize(values, config);
-    RejectionResult {
-        value: math::mean_f32(&working),
-        remaining_count: values.len(),
-    }
-}
-
 /// Apply winsorization: replace outliers with boundary values, return modified copy.
 ///
 /// Iteratively computes median and std dev, then clamps values to
@@ -829,18 +818,15 @@ mod tests {
     }
 
     #[test]
-    fn test_winsorized_sigma_clipped_mean() {
+    fn test_winsorize() {
         let values = vec![1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 100.0];
         let config = WinsorizedClipConfig::new(2.0, 3);
-        let result = winsorized_sigma_clipped_mean(&values, &config);
+        let winsorized = winsorize(&values, &config);
+        let mean = math::mean_f32(&winsorized);
         // Winsorized should have lower mean than with full outlier
-        assert!(
-            result.value < 20.0,
-            "Outlier should be winsorized, got {}",
-            result.value
-        );
+        assert!(mean < 20.0, "Outlier should be winsorized, got {}", mean);
         // All values retained (just modified)
-        assert_eq!(result.remaining_count, 8);
+        assert_eq!(winsorized.len(), 8);
     }
 
     #[test]
@@ -923,9 +909,8 @@ mod tests {
         );
         assert_eq!(sigma_result.remaining_count, 2);
 
-        let winsorized_result =
-            winsorized_sigma_clipped_mean(&values, &WinsorizedClipConfig::default());
-        assert_eq!(winsorized_result.remaining_count, 2);
+        let winsorized = winsorize(&values, &WinsorizedClipConfig::default());
+        assert_eq!(winsorized.len(), 2);
 
         let linear_result = linear_fit_clipped_mean(
             &mut values.clone(),
