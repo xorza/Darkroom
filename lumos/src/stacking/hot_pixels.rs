@@ -61,20 +61,12 @@ impl HotPixelMap {
 
         let threshold = stats.threshold;
 
-        const CHUNK_SIZE: usize = 64 * 1024;
         let indices: Vec<usize> = dark
             .data
-            .par_chunks(CHUNK_SIZE)
+            .par_iter()
             .enumerate()
-            .flat_map(|(chunk_idx, chunk): (usize, &[f32])| {
-                let base_idx = chunk_idx * CHUNK_SIZE;
-                chunk
-                    .iter()
-                    .enumerate()
-                    .filter(|&(_, &val)| val > threshold)
-                    .map(|(i, _)| base_idx + i)
-                    .collect::<Vec<_>>()
-            })
+            .filter(|&(_, &val)| val > threshold)
+            .map(|(i, _)| i)
             .collect();
 
         Self {
