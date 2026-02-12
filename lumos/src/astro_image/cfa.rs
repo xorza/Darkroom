@@ -56,6 +56,28 @@ pub struct CfaImage {
     pub metadata: AstroImageMetadata,
 }
 
+impl crate::stacking::cache::StackableImage for CfaImage {
+    fn dimensions(&self) -> ImageDimensions {
+        ImageDimensions::new(self.width, self.height, 1)
+    }
+
+    fn channel(&self, c: usize) -> &[f32] {
+        assert!(c == 0, "CfaImage has only 1 channel, got {c}");
+        &self.pixels
+    }
+
+    fn metadata(&self) -> &AstroImageMetadata {
+        &self.metadata
+    }
+
+    fn load(path: &std::path::Path) -> Result<Self, crate::stacking::Error> {
+        crate::raw::load_raw_cfa(path).map_err(|e| crate::stacking::Error::ImageLoad {
+            path: path.to_path_buf(),
+            source: std::io::Error::other(e.to_string()),
+        })
+    }
+}
+
 impl CfaImage {
     pub fn pixel_count(&self) -> usize {
         self.width * self.height
