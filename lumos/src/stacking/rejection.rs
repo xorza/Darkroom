@@ -59,6 +59,65 @@ impl SigmaClipConfig {
             max_iterations,
         }
     }
+
+    /// Partition values by sigma clipping, returning the number of survivors.
+    ///
+    /// After return, `values[..remaining]` contains surviving values and
+    /// `indices[..remaining]` contains their original frame indices.
+    /// Supports both symmetric (`sigma_low == sigma_high`) and asymmetric thresholds.
+    pub fn reject(&self, values: &mut [f32], indices: &mut Vec<usize>) -> usize {
+        debug_assert!(!values.is_empty());
+
+        reset_indices(indices, values.len());
+
+        if values.len() <= 2 {
+            return values.len();
+        }
+
+        let mut len = values.len();
+        let mut scratch = Vec::with_capacity(len);
+
+        for _ in 0..self.max_iterations {
+            if len <= 2 {
+                break;
+            }
+
+            let active = &mut values[..len];
+
+            let center = math::median_f32_mut(active);
+            let mad = mad_f32_with_scratch(&values[..len], center, &mut scratch);
+            let sigma = mad_to_sigma(mad);
+
+            if sigma < f32::EPSILON {
+                break;
+            }
+
+            let low_threshold = self.sigma_low * sigma;
+            let high_threshold = self.sigma_high * sigma;
+
+            let mut write_idx = 0;
+            for read_idx in 0..len {
+                let diff = values[read_idx] - center;
+                let keep = if diff < 0.0 {
+                    -diff <= low_threshold
+                } else {
+                    diff <= high_threshold
+                };
+                if keep {
+                    values[write_idx] = values[read_idx];
+                    indices[write_idx] = indices[read_idx];
+                    write_idx += 1;
+                }
+            }
+
+            if write_idx == len {
+                break;
+            }
+            len = write_idx;
+        }
+
+        len
+    }
 }
 
 /// Configuration for winsorized sigma clipping.
@@ -91,6 +150,62 @@ impl WinsorizedClipConfig {
             sigma,
             max_iterations,
         }
+    }
+
+    /// Apply winsorization: replace outliers with boundary values.
+    ///
+    /// Iteratively computes median and std dev, then clamps values to
+    /// `[median - sigma*stddev, median + sigma*stddev]`.
+    ///
+    /// Returns `working` filled with the winsorized copy. Does NOT modify `values`.
+    /// `scratch` is used for median/MAD computation.
+    pub fn winsorize<'a>(
+        &self,
+        values: &[f32],
+        working: &'a mut Vec<f32>,
+        scratch: &mut Vec<f32>,
+    ) -> &'a [f32] {
+        debug_assert!(!values.is_empty());
+
+        working.clear();
+        working.extend_from_slice(values);
+
+        if values.len() <= 2 {
+            return working;
+        }
+
+        for _ in 0..self.max_iterations {
+            // Copy into scratch buffer for median (which sorts in-place)
+            scratch.clear();
+            scratch.extend_from_slice(working);
+            let center = math::median_f32_mut(scratch);
+            let mad = mad_f32_with_scratch(working, center, scratch);
+            let sigma = mad_to_sigma(mad);
+
+            if sigma < f32::EPSILON {
+                break;
+            }
+
+            let low_bound = center - self.sigma * sigma;
+            let high_bound = center + self.sigma * sigma;
+
+            let mut changed = false;
+            for v in working.iter_mut() {
+                if *v < low_bound {
+                    *v = low_bound;
+                    changed = true;
+                } else if *v > high_bound {
+                    *v = high_bound;
+                    changed = true;
+                }
+            }
+
+            if !changed {
+                break;
+            }
+        }
+
+        working
     }
 }
 
@@ -129,6 +244,95 @@ impl LinearFitClipConfig {
             sigma_high,
             max_iterations,
         }
+    }
+
+    /// Partition values by linear fit clipping, returning the number of survivors.
+    ///
+    /// After return, `values[..remaining]` contains surviving values and
+    /// `indices[..remaining]` contains their original frame indices.
+    pub fn reject(&self, values: &mut [f32], indices: &mut Vec<usize>) -> usize {
+        debug_assert!(!values.is_empty());
+
+        reset_indices(indices, values.len());
+
+        if values.len() <= 3 {
+            return values.len();
+        }
+
+        let mut len = values.len();
+
+        for _ in 0..self.max_iterations {
+            if len <= 3 {
+                break;
+            }
+
+            // Fit line y = a + b*x using least squares
+            // x values are the original indices
+            let n = len as f32;
+            let mut sum_x = 0.0f32;
+            let mut sum_y = 0.0f32;
+            let mut sum_xy = 0.0f32;
+            let mut sum_xx = 0.0f32;
+
+            for i in 0..len {
+                let x = indices[i] as f32;
+                let y = values[i];
+                sum_x += x;
+                sum_y += y;
+                sum_xy += x * y;
+                sum_xx += x * x;
+            }
+
+            let denom = n * sum_xx - sum_x * sum_x;
+            if denom.abs() < f32::EPSILON {
+                break;
+            }
+
+            let b = (n * sum_xy - sum_x * sum_y) / denom;
+            let a = (sum_y - b * sum_x) / n;
+
+            // Compute std dev of residuals
+            let mut sum_residual_sq = 0.0f32;
+            for i in 0..len {
+                let predicted = a + b * indices[i] as f32;
+                let residual = values[i] - predicted;
+                sum_residual_sq += residual * residual;
+            }
+
+            let std_dev = (sum_residual_sq / n).sqrt();
+            if std_dev < f32::EPSILON {
+                break;
+            }
+
+            // Clip based on residuals from fit
+            let low_threshold = self.sigma_low * std_dev;
+            let high_threshold = self.sigma_high * std_dev;
+
+            let mut write_idx = 0;
+            for read_idx in 0..len {
+                let predicted = a + b * indices[read_idx] as f32;
+                let residual = values[read_idx] - predicted;
+
+                let keep = if residual < 0.0 {
+                    -residual <= low_threshold
+                } else {
+                    residual <= high_threshold
+                };
+
+                if keep {
+                    values[write_idx] = values[read_idx];
+                    indices[write_idx] = indices[read_idx];
+                    write_idx += 1;
+                }
+            }
+
+            if write_idx == len {
+                break;
+            }
+            len = write_idx;
+        }
+
+        len
     }
 }
 
@@ -190,6 +394,28 @@ impl PercentileClipConfig {
             start..end
         }
     }
+
+    /// Partition values by percentile clipping, returning the number of survivors.
+    ///
+    /// Sorts values and moves the surviving middle range to `values[..remaining]`.
+    pub fn reject(&self, values: &mut [f32]) -> usize {
+        debug_assert!(!values.is_empty());
+
+        if values.len() <= 2 {
+            return values.len();
+        }
+
+        values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+
+        let range = self.surviving_range(values.len());
+        let count = range.len();
+
+        if range.start > 0 {
+            values.copy_within(range, 0);
+        }
+
+        count
+    }
 }
 
 /// Configuration for Generalized Extreme Studentized Deviate (GESD) test.
@@ -227,246 +453,7 @@ impl GesdConfig {
     pub fn max_outliers_for_size(&self, n: usize) -> usize {
         self.max_outliers.unwrap_or(n / 4)
     }
-}
 
-// ============================================================================
-// Rejection Algorithm Implementations
-// ============================================================================
-
-impl SigmaClipConfig {
-    /// Partition values by sigma clipping, returning the number of survivors.
-    ///
-    /// After return, `values[..remaining]` contains surviving values and
-    /// `indices[..remaining]` contains their original frame indices.
-    /// Supports both symmetric (`sigma_low == sigma_high`) and asymmetric thresholds.
-    pub fn reject(&self, values: &mut [f32], indices: &mut Vec<usize>) -> usize {
-        debug_assert!(!values.is_empty());
-
-        reset_indices(indices, values.len());
-
-        if values.len() <= 2 {
-            return values.len();
-        }
-
-        let mut len = values.len();
-        let mut scratch = Vec::with_capacity(len);
-
-        for _ in 0..self.max_iterations {
-            if len <= 2 {
-                break;
-            }
-
-            let active = &mut values[..len];
-
-            let center = math::median_f32_mut(active);
-            let mad = mad_f32_with_scratch(&values[..len], center, &mut scratch);
-            let sigma = mad_to_sigma(mad);
-
-            if sigma < f32::EPSILON {
-                break;
-            }
-
-            let low_threshold = self.sigma_low * sigma;
-            let high_threshold = self.sigma_high * sigma;
-
-            let mut write_idx = 0;
-            for read_idx in 0..len {
-                let diff = values[read_idx] - center;
-                let keep = if diff < 0.0 {
-                    diff.abs() <= low_threshold
-                } else {
-                    diff <= high_threshold
-                };
-                if keep {
-                    values[write_idx] = values[read_idx];
-                    indices[write_idx] = indices[read_idx];
-                    write_idx += 1;
-                }
-            }
-
-            if write_idx == len {
-                break;
-            }
-            len = write_idx;
-        }
-
-        len
-    }
-}
-
-impl WinsorizedClipConfig {
-    /// Apply winsorization: replace outliers with boundary values.
-    ///
-    /// Iteratively computes median and std dev, then clamps values to
-    /// `[median - sigma*stddev, median + sigma*stddev]`.
-    ///
-    /// Returns `working` filled with the winsorized copy. Does NOT modify `values`.
-    /// `scratch` is used for median/MAD computation.
-    pub fn winsorize<'a>(
-        &self,
-        values: &[f32],
-        working: &'a mut Vec<f32>,
-        scratch: &mut Vec<f32>,
-    ) -> &'a [f32] {
-        debug_assert!(!values.is_empty());
-
-        working.clear();
-        working.extend_from_slice(values);
-
-        if values.len() <= 2 {
-            return working;
-        }
-
-        for _ in 0..self.max_iterations {
-            // Copy into scratch buffer for median (which sorts in-place)
-            scratch.clear();
-            scratch.extend_from_slice(working);
-            let center = math::median_f32_mut(scratch);
-            let mad = mad_f32_with_scratch(working, center, scratch);
-            let sigma = mad_to_sigma(mad);
-
-            if sigma < f32::EPSILON {
-                break;
-            }
-
-            let low_bound = center - self.sigma * sigma;
-            let high_bound = center + self.sigma * sigma;
-
-            let mut changed = false;
-            for v in working.iter_mut() {
-                if *v < low_bound {
-                    *v = low_bound;
-                    changed = true;
-                } else if *v > high_bound {
-                    *v = high_bound;
-                    changed = true;
-                }
-            }
-
-            if !changed {
-                break;
-            }
-        }
-
-        working
-    }
-}
-
-impl LinearFitClipConfig {
-    /// Partition values by linear fit clipping, returning the number of survivors.
-    ///
-    /// After return, `values[..remaining]` contains surviving values and
-    /// `indices[..remaining]` contains their original frame indices.
-    pub fn reject(&self, values: &mut [f32], indices: &mut Vec<usize>) -> usize {
-        debug_assert!(!values.is_empty());
-
-        reset_indices(indices, values.len());
-
-        if values.len() <= 3 {
-            return values.len();
-        }
-
-        let mut len = values.len();
-
-        for _ in 0..self.max_iterations {
-            if len <= 3 {
-                break;
-            }
-
-            // Fit line y = a + b*x using least squares
-            // x values are the original indices
-            let n = len as f32;
-            let mut sum_x = 0.0f32;
-            let mut sum_y = 0.0f32;
-            let mut sum_xy = 0.0f32;
-            let mut sum_xx = 0.0f32;
-
-            for i in 0..len {
-                let x = indices[i] as f32;
-                let y = values[i];
-                sum_x += x;
-                sum_y += y;
-                sum_xy += x * y;
-                sum_xx += x * x;
-            }
-
-            let denom = n * sum_xx - sum_x * sum_x;
-            if denom.abs() < f32::EPSILON {
-                break;
-            }
-
-            let b = (n * sum_xy - sum_x * sum_y) / denom;
-            let a = (sum_y - b * sum_x) / n;
-
-            // Compute residuals and their std dev
-            let mut sum_residual_sq = 0.0f32;
-            for i in 0..len {
-                let x = indices[i] as f32;
-                let predicted = a + b * x;
-                let residual = values[i] - predicted;
-                sum_residual_sq += residual * residual;
-            }
-
-            let std_dev = (sum_residual_sq / n).sqrt();
-            if std_dev < f32::EPSILON {
-                break;
-            }
-
-            // Clip based on residuals from fit
-            let mut write_idx = 0;
-            for read_idx in 0..len {
-                let x = indices[read_idx] as f32;
-                let predicted = a + b * x;
-                let residual = values[read_idx] - predicted;
-
-                let keep = if residual < 0.0 {
-                    residual.abs() <= self.sigma_low * std_dev
-                } else {
-                    residual <= self.sigma_high * std_dev
-                };
-
-                if keep {
-                    values[write_idx] = values[read_idx];
-                    indices[write_idx] = indices[read_idx];
-                    write_idx += 1;
-                }
-            }
-
-            if write_idx == len {
-                break;
-            }
-            len = write_idx;
-        }
-
-        len
-    }
-}
-
-impl PercentileClipConfig {
-    /// Partition values by percentile clipping, returning the number of survivors.
-    ///
-    /// Sorts values and moves the surviving middle range to `values[..remaining]`.
-    pub fn reject(&self, values: &mut [f32]) -> usize {
-        debug_assert!(!values.is_empty());
-
-        if values.len() <= 2 {
-            return values.len();
-        }
-
-        values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-
-        let range = self.surviving_range(values.len());
-        let count = range.len();
-
-        if range.start > 0 {
-            values.copy_within(range, 0);
-        }
-
-        count
-    }
-}
-
-impl GesdConfig {
     /// Partition values by GESD test, returning the number of survivors.
     ///
     /// After return, `values[..remaining]` contains surviving values and
