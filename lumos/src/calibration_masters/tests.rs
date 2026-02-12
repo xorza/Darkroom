@@ -1,12 +1,11 @@
 use crate::astro_image::cfa::{CfaImage, CfaType};
+use crate::common::Buffer2;
 use crate::{AstroImageMetadata, CalibrationMasters};
 
 /// Helper to create a CfaImage filled with a constant value.
 fn constant_cfa(width: usize, height: usize, value: f32, pattern: CfaType) -> CfaImage {
     CfaImage {
-        pixels: vec![value; width * height],
-        width,
-        height,
+        data: Buffer2::new_filled(width, height, value),
         pattern,
         metadata: AstroImageMetadata::default(),
     }
@@ -46,7 +45,7 @@ fn test_calibrate_dark_subtraction() {
     masters.calibrate(&mut light);
 
     // 0.5 - 0.1 = 0.4
-    for &v in &light.pixels {
+    for &v in &light.data {
         assert!((v - 0.4).abs() < 1e-6, "Expected 0.4, got {v}");
     }
 }
@@ -61,7 +60,7 @@ fn test_calibrate_bias_only() {
     masters.calibrate(&mut light);
 
     // 0.5 - 0.05 = 0.45
-    for &v in &light.pixels {
+    for &v in &light.data {
         assert!((v - 0.45).abs() < 1e-6, "Expected 0.45, got {v}");
     }
 }
@@ -77,7 +76,7 @@ fn test_calibrate_dark_takes_priority_over_bias() {
     masters.calibrate(&mut light);
 
     // Dark subtracted: 0.5 - 0.1 = 0.4 (not 0.5 - 0.05)
-    for &v in &light.pixels {
+    for &v in &light.data {
         assert!((v - 0.4).abs() < 1e-6, "Expected 0.4, got {v}");
     }
 }
@@ -89,9 +88,7 @@ fn test_calibrate_flat_correction() {
     // light = [0.3, 0.3, 0.3, 0.3]
     // result = light / normalized
     let flat = CfaImage {
-        pixels: vec![0.4, 0.8, 0.8, 0.4],
-        width: 2,
-        height: 2,
+        data: Buffer2::new(2, 2, vec![0.4, 0.8, 0.8, 0.4]),
         pattern: CfaType::Mono,
         metadata: AstroImageMetadata::default(),
     };
@@ -102,16 +99,12 @@ fn test_calibrate_flat_correction() {
     masters.calibrate(&mut light);
 
     // 0.3 / (0.4/0.6) = 0.3 / 0.6667 = 0.45
-    assert!(
-        (light.pixels[0] - 0.45).abs() < 1e-4,
-        "got {}",
-        light.pixels[0]
-    );
+    assert!((light.data[0] - 0.45).abs() < 1e-4, "got {}", light.data[0]);
     // 0.3 / (0.8/0.6) = 0.3 / 1.3333 = 0.225
     assert!(
-        (light.pixels[1] - 0.225).abs() < 1e-4,
+        (light.data[1] - 0.225).abs() < 1e-4,
         "got {}",
-        light.pixels[1]
+        light.data[1]
     );
 }
 
@@ -138,9 +131,7 @@ fn test_calibrate_full_pipeline() {
 
     let dark = constant_cfa(2, 1, dark_val, CfaType::Mono);
     let flat = CfaImage {
-        pixels: flat_pixels,
-        width: 2,
-        height: 1,
+        data: Buffer2::new(2, 1, flat_pixels),
         pattern: CfaType::Mono,
         metadata: AstroImageMetadata::default(),
     };
@@ -149,9 +140,7 @@ fn test_calibrate_full_pipeline() {
     let masters = CalibrationMasters::new(Some(dark), Some(flat), Some(bias));
 
     let mut light = CfaImage {
-        pixels: light_pixels,
-        width: 2,
-        height: 1,
+        data: Buffer2::new(2, 1, light_pixels),
         pattern: CfaType::Mono,
         metadata: AstroImageMetadata::default(),
     };
@@ -168,14 +157,14 @@ fn test_calibrate_full_pipeline() {
     let expected_0 = signal[0] * 0.9;
     let expected_1 = signal[1] * 0.9;
     assert!(
-        (light.pixels[0] - expected_0).abs() < 1e-4,
+        (light.data[0] - expected_0).abs() < 1e-4,
         "Expected {expected_0}, got {}",
-        light.pixels[0]
+        light.data[0]
     );
     assert!(
-        (light.pixels[1] - expected_1).abs() < 1e-4,
+        (light.data[1] - expected_1).abs() < 1e-4,
         "Expected {expected_1}, got {}",
-        light.pixels[1]
+        light.data[1]
     );
 }
 
@@ -192,9 +181,7 @@ fn test_calibrate_hot_pixel_correction() {
     dark_pixels[2 * w + 2] = 0.9; // hot pixel at (2,2)
 
     let dark = CfaImage {
-        pixels: dark_pixels,
-        width: w,
-        height: h,
+        data: Buffer2::new(w, h, dark_pixels),
         pattern: pattern.clone(),
         metadata: AstroImageMetadata::default(),
     };
@@ -210,9 +197,7 @@ fn test_calibrate_hot_pixel_correction() {
     light_pixels[2 * w + 2] = 0.99; // corrupted value at hot pixel location
 
     let mut light = CfaImage {
-        pixels: light_pixels,
-        width: w,
-        height: h,
+        data: Buffer2::new(w, h, light_pixels),
         pattern,
         metadata: AstroImageMetadata::default(),
     };
@@ -220,7 +205,7 @@ fn test_calibrate_hot_pixel_correction() {
 
     // After dark subtraction: normal pixels become ~0.49, hot pixel stays high
     // After hot pixel correction: replaced with median of same-color Bayer neighbors
-    let corrected = light.pixels[2 * w + 2];
+    let corrected = light.data[2 * w + 2];
     assert!(
         (corrected - 0.49).abs() < 0.02,
         "Hot pixel should be corrected to ~0.49, got {corrected}"

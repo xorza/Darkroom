@@ -7,7 +7,7 @@
 use rayon::prelude::*;
 
 use super::{AstroImage, AstroImageMetadata, ImageDimensions};
-
+use crate::common::Buffer2;
 use crate::raw::demosaic::CfaPattern;
 
 /// CFA pattern for raw sensor data.
@@ -49,21 +49,19 @@ impl CfaType {
 pub struct CfaImage {
     /// Single-channel pixel data, normalized to 0.0-1.0.
     /// Layout: row-major, width * height pixels.
-    pub pixels: Vec<f32>,
-    pub width: usize,
-    pub height: usize,
+    pub data: Buffer2<f32>,
     pub pattern: CfaType,
     pub metadata: AstroImageMetadata,
 }
 
 impl crate::stacking::cache::StackableImage for CfaImage {
     fn dimensions(&self) -> ImageDimensions {
-        ImageDimensions::new(self.width, self.height, 1)
+        ImageDimensions::new(self.data.width(), self.data.height(), 1)
     }
 
     fn channel(&self, c: usize) -> &[f32] {
         assert!(c == 0, "CfaImage has only 1 channel, got {c}");
-        &self.pixels
+        &self.data
     }
 
     fn metadata(&self) -> &AstroImageMetadata {
@@ -79,18 +77,18 @@ impl crate::stacking::cache::StackableImage for CfaImage {
 }
 
 impl CfaImage {
-    pub fn pixel_count(&self) -> usize {
-        self.width * self.height
-    }
-
     /// Demosaic this CFA image into a 3-channel AstroImage.
     /// Consumes self.
     pub fn demosaic(self) -> AstroImage {
+        let width = self.data.width();
+        let height = self.data.height();
+        let pixels = self.data.into_vec();
+
         match &self.pattern {
             CfaType::Mono => {
                 // No demosaicing needed - convert 1-channel to 1-channel AstroImage
-                let dims = ImageDimensions::new(self.width, self.height, 1);
-                let mut astro = AstroImage::from_pixels(dims, self.pixels);
+                let dims = ImageDimensions::new(width, height, 1);
+                let mut astro = AstroImage::from_pixels(dims, pixels);
                 astro.metadata = self.metadata;
                 astro
             }
@@ -98,17 +96,17 @@ impl CfaImage {
                 use crate::raw::demosaic::bayer::{BayerImage, demosaic_bayer};
 
                 let bayer = BayerImage::with_margins(
-                    &self.pixels,
-                    self.width,
-                    self.height,
-                    self.width,
-                    self.height,
+                    &pixels,
+                    width,
+                    height,
+                    width,
+                    height,
                     0,
                     0,
                     *cfa_pattern,
                 );
                 let rgb = demosaic_bayer(&bayer);
-                let dims = ImageDimensions::new(self.width, self.height, 3);
+                let dims = ImageDimensions::new(width, height, 3);
                 let mut astro = AstroImage::from_pixels(dims, rgb);
                 astro.metadata = self.metadata;
                 astro
@@ -118,18 +116,17 @@ impl CfaImage {
 
                 // Convert f32 back to u16 for the existing XTrans pipeline.
                 // The xtrans pipeline expects u16 + normalization params.
-                let raw_u16: Vec<u16> = self
-                    .pixels
+                let raw_u16: Vec<u16> = pixels
                     .par_iter()
                     .map(|&v| (v.clamp(0.0, 1.0) * 65535.0).round() as u16)
                     .collect();
 
                 let (rgb, _channels) = process_xtrans(
                     &raw_u16,
-                    self.width,
-                    self.height,
-                    self.width,
-                    self.height,
+                    width,
+                    height,
+                    width,
+                    height,
                     0,
                     0,
                     *pattern,
@@ -137,7 +134,7 @@ impl CfaImage {
                     1.0 / 65535.0, // inv_range to undo the u16 conversion
                 );
 
-                let dims = ImageDimensions::new(self.width, self.height, 3);
+                let dims = ImageDimensions::new(width, height, 3);
                 let mut astro = AstroImage::from_pixels(dims, rgb);
                 astro.metadata = self.metadata;
                 astro
@@ -148,16 +145,16 @@ impl CfaImage {
     /// Subtract another CfaImage pixel-by-pixel (dark subtraction).
     pub fn subtract(&mut self, dark: &CfaImage) {
         assert!(
-            self.width == dark.width && self.height == dark.height,
+            self.data.width() == dark.data.width() && self.data.height() == dark.data.height(),
             "CfaImage dimensions mismatch: {}x{} vs {}x{}",
-            self.width,
-            self.height,
-            dark.width,
-            dark.height
+            self.data.width(),
+            self.data.height(),
+            dark.data.width(),
+            dark.data.height()
         );
-        self.pixels
+        self.data
             .par_iter_mut()
-            .zip(dark.pixels.par_iter())
+            .zip(dark.data.par_iter())
             .for_each(|(l, d)| *l -= d);
     }
 
@@ -165,33 +162,33 @@ impl CfaImage {
     /// Formula: light /= (flat - bias) / mean(flat - bias)
     pub fn divide_by_normalized(&mut self, flat: &CfaImage, bias: Option<&CfaImage>) {
         assert!(
-            self.width == flat.width && self.height == flat.height,
+            self.data.width() == flat.data.width() && self.data.height() == flat.data.height(),
             "Flat dimensions mismatch: {}x{} vs {}x{}",
-            self.width,
-            self.height,
-            flat.width,
-            flat.height
+            self.data.width(),
+            self.data.height(),
+            flat.data.width(),
+            flat.data.height()
         );
 
         let flat_mean = if let Some(bias) = bias {
             assert!(
-                bias.width == flat.width && bias.height == flat.height,
+                bias.data.width() == flat.data.width() && bias.data.height() == flat.data.height(),
                 "Bias dimensions mismatch: {}x{} vs {}x{}",
-                bias.width,
-                bias.height,
-                flat.width,
-                flat.height
+                bias.data.width(),
+                bias.data.height(),
+                flat.data.width(),
+                flat.data.height()
             );
             let sum: f64 = flat
-                .pixels
+                .data
                 .par_iter()
-                .zip(bias.pixels.par_iter())
+                .zip(bias.data.par_iter())
                 .map(|(f, b)| (f - b) as f64)
                 .sum();
-            (sum / flat.pixels.len() as f64) as f32
+            (sum / flat.data.len() as f64) as f32
         } else {
-            let sum: f64 = flat.pixels.par_iter().map(|&f| f as f64).sum();
-            (sum / flat.pixels.len() as f64) as f32
+            let sum: f64 = flat.data.par_iter().map(|&f| f as f64).sum();
+            (sum / flat.data.len() as f64) as f32
         };
 
         assert!(
@@ -202,9 +199,9 @@ impl CfaImage {
 
         match bias {
             Some(bias) => {
-                self.pixels
+                self.data
                     .par_iter_mut()
-                    .zip(flat.pixels.par_iter().zip(bias.pixels.par_iter()))
+                    .zip(flat.data.par_iter().zip(bias.data.par_iter()))
                     .for_each(|(l, (f, b))| {
                         let norm_flat = (f - b) * inv_mean;
                         if norm_flat > f32::EPSILON {
@@ -213,9 +210,9 @@ impl CfaImage {
                     });
             }
             None => {
-                self.pixels
+                self.data
                     .par_iter_mut()
-                    .zip(flat.pixels.par_iter())
+                    .zip(flat.data.par_iter())
                     .for_each(|(l, f)| {
                         let norm_flat = f * inv_mean;
                         if norm_flat > f32::EPSILON {
@@ -232,11 +229,8 @@ mod tests {
     use super::*;
 
     fn make_cfa(width: usize, height: usize, pixels: Vec<f32>, pattern: CfaType) -> CfaImage {
-        assert_eq!(pixels.len(), width * height);
         CfaImage {
-            pixels,
-            width,
-            height,
+            data: Buffer2::new(width, height, pixels),
             pattern,
             metadata: AstroImageMetadata::default(),
         }
@@ -315,10 +309,10 @@ mod tests {
 
         light.subtract(&dark);
 
-        assert!((light.pixels[0] - 0.4).abs() < 1e-6);
-        assert!((light.pixels[1] - 0.5).abs() < 1e-6);
-        assert!((light.pixels[2] - 0.6).abs() < 1e-6);
-        assert!((light.pixels[3] - 0.7).abs() < 1e-6);
+        assert!((light.data[0] - 0.4).abs() < 1e-6);
+        assert!((light.data[1] - 0.5).abs() < 1e-6);
+        assert!((light.data[2] - 0.6).abs() < 1e-6);
+        assert!((light.data[3] - 0.7).abs() < 1e-6);
     }
 
     #[test]
@@ -338,10 +332,10 @@ mod tests {
 
         light.divide_by_normalized(&flat, None);
 
-        assert!((light.pixels[0] - 0.5).abs() < 1e-6);
-        assert!((light.pixels[1] - 0.6).abs() < 1e-6);
-        assert!((light.pixels[2] - 0.7).abs() < 1e-6);
-        assert!((light.pixels[3] - 0.8).abs() < 1e-6);
+        assert!((light.data[0] - 0.5).abs() < 1e-6);
+        assert!((light.data[1] - 0.6).abs() < 1e-6);
+        assert!((light.data[2] - 0.7).abs() < 1e-6);
+        assert!((light.data[3] - 0.8).abs() < 1e-6);
     }
 
     #[test]
@@ -357,9 +351,9 @@ mod tests {
         light.divide_by_normalized(&flat, None);
 
         // 0.25 / (0.5/0.75) = 0.25 / 0.6667 = 0.375
-        assert!((light.pixels[0] - 0.375).abs() < 1e-4);
+        assert!((light.data[0] - 0.375).abs() < 1e-4);
         // 0.5 / (1.0/0.75) = 0.5 / 1.3333 = 0.375
-        assert!((light.pixels[1] - 0.375).abs() < 1e-4);
+        assert!((light.data[1] - 0.375).abs() < 1e-4);
     }
 
     #[test]
@@ -374,14 +368,14 @@ mod tests {
 
         light.divide_by_normalized(&flat, Some(&bias));
 
-        for &v in &light.pixels {
+        for &v in light.data.pixels() {
             assert!((v - 0.4).abs() < 1e-6);
         }
     }
 
     #[test]
-    fn test_pixel_count() {
+    fn test_data_len() {
         let img = make_cfa(10, 20, vec![0.0; 200], CfaType::Mono);
-        assert_eq!(img.pixel_count(), 200);
+        assert_eq!(img.data.len(), 200);
     }
 }

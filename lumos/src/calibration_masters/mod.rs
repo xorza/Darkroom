@@ -8,6 +8,7 @@ use std::path::Path;
 use anyhow::Result;
 
 use crate::astro_image::cfa::{CfaImage, CfaType};
+use crate::common::Buffer2;
 use crate::raw::load_raw_cfa;
 use crate::stacking::FrameType;
 use crate::stacking::cache::ImageCache;
@@ -87,9 +88,7 @@ fn stack_cfa_frames(
     let pixels = channels.into_iter().next().unwrap();
 
     Ok(Some(CfaImage {
-        width: cache.dimensions().width,
-        height: cache.dimensions().height,
-        pixels,
+        data: Buffer2::new(cache.dimensions().width, cache.dimensions().height, pixels),
         pattern,
         metadata: cache.metadata().clone(),
     }))

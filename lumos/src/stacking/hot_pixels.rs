@@ -47,7 +47,7 @@ impl HotPixelMap {
     pub fn from_master_dark(dark: &CfaImage, sigma_threshold: f32) -> Self {
         assert!(sigma_threshold > 0.0, "Sigma threshold must be positive");
 
-        let stats = compute_single_channel_stats(&dark.pixels, sigma_threshold);
+        let stats = compute_single_channel_stats(&dark.data, sigma_threshold);
 
         tracing::info!(
             "Hot pixel CFA: median={:.6}, MAD={:.6}, sigma={:.6}, threshold={:.6}",
@@ -61,10 +61,10 @@ impl HotPixelMap {
 
         const CHUNK_SIZE: usize = 64 * 1024;
         let indices: Vec<usize> = dark
-            .pixels
+            .data
             .par_chunks(CHUNK_SIZE)
             .enumerate()
-            .flat_map(|(chunk_idx, chunk)| {
+            .flat_map(|(chunk_idx, chunk): (usize, &[f32])| {
                 let base_idx = chunk_idx * CHUNK_SIZE;
                 chunk
                     .iter()
@@ -77,8 +77,8 @@ impl HotPixelMap {
 
         Self {
             indices,
-            width: dark.width,
-            height: dark.height,
+            width: dark.data.width(),
+            height: dark.data.height(),
         }
     }
 
@@ -97,10 +97,10 @@ impl HotPixelMap {
     /// same-color CFA neighbors.
     pub fn correct(&self, image: &mut CfaImage) {
         assert!(
-            image.width == self.width && image.height == self.height,
+            image.data.width() == self.width && image.data.height() == self.height,
             "CfaImage dimensions {}x{} don't match hot pixel map {}x{}",
-            image.width,
-            image.height,
+            image.data.width(),
+            image.data.height(),
             self.width,
             self.height
         );
@@ -109,14 +109,14 @@ impl HotPixelMap {
             return;
         }
 
-        let width = image.width;
-        let height = image.height;
+        let width = image.data.width();
+        let height = image.data.height();
 
         for &idx in &self.indices {
             let x = idx % width;
             let y = idx / width;
-            image.pixels[idx] =
-                median_same_color_neighbors(&image.pixels, width, height, x, y, &image.pattern);
+            image.data[idx] =
+                median_same_color_neighbors(&image.data, width, height, x, y, &image.pattern);
         }
     }
 }
@@ -319,9 +319,7 @@ mod tests {
 
     fn make_cfa(width: usize, height: usize, pixels: Vec<f32>, pattern: CfaType) -> CfaImage {
         CfaImage {
-            pixels,
-            width,
-            height,
+            data: crate::common::Buffer2::new(width, height, pixels),
             pattern,
             metadata: crate::astro_image::AstroImageMetadata::default(),
         }
@@ -378,9 +376,9 @@ mod tests {
 
         // Should be replaced with median of same-color neighbors (all 100.0)
         assert!(
-            (image.pixels[2 * 6 + 2] - 100.0).abs() < f32::EPSILON,
+            (image.data[2 * 6 + 2] - 100.0).abs() < f32::EPSILON,
             "Expected 100.0, got {}",
-            image.pixels[2 * 6 + 2]
+            image.data[2 * 6 + 2]
         );
     }
 
@@ -400,9 +398,9 @@ mod tests {
 
         // Median of [10, 20, 30, 40, 50, 60, 70, 80] = 45
         assert!(
-            (image.pixels[4] - 45.0).abs() < f32::EPSILON,
+            (image.data[4] - 45.0).abs() < f32::EPSILON,
             "Expected 45.0, got {}",
-            image.pixels[4]
+            image.data[4]
         );
     }
 

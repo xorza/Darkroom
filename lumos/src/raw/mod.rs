@@ -18,6 +18,7 @@ use rayon::prelude::*;
 use crate::astro_image::cfa::{CfaImage, CfaType};
 use crate::astro_image::sensor::{SensorType, detect_sensor_type};
 use crate::astro_image::{AstroImage, AstroImageMetadata, BitPix, ImageDimensions};
+use crate::common::Buffer2;
 use demosaic::xtrans::process_xtrans;
 use demosaic::{BayerImage, CfaPattern, demosaic_bayer};
 
@@ -528,9 +529,7 @@ pub fn load_raw_cfa(path: &Path) -> Result<CfaImage> {
             let pixels = raw.extract_cfa_pixels()?;
             let metadata = raw.metadata(raw.width, raw.height, 1, false);
             Ok(CfaImage {
-                pixels,
-                width: raw.width,
-                height: raw.height,
+                data: Buffer2::new(raw.width, raw.height, pixels),
                 pattern: CfaType::Mono,
                 metadata,
             })
@@ -539,9 +538,7 @@ pub fn load_raw_cfa(path: &Path) -> Result<CfaImage> {
             let pixels = raw.extract_cfa_pixels()?;
             let metadata = raw.metadata(raw.width, raw.height, 1, true);
             Ok(CfaImage {
-                pixels,
-                width: raw.width,
-                height: raw.height,
+                data: Buffer2::new(raw.width, raw.height, pixels),
                 pattern: CfaType::Bayer(cfa_pattern),
                 metadata,
             })
@@ -551,9 +548,7 @@ pub fn load_raw_cfa(path: &Path) -> Result<CfaImage> {
             let pixels = raw.extract_cfa_pixels()?;
             let metadata = raw.metadata(raw.width, raw.height, 1, true);
             Ok(CfaImage {
-                pixels,
-                width: raw.width,
-                height: raw.height,
+                data: Buffer2::new(raw.width, raw.height, pixels),
                 pattern: CfaType::XTrans(xtrans_pattern),
                 metadata,
             })
@@ -569,9 +564,7 @@ pub fn load_raw_cfa(path: &Path) -> Result<CfaImage> {
             // Wrap as mono CfaImage (already demosaiced, convert to grayscale)
             let gray = astro.into_grayscale();
             Ok(CfaImage {
-                pixels: gray.channel(0).pixels().to_vec(),
-                width: dims.width,
-                height: dims.height,
+                data: Buffer2::new(dims.width, dims.height, gray.channel(0).pixels().to_vec()),
                 pattern: CfaType::Mono,
                 metadata: gray.metadata.clone(),
             })
