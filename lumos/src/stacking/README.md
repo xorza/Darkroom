@@ -51,11 +51,7 @@ let result = stack(&paths, FrameType::Light, StackConfig::weighted(vec![1.0, 0.8
 
 // Global normalization + custom rejection
 let config = StackConfig {
-    rejection: Rejection::SigmaClipAsymmetric {
-        sigma_low: 4.0,
-        sigma_high: 3.0,
-        iterations: 5,
-    },
+    rejection: Rejection::sigma_clip_asymmetric(4.0, 3.0),
     normalization: Normalization::Global,
     ..Default::default()
 };

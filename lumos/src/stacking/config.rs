@@ -4,6 +4,10 @@
 //! parameters: combination method, pixel rejection, normalization, and memory settings.
 
 use crate::stacking::CacheConfig;
+use crate::stacking::rejection::{
+    AsymmetricSigmaClipConfig, GesdConfig, LinearFitClipConfig, PercentileClipConfig,
+    SigmaClipConfig, WinsorizedClipConfig,
+};
 
 /// Method for combining pixel values across frames.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -21,111 +25,54 @@ pub enum Rejection {
     /// No rejection.
     None,
     /// Iterative sigma clipping from median.
-    SigmaClip {
-        /// Number of standard deviations for clipping threshold.
-        sigma: f32,
-        /// Maximum number of iterations.
-        iterations: u32,
-    },
+    SigmaClip(SigmaClipConfig),
     /// Sigma clipping with asymmetric thresholds.
-    SigmaClipAsymmetric {
-        /// Sigma threshold for low outliers.
-        sigma_low: f32,
-        /// Sigma threshold for high outliers.
-        sigma_high: f32,
-        /// Maximum number of iterations.
-        iterations: u32,
-    },
+    SigmaClipAsymmetric(AsymmetricSigmaClipConfig),
     /// Replace outliers with boundary values (better for small stacks).
-    Winsorized {
-        /// Number of standard deviations for clipping threshold.
-        sigma: f32,
-        /// Maximum number of iterations.
-        iterations: u32,
-    },
+    Winsorized(WinsorizedClipConfig),
     /// Fit linear trend, reject deviants (good for gradients).
-    LinearFit {
-        /// Sigma threshold for low outliers.
-        sigma_low: f32,
-        /// Sigma threshold for high outliers.
-        sigma_high: f32,
-        /// Maximum number of iterations.
-        iterations: u32,
-    },
+    LinearFit(LinearFitClipConfig),
     /// Clip lowest/highest percentiles.
-    Percentile {
-        /// Percentile to clip from low end (0-50).
-        low: f32,
-        /// Percentile to clip from high end (0-50).
-        high: f32,
-    },
+    Percentile(PercentileClipConfig),
     /// Generalized ESD test (best for large stacks >50 frames).
-    Gesd {
-        /// Significance level (typically 0.05).
-        alpha: f32,
-        /// Maximum outliers to detect. None = 25% of data.
-        max_outliers: Option<usize>,
-    },
+    Gesd(GesdConfig),
 }
 
 impl Default for Rejection {
     fn default() -> Self {
-        Self::SigmaClip {
-            sigma: 2.5,
-            iterations: 3,
-        }
+        Self::SigmaClip(SigmaClipConfig::new(2.5, 3))
     }
 }
 
 impl Rejection {
     /// Create sigma clipping with default iterations.
     pub fn sigma_clip(sigma: f32) -> Self {
-        Self::SigmaClip {
-            sigma,
-            iterations: 3,
-        }
+        Self::SigmaClip(SigmaClipConfig::new(sigma, 3))
     }
 
     /// Create asymmetric sigma clipping.
     pub fn sigma_clip_asymmetric(sigma_low: f32, sigma_high: f32) -> Self {
-        Self::SigmaClipAsymmetric {
-            sigma_low,
-            sigma_high,
-            iterations: 3,
-        }
+        Self::SigmaClipAsymmetric(AsymmetricSigmaClipConfig::new(sigma_low, sigma_high, 3))
     }
 
     /// Create winsorized sigma clipping.
     pub fn winsorized(sigma: f32) -> Self {
-        Self::Winsorized {
-            sigma,
-            iterations: 3,
-        }
+        Self::Winsorized(WinsorizedClipConfig::new(sigma, 3))
     }
 
     /// Create linear fit clipping with symmetric thresholds.
     pub fn linear_fit(sigma: f32) -> Self {
-        Self::LinearFit {
-            sigma_low: sigma,
-            sigma_high: sigma,
-            iterations: 3,
-        }
+        Self::LinearFit(LinearFitClipConfig::new(sigma, sigma, 3))
     }
 
     /// Create percentile clipping with symmetric bounds.
     pub fn percentile(percent: f32) -> Self {
-        Self::Percentile {
-            low: percent,
-            high: percent,
-        }
+        Self::Percentile(PercentileClipConfig::new(percent, percent))
     }
 
     /// Create GESD with default alpha.
     pub fn gesd() -> Self {
-        Self::Gesd {
-            alpha: 0.05,
-            max_outliers: None,
-        }
+        Self::Gesd(GesdConfig::new(0.05, None))
     }
 }
 
@@ -157,13 +104,9 @@ pub enum Normalization {
 /// let result = stack(&paths, FrameType::Light, StackConfig::sigma_clipped(2.0))?;
 /// let result = stack(&paths, FrameType::Light, StackConfig::median())?;
 ///
-/// // Custom configuration using struct update syntax
+/// // Custom configuration
 /// let config = StackConfig {
-///     rejection: Rejection::SigmaClipAsymmetric {
-///         sigma_low: 2.0,
-///         sigma_high: 3.0,
-///         iterations: 5,
-///     },
+///     rejection: Rejection::sigma_clip_asymmetric(2.0, 3.0),
 ///     normalization: Normalization::Global,
 ///     ..Default::default()
 /// };
@@ -201,10 +144,7 @@ impl StackConfig {
     /// Preset: sigma-clipped mean (most common for light frames).
     pub fn sigma_clipped(sigma: f32) -> Self {
         Self {
-            rejection: Rejection::SigmaClip {
-                sigma,
-                iterations: 3,
-            },
+            rejection: Rejection::sigma_clip(sigma),
             ..Default::default()
         }
     }
@@ -238,10 +178,7 @@ impl StackConfig {
     /// Preset: winsorized sigma clipping (better for small stacks).
     pub fn winsorized(sigma: f32) -> Self {
         Self {
-            rejection: Rejection::Winsorized {
-                sigma,
-                iterations: 3,
-            },
+            rejection: Rejection::winsorized(sigma),
             ..Default::default()
         }
     }
@@ -249,11 +186,7 @@ impl StackConfig {
     /// Preset: linear fit clipping (good for sky gradients).
     pub fn linear_fit(sigma: f32) -> Self {
         Self {
-            rejection: Rejection::LinearFit {
-                sigma_low: sigma,
-                sigma_high: sigma,
-                iterations: 3,
-            },
+            rejection: Rejection::linear_fit(sigma),
             ..Default::default()
         }
     }
@@ -261,10 +194,7 @@ impl StackConfig {
     /// Preset: percentile clipping (simple, for small stacks <10).
     pub fn percentile(percent: f32) -> Self {
         Self {
-            rejection: Rejection::Percentile {
-                low: percent,
-                high: percent,
-            },
+            rejection: Rejection::percentile(percent),
             ..Default::default()
         }
     }
@@ -272,10 +202,7 @@ impl StackConfig {
     /// Preset: GESD (rigorous, for large stacks >50).
     pub fn gesd() -> Self {
         Self {
-            rejection: Rejection::Gesd {
-                alpha: 0.05,
-                max_outliers: None,
-            },
+            rejection: Rejection::gesd(),
             ..Default::default()
         }
     }
@@ -288,41 +215,44 @@ impl StackConfig {
     ///
     /// Panics if parameters are invalid (e.g., negative sigma, invalid percentiles).
     pub fn validate(&self) {
+        // Config structs validate in their constructors, but validate() can be
+        // called on configs built via struct literal syntax, so re-check here.
         match self.rejection {
             Rejection::None => {}
-            Rejection::SigmaClip { sigma, iterations } => {
-                assert!(sigma > 0.0, "Sigma must be positive");
-                assert!(iterations > 0, "Iterations must be at least 1");
+            Rejection::SigmaClip(c) => {
+                assert!(c.sigma > 0.0, "Sigma must be positive");
+                assert!(c.max_iterations > 0, "Iterations must be at least 1");
             }
-            Rejection::SigmaClipAsymmetric {
-                sigma_low,
-                sigma_high,
-                iterations,
-            } => {
-                assert!(sigma_low > 0.0, "Sigma low must be positive");
-                assert!(sigma_high > 0.0, "Sigma high must be positive");
-                assert!(iterations > 0, "Iterations must be at least 1");
+            Rejection::SigmaClipAsymmetric(c) => {
+                assert!(c.sigma_low > 0.0, "Sigma low must be positive");
+                assert!(c.sigma_high > 0.0, "Sigma high must be positive");
+                assert!(c.max_iterations > 0, "Iterations must be at least 1");
             }
-            Rejection::Winsorized { sigma, iterations } => {
-                assert!(sigma > 0.0, "Sigma must be positive");
-                assert!(iterations > 0, "Iterations must be at least 1");
+            Rejection::Winsorized(c) => {
+                assert!(c.sigma > 0.0, "Sigma must be positive");
+                assert!(c.max_iterations > 0, "Iterations must be at least 1");
             }
-            Rejection::LinearFit {
-                sigma_low,
-                sigma_high,
-                iterations,
-            } => {
-                assert!(sigma_low > 0.0, "Sigma low must be positive");
-                assert!(sigma_high > 0.0, "Sigma high must be positive");
-                assert!(iterations > 0, "Iterations must be at least 1");
+            Rejection::LinearFit(c) => {
+                assert!(c.sigma_low > 0.0, "Sigma low must be positive");
+                assert!(c.sigma_high > 0.0, "Sigma high must be positive");
+                assert!(c.max_iterations > 0, "Iterations must be at least 1");
             }
-            Rejection::Percentile { low, high } => {
-                assert!((0.0..=50.0).contains(&low), "Low percentile must be 0-50");
-                assert!((0.0..=50.0).contains(&high), "High percentile must be 0-50");
-                assert!(low + high < 100.0, "Total clipping must be < 100%");
+            Rejection::Percentile(c) => {
+                assert!(
+                    (0.0..=50.0).contains(&c.low_percentile),
+                    "Low percentile must be 0-50"
+                );
+                assert!(
+                    (0.0..=50.0).contains(&c.high_percentile),
+                    "High percentile must be 0-50"
+                );
+                assert!(
+                    c.low_percentile + c.high_percentile < 100.0,
+                    "Total clipping must be < 100%"
+                );
             }
-            Rejection::Gesd { alpha, .. } => {
-                assert!((0.0..1.0).contains(&alpha), "Alpha must be 0-1");
+            Rejection::Gesd(c) => {
+                assert!((0.0..1.0).contains(&c.alpha), "Alpha must be 0-1");
             }
         }
 
@@ -357,7 +287,7 @@ mod tests {
     fn test_default_config() {
         let config = StackConfig::default();
         assert_eq!(config.method, CombineMethod::Mean);
-        assert!(matches!(config.rejection, Rejection::SigmaClip { .. }));
+        assert!(matches!(config.rejection, Rejection::SigmaClip(..)));
         assert!(config.weights.is_empty());
         assert_eq!(config.normalization, Normalization::None);
     }
@@ -368,7 +298,7 @@ mod tests {
         assert_eq!(config.method, CombineMethod::Mean);
         assert!(matches!(
             config.rejection,
-            Rejection::SigmaClip { sigma, .. } if (sigma - 2.0).abs() < f32::EPSILON
+            Rejection::SigmaClip(c) if (c.sigma - 2.0).abs() < f32::EPSILON
         ));
     }
 
@@ -389,17 +319,13 @@ mod tests {
     #[test]
     fn test_struct_update_syntax() {
         let config = StackConfig {
-            rejection: Rejection::SigmaClipAsymmetric {
-                sigma_low: 2.0,
-                sigma_high: 3.0,
-                iterations: 5,
-            },
+            rejection: Rejection::SigmaClipAsymmetric(AsymmetricSigmaClipConfig::new(2.0, 3.0, 5)),
             normalization: Normalization::Global,
             ..Default::default()
         };
         assert!(matches!(
             config.rejection,
-            Rejection::SigmaClipAsymmetric { .. }
+            Rejection::SigmaClipAsymmetric(..)
         ));
         assert_eq!(config.normalization, Normalization::Global);
     }
@@ -433,10 +359,10 @@ mod tests {
     #[should_panic(expected = "Sigma must be positive")]
     fn test_validate_invalid_sigma() {
         let config = StackConfig {
-            rejection: Rejection::SigmaClip {
+            rejection: Rejection::SigmaClip(SigmaClipConfig {
                 sigma: -1.0,
-                iterations: 3,
-            },
+                max_iterations: 3,
+            }),
             ..Default::default()
         };
         config.validate();
@@ -446,10 +372,10 @@ mod tests {
     #[should_panic(expected = "Low percentile must be 0-50")]
     fn test_validate_invalid_percentile() {
         let config = StackConfig {
-            rejection: Rejection::Percentile {
-                low: 60.0,
-                high: 10.0,
-            },
+            rejection: Rejection::Percentile(PercentileClipConfig {
+                low_percentile: 60.0,
+                high_percentile: 10.0,
+            }),
             ..Default::default()
         };
         config.validate();
@@ -458,27 +384,21 @@ mod tests {
     #[test]
     fn test_rejection_constructors() {
         let r = Rejection::sigma_clip(2.0);
-        assert!(
-            matches!(r, Rejection::SigmaClip { sigma, .. } if (sigma - 2.0).abs() < f32::EPSILON)
-        );
+        assert!(matches!(r, Rejection::SigmaClip(c) if (c.sigma - 2.0).abs() < f32::EPSILON));
 
         let r = Rejection::winsorized(3.0);
-        assert!(
-            matches!(r, Rejection::Winsorized { sigma, .. } if (sigma - 3.0).abs() < f32::EPSILON)
-        );
+        assert!(matches!(r, Rejection::Winsorized(c) if (c.sigma - 3.0).abs() < f32::EPSILON));
 
         let r = Rejection::linear_fit(2.5);
-        assert!(
-            matches!(r, Rejection::LinearFit { sigma_low, sigma_high, .. }
-            if (sigma_low - 2.5).abs() < f32::EPSILON && (sigma_high - 2.5).abs() < f32::EPSILON)
-        );
+        assert!(matches!(r, Rejection::LinearFit(c)
+            if (c.sigma_low - 2.5).abs() < f32::EPSILON && (c.sigma_high - 2.5).abs() < f32::EPSILON));
 
         let r = Rejection::percentile(15.0);
-        assert!(matches!(r, Rejection::Percentile { low, high }
-            if (low - 15.0).abs() < f32::EPSILON && (high - 15.0).abs() < f32::EPSILON));
+        assert!(matches!(r, Rejection::Percentile(c)
+            if (c.low_percentile - 15.0).abs() < f32::EPSILON && (c.high_percentile - 15.0).abs() < f32::EPSILON));
 
         let r = Rejection::gesd();
-        assert!(matches!(r, Rejection::Gesd { alpha, max_outliers: None }
-            if (alpha - 0.05).abs() < f32::EPSILON));
+        assert!(matches!(r, Rejection::Gesd(c)
+            if (c.alpha - 0.05).abs() < f32::EPSILON && c.max_outliers.is_none()));
     }
 }
