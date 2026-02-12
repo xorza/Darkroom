@@ -11,7 +11,6 @@ use super::cache::{ImageCache, ScratchBuffers, StackableImage};
 use super::config::{CombineMethod, Normalization, Rejection, StackConfig};
 use super::error::Error;
 use super::progress::ProgressCallback;
-use super::rejection::RejectionResult;
 use super::{CacheConfig, FrameType};
 use crate::math;
 
@@ -245,114 +244,9 @@ fn dispatch_stacking(
             cache.process_chunked(
                 weights.as_deref(),
                 norm_params,
-                move |values, w, scratch| combine_mean(values, w, scratch, &config.rejection).value,
+                move |values, w, scratch| config.rejection.combine_mean(values, w, scratch).value,
             )
         }
-    }
-}
-
-/// Reject outliers then compute (weighted) mean. Returns RejectionResult.
-///
-/// Uses index tracking to maintain correct value-weight alignment after rejection
-/// functions partition/reorder the values array.
-fn combine_mean(
-    values: &mut [f32],
-    weights: Option<&[f32]>,
-    scratch: &mut ScratchBuffers,
-    rejection: &Rejection,
-) -> RejectionResult {
-    // Winsorized and weighted-Percentile are special cases
-    match rejection {
-        Rejection::Winsorized(config) => {
-            let winsorized = config.winsorize(values, &mut scratch.floats_a, &mut scratch.floats_b);
-            let value = match weights {
-                Some(w) => math::weighted_mean_f32(winsorized, w),
-                None => math::mean_f32(winsorized),
-            };
-            return RejectionResult {
-                value,
-                remaining_count: values.len(),
-            };
-        }
-
-        Rejection::Percentile(config) if weights.is_some() => {
-            let w = weights.unwrap();
-            // Reuse scratch pairs buffer instead of allocating per pixel
-            scratch.pairs.clear();
-            scratch
-                .pairs
-                .extend(values.iter().zip(w.iter()).map(|(&v, &wt)| (v, wt)));
-            scratch
-                .pairs
-                .sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
-
-            let n = scratch.pairs.len();
-            let low_count = ((config.low_percentile / 100.0) * n as f32).floor() as usize;
-            let high_count = ((config.high_percentile / 100.0) * n as f32).floor() as usize;
-            let start = low_count;
-            let end = n.saturating_sub(high_count);
-            let (start, end) = if start >= end {
-                let mid = n / 2;
-                (mid, mid + 1)
-            } else {
-                (start, end)
-            };
-
-            let remaining = &scratch.pairs[start..end];
-            let value = math::weighted_mean_pairs_f32(remaining);
-            return RejectionResult {
-                value,
-                remaining_count: remaining.len(),
-            };
-        }
-
-        _ => {}
-    }
-
-    // Common path: reject then compute mean
-    let remaining = rejection.reject(values, scratch);
-
-    let value = match (weights, rejection) {
-        // No rejection: indices not set up, use direct weighted mean
-        (Some(w), Rejection::None) => math::weighted_mean_f32(values, w),
-        // Percentile doesn't track indices, use unweighted mean
-        // (weighted Percentile already handled above)
-        (_, Rejection::Percentile(_)) => math::mean_f32(&values[..remaining]),
-        // Index-tracking rejections: use indexed weighted mean
-        (Some(w), _) if remaining > 0 => {
-            weighted_mean_indexed(&values[..remaining], w, &scratch.indices[..remaining])
-        }
-        _ => math::mean_f32(&values[..remaining]),
-    };
-
-    RejectionResult {
-        value,
-        remaining_count: remaining,
-    }
-}
-
-/// Compute weighted mean using index mapping.
-///
-/// `indices[i]` maps `values[i]` to `weights[indices[i]]`, maintaining correct
-/// alignment after rejection functions have reordered the values array.
-fn weighted_mean_indexed(values: &[f32], weights: &[f32], indices: &[usize]) -> f32 {
-    if values.is_empty() {
-        return 0.0;
-    }
-
-    let mut sum = 0.0f32;
-    let mut weight_sum = 0.0f32;
-
-    for (i, &v) in values.iter().enumerate() {
-        let w = weights[indices[i]];
-        sum += v * w;
-        weight_sum += w;
-    }
-
-    if weight_sum > f32::EPSILON {
-        sum / weight_sum
-    } else {
-        values.iter().sum::<f32>() / values.len() as f32
     }
 }
 
@@ -404,7 +298,7 @@ mod tests {
     #[test]
     fn test_combine_mean_none() {
         let mut values = vec![1.0, 2.0, 3.0, 4.0, 5.0];
-        let result = combine_mean(&mut values, None, &mut scratch(), &Rejection::None);
+        let result = Rejection::None.combine_mean(&mut values, None, &mut scratch());
         assert!((result.value - 3.0).abs() < f32::EPSILON);
         assert_eq!(result.remaining_count, 5);
     }
@@ -412,12 +306,7 @@ mod tests {
     #[test]
     fn test_combine_mean_sigma_clip() {
         let mut values = vec![1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 100.0];
-        let result = combine_mean(
-            &mut values,
-            None,
-            &mut scratch(),
-            &Rejection::sigma_clip(2.0),
-        );
+        let result = Rejection::sigma_clip(2.0).combine_mean(&mut values, None, &mut scratch());
         assert!(
             result.value < 10.0,
             "Outlier should be clipped, got {}",
@@ -442,12 +331,8 @@ mod tests {
         let mut values = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0];
         let weights = vec![1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 10.0, 1.0, 1.0];
 
-        let result = combine_mean(
-            &mut values,
-            Some(&weights),
-            &mut scratch(),
-            &Rejection::percentile(20.0),
-        );
+        let result =
+            Rejection::percentile(20.0).combine_mean(&mut values, Some(&weights), &mut scratch());
 
         // Unweighted mean of [3,4,5,6,7,8] = 5.5
         // Weighted mean should be pulled toward 8 (weight 10.0)
@@ -465,12 +350,8 @@ mod tests {
         let mut values = vec![1.0, 2.0, 2.0, 2.0, 2.0, 100.0];
         let weights = vec![10.0, 1.0, 1.0, 1.0, 1.0, 1.0];
 
-        let result = combine_mean(
-            &mut values,
-            Some(&weights),
-            &mut scratch(),
-            &Rejection::winsorized(2.0),
-        );
+        let result =
+            Rejection::winsorized(2.0).combine_mean(&mut values, Some(&weights), &mut scratch());
 
         // All values retained (winsorized, not removed)
         assert_eq!(result.remaining_count, 6);
@@ -479,11 +360,10 @@ mod tests {
         // Weighted should be pulled toward 1.0 due to weight 10.0
         let mut values_unwt = vec![1.0, 2.0, 2.0, 2.0, 2.0, 100.0];
         let uniform_weights = vec![1.0; 6];
-        let unweighted_result = combine_mean(
+        let unweighted_result = Rejection::winsorized(2.0).combine_mean(
             &mut values_unwt,
             Some(&uniform_weights),
             &mut scratch(),
-            &Rejection::winsorized(2.0),
         );
 
         assert!(
@@ -501,11 +381,10 @@ mod tests {
         let mut values = vec![1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 100.0];
         let weights = vec![10.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0];
 
-        let result = combine_mean(
+        let result = Rejection::sigma_clip_asymmetric(4.0, 2.0).combine_mean(
             &mut values,
             Some(&weights),
             &mut scratch(),
-            &Rejection::sigma_clip_asymmetric(4.0, 2.0),
         );
 
         // High outlier (100.0) should be rejected
@@ -541,12 +420,8 @@ mod tests {
         let mut values = vec![2.0, 100.0, 3.0, 2.5, 2.2, 1.8, 2.8, 2.3];
         let weights = vec![10.0, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1];
 
-        let result = combine_mean(
-            &mut values,
-            Some(&weights),
-            &mut scratch(),
-            &Rejection::sigma_clip(2.0),
-        );
+        let result =
+            Rejection::sigma_clip(2.0).combine_mean(&mut values, Some(&weights), &mut scratch());
 
         // Frame 1 should be rejected
         assert!(result.remaining_count < 8);
@@ -566,12 +441,8 @@ mod tests {
         let mut values = vec![1.0, 2.0, 3.0, 4.0, 100.0, 6.0];
         let weights = vec![10.0, 0.1, 0.1, 0.1, 0.1, 0.1];
 
-        let result = combine_mean(
-            &mut values,
-            Some(&weights),
-            &mut scratch(),
-            &Rejection::linear_fit(2.0),
-        );
+        let result =
+            Rejection::linear_fit(2.0).combine_mean(&mut values, Some(&weights), &mut scratch());
 
         // Outlier rejected, frame 0 (weight=10.0, value=1.0) dominates
         assert!(result.remaining_count < 6);
@@ -588,11 +459,10 @@ mod tests {
         let mut values = vec![1.0, 1.1, 0.9, 1.0, 1.2, 0.8, 1.0, 100.0];
         let weights = vec![10.0, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1];
 
-        let result = combine_mean(
+        let result = Rejection::Gesd(GesdConfig::new(0.05, Some(3))).combine_mean(
             &mut values,
             Some(&weights),
             &mut scratch(),
-            &Rejection::Gesd(GesdConfig::new(0.05, Some(3))),
         );
 
         // Outlier rejected, frame 0 (weight=10.0, value=1.0) dominates
@@ -610,21 +480,15 @@ mod tests {
         let values = vec![1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 100.0];
         let uniform_weights = vec![1.0; 8];
 
-        let result = combine_mean(
+        let result = Rejection::sigma_clip(2.0).combine_mean(
             &mut values.clone(),
             Some(&uniform_weights),
             &mut scratch(),
-            &Rejection::sigma_clip(2.0),
         );
 
         // Should match non-weighted rejection
         let mut values2 = values;
-        let result2 = combine_mean(
-            &mut values2,
-            None,
-            &mut scratch(),
-            &Rejection::sigma_clip(2.0),
-        );
+        let result2 = Rejection::sigma_clip(2.0).combine_mean(&mut values2, None, &mut scratch());
 
         assert_eq!(result.remaining_count, result2.remaining_count);
         assert!(

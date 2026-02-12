@@ -3,11 +3,12 @@
 //! This module provides a single `StackConfig` type that encapsulates all stacking
 //! parameters: combination method, pixel rejection, normalization, and memory settings.
 
+use crate::math;
 use crate::stacking::CacheConfig;
 use crate::stacking::cache::ScratchBuffers;
 use crate::stacking::rejection::{
     AsymmetricSigmaClipConfig, GesdConfig, LinearFitClipConfig, PercentileClipConfig,
-    SigmaClipConfig, WinsorizedClipConfig,
+    RejectionResult, SigmaClipConfig, WinsorizedClipConfig,
 };
 
 /// Method for combining pixel values across frames.
@@ -90,6 +91,107 @@ impl Rejection {
             Rejection::Percentile(c) => c.reject(values),
             Rejection::Winsorized(_) => values.len(),
         }
+    }
+
+    /// Reject outliers then compute (weighted) mean.
+    ///
+    /// Uses index tracking to maintain correct value-weight alignment after rejection
+    /// functions partition/reorder the values array.
+    pub(crate) fn combine_mean(
+        &self,
+        values: &mut [f32],
+        weights: Option<&[f32]>,
+        scratch: &mut ScratchBuffers,
+    ) -> RejectionResult {
+        // Winsorized and weighted-Percentile are special cases
+        match self {
+            Rejection::Winsorized(config) => {
+                let winsorized =
+                    config.winsorize(values, &mut scratch.floats_a, &mut scratch.floats_b);
+                let value = match weights {
+                    Some(w) => math::weighted_mean_f32(winsorized, w),
+                    None => math::mean_f32(winsorized),
+                };
+                return RejectionResult {
+                    value,
+                    remaining_count: values.len(),
+                };
+            }
+
+            Rejection::Percentile(config) if weights.is_some() => {
+                let w = weights.unwrap();
+                scratch.pairs.clear();
+                scratch
+                    .pairs
+                    .extend(values.iter().zip(w.iter()).map(|(&v, &wt)| (v, wt)));
+                scratch
+                    .pairs
+                    .sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+
+                let n = scratch.pairs.len();
+                let low_count = ((config.low_percentile / 100.0) * n as f32).floor() as usize;
+                let high_count = ((config.high_percentile / 100.0) * n as f32).floor() as usize;
+                let start = low_count;
+                let end = n.saturating_sub(high_count);
+                let (start, end) = if start >= end {
+                    let mid = n / 2;
+                    (mid, mid + 1)
+                } else {
+                    (start, end)
+                };
+
+                let remaining = &scratch.pairs[start..end];
+                let value = math::weighted_mean_pairs_f32(remaining);
+                return RejectionResult {
+                    value,
+                    remaining_count: remaining.len(),
+                };
+            }
+
+            _ => {}
+        }
+
+        // Common path: reject then compute mean
+        let remaining = self.reject(values, scratch);
+
+        let value = match (weights, self) {
+            (Some(w), Rejection::None) => math::weighted_mean_f32(values, w),
+            (_, Rejection::Percentile(_)) => math::mean_f32(&values[..remaining]),
+            (Some(w), _) if remaining > 0 => {
+                weighted_mean_indexed(&values[..remaining], w, &scratch.indices[..remaining])
+            }
+            _ => math::mean_f32(&values[..remaining]),
+        };
+
+        RejectionResult {
+            value,
+            remaining_count: remaining,
+        }
+    }
+}
+
+/// Compute weighted mean using index mapping.
+///
+/// `indices[i]` maps `values[i]` to `weights[indices[i]]`, maintaining correct
+/// alignment after rejection functions have reordered the values array.
+fn weighted_mean_indexed(values: &[f32], weights: &[f32], indices: &[usize]) -> f32 {
+    if values.is_empty() {
+        return 0.0;
+    }
+
+    let mut sum = 0.0f32;
+    let mut weight_sum = 0.0f32;
+
+    for (i, &v) in values.iter().enumerate() {
+        let w = weights[indices[i]];
+        sum += v * w;
+        weight_sum += w;
+    }
+
+    if weight_sum > f32::EPSILON {
+        sum / weight_sum
+    } else {
+        values.iter().sum::<f32>() / values.len() as f32
     }
 }
 
