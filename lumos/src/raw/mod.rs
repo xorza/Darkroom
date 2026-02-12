@@ -540,50 +540,37 @@ pub fn load_raw_cfa(path: &Path) -> Result<CfaImage> {
     match sensor_type {
         SensorType::Monochrome => {
             let pixels = raw.extract_cfa_pixels()?;
-            let pattern = CfaType::Mono;
-            let metadata = raw.metadata(raw.width, raw.height, 1, None);
+            let metadata = raw.metadata(raw.width, raw.height, 1, Some(CfaType::Mono));
             Ok(CfaImage {
                 data: Buffer2::new(raw.width, raw.height, pixels),
-                pattern,
                 metadata,
             })
         }
         SensorType::Bayer(cfa_pattern) => {
             let pixels = raw.extract_cfa_pixels()?;
-            let pattern = CfaType::Bayer(cfa_pattern);
-            let metadata = raw.metadata(raw.width, raw.height, 1, Some(pattern.clone()));
+            let metadata =
+                raw.metadata(raw.width, raw.height, 1, Some(CfaType::Bayer(cfa_pattern)));
             Ok(CfaImage {
                 data: Buffer2::new(raw.width, raw.height, pixels),
-                pattern,
                 metadata,
             })
         }
         SensorType::XTrans => {
             let xtrans_pattern = raw.xtrans_pattern();
             let pixels = raw.extract_cfa_pixels()?;
-            let pattern = CfaType::XTrans(xtrans_pattern);
-            let metadata = raw.metadata(raw.width, raw.height, 1, Some(pattern.clone()));
+            let metadata = raw.metadata(
+                raw.width,
+                raw.height,
+                1,
+                Some(CfaType::XTrans(xtrans_pattern)),
+            );
             Ok(CfaImage {
                 data: Buffer2::new(raw.width, raw.height, pixels),
-                pattern,
                 metadata,
             })
         }
         SensorType::Unknown => {
-            // Cannot extract raw CFA for unknown patterns - fall back to demosaiced.
-            drop(raw);
-            tracing::warn!(
-                "Unknown sensor type, cannot extract raw CFA - using demosaiced fallback"
-            );
-            let astro = load_raw(path)?;
-            let dims = astro.dimensions();
-            // Wrap as mono CfaImage (already demosaiced, convert to grayscale)
-            let gray = astro.into_grayscale();
-            Ok(CfaImage {
-                data: Buffer2::new(dims.width, dims.height, gray.channel(0).pixels().to_vec()),
-                pattern: CfaType::Mono,
-                metadata: gray.metadata.clone(),
-            })
+            unimplemented!("Cannot extract raw CFA data for unknown sensor types")
         }
     }
 }

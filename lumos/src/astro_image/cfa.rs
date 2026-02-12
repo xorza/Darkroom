@@ -50,7 +50,6 @@ pub struct CfaImage {
     /// Single-channel pixel data, normalized to 0.0-1.0.
     /// Layout: row-major, width * height pixels.
     pub data: Buffer2<f32>,
-    pub pattern: CfaType,
     pub metadata: AstroImageMetadata,
 }
 
@@ -82,9 +81,10 @@ impl CfaImage {
     pub fn demosaic(self) -> AstroImage {
         let width = self.data.width();
         let height = self.data.height();
+        let cfa_type = self.metadata.cfa_type.clone().unwrap();
         let pixels = self.data.into_vec();
 
-        match &self.pattern {
+        match &cfa_type {
             CfaType::Mono => {
                 // No demosaicing needed - convert 1-channel to 1-channel AstroImage
                 let dims = ImageDimensions::new(width, height, 1);
@@ -228,11 +228,13 @@ impl CfaImage {
 mod tests {
     use super::*;
 
-    fn make_cfa(width: usize, height: usize, pixels: Vec<f32>, pattern: CfaType) -> CfaImage {
+    fn make_cfa(width: usize, height: usize, pixels: Vec<f32>, cfa_type: CfaType) -> CfaImage {
         CfaImage {
             data: Buffer2::new(width, height, pixels),
-            pattern,
-            metadata: AstroImageMetadata::default(),
+            metadata: AstroImageMetadata {
+                cfa_type: Some(cfa_type),
+                ..Default::default()
+            },
         }
     }
 

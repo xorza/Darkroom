@@ -3,11 +3,13 @@ use crate::common::Buffer2;
 use crate::{AstroImageMetadata, CalibrationMasters};
 
 /// Helper to create a CfaImage filled with a constant value.
-fn constant_cfa(width: usize, height: usize, value: f32, pattern: CfaType) -> CfaImage {
+fn constant_cfa(width: usize, height: usize, value: f32, cfa_type: CfaType) -> CfaImage {
     CfaImage {
         data: Buffer2::new_filled(width, height, value),
-        pattern,
-        metadata: AstroImageMetadata::default(),
+        metadata: AstroImageMetadata {
+            cfa_type: Some(cfa_type),
+            ..Default::default()
+        },
     }
 }
 
@@ -89,8 +91,10 @@ fn test_calibrate_flat_correction() {
     // result = light / normalized
     let flat = CfaImage {
         data: Buffer2::new(2, 2, vec![0.4, 0.8, 0.8, 0.4]),
-        pattern: CfaType::Mono,
-        metadata: AstroImageMetadata::default(),
+        metadata: AstroImageMetadata {
+            cfa_type: Some(CfaType::Mono),
+            ..Default::default()
+        },
     };
 
     let masters = CalibrationMasters::new(None, Some(flat), None);
@@ -132,8 +136,10 @@ fn test_calibrate_full_pipeline() {
     let dark = constant_cfa(2, 1, dark_val, CfaType::Mono);
     let flat = CfaImage {
         data: Buffer2::new(2, 1, flat_pixels),
-        pattern: CfaType::Mono,
-        metadata: AstroImageMetadata::default(),
+        metadata: AstroImageMetadata {
+            cfa_type: Some(CfaType::Mono),
+            ..Default::default()
+        },
     };
     let bias = constant_cfa(2, 1, bias_val, CfaType::Mono);
 
@@ -141,8 +147,10 @@ fn test_calibrate_full_pipeline() {
 
     let mut light = CfaImage {
         data: Buffer2::new(2, 1, light_pixels),
-        pattern: CfaType::Mono,
-        metadata: AstroImageMetadata::default(),
+        metadata: AstroImageMetadata {
+            cfa_type: Some(CfaType::Mono),
+            ..Default::default()
+        },
     };
     masters.calibrate(&mut light);
 
@@ -182,8 +190,10 @@ fn test_calibrate_hot_pixel_correction() {
 
     let dark = CfaImage {
         data: Buffer2::new(w, h, dark_pixels),
-        pattern: pattern.clone(),
-        metadata: AstroImageMetadata::default(),
+        metadata: AstroImageMetadata {
+            cfa_type: Some(pattern.clone()),
+            ..Default::default()
+        },
     };
 
     let masters = CalibrationMasters::new(Some(dark), None, None);
@@ -198,8 +208,10 @@ fn test_calibrate_hot_pixel_correction() {
 
     let mut light = CfaImage {
         data: Buffer2::new(w, h, light_pixels),
-        pattern,
-        metadata: AstroImageMetadata::default(),
+        metadata: AstroImageMetadata {
+            cfa_type: Some(pattern),
+            ..Default::default()
+        },
     };
     masters.calibrate(&mut light);
 

@@ -7,8 +7,7 @@ use std::path::Path;
 
 use anyhow::Result;
 
-use crate::astro_image::cfa::{CfaImage, CfaType};
-use crate::raw::load_raw_cfa;
+use crate::astro_image::cfa::CfaImage;
 use crate::stacking::FrameType;
 use crate::stacking::cache::ImageCache;
 use crate::stacking::config::{Normalization, StackConfig};
@@ -49,12 +48,6 @@ fn stack_cfa_frames(
         return Ok(None);
     }
 
-    // Load the first frame to capture the CFA pattern (not stored in cache metadata)
-    // todo load only header
-    let first = load_raw_cfa(paths[0].as_ref())?;
-    let pattern = first.pattern.clone();
-    drop(first);
-
     let config = if paths.len() < 8 {
         StackConfig {
             normalization,
@@ -79,7 +72,6 @@ fn stack_cfa_frames(
 
     Ok(Some(CfaImage {
         data: pixel_data.into_l(),
-        pattern,
         metadata: cache.metadata().clone(),
     }))
 }

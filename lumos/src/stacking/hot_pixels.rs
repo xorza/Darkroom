@@ -27,6 +27,8 @@
 //!    (by the central limit theorem for order statistics).
 
 use crate::astro_image::cfa::{CfaImage, CfaType};
+use crate::common::Buffer2;
+use crate::stacking::cache::StackableImage;
 
 use rayon::prelude::*;
 
@@ -109,14 +111,15 @@ impl HotPixelMap {
             return;
         }
 
-        let width = image.data.width();
-        let height = image.data.height();
-
         for &idx in &self.indices {
-            let x = idx % width;
-            let y = idx / width;
-            image.data[idx] =
-                median_same_color_neighbors(&image.data, width, height, x, y, &image.pattern);
+            let x = idx % image.data.width();
+            let y = idx / image.data.width();
+            image.data[idx] = median_same_color_neighbors(
+                &image.data,
+                x,
+                y,
+                image.metadata().cfa_type.as_ref().unwrap(),
+            );
         }
     }
 }
@@ -170,13 +173,9 @@ fn compute_single_channel_stats(data: &[f32], sigma_threshold: f32) -> ChannelSt
 }
 
 /// Calculate median of 8-connected neighbors from raw channel data.
-fn median_of_neighbors_raw(
-    channel_data: &[f32],
-    width: usize,
-    height: usize,
-    x: usize,
-    y: usize,
-) -> f32 {
+fn median_of_neighbors_raw(pixels: &Buffer2<f32>, x: usize, y: usize) -> f32 {
+    let width = pixels.width();
+    let height = pixels.height();
     let mut neighbors: [f32; 8] = [0.0; 8];
     let mut count = 0;
 
@@ -196,15 +195,13 @@ fn median_of_neighbors_raw(
         let ny = y as i32 + dy;
 
         if nx >= 0 && nx < width as i32 && ny >= 0 && ny < height as i32 {
-            let idx = ny as usize * width + nx as usize;
-            neighbors[count] = channel_data[idx];
+            neighbors[count] = *pixels.get(nx as usize, ny as usize);
             count += 1;
         }
     }
 
     if count == 0 {
-        let idx = y * width + x;
-        return channel_data[idx];
+        return *pixels.get(x, y);
     }
 
     crate::math::median_f32_mut(&mut neighbors[..count])
@@ -216,30 +213,23 @@ fn median_of_neighbors_raw(
 /// For X-Trans, searches within a radius of 2*period.
 /// For Mono, uses standard 8-connected neighbors.
 fn median_same_color_neighbors(
-    pixels: &[f32],
-    width: usize,
-    height: usize,
+    pixels: &Buffer2<f32>,
     x: usize,
     y: usize,
     pattern: &CfaType,
 ) -> f32 {
     match pattern {
-        CfaType::Mono => median_of_neighbors_raw(pixels, width, height, x, y),
-        CfaType::Bayer(_) => bayer_same_color_median(pixels, width, height, x, y, pattern),
-        CfaType::XTrans(_) => xtrans_same_color_median(pixels, width, height, x, y, pattern),
+        CfaType::Mono => median_of_neighbors_raw(pixels, x, y),
+        CfaType::Bayer(_) => bayer_same_color_median(pixels, x, y),
+        CfaType::XTrans(_) => xtrans_same_color_median(pixels, x, y, pattern),
     }
 }
 
 /// Optimized Bayer same-color neighbor median.
 /// Same-color neighbors are at stride 2 in all directions.
-fn bayer_same_color_median(
-    pixels: &[f32],
-    width: usize,
-    height: usize,
-    x: usize,
-    y: usize,
-    _pattern: &CfaType,
-) -> f32 {
+fn bayer_same_color_median(pixels: &Buffer2<f32>, x: usize, y: usize) -> f32 {
+    let width = pixels.width();
+    let height = pixels.height();
     let offsets: [(i32, i32); 8] = [
         (-2, 0),
         (2, 0),
@@ -256,26 +246,21 @@ fn bayer_same_color_median(
         let nx = x as i32 + dx;
         let ny = y as i32 + dy;
         if nx >= 0 && ny >= 0 && nx < width as i32 && ny < height as i32 {
-            buf[count] = pixels[ny as usize * width + nx as usize];
+            buf[count] = *pixels.get(nx as usize, ny as usize);
             count += 1;
         }
     }
     if count == 0 {
-        return pixels[y * width + x];
+        return *pixels.get(x, y);
     }
     crate::math::median_f32_mut(&mut buf[..count])
 }
 
 /// X-Trans same-color neighbor median.
 /// Searches within radius of 6 (one full period) for same-color pixels.
-fn xtrans_same_color_median(
-    pixels: &[f32],
-    width: usize,
-    height: usize,
-    x: usize,
-    y: usize,
-    pattern: &CfaType,
-) -> f32 {
+fn xtrans_same_color_median(pixels: &Buffer2<f32>, x: usize, y: usize, pattern: &CfaType) -> f32 {
+    let width = pixels.width();
+    let height = pixels.height();
     let my_color = pattern.color_at(x, y);
     let mut neighbors = [0.0f32; 24];
     let mut count = 0;
@@ -295,7 +280,7 @@ fn xtrans_same_color_median(
             let nx = nx as usize;
             let ny = ny as usize;
             if pattern.color_at(nx, ny) == my_color {
-                neighbors[count] = pixels[ny * width + nx];
+                neighbors[count] = *pixels.get(nx, ny);
                 count += 1;
                 if count >= 24 {
                     break;
@@ -317,11 +302,13 @@ fn xtrans_same_color_median(
 mod tests {
     use super::*;
 
-    fn make_cfa(width: usize, height: usize, pixels: Vec<f32>, pattern: CfaType) -> CfaImage {
+    fn make_cfa(width: usize, height: usize, pixels: Vec<f32>, cfa_type: CfaType) -> CfaImage {
         CfaImage {
             data: crate::common::Buffer2::new(width, height, pixels),
-            pattern,
-            metadata: crate::astro_image::AstroImageMetadata::default(),
+            metadata: crate::astro_image::AstroImageMetadata {
+                cfa_type: Some(cfa_type),
+                ..Default::default()
+            },
         }
     }
 
@@ -414,8 +401,8 @@ mod tests {
         pixels[2] = 70.0; // (2,0)
         pixels[4 * 6 + 2] = 80.0; // (2,4)
 
-        let pattern = CfaType::Bayer(crate::raw::demosaic::CfaPattern::Rggb);
-        let result = bayer_same_color_median(&pixels, 6, 6, 2, 2, &pattern);
+        let pixels = crate::common::Buffer2::new(6, 6, pixels);
+        let result = bayer_same_color_median(&pixels, 2, 2);
 
         // Neighbors: 50, 60, 70, 80, 100 (0,2=100), 100 (4,2=100), 100 (0,4=100), 100 (4,4=100)
         // Sorted: 50, 60, 70, 80, 100, 100, 100, 100 → median of 8 = (80+100)/2 = 90
@@ -434,8 +421,8 @@ mod tests {
             999.0, 10.0, 50.0, 10.0, 10.0, 10.0, 10.0, 10.0, 60.0, 10.0, 70.0, 10.0, 10.0, 10.0,
             10.0, 10.0,
         ];
-        let pattern = CfaType::Bayer(crate::raw::demosaic::CfaPattern::Rggb);
-        let result = bayer_same_color_median(&pixels, 4, 4, 0, 0, &pattern);
+        let pixels = crate::common::Buffer2::new(4, 4, pixels);
+        let result = bayer_same_color_median(&pixels, 0, 0);
 
         // Same-color neighbors: (2,0)=50, (0,2)=60, (2,2)=70
         // Median of [50, 60, 70] = 60
