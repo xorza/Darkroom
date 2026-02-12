@@ -18,6 +18,22 @@ use super::rejection::{
 use super::{CacheConfig, FrameType};
 use crate::math;
 
+/// Per-frame, per-channel affine normalization parameters.
+///
+/// Applied as `normalized = raw * gain + offset`.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct NormParams {
+    pub gain: f32,
+    pub offset: f32,
+}
+
+impl NormParams {
+    pub const IDENTITY: NormParams = NormParams {
+        gain: 1.0,
+        offset: 0.0,
+    };
+}
+
 /// Stack multiple images into a single result.
 ///
 /// This is the main entry point for image stacking. It combines multiple frames
@@ -160,11 +176,11 @@ pub fn stack_with_progress<P: AsRef<Path> + Sync>(
 /// Formula: `gain = ref_scale / frame_scale`, `offset = ref_median - frame_median * gain`
 pub(crate) fn compute_global_norm_params(
     cache: &ImageCache<impl StackableImage>,
-) -> Vec<(f32, f32)> {
+) -> Vec<NormParams> {
     let stats = cache.compute_channel_stats();
     let channels = cache.dimensions().channels;
     let frame_count = cache.frame_count();
-    let mut params = vec![(1.0f32, 0.0f32); frame_count * channels];
+    let mut params = vec![NormParams::IDENTITY; frame_count * channels];
 
     for channel in 0..channels {
         let (ref_median, ref_mad) = stats[channel]; // frame 0
@@ -179,7 +195,7 @@ pub(crate) fn compute_global_norm_params(
             };
             let offset = ref_median - frame_median * gain;
 
-            params[frame_idx * channels + channel] = (gain, offset);
+            params[frame_idx * channels + channel] = NormParams { gain, offset };
         }
     }
 
@@ -200,11 +216,11 @@ pub(crate) fn compute_global_norm_params(
 /// Best for flat frames where exposure varies (e.g., sky flats at sunset).
 pub(crate) fn compute_multiplicative_norm_params(
     cache: &ImageCache<impl StackableImage>,
-) -> Vec<(f32, f32)> {
+) -> Vec<NormParams> {
     let stats = cache.compute_channel_stats();
     let channels = cache.dimensions().channels;
     let frame_count = cache.frame_count();
-    let mut params = vec![(1.0f32, 0.0f32); frame_count * channels];
+    let mut params = vec![NormParams::IDENTITY; frame_count * channels];
 
     for channel in 0..channels {
         let (ref_median, _) = stats[channel]; // frame 0
@@ -218,7 +234,7 @@ pub(crate) fn compute_multiplicative_norm_params(
                 1.0
             };
 
-            params[frame_idx * channels + channel] = (gain, 0.0);
+            params[frame_idx * channels + channel] = NormParams { gain, offset: 0.0 };
         }
     }
 
@@ -238,7 +254,7 @@ pub(crate) fn dispatch_stacking(
     cache: &ImageCache<impl StackableImage>,
     config: &StackConfig,
     frame_count: usize,
-    norm_params: Option<&[(f32, f32)]>,
+    norm_params: Option<&[NormParams]>,
 ) -> crate::astro_image::PixelData {
     match (config.method, &config.rejection) {
         (CombineMethod::Mean, Rejection::None) => {
@@ -857,13 +873,17 @@ mod tests {
 
         // 3 frames * 1 channel = 3 entries
         assert_eq!(params.len(), 3);
-        for (gain, offset) in &params {
+        for np in &params {
             assert!(
-                (*gain - 1.0).abs() < 1e-5,
+                (np.gain - 1.0).abs() < 1e-5,
                 "Gain should be ~1.0, got {}",
-                gain
+                np.gain
             );
-            assert!(offset.abs() < 1e-5, "Offset should be ~0.0, got {}", offset);
+            assert!(
+                np.offset.abs() < 1e-5,
+                "Offset should be ~0.0, got {}",
+                np.offset
+            );
         }
     }
 
@@ -882,17 +902,19 @@ mod tests {
         let params = compute_global_norm_params(&cache);
 
         // Frame 0 is reference -> (gain=1, offset=0)
-        let (g0, o0) = params[0];
-        assert!((g0 - 1.0).abs() < 1e-5);
-        assert!(o0.abs() < 1e-5);
+        assert!((params[0].gain - 1.0).abs() < 1e-5);
+        assert!(params[0].offset.abs() < 1e-5);
 
         // Frame 1 should have gain ~1.0 (same scale), offset ~-100.0
-        let (g1, o1) = params[1];
-        assert!((g1 - 1.0).abs() < 0.1, "Gain should be ~1.0, got {}", g1);
         assert!(
-            (o1 - (-100.0)).abs() < 1.0,
+            (params[1].gain - 1.0).abs() < 0.1,
+            "Gain should be ~1.0, got {}",
+            params[1].gain
+        );
+        assert!(
+            (params[1].offset - (-100.0)).abs() < 1.0,
             "Offset should be ~-100.0, got {}",
-            o1
+            params[1].offset
         );
     }
 
@@ -911,11 +933,10 @@ mod tests {
         let params = compute_global_norm_params(&cache);
 
         // Frame 1 has ~2x the spread of frame 0, so gain should be ~0.5
-        let (g1, _o1) = params[1];
         assert!(
-            (g1 - 0.5).abs() < 0.15,
+            (params[1].gain - 0.5).abs() < 0.15,
             "Gain should be ~0.5 (narrowing wider frame), got {}",
-            g1
+            params[1].gain
         );
     }
 
@@ -1066,13 +1087,17 @@ mod tests {
         let params = compute_multiplicative_norm_params(&cache);
 
         assert_eq!(params.len(), 3);
-        for (gain, offset) in &params {
+        for np in &params {
             assert!(
-                (*gain - 1.0).abs() < 1e-5,
+                (np.gain - 1.0).abs() < 1e-5,
                 "Gain should be ~1.0, got {}",
-                gain
+                np.gain
             );
-            assert!(offset.abs() < 1e-5, "Offset should be 0.0, got {}", offset);
+            assert!(
+                np.offset.abs() < 1e-5,
+                "Offset should be 0.0, got {}",
+                np.offset
+            );
         }
     }
 
@@ -1091,14 +1116,20 @@ mod tests {
         let params = compute_multiplicative_norm_params(&cache);
 
         // Frame 0: reference -> gain=1, offset=0
-        let (g0, o0) = params[0];
-        assert!((g0 - 1.0).abs() < 1e-5);
-        assert!(o0.abs() < 1e-5);
+        assert!((params[0].gain - 1.0).abs() < 1e-5);
+        assert!(params[0].offset.abs() < 1e-5);
 
         // Frame 1: gain = 100/200 = 0.5, offset = 0
-        let (g1, o1) = params[1];
-        assert!((g1 - 0.5).abs() < 1e-5, "Gain should be 0.5, got {}", g1);
-        assert!(o1.abs() < 1e-5, "Offset should be 0.0, got {}", o1);
+        assert!(
+            (params[1].gain - 0.5).abs() < 1e-5,
+            "Gain should be 0.5, got {}",
+            params[1].gain
+        );
+        assert!(
+            params[1].offset.abs() < 1e-5,
+            "Offset should be 0.0, got {}",
+            params[1].offset
+        );
     }
 
     #[test]
@@ -1117,11 +1148,11 @@ mod tests {
         let params = compute_multiplicative_norm_params(&cache);
 
         // All offsets must be exactly 0
-        for &(_, offset) in &params {
+        for np in &params {
             assert!(
-                offset.abs() < f32::EPSILON,
+                np.offset.abs() < f32::EPSILON,
                 "Multiplicative offset must be 0, got {}",
-                offset
+                np.offset
             );
         }
     }

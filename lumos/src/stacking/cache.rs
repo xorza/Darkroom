@@ -29,6 +29,7 @@ use crate::stacking::cache_config::{
 };
 use crate::stacking::error::Error;
 use crate::stacking::progress::{ProgressCallback, StackingStage, report_progress};
+use crate::stacking::stack::NormParams;
 
 /// Trait for images that can be stacked via `ImageCache`.
 ///
@@ -296,11 +297,10 @@ impl<I: StackableImage> ImageCache<I> {
     /// Returns `PixelData` with the combined result.
     ///
     /// Optional `norm_params` apply per-frame affine normalization before combining.
-    /// Indexed as `[frame * channels + channel]` with `(gain, offset)` pairs:
-    /// `normalized = raw * gain + offset`.
+    /// Indexed as `[frame * channels + channel]`.
     ///
     /// Processing is done per-channel, parallelized per-row with rayon.
-    pub fn process_chunked<F>(&self, norm_params: Option<&[(f32, f32)]>, combine: F) -> PixelData
+    pub fn process_chunked<F>(&self, norm_params: Option<&[NormParams]>, combine: F) -> PixelData
     where
         F: Fn(&mut [f32]) -> f32 + Sync,
     {
@@ -315,8 +315,8 @@ impl<I: StackableImage> ImageCache<I> {
                         let pixel_idx = row_offset + pixel_in_row;
                         if let Some(norms) = norm_params {
                             for (frame_idx, chunk) in chunks.iter().enumerate() {
-                                let (gain, offset) = norms[frame_idx * channels + channel];
-                                values[frame_idx] = chunk[pixel_idx] * gain + offset;
+                                let np = norms[frame_idx * channels + channel];
+                                values[frame_idx] = chunk[pixel_idx] * np.gain + np.offset;
                             }
                         } else {
                             for (frame_idx, chunk) in chunks.iter().enumerate() {
@@ -338,7 +338,7 @@ impl<I: StackableImage> ImageCache<I> {
     pub fn process_chunked_weighted<F>(
         &self,
         weights: &[f32],
-        norm_params: Option<&[(f32, f32)]>,
+        norm_params: Option<&[NormParams]>,
         combine: F,
     ) -> PixelData
     where
@@ -362,8 +362,8 @@ impl<I: StackableImage> ImageCache<I> {
                         let pixel_idx = row_offset + pixel_in_row;
                         if let Some(norms) = norm_params {
                             for (frame_idx, chunk) in chunks.iter().enumerate() {
-                                let (gain, offset) = norms[frame_idx * channels + channel];
-                                values[frame_idx] = chunk[pixel_idx] * gain + offset;
+                                let np = norms[frame_idx * channels + channel];
+                                values[frame_idx] = chunk[pixel_idx] * np.gain + np.offset;
                             }
                         } else {
                             for (frame_idx, chunk) in chunks.iter().enumerate() {
