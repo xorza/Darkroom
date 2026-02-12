@@ -659,17 +659,22 @@ impl Rejection {
 
             Rejection::Percentile(config) if weights.is_some() => {
                 let w = weights.unwrap();
-                scratch.pairs.clear();
-                scratch
-                    .pairs
-                    .extend(values.iter().zip(w.iter()).map(|(&v, &wt)| (v, wt)));
-                scratch
-                    .pairs
-                    .sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+                let n = values.len();
 
-                let range = config.surviving_range(scratch.pairs.len());
-                let remaining = &scratch.pairs[range];
-                return math::weighted_mean_pairs_f32(remaining);
+                // Sort values with index co-array for weight lookup
+                reset_indices(&mut scratch.indices, n);
+                // Insertion sort — typical pixel stacks are small (< 50 frames)
+                for i in 1..n {
+                    let mut j = i;
+                    while j > 0 && values[j - 1] > values[j] {
+                        values.swap(j - 1, j);
+                        scratch.indices.swap(j - 1, j);
+                        j -= 1;
+                    }
+                }
+
+                let range = config.surviving_range(n);
+                return weighted_mean_indexed(&values[range.clone()], w, &scratch.indices[range]);
             }
 
             _ => {}
@@ -1093,7 +1098,6 @@ mod tests {
     fn scratch() -> ScratchBuffers {
         ScratchBuffers {
             indices: vec![],
-            pairs: vec![],
             floats_a: vec![],
             floats_b: vec![],
         }

@@ -78,24 +78,6 @@ pub fn weighted_mean_f32(values: &[f32], weights: &[f32]) -> f32 {
     }
 }
 
-/// Compute weighted mean from `(value, weight)` pairs.
-pub fn weighted_mean_pairs_f32(pairs: &[(f32, f32)]) -> f32 {
-    if pairs.is_empty() {
-        return 0.0;
-    }
-    let mut sum = 0.0f32;
-    let mut weight_sum = 0.0f32;
-    for &(v, w) in pairs {
-        sum += v * w;
-        weight_sum += w;
-    }
-    if weight_sum > f32::EPSILON {
-        sum / weight_sum
-    } else {
-        pairs.iter().map(|(v, _)| v).sum::<f32>() / pairs.len() as f32
-    }
-}
-
 #[cfg(test)]
 mod tests;
 

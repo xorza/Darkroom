@@ -101,7 +101,7 @@ Per-frame, per-channel median and MAD (robust scale) are computed from the full 
 
 - **MAD for scale estimation**: All sigma clipping (symmetric, asymmetric, winsorized) uses MAD (Median Absolute Deviation) instead of stddev. MAD is robust to the outliers being rejected — stddev is inflated by them, leading to under-rejection. Matches Siril and PixInsight behavior.
 - **Asymmetric sigma clipping**: Separate algorithm from linear fit clipping. Uses median as center with independent low/high thresholds. Default: sigma_low=4.0, sigma_high=3.0 (PixInsight convention).
-- **Weighted rejection**: Percentile clipping sorts (value, weight) pairs together. Winsorized applies winsorization first, then weighted mean. Other rejection methods reject from unweighted statistics, then apply weighted mean to survivors.
+- **Weighted rejection**: Percentile clipping sorts values with an index co-array for weight lookup, then computes weighted mean over the surviving range. Winsorized applies winsorization first, then weighted mean. Other rejection methods reject from unweighted statistics, then apply weighted mean to survivors via index mapping.
 - **No local normalization**: Tile-based PixInsight-style local normalization was evaluated and removed — niche benefit for most workflows, significant complexity.
 - **No auto frame weighting**: Evaluated and removed — marginal benefit vs. manual weights or equal weighting with good rejection.
 
