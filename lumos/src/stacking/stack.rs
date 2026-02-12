@@ -7,11 +7,11 @@ use std::path::Path;
 
 use crate::AstroImage;
 
-use super::cache::{ImageCache, ScratchBuffers, StackableImage};
-use super::config::{CombineMethod, Normalization, Rejection, StackConfig};
+use super::FrameType;
+use super::cache::{ImageCache, StackableImage};
+use super::config::{CombineMethod, Normalization, StackConfig};
 use super::error::Error;
 use super::progress::ProgressCallback;
-use super::{CacheConfig, FrameType};
 use crate::math;
 
 /// Per-frame, per-channel affine normalization parameters.
@@ -168,7 +168,8 @@ fn compute_norm_params(
     for channel in 0..channels {
         let (ref_median, ref_mad) = stats[channel]; // frame 0
 
-        for frame_idx in 0..frame_count {
+        // Frame 0 is the reference — already initialized to IDENTITY
+        for frame_idx in 1..frame_count {
             let (frame_median, frame_mad) = stats[frame_idx * channels + channel];
 
             let np = match normalization {
@@ -253,6 +254,7 @@ fn dispatch_stacking(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::stacking::config::Rejection;
     use crate::{
         astro_image::{AstroImage, ImageDimensions},
         stacking::cache::tests::make_test_cache,
