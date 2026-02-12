@@ -22,7 +22,7 @@ stack(paths, frame_type, config) -> Result<AstroImage, Error>
 stack_with_progress(paths, frame_type, config, progress) -> Result<AstroImage, Error>
 
 StackConfig        // { method, rejection, weights, normalization, cache }
-CombineMethod      // Mean | Median | WeightedMean
+CombineMethod      // Mean | Median
 Rejection          // None | SigmaClip | SigmaClipAsymmetric | Winsorized | LinearFit | Percentile | Gesd
 Normalization      // None | Global
 FrameType          // Dark | Flat | Bias | Light

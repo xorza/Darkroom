@@ -8,13 +8,11 @@ use crate::stacking::CacheConfig;
 /// Method for combining pixel values across frames.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum CombineMethod {
-    /// Simple average (no implicit rejection, fastest).
+    /// Mean value. If weights are provided, computes weighted mean.
     #[default]
     Mean,
     /// Median value (implicit outlier rejection).
     Median,
-    /// Weighted mean using per-frame weights.
-    WeightedMean,
 }
 
 /// Pixel rejection algorithm applied before combining.
@@ -232,7 +230,6 @@ impl StackConfig {
     /// Preset: weighted mean with explicit weights.
     pub fn weighted(weights: Vec<f32>) -> Self {
         Self {
-            method: CombineMethod::WeightedMean,
             weights,
             ..Default::default()
         }
@@ -329,7 +326,7 @@ impl StackConfig {
             }
         }
 
-        if self.method == CombineMethod::WeightedMean && !self.weights.is_empty() {
+        if !self.weights.is_empty() {
             assert!(
                 self.weights.iter().all(|&w| w >= 0.0),
                 "Weights must be non-negative"
@@ -385,7 +382,7 @@ mod tests {
     #[test]
     fn test_weighted_preset() {
         let config = StackConfig::weighted(vec![1.0, 2.0, 3.0]);
-        assert_eq!(config.method, CombineMethod::WeightedMean);
+        assert_eq!(config.method, CombineMethod::Mean);
         assert_eq!(config.weights.len(), 3);
     }
 

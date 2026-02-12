@@ -264,21 +264,10 @@ fn dispatch_stacking(
     config: &StackConfig,
     norm_params: Option<&[NormParams]>,
 ) -> crate::astro_image::PixelData {
-    let weights = match config.method {
-        CombineMethod::WeightedMean => Some(config.normalized_weights(cache.frame_count())),
-        _ => None,
-    };
-    let weights_ref = weights.as_deref();
     let rejection = config.rejection;
 
-    match (config.method, &config.rejection) {
-        (CombineMethod::Median, Rejection::None) => {
-            cache.process_chunked(None, norm_params, |values, _, _| {
-                math::median_f32_mut(values)
-            })
-        }
-
-        (CombineMethod::Median, _) => {
+    match config.method {
+        CombineMethod::Median => {
             cache.process_chunked(None, norm_params, move |values, _, indices| {
                 reset_indices(indices, values.len());
                 apply_rejection(values, None, indices, &rejection);
@@ -286,18 +275,19 @@ fn dispatch_stacking(
             })
         }
 
-        (_, Rejection::None) => {
-            cache.process_chunked(weights_ref, norm_params, |values, w, indices| {
+        CombineMethod::Mean => {
+            let weights = if config.weights.is_empty() {
+                None
+            } else {
+                Some(config.normalized_weights(cache.frame_count()))
+            };
+            let weights_ref = weights.as_deref();
+
+            cache.process_chunked(weights_ref, norm_params, move |values, w, indices| {
                 reset_indices(indices, values.len());
-                compute_mean(values, w, indices)
+                apply_rejection(values, w, indices, &rejection).value
             })
         }
-
-        (_, _) => cache.process_chunked(weights_ref, norm_params, move |values, w, indices| {
-            reset_indices(indices, values.len());
-            let result = apply_rejection(values, w, indices, &rejection);
-            result.value
-        }),
     }
 }
 
