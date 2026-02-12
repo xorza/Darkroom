@@ -165,14 +165,6 @@ impl AstroImage {
         }
     }
 
-    /// Load all astronomical images from a directory.
-    pub fn load_from_directory<P: AsRef<Path>>(dir: P) -> Vec<Self> {
-        common::file_utils::astro_image_files(dir.as_ref())
-            .par_iter()
-            .map(|path| Self::from_file(path).expect("Failed to load image"))
-            .collect()
-    }
-
     /// Create from dimensions and interleaved pixel data (RGBRGBRGB...).
     pub fn from_pixels(dimensions: ImageDimensions, pixels: Vec<f32>) -> Self {
         assert_eq!(
@@ -451,6 +443,31 @@ impl AstroImage {
                 interleaved
             }
         }
+    }
+}
+
+// ============================================================================
+// StackableImage implementation
+// ============================================================================
+
+impl crate::stacking::cache::StackableImage for AstroImage {
+    fn dimensions(&self) -> ImageDimensions {
+        self.dimensions()
+    }
+
+    fn channel(&self, c: usize) -> &[f32] {
+        AstroImage::channel(self, c)
+    }
+
+    fn metadata(&self) -> &AstroImageMetadata {
+        &self.metadata
+    }
+
+    fn load(path: &Path) -> Result<Self, crate::stacking::Error> {
+        AstroImage::from_file(path).map_err(|e| crate::stacking::Error::ImageLoad {
+            path: path.to_path_buf(),
+            source: std::io::Error::other(e.to_string()),
+        })
     }
 }
 

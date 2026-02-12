@@ -69,7 +69,11 @@ pub fn load_calibration_images(subdir: &str) -> Option<Vec<AstroImage>> {
         return None;
     }
 
-    Some(AstroImage::load_from_directory(&dir))
+    let images = common::file_utils::astro_image_files(&dir)
+        .iter()
+        .map(|path| AstroImage::from_file(path).expect("Failed to load image"))
+        .collect();
+    Some(images)
 }
 
 /// Returns the first RAW file from the Lights subdirectory.

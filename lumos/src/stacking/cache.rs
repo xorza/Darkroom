@@ -1,8 +1,10 @@
 //! Image cache for stacking operations.
 //!
 //! Supports two modes:
-//! - In-memory: When all images fit in available RAM (75%), keeps AstroImages directly
+//! - In-memory: When all images fit in available RAM (75%), keeps images directly
 //! - Disk-based: Uses memory-mapped binary files for larger datasets
+//!
+//! Generic over any `StackableImage` type (e.g., `AstroImage`, `CfaImage`).
 //!
 //! Cache format (disk mode):
 //! - Each image frame has one file per channel (planar storage)
@@ -20,13 +22,24 @@ use common::parallel::try_par_map_limited;
 use memmap2::Mmap;
 use rayon::prelude::*;
 
-use crate::astro_image::{AstroImage, AstroImageMetadata, ImageDimensions};
+use crate::astro_image::{AstroImageMetadata, ImageDimensions};
 use crate::stacking::FrameType;
 use crate::stacking::cache_config::{
     CacheConfig, MEMORY_PERCENT, compute_optimal_chunk_rows_with_memory,
 };
 use crate::stacking::error::Error;
 use crate::stacking::progress::{ProgressCallback, StackingStage, report_progress};
+
+/// Trait for images that can be stacked via `ImageCache`.
+///
+/// Implementations must provide planar channel access as `&[f32]` slices
+/// and a file-loading constructor.
+pub(crate) trait StackableImage: Send + Sync + std::fmt::Debug + Sized {
+    fn dimensions(&self) -> ImageDimensions;
+    fn channel(&self, c: usize) -> &[f32];
+    fn metadata(&self) -> &AstroImageMetadata;
+    fn load(path: &Path) -> Result<Self, Error>;
+}
 
 /// Generate a cache filename from the hash of the source path.
 fn cache_filename_for_path(path: &Path) -> String {
@@ -46,7 +59,7 @@ struct CachedChannel {
 }
 
 /// Cached frame data for disk-backed storage.
-/// Contains 1 channel (grayscale) or 3 channels (RGB).
+/// Contains 1 or more channels.
 #[derive(Debug)]
 struct CachedFrame {
     channels: Vec<CachedChannel>,
@@ -54,9 +67,9 @@ struct CachedFrame {
 
 /// Storage mode for image data.
 #[derive(Debug)]
-enum Storage {
-    /// All images fit in memory - stores AstroImage directly for planar channel access.
-    InMemory(Vec<AstroImage>),
+enum Storage<I> {
+    /// All images fit in memory - stores images directly for planar channel access.
+    InMemory(Vec<I>),
     /// Images stored on disk with memory-mapped access.
     /// Each frame has one file per channel for efficient planar access.
     DiskBacked {
@@ -67,8 +80,8 @@ enum Storage {
 
 /// Image cache that automatically chooses between in-memory and disk-based storage.
 #[derive(Debug)]
-pub struct ImageCache {
-    storage: Storage,
+pub(crate) struct ImageCache<I> {
+    storage: Storage<I>,
     /// Image dimensions (same for all frames).
     dimensions: ImageDimensions,
     /// Metadata from first frame.
@@ -79,7 +92,7 @@ pub struct ImageCache {
     progress: ProgressCallback,
 }
 
-impl ImageCache {
+impl<I: StackableImage> ImageCache<I> {
     /// Check if images would fit in memory given available memory.
     ///
     /// Returns true if total image size fits within usable memory (75% of available).
@@ -116,12 +129,9 @@ impl ImageCache {
 
         // Load first image to get dimensions
         let first_path = paths[0].as_ref();
-        let first_image = AstroImage::from_file(first_path).map_err(|e| Error::ImageLoad {
-            path: first_path.to_path_buf(),
-            source: io::Error::other(e.to_string()),
-        })?;
+        let first_image = I::load(first_path)?;
         let dimensions = first_image.dimensions();
-        let metadata = first_image.metadata.clone();
+        let metadata = first_image.metadata().clone();
 
         // Check available memory (from config or system)
         let available_memory = config.get_available_memory();
@@ -164,8 +174,8 @@ impl ImageCache {
         progress: &ProgressCallback,
         frame_type: FrameType,
         dimensions: ImageDimensions,
-        first_image: AstroImage,
-    ) -> Result<Storage, Error> {
+        first_image: I,
+    ) -> Result<Storage<I>, Error> {
         report_progress(progress, 1, paths.len(), StackingStage::Loading);
 
         // Load remaining images in parallel, at most 3 at a time to cap memory/IO pressure
@@ -176,10 +186,7 @@ impl ImageCache {
             .collect();
         let remaining = try_par_map_limited(&indexed_paths, 3, |&(idx, ref path)| {
             let path_ref = path.as_ref();
-            let image = AstroImage::from_file(path_ref).map_err(|e| Error::ImageLoad {
-                path: path_ref.to_path_buf(),
-                source: io::Error::other(e.to_string()),
-            })?;
+            let image = I::load(path_ref)?;
             if image.dimensions() != dimensions {
                 return Err(Error::DimensionMismatch {
                     frame_type,
@@ -191,7 +198,7 @@ impl ImageCache {
             Ok(image)
         })?;
 
-        // Build final vector of AstroImages
+        // Build final vector
         let mut images = Vec::with_capacity(paths.len());
         images.push(first_image);
         images.extend(remaining);
@@ -211,8 +218,8 @@ impl ImageCache {
         progress: &ProgressCallback,
         frame_type: FrameType,
         dimensions: ImageDimensions,
-        first_image: AstroImage,
-    ) -> Result<Storage, Error> {
+        first_image: I,
+    ) -> Result<Storage<I>, Error> {
         let cache_dir = &config.cache_dir;
         std::fs::create_dir_all(cache_dir).map_err(|e| Error::CreateCacheDir {
             path: cache_dir.to_path_buf(),
@@ -236,7 +243,7 @@ impl ImageCache {
         let remaining = try_par_map_limited(&indexed_paths, 3, |&(idx, ref path)| {
             let path_ref = path.as_ref();
             let base_filename = cache_filename_for_path(path_ref);
-            load_and_cache_frame(
+            load_and_cache_frame::<I>(
                 cache_dir,
                 &base_filename,
                 path_ref,
@@ -271,6 +278,11 @@ impl ImageCache {
         self.dimensions
     }
 
+    /// Get metadata from the first frame.
+    pub fn metadata(&self) -> &AstroImageMetadata {
+        &self.metadata
+    }
+
     /// Get number of cached frames.
     pub fn frame_count(&self) -> usize {
         match &self.storage {
@@ -279,30 +291,20 @@ impl ImageCache {
         }
     }
 
-    /// Remove all cache files (only applies to disk-backed storage).
-    pub fn cleanup(&self) {
-        if self.config.keep_cache {
-            return;
-        }
-
-        if let Storage::DiskBacked { frames, cache_dir } = &self.storage {
-            for frame in frames {
-                for channel in &frame.channels {
-                    let _ = std::fs::remove_file(&channel.path);
-                }
-            }
-            let _ = std::fs::remove_dir(cache_dir);
-        }
-    }
-
     /// Process images in horizontal chunks, applying a combine function to each pixel.
+    ///
+    /// Returns planar channel data as `Vec<Vec<f32>>`.
     ///
     /// Optional `norm_params` apply per-frame affine normalization before combining.
     /// Indexed as `[frame * channels + channel]` with `(gain, offset)` pairs:
     /// `normalized = raw * gain + offset`.
     ///
     /// Processing is done per-channel, parallelized per-row with rayon.
-    pub fn process_chunked<F>(&self, norm_params: Option<&[(f32, f32)]>, combine: F) -> AstroImage
+    pub fn process_chunked<F>(
+        &self,
+        norm_params: Option<&[(f32, f32)]>,
+        combine: F,
+    ) -> Vec<Vec<f32>>
     where
         F: Fn(&mut [f32]) -> f32 + Sync,
     {
@@ -334,13 +336,15 @@ impl ImageCache {
 
     /// Process images in horizontal chunks with per-frame weights.
     ///
+    /// Returns planar channel data as `Vec<Vec<f32>>`.
+    ///
     /// Optional `norm_params` apply per-frame affine normalization before combining.
     pub fn process_chunked_weighted<F>(
         &self,
         weights: &[f32],
         norm_params: Option<&[(f32, f32)]>,
         combine: F,
-    ) -> AstroImage
+    ) -> Vec<Vec<f32>>
     where
         F: Fn(&mut [f32], &[f32]) -> f32 + Sync,
     {
@@ -379,7 +383,8 @@ impl ImageCache {
 
     /// Internal chunk processing - handles chunking logic, calls processor for each chunk.
     /// The closure receives `(output_slice, chunks, frame_count, width, channel)`.
-    fn process_chunks_internal<F>(&self, mut process_chunk: F) -> AstroImage
+    /// Returns planar channel data as `Vec<Vec<f32>>`.
+    fn process_chunks_internal<F>(&self, mut process_chunk: F) -> Vec<Vec<f32>>
     where
         F: FnMut(&mut [f32], &[&[f32]], usize, usize, usize),
     {
@@ -434,9 +439,7 @@ impl ImageCache {
             }
         }
 
-        let mut result = AstroImage::from_planar_channels(dims, output_channels);
-        result.metadata = self.metadata.clone();
-        result
+        output_channels
     }
 
     /// Compute per-frame, per-channel median and MAD (robust scale).
@@ -490,7 +493,25 @@ impl ImageCache {
     }
 }
 
-impl Drop for ImageCache {
+impl<I> ImageCache<I> {
+    /// Remove all cache files (only applies to disk-backed storage).
+    pub fn cleanup(&self) {
+        if self.config.keep_cache {
+            return;
+        }
+
+        if let Storage::DiskBacked { frames, cache_dir } = &self.storage {
+            for frame in frames {
+                for channel in &frame.channels {
+                    let _ = std::fs::remove_file(&channel.path);
+                }
+            }
+            let _ = std::fs::remove_dir(cache_dir);
+        }
+    }
+}
+
+impl<I> Drop for ImageCache<I> {
     fn drop(&mut self) {
         self.cleanup();
     }
@@ -550,7 +571,7 @@ fn write_channel_cache_file(path: &Path, channel_data: &[f32]) -> Result<(), Err
 
 /// Load an image and cache it, or reuse existing cache files if valid.
 /// Returns the CachedFrame with memory-mapped channel data.
-fn load_and_cache_frame(
+fn load_and_cache_frame<I: StackableImage>(
     cache_dir: &Path,
     base_filename: &str,
     source_path: &Path,
@@ -590,20 +611,12 @@ fn load_and_cache_frame(
             source = %source_path.display(),
             "Reusing existing cache files"
         );
-        assert!(
-            cached_channels.len() == 1 || cached_channels.len() == 3,
-            "CachedFrame must have 1 (grayscale) or 3 (RGB) channels, got {}",
-            cached_channels.len()
-        );
         Ok(CachedFrame {
             channels: cached_channels,
         })
     } else {
         // Load image and write to cache
-        let image = AstroImage::from_file(source_path).map_err(|e| Error::ImageLoad {
-            path: source_path.to_path_buf(),
-            source: io::Error::other(e.to_string()),
-        })?;
+        let image = I::load(source_path)?;
 
         if image.dimensions() != dimensions {
             return Err(Error::DimensionMismatch {
@@ -622,15 +635,10 @@ fn load_and_cache_frame(
 fn cache_image_channels(
     cache_dir: &Path,
     base_filename: &str,
-    image: &AstroImage,
+    image: &impl StackableImage,
     dimensions: ImageDimensions,
 ) -> Result<CachedFrame, Error> {
     let channels = dimensions.channels;
-    assert!(
-        channels == 1 || channels == 3,
-        "Image must have 1 (grayscale) or 3 (RGB) channels, got {}",
-        channels
-    );
 
     let mut cached_channels = Vec::with_capacity(channels);
 
@@ -666,11 +674,11 @@ fn cache_image_channels(
     })
 }
 
-/// Create an in-memory ImageCache from loaded images (test helper).
+/// Create an in-memory ImageCache from loaded images (test/internal helper).
 #[cfg(test)]
-pub(crate) fn make_test_cache(images: Vec<AstroImage>) -> ImageCache {
+pub(crate) fn make_test_cache<I: StackableImage>(images: Vec<I>) -> ImageCache<I> {
     let dimensions = images[0].dimensions();
-    let metadata = images[0].metadata.clone();
+    let metadata = images[0].metadata().clone();
     ImageCache {
         storage: Storage::InMemory(images),
         dimensions,
@@ -683,20 +691,21 @@ pub(crate) fn make_test_cache(images: Vec<AstroImage>) -> ImageCache {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::astro_image::AstroImage;
 
     // ========== Storage Type Selection Tests ==========
 
     #[test]
     fn test_fits_in_memory() {
         // Test basic fit: 10 images of 1000x1000x3 = 120MB, 1GB available (750MB usable)
-        assert!(ImageCache::fits_in_memory(
+        assert!(ImageCache::<AstroImage>::fits_in_memory(
             1000 * 1000 * 3,
             10,
             1024 * 1024 * 1024
         ));
 
         // Test doesn't fit: 100 images of 6000x4000x3 = 28.8GB, 16GB available (12GB usable)
-        assert!(!ImageCache::fits_in_memory(
+        assert!(!ImageCache::<AstroImage>::fits_in_memory(
             6000 * 4000 * 3,
             100,
             16 * 1024 * 1024 * 1024
@@ -707,12 +716,12 @@ mod tests {
         let frame_count = 10;
         let bytes_needed = (pixel_count * frame_count * 4) as u64;
         let available_at_boundary = (bytes_needed * 100).div_ceil(75);
-        assert!(ImageCache::fits_in_memory(
+        assert!(ImageCache::<AstroImage>::fits_in_memory(
             pixel_count,
             frame_count,
             available_at_boundary
         ));
-        assert!(!ImageCache::fits_in_memory(
+        assert!(!ImageCache::<AstroImage>::fits_in_memory(
             pixel_count,
             frame_count,
             available_at_boundary - 2
@@ -720,8 +729,16 @@ mod tests {
 
         // Test grayscale vs RGB with same memory
         let available = 4 * 1024 * 1024 * 1024u64; // 4GB (3GB usable)
-        assert!(ImageCache::fits_in_memory(6000 * 4000, 20, available)); // Grayscale: 1.92GB
-        assert!(!ImageCache::fits_in_memory(6000 * 4000 * 3, 20, available)); // RGB: 5.76GB
+        assert!(ImageCache::<AstroImage>::fits_in_memory(
+            6000 * 4000,
+            20,
+            available
+        )); // Grayscale: 1.92GB
+        assert!(!ImageCache::<AstroImage>::fits_in_memory(
+            6000 * 4000 * 3,
+            20,
+            available
+        )); // RGB: 5.76GB
     }
 
     // ========== Cache File Tests ==========
@@ -807,7 +824,7 @@ mod tests {
         let config = CacheConfig::default();
 
         // Empty paths
-        let result = ImageCache::from_paths(
+        let result = ImageCache::<AstroImage>::from_paths(
             &Vec::<PathBuf>::new(),
             &config,
             FrameType::Dark,
@@ -816,7 +833,7 @@ mod tests {
         assert!(matches!(result.unwrap_err(), Error::NoPaths));
 
         // Nonexistent file
-        let result = ImageCache::from_paths(
+        let result = ImageCache::<AstroImage>::from_paths(
             &[PathBuf::from("/nonexistent/path/image.fits")],
             &config,
             FrameType::Dark,
@@ -837,24 +854,17 @@ mod tests {
             AstroImage::from_pixels(dims, vec![2.0; 16]),
         ];
 
-        let cache = ImageCache {
-            storage: Storage::InMemory(images),
-            dimensions: dims,
-            metadata: AstroImageMetadata::default(),
-            config: CacheConfig::default(),
-            progress: ProgressCallback::default(),
-        };
+        let cache = make_test_cache(images);
 
         // Median of [1, 3, 2] = 2
-        let result = cache.process_chunked(None, |values| {
+        let channels = cache.process_chunked(None, |values| {
             values.sort_by(|a, b| a.partial_cmp(b).unwrap());
             values[values.len() / 2]
         });
 
-        assert_eq!(result.width(), 4);
-        assert_eq!(result.height(), 4);
-        assert_eq!(result.channels(), 1);
-        for &pixel in result.channel(0) {
+        assert_eq!(channels.len(), 1);
+        assert_eq!(channels[0].len(), 16);
+        for &pixel in &channels[0] {
             assert!((pixel - 2.0).abs() < f32::EPSILON);
         }
     }
@@ -873,27 +883,21 @@ mod tests {
             AstroImage::from_pixels(dims, pixels2),
         ];
 
-        let cache = ImageCache {
-            storage: Storage::InMemory(images),
-            dimensions: dims,
-            metadata: AstroImageMetadata::default(),
-            config: CacheConfig::default(),
-            progress: ProgressCallback::default(),
-        };
+        let cache = make_test_cache(images);
 
         // Mean: R=(1+5)/2=3, G=(2+6)/2=4, B=(3+7)/2=5
-        let result = cache.process_chunked(None, |values| {
+        let channels = cache.process_chunked(None, |values| {
             values.iter().sum::<f32>() / values.len() as f32
         });
 
-        assert_eq!(result.channels(), 3);
-        for &pixel in result.channel(0) {
+        assert_eq!(channels.len(), 3);
+        for &pixel in &channels[0] {
             assert!((pixel - 3.0).abs() < f32::EPSILON, "R channel");
         }
-        for &pixel in result.channel(1) {
+        for &pixel in &channels[1] {
             assert!((pixel - 4.0).abs() < f32::EPSILON, "G channel");
         }
-        for &pixel in result.channel(2) {
+        for &pixel in &channels[2] {
             assert!((pixel - 5.0).abs() < f32::EPSILON, "B channel");
         }
     }
@@ -906,23 +910,17 @@ mod tests {
             AstroImage::from_pixels(dims, vec![20.0; 4]),
         ];
 
-        let cache = ImageCache {
-            storage: Storage::InMemory(images),
-            dimensions: dims,
-            metadata: AstroImageMetadata::default(),
-            config: CacheConfig::default(),
-            progress: ProgressCallback::default(),
-        };
+        let cache = make_test_cache(images);
 
         // Weighted mean with weights [1, 3]: (10*1 + 20*3) / (1+3) = 70/4 = 17.5
         let weights = vec![1.0, 3.0];
-        let result = cache.process_chunked_weighted(&weights, None, |values, w| {
+        let channels = cache.process_chunked_weighted(&weights, None, |values, w| {
             let sum: f32 = values.iter().zip(w.iter()).map(|(v, wt)| v * wt).sum();
             let weight_sum: f32 = w.iter().sum();
             sum / weight_sum
         });
 
-        for &pixel in result.channel(0) {
+        for &pixel in &channels[0] {
             assert!((pixel - 17.5).abs() < f32::EPSILON);
         }
     }
@@ -936,13 +934,7 @@ mod tests {
             AstroImage::from_pixels(dims, vec![3.0; 4]),
         ];
 
-        let cache = ImageCache {
-            storage: Storage::InMemory(images),
-            dimensions: dims,
-            metadata: AstroImageMetadata::default(),
-            config: CacheConfig::default(),
-            progress: ProgressCallback::default(),
-        };
+        let cache = make_test_cache(images);
 
         assert_eq!(cache.frame_count(), 3);
     }
@@ -976,7 +968,7 @@ mod tests {
             ..Default::default()
         };
 
-        let cache = ImageCache {
+        let cache: ImageCache<AstroImage> = ImageCache {
             storage: Storage::DiskBacked {
                 frames: vec![cached_frame],
                 cache_dir: temp_dir.clone(),
@@ -1003,13 +995,7 @@ mod tests {
         let pixels: Vec<f32> = (0..12).map(|i| i as f32).collect();
         let images = vec![AstroImage::from_pixels(dims, pixels)];
 
-        let cache = ImageCache {
-            storage: Storage::InMemory(images),
-            dimensions: dims,
-            metadata: AstroImageMetadata::default(),
-            config: CacheConfig::default(),
-            progress: ProgressCallback::default(),
-        };
+        let cache = make_test_cache(images);
 
         // Read row 1 (pixels 4-7)
         let chunk = cache.read_channel_chunk(0, 0, 1, 2);
@@ -1034,7 +1020,7 @@ mod tests {
         let base_filename = "test_chunk.bin";
         let cached_frame = cache_image_channels(&temp_dir, base_filename, &image, dims).unwrap();
 
-        let cache = ImageCache {
+        let cache: ImageCache<AstroImage> = ImageCache {
             storage: Storage::DiskBacked {
                 frames: vec![cached_frame],
                 cache_dir: temp_dir.clone(),
@@ -1079,7 +1065,7 @@ mod tests {
             frames.push(cached_frame);
         }
 
-        let cache = ImageCache {
+        let cache: ImageCache<AstroImage> = ImageCache {
             storage: Storage::DiskBacked {
                 frames,
                 cache_dir: temp_dir.clone(),
@@ -1112,7 +1098,7 @@ mod tests {
         let base_filename = "cached_frame.bin";
 
         // First call should load and cache
-        let cached_frame = load_and_cache_frame(
+        let cached_frame = load_and_cache_frame::<AstroImage>(
             &temp_dir,
             base_filename,
             &source_path,
@@ -1152,7 +1138,7 @@ mod tests {
         let base_filename = "cached_frame.bin";
 
         // First call - creates cache
-        let first_frame = load_and_cache_frame(
+        let first_frame = load_and_cache_frame::<AstroImage>(
             &temp_dir,
             base_filename,
             &source_path,
@@ -1162,11 +1148,8 @@ mod tests {
         )
         .unwrap();
 
-        // Modify source file timestamp to ensure we're not re-reading it
-        // (the cache should be reused based on file size match)
-
         // Second call - should reuse cache
-        let second_frame = load_and_cache_frame(
+        let second_frame = load_and_cache_frame::<AstroImage>(
             &temp_dir,
             base_filename,
             &source_path,
@@ -1205,7 +1188,7 @@ mod tests {
 
         // Try to load with wrong expected dimensions
         let expected_dims = ImageDimensions::new(8, 6, 1);
-        let result = load_and_cache_frame(
+        let result = load_and_cache_frame::<AstroImage>(
             &temp_dir,
             "cached.bin",
             &source_path,

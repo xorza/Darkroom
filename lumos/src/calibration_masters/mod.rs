@@ -7,9 +7,14 @@ use std::path::Path;
 
 use anyhow::Result;
 
-use crate::astro_image::cfa::CfaImage;
+use crate::astro_image::cfa::{CfaImage, CfaType};
 use crate::raw::load_raw_cfa;
+use crate::stacking::FrameType;
+use crate::stacking::cache::ImageCache;
+use crate::stacking::config::{Normalization, StackConfig};
 use crate::stacking::hot_pixels::HotPixelMap;
+use crate::stacking::progress::ProgressCallback;
+use crate::stacking::stack::{compute_multiplicative_norm_params, dispatch_stacking_generic};
 
 /// Default sigma threshold for hot pixel detection.
 const DEFAULT_HOT_PIXEL_SIGMA: f32 = 5.0;
@@ -31,28 +36,63 @@ pub struct CalibrationMasters {
     pub hot_pixel_map: Option<HotPixelMap>,
 }
 
-/// Compute pixel-wise mean of raw CFA frames loaded from files.
+/// Stack raw CFA frames using the full stacking pipeline.
 ///
+/// Uses median for < 8 frames, sigma-clipped mean for >= 8 frames.
 /// Returns `None` if `paths` is empty.
-fn compute_cfa_mean(paths: &[impl AsRef<Path>]) -> Result<Option<CfaImage>> {
+fn stack_cfa_frames(
+    paths: &[impl AsRef<Path> + Sync],
+    frame_type: FrameType,
+    normalization: Normalization,
+) -> Result<Option<CfaImage>> {
     if paths.is_empty() {
         return Ok(None);
     }
 
-    let mut acc = load_raw_cfa(paths[0].as_ref())?;
-    for path in &paths[1..] {
-        let frame = load_raw_cfa(path.as_ref())?;
-        for (a, b) in acc.pixels.iter_mut().zip(frame.pixels.iter()) {
-            *a += b;
+    // Load the first frame to capture the CFA pattern (not stored in cache metadata)
+    // todo load only header
+    let first = load_raw_cfa(paths[0].as_ref())?;
+    let pattern = first.pattern.clone();
+    drop(first);
+
+    let config = if paths.len() < 8 {
+        StackConfig {
+            normalization,
+            ..StackConfig::median()
         }
-    }
+    } else {
+        StackConfig {
+            normalization,
+            ..StackConfig::sigma_clipped(3.0)
+        }
+    };
 
-    let count = paths.len() as f32;
-    for v in acc.pixels.iter_mut() {
-        *v /= count;
-    }
+    let cache = ImageCache::<CfaImage>::from_paths(
+        paths,
+        &config.cache,
+        frame_type,
+        ProgressCallback::default(),
+    )
+    .map_err(|e| anyhow::anyhow!("{e}"))?;
 
-    Ok(Some(acc))
+    let norm_params = match config.normalization {
+        Normalization::None => None,
+        Normalization::Multiplicative => Some(compute_multiplicative_norm_params(&cache)),
+        Normalization::Global => Some(crate::stacking::stack::compute_global_norm_params(&cache)),
+    };
+
+    let channels = dispatch_stacking_generic(&cache, &config, paths.len(), norm_params.as_deref());
+
+    // CfaImage has exactly 1 channel
+    let pixels = channels.into_iter().next().unwrap();
+
+    Ok(Some(CfaImage {
+        width: cache.dimensions().width,
+        height: cache.dimensions().height,
+        pixels,
+        pattern,
+        metadata: cache.metadata().clone(),
+    }))
 }
 
 impl CalibrationMasters {
@@ -72,18 +112,19 @@ impl CalibrationMasters {
         }
     }
 
-    /// Create CalibrationMasters by loading and averaging raw CFA files.
+    /// Create CalibrationMasters by stacking raw CFA files.
     ///
-    /// Each set of paths is averaged pixel-wise into a master frame.
+    /// Uses sigma-clipped mean (>= 8 frames) or median (< 8 frames)
+    /// with the full stacking pipeline (rejection, normalization, chunked processing).
     /// Empty slices produce `None` for that master.
     pub fn from_raw_files(
-        darks: &[impl AsRef<Path>],
-        flats: &[impl AsRef<Path>],
-        biases: &[impl AsRef<Path>],
+        darks: &[impl AsRef<Path> + Sync],
+        flats: &[impl AsRef<Path> + Sync],
+        biases: &[impl AsRef<Path> + Sync],
     ) -> Result<Self> {
-        let dark = compute_cfa_mean(darks)?;
-        let flat = compute_cfa_mean(flats)?;
-        let bias = compute_cfa_mean(biases)?;
+        let dark = stack_cfa_frames(darks, FrameType::Dark, Normalization::None)?;
+        let flat = stack_cfa_frames(flats, FrameType::Flat, Normalization::Multiplicative)?;
+        let bias = stack_cfa_frames(biases, FrameType::Bias, Normalization::None)?;
         Ok(Self::new(dark, flat, bias))
     }
 
