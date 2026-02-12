@@ -693,25 +693,23 @@ impl Rejection {
 ///
 /// `indices[i]` maps `values[i]` to `weights[indices[i]]`, maintaining correct
 /// alignment after rejection functions have reordered the values array.
+///
+/// Preconditions: `values` is non-empty, `indices.len() == values.len()`,
+/// all `indices[i] < weights.len()`, and total weight > 0.
 fn weighted_mean_indexed(values: &[f32], weights: &[f32], indices: &[usize]) -> f32 {
-    if values.is_empty() {
-        return 0.0;
-    }
+    debug_assert!(!values.is_empty());
+    debug_assert_eq!(values.len(), indices.len());
 
     let mut sum = 0.0f32;
     let mut weight_sum = 0.0f32;
 
-    for (i, &v) in values.iter().enumerate() {
-        let w = weights[indices[i]];
+    for (&v, &idx) in values.iter().zip(indices.iter()) {
+        let w = weights[idx];
         sum += v * w;
         weight_sum += w;
     }
 
-    if weight_sum > f32::EPSILON {
-        sum / weight_sum
-    } else {
-        values.iter().sum::<f32>() / values.len() as f32
-    }
+    sum / weight_sum
 }
 
 #[cfg(test)]
@@ -1328,15 +1326,29 @@ mod tests {
     }
 
     #[test]
-    fn test_weighted_mean_indexed_zero_weights() {
-        // When all weights are zero, should fall back to simple mean
+    fn test_weighted_mean_indexed_basic() {
+        // values [2, 4, 6] with weights [10, 1, 1] via identity indices
+        // expected: (20 + 4 + 6) / 12 = 2.5
         let values = [2.0, 4.0, 6.0];
-        let weights = [0.0, 0.0, 0.0];
+        let weights = [10.0, 1.0, 1.0];
         let indices = [0, 1, 2];
         let mean = weighted_mean_indexed(&values, &weights, &indices);
+        assert!((mean - 2.5).abs() < 1e-6, "Expected 2.5, got {}", mean);
+    }
+
+    #[test]
+    fn test_weighted_mean_indexed_reordered() {
+        // Simulate rejection reordering: values were [10, 99, 20] → after rejecting idx 1,
+        // survivors are values [10, 20] with indices [0, 2]
+        let values = [10.0, 20.0];
+        let weights = [5.0, 0.5, 1.0]; // original weights for 3 frames
+        let indices = [0, 2]; // frame 0 and frame 2 survived
+        let mean = weighted_mean_indexed(&values, &weights, &indices);
+        // expected: (10*5 + 20*1) / (5+1) = 70/6 ≈ 11.667
         assert!(
-            (mean - 4.0).abs() < f32::EPSILON,
-            "Zero-weight fallback should give simple mean 4.0, got {}",
+            (mean - 70.0 / 6.0).abs() < 1e-5,
+            "Expected {}, got {}",
+            70.0 / 6.0,
             mean
         );
     }
