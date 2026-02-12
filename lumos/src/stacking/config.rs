@@ -4,6 +4,7 @@
 //! parameters: combination method, pixel rejection, normalization, and memory settings.
 
 use crate::stacking::CacheConfig;
+use crate::stacking::cache::ScratchBuffers;
 use crate::stacking::rejection::{
     AsymmetricSigmaClipConfig, GesdConfig, LinearFitClipConfig, PercentileClipConfig,
     SigmaClipConfig, WinsorizedClipConfig,
@@ -73,6 +74,22 @@ impl Rejection {
     /// Create GESD with default alpha.
     pub fn gesd() -> Self {
         Self::Gesd(GesdConfig::new(0.05, None))
+    }
+
+    /// Partition values by rejection algorithm, returning the number of survivors.
+    ///
+    /// After return, `values[..remaining]` contains surviving values.
+    /// For `Winsorized`, no partitioning occurs (returns `values.len()`).
+    pub(crate) fn reject(&self, values: &mut [f32], scratch: &mut ScratchBuffers) -> usize {
+        match self {
+            Rejection::None => values.len(),
+            Rejection::SigmaClip(c) => c.reject(values, &mut scratch.indices),
+            Rejection::SigmaClipAsymmetric(c) => c.reject(values, &mut scratch.indices),
+            Rejection::LinearFit(c) => c.reject(values, &mut scratch.indices),
+            Rejection::Gesd(c) => c.reject(values, &mut scratch.indices),
+            Rejection::Percentile(c) => c.reject(values),
+            Rejection::Winsorized(_) => values.len(),
+        }
     }
 }
 

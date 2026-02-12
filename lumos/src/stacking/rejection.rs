@@ -244,27 +244,17 @@ pub struct RejectionResult {
 }
 
 impl SigmaClipConfig {
-    /// Sigma-clipped mean: iteratively remove outliers beyond sigma threshold.
+    /// Partition values by sigma clipping, returning the number of survivors.
     ///
-    /// Algorithm:
-    /// 1. Use median as center (robust to outliers)
-    /// 2. Compute std dev from median
-    /// 3. Clip values beyond sigma threshold from median
-    /// 4. Return mean of remaining values
-    ///
-    /// Modifies `values` and `indices` in place. After return, `values[..remaining_count]`
-    /// contains surviving values and `indices[..remaining_count]` contains their original
-    /// frame indices. `indices` must be initialized by the caller (typically `[0, 1, ..., N-1]`).
-    pub fn clipped_mean(&self, values: &mut [f32], indices: &mut Vec<usize>) -> RejectionResult {
+    /// After return, `values[..remaining]` contains surviving values and
+    /// `indices[..remaining]` contains their original frame indices.
+    pub fn reject(&self, values: &mut [f32], indices: &mut Vec<usize>) -> usize {
         debug_assert!(!values.is_empty());
 
         reset_indices(indices, values.len());
 
         if values.len() <= 2 {
-            return RejectionResult {
-                value: math::mean_f32(values),
-                remaining_count: values.len(),
-            };
+            return values.len();
         }
 
         let mut len = values.len();
@@ -305,34 +295,31 @@ impl SigmaClipConfig {
             len = write_idx;
         }
 
+        len
+    }
+
+    /// Sigma-clipped mean: reject outliers then compute mean of survivors.
+    pub fn clipped_mean(&self, values: &mut [f32], indices: &mut Vec<usize>) -> RejectionResult {
+        let remaining = self.reject(values, indices);
         RejectionResult {
-            value: math::mean_f32(&values[..len]),
-            remaining_count: len,
+            value: math::mean_f32(&values[..remaining]),
+            remaining_count: remaining,
         }
     }
 }
 
 impl AsymmetricSigmaClipConfig {
-    /// Asymmetric sigma-clipped mean: separate thresholds for low and high outliers.
+    /// Partition values by asymmetric sigma clipping, returning the number of survivors.
     ///
-    /// Algorithm:
-    /// 1. Use median as center (robust to outliers)
-    /// 2. Compute std dev from median
-    /// 3. Clip low outliers beyond sigma_low * stddev below median
-    /// 4. Clip high outliers beyond sigma_high * stddev above median
-    /// 5. Return mean of remaining values
-    ///
-    /// Modifies `values` and `indices` in place. See [`SigmaClipConfig::clipped_mean`] for index semantics.
-    pub fn clipped_mean(&self, values: &mut [f32], indices: &mut Vec<usize>) -> RejectionResult {
+    /// After return, `values[..remaining]` contains surviving values and
+    /// `indices[..remaining]` contains their original frame indices.
+    pub fn reject(&self, values: &mut [f32], indices: &mut Vec<usize>) -> usize {
         debug_assert!(!values.is_empty());
 
         reset_indices(indices, values.len());
 
         if values.len() <= 2 {
-            return RejectionResult {
-                value: math::mean_f32(values),
-                remaining_count: values.len(),
-            };
+            return values.len();
         }
 
         let mut len = values.len();
@@ -378,9 +365,15 @@ impl AsymmetricSigmaClipConfig {
             len = write_idx;
         }
 
+        len
+    }
+
+    /// Asymmetric sigma-clipped mean: reject outliers then compute mean of survivors.
+    pub fn clipped_mean(&self, values: &mut [f32], indices: &mut Vec<usize>) -> RejectionResult {
+        let remaining = self.reject(values, indices);
         RejectionResult {
-            value: math::mean_f32(&values[..len]),
-            remaining_count: len,
+            value: math::mean_f32(&values[..remaining]),
+            remaining_count: remaining,
         }
     }
 }
@@ -440,23 +433,17 @@ impl WinsorizedClipConfig {
 }
 
 impl LinearFitClipConfig {
-    /// Linear fit clipping: reject pixels based on deviation from linear fit.
+    /// Partition values by linear fit clipping, returning the number of survivors.
     ///
-    /// This method is particularly effective for data with sky gradients where
-    /// pixel values may have a linear relationship with some reference.
-    /// Here we use the pixel index as the reference (assumes temporal ordering).
-    ///
-    /// Modifies `values` and `indices` in place. See [`SigmaClipConfig::clipped_mean`] for index semantics.
-    pub fn clipped_mean(&self, values: &mut [f32], indices: &mut Vec<usize>) -> RejectionResult {
+    /// After return, `values[..remaining]` contains surviving values and
+    /// `indices[..remaining]` contains their original frame indices.
+    pub fn reject(&self, values: &mut [f32], indices: &mut Vec<usize>) -> usize {
         debug_assert!(!values.is_empty());
 
         reset_indices(indices, values.len());
 
         if values.len() <= 3 {
-            return RejectionResult {
-                value: math::mean_f32(values),
-                remaining_count: values.len(),
-            };
+            return values.len();
         }
 
         let mut len = values.len();
@@ -531,73 +518,74 @@ impl LinearFitClipConfig {
             len = write_idx;
         }
 
+        len
+    }
+
+    /// Linear fit clipped mean: reject outliers then compute mean of survivors.
+    pub fn clipped_mean(&self, values: &mut [f32], indices: &mut Vec<usize>) -> RejectionResult {
+        let remaining = self.reject(values, indices);
         RejectionResult {
-            value: math::mean_f32(&values[..len]),
-            remaining_count: len,
+            value: math::mean_f32(&values[..remaining]),
+            remaining_count: remaining,
         }
     }
 }
 
 impl PercentileClipConfig {
-    /// Percentile clipping: reject lowest and highest percentiles.
+    /// Partition values by percentile clipping, returning the number of survivors.
     ///
-    /// Simple and effective for small stacks. Requires sorting.
-    ///
-    /// Modifies the input slice in place (sorts it).
-    pub fn clipped_mean(&self, values: &mut [f32]) -> RejectionResult {
+    /// Sorts values and moves the surviving middle range to `values[..remaining]`.
+    pub fn reject(&self, values: &mut [f32]) -> usize {
         debug_assert!(!values.is_empty());
 
-        let original_len = values.len();
-
         if values.len() <= 2 {
-            return RejectionResult {
-                value: math::mean_f32(values),
-                remaining_count: values.len(),
-            };
+            return values.len();
         }
+
+        let n = values.len();
 
         // Sort for percentile computation
         values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
         // Calculate indices to keep
-        let low_count = ((self.low_percentile / 100.0) * original_len as f32).floor() as usize;
-        let high_count = ((self.high_percentile / 100.0) * original_len as f32).floor() as usize;
+        let low_count = ((self.low_percentile / 100.0) * n as f32).floor() as usize;
+        let high_count = ((self.high_percentile / 100.0) * n as f32).floor() as usize;
 
         let start = low_count;
-        let end = original_len.saturating_sub(high_count);
+        let end = n.saturating_sub(high_count);
 
         // Ensure we have at least one value
         let (start, end) = if start >= end {
-            let mid = original_len / 2;
+            let mid = n / 2;
             (mid, mid + 1)
         } else {
             (start, end)
         };
 
-        let remaining = &values[start..end];
-        let remaining_count = remaining.len();
+        // Move survivors to front
+        if start > 0 {
+            values.copy_within(start..end, 0);
+        }
 
+        end - start
+    }
+
+    /// Percentile clipped mean: reject outliers then compute mean of survivors.
+    pub fn clipped_mean(&self, values: &mut [f32]) -> RejectionResult {
+        let remaining = self.reject(values);
         RejectionResult {
-            value: math::mean_f32(remaining),
-            remaining_count,
+            value: math::mean_f32(&values[..remaining]),
+            remaining_count: remaining,
         }
     }
 }
 
 impl GesdConfig {
-    /// GESD (Generalized Extreme Studentized Deviate) test for outlier detection.
+    /// Partition values by GESD test, returning the number of survivors.
     ///
-    /// A rigorous statistical test that can identify multiple outliers.
-    /// Best for large datasets (> 50 frames).
-    ///
-    /// Algorithm:
-    /// 1. Compute test statistic R_i for most extreme value
-    /// 2. Compare to critical value based on t-distribution
-    /// 3. If R_i > critical, mark as outlier and repeat
-    /// 4. Return mean of non-outliers
-    ///
-    /// Modifies `values` and `indices` in place. See [`SigmaClipConfig::clipped_mean`] for index semantics.
-    pub fn clipped_mean(&self, values: &mut [f32], indices: &mut Vec<usize>) -> RejectionResult {
+    /// After return, `values[..remaining]` contains surviving values and
+    /// `indices[..remaining]` contains their original frame indices.
+    pub fn reject(&self, values: &mut [f32], indices: &mut Vec<usize>) -> usize {
         debug_assert!(!values.is_empty());
 
         reset_indices(indices, values.len());
@@ -605,10 +593,7 @@ impl GesdConfig {
         let original_len = values.len();
 
         if values.len() <= 3 {
-            return RejectionResult {
-                value: math::mean_f32(values),
-                remaining_count: values.len(),
-            };
+            return values.len();
         }
 
         let max_outliers = self
@@ -669,9 +654,15 @@ impl GesdConfig {
             }
         }
 
+        len
+    }
+
+    /// GESD clipped mean: reject outliers then compute mean of survivors.
+    pub fn clipped_mean(&self, values: &mut [f32], indices: &mut Vec<usize>) -> RejectionResult {
+        let remaining = self.reject(values, indices);
         RejectionResult {
-            value: math::mean_f32(&values[..len]),
-            remaining_count: len,
+            value: math::mean_f32(&values[..remaining]),
+            remaining_count: remaining,
         }
     }
 }
