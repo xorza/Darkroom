@@ -397,21 +397,34 @@ impl PercentileClipConfig {
 
     /// Partition values by percentile clipping, returning the number of survivors.
     ///
-    /// Sorts values and moves the surviving middle range to `values[..remaining]`.
-    pub fn reject(&self, values: &mut [f32]) -> usize {
+    /// Sorts values (with index co-array) and moves the surviving middle range
+    /// to `values[..remaining]` and `indices[..remaining]`.
+    pub fn reject(&self, values: &mut [f32], indices: &mut Vec<usize>) -> usize {
         debug_assert!(!values.is_empty());
 
-        if values.len() <= 2 {
-            return values.len();
+        let n = values.len();
+        reset_indices(indices, n);
+
+        if n <= 2 {
+            return n;
         }
 
-        values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        // Insertion sort with index co-array — optimal for small pixel stacks (< 50 frames)
+        for i in 1..n {
+            let mut j = i;
+            while j > 0 && values[j - 1] > values[j] {
+                values.swap(j - 1, j);
+                indices.swap(j - 1, j);
+                j -= 1;
+            }
+        }
 
-        let range = self.surviving_range(values.len());
+        let range = self.surviving_range(n);
         let count = range.len();
 
         if range.start > 0 {
-            values.copy_within(range, 0);
+            values.copy_within(range.clone(), 0);
+            indices.copy_within(range, 0);
         }
 
         count
@@ -627,12 +640,11 @@ impl Rejection {
     /// For `Winsorized`, no partitioning occurs (returns `values.len()`).
     pub(crate) fn reject(&self, values: &mut [f32], scratch: &mut ScratchBuffers) -> usize {
         match self {
-            Rejection::None => values.len(),
+            Rejection::None | Rejection::Winsorized(_) => values.len(),
             Rejection::SigmaClip(c) => c.reject(values, &mut scratch.indices),
             Rejection::LinearFit(c) => c.reject(values, &mut scratch.indices),
             Rejection::Gesd(c) => c.reject(values, &mut scratch.indices),
-            Rejection::Percentile(c) => c.reject(values),
-            Rejection::Winsorized(_) => values.len(),
+            Rejection::Percentile(c) => c.reject(values, &mut scratch.indices),
         }
     }
 
@@ -646,8 +658,14 @@ impl Rejection {
         weights: Option<&[f32]>,
         scratch: &mut ScratchBuffers,
     ) -> f32 {
-        // Winsorized and weighted-Percentile are special cases
+        // None and Winsorized don't reorder values, so weights align directly
         match self {
+            Rejection::None => {
+                return match weights {
+                    Some(w) => math::weighted_mean_f32(values, w),
+                    None => math::mean_f32(values),
+                };
+            }
             Rejection::Winsorized(config) => {
                 let winsorized =
                     config.winsorize(values, &mut scratch.floats_a, &mut scratch.floats_b);
@@ -656,37 +674,14 @@ impl Rejection {
                     None => math::mean_f32(winsorized),
                 };
             }
-
-            Rejection::Percentile(config) if weights.is_some() => {
-                let w = weights.unwrap();
-                let n = values.len();
-
-                // Sort values with index co-array for weight lookup
-                reset_indices(&mut scratch.indices, n);
-                // Insertion sort — typical pixel stacks are small (< 50 frames)
-                for i in 1..n {
-                    let mut j = i;
-                    while j > 0 && values[j - 1] > values[j] {
-                        values.swap(j - 1, j);
-                        scratch.indices.swap(j - 1, j);
-                        j -= 1;
-                    }
-                }
-
-                let range = config.surviving_range(n);
-                return weighted_mean_indexed(&values[range.clone()], w, &scratch.indices[range]);
-            }
-
             _ => {}
         }
 
-        // Common path: reject then compute mean
+        // Rejection variants that reorder values: use index mapping for weights
         let remaining = self.reject(values, scratch);
 
-        match (weights, self) {
-            (Some(w), Rejection::None) => math::weighted_mean_f32(values, w),
-            (_, Rejection::Percentile(_)) => math::mean_f32(&values[..remaining]),
-            (Some(w), _) if remaining > 0 => {
+        match weights {
+            Some(w) if remaining > 0 => {
                 weighted_mean_indexed(&values[..remaining], w, &scratch.indices[..remaining])
             }
             _ => math::mean_f32(&values[..remaining]),
@@ -936,7 +931,8 @@ mod tests {
     #[test]
     fn test_percentile_clip() {
         let mut values = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0];
-        let remaining = PercentileClipConfig::new(20.0, 20.0).reject(&mut values);
+        let mut indices = vec![];
+        let remaining = PercentileClipConfig::new(20.0, 20.0).reject(&mut values, &mut indices);
         assert_eq!(remaining, 6);
         // Mean of [3, 4, 5, 6, 7, 8] = 5.5
         assert!((math::mean_f32(&values[..remaining]) - 5.5).abs() < 0.01);
@@ -991,7 +987,7 @@ mod tests {
         let r = LinearFitClipConfig::default().reject(&mut [1.0, 2.0], &mut indices);
         assert_eq!(r, 2);
 
-        let r = PercentileClipConfig::default().reject(&mut [1.0, 2.0]);
+        let r = PercentileClipConfig::default().reject(&mut [1.0, 2.0], &mut indices);
         assert!(r >= 1);
 
         let r = GesdConfig::default().reject(&mut [1.0, 2.0], &mut indices);
