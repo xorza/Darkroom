@@ -575,13 +575,11 @@ fn weighted_mean_indexed(values: &[f32], weights: &[f32], indices: &[usize]) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::astro_image::{AstroImage, ImageDimensions};
+    use crate::{
+        astro_image::{AstroImage, ImageDimensions},
+        stacking::cache::tests::make_test_cache,
+    };
     use std::path::PathBuf;
-
-    /// Helper: create an in-memory ImageCache from a list of AstroImages.
-    fn cache_from_images(images: Vec<AstroImage>) -> ImageCache<AstroImage> {
-        super::super::cache::make_test_cache(images)
-    }
 
     #[test]
     fn test_stack_empty_paths() {
@@ -883,7 +881,7 @@ mod tests {
             AstroImage::from_pixels(dims, vec![5.0; 16]),
             AstroImage::from_pixels(dims, vec![5.0; 16]),
         ];
-        let cache = cache_from_images(images);
+        let cache = make_test_cache(images);
         let params = compute_global_norm_params(&cache);
 
         // 3 frames * 1 channel = 3 entries
@@ -913,7 +911,7 @@ mod tests {
             AstroImage::from_pixels(dims, frame0),
             AstroImage::from_pixels(dims, frame1),
         ];
-        let cache = cache_from_images(images);
+        let cache = make_test_cache(images);
         let params = compute_global_norm_params(&cache);
 
         // Frame 0 is reference -> (gain=1, offset=0)
@@ -944,7 +942,7 @@ mod tests {
             AstroImage::from_pixels(dims, frame0),
             AstroImage::from_pixels(dims, frame1),
         ];
-        let cache = cache_from_images(images);
+        let cache = make_test_cache(images);
         let params = compute_global_norm_params(&cache);
 
         // Frame 1 has ~2x the spread of frame 0, so gain should be ~0.5
@@ -970,7 +968,7 @@ mod tests {
             AstroImage::from_pixels(dims, frame0.clone()),
             AstroImage::from_pixels(dims, frame1.clone()),
         ];
-        let cache = cache_from_images(images_norm);
+        let cache = make_test_cache(images_norm);
         let norm_params = compute_global_norm_params(&cache);
 
         // With normalization: all pixels should be close to base_value
@@ -991,7 +989,7 @@ mod tests {
             AstroImage::from_pixels(dims, frame0),
             AstroImage::from_pixels(dims, frame1),
         ];
-        let cache_raw = cache_from_images(images_raw);
+        let cache_raw = make_test_cache(images_raw);
         let result_raw =
             cache_raw.process_chunked(None, |values: &mut [f32]| math::mean_f32(values));
         for &pixel in result_raw.channel(0).pixels() {
@@ -1017,7 +1015,7 @@ mod tests {
             AstroImage::from_pixels(dims, pixels0),
             AstroImage::from_pixels(dims, pixels1),
         ];
-        let cache = cache_from_images(images);
+        let cache = make_test_cache(images);
         let norm_params = compute_global_norm_params(&cache);
 
         let result = cache.process_chunked(Some(&norm_params), |values: &mut [f32]| {
@@ -1060,7 +1058,7 @@ mod tests {
             AstroImage::from_pixels(dims, frame0.clone()),
             AstroImage::from_pixels(dims, frame1.clone()),
         ];
-        let cache = cache_from_images(images);
+        let cache = make_test_cache(images);
         let norm_params = compute_global_norm_params(&cache);
 
         let config = StackConfig {
@@ -1098,7 +1096,7 @@ mod tests {
             AstroImage::from_pixels(dims, vec![5.0; 16]),
             AstroImage::from_pixels(dims, vec![5.0; 16]),
         ];
-        let cache = cache_from_images(images);
+        let cache = make_test_cache(images);
         let params = compute_multiplicative_norm_params(&cache);
 
         assert_eq!(params.len(), 3);
@@ -1127,7 +1125,7 @@ mod tests {
             AstroImage::from_pixels(dims, frame0),
             AstroImage::from_pixels(dims, frame1),
         ];
-        let cache = cache_from_images(images);
+        let cache = make_test_cache(images);
         let params = compute_multiplicative_norm_params(&cache);
 
         // Frame 0: reference -> gain=1, offset=0
@@ -1159,7 +1157,7 @@ mod tests {
             AstroImage::from_pixels(dims, frame0),
             AstroImage::from_pixels(dims, frame1),
         ];
-        let cache = cache_from_images(images);
+        let cache = make_test_cache(images);
         let params = compute_multiplicative_norm_params(&cache);
 
         // All offsets must be exactly 0
@@ -1184,7 +1182,7 @@ mod tests {
             AstroImage::from_pixels(dims, frame0),
             AstroImage::from_pixels(dims, frame1),
         ];
-        let cache = cache_from_images(images);
+        let cache = make_test_cache(images);
         let norm_params = compute_multiplicative_norm_params(&cache);
 
         let result = cache.process_chunked(Some(&norm_params), |values: &mut [f32]| {
@@ -1212,7 +1210,7 @@ mod tests {
             AstroImage::from_pixels(dims, pixels0),
             AstroImage::from_pixels(dims, pixels1),
         ];
-        let cache = cache_from_images(images);
+        let cache = make_test_cache(images);
         let norm_params = compute_multiplicative_norm_params(&cache);
 
         let result = cache.process_chunked(Some(&norm_params), |values: &mut [f32]| {

@@ -668,24 +668,24 @@ fn cache_image_channels(
     })
 }
 
-/// Create an in-memory ImageCache from loaded images (test/internal helper).
 #[cfg(test)]
-pub(crate) fn make_test_cache<I: StackableImage>(images: Vec<I>) -> ImageCache<I> {
-    let dimensions = images[0].dimensions();
-    let metadata = images[0].metadata().clone();
-    ImageCache {
-        storage: Storage::InMemory(images),
-        dimensions,
-        metadata,
-        config: CacheConfig::default(),
-        progress: ProgressCallback::default(),
-    }
-}
-
-#[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::astro_image::AstroImage;
+
+    /// Create an in-memory ImageCache from loaded images (test/internal helper).
+    #[cfg(test)]
+    pub(crate) fn make_test_cache<I: StackableImage>(images: Vec<I>) -> ImageCache<I> {
+        let dimensions = images[0].dimensions();
+        let metadata = images[0].metadata().clone();
+        ImageCache {
+            storage: Storage::InMemory(images),
+            dimensions,
+            metadata,
+            config: CacheConfig::default(),
+            progress: ProgressCallback::default(),
+        }
+    }
 
     // ========== Storage Type Selection Tests ==========
 
