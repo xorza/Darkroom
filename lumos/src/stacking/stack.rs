@@ -11,7 +11,7 @@ use super::cache::{ImageCache, ScratchBuffers, StackableImage};
 use super::config::{CombineMethod, Normalization, Rejection, StackConfig};
 use super::error::Error;
 use super::progress::ProgressCallback;
-use super::rejection::{self, RejectionResult};
+use super::rejection::RejectionResult;
 use super::{CacheConfig, FrameType};
 use crate::math;
 
@@ -275,18 +275,17 @@ fn apply_rejection(
         }
 
         Rejection::SigmaClip(config) => {
-            let result = rejection::sigma_clipped_mean(values, &mut scratch.indices, config);
+            let result = config.clipped_mean(values, &mut scratch.indices);
             recompute_weighted_mean(result, values, weights, &scratch.indices)
         }
 
         Rejection::SigmaClipAsymmetric(config) => {
-            let result =
-                rejection::sigma_clipped_mean_asymmetric(values, &mut scratch.indices, config);
+            let result = config.clipped_mean(values, &mut scratch.indices);
             recompute_weighted_mean(result, values, weights, &scratch.indices)
         }
 
         Rejection::Winsorized(config) => {
-            let winsorized = rejection::winsorize(values, config);
+            let winsorized = config.winsorize(values);
             let value = match weights {
                 Some(w) => math::weighted_mean_f32(&winsorized, w),
                 None => math::mean_f32(&winsorized),
@@ -298,7 +297,7 @@ fn apply_rejection(
         }
 
         Rejection::LinearFit(config) => {
-            let result = rejection::linear_fit_clipped_mean(values, &mut scratch.indices, config);
+            let result = config.clipped_mean(values, &mut scratch.indices);
             recompute_weighted_mean(result, values, weights, &scratch.indices)
         }
 
@@ -332,11 +331,11 @@ fn apply_rejection(
                     remaining_count: remaining.len(),
                 }
             }
-            None => rejection::percentile_clipped_mean(values, config),
+            None => config.clipped_mean(values),
         },
 
         Rejection::Gesd(config) => {
-            let result = rejection::gesd_mean(values, &mut scratch.indices, config);
+            let result = config.clipped_mean(values, &mut scratch.indices);
             recompute_weighted_mean(result, values, weights, &scratch.indices)
         }
     }

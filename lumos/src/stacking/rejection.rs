@@ -243,447 +243,436 @@ pub struct RejectionResult {
     pub remaining_count: usize,
 }
 
-/// Sigma-clipped mean: iteratively remove outliers beyond sigma threshold.
-///
-/// Algorithm:
-/// 1. Use median as center (robust to outliers)
-/// 2. Compute std dev from median
-/// 3. Clip values beyond sigma threshold from median
-/// 4. Return mean of remaining values
-///
-/// Modifies `values` and `indices` in place. After return, `values[..remaining_count]`
-/// contains surviving values and `indices[..remaining_count]` contains their original
-/// frame indices. `indices` must be initialized by the caller (typically `[0, 1, ..., N-1]`).
-pub fn sigma_clipped_mean(
-    values: &mut [f32],
-    indices: &mut Vec<usize>,
-    config: &SigmaClipConfig,
-) -> RejectionResult {
-    debug_assert!(!values.is_empty());
+impl SigmaClipConfig {
+    /// Sigma-clipped mean: iteratively remove outliers beyond sigma threshold.
+    ///
+    /// Algorithm:
+    /// 1. Use median as center (robust to outliers)
+    /// 2. Compute std dev from median
+    /// 3. Clip values beyond sigma threshold from median
+    /// 4. Return mean of remaining values
+    ///
+    /// Modifies `values` and `indices` in place. After return, `values[..remaining_count]`
+    /// contains surviving values and `indices[..remaining_count]` contains their original
+    /// frame indices. `indices` must be initialized by the caller (typically `[0, 1, ..., N-1]`).
+    pub fn clipped_mean(&self, values: &mut [f32], indices: &mut Vec<usize>) -> RejectionResult {
+        debug_assert!(!values.is_empty());
 
-    reset_indices(indices, values.len());
+        reset_indices(indices, values.len());
 
-    if values.len() <= 2 {
-        return RejectionResult {
-            value: math::mean_f32(values),
-            remaining_count: values.len(),
-        };
-    }
-
-    let mut len = values.len();
-    let mut scratch = Vec::with_capacity(len);
-
-    for _ in 0..config.max_iterations {
-        if len <= 2 {
-            break;
-        }
-
-        let active = &mut values[..len];
-
-        // Use median as center - robust to outliers
-        let center = math::median_f32_mut(active);
-        // Use MAD-based scale estimate (robust to outliers, unlike stddev)
-        let mad = mad_f32_with_scratch(&values[..len], center, &mut scratch);
-        let sigma = mad_to_sigma(mad);
-
-        if sigma < f32::EPSILON {
-            break;
-        }
-
-        let threshold = config.sigma * sigma;
-
-        // Partition: move kept values and indices to front
-        let mut write_idx = 0;
-        for read_idx in 0..len {
-            if (values[read_idx] - center).abs() <= threshold {
-                values[write_idx] = values[read_idx];
-                indices[write_idx] = indices[read_idx];
-                write_idx += 1;
-            }
-        }
-
-        if write_idx == len {
-            break;
-        }
-        len = write_idx;
-    }
-
-    RejectionResult {
-        value: math::mean_f32(&values[..len]),
-        remaining_count: len,
-    }
-}
-
-/// Asymmetric sigma-clipped mean: separate thresholds for low and high outliers.
-///
-/// Algorithm:
-/// 1. Use median as center (robust to outliers)
-/// 2. Compute std dev from median
-/// 3. Clip low outliers beyond sigma_low * stddev below median
-/// 4. Clip high outliers beyond sigma_high * stddev above median
-/// 5. Return mean of remaining values
-///
-/// Modifies `values` and `indices` in place. See [`sigma_clipped_mean`] for index semantics.
-pub fn sigma_clipped_mean_asymmetric(
-    values: &mut [f32],
-    indices: &mut Vec<usize>,
-    config: &AsymmetricSigmaClipConfig,
-) -> RejectionResult {
-    debug_assert!(!values.is_empty());
-
-    reset_indices(indices, values.len());
-
-    if values.len() <= 2 {
-        return RejectionResult {
-            value: math::mean_f32(values),
-            remaining_count: values.len(),
-        };
-    }
-
-    let mut len = values.len();
-    let mut scratch = Vec::with_capacity(len);
-
-    for _ in 0..config.max_iterations {
-        if len <= 2 {
-            break;
-        }
-
-        let active = &mut values[..len];
-
-        let center = math::median_f32_mut(active);
-        let mad = mad_f32_with_scratch(&values[..len], center, &mut scratch);
-        let sigma = mad_to_sigma(mad);
-
-        if sigma < f32::EPSILON {
-            break;
-        }
-
-        let low_threshold = config.sigma_low * sigma;
-        let high_threshold = config.sigma_high * sigma;
-
-        // Partition: move kept values and indices to front
-        let mut write_idx = 0;
-        for read_idx in 0..len {
-            let diff = values[read_idx] - center;
-            let keep = if diff < 0.0 {
-                diff.abs() <= low_threshold
-            } else {
-                diff <= high_threshold
+        if values.len() <= 2 {
+            return RejectionResult {
+                value: math::mean_f32(values),
+                remaining_count: values.len(),
             };
-            if keep {
-                values[write_idx] = values[read_idx];
-                indices[write_idx] = indices[read_idx];
-                write_idx += 1;
+        }
+
+        let mut len = values.len();
+        let mut scratch = Vec::with_capacity(len);
+
+        for _ in 0..self.max_iterations {
+            if len <= 2 {
+                break;
             }
+
+            let active = &mut values[..len];
+
+            // Use median as center - robust to outliers
+            let center = math::median_f32_mut(active);
+            // Use MAD-based scale estimate (robust to outliers, unlike stddev)
+            let mad = mad_f32_with_scratch(&values[..len], center, &mut scratch);
+            let sigma = mad_to_sigma(mad);
+
+            if sigma < f32::EPSILON {
+                break;
+            }
+
+            let threshold = self.sigma * sigma;
+
+            // Partition: move kept values and indices to front
+            let mut write_idx = 0;
+            for read_idx in 0..len {
+                if (values[read_idx] - center).abs() <= threshold {
+                    values[write_idx] = values[read_idx];
+                    indices[write_idx] = indices[read_idx];
+                    write_idx += 1;
+                }
+            }
+
+            if write_idx == len {
+                break;
+            }
+            len = write_idx;
         }
 
-        if write_idx == len {
-            break;
+        RejectionResult {
+            value: math::mean_f32(&values[..len]),
+            remaining_count: len,
         }
-        len = write_idx;
-    }
-
-    RejectionResult {
-        value: math::mean_f32(&values[..len]),
-        remaining_count: len,
     }
 }
 
-/// Winsorized sigma-clipped mean: replace outliers with boundary values.
-///
-/// Unlike standard sigma clipping which removes outliers, this replaces them
-/// with the clipping boundary value. More robust for small sample sizes.
-///
-/// Does NOT modify the input slice.
-/// Apply winsorization: replace outliers with boundary values, return modified copy.
-///
-/// Iteratively computes median and std dev, then clamps values to
-/// `[median - sigma*stddev, median + sigma*stddev]`.
-pub fn winsorize(values: &[f32], config: &WinsorizedClipConfig) -> Vec<f32> {
-    debug_assert!(!values.is_empty());
+impl AsymmetricSigmaClipConfig {
+    /// Asymmetric sigma-clipped mean: separate thresholds for low and high outliers.
+    ///
+    /// Algorithm:
+    /// 1. Use median as center (robust to outliers)
+    /// 2. Compute std dev from median
+    /// 3. Clip low outliers beyond sigma_low * stddev below median
+    /// 4. Clip high outliers beyond sigma_high * stddev above median
+    /// 5. Return mean of remaining values
+    ///
+    /// Modifies `values` and `indices` in place. See [`SigmaClipConfig::clipped_mean`] for index semantics.
+    pub fn clipped_mean(&self, values: &mut [f32], indices: &mut Vec<usize>) -> RejectionResult {
+        debug_assert!(!values.is_empty());
 
-    let mut working = values.to_vec();
+        reset_indices(indices, values.len());
 
-    if values.len() <= 2 {
-        return working;
-    }
-
-    let mut median_buf = Vec::with_capacity(values.len());
-    let mut mad_scratch = Vec::with_capacity(values.len());
-
-    for _ in 0..config.max_iterations {
-        // Copy into scratch buffer for median (which sorts in-place)
-        median_buf.clear();
-        median_buf.extend_from_slice(&working);
-        let center = math::median_f32_mut(&mut median_buf);
-        let mad = mad_f32_with_scratch(&working, center, &mut mad_scratch);
-        let sigma = mad_to_sigma(mad);
-
-        if sigma < f32::EPSILON {
-            break;
-        }
-
-        let low_bound = center - config.sigma * sigma;
-        let high_bound = center + config.sigma * sigma;
-
-        let mut changed = false;
-        for v in &mut working {
-            if *v < low_bound {
-                *v = low_bound;
-                changed = true;
-            } else if *v > high_bound {
-                *v = high_bound;
-                changed = true;
-            }
-        }
-
-        if !changed {
-            break;
-        }
-    }
-
-    working
-}
-
-/// Linear fit clipping: reject pixels based on deviation from linear fit.
-///
-/// This method is particularly effective for data with sky gradients where
-/// pixel values may have a linear relationship with some reference.
-/// Here we use the pixel index as the reference (assumes temporal ordering).
-///
-/// Modifies `values` and `indices` in place. See [`sigma_clipped_mean`] for index semantics.
-pub fn linear_fit_clipped_mean(
-    values: &mut [f32],
-    indices: &mut Vec<usize>,
-    config: &LinearFitClipConfig,
-) -> RejectionResult {
-    debug_assert!(!values.is_empty());
-
-    reset_indices(indices, values.len());
-
-    if values.len() <= 3 {
-        return RejectionResult {
-            value: math::mean_f32(values),
-            remaining_count: values.len(),
-        };
-    }
-
-    let mut len = values.len();
-
-    for _ in 0..config.max_iterations {
-        if len <= 3 {
-            break;
-        }
-
-        // Fit line y = a + b*x using least squares
-        // x values are the original indices
-        let n = len as f32;
-        let mut sum_x = 0.0f32;
-        let mut sum_y = 0.0f32;
-        let mut sum_xy = 0.0f32;
-        let mut sum_xx = 0.0f32;
-
-        for i in 0..len {
-            let x = indices[i] as f32;
-            let y = values[i];
-            sum_x += x;
-            sum_y += y;
-            sum_xy += x * y;
-            sum_xx += x * x;
-        }
-
-        let denom = n * sum_xx - sum_x * sum_x;
-        if denom.abs() < f32::EPSILON {
-            break;
-        }
-
-        let b = (n * sum_xy - sum_x * sum_y) / denom;
-        let a = (sum_y - b * sum_x) / n;
-
-        // Compute residuals and their std dev
-        let mut sum_residual_sq = 0.0f32;
-        for i in 0..len {
-            let x = indices[i] as f32;
-            let predicted = a + b * x;
-            let residual = values[i] - predicted;
-            sum_residual_sq += residual * residual;
-        }
-
-        let std_dev = (sum_residual_sq / n).sqrt();
-        if std_dev < f32::EPSILON {
-            break;
-        }
-
-        // Clip based on residuals from fit
-        let mut write_idx = 0;
-        for read_idx in 0..len {
-            let x = indices[read_idx] as f32;
-            let predicted = a + b * x;
-            let residual = values[read_idx] - predicted;
-
-            let keep = if residual < 0.0 {
-                residual.abs() <= config.sigma_low * std_dev
-            } else {
-                residual <= config.sigma_high * std_dev
+        if values.len() <= 2 {
+            return RejectionResult {
+                value: math::mean_f32(values),
+                remaining_count: values.len(),
             };
+        }
 
-            if keep {
-                values[write_idx] = values[read_idx];
-                indices[write_idx] = indices[read_idx];
-                write_idx += 1;
+        let mut len = values.len();
+        let mut scratch = Vec::with_capacity(len);
+
+        for _ in 0..self.max_iterations {
+            if len <= 2 {
+                break;
             }
+
+            let active = &mut values[..len];
+
+            let center = math::median_f32_mut(active);
+            let mad = mad_f32_with_scratch(&values[..len], center, &mut scratch);
+            let sigma = mad_to_sigma(mad);
+
+            if sigma < f32::EPSILON {
+                break;
+            }
+
+            let low_threshold = self.sigma_low * sigma;
+            let high_threshold = self.sigma_high * sigma;
+
+            // Partition: move kept values and indices to front
+            let mut write_idx = 0;
+            for read_idx in 0..len {
+                let diff = values[read_idx] - center;
+                let keep = if diff < 0.0 {
+                    diff.abs() <= low_threshold
+                } else {
+                    diff <= high_threshold
+                };
+                if keep {
+                    values[write_idx] = values[read_idx];
+                    indices[write_idx] = indices[read_idx];
+                    write_idx += 1;
+                }
+            }
+
+            if write_idx == len {
+                break;
+            }
+            len = write_idx;
         }
 
-        if write_idx == len {
-            break;
+        RejectionResult {
+            value: math::mean_f32(&values[..len]),
+            remaining_count: len,
         }
-        len = write_idx;
-    }
-
-    RejectionResult {
-        value: math::mean_f32(&values[..len]),
-        remaining_count: len,
     }
 }
 
-/// Percentile clipping: reject lowest and highest percentiles.
-///
-/// Simple and effective for small stacks. Requires sorting.
-///
-/// Modifies the input slice in place (sorts it).
-pub fn percentile_clipped_mean(
-    values: &mut [f32],
-    config: &PercentileClipConfig,
-) -> RejectionResult {
-    debug_assert!(!values.is_empty());
+impl WinsorizedClipConfig {
+    /// Apply winsorization: replace outliers with boundary values, return modified copy.
+    ///
+    /// Iteratively computes median and std dev, then clamps values to
+    /// `[median - sigma*stddev, median + sigma*stddev]`.
+    ///
+    /// Does NOT modify the input slice.
+    pub fn winsorize(&self, values: &[f32]) -> Vec<f32> {
+        debug_assert!(!values.is_empty());
 
-    let original_len = values.len();
+        let mut working = values.to_vec();
 
-    if values.len() <= 2 {
-        return RejectionResult {
-            value: math::mean_f32(values),
-            remaining_count: values.len(),
-        };
-    }
-
-    // Sort for percentile computation
-    values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-
-    // Calculate indices to keep
-    let low_count = ((config.low_percentile / 100.0) * original_len as f32).floor() as usize;
-    let high_count = ((config.high_percentile / 100.0) * original_len as f32).floor() as usize;
-
-    let start = low_count;
-    let end = original_len.saturating_sub(high_count);
-
-    // Ensure we have at least one value
-    let (start, end) = if start >= end {
-        let mid = original_len / 2;
-        (mid, mid + 1)
-    } else {
-        (start, end)
-    };
-
-    let remaining = &values[start..end];
-    let remaining_count = remaining.len();
-
-    RejectionResult {
-        value: math::mean_f32(remaining),
-        remaining_count,
-    }
-}
-
-/// GESD (Generalized Extreme Studentized Deviate) test for outlier detection.
-///
-/// A rigorous statistical test that can identify multiple outliers.
-/// Best for large datasets (> 50 frames).
-///
-/// Algorithm:
-/// 1. Compute test statistic R_i for most extreme value
-/// 2. Compare to critical value based on t-distribution
-/// 3. If R_i > critical, mark as outlier and repeat
-/// 4. Return mean of non-outliers
-///
-/// Modifies `values` and `indices` in place. See [`sigma_clipped_mean`] for index semantics.
-pub fn gesd_mean(
-    values: &mut [f32],
-    indices: &mut Vec<usize>,
-    config: &GesdConfig,
-) -> RejectionResult {
-    debug_assert!(!values.is_empty());
-
-    reset_indices(indices, values.len());
-
-    let original_len = values.len();
-
-    if values.len() <= 3 {
-        return RejectionResult {
-            value: math::mean_f32(values),
-            remaining_count: values.len(),
-        };
-    }
-
-    let max_outliers = config
-        .max_outliers_for_size(original_len)
-        .min(original_len - 3);
-    let mut len = original_len;
-
-    for i in 0..max_outliers {
-        if len <= 3 {
-            break;
+        if values.len() <= 2 {
+            return working;
         }
 
-        let active = &values[..len];
-        let mean = math::mean_f32(active);
-        let variance = math::sum_squared_diff(active, mean) / len as f32;
-        let std_dev = variance.sqrt();
+        let mut median_buf = Vec::with_capacity(values.len());
+        let mut mad_scratch = Vec::with_capacity(values.len());
 
-        if std_dev < f32::EPSILON {
-            break;
-        }
+        for _ in 0..self.max_iterations {
+            // Copy into scratch buffer for median (which sorts in-place)
+            median_buf.clear();
+            median_buf.extend_from_slice(&working);
+            let center = math::median_f32_mut(&mut median_buf);
+            let mad = mad_f32_with_scratch(&working, center, &mut mad_scratch);
+            let sigma = mad_to_sigma(mad);
 
-        // Find the most extreme value
-        let mut max_deviation = 0.0f32;
-        let mut max_idx = 0;
-        for (idx, &v) in active.iter().enumerate() {
-            let deviation = (v - mean).abs();
-            if deviation > max_deviation {
-                max_deviation = deviation;
-                max_idx = idx;
+            if sigma < f32::EPSILON {
+                break;
+            }
+
+            let low_bound = center - self.sigma * sigma;
+            let high_bound = center + self.sigma * sigma;
+
+            let mut changed = false;
+            for v in &mut working {
+                if *v < low_bound {
+                    *v = low_bound;
+                    changed = true;
+                } else if *v > high_bound {
+                    *v = high_bound;
+                    changed = true;
+                }
+            }
+
+            if !changed {
+                break;
             }
         }
 
-        // Compute test statistic R_i
-        let r_i = max_deviation / std_dev;
+        working
+    }
+}
 
-        // Compute critical value using approximation
-        // For large n, critical value ≈ t_{p,n-i-1} * (n-i-1) / sqrt((n-i-1+t²)(n-i))
-        let n = len as f32;
-        let p = 1.0 - config.alpha / (2.0 * (n - i as f32));
+impl LinearFitClipConfig {
+    /// Linear fit clipping: reject pixels based on deviation from linear fit.
+    ///
+    /// This method is particularly effective for data with sky gradients where
+    /// pixel values may have a linear relationship with some reference.
+    /// Here we use the pixel index as the reference (assumes temporal ordering).
+    ///
+    /// Modifies `values` and `indices` in place. See [`SigmaClipConfig::clipped_mean`] for index semantics.
+    pub fn clipped_mean(&self, values: &mut [f32], indices: &mut Vec<usize>) -> RejectionResult {
+        debug_assert!(!values.is_empty());
 
-        // Approximation for t-distribution critical value
-        // Using simple approximation: t ≈ inverse_normal(p) for large df
-        let t_crit = inverse_normal_approx(p);
+        reset_indices(indices, values.len());
 
-        let numerator = (n - i as f32 - 1.0) * t_crit;
-        let denominator = ((n - i as f32) * (n - i as f32 - 2.0 + t_crit * t_crit)).sqrt();
-        let critical = numerator / denominator;
+        if values.len() <= 3 {
+            return RejectionResult {
+                value: math::mean_f32(values),
+                remaining_count: values.len(),
+            };
+        }
 
-        // If test statistic exceeds critical value, remove the outlier
-        if r_i > critical {
-            // Remove by swapping with last element
-            values.swap(max_idx, len - 1);
-            indices.swap(max_idx, len - 1);
-            len -= 1;
+        let mut len = values.len();
+
+        for _ in 0..self.max_iterations {
+            if len <= 3 {
+                break;
+            }
+
+            // Fit line y = a + b*x using least squares
+            // x values are the original indices
+            let n = len as f32;
+            let mut sum_x = 0.0f32;
+            let mut sum_y = 0.0f32;
+            let mut sum_xy = 0.0f32;
+            let mut sum_xx = 0.0f32;
+
+            for i in 0..len {
+                let x = indices[i] as f32;
+                let y = values[i];
+                sum_x += x;
+                sum_y += y;
+                sum_xy += x * y;
+                sum_xx += x * x;
+            }
+
+            let denom = n * sum_xx - sum_x * sum_x;
+            if denom.abs() < f32::EPSILON {
+                break;
+            }
+
+            let b = (n * sum_xy - sum_x * sum_y) / denom;
+            let a = (sum_y - b * sum_x) / n;
+
+            // Compute residuals and their std dev
+            let mut sum_residual_sq = 0.0f32;
+            for i in 0..len {
+                let x = indices[i] as f32;
+                let predicted = a + b * x;
+                let residual = values[i] - predicted;
+                sum_residual_sq += residual * residual;
+            }
+
+            let std_dev = (sum_residual_sq / n).sqrt();
+            if std_dev < f32::EPSILON {
+                break;
+            }
+
+            // Clip based on residuals from fit
+            let mut write_idx = 0;
+            for read_idx in 0..len {
+                let x = indices[read_idx] as f32;
+                let predicted = a + b * x;
+                let residual = values[read_idx] - predicted;
+
+                let keep = if residual < 0.0 {
+                    residual.abs() <= self.sigma_low * std_dev
+                } else {
+                    residual <= self.sigma_high * std_dev
+                };
+
+                if keep {
+                    values[write_idx] = values[read_idx];
+                    indices[write_idx] = indices[read_idx];
+                    write_idx += 1;
+                }
+            }
+
+            if write_idx == len {
+                break;
+            }
+            len = write_idx;
+        }
+
+        RejectionResult {
+            value: math::mean_f32(&values[..len]),
+            remaining_count: len,
+        }
+    }
+}
+
+impl PercentileClipConfig {
+    /// Percentile clipping: reject lowest and highest percentiles.
+    ///
+    /// Simple and effective for small stacks. Requires sorting.
+    ///
+    /// Modifies the input slice in place (sorts it).
+    pub fn clipped_mean(&self, values: &mut [f32]) -> RejectionResult {
+        debug_assert!(!values.is_empty());
+
+        let original_len = values.len();
+
+        if values.len() <= 2 {
+            return RejectionResult {
+                value: math::mean_f32(values),
+                remaining_count: values.len(),
+            };
+        }
+
+        // Sort for percentile computation
+        values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+
+        // Calculate indices to keep
+        let low_count = ((self.low_percentile / 100.0) * original_len as f32).floor() as usize;
+        let high_count = ((self.high_percentile / 100.0) * original_len as f32).floor() as usize;
+
+        let start = low_count;
+        let end = original_len.saturating_sub(high_count);
+
+        // Ensure we have at least one value
+        let (start, end) = if start >= end {
+            let mid = original_len / 2;
+            (mid, mid + 1)
         } else {
-            // No more outliers found
-            break;
+            (start, end)
+        };
+
+        let remaining = &values[start..end];
+        let remaining_count = remaining.len();
+
+        RejectionResult {
+            value: math::mean_f32(remaining),
+            remaining_count,
         }
     }
+}
 
-    RejectionResult {
-        value: math::mean_f32(&values[..len]),
-        remaining_count: len,
+impl GesdConfig {
+    /// GESD (Generalized Extreme Studentized Deviate) test for outlier detection.
+    ///
+    /// A rigorous statistical test that can identify multiple outliers.
+    /// Best for large datasets (> 50 frames).
+    ///
+    /// Algorithm:
+    /// 1. Compute test statistic R_i for most extreme value
+    /// 2. Compare to critical value based on t-distribution
+    /// 3. If R_i > critical, mark as outlier and repeat
+    /// 4. Return mean of non-outliers
+    ///
+    /// Modifies `values` and `indices` in place. See [`SigmaClipConfig::clipped_mean`] for index semantics.
+    pub fn clipped_mean(&self, values: &mut [f32], indices: &mut Vec<usize>) -> RejectionResult {
+        debug_assert!(!values.is_empty());
+
+        reset_indices(indices, values.len());
+
+        let original_len = values.len();
+
+        if values.len() <= 3 {
+            return RejectionResult {
+                value: math::mean_f32(values),
+                remaining_count: values.len(),
+            };
+        }
+
+        let max_outliers = self
+            .max_outliers_for_size(original_len)
+            .min(original_len - 3);
+        let mut len = original_len;
+
+        for i in 0..max_outliers {
+            if len <= 3 {
+                break;
+            }
+
+            let active = &values[..len];
+            let mean = math::mean_f32(active);
+            let variance = math::sum_squared_diff(active, mean) / len as f32;
+            let std_dev = variance.sqrt();
+
+            if std_dev < f32::EPSILON {
+                break;
+            }
+
+            // Find the most extreme value
+            let mut max_deviation = 0.0f32;
+            let mut max_idx = 0;
+            for (idx, &v) in active.iter().enumerate() {
+                let deviation = (v - mean).abs();
+                if deviation > max_deviation {
+                    max_deviation = deviation;
+                    max_idx = idx;
+                }
+            }
+
+            // Compute test statistic R_i
+            let r_i = max_deviation / std_dev;
+
+            // Compute critical value using approximation
+            // For large n, critical value ≈ t_{p,n-i-1} * (n-i-1) / sqrt((n-i-1+t²)(n-i))
+            let n = len as f32;
+            let p = 1.0 - self.alpha / (2.0 * (n - i as f32));
+
+            // Approximation for t-distribution critical value
+            // Using simple approximation: t ≈ inverse_normal(p) for large df
+            let t_crit = inverse_normal_approx(p);
+
+            let numerator = (n - i as f32 - 1.0) * t_crit;
+            let denominator = ((n - i as f32) * (n - i as f32 - 2.0 + t_crit * t_crit)).sqrt();
+            let critical = numerator / denominator;
+
+            // If test statistic exceeds critical value, remove the outlier
+            if r_i > critical {
+                // Remove by swapping with last element
+                values.swap(max_idx, len - 1);
+                indices.swap(max_idx, len - 1);
+                len -= 1;
+            } else {
+                // No more outliers found
+                break;
+            }
+        }
+
+        RejectionResult {
+            value: math::mean_f32(&values[..len]),
+            remaining_count: len,
+        }
     }
 }
 
@@ -809,7 +798,7 @@ mod tests {
         let mut values = vec![1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 100.0];
         let mut indices = make_indices(values.len());
         let config = SigmaClipConfig::new(2.0, 3);
-        let result = sigma_clipped_mean(&mut values, &mut indices, &config);
+        let result = config.clipped_mean(&mut values, &mut indices);
         assert!(
             result.value < 10.0,
             "Expected outlier to be clipped, got {}",
@@ -823,7 +812,7 @@ mod tests {
         let mut values = vec![1.0, 1.1, 1.2, 0.9, 1.0];
         let mut indices = make_indices(values.len());
         let config = SigmaClipConfig::new(3.0, 3);
-        let result = sigma_clipped_mean(&mut values, &mut indices, &config);
+        let result = config.clipped_mean(&mut values, &mut indices);
         assert_eq!(result.remaining_count, 5);
     }
 
@@ -831,7 +820,7 @@ mod tests {
     fn test_winsorize() {
         let values = vec![1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 100.0];
         let config = WinsorizedClipConfig::new(2.0, 3);
-        let winsorized = winsorize(&values, &config);
+        let winsorized = config.winsorize(&values);
         let mean = math::mean_f32(&winsorized);
         // Winsorized should have lower mean than with full outlier
         assert!(mean < 20.0, "Outlier should be winsorized, got {}", mean);
@@ -844,7 +833,7 @@ mod tests {
         let mut values = vec![5.0, 5.0, 5.0, 5.0, 5.0];
         let mut indices = make_indices(values.len());
         let config = LinearFitClipConfig::default();
-        let result = linear_fit_clipped_mean(&mut values, &mut indices, &config);
+        let result = config.clipped_mean(&mut values, &mut indices);
         assert!((result.value - 5.0).abs() < 0.01);
         assert_eq!(result.remaining_count, 5);
     }
@@ -855,7 +844,7 @@ mod tests {
         let mut values = vec![1.0, 2.0, 3.0, 4.0, 100.0, 6.0];
         let mut indices = make_indices(values.len());
         let config = LinearFitClipConfig::new(2.0, 2.0, 3);
-        let result = linear_fit_clipped_mean(&mut values, &mut indices, &config);
+        let result = config.clipped_mean(&mut values, &mut indices);
         // Should reject the 100.0 outlier
         assert!(result.remaining_count < 6);
         assert!(result.value < 20.0);
@@ -865,7 +854,7 @@ mod tests {
     fn test_percentile_clipped_mean() {
         let mut values = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0];
         let config = PercentileClipConfig::new(20.0, 20.0);
-        let result = percentile_clipped_mean(&mut values, &config);
+        let result = config.clipped_mean(&mut values);
         // Should clip 2 from each end (20% of 10)
         assert_eq!(result.remaining_count, 6);
         // Mean of [3, 4, 5, 6, 7, 8] = 5.5
@@ -877,7 +866,7 @@ mod tests {
         let mut values = vec![1.0, 1.1, 0.9, 1.0, 1.2, 0.8, 1.0, 100.0];
         let mut indices = make_indices(values.len());
         let config = GesdConfig::new(0.05, Some(3));
-        let result = gesd_mean(&mut values, &mut indices, &config);
+        let result = config.clipped_mean(&mut values, &mut indices);
         // Should detect and remove the 100.0 outlier
         assert!(result.remaining_count < 8);
         assert!(result.value < 10.0);
@@ -888,7 +877,7 @@ mod tests {
         let mut values = vec![1.0, 1.1, 0.9, 1.0, 1.2, 0.8, 1.0, 1.1];
         let mut indices = make_indices(values.len());
         let config = GesdConfig::new(0.05, Some(3));
-        let result = gesd_mean(&mut values, &mut indices, &config);
+        let result = config.clipped_mean(&mut values, &mut indices);
         // Clean data should have few or no rejections
         assert!(result.remaining_count >= 7);
     }
@@ -912,39 +901,26 @@ mod tests {
         // All algorithms should handle small samples gracefully
         let values = vec![1.0, 2.0];
 
-        let sigma_result = sigma_clipped_mean(
-            &mut values.clone(),
-            &mut make_indices(values.len()),
-            &SigmaClipConfig::default(),
-        );
+        let sigma_result = SigmaClipConfig::default()
+            .clipped_mean(&mut values.clone(), &mut make_indices(values.len()));
         assert_eq!(sigma_result.remaining_count, 2);
 
-        let winsorized = winsorize(&values, &WinsorizedClipConfig::default());
+        let winsorized = WinsorizedClipConfig::default().winsorize(&values);
         assert_eq!(winsorized.len(), 2);
 
-        let linear_result = linear_fit_clipped_mean(
-            &mut values.clone(),
-            &mut make_indices(values.len()),
-            &LinearFitClipConfig::default(),
-        );
+        let linear_result = LinearFitClipConfig::default()
+            .clipped_mean(&mut values.clone(), &mut make_indices(values.len()));
         assert_eq!(linear_result.remaining_count, 2);
 
-        let percentile_result =
-            percentile_clipped_mean(&mut values.clone(), &PercentileClipConfig::default());
+        let percentile_result = PercentileClipConfig::default().clipped_mean(&mut values.clone());
         assert!(percentile_result.remaining_count >= 1);
 
-        let asymmetric_result = sigma_clipped_mean_asymmetric(
-            &mut values.clone(),
-            &mut make_indices(values.len()),
-            &AsymmetricSigmaClipConfig::default(),
-        );
+        let asymmetric_result = AsymmetricSigmaClipConfig::default()
+            .clipped_mean(&mut values.clone(), &mut make_indices(values.len()));
         assert_eq!(asymmetric_result.remaining_count, 2);
 
-        let gesd_result = gesd_mean(
-            &mut values.clone(),
-            &mut make_indices(values.len()),
-            &GesdConfig::default(),
-        );
+        let gesd_result = GesdConfig::default()
+            .clipped_mean(&mut values.clone(), &mut make_indices(values.len()));
         assert_eq!(gesd_result.remaining_count, 2);
     }
 
@@ -986,7 +962,7 @@ mod tests {
         let mut values = vec![1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 100.0];
         let mut indices = make_indices(values.len());
         let config = AsymmetricSigmaClipConfig::new(4.0, 2.0, 3);
-        let result = sigma_clipped_mean_asymmetric(&mut values, &mut indices, &config);
+        let result = config.clipped_mean(&mut values, &mut indices);
         assert!(
             result.value < 10.0,
             "High outlier should be clipped, got {}",
@@ -1003,7 +979,7 @@ mod tests {
         let mut values = vec![-5.0, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 50.0];
         let mut indices = make_indices(values.len());
         let config = AsymmetricSigmaClipConfig::new(10.0, 2.0, 5);
-        let result = sigma_clipped_mean_asymmetric(&mut values, &mut indices, &config);
+        let result = config.clipped_mean(&mut values, &mut indices);
 
         // The high outlier (50.0) should be removed
         // The low outlier (-5.0) should be kept due to high sigma_low
@@ -1025,7 +1001,7 @@ mod tests {
         let mut values = vec![1.0, 1.1, 1.2, 0.9, 1.0];
         let mut indices = make_indices(values.len());
         let config = AsymmetricSigmaClipConfig::new(3.0, 3.0, 3);
-        let result = sigma_clipped_mean_asymmetric(&mut values, &mut indices, &config);
+        let result = config.clipped_mean(&mut values, &mut indices);
         assert_eq!(result.remaining_count, 5);
     }
 
@@ -1035,16 +1011,10 @@ mod tests {
         let values = vec![1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 100.0];
         let sigma = 2.5;
 
-        let sym_result = sigma_clipped_mean(
-            &mut values.clone(),
-            &mut make_indices(values.len()),
-            &SigmaClipConfig::new(sigma, 3),
-        );
-        let asym_result = sigma_clipped_mean_asymmetric(
-            &mut values.clone(),
-            &mut make_indices(values.len()),
-            &AsymmetricSigmaClipConfig::new(sigma, sigma, 3),
-        );
+        let sym_result = SigmaClipConfig::new(sigma, 3)
+            .clipped_mean(&mut values.clone(), &mut make_indices(values.len()));
+        let asym_result = AsymmetricSigmaClipConfig::new(sigma, sigma, 3)
+            .clipped_mean(&mut values.clone(), &mut make_indices(values.len()));
 
         assert_eq!(sym_result.remaining_count, asym_result.remaining_count);
         assert!(
@@ -1062,16 +1032,10 @@ mod tests {
         // For data with a clear trend, they give different results.
         let values = vec![1.0, 3.0, 5.0, 7.0, 9.0, 11.0, 13.0, 15.0, 17.0, 19.0];
 
-        let asym_result = sigma_clipped_mean_asymmetric(
-            &mut values.clone(),
-            &mut make_indices(values.len()),
-            &AsymmetricSigmaClipConfig::new(1.0, 1.0, 3),
-        );
-        let linear_result = linear_fit_clipped_mean(
-            &mut values.clone(),
-            &mut make_indices(values.len()),
-            &LinearFitClipConfig::new(1.0, 1.0, 3),
-        );
+        let asym_result = AsymmetricSigmaClipConfig::new(1.0, 1.0, 3)
+            .clipped_mean(&mut values.clone(), &mut make_indices(values.len()));
+        let linear_result = LinearFitClipConfig::new(1.0, 1.0, 3)
+            .clipped_mean(&mut values.clone(), &mut make_indices(values.len()));
 
         // Linear fit follows the trend perfectly, so no rejections
         assert_eq!(
@@ -1096,7 +1060,7 @@ mod tests {
         let mut values = vec![1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 100.0];
         let mut indices = make_indices(values.len());
         let config = SigmaClipConfig::new(2.0, 3);
-        let result = sigma_clipped_mean(&mut values, &mut indices, &config);
+        let result = config.clipped_mean(&mut values, &mut indices);
 
         // Outlier (frame 7) should be rejected
         let surviving = &indices[..result.remaining_count];
@@ -1117,7 +1081,7 @@ mod tests {
         let mut values = vec![1.0, 1.1, 0.9, 1.0, 1.2, 0.8, 1.0, 100.0];
         let mut indices = make_indices(values.len());
         let config = GesdConfig::new(0.05, Some(3));
-        let result = gesd_mean(&mut values, &mut indices, &config);
+        let result = config.clipped_mean(&mut values, &mut indices);
 
         let surviving = &indices[..result.remaining_count];
         assert!(
@@ -1136,7 +1100,7 @@ mod tests {
         let mut values = vec![1.0, 2.0, 3.0, 4.0, 100.0, 6.0];
         let mut indices = make_indices(values.len());
         let config = LinearFitClipConfig::new(2.0, 2.0, 3);
-        let result = linear_fit_clipped_mean(&mut values, &mut indices, &config);
+        let result = config.clipped_mean(&mut values, &mut indices);
 
         let surviving = &indices[..result.remaining_count];
         assert!(
@@ -1154,7 +1118,7 @@ mod tests {
         let mut values = vec![1.0, 1.1, 1.2, 0.9, 1.0];
         let mut indices = make_indices(values.len());
         let config = SigmaClipConfig::new(3.0, 3);
-        let result = sigma_clipped_mean(&mut values, &mut indices, &config);
+        let result = config.clipped_mean(&mut values, &mut indices);
 
         assert_eq!(result.remaining_count, 5);
         // All original indices should be present
