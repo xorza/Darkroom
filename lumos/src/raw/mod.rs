@@ -88,13 +88,13 @@ impl UnpackedRaw {
         width: usize,
         height: usize,
         channels: usize,
-        is_cfa: bool,
+        cfa_type: Option<CfaType>,
     ) -> AstroImageMetadata {
         AstroImageMetadata {
             iso: self.iso,
             bitpix: BitPix::Int16,
             header_dimensions: vec![height, width, channels],
-            is_cfa,
+            cfa_type,
             ..Default::default()
         }
     }
@@ -473,30 +473,43 @@ pub fn load_raw(path: &Path) -> Result<AstroImage> {
     let mut raw = open_raw(path)?;
 
     let sensor_type = raw.sensor_type.clone();
-    let (pixels, out_width, out_height, num_channels, is_cfa) = match sensor_type {
+    let (pixels, out_width, out_height, num_channels, cfa_type) = match sensor_type {
         SensorType::Monochrome => {
             tracing::info!("Monochrome sensor detected, skipping demosaic");
             let pixels = raw.extract_cfa_pixels()?;
-            (pixels, raw.width, raw.height, 1, false)
+            (pixels, raw.width, raw.height, 1, None)
         }
         SensorType::Bayer(cfa_pattern) => {
             tracing::debug!("Detected Bayer CFA pattern: {:?}", cfa_pattern);
             let (pixels, channels) = raw.demosaic_bayer(cfa_pattern)?;
-            (pixels, raw.width, raw.height, channels, true)
+            (
+                pixels,
+                raw.width,
+                raw.height,
+                channels,
+                Some(CfaType::Bayer(cfa_pattern)),
+            )
         }
         SensorType::XTrans => {
             tracing::info!("X-Trans sensor detected, using X-Trans demosaic");
+            let xtrans_pattern = raw.xtrans_pattern();
             let (pixels, channels) = raw.demosaic_xtrans()?;
-            (pixels, raw.width, raw.height, channels, true)
+            (
+                pixels,
+                raw.width,
+                raw.height,
+                channels,
+                Some(CfaType::XTrans(xtrans_pattern)),
+            )
         }
         SensorType::Unknown => {
             tracing::info!("Unknown CFA pattern, using libraw demosaic fallback");
             let (pixels, w, h, c) = raw.demosaic_libraw_fallback()?;
-            (pixels, w, h, c, true)
+            (pixels, w, h, c, Some(CfaType::Mono))
         }
     };
 
-    let metadata = raw.metadata(out_width, out_height, num_channels, is_cfa);
+    let metadata = raw.metadata(out_width, out_height, num_channels, cfa_type);
     drop(raw);
 
     let dimensions = ImageDimensions::new(out_width, out_height, num_channels);
@@ -527,29 +540,32 @@ pub fn load_raw_cfa(path: &Path) -> Result<CfaImage> {
     match sensor_type {
         SensorType::Monochrome => {
             let pixels = raw.extract_cfa_pixels()?;
-            let metadata = raw.metadata(raw.width, raw.height, 1, false);
+            let pattern = CfaType::Mono;
+            let metadata = raw.metadata(raw.width, raw.height, 1, None);
             Ok(CfaImage {
                 data: Buffer2::new(raw.width, raw.height, pixels),
-                pattern: CfaType::Mono,
+                pattern,
                 metadata,
             })
         }
         SensorType::Bayer(cfa_pattern) => {
             let pixels = raw.extract_cfa_pixels()?;
-            let metadata = raw.metadata(raw.width, raw.height, 1, true);
+            let pattern = CfaType::Bayer(cfa_pattern);
+            let metadata = raw.metadata(raw.width, raw.height, 1, Some(pattern.clone()));
             Ok(CfaImage {
                 data: Buffer2::new(raw.width, raw.height, pixels),
-                pattern: CfaType::Bayer(cfa_pattern),
+                pattern,
                 metadata,
             })
         }
         SensorType::XTrans => {
             let xtrans_pattern = raw.xtrans_pattern();
             let pixels = raw.extract_cfa_pixels()?;
-            let metadata = raw.metadata(raw.width, raw.height, 1, true);
+            let pattern = CfaType::XTrans(xtrans_pattern);
+            let metadata = raw.metadata(raw.width, raw.height, 1, Some(pattern.clone()));
             Ok(CfaImage {
                 data: Buffer2::new(raw.width, raw.height, pixels),
-                pattern: CfaType::XTrans(xtrans_pattern),
+                pattern,
                 metadata,
             })
         }

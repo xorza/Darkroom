@@ -57,7 +57,7 @@ pub fn load_fits(path: &Path) -> Result<AstroImage> {
         iso: None, // FITS typically doesn't store ISO
         bitpix,
         header_dimensions: dimensions,
-        is_cfa: false,
+        cfa_type: None,
     };
 
     let mut astro = AstroImage::from_pixels(img_dims, pixels);

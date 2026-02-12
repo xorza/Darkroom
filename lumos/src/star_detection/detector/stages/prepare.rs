@@ -18,7 +18,7 @@ pub(crate) fn prepare(image: &AstroImage, pool: &mut BufferPool) -> Buffer2<f32>
     image.write_grayscale_buffer(&mut pixels);
 
     // CFA median filter
-    if image.metadata.is_cfa {
+    if image.metadata.cfa_type.is_some() {
         let mut scratch = pool.acquire_f32();
         median_filter_3x3(&pixels, &mut scratch);
         std::mem::swap(&mut pixels, &mut scratch);

@@ -108,8 +108,9 @@ pub struct AstroImageMetadata {
     pub iso: Option<u32>,
     pub bitpix: BitPix,
     pub header_dimensions: Vec<usize>,
-    /// Whether the image has CFA pattern artifacts (from Bayer/X-Trans sensors).
-    pub is_cfa: bool,
+    /// CFA sensor type, if the image originated from a raw sensor.
+    /// `None` for non-CFA sources (FITS, monochrome sensors).
+    pub cfa_type: Option<cfa::CfaType>,
 }
 
 // ============================================================================
