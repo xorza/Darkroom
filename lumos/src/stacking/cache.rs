@@ -31,6 +31,26 @@ use crate::stacking::error::Error;
 use crate::stacking::progress::{ProgressCallback, StackingStage, report_progress};
 use crate::stacking::stack::NormParams;
 
+/// Per-thread scratch buffers for stacking combine closures.
+///
+/// Allocated once per rayon thread via `for_each_init` and reused across all pixels.
+#[derive(Debug)]
+pub(crate) struct ScratchBuffers {
+    /// Tracks original frame indices after rejection reordering.
+    pub indices: Vec<usize>,
+    /// Scratch space for weighted percentile (value, weight) pairs.
+    pub pairs: Vec<(f32, f32)>,
+}
+
+impl ScratchBuffers {
+    fn new(frame_count: usize) -> Self {
+        Self {
+            indices: Vec::with_capacity(frame_count),
+            pairs: Vec::with_capacity(frame_count),
+        }
+    }
+}
+
 /// Trait for images that can be stacked via `ImageCache`.
 ///
 /// Implementations must provide planar channel access as `&[f32]` slices
@@ -315,7 +335,7 @@ impl<I: StackableImage> ImageCache<I> {
         combine: F,
     ) -> PixelData
     where
-        F: Fn(&mut [f32], Option<&[f32]>, &mut Vec<usize>) -> f32 + Sync,
+        F: Fn(&mut [f32], Option<&[f32]>, &mut ScratchBuffers) -> f32 + Sync,
     {
         if let Some(w) = weights {
             assert_eq!(
@@ -330,8 +350,8 @@ impl<I: StackableImage> ImageCache<I> {
                 .par_chunks_mut(width)
                 .enumerate()
                 .for_each_init(
-                    || (vec![0.0f32; frame_count], Vec::with_capacity(frame_count)),
-                    |(values, indices), (row_in_chunk, row_output)| {
+                    || (vec![0.0f32; frame_count], ScratchBuffers::new(frame_count)),
+                    |(values, scratch), (row_in_chunk, row_output)| {
                         let row_offset = row_in_chunk * width;
 
                         for (pixel_in_row, out) in row_output.iter_mut().enumerate() {
@@ -346,7 +366,7 @@ impl<I: StackableImage> ImageCache<I> {
                                     values[frame_idx] = chunk[pixel_idx];
                                 }
                             }
-                            *out = combine(values, weights, indices);
+                            *out = combine(values, weights, scratch);
                         }
                     },
                 );

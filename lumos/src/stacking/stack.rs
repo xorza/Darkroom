@@ -7,7 +7,7 @@ use std::path::Path;
 
 use crate::AstroImage;
 
-use super::cache::{ImageCache, StackableImage};
+use super::cache::{ImageCache, ScratchBuffers, StackableImage};
 use super::config::{CombineMethod, Normalization, Rejection, StackConfig};
 use super::error::Error;
 use super::progress::ProgressCallback;
@@ -154,16 +154,20 @@ pub fn stack_with_progress<P: AsRef<Path> + Sync>(
     Ok(result)
 }
 
-/// Compute per-frame normalization parameters for global normalization.
+/// Compute per-frame normalization parameters based on the normalization mode.
 ///
-/// Uses frame 0 as the reference. For each frame/channel, computes `(gain, offset)`
-/// such that `normalized = raw * gain + offset` matches the reference frame's
-/// median and scale (MAD).
+/// Uses frame 0 as the reference. Returns `None` for `Normalization::None`.
 ///
-/// Formula: `gain = ref_scale / frame_scale`, `offset = ref_median - frame_median * gain`
-pub(crate) fn compute_global_norm_params(
+/// - **Global**: `gain = ref_mad / frame_mad`, `offset = ref_median - frame_median * gain`
+/// - **Multiplicative**: `gain = ref_median / frame_median`, `offset = 0`
+fn compute_norm_params(
     cache: &ImageCache<impl StackableImage>,
-) -> Vec<NormParams> {
+    normalization: Normalization,
+) -> Option<Vec<NormParams>> {
+    if normalization == Normalization::None {
+        return None;
+    }
+
     let stats = cache.compute_channel_stats();
     let channels = cache.dimensions().channels;
     let frame_count = cache.frame_count();
@@ -175,75 +179,41 @@ pub(crate) fn compute_global_norm_params(
         for frame_idx in 0..frame_count {
             let (frame_median, frame_mad) = stats[frame_idx * channels + channel];
 
-            let gain = if frame_mad > f32::EPSILON {
-                ref_mad / frame_mad
-            } else {
-                1.0
+            let np = match normalization {
+                Normalization::Global => {
+                    let gain = if frame_mad > f32::EPSILON {
+                        ref_mad / frame_mad
+                    } else {
+                        1.0
+                    };
+                    NormParams {
+                        gain,
+                        offset: ref_median - frame_median * gain,
+                    }
+                }
+                Normalization::Multiplicative => {
+                    let gain = if frame_median > f32::EPSILON {
+                        ref_median / frame_median
+                    } else {
+                        1.0
+                    };
+                    NormParams { gain, offset: 0.0 }
+                }
+                Normalization::None => unreachable!(),
             };
-            let offset = ref_median - frame_median * gain;
 
-            params[frame_idx * channels + channel] = NormParams { gain, offset };
+            params[frame_idx * channels + channel] = np;
         }
     }
 
     tracing::info!(
         frame_count,
         channels,
-        "Computed global normalization (reference frame 0)"
+        ?normalization,
+        "Computed normalization (reference frame 0)"
     );
 
-    params
-}
-
-/// Compute per-frame normalization parameters for multiplicative normalization.
-///
-/// Uses frame 0 as the reference. For each frame/channel, computes `(gain, offset)`
-/// where `gain = ref_median / frame_median` and `offset = 0.0`.
-///
-/// Best for flat frames where exposure varies (e.g., sky flats at sunset).
-pub(crate) fn compute_multiplicative_norm_params(
-    cache: &ImageCache<impl StackableImage>,
-) -> Vec<NormParams> {
-    let stats = cache.compute_channel_stats();
-    let channels = cache.dimensions().channels;
-    let frame_count = cache.frame_count();
-    let mut params = vec![NormParams::IDENTITY; frame_count * channels];
-
-    for channel in 0..channels {
-        let (ref_median, _) = stats[channel]; // frame 0
-
-        for frame_idx in 0..frame_count {
-            let (frame_median, _) = stats[frame_idx * channels + channel];
-
-            let gain = if frame_median > f32::EPSILON {
-                ref_median / frame_median
-            } else {
-                1.0
-            };
-
-            params[frame_idx * channels + channel] = NormParams { gain, offset: 0.0 };
-        }
-    }
-
-    tracing::info!(
-        frame_count,
-        channels,
-        "Computed multiplicative normalization (reference frame 0)"
-    );
-
-    params
-}
-
-/// Compute normalization parameters based on the normalization mode.
-fn compute_norm_params(
-    cache: &ImageCache<impl StackableImage>,
-    normalization: Normalization,
-) -> Option<Vec<NormParams>> {
-    match normalization {
-        Normalization::None => None,
-        Normalization::Global => Some(compute_global_norm_params(cache)),
-        Normalization::Multiplicative => Some(compute_multiplicative_norm_params(cache)),
-    }
+    Some(params)
 }
 
 /// Run the full stacking pipeline: compute normalization, dispatch combining,
@@ -275,15 +245,15 @@ fn dispatch_stacking(
 
     match config.method {
         CombineMethod::Median => {
-            cache.process_chunked(None, norm_params, move |values, _, indices| {
-                apply_rejection(values, None, indices, &rejection);
+            cache.process_chunked(None, norm_params, move |values, _, scratch| {
+                apply_rejection(values, None, scratch, &rejection);
                 math::median_f32_mut(values)
             })
         }
 
         CombineMethod::Mean => {
-            cache.process_chunked(weights_ref, norm_params, move |values, w, indices| {
-                apply_rejection(values, w, indices, &rejection).value
+            cache.process_chunked(weights_ref, norm_params, move |values, w, scratch| {
+                apply_rejection(values, w, scratch, &rejection).value
             })
         }
     }
@@ -302,14 +272,17 @@ fn reset_indices(indices: &mut Vec<usize>, n: usize) {
 fn apply_rejection(
     values: &mut [f32],
     weights: Option<&[f32]>,
-    indices: &mut Vec<usize>,
+    scratch: &mut ScratchBuffers,
     rejection: &Rejection,
 ) -> RejectionResult {
-    reset_indices(indices, values.len());
+    reset_indices(&mut scratch.indices, values.len());
 
     match rejection {
         Rejection::None => {
-            let value = compute_mean(values, weights, indices);
+            let value = match weights {
+                Some(w) => weighted_mean_indexed(values, w, &scratch.indices),
+                None => math::mean_f32(values),
+            };
             RejectionResult {
                 value,
                 remaining_count: values.len(),
@@ -318,8 +291,8 @@ fn apply_rejection(
 
         Rejection::SigmaClip { sigma, iterations } => {
             let config = RejectionSigmaClipConfig::new(*sigma, *iterations);
-            let result = rejection::sigma_clipped_mean(values, indices, &config);
-            reweight_result(result, values, weights, indices)
+            let result = rejection::sigma_clipped_mean(values, &mut scratch.indices, &config);
+            reweight_result(result, values, weights, &scratch.indices)
         }
 
         Rejection::SigmaClipAsymmetric {
@@ -328,8 +301,9 @@ fn apply_rejection(
             iterations,
         } => {
             let config = AsymmetricSigmaClipConfig::new(*sigma_low, *sigma_high, *iterations);
-            let result = rejection::sigma_clipped_mean_asymmetric(values, indices, &config);
-            reweight_result(result, values, weights, indices)
+            let result =
+                rejection::sigma_clipped_mean_asymmetric(values, &mut scratch.indices, &config);
+            reweight_result(result, values, weights, &scratch.indices)
         }
 
         Rejection::Winsorized { sigma, iterations } => {
@@ -351,24 +325,24 @@ fn apply_rejection(
             iterations,
         } => {
             let config = LinearFitClipConfig::new(*sigma_low, *sigma_high, *iterations);
-            let result = rejection::linear_fit_clipped_mean(values, indices, &config);
-            reweight_result(result, values, weights, indices)
+            let result = rejection::linear_fit_clipped_mean(values, &mut scratch.indices, &config);
+            reweight_result(result, values, weights, &scratch.indices)
         }
 
         Rejection::Percentile { low, high } => {
             let config = PercentileClipConfig::new(*low, *high);
             match weights {
                 Some(w) => {
-                    // Sort values and weights together so they stay aligned
-                    let mut pairs: Vec<(f32, f32)> = values
-                        .iter()
-                        .zip(w.iter())
-                        .map(|(&v, &wt)| (v, wt))
-                        .collect();
-                    pairs
+                    // Reuse scratch pairs buffer instead of allocating per pixel
+                    scratch.pairs.clear();
+                    scratch
+                        .pairs
+                        .extend(values.iter().zip(w.iter()).map(|(&v, &wt)| (v, wt)));
+                    scratch
+                        .pairs
                         .sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
 
-                    let n = pairs.len();
+                    let n = scratch.pairs.len();
                     let low_count = ((low / 100.0) * n as f32).floor() as usize;
                     let high_count = ((high / 100.0) * n as f32).floor() as usize;
                     let start = low_count;
@@ -380,8 +354,8 @@ fn apply_rejection(
                         (start, end)
                     };
 
-                    let remaining = &pairs[start..end];
-                    let value = weighted_mean_pairs(remaining);
+                    let remaining = &scratch.pairs[start..end];
+                    let value = math::weighted_mean_pairs_f32(remaining);
                     RejectionResult {
                         value,
                         remaining_count: remaining.len(),
@@ -396,18 +370,9 @@ fn apply_rejection(
             max_outliers,
         } => {
             let config = GesdConfig::new(*alpha, *max_outliers);
-            let result = rejection::gesd_mean(values, indices, &config);
-            reweight_result(result, values, weights, indices)
+            let result = rejection::gesd_mean(values, &mut scratch.indices, &config);
+            reweight_result(result, values, weights, &scratch.indices)
         }
-    }
-}
-
-/// Compute mean of values, optionally weighted. For the `Rejection::None` path
-/// where indices are identity (no rejection reordering).
-fn compute_mean(values: &[f32], weights: Option<&[f32]>, indices: &[usize]) -> f32 {
-    match weights {
-        Some(w) => weighted_mean_indexed(values, w, indices),
-        None => math::mean_f32(values),
     }
 }
 
@@ -429,24 +394,6 @@ fn reweight_result(
             RejectionResult { value, ..result }
         }
         _ => result,
-    }
-}
-
-/// Compute weighted mean from (value, weight) pairs.
-fn weighted_mean_pairs(pairs: &[(f32, f32)]) -> f32 {
-    if pairs.is_empty() {
-        return 0.0;
-    }
-    let mut sum = 0.0f32;
-    let mut weight_sum = 0.0f32;
-    for &(v, w) in pairs {
-        sum += v * w;
-        weight_sum += w;
-    }
-    if weight_sum > f32::EPSILON {
-        sum / weight_sum
-    } else {
-        pairs.iter().map(|(v, _)| v).sum::<f32>() / pairs.len() as f32
     }
 }
 
@@ -510,15 +457,17 @@ mod tests {
         let _ = stack(&paths, FrameType::Light, config);
     }
 
-    fn make_indices(len: usize) -> Vec<usize> {
-        (0..len).collect()
+    fn scratch() -> ScratchBuffers {
+        ScratchBuffers {
+            indices: vec![],
+            pairs: vec![],
+        }
     }
 
     #[test]
     fn test_apply_rejection_none() {
         let mut values = vec![1.0, 2.0, 3.0, 4.0, 5.0];
-        let mut indices = make_indices(values.len());
-        let result = apply_rejection(&mut values, None, &mut indices, &Rejection::None);
+        let result = apply_rejection(&mut values, None, &mut scratch(), &Rejection::None);
         assert!((result.value - 3.0).abs() < f32::EPSILON);
         assert_eq!(result.remaining_count, 5);
     }
@@ -526,11 +475,10 @@ mod tests {
     #[test]
     fn test_apply_rejection_sigma_clip() {
         let mut values = vec![1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 100.0];
-        let mut indices = make_indices(values.len());
         let result = apply_rejection(
             &mut values,
             None,
-            &mut indices,
+            &mut scratch(),
             &Rejection::SigmaClip {
                 sigma: 2.0,
                 iterations: 3,
@@ -563,7 +511,7 @@ mod tests {
         let result = apply_rejection(
             &mut values,
             Some(&weights),
-            &mut Vec::new(),
+            &mut scratch(),
             &Rejection::Percentile {
                 low: 20.0,
                 high: 20.0,
@@ -589,7 +537,7 @@ mod tests {
         let result = apply_rejection(
             &mut values,
             Some(&weights),
-            &mut Vec::new(),
+            &mut scratch(),
             &Rejection::Winsorized {
                 sigma: 2.0,
                 iterations: 3,
@@ -606,7 +554,7 @@ mod tests {
         let unweighted_result = apply_rejection(
             &mut values_unwt,
             Some(&uniform_weights),
-            &mut Vec::new(),
+            &mut scratch(),
             &Rejection::Winsorized {
                 sigma: 2.0,
                 iterations: 3,
@@ -631,7 +579,7 @@ mod tests {
         let result = apply_rejection(
             &mut values,
             Some(&weights),
-            &mut Vec::new(),
+            &mut scratch(),
             &Rejection::SigmaClipAsymmetric {
                 sigma_low: 4.0,
                 sigma_high: 2.0,
@@ -675,7 +623,7 @@ mod tests {
         let result = apply_rejection(
             &mut values,
             Some(&weights),
-            &mut Vec::new(),
+            &mut scratch(),
             &Rejection::SigmaClip {
                 sigma: 2.0,
                 iterations: 3,
@@ -703,7 +651,7 @@ mod tests {
         let result = apply_rejection(
             &mut values,
             Some(&weights),
-            &mut Vec::new(),
+            &mut scratch(),
             &Rejection::LinearFit {
                 sigma_low: 2.0,
                 sigma_high: 2.0,
@@ -729,7 +677,7 @@ mod tests {
         let result = apply_rejection(
             &mut values,
             Some(&weights),
-            &mut Vec::new(),
+            &mut scratch(),
             &Rejection::Gesd {
                 alpha: 0.05,
                 max_outliers: Some(3),
@@ -754,7 +702,7 @@ mod tests {
         let result = apply_rejection(
             &mut values.clone(),
             Some(&uniform_weights),
-            &mut Vec::new(),
+            &mut scratch(),
             &Rejection::SigmaClip {
                 sigma: 2.0,
                 iterations: 3,
@@ -766,7 +714,7 @@ mod tests {
         let result2 = apply_rejection(
             &mut values2,
             None,
-            &mut Vec::new(),
+            &mut scratch(),
             &Rejection::SigmaClip {
                 sigma: 2.0,
                 iterations: 3,
@@ -794,7 +742,7 @@ mod tests {
             AstroImage::from_pixels(dims, vec![5.0; 16]),
         ];
         let cache = make_test_cache(images);
-        let params = compute_global_norm_params(&cache);
+        let params = compute_norm_params(&cache, Normalization::Global).unwrap();
 
         // 3 frames * 1 channel = 3 entries
         assert_eq!(params.len(), 3);
@@ -824,7 +772,7 @@ mod tests {
             AstroImage::from_pixels(dims, frame1),
         ];
         let cache = make_test_cache(images);
-        let params = compute_global_norm_params(&cache);
+        let params = compute_norm_params(&cache, Normalization::Global).unwrap();
 
         // Frame 0 is reference -> (gain=1, offset=0)
         assert!((params[0].gain - 1.0).abs() < 1e-5);
@@ -855,7 +803,7 @@ mod tests {
             AstroImage::from_pixels(dims, frame1),
         ];
         let cache = make_test_cache(images);
-        let params = compute_global_norm_params(&cache);
+        let params = compute_norm_params(&cache, Normalization::Global).unwrap();
 
         // Frame 1 has ~2x the spread of frame 0, so gain should be ~0.5
         assert!(
@@ -881,7 +829,7 @@ mod tests {
             AstroImage::from_pixels(dims, frame1.clone()),
         ];
         let cache = make_test_cache(images_norm);
-        let norm_params = compute_global_norm_params(&cache);
+        let norm_params = compute_norm_params(&cache, Normalization::Global).unwrap();
 
         // With normalization: all pixels should be close to base_value
         let result = cache.process_chunked(None, Some(&norm_params), |values, _, _| {
@@ -928,7 +876,7 @@ mod tests {
             AstroImage::from_pixels(dims, pixels1),
         ];
         let cache = make_test_cache(images);
-        let norm_params = compute_global_norm_params(&cache);
+        let norm_params = compute_norm_params(&cache, Normalization::Global).unwrap();
 
         let result = cache.process_chunked(None, Some(&norm_params), |values, _, _| {
             math::mean_f32(values)
@@ -971,7 +919,7 @@ mod tests {
             AstroImage::from_pixels(dims, frame1.clone()),
         ];
         let cache = make_test_cache(images);
-        let norm_params = compute_global_norm_params(&cache);
+        let norm_params = compute_norm_params(&cache, Normalization::Global).unwrap();
 
         let config = StackConfig {
             normalization: Normalization::Global,
@@ -1009,7 +957,7 @@ mod tests {
             AstroImage::from_pixels(dims, vec![5.0; 16]),
         ];
         let cache = make_test_cache(images);
-        let params = compute_multiplicative_norm_params(&cache);
+        let params = compute_norm_params(&cache, Normalization::Multiplicative).unwrap();
 
         assert_eq!(params.len(), 3);
         for np in &params {
@@ -1038,7 +986,7 @@ mod tests {
             AstroImage::from_pixels(dims, frame1),
         ];
         let cache = make_test_cache(images);
-        let params = compute_multiplicative_norm_params(&cache);
+        let params = compute_norm_params(&cache, Normalization::Multiplicative).unwrap();
 
         // Frame 0: reference -> gain=1, offset=0
         assert!((params[0].gain - 1.0).abs() < 1e-5);
@@ -1070,7 +1018,7 @@ mod tests {
             AstroImage::from_pixels(dims, frame1),
         ];
         let cache = make_test_cache(images);
-        let params = compute_multiplicative_norm_params(&cache);
+        let params = compute_norm_params(&cache, Normalization::Multiplicative).unwrap();
 
         // All offsets must be exactly 0
         for np in &params {
@@ -1095,7 +1043,7 @@ mod tests {
             AstroImage::from_pixels(dims, frame1),
         ];
         let cache = make_test_cache(images);
-        let norm_params = compute_multiplicative_norm_params(&cache);
+        let norm_params = compute_norm_params(&cache, Normalization::Multiplicative).unwrap();
 
         let result = cache.process_chunked(None, Some(&norm_params), |values, _, _| {
             math::mean_f32(values)
@@ -1123,7 +1071,7 @@ mod tests {
             AstroImage::from_pixels(dims, pixels1),
         ];
         let cache = make_test_cache(images);
-        let norm_params = compute_multiplicative_norm_params(&cache);
+        let norm_params = compute_norm_params(&cache, Normalization::Multiplicative).unwrap();
 
         let result = cache.process_chunked(None, Some(&norm_params), |values, _, _| {
             math::mean_f32(values)
