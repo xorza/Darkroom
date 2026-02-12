@@ -266,25 +266,23 @@ fn dispatch_stacking(
 ) -> crate::astro_image::PixelData {
     let rejection = config.rejection;
 
+    let weights = if config.weights.is_empty() {
+        None
+    } else {
+        Some(config.normalized_weights(cache.frame_count()))
+    };
+    let weights_ref = weights.as_deref();
+
     match config.method {
         CombineMethod::Median => {
             cache.process_chunked(None, norm_params, move |values, _, indices| {
-                reset_indices(indices, values.len());
                 apply_rejection(values, None, indices, &rejection);
                 math::median_f32_mut(values)
             })
         }
 
         CombineMethod::Mean => {
-            let weights = if config.weights.is_empty() {
-                None
-            } else {
-                Some(config.normalized_weights(cache.frame_count()))
-            };
-            let weights_ref = weights.as_deref();
-
             cache.process_chunked(weights_ref, norm_params, move |values, w, indices| {
-                reset_indices(indices, values.len());
                 apply_rejection(values, w, indices, &rejection).value
             })
         }
@@ -307,6 +305,8 @@ fn apply_rejection(
     indices: &mut Vec<usize>,
     rejection: &Rejection,
 ) -> RejectionResult {
+    reset_indices(indices, values.len());
+
     match rejection {
         Rejection::None => {
             let value = compute_mean(values, weights, indices);
@@ -318,7 +318,6 @@ fn apply_rejection(
 
         Rejection::SigmaClip { sigma, iterations } => {
             let config = RejectionSigmaClipConfig::new(*sigma, *iterations);
-            reset_indices(indices, values.len());
             let result = rejection::sigma_clipped_mean(values, indices, &config);
             reweight_result(result, values, weights, indices)
         }
@@ -329,7 +328,6 @@ fn apply_rejection(
             iterations,
         } => {
             let config = AsymmetricSigmaClipConfig::new(*sigma_low, *sigma_high, *iterations);
-            reset_indices(indices, values.len());
             let result = rejection::sigma_clipped_mean_asymmetric(values, indices, &config);
             reweight_result(result, values, weights, indices)
         }
@@ -353,7 +351,6 @@ fn apply_rejection(
             iterations,
         } => {
             let config = LinearFitClipConfig::new(*sigma_low, *sigma_high, *iterations);
-            reset_indices(indices, values.len());
             let result = rejection::linear_fit_clipped_mean(values, indices, &config);
             reweight_result(result, values, weights, indices)
         }
@@ -399,7 +396,6 @@ fn apply_rejection(
             max_outliers,
         } => {
             let config = GesdConfig::new(*alpha, *max_outliers);
-            reset_indices(indices, values.len());
             let result = rejection::gesd_mean(values, indices, &config);
             reweight_result(result, values, weights, indices)
         }
