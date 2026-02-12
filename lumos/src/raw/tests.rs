@@ -181,7 +181,7 @@ fn test_normalize_u16_large_array() {
     assert!((result[65535] - 1.0).abs() < 1e-4);
 }
 
-/// Test the normalize-then-crop pattern used by process_monochrome.
+/// Test the normalize-then-crop pattern used by extract_raw_cfa_pixels.
 /// Creates a synthetic raw buffer with margins and verifies active area extraction.
 #[test]
 fn test_normalize_and_crop_monochrome() {

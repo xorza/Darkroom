@@ -101,11 +101,7 @@ impl<I: StackableImage> ImageCache<I> {
     /// Check if images would fit in memory given available memory.
     ///
     /// Returns true if total image size fits within usable memory (75% of available).
-    fn fits_in_memory(
-        bytes_per_image: usize,
-        frame_count: usize,
-        available_memory: u64,
-    ) -> bool {
+    fn fits_in_memory(bytes_per_image: usize, frame_count: usize, available_memory: u64) -> bool {
         let Some(total_bytes) = bytes_per_image.checked_mul(frame_count) else {
             return false;
         };

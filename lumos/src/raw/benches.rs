@@ -182,25 +182,14 @@ fn bench_markesteijn_quality_vs_libraw() {
 
 /// Load raw file using libraw's built-in demosaic (for benchmarking comparison).
 fn load_raw_libraw_demosaic(path: &Path, user_qual: i32) -> Result<AstroImage> {
-    let buf = fs::read(path)?;
-    let inner = unsafe { sys::libraw_init(0) };
-    assert!(!inner.is_null());
-    let guard = LibrawGuard(inner);
-
-    let ret = unsafe { sys::libraw_open_buffer(inner, buf.as_ptr() as *const _, buf.len()) };
-    assert_eq!(ret, 0, "libraw open_buffer failed: {ret}");
-
-    let ret = unsafe { sys::libraw_unpack(inner) };
-    assert_eq!(ret, 0, "libraw unpack failed: {ret}");
+    let raw = open_raw(path)?;
 
     // Set demosaic quality before processing
     unsafe {
-        (*inner).params.user_qual = user_qual;
+        (*raw.inner).params.user_qual = user_qual;
     }
 
-    let (pixels, out_width, out_height, num_channels) = process_unknown_libraw_fallback(inner)?;
-
-    drop(guard);
+    let (pixels, out_width, out_height, num_channels) = raw.demosaic_libraw_fallback()?;
 
     let dimensions = ImageDimensions::new(out_width, out_height, num_channels);
     Ok(AstroImage::from_pixels(dimensions, pixels))

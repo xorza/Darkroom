@@ -35,6 +35,7 @@ pub(crate) unsafe fn alloc_uninit_vec<T>(len: usize) -> Vec<T> {
 }
 
 /// RAII guard for libraw_data_t to ensure proper cleanup.
+#[derive(Debug)]
 struct LibrawGuard(*mut sys::libraw_data_t);
 
 // SAFETY: LibrawGuard owns the pointer and ensures exclusive access.
@@ -62,13 +63,296 @@ impl Drop for ProcessedImageGuard {
     }
 }
 
-/// Load raw file using libraw (C library, broader camera support).
+/// Unpacked raw file data from libraw, ready for sensor-specific processing.
+#[derive(Debug)]
+struct UnpackedRaw {
+    inner: *mut sys::libraw_data_t,
+    guard: Option<LibrawGuard>,
+    buf: Option<Vec<u8>>,
+    raw_width: usize,
+    raw_height: usize,
+    width: usize,
+    height: usize,
+    top_margin: usize,
+    left_margin: usize,
+    black: f32,
+    range: f32,
+    sensor_type: SensorType,
+    iso: Option<u32>,
+}
+
+impl UnpackedRaw {
+    fn metadata(
+        &self,
+        width: usize,
+        height: usize,
+        channels: usize,
+        is_cfa: bool,
+    ) -> AstroImageMetadata {
+        AstroImageMetadata {
+            iso: self.iso,
+            bitpix: BitPix::Int16,
+            header_dimensions: vec![height, width, channels],
+            is_cfa,
+            ..Default::default()
+        }
+    }
+
+    /// Get the raw u16 image pointer and total pixel count.
+    /// Returns the pointer and count, or an error if null.
+    fn raw_image_slice(&self) -> Result<&[u16]> {
+        // SAFETY: inner is valid and unpack succeeded.
+        let raw_image_ptr = unsafe { (*self.inner).rawdata.raw_image };
+        if raw_image_ptr.is_null() {
+            anyhow::bail!("libraw: raw_image is null");
+        }
+
+        let pixel_count = self
+            .raw_width
+            .checked_mul(self.raw_height)
+            .expect("libraw: raw dimensions overflow");
+
+        // SAFETY: raw_image_ptr is valid (checked above), and dimensions were validated in open_raw.
+        Ok(unsafe { slice::from_raw_parts(raw_image_ptr, pixel_count) })
+    }
+
+    /// Extract raw CFA pixels as normalized f32 (active area only).
+    /// Used by Monochrome, Bayer, and XTrans paths.
+    fn extract_cfa_pixels(&self) -> Result<Vec<f32>> {
+        let raw_data = self.raw_image_slice()?;
+
+        let inv_range = 1.0 / self.range;
+        let normalized = normalize_u16_to_f32_parallel(raw_data, self.black, inv_range);
+
+        // Extract the active area
+        let output_size = self.width * self.height;
+        // SAFETY: Every element is written by the parallel copy_from_slice pass below.
+        let mut pixels = unsafe { alloc_uninit_vec::<f32>(output_size) };
+        let width = self.width;
+        let raw_width = self.raw_width;
+        let top_margin = self.top_margin;
+        let left_margin = self.left_margin;
+        pixels
+            .par_chunks_mut(width)
+            .enumerate()
+            .for_each(|(y, row)| {
+                let src_y = top_margin + y;
+                let src_start = src_y * raw_width + left_margin;
+                row.copy_from_slice(&normalized[src_start..src_start + width]);
+            });
+
+        Ok(pixels)
+    }
+
+    /// Process Bayer sensor data using our fast SIMD demosaic.
+    fn demosaic_bayer(&self, cfa_pattern: CfaPattern) -> Result<(Vec<f32>, usize)> {
+        let raw_data = self.raw_image_slice()?;
+
+        // Normalize to 0.0-1.0 range using parallel processing
+        let inv_range = 1.0 / self.range;
+        let normalized_data = normalize_u16_to_f32_parallel(raw_data, self.black, inv_range);
+
+        let bayer = BayerImage::with_margins(
+            &normalized_data,
+            self.raw_width,
+            self.raw_height,
+            self.width,
+            self.height,
+            self.top_margin,
+            self.left_margin,
+            cfa_pattern,
+        );
+
+        let demosaic_start = Instant::now();
+        let rgb_pixels = demosaic_bayer(&bayer);
+        let demosaic_elapsed = demosaic_start.elapsed();
+
+        tracing::info!(
+            "Fast SIMD demosaicing {}x{} took {:.2}ms",
+            self.width,
+            self.height,
+            demosaic_elapsed.as_secs_f64() * 1000.0
+        );
+
+        Ok((rgb_pixels, 3))
+    }
+
+    /// Extract X-Trans 6x6 pattern from libraw metadata.
+    fn xtrans_pattern(&self) -> [[u8; 6]; 6] {
+        // SAFETY: inner is valid and xtrans is populated for X-Trans sensors
+        let xtrans_raw = unsafe { (*self.inner).idata.xtrans };
+        let mut pattern = [[0u8; 6]; 6];
+        for (i, row) in xtrans_raw.iter().enumerate() {
+            for (j, &val) in row.iter().enumerate() {
+                #[allow(clippy::unnecessary_cast)]
+                {
+                    pattern[i][j] = val as u8;
+                }
+            }
+        }
+        pattern
+    }
+
+    /// Process X-Trans sensor data using our Markesteijn demosaic.
+    ///
+    /// Drops guard and buf before the expensive demosaicing step,
+    /// reducing peak memory by ~77 MB.
+    fn demosaic_xtrans(&mut self) -> Result<(Vec<f32>, usize)> {
+        let raw_data = self.raw_image_slice()?;
+        let xtrans_pattern = self.xtrans_pattern();
+
+        // Copy raw u16 data so we can drop libraw before demosaicing.
+        // P×2 bytes (~47 MB) instead of P×4 bytes (~93 MB) for normalized f32.
+        let raw_u16: Vec<u16> = raw_data.to_vec();
+        let inv_range = 1.0 / self.range;
+
+        // Drop libraw and file buffer to reduce peak memory during demosaicing
+        self.guard.take();
+        self.buf.take();
+
+        let (pixels, channels) = process_xtrans(
+            &raw_u16,
+            self.raw_width,
+            self.raw_height,
+            self.width,
+            self.height,
+            self.top_margin,
+            self.left_margin,
+            xtrans_pattern,
+            self.black,
+            inv_range,
+        );
+
+        Ok((pixels, channels))
+    }
+
+    /// Process unknown CFA pattern using libraw's built-in demosaic.
+    /// This is slower but handles exotic sensor patterns correctly.
+    /// Returns (pixels, width, height, num_channels).
+    fn demosaic_libraw_fallback(&self) -> Result<(Vec<f32>, usize, usize, usize)> {
+        let demosaic_start = Instant::now();
+
+        // Configure libraw for linear output (no gamma, no color conversion)
+        // SAFETY: inner is valid
+        unsafe {
+            // Output in linear color space (no gamma curve)
+            (*self.inner).params.gamm[0] = 1.0;
+            (*self.inner).params.gamm[1] = 1.0;
+            // No brightness adjustment
+            (*self.inner).params.bright = 1.0;
+            // Use camera white balance
+            (*self.inner).params.use_camera_wb = 1;
+            // Output 16-bit
+            (*self.inner).params.output_bps = 16;
+            // Linear color space (raw)
+            (*self.inner).params.output_color = 0;
+            // No auto-brightness
+            (*self.inner).params.no_auto_bright = 1;
+        }
+
+        // Run libraw's demosaic
+        // SAFETY: inner is valid and configured
+        let ret = unsafe { sys::libraw_dcraw_process(self.inner) };
+        if ret != 0 {
+            anyhow::bail!("libraw: dcraw_process failed, error code: {}", ret);
+        }
+
+        // Get the processed image
+        // SAFETY: inner is valid and dcraw_process succeeded
+        let mut errc: i32 = 0;
+        let processed_ptr = unsafe { sys::libraw_dcraw_make_mem_image(self.inner, &mut errc) };
+        if processed_ptr.is_null() || errc != 0 {
+            anyhow::bail!("libraw: dcraw_make_mem_image failed, error code: {}", errc);
+        }
+
+        // Guard ensures cleanup even on early return or panic
+        let _processed_guard = ProcessedImageGuard(processed_ptr);
+
+        // Extract image data
+        // SAFETY: processed_ptr is valid (checked above)
+        let img_width = unsafe { (*processed_ptr).width } as usize;
+        let img_height = unsafe { (*processed_ptr).height } as usize;
+        let img_colors = unsafe { (*processed_ptr).colors } as usize;
+        let img_bits = unsafe { (*processed_ptr).bits } as usize;
+        let data_size = unsafe { (*processed_ptr).data_size } as usize;
+
+        tracing::debug!(
+            "libraw fallback: {}x{}x{}, {} bits, {} bytes",
+            img_width,
+            img_height,
+            img_colors,
+            img_bits,
+            data_size
+        );
+
+        // The data array is at the end of the struct (flexible array member)
+        // SAFETY: processed_ptr is valid, data_size tells us the valid range
+        let data_ptr = unsafe { (*processed_ptr).data.as_ptr() };
+
+        // Use checked arithmetic to prevent overflow on extremely large images
+        let pixel_count = img_width
+            .checked_mul(img_height)
+            .and_then(|v| v.checked_mul(img_colors))
+            .expect("libraw: image dimensions overflow");
+
+        let pixels = if img_bits == 16 {
+            // 16-bit data
+            let expected_size = pixel_count
+                .checked_mul(2)
+                .expect("libraw: expected_size overflow");
+            assert!(
+                data_size >= expected_size,
+                "libraw: data_size {} < expected {}",
+                data_size,
+                expected_size
+            );
+
+            // SAFETY: data_ptr points to valid u16 data of the calculated size
+            let data_u16 = unsafe { slice::from_raw_parts(data_ptr as *const u16, pixel_count) };
+
+            // Normalize to 0.0-1.0
+            data_u16
+                .iter()
+                .map(|&v| (v as f32) / 65535.0)
+                .collect::<Vec<f32>>()
+        } else {
+            // 8-bit data
+            assert!(
+                data_size >= pixel_count,
+                "libraw: data_size {} < expected {}",
+                data_size,
+                pixel_count
+            );
+
+            // SAFETY: data_ptr points to valid u8 data of the calculated size
+            let data_u8 = unsafe { slice::from_raw_parts(data_ptr, pixel_count) };
+
+            // Normalize to 0.0-1.0
+            data_u8
+                .iter()
+                .map(|&v| (v as f32) / 255.0)
+                .collect::<Vec<f32>>()
+        };
+
+        // Memory is freed automatically by _processed_guard when it goes out of scope
+
+        let demosaic_elapsed = demosaic_start.elapsed();
+        tracing::info!(
+            "Libraw fallback demosaicing {}x{} took {:.2}ms",
+            img_width,
+            img_height,
+            demosaic_elapsed.as_secs_f64() * 1000.0
+        );
+
+        Ok((pixels, img_width, img_height, img_colors))
+    }
+}
+
+/// Open and unpack a raw file using libraw.
 ///
-/// Demosaicing strategy:
-/// - Monochrome sensors: no demosaic needed, returns grayscale
-/// - Known Bayer patterns (RGGB, BGGR, GRBG, GBRG): fast SIMD demosaic
-/// - Unknown patterns (X-Trans, etc.): libraw's built-in demosaic (slower but correct)
-pub fn load_raw(path: &Path) -> Result<AstroImage> {
+/// Performs: file read, libraw init, open_buffer, unpack, dimension/color
+/// validation, sensor type detection, and ISO extraction.
+fn open_raw(path: &Path) -> Result<UnpackedRaw> {
     let buf =
         fs::read(path).with_context(|| format!("Failed to read raw file: {}", path.display()))?;
 
@@ -159,89 +443,60 @@ pub fn load_raw(path: &Path) -> Result<AstroImage> {
         sensor_type
     );
 
-    // Extract ISO before the match — all branches need it, and X-Trans
-    // consumes guard/buf so it must be read first.
     let iso = extract_iso(inner);
 
-    // Wrap in Option so X-Trans can take ownership to drop before demosaicing.
-    let mut guard = Some(guard);
-    let mut buf = Some(buf);
+    Ok(UnpackedRaw {
+        inner,
+        guard: Some(guard),
+        buf: Some(buf),
+        raw_width,
+        raw_height,
+        width,
+        height,
+        top_margin,
+        left_margin,
+        black,
+        range,
+        sensor_type,
+        iso,
+    })
+}
 
-    // Process based on sensor type
-    // Returns (pixels, width, height, num_channels, is_cfa) - dimensions may differ for libraw fallback
+/// Load raw file using libraw (C library, broader camera support).
+///
+/// Demosaicing strategy:
+/// - Monochrome sensors: no demosaic needed, returns grayscale
+/// - Known Bayer patterns (RGGB, BGGR, GRBG, GBRG): fast SIMD demosaic
+/// - Unknown patterns (X-Trans, etc.): libraw's built-in demosaic (slower but correct)
+pub fn load_raw(path: &Path) -> Result<AstroImage> {
+    let mut raw = open_raw(path)?;
+
+    let sensor_type = raw.sensor_type.clone();
     let (pixels, out_width, out_height, num_channels, is_cfa) = match sensor_type {
         SensorType::Monochrome => {
-            tracing::info!(
-                "Monochrome sensor detected (filters=0x{:08x}, colors={}), skipping demosaic",
-                filters,
-                colors
-            );
-            let (pixels, channels) = process_monochrome(
-                inner,
-                raw_width,
-                raw_height,
-                width,
-                height,
-                top_margin,
-                left_margin,
-                black,
-                range,
-            )?;
-            (pixels, width, height, channels, false)
+            tracing::info!("Monochrome sensor detected, skipping demosaic");
+            let pixels = raw.extract_cfa_pixels()?;
+            (pixels, raw.width, raw.height, 1, false)
         }
         SensorType::Bayer(cfa_pattern) => {
-            tracing::debug!(
-                "Detected Bayer CFA pattern: {:?} (filters=0x{:08x})",
-                cfa_pattern,
-                filters
-            );
-            let (pixels, channels) = process_bayer_fast(
-                inner,
-                raw_width,
-                raw_height,
-                width,
-                height,
-                top_margin,
-                left_margin,
-                black,
-                range,
-                cfa_pattern,
-            )?;
-            (pixels, width, height, channels, true)
+            tracing::debug!("Detected Bayer CFA pattern: {:?}", cfa_pattern);
+            let (pixels, channels) = raw.demosaic_bayer(cfa_pattern)?;
+            (pixels, raw.width, raw.height, channels, true)
         }
         SensorType::XTrans => {
-            tracing::info!(
-                "X-Trans sensor detected (filters=0x{:08x}), using X-Trans demosaic",
-                filters
-            );
-            let (pixels, channels) = process_xtrans_fast(
-                inner,
-                guard.take().unwrap(),
-                buf.take().unwrap(),
-                raw_width,
-                raw_height,
-                width,
-                height,
-                top_margin,
-                left_margin,
-                black,
-                range,
-            )?;
-            (pixels, width, height, channels, true)
+            tracing::info!("X-Trans sensor detected, using X-Trans demosaic");
+            let (pixels, channels) = raw.demosaic_xtrans()?;
+            (pixels, raw.width, raw.height, channels, true)
         }
         SensorType::Unknown => {
-            tracing::info!(
-                "Unknown CFA pattern (filters=0x{:08x}), using libraw demosaic fallback",
-                filters
-            );
-            let (pixels, w, h, c) = process_unknown_libraw_fallback(inner)?;
-            (pixels, w, h, c, true) // Assume CFA for unknown patterns
+            tracing::info!("Unknown CFA pattern, using libraw demosaic fallback");
+            let (pixels, w, h, c) = raw.demosaic_libraw_fallback()?;
+            (pixels, w, h, c, true)
         }
     };
 
-    // Drop libraw and file buffer (no-op if X-Trans already consumed them)
-    drop(guard);
-    drop(buf);
+    let metadata = raw.metadata(out_width, out_height, num_channels, is_cfa);
+    drop(raw);
 
     let dimensions = ImageDimensions::new(out_width, out_height, num_channels);
     assert!(
@@ -250,18 +505,6 @@ pub fn load_raw(path: &Path) -> Result<AstroImage> {
         dimensions.pixel_count(),
         pixels.len()
     );
-
-    let metadata = AstroImageMetadata {
-        object: None,
-        instrument: None,
-        telescope: None,
-        date_obs: None,
-        exposure_time: None,
-        iso,
-        bitpix: BitPix::Int16,
-        header_dimensions: vec![out_height, out_width, num_channels],
-        is_cfa,
-    };
 
     let mut astro = AstroImage::from_pixels(dimensions, pixels);
     astro.metadata = metadata;
@@ -277,189 +520,49 @@ pub fn load_raw(path: &Path) -> Result<AstroImage> {
 /// For Unknown sensor types, falls back to `load_raw()` then wraps
 /// the demosaiced result as a Mono CfaImage.
 pub fn load_raw_cfa(path: &Path) -> Result<CfaImage> {
-    let buf =
-        fs::read(path).with_context(|| format!("Failed to read raw file: {}", path.display()))?;
+    let raw = open_raw(path)?;
 
-    // SAFETY: libraw_init returns a valid pointer or null on failure.
-    let inner = unsafe { sys::libraw_init(0) };
-    if inner.is_null() {
-        anyhow::bail!("libraw: Failed to initialize");
-    }
-
-    let guard = LibrawGuard(inner);
-
-    // SAFETY: inner is valid (checked above), buf is valid for the duration of this call.
-    let ret = unsafe { sys::libraw_open_buffer(inner, buf.as_ptr() as *const _, buf.len()) };
-    if ret != 0 {
-        anyhow::bail!("libraw: Failed to open buffer, error code: {}", ret);
-    }
-
-    // SAFETY: inner is valid and open_buffer succeeded.
-    let ret = unsafe { sys::libraw_unpack(inner) };
-    if ret != 0 {
-        anyhow::bail!("libraw: Failed to unpack, error code: {}", ret);
-    }
-
-    // SAFETY: inner is valid and unpack succeeded, sizes struct is initialized.
-    let raw_width = unsafe { (*inner).sizes.raw_width } as usize;
-    let raw_height = unsafe { (*inner).sizes.raw_height } as usize;
-    let width = unsafe { (*inner).sizes.width } as usize;
-    let height = unsafe { (*inner).sizes.height } as usize;
-    let top_margin = unsafe { (*inner).sizes.top_margin } as usize;
-    let left_margin = unsafe { (*inner).sizes.left_margin } as usize;
-
-    // Validate dimensions
-    if raw_width == 0 || raw_height == 0 {
-        anyhow::bail!(
-            "libraw: Invalid raw dimensions: {}x{}",
-            raw_width,
-            raw_height
-        );
-    }
-    if width == 0 || height == 0 {
-        anyhow::bail!("libraw: Invalid output dimensions: {}x{}", width, height);
-    }
-    if top_margin + height > raw_height || left_margin + width > raw_width {
-        anyhow::bail!(
-            "libraw: Margins exceed raw dimensions: margins ({}, {}) + size ({}, {}) > raw ({}, {})",
-            top_margin,
-            left_margin,
-            width,
-            height,
-            raw_width,
-            raw_height
-        );
-    }
-
-    // SAFETY: inner is valid, color struct is initialized after unpack.
-    let black = unsafe { (*inner).color.black } as f32;
-    let maximum = unsafe { (*inner).color.maximum } as f32;
-    let range = maximum - black;
-
-    if range <= 0.0 {
-        anyhow::bail!(
-            "libraw: Invalid color range: black={}, maximum={}, range={}",
-            black,
-            maximum,
-            range
-        );
-    }
-
-    // SAFETY: inner is valid, idata struct is initialized after unpack.
-    let filters = unsafe { (*inner).idata.filters };
-    let colors = unsafe { (*inner).idata.colors };
-    let sensor_type = detect_sensor_type(filters, colors);
-
-    let iso = extract_iso(inner);
-
+    let sensor_type = raw.sensor_type.clone();
     match sensor_type {
         SensorType::Monochrome => {
-            let (pixels, _channels) = process_monochrome(
-                inner,
-                raw_width,
-                raw_height,
-                width,
-                height,
-                top_margin,
-                left_margin,
-                black,
-                range,
-            )?;
-            drop(guard);
-
-            let metadata = AstroImageMetadata {
-                iso,
-                bitpix: BitPix::Int16,
-                header_dimensions: vec![height, width, 1],
-                ..Default::default()
-            };
-
+            let pixels = raw.extract_cfa_pixels()?;
+            let metadata = raw.metadata(raw.width, raw.height, 1, false);
             Ok(CfaImage {
                 pixels,
-                width,
-                height,
+                width: raw.width,
+                height: raw.height,
                 pattern: CfaType::Mono,
                 metadata,
             })
         }
         SensorType::Bayer(cfa_pattern) => {
-            let pixels = extract_raw_cfa_pixels(
-                inner,
-                raw_width,
-                raw_height,
-                width,
-                height,
-                top_margin,
-                left_margin,
-                black,
-                range,
-            )?;
-            drop(guard);
-
-            let metadata = AstroImageMetadata {
-                iso,
-                bitpix: BitPix::Int16,
-                header_dimensions: vec![height, width, 1],
-                is_cfa: true,
-                ..Default::default()
-            };
-
+            let pixels = raw.extract_cfa_pixels()?;
+            let metadata = raw.metadata(raw.width, raw.height, 1, true);
             Ok(CfaImage {
                 pixels,
-                width,
-                height,
+                width: raw.width,
+                height: raw.height,
                 pattern: CfaType::Bayer(cfa_pattern),
                 metadata,
             })
         }
         SensorType::XTrans => {
-            // SAFETY: inner is valid and xtrans is populated for X-Trans sensors
-            let xtrans_raw = unsafe { (*inner).idata.xtrans };
-            let mut xtrans_pattern = [[0u8; 6]; 6];
-            for (i, row) in xtrans_raw.iter().enumerate() {
-                for (j, &val) in row.iter().enumerate() {
-                    #[allow(clippy::unnecessary_cast)]
-                    {
-                        xtrans_pattern[i][j] = val as u8;
-                    }
-                }
-            }
-
-            let pixels = extract_raw_cfa_pixels(
-                inner,
-                raw_width,
-                raw_height,
-                width,
-                height,
-                top_margin,
-                left_margin,
-                black,
-                range,
-            )?;
-            drop(guard);
-
-            let metadata = AstroImageMetadata {
-                iso,
-                bitpix: BitPix::Int16,
-                header_dimensions: vec![height, width, 1],
-                is_cfa: true,
-                ..Default::default()
-            };
-
+            let xtrans_pattern = raw.xtrans_pattern();
+            let pixels = raw.extract_cfa_pixels()?;
+            let metadata = raw.metadata(raw.width, raw.height, 1, true);
             Ok(CfaImage {
                 pixels,
-                width,
-                height,
+                width: raw.width,
+                height: raw.height,
                 pattern: CfaType::XTrans(xtrans_pattern),
                 metadata,
             })
         }
         SensorType::Unknown => {
             // Cannot extract raw CFA for unknown patterns - fall back to demosaiced.
-            drop(guard);
+            drop(raw);
             tracing::warn!(
-                "Unknown sensor type (filters=0x{:08x}), cannot extract raw CFA - using demosaiced fallback",
-                filters
+                "Unknown sensor type, cannot extract raw CFA - using demosaiced fallback"
             );
             let astro = load_raw(path)?;
             let dims = astro.dimensions();
@@ -476,154 +579,6 @@ pub fn load_raw_cfa(path: &Path) -> Result<CfaImage> {
     }
 }
 
-/// Extract raw CFA pixels from libraw as normalized f32 (active area only).
-/// Used by both Bayer and XTrans paths in load_raw_cfa().
-#[allow(clippy::too_many_arguments)]
-fn extract_raw_cfa_pixels(
-    inner: *mut sys::libraw_data_t,
-    raw_width: usize,
-    raw_height: usize,
-    width: usize,
-    height: usize,
-    top_margin: usize,
-    left_margin: usize,
-    black: f32,
-    range: f32,
-) -> Result<Vec<f32>> {
-    // SAFETY: inner is valid and unpack succeeded.
-    let raw_image_ptr = unsafe { (*inner).rawdata.raw_image };
-    if raw_image_ptr.is_null() {
-        anyhow::bail!("libraw: raw_image is null");
-    }
-
-    let pixel_count = raw_width
-        .checked_mul(raw_height)
-        .expect("libraw: raw dimensions overflow");
-
-    // SAFETY: raw_image_ptr is valid (checked above), and we've validated dimensions.
-    let raw_data = unsafe { slice::from_raw_parts(raw_image_ptr, pixel_count) };
-
-    let inv_range = 1.0 / range;
-    let normalized = normalize_u16_to_f32_parallel(raw_data, black, inv_range);
-
-    // Extract the active area
-    let output_size = width * height;
-    // SAFETY: Every element is written by the parallel copy_from_slice pass below.
-    let mut pixels = unsafe { alloc_uninit_vec::<f32>(output_size) };
-    pixels
-        .par_chunks_mut(width)
-        .enumerate()
-        .for_each(|(y, row)| {
-            let src_y = top_margin + y;
-            let src_start = src_y * raw_width + left_margin;
-            row.copy_from_slice(&normalized[src_start..src_start + width]);
-        });
-
-    Ok(pixels)
-}
-
-/// Process monochrome sensor data (no demosaicing needed).
-#[allow(clippy::too_many_arguments)]
-fn process_monochrome(
-    inner: *mut sys::libraw_data_t,
-    raw_width: usize,
-    raw_height: usize,
-    width: usize,
-    height: usize,
-    top_margin: usize,
-    left_margin: usize,
-    black: f32,
-    range: f32,
-) -> Result<(Vec<f32>, usize)> {
-    // SAFETY: inner is valid and unpack succeeded.
-    let raw_image_ptr = unsafe { (*inner).rawdata.raw_image };
-    if raw_image_ptr.is_null() {
-        anyhow::bail!("libraw: raw_image is null");
-    }
-
-    let pixel_count = raw_width
-        .checked_mul(raw_height)
-        .expect("libraw: raw dimensions overflow");
-
-    // SAFETY: raw_image_ptr is valid (checked above), and we've validated dimensions.
-    let raw_data = unsafe { slice::from_raw_parts(raw_image_ptr, pixel_count) };
-
-    // Normalize full raw buffer using SIMD parallel normalization
-    let inv_range = 1.0 / range;
-    let normalized = normalize_u16_to_f32_parallel(raw_data, black, inv_range);
-
-    // Extract the active area
-    let output_size = width * height;
-    // SAFETY: Every element is written by the parallel copy_from_slice pass below.
-    let mut mono_pixels = unsafe { alloc_uninit_vec::<f32>(output_size) };
-    mono_pixels
-        .par_chunks_mut(width)
-        .enumerate()
-        .for_each(|(y, row)| {
-            let src_y = top_margin + y;
-            let src_start = src_y * raw_width + left_margin;
-            row.copy_from_slice(&normalized[src_start..src_start + width]);
-        });
-
-    Ok((mono_pixels, 1))
-}
-
-/// Process Bayer sensor data using our fast SIMD demosaic.
-#[allow(clippy::too_many_arguments)]
-fn process_bayer_fast(
-    inner: *mut sys::libraw_data_t,
-    raw_width: usize,
-    raw_height: usize,
-    width: usize,
-    height: usize,
-    top_margin: usize,
-    left_margin: usize,
-    black: f32,
-    range: f32,
-    cfa_pattern: CfaPattern,
-) -> Result<(Vec<f32>, usize)> {
-    // SAFETY: inner is valid and unpack succeeded.
-    let raw_image_ptr = unsafe { (*inner).rawdata.raw_image };
-    if raw_image_ptr.is_null() {
-        anyhow::bail!("libraw: raw_image is null");
-    }
-
-    let pixel_count = raw_width
-        .checked_mul(raw_height)
-        .expect("libraw: raw dimensions overflow");
-
-    // SAFETY: raw_image_ptr is valid (checked above), and we've validated dimensions.
-    let raw_data = unsafe { slice::from_raw_parts(raw_image_ptr, pixel_count) };
-
-    // Normalize to 0.0-1.0 range using parallel processing
-    let inv_range = 1.0 / range;
-    let normalized_data = normalize_u16_to_f32_parallel(raw_data, black, inv_range);
-
-    let bayer = BayerImage::with_margins(
-        &normalized_data,
-        raw_width,
-        raw_height,
-        width,
-        height,
-        top_margin,
-        left_margin,
-        cfa_pattern,
-    );
-
-    let demosaic_start = Instant::now();
-    let rgb_pixels = demosaic_bayer(&bayer);
-    let demosaic_elapsed = demosaic_start.elapsed();
-
-    tracing::info!(
-        "Fast SIMD demosaicing {}x{} took {:.2}ms",
-        width,
-        height,
-        demosaic_elapsed.as_secs_f64() * 1000.0
-    );
-
-    Ok((rgb_pixels, 3))
-}
-
 /// Extract ISO from libraw metadata.
 fn extract_iso(inner: *mut sys::libraw_data_t) -> Option<u32> {
     // SAFETY: inner is valid after unpack.
@@ -633,198 +588,4 @@ fn extract_iso(inner: *mut sys::libraw_data_t) -> Option<u32> {
     } else {
         None
     }
-}
-
-/// Process X-Trans sensor data using our Markesteijn demosaic.
-///
-/// Takes ownership of `guard` and `buf` to drop them before the expensive
-/// demosaicing step, reducing peak memory by ~77 MB.
-#[allow(clippy::too_many_arguments)]
-fn process_xtrans_fast(
-    inner: *mut sys::libraw_data_t,
-    guard: LibrawGuard,
-    buf: Vec<u8>,
-    raw_width: usize,
-    raw_height: usize,
-    width: usize,
-    height: usize,
-    top_margin: usize,
-    left_margin: usize,
-    black: f32,
-    range: f32,
-) -> Result<(Vec<f32>, usize)> {
-    // SAFETY: inner is valid and unpack succeeded.
-    let raw_image_ptr = unsafe { (*inner).rawdata.raw_image };
-    if raw_image_ptr.is_null() {
-        anyhow::bail!("libraw: raw_image is null");
-    }
-
-    let pixel_count = raw_width
-        .checked_mul(raw_height)
-        .expect("libraw: raw dimensions overflow");
-
-    // SAFETY: raw_image_ptr is valid (checked above), and we've validated dimensions.
-    let raw_data = unsafe { slice::from_raw_parts(raw_image_ptr, pixel_count) };
-
-    // Get X-Trans 6×6 pattern from libraw
-    // SAFETY: inner is valid and xtrans is populated for X-Trans sensors
-    let xtrans_raw = unsafe { (*inner).idata.xtrans };
-
-    // Convert libraw's pattern to u8 (type varies by platform)
-    let mut xtrans_pattern = [[0u8; 6]; 6];
-    for (i, row) in xtrans_raw.iter().enumerate() {
-        for (j, &val) in row.iter().enumerate() {
-            #[allow(clippy::unnecessary_cast)]
-            {
-                xtrans_pattern[i][j] = val as u8;
-            }
-        }
-    }
-
-    // Copy raw u16 data so we can drop libraw before demosaicing.
-    // P×2 bytes (~47 MB) instead of P×4 bytes (~93 MB) for normalized f32.
-    let raw_u16: Vec<u16> = raw_data.to_vec();
-    let inv_range = 1.0 / range;
-
-    // Drop libraw and file buffer to reduce peak memory during demosaicing
-    drop(guard);
-    drop(buf);
-
-    let (pixels, channels) = process_xtrans(
-        &raw_u16,
-        raw_width,
-        raw_height,
-        width,
-        height,
-        top_margin,
-        left_margin,
-        xtrans_pattern,
-        black,
-        inv_range,
-    );
-
-    Ok((pixels, channels))
-}
-
-/// Process unknown CFA pattern using libraw's built-in demosaic.
-/// This is slower but handles exotic sensor patterns correctly.
-/// Returns (pixels, width, height, num_channels).
-fn process_unknown_libraw_fallback(
-    inner: *mut sys::libraw_data_t,
-) -> Result<(Vec<f32>, usize, usize, usize)> {
-    let demosaic_start = Instant::now();
-
-    // Configure libraw for linear output (no gamma, no color conversion)
-    // SAFETY: inner is valid
-    unsafe {
-        // Output in linear color space (no gamma curve)
-        (*inner).params.gamm[0] = 1.0;
-        (*inner).params.gamm[1] = 1.0;
-        // No brightness adjustment
-        (*inner).params.bright = 1.0;
-        // Use camera white balance
-        (*inner).params.use_camera_wb = 1;
-        // Output 16-bit
-        (*inner).params.output_bps = 16;
-        // Linear color space (raw)
-        (*inner).params.output_color = 0;
-        // No auto-brightness
-        (*inner).params.no_auto_bright = 1;
-    }
-
-    // Run libraw's demosaic
-    // SAFETY: inner is valid and configured
-    let ret = unsafe { sys::libraw_dcraw_process(inner) };
-    if ret != 0 {
-        anyhow::bail!("libraw: dcraw_process failed, error code: {}", ret);
-    }
-
-    // Get the processed image
-    // SAFETY: inner is valid and dcraw_process succeeded
-    let mut errc: i32 = 0;
-    let processed_ptr = unsafe { sys::libraw_dcraw_make_mem_image(inner, &mut errc) };
-    if processed_ptr.is_null() || errc != 0 {
-        anyhow::bail!("libraw: dcraw_make_mem_image failed, error code: {}", errc);
-    }
-
-    // Guard ensures cleanup even on early return or panic
-    let _processed_guard = ProcessedImageGuard(processed_ptr);
-
-    // Extract image data
-    // SAFETY: processed_ptr is valid (checked above)
-    let img_width = unsafe { (*processed_ptr).width } as usize;
-    let img_height = unsafe { (*processed_ptr).height } as usize;
-    let img_colors = unsafe { (*processed_ptr).colors } as usize;
-    let img_bits = unsafe { (*processed_ptr).bits } as usize;
-    let data_size = unsafe { (*processed_ptr).data_size } as usize;
-
-    tracing::debug!(
-        "libraw fallback: {}x{}x{}, {} bits, {} bytes",
-        img_width,
-        img_height,
-        img_colors,
-        img_bits,
-        data_size
-    );
-
-    // The data array is at the end of the struct (flexible array member)
-    // SAFETY: processed_ptr is valid, data_size tells us the valid range
-    let data_ptr = unsafe { (*processed_ptr).data.as_ptr() };
-
-    // Use checked arithmetic to prevent overflow on extremely large images
-    let pixel_count = img_width
-        .checked_mul(img_height)
-        .and_then(|v| v.checked_mul(img_colors))
-        .expect("libraw: image dimensions overflow");
-
-    let pixels = if img_bits == 16 {
-        // 16-bit data
-        let expected_size = pixel_count
-            .checked_mul(2)
-            .expect("libraw: expected_size overflow");
-        assert!(
-            data_size >= expected_size,
-            "libraw: data_size {} < expected {}",
-            data_size,
-            expected_size
-        );
-
-        // SAFETY: data_ptr points to valid u16 data of the calculated size
-        let data_u16 = unsafe { slice::from_raw_parts(data_ptr as *const u16, pixel_count) };
-
-        // Normalize to 0.0-1.0
-        data_u16
-            .iter()
-            .map(|&v| (v as f32) / 65535.0)
-            .collect::<Vec<f32>>()
-    } else {
-        // 8-bit data
-        assert!(
-            data_size >= pixel_count,
-            "libraw: data_size {} < expected {}",
-            data_size,
-            pixel_count
-        );
-
-        // SAFETY: data_ptr points to valid u8 data of the calculated size
-        let data_u8 = unsafe { slice::from_raw_parts(data_ptr, pixel_count) };
-
-        // Normalize to 0.0-1.0
-        data_u8
-            .iter()
-            .map(|&v| (v as f32) / 255.0)
-            .collect::<Vec<f32>>()
-    };
-
-    // Memory is freed automatically by _processed_guard when it goes out of scope
-
-    let demosaic_elapsed = demosaic_start.elapsed();
-    tracing::info!(
-        "Libraw fallback demosaicing {}x{} took {:.2}ms",
-        img_width,
-        img_height,
-        demosaic_elapsed.as_secs_f64() * 1000.0
-    );
-
-    Ok((pixels, img_width, img_height, img_colors))
 }
