@@ -57,6 +57,27 @@ pub fn mean_f32(values: &[f32]) -> f32 {
     sum_f32(values) / values.len() as f32
 }
 
+/// Compute weighted mean of values with corresponding weights.
+pub fn weighted_mean_f32(values: &[f32], weights: &[f32]) -> f32 {
+    if values.is_empty() {
+        return 0.0;
+    }
+
+    let mut sum = 0.0f32;
+    let mut weight_sum = 0.0f32;
+
+    for (&v, &w) in values.iter().zip(weights.iter()) {
+        sum += v * w;
+        weight_sum += w;
+    }
+
+    if weight_sum > f32::EPSILON {
+        sum / weight_sum
+    } else {
+        values.iter().sum::<f32>() / values.len() as f32
+    }
+}
+
 #[cfg(test)]
 mod tests;
 

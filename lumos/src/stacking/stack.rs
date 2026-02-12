@@ -336,7 +336,7 @@ fn apply_rejection(
             let config = WinsorizedClipConfig::new(*sigma, *iterations);
             let winsorized = rejection::winsorize(values, &config);
             let value = match weights {
-                Some(w) => weighted_mean(&winsorized, w),
+                Some(w) => math::weighted_mean_f32(&winsorized, w),
                 None => math::mean_f32(&winsorized),
             };
             RejectionResult {
@@ -450,27 +450,6 @@ fn weighted_mean_pairs(pairs: &[(f32, f32)]) -> f32 {
     }
 }
 
-/// Compute weighted mean.
-fn weighted_mean(values: &[f32], weights: &[f32]) -> f32 {
-    if values.is_empty() {
-        return 0.0;
-    }
-
-    let mut sum = 0.0f32;
-    let mut weight_sum = 0.0f32;
-
-    for (&v, &w) in values.iter().zip(weights.iter()) {
-        sum += v * w;
-        weight_sum += w;
-    }
-
-    if weight_sum > f32::EPSILON {
-        sum / weight_sum
-    } else {
-        values.iter().sum::<f32>() / values.len() as f32
-    }
-}
-
 /// Compute weighted mean using index mapping.
 ///
 /// `indices[i]` maps `values[i]` to `weights[indices[i]]`, maintaining correct
@@ -569,7 +548,7 @@ mod tests {
     fn test_weighted_mean() {
         let values = vec![1.0, 10.0];
         let weights = vec![0.9, 0.1];
-        let result = weighted_mean(&values, &weights);
+        let result = math::weighted_mean_f32(&values, &weights);
         assert!((result - 1.9).abs() < f32::EPSILON);
     }
 
