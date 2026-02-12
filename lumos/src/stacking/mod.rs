@@ -43,16 +43,3 @@ pub enum FrameType {
 
 #[cfg(test)]
 mod tests;
-
-#[cfg(test)]
-mod unit_tests {
-    use super::*;
-
-    #[test]
-    fn test_frame_type_display() {
-        assert_eq!(FrameType::Dark.to_string(), "dark");
-        assert_eq!(FrameType::Flat.to_string(), "flat");
-        assert_eq!(FrameType::Bias.to_string(), "bias");
-        assert_eq!(FrameType::Light.to_string(), "light");
-    }
-}
