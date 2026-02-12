@@ -282,16 +282,14 @@ impl StackConfig {
     }
 
     /// Get normalized weights (sum to 1.0).
-    pub fn normalized_weights(&self, frame_count: usize) -> Vec<f32> {
-        if self.weights.is_empty() {
-            vec![1.0 / frame_count as f32; frame_count]
+    pub fn normalized_weights(&self) -> Vec<f32> {
+        assert!(!self.weights.is_empty(), "Cannot normalize empty weights");
+        let sum: f32 = self.weights.iter().sum();
+        if sum > f32::EPSILON {
+            self.weights.iter().map(|w| w / sum).collect()
         } else {
-            let sum: f32 = self.weights.iter().sum();
-            if sum > f32::EPSILON {
-                self.weights.iter().map(|w| w / sum).collect()
-            } else {
-                vec![1.0 / frame_count as f32; frame_count]
-            }
+            let n = self.weights.len();
+            vec![1.0 / n as f32; n]
         }
     }
 }
@@ -348,17 +346,16 @@ mod tests {
     }
 
     #[test]
-    fn test_normalized_weights_empty() {
+    #[should_panic(expected = "Cannot normalize empty weights")]
+    fn test_normalized_weights_empty_panics() {
         let config = StackConfig::default();
-        let weights = config.normalized_weights(4);
-        assert_eq!(weights.len(), 4);
-        assert!((weights.iter().sum::<f32>() - 1.0).abs() < f32::EPSILON);
+        config.normalized_weights();
     }
 
     #[test]
     fn test_normalized_weights_provided() {
         let config = StackConfig::weighted(vec![1.0, 2.0, 3.0]);
-        let weights = config.normalized_weights(3);
+        let weights = config.normalized_weights();
         assert_eq!(weights.len(), 3);
         assert!((weights.iter().sum::<f32>() - 1.0).abs() < f32::EPSILON);
         // First weight should be smallest

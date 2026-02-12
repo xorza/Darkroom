@@ -239,15 +239,13 @@ fn dispatch_stacking(
             let weights = if config.weights.is_empty() {
                 None
             } else {
-                Some(config.normalized_weights(cache.frame_count()))
+                Some(config.normalized_weights())
             };
 
             cache.process_chunked(
                 weights.as_deref(),
                 norm_params,
-                move |values, w, scratch| {
-                    return combine_mean(values, w, scratch, &config.rejection).value;
-                },
+                move |values, w, scratch| combine_mean(values, w, scratch, &config.rejection).value,
             )
         }
     }
