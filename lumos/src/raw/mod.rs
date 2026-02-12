@@ -53,6 +53,7 @@ impl Drop for LibrawGuard {
 }
 
 /// RAII guard for libraw_processed_image_t to ensure proper cleanup.
+#[derive(Debug)]
 struct ProcessedImageGuard(*mut sys::libraw_processed_image_t);
 
 impl Drop for ProcessedImageGuard {
@@ -457,7 +458,7 @@ pub fn load_raw(path: &Path) -> Result<AstroImage> {
     let mut raw = open_raw(path)?;
 
     let sensor_type = raw.sensor_type.clone();
-    let (pixels, out_width, out_height, num_channels, cfa_type) = match sensor_type {
+    let (pixels, width, height, channels, cfa_type) = match sensor_type {
         SensorType::Monochrome => {
             tracing::info!("Monochrome sensor detected, skipping demosaic");
             let pixels = raw.extract_cfa_pixels()?;
@@ -496,13 +497,13 @@ pub fn load_raw(path: &Path) -> Result<AstroImage> {
     let metadata = AstroImageMetadata {
         iso: raw.iso,
         bitpix: BitPix::Int16,
-        header_dimensions: vec![out_height, out_width, num_channels],
+        header_dimensions: vec![height, width, channels],
         cfa_type,
         ..Default::default()
     };
     drop(raw);
 
-    let dimensions = ImageDimensions::new(out_width, out_height, num_channels);
+    let dimensions = ImageDimensions::new(width, height, channels);
     assert!(
         pixels.len() == dimensions.pixel_count(),
         "Pixel count mismatch: expected {}, got {}",
@@ -526,55 +527,28 @@ pub fn load_raw(path: &Path) -> Result<AstroImage> {
 pub fn load_raw_cfa(path: &Path) -> Result<CfaImage> {
     let raw = open_raw(path)?;
 
-    let sensor_type = raw.sensor_type.clone();
-    match sensor_type {
-        SensorType::Monochrome => {
-            let pixels = raw.extract_cfa_pixels()?;
-            let metadata = AstroImageMetadata {
-                iso: raw.iso,
-                bitpix: BitPix::Int16,
-                header_dimensions: vec![raw.height, raw.width, 1],
-                cfa_type: Some(CfaType::Mono),
-                ..Default::default()
-            };
-            Ok(CfaImage {
-                data: Buffer2::new(raw.width, raw.height, pixels),
-                metadata,
-            })
-        }
-        SensorType::Bayer(cfa_pattern) => {
-            let pixels = raw.extract_cfa_pixels()?;
-            let metadata = AstroImageMetadata {
-                iso: raw.iso,
-                bitpix: BitPix::Int16,
-                header_dimensions: vec![raw.height, raw.width, 1],
-                cfa_type: Some(CfaType::Bayer(cfa_pattern)),
-                ..Default::default()
-            };
-            Ok(CfaImage {
-                data: Buffer2::new(raw.width, raw.height, pixels),
-                metadata,
-            })
-        }
-        SensorType::XTrans => {
-            let xtrans_pattern = raw.xtrans_pattern();
-            let pixels = raw.extract_cfa_pixels()?;
-            let metadata = AstroImageMetadata {
-                iso: raw.iso,
-                bitpix: BitPix::Int16,
-                header_dimensions: vec![raw.height, raw.width, 1],
-                cfa_type: Some(CfaType::XTrans(xtrans_pattern)),
-                ..Default::default()
-            };
-            Ok(CfaImage {
-                data: Buffer2::new(raw.width, raw.height, pixels),
-                metadata,
-            })
-        }
+    let cfa_type = match &raw.sensor_type {
+        SensorType::Monochrome => CfaType::Mono,
+        SensorType::Bayer(p) => CfaType::Bayer(*p),
+        SensorType::XTrans => CfaType::XTrans(raw.xtrans_pattern()),
         SensorType::Unknown => {
             unimplemented!("Cannot extract raw CFA data for unknown sensor types")
         }
-    }
+    };
+
+    let pixels = raw.extract_cfa_pixels()?;
+    let metadata = AstroImageMetadata {
+        iso: raw.iso,
+        bitpix: BitPix::Int16,
+        header_dimensions: vec![raw.height, raw.width, 1],
+        cfa_type: Some(cfa_type),
+        ..Default::default()
+    };
+
+    Ok(CfaImage {
+        data: Buffer2::new(raw.width, raw.height, pixels),
+        metadata,
+    })
 }
 
 /// Extract ISO from libraw metadata.
