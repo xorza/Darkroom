@@ -112,7 +112,7 @@ impl CfaImage {
                     .map(|&v| (v.clamp(0.0, 1.0) * 65535.0).round() as u16)
                     .collect();
 
-                let (rgb, _channels) = process_xtrans(
+                let rgb = process_xtrans(
                     &raw_u16,
                     width,
                     height,

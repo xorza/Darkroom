@@ -36,7 +36,7 @@ pub fn process_xtrans(
     xtrans_pattern: [[u8; 6]; 6],
     black: f32,
     inv_range: f32,
-) -> (Vec<f32>, usize) {
+) -> Vec<f32> {
     let pattern = XTransPattern::new(xtrans_pattern);
 
     let xtrans = XTransImage::with_margins(
@@ -63,7 +63,7 @@ pub fn process_xtrans(
         demosaic_elapsed.as_secs_f64() * 1000.0
     );
 
-    (rgb_pixels, 3)
+    rgb_pixels
 }
 
 /// X-Trans 6x6 color filter array pattern.
@@ -292,7 +292,7 @@ mod tests {
     #[test]
     fn test_process_xtrans_output_size() {
         let raw_data: Vec<u16> = vec![1000; 12 * 12];
-        let (rgb, channels) = process_xtrans(
+        let rgb = process_xtrans(
             &raw_data,
             12,
             12,
@@ -305,7 +305,6 @@ mod tests {
             1.0 / 4096.0,
         );
 
-        assert_eq!(channels, 3);
         assert_eq!(rgb.len(), 6 * 6 * 3);
     }
 
@@ -320,7 +319,7 @@ mod tests {
         let mid_value = (black + range / 2.0) as u16;
         let raw_data: Vec<u16> = vec![mid_value; 12 * 12];
 
-        let (rgb, _) = process_xtrans(
+        let rgb = process_xtrans(
             &raw_data,
             12,
             12,
@@ -347,7 +346,7 @@ mod tests {
         // All values below black level
         let raw_data: Vec<u16> = vec![100; 12 * 12];
 
-        let (rgb, _) = process_xtrans(
+        let rgb = process_xtrans(
             &raw_data,
             12,
             12,
@@ -372,7 +371,7 @@ mod tests {
 
         let raw_data: Vec<u16> = vec![65535; 12 * 12];
 
-        let (rgb, _) = process_xtrans(
+        let rgb = process_xtrans(
             &raw_data,
             12,
             12,

@@ -130,7 +130,7 @@ impl UnpackedRaw {
     }
 
     /// Process Bayer sensor data using our fast SIMD demosaic.
-    fn demosaic_bayer(&self, cfa_pattern: CfaPattern) -> Result<(Vec<f32>, usize)> {
+    fn demosaic_bayer(&self, cfa_pattern: CfaPattern) -> Result<Vec<f32>> {
         let raw_data = self.raw_image_slice()?;
 
         // Normalize to 0.0-1.0 range using parallel processing
@@ -159,7 +159,7 @@ impl UnpackedRaw {
             demosaic_elapsed.as_secs_f64() * 1000.0
         );
 
-        Ok((rgb_pixels, 3))
+        Ok(rgb_pixels)
     }
 
     /// Extract X-Trans 6x6 pattern from libraw metadata.
@@ -182,7 +182,7 @@ impl UnpackedRaw {
     ///
     /// Drops guard and buf before the expensive demosaicing step,
     /// reducing peak memory by ~77 MB.
-    fn demosaic_xtrans(&mut self) -> Result<(Vec<f32>, usize)> {
+    fn demosaic_xtrans(&mut self) -> Result<Vec<f32>> {
         let raw_data = self.raw_image_slice()?;
         let xtrans_pattern = self.xtrans_pattern();
 
@@ -195,7 +195,7 @@ impl UnpackedRaw {
         self.guard.take();
         self.buf.take();
 
-        let (pixels, channels) = process_xtrans(
+        let pixels = process_xtrans(
             &raw_u16,
             self.raw_width,
             self.raw_height,
@@ -208,7 +208,7 @@ impl UnpackedRaw {
             inv_range,
         );
 
-        Ok((pixels, channels))
+        Ok(pixels)
     }
 
     /// Process unknown CFA pattern using libraw's built-in demosaic.
@@ -465,24 +465,24 @@ pub fn load_raw(path: &Path) -> Result<AstroImage> {
         }
         SensorType::Bayer(cfa_pattern) => {
             tracing::debug!("Detected Bayer CFA pattern: {:?}", cfa_pattern);
-            let (pixels, channels) = raw.demosaic_bayer(cfa_pattern)?;
+            let pixels = raw.demosaic_bayer(cfa_pattern)?;
             (
                 pixels,
                 raw.width,
                 raw.height,
-                channels,
+                3,
                 Some(CfaType::Bayer(cfa_pattern)),
             )
         }
         SensorType::XTrans => {
             tracing::info!("X-Trans sensor detected, using X-Trans demosaic");
             let xtrans_pattern = raw.xtrans_pattern();
-            let (pixels, channels) = raw.demosaic_xtrans()?;
+            let pixels = raw.demosaic_xtrans()?;
             (
                 pixels,
                 raw.width,
                 raw.height,
-                channels,
+                3,
                 Some(CfaType::XTrans(xtrans_pattern)),
             )
         }
