@@ -68,12 +68,9 @@ fn stack_cfa_frames(
     )
     .map_err(|e| anyhow::anyhow!("{e}"))?;
 
-    let pixel_data = run_stacking(&cache, &config, paths.len());
+    let result = run_stacking(&cache, &config);
 
-    Ok(Some(CfaImage {
-        data: pixel_data.into_l(),
-        metadata: cache.metadata().clone(),
-    }))
+    Ok(Some(result))
 }
 
 impl CalibrationMasters {

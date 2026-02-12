@@ -41,6 +41,13 @@ pub(crate) trait StackableImage: Send + Sync + std::fmt::Debug + Sized {
     fn metadata(&self) -> &AstroImageMetadata;
     fn load(path: &Path) -> Result<Self, Error>;
 
+    /// Construct from stacking output.
+    fn from_stacked(
+        pixels: PixelData,
+        metadata: AstroImageMetadata,
+        dimensions: ImageDimensions,
+    ) -> Self;
+
     /// In-memory size of this image's pixel data in bytes.
     fn size_in_bytes(&self) -> usize {
         self.dimensions().pixel_count() * size_of::<f32>()

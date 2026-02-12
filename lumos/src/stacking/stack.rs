@@ -145,17 +145,13 @@ pub fn stack_with_progress<P: AsRef<Path> + Sync>(
     // Create image cache
     let cache = ImageCache::<AstroImage>::from_paths(paths, &config.cache, frame_type, progress)?;
 
-    // Run stacking pipeline (normalization + combining)
-    let pixel_data = run_stacking(&cache, &config, paths.len());
+    // Run stacking pipeline (normalization + combining + construction)
+    let result = run_stacking(&cache, &config);
 
     // Cleanup cache
     cache.cleanup();
 
-    Ok(AstroImage {
-        metadata: cache.metadata().clone(),
-        dimensions: cache.dimensions(),
-        pixels: pixel_data,
-    })
+    Ok(result)
 }
 
 /// Compute per-frame normalization parameters for global normalization.
@@ -250,16 +246,14 @@ fn compute_norm_params(
     }
 }
 
-/// Run the full stacking pipeline: compute normalization and dispatch combining.
+/// Run the full stacking pipeline: compute normalization, dispatch combining,
+/// and construct the output image.
 ///
 /// Generic over any `StackableImage` type.
-pub(crate) fn run_stacking(
-    cache: &ImageCache<impl StackableImage>,
-    config: &StackConfig,
-    frame_count: usize,
-) -> crate::astro_image::PixelData {
+pub(crate) fn run_stacking<I: StackableImage>(cache: &ImageCache<I>, config: &StackConfig) -> I {
     let norm_params = compute_norm_params(cache, config.normalization);
-    dispatch_stacking(cache, config, frame_count, norm_params.as_deref())
+    let pixels = dispatch_stacking(cache, config, norm_params.as_deref());
+    I::from_stacked(pixels, cache.metadata().clone(), cache.dimensions())
 }
 
 /// Stacking dispatch that works with any `StackableImage` type.
@@ -268,7 +262,6 @@ pub(crate) fn run_stacking(
 fn dispatch_stacking(
     cache: &ImageCache<impl StackableImage>,
     config: &StackConfig,
-    frame_count: usize,
     norm_params: Option<&[NormParams]>,
 ) -> crate::astro_image::PixelData {
     match (config.method, &config.rejection) {
@@ -303,7 +296,7 @@ fn dispatch_stacking(
         }
 
         (CombineMethod::WeightedMean, rejection) => {
-            let weights = config.normalized_weights(frame_count);
+            let weights = config.normalized_weights(cache.frame_count());
             let rejection = *rejection;
             cache.process_chunked_weighted(
                 &weights,
@@ -1067,8 +1060,8 @@ mod tests {
             ..Default::default()
         };
 
-        let result_norm = dispatch_stacking(&cache, &config, 2, Some(&norm_params));
-        let result_unnorm = dispatch_stacking(&cache, &config, 2, None);
+        let result_norm = dispatch_stacking(&cache, &config, Some(&norm_params));
+        let result_unnorm = dispatch_stacking(&cache, &config, None);
 
         // Normalized: should be ~100 (reference frame level)
         // Unnormalized: should be ~150 (average of 100 and 200)

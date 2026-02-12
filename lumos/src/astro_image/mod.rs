@@ -506,6 +506,18 @@ impl crate::stacking::cache::StackableImage for AstroImage {
             source: std::io::Error::other(e.to_string()),
         })
     }
+
+    fn from_stacked(
+        pixels: PixelData,
+        metadata: AstroImageMetadata,
+        dimensions: ImageDimensions,
+    ) -> Self {
+        AstroImage {
+            metadata,
+            dimensions,
+            pixels,
+        }
+    }
 }
 
 // ============================================================================

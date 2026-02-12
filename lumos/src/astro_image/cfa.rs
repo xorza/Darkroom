@@ -6,7 +6,7 @@
 
 use rayon::prelude::*;
 
-use super::{AstroImage, AstroImageMetadata, ImageDimensions};
+use super::{AstroImage, AstroImageMetadata, ImageDimensions, PixelData};
 use crate::common::Buffer2;
 use crate::raw::demosaic::CfaPattern;
 
@@ -63,6 +63,17 @@ impl crate::stacking::cache::StackableImage for CfaImage {
             path: path.to_path_buf(),
             source: std::io::Error::other(e.to_string()),
         })
+    }
+
+    fn from_stacked(
+        pixels: PixelData,
+        metadata: AstroImageMetadata,
+        _dimensions: ImageDimensions,
+    ) -> Self {
+        CfaImage {
+            data: pixels.into_l(),
+            metadata,
+        }
     }
 }
 
