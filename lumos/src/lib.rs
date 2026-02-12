@@ -44,8 +44,8 @@ pub mod prelude;
 
 pub use astro_image::cfa::{CfaImage, CfaType};
 pub use astro_image::{AstroImage, AstroImageMetadata, BitPix, ImageDimensions};
+pub use calibration_masters::HotPixelMap;
 pub use raw::demosaic::CfaPattern;
-pub use stacking::hot_pixels::HotPixelMap;
 
 // ============================================================================
 // Calibration

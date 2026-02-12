@@ -1,5 +1,7 @@
 //! Calibration master frame creation and management.
 
+pub mod hot_pixels;
+
 #[cfg(test)]
 mod tests;
 
@@ -11,9 +13,10 @@ use crate::astro_image::cfa::CfaImage;
 use crate::stacking::FrameType;
 use crate::stacking::cache::ImageCache;
 use crate::stacking::config::{Normalization, StackConfig};
-use crate::stacking::hot_pixels::HotPixelMap;
 use crate::stacking::progress::ProgressCallback;
 use crate::stacking::stack::run_stacking;
+
+pub use hot_pixels::HotPixelMap;
 
 /// Default sigma threshold for hot pixel detection.
 const DEFAULT_HOT_PIXEL_SIGMA: f32 = 5.0;
