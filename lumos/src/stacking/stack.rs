@@ -292,7 +292,7 @@ fn apply_rejection(
         Rejection::SigmaClip { sigma, iterations } => {
             let config = RejectionSigmaClipConfig::new(*sigma, *iterations);
             let result = rejection::sigma_clipped_mean(values, &mut scratch.indices, &config);
-            reweight_result(result, values, weights, &scratch.indices)
+            recompute_weighted_mean(result, values, weights, &scratch.indices)
         }
 
         Rejection::SigmaClipAsymmetric {
@@ -303,7 +303,7 @@ fn apply_rejection(
             let config = AsymmetricSigmaClipConfig::new(*sigma_low, *sigma_high, *iterations);
             let result =
                 rejection::sigma_clipped_mean_asymmetric(values, &mut scratch.indices, &config);
-            reweight_result(result, values, weights, &scratch.indices)
+            recompute_weighted_mean(result, values, weights, &scratch.indices)
         }
 
         Rejection::Winsorized { sigma, iterations } => {
@@ -326,7 +326,7 @@ fn apply_rejection(
         } => {
             let config = LinearFitClipConfig::new(*sigma_low, *sigma_high, *iterations);
             let result = rejection::linear_fit_clipped_mean(values, &mut scratch.indices, &config);
-            reweight_result(result, values, weights, &scratch.indices)
+            recompute_weighted_mean(result, values, weights, &scratch.indices)
         }
 
         Rejection::Percentile { low, high } => {
@@ -371,14 +371,14 @@ fn apply_rejection(
         } => {
             let config = GesdConfig::new(*alpha, *max_outliers);
             let result = rejection::gesd_mean(values, &mut scratch.indices, &config);
-            reweight_result(result, values, weights, &scratch.indices)
+            recompute_weighted_mean(result, values, weights, &scratch.indices)
         }
     }
 }
 
 /// After a rejection algorithm partitions values, recompute the mean using weights
 /// if present, or keep the unweighted result from the rejection algorithm.
-fn reweight_result(
+fn recompute_weighted_mean(
     result: RejectionResult,
     values: &[f32],
     weights: Option<&[f32]>,
