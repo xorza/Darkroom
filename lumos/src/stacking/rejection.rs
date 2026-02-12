@@ -1217,6 +1217,135 @@ mod tests {
     }
 
     #[test]
+    fn test_rejection_default_is_sigma_clip() {
+        let r = Rejection::default();
+        assert!(
+            matches!(r, Rejection::SigmaClip(c) if (c.sigma_low - 2.5).abs() < f32::EPSILON
+                && (c.sigma_high - 2.5).abs() < f32::EPSILON
+                && c.max_iterations == 3)
+        );
+    }
+
+    #[test]
+    fn test_sigma_clip_multiple_outliers() {
+        let mut values = vec![1.0, 1.5, 2.0, 2.5, 3.0, 50.0, 80.0, 100.0];
+        let mut indices = vec![];
+        let remaining = SigmaClipConfig::new(2.0, 3).reject(&mut values, &mut indices);
+        // All three outliers should be removed
+        for &v in &values[..remaining] {
+            assert!(v < 10.0, "Outlier {} should have been clipped", v);
+        }
+        assert!(
+            remaining <= 5,
+            "Expected at most 5 survivors, got {}",
+            remaining
+        );
+    }
+
+    #[test]
+    fn test_winsorize_no_outliers() {
+        let values = vec![2.0, 2.1, 2.2, 1.9, 2.0];
+        let mut working = vec![];
+        let mut scratch_buf = vec![];
+        let winsorized =
+            WinsorizedClipConfig::new(3.0, 3).winsorize(&values, &mut working, &mut scratch_buf);
+        assert_eq!(winsorized.len(), 5);
+        // Values should pass through unchanged
+        for (orig, &w) in values.iter().zip(winsorized.iter()) {
+            assert!(
+                (orig - w).abs() < f32::EPSILON,
+                "Value {} should be unchanged, got {}",
+                orig,
+                w
+            );
+        }
+    }
+
+    #[test]
+    fn test_winsorize_does_not_modify_original() {
+        let values = vec![1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 100.0];
+        let original = values.clone();
+        let mut working = vec![];
+        let mut scratch_buf = vec![];
+        WinsorizedClipConfig::new(2.0, 3).winsorize(&values, &mut working, &mut scratch_buf);
+        assert_eq!(values, original, "Original values should not be modified");
+    }
+
+    #[test]
+    fn test_linear_fit_with_trend_plus_outlier() {
+        // Perfect linear trend y = 1 + 2*x, with one outlier
+        let mut values = vec![1.0, 3.0, 5.0, 7.0, 50.0, 11.0, 13.0, 15.0];
+        let mut indices = vec![];
+        let remaining = LinearFitClipConfig::new(2.0, 2.0, 3).reject(&mut values, &mut indices);
+        // The outlier at index 4 (value 50.0, expected 9.0) should be rejected
+        assert_eq!(remaining, 7, "Only the outlier should be rejected");
+        let surviving = &indices[..remaining];
+        assert!(
+            !surviving.contains(&4),
+            "Frame 4 (outlier) should not survive, survivors: {:?}",
+            surviving
+        );
+    }
+
+    #[test]
+    fn test_surviving_range_single_element() {
+        let config = PercentileClipConfig::new(10.0, 10.0);
+        let range = config.surviving_range(1);
+        assert_eq!(range, 0..1, "Single element must survive");
+    }
+
+    #[test]
+    fn test_surviving_range_extreme_percentiles() {
+        // 49% + 49% = 98% clipped — should still keep at least 1
+        let config = PercentileClipConfig::new(49.0, 49.0);
+        let range = config.surviving_range(5);
+        assert!(!range.is_empty(), "Must keep at least one element");
+        // For n=5: low_count = floor(0.49*5) = 2, high_count = floor(0.49*5) = 2
+        // start=2, end=5-2=3, range = 2..3 (1 element)
+        assert_eq!(range.len(), 1);
+    }
+
+    #[test]
+    fn test_weighted_mean_indexed_zero_weights() {
+        // When all weights are zero, should fall back to simple mean
+        let values = [2.0, 4.0, 6.0];
+        let weights = [0.0, 0.0, 0.0];
+        let indices = [0, 1, 2];
+        let mean = weighted_mean_indexed(&values, &weights, &indices);
+        assert!(
+            (mean - 4.0).abs() < f32::EPSILON,
+            "Zero-weight fallback should give simple mean 4.0, got {}",
+            mean
+        );
+    }
+
+    #[test]
+    fn test_combine_mean_percentile_unweighted() {
+        let mut values = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0];
+        let mean = Rejection::percentile(20.0).combine_mean(&mut values, None, &mut scratch());
+        // Clips 2 low (1,2) and 2 high (9,10), mean of [3,4,5,6,7,8] = 5.5
+        assert!(
+            (mean - 5.5).abs() < 0.01,
+            "Unweighted percentile mean should be 5.5, got {}",
+            mean
+        );
+    }
+
+    #[test]
+    fn test_combine_mean_none_with_weights() {
+        let mut values = vec![1.0, 2.0, 3.0, 4.0, 5.0];
+        let weights = vec![10.0, 1.0, 1.0, 1.0, 1.0];
+        let mean = Rejection::None.combine_mean(&mut values, Some(&weights), &mut scratch());
+        // Weighted mean: (10+2+3+4+5) / (10+1+1+1+1) = 24/14 ≈ 1.714
+        assert!(
+            (mean - 24.0 / 14.0).abs() < 1e-5,
+            "Weighted mean with no rejection should be {}, got {}",
+            24.0 / 14.0,
+            mean
+        );
+    }
+
+    #[test]
     fn test_weighted_rejection_uniform_weights_unchanged() {
         let values = vec![1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 100.0];
         let uniform_weights = vec![1.0; 8];
