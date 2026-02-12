@@ -3,13 +3,8 @@
 //! This module provides a single `StackConfig` type that encapsulates all stacking
 //! parameters: combination method, pixel rejection, normalization, and memory settings.
 
-use crate::math;
 use crate::stacking::CacheConfig;
-use crate::stacking::cache::ScratchBuffers;
-use crate::stacking::rejection::{
-    AsymmetricSigmaClipConfig, GesdConfig, LinearFitClipConfig, PercentileClipConfig,
-    RejectionResult, SigmaClipConfig, WinsorizedClipConfig,
-};
+use crate::stacking::rejection::Rejection;
 
 /// Method for combining pixel values across frames.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -19,169 +14,6 @@ pub enum CombineMethod {
     Mean,
     /// Median value (implicit outlier rejection).
     Median,
-}
-
-/// Pixel rejection algorithm applied before combining.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum Rejection {
-    /// No rejection.
-    None,
-    /// Iterative sigma clipping from median.
-    SigmaClip(SigmaClipConfig),
-    /// Sigma clipping with asymmetric thresholds.
-    SigmaClipAsymmetric(AsymmetricSigmaClipConfig),
-    /// Replace outliers with boundary values (better for small stacks).
-    Winsorized(WinsorizedClipConfig),
-    /// Fit linear trend, reject deviants (good for gradients).
-    LinearFit(LinearFitClipConfig),
-    /// Clip lowest/highest percentiles.
-    Percentile(PercentileClipConfig),
-    /// Generalized ESD test (best for large stacks >50 frames).
-    Gesd(GesdConfig),
-}
-
-impl Default for Rejection {
-    fn default() -> Self {
-        Self::SigmaClip(SigmaClipConfig::new(2.5, 3))
-    }
-}
-
-impl Rejection {
-    /// Create sigma clipping with default iterations.
-    pub fn sigma_clip(sigma: f32) -> Self {
-        Self::SigmaClip(SigmaClipConfig::new(sigma, 3))
-    }
-
-    /// Create asymmetric sigma clipping.
-    pub fn sigma_clip_asymmetric(sigma_low: f32, sigma_high: f32) -> Self {
-        Self::SigmaClipAsymmetric(AsymmetricSigmaClipConfig::new(sigma_low, sigma_high, 3))
-    }
-
-    /// Create winsorized sigma clipping.
-    pub fn winsorized(sigma: f32) -> Self {
-        Self::Winsorized(WinsorizedClipConfig::new(sigma, 3))
-    }
-
-    /// Create linear fit clipping with symmetric thresholds.
-    pub fn linear_fit(sigma: f32) -> Self {
-        Self::LinearFit(LinearFitClipConfig::new(sigma, sigma, 3))
-    }
-
-    /// Create percentile clipping with symmetric bounds.
-    pub fn percentile(percent: f32) -> Self {
-        Self::Percentile(PercentileClipConfig::new(percent, percent))
-    }
-
-    /// Create GESD with default alpha.
-    pub fn gesd() -> Self {
-        Self::Gesd(GesdConfig::new(0.05, None))
-    }
-
-    /// Partition values by rejection algorithm, returning the number of survivors.
-    ///
-    /// After return, `values[..remaining]` contains surviving values.
-    /// For `Winsorized`, no partitioning occurs (returns `values.len()`).
-    pub(crate) fn reject(&self, values: &mut [f32], scratch: &mut ScratchBuffers) -> usize {
-        match self {
-            Rejection::None => values.len(),
-            Rejection::SigmaClip(c) => c.reject(values, &mut scratch.indices),
-            Rejection::SigmaClipAsymmetric(c) => c.reject(values, &mut scratch.indices),
-            Rejection::LinearFit(c) => c.reject(values, &mut scratch.indices),
-            Rejection::Gesd(c) => c.reject(values, &mut scratch.indices),
-            Rejection::Percentile(c) => c.reject(values),
-            Rejection::Winsorized(_) => values.len(),
-        }
-    }
-
-    /// Reject outliers then compute (weighted) mean.
-    ///
-    /// Uses index tracking to maintain correct value-weight alignment after rejection
-    /// functions partition/reorder the values array.
-    pub(crate) fn combine_mean(
-        &self,
-        values: &mut [f32],
-        weights: Option<&[f32]>,
-        scratch: &mut ScratchBuffers,
-    ) -> RejectionResult {
-        // Winsorized and weighted-Percentile are special cases
-        match self {
-            Rejection::Winsorized(config) => {
-                let winsorized =
-                    config.winsorize(values, &mut scratch.floats_a, &mut scratch.floats_b);
-                let value = match weights {
-                    Some(w) => math::weighted_mean_f32(winsorized, w),
-                    None => math::mean_f32(winsorized),
-                };
-                return RejectionResult {
-                    value,
-                    remaining_count: values.len(),
-                };
-            }
-
-            Rejection::Percentile(config) if weights.is_some() => {
-                let w = weights.unwrap();
-                scratch.pairs.clear();
-                scratch
-                    .pairs
-                    .extend(values.iter().zip(w.iter()).map(|(&v, &wt)| (v, wt)));
-                scratch
-                    .pairs
-                    .sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
-
-                let range = config.surviving_range(scratch.pairs.len());
-                let remaining = &scratch.pairs[range];
-                let value = math::weighted_mean_pairs_f32(remaining);
-                return RejectionResult {
-                    value,
-                    remaining_count: remaining.len(),
-                };
-            }
-
-            _ => {}
-        }
-
-        // Common path: reject then compute mean
-        let remaining = self.reject(values, scratch);
-
-        let value = match (weights, self) {
-            (Some(w), Rejection::None) => math::weighted_mean_f32(values, w),
-            (_, Rejection::Percentile(_)) => math::mean_f32(&values[..remaining]),
-            (Some(w), _) if remaining > 0 => {
-                weighted_mean_indexed(&values[..remaining], w, &scratch.indices[..remaining])
-            }
-            _ => math::mean_f32(&values[..remaining]),
-        };
-
-        RejectionResult {
-            value,
-            remaining_count: remaining,
-        }
-    }
-}
-
-/// Compute weighted mean using index mapping.
-///
-/// `indices[i]` maps `values[i]` to `weights[indices[i]]`, maintaining correct
-/// alignment after rejection functions have reordered the values array.
-fn weighted_mean_indexed(values: &[f32], weights: &[f32], indices: &[usize]) -> f32 {
-    if values.is_empty() {
-        return 0.0;
-    }
-
-    let mut sum = 0.0f32;
-    let mut weight_sum = 0.0f32;
-
-    for (i, &v) in values.iter().enumerate() {
-        let w = weights[indices[i]];
-        sum += v * w;
-        weight_sum += w;
-    }
-
-    if weight_sum > f32::EPSILON {
-        sum / weight_sum
-    } else {
-        values.iter().sum::<f32>() / values.len() as f32
-    }
 }
 
 /// Frame normalization method applied before stacking.
@@ -328,10 +160,6 @@ impl StackConfig {
         match self.rejection {
             Rejection::None => {}
             Rejection::SigmaClip(c) => {
-                assert!(c.sigma > 0.0, "Sigma must be positive");
-                assert!(c.max_iterations > 0, "Iterations must be at least 1");
-            }
-            Rejection::SigmaClipAsymmetric(c) => {
                 assert!(c.sigma_low > 0.0, "Sigma low must be positive");
                 assert!(c.sigma_high > 0.0, "Sigma high must be positive");
                 assert!(c.max_iterations > 0, "Iterations must be at least 1");
@@ -388,6 +216,7 @@ impl StackConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::stacking::rejection::{PercentileClipConfig, SigmaClipConfig};
 
     #[test]
     fn test_default_config() {
@@ -404,7 +233,7 @@ mod tests {
         assert_eq!(config.method, CombineMethod::Mean);
         assert!(matches!(
             config.rejection,
-            Rejection::SigmaClip(c) if (c.sigma - 2.0).abs() < f32::EPSILON
+            Rejection::SigmaClip(c) if (c.sigma_low - 2.0).abs() < f32::EPSILON && (c.sigma_high - 2.0).abs() < f32::EPSILON
         ));
     }
 
@@ -425,14 +254,11 @@ mod tests {
     #[test]
     fn test_struct_update_syntax() {
         let config = StackConfig {
-            rejection: Rejection::SigmaClipAsymmetric(AsymmetricSigmaClipConfig::new(2.0, 3.0, 5)),
+            rejection: Rejection::SigmaClip(SigmaClipConfig::new_asymmetric(2.0, 3.0, 5)),
             normalization: Normalization::Global,
             ..Default::default()
         };
-        assert!(matches!(
-            config.rejection,
-            Rejection::SigmaClipAsymmetric(..)
-        ));
+        assert!(matches!(config.rejection, Rejection::SigmaClip(..)));
         assert_eq!(config.normalization, Normalization::Global);
     }
 
@@ -461,11 +287,12 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "Sigma must be positive")]
+    #[should_panic(expected = "Sigma low must be positive")]
     fn test_validate_invalid_sigma() {
         let config = StackConfig {
             rejection: Rejection::SigmaClip(SigmaClipConfig {
-                sigma: -1.0,
+                sigma_low: -1.0,
+                sigma_high: -1.0,
                 max_iterations: 3,
             }),
             ..Default::default()
@@ -484,194 +311,5 @@ mod tests {
             ..Default::default()
         };
         config.validate();
-    }
-
-    #[test]
-    fn test_rejection_constructors() {
-        let r = Rejection::sigma_clip(2.0);
-        assert!(matches!(r, Rejection::SigmaClip(c) if (c.sigma - 2.0).abs() < f32::EPSILON));
-
-        let r = Rejection::winsorized(3.0);
-        assert!(matches!(r, Rejection::Winsorized(c) if (c.sigma - 3.0).abs() < f32::EPSILON));
-
-        let r = Rejection::linear_fit(2.5);
-        assert!(matches!(r, Rejection::LinearFit(c)
-            if (c.sigma_low - 2.5).abs() < f32::EPSILON && (c.sigma_high - 2.5).abs() < f32::EPSILON));
-
-        let r = Rejection::percentile(15.0);
-        assert!(matches!(r, Rejection::Percentile(c)
-            if (c.low_percentile - 15.0).abs() < f32::EPSILON && (c.high_percentile - 15.0).abs() < f32::EPSILON));
-
-        let r = Rejection::gesd();
-        assert!(matches!(r, Rejection::Gesd(c)
-            if (c.alpha - 0.05).abs() < f32::EPSILON && c.max_outliers.is_none()));
-    }
-
-    // ========== Rejection::combine_mean Tests ==========
-
-    fn scratch() -> ScratchBuffers {
-        ScratchBuffers {
-            indices: vec![],
-            pairs: vec![],
-            floats_a: vec![],
-            floats_b: vec![],
-        }
-    }
-
-    #[test]
-    fn test_combine_mean_none() {
-        let mut values = vec![1.0, 2.0, 3.0, 4.0, 5.0];
-        let result = Rejection::None.combine_mean(&mut values, None, &mut scratch());
-        assert!((result.value - 3.0).abs() < f32::EPSILON);
-        assert_eq!(result.remaining_count, 5);
-    }
-
-    #[test]
-    fn test_combine_mean_sigma_clip() {
-        let mut values = vec![1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 100.0];
-        let result = Rejection::sigma_clip(2.0).combine_mean(&mut values, None, &mut scratch());
-        assert!(
-            result.value < 10.0,
-            "Outlier should be clipped, got {}",
-            result.value
-        );
-        assert!(result.remaining_count < 8);
-    }
-
-    #[test]
-    fn test_weighted_percentile_uses_weights() {
-        let mut values = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0];
-        let weights = vec![1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 10.0, 1.0, 1.0];
-
-        let result =
-            Rejection::percentile(20.0).combine_mean(&mut values, Some(&weights), &mut scratch());
-
-        assert_eq!(result.remaining_count, 6);
-        assert!(
-            result.value > 5.5 + 0.5,
-            "Weighted percentile should be pulled toward heavily weighted value 8, got {}",
-            result.value
-        );
-    }
-
-    #[test]
-    fn test_weighted_winsorized_uses_weights() {
-        let mut values = vec![1.0, 2.0, 2.0, 2.0, 2.0, 100.0];
-        let weights = vec![10.0, 1.0, 1.0, 1.0, 1.0, 1.0];
-
-        let result =
-            Rejection::winsorized(2.0).combine_mean(&mut values, Some(&weights), &mut scratch());
-
-        assert_eq!(result.remaining_count, 6);
-
-        let mut values_unwt = vec![1.0, 2.0, 2.0, 2.0, 2.0, 100.0];
-        let uniform_weights = vec![1.0; 6];
-        let unweighted_result = Rejection::winsorized(2.0).combine_mean(
-            &mut values_unwt,
-            Some(&uniform_weights),
-            &mut scratch(),
-        );
-
-        assert!(
-            result.value < unweighted_result.value,
-            "Weighted winsorized (heavy on 1.0) should be less than uniform: {} vs {}",
-            result.value,
-            unweighted_result.value,
-        );
-    }
-
-    #[test]
-    fn test_weighted_asymmetric_sigma_clip() {
-        let mut values = vec![1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 100.0];
-        let weights = vec![10.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0];
-
-        let result = Rejection::sigma_clip_asymmetric(4.0, 2.0).combine_mean(
-            &mut values,
-            Some(&weights),
-            &mut scratch(),
-        );
-
-        assert!(result.remaining_count < 8);
-        assert!(
-            result.value < 2.5,
-            "Should be pulled toward 1.0, got {}",
-            result.value
-        );
-    }
-
-    // ========== Weight-Value Alignment Tests ==========
-
-    #[test]
-    fn test_weighted_sigma_clip_weight_alignment() {
-        let mut values = vec![2.0, 100.0, 3.0, 2.5, 2.2, 1.8, 2.8, 2.3];
-        let weights = vec![10.0, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1];
-
-        let result =
-            Rejection::sigma_clip(2.0).combine_mean(&mut values, Some(&weights), &mut scratch());
-
-        assert!(result.remaining_count < 8);
-        assert!(
-            (result.value - 2.0).abs() < 0.25,
-            "Weighted mean should be ~2.0 (dominated by frame 0, weight=10.0), got {}",
-            result.value
-        );
-    }
-
-    #[test]
-    fn test_weighted_linear_fit_weight_alignment() {
-        let mut values = vec![1.0, 2.0, 3.0, 4.0, 100.0, 6.0];
-        let weights = vec![10.0, 0.1, 0.1, 0.1, 0.1, 0.1];
-
-        let result =
-            Rejection::linear_fit(2.0).combine_mean(&mut values, Some(&weights), &mut scratch());
-
-        assert!(result.remaining_count < 6);
-        assert!(
-            result.value < 2.0,
-            "Weighted mean should be pulled toward frame 0 (value=1.0, weight=10.0), got {}",
-            result.value
-        );
-    }
-
-    #[test]
-    fn test_weighted_gesd_weight_alignment() {
-        let mut values = vec![1.0, 1.1, 0.9, 1.0, 1.2, 0.8, 1.0, 100.0];
-        let weights = vec![10.0, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1];
-
-        let result = Rejection::Gesd(GesdConfig::new(0.05, Some(3))).combine_mean(
-            &mut values,
-            Some(&weights),
-            &mut scratch(),
-        );
-
-        assert!(result.remaining_count < 8);
-        assert!(
-            (result.value - 1.0).abs() < 0.05,
-            "Weighted mean should be ~1.0 (dominated by frame 0, weight=10.0), got {}",
-            result.value
-        );
-    }
-
-    #[test]
-    fn test_weighted_rejection_uniform_weights_unchanged() {
-        let values = vec![1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 100.0];
-        let uniform_weights = vec![1.0; 8];
-
-        let result = Rejection::sigma_clip(2.0).combine_mean(
-            &mut values.clone(),
-            Some(&uniform_weights),
-            &mut scratch(),
-        );
-
-        let mut values2 = values;
-        let result2 = Rejection::sigma_clip(2.0).combine_mean(&mut values2, None, &mut scratch());
-
-        assert_eq!(result.remaining_count, result2.remaining_count);
-        assert!(
-            (result.value - result2.value).abs() < 1e-5,
-            "Uniform weighted should match non-weighted: {} vs {}",
-            result.value,
-            result2.value
-        );
     }
 }

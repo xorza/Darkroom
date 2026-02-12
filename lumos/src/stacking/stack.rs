@@ -245,7 +245,7 @@ fn dispatch_stacking(
             cache.process_chunked(
                 weights.as_deref(),
                 norm_params,
-                move |values, w, scratch| config.rejection.combine_mean(values, w, scratch).value,
+                move |values, w, scratch| config.rejection.combine_mean(values, w, scratch),
             )
         }
     }
@@ -254,7 +254,7 @@ fn dispatch_stacking(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::stacking::config::Rejection;
+    use crate::stacking::rejection::Rejection;
     use crate::{
         astro_image::{AstroImage, ImageDimensions},
         stacking::cache::tests::make_test_cache,
