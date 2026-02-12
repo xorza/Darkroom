@@ -6,7 +6,8 @@
 //!
 //! Re-exports the main types and functions from the submodules.
 
-mod bayer;
+pub(crate) mod bayer;
 pub(crate) mod xtrans;
 
-pub(crate) use bayer::{BayerImage, CfaPattern, demosaic_bayer};
+pub use bayer::CfaPattern;
+pub(crate) use bayer::{BayerImage, demosaic_bayer};

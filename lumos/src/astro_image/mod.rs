@@ -1,3 +1,4 @@
+pub mod cfa;
 mod fits;
 pub(crate) mod sensor;
 

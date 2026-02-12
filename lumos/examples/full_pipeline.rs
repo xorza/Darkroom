@@ -1,8 +1,8 @@
 //! Example: Full astrophotography calibration pipeline
 //!
 //! This example demonstrates the complete calibration workflow:
-//! 1. Create master calibration frames (darks, flats, biases) from raw frames
-//! 2. Calibrate light frames using the master frames
+//! 1. Create master calibration frames (darks, flats, biases) from raw CFA frames
+//! 2. Calibrate light frames using the CFA masters
 //! 3. Detect stars in calibrated images
 //! 4. Register (align) all lights to a reference frame
 //! 5. Stack aligned lights into final image
@@ -25,11 +25,6 @@
 //! Output structure:
 //! ```text
 //! test_output/
-//!   calibration_masters/
-//!     master_dark_median.tiff
-//!     master_flat_median.tiff
-//!     master_bias_median.tiff
-//!     hot_pixel_map.bin
 //!   calibrated_lights/
 //!     light1_calibrated.tiff
 //!     light2_calibrated.tiff
@@ -53,6 +48,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
 
+use lumos::raw::load_raw_cfa;
 use lumos::{
     AstroImage, CalibrationMasters, FrameType, ProgressCallback, RegistrationConfig, StackConfig,
     StackingProgress, StackingStage, Star, StarDetectionConfig, StarDetector, TransformType,
@@ -80,22 +76,20 @@ fn main() {
         .parent()
         .unwrap()
         .join("test_output");
-    let masters_dir = output_base.join("calibration_masters");
     let calibrated_dir = output_base.join("calibrated_lights");
     let registered_dir = output_base.join("registered_lights");
 
-    fs::create_dir_all(&masters_dir).expect("Failed to create masters directory");
     fs::create_dir_all(&calibrated_dir).expect("Failed to create calibrated directory");
     fs::create_dir_all(&registered_dir).expect("Failed to create registered directory");
 
     // =========================================================================
-    // STEP 1: Create calibration master frames
+    // STEP 1: Create calibration master frames from raw CFA data
     // =========================================================================
     println!("\n{}", "=".repeat(60));
     println!("STEP 1: Creating calibration master frames");
     println!("{}\n", "=".repeat(60));
 
-    let masters = create_calibration_masters(&calibration_dir, &masters_dir);
+    let masters = create_calibration_masters(&calibration_dir);
 
     // =========================================================================
     // STEP 2: Calibrate light frames
@@ -144,78 +138,49 @@ fn main() {
     println!("Total time: {:.2}s", total_elapsed.as_secs_f32());
 }
 
-/// Step 1: Load or create calibration master frames.
-fn create_calibration_masters(calibration_dir: &Path, output_dir: &Path) -> CalibrationMasters {
+/// Step 1: Create calibration master frames from raw CFA data.
+fn create_calibration_masters(calibration_dir: &Path) -> CalibrationMasters {
     let start = Instant::now();
 
-    let config = StackConfig::median();
+    let load_paths = |subdir: &str| -> Vec<PathBuf> {
+        let dir = calibration_dir.join(subdir);
+        if dir.exists() {
+            common::file_utils::astro_image_files(&dir)
+        } else {
+            Vec::new()
+        }
+    };
 
-    // First, try to load existing masters from the output directory
-    if let Ok(masters) = CalibrationMasters::load(output_dir, config.clone())
-        && (masters.master_dark.is_some()
-            || masters.master_flat.is_some()
-            || masters.master_bias.is_some())
-    {
-        tracing::info!(
-            "Loaded existing calibration masters from {}",
-            output_dir.display()
-        );
-        return masters;
-    }
+    let dark_paths = load_paths("Darks");
+    let flat_paths = load_paths("Flats");
+    let bias_paths = load_paths("Bias");
 
-    // No existing masters found, create from raw frames
-    let progress = create_progress_callback();
-    tracing::info!("Creating calibration masters from raw frames...");
+    tracing::info!(
+        "Found frames: darks={}, flats={}, bias={}",
+        dark_paths.len(),
+        flat_paths.len(),
+        bias_paths.len()
+    );
 
-    let masters = CalibrationMasters::create(calibration_dir, config, progress)
+    let masters = CalibrationMasters::from_raw_files(&dark_paths, &flat_paths, &bias_paths)
         .expect("Failed to create calibration masters");
 
-    let elapsed = start.elapsed();
-
-    // Report what was created
-    if let Some(ref dark) = masters.master_dark {
-        tracing::info!(
-            width = dark.dimensions().width,
-            height = dark.dimensions().height,
-            "Master dark created"
-        );
-    } else {
-        tracing::warn!("No master dark created (no Darks subdirectory)");
-    }
-
-    if let Some(ref flat) = masters.master_flat {
-        tracing::info!(
-            width = flat.dimensions().width,
-            height = flat.dimensions().height,
-            "Master flat created"
-        );
-    } else {
-        tracing::warn!("No master flat created (no Flats subdirectory)");
-    }
-
-    if let Some(ref bias) = masters.master_bias {
-        tracing::info!(
-            width = bias.dimensions().width,
-            height = bias.dimensions().height,
-            "Master bias created"
-        );
-    } else {
-        tracing::warn!("No master bias created (no Bias subdirectory)");
-    }
+    tracing::info!(
+        dark = masters.master_dark.is_some(),
+        flat = masters.master_flat.is_some(),
+        bias = masters.master_bias.is_some(),
+        "Masters created"
+    );
 
     if let Some(ref hot_pixels) = masters.hot_pixel_map {
         tracing::info!(
-            count = hot_pixels.count,
+            count = hot_pixels.count(),
             percentage = format!("{:.4}%", hot_pixels.percentage()),
             "Hot pixels detected"
         );
     }
 
-    // Save masters
-    masters
-        .save_to_directory(output_dir)
-        .expect("Failed to save calibration masters");
-
+    let elapsed = start.elapsed();
     tracing::info!(
         elapsed_secs = format!("{:.2}", elapsed.as_secs_f32()),
         "Step 1 complete: Calibration masters created"
@@ -289,17 +254,17 @@ fn calibrate_light_frames(
 
         tracing::info!(file = %filename, "Calibrating");
 
-        // Load the light frame
-        let mut light = match AstroImage::from_file(path) {
-            Ok(img) => img,
+        // CFA pipeline: load raw, calibrate on un-demosaiced data, then demosaic
+        let light = match load_raw_cfa(path) {
+            Ok(mut cfa) => {
+                masters.calibrate(&mut cfa);
+                cfa.demosaic()
+            }
             Err(e) => {
-                tracing::error!(file = %filename, error = %e, "Failed to load");
+                tracing::error!(file = %filename, error = %e, "Failed to load as CFA");
                 continue;
             }
         };
-
-        // Calibrate
-        masters.calibrate(&mut light);
 
         // Save calibrated frame
         let img: imaginarium::Image = light.into();

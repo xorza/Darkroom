@@ -1,7 +1,8 @@
-//! Full pipeline benchmark: master creation -> calibration -> registration -> stacking.
+//! Full pipeline benchmark: CFA master creation -> calibration -> registration -> stacking.
 
 use std::time::Instant;
 
+use crate::raw::load_raw_cfa;
 use crate::testing::{calibration_dir, calibration_image_paths, init_tracing};
 use crate::{
     AstroImage, CalibrationMasters, FrameType, Normalization, ProgressCallback, RegistrationConfig,
@@ -20,41 +21,32 @@ fn bench_full_pipeline() {
     let total_start = Instant::now();
 
     // =========================================================================
-    // Step 1: Create master calibration frames
+    // Step 1: Create master calibration frames from raw CFA data
     // =========================================================================
-    println!("\n--- Step 1: Creating master calibration frames ---");
+    println!("\n--- Step 1: Creating CFA master calibration frames ---");
     let step_start = Instant::now();
 
-    let masters = CalibrationMasters::create(
-        &cal_dir,
-        StackConfig::sigma_clipped(2.5),
-        ProgressCallback::default(),
-    )
-    .unwrap();
+    let dark_paths = calibration_image_paths("Darks").unwrap_or_default();
+    let flat_paths = calibration_image_paths("Flats").unwrap_or_default();
+    let bias_paths = calibration_image_paths("Bias").unwrap_or_default();
 
-    if let Some(ref dark) = masters.master_dark {
-        println!("  Master dark: {}x{}", dark.width(), dark.height());
-    }
-    if let Some(ref flat) = masters.master_flat {
-        println!("  Master flat: {}x{}", flat.width(), flat.height());
-    }
-    if let Some(ref bias) = masters.master_bias {
-        println!("  Master bias: {}x{}", bias.width(), bias.height());
-    }
+    let masters = CalibrationMasters::from_raw_files(&dark_paths, &flat_paths, &bias_paths)
+        .expect("Failed to create calibration masters");
+
+    println!(
+        "  Masters: dark={}, flat={}, bias={}",
+        masters.master_dark.is_some(),
+        masters.master_flat.is_some(),
+        masters.master_bias.is_some(),
+    );
+
     if let Some(ref hp) = masters.hot_pixel_map {
-        println!("  Hot pixels: {} ({:.4}%)", hp.count, hp.percentage());
+        println!("  Hot pixels: {} ({:.4}%)", hp.count(), hp.percentage());
     }
     println!("  Elapsed: {:?}", step_start.elapsed());
 
-    // Save masters
-    let masters_dir = cal_dir.join("calibration_masters");
-    masters
-        .save_to_directory(&masters_dir)
-        .expect("Failed to save masters");
-    println!("  Saved masters to {}", masters_dir.display());
-
     // =========================================================================
-    // Step 2: Calibrate light frames
+    // Step 2: Calibrate light frames (CFA pipeline)
     // =========================================================================
     println!("\n--- Step 2: Calibrating light frames ---");
     let step_start = Instant::now();
@@ -64,9 +56,9 @@ fn bench_full_pipeline() {
     println!("  Loading and calibrating {} lights...", light_paths.len());
 
     let calibrated: Vec<AstroImage> = common::parallel::par_map_limited(&light_paths, 3, |p| {
-        let mut img = AstroImage::from_file(p).unwrap();
-        masters.calibrate(&mut img);
-        img
+        let mut cfa = load_raw_cfa(p).unwrap();
+        masters.calibrate(&mut cfa);
+        cfa.demosaic()
     });
 
     println!("  Elapsed: {:?}", step_start.elapsed());

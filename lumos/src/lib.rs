@@ -28,7 +28,7 @@ pub(crate) mod common;
 pub mod drizzle;
 pub mod gradient_removal;
 pub(crate) mod math;
-pub(crate) mod raw;
+pub mod raw;
 pub(crate) mod registration;
 pub(crate) mod stacking;
 pub(crate) mod star_detection;
@@ -42,7 +42,9 @@ pub mod prelude;
 // Core image types
 // ============================================================================
 
+pub use astro_image::cfa::{CfaImage, CfaType};
 pub use astro_image::{AstroImage, AstroImageMetadata, BitPix, ImageDimensions};
+pub use raw::demosaic::CfaPattern;
 pub use stacking::hot_pixels::HotPixelMap;
 
 // ============================================================================
