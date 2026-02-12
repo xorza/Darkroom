@@ -1,0 +1,22 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__acp__Edit",
+      "mcp__acp__Write",
+      "mcp__acp__Read",
+      "WebSearch",
+      "WebFetch",
+      "Bash(cargo test:*)",
+      "Bash(cargo nextest:*)",
+      "Bash(cargo build:*)",
+      "Bash(cargo run:*)",
+      "Bash(cargo clippy:*)",
+      "Bash(cargo fmt:*)",
+      "Bash(cargo check:*)"
+    ]
+  },
+  "sandbox": {
+    "enabled": true,
+    "autoAllowBashIfSandboxed": true
+  }
+}
