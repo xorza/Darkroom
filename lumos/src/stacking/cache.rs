@@ -22,7 +22,7 @@ use common::parallel::try_par_map_limited;
 use memmap2::Mmap;
 use rayon::prelude::*;
 
-use crate::astro_image::{AstroImageMetadata, ImageDimensions};
+use crate::astro_image::{AstroImageMetadata, ImageDimensions, PixelData};
 use crate::stacking::FrameType;
 use crate::stacking::cache_config::{
     CacheConfig, MEMORY_PERCENT, compute_optimal_chunk_rows_with_memory,
@@ -293,18 +293,14 @@ impl<I: StackableImage> ImageCache<I> {
 
     /// Process images in horizontal chunks, applying a combine function to each pixel.
     ///
-    /// Returns planar channel data as `Vec<Vec<f32>>`.
+    /// Returns `PixelData` with the combined result.
     ///
     /// Optional `norm_params` apply per-frame affine normalization before combining.
     /// Indexed as `[frame * channels + channel]` with `(gain, offset)` pairs:
     /// `normalized = raw * gain + offset`.
     ///
     /// Processing is done per-channel, parallelized per-row with rayon.
-    pub fn process_chunked<F>(
-        &self,
-        norm_params: Option<&[(f32, f32)]>,
-        combine: F,
-    ) -> Vec<Vec<f32>>
+    pub fn process_chunked<F>(&self, norm_params: Option<&[(f32, f32)]>, combine: F) -> PixelData
     where
         F: Fn(&mut [f32]) -> f32 + Sync,
     {
@@ -336,7 +332,7 @@ impl<I: StackableImage> ImageCache<I> {
 
     /// Process images in horizontal chunks with per-frame weights.
     ///
-    /// Returns planar channel data as `Vec<Vec<f32>>`.
+    /// Returns `PixelData` with the combined result.
     ///
     /// Optional `norm_params` apply per-frame affine normalization before combining.
     pub fn process_chunked_weighted<F>(
@@ -344,7 +340,7 @@ impl<I: StackableImage> ImageCache<I> {
         weights: &[f32],
         norm_params: Option<&[(f32, f32)]>,
         combine: F,
-    ) -> Vec<Vec<f32>>
+    ) -> PixelData
     where
         F: Fn(&mut [f32], &[f32]) -> f32 + Sync,
     {
@@ -383,8 +379,8 @@ impl<I: StackableImage> ImageCache<I> {
 
     /// Internal chunk processing - handles chunking logic, calls processor for each chunk.
     /// The closure receives `(output_slice, chunks, frame_count, width, channel)`.
-    /// Returns planar channel data as `Vec<Vec<f32>>`.
-    fn process_chunks_internal<F>(&self, mut process_chunk: F) -> Vec<Vec<f32>>
+    /// Returns `PixelData` with the combined result.
+    fn process_chunks_internal<F>(&self, mut process_chunk: F) -> PixelData
     where
         F: FnMut(&mut [f32], &[&[f32]], usize, usize, usize),
     {
@@ -392,8 +388,6 @@ impl<I: StackableImage> ImageCache<I> {
         let frame_count = self.frame_count();
         let width = dims.width;
         let height = dims.height;
-        let channels = dims.channels;
-        let pixels_per_channel = width * height;
         let available_memory = self.config.get_available_memory();
 
         let chunk_rows = match &self.storage {
@@ -403,9 +397,8 @@ impl<I: StackableImage> ImageCache<I> {
             }
         };
 
-        let mut output_channels: Vec<Vec<f32>> = (0..channels)
-            .map(|_| vec![0.0f32; pixels_per_channel])
-            .collect();
+        let mut output = PixelData::new_default(width, height, dims.channels);
+        let channels = output.channels();
 
         let num_chunks = height.div_ceil(chunk_rows);
         let total_work = num_chunks * channels;
@@ -414,7 +407,7 @@ impl<I: StackableImage> ImageCache<I> {
 
         report_progress(&self.progress, 0, total_work, StackingStage::Processing);
 
-        for (channel, output_channel) in output_channels.iter_mut().enumerate() {
+        for channel in 0..channels {
             for chunk_idx in 0..num_chunks {
                 let start_row = chunk_idx * chunk_rows;
                 let end_row = (start_row + chunk_rows).min(height);
@@ -426,7 +419,8 @@ impl<I: StackableImage> ImageCache<I> {
                     self.read_channel_chunk(frame_idx, channel, start_row, end_row)
                 }));
 
-                let output_slice = &mut output_channel[start_row * width..][..pixels_in_chunk];
+                let output_slice = &mut output.channel_mut(channel).pixels_mut()
+                    [start_row * width..][..pixels_in_chunk];
 
                 process_chunk(output_slice, &chunks, frame_count, width, channel);
 
@@ -439,7 +433,7 @@ impl<I: StackableImage> ImageCache<I> {
             }
         }
 
-        output_channels
+        output
     }
 
     /// Compute per-frame, per-channel median and MAD (robust scale).
@@ -857,14 +851,14 @@ mod tests {
         let cache = make_test_cache(images);
 
         // Median of [1, 3, 2] = 2
-        let channels = cache.process_chunked(None, |values| {
+        let result = cache.process_chunked(None, |values| {
             values.sort_by(|a, b| a.partial_cmp(b).unwrap());
             values[values.len() / 2]
         });
 
-        assert_eq!(channels.len(), 1);
-        assert_eq!(channels[0].len(), 16);
-        for &pixel in &channels[0] {
+        assert_eq!(result.channels(), 1);
+        assert_eq!(result.channel(0).len(), 16);
+        for &pixel in result.channel(0).pixels() {
             assert!((pixel - 2.0).abs() < f32::EPSILON);
         }
     }
@@ -886,18 +880,18 @@ mod tests {
         let cache = make_test_cache(images);
 
         // Mean: R=(1+5)/2=3, G=(2+6)/2=4, B=(3+7)/2=5
-        let channels = cache.process_chunked(None, |values| {
+        let result = cache.process_chunked(None, |values| {
             values.iter().sum::<f32>() / values.len() as f32
         });
 
-        assert_eq!(channels.len(), 3);
-        for &pixel in &channels[0] {
+        assert_eq!(result.channels(), 3);
+        for &pixel in result.channel(0).pixels() {
             assert!((pixel - 3.0).abs() < f32::EPSILON, "R channel");
         }
-        for &pixel in &channels[1] {
+        for &pixel in result.channel(1).pixels() {
             assert!((pixel - 4.0).abs() < f32::EPSILON, "G channel");
         }
-        for &pixel in &channels[2] {
+        for &pixel in result.channel(2).pixels() {
             assert!((pixel - 5.0).abs() < f32::EPSILON, "B channel");
         }
     }
@@ -914,13 +908,13 @@ mod tests {
 
         // Weighted mean with weights [1, 3]: (10*1 + 20*3) / (1+3) = 70/4 = 17.5
         let weights = vec![1.0, 3.0];
-        let channels = cache.process_chunked_weighted(&weights, None, |values, w| {
+        let result = cache.process_chunked_weighted(&weights, None, |values, w| {
             let sum: f32 = values.iter().zip(w.iter()).map(|(v, wt)| v * wt).sum();
             let weight_sum: f32 = w.iter().sum();
             sum / weight_sum
         });
 
-        for &pixel in &channels[0] {
+        for &pixel in result.channel(0).pixels() {
             assert!((pixel - 17.5).abs() < f32::EPSILON);
         }
     }

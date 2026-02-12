@@ -8,14 +8,13 @@ use std::path::Path;
 use anyhow::Result;
 
 use crate::astro_image::cfa::{CfaImage, CfaType};
-use crate::common::Buffer2;
 use crate::raw::load_raw_cfa;
 use crate::stacking::FrameType;
 use crate::stacking::cache::ImageCache;
 use crate::stacking::config::{Normalization, StackConfig};
 use crate::stacking::hot_pixels::HotPixelMap;
 use crate::stacking::progress::ProgressCallback;
-use crate::stacking::stack::{compute_multiplicative_norm_params, dispatch_stacking_generic};
+use crate::stacking::stack::{compute_multiplicative_norm_params, dispatch_stacking};
 
 /// Default sigma threshold for hot pixel detection.
 const DEFAULT_HOT_PIXEL_SIGMA: f32 = 5.0;
@@ -82,13 +81,10 @@ fn stack_cfa_frames(
         Normalization::Global => Some(crate::stacking::stack::compute_global_norm_params(&cache)),
     };
 
-    let channels = dispatch_stacking_generic(&cache, &config, paths.len(), norm_params.as_deref());
-
-    // CfaImage has exactly 1 channel
-    let pixels = channels.into_iter().next().unwrap();
+    let pixel_data = dispatch_stacking(&cache, &config, paths.len(), norm_params.as_deref());
 
     Ok(Some(CfaImage {
-        data: Buffer2::new(cache.dimensions().width, cache.dimensions().height, pixels),
+        data: pixel_data.into_l(),
         pattern,
         metadata: cache.metadata().clone(),
     }))

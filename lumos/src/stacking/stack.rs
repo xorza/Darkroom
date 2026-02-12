@@ -127,7 +127,7 @@ pub fn stack_with_progress<P: AsRef<Path> + Sync>(
     );
 
     // Create image cache
-    let cache = ImageCache::from_paths(paths, &config.cache, frame_type, progress)?;
+    let cache = ImageCache::<AstroImage>::from_paths(paths, &config.cache, frame_type, progress)?;
 
     // Compute normalization parameters if requested
     let norm_params = match config.normalization {
@@ -137,14 +137,18 @@ pub fn stack_with_progress<P: AsRef<Path> + Sync>(
     };
 
     // Dispatch based on method and rejection (normalization applied transparently)
-    let result = dispatch_stacking(&cache, &config, paths.len(), norm_params.as_deref());
+    let pixel_data = dispatch_stacking(&cache, &config, paths.len(), norm_params.as_deref());
 
     // Cleanup cache if not keeping
     if !config.cache.keep_cache {
         cache.cleanup();
     }
 
-    Ok(result)
+    Ok(AstroImage {
+        metadata: cache.metadata().clone(),
+        dimensions: cache.dimensions(),
+        pixels: pixel_data,
+    })
 }
 
 /// Compute per-frame normalization parameters for global normalization.
@@ -227,15 +231,15 @@ pub(crate) fn compute_multiplicative_norm_params(
     params
 }
 
-/// Generic stacking dispatch that works with any `StackableImage` type.
+/// Stacking dispatch that works with any `StackableImage` type.
 ///
-/// Returns raw planar channel data as `Vec<Vec<f32>>`.
-pub(crate) fn dispatch_stacking_generic(
+/// Returns `PixelData` with the combined result.
+pub(crate) fn dispatch_stacking(
     cache: &ImageCache<impl StackableImage>,
     config: &StackConfig,
     frame_count: usize,
     norm_params: Option<&[(f32, f32)]>,
-) -> Vec<Vec<f32>> {
+) -> crate::astro_image::PixelData {
     match (config.method, &config.rejection) {
         (CombineMethod::Mean, Rejection::None) => {
             cache.process_chunked(norm_params, |values: &mut [f32]| math::mean_f32(values))
@@ -280,19 +284,6 @@ pub(crate) fn dispatch_stacking_generic(
             )
         }
     }
-}
-
-/// Dispatch stacking for AstroImage, returning a fully constructed AstroImage.
-fn dispatch_stacking(
-    cache: &ImageCache<AstroImage>,
-    config: &StackConfig,
-    frame_count: usize,
-    norm_params: Option<&[(f32, f32)]>,
-) -> AstroImage {
-    let channels = dispatch_stacking_generic(cache, config, frame_count, norm_params);
-    let mut result = AstroImage::from_planar_channels(cache.dimensions(), channels);
-    result.metadata = cache.metadata().clone();
-    result
 }
 
 /// Apply rejection algorithm to values.
@@ -947,10 +938,10 @@ mod tests {
         let norm_params = compute_global_norm_params(&cache);
 
         // With normalization: all pixels should be close to base_value
-        let channels = cache.process_chunked(Some(&norm_params), |values: &mut [f32]| {
+        let result = cache.process_chunked(Some(&norm_params), |values: &mut [f32]| {
             math::mean_f32(values)
         });
-        for &pixel in &channels[0] {
+        for &pixel in result.channel(0).pixels() {
             assert!(
                 (pixel - base_value).abs() < 1.0,
                 "Normalized mean should be ~{}, got {}",
@@ -965,9 +956,9 @@ mod tests {
             AstroImage::from_pixels(dims, frame1),
         ];
         let cache_raw = cache_from_images(images_raw);
-        let channels_raw =
+        let result_raw =
             cache_raw.process_chunked(None, |values: &mut [f32]| math::mean_f32(values));
-        for &pixel in &channels_raw[0] {
+        for &pixel in result_raw.channel(0).pixels() {
             assert!(
                 (pixel - (base_value + offset / 2.0)).abs() < 1.0,
                 "Unnormalized mean should be ~{}, got {}",
@@ -993,27 +984,27 @@ mod tests {
         let cache = cache_from_images(images);
         let norm_params = compute_global_norm_params(&cache);
 
-        let channels = cache.process_chunked(Some(&norm_params), |values: &mut [f32]| {
+        let result = cache.process_chunked(Some(&norm_params), |values: &mut [f32]| {
             math::mean_f32(values)
         });
 
         // After normalization to frame 0's reference, each channel should be
         // close to the reference frame's values
-        for &pixel in &channels[0] {
+        for &pixel in result.channel(0).pixels() {
             assert!(
                 (pixel - 100.0).abs() < 2.0,
                 "R channel should be ~100, got {}",
                 pixel
             );
         }
-        for &pixel in &channels[1] {
+        for &pixel in result.channel(1).pixels() {
             assert!(
                 (pixel - 200.0).abs() < 2.0,
                 "G channel should be ~200, got {}",
                 pixel
             );
         }
-        for &pixel in &channels[2] {
+        for &pixel in result.channel(2).pixels() {
             assert!(
                 (pixel - 300.0).abs() < 2.0,
                 "B channel should be ~300, got {}",
@@ -1150,12 +1141,12 @@ mod tests {
         let cache = cache_from_images(images);
         let norm_params = compute_multiplicative_norm_params(&cache);
 
-        let channels = cache.process_chunked(Some(&norm_params), |values: &mut [f32]| {
+        let result = cache.process_chunked(Some(&norm_params), |values: &mut [f32]| {
             math::mean_f32(values)
         });
 
         // Both frames scaled to reference level (100.0), mean should be 100.0
-        for &pixel in &channels[0] {
+        for &pixel in result.channel(0).pixels() {
             assert!(
                 (pixel - 100.0).abs() < 1.0,
                 "Multiplicative stacked flat should be ~100, got {}",
@@ -1178,25 +1169,25 @@ mod tests {
         let cache = cache_from_images(images);
         let norm_params = compute_multiplicative_norm_params(&cache);
 
-        let channels = cache.process_chunked(Some(&norm_params), |values: &mut [f32]| {
+        let result = cache.process_chunked(Some(&norm_params), |values: &mut [f32]| {
             math::mean_f32(values)
         });
 
-        for &pixel in &channels[0] {
+        for &pixel in result.channel(0).pixels() {
             assert!(
                 (pixel - 100.0).abs() < 1.0,
                 "R should be ~100, got {}",
                 pixel
             );
         }
-        for &pixel in &channels[1] {
+        for &pixel in result.channel(1).pixels() {
             assert!(
                 (pixel - 200.0).abs() < 1.0,
                 "G should be ~200, got {}",
                 pixel
             );
         }
-        for &pixel in &channels[2] {
+        for &pixel in result.channel(2).pixels() {
             assert!(
                 (pixel - 300.0).abs() < 1.0,
                 "B should be ~300, got {}",

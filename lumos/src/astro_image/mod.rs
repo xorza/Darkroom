@@ -123,6 +123,60 @@ pub(crate) enum PixelData {
     Rgb([Buffer2<f32>; 3]),
 }
 
+impl PixelData {
+    pub fn new_default(width: usize, height: usize, channels: usize) -> Self {
+        match channels {
+            1 => PixelData::L(Buffer2::new_default(width, height)),
+            3 => PixelData::Rgb([
+                Buffer2::new_default(width, height),
+                Buffer2::new_default(width, height),
+                Buffer2::new_default(width, height),
+            ]),
+            _ => panic!("Only 1 or 3 channels supported, got {channels}"),
+        }
+    }
+
+    pub fn channel(&self, c: usize) -> &Buffer2<f32> {
+        match self {
+            PixelData::L(data) => {
+                assert!(c == 0, "Grayscale image only has channel 0, got {c}");
+                data
+            }
+            PixelData::Rgb(channels) => {
+                assert!(c < 3, "RGB image has channels 0-2, got {c}");
+                &channels[c]
+            }
+        }
+    }
+
+    pub fn channel_mut(&mut self, c: usize) -> &mut Buffer2<f32> {
+        match self {
+            PixelData::L(data) => {
+                assert!(c == 0, "Grayscale image only has channel 0, got {c}");
+                data
+            }
+            PixelData::Rgb(channels) => {
+                assert!(c < 3, "RGB image has channels 0-2, got {c}");
+                &mut channels[c]
+            }
+        }
+    }
+
+    pub fn channels(&self) -> usize {
+        match self {
+            PixelData::L(_) => 1,
+            PixelData::Rgb(_) => 3,
+        }
+    }
+
+    pub fn into_l(self) -> Buffer2<f32> {
+        match self {
+            PixelData::L(data) => data,
+            PixelData::Rgb(_) => panic!("Expected L variant, got Rgb"),
+        }
+    }
+}
+
 // ============================================================================
 // AstroImage
 // ============================================================================
@@ -131,7 +185,7 @@ pub(crate) enum PixelData {
 #[derive(Debug, Clone)]
 pub struct AstroImage {
     pub metadata: AstroImageMetadata,
-    dimensions: ImageDimensions,
+    pub(crate) dimensions: ImageDimensions,
     pub(crate) pixels: PixelData,
 }
 
@@ -285,30 +339,12 @@ impl AstroImage {
 
     /// Get channel as Buffer2 reference (0=L or R, 1=G, 2=B).
     pub fn channel(&self, c: usize) -> &Buffer2<f32> {
-        match &self.pixels {
-            PixelData::L(data) => {
-                assert!(c == 0, "Grayscale image only has channel 0, got {}", c);
-                data
-            }
-            PixelData::Rgb(channels) => {
-                assert!(c < 3, "RGB image has channels 0-2, got {}", c);
-                &channels[c]
-            }
-        }
+        self.pixels.channel(c)
     }
 
     /// Get channel as mutable Buffer2 reference.
     pub fn channel_mut(&mut self, c: usize) -> &mut Buffer2<f32> {
-        match &mut self.pixels {
-            PixelData::L(data) => {
-                assert!(c == 0, "Grayscale image only has channel 0, got {}", c);
-                data
-            }
-            PixelData::Rgb(channels) => {
-                assert!(c < 3, "RGB image has channels 0-2, got {}", c);
-                &mut channels[c]
-            }
-        }
+        self.pixels.channel_mut(c)
     }
 
     // ------------------------------------------------------------------------
