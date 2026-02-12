@@ -266,27 +266,28 @@ fn dispatch_stacking(
 ) -> crate::astro_image::PixelData {
     match (config.method, &config.rejection) {
         (CombineMethod::Mean, Rejection::None) => {
-            cache.process_chunked(norm_params, |values: &mut [f32]| math::mean_f32(values))
+            cache.process_chunked(norm_params, |values: &mut [f32], _| math::mean_f32(values))
         }
 
-        (CombineMethod::Median, Rejection::None) => {
-            cache.process_chunked(norm_params, math::median_f32_mut)
-        }
+        (CombineMethod::Median, Rejection::None) => cache
+            .process_chunked(norm_params, |values: &mut [f32], _| {
+                math::median_f32_mut(values)
+            }),
 
         (CombineMethod::Median, rejection) => {
             let rejection = *rejection;
-            cache.process_chunked(norm_params, move |values: &mut [f32]| {
-                let mut indices: Vec<usize> = (0..values.len()).collect();
-                apply_rejection(values, &mut indices, &rejection);
+            cache.process_chunked(norm_params, move |values: &mut [f32], indices| {
+                reset_indices(indices, values.len());
+                apply_rejection(values, indices, &rejection);
                 math::median_f32_mut(values)
             })
         }
 
         (CombineMethod::Mean, rejection) => {
             let rejection = *rejection;
-            cache.process_chunked(norm_params, move |values: &mut [f32]| {
-                let mut indices: Vec<usize> = (0..values.len()).collect();
-                let result = apply_rejection(values, &mut indices, &rejection);
+            cache.process_chunked(norm_params, move |values: &mut [f32], indices| {
+                reset_indices(indices, values.len());
+                let result = apply_rejection(values, indices, &rejection);
                 if result.remaining_count > 0 {
                     math::mean_f32(&values[..result.remaining_count])
                 } else {
@@ -301,13 +302,19 @@ fn dispatch_stacking(
             cache.process_chunked_weighted(
                 &weights,
                 norm_params,
-                move |values: &mut [f32], w: &[f32]| {
-                    let result = apply_rejection_weighted(values, w, &rejection);
+                move |values: &mut [f32], w: &[f32], indices| {
+                    let result = apply_rejection_weighted(values, w, &rejection, indices);
                     result.value
                 },
             )
         }
     }
+}
+
+/// Reset an indices buffer to [0, 1, 2, ...n), reusing the allocation.
+fn reset_indices(indices: &mut Vec<usize>, n: usize) {
+    indices.clear();
+    indices.extend(0..n);
 }
 
 /// Apply rejection algorithm to values.
@@ -373,6 +380,7 @@ fn apply_rejection_weighted(
     values: &mut [f32],
     weights: &[f32],
     rejection: &Rejection,
+    indices: &mut Vec<usize>,
 ) -> RejectionResult {
     match rejection {
         Rejection::None => {
@@ -385,8 +393,8 @@ fn apply_rejection_weighted(
 
         Rejection::SigmaClip { sigma, iterations } => {
             let config = RejectionSigmaClipConfig::new(*sigma, *iterations);
-            let mut indices: Vec<usize> = (0..values.len()).collect();
-            let result = rejection::sigma_clipped_mean(values, &mut indices, &config);
+            reset_indices(indices, values.len());
+            let result = rejection::sigma_clipped_mean(values, indices, &config);
             if result.remaining_count > 0 {
                 let value = weighted_mean_indexed(
                     &values[..result.remaining_count],
@@ -405,8 +413,8 @@ fn apply_rejection_weighted(
             iterations,
         } => {
             let config = AsymmetricSigmaClipConfig::new(*sigma_low, *sigma_high, *iterations);
-            let mut indices: Vec<usize> = (0..values.len()).collect();
-            let result = rejection::sigma_clipped_mean_asymmetric(values, &mut indices, &config);
+            reset_indices(indices, values.len());
+            let result = rejection::sigma_clipped_mean_asymmetric(values, indices, &config);
             if result.remaining_count > 0 {
                 let value = weighted_mean_indexed(
                     &values[..result.remaining_count],
@@ -437,8 +445,8 @@ fn apply_rejection_weighted(
             iterations,
         } => {
             let config = LinearFitClipConfig::new(*sigma_low, *sigma_high, *iterations);
-            let mut indices: Vec<usize> = (0..values.len()).collect();
-            let result = rejection::linear_fit_clipped_mean(values, &mut indices, &config);
+            reset_indices(indices, values.len());
+            let result = rejection::linear_fit_clipped_mean(values, indices, &config);
             if result.remaining_count > 0 {
                 let value = weighted_mean_indexed(
                     &values[..result.remaining_count],
@@ -485,8 +493,8 @@ fn apply_rejection_weighted(
             max_outliers,
         } => {
             let config = GesdConfig::new(*alpha, *max_outliers);
-            let mut indices: Vec<usize> = (0..values.len()).collect();
-            let result = rejection::gesd_mean(values, &mut indices, &config);
+            reset_indices(indices, values.len());
+            let result = rejection::gesd_mean(values, indices, &config);
             if result.remaining_count > 0 {
                 let value = weighted_mean_indexed(
                     &values[..result.remaining_count],
@@ -656,6 +664,7 @@ mod tests {
                 low: 20.0,
                 high: 20.0,
             },
+            &mut Vec::new(),
         );
 
         // Unweighted mean of [3,4,5,6,7,8] = 5.5
@@ -681,6 +690,7 @@ mod tests {
                 sigma: 2.0,
                 iterations: 3,
             },
+            &mut Vec::new(),
         );
 
         // All values retained (winsorized, not removed)
@@ -697,6 +707,7 @@ mod tests {
                 sigma: 2.0,
                 iterations: 3,
             },
+            &mut Vec::new(),
         );
 
         assert!(
@@ -722,6 +733,7 @@ mod tests {
                 sigma_high: 2.0,
                 iterations: 3,
             },
+            &mut Vec::new(),
         );
 
         // High outlier (100.0) should be rejected
@@ -764,6 +776,7 @@ mod tests {
                 sigma: 2.0,
                 iterations: 3,
             },
+            &mut Vec::new(),
         );
 
         // Frame 1 should be rejected
@@ -792,6 +805,7 @@ mod tests {
                 sigma_high: 2.0,
                 iterations: 3,
             },
+            &mut Vec::new(),
         );
 
         // Outlier rejected, frame 0 (weight=10.0, value=1.0) dominates
@@ -816,6 +830,7 @@ mod tests {
                 alpha: 0.05,
                 max_outliers: Some(3),
             },
+            &mut Vec::new(),
         );
 
         // Outlier rejected, frame 0 (weight=10.0, value=1.0) dominates
@@ -840,6 +855,7 @@ mod tests {
                 sigma: 2.0,
                 iterations: 3,
             },
+            &mut Vec::new(),
         );
 
         // Should match non-weighted rejection
@@ -965,7 +981,7 @@ mod tests {
         let norm_params = compute_global_norm_params(&cache);
 
         // With normalization: all pixels should be close to base_value
-        let result = cache.process_chunked(Some(&norm_params), |values: &mut [f32]| {
+        let result = cache.process_chunked(Some(&norm_params), |values: &mut [f32], _| {
             math::mean_f32(values)
         });
         for &pixel in result.channel(0).pixels() {
@@ -984,7 +1000,7 @@ mod tests {
         ];
         let cache_raw = make_test_cache(images_raw);
         let result_raw =
-            cache_raw.process_chunked(None, |values: &mut [f32]| math::mean_f32(values));
+            cache_raw.process_chunked(None, |values: &mut [f32], _| math::mean_f32(values));
         for &pixel in result_raw.channel(0).pixels() {
             assert!(
                 (pixel - (base_value + offset / 2.0)).abs() < 1.0,
@@ -1011,7 +1027,7 @@ mod tests {
         let cache = make_test_cache(images);
         let norm_params = compute_global_norm_params(&cache);
 
-        let result = cache.process_chunked(Some(&norm_params), |values: &mut [f32]| {
+        let result = cache.process_chunked(Some(&norm_params), |values: &mut [f32], _| {
             math::mean_f32(values)
         });
 
@@ -1178,7 +1194,7 @@ mod tests {
         let cache = make_test_cache(images);
         let norm_params = compute_multiplicative_norm_params(&cache);
 
-        let result = cache.process_chunked(Some(&norm_params), |values: &mut [f32]| {
+        let result = cache.process_chunked(Some(&norm_params), |values: &mut [f32], _| {
             math::mean_f32(values)
         });
 
@@ -1206,7 +1222,7 @@ mod tests {
         let cache = make_test_cache(images);
         let norm_params = compute_multiplicative_norm_params(&cache);
 
-        let result = cache.process_chunked(Some(&norm_params), |values: &mut [f32]| {
+        let result = cache.process_chunked(Some(&norm_params), |values: &mut [f32], _| {
             math::mean_f32(values)
         });
 

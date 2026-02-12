@@ -309,31 +309,34 @@ impl<I: StackableImage> ImageCache<I> {
     /// Processing is done per-channel, parallelized per-row with rayon.
     pub fn process_chunked<F>(&self, norm_params: Option<&[NormParams]>, combine: F) -> PixelData
     where
-        F: Fn(&mut [f32]) -> f32 + Sync,
+        F: Fn(&mut [f32], &mut Vec<usize>) -> f32 + Sync,
     {
         let channels = self.dimensions.channels;
         self.process_chunks_internal(|output_slice, chunks, frame_count, width, channel| {
-            output_slice.par_chunks_mut(width).enumerate().for_each(
-                |(row_in_chunk, row_output)| {
-                    let mut values = vec![0.0f32; frame_count];
-                    let row_offset = row_in_chunk * width;
+            output_slice
+                .par_chunks_mut(width)
+                .enumerate()
+                .for_each_init(
+                    || (vec![0.0f32; frame_count], Vec::with_capacity(frame_count)),
+                    |(values, indices), (row_in_chunk, row_output)| {
+                        let row_offset = row_in_chunk * width;
 
-                    for (pixel_in_row, out) in row_output.iter_mut().enumerate() {
-                        let pixel_idx = row_offset + pixel_in_row;
-                        if let Some(norms) = norm_params {
-                            for (frame_idx, chunk) in chunks.iter().enumerate() {
-                                let np = norms[frame_idx * channels + channel];
-                                values[frame_idx] = chunk[pixel_idx] * np.gain + np.offset;
+                        for (pixel_in_row, out) in row_output.iter_mut().enumerate() {
+                            let pixel_idx = row_offset + pixel_in_row;
+                            if let Some(norms) = norm_params {
+                                for (frame_idx, chunk) in chunks.iter().enumerate() {
+                                    let np = norms[frame_idx * channels + channel];
+                                    values[frame_idx] = chunk[pixel_idx] * np.gain + np.offset;
+                                }
+                            } else {
+                                for (frame_idx, chunk) in chunks.iter().enumerate() {
+                                    values[frame_idx] = chunk[pixel_idx];
+                                }
                             }
-                        } else {
-                            for (frame_idx, chunk) in chunks.iter().enumerate() {
-                                values[frame_idx] = chunk[pixel_idx];
-                            }
+                            *out = combine(values, indices);
                         }
-                        *out = combine(&mut values);
-                    }
-                },
-            );
+                    },
+                );
         })
     }
 
@@ -349,7 +352,7 @@ impl<I: StackableImage> ImageCache<I> {
         combine: F,
     ) -> PixelData
     where
-        F: Fn(&mut [f32], &[f32]) -> f32 + Sync,
+        F: Fn(&mut [f32], &[f32], &mut Vec<usize>) -> f32 + Sync,
     {
         let frame_count = self.frame_count();
         let channels = self.dimensions.channels;
@@ -360,27 +363,30 @@ impl<I: StackableImage> ImageCache<I> {
         );
 
         self.process_chunks_internal(|output_slice, chunks, frame_count, width, channel| {
-            output_slice.par_chunks_mut(width).enumerate().for_each(
-                |(row_in_chunk, row_output)| {
-                    let mut values = vec![0.0f32; frame_count];
-                    let row_offset = row_in_chunk * width;
+            output_slice
+                .par_chunks_mut(width)
+                .enumerate()
+                .for_each_init(
+                    || (vec![0.0f32; frame_count], Vec::with_capacity(frame_count)),
+                    |(values, indices), (row_in_chunk, row_output)| {
+                        let row_offset = row_in_chunk * width;
 
-                    for (pixel_in_row, out) in row_output.iter_mut().enumerate() {
-                        let pixel_idx = row_offset + pixel_in_row;
-                        if let Some(norms) = norm_params {
-                            for (frame_idx, chunk) in chunks.iter().enumerate() {
-                                let np = norms[frame_idx * channels + channel];
-                                values[frame_idx] = chunk[pixel_idx] * np.gain + np.offset;
+                        for (pixel_in_row, out) in row_output.iter_mut().enumerate() {
+                            let pixel_idx = row_offset + pixel_in_row;
+                            if let Some(norms) = norm_params {
+                                for (frame_idx, chunk) in chunks.iter().enumerate() {
+                                    let np = norms[frame_idx * channels + channel];
+                                    values[frame_idx] = chunk[pixel_idx] * np.gain + np.offset;
+                                }
+                            } else {
+                                for (frame_idx, chunk) in chunks.iter().enumerate() {
+                                    values[frame_idx] = chunk[pixel_idx];
+                                }
                             }
-                        } else {
-                            for (frame_idx, chunk) in chunks.iter().enumerate() {
-                                values[frame_idx] = chunk[pixel_idx];
-                            }
+                            *out = combine(values, weights, indices);
                         }
-                        *out = combine(&mut values, weights);
-                    }
-                },
-            );
+                    },
+                );
         })
     }
 
@@ -858,7 +864,7 @@ pub(crate) mod tests {
         let cache = make_test_cache(images);
 
         // Median of [1, 3, 2] = 2
-        let result = cache.process_chunked(None, |values| {
+        let result = cache.process_chunked(None, |values, _| {
             values.sort_by(|a, b| a.partial_cmp(b).unwrap());
             values[values.len() / 2]
         });
@@ -887,7 +893,7 @@ pub(crate) mod tests {
         let cache = make_test_cache(images);
 
         // Mean: R=(1+5)/2=3, G=(2+6)/2=4, B=(3+7)/2=5
-        let result = cache.process_chunked(None, |values| {
+        let result = cache.process_chunked(None, |values, _| {
             values.iter().sum::<f32>() / values.len() as f32
         });
 
@@ -915,7 +921,7 @@ pub(crate) mod tests {
 
         // Weighted mean with weights [1, 3]: (10*1 + 20*3) / (1+3) = 70/4 = 17.5
         let weights = vec![1.0, 3.0];
-        let result = cache.process_chunked_weighted(&weights, None, |values, w| {
+        let result = cache.process_chunked_weighted(&weights, None, |values, w, _| {
             let sum: f32 = values.iter().zip(w.iter()).map(|(v, wt)| v * wt).sum();
             let weight_sum: f32 = w.iter().sum();
             sum / weight_sum
