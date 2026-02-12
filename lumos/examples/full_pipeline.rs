@@ -483,7 +483,6 @@ fn stack_registered_lights(registered_paths: &[PathBuf], output_dir: &Path) {
     tracing::info!(
         image_count = registered_paths.len(),
         method = ?config.method,
-        rejection = ?config.rejection,
         "Starting final stack"
     );
 

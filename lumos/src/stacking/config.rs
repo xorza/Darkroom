@@ -7,12 +7,13 @@ use crate::stacking::CacheConfig;
 use crate::stacking::rejection::Rejection;
 
 /// Method for combining pixel values across frames.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+///
+/// Rejection is only available with `Mean` — median is already robust to outliers.
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum CombineMethod {
-    /// Mean value. If weights are provided, computes weighted mean.
-    #[default]
-    Mean,
-    /// Median value (implicit outlier rejection).
+    /// Mean value with optional rejection. If weights are provided, computes weighted mean.
+    Mean(Rejection),
+    /// Median value (implicit outlier rejection, no explicit rejection needed).
     Median,
 }
 
@@ -46,7 +47,7 @@ pub enum Normalization {
 ///
 /// // Custom configuration
 /// let config = StackConfig {
-///     rejection: Rejection::sigma_clip_asymmetric(2.0, 3.0),
+///     method: CombineMethod::Mean(Rejection::sigma_clip_asymmetric(2.0, 3.0)),
 ///     normalization: Normalization::Global,
 ///     ..Default::default()
 /// };
@@ -55,9 +56,8 @@ pub enum Normalization {
 #[derive(Debug, Clone, PartialEq)]
 pub struct StackConfig {
     /// How to combine pixel values across frames.
+    /// For `Mean`, includes the rejection algorithm.
     pub method: CombineMethod,
-    /// Pixel rejection to remove outliers before combining.
-    pub rejection: Rejection,
     /// Per-frame weights (empty = equal weights).
     pub weights: Vec<f32>,
     /// Frame normalization before stacking.
@@ -69,8 +69,7 @@ pub struct StackConfig {
 impl Default for StackConfig {
     fn default() -> Self {
         Self {
-            method: CombineMethod::Mean,
-            rejection: Rejection::default(),
+            method: CombineMethod::Mean(Rejection::default()),
             weights: vec![],
             normalization: Normalization::None,
             cache: CacheConfig::default(),
@@ -84,25 +83,23 @@ impl StackConfig {
     /// Preset: sigma-clipped mean (most common for light frames).
     pub fn sigma_clipped(sigma: f32) -> Self {
         Self {
-            rejection: Rejection::sigma_clip(sigma),
+            method: CombineMethod::Mean(Rejection::sigma_clip(sigma)),
             ..Default::default()
         }
     }
 
-    /// Preset: median stacking (no explicit rejection needed).
+    /// Preset: median stacking (implicit outlier rejection).
     pub fn median() -> Self {
         Self {
             method: CombineMethod::Median,
-            rejection: Rejection::None,
             ..Default::default()
         }
     }
 
-    /// Preset: simple mean (fastest, for bias frames).
+    /// Preset: simple mean without rejection (fastest, for bias frames).
     pub fn mean() -> Self {
         Self {
-            method: CombineMethod::Mean,
-            rejection: Rejection::None,
+            method: CombineMethod::Mean(Rejection::None),
             ..Default::default()
         }
     }
@@ -118,7 +115,7 @@ impl StackConfig {
     /// Preset: winsorized sigma clipping (better for small stacks).
     pub fn winsorized(sigma: f32) -> Self {
         Self {
-            rejection: Rejection::winsorized(sigma),
+            method: CombineMethod::Mean(Rejection::winsorized(sigma)),
             ..Default::default()
         }
     }
@@ -126,7 +123,7 @@ impl StackConfig {
     /// Preset: linear fit clipping (good for sky gradients).
     pub fn linear_fit(sigma: f32) -> Self {
         Self {
-            rejection: Rejection::linear_fit(sigma),
+            method: CombineMethod::Mean(Rejection::linear_fit(sigma)),
             ..Default::default()
         }
     }
@@ -134,7 +131,7 @@ impl StackConfig {
     /// Preset: percentile clipping (simple, for small stacks <10).
     pub fn percentile(percent: f32) -> Self {
         Self {
-            rejection: Rejection::percentile(percent),
+            method: CombineMethod::Mean(Rejection::percentile(percent)),
             ..Default::default()
         }
     }
@@ -142,7 +139,7 @@ impl StackConfig {
     /// Preset: GESD (rigorous, for large stacks >50).
     pub fn gesd() -> Self {
         Self {
-            rejection: Rejection::gesd(),
+            method: CombineMethod::Mean(Rejection::gesd()),
             ..Default::default()
         }
     }
@@ -157,38 +154,40 @@ impl StackConfig {
     pub fn validate(&self) {
         // Config structs validate in their constructors, but validate() can be
         // called on configs built via struct literal syntax, so re-check here.
-        match self.rejection {
-            Rejection::None => {}
-            Rejection::SigmaClip(c) => {
-                assert!(c.sigma_low > 0.0, "Sigma low must be positive");
-                assert!(c.sigma_high > 0.0, "Sigma high must be positive");
-                assert!(c.max_iterations > 0, "Iterations must be at least 1");
-            }
-            Rejection::Winsorized(c) => {
-                assert!(c.sigma > 0.0, "Sigma must be positive");
-                assert!(c.max_iterations > 0, "Iterations must be at least 1");
-            }
-            Rejection::LinearFit(c) => {
-                assert!(c.sigma_low > 0.0, "Sigma low must be positive");
-                assert!(c.sigma_high > 0.0, "Sigma high must be positive");
-                assert!(c.max_iterations > 0, "Iterations must be at least 1");
-            }
-            Rejection::Percentile(c) => {
-                assert!(
-                    (0.0..=50.0).contains(&c.low_percentile),
-                    "Low percentile must be 0-50"
-                );
-                assert!(
-                    (0.0..=50.0).contains(&c.high_percentile),
-                    "High percentile must be 0-50"
-                );
-                assert!(
-                    c.low_percentile + c.high_percentile < 100.0,
-                    "Total clipping must be < 100%"
-                );
-            }
-            Rejection::Gesd(c) => {
-                assert!((0.0..1.0).contains(&c.alpha), "Alpha must be 0-1");
+        if let CombineMethod::Mean(rejection) = &self.method {
+            match rejection {
+                Rejection::None => {}
+                Rejection::SigmaClip(c) => {
+                    assert!(c.sigma_low > 0.0, "Sigma low must be positive");
+                    assert!(c.sigma_high > 0.0, "Sigma high must be positive");
+                    assert!(c.max_iterations > 0, "Iterations must be at least 1");
+                }
+                Rejection::Winsorized(c) => {
+                    assert!(c.sigma > 0.0, "Sigma must be positive");
+                    assert!(c.max_iterations > 0, "Iterations must be at least 1");
+                }
+                Rejection::LinearFit(c) => {
+                    assert!(c.sigma_low > 0.0, "Sigma low must be positive");
+                    assert!(c.sigma_high > 0.0, "Sigma high must be positive");
+                    assert!(c.max_iterations > 0, "Iterations must be at least 1");
+                }
+                Rejection::Percentile(c) => {
+                    assert!(
+                        (0.0..=50.0).contains(&c.low_percentile),
+                        "Low percentile must be 0-50"
+                    );
+                    assert!(
+                        (0.0..=50.0).contains(&c.high_percentile),
+                        "High percentile must be 0-50"
+                    );
+                    assert!(
+                        c.low_percentile + c.high_percentile < 100.0,
+                        "Total clipping must be < 100%"
+                    );
+                }
+                Rejection::Gesd(c) => {
+                    assert!((0.0..1.0).contains(&c.alpha), "Alpha must be 0-1");
+                }
             }
         }
 
@@ -221,8 +220,10 @@ mod tests {
     #[test]
     fn test_default_config() {
         let config = StackConfig::default();
-        assert_eq!(config.method, CombineMethod::Mean);
-        assert!(matches!(config.rejection, Rejection::SigmaClip(..)));
+        assert!(matches!(
+            config.method,
+            CombineMethod::Mean(Rejection::SigmaClip(..))
+        ));
         assert!(config.weights.is_empty());
         assert_eq!(config.normalization, Normalization::None);
     }
@@ -230,10 +231,10 @@ mod tests {
     #[test]
     fn test_sigma_clipped_preset() {
         let config = StackConfig::sigma_clipped(2.0);
-        assert_eq!(config.method, CombineMethod::Mean);
         assert!(matches!(
-            config.rejection,
-            Rejection::SigmaClip(c) if (c.sigma_low - 2.0).abs() < f32::EPSILON && (c.sigma_high - 2.0).abs() < f32::EPSILON
+            config.method,
+            CombineMethod::Mean(Rejection::SigmaClip(c))
+                if (c.sigma_low - 2.0).abs() < f32::EPSILON && (c.sigma_high - 2.0).abs() < f32::EPSILON
         ));
     }
 
@@ -241,24 +242,28 @@ mod tests {
     fn test_median_preset() {
         let config = StackConfig::median();
         assert_eq!(config.method, CombineMethod::Median);
-        assert_eq!(config.rejection, Rejection::None);
     }
 
     #[test]
     fn test_weighted_preset() {
         let config = StackConfig::weighted(vec![1.0, 2.0, 3.0]);
-        assert_eq!(config.method, CombineMethod::Mean);
+        assert!(matches!(config.method, CombineMethod::Mean(..)));
         assert_eq!(config.weights.len(), 3);
     }
 
     #[test]
     fn test_struct_update_syntax() {
         let config = StackConfig {
-            rejection: Rejection::SigmaClip(SigmaClipConfig::new_asymmetric(2.0, 3.0, 5)),
+            method: CombineMethod::Mean(Rejection::SigmaClip(SigmaClipConfig::new_asymmetric(
+                2.0, 3.0, 5,
+            ))),
             normalization: Normalization::Global,
             ..Default::default()
         };
-        assert!(matches!(config.rejection, Rejection::SigmaClip(..)));
+        assert!(matches!(
+            config.method,
+            CombineMethod::Mean(Rejection::SigmaClip(..))
+        ));
         assert_eq!(config.normalization, Normalization::Global);
     }
 
@@ -290,11 +295,11 @@ mod tests {
     #[should_panic(expected = "Sigma low must be positive")]
     fn test_validate_invalid_sigma() {
         let config = StackConfig {
-            rejection: Rejection::SigmaClip(SigmaClipConfig {
+            method: CombineMethod::Mean(Rejection::SigmaClip(SigmaClipConfig {
                 sigma_low: -1.0,
                 sigma_high: -1.0,
                 max_iterations: 3,
-            }),
+            })),
             ..Default::default()
         };
         config.validate();
@@ -304,10 +309,10 @@ mod tests {
     #[should_panic(expected = "Low percentile must be 0-50")]
     fn test_validate_invalid_percentile() {
         let config = StackConfig {
-            rejection: Rejection::Percentile(PercentileClipConfig {
+            method: CombineMethod::Mean(Rejection::Percentile(PercentileClipConfig {
                 low_percentile: 60.0,
                 high_percentile: 10.0,
-            }),
+            })),
             ..Default::default()
         };
         config.validate();

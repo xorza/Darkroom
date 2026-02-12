@@ -66,7 +66,7 @@ impl NormParams {
 ///
 /// // Custom configuration
 /// let config = StackConfig {
-///     rejection: Rejection::sigma_clip_asymmetric(2.0, 3.0),
+///     method: CombineMethod::Mean(Rejection::sigma_clip_asymmetric(2.0, 3.0)),
 ///     ..Default::default()
 /// };
 /// let result = stack(&paths, FrameType::Light, config)?;
@@ -127,7 +127,6 @@ pub fn stack_with_progress<P: AsRef<Path> + Sync>(
     tracing::info!(
         frame_type = %frame_type,
         method = ?config.method,
-        rejection = ?config.rejection,
         normalization = ?config.normalization,
         frame_count = paths.len(),
         has_weights = !config.weights.is_empty(),
@@ -228,14 +227,11 @@ fn dispatch_stacking(
     norm_params: Option<&[NormParams]>,
 ) -> crate::astro_image::PixelData {
     match config.method {
-        CombineMethod::Median => {
-            cache.process_chunked(None, norm_params, move |values, _, scratch| {
-                let remaining = config.rejection.reject(values, scratch);
-                math::median_f32_mut(&mut values[..remaining])
-            })
-        }
+        CombineMethod::Median => cache.process_chunked(None, norm_params, |values, _, _| {
+            math::median_f32_mut(values)
+        }),
 
-        CombineMethod::Mean => {
+        CombineMethod::Mean(rejection) => {
             let weights = if config.weights.is_empty() {
                 None
             } else {
@@ -245,7 +241,7 @@ fn dispatch_stacking(
             cache.process_chunked(
                 weights.as_deref(),
                 norm_params,
-                move |values, w, scratch| config.rejection.combine_mean(values, w, scratch),
+                move |values, w, scratch| rejection.combine_mean(values, w, scratch),
             )
         }
     }
@@ -502,8 +498,8 @@ mod tests {
         let norm_params = compute_norm_params(&cache, Normalization::Global).unwrap();
 
         let config = StackConfig {
+            method: CombineMethod::Mean(Rejection::None),
             normalization: Normalization::Global,
-            rejection: Rejection::None,
             ..Default::default()
         };
 

@@ -21,8 +21,8 @@ Image stacking for astrophotography with pixel rejection, frame weighting, norma
 stack(paths, frame_type, config) -> Result<AstroImage, Error>
 stack_with_progress(paths, frame_type, config, progress) -> Result<AstroImage, Error>
 
-StackConfig        // { method, rejection, weights, normalization, cache }
-CombineMethod      // Mean | Median
+StackConfig        // { method, weights, normalization, cache }
+CombineMethod      // Mean(Rejection) | Median
 Rejection          // None | SigmaClip | SigmaClipAsymmetric | Winsorized | LinearFit | Percentile | Gesd
 Normalization      // None | Global
 FrameType          // Dark | Flat | Bias | Light
