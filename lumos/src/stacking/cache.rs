@@ -40,6 +40,10 @@ pub(crate) struct ScratchBuffers {
     pub indices: Vec<usize>,
     /// Scratch space for weighted percentile (value, weight) pairs.
     pub pairs: Vec<(f32, f32)>,
+    /// General-purpose f32 scratch (e.g. winsorized working copy).
+    pub floats_a: Vec<f32>,
+    /// Second f32 scratch (e.g. median/MAD computation).
+    pub floats_b: Vec<f32>,
 }
 
 impl ScratchBuffers {
@@ -47,6 +51,8 @@ impl ScratchBuffers {
         Self {
             indices: Vec::with_capacity(frame_count),
             pairs: Vec::with_capacity(frame_count),
+            floats_a: Vec::with_capacity(frame_count),
+            floats_b: Vec::with_capacity(frame_count),
         }
     }
 }

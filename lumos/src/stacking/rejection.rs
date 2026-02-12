@@ -379,30 +379,34 @@ impl AsymmetricSigmaClipConfig {
 }
 
 impl WinsorizedClipConfig {
-    /// Apply winsorization: replace outliers with boundary values, return modified copy.
+    /// Apply winsorization: replace outliers with boundary values.
     ///
     /// Iteratively computes median and std dev, then clamps values to
     /// `[median - sigma*stddev, median + sigma*stddev]`.
     ///
-    /// Does NOT modify the input slice.
-    pub fn winsorize(&self, values: &[f32]) -> Vec<f32> {
+    /// Returns `working` filled with the winsorized copy. Does NOT modify `values`.
+    /// `scratch` is used for median/MAD computation.
+    pub fn winsorize<'a>(
+        &self,
+        values: &[f32],
+        working: &'a mut Vec<f32>,
+        scratch: &mut Vec<f32>,
+    ) -> &'a [f32] {
         debug_assert!(!values.is_empty());
 
-        let mut working = values.to_vec();
+        working.clear();
+        working.extend_from_slice(values);
 
         if values.len() <= 2 {
             return working;
         }
 
-        let mut median_buf = Vec::with_capacity(values.len());
-        let mut mad_scratch = Vec::with_capacity(values.len());
-
         for _ in 0..self.max_iterations {
             // Copy into scratch buffer for median (which sorts in-place)
-            median_buf.clear();
-            median_buf.extend_from_slice(&working);
-            let center = math::median_f32_mut(&mut median_buf);
-            let mad = mad_f32_with_scratch(&working, center, &mut mad_scratch);
+            scratch.clear();
+            scratch.extend_from_slice(working);
+            let center = math::median_f32_mut(scratch);
+            let mad = mad_f32_with_scratch(working, center, scratch);
             let sigma = mad_to_sigma(mad);
 
             if sigma < f32::EPSILON {
@@ -413,7 +417,7 @@ impl WinsorizedClipConfig {
             let high_bound = center + self.sigma * sigma;
 
             let mut changed = false;
-            for v in &mut working {
+            for v in working.iter_mut() {
                 if *v < low_bound {
                     *v = low_bound;
                     changed = true;
@@ -811,8 +815,10 @@ mod tests {
     fn test_winsorize() {
         let values = vec![1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 100.0];
         let config = WinsorizedClipConfig::new(2.0, 3);
-        let winsorized = config.winsorize(&values);
-        let mean = math::mean_f32(&winsorized);
+        let mut working = vec![];
+        let mut scratch = vec![];
+        let winsorized = config.winsorize(&values, &mut working, &mut scratch);
+        let mean = math::mean_f32(winsorized);
         // Winsorized should have lower mean than with full outlier
         assert!(mean < 20.0, "Outlier should be winsorized, got {}", mean);
         // All values retained (just modified)
@@ -896,7 +902,10 @@ mod tests {
             .clipped_mean(&mut values.clone(), &mut make_indices(values.len()));
         assert_eq!(sigma_result.remaining_count, 2);
 
-        let winsorized = WinsorizedClipConfig::default().winsorize(&values);
+        let mut working = vec![];
+        let mut scratch = vec![];
+        let winsorized =
+            WinsorizedClipConfig::default().winsorize(&values, &mut working, &mut scratch);
         assert_eq!(winsorized.len(), 2);
 
         let linear_result = LinearFitClipConfig::default()

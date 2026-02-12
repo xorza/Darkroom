@@ -268,10 +268,10 @@ fn combine_mean(
     // Winsorized and weighted-Percentile are special cases
     match rejection {
         Rejection::Winsorized(config) => {
-            let winsorized = config.winsorize(values);
+            let winsorized = config.winsorize(values, &mut scratch.floats_a, &mut scratch.floats_b);
             let value = match weights {
-                Some(w) => math::weighted_mean_f32(&winsorized, w),
-                None => math::mean_f32(&winsorized),
+                Some(w) => math::weighted_mean_f32(winsorized, w),
+                None => math::mean_f32(winsorized),
             };
             return RejectionResult {
                 value,
@@ -400,6 +400,8 @@ mod tests {
         ScratchBuffers {
             indices: vec![],
             pairs: vec![],
+            floats_a: vec![],
+            floats_b: vec![],
         }
     }
 
