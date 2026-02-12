@@ -83,22 +83,6 @@ struct UnpackedRaw {
 }
 
 impl UnpackedRaw {
-    fn metadata(
-        &self,
-        width: usize,
-        height: usize,
-        channels: usize,
-        cfa_type: Option<CfaType>,
-    ) -> AstroImageMetadata {
-        AstroImageMetadata {
-            iso: self.iso,
-            bitpix: BitPix::Int16,
-            header_dimensions: vec![height, width, channels],
-            cfa_type,
-            ..Default::default()
-        }
-    }
-
     /// Get the raw u16 image pointer and total pixel count.
     /// Returns the pointer and count, or an error if null.
     fn raw_image_slice(&self) -> Result<&[u16]> {
@@ -509,7 +493,13 @@ pub fn load_raw(path: &Path) -> Result<AstroImage> {
         }
     };
 
-    let metadata = raw.metadata(out_width, out_height, num_channels, cfa_type);
+    let metadata = AstroImageMetadata {
+        iso: raw.iso,
+        bitpix: BitPix::Int16,
+        header_dimensions: vec![out_height, out_width, num_channels],
+        cfa_type,
+        ..Default::default()
+    };
     drop(raw);
 
     let dimensions = ImageDimensions::new(out_width, out_height, num_channels);
@@ -540,7 +530,13 @@ pub fn load_raw_cfa(path: &Path) -> Result<CfaImage> {
     match sensor_type {
         SensorType::Monochrome => {
             let pixels = raw.extract_cfa_pixels()?;
-            let metadata = raw.metadata(raw.width, raw.height, 1, Some(CfaType::Mono));
+            let metadata = AstroImageMetadata {
+                iso: raw.iso,
+                bitpix: BitPix::Int16,
+                header_dimensions: vec![raw.height, raw.width, 1],
+                cfa_type: Some(CfaType::Mono),
+                ..Default::default()
+            };
             Ok(CfaImage {
                 data: Buffer2::new(raw.width, raw.height, pixels),
                 metadata,
@@ -548,8 +544,13 @@ pub fn load_raw_cfa(path: &Path) -> Result<CfaImage> {
         }
         SensorType::Bayer(cfa_pattern) => {
             let pixels = raw.extract_cfa_pixels()?;
-            let metadata =
-                raw.metadata(raw.width, raw.height, 1, Some(CfaType::Bayer(cfa_pattern)));
+            let metadata = AstroImageMetadata {
+                iso: raw.iso,
+                bitpix: BitPix::Int16,
+                header_dimensions: vec![raw.height, raw.width, 1],
+                cfa_type: Some(CfaType::Bayer(cfa_pattern)),
+                ..Default::default()
+            };
             Ok(CfaImage {
                 data: Buffer2::new(raw.width, raw.height, pixels),
                 metadata,
@@ -558,12 +559,13 @@ pub fn load_raw_cfa(path: &Path) -> Result<CfaImage> {
         SensorType::XTrans => {
             let xtrans_pattern = raw.xtrans_pattern();
             let pixels = raw.extract_cfa_pixels()?;
-            let metadata = raw.metadata(
-                raw.width,
-                raw.height,
-                1,
-                Some(CfaType::XTrans(xtrans_pattern)),
-            );
+            let metadata = AstroImageMetadata {
+                iso: raw.iso,
+                bitpix: BitPix::Int16,
+                header_dimensions: vec![raw.height, raw.width, 1],
+                cfa_type: Some(CfaType::XTrans(xtrans_pattern)),
+                ..Default::default()
+            };
             Ok(CfaImage {
                 data: Buffer2::new(raw.width, raw.height, pixels),
                 metadata,

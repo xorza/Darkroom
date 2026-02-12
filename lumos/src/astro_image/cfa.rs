@@ -32,15 +32,6 @@ impl CfaType {
             CfaType::XTrans(pattern) => pattern[y % 6][x % 6],
         }
     }
-
-    /// Get the CFA period (1 for Mono, 2 for Bayer, 6 for X-Trans).
-    pub fn period(&self) -> usize {
-        match self {
-            CfaType::Mono => 1,
-            CfaType::Bayer(_) => 2,
-            CfaType::XTrans(_) => 6,
-        }
-    }
 }
 
 /// Raw CFA image - single channel with color filter pattern metadata.
@@ -247,7 +238,6 @@ mod tests {
         let mono = CfaType::Mono;
         assert_eq!(mono.color_at(0, 0), 0);
         assert_eq!(mono.color_at(5, 5), 0);
-        assert_eq!(mono.period(), 1);
     }
 
     #[test]
@@ -258,7 +248,6 @@ mod tests {
         assert_eq!(bayer.color_at(1, 0), 1); // G
         assert_eq!(bayer.color_at(0, 1), 1); // G
         assert_eq!(bayer.color_at(1, 1), 2); // B
-        assert_eq!(bayer.period(), 2);
     }
 
     #[test]
@@ -294,7 +283,6 @@ mod tests {
         assert_eq!(xtrans.color_at(0, 0), 1); // G
         assert_eq!(xtrans.color_at(1, 0), 0); // R
         assert_eq!(xtrans.color_at(0, 1), 2); // B
-        assert_eq!(xtrans.period(), 6);
         // Wrapping
         assert_eq!(xtrans.color_at(6, 0), xtrans.color_at(0, 0));
         assert_eq!(xtrans.color_at(0, 6), xtrans.color_at(0, 0));
