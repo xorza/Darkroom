@@ -256,11 +256,12 @@ pub struct RejectionResult {
 /// frame indices. `indices` must be initialized by the caller (typically `[0, 1, ..., N-1]`).
 pub fn sigma_clipped_mean(
     values: &mut [f32],
-    indices: &mut [usize],
+    indices: &mut Vec<usize>,
     config: &SigmaClipConfig,
 ) -> RejectionResult {
     debug_assert!(!values.is_empty());
-    debug_assert_eq!(values.len(), indices.len());
+
+    reset_indices(indices, values.len());
 
     if values.len() <= 2 {
         return RejectionResult {
@@ -325,11 +326,12 @@ pub fn sigma_clipped_mean(
 /// Modifies `values` and `indices` in place. See [`sigma_clipped_mean`] for index semantics.
 pub fn sigma_clipped_mean_asymmetric(
     values: &mut [f32],
-    indices: &mut [usize],
+    indices: &mut Vec<usize>,
     config: &AsymmetricSigmaClipConfig,
 ) -> RejectionResult {
     debug_assert!(!values.is_empty());
-    debug_assert_eq!(values.len(), indices.len());
+
+    reset_indices(indices, values.len());
 
     if values.len() <= 2 {
         return RejectionResult {
@@ -452,11 +454,12 @@ pub fn winsorize(values: &[f32], config: &WinsorizedClipConfig) -> Vec<f32> {
 /// Modifies `values` and `indices` in place. See [`sigma_clipped_mean`] for index semantics.
 pub fn linear_fit_clipped_mean(
     values: &mut [f32],
-    indices: &mut [usize],
+    indices: &mut Vec<usize>,
     config: &LinearFitClipConfig,
 ) -> RejectionResult {
     debug_assert!(!values.is_empty());
-    debug_assert_eq!(values.len(), indices.len());
+
+    reset_indices(indices, values.len());
 
     if values.len() <= 3 {
         return RejectionResult {
@@ -604,11 +607,12 @@ pub fn percentile_clipped_mean(
 /// Modifies `values` and `indices` in place. See [`sigma_clipped_mean`] for index semantics.
 pub fn gesd_mean(
     values: &mut [f32],
-    indices: &mut [usize],
+    indices: &mut Vec<usize>,
     config: &GesdConfig,
 ) -> RejectionResult {
     debug_assert!(!values.is_empty());
-    debug_assert_eq!(values.len(), indices.len());
+
+    reset_indices(indices, values.len());
 
     let original_len = values.len();
 
@@ -707,6 +711,12 @@ fn inverse_normal_approx(p: f32) -> f32 {
     let denominator = 1.0 + d1 * t + d2 * t * t + d3 * t * t * t;
 
     sign * (t - numerator / denominator)
+}
+
+/// Reset an indices buffer to [0, 1, 2, ...n), reusing the allocation.
+fn reset_indices(indices: &mut Vec<usize>, n: usize) {
+    indices.clear();
+    indices.extend(0..n);
 }
 
 #[cfg(test)]

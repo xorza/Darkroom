@@ -246,8 +246,8 @@ fn dispatch_stacking(
     match config.method {
         CombineMethod::Median => {
             cache.process_chunked(None, norm_params, move |values, _, scratch| {
-                apply_rejection(values, None, scratch, &rejection);
-                math::median_f32_mut(values)
+                let result = apply_rejection(values, None, scratch, &rejection);
+                math::median_f32_mut(&mut values[..result.remaining_count])
             })
         }
 
@@ -257,12 +257,6 @@ fn dispatch_stacking(
             })
         }
     }
-}
-
-/// Reset an indices buffer to [0, 1, 2, ...n), reusing the allocation.
-fn reset_indices(indices: &mut Vec<usize>, n: usize) {
-    indices.clear();
-    indices.extend(0..n);
 }
 
 /// Apply rejection algorithm to values, optionally with per-frame weights.
@@ -275,12 +269,10 @@ fn apply_rejection(
     scratch: &mut ScratchBuffers,
     rejection: &Rejection,
 ) -> RejectionResult {
-    reset_indices(&mut scratch.indices, values.len());
-
     match rejection {
         Rejection::None => {
             let value = match weights {
-                Some(w) => weighted_mean_indexed(values, w, &scratch.indices),
+                Some(w) => math::weighted_mean_f32(values, w),
                 None => math::mean_f32(values),
             };
             RejectionResult {
