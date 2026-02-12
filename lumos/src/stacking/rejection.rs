@@ -1048,6 +1048,28 @@ mod tests {
     }
 
     #[test]
+    fn test_percentile_indices_track_survivors() {
+        // Values: [5, 1, 3, 2, 4] → sorted: [1, 2, 3, 4, 5]
+        // With 20% clip on each end: clips 1 low, 1 high → survivors [2, 3, 4]
+        let mut values = vec![5.0, 1.0, 3.0, 2.0, 4.0];
+        let mut indices = vec![];
+        let remaining = PercentileClipConfig::new(20.0, 20.0).reject(&mut values, &mut indices);
+
+        assert_eq!(remaining, 3);
+        let surviving = &indices[..remaining];
+        // Original indices: 5.0→0, 1.0→1, 3.0→2, 2.0→3, 4.0→4
+        // Survivors (values 2,3,4) should map to original indices 3, 2, 4
+        assert!(
+            !surviving.contains(&0) && !surviving.contains(&1),
+            "Frames 0 (5.0) and 1 (1.0) should be clipped, survivors: {:?}",
+            surviving
+        );
+        for &idx in surviving {
+            assert!(idx < 5, "Invalid surviving index: {}", idx);
+        }
+    }
+
+    #[test]
     fn test_no_rejection_preserves_all_indices() {
         let mut values = vec![1.0, 1.1, 1.2, 0.9, 1.0];
         let mut indices = vec![];
