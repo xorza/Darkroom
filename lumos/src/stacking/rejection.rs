@@ -574,6 +574,11 @@ pub struct GesdConfig {
     /// Maximum number of outliers to detect.
     /// If None, uses 25% of data size.
     pub max_outliers: Option<usize>,
+    /// Relaxation factor for pixels below the center (>= 1.0).
+    /// Multiplies sigma when computing test statistics for dark outliers,
+    /// making the test more tolerant of low-side deviations.
+    /// Default: 1.5 (matching PixInsight).
+    pub low_relaxation: f32,
 }
 
 impl Default for GesdConfig {
@@ -581,6 +586,7 @@ impl Default for GesdConfig {
         Self {
             alpha: 0.05,
             max_outliers: None,
+            low_relaxation: 1.5,
         }
     }
 }
@@ -591,7 +597,15 @@ impl GesdConfig {
         Self {
             alpha,
             max_outliers,
+            low_relaxation: 1.5,
         }
+    }
+
+    /// Create GESD config with custom low relaxation factor.
+    pub fn with_low_relaxation(mut self, low_relaxation: f32) -> Self {
+        assert!(low_relaxation >= 1.0, "Low relaxation must be >= 1.0");
+        self.low_relaxation = low_relaxation;
+        self
     }
 
     /// Get maximum outliers, defaulting to 25% of data size.
@@ -643,20 +657,26 @@ impl GesdConfig {
                 break;
             }
 
-            // Find the most extreme value from median
-            let mut max_deviation = 0.0f32;
+            // Find the most extreme value from median, applying asymmetric
+            // relaxation: dark pixels (below median) use sigma * low_relaxation,
+            // making them harder to reject.
+            let mut max_r = 0.0f32;
             let mut max_idx = 0;
             for (idx, &v) in values[..len].iter().enumerate() {
-                let deviation = (v - median).abs();
-                if deviation > max_deviation {
-                    max_deviation = deviation;
+                let diff = v - median;
+                let effective_sigma = if diff < 0.0 {
+                    sigma * self.low_relaxation
+                } else {
+                    sigma
+                };
+                let r = diff.abs() / effective_sigma;
+                if r > max_r {
+                    max_r = r;
                     max_idx = idx;
                 }
             }
 
-            // Test statistic: deviation / sigma(MAD)
-            let r_i = max_deviation / sigma;
-            scratch.floats_b.push(r_i);
+            scratch.floats_b.push(max_r);
 
             // Tentatively remove the most deviant value
             values.swap(max_idx, len - 1);
@@ -927,6 +947,7 @@ mod tests {
         let config = GesdConfig::default();
         assert!((config.alpha - 0.05).abs() < f32::EPSILON);
         assert!(config.max_outliers.is_none());
+        assert!((config.low_relaxation - 1.5).abs() < f32::EPSILON);
     }
 
     #[test]
@@ -1056,11 +1077,27 @@ mod tests {
     }
 
     #[test]
-    fn test_gesd_removes_outliers() {
+    fn test_gesd_removes_single_bright_outlier() {
+        // n=8, max_outliers=default(25%=2), relax=1.0 (symmetric).
+        // Hand-computed: step 0 removes 100.0 (r=667.8), step 1 tries 1.2
+        // (r=1.35 < lambda=1.63 → keep). Phase 2 confirms 1 outlier. Result: 7.
         let mut values = vec![1.0, 1.1, 0.9, 1.0, 1.2, 0.8, 1.0, 100.0];
-        let remaining = GesdConfig::new(0.05, Some(3)).reject(&mut values, &mut scratch());
-        assert!(remaining < 8);
-        assert!(math::mean_f32(&values[..remaining]) < 10.0);
+        let mut s = scratch();
+        let remaining = GesdConfig::new(0.05, None)
+            .with_low_relaxation(1.0)
+            .reject(&mut values, &mut s);
+        assert_eq!(
+            remaining, 7,
+            "Exactly the bright outlier should be rejected"
+        );
+        assert!(
+            !s.indices[..remaining].contains(&7),
+            "Index 7 (100.0) must be rejected, survivors: {:?}",
+            &s.indices[..remaining]
+        );
+        for &v in &values[..remaining] {
+            assert!(v < 2.0, "Outlier {v} should not survive");
+        }
     }
 
     #[test]
@@ -1072,16 +1109,13 @@ mod tests {
     }
 
     #[test]
-    fn test_gesd_keeps_most_in_tight_cluster() {
-        // With median+MAD, a tight normal-like cluster should keep most values
+    fn test_gesd_keeps_tight_cluster() {
+        // Tight cluster, no real outliers. max_outliers=default(25%=2).
+        // Hand-computed: step 0 tries 1.2 (r=1.35 < lambda=1.84), step 1
+        // tries 0.8 (r=0.90 < lambda=1.63). Phase 2: both keep. Result: 8.
         let mut values = vec![1.0, 1.1, 0.9, 1.0, 1.2, 0.8, 1.0, 1.1];
-        let remaining = GesdConfig::new(0.05, Some(3)).reject(&mut values, &mut scratch());
-        // May reject 1-2 borderline values with robust estimator, but keeps the majority
-        assert!(
-            remaining >= 5,
-            "Should keep most values in tight cluster, got {}",
-            remaining
-        );
+        let remaining = GesdConfig::default().reject(&mut values, &mut scratch());
+        assert_eq!(remaining, 8, "Tight cluster should have no rejections");
     }
 
     #[test]
@@ -1366,6 +1400,139 @@ mod tests {
             "Weighted mean should be ~1.0 (dominated by frame 0, weight=10.0), got {}",
             mean
         );
+    }
+
+    #[test]
+    fn test_gesd_relaxation_correctness() {
+        // Cluster of 10 around 10.0, dark pixel at 9.6 (idx 10), bright at 50.0 (idx 11).
+        // Hand-computed with our median+MAD+A&S inverse normal:
+        //   Initial (n=12): median=10.0, MAD=0.125, sigma=0.1853
+        //   Phase 1, step 0: 50.0 removed (r=215.8 >> any lambda)
+        //   Phase 1, step 1: after removing 50.0 (n=11), sigma=0.1483
+        //     relax=1.0: r = 0.4/0.1483 = 2.698 > lambda(2.005) → candidate
+        //     relax=1.5: r = 0.4/(0.1483×1.5) = 1.799 < lambda(2.005) → not candidate
+        //   Phase 2 backward: relax=1.0 rejects dark; relax=1.5 does not.
+        let cluster = vec![10.0, 10.1, 9.9, 10.0, 10.2, 9.8, 10.05, 9.95, 10.15, 9.85];
+
+        // With default relaxation (1.5): dark pixel survives, only bright rejected
+        let mut v1: Vec<f32> = cluster.iter().copied().chain([9.6, 50.0]).collect();
+        let mut s1 = scratch();
+        let r1 = GesdConfig::new(0.05, Some(3)).reject(&mut v1, &mut s1);
+        let surv1: Vec<usize> = s1.indices[..r1].to_vec();
+        assert_eq!(r1, 11, "relax=1.5: only bright outlier rejected");
+        assert!(
+            surv1.contains(&10),
+            "relax=1.5: dark pixel must survive: {:?}",
+            surv1
+        );
+        assert!(!surv1.contains(&11), "relax=1.5: bright must be rejected");
+
+        // Without relaxation: both outliers rejected, survivors = clean cluster
+        let mut v2: Vec<f32> = cluster.iter().copied().chain([9.6, 50.0]).collect();
+        let mut s2 = scratch();
+        let r2 = GesdConfig::new(0.05, Some(3))
+            .with_low_relaxation(1.0)
+            .reject(&mut v2, &mut s2);
+        let surv2: Vec<usize> = s2.indices[..r2].to_vec();
+        assert_eq!(r2, 10, "relax=1.0: both outliers rejected");
+        assert!(
+            !surv2.contains(&10),
+            "relax=1.0: dark pixel must be rejected"
+        );
+        assert!(!surv2.contains(&11), "relax=1.0: bright must be rejected");
+
+        // Verify surviving values match the clean cluster exactly
+        let mut got: Vec<f32> = v2[..r2].to_vec();
+        got.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        let mut want = cluster.clone();
+        want.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        assert_eq!(got, want, "survivors must be exactly the clean cluster");
+    }
+
+    #[test]
+    fn test_gesd_relaxation_boundary() {
+        // dark=9.5 is too extreme: with relax=1.5, r=2.248 > lambda=2.005
+        // so even default relaxation cannot save it — both outliers rejected.
+        let cluster = vec![10.0, 10.1, 9.9, 10.0, 10.2, 9.8, 10.05, 9.95, 10.15, 9.85];
+        let mut v: Vec<f32> = cluster.iter().copied().chain([9.5, 50.0]).collect();
+        let mut s = scratch();
+        let remaining = GesdConfig::new(0.05, Some(3)).reject(&mut v, &mut s);
+        assert_eq!(
+            remaining, 10,
+            "dark=9.5 too extreme, both rejected even with relax=1.5"
+        );
+    }
+
+    #[test]
+    fn test_gesd_relaxation_symmetry() {
+        // With relaxation=1.0, equidistant dark/bright outliers must produce
+        // identical survivor counts (no asymmetric bias).
+        let config = GesdConfig::new(0.05, Some(2)).with_low_relaxation(1.0);
+
+        let mut v_dark = vec![10.0, 10.1, 9.9, 10.0, 10.2, 9.8, 10.1, 0.0];
+        let mut s1 = scratch();
+        let r_dark = config.reject(&mut v_dark, &mut s1);
+
+        let mut v_bright = vec![10.0, 10.1, 9.9, 10.0, 10.2, 9.8, 10.1, 20.0];
+        let mut s2 = scratch();
+        let r_bright = config.reject(&mut v_bright, &mut s2);
+
+        assert_eq!(r_dark, r_bright, "relax=1.0 must be symmetric");
+    }
+
+    #[test]
+    fn test_gesd_relaxation_does_not_affect_bright() {
+        // Relaxation only applies to below-median pixels. A bright-only outlier
+        // must be rejected identically regardless of relaxation value.
+        let data: Vec<f32> = vec![
+            10.0, 10.1, 9.9, 10.0, 10.2, 9.8, 10.05, 9.95, 10.15, 9.85, 50.0,
+        ];
+        for relax in [1.0, 1.5, 3.0, 5.0] {
+            let mut v = data.clone();
+            let mut s = scratch();
+            let r = GesdConfig::new(0.05, Some(3))
+                .with_low_relaxation(relax)
+                .reject(&mut v, &mut s);
+            assert_eq!(
+                r, 10,
+                "relax={}: bright outlier must always be rejected",
+                relax
+            );
+            assert!(
+                !s.indices[..r].contains(&10),
+                "relax={}: idx 10 must be rejected",
+                relax
+            );
+        }
+    }
+
+    #[test]
+    fn test_gesd_combined_mean_with_relaxation() {
+        // Verify final pixel value: cluster + dark=9.6 survives, bright=50.0 rejected.
+        // Expected mean = (sum_of_cluster + 9.6) / 11
+        let cluster = [
+            10.0f32, 10.1, 9.9, 10.0, 10.2, 9.8, 10.05, 9.95, 10.15, 9.85,
+        ];
+        let expected_mean = (cluster.iter().sum::<f32>() + 9.6) / 11.0;
+
+        let mut values: Vec<f32> = cluster.iter().copied().chain([9.6, 50.0]).collect();
+        let mean = Rejection::Gesd(GesdConfig::new(0.05, Some(3))).combine_mean(
+            &mut values,
+            None,
+            &mut scratch(),
+        );
+        assert!(
+            (mean - expected_mean).abs() < 0.001,
+            "mean should be {:.4}, got {:.4}",
+            expected_mean,
+            mean
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "Low relaxation must be >= 1.0")]
+    fn test_gesd_relaxation_below_one_panics() {
+        GesdConfig::new(0.05, None).with_low_relaxation(0.5);
     }
 
     #[test]

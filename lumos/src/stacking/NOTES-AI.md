@@ -44,14 +44,14 @@ Rewritten to match PixInsight/Siril two-phase algorithm:
 - Asymmetric sigma_low/sigma_high support added
 - Now properly rejects outliers (via `reject()`) instead of averaging Winsorized values
 
-### P2: GESD -- Missing Asymmetric Relaxation
+### ~~P2: GESD -- Missing Asymmetric Relaxation~~ — FIXED
 
-- **File**: rejection.rs, `GesdConfig::reject`
-- PixInsight multiplies sigma by a relaxation factor (default >= 1.5) for pixels
-  **below** the trimmed mean, making the test more tolerant of dark outliers.
-- Dark pixels (noise floor) should be rejected less aggressively than bright outliers
-  (cosmic rays, satellites). Without relaxation, GESD over-rejects dark pixels.
-- **Fix**: Add `low_relaxation: f32` field (default 1.5) to GesdConfig.
+- `GesdConfig::low_relaxation: f32` (default 1.5, matching PixInsight)
+- In Phase 1, pixels below the median use `sigma * low_relaxation` as effective sigma,
+  making test statistic `r = |deviation| / (sigma * relaxation)` smaller for dark outliers
+- Builder: `GesdConfig::new(0.05, None).with_low_relaxation(2.0)`
+- `relaxation = 1.0` restores symmetric behavior; higher values → more tolerant of dark pixels
+- Validated: `relaxation=5.0` preserves 6.7σ dark pixel that is rejected at `relaxation=1.0`
 
 ### P2: GESD -- Statistics Mismatch with Critical Values
 
@@ -162,7 +162,7 @@ Rewritten to match PixInsight/Siril two-phase algorithm:
 | Linear fit | Per-pixel comparison against fitted value | Per-pixel comparison against fitted value |
 | Linear fit sigma | Mean absolute deviation from fit | Mean absolute deviation from fit |
 | GESD statistics | Median + MAD | Trimmed mean + trimmed stddev |
-| GESD relaxation | Not implemented | Yes (default 1.5 for low pixels) |
+| GESD relaxation | Yes (default 1.5 for low pixels) | Yes (default 1.5 for low pixels) |
 | Normalization | 3 modes (None/Global/Mult) | 5 modes + Local normalization |
 | Rejection normalization | Same as combination | Separate from combination normalization |
 | Weighting | Manual per-frame weights | Noise eval (MRS), PSF signal, PSF SNR |

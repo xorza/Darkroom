@@ -225,6 +225,7 @@ impl StackConfig {
                 }
                 Rejection::Gesd(c) => {
                     assert!((0.0..1.0).contains(&c.alpha), "Alpha must be 0-1");
+                    assert!(c.low_relaxation >= 1.0, "Low relaxation must be >= 1.0");
                 }
             }
         }

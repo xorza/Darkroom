@@ -23,9 +23,22 @@ AI coding rules for Rust projects:
   cargo nextest run && cargo fmt && cargo check && cargo clippy --all-targets -- -D warnings
   ```
   Skip doc-tests.
-- Add tests for all new or modified non-GUI code (algorithms, data structures, utilities).
 - Check test run times are reasonable. Research and fix slow tests.
 - Check online documentation for best practices and patterns.
+
+## Testing
+
+- Write tests for ALL new and modified non-GUI code. No exceptions.
+- Tests must verify **correctness**, not just "it runs without panicking":
+  - Use hand-computed expected values. Show the math in comments.
+  - Assert exact outputs (survivor counts, indices, computed values), not vague ranges.
+  - Verify edge cases: empty input, minimal input, boundary conditions.
+- For algorithms with parameters, test that parameters actually change behavior:
+  - Test with parameter A: expect result X. Test with parameter B: expect result Y. Assert X != Y.
+- For SIMD implementations, test against scalar reference for identical results.
+- For rejection/filtering: verify exactly which elements survive and which are rejected.
+- For numerical code: validate against known-good reference values or analytical solutions.
+- Do NOT write tests that only check `result < 10` or `remaining > 0`. These catch nothing.
 
 ## Documentation
 
