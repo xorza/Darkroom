@@ -1,4 +1,4 @@
-Do a thorough research of each module in this crate. For each module:
+Do a thorough research of each submodule in this module. For each submodule:
 
 1. Look for industry standards and best practices online
 2. Compare with the current implementation
@@ -12,4 +12,4 @@ Focus on:
 - Consistency issues across modules
 - Incorrect implementations vs reference papers/tools
 
-Take your time. Research each module in parallel. After all modules are done, write a cross-cutting summary at the crate root level.
+Take your time. Research each module in parallel. After all modules are done, write a cross-cutting summary at the module root level.
