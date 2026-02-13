@@ -14,3 +14,21 @@
 /patch.diff
 /style.toml
 /config.toml
+
+# Claude Code sandbox sentinel files
+/.bash_profile
+/.bashrc
+/.gitconfig
+/.gitmodules
+/.profile
+/.ripgreprc
+/.zprofile
+/.zshrc
+/.mcp.json
+/.idea
+/.vscode
+/HEAD
+/config
+/hooks
+/objects
+/refs

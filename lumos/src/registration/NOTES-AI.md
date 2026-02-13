@@ -5,6 +5,13 @@ via k-d tree, RANSAC with MAGSAC++ scoring and LO-RANSAC, transform models
 (Translation through Homography), optional SIP distortion correction, image
 warping with Lanczos interpolation and SIMD-optimized row warping.
 
+See submodule NOTES-AI.md files for detailed per-module analysis:
+- `triangle/NOTES-AI.md` — matching algorithm, vertex correspondence, invariants
+- `ransac/NOTES-AI.md` — MAGSAC++ fidelity, LO-RANSAC, transform estimation
+- `distortion/NOTES-AI.md` — SIP correctness, TPS status, fitting analysis
+- `interpolation/NOTES-AI.md` — kernels, SIMD, LUT, performance
+- `spatial/NOTES-AI.md` — k-d tree correctness, performance
+
 ## Architecture
 
 ### Pipeline Flow
@@ -14,116 +21,118 @@ warping with Lanczos interpolation and SIMD-optimized row warping.
 4. RANSAC with MAGSAC++ scoring estimates transform from voted matches
 5. Post-RANSAC match recovery via k-d tree projection on unmatched stars
 6. Optional SIP polynomial fit on residuals, bundled into `WarpTransform`
-7. Image warping via `warp()` / `warp_image()` takes `&WarpTransform` (output→input mapping, Lanczos3 default)
+7. Image warping via `warp()` / `warp_image()` takes `&WarpTransform` (output->input mapping, Lanczos3 default)
 
-### Strengths
-- Triangle formation via k-d tree O(n*k^2) vs O(n^3) brute-force
-- K-d tree on invariant ratios (Groth 1986 / Valdes 1995 approach)
-- MAGSAC++ scoring (Barath & Matas 2020) - eliminates manual threshold tuning
-- FWHM-adaptive sigma derived from median star FWHM
-- DLT with Hartley normalization for homography estimation
-- Post-RANSAC match recovery (recovers 10-30% more matches)
-- Progressive 3-phase sampling: high-confidence matches sampled first
-- Dense/sparse vote matrix auto-switch at 250K entries
-- Flat implicit k-d tree layout (cache-friendly, no pointers)
-- AVX2/SSE4.1 bilinear warp, optimized Lanczos3 row warp with interior fast-path
-- Lanczos LUT: 4096 samples/unit, 48KB for Lanczos3 (fits L1 cache)
-- SIP sigma-clipping: 3 iterations × 3-sigma MAD rejection (LSST practice)
-- 5 presets (fast, precise, wide_field, mosaic, precise_wide_field)
+## Cross-Cutting Research Summary
 
-## Comparison with Industry Standards
+### What We Do Correctly
+- **All 5 transform estimators** verified correct (translation, euclidean, similarity, affine, homography)
+- **MAGSAC++ scoring** is a structurally correct k=2 specialization of the paper
+- **SIP polynomial direction** is correct (forward A/B, applied before linear transform)
+- **SIP coordinate normalization** improves on the standard (reduces condition number)
+- **K-d tree** implementation is clean, correct, well-tested (no bugs found)
+- **Lanczos LUT** precision (4096 samples/unit) is adequate for f32 data
+- **Kernel normalization** applied correctly in both generic and optimized paths
+- **Incremental stepping** optimization is mathematically correct for affine transforms
+- **Adaptive iteration count** formula matches standard (Fischler & Bolles 1981)
+- **Hartley normalization** for DLT homography is standard and correct
 
-### Triangle Matching vs Alternatives
-This implementation uses the Groth (1986) triangle voting approach, same
-as Astroalign. Industry alternatives:
-- **Astrometry.net**: Uses quad (4-star) geometric hashing. Two most distant
-  stars define a local coordinate system; other two stars' positions in that
-  frame form a hash code. More distinctive than triangles, fewer false matches.
-  Verified via Bayesian decision process.
-- **PixInsight StarAlignment**: Upgraded from triangles to polygonal descriptors
-  (quadrilaterals through octagons). Two most distant stars define coordinate
-  frame, remaining N-2 star positions form hash. More robust for distorted fields.
-- **Siril**: Triangle similarity (same as this crate), based on Michael
-  Richmond's `match` program. Uses RANSAC for outlier rejection.
-- **Astroalign**: Nearest-neighbor triangulation with 10 triangles per star
-  (4 nearest neighbors). Same invariant ratio approach as this crate.
+### Bugs Found
 
-Current implementation is comparable to Siril/Astroalign. Upgrading to quad
-descriptors would improve robustness for large star fields.
+1. **Triangle vertex correspondence is broken** (moderate severity)
+   `triangle/geometry.rs:48-96`, `triangle/voting.rs:143-149`
+   Vertices stored in numeric index order, not geometric-role order. Voting pairs
+   `ref_tri.indices[i]` with `target_tri.indices[i]` by position, but positions
+   have no geometric meaning. ~2/3 of votes per triangle match are cast for wrong
+   correspondences. Mitigated by voting mechanism (correct votes accumulate, wrong
+   ones scatter), but requires ~3x more triangles than necessary.
+   **Fix:** Reorder `indices` by geometric role in `from_positions()`.
 
-### RANSAC/MAGSAC++ Quality
-MAGSAC++ implementation is faithful to Barath & Matas 2020:
-- Marginalizes over noise scales via lower incomplete gamma function (LUT)
-- Continuous loss function instead of binary inlier/outlier
-- LO-RANSAC refinement loop
-- Adaptive iteration count based on inlier ratio
-- Progressive NAPSAC-like sampling (3-phase: top 25%, top 50%, uniform)
+2. **LO-RANSAC runs on every hypothesis** (moderate, performance)
+   `ransac/mod.rs:310` — LO triggers when `inlier_buf.len() >= min_samples`,
+   not just on new-best models. Standard LO-RANSAC and OpenCV run LO only on
+   new best. Wastes significant computation.
+   **Fix:** Add `score > best_score` check before LO.
 
-The original MAGSAC++ paper proposes iteratively re-weighted least squares
-(IRWLS) for model polishing. This implementation uses standard least-squares
-on inliers instead. Weighted LS using MAGSAC++ weights would improve accuracy.
+3. **`precise_wide_field` ratio_tolerance is inverted** (config bug)
+   `config.rs:199` — `ratio_tolerance: 0.005` is *tighter* than default 0.01.
+   For wide-field images with more distortion, it should be *looser* (0.02-0.03).
 
-### Transform Estimation
-- **Similarity**: Closed-form via centered covariance (standard approach). Correct.
-- **Affine**: Normal equations with direct 3x3 inverse (Cramer-like). Correct.
-- **Homography**: DLT with Hartley normalization via SVD. Standard, correct.
-  Uses A^T*A decomposition (computing A^T*A then SVD on that) rather than
-  SVD directly on A. Slightly less numerically stable but adequate.
-- **Translation**: Average displacement. Correct.
-- **Euclidean**: Constrained Procrustes with scale=1. Cross-covariance rotation
-  via atan2, translation computed with unit scale. Correct.
+4. **Auto validation vs min_matches** (config bug)
+   `config.rs:237` — When `transform_type == Auto`, `min_points()` returns 2
+   (Similarity), but Auto can upgrade to Homography (needs 4). A `min_matches`
+   of 3 passes validation but would be insufficient for Homography.
 
-### Interpolation Quality
-- Lanczos3 as default matches PixInsight/Siril defaults
-- LUT-based kernel evaluation (4096 samples/unit precision ~0.00024)
-- Kernel normalization prevents DC bias
-- Bicubic uses Catmull-Rom (a=-0.5), standard choice
-- No anti-aliasing filter for downscaling (minor for astro, typically upscaling)
-- SIMD: AVX2 bilinear processes 8 pixels/cycle on x86_64
+### Dead Code / Unused Config
 
-## Important Issues
+5. **SIP sigma-clipping fields declared but never used**
+   `distortion/sip/mod.rs:66-71` — `SipConfig.clip_sigma` and `clip_iterations`
+   exist with defaults but `fit_from_transform` never uses them. False API promise.
 
-### Triangle Vertex Correspondence is Approximate
-**File:** `triangle/voting.rs:143-149`
+6. **Interpolation config fields never wired up**
+   `config.rs:108-112` — `border_value`, `normalize_kernel`, `clamp_output` are
+   defined but never passed to `warp_image()`. Either implement or remove.
 
-When voting, `indices[i]` from ref matches `indices[i]` from target. But
-`Triangle.indices` retains the sorted-by-index order (from `tri.sort()` in
-matching.rs:126), not geometric-role order (e.g., vertex opposite shortest
-side). Two similar triangles from different star sets may have different
-geometric roles at the same index position.
+### Important Missing Features
 
-This is mitigated by the voting mechanism itself (Groth 1986 design): correct
-correspondences accumulate many votes across multiple triangles while incorrect
-ones scatter. Works well in practice but could be improved by reordering
-indices based on the side sorting in `from_positions()`.
+7. **No Lanczos deringing/clamping**
+   PixInsight uses clamping threshold (default 0.3) to prevent dark halos around
+   bright stars. `clamp_output` config exists but is unimplemented.
 
-### TPS Not Integrated Into Pipeline
-**File:** `distortion/tps/mod.rs` - marked `#![allow(dead_code)]`
+8. **Pipeline always uses star centroid as SIP reference, never image center**
+   `registration/mod.rs:318` passes `reference_point: None`. SIP standard uses
+   CRPIX (image center). Radial distortion is centered on optical axis, not
+   star centroid.
 
-Implementation exists and passes tests but is not accessible from the public
-API. PixInsight's StarAlignment uses 2D surface splines (thin plate splines)
-as its primary distortion correction method when distortion correction is
-enabled. They iteratively refine with "surface simplifiers" for accuracy.
-Integrating TPS would close the gap with PixInsight for wide-field work.
+9. **Single-pass match recovery**
+   `mod.rs:300-307` — Recovery + refit runs once. PixInsight iterates predict ->
+   re-match -> refit until convergence, recovering more matches.
 
-## Minor Issues
+10. **TPS not integrated** — fully implemented and tested (`distortion/tps/`)
+    but marked `dead_code`. PixInsight's primary distortion method.
 
-- No weighted least-squares in final refinement. MAGSAC++ weights are available
-  but unused for the final LS step.
-- Bicubic kernel not normalized (Catmull-Rom sums to 1.0 only at integer
-  positions; at fractional positions the sum deviates slightly).
-- No anti-aliasing filter for scale-down warps (rare in astrophotography).
+11. **No SIMD for Lanczos3** — the default interpolation method has no SIMD path.
+    Separable two-pass AVX2 could yield 2-4x speedup (Intel IPP approach).
 
-## Missing Features vs Industry Tools
+12. **Missing IRWLS for MAGSAC++** — paper's key contribution for model accuracy.
+    We use MAGSAC++ only for scoring, with binary inlier selection for estimation.
 
-| Feature | This Crate | PixInsight | Siril | Astrometry.net |
-|---------|-----------|------------|-------|----------------|
-| Star matching | Triangles | Polygons (4-8) | Triangles | Quads (4-star) |
-| Distortion correction | SIP (forward, applied in warp) | TPS/surface splines | SIP via WCS | SIP (full A/B/AP/BP) |
-| Drizzle integration | No | Yes | Yes | N/A |
-| Phase correlation fallback | No | No | Yes | N/A |
-| Multi-channel registration | Per-channel warp | Per-channel warp | Global | N/A |
-| Plate solving | No | Yes | Yes | Yes |
+### Comparison with Industry Tools
+
+| Aspect | This Crate | PixInsight | Siril | Astrometry.net | Astroalign |
+|--------|-----------|------------|-------|----------------|------------|
+| Star matching | Triangles (2D) | Polygons (6D) | Triangles | Quads (4D) | Triangles (2D) |
+| Vertex ordering | Bug (numeric) | Correct | Correct | N/A (hash) | Correct (geometric) |
+| RANSAC scoring | MAGSAC++ | Standard | OpenCV | Bayesian odds | RANSAC |
+| IRWLS polish | No | N/A | N/A | N/A | No |
+| Distortion | SIP (forward) | TPS (iterative) | SIP (from WCS) | SIP (full A/B/AP/BP) | None |
+| Sigma-clipping SIP | Config exists, not impl | N/A | N/A | Yes | N/A |
+| Lanczos deringing | Config exists, not impl | Yes (0.3 threshold) | Yes | N/A | N/A |
+| SIMD warp | AVX2 bilinear only | Full SIMD | OpenCV SIMD | N/A | N/A |
+| Match recovery | Single-pass | Iterative | N/A | Bayesian | N/A |
+| Output framing | Fixed (=input) | Max/min/COG | Max/min/current/COG | N/A | Fixed |
+
+### Prioritized Improvements
+
+**Quick Wins (bug fixes, high impact, low effort):**
+1. Fix vertex correspondence ordering in triangle geometry (~5 lines)
+2. Add `score > best_score` guard before LO-RANSAC (~1 line)
+3. Fix `precise_wide_field` ratio_tolerance (1 line)
+4. Fix Auto validation to use Homography min_points (1 line)
+
+**Medium Effort (correctness/quality):**
+5. Implement SIP sigma-clipping (config fields already exist)
+6. Pass image center as SIP reference_point when available
+7. Implement Lanczos deringing (clamp_output config exists)
+8. Wire up or remove dead Config fields (border_value, etc.)
+9. Add preemptive scoring to MAGSAC++ (break early when loss > best)
+10. Iterative match recovery (2-3 passes of recover + refit)
+
+**Larger Effort (performance/features):**
+11. Separable SIMD Lanczos3 (two-pass horizontal+vertical with AVX2)
+12. Integrate TPS as alternative distortion model
+13. IRWLS final polish with MAGSAC++ weights
+14. Upgrade to quad descriptors (4D hash, matches Astrometry.net)
 
 ## File Map
 
@@ -131,18 +140,10 @@ Integrating TPS would close the gap with PixInsight for wide-field work.
 |------|---------|
 | `mod.rs` | Public API: `register()`, `warp()`, match recovery |
 | `config.rs` | `Config` struct, presets, `InterpolationMethod` |
-| `transform.rs` | `Transform` (3x3 homogeneous), `TransformType` enum, `WarpTransform` (bundles Transform + optional SIP) |
+| `transform.rs` | `Transform` (3x3 homogeneous), `TransformType`, `WarpTransform` |
 | `result.rs` | `RegistrationResult`, `RegistrationError` |
-| `triangle/mod.rs` | Triangle matching params and re-exports |
-| `triangle/geometry.rs` | `Triangle` struct, invariant ratios, orientation |
-| `triangle/voting.rs` | Vote matrix (dense/sparse), correspondence voting |
-| `triangle/matching.rs` | Triangle formation via KNN, `match_triangles()` |
-| `ransac/mod.rs` | RANSAC loop, progressive sampling, LO-RANSAC |
-| `ransac/transforms.rs` | Transform estimation (all types), DLT, normalization |
-| `ransac/magsac.rs` | MAGSAC++ scorer, gamma LUT |
-| `distortion/mod.rs` | Re-exports for SIP and TPS |
-| `distortion/sip/mod.rs` | SIP polynomial fitting via Cholesky/LU |
-| `distortion/tps/mod.rs` | Thin-plate spline (WIP, not integrated) |
-| `interpolation/mod.rs` | Interpolation kernels, `warp_image(&WarpTransform)` |
-| `interpolation/warp/mod.rs` | Optimized row warping (AVX2, SSE, scalar), takes `&WarpTransform` |
-| `spatial/mod.rs` | K-d tree (flat implicit layout) |
+| `triangle/` | Triangle matching: geometry, voting, KNN formation |
+| `ransac/` | RANSAC loop, MAGSAC++ scorer, transform estimation |
+| `distortion/` | SIP polynomial (integrated), TPS (not integrated) |
+| `interpolation/` | Kernels, `warp_image()`, row warping (SIMD + scalar) |
+| `spatial/` | K-d tree (flat implicit layout, KNN + radius search) |
