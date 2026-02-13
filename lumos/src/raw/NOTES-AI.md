@@ -11,9 +11,11 @@ for calibration frames where hot pixel correction must precede demosaicing).
 
 ```
 raw/
-  mod.rs              - LibrawGuard RAII, UnpackedRaw, open_raw(), load_raw(), load_raw_cfa()
+  mod.rs              - LibrawGuard, BlackLevel, UnpackedRaw, consolidate_black_levels(),
+                        compute_wb_multipliers(), apply_channel_corrections(), fc(),
+                        open_raw(), load_raw(), load_raw_cfa()
   normalize.rs        - SIMD u16->f32 normalization (SSE2, SSE4.1, NEON, scalar)
-  tests.rs            - 14 unit tests for loading, normalization, guard cleanup
+  tests.rs            - Unit tests for loading, normalization, black level, WB, corrections
   benches.rs          - Raw load benchmark, libraw quality comparison, Markesteijn vs libraw
   demosaic/
     mod.rs            - Re-exports CfaPattern, BayerImage, demosaic_bayer
@@ -32,15 +34,38 @@ raw/
 
 ```
 File -> libraw_open_buffer -> libraw_unpack -> detect_sensor_type(filters, colors)
-  -> Monochrome:  normalize_u16_to_f32 -> extract active area -> 1-channel output
-  -> Bayer:       normalize_u16_to_f32 -> demosaic_bayer() [todo!() - panics]
-  -> XTrans:      copy raw u16 -> drop libraw -> process_xtrans (normalizes on-the-fly)
+  -> consolidate_black_levels(cblack[4104], black, maximum, filters)
+  -> compute_wb_multipliers(cam_mul[4])
+  -> Monochrome:  normalize_u16(common_black) -> extract active area -> 1-channel output
+  -> Bayer:       normalize_u16(common_black) -> apply_channel_corrections(delta+WB) -> demosaic_bayer() [todo!()]
+  -> XTrans:      copy raw u16 -> drop libraw -> process_xtrans(channel_black, wb_mul)
+  -> CFA (calib): normalize_u16(common_black) -> per-channel delta (NO WB) -> CfaImage
   -> Unknown:     libraw_dcraw_process fallback -> normalize 16/8-bit -> RGB output
 ```
 
-### Normalization Formula
-`output = max(0, (value_u16 as f32 - black)) * inv_range` where `inv_range = 1/(maximum - black)`.
-Values above 1.0 are preserved (no upper clamp). Parallelized via rayon with 16K-element chunks.
+### Black Level Consolidation
+Replicates libraw's `adjust_bl()` from `utils_libraw.cpp:464-540`:
+1. Fold spatial pattern (`cblack[4..5]` dimensions, `cblack[6..]` values) into per-channel `cblack[0..3]`
+   - Bayer 2x2: map positions to color channels via FC macro, remap second green to G2
+   - X-Trans 1x1: add `cblack[6]` to all 4 channels
+2. Extract common minimum across channels, move to scalar `black`
+3. Handle remaining spatial pattern (rare): extract common from pattern, move to `black`
+4. Final: `per_channel[c] = cblack[c] + black`, `common = black`, `inv_range = 1/(max - common)`
+5. `channel_delta_norm[c] = (per_channel[c] - common) * inv_range` for second-pass correction
+
+### Two-Pass Normalization
+- **Pass 1 (SIMD)**: `max(0, val - common_black) * inv_range` — existing SSE/NEON path, unchanged
+- **Pass 2 (per-pixel)**: `(val - delta_norm[ch]).max(0.0) * wb_mul[ch]` via `apply_channel_corrections()`
+  - Channel determined by `fc(filters, row, col)` — libraw FC macro
+  - Parallelized with rayon `par_chunks_mut` by row
+  - Skipped entirely if delta and WB are both trivial
+
+### White Balance
+- `compute_wb_multipliers(cam_mul)`: normalizes camera multipliers so min=1.0 (avoids clipping)
+- `cam_mul[3]==0` for 3-color cameras → copies from `cam_mul[1]` (green)
+- Returns `None` for invalid (zeros, negatives, NaN) → WB skipped
+- CFA/calibration path: no WB applied (calibration frames need raw channel values)
+- X-Trans: WB folded into `read_normalized()` per-pixel path (zero overhead)
 
 ### CFA Pattern Detection
 `detect_sensor_type(filters, colors)` in `astro_image/sensor.rs`:
@@ -97,6 +122,8 @@ the 12P rgb_dir buffer (~1.1 GB for 6032x4028). Peak arena: ~920 MB for full-res
 - Rayon parallelism at row/chunk level in all 5 steps.
 - U16 raw data kept until demosaic (half the memory of pre-normalizing to f32).
 - Libraw and file buffer dropped before demosaic to reduce peak memory by ~77 MB.
+- Per-channel black + WB folded into `read_normalized()` per-pixel path (zero overhead).
+  `XTransImage` stores `channel_black: [f32; 3]` and `wb_mul: [f32; 3]` (R/G/B).
 
 ### Correctness Assessment
 - Hex lookup construction matches dcraw/libraw's allhex logic faithfully.
@@ -134,25 +161,6 @@ Runtime feature detection uses `common::cpu_features::has_sse4_1()` / `has_sse2(
 - Workaround: could route Bayer to `demosaic_libraw_fallback()` as interim fix.
 - Long-term: implement RCD for astrophotography-quality demosaicing.
 
-### Medium: Missing Per-Channel Black Level (cblack[])
-- Uses only `color.black` (scalar). Ignores `cblack[0..3]` per-channel corrections
-  and `cblack[4..5]` spatial pattern (6x6 for X-Trans, 2x2 for some Bayer sensors).
-- Correct formula per libraw docs: `black_for_pixel = black + cblack[channel] + cblack[pattern]`.
-- Sony, some Canon, and X-Trans cameras have non-trivial cblack values.
-- Impact: subtle color bias in shadows and calibration frames.
-- Alternative: call `libraw_subtract_black()` before reading raw_image to let libraw
-  handle the full black level model, then normalize from 0 to adjusted maximum.
-
-### Medium: No Pre-Demosaic White Balance
-- Standard RAW pipeline: black subtraction -> white balance -> demosaic -> color correction.
-- This implementation skips white balance entirely (no `cam_mul`/`pre_mul` usage).
-- For astrophotography this is defensible (white balance applied later in the pipeline),
-  but it can degrade demosaic quality at color transitions and in the libraw fallback path.
-- The libraw fallback path does apply `use_camera_wb = 1`, creating an inconsistency
-  between the custom demosaic paths and the fallback path.
-- Quality comparison benchmark uses linear regression to remove scale/offset differences,
-  which effectively compensates for missing white balance in the comparison.
-
 ### Low: No Upper Clamp in Normalization
 - Values above `maximum` produce output > 1.0. Tests explicitly validate this behavior.
 - Industry standard (libraw, RawTherapee, dcraw) clips at white point.
@@ -170,11 +178,16 @@ Runtime feature detection uses `common::cpu_features::has_sse4_1()` / `has_sse2(
 
 ## Test Coverage
 
-67+ tests across the module:
+80+ tests across the module:
 - Normalization: SIMD correctness, large arrays, below-black clamping, crop pattern
+- Black level: consolidation (uniform, per-channel, Bayer 2x2 fold, X-Trans 1x1 fold)
+- WB multipliers: normal, 3-channel, normalization, invalid (zeros, negative, NaN)
+- Channel corrections: identity, delta-only, WB-only, negative clamping
+- FC macro: RGGB pattern mapping, periodicity
 - CFA patterns: all 4 Bayer variants, color_at, red_in_row, pattern_2x2
 - BayerImage: validation panics (zero dims, wrong length, margin overflow)
-- XTrans: pattern validation, image construction, output size, normalization, clamping
+- XTrans: pattern validation, image construction, output size, normalization, clamping,
+  per-channel black + WB, u16/f32 path equivalence
 - Markesteijn steps: green minmax, green interpolation, derivatives (uniform/checkerboard),
   homogeneity (uniform/dominant), YPbPr conversion, SAT queries, interior/border consistency,
   border no-panic, blend (uniform/dominant)

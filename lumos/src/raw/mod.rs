@@ -65,6 +65,207 @@ impl Drop for ProcessedImageGuard {
     }
 }
 
+/// Per-channel black levels after consolidation.
+///
+/// Replicates libraw's `adjust_bl()` logic: folds spatial patterns into per-channel
+/// values, extracts the common minimum, and computes normalized deltas for efficient
+/// two-pass correction (SIMD uniform pass + per-pixel channel delta pass).
+#[derive(Debug, Clone)]
+struct BlackLevel {
+    /// Per-channel total black [R, G1, B, G2] (common + per-channel delta).
+    per_channel: [f32; 4],
+    /// Common (minimum) black across all channels. Used for SIMD first pass.
+    common: f32,
+    /// 1.0 / (maximum - common).
+    inv_range: f32,
+    /// `(per_channel[c] - common) * inv_range` — normalized delta per channel.
+    /// Applied in the second per-pixel pass.
+    channel_delta_norm: [f32; 4],
+}
+
+/// Replicate libraw's `adjust_bl()` to consolidate per-channel and spatial
+/// black level corrections into a single per-channel array.
+///
+/// See libraw `utils_libraw.cpp:464-540` for the reference C++ implementation.
+fn consolidate_black_levels(
+    cblack_raw: &[u32; 4104],
+    black_raw: u32,
+    maximum_raw: u32,
+    filters: u32,
+) -> BlackLevel {
+    let mut cblack = [0u32; 4104];
+    cblack.copy_from_slice(cblack_raw);
+    let mut black = black_raw;
+
+    // Step 1: Fold spatial pattern into per-channel values.
+    // For Bayer sensors with ~2x2 spatial pattern:
+    if filters > 1000 && cblack[4].div_ceil(2) == 1 && cblack[5].div_ceil(2) == 1 {
+        // Map position (c/2, c%2) to color channel using FC macro.
+        // FC(row,col) = (filters >> (((row<<1 & 14) | (col & 1)) << 1)) & 3
+        let mut clrs = [0u32; 4];
+        let mut last_g: Option<usize> = None;
+        let mut g_count = 0;
+        for (c, clr) in clrs.iter_mut().enumerate() {
+            let row = c / 2;
+            let col = c % 2;
+            *clr = (filters >> (((row << 1 & 14) | (col & 1)) << 1)) & 3;
+            if *clr == 1 {
+                g_count += 1;
+                last_g = Some(c);
+            }
+        }
+        // If two greens found, remap second green to channel 3 (G2)
+        if g_count > 1
+            && let Some(lg) = last_g
+        {
+            clrs[lg] = 3;
+        }
+        for c in 0..4 {
+            let pattern_idx =
+                6 + (c / 2) % cblack[4] as usize * cblack[5] as usize + c % 2 % cblack[5] as usize;
+            cblack[clrs[c] as usize] += cblack[pattern_idx];
+        }
+        cblack[4] = 0;
+        cblack[5] = 0;
+    } else if filters <= 1000 && cblack[4] == 1 && cblack[5] == 1 {
+        // X-Trans / Fuji RAF DNG: 1x1 spatial pattern
+        for c in 0..4 {
+            cblack[c] += cblack[6];
+        }
+        cblack[4] = 0;
+        cblack[5] = 0;
+    }
+
+    // Step 2: Extract common minimum from per-channel values.
+    let common_ch = cblack[..4].iter().copied().min().unwrap();
+    for val in &mut cblack[..4] {
+        *val -= common_ch;
+    }
+    black += common_ch;
+
+    // Step 3: Handle remaining spatial pattern (rare).
+    if cblack[4] > 0 && cblack[5] > 0 {
+        let pattern_size = (cblack[4] * cblack[5]) as usize;
+        let mut common_spatial = cblack[6];
+        for c in 1..pattern_size {
+            if cblack[6 + c] < common_spatial {
+                common_spatial = cblack[6 + c];
+            }
+        }
+        let mut nonzero = 0;
+        for c in 0..pattern_size {
+            cblack[6 + c] -= common_spatial;
+            if cblack[6 + c] != 0 {
+                nonzero += 1;
+            }
+        }
+        black += common_spatial;
+        if nonzero == 0 {
+            cblack[4] = 0;
+            cblack[5] = 0;
+        }
+    }
+
+    // Warn if spatial pattern still present after consolidation
+    if cblack[4] > 0 && cblack[5] > 0 {
+        tracing::warn!(
+            "Unhandled spatial black pattern: {}x{} (using per-channel only)",
+            cblack[4],
+            cblack[5]
+        );
+    }
+
+    // Step 4: Final per-channel = cblack[c] + black
+    let mut per_channel = [0f32; 4];
+    for c in 0..4 {
+        per_channel[c] = (cblack[c] + black) as f32;
+    }
+    let common = black as f32;
+    let effective_max = maximum_raw as f32 - common;
+    assert!(
+        effective_max > 0.0,
+        "Invalid black level: common={common}, maximum={maximum_raw}"
+    );
+    let inv_range = 1.0 / effective_max;
+    let mut channel_delta_norm = [0f32; 4];
+    for c in 0..4 {
+        channel_delta_norm[c] = (per_channel[c] - common) * inv_range;
+    }
+
+    tracing::debug!(
+        "Black levels: common={common}, per_channel={per_channel:?}, \
+         delta_norm={channel_delta_norm:?}, inv_range={inv_range}"
+    );
+
+    BlackLevel {
+        per_channel,
+        common,
+        inv_range,
+        channel_delta_norm,
+    }
+}
+
+/// Compute normalized WB multipliers from camera multipliers.
+///
+/// Normalizes so the smallest multiplier is 1.0 (avoids clipping).
+/// Returns None if cam_mul appears invalid (all zeros or non-finite).
+fn compute_wb_multipliers(cam_mul: [f32; 4]) -> Option<[f32; 4]> {
+    let mut mul = cam_mul;
+    // cam_mul[3] may be 0 for 3-color cameras; use cam_mul[1] (green) as fallback
+    if mul[3] == 0.0 {
+        mul[3] = mul[1];
+    }
+
+    // Validate: all must be positive and finite
+    if mul.iter().any(|&m| m <= 0.0 || !m.is_finite()) {
+        tracing::warn!("Invalid camera WB multipliers: {cam_mul:?}, skipping WB");
+        return None;
+    }
+
+    // Normalize so minimum is 1.0
+    let min_mul = mul.iter().copied().fold(f32::MAX, f32::min);
+    for m in &mut mul {
+        *m /= min_mul;
+    }
+
+    tracing::debug!("WB multipliers (normalized): {mul:?} (raw: {cam_mul:?})");
+    Some(mul)
+}
+
+/// Apply per-channel black delta correction and white balance to Bayer data.
+///
+/// Operates on data already normalized with the common black level.
+/// Channel is determined by the libraw `filters` bitmask using the FC macro.
+fn apply_channel_corrections(
+    data: &mut [f32],
+    raw_width: usize,
+    filters: u32,
+    delta_norm: &[f32; 4],
+    wb_mul: &[f32; 4],
+) {
+    // Check if corrections are trivial (skip for performance)
+    let has_delta = delta_norm.iter().any(|&d| d.abs() > f32::EPSILON);
+    let has_wb = wb_mul.iter().any(|&w| (w - 1.0).abs() > f32::EPSILON);
+    if !has_delta && !has_wb {
+        return;
+    }
+
+    data.par_chunks_mut(raw_width)
+        .enumerate()
+        .for_each(|(row, row_data)| {
+            for (col, pixel) in row_data.iter_mut().enumerate() {
+                let ch = fc(filters, row, col);
+                *pixel = (*pixel - delta_norm[ch]).max(0.0) * wb_mul[ch];
+            }
+        });
+}
+
+/// Libraw FC macro: determine color channel at (row, col) from filters bitmask.
+#[inline(always)]
+fn fc(filters: u32, row: usize, col: usize) -> usize {
+    ((filters >> (((row << 1 & 14) | (col & 1)) << 1)) & 3) as usize
+}
+
 /// Unpacked raw file data from libraw, ready for sensor-specific processing.
 #[derive(Debug)]
 struct UnpackedRaw {
@@ -77,8 +278,9 @@ struct UnpackedRaw {
     height: usize,
     top_margin: usize,
     left_margin: usize,
-    black: f32,
-    range: f32,
+    black_level: BlackLevel,
+    filters: u32,
+    wb_multipliers: Option<[f32; 4]>,
     sensor_type: SensorType,
     iso: Option<u32>,
 }
@@ -103,12 +305,34 @@ impl UnpackedRaw {
     }
 
     /// Extract raw CFA pixels as normalized f32 (active area only).
-    /// Used by Monochrome, Bayer, and XTrans paths.
+    ///
+    /// Applies per-channel black correction but NO white balance (used for
+    /// calibration frames where raw data integrity is required).
     fn extract_cfa_pixels(&self) -> Result<Vec<f32>> {
         let raw_data = self.raw_image_slice()?;
 
-        let inv_range = 1.0 / self.range;
-        let normalized = normalize_u16_to_f32_parallel(raw_data, self.black, inv_range);
+        // Pass 1: SIMD normalize with common black level
+        let mut normalized = normalize_u16_to_f32_parallel(
+            raw_data,
+            self.black_level.common,
+            self.black_level.inv_range,
+        );
+
+        // Pass 2: Per-channel black delta correction (no WB)
+        let has_delta = self
+            .black_level
+            .channel_delta_norm
+            .iter()
+            .any(|&d| d.abs() > f32::EPSILON);
+        if has_delta {
+            apply_channel_corrections(
+                &mut normalized,
+                self.raw_width,
+                self.filters,
+                &self.black_level.channel_delta_norm,
+                &[1.0; 4], // No WB for calibration path
+            );
+        }
 
         // Extract the active area
         let output_size = self.width * self.height;
@@ -134,9 +358,22 @@ impl UnpackedRaw {
     fn demosaic_bayer(&self, cfa_pattern: CfaPattern) -> Result<Vec<f32>> {
         let raw_data = self.raw_image_slice()?;
 
-        // Normalize to 0.0-1.0 range using parallel processing
-        let inv_range = 1.0 / self.range;
-        let normalized_data = normalize_u16_to_f32_parallel(raw_data, self.black, inv_range);
+        // Pass 1: SIMD normalize with common black level
+        let mut normalized_data = normalize_u16_to_f32_parallel(
+            raw_data,
+            self.black_level.common,
+            self.black_level.inv_range,
+        );
+
+        // Pass 2: Per-channel black delta + white balance
+        let wb = self.wb_multipliers.unwrap_or([1.0; 4]);
+        apply_channel_corrections(
+            &mut normalized_data,
+            self.raw_width,
+            self.filters,
+            &self.black_level.channel_delta_norm,
+            &wb,
+        );
 
         let bayer = BayerImage::with_margins(
             &normalized_data,
@@ -190,7 +427,14 @@ impl UnpackedRaw {
         // Copy raw u16 data so we can drop libraw before demosaicing.
         // P×2 bytes (~47 MB) instead of P×4 bytes (~93 MB) for normalized f32.
         let raw_u16: Vec<u16> = raw_data.to_vec();
-        let inv_range = 1.0 / self.range;
+
+        // Convert 4-channel black/WB to 3-channel for X-Trans (R=0, G=1, B=2)
+        let bl = &self.black_level;
+        let channel_black = [bl.per_channel[0], bl.per_channel[1], bl.per_channel[2]];
+        let wb_mul = match self.wb_multipliers {
+            Some(wb) => [wb[0], wb[1], wb[2]],
+            None => [1.0; 3],
+        };
 
         // Drop libraw and file buffer to reduce peak memory during demosaicing
         self.guard.take();
@@ -205,8 +449,9 @@ impl UnpackedRaw {
             self.top_margin,
             self.left_margin,
             xtrans_pattern,
-            self.black,
-            inv_range,
+            channel_black,
+            bl.inv_range,
+            wb_mul,
         );
 
         Ok(pixels)
@@ -395,26 +640,8 @@ fn open_raw(path: &Path) -> Result<UnpackedRaw> {
     }
 
     // SAFETY: inner is valid, color struct is initialized after unpack.
-    let black = unsafe { (*inner).color.black } as f32;
-    let maximum = unsafe { (*inner).color.maximum } as f32;
-    let range = maximum - black;
-
-    // Validate color range
-    if range <= 0.0 {
-        anyhow::bail!(
-            "libraw: Invalid color range: black={}, maximum={}, range={}",
-            black,
-            maximum,
-            range
-        );
-    }
-
-    tracing::debug!(
-        "libraw: black={}, maximum={}, range={}",
-        black,
-        maximum,
-        range
-    );
+    let black_raw = unsafe { (*inner).color.black } as u32;
+    let maximum_raw = unsafe { (*inner).color.maximum } as u32;
 
     // Get sensor info from libraw metadata
     // SAFETY: inner is valid, idata struct is initialized after unpack.
@@ -429,6 +656,16 @@ fn open_raw(path: &Path) -> Result<UnpackedRaw> {
         sensor_type
     );
 
+    // Consolidate per-channel black levels (replicates libraw adjust_bl)
+    // SAFETY: inner is valid, color.cblack is initialized after unpack.
+    let cblack_raw: [u32; 4104] = unsafe { (*inner).color.cblack };
+    let black_level = consolidate_black_levels(&cblack_raw, black_raw, maximum_raw, filters);
+
+    // Extract camera white balance multipliers
+    // SAFETY: inner is valid, color.cam_mul is initialized after unpack.
+    let cam_mul: [f32; 4] = unsafe { (*inner).color.cam_mul };
+    let wb_multipliers = compute_wb_multipliers(cam_mul);
+
     let iso = extract_iso(inner);
 
     Ok(UnpackedRaw {
@@ -441,8 +678,9 @@ fn open_raw(path: &Path) -> Result<UnpackedRaw> {
         height,
         top_margin,
         left_margin,
-        black,
-        range,
+        black_level,
+        filters,
+        wb_multipliers,
         sensor_type,
         iso,
     })

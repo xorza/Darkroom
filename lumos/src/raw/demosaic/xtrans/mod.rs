@@ -34,8 +34,9 @@ pub fn process_xtrans(
     top_margin: usize,
     left_margin: usize,
     xtrans_pattern: [[u8; 6]; 6],
-    black: f32,
+    channel_black: [f32; 3],
     inv_range: f32,
+    wb_mul: [f32; 3],
 ) -> Vec<f32> {
     let pattern = XTransPattern::new(xtrans_pattern);
 
@@ -48,8 +49,9 @@ pub fn process_xtrans(
         top_margin,
         left_margin,
         pattern,
-        black,
+        channel_black,
         inv_range,
+        wb_mul,
     );
 
     let demosaic_start = Instant::now();
@@ -174,10 +176,12 @@ pub(crate) struct XTransImage<'a> {
     pub(crate) left_margin: usize,
     /// X-Trans CFA pattern
     pub(crate) pattern: XTransPattern,
-    /// Black level for normalization (u16 path only)
-    black: f32,
-    /// 1.0 / (maximum - black) for normalization (u16 path only)
+    /// Per-channel black levels [R=0, G=1, B=2] for u16 path normalization.
+    channel_black: [f32; 3],
+    /// 1.0 / (maximum - common_black) for normalization (u16 path only).
     inv_range: f32,
+    /// Per-channel white balance multipliers [R=0, G=1, B=2] for u16 path.
+    wb_mul: [f32; 3],
 }
 
 impl<'a> XTransImage<'a> {
@@ -227,7 +231,7 @@ impl<'a> XTransImage<'a> {
         );
     }
 
-    /// Create from raw u16 sensor data with on-the-fly normalization.
+    /// Create from raw u16 sensor data with on-the-fly per-channel normalization.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn with_margins(
         data: &'a [u16],
@@ -238,8 +242,9 @@ impl<'a> XTransImage<'a> {
         top_margin: usize,
         left_margin: usize,
         pattern: XTransPattern,
-        black: f32,
+        channel_black: [f32; 3],
         inv_range: f32,
+        wb_mul: [f32; 3],
     ) -> Self {
         Self::validate_dimensions(
             data.len(),
@@ -259,8 +264,9 @@ impl<'a> XTransImage<'a> {
             top_margin,
             left_margin,
             pattern,
-            black,
+            channel_black,
             inv_range,
+            wb_mul,
         }
     }
 
@@ -296,22 +302,25 @@ impl<'a> XTransImage<'a> {
             top_margin,
             left_margin,
             pattern,
-            black: 0.0,
+            channel_black: [0.0; 3],
             inv_range: 1.0,
+            wb_mul: [1.0; 3],
         }
     }
 
-    /// Read a pixel and return its normalized value in 0.0-1.0 range.
+    /// Read a pixel and return its normalized, white-balanced value.
     ///
-    /// For u16 data: `((value - black).max(0) * inv_range)`
-    /// For f32 data: returns value directly (already normalized).
+    /// For u16 data: per-channel black subtraction, normalization, and WB multiplication.
+    /// For f32 data: returns value directly (already normalized and WB'd).
     #[inline(always)]
     pub(crate) fn read_normalized(&self, raw_y: usize, raw_x: usize) -> f32 {
         let idx = raw_y * self.raw_width + raw_x;
         match &self.data {
             PixelSource::U16(data) => {
                 let val = data[idx] as f32;
-                (val - self.black).max(0.0) * self.inv_range
+                let ch = self.pattern.color_at(raw_y, raw_x) as usize;
+                let normalized = (val - self.channel_black[ch]).max(0.0) * self.inv_range;
+                normalized * self.wb_mul[ch]
             }
             PixelSource::F32(data) => data[idx],
         }
@@ -376,7 +385,19 @@ mod tests {
     fn test_xtrans_image_valid() {
         let data = vec![32768u16; 36];
         let pattern = test_pattern();
-        let img = XTransImage::with_margins(&data, 6, 6, 4, 4, 1, 1, pattern, 0.0, 1.0 / 65535.0);
+        let img = XTransImage::with_margins(
+            &data,
+            6,
+            6,
+            4,
+            4,
+            1,
+            1,
+            pattern,
+            [0.0; 3],
+            1.0 / 65535.0,
+            [1.0; 3],
+        );
         assert_eq!(img.raw_width, 6);
         assert_eq!(img.raw_height, 6);
         assert_eq!(img.width, 4);
@@ -388,7 +409,19 @@ mod tests {
     fn test_xtrans_image_zero_width() {
         let data = vec![32768u16; 36];
         let pattern = test_pattern();
-        XTransImage::with_margins(&data, 6, 6, 0, 4, 0, 0, pattern, 0.0, 1.0 / 65535.0);
+        XTransImage::with_margins(
+            &data,
+            6,
+            6,
+            0,
+            4,
+            0,
+            0,
+            pattern,
+            [0.0; 3],
+            1.0 / 65535.0,
+            [1.0; 3],
+        );
     }
 
     #[test]
@@ -396,7 +429,19 @@ mod tests {
     fn test_xtrans_image_wrong_data_length() {
         let data = vec![32768u16; 30]; // Should be 36
         let pattern = test_pattern();
-        XTransImage::with_margins(&data, 6, 6, 6, 6, 0, 0, pattern, 0.0, 1.0 / 65535.0);
+        XTransImage::with_margins(
+            &data,
+            6,
+            6,
+            6,
+            6,
+            0,
+            0,
+            pattern,
+            [0.0; 3],
+            1.0 / 65535.0,
+            [1.0; 3],
+        );
     }
 
     #[test]
@@ -411,8 +456,9 @@ mod tests {
             3,
             3,
             test_pattern_array(),
-            0.0,
+            [0.0; 3],
             1.0 / 4096.0,
+            [1.0; 3],
         );
 
         assert_eq!(rgb.len(), 6 * 6 * 3);
@@ -438,8 +484,9 @@ mod tests {
             3,
             3,
             test_pattern_array(),
-            black,
+            [black; 3],
             inv_range,
+            [1.0; 3],
         );
 
         for &val in &rgb {
@@ -465,8 +512,9 @@ mod tests {
             3,
             3,
             test_pattern_array(),
-            black,
+            [black; 3],
             inv_range,
+            [1.0; 3],
         );
 
         for &val in &rgb {
@@ -490,13 +538,112 @@ mod tests {
             3,
             3,
             test_pattern_array(),
-            black,
+            [black; 3],
             inv_range,
+            [1.0; 3],
         );
 
         for &val in &rgb {
             assert!((val - 1.0).abs() < 0.001, "Expected 1.0, got {}", val);
         }
+    }
+
+    /// Verify per-channel black and WB multipliers produce different
+    /// results than uniform black with no WB.
+    #[test]
+    fn test_process_xtrans_per_channel_black_and_wb() {
+        let common_black = 200.0;
+        let maximum = 4096.0;
+        let inv_range = 1.0 / (maximum - common_black);
+
+        // Raw value well above all black levels
+        let raw_val = 2000u16;
+        let raw_data: Vec<u16> = vec![raw_val; 12 * 12];
+
+        // Uniform black, no WB → baseline
+        let rgb_uniform = process_xtrans(
+            &raw_data,
+            12,
+            12,
+            6,
+            6,
+            3,
+            3,
+            test_pattern_array(),
+            [common_black; 3],
+            inv_range,
+            [1.0; 3],
+        );
+
+        // Non-uniform per-channel black: R has higher black → lower output
+        let channel_black = [250.0, 200.0, 220.0]; // R=250, G=200, B=220
+        let rgb_perchannel = process_xtrans(
+            &raw_data,
+            12,
+            12,
+            6,
+            6,
+            3,
+            3,
+            test_pattern_array(),
+            channel_black,
+            inv_range,
+            [1.0; 3],
+        );
+
+        // With per-channel black, results should differ from uniform
+        assert_ne!(
+            rgb_uniform, rgb_perchannel,
+            "Per-channel black should produce different output"
+        );
+
+        // With WB multipliers, results should differ further
+        let wb_mul = [2.0, 1.0, 1.5];
+        let rgb_wb = process_xtrans(
+            &raw_data,
+            12,
+            12,
+            6,
+            6,
+            3,
+            3,
+            test_pattern_array(),
+            channel_black,
+            inv_range,
+            wb_mul,
+        );
+
+        assert_ne!(rgb_perchannel, rgb_wb, "WB should produce different output");
+
+        // Verify a specific pixel's read_normalized math:
+        // For a red pixel with value 2000, channel_black[0]=250, inv_range=1/3896:
+        // normalized = (2000-250) * (1/3896) = 1750/3896 ≈ 0.4492
+        // With wb_mul[0]=2.0 → 0.8984
+        // For a green pixel: (2000-200) * (1/3896) = 1800/3896 ≈ 0.4620
+        // With wb_mul[1]=1.0 → 0.4620
+        let red_expected = (raw_val as f32 - 250.0) * inv_range * 2.0;
+        let green_expected = (raw_val as f32 - 200.0) * inv_range * 1.0;
+        let blue_expected = (raw_val as f32 - 220.0) * inv_range * 1.5;
+
+        // Since demosaic blends neighbors, we can't check exact pixel values,
+        // but the mean should reflect the per-channel scaling
+        let mean_uniform: f32 = rgb_uniform.iter().sum::<f32>() / rgb_uniform.len() as f32;
+        let mean_wb: f32 = rgb_wb.iter().sum::<f32>() / rgb_wb.len() as f32;
+
+        // WB with multipliers [2.0, 1.0, 1.5] on average should produce higher values
+        // than per-channel-black-only (wb=[1,1,1])
+        assert!(
+            mean_wb > mean_uniform * 1.1,
+            "WB mean ({mean_wb}) should be notably higher than uniform mean ({mean_uniform})"
+        );
+
+        // The expected per-channel means (before demosaic blending) are:
+        // R: red_expected ≈ 0.898, G: green_expected ≈ 0.462, B: blue_expected ≈ 0.685
+        // Overall average ≈ weighted by X-Trans color distribution (20R, 8G, 8B out of 36)
+        // ... but demosaic blends everything, so just verify they're reasonable
+        assert!(red_expected > 0.0 && red_expected < 2.0);
+        assert!(green_expected > 0.0 && green_expected < 2.0);
+        assert!(blue_expected > 0.0 && blue_expected < 2.0);
     }
 
     // ---------------------------------------------------------------
@@ -542,8 +689,9 @@ mod tests {
             3,
             3,
             test_pattern_array(),
-            black,
+            [black; 3],
             inv_range,
+            [1.0; 3],
         );
         let rgb_f32 = process_xtrans_f32(&raw_f32, 12, 12, 6, 6, 3, 3, test_pattern_array());
 

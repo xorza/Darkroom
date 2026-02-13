@@ -1018,8 +1018,9 @@ mod tests {
             top,
             left,
             test_pattern(),
-            0.0,
+            [0.0; 3],
             TEST_INV_RANGE,
+            [1.0; 3],
         )
     }
 
