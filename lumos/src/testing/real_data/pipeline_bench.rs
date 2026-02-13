@@ -40,7 +40,7 @@ fn bench_full_pipeline() {
         masters.master_bias.is_some(),
     );
 
-    if let Some(ref hp) = masters.hot_pixel_map {
+    if let Some(ref hp) = masters.defect_map {
         println!("  Hot pixels: {} ({:.4}%)", hp.count(), hp.percentage());
     }
     println!("  Elapsed: {:?}", step_start.elapsed());

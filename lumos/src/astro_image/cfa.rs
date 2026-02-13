@@ -127,6 +127,11 @@ impl CfaImage {
     }
 
     /// Subtract another CfaImage pixel-by-pixel (dark subtraction).
+    ///
+    /// May produce negative pixel values when dark noise exceeds signal.
+    /// This is intentional: the f32 pipeline preserves negatives, and stacking
+    /// averages them out correctly. Clamping to zero would introduce a positive
+    /// bias in the stacked result.
     pub fn subtract(&mut self, dark: &CfaImage) {
         assert!(
             self.data.width() == dark.data.width() && self.data.height() == dark.data.height(),

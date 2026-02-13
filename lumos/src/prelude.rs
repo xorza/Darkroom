@@ -9,7 +9,7 @@
 //! ```
 
 // Core image types
-pub use crate::{AstroImage, AstroImageMetadata, BitPix, HotPixelMap, ImageDimensions};
+pub use crate::{AstroImage, AstroImageMetadata, BitPix, DefectMap, ImageDimensions};
 
 // Calibration
 pub use crate::CalibrationMasters;

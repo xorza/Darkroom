@@ -172,7 +172,7 @@ fn create_calibration_masters(calibration_dir: &Path) -> CalibrationMasters {
         "Masters created"
     );
 
-    if let Some(ref hot_pixels) = masters.hot_pixel_map {
+    if let Some(ref hot_pixels) = masters.defect_map {
         tracing::info!(
             count = hot_pixels.count(),
             percentage = format!("{:.4}%", hot_pixels.percentage()),

@@ -1,6 +1,6 @@
 //! Calibration master frame creation and management.
 
-pub mod hot_pixels;
+pub mod defect_map;
 
 #[cfg(test)]
 mod tests;
@@ -16,7 +16,7 @@ use crate::stacking::config::{Normalization, StackConfig};
 use crate::stacking::progress::ProgressCallback;
 use crate::stacking::stack::run_stacking;
 
-pub use hot_pixels::HotPixelMap;
+pub use defect_map::DefectMap;
 
 /// Default sigma threshold for hot pixel detection.
 const DEFAULT_HOT_PIXEL_SIGMA: f32 = 5.0;
@@ -35,7 +35,7 @@ pub struct CalibrationMasters {
     /// Master bias frame (raw CFA)
     pub master_bias: Option<CfaImage>,
     /// Hot pixel map derived from master dark
-    pub hot_pixel_map: Option<HotPixelMap>,
+    pub defect_map: Option<DefectMap>,
 }
 
 /// Stack raw CFA frames using the full stacking pipeline.
@@ -81,15 +81,15 @@ impl CalibrationMasters {
     ///
     /// Generates hot pixel map from the CFA dark if provided.
     pub fn new(dark: Option<CfaImage>, flat: Option<CfaImage>, bias: Option<CfaImage>) -> Self {
-        let hot_pixel_map = dark
+        let defect_map = dark
             .as_ref()
-            .map(|d| HotPixelMap::from_master_dark(d, DEFAULT_HOT_PIXEL_SIGMA));
+            .map(|d| DefectMap::from_master_dark(d, DEFAULT_HOT_PIXEL_SIGMA));
 
         Self {
             master_dark: dark,
             master_flat: flat,
             master_bias: bias,
-            hot_pixel_map,
+            defect_map,
         }
     }
 
@@ -128,9 +128,9 @@ impl CalibrationMasters {
             image.divide_by_normalized(flat, self.master_bias.as_ref());
         }
 
-        // 3. CFA-aware hot pixel correction
-        if let Some(ref hot_map) = self.hot_pixel_map {
-            hot_map.correct(image);
+        // 3. CFA-aware defective pixel correction
+        if let Some(ref defect_map) = self.defect_map {
+            defect_map.correct(image);
         }
     }
 }

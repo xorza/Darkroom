@@ -24,7 +24,7 @@ fn test_new_constructor() {
     assert!(masters.master_flat.is_some());
     assert!(masters.master_bias.is_none());
     // Hot pixel map derived from dark
-    assert!(masters.hot_pixel_map.is_some());
+    assert!(masters.defect_map.is_some());
 }
 
 #[test]
@@ -35,7 +35,7 @@ fn test_new_no_dark_no_hot_pixels() {
 
     assert!(masters.master_dark.is_none());
     assert!(masters.master_flat.is_some());
-    assert!(masters.hot_pixel_map.is_none());
+    assert!(masters.defect_map.is_none());
 }
 
 #[test]
@@ -198,8 +198,8 @@ fn test_calibrate_hot_pixel_correction() {
 
     let masters = CalibrationMasters::new(Some(dark), None, None);
 
-    assert!(masters.hot_pixel_map.is_some());
-    let hot_map = masters.hot_pixel_map.as_ref().unwrap();
+    assert!(masters.defect_map.is_some());
+    let hot_map = masters.defect_map.as_ref().unwrap();
     assert!(hot_map.count() >= 1, "Should detect the hot pixel");
 
     // Create light with corrupted hot pixel

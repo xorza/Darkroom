@@ -3,8 +3,8 @@
 ## Overview
 
 Creates master calibration frames (dark, flat, bias) from raw CFA sensor data and
-applies them to calibrate light frames. Detects hot pixels via MAD-based statistics.
-Operates on raw single-channel CFA data before demosaicing.
+applies them to calibrate light frames. Detects defective pixels (hot and cold/dead)
+via MAD-based statistics. Operates on raw single-channel CFA data before demosaicing.
 
 **Files:** mod.rs (orchestration), hot_pixels.rs (detection/correction), tests.rs (integration tests)
 
@@ -13,17 +13,17 @@ Operates on raw single-channel CFA data before demosaicing.
 ```
 CalibrationMasters::from_raw_files()     CalibrationMasters::new()
   stack_cfa_frames(darks, ...)             Takes pre-built CfaImages
-  stack_cfa_frames(flats, ...)             Generates HotPixelMap from dark
+  stack_cfa_frames(flats, ...)             Generates DefectMap from dark
   stack_cfa_frames(biases, ...)
          |                                          |
          v                                          v
-CalibrationMasters { master_dark, master_flat, master_bias, hot_pixel_map }
+CalibrationMasters { master_dark, master_flat, master_bias, defect_map }
          |
          v
 calibrate(light):
   1. Dark subtraction (or bias-only fallback)     CfaImage::subtract()
   2. Flat division with normalization              CfaImage::divide_by_normalized()
-  3. CFA-aware hot pixel correction                HotPixelMap::correct()
+  3. CFA-aware defective pixel correction            DefectMap::correct()
 ```
 
 ## Calibration Formula
@@ -44,14 +44,16 @@ because a master dark captured at the same exposure time already includes the bi
 The flat division guards against divide-by-zero with `norm_flat > f32::EPSILON` and
 uses `f64` accumulation for the mean, which is good numerical practice.
 
-## Hot Pixel Detection
+## Defective Pixel Detection
 
 **Algorithm:** MAD (Median Absolute Deviation) with sigma threshold.
 - `sigma = MAD * 1.4826` (correct conversion constant for normal distribution)
-- `threshold = median + sigma_threshold * sigma`
+- Hot threshold: `median + sigma_threshold * sigma`
+- Cold threshold: `max(median - sigma_threshold * sigma, 0.0)`
 - Default threshold: 5.0 sigma
 - Sigma floor: `max(computed_sigma, median * 0.1)` prevents over-detection on
   uniform darks where MAD approaches zero
+- `DefectMap` stores separate `hot_indices` and `cold_indices` vectors
 
 **Industry comparison:**
 - PixInsight CosmeticCorrection: Uses master dark or auto-detect (3 sigma default,
@@ -93,35 +95,7 @@ Avoids O(n log n) sort on full-resolution images.
 - >= 8 frames: sigma-clipped mean at 3 sigma (statistically efficient)
 - Darks/biases: no normalization; Flats: multiplicative normalization
 
-## Issues Found
-
-### High: No Cold/Dead Pixel Detection
-- **File:** hot_pixels.rs:64-69
-- Only detects pixels ABOVE threshold (hot pixels)
-- No detection of dead pixels (zero/low response) that fall below
-  `median - sigma_threshold * sigma`
-- Dead pixels are multiplicative defects (zero or reduced sensitivity) that survive
-  dark subtraction. They appear as dark spots in the final image.
-- Both PixInsight and Siril detect hot AND cold pixels as a pair
-- **Fix:** Add lower threshold check: `val < median - sigma_threshold * sigma`
-
-### High: Dark Subtraction Does Not Clamp Negatives
-- **File:** cfa.rs:157-160 (`*l -= d` with no floor)
-- Can produce negative pixel values when dark noise exceeds light signal
-- **Industry approaches:**
-  - PixInsight: Adds a pedestal (e.g., +100 ADU) before calibration to keep values
-    positive, stored in FITS PEDESTAL keyword. Allows lossless floating-point workflow.
-  - Siril: Warns when light median is close to dark median. Processes in float but
-    negative values can cause issues downstream.
-  - MaxIm DL: Adds fixed pedestal (typically 100 ADU)
-  - Cloudy Nights consensus: Clamping to zero loses information (creates bright bias
-    in stacked result). Preserving negatives in float is preferred if pipeline handles it.
-- **Current impact:** Since the pipeline uses f32 throughout and stacking happens after
-  calibration, negative values from noise are averaged out during integration. This is
-  actually the correct floating-point approach. However, if images are ever exported to
-  integer formats between calibration and stacking, clamping would destroy information.
-- **Recommendation:** Document that negatives are intentional and the pipeline relies on
-  float arithmetic. Consider adding optional pedestal support for integer export paths.
+## Remaining Issues
 
 ### Medium: Single-Channel Statistics vs Per-CFA-Channel
 - **File:** hot_pixels.rs:49-52 (calls `compute_single_channel_stats` on all pixels)
@@ -152,9 +126,9 @@ Avoids O(n log n) sort on full-resolution images.
 - **Fix:** Collect all same-color neighbors within radius, sort by Manhattan distance,
   take closest 24
 
-### Low: HotPixelMap::correct is Sequential
-- **File:** hot_pixels.rs:106-116
-- Iterates `&self.indices` sequentially
+### Low: DefectMap::correct is Sequential
+- **File:** hot_pixels.rs
+- Iterates hot and cold indices sequentially
 - Safe to parallelize: Bayer stride-2 neighbors never overlap with other hot pixels'
   replacement zones (hot pixels are sparse). For X-Trans, radius-6 neighborhoods could
   theoretically overlap but in practice hot pixels are rare enough.
@@ -171,8 +145,9 @@ Avoids O(n log n) sort on full-resolution images.
 
 ## Test Coverage
 
-- Unit tests for detection (small/large images, edge cases, no hot pixels)
-- Unit tests for correction (Bayer stride-2, Mono 8-connected, corner pixels)
+- Unit tests for hot pixel detection (small/large images, edge cases, no defects)
+- Unit tests for cold/dead pixel detection and mixed hot+cold detection
+- Unit tests for correction (Bayer stride-2, Mono 8-connected, corner pixels, cold pixels)
 - Integration tests for full calibration pipeline (dark sub, bias-only, flat correction,
   combined dark+flat+bias with algebraic verification)
 - Dimension mismatch assertions tested with `#[should_panic]`
