@@ -15,6 +15,9 @@ Per-module details in each module's `NOTES-AI.md`. This file summarizes cross-cu
 | math | sigma_clip_iteration: deviation/value index mismatch after quickselect | Bug |
 | astro_image | FITS integer data not normalized to [0,1] (RAW is) | P1 |
 | star_detection | Matched filter noise map not scaled after convolution | P1 |
+| star_detection | Hardcoded radius-1 dilation before labeling contaminates measurements | P1 |
+| drizzle | Gaussian kernel FWHM uses wrong formula | Major |
+| stacking | Linear fit clipping uses single center instead of per-value fitted value | Medium |
 | registration | Euclidean transform estimation uses wrong method | Important |
 
 ## Cross-Cutting Patterns
@@ -80,23 +83,26 @@ Per-module details in each module's `NOTES-AI.md`. This file summarizes cross-cu
 4. Fix sigma_clip_iteration index mismatch in math
 
 ### Short-term (correctness improvements)
-5. Implement Bayer demosaic (at minimum libraw fallback)
-6. Normalize FITS integer data to [0,1]
-7. Scale noise map after matched filter convolution
-8. Add compensated summation to math
-9. Fix Euclidean transform estimation
-10. Clamp dark subtraction to zero
+5. Fix drizzle Gaussian kernel FWHM formula
+6. Implement Bayer demosaic (at minimum libraw fallback)
+7. Normalize FITS integer data to [0,1]
+8. Scale noise map after matched filter convolution
+9. Remove or make configurable radius-1 dilation in star_detection
+10. Fix linear fit clipping to use per-value fitted centers in stacking
+11. Add compensated summation to math
+12. Fix Euclidean transform estimation
+13. Clamp dark subtraction to zero
 
 ### Medium-term (quality & interoperability)
-11. Read BAYERPAT from FITS headers
-12. Add FITS writing support
-13. Replace normal equations with QR/SVD in gradient_removal
-14. Normalize TPS coordinates
-15. Add asymmetric sigma to winsorized/GESD
-16. Add per-pixel bad pixel masks to drizzle
+14. Read BAYERPAT from FITS headers
+15. Add FITS writing support
+16. Replace normal equations with QR/SVD in gradient_removal
+17. Normalize TPS coordinates
+18. Add asymmetric sigma to winsorized/GESD
+19. Add per-pixel bad pixel masks to drizzle
 
 ### Long-term (completeness)
-17. Add cold/dead pixel detection
-18. Parallelize drizzle
-19. Add rejection maps to stacking
-20. Implement true Square kernel with polygon clipping
+20. Add cold/dead pixel detection
+21. Parallelize drizzle
+22. Add rejection maps to stacking
+23. Implement true Square kernel with polygon clipping
