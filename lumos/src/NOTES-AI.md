@@ -1,6 +1,7 @@
 # lumos Crate - Cross-Cutting Findings Summary
 
-Per-module details in each module's `NOTES-AI.md`. This file summarizes cross-cutting patterns and the highest-priority issues across all modules.
+Per-module details in each module's `NOTES-AI.md`. This file summarizes cross-cutting
+patterns and the highest-priority **unfixed** issues across all modules.
 
 ## Top Priority Bugs & Correctness Issues
 
@@ -8,101 +9,86 @@ Per-module details in each module's `NOTES-AI.md`. This file summarizes cross-cu
 |--------|-------|----------|
 | drizzle | Drop size formula inverted: `pixfrac / scale` should be `pixfrac * scale` | Critical |
 | drizzle | Square kernel only transforms center point (is actually Turbo kernel) | Critical |
-| astro_image | 3-channel FITS loaded as interleaved instead of planar | Critical |
-| registration | SIP distortion correction computed but never applied during warping | Critical |
-| registration | Double-inverse in warp() (correct by accident) | Critical |
+| drizzle | Gaussian kernel FWHM uses wrong formula | Critical |
 | raw | Bayer demosaic not implemented (`todo!()`) - affects >95% of cameras | Critical |
-| math | sigma_clip_iteration: deviation/value index mismatch after quickselect | Bug |
-| astro_image | FITS integer data not normalized to [0,1] (RAW is) | P1 |
-| star_detection | Matched filter noise map not scaled after convolution | P1 |
-| star_detection | Hardcoded radius-1 dilation before labeling contaminates measurements | P1 |
-| drizzle | Gaussian kernel FWHM uses wrong formula | Major |
-| stacking | Linear fit clipping uses single center instead of per-value fitted value | Medium |
-| registration | Euclidean transform estimation uses wrong method | Important |
+| labeling | AtomicUnionFind capacity overflow silently ignored | P1 |
+| calibration | Sigma floor fails when median=0 (bias frames → massive false positives) | P1 |
+
+## Already Fixed (removed from priority list)
+
+- ~~astro_image: 3-channel FITS loaded as interleaved~~ — loads planar via `from_planar_channels`
+- ~~astro_image: FITS integer data not normalized~~ — `BitPix::normalization_max()` normalizes to [0,1]
+- ~~astro_image: Missing BAYERPAT/FILTER/GAIN/CCD-TEMP~~ — comprehensive FITS metadata parsing
+- ~~math: sigma_clip_iteration index mismatch~~ — deviations recomputed after quickselect
+- ~~star_detection: Matched filter noise not scaled~~ — normalized by `sqrt(sum(K^2))`
+- ~~star_detection: Hardcoded radius-1 dilation~~ — removed from detect stage
+- ~~star_detection: Default 4-connectivity~~ — changed to 8-connectivity
+- ~~star_detection: Unsafe mutable aliasing in mask_dilation~~ — proper `SendPtr` wrapper
+- ~~star_detection: PixelGrid generation counter wrap~~ — skip-zero guard added
+- ~~stacking: Linear fit single center~~ — per-pixel comparison against fitted value
+- ~~stacking: Winsorized missing 1.134 correction~~ — two-phase Huber c=1.5 rewrite
+- ~~registration: GammaLut~~ — replaced with closed-form `gamma_k2()`
+- ~~registration: L2/L-inf tolerance mismatch~~ — search radius × √2
+- ~~registration: Target point degeneracy~~ — added `is_sample_degenerate`
+- ~~registration: Confidence defaults misaligned~~ — both use 0.995
+- ~~registration: Missing `nearest_one()`~~ — dedicated method, used in match recovery
+- ~~registration: `partial_cmp().unwrap()`~~ — replaced with `total_cmp()`
+- ~~registration: SIP distortion not applied during warping~~ — `WarpTransform.apply()` applies SIP
+- ~~registration: Double-inverse in warp()~~ — phantom issue; transform direction is correct
+- ~~registration: Euclidean estimation wrong method~~ — verified correct constrained Procrustes
+- ~~calibration: Single-channel MAD across CFA~~ — per-CFA-color statistics
 
 ## Cross-Cutting Patterns
 
-### 1. Inconsistent Value Range Convention
-- RAW files: normalized to [0,1] by libraw
-- FITS integer files: raw ADU values (0-65535 for 16-bit)
-- Calibration expects consistent ranges
-- Affects: astro_image, calibration_masters, stacking
-
-### 2. Negative Values Not Handled Consistently
+### 1. Negative Values Not Handled Consistently
 - calibration_masters: dark subtraction doesn't clamp to zero
 - gradient_removal: subtraction correction can produce negatives
-- drizzle: no output clamping
+- drizzle: no output clamping (Lanczos negative lobes)
 - stacking: no post-combination clamping
 - Need project-wide decision: allow negatives in linear pipeline or clamp at each stage
 
-### 3. NaN Propagation Risk
-- math: partial_cmp().unwrap() panics on NaN
-- Dead pixels, division-by-zero in calibration, and unclamped operations can produce NaN
-- NaN propagates silently through f32 arithmetic until it hits a comparison
-- Fix: Use total_cmp throughout, or add NaN guards at pipeline stage boundaries
-
-### 4. Numerical Stability
+### 2. Numerical Stability
 - math: No compensated summation (naive f32 accumulation loses precision)
 - gradient_removal: Normal equations (A^T*A) squares condition number
 - gradient_removal: TPS coordinates not normalized (huge scale mismatch)
-- registration: No weighted least-squares in final refinement
-- These compound: imprecise sums feed into imprecise statistics feed into imprecise models
+- These compound: imprecise sums → imprecise statistics → imprecise models
 
-### 5. MAD-based Robust Statistics Used Correctly But Inconsistently
-- Correct 1.4826 factor used everywhere (good)
-- calibration_masters: single-channel MAD across all CFA pixels (should be per-channel)
-- stacking: GESD uses median+MAD, PixInsight uses trimmed mean+stddev
-- star_detection: noise map not post-convolution scaled
-
-### 6. Missing Industry-Standard Metadata
-- FITS: no BAYERPAT, FILTER, GAIN, CCD-TEMP reading
-- No FITS writing support at all
-- Missing context/contribution images from drizzle
-- Missing rejection maps from stacking
-- These limit interoperability with PixInsight, Siril, N.I.N.A.
-
-### 7. SIMD Coverage Gaps
+### 3. SIMD Coverage Gaps
 - raw normalization: no AVX2 path (only SSE4.1)
 - math weighted_mean: scalar only, no SIMD
 - drizzle: entirely single-threaded
-- calibration_masters: hot pixel correction sequential
 - gradient_removal: TPS evaluation O(n*W*H) with no spatial optimization
-
-### 8. README vs Code Drift
-- registration: quality score formula differs, nonexistent directories listed
-- calibration_masters: claims per-channel analysis but does single-channel
-- stacking: default normalization None vs README recommending Global
-- gradient_removal: wrong module path in doc example
 
 ## Recommendations by Priority
 
 ### Immediate (data corruption / wrong results)
-1. Fix drizzle drop size formula
-2. Fix FITS planar loading in astro_image
-3. Apply SIP correction during warping in registration
-4. Fix sigma_clip_iteration index mismatch in math
+1. Fix drizzle drop size formula (`pixfrac * scale`)
+2. Fix drizzle Gaussian FWHM formula
+3. Implement Bayer demosaic (at minimum libraw fallback)
+4. Fix AtomicUnionFind capacity overflow
+5. Fix calibration sigma floor for median=0
 
 ### Short-term (correctness improvements)
-5. Fix drizzle Gaussian kernel FWHM formula
-6. Implement Bayer demosaic (at minimum libraw fallback)
-7. Normalize FITS integer data to [0,1]
-8. Scale noise map after matched filter convolution
-9. Remove or make configurable radius-1 dilation in star_detection
-10. Fix linear fit clipping to use per-value fitted centers in stacking
-11. Add compensated summation to math
-12. Fix Euclidean transform estimation
-13. Clamp dark subtraction to zero
+6. Fix drizzle Lanczos parameter validation + output clamping
+7. Fix drizzle `min_coverage` normalization
+8. Rename Square kernel to Turbo
+9. Add compensated summation to math
+10. Replace gradient_removal normal equations with QR/SVD
+11. Normalize gradient_removal TPS coordinates
+12. Increase gradient_removal sample box radius
+13. Fix gradient_removal division correction (mean → median)
 
 ### Medium-term (quality & interoperability)
-14. Read BAYERPAT from FITS headers
-15. Add FITS writing support
-16. Replace normal equations with QR/SVD in gradient_removal
-17. Normalize TPS coordinates
-18. Add asymmetric sigma to winsorized/GESD
-19. Add per-pixel bad pixel masks to drizzle
+14. Add FITS writing support
+15. Add stacking rejection maps
+16. Add auto reference frame selection
+17. Fix GESD asymmetric relaxation + statistics mismatch
+18. Parallelize drizzle
+19. Add iterative gradient sample rejection
+20. Coarse-grid TPS evaluation
 
 ### Long-term (completeness)
-20. Add cold/dead pixel detection
-21. Parallelize drizzle
-22. Add rejection maps to stacking
-23. Implement true Square kernel with polygon clipping
+21. Implement true Square kernel with polygon clipping
+22. Add noise-based auto weighting to stacking
+23. Soft deringing threshold in registration
+24. Frame-type presets for stacking
