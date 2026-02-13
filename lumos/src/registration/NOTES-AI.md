@@ -53,10 +53,12 @@ See submodule NOTES-AI.md files for detailed per-module analysis:
 8. **TPS not integrated** — fully implemented and tested (`distortion/tps/`)
    but marked `dead_code`. PixInsight's primary distortion method.
 
-9. **Separable Lanczos3** — explicit AVX2 was tried on the non-separable 6x6 path
-   but provided no benefit (LLVM auto-vectorizes well). Fused weight normalization
-   gives -47% per-pixel overhead, -5-8% full-image. The remaining big win is
-   separable two-pass (6+6 vs 6x6), expected 2-3x improvement.
+9. ~~**Separable Lanczos3**~~ **Superseded** — explicit FMA SIMD kernel
+   (`lanczos3_kernel_fma`) now vectorizes the 6x6 accumulation with fused
+   min/max deringing tracking. Results: -59% with deringing, -52% multi-threaded
+   4k. LLVM does NOT auto-vectorize the 6-element loop (contrary to previous
+   claim). Separable two-pass remains theoretically possible for pure resize
+   but doesn't apply to arbitrary warps with rotation.
 
 10. **Missing IRWLS for MAGSAC++** — paper's key contribution for model accuracy.
     We use MAGSAC++ only for scoring, with binary inlier selection for estimation.
@@ -72,17 +74,15 @@ See submodule NOTES-AI.md files for detailed per-module analysis:
 | Distortion | SIP (forward) | TPS (iterative) | SIP (from WCS) | SIP (full A/B/AP/BP) | None |
 | Sigma-clipping SIP | Yes (3-iter, 3-sigma MAD) | N/A | N/A | Yes | N/A |
 | Lanczos deringing | Yes (min/max clamping) | Yes (0.3 threshold) | Yes | N/A | N/A |
-| SIMD warp | AVX2 bilinear; Lanczos3 auto-vectorized | Full SIMD | OpenCV SIMD | N/A | N/A |
+| SIMD warp | AVX2 bilinear; Lanczos3 FMA kernel | Full SIMD | OpenCV SIMD | N/A | N/A |
 | Match recovery | Iterative (ICP-style) | Iterative | N/A | Bayesian | N/A |
 | Output framing | Fixed (=input) | Max/min/COG | Max/min/current/COG | N/A | Fixed |
 
-### Prioritized Improvements
-
-**Larger Effort (performance/features):**
-1. Separable SIMD Lanczos3 (two-pass horizontal+vertical with AVX2)
-2. Integrate TPS as alternative distortion model
-3. IRWLS final polish with MAGSAC++ weights
-4. Upgrade to quad descriptors (4D hash, matches Astrometry.net)
+### Postponed (low impact, revisit only if a real problem arises)
+- **TPS integration** — already implemented/tested but dead code. SIP is sufficient for typical setups.
+- **IRWLS for MAGSAC++** — marginal sub-pixel accuracy gain. Current pipeline works well.
+- **Quad descriptors** — only matters for blind all-sky matching, not frame-to-frame registration.
+- **Inline FMA kernel** — ~2-3ms gain out of 33ms. Not worth forcing AVX2 on entire row function.
 
 ## File Map
 

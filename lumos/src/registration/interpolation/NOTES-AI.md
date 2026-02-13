@@ -288,28 +288,13 @@ from clamp-to-edge which would be more correct.
    arbitrary warps with rotation (source coordinates differ per pixel), but shear
    decomposition of affine transforms could enable it.
 
-### Medium Priority
-2. **SIMD bilinear interior fast path:** When all 8 source pixels in a chunk are
-   guaranteed in-bounds, skip per-pixel bounds checking. Simple range check on min/max
-   source coordinates of the chunk.
-
-3. **FMA for SIMD bilinear:** Add `fma` to target features, replace `mul+add` with
-   `_mm256_fmadd_ps`. Modest throughput gain, better accuracy.
-
-4. **Inline the FMA kernel:** Mark `warp_row_lanczos3_inner` with
-   `#[target_feature(enable = "avx2,fma")]` to allow the kernel to be inlined, removing
-   per-pixel function call overhead. Requires the entire function to use AVX2 feature.
-
-### Low Priority
-5. **Linear interpolation in LUT:** Replace nearest-index lookup with linear interpolation
-   between adjacent entries. Allows reducing LUT size to 1024-2048 entries while
-   maintaining precision.
-
-6. **Tile-based processing:** For extreme rotations (>45 degrees), tile-based warping
-   would improve cache behavior.
-
-7. **Configurable border modes:** Add clamp-to-edge and replicate modes alongside
-   constant-value padding.
+### Postponed (low impact)
+- **SIMD bilinear interior fast path** — skip bounds checks for interior chunk. Marginal.
+- **FMA for SIMD bilinear** — replace `mul+add` with `fmadd`. Marginal.
+- **Inline FMA kernel** — ~2-3ms gain out of 33ms. Not worth the complexity.
+- **Linear interpolation in LUT** — current 4096 samples/unit is adequate for f32.
+- **Tile-based processing** — only helps extreme rotations (>45°), rare in practice.
+- **Configurable border modes** — borders are cropped in astrophotography.
 
 ### Tried and Rejected
 - **AVX2 gather for LUT lookups:** `_mm256_i32gather_ps` for 6 weights at once. ~2% slower

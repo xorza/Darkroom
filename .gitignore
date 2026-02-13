@@ -27,6 +27,8 @@
 /.mcp.json
 /.idea
 /.vscode
+/.claude/agents
+/.claude/commands
 /HEAD
 /config
 /hooks
