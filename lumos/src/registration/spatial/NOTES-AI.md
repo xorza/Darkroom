@@ -139,7 +139,7 @@ The code is clean, correct, and well-tested. Specific positives:
 
 ### Minor Observations (not bugs)
 
-1. **`partial_cmp().unwrap()` on line 92 and line 136**: Will panic on NaN. Acceptable for star coordinates (which should never be NaN), but could be hardened with `total_cmp()` on f64 (available since Rust 1.62) which treats NaN consistently.
+1. ~~**`partial_cmp().unwrap()`**~~ — **FIXED**: replaced with `f64::total_cmp()` in both build (line 92) and k_nearest sort (line 136).
 
 2. **Points are cloned** (line 60): `points.to_vec()` copies all points into the tree. For DVec2 (16 bytes each), this is 200 * 16 = 3.2 KB. Negligible. An alternative would be to store a reference `&[DVec2]`, but the owned copy avoids lifetime complexity.
 
@@ -161,9 +161,9 @@ The code is clean, correct, and well-tested. Specific positives:
 
 ### Recommended
 
-1. **`nearest_one()` method**: `recover_matches` (`mod.rs:389`) calls `k_nearest(predicted, 1)` in a loop over all unmatched stars, allocating a `Vec` via `BoundedMaxHeap` per iteration. A dedicated `nearest_one() -> Option<Neighbor>` using a scalar best-distance tracker (no heap, no Vec) would eliminate these allocations. ~30 lines. Reference: kiddo crate provides this.
+1. ~~**`nearest_one()` method**~~ — **FIXED**: added `nearest_one() -> Option<Neighbor>` with scalar tracker, used in `recover_matches`.
 
-2. **`f64::total_cmp()` instead of `partial_cmp().unwrap()`**: Eliminates the panic path for NaN. One-line change on lines 92 and 136.
+2. ~~**`f64::total_cmp()`**~~ — **FIXED**: see Minor Observations above.
 
 3. **L-infinity radius search for invariant matching**: Voting code (`voting.rs:126-134`) uses L2 radius search then post-filters with L-infinity `is_similar()`. A native `radius_chebyshev_into()` method would eliminate the post-filter and reduce candidate count by ~22%. The k-d tree pruning for L-infinity is simpler than L2: check `|diff| <= radius` on the split axis.
 

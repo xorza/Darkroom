@@ -386,9 +386,8 @@ pub(crate) fn recover_matches(
             }
 
             let predicted = current_transform.apply(ref_pos);
-            let nearest = target_tree.k_nearest(predicted, 1);
 
-            if let Some(nn) = nearest.first()
+            if let Some(nn) = target_tree.nearest_one(predicted)
                 && nn.dist_sq <= threshold_sq
                 && !matched_target.contains(&nn.index)
                 && !newly_matched_targets.contains(&nn.index)

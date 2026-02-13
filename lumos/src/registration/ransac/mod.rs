@@ -59,7 +59,7 @@ impl Default for RansacParams {
         Self {
             max_iterations: 2000,
             max_sigma: 1.0, // ~3px effective threshold
-            confidence: 0.999,
+            confidence: 0.995,
             min_inlier_ratio: 0.3,
             seed: None,
             use_local_optimization: true,

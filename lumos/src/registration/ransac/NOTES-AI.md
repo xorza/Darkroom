@@ -158,7 +158,7 @@ The SVD solver returns a poor model rejected by MAGSAC++ scoring.
 3. **Direct SVD for homography**: SVD on full 2n x 9 matrix A via nalgebra.
 4. **IRWLS final polish**: 3-5 IRWLS iterations after model selection with sigma-marginalized weights.
 5. **Fix LO buffer replacement**: Write into `inlier_buf` directly instead of replacing it.
-6. **Align confidence defaults**: Make `RansacParams::default()` match Config's 0.995.
+6. ~~**Align confidence defaults**~~ — **FIXED**: `RansacParams::default()` now uses 0.995.
 
 ## References
 

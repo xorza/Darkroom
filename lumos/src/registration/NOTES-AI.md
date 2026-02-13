@@ -51,9 +51,9 @@ MAGSAC++ paper, Groth 1986, Valdes 1995, Tabur 2007, Lang 2010, SWarp, LSST pipe
 2. ~~**Fix L2/L-inf tolerance mismatch** (triangle/voting.rs)~~ — **FIXED**: search radius multiplied by √2
 3. **Fix orientation test comments** (triangle/tests.rs:365,1050) — rotation preserves orientation
 4. ~~**Check target point degeneracy** (ransac/mod.rs)~~ — **FIXED**: added `is_sample_degenerate(&sample_target)`
-5. **Align confidence defaults** — RansacParams::default() 0.999 vs Config::default() 0.995
-6. **Add `nearest_one()`** to k-d tree (spatial/mod.rs) — avoids Vec allocation in match recovery
-7. **Use `f64::total_cmp()`** in k-d tree (spatial/mod.rs:92,136) — eliminates NaN panic path
+5. ~~**Align confidence defaults**~~ — **FIXED**: RansacParams::default() now uses 0.995 to match Config::default()
+6. ~~**Add `nearest_one()`** to k-d tree~~ — **FIXED**: dedicated method with scalar tracker, used in match recovery
+7. ~~**Use `f64::total_cmp()`** in k-d tree~~ — **FIXED**: eliminates NaN panic path in build and k_nearest sort
 
 #### Medium Effort (moderate changes, meaningful impact)
 8. **Soft deringing threshold** (interpolation) — configurable `t=0.3` (PixInsight-style) instead of hard min/max clamp

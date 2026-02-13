@@ -104,6 +104,42 @@ fn test_kdtree_k_nearest_more_than_available() {
 }
 
 #[test]
+fn test_kdtree_nearest_one() {
+    let points = vec![
+        DVec2::new(0.0, 0.0),
+        DVec2::new(10.0, 10.0),
+        DVec2::new(5.0, 5.0),
+        DVec2::new(3.0, 4.0),
+    ];
+    let tree = KdTree::build(&points).unwrap();
+
+    // Exact match
+    let nn = tree.nearest_one(DVec2::new(5.0, 5.0)).unwrap();
+    assert_eq!(nn.index, 2);
+    assert!(nn.dist_sq < 1e-10);
+
+    // Closest to (4.0, 4.5) is (3.0, 4.0) at dist_sq = 1.25 or (5.0, 5.0) at dist_sq = 1.25
+    // Both are equidistant, either is valid
+    let nn = tree.nearest_one(DVec2::new(4.0, 4.5)).unwrap();
+    assert!((nn.dist_sq - 1.25).abs() < 1e-10);
+
+    // Matches k_nearest(q, 1) result
+    let nn1 = tree.nearest_one(DVec2::new(7.0, 8.0)).unwrap();
+    let kn1 = tree.k_nearest(DVec2::new(7.0, 8.0), 1);
+    assert_eq!(nn1.index, kn1[0].index);
+    assert!((nn1.dist_sq - kn1[0].dist_sq).abs() < 1e-10);
+}
+
+#[test]
+fn test_kdtree_nearest_one_single_point() {
+    let points = vec![DVec2::new(3.0, 7.0)];
+    let tree = KdTree::build(&points).unwrap();
+    let nn = tree.nearest_one(DVec2::new(0.0, 0.0)).unwrap();
+    assert_eq!(nn.index, 0);
+    assert!((nn.dist_sq - 58.0).abs() < 1e-10);
+}
+
+#[test]
 fn test_kdtree_radius_indices_basic() {
     let points = vec![
         DVec2::new(0.0, 0.0),

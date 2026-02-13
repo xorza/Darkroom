@@ -89,7 +89,7 @@ impl KdTree {
                 } else {
                     points_vec[b].y
                 };
-                va.partial_cmp(&vb).unwrap()
+                va.total_cmp(&vb)
             });
 
             let mid = range.start + median;
@@ -133,7 +133,7 @@ impl KdTree {
         self.k_nearest_range(0, self.indices.len(), 0, query, &mut heap);
 
         let mut result: Vec<Neighbor> = heap.into_vec();
-        result.sort_by(|a, b| a.dist_sq.partial_cmp(&b.dist_sq).unwrap());
+        result.sort_by(|a, b| a.dist_sq.total_cmp(&b.dist_sq));
         result
     }
 
@@ -178,6 +178,67 @@ impl KdTree {
         let diff_sq = diff * diff;
         if !heap.is_full() || diff_sq < heap.max_distance() {
             self.k_nearest_range(second_start, second_end, depth + 1, query, heap);
+        }
+    }
+
+    /// Find the single nearest neighbor to a query point.
+    ///
+    /// More efficient than `k_nearest(query, 1)` — uses a scalar best-distance
+    /// tracker with no heap or Vec allocation.
+    pub fn nearest_one(&self, query: DVec2) -> Option<Neighbor> {
+        if self.indices.is_empty() {
+            return None;
+        }
+        let mut best = Neighbor {
+            index: 0,
+            dist_sq: f64::INFINITY,
+        };
+        self.nearest_one_range(0, self.indices.len(), 0, query, &mut best);
+        if best.dist_sq.is_finite() {
+            Some(best)
+        } else {
+            None
+        }
+    }
+
+    /// Nearest-one search over a range of the implicit tree.
+    fn nearest_one_range(
+        &self,
+        start: usize,
+        end: usize,
+        depth: usize,
+        query: DVec2,
+        best: &mut Neighbor,
+    ) {
+        if start >= end {
+            return;
+        }
+
+        let mid = start + (end - start) / 2;
+        let point_idx = self.indices[mid];
+        let point = self.points[point_idx];
+
+        let dist_sq = (query - point).length_squared();
+        if dist_sq < best.dist_sq {
+            best.index = point_idx;
+            best.dist_sq = dist_sq;
+        }
+
+        let split_dim = depth % 2;
+        let query_val = if split_dim == 0 { query.x } else { query.y };
+        let point_val = if split_dim == 0 { point.x } else { point.y };
+        let diff = query_val - point_val;
+
+        let (first_start, first_end, second_start, second_end) = if diff < 0.0 {
+            (start, mid, mid + 1, end)
+        } else {
+            (mid + 1, end, start, mid)
+        };
+
+        self.nearest_one_range(first_start, first_end, depth + 1, query, best);
+
+        if diff * diff < best.dist_sq {
+            self.nearest_one_range(second_start, second_end, depth + 1, query, best);
         }
     }
 
