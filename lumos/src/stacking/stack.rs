@@ -8,7 +8,7 @@ use std::path::Path;
 use crate::AstroImage;
 
 use super::FrameType;
-use super::cache::{ImageCache, StackableImage};
+use super::cache::{ChannelStats, ImageCache, StackableImage};
 use super::config::{CombineMethod, Normalization, StackConfig};
 use super::error::Error;
 use super::progress::ProgressCallback;
@@ -145,9 +145,35 @@ pub fn stack_with_progress<P: AsRef<Path> + Sync>(
     Ok(result)
 }
 
+/// Select the best reference frame by lowest average noise (MAD) across channels.
+///
+/// For each frame, computes the mean MAD across all channels. The frame with the
+/// lowest mean MAD is selected — it has the most stable background and will produce
+/// the best normalization for all other frames.
+fn select_reference_frame(stats: &[ChannelStats], frame_count: usize, channels: usize) -> usize {
+    assert!(frame_count > 0);
+    let mut best_frame = 0;
+    let mut best_mad = f32::MAX;
+
+    for frame_idx in 0..frame_count {
+        let mut mad_sum = 0.0f32;
+        for channel in 0..channels {
+            mad_sum += stats[frame_idx * channels + channel].mad;
+        }
+        let avg_mad = mad_sum / channels as f32;
+        if avg_mad < best_mad {
+            best_mad = avg_mad;
+            best_frame = frame_idx;
+        }
+    }
+
+    best_frame
+}
+
 /// Compute per-frame normalization parameters based on the normalization mode.
 ///
-/// Uses frame 0 as the reference. Returns `None` for `Normalization::None`.
+/// Auto-selects the lowest-noise frame as reference. Returns `None` for
+/// `Normalization::None`.
 ///
 /// - **Global**: `gain = ref_mad / frame_mad`, `offset = ref_median - frame_median * gain`
 /// - **Multiplicative**: `gain = ref_median / frame_median`, `offset = 0`
@@ -162,14 +188,24 @@ fn compute_norm_params(
     let stats = cache.compute_channel_stats();
     let channels = cache.dimensions().channels;
     let frame_count = cache.frame_count();
+    let ref_frame = select_reference_frame(&stats, frame_count, channels);
     let mut params = vec![NormParams::IDENTITY; frame_count * channels];
 
     for channel in 0..channels {
-        let (ref_median, ref_mad) = stats[channel]; // frame 0
+        let ChannelStats {
+            median: ref_median,
+            mad: ref_mad,
+        } = stats[ref_frame * channels + channel];
 
-        // Frame 0 is the reference — already initialized to IDENTITY
-        for frame_idx in 1..frame_count {
-            let (frame_median, frame_mad) = stats[frame_idx * channels + channel];
+        for frame_idx in 0..frame_count {
+            if frame_idx == ref_frame {
+                continue; // Reference frame keeps IDENTITY
+            }
+
+            let ChannelStats {
+                median: frame_median,
+                mad: frame_mad,
+            } = stats[frame_idx * channels + channel];
 
             let np = match normalization {
                 Normalization::Global => {
@@ -201,8 +237,9 @@ fn compute_norm_params(
     tracing::info!(
         frame_count,
         channels,
+        ref_frame,
         ?normalization,
-        "Computed normalization (reference frame 0)"
+        "Computed normalization"
     );
 
     Some(params)
@@ -518,5 +555,135 @@ mod tests {
             "Unnormalized should be ~150, got {}",
             unnorm_pixel
         );
+    }
+
+    // ========== Auto Reference Frame Selection ==========
+
+    #[test]
+    fn test_select_reference_frame_picks_lowest_noise() {
+        // 3 frames, 1 channel: MADs are 2.0, 0.5, 1.0
+        // Frame 1 (MAD=0.5) should be selected.
+        use super::ChannelStats;
+        let s = |median, mad| ChannelStats { median, mad };
+        let stats = vec![
+            s(100.0, 2.0), // frame 0: high noise
+            s(100.0, 0.5), // frame 1: lowest noise
+            s(100.0, 1.0), // frame 2: medium noise
+        ];
+        assert_eq!(select_reference_frame(&stats, 3, 1), 1);
+    }
+
+    #[test]
+    fn test_select_reference_frame_rgb_averages_channels() {
+        // 2 frames, 3 channels. Frame 0 has lower MAD in R/G but higher in B.
+        // Frame 0: MADs = [1.0, 1.0, 5.0] → avg = 2.333
+        // Frame 1: MADs = [2.0, 2.0, 2.0] → avg = 2.000
+        // Frame 1 should be selected (lower average).
+        use super::ChannelStats;
+        let s = |median, mad| ChannelStats { median, mad };
+        let stats = vec![
+            s(100.0, 1.0), // frame 0, R
+            s(100.0, 1.0), // frame 0, G
+            s(100.0, 5.0), // frame 0, B
+            s(100.0, 2.0), // frame 1, R
+            s(100.0, 2.0), // frame 1, G
+            s(100.0, 2.0), // frame 1, B
+        ];
+        assert_eq!(select_reference_frame(&stats, 2, 3), 1);
+    }
+
+    #[test]
+    fn test_select_reference_frame_single_frame() {
+        use super::ChannelStats;
+        let stats = vec![ChannelStats {
+            median: 50.0,
+            mad: 3.0,
+        }];
+        assert_eq!(select_reference_frame(&stats, 1, 1), 0);
+    }
+
+    #[test]
+    fn test_select_reference_frame_equal_noise() {
+        // All frames have same MAD → picks first (frame 0).
+        use super::ChannelStats;
+        let s = |median, mad| ChannelStats { median, mad };
+        let stats = vec![s(100.0, 1.5), s(200.0, 1.5), s(300.0, 1.5)];
+        assert_eq!(select_reference_frame(&stats, 3, 1), 0);
+    }
+
+    #[test]
+    fn test_norm_uses_lowest_noise_reference() {
+        // Frame 0: median=100, high spread (noisy)
+        // Frame 1: median=200, low spread (clean) ← should be reference
+        // Frame 2: median=150, medium spread
+        //
+        // With Global normalization, the reference frame gets IDENTITY params.
+        // Other frames are normalized to match the reference.
+        let dims = ImageDimensions::new(10, 10, 1);
+        // Frame 0: values spread from 80..120 (median=100, MAD=10)
+        let f0: Vec<f32> = (0..100).map(|i| 80.0 + (i as f32) * 40.0 / 99.0).collect();
+        // Frame 1: values spread from 198..202 (median=200, MAD=1)
+        let f1: Vec<f32> = (0..100).map(|i| 198.0 + (i as f32) * 4.0 / 99.0).collect();
+        // Frame 2: values spread from 140..160 (median=150, MAD=5)
+        let f2: Vec<f32> = (0..100).map(|i| 140.0 + (i as f32) * 20.0 / 99.0).collect();
+
+        let cache = make_test_cache(vec![
+            AstroImage::from_pixels(dims, f0),
+            AstroImage::from_pixels(dims, f1),
+            AstroImage::from_pixels(dims, f2),
+        ]);
+
+        let params = compute_norm_params(&cache, Normalization::Global).unwrap();
+
+        // Frame 1 (lowest noise) should have identity params
+        assert!(
+            (params[1].gain - 1.0).abs() < 1e-5,
+            "Reference frame (1) should have gain=1.0, got {}",
+            params[1].gain
+        );
+        assert!(
+            params[1].offset.abs() < 1e-5,
+            "Reference frame (1) should have offset=0.0, got {}",
+            params[1].offset
+        );
+
+        // Frame 0 should NOT have identity (it's not the reference)
+        assert!(
+            (params[0].gain - 1.0).abs() > 0.01 || params[0].offset.abs() > 0.1,
+            "Frame 0 should not have identity params: gain={}, offset={}",
+            params[0].gain,
+            params[0].offset
+        );
+
+        // Frame 2 should NOT have identity either
+        assert!(
+            (params[2].gain - 1.0).abs() > 0.01 || params[2].offset.abs() > 0.1,
+            "Frame 2 should not have identity params: gain={}, offset={}",
+            params[2].gain,
+            params[2].offset
+        );
+    }
+
+    #[test]
+    fn test_norm_result_matches_lowest_noise_frame() {
+        // After global normalization + mean stacking, the result should be
+        // at the reference frame's level (the lowest-noise frame).
+        let dims = ImageDimensions::new(16, 1, 1);
+        // Frame 0: high noise, median ~100
+        let f0: Vec<f32> = (0..16).map(|i| 80.0 + (i as f32) * 40.0 / 15.0).collect();
+        // Frame 1: low noise, median ~200 ← reference
+        let f1: Vec<f32> = (0..16).map(|i| 199.0 + (i as f32) * 2.0 / 15.0).collect();
+
+        let cache = make_test_cache(vec![
+            AstroImage::from_pixels(dims, f0),
+            AstroImage::from_pixels(dims, f1),
+        ]);
+        let norm_params = compute_norm_params(&cache, Normalization::Global).unwrap();
+
+        // Frame 1 is reference (lower noise), so stacked result should be ~200
+        let result = cache.process_chunked(None, Some(&norm_params), |values, _, _| {
+            math::mean_f32(values)
+        });
+        assert_channel_near(&result, 0, 200.0, 2.0);
     }
 }

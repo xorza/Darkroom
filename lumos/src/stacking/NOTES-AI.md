@@ -71,14 +71,12 @@ Rewritten to match PixInsight/Siril two-phase algorithm:
 - Our implementation uses a single normalization for both.
 - **Fix**: Add `StackConfig::rejection_normalization` field.
 
-### P2: Reference Frame Always Frame 0
+### ~~P2: Reference Frame Always Frame 0~~ — FIXED
 
-- **File**: stack.rs, `compute_norm_params`
-- Always uses frame 0 (first loaded) as reference.
-- A poor reference (high noise, gradient, cloud cover) degrades normalization and
-  rejection quality for the entire stack.
-- PixInsight auto-selects by SNRWeight; Siril auto-selects by noise level.
-- **Fix**: After loading, compute per-frame `sigma_bg`, select lowest-noise frame.
+- `select_reference_frame()` picks frame with lowest average MAD across channels
+- `compute_norm_params()` normalizes all other frames to the selected reference
+- Reference frame gets `NormParams::IDENTITY` (gain=1.0, offset=0.0)
+- Ties broken by first frame (stable, deterministic)
 
 ### P2: Missing Rejection Maps Output
 
@@ -163,7 +161,7 @@ Rewritten to match PixInsight/Siril two-phase algorithm:
 | Normalization | 3 modes (None/Global/Mult) | 5 modes + Local normalization |
 | Rejection normalization | Same as combination | Separate from combination normalization |
 | Weighting | Manual per-frame weights | Noise eval (MRS), PSF signal, PSF SNR |
-| Reference frame | Always frame 0 | Auto-select by quality metric |
+| Reference frame | Auto-select by lowest noise (MAD) | Auto-select by quality metric |
 | Combine methods | Mean, Median | Mean, Median, Min, Max |
 | Rejection maps | Not generated | Low/High rejection maps + slope map |
 | Large-scale rejection | Not implemented | Layers + growth for satellite trails |
@@ -243,7 +241,7 @@ Rewritten to match PixInsight/Siril two-phase algorithm:
   Matches Siril's "additive with scaling". Best for light frames.
 - **Multiplicative**: `gain = ref_median / frame_median`, `offset = 0`
   Best for flat frames where exposure varies.
-- Reference frame: always frame 0 (first loaded) -- should auto-select by quality
+- Reference frame: auto-selected by lowest average MAD across channels
 - Statistics: per-channel median and MAD via `compute_channel_stats()`
 - Missing: separate rejection vs combination normalization (PixInsight feature)
 - Missing: IKSS estimator (sigma-clip then recompute with BWMV -- Siril default)
@@ -257,7 +255,7 @@ Rewritten to match PixInsight/Siril two-phase algorithm:
    1.134 correction, convergence, stddev, asymmetric sigma_low/sigma_high.
 3. **Add rejection maps** (P2) -- per-pixel high/low rejection counts for diagnostics.
    Most requested feature for parameter tuning.
-4. **Add auto reference frame selection** (P2) -- select lowest-noise frame. Easy win.
+4. ~~**Add auto reference frame selection**~~ (P2) -- **FIXED**: `select_reference_frame()` picks lowest MAD.
 5. **Add noise-based auto weighting** (P2) -- `w = 1/sigma_bg^2`. Highest-impact
    automatic weighting scheme. Requires reliable background noise estimator.
 6. ~~**Fix cache hash determinism**~~ (P3) -- **FIXED**: FNV-1a hasher.
