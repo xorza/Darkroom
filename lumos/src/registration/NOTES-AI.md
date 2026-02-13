@@ -36,17 +36,7 @@ See submodule NOTES-AI.md files for detailed per-module analysis:
 - **Incremental stepping** optimization is mathematically correct for affine transforms
 - **Adaptive iteration count** formula matches standard (Fischler & Bolles 1981)
 - **Hartley normalization** for DLT homography is standard and correct
-
-### Bugs Found
-
-1. **Triangle vertex correspondence is broken** (moderate severity)
-   `triangle/geometry.rs:48-96`, `triangle/voting.rs:143-149`
-   Vertices stored in numeric index order, not geometric-role order. Voting pairs
-   `ref_tri.indices[i]` with `target_tri.indices[i]` by position, but positions
-   have no geometric meaning. ~2/3 of votes per triangle match are cast for wrong
-   correspondences. Mitigated by voting mechanism (correct votes accumulate, wrong
-   ones scatter), but requires ~3x more triangles than necessary.
-   **Fix:** Reorder `indices` by geometric role in `from_positions()`.
+- **Triangle vertex ordering** by geometric role (opposite shortest/middle/longest side)
 
 ### Dead Code / Unused Config
 
@@ -83,7 +73,7 @@ See submodule NOTES-AI.md files for detailed per-module analysis:
 | Aspect | This Crate | PixInsight | Siril | Astrometry.net | Astroalign |
 |--------|-----------|------------|-------|----------------|------------|
 | Star matching | Triangles (2D) | Polygons (6D) | Triangles | Quads (4D) | Triangles (2D) |
-| Vertex ordering | Bug (numeric) | Correct | Correct | N/A (hash) | Correct (geometric) |
+| Vertex ordering | Correct (geometric role) | Correct | Correct | N/A (hash) | Correct (geometric) |
 | RANSAC scoring | MAGSAC++ | Standard | OpenCV | Bayesian odds | RANSAC |
 | IRWLS polish | No | N/A | N/A | N/A | No |
 | Distortion | SIP (forward) | TPS (iterative) | SIP (from WCS) | SIP (full A/B/AP/BP) | None |
@@ -95,21 +85,18 @@ See submodule NOTES-AI.md files for detailed per-module analysis:
 
 ### Prioritized Improvements
 
-**Quick Wins (bug fixes, high impact, low effort):**
-1. Fix vertex correspondence ordering in triangle geometry (~5 lines)
-
 **Medium Effort (correctness/quality):**
-2. Pass image center as SIP reference_point when available
-3. Implement Lanczos deringing (clamp_output config exists)
-4. Wire up or remove dead Config fields (border_value, etc.)
-5. Add preemptive scoring to MAGSAC++ (break early when loss > best)
-6. Iterative match recovery (2-3 passes of recover + refit)
+1. Pass image center as SIP reference_point when available
+2. Implement Lanczos deringing (clamp_output config exists)
+3. Wire up or remove dead Config fields (border_value, etc.)
+4. Add preemptive scoring to MAGSAC++ (break early when loss > best)
+5. Iterative match recovery (2-3 passes of recover + refit)
 
 **Larger Effort (performance/features):**
-7. Separable SIMD Lanczos3 (two-pass horizontal+vertical with AVX2)
-8. Integrate TPS as alternative distortion model
-9. IRWLS final polish with MAGSAC++ weights
-10. Upgrade to quad descriptors (4D hash, matches Astrometry.net)
+6. Separable SIMD Lanczos3 (two-pass horizontal+vertical with AVX2)
+7. Integrate TPS as alternative distortion model
+8. IRWLS final polish with MAGSAC++ weights
+9. Upgrade to quad descriptors (4D hash, matches Astrometry.net)
 
 ## File Map
 

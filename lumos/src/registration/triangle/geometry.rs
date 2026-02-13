@@ -44,9 +44,14 @@ impl Triangle {
             return None;
         }
 
-        // Sort sides and track which vertices are at each position
+        // Sort sides and track which vertices are at each position.
+        // Tiebreak equal sides by original vertex index for deterministic ordering.
         let mut side_vertex_pairs = [(d01, 2), (d12, 0), (d20, 1)];
-        side_vertex_pairs.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+        side_vertex_pairs.sort_by(|a, b| {
+            a.0.partial_cmp(&b.0)
+                .unwrap()
+                .then(indices[a.1].cmp(&indices[b.1]))
+        });
 
         let sides = [
             side_vertex_pairs[0].0,
@@ -77,10 +82,23 @@ impl Triangle {
             return None; // Too flat / nearly collinear
         }
 
-        // Compute orientation using cross product
-        let v01 = p1 - p0;
-        let v02 = p2 - p0;
-        let cross = v01.x * v02.y - v01.y * v02.x;
+        // Reorder indices by geometric role:
+        // indices[0] = vertex opposite shortest side
+        // indices[1] = vertex opposite middle side
+        // indices[2] = vertex opposite longest side
+        let reordered = [
+            indices[side_vertex_pairs[0].1],
+            indices[side_vertex_pairs[1].1],
+            indices[side_vertex_pairs[2].1],
+        ];
+
+        // Compute orientation from reordered vertex positions
+        let rp0 = positions[side_vertex_pairs[0].1];
+        let rp1 = positions[side_vertex_pairs[1].1];
+        let rp2 = positions[side_vertex_pairs[2].1];
+        let rv01 = rp1 - rp0;
+        let rv02 = rp2 - rp0;
+        let cross = rv01.x * rv02.y - rv01.y * rv02.x;
         if cross.abs() < 1e-10 * longest * longest {
             return None; // Degenerate
         }
@@ -92,7 +110,7 @@ impl Triangle {
         };
 
         Some(Self {
-            indices,
+            indices: reordered,
             ratios,
             orientation,
         })

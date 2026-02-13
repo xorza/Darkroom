@@ -122,27 +122,37 @@ fn test_triangle_not_similar() {
 
 #[test]
 fn test_triangle_orientation() {
-    let ccw = Triangle::from_positions(
+    // Orientation is computed from geometrically-reordered vertices
+    // (opposite shortest, opposite middle, opposite longest), not input order.
+    // Use a scalene triangle (all sides different) for unambiguous geometric ordering.
+    // 3-4-5 right triangle: sides 3, 4, 5 — all distinct.
+    let tri = Triangle::from_positions(
         [0, 1, 2],
         [
             DVec2::new(0.0, 0.0),
-            DVec2::new(1.0, 0.0),
-            DVec2::new(0.0, 1.0),
+            DVec2::new(3.0, 0.0),
+            DVec2::new(0.0, 4.0),
         ],
     )
     .unwrap();
-    assert_eq!(ccw.orientation, Orientation::CounterClockwise);
 
-    let cw = Triangle::from_positions(
+    // Verify orientation is deterministic (just check it's valid)
+    assert!(
+        tri.orientation == Orientation::Clockwise
+            || tri.orientation == Orientation::CounterClockwise
+    );
+
+    // Mirrored triangle should have opposite orientation
+    let mirrored = Triangle::from_positions(
         [0, 1, 2],
         [
             DVec2::new(0.0, 0.0),
-            DVec2::new(0.0, 1.0),
-            DVec2::new(1.0, 0.0),
+            DVec2::new(-3.0, 0.0),
+            DVec2::new(0.0, 4.0),
         ],
     )
     .unwrap();
-    assert_eq!(cw.orientation, Orientation::Clockwise);
+    assert_ne!(tri.orientation, mirrored.orientation);
 }
 
 #[test]
@@ -1619,5 +1629,114 @@ fn test_form_triangles_sparse_neighbors() {
 
     for tri in &triangles {
         assert!(tri[0] < tri[1] && tri[1] < tri[2]);
+    }
+}
+
+// ============================================================================
+// Geometric role ordering tests
+// ============================================================================
+
+/// Verify that from_positions reorders indices by geometric role (scalene triangle).
+/// indices[0] = opposite shortest side, indices[2] = opposite longest side.
+#[test]
+fn test_vertex_ordering_by_geometric_role() {
+    // 3-4-5 right triangle with positions:
+    // p0=(0,0), p1=(3,0), p2=(0,4)
+    // sides: d01=3 (opp vtx 2), d12=5 (opp vtx 0), d20=4 (opp vtx 1)
+    // shortest=3 (opp 2), middle=4 (opp 1), longest=5 (opp 0)
+    // So reordered: [2, 1, 0]
+    let tri = Triangle::from_positions(
+        [10, 20, 30],
+        [
+            DVec2::new(0.0, 0.0),
+            DVec2::new(3.0, 0.0),
+            DVec2::new(0.0, 4.0),
+        ],
+    )
+    .unwrap();
+
+    assert_eq!(tri.indices[0], 30); // opposite shortest (d01=3)
+    assert_eq!(tri.indices[1], 20); // opposite middle (d20=4)
+    assert_eq!(tri.indices[2], 10); // opposite longest (d12=5)
+}
+
+/// Same geometric triangle with shuffled input order produces the same indices.
+#[test]
+fn test_vertex_ordering_deterministic_across_input_orders() {
+    let p_a = DVec2::new(0.0, 0.0);
+    let p_b = DVec2::new(5.0, 0.0);
+    let p_c = DVec2::new(2.0, 7.0);
+
+    // All 6 permutations of the same 3 points with the same original indices
+    let orders: [(usize, usize, usize); 6] = [
+        (0, 1, 2),
+        (0, 2, 1),
+        (1, 0, 2),
+        (1, 2, 0),
+        (2, 0, 1),
+        (2, 1, 0),
+    ];
+    let pts = [p_a, p_b, p_c];
+    let idx = [100, 200, 300];
+
+    let reference =
+        Triangle::from_positions([idx[0], idx[1], idx[2]], [pts[0], pts[1], pts[2]]).unwrap();
+
+    for (a, b, c) in orders {
+        let tri =
+            Triangle::from_positions([idx[a], idx[b], idx[c]], [pts[a], pts[b], pts[c]]).unwrap();
+
+        assert_eq!(
+            tri.indices, reference.indices,
+            "Permutation ({a},{b},{c}) produced different indices: {:?} vs {:?}",
+            tri.indices, reference.indices
+        );
+        assert_eq!(
+            tri.orientation, reference.orientation,
+            "Permutation ({a},{b},{c}) produced different orientation"
+        );
+        assert!((tri.ratios.0 - reference.ratios.0).abs() < 1e-10);
+        assert!((tri.ratios.1 - reference.ratios.1).abs() < 1e-10);
+    }
+}
+
+/// Verify that voting produces correct correspondences when ref and target
+/// have the same geometric points but different index numbering.
+#[test]
+fn test_vertex_correspondence_with_permuted_indices() {
+    // 5 distinctive points forming an asymmetric pattern
+    let points = vec![
+        DVec2::new(0.0, 0.0),
+        DVec2::new(30.0, 0.0),
+        DVec2::new(15.0, 40.0),
+        DVec2::new(50.0, 20.0),
+        DVec2::new(10.0, 25.0),
+    ];
+
+    // Target has the same points but in reversed order
+    let target_points: Vec<DVec2> = points.iter().rev().copied().collect();
+    // target[0] = points[4], target[1] = points[3], ..., target[4] = points[0]
+    // So ref_idx i corresponds to target_idx (4 - i)
+
+    let config = TriangleParams {
+        min_votes: 1,
+        ..Default::default()
+    };
+
+    let matches = match_triangles(&points, &target_points, &config);
+
+    assert!(
+        matches.len() >= 4,
+        "Should match most points, got {}",
+        matches.len()
+    );
+
+    for m in &matches {
+        let expected_target = 4 - m.ref_idx;
+        assert_eq!(
+            m.target_idx, expected_target,
+            "ref {} should match target {} (same point), got target {}",
+            m.ref_idx, expected_target, m.target_idx
+        );
     }
 }

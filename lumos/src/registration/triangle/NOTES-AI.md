@@ -35,7 +35,7 @@ vote accumulation scheme.
 | **Triangles per star** | C(k,2) = 10..190 | C(5,3) = 10 | N/A | N/A |
 | **Invariant lookup** | k-d tree radius search | k-d tree ball query (r=0.1) | Geometric hash table | Hash table |
 | **Matching tolerance** | 0.01 (L-inf) | 0.1 (L2) | Bayesian odds | Hash bin tolerance |
-| **Vertex correspondence** | Index-order (bug) | Geometric-role order | Built into hash | Built into hash |
+| **Vertex correspondence** | Geometric-role order | Geometric-role order | Built into hash | Built into hash |
 | **Orientation check** | Optional (default on) | Not explicit | N/A (4D hash) | Cannot handle mirrors |
 | **Outlier rejection** | Vote threshold + greedy | RANSAC on transform | Bayesian verification | RANSAC |
 | **Degenerate filter** | R>10 rejection + area | None documented | Quad geometry constraints | Polygon constraints |
@@ -43,62 +43,7 @@ vote accumulation scheme.
 
 ## Issues Found
 
-### Issue 1: Vertex Correspondence is Broken (Correctness Bug)
-
-**Severity:** Moderate (mitigated by voting but reduces vote efficiency)
-
-**Location:** `geometry.rs:48-49,94-96` and `voting.rs:143-149`
-
-In `geometry.rs`, `side_vertex_pairs` sorts sides by length and tracks which vertex is
-opposite each side. The vertex opposite the shortest side is `side_vertex_pairs[0].1`,
-opposite the middle side is `side_vertex_pairs[1].1`, and opposite the longest side is
-`side_vertex_pairs[2].1`. But this reordering information is **discarded** on line 95:
-`indices` is stored as the raw input from `matching.rs:125-126`, which is sorted by
-**numeric index** (`tri.sort()`), not by geometric role.
-
-In `voting.rs:145-148`, the code assumes `indices[i]` from ref and target correspond
-by position:
-```rust
-for i in 0..3 {
-    let ref_pt = ref_tri.indices[i];
-    let target_pt = target_tri.indices[i];
-    vote_matrix.increment(ref_pt, target_pt);
-}
-```
-
-This means vertex 0 of ref is paired with vertex 0 of target, but vertex 0 in both
-cases is just the numerically smallest star index -- which has no geometric meaning.
-Two similar triangles formed from different star sets will generally have different
-geometric roles at each index position.
-
-**How Groth 1986 handles this:** Vertices are indexed such that the shortest side is
-between vertices 1-2, intermediate between 2-3, and longest between 3-1. Vertex
-correspondence follows from this geometric ordering.
-
-**How Astroalign handles this:** The `_arrangetriplet()` function reorders vertex indices
-by geometric role before storing them. Vertex `a` is at the intersection of L1 and L2
-(shortest and middle sides), vertex `b` at L2 and L3 (middle and longest), vertex `c`
-at L3 and L1 (longest and shortest). When two matched triangles zip their vertex lists,
-geometric correspondence is correct.
-
-**Fix:** In `from_positions()`, reorder `indices` using `side_vertex_pairs`:
-```rust
-let reordered_indices = [
-    indices[side_vertex_pairs[0].1],  // vertex opposite shortest side
-    indices[side_vertex_pairs[1].1],  // vertex opposite middle side
-    indices[side_vertex_pairs[2].1],  // vertex opposite longest side
-];
-```
-Store `reordered_indices` instead of `indices`. This makes the voting loop correct
-without any changes to `voting.rs`.
-
-**Impact of bug:** Each matching triangle pair casts 3 votes. With the bug, only
-~1 out of 3 vertex votes is geometrically correct on average (the other 2 are random).
-The voting mechanism still works because correct correspondences accumulate many
-votes across many triangles while incorrect ones scatter, but convergence requires
-~3x more triangles than necessary, and vote counts are diluted.
-
-### Issue 2: Invariant Ratio Convention Differs from Literature
+### Issue 1: Invariant Ratio Convention Differs from Literature
 
 **Severity:** Low (functionally equivalent but confusing)
 
@@ -119,7 +64,7 @@ of 0.01 should be calibrated to the specific convention being used. With ratios 
 [0,1], 0.01 is quite tight (1% of full range). Astroalign uses 0.1 on ratios >= 1,
 which is approximately 5% relative tolerance.
 
-### Issue 3: k-d Tree Radius Uses L2, Similarity Check Uses L-infinity
+### Issue 2: k-d Tree Radius Uses L2, Similarity Check Uses L-infinity
 
 **Severity:** Low (conservative, no false negatives)
 
@@ -133,7 +78,7 @@ so L-inf is the stricter metric. The k-d tree (L2) returns a superset of what
 performs the exact check. No false negatives are possible. The code comment at
 `voting.rs:131-133` correctly states that L-infinity is stricter.
 
-### Issue 4: Adaptive k_neighbors May Be Too Aggressive
+### Issue 3: Adaptive k_neighbors May Be Too Aggressive
 
 **Severity:** Low
 
@@ -158,7 +103,7 @@ n=150, that is 150 * 190 = 28,500 triangles (before deduplication via HashSet).
 This is manageable but much larger than Astroalign's ~1500 triangles for the same
 star count.
 
-### Issue 5: HashSet Deduplication is Wasteful for Large k
+### Issue 4: HashSet Deduplication is Wasteful for Large k
 
 **Severity:** Low (performance, not correctness)
 
@@ -174,14 +119,7 @@ targeted triangle generation strategy that avoids duplicates by construction.
 
 ## Missing Features
 
-### 1. Geometric-Role Vertex Ordering (Critical)
-
-As described in Issue 1, the vertices should be reordered by their geometric role
-(opposite shortest, middle, longest side) before storing in the Triangle struct.
-This is how Groth 1986 and Astroalign both work. Without it, the voting mechanism
-is ~3x less efficient than it should be.
-
-### 2. Quad/Polygon Descriptors
+### 1. Quad/Polygon Descriptors
 
 Triangle descriptors have only 2 degrees of freedom (2D invariant space), making
 them prone to false matches in dense star fields. Industry has moved to:
@@ -200,7 +138,7 @@ Triangle matching works for small-to-medium fields (<200 stars) but struggles wi
 dense star fields (many similar triangle shapes), wide-field distortion (triangle
 shapes change across field), and high contamination rates (>50% spurious detections).
 
-### 3. Proper Bayesian Verification
+### 2. Proper Bayesian Verification
 
 Astrometry.net uses a Bayesian decision process to verify matches: given a quad
 match, predict where other stars should appear, and compute the odds ratio. This
@@ -208,14 +146,14 @@ provides rigorous false-positive control (default threshold: 10^9 odds). The cur
 implementation relies only on vote counts and a minimum vote threshold, which is
 less principled.
 
-### 4. Global Triangle Selection Strategy
+### 3. Global Triangle Selection Strategy
 
 The current implementation uses only local KNN triangles. Astrometry.net pre-selects
 specific star configurations that maximize discriminating power across the entire
 field. Adding a few globally-formed triangles (e.g., from the 4-5 brightest stars)
 could improve matching robustness for small star counts.
 
-### 5. Weighted Voting
+### 4. Weighted Voting
 
 All triangle votes have equal weight. Triangles with very common shapes (e.g.,
 near-equilateral) produce more false votes than distinctive triangles. Weighting
@@ -224,12 +162,7 @@ would improve signal-to-noise in the vote matrix.
 
 ## Potential Improvements
 
-### Priority 1: Fix Vertex Correspondence (Bug Fix)
-Reorder `Triangle.indices` by geometric role in `from_positions()`. Expected
-improvement: ~3x better vote concentration for correct matches, allowing lower
-`min_votes` threshold or fewer triangles.
-
-### Priority 2: Upgrade to Quad Descriptors
+### Priority 1: Upgrade to Quad Descriptors
 Replace 2D triangle invariants with 4D quad hash codes. This would:
 - Halve false match rate compared to triangles
 - Enable matching in denser star fields
@@ -245,12 +178,12 @@ Implementation sketch:
 5. Index quads in 4D k-d tree
 6. Match with radius search as now
 
-### Priority 3: Consider Fixed k Like Astroalign
+### Priority 2: Consider Fixed k Like Astroalign
 The adaptive k formula produces 19x more triangles than Astroalign for 150 stars.
 Consider benchmarking with k=5 (matching Astroalign) to see if quality holds with
 dramatically fewer triangles and faster runtime.
 
-### Priority 4: Pre-filter by Star Brightness
+### Priority 3: Pre-filter by Star Brightness
 Both Astrometry.net and PixInsight weight their star selection by brightness.
 Forming triangles only from the brightest N stars (already done upstream in the
 pipeline per NOTES-AI.md) is correct, but the triangle formation could additionally
@@ -265,11 +198,11 @@ prioritize triangles that include bright stars.
 - Elongation filter (R>10) matches Groth 1986 recommendation
 - Area-based degeneracy check (Heron's formula) is more robust than cross-product alone
 - Orientation check is optional, correctly disabled for rotated/mirrored images
-- Comprehensive test suite (40+ tests, including noise, outliers, stress tests)
+- Vertex ordering by geometric role (opposite shortest/middle/longest side)
+- Comprehensive test suite (65+ tests, including noise, outliers, stress tests)
 - Greedy conflict resolution is standard and adequate
 
 **Weaknesses:**
-- Vertex correspondence bug (Issue 1) reduces voting efficiency ~3x
 - Only 2D invariant space (triangles); industry uses 4-8D (quads/polygons)
 - No verification beyond vote counting (no Bayesian or geometric consistency check)
 - Adaptive k produces excessive triangles for moderate star counts
