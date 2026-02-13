@@ -102,13 +102,6 @@ Avoids O(n log n) sort on full-resolution images.
 
 ## Remaining Issues
 
-### Low: X-Trans Neighbor Search Biased Toward Top-Left
-- **File:** defect_map.rs:262-285
-- Iterates dy then dx from negative to positive, breaks at 24 neighbors
-- Systematic bias: top-left neighbors always included, bottom-right may be excluded
-- **Fix:** Collect all same-color neighbors within radius, sort by Manhattan distance,
-  take closest 24
-
 ### Low: DefectMap::correct is Sequential
 - **File:** defect_map.rs
 - Iterates hot and cold indices sequentially

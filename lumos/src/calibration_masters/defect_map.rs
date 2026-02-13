@@ -327,14 +327,17 @@ fn bayer_same_color_median(pixels: &Buffer2<f32>, x: usize, y: usize) -> f32 {
 
 /// X-Trans same-color neighbor median.
 /// Searches within radius of 6 (one full period) for same-color pixels.
+/// Collects all same-color neighbors, sorts by Manhattan distance, and takes
+/// the closest 24 to avoid directional bias.
 fn xtrans_same_color_median(pixels: &Buffer2<f32>, x: usize, y: usize, pattern: &CfaType) -> f32 {
     let width = pixels.width();
     let height = pixels.height();
     let my_color = pattern.color_at(x, y);
-    let mut neighbors = [0.0f32; 24];
-    let mut count = 0;
 
     let radius = 6i32;
+
+    // Collect all same-color neighbors with their Manhattan distance
+    let mut candidates: ArrayVec<(i32, f32), 169> = ArrayVec::new(); // 13×13 = 169 max
 
     for dy in -radius..=radius {
         for dx in -radius..=radius {
@@ -349,22 +352,24 @@ fn xtrans_same_color_median(pixels: &Buffer2<f32>, x: usize, y: usize, pattern: 
             let nx = nx as usize;
             let ny = ny as usize;
             if pattern.color_at(nx, ny) == my_color {
-                neighbors[count] = *pixels.get(nx, ny);
-                count += 1;
-                if count >= 24 {
-                    break;
-                }
+                let dist = dx.abs() + dy.abs();
+                candidates.push((dist, *pixels.get(nx, ny)));
             }
-        }
-        if count >= 24 {
-            break;
         }
     }
 
-    if count == 0 {
+    if candidates.is_empty() {
         return pixels[y * width + x];
     }
-    crate::math::median_f32_mut(&mut neighbors[..count])
+
+    // Sort by Manhattan distance, take closest 24
+    candidates.sort_unstable_by_key(|&(dist, _)| dist);
+    let n = candidates.len().min(24);
+    let mut neighbors = [0.0f32; 24];
+    for (i, &(_, val)) in candidates[..n].iter().enumerate() {
+        neighbors[i] = val;
+    }
+    crate::math::median_f32_mut(&mut neighbors[..n])
 }
 
 #[cfg(test)]
