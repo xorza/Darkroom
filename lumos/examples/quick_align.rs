@@ -80,7 +80,7 @@ fn main() {
     // Warp target to align with reference
     println!("\nWarping target image...");
     let warp_config = RegistrationConfig {
-        interpolation: InterpolationMethod::Lanczos3,
+        interpolation: InterpolationMethod::Lanczos3 { deringing: true },
         ..Default::default()
     };
     let mut aligned = target_image.clone();

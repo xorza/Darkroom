@@ -47,10 +47,11 @@ optimized `warp_row_lanczos3`. The x and y weight sums are computed independentl
 the threshold `1e-10` protects against division by zero for edge cases (e.g., pixel fully
 outside the image).
 
-**Consistency issue:** The `Config` struct defines `normalize_kernel: bool` (config.rs
-line 109) and `clamp_output: bool` (line 111), but these are never passed to `warp_image`
-or used anywhere in the interpolation code. Normalization is always applied. The `Config`
-fields are dead code for interpolation.
+**Config wiring:** `border_value` is wired through via `WarpParams` struct (method +
+border_value). `normalize_kernel` was removed (normalization is always applied). Deringing
+is a field on the Lanczos variants of `InterpolationMethod` (e.g.
+`Lanczos3 { deringing: true }`), using min/max clamping of source pixels in the kernel
+window.
 
 ### Bicubic Catmull-Rom (`mod.rs` lines 85-97)
 
@@ -75,17 +76,16 @@ zero-padding borders.
 Uses `x.round()`, which rounds half-values up (0.5 -> 1). This is standard. The
 `sample_pixel` call handles out-of-bounds correctly, returning 0.0.
 
-### `sample_pixel` Border Handling (`mod.rs` lines 99-107)
+### `sample_pixel` Border Handling (`mod.rs`)
 
-Returns 0.0 for out-of-bounds coordinates (zero-padding). This means:
-- Bilinear/bicubic/Lanczos near image edges will produce darkened values.
-- This is typical for astronomical stacking (border pixels are later masked/cropped).
-- `Config.border_value` exists but is never wired up -- always hardcoded to 0.0.
+Returns `border_value` for out-of-bounds coordinates (default 0.0 = zero-padding). This
+means bilinear/bicubic/Lanczos near image edges will use the configured border value.
+`Config.border_value` is wired through via `WarpParams`.
 
 **Industry comparison:** OpenCV offers `BORDER_REPLICATE` (clamp-to-edge),
 `BORDER_REFLECT`, `BORDER_CONSTANT` (configurable value), etc. PixInsight uses clamped
-borders. The current zero-padding is acceptable for astrophotography where borders are
-cropped, but the unused `border_value` config suggests clamp-to-edge was intended.
+borders. The current constant-value padding is acceptable for astrophotography where
+borders are cropped.
 
 ## Warp Implementation Analysis
 
@@ -239,25 +239,7 @@ similar precision.
 
 ## Issues Found
 
-### 1. Dead Config Fields (Medium)
-`Config.border_value`, `Config.normalize_kernel`, and `Config.clamp_output` are defined
-(`config.rs` lines 108-112) but never used by the interpolation code. The `Config` struct
-is not passed to `warp_image()` at all. Either wire these up or remove them.
-
-### 2. No Ringing Clamping (Medium - Astrophotography Impact)
-Lanczos interpolation produces ringing artifacts (dark halos) around bright stars due to
-negative kernel lobes. PixInsight addresses this with a clamping threshold (default 0.3)
-that limits negative overshoot. Siril also requires clamping for Lanczos/bicubic.
-
-The `Config.clamp_output` field exists but is not implemented. For linear (non-stretched)
-astronomical data, dark ringing pixels around stars can contaminate photometry and create
-visual artifacts in stacked images.
-
-**PixInsight approach:** After interpolation, if the result is below the minimum of the
-contributing pixels, clamp it to that minimum (with a configurable aggressiveness
-threshold). This eliminates negative ringing while preserving legitimate detail.
-
-### 3. No Anti-Aliasing Prefilter for Downscaling (Low - Context-Dependent)
+### 1. No Anti-Aliasing Prefilter for Downscaling (Low - Context-Dependent)
 When the transform involves scaling down (scale factor < 1), the Nyquist frequency of the
 output is lower than the input. Without prefiltering, high-frequency content aliases into
 the output. The current code does no prefiltering.
@@ -277,7 +259,7 @@ mosaic edge matching with different plate scales), aliasing could appear.
   prefilter (known issue #21060 on GitHub)
 - Intel IPP: uses separable approach that inherently handles this for fixed ratios
 
-### 4. Bicubic Not Normalized at Boundaries (Low)
+### 2. Bicubic Not Normalized at Boundaries (Low)
 At image boundaries, `sample_pixel` returns 0.0 for out-of-bounds coordinates. For
 bicubic interpolation, this means the effective kernel weights don't sum to 1.0 near
 edges, producing darkened pixels. The same applies to bilinear. This matches zero-padding
@@ -291,20 +273,12 @@ No SIMD implementation exists for Lanczos3, despite it being the default interpo
 method. A separable two-pass approach with AVX2 vectorization could yield 2-3x speedup
 based on Intel IPP numbers.
 
-### 2. Configurable Border Handling
-Currently hardcoded to zero-padding. Config has `border_value` but it's unused.
-Clamp-to-edge would produce better results at borders.
-
-### 3. Output Clamping / Deringing
-Config has `clamp_output` but it's unused. PixInsight-style clamping would reduce ringing
-artifacts around bright stars in linear data.
-
-### 4. FMA in SIMD Bilinear
+### 2. FMA in SIMD Bilinear
 The AVX2 bilinear uses `_mm256_mul_ps` + `_mm256_add_ps` separately. Using FMA
 (`_mm256_fmadd_ps`) would improve accuracy and potentially throughput (1 instruction
 instead of 2). Requires `#[target_feature(enable = "avx2,fma")]`.
 
-### 5. SIMD Interior Fast Path for Bilinear
+### 3. SIMD Interior Fast Path for Bilinear
 The AVX2 bilinear falls back to scalar `sample_pixel` for every pixel. An interior
 detection path (all 8 pixels map within bounds) could skip bounds checking entirely.
 
@@ -315,33 +289,25 @@ detection path (all 8 pixels map within bounds) could skip bounds checking entir
    the single biggest performance opportunity. Intel IPP gets 1.5x from SSE->AVX alone.
    Combined with separability, expect 2-4x total improvement for Lanczos3 warping.
 
-2. **Wire up Config options or remove them:** Either pass `Config` into `warp_image()`
-   and implement `border_value` / `clamp_output` / `normalize_kernel`, or remove the dead
-   fields to avoid confusion.
-
 ### Medium Priority
-3. **Lanczos deringing:** Implement PixInsight-style output clamping. After computing the
-   interpolated value, if it falls below the minimum of the source pixels in the kernel
-   window, clamp it to that minimum (modulated by a threshold parameter).
-
-4. **SIMD bilinear interior fast path:** When all 8 source pixels in a chunk are
+2. **SIMD bilinear interior fast path:** When all 8 source pixels in a chunk are
    guaranteed in-bounds, skip per-pixel bounds checking. This is a simple range check
    on the min/max source coordinates of the chunk.
 
-5. **FMA for SIMD bilinear:** Add `fma` to target features, replace
+3. **FMA for SIMD bilinear:** Add `fma` to target features, replace
    `mul+add` with `_mm256_fmadd_ps`. Modest throughput gain, better accuracy.
 
 ### Low Priority
-6. **Linear interpolation in LUT:** Replace nearest-index lookup with linear interpolation
+4. **Linear interpolation in LUT:** Replace nearest-index lookup with linear interpolation
    between adjacent entries. Allows reducing LUT size to 1024-2048 entries while
    maintaining precision. Minimal performance cost (one extra multiply-add per lookup).
 
-7. **Tile-based processing:** For extreme rotations (>45 degrees), tile-based warping
+5. **Tile-based processing:** For extreme rotations (>45 degrees), tile-based warping
    would improve cache behavior. Low priority because typical astro registration has
    small rotations.
 
-8. **Configurable border modes:** Add clamp-to-edge and replicate modes alongside
-   zero-padding.
+6. **Configurable border modes:** Add clamp-to-edge and replicate modes alongside
+   constant-value padding.
 
 ## References
 

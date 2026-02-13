@@ -14,6 +14,7 @@ use common::cpu_features;
 pub mod sse;
 
 use crate::common::Buffer2;
+use crate::registration::interpolation::WarpParams;
 use crate::registration::interpolation::get_lanczos_lut;
 use crate::registration::transform::WarpTransform;
 use glam::DVec2;
@@ -28,9 +29,11 @@ pub(crate) fn warp_row_bilinear(
     output_row: &mut [f32],
     output_y: usize,
     wt: &WarpTransform,
+    border_value: f32,
 ) {
+    // SIMD paths use hardcoded 0.0 border — only use them when border_value is 0.0
     #[cfg(target_arch = "x86_64")]
-    if !wt.has_sip() {
+    if !wt.has_sip() && border_value == 0.0 {
         let output_width = output_row.len();
         if output_width >= 8 && cpu_features::has_avx2() {
             unsafe {
@@ -47,7 +50,7 @@ pub(crate) fn warp_row_bilinear(
     }
 
     // Scalar fallback (also used on aarch64 and when SIP is active)
-    warp_row_bilinear_scalar(input, output_row, output_y, wt);
+    warp_row_bilinear_scalar(input, output_row, output_y, wt, border_value);
 }
 
 /// Scalar implementation of row warping with bilinear interpolation.
@@ -59,6 +62,7 @@ pub(crate) fn warp_row_bilinear_scalar(
     output_row: &mut [f32],
     output_y: usize,
     wt: &WarpTransform,
+    border_value: f32,
 ) {
     let m = wt.transform.matrix.as_array();
     let can_step = wt.is_linear();
@@ -76,7 +80,7 @@ pub(crate) fn warp_row_bilinear_scalar(
             src_y = src.y;
         }
 
-        *out_pixel = bilinear_sample(input, src_x as f32, src_y as f32);
+        *out_pixel = bilinear_sample(input, src_x as f32, src_y as f32, border_value);
 
         if can_step {
             src_x += dx_step;
@@ -89,7 +93,7 @@ use super::sample_pixel;
 
 /// Bilinear sampling at a single point (f32 coordinates).
 #[inline]
-pub(crate) fn bilinear_sample(input: &Buffer2<f32>, x: f32, y: f32) -> f32 {
+pub(crate) fn bilinear_sample(input: &Buffer2<f32>, x: f32, y: f32, border_value: f32) -> f32 {
     let pixels = input.pixels();
     let width = input.width();
     let height = input.height();
@@ -99,10 +103,10 @@ pub(crate) fn bilinear_sample(input: &Buffer2<f32>, x: f32, y: f32) -> f32 {
     let fx = x - x0 as f32;
     let fy = y - y0 as f32;
 
-    let p00 = sample_pixel(pixels, width, height, x0, y0);
-    let p10 = sample_pixel(pixels, width, height, x0 + 1, y0);
-    let p01 = sample_pixel(pixels, width, height, x0, y0 + 1);
-    let p11 = sample_pixel(pixels, width, height, x0 + 1, y0 + 1);
+    let p00 = sample_pixel(pixels, width, height, x0, y0, border_value);
+    let p10 = sample_pixel(pixels, width, height, x0 + 1, y0, border_value);
+    let p01 = sample_pixel(pixels, width, height, x0, y0 + 1, border_value);
+    let p11 = sample_pixel(pixels, width, height, x0 + 1, y0 + 1, border_value);
 
     let top = p00 + fx * (p10 - p00);
     let bottom = p01 + fx * (p11 - p01);
@@ -120,10 +124,13 @@ pub(crate) fn warp_row_lanczos3(
     output_row: &mut [f32],
     output_y: usize,
     wt: &WarpTransform,
+    params: &WarpParams,
 ) {
     let pixels = input.pixels();
     let input_width = input.width();
     let input_height = input.height();
+    let border_value = params.border_value;
+    let clamp = params.method.deringing();
 
     let lut = get_lanczos_lut(3);
     let iw = input_width as i32;
@@ -202,40 +209,54 @@ pub(crate) fn warp_row_lanczos3(
         ];
 
         // Check if entire 6x6 kernel is within bounds
-        let sum = if kx0 >= 0 && ky0 >= 0 && kx0 + 5 < iw && ky0 + 5 < ih {
+        let (sum, src_min, src_max) = if kx0 >= 0 && ky0 >= 0 && kx0 + 5 < iw && ky0 + 5 < ih {
             // Fast path: all pixels in bounds, direct indexing
             let kx = kx0 as usize;
             let ky = ky0 as usize;
             let w = input_width;
 
             let mut sum = 0.0f32;
+            let mut smin = f32::MAX;
+            let mut smax = f32::MIN;
             for (j, &wyj_raw) in wy.iter().enumerate() {
                 let row_off = (ky + j) * w + kx;
                 let wyj = wyj_raw * inv_wy;
-                sum += wyj
-                    * (unsafe { *pixels.get_unchecked(row_off) } * nwx[0]
-                        + unsafe { *pixels.get_unchecked(row_off + 1) } * nwx[1]
-                        + unsafe { *pixels.get_unchecked(row_off + 2) } * nwx[2]
-                        + unsafe { *pixels.get_unchecked(row_off + 3) } * nwx[3]
-                        + unsafe { *pixels.get_unchecked(row_off + 4) } * nwx[4]
-                        + unsafe { *pixels.get_unchecked(row_off + 5) } * nwx[5]);
+                for (k, &wxi) in nwx.iter().enumerate() {
+                    let v = unsafe { *pixels.get_unchecked(row_off + k) };
+                    sum += v * wxi * wyj;
+                    if clamp {
+                        smin = smin.min(v);
+                        smax = smax.max(v);
+                    }
+                }
             }
-            sum
+            (sum, smin, smax)
         } else {
             // Slow path: bounds-checked sampling for border pixels
             let mut sum = 0.0f32;
+            let mut smin = f32::MAX;
+            let mut smax = f32::MIN;
             for (j, &wyj_raw) in wy.iter().enumerate() {
                 let py = ky0 + j as i32;
                 let wyj = wyj_raw * inv_wy;
                 for (i, &wxi) in nwx.iter().enumerate() {
                     let px = kx0 + i as i32;
-                    sum += sample_pixel(pixels, input_width, input_height, px, py) * wxi * wyj;
+                    let v = sample_pixel(pixels, input_width, input_height, px, py, border_value);
+                    sum += v * wxi * wyj;
+                    if clamp {
+                        smin = smin.min(v);
+                        smax = smax.max(v);
+                    }
                 }
             }
-            sum
+            (sum, smin, smax)
         };
 
-        *out_pixel = sum;
+        *out_pixel = if clamp {
+            sum.clamp(src_min, src_max)
+        } else {
+            sum
+        };
 
         if can_step {
             src_x += dx_step;
@@ -247,6 +268,8 @@ pub(crate) fn warp_row_lanczos3(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::registration::config::InterpolationMethod;
+    use crate::registration::interpolation::WarpParams;
     use crate::registration::transform::Transform;
     use crate::testing::synthetic::patterns;
 
@@ -302,7 +325,7 @@ mod tests {
                 let py = y0 - 2 + j as i32;
                 for (i, &wxi) in wx.iter().enumerate() {
                     let px = x0 - 2 + i as i32;
-                    let pixel = sample_pixel(pixels, input_width, input_height, px, py);
+                    let pixel = sample_pixel(pixels, input_width, input_height, px, py, 0.0);
                     sum += pixel * wxi * wyj;
                 }
             }
@@ -321,7 +344,7 @@ mod tests {
         let mut output_row = vec![0.0f32; width];
         let y = 50;
 
-        warp_row_bilinear(&input, &mut output_row, y, &identity);
+        warp_row_bilinear(&input, &mut output_row, y, &identity, 0.0);
 
         // With identity transform, output should match input
         for x in 1..width - 1 {
@@ -349,7 +372,7 @@ mod tests {
         let mut output_row = vec![0.0f32; width];
         let y = 50;
 
-        warp_row_bilinear(&input, &mut output_row, y, &inverse);
+        warp_row_bilinear(&input, &mut output_row, y, &inverse, 0.0);
 
         // Check that pixels are shifted
         for (x, &output_val) in output_row.iter().enumerate().skip(10).take(width - 20) {
@@ -389,8 +412,8 @@ mod tests {
                 let mut output_simd = vec![0.0f32; width];
                 let mut output_scalar = vec![0.0f32; width];
 
-                warp_row_bilinear(&input, &mut output_simd, y, &inverse);
-                warp_row_bilinear_scalar(&input, &mut output_scalar, y, &inverse);
+                warp_row_bilinear(&input, &mut output_simd, y, &inverse, 0.0);
+                warp_row_bilinear_scalar(&input, &mut output_scalar, y, &inverse, 0.0);
 
                 for x in 0..width {
                     // Tolerance slightly relaxed for SIMD/scalar differences due to
@@ -433,8 +456,8 @@ mod tests {
             let mut output_scalar = vec![0.0f32; width];
             let y = height / 2;
 
-            warp_row_bilinear(&input, &mut output_simd, y, &identity);
-            warp_row_bilinear_scalar(&input, &mut output_scalar, y, &identity);
+            warp_row_bilinear(&input, &mut output_simd, y, &identity, 0.0);
+            warp_row_bilinear_scalar(&input, &mut output_scalar, y, &identity, 0.0);
 
             for x in 0..width {
                 assert!(
@@ -522,6 +545,8 @@ mod tests {
         let width = 128;
         let height = 128;
         let input = patterns::diagonal_gradient(width, height);
+        // Disable clamping to match unclamped scalar reference
+        let params = WarpParams::new(InterpolationMethod::Lanczos3 { deringing: false });
 
         let transforms = vec![
             Transform::identity(),
@@ -536,7 +561,7 @@ mod tests {
                 let mut output_fast = vec![0.0f32; width];
                 let mut output_scalar = vec![0.0f32; width];
 
-                warp_row_lanczos3(&input, &mut output_fast, y, &inverse);
+                warp_row_lanczos3(&input, &mut output_fast, y, &inverse, &params);
                 warp_row_lanczos3_scalar(&input, &mut output_scalar, y, &inverse);
 
                 for x in 0..width {
@@ -555,6 +580,8 @@ mod tests {
     fn test_warp_row_lanczos3_various_sizes() {
         let height = 64;
         let input_base = patterns::diagonal_gradient(256, height);
+        // Disable clamping to match unclamped scalar reference
+        let params = WarpParams::new(InterpolationMethod::Lanczos3 { deringing: false });
 
         for width in [1, 2, 3, 7, 8, 16, 33, 64, 100] {
             let input = Buffer2::new(
@@ -574,7 +601,7 @@ mod tests {
             let mut output_scalar = vec![0.0f32; width];
             let y = height / 2;
 
-            warp_row_lanczos3(&input, &mut output_fast, y, &inverse);
+            warp_row_lanczos3(&input, &mut output_fast, y, &inverse, &params);
             warp_row_lanczos3_scalar(&input, &mut output_scalar, y, &inverse);
 
             for x in 0..width {

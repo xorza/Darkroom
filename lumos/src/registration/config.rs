@@ -1,9 +1,15 @@
 //! Configuration for the registration module.
 
+use glam::DVec2;
+
 use crate::registration::transform::TransformType;
 
 /// Interpolation method for image resampling.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+///
+/// Lanczos variants include a `deringing` flag that clamps interpolated values
+/// to the source pixel range, suppressing ringing artifacts (dark halos around
+/// bright stars). Enabled by default.
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum InterpolationMethod {
     /// Nearest neighbor - fastest, lowest quality
     Nearest,
@@ -12,12 +18,17 @@ pub enum InterpolationMethod {
     /// Bicubic interpolation - good quality
     Bicubic,
     /// Lanczos-2 (4x4 kernel) - high quality
-    Lanczos2,
+    Lanczos2 { deringing: bool },
     /// Lanczos-3 (6x6 kernel) - highest quality, default
-    #[default]
-    Lanczos3,
+    Lanczos3 { deringing: bool },
     /// Lanczos-4 (8x8 kernel) - extreme quality
-    Lanczos4,
+    Lanczos4 { deringing: bool },
+}
+
+impl Default for InterpolationMethod {
+    fn default() -> Self {
+        Self::Lanczos3 { deringing: true }
+    }
 }
 
 impl InterpolationMethod {
@@ -28,9 +39,32 @@ impl InterpolationMethod {
             InterpolationMethod::Nearest => 1,
             InterpolationMethod::Bilinear => 1,
             InterpolationMethod::Bicubic => 2,
-            InterpolationMethod::Lanczos2 => 2,
-            InterpolationMethod::Lanczos3 => 3,
-            InterpolationMethod::Lanczos4 => 4,
+            InterpolationMethod::Lanczos2 { .. } => 2,
+            InterpolationMethod::Lanczos3 { .. } => 3,
+            InterpolationMethod::Lanczos4 { .. } => 4,
+        }
+    }
+
+    /// Returns whether Lanczos deringing (min/max clamping) is enabled.
+    /// Always `false` for non-Lanczos methods.
+    #[inline]
+    pub fn deringing(&self) -> bool {
+        match self {
+            InterpolationMethod::Lanczos2 { deringing }
+            | InterpolationMethod::Lanczos3 { deringing }
+            | InterpolationMethod::Lanczos4 { deringing } => *deringing,
+            _ => false,
+        }
+    }
+
+    /// Returns the Lanczos parameter `a` (kernel half-width), or `None` for non-Lanczos methods.
+    #[inline]
+    pub fn lanczos_param(&self) -> Option<usize> {
+        match self {
+            InterpolationMethod::Lanczos2 { .. } => Some(2),
+            InterpolationMethod::Lanczos3 { .. } => Some(3),
+            InterpolationMethod::Lanczos4 { .. } => Some(4),
+            _ => None,
         }
     }
 }
@@ -100,16 +134,15 @@ pub struct Config {
     pub sip_enabled: bool,
     /// SIP polynomial order (2-5). Default: 3.
     pub sip_order: usize,
+    /// SIP reference point (e.g. image center). Default: None (uses star centroid).
+    /// For proper optical distortion modeling, set to image center: `Some(DVec2::new(w/2, h/2))`.
+    pub sip_reference_point: Option<DVec2>,
 
     // == Image warping ==
-    /// Interpolation method for warping. Default: Lanczos3.
+    /// Interpolation method for warping. Default: Lanczos3 with deringing.
     pub interpolation: InterpolationMethod,
     /// Border value for out-of-bounds pixels. Default: 0.0.
     pub border_value: f32,
-    /// Normalize Lanczos kernel weights. Default: true.
-    pub normalize_kernel: bool,
-    /// Clamp output to reduce Lanczos ringing. Default: false.
-    pub clamp_output: bool,
 }
 
 impl Default for Config {
@@ -142,12 +175,11 @@ impl Default for Config {
             // Distortion
             sip_enabled: false,
             sip_order: 3,
+            sip_reference_point: None,
 
             // Warping
             interpolation: InterpolationMethod::default(),
             border_value: 0.0,
-            normalize_kernel: true,
-            clamp_output: false,
         }
     }
 }
@@ -329,10 +361,12 @@ mod tests {
         assert!((config.max_rms_error - 2.0).abs() < 1e-10);
         assert!(!config.sip_enabled);
         assert_eq!(config.sip_order, 3);
-        assert_eq!(config.interpolation, InterpolationMethod::Lanczos3);
+        assert!(config.sip_reference_point.is_none());
+        assert_eq!(
+            config.interpolation,
+            InterpolationMethod::Lanczos3 { deringing: true }
+        );
         assert!((config.border_value - 0.0).abs() < 1e-10);
-        assert!(config.normalize_kernel);
-        assert!(!config.clamp_output);
     }
 
     #[test]
@@ -432,8 +466,17 @@ mod tests {
         assert_eq!(InterpolationMethod::Nearest.kernel_radius(), 1);
         assert_eq!(InterpolationMethod::Bilinear.kernel_radius(), 1);
         assert_eq!(InterpolationMethod::Bicubic.kernel_radius(), 2);
-        assert_eq!(InterpolationMethod::Lanczos2.kernel_radius(), 2);
-        assert_eq!(InterpolationMethod::Lanczos3.kernel_radius(), 3);
-        assert_eq!(InterpolationMethod::Lanczos4.kernel_radius(), 4);
+        assert_eq!(
+            InterpolationMethod::Lanczos2 { deringing: true }.kernel_radius(),
+            2
+        );
+        assert_eq!(
+            InterpolationMethod::Lanczos3 { deringing: true }.kernel_radius(),
+            3
+        );
+        assert_eq!(
+            InterpolationMethod::Lanczos4 { deringing: true }.kernel_radius(),
+            4
+        );
     }
 }

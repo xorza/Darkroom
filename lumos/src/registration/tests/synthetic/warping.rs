@@ -9,7 +9,7 @@
 
 use crate::common::Buffer2;
 use crate::registration::config::InterpolationMethod;
-use crate::registration::interpolation::warp_image;
+use crate::registration::interpolation::{WarpParams, warp_image};
 use crate::registration::transform::{Transform, TransformType, WarpTransform};
 use crate::registration::warp;
 use crate::star_detection::StarDetector;
@@ -27,7 +27,12 @@ fn do_warp(
 ) -> Buffer2<f32> {
     let inverse = transform.inverse();
     let mut output = Buffer2::new(input.width(), input.height(), vec![0.0; input.len()]);
-    warp_image(input, &mut output, &WarpTransform::new(inverse), method);
+    warp_image(
+        input,
+        &mut output,
+        &WarpTransform::new(inverse),
+        &WarpParams::new(method),
+    );
     output
 }
 
@@ -84,9 +89,9 @@ fn all_interpolation_methods() -> Vec<InterpolationMethod> {
         InterpolationMethod::Nearest,
         InterpolationMethod::Bilinear,
         InterpolationMethod::Bicubic,
-        InterpolationMethod::Lanczos2,
-        InterpolationMethod::Lanczos3,
-        InterpolationMethod::Lanczos4,
+        InterpolationMethod::Lanczos2 { deringing: true },
+        InterpolationMethod::Lanczos3 { deringing: true },
+        InterpolationMethod::Lanczos4 { deringing: true },
     ]
 }
 
@@ -96,7 +101,7 @@ fn representative_interpolation_methods() -> Vec<InterpolationMethod> {
     vec![
         InterpolationMethod::Nearest,
         InterpolationMethod::Bilinear,
-        InterpolationMethod::Lanczos3,
+        InterpolationMethod::Lanczos3 { deringing: true },
     ]
 }
 
@@ -436,7 +441,11 @@ fn test_warp_with_detected_transform() {
     let true_transform = Transform::euclidean(DVec2::new(dx, dy), angle_rad);
 
     // Create target by warping reference
-    let target_pixels = do_warp(&ref_pixels, &true_transform, InterpolationMethod::Lanczos3);
+    let target_pixels = do_warp(
+        &ref_pixels,
+        &true_transform,
+        InterpolationMethod::Lanczos3 { deringing: true },
+    );
 
     // Detect stars in both images
     let mut det = StarDetector::from_config(StarConfig {
@@ -473,7 +482,7 @@ fn test_warp_with_detected_transform() {
         target_pixels.into_vec(),
     );
     let warp_config = RegConfig {
-        interpolation: InterpolationMethod::Lanczos3,
+        interpolation: InterpolationMethod::Lanczos3 { deringing: true },
         ..Default::default()
     };
     let mut warped_astro = target_astro.clone();
@@ -552,7 +561,7 @@ fn test_interpolation_quality_ordering() {
         .1;
     let lanczos3_psnr = results
         .iter()
-        .find(|(m, _)| *m == InterpolationMethod::Lanczos3)
+        .find(|(m, _)| *m == InterpolationMethod::Lanczos3 { deringing: true })
         .unwrap()
         .1;
 
@@ -590,7 +599,7 @@ fn test_warp_grayscale() {
 
     // Warp the image
     let warp_config = RegConfig {
-        interpolation: InterpolationMethod::Lanczos3,
+        interpolation: InterpolationMethod::Lanczos3 { deringing: true },
         ..Default::default()
     };
     let mut warped = ref_image.clone();
@@ -634,7 +643,7 @@ fn test_warp_rgb() {
 
     // Warp the RGB image
     let warp_config = RegConfig {
-        interpolation: InterpolationMethod::Lanczos3,
+        interpolation: InterpolationMethod::Lanczos3 { deringing: true },
         ..Default::default()
     };
     let mut warped = rgb_image.clone();
@@ -798,13 +807,13 @@ fn test_warp_with_sip_correction() {
         &ref_buf,
         &mut output_no_sip,
         &WarpTransform::new(transform),
-        InterpolationMethod::Lanczos3,
+        &WarpParams::new(InterpolationMethod::Lanczos3 { deringing: true }),
     );
     warp_image(
         &ref_buf,
         &mut output_with_sip,
         &WarpTransform::with_sip(transform, sip),
-        InterpolationMethod::Lanczos3,
+        &WarpParams::new(InterpolationMethod::Lanczos3 { deringing: true }),
     );
 
     // The two outputs should differ — SIP applies nonlinear correction

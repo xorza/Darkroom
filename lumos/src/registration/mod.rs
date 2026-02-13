@@ -249,12 +249,15 @@ pub fn warp(
         "Output dimensions must match input"
     );
 
-    let method = config.interpolation;
+    let params = interpolation::WarpParams {
+        method: config.interpolation,
+        border_value: config.border_value,
+    };
 
     for c in 0..image.channels() {
         let input = image.channel(c);
         let output_buf = output.channel_mut(c);
-        warp_image(input, output_buf, warp_transform, method);
+        warp_image(input, output_buf, warp_transform, &params);
     }
 }
 
@@ -315,7 +318,7 @@ fn estimate_and_refine(
 
         let sip_config = SipConfig {
             order: config.sip_order,
-            reference_point: None,
+            reference_point: config.sip_reference_point,
             ..Default::default()
         };
 

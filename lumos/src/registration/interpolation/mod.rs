@@ -13,6 +13,32 @@ use crate::common::Buffer2;
 use crate::registration::config::InterpolationMethod;
 use crate::registration::transform::WarpTransform;
 
+/// Bundled warp parameters passed through the interpolation pipeline.
+#[derive(Debug, Clone, Copy)]
+pub struct WarpParams {
+    pub method: InterpolationMethod,
+    pub border_value: f32,
+}
+
+impl Default for WarpParams {
+    fn default() -> Self {
+        Self {
+            method: InterpolationMethod::default(),
+            border_value: 0.0,
+        }
+    }
+}
+
+impl WarpParams {
+    #[allow(dead_code)]
+    pub fn new(method: InterpolationMethod) -> Self {
+        Self {
+            method,
+            ..Default::default()
+        }
+    }
+}
+
 #[cfg(test)]
 mod bench;
 #[cfg(test)]
@@ -96,46 +122,54 @@ pub(crate) fn bicubic_kernel(x: f32) -> f32 {
     }
 }
 
-/// Sample a pixel with bounds checking. Returns 0.0 for out-of-bounds coordinates.
+/// Sample a pixel with bounds checking. Returns `border_value` for out-of-bounds coordinates.
 #[inline]
-pub(super) fn sample_pixel(data: &[f32], width: usize, height: usize, x: i32, y: i32) -> f32 {
+pub(super) fn sample_pixel(
+    data: &[f32],
+    width: usize,
+    height: usize,
+    x: i32,
+    y: i32,
+    border_value: f32,
+) -> f32 {
     if x < 0 || y < 0 || x >= width as i32 || y >= height as i32 {
-        0.0
+        border_value
     } else {
         data[y as usize * width + x as usize]
     }
 }
 
 #[inline]
-fn interpolate_nearest(data: &Buffer2<f32>, x: f32, y: f32) -> f32 {
+fn interpolate_nearest(data: &Buffer2<f32>, x: f32, y: f32, border_value: f32) -> f32 {
     sample_pixel(
         data.pixels(),
         data.width(),
         data.height(),
         x.round() as i32,
         y.round() as i32,
+        border_value,
     )
 }
 
 #[inline]
-fn interpolate_bilinear(data: &Buffer2<f32>, x: f32, y: f32) -> f32 {
+fn interpolate_bilinear(data: &Buffer2<f32>, x: f32, y: f32, border_value: f32) -> f32 {
     let x0 = x.floor() as i32;
     let y0 = y.floor() as i32;
     let fx = x - x0 as f32;
     let fy = y - y0 as f32;
 
     let (pixels, w, h) = (data.pixels(), data.width(), data.height());
-    let p00 = sample_pixel(pixels, w, h, x0, y0);
-    let p10 = sample_pixel(pixels, w, h, x0 + 1, y0);
-    let p01 = sample_pixel(pixels, w, h, x0, y0 + 1);
-    let p11 = sample_pixel(pixels, w, h, x0 + 1, y0 + 1);
+    let p00 = sample_pixel(pixels, w, h, x0, y0, border_value);
+    let p10 = sample_pixel(pixels, w, h, x0 + 1, y0, border_value);
+    let p01 = sample_pixel(pixels, w, h, x0, y0 + 1, border_value);
+    let p11 = sample_pixel(pixels, w, h, x0 + 1, y0 + 1, border_value);
 
     let top = p00 + fx * (p10 - p00);
     let bottom = p01 + fx * (p11 - p01);
     top + fy * (bottom - top)
 }
 
-fn interpolate_bicubic(data: &Buffer2<f32>, x: f32, y: f32) -> f32 {
+fn interpolate_bicubic(data: &Buffer2<f32>, x: f32, y: f32, border_value: f32) -> f32 {
     let x0 = x.floor() as i32;
     let y0 = y.floor() as i32;
     let fx = x - x0 as f32;
@@ -160,18 +194,18 @@ fn interpolate_bicubic(data: &Buffer2<f32>, x: f32, y: f32) -> f32 {
         let py = y0 - 1 + j as i32;
         for (i, &wxi) in wx.iter().enumerate() {
             let px = x0 - 1 + i as i32;
-            sum += sample_pixel(pixels, w, h, px, py) * wxi * wyj;
+            sum += sample_pixel(pixels, w, h, px, py, border_value) * wxi * wyj;
         }
     }
     sum
 }
 
 #[inline]
-fn interpolate_lanczos(data: &Buffer2<f32>, x: f32, y: f32, a: usize) -> f32 {
+fn interpolate_lanczos(data: &Buffer2<f32>, x: f32, y: f32, a: usize, border_value: f32) -> f32 {
     match a {
-        2 => interpolate_lanczos_impl::<2, 4>(data, x, y),
-        3 => interpolate_lanczos_impl::<3, 6>(data, x, y),
-        4 => interpolate_lanczos_impl::<4, 8>(data, x, y),
+        2 => interpolate_lanczos_impl::<2, 4>(data, x, y, border_value),
+        3 => interpolate_lanczos_impl::<3, 6>(data, x, y, border_value),
+        4 => interpolate_lanczos_impl::<4, 8>(data, x, y, border_value),
         _ => panic!("Unsupported Lanczos parameter: {a}"),
     }
 }
@@ -181,6 +215,7 @@ fn interpolate_lanczos_impl<const A: usize, const SIZE: usize>(
     data: &Buffer2<f32>,
     x: f32,
     y: f32,
+    border_value: f32,
 ) -> f32 {
     let x0 = x.floor() as i32;
     let y0 = y.floor() as i32;
@@ -221,21 +256,27 @@ fn interpolate_lanczos_impl<const A: usize, const SIZE: usize>(
         let wyj = wyj * inv_wy;
         for (i, &wxi) in wx.iter().enumerate() {
             let px = x0 - a_i32 + 1 + i as i32;
-            sum += sample_pixel(pixels, w, h, px, py) * wxi * inv_wx * wyj;
+            sum += sample_pixel(pixels, w, h, px, py, border_value) * wxi * inv_wx * wyj;
         }
     }
     sum
 }
 
 #[inline]
-fn interpolate(data: &Buffer2<f32>, x: f32, y: f32, method: InterpolationMethod) -> f32 {
-    match method {
-        InterpolationMethod::Nearest => interpolate_nearest(data, x, y),
-        InterpolationMethod::Bilinear => interpolate_bilinear(data, x, y),
-        InterpolationMethod::Bicubic => interpolate_bicubic(data, x, y),
-        InterpolationMethod::Lanczos2 => interpolate_lanczos(data, x, y, 2),
-        InterpolationMethod::Lanczos3 => interpolate_lanczos(data, x, y, 3),
-        InterpolationMethod::Lanczos4 => interpolate_lanczos(data, x, y, 4),
+fn interpolate(data: &Buffer2<f32>, x: f32, y: f32, params: &WarpParams) -> f32 {
+    match params.method {
+        InterpolationMethod::Nearest => interpolate_nearest(data, x, y, params.border_value),
+        InterpolationMethod::Bilinear => interpolate_bilinear(data, x, y, params.border_value),
+        InterpolationMethod::Bicubic => interpolate_bicubic(data, x, y, params.border_value),
+        InterpolationMethod::Lanczos2 { .. } => {
+            interpolate_lanczos(data, x, y, 2, params.border_value)
+        }
+        InterpolationMethod::Lanczos3 { .. } => {
+            interpolate_lanczos(data, x, y, 3, params.border_value)
+        }
+        InterpolationMethod::Lanczos4 { .. } => {
+            interpolate_lanczos(data, x, y, 4, params.border_value)
+        }
     }
 }
 
@@ -248,7 +289,7 @@ pub fn warp_image(
     input: &Buffer2<f32>,
     output: &mut Buffer2<f32>,
     warp_transform: &WarpTransform,
-    method: InterpolationMethod,
+    params: &WarpParams,
 ) {
     let width = input.width();
     let height = input.height();
@@ -260,15 +301,15 @@ pub fn warp_image(
         .par_chunks_mut(width)
         .enumerate()
         .for_each(|(y, row)| {
-            if method == InterpolationMethod::Bilinear {
-                warp::warp_row_bilinear(input, row, y, warp_transform);
-            } else if method == InterpolationMethod::Lanczos3 {
-                warp::warp_row_lanczos3(input, row, y, warp_transform);
+            if params.method == InterpolationMethod::Bilinear {
+                warp::warp_row_bilinear(input, row, y, warp_transform, params.border_value);
+            } else if matches!(params.method, InterpolationMethod::Lanczos3 { .. }) {
+                warp::warp_row_lanczos3(input, row, y, warp_transform, params);
             } else {
                 for (x, pixel) in row.iter_mut().enumerate() {
                     let p = glam::DVec2::new(x as f64, y as f64);
                     let src = warp_transform.apply(p);
-                    *pixel = interpolate(input, src.x as f32, src.y as f32, method);
+                    *pixel = interpolate(input, src.x as f32, src.y as f32, params);
                 }
             }
         });

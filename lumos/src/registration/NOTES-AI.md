@@ -37,35 +37,24 @@ See submodule NOTES-AI.md files for detailed per-module analysis:
 - **Adaptive iteration count** formula matches standard (Fischler & Bolles 1981)
 - **Hartley normalization** for DLT homography is standard and correct
 - **Triangle vertex ordering** by geometric role (opposite shortest/middle/longest side)
-
-### Dead Code / Unused Config
-
-2. **Interpolation config fields never wired up**
-   `config.rs:108-112` — `border_value`, `normalize_kernel`, `clamp_output` are
-   defined but never passed to `warp_image()`. Either implement or remove.
+- **SIP reference_point** configurable via `Config.sip_reference_point` (defaults to centroid, can pass image center)
+- **Lanczos deringing** via min/max clamping of source pixels in kernel window (`InterpolationMethod::Lanczos3 { deringing: true }`)
+- **`WarpParams` struct** bundles interpolation method and border_value through warp pipeline
+- **MAGSAC++ preemptive scoring** exits early when cumulative loss exceeds best score
 
 ### Important Missing Features
 
-7. **No Lanczos deringing/clamping**
-   PixInsight uses clamping threshold (default 0.3) to prevent dark halos around
-   bright stars. `clamp_output` config exists but is unimplemented.
-
-8. **Pipeline always uses star centroid as SIP reference, never image center**
-   `registration/mod.rs:318` passes `reference_point: None`. SIP standard uses
-   CRPIX (image center). Radial distortion is centered on optical axis, not
-   star centroid.
-
-9. **Single-pass match recovery**
+7. **Single-pass match recovery**
    `mod.rs:300-307` — Recovery + refit runs once. PixInsight iterates predict ->
    re-match -> refit until convergence, recovering more matches.
 
-10. **TPS not integrated** — fully implemented and tested (`distortion/tps/`)
-    but marked `dead_code`. PixInsight's primary distortion method.
+8. **TPS not integrated** — fully implemented and tested (`distortion/tps/`)
+   but marked `dead_code`. PixInsight's primary distortion method.
 
-11. **No SIMD for Lanczos3** — the default interpolation method has no SIMD path.
-    Separable two-pass AVX2 could yield 2-4x speedup (Intel IPP approach).
+9. **No SIMD for Lanczos3** — the default interpolation method has no SIMD path.
+   Separable two-pass AVX2 could yield 2-4x speedup (Intel IPP approach).
 
-12. **Missing IRWLS for MAGSAC++** — paper's key contribution for model accuracy.
+10. **Missing IRWLS for MAGSAC++** — paper's key contribution for model accuracy.
     We use MAGSAC++ only for scoring, with binary inlier selection for estimation.
 
 ### Comparison with Industry Tools
@@ -78,7 +67,7 @@ See submodule NOTES-AI.md files for detailed per-module analysis:
 | IRWLS polish | No | N/A | N/A | N/A | No |
 | Distortion | SIP (forward) | TPS (iterative) | SIP (from WCS) | SIP (full A/B/AP/BP) | None |
 | Sigma-clipping SIP | Yes (3-iter, 3-sigma MAD) | N/A | N/A | Yes | N/A |
-| Lanczos deringing | Config exists, not impl | Yes (0.3 threshold) | Yes | N/A | N/A |
+| Lanczos deringing | Yes (min/max clamping) | Yes (0.3 threshold) | Yes | N/A | N/A |
 | SIMD warp | AVX2 bilinear only | Full SIMD | OpenCV SIMD | N/A | N/A |
 | Match recovery | Single-pass | Iterative | N/A | Bayesian | N/A |
 | Output framing | Fixed (=input) | Max/min/COG | Max/min/current/COG | N/A | Fixed |
@@ -86,17 +75,13 @@ See submodule NOTES-AI.md files for detailed per-module analysis:
 ### Prioritized Improvements
 
 **Medium Effort (correctness/quality):**
-1. Pass image center as SIP reference_point when available
-2. Implement Lanczos deringing (clamp_output config exists)
-3. Wire up or remove dead Config fields (border_value, etc.)
-4. Add preemptive scoring to MAGSAC++ (break early when loss > best)
-5. Iterative match recovery (2-3 passes of recover + refit)
+1. Iterative match recovery (2-3 passes of recover + refit)
 
 **Larger Effort (performance/features):**
-6. Separable SIMD Lanczos3 (two-pass horizontal+vertical with AVX2)
-7. Integrate TPS as alternative distortion model
-8. IRWLS final polish with MAGSAC++ weights
-9. Upgrade to quad descriptors (4D hash, matches Astrometry.net)
+2. Separable SIMD Lanczos3 (two-pass horizontal+vertical with AVX2)
+3. Integrate TPS as alternative distortion model
+4. IRWLS final polish with MAGSAC++ weights
+5. Upgrade to quad descriptors (4D hash, matches Astrometry.net)
 
 ## File Map
 

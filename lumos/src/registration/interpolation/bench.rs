@@ -7,6 +7,7 @@ use ::bench::quick_bench;
 use super::*;
 use crate::common::Buffer2;
 use crate::math::DMat3;
+use crate::registration::config::InterpolationMethod;
 use crate::registration::transform::{Transform, TransformType, WarpTransform};
 
 /// Create a test image of specified size filled with gradient pattern.
@@ -49,7 +50,7 @@ fn bench_warp_lanczos3_1k(b: bench::Bencher) {
             black_box(&input),
             black_box(&mut output),
             &black_box(WarpTransform::new(transform)),
-            InterpolationMethod::Lanczos3,
+            &WarpParams::new(InterpolationMethod::Lanczos3 { deringing: true }),
         );
     });
 }
@@ -65,7 +66,7 @@ fn bench_warp_lanczos3_2k(b: bench::Bencher) {
             black_box(&input),
             black_box(&mut output),
             &black_box(WarpTransform::new(transform)),
-            InterpolationMethod::Lanczos3,
+            &WarpParams::new(InterpolationMethod::Lanczos3 { deringing: true }),
         );
     });
 }
@@ -81,7 +82,7 @@ fn bench_warp_lanczos3_4k(b: bench::Bencher) {
             black_box(&input),
             black_box(&mut output),
             &black_box(WarpTransform::new(transform)),
-            InterpolationMethod::Lanczos3,
+            &WarpParams::new(InterpolationMethod::Lanczos3 { deringing: true }),
         );
     });
 }
@@ -101,7 +102,7 @@ fn bench_warp_bilinear_2k(b: bench::Bencher) {
             black_box(&input),
             black_box(&mut output),
             &black_box(WarpTransform::new(transform)),
-            InterpolationMethod::Bilinear,
+            &WarpParams::new(InterpolationMethod::Bilinear),
         );
     });
 }
@@ -139,7 +140,7 @@ fn bench_interpolate_lanczos3_single(b: bench::Bencher) {
     b.bench(|| {
         let mut sum = 0.0f32;
         for &(x, y) in black_box(&positions) {
-            sum += interpolate_lanczos(&input, x, y, 3);
+            sum += interpolate_lanczos(&input, x, y, 3, 0.0);
         }
         black_box(sum)
     });

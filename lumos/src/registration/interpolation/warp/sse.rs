@@ -119,10 +119,10 @@ pub unsafe fn warp_row_bilinear_avx2(
                 let ix1 = x1_arr[i] as i32;
                 let iy1 = y1_arr[i] as i32;
 
-                p00[i] = sample_pixel(pixels, input_width, input_height, ix0, iy0);
-                p10[i] = sample_pixel(pixels, input_width, input_height, ix1, iy0);
-                p01[i] = sample_pixel(pixels, input_width, input_height, ix0, iy1);
-                p11[i] = sample_pixel(pixels, input_width, input_height, ix1, iy1);
+                p00[i] = sample_pixel(pixels, input_width, input_height, ix0, iy0, 0.0);
+                p10[i] = sample_pixel(pixels, input_width, input_height, ix1, iy0, 0.0);
+                p01[i] = sample_pixel(pixels, input_width, input_height, ix0, iy1, 0.0);
+                p11[i] = sample_pixel(pixels, input_width, input_height, ix1, iy1, 0.0);
             }
 
             let p00_vec = _mm256_loadu_ps(p00.as_ptr());
@@ -146,7 +146,7 @@ pub unsafe fn warp_row_bilinear_avx2(
         let remainder_start = chunks * 8;
         for x in remainder_start..output_width {
             let src = transform.apply(DVec2::new(x as f64, y));
-            output_row[x] = super::bilinear_sample(input, src.x as f32, src.y as f32);
+            output_row[x] = super::bilinear_sample(input, src.x as f32, src.y as f32, 0.0);
         }
     }
 }
@@ -247,10 +247,10 @@ pub unsafe fn warp_row_bilinear_sse(
                 let ix1 = ix0 + 1;
                 let iy1 = iy0 + 1;
 
-                p00[i] = sample_pixel(pixels, input_width, input_height, ix0, iy0);
-                p10[i] = sample_pixel(pixels, input_width, input_height, ix1, iy0);
-                p01[i] = sample_pixel(pixels, input_width, input_height, ix0, iy1);
-                p11[i] = sample_pixel(pixels, input_width, input_height, ix1, iy1);
+                p00[i] = sample_pixel(pixels, input_width, input_height, ix0, iy0, 0.0);
+                p10[i] = sample_pixel(pixels, input_width, input_height, ix1, iy0, 0.0);
+                p01[i] = sample_pixel(pixels, input_width, input_height, ix0, iy1, 0.0);
+                p11[i] = sample_pixel(pixels, input_width, input_height, ix1, iy1, 0.0);
             }
 
             let p00_vec = _mm_loadu_ps(p00.as_ptr());
@@ -271,7 +271,7 @@ pub unsafe fn warp_row_bilinear_sse(
         let remainder_start = chunks * 4;
         for x in remainder_start..output_width {
             let src = transform.apply(DVec2::new(x as f64, y));
-            output_row[x] = super::bilinear_sample(input, src.x as f32, src.y as f32);
+            output_row[x] = super::bilinear_sample(input, src.x as f32, src.y as f32, 0.0);
         }
     }
 }
@@ -308,7 +308,7 @@ mod tests {
         }
 
         let inverse_wt = super::super::WarpTransform::new(inverse);
-        super::super::warp_row_bilinear_scalar(&input, &mut output_scalar, y, &inverse_wt);
+        super::super::warp_row_bilinear_scalar(&input, &mut output_scalar, y, &inverse_wt, 0.0);
 
         for x in 0..width {
             assert!(
@@ -344,7 +344,7 @@ mod tests {
         }
 
         let inverse_wt = super::super::WarpTransform::new(inverse);
-        super::super::warp_row_bilinear_scalar(&input, &mut output_scalar, y, &inverse_wt);
+        super::super::warp_row_bilinear_scalar(&input, &mut output_scalar, y, &inverse_wt, 0.0);
 
         for x in 0..width {
             assert!(

@@ -193,6 +193,7 @@ impl RansacEstimator {
             &current_transform,
             scorer,
             inlier_buf,
+            f64::NEG_INFINITY,
         );
         let mut current_score = initial_score;
 
@@ -216,8 +217,14 @@ impl RansacEstimator {
             };
 
             // Score with refined transform
-            let new_score =
-                score_hypothesis(ref_points, target_points, &refined, scorer, inlier_buf);
+            let new_score = score_hypothesis(
+                ref_points,
+                target_points,
+                &refined,
+                scorer,
+                inlier_buf,
+                current_score,
+            );
 
             // Check for convergence (no improvement)
             if inlier_buf.len() <= current_inliers.len() && new_score <= current_score {
@@ -295,13 +302,14 @@ impl RansacEstimator {
                 continue;
             }
 
-            // Score with MAGSAC++
+            // Score with MAGSAC++ (preemptive: skip if cannot beat current best)
             let mut score = score_hypothesis(
                 ref_points,
                 target_points,
                 &transform,
                 &scorer,
                 &mut inlier_buf,
+                best_score,
             );
 
             let mut current_transform = transform;
@@ -368,6 +376,7 @@ impl RansacEstimator {
                 &refined,
                 &scorer,
                 &mut inlier_buf,
+                f64::NEG_INFINITY,
             );
 
             let inlier_ratio = inlier_buf.len() as f64 / n as f64;
@@ -602,6 +611,11 @@ fn is_sample_degenerate(points: &[DVec2]) -> bool {
 ///
 /// Returns negative total loss (higher score = better model).
 /// Also populates the inliers buffer with indices of points within threshold.
+///
+/// When `best_score` is provided, exits early once the cumulative loss exceeds
+/// `-best_score` (the hypothesis cannot beat the current best). On early exit,
+/// the inliers buffer is incomplete — callers must only use it when the returned
+/// score improves on `best_score`.
 #[inline]
 fn score_hypothesis(
     ref_points: &[DVec2],
@@ -609,15 +623,20 @@ fn score_hypothesis(
     transform: &Transform,
     scorer: &MagsacScorer,
     inliers: &mut Vec<usize>,
+    best_score: f64,
 ) -> f64 {
     inliers.clear();
     let mut total_loss = 0.0f64;
+    let loss_budget = -best_score;
 
     for (i, (r, t)) in ref_points.iter().zip(target_points.iter()).enumerate() {
         let p = transform.apply(*r);
         let dist_sq = (p - *t).length_squared();
 
         total_loss += scorer.loss(dist_sq);
+        if total_loss > loss_budget {
+            return -total_loss;
+        }
         if scorer.is_inlier(dist_sq) {
             inliers.push(i);
         }

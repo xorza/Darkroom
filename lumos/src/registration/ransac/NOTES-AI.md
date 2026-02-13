@@ -19,7 +19,9 @@ where `x = r²/(2σ²_max)` and γ(1,x) = 1-exp(-x) for k=2.
 **Difference**: We omit the `-gamma_value_of_k` correction (~1% at boundary)
 and the normalization. Ranking is preserved so practical impact is negligible.
 
-**Verdict**: Structurally correct k=2 specialization.
+**Verdict**: Structurally correct k=2 specialization. Preemptive scoring
+implemented: `score_hypothesis` accepts `best_score` and exits early when
+cumulative loss exceeds `-best_score`.
 
 ### Gamma LUT (lines 14-68)
 
@@ -128,18 +130,15 @@ The SVD solver returns a poor model rejected by MAGSAC++ scoring.
 - IRWLS polishing with sigma-marginalized weights
 - SPRT early model rejection
 - PROSAC continuous progressive sampling
-- Preemptive scoring (break when loss exceeds best)
 - Inner RANSAC / threshold shrinking in LO
 - Graph-Cut spatial coherence (OpenCV USAC)
 
 ## Potential Improvements (Prioritized)
 
-1. **LO on new-best only**: Check `score > best_score` before LO. Simple, high impact.
-2. **Preemptive scoring**: Pass `best_score` to `score_hypothesis`, break early.
-3. **IRWLS final polish**: 3-5 IRWLS iterations after model selection.
-4. **Direct SVD for homography**: SVD on full 2n×9 matrix A.
-5. **PROSAC sampling**: Replace 3-phase with continuous growth.
-6. **Inline exp(-x)**: Replace GammaLut with direct computation for k=2.
+1. **IRWLS final polish**: 3-5 IRWLS iterations after model selection.
+2. **Direct SVD for homography**: SVD on full 2n×9 matrix A.
+3. **PROSAC sampling**: Replace 3-phase with continuous growth.
+4. **Inline exp(-x)**: Replace GammaLut with direct computation for k=2.
 
 ## References
 
