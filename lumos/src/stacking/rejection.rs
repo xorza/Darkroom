@@ -121,91 +121,176 @@ impl SigmaClipConfig {
 
 /// Configuration for winsorized sigma clipping.
 ///
-/// Unlike standard sigma clipping which removes outliers,
-/// winsorized clipping replaces them with the boundary value (mean ± sigma*stddev).
-/// This is more robust for small sample sizes.
+/// Two-phase algorithm matching PixInsight/Siril:
+/// 1. **Robust estimation**: Iteratively Winsorize with Huber's c=1.5 constant
+///    until sigma converges, then apply 1.134 bias correction to get robust
+///    (center, sigma) estimates.
+/// 2. **Rejection**: Standard sigma clipping using the robust estimates and
+///    user-specified sigma_low/sigma_high thresholds.
+///
+/// This is more robust for small sample sizes than standard sigma clipping.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct WinsorizedClipConfig {
-    /// Number of standard deviations for clipping threshold.
-    pub sigma: f32,
-    /// Maximum number of iterations for iterative clipping.
-    pub max_iterations: u32,
+    /// Sigma threshold for low outliers (below median).
+    pub sigma_low: f32,
+    /// Sigma threshold for high outliers (above median).
+    pub sigma_high: f32,
 }
+
+/// Huber's constant for Winsorization boundaries.
+const HUBER_C: f32 = 1.5;
+/// Bias correction factor for Winsorized standard deviation.
+const WINSORIZED_CORRECTION: f32 = 1.134;
+/// Convergence threshold for iterative Winsorization.
+const WINSORIZE_CONVERGENCE: f32 = 0.0005;
+/// Maximum iterations for Winsorization convergence.
+const WINSORIZE_MAX_ITER: u32 = 50;
 
 impl Default for WinsorizedClipConfig {
     fn default() -> Self {
         Self {
-            sigma: 2.5,
-            max_iterations: 3,
+            sigma_low: 2.5,
+            sigma_high: 2.5,
         }
     }
 }
 
 impl WinsorizedClipConfig {
-    pub fn new(sigma: f32, max_iterations: u32) -> Self {
+    pub fn new(sigma: f32) -> Self {
         assert!(sigma > 0.0, "Sigma must be positive");
-        assert!(max_iterations > 0, "Max iterations must be at least 1");
         Self {
-            sigma,
-            max_iterations,
+            sigma_low: sigma,
+            sigma_high: sigma,
         }
     }
 
-    /// Apply winsorization: replace outliers with boundary values.
+    pub fn new_asymmetric(sigma_low: f32, sigma_high: f32) -> Self {
+        assert!(sigma_low > 0.0, "Sigma low must be positive");
+        assert!(sigma_high > 0.0, "Sigma high must be positive");
+        Self {
+            sigma_low,
+            sigma_high,
+        }
+    }
+
+    /// Phase 1: Iteratively Winsorize to get robust (center, sigma) estimates.
     ///
-    /// Iteratively computes median and std dev, then clamps values to
-    /// `[median - sigma*stddev, median + sigma*stddev]`.
+    /// Uses Huber's c=1.5 for Winsorization boundaries, converges when
+    /// `|sigma_new - sigma_old| / sigma_old < 0.0005`. Applies 1.134 bias
+    /// correction to the final sigma.
     ///
-    /// Returns `working` filled with the winsorized copy. Does NOT modify `values`.
-    /// `scratch` is used for median/MAD computation.
-    pub fn winsorize<'a>(
+    /// Returns (center, corrected_sigma).
+    fn robust_estimate(
         &self,
         values: &[f32],
-        working: &'a mut Vec<f32>,
+        working: &mut Vec<f32>,
         scratch: &mut Vec<f32>,
-    ) -> &'a [f32] {
-        debug_assert!(!values.is_empty());
-
+    ) -> (f32, f32) {
         working.clear();
         working.extend_from_slice(values);
 
-        if values.len() <= 2 {
-            return working;
+        // Initial estimates
+        scratch.clear();
+        scratch.extend_from_slice(working);
+        let mut center = math::median_f32_mut(scratch);
+        let mut sigma = winsorized_stddev(working, center) * WINSORIZED_CORRECTION;
+
+        if sigma < f32::EPSILON {
+            return (center, 0.0);
         }
 
-        for _ in 0..self.max_iterations {
-            // Copy into scratch buffer for median (which sorts in-place)
-            scratch.clear();
-            scratch.extend_from_slice(working);
-            let center = math::median_f32_mut(scratch);
-            let mad = mad_f32_with_scratch(working, center, scratch);
-            let sigma = mad_to_sigma(mad);
+        for _ in 0..WINSORIZE_MAX_ITER {
+            let low_bound = center - HUBER_C * sigma;
+            let high_bound = center + HUBER_C * sigma;
 
-            if sigma < f32::EPSILON {
-                break;
-            }
-
-            let low_bound = center - self.sigma * sigma;
-            let high_bound = center + self.sigma * sigma;
-
-            let mut changed = false;
+            // Winsorize: clamp outliers to boundary values
             for v in working.iter_mut() {
                 if *v < low_bound {
                     *v = low_bound;
-                    changed = true;
                 } else if *v > high_bound {
                     *v = high_bound;
-                    changed = true;
                 }
             }
 
-            if !changed {
+            // Recompute center (median of winsorized values)
+            scratch.clear();
+            scratch.extend_from_slice(working);
+            center = math::median_f32_mut(scratch);
+
+            let sigma_new = winsorized_stddev(working, center) * WINSORIZED_CORRECTION;
+
+            if sigma_new < f32::EPSILON {
+                return (center, 0.0);
+            }
+
+            let converged = (sigma_new - sigma).abs() <= sigma * WINSORIZE_CONVERGENCE;
+            sigma = sigma_new;
+
+            if converged {
                 break;
             }
         }
 
-        working
+        (center, sigma)
     }
+
+    /// Phase 2: Reject outliers using the robust estimates from phase 1.
+    ///
+    /// Standard sigma clipping with the Winsorized (center, sigma) and
+    /// the user's sigma_low/sigma_high thresholds.
+    pub(crate) fn reject(&self, values: &mut [f32], scratch: &mut ScratchBuffers) -> usize {
+        debug_assert!(!values.is_empty());
+
+        reset_indices(&mut scratch.indices, values.len());
+
+        if values.len() <= 2 {
+            return values.len();
+        }
+
+        let (center, sigma) =
+            self.robust_estimate(values, &mut scratch.floats_a, &mut scratch.floats_b);
+
+        if sigma < f32::EPSILON {
+            return values.len();
+        }
+
+        let low_threshold = self.sigma_low * sigma;
+        let high_threshold = self.sigma_high * sigma;
+
+        let mut write_idx = 0;
+        for read_idx in 0..values.len() {
+            let diff = values[read_idx] - center;
+            let keep = if diff < 0.0 {
+                -diff <= low_threshold
+            } else {
+                diff <= high_threshold
+            };
+            if keep {
+                values[write_idx] = values[read_idx];
+                scratch.indices[write_idx] = scratch.indices[read_idx];
+                write_idx += 1;
+            }
+        }
+
+        write_idx
+    }
+}
+
+/// Compute standard deviation from mean (not MAD) for Winsorized values.
+fn winsorized_stddev(values: &[f32], center: f32) -> f32 {
+    let n = values.len() as f32;
+    if n <= 1.0 {
+        return 0.0;
+    }
+    let variance = values
+        .iter()
+        .map(|&v| {
+            let d = v - center;
+            d * d
+        })
+        .sum::<f32>()
+        / (n - 1.0);
+    variance.sqrt()
 }
 
 /// Configuration for linear fit clipping.
@@ -655,7 +740,7 @@ impl Rejection {
 
     /// Create winsorized sigma clipping.
     pub fn winsorized(sigma: f32) -> Self {
-        Self::Winsorized(WinsorizedClipConfig::new(sigma, 3))
+        Self::Winsorized(WinsorizedClipConfig::new(sigma))
     }
 
     /// Create linear fit clipping with symmetric thresholds.
@@ -679,8 +764,9 @@ impl Rejection {
     /// For `Winsorized`, no partitioning occurs (returns `values.len()`).
     pub(crate) fn reject(&self, values: &mut [f32], scratch: &mut ScratchBuffers) -> usize {
         match self {
-            Rejection::None | Rejection::Winsorized(_) => values.len(),
+            Rejection::None => values.len(),
             Rejection::SigmaClip(c) => c.reject(values, scratch),
+            Rejection::Winsorized(c) => c.reject(values, scratch),
             Rejection::LinearFit(c) => c.reject(values, scratch),
             Rejection::Gesd(c) => c.reject(values, scratch),
             Rejection::Percentile(c) => c.reject(values, scratch),
@@ -697,23 +783,12 @@ impl Rejection {
         weights: Option<&[f32]>,
         scratch: &mut ScratchBuffers,
     ) -> f32 {
-        // None and Winsorized don't reorder values, so weights align directly
-        match self {
-            Rejection::None => {
-                return match weights {
-                    Some(w) => math::weighted_mean_f32(values, w),
-                    None => math::mean_f32(values),
-                };
-            }
-            Rejection::Winsorized(config) => {
-                let winsorized =
-                    config.winsorize(values, &mut scratch.floats_a, &mut scratch.floats_b);
-                return match weights {
-                    Some(w) => math::weighted_mean_f32(winsorized, w),
-                    None => math::mean_f32(winsorized),
-                };
-            }
-            _ => {}
+        // None doesn't reorder values, so weights align directly
+        if let Rejection::None = self {
+            return match weights {
+                Some(w) => math::weighted_mean_f32(values, w),
+                None => math::mean_f32(values),
+            };
         }
 
         // Rejection variants that reorder values: use index mapping for weights
@@ -802,8 +877,8 @@ mod tests {
     #[test]
     fn test_winsorized_config_default() {
         let config = WinsorizedClipConfig::default();
-        assert!((config.sigma - 2.5).abs() < f32::EPSILON);
-        assert_eq!(config.max_iterations, 3);
+        assert!((config.sigma_low - 2.5).abs() < f32::EPSILON);
+        assert!((config.sigma_high - 2.5).abs() < f32::EPSILON);
     }
 
     #[test]
@@ -923,15 +998,15 @@ mod tests {
     }
 
     #[test]
-    fn test_winsorize() {
-        let values = vec![1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 100.0];
-        let mut working = vec![];
-        let mut scratch = vec![];
-        let winsorized =
-            WinsorizedClipConfig::new(2.0, 3).winsorize(&values, &mut working, &mut scratch);
-        let mean = math::mean_f32(winsorized);
-        assert!(mean < 20.0, "Outlier should be winsorized, got {}", mean);
-        assert_eq!(winsorized.len(), 8);
+    fn test_winsorized_rejects_outlier() {
+        let mut values = vec![1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 100.0];
+        let remaining = WinsorizedClipConfig::new(2.0).reject(&mut values, &mut scratch());
+        assert!(
+            remaining < 8,
+            "Outlier should be rejected, got {remaining} survivors"
+        );
+        let mean = math::mean_f32(&values[..remaining]);
+        assert!(mean < 10.0, "Mean of survivors should be low, got {mean}");
     }
 
     #[test]
@@ -1011,11 +1086,8 @@ mod tests {
             SigmaClipConfig::new_asymmetric(4.0, 3.0, 3).reject(&mut [1.0, 2.0], &mut scratch());
         assert_eq!(r, 2);
 
-        let mut working = vec![];
-        let mut scratch_buf = vec![];
-        let w =
-            WinsorizedClipConfig::default().winsorize(&[1.0, 2.0], &mut working, &mut scratch_buf);
-        assert_eq!(w.len(), 2);
+        let r = WinsorizedClipConfig::default().reject(&mut [1.0, 2.0], &mut scratch());
+        assert_eq!(r, 2);
 
         let r = LinearFitClipConfig::default().reject(&mut [1.0, 2.0], &mut scratch());
         assert_eq!(r, 2);
@@ -1129,7 +1201,9 @@ mod tests {
         );
 
         let r = Rejection::winsorized(3.0);
-        assert!(matches!(r, Rejection::Winsorized(c) if (c.sigma - 3.0).abs() < f32::EPSILON));
+        assert!(
+            matches!(r, Rejection::Winsorized(c) if (c.sigma_low - 3.0).abs() < f32::EPSILON && (c.sigma_high - 3.0).abs() < f32::EPSILON)
+        );
 
         let r = Rejection::linear_fit(2.5);
         assert!(matches!(r, Rejection::LinearFit(c)
@@ -1299,32 +1373,21 @@ mod tests {
     }
 
     #[test]
-    fn test_winsorize_no_outliers() {
-        let values = vec![2.0, 2.1, 2.2, 1.9, 2.0];
-        let mut working = vec![];
-        let mut scratch_buf = vec![];
-        let winsorized =
-            WinsorizedClipConfig::new(3.0, 3).winsorize(&values, &mut working, &mut scratch_buf);
-        assert_eq!(winsorized.len(), 5);
-        // Values should pass through unchanged
-        for (orig, &w) in values.iter().zip(winsorized.iter()) {
-            assert!(
-                (orig - w).abs() < f32::EPSILON,
-                "Value {} should be unchanged, got {}",
-                orig,
-                w
-            );
-        }
+    fn test_winsorized_no_outliers() {
+        let mut values = vec![2.0, 2.1, 2.2, 1.9, 2.0];
+        let remaining = WinsorizedClipConfig::new(3.0).reject(&mut values, &mut scratch());
+        assert_eq!(remaining, 5, "No values should be rejected");
     }
 
     #[test]
-    fn test_winsorize_does_not_modify_original() {
-        let values = vec![1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 100.0];
-        let original = values.clone();
-        let mut working = vec![];
-        let mut scratch_buf = vec![];
-        WinsorizedClipConfig::new(2.0, 3).winsorize(&values, &mut working, &mut scratch_buf);
-        assert_eq!(values, original, "Original values should not be modified");
+    fn test_winsorized_asymmetric() {
+        // Strong high outlier, mild low variation
+        let mut values = vec![1.0, 1.1, 1.2, 0.9, 1.0, 50.0];
+        let remaining =
+            WinsorizedClipConfig::new_asymmetric(3.0, 2.0).reject(&mut values, &mut scratch());
+        assert!(remaining < 6, "High outlier should be rejected");
+        let mean = math::mean_f32(&values[..remaining]);
+        assert!(mean < 5.0, "Mean without outlier should be low, got {mean}");
     }
 
     #[test]

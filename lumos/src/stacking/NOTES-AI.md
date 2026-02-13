@@ -47,32 +47,15 @@ three normalization modes, per-frame weighting, and automatic memory management.
   Siril computes the same: `sigma += fabsf(stack[frame] - (a * frame + b)); sigma /= N;`
 - Current computation is doubly wrong: wrong centering + MAD instead of mean absolute deviation.
 
-### P1: Winsorized -- Missing 1.134 Correction Factor -- HIGH
+### ~~P1: Winsorized -- Missing 1.134 Correction Factor~~ — FIXED
+### ~~P1: Winsorized -- Wrong Architecture (Missing Two-Phase Approach)~~ — FIXED
 
-- **File**: rejection.rs, `WinsorizedClipConfig::winsorize`
-- Both PixInsight and Siril multiply the Winsorized standard deviation by **1.134** to
-  correct for bias introduced by replacing tail values. This factor derives from
-  the area under the normal curve beyond +/-1.5 sigma (Huber's c constant).
-- Siril source: `sigma = 1.134f * siril_stats_float_sd(w_stack, N, NULL);`
-- Without this correction, sigma is underestimated, causing **systematic over-rejection**.
-
-### P1: Winsorized -- Wrong Architecture (Missing Two-Phase Approach) -- HIGH
-
-- **File**: rejection.rs, `WinsorizedClipConfig`
-- **Industry approach** (PixInsight + Siril):
-  1. Phase 1: Iteratively Winsorize with **Huber's c=1.5** constant to get robust
-     (center, sigma) estimates. Converge until `|sigma_new - sigma_old| / sigma_old < 0.0005`.
-  2. Phase 2: Apply standard sigma clipping with the robust estimates and user's
-     sigma_low/sigma_high thresholds.
-- **Our approach**: Uses the user's sigma directly for Winsorization boundaries
-  (conflating the two steps), does fixed iterations (no convergence), and returns the
-  mean of Winsorized values instead of rejecting outliers then averaging survivors.
-- **Specific issues**:
-  - Uses user's sigma instead of Huber's c=1.5 for Winsorization boundaries
-  - Missing convergence-based iteration (`|delta_sigma/sigma| < 0.0005`)
-  - No rejection phase after Winsorization -- just averages Winsorized values
-  - Missing asymmetric sigma_low/sigma_high (single `sigma` field)
-  - Uses MAD instead of stddev for the Winsorized estimator (differs from industry)
+Rewritten to match PixInsight/Siril two-phase algorithm:
+- Phase 1: Iteratively Winsorize with Huber's c=1.5, stddev (not MAD),
+  1.134 bias correction, convergence criterion `|delta_sigma/sigma| < 0.0005`
+- Phase 2: Standard sigma clipping rejection using the robust estimates
+- Asymmetric sigma_low/sigma_high support added
+- Now properly rejects outliers (via `reject()`) instead of averaging Winsorized values
 
 ### P2: GESD -- Missing Asymmetric Relaxation
 
@@ -199,7 +182,7 @@ three normalization modes, per-frame weighting, and automatic memory management.
 | Sigma clip center | Median | Median |
 | Sigma clip spread | MAD * 1.4826 | MAD * 1.4826 |
 | Asymmetric sigma | Yes (sigma_low/high) | Yes (sigma low/high) |
-| Winsorized | Simple boundary clamp | Huber c=1.5, convergence, 1.134 correction, then sigma clip |
+| Winsorized | Huber c=1.5, convergence, 1.134 correction, then sigma clip | Huber c=1.5, convergence, 1.134 correction, then sigma clip |
 | Linear fit | Single center at midpoint | Per-pixel comparison against fitted value |
 | Linear fit sigma | MAD of residuals (wrong centering) | Mean absolute deviation from fit |
 | GESD statistics | Median + MAD | Trimmed mean + trimmed stddev |
@@ -219,7 +202,7 @@ three normalization modes, per-frame weighting, and automatic memory management.
 | Scale estimator | MAD | IKSS (default), MAD (fast mode), sqrt(BWMV) |
 | Location estimator | Median | IKSS (default), Median (fast mode) |
 | Normalization modes | 3 (None/Global/Mult) | 5 (None/Add/Mult/Add+Scale/Mult+Scale) |
-| Winsorized correction | No 1.134 factor | Yes, 1.134 * stddev |
+| Winsorized correction | Yes, 1.134 * stddev | Yes, 1.134 * stddev |
 | Linear fit sigma | MAD from single center | Mean absolute deviation, per-pixel |
 | Weighting | Manual | Automatic: noise, FWHM, star count |
 | Rejection maps | No | Yes (low/high, mergeable) |
@@ -297,8 +280,8 @@ three normalization modes, per-frame weighting, and automatic memory management.
 
 1. **Fix linear fit rejection** (P1) -- per-pixel comparison against fitted line +
    mean absolute deviation sigma. Currently defeats the purpose of linear fit clipping.
-2. **Fix Winsorized architecture** (P1) -- Huber c=1.5, 1.134 correction, convergence,
-   two-phase (Winsorize then reject), asymmetric sigma. Currently over-rejects.
+2. ~~**Fix Winsorized architecture** (P1)~~ — **FIXED**: two-phase with Huber c=1.5,
+   1.134 correction, convergence, stddev, asymmetric sigma_low/sigma_high.
 3. **Add rejection maps** (P2) -- per-pixel high/low rejection counts for diagnostics.
    Most requested feature for parameter tuning.
 4. **Add auto reference frame selection** (P2) -- select lowest-noise frame. Easy win.

@@ -163,8 +163,8 @@ impl StackConfig {
                     assert!(c.max_iterations > 0, "Iterations must be at least 1");
                 }
                 Rejection::Winsorized(c) => {
-                    assert!(c.sigma > 0.0, "Sigma must be positive");
-                    assert!(c.max_iterations > 0, "Iterations must be at least 1");
+                    assert!(c.sigma_low > 0.0, "Sigma low must be positive");
+                    assert!(c.sigma_high > 0.0, "Sigma high must be positive");
                 }
                 Rejection::LinearFit(c) => {
                     assert!(c.sigma_low > 0.0, "Sigma low must be positive");
