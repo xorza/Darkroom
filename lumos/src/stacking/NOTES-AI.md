@@ -24,40 +24,171 @@ three normalization modes, per-frame weighting, and automatic memory management.
 6. Per-pixel: gather values from all frames, apply normalization, call combine function
 7. Combine function calls `rejection.combine_mean()` which rejects then computes (weighted) mean
 
-## Rejection Algorithms
+## Issues vs Industry Standards
 
-### Sigma Clipping (`SigmaClipConfig`)
-- Iterative median + MAD-based (converted via 1.4826 factor)
-- Supports asymmetric thresholds (sigma_low, sigma_high)
-- Stops when no values rejected or <= 2 values remain
-- Default: sigma=2.5, 3 iterations
+### P1: Linear Fit -- Per-Pixel Rejection Against Fitted Value -- CRITICAL
 
-### Winsorized Sigma Clipping (`WinsorizedClipConfig`)
-- Replaces outliers with boundary values instead of removing them
-- Uses median + MAD for center/sigma; clamps to [center - sigma*s, center + sigma*s]
-- Does not modify original values (writes to working buffer)
-- Default: sigma=2.5, 3 iterations
+- **File**: rejection.rs, `LinearFitClipConfig::reject`, ~line 345
+- `center = a + b * (n / 2.0)` uses a **single center** for all values.
+- Both PixInsight and Siril compare **each pixel against its own fitted value**:
+  `fitted_i = a + b * i`, then reject where `|value_i - fitted_i| > sigma * residual_sigma`.
+- Siril's `line_clipping`: `if (a*i + b - pixel > sigma * sigma_low) reject_low`.
+- Using a single midpoint center **defeats the entire purpose** of linear fit clipping,
+  which is to account for a trend in sorted pixel values.
+- **Fix**: Replace single-center comparison with per-value comparison against fitted line.
 
-### Linear Fit Clipping (`LinearFitClipConfig`)
-- First pass: median + MAD rejection (identical to sigma clip)
-- Subsequent passes: sorts survivors, fits line y=a+bx through (sorted_index, value)
-- New center from fit at median position; new sigma from MAD of residuals
-- Default: sigma_low=3.0, sigma_high=3.0, 3 iterations
+### P1: Linear Fit -- Residual Sigma Uses Wrong Computation -- CRITICAL
 
-### Percentile Clipping (`PercentileClipConfig`)
-- Sorts values, clips lowest N% and highest N%
-- Guarantees at least one survivor
-- Default: 10% low, 10% high
+- **File**: rejection.rs, ~line 348-358
+- Current: computes `(residual_i - residual_at_median_position).abs()`, then takes MAD.
+- Correct (PixInsight and Siril): **mean absolute deviation** of each value from its own
+  fitted point: `sigma = (1/N) * sum |values[i] - (a + b*i)|`.
+- PixInsight uses `adev` (average absolute deviation from fit) as the sigma measure.
+  Siril computes the same: `sigma += fabsf(stack[frame] - (a * frame + b)); sigma /= N;`
+- Current computation is doubly wrong: wrong centering + MAD instead of mean absolute deviation.
 
-### GESD (`GesdConfig`)
-- Two-phase: (1) iteratively remove most deviant value, record test statistic R_i
-- (2) backward scan comparing R_i against critical values lambda_i
-- Uses median + MAD for robust statistics (not textbook mean + stddev)
-- Inverse normal approximation (Abramowitz & Stegun) for critical values
-- Default: alpha=0.05, max_outliers=25% of n
+### P1: Winsorized -- Missing 1.134 Correction Factor -- HIGH
 
-### None
-- Pass-through, no rejection
+- **File**: rejection.rs, `WinsorizedClipConfig::winsorize`
+- Both PixInsight and Siril multiply the Winsorized standard deviation by **1.134** to
+  correct for bias introduced by replacing tail values. This factor derives from
+  the area under the normal curve beyond +/-1.5 sigma (Huber's c constant).
+- Siril source: `sigma = 1.134f * siril_stats_float_sd(w_stack, N, NULL);`
+- Without this correction, sigma is underestimated, causing **systematic over-rejection**.
+
+### P1: Winsorized -- Wrong Architecture (Missing Two-Phase Approach) -- HIGH
+
+- **File**: rejection.rs, `WinsorizedClipConfig`
+- **Industry approach** (PixInsight + Siril):
+  1. Phase 1: Iteratively Winsorize with **Huber's c=1.5** constant to get robust
+     (center, sigma) estimates. Converge until `|sigma_new - sigma_old| / sigma_old < 0.0005`.
+  2. Phase 2: Apply standard sigma clipping with the robust estimates and user's
+     sigma_low/sigma_high thresholds.
+- **Our approach**: Uses the user's sigma directly for Winsorization boundaries
+  (conflating the two steps), does fixed iterations (no convergence), and returns the
+  mean of Winsorized values instead of rejecting outliers then averaging survivors.
+- **Specific issues**:
+  - Uses user's sigma instead of Huber's c=1.5 for Winsorization boundaries
+  - Missing convergence-based iteration (`|delta_sigma/sigma| < 0.0005`)
+  - No rejection phase after Winsorization -- just averages Winsorized values
+  - Missing asymmetric sigma_low/sigma_high (single `sigma` field)
+  - Uses MAD instead of stddev for the Winsorized estimator (differs from industry)
+
+### P2: GESD -- Missing Asymmetric Relaxation
+
+- **File**: rejection.rs, `GesdConfig::reject`
+- PixInsight multiplies sigma by a relaxation factor (default >= 1.5) for pixels
+  **below** the trimmed mean, making the test more tolerant of dark outliers.
+- Dark pixels (noise floor) should be rejected less aggressively than bright outliers
+  (cosmic rays, satellites). Without relaxation, GESD over-rejects dark pixels.
+- **Fix**: Add `low_relaxation: f32` field (default 1.5) to GesdConfig.
+
+### P2: GESD -- Statistics Mismatch with Critical Values
+
+- **File**: rejection.rs, `GesdConfig::reject`
+- GESD critical values are derived assuming normal-distribution statistics (mean + stddev).
+- Our median + MAD estimator is theoretically incompatible with these critical values.
+- PixInsight uses **trimmed mean + trimmed stddev** (trimming fraction = max_outliers).
+- Siril uses raw **mean + stddev** (classic Grubbs test).
+- Our robust estimators may cause the test to behave differently from theoretical guarantees.
+- **Fix**: Consider trimmed mean + stddev to match PixInsight, or document the deviation.
+
+### P2: Missing Separate Rejection vs Combination Normalization
+
+- **File**: stack.rs, config.rs
+- PixInsight provides **two independent normalization controls**:
+  1. Rejection normalization: applied before rejection to make outlier detection uniform
+  2. Combination normalization: applied when computing final pixel values
+- These can differ. Example: "Scale + Zero Offset" for rejection (match backgrounds),
+  "No normalization" for output (preserve photometric values).
+- Our implementation uses a single normalization for both.
+- **Fix**: Add `StackConfig::rejection_normalization` field.
+
+### P2: Reference Frame Always Frame 0
+
+- **File**: stack.rs, `compute_norm_params`
+- Always uses frame 0 (first loaded) as reference.
+- A poor reference (high noise, gradient, cloud cover) degrades normalization and
+  rejection quality for the entire stack.
+- PixInsight auto-selects by SNRWeight; Siril auto-selects by noise level.
+- **Fix**: After loading, compute per-frame `sigma_bg`, select lowest-noise frame.
+
+### P2: Missing Rejection Maps Output
+
+- Both PixInsight and Siril generate per-pixel rejection count maps (low/high).
+- Critical for diagnosing whether rejection parameters are too aggressive or too lenient.
+- PixInsight also generates a slope map for linear fit clipping.
+- **Fix**: During `combine_mean`, track rejected counts. Return alongside combined value.
+
+### P2: Large-Stack Sorting Performance (N > 100)
+
+- **File**: rejection.rs, percentile and linear fit use insertion sort
+- Insertion sort is O(N^2). For N=1000 (lucky imaging), ~500K comparisons per pixel.
+  On a 6Kx4K image that's ~12 trillion comparisons.
+- **Fix**: Switch to `sort_unstable` (introsort) for N > ~50 in percentile and linear fit.
+
+### P3: Missing Additive-Only Normalization
+
+- **File**: config.rs, `Normalization` enum
+- Has None, Global (additive+scaling), Multiplicative. Missing pure additive (shift-only).
+- Formula: `offset = ref_median - frame_median`, `gain = 1.0`.
+- Useful for calibration frames (darks, bias) with varying pedestal but consistent gain.
+- Siril and PixInsight both offer 5 normalization modes including pure additive.
+
+### P3: Missing Min/Max Combine Methods
+
+- Siril and PixInsight offer Minimum and Maximum combination.
+- Maximum: star-trail images, hot pixel identification.
+- Minimum: dark current floor, cold pixel identification.
+- Trivial to implement.
+
+### P3: Cache -- DefaultHasher Non-Deterministic Across Runs
+
+- **File**: cache.rs, `cache_filename_for_path`
+- `DefaultHasher` uses SipHash with random keys. Hash of a path differs between
+  program invocations. Cache files from run 1 will **never** be found in run 2.
+- Makes `keep_cache` feature effectively useless.
+- **Fix**: Use a deterministic hasher (fixed-key SipHash, xxhash, or path-based encoding).
+
+### P3: Cache -- Missing Source File Validation
+
+- **File**: cache.rs, `try_reuse_channel_cache_file`
+- Only checks file existence + size match. If source file changes (re-calibration)
+  but path and dimensions remain the same, **stale data is silently used**.
+- **Fix**: Store source file mtime + size in sidecar metadata. Validate on reuse.
+
+### P3: Cache -- Missing madvise(MADV_SEQUENTIAL)
+
+- **File**: cache.rs, `mmap_channel_file`
+- Memory-mapped files are accessed sequentially (chunk by chunk), but no madvise hint.
+- `MADV_SEQUENTIAL` enables kernel read-ahead and early page release.
+- `memmap2::Mmap::advise(Advice::Sequential)` is a single-line addition.
+- **Fix**: Add `.advise(Advice::Sequential)` after mmap creation.
+
+### P3: Missing Frame-Type-Specific Presets
+
+- `FrameType` enum affects only logging, not behavior.
+- Industry-standard defaults differ by frame type:
+  - Bias: Mean + Winsorized(3.0), Normalization::None
+  - Dark: Mean + Winsorized(3.0), Normalization::None
+  - Flat: Mean + SigmaClip(2.5), Normalization::Multiplicative
+  - Light: Mean + SigmaClip(2.5), Normalization::Global
+- **Fix**: Add preset constructors `StackConfig::bias()`, `dark()`, `flat()`, `light()`.
+
+### P3: Sigma Clipping -- Missing Convergence Mode
+
+- Astropy supports `maxiters=None` (iterate until no values rejected).
+- Siril iterates until convergence (no rejection occurs).
+- Our implementation only supports fixed iteration count.
+- For most astrophotography stacks (10-50 frames), 3 iterations is sufficient.
+
+### P3: Percentile Clipping -- Different Semantics from Industry
+
+- Our implementation is **rank-based** (clip N% from each end of sorted values).
+- Siril's "percentile clipping" is **distance-based from median**:
+  `reject if |pixel - median| > median * percentile_factor`.
+- Both are valid approaches. Rank-based is simpler and more predictable.
+- Distance-based adapts to the actual distribution (no rejection if all values agree).
 
 ## Comparison with Industry Standards
 
@@ -68,15 +199,18 @@ three normalization modes, per-frame weighting, and automatic memory management.
 | Sigma clip center | Median | Median |
 | Sigma clip spread | MAD * 1.4826 | MAD * 1.4826 |
 | Asymmetric sigma | Yes (sigma_low/high) | Yes (sigma low/high) |
-| Winsorized asymmetric | No (single sigma) | Yes (sigma low/high) |
-| Linear fit | Sorted-index fit | Sorted-index fit |
+| Winsorized | Simple boundary clamp | Huber c=1.5, convergence, 1.134 correction, then sigma clip |
+| Linear fit | Single center at midpoint | Per-pixel comparison against fitted value |
+| Linear fit sigma | MAD of residuals (wrong centering) | Mean absolute deviation from fit |
 | GESD statistics | Median + MAD | Trimmed mean + trimmed stddev |
-| GESD relaxation | Not implemented | Yes (default 1.5, multiplies sigma for low pixels) |
-| Normalization | None/Global/Multiplicative | Additive/Multiplicative/Additive+Scaling/Local |
+| GESD relaxation | Not implemented | Yes (default 1.5 for low pixels) |
+| Normalization | 3 modes (None/Global/Mult) | 5 modes + Local normalization |
 | Rejection normalization | Same as combination | Separate from combination normalization |
-| Weighting | Manual per-frame weights | Noise eval, PSF signal, PSF SNR, FITS keyword |
+| Weighting | Manual per-frame weights | Noise eval (MRS), PSF signal, PSF SNR |
+| Reference frame | Always frame 0 | Auto-select by quality metric |
+| Combine methods | Mean, Median | Mean, Median, Min, Max |
 | Rejection maps | Not generated | Low/High rejection maps + slope map |
-| Large-scale rejection | Not implemented | Layers + growth for satellite/airplane trails |
+| Large-scale rejection | Not implemented | Layers + growth for satellite trails |
 
 ### vs Siril
 
@@ -85,97 +219,66 @@ three normalization modes, per-frame weighting, and automatic memory management.
 | Scale estimator | MAD | IKSS (default), MAD (fast mode), sqrt(BWMV) |
 | Location estimator | Median | IKSS (default), Median (fast mode) |
 | Normalization modes | 3 (None/Global/Mult) | 5 (None/Add/Mult/Add+Scale/Mult+Scale) |
-| Weighting formula | Manual | 1/(pscale^2 * bgnoise^2) automatic |
+| Winsorized correction | No 1.134 factor | Yes, 1.134 * stddev |
+| Linear fit sigma | MAD from single center | Mean absolute deviation, per-pixel |
+| Weighting | Manual | Automatic: noise, FWHM, star count |
 | Rejection maps | No | Yes (low/high, mergeable) |
-| MAD clipping | Via sigma clip | Separate algorithm |
-| Median sigma clip | No | Yes (replaces rejected with median) |
+| Percentile clipping | Rank-based | Distance-based from median |
+| Block processing | Per-channel sequential | Channel-in-block (parallel channels) |
+| Memory threshold | 75% of available | 90% of available |
 
-## Correctness Assessment
+## What We Do Well
 
-### Correct
-- **MAD-based sigma**: Uses proper 1.4826 factor for all rejection algorithms
-- **Asymmetric sigma clipping**: Separate low/high thresholds, tested extensively
+- **MAD-based sigma**: More robust than Siril's default clipped stddev and DSS's mean+stddev
+- **ScratchBuffers per rayon thread**: No per-pixel allocation (PixInsight allocates per pixel)
+- **Compile-time safety**: `CombineMethod::Mean(Rejection)` makes invalid combinations
+  unrepresentable (e.g., median + rejection)
+- **Adaptive storage**: Auto in-memory vs disk-backed (mmap) based on available RAM
 - **Index tracking**: Maintains frame-to-weight mapping through rejection reordering
-- **Percentile surviving_range**: Handles edge cases, guarantees >= 1 survivor
-- **GESD backward scan**: Correct implementation of the two-phase decision rule
+- **Asymmetric sigma clipping**: Proper separate low/high thresholds
+- **GESD two-phase**: Correct forward removal + backward scan matching NIST description
 - **Normalization formulas**: Global matches Siril's "additive with scaling"
-
-### Issues
-
-**GESD: Missing asymmetric relaxation (Medium)**
-- rejection.rs GesdConfig: PixInsight multiplies sigma by a relaxation factor (default 1.5)
-  for low-pixel test statistics, making it much more tolerant of dark outliers.
-  This is critical because dark pixels (noise floor) should be rejected less aggressively
-  than bright outliers (cosmic rays, satellites).
-- Fix: Add `low_relaxation: f32` field (default 1.5) to GesdConfig.
-
-**GESD: Uses median+MAD instead of trimmed mean+trimmed stddev (Medium)**
-- rejection.rs GesdConfig::reject: Standard GESD uses mean+stddev. PixInsight improves
-  this with trimmed statistics (trimming proportion = max_outliers fraction).
-  Median+MAD is more robust but has higher variance for normally-distributed data,
-  which can cause over-rejection in small stacks.
-- The NIST reference states critical value approximation is accurate for n >= 25.
-
-**Linear fit: Center computed at midpoint position only (Medium)**
-- rejection.rs LinearFitClipConfig::reject: `center = a + b * (n / 2.0)` uses a single
-  center for all values. The correct approach (matching PixInsight/Siril) is to compare
-  each pixel against its own fitted value: `fitted_i = a + b * i`, then reject where
-  `|value_i - fitted_i| > sigma * residual_sigma`.
-- Current code rejects based on distance from one center point, which is less accurate
-  for values far from the median sorted position.
-
-**Linear fit: Residual MAD uses wrong centering (Medium)**
-- rejection.rs ~line 349: Computes `(residual_i - residual_at_median_position).abs()`,
-  but should compute MAD of all residuals directly (median of absolute deviations
-  from the median residual, not from one specific residual).
-
-**Winsorized: Symmetric sigma only (Medium)**
-- rejection.rs WinsorizedClipConfig: Single `sigma` field. Both PixInsight and Siril
-  support separate sigma_low/sigma_high for asymmetric winsorization.
-
-**Missing additive-only normalization (Low)**
-- config.rs Normalization: Has None, Global (additive+scaling), Multiplicative.
-  Missing pure additive mode (shift-only, no gain adjustment).
-  Siril offers five modes. Pure additive is useful for same-setup sessions with
-  varying sky background but consistent gain characteristics.
-
-**Missing rejection maps output (Low)**
-- Both PixInsight and Siril generate per-pixel rejection count maps (high/low).
-  Critical for diagnosing whether rejection parameters are too aggressive or too lenient.
-  PixInsight also generates a slope map for linear fit clipping.
-
-**Missing large-scale rejection (Low)**
-- PixInsight has separate large-scale rejection (layers + growth parameters)
-  specifically for satellite/airplane trails that span many connected pixels.
-  Current implementation handles these only through per-pixel sigma clipping,
-  which can miss coherent structures.
+- **Thorough test coverage**: ~90+ tests including weight alignment, edge cases, cross-validation
 
 ## Memory Management
 
-- **In-memory mode**: Chosen when total image data < 75% of available RAM
+- **In-memory mode**: When total image data < 75% of available RAM
 - **Disk-backed mode**: Per-channel binary files with mmap; hash-based filenames
-  allow cache reuse across runs (`keep_cache` option)
-- **Chunked processing**: Rows processed in chunks sized to fit in memory;
-  adaptive sizing via `compute_optimal_chunk_rows_with_memory()`
-- **Parallel I/O**: Loading limited to 3 concurrent threads to cap memory/IO pressure
+- **Chunked processing**: Rows in chunks sized to fit memory; chunk_rows =
+  `usable_memory / (width * sizeof(f32) * frame_count)` (processes one channel at a time)
+- **Parallel I/O**: Loading limited to 3 concurrent threads. Conservative for HDD;
+  suboptimal for NVMe SSD (could use 6-8 for SSDs)
 - **Per-thread scratch**: `ScratchBuffers` allocated once per rayon thread via `for_each_init`
-- **Cache cleanup**: `Drop` impl removes cache files unless `keep_cache` is set
+- **Cache cleanup**: `Drop` impl removes cache files unless `keep_cache` set
+- **bytemuck alignment**: mmap returns page-aligned addresses (4096-byte); f32 needs
+  4-byte alignment. Always safe. Consider `try_cast_slice().expect()` for clarity.
 
-### Siril comparison
-- Siril uses block-based parallel processing with `_data_block` structures
-- Maintains separate rejected/working/original stacks per block
-- Both approaches are O(width * height * frames) total; this implementation
-  has simpler per-channel pass structure while Siril processes all channels together
+### vs Siril Block Processing
+- Siril's blocks include the channel dimension: different threads can work on different
+  channels simultaneously. Our implementation processes channels sequentially in the
+  outer loop, limiting cross-channel parallelism.
+- Siril takes 90% of available memory (vs our 75%). If memory can't feed all threads,
+  Siril reduces thread count rather than shrinking blocks.
+- Siril's `refine_blocks_candidate()` balances block distribution across threads.
+
+### vs PixInsight
+- PixInsight reads rows directly from FITS on demand (no pre-caching phase).
+  Our approach writes all images to cache files first, adding an extra I/O pass.
+- PixInsight uses "buffer size" + "stack size" parameters for memory control.
+  Users find that smaller buffer sizes sometimes perform better due to reduced
+  memory pressure and better cache locality.
 
 ## Weighting
 
 - Manual per-frame weights via `StackConfig::weights`
 - Weights normalized to sum to 1.0 before use
 - Index tracking preserves correct weight-to-value mapping after rejection reordering
-- Weighted mean computed via `weighted_mean_indexed()` using frame index mapping
-- Missing: automatic noise-based weighting (PixInsight: noise eval via MRS;
-  Siril: `1/(pscale^2 * bgnoise^2)`)
+- Missing: automatic noise-based weighting (`w = 1/sigma_bg^2`, inverse variance --
+  theoretically optimal for maximizing SNR)
+- Missing: FWHM-based weighting (`w = 1/(sigma_bg^2 * FWHM^2)` for point sources)
 - Missing: PSF-based weighting (PixInsight: PSF signal weight, PSF SNR)
+- The `weights` field provides the integration point; automatic computation belongs
+  in a separate quality-assessment module
 
 ## Normalization
 
@@ -184,12 +287,27 @@ three normalization modes, per-frame weighting, and automatic memory management.
   Matches Siril's "additive with scaling". Best for light frames.
 - **Multiplicative**: `gain = ref_median / frame_median`, `offset = 0`
   Best for flat frames where exposure varies.
-- Reference frame: always frame 0 (first loaded)
-- Statistics: per-channel median and MAD computed via `compute_channel_stats()`
-- Missing: separate normalization for rejection vs combination pass
-  (PixInsight separates these; important for photometric accuracy)
-- Missing: IKSS/BWMV estimators (Siril default; more robust than median+MAD
-  but slower). Current MAD-based approach matches Siril's "fast normalization" mode.
+- Reference frame: always frame 0 (first loaded) -- should auto-select by quality
+- Statistics: per-channel median and MAD via `compute_channel_stats()`
+- Missing: separate rejection vs combination normalization (PixInsight feature)
+- Missing: IKSS estimator (sigma-clip then recompute with BWMV -- Siril default)
+- Missing: pure additive mode, local normalization
+
+## Most Impactful Fixes (ordered by expected improvement)
+
+1. **Fix linear fit rejection** (P1) -- per-pixel comparison against fitted line +
+   mean absolute deviation sigma. Currently defeats the purpose of linear fit clipping.
+2. **Fix Winsorized architecture** (P1) -- Huber c=1.5, 1.134 correction, convergence,
+   two-phase (Winsorize then reject), asymmetric sigma. Currently over-rejects.
+3. **Add rejection maps** (P2) -- per-pixel high/low rejection counts for diagnostics.
+   Most requested feature for parameter tuning.
+4. **Add auto reference frame selection** (P2) -- select lowest-noise frame. Easy win.
+5. **Add noise-based auto weighting** (P2) -- `w = 1/sigma_bg^2`. Highest-impact
+   automatic weighting scheme. Requires reliable background noise estimator.
+6. **Fix cache hash determinism** (P3) -- replace `DefaultHasher` with deterministic
+   hash so `keep_cache` works across process runs.
+7. **Add madvise(MADV_SEQUENTIAL)** (P3) -- single-line change for disk-backed perf.
+8. **Add frame-type presets** (P3) -- `bias()`, `dark()`, `flat()`, `light()`.
 
 ## Test Coverage
 
@@ -203,3 +321,16 @@ three normalization modes, per-frame weighting, and automatic memory management.
 - Dispatch: normalized vs unnormalized stacking comparison
 - Cache: in-memory and disk-backed roundtrip, reuse detection, dimension mismatch
 - Real data test (ignored): stacks registered lights from calibration directory
+
+## References
+
+- [PixInsight PCL -- IntegrationRejectionEngine.cpp](https://github.com/PixInsight/PCL/blob/master/src/modules/processes/ImageIntegration/IntegrationRejectionEngine.cpp)
+- [PixInsight Image Weighting Algorithms](https://pixinsight.com/doc/docs/ImageWeighting/ImageWeighting.html)
+- [PixInsight Forum -- Winsorized Sigma Clipping](https://pixinsight.com/forum/index.php?threads/image-integration-question-about-winsorized-sigma-clipping.1558/)
+- [Siril Stacking Documentation (1.5.0)](https://siril.readthedocs.io/en/latest/preprocessing/stacking.html)
+- [Siril rejection_float.c (GitLab)](https://gitlab.com/free-astro/siril/-/blob/master/src/stacking/rejection_float.c)
+- [Astropy sigma_clip](https://docs.astropy.org/en/stable/api/astropy.stats.sigma_clip.html)
+- [NIST -- Generalized ESD Test](https://www.itl.nist.gov/div898/handbook/eda/section3/eda35h3.htm)
+- [DeepSkyStacker Technical Info](http://deepskystacker.free.fr/english/technical.htm)
+- [Zackay & Ofek 2017 -- Optimal Coaddition](https://arxiv.org/abs/1512.06879)
+- Bertin & Arnouts 1996 (SExtractor): A&AS 117, 393
