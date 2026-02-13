@@ -79,87 +79,34 @@ See submodule NOTES-AI.md files for detailed per-module analysis:
 ### ~~P1: Default 4-Connectivity Is Non-Standard~~ FIXED
 - Default changed to 8-connectivity, matching SExtractor, photutils, and SEP.
 
-### P2: L.A.Cosmic Missing Fine Structure Ratio -- HIGH IMPACT
-- **File**: centroid/mod.rs (Laplacian SNR computation)
-- van Dokkum (2001) L.A.Cosmic uses TWO criteria: (1) Laplacian SNR AND (2) fine
-  structure ratio = Laplacian / median-filtered-Laplacian > threshold.
-- Without the fine structure ratio, bright star peaks (large Laplacian from sharpness)
-  get flagged alongside actual cosmic rays.
-- The fine structure ratio discriminates: CRs have high Laplacian but low surrounding
-  signal (high ratio), while stars have proportional surrounding signal (low ratio).
-- **Fix**: Compute median-filtered Laplacian, divide. Threshold at ~2.0 per paper.
-
 ### ~~P2: Negative Clipping Before Convolution~~ FIXED
 - Removed `.max(0.0)` in `matched_filter()`. Fixed together with P1 noise scaling.
 
-### P2: Background Uses Sigma-Clipped Median, Not Mode/Biweight
-- **File**: background/tile_grid.rs, compute_tile_stats
-- SExtractor: `Mode = 2.5*Median - 1.5*Mean` (~30% less noisy in crowded fields).
-  photutils recommends biweight location (98.2% efficiency vs median's 64%).
-- Current sigma-clipped median is adequate for sparse fields. Iterative refinement
-  with source masking partially compensates.
-- **Fix**: Implement SExtractor mode formula with median fallback (simplest).
-  See background/NOTES-AI.md for biweight location details.
-
-### P2: Deblend Contrast Criterion Differs from SExtractor
-- **File**: deblend/multi_threshold/mod.rs L787-826
-- This implementation uses **parent-relative** contrast criterion.
-- SExtractor uses **root/total component** relative contrast (confirmed from source).
-- Parent-relative is stricter for nested splits. Difference mainly affects deeply
-  nested tree structures with 3+ levels.
-- See deblend/NOTES-AI.md for details.
-
-### P2: Quality Metrics Differ from DAOFIND Definitions
-- **Sharpness** (centroid/mod.rs:652-656): `peak/core_flux` vs DAOFIND
-  `(peak - mean_surrounding) / convolved_peak`. Different metric.
-- **GROUND roundness** (centroid/mod.rs:678-681): raw marginal max vs Gaussian fit
-  amplitude. Missing factor of 2 (range [-0.5,0.5] vs DAOFIND [-1,1]).
-- **SROUND** (centroid/mod.rs:683-701): marginal asymmetry vs quadrant symmetry.
-- **SNR** (centroid/mod.rs:646): full square stamp area `(2r+1)^2` vs circular aperture.
-  Underestimates SNR by factor of sqrt(pi/4) to sqrt(2).
-- Still functional for quality filtering but published threshold values not transferable.
-
-### P3: Background Interpolation is Bilinear, Not Bicubic Spline
-- **File**: background/mod.rs:105-231
-- SExtractor uses bicubic spline. Negligible difference for registration (interpolation
-  errors far below noise floor with 64px tiles).
-
-### P3: Gaussian Fit Model Lacks Rotation Angle (theta)
-- **File**: centroid/gaussian_fit/mod.rs
-- 6 params vs SExtractor's 7 (with theta). Adequate for near-circular ground-based PSFs.
-
-### P3: Filter Rejection Categories Are Mutually Exclusive
-- **File**: detector/stages/filter.rs:28-47
-- Cascading if-else: first failure reported. SExtractor uses bit-field FLAGS for all.
-
-### P3: FWHM Lacks Pixel Discretization Correction
-- **File**: centroid/mod.rs:619-620
-- `sigma^2 - 1/12` correction missing. Only matters for FWHM < 3px.
-
-### P3: Fit Parameters Discarded
-- **File**: centroid/mod.rs:382-412
-- Profile fit gives sigma_x, sigma_y (Gaussian) or alpha, beta (Moffat) for better
-  FWHM/eccentricity than second moments. Only position used.
-
-### P3: Deblend Pixel Assignment Uses Voronoi, Not Flux-Weighted
-- Both algorithms assign pixels by nearest-peak Euclidean distance.
-- SExtractor: probabilistic elliptical Gaussian weighting (Mahalanobis distance).
-- photutils: watershed segmentation (follows intensity gradients).
-- Impact: moderate for high dynamic range blends (>2 mag difference).
-
-### P3: Missing SExtractor Cleaning Pass
-- SExtractor removes spurious detections near bright star wings (CLEAN parameter).
-- Quality filter stage partially compensates but not equivalent.
+### Postponed (low impact, revisit only if a real problem arises)
+- **L.A.Cosmic fine structure ratio** — `laplacian_snr` is computed but never used in
+  the filter pipeline (`is_cosmic_ray_laplacian()` is not called). Only matters if
+  Laplacian-based filtering is activated.
+- **Mode estimator for background** — Iterative refinement with source masking already
+  handles the same problem (crowded fields). Marginal improvement.
+- **Deblend contrast criterion** — Parent-relative vs root-relative. Only affects deeply
+  nested 3+ level blends. Valid alternative.
+- **Quality metrics vs DAOFIND** — Custom definitions work for filtering. Published
+  threshold values aren't transferable, but that's acceptable.
+- **Bicubic spline background** — Negligible for registration with 64px tiles.
+- **Gaussian fit rotation angle** — Adequate for near-circular ground-based PSFs.
+- **Filter rejection categories** — Cascading if-else vs bit-field FLAGS. Functional.
+- **FWHM discretization correction** — Only matters for FWHM < 3px.
+- **Fit parameters discarded** — Only position used from profile fits. Could improve
+  FWHM/eccentricity but current second-moment approach works.
+- **Voronoi vs flux-weighted deblend** — Low impact for point-source centroids.
+- **SExtractor cleaning pass** — Quality filter stage partially compensates.
 
 ## Cross-Cutting Summary
 
-### Most Impactful Fixes (ordered by expected improvement)
+### Completed Fixes
 1. ~~**Fix noise scaling** (P1)~~ **DONE** — matched_filter output normalized by sqrt(sum(K^2)).
 2. ~~**Remove dilation + fix connectivity** (P1)~~ **DONE** — dilation removed, default 8-connectivity.
 3. ~~**Remove negative clipping** (P2)~~ **DONE** — fixed together with noise scaling.
-4. **Add L.A.Cosmic fine structure ratio** (P2) -- prevents misclassifying bright star
-   peaks as cosmic rays. Compute median-filtered Laplacian, divide.
-5. **Mode estimator for background** (P2) -- SExtractor mode formula, ~5 lines of code.
 
 ### What We Do Well vs Industry
 - **MAD-based noise** is more robust than SExtractor's clipped std dev (background)
@@ -185,9 +132,6 @@ See submodule NOTES-AI.md files for detailed per-module analysis:
 ### Consistency Issues Across Modules
 - ~~Dilation + 4-connectivity~~ **FIXED** — dilation removed, 8-connectivity default
 - ~~Matched filter output not in proper units~~ **FIXED** — noise-normalized output
-- Quality metrics (sharpness, roundness) use custom definitions but config defaults
-  and documentation reference DAOFIND ranges, which don't apply
-- L.A.Cosmic implementation is incomplete (missing fine structure ratio)
 
 ## Missing Features vs SExtractor / PixInsight
 
@@ -205,8 +149,7 @@ See submodule NOTES-AI.md files for detailed per-module analysis:
   scale variation across the field
 
 ### vs photutils DAOStarFinder
-- Missing noise correction factor (P1)
-- Sharpness/roundness metrics non-standard (P2)
+- ~~Missing noise correction factor~~ **FIXED**
 - No negative-wing (zero-sum) kernel for implicit background subtraction
 
 ## References
