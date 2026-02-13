@@ -136,3 +136,59 @@ fn test_mean_f32_two_elements() {
     let values = [3.0f32, 7.0];
     assert!((mean_f32(&values) - 5.0).abs() < f32::EPSILON);
 }
+
+// ---------------------------------------------------------------------------
+// weighted_mean_f32 tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_weighted_mean_uniform_weights() {
+    let values = [1.0f32, 2.0, 3.0, 4.0, 5.0];
+    let weights = [1.0f32; 5];
+    let result = weighted_mean_f32(&values, &weights);
+    assert!((result - 3.0).abs() < 1e-6);
+}
+
+#[test]
+fn test_weighted_mean_varying_weights() {
+    // Weighted mean of [10, 20] with weights [3, 1] = (30 + 20) / 4 = 12.5
+    let values = [10.0f32, 20.0];
+    let weights = [3.0f32, 1.0];
+    let result = weighted_mean_f32(&values, &weights);
+    assert!((result - 12.5).abs() < 1e-6);
+}
+
+#[test]
+fn test_weighted_mean_single_value() {
+    let result = weighted_mean_f32(&[42.0], &[5.0]);
+    assert!((result - 42.0).abs() < 1e-6);
+}
+
+#[test]
+fn test_weighted_mean_empty() {
+    let result = weighted_mean_f32(&[], &[]);
+    assert_eq!(result, 0.0);
+}
+
+#[test]
+fn test_weighted_mean_zero_weights_returns_zero() {
+    let result = weighted_mean_f32(&[1.0, 2.0, 3.0], &[0.0, 0.0, 0.0]);
+    assert_eq!(result, 0.0);
+}
+
+#[test]
+fn test_weighted_mean_one_nonzero_weight() {
+    // Only the value with nonzero weight should matter
+    let values = [10.0f32, 20.0, 30.0];
+    let weights = [0.0f32, 5.0, 0.0];
+    let result = weighted_mean_f32(&values, &weights);
+    assert!((result - 20.0).abs() < 1e-6);
+}
+
+#[test]
+fn test_weighted_mean_negative_values() {
+    let values = [-10.0f32, 10.0];
+    let weights = [1.0f32, 1.0];
+    let result = weighted_mean_f32(&values, &weights);
+    assert!(result.abs() < 1e-6);
+}

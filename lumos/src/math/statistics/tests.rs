@@ -238,6 +238,57 @@ fn test_sigma_clipped_all_same_then_one_different() {
 }
 
 // ---------------------------------------------------------------------------
+// NaN handling tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_median_with_nan_does_not_panic() {
+    let mut values = [1.0f32, f32::NAN, 3.0, 2.0, 5.0];
+    // Should not panic — NaN sorts to end via total_cmp
+    let median = median_f32_mut(&mut values);
+    assert!(!median.is_nan());
+}
+
+#[test]
+fn test_sigma_clip_with_nan_does_not_panic() {
+    let mut values = vec![10.0f32; 20];
+    values[5] = f32::NAN;
+    values[15] = f32::NAN;
+    let mut deviations = Vec::new();
+    // Should not panic
+    let (median, _sigma) = sigma_clipped_median_mad(&mut values, &mut deviations, 3.0, 3);
+    assert!(!median.is_nan());
+}
+
+// ---------------------------------------------------------------------------
+// Sigma clip index correspondence regression test
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_sigma_clip_asymmetric_outliers() {
+    // Regression test for the index mismatch bug where select_nth_unstable_by
+    // on the deviations buffer broke the correspondence with the values buffer.
+    // With asymmetric outliers, the bug would clip wrong values.
+    let mut values: Vec<f32> = vec![100.0; 50];
+    // Add outliers only on the high side
+    values.extend([500.0, 600.0, 700.0, 800.0, 900.0]);
+    let mut deviations = Vec::new();
+
+    let (median, sigma) = sigma_clipped_median_mad(&mut values, &mut deviations, 2.5, 5);
+
+    assert!(
+        (median - 100.0).abs() < 1.0,
+        "median should be ~100, got {}",
+        median
+    );
+    assert!(
+        sigma < 5.0,
+        "sigma should be small after clipping outliers, got {}",
+        sigma
+    );
+}
+
+// ---------------------------------------------------------------------------
 // abs_deviation_inplace tests
 // ---------------------------------------------------------------------------
 

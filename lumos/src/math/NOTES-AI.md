@@ -14,30 +14,11 @@ robust statistics (median via quickselect, MAD, iterative sigma-clipped rejectio
 - Correct MAD_TO_SIGMA constant: 1.4826022 matches 1/inverse-CDF(3/4) for normal distribution
 - Correct DMat3: cofactor inverse, perspective divide, Frobenius norm
 - Good test coverage for statistics and SIMD boundaries
+- NaN-safe median/sigma-clipping via `f32::total_cmp` (NaN sorts to end, gets clipped)
+- `Aabb::is_empty()` with correct `width()`/`height()`/`area()` returning 0 for empty boxes
+- `weighted_mean_f32` has `debug_assert_eq` on lengths, returns 0.0 on zero weights
 
-## Issues Found
-
-### BUG: Deviation/Value Index Mismatch in sigma_clip_iteration
-- File: `statistics/mod.rs`, lines 96-139
-- **Root cause**: Two calls to `select_nth_unstable_by` destroy index correspondence.
-  1. Line 109: `median_f32_approx(active)` partially sorts `values[..*len]`.
-  2. Lines 112-113: `deviations` is copied from the reordered values, then transformed to
-     absolute deviations. At this point `deviations[i]` corresponds to `values[i]`.
-  3. Line 115: `median_f32_approx(&mut deviations[..*len])` partially sorts `deviations`.
-     Now `deviations[i]` no longer corresponds to `values[i]`.
-  4. Lines 125-129: Clipping loop uses `deviations[i]` to decide on `values[i]` -- indices are mismatched.
-- **Effect**: Wrong values get clipped. The pairing is effectively randomized.
-- **Mitigation in practice**: Deviations are symmetric around the median, and multiple
-  iterations re-converge, so final results are often close. But individual iterations
-  clip incorrect values, and edge cases (asymmetric distributions) will produce wrong results.
-- **Fix**: After computing the MAD median, recompute deviations from scratch:
-  ```rust
-  // After line 115 (MAD computation), recompute:
-  for i in 0..*len {
-      deviations[i] = (values[i] - median).abs();
-  }
-  ```
-  Alternatively, use a separate scratch buffer for the MAD median computation.
+## Remaining Issues
 
 ### No Compensated Summation - Precision Loss for Large Arrays
 - Files: `sum/scalar.rs`, `sum/sse.rs`, `sum/avx2.rs`, `sum/neon.rs`
@@ -56,34 +37,8 @@ robust statistics (median via quickselect, MAD, iterative sigma-clipped rejectio
 - **Fix options**: (a) Neumaier compensated loop for scalar, (b) multiple accumulator
   vectors for SIMD (e.g., 2-4 vectors before combining), (c) pairwise summation.
 
-### NaN Input Panics via partial_cmp().unwrap()
-- File: `statistics/mod.rs`, lines 36, 40, 59
-- `select_nth_unstable_by(mid, |a, b| a.partial_cmp(b).unwrap())` panics if any value is NaN.
-- NaN values can arise from dead/hot pixels, division by zero in calibration, or bad FITS data.
-- **Industry standard**: Astropy's `sigma_clip` has `masked=True` to handle NaN/Inf.
-  Rust's `f32::total_cmp` provides a total order (NaN sorts to end) with no performance penalty.
-- **Fix**: Replace `|a, b| a.partial_cmp(b).unwrap()` with `f32::total_cmp`. NaN values
-  will sort to the end and be naturally clipped by sigma clipping.
-
-### weighted_mean_f32 Has No Tests
-- File: `sum/mod.rs`, lines 41-59
-- Zero test coverage; violates project CLAUDE.md requirement to test all non-GUI code.
-- Needs tests for: normal case, mismatched lengths, zero weights, negative weights, empty input.
-
-### weighted_mean_f32 Silently Truncates Mismatched Lengths
-- File: `sum/mod.rs`, line 49
-- `zip()` silently truncates to the shorter slice.
-- **Fix**: Add `debug_assert_eq!(values.len(), weights.len())` to catch caller bugs.
-
-### weighted_mean_f32 Fallback on Zero Weights Masks Bugs
-- File: `sum/mod.rs`, lines 54-58
-- When `weight_sum <= f32::EPSILON`, falls back to unweighted mean.
-- This masks likely caller bugs (all-zero or all-negative weights).
-- **Fix**: Return 0.0 or document the behavior explicitly. Falling back to unweighted mean
-  is surprising behavior.
-
 ### weighted_mean_f32 Uses Naive Scalar Loop, Not SIMD
-- File: `sum/mod.rs`, lines 46-51
+- File: `sum/mod.rs`
 - The module provides SIMD-accelerated `sum_f32` but `weighted_mean_f32` uses a naive
   scalar loop. For large arrays this misses the SIMD speedup.
 
@@ -102,13 +57,6 @@ robust statistics (median via quickselect, MAD, iterative sigma-clipped rejectio
 - References removed functions: `sum_squared_diff`, `accumulate`, `scale`.
 - Table lists 5 functions but only `sum_f32`, `mean_f32`, and `weighted_mean_f32` exist.
 - Benchmark results may be outdated.
-
-### Aabb::empty().width() Returns 1, Not 0
-- File: `bbox.rs`, lines 47-49
-- `saturating_sub` prevents overflow but `usize::MAX.saturating_sub(0) + 1 = 0` (wraps).
-  Actually on closer inspection: `max=0, min=usize::MAX`, so `width = 0 - usize::MAX`
-  which saturates to 0, then +1 = 1. This is semantically wrong for an empty box.
-- **Fix**: Add `is_empty()` method; return 0 from `width()`/`height()`/`area()` when empty.
 
 ### Vec2us::sub Can Panic on Underflow
 - File: `vec2us.rs`, lines 53-58
@@ -152,7 +100,7 @@ math/
   mod.rs          - Re-exports, FWHM-sigma conversion
   statistics/
     mod.rs        - median, MAD, sigma-clipped statistics
-    tests.rs      - 30 tests covering statistics functions
+    tests.rs      - 37 tests covering statistics, NaN handling, regression tests
     bench.rs      - Benchmarks for median and sigma clipping
   sum/
     mod.rs        - SIMD dispatch, mean, weighted_mean
@@ -160,11 +108,11 @@ math/
     sse.rs        - SSE4.1 sum (x86_64)
     avx2.rs       - AVX2 sum (x86_64)
     neon.rs       - NEON sum (aarch64)
-    tests.rs      - 12 tests including SIMD boundary tests
+    tests.rs      - 19 tests including SIMD boundary and weighted_mean tests
     bench.rs      - Scalar vs SIMD benchmarks
     README.md     - (stale) documentation
   dmat3.rs        - 3x3 f64 matrix with full test suite
-  bbox.rs         - Axis-aligned bounding box with tests
+  bbox.rs         - Axis-aligned bounding box with is_empty() and tests
   vec2us.rs       - 2D usize vector with tests
 ```
 

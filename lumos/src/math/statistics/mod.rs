@@ -33,11 +33,10 @@ pub fn median_f32_mut(data: &mut [f32]) -> f32 {
     let mid = len / 2;
 
     if len & 1 == 1 {
-        let (_, median, _) = data.select_nth_unstable_by(mid, |a, b| a.partial_cmp(b).unwrap());
+        let (_, median, _) = data.select_nth_unstable_by(mid, f32::total_cmp);
         *median
     } else {
-        let (left_part, right_median, _) =
-            data.select_nth_unstable_by(mid, |a, b| a.partial_cmp(b).unwrap());
+        let (left_part, right_median, _) = data.select_nth_unstable_by(mid, f32::total_cmp);
         let right = *right_median;
         let left = left_part.iter().copied().reduce(f32::max).unwrap();
         (left + right) * 0.5
@@ -56,7 +55,7 @@ fn median_f32_approx(data: &mut [f32]) -> f32 {
     debug_assert!(!data.is_empty());
 
     let mid = data.len() / 2;
-    let (_, median, _) = data.select_nth_unstable_by(mid, |a, b| a.partial_cmp(b).unwrap());
+    let (_, median, _) = data.select_nth_unstable_by(mid, f32::total_cmp);
     *median
 }
 
@@ -119,7 +118,12 @@ fn sigma_clip_iteration(
         return Some((median, 0.0));
     }
 
-    // Clip values outside threshold using computed deviations
+    // Recompute deviations from values: median_f32_approx destroyed the index
+    // correspondence between deviations[i] and values[i] via partial sort.
+    deviations[..*len].copy_from_slice(&values[..*len]);
+    abs_deviation_inplace(&mut deviations[..*len], median);
+
+    // Clip values outside threshold using recomputed deviations
     let threshold = kappa * sigma;
     let mut write_idx = 0;
     for i in 0..*len {

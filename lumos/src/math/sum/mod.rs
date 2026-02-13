@@ -38,7 +38,15 @@ pub fn mean_f32(values: &[f32]) -> f32 {
 }
 
 /// Compute weighted mean of values with corresponding weights.
+///
+/// Returns 0.0 if the total weight is near zero.
 pub fn weighted_mean_f32(values: &[f32], weights: &[f32]) -> f32 {
+    debug_assert_eq!(
+        values.len(),
+        weights.len(),
+        "values and weights must have the same length"
+    );
+
     if values.is_empty() {
         return 0.0;
     }
@@ -54,7 +62,7 @@ pub fn weighted_mean_f32(values: &[f32], weights: &[f32]) -> f32 {
     if weight_sum > f32::EPSILON {
         sum / weight_sum
     } else {
-        values.iter().sum::<f32>() / values.len() as f32
+        0.0
     }
 }
 

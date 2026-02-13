@@ -33,6 +33,12 @@ impl Aabb {
         }
     }
 
+    /// Check if this bounding box is empty (no points included).
+    #[inline]
+    pub const fn is_empty(&self) -> bool {
+        self.min.x > self.max.x || self.min.y > self.max.y
+    }
+
     /// Expand this bounding box to include the given point.
     #[inline]
     pub fn include(&mut self, pos: Vec2us) {
@@ -42,16 +48,22 @@ impl Aabb {
         self.max.y = self.max.y.max(pos.y);
     }
 
-    /// Width of the bounding box (number of columns).
+    /// Width of the bounding box (number of columns). Returns 0 for empty boxes.
     #[inline]
     pub const fn width(&self) -> usize {
-        self.max.x.saturating_sub(self.min.x) + 1
+        if self.is_empty() {
+            return 0;
+        }
+        self.max.x - self.min.x + 1
     }
 
-    /// Height of the bounding box (number of rows).
+    /// Height of the bounding box (number of rows). Returns 0 for empty boxes.
     #[inline]
     pub const fn height(&self) -> usize {
-        self.max.y.saturating_sub(self.min.y) + 1
+        if self.is_empty() {
+            return 0;
+        }
+        self.max.y - self.min.y + 1
     }
 
     /// Check if a point is inside the bounding box.
@@ -96,6 +108,10 @@ mod tests {
         assert_eq!(bbox.max.x, 0);
         assert_eq!(bbox.min.y, usize::MAX);
         assert_eq!(bbox.max.y, 0);
+        assert!(bbox.is_empty());
+        assert_eq!(bbox.width(), 0);
+        assert_eq!(bbox.height(), 0);
+        assert_eq!(bbox.area(), 0);
     }
 
     #[test]
@@ -121,6 +137,7 @@ mod tests {
     #[test]
     fn test_single_pixel() {
         let bbox = Aabb::new(Vec2us::new(3, 5), Vec2us::new(3, 5));
+        assert!(!bbox.is_empty());
         assert_eq!(bbox.width(), 1);
         assert_eq!(bbox.height(), 1);
         assert_eq!(bbox.area(), 1);
