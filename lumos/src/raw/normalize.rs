@@ -1,7 +1,7 @@
 use rayon::prelude::*;
 
 /// Normalize u16 raw data to f32 in [0.0, 1.0] range using parallel SIMD processing.
-/// Formula: ((value - black).max(0) * inv_range)
+/// Formula: clamp(((value - black).max(0) * inv_range), 0.0, 1.0)
 pub(crate) fn normalize_u16_to_f32_parallel(data: &[u16], black: f32, inv_range: f32) -> Vec<f32> {
     const CHUNK_SIZE: usize = 16384; // Process 64KB chunks (16K * 4 bytes)
 
@@ -36,7 +36,7 @@ fn normalize_chunk_simd(input: &[u16], output: &mut [f32], black: f32, inv_range
             }
         } else {
             for (out, &val) in output.iter_mut().zip(input.iter()) {
-                *out = ((val as f32) - black).max(0.0) * inv_range;
+                *out = (((val as f32) - black).max(0.0) * inv_range).min(1.0);
             }
         }
     }
@@ -61,7 +61,7 @@ fn normalize_chunk_simd(input: &[u16], output: &mut [f32], black: f32, inv_range
 #[inline]
 fn normalize_chunk_scalar(input: &[u16], output: &mut [f32], black: f32, inv_range: f32) {
     for (out, &val) in output.iter_mut().zip(input.iter()) {
-        *out = ((val as f32) - black).max(0.0) * inv_range;
+        *out = (((val as f32) - black).max(0.0) * inv_range).min(1.0);
     }
 }
 
@@ -76,6 +76,7 @@ unsafe fn normalize_chunk_sse41(input: &[u16], output: &mut [f32], black: f32, i
         let black_vec = _mm_set1_ps(black);
         let inv_range_vec = _mm_set1_ps(inv_range);
         let zero_vec = _mm_setzero_ps();
+        let one_vec = _mm_set1_ps(1.0);
 
         let chunks = input.len() / 4;
         let remainder = input.len() % 4;
@@ -87,20 +88,21 @@ unsafe fn normalize_chunk_sse41(input: &[u16], output: &mut [f32], black: f32, i
             let vals_i32 = _mm_cvtepu16_epi32(vals_u16);
             let vals_f32 = _mm_cvtepi32_ps(vals_i32);
 
-            // Subtract black, clamp to 0, multiply by inv_range
+            // Subtract black, clamp to [0, 1], multiply by inv_range
             let subtracted = _mm_sub_ps(vals_f32, black_vec);
             let clamped = _mm_max_ps(subtracted, zero_vec);
             let normalized = _mm_mul_ps(clamped, inv_range_vec);
+            let clamped_upper = _mm_min_ps(normalized, one_vec);
 
             // Store result
-            _mm_storeu_ps(output.as_mut_ptr().add(idx), normalized);
+            _mm_storeu_ps(output.as_mut_ptr().add(idx), clamped_upper);
         }
 
         // Handle remainder with scalar
         let start = chunks * 4;
         for i in 0..remainder {
             let idx = start + i;
-            output[idx] = ((input[idx] as f32) - black).max(0.0) * inv_range;
+            output[idx] = (((input[idx] as f32) - black).max(0.0) * inv_range).min(1.0);
         }
     }
 }
@@ -116,6 +118,7 @@ unsafe fn normalize_chunk_sse2(input: &[u16], output: &mut [f32], black: f32, in
         let black_vec = _mm_set1_ps(black);
         let inv_range_vec = _mm_set1_ps(inv_range);
         let zero_vec = _mm_setzero_ps();
+        let one_vec = _mm_set1_ps(1.0);
 
         let chunks = input.len() / 4;
         let remainder = input.len() % 4;
@@ -129,20 +132,21 @@ unsafe fn normalize_chunk_sse2(input: &[u16], output: &mut [f32], black: f32, in
             let vals_i32 = _mm_unpacklo_epi16(vals_u16, _mm_setzero_si128());
             let vals_f32 = _mm_cvtepi32_ps(vals_i32);
 
-            // Subtract black, clamp to 0, multiply by inv_range
+            // Subtract black, clamp to [0, 1], multiply by inv_range
             let subtracted = _mm_sub_ps(vals_f32, black_vec);
             let clamped = _mm_max_ps(subtracted, zero_vec);
             let normalized = _mm_mul_ps(clamped, inv_range_vec);
+            let clamped_upper = _mm_min_ps(normalized, one_vec);
 
             // Store result
-            _mm_storeu_ps(output.as_mut_ptr().add(idx), normalized);
+            _mm_storeu_ps(output.as_mut_ptr().add(idx), clamped_upper);
         }
 
         // Handle remainder with scalar
         let start = chunks * 4;
         for i in 0..remainder {
             let idx = start + i;
-            output[idx] = ((input[idx] as f32) - black).max(0.0) * inv_range;
+            output[idx] = (((input[idx] as f32) - black).max(0.0) * inv_range).min(1.0);
         }
     }
 }
@@ -160,6 +164,7 @@ unsafe fn normalize_chunk_neon(input: &[u16], output: &mut [f32], black: f32, in
         let black_vec = vdupq_n_f32(black);
         let inv_range_vec = vdupq_n_f32(inv_range);
         let zero_vec = vdupq_n_f32(0.0);
+        let one_vec = vdupq_n_f32(1.0);
 
         let chunks = input.len() / 4;
         let remainder = input.len() % 4;
@@ -173,20 +178,21 @@ unsafe fn normalize_chunk_neon(input: &[u16], output: &mut [f32], black: f32, in
             // Convert to f32
             let vals_f32 = vcvtq_f32_u32(vals_u32);
 
-            // Subtract black, clamp to 0, multiply by inv_range
+            // Subtract black, clamp to [0, 1], multiply by inv_range
             let subtracted = vsubq_f32(vals_f32, black_vec);
             let clamped = vmaxq_f32(subtracted, zero_vec);
             let normalized = vmulq_f32(clamped, inv_range_vec);
+            let clamped_upper = vminq_f32(normalized, one_vec);
 
             // Store result
-            vst1q_f32(output.as_mut_ptr().add(idx), normalized);
+            vst1q_f32(output.as_mut_ptr().add(idx), clamped_upper);
         }
 
         // Handle remainder with scalar
         let start = chunks * 4;
         for i in 0..remainder {
             let idx = start + i;
-            output[idx] = ((input[idx] as f32) - black).max(0.0) * inv_range;
+            output[idx] = (((input[idx] as f32) - black).max(0.0) * inv_range).min(1.0);
         }
     }
 }

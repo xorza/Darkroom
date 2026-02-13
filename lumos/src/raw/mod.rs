@@ -255,7 +255,7 @@ fn apply_channel_corrections(
         .for_each(|(row, row_data)| {
             for (col, pixel) in row_data.iter_mut().enumerate() {
                 let ch = fc(filters, row, col);
-                *pixel = (*pixel - delta_norm[ch]).max(0.0) * wb_mul[ch];
+                *pixel = ((*pixel - delta_norm[ch]).max(0.0) * wb_mul[ch]).min(1.0);
             }
         });
 }

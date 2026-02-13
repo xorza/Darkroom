@@ -161,16 +161,6 @@ Runtime feature detection uses `common::cpu_features::has_sse4_1()` / `has_sse2(
 - Workaround: could route Bayer to `demosaic_libraw_fallback()` as interim fix.
 - Long-term: implement RCD for astrophotography-quality demosaicing.
 
-### Low: No Upper Clamp in Normalization
-- Values above `maximum` produce output > 1.0. Tests explicitly validate this behavior.
-- Industry standard (libraw, RawTherapee, dcraw) clips at white point.
-- Hot pixels and saturated star cores can produce values >> 1.0, which may cause
-  artifacts in downstream processing (e.g., X-Trans demosaic interpolation overshoot).
-
-### Low: load_raw_cfa Panics on Unknown Sensor
-- `unimplemented!()` at mod.rs:535 for Unknown sensor type.
-- Per project error handling rules, expected failures should return `Result::Err`.
-
 ### Low: alloc_uninit_vec Safety
 - 5 call sites, all with SAFETY comments explaining complete-write guarantees.
 - Valid optimization for multi-megabyte buffers (avoids kernel page zeroing).

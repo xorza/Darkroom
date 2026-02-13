@@ -320,7 +320,7 @@ impl<'a> XTransImage<'a> {
                 let val = data[idx] as f32;
                 let ch = self.pattern.color_at(raw_y, raw_x) as usize;
                 let normalized = (val - self.channel_black[ch]).max(0.0) * self.inv_range;
-                normalized * self.wb_mul[ch]
+                (normalized * self.wb_mul[ch]).min(1.0)
             }
             PixelSource::F32(data) => data[idx],
         }

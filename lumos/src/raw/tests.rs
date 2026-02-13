@@ -61,8 +61,8 @@ fn test_load_raw_valid_file() {
     for c in 0..3 {
         for &pixel in image.channel(c) {
             assert!(pixel >= 0.0, "Pixel value {} is negative", pixel);
-            // Values can exceed 1.0 slightly due to demosaic interpolation
-            assert!(pixel <= 2.0, "Pixel value {} is too large", pixel);
+            // Values can exceed 1.0 slightly due to demosaic interpolation overshoot
+            assert!(pixel <= 1.5, "Pixel value {} is too large", pixel);
         }
     }
 
@@ -130,7 +130,7 @@ fn test_normalize_u16_to_f32_parallel() {
         512,   // At black -> 0.0
         8447,  // Midpoint -> ~0.5
         16383, // At maximum -> 1.0
-        20000, // Above maximum -> >1.0
+        20000, // Above maximum -> clamped to 1.0
     ];
 
     let result = normalize::normalize_u16_to_f32_parallel(&input, black, inv_range);
@@ -153,8 +153,12 @@ fn test_normalize_u16_to_f32_parallel() {
         "At maximum should be 1.0, got {}",
         result[3]
     );
-    // Above maximum should be >1.0
-    assert!(result[4] > 1.0, "Above maximum should be >1.0");
+    // Above maximum should be clamped to 1.0
+    assert!(
+        (result[4] - 1.0).abs() < 1e-6,
+        "Above maximum should be clamped to 1.0, got {}",
+        result[4]
+    );
 }
 
 #[test]
