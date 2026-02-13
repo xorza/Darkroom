@@ -11,8 +11,8 @@ patterns and the highest-priority **unfixed** issues across all modules.
 | drizzle | Square kernel only transforms center point (is actually Turbo kernel) | Critical |
 | drizzle | Gaussian kernel FWHM uses wrong formula | Critical |
 | raw | Bayer demosaic not implemented (`todo!()`) - affects >95% of cameras | Critical |
-| labeling | AtomicUnionFind capacity overflow silently ignored | P1 |
-| calibration | Sigma floor fails when median=0 (bias frames → massive false positives) | P1 |
+| ~~labeling~~ | ~~AtomicUnionFind capacity overflow silently ignored~~ | ~~P1~~ FIXED |
+| ~~calibration~~ | ~~Sigma floor fails when median=0~~ | ~~P1~~ FIXED |
 
 ## Already Fixed (removed from priority list)
 
@@ -37,6 +37,8 @@ patterns and the highest-priority **unfixed** issues across all modules.
 - ~~registration: Double-inverse in warp()~~ — phantom issue; transform direction is correct
 - ~~registration: Euclidean estimation wrong method~~ — verified correct constrained Procrustes
 - ~~calibration: Single-channel MAD across CFA~~ — per-CFA-color statistics
+- ~~calibration: Sigma floor fails when median=0~~ — added absolute floor `1e-4`
+- ~~labeling: AtomicUnionFind capacity overflow~~ — assert on overflow instead of silent skip
 
 ## Cross-Cutting Patterns
 
@@ -65,8 +67,6 @@ patterns and the highest-priority **unfixed** issues across all modules.
 1. Fix drizzle drop size formula (`pixfrac * scale`)
 2. Fix drizzle Gaussian FWHM formula
 3. Implement Bayer demosaic (at minimum libraw fallback)
-4. Fix AtomicUnionFind capacity overflow
-5. Fix calibration sigma floor for median=0
 
 ### Short-term (correctness improvements)
 6. Fix drizzle Lanczos parameter validation + output clamping

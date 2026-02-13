@@ -182,7 +182,10 @@ fn compute_per_color_thresholds(
         let mad = crate::math::median_f32_mut(&mut samples);
 
         let computed_sigma = mad * MAD_TO_SIGMA;
-        let sigma = computed_sigma.max(median * 0.1);
+        // Floor prevents over-detection on uniform darks (MAD≈0). The median-relative
+        // floor handles typical darks; the absolute floor handles bias frames where
+        // median=0 (otherwise every pixel > 0 would be flagged as hot).
+        let sigma = computed_sigma.max(median * 0.1).max(1e-4);
         let upper = median + sigma_threshold * sigma;
         let lower = (median - sigma_threshold * sigma).max(0.0);
 

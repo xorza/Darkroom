@@ -103,14 +103,10 @@ Avoids O(n log n) sort on full-resolution images.
 
 ## Issues
 
-### Medium: Sigma Floor Fails When Median is Zero
-- **File:** defect_map.rs:185
-- `sigma = computed_sigma.max(median * 0.1)` — if median=0 (possible for bias frames
-  or well-cooled darks with very low background), the floor becomes 0.
-- When both MAD=0 and median=0, sigma=0 and upper=0, so every pixel with value > 0
-  gets flagged as hot. This would produce massive false positives on bias frames.
-- **Fix:** Use an absolute floor instead, e.g. `sigma.max(1e-6)` or
-  `sigma.max(median * 0.1).max(absolute_floor)`.
+### ~~Medium: Sigma Floor Fails When Median is Zero~~ — FIXED
+- Added absolute floor: `sigma = computed_sigma.max(median * 0.1).max(1e-4)`
+- `1e-4` in [0,1] range ≈ 6.5 ADU in 16-bit, prevents over-detection while still
+  catching genuine hot pixels. Test: `test_defect_detection_zero_median_no_false_positives`
 
 ### Low: collect_color_samples Allocates Full Channel Before Subsampling
 - **File:** defect_map.rs:229-241

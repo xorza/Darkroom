@@ -393,13 +393,9 @@ threshold and larger dilation radius to create conservative object masks.
 - Raw pointer now obtained from `words_mut().as_mut_ptr()` (proper `&mut` borrow)
   before entering parallel regions. Wrapped in `SendPtr` for thread safety.
 
-### P2: AtomicUnionFind Capacity Overflow Silently Ignored
-- **Location**: labeling/mod.rs line 731-735
-- `make_set()` uses `fetch_add(1)` and checks `if (label as usize) <= self.parent.len()`.
-  If capacity is exceeded, the label is returned without being stored in the parent array.
-- Subsequent `find()` calls on this label would access out-of-bounds memory or return
-  garbage. Pre-allocation at 5% of pixel count (line 408) is generous but not guaranteed.
-- **Fix**: Either panic on overflow (assert), or grow the parent array.
+### ~~P2: AtomicUnionFind Capacity Overflow Silently Ignored~~ — FIXED
+- `make_set()` now asserts on overflow instead of silently skipping the parent store.
+  Pre-allocation at 5% of pixel count is generous; assert catches the edge case cleanly.
 
 ### P3: No Path Compression in AtomicUnionFind::find
 - **Location**: labeling/mod.rs lines 739-752

@@ -729,9 +729,12 @@ impl AtomicUnionFind {
     #[inline]
     fn make_set(&self) -> u32 {
         let label = self.next_label.fetch_add(1, Ordering::SeqCst);
-        if (label as usize) <= self.parent.len() {
-            self.parent[label as usize - 1].store(label, Ordering::SeqCst);
-        }
+        assert!(
+            (label as usize) <= self.parent.len(),
+            "AtomicUnionFind capacity exceeded: label {label} > capacity {}",
+            self.parent.len()
+        );
+        self.parent[label as usize - 1].store(label, Ordering::SeqCst);
         label
     }
 

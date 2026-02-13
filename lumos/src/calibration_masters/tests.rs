@@ -1,4 +1,5 @@
 use crate::astro_image::cfa::{CfaImage, CfaType};
+use crate::calibration_masters::DefectMap;
 use crate::common::Buffer2;
 use crate::{AstroImageMetadata, CalibrationMasters};
 
@@ -173,6 +174,41 @@ fn test_calibrate_full_pipeline() {
         (light.data[1] - expected_1).abs() < 1e-4,
         "Expected {expected_1}, got {}",
         light.data[1]
+    );
+}
+
+#[test]
+fn test_defect_detection_zero_median_no_false_positives() {
+    // Bias frames can have median=0. Without the absolute sigma floor,
+    // every pixel > 0 would be flagged as hot.
+    let mut data = vec![0.0f32; 100];
+    // Add a few pixels with tiny values (normal bias noise)
+    data[10] = 0.0001;
+    data[20] = 0.0002;
+    data[30] = 0.0001;
+    // Add one genuine hot pixel
+    data[50] = 0.5;
+
+    let dark = CfaImage {
+        data: Buffer2::new(10, 10, data),
+        metadata: AstroImageMetadata {
+            cfa_type: Some(CfaType::Mono),
+            ..Default::default()
+        },
+    };
+
+    let defect_map = DefectMap::from_master_dark(&dark, 5.0);
+
+    // The tiny values should NOT be flagged as hot
+    assert!(
+        defect_map.hot_count() <= 1,
+        "Expected at most 1 hot pixel (the 0.5 outlier), got {}",
+        defect_map.hot_count()
+    );
+    // The genuine outlier at 0.5 should be detected
+    assert!(
+        defect_map.hot_indices.contains(&50),
+        "Genuine hot pixel at index 50 should be detected"
     );
 }
 
