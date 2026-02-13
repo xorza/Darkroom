@@ -85,12 +85,12 @@ Rewritten to match PixInsight/Siril two-phase algorithm:
 - PixInsight also generates a slope map for linear fit clipping.
 - **Fix**: During `combine_mean`, track rejected counts. Return alongside combined value.
 
-### P2: Large-Stack Sorting Performance (N > 100)
+### ~~P2: Large-Stack Sorting Performance (N > 100)~~ — FIXED
 
-- **File**: rejection.rs, percentile and linear fit use insertion sort
-- Insertion sort is O(N^2). For N=1000 (lucky imaging), ~500K comparisons per pixel.
-  On a 6Kx4K image that's ~12 trillion comparisons.
-- **Fix**: Switch to `sort_unstable` (introsort) for N > ~50 in percentile and linear fit.
+- `sort_with_indices()` helper: insertion sort for N ≤ 64 (optimal for typical stacks),
+  `sort_unstable_by` with permutation reorder for N > 64 (O(N log N) for lucky imaging).
+- Both percentile clipping and linear fit clipping use the shared helper.
+- Index co-array correctly tracked through both paths.
 
 ### P3: Missing Additive-Only Normalization
 
