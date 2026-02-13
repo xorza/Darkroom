@@ -33,6 +33,7 @@ for raw CFA data, calibration ops, demosaic dispatch).
 - FITS integer data normalized to [0,1] on load (consistent with RAW normalization)
 - BitPix distinguishes unsigned from signed types for correct normalization ranges
 - `from_fits_value()` returns Result for safe handling of unknown BITPIX values
+- X-Trans demosaic uses `process_xtrans_f32()` — no f32→u16 precision loss
 
 ## Remaining Issues
 
@@ -55,12 +56,6 @@ classification), XBINNING/YBINNING, SET-TEMP, OFFSET, FOCALLEN, AIRMASS.
 
 Returns `width * height * channels`. For 100x100 RGB: returns 30000, not 10000.
 **Fix:** Rename to `sample_count()` and add true `pixel_count() -> width * height`.
-
-### P6: X-Trans Demosaic Roundtrips Through u16
-**File:** `cfa.rs`
-
-Converts f32 -> u16 -> f32, losing ~15 bits of precision (1/65536 quantization).
-Bayer path works directly on f32. Workaround for X-Trans pipeline accepting u16 input.
 
 ### P7: No FITS Writing Support
 **File:** `mod.rs`

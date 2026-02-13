@@ -114,27 +114,9 @@ impl CfaImage {
                 astro
             }
             CfaType::XTrans(pattern) => {
-                use crate::raw::demosaic::xtrans::process_xtrans;
+                use crate::raw::demosaic::xtrans::process_xtrans_f32;
 
-                // Convert f32 back to u16 for the existing XTrans pipeline.
-                // The xtrans pipeline expects u16 + normalization params.
-                let raw_u16: Vec<u16> = pixels
-                    .par_iter()
-                    .map(|&v| (v.clamp(0.0, 1.0) * 65535.0).round() as u16)
-                    .collect();
-
-                let rgb = process_xtrans(
-                    &raw_u16,
-                    width,
-                    height,
-                    width,
-                    height,
-                    0,
-                    0,
-                    *pattern,
-                    0.0,           // black = 0 (already normalized)
-                    1.0 / 65535.0, // inv_range to undo the u16 conversion
-                );
+                let rgb = process_xtrans_f32(&pixels, width, height, width, height, 0, 0, *pattern);
 
                 let dims = ImageDimensions::new(width, height, 3);
                 let mut astro = AstroImage::from_pixels(dims, rgb);
