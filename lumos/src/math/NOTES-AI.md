@@ -33,9 +33,9 @@ All sum paths now use compensated summation for O(n·ε²) precision:
 - Scalar: 13.2µs (baseline was 16.7µs — slightly faster due to better branch pattern)
 - SIMD: 3.8µs (baseline was 1.6µs — 2.4× overhead, acceptable for precision gain)
 
-### weighted_mean_f32 Uses Scalar Loop, Not SIMD
-- File: `sum/mod.rs`
-- Uses Neumaier-compensated scalar loop. SIMD weighted mean is possible but not yet needed.
+### ~~weighted_mean_f32 Uses Scalar Loop, Not SIMD~~ — FIXED
+- SIMD dispatch (AVX2 > SSE4.1 > NEON > scalar), Kahan compensated dual accumulation
+  (v*w numerator + w denominator), 4× speedup (6µs vs 24µs, 10k elements, AVX2)
 
 ## Algorithm Comparison with Industry Standards
 

@@ -370,3 +370,108 @@ fn test_weighted_mean_compensation_helps() {
         "weighted mean error {error:.6} (f64 ref: {f64_mean:.6}, got: {result})"
     );
 }
+
+// ---------------------------------------------------------------------------
+// SIMD vs scalar consistency for weighted_mean_f32
+// ---------------------------------------------------------------------------
+
+/// Compute f64 reference weighted mean.
+fn weighted_mean_f64_ref(values: &[f32], weights: &[f32]) -> f64 {
+    let num: f64 = values
+        .iter()
+        .zip(weights.iter())
+        .map(|(&v, &w)| v as f64 * w as f64)
+        .sum();
+    let den: f64 = weights.iter().map(|&w| w as f64).sum();
+    if den > 0.0 { num / den } else { 0.0 }
+}
+
+#[test]
+fn test_weighted_mean_simd_vs_scalar() {
+    let values: Vec<f32> = (0..1000).map(|i| (i as f32) * 0.7 + 10.0).collect();
+    let weights: Vec<f32> = (0..1000).map(|i| 1.0 + (i as f32) * 0.01).collect();
+
+    let scalar_result = scalar::weighted_mean_f32(&values, &weights);
+    let simd_result = weighted_mean_f32(&values, &weights);
+    assert!(
+        (scalar_result - simd_result).abs() < 1e-4,
+        "scalar={scalar_result}, simd={simd_result}"
+    );
+}
+
+#[test]
+fn test_weighted_mean_simd_vs_scalar_large() {
+    // 10k elements — exercises full SIMD loop + remainder
+    let values: Vec<f32> = (0..10_000).map(|i| 500.0 + (i as f32) * 0.03).collect();
+    let weights: Vec<f32> = (0..10_000).map(|i| 2.0 - (i as f32) * 0.0001).collect();
+
+    let f64_ref = weighted_mean_f64_ref(&values, &weights);
+    let scalar_result = scalar::weighted_mean_f32(&values, &weights);
+    let simd_result = weighted_mean_f32(&values, &weights);
+
+    let scalar_err = (scalar_result as f64 - f64_ref).abs();
+    let simd_err = (simd_result as f64 - f64_ref).abs();
+    assert!(
+        scalar_err < 0.1,
+        "scalar error {scalar_err:.6} vs f64 ref {f64_ref:.4}"
+    );
+    assert!(
+        simd_err < 0.1,
+        "simd error {simd_err:.6} vs f64 ref {f64_ref:.4}"
+    );
+    assert!(
+        (scalar_result - simd_result).abs() < 0.1,
+        "scalar={scalar_result}, simd={simd_result}"
+    );
+}
+
+#[test]
+fn test_weighted_mean_simd_boundary_sizes() {
+    // Test sizes that exercise remainder handling for SSE (4) and AVX2 (8)
+    for size in [3, 4, 5, 7, 8, 9, 15, 16, 17, 31, 32, 33] {
+        let values: Vec<f32> = (0..size).map(|i| 10.0 + i as f32).collect();
+        let weights: Vec<f32> = (0..size).map(|i| 1.0 + i as f32 * 0.1).collect();
+
+        let f64_ref = weighted_mean_f64_ref(&values, &weights);
+        let scalar_result = scalar::weighted_mean_f32(&values, &weights);
+        let simd_result = weighted_mean_f32(&values, &weights);
+
+        assert!(
+            (scalar_result as f64 - f64_ref).abs() < 0.01,
+            "size={size}: scalar={scalar_result}, f64_ref={f64_ref:.6}"
+        );
+        assert!(
+            (simd_result as f64 - f64_ref).abs() < 0.01,
+            "size={size}: simd={simd_result}, f64_ref={f64_ref:.6}"
+        );
+        assert!(
+            (scalar_result - simd_result).abs() < 1e-4,
+            "size={size}: scalar={scalar_result}, simd={simd_result}"
+        );
+    }
+}
+
+#[test]
+fn test_weighted_mean_simd_catastrophic_cancellation() {
+    // Large + small values with varying weights — stresses compensation
+    let mut values = vec![1e6f32, -1e6f32];
+    let mut weights = vec![1.0f32, 1.0f32];
+    for i in 0..1000 {
+        values.push(0.1);
+        weights.push(1.0 + (i as f32) * 0.001);
+    }
+
+    let f64_ref = weighted_mean_f64_ref(&values, &weights);
+    let scalar_result = scalar::weighted_mean_f32(&values, &weights);
+    let simd_result = weighted_mean_f32(&values, &weights);
+
+    // Both should be close to the f64 reference
+    assert!(
+        (scalar_result as f64 - f64_ref).abs() < 0.01,
+        "scalar={scalar_result}, f64_ref={f64_ref:.6}"
+    );
+    assert!(
+        (simd_result as f64 - f64_ref).abs() < 0.01,
+        "simd={simd_result}, f64_ref={f64_ref:.6}"
+    );
+}

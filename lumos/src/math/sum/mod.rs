@@ -37,22 +37,10 @@ pub fn mean_f32(values: &[f32]) -> f32 {
     sum_f32(values) / values.len() as f32
 }
 
-/// Neumaier compensated addition: accumulates `v` into `sum` with compensation `c`.
-#[inline]
-fn neumaier_add(sum: &mut f32, c: &mut f32, v: f32) {
-    let t = *sum + v;
-    if sum.abs() >= v.abs() {
-        *c += (*sum - t) + v;
-    } else {
-        *c += (v - t) + *sum;
-    }
-    *sum = t;
-}
-
-/// Compute weighted mean of values with corresponding weights.
+/// Compute weighted mean of values with corresponding weights using SIMD when available.
 ///
-/// Uses Neumaier compensated summation for both numerator and denominator.
-/// Returns 0.0 if the total weight is near zero.
+/// Uses Kahan compensated summation (SIMD) or Neumaier (scalar) for both numerator
+/// and denominator. Returns 0.0 if the total weight is near zero.
 pub fn weighted_mean_f32(values: &[f32], weights: &[f32]) -> f32 {
     debug_assert_eq!(
         values.len(),
@@ -64,24 +52,22 @@ pub fn weighted_mean_f32(values: &[f32], weights: &[f32]) -> f32 {
         return 0.0;
     }
 
-    let mut sum = 0.0f32;
-    let mut c_sum = 0.0f32;
-    let mut wsum = 0.0f32;
-    let mut c_wsum = 0.0f32;
-
-    for (&v, &w) in values.iter().zip(weights.iter()) {
-        neumaier_add(&mut sum, &mut c_sum, v * w);
-        neumaier_add(&mut wsum, &mut c_wsum, w);
+    #[cfg(target_arch = "aarch64")]
+    {
+        if values.len() >= 4 {
+            return unsafe { neon::weighted_mean_f32(values, weights) };
+        }
     }
-
-    let total = sum + c_sum;
-    let total_w = wsum + c_wsum;
-
-    if total_w > f32::EPSILON {
-        total / total_w
-    } else {
-        0.0
+    #[cfg(target_arch = "x86_64")]
+    {
+        if values.len() >= 8 && common::cpu_features::has_avx2() {
+            return unsafe { avx2::weighted_mean_f32(values, weights) };
+        }
+        if values.len() >= 4 && common::cpu_features::has_sse4_1() {
+            return unsafe { sse::weighted_mean_f32(values, weights) };
+        }
     }
+    scalar::weighted_mean_f32(values, weights)
 }
 
 #[cfg(test)]
