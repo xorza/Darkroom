@@ -35,11 +35,13 @@ harmless.
 Ours: constant `σ²_max/2` penalty. OpenCV: outliers contribute 0 (skipped).
 Both preserve model ranking since outlier count is constant per model.
 
-### IRWLS -- Not Implemented
+### IRWLS -- POSTPONED
 
 MAGSAC++ paper uses IRWLS for weighted model estimation (weights from sigma
 marginalization). We use MAGSAC++ only for *scoring*, with binary inlier
-selection for estimation via LO-RANSAC. Impact is moderate -- IRWLS helps
+selection for estimation via LO-RANSAC. Impact is low for astro registration —
+centroid accuracy (~0.1-0.3 px) is the limiting factor, and LO-RANSAC + SIP
+distortion correction already achieve sub-pixel accuracy. IRWLS helps
 borderline cases, but star registration has clean inlier/outlier separation.
 
 ### Sigma Marginalization
