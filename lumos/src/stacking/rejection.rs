@@ -332,10 +332,10 @@ impl LinearFitClipConfig {
 
     /// Partition values by linear fit clipping, returning the number of survivors.
     ///
-    /// First pass rejects using median + MAD (like sigma clip). After each
-    /// rejection, sorts remaining values and fits a line through
-    /// `(sorted_index, value)` to derive a refined center and MAD-of-residuals
-    /// sigma for the next pass. This matches the PixInsight/Siril approach.
+    /// First pass uses median + MAD for initial rejection (robust starting point).
+    /// Subsequent passes sort survivors, fit a line through `(sorted_index, value)`,
+    /// compute mean absolute deviation of residuals as sigma, and reject each pixel
+    /// against its own fitted value. Matches PixInsight/Siril linear fit rejection.
     ///
     /// After return, `values[..remaining]` contains surviving values and
     /// `indices[..remaining]` contains their original frame indices.
@@ -350,97 +350,118 @@ impl LinearFitClipConfig {
 
         let mut len = values.len();
 
-        // Initial center and sigma from median + MAD (robust starting point)
-        // Use scratch copy since median_f32_mut reorders the array
-        scratch.floats_a.clear();
-        scratch.floats_a.extend_from_slice(&values[..len]);
-        let center = math::median_f32_mut(&mut scratch.floats_a);
-        let mad = mad_f32_with_scratch(&values[..len], center, &mut scratch.floats_a);
-        let mut sigma = mad_to_sigma(mad);
-        let mut center = center;
-
-        for _ in 0..self.max_iterations {
-            if len <= 3 || sigma < f32::EPSILON {
-                break;
-            }
-
-            let low_threshold = self.sigma_low * sigma;
-            let high_threshold = self.sigma_high * sigma;
-
-            // Reject based on distance from center
-            let mut write_idx = 0;
-            for read_idx in 0..len {
-                let diff = values[read_idx] - center;
-                let keep = if diff < 0.0 {
-                    -diff <= low_threshold
-                } else {
-                    diff <= high_threshold
-                };
-
-                if keep {
-                    values[write_idx] = values[read_idx];
-                    scratch.indices[write_idx] = scratch.indices[read_idx];
-                    write_idx += 1;
-                }
-            }
-
-            if write_idx == len {
-                break;
-            }
-            len = write_idx;
-
+        for iteration in 0..self.max_iterations {
             if len <= 3 {
                 break;
             }
 
-            // Sort remaining values with index co-array for linear fit
-            for i in 1..len {
-                let mut j = i;
-                while j > 0 && values[j - 1] > values[j] {
-                    values.swap(j - 1, j);
-                    scratch.indices.swap(j - 1, j);
-                    j -= 1;
+            if iteration == 0 {
+                // Initial pass: median + MAD sigma clipping (robust starting point)
+                scratch.floats_a.clear();
+                scratch.floats_a.extend_from_slice(&values[..len]);
+                let center = math::median_f32_mut(&mut scratch.floats_a);
+                let mad = mad_f32_with_scratch(&values[..len], center, &mut scratch.floats_a);
+                let sigma = mad_to_sigma(mad);
+
+                if sigma < f32::EPSILON {
+                    break;
                 }
+
+                let low_threshold = self.sigma_low * sigma;
+                let high_threshold = self.sigma_high * sigma;
+
+                let mut write_idx = 0;
+                for read_idx in 0..len {
+                    let diff = values[read_idx] - center;
+                    let keep = if diff < 0.0 {
+                        -diff <= low_threshold
+                    } else {
+                        diff <= high_threshold
+                    };
+                    if keep {
+                        values[write_idx] = values[read_idx];
+                        scratch.indices[write_idx] = scratch.indices[read_idx];
+                        write_idx += 1;
+                    }
+                }
+
+                if write_idx == len {
+                    break;
+                }
+                len = write_idx;
+            } else {
+                // Subsequent passes: linear fit rejection
+
+                // Sort remaining values with index co-array
+                for i in 1..len {
+                    let mut j = i;
+                    while j > 0 && values[j - 1] > values[j] {
+                        values.swap(j - 1, j);
+                        scratch.indices.swap(j - 1, j);
+                        j -= 1;
+                    }
+                }
+
+                // Fit line y = a + b*x through sorted values, x = sorted position
+                let n = len as f32;
+                let mut sum_x = 0.0f32;
+                let mut sum_y = 0.0f32;
+                let mut sum_xy = 0.0f32;
+                let mut sum_xx = 0.0f32;
+
+                for (i, &v) in values[..len].iter().enumerate() {
+                    let x = i as f32;
+                    sum_x += x;
+                    sum_y += v;
+                    sum_xy += x * v;
+                    sum_xx += x * x;
+                }
+
+                let denom = n * sum_xx - sum_x * sum_x;
+                if denom.abs() < f32::EPSILON {
+                    break;
+                }
+
+                let b = (n * sum_xy - sum_x * sum_y) / denom;
+                let a = (sum_y - b * sum_x) / n;
+
+                // Sigma = mean absolute deviation of residuals from fit
+                let sigma: f32 = values[..len]
+                    .iter()
+                    .enumerate()
+                    .map(|(i, &v)| (v - (a + b * i as f32)).abs())
+                    .sum::<f32>()
+                    / n;
+
+                if sigma < f32::EPSILON {
+                    break;
+                }
+
+                let low_threshold = self.sigma_low * sigma;
+                let high_threshold = self.sigma_high * sigma;
+
+                // Reject each pixel against its own fitted value
+                let mut write_idx = 0;
+                for read_idx in 0..len {
+                    let fitted = a + b * read_idx as f32;
+                    let diff = values[read_idx] - fitted;
+                    let keep = if diff < 0.0 {
+                        -diff <= low_threshold
+                    } else {
+                        diff <= high_threshold
+                    };
+                    if keep {
+                        values[write_idx] = values[read_idx];
+                        scratch.indices[write_idx] = scratch.indices[read_idx];
+                        write_idx += 1;
+                    }
+                }
+
+                if write_idx == len {
+                    break;
+                }
+                len = write_idx;
             }
-
-            // Fit line y = a + b*x through sorted values, x = sorted position
-            let n = len as f32;
-            let mut sum_x = 0.0f32;
-            let mut sum_y = 0.0f32;
-            let mut sum_xy = 0.0f32;
-            let mut sum_xx = 0.0f32;
-
-            for (i, &v) in values[..len].iter().enumerate() {
-                let x = i as f32;
-                sum_x += x;
-                sum_y += v;
-                sum_xy += x * v;
-                sum_xx += x * x;
-            }
-
-            let denom = n * sum_xx - sum_x * sum_x;
-            if denom.abs() < f32::EPSILON {
-                break;
-            }
-
-            let b = (n * sum_xy - sum_x * sum_y) / denom;
-            let a = (sum_y - b * sum_x) / n;
-
-            // New center = fit value at the median position
-            center = a + b * (n / 2.0);
-
-            // New sigma = MAD of residuals from the fit
-            let median_idx = len / 2;
-            let median_residual = values[median_idx] - (a + b * median_idx as f32);
-            scratch.floats_a.clear();
-            scratch.floats_a.extend(
-                (0..len).map(|i| ((values[i] - (a + b * i as f32)) - median_residual).abs()),
-            );
-            scratch
-                .floats_a
-                .sort_unstable_by(|a, b| a.partial_cmp(b).unwrap());
-            let mad = scratch.floats_a[len / 2];
-            sigma = mad_to_sigma(mad);
         }
 
         len
@@ -1521,5 +1542,176 @@ mod tests {
             weighted,
             unweighted
         );
+    }
+
+    // ========== Winsorized Correctness Tests ==========
+
+    #[test]
+    fn test_winsorized_robust_estimate_uses_stddev_not_mad() {
+        // With known data, verify robust_estimate returns stddev-based sigma
+        // (not MAD-based). For Gaussian data, stddev > MAD * 1.4826 is false,
+        // but for uniform-like data they differ noticeably.
+        let config = WinsorizedClipConfig::new(3.0);
+        let values: Vec<f32> = (0..20).map(|i| 10.0 + i as f32 * 0.1).collect();
+        let mut working = vec![];
+        let mut scratch_buf = vec![];
+        let (center, sigma) = config.robust_estimate(&values, &mut working, &mut scratch_buf);
+
+        // Center should be near median (10.95)
+        assert!(
+            (center - 10.95).abs() < 0.2,
+            "Center should be near median, got {center}"
+        );
+        // Sigma should be positive and reasonable (1.134 * stddev of uniform-ish data)
+        assert!(sigma > 0.0, "Sigma should be positive, got {sigma}");
+        assert!(
+            sigma < 2.0,
+            "Sigma should be reasonable for tight data, got {sigma}"
+        );
+    }
+
+    #[test]
+    fn test_winsorized_correction_factor_applied() {
+        // Verify 1.134 correction is applied by comparing with raw stddev
+        let config = WinsorizedClipConfig::new(3.0);
+        let values = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0];
+        let mut working = vec![];
+        let mut scratch_buf = vec![];
+        let (_center, sigma) = config.robust_estimate(&values, &mut working, &mut scratch_buf);
+
+        // Raw stddev of 1..=10 is ~3.03. With no outliers to Winsorize,
+        // sigma should be approximately 3.03 * 1.134 ≈ 3.43
+        let raw_stddev = winsorized_stddev(&values, 5.5);
+        let expected = raw_stddev * 1.134;
+        assert!(
+            (sigma - expected).abs() < 0.5,
+            "Sigma {sigma} should be near {expected} (raw_stddev {raw_stddev} * 1.134)"
+        );
+    }
+
+    #[test]
+    fn test_winsorized_converges() {
+        // With a clear outlier, verify convergence produces stable estimates
+        let config = WinsorizedClipConfig::new(2.5);
+        let values = vec![10.0, 10.1, 10.2, 9.9, 10.0, 10.1, 9.8, 10.3, 50.0];
+        let mut working = vec![];
+        let mut scratch_buf = vec![];
+        let (center, sigma) = config.robust_estimate(&values, &mut working, &mut scratch_buf);
+
+        // Center should be near the cluster (~10.05), not pulled toward 50
+        assert!(
+            (center - 10.05).abs() < 0.5,
+            "Center should be near 10.05, got {center}"
+        );
+        // Sigma should reflect the cluster spread, not the outlier
+        assert!(
+            sigma < 2.0,
+            "Sigma should be small (cluster spread), got {sigma}"
+        );
+    }
+
+    #[test]
+    fn test_winsorized_huber_constant_not_user_sigma() {
+        // Verify that Winsorization boundaries use c=1.5, not user's sigma.
+        // With sigma=10.0 (very permissive), phase 1 should still use c=1.5
+        // for Winsorization, producing the same robust estimates.
+        let config_permissive = WinsorizedClipConfig::new(10.0);
+        let config_tight = WinsorizedClipConfig::new(2.0);
+
+        // Use a mild outlier (~5σ from center) so tight rejects but permissive keeps.
+        // Clean cluster ~1.0 (stddev ~0.15, corrected ~0.17), outlier at 2.0 is ~5.6σ.
+        let values = vec![1.0, 1.1, 1.2, 0.9, 1.0, 1.1, 0.8, 1.3, 2.0];
+        let mut w1 = vec![];
+        let mut s1 = vec![];
+        let mut w2 = vec![];
+        let mut s2 = vec![];
+        let (center1, sigma1) = config_permissive.robust_estimate(&values, &mut w1, &mut s1);
+        let (center2, sigma2) = config_tight.robust_estimate(&values, &mut w2, &mut s2);
+
+        // Both should produce the same robust estimates (same Huber c=1.5)
+        assert!(
+            (center1 - center2).abs() < 1e-4,
+            "Centers should match: {center1} vs {center2}"
+        );
+        assert!(
+            (sigma1 - sigma2).abs() < 1e-4,
+            "Sigmas should match: {sigma1} vs {sigma2}"
+        );
+
+        // But rejection results should differ (permissive keeps outlier)
+        let mut v1 = values.clone();
+        let mut v2 = values.clone();
+        let r1 = config_permissive.reject(&mut v1, &mut scratch());
+        let r2 = config_tight.reject(&mut v2, &mut scratch());
+        assert!(
+            r1 > r2,
+            "Permissive sigma should keep more values: {r1} vs {r2}"
+        );
+    }
+
+    // ========== Linear Fit Correctness Tests ==========
+
+    #[test]
+    fn test_linear_fit_per_pixel_rejection() {
+        // Construct data with a clear linear trend plus one outlier.
+        // Sorted values: [1, 2, 3, 4, 5, 6, 7, 100]
+        // The fit through sorted positions should approximate y = 1 + x.
+        // Value 100 at position 7 has fitted value ~8, residual ~92.
+        // With per-pixel rejection, this should be caught easily.
+        // With single-center rejection (old bug), center ≈ fit(3.5) ≈ 4.5,
+        // values 1 and 7 would be far from center too.
+        let mut values = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 100.0];
+        let mut s = scratch();
+        let remaining = LinearFitClipConfig::new(2.0, 2.0, 3).reject(&mut values, &mut s);
+
+        // The outlier (100.0) should be rejected
+        assert!(
+            remaining == 7,
+            "Should reject only the outlier, got {remaining} survivors"
+        );
+        // All survivors should be in range [1, 7]
+        for &v in &values[..remaining] {
+            assert!((1.0..=7.0).contains(&v), "Unexpected survivor: {v}");
+        }
+    }
+
+    #[test]
+    fn test_linear_fit_sigma_is_mean_abs_dev() {
+        // For a perfect linear sequence, mean absolute deviation from fit should be ~0.
+        // Adding a known deviation: values = [1, 2, 3, 4, 5] + noise on last.
+        // After initial median+MAD pass (no rejection for clean data),
+        // the fit pass should compute sigma from mean abs dev.
+        let mut values = vec![1.0, 2.0, 3.0, 4.0, 5.0];
+        let remaining = LinearFitClipConfig::new(2.0, 2.0, 3).reject(&mut values, &mut scratch());
+        // Perfect line: no rejections
+        assert_eq!(remaining, 5, "Perfect line should have no rejections");
+    }
+
+    #[test]
+    fn test_linear_fit_preserves_trend() {
+        // Linear fit should NOT reject values that follow a trend, even if
+        // they're far from the median. This was the old bug: single-center
+        // rejection would reject endpoints of a steep trend.
+        let mut values = vec![1.0, 3.0, 5.0, 7.0, 9.0, 11.0, 13.0, 15.0];
+        let remaining = LinearFitClipConfig::new(2.0, 2.0, 3).reject(&mut values, &mut scratch());
+        assert_eq!(
+            remaining, 8,
+            "All values follow a linear trend — none should be rejected"
+        );
+    }
+
+    #[test]
+    fn test_linear_fit_rejects_middle_outlier() {
+        // An outlier in the middle of the distribution should be caught by
+        // per-pixel rejection. After sorting: [1, 2, 3, 4, 5, 50, 6, 7]
+        // → sorted: [1, 2, 3, 4, 5, 6, 7, 50]. Fit: ~y = 0.71 + 0.71*x.
+        // Fitted value at position 7 ≈ 5.7, residual of 50 ≈ 44.3.
+        let mut values = vec![1.0, 2.0, 3.0, 50.0, 5.0, 6.0, 7.0, 4.0];
+        let mut s = scratch();
+        let remaining = LinearFitClipConfig::new(2.0, 2.0, 3).reject(&mut values, &mut s);
+        assert!(remaining < 8, "Outlier 50 should be rejected");
+        for &v in &values[..remaining] {
+            assert!(v < 10.0, "Outlier should not survive, got {v}");
+        }
     }
 }

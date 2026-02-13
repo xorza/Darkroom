@@ -26,26 +26,13 @@ three normalization modes, per-frame weighting, and automatic memory management.
 
 ## Issues vs Industry Standards
 
-### P1: Linear Fit -- Per-Pixel Rejection Against Fitted Value -- CRITICAL
+### ~~P1: Linear Fit -- Per-Pixel Rejection Against Fitted Value~~ — FIXED
+### ~~P1: Linear Fit -- Residual Sigma Uses Wrong Computation~~ — FIXED
 
-- **File**: rejection.rs, `LinearFitClipConfig::reject`, ~line 345
-- `center = a + b * (n / 2.0)` uses a **single center** for all values.
-- Both PixInsight and Siril compare **each pixel against its own fitted value**:
-  `fitted_i = a + b * i`, then reject where `|value_i - fitted_i| > sigma * residual_sigma`.
-- Siril's `line_clipping`: `if (a*i + b - pixel > sigma * sigma_low) reject_low`.
-- Using a single midpoint center **defeats the entire purpose** of linear fit clipping,
-  which is to account for a trend in sorted pixel values.
-- **Fix**: Replace single-center comparison with per-value comparison against fitted line.
-
-### P1: Linear Fit -- Residual Sigma Uses Wrong Computation -- CRITICAL
-
-- **File**: rejection.rs, ~line 348-358
-- Current: computes `(residual_i - residual_at_median_position).abs()`, then takes MAD.
-- Correct (PixInsight and Siril): **mean absolute deviation** of each value from its own
-  fitted point: `sigma = (1/N) * sum |values[i] - (a + b*i)|`.
-- PixInsight uses `adev` (average absolute deviation from fit) as the sigma measure.
-  Siril computes the same: `sigma += fabsf(stack[frame] - (a * frame + b)); sigma /= N;`
-- Current computation is doubly wrong: wrong centering + MAD instead of mean absolute deviation.
+Rewritten to match PixInsight/Siril:
+- Each pixel now compared against its own fitted value `a + b * i` (was single midpoint center)
+- Sigma now uses mean absolute deviation: `(1/N) * sum |values[i] - (a + b*i)|` (was MAD of centered residuals)
+- First pass still uses robust median + MAD for initial outlier removal
 
 ### ~~P1: Winsorized -- Missing 1.134 Correction Factor~~ — FIXED
 ### ~~P1: Winsorized -- Wrong Architecture (Missing Two-Phase Approach)~~ — FIXED
@@ -183,8 +170,8 @@ Rewritten to match PixInsight/Siril two-phase algorithm:
 | Sigma clip spread | MAD * 1.4826 | MAD * 1.4826 |
 | Asymmetric sigma | Yes (sigma_low/high) | Yes (sigma low/high) |
 | Winsorized | Huber c=1.5, convergence, 1.134 correction, then sigma clip | Huber c=1.5, convergence, 1.134 correction, then sigma clip |
-| Linear fit | Single center at midpoint | Per-pixel comparison against fitted value |
-| Linear fit sigma | MAD of residuals (wrong centering) | Mean absolute deviation from fit |
+| Linear fit | Per-pixel comparison against fitted value | Per-pixel comparison against fitted value |
+| Linear fit sigma | Mean absolute deviation from fit | Mean absolute deviation from fit |
 | GESD statistics | Median + MAD | Trimmed mean + trimmed stddev |
 | GESD relaxation | Not implemented | Yes (default 1.5 for low pixels) |
 | Normalization | 3 modes (None/Global/Mult) | 5 modes + Local normalization |
@@ -203,7 +190,7 @@ Rewritten to match PixInsight/Siril two-phase algorithm:
 | Location estimator | Median | IKSS (default), Median (fast mode) |
 | Normalization modes | 3 (None/Global/Mult) | 5 (None/Add/Mult/Add+Scale/Mult+Scale) |
 | Winsorized correction | Yes, 1.134 * stddev | Yes, 1.134 * stddev |
-| Linear fit sigma | MAD from single center | Mean absolute deviation, per-pixel |
+| Linear fit sigma | Mean absolute deviation from fit | Mean absolute deviation, per-pixel |
 | Weighting | Manual | Automatic: noise, FWHM, star count |
 | Rejection maps | No | Yes (low/high, mergeable) |
 | Percentile clipping | Rank-based | Distance-based from median |
@@ -278,8 +265,8 @@ Rewritten to match PixInsight/Siril two-phase algorithm:
 
 ## Most Impactful Fixes (ordered by expected improvement)
 
-1. **Fix linear fit rejection** (P1) -- per-pixel comparison against fitted line +
-   mean absolute deviation sigma. Currently defeats the purpose of linear fit clipping.
+1. ~~**Fix linear fit rejection** (P1)~~ — **FIXED**: per-pixel comparison against fitted
+   value + mean absolute deviation sigma. Matches PixInsight/Siril.
 2. ~~**Fix Winsorized architecture** (P1)~~ — **FIXED**: two-phase with Huber c=1.5,
    1.134 correction, convergence, stddev, asymmetric sigma_low/sigma_high.
 3. **Add rejection maps** (P2) -- per-pixel high/low rejection counts for diagnostics.
