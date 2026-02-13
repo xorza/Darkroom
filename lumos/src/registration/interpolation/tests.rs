@@ -249,6 +249,7 @@ fn test_warp_identity() {
         &input_buf,
         &mut output,
         &transform,
+        None,
         InterpolationMethod::Bilinear,
     );
 
@@ -279,6 +280,7 @@ fn test_warp_translation() {
         &input_buf,
         &mut output,
         &transform,
+        None,
         InterpolationMethod::Bilinear,
     );
 
@@ -302,6 +304,7 @@ fn test_warp_scale() {
         &input_buf,
         &mut output,
         &transform,
+        None,
         InterpolationMethod::Bilinear,
     );
 
@@ -349,6 +352,7 @@ fn test_warp_rotation() {
         &input_buf,
         &mut output,
         &transform,
+        None,
         InterpolationMethod::Bilinear,
     );
 
@@ -586,6 +590,7 @@ fn test_warp_image_lanczos3_identity() {
         &input_buf,
         &mut output,
         &transform,
+        None,
         InterpolationMethod::Lanczos3,
     );
 
@@ -616,6 +621,7 @@ fn test_warp_image_lanczos3_translation() {
         &input_buf,
         &mut output,
         &transform,
+        None,
         InterpolationMethod::Lanczos3,
     );
 
@@ -653,6 +659,7 @@ fn test_warp_image_lanczos3_rotation() {
         &input_buf,
         &mut output,
         &transform,
+        None,
         InterpolationMethod::Lanczos3,
     );
 
@@ -686,6 +693,7 @@ fn test_warp_image_lanczos3_matches_per_pixel() {
         &input_buf,
         &mut output,
         &transform,
+        None,
         InterpolationMethod::Lanczos3,
     );
 

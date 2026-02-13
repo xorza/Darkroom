@@ -84,7 +84,13 @@ fn main() {
         ..Default::default()
     };
     let mut aligned = target_image.clone();
-    warp(&target_image, &mut aligned, &result.transform, &warp_config);
+    warp(
+        &target_image,
+        &mut aligned,
+        &result.transform,
+        None,
+        &warp_config,
+    );
 
     // Save result
     println!("Saving aligned image to: {}", output_path.display());

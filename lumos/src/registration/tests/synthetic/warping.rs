@@ -28,7 +28,7 @@ fn do_warp(
 ) -> Buffer2<f32> {
     let inverse = transform.inverse();
     let mut output = Buffer2::new(input.width(), input.height(), vec![0.0; input.len()]);
-    warp_image(input, &mut output, &inverse, method);
+    warp_image(input, &mut output, &inverse, None, method);
     output
 }
 
@@ -482,6 +482,7 @@ fn test_warp_with_detected_transform() {
         &target_astro,
         &mut warped_astro,
         &result.transform,
+        None,
         &warp_config,
     );
 
@@ -595,7 +596,7 @@ fn test_warp_grayscale() {
         ..Default::default()
     };
     let mut warped = ref_image.clone();
-    warp(&ref_image, &mut warped, &transform, &warp_config);
+    warp(&ref_image, &mut warped, &transform, None, &warp_config);
 
     // Verify dimensions and basic properties
     assert_eq!(warped.width(), width);
@@ -634,7 +635,7 @@ fn test_warp_rgb() {
         ..Default::default()
     };
     let mut warped = rgb_image.clone();
-    warp(&rgb_image, &mut warped, &transform, &warp_config);
+    warp(&rgb_image, &mut warped, &transform, None, &warp_config);
 
     // Verify dimensions preserved
     assert_eq!(warped.width(), width);
@@ -675,7 +676,7 @@ fn test_warp_preserves_output_metadata() {
         interpolation: InterpolationMethod::Bilinear,
         ..Default::default()
     };
-    warp(&image, &mut warped, &transform, &warp_config);
+    warp(&image, &mut warped, &transform, None, &warp_config);
 
     // Verify output metadata is preserved (warp only modifies pixel data)
     assert_eq!(warped.metadata.object, Some("M42".to_string()));
@@ -709,4 +710,195 @@ fn extract_central_region(
     }
 
     (central_a, central_b)
+}
+
+// ============================================================================
+// SIP distortion correction warping tests
+// ============================================================================
+
+/// Test that warp with SIP correction produces different (corrected) output
+/// compared to warp without SIP.
+#[test]
+fn test_warp_with_sip_correction() {
+    use crate::registration::distortion::{SipConfig, SipPolynomial};
+
+    let width = 256;
+    let height = 256;
+    let cx = width as f64 / 2.0;
+    let cy = height as f64 / 2.0;
+
+    // Generate a grid of matched point pairs with barrel distortion.
+    // The "linear" transform is identity. The SIP polynomial should capture
+    // the nonlinear (barrel) distortion.
+    let transform = Transform::translation(DVec2::new(5.0, -3.0));
+
+    let mut ref_points = Vec::new();
+    let mut target_points = Vec::new();
+    let distortion_k = 2e-6; // barrel distortion coefficient
+
+    for gy in 0..16 {
+        for gx in 0..16 {
+            let rx = 16.0 + gx as f64 * 14.0;
+            let ry = 16.0 + gy as f64 * 14.0;
+            let ref_pos = DVec2::new(rx, ry);
+
+            // Apply barrel distortion: r' = r + k*r^3
+            let dx = rx - cx;
+            let dy = ry - cy;
+            let r2 = dx * dx + dy * dy;
+            let distorted = DVec2::new(rx + distortion_k * dx * r2, ry + distortion_k * dy * r2);
+
+            // Target = transform(distorted_ref)
+            let target_pos = transform.apply(distorted);
+
+            ref_points.push(ref_pos);
+            target_points.push(target_pos);
+        }
+    }
+
+    // Fit SIP from these matched points
+    let sip_config = SipConfig {
+        order: 3,
+        reference_point: Some(DVec2::new(cx, cy)),
+    };
+    let sip =
+        SipPolynomial::fit_from_transform(&ref_points, &target_points, &transform, &sip_config)
+            .expect("SIP fitting should succeed");
+
+    // Verify SIP correction is non-trivial
+    let max_correction = sip.max_correction(width, height, 10.0);
+    assert!(
+        max_correction > 0.1,
+        "SIP correction should be significant, got {}",
+        max_correction
+    );
+
+    // Create a test image with a gradient pattern
+    let (ref_buf, _) = stamps::star_field(width, height, 30, 2.5, 0.05, 54321);
+
+    // Warp the same image with and without SIP
+    let mut output_no_sip = Buffer2::new(width, height, vec![0.0; width * height]);
+    let mut output_with_sip = Buffer2::new(width, height, vec![0.0; width * height]);
+
+    warp_image(
+        &ref_buf,
+        &mut output_no_sip,
+        &transform,
+        None,
+        InterpolationMethod::Lanczos3,
+    );
+    warp_image(
+        &ref_buf,
+        &mut output_with_sip,
+        &transform,
+        Some(&sip),
+        InterpolationMethod::Lanczos3,
+    );
+
+    // The two outputs should differ — SIP applies nonlinear correction
+    let mut max_diff: f32 = 0.0;
+    let mut diff_count = 0usize;
+    let margin = 20;
+
+    for y in margin..height - margin {
+        for x in margin..width - margin {
+            let d = (output_no_sip[(x, y)] - output_with_sip[(x, y)]).abs();
+            if d > 1e-6 {
+                diff_count += 1;
+            }
+            max_diff = max_diff.max(d);
+        }
+    }
+
+    assert!(
+        diff_count > 100,
+        "SIP should produce different pixel values, only {} pixels differ",
+        diff_count
+    );
+    assert!(
+        max_diff > 0.001,
+        "Max pixel difference too small: {}",
+        max_diff
+    );
+}
+
+/// Test that warp with SIP correction through the public `warp()` API works.
+#[test]
+fn test_warp_api_with_sip() {
+    use crate::registration::Config as RegConfig;
+    use crate::registration::distortion::{SipConfig, SipPolynomial};
+
+    let width = 128;
+    let height = 128;
+    let cx = width as f64 / 2.0;
+    let cy = height as f64 / 2.0;
+
+    let transform = Transform::identity();
+    let distortion_k = 3e-6;
+
+    let mut ref_points = Vec::new();
+    let mut target_points = Vec::new();
+
+    for gy in 0..10 {
+        for gx in 0..10 {
+            let rx = 10.0 + gx as f64 * 11.0;
+            let ry = 10.0 + gy as f64 * 11.0;
+            let ref_pos = DVec2::new(rx, ry);
+
+            let dx = rx - cx;
+            let dy = ry - cy;
+            let r2 = dx * dx + dy * dy;
+            let distorted = DVec2::new(rx + distortion_k * dx * r2, ry + distortion_k * dy * r2);
+            let target_pos = transform.apply(distorted);
+
+            ref_points.push(ref_pos);
+            target_points.push(target_pos);
+        }
+    }
+
+    let sip_config = SipConfig {
+        order: 3,
+        reference_point: Some(DVec2::new(cx, cy)),
+    };
+    let sip =
+        SipPolynomial::fit_from_transform(&ref_points, &target_points, &transform, &sip_config)
+            .expect("SIP fitting should succeed");
+
+    // Create a grayscale image
+    let (pixels, _) = stamps::star_field(width, height, 20, 2.5, 0.05, 12321);
+    let image = AstroImage::from_pixels(ImageDimensions::new(width, height, 1), pixels.into_vec());
+
+    let warp_config = RegConfig {
+        interpolation: InterpolationMethod::Bilinear,
+        ..Default::default()
+    };
+
+    // Warp without SIP
+    let mut warped_no_sip = image.clone();
+    warp(&image, &mut warped_no_sip, &transform, None, &warp_config);
+
+    // Warp with SIP
+    let mut warped_with_sip = image.clone();
+    warp(
+        &image,
+        &mut warped_with_sip,
+        &transform,
+        Some(&sip),
+        &warp_config,
+    );
+
+    // They should differ
+    let ch_no_sip = warped_no_sip.channel(0);
+    let ch_with_sip = warped_with_sip.channel(0);
+    let diff_count = ch_no_sip
+        .iter()
+        .zip(ch_with_sip.iter())
+        .filter(|(a, b)| (*a - *b).abs() > 1e-6)
+        .count();
+
+    assert!(
+        diff_count > 50,
+        "SIP should produce different warp output, only {} pixels differ",
+        diff_count
+    );
 }

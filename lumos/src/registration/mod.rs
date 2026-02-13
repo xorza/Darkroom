@@ -13,7 +13,7 @@
 //! println!("Matched {} stars, RMS = {:.2}px", result.num_inliers, result.rms_error);
 //!
 //! // Warp target image in place to align with reference
-//! let aligned = warp(target_image, &result.transform, &Config::default());
+//! let aligned = warp(target_image, &result.transform, None, &Config::default());
 //! ```
 //!
 //! # Transformation Models
@@ -217,12 +217,14 @@ fn median_fwhm(ref_stars: &[Star], target_stars: &[Star]) -> f64 {
 ///
 /// The transform maps reference (output) coordinates to target (input) coordinates,
 /// as returned by `register()`. For each output pixel at position `p`, samples the
-/// input image at `transform.apply(p)`.
+/// input image at `transform.apply(sip.correct(p))` when SIP is provided, or
+/// `transform.apply(p)` otherwise.
 ///
 /// # Arguments
 /// * `image` - The source (target) image to warp
 /// * `output` - The destination image where the warped result is written
 /// * `transform` - The geometric transformation (ref → target, as from `register()`)
+/// * `sip` - Optional SIP distortion correction polynomial
 /// * `config` - Configuration for interpolation method
 ///
 /// # Panics
@@ -235,9 +237,15 @@ fn median_fwhm(ref_stars: &[Star], target_stars: &[Star]) -> f64 {
 ///
 /// let result = register(&ref_stars, &target_stars, &Config::default())?;
 /// let mut aligned = target_image.clone();
-/// warp(&target_image, &mut aligned, &result.transform, &Config::default());
+/// warp(&target_image, &mut aligned, &result.transform, result.sip_correction.as_ref(), &Config::default());
 /// ```
-pub fn warp(image: &AstroImage, output: &mut AstroImage, transform: &Transform, config: &Config) {
+pub fn warp(
+    image: &AstroImage,
+    output: &mut AstroImage,
+    transform: &Transform,
+    sip: Option<&SipPolynomial>,
+    config: &Config,
+) {
     assert_eq!(
         image.dimensions(),
         output.dimensions(),
@@ -249,7 +257,7 @@ pub fn warp(image: &AstroImage, output: &mut AstroImage, transform: &Transform, 
     for c in 0..image.channels() {
         let input = image.channel(c);
         let output_buf = output.channel_mut(c);
-        warp_image(input, output_buf, transform, method);
+        warp_image(input, output_buf, transform, sip, method);
     }
 }
 

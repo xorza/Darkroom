@@ -122,7 +122,7 @@ fn bench_full_pipeline() {
                 result.num_inliers, result.rms_error, result.elapsed_ms,
             );
             let mut warped = (*img).clone();
-            warp(img, &mut warped, &result.transform, &reg_config);
+            warp(img, &mut warped, &result.transform, None, &reg_config);
             warped
         });
 

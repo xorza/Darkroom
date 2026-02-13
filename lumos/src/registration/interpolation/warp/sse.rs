@@ -307,7 +307,7 @@ mod tests {
             warp_row_bilinear_avx2(&input, &mut output_avx2, y, &inverse);
         }
 
-        super::super::warp_row_bilinear_scalar(&input, &mut output_scalar, y, &inverse);
+        super::super::warp_row_bilinear_scalar(&input, &mut output_scalar, y, &inverse, None);
 
         for x in 0..width {
             assert!(
@@ -342,7 +342,7 @@ mod tests {
             warp_row_bilinear_sse(&input, &mut output_sse, y, &inverse);
         }
 
-        super::super::warp_row_bilinear_scalar(&input, &mut output_scalar, y, &inverse);
+        super::super::warp_row_bilinear_scalar(&input, &mut output_scalar, y, &inverse, None);
 
         for x in 0..width {
             assert!(

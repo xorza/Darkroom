@@ -430,7 +430,13 @@ fn register_all_lights(
 
                 // Warp the image to align with reference
                 let mut warped = target_image.clone();
-                lumos::warp(&target_image, &mut warped, &result.transform, &reg_config);
+                lumos::warp(
+                    &target_image,
+                    &mut warped,
+                    &result.transform,
+                    None,
+                    &reg_config,
+                );
 
                 // Save registered image
                 let img: imaginarium::Image = warped.into();

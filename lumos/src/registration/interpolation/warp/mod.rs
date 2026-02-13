@@ -3,6 +3,9 @@
 //! Runtime dispatch to the best available implementation:
 //! - **Bilinear**: AVX2/SSE4.1 on x86_64, scalar with incremental stepping elsewhere
 //! - **Lanczos3**: Scalar with incremental stepping, fast-path interior bounds skipping
+//!
+//! When SIP distortion correction is active, incremental stepping is disabled
+//! (SIP is nonlinear) and SIMD paths fall back to scalar.
 
 #[cfg(target_arch = "x86_64")]
 use common::cpu_features;
@@ -11,22 +14,35 @@ use common::cpu_features;
 pub mod sse;
 
 use crate::common::Buffer2;
+use crate::registration::distortion::SipPolynomial;
 use crate::registration::interpolation::get_lanczos_lut;
 use crate::registration::transform::Transform;
 use glam::DVec2;
 
+/// Compute source coordinates for an output pixel, applying optional SIP correction.
+#[inline]
+fn source_coord(output_pos: DVec2, transform: &Transform, sip: Option<&SipPolynomial>) -> DVec2 {
+    let corrected = match sip {
+        Some(s) => s.correct(output_pos),
+        None => output_pos,
+    };
+    transform.apply(corrected)
+}
+
 /// Warp a row of pixels using bilinear interpolation.
 ///
 /// Uses AVX2/SSE4.1 on x86_64, scalar with incremental stepping elsewhere.
+/// When SIP is active, falls back to scalar (SIP is nonlinear).
 #[inline]
 pub(crate) fn warp_row_bilinear(
     input: &Buffer2<f32>,
     output_row: &mut [f32],
     output_y: usize,
     transform: &Transform,
+    sip: Option<&SipPolynomial>,
 ) {
     #[cfg(target_arch = "x86_64")]
-    {
+    if sip.is_none() {
         let output_width = output_row.len();
         if output_width >= 8 && cpu_features::has_avx2() {
             unsafe {
@@ -42,39 +58,41 @@ pub(crate) fn warp_row_bilinear(
         }
     }
 
-    // Scalar fallback (also used on aarch64 - NEON was slower due to gather overhead)
-    warp_row_bilinear_scalar(input, output_row, output_y, transform);
+    // Scalar fallback (also used on aarch64 and when SIP is active)
+    warp_row_bilinear_scalar(input, output_row, output_y, transform, sip);
 }
 
 /// Scalar implementation of row warping with bilinear interpolation.
 ///
-/// Uses incremental coordinate stepping for affine transforms to avoid
-/// per-pixel matrix multiply.
+/// Uses incremental coordinate stepping for affine transforms (when no SIP)
+/// to avoid per-pixel matrix multiply.
 pub(crate) fn warp_row_bilinear_scalar(
     input: &Buffer2<f32>,
     output_row: &mut [f32],
     output_y: usize,
     transform: &Transform,
+    sip: Option<&SipPolynomial>,
 ) {
     let m = transform.matrix.as_array();
-    let is_affine = m[6].abs() < 1e-12 && m[7].abs() < 1e-12;
+    // Incremental stepping only when affine AND no SIP (SIP is nonlinear)
+    let can_step = sip.is_none() && m[6].abs() < 1e-12 && m[7].abs() < 1e-12;
 
-    let src0 = transform.apply(DVec2::new(0.0, output_y as f64));
+    let src0 = source_coord(DVec2::new(0.0, output_y as f64), transform, sip);
     let mut src_x = src0.x;
     let mut src_y = src0.y;
     let dx_step = m[0];
     let dy_step = m[3];
 
     for (x_idx, out_pixel) in output_row.iter_mut().enumerate() {
-        if !is_affine {
-            let src = transform.apply(DVec2::new(x_idx as f64, output_y as f64));
+        if !can_step {
+            let src = source_coord(DVec2::new(x_idx as f64, output_y as f64), transform, sip);
             src_x = src.x;
             src_y = src.y;
         }
 
         *out_pixel = bilinear_sample(input, src_x as f32, src_y as f32);
 
-        if is_affine {
+        if can_step {
             src_x += dx_step;
             src_y += dy_step;
         }
@@ -116,6 +134,7 @@ pub(crate) fn warp_row_lanczos3(
     output_row: &mut [f32],
     output_y: usize,
     transform: &Transform,
+    sip: Option<&SipPolynomial>,
 ) {
     let pixels = input.pixels();
     let input_width = input.width();
@@ -125,23 +144,19 @@ pub(crate) fn warp_row_lanczos3(
     let iw = input_width as i32;
     let ih = input_height as i32;
 
-    // Row-major DMat3: m[0..9] = [a, b, tx, c, d, ty, g, h, 1]
-    // transform_point: x' = (m[0]*x + m[1]*y + m[2]) / w, y' = (m[3]*x + m[4]*y + m[5]) / w
-    // For affine transforms (m[6]==0, m[7]==0, m[8]==1), stepping x by 1 adds (m[0], m[3]).
     let m = transform.matrix.as_array();
-    let is_affine = m[6].abs() < 1e-12 && m[7].abs() < 1e-12;
+    // Incremental stepping only when affine AND no SIP
+    let can_step = sip.is_none() && m[6].abs() < 1e-12 && m[7].abs() < 1e-12;
 
-    // Compute source coords for first pixel in this row
-    let src0 = transform.apply(DVec2::new(0.0, output_y as f64));
+    let src0 = source_coord(DVec2::new(0.0, output_y as f64), transform, sip);
     let mut src_x = src0.x;
     let mut src_y = src0.y;
     let dx_step = m[0];
     let dy_step = m[3];
 
     for (x_idx, out_pixel) in output_row.iter_mut().enumerate() {
-        // For perspective transforms, recompute exact coords each pixel
-        if !is_affine {
-            let src = transform.apply(DVec2::new(x_idx as f64, output_y as f64));
+        if !can_step {
+            let src = source_coord(DVec2::new(x_idx as f64, output_y as f64), transform, sip);
             src_x = src.x;
             src_y = src.y;
         }
@@ -238,7 +253,7 @@ pub(crate) fn warp_row_lanczos3(
 
         *out_pixel = sum;
 
-        if is_affine {
+        if can_step {
             src_x += dx_step;
             src_y += dy_step;
         }
@@ -252,6 +267,7 @@ pub fn warp_row_lanczos3_scalar(
     output_row: &mut [f32],
     output_y: usize,
     transform: &Transform,
+    sip: Option<&SipPolynomial>,
 ) {
     let pixels = input.pixels();
     let input_width = input.width();
@@ -261,7 +277,7 @@ pub fn warp_row_lanczos3_scalar(
     const A: usize = 3; // Lanczos3 kernel radius
 
     for (x, out_pixel) in output_row.iter_mut().enumerate() {
-        let src = transform.apply(DVec2::new(x as f64, y));
+        let src = source_coord(DVec2::new(x as f64, y), transform, sip);
         let sx = src.x as f32;
         let sy = src.y as f32;
 
@@ -327,7 +343,7 @@ mod tests {
         let mut output_row = vec![0.0f32; width];
         let y = 50;
 
-        warp_row_bilinear(&input, &mut output_row, y, &identity);
+        warp_row_bilinear(&input, &mut output_row, y, &identity, None);
 
         // With identity transform, output should match input
         for x in 1..width - 1 {
@@ -355,7 +371,7 @@ mod tests {
         let mut output_row = vec![0.0f32; width];
         let y = 50;
 
-        warp_row_bilinear(&input, &mut output_row, y, &inverse);
+        warp_row_bilinear(&input, &mut output_row, y, &inverse, None);
 
         // Check that pixels are shifted
         for (x, &output_val) in output_row.iter().enumerate().skip(10).take(width - 20) {
@@ -395,8 +411,8 @@ mod tests {
                 let mut output_simd = vec![0.0f32; width];
                 let mut output_scalar = vec![0.0f32; width];
 
-                warp_row_bilinear(&input, &mut output_simd, y, &inverse);
-                warp_row_bilinear_scalar(&input, &mut output_scalar, y, &inverse);
+                warp_row_bilinear(&input, &mut output_simd, y, &inverse, None);
+                warp_row_bilinear_scalar(&input, &mut output_scalar, y, &inverse, None);
 
                 for x in 0..width {
                     // Tolerance slightly relaxed for SIMD/scalar differences due to
@@ -439,8 +455,8 @@ mod tests {
             let mut output_scalar = vec![0.0f32; width];
             let y = height / 2;
 
-            warp_row_bilinear(&input, &mut output_simd, y, &identity);
-            warp_row_bilinear_scalar(&input, &mut output_scalar, y, &identity);
+            warp_row_bilinear(&input, &mut output_simd, y, &identity, None);
+            warp_row_bilinear_scalar(&input, &mut output_scalar, y, &identity, None);
 
             for x in 0..width {
                 assert!(
@@ -465,7 +481,7 @@ mod tests {
         let mut output_row = vec![0.0f32; width];
         let y = 50;
 
-        warp_row_lanczos3_scalar(&input, &mut output_row, y, &identity);
+        warp_row_lanczos3_scalar(&input, &mut output_row, y, &identity, None);
 
         // With identity transform, output should match input (within Lanczos ringing tolerance)
         for x in 3..width - 3 {
@@ -503,7 +519,7 @@ mod tests {
             let mut output = vec![0.0f32; width];
             let y = height / 2;
 
-            warp_row_lanczos3_scalar(&input, &mut output, y, &inverse);
+            warp_row_lanczos3_scalar(&input, &mut output, y, &inverse, None);
 
             // Just verify no panics and output is reasonable
             for (x, &val) in output
@@ -542,8 +558,8 @@ mod tests {
                 let mut output_fast = vec![0.0f32; width];
                 let mut output_scalar = vec![0.0f32; width];
 
-                warp_row_lanczos3(&input, &mut output_fast, y, &inverse);
-                warp_row_lanczos3_scalar(&input, &mut output_scalar, y, &inverse);
+                warp_row_lanczos3(&input, &mut output_fast, y, &inverse, None);
+                warp_row_lanczos3_scalar(&input, &mut output_scalar, y, &inverse, None);
 
                 for x in 0..width {
                     assert!(
@@ -580,8 +596,8 @@ mod tests {
             let mut output_scalar = vec![0.0f32; width];
             let y = height / 2;
 
-            warp_row_lanczos3(&input, &mut output_fast, y, &inverse);
-            warp_row_lanczos3_scalar(&input, &mut output_scalar, y, &inverse);
+            warp_row_lanczos3(&input, &mut output_fast, y, &inverse, None);
+            warp_row_lanczos3_scalar(&input, &mut output_scalar, y, &inverse, None);
 
             for x in 0..width {
                 assert!(

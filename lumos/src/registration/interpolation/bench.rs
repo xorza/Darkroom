@@ -49,6 +49,7 @@ fn bench_warp_lanczos3_1k(b: bench::Bencher) {
             black_box(&input),
             black_box(&mut output),
             black_box(&transform),
+            None,
             InterpolationMethod::Lanczos3,
         );
     });
@@ -65,6 +66,7 @@ fn bench_warp_lanczos3_2k(b: bench::Bencher) {
             black_box(&input),
             black_box(&mut output),
             black_box(&transform),
+            None,
             InterpolationMethod::Lanczos3,
         );
     });
@@ -81,6 +83,7 @@ fn bench_warp_lanczos3_4k(b: bench::Bencher) {
             black_box(&input),
             black_box(&mut output),
             black_box(&transform),
+            None,
             InterpolationMethod::Lanczos3,
         );
     });
@@ -101,6 +104,7 @@ fn bench_warp_bilinear_2k(b: bench::Bencher) {
             black_box(&input),
             black_box(&mut output),
             black_box(&transform),
+            None,
             InterpolationMethod::Bilinear,
         );
     });

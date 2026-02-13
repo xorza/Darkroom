@@ -13,7 +13,7 @@ warping with Lanczos interpolation and SIMD-optimized row warping.
 3. Vote matrix accumulates vertex correspondences from similar triangles
 4. RANSAC with MAGSAC++ scoring estimates transform from voted matches
 5. Post-RANSAC match recovery via k-d tree projection on unmatched stars
-6. Optional SIP polynomial fit on residuals (computed but not applied in warp)
+6. Optional SIP polynomial fit on residuals, applied during warping when provided
 7. Image warping with output→input coordinate mapping (Lanczos3 default)
 
 ### Strengths
@@ -80,26 +80,6 @@ on inliers instead. Weighted LS using MAGSAC++ weights would improve accuracy.
 - No anti-aliasing filter for downscaling (minor for astro, typically upscaling)
 - SIMD: AVX2 bilinear processes 8 pixels/cycle on x86_64
 
-## Critical Issues
-
-### SIP Correction Computed But Never Applied During Warping
-**Files:** `mod.rs:239-254`, `mod.rs:304-318`
-
-`warp()` accepts only a `Transform` and ignores `RegistrationResult.sip_correction`.
-SIP polynomial is fit (line 316) and used for residual computation (lines 326-332)
-but never applied during actual image warping. Users enabling `sip_enabled` get
-improved residual reporting but identical warped images.
-
-The FITS WCS SIP standard defines both forward (A/B) and inverse (AP/BP)
-polynomial coefficients. This implementation only has forward coefficients.
-Warping requires the inverse direction (pixel -> corrected pixel) which needs
-AP/BP. Standard approach: fit inverse polynomial via grid sampling (LSST uses
-100x100 grid with least-squares).
-
-**Fix:** (1) Implement inverse SIP (AP/BP) via grid inversion.
-(2) Modify `warp()` or `warp_image()` to compose SIP correction with the
-transform for each pixel lookup.
-
 ## Important Issues
 
 ### Triangle Vertex Correspondence is Approximate
@@ -142,7 +122,7 @@ Integrating TPS would close the gap with PixInsight for wide-field work.
 | Feature | This Crate | PixInsight | Siril | Astrometry.net |
 |---------|-----------|------------|-------|----------------|
 | Star matching | Triangles | Polygons (4-8) | Triangles | Quads (4-star) |
-| Distortion correction | SIP (computed only) | TPS/surface splines | SIP via WCS | SIP (full A/B/AP/BP) |
+| Distortion correction | SIP (forward, applied in warp) | TPS/surface splines | SIP via WCS | SIP (full A/B/AP/BP) |
 | Drizzle integration | No | Yes | Yes | N/A |
 | Phase correlation fallback | No | No | Yes | N/A |
 | Multi-channel registration | Per-channel warp | Per-channel warp | Global | N/A |

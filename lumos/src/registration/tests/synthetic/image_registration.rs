@@ -45,6 +45,7 @@ fn transform_image(
         &src_buf,
         &mut output,
         &inverse,
+        None,
         InterpolationMethod::Bilinear,
     );
     output.into_vec()
@@ -62,6 +63,7 @@ fn translate_image(src_pixels: &[f32], width: usize, height: usize, dx: f64, dy:
         &src_buf,
         &mut output,
         &inverse,
+        None,
         InterpolationMethod::Bilinear,
     );
     output.into_vec()
