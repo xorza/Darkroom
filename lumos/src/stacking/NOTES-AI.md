@@ -60,16 +60,12 @@ Rewritten to match PixInsight/Siril two-phase algorithm:
   For clean data median≈mean and MAD*1.4826≈stddev, so critical values are close enough.
   Switching risks regressions with no measurable quality improvement.
 
-### P2: Missing Separate Rejection vs Combination Normalization
+### P2: Missing Separate Rejection vs Combination Normalization — POSTPONED
 
-- **File**: stack.rs, config.rs
-- PixInsight provides **two independent normalization controls**:
-  1. Rejection normalization: applied before rejection to make outlier detection uniform
-  2. Combination normalization: applied when computing final pixel values
-- These can differ. Example: "Scale + Zero Offset" for rejection (match backgrounds),
-  "No normalization" for output (preserve photometric values).
-- Our implementation uses a single normalization for both.
-- **Fix**: Add `StackConfig::rejection_normalization` field.
+- PixInsight provides two independent normalization controls (rejection vs combination).
+- In practice, using the same normalization for both works for the vast majority of
+  workflows. Separate controls only matter for preserving absolute flux while using
+  normalized rejection — a niche advanced use case. Matches Siril's default behavior.
 
 ### ~~P2: Reference Frame Always Frame 0~~ — FIXED
 
