@@ -197,10 +197,12 @@ NEON gives 2x. Fused normal equations avoid Jacobian allocation.
   the quality filter stage if Laplacian SNR is used for rejection.
 - **Fix**: Compute median-filtered Laplacian and divide. Threshold at ~2.0 per paper.
 
-### MEDIUM: SNR Uses Full Square Stamp Area
-- Already documented in top-level NOTES-AI.md P2.
-- Overestimates noise by factor of sqrt(pi/4) to sqrt(2) depending on stamp size.
-- Produces systematically lower SNR than optimal aperture photometry.
+### ~~MEDIUM: SNR Uses Full Square Stamp Area~~ — REJECTED
+- Flux is summed over the full square stamp. Using circular npix with square flux
+  would be inconsistent. The proper fix (circular aperture masking for everything)
+  is a larger refactor touching flux, moments, sharpness, etc. Since SNR is only
+  used for ranking/filtering (not photometry), the systematic offset doesn't affect
+  relative ordering.
 
 ### LOW-MEDIUM: Fit Parameters Discarded
 - Already documented in top-level NOTES-AI.md P3.
