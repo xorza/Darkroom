@@ -268,10 +268,9 @@ need ~45 matched stars.
    Compute `max(diag(L)) / min(diag(L))` during factorization and log a warning
    if it exceeds ~1e10.
 
-3. **No polynomial order validation against point count** (`sip/mod.rs:138`).
-   Only checks `n < terms.len()`. Should warn/return None if
-   `n < 3 * terms.len()` to prevent overfitting. For order 5 (18 terms),
-   minimum ~54 points.
+3. ~~**No polynomial order validation against point count**~~ — FIXED.
+   Now requires `n >= 3 * terms.len()` (Astrometry.net practice). Returns
+   `None` if insufficient points. Order 5 (18 terms) needs ≥54 points.
 
 4. **Stale README.md** (`sip/README.md`). References `compute_inverse`,
    `inverse_correct`, `inverse_correction_at`, `inverse_correct_points`, and

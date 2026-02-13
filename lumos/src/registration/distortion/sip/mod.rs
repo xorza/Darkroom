@@ -135,7 +135,9 @@ impl SipPolynomial {
 
         let n = ref_points.len();
         let terms = term_exponents(config.order);
-        if n < terms.len() {
+        // Require at least 3x as many points as polynomial terms to prevent overfitting.
+        // Astrometry.net practice: order 4 (12 terms) needs ~36 points minimum.
+        if n < 3 * terms.len() {
             return None;
         }
 

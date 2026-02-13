@@ -154,7 +154,7 @@ fn test_too_few_points() {
         ..Default::default()
     };
 
-    // 2 points < 3 terms for order 2 => should return None
+    // 2 points < 3*3=9 minimum for order 2 => should return None
     assert!(
         SipPolynomial::fit_from_transform(&ref_points, &target_points, &transform, &config)
             .is_none()
