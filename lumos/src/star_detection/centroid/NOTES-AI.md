@@ -185,17 +185,10 @@ NEON gives 2x. Fused normal equations avoid Jacobian allocation.
 
 ## Issues Found by Research
 
-### HIGH: L.A.Cosmic Laplacian SNR Missing Fine Structure Ratio
-- **File**: mod.rs (L.A.Cosmic metric computation)
-- van Dokkum (2001) L.A.Cosmic uses TWO criteria: (1) Laplacian SNR > threshold AND
-  (2) fine structure ratio = Laplacian / (median-filtered Laplacian) > threshold.
-- Without the fine structure ratio, bright star peaks (which have large Laplacian due
-  to sharpness) get flagged as cosmic rays alongside actual CRs.
-- The fine structure ratio discriminates: CRs have high Laplacian but low surrounding
-  signal (high ratio), while stars have proportional surrounding signal (low ratio).
-- **Impact**: Stars near saturation may be misclassified as cosmic rays. This affects
-  the quality filter stage if Laplacian SNR is used for rejection.
-- **Fix**: Compute median-filtered Laplacian and divide. Threshold at ~2.0 per paper.
+### HIGH: L.A.Cosmic Laplacian SNR Missing Fine Structure Ratio — POSTPONED
+- `laplacian_snr` is computed but not used in the filter stage (filter uses sharpness
+  instead). Adding fine-structure ratio to an unused metric would be dead code.
+  Revisit when laplacian_snr is wired into the filtering pipeline.
 
 ### ~~MEDIUM: SNR Uses Full Square Stamp Area~~ — REJECTED
 - Flux is summed over the full square stamp. Using circular npix with square flux
