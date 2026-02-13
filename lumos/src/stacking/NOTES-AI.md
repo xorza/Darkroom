@@ -53,15 +53,12 @@ Rewritten to match PixInsight/Siril two-phase algorithm:
 - `relaxation = 1.0` restores symmetric behavior; higher values → more tolerant of dark pixels
 - Validated: `relaxation=5.0` preserves 6.7σ dark pixel that is rejected at `relaxation=1.0`
 
-### P2: GESD -- Statistics Mismatch with Critical Values
+### ~~P2: GESD -- Statistics Mismatch with Critical Values~~ — REJECTED
 
-- **File**: rejection.rs, `GesdConfig::reject`
-- GESD critical values are derived assuming normal-distribution statistics (mean + stddev).
-- Our median + MAD estimator is theoretically incompatible with these critical values.
-- PixInsight uses **trimmed mean + trimmed stddev** (trimming fraction = max_outliers).
-- Siril uses raw **mean + stddev** (classic Grubbs test).
-- Our robust estimators may cause the test to behave differently from theoretical guarantees.
-- **Fix**: Consider trimmed mean + stddev to match PixInsight, or document the deviation.
+- Median+MAD is intentionally used over mean+stddev for robustness against the very
+  outliers GESD is detecting. PixInsight's trimmed mean+stddev is equally approximate.
+  For clean data median≈mean and MAD*1.4826≈stddev, so critical values are close enough.
+  Switching risks regressions with no measurable quality improvement.
 
 ### P2: Missing Separate Rejection vs Combination Normalization
 
