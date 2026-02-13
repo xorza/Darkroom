@@ -469,6 +469,8 @@ fn test_tps_many_points() {
 }
 
 /// Test numerical stability with large coordinates.
+/// Before normalization, this test required tolerance of 1.0 pixel.
+/// With coordinate normalization, tolerance is now 1e-3.
 #[test]
 fn test_tps_large_coordinates() {
     let offset = 10000.0;
@@ -483,19 +485,89 @@ fn test_tps_large_coordinates() {
 
     let tps = ThinPlateSpline::fit(&source, &target, TpsConfig::default()).unwrap();
 
-    // Test transformation
+    // Control points: exact interpolation
+    for (&src, &tgt) in source.iter().zip(target.iter()) {
+        let t = tps.transform(src);
+        assert!(
+            (t.x - tgt.x).abs() < 1e-6,
+            "Control point x: {} expected {}",
+            t.x,
+            tgt.x
+        );
+        assert!(
+            (t.y - tgt.y).abs() < 1e-6,
+            "Control point y: {} expected {}",
+            t.y,
+            tgt.y
+        );
+    }
+
+    // Intermediate point: pure translation should interpolate exactly
     let t = tps.transform(DVec2::new(offset + 50.0, offset + 50.0));
     assert!(
-        (t.x - (offset + 55.0)).abs() < 1.0,
+        (t.x - (offset + 55.0)).abs() < 1e-3,
         "tx: {} expected {}",
         t.x,
         offset + 55.0
     );
     assert!(
-        (t.y - (offset + 53.0)).abs() < 1.0,
+        (t.y - (offset + 53.0)).abs() < 1e-3,
         "ty: {} expected {}",
         t.y,
         offset + 53.0
+    );
+}
+
+/// Test with extreme coordinates (offset=100000) to verify normalization robustness.
+/// Without normalization this would fail completely due to catastrophic cancellation
+/// in r^2*ln(r) with r~141000.
+#[test]
+fn test_tps_extreme_coordinates() {
+    let offset = 100_000.0;
+    let source = vec![
+        DVec2::new(offset, offset),
+        DVec2::new(offset + 100.0, offset),
+        DVec2::new(offset, offset + 100.0),
+        DVec2::new(offset + 100.0, offset + 100.0),
+        DVec2::new(offset + 50.0, offset + 50.0),
+    ];
+
+    // Non-trivial distortion: barrel-like shift
+    let center = DVec2::new(offset + 50.0, offset + 50.0);
+    let target: Vec<DVec2> = source
+        .iter()
+        .map(|&p| {
+            let d = p - center;
+            let r2 = d.length_squared();
+            p + d * (0.00001 * r2) + DVec2::new(3.0, -2.0)
+        })
+        .collect();
+
+    let tps = ThinPlateSpline::fit(&source, &target, TpsConfig::default()).unwrap();
+
+    // Control points should be exact
+    let residuals = tps.compute_residuals(&target);
+    let max_residual = residuals.iter().cloned().fold(0.0f64, f64::max);
+    assert!(
+        max_residual < 1e-5,
+        "Max residual at extreme coords: {max_residual}"
+    );
+
+    // Intermediate point should interpolate smoothly
+    let mid = DVec2::new(offset + 25.0, offset + 75.0);
+    let t = tps.transform(mid);
+    // Verify result is in a reasonable range (not NaN, not wildly off)
+    assert!(
+        (t.x - mid.x).abs() < 20.0,
+        "Extreme coord mid x: {} vs {}",
+        t.x,
+        mid.x
+    );
+    assert!(
+        (t.y - mid.y).abs() < 20.0,
+        "Extreme coord mid y: {} vs {}",
+        t.y,
+        mid.y
     );
 }
 

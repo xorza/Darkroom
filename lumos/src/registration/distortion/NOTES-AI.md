@@ -156,17 +156,16 @@ recommended.
 (the TPS matrix is not SPD). Uses `Vec<Vec<f64>>` which is allocation-heavy
 but correct.
 
-### Coordinate Normalization
+### Coordinate Normalization — FIXED
 
-**Missing**. The TPS solver uses raw pixel coordinates without normalization.
-The `r^2 * ln(r)` kernel amplifies rounding errors for large coordinates
-(e.g., 4000+ pixel images). ALGLIB uses ACBF preconditioning for this reason.
-The test `test_tps_large_coordinates` uses offset=10000 and passes, but the
-tolerance is relaxed to 1.0 pixel, suggesting some numerical degradation.
+Coordinates are now centered and scaled to `[-1, 1]` before building the TPS
+system matrix. `compute_normalization()` computes bounding-box center and
+half-extent; both source and target points are normalized with the same
+parameters. `transform()` normalizes input and denormalizes output.
 
-**Recommendation**: Center and scale coordinates to unit box before building
-the TPS matrix, then transform results back. This is a simple change that
-significantly improves stability.
+Result: `test_tps_large_coordinates` (offset=10000) tolerance tightened from
+1.0 to 1e-3 pixel. New `test_tps_extreme_coordinates` (offset=100000) passes
+with residuals < 1e-5.
 
 ### Integration Status
 
@@ -262,10 +261,8 @@ need ~45 matched stars.
 
 #### Important
 
-1. **TPS lacks coordinate normalization** (`tps/mod.rs`). The kernel `r^2*ln(r)`
-   amplifies errors for large coordinates. Center and scale to unit box before
-   building the matrix, transform back after solving. Simple fix, significant
-   stability improvement.
+1. ~~**TPS lacks coordinate normalization**~~ — FIXED. Coordinates now centered
+   and scaled to `[-1, 1]` in `fit()`, with normalize/denormalize in `transform()`.
 
 2. **No condition number monitoring** in Cholesky solver (`sip/mod.rs:406-451`).
    Compute `max(diag(L)) / min(diag(L))` during factorization and log a warning
