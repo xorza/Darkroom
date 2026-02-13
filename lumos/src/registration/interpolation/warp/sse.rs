@@ -2,6 +2,7 @@
 
 #![allow(clippy::needless_range_loop)]
 
+use crate::common::Buffer2;
 use glam::DVec2;
 #[cfg(target_arch = "x86_64")]
 use std::arch::x86_64::*;
@@ -17,19 +18,21 @@ use crate::registration::transform::Transform;
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2")]
 pub unsafe fn warp_row_bilinear_avx2(
-    input: &[f32],
-    input_width: usize,
-    input_height: usize,
+    input: &Buffer2<f32>,
     output_row: &mut [f32],
     output_y: usize,
-    inverse: &Transform,
+    transform: &Transform,
 ) {
+    let pixels = input.pixels();
+    let input_width = input.width();
+    let input_height = input.height();
+
     unsafe {
         let output_width = output_row.len();
         let y = output_y as f64;
 
         // Extract transform coefficients
-        let t = inverse.matrix.as_array();
+        let t = transform.matrix.as_array();
         let a = t[0] as f32;
         let b = t[1] as f32;
         let c = t[2] as f32;
@@ -116,10 +119,10 @@ pub unsafe fn warp_row_bilinear_avx2(
                 let ix1 = x1_arr[i] as i32;
                 let iy1 = y1_arr[i] as i32;
 
-                p00[i] = sample_pixel(input, input_width, input_height, ix0, iy0);
-                p10[i] = sample_pixel(input, input_width, input_height, ix1, iy0);
-                p01[i] = sample_pixel(input, input_width, input_height, ix0, iy1);
-                p11[i] = sample_pixel(input, input_width, input_height, ix1, iy1);
+                p00[i] = sample_pixel(pixels, input_width, input_height, ix0, iy0);
+                p10[i] = sample_pixel(pixels, input_width, input_height, ix1, iy0);
+                p01[i] = sample_pixel(pixels, input_width, input_height, ix0, iy1);
+                p11[i] = sample_pixel(pixels, input_width, input_height, ix1, iy1);
             }
 
             let p00_vec = _mm256_loadu_ps(p00.as_ptr());
@@ -142,14 +145,8 @@ pub unsafe fn warp_row_bilinear_avx2(
         // Handle remainder with scalar
         let remainder_start = chunks * 8;
         for x in remainder_start..output_width {
-            let src = inverse.apply(DVec2::new(x as f64, y));
-            output_row[x] = super::bilinear_sample(
-                input,
-                input_width,
-                input_height,
-                src.x as f32,
-                src.y as f32,
-            );
+            let src = transform.apply(DVec2::new(x as f64, y));
+            output_row[x] = super::bilinear_sample(input, src.x as f32, src.y as f32);
         }
     }
 }
@@ -163,19 +160,21 @@ pub unsafe fn warp_row_bilinear_avx2(
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "sse4.1")]
 pub unsafe fn warp_row_bilinear_sse(
-    input: &[f32],
-    input_width: usize,
-    input_height: usize,
+    input: &Buffer2<f32>,
     output_row: &mut [f32],
     output_y: usize,
-    inverse: &Transform,
+    transform: &Transform,
 ) {
+    let pixels = input.pixels();
+    let input_width = input.width();
+    let input_height = input.height();
+
     unsafe {
         let output_width = output_row.len();
         let y = output_y as f64;
 
         // Extract transform coefficients
-        let t = inverse.matrix.as_array();
+        let t = transform.matrix.as_array();
         let a = t[0] as f32;
         let b = t[1] as f32;
         let c = t[2] as f32;
@@ -248,10 +247,10 @@ pub unsafe fn warp_row_bilinear_sse(
                 let ix1 = ix0 + 1;
                 let iy1 = iy0 + 1;
 
-                p00[i] = sample_pixel(input, input_width, input_height, ix0, iy0);
-                p10[i] = sample_pixel(input, input_width, input_height, ix1, iy0);
-                p01[i] = sample_pixel(input, input_width, input_height, ix0, iy1);
-                p11[i] = sample_pixel(input, input_width, input_height, ix1, iy1);
+                p00[i] = sample_pixel(pixels, input_width, input_height, ix0, iy0);
+                p10[i] = sample_pixel(pixels, input_width, input_height, ix1, iy0);
+                p01[i] = sample_pixel(pixels, input_width, input_height, ix0, iy1);
+                p11[i] = sample_pixel(pixels, input_width, input_height, ix1, iy1);
             }
 
             let p00_vec = _mm_loadu_ps(p00.as_ptr());
@@ -271,14 +270,8 @@ pub unsafe fn warp_row_bilinear_sse(
         // Handle remainder with scalar
         let remainder_start = chunks * 4;
         for x in remainder_start..output_width {
-            let src = inverse.apply(DVec2::new(x as f64, y));
-            output_row[x] = super::bilinear_sample(
-                input,
-                input_width,
-                input_height,
-                src.x as f32,
-                src.y as f32,
-            );
+            let src = transform.apply(DVec2::new(x as f64, y));
+            output_row[x] = super::bilinear_sample(input, src.x as f32, src.y as f32);
         }
     }
 }
@@ -311,17 +304,10 @@ mod tests {
         let y = 30;
 
         unsafe {
-            warp_row_bilinear_avx2(input.pixels(), width, height, &mut output_avx2, y, &inverse);
+            warp_row_bilinear_avx2(&input, &mut output_avx2, y, &inverse);
         }
 
-        super::super::warp_row_bilinear_scalar(
-            input.pixels(),
-            width,
-            height,
-            &mut output_scalar,
-            y,
-            &inverse,
-        );
+        super::super::warp_row_bilinear_scalar(&input, &mut output_scalar, y, &inverse);
 
         for x in 0..width {
             assert!(
@@ -353,17 +339,10 @@ mod tests {
         let y = 25;
 
         unsafe {
-            warp_row_bilinear_sse(input.pixels(), width, height, &mut output_sse, y, &inverse);
+            warp_row_bilinear_sse(&input, &mut output_sse, y, &inverse);
         }
 
-        super::super::warp_row_bilinear_scalar(
-            input.pixels(),
-            width,
-            height,
-            &mut output_scalar,
-            y,
-            &inverse,
-        );
+        super::super::warp_row_bilinear_scalar(&input, &mut output_scalar, y, &inverse);
 
         for x in 0..width {
             assert!(

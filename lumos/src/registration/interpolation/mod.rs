@@ -261,9 +261,9 @@ pub fn warp_image(
         .enumerate()
         .for_each(|(y, row)| {
             if method == InterpolationMethod::Bilinear {
-                warp::warp_row_bilinear(input.pixels(), width, height, row, y, transform);
+                warp::warp_row_bilinear(input, row, y, transform);
             } else if method == InterpolationMethod::Lanczos3 {
-                warp::warp_row_lanczos3(input.pixels(), width, height, row, y, transform);
+                warp::warp_row_lanczos3(input, row, y, transform);
             } else {
                 for (x, pixel) in row.iter_mut().enumerate() {
                     let src = transform.apply(glam::DVec2::new(x as f64, y as f64));
