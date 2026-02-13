@@ -45,42 +45,6 @@ fn test_sum_f32_negative() {
 }
 
 // ---------------------------------------------------------------------------
-// sum_squared_diff tests
-// ---------------------------------------------------------------------------
-
-#[test]
-fn test_sum_squared_diff() {
-    let values: Vec<f32> = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
-    let mean_val: f32 = 4.5;
-    let expected: f32 = values.iter().map(|v| (v - mean_val).powi(2)).sum();
-    assert!((sum_squared_diff(&values, mean_val) - expected).abs() < 1e-4);
-}
-
-#[test]
-fn test_sum_squared_diff_remainder() {
-    let values: Vec<f32> = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0];
-    let mean_val: f32 = 4.0;
-    let expected: f32 = values.iter().map(|v| (v - mean_val).powi(2)).sum();
-    assert!((sum_squared_diff(&values, mean_val) - expected).abs() < 1e-4);
-}
-
-#[test]
-fn test_sum_squared_diff_small() {
-    let values: Vec<f32> = vec![1.0, 2.0, 3.0];
-    let mean_val: f32 = 2.0;
-    let expected: f32 = values.iter().map(|v| (v - mean_val).powi(2)).sum();
-    assert!((sum_squared_diff(&values, mean_val) - expected).abs() < 1e-4);
-}
-
-#[test]
-fn test_sum_squared_diff_negative() {
-    let values: Vec<f32> = vec![-4.0, -2.0, 0.0, 2.0, 4.0, 6.0, 8.0, 10.0];
-    let mean_val: f32 = 3.0;
-    let expected: f32 = values.iter().map(|v| (v - mean_val).powi(2)).sum();
-    assert!((sum_squared_diff(&values, mean_val) - expected).abs() < 1e-4);
-}
-
-// ---------------------------------------------------------------------------
 // mean_f32 tests
 // ---------------------------------------------------------------------------
 
@@ -106,20 +70,6 @@ fn test_simd_vs_scalar_sum() {
     let simd_result = sum_f32(&values);
     assert!(
         (scalar_result - simd_result).abs() < 1e-2,
-        "scalar={}, simd={}",
-        scalar_result,
-        simd_result
-    );
-}
-
-#[test]
-fn test_simd_vs_scalar_sum_squared_diff() {
-    let values: Vec<f32> = (0..1000).map(|x| x as f32 * 0.1).collect();
-    let mean = values.iter().sum::<f32>() / values.len() as f32;
-    let scalar_result = scalar::sum_squared_diff(&values, mean);
-    let simd_result = sum_squared_diff(&values, mean);
-    assert!(
-        (scalar_result - simd_result).abs() < 1e-1,
         "scalar={}, simd={}",
         scalar_result,
         simd_result
@@ -173,23 +123,6 @@ fn test_sum_f32_simd_boundary_plus_one() {
         let result = sum_f32(&values);
         assert!(
             (result - expected).abs() < 1e-4,
-            "size={}, expected={}, got={}",
-            size,
-            expected,
-            result
-        );
-    }
-}
-
-#[test]
-fn test_sum_squared_diff_simd_boundaries() {
-    for size in [4, 8, 16, 32] {
-        let values: Vec<f32> = (1..=size).map(|x| x as f32).collect();
-        let mean = values.iter().sum::<f32>() / values.len() as f32;
-        let expected: f32 = values.iter().map(|v| (v - mean).powi(2)).sum();
-        let result = sum_squared_diff(&values, mean);
-        assert!(
-            (result - expected).abs() < 1e-3,
             "size={}, expected={}, got={}",
             size,
             expected,

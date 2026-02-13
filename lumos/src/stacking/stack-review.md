@@ -16,35 +16,13 @@ Review of `lumos/src/stacking/` against [Siril source](https://gitlab.com/free-a
 
 ## Bugs / Wrong Behavior
 
-### 1. Linear fit uses wrong x-values (BUG)
+### ~~1. Linear fit uses wrong x-values~~ (FIXED)
 
-**Our code** (`LinearFitClipConfig::reject`): fits `y = a + b * original_frame_index`, treating pixel values as a time series across frames.
+Fixed: now sorts values with index co-array, fits `y = a + b * sorted_index`, uses MAD of residuals for sigma, fit value at median position as center. First pass uses initial median+MAD (robust starting point), subsequent passes refine with linear fit. Matches PixInsight/Siril.
 
-**PixInsight** (`RejectionLinearFit`): sorts values by magnitude, then fits `y = a + b * sorted_index`. Residual sigma from this fit is used as a robust scale estimator. Center is the fit value at the median position.
+### ~~2. GESD uses mean+stddev instead of median+MAD~~ (FIXED)
 
-**Siril** (`line_clipping_float`): identical to PixInsight — sorts values, fits through sorted indices, uses residual sigma.
-
-The purpose of linear fit clipping is NOT to model temporal trends. It fits a line through the **sorted pixel value distribution** to get a robust sigma estimate that accounts for the expected shape of the distribution (which should be roughly linear when sorted). This makes the sigma estimate robust against outliers skewing the mean/stddev.
-
-**Fix**: Sort values (with index co-array), use sorted position as x-values, compute MAD of residuals for sigma, use fit value at median position as center.
-
-**Impact**: Critical — linear fit currently models the wrong thing | **Effort**: Low
-
-### 2. GESD uses mean+stddev instead of median+MAD (quality issue)
-
-**Our code** (`GesdConfig::reject`): test statistic = `|value - mean| / stddev`.
-
-**PixInsight** (`ESDRejection`): test statistic = `|value - median| / MAD`. Uses proper `TDistribution::InverseCDF` for critical values.
-
-**Siril** (`GESDT_float`): uses mean+stddev like ours, but with a precomputed Grubbs lookup table (max 25 frames).
-
-PixInsight's approach is more robust. The mean and stddev can be heavily influenced by the very outliers GESD is trying to detect — the classic masking effect. Using median+MAD for the test statistic makes the detection more reliable.
-
-Our inverse normal approximation for critical values is acceptable (Abramowitz & Stegun is standard), but PixInsight uses proper t-distribution inverse CDF which is more accurate for small sample sizes.
-
-**Fix**: Switch to median+MAD for test statistic computation. Consider proper t-distribution CDF.
-
-**Impact**: Medium — affects GESD quality for small stacks | **Effort**: Low
+Fixed: switched to median+MAD for test statistics (more robust against masking effect). Implemented proper two-phase approach: Phase 1 iteratively finds most deviant value and records test statistic; Phase 2 backward scans comparing test statistics against critical values to determine actual outlier count. Matches PixInsight.
 
 ## Resolved
 
@@ -97,16 +75,16 @@ Always uses frame 0. Should pick best-quality frame (lowest noise, best FWHM).
 |-----------|-------------------|------------|-------|
 | **Sigma Clip** | median + MAD, iterative | Single-pass median+MAD | mean + stddev, iterative |
 | **Winsorized** | Clamps outliers to boundary | Iterative reject + recompute median+MAD | mean for sigma, median for center, σ×1.134 |
-| **Linear Fit** | Frame index as x (**wrong**) | Sorted-value index as x | Sorted-value index as x |
-| **GESD** | mean + stddev, inverse normal approx | median + MAD, t-distribution CDF | mean + stddev, Grubbs lookup table (≤25) |
+| **Linear Fit** | Sorted-value index as x, MAD of residuals | Sorted-value index as x | Sorted-value index as x |
+| **GESD** | median + MAD, two-phase, inverse normal approx | median + MAD, t-distribution CDF | mean + stddev, Grubbs lookup table (≤25) |
 | **Percentile** | Rank-based (clip N% from ends) | Distance from median | Distance from median (multiplicative) |
 
 ## Priority
 
 | # | Item | Impact | Effort |
 |---|------|--------|--------|
-| 1 | Fix linear fit x-values | Critical | Low |
-| 2 | GESD: switch to median+MAD | Medium | Low |
+| ~~1~~ | ~~Fix linear fit x-values~~ | ~~Critical~~ | ~~Done~~ |
+| ~~2~~ | ~~GESD: switch to median+MAD~~ | ~~Medium~~ | ~~Done~~ |
 | 3 | IKSS normalization | Quality | Medium |
 | 4 | Auto weighting | Feature | High |
 | 5 | Sum stacking | Completeness | Trivial |

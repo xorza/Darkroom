@@ -31,26 +31,6 @@ pub fn sum_f32(values: &[f32]) -> f32 {
     scalar::sum_f32(values)
 }
 
-/// Calculate sum of squared differences from mean using SIMD when available.
-pub fn sum_squared_diff(values: &[f32], mean: f32) -> f32 {
-    #[cfg(target_arch = "aarch64")]
-    {
-        if values.len() >= 4 {
-            return unsafe { neon::sum_squared_diff(values, mean) };
-        }
-    }
-    #[cfg(target_arch = "x86_64")]
-    {
-        if values.len() >= 8 && common::cpu_features::has_avx2() {
-            return unsafe { avx2::sum_squared_diff(values, mean) };
-        }
-        if values.len() >= 4 && common::cpu_features::has_sse4_1() {
-            return unsafe { sse::sum_squared_diff(values, mean) };
-        }
-    }
-    scalar::sum_squared_diff(values, mean)
-}
-
 /// Calculate the mean of f32 values using SIMD-accelerated sum.
 pub fn mean_f32(values: &[f32]) -> f32 {
     debug_assert!(!values.is_empty());

@@ -39,33 +39,3 @@ pub unsafe fn sum_f32(values: &[f32]) -> f32 {
         horizontal_sum_256(sum_vec) + remainder.iter().sum::<f32>()
     }
 }
-
-/// Calculate sum of squared differences from mean using AVX2 SIMD.
-///
-/// # Safety
-/// Caller must ensure AVX2 is available.
-#[target_feature(enable = "avx2")]
-pub unsafe fn sum_squared_diff(values: &[f32], mean: f32) -> f32 {
-    unsafe {
-        let mean_vec = _mm256_set1_ps(mean);
-        let mut sum_vec = _mm256_setzero_ps();
-        let chunks = values.chunks_exact(8);
-        let remainder = chunks.remainder();
-
-        for chunk in chunks {
-            let v = _mm256_loadu_ps(chunk.as_ptr());
-            let diff = _mm256_sub_ps(v, mean_vec);
-            let sq = _mm256_mul_ps(diff, diff);
-            sum_vec = _mm256_add_ps(sum_vec, sq);
-        }
-
-        horizontal_sum_256(sum_vec)
-            + remainder
-                .iter()
-                .map(|v| {
-                    let diff = v - mean;
-                    diff * diff
-                })
-                .sum::<f32>()
-    }
-}

@@ -256,9 +256,8 @@ warp_multichannel_parallel(image, w, h, channels, transform, method) -> Vec<f32>
 
 - `sum_f32()` - SIMD-accelerated sum
 - `mean_f32()` - SIMD-accelerated mean
-- `sum_squared_diff()` - SIMD-accelerated sum of squared differences
 
-Platforms: ARM NEON (aarch64), x86 SSE4, scalar fallback
+Platforms: ARM NEON (aarch64), x86 SSE4/AVX2, scalar fallback
 
 ## RAW File Loading (`raw/`)
 
