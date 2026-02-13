@@ -12,7 +12,7 @@ use anyhow::Result;
 use crate::astro_image::cfa::CfaImage;
 use crate::stacking::FrameType;
 use crate::stacking::cache::ImageCache;
-use crate::stacking::config::{Normalization, StackConfig};
+use crate::stacking::config::StackConfig;
 use crate::stacking::progress::ProgressCallback;
 use crate::stacking::stack::run_stacking;
 
@@ -42,12 +42,13 @@ pub struct CalibrationMasters {
 
 /// Stack raw CFA frames using the full stacking pipeline.
 ///
-/// Uses median for < 8 frames, sigma-clipped mean for >= 8 frames.
+/// Uses the frame-type preset config. Falls back to median for < 8 frames
+/// (too few for rejection to work well).
 /// Returns `None` if `paths` is empty.
 fn stack_cfa_frames(
     paths: &[impl AsRef<Path> + Sync],
     frame_type: FrameType,
-    normalization: Normalization,
+    config: StackConfig,
 ) -> Result<Option<CfaImage>> {
     if paths.is_empty() {
         return Ok(None);
@@ -55,14 +56,11 @@ fn stack_cfa_frames(
 
     let config = if paths.len() < 8 {
         StackConfig {
-            normalization,
+            normalization: config.normalization,
             ..StackConfig::median()
         }
     } else {
-        StackConfig {
-            normalization,
-            ..StackConfig::sigma_clipped(3.0)
-        }
+        config
     };
 
     let cache = ImageCache::<CfaImage>::from_paths(
@@ -118,10 +116,10 @@ impl CalibrationMasters {
         biases: &[impl AsRef<Path> + Sync],
         flat_darks: &[impl AsRef<Path> + Sync],
     ) -> Result<Self> {
-        let dark = stack_cfa_frames(darks, FrameType::Dark, Normalization::None)?;
-        let flat = stack_cfa_frames(flats, FrameType::Flat, Normalization::Multiplicative)?;
-        let bias = stack_cfa_frames(biases, FrameType::Bias, Normalization::None)?;
-        let flat_dark = stack_cfa_frames(flat_darks, FrameType::Dark, Normalization::None)?;
+        let dark = stack_cfa_frames(darks, FrameType::Dark, StackConfig::dark())?;
+        let flat = stack_cfa_frames(flats, FrameType::Flat, StackConfig::flat())?;
+        let bias = stack_cfa_frames(biases, FrameType::Bias, StackConfig::bias())?;
+        let flat_dark = stack_cfa_frames(flat_darks, FrameType::Dark, StackConfig::dark())?;
         Ok(Self::new(dark, flat, bias, flat_dark))
     }
 

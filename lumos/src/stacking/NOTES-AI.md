@@ -127,15 +127,12 @@ Rewritten to match PixInsight/Siril two-phase algorithm:
   Gated with `#[cfg(unix)]`. Enables kernel read-ahead and early page release for
   the sequential row-by-row access pattern used during stacking.
 
-### P3: Missing Frame-Type-Specific Presets
-
-- `FrameType` enum affects only logging, not behavior.
-- Industry-standard defaults differ by frame type:
-  - Bias: Mean + Winsorized(3.0), Normalization::None
-  - Dark: Mean + Winsorized(3.0), Normalization::None
-  - Flat: Mean + SigmaClip(2.5), Normalization::Multiplicative
-  - Light: Mean + SigmaClip(2.5), Normalization::Global
-- **Fix**: Add preset constructors `StackConfig::bias()`, `dark()`, `flat()`, `light()`.
+### ~~P3: Missing Frame-Type-Specific Presets~~ — FIXED
+- Added `StackConfig::bias()`, `dark()`, `flat()`, `light()` preset constructors:
+  - Bias/Dark: Winsorized σ=3.0, no normalization
+  - Flat: σ-clip σ=2.5, multiplicative normalization
+  - Light: σ-clip σ=2.5, global normalization
+- Matches PixInsight/Siril defaults. Tests in `config::tests`.
 
 ### P3: Sigma Clipping -- Missing Convergence Mode
 
@@ -268,7 +265,7 @@ Rewritten to match PixInsight/Siril two-phase algorithm:
    automatic weighting scheme. Requires reliable background noise estimator.
 6. ~~**Fix cache hash determinism**~~ (P3) -- **FIXED**: FNV-1a hasher.
 7. ~~**Add madvise(MADV_SEQUENTIAL)**~~ (P3) -- **FIXED**: `Advice::Sequential` on mmap.
-8. **Add frame-type presets** (P3) -- `bias()`, `dark()`, `flat()`, `light()`.
+8. ~~**Add frame-type presets**~~ (P3) -- **FIXED**: `bias()`, `dark()`, `flat()`, `light()`.
 
 ## Test Coverage
 

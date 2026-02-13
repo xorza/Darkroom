@@ -144,6 +144,44 @@ impl StackConfig {
         }
     }
 
+    // ========== Frame-Type Presets ==========
+
+    /// Preset for bias frames: Winsorized σ=3.0, no normalization.
+    pub fn bias() -> Self {
+        Self {
+            method: CombineMethod::Mean(Rejection::winsorized(3.0)),
+            normalization: Normalization::None,
+            ..Default::default()
+        }
+    }
+
+    /// Preset for dark frames: Winsorized σ=3.0, no normalization.
+    pub fn dark() -> Self {
+        Self {
+            method: CombineMethod::Mean(Rejection::winsorized(3.0)),
+            normalization: Normalization::None,
+            ..Default::default()
+        }
+    }
+
+    /// Preset for flat frames: σ-clip σ=2.5, multiplicative normalization.
+    pub fn flat() -> Self {
+        Self {
+            method: CombineMethod::Mean(Rejection::sigma_clip(2.5)),
+            normalization: Normalization::Multiplicative,
+            ..Default::default()
+        }
+    }
+
+    /// Preset for light frames: σ-clip σ=2.5, global normalization.
+    pub fn light() -> Self {
+        Self {
+            method: CombineMethod::Mean(Rejection::sigma_clip(2.5)),
+            normalization: Normalization::Global,
+            ..Default::default()
+        }
+    }
+
     // ========== Validation ==========
 
     /// Validate configuration parameters.
@@ -303,6 +341,50 @@ mod tests {
             ..Default::default()
         };
         config.validate();
+    }
+
+    #[test]
+    fn test_bias_preset() {
+        let config = StackConfig::bias();
+        assert!(matches!(
+            config.method,
+            CombineMethod::Mean(Rejection::Winsorized(c))
+                if (c.sigma_low - 3.0).abs() < f32::EPSILON
+        ));
+        assert_eq!(config.normalization, Normalization::None);
+    }
+
+    #[test]
+    fn test_dark_preset() {
+        let config = StackConfig::dark();
+        assert!(matches!(
+            config.method,
+            CombineMethod::Mean(Rejection::Winsorized(c))
+                if (c.sigma_low - 3.0).abs() < f32::EPSILON
+        ));
+        assert_eq!(config.normalization, Normalization::None);
+    }
+
+    #[test]
+    fn test_flat_preset() {
+        let config = StackConfig::flat();
+        assert!(matches!(
+            config.method,
+            CombineMethod::Mean(Rejection::SigmaClip(c))
+                if (c.sigma_low - 2.5).abs() < f32::EPSILON
+        ));
+        assert_eq!(config.normalization, Normalization::Multiplicative);
+    }
+
+    #[test]
+    fn test_light_preset() {
+        let config = StackConfig::light();
+        assert!(matches!(
+            config.method,
+            CombineMethod::Mean(Rejection::SigmaClip(c))
+                if (c.sigma_low - 2.5).abs() < f32::EPSILON
+        ));
+        assert_eq!(config.normalization, Normalization::Global);
     }
 
     #[test]
