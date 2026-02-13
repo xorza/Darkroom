@@ -264,9 +264,9 @@ need ~45 matched stars.
 1. ~~**TPS lacks coordinate normalization**~~ — FIXED. Coordinates now centered
    and scaled to `[-1, 1]` in `fit()`, with normalize/denormalize in `transform()`.
 
-2. **No condition number monitoring** in Cholesky solver (`sip/mod.rs:406-451`).
-   Compute `max(diag(L)) / min(diag(L))` during factorization and log a warning
-   if it exceeds ~1e10.
+2. ~~**No condition number monitoring**~~ — FIXED. After Cholesky factorization,
+   computes `max(diag(L)) / min(diag(L))`. If ratio exceeds 1e5 (cond(A) ≈ 1e10),
+   falls back to LU with partial pivoting for better numerical stability.
 
 3. ~~**No polynomial order validation against point count**~~ — FIXED.
    Now requires `n >= 3 * terms.len()` (Astrometry.net practice). Returns

@@ -429,6 +429,20 @@ fn solve_cholesky(a: &[f64], b: &[f64], n: usize) -> Option<ArrayVec<f64, MAX_TE
         }
     }
 
+    // Condition number estimate: cond(A) ≈ (max(diag(L)) / min(diag(L)))^2.
+    // If this exceeds ~1e10 the solution is unreliable; fall back to LU with pivoting.
+    let mut diag_min = f64::MAX;
+    let mut diag_max = 0.0f64;
+    for i in 0..n {
+        let d = l[i * n + i];
+        diag_min = diag_min.min(d);
+        diag_max = diag_max.max(d);
+    }
+    if diag_min < 1e-12 || (diag_max / diag_min) > 1e5 {
+        // cond(A) ≈ (1e5)^2 = 1e10, unreliable — fall back to LU
+        return solve_lu(a, b, n);
+    }
+
     // Forward substitution: L * y = b
     let mut y = [0.0; MAX_TERMS];
     for i in 0..n {

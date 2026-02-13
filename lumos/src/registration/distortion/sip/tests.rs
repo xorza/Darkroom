@@ -568,3 +568,70 @@ fn test_sip_sigma_clipping_disabled_with_zero_iterations() {
         );
     }
 }
+
+/// Test that ill-conditioned normal equations (high order, narrow point distribution)
+/// still produce a valid fit via the Cholesky→LU fallback.
+///
+/// Points clustered in a narrow strip create near-singular A^T*A because the
+/// monomial columns become nearly linearly dependent. Without condition number
+/// monitoring, Cholesky would proceed with garbage; with the check, it falls
+/// back to LU with pivoting which handles the ill-conditioning better.
+#[test]
+fn test_ill_conditioned_falls_back_to_lu() {
+    let center = DVec2::new(500.0, 500.0);
+    let k = 1e-7;
+
+    // Narrow strip: y spans only 100 pixels (450..550) while x spans full 1000.
+    // The 10:1 aspect ratio makes v-dependent monomials much smaller than
+    // u-dependent ones after normalization, creating ill-conditioned A^T*A.
+    let mut ref_points = Vec::new();
+    let mut target_points = Vec::new();
+    for y in (450..=550).step_by(10) {
+        for x in (0..=1000).step_by(20) {
+            let p = DVec2::new(x as f64, y as f64);
+            ref_points.push(p);
+            let d = p - center;
+            let r2 = d.length_squared();
+            target_points.push(p + d * k * r2);
+        }
+    }
+    // 11 y-values × 51 x-values = 561 points, order 5 needs 3*18=54 minimum
+
+    let transform = Transform::identity();
+    let config = SipConfig {
+        order: 5,
+        reference_point: Some(center),
+        ..Default::default()
+    };
+
+    // Should succeed (LU fallback handles the ill-conditioning)
+    let sip = SipPolynomial::fit_from_transform(&ref_points, &target_points, &transform, &config);
+    assert!(
+        sip.is_some(),
+        "SIP should fit via LU fallback for ill-conditioned system"
+    );
+
+    let sip = sip.unwrap();
+
+    // Corrected residuals should still be reasonable within the data region.
+    // We test at points WITHIN the narrow strip (not extrapolating).
+    let test_points: Vec<DVec2> = (0..=1000)
+        .step_by(100)
+        .map(|x| DVec2::new(x as f64, 500.0))
+        .collect();
+
+    for &p in &test_points {
+        let corrected = sip.correct(p);
+        let d = p - center;
+        let r2 = d.length_squared();
+        let expected_target = p + d * k * r2;
+        let actual_target = transform.apply(corrected);
+        let error = (actual_target - expected_target).length();
+        assert!(
+            error < 1.0,
+            "Ill-conditioned fit error at {:?}: {:.4} pixels (expected < 1.0)",
+            p,
+            error
+        );
+    }
+}
