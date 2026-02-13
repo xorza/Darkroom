@@ -112,13 +112,9 @@ Rewritten to match PixInsight/Siril two-phase algorithm:
 - Minimum: dark current floor, cold pixel identification.
 - Trivial to implement.
 
-### P3: Cache -- DefaultHasher Non-Deterministic Across Runs
-
-- **File**: cache.rs, `cache_filename_for_path`
-- `DefaultHasher` uses SipHash with random keys. Hash of a path differs between
-  program invocations. Cache files from run 1 will **never** be found in run 2.
-- Makes `keep_cache` feature effectively useless.
-- **Fix**: Use a deterministic hasher (fixed-key SipHash, xxhash, or path-based encoding).
+### ~~P3: Cache -- DefaultHasher Non-Deterministic Across Runs~~ — FIXED
+- Replaced `DefaultHasher` (random-seeded SipHash) with deterministic FNV-1a hasher.
+  Cache filenames are now stable across process invocations, making `keep_cache` work.
 
 ### P3: Cache -- Missing Source File Validation
 
@@ -274,8 +270,7 @@ Rewritten to match PixInsight/Siril two-phase algorithm:
 4. **Add auto reference frame selection** (P2) -- select lowest-noise frame. Easy win.
 5. **Add noise-based auto weighting** (P2) -- `w = 1/sigma_bg^2`. Highest-impact
    automatic weighting scheme. Requires reliable background noise estimator.
-6. **Fix cache hash determinism** (P3) -- replace `DefaultHasher` with deterministic
-   hash so `keep_cache` works across process runs.
+6. ~~**Fix cache hash determinism**~~ (P3) -- **FIXED**: FNV-1a hasher.
 7. **Add madvise(MADV_SEQUENTIAL)** (P3) -- single-line change for disk-backed perf.
 8. **Add frame-type presets** (P3) -- `bias()`, `dark()`, `flat()`, `light()`.
 

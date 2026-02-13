@@ -11,7 +11,6 @@
 //! - File naming: `{hash}_c{channel}.bin` (e.g., `abc123_c0.bin`, `abc123_c1.bin`)
 //! - Each file contains raw f32 pixels in row-major order (width * height * 4 bytes)
 
-use std::collections::hash_map::DefaultHasher;
 use std::fs::File;
 use std::hash::{Hash, Hasher};
 use std::io::{BufWriter, Write};
@@ -78,9 +77,32 @@ pub(crate) trait StackableImage: Send + Sync + std::fmt::Debug + Sized {
     }
 }
 
+/// Deterministic FNV-1a hasher for cache filenames.
+/// DefaultHasher uses random seeds, producing different hashes across process
+/// invocations — making keep_cache useless. FNV-1a is deterministic.
+struct FnvHasher(u64);
+
+impl FnvHasher {
+    fn new() -> Self {
+        Self(0xcbf29ce484222325)
+    }
+}
+
+impl Hasher for FnvHasher {
+    fn finish(&self) -> u64 {
+        self.0
+    }
+    fn write(&mut self, bytes: &[u8]) {
+        for &b in bytes {
+            self.0 ^= b as u64;
+            self.0 = self.0.wrapping_mul(0x100000001b3);
+        }
+    }
+}
+
 /// Generate a cache filename from the hash of the source path.
 fn cache_filename_for_path(path: &Path) -> String {
-    let mut hasher = DefaultHasher::new();
+    let mut hasher = FnvHasher::new();
     path.hash(&mut hasher);
     let hash = hasher.finish();
     format!("{:016x}.bin", hash)
@@ -1303,5 +1325,32 @@ pub(crate) mod tests {
 
         // Filename should be hex (16 chars + .bin)
         assert_eq!(filename1.len(), 20); // 16 hex chars + ".bin"
+    }
+
+    #[test]
+    fn test_cache_filename_deterministic_across_calls() {
+        // Hash must be deterministic (FNV-1a with fixed seed). Pin a known value
+        // so any accidental revert to DefaultHasher (random seed) is caught.
+        let path = Path::new("/test/deterministic.fits");
+        let expected = cache_filename_for_path(path);
+
+        // Call multiple times to simulate "across invocations" within same process
+        for _ in 0..10 {
+            assert_eq!(
+                cache_filename_for_path(path),
+                expected,
+                "Cache filename must be deterministic"
+            );
+        }
+
+        // Pin the exact value. If someone reverts to DefaultHasher (random seed),
+        // this assertion will fail because the hash changes between runs.
+        assert_eq!(expected, "6f63e2eb959a4c65.bin");
+        // Verify it's a valid hex filename
+        let hex_part = &expected[..16];
+        assert!(
+            hex_part.chars().all(|c| c.is_ascii_hexdigit()),
+            "Filename must be hex: {hex_part}"
+        );
     }
 }
