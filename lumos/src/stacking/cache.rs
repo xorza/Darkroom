@@ -18,6 +18,7 @@ use std::io::{self, BufWriter, Write};
 use std::mem::size_of;
 use std::path::{Path, PathBuf};
 
+use arrayvec::ArrayVec;
 use common::parallel::try_par_map_limited;
 use memmap2::Mmap;
 use rayon::prelude::*;
@@ -95,10 +96,10 @@ struct CachedChannel {
 }
 
 /// Cached frame data for disk-backed storage.
-/// Contains 1 or more channels.
+/// Contains 1–3 channels (L, RGB).
 #[derive(Debug)]
 struct CachedFrame {
-    channels: Vec<CachedChannel>,
+    channels: ArrayVec<CachedChannel, 3>,
 }
 
 /// Storage mode for image data.
@@ -582,7 +583,7 @@ fn load_and_cache_frame<I: StackableImage>(
 
     if can_reuse {
         // Reuse existing cache files - just mmap them
-        let mut cached_channels = Vec::with_capacity(channels);
+        let mut cached_channels = ArrayVec::new();
         for c in 0..channels {
             let channel_path = cache_dir.join(channel_cache_filename(base_filename, c));
             let file = File::open(&channel_path).map_err(|e| Error::OpenCacheFile {
@@ -633,7 +634,7 @@ fn cache_image_channels(
 ) -> Result<CachedFrame, Error> {
     let channels = dimensions.channels;
 
-    let mut cached_channels = Vec::with_capacity(channels);
+    let mut cached_channels = ArrayVec::new();
 
     for c in 0..channels {
         let channel_filename = channel_cache_filename(base_filename, c);
