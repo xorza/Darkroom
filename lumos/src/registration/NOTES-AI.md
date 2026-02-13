@@ -44,9 +44,11 @@ See submodule NOTES-AI.md files for detailed per-module analysis:
 
 ### Important Missing Features
 
-7. **Single-pass match recovery**
-   `mod.rs:300-307` — Recovery + refit runs once. PixInsight iterates predict ->
-   re-match -> refit until convergence, recovering more matches.
+7. ~~**Single-pass match recovery**~~ **DONE** — `recover_matches` now iterates
+   up to 5 passes (ICP-style): project → match → re-validate → refit → repeat
+   until convergence. Each pass also re-validates existing matches, removing
+   outliers that drifted beyond threshold. Safety fallback ensures we never
+   return fewer matches than we started with.
 
 8. **TPS not integrated** — fully implemented and tested (`distortion/tps/`)
    but marked `dead_code`. PixInsight's primary distortion method.
@@ -69,19 +71,16 @@ See submodule NOTES-AI.md files for detailed per-module analysis:
 | Sigma-clipping SIP | Yes (3-iter, 3-sigma MAD) | N/A | N/A | Yes | N/A |
 | Lanczos deringing | Yes (min/max clamping) | Yes (0.3 threshold) | Yes | N/A | N/A |
 | SIMD warp | AVX2 bilinear only | Full SIMD | OpenCV SIMD | N/A | N/A |
-| Match recovery | Single-pass | Iterative | N/A | Bayesian | N/A |
+| Match recovery | Iterative (ICP-style) | Iterative | N/A | Bayesian | N/A |
 | Output framing | Fixed (=input) | Max/min/COG | Max/min/current/COG | N/A | Fixed |
 
 ### Prioritized Improvements
 
-**Medium Effort (correctness/quality):**
-1. Iterative match recovery (2-3 passes of recover + refit)
-
 **Larger Effort (performance/features):**
-2. Separable SIMD Lanczos3 (two-pass horizontal+vertical with AVX2)
-3. Integrate TPS as alternative distortion model
-4. IRWLS final polish with MAGSAC++ weights
-5. Upgrade to quad descriptors (4D hash, matches Astrometry.net)
+1. Separable SIMD Lanczos3 (two-pass horizontal+vertical with AVX2)
+2. Integrate TPS as alternative distortion model
+3. IRWLS final polish with MAGSAC++ weights
+4. Upgrade to quad descriptors (4D hash, matches Astrometry.net)
 
 ## File Map
 

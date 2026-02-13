@@ -346,6 +346,10 @@ fn estimate_and_refine(
     Ok(result)
 }
 
+/// Maximum iterations for iterative match recovery.
+/// Convergence is typically reached in 2-3 passes; diminishing returns after that.
+const RECOVERY_MAX_ITERATIONS: usize = 5;
+
 pub(crate) fn recover_matches(
     ref_stars: &[DVec2],
     target_stars: &[DVec2],
@@ -359,47 +363,71 @@ pub(crate) fn recover_matches(
         None => return (*transform, inlier_matches.to_vec()),
     };
 
-    let matched_ref: std::collections::HashSet<usize> =
-        inlier_matches.iter().map(|&(r, _)| r).collect();
-    let matched_target: std::collections::HashSet<usize> =
-        inlier_matches.iter().map(|&(_, t)| t).collect();
-
     let threshold_sq = inlier_threshold * inlier_threshold;
-    let mut all_matches: Vec<(usize, usize)> = inlier_matches.to_vec();
-    let mut newly_matched_targets = std::collections::HashSet::new();
+    let mut current_transform = *transform;
+    let mut current_matches: Vec<(usize, usize)> = inlier_matches.to_vec();
 
-    for (ref_idx, &ref_pos) in ref_stars.iter().enumerate() {
-        if matched_ref.contains(&ref_idx) {
-            continue;
+    for _ in 0..RECOVERY_MAX_ITERATIONS {
+        let prev_count = current_matches.len();
+
+        // Collect all matched target indices for exclusion
+        let matched_target: std::collections::HashSet<usize> =
+            current_matches.iter().map(|&(_, t)| t).collect();
+
+        // Try to recover unmatched ref stars
+        let matched_ref: std::collections::HashSet<usize> =
+            current_matches.iter().map(|&(r, _)| r).collect();
+
+        let mut newly_matched_targets = std::collections::HashSet::new();
+
+        for (ref_idx, &ref_pos) in ref_stars.iter().enumerate() {
+            if matched_ref.contains(&ref_idx) {
+                continue;
+            }
+
+            let predicted = current_transform.apply(ref_pos);
+            let nearest = target_tree.k_nearest(predicted, 1);
+
+            if let Some(nn) = nearest.first()
+                && nn.dist_sq <= threshold_sq
+                && !matched_target.contains(&nn.index)
+                && !newly_matched_targets.contains(&nn.index)
+            {
+                current_matches.push((ref_idx, nn.index));
+                newly_matched_targets.insert(nn.index);
+            }
         }
 
-        let predicted = transform.apply(ref_pos);
-        let nearest = target_tree.k_nearest(predicted, 1);
+        // Re-validate all matches against current transform, removing outliers
+        current_matches.retain(|&(r, t)| {
+            let predicted = current_transform.apply(ref_stars[r]);
+            (predicted - target_stars[t]).length_squared() <= threshold_sq
+        });
 
-        if let Some(nearest_neighbor) = nearest.first()
-            && nearest_neighbor.dist_sq <= threshold_sq
-            && !matched_target.contains(&nearest_neighbor.index)
-            && !newly_matched_targets.contains(&nearest_neighbor.index)
-        {
-            all_matches.push((ref_idx, nearest_neighbor.index));
-            newly_matched_targets.insert(nearest_neighbor.index);
+        // Stop if match count didn't change (converged)
+        if current_matches.len() == prev_count {
+            break;
+        }
+
+        // Refit transform with updated matches
+        let all_ref: Vec<DVec2> = current_matches.iter().map(|&(r, _)| ref_stars[r]).collect();
+        let all_target: Vec<DVec2> = current_matches
+            .iter()
+            .map(|&(_, t)| target_stars[t])
+            .collect();
+
+        match estimate_transform(&all_ref, &all_target, transform_type) {
+            Some(new_transform) => current_transform = new_transform,
+            None => break,
         }
     }
 
-    if all_matches.len() == inlier_matches.len() {
-        return (*transform, all_matches);
+    // Ensure we never return fewer matches than we started with
+    if current_matches.len() < inlier_matches.len() {
+        return (*transform, inlier_matches.to_vec());
     }
 
-    let all_ref: Vec<DVec2> = all_matches.iter().map(|&(r, _)| ref_stars[r]).collect();
-    let all_target: Vec<DVec2> = all_matches.iter().map(|&(_, t)| target_stars[t]).collect();
-
-    match estimate_transform(&all_ref, &all_target, transform_type) {
-        Some(new_transform) => (new_transform, all_matches),
-        None => {
-            all_matches.truncate(inlier_matches.len());
-            (*transform, all_matches)
-        }
-    }
+    (current_transform, current_matches)
 }
 
 // === Internal Re-exports (for submodules) ===
@@ -471,5 +499,189 @@ mod fwhm_tests {
         // max_sigma = 2.5 * 0.5 = 1.25
         assert!((median - 2.5).abs() < 0.01);
         assert!((max_sigma - 1.25).abs() < 0.01);
+    }
+}
+
+#[cfg(test)]
+mod recovery_tests {
+    use super::*;
+    use crate::testing::synthetic::generate_random_positions;
+
+    /// Apply a similarity transform (rotation + translation) around a center.
+    fn apply_similarity(pos: DVec2, dx: f64, dy: f64, angle: f64, center: DVec2) -> DVec2 {
+        let r = pos - center;
+        let cos_a = angle.cos();
+        let sin_a = angle.sin();
+        DVec2::new(
+            cos_a * r.x - sin_a * r.y + center.x + dx,
+            sin_a * r.x + cos_a * r.y + center.y + dy,
+        )
+    }
+
+    #[test]
+    fn test_iterative_recovery_improves_on_biased_seed() {
+        // Setup: 50 stars with a rotation transform. Give recover_matches
+        // a slightly wrong initial transform (estimated from only 3 seed points).
+        // The initial transform is close enough for some matches, but iterative
+        // refinement should recover significantly more.
+        let ref_stars = generate_random_positions(50, 2000.0, 2000.0, 42);
+
+        let dx = 30.0;
+        let dy = -20.0;
+        let angle = 1.0_f64.to_radians();
+        let center = DVec2::new(1000.0, 1000.0);
+
+        let target_stars: Vec<DVec2> = ref_stars
+            .iter()
+            .map(|&p| apply_similarity(p, dx, dy, angle, center))
+            .collect();
+
+        // Create a biased initial transform from only the first 3 points
+        let seed_ref: Vec<DVec2> = ref_stars[..3].to_vec();
+        let seed_target: Vec<DVec2> = target_stars[..3].to_vec();
+        let initial_transform =
+            estimate_transform(&seed_ref, &seed_target, TransformType::Euclidean).unwrap();
+
+        let seed_matches: Vec<(usize, usize)> = (0..3).map(|i| (i, i)).collect();
+        let threshold = 3.0; // ~3px
+
+        let (refined_transform, recovered_matches) = recover_matches(
+            &ref_stars,
+            &target_stars,
+            &initial_transform,
+            &seed_matches,
+            threshold,
+            TransformType::Euclidean,
+        );
+
+        // Iterative recovery should find many more matches than the 3 seeds
+        assert!(
+            recovered_matches.len() > 10,
+            "Expected significant recovery, got only {} matches from 3 seeds",
+            recovered_matches.len()
+        );
+
+        // Verify the refined transform is accurate
+        let mut max_error = 0.0f64;
+        for &(r, t) in &recovered_matches {
+            let predicted = refined_transform.apply(ref_stars[r]);
+            let error = (predicted - target_stars[t]).length();
+            max_error = max_error.max(error);
+        }
+        assert!(
+            max_error < threshold,
+            "All recovered matches should be within threshold, max_error={}",
+            max_error
+        );
+    }
+
+    #[test]
+    fn test_iterative_recovery_converges() {
+        // With a perfect initial transform, recovery should converge in 1 pass
+        // (no improvement possible after first pass finds all matches).
+        let ref_stars = generate_random_positions(30, 1000.0, 1000.0, 99);
+
+        let dx = 15.0;
+        let dy = -10.0;
+        let target_stars: Vec<DVec2> = ref_stars.iter().map(|&p| p + DVec2::new(dx, dy)).collect();
+
+        let transform =
+            estimate_transform(&ref_stars, &target_stars, TransformType::Translation).unwrap();
+
+        // Start with only 5 seed matches
+        let seed_matches: Vec<(usize, usize)> = (0..5).map(|i| (i, i)).collect();
+
+        let (_refined, recovered) = recover_matches(
+            &ref_stars,
+            &target_stars,
+            &transform,
+            &seed_matches,
+            3.0,
+            TransformType::Translation,
+        );
+
+        // With a perfect transform, should recover all 30 matches
+        assert_eq!(
+            recovered.len(),
+            30,
+            "Perfect transform should recover all stars, got {}",
+            recovered.len()
+        );
+    }
+
+    #[test]
+    fn test_iterative_recovery_never_loses_matches() {
+        // Ensure the safety fallback works: we never return fewer matches
+        // than we started with.
+        let ref_stars = generate_random_positions(20, 1000.0, 1000.0, 77);
+        let target_stars: Vec<DVec2> = ref_stars
+            .iter()
+            .map(|&p| p + DVec2::new(10.0, 5.0))
+            .collect();
+
+        let transform =
+            estimate_transform(&ref_stars, &target_stars, TransformType::Translation).unwrap();
+
+        let seed_matches: Vec<(usize, usize)> = (0..10).map(|i| (i, i)).collect();
+
+        let (_, recovered) = recover_matches(
+            &ref_stars,
+            &target_stars,
+            &transform,
+            &seed_matches,
+            3.0,
+            TransformType::Translation,
+        );
+
+        assert!(
+            recovered.len() >= seed_matches.len(),
+            "Should never lose matches: started with {}, got {}",
+            seed_matches.len(),
+            recovered.len()
+        );
+    }
+
+    #[test]
+    fn test_iterative_recovery_removes_outliers() {
+        // Start with some incorrect seed matches. The re-validation step
+        // should remove them during iteration.
+        let ref_stars = generate_random_positions(30, 1000.0, 1000.0, 55);
+        let target_stars: Vec<DVec2> = ref_stars
+            .iter()
+            .map(|&p| p + DVec2::new(20.0, -15.0))
+            .collect();
+
+        let transform =
+            estimate_transform(&ref_stars, &target_stars, TransformType::Translation).unwrap();
+
+        // Good matches plus 2 deliberately wrong matches
+        let mut seed_matches: Vec<(usize, usize)> = (0..8).map(|i| (i, i)).collect();
+        // Wrong: ref[8] matched to target[15], ref[9] matched to target[20]
+        seed_matches.push((8, 15));
+        seed_matches.push((9, 20));
+
+        let (_, recovered) = recover_matches(
+            &ref_stars,
+            &target_stars,
+            &transform,
+            &seed_matches,
+            3.0,
+            TransformType::Translation,
+        );
+
+        // Wrong matches should be removed, correct ones kept
+        for &(r, t) in &recovered {
+            assert_eq!(
+                r, t,
+                "All recovered matches should be correct correspondences (r==t for this synthetic data)"
+            );
+        }
+
+        // Should still recover many correct matches
+        assert!(
+            recovered.len() >= 20,
+            "Should recover many correct matches after removing outliers, got {}",
+            recovered.len()
+        );
     }
 }
