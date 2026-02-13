@@ -379,3 +379,31 @@ from and released back to the pool.
 For background refinement (background/mod.rs line 119-143), the same
 threshold mask + dilation sequence is used but with a different sigma
 threshold and larger dilation radius to create conservative object masks.
+
+## Critical Issues Found by Research
+
+### P1: Radius-1 Dilation Before Labeling Is Harmful
+- **Location**: detect.rs line 115 -- `dilate_mask(&mask, 1, &mut dilated)`
+- Hardcoded, not configurable. Always applied before CCL.
+- **No standard tool** (SExtractor, DAOFIND, photutils, SEP) performs dilation before
+  labeling. This is unique to this implementation.
+- **Harm**: Merges star pairs within 2 pixels into single components. Inflates component
+  areas with background pixels. Contaminates flux and centroid measurements.
+- **Root cause**: Likely a workaround for 4-connectivity (default) missing diagonal
+  connections. The proper fix is 8-connectivity without dilation.
+- **Fix**: Remove the dilation, or gate behind a config flag defaulting to off.
+
+### P1: Default 4-Connectivity Is Non-Standard
+- **Location**: config.rs -- default connectivity is 4-connected.
+- SExtractor, photutils, and SEP all default to **8-connectivity**.
+- 4-connectivity fragments stars whose above-threshold footprints touch only diagonally,
+  which is common for undersampled PSFs and near-threshold faint stars.
+- The config comment claims this "matches SExtractor behavior" -- this is **incorrect**.
+- **Fix**: Change default to 8-connectivity. This also eliminates the need for the
+  radius-1 dilation workaround.
+
+### P3: Missing SExtractor Cleaning Pass
+- SExtractor applies a cleaning pass that removes spurious detections near bright star
+  wings (CLEAN parameter). This implementation has no equivalent.
+- The quality filter stage partially compensates, but dedicated cleaning would help
+  in crowded fields with very bright stars.

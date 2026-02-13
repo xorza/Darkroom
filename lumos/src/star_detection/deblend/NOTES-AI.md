@@ -84,8 +84,16 @@ min_flux = min_contrast * parent_flux
 ```
 A branch is kept as separate object if at least 2 children have flux >= min_flux.
 If only 0-1 children pass, the parent becomes a leaf (no split). This is per-node
-recursive, not global -- matches SExtractor's specification where contrast is
-relative to the parent branch, not the root.
+recursive, not global.
+
+**NOTE**: SExtractor's `DEBLEND_MINCONT` is documented ambiguously, but examination of the
+SExtractor source code (`analyse.c`) reveals the contrast is computed relative to the
+**total (root) component flux**, not the parent branch flux. The formula is:
+`child_flux >= DEBLEND_MINCONT * total_flux`. This implementation uses parent-relative
+contrast, which is a **deliberate deviation** that makes the criterion stricter for
+nested splits (a child must be significant relative to its immediate parent, not just
+relative to the whole component). In practice, the difference mainly affects deeply
+nested tree structures with 3+ levels of splitting.
 
 ### Grid-Based BFS (L900-1049)
 - `PixelGrid` (L50-186): flat arrays indexed by local bbox coordinates with
@@ -127,7 +135,7 @@ relative to the parent branch, not the root.
 | Threshold levels | DEBLEND_NTHRESH (default 32) | `deblend_n_thresholds` (default 32 for crowded_field) |
 | Threshold spacing | Exponential (log scale) | Exponential: `low * (high/low)^(i/n)` (L494-496) |
 | Contrast criterion | DEBLEND_MINCONT (default 0.005) | `deblend_min_contrast` (default 0.005) |
-| Contrast reference | Relative to parent branch flux | Relative to parent branch flux (L802-804) -- matches |
+| Contrast reference | Relative to **root/total** component flux | Relative to **parent branch** flux (L802-804) -- **differs** |
 | Connected components | BFS/flood-fill | Grid-based BFS with generation counters (faster) |
 | Pixel assignment | Gaussian template weighting | Voronoi (nearest peak) -- see weakness below |
 | Connectivity | 8-connected | 8-connected in BFS, configurable 4/8 for initial CCL |
@@ -141,8 +149,8 @@ For symmetric, equal-brightness pairs this is fine; for asymmetric blends
 (bright + faint neighbor), Voronoi over-assigns area to the faint source.
 
 **Matching aspects**: Exponential threshold spacing, 32-level default, 0.005
-contrast default, parent-relative contrast criterion, and the hierarchical tree
-structure all match SExtractor's design closely.
+contrast default, and the hierarchical tree structure closely follow SExtractor's
+design. The contrast reference differs (parent-relative vs root-relative).
 
 ### vs photutils deblend_sources
 

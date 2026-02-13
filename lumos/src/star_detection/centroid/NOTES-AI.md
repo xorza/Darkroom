@@ -183,6 +183,35 @@ NEON gives 2x. Fused normal equations avoid Jacobian allocation.
 - **Integration** (~80 tests): full measure_star pipeline, stamp validation, refine
   centroid convergence/rejection, compute_metrics scaling, Hessian properties
 
+## Issues Found by Research
+
+### HIGH: L.A.Cosmic Laplacian SNR Missing Fine Structure Ratio
+- **File**: mod.rs (L.A.Cosmic metric computation)
+- van Dokkum (2001) L.A.Cosmic uses TWO criteria: (1) Laplacian SNR > threshold AND
+  (2) fine structure ratio = Laplacian / (median-filtered Laplacian) > threshold.
+- Without the fine structure ratio, bright star peaks (which have large Laplacian due
+  to sharpness) get flagged as cosmic rays alongside actual CRs.
+- The fine structure ratio discriminates: CRs have high Laplacian but low surrounding
+  signal (high ratio), while stars have proportional surrounding signal (low ratio).
+- **Impact**: Stars near saturation may be misclassified as cosmic rays. This affects
+  the quality filter stage if Laplacian SNR is used for rejection.
+- **Fix**: Compute median-filtered Laplacian and divide. Threshold at ~2.0 per paper.
+
+### MEDIUM: SNR Uses Full Square Stamp Area
+- Already documented in top-level NOTES-AI.md P2.
+- Overestimates noise by factor of sqrt(pi/4) to sqrt(2) depending on stamp size.
+- Produces systematically lower SNR than optimal aperture photometry.
+
+### LOW-MEDIUM: Fit Parameters Discarded
+- Already documented in top-level NOTES-AI.md P3.
+- GaussianFit provides sigma_x/sigma_y, MoffatFit provides alpha/beta, but only
+  position (x0, y0) is used. FWHM and eccentricity recomputed from second moments.
+
+### LOW: Sharpness and Roundness Differ from DAOFIND
+- Already documented in top-level NOTES-AI.md P2.
+- Functionally different metrics, not transferable to published DAOFIND thresholds.
+- Still effective for cosmic ray rejection and quality filtering.
+
 ## Performance
 
 - Stamps: 9x9 to 31x31. L-M: 5-15 iterations typical.

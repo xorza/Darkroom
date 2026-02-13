@@ -153,13 +153,26 @@ Note: `sum_and_sum_sq_simd` and `sum_abs_deviations_simd` are currently marked `
 
 ## Issues and Gaps
 
-### 1. No Mode Estimator for Crowded Fields
+### 1. No Mode/Biweight Location Estimator for Crowded Fields
 
-The module uses pure median. In crowded fields (globular clusters, galaxy cores), sources bias the median upward. SExtractor's mode formula `2.5*median - 1.5*mean` compensates for this. The iterative refinement partially mitigates this, but a mode estimator would help the first-pass estimate.
+The module uses pure median. In crowded fields (globular clusters, galaxy cores), sources bias the median upward. Two better estimators exist:
 
-**Severity**: Medium. Primarily affects crowded field photometry accuracy.
+**SExtractor mode**: `Mode = 2.5*Median - 1.5*Mean` after sigma clipping. Less affected
+by source crowding (~30% noisier but lower bias). Falls back to median when mode/median
+disagree by >30%. Simple to implement (~5 lines in `compute_tile_stats`).
 
-**Fix**: After sigma-clipping, compute both mean and median of remaining values. Apply the SExtractor mode formula with 30% fallback. This requires only ~5 lines of code in `compute_tile_stats` (tile_grid.rs:228-272).
+**Biweight location** (Tukey 1977): Iteratively down-weights outliers using a smooth
+weight function. Combines the robustness of the median (50% breakdown point) with
+near-Gaussian efficiency (98.2% vs median's 64%). Used by photutils as the recommended
+`BiweightLocationBackground` estimator. More complex to implement but statistically
+superior. The formula: `BL = M + sum(u_i * (x_i - M) * (1 - u_i^2)^2) / sum((1 - u_i^2)^2)`
+where `u_i = (x_i - M) / (c * MAD)` and `c = 9.0` (tuning constant).
+
+**Severity**: Medium. Primarily affects crowded field photometry accuracy. The iterative
+refinement with source masking partially compensates.
+
+**Recommendation**: For highest impact with least effort, implement SExtractor mode first.
+Biweight location is a future enhancement for photometry-grade accuracy.
 
 ### 2. Bilinear Interpolation (vs Bicubic Spline)
 

@@ -185,23 +185,63 @@ Background subtraction clips to zero: `(px - bg).max(0.0)`. This is non-standard
 
 ## Known Issues
 
-### P1: Noise Map Not Scaled After Convolution
+### P1: Noise Map Not Scaled After Convolution -- CRITICAL, CONFIRMED
 - **Location**: Called from `detector/stages/detect.rs:95-98`
 - After convolution with kernel K (sum=1), noise variance at each pixel becomes
   `sigma_conv^2 = sigma^2 * sum(K_i^2)`. The threshold mask compares `filtered[px]`
   against `sigma_threshold * noise[px]` using the **original** noise map.
-- For a Gaussian kernel with FWHM=4px (sigma~1.7), `sqrt(sum(K^2))` ~ 0.11-0.15,
-  so the effective sigma threshold is ~6-9x higher than configured.
-- **Fix**: Either (a) convolve the variance map with K^2 and use `sqrt(convolved_var)`,
-  or (b) multiply the threshold by `1/sqrt(sum(K^2))`, or (c) divide the convolved
-  image by `sqrt(sum(K^2))` to normalize to noise units (SEP approach).
+- For a Gaussian kernel with FWHM=4px (sigma~1.7), `sqrt(sum(K^2))` ~ 0.117,
+  so the effective sigma threshold is **~8.5x** higher than configured.
+  A configured threshold of 3.0 sigma behaves like **25.5 sigma**.
+- Only very bright stars are detected. This is the dominant bug in the pipeline.
 
-### P2: No Support for DAOFIND-style Zero-Sum Kernel
+**SEP matched filter formula** (the gold standard):
+```
+SNR = S^T C^{-1} D / sqrt(S^T C^{-1} S)
+```
+For uniform noise (C = sigma^2 * I), this simplifies to:
+```
+SNR = convolution(D, K) / (sigma * sqrt(sum(K^2)))
+```
+The output is directly in SNR units (number of standard deviations above background).
+
+**DAOFIND equivalent**: Uses `threshold_eff = threshold * relerr` where
+`relerr = 1/sqrt(sum(K^2) - sum(K)^2/N)`. For a zero-sum kernel sum(K)=0,
+this reduces to `1/sqrt(sum(K^2))`.
+
+**Recommended fix (Option A -- SEP approach)**: Divide the convolved output by
+`sqrt(sum(K_1d^2)^2)` for separable kernels. This is a single scalar computed
+from the kernel, applied as a division over the output array. Can be done in-place
+in the existing parallel loop. Converts output to SNR units.
+```rust
+let k_sq_sum: f32 = kernel.iter().map(|&k| k * k).sum();
+let norm = (k_sq_sum * k_sq_sum).sqrt(); // separable: 2D sum(K^2) = (1D sum)^2
+// divide output[] by norm
+```
+
+Alternative fixes:
+- (b) Multiply sigma threshold by `sqrt(sum(K^2))` -- less intuitive, FWHM-dependent
+- (c) Convolve variance map with K^2 -- correct for variable noise, doubles cost
+
+### P2: Negative Value Clipping Before Convolution
+- **Location**: mod.rs:73 -- `*out = (px - bg).max(0.0)`
+- Neither SExtractor, DAOFIND, nor SEP clip negative values before convolution.
+- Clipping removes negative noise fluctuations, biasing the convolved image upward by
+  ~0.798*sigma (= sigma * sqrt(2/pi)) for Gaussian noise.
+- For bright stars (SNR >> 1), negligible. For faint stars near threshold, creates
+  asymmetric noise response and an elevated noise floor.
+- **Impact**: The positive bias partially compensates for P1 (by coincidence). Once P1 is
+  fixed, this bias becomes proportionally larger and should be addressed.
+- **Fix**: Remove `.max(0.0)`. Allow negative residuals through convolution.
+
+### P3: No Support for DAOFIND-style Zero-Sum Kernel
 - The Gaussian kernel sums to 1.0, not 0.0. This means the convolution does not perform
   implicit local background subtraction. Background must be subtracted beforehand.
 - Not necessarily a bug (explicit background subtraction is valid), but means the
   implementation cannot benefit from the local background subtraction that makes DAOFIND
   robust to background estimation errors.
+- DAOFIND kernel: `K = (G - mean(G)) / (sum(G^2) - sum(G)^2/N)` where G is a truncated
+  Gaussian. The output is in density-enhancement units (least-squares Gaussian amplitude).
 
 ### P3: Column Convolution Not Parallelized
 - `convolve_cols_direct()` (simd/mod.rs:133-168 -> sse.rs:140-185) processes all rows
