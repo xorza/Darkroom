@@ -241,9 +241,9 @@ fn interpolate(data: &Buffer2<f32>, x: f32, y: f32, method: InterpolationMethod)
 
 /// Warp an image using a transformation matrix.
 ///
-/// Applies the inverse transform to map output coordinates to input coordinates,
-/// then interpolates. Parallelized with rayon. Bilinear and Lanczos3 use
-/// optimized row-warping paths.
+/// The transform maps output coordinates to input coordinates (output → input).
+/// For each output pixel at (x,y), samples the input at `transform.apply(x,y)`.
+/// Parallelized with rayon. Bilinear and Lanczos3 use optimized row-warping paths.
 pub fn warp_image(
     input: &Buffer2<f32>,
     output: &mut Buffer2<f32>,
@@ -255,20 +255,18 @@ pub fn warp_image(
     debug_assert_eq!(width, output.width());
     debug_assert_eq!(height, output.height());
 
-    let inverse = transform.inverse();
-
     output
         .pixels_mut()
         .par_chunks_mut(width)
         .enumerate()
         .for_each(|(y, row)| {
             if method == InterpolationMethod::Bilinear {
-                warp::warp_row_bilinear(input.pixels(), width, height, row, y, &inverse);
+                warp::warp_row_bilinear(input.pixels(), width, height, row, y, transform);
             } else if method == InterpolationMethod::Lanczos3 {
-                warp::warp_row_lanczos3(input.pixels(), width, height, row, y, &inverse);
+                warp::warp_row_lanczos3(input.pixels(), width, height, row, y, transform);
             } else {
                 for (x, pixel) in row.iter_mut().enumerate() {
-                    let src = inverse.apply(glam::DVec2::new(x as f64, y as f64));
+                    let src = transform.apply(glam::DVec2::new(x as f64, y as f64));
                     *pixel = interpolate(input, src.x as f32, src.y as f32, method);
                 }
             }

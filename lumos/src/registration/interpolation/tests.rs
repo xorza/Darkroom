@@ -271,7 +271,7 @@ fn test_warp_translation() {
     input[5] = 1.0; // Position (1, 1)
     let input_buf = Buffer2::new(4, 4, input);
 
-    // Translate by (1, 1)
+    // Transform maps output→input: output(0,0) samples input(1,1)
     let transform = Transform::translation(DVec2::new(1.0, 1.0));
 
     let mut output = Buffer2::new(4, 4, vec![0.0; 16]);
@@ -282,8 +282,9 @@ fn test_warp_translation() {
         InterpolationMethod::Bilinear,
     );
 
-    // The bright pixel should move to (2, 2)
-    assert!(output[10] > 0.5, "Expected bright pixel at (2,2)");
+    // output[p] = input[T(p)] = input[p + (1,1)]
+    // So bright pixel at input(1,1) appears at output(0,0)
+    assert!(output[0] > 0.5, "Expected bright pixel at (0,0)");
     assert!(output[5] < 0.1, "Expected dark pixel at (1,1)");
 }
 
@@ -607,6 +608,7 @@ fn test_warp_image_lanczos3_translation() {
     let height = 64;
     let input: Vec<f32> = (0..width * height).map(|i| (i as f32) / 4096.0).collect();
     let input_buf = Buffer2::new(width, height, input);
+    // Transform maps output→input: output[p] = input[p + (5,3)]
     let transform = Transform::translation(DVec2::new(5.0, 3.0));
 
     let mut output = Buffer2::new(width, height, vec![0.0; width * height]);
@@ -617,10 +619,10 @@ fn test_warp_image_lanczos3_translation() {
         InterpolationMethod::Lanczos3,
     );
 
-    // Check shifted pixels match
+    // output[(x,y)] = input[(x+5, y+3)]
     for y in 8..height - 8 {
-        for x in 10..width - 10 {
-            let expected = input_buf[(x - 5, y - 3)];
+        for x in 5..width - 15 {
+            let expected = input_buf[(x + 5, y + 3)];
             let actual = output[(x, y)];
             assert!(
                 (actual - expected).abs() < 0.02,
@@ -678,7 +680,6 @@ fn test_warp_image_lanczos3_matches_per_pixel() {
         .collect();
     let input_buf = Buffer2::new(width, height, input);
     let transform = Transform::similarity(DVec2::new(16.0, 16.0), 0.03, 1.02);
-    let inverse = transform.inverse();
 
     let mut output = Buffer2::new(width, height, vec![0.0; width * height]);
     warp_image(
@@ -688,10 +689,10 @@ fn test_warp_image_lanczos3_matches_per_pixel() {
         InterpolationMethod::Lanczos3,
     );
 
-    // Compare against per-pixel interpolate() which uses the original scalar path
+    // Compare against per-pixel interpolate() — warp_image applies transform directly
     for y in 0..height {
         for x in 0..width {
-            let src = inverse.apply(DVec2::new(x as f64, y as f64));
+            let src = transform.apply(DVec2::new(x as f64, y as f64));
             let expected = interpolate(
                 &input_buf,
                 src.x as f32,

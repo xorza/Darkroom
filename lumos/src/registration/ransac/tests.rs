@@ -123,6 +123,45 @@ fn test_estimate_euclidean() {
     assert!(approx_eq(est_t.y, t.y, 0.1));
 }
 
+/// Verify Euclidean estimation doesn't absorb scale.
+/// When data has inherent scale != 1, the Euclidean estimator should still
+/// produce scale=1 and recover the best rotation/translation without scale.
+#[test]
+fn test_estimate_euclidean_ignores_scale() {
+    let ref_points = vec![
+        DVec2::new(0.0, 0.0),
+        DVec2::new(10.0, 0.0),
+        DVec2::new(0.0, 10.0),
+        DVec2::new(10.0, 10.0),
+    ];
+
+    // Create target with similarity transform (rotation + scale 1.1)
+    let angle = PI / 6.0; // 30 degrees
+    let scale = 1.1;
+    let t = DVec2::new(3.0, -2.0);
+    let sim = Transform::similarity(t, angle, scale);
+    let target_points: Vec<DVec2> = ref_points.iter().map(|&p| sim.apply(p)).collect();
+
+    // Euclidean estimation should NOT absorb the scale
+    let estimated =
+        estimate_transform(&ref_points, &target_points, TransformType::Euclidean).unwrap();
+
+    // Scale must be exactly 1.0 (Euclidean constraint)
+    assert!(
+        approx_eq(estimated.scale_factor(), 1.0, 1e-10),
+        "Euclidean scale must be 1.0, got {}",
+        estimated.scale_factor()
+    );
+
+    // Rotation should still be close to the true angle
+    assert!(
+        approx_eq(estimated.rotation_angle(), angle, 0.05),
+        "Rotation should be close to {}, got {}",
+        angle,
+        estimated.rotation_angle()
+    );
+}
+
 #[test]
 fn test_estimate_affine() {
     let ref_points = vec![

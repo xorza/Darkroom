@@ -65,12 +65,42 @@ fn estimate_translation(ref_points: &[DVec2], target_points: &[DVec2]) -> Option
     Some(Transform::translation(d_sum / n))
 }
 
-/// Estimate Euclidean transform (translation + rotation).
+/// Estimate Euclidean transform (translation + rotation, scale fixed at 1.0).
+///
+/// Uses constrained Procrustes analysis: computes optimal rotation from the
+/// cross-covariance matrix of centered points, then derives translation with
+/// scale=1. Unlike similarity estimation, scale is never fitted.
 fn estimate_euclidean(ref_points: &[DVec2], target_points: &[DVec2]) -> Option<Transform> {
-    // Use similarity estimation with scale=1
-    let sim = estimate_similarity(ref_points, target_points)?;
-    let t = sim.translation_components();
-    let angle = sim.rotation_angle();
+    if ref_points.len() < 2 {
+        return None;
+    }
+
+    let ref_centroid = centroid(ref_points);
+    let tar_centroid = centroid(target_points);
+
+    // Cross-covariance terms (no ref_var needed since scale=1)
+    let mut sxx = 0.0;
+    let mut sxy = 0.0;
+    let mut syx = 0.0;
+    let mut syy = 0.0;
+    for (r, t) in ref_points.iter().zip(target_points.iter()) {
+        let rc = *r - ref_centroid;
+        let tc = *t - tar_centroid;
+        sxx += rc.x * tc.x;
+        sxy += rc.x * tc.y;
+        syx += rc.y * tc.x;
+        syy += rc.y * tc.y;
+    }
+
+    let angle = (sxy - syx).atan2(sxx + syy);
+    let (sin_a, cos_a) = angle.sin_cos();
+
+    // Translation with scale=1
+    let t = DVec2::new(
+        tar_centroid.x - (cos_a * ref_centroid.x - sin_a * ref_centroid.y),
+        tar_centroid.y - (sin_a * ref_centroid.x + cos_a * ref_centroid.y),
+    );
+
     Some(Transform::euclidean(t, angle))
 }
 

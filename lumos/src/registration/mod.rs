@@ -215,13 +215,14 @@ fn median_fwhm(ref_stars: &[Star], target_stars: &[Star]) -> f64 {
 
 /// Warp an image to align with the reference frame, writing the result into an output image.
 ///
-/// Applies the inverse transformation so the image aligns
-/// pixel-for-pixel with the reference image.
+/// The transform maps reference (output) coordinates to target (input) coordinates,
+/// as returned by `register()`. For each output pixel at position `p`, samples the
+/// input image at `transform.apply(p)`.
 ///
 /// # Arguments
-/// * `image` - The source image to warp (consumed)
+/// * `image` - The source (target) image to warp
 /// * `output` - The destination image where the warped result is written
-/// * `transform` - The geometric transformation to apply
+/// * `transform` - The geometric transformation (ref → target, as from `register()`)
 /// * `config` - Configuration for interpolation method
 ///
 /// # Panics
@@ -234,7 +235,7 @@ fn median_fwhm(ref_stars: &[Star], target_stars: &[Star]) -> f64 {
 ///
 /// let result = register(&ref_stars, &target_stars, &Config::default())?;
 /// let mut aligned = target_image.clone();
-/// warp(target_image, &mut aligned, &result.transform, &Config::default());
+/// warp(&target_image, &mut aligned, &result.transform, &Config::default());
 /// ```
 pub fn warp(image: &AstroImage, output: &mut AstroImage, transform: &Transform, config: &Config) {
     assert_eq!(
@@ -244,12 +245,11 @@ pub fn warp(image: &AstroImage, output: &mut AstroImage, transform: &Transform, 
     );
 
     let method = config.interpolation;
-    let inverse = transform.inverse();
 
     for c in 0..image.channels() {
         let input = image.channel(c);
         let output_buf = output.channel_mut(c);
-        warp_image(input, output_buf, &inverse, method);
+        warp_image(input, output_buf, transform, method);
     }
 }
 

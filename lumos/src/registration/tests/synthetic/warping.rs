@@ -19,13 +19,16 @@ use crate::{AstroImage, ImageDimensions};
 use glam::DVec2;
 
 /// Helper to warp and return a new buffer (for test convenience).
+/// Visually applies the transform to the image content (stars move by T).
+/// Passes T⁻¹ to warp_image since it uses output→input coordinate mapping.
 fn do_warp(
     input: &Buffer2<f32>,
     transform: &Transform,
     method: InterpolationMethod,
 ) -> Buffer2<f32> {
+    let inverse = transform.inverse();
     let mut output = Buffer2::new(input.width(), input.height(), vec![0.0; input.len()]);
-    warp_image(input, &mut output, transform, method);
+    warp_image(input, &mut output, &inverse, method);
     output
 }
 

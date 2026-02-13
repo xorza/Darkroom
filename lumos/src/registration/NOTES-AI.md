@@ -14,7 +14,7 @@ warping with Lanczos interpolation and SIMD-optimized row warping.
 4. RANSAC with MAGSAC++ scoring estimates transform from voted matches
 5. Post-RANSAC match recovery via k-d tree projection on unmatched stars
 6. Optional SIP polynomial fit on residuals (computed but not applied in warp)
-7. Image warping with inverse mapping and interpolation (Lanczos3 default)
+7. Image warping with output→input coordinate mapping (Lanczos3 default)
 
 ### Strengths
 - Triangle formation via k-d tree O(n*k^2) vs O(n^3) brute-force
@@ -69,7 +69,8 @@ on inliers instead. Weighted LS using MAGSAC++ weights would improve accuracy.
   Uses A^T*A decomposition (computing A^T*A then SVD on that) rather than
   SVD directly on A. Slightly less numerically stable but adequate.
 - **Translation**: Average displacement. Correct.
-- **Euclidean**: See critical issues below.
+- **Euclidean**: Constrained Procrustes with scale=1. Cross-covariance rotation
+  via atan2, translation computed with unit scale. Correct.
 
 ### Interpolation Quality
 - Lanczos3 as default matches PixInsight/Siril defaults
@@ -80,23 +81,6 @@ on inliers instead. Weighted LS using MAGSAC++ weights would improve accuracy.
 - SIMD: AVX2 bilinear processes 8 pixels/cycle on x86_64
 
 ## Critical Issues
-
-### Double-Inverse in warp()
-**Files:** `mod.rs:247`, `interpolation/mod.rs:258`
-
-`warp()` computes `transform.inverse()` then passes to `warp_image()`, which
-inverts again. The double-negation produces the correct forward transform by
-accident. Wastes a matrix inversion and creates confusion about transform
-direction semantics.
-
-**Verification:** Transform T maps ref->target. For warping target to reference
-frame, each output (ref) pixel needs to sample from target at T.apply(ref_pos).
-`warp()` passes T^(-1), `warp_image()` inverts to T, applies T to output coords
-to get source coords. Correct result, wrong path.
-
-**Fix:** Remove inverse in `warp()`, pass transform directly to `warp_image()`.
-Or remove the inverse in `warp_image()` and have `warp()` pass the forward
-transform. Either way, one inverse must go.
 
 ### SIP Correction Computed But Never Applied During Warping
 **Files:** `mod.rs:239-254`, `mod.rs:304-318`
@@ -115,18 +99,6 @@ AP/BP. Standard approach: fit inverse polynomial via grid sampling (LSST uses
 **Fix:** (1) Implement inverse SIP (AP/BP) via grid inversion.
 (2) Modify `warp()` or `warp_image()` to compose SIP correction with the
 transform for each pixel lookup.
-
-### Euclidean Transform Estimation is Incorrect
-**File:** `ransac/transforms.rs:69-74`
-
-Fits a similarity transform (allows scale), then extracts rotation and
-translation to create a Euclidean transform (scale=1). The translation
-computed by similarity estimation incorporates the fitted scale factor.
-Forcing scale=1 with the same translation is geometrically inconsistent.
-
-Correct approach: constrained Procrustes / Kabsch algorithm with scale fixed
-at 1. Compute rotation via SVD of cross-covariance matrix H = Σ(r_i - c_r)(t_i - c_t)^T,
-enforce det(R) = 1, then t = c_t - R * c_r.
 
 ## Important Issues
 

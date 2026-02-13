@@ -26,6 +26,8 @@ fn detector() -> StarDetector {
 }
 
 /// Apply a similarity transform to an image.
+/// Creates a target where stars are visually shifted/rotated/scaled by the given parameters.
+/// Passes the inverse to warp_image since it uses output→input coordinate mapping.
 fn transform_image(
     src_pixels: &[f32],
     width: usize,
@@ -36,26 +38,30 @@ fn transform_image(
     scale: f64,
 ) -> Vec<f32> {
     let transform = Transform::similarity(DVec2::new(dx, dy), angle_rad, scale);
+    let inverse = transform.inverse();
     let src_buf = Buffer2::new(width, height, src_pixels.to_vec());
     let mut output = Buffer2::new(width, height, vec![0.0; width * height]);
     warp_image(
         &src_buf,
         &mut output,
-        &transform,
+        &inverse,
         InterpolationMethod::Bilinear,
     );
     output.into_vec()
 }
 
 /// Apply a translation to an image.
+/// Creates a target where stars are visually shifted by (dx, dy).
+/// Passes the inverse to warp_image since it uses output→input coordinate mapping.
 fn translate_image(src_pixels: &[f32], width: usize, height: usize, dx: f64, dy: f64) -> Vec<f32> {
     let transform = Transform::translation(DVec2::new(dx, dy));
+    let inverse = transform.inverse();
     let src_buf = Buffer2::new(width, height, src_pixels.to_vec());
     let mut output = Buffer2::new(width, height, vec![0.0; width * height]);
     warp_image(
         &src_buf,
         &mut output,
-        &transform,
+        &inverse,
         InterpolationMethod::Bilinear,
     );
     output.into_vec()
