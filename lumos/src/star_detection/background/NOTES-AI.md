@@ -155,7 +155,7 @@ Note: `sum_and_sum_sq_simd` and `sum_abs_deviations_simd` are currently marked `
 
 ### 1. No Mode/Biweight Location Estimator for Crowded Fields
 
-The module uses pure median. In crowded fields (globular clusters, galaxy cores), sources bias the median upward. Two better estimators exist:
+**POSTPONED.** The module uses pure median. In crowded fields (globular clusters, galaxy cores), sources bias the median upward. Only matters for extremely crowded targets; iterative refinement with source masking partially compensates. Two better estimators exist:
 
 **SExtractor mode**: `Mode = 2.5*Median - 1.5*Mean` after sigma clipping. Less affected
 by source crowding (~30% noisier but lower bias). Falls back to median when mode/median
