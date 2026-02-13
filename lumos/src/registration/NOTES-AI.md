@@ -39,7 +39,7 @@ MAGSAC++ paper, Groth 1986, Valdes 1995, Tabur 2007, Lang 2010, SWarp, LSST pipe
 - **Kernel normalization** applied correctly in both generic and optimized paths
 - **Incremental stepping** optimization is mathematically correct for affine transforms
 - **Adaptive iteration count** formula matches standard (Fischler & Bolles 1981)
-- **Hartley normalization** for DLT homography is standard and correct
+- **Hartley normalization** for DLT homography is standard and correct; direct SVD on 2n×9 A (not A^T A)
 - **Triangle vertex ordering** by geometric role (opposite shortest/middle/longest side)
 - **Lanczos3 FMA SIMD kernel** with fused deringing: -59% single-threaded, -52% MT 4k
 - **Pipeline architecture** matches industry standard (detect → match → estimate → warp)
@@ -57,7 +57,7 @@ MAGSAC++ paper, Groth 1986, Valdes 1995, Tabur 2007, Lang 2010, SWarp, LSST pipe
 
 #### Medium Effort (moderate changes, meaningful impact)
 8. ~~**Soft deringing threshold**~~ — **DONE.** PixInsight-style soft clamping with `f32` threshold (default 0.3), `sp/sn/wp/wn` accumulation, SIMD branchless splitting
-9. **Direct SVD for homography DLT** (ransac/transforms.rs) — SVD on 2n x 9 matrix A, not A^T A
+9. ~~**Direct SVD for homography DLT**~~ — **DONE.** Builds 2n×9 design matrix A, direct SVD (zero-padded to 9×9 for 4-point minimum samples)
 10. **TPS coordinate normalization** (distortion/tps/mod.rs) — center+scale before building matrix
 11. **SIP condition number monitoring** (distortion/sip/mod.rs:406) — detect ill-conditioned systems
 12. **SIP order validation** (distortion/sip/mod.rs:138) — require `n >= 3 * terms.len()` not just `n >= terms.len()`

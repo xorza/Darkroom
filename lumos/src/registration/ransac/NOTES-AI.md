@@ -101,12 +101,11 @@ but adequate for typical coordinate ranges. Matrix inverse verified by cofactor
 analysis -- all 9 entries correct. OpenCV uses SVD here.
 
 ### Homography (lines 251-312)
-DLT with Hartley normalization (centroid=0, avg dist=sqrt(2)). Builds 9x9
-A^T A directly, solves via SVD. Denormalization: `H = T_tar^-1 * H_norm * T_ref`.
-
-**Numerical note**: SVD of A^T A squares condition number vs direct SVD on
-2n×9 matrix A. OpenCV and danini/magsac use direct SVD. With Hartley
-normalization this is usually fine but less robust for ill-conditioned cases.
+DLT with Hartley normalization (centroid=0, avg dist=sqrt(2)). Builds full
+2n×9 design matrix A, solves via direct SVD (last row of V^T = null space).
+Denormalization: `H = T_tar^-1 * H_norm * T_ref`. For the minimum 4-point
+case (8×9 matrix), zero-padded to 9×9 so nalgebra's thin SVD produces all 9
+right singular vectors.
 
 ### Minimum Sample Sizes
 Translation=1, Euclidean=2, Similarity=2, Affine=3, Homography=4. All correct.
@@ -121,8 +120,7 @@ The SVD solver returns a poor model rejected by MAGSAC++ scoring.
 ### Important
 1. **Missing IRWLS** (moderate) -- paper's key contribution for model accuracy.
    Impact smaller for well-separated star matches.
-2. **A^T A for homography** (moderate) -- Direct SVD on 2n x 9 matrix A is more
-   robust (doesn't square condition number). nalgebra's `SVD` supports non-square.
+2. ~~**A^T A for homography**~~ — **FIXED**: Direct SVD on 2n×9 matrix A (zero-padded to 9×9 for minimal samples).
 3. ~~**Homography degeneracy: no same-side test**~~ — **FIXED**: added `is_sample_degenerate(&sample_target)` check alongside existing ref check.
 4. ~~**GammaLut unnecessary for k=2**~~ — **FIXED**: replaced ~70-line LUT with 6-line `gamma_k2()` closed-form `1 - exp(-x)`.
 
@@ -145,7 +143,7 @@ The SVD solver returns a poor model rejected by MAGSAC++ scoring.
 
 - **IRWLS polishing** with sigma-marginalized weights (moderate -- sub-pixel accuracy)
 - **Same-side homography degeneracy** test on both ref and target points (moderate)
-- **Direct SVD for DLT** on 2n x 9 matrix A (moderate -- numerical stability)
+- ~~**Direct SVD for DLT**~~ — **FIXED**
 - PROSAC continuous progressive sampling (low)
 - Inner RANSAC / threshold shrinking in LO (low)
 - SPRT early model rejection (low -- small point sets)
@@ -155,7 +153,7 @@ The SVD solver returns a poor model rejected by MAGSAC++ scoring.
 
 1. ~~**Replace GammaLut with exp()**~~ — **FIXED**
 2. ~~**Check target point degeneracy**~~ — **FIXED**
-3. **Direct SVD for homography**: SVD on full 2n x 9 matrix A via nalgebra.
+3. ~~**Direct SVD for homography**~~ — **FIXED**
 4. **IRWLS final polish**: 3-5 IRWLS iterations after model selection with sigma-marginalized weights.
 5. **Fix LO buffer replacement**: Write into `inlier_buf` directly instead of replacing it.
 6. ~~**Align confidence defaults**~~ — **FIXED**: `RansacParams::default()` now uses 0.995.

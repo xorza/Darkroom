@@ -2222,3 +2222,41 @@ fn test_random_sample_into_produces_unique_indices() {
         }
     }
 }
+
+/// Test homography estimation with ill-conditioned points (high dynamic range).
+/// This is where direct SVD of A outperforms SVD of A^T A (condition number κ vs κ²).
+#[test]
+fn test_homography_ill_conditioned() {
+    // Points spanning a large range — stresses numerical stability
+    let ref_points = vec![
+        DVec2::new(0.01, 0.02),
+        DVec2::new(5000.0, 0.01),
+        DVec2::new(5000.0, 4000.0),
+        DVec2::new(0.01, 4000.0),
+        DVec2::new(2500.0, 2000.0),
+        DVec2::new(1000.0, 3000.0),
+        DVec2::new(4000.0, 1000.0),
+        DVec2::new(100.0, 100.0),
+    ];
+
+    // Apply a known homography with perspective
+    let known = Transform::homography([1.05, 0.02, 10.0, -0.01, 0.98, 5.0, 1e-5, -2e-5]);
+    let target_points: Vec<DVec2> = ref_points.iter().map(|&p| known.apply(p)).collect();
+
+    let estimated =
+        estimate_transform(&ref_points, &target_points, TransformType::Homography).unwrap();
+
+    for (&rp, &tp) in ref_points.iter().zip(target_points.iter()) {
+        let pp = estimated.apply(rp);
+        assert!(
+            approx_eq(pp.x, tp.x, 0.5) && approx_eq(pp.y, tp.y, 0.5),
+            "Point ({}, {}): expected ({:.4}, {:.4}), got ({:.4}, {:.4})",
+            rp.x,
+            rp.y,
+            tp.x,
+            tp.y,
+            pp.x,
+            pp.y,
+        );
+    }
+}

@@ -6,6 +6,7 @@
 use glam::DVec2;
 use nalgebra::{DMatrix, SVD};
 
+use crate::math::DMat3;
 use crate::registration::transform::{Transform, TransformType};
 
 /// Compute adaptive iteration count for early termination.
@@ -266,27 +267,43 @@ pub(crate) fn estimate_homography(
     // [ 0  0  0 -x -y -1  x*y'  y*y'  y']
 
     let n = ref_norm.len();
-    let mut ata = [[0.0f64; 9]; 9];
 
+    // Build the full 2n×9 design matrix A directly (instead of A^T A)
+    // to preserve condition number (κ instead of κ²)
+    let mut a_data = vec![0.0f64; 2 * n * 9];
     for i in 0..n {
         let r = ref_norm[i];
         let t = tar_norm[i];
-
-        let row1 = [-r.x, -r.y, -1.0, 0.0, 0.0, 0.0, r.x * t.x, r.y * t.x, t.x];
-        let row2 = [0.0, 0.0, 0.0, -r.x, -r.y, -1.0, r.x * t.y, r.y * t.y, t.y];
-
-        // Add to A^T A
-        for j in 0..9 {
-            for k in 0..9 {
-                ata[j][k] += row1[j] * row1[k] + row2[j] * row2[k];
-            }
-        }
+        let base = i * 2 * 9;
+        a_data[base..base + 9].copy_from_slice(&[
+            -r.x,
+            -r.y,
+            -1.0,
+            0.0,
+            0.0,
+            0.0,
+            r.x * t.x,
+            r.y * t.x,
+            t.x,
+        ]);
+        a_data[base + 9..base + 18].copy_from_slice(&[
+            0.0,
+            0.0,
+            0.0,
+            -r.x,
+            -r.y,
+            -1.0,
+            r.x * t.y,
+            r.y * t.y,
+            t.y,
+        ]);
     }
+    let a = DMatrix::from_row_slice(2 * n, 9, &a_data);
 
-    let h = solve_homogeneous_9x9(&ata)?;
+    let h = solve_homogeneous_svd(a)?;
 
     // Denormalize: H = T_target^-1 * H_norm * T_ref
-    let h_norm = Transform::from_matrix(h.into(), TransformType::Homography);
+    let h_norm = Transform::from_matrix(h, TransformType::Homography);
     let tar_t_inv = tar_t.inverse(); // Normalization transforms are always invertible
 
     let h_denorm = tar_t_inv.compose(&h_norm).compose(&ref_t);
@@ -356,31 +373,41 @@ pub(crate) fn normalize_points(points: &[DVec2]) -> (Vec<DVec2>, Transform) {
     (normalized, t)
 }
 
-/// Solve 9x9 homogeneous system using SVD.
+/// Solve homogeneous system Ah=0 via direct SVD of the m×9 design matrix.
 ///
-/// Finds the eigenvector corresponding to the smallest singular value of A^T A,
-/// which is the null space of A (or closest to it for overdetermined systems).
-fn solve_homogeneous_9x9(ata: &[[f64; 9]; 9]) -> Option<[f64; 9]> {
-    // Flatten the 9x9 matrix into a nalgebra DMatrix
-    let data: Vec<f64> = ata.iter().flatten().copied().collect();
-    let matrix = DMatrix::from_row_slice(9, 9, &data);
+/// Returns the right singular vector corresponding to the smallest singular value
+/// (last row of V^T). Using the full rectangular matrix preserves condition number κ,
+/// vs κ² when SVD-ing A^T A.
+fn solve_homogeneous_svd(a: DMatrix<f64>) -> Option<DMat3> {
+    let nrows = a.nrows();
+    let ncols = a.ncols();
 
-    // Compute SVD with V matrix (we need the right singular vectors)
-    let svd = SVD::new(matrix, false, true);
+    // nalgebra computes thin SVD: V^T has min(m,n) × n shape.
+    // For m < 9, we'd miss the null-space vector (row 8 of full V^T).
+    // Pad with zero rows so m >= 9 — zeros don't affect the null space.
+    let a = if nrows < ncols {
+        let mut padded = DMatrix::zeros(ncols, ncols);
+        padded.view_mut((0, 0), (nrows, ncols)).copy_from(&a);
+        padded
+    } else {
+        a
+    };
 
-    // Get V^T (right singular vectors as rows)
+    // Compute SVD — only need V (right singular vectors), skip U
+    let svd = SVD::new(a, false, true);
+
+    // Get V^T (right singular vectors as rows, 9×9)
     let v_t = svd.v_t?;
 
-    // The last row of V^T (last column of V) corresponds to smallest singular value
-    // This is the solution to the homogeneous system
+    // The last row of V^T corresponds to the smallest singular value
     let last_row = v_t.row(8);
 
-    let mut result = [0.0; 9];
+    let mut data = [0.0f64; 9];
     for (i, &val) in last_row.iter().enumerate() {
-        result[i] = val;
+        data[i] = val;
     }
 
-    Some(result)
+    Some(DMat3::from_array(data))
 }
 
 /// Compute centroid of points.
