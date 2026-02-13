@@ -353,13 +353,21 @@ fn test_ransac_insufficient_points() {
 
 #[test]
 fn test_adaptive_iterations() {
-    // High inlier ratio should require few iterations
-    let iters_high = adaptive_iterations(0.9, 2, 0.99);
-    assert!(iters_high < 20);
+    // Formula: N = ceil(log(1-conf) / log(1 - w^n))
+    // Edge cases: returns 1
+    assert_eq!(adaptive_iterations(0.0, 2, 0.99), 1);
+    assert_eq!(adaptive_iterations(1.0, 2, 0.99), 1);
 
-    // Low inlier ratio should require more iterations than high ratio
-    let iters_low = adaptive_iterations(0.3, 2, 0.99);
-    assert!(iters_low > iters_high);
+    // w=0.9, n=2, conf=0.99: w^n=0.81
+    // N = ceil(ln(0.01)/ln(0.19)) = ceil(4.6052/1.6607) = ceil(2.773) = 3
+    assert_eq!(adaptive_iterations(0.9, 2, 0.99), 3);
+
+    // w=0.3, n=2, conf=0.99: w^n=0.09
+    // N = ceil(ln(0.01)/ln(0.91)) = ceil(4.6052/0.09431) = ceil(48.83) = 49
+    assert_eq!(adaptive_iterations(0.3, 2, 0.99), 49);
+
+    // More iterations with lower inlier ratio
+    assert!(adaptive_iterations(0.3, 2, 0.99) > adaptive_iterations(0.9, 2, 0.99));
 }
 
 #[test]
@@ -1259,44 +1267,25 @@ fn test_ransac_0_percent_inliers_pure_noise() {
     // Returning None is also acceptable for pure noise
 }
 
-/// Test adaptive iteration count verification
+/// Test adaptive iteration count with exact formula values
 #[test]
 fn test_adaptive_iteration_count() {
-    let config = RansacParams {
-        max_iterations: 10000,
-        confidence: 0.999,
-        ..Default::default()
-    };
+    // w=0.5, n=2, conf=0.999: w^n=0.25
+    // N = ceil(ln(0.001)/ln(0.75)) = ceil(6.9078/0.2877) = ceil(24.01) = 25
+    assert_eq!(adaptive_iterations(0.5, 2, 0.999), 25);
 
-    // With 50% inliers and 2 points per model (similarity), we need:
-    // k = log(1-0.999) / log(1 - 0.5^2) = log(0.001) / log(0.75) ≈ 24 iterations
-    let adaptive_iters = adaptive_iterations(0.5, 2, config.confidence);
-    assert!(
-        adaptive_iters < 50,
-        "50% inliers should need ~24 iterations, got {}",
-        adaptive_iters
-    );
-    assert!(
-        adaptive_iters > 10,
-        "Should need at least 10 iterations, got {}",
-        adaptive_iters
-    );
+    // w=0.9, n=2, conf=0.999: w^n=0.81
+    // N = ceil(ln(0.001)/ln(0.19)) = ceil(6.9078/1.6607) = ceil(4.16) = 5
+    assert_eq!(adaptive_iterations(0.9, 2, 0.999), 5);
 
-    // With 90% inliers, we need very few iterations
-    let high_inlier_iters = adaptive_iterations(0.9, 2, config.confidence);
-    assert!(
-        high_inlier_iters < 15,
-        "90% inliers should need very few iterations, got {}",
-        high_inlier_iters
-    );
+    // w=0.1, n=2, conf=0.999: w^n=0.01
+    // N = ceil(ln(0.001)/ln(0.99)) = ceil(6.9078/0.01005) = ceil(687.3) = 688
+    assert_eq!(adaptive_iterations(0.1, 2, 0.999), 688);
 
-    // With 10% inliers, we need many iterations
-    let low_inlier_iters = adaptive_iterations(0.1, 2, config.confidence);
-    assert!(
-        low_inlier_iters > 500,
-        "10% inliers should need many iterations, got {}",
-        low_inlier_iters
-    );
+    // Larger sample size requires more iterations at same inlier ratio
+    // w=0.5, n=4, conf=0.999: w^n=0.0625
+    // N = ceil(ln(0.001)/ln(0.9375)) = ceil(6.9078/0.06454) = ceil(107.0) = 108
+    assert_eq!(adaptive_iterations(0.5, 4, 0.999), 108);
 }
 
 /// Test that RANSAC early terminates when it finds a good model

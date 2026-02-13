@@ -160,4 +160,67 @@ mod tests {
         let bbox = Aabb::new(Vec2us::new(0, 0), Vec2us::new(9, 4));
         assert_eq!(bbox.area(), 50); // 10 * 5
     }
+
+    #[test]
+    fn test_merge_overlapping() {
+        // Two overlapping boxes:
+        //   A: (2,3) to (5,8) — width=4, height=6
+        //   B: (4,6) to (9,10) — width=6, height=5
+        // Merged: min=(2,3), max=(9,10) — width=8, height=8
+        let a = Aabb::new(Vec2us::new(2, 3), Vec2us::new(5, 8));
+        let b = Aabb::new(Vec2us::new(4, 6), Vec2us::new(9, 10));
+        let merged = a.merge(&b);
+        assert_eq!(merged.min, Vec2us::new(2, 3));
+        assert_eq!(merged.max, Vec2us::new(9, 10));
+        assert_eq!(merged.width(), 8); // 9 - 2 + 1
+        assert_eq!(merged.height(), 8); // 10 - 3 + 1
+    }
+
+    #[test]
+    fn test_merge_disjoint() {
+        // Two disjoint boxes:
+        //   A: (0,0) to (2,2)
+        //   B: (10,10) to (12,12)
+        // Merged: min=(0,0), max=(12,12)
+        let a = Aabb::new(Vec2us::new(0, 0), Vec2us::new(2, 2));
+        let b = Aabb::new(Vec2us::new(10, 10), Vec2us::new(12, 12));
+        let merged = a.merge(&b);
+        assert_eq!(merged.min, Vec2us::new(0, 0));
+        assert_eq!(merged.max, Vec2us::new(12, 12));
+        assert_eq!(merged.area(), 169); // 13 * 13
+    }
+
+    #[test]
+    fn test_merge_identical() {
+        let a = Aabb::new(Vec2us::new(3, 5), Vec2us::new(7, 9));
+        let merged = a.merge(&a);
+        assert_eq!(merged, a);
+    }
+
+    #[test]
+    fn test_merge_contained() {
+        // B is entirely inside A
+        let a = Aabb::new(Vec2us::new(0, 0), Vec2us::new(10, 10));
+        let b = Aabb::new(Vec2us::new(3, 3), Vec2us::new(7, 7));
+        let merged = a.merge(&b);
+        assert_eq!(merged, a);
+    }
+
+    #[test]
+    fn test_merge_with_empty() {
+        let a = Aabb::new(Vec2us::new(2, 3), Vec2us::new(5, 8));
+        let empty = Aabb::empty();
+        // Merging with empty: min takes min of (2, usize::MAX)=2, max takes max of (5, 0)=5
+        // So for a non-empty box, merge with empty returns the non-empty box
+        let merged = a.merge(&empty);
+        assert_eq!(merged.min, Vec2us::new(2, 3));
+        assert_eq!(merged.max, Vec2us::new(5, 8));
+    }
+
+    #[test]
+    fn test_merge_is_commutative() {
+        let a = Aabb::new(Vec2us::new(1, 2), Vec2us::new(4, 6));
+        let b = Aabb::new(Vec2us::new(3, 5), Vec2us::new(8, 9));
+        assert_eq!(a.merge(&b), b.merge(&a));
+    }
 }

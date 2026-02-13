@@ -247,3 +247,154 @@ impl<T> From<Buffer2<T>> for Vec<T> {
         buffer.pixels
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_new_stores_dimensions() {
+        let buf = Buffer2::new(3, 2, vec![10, 20, 30, 40, 50, 60]);
+        assert_eq!(buf.width(), 3);
+        assert_eq!(buf.height(), 2);
+        assert_eq!(buf.len(), 6);
+        assert!(!buf.is_empty());
+    }
+
+    #[test]
+    #[should_panic(expected = "pixels length must equal width * height")]
+    fn test_new_panics_on_size_mismatch() {
+        Buffer2::new(3, 2, vec![1, 2, 3]); // 3 != 3*2
+    }
+
+    #[test]
+    fn test_new_default() {
+        let buf: Buffer2<f32> = Buffer2::new_default(4, 3);
+        assert_eq!(buf.width(), 4);
+        assert_eq!(buf.height(), 3);
+        assert_eq!(buf.len(), 12);
+        assert!(buf.iter().all(|&v| v == 0.0));
+    }
+
+    #[test]
+    fn test_new_filled() {
+        let buf = Buffer2::new_filled(2, 3, 42u8);
+        assert_eq!(buf.len(), 6);
+        assert!(buf.iter().all(|&v| v == 42));
+    }
+
+    #[test]
+    fn test_get_2d() {
+        // 3x2 buffer: row 0 = [10, 20, 30], row 1 = [40, 50, 60]
+        let buf = Buffer2::new(3, 2, vec![10, 20, 30, 40, 50, 60]);
+        // get(x, y) => pixels[y * width + x]
+        assert_eq!(*buf.get(0, 0), 10); // (0,0) => [0*3+0=0]
+        assert_eq!(*buf.get(2, 0), 30); // (2,0) => [0*3+2=2]
+        assert_eq!(*buf.get(0, 1), 40); // (0,1) => [1*3+0=3]
+        assert_eq!(*buf.get(2, 1), 60); // (2,1) => [1*3+2=5]
+    }
+
+    #[test]
+    fn test_get_mut_2d() {
+        let mut buf = Buffer2::new(2, 2, vec![1, 2, 3, 4]);
+        *buf.get_mut(1, 0) = 99;
+        assert_eq!(*buf.get(1, 0), 99);
+        assert_eq!(*buf.get(0, 0), 1); // unchanged
+    }
+
+    #[test]
+    fn test_index_tuple() {
+        let buf = Buffer2::new(3, 2, vec![10, 20, 30, 40, 50, 60]);
+        assert_eq!(buf[(0, 0)], 10);
+        assert_eq!(buf[(2, 1)], 60); // (2,1) => 1*3+2 = 5
+    }
+
+    #[test]
+    fn test_index_mut_tuple() {
+        let mut buf = Buffer2::new(2, 2, vec![1, 2, 3, 4]);
+        buf[(1, 1)] = 77; // (1,1) => index 3
+        assert_eq!(buf[(1, 1)], 77);
+    }
+
+    #[test]
+    fn test_index_linear() {
+        let buf = Buffer2::new(3, 2, vec![10, 20, 30, 40, 50, 60]);
+        assert_eq!(buf[0], 10);
+        assert_eq!(buf[5], 60);
+    }
+
+    #[test]
+    fn test_index_range() {
+        let buf = Buffer2::new(3, 2, vec![10, 20, 30, 40, 50, 60]);
+        assert_eq!(&buf[1..4], &[20, 30, 40]);
+    }
+
+    #[test]
+    fn test_into_vec() {
+        let data = vec![1.0f32, 2.0, 3.0, 4.0];
+        let buf = Buffer2::new(2, 2, data.clone());
+        assert_eq!(buf.into_vec(), data);
+    }
+
+    #[test]
+    fn test_from_buffer2_to_vec() {
+        let buf = Buffer2::new(2, 2, vec![1, 2, 3, 4]);
+        let v: Vec<i32> = buf.into();
+        assert_eq!(v, vec![1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn test_copy_from() {
+        let src = Buffer2::new(2, 2, vec![10, 20, 30, 40]);
+        let mut dst = Buffer2::new(2, 2, vec![0, 0, 0, 0]);
+        dst.copy_from(&src);
+        assert_eq!(dst.pixels(), src.pixels());
+    }
+
+    #[test]
+    #[should_panic(expected = "width mismatch")]
+    fn test_copy_from_panics_on_width_mismatch() {
+        let src = Buffer2::new(3, 2, vec![0; 6]);
+        let mut dst = Buffer2::new(2, 3, vec![0; 6]);
+        dst.copy_from(&src);
+    }
+
+    #[test]
+    fn test_fill() {
+        let mut buf = Buffer2::new(2, 2, vec![1, 2, 3, 4]);
+        buf.fill(99);
+        assert!(buf.iter().all(|&v| v == 99));
+    }
+
+    #[test]
+    fn test_deref_to_slice() {
+        let buf = Buffer2::new(2, 2, vec![1, 2, 3, 4]);
+        let slice: &[i32] = &buf;
+        assert_eq!(slice.len(), 4);
+        assert_eq!(slice[0], 1);
+    }
+
+    #[test]
+    fn test_index_method() {
+        let buf = Buffer2::<u8>::new_default(5, 3);
+        // index(x, y) = y * width + x
+        assert_eq!(buf.index(0, 0), 0);
+        assert_eq!(buf.index(4, 0), 4);
+        assert_eq!(buf.index(0, 1), 5); // 1 * 5 + 0
+        assert_eq!(buf.index(3, 2), 13); // 2 * 5 + 3
+    }
+
+    #[test]
+    fn test_iterator_sum() {
+        let buf = Buffer2::new(2, 2, vec![10, 20, 30, 40]);
+        let sum: i32 = buf.iter().sum();
+        assert_eq!(sum, 100); // 10 + 20 + 30 + 40
+    }
+
+    #[test]
+    fn test_clone_equality() {
+        let buf = Buffer2::new(2, 2, vec![1, 2, 3, 4]);
+        let cloned = buf.clone();
+        assert_eq!(buf, cloned);
+    }
+}

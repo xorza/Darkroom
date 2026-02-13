@@ -871,15 +871,22 @@ mod tests {
         assert_eq!(result.image.width(), 200);
         assert_eq!(result.image.height(), 200);
 
-        // Average value should be preserved (approximately)
+        // With scale=2, pixfrac=0.8: drop_size=0.4, each input pixel center
+        // at (2*ix+1, 2*iy+1) contributes to a 2×2 output block with weight 0.25 each.
+        // Every output pixel receives exactly one contribution.
+        // Finalized output = (0.5 * 0.25) / 0.25 = 0.5
         let pixels = result.image.channel(0);
         let avg: f32 = pixels.iter().sum::<f32>() / pixels.len() as f32;
-        // With pixfrac=0.8 and scale=2, not all pixels get full coverage
-        // but well-covered pixels should have ~0.5 value
         assert!(
-            avg > 0.3 && avg < 0.7,
-            "Average value {} not in expected range",
+            (avg - 0.5).abs() < 1e-5,
+            "Average should be 0.5, got {}",
             avg
+        );
+        // Verify specific pixels
+        assert!(
+            (pixels[0] - 0.5).abs() < 1e-5,
+            "Pixel (0,0) should be 0.5, got {}",
+            pixels[0]
         );
     }
 
@@ -896,6 +903,24 @@ mod tests {
         let result = acc.finalize();
         assert_eq!(result.image.width(), 20);
         assert_eq!(result.image.height(), 20);
+
+        // Point kernel: input (ix,iy) center at (ix+0.5, iy+0.5)
+        // scaled → output floor((ix+0.5)*2) = 2*ix+1, floor((iy+0.5)*2) = 2*iy+1
+        // Covered pixels (odd x, odd y): value = 1.0/1.0 = 1.0
+        // Uncovered pixels: fill_value = 0.0
+        let pixels = result.image.channel(0);
+        let w = 20;
+        // (1,1) ← input (0,0): value = 1.0
+        assert!((pixels[w + 1] - 1.0).abs() < f32::EPSILON);
+        // (3,1) ← input (1,0): value = 1.0
+        assert!((pixels[w + 3] - 1.0).abs() < f32::EPSILON);
+        // (0,0): no coverage → fill_value = 0.0
+        assert!((pixels[0]).abs() < f32::EPSILON);
+        // (2,2): even coords, no coverage → 0.0
+        assert!((pixels[2 * w + 2]).abs() < f32::EPSILON);
+        // Exactly 100 covered pixels (10×10 input maps to 10×10 odd-coordinate outputs)
+        let covered = pixels.iter().filter(|&&v| v > 0.5).count();
+        assert_eq!(covered, 100);
     }
 
     #[test]
@@ -943,22 +968,65 @@ mod tests {
 
     #[test]
     fn test_drizzle_with_translation() {
-        // Create test image with known pattern
+        // Single bright pixel at (10,10), all others zero
         let mut pixels = vec![0.0f32; 20 * 20];
-        pixels[10 * 20 + 10] = 1.0; // Single bright pixel at center
+        pixels[10 * 20 + 10] = 1.0;
         let image = AstroImage::from_pixels(ImageDimensions::new(20, 20, 1), pixels);
 
+        // scale=2, pixfrac=0.8: drop_size=0.4, half_drop=0.2
         let config = DrizzleConfig::x2();
         let mut acc = DrizzleAccumulator::new(20, 20, 1, config);
 
-        // Add with small translation
+        // Translation (0.5, 0.5): pixel (10,10) center at (10.5+0.5, 10.5+0.5) = (11, 11)
+        // Scaled to output: (22, 22). Drop from (21.8, 21.8) to (22.2, 22.2).
+        // Overlaps output pixels (21,21), (22,21), (21,22), (22,22) — each with weight 0.25.
         let transform = Transform::translation(DVec2::new(0.5, 0.5));
         acc.add_image(image, &transform, 1.0);
 
         let result = acc.finalize();
-
-        // The bright pixel should appear shifted in the output
         assert_eq!(result.image.width(), 40);
         assert_eq!(result.image.height(), 40);
+
+        let out = result.image.channel(0);
+        // The 4 output pixels receiving flux = 1.0*0.25/0.25 = 1.0
+        assert!(
+            (out[21 * 40 + 21] - 1.0).abs() < 1e-5,
+            "Expected 1.0 at (21,21), got {}",
+            out[21 * 40 + 21]
+        );
+        assert!(
+            (out[21 * 40 + 22] - 1.0).abs() < 1e-5,
+            "Expected 1.0 at (22,21), got {}",
+            out[21 * 40 + 22]
+        );
+        assert!(
+            (out[22 * 40 + 21] - 1.0).abs() < 1e-5,
+            "Expected 1.0 at (21,22), got {}",
+            out[22 * 40 + 21]
+        );
+        assert!(
+            (out[22 * 40 + 22] - 1.0).abs() < 1e-5,
+            "Expected 1.0 at (22,22), got {}",
+            out[22 * 40 + 22]
+        );
+        // Pixel far from the bright spot should be 0.0
+        assert!((out[0]).abs() < 1e-5);
+    }
+
+    #[test]
+    fn test_coverage_at() {
+        // Point kernel with identity: covered at odd coords, uncovered at even
+        let image = AstroImage::from_pixels(ImageDimensions::new(4, 4, 1), vec![1.0; 16]);
+        let config = DrizzleConfig::x2().with_kernel(DrizzleKernel::Point);
+        let mut acc = DrizzleAccumulator::new(4, 4, 1, config);
+        acc.add_image(image, &Transform::identity(), 1.0);
+        let result = acc.finalize();
+
+        // Output 8×8. Covered pixels at (2*ix+1, 2*iy+1) for ix,iy=0..3
+        // Normalized coverage: max_coverage = 1.0
+        assert!((result.coverage_at(1, 1) - 1.0).abs() < f32::EPSILON); // covered
+        assert!((result.coverage_at(0, 0)).abs() < f32::EPSILON); // uncovered
+        assert!((result.coverage_at(3, 3) - 1.0).abs() < f32::EPSILON); // covered
+        assert!((result.coverage_at(2, 2)).abs() < f32::EPSILON); // uncovered
     }
 }

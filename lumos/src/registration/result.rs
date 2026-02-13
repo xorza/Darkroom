@@ -197,9 +197,80 @@ mod tests {
         let result = RegistrationResult::new(transform, matches, residuals);
 
         assert_eq!(result.num_inliers, 3);
-        assert!(result.rms_error > 0.0);
-        assert!(result.max_error > 0.0);
-        assert!(result.quality_score >= 0.0 && result.quality_score <= 1.0);
+        // rms = sqrt((0.01 + 0.04 + 0.0225) / 3) = sqrt(0.0725/3) = sqrt(0.024167)
+        let expected_rms = (0.0725_f64 / 3.0).sqrt();
+        assert!(
+            (result.rms_error - expected_rms).abs() < 1e-10,
+            "rms: expected {}, got {}",
+            expected_rms,
+            result.rms_error
+        );
+        // max_error = max(0.1, 0.2, 0.15) = 0.2
+        assert!((result.max_error - 0.2).abs() < 1e-10);
+        // num_inliers = 3 < 4, so quality_score = 0.0
+        assert_eq!(result.quality_score, 0.0);
+    }
+
+    #[test]
+    fn test_registration_result_quality_score_with_4_inliers() {
+        let transform = Transform::translation(DVec2::new(1.0, 2.0));
+        let matches = vec![(0, 0), (1, 1), (2, 2), (3, 3)];
+        let residuals = vec![0.1, 0.2, 0.15, 0.05];
+
+        let result = RegistrationResult::new(transform, matches, residuals);
+
+        assert_eq!(result.num_inliers, 4);
+        // rms = sqrt((0.01 + 0.04 + 0.0225 + 0.0025) / 4) = sqrt(0.075/4) = sqrt(0.01875)
+        let expected_rms = (0.075_f64 / 4.0).sqrt();
+        assert!((result.rms_error - expected_rms).abs() < 1e-10);
+        assert!((result.max_error - 0.2).abs() < 1e-10);
+        // quality = exp(-rms/2) * min(4/20, 1) = exp(-rms/2) * 0.2
+        let expected_quality = (-expected_rms / 2.0).exp() * 0.2;
+        assert!(
+            (result.quality_score - expected_quality).abs() < 1e-10,
+            "quality: expected {}, got {}",
+            expected_quality,
+            result.quality_score
+        );
+    }
+
+    #[test]
+    fn test_registration_result_empty_residuals() {
+        let transform = Transform::identity();
+        let result = RegistrationResult::new(transform, vec![], vec![]);
+        assert_eq!(result.rms_error, 0.0);
+        assert_eq!(result.max_error, 0.0);
+        assert_eq!(result.num_inliers, 0);
+        assert_eq!(result.quality_score, 0.0); // 0 < 4
+    }
+
+    #[test]
+    fn test_registration_result_quality_saturates_at_20_inliers() {
+        // With >= 20 inliers, count_factor = min(n/20, 1) = 1.0
+        let transform = Transform::identity();
+        let n = 25;
+        let matches: Vec<(usize, usize)> = (0..n).map(|i| (i, i)).collect();
+        let residuals = vec![0.1; n];
+
+        let result = RegistrationResult::new(transform, matches, residuals);
+
+        // rms = sqrt(25 * 0.01 / 25) = sqrt(0.01) = 0.1
+        assert!((result.rms_error - 0.1).abs() < 1e-10);
+        // quality = exp(-0.1/2) * min(25/20, 1) = exp(-0.05) * 1.0
+        let expected_quality = (-0.05_f64).exp();
+        assert!(
+            (result.quality_score - expected_quality).abs() < 1e-10,
+            "quality: expected {}, got {}",
+            expected_quality,
+            result.quality_score
+        );
+    }
+
+    #[test]
+    fn test_registration_result_with_elapsed() {
+        let transform = Transform::identity();
+        let result = RegistrationResult::new(transform, vec![], vec![]).with_elapsed(42.5);
+        assert!((result.elapsed_ms - 42.5).abs() < 1e-10);
     }
 
     #[test]

@@ -125,4 +125,47 @@ mod tests {
         let t: (usize, usize) = v.into();
         assert_eq!(t, (3, 5));
     }
+
+    #[test]
+    fn test_to_index_from_index_roundtrip() {
+        // For any valid (x, y) where x < width, roundtrip should be identity:
+        // from_index(to_index(v, w), w) == v
+        for width in [1, 5, 10, 100] {
+            for y in 0..5 {
+                for x in 0..width.min(5) {
+                    let v = Vec2us::new(x, y);
+                    let idx = v.to_index(width);
+                    let recovered = Vec2us::from_index(idx, width);
+                    assert_eq!(
+                        recovered, v,
+                        "Roundtrip failed for ({}, {}) with width={}",
+                        x, y, width
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_to_index_width_1() {
+        // Width=1 is a vertical column: index == y
+        assert_eq!(Vec2us::new(0, 0).to_index(1), 0);
+        assert_eq!(Vec2us::new(0, 5).to_index(1), 5);
+        assert_eq!(Vec2us::new(0, 99).to_index(1), 99);
+    }
+
+    #[test]
+    fn test_from_index_origin() {
+        // Index 0 is always (0, 0)
+        assert_eq!(Vec2us::from_index(0, 1), Vec2us::new(0, 0));
+        assert_eq!(Vec2us::from_index(0, 10), Vec2us::new(0, 0));
+        assert_eq!(Vec2us::from_index(0, 100), Vec2us::new(0, 0));
+    }
+
+    #[test]
+    fn test_zero_constant() {
+        assert_eq!(Vec2us::ZERO.x, 0);
+        assert_eq!(Vec2us::ZERO.y, 0);
+        assert_eq!(Vec2us::ZERO, Vec2us::new(0, 0));
+    }
 }
