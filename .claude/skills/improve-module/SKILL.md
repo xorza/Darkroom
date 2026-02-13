@@ -12,7 +12,8 @@ Categories to look for:
 - **Generalizations**: Duplicated patterns across submodules that could share a common implementation. Similar structs/enums/traits that could be unified. Copy-pasted logic with minor variations.
 - **Consistency**: Naming inconsistencies (similar things named differently). Different error handling patterns for the same kind of errors. Mixed conventions (e.g., some modules use iterators, others use index loops for the same pattern). Inconsistent API shapes across sibling modules.
 - **Dead code**: Unused functions, unreachable branches, redundant checks, stale comments.
-- **API cleanliness**: Public API that exposes internal details. Functions that take too many parameters (should be a struct). Return types that leak implementation.
+- **API cleanliness**: Public API that exposes internal details. Functions that take too many parameters (should be a struct). Return types that leak implementation. API should be simple, contain no test code in production modules, no backward compatibility proxy methods.
+- **Data flow**: Data flow should be linear and simple. Look for unnecessary round-trips, redundant conversions, data passed through too many layers, or convoluted pipelines that could be straightened out.
 
 Process all submodules in parallel. After all submodules are reviewed, produce a single consolidated report.
 
@@ -33,7 +34,7 @@ Brief overview of findings and overall code quality assessment.
 
 #### [F1] <Title>
 - **Location**: `file.rs:123-145`
-- **Category**: Simplification / Generalization / Consistency / Dead code / API
+- **Category**: Simplification / Generalization / Consistency / Dead code / API / Data flow
 - **Impact**: 4/5 — <why>
 - **Meaningfulness**: 5/5 — <why>
 - **Invasiveness**: 1/5 — <why>
