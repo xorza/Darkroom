@@ -162,7 +162,8 @@ fn create_calibration_masters(calibration_dir: &Path) -> CalibrationMasters {
         bias_paths.len()
     );
 
-    let masters = CalibrationMasters::from_raw_files(&dark_paths, &flat_paths, &bias_paths)
+    let empty: Vec<String> = Vec::new();
+    let masters = CalibrationMasters::from_raw_files(&dark_paths, &flat_paths, &bias_paths, &empty)
         .expect("Failed to create calibration masters");
 
     tracing::info!(

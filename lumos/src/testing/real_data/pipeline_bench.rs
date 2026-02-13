@@ -30,7 +30,8 @@ fn bench_full_pipeline() {
     let flat_paths = calibration_image_paths("Flats").unwrap_or_default();
     let bias_paths = calibration_image_paths("Bias").unwrap_or_default();
 
-    let masters = CalibrationMasters::from_raw_files(&dark_paths, &flat_paths, &bias_paths)
+    let empty: Vec<String> = Vec::new();
+    let masters = CalibrationMasters::from_raw_files(&dark_paths, &flat_paths, &bias_paths, &empty)
         .expect("Failed to create calibration masters");
 
     println!(

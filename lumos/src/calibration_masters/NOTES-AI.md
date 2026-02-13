@@ -15,31 +15,34 @@ CalibrationMasters::from_raw_files()     CalibrationMasters::new()
   stack_cfa_frames(darks, ...)             Takes pre-built CfaImages
   stack_cfa_frames(flats, ...)             Generates DefectMap from dark
   stack_cfa_frames(biases, ...)
+  stack_cfa_frames(flat_darks, ...)
          |                                          |
          v                                          v
-CalibrationMasters { master_dark, master_flat, master_bias, defect_map }
+CalibrationMasters { master_dark, master_flat, master_bias, master_flat_dark, defect_map }
          |
          v
 calibrate(light):
   1. Dark subtraction (or bias-only fallback)     CfaImage::subtract()
-  2. Flat division with normalization              CfaImage::divide_by_normalized()
+  2. Flat division (flat dark > bias for flat norm) CfaImage::divide_by_normalized()
   3. CFA-aware defective pixel correction            DefectMap::correct()
 ```
 
 ## Calibration Formula
 
-**Implementation:** `calibrated = (Light - Dark) / normalize(Flat - Bias)`
+**Implementation:** `calibrated = (Light - Dark) / normalize(Flat - FlatSub)`
 
-Where `normalize(X) = X / mean(X)`, so flat division preserves the light frame's
-intensity scale. When bias is provided, flat normalization uses `mean(Flat - Bias)`.
+Where `normalize(X) = X / mean(X)`, and `FlatSub` is the flat dark if provided,
+otherwise bias. Flat dark takes priority because it matches the flat's exposure time
+and captures both bias and dark current accumulated during the flat exposure.
 
 **Industry standard (Siril, PixInsight, Astropy CCD Guide):**
-`L_c = (L - D) / (F - O)` with normalization by `mean(F - O)`.
+`L_c = (L - D) / (F - F_d)` with normalization by `mean(F - F_d)`.
+Where `F_d` is a dark frame matching the flat's exposure time. When no flat dark
+is available, bias is used as fallback.
 
 **Verdict:** The formula is correct. The implementation matches the standard. When both
 dark and bias exist, dark is subtracted from the light (dark already contains bias),
-and bias is subtracted from the flat before normalization. This is the correct approach
-because a master dark captured at the same exposure time already includes the bias signal.
+and flat dark (or bias fallback) is subtracted from the flat before normalization.
 
 The flat division guards against divide-by-zero with `norm_flat > f32::EPSILON` and
 uses `f64` accumulation for the mean, which is good numerical practice.
@@ -99,15 +102,6 @@ Avoids O(n log n) sort on full-resolution images.
 
 ## Remaining Issues
 
-### Medium: No Flat Dark Support
-- **File:** mod.rs:101-109
-- No slot for flat darks (dark frames taken at flat exposure time)
-- Important for narrowband imaging where flat exposures can be several seconds,
-  accumulating non-negligible dark current
-- Siril, PixInsight, and DeepSkyStacker all support flat darks
-- **Fix:** Add optional `flat_darks` parameter to `from_raw_files()`. Subtract master
-  flat dark from master flat before normalization.
-
 ### Low: X-Trans Neighbor Search Biased Toward Top-Left
 - **File:** defect_map.rs:262-285
 - Iterates dy then dx from negative to positive, breaks at 24 neighbors
@@ -138,7 +132,7 @@ Avoids O(n log n) sort on full-resolution images.
 - Unit tests for cold/dead pixel detection and mixed hot+cold detection
 - Unit tests for correction (Bayer stride-2, Mono 8-connected, corner pixels, cold pixels)
 - Integration tests for full calibration pipeline (dark sub, bias-only, flat correction,
-  combined dark+flat+bias with algebraic verification)
+  combined dark+flat+bias with algebraic verification, flat dark priority over bias)
 - Dimension mismatch assertions tested with `#[should_panic]`
 - Full pipeline test verifies vignetting cancellation algebraically
 

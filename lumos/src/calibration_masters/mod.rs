@@ -34,6 +34,8 @@ pub struct CalibrationMasters {
     pub master_flat: Option<CfaImage>,
     /// Master bias frame (raw CFA)
     pub master_bias: Option<CfaImage>,
+    /// Master flat dark frame (dark taken at flat exposure time)
+    pub master_flat_dark: Option<CfaImage>,
     /// Hot pixel map derived from master dark
     pub defect_map: Option<DefectMap>,
 }
@@ -80,7 +82,14 @@ impl CalibrationMasters {
     /// Create CalibrationMasters from pre-built CFA images.
     ///
     /// Generates hot pixel map from the CFA dark if provided.
-    pub fn new(dark: Option<CfaImage>, flat: Option<CfaImage>, bias: Option<CfaImage>) -> Self {
+    /// `flat_dark` is a dark frame taken at the flat's exposure time — used instead
+    /// of bias for flat normalization when provided.
+    pub fn new(
+        dark: Option<CfaImage>,
+        flat: Option<CfaImage>,
+        bias: Option<CfaImage>,
+        flat_dark: Option<CfaImage>,
+    ) -> Self {
         let defect_map = dark
             .as_ref()
             .map(|d| DefectMap::from_master_dark(d, DEFAULT_HOT_PIXEL_SIGMA));
@@ -89,6 +98,7 @@ impl CalibrationMasters {
             master_dark: dark,
             master_flat: flat,
             master_bias: bias,
+            master_flat_dark: flat_dark,
             defect_map,
         }
     }
@@ -98,15 +108,21 @@ impl CalibrationMasters {
     /// Uses sigma-clipped mean (>= 8 frames) or median (< 8 frames)
     /// with the full stacking pipeline (rejection, normalization, chunked processing).
     /// Empty slices produce `None` for that master.
+    ///
+    /// `flat_darks` are dark frames taken at the flat exposure time. When provided,
+    /// they are subtracted from the flat instead of bias during normalization.
+    /// Important for narrowband imaging where flat exposures accumulate dark current.
     pub fn from_raw_files(
         darks: &[impl AsRef<Path> + Sync],
         flats: &[impl AsRef<Path> + Sync],
         biases: &[impl AsRef<Path> + Sync],
+        flat_darks: &[impl AsRef<Path> + Sync],
     ) -> Result<Self> {
         let dark = stack_cfa_frames(darks, FrameType::Dark, Normalization::None)?;
         let flat = stack_cfa_frames(flats, FrameType::Flat, Normalization::Multiplicative)?;
         let bias = stack_cfa_frames(biases, FrameType::Bias, Normalization::None)?;
-        Ok(Self::new(dark, flat, bias))
+        let flat_dark = stack_cfa_frames(flat_darks, FrameType::Dark, Normalization::None)?;
+        Ok(Self::new(dark, flat, bias, flat_dark))
     }
 
     /// Calibrate a raw CFA light frame in place.
@@ -123,9 +139,10 @@ impl CalibrationMasters {
             image.subtract(bias);
         }
 
-        // 2. Flat division
+        // 2. Flat division (flat dark takes priority over bias for flat normalization)
         if let Some(ref flat) = self.master_flat {
-            image.divide_by_normalized(flat, self.master_bias.as_ref());
+            let flat_sub = self.master_flat_dark.as_ref().or(self.master_bias.as_ref());
+            image.divide_by_normalized(flat, flat_sub);
         }
 
         // 3. CFA-aware defective pixel correction

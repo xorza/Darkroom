@@ -18,7 +18,7 @@ fn test_new_constructor() {
     let dark = constant_cfa(4, 4, 0.1, CfaType::Mono);
     let flat = constant_cfa(4, 4, 0.8, CfaType::Mono);
 
-    let masters = CalibrationMasters::new(Some(dark), Some(flat), None);
+    let masters = CalibrationMasters::new(Some(dark), Some(flat), None, None);
 
     assert!(masters.master_dark.is_some());
     assert!(masters.master_flat.is_some());
@@ -31,7 +31,7 @@ fn test_new_constructor() {
 fn test_new_no_dark_no_hot_pixels() {
     let flat = constant_cfa(4, 4, 0.8, CfaType::Mono);
 
-    let masters = CalibrationMasters::new(None, Some(flat), None);
+    let masters = CalibrationMasters::new(None, Some(flat), None, None);
 
     assert!(masters.master_dark.is_none());
     assert!(masters.master_flat.is_some());
@@ -41,7 +41,7 @@ fn test_new_no_dark_no_hot_pixels() {
 #[test]
 fn test_calibrate_dark_subtraction() {
     let dark = constant_cfa(4, 4, 0.1, CfaType::Mono);
-    let masters = CalibrationMasters::new(Some(dark), None, None);
+    let masters = CalibrationMasters::new(Some(dark), None, None, None);
 
     let mut light = constant_cfa(4, 4, 0.5, CfaType::Mono);
     masters.calibrate(&mut light);
@@ -56,7 +56,7 @@ fn test_calibrate_dark_subtraction() {
 fn test_calibrate_bias_only() {
     // No dark → bias is subtracted instead
     let bias = constant_cfa(4, 4, 0.05, CfaType::Mono);
-    let masters = CalibrationMasters::new(None, None, Some(bias));
+    let masters = CalibrationMasters::new(None, None, Some(bias), None);
 
     let mut light = constant_cfa(4, 4, 0.5, CfaType::Mono);
     masters.calibrate(&mut light);
@@ -72,7 +72,7 @@ fn test_calibrate_dark_takes_priority_over_bias() {
     // When both dark and bias exist, only dark is subtracted
     let dark = constant_cfa(4, 4, 0.1, CfaType::Mono);
     let bias = constant_cfa(4, 4, 0.05, CfaType::Mono);
-    let masters = CalibrationMasters::new(Some(dark), None, Some(bias));
+    let masters = CalibrationMasters::new(Some(dark), None, Some(bias), None);
 
     let mut light = constant_cfa(4, 4, 0.5, CfaType::Mono);
     masters.calibrate(&mut light);
@@ -97,7 +97,7 @@ fn test_calibrate_flat_correction() {
         },
     };
 
-    let masters = CalibrationMasters::new(None, Some(flat), None);
+    let masters = CalibrationMasters::new(None, Some(flat), None, None);
 
     let mut light = constant_cfa(2, 2, 0.3, CfaType::Mono);
     masters.calibrate(&mut light);
@@ -143,7 +143,7 @@ fn test_calibrate_full_pipeline() {
     };
     let bias = constant_cfa(2, 1, bias_val, CfaType::Mono);
 
-    let masters = CalibrationMasters::new(Some(dark), Some(flat), Some(bias));
+    let masters = CalibrationMasters::new(Some(dark), Some(flat), Some(bias), None);
 
     let mut light = CfaImage {
         data: Buffer2::new(2, 1, light_pixels),
@@ -196,7 +196,7 @@ fn test_calibrate_hot_pixel_correction() {
         },
     };
 
-    let masters = CalibrationMasters::new(Some(dark), None, None);
+    let masters = CalibrationMasters::new(Some(dark), None, None, None);
 
     assert!(masters.defect_map.is_some());
     let hot_map = masters.defect_map.as_ref().unwrap();
@@ -221,5 +221,108 @@ fn test_calibrate_hot_pixel_correction() {
     assert!(
         (corrected - 0.49).abs() < 0.02,
         "Hot pixel should be corrected to ~0.49, got {corrected}"
+    );
+}
+
+#[test]
+fn test_calibrate_flat_dark() {
+    // Flat dark is subtracted from flat instead of bias during normalization.
+    // Simulates narrowband scenario: flat exposure accumulates dark current.
+    //
+    // Setup:
+    //   signal = [0.3, 0.6], vignetting = [0.8, 1.0]
+    //   dark = 0.07 (light dark), flat_dark = 0.03 (flat dark, shorter exposure)
+    //   K = 0.8 (flat illumination level)
+    //   light = signal * vignetting + dark
+    //   flat = K * vignetting + flat_dark
+    let signal = [0.3_f32, 0.6];
+    let vignetting = [0.8_f32, 1.0];
+    let dark_val = 0.07_f32;
+    let flat_dark_val = 0.03_f32;
+    let k = 0.8_f32;
+
+    let light_pixels: Vec<f32> = signal
+        .iter()
+        .zip(&vignetting)
+        .map(|(s, v)| s * v + dark_val)
+        .collect();
+    let flat_pixels: Vec<f32> = vignetting.iter().map(|v| k * v + flat_dark_val).collect();
+
+    let dark = constant_cfa(2, 1, dark_val, CfaType::Mono);
+    let flat = CfaImage {
+        data: Buffer2::new(2, 1, flat_pixels),
+        metadata: AstroImageMetadata {
+            cfa_type: Some(CfaType::Mono),
+            ..Default::default()
+        },
+    };
+    let flat_dark = constant_cfa(2, 1, flat_dark_val, CfaType::Mono);
+
+    let masters = CalibrationMasters::new(Some(dark), Some(flat), None, Some(flat_dark));
+
+    let mut light = CfaImage {
+        data: Buffer2::new(2, 1, light_pixels),
+        metadata: AstroImageMetadata {
+            cfa_type: Some(CfaType::Mono),
+            ..Default::default()
+        },
+    };
+    masters.calibrate(&mut light);
+
+    // After dark subtraction: signal * vignetting = [0.24, 0.60]
+    // flat - flat_dark = K * vignetting = [0.64, 0.80]
+    // mean(flat - flat_dark) = 0.72
+    // normalized_flat = [0.64/0.72, 0.80/0.72] = [0.8889, 1.1111]
+    // result = [0.24/0.8889, 0.60/1.1111] = [0.27, 0.54] = signal * 0.9
+    let scale = k * (vignetting[0] + vignetting[1]) / 2.0 / k; // mean(vignetting)/1 = 0.9
+    let expected_0 = signal[0] * scale;
+    let expected_1 = signal[1] * scale;
+    assert!(
+        (light.data[0] - expected_0).abs() < 1e-4,
+        "Expected {expected_0}, got {}",
+        light.data[0]
+    );
+    assert!(
+        (light.data[1] - expected_1).abs() < 1e-4,
+        "Expected {expected_1}, got {}",
+        light.data[1]
+    );
+}
+
+#[test]
+fn test_flat_dark_takes_priority_over_bias() {
+    // When both flat dark and bias exist, flat dark is used for flat normalization
+    let flat_pixels = vec![0.8_f32, 0.6, 0.6, 0.8];
+    let flat = CfaImage {
+        data: Buffer2::new(2, 2, flat_pixels),
+        metadata: AstroImageMetadata {
+            cfa_type: Some(CfaType::Mono),
+            ..Default::default()
+        },
+    };
+    let bias = constant_cfa(2, 2, 0.05, CfaType::Mono);
+    let flat_dark = constant_cfa(2, 2, 0.10, CfaType::Mono);
+
+    let masters = CalibrationMasters::new(None, Some(flat), Some(bias), Some(flat_dark));
+
+    let mut light = constant_cfa(2, 2, 0.5, CfaType::Mono);
+    masters.calibrate(&mut light);
+
+    // Bias subtracted from light: 0.5 - 0.05 = 0.45
+    // flat - flat_dark = [0.7, 0.5, 0.5, 0.7], mean = 0.6
+    // normalized = [1.1667, 0.8333, 0.8333, 1.1667]
+    // If bias were used for flat instead: flat - bias = [0.75, 0.55, 0.55, 0.75], mean = 0.65
+    // Verify flat dark is used for flat normalization (not bias)
+    let expected_0 = 0.45 / (0.7 / 0.6);
+    let expected_1 = 0.45 / (0.5 / 0.6);
+    assert!(
+        (light.data[0] - expected_0).abs() < 1e-4,
+        "Expected {expected_0}, got {}",
+        light.data[0]
+    );
+    assert!(
+        (light.data[1] - expected_1).abs() < 1e-4,
+        "Expected {expected_1}, got {}",
+        light.data[1]
     );
 }
