@@ -78,11 +78,10 @@ Rewritten to match PixInsight/Siril two-phase algorithm:
 - Reference frame gets `NormParams::IDENTITY` (gain=1.0, offset=0.0)
 - Ties broken by first frame (stable, deterministic)
 
-### P2: Missing Rejection Maps Output
+### P2: Missing Rejection Maps Output — POSTPONED
 
 - Both PixInsight and Siril generate per-pixel rejection count maps (low/high).
-- Critical for diagnosing whether rejection parameters are too aggressive or too lenient.
-- PixInsight also generates a slope map for linear fit clipping.
+- Diagnostic only — does not affect stacking results. Nice-to-have for parameter tuning.
 - **Fix**: During `combine_mean`, track rejected counts. Return alongside combined value.
 
 ### ~~P2: Large-Stack Sorting Performance (N > 100)~~ — FIXED
