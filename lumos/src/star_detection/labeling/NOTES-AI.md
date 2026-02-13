@@ -380,27 +380,40 @@ For background refinement (background/mod.rs line 119-143), the same
 threshold mask + dilation sequence is used but with a different sigma
 threshold and larger dilation radius to create conservative object masks.
 
-## Critical Issues Found by Research
+## Issues Found by Research
 
-### P1: Radius-1 Dilation Before Labeling Is Harmful
-- **Location**: detect.rs line 115 -- `dilate_mask(&mask, 1, &mut dilated)`
-- Hardcoded, not configurable. Always applied before CCL.
-- **No standard tool** (SExtractor, DAOFIND, photutils, SEP) performs dilation before
-  labeling. This is unique to this implementation.
-- **Harm**: Merges star pairs within 2 pixels into single components. Inflates component
-  areas with background pixels. Contaminates flux and centroid measurements.
-- **Root cause**: Likely a workaround for 4-connectivity (default) missing diagonal
-  connections. The proper fix is 8-connectivity without dilation.
-- **Fix**: Remove the dilation, or gate behind a config flag defaulting to off.
+### ~~P1: Radius-1 Dilation Before Labeling~~ FIXED
+- Dilation was removed from detect.rs. No dilation is applied before CCL.
 
-### P1: Default 4-Connectivity Is Non-Standard
-- **Location**: config.rs -- default connectivity is 4-connected.
-- SExtractor, photutils, and SEP all default to **8-connectivity**.
-- 4-connectivity fragments stars whose above-threshold footprints touch only diagonally,
-  which is common for undersampled PSFs and near-threshold faint stars.
-- The config comment claims this "matches SExtractor behavior" -- this is **incorrect**.
-- **Fix**: Change default to 8-connectivity. This also eliminates the need for the
-  radius-1 dilation workaround.
+### ~~P1: Default 4-Connectivity Is Non-Standard~~ FIXED
+- Default changed to `Connectivity::Eight` (config.rs:273), matching SExtractor,
+  photutils, and SEP.
+
+### P1 (Safety): Unsafe Mutable Aliasing in mask_dilation
+- **Location**: mask_dilation/mod.rs lines 40-42 and 76-80
+- Both horizontal and vertical dilation passes create `*mut u64` from
+  `output.words().as_ptr() as *mut u64`, where `output.words()` returns `&[u64]`.
+- This creates a mutable raw pointer from a shared reference, which is undefined
+  behavior under Rust aliasing rules (violates `&T` immutability guarantee).
+- The SAFETY comments claim disjoint per-thread access, which addresses data races
+  but not the aliasing violation.
+- **Fix**: Get `*mut u64` before entering the parallel region via
+  `output.words_mut().as_mut_ptr()`, or restructure to use `&mut` slicing.
+
+### P2: AtomicUnionFind Capacity Overflow Silently Ignored
+- **Location**: labeling/mod.rs line 731-735
+- `make_set()` uses `fetch_add(1)` and checks `if (label as usize) <= self.parent.len()`.
+  If capacity is exceeded, the label is returned without being stored in the parent array.
+- Subsequent `find()` calls on this label would access out-of-bounds memory or return
+  garbage. Pre-allocation at 5% of pixel count (line 408) is generous but not guaranteed.
+- **Fix**: Either panic on overflow (assert), or grow the parent array.
+
+### P3: No Path Compression in AtomicUnionFind::find
+- **Location**: labeling/mod.rs lines 739-752
+- The atomic `find()` chases parent pointers without path compression.
+- Sequential `UnionFind` does full path compression (lines 628-663).
+- For typical astronomical masks (few large components), this is not a bottleneck.
+- Path compression with atomics requires CAS loops and is complex to implement correctly.
 
 ### P3: Missing SExtractor Cleaning Pass
 - SExtractor applies a cleaning pass that removes spurious detections near bright star

@@ -201,6 +201,19 @@ for correct noise statistics during convolution. Matches SExtractor, DAOFIND, an
 - DAOFIND kernel: `K = (G - mean(G)) / (sum(G^2) - sum(G)^2/N)` where G is a truncated
   Gaussian. The output is in density-enhancement units (least-squares Gaussian amplitude).
 
+### P2: No Variance Map Convolution for Non-Uniform Noise
+- The output normalization `/ sqrt(sum(K^2))` assumes uniform noise across the image.
+- For images with spatially varying noise (mosaics, vignetted fields, bad columns),
+  SExtractor convolves the variance map alongside the image: `conv_var = conv(K^2, var)`.
+  The detection threshold becomes `filtered[px] > sigma * sqrt(conv_var[px])`.
+- SEP's full matched filter: `T = sum(K*D/var) / sqrt(sum(K^2/var))` handles per-pixel
+  variance explicitly.
+- **Impact**: Low for typical astrophotography (uniform flat-fielded subs). Higher for
+  mosaics or images with strong vignetting gradients.
+- **Fix**: Add optional variance map input. If provided, convolve `K^2` with the variance
+  map and use `sqrt(conv_var)` as the local noise normalization instead of the global
+  `sqrt(sum(K^2))`.
+
 ### P3: Column Convolution Not Parallelized
 - `convolve_cols_direct()` (simd/mod.rs:133-168 -> sse.rs:140-185) processes all rows
   sequentially in a single thread. Row convolution uses `par_chunks_mut()`.

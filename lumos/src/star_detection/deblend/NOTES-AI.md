@@ -213,6 +213,21 @@ stacking where the current algorithms operate.
 7. **Robust edge handling**: PixelGrid wrapping_sub border handles coordinate-0 pixels
    correctly (regression test L1204-1245).
 
+## Bugs
+
+### P2: PixelGrid Generation Counter Wrap-to-Zero Not Guarded
+- **Location**: multi_threshold/mod.rs line 104
+- `PixelGrid::reset_with_pixels` increments `current_generation` via `wrapping_add(1)`
+  but does NOT check if it wraps to 0. Generation 0 is the sentinel meaning "unset",
+  so wrapping to 0 would cause all grid cells to appear valid (matching generation 0
+  stored at initialization), producing phantom pixels or incorrect BFS results.
+- `NodeGrid::reset_with_pixels` (line 233-236) correctly adds the guard:
+  `if self.current_generation == 0 { self.current_generation = 1; }`
+- **Trigger**: After `u32::MAX` resets (~4 billion). In practice, with ~32 threshold
+  levels and ~10000 components per frame, this would take ~13,400 frames. Unlikely
+  but possible in long video sessions.
+- **Fix**: Add the same guard as NodeGrid: `if self.current_generation == 0 { self.current_generation = 1; }`
+
 ## Weaknesses and Potential Improvements
 
 ### W1: Voronoi Pixel Assignment Instead of Flux-Weighted

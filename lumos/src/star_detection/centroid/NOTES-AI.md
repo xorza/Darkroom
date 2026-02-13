@@ -207,6 +207,17 @@ NEON gives 2x. Fused normal equations avoid Jacobian allocation.
 - GaussianFit provides sigma_x/sigma_y, MoffatFit provides alpha/beta, but only
   position (x0, y0) is used. FWHM and eccentricity recomputed from second moments.
 
+### LOW-MEDIUM: No Formal Parameter Uncertainties from Covariance Matrix
+- The L-M optimizer converges to best-fit parameters but does not compute the
+  covariance matrix `C = (J^T J)^{-1} * chi2 / (n - p)` at convergence.
+- Standard practice (MINPACK, scipy, DAOPHOT) is to invert the Hessian at the
+  solution to provide 1-sigma uncertainties on each parameter.
+- The Hessian (J^T J) is already available at convergence -- inverting a 5x5 or
+  6x6 matrix is trivial (~1 microsecond).
+- Would enable per-star position uncertainty estimates for downstream weighting
+  in image registration (e.g., weight by 1/sigma_pos^2).
+- Not critical for current centroid-only use case but valuable for photometry.
+
 ### LOW: Sharpness and Roundness Differ from DAOFIND
 - Already documented in top-level NOTES-AI.md P2.
 - Functionally different metrics, not transferable to published DAOFIND thresholds.
