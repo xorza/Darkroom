@@ -26,9 +26,13 @@ use crate::math::fwhm_to_sigma;
 
 /// Apply matched filter convolution optimized for star detection.
 ///
-/// This convolves the background-subtracted image with a Gaussian kernel
-/// matching the expected PSF. The result is normalized to preserve flux
-/// and can be directly thresholded.
+/// Convolves the background-subtracted image with a Gaussian kernel matching
+/// the expected PSF. The output is normalized by `sqrt(sum(K^2))` so that the
+/// noise level in the convolved image matches the original noise map. This
+/// means the existing threshold `filtered[px] > sigma * noise[px]` is correct.
+///
+/// Follows the SEP matched filter approach (Barbary 2016):
+/// `SNR = conv(D, K) / (sigma * sqrt(sum(K^2)))`
 ///
 /// Supports elliptical PSF shapes for stars elongated due to tracking errors,
 /// field rotation, or optical aberrations. For circular PSFs, use `axis_ratio = 1.0`.
@@ -63,19 +67,43 @@ pub fn matched_filter(
         "Axis ratio must be in (0, 1]"
     );
 
-    // Subtract background first (parallel) - reuse scratch buffer to avoid allocation
+    // Subtract background (parallel) - allow negative residuals for correct
+    // noise statistics during convolution (no clipping)
     subtraction_scratch
         .pixels_mut()
         .par_iter_mut()
         .zip(pixels.pixels().par_iter())
         .zip(background.pixels().par_iter())
         .for_each(|((out, &px), &bg)| {
-            *out = (px - bg).max(0.0);
+            *out = px - bg;
         });
 
     // Convolve with elliptical Gaussian kernel
     let sigma = fwhm_to_sigma(fwhm);
+
+    // Compute noise normalization factor: sqrt(sum(K^2))
+    // For separable kernel: sum_2d(K^2) = sum_1d(K^2)^2
+    let noise_norm = if (axis_ratio - 1.0).abs() < 0.01 {
+        let kernel_1d = gaussian_kernel_1d(sigma);
+        let sum_k_sq: f32 = kernel_1d.iter().map(|&k| k * k).sum();
+        (sum_k_sq * sum_k_sq).sqrt()
+    } else {
+        let (kernel_2d, _) = elliptical_gaussian_kernel_2d(sigma, axis_ratio, angle);
+        let sum_k_sq: f32 = kernel_2d.iter().map(|&k| k * k).sum();
+        sum_k_sq.sqrt()
+    };
+
     elliptical_gaussian_convolve(subtraction_scratch, sigma, axis_ratio, angle, output, temp);
+
+    // Normalize output so noise matches original noise map.
+    // After convolution: conv_noise = orig_noise * sqrt(sum(K^2))
+    // After division: normalized_noise = orig_noise
+    // So threshold `filtered[px] > sigma * noise[px]` uses the correct noise.
+    let inv_norm = 1.0 / noise_norm;
+    output
+        .pixels_mut()
+        .par_iter_mut()
+        .for_each(|px| *px *= inv_norm);
 }
 
 // ============================================================================

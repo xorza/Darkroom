@@ -398,7 +398,7 @@ fn test_matched_filter_boosts_snr() {
 }
 
 #[test]
-fn test_matched_filter_clips_negative() {
+fn test_matched_filter_preserves_negative_residuals() {
     let width = 16;
     let height = 16;
     let background = Buffer2::new(width, height, vec![0.5f32; width * height]);
@@ -418,10 +418,85 @@ fn test_matched_filter_clips_negative() {
         &mut temp,
     );
 
-    // Should be clipped to zero before convolution
+    // Negative residuals are preserved for correct noise statistics.
+    // Uniform below-background input should produce negative convolved output.
     for &v in result.iter() {
-        assert!(v >= 0.0, "Negative values should be clipped");
+        assert!(
+            v < 0.0,
+            "Below-background pixels should produce negative output"
+        );
     }
+}
+
+#[test]
+fn test_matched_filter_noise_normalization() {
+    use rand::prelude::*;
+
+    // After noise normalization, the standard deviation of the output on a
+    // pure-noise image should approximately match the input noise level.
+    // This verifies the sqrt(sum(K^2)) normalization is correct.
+    let width = 256;
+    let height = 256;
+    let bg_level = 1000.0f32;
+    let noise_sigma = 10.0f32;
+
+    // Generate spatially uncorrelated Gaussian noise via Box-Muller
+    let mut rng = StdRng::seed_from_u64(42);
+    let mut pixels = vec![bg_level; width * height];
+    for chunk in pixels.chunks_mut(2) {
+        let u1: f32 = rng.random_range(1e-10f32..1.0);
+        let u2: f32 = rng.random_range(0.0f32..1.0);
+        let r = (-2.0 * u1.ln()).sqrt() * noise_sigma;
+        let theta = 2.0 * std::f32::consts::PI * u2;
+        chunk[0] += r * theta.cos();
+        if chunk.len() > 1 {
+            chunk[1] += r * theta.sin();
+        }
+    }
+
+    let background = Buffer2::new(width, height, vec![bg_level; width * height]);
+    let pixels = Buffer2::new(width, height, pixels);
+    let mut result = Buffer2::new_default(width, height);
+    let mut scratch = Buffer2::new_default(width, height);
+    let mut temp = Buffer2::new_default(width, height);
+
+    let fwhm = 4.0;
+    matched_filter(
+        &pixels,
+        &background,
+        fwhm,
+        1.0,
+        0.0,
+        &mut result,
+        &mut scratch,
+        &mut temp,
+    );
+
+    // Compute standard deviation of output (excluding border region affected by mirror)
+    let margin = 10;
+    let mut sum = 0.0f64;
+    let mut sum_sq = 0.0f64;
+    let mut count = 0usize;
+    for y in margin..height - margin {
+        for x in margin..width - margin {
+            let v = result[y * width + x] as f64;
+            sum += v;
+            sum_sq += v * v;
+            count += 1;
+        }
+    }
+    let mean = sum / count as f64;
+    let variance = sum_sq / count as f64 - mean * mean;
+    let output_sigma = variance.sqrt();
+
+    // After normalization, output noise should be close to input noise.
+    // Allow 30% tolerance for finite-sample and boundary effects.
+    let ratio = output_sigma / noise_sigma as f64;
+    assert!(
+        (0.7..1.3).contains(&ratio),
+        "Output noise should match input noise after normalization. \
+         ratio={ratio:.3}, output_sigma={output_sigma:.2}, input_sigma={noise_sigma}"
+    );
 }
 
 // ============================================================================

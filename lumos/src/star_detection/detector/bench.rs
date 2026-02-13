@@ -34,7 +34,7 @@ fn bench_detect_6k_globular_cluster(b: ::bench::Bencher) {
         sigma_clip_iterations: 5,
         refinement: BackgroundRefinement::Iterative { iterations: 2 },
         // Detection
-        connectivity: Connectivity::Four,
+        connectivity: Connectivity::Eight,
         // Region filtering
         min_area: 5,
         max_area: 500,

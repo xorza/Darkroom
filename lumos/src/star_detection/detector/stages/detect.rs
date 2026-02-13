@@ -17,7 +17,7 @@ use crate::star_detection::deblend::{
     ComponentData, DeblendBuffers, deblend_local_maxima, deblend_multi_threshold,
 };
 use crate::star_detection::labeling::LabelMap;
-use crate::star_detection::mask_dilation::dilate_mask;
+
 use crate::star_detection::threshold_mask::{
     create_threshold_mask, create_threshold_mask_filtered,
 };
@@ -106,16 +106,7 @@ pub(crate) fn detect(
         );
     }
 
-    // Count pixels above threshold before dilation
     let pixels_above_threshold = mask.count_ones();
-
-    // Dilate mask to connect nearby pixels
-    let mut dilated = pool.acquire_bit();
-    dilated.fill(false);
-    dilate_mask(&mask, 1, &mut dilated);
-    std::mem::swap(&mut mask, &mut dilated);
-
-    pool.release_bit(dilated);
 
     let label_map = LabelMap::from_pool(&mask, config.connectivity, pool);
     let connected_components = label_map.num_labels();

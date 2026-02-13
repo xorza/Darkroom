@@ -17,13 +17,11 @@ pub enum Connectivity {
     /// 4-connectivity: only horizontal and vertical neighbors.
     /// Pixels at (x±1, y) and (x, y±1) are connected.
     /// Diagonal pixels are NOT connected.
-    /// This is the default and matches SExtractor behavior.
-    #[default]
     Four,
     /// 8-connectivity: includes diagonal neighbors.
     /// All 8 surrounding pixels are connected.
-    /// Better for undersampled PSFs or elongated sources,
-    /// but may merge close star pairs more aggressively.
+    /// This is the default, matching SExtractor, photutils, and SEP.
+    #[default]
     Eight,
 }
 
@@ -272,7 +270,7 @@ impl Default for Config {
 
             // Detection
             sigma_threshold: 4.0,
-            connectivity: Connectivity::Four,
+            connectivity: Connectivity::Eight,
 
             // PSF / matched filter
             expected_fwhm: 4.0,

@@ -23,8 +23,9 @@ See submodule NOTES-AI.md files for detailed per-module analysis:
    iterative refinement with source masking and dilation
 3. **fwhm** - Auto-estimation from bright stars (2x sigma first-pass, MAD outlier rejection)
    or manual FWHM, or disabled (no matched filter)
-4. **detect** - Optional matched filter convolution, threshold mask creation, radius-1
-   dilation, CCL (RLE + union-find), deblending, size/edge filtering
+4. **detect** - Optional matched filter convolution (noise-normalized output),
+   threshold mask creation, CCL with 8-connectivity (RLE + union-find), deblending,
+   size/edge filtering
 5. **measure** - Parallel centroid computation (weighted moments + optional Gaussian/Moffat
    L-M fitting), quality metrics (flux, FWHM, eccentricity, SNR, sharpness, roundness,
    L.A.Cosmic Laplacian SNR)
@@ -66,32 +67,17 @@ See submodule NOTES-AI.md files for detailed per-module analysis:
 
 ## Issues vs Industry Standards
 
-### P1: Matched Filter Noise Not Scaled After Convolution -- CRITICAL
-- **File**: detector/stages/detect.rs:95-98, convolution/mod.rs:73
-- After convolution with normalized Gaussian kernel (sum=1.0), noise is reduced by
-  `sqrt(sum(K^2))`. Threshold mask uses the **original** unconvolved noise map.
-- For FWHM=4px, `sqrt(sum(K^2))` ~ 0.117. Effective threshold is **~8.5x** too high.
-  A configured 3.0 sigma behaves like **25.5 sigma**. Only very bright stars detected.
-- SEP matched filter: `SNR = conv(D,K) / (sigma * sqrt(sum(K^2)))` -- output in SNR units.
-- DAOFIND: `threshold_eff = threshold * relerr` where `relerr = 1/sqrt(sum(K^2))`.
-- **Fix**: Divide convolved output by `sqrt(sum(K_1d^2)^2)` (SEP approach). See
-  convolution/NOTES-AI.md for implementation details.
+### ~~P1: Matched Filter Noise Not Scaled After Convolution~~ FIXED
+- **Fix applied**: `matched_filter()` now divides convolved output by `sqrt(sum(K^2))`
+  (SEP approach). Output noise matches original noise map. Threshold comparison is correct.
+- Also removed negative clipping (`.max(0.0)`) before convolution — negative residuals
+  are preserved for correct noise statistics.
 
-### P1: Hardcoded Radius-1 Dilation Before Labeling
-- **File**: detector/stages/detect.rs:112-118
-- Always dilates mask by 1 pixel before CCL, not configurable.
-- **No standard tool** (SExtractor, DAOFIND, photutils, SEP) performs dilation before
-  labeling. This is unique to this implementation.
-- Merges star pairs within 2 pixels, inflates component areas, contaminates centroids.
-- **Fix**: Remove entirely. Use 8-connectivity instead (see next issue).
+### ~~P1: Hardcoded Radius-1 Dilation Before Labeling~~ FIXED
+- Removed dilation entirely from detect stage. Was a workaround for 4-connectivity.
 
-### P1: Default 4-Connectivity Is Non-Standard
-- **File**: config.rs -- default connectivity is 4-connected.
-- SExtractor, photutils, and SEP all default to **8-connectivity**.
-- 4-connectivity fragments above-threshold footprints that touch only diagonally.
-- The config comment claiming "matches SExtractor" is **incorrect**.
-- **Fix**: Change default to 8-connectivity. This eliminates the need for dilation.
-- **Note**: The dilation was likely a workaround for 4-connectivity missing diagonals.
+### ~~P1: Default 4-Connectivity Is Non-Standard~~ FIXED
+- Default changed to 8-connectivity, matching SExtractor, photutils, and SEP.
 
 ### P2: L.A.Cosmic Missing Fine Structure Ratio -- HIGH IMPACT
 - **File**: centroid/mod.rs (Laplacian SNR computation)
@@ -103,12 +89,8 @@ See submodule NOTES-AI.md files for detailed per-module analysis:
   signal (high ratio), while stars have proportional surrounding signal (low ratio).
 - **Fix**: Compute median-filtered Laplacian, divide. Threshold at ~2.0 per paper.
 
-### P2: Negative Clipping Before Convolution
-- **File**: convolution/mod.rs:73 -- `(px - bg).max(0.0)`
-- Neither SExtractor, DAOFIND, nor SEP clip negatives before convolution.
-- Biases convolved image upward by ~0.798*sigma. Once P1 noise scaling is fixed, this
-  bias becomes proportionally larger.
-- **Fix**: Remove `.max(0.0)`.
+### ~~P2: Negative Clipping Before Convolution~~ FIXED
+- Removed `.max(0.0)` in `matched_filter()`. Fixed together with P1 noise scaling.
 
 ### P2: Background Uses Sigma-Clipped Median, Not Mode/Biweight
 - **File**: background/tile_grid.rs, compute_tile_stats
@@ -172,13 +154,11 @@ See submodule NOTES-AI.md files for detailed per-module analysis:
 ## Cross-Cutting Summary
 
 ### Most Impactful Fixes (ordered by expected improvement)
-1. **Fix noise scaling** (P1) -- currently only detecting very bright stars. Single
-   scalar division on convolved output. Expected: 5-10x more stars detected.
-2. **Remove dilation + fix connectivity** (P1) -- remove radius-1 dilation, change
-   default to 8-connectivity. Prevents merging close pairs, cleaner components.
-3. **Add L.A.Cosmic fine structure ratio** (P2) -- prevents misclassifying bright star
+1. ~~**Fix noise scaling** (P1)~~ **DONE** — matched_filter output normalized by sqrt(sum(K^2)).
+2. ~~**Remove dilation + fix connectivity** (P1)~~ **DONE** — dilation removed, default 8-connectivity.
+3. ~~**Remove negative clipping** (P2)~~ **DONE** — fixed together with noise scaling.
+4. **Add L.A.Cosmic fine structure ratio** (P2) -- prevents misclassifying bright star
    peaks as cosmic rays. Compute median-filtered Laplacian, divide.
-4. **Remove negative clipping** (P2) -- remove `.max(0.0)` before convolution.
 5. **Mode estimator for background** (P2) -- SExtractor mode formula, ~5 lines of code.
 
 ### What We Do Well vs Industry
@@ -203,8 +183,8 @@ See submodule NOTES-AI.md files for detailed per-module analysis:
 - **Isophotal/Kron photometry** -- NOT NEEDED for registration
 
 ### Consistency Issues Across Modules
-- Dilation + 4-connectivity is an inconsistent workaround; fix is 8-connectivity alone
-- Matched filter output not in proper units, affecting all downstream thresholding
+- ~~Dilation + 4-connectivity~~ **FIXED** — dilation removed, 8-connectivity default
+- ~~Matched filter output not in proper units~~ **FIXED** — noise-normalized output
 - Quality metrics (sharpness, roundness) use custom definitions but config defaults
   and documentation reference DAOFIND ranges, which don't apply
 - L.A.Cosmic implementation is incomplete (missing fine structure ratio)

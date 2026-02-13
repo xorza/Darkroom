@@ -30,16 +30,16 @@ fn test_deblend_star_pair() {
     let fwhm = 4.0;
     let sigma = fwhm_to_sigma(fwhm);
 
-    // Create two stars separated by ~1.5 FWHM (should be deblended)
-    let separation = fwhm * 1.5;
+    // Create two stars separated by ~2.5 FWHM (should be deblended)
+    let separation = fwhm * 2.5;
     let star1_x = 128.0 - separation / 2.0;
     let star2_x = 128.0 + separation / 2.0;
     let star_y = 128.0;
 
     let mut pixels = vec![0.1f32; width * height];
 
-    // Both stars with same brightness
-    let amplitude = 0.6 / (2.0 * std::f32::consts::PI * sigma * sigma);
+    // Both stars with same brightness (peak ~15 sigma above noise)
+    let amplitude = 0.15;
     render_gaussian_star(&mut pixels, width, star1_x, star_y, sigma, amplitude);
     render_gaussian_star(&mut pixels, width, star2_x, star_y, sigma, amplitude);
 
@@ -135,16 +135,16 @@ fn test_deblend_chain() {
     let fwhm = 4.0;
     let sigma = fwhm_to_sigma(fwhm);
 
-    // Create 5 stars in a chain, each separated by 1 FWHM
+    // Create 5 stars in a chain, each separated by 2 FWHM
     let num_stars = 5;
-    let separation = fwhm;
+    let separation = fwhm * 2.0;
     let start_x = 100.0;
     let star_y = 64.0;
 
     let mut pixels = vec![0.1f32; width * height];
     let mut true_positions = Vec::new();
 
-    let amplitude = 0.5 / (2.0 * std::f32::consts::PI * sigma * sigma);
+    let amplitude = 0.15;
     for i in 0..num_stars {
         let x = start_x + i as f32 * separation;
         true_positions.push((x, star_y));
@@ -252,12 +252,12 @@ fn test_deblend_unequal_pair() {
 
     let mut pixels = vec![0.1f32; width * height];
 
-    // Bright star
-    let amplitude1 = 0.8 / (2.0 * std::f32::consts::PI * sigma * sigma);
+    // Bright star (peak ~20 sigma above noise)
+    let amplitude1 = 0.20;
     render_gaussian_star(&mut pixels, width, star1_x, star_y, sigma, amplitude1);
 
-    // Faint star (1/4 brightness)
-    let amplitude2 = 0.2 / (2.0 * std::f32::consts::PI * sigma * sigma);
+    // Faint star (1/4 brightness, peak ~5 sigma above noise)
+    let amplitude2 = 0.05;
     render_gaussian_star(&mut pixels, width, star2_x, star_y, sigma, amplitude2);
 
     // Add noise

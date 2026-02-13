@@ -22,12 +22,15 @@ SNR for faint point sources. Supports circular (separable, O(n*k)) and elliptica
 
 ## Public API
 
-### `matched_filter()` (mod.rs:45-79)
+### `matched_filter()` (mod.rs:45-110)
 Entry point for the detection pipeline. Steps:
-1. **Background subtraction** (line 67-74): `(pixels - background).max(0.0)` in parallel.
-   Clips negative values to zero.
-2. **FWHM to sigma** (line 77): `sigma = fwhm / 2.35482`
-3. **Convolution** (line 78): Dispatches to `elliptical_gaussian_convolve()`.
+1. **Background subtraction** in parallel. Negative residuals preserved (no clipping).
+2. **FWHM to sigma**: `sigma = fwhm / 2.35482`
+3. **Noise normalization factor**: `sqrt(sum(K^2))` computed from kernel. For separable
+   kernels: `sqrt(sum_1d(K^2)^2) = sum_1d(K^2)`. For 2D elliptical: `sqrt(sum_2d(K^2))`.
+4. **Convolution**: Dispatches to `elliptical_gaussian_convolve()`.
+5. **Output normalization**: Divides by `sqrt(sum(K^2))` so output noise matches original
+   noise map. Follows SEP matched filter approach (Barbary 2016).
 
 Parameters: `pixels`, `background`, `fwhm`, `axis_ratio` (1.0=circular), `angle` (radians),
 `output`, `subtraction_scratch`, `temp`.
@@ -123,13 +126,12 @@ Three dispatch points, each with runtime CPU detection:
 | Negative wings | No (for standard conv filters) | No (same) |
 | Separable | No (always 2D convolution) | Yes for circular, 2D for elliptical |
 | Edge handling | Zero-pad ("virtual pixels set to zero") | Mirror/reflect boundary |
-| Noise after conv | **Convolves variance map with squared kernel** | **Does not scale noise map (BUG - see Issues)** |
+| Noise after conv | **Convolves variance map with squared kernel** | **Divides output by sqrt(sum(K^2))** (FIXED) |
 | Filter flexibility | Any user-supplied filter file | Fixed Gaussian shape |
 
-**Key difference**: SExtractor convolves the variance map alongside the image to maintain
-correct noise scaling. This implementation uses the unconvolved noise map for thresholding,
-which makes the effective threshold ~6-7x too high for typical FWHM values. See P1 issue
-in parent NOTES-AI.md.
+**Key difference**: SExtractor convolves the variance map alongside the image. This
+implementation instead divides the convolved output by `sqrt(sum(K^2))`, which is
+equivalent for uniform noise and simpler to implement.
 
 ### vs DAOFIND / photutils DAOStarFinder (Stetson 1987)
 
@@ -137,7 +139,7 @@ in parent NOTES-AI.md.
 |--------|---------|-------------------|
 | Kernel shape | Lowered Gaussian (zero-sum, negative wings) | Pure Gaussian (sum=1, no negative wings) |
 | Background handling | Kernel implicitly subtracts local background | Explicit background subtraction before convolution |
-| Noise correction | `threshold_eff = threshold * kernel.relerr` where `relerr = 1/sqrt(sum(K^2) - sum(K)^2/N)` | **No noise correction (BUG)** |
+| Noise correction | `threshold_eff = threshold * kernel.relerr` where `relerr = 1/sqrt(sum(K^2) - sum(K)^2/N)` | Output / sqrt(sum(K^2)) (FIXED) |
 | Edge handling | Zero-pad | Mirror/reflect |
 | Convolution output | Density enhancement (fits Gaussian amplitude) | Smoothed image (preserves flux) |
 | Separable | No (2D kernel with mask) | Yes for circular |
@@ -175,64 +177,20 @@ Correct for circular Gaussians only. The implementation properly falls back to f
 for elliptical kernels (axis_ratio < 0.99). Complexity reduction: O(n*k) vs O(n*k^2),
 typically 5-10x faster for FWHM=4px (kernel size 13).
 
-### Negative Value Clipping (mod.rs:73)
-Background subtraction clips to zero: `(px - bg).max(0.0)`. This is non-standard:
-- SExtractor does not clip negative residuals before convolution.
-- Clipping removes negative noise fluctuations, biasing the convolved image upward.
-- Impact: Faint stars near background level may have asymmetric noise response.
-- However, for the purpose of detecting positive peaks, this is conservative and avoids
-  negative-going artifacts in the convolved image.
+### ~~Negative Value Clipping~~ REMOVED
+Previously clipped to zero: `(px - bg).max(0.0)`. Now preserves negative residuals
+for correct noise statistics during convolution. Matches SExtractor, DAOFIND, and SEP.
 
 ## Known Issues
 
-### P1: Noise Map Not Scaled After Convolution -- CRITICAL, CONFIRMED
-- **Location**: Called from `detector/stages/detect.rs:95-98`
-- After convolution with kernel K (sum=1), noise variance at each pixel becomes
-  `sigma_conv^2 = sigma^2 * sum(K_i^2)`. The threshold mask compares `filtered[px]`
-  against `sigma_threshold * noise[px]` using the **original** noise map.
-- For a Gaussian kernel with FWHM=4px (sigma~1.7), `sqrt(sum(K^2))` ~ 0.117,
-  so the effective sigma threshold is **~8.5x** higher than configured.
-  A configured threshold of 3.0 sigma behaves like **25.5 sigma**.
-- Only very bright stars are detected. This is the dominant bug in the pipeline.
+### ~~P1: Noise Map Not Scaled After Convolution~~ FIXED
+- `matched_filter()` now divides output by `sqrt(sum(K^2))`, following the SEP approach.
+  For separable kernels: `norm = sum_1d(K^2)`. For 2D: `norm = sqrt(sum_2d(K^2))`.
+- Output noise matches the original noise map, so `filtered[px] > sigma * noise[px]`
+  gives correct threshold behavior.
 
-**SEP matched filter formula** (the gold standard):
-```
-SNR = S^T C^{-1} D / sqrt(S^T C^{-1} S)
-```
-For uniform noise (C = sigma^2 * I), this simplifies to:
-```
-SNR = convolution(D, K) / (sigma * sqrt(sum(K^2)))
-```
-The output is directly in SNR units (number of standard deviations above background).
-
-**DAOFIND equivalent**: Uses `threshold_eff = threshold * relerr` where
-`relerr = 1/sqrt(sum(K^2) - sum(K)^2/N)`. For a zero-sum kernel sum(K)=0,
-this reduces to `1/sqrt(sum(K^2))`.
-
-**Recommended fix (Option A -- SEP approach)**: Divide the convolved output by
-`sqrt(sum(K_1d^2)^2)` for separable kernels. This is a single scalar computed
-from the kernel, applied as a division over the output array. Can be done in-place
-in the existing parallel loop. Converts output to SNR units.
-```rust
-let k_sq_sum: f32 = kernel.iter().map(|&k| k * k).sum();
-let norm = (k_sq_sum * k_sq_sum).sqrt(); // separable: 2D sum(K^2) = (1D sum)^2
-// divide output[] by norm
-```
-
-Alternative fixes:
-- (b) Multiply sigma threshold by `sqrt(sum(K^2))` -- less intuitive, FWHM-dependent
-- (c) Convolve variance map with K^2 -- correct for variable noise, doubles cost
-
-### P2: Negative Value Clipping Before Convolution
-- **Location**: mod.rs:73 -- `*out = (px - bg).max(0.0)`
-- Neither SExtractor, DAOFIND, nor SEP clip negative values before convolution.
-- Clipping removes negative noise fluctuations, biasing the convolved image upward by
-  ~0.798*sigma (= sigma * sqrt(2/pi)) for Gaussian noise.
-- For bright stars (SNR >> 1), negligible. For faint stars near threshold, creates
-  asymmetric noise response and an elevated noise floor.
-- **Impact**: The positive bias partially compensates for P1 (by coincidence). Once P1 is
-  fixed, this bias becomes proportionally larger and should be addressed.
-- **Fix**: Remove `.max(0.0)`. Allow negative residuals through convolution.
+### ~~P2: Negative Value Clipping Before Convolution~~ FIXED
+- Removed `.max(0.0)` clipping. Negative residuals preserved for correct noise statistics.
 
 ### P3: No Support for DAOFIND-style Zero-Sum Kernel
 - The Gaussian kernel sums to 1.0, not 0.0. This means the convolution does not perform
@@ -273,11 +231,12 @@ Alternative fixes:
 - Non-square images, small images
 - Separable vs direct 2D equivalence
 
-### Matched Filter Tests (tests.rs:275-425)
+### Matched Filter Tests (tests.rs:275-500)
 - Background subtraction (flat field -> ~0)
 - Star detection (positive peak at star center)
 - SNR boost (peak location correct with noise)
-- Negative clipping (below-background -> non-negative output)
+- Negative residual preservation (below-background -> negative output)
+- Noise normalization (output noise matches input noise with proper RNG)
 
 ### Elliptical Tests (tests.rs:481-723)
 - Kernel normalization, symmetry at angle=0, elongation verification
