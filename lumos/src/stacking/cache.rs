@@ -607,17 +607,26 @@ fn write_channel_cache_file(path: &Path, channel_data: &[f32]) -> Result<(), Err
 }
 
 /// Open and memory-map a channel cache file.
+/// Advises the OS for sequential access (the stacking pipeline reads row-by-row).
 fn mmap_channel_file(channel_path: PathBuf) -> Result<Mmap, Error> {
     let file = File::open(&channel_path).map_err(|e| Error::OpenCacheFile {
         path: channel_path.clone(),
         source: e,
     })?;
-    unsafe {
+    let mmap = unsafe {
         Mmap::map(&file).map_err(|e| Error::MmapCacheFile {
             path: channel_path,
             source: e,
-        })
+        })?
+    };
+
+    #[cfg(unix)]
+    {
+        use memmap2::Advice;
+        let _ = mmap.advise(Advice::Sequential);
     }
+
+    Ok(mmap)
 }
 
 /// Load an image and cache it, or reuse existing cache files if valid.

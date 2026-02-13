@@ -122,13 +122,10 @@ Rewritten to match PixInsight/Siril two-phase algorithm:
   before reuse. Cleanup removes `.meta` files alongside channel caches.
 - Test: `test_source_meta_validates_mtime`
 
-### P3: Cache -- Missing madvise(MADV_SEQUENTIAL)
-
-- **File**: cache.rs, `mmap_channel_file`
-- Memory-mapped files are accessed sequentially (chunk by chunk), but no madvise hint.
-- `MADV_SEQUENTIAL` enables kernel read-ahead and early page release.
-- `memmap2::Mmap::advise(Advice::Sequential)` is a single-line addition.
-- **Fix**: Add `.advise(Advice::Sequential)` after mmap creation.
+### ~~P3: Cache -- Missing madvise(MADV_SEQUENTIAL)~~ — FIXED
+- Added `mmap.advise(Advice::Sequential)` after mmap creation in `mmap_channel_file`.
+  Gated with `#[cfg(unix)]`. Enables kernel read-ahead and early page release for
+  the sequential row-by-row access pattern used during stacking.
 
 ### P3: Missing Frame-Type-Specific Presets
 
@@ -270,7 +267,7 @@ Rewritten to match PixInsight/Siril two-phase algorithm:
 5. **Add noise-based auto weighting** (P2) -- `w = 1/sigma_bg^2`. Highest-impact
    automatic weighting scheme. Requires reliable background noise estimator.
 6. ~~**Fix cache hash determinism**~~ (P3) -- **FIXED**: FNV-1a hasher.
-7. **Add madvise(MADV_SEQUENTIAL)** (P3) -- single-line change for disk-backed perf.
+7. ~~**Add madvise(MADV_SEQUENTIAL)**~~ (P3) -- **FIXED**: `Advice::Sequential` on mmap.
 8. **Add frame-type presets** (P3) -- `bias()`, `dark()`, `flat()`, `light()`.
 
 ## Test Coverage
