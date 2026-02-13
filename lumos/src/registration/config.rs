@@ -196,7 +196,7 @@ impl Config {
             transform_type: TransformType::Homography,
             max_stars: 500,
             min_matches: 20,
-            ratio_tolerance: 0.005,
+            ratio_tolerance: 0.02,
             ransac_iterations: 5000,
             confidence: 0.9999,
             sip_enabled: true,
@@ -233,11 +233,17 @@ impl Config {
             self.max_stars,
             self.min_stars
         );
+        // Auto can upgrade to Homography (needs 4 points), so validate against that
+        let required_points = if self.transform_type == TransformType::Auto {
+            TransformType::Homography.min_points()
+        } else {
+            self.transform_type.min_points()
+        };
         assert!(
-            self.min_matches >= self.transform_type.min_points(),
+            self.min_matches >= required_points,
             "min_matches ({}) must be >= transform minimum points ({})",
             self.min_matches,
-            self.transform_type.min_points()
+            required_points
         );
         assert!(
             self.ratio_tolerance > 0.0 && self.ratio_tolerance < 1.0,
@@ -370,7 +376,7 @@ mod tests {
         assert_eq!(config.transform_type, TransformType::Homography);
         assert_eq!(config.max_stars, 500);
         assert_eq!(config.min_matches, 20);
-        assert!((config.ratio_tolerance - 0.005).abs() < 1e-10);
+        assert!((config.ratio_tolerance - 0.02).abs() < 1e-10);
         assert_eq!(config.ransac_iterations, 5000);
         assert!((config.confidence - 0.9999).abs() < 1e-10);
         assert!(config.sip_enabled);

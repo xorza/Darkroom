@@ -48,28 +48,9 @@ See submodule NOTES-AI.md files for detailed per-module analysis:
    ones scatter), but requires ~3x more triangles than necessary.
    **Fix:** Reorder `indices` by geometric role in `from_positions()`.
 
-2. **LO-RANSAC runs on every hypothesis** (moderate, performance)
-   `ransac/mod.rs:310` — LO triggers when `inlier_buf.len() >= min_samples`,
-   not just on new-best models. Standard LO-RANSAC and OpenCV run LO only on
-   new best. Wastes significant computation.
-   **Fix:** Add `score > best_score` check before LO.
-
-3. **`precise_wide_field` ratio_tolerance is inverted** (config bug)
-   `config.rs:199` — `ratio_tolerance: 0.005` is *tighter* than default 0.01.
-   For wide-field images with more distortion, it should be *looser* (0.02-0.03).
-
-4. **Auto validation vs min_matches** (config bug)
-   `config.rs:237` — When `transform_type == Auto`, `min_points()` returns 2
-   (Similarity), but Auto can upgrade to Homography (needs 4). A `min_matches`
-   of 3 passes validation but would be insufficient for Homography.
-
 ### Dead Code / Unused Config
 
-5. **SIP sigma-clipping fields declared but never used**
-   `distortion/sip/mod.rs:66-71` — `SipConfig.clip_sigma` and `clip_iterations`
-   exist with defaults but `fit_from_transform` never uses them. False API promise.
-
-6. **Interpolation config fields never wired up**
+2. **Interpolation config fields never wired up**
    `config.rs:108-112` — `border_value`, `normalize_kernel`, `clamp_output` are
    defined but never passed to `warp_image()`. Either implement or remove.
 
@@ -106,7 +87,7 @@ See submodule NOTES-AI.md files for detailed per-module analysis:
 | RANSAC scoring | MAGSAC++ | Standard | OpenCV | Bayesian odds | RANSAC |
 | IRWLS polish | No | N/A | N/A | N/A | No |
 | Distortion | SIP (forward) | TPS (iterative) | SIP (from WCS) | SIP (full A/B/AP/BP) | None |
-| Sigma-clipping SIP | Config exists, not impl | N/A | N/A | Yes | N/A |
+| Sigma-clipping SIP | Yes (3-iter, 3-sigma MAD) | N/A | N/A | Yes | N/A |
 | Lanczos deringing | Config exists, not impl | Yes (0.3 threshold) | Yes | N/A | N/A |
 | SIMD warp | AVX2 bilinear only | Full SIMD | OpenCV SIMD | N/A | N/A |
 | Match recovery | Single-pass | Iterative | N/A | Bayesian | N/A |
@@ -116,23 +97,19 @@ See submodule NOTES-AI.md files for detailed per-module analysis:
 
 **Quick Wins (bug fixes, high impact, low effort):**
 1. Fix vertex correspondence ordering in triangle geometry (~5 lines)
-2. Add `score > best_score` guard before LO-RANSAC (~1 line)
-3. Fix `precise_wide_field` ratio_tolerance (1 line)
-4. Fix Auto validation to use Homography min_points (1 line)
 
 **Medium Effort (correctness/quality):**
-5. Implement SIP sigma-clipping (config fields already exist)
-6. Pass image center as SIP reference_point when available
-7. Implement Lanczos deringing (clamp_output config exists)
-8. Wire up or remove dead Config fields (border_value, etc.)
-9. Add preemptive scoring to MAGSAC++ (break early when loss > best)
-10. Iterative match recovery (2-3 passes of recover + refit)
+2. Pass image center as SIP reference_point when available
+3. Implement Lanczos deringing (clamp_output config exists)
+4. Wire up or remove dead Config fields (border_value, etc.)
+5. Add preemptive scoring to MAGSAC++ (break early when loss > best)
+6. Iterative match recovery (2-3 passes of recover + refit)
 
 **Larger Effort (performance/features):**
-11. Separable SIMD Lanczos3 (two-pass horizontal+vertical with AVX2)
-12. Integrate TPS as alternative distortion model
-13. IRWLS final polish with MAGSAC++ weights
-14. Upgrade to quad descriptors (4D hash, matches Astrometry.net)
+7. Separable SIMD Lanczos3 (two-pass horizontal+vertical with AVX2)
+8. Integrate TPS as alternative distortion model
+9. IRWLS final polish with MAGSAC++ weights
+10. Upgrade to quad descriptors (4D hash, matches Astrometry.net)
 
 ## File Map
 

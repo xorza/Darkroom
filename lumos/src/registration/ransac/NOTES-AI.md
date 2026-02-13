@@ -74,9 +74,8 @@ Paper (Chum, Matas, Kittler 2003) prescribes: (1) LS re-estimation on inliers,
 **Ours**: Only step (1) with iterative re-scoring. Default 10 iterations
 (matches OpenCV USAC). Missing inner RANSAC and threshold shrinking.
 
-**Issue**: LO triggers on *every* hypothesis with `inlier_buf.len() >= min_samples`
-(line 310), not just new-best models. This wastes computation. Standard
-LO-RANSAC and OpenCV run LO only on new best models.
+LO triggers only on new-best hypotheses (`score > best_score`), matching
+standard LO-RANSAC and OpenCV USAC behavior.
 
 ## Transform Estimation (transforms.rs)
 
@@ -117,10 +116,7 @@ The SVD solver returns a poor model rejected by MAGSAC++ scoring.
 
 ## Issues Found
 
-1. **LO runs on every hypothesis** (moderate) -- should only run on new-best.
-   Line 310 checks `inlier_buf.len() >= min_samples` but should also check
-   `score > best_score`.
-2. **Missing IRWLS** (moderate) -- paper's key contribution for model accuracy.
+1. **Missing IRWLS** (moderate) -- paper's key contribution for model accuracy.
    Impact smaller for well-separated star matches.
 3. **No SPRT** (minor) -- for 50-500 point sets, benefit is minimal.
 4. **A^T A for homography** (minor) -- direct SVD on A more robust.

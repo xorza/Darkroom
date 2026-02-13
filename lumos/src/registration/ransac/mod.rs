@@ -306,8 +306,11 @@ impl RansacEstimator {
 
             let mut current_transform = transform;
 
-            // Local Optimization: if this hypothesis looks promising, refine it
-            if self.params.use_local_optimization && inlier_buf.len() >= min_samples {
+            // Local Optimization: refine only new-best hypotheses (standard LO-RANSAC)
+            if self.params.use_local_optimization
+                && score > best_score
+                && inlier_buf.len() >= min_samples
+            {
                 let (lo_transform, lo_inliers, lo_score) = self.local_optimization(
                     ref_points,
                     target_points,
