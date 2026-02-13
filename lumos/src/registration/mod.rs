@@ -316,6 +316,7 @@ fn estimate_and_refine(
         let sip_config = SipConfig {
             order: config.sip_order,
             reference_point: None,
+            ..Default::default()
         };
 
         SipPolynomial::fit_from_transform(&inlier_ref, &inlier_target, &transform, &sip_config)

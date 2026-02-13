@@ -28,6 +28,7 @@ warping with Lanczos interpolation and SIMD-optimized row warping.
 - Flat implicit k-d tree layout (cache-friendly, no pointers)
 - AVX2/SSE4.1 bilinear warp, optimized Lanczos3 row warp with interior fast-path
 - Lanczos LUT: 4096 samples/unit, 48KB for Lanczos3 (fits L1 cache)
+- SIP sigma-clipping: 3 iterations × 3-sigma MAD rejection (LSST practice)
 - 5 presets (fast, precise, wide_field, mosaic, precise_wide_field)
 
 ## Comparison with Industry Standards
@@ -95,10 +96,6 @@ This is mitigated by the voting mechanism itself (Groth 1986 design): correct
 correspondences accumulate many votes across multiple triangles while incorrect
 ones scatter. Works well in practice but could be improved by reordering
 indices based on the side sorting in `from_positions()`.
-
-### No Sigma-Clipping in SIP Fitting
-Marginal RANSAC inliers can disproportionately affect polynomial coefficients.
-LSST pipeline uses 3 iterations of 3-sigma clipping during SIP fitting.
 
 ### TPS Not Integrated Into Pipeline
 **File:** `distortion/tps/mod.rs` - marked `#![allow(dead_code)]`

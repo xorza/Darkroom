@@ -773,6 +773,7 @@ fn test_warp_with_sip_correction() {
     let sip_config = SipConfig {
         order: 3,
         reference_point: Some(DVec2::new(cx, cy)),
+        ..Default::default()
     };
     let sip =
         SipPolynomial::fit_from_transform(&ref_points, &target_points, &transform, &sip_config)
@@ -870,6 +871,7 @@ fn test_warp_api_with_sip() {
     let sip_config = SipConfig {
         order: 3,
         reference_point: Some(DVec2::new(cx, cy)),
+        ..Default::default()
     };
     let sip =
         SipPolynomial::fit_from_transform(&ref_points, &target_points, &transform, &sip_config)

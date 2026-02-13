@@ -62,6 +62,13 @@ pub struct SipConfig {
     /// Coordinates are relative to this point before polynomial evaluation.
     /// If None, the centroid of the input points is used.
     pub reference_point: Option<DVec2>,
+
+    /// Sigma threshold for iterative outlier rejection (default 3.0).
+    /// Points with residuals beyond `clip_sigma * MAD_sigma` are rejected.
+    pub clip_sigma: f64,
+
+    /// Number of sigma-clipping iterations (default 3). Set to 0 to disable.
+    pub clip_iterations: usize,
 }
 
 impl Default for SipConfig {
@@ -69,6 +76,8 @@ impl Default for SipConfig {
         Self {
             order: 3,
             reference_point: None,
+            clip_sigma: 3.0,
+            clip_iterations: 3,
         }
     }
 }
@@ -136,7 +145,7 @@ impl SipPolynomial {
         });
         let norm_scale = avg_distance(ref_points, ref_pt);
 
-        // Compute residuals: transform(ref) - target (normalized)
+        // Compute target residuals in normalized space (constant across iterations)
         let targets_u: Vec<f64> = ref_points
             .iter()
             .zip(target_points.iter())
@@ -148,13 +157,83 @@ impl SipPolynomial {
             .map(|(&r, &t)| -(transform.apply(r).y - t.y) / norm_scale)
             .collect();
 
-        let (ata, atb_u, atb_v) = build_normal_equations(
-            ref_points, &targets_u, &targets_v, ref_pt, norm_scale, &terms,
-        );
+        // Initial fit on all points
+        let mut mask = vec![true; n];
+        let (mut coeffs_u, mut coeffs_v) = solve_masked(
+            ref_points, &targets_u, &targets_v, &mask, ref_pt, norm_scale, &terms,
+        )?;
 
-        let n_terms = terms.len();
-        let coeffs_u = solve_cholesky(&ata, &atb_u, n_terms)?;
-        let coeffs_v = solve_cholesky(&ata, &atb_v, n_terms)?;
+        // Iterative sigma-clipping
+        for _ in 0..config.clip_iterations {
+            // Compute per-point residual magnitudes in normalized space
+            let mut residuals: Vec<f64> = Vec::with_capacity(n);
+            for i in 0..n {
+                if !mask[i] {
+                    residuals.push(f64::INFINITY);
+                    continue;
+                }
+                let u = (ref_points[i].x - ref_pt.x) / norm_scale;
+                let v = (ref_points[i].y - ref_pt.y) / norm_scale;
+
+                let mut pred_u = 0.0;
+                let mut pred_v = 0.0;
+                for (j, &(p, q)) in terms.iter().enumerate() {
+                    let basis = monomial(u, v, p, q);
+                    pred_u += coeffs_u[j] * basis;
+                    pred_v += coeffs_v[j] * basis;
+                }
+
+                let du = pred_u - targets_u[i];
+                let dv = pred_v - targets_v[i];
+                residuals.push((du * du + dv * dv).sqrt());
+            }
+
+            // Compute median and MAD of active residuals
+            let mut active: Vec<f64> = residuals
+                .iter()
+                .zip(mask.iter())
+                .filter(|(_, m)| **m)
+                .map(|(r, _)| *r)
+                .collect();
+
+            if active.len() < terms.len() {
+                break; // Not enough points to re-fit
+            }
+
+            active.sort_unstable_by(|a, b| a.partial_cmp(b).unwrap());
+            let median = active[active.len() / 2];
+
+            let mut deviations: Vec<f64> = active.iter().map(|&r| (r - median).abs()).collect();
+            deviations.sort_unstable_by(|a, b| a.partial_cmp(b).unwrap());
+            let mad = deviations[deviations.len() / 2];
+
+            const MAD_TO_SIGMA: f64 = 1.4826022;
+            let threshold = config.clip_sigma * mad * MAD_TO_SIGMA;
+
+            if threshold < 1e-15 {
+                break; // Residuals are essentially zero
+            }
+
+            // Reject outliers
+            let mut any_rejected = false;
+            for i in 0..n {
+                if mask[i] && residuals[i] > median + threshold {
+                    mask[i] = false;
+                    any_rejected = true;
+                }
+            }
+
+            if !any_rejected {
+                break; // Converged
+            }
+
+            // Re-fit on surviving points
+            let (new_u, new_v) = solve_masked(
+                ref_points, &targets_u, &targets_v, &mask, ref_pt, norm_scale, &terms,
+            )?;
+            coeffs_u = new_u;
+            coeffs_v = new_v;
+        }
 
         Some(Self {
             reference_point: ref_pt,
@@ -257,11 +336,31 @@ fn avg_distance(points: &[DVec2], ref_pt: DVec2) -> f64 {
 // Linear algebra: normal equations and solvers
 // ============================================================================
 
-/// Build normal equations A^T*A and A^T*b from point/target pairs.
+/// Solve the SIP normal equations using only the masked-in points.
+fn solve_masked(
+    points: &[DVec2],
+    targets_u: &[f64],
+    targets_v: &[f64],
+    mask: &[bool],
+    ref_pt: DVec2,
+    norm_scale: f64,
+    terms: &[(usize, usize)],
+) -> Option<(ArrayVec<f64, MAX_TERMS>, ArrayVec<f64, MAX_TERMS>)> {
+    let (ata, atb_u, atb_v) = build_normal_equations(
+        points, targets_u, targets_v, mask, ref_pt, norm_scale, terms,
+    );
+    let n_terms = terms.len();
+    let coeffs_u = solve_cholesky(&ata, &atb_u, n_terms)?;
+    let coeffs_v = solve_cholesky(&ata, &atb_v, n_terms)?;
+    Some((coeffs_u, coeffs_v))
+}
+
+/// Build normal equations A^T*A and A^T*b from point/target pairs (masked).
 fn build_normal_equations(
     points: &[DVec2],
     targets_u: &[f64],
     targets_v: &[f64],
+    mask: &[bool],
     ref_pt: DVec2,
     norm_scale: f64,
     terms: &[(usize, usize)],
@@ -273,6 +372,9 @@ fn build_normal_equations(
     let mut basis = [0.0; MAX_TERMS];
 
     for (i, point) in points.iter().enumerate() {
+        if !mask[i] {
+            continue;
+        }
         let u = (point.x - ref_pt.x) / norm_scale;
         let v = (point.y - ref_pt.y) / norm_scale;
 

@@ -538,6 +538,7 @@ mod tests {
         let sip_config = SipConfig {
             order: 3,
             reference_point: Some(DVec2::new(cx, cy)),
+            ..Default::default()
         };
         let sip =
             SipPolynomial::fit_from_transform(&ref_pts, &tgt_pts, &transform, &sip_config).unwrap();

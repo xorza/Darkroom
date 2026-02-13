@@ -181,6 +181,7 @@ fn test_register_two_calibrated_lights() {
     let sip_config = crate::registration::distortion::SipConfig {
         order: 4,
         reference_point: None,
+        ..Default::default()
     };
 
     let sip = crate::registration::distortion::SipPolynomial::fit_from_transform(
