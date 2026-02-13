@@ -93,8 +93,13 @@ fn test_load_full_example_fits() {
     assert_eq!(image.metadata.bitpix, BitPix::Int32);
     assert_eq!(image.metadata.header_dimensions, vec![100, 100]);
 
+    // FITS integer data is normalized to [0,1] on load
     let pixel = image.get_pixel_gray(5, 20);
-    assert_eq!(pixel, 152.0);
+    let expected = 152.0 / i32::MAX as f32;
+    assert!(
+        (pixel - expected).abs() < 1e-6,
+        "pixel={pixel}, expected={expected}"
+    );
 }
 
 #[test]
@@ -496,8 +501,30 @@ fn test_bitpix_roundtrip() {
     ];
 
     for (fits_val, expected) in values {
-        let bitpix = BitPix::from_fits_value(fits_val);
+        let bitpix = BitPix::from_fits_value(fits_val).unwrap();
         assert_eq!(bitpix, expected);
         assert_eq!(bitpix.to_fits_value(), fits_val);
     }
+}
+
+#[test]
+fn test_bitpix_unsigned_variants() {
+    // UInt16 and UInt32 map back to the same BITPIX as signed
+    assert_eq!(BitPix::UInt16.to_fits_value(), 16);
+    assert_eq!(BitPix::UInt32.to_fits_value(), 32);
+}
+
+#[test]
+fn test_bitpix_from_fits_value_unknown() {
+    assert!(BitPix::from_fits_value(99).is_err());
+    assert!(BitPix::from_fits_value(0).is_err());
+}
+
+#[test]
+fn test_bitpix_normalization_max() {
+    assert_eq!(BitPix::UInt8.normalization_max(), Some(255.0));
+    assert_eq!(BitPix::UInt16.normalization_max(), Some(65535.0));
+    assert_eq!(BitPix::Int16.normalization_max(), Some(32767.0));
+    assert!(BitPix::Float32.normalization_max().is_none());
+    assert!(BitPix::Float64.normalization_max().is_none());
 }

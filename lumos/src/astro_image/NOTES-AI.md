@@ -13,8 +13,12 @@ for raw CFA data, calibration ops, demosaic dispatch).
 - **AstroImage**: PixelData + ImageDimensions + AstroImageMetadata
 - **CfaImage**: Single-channel raw sensor data with CFA pattern metadata
 - **ImageDimensions**: width/height/channels (1 or 3 only)
+- **BitPix**: Enum with UInt8/Int16/UInt16/Int32/UInt32/Int64/Float32/Float64 variants
+  - `from_fits_value()` returns `Result<Self, String>` for safe external input handling
+  - `normalization_max()` returns divisor for [0,1] normalization (None for floats)
+  - `to_fits_value()` maps back to FITS BITPIX integer (unsigned maps to signed equivalent)
 - FITS loading via `fitsio` crate (thin wrapper around cfitsio C library)
-- All pixel data stored as f32 (RAW normalized to [0,1], FITS as raw ADU values)
+- All pixel data stored as f32 normalized to [0,1] (both RAW and FITS)
 
 ## What It Does Well
 - Planar storage matches PixInsight XISF convention for per-channel processing
@@ -25,183 +29,63 @@ for raw CFA data, calibration ops, demosaic dispatch).
 - Rayon parallelism throughout (row-based chunking for cache locality)
 - Good test coverage (~50 tests across module)
 - Trait-based `StackableImage` abstraction for both AstroImage and CfaImage
+- 3-channel FITS loaded correctly as planar data (via `from_planar_channels`)
+- FITS integer data normalized to [0,1] on load (consistent with RAW normalization)
+- BitPix distinguishes unsigned from signed types for correct normalization ranges
+- `from_fits_value()` returns Result for safe handling of unknown BITPIX values
 
-## Issues Found
-
-### P0: 3-Channel FITS Loaded as Interleaved Instead of Planar
-**File:** `fits.rs:63`
-
-FITS standard stores 3D images in planar order per NAXIS3: all R pixels, then all G, then
-all B (confirmed by FITS Standard 4.0, MaxIm DL docs, and cfitsio documentation). The
-`fitsio` crate's `read_image()` returns these as a flat Vec in this planar order.
-
-The code calls `AstroImage::from_pixels()` which treats input as interleaved (RGBRGB...).
-This produces garbled colors for any 3-channel FITS file. Currently masked because test
-files are all grayscale.
-
-**Fix:** Use `from_planar_channels()` for 3-channel FITS:
-```rust
-if img_dims.channels == 3 {
-    let plane_size = img_dims.width * img_dims.height;
-    let channels = pixels.chunks_exact(plane_size).map(|c| c.to_vec());
-    AstroImage::from_planar_channels(img_dims, channels)
-} else {
-    AstroImage::from_pixels(img_dims, pixels)
-}
-```
-
-### P1: Inconsistent Normalization Between FITS and RAW
-**File:** `fits.rs:43-45`
-
-RAW files are normalized to [0,1] by libraw (see `raw/NOTES-AI.md`). FITS integer data
-retains raw ADU values (e.g., 0-65535 for 16-bit). This creates inconsistency:
-- Operations mixing FITS and RAW sources produce nonsensical results
-- Threshold-based algorithms break across formats
-- Display expects [0,1] range
-
-**Industry practice:**
-- PixInsight normalizes all data to [0,1] float internally
-- Siril uses [0,1] for 32-bit float processing
-- AstroPixelProcessor normalizes to [0,1]
-
-**cfitsio note:** cfitsio automatically applies BZERO/BSCALE when reading via
-`fits_read_img` with TFLOAT output. So a BITPIX=16, BZERO=32768 file (unsigned 16-bit)
-is already converted to unsigned values (0-65535 range). The remaining step is dividing
-by the max value for the BITPIX type to get [0,1].
-
-**Fix:** After `read_image`, normalize based on original BITPIX:
-- UInt8: divide by 255.0
-- Int16/UInt16: divide by 65535.0 (cfitsio already applied BZERO)
-- Int32/UInt32: divide by max value
-- Float32/Float64: assume already normalized (or check range)
-
-### P2: BitPix Enum Conflates Unsigned and Signed Types
-**File:** `fits.rs:69-78`, `mod.rs:20-53`
-
-`image_type_to_bitpix()` maps both `UnsignedShort` and `Short` to `BitPix::Int16`. UInt16
-is the dominant format in amateur astrophotography (virtually all cooled CCD/CMOS cameras).
-This loses the distinction needed for:
-- Correct normalization range (32767 vs 65535)
-- Proper FITS writing with BZERO convention
-- Metadata fidelity
-
-**Note:** cfitsio reports `USHORT_IMG` when BITPIX=16 + BZERO=32768, so the fitsio crate
-does distinguish at the `ImageType` level - this info is just discarded during mapping.
-
-**Fix:** Add `UInt8`, `UInt16`, `UInt32` variants to BitPix enum.
+## Remaining Issues
 
 ### P3: Missing BAYERPAT FITS Header Reading
-**File:** `fits.rs:50-51`
+**File:** `fits.rs`
 
-Comment says "FITS files don't indicate CFA status" - this is incorrect. BAYERPAT is a
-widely used non-standard keyword written by:
-- N.I.N.A. (BAYERPAT, XBAYROFF, YBAYROFF)
-- SharpCap (BAYERPAT)
-- SGPro (BAYERPAT)
-- MaxIm DL (BAYERPAT)
-- Most modern capture software
-
-Values: "RGGB", "BGGR", "GRBG", "GBRG".
-
-Additionally, ROWORDER keyword ("TOP-DOWN" or "BOTTOM-UP") affects CFA pattern
-interpretation. Siril reads ROWORDER and flips the pattern accordingly.
-
-**Fix:**
-```rust
-let cfa_type: Option<CfaType> = read_key_optional::<String>(&hdu, &mut fptr, "BAYERPAT")
-    .and_then(|val| match val.trim() {
-        "RGGB" => Some(CfaType::Bayer(CfaPattern::Rggb)),
-        "BGGR" => Some(CfaType::Bayer(CfaPattern::Bggr)),
-        "GRBG" => Some(CfaType::Bayer(CfaPattern::Grbg)),
-        "GBRG" => Some(CfaType::Bayer(CfaPattern::Gbrg)),
-        _ => None,
-    });
-```
+BAYERPAT is a widely used non-standard keyword written by N.I.N.A., SharpCap, SGPro,
+MaxIm DL, and most modern capture software. Values: "RGGB", "BGGR", "GRBG", "GBRG".
+ROWORDER keyword ("TOP-DOWN"/"BOTTOM-UP") affects CFA pattern interpretation.
 
 ### P4: Missing Standard FITS Metadata Fields
-**File:** `mod.rs:102-114`
+**File:** `mod.rs`
 
 Currently reads: OBJECT, INSTRUME, TELESCOP, DATE-OBS, EXPTIME.
-Missing fields used by N.I.N.A., Siril, PixInsight, MaxIm DL:
-
-| Keyword | Purpose | Used by |
-|---------|---------|---------|
-| FILTER | Filter name (Ha, OIII, L, R, G, B) | All tools |
-| GAIN | Camera gain setting | N.I.N.A., Siril |
-| EGAIN | Electrons per ADU | MaxIm DL, N.I.N.A. |
-| CCD-TEMP | Sensor temperature (C) | All tools |
-| IMAGETYP | Frame type (LIGHT, DARK, FLAT, BIAS) | All tools |
-| XBINNING/YBINNING | Pixel binning factors | All tools |
-| BAYERPAT | CFA pattern | See P3 |
-| SET-TEMP | Target cooling temperature | N.I.N.A. |
-| OFFSET | Camera offset/bias setting | N.I.N.A. |
-| FOCALLEN | Focal length (mm) | MaxIm DL, N.I.N.A. |
-| AIRMASS | Atmospheric extinction factor | MaxIm DL |
-
-Impact: Incomplete metadata propagation through calibration/stacking pipeline. FILTER
-is critical for multi-narrowband workflows. IMAGETYP enables automatic frame classification.
+Missing: FILTER (critical for narrowband), GAIN, EGAIN, CCD-TEMP, IMAGETYP (frame
+classification), XBINNING/YBINNING, SET-TEMP, OFFSET, FOCALLEN, AIRMASS.
 
 ### P5: pixel_count() Returns Sample Count, Not Pixel Count
-**File:** `mod.rs:83-85`
+**File:** `mod.rs`
 
 Returns `width * height * channels`. For 100x100 RGB: returns 30000, not 10000.
-Name implies spatial pixel count. Used in `from_pixels()` assertion and FITS loader.
-
 **Fix:** Rename to `sample_count()` and add true `pixel_count() -> width * height`.
 
 ### P6: X-Trans Demosaic Roundtrips Through u16
-**File:** `cfa.rs:121-137`
+**File:** `cfa.rs`
 
 Converts f32 -> u16 -> f32, losing ~15 bits of precision (1/65536 quantization).
-Bayer path works directly on f32. This is a workaround for the X-Trans pipeline
-accepting u16 input.
-
-**Fix:** Modify X-Trans demosaic to accept `&[f32]` directly, matching Bayer path.
+Bayer path works directly on f32. Workaround for X-Trans pipeline accepting u16 input.
 
 ### P7: No FITS Writing Support
-**File:** `mod.rs:467-471`
+**File:** `mod.rs`
 
 `save()` only supports PNG/JPEG/TIFF. FITS is the interchange format for astrophotography.
-All major tools (Siril, PixInsight, APP) use FITS for intermediate and final output.
-Also: `save()` clones the entire image (`.clone().into()`) which is wasteful.
-
-### P8: from_fits_value() Panics on Unknown BITPIX
-**File:** `mod.rs:31-41`
-
-BITPIX comes from external user files. Per project error handling rules, external input
-should use `Result<>`, not panic. An unknown BITPIX value is an expected failure mode
-(corrupted or non-standard FITS files).
+Also: `save()` clones the entire image which is wasteful.
 
 ## FITS Standard Compliance Notes
 
 ### BZERO/BSCALE Handling
-cfitsio automatically applies BZERO/BSCALE when reading images, so the fitsio Rust crate
-inherits this behavior. For BITPIX=16 + BZERO=32768 (unsigned 16-bit convention), cfitsio
-returns values in the 0-65535 range as f32. No manual BZERO/BSCALE handling is needed in
-the Rust code - only post-read normalization to [0,1].
+cfitsio automatically applies BZERO/BSCALE when reading images. For BITPIX=16 +
+BZERO=32768 (unsigned 16-bit convention), cfitsio returns values in the 0-65535 range
+as f32. The loader then normalizes to [0,1] by dividing by `BitPix::normalization_max()`.
 
 ### 3D FITS Data Order
 FITS uses Fortran-style (column-major) storage. For NAXIS1=W, NAXIS2=H, NAXIS3=3:
 data is stored as W*H red values, then W*H green, then W*H blue. The fitsio-rs crate
-reports shape in C order: [3, H, W]. The `read_image()` returns a flat Vec in this
-planar order. Current code correctly parses dimensions but incorrectly treats the flat
-pixel data as interleaved.
+reports shape in C order: [3, H, W]. The loader uses `from_planar_channels()` for
+3-channel FITS to correctly handle this planar layout.
 
 ### Integer Data Convention
 FITS standard (4.0) only supports signed integers natively. Unsigned integers use the
 BZERO convention: BITPIX=16 + BZERO=32768 + BSCALE=1 for unsigned 16-bit. This is by
-far the most common format from astronomical cameras. cfitsio handles this transparently.
-
-## Recommendations by Priority
-
-1. **Immediate (P0-P1):** Fix planar FITS loading (data corruption for color FITS).
-   Add normalization for integer FITS data (format consistency).
-
-2. **Short-term (P2-P4):** Add UInt16/UInt32 BitPix variants. Read BAYERPAT + ROWORDER
-   from FITS headers. Add FILTER, GAIN, CCD-TEMP, IMAGETYP to metadata.
-
-3. **Medium-term (P5-P8):** Rename pixel_count, fix X-Trans precision loss, add FITS
-   writing, convert from_fits_value panic to Result.
+far the most common format from astronomical cameras. cfitsio handles this transparently,
+and `image_type_to_bitpix()` preserves the unsigned/signed distinction.
 
 ## References
 - FITS Standard 4.0: https://fits.gsfc.nasa.gov/standard40/fits_standard40aa.pdf

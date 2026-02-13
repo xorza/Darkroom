@@ -496,7 +496,7 @@ pub fn load_raw(path: &Path) -> Result<AstroImage> {
 
     let metadata = AstroImageMetadata {
         iso: raw.iso,
-        bitpix: BitPix::Int16,
+        bitpix: BitPix::UInt16,
         header_dimensions: vec![height, width, channels],
         cfa_type,
         ..Default::default()
@@ -539,7 +539,7 @@ pub fn load_raw_cfa(path: &Path) -> Result<CfaImage> {
     let pixels = raw.extract_cfa_pixels()?;
     let metadata = AstroImageMetadata {
         iso: raw.iso,
-        bitpix: BitPix::Int16,
+        bitpix: BitPix::UInt16,
         header_dimensions: vec![raw.height, raw.width, 1],
         cfa_type: Some(cfa_type),
         ..Default::default()
