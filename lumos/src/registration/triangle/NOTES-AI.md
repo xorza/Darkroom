@@ -85,24 +85,10 @@ of 0.01 should be calibrated to the specific convention being used. With ratios 
 [0,1], 0.01 is quite tight (1% of full range). Astroalign uses 0.1 on ratios >= 1,
 which is approximately 5% relative tolerance.
 
-### Issue 2: k-d Tree Radius Uses L2, Similarity Check Uses L-infinity
+### Issue 2: ~~k-d Tree Radius Uses L2, Similarity Check Uses L-infinity~~ — FIXED
 
-**Severity:** Low (conservative, no false negatives)
-
-**Location:** `voting.rs:131-134`
-
-The k-d tree `radius_indices_into()` uses L2 (Euclidean) distance, but `is_similar()`
-uses L-infinity (per-axis max). The L-inf square is inscribed in the L2 circle, so
-L-inf is stricter. However, points at L-inf boundary corners (e.g., `(t, t)` from
-query, L2 distance `t*sqrt(2)`) are NOT in the L2 ball of radius `t`. This means
-valid L-inf matches at the corners are missed. Effective tolerance in worst case is
-`ratio_tolerance / sqrt(2)`.
-
-**Fix:** Either multiply the k-d tree radius by `sqrt(2)`:
-```rust
-invariant_tree.radius_indices_into(query, params.ratio_tolerance * SQRT_2, &mut candidates);
-```
-Or implement L-infinity radius search in the k-d tree (see spatial/NOTES-AI.md).
+**FIXED**: Search radius multiplied by √2 so L2 ball circumscribes the L-inf square.
+The `is_similar()` L-inf check then correctly filters candidates from the larger L2 ball.
 
 ### Issue 3: Adaptive k_neighbors May Be Too Aggressive
 
@@ -211,8 +197,7 @@ could improve matching robustness for small star counts.
 
 ## Potential Improvements
 
-### Priority 1: Fix L2/L-inf Tolerance Mismatch
-Multiply k-d tree radius by `sqrt(2)` or implement L-inf search. One-line fix.
+### ~~Priority 1: Fix L2/L-inf Tolerance Mismatch~~ — FIXED
 
 ### Priority 2: Fix Orientation Test Comments
 Correct misleading comments about rotation changing orientation.

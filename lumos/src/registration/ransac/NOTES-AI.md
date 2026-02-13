@@ -123,12 +123,8 @@ The SVD solver returns a poor model rejected by MAGSAC++ scoring.
    Impact smaller for well-separated star matches.
 2. **A^T A for homography** (moderate) -- Direct SVD on 2n x 9 matrix A is more
    robust (doesn't square condition number). nalgebra's `SVD` supports non-square.
-3. **Homography degeneracy: no same-side test** -- Only checks collinearity on
-   ref points (`mod.rs:289-291`). Should check both ref and target. OpenCV's USAC
-   also checks that points 3,4 lie on same side of line through 1,2 in both images.
-4. **GammaLut unnecessary for k=2** (`magsac.rs:9-68`) -- For k=2, `gamma(1,x) =
-   1 - exp(-x)` is a trivial closed-form. Direct computation is one `exp` instruction,
-   likely faster than LUT. Remove ~70 lines.
+3. ~~**Homography degeneracy: no same-side test**~~ — **FIXED**: added `is_sample_degenerate(&sample_target)` check alongside existing ref check.
+4. ~~**GammaLut unnecessary for k=2**~~ — **FIXED**: replaced ~70-line LUT with 6-line `gamma_k2()` closed-form `1 - exp(-x)`.
 
 ### Minor
 5. **LO inlier buffer replacement** (`mod.rs:322-337`) -- `inlier_buf = lo_inliers`
@@ -157,8 +153,8 @@ The SVD solver returns a poor model rejected by MAGSAC++ scoring.
 
 ## Potential Improvements (Prioritized)
 
-1. **Replace GammaLut with exp()**: For k=2, `gamma(1,x) = 1-exp(-x)`. Removes ~70 lines. Easy win.
-2. **Check target point degeneracy**: Add `|| is_sample_degenerate(&sample_target)` at `mod.rs:289`.
+1. ~~**Replace GammaLut with exp()**~~ — **FIXED**
+2. ~~**Check target point degeneracy**~~ — **FIXED**
 3. **Direct SVD for homography**: SVD on full 2n x 9 matrix A via nalgebra.
 4. **IRWLS final polish**: 3-5 IRWLS iterations after model selection with sigma-marginalized weights.
 5. **Fix LO buffer replacement**: Write into `inlier_buf` directly instead of replacing it.

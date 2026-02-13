@@ -121,16 +121,19 @@ pub(crate) fn vote_for_correspondences(
     // Pre-allocate candidate buffer to avoid per-triangle allocations
     let mut candidates: Vec<usize> = Vec::new();
 
+    // The k-d tree uses L2 distance but is_similar uses L-infinity (per-axis max).
+    // Multiply by sqrt(2) so the L2 circle circumscribes the L-inf square,
+    // ensuring no valid candidates are missed at the corners.
+    let l2_radius = params.ratio_tolerance * std::f64::consts::SQRT_2;
+
     for target_tri in target_triangles {
         let query = DVec2::new(target_tri.ratios.0, target_tri.ratios.1);
-        invariant_tree.radius_indices_into(query, params.ratio_tolerance, &mut candidates);
+        invariant_tree.radius_indices_into(query, l2_radius, &mut candidates);
 
         for &ref_idx in &candidates {
             let ref_tri = &ref_triangles[ref_idx];
 
-            // The k-d tree radius search uses L2 distance as a fast pre-filter.
-            // is_similar uses L-infinity (per-axis max), which is stricter within
-            // the unit square, so this filters candidates the tree returned.
+            // L-inf filter: exact per-axis tolerance check
             if !ref_tri.is_similar(target_tri, params.ratio_tolerance) {
                 continue;
             }

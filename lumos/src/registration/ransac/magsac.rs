@@ -5,72 +5,18 @@
 //!
 //! Instead of a binary inlier/outlier decision, MAGSAC++ computes a continuous
 //! quality score based on the marginal likelihood of each point being an inlier.
+//!
+//! For k=2 (2D point correspondences), the lower incomplete gamma function has
+//! the closed-form γ(1, x) = 1 - exp(-x), so no lookup table is needed.
 
-/// Pre-computed lower incomplete gamma function lookup table.
-///
-/// For k=2 (2D point correspondences), γ(1, x) = 1 - e^(-x).
-/// This is stored in a lookup table for fast evaluation.
-#[derive(Debug)]
-pub struct GammaLut {
-    /// Lookup table values: values[i] = γ(1, i * step)
-    values: Vec<f64>,
-    /// Inverse step for index calculation
-    inv_step: f64,
-}
+/// Chi-square 99% quantile for k=2 degrees of freedom.
+/// Points beyond this are considered outliers.
+const CHI_QUANTILE_SQ: f64 = 9.21; // χ²₀.₉₉(2)
 
-impl GammaLut {
-    /// Number of entries in the lookup table.
-    const PRECISION: usize = 1024;
-
-    /// Chi-square 99% quantile for k=2 degrees of freedom.
-    /// Points beyond this are considered outliers.
-    pub const CHI_QUANTILE_SQ: f64 = 9.21; // χ²₀.₉₉(2)
-
-    /// Create lookup table for 2D point correspondences (k=2).
-    pub fn new() -> Self {
-        // x_max corresponds to the outlier threshold
-        // x = r² / (2σ²_max), at threshold r² = χ²·σ²_max
-        // so x_max = χ² / 2 ≈ 4.605
-        let x_max = Self::CHI_QUANTILE_SQ / 2.0;
-
-        let step = x_max / (Self::PRECISION as f64);
-        let inv_step = 1.0 / step;
-
-        // Compute table: γ(1, x) = 1 - exp(-x) for k=2
-        let values: Vec<f64> = (0..=Self::PRECISION)
-            .map(|i| {
-                let x = i as f64 * step;
-                1.0 - (-x).exp()
-            })
-            .collect();
-
-        Self { values, inv_step }
-    }
-
-    /// Lookup γ(1, x) with linear interpolation.
-    #[inline]
-    pub fn lookup(&self, x: f64) -> f64 {
-        if x <= 0.0 {
-            return 0.0;
-        }
-
-        let idx_f = x * self.inv_step;
-        let idx = idx_f as usize;
-
-        if idx >= self.values.len() - 1 {
-            return 1.0; // Saturate at Γ(1) = 1
-        }
-
-        // Linear interpolation
-        let t = idx_f - idx as f64;
-        self.values[idx] * (1.0 - t) + self.values[idx + 1] * t
-    }
-}
-
-impl Default for GammaLut {
-    fn default() -> Self {
-        Self::new()
-    }
+/// Lower incomplete gamma function for k=2: γ(1, x) = 1 - exp(-x).
+#[inline]
+fn gamma_k2(x: f64) -> f64 {
+    if x <= 0.0 { 0.0 } else { 1.0 - (-x).exp() }
 }
 
 /// MAGSAC++ scorer for threshold-free inlier evaluation.
@@ -79,8 +25,6 @@ impl Default for GammaLut {
 /// eliminating the need for manual threshold tuning.
 #[derive(Debug)]
 pub struct MagsacScorer {
-    /// Gamma function lookup table
-    gamma_lut: GammaLut,
     /// Maximum sigma squared (σ²_max)
     max_sigma_sq: f64,
     /// Outlier loss (assigned to points beyond threshold)
@@ -97,7 +41,7 @@ impl MagsacScorer {
     ///   greater than ~3·max_sigma are treated as outliers.
     pub fn new(max_sigma: f64) -> Self {
         let max_sigma_sq = max_sigma * max_sigma;
-        let threshold_sq = GammaLut::CHI_QUANTILE_SQ * max_sigma_sq;
+        let threshold_sq = CHI_QUANTILE_SQ * max_sigma_sq;
 
         // Outlier loss = loss at the boundary, ensuring continuity
         // For k=2: loss(threshold) = σ²_max/2 · γ(1, χ²/2) + threshold/4 · (1 - γ(1, χ²/2))
@@ -105,7 +49,6 @@ impl MagsacScorer {
         let outlier_loss = max_sigma_sq / 2.0;
 
         Self {
-            gamma_lut: GammaLut::new(),
             max_sigma_sq,
             outlier_loss,
             threshold_sq,
@@ -126,10 +69,9 @@ impl MagsacScorer {
         let x = residual_sq / (2.0 * self.max_sigma_sq);
 
         // For k=2: loss = σ²_max/2 · γ(1,x) + r²/4 · (1 - γ(1,x))
-        let gamma_x = self.gamma_lut.lookup(x);
-        let one_minus_gamma = 1.0 - gamma_x;
+        let gx = gamma_k2(x);
 
-        self.max_sigma_sq / 2.0 * gamma_x + residual_sq / 4.0 * one_minus_gamma
+        self.max_sigma_sq / 2.0 * gx + residual_sq / 4.0 * (1.0 - gx)
     }
 
     /// Check if a point should be considered an inlier for counting purposes.
@@ -151,31 +93,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_gamma_lut_boundaries() {
-        let lut = GammaLut::new();
+    fn test_gamma_k2_boundaries() {
+        assert!((gamma_k2(0.0) - 0.0).abs() < 1e-10);
+        assert!((gamma_k2(-1.0) - 0.0).abs() < 1e-10);
+        assert!((gamma_k2(100.0) - 1.0).abs() < 1e-10);
 
-        // γ(1, 0) = 0
-        assert!((lut.lookup(0.0) - 0.0).abs() < 1e-10);
-
-        // γ(1, x) → 1 as x → ∞
-        assert!((lut.lookup(100.0) - 1.0).abs() < 1e-6);
-
-        // γ(1, 1) = 1 - e^(-1) ≈ 0.632
         let expected = 1.0 - (-1.0_f64).exp();
-        assert!((lut.lookup(1.0) - expected).abs() < 0.001);
-    }
-
-    #[test]
-    fn test_gamma_lut_monotonic() {
-        let lut = GammaLut::new();
-
-        let mut prev = 0.0;
-        for i in 0..100 {
-            let x = i as f64 * 0.1;
-            let val = lut.lookup(x);
-            assert!(val >= prev, "γ(1, x) should be monotonically increasing");
-            prev = val;
-        }
+        assert!((gamma_k2(1.0) - expected).abs() < 1e-10);
     }
 
     #[test]

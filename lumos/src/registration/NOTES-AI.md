@@ -47,10 +47,10 @@ MAGSAC++ paper, Groth 1986, Valdes 1995, Tabur 2007, Lang 2010, SWarp, LSST pipe
 ### Prioritized Issues Across All Submodules
 
 #### Quick Fixes (easy, localized changes)
-1. **Replace GammaLut with `1-exp(-x)`** (ransac/magsac.rs) — removes ~70 lines, k=2 closed-form
-2. **Fix L2/L-inf tolerance mismatch** (triangle/voting.rs:126) — multiply radius by sqrt(2)
+1. ~~**Replace GammaLut with `1-exp(-x)`** (ransac/magsac.rs)~~ — **FIXED**: replaced ~70-line LUT with 6-line `gamma_k2()` closed-form
+2. ~~**Fix L2/L-inf tolerance mismatch** (triangle/voting.rs)~~ — **FIXED**: search radius multiplied by √2
 3. **Fix orientation test comments** (triangle/tests.rs:365,1050) — rotation preserves orientation
-4. **Check target point degeneracy** (ransac/mod.rs:289) — add `is_sample_degenerate(&sample_target)`
+4. ~~**Check target point degeneracy** (ransac/mod.rs)~~ — **FIXED**: added `is_sample_degenerate(&sample_target)`
 5. **Align confidence defaults** — RansacParams::default() 0.999 vs Config::default() 0.995
 6. **Add `nearest_one()`** to k-d tree (spatial/mod.rs) — avoids Vec allocation in match recovery
 7. **Use `f64::total_cmp()`** in k-d tree (spatial/mod.rs:92,136) — eliminates NaN panic path

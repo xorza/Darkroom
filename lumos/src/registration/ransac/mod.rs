@@ -286,8 +286,8 @@ impl RansacEstimator {
                 sample_target.push(target_points[i]);
             }
 
-            // Skip degenerate samples (coincident/collinear points)
-            if is_sample_degenerate(&sample_ref) {
+            // Skip degenerate samples (coincident/collinear points in either image)
+            if is_sample_degenerate(&sample_ref) || is_sample_degenerate(&sample_target) {
                 continue;
             }
 
