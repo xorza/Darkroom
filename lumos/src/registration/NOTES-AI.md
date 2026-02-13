@@ -53,8 +53,10 @@ See submodule NOTES-AI.md files for detailed per-module analysis:
 8. **TPS not integrated** — fully implemented and tested (`distortion/tps/`)
    but marked `dead_code`. PixInsight's primary distortion method.
 
-9. **No SIMD for Lanczos3** — the default interpolation method has no SIMD path.
-   Separable two-pass AVX2 could yield 2-4x speedup (Intel IPP approach).
+9. **Separable Lanczos3** — explicit AVX2 was tried on the non-separable 6x6 path
+   but provided no benefit (LLVM auto-vectorizes well). Fused weight normalization
+   gives -47% per-pixel overhead, -5-8% full-image. The remaining big win is
+   separable two-pass (6+6 vs 6x6), expected 2-3x improvement.
 
 10. **Missing IRWLS for MAGSAC++** — paper's key contribution for model accuracy.
     We use MAGSAC++ only for scoring, with binary inlier selection for estimation.
@@ -70,7 +72,7 @@ See submodule NOTES-AI.md files for detailed per-module analysis:
 | Distortion | SIP (forward) | TPS (iterative) | SIP (from WCS) | SIP (full A/B/AP/BP) | None |
 | Sigma-clipping SIP | Yes (3-iter, 3-sigma MAD) | N/A | N/A | Yes | N/A |
 | Lanczos deringing | Yes (min/max clamping) | Yes (0.3 threshold) | Yes | N/A | N/A |
-| SIMD warp | AVX2 bilinear only | Full SIMD | OpenCV SIMD | N/A | N/A |
+| SIMD warp | AVX2 bilinear; Lanczos3 auto-vectorized | Full SIMD | OpenCV SIMD | N/A | N/A |
 | Match recovery | Iterative (ICP-style) | Iterative | N/A | Bayesian | N/A |
 | Output framing | Fixed (=input) | Max/min/COG | Max/min/current/COG | N/A | Fixed |
 

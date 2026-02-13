@@ -174,25 +174,26 @@ higher-order interpolation if the SIMD approach were extended to Lanczos.
 Same algorithm as AVX2 but processes 4 pixels at a time. Uses `_mm_floor_ps` (SSE4.1
 instruction, hence the feature requirement). Otherwise identical structure.
 
-### Missing: SIMD Lanczos3
+### Lanczos3: No Explicit SIMD (Auto-Vectorized Scalar)
 
-No SIMD path exists for Lanczos3. The optimized scalar path in `warp/mod.rs` is the only
-fast path.
+Explicit AVX2 Lanczos3 was implemented and benchmarked (per-pixel vectorized 6-wide dot
+product with horizontal sum). Two strategies were tried:
+1. **Per-row hsum** (6 hsums per pixel): 25% slower than scalar
+2. **Single hsum** (accumulate all 6 rows, 1 hsum): matched scalar, no improvement
 
-**How much would SIMD Lanczos3 help?** The Lanczos3 kernel evaluates 12 LUT lookups per
-pixel (6 for x, 6 for y), then performs 36 multiply-accumulates for the 6x6 convolution.
-The LUT lookups are the bottleneck -- they involve scattered memory access that does not
-vectorize well. Intel IPP solves this with a two-pass separable approach:
-1. Horizontal pass: for each row, convolve 6 source pixels with x-weights
-2. Vertical pass: convolve 6 intermediate rows with y-weights
+Root cause: LLVM auto-vectorizes the scalar `for k in 0..6` inner loop with
+`get_unchecked` effectively. The AVX2 hsum overhead (~6 instructions) per pixel cancels
+out any SIMD benefit.
 
-This separable decomposition reduces 36 operations to 12 (6+6), and each pass is easily
-vectorized since it processes consecutive pixels. Intel reports 42 multiplications and 35
-additions per pixel with this approach.
+**Current optimization:** Fused weight normalization — raw (unnormalized) wx/wy weights
+are used throughout, with a single `1.0 / (wx_sum * wy_sum)` division at the end. This
+eliminates 2 divisions + 12 multiplies per pixel compared to normalizing wx and wy
+separately. Results: -47% on per-pixel microbenchmark, -5-8% on full-image warps (where
+memory bandwidth dominates).
 
-**Recommendation:** A separable two-pass Lanczos SIMD implementation would be the biggest
-performance win. Intel IPP achieves 1.5x speedup from SSE to AVX alone, and the separable
-approach itself is a fundamental algorithmic improvement.
+**Remaining opportunity:** Separable two-pass Lanczos (horizontal then vertical) would
+reduce 36 ops to 12 (6+6) and each pass vectorizes naturally over consecutive pixels.
+Intel IPP uses this approach. This is the biggest remaining performance opportunity.
 
 ## Performance Analysis
 
@@ -268,10 +269,13 @@ from clamp-to-edge which would be more correct.
 
 ## Missing Features
 
-### 1. SIMD Lanczos3 (High Impact)
-No SIMD implementation exists for Lanczos3, despite it being the default interpolation
-method. A separable two-pass approach with AVX2 vectorization could yield 2-3x speedup
-based on Intel IPP numbers.
+### 1. Separable Lanczos3 (High Impact)
+The current non-separable 6x6 convolution does 36 multiply-adds per pixel. A separable
+two-pass approach (horizontal then vertical) reduces this to 12 (6+6). Each pass processes
+consecutive pixels, enabling effective SIMD vectorization. Intel IPP uses this approach
+and reports 2-3x speedup. (Note: explicit AVX2 on the non-separable path was tried and
+provided no benefit — LLVM auto-vectorizes well. The separable decomposition is the key
+algorithmic improvement needed.)
 
 ### 2. FMA in SIMD Bilinear
 The AVX2 bilinear uses `_mm256_mul_ps` + `_mm256_add_ps` separately. Using FMA
@@ -285,9 +289,11 @@ detection path (all 8 pixels map within bounds) could skip bounds checking entir
 ## Potential Improvements (Prioritized)
 
 ### High Priority
-1. **Separable SIMD Lanczos3:** Two-pass (horizontal then vertical) with AVX2. This is
-   the single biggest performance opportunity. Intel IPP gets 1.5x from SSE->AVX alone.
-   Combined with separability, expect 2-4x total improvement for Lanczos3 warping.
+1. **Separable Lanczos3:** Two-pass (horizontal then vertical). This is the single biggest
+   performance opportunity — reduces 36 ops to 12 per pixel. Each pass processes
+   consecutive pixels enabling natural SIMD vectorization. Expect 2-3x total improvement.
+   (Explicit AVX2 on non-separable path was tried and did not help — LLVM auto-vectorizes
+   the 6-wide inner loop well enough that hsum overhead cancels SIMD gains.)
 
 ### Medium Priority
 2. **SIMD bilinear interior fast path:** When all 8 source pixels in a chunk are
