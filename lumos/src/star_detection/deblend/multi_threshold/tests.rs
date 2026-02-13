@@ -1401,3 +1401,60 @@ fn test_connected_regions_grid_into_recycles_previous() {
     // Pool should be empty because the 2 recycled vecs were reused for the 2 new regions
     assert!(region_pool.is_empty());
 }
+
+#[test]
+fn test_pixel_grid_generation_wrap_to_zero_guard() {
+    // Verify that wrapping generation counter from u32::MAX to 0 is handled
+    // correctly — generation 0 is skipped because generation arrays are
+    // initialized to 0, so wrapping to 0 would make all cells appear valid.
+    let mut grid = PixelGrid::empty();
+
+    // First population to set up grid dimensions
+    let pixels_large: Vec<Pixel> = (0..20)
+        .map(|i| Pixel {
+            pos: Vec2us::new(i, 0),
+            value: 99.0,
+        })
+        .collect();
+    grid.reset_with_pixels(&pixels_large);
+
+    // Force generation counter to u32::MAX so next reset wraps
+    grid.current_generation = u32::MAX;
+
+    // Small population — reset should wrap past 0 to 1
+    let pixels_small = vec![
+        Pixel {
+            pos: Vec2us::new(5, 0),
+            value: 1.0,
+        },
+        Pixel {
+            pos: Vec2us::new(6, 0),
+            value: 2.0,
+        },
+    ];
+    grid.reset_with_pixels(&pixels_small);
+
+    assert_ne!(
+        grid.current_generation, 0,
+        "Generation 0 must be skipped on wrap"
+    );
+
+    // BFS should find exactly the 2 new pixels, not stale data
+    let mut regions = Vec::new();
+    let mut region_pool = Vec::new();
+    let mut queue = Vec::new();
+    find_connected_regions_grid(
+        &pixels_small,
+        &mut regions,
+        &mut region_pool,
+        &mut grid,
+        &mut queue,
+    );
+
+    assert_eq!(regions.len(), 1);
+    assert_eq!(
+        regions[0].len(),
+        2,
+        "Should find exactly 2 pixels after generation wrap, not stale values"
+    );
+}

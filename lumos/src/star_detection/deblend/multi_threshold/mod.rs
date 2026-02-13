@@ -100,8 +100,13 @@ impl PixelGrid {
             return;
         }
 
-        // Increment generation to invalidate all previous values and visited marks
+        // Increment generation to invalidate all previous values and visited marks.
+        // Skip 0 because generation arrays are initialized to 0 — wrapping to 0
+        // would make all cells appear valid.
         self.current_generation = self.current_generation.wrapping_add(1);
+        if self.current_generation == 0 {
+            self.current_generation = 1;
+        }
         self.visited_generation_counter = self.current_generation;
 
         // Find bounding box
