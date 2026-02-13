@@ -14,7 +14,7 @@
 use std::collections::hash_map::DefaultHasher;
 use std::fs::File;
 use std::hash::{Hash, Hasher};
-use std::io::{self, BufWriter, Write};
+use std::io::{BufWriter, Write};
 use std::mem::size_of;
 use std::path::{Path, PathBuf};
 
@@ -443,14 +443,17 @@ impl<I: StackableImage> ImageCache<I> {
         let frame_count = self.frame_count();
         let channels = self.dimensions.channels;
         let height = self.dimensions.height;
+        let pixel_count = self.dimensions.width * height;
         let mut stats = vec![(0.0f32, 0.0f32); frame_count * channels];
+        let mut buf = Vec::with_capacity(pixel_count);
+        let mut scratch = Vec::with_capacity(pixel_count);
 
         for frame_idx in 0..frame_count {
             for channel in 0..channels {
                 let data = self.read_channel_chunk(frame_idx, channel, 0, height);
-                let mut buf: Vec<f32> = data.to_vec();
+                buf.clear();
+                buf.extend_from_slice(data);
                 let median = crate::math::median_f32_mut(&mut buf);
-                let mut scratch = Vec::with_capacity(buf.len());
                 let mad = crate::math::mad_f32_with_scratch(data, median, &mut scratch);
                 stats[frame_idx * channels + channel] = (median, mad);
             }
@@ -563,6 +566,24 @@ fn write_channel_cache_file(path: &Path, channel_data: &[f32]) -> Result<(), Err
     Ok(())
 }
 
+/// Open and memory-map a channel cache file.
+fn mmap_channel_file(channel_path: PathBuf) -> Result<CachedChannel, Error> {
+    let file = File::open(&channel_path).map_err(|e| Error::OpenCacheFile {
+        path: channel_path.clone(),
+        source: e,
+    })?;
+    let mmap = unsafe {
+        Mmap::map(&file).map_err(|e| Error::MmapCacheFile {
+            path: channel_path.clone(),
+            source: e,
+        })?
+    };
+    Ok(CachedChannel {
+        mmap,
+        path: channel_path,
+    })
+}
+
 /// Load an image and cache it, or reuse existing cache files if valid.
 /// Returns the CachedFrame with memory-mapped channel data.
 fn load_and_cache_frame<I: StackableImage>(
@@ -586,20 +607,7 @@ fn load_and_cache_frame<I: StackableImage>(
         let mut cached_channels = ArrayVec::new();
         for c in 0..channels {
             let channel_path = cache_dir.join(channel_cache_filename(base_filename, c));
-            let file = File::open(&channel_path).map_err(|e| Error::OpenCacheFile {
-                path: channel_path.clone(),
-                source: e,
-            })?;
-            let mmap = unsafe {
-                Mmap::map(&file).map_err(|e| Error::MmapCacheFile {
-                    path: channel_path.clone(),
-                    source: e,
-                })?
-            };
-            cached_channels.push(CachedChannel {
-                mmap,
-                path: channel_path,
-            });
+            cached_channels.push(mmap_channel_file(channel_path)?);
         }
         tracing::debug!(
             source = %source_path.display(),
@@ -645,22 +653,7 @@ fn cache_image_channels(
             write_channel_cache_file(&channel_path, image.channel(c))?;
         }
 
-        // Memory-map the channel file
-        let file = File::open(&channel_path).map_err(|e| Error::OpenCacheFile {
-            path: channel_path.clone(),
-            source: e,
-        })?;
-        let mmap = unsafe {
-            Mmap::map(&file).map_err(|e| Error::MmapCacheFile {
-                path: channel_path.clone(),
-                source: e,
-            })?
-        };
-
-        cached_channels.push(CachedChannel {
-            mmap,
-            path: channel_path,
-        });
+        cached_channels.push(mmap_channel_file(channel_path)?);
     }
 
     Ok(CachedFrame {
