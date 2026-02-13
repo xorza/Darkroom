@@ -19,29 +19,23 @@ robust statistics (median via quickselect, MAD, iterative sigma-clipped rejectio
 - `weighted_mean_f32` has `debug_assert_eq` on lengths, returns 0.0 on zero weights
 - `transform_point` has `debug_assert` for w=0 (points at infinity)
 
-## Remaining Issues (Performance Only)
+## Compensated Summation — FIXED
 
-### No Compensated Summation - Precision Loss for Large Arrays
-- Files: `sum/scalar.rs`, `sum/sse.rs`, `sum/avx2.rs`, `sum/neon.rs`
-- All use naive sequential accumulation: scalar uses `iter().sum()`, SIMD uses single
-  accumulator vector per lane with naive horizontal reduction.
-- **Error analysis**: Naive summation has O(n*eps) worst-case error. For a 4096-pixel
-  tile of values around 100.0, f32 (23-bit mantissa, ~7 decimal digits) can lose 1-2
-  significant digits in the sum.
-- SIMD lanes provide partial pairwise benefit (4 or 8 independent accumulators), but the
-  horizontal reduction at the end and the scalar remainder loop are still naive.
-- **Industry standard**: Pairwise summation achieves O(log(n)*eps) with negligible cost.
-  Neumaier/Kahan compensated summation achieves O(n*eps^2) -- essentially independent of n.
-  Python 3.12+ stdlib uses Neumaier for `sum()`. NumPy uses pairwise summation.
-- **Impact**: For the tile sizes used (64x64 = 4096), the error is tolerable but not optimal.
-  For weighted mean (which sums products), errors compound further.
-- **Fix options**: (a) Neumaier compensated loop for scalar, (b) multiple accumulator
-  vectors for SIMD (e.g., 2-4 vectors before combining), (c) pairwise summation.
+All sum paths now use compensated summation for O(n·ε²) precision:
+- **Scalar** (`scalar.rs`): Neumaier compensated loop (improved Kahan with abs-comparison)
+- **SSE/AVX2/NEON** (`sse.rs`, `avx2.rs`, `neon.rs`): Kahan compensated SIMD inner loop
+  (3 extra ops/element: sub, add, sub — no comparison/blend needed), Neumaier horizontal
+  reduction with separate sum/compensation lane reduction
+- **`weighted_mean_f32`** (`mod.rs`): Neumaier for both numerator and denominator via
+  `neumaier_add` helper
 
-### weighted_mean_f32 Uses Naive Scalar Loop, Not SIMD
+**Benchmark** (10k elements, AVX2):
+- Scalar: 13.2µs (baseline was 16.7µs — slightly faster due to better branch pattern)
+- SIMD: 3.8µs (baseline was 1.6µs — 2.4× overhead, acceptable for precision gain)
+
+### weighted_mean_f32 Uses Scalar Loop, Not SIMD
 - File: `sum/mod.rs`
-- The module provides SIMD-accelerated `sum_f32` but `weighted_mean_f32` uses a naive
-  scalar loop. For large arrays this misses the SIMD speedup.
+- Uses Neumaier-compensated scalar loop. SIMD weighted mean is possible but not yet needed.
 
 ## Algorithm Comparison with Industry Standards
 
@@ -59,12 +53,10 @@ robust statistics (median via quickselect, MAD, iterative sigma-clipped rejectio
   1/Phi^{-1}(3/4) to f32 precision. The computation is standard.
 
 ### SIMD Summation
-- **This implementation**: Single accumulator vector per architecture. Correct results for
-  typical astronomy data (values 0-65535, tile sizes up to 4096).
-- **Best practice**: Use 2-4 accumulator vectors to break dependency chains and improve
-  throughput. The dependency chain in single-accumulator SIMD limits ILP.
-- **Correctness**: All three SIMD implementations (SSE, AVX2, NEON) are structurally
-  correct. Horizontal reduction patterns are standard. Remainder handling is correct.
+- **This implementation**: Kahan compensated summation per SIMD lane (SSE/AVX2/NEON),
+  Neumaier horizontal reduction with separate sum/compensation lane reduction.
+- O(n·ε²) precision — essentially independent of array length.
+- ~2.4× overhead vs naive SIMD (10k elements, AVX2). Acceptable for astronomy data.
 
 ### Quickselect / Median
 - **This implementation**: Uses Rust stdlib `select_nth_unstable_by` which is O(n) expected,

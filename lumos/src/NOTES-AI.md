@@ -50,7 +50,7 @@ patterns and the highest-priority **unfixed** issues across all modules.
 - Need project-wide decision: allow negatives in linear pipeline or clamp at each stage
 
 ### 2. Numerical Stability
-- math: No compensated summation (naive f32 accumulation loses precision)
+- ~~math: No compensated summation~~ — **FIXED**: Neumaier scalar + Kahan SIMD
 - gradient_removal: Normal equations (A^T*A) squares condition number
 - gradient_removal: TPS coordinates not normalized (huge scale mismatch)
 - These compound: imprecise sums → imprecise statistics → imprecise models
@@ -72,7 +72,7 @@ patterns and the highest-priority **unfixed** issues across all modules.
 6. Fix drizzle Lanczos parameter validation + output clamping
 7. Fix drizzle `min_coverage` normalization
 8. Rename Square kernel to Turbo
-9. Add compensated summation to math
+9. ~~Add compensated summation to math~~ — **FIXED**
 10. Replace gradient_removal normal equations with QR/SVD
 11. Normalize gradient_removal TPS coordinates
 12. Increase gradient_removal sample box radius

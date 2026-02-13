@@ -37,8 +37,21 @@ pub fn mean_f32(values: &[f32]) -> f32 {
     sum_f32(values) / values.len() as f32
 }
 
+/// Neumaier compensated addition: accumulates `v` into `sum` with compensation `c`.
+#[inline]
+fn neumaier_add(sum: &mut f32, c: &mut f32, v: f32) {
+    let t = *sum + v;
+    if sum.abs() >= v.abs() {
+        *c += (*sum - t) + v;
+    } else {
+        *c += (v - t) + *sum;
+    }
+    *sum = t;
+}
+
 /// Compute weighted mean of values with corresponding weights.
 ///
+/// Uses Neumaier compensated summation for both numerator and denominator.
 /// Returns 0.0 if the total weight is near zero.
 pub fn weighted_mean_f32(values: &[f32], weights: &[f32]) -> f32 {
     debug_assert_eq!(
@@ -52,15 +65,20 @@ pub fn weighted_mean_f32(values: &[f32], weights: &[f32]) -> f32 {
     }
 
     let mut sum = 0.0f32;
-    let mut weight_sum = 0.0f32;
+    let mut c_sum = 0.0f32;
+    let mut wsum = 0.0f32;
+    let mut c_wsum = 0.0f32;
 
     for (&v, &w) in values.iter().zip(weights.iter()) {
-        sum += v * w;
-        weight_sum += w;
+        neumaier_add(&mut sum, &mut c_sum, v * w);
+        neumaier_add(&mut wsum, &mut c_wsum, w);
     }
 
-    if weight_sum > f32::EPSILON {
-        sum / weight_sum
+    let total = sum + c_sum;
+    let total_w = wsum + c_wsum;
+
+    if total_w > f32::EPSILON {
+        total / total_w
     } else {
         0.0
     }
