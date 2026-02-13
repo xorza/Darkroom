@@ -7,6 +7,7 @@ use glam::DVec2;
 #[cfg(target_arch = "x86_64")]
 use std::arch::x86_64::*;
 
+use super::SoftClampAccum;
 use crate::registration::transform::Transform;
 
 /// Warp a row using AVX2 SIMD with bilinear interpolation.
@@ -309,7 +310,7 @@ pub unsafe fn lanczos3_kernel_fma<const DERINGING: bool>(
     ky: usize,
     wx: &[f32; 6],
     wy: &[f32; 6],
-) -> (f32, f32, f32, f32) {
+) -> SoftClampAccum {
     // Pre-load wx weights into SSE registers (constant across all 6 rows)
     let wx_lo = _mm_set_ps(wx[3], wx[2], wx[1], wx[0]);
     let wx_hi = _mm_setr_ps(wx[4], wx[5], 0.0, 0.0);
@@ -363,14 +364,19 @@ pub unsafe fn lanczos3_kernel_fma<const DERINGING: bool>(
 
     if DERINGING {
         // Horizontal reductions for all 4 accumulators
-        let sp = hsum_ps(_mm_add_ps(sp_lo, sp_hi));
-        let sn = hsum_ps(_mm_add_ps(sn_lo, sn_hi));
-        let wp = hsum_ps(_mm_add_ps(wp_lo, wp_hi));
-        let wn = hsum_ps(_mm_add_ps(wn_lo, wn_hi));
-        (sp, sn, wp, wn)
+        SoftClampAccum {
+            sp: hsum_ps(_mm_add_ps(sp_lo, sp_hi)),
+            sn: hsum_ps(_mm_add_ps(sn_lo, sn_hi)),
+            wp: hsum_ps(_mm_add_ps(wp_lo, wp_hi)),
+            wn: hsum_ps(_mm_add_ps(wn_lo, wn_hi)),
+        }
     } else {
-        let sum = hsum_ps(_mm_add_ps(acc_lo, acc_hi));
-        (sum, 0.0, 0.0, 0.0)
+        SoftClampAccum {
+            sp: hsum_ps(_mm_add_ps(acc_lo, acc_hi)),
+            sn: 0.0,
+            wp: 0.0,
+            wn: 0.0,
+        }
     }
 }
 

@@ -19,6 +19,19 @@ use crate::registration::interpolation::get_lanczos_lut;
 use crate::registration::transform::WarpTransform;
 use glam::DVec2;
 
+/// Positive/negative weighted contribution accumulators for soft clamping.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct SoftClampAccum {
+    /// Sum of positive weighted values (pixel * weight where result >= 0)
+    pub sp: f32,
+    /// Sum of absolute negative weighted values
+    pub sn: f32,
+    /// Sum of weights for positive contributions
+    pub wp: f32,
+    /// Sum of weights for negative contributions
+    pub wn: f32,
+}
+
 /// Warp a row of pixels using bilinear interpolation.
 ///
 /// Uses AVX2/SSE4.1 on x86_64, scalar with incremental stepping elsewhere.
@@ -241,7 +254,7 @@ fn warp_row_lanczos3_inner<const DERINGING: bool>(
         // SIMD fast path: needs kx0+7 < iw for 128-bit loads (6 valid + 2 padding)
         #[cfg(target_arch = "x86_64")]
         if kx0 >= 0 && ky0 >= 0 && kx0 + 8 < iw && ky0 + 5 < ih && use_fma {
-            let (sp, sn, wp, wn) = unsafe {
+            let acc = unsafe {
                 sse::lanczos3_kernel_fma::<DERINGING>(
                     pixels,
                     input_width,
@@ -252,9 +265,9 @@ fn warp_row_lanczos3_inner<const DERINGING: bool>(
                 )
             };
             *out_pixel = if DERINGING {
-                soft_clamp(sp, sn, wp, wn, clamp_th, clamp_th_inv)
+                soft_clamp(acc.sp, acc.sn, acc.wp, acc.wn, clamp_th, clamp_th_inv)
             } else {
-                sp * inv_total
+                acc.sp * inv_total
             };
 
             if can_step {
