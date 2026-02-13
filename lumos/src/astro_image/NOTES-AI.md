@@ -34,28 +34,13 @@ for raw CFA data, calibration ops, demosaic dispatch).
 - BitPix distinguishes unsigned from signed types for correct normalization ranges
 - `from_fits_value()` returns Result for safe handling of unknown BITPIX values
 - X-Trans demosaic uses `process_xtrans_f32()` — no f32→u16 precision loss
+- `ImageDimensions::sample_count()` (w*h*c) vs `pixel_count()` (w*h) — clear naming
+- BAYERPAT/ROWORDER/XBAYROFF/YBAYROFF FITS header parsing for CFA pattern detection
+- CfaPattern: `from_bayerpat()`, `flip_vertical()`, `flip_horizontal()` for FITS CFA
+- Comprehensive FITS metadata: FILTER, GAIN, EGAIN, CCD-TEMP, IMAGETYP, XBINNING,
+  YBINNING, SET-TEMP, OFFSET, FOCALLEN, AIRMASS (with CCDTEMP/FRAME fallbacks)
 
 ## Remaining Issues
-
-### P3: Missing BAYERPAT FITS Header Reading
-**File:** `fits.rs`
-
-BAYERPAT is a widely used non-standard keyword written by N.I.N.A., SharpCap, SGPro,
-MaxIm DL, and most modern capture software. Values: "RGGB", "BGGR", "GRBG", "GBRG".
-ROWORDER keyword ("TOP-DOWN"/"BOTTOM-UP") affects CFA pattern interpretation.
-
-### P4: Missing Standard FITS Metadata Fields
-**File:** `mod.rs`
-
-Currently reads: OBJECT, INSTRUME, TELESCOP, DATE-OBS, EXPTIME.
-Missing: FILTER (critical for narrowband), GAIN, EGAIN, CCD-TEMP, IMAGETYP (frame
-classification), XBINNING/YBINNING, SET-TEMP, OFFSET, FOCALLEN, AIRMASS.
-
-### P5: pixel_count() Returns Sample Count, Not Pixel Count
-**File:** `mod.rs`
-
-Returns `width * height * channels`. For 100x100 RGB: returns 30000, not 10000.
-**Fix:** Rename to `sample_count()` and add true `pixel_count() -> width * height`.
 
 ### P7: No FITS Writing Support
 **File:** `mod.rs`

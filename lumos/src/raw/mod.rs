@@ -505,9 +505,9 @@ pub fn load_raw(path: &Path) -> Result<AstroImage> {
 
     let dimensions = ImageDimensions::new(width, height, channels);
     assert!(
-        pixels.len() == dimensions.pixel_count(),
-        "Pixel count mismatch: expected {}, got {}",
-        dimensions.pixel_count(),
+        pixels.len() == dimensions.sample_count(),
+        "Sample count mismatch: expected {}, got {}",
+        dimensions.sample_count(),
         pixels.len()
     );
 

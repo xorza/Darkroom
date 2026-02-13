@@ -69,6 +69,69 @@ fn test_pattern_2x2() {
     assert_eq!(CfaPattern::Gbrg.pattern_2x2(), [1, 2, 0, 1]);
 }
 
+// ── from_bayerpat tests ──────────────────────────────────────
+
+#[test]
+fn test_from_bayerpat() {
+    assert_eq!(CfaPattern::from_bayerpat("RGGB"), Some(CfaPattern::Rggb));
+    assert_eq!(CfaPattern::from_bayerpat("BGGR"), Some(CfaPattern::Bggr));
+    assert_eq!(CfaPattern::from_bayerpat("GRBG"), Some(CfaPattern::Grbg));
+    assert_eq!(CfaPattern::from_bayerpat("GBRG"), Some(CfaPattern::Gbrg));
+    // Case insensitive
+    assert_eq!(CfaPattern::from_bayerpat("rggb"), Some(CfaPattern::Rggb));
+    // "TRUE" is RGGB
+    assert_eq!(CfaPattern::from_bayerpat("TRUE"), Some(CfaPattern::Rggb));
+    // Whitespace trimmed
+    assert_eq!(CfaPattern::from_bayerpat(" BGGR "), Some(CfaPattern::Bggr));
+    // Invalid
+    assert_eq!(CfaPattern::from_bayerpat("XXXX"), None);
+    assert_eq!(CfaPattern::from_bayerpat(""), None);
+}
+
+// ── flip tests ───────────────────────────────────────────────
+
+#[test]
+fn test_flip_vertical() {
+    // Flip swaps rows: RGGB row0=[R,G] row1=[G,B] → row0=[G,B] row1=[R,G] = GBRG
+    assert_eq!(CfaPattern::Rggb.flip_vertical(), CfaPattern::Gbrg);
+    assert_eq!(CfaPattern::Gbrg.flip_vertical(), CfaPattern::Rggb);
+    assert_eq!(CfaPattern::Bggr.flip_vertical(), CfaPattern::Grbg);
+    assert_eq!(CfaPattern::Grbg.flip_vertical(), CfaPattern::Bggr);
+    // Double flip is identity
+    assert_eq!(
+        CfaPattern::Rggb.flip_vertical().flip_vertical(),
+        CfaPattern::Rggb
+    );
+}
+
+#[test]
+fn test_flip_horizontal() {
+    // Flip swaps columns: RGGB row0=[R,G] row1=[G,B] → row0=[G,R] row1=[B,G] = GRBG
+    assert_eq!(CfaPattern::Rggb.flip_horizontal(), CfaPattern::Grbg);
+    assert_eq!(CfaPattern::Grbg.flip_horizontal(), CfaPattern::Rggb);
+    assert_eq!(CfaPattern::Bggr.flip_horizontal(), CfaPattern::Gbrg);
+    assert_eq!(CfaPattern::Gbrg.flip_horizontal(), CfaPattern::Bggr);
+    // Double flip is identity
+    assert_eq!(
+        CfaPattern::Rggb.flip_horizontal().flip_horizontal(),
+        CfaPattern::Rggb
+    );
+}
+
+#[test]
+fn test_flip_both_axes() {
+    // Flipping both axes is equivalent to 180° rotation
+    // RGGB → flip_v → GBRG → flip_h → BGGR
+    assert_eq!(
+        CfaPattern::Rggb.flip_vertical().flip_horizontal(),
+        CfaPattern::Bggr
+    );
+    assert_eq!(
+        CfaPattern::Bggr.flip_vertical().flip_horizontal(),
+        CfaPattern::Rggb
+    );
+}
+
 // ── BayerImage validation tests ──────────────────────────────
 
 #[test]

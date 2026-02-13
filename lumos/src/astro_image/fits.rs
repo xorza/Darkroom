@@ -4,6 +4,7 @@ use fitsio::hdu::HduInfo;
 use fitsio::images::ImageType;
 use std::path::Path;
 
+use super::cfa::CfaType;
 use super::{AstroImage, AstroImageMetadata, BitPix, ImageDimensions};
 
 /// Load an astronomical image from a FITS file.
@@ -54,6 +55,9 @@ pub fn load_fits(path: &Path) -> Result<AstroImage> {
     // Normalize integer FITS data to [0,1] range (RAW files are already normalized)
     let pixels = normalize_fits_pixels(pixels, bitpix);
 
+    // Detect CFA pattern from BAYERPAT header
+    let cfa_type = read_cfa_from_headers(&hdu, &mut fptr);
+
     // Read metadata
     let metadata = AstroImageMetadata {
         object: read_key_optional(&hdu, &mut fptr, "OBJECT"),
@@ -61,10 +65,23 @@ pub fn load_fits(path: &Path) -> Result<AstroImage> {
         telescope: read_key_optional(&hdu, &mut fptr, "TELESCOP"),
         date_obs: read_key_optional(&hdu, &mut fptr, "DATE-OBS"),
         exposure_time: read_key_optional(&hdu, &mut fptr, "EXPTIME"),
-        iso: None, // FITS typically doesn't store ISO
+        iso: None,
         bitpix,
         header_dimensions: dimensions,
-        cfa_type: None,
+        cfa_type,
+        filter: read_key_optional(&hdu, &mut fptr, "FILTER"),
+        gain: read_key_optional(&hdu, &mut fptr, "GAIN"),
+        egain: read_key_optional(&hdu, &mut fptr, "EGAIN"),
+        ccd_temp: read_key_optional::<f64>(&hdu, &mut fptr, "CCD-TEMP")
+            .or_else(|| read_key_optional(&hdu, &mut fptr, "CCDTEMP")),
+        image_type: read_key_optional::<String>(&hdu, &mut fptr, "IMAGETYP")
+            .or_else(|| read_key_optional(&hdu, &mut fptr, "FRAME")),
+        xbinning: read_key_optional(&hdu, &mut fptr, "XBINNING"),
+        ybinning: read_key_optional(&hdu, &mut fptr, "YBINNING"),
+        set_temp: read_key_optional(&hdu, &mut fptr, "SET-TEMP"),
+        offset: read_key_optional(&hdu, &mut fptr, "OFFSET"),
+        focal_length: read_key_optional(&hdu, &mut fptr, "FOCALLEN"),
+        airmass: read_key_optional(&hdu, &mut fptr, "AIRMASS"),
     };
 
     // FITS stores 3D images in planar order (all R, then all G, then all B).
@@ -107,6 +124,39 @@ fn normalize_fits_pixels(mut pixels: Vec<f32>, bitpix: BitPix) -> Vec<f32> {
         pixels.iter_mut().for_each(|p| *p *= inv_max);
     }
     pixels
+}
+
+/// Read CFA pattern from BAYERPAT header, adjusting for ROWORDER if present.
+///
+/// BAYERPAT values: "RGGB", "BGGR", "GRBG", "GBRG", or "TRUE" (= RGGB).
+/// ROWORDER: "TOP-DOWN" (default) or "BOTTOM-UP" (flips pattern vertically).
+/// XBAYROFF/YBAYROFF: integer offsets into the Bayer matrix (shifts pattern).
+fn read_cfa_from_headers(hdu: &fitsio::hdu::FitsHdu, fptr: &mut FitsFile) -> Option<CfaType> {
+    use crate::raw::demosaic::CfaPattern;
+
+    let bayerpat: String = read_key_optional(hdu, fptr, "BAYERPAT")?;
+    let mut pattern = CfaPattern::from_bayerpat(&bayerpat)?;
+
+    // ROWORDER: if BOTTOM-UP, the first row in memory is the bottom of the image,
+    // so the Bayer pattern needs to be flipped vertically.
+    if let Some(roworder) = read_key_optional::<String>(hdu, fptr, "ROWORDER")
+        && roworder.trim().eq_ignore_ascii_case("BOTTOM-UP")
+    {
+        pattern = pattern.flip_vertical();
+    }
+
+    // XBAYROFF/YBAYROFF: offset into the Bayer matrix.
+    // An odd Y offset flips rows, an odd X offset flips columns.
+    let xoff: i32 = read_key_optional(hdu, fptr, "XBAYROFF").unwrap_or(0);
+    let yoff: i32 = read_key_optional(hdu, fptr, "YBAYROFF").unwrap_or(0);
+    if yoff & 1 != 0 {
+        pattern = pattern.flip_vertical();
+    }
+    if xoff & 1 != 0 {
+        pattern = pattern.flip_horizontal();
+    }
+
+    Some(CfaType::Bayer(pattern))
 }
 
 /// Helper to read an optional string key from FITS header.

@@ -18,6 +18,39 @@ pub enum CfaPattern {
 }
 
 impl CfaPattern {
+    /// Parse from FITS BAYERPAT header value (e.g. "RGGB", "BGGR", "GRBG", "GBRG").
+    pub fn from_bayerpat(s: &str) -> Option<Self> {
+        match s.trim().to_uppercase().as_str() {
+            "RGGB" | "TRUE" => Some(CfaPattern::Rggb),
+            "BGGR" => Some(CfaPattern::Bggr),
+            "GRBG" => Some(CfaPattern::Grbg),
+            "GBRG" => Some(CfaPattern::Gbrg),
+            _ => None,
+        }
+    }
+
+    /// Flip the pattern vertically (swap rows).
+    /// Used when ROWORDER is BOTTOM-UP, since BAYERPAT assumes TOP-DOWN.
+    pub fn flip_vertical(self) -> Self {
+        match self {
+            CfaPattern::Rggb => CfaPattern::Gbrg,
+            CfaPattern::Gbrg => CfaPattern::Rggb,
+            CfaPattern::Bggr => CfaPattern::Grbg,
+            CfaPattern::Grbg => CfaPattern::Bggr,
+        }
+    }
+
+    /// Flip the pattern horizontally (swap columns).
+    /// Used when XBAYROFF is odd.
+    pub fn flip_horizontal(self) -> Self {
+        match self {
+            CfaPattern::Rggb => CfaPattern::Grbg,
+            CfaPattern::Grbg => CfaPattern::Rggb,
+            CfaPattern::Bggr => CfaPattern::Gbrg,
+            CfaPattern::Gbrg => CfaPattern::Bggr,
+        }
+    }
+
     /// Get color index at position (y, x) in the Bayer pattern.
     /// Returns: 0=Red, 1=Green, 2=Blue
     #[inline(always)]

@@ -74,7 +74,7 @@ pub(crate) trait StackableImage: Send + Sync + std::fmt::Debug + Sized {
 
     /// In-memory size of this image's pixel data in bytes.
     fn size_in_bytes(&self) -> usize {
-        self.dimensions().pixel_count() * size_of::<f32>()
+        self.dimensions().sample_count() * size_of::<f32>()
     }
 }
 
@@ -172,7 +172,7 @@ impl<I: StackableImage> ImageCache<I> {
 
         tracing::info!(
             frame_count = paths.len(),
-            pixel_count = dimensions.pixel_count(),
+            sample_count = dimensions.sample_count(),
             available_mb = available_memory / (1024 * 1024),
             use_in_memory,
             "Image cache storage decision"

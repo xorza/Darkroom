@@ -100,6 +100,15 @@ fn test_load_full_example_fits() {
         (pixel - expected).abs() < 1e-6,
         "pixel={pixel}, expected={expected}"
     );
+
+    // No BAYERPAT header → cfa_type is None
+    assert!(image.metadata.cfa_type.is_none());
+
+    // New metadata fields are None for this simple test file
+    assert!(image.metadata.filter.is_none());
+    assert!(image.metadata.gain.is_none());
+    assert!(image.metadata.ccd_temp.is_none());
+    assert!(image.metadata.image_type.is_none());
 }
 
 #[test]
@@ -283,7 +292,8 @@ fn test_rgb_image_creation_and_operations() {
     assert_eq!(image.height(), 2);
     assert_eq!(image.channels(), 3);
     assert!(!image.is_grayscale());
-    assert_eq!(image.pixel_count(), 12);
+    assert_eq!(image.pixel_count(), 4);
+    assert_eq!(image.sample_count(), 12);
 
     let expected_mean: f32 =
         (10.0 + 20.0 + 30.0 + 40.0 + 50.0 + 60.0 + 70.0 + 80.0 + 90.0 + 100.0 + 110.0 + 120.0)
@@ -466,7 +476,8 @@ fn test_image_dimensions_validation() {
     assert_eq!(dims.width, 100);
     assert_eq!(dims.height, 200);
     assert_eq!(dims.channels, 3);
-    assert_eq!(dims.pixel_count(), 60000);
+    assert_eq!(dims.pixel_count(), 20000);
+    assert_eq!(dims.sample_count(), 60000);
     assert!(!dims.is_grayscale());
     assert!(dims.is_rgb());
 }

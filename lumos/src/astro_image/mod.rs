@@ -102,8 +102,16 @@ impl ImageDimensions {
         }
     }
 
-    pub fn pixel_count(&self) -> usize {
+    /// Total number of f32 samples: `width * height * channels`.
+    /// For a 100x100 RGB image, returns 30000.
+    pub fn sample_count(&self) -> usize {
         self.width * self.height * self.channels
+    }
+
+    /// Number of pixels: `width * height`.
+    /// For a 100x100 RGB image, returns 10000.
+    pub fn pixel_count(&self) -> usize {
+        self.width * self.height
     }
 
     pub fn is_grayscale(&self) -> bool {
@@ -119,7 +127,7 @@ impl ImageDimensions {
 // AstroImageMetadata
 // ============================================================================
 
-/// Metadata extracted from FITS file headers.
+/// Metadata extracted from FITS file headers or RAW EXIF.
 #[derive(Debug, Clone, Default)]
 pub struct AstroImageMetadata {
     pub object: Option<String>,
@@ -133,6 +141,28 @@ pub struct AstroImageMetadata {
     /// CFA sensor type, if the image originated from a raw sensor.
     /// `None` for non-CFA sources (FITS, monochrome sensors).
     pub cfa_type: Option<cfa::CfaType>,
+    /// Filter name (e.g. "Ha", "OIII", "L", "R"). Critical for narrowband.
+    pub filter: Option<String>,
+    /// Camera gain setting (unitless, camera-specific).
+    pub gain: Option<f64>,
+    /// Electrons per ADU (e-/ADU). Used for noise modeling.
+    pub egain: Option<f64>,
+    /// CCD/sensor temperature in degrees Celsius during exposure.
+    pub ccd_temp: Option<f64>,
+    /// Frame type: "Light", "Dark", "Flat", "Bias", etc.
+    pub image_type: Option<String>,
+    /// Horizontal binning factor.
+    pub xbinning: Option<i32>,
+    /// Vertical binning factor.
+    pub ybinning: Option<i32>,
+    /// Target sensor temperature setpoint in degrees Celsius.
+    pub set_temp: Option<f64>,
+    /// Camera offset setting (unitless, camera-specific).
+    pub offset: Option<i32>,
+    /// Focal length in mm.
+    pub focal_length: Option<f64>,
+    /// Airmass at time of observation.
+    pub airmass: Option<f64>,
 }
 
 // ============================================================================
@@ -246,9 +276,9 @@ impl AstroImage {
     pub fn from_pixels(dimensions: ImageDimensions, pixels: Vec<f32>) -> Self {
         assert_eq!(
             pixels.len(),
-            dimensions.pixel_count(),
-            "Pixel count mismatch: expected {}, got {}",
-            dimensions.pixel_count(),
+            dimensions.sample_count(),
+            "Sample count mismatch: expected {}, got {}",
+            dimensions.sample_count(),
             pixels.len()
         );
 
@@ -346,6 +376,10 @@ impl AstroImage {
 
     pub fn pixel_count(&self) -> usize {
         self.dimensions.pixel_count()
+    }
+
+    pub fn sample_count(&self) -> usize {
+        self.dimensions.sample_count()
     }
 
     pub fn is_grayscale(&self) -> bool {
