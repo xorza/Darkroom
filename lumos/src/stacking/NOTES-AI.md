@@ -116,12 +116,11 @@ Rewritten to match PixInsight/Siril two-phase algorithm:
 - Replaced `DefaultHasher` (random-seeded SipHash) with deterministic FNV-1a hasher.
   Cache filenames are now stable across process invocations, making `keep_cache` work.
 
-### P3: Cache -- Missing Source File Validation
-
-- **File**: cache.rs, `try_reuse_channel_cache_file`
-- Only checks file existence + size match. If source file changes (re-calibration)
-  but path and dimensions remain the same, **stale data is silently used**.
-- **Fix**: Store source file mtime + size in sidecar metadata. Validate on reuse.
+### ~~P3: Cache -- Missing Source File Validation~~ — FIXED
+- Added `.meta` sidecar files storing source mtime (8-byte LE u64).
+  `load_and_cache_frame` writes meta after caching; `validate_source_meta` checks
+  before reuse. Cleanup removes `.meta` files alongside channel caches.
+- Test: `test_source_meta_validates_mtime`
 
 ### P3: Cache -- Missing madvise(MADV_SEQUENTIAL)
 

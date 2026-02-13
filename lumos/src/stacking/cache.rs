@@ -108,20 +108,11 @@ fn cache_filename_for_path(path: &Path) -> String {
     format!("{:016x}.bin", hash)
 }
 
-/// Single cached channel with memory-mapped data.
-#[derive(Debug)]
-struct CachedChannel {
-    /// Memory-mapped channel data.
-    mmap: Mmap,
-    /// Path to the cache file.
-    path: PathBuf,
-}
-
 /// Cached frame data for disk-backed storage.
-/// Contains 1–3 channels (L, RGB).
+/// Contains 1–3 memory-mapped channels (L, RGB).
 #[derive(Debug)]
 struct CachedFrame {
-    channels: ArrayVec<CachedChannel, 3>,
+    channels: ArrayVec<Mmap, 3>,
 }
 
 /// Storage mode for image data.
@@ -502,7 +493,7 @@ impl<I: StackableImage> ImageCache<I> {
                 &channel_data[start_pixel..end_pixel]
             }
             Storage::DiskBacked { frames, .. } => {
-                let mmap = &frames[frame_idx].channels[channel].mmap;
+                let mmap = &frames[frame_idx].channels[channel];
                 let start_offset = start_pixel * size_of::<f32>();
                 let end_offset = end_pixel * size_of::<f32>();
                 let bytes = &mmap[start_offset..end_offset];
@@ -519,13 +510,8 @@ impl<I> ImageCache<I> {
             return;
         }
 
-        if let Storage::DiskBacked { frames, cache_dir } = &self.storage {
-            for frame in frames {
-                for channel in &frame.channels {
-                    let _ = std::fs::remove_file(&channel.path);
-                }
-            }
-            let _ = std::fs::remove_dir(cache_dir);
+        if let Storage::DiskBacked { cache_dir, .. } = &self.storage {
+            let _ = std::fs::remove_dir_all(cache_dir);
         }
     }
 }
@@ -538,31 +524,67 @@ impl<I> Drop for ImageCache<I> {
 
 /// Generate cache filename for a specific channel.
 fn channel_cache_filename(base_filename: &str, channel: usize) -> String {
-    // Replace .bin with _c{channel}.bin
-    let stem = base_filename.trim_end_matches(".bin");
-    format!("{}_c{}.bin", stem, channel)
+    let stem = base_filename.strip_suffix(".bin").unwrap_or(base_filename);
+    format!("{stem}_c{channel}.bin")
 }
 
 /// Try to reuse an existing channel cache file if it exists and has matching size.
 ///
 /// Returns true if the file can be reused, false if it needs to be rewritten.
 fn try_reuse_channel_cache_file(path: &Path, expected_dims: ImageDimensions) -> bool {
-    let Ok(file) = File::open(path) else {
+    let Ok(metadata) = std::fs::metadata(path) else {
         return false;
     };
 
-    // Check file size matches expected (raw f32 data, no header)
     let pixels_per_channel = expected_dims.width * expected_dims.height;
-    let expected_size = pixels_per_channel * size_of::<f32>();
-    let Ok(metadata) = file.metadata() else {
-        return false;
-    };
-    if metadata.len() != expected_size as u64 {
+    let expected_size = (pixels_per_channel * size_of::<f32>()) as u64;
+    if metadata.len() != expected_size {
         return false;
     }
 
     tracing::debug!("Reusing existing channel cache file: {:?}", path);
     true
+}
+
+/// Get the source file's modification time as seconds since epoch.
+fn source_mtime(path: &Path) -> Option<u64> {
+    let metadata = std::fs::metadata(path).ok()?;
+    let modified = metadata.modified().ok()?;
+    Some(
+        modified
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs(),
+    )
+}
+
+/// Path for the sidecar metadata file that stores source mtime.
+fn meta_path(cache_dir: &Path, base_filename: &str) -> PathBuf {
+    cache_dir.join(format!("{}.meta", base_filename.trim_end_matches(".bin")))
+}
+
+/// Write source mtime to sidecar file.
+fn write_source_meta(cache_dir: &Path, base_filename: &str, mtime: u64) {
+    let path = meta_path(cache_dir, base_filename);
+    let _ = std::fs::write(&path, mtime.to_le_bytes());
+}
+
+/// Check if cached data is still valid by comparing source mtime.
+/// Returns true if the sidecar exists and its stored mtime matches the source.
+fn validate_source_meta(cache_dir: &Path, base_filename: &str, source: &Path) -> bool {
+    let current_mtime = match source_mtime(source) {
+        Some(m) => m,
+        None => return false,
+    };
+    let path = meta_path(cache_dir, base_filename);
+    let Ok(bytes) = std::fs::read(&path) else {
+        return false;
+    };
+    if bytes.len() != 8 {
+        return false;
+    }
+    let stored_mtime = u64::from_le_bytes(bytes.try_into().unwrap());
+    stored_mtime == current_mtime
 }
 
 /// Write a single channel to a binary cache file.
@@ -572,38 +594,30 @@ fn write_channel_cache_file(path: &Path, channel_data: &[f32]) -> Result<(), Err
         source: e,
     })?;
     let mut writer = BufWriter::new(file);
+    let map_write_err = |e| Error::WriteCacheFile {
+        path: path.to_path_buf(),
+        source: e,
+    };
 
-    // Write raw f32 data (no header needed - dimensions tracked at ImageCache level)
     let bytes: &[u8] = bytemuck::cast_slice(channel_data);
-    writer.write_all(bytes).map_err(|e| Error::WriteCacheFile {
-        path: path.to_path_buf(),
-        source: e,
-    })?;
-
-    writer.flush().map_err(|e| Error::WriteCacheFile {
-        path: path.to_path_buf(),
-        source: e,
-    })?;
+    writer.write_all(bytes).map_err(&map_write_err)?;
+    writer.flush().map_err(map_write_err)?;
 
     Ok(())
 }
 
 /// Open and memory-map a channel cache file.
-fn mmap_channel_file(channel_path: PathBuf) -> Result<CachedChannel, Error> {
+fn mmap_channel_file(channel_path: PathBuf) -> Result<Mmap, Error> {
     let file = File::open(&channel_path).map_err(|e| Error::OpenCacheFile {
         path: channel_path.clone(),
         source: e,
     })?;
-    let mmap = unsafe {
+    unsafe {
         Mmap::map(&file).map_err(|e| Error::MmapCacheFile {
-            path: channel_path.clone(),
+            path: channel_path,
             source: e,
-        })?
-    };
-    Ok(CachedChannel {
-        mmap,
-        path: channel_path,
-    })
+        })
+    }
 }
 
 /// Load an image and cache it, or reuse existing cache files if valid.
@@ -618,11 +632,13 @@ fn load_and_cache_frame<I: StackableImage>(
 ) -> Result<CachedFrame, Error> {
     let channels = dimensions.channels;
 
-    // Check if all channel files exist and can be reused
-    let can_reuse = (0..channels).all(|c| {
-        let channel_path = cache_dir.join(channel_cache_filename(base_filename, c));
-        try_reuse_channel_cache_file(&channel_path, dimensions)
-    });
+    // Check if all channel files exist, have correct size, and source hasn't changed
+    let meta_valid = validate_source_meta(cache_dir, base_filename, source_path);
+    let can_reuse = meta_valid
+        && (0..channels).all(|c| {
+            let channel_path = cache_dir.join(channel_cache_filename(base_filename, c));
+            try_reuse_channel_cache_file(&channel_path, dimensions)
+        });
 
     if can_reuse {
         // Reuse existing cache files - just mmap them
@@ -651,7 +667,14 @@ fn load_and_cache_frame<I: StackableImage>(
             });
         }
 
-        cache_image_channels(cache_dir, base_filename, &image, dimensions)
+        let result = cache_image_channels(cache_dir, base_filename, &image, dimensions)?;
+
+        // Record source mtime so future runs can detect stale cache
+        if let Some(mtime) = source_mtime(source_path) {
+            write_source_meta(cache_dir, base_filename, mtime);
+        }
+
+        Ok(result)
     }
 }
 
@@ -769,16 +792,14 @@ pub(crate) mod tests {
 
         // Verify each channel file contains the correct data
         for (c, cached_channel) in cached_frame.channels.iter().enumerate() {
-            let read_channel: &[f32] = bytemuck::cast_slice(&cached_channel.mmap[..]);
+            let read_channel: &[f32] = bytemuck::cast_slice(&cached_channel[..]);
             let expected_channel = image.channel(c).pixels();
             assert_eq!(read_channel, expected_channel);
         }
 
         // Cleanup
-        for channel in cached_frame.channels {
-            let _ = std::fs::remove_file(channel.path);
-        }
-        let _ = std::fs::remove_dir(&temp_dir);
+        drop(cached_frame);
+        let _ = std::fs::remove_dir_all(&temp_dir);
     }
 
     #[test]
@@ -962,15 +983,9 @@ pub(crate) mod tests {
         let cached_frame =
             cache_image_channels(&temp_dir, "cleanup_test.bin", &image, dims).unwrap();
 
-        // Verify files exist
-        let paths: Vec<PathBuf> = cached_frame
-            .channels
-            .iter()
-            .map(|c| c.path.clone())
-            .collect();
-        for path in &paths {
-            assert!(path.exists());
-        }
+        // Verify cache dir has files
+        assert!(temp_dir.exists());
+        assert!(temp_dir.read_dir().unwrap().count() > 0);
 
         // Use keep_cache: false to actually test cleanup
         let config = CacheConfig {
@@ -992,10 +1007,11 @@ pub(crate) mod tests {
         // Drop the cache - should trigger cleanup via Drop
         drop(cache);
 
-        // Files should be removed
-        for path in &paths {
-            assert!(!path.exists(), "File should be deleted: {:?}", path);
-        }
+        // Entire cache directory should be removed
+        assert!(
+            !temp_dir.exists(),
+            "Cache directory should be deleted on cleanup"
+        );
     }
 
     #[test]
@@ -1121,15 +1137,12 @@ pub(crate) mod tests {
         assert_eq!(cached_frame.channels.len(), 1);
 
         // Verify cached data matches original
-        let cached_data: &[f32] = bytemuck::cast_slice(&cached_frame.channels[0].mmap[..]);
+        let cached_data: &[f32] = bytemuck::cast_slice(&cached_frame.channels[0][..]);
         assert_eq!(cached_data, &pixels[..]);
 
         // Cleanup
-        for channel in cached_frame.channels {
-            let _ = std::fs::remove_file(channel.path);
-        }
-        let _ = std::fs::remove_file(&source_path);
-        let _ = std::fs::remove_dir(&temp_dir);
+        drop(cached_frame);
+        let _ = std::fs::remove_dir_all(&temp_dir);
     }
 
     #[test]
@@ -1170,17 +1183,14 @@ pub(crate) mod tests {
         .unwrap();
 
         // Both should have same data
-        let first_data: &[f32] = bytemuck::cast_slice(&first_frame.channels[0].mmap[..]);
-        let second_data: &[f32] = bytemuck::cast_slice(&second_frame.channels[0].mmap[..]);
+        let first_data: &[f32] = bytemuck::cast_slice(&first_frame.channels[0][..]);
+        let second_data: &[f32] = bytemuck::cast_slice(&second_frame.channels[0][..]);
         assert_eq!(first_data, second_data);
         assert_eq!(first_data, &pixels[..]);
 
         // Cleanup
-        for channel in first_frame.channels {
-            let _ = std::fs::remove_file(channel.path);
-        }
-        let _ = std::fs::remove_file(&source_path);
-        let _ = std::fs::remove_dir(&temp_dir);
+        drop(first_frame);
+        let _ = std::fs::remove_dir_all(&temp_dir);
     }
 
     #[test]
@@ -1352,5 +1362,36 @@ pub(crate) mod tests {
             hex_part.chars().all(|c| c.is_ascii_hexdigit()),
             "Filename must be hex: {hex_part}"
         );
+    }
+
+    #[test]
+    fn test_source_meta_validates_mtime() {
+        let temp_dir = std::env::temp_dir().join("test_source_meta_validates");
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        let source = temp_dir.join("source.fits");
+        std::fs::write(&source, b"original data").unwrap();
+
+        let base = "abc123.bin";
+
+        // No meta file yet — validation should fail
+        assert!(!validate_source_meta(&temp_dir, base, &source));
+
+        // Write meta for current source
+        let mtime = source_mtime(&source).unwrap();
+        write_source_meta(&temp_dir, base, mtime);
+
+        // Now validation should pass
+        assert!(validate_source_meta(&temp_dir, base, &source));
+
+        // Modify the source file (touch with new content to change mtime)
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+        std::fs::write(&source, b"modified data").unwrap();
+
+        // Validation should fail — source changed
+        assert!(!validate_source_meta(&temp_dir, base, &source));
+
+        // Cleanup
+        let _ = std::fs::remove_dir_all(&temp_dir);
     }
 }
