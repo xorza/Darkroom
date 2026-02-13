@@ -95,6 +95,9 @@ impl DMat3 {
     }
 
     /// Compute the matrix inverse, or `None` if singular.
+    ///
+    /// Uses a fixed threshold of 1e-12 for singularity detection,
+    /// appropriate for pixel-scale coordinates (typical values 0-10000).
     pub fn inverse(&self) -> Option<DMat3> {
         let det = self.determinant();
         if det.abs() < 1e-12 {
@@ -125,10 +128,17 @@ impl DMat3 {
     /// x' = (m[0]*x + m[1]*y + m[2]) / w
     /// y' = (m[3]*x + m[4]*y + m[5]) / w
     /// ```
+    ///
+    /// # Panics (debug)
+    /// Panics if `w` is near zero (point at infinity).
     #[inline]
     pub fn transform_point(&self, p: DVec2) -> DVec2 {
         let d = &self.data;
         let w = d[6] * p.x + d[7] * p.y + d[8];
+        debug_assert!(
+            w.abs() > f64::EPSILON,
+            "transform_point: w ≈ 0 (point at infinity)"
+        );
         let x_prime = (d[0] * p.x + d[1] * p.y + d[2]) / w;
         let y_prime = (d[3] * p.x + d[4] * p.y + d[5]) / w;
         DVec2::new(x_prime, y_prime)

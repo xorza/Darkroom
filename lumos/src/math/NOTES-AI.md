@@ -12,13 +12,14 @@ robust statistics (median via quickselect, MAD, iterative sigma-clipped rejectio
 - SIMD dispatch hierarchy: AVX2 > SSE4.1 > scalar on x86_64; NEON always on aarch64
 - Zero-allocation ArrayVec variant for hot per-tile loops
 - Correct MAD_TO_SIGMA constant: 1.4826022 matches 1/inverse-CDF(3/4) for normal distribution
-- Correct DMat3: cofactor inverse, perspective divide, Frobenius norm
+- Correct DMat3: cofactor inverse (documented pixel-scale threshold), perspective divide, Frobenius norm
 - Good test coverage for statistics and SIMD boundaries
 - NaN-safe median/sigma-clipping via `f32::total_cmp` (NaN sorts to end, gets clipped)
 - `Aabb::is_empty()` with correct `width()`/`height()`/`area()` returning 0 for empty boxes
 - `weighted_mean_f32` has `debug_assert_eq` on lengths, returns 0.0 on zero weights
+- `transform_point` has `debug_assert` for w=0 (points at infinity)
 
-## Remaining Issues
+## Remaining Issues (Performance Only)
 
 ### No Compensated Summation - Precision Loss for Large Arrays
 - Files: `sum/scalar.rs`, `sum/sse.rs`, `sum/avx2.rs`, `sum/neon.rs`
@@ -41,27 +42,6 @@ robust statistics (median via quickselect, MAD, iterative sigma-clipped rejectio
 - File: `sum/mod.rs`
 - The module provides SIMD-accelerated `sum_f32` but `weighted_mean_f32` uses a naive
   scalar loop. For large arrays this misses the SIMD speedup.
-
-### transform_point Division by Zero When w=0
-- File: `dmat3.rs`, lines 129-135
-- Projective transforms can have w=0 (points at infinity), producing Inf/NaN.
-- **Fix**: Add `debug_assert!(w.abs() > f64::EPSILON)` to catch this in debug builds.
-
-### DMat3::inverse Singularity Threshold Not Scale-Invariant
-- File: `dmat3.rs`, line 100
-- Hardcoded threshold `1e-12` is not appropriate for all coordinate scales.
-- OK for pixel-scale coordinates (typical values 0-10000) but should document this assumption.
-
-### Stale sum/README.md
-- File: `sum/README.md`
-- References removed functions: `sum_squared_diff`, `accumulate`, `scale`.
-- Table lists 5 functions but only `sum_f32`, `mean_f32`, and `weighted_mean_f32` exist.
-- Benchmark results may be outdated.
-
-### Vec2us::sub Can Panic on Underflow
-- File: `vec2us.rs`, lines 53-58
-- Unsigned subtraction panics in debug mode on underflow. `Aabb` uses `saturating_sub`
-  internally but `Vec2us` does not.
 
 ## Algorithm Comparison with Industry Standards
 
@@ -110,7 +90,7 @@ math/
     neon.rs       - NEON sum (aarch64)
     tests.rs      - 19 tests including SIMD boundary and weighted_mean tests
     bench.rs      - Scalar vs SIMD benchmarks
-    README.md     - (stale) documentation
+    README.md     - Documentation
   dmat3.rs        - 3x3 f64 matrix with full test suite
   bbox.rs         - Axis-aligned bounding box with is_empty() and tests
   vec2us.rs       - 2D usize vector with tests
