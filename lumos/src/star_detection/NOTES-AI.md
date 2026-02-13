@@ -69,12 +69,9 @@ See submodule NOTES-AI.md files for detailed per-module analysis:
 
 ## Open Issues
 
-### P1 (Safety): Unsafe Mutable Aliasing in mask_dilation
-- **Location**: mask_dilation/mod.rs lines 40-42 and 76-80
-- Creates `*mut u64` from `output.words().as_ptr() as *mut u64` (shared reference).
-- Undefined behavior under Rust aliasing rules. Disjoint per-thread access addresses
-  data races but not the aliasing violation itself.
-- **Fix**: Get raw pointer from `words_mut().as_mut_ptr()` before entering parallel region.
+### ~~P1 (Safety): Unsafe Mutable Aliasing in mask_dilation~~ — FIXED
+- Raw pointer now obtained from `words_mut().as_mut_ptr()` (proper `&mut` borrow)
+  before entering parallel regions. Wrapped in `SendPtr` for thread safety.
 
 ### P2: PixelGrid Generation Counter Wrap-to-Zero Not Guarded
 - **Location**: deblend/multi_threshold/mod.rs line 104

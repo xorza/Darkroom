@@ -389,16 +389,9 @@ threshold and larger dilation radius to create conservative object masks.
 - Default changed to `Connectivity::Eight` (config.rs:273), matching SExtractor,
   photutils, and SEP.
 
-### P1 (Safety): Unsafe Mutable Aliasing in mask_dilation
-- **Location**: mask_dilation/mod.rs lines 40-42 and 76-80
-- Both horizontal and vertical dilation passes create `*mut u64` from
-  `output.words().as_ptr() as *mut u64`, where `output.words()` returns `&[u64]`.
-- This creates a mutable raw pointer from a shared reference, which is undefined
-  behavior under Rust aliasing rules (violates `&T` immutability guarantee).
-- The SAFETY comments claim disjoint per-thread access, which addresses data races
-  but not the aliasing violation.
-- **Fix**: Get `*mut u64` before entering the parallel region via
-  `output.words_mut().as_mut_ptr()`, or restructure to use `&mut` slicing.
+### ~~P1 (Safety): Unsafe Mutable Aliasing in mask_dilation~~ — FIXED
+- Raw pointer now obtained from `words_mut().as_mut_ptr()` (proper `&mut` borrow)
+  before entering parallel regions. Wrapped in `SendPtr` for thread safety.
 
 ### P2: AtomicUnionFind Capacity Overflow Silently Ignored
 - **Location**: labeling/mod.rs line 731-735

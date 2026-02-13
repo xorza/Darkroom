@@ -11,6 +11,13 @@ mod tests;
 use crate::common::BitBuffer2;
 use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 
+/// Wrapper to send raw pointers across thread boundaries.
+/// SAFETY: Caller must ensure disjoint access from each thread.
+#[derive(Clone, Copy)]
+struct SendPtr(*mut u64);
+unsafe impl Send for SendPtr {}
+unsafe impl Sync for SendPtr {}
+
 /// Dilate a binary mask by the given radius (morphological dilation).
 ///
 /// This connects nearby pixels that might be separated due to variable threshold.
@@ -32,14 +39,18 @@ pub fn dilate_mask(mask: &BitBuffer2, radius: usize, output: &mut BitBuffer2) {
     let height = mask.height();
     let words_per_row = mask.words_per_row();
 
+    // Get mutable pointer from a proper &mut borrow before entering parallel sections
+    let num_words = output.num_words();
+    let out_ptr = SendPtr(output.words_mut().as_mut_ptr());
+
     // Horizontal dilation pass
     (0..height).into_par_iter().for_each(|y| {
         let row_start = y * words_per_row;
         let input_words = mask.words();
-        // SAFETY: Each thread writes to a disjoint set of rows
-        let output_words = unsafe {
-            std::slice::from_raw_parts_mut(output.words().as_ptr() as *mut u64, output.num_words())
-        };
+        // SAFETY: Each thread writes to a disjoint set of rows (non-overlapping row_start ranges).
+        // Rebind to capture the SendPtr (which is Sync), not the raw pointer field.
+        let p = out_ptr;
+        let output_words = unsafe { std::slice::from_raw_parts_mut(p.0, num_words) };
 
         let row = &input_words[row_start..row_start + words_per_row];
 
@@ -72,13 +83,9 @@ pub fn dilate_mask(mask: &BitBuffer2, radius: usize, output: &mut BitBuffer2) {
         .for_each(|chunk_start| {
             let chunk_end = (chunk_start + chunk_size).min(words_per_row);
 
-            // SAFETY: Each thread accesses disjoint word indices
-            let output_words = unsafe {
-                std::slice::from_raw_parts_mut(
-                    output.words().as_ptr() as *mut u64,
-                    output.num_words(),
-                )
-            };
+            // SAFETY: Each thread accesses disjoint word indices (non-overlapping chunk ranges).
+            let p = out_ptr;
+            let output_words = unsafe { std::slice::from_raw_parts_mut(p.0, num_words) };
 
             let mut column_data = vec![0u64; height];
             let mut dilated = vec![0u64; height];
