@@ -174,26 +174,38 @@ higher-order interpolation if the SIMD approach were extended to Lanczos.
 Same algorithm as AVX2 but processes 4 pixels at a time. Uses `_mm_floor_ps` (SSE4.1
 instruction, hence the feature requirement). Otherwise identical structure.
 
-### Lanczos3: No Explicit SIMD (Auto-Vectorized Scalar)
+### Lanczos3: Explicit FMA SIMD Kernel (`warp/sse.rs`)
 
-Explicit AVX2 Lanczos3 was implemented and benchmarked (per-pixel vectorized 6-wide dot
-product with horizontal sum). Two strategies were tried:
-1. **Per-row hsum** (6 hsums per pixel): 25% slower than scalar
-2. **Single hsum** (accumulate all 6 rows, 1 hsum): matched scalar, no improvement
+`lanczos3_kernel_fma<const DERINGING: bool>` processes the 6x6 kernel accumulation using
+SSE FMA intrinsics. LLVM does NOT auto-vectorize the 6-element inner loop (assembly
+analysis confirmed purely scalar `mulss`/`addss`).
 
-Root cause: LLVM auto-vectorizes the scalar `for k in 0..6` inner loop with
-`get_unchecked` effectively. The AVX2 hsum overhead (~6 instructions) per pixel cancels
-out any SIMD benefit.
+**Architecture:** Pre-loads `wx[0..3]` and `wx[4..5]` into two `__m128` registers. For
+each of the 6 rows: loads 8 source pixels as two `__m128` vectors, multiplies by `wx`,
+then uses `_mm_fmadd_ps` to accumulate `weighted * wy[j]`. Horizontal sum via
+`movehdup + add + movehl + add_ss`.
 
-**Current optimization:** Fused weight normalization — raw (unnormalized) wx/wy weights
-are used throughout, with a single `1.0 / (wx_sum * wy_sum)` division at the end. This
-eliminates 2 divisions + 12 multiplies per pixel compared to normalizing wx and wy
-separately. Results: -47% on per-pixel microbenchmark, -5-8% on full-image warps (where
-memory bandwidth dominates).
+**Deringing fusion:** When `DERINGING=true`, tracks min/max using `_mm_min_ps`/`_mm_max_ps`
+on the same loaded source vectors, fusing min/max tracking with accumulation in a single
+pass. This avoids a separate 36-element scan, providing the biggest speedup for deringing.
 
-**Remaining opportunity:** Separable two-pass Lanczos (horizontal then vertical) would
-reduce 36 ops to 12 (6+6) and each pass vectorizes naturally over consecutive pixels.
-Intel IPP uses this approach. This is the biggest remaining performance opportunity.
+**Results (1024x1024, single-threaded, correct affine transform):**
+- Deringing: 80.9ms (scalar) → 33.4ms (FMA) = **-59%**
+- No deringing: 36.6ms → 30.3ms = **-17%**
+- Multi-threaded 4k: 95.7ms → 45.7ms = **-52%**
+
+**Bounds requirement:** `kx0 + 8 < input_width` (reads 8 floats per row via two
+`_mm_loadu_ps`; lanes 6-7 are garbage but zeroed by `wx_hi = [wx4, wx5, 0, 0]`).
+
+**Dispatch:** Runtime check via `cpu_features::has_avx2_fma()`, cached outside pixel loop.
+Falls back to scalar fast path for edge pixels (only needs `kx0 + 5 < iw`).
+
+**Note:** Cannot be inlined into the caller because `#[target_feature(enable = "avx2,fma")]`
+functions can only be inlined into functions with the same target features. The per-pixel
+call overhead is measurable but small compared to the SIMD savings.
+
+**Previous incorrect claim:** NOTES-AI previously stated LLVM auto-vectorizes the scalar
+loop — assembly analysis proved this wrong. Only scalar `mulss`/`addss` is generated.
 
 ## Performance Analysis
 
@@ -267,53 +279,45 @@ edges, producing darkened pixels. The same applies to bilinear. This matches zer
 border behavior and is expected for astrophotography (borders are cropped), but differs
 from clamp-to-edge which would be more correct.
 
-## Missing Features
-
-### 1. Separable Lanczos3 (High Impact)
-The current non-separable 6x6 convolution does 36 multiply-adds per pixel. A separable
-two-pass approach (horizontal then vertical) reduces this to 12 (6+6). Each pass processes
-consecutive pixels, enabling effective SIMD vectorization. Intel IPP uses this approach
-and reports 2-3x speedup. (Note: explicit AVX2 on the non-separable path was tried and
-provided no benefit — LLVM auto-vectorizes well. The separable decomposition is the key
-algorithmic improvement needed.)
-
-### 2. FMA in SIMD Bilinear
-The AVX2 bilinear uses `_mm256_mul_ps` + `_mm256_add_ps` separately. Using FMA
-(`_mm256_fmadd_ps`) would improve accuracy and potentially throughput (1 instruction
-instead of 2). Requires `#[target_feature(enable = "avx2,fma")]`.
-
-### 3. SIMD Interior Fast Path for Bilinear
-The AVX2 bilinear falls back to scalar `sample_pixel` for every pixel. An interior
-detection path (all 8 pixels map within bounds) could skip bounds checking entirely.
-
-## Potential Improvements (Prioritized)
+## Missing Features / Potential Improvements (Prioritized)
 
 ### High Priority
-1. **Separable Lanczos3:** Two-pass (horizontal then vertical). This is the single biggest
-   performance opportunity — reduces 36 ops to 12 per pixel. Each pass processes
-   consecutive pixels enabling natural SIMD vectorization. Expect 2-3x total improvement.
-   (Explicit AVX2 on non-separable path was tried and did not help — LLVM auto-vectorizes
-   the 6-wide inner loop well enough that hsum overhead cancels SIMD gains.)
+1. **Separable Lanczos3:** Two-pass (horizontal then vertical) reduces 36 ops to 12 per
+   pixel. Each pass processes consecutive pixels enabling natural SIMD vectorization. Intel
+   IPP uses this approach. Note: separable decomposition does not directly apply to
+   arbitrary warps with rotation (source coordinates differ per pixel), but shear
+   decomposition of affine transforms could enable it.
 
 ### Medium Priority
 2. **SIMD bilinear interior fast path:** When all 8 source pixels in a chunk are
-   guaranteed in-bounds, skip per-pixel bounds checking. This is a simple range check
-   on the min/max source coordinates of the chunk.
+   guaranteed in-bounds, skip per-pixel bounds checking. Simple range check on min/max
+   source coordinates of the chunk.
 
-3. **FMA for SIMD bilinear:** Add `fma` to target features, replace
-   `mul+add` with `_mm256_fmadd_ps`. Modest throughput gain, better accuracy.
+3. **FMA for SIMD bilinear:** Add `fma` to target features, replace `mul+add` with
+   `_mm256_fmadd_ps`. Modest throughput gain, better accuracy.
+
+4. **Inline the FMA kernel:** Mark `warp_row_lanczos3_inner` with
+   `#[target_feature(enable = "avx2,fma")]` to allow the kernel to be inlined, removing
+   per-pixel function call overhead. Requires the entire function to use AVX2 feature.
 
 ### Low Priority
-4. **Linear interpolation in LUT:** Replace nearest-index lookup with linear interpolation
+5. **Linear interpolation in LUT:** Replace nearest-index lookup with linear interpolation
    between adjacent entries. Allows reducing LUT size to 1024-2048 entries while
-   maintaining precision. Minimal performance cost (one extra multiply-add per lookup).
+   maintaining precision.
 
-5. **Tile-based processing:** For extreme rotations (>45 degrees), tile-based warping
-   would improve cache behavior. Low priority because typical astro registration has
-   small rotations.
+6. **Tile-based processing:** For extreme rotations (>45 degrees), tile-based warping
+   would improve cache behavior.
 
-6. **Configurable border modes:** Add clamp-to-edge and replicate modes alongside
+7. **Configurable border modes:** Add clamp-to-edge and replicate modes alongside
    constant-value padding.
+
+### Tried and Rejected
+- **AVX2 gather for LUT lookups:** `_mm256_i32gather_ps` for 6 weights at once. ~2% slower
+  than scalar lookups due to high gather latency (~12 cycles) vs L1-cached scalar loads
+  (~4 cycles). The 48KB LUT fits in L1 cache, making scalar lookups fast enough.
+- **Per-pixel separable factorization:** Restructuring inner loop from `v*wx*wy` to
+  row_sums then vertical combine. No improvement — LLVM already optimizes the original
+  pattern.
 
 ## References
 

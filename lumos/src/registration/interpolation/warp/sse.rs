@@ -278,6 +278,90 @@ pub unsafe fn warp_row_bilinear_sse(
 
 use super::super::sample_pixel;
 
+/// Compute the Lanczos3 6x6 weighted sum for a single pixel using FMA.
+///
+/// Pre-loads `wx` weights into SSE registers, then for each of the 6 source rows:
+/// loads pixels, multiplies by `wx`, scales by `wy[j]` (broadcast), and accumulates.
+///
+/// Returns `(weighted_sum, min_pixel, max_pixel)`.
+///
+/// # Safety
+/// - Caller must ensure FMA is available.
+/// - The 6x6 pixel window at `(kx, ky)` must be fully in bounds,
+///   plus 2 extra columns for the 128-bit load at offset +4: `kx + 7 < input_width`.
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2,fma")]
+#[inline]
+#[allow(unsafe_op_in_unsafe_fn)]
+pub unsafe fn lanczos3_kernel_fma<const DERINGING: bool>(
+    pixels: &[f32],
+    input_width: usize,
+    kx: usize,
+    ky: usize,
+    wx: &[f32; 6],
+    wy: &[f32; 6],
+) -> (f32, f32, f32) {
+    // Pre-load wx weights into SSE registers (constant across all 6 rows)
+    let wx_lo = _mm_set_ps(wx[3], wx[2], wx[1], wx[0]);
+    let wx_hi = _mm_setr_ps(wx[4], wx[5], 0.0, 0.0);
+
+    let mut acc_lo = _mm_setzero_ps();
+    let mut acc_hi = _mm_setzero_ps();
+    let mut vmin_lo = _mm_set1_ps(f32::MAX);
+    let mut vmax_lo = _mm_set1_ps(f32::MIN);
+    let mut vmin_hi = _mm_set1_ps(f32::MAX);
+    let mut vmax_hi = _mm_set1_ps(f32::MIN);
+
+    for j in 0..6 {
+        let row_ptr = pixels.as_ptr().add((ky + j) * input_width + kx);
+        let src_lo = _mm_loadu_ps(row_ptr);
+        let src_hi = _mm_loadu_ps(row_ptr.add(4));
+
+        let wyj = _mm_set1_ps(wy[j]);
+        let weighted_lo = _mm_mul_ps(src_lo, wx_lo);
+        acc_lo = _mm_fmadd_ps(weighted_lo, wyj, acc_lo);
+        let weighted_hi = _mm_mul_ps(src_hi, wx_hi);
+        acc_hi = _mm_fmadd_ps(weighted_hi, wyj, acc_hi);
+
+        if DERINGING {
+            vmin_lo = _mm_min_ps(vmin_lo, src_lo);
+            vmax_lo = _mm_max_ps(vmax_lo, src_lo);
+            // src_hi lanes 2-3 are garbage neighbors; including them in min/max
+            // only widens the clamp range slightly, which is harmless for deringing
+            vmin_hi = _mm_min_ps(vmin_hi, src_hi);
+            vmax_hi = _mm_max_ps(vmax_hi, src_hi);
+        }
+    }
+
+    // Horizontal sum (4 floats -> 1)
+    let combined = _mm_add_ps(acc_lo, acc_hi);
+    let shuf = _mm_movehdup_ps(combined);
+    let sums = _mm_add_ps(combined, shuf);
+    let high = _mm_movehl_ps(sums, sums);
+    let total = _mm_add_ss(sums, high);
+    let sum = _mm_cvtss_f32(total);
+
+    if DERINGING {
+        let min4 = _mm_min_ps(vmin_lo, vmin_hi);
+        let shuf = _mm_movehdup_ps(min4);
+        let mins = _mm_min_ps(min4, shuf);
+        let high = _mm_movehl_ps(mins, mins);
+        let min_final = _mm_min_ss(mins, high);
+        let smin = _mm_cvtss_f32(min_final);
+
+        let max4 = _mm_max_ps(vmax_lo, vmax_hi);
+        let shuf = _mm_movehdup_ps(max4);
+        let maxs = _mm_max_ps(max4, shuf);
+        let high = _mm_movehl_ps(maxs, maxs);
+        let max_final = _mm_max_ss(maxs, high);
+        let smax = _mm_cvtss_f32(max_final);
+
+        (sum, smin, smax)
+    } else {
+        (sum, 0.0, 0.0)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

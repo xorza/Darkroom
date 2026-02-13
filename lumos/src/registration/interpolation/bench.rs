@@ -30,7 +30,7 @@ fn create_test_transform() -> Transform {
     let sin_a = angle.sin();
 
     Transform::from_matrix(
-        DMat3::from_array([cos_a, sin_a, 0.0, -sin_a, cos_a, 0.0, 5.0, 3.0, 1.0]),
+        DMat3::from_array([cos_a, sin_a, 5.0, -sin_a, cos_a, 3.0, 0.0, 0.0, 1.0]),
         TransformType::Similarity,
     )
 }
@@ -110,6 +110,48 @@ fn bench_warp_bilinear_2k(b: bench::Bencher) {
 // ============================================================================
 // Micro-benchmarks for specific functions
 // ============================================================================
+
+/// Single-threaded 1k warp to measure per-thread throughput without rayon overhead.
+#[quick_bench(warmup_iters = 3, iters = 10)]
+fn bench_warp_lanczos3_1k_single_thread(b: bench::Bencher) {
+    let input = create_test_image(1024, 1024);
+    let mut output = Buffer2::new_default(1024, 1024);
+    let transform = create_test_transform();
+    let wt = WarpTransform::new(transform);
+    let params = WarpParams::new(InterpolationMethod::Lanczos3 { deringing: true });
+
+    b.bench(|| {
+        let width = input.width();
+        for (y, row) in black_box(&mut output)
+            .pixels_mut()
+            .chunks_mut(width)
+            .enumerate()
+        {
+            warp::warp_row_lanczos3(black_box(&input), row, y, &wt, &params);
+        }
+    });
+}
+
+/// Single-threaded 1k warp WITHOUT deringing, to measure min/max overhead.
+#[quick_bench(warmup_iters = 3, iters = 10)]
+fn bench_warp_lanczos3_1k_no_dering(b: bench::Bencher) {
+    let input = create_test_image(1024, 1024);
+    let mut output = Buffer2::new_default(1024, 1024);
+    let transform = create_test_transform();
+    let wt = WarpTransform::new(transform);
+    let params = WarpParams::new(InterpolationMethod::Lanczos3 { deringing: false });
+
+    b.bench(|| {
+        let width = input.width();
+        for (y, row) in black_box(&mut output)
+            .pixels_mut()
+            .chunks_mut(width)
+            .enumerate()
+        {
+            warp::warp_row_lanczos3(black_box(&input), row, y, &wt, &params);
+        }
+    });
+}
 
 #[quick_bench(warmup_iters = 3, iters = 20)]
 fn bench_lut_lookup(b: bench::Bencher) {

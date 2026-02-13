@@ -115,13 +115,11 @@ pub(crate) fn bilinear_sample(input: &Buffer2<f32>, x: f32, y: f32, border_value
 
 /// Optimized Lanczos3 row warping with incremental coordinate stepping.
 ///
-/// Uses AVX2+FMA SIMD on x86_64 when available (vectorized 6-wide dot product
-/// per kernel row). Falls back to scalar with incremental stepping otherwise.
-///
 /// Key optimizations:
-/// 1. AVX2: vectorized 6-element horizontal dot product per kernel row
-/// 2. Incremental source coordinate stepping (avoid per-pixel matrix multiply)
-/// 3. Fast-path for interior pixels (skip bounds checks, use direct row pointers)
+/// 1. Const-generic DERINGING: eliminates inner-loop branch, letting LLVM fully vectorize
+/// 2. Separated min/max scan from weighted accumulation (when deringing enabled)
+/// 3. Incremental source coordinate stepping (avoid per-pixel matrix multiply)
+/// 4. Fast-path for interior pixels (skip bounds checks, use direct row pointers)
 pub(crate) fn warp_row_lanczos3(
     input: &Buffer2<f32>,
     output_row: &mut [f32],
@@ -129,19 +127,31 @@ pub(crate) fn warp_row_lanczos3(
     wt: &WarpTransform,
     params: &WarpParams,
 ) {
-    // Note: explicit AVX2 Lanczos3 was benchmarked and found slower than the
-    // scalar path (LLVM auto-vectorizes the inner loop effectively). Keeping
-    // scalar-only with fused weight normalization.
+    if params.method.deringing() {
+        warp_row_lanczos3_inner::<true>(input, output_row, output_y, wt, params);
+    } else {
+        warp_row_lanczos3_inner::<false>(input, output_row, output_y, wt, params);
+    }
+}
 
+fn warp_row_lanczos3_inner<const DERINGING: bool>(
+    input: &Buffer2<f32>,
+    output_row: &mut [f32],
+    output_y: usize,
+    wt: &WarpTransform,
+    params: &WarpParams,
+) {
     let pixels = input.pixels();
     let input_width = input.width();
     let input_height = input.height();
     let border_value = params.border_value;
-    let clamp = params.method.deringing();
 
     let lut = get_lanczos_lut(3);
     let iw = input_width as i32;
     let ih = input_height as i32;
+
+    #[cfg(target_arch = "x86_64")]
+    let use_fma = cpu_features::has_avx2_fma();
 
     let m = wt.transform.matrix.as_array();
     let can_step = wt.is_linear();
@@ -167,13 +177,9 @@ pub(crate) fn warp_row_lanczos3(
         let fx = sx - x0 as f32;
         let fy = sy - y0 as f32;
 
-        // Kernel origin: (x0 - 2, y0 - 2)
         let kx0 = x0 - 2;
         let ky0 = y0 - 2;
 
-        // Compute raw weights (unnormalized) and combined 2D weights.
-        // Instead of normalizing wx and wy separately (2 divisions + 12 muls),
-        // we compute raw combined weights wx[k]*wy[j] and normalize once at the end.
         let wx = [
             lut.lookup(fx + 2.0),
             lut.lookup(fx + 1.0),
@@ -200,14 +206,39 @@ pub(crate) fn warp_row_lanczos3(
             1.0
         };
 
-        // Check if entire 6x6 kernel is within bounds
-        let (sum, src_min, src_max) = if kx0 >= 0 && ky0 >= 0 && kx0 + 5 < iw && ky0 + 5 < ih {
-            // Fast path: all pixels in bounds, direct indexing
+        // SIMD fast path: needs kx0+7 < iw for 128-bit loads (6 valid + 2 padding)
+        #[cfg(target_arch = "x86_64")]
+        if kx0 >= 0 && ky0 >= 0 && kx0 + 8 < iw && ky0 + 5 < ih && use_fma {
+            let (raw_sum, smin, smax) = unsafe {
+                sse::lanczos3_kernel_fma::<DERINGING>(
+                    pixels,
+                    input_width,
+                    kx0 as usize,
+                    ky0 as usize,
+                    &wx,
+                    &wy,
+                )
+            };
+            let val = raw_sum * inv_total;
+            *out_pixel = if DERINGING {
+                val.clamp(smin, smax)
+            } else {
+                val
+            };
+
+            if can_step {
+                src_x += dx_step;
+                src_y += dy_step;
+            }
+            continue;
+        }
+
+        if kx0 >= 0 && ky0 >= 0 && kx0 + 5 < iw && ky0 + 5 < ih {
+            // Scalar fast path: all 6x6 pixels in bounds, direct indexing
             let kx = kx0 as usize;
             let ky = ky0 as usize;
             let w = input_width;
 
-            // Accumulate with raw (unnormalized) weights, normalize once at end
             let mut sum = 0.0f32;
             let mut smin = f32::MAX;
             let mut smax = f32::MIN;
@@ -216,13 +247,18 @@ pub(crate) fn warp_row_lanczos3(
                 for (k, &wxk) in wx.iter().enumerate() {
                     let v = unsafe { *pixels.get_unchecked(row_off + k) };
                     sum += v * wxk * wyj;
-                    if clamp {
+                    if DERINGING {
                         smin = smin.min(v);
                         smax = smax.max(v);
                     }
                 }
             }
-            (sum * inv_total, smin, smax)
+            let val = sum * inv_total;
+            *out_pixel = if DERINGING {
+                val.clamp(smin, smax)
+            } else {
+                val
+            };
         } else {
             // Slow path: bounds-checked sampling for border pixels
             let mut sum = 0.0f32;
@@ -234,20 +270,19 @@ pub(crate) fn warp_row_lanczos3(
                     let px = kx0 + i as i32;
                     let v = sample_pixel(pixels, input_width, input_height, px, py, border_value);
                     sum += v * wxi * wyj;
-                    if clamp {
+                    if DERINGING {
                         smin = smin.min(v);
                         smax = smax.max(v);
                     }
                 }
             }
-            (sum * inv_total, smin, smax)
-        };
-
-        *out_pixel = if clamp {
-            sum.clamp(src_min, src_max)
-        } else {
-            sum
-        };
+            let val = sum * inv_total;
+            *out_pixel = if DERINGING {
+                val.clamp(smin, smax)
+            } else {
+                val
+            };
+        }
 
         if can_step {
             src_x += dx_step;
