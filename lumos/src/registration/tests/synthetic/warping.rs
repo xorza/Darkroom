@@ -89,9 +89,9 @@ fn all_interpolation_methods() -> Vec<InterpolationMethod> {
         InterpolationMethod::Nearest,
         InterpolationMethod::Bilinear,
         InterpolationMethod::Bicubic,
-        InterpolationMethod::Lanczos2 { deringing: true },
-        InterpolationMethod::Lanczos3 { deringing: true },
-        InterpolationMethod::Lanczos4 { deringing: true },
+        InterpolationMethod::Lanczos2 { deringing: 0.3 },
+        InterpolationMethod::Lanczos3 { deringing: 0.3 },
+        InterpolationMethod::Lanczos4 { deringing: 0.3 },
     ]
 }
 
@@ -101,7 +101,7 @@ fn representative_interpolation_methods() -> Vec<InterpolationMethod> {
     vec![
         InterpolationMethod::Nearest,
         InterpolationMethod::Bilinear,
-        InterpolationMethod::Lanczos3 { deringing: true },
+        InterpolationMethod::Lanczos3 { deringing: 0.3 },
     ]
 }
 
@@ -444,7 +444,7 @@ fn test_warp_with_detected_transform() {
     let target_pixels = do_warp(
         &ref_pixels,
         &true_transform,
-        InterpolationMethod::Lanczos3 { deringing: true },
+        InterpolationMethod::Lanczos3 { deringing: 0.3 },
     );
 
     // Detect stars in both images
@@ -482,7 +482,7 @@ fn test_warp_with_detected_transform() {
         target_pixels.into_vec(),
     );
     let warp_config = RegConfig {
-        interpolation: InterpolationMethod::Lanczos3 { deringing: true },
+        interpolation: InterpolationMethod::Lanczos3 { deringing: 0.3 },
         ..Default::default()
     };
     let mut warped_astro = target_astro.clone();
@@ -561,7 +561,7 @@ fn test_interpolation_quality_ordering() {
         .1;
     let lanczos3_psnr = results
         .iter()
-        .find(|(m, _)| *m == InterpolationMethod::Lanczos3 { deringing: true })
+        .find(|(m, _)| *m == InterpolationMethod::Lanczos3 { deringing: 0.3 })
         .unwrap()
         .1;
 
@@ -599,7 +599,7 @@ fn test_warp_grayscale() {
 
     // Warp the image
     let warp_config = RegConfig {
-        interpolation: InterpolationMethod::Lanczos3 { deringing: true },
+        interpolation: InterpolationMethod::Lanczos3 { deringing: 0.3 },
         ..Default::default()
     };
     let mut warped = ref_image.clone();
@@ -643,7 +643,7 @@ fn test_warp_rgb() {
 
     // Warp the RGB image
     let warp_config = RegConfig {
-        interpolation: InterpolationMethod::Lanczos3 { deringing: true },
+        interpolation: InterpolationMethod::Lanczos3 { deringing: 0.3 },
         ..Default::default()
     };
     let mut warped = rgb_image.clone();
@@ -807,13 +807,13 @@ fn test_warp_with_sip_correction() {
         &ref_buf,
         &mut output_no_sip,
         &WarpTransform::new(transform),
-        &WarpParams::new(InterpolationMethod::Lanczos3 { deringing: true }),
+        &WarpParams::new(InterpolationMethod::Lanczos3 { deringing: 0.3 }),
     );
     warp_image(
         &ref_buf,
         &mut output_with_sip,
         &WarpTransform::with_sip(transform, sip),
-        &WarpParams::new(InterpolationMethod::Lanczos3 { deringing: true }),
+        &WarpParams::new(InterpolationMethod::Lanczos3 { deringing: 0.3 }),
     );
 
     // The two outputs should differ — SIP applies nonlinear correction

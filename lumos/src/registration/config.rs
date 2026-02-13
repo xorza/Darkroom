@@ -4,11 +4,22 @@ use glam::DVec2;
 
 use crate::registration::transform::TransformType;
 
+/// Default soft-clamping threshold for Lanczos deringing (PixInsight default).
+/// Lower = more aggressive. Range [0.0, 1.0]. Negative disables deringing.
+pub const DEFAULT_DERINGING_THRESHOLD: f32 = 0.3;
+
 /// Interpolation method for image resampling.
 ///
-/// Lanczos variants include a `deringing` flag that clamps interpolated values
-/// to the source pixel range, suppressing ringing artifacts (dark halos around
-/// bright stars). Enabled by default.
+/// Lanczos variants include a `deringing` threshold that controls soft clamping
+/// of interpolated values to suppress ringing artifacts (dark halos around
+/// bright stars). Uses PixInsight-style clamping that tracks positive/negative
+/// Lanczos contributions and applies a quadratic fade. Enabled by default.
+///
+/// Deringing threshold values:
+/// - **Negative**: disabled (no deringing)
+/// - **0.0**: most aggressive (hard clamp all negative contribution)
+/// - **0.3**: default (PixInsight default, good balance)
+/// - **1.0**: least aggressive (only clamps extreme ringing)
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum InterpolationMethod {
     /// Nearest neighbor - fastest, lowest quality
@@ -18,16 +29,18 @@ pub enum InterpolationMethod {
     /// Bicubic interpolation - good quality
     Bicubic,
     /// Lanczos-2 (4x4 kernel) - high quality
-    Lanczos2 { deringing: bool },
+    Lanczos2 { deringing: f32 },
     /// Lanczos-3 (6x6 kernel) - highest quality, default
-    Lanczos3 { deringing: bool },
+    Lanczos3 { deringing: f32 },
     /// Lanczos-4 (8x8 kernel) - extreme quality
-    Lanczos4 { deringing: bool },
+    Lanczos4 { deringing: f32 },
 }
 
 impl Default for InterpolationMethod {
     fn default() -> Self {
-        Self::Lanczos3 { deringing: true }
+        Self::Lanczos3 {
+            deringing: DEFAULT_DERINGING_THRESHOLD,
+        }
     }
 }
 
@@ -45,16 +58,22 @@ impl InterpolationMethod {
         }
     }
 
-    /// Returns whether Lanczos deringing (min/max clamping) is enabled.
-    /// Always `false` for non-Lanczos methods.
+    /// Returns the deringing threshold. Negative means disabled.
+    /// Always negative for non-Lanczos methods.
     #[inline]
-    pub fn deringing(&self) -> bool {
+    pub fn deringing(&self) -> f32 {
         match self {
             InterpolationMethod::Lanczos2 { deringing }
             | InterpolationMethod::Lanczos3 { deringing }
             | InterpolationMethod::Lanczos4 { deringing } => *deringing,
-            _ => false,
+            _ => -1.0,
         }
+    }
+
+    /// Returns whether Lanczos soft-clamping deringing is enabled.
+    #[inline]
+    pub fn deringing_enabled(&self) -> bool {
+        self.deringing() >= 0.0
     }
 
     /// Returns the Lanczos parameter `a` (kernel half-width), or `None` for non-Lanczos methods.
@@ -364,8 +383,11 @@ mod tests {
         assert!(config.sip_reference_point.is_none());
         assert_eq!(
             config.interpolation,
-            InterpolationMethod::Lanczos3 { deringing: true }
+            InterpolationMethod::Lanczos3 {
+                deringing: DEFAULT_DERINGING_THRESHOLD
+            }
         );
+        assert!(config.interpolation.deringing_enabled());
         assert!((config.border_value - 0.0).abs() < 1e-10);
     }
 
@@ -467,16 +489,29 @@ mod tests {
         assert_eq!(InterpolationMethod::Bilinear.kernel_radius(), 1);
         assert_eq!(InterpolationMethod::Bicubic.kernel_radius(), 2);
         assert_eq!(
-            InterpolationMethod::Lanczos2 { deringing: true }.kernel_radius(),
+            InterpolationMethod::Lanczos2 { deringing: 0.3 }.kernel_radius(),
             2
         );
         assert_eq!(
-            InterpolationMethod::Lanczos3 { deringing: true }.kernel_radius(),
+            InterpolationMethod::Lanczos3 { deringing: 0.3 }.kernel_radius(),
             3
         );
         assert_eq!(
-            InterpolationMethod::Lanczos4 { deringing: true }.kernel_radius(),
+            InterpolationMethod::Lanczos4 { deringing: 0.3 }.kernel_radius(),
             4
         );
+    }
+
+    #[test]
+    fn test_deringing_threshold() {
+        assert!(InterpolationMethod::Lanczos3 { deringing: 0.3 }.deringing_enabled());
+        assert!(InterpolationMethod::Lanczos3 { deringing: 0.0 }.deringing_enabled());
+        assert!(!InterpolationMethod::Lanczos3 { deringing: -1.0 }.deringing_enabled());
+        assert!(!InterpolationMethod::Bilinear.deringing_enabled());
+        assert!(
+            (InterpolationMethod::Lanczos3 { deringing: 0.3 }.deringing() - 0.3).abs()
+                < f32::EPSILON
+        );
+        assert!(InterpolationMethod::Nearest.deringing() < 0.0);
     }
 }

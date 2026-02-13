@@ -283,7 +283,16 @@ use super::super::sample_pixel;
 /// Pre-loads `wx` weights into SSE registers, then for each of the 6 source rows:
 /// loads pixels, multiplies by `wx`, scales by `wy[j]` (broadcast), and accumulates.
 ///
-/// Returns `(weighted_sum, min_pixel, max_pixel)`.
+/// When `DERINGING=true`, tracks positive and negative weighted contributions
+/// separately for PixInsight-style soft clamping.
+///
+/// Returns `(sp, sn, wp, wn)`:
+/// - `sp`: sum of positive weighted contributions
+/// - `sn`: sum of |negative weighted contributions|
+/// - `wp`: sum of weights for positive contributions
+/// - `wn`: sum of |weights| for negative contributions
+///
+/// When `DERINGING=false`, returns `(total_sum, 0.0, 0.0, 0.0)`.
 ///
 /// # Safety
 /// - Caller must ensure FMA is available.
@@ -300,17 +309,24 @@ pub unsafe fn lanczos3_kernel_fma<const DERINGING: bool>(
     ky: usize,
     wx: &[f32; 6],
     wy: &[f32; 6],
-) -> (f32, f32, f32) {
+) -> (f32, f32, f32, f32) {
     // Pre-load wx weights into SSE registers (constant across all 6 rows)
     let wx_lo = _mm_set_ps(wx[3], wx[2], wx[1], wx[0]);
     let wx_hi = _mm_setr_ps(wx[4], wx[5], 0.0, 0.0);
 
-    let mut acc_lo = _mm_setzero_ps();
-    let mut acc_hi = _mm_setzero_ps();
-    let mut vmin_lo = _mm_set1_ps(f32::MAX);
-    let mut vmax_lo = _mm_set1_ps(f32::MIN);
-    let mut vmin_hi = _mm_set1_ps(f32::MAX);
-    let mut vmax_hi = _mm_set1_ps(f32::MIN);
+    let zero = _mm_setzero_ps();
+    let mut acc_lo = zero;
+    let mut acc_hi = zero;
+
+    // Positive/negative contribution accumulators for soft clamping
+    let mut sp_lo = zero;
+    let mut sp_hi = zero;
+    let mut sn_lo = zero;
+    let mut sn_hi = zero;
+    let mut wp_lo = zero;
+    let mut wp_hi = zero;
+    let mut wn_lo = zero;
+    let mut wn_hi = zero;
 
     for j in 0..6 {
         let row_ptr = pixels.as_ptr().add((ky + j) * input_width + kx);
@@ -318,48 +334,57 @@ pub unsafe fn lanczos3_kernel_fma<const DERINGING: bool>(
         let src_hi = _mm_loadu_ps(row_ptr.add(4));
 
         let wyj = _mm_set1_ps(wy[j]);
-        let weighted_lo = _mm_mul_ps(src_lo, wx_lo);
-        acc_lo = _mm_fmadd_ps(weighted_lo, wyj, acc_lo);
-        let weighted_hi = _mm_mul_ps(src_hi, wx_hi);
-        acc_hi = _mm_fmadd_ps(weighted_hi, wyj, acc_hi);
+        let w_lo = _mm_mul_ps(wx_lo, wyj);
+        let w_hi = _mm_mul_ps(wx_hi, wyj);
+        let s_lo = _mm_mul_ps(src_lo, w_lo);
+        let s_hi = _mm_mul_ps(src_hi, w_hi);
 
         if DERINGING {
-            vmin_lo = _mm_min_ps(vmin_lo, src_lo);
-            vmax_lo = _mm_max_ps(vmax_lo, src_lo);
-            // src_hi lanes 2-3 are garbage neighbors; including them in min/max
-            // only widens the clamp range slightly, which is harmless for deringing
-            vmin_hi = _mm_min_ps(vmin_hi, src_hi);
-            vmax_hi = _mm_max_ps(vmax_hi, src_hi);
+            // Split into positive (s >= 0) and negative (s < 0) contributions
+            let pos_lo = _mm_cmpge_ps(s_lo, zero);
+            let neg_lo = _mm_cmplt_ps(s_lo, zero);
+            sp_lo = _mm_add_ps(sp_lo, _mm_and_ps(pos_lo, s_lo));
+            wp_lo = _mm_add_ps(wp_lo, _mm_and_ps(pos_lo, w_lo));
+            // For negative: accumulate -s and -w (both positive values)
+            sn_lo = _mm_sub_ps(sn_lo, _mm_and_ps(neg_lo, s_lo));
+            wn_lo = _mm_sub_ps(wn_lo, _mm_and_ps(neg_lo, w_lo));
+
+            let pos_hi = _mm_cmpge_ps(s_hi, zero);
+            let neg_hi = _mm_cmplt_ps(s_hi, zero);
+            sp_hi = _mm_add_ps(sp_hi, _mm_and_ps(pos_hi, s_hi));
+            wp_hi = _mm_add_ps(wp_hi, _mm_and_ps(pos_hi, w_hi));
+            sn_hi = _mm_sub_ps(sn_hi, _mm_and_ps(neg_hi, s_hi));
+            wn_hi = _mm_sub_ps(wn_hi, _mm_and_ps(neg_hi, w_hi));
+        } else {
+            acc_lo = _mm_add_ps(acc_lo, s_lo);
+            acc_hi = _mm_add_ps(acc_hi, s_hi);
         }
     }
 
-    // Horizontal sum (4 floats -> 1)
-    let combined = _mm_add_ps(acc_lo, acc_hi);
-    let shuf = _mm_movehdup_ps(combined);
-    let sums = _mm_add_ps(combined, shuf);
+    if DERINGING {
+        // Horizontal reductions for all 4 accumulators
+        let sp = hsum_ps(_mm_add_ps(sp_lo, sp_hi));
+        let sn = hsum_ps(_mm_add_ps(sn_lo, sn_hi));
+        let wp = hsum_ps(_mm_add_ps(wp_lo, wp_hi));
+        let wn = hsum_ps(_mm_add_ps(wn_lo, wn_hi));
+        (sp, sn, wp, wn)
+    } else {
+        let sum = hsum_ps(_mm_add_ps(acc_lo, acc_hi));
+        (sum, 0.0, 0.0, 0.0)
+    }
+}
+
+/// Horizontal sum of 4 floats in an SSE register.
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2,fma")]
+#[inline]
+#[allow(unsafe_op_in_unsafe_fn)]
+unsafe fn hsum_ps(v: __m128) -> f32 {
+    let shuf = _mm_movehdup_ps(v);
+    let sums = _mm_add_ps(v, shuf);
     let high = _mm_movehl_ps(sums, sums);
     let total = _mm_add_ss(sums, high);
-    let sum = _mm_cvtss_f32(total);
-
-    if DERINGING {
-        let min4 = _mm_min_ps(vmin_lo, vmin_hi);
-        let shuf = _mm_movehdup_ps(min4);
-        let mins = _mm_min_ps(min4, shuf);
-        let high = _mm_movehl_ps(mins, mins);
-        let min_final = _mm_min_ss(mins, high);
-        let smin = _mm_cvtss_f32(min_final);
-
-        let max4 = _mm_max_ps(vmax_lo, vmax_hi);
-        let shuf = _mm_movehdup_ps(max4);
-        let maxs = _mm_max_ps(max4, shuf);
-        let high = _mm_movehl_ps(maxs, maxs);
-        let max_final = _mm_max_ss(maxs, high);
-        let smax = _mm_cvtss_f32(max_final);
-
-        (sum, smin, smax)
-    } else {
-        (sum, 0.0, 0.0)
-    }
+    _mm_cvtss_f32(total)
 }
 
 #[cfg(test)]

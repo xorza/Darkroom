@@ -50,7 +50,7 @@ fn bench_warp_lanczos3_1k(b: bench::Bencher) {
             black_box(&input),
             black_box(&mut output),
             &black_box(WarpTransform::new(transform)),
-            &WarpParams::new(InterpolationMethod::Lanczos3 { deringing: true }),
+            &WarpParams::new(InterpolationMethod::Lanczos3 { deringing: 0.3 }),
         );
     });
 }
@@ -66,7 +66,7 @@ fn bench_warp_lanczos3_2k(b: bench::Bencher) {
             black_box(&input),
             black_box(&mut output),
             &black_box(WarpTransform::new(transform)),
-            &WarpParams::new(InterpolationMethod::Lanczos3 { deringing: true }),
+            &WarpParams::new(InterpolationMethod::Lanczos3 { deringing: 0.3 }),
         );
     });
 }
@@ -82,7 +82,7 @@ fn bench_warp_lanczos3_4k(b: bench::Bencher) {
             black_box(&input),
             black_box(&mut output),
             &black_box(WarpTransform::new(transform)),
-            &WarpParams::new(InterpolationMethod::Lanczos3 { deringing: true }),
+            &WarpParams::new(InterpolationMethod::Lanczos3 { deringing: 0.3 }),
         );
     });
 }
@@ -118,7 +118,7 @@ fn bench_warp_lanczos3_1k_single_thread(b: bench::Bencher) {
     let mut output = Buffer2::new_default(1024, 1024);
     let transform = create_test_transform();
     let wt = WarpTransform::new(transform);
-    let params = WarpParams::new(InterpolationMethod::Lanczos3 { deringing: true });
+    let params = WarpParams::new(InterpolationMethod::Lanczos3 { deringing: 0.3 });
 
     b.bench(|| {
         let width = input.width();
@@ -132,14 +132,14 @@ fn bench_warp_lanczos3_1k_single_thread(b: bench::Bencher) {
     });
 }
 
-/// Single-threaded 1k warp WITHOUT deringing, to measure min/max overhead.
+/// Single-threaded 1k warp WITHOUT deringing, to measure soft-clamp overhead.
 #[quick_bench(warmup_iters = 3, iters = 10)]
 fn bench_warp_lanczos3_1k_no_dering(b: bench::Bencher) {
     let input = create_test_image(1024, 1024);
     let mut output = Buffer2::new_default(1024, 1024);
     let transform = create_test_transform();
     let wt = WarpTransform::new(transform);
-    let params = WarpParams::new(InterpolationMethod::Lanczos3 { deringing: false });
+    let params = WarpParams::new(InterpolationMethod::Lanczos3 { deringing: -1.0 });
 
     b.bench(|| {
         let width = input.width();

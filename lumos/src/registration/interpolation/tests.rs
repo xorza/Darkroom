@@ -223,7 +223,7 @@ fn test_lanczos_pixel_centers() {
             &data_buf,
             3.0,
             3.0,
-            InterpolationMethod::Lanczos3 { deringing: true }
+            InterpolationMethod::Lanczos3 { deringing: 0.3 }
         ) - 27.0)
             .abs()
             < 0.1
@@ -233,7 +233,7 @@ fn test_lanczos_pixel_centers() {
             &data_buf,
             4.0,
             4.0,
-            InterpolationMethod::Lanczos3 { deringing: true }
+            InterpolationMethod::Lanczos3 { deringing: 0.3 }
         ) - 36.0)
             .abs()
             < 0.1
@@ -330,15 +330,15 @@ fn test_interpolation_method_radius() {
     assert_eq!(InterpolationMethod::Bilinear.kernel_radius(), 1);
     assert_eq!(InterpolationMethod::Bicubic.kernel_radius(), 2);
     assert_eq!(
-        InterpolationMethod::Lanczos2 { deringing: true }.kernel_radius(),
+        InterpolationMethod::Lanczos2 { deringing: 0.3 }.kernel_radius(),
         2
     );
     assert_eq!(
-        InterpolationMethod::Lanczos3 { deringing: true }.kernel_radius(),
+        InterpolationMethod::Lanczos3 { deringing: 0.3 }.kernel_radius(),
         3
     );
     assert_eq!(
-        InterpolationMethod::Lanczos4 { deringing: true }.kernel_radius(),
+        InterpolationMethod::Lanczos4 { deringing: 0.3 }.kernel_radius(),
         4
     );
 }
@@ -354,13 +354,13 @@ fn test_lanczos_preserves_dc() {
         &input_buf,
         3.3,
         4.7,
-        InterpolationMethod::Lanczos3 { deringing: true },
+        InterpolationMethod::Lanczos3 { deringing: 0.3 },
     );
     let val2 = interp(
         &input_buf,
         2.1,
         5.9,
-        InterpolationMethod::Lanczos3 { deringing: true },
+        InterpolationMethod::Lanczos3 { deringing: 0.3 },
     );
 
     assert!((val1 - 0.5).abs() < 0.01);
@@ -418,13 +418,13 @@ fn test_lanczos2_vs_lanczos3() {
         &input_buf,
         3.5,
         4.5,
-        InterpolationMethod::Lanczos2 { deringing: true },
+        InterpolationMethod::Lanczos2 { deringing: 0.3 },
     );
     let v3 = interp(
         &input_buf,
         3.5,
         4.5,
-        InterpolationMethod::Lanczos3 { deringing: true },
+        InterpolationMethod::Lanczos3 { deringing: 0.3 },
     );
 
     // Both should give reasonable values (not wildly different)
@@ -449,7 +449,7 @@ fn test_interpolation_gradient_preservation() {
     let methods = [
         InterpolationMethod::Bilinear,
         InterpolationMethod::Bicubic,
-        InterpolationMethod::Lanczos3 { deringing: true },
+        InterpolationMethod::Lanczos3 { deringing: 0.3 },
     ];
 
     for method in &methods {
@@ -506,7 +506,7 @@ fn test_bicubic_vs_lanczos_quality() {
                 &input_buf,
                 x,
                 y,
-                InterpolationMethod::Lanczos3 { deringing: true },
+                InterpolationMethod::Lanczos3 { deringing: 0.3 },
             );
 
             bicubic_error_sum += (bicubic_val - expected).abs();
@@ -542,9 +542,9 @@ fn test_all_methods_exact_at_pixel_centers() {
         InterpolationMethod::Nearest,
         InterpolationMethod::Bilinear,
         InterpolationMethod::Bicubic,
-        InterpolationMethod::Lanczos2 { deringing: true },
-        InterpolationMethod::Lanczos3 { deringing: true },
-        InterpolationMethod::Lanczos4 { deringing: true },
+        InterpolationMethod::Lanczos2 { deringing: 0.3 },
+        InterpolationMethod::Lanczos3 { deringing: 0.3 },
+        InterpolationMethod::Lanczos4 { deringing: 0.3 },
     ];
 
     for method in &methods {
@@ -599,7 +599,7 @@ fn test_interpolation_extreme_subpixel() {
             &input_buf,
             x,
             y,
-            InterpolationMethod::Lanczos3 { deringing: true },
+            InterpolationMethod::Lanczos3 { deringing: 0.3 },
         );
 
         // Should not produce NaN or infinity
@@ -639,7 +639,7 @@ fn test_warp_image_lanczos3_identity() {
         &input_buf,
         &mut output,
         &WarpTransform::new(transform),
-        &WarpParams::new(InterpolationMethod::Lanczos3 { deringing: true }),
+        &WarpParams::new(InterpolationMethod::Lanczos3 { deringing: 0.3 }),
     );
 
     // Interior pixels should match input closely
@@ -669,7 +669,7 @@ fn test_warp_image_lanczos3_translation() {
         &input_buf,
         &mut output,
         &WarpTransform::new(transform),
-        &WarpParams::new(InterpolationMethod::Lanczos3 { deringing: true }),
+        &WarpParams::new(InterpolationMethod::Lanczos3 { deringing: 0.3 }),
     );
 
     // output[(x,y)] = input[(x+5, y+3)]
@@ -706,7 +706,7 @@ fn test_warp_image_lanczos3_rotation() {
         &input_buf,
         &mut output,
         &WarpTransform::new(transform),
-        &WarpParams::new(InterpolationMethod::Lanczos3 { deringing: true }),
+        &WarpParams::new(InterpolationMethod::Lanczos3 { deringing: 0.3 }),
     );
 
     // All interior pixels should be finite and in reasonable range
@@ -736,7 +736,7 @@ fn test_warp_image_lanczos3_matches_per_pixel() {
 
     let mut output = Buffer2::new(width, height, vec![0.0; width * height]);
     // Disable clamping so warp_image matches per-pixel interpolate() exactly
-    let params = WarpParams::new(InterpolationMethod::Lanczos3 { deringing: false });
+    let params = WarpParams::new(InterpolationMethod::Lanczos3 { deringing: -1.0 });
     warp_image(
         &input_buf,
         &mut output,

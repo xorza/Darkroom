@@ -56,7 +56,7 @@ MAGSAC++ paper, Groth 1986, Valdes 1995, Tabur 2007, Lang 2010, SWarp, LSST pipe
 7. ~~**Use `f64::total_cmp()`** in k-d tree~~ — **FIXED**: eliminates NaN panic path in build and k_nearest sort
 
 #### Medium Effort (moderate changes, meaningful impact)
-8. **Soft deringing threshold** (interpolation) — configurable `t=0.3` (PixInsight-style) instead of hard min/max clamp
+8. ~~**Soft deringing threshold**~~ — **DONE.** PixInsight-style soft clamping with `f32` threshold (default 0.3), `sp/sn/wp/wn` accumulation, SIMD branchless splitting
 9. **Direct SVD for homography DLT** (ransac/transforms.rs) — SVD on 2n x 9 matrix A, not A^T A
 10. **TPS coordinate normalization** (distortion/tps/mod.rs) — center+scale before building matrix
 11. **SIP condition number monitoring** (distortion/sip/mod.rs:406) — detect ill-conditioned systems

@@ -90,5 +90,5 @@ patterns and the highest-priority **unfixed** issues across all modules.
 ### Long-term (completeness)
 21. Implement true Square kernel with polygon clipping
 22. Add noise-based auto weighting to stacking
-23. Soft deringing threshold in registration
+23. ~~Soft deringing threshold in registration~~ — FIXED: PixInsight-style soft clamping (f32 threshold, default 0.3)
 24. Frame-type presets for stacking

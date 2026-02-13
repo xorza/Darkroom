@@ -50,8 +50,29 @@ outside the image).
 **Config wiring:** `border_value` is wired through via `WarpParams` struct (method +
 border_value). `normalize_kernel` was removed (normalization is always applied). Deringing
 is a field on the Lanczos variants of `InterpolationMethod` (e.g.
-`Lanczos3 { deringing: true }`), using min/max clamping of source pixels in the kernel
-window.
+`Lanczos3 { deringing: 0.3 }`), using PixInsight-style soft clamping (see below).
+
+### Soft Deringing (PixInsight-style)
+
+Deringing uses a `f32` threshold instead of a boolean. Negative values disable deringing;
+values in `[0.0, 1.0]` set the soft clamping threshold (default `0.3`, matching PixInsight).
+
+**Algorithm** (from PCL `LanczosInterpolation.h`): During accumulation, each
+`weighted_value = pixel * weight` is split into positive (`sp += val`, `wp += weight`) and
+negative (`sn += |val|`, `wn += |weight|`) contributions. After accumulation:
+```
+r = sn / sp                           // ratio of negative to positive
+if r >= 1.0: return sp / wp           // hard clamp (total undershoot)
+if r > threshold:
+    fade = (r - threshold) / (1 - threshold)
+    c = 1 - fade²                     // quadratic fade
+    sn *= c; wn *= c                  // reduce negative contribution
+return (sp - sn) / (wp - wn)          // final value
+```
+
+This replaces both weight normalization and the old hard min/max clamp. The `soft_clamp()`
+helper in `warp/mod.rs` implements this. Pre-computed `clamp_th` and `clamp_th_inv` are
+hoisted outside the pixel loop.
 
 ### Bicubic Catmull-Rom (`mod.rs` lines 85-97)
 
@@ -185,9 +206,11 @@ each of the 6 rows: loads 8 source pixels as two `__m128` vectors, multiplies by
 then uses `_mm_fmadd_ps` to accumulate `weighted * wy[j]`. Horizontal sum via
 `movehdup + add + movehl + add_ss`.
 
-**Deringing fusion:** When `DERINGING=true`, tracks min/max using `_mm_min_ps`/`_mm_max_ps`
-on the same loaded source vectors, fusing min/max tracking with accumulation in a single
-pass. This avoids a separate 36-element scan, providing the biggest speedup for deringing.
+**Deringing fusion:** When `DERINGING=true`, splits weighted contributions into positive
+(`sp`) and negative (`sn`) using SSE comparison masks (`_mm_cmpge_ps`/`_mm_cmplt_ps` +
+`_mm_and_ps`) for branchless accumulation. Uses 8 SSE accumulators: `sp_lo/hi`, `sn_lo/hi`,
+`wp_lo/hi`, `wn_lo/hi`. Returns `(sp, sn, wp, wn)` for the caller to apply `soft_clamp()`.
+When `!DERINGING`, returns `(sum, 0.0, 0.0, 0.0)` with simple accumulation.
 
 **Results (1024x1024, single-threaded, correct affine transform):**
 - Deringing: 80.9ms (scalar) → 33.4ms (FMA) = **-59%**
@@ -282,11 +305,9 @@ from clamp-to-edge which would be more correct.
 ## Potential Improvements (Prioritized)
 
 ### Worth Doing
-1. **Soft deringing threshold**: Replace hard min/max clamp with configurable threshold.
-   `clamp(val, min - t * range, max + t * range)` where `range = max - min` and default
-   `t = 0.3` (PixInsight's default). Preserves more Lanczos sharpness at smooth gradients
-   while still preventing extreme ringing. Simple change to `warp/mod.rs` lines 223-228,
-   256-261, and 279-284.
+1. ~~**Soft deringing threshold**~~ — **DONE.** PixInsight-style soft clamping with
+   configurable `f32` threshold (default 0.3). Tracks positive/negative contributions
+   (`sp/sn/wp/wn`) with quadratic fade. SIMD path uses branchless SSE mask splitting.
 
 2. **Generic incremental stepping** for Lanczos2/Lanczos4/Bicubic: Factor out stepping
    logic from the Lanczos3-specific row warper so all methods benefit from avoiding
