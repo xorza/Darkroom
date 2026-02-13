@@ -1201,6 +1201,91 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn test_compute_channel_stats_grayscale() {
+        // 3 grayscale frames, 3x3 pixels each
+        let dims = ImageDimensions::new(3, 3, 1);
+
+        // Frame 0: all 5.0 → median=5.0, MAD=0.0
+        let frame0 = AstroImage::from_pixels(dims, vec![5.0; 9]);
+
+        // Frame 1: [1,2,3,4,5,6,7,8,9] → median=5.0, deviations=[4,3,2,1,0,1,2,3,4] → MAD=2.0
+        let frame1 = AstroImage::from_pixels(dims, (1..=9).map(|i| i as f32).collect());
+
+        // Frame 2: [10,10,10,20,20,20,30,30,30] → median=20.0, deviations=[10,10,10,0,0,0,10,10,10] → MAD=10.0
+        let frame2 = AstroImage::from_pixels(
+            dims,
+            vec![10.0, 10.0, 10.0, 20.0, 20.0, 20.0, 30.0, 30.0, 30.0],
+        );
+
+        let cache = make_test_cache(vec![frame0, frame1, frame2]);
+        let stats = cache.compute_channel_stats();
+
+        assert_eq!(stats.len(), 3); // 3 frames × 1 channel
+        assert!((stats[0].0 - 5.0).abs() < f32::EPSILON);
+        assert!((stats[0].1 - 0.0).abs() < f32::EPSILON);
+        assert!((stats[1].0 - 5.0).abs() < f32::EPSILON);
+        assert!((stats[1].1 - 2.0).abs() < f32::EPSILON);
+        assert!((stats[2].0 - 20.0).abs() < f32::EPSILON);
+        assert!((stats[2].1 - 10.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_compute_channel_stats_rgb() {
+        // 2 RGB frames, 2x2 pixels each
+        let dims = ImageDimensions::new(2, 2, 3);
+
+        // Frame 0: R=[1,3,5,7] G=[10,10,10,10] B=[0,0,100,100]
+        let frame0 = AstroImage::from_planar_channels(
+            dims,
+            vec![
+                vec![1.0, 3.0, 5.0, 7.0],
+                vec![10.0, 10.0, 10.0, 10.0],
+                vec![0.0, 0.0, 100.0, 100.0],
+            ],
+        );
+        // Frame 0 expected:
+        //   R: median=4.0 (avg of 3,5), deviations=[3,1,1,3] → MAD=2.0 (avg of 1,3)
+        //   G: median=10.0, MAD=0.0
+        //   B: median=50.0 (avg of 0,100), deviations=[50,50,50,50] → MAD=50.0
+
+        // Frame 1: R=[2,2,2,2] G=[1,2,3,4] B=[10,20,30,40]
+        let frame1 = AstroImage::from_planar_channels(
+            dims,
+            vec![
+                vec![2.0, 2.0, 2.0, 2.0],
+                vec![1.0, 2.0, 3.0, 4.0],
+                vec![10.0, 20.0, 30.0, 40.0],
+            ],
+        );
+        // Frame 1 expected:
+        //   R: median=2.0, MAD=0.0
+        //   G: median=2.5, deviations=[1.5,0.5,0.5,1.5] → MAD=1.0
+        //   B: median=25.0, deviations=[15,5,5,15] → MAD=10.0
+
+        let cache = make_test_cache(vec![frame0, frame1]);
+        let stats = cache.compute_channel_stats();
+
+        // Indexed as [frame * channels + channel]
+        assert_eq!(stats.len(), 6); // 2 frames × 3 channels
+
+        // Frame 0
+        assert!((stats[0].0 - 4.0).abs() < f32::EPSILON, "F0 R median");
+        assert!((stats[0].1 - 2.0).abs() < f32::EPSILON, "F0 R MAD");
+        assert!((stats[1].0 - 10.0).abs() < f32::EPSILON, "F0 G median");
+        assert!((stats[1].1 - 0.0).abs() < f32::EPSILON, "F0 G MAD");
+        assert!((stats[2].0 - 50.0).abs() < f32::EPSILON, "F0 B median");
+        assert!((stats[2].1 - 50.0).abs() < f32::EPSILON, "F0 B MAD");
+
+        // Frame 1
+        assert!((stats[3].0 - 2.0).abs() < f32::EPSILON, "F1 R median");
+        assert!((stats[3].1 - 0.0).abs() < f32::EPSILON, "F1 R MAD");
+        assert!((stats[4].0 - 2.5).abs() < f32::EPSILON, "F1 G median");
+        assert!((stats[4].1 - 1.0).abs() < f32::EPSILON, "F1 G MAD");
+        assert!((stats[5].0 - 25.0).abs() < f32::EPSILON, "F1 B median");
+        assert!((stats[5].1 - 10.0).abs() < f32::EPSILON, "F1 B MAD");
+    }
+
+    #[test]
     fn test_cache_filename_for_path() {
         // Same path should always produce same hash
         let path1 = Path::new("/some/path/image.fits");
